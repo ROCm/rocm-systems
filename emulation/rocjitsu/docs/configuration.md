@@ -393,14 +393,14 @@ and VOP3 floating-point comparisons.
 
 | `semantics` | rj-arith mode | Loose fallback | FP status reporting |
 |---|---:|---|---|
-| `loose` | 0 | Loose arithmetic | No |
-| `bit_exact_empirical_allow_loose` | 1 | Allowed | No |
-| `bit_exact_empirical_no_fp_status` | 2 | Forbidden | No |
-| `bit_exact_empirical` | 3 | Forbidden | Required |
+| `loose` | 1 | Loose arithmetic | No |
+| `bit_exact_empirical_allow_loose` | 2 | Allowed | No |
+| `bit_exact_empirical_no_fp_status` | 3 | Forbidden | No |
+| `bit_exact_empirical` | 4 | Forbidden | Required |
 | `compatibility` (temporary default) | 7 | Per instruction | Per instruction |
 
 These names map directly to the corresponding `RJ_ARITH_SEMANTICS_*` constants.
-Modes 4–6 are reserved and unavailable. Strict requests fail through the
+Modes 0 and 5–6 are reserved and unavailable. Strict requests fail through the
 instruction-execution error mechanism when exact arithmetic or required FP
 status is unavailable for that instruction or guest mode.
 
@@ -416,21 +416,21 @@ an arithmetic policy use mode 7; existing configurations need no migration.
 CPU capabilities are detected during initialization and cached in each CU,
 without synchronized initialization during instruction execution.
 
-Modes 0–3 are totally ordered: larger values impose stricter requirements.
+Modes 1–4 are totally ordered: larger values impose stricter requirements.
 Temporary compatibility mode 7 is excluded from that ordering. Handlers forward
 it unchanged to rj-arith, whose entry points choose the mode closest to old rocjitsu
-behavior. Exact arithmetic with/without reporting becomes mode 3/2; loose becomes
-mode 0. Old loose arithmetic with reporting also becomes mode 0, so it remains
+behavior. Exact arithmetic with/without reporting becomes mode 4/3; loose becomes
+mode 1. Old loose arithmetic with reporting also becomes mode 1, so it remains
 executable but may lose FP status. This mode exists only for the rj-arith transition.
 See [rj-arith's design](arith-design.md#compatibility-mode)
 for the instruction-dependent policy and remaining gaps.
-For migrated instructions with architectural FP status, mode 3 requires faithful reporting.
-Modes 0–2 leave FP status untouched; ordinary results such as comparison masks,
+For migrated instructions with architectural FP status, mode 4 requires faithful reporting.
+Modes 1–3 leave FP status untouched; ordinary results such as comparison masks,
 SCC, EXEC and explicit register writes remain required in every mode. Matrix
 instructions and DIV_SCALE have no FP status output. DIV_SCALE still writes its
 ordinary per-lane condition mask in every semantics mode. On observed gfx1201,
 FP8/BF8 DOT4 and FP32-output DOT2 likewise leave FP status unchanged, including
-invalid and inexact cases; mode 3 accepts those instructions.
+invalid and inexact cases; mode 4 accepts those instructions.
 
 Decoding, register
 addressing, memory operations, scheduling, HWREG access and trap delivery remain

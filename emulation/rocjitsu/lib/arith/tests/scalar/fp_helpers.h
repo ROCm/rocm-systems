@@ -141,7 +141,7 @@ inline uint64_t scalar_capture_flags(uint32_t mode, int input_bits, int output_b
 }
 
 // Check captured results in every semantics mode that resolves to exact arithmetic, and
-// the captured causes under Compatibility; mode 3 FP status is rejected before outputs
+// the captured causes under Compatibility; mode 4 FP status is rejected before outputs
 // change. call(flags, d, a, b, c, status) receives d preloaded with c.
 template <size_t N, typename Call>
 void check_scalar_captures(Call call, const ScalarCapture (&captures)[N], int input_bits,

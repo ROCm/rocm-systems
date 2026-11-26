@@ -15,7 +15,7 @@ extern "C" {
 #endif
 
 // On the observed gfx1201, FP8/BF8 DOT4 and FP32-output DOT2 leave EXCP_FLAG_USER
-// unchanged, including invalid and inexact cases. Mode 3 accepts these operations
+// unchanged, including invalid and inexact cases. Mode 4 accepts these operations
 // without producing FP status; this is an instruction policy, not missing reporting.
 
 // DPP8/DPP16 permute the complete A word before modifiers; B/C stay in their
@@ -108,7 +108,7 @@ int rj_arith_v_dot2_f32_bf16_w32_gfx12(uint64_t flags, uint32_t exec_mask,
 
 // RDNA3 DOT2 has the same register layout, sign/half selection and ignored
 // CLAMP as qualified above, but different empirical accumulation. Exact result bits are supported;
-// mode 3 requests return UNSUPPORTED_FP_STATUS.
+// mode 4 requests return UNSUPPORTED_FP_STATUS.
 // Loose semantics share the RDNA4 SIMD path and leave optional state unchanged.
 int rj_arith_v_dot2_f32_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                 uint32_t *const *d, const uint32_t *const *a,

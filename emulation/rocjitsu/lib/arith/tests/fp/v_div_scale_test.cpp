@@ -474,7 +474,9 @@ static void check_cdna_scale(Call call, Call inherited) {
                  nullptr, nullptr),
             RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
   EXPECT_EQ(condition, Mask(7));
-  EXPECT_EQ(call(0, Mask(0), 0, nullptr, &condition, nullptr, nullptr, nullptr), 0);
+  EXPECT_EQ(
+      call(RJ_ARITH_SEMANTICS_LOOSE, Mask(0), 0, nullptr, &condition, nullptr, nullptr, nullptr),
+      0);
   EXPECT_EQ(condition, Mask(0));
 }
 

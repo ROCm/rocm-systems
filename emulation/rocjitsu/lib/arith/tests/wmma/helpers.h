@@ -36,7 +36,8 @@ void expect_matrix_invalid_flags(Call call, const Registers<RegistersCount, Lane
                                  int a, int b, int c_or_indices, uint64_t supported_modifiers) {
   for (uint64_t invalid :
        {RJ_ARITH_FP_FLUSH_INPUT_DENORMALS_F16, RJ_ARITH_FP_PRESERVE_INPUT_DENORMALS_F16}) {
-    EXPECT_EQ(call(invalid, 0, nullptr, nullptr, nullptr, nullptr), RJ_ARITH_ERROR_INVALID_FLAGS);
+    EXPECT_EQ(call(invalid | RJ_ARITH_SEMANTICS_LOOSE, 0, nullptr, nullptr, nullptr, nullptr),
+              RJ_ARITH_ERROR_INVALID_FLAGS);
   }
   expect_invalid_flags(
       [&](uint64_t flags, uint64_t modifiers) {

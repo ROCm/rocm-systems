@@ -16,14 +16,14 @@ namespace rocjitsu::arith::test {
 // each unsupported modifier bit. The caller binds operands and checks that
 // any supplied storage is preserved; null operands can test early rejection.
 template <typename Call> void expect_invalid_flags(Call call, uint64_t supported_modifiers) {
-  for (int semantics = 4; semantics <= 6; ++semantics) {
+  for (int semantics : {0, 5, 6}) {
     EXPECT_EQ(call(uint64_t(semantics) << 16, 0), RJ_ARITH_ERROR_INVALID_FLAGS);
   }
-  EXPECT_EQ(call(1ULL << 63, 0), RJ_ARITH_ERROR_INVALID_FLAGS);
+  EXPECT_EQ(call((1ULL << 63) | RJ_ARITH_SEMANTICS_LOOSE, 0), RJ_ARITH_ERROR_INVALID_FLAGS);
   for (int bit = 0; bit < 64; ++bit) {
     if (!(supported_modifiers & (1ULL << bit))) {
       SCOPED_TRACE(bit);
-      EXPECT_EQ(call(0, 1ULL << bit), RJ_ARITH_ERROR_INVALID_FLAGS);
+      EXPECT_EQ(call(RJ_ARITH_SEMANTICS_LOOSE, 1ULL << bit), RJ_ARITH_ERROR_INVALID_FLAGS);
     }
   }
 }
@@ -42,7 +42,7 @@ void expect_alu_invalid_flags(Call call, uint64_t low_modifiers) {
                                     RJ_ARITH_DPP16 | (0x131ULL << RJ_ARITH_DPP_CTRL_SHIFT),
                                     1ULL << RJ_ARITH_DPP8_SELECT_SHIFT};
   for (uint64_t invalid : invalid_modes) {
-    EXPECT_EQ(call(0, invalid), RJ_ARITH_ERROR_INVALID_FLAGS);
+    EXPECT_EQ(call(RJ_ARITH_SEMANTICS_LOOSE, invalid), RJ_ARITH_ERROR_INVALID_FLAGS);
   }
 }
 

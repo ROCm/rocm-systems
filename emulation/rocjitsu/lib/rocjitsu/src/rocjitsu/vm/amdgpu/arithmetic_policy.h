@@ -16,11 +16,11 @@ namespace rocjitsu::amdgpu {
 
 /// @brief rj-arith semantics modes, before placement in the flags bit field.
 enum class ArithmeticSemantics : uint8_t {
-  Loose = 0,
-  BitExactEmpiricalAllowLoose = 1,
-  BitExactEmpiricalNoFpStatus = 2,
-  BitExactEmpirical = 3,
-  // Temporary per-instruction migration policy; outside the 0..3 ordering.
+  Loose = 1,
+  BitExactEmpiricalAllowLoose = 2,
+  BitExactEmpiricalNoFpStatus = 3,
+  BitExactEmpirical = 4,
+  // Temporary per-instruction migration policy; outside the 1..4 ordering.
   Compatibility = 7,
 };
 

@@ -31,7 +31,7 @@ extern "C" {
 // with TRAPSTS and _gfx12 APIs with EXCP_FLAG_USER, including architecture-specific
 // NaN/IEEE behavior. DOT2ACC additionally has different accumulation models.
 // FMAC and literal FMA retain exact fused results on both architectures but reject
-// FP status reporting in mode 3.
+// FP status reporting in mode 4.
 // DUAL_MUL inherits ordinary MUL's nearest-even FP-status reporting contract.
 // Invalid calls preserve the outputs.
 int rj_arith_v_dual_fmac_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
@@ -185,7 +185,7 @@ int rj_arith_v_dual_fma_f64_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
                                         const uint32_t *const *c, uint32_t *excp_flag_user);
 
 // gfx1250 FP32 slots accept encoded source NEG flags, but no ABS/CLAMP/OMOD.
-// MUL returns UNSUPPORTED_FP_STATUS in mode 3 pending gfx1250 qualification.
+// MUL returns UNSUPPORTED_FP_STATUS in mode 4 pending gfx1250 qualification.
 // The additional integer slots have no modifiers. BITOP2 uses bits 0..7 of
 // instruction_flags as the BITOP3 truth table evaluated with C=0.
 int rj_arith_v_dual_add_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask,

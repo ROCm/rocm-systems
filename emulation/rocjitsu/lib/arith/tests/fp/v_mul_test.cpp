@@ -176,7 +176,7 @@ TEST(FpMulF64W64Gfx11, Arithmetic) {
 }
 
 // Reject unqualified status domains before touching outputs; on gfx12 Compatibility reports
-// the shared hardware classifier even where explicit mode 3 is unqualified: CLAMP suppresses
+// the shared hardware classifier even where explicit mode 4 is unqualified: CLAMP suppresses
 // every cause, while an output modifier suppresses only UNDERFLOW and INEXACT and leaves the
 // operand causes in place (gfx1201 captures).
 TEST(FpMulF32, ReportingDomain) {
@@ -278,7 +278,7 @@ uint64_t mul_capture_flags(uint32_t mode) {
 }
 
 // Check captured values and causes under Compatibility on a lane in a later SIMD chunk, and
-// under explicit mode 3 where it is qualified (default MODE, no OMOD/CLAMP), which must
+// under explicit mode 4 where it is qualified (default MODE, no OMOD/CLAMP), which must
 // report the same bits. Only the gfx12 entry points carry this classifier: gfx11 has no
 // status capture, because TRAPSTS.EXCP does not latch there with exceptions disabled.
 template <int Lanes, typename Call> void check_mul_captures(Call call, bool gfx12) {

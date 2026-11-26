@@ -127,10 +127,12 @@ TEST(RegisterRelativeOffsetLimit, Arithmetic) {
   registers.v[255][0] = 20;
   registers.v[256][0] = 30;
   for (uint32_t offset : {255U, 256U}) {
-    ASSERT_EQ(rj_arith_v_movrels_b32_w32(0, 1, 0, registers.v, registers.v, 257, 257, 1, 0, offset),
+    ASSERT_EQ(rj_arith_v_movrels_b32_w32(RJ_ARITH_SEMANTICS_LOOSE, 1, 0, registers.v, registers.v,
+                                         257, 257, 1, 0, offset),
               RJ_ARITH_SUCCESS);
     EXPECT_EQ(registers.v[1][0], offset == 255 ? 20U : 10U);
-    ASSERT_EQ(rj_arith_v_movreld_b32_w32(0, 1, 0, registers.v, registers.v, 257, 257, 0, 0, offset),
+    ASSERT_EQ(rj_arith_v_movreld_b32_w32(RJ_ARITH_SEMANTICS_LOOSE, 1, 0, registers.v, registers.v,
+                                         257, 257, 0, 0, offset),
               RJ_ARITH_SUCCESS);
   }
   EXPECT_EQ(registers.v[255][0], 10U);

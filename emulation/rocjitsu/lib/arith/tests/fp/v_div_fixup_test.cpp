@@ -193,7 +193,7 @@ TEST(FpDivFixupGfx11, UnsupportedStatusBeforeOperandAccess) {
   }
 }
 
-// Active RDNA3 FP16 OMOD runs the shared model in Compatibility and strict exact; mode 3 rejection
+// Active RDNA3 FP16 OMOD runs the shared model in Compatibility and strict exact; mode 4 rejection
 // is transactional, including empty EXEC. IEEE clear keeps the selected sNaN under OMOD.
 TEST(FpDivFixupF16, Rdna3OmodQualification) {
   using namespace rocjitsu::arith::test;

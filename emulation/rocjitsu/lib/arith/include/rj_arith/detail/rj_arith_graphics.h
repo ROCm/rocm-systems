@@ -104,9 +104,9 @@ int rj_arith_v_interp_p2_rtz_f16_f32_w64(uint64_t flags, uint64_t exec_mask,
 // arithmetic uses host rounding rather than implementing guest-directed rounding.
 // Exact modes and Compatibility use the exact MUL backend for guest rounding, tininess,
 // and OMOD after applying MULLIT source predicates; the gfx1100 and gfx1201 captures match
-// this model, so Compatibility resolves to mode 2. FP status is still omitted. APIs without
+// this model, so Compatibility resolves to mode 3. FP status is still omitted. APIs without
 // _gfx12 use RDNA3 TRAPSTS, _gfx12 uses EXCP_FLAG_USER; loose calls skip FP-status output,
-// exact FP status reporting in mode 3 is unsupported. Supports all A/B/C ABS/NEG, OMOD and CLAMP
+// exact FP status reporting in mode 4 is unsupported. Supports all A/B/C ABS/NEG, OMOD and CLAMP
 // modifiers. DPP8/DPP16 permute A before source modifiers. B and C retain
 // their lanes; inactive or DPP-filtered destinations remain unchanged. Host nearest-even rounding
 // with denormals enabled is required; exception flags may change. NaN payloads are unspecified.

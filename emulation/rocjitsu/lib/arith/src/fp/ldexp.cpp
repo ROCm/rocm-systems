@@ -221,7 +221,7 @@ int ldexp(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32
   if (exec_mask == 0) {
     return RJ_ARITH_SUCCESS;
   }
-  if ((flags & RJ_ARITH_SEMANTICS_MASK) != RJ_ARITH_SEMANTICS_LOOSE ||
+  if ((flags & RJ_ARITH_SEMANTICS_MASK) > RJ_ARITH_SEMANTICS_LOOSE ||
       (flags & RJ_ARITH_FP_ROUND_MASK)) {
     // gfx11 exact semantics keep signaling NaNs when IEEE is clear.
     const bool quiet_snan =

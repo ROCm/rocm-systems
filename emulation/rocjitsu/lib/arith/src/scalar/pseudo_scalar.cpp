@@ -151,7 +151,8 @@ int run_gfx1250(uint64_t flags, uint64_t mode, uint32_t *d, uint32_t raw) {
     }
     return RJ_ARITH_SUCCESS;
   }
-  return run<Op, Half>(flags & ~RJ_ARITH_SEMANTICS_MASK, uint32_t(mode), d, raw);
+  return run<Op, Half>((flags & ~RJ_ARITH_SEMANTICS_MASK) | RJ_ARITH_SEMANTICS_LOOSE,
+                       uint32_t(mode), d, raw);
 }
 
 } // namespace

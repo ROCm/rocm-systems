@@ -300,7 +300,7 @@ int binary_wave64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags
 }
 
 // Compatibility reports the shared hardware MUL classifier in every guest mode without
-// qualifying explicit mode 3 beyond its captured domain; ADD/SUB/SUBREV and selection keep
+// qualifying explicit mode 4 beyond its captured domain; ADD/SUB/SUBREV and selection keep
 // the inherited gfx12 causes. Source classification precedes aliased writes; DPP stores
 // and MUL range causes use different masks when row/bank controls suppress a destination.
 template <rocjitsu::arith::Binary Op, bool Rdna3 = false, bool Gfx1250 = false>

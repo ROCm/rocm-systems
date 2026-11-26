@@ -447,8 +447,8 @@ TEST(ArithBridgeTest, WideMadCommitsBothWordsAndCarry) {
       rdna4::Operand zero(64, rdna4::OperandType::OPR_SRC, 128);
       uint64_t carry = ~0ULL;
       arith::execute_mad64(*fixture.wave, rj_arith_v_mad_co_u64_u32_w32,
-                           rj_arith_v_mad_co_u64_u32_w64, 0, 0, d, a, two, zero,
-                           [&](uint64_t value) { carry = value; });
+                           rj_arith_v_mad_co_u64_u32_w64, RJ_ARITH_SEMANTICS_LOOSE, 0, d, a, two,
+                           zero, [&](uint64_t value) { carry = value; });
       ASSERT_FALSE(fixture.wave->instruction_execution_failed());
       // (2^32-1)*2 crosses the destination-word boundary without a 65th-bit
       // carry.
@@ -955,7 +955,7 @@ TEST(ArithBridgeTest, FloatFrexpExponentIgnoresGuestRounding) {
   EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 1, 0), 1U);
 }
 
-// Compatibility uses the legacy classifier even outside mode 3's reporting domain.
+// Compatibility uses the legacy classifier even outside mode 4's reporting domain.
 // Suppressed MUL lanes contribute range causes, but not gfx12 INVALID causes.
 
 TEST(ArithBridgeTest, CompatibilityMulDppSuppressesInvalid) {
@@ -1145,14 +1145,14 @@ TEST(ArithBridgeTest, UnobservedVectorWritesPreserveAliasesMasksAndRejectedOutpu
       rdna4::Operand a(32, rdna4::OperandType::OPR_SRC_VGPR, 256);
       rdna4::Operand one(32, rdna4::OperandType::OPR_SRC, 129);
       arith::execute_binary32(*fixture.wave, rj_arith_v_add_nc_u32_w32, rj_arith_v_add_nc_u32_w64,
-                              cpu, 0, d, a, one);
-      arith::execute_unary32(*fixture.wave, rj_arith_v_not_b32_w32, rj_arith_v_not_b32_w64, cpu, 0,
-                             d, a);
-      arith::execute_ternary32(*fixture.wave, rj_arith_v_add3_u32_w32, rj_arith_v_add3_u32_w64, cpu,
-                               0, d, a, one, one);
+                              cpu | RJ_ARITH_SEMANTICS_LOOSE, 0, d, a, one);
+      arith::execute_unary32(*fixture.wave, rj_arith_v_not_b32_w32, rj_arith_v_not_b32_w64,
+                             cpu | RJ_ARITH_SEMANTICS_LOOSE, 0, d, a);
+      arith::execute_ternary32(*fixture.wave, rj_arith_v_add3_u32_w32, rj_arith_v_add3_u32_w64,
+                               cpu | RJ_ARITH_SEMANTICS_LOOSE, 0, d, a, one, one);
       ASSERT_FALSE(fixture.wave->instruction_execution_failed());
       arith::execute_binary32(*fixture.wave, rj_arith_v_add_nc_u32_w32, rj_arith_v_add_nc_u32_w64,
-                              cpu | (1ULL << 63), 0, d, a, one);
+                              cpu | RJ_ARITH_SEMANTICS_LOOSE | (1ULL << 63), 0, d, a, one);
       EXPECT_TRUE(fixture.wave->instruction_execution_failed());
       for (uint32_t lane = 0; lane < lanes; ++lane) {
         const bool written = (exec_mask & ~2ULL) & (1ULL << lane);
@@ -1367,7 +1367,8 @@ TEST(ArithBridgeTest, VectorCarryMasksScalarAndVectorResultsTogether) {
           rdna4::Operand zero(32, rdna4::OperandType::OPR_SRC, 128);
           uint64_t carry = ~0ULL;
           arith::execute_carry32<true>(*fixture.wave, rj_arith_v_add_co_ci_u32_w32,
-                                       rj_arith_v_add_co_ci_u32_w64, cpu, 0, d, a, zero, exec_mask,
+                                       rj_arith_v_add_co_ci_u32_w64, cpu | RJ_ARITH_SEMANTICS_LOOSE,
+                                       0, d, a, zero, exec_mask,
                                        [&](uint64_t value) { carry = value; });
           ASSERT_FALSE(fixture.wave->instruction_execution_failed());
           EXPECT_EQ(carry, exec_mask & write_mask);
@@ -1428,7 +1429,8 @@ TEST(ArithBridgeTest, RejectedVectorCarryDoesNotCommitEitherOutput) {
       rdna4::Operand a(32, rdna4::OperandType::OPR_SRC_VGPR, 256);
       bool committed = false;
       arith::execute_carry32<false>(*fixture.wave, rj_arith_v_subrev_co_u32_w32,
-                                    rj_arith_v_subrev_co_u32_w64, 1ULL << 63, 0, d, a, a, 0,
+                                    rj_arith_v_subrev_co_u32_w64,
+                                    RJ_ARITH_SEMANTICS_LOOSE | (1ULL << 63), 0, d, a, a, 0,
                                     [&](uint64_t) { committed = true; });
       EXPECT_TRUE(fixture.wave->instruction_execution_failed());
       EXPECT_FALSE(committed);
@@ -1618,8 +1620,8 @@ TEST(ArithBridgeTest, RejectedWideOutputDoesNotWriteOrNotifyEitherWord) {
     rdna4::Operand c(64, rdna4::OperandType::OPR_SRC_VGPR, 256);
     bool committed = false;
     arith::execute_mad64(*fixture.wave, rj_arith_v_mad_co_u64_u32_w32,
-                         rj_arith_v_mad_co_u64_u32_w64, 1ULL << 63, 0, d, a, a, c,
-                         [&](uint64_t) { committed = true; });
+                         rj_arith_v_mad_co_u64_u32_w64, RJ_ARITH_SEMANTICS_LOOSE | (1ULL << 63), 0,
+                         d, a, a, c, [&](uint64_t) { committed = true; });
     EXPECT_TRUE(fixture.wave->instruction_execution_failed());
     EXPECT_FALSE(committed);
     EXPECT_EQ(fixture.cu->read_vgpr(fixture.base(), 0), 0x3c003c00u);
@@ -4454,10 +4456,11 @@ TEST(ArithBridgeTest, Integer16RecordsOnlySelectedBytesAndNoPreservationRead) {
         rdna4::Operand b(16, rdna4::OperandType::OPR_SRC_VGPR, 257);
         rdna4::Operand c(16, rdna4::OperandType::OPR_SRC_VGPR, 258);
         const uint64_t active = fixture.wave->exec();
-        arith::execute_integer16<3>(
-            *fixture.wave, rj_arith_v_mad_u16_w32, rj_arith_v_mad_u16_w64, cpu,
-            RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_C | RJ_ARITH_ALU_HIGH_D | RJ_ARITH_ALU_CLAMP, d,
-            a, &b, &c);
+        arith::execute_integer16<3>(*fixture.wave, rj_arith_v_mad_u16_w32, rj_arith_v_mad_u16_w64,
+                                    cpu | RJ_ARITH_SEMANTICS_LOOSE,
+                                    RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_C |
+                                        RJ_ARITH_ALU_HIGH_D | RJ_ARITH_ALU_CLAMP,
+                                    d, a, &b, &c);
         ASSERT_FALSE(fixture.wave->instruction_execution_failed());
         if (!active) {
           EXPECT_TRUE(fixture.recorder->reads.empty());
@@ -4490,7 +4493,7 @@ TEST(ArithBridgeTest, Integer16RejectsWithoutPartialWrites) {
   rdna4::Operand d(16, rdna4::OperandType::OPR_VGPR, 0);
   rdna4::Operand a(16, rdna4::OperandType::OPR_SRC_VGPR, 256);
   arith::execute_integer16<1>(*fixture.wave, rj_arith_v_not_b16_w32, rj_arith_v_not_b16_w64,
-                              1ULL << 63, RJ_ARITH_ALU_HIGH_D, d, a);
+                              RJ_ARITH_SEMANTICS_LOOSE | (1ULL << 63), RJ_ARITH_ALU_HIGH_D, d, a);
   EXPECT_TRUE(fixture.wave->instruction_execution_failed());
   EXPECT_TRUE(fixture.recorder->writes.empty());
   EXPECT_EQ(fixture.cu->read_vgpr(fixture.base(), 0), 0x3c003c00u);
@@ -4690,8 +4693,8 @@ TEST(ArithBridgeTest, VectorRejectedFlagsDoNotWriteOrNotify) {
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
   rdna4::Operand d(32, rdna4::OperandType::OPR_VGPR, 0);
   rdna4::Operand a(32, rdna4::OperandType::OPR_SRC_VGPR, 256);
-  arith::execute_binary32(*fixture.wave, rj_arith_v_and_b32_w32, rj_arith_v_and_b32_w64, 1ULL << 63,
-                          0, d, a, a);
+  arith::execute_binary32(*fixture.wave, rj_arith_v_and_b32_w32, rj_arith_v_and_b32_w64,
+                          RJ_ARITH_SEMANTICS_LOOSE | (1ULL << 63), 0, d, a, a);
   EXPECT_TRUE(fixture.wave->instruction_execution_failed());
   EXPECT_TRUE(fixture.recorder->writes.empty());
   for (uint32_t lane = 0; lane < 32; ++lane) {
@@ -4708,8 +4711,8 @@ TEST(ArithBridgeTest, UnaryVectorPreservesInactiveAliasedLanesWithClamp) {
       fixture.wave->set_exec(exec_mask);
       rdna4::Operand d(32, rdna4::OperandType::OPR_VGPR, 0);
       rdna4::Operand a(32, rdna4::OperandType::OPR_SRC_VGPR, 256);
-      arith::execute_unary32(*fixture.wave, rj_arith_v_not_b32_w32, rj_arith_v_not_b32_w64, cpu,
-                             RJ_ARITH_ALU_CLAMP, d, a);
+      arith::execute_unary32(*fixture.wave, rj_arith_v_not_b32_w32, rj_arith_v_not_b32_w64,
+                             cpu | RJ_ARITH_SEMANTICS_LOOSE, RJ_ARITH_ALU_CLAMP, d, a);
       ASSERT_FALSE(fixture.wave->instruction_execution_failed());
       ASSERT_EQ(fixture.recorder->reads.size(), 1u);
       EXPECT_EQ(fixture.recorder->reads[0].lanes, exec_mask);
@@ -4810,8 +4813,8 @@ TEST(ArithBridgeTest, DelegatedVectorInputIsNotReadAsItsOriginalVgpr) {
   }
   StagedOperand staged(a, values, 32);
   ScopedOperandDelegate delegate(a, &staged);
-  arith::execute_binary32(*fixture.wave, rj_arith_v_add_nc_u32_w32, rj_arith_v_add_nc_u32_w64, 0, 0,
-                          d, a, b);
+  arith::execute_binary32(*fixture.wave, rj_arith_v_add_nc_u32_w32, rj_arith_v_add_nc_u32_w64,
+                          RJ_ARITH_SEMANTICS_LOOSE, 0, d, a, b);
   ASSERT_FALSE(fixture.wave->instruction_execution_failed());
   EXPECT_TRUE(fixture.recorder->reads.empty());
   EXPECT_EQ(fixture.cu->read_vgpr(fixture.base(), 0), 101u);
@@ -4826,8 +4829,8 @@ TEST(ArithBridgeTest, VectorInvalidSourceRetainsZeroReadBehavior) {
   rdna4::Operand d(32, rdna4::OperandType::OPR_VGPR, 0);
   rdna4::Operand a(32, rdna4::OperandType::OPR_SRC_VGPR, 256 + 256);
   rdna4::Operand b(32, rdna4::OperandType::OPR_SRC, 129);
-  arith::execute_binary32(*fixture.wave, rj_arith_v_add_nc_u32_w32, rj_arith_v_add_nc_u32_w64, 0, 0,
-                          d, a, b);
+  arith::execute_binary32(*fixture.wave, rj_arith_v_add_nc_u32_w32, rj_arith_v_add_nc_u32_w64,
+                          RJ_ARITH_SEMANTICS_LOOSE, 0, d, a, b);
   ASSERT_FALSE(fixture.wave->instruction_execution_failed());
   EXPECT_TRUE(fixture.recorder->reads.empty());
   EXPECT_EQ(fixture.cu->read_vgpr(fixture.base(), 0), 1u);
@@ -4839,8 +4842,8 @@ TEST(ArithBridgeTest, VectorZeroExecDoesNotReadOrWrite) {
   fixture.wave->set_exec(0);
   rdna4::Operand d(32, rdna4::OperandType::OPR_VGPR, 0);
   rdna4::Operand a(32, rdna4::OperandType::OPR_SRC_VGPR, 256);
-  arith::execute_binary32(*fixture.wave, rj_arith_v_and_b32_w32, rj_arith_v_and_b32_w64, 0, 0, d, a,
-                          a);
+  arith::execute_binary32(*fixture.wave, rj_arith_v_and_b32_w32, rj_arith_v_and_b32_w64,
+                          RJ_ARITH_SEMANTICS_LOOSE, 0, d, a, a);
   EXPECT_TRUE(fixture.recorder->reads.empty());
   EXPECT_TRUE(fixture.recorder->writes.empty());
   EXPECT_FALSE(fixture.wave->instruction_execution_failed());
@@ -4866,8 +4869,8 @@ TEST(ArithBridgeTest, IntegerCompareUsesHalfSelectorsAndClearsInactiveMaskBits) 
           fixture.recorder->reads.clear();
           uint64_t result = ~0ULL;
           arith::execute_compare<16>(*fixture.wave, rj_arith_v_cmp_eq_i16_w32,
-                                     rj_arith_v_cmp_eq_i16_w64, cpu, mode, a, b, false,
-                                     [&](uint64_t value) { result = value; });
+                                     rj_arith_v_cmp_eq_i16_w64, cpu | RJ_ARITH_SEMANTICS_LOOSE,
+                                     mode, a, b, false, [&](uint64_t value) { result = value; });
           ASSERT_FALSE(fixture.wave->instruction_execution_failed());
           const bool equal = mode == RJ_ARITH_ALU_HIGH_A || mode == RJ_ARITH_ALU_HIGH_B;
           EXPECT_EQ(result, equal ? exec_mask : 0);
@@ -4948,13 +4951,15 @@ TEST(ArithBridgeTest, ConstantCompareSkipsSourceReadsAndRejectedCallsDoNotCommit
   fixture.wave->set_exec(0x8000000100000005ULL);
   rdna4::Operand a(64, rdna4::OperandType::OPR_SRC_VGPR, 256);
   uint64_t result = 0;
-  arith::execute_compare<64>(*fixture.wave, rj_arith_v_cmp_t_u64_w32, rj_arith_v_cmp_t_u64_w64, 0,
-                             0, a, a, true, [&](uint64_t value) { result = value; });
+  arith::execute_compare<64>(*fixture.wave, rj_arith_v_cmp_t_u64_w32, rj_arith_v_cmp_t_u64_w64,
+                             RJ_ARITH_SEMANTICS_LOOSE, 0, a, a, true,
+                             [&](uint64_t value) { result = value; });
   EXPECT_EQ(result, fixture.wave->exec());
   EXPECT_TRUE(fixture.recorder->reads.empty());
   bool committed = false;
   arith::execute_compare<64>(*fixture.wave, rj_arith_v_cmp_eq_u64_w32, rj_arith_v_cmp_eq_u64_w64,
-                             1ULL << 63, 0, a, a, false, [&](uint64_t) { committed = true; });
+                             RJ_ARITH_SEMANTICS_LOOSE | (1ULL << 63), 0, a, a, false,
+                             [&](uint64_t) { committed = true; });
   EXPECT_TRUE(fixture.wave->instruction_execution_failed());
   EXPECT_FALSE(committed);
 }
@@ -5013,8 +5018,9 @@ TEST(ArithBridgeTest, PendingRegisterErrorPreventsCompareMaskAndStatusCommit) {
   fixture.wave->report_instruction_execution_error(
       InstructionExecutionError::InvalidRegisterAccess);
   bool committed = false;
-  arith::execute_compare<32>(*fixture.wave, rj_arith_v_cmp_eq_u32_w32, rj_arith_v_cmp_eq_u32_w64, 0,
-                             0, a, a, false, [&](uint64_t) { committed = true; });
+  arith::execute_compare<32>(*fixture.wave, rj_arith_v_cmp_eq_u32_w32, rj_arith_v_cmp_eq_u32_w64,
+                             RJ_ARITH_SEMANTICS_LOOSE, 0, a, a, false,
+                             [&](uint64_t) { committed = true; });
   EXPECT_FALSE(committed);
   committed = false;
   arith::execute_float_compare<32>(
@@ -11135,7 +11141,7 @@ TEST(ArithBridgeTest, DualSecondSlotRejectionCommitsNeitherResultNorState) {
     fixture.wave->set_exec(0xffffffff);
     fixture.wave->set_trapsts(0x20);
     // MOV succeeds on gfx11; gfx12 MUL can report overflow/inexact.
-    // MIN rejects mode 3 because it has no FP-status implementation.
+    // MIN rejects mode 4 because it has no FP-status implementation.
     const std::array<uint32_t, 2> words = {(0x32U << 26) | ((rdna3 ? 8U : 3U) << 22) | (11U << 17) |
                                                (1U << 9) | 256U,
                                            (6U << 24) | (3U << 17) | (3U << 9) | 258U};

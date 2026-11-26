@@ -145,10 +145,11 @@ TEST(FpPkFmacF16W64Gfx942, SdwaOutput) {
       EXPECT_EQ(status, 0x100U);
     }
   }
-  EXPECT_EQ(rj_arith_v_pk_fmac_f16_w64_gfx942(0, 0, RJ_ARITH_ALU_SDWA | RJ_ARITH_DPP16, nullptr,
-                                              nullptr, nullptr, nullptr),
+  EXPECT_EQ(rj_arith_v_pk_fmac_f16_w64_gfx942(RJ_ARITH_SEMANTICS_LOOSE, 0,
+                                              RJ_ARITH_ALU_SDWA | RJ_ARITH_DPP16, nullptr, nullptr,
+                                              nullptr, nullptr),
             RJ_ARITH_ERROR_INVALID_FLAGS);
-  EXPECT_EQ(
-      rj_arith_v_pk_fmac_f16_w64_gfx12(0, 0, RJ_ARITH_ALU_SDWA, nullptr, nullptr, nullptr, nullptr),
-      RJ_ARITH_ERROR_INVALID_FLAGS);
+  EXPECT_EQ(rj_arith_v_pk_fmac_f16_w64_gfx12(RJ_ARITH_SEMANTICS_LOOSE, 0, RJ_ARITH_ALU_SDWA,
+                                             nullptr, nullptr, nullptr, nullptr),
+            RJ_ARITH_ERROR_INVALID_FLAGS);
 }

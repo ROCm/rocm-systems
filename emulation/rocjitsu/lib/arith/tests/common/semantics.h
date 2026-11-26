@@ -20,7 +20,7 @@ inline std::vector<uint64_t> semantics_modes() {
 }
 
 // Return the modes that must reproduce captured hardware results for an entry point whose
-// Compatibility resolves to strict exact. Loose and mode 1 may take approximate shortcuts.
+// Compatibility resolves to strict exact. Loose and mode 2 may take approximate shortcuts.
 inline std::vector<uint64_t> hardware_semantics() {
   return {RJ_ARITH_SEMANTICS_COMPATIBILITY, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS};
 }

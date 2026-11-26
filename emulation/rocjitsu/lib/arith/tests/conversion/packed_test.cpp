@@ -235,10 +235,11 @@ TEST(ConversionCvtPkRtzF16F32W64Gfx11, SdwaOutput) {
       EXPECT_EQ(status, 0x100U);
     }
   }
-  EXPECT_EQ(rj_arith_v_cvt_pk_rtz_f16_f32_w64(0, 0, RJ_ARITH_CVT_SDWA | RJ_ARITH_DPP16, nullptr,
-                                              nullptr, nullptr, nullptr),
+  EXPECT_EQ(rj_arith_v_cvt_pk_rtz_f16_f32_w64(RJ_ARITH_SEMANTICS_LOOSE, 0,
+                                              RJ_ARITH_CVT_SDWA | RJ_ARITH_DPP16, nullptr, nullptr,
+                                              nullptr, nullptr),
             RJ_ARITH_ERROR_INVALID_FLAGS);
-  EXPECT_EQ(rj_arith_v_cvt_pk_rtz_f16_f32_w64_gfx12(0, 0, RJ_ARITH_CVT_SDWA, nullptr, nullptr,
-                                                    nullptr, nullptr),
+  EXPECT_EQ(rj_arith_v_cvt_pk_rtz_f16_f32_w64_gfx12(RJ_ARITH_SEMANTICS_LOOSE, 0, RJ_ARITH_CVT_SDWA,
+                                                    nullptr, nullptr, nullptr, nullptr),
             RJ_ARITH_ERROR_INVALID_FLAGS);
 }

@@ -125,17 +125,18 @@ an unchecked caller precondition unless the instruction explicitly permits null.
 
 ### One semantics control
 
-Modes 0–3 form an ordered choice: each higher mode requires more faithful behavior.
+Modes 1–4 form an ordered choice: each higher mode requires more faithful behavior.
 The constants include their bit position in `flags` and can be OR-ed with CPU
 and guest FP controls.
 
 | Mode | Constant | Requirement |
 |---|---|---|
-| 0 | `RJ_ARITH_SEMANTICS_LOOSE` | Loose arithmetic; no FP status reporting |
-| 1 | `RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE` | Prefer empirical bit-exact arithmetic, allow loose fallback; no FP status reporting |
-| 2 | `RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS` | Require empirical bit-exact arithmetic; no FP status reporting |
-| 3 | `RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL` | Require empirical bit-exact arithmetic and FP status reporting |
-| 4–6 | Reserved | Rejected |
+| 0 | Reserved | Rejected |
+| 1 | `RJ_ARITH_SEMANTICS_LOOSE` | Loose arithmetic; no FP status reporting |
+| 2 | `RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE` | Prefer empirical bit-exact arithmetic, allow loose fallback; no FP status reporting |
+| 3 | `RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS` | Require empirical bit-exact arithmetic; no FP status reporting |
+| 4 | `RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL` | Require empirical bit-exact arithmetic and FP status reporting |
+| 5–6 | Reserved | Rejected |
 | 7 | `RJ_ARITH_SEMANTICS_COMPATIBILITY` | Instruction-specific policy, outside the ordering |
 
 Loose semantics permit numerical approximations, not wrong operands, missing
@@ -143,7 +144,7 @@ operations, or incorrect integer and comparison results. Native floating-point
 arithmetic may overflow intermediate values or use a different accumulation order,
 including returning infinity where the GPU returns a finite value. Loose paths
 need not reorder terms or check operand ranges to prevent these discrepancies.
-Modes 2 and 3 reject unsupported behavior rather than silently falling back to
+Modes 3 and 4 reject unsupported behavior rather than silently falling back to
 loose arithmetic.
 
 ### Compatibility mode
@@ -154,7 +155,7 @@ previous behavior. This can retain instruction-specific details beyond the
 other modes, such as rounding FP16 results before applying OMOD.
 FP32 MUL retains rocjitsu's inherited numerical model for Compatibility and reports
 one hardware-fitted exception classifier in every guest mode, shared with explicit
-mode 3 inside its separately qualified reporting domain; gfx1250 MUL keeps the
+mode 4 inside its separately qualified reporting domain; gfx1250 MUL keeps the
 inherited range-only classifier because the shared rule has no capture there. Gfx12
 binary arithmetic and selection likewise own their inherited Compatibility causes in
 the library. Their status storage must be valid when these policies report. Gfx1250
@@ -170,7 +171,7 @@ raises UNDERFLOW when the unbounded rounding stays below it.
 Gfx12 scalar FP Compatibility computes the inherited numerical result and FP
 status inside the library; the VM commits the destination and raises guest traps.
 For arithmetic and conversion, this inherited reporting does not qualify explicit
-mode 3, which continues to reject unsupported status. Compatibility requires
+mode 4, which continues to reject unsupported status. Compatibility requires
 valid status storage for these operations, as specified by their declarations.
 Compatibility may retain demonstrated hardware-fidelity improvements over the
 previous interpreter; instruction contracts document such exceptions.
@@ -201,10 +202,10 @@ they do not change the host FP environment.
 ### FP status and other instruction results
 
 FP status outputs are trailing register pointers, such as `excp_flag_user` or
-`trapsts`. Modes 0–2 leave them unused; mode 3 requires valid storage without a
-null check. A pointer does not select reporting: null is allowed in modes 0–2,
+`trapsts`. Modes 1–3 leave them unused; mode 4 requires valid storage without a
+null check. A pointer does not select reporting: null is allowed in modes 1–3,
 and non-null storage is left unchanged. Instructions without FP status outputs
-have no additional pointer requirement in mode 3.
+have no additional pointer requirement in mode 4.
 
 Reporting accumulates participating-lane exception causes with bitwise OR,
 preserving existing register bits. Each applicable register has one trailing

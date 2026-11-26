@@ -38,7 +38,7 @@ template <int Width> uint64_t gfx11_division_flags(uint32_t mode) {
 }
 
 // Each lane reproduces the capture in Compatibility and strict exact at every CPU level, with the
-// same operands in every wave lane. Mode 3 keeps rejecting these entries (no RDNA3 status model),
+// same operands in every wave lane. Mode 4 keeps rejecting these entries (no RDNA3 status model),
 // leaving the destination untouched.
 template <int Lanes, int Width, typename Fn, size_t N>
 void check_div_fmas_omod_gfx11(Fn fn, const DivOmodGfx11 (&lanes)[N]) {
@@ -115,8 +115,8 @@ void check_div_fixup_f16_omod_gfx11(Fn fn, const DivOmodGfx11 (&lanes)[N]) {
   }
 }
 
-// DIV_SCALE lanes: the condition output must match the capture in every lane; mode 3 has no
-// status output and succeeds like mode 2.
+// DIV_SCALE lanes: the condition output must match the capture in every lane; mode 4 has no
+// status output and succeeds like mode 3.
 template <int Lanes, int Width, typename Fn, size_t N>
 void check_div_scale_omod_gfx11(Fn fn, const DivOmodGfx11 (&lanes)[N]) {
   for (const DivOmodGfx11 &c : lanes) {

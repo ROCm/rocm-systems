@@ -33,9 +33,9 @@ varies by instruction.
 ## FP arithmetic and DOT counts
 
 These counts group the APIs called by generated handlers by library operation, combining
-Wave32/Wave64 and encoding variants. Bit-exact means mode 2 succeeds with default
+Wave32/Wave64 and encoding variants. Bit-exact means mode 3 succeeds with default
 controls. FP status counts only APIs with a `trapsts` or `excp_flag_user` output;
-mode 3 succeeding on an API without that output is not FP-status coverage.
+mode 4 succeeding on an API without that output is not FP-status coverage.
 
 | Architecture/family | Bit-exact mnemonics | FP-status mnemonics |
 |---|---:|---:|
@@ -51,26 +51,26 @@ have no FP-status output and are excluded from these denominators.
 
 FP64 ADD/MUL/FMA, TRUNC/CEIL/RNDNE/FLOOR, FRACT, FREXP_MANT and FREXP_EXP, the FP16/FP32
 FRACT forms, the FP16/FP32/FP64 and normalized/packed/byte conversions, PACK_B32_F16 and
-VINTERP accept mode 2 on RDNA3 and RDNA4 since the gfx1100 and gfx1201 captures match their
-single numeric model; Compatibility resolves to mode 2 for them. The CDNA3 (`_gfx942`) and CDNA4
+VINTERP accept mode 3 on RDNA3 and RDNA4 since the gfx1100 and gfx1201 captures match their
+single numeric model; Compatibility resolves to mode 3 for them. The CDNA3 (`_gfx942`) and CDNA4
 (`_gfx950`) FP64 ADD/MUL/FMA/FMAC and TRUNC/CEIL/RNDNE/FLOOR/FRACT/FREXP_MANT, conversion
 (excluding SDWA F16 prescaling), PACK_B32_F16 and unmodified CVT_PKACCUM_U8_F32 entry points
-likewise accept mode 2 and resolve Compatibility to mode 2 against MI300X and MI350X captures.
+likewise accept mode 3 and resolve Compatibility to mode 3 against MI300X and MI350X captures.
 The gfx1250 (`_gfx1250`) and older/RDNA (`_gfx10`) entry points of the shared conversion, PACK and
 FP64 kernels stay loose-only until their captures are reviewed per instruction.
 
 FP16 ADD/SUB/SUBREV/MUL, MULLIT and the RDNA4 V_S_EXP_F16/V_S_LOG_F16 carry their hardware
 rules (first-source NaN priority, FP16 rounding before OMOD, the RDNA3 signaling-NaN and OMOD
 gates, MULLIT's operand substitution before an exact multiply) on the exact path, so they
-accept mode 2 on RDNA3 and RDNA4 and Compatibility resolves to mode 2. Loose keeps its
+accept mode 3 on RDNA3 and RDNA4 and Compatibility resolves to mode 3. Loose keeps its
 approximations and may differ from hardware on NaN selection and OMOD overflow. The gfx1250
 (`_gfx1250`) and RDNA2 (`_gfx10`) FP16 arithmetic entries and the gfx1250 MULLIT entry run the
 same rules in Compatibility but stay loose-only until their captures are reviewed.
 
 For DOT, integer instructions and FP8/BF8 DOT4 have no FP-status output and are
-excluded. RDNA4 FP32-output `DOT2_F32_F16/BF16` accepts mode 3 and leaves flags
+excluded. RDNA4 FP32-output `DOT2_F32_F16/BF16` accepts mode 4 and leaves flags
 unchanged, matching its documented gfx1201 behavior; true16-output DOT2 rejects
-mode 3. The 50% figure describes these two supported contracts out of four,
+mode 4. The 50% figure describes these two supported contracts out of four,
 not the ability to raise a flag on half of all DOT mnemonics.
 
 ## CDNA and gfx1250
@@ -139,7 +139,7 @@ paths.
 Gfx1250 binary FP32 selection uses `_gfx1250` entry points to preserve its
 numeric-only Compatibility policy separately from gfx12's reporting policy.
 FP-status reporting is not implemented for these CDNA selection entry points, so
-explicit mode 3 stops execution. Mode 2 also rejects effective OMOD scaling on
+explicit mode 4 stops execution. Mode 3 also rejects effective OMOD scaling on
 gfx950 propagating FP32 ternary selection. Selected NaN inputs are also rejected
 for gfx1250 packed FP16 MINIMUM3/MAXIMUM3 and gfx1250 packed FP16
 MINIMUM/MAXIMUM, pending target qualification. Rejection leaves
@@ -176,8 +176,8 @@ No new empirical hardware qualification is claimed for this inherited model.
 
 gfx12 scalar arithmetic, comparisons, rounding and conversions use rj-arith in
 every semantics, including Compatibility. Compatibility retains the inherited
-scalar FP-status model; arithmetic and conversions still reject explicit mode 3
-where reporting is not qualified. Scalar comparisons and rounding support mode 3.
+scalar FP-status model; arithmetic and conversions still reject explicit mode 4
+where reporting is not qualified. Scalar comparisons and rounding support mode 4.
 The VM owns SGPR/SCC writes and trap delivery. gfx1150 and gfx1250 use the
 architecture-specific library policies documented below.
 
@@ -242,11 +242,11 @@ retains the inherited scalar grid model. Guest rounding/denormal controls
 remain ignored; FP16 overflow, inline replication, modifiers, selected
 C/D halves and DPP continue through the shared adapters. This inherits the
 existing software model, not a new gfx1150 hardware qualification. Explicit
-strict decoded modes 2 and 3 reject active VOP2, VOP3 and VOP3P requests
+strict decoded modes 3 and 4 reject active VOP2, VOP3 and VOP3P requests
 without changing D; Compatibility/Loose/allow-Loose support the inherited model.
 This qualification boundary does not cover VOPD: its FP16/BF16 dual DOT2ACC
 forms retain their existing execution policy and can write both destinations
-in modes 2 and 3.
+in modes 3 and 4.
 
 The old true16-dot emitter loses its last production users and is deleted.
 Its semantic classes now route directly to the shared library binding, along
@@ -274,14 +274,14 @@ All FP16/FP32/FP64 relational CMP/CMPX forms, including F/TRU, use shared
 scalar, AVX2 and AVX-512 numeric predicates. Wave64-only gfx908 APIs preserve
 Compatibility's CLAMP-only INVALID classification, including quiet NaNs and
 constant predicates. Loose and numeric-only modes leave status untouched;
-mode 3 remains unsupported. This carries the existing emulator model without
+mode 4 remains unsupported. This carries the existing emulator model without
 claiming new empirical qualification. Other older profiles migrate separately.
 ### gfx90a floating comparisons
 
 FP16/FP32/FP64 relational CMP/CMPX, including F/TRU, use the existing shared
 comparison APIs and scalar, AVX2 and AVX-512 backends. Compatibility carries
 raw ordering, guest input flushing and the existing absence of FP-status
-reporting; CLAMP does not add a classifier on this target. Mode 3 remains
+reporting; CLAMP does not add a classifier on this target. Mode 4 remains
 unsupported. The VM owns explicit SGPR/VCC and EXEC commits, including both
 mask writes for CMPX. This migration does not newly qualify a numerical model.
 

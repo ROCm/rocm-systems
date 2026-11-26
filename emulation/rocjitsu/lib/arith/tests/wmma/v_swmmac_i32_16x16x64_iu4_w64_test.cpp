@@ -51,7 +51,8 @@ TEST(SwmmacI32Iu4K64W64, Arithmetic) {
         std::fill_n(r.v[reg], 64, 0U);
       }
       std::fill_n(r.v[7], 64, 0xeeee4444U);
-      ASSERT_EQ(rj_arith_v_swmmac_i32_16x16x64_iu4_w64(cpu, key, r.v + 3, r.v, r.v + 1, r.v + 7),
+      ASSERT_EQ(rj_arith_v_swmmac_i32_16x16x64_iu4_w64(cpu | RJ_ARITH_SEMANTICS_LOOSE, key, r.v + 3,
+                                                       r.v, r.v + 1, r.v + 7),
                 RJ_ARITH_SUCCESS);
       EXPECT_EQ(r.v[3][0], key ? 112U : 48U);
     }

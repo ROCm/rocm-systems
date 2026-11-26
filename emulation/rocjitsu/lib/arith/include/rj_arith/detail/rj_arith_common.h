@@ -31,18 +31,19 @@ constexpr uint64_t RJ_ARITH_CPU_X86_64_ZEN4 = 3ULL;
 constexpr uint64_t RJ_ARITH_CPU_FEATURES_MASK = 0xfff0ULL;
 
 // Semantics form an ordered enumeration, not independently OR-able bits.
-// Mode 0 is loose. Mode 1 prefers exact results but permits loose fallback.
-// Mode 2 requires exact results. Mode 3 additionally requires FP status reporting.
-// Modes 0 through 2 never access FP status outputs. Values 4 through 6 are reserved.
+// Mode 0 is reserved.
+// Mode 1 is loose. Mode 2 prefers exact results but permits loose fallback.
+// Mode 3 requires exact results. Mode 4 additionally requires FP status reporting.
+// Modes 1 through 3 never access FP status outputs. Values 5 through 6 are reserved.
 // Temporary migration mode 7 is outside this ordering: each instruction resolves
 // it to the behavior closest to old rocjitsu. Compatibility FP status follows
 // each instruction family's declaration, independently of its numeric mode;
 // supply valid storage whenever that family reports status.
 constexpr uint64_t RJ_ARITH_SEMANTICS_MASK = 7ULL << 16;
-constexpr uint64_t RJ_ARITH_SEMANTICS_LOOSE = 0ULL;
-constexpr uint64_t RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE = 1ULL << 16;
-constexpr uint64_t RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS = 2ULL << 16;
-constexpr uint64_t RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL = 3ULL << 16;
+constexpr uint64_t RJ_ARITH_SEMANTICS_LOOSE = 1ULL << 16;
+constexpr uint64_t RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE = 2ULL << 16;
+constexpr uint64_t RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS = 3ULL << 16;
+constexpr uint64_t RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL = 4ULL << 16;
 constexpr uint64_t RJ_ARITH_SEMANTICS_COMPATIBILITY = 7ULL << 16;
 
 // Guest MODE.FP16_OVFL. Availability and effects, including saturation of
@@ -116,10 +117,10 @@ constexpr int RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS = 3;
 // nearest-even rounding, denormals enabled, and exceptions masked. Implementations
 // never explicitly modify host FP state; ordinary arithmetic may raise sticky flags.
 
-// FP status outputs are appended to the operand list. Modes 0 through 2 do not
+// FP status outputs are appended to the operand list. Modes 1 through 3 do not
 // access these pointers: null is allowed and supplied storage remains unchanged.
-// Mode 3 requires valid storage. Compatibility follows the instruction-family
-// status contract, which may require storage even when its numeric mode is 2.
+// Mode 4 requires valid storage. Compatibility follows the instruction-family
+// status contract, which may require storage even when its numeric mode is 3.
 // Entry points assume required storage is valid; they do not check nullness.
 // trapsts (RDNA3) or excp_flag_user (RDNA4) accumulates participating-lane FP
 // exception causes with bitwise OR, preserving all existing bits. Status storage

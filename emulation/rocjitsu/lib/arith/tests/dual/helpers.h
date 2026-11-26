@@ -48,7 +48,9 @@ void check_dual(Call call, Ordinary ordinary, uint32_t a, uint32_t b, uint32_t c
     input.v[3][lane] = c;
   }
   uint32_t status = 0x80000000U;
-  ASSERT_EQ(call(0, UINT32_MAX, 0, input.v + 3, input.v, input.v + 1, &status), RJ_ARITH_SUCCESS);
+  ASSERT_EQ(
+      call(RJ_ARITH_SEMANTICS_LOOSE, UINT32_MAX, 0, input.v + 3, input.v, input.v + 1, &status),
+      RJ_ARITH_SUCCESS);
   for (int lane = 0; lane < 32; ++lane) {
     EXPECT_EQ(input.v[3][lane], select ? (lane & 1 ? b : a) : expected);
   }

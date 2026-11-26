@@ -30,8 +30,8 @@ extern "C" {
 // RDNA4 exact reporting accumulates INPUT_DENORM for
 // finite operand pairs containing a preserved subnormal. Only participating
 // lanes contribute, after DPP filtering. RDNA3 entry points take
-// trapsts; mode 3 FP status reporting is unsupported, even with empty
-// EXEC. Both architectures support exact predicate results in mode 2.
+// trapsts; mode 4 FP status reporting is unsupported, even with empty
+// EXEC. Both architectures support exact predicate results in mode 3.
 // gfx12 Compatibility with CLAMP preserves the legacy wave-wide reporting gate:
 // causes accumulate only when an active selected operand is nonfinite. Then all
 // participating lanes contribute, including finite denormal pairs elsewhere in
@@ -1090,7 +1090,7 @@ int rj_arith_v_cmpx_u_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t
 // a/b may be NULL. F16 half selectors, ABS/NEG, CLAMP, guest IEEE mode and
 // input/output flushing are accepted without changing the result. F64 rejects DPP.
 // Result masks are exact in both semantics. Exact-mode exception reporting is
-// not implemented: mode 3 returns RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS before
+// not implemented: mode 4 returns RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS before
 // modifying any output. Other modes leave FP status storage unchanged. The ISA still specifies NaN
 // exceptions for these predicates; an exception-free result must not be inferred from F/T.
 int rj_arith_v_cmp_f_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
@@ -1595,9 +1595,9 @@ constexpr uint32_t RJ_ARITH_CLASS_POS_INF = 1U << 9;
 // Supports loose and empirical-exact semantics, independently of denormal
 // controls and guest IEEE mode. CLAMP is accepted and ignored.
 // Host FP controls are never changed; arithmetic may raise sticky host flags.
-// Unsuffixed APIs reject mode 3 pending qualification of CLASS FP status.
+// Unsuffixed APIs reject mode 4 pending qualification of CLASS FP status.
 // This also applies to the gfx908/gfx90a/gfx1010/gfx1030/gfx1150 adapters;
-// Compatibility retains classification masks. Gfx12 mode 3 succeeds without FP status:
+// Compatibility retains classification masks. Gfx12 mode 4 succeeds without FP status:
 // observed gfx1201 CLASS does not raise flags, including for signaling NaNs.
 int rj_arith_v_cmp_class_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                  uint32_t *d, const uint32_t *const *a, const uint32_t *const *b);
@@ -1664,7 +1664,7 @@ int rj_arith_v_cmpx_class_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask,
 // instruction controls. DX10_CLAMP_OFF is additionally accepted. Compatibility
 // accumulates INVALID only with that flag set: CLAMP signals on any NaN,
 // otherwise only signaling NaNs contribute. No INPUT_DENORM is produced.
-// Numeric-only modes leave status unused; mode 3 is unsupported. All input reads
+// Numeric-only modes leave status unused; mode 4 is unsupported. All input reads
 // finish before mask/status stores. Constants need inputs only when reporting
 // Compatibility status with DX10_CLAMP_OFF; empty EXEC needs no inputs.
 // This preserves the existing emulator model, without new empirical qualification.
@@ -2416,7 +2416,7 @@ int rj_arith_v_cmpx_t_f64_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
 // their unsuffixed counterparts, for Wave64 only. In Compatibility, CLAMP also
 // accumulates INVALID in TRAPSTS for any participating NaN (quiet or signaling),
 // including F/T predicates; no other FP causes are produced. Numeric-only modes
-// leave TRAPSTS untouched. Mode 3 rejects before accessing operands or outputs.
+// leave TRAPSTS untouched. Mode 4 rejects before accessing operands or outputs.
 // Numeric masks and NaN classification complete before output stores; D or
 // TRAPSTS may overlap sources. With Compatibility+CLAMP, even F/T need A/B.
 // Otherwise constants and empty EXEC do not read inputs. No new empirical

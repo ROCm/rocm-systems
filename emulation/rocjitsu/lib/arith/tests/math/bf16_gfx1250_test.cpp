@@ -107,7 +107,8 @@ void check(Call call, Call reference) {
   }
   EXPECT_EQ(call(RJ_ARITH_SEMANTICS_COMPATIBILITY, 0, 0, nullptr, nullptr, nullptr),
             RJ_ARITH_SUCCESS);
-  EXPECT_EQ(call(0, 0, 1ULL << 63, nullptr, nullptr, nullptr), RJ_ARITH_ERROR_INVALID_FLAGS);
+  EXPECT_EQ(call(RJ_ARITH_SEMANTICS_LOOSE, 0, 1ULL << 63, nullptr, nullptr, nullptr),
+            RJ_ARITH_ERROR_INVALID_FLAGS);
 }
 } // namespace
 

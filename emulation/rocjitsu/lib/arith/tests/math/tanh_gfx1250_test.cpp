@@ -88,8 +88,9 @@ template <bool Half> void check() {
       }
     }
   }
-  EXPECT_EQ(call(0, 0, 0, nullptr, nullptr, nullptr), RJ_ARITH_SUCCESS);
-  EXPECT_EQ(call(0, 0, 1ULL << 63, nullptr, nullptr, nullptr), RJ_ARITH_ERROR_INVALID_FLAGS);
+  EXPECT_EQ(call(RJ_ARITH_SEMANTICS_LOOSE, 0, 0, nullptr, nullptr, nullptr), RJ_ARITH_SUCCESS);
+  EXPECT_EQ(call(RJ_ARITH_SEMANTICS_LOOSE, 0, 1ULL << 63, nullptr, nullptr, nullptr),
+            RJ_ARITH_ERROR_INVALID_FLAGS);
 }
 } // namespace
 
@@ -109,7 +110,8 @@ TEST(Gfx1250Tanh, LooseAccuracy) {
       }
       const uint32_t *a[] = {input};
       uint32_t *d[] = {output};
-      ASSERT_EQ(rj_arith_v_tanh_f32_w32_gfx1250(cpu, UINT32_MAX, 0, d, a, nullptr),
+      ASSERT_EQ(rj_arith_v_tanh_f32_w32_gfx1250(cpu | RJ_ARITH_SEMANTICS_LOOSE, UINT32_MAX, 0, d, a,
+                                                nullptr),
                 RJ_ARITH_SUCCESS);
       for (int lane = 0; lane < 32; ++lane) {
         const float reference = std::tanh(std::bit_cast<float>(input[lane]));

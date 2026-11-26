@@ -74,9 +74,9 @@ library never explicitly changes it. The function returns `RJ_ARITH_SUCCESS`
 (zero) on success and leaves outputs unchanged on error.
 
 The following C/C++ program uses strict bit-exact semantics with FP status
-reporting required where applicable. This entry point has no FP-status output, so mode 3 has the same numeric contract
-as mode 2. No status
-output is needed. It fills A and B with
+reporting required where applicable. This entry point has no FP-status output,
+so mode 4 has the same numeric contract as mode 3. No status output is needed.
+It fills A and B with
 FP16 ones and C with zeros, then prints the resulting 16×16 FP32 matrix (every element is 16):
 
 ```c

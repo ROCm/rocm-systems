@@ -192,7 +192,7 @@ void expect_captured_conversion_gfx11(Call call, uint32_t mode, uint64_t modifie
 
 // A narrow conversion shares this memory/semantics contract with widening and
 // packing. References return one or two words; comparators own numeric rules.
-// Exact entry points without a status parameter accept mode 3 only when status_free.
+// Exact entry points without a status parameter accept mode 4 only when status_free.
 template <int Lanes, int Operands, int InputWords, int OutputWords, bool Dpp, typename Call,
           typename Reference, typename Compare>
 void check_conversion(Call call, const Registers<8, Lanes> &input, Reference reference,

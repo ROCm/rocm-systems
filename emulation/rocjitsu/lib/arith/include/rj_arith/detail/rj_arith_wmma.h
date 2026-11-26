@@ -265,10 +265,10 @@ constexpr uint32_t RJ_ARITH_WMMA_CLAMP = 1U << 6;
 // 16-lane group. Results are unspecified without this replication.
 // C/D[row][col] maps to [row / 2][col + 16 * (row % 2)] in Wave32 and
 // [row / 4][col + 16 * (row % 4)] in Wave64. Whole-VGPR aliases are supported.
-// These gfx11 entry points support modes 0..3 without an FP-status output.
+// These gfx11 entry points support modes 1..4 without an FP-status output.
 // Mixed-format FP16 input-denormal overrides are rejected.
 // The six source/accumulator modifiers above are supported. Common guest denormal and
-// IEEE, rounding and DX10 controls are accepted but ignored; compatibility resolves to mode 2.
+// IEEE, rounding and DX10 controls are accepted but ignored; compatibility resolves to mode 3.
 // FP16_OVFL has no effect on these FP32 results.
 int rj_arith_v_wmma_f32_16x16x16_f16_w32(uint64_t flags, uint64_t instruction_flags,
                                          uint32_t *const *d, const uint32_t *const *a,
@@ -334,8 +334,8 @@ int rj_arith_v_wmma_i32_16x16x16_iu4_w64(uint64_t flags, uint64_t instruction_fl
 // Mixed-format FP16 input-denormal overrides are rejected.
 // Guest rounding, common denormal and IEEE controls are accepted but ignored by the fixed
 // matrix model. DX10_CLAMP_OFF is rejected on gfx12. FP16_OVFL has no effect on FP32 results.
-// Compatibility selects mode 2. There is no FP-status output: mode 3 has the same numeric contract
-// as mode 2.
+// Compatibility selects mode 3. There is no FP-status output: mode 4 has the same numeric contract
+// as mode 3.
 int rj_arith_v_wmma_f32_16x16x16_f16_w32_gfx12(uint64_t flags, uint64_t instruction_flags,
                                                uint32_t *const *d, const uint32_t *const *a,
                                                const uint32_t *const *b, const uint32_t *const *c);

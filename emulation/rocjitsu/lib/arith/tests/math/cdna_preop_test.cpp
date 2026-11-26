@@ -110,8 +110,9 @@ template <int Lanes, bool Gfx1250, typename Call> void check(Call call) {
   EXPECT_EQ(
       call(RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL, Mask(0), 0, nullptr, nullptr, nullptr, nullptr),
       RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
-  EXPECT_EQ(call(0, Mask(0), 0, nullptr, nullptr, nullptr, nullptr), RJ_ARITH_SUCCESS);
-  EXPECT_EQ(call(0, Mask(0), 1ULL << 63, nullptr, nullptr, nullptr, nullptr),
+  EXPECT_EQ(call(RJ_ARITH_SEMANTICS_LOOSE, Mask(0), 0, nullptr, nullptr, nullptr, nullptr),
+            RJ_ARITH_SUCCESS);
+  EXPECT_EQ(call(RJ_ARITH_SEMANTICS_LOOSE, Mask(0), 1ULL << 63, nullptr, nullptr, nullptr, nullptr),
             RJ_ARITH_ERROR_INVALID_FLAGS);
 }
 } // namespace

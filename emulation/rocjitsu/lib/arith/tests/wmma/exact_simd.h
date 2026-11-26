@@ -133,7 +133,8 @@ void expect_wmma_exact_simd(Call call) {
     // Reuse the same broad inputs, modifiers and aliases for loose FP16/BF16.
     // Include exceptional columns and the full exponent range in SIMD comparisons.
     for (bool loose : {false, true}) {
-      uint64_t selected_flags = loose ? (flags & ~RJ_ARITH_SEMANTICS_MASK) : flags;
+      uint64_t selected_flags =
+          loose ? (flags & ~RJ_ARITH_SEMANTICS_MASK) | RJ_ARITH_SEMANTICS_LOOSE : flags;
       auto expected = input;
       ASSERT_EQ(call(selected_flags, instruction_flags, expected.v + destination, expected.v,
                      expected.v + 8, expected.v + 16),

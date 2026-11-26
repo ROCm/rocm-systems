@@ -104,7 +104,7 @@ int rj_arith_v_tanh_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t
 // Existing excp_flag_user bits, including a pre-existing INT_DIV0, survive.
 // DPP8/DPP16 permutes A before source modifiers. DPP-filtered destination lanes
 // add no exception; a zero-filled source in an active lane can set INT_DIV0.
-// FP status is accumulated in mode 3; modes 0..2 do not access the status pointer.
+// FP status is accumulated in mode 4; modes 0..3 do not access the status pointer.
 // Unlike the general no-overlap requirement, this
 // instruction also permits it to alias any operand word: its initial value is
 // read before VGPR stores and its final write takes precedence on overlap.
@@ -112,7 +112,7 @@ int rj_arith_v_tanh_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t
 // Errors leave all outputs unchanged. Loose and empirical exact results are
 // supported; exact RCP_IFLAG preserves signaling NaNs on RDNA3 with IEEE clear
 // and quiets them otherwise.
-// RDNA4 supports mode 3 exception accumulation; loose calls leave FP status unchanged.
+// RDNA4 supports mode 4 exception accumulation; loose calls leave FP status unchanged.
 // RDNA3 exact reporting inherits rocjitsu's signed-zero-only INT_DIV0 classifier,
 // including under CLAMP; nonzero subnormals do not raise it. This is a borrowed
 // model, not a hardware-validated RDNA3 exception capture. RDNA3 loose calls skip
@@ -139,7 +139,7 @@ int rj_arith_v_rcp_iflag_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask,
 // tiny results before and after scaling. RDNA3 disables OMOD when output denormals are preserved
 // or IEEE mode is set. All three guest FP flags are accepted; output flushing applies even without
 // OMOD. Input flushing does not affect the exponent lookup. APIs without _gfx12 use TRAPSTS; _gfx12
-// uses EXCP_FLAG_USER. Mode 3 reporting is unsupported; loose calls leave FP status unchanged.
+// uses EXCP_FLAG_USER. Mode 4 reporting is unsupported; loose calls leave FP status unchanged.
 // Supports loose and empirical-exact semantics. Never changes host FP controls. If destination
 // VGPRs alias, the high word is written last.
 int rj_arith_v_trig_preop_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
@@ -174,7 +174,7 @@ int rj_arith_v_trig_preop_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask,
 // NaNs through CLAMP. All three guest FP flags are accepted.
 // Exact arithmetic never changes host FP controls. Loose SIMD arithmetic requires
 // host nearest-even with denormals preserved; it never changes host controls.
-// APIs without _gfx12 take RDNA3 trapsts; _gfx12 takes excp_flag_user. Mode 3
+// APIs without _gfx12 take RDNA3 trapsts; _gfx12 takes excp_flag_user. Mode 4
 // reporting is unsupported on RDNA3 and with guest flushing on RDNA4. Existing
 // RDNA4 reporting with denormals preserved is retained; loose reporting is skipped.
 int rj_arith_v_sin_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
@@ -215,7 +215,7 @@ int rj_arith_v_cos_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t in
 // DX10_CLAMP=1 by default; RDNA3 accepts RJ_ARITH_FP_DX10_CLAMP_OFF to preserve NaNs through CLAMP.
 // All three guest FP flags are accepted; FP16_OVFL has no effect on these bounded results. Exact
 // semantics preserve host FP state. Loose SIMD requires host nearest-even with denormals enabled.
-// APIs without _gfx12 take RDNA3 trapsts; _gfx12 takes excp_flag_user. Mode 3
+// APIs without _gfx12 take RDNA3 trapsts; _gfx12 takes excp_flag_user. Mode 4
 // reporting is unsupported on RDNA3 and with guest flushing on RDNA4. Existing
 // RDNA4 reporting with denormals preserved is retained; loose reporting is skipped.
 int rj_arith_v_sin_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
@@ -250,9 +250,9 @@ int rj_arith_v_cos_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t in
 // FP32 fractional part: x - floor(x), capped below one before OMOD/CLAMP.
 // Supports A ABS/NEG, OMOD, CLAMP and guest input/output flushing. One numeric
 // model serves Loose and bit-exact semantics; the gfx1201 and gfx1100 captures match
-// it, so Compatibility resolves to mode 2. One VGPR per operand; infinite inputs
+// it, so Compatibility resolves to mode 3. One VGPR per operand; infinite inputs
 // produce NaN. RDNA3 ignores OMOD with IEEE mode or preserved output denormals; RDNA4
-// does not. FP status reporting (mode 3) is unsupported.
+// does not. FP status reporting (mode 4) is unsupported.
 int rj_arith_v_fract_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                              uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
 int rj_arith_v_fract_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
@@ -265,7 +265,7 @@ int rj_arith_v_fract_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t 
 // Guest input flushing is supported.
 // Supports A ABS/NEG, OMOD and CLAMP. FP32 uses one VGPR per operand; FP64 uses
 // low/high VGPR pairs and the FP64 alias contract. Both widths support Loose and
-// bit-exact semantics (Compatibility resolves to mode 2); the gfx1201 and gfx1100
+// bit-exact semantics (Compatibility resolves to mode 3); the gfx1201 and gfx1100
 // captures match the FP64 model. RDNA3 FP32 suppresses OMOD when IEEE mode is enabled or
 // output denormals are preserved; RDNA4 scales independently. Non-null exact
 // reporting is unsupported on both architectures; loose calls leave state alone.
@@ -360,7 +360,7 @@ int rj_arith_v_frexp_mant_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask,
 // RDNA3: OMOD is disabled when IEEE is set or output denormals are preserved.
 // RDNA4 OMOD is independent of these modes. Exact RDNA3 unary operations retain
 // signaling NaNs unless IEEE is set; RDNA4 quiets them. FP16_OVFL saturates
-// zero-input RCP/RSQ infinities. Mode 3 FP status reporting is unsupported on
+// zero-input RCP/RSQ infinities. Mode 4 FP status reporting is unsupported on
 // both architectures. Loose paths leave FP status unchanged.
 // RDNA3 accepts RJ_ARITH_FP_DX10_CLAMP_OFF to preserve arithmetic NaNs through
 // CLAMP, after the operation's quieting policy. By default CLAMP maps them to
@@ -538,7 +538,7 @@ int rj_arith_v_frexp_mant_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask,
 // preserved; _gfx12 forms scale independently. Guest input flushing applies
 // before rounding. Both architectures implement exact numerical results with
 // signaling NaNs preserved on RDNA3 with IEEE clear, and quieted otherwise.
-// Mode 3 FP status reporting is unsupported on both
+// Mode 4 FP status reporting is unsupported on both
 // architectures; loose calls leave FP status alone.
 int rj_arith_v_trunc_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                              uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
@@ -608,7 +608,7 @@ int rj_arith_v_log_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t in
 // gfx942/gfx950 integral rounding and mantissa extraction share the existing
 // integer models, but always quiet NaNs independently of MODE.IEEE. OMOD remains
 // enabled only with IEEE clear and output denormals flushed. Compatibility and
-// allow-Loose use the inherited model; explicit mode 2 is unqualified and mode 3
+// allow-Loose use the inherited model; explicit mode 3 is unqualified and mode 4
 // FP-status reporting is unsupported. D may alias A; inactive lanes and the unselected FP16 half
 // survive.
 int rj_arith_v_trunc_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
