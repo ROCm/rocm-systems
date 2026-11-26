@@ -18,23 +18,36 @@ int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32
                            kMatrixIgnoredFpFlags | RJ_ARITH_FP_DX10_CLAMP_OFF)) {
     return error;
   }
-  // Only the captured gfx942 forms with FP16_OVFL clear are qualified.
+  // All 12 captured gfx942 forms support exact modes for both FP16_OVFL=0 and 1.
   // Compatibility retains the existing fast approximate implementation.
   if constexpr (Gfx942) {
-    if (is_exact(flags) && !(flags & RJ_ARITH_FP16_OVFL)) {
-      constexpr auto format =
+    if (is_exact(flags)) {
+      constexpr MfmaGfx942Format format =
           Bits == 16 ? (BfA ? MfmaGfx942Format::Bf16 : MfmaGfx942Format::F16)
                      : (BfA ? (BfB ? MfmaGfx942Format::Bf8Bf8 : MfmaGfx942Format::Bf8Fp8)
                             : (BfB ? MfmaGfx942Format::Fp8Bf8 : MfmaGfx942Format::Fp8Fp8));
-      smfmac_gfx942_exact(format, M, controls, d, a, b, index);
+      const bool no_inf_nan = (flags & RJ_ARITH_FP16_OVFL) != 0;
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+      if (!no_inf_nan && cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+        smfmac_gfx942_exact_x86_64_v4<format, M, K>(controls, d, a, b, index);
+        return RJ_ARITH_SUCCESS;
+      }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+      if (!no_inf_nan && cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+        smfmac_gfx942_exact_x86_64_v3<format, M, K>(controls, d, a, b, index);
+        return RJ_ARITH_SUCCESS;
+      }
+#endif
+      smfmac_gfx942_exact(format, M, controls, no_inf_nan, d, a, b, index);
       return RJ_ARITH_SUCCESS;
     }
   }
   if ((flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
     return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
   }
-  // gfx942 carries this bit only to delimit exact qualification. Its inherited
-  // approximate policy ignores it; saturation belongs to the gfx950 variants.
+  // gfx942's inherited approximate policy ignores RJ_ARITH_FP16_OVFL; approximate
+  // saturation belongs to the gfx950 variants.
   const bool clamp_overflow = !Gfx942 && (flags & RJ_ARITH_FP16_OVFL);
   // Metadata sets occupy 8 bits for compact F16/BF16, 16 bits for
   // wide F16/BF16 or compact FP8/BF8, and all 32 bits for wide FP8/BF8.

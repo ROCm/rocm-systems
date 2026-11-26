@@ -226,22 +226,22 @@ Panel Config:
         unit: Unit
       metric:
         Wavefront Occupancy:
-          value: ROUND(100 * SUM(SQ_WAVE_CYCLES_sum) / SUM(SQ_BUSY_CYCLES_sum * 2 * $max_waves_per_cu), 1)
+          value: 100 * SUM(SQ_WAVE_CYCLES_sum) / SUM(SQ_BUSY_CYCLES_sum * 2 * $max_waves_per_cu)
           unit: Percent
         VGPR:
-          value: ROUND(AVG(Arch_VGPR), 0)
+          value: AVG(Arch_VGPR)
           unit: Registers
         SGPR:
-          value: ROUND(AVG(SGPR), 0)
+          value: AVG(SGPR)
           unit: Registers
         LDS Allocation:
-          value: ROUND(AVG(LDS_Per_Workgroup), 0)
+          value: AVG(LDS_Per_Workgroup)
           unit: Bytes per Workgroup
         Scratch Allocation:
-          value: ROUND(AVG(Scratch_Per_Workitem) * $wave_size / 1024, 3)
+          value: AVG(Scratch_Per_Workitem) * $wave_size / 1024
           unit: KB per Wave
         Workgroups:
-          value: ROUND(AVG(Grid_Size / Workgroup_Size) / ($cu_per_gpu / 2), 1)
+          value: AVG(Grid_Size / Workgroup_Size) / ($cu_per_gpu / 2)
           unit: Workgroups per WGP
 
   metrics_description:

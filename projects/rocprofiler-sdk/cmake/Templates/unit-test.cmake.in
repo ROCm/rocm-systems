@@ -16,6 +16,7 @@ set(_DISABLED "@RAUT_DISABLED@")
 set(_ENVIRONMENT "@RAUT_ENVIRONMENT@")
 set(_PREFIX "@RAUT_TEST_PREFIX@")
 set(_RESOURCE_LOCK "@RAUT_RESOURCE_LOCK@")
+set(_INSTALLED_METRICS_PATH "@RAUT_INSTALLED_METRICS_PATH@")
 
 function(rocprofiler_sdk_update_unit_test_environment _VAR _NAME)
     set(_UPD) # temporary variable to hold updated list
@@ -31,6 +32,15 @@ function(rocprofiler_sdk_update_unit_test_environment _VAR _NAME)
         "${_UPD}"
         PARENT_SCOPE)
 endfunction()
+
+if(_INSTALLED_METRICS_PATH)
+    # This file is installed as <prefix>/share/rocprofiler-sdk/tests/unit-tests/<name>.cmake.
+    # The share directory with config.yaml is two levels up, in the installation the
+    # tests are configured from.
+    get_filename_component(_INSTALLED_SHARE_DIR "${CMAKE_CURRENT_LIST_DIR}/../.."
+                           ABSOLUTE)
+    list(APPEND _ENVIRONMENT "ROCPROFILER_METRICS_PATH=${_INSTALLED_SHARE_DIR}")
+endif()
 
 rocprofiler_sdk_update_unit_test_environment(_ENVIRONMENT "LD_LIBRARY_PATH"
                                              "$ENV{LD_LIBRARY_PATH}")

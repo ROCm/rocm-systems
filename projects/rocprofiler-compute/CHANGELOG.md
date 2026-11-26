@@ -9,7 +9,14 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Added LDS arithmetic intensity points to the gfx1250 roofline.
 
+* Added GPU metrics, the Memory Chart and the roofline for gfx1200.
+  * gfx1200 support is experimental and requires the `--experimental` option.
+
 ### Changed
+
+* Analyze mode accepts numpy versions from 1.26.4 to 2.5.x. It previously required exactly 1.26.4, or 2.5.2 on Python 3.13 and newer.
+
+* The analyze option `--decimal` is now the debug option `--debug-table-decimal`, which sets the decimals of the analyze tables.
 
 ### Removed
 
@@ -24,6 +31,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Fixed MI200 profiling collecting the L2-Fabric write counters twice under two names, which took one extra profiling pass.
 
 * Fixed gfx1201 Wavefront Occupancy, Memory Chart occupancy and Wavefront Life reading far above the real wave count.
+
+* Fixed the peak of the `L2 Cache BW` metric in the `System Speed-of-Light` panel on MI200 (gfx90a). The peak was half the intended value, so the metric could exceed its peak.
+
+* Fixed Memory Chart values that did not match the same metrics in the analyze tables.
 
 ### Upcoming changes
 

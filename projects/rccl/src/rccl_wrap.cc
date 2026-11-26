@@ -433,6 +433,7 @@ static size_t rcclRingLl128OneLoopPerNode(struct ncclComm* comm, int nChannels) 
 
 extern int64_t ncclParamMinNchannels();
 extern int64_t ncclParamMaxNchannels();
+extern int ncclMaxNchannels();  // connect.cc: NCCL_MAX_NCHANNELS / NCCL_MAX_NRINGS / NCCL_WORK_ARGS_BYTES
 
 // gfx950 multi-node choices with the remote GDR flush flag, 8 GPUs per node, all choices measured.
 //
@@ -1111,7 +1112,7 @@ inline size_t rcclSymMinR2CapTab(const rcclArchThresholds* table, ncclFunc_t fun
 // Where the hierarchical LSA AllGather kernel runs, the table's hierarchical window replaces the
 // AllGather symk bounds in both eager and graph mode. RCCL_SYM_K_MIN_BYTES / RCCL_SYM_K_MAX_BYTES still win.
 inline bool rcclAgHierSymWindow(struct ncclComm* comm, const rcclArchThresholds* table) {
-  return table != nullptr && table->agHierSymMinR2 != 0 && ncclSymkAgHierGroups(comm) > 0;
+  return table != nullptr && table->agHierSymMinR2 != 0 && ncclSymkHierGroups(comm) > 0;
 }
 inline size_t rcclAgSymMaxR2Cap(struct ncclComm* comm, const rcclArchThresholds* table, bool graphMode) {
   if (rcclParamSymKMaxBytes() < 0 && rcclAgHierSymWindow(comm, table)) return table->agHierSymMaxR2;
@@ -1631,12 +1632,10 @@ inline size_t rcclDdaVmmThresholdCtxTab(const rcclArchThresholds* table, ncclFun
 
 bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t threshold,
                     bool query, const char* prefix) {
-  // The environment parameter can be NCCL_CONFIG_UNDEF_INT when launch order
-  // is configured per communicator. Use the resolved communicator value:
-  // testing the raw sentinel as a boolean disables DDA by default, while
-  // testing only the environment would ignore an explicit config value.
-  if (!rcclParamDdaEnable() || comm->config.launchOrderImplicit == 1 || ncclGroupDepth != 0) {
-    if (!query && prefix) INFO(NCCL_TUNING, "%s DDA disqualified: RCCL_DDA_ENABLE=%d launchOrderImplicit=%d ncclGroupDepth=%d", prefix, (int)rcclParamDdaEnable(), comm->config.launchOrderImplicit, ncclGroupDepth);
+  // Implicit launch order does not disqualify DDA: rcclAddonLaunch joins the
+  // per-device launch order the same way native kernel launches do.
+  if (!rcclParamDdaEnable() || ncclGroupDepth != 0) {
+    if (!query && prefix) INFO(NCCL_TUNING, "%s DDA disqualified: RCCL_DDA_ENABLE=%d ncclGroupDepth=%d", prefix, (int)rcclParamDdaEnable(), ncclGroupDepth);
     return false;
   }
   if (comm->ddaDisabledAfterAbort) {
@@ -3436,7 +3435,7 @@ int rcclWarpSpeedAdjustChannels(struct ncclComm* comm, struct ncclTaskColl* info
     // TODO: Remove this condition after optimizing all collectives
     if (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && comm->nNodes == 1 && comm->nRanks == 8 &&
         info->func != ncclFuncAllReduce && info->func != ncclFuncAllGather && info->func != ncclFuncReduceScatter &&
-        ncclParamMaxNchannels() < 0) {
+        ncclMaxNchannels() == MAXCHANNELS) {  // undo the halving only where rcclWarpSpeedComputeNChannels did it
       nc *= 2;
     }
   }

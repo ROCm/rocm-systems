@@ -11,52 +11,52 @@ Panel Config:
         unit: Unit
       metric:
         Wavefront Occupancy:
-          value: ROUND(100 * SUM(SQ_LEVEL_WAVES_ACCUM) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $numActiveCUs * $max_waves_per_cu), 1)
+          value: 100 * SUM(SQ_LEVEL_WAVES_ACCUM) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $numActiveCUs * $max_waves_per_cu)
           unit: Percent
         VGPR:
-          value: ROUND(AVG(Arch_VGPR), 0)
+          value: AVG(Arch_VGPR)
           unit: Registers
         SGPR:
-          value: ROUND(AVG(SGPR), 0)
+          value: AVG(SGPR)
           unit: Registers
         LDS Allocation:
-          value: ROUND(AVG(LDS_Per_Workgroup), 0)
+          value: AVG(LDS_Per_Workgroup)
           unit: Bytes per Workgroup
         Scratch Allocation:
-          value: ROUND(AVG(Scratch_Per_Workitem) * $wave_size / 1024, 3)
+          value: AVG(Scratch_Per_Workitem) * $wave_size / 1024
           unit: KB per Wave
         Workgroups:
-          value: ROUND(AVG(SPI_CSN_NUM_THREADGROUPS) / $numActiveCUs, 1)
+          value: AVG(SPI_CSN_NUM_THREADGROUPS) / $numActiveCUs
           unit: Workgroups per CU
         Flat Read:
-          value: ROUND(SUM(TA_FLAT_READ_WAVEFRONTS_sum) / SUM($denom), 0)
+          value: SUM(TA_FLAT_READ_WAVEFRONTS_sum) / SUM($denom)
           unit: (Instructions + $normUnit)
         Flat Write:
-          value: ROUND(SUM(TA_FLAT_WRITE_WAVEFRONTS_sum) / SUM($denom), 0)
+          value: SUM(TA_FLAT_WRITE_WAVEFRONTS_sum) / SUM($denom)
           unit: (Instructions + $normUnit)
         Flat Atomic:
-          value: ROUND(SUM(TA_FLAT_ATOMIC_WAVEFRONTS_sum) / SUM($denom), 0)
+          value: SUM(TA_FLAT_ATOMIC_WAVEFRONTS_sum) / SUM($denom)
           unit: (Instructions + $normUnit)
         Buffer Read:
-          value: ROUND(SUM(TA_BUFFER_READ_WAVEFRONTS_sum) / SUM($denom), 0)
+          value: SUM(TA_BUFFER_READ_WAVEFRONTS_sum) / SUM($denom)
           unit: (Instructions + $normUnit)
         Buffer Write:
-          value: ROUND(SUM(TA_BUFFER_WRITE_WAVEFRONTS_sum) / SUM($denom), 0)
+          value: SUM(TA_BUFFER_WRITE_WAVEFRONTS_sum) / SUM($denom)
           unit: (Instructions + $normUnit)
         Buffer Atomic:
-          value: ROUND(SUM(TA_BUFFER_ATOMIC_WAVEFRONTS_sum) / SUM($denom), 0)
+          value: SUM(TA_BUFFER_ATOMIC_WAVEFRONTS_sum) / SUM($denom)
           unit: (Instructions + $normUnit)
         LDS Req:
-          value: ROUND(SUM(SQ_INSTS_LDS) / SUM($denom), 0)
+          value: SUM(SQ_INSTS_LDS) / SUM($denom)
           unit: (Instructions + $normUnit)
         LDS Util:
-          value: ROUND(100 * SUM(SQ_LDS_IDX_ACTIVE) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu), 0)
+          value: 100 * SUM(SQ_LDS_IDX_ACTIVE) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
           unit: Percent
         VL1 Hit:
-          value: ROUND(100 - $vl1d_read_write_miss_rate - $vl1d_atomic_miss_rate, 0)
+          value: 100 - $vl1d_read_write_miss_rate - $vl1d_atomic_miss_rate
           unit: Percent
         VL1 Coalesce:
-          value: ROUND(100 * 64 * SUM(TA_TOTAL_WAVEFRONTS_sum) / (4 * SUM(TCP_TOTAL_ACCESSES_sum)), 0)
+          value: 100 * 64 * SUM(TA_TOTAL_WAVEFRONTS_sum) / (4 * SUM(TCP_TOTAL_ACCESSES_sum))
           unit: Percent
         VL1_L2 Read BW:
           value: 128 * SUM(TCP_TCC_READ_REQ_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
@@ -68,25 +68,25 @@ Panel Config:
           value: 64 * SUM(TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
         sL1D Rd:
-          value: ROUND(SUM(SQC_DCACHE_REQ) / SUM($denom), 0)
+          value: SUM(SQC_DCACHE_REQ) / SUM($denom)
           unit: (Requests + $normUnit)
         sL1D Hit:
-          value: ROUND(100 * SUM(SQC_DCACHE_HITS) / SUM(SQC_DCACHE_REQ), 0)
+          value: 100 * SUM(SQC_DCACHE_HITS) / SUM(SQC_DCACHE_REQ)
           unit: Percent
         sL1D_L2 Read BW:
           value: 64 * SUM(SQC_TC_DATA_READ_REQ) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
         IL1 Fetch:
-          value: ROUND(SUM(SQC_ICACHE_REQ) / SUM($denom), 0)
+          value: SUM(SQC_ICACHE_REQ) / SUM($denom)
           unit: (Requests + $normUnit)
         IL1 Hit:
-          value: ROUND(100 * SUM(SQC_ICACHE_HITS) / SUM(SQC_ICACHE_REQ), 0)
+          value: 100 * SUM(SQC_ICACHE_HITS) / SUM(SQC_ICACHE_REQ)
           unit: Percent
         IL1_L2 Read BW:
           value: 64 * SUM(SQC_TC_INST_REQ) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
         L2 Hit:
-          value: ROUND(100 * SUM(TCC_HIT_sum) / SUM(TCC_HIT_sum + TCC_MISS_sum), 0)
+          value: 100 * SUM(TCC_HIT_sum) / SUM(TCC_HIT_sum + TCC_MISS_sum)
           unit: Percent
         L2-Fabric Read BW:
           value: SUM(128 * TCC_BUBBLE_sum + 64 * (TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum) + 32 * TCC_EA0_RDREQ_32B_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)

@@ -1,0 +1,5 @@
+wgp.util:
+  name: WGP Utilization
+  formula: AVG(100 * SQ_BUSY_CYCLES_avr / GRBM_GUI_ACTIVE)
+  unit: Percent
+  description: Percentage of WGP clock cycles at least one wavefront is active.

@@ -43,7 +43,7 @@ int convert(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *
     return RJ_ARITH_SUCCESS;
   }
   if (policy == Fp8WidenPolicy::Gfx1250) {
-    policy = mode & RJ_ARITH_ALU_CLAMP ? Fp8WidenPolicy::E5M3 : Fp8WidenPolicy::Gfx950;
+    policy = mode & RJ_ARITH_ALU_CLAMP ? Fp8WidenPolicy::E5M3 : Fp8WidenPolicy::OcpSignedNan;
     mode &= ~uint64_t(RJ_ARITH_ALU_CLAMP);
   }
   unsigned shift = Packed ? (mode & RJ_ARITH_ALU_HIGH_A ? 16 : 0) : 8 * ((mode >> 16) & 3);
@@ -65,7 +65,7 @@ int convert(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *
   for (int lane = 0; lane < 32; ++lane) {
     uint32_t raw = a[0][lane] >> shift;
 
-    // RX 9070 widening canonicalizes either NaN sign to the negative quiet NaN.
+    // RX 9070 and MI350X widening canonicalize either NaN sign to the negative quiet NaN.
     auto widen = [policy](uint8_t code) {
       if (policy == Fp8WidenPolicy::E5M3) {
         if (code == 255) {
@@ -80,7 +80,8 @@ int convert(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *
         return rocjitsu::arith::as_bits(rocjitsu::arith::fp8_to_float<Bf8, true>(code));
       }
       unsigned magnitude = code & 127;
-      if (policy == Fp8WidenPolicy::Gfx12 && (Bf8 ? magnitude > 124 : magnitude == 127)) {
+      if ((policy == Fp8WidenPolicy::Gfx12 || policy == Fp8WidenPolicy::Gfx950) &&
+          (Bf8 ? magnitude > 124 : magnitude == 127)) {
         return 0xffc00000U;
       }
       return rocjitsu::arith::as_bits(rocjitsu::arith::fp8_to_float<Bf8>(code));
@@ -465,6 +466,72 @@ int rj_arith_v_cvt_f32_fp8_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
                                       Fp8WidenPolicy::Gfx1250);
 }
 
+// Widen with the inherited gfx1250 OCP signed-NaN policy, retaining masked destination lanes.
+int rj_arith_v_cvt_f32_bf8_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a) {
+  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/false)) {
+    return error;
+  }
+  return convert<true, false>(flags, exec_mask, instruction_flags, d, a,
+                              Fp8WidenPolicy::OcpSignedNan);
+}
+
+// Widen with the inherited gfx1250 OCP signed-NaN policy, retaining masked destination lanes.
+int rj_arith_v_cvt_f32_bf8_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a) {
+  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/false)) {
+    return error;
+  }
+  return convert_wave64<true, false>(flags, exec_mask, instruction_flags, d, a,
+                                     Fp8WidenPolicy::OcpSignedNan);
+}
+
+// Widen with the inherited gfx1250 OCP signed-NaN policy, retaining masked destination lanes.
+int rj_arith_v_cvt_pk_f32_fp8_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
+                                          uint64_t instruction_flags, uint32_t *const *d,
+                                          const uint32_t *const *a) {
+  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/false)) {
+    return error;
+  }
+  return convert<false, true>(flags, exec_mask, instruction_flags, d, a,
+                              Fp8WidenPolicy::OcpSignedNan);
+}
+
+// Widen with the inherited gfx1250 OCP signed-NaN policy, retaining masked destination lanes.
+int rj_arith_v_cvt_pk_f32_fp8_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
+                                          uint64_t instruction_flags, uint32_t *const *d,
+                                          const uint32_t *const *a) {
+  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/false)) {
+    return error;
+  }
+  return convert_wave64<false, true>(flags, exec_mask, instruction_flags, d, a,
+                                     Fp8WidenPolicy::OcpSignedNan);
+}
+
+// Widen with the inherited gfx1250 OCP signed-NaN policy, retaining masked destination lanes.
+int rj_arith_v_cvt_pk_f32_bf8_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
+                                          uint64_t instruction_flags, uint32_t *const *d,
+                                          const uint32_t *const *a) {
+  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/false)) {
+    return error;
+  }
+  return convert<true, true>(flags, exec_mask, instruction_flags, d, a,
+                             Fp8WidenPolicy::OcpSignedNan);
+}
+
+// Widen with the inherited gfx1250 OCP signed-NaN policy, retaining masked destination lanes.
+int rj_arith_v_cvt_pk_f32_bf8_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
+                                          uint64_t instruction_flags, uint32_t *const *d,
+                                          const uint32_t *const *a) {
+  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/false)) {
+    return error;
+  }
+  return convert_wave64<true, true>(flags, exec_mask, instruction_flags, d, a,
+                                    Fp8WidenPolicy::OcpSignedNan);
+}
+
 // Decode one selected byte to FP16; preserve inactive lanes; preserve the other destination half.
 int rj_arith_v_cvt_f16_fp8_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                uint32_t *const *d, const uint32_t *const *a) {
@@ -498,7 +565,7 @@ int rj_arith_v_cvt_pk_f16_fp8_w32(uint64_t flags, uint32_t exec_mask, uint64_t i
     return error;
   }
   return convert<false, true, true>(flags, exec_mask, instruction_flags, d, a,
-                                    Fp8WidenPolicy::Gfx950);
+                                    Fp8WidenPolicy::OcpSignedNan);
 }
 
 // Decode two selected bytes to FP16; preserve inactive lanes.
@@ -510,7 +577,7 @@ int rj_arith_v_cvt_pk_f16_fp8_w64(uint64_t flags, uint64_t exec_mask, uint64_t i
     return error;
   }
   return convert_wave64<false, true, true>(flags, exec_mask, instruction_flags, d, a,
-                                           Fp8WidenPolicy::Gfx950);
+                                           Fp8WidenPolicy::OcpSignedNan);
 }
 
 // Decode one selected byte to FP16; preserve inactive lanes; preserve the other destination half.
@@ -522,7 +589,7 @@ int rj_arith_v_cvt_f16_bf8_w32(uint64_t flags, uint32_t exec_mask, uint64_t inst
     return error;
   }
   return convert<true, false, true>(flags, exec_mask, instruction_flags, d, a,
-                                    Fp8WidenPolicy::Gfx950);
+                                    Fp8WidenPolicy::OcpSignedNan);
 }
 
 // Decode one selected byte to FP16; preserve inactive lanes; preserve the other destination half.
@@ -534,7 +601,7 @@ int rj_arith_v_cvt_f16_bf8_w64(uint64_t flags, uint64_t exec_mask, uint64_t inst
     return error;
   }
   return convert_wave64<true, false, true>(flags, exec_mask, instruction_flags, d, a,
-                                           Fp8WidenPolicy::Gfx950);
+                                           Fp8WidenPolicy::OcpSignedNan);
 }
 
 // Decode two selected bytes to FP16; preserve inactive lanes.
@@ -546,7 +613,7 @@ int rj_arith_v_cvt_pk_f16_bf8_w32(uint64_t flags, uint32_t exec_mask, uint64_t i
     return error;
   }
   return convert<true, true, true>(flags, exec_mask, instruction_flags, d, a,
-                                   Fp8WidenPolicy::Gfx950);
+                                   Fp8WidenPolicy::OcpSignedNan);
 }
 
 // Decode two selected bytes to FP16; preserve inactive lanes.
@@ -558,5 +625,5 @@ int rj_arith_v_cvt_pk_f16_bf8_w64(uint64_t flags, uint64_t exec_mask, uint64_t i
     return error;
   }
   return convert_wave64<true, true, true>(flags, exec_mask, instruction_flags, d, a,
-                                          Fp8WidenPolicy::Gfx950);
+                                          Fp8WidenPolicy::OcpSignedNan);
 }

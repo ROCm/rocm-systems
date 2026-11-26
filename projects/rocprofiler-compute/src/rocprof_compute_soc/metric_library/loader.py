@@ -21,7 +21,7 @@ METRIC_LIBRARY_PARENT_ARCH: Dict[str, Optional[str]] = {
     "gfx942": "gfx90a",
     "gfx950": "gfx942",
     "gfx115x": None,
-    "gfx1201": None,
+    "gfx120x": None,
     "gfx1250": None,
 }
 COLLECTABLES_FILENAME = "collectables.yaml"

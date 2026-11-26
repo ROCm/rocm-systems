@@ -63,9 +63,12 @@ void check_fp8_narrow(Call call) {
           a = std::bit_cast<uint32_t>(f16_value(uint16_t(a >> shift)));
         }
         return fp8_narrow_result((Stochastic ? 2 : 0) + (Bf8 ? 1 : 0), uint32_t(a), b, old, mode,
-                                 !Half && (flags & RJ_ARITH_FP16_OVFL), Arch, Half);
+                                 !Half && (flags & RJ_ARITH_FP16_OVFL), Arch, Half,
+                                 Arch == 950 && !Half &&
+                                     (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS));
       },
-      conversion_bits, modifiers, true);
+      conversion_bits, modifiers, true,
+      Arch == 950 && !Half ? RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS : 0);
 }
 
 } // namespace

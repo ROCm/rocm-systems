@@ -281,6 +281,20 @@ void fp8_wmma_x86_64_v4(uint32_t *const *d, const uint32_t *const *a, const uint
 void fp8_wmma_exact_x86_64_v4(bool bf8_a, bool bf8_b, uint32_t *const *d, const uint32_t *const *a,
                               const uint32_t *const *b, const uint32_t *const *c);
 
+// Exact integer WMMA in gfx12 Wave32 layout, with staged CLAMP. D may alias inputs.
+// Requires the named CPU features and validated instruction controls.
+template <int Bits, int K>
+void integer_wmma_x86_64_v4(uint32_t instruction_flags, uint32_t *const *d,
+                            const uint32_t *const *a, const uint32_t *const *b,
+                            const uint32_t *const *c);
+
+// Compute a gfx11 integer tile with independent sixteen-lane factor groups.
+// Requires validated modifiers. D may overlap any input.
+template <int Bits, int Lanes>
+void integer_wmma_replicated_x86_64_v4(uint32_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       const uint32_t *const *c);
+
 // Compute empirical bit-exact FP16/BF16 A*B+C for the selected gfx layout
 // and wave size. Requires validated instruction flags; D may alias inputs.
 template <bool Bf16, int Lanes, bool Rdna3, bool Packed>
@@ -328,6 +342,13 @@ template <int Bits, int K>
 void integer_wmma_avx512vnni(uint32_t instruction_flags, uint32_t *const *d,
                              const uint32_t *const *a, const uint32_t *const *b,
                              const uint32_t *const *c);
+
+// Exact integer WMMA in gfx11 replicated layout, with staged CLAMP. D may alias inputs.
+// Requires Zen4/VNNI support and validated instruction controls.
+template <int Bits, int Lanes>
+void integer_wmma_replicated_avx512vnni(uint32_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        const uint32_t *const *c);
 
 #endif
 

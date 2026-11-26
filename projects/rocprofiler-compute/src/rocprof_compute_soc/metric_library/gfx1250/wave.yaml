@@ -24,5 +24,5 @@ wave.occupancy_pct:
   formula: 100 * SUM(SQG_WAVE_CYCLES_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu * $max_waves_per_cu)
   unit: Percent
   description: >-
-    Resident wavefronts per WGP, averaged over GPU-active cycles, as a percent of
-    the maximum wavefronts per WGP.
+    Percentage of the maximum wavefronts per WGP that are resident, averaged over
+    GPU-active cycles.

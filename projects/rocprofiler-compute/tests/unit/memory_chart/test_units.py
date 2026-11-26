@@ -17,7 +17,7 @@ from memory_chart.units import PLAIN, display_unit, format_value, panel_units
         ("KB per Wave", 0.625, "0.625 KB"),
         ("Bytes per Workgroup", 32768, "32.0 KB"),
         ("Cycles", 68.24, "68.2 cycles"),
-        ("Registers", 64, "64.0"),
+        ("Registers", 63.7, "64"),
         ("(Requests + $normUnit)", 119, "119"),
         ("(Instructions + $normUnit)", 12345, "1.23e+04"),
         (None, 3, "3.0"),

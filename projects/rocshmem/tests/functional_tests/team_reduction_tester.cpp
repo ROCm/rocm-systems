@@ -22,8 +22,6 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
-#include <hip/hip_version.h>
-
 using namespace rocshmem;
 
 /* Declare the template with a generic implementation */
@@ -61,23 +59,12 @@ __device__ int wg_team_reduce([[maybe_unused]] rocshmem_ctx_t ctx, [[maybe_unuse
 #define TEAM_FLOAT_REDUCTION_DEF_GEN(T, TNAME) \
   TEAM_ARITH_REDUCTION_DEF_GEN(T, TNAME)
 
-TEAM_INT_REDUCTION_DEF_GEN(char, char)
-TEAM_INT_REDUCTION_DEF_GEN(signed char, schar)
-TEAM_INT_REDUCTION_DEF_GEN(unsigned char, uchar)
-TEAM_INT_REDUCTION_DEF_GEN(short, short)
-TEAM_INT_REDUCTION_DEF_GEN(unsigned short, ushort)
 TEAM_INT_REDUCTION_DEF_GEN(int, int)
-TEAM_INT_REDUCTION_DEF_GEN(unsigned int, uint)
+TEAM_INT_REDUCTION_DEF_GEN(short, short)
 TEAM_INT_REDUCTION_DEF_GEN(long, long)
-TEAM_INT_REDUCTION_DEF_GEN(unsigned long, ulong)
 TEAM_INT_REDUCTION_DEF_GEN(long long, longlong)
-TEAM_INT_REDUCTION_DEF_GEN(unsigned long long, ulonglong)
 TEAM_FLOAT_REDUCTION_DEF_GEN(float, float)
 TEAM_FLOAT_REDUCTION_DEF_GEN(double, double)
-TEAM_FLOAT_REDUCTION_DEF_GEN(__half, half)
-#if !(HIP_VERSION_MAJOR == 7 && (HIP_VERSION_MINOR == 16 || HIP_VERSION_MINOR == 17))
-TEAM_FLOAT_REDUCTION_DEF_GEN(__hip_bfloat16, bfloat16)
-#endif
 // long double reduction fails. hipcc/device may not support long double.
 // so disable it for now.
 // FLOAT_REDUCTION_DEF_GEN(long double, longdouble)

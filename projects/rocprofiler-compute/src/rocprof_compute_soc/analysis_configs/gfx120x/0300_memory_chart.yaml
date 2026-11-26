@@ -1,0 +1,194 @@
+Panel Config:
+  id: 300
+  alias: memchart
+  title: Memory Chart
+  data source:
+  - metric_table:
+      id: 301
+      title: Instruction Cache
+      header:
+        metric: Metric
+        value: Value
+        unit: Unit
+      metric:
+        ICache Requests:
+          value: SUM(SQC_ICACHE_REQ_sum) / SUM($denom)
+          unit: (Requests + $normUnit)
+        ICache Hit Rate:
+          value: 100 * SUM(SQC_ICACHE_HITS_sum) / SUM(SQC_ICACHE_REQ_sum)
+          unit: Percent
+  - metric_table:
+      id: 302
+      title: Scalar Data Cache
+      header:
+        metric: Metric
+        value: Value
+        unit: Unit
+      metric:
+        DCache Requests:
+          value: SUM(SQC_DCACHE_REQ_sum) / SUM($denom)
+          unit: (Requests + $normUnit)
+        DCache Hit Rate:
+          value: 100 * SUM(SQC_DCACHE_HITS_sum) / SUM(SQC_DCACHE_REQ_sum)
+          unit: Percent
+        DCache Load Bandwidth:
+          value: 4 * SUM(SQC_SMEM_LOAD_DWORDS_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
+  - metric_table:
+      id: 303
+      title: GL0 Cache (Vector L0)
+      header:
+        metric: Metric
+        value: Value
+        unit: Unit
+      metric:
+        GL0 Hit Rate:
+          value: 100 * SUM(TCP_REQ_sum - TCP_REQ_MISS_sum) / SUM(TCP_REQ_sum)
+          unit: Percent
+  - metric_table:
+      id: 304
+      title: LDS (Local Data Share)
+      header:
+        metric: Metric
+        value: Value
+        unit: Unit
+      metric:
+        LDS Req:
+          value: SUM(SQ_INSTS_LDS_sum) / SUM($denom)
+          unit: (Requests + $normUnit)
+        LDS Utilization:
+          value: 100 * SUM(SQC_LDS_IDX_ACTIVE_sum) / (SUM(GRBM_GUI_ACTIVE) * $cu_per_gpu)
+          unit: Percent
+        LDS Bank Conflict Rate:
+          value: 100 * SUM(SQC_LDS_BANK_CONFLICT_sum) / SUM(SQC_LDS_IDX_ACTIVE_sum)
+          unit: Percent
+        LDS Bandwidth:
+          value: 4 * SUM(SQC_LDS_LOAD_DWORDS_sum + SQC_LDS_STORE_DWORDS_sum + SQC_LDS_ATOMIC_DWORDS_sum)
+            / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
+  - metric_table:
+      id: 308
+      title: GL2 Cache (L2)
+      header:
+        metric: Metric
+        value: Value
+        unit: Unit
+      metric:
+        GL2 Hit Rate:
+          value: 100 * SUM(GL2C_HIT_sum) / SUM(GL2C_HIT_sum + GL2C_MISS_sum)
+          unit: Percent
+  - metric_table:
+      id: 309
+      title: L2 to Memory
+      header:
+        metric: Metric
+        value: Value
+        unit: Unit
+      metric:
+        Memory Read Requests:
+          value: SUM(GL2C_EA_RDREQ_DRAM_sum) / SUM($denom)
+          unit: (Requests + $normUnit)
+        Memory Write Requests:
+          value: SUM(GL2C_EA_WRREQ_DRAM_sum) / SUM($denom)
+          unit: (Requests + $normUnit)
+        Memory Read Bandwidth:
+          value: 32 * SUM(GL2C_EA_RDREQ_DRAM_32B_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
+        Memory Write Bandwidth:
+          value: 32 * SUM(GL2C_EA_WRREQ_DRAM_32B_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
+  - metric_table:
+      id: 310
+      title: Workgroup Processors (WGPs)
+      header:
+        metric: Metric
+        value: Value
+        unit: Unit
+      metric:
+        Wavefront Occupancy:
+          value: 100 * SUM(SQ_WAVE_CYCLES_sum) / SUM(GRBM_GUI_ACTIVE * $cu_per_gpu * $max_waves_per_cu)
+          unit: Percent
+        VGPR:
+          value: AVG(Arch_VGPR)
+          unit: Registers
+        SGPR:
+          value: AVG(SGPR)
+          unit: Registers
+        LDS Allocation:
+          value: AVG(LDS_Per_Workgroup)
+          unit: Bytes per Workgroup
+        Scratch Allocation:
+          value: AVG(Scratch_Per_Workitem) * $wave_size / 1024
+          unit: KB per Wave
+        Workgroups:
+          value: AVG(Grid_Size / Workgroup_Size) / ($cu_per_gpu / 2)
+          unit: Workgroups per WGP
+  metrics_description:
+    ICache Requests: >-
+      Instruction cache requests from the SQ, normalized by the chosen unit.
+    ICache Hit Rate: >-
+      Percentage of instruction cache accesses that are serviced from cache without fetching
+      from GL1. High hit rates indicate good instruction locality. Low hit rates
+      may indicate large kernels exceeding instruction cache capacity or divergent branches.
+    DCache Requests: >-
+      Scalar data cache requests after bank serialization, normalized by the chosen unit.
+    DCache Hit Rate: >-
+      Percentage of scalar data cache accesses that hit in cache. High hit rates indicate
+      efficient reuse of constant and uniform data. Low hit rates may indicate excessive
+      unique constant data or poor temporal locality.
+    DCache Load Bandwidth: >-
+      Bytes loaded by scalar memory instructions, from the dwords each instruction loads.
+      Bounds-check reductions are ignored.
+    GL0 Hit Rate: >-
+      Percentage of GL0 cache requests serviced from cache without accessing GL1.
+    LDS Req: >-
+      Number of LDS instructions issued by the shader, including FLAT instructions that
+      resolve to LDS. This counts instructions rather than data movement, so it does not
+      distinguish reads from writes.
+    LDS Utilization: >-
+      Percentage of the LDS cycle budget across all CUs spent servicing indexed
+      (non-direct, non-interpolation) accesses, measured over GPU-active cycles.
+      Because two CUs share a workgroup processor's LDS, a saturated LDS reads
+      well below 100% on this architecture.
+    LDS Bank Conflict Rate: >-
+      Percentage of LDS accesses that experienced bank conflicts. Conflicts occur when
+      multiple work-items in a wavefront access different addresses in the same LDS bank.
+      High conflict rates reduce effective LDS bandwidth. Restructuring data layouts can help.
+    LDS Bandwidth: >-
+      LDS byte-access rate from load, store, and atomic dword counters, using
+      four bytes per dword.
+    GL2 Hit Rate: >-
+      Percentage of L2 lookups that hit.
+    Memory Read Requests: >-
+      L2 read requests over EA destined for VRAM. Infinity Cache can serve
+      them before they reach VRAM.
+    Memory Write Requests: >-
+      L2 write requests over EA destined for VRAM. Infinity Cache can absorb
+      them before they reach VRAM.
+    Memory Read Bandwidth: >-
+      Bytes L2 read over EA for requests destined for VRAM, in 32-byte units. Infinity
+      Cache hits are included, so this can exceed the VRAM bandwidth peak.
+    Memory Write Bandwidth: >-
+      Bytes L2 wrote over EA for requests destined for VRAM, in 32-byte units. Infinity
+      Cache hits are included.
+    Wavefront Occupancy: >-
+      Resident wavefronts per WGP, averaged over GPU-active cycles, as a percent of the
+      maximum wavefronts per WGP.
+    VGPR: >-
+      The number of architected vector general-purpose registers allocated
+      for the kernel. Note: this may not exactly match the number of VGPRs
+      requested by the compiler due to allocation granularity.
+    SGPR: >-
+      The number of scalar general-purpose registers allocated for the kernel.
+      Note: this may not exactly match the number of SGPRs requested by
+      the compiler due to allocation granularity.
+    LDS Allocation: >-
+      The number of bytes of LDS memory (or, shared memory) allocated per workgroup. Note:
+      This may also be larger than what was requested at compile time due to both allocation
+      granularity and dynamic per-dispatch LDS allocations.
+    Scratch Allocation: >-
+      The amount of scratch memory requested per wavefront, in KB: the scratch bytes
+      requested per work-item multiplied by the wavefront size. Scratch memory is used for
+      stack memory on the accelerator, as well as for register spills and restores.
+    Workgroups: >-
+      The number of workgroups in the launch divided by the number of WGPs.
