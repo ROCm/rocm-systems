@@ -282,17 +282,19 @@ static std::vector<int> GetMutuallyPeeredDevices() {
 // The number of allgather batches over `num_devices` GPUs: kBackToBackIterations up to 8 GPUs, then
 // fewer, so the peer copies stay at what 8 GPUs move and a run over every partition of a large
 // machine (64 GPUs: 8064 copies per batch) ends within its child deadline. A batch that large still
-// wraps the signal ring many times. At least `num_patterns` batches keep the alternating sources
-// that show the last batch landed last.
+// wraps the signal ring many times. The count is a multiple of `num_patterns`, at least one round,
+// so the last batch writes a different pattern from the first and the final contents show that
+// the last batch landed last.
 static size_t AllgatherIterations(size_t num_devices, size_t destinations_per_peer,
                                   size_t num_patterns) {
   constexpr size_t kReferenceDevices = 8;
   const auto peer_copies = [destinations_per_peer](size_t devices) {
     return devices * (devices - 1) * destinations_per_peer;
   };
-  return std::clamp<size_t>(
+  const size_t iterations = std::clamp<size_t>(
       kBackToBackIterations * peer_copies(kReferenceDevices) / peer_copies(num_devices),
       num_patterns, kBackToBackIterations);
+  return iterations - iterations % num_patterns;
 }
 
 // Allgather-style batches issued back to back on one stream with no synchronization in between,
