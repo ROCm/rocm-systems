@@ -5,7 +5,7 @@
 
 from typing import Tuple
 
-KNOWN_ML_API_BACKENDS: Tuple[str, ...] = ("torch", "triton")
+KNOWN_ML_API_BACKENDS: Tuple[str, ...] = ("torch", "triton", "jax")
 USER_REGION_BACKEND: str = "user"
 
 # Backends accepted by --list-operators and --operator.

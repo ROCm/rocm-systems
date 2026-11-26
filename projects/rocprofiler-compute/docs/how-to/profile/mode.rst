@@ -1045,7 +1045,7 @@ Example:
 :doc:`../analyze/cli`) to list and filter operators. ``--operator`` takes
 shell-style glob patterns, such as ``--operator 'torch:*relu*'`` or
 ``--operator '*/aten::addmm'``. A pattern can match an operator name or its
-call path. A ``torch:`` or ``triton:`` prefix limits a pattern to that
+call path. A ``torch:``, ``triton:``, or ``jax:`` prefix limits a pattern to that
 framework. To select all operators, pass no arguments or ``**``.
 
 Combining Torch operator with other options
@@ -1116,6 +1116,56 @@ pass :ref:`--trace-ml-api <ml-api-trace>` with no values.
 To analyze the captured Triton kernels, use ``--list-operators triton`` and
 ``--operator 'triton:PATTERN'`` in analyze mode (see :doc:`../analyze/cli`).
 
+.. _jax-trace:
+
+JAX trace
+=========
+
+ROCm Compute Profiler can map performance counters to the ``jax.jit``,
+``jax.pmap``, or ``jax.shard_map`` compiled call, or the eager primitive, that
+launched them. Enable it with the ``--trace-ml-api jax`` option. It writes the
+same ``ml_api_trace`` output as Torch and Triton trace and is analyzed the same
+way.
+
+Marker names are ``jax.jit.<fn>``, ``jax.pmap.<fn>``, ``jax.shard_map.<fn>``,
+and ``jax.{primitive}``. A nested or inner JAX call does not open a second
+range; its kernels stay under the outer marker. Deprecated ``pjit`` calls use
+the same compiled type as ``jax.jit``, so they show as ``jax.jit.<fn>``.
+
+Kernels launched from another thread are not attributed. ROCTx correlation is
+thread-local, and there is no timestamp fallback in analyze.
+
+JAX tracing sets ``XLA_FLAGS=--xla_gpu_autotune_level=0`` in the workload
+process so PMC passes launch the same kernels. Other ``XLA_FLAGS`` tokens are
+kept.
+
+.. warning::
+
+   JAX trace is currently an experimental feature. You must pass
+   ``--experimental`` to both **profile** and **analyze** commands when using the
+   JAX trace related options (``--trace-ml-api jax`` for profile;
+   ``--list-operators jax`` and ``--operator 'jax:PATTERN'`` for analyze).
+
+Requirements
+------------
+
+JAX trace has the same requirements and limitations as Torch trace (see
+:ref:`torch-trace-requirements` and :ref:`torch-trace-limitations`), with a
+valid ROCm JAX installation required in place of PyTorch.
+
+Usage
+-----
+
+To enable JAX mapping, use ``--experimental`` with the
+``--trace-ml-api jax`` option:
+
+.. code-block:: shell-session
+
+   $ rocprof-compute profile --experimental --trace-ml-api jax --name jax_workload -- python jax_workload.py
+
+To analyze the captured JAX operators, use ``--list-operators jax`` and
+``--operator 'jax:PATTERN'`` in analyze mode (see :doc:`../analyze/cli`).
+
 .. _ml-api-trace:
 
 ML API trace
@@ -1124,8 +1174,8 @@ ML API trace
 ``--trace-ml-api`` without values traces every supported ML framework.
 Every ``--trace-ml-api`` run also records user ROCTx regions.
 
-The accepted framework values are ``torch`` and ``triton``, separated by
-spaces, as in ``--trace-ml-api torch triton``. User regions are always
+The accepted framework values are ``torch``, ``triton``, and ``jax``, separated by
+spaces, as in ``--trace-ml-api torch triton jax``. User regions are always
 included, so ``user`` is not a profile value.
 
 .. warning::
@@ -1138,7 +1188,7 @@ included, so ``user`` is not a profile value.
    $ rocprof-compute profile --experimental --trace-ml-api --name torch_triton_net -- python torch_triton_net.py
 
 The output is the same as naming every framework, as in
-``--trace-ml-api torch triton``. Each kernel is attributed to the framework
+``--trace-ml-api torch triton jax``. Each kernel is attributed to the framework
 that launched it. Analyze the results with ``--list-operators`` and
 ``--operator`` (see :doc:`../analyze/cli`). To select a user ROCTx region and
 the GPU work inside it, use ``--list-operators user`` or

@@ -1,7 +1,7 @@
 # ML API tracing
 
-Code for `--trace-ml-api`, which records PyTorch and Triton operators and the
-GPU kernels they launch, and for the analyze options that read the result.
+Code for `--trace-ml-api`, which records PyTorch, Triton, and JAX operators and
+the GPU kernels they launch, and for the analyze options that read the result.
 
 ## Layout
 

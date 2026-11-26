@@ -172,6 +172,17 @@ def test_parse_marker_function_triton_backend_and_location():
     assert parsed["Line_Number"] == 381
 
 
+def test_parse_marker_function_jax_backend_and_location():
+    parsed = parse_marker_function(
+        "jax.jit.train_step:jax_workload.py:28"
+        "|seqNr=n/a|tid=n/a|ftid=n/a|scope=n/a|args=n/a|jax"
+    )
+    assert parsed["Backend"] == "jax"
+    assert parsed["Operator_Name"] == "jax.jit.train_step"
+    assert parsed["File_Name"] == "jax_workload.py"
+    assert parsed["Line_Number"] == 28
+
+
 def test_parse_marker_function_user_range_without_keys():
     parsed = parse_marker_function("training_loop")
     assert parsed["Operator_Name"] == "training_loop"

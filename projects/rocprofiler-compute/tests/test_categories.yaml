@@ -68,6 +68,7 @@ test_categories:
       - test_ml_api_tracing_inject_roctx_marker_ranges
       - test_ml_api_tracing_inject_roctx_launch
       - test_ml_api_tracing_inject_roctx_triton
+      - test_ml_api_tracing_inject_roctx_jax
       - test_ml_api_tracing_inject_roctx_torch
       - test_ml_api_tracing_inject_roctx_torch_trace_collector
       - test_ml_api_tracing_profiling_orchestrator
@@ -201,6 +202,7 @@ test_categories:
       - test_ml_api_tracing_inject_roctx_marker_ranges
       - test_ml_api_tracing_inject_roctx_launch
       - test_ml_api_tracing_inject_roctx_triton
+      - test_ml_api_tracing_inject_roctx_jax
       - test_ml_api_tracing_inject_roctx_torch
       - test_ml_api_tracing_inject_roctx_torch_trace_collector
       - test_ml_api_tracing_profiling_orchestrator
@@ -231,6 +233,7 @@ test_categories:
       - test-torch-trace-collector-before-install
       - test_profile_torch_trace
       - test_profile_triton_trace
+      - test_profile_jax_trace
       - test_profile_ml_api_trace
       - test_torch_trace_coverage
       - test_profile_live_attach_detach
@@ -352,6 +355,7 @@ test_categories:
       - test_ml_api_tracing_inject_roctx_marker_ranges
       - test_ml_api_tracing_inject_roctx_launch
       - test_ml_api_tracing_inject_roctx_triton
+      - test_ml_api_tracing_inject_roctx_jax
       - test_ml_api_tracing_inject_roctx_torch
       - test_ml_api_tracing_inject_roctx_torch_trace_collector
       - test_ml_api_tracing_profiling_orchestrator
@@ -382,6 +386,7 @@ test_categories:
       - test-torch-trace-collector-before-install
       - test_profile_torch_trace
       - test_profile_triton_trace
+      - test_profile_jax_trace
       - test_profile_ml_api_trace
       - test_torch_trace_coverage
       - test_profile_live_attach_detach
@@ -503,6 +508,7 @@ test_categories:
       - test_ml_api_tracing_inject_roctx_marker_ranges
       - test_ml_api_tracing_inject_roctx_launch
       - test_ml_api_tracing_inject_roctx_triton
+      - test_ml_api_tracing_inject_roctx_jax
       - test_ml_api_tracing_inject_roctx_torch
       - test_ml_api_tracing_inject_roctx_torch_trace_collector
       - test_ml_api_tracing_profiling_orchestrator
@@ -533,6 +539,7 @@ test_categories:
       - test-torch-trace-collector-before-install
       - test_profile_torch_trace
       - test_profile_triton_trace
+      - test_profile_jax_trace
       - test_profile_ml_api_trace
       - test_torch_trace_coverage
       - test_profile_live_attach_detach
