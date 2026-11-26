@@ -1889,7 +1889,7 @@ TEST_P(KFDSVMRangeTest, VAHighAddr) {
     int defaultGPUNode = m_NodeInfo.HsaDefaultGPUNode();
     ASSERT_GE(defaultGPUNode, 0) << "failed to get default GPU Node";
 
-    if (m_FamilyId < FAMILY_GFX125X) {
+    if (m_FamilyId < FAMILY_GFX125X || m_FamilyId == FAMILY_GFX13) {
         LOG() << std::hex << "Skipping test: 57bit VA does not support on family ID 0x" << m_FamilyId << "." << std::endl;
         return;
     }
@@ -2124,7 +2124,7 @@ TEST_P(KFDSVMRangeTest, MapAllHighAddr) {
     int defaultGPUNode = m_NodeInfo.HsaDefaultGPUNode();
     ASSERT_GE(defaultGPUNode, 0) << "failed to get default GPU Node";
 
-    if (m_FamilyId < FAMILY_GFX125X) {
+    if (m_FamilyId < FAMILY_GFX125X || m_FamilyId == FAMILY_GFX13) {
         LOG() << std::hex << "Skipping test: 57bit VA does not support on family ID 0x" << m_FamilyId << "." << std::endl;
         return;
     }
