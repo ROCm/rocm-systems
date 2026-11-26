@@ -505,18 +505,6 @@ emit_grouped_event(bool group_by_queue, QueueCategory queue_cat,
                                      end_ts);
     }
 }
-
-constexpr std::string_view k_rocprof_sys_library_prefix = "librocprof-sys";
-
-std::vector<std::string>
-get_cpu_snap_skipped_module_prefixes()
-{
-    if(config::get_sampling_keep_internal())
-    {
-        return {};
-    }
-    return { std::string{ k_rocprof_sys_library_prefix } };
-}
 }  // namespace
 
 perfetto_processor_t::perfetto_processor_t(

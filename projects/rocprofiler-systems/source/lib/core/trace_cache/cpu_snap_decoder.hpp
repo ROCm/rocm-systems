@@ -46,6 +46,15 @@ slice_start(std::span<const std::uint64_t> resumes, std::uint64_t previous_ns,
 }
 
 /**
+ * @brief Module prefixes whose frames every processor's cpu_snap_decoder leaves out.
+ *
+ * Empty when ROCPROFSYS_SAMPLING_KEEP_INTERNAL is ON, otherwise rocprof-sys's own
+ * libraries. All outputs use this list, so they show the same call stacks.
+ */
+[[nodiscard]] std::vector<std::string>
+get_cpu_snap_skipped_module_prefixes();
+
+/**
  * @brief Turns one process's cpu-snap chunks into backtrace_region_sample records.
  *
  * Feed the chunks of a single process in store order, starting with the first one.

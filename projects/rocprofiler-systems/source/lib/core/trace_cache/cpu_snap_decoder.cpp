@@ -3,6 +3,7 @@
 
 #include "core/trace_cache/cpu_snap_decoder.hpp"
 #include "common/path.hpp"
+#include "core/config.hpp"
 #include "core/trace_cache/sample_type.hpp"
 #include "logger/debug.hpp"
 #include "rocprofiler-systems/categories.h"
@@ -36,6 +37,8 @@ namespace
 // matches to pick the track category.
 constexpr std::string_view k_timer_sampling_category = "timer_sampling";
 
+constexpr std::string_view k_rocprof_sys_library_prefix = "librocprof-sys";
+
 // A frame's slice name and its call_stack JSON, as the old sampler writes them
 // (library/sampling.cpp, generate_call_stack_json).
 struct frame_strings
@@ -45,6 +48,16 @@ struct frame_strings
     bool        skipped = false;
 };
 }  // namespace
+
+std::vector<std::string>
+get_cpu_snap_skipped_module_prefixes()
+{
+    if(config::get_sampling_keep_internal())
+    {
+        return {};
+    }
+    return { std::string{ k_rocprof_sys_library_prefix } };
+}
 
 struct cpu_snap_decoder::impl
 {
