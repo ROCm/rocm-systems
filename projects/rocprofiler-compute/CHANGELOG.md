@@ -15,7 +15,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * Scratch Allocation is in bytes per work-item, and LDS Allocation is in bytes, as in the Wavefront panel.
   * Counts show what they count, such as instr or req.
   * Only percentages use the Util, Hit and Stall colors, and each shows a bar.
-  * Scratch Allocation and Wavefront Occupancy values can't be compared with earlier releases.
+  * The Compute Unit box shows AGPRs on GPUs that have them.
 
 ### Removed
 
