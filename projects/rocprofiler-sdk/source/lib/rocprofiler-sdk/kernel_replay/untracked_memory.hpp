@@ -143,7 +143,7 @@ is_idempotent_runtime_kernel(std::string_view kernel_name);
 
 // Sorted spans of the snapshot's blocks.
 std::vector<address_span_t>
-covered_spans(const memory_snapshot::snapshot_t& snapshot);
+covered_spans(const memory_snapshot::device_snapshot_t& snapshot);
 
 std::optional<kind_t>
 classify_pointer(const pointer_facts_t& facts);
@@ -169,14 +169,14 @@ bool
 can_replay_dispatch(const uint8_t*                                    kernarg,
                     size_t                                            segment_size,
                     const std::vector<code_object::kernarg_region_t>* pointer_regions,
-                    const memory_snapshot::snapshot_t&                snapshot,
+                    const memory_snapshot::device_snapshot_t&         snapshot,
                     const pointer_facts_fn_t&                         facts);
 
 // The same for a dispatch packet, with its kernel and pointer ranges found by kernel_object.
 // A kernel the code object registry does not know about also runs once.
 bool
-can_replay_dispatch(const hsa_kernel_dispatch_packet_t& packet,
-                    const memory_snapshot::snapshot_t&  snapshot);
+can_replay_dispatch(const hsa_kernel_dispatch_packet_t&       packet,
+                    const memory_snapshot::device_snapshot_t& snapshot);
 }  // namespace untracked_memory
 }  // namespace kernel_replay
 }  // namespace rocprofiler

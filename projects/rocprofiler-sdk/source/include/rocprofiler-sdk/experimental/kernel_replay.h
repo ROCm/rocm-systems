@@ -59,79 +59,21 @@ typedef rocprofiler_status_t (*rocprofiler_kernel_replay_context_cb_t)(
     rocprofiler_context_id_t context_id);
 
 /**
- * @brief Bits of @ref rocprofiler_kernel_replay_options_t::flags.
- */
-typedef enum rocprofiler_kernel_replay_option_flag_t
-{
-    ROCPROFILER_KERNEL_REPLAY_OPTION_NONE                   = 0,         ///< The SDK's defaults
-    ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_DEVICE        = (1 << 0),  ///< Device memory
-    ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_HOST_PINNED   = (1 << 1),  ///< Pinned host memory
-    ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_HOST_PAGEABLE = (1 << 2),  ///< Not supported yet
-    ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_DISK          = (1 << 3),  ///< Not supported yet
-} rocprofiler_kernel_replay_option_flag_t;
-
-/**
- * @brief Options for one dispatch, which a tool may change during CONFIG
- * @ref ROCPROFILER_CALLBACK_PHASE_ENTER.
- *
- * The snapshot bits of @c flags name the memory the SDK may keep the dispatch's snapshot in:
- *  - only @ref ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_HOST_PINNED set: the snapshot is kept in
- *    pinned host memory, so it does not compete with an application that allocates device memory
- *    as it runs, apart from a work list the restore kernels keep in device memory between replays:
- *    about 0.2% of the snapshot's size, and at least 2 MiB. Pinned memory cannot be swapped out,
- *    so a large snapshot leaves the rest of the system that much less memory.
- *  - only @ref ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_DEVICE set: the snapshot is kept in device
- *    memory. The SDK leaves the application 5% of the free device memory, counting memory it kept
- *    from earlier replays as free, because the replayed kernel may need scratch. This needs the
- *    SDK's copy kernels for the GPU.
- *  - both of those: device memory first, as above, and pinned host memory for what does not fit.
- *  - neither: the SDK chooses, which today means the same order within limits it sets for each,
- *    and it keeps that memory for later replays.
- *
- * @ref ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_HOST_PAGEABLE and
- * @ref ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_DISK name pageable host memory and a file on disk.
- * This SDK cannot keep a snapshot in either yet, so options that set one of them are not honored.
- *
- * With flags set, the SDK sets no limit of its own on how much of that memory the snapshot uses,
- * beyond the device reserve above. It frees that memory when the replay ends, including memory it
- * kept there from earlier replays, so a tool that switches flags between dispatches makes it
- * allocate again. A replay limited to pinned host memory also frees device memory kept by earlier
- * replays. If the snapshot does not fit in the memory allowed, the dispatch is not replayed: it
- * runs once, as when @c replay_pass_count returns 1.
- *
- * The SDK owns the options. It sets @c size to the size of the struct it provides and @c flags to
- * @ref ROCPROFILER_KERNEL_REPLAY_OPTION_NONE. A member added later is present only when @c size
- * covers it, so check @c size before writing one.
- */
-typedef struct rocprofiler_kernel_replay_options_t
-{
-    uint64_t size;   ///< Size of this struct, set by the SDK
-    uint64_t flags;  ///< Bitwise OR of @ref rocprofiler_kernel_replay_option_flag_t values
-} rocprofiler_kernel_replay_options_t;
-
-/**
  * @brief ROCProfiler Kernel Replay Callback Tracer Record.
  *
  * Payload for @ref ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY callbacks.
  * All members are present in the struct (no unions). Which members are meaningful
  * depends on the current operation:
  *
- * - @ref ROCPROFILER_KERNEL_REPLAY_CONFIG callbacks: @c dispatch_info is populated by the SDK.
- *   The tool sets @c replay_pass_count, and optionally @c replay_continue and the options
- *   @c replay_options points to, during @ref ROCPROFILER_CALLBACK_PHASE_ENTER. Pass-info fields
- *   are zero.
- * - @ref ROCPROFILER_KERNEL_REPLAY_PASS callbacks: @c dispatch_info, @c current_pass, and
- *   @c total_passes are populated by the SDK. @c replay_pass_count and @c replay_options read as
- *   NULL and must not be modified (both are fixed at CONFIG PHASE_ENTER). @c replay_continue is
- *   NULL during PASS PHASE_ENTER; during PASS PHASE_EXIT the SDK populates it with the callback
- *   in effect for this pass, and the tool may overwrite it there to change the continue decision
- *   for this pass only (the next pass reverts to the CONFIG default).
- *
- * Tool callbacks that run while a dispatch is replayed (the PASS callbacks, and the callbacks of
- * services such as dispatch counting for the replayed passes) must not allocate or free device
- * memory. The SDK holds the allocation inventory's read lock from each restore until its pass
- * completes, so such a call waits on that lock, and the replay hangs or aborts when its drain
- * times out.
+ * - @ref ROCPROFILER_KERNEL_REPLAY_CONFIG: @c dispatch_info is populated by the SDK.
+ *   The tool sets @c replay_pass_count and optionally @c replay_continue during
+ *   @ref ROCPROFILER_CALLBACK_PHASE_ENTER. Pass-info fields are zero.
+ * - @ref ROCPROFILER_KERNEL_REPLAY_PASS: @c dispatch_info, @c current_pass, and
+ *   @c total_passes are populated by the SDK. @c replay_pass_count reads as NULL and must not be
+ *   modified (the pass count is fixed at CONFIG PHASE_ENTER). @c replay_continue is NULL during
+ *   PASS PHASE_ENTER; during PASS PHASE_EXIT the SDK populates it with the callback in effect for
+ *   this pass, and the tool may overwrite it there to change the continue decision for this pass
+ *   only (the next pass reverts to the CONFIG default).
  *
  * The SDK maintains a single @c rocprofiler_user_data_t for the entire replay sequence
  * (CONFIG + all PASS operations). A tool can write per-dispatch state into
@@ -184,7 +126,6 @@ typedef struct rocprofiler_callback_tracing_kernel_replay_data_t
     rocprofiler_kernel_replay_continue_cb_t   replay_continue;
     rocprofiler_kernel_replay_context_cb_t    replay_start_context;
     rocprofiler_kernel_replay_context_cb_t    replay_stop_context;
-    rocprofiler_kernel_replay_options_t*      replay_options;
 
     /// @var replay_pass_count
     /// @brief [CONFIG] Tool-provided callback returning the number of replay passes.
@@ -244,15 +185,6 @@ typedef struct rocprofiler_callback_tracing_kernel_replay_data_t
     ///    promote a globally stopped context). PC sampling is agent-wide and device counting
     ///    is not dispatch-scoped, so neither consults the override at all -- a call naming
     ///    such a context reports success but has no effect.
-    ///
-    /// @var replay_options
-    /// @brief [CONFIG] Options for this dispatch, owned by the SDK. During CONFIG
-    /// @ref ROCPROFILER_CALLBACK_PHASE_ENTER it points to options holding the SDK's defaults, and
-    /// the tool changes the ones it wants through it; replacing the pointer itself has no effect.
-    /// It is NULL in every other callback. The SDK reads the options after that callback returns.
-    /// If it cannot honor them, because a flag is unknown or names memory the SDK cannot keep a
-    /// snapshot in yet, the dispatch is not replayed. An older SDK's record ends before this
-    /// member, so read it only when @c size covers it.
 } rocprofiler_callback_tracing_kernel_replay_data_t;
 
 /** @} */

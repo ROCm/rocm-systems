@@ -27,7 +27,6 @@
 #include "snap_kernels.hpp"
 
 #include "lib/rocprofiler-sdk/agent.hpp"
-#include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/memory_snapshot.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/memory_tracker.hpp"
@@ -44,7 +43,6 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <optional>
 #include <vector>
 
 using namespace rocprofiler;
@@ -112,21 +110,6 @@ gpu_agent()
     return hsa_agent_t{.handle = 0};
 }
 
-std::optional<msnp::capture_context_t>
-capture_context(hsa_agent_t agent, msnp::capture_mode mode)
-{
-    auto cache = rocprofiler::agent::get_agent_cache(agent);
-    if(!cache) return std::nullopt;
-    return msnp::capture_context_t{
-        agent,
-        cache->near_cpu(),
-        cache->gpu_pool(),
-        cache->cpu_pool(),
-        mode,
-        true,
-    };
-}
-
 void
 sync_ok()
 {
@@ -145,9 +128,12 @@ read_device(const float* d, int n)
 }
 
 size_t
-snapshot_footprint_bytes(const msnp::snapshot_t& snap)
+snapshot_footprint_bytes(const msnp::device_snapshot_t& snap)
 {
-    return snap.footprint_bytes();
+    size_t total = 0;
+    for(const auto& block : snap.blocks)
+        total += block.host_copy.size();
+    return total;
 }
 
 // Conservative host-link floor (GB/s). Intentionally low for heterogeneous CI including
@@ -181,24 +167,14 @@ struct snap_restore_timing_t
 };
 
 snap_restore_timing_t
-measure_snap_restore_once(hsa_agent_t        agent,
-                          float*             buffer,
-                          int                n_elems,
-                          msnp::capture_mode mode = msnp::capture_mode::force_pinned)
+measure_snap_restore_once(hsa_agent_t agent, float* buffer, int n_elems)
 {
     using clock = std::chrono::steady_clock;
 
-    // Automatic mode with the forced mode's budgets places the snapshot the same way, but keeps the
-    // arena between snapshots, so the warmup allocates it and the timed iterations reuse it.
-    const auto forced = capture_context(agent, mode);
-    const auto ctx    = capture_context(agent, msnp::capture_mode::automatic);
-    if(!forced || !ctx) return {};
-    const auto budgets = msnp::plan_budgets(*forced);
-
     auto snap_start = clock::now();
-    auto snapshot   = msnp::snap(*ctx, budgets);
+    auto snapshot   = msnp::snap(agent);
     auto snap_end   = clock::now();
-    if(!snapshot.complete()) return {};
+    if(!snapshot.ok) return {};
 
     kernel_launch::add(buffer, 1.0f, n_elems);
     sync_ok();
@@ -222,16 +198,12 @@ measure_snap_restore_once(hsa_agent_t        agent,
 // sample, and it still catches a real regression: code that genuinely got slower slows every
 // iteration down, the best one included.
 snap_restore_timing_t
-measure_snap_restore_best(hsa_agent_t        agent,
-                          float*             buffer,
-                          int                n_elems,
-                          int                iterations,
-                          msnp::capture_mode mode = msnp::capture_mode::force_pinned)
+measure_snap_restore_best(hsa_agent_t agent, float* buffer, int n_elems, int iterations)
 {
     snap_restore_timing_t best{};
     for(int i = 0; i < iterations; ++i)
     {
-        auto t = measure_snap_restore_once(agent, buffer, n_elems, mode);
+        auto t = measure_snap_restore_once(agent, buffer, n_elems);
         if(i == 0 || t.snap_seconds < best.snap_seconds) best.snap_seconds = t.snap_seconds;
         if(i == 0 || t.restore_seconds < best.restore_seconds)
             best.restore_seconds = t.restore_seconds;
@@ -266,12 +238,11 @@ log_timing(const char* label, const snap_restore_timing_t& t)
 // setup dominates, so the computed rate reports fixed cost rather than link bandwidth. Those cases
 // still run, and still assert the wall-time ceiling below, which is what catches a blow-up.
 void
-run_bandwidth_test(size_t             ballast_bytes,
-                   const char*        label,
-                   int                warmup_iterations     = 1,
-                   int                measure_iterations    = 3,
-                   bool               check_bandwidth_floor = true,
-                   msnp::capture_mode mode                  = msnp::capture_mode::force_pinned)
+run_bandwidth_test(size_t      ballast_bytes,
+                   const char* label,
+                   int         warmup_iterations     = 1,
+                   int         measure_iterations    = 3,
+                   bool        check_bandwidth_floor = true)
 {
     const auto agent = gpu_agent();
     ASSERT_NE(agent.handle, 0U);
@@ -286,11 +257,11 @@ run_bandwidth_test(size_t             ballast_bytes,
     // Warmup: prime caches and allocator state before timed iterations.
     for(int w = 0; w < warmup_iterations; ++w)
     {
-        const auto warmup = measure_snap_restore_once(agent, buffer, n_elems, mode);
+        const auto warmup = measure_snap_restore_once(agent, buffer, n_elems);
         ASSERT_GT(warmup.footprint_bytes, 0U) << "snap/restore warmup failed";
     }
 
-    const auto timing = measure_snap_restore_best(agent, buffer, n_elems, measure_iterations, mode);
+    const auto timing = measure_snap_restore_best(agent, buffer, n_elems, measure_iterations);
     ASSERT_GT(timing.footprint_bytes, 0U) << "snap/restore measurement failed";
     log_timing(label, timing);
 
@@ -341,17 +312,6 @@ TEST(kernel_replay_snapshot, snap_bandwidth_meets_floor_with_128mb_ballast)
 {
     if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";
     run_bandwidth_test(128U * 1024U * 1024U, "ballast_128mb");
-}
-
-TEST(kernel_replay_snapshot, gpu_arena_bandwidth_with_128mb_ballast)
-{
-    if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";
-    run_bandwidth_test(128U * 1024U * 1024U,
-                       "gpu_arena_128mb",
-                       1,
-                       3,
-                       /*check_bandwidth_floor=*/true,
-                       msnp::capture_mode::force_gpu);
 }
 
 // Snap/restore cost should grow roughly with footprint (bandwidth-bound), not super-linearly.
@@ -463,7 +423,7 @@ TEST(kernel_replay_snapshot, snap_restore_repeatable_from_one_snapshot)
     const auto snap_start = std::chrono::steady_clock::now();
     auto       snapshot   = msnp::snap(agent);
     const auto snap_end   = std::chrono::steady_clock::now();
-    ASSERT_TRUE(snapshot.complete());
+    ASSERT_TRUE(snapshot.ok);
     ASSERT_GT(snapshot_footprint_bytes(snapshot), 0U);
 
     // What this test exists to prove is that one snapshot image stays valid across repeated

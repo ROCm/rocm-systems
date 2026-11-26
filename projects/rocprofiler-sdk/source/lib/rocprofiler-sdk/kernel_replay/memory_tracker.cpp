@@ -50,17 +50,6 @@ tracking_flag()
     static auto*& _v = rocprofiler::common::static_object<std::atomic<bool>>::construct(false);
     return *_v;
 }
-
-std::atomic<uint64_t>&
-generation_counter()
-{
-    struct generation_tag
-    {};
-    static auto*& _v =
-        rocprofiler::common::static_object<std::atomic<uint64_t>, generation_tag>::construct(
-            uint64_t{0});
-    return *_v;
-}
 }  // namespace
 
 // Tracked allocations. The map and its lock are bundled in a Synchronized wrapper so every access
@@ -75,18 +64,6 @@ inventory()
 {
     static auto*& _v = common::static_object<common::Synchronized<tracked_map_t>>::construct();
     return *_v;
-}
-
-uint64_t
-inventory_generation()
-{
-    return generation_counter().load(std::memory_order_relaxed);
-}
-
-void
-note_inventory_change()
-{
-    generation_counter().fetch_add(1, std::memory_order_relaxed);
 }
 
 common::Synchronized<tracked_map_t>&
@@ -146,12 +123,12 @@ retire_recorded_alloc(void* ptr)
     auto out = retired_alloc_t{};
     if(registration::get_fini_status() > 0) return out;
 
-    modify_inventory([&](auto& _map) {
-        const auto itr = _map.find(ptr);
-        if(itr == _map.end()) return false;
-        out.tracked = itr->second;
-        _map.erase(itr);
-        return true;
+    inventory().wlock([&](auto& _map) {
+        if(auto itr = _map.find(ptr); itr != _map.end())
+        {
+            out.tracked = itr->second;
+            _map.erase(itr);
+        }
     });
     unsupported_executable_inventory().wlock([&](auto& _map) {
         if(auto itr = _map.find(ptr); itr != _map.end())
@@ -168,11 +145,7 @@ reinstate_recorded_alloc(void* ptr, const retired_alloc_t& prev)
 {
     if(registration::get_fini_status() > 0) return;
 
-    if(prev.tracked)
-        modify_inventory([&](auto& _map) {
-            _map[ptr] = *prev.tracked;
-            return true;
-        });
+    if(prev.tracked) inventory().wlock([&](auto& _map) { _map[ptr] = *prev.tracked; });
     if(prev.unsupported)
         unsupported_executable_inventory().wlock(
             [&](auto& _map) { _map[ptr] = *prev.unsupported; });
@@ -263,17 +236,14 @@ record_alloc(void* ptr, size_t size)
 
     const auto q = query_alloc(ptr);
     if(!q.trackable) return;  // skip kernarg / host / fine-grained memory
-    modify_inventory([&](auto& _map) {
-        _map[ptr] = alloc_info_t{size, q.agent};
-        return true;
-    });
+    inventory().wlock([&](auto& _map) { _map[ptr] = alloc_info_t{size, q.agent}; });
 }
 
 void
 record_free(void* ptr)
 {
     if(registration::get_fini_status() > 0) return;
-    modify_inventory([ptr](auto& _map) { return _map.erase(ptr) > 0; });
+    inventory().wlock([ptr](auto& _map) { _map.erase(ptr); });
     unsupported_executable_inventory().wlock([ptr](auto& _map) { _map.erase(ptr); });
 }
 
