@@ -47,8 +47,7 @@ macro(rccl_add_dda_micro_binary _name _test)
     OBJECT_PREFIX rccl-dda-obj
     # alltoall_dda_fabric_tdm.h includes "tdm/tdmCopy.h".
     COMMON_INCLUDES ${RCCL_HOST_HIPIFY_DIR}/src/device
-    COMMON_DEFS ${_MICRO_DDA_DEFS}
-    CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_dda.yaml")
+    COMMON_DEFS ${_MICRO_DDA_DEFS})
   if(_radmb_KERNELS)
     target_compile_options(${_name} PRIVATE
       "SHELL:-Xclang -fcuda-include-gpubinary -Xclang ${CMAKE_CURRENT_BINARY_DIR}/empty_gpubinary")

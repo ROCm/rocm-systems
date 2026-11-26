@@ -13,8 +13,7 @@ set(_MICRO_NCCL_DEVICE_DEFS
 macro(rccl_add_nccl_device_micro_binary _name _test)
   rccl_add_unit_micro_binary(${_name} nccl_device/${_test} ${ARGN}
     OBJECT_PREFIX rccl-nccl_device-obj
-    COMMON_DEFS ${_MICRO_NCCL_DEVICE_DEFS}
-    CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_nccl_device.yaml")
+    COMMON_DEFS ${_MICRO_NCCL_DEVICE_DEFS})
 endmacro()
 
 rccl_add_nccl_device_micro_binary(rccl-UnitTestsMicroNcclDeviceCore core-test.cc

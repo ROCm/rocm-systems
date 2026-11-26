@@ -38,8 +38,7 @@ set(_MICRO_RAS_DEFS
 macro(rccl_add_ras_micro_binary _name _test)
   rccl_add_unit_micro_binary(${_name} ras/${_test} ${ARGN}
     OBJECT_PREFIX rccl-ras-obj
-    COMMON_DEFS ${_MICRO_RAS_DEFS}
-    CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_ras.yaml")
+    COMMON_DEFS ${_MICRO_RAS_DEFS})
 endmacro()
 
 rccl_add_ras_micro_binary(rccl-UnitTestsMicroRasClientSupport client-support-test.cc

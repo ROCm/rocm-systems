@@ -10,8 +10,7 @@ set(_MICRO_SCHEDULER_DEFS
 macro(rccl_add_scheduler_micro_binary _name _test)
   rccl_add_unit_micro_binary(${_name} scheduler/${_test} ${ARGN}
     OBJECT_PREFIX rccl-scheduler-obj
-    COMMON_DEFS ${_MICRO_SCHEDULER_DEFS}
-    CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_scheduler.yaml")
+    COMMON_DEFS ${_MICRO_SCHEDULER_DEFS})
 endmacro()
 
 rccl_add_scheduler_micro_binary(rccl-UnitTestsMicroScheduler scheduler-test.cc

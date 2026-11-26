@@ -2,6 +2,12 @@ cmake_minimum_required(VERSION 3.16)
 
 include("${CMAKE_CURRENT_LIST_DIR}/cmake/RcclAssertSourceLine.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/cmake/RcclTargetHelpers.cmake")
+include(GNUInstallDirs)
+
+# Where the binaries rccl-UnitTestsHostAll runs live, relative to its location
+set(RCCL_MICRO_SUBDIR "micro")
+
+set(RCCL_MICRO_MANIFEST "host_test_binaries.txt")
 
 # Checked against the original sources because hipify output does not exist yet
 # at configure time. Paths are relative to this file, so the same checks cover
@@ -439,11 +445,10 @@ endfunction()
 #   SOURCES         the target's source list
 #   EXTRA_INCLUDES  include dirs appended after the mode's include-dir var
 #   EXTRA_DEFS      compile definitions appended after the mode's define baseline
-#   CATEGORIES_YAML CTest category yaml (in-build only; ignored standalone)
 #   REMOVE_DEFS     defines to drop from the in-build baseline before EXTRA_DEFS are
 #                   added; ignored standalone, whose baseline is fixed
 function(rccl_add_micro_binary _name)
-  cmake_parse_arguments(_ramb "OBJECT" "CATEGORIES_YAML"
+  cmake_parse_arguments(_ramb "OBJECT" ""
     "SOURCES;EXTRA_INCLUDES;EXTRA_DEFS;REMOVE_DEFS" ${ARGN})
   # OBJECT builds an object library with the same compile settings, for sources several binaries share.
   if(_ramb_OBJECT)
@@ -473,10 +478,9 @@ function(rccl_add_micro_binary _name)
     endif()
     rccl_apply_host_only_flags(${_name})
     if(NOT _ramb_OBJECT)
-      rocm_install(TARGETS ${_name} COMPONENT tests)
-      if(_ramb_CATEGORIES_YAML)
-        rccl_register_test_categories(${_name} "${_ramb_CATEGORIES_YAML}")
-      endif()
+      install(TARGETS ${_name}
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/${RCCL_MICRO_SUBDIR} COMPONENT tests)
+      set_property(TARGET ${_name} APPEND PROPERTY INSTALL_RPATH "$ORIGIN/../../lib")
     endif()
   else()
     # Mirror add_test_executable(): record for the standalone coverage loop.
@@ -504,12 +508,17 @@ function(rccl_add_micro_binary _name)
       GTest::GTest Threads::Threads fmt::fmt-header-only)
   endif()
   target_link_libraries(${_name} PRIVATE nlohmann_json::nlohmann_json)
+  set_target_properties(${_name} PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/${RCCL_MICRO_SUBDIR}")
+  if(NOT _ramb_OBJECT)
+    set_property(GLOBAL APPEND PROPERTY RCCL_MICRO_BINARIES ${_name})
+  endif()
 endfunction()
 
 # One binary per test file. SOURCES (relative to test/host/) compile once into object libs named from OBJECT_PREFIX,
 # unless EXTRA_DEFS or in-tree REMOVE_DEFS is set. Wrap it in a macro so HOST_TEST_BINARIES reaches the top-level scope.
 function(rccl_add_unit_micro_binary _name _test)
-  cmake_parse_arguments(_raumb "PROCESS_ISOLATED" "OBJECT_PREFIX;CATEGORIES_YAML"
+  cmake_parse_arguments(_raumb "PROCESS_ISOLATED" "OBJECT_PREFIX"
     "SOURCES;COMMON_INCLUDES;COMMON_DEFS;EXTRA_DEFS;REMOVE_DEFS" ${ARGN})
   if(NOT _raumb_OBJECT_PREFIX)
     message(FATAL_ERROR "rccl_add_unit_micro_binary(${_name}): needs OBJECT_PREFIX")
@@ -541,8 +550,7 @@ function(rccl_add_unit_micro_binary _name _test)
   endif()
   rccl_add_micro_binary(${_name}
     SOURCES ${_raumb_sources}
-    ${_raumb_args}
-    CATEGORIES_YAML "${_raumb_CATEGORIES_YAML}")
+    ${_raumb_args})
   set(HOST_TEST_BINARIES "${HOST_TEST_BINARIES}" PARENT_SCOPE)
   set(HOST_TEST_OBJECT_LIBS "${HOST_TEST_OBJECT_LIBS}" PARENT_SCOPE)
 endfunction()
@@ -1016,7 +1024,7 @@ rccl_add_unit_micro_binary(rccl-UnitTestsMicroBootstrap bootstrap-test.cc
   EXTRA_DEFS
     BOOTSTRAP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/bootstrap.cc"
     RCCL_OS_FAKES_OMIT_ncclSocketClose   # fakes/bootstrap_micro_fakes.cc defines it
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_bootstrap.yaml")
+  )
 
 # ---------------------------------------------------------------------------
 # Root tests (src/*.cc, src/include/ headers, the test harness): one binary per test file.
@@ -1043,8 +1051,7 @@ set(_MICRO_ROOT_TEST_DEFS
 set(_MICRO_ROOT_TEST_ARGS
   OBJECT_PREFIX rccl-root-tests-obj
   COMMON_INCLUDES ${_MICRO_ROOT_TEST_INCLUDES}
-  COMMON_DEFS ${_MICRO_ROOT_TEST_DEFS}
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
+  COMMON_DEFS ${_MICRO_ROOT_TEST_DEFS})
 
 rccl_add_unit_micro_binary(rccl-UnitTestsMicroCommDump comm-dump-test.cc ${_MICRO_ROOT_TEST_ARGS}
   SOURCES
@@ -1187,8 +1194,7 @@ rccl_add_unit_micro_binary(rccl-UnitTestsMicroCollectives collectives-test.cc
     fakes/recorder_fakes.cc
     fakes/strongstream_stubs.cc
     fakes/sym_kernels_fakes.cc
-    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_collectives.yaml")
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc)
 target_compile_definitions(rccl-UnitTestsMicroCollectives PRIVATE
   COLLECTIVES_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/collectives.cc")
 # collectives.cc defines a kernel. An empty embedded device binary stands in for the device pass, so the
@@ -1203,8 +1209,7 @@ include("${CMAKE_CURRENT_LIST_DIR}/device/host_tests.cmake")
 # rccl-UnitTestsMicroCpuset -- src/include/cpuset.h
 # ---------------------------------------------------------------------------
 rccl_add_unit_micro_binary(rccl-UnitTestsMicroCpuset cpuset-test.cc
-  OBJECT_PREFIX rccl-root-obj
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_cpuset.yaml")
+  OBJECT_PREFIX rccl-root-obj)
 
 include("${CMAKE_CURRENT_LIST_DIR}/algorithms/dda/host_tests.cmake")
 
@@ -1214,8 +1219,7 @@ include("${CMAKE_CURRENT_LIST_DIR}/rma/host_tests.cmake")
 # rccl-UnitTestsMicroDebug -- src/debug.cc
 # ---------------------------------------------------------------------------
 rccl_add_unit_micro_binary(rccl-UnitTestsMicroDebug debug-test.cc
-  OBJECT_PREFIX rccl-root-obj
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_debug.yaml")
+  OBJECT_PREFIX rccl-root-obj)
 target_compile_definitions(rccl-UnitTestsMicroDebug PRIVATE
   DEBUG_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/debug.cc")
 
@@ -1248,8 +1252,7 @@ foreach(_variant "" "-uncached" "-faultinj")
   rccl_add_micro_binary(${_init_tgt}
     SOURCES ${TEST_MICRO_INIT_SOURCE_FILES}
     REMOVE_DEFS ENABLE_FAULT_INJECTION HIP_HOST_UNCACHED_MEMORY HIP_UNCACHED_MEMORY
-    EXTRA_DEFS ${_MICRO_MODE_DEFS} ${_MICRO_AMDSMI_DEF} INIT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/init.cc"
-    CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_init.yaml")
+    EXTRA_DEFS ${_MICRO_MODE_DEFS} ${_MICRO_AMDSMI_DEF} INIT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/init.cc")
   if(_variant STREQUAL "-uncached")
     target_compile_definitions(${_init_tgt} PRIVATE HIP_HOST_UNCACHED_MEMORY HIP_UNCACHED_MEMORY)
   elseif(_variant STREQUAL "-faultinj")
@@ -1265,8 +1268,7 @@ rccl_add_unit_micro_binary(rccl-UnitTestsMicroMemManager mem-manager-test.cc
   SOURCES
     fakes/mem_manager_micro_fakes.cc
     fakes/bootstrap_stubs.cc
-    fakes/hip_fakes.cc
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_mem_manager.yaml")
+    fakes/hip_fakes.cc)
 target_compile_definitions(rccl-UnitTestsMicroMemManager PRIVATE
   MEM_MANAGER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/mem_manager.cc")
 
@@ -1278,8 +1280,7 @@ rccl_add_unit_micro_binary(rccl-UnitTestsMicroAllocator allocator-test.cc
   SOURCES
     fakes/hip_fakes.cc
     fakes/nccl_fakes.cc
-    fakes/rocmwrap_fakes.cc
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_allocator.yaml")
+    fakes/rocmwrap_fakes.cc)
 target_compile_definitions(rccl-UnitTestsMicroAllocator PRIVATE
   ALLOCATOR_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/allocator.cc")
 
@@ -1291,8 +1292,7 @@ rccl_add_unit_micro_binary(rccl-UnitTestsMicroMnnvl mnnvl-test.cc
   SOURCES
     fakes/hip_fakes.cc
     fakes/nccl_fakes.cc
-    fakes/utils_fakes.cc
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_mnnvl.yaml")
+    fakes/utils_fakes.cc)
 target_compile_definitions(rccl-UnitTestsMicroMnnvl PRIVATE
   MNNVL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/mnnvl.cc")
 
@@ -1305,8 +1305,7 @@ rccl_add_unit_micro_binary(rccl-UnitTestsMicroAlloc alloc-test.cc
     fakes/hip_fakes.cc
     fakes/nccl_fakes.cc
     fakes/os_fakes.cc
-    fakes/utils_fakes.cc
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_alloc.yaml")
+    fakes/utils_fakes.cc)
 
 include("${CMAKE_CURRENT_LIST_DIR}/enqueue/host_tests.cmake")
 
@@ -1325,8 +1324,7 @@ rccl_add_unit_micro_binary(rccl-UnitTestsMicroCftDevRuntime cft-dev-runtime-test
     fakes/hip_fakes.cc
     fakes/dev_runtime_fakes.cc
     fakes/env_fakes.cc
-    ${RCCL_HOST_HIPIFY_DIR}/src/misc/argcheck.cc
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_cft_dev_runtime.yaml")
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/argcheck.cc)
 target_compile_definitions(rccl-UnitTestsMicroCftDevRuntime PRIVATE
   CORE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/nccl_device/core.cc"
   CFT_DEV_RUNTIME_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/cft_dev_runtime.cc")
@@ -1368,8 +1366,7 @@ rccl_add_unit_micro_binary(rccl-UnitTestsMicroCeColl ce-coll-test.cc
     ${_MICRO_AMDSMI_DEF}
     ${_MICRO_CE_BATCH_DEF}
     RCCL_STUBS_OMIT_ncclCeFinalize       # ce_coll.cc defines it
-    CE_COLL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ce_coll.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
+    CE_COLL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ce_coll.cc")
 
 include("${CMAKE_CURRENT_LIST_DIR}/param/host_tests.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/register/host_tests.cmake")
@@ -1396,8 +1393,7 @@ if(_MICRO_BUILD_SYM_KERNELS)
       ${_MICRO_AMDSMI_DEF}
       GENERATE_SYM_KERNELS
       SYM_KERNELS_HOST_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/gensrc/symmetric/sym_kernels_host.cc"
-      SYM_KERNELS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/sym_kernels.cc"
-    CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
+      SYM_KERNELS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/sym_kernels.cc")
 endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/tuning/host_tests.cmake")
@@ -1415,7 +1411,7 @@ rccl_add_unit_micro_binary(rccl-UnitTestsMicroProxy proxy-test.cc
   EXTRA_DEFS
     PROXY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/proxy.cc"
     RCCL_OS_FAKES_OMIT_ncclSocketClose   # fakes/proxy_micro_fakes.cc defines it
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_proxy.yaml")
+  )
 
 include("${CMAKE_CURRENT_LIST_DIR}/graph/host_tests.cmake")
 
@@ -1430,8 +1426,7 @@ rccl_add_unit_micro_binary(rccl-UnitTestsMicroDiagnostics diagnostics-test.cc
     fakes/hip_fakes.cc
     fakes/mgmt_task_enq_fakes.cc
     fakes/nccl_device_core_fakes.cc
-    fakes/nccl_fakes.cc
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_diagnostics.yaml")
+    fakes/nccl_fakes.cc)
 target_compile_definitions(rccl-UnitTestsMicroDiagnostics PRIVATE
   DIAGNOSTICS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/diagnostics.cc")
 
@@ -1445,38 +1440,77 @@ include("${CMAKE_CURRENT_LIST_DIR}/os/host_tests.cmake")
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroHostTestDispatch -- host_test_dispatch.cc, the rccl-UnitTestsHostAll front end
 # ---------------------------------------------------------------------------
+# The fixture binary host-dispatch-e2e-test.cc drives the real front door against. Deliberately
+# not a micro binary: it is absent from the manifest, so the front door this build ships never
+# fronts it, and it is built off to one side where the tests copy it from.
+add_executable(rccl-host-dispatch-fixture host_test_dispatch_fixture.cc)
+set_target_properties(rccl-host-dispatch-fixture PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/fixtures")
+target_compile_options(rccl-host-dispatch-fixture PRIVATE --offload-host-only)
+target_link_options(rccl-host-dispatch-fixture PRIVATE -no-hip-rt)
+
 rccl_add_unit_micro_binary(rccl-UnitTestsMicroHostTestDispatch host-test-dispatch-test.cc
   OBJECT_PREFIX rccl-root-obj
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
+  SOURCES host-dispatch-e2e-test.cc
+  EXTRA_DEFS
+    HOST_DISPATCH_FIXTURE_PATH="$<TARGET_FILE:rccl-host-dispatch-fixture>"
+    # The front door is NOT made a target-level dependency: it already depends on every micro
+    # binary, this one included, and naming it here would close that into a cycle. The build that
+    # produces this binary produces that one too.
+    HOST_DISPATCH_FRONT_DOOR_PATH="$<TARGET_FILE:rccl-UnitTestsHostAll>"
+    # Where these tests write files they then execute: TMPDIR may be mounted noexec.
+    RCCL_HOST_TEST_BUILD_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+add_dependencies(rccl-UnitTestsMicroHostTestDispatch rccl-host-dispatch-fixture)
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsHostAll
 # ---------------------------------------------------------------------------
-# The single gtest-shaped front door for every rccl-UnitTestsMicro* binary above: it discovers
-# them at run time, so a test harness integrates with this one target and never needs a copy of
-# the binary list. Deliberately NOT named rccl-UnitTestsMicro*, so it cannot front itself.
-#
-# Defined through the same helper as the binaries it runs purely so the two build modes, the
-# install rule and the host-only flags stay in one place; it compiles no production source and
-# links no fakes.
-rccl_add_micro_binary(rccl-UnitTestsHostAll
-  SOURCES host_test_dispatch.cc
-  EXTRA_DEFS ${_MICRO_MODE_DEFS})
+add_executable(rccl-UnitTestsHostAll host_test_dispatch.cc)
+target_include_directories(rccl-UnitTestsHostAll PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(rccl-UnitTestsHostAll PRIVATE nlohmann_json::nlohmann_json)
+if(BUILD_TESTS)
+  target_include_directories(rccl-UnitTestsHostAll PRIVATE ${RCCL_COMMON_INCLUDE_DIRS})
+  target_link_libraries(rccl-UnitTestsHostAll PRIVATE ${MICRO_TEST_LINK_LIBS})
+  rccl_apply_host_only_flags(rccl-UnitTestsHostAll)
+  rocm_install(TARGETS rccl-UnitTestsHostAll COMPONENT tests)
+  rccl_register_test_categories(rccl-UnitTestsHostAll
+    "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_host_all.yaml")
+else()
+  list(APPEND HOST_TEST_BINARIES rccl-UnitTestsHostAll)
+  target_compile_options(rccl-UnitTestsHostAll PRIVATE -ffunction-sections)
+  set(_front_door_link_opts -no-hip-rt -Wl,--gc-sections)
+  if(_MICRO_LINK_NO_PIE)
+    list(APPEND _front_door_link_opts -no-pie)
+  endif()
+  target_link_options(rccl-UnitTestsHostAll PRIVATE ${_front_door_link_opts})
+  target_link_libraries(rccl-UnitTestsHostAll PRIVATE
+    GTest::GTest Threads::Threads fmt::fmt-header-only)
+endif()
+
+get_property(_micro_binaries GLOBAL PROPERTY RCCL_MICRO_BINARIES)
+list(SORT _micro_binaries)
+string(REPLACE ";" "\n" _micro_manifest "${_micro_binaries}")
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/${RCCL_MICRO_SUBDIR}/${RCCL_MICRO_MANIFEST}"
+  "${_micro_manifest}\n")
+
+add_dependencies(rccl-UnitTestsHostAll ${_micro_binaries})
+
+if(BUILD_TESTS)
+  # Plain install(), as for everything else in micro/: rocm_install() hard-codes
+  # CMAKE_INSTALL_BINDIR and cannot be pointed a level deeper.
+  install(FILES "${CMAKE_CURRENT_BINARY_DIR}/${RCCL_MICRO_SUBDIR}/${RCCL_MICRO_MANIFEST}"
+    DESTINATION ${CMAKE_INSTALL_BINDIR}/${RCCL_MICRO_SUBDIR} COMPONENT tests)
+endif()
 
 # =====================================================================
-# Standalone-only tail: coverage, the runner's binary list, no CTest registration.
+# Standalone-only tail: coverage, no CTest registration.
 # =====================================================================
 if(BUILD_TESTS)
-  # In-RCCL-build path registers these binaries via CTest categories
-  # (rccl_register_test_categories, called inside rccl_add_micro_binary).
+  # The in-RCCL-build path registers one CTest entry, for rccl-UnitTestsHostAll above
+  # (rccl_register_test_categories). The binaries it fronts are deliberately not registered
+  # individually: running them is the front door's job, and two routes to the same cases would
+  # report them twice.
   return()
 endif()
 
 rccl_standalone_coverage()
-
-# run_host_tests.sh runs every binary listed here, so a new binary needs no runner edit.
-# rccl-UnitTestsHostAll is left out: it reruns every rccl-UnitTestsMicro* binary itself.
-set(_host_test_binaries ${HOST_TEST_BINARIES})
-list(REMOVE_ITEM _host_test_binaries rccl-UnitTestsHostAll)
-string(REPLACE ";" "\n" _host_test_binaries "${_host_test_binaries}")
-file(WRITE "${CMAKE_BINARY_DIR}/host_test_binaries.txt" "${_host_test_binaries}\n")

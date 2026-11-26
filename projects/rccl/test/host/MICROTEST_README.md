@@ -40,21 +40,20 @@ invented per binary. For a unit at `src/<dirs>/<stem>.cc`:
 | Test TU | `test/host/<dirs>/<stem>-test.cc`, `_` → `-`; prefix the stem with the parent directory if the basename is taken under the same top directory (`net_ib/p2p.cc` → `net-ib-p2p-test.cc`) | `test/host/gin/gin-host-test.cc` |
 | Binary | `rccl-UnitTestsMicro<Dirs><TestStem>` UpperCamel; `<TestStem>` is the TU's basename less `-test.cc` and less leading words already in `<Dirs>` | `rccl-UnitTestsMicroGinHost` |
 | gtest suites | `<Stem>…Microtest` — every suite in the TU starts with `<Stem>` | `GinHostProxyAffinityMicrotest` |
-| CTest categories | `test/test_categories_micro_<top>.yaml`, `<top>` the first of `<dirs>`, shared by its binaries | `test/test_categories_micro_gin.yaml` |
-| JUnit XML | `host_tests_micro_<binary suffix, snake_case>.xml` (`run_host_tests.sh` derives it from the binary) | `host_tests_micro_gin_host.xml` |
 
-Because every suite starts with its unit's `<Stem>`, the directory's yaml needs
-one pattern per unit, and fewer when one stem prefixes another (gin's
-`GinHost*` also matches `GinHostProxy*`). A new suite in the same TU is picked
-up without editing it — gtest's `*` does not cross the `.`, so a per-suite list
-silently drops any suite someone forgets to add.
+There is no per-binary CTest yaml. `rccl-UnitTestsHostAll` runs every one of
+these binaries and publishes their cases as its own, so the whole host tree is
+registered once, by `test/test_categories_host_all.yaml`, whose patterns select
+everything. A new binary — and a new suite in an existing one — is covered with
+no yaml to edit.
 
-A new binary is named once, in its `rccl_add_micro_binary()` call in
+A new binary is named in **one** place: its `rccl_add_micro_binary()` call in
 `test/host/CMakeLists.txt`, or its directory wrapper's call in
-`<dir>/host_tests.cmake` (e.g. `rccl_add_transport_micro_binary()`). The
-standalone configure writes every binary to `host_test_binaries.txt` in the build
-directory, which `run_host_tests.sh` runs, and `lib/test_executor.py` passes every
-`rccl-UnitTestsMicro*` binary to llvm-cov as `--object`.
+`<dir>/host_tests.cmake` (e.g. `rccl_add_transport_micro_binary()`). Everything
+that runs it finds it from the name alone — `run_host_tests.sh` goes through
+[`rccl-UnitTestsHostAll`](#rccl-unittestshostall--one-front-door-for-every-host-binary),
+which runs the binaries the build recorded beside it. (`lib/test_executor.py` needs no list of
+them either: it attributes their coverage from `host-coverage.lcov`, not from objects of its own.)
 
 ## Why a separate test binary
 
@@ -120,10 +119,9 @@ test:
    [Naming a new microtest](#naming-a-new-microtest).
 2. **Register the source.** Add the test to its binary's
    `rccl_add_unit_micro_binary()` call (`test/host/CMakeLists.txt` for root tests,
-   else `<dir>/host_tests.cmake`), which both build paths share. If you add a new
-   gtest suite, add its pattern to the target's `test/test_categories_micro*.yaml`
-   so CTest runs it (a suite named for its binary's stem is already matched). A new
-   *binary* is named once, as [Naming a new microtest](#naming-a-new-microtest)
+   else `<dir>/host_tests.cmake`), which both build paths share. A new suite needs no
+   CTest registration: the whole host tree is registered once through
+   `rccl-UnitTestsHostAll`. A new *binary* is named once, as [Naming a new microtest](#naming-a-new-microtest)
    describes.
 3. **Write the `TEST` / fixture.** Use a fixture whose `TearDown()` calls the
    unit's reset entry point (`ResetP2pFakes()`, `ResetInitFakes()`, ...) so
@@ -496,6 +494,7 @@ declares:
 | `WaitUntil.h` | `waitUntil(pred)` — bounded poll for something another thread will do, returning false when the budget elapses so the test fails with its own message instead of hanging. Never `sleep_for` and hope. |
 | `JoinThreadsOnExit.h` | Spawn worker threads and stop/join them on every exit from the scope. The stop action is a callback, because what ends the worker's loop belongs to the unit under test. |
 | `ScopeExit.h` | The one-off cleanup that has no purpose-built RAII type. A fatal `ASSERT_*` returns immediately, so cleanup written after it does not run. |
+| `ScopedDir.h` | A private temporary directory, removed with everything under it on scope exit. Takes a prefix so a leftover names the suite that made it, uses `temp_directory_path()` rather than a hardcoded `/tmp`, and aborts with the errno if `mkdtemp` fails — a test that cannot get a directory has nothing left to prove. |
 
 When a test grows a helper that is not specific to its unit under test, promote
 it here rather than leaving it in the TU — a per-TU copy is how four tests end
@@ -564,7 +563,7 @@ whole-binary totals).
 
 ```bash
 BD=build/release                        # or build/debug, or a standalone build dir
-BIN=$BD/test/host/rccl-UnitTestsMicroTransportP2p
+BIN=$BD/test/host/micro/rccl-UnitTestsMicroTransportP2p
 SRC=$BD/hipify/src/transport/p2p_tmp.cc
 LLVM=/opt/rocm/llvm/bin                 # ROCm's llvm-cov matches the build clang
 
@@ -592,6 +591,68 @@ LLVM_PROFILE_FILE=micro.profraw "$BIN"
 On OCI compute nodes `llvm-cov`/`llvm-profdata` are unavailable: run step 1
 there to produce `micro.profraw`, copy it plus the binary to a host that has
 `llvm-cov` (matching the build clang's major version), and render there.
+
+### Why the whole tree's coverage is unioned as lcov, not merged with llvm tooling
+
+The workflow above is for **one** binary, where llvm's own tooling is fine. 
+
+A coverage profile is tied to the binary that produced it by a per-function
+*coverage-mapping hash*. This tree compiles the same source into many binaries
+under different `#define`s — `-uncached`, `-faultinj`, `-devlinker`, `-roctx`,
+and the different fake sets each binary links — so one function in one source
+file has a **different hash in each binary it is compiled into**. Merge every
+`.profraw` into one `.profdata` and hand `llvm-cov` every binary as `--object`
+and you do not get the union: records whose hash matches no object are dropped,
+records that collide are attributed to whichever object claimed them first, and
+a profile whose object is missing entirely is discarded without a word. The
+number that comes out is neither the union nor any single binary's truth, and
+nothing in the output says so.
+
+lcov's tracefile format has no hashes. It is keyed by file, line and branch, so
+unioning two of them has one meaning — a line is covered if **any** input
+covered it — which is the question being asked of a tree whose binaries
+deliberately compile the same code several ways. That is why the host tree's
+coverage is carried as lcov between the thing that measures it and the things
+that read it.
+
+The division of labour follows from the same constraint:
+
+- **`rccl-UnitTestsHostAll`** is the only thing that knows which profiles came
+  from which binary, so it does the per-binary step: `llvm-profdata merge` then
+  `llvm-cov export -format=lcov` with that child as the only `--object`. It then
+  unions those tracefiles itself — hand-rolled, no `lcov` binary involved, since
+  `lcov` is perl and not otherwise needed to run tests — into
+  `host-coverage.lcov` beside the profiles. That file is the consumable
+  artefact: object-free, hash-agnostic, and complete for every binary it ran.
+- **`run_host_tests.sh coverage`** does presentation and the one binary outside
+  the front door: per-binary `llvm-cov report`/`show` HTML from the
+  `merged.profdata` already written, `rccl-HostUnitTests` (not fronted) merged
+  and exported, and the final `lcov --add-tracefile` union plus `genhtml`.
+- **`tools/scripts/test_runner`** (the GPU/library runner) consumes the same
+  tracefile rather than reconstructing anything: it exports its own llvm-cov
+  data as lcov and unions `host-coverage.lcov` into it, giving one report over
+  both. Additive and best effort — no tracefile, no `lcov`, or a tracefile lcov
+  rejects, and its own reports are produced exactly as before.
+
+  The boundary is visible in the profile layout, and the runner's `.profdata`
+  glob is deliberately **flat** because of it. The front door writes each
+  binary it forks into `<rawfiles>/<binary>/`, one directory down; everything
+  the runner launched itself — including the front door's own profile — is at
+  the top level. So the top level is exactly the set the runner may read
+  against its own objects, and the nested ones are the set it must take as
+  lcov instead. A suite that names a host binary *directly* rather than going
+  through the front door (`gin_micro_finalize` runs
+  `host/micro/rccl-UnitTestsMicroPluginGinPluginInit`) is therefore an ordinary test to the
+  runner: flat profile, and its binary passed as `--object` like any other.
+
+  Only binaries that actually ran are passed as objects. An `--object` with no
+  profile is not free — `llvm-cov` counts its mappings as uncovered — so
+  naming the whole host tree, as this did before the front door existed,
+  reports ~90 binaries' worth of unexecuted product-source mappings against
+  the library's own numbers.
+
+Note that `lcov` and `llvm-cov` count branches differently, so a per-binary
+`llvm-cov` branch total and the lcov union's will not agree; neither is wrong.
 
 ### Coverage-driven workflow
 
@@ -632,10 +693,10 @@ make -j $(nproc) rccl-UnitTestsMicroTransportP2p
 
 ```bash
 # All tests:
-./build/release/test/host/rccl-UnitTestsMicroTransportP2p
+./build/release/test/host/micro/rccl-UnitTestsMicroTransportP2p
 
 # One test:
-./build/release/test/host/rccl-UnitTestsMicroTransportP2p \
+./build/release/test/host/micro/rccl-UnitTestsMicroTransportP2p \
     --gtest_filter='P2pMicrotest.IpcRegisterBuffer_NullRegRecordIsNoOp'
 
 # Coverage: see the Coverage section (run under LLVM_PROFILE_FILE, then llvm-cov).
@@ -650,10 +711,10 @@ under test tends to add another. Anything outside this directory that wants to
 copies drift: a new binary silently goes unrun, and its coverage silently goes
 unreported.
 
-`rccl-UnitTestsHostAll` (`host_test_dispatch.cc`) removes the lists. It is not
-a test binary; it is a gtest-shaped front door that discovers its
-`rccl-UnitTestsMicro*` siblings **at run time** and forks the ones that own a
-selected case:
+`rccl-UnitTestsHostAll` (`host_test_dispatch.cc`) removes the hand-kept lists.
+It is not a test binary; it is a gtest-shaped front door that reads the one
+list the build **generates** — `micro/host_test_binaries.txt`, written by
+`rccl_add_micro_binary()` — and forks the binaries that own a selected case:
 
 ```bash
 # Everything, as one report:
@@ -666,6 +727,27 @@ selected case:
 ./build/release/test/host/rccl-UnitTestsHostAll --gtest_filter='*RmaCeInitTest.*'
 ```
 
+### Where the binaries are
+
+One level down, in `micro/`, with the two binaries a person invokes above them:
+
+```
+build/                       (or <prefix>/bin/ for an install)
+  rccl-UnitTestsHostAll      <- the front door: run this
+  rccl-HostUnitTests         <- older non-micro tests
+  micro/
+    rccl-UnitTestsMicroInit
+    rccl-UnitTestsMicroCrypt
+    ...
+```
+
+The same layout in a build tree and in an install, which is why the front door
+can take its directory by appending `micro/` to its own rather than searching
+for whichever arrangement it is running from. `rccl_add_micro_binary()` sets
+both the `RUNTIME_OUTPUT_DIRECTORY` and the install `DESTINATION`, so the two
+cannot drift apart; the dv provider fakes, which `misc/dvsymbols-test.cc` `dlopen`s
+from beside its own executable, are installed there too.
+
 Case names are qualified with the owning binary's suffix — 
 `MicroInitUncached/InitMicrotest.Case` — because the multi-arm binaries
 (`-uncached`, `-faultinj`, `-devlinker`, `-roctx`) publish identical
@@ -675,8 +757,8 @@ not `MicroInit-uncached`) because gtest splits a `--gtest_filter` at its first
 `-`, so a qualifier carrying one could never be named by a positive pattern.
 
 The qualifier is part of the name a filter has to match, so a pattern written
-against one binary does **not** carry over unchanged: `P2pMicrotest.*` (as in
-`test_categories_micro.yaml`) matches nothing here, because every published name
+against one binary does **not** carry over unchanged: `P2pMicrotest.*` matches
+nothing here, because every published name
 begins `<Qualifier>/`. Lead with `*` to mean "in whichever binary owns it", or
 name the qualifier to mean one arm:
 
@@ -741,28 +823,18 @@ first fork (it shards over them), and putting it at the fork sites means there
 is no ordering in `main()` to get right and a fork site added later inherits the
 guarantee by construction.
 
-For coverage, each child inherits `LLVM_PROFILE_FILE` and drops its own
-`.profraw` as usual. What a harness cannot know is which binaries those
-profiles came from — `llvm-cov` needs an `--object` per binary and silently
-discards a profile whose object is missing — so the dispatcher appends every
-binary it ran to `coverage-objects.txt` in the profile directory. That file,
-not a list maintained in the harness, is the object set.
-
-Adding a host test binary therefore needs no change outside this directory.
-
-`run_host_tests.sh` keeps driving the binaries individually: it writes each
-one's profiles into its own `coverage/<binary>/` subdirectory to produce the
-per-binary reports CI publishes, which a single shared profile directory could
-not reconstruct.
+For coverage, each child profiles into `<profile dir>/<binary>/` and the
+dispatcher merges the results into `host-coverage.lcov` beside them (see
+[Why the whole tree's coverage is unioned as lcov](#why-the-whole-trees-coverage-is-unioned-as-lcov-not-merged-with-llvm-tooling)).
 
 ## Standalone host-only build (no full librccl build)
 
 `test/host/CMakeLists.txt` is dual-mode. Alongside the in-RCCL-build target
 above (`./install.sh -t`, wired via `add_subdirectory(host)`), the same file
-can be configured **directly** to build every host binary (`host_test_binaries.txt` in the
-build directory lists them) — **without configuring/building all of
-librccl**. It compiles just the tests + fakes + the hipified unit-under-test
-sources.
+can be configured **directly** to build every host binary — `rccl-HostUnitTests`,
+`rccl-UnitTestsHostAll` and the `rccl-UnitTestsMicro*` binaries the front door
+runs — **without configuring/building all of librccl**. It compiles just the
+tests + fakes + the hipified unit-under-test sources.
 
 The `-uncached`, `-faultinj`, `-devlinker` and `-roctx` binaries are preprocessor
 variants, not duplicates. `init.cc` gates
@@ -791,7 +863,18 @@ cd projects/rccl/test/host
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
       -DRCCL_BUILD_DIR=/path/to/projects/rccl/build/release
 cmake --build build -j"$(nproc)"
-./build/rccl-UnitTestsMicroBootstrap   # one binary per test file; build/host_test_binaries.txt lists them
+
+# Everything, through the front door: it runs the binaries listed in
+# micro/host_test_binaries.txt beside it and merges their reports into one.
+./build/rccl-UnitTestsHostAll --gtest_output=xml:host_tests_micro.xml
+./build/rccl-HostUnitTests          # not fronted: not in micro/
+
+# One binary's cases, by qualifier, without naming the binary's path:
+./build/rccl-UnitTestsHostAll --gtest_filter='MicroInit/*'
+
+# Or the binary directly, when its own console output is what you want:
+ls build/micro                      # the binaries the front door runs
+./build/micro/rccl-UnitTestsMicroInit
 ```
 
 Coverage instrumentation for the standalone host-only test binaries is OFF by

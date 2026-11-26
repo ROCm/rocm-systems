@@ -19,8 +19,7 @@ set(_MICRO_OS_DEFS
 macro(rccl_add_os_micro_binary _name _test)
   rccl_add_unit_micro_binary(${_name} os/${_test} ${ARGN}
     OBJECT_PREFIX rccl-os-obj
-    COMMON_DEFS ${_MICRO_OS_DEFS}
-    CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_os.yaml")
+    COMMON_DEFS ${_MICRO_OS_DEFS})
 endmacro()
 
 rccl_add_os_micro_binary(rccl-UnitTestsMicroOsLinux linux-test.cc

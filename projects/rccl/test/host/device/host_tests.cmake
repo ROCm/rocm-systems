@@ -11,8 +11,7 @@ macro(rccl_add_device_micro_binary _name _test)
     COMMON_INCLUDES
       ${RCCL_HOST_HIPIFY_DIR}/src/include/nccl_device  # device/op128.h includes rccl_ptr.h unqualified
       ${RCCL_HOST_HIPIFY_DIR}/src/device               # common_kernel.h includes "tdm/tdmCopy.h"
-    COMMON_DEFS ${_MICRO_DEVICE_DEFS}
-    CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_device.yaml")
+    COMMON_DEFS ${_MICRO_DEVICE_DEFS})
 endmacro()
 
 rccl_add_device_micro_binary(rccl-UnitTestsMicroDeviceOnerank onerank-test.cc

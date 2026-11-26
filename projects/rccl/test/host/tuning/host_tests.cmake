@@ -33,8 +33,7 @@ macro(rccl_add_tuning_micro_binary _name _test)
     OBJECT_PREFIX rccl-tuning-obj
     COMMON_INCLUDES
       ${RCCL_HOST_HIPIFY_DIR}/src/device  # sym_kernels.cc includes "tdm/tdmCopy.h" (SymModel)
-    COMMON_DEFS ${_MICRO_TUNING_DEFS}
-    CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_tuning.yaml")
+    COMMON_DEFS ${_MICRO_TUNING_DEFS})
 endmacro()
 
 rccl_add_tuning_micro_binary(rccl-UnitTestsMicroTuning tuning-test.cc

@@ -35,8 +35,7 @@ macro(rccl_add_enqueue_micro_binary _name _test)
     COMMON_INCLUDES
       ${RCCL_HOST_HIPIFY_DIR}/src/device               # device/common.h (neutered)
       ${RCCL_HOST_HIPIFY_DIR}/src/include/nccl_device
-    COMMON_DEFS ${_MICRO_ENQUEUE_DEFS}
-    CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_enqueue.yaml")
+    COMMON_DEFS ${_MICRO_ENQUEUE_DEFS})
 endmacro()
 
 set(_enq_sources

@@ -13,8 +13,7 @@ set(_MICRO_PARAM_DEFS
 macro(rccl_add_param_micro_binary _name _test)
   rccl_add_unit_micro_binary(${_name} param/${_test} ${ARGN}
     OBJECT_PREFIX rccl-param-obj
-    COMMON_DEFS ${_MICRO_PARAM_DEFS}
-    CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_param.yaml")
+    COMMON_DEFS ${_MICRO_PARAM_DEFS})
 endmacro()
 
 # No fakes beyond hip_fakes.cc (the runner's GPU-count probe): misc/param.cc defines ncclGetEnv, initEnv and

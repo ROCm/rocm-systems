@@ -15,8 +15,7 @@ set(_MICRO_RMA_DEFS
 macro(rccl_add_rma_micro_binary _name _test)
   rccl_add_unit_micro_binary(${_name} rma/${_test} ${ARGN}
     OBJECT_PREFIX rccl-rma-obj
-    COMMON_DEFS ${_MICRO_RMA_DEFS}
-    CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_rma.yaml")
+    COMMON_DEFS ${_MICRO_RMA_DEFS})
 endmacro()
 
 rccl_add_rma_micro_binary(rccl-UnitTestsMicroRma rma-test.cc

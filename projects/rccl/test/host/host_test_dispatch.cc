@@ -6,10 +6,8 @@
 
 // rccl-UnitTestsHostAll -- one gtest-shaped front door for every host-only test binary.
 //
-// Discovers its rccl-UnitTestsMicro* siblings at run time, forks the ones owning a selected
-// case, and merges their reports into the one the caller asked for. What it is for, how the
-// case names are qualified, and how the coverage manifest is used: see MICROTEST_README.md,
-// "rccl-UnitTestsHostAll".
+// Reads the list of binaries the build put beside it, forks the ones owning a selected case,
+// and merges their reports into the one the caller asked for.
 
 #include <gtest/gtest.h>
 
@@ -20,21 +18,32 @@
 #include <cctype>
 #include <cerrno>
 #include <charconv>
+#include <chrono>
+#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <limits>
+#include <map>
 #include <memory>
 #include <optional>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <system_error>
+#include <thread>
+#include <tuple>
 #include <unordered_set>
 #include <vector>
 
 #include <fcntl.h>
+#include <poll.h>
+#include <sched.h>
+#include <sys/prctl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -46,34 +55,47 @@ namespace rccl_host_dispatch {
 
 namespace fs = std::filesystem;
 
-// Binaries this dispatcher fronts: every sibling executable whose name starts with this. The
-// host tree's own naming convention is the registry; nothing enumerates the binaries by hand.
-constexpr std::string_view kBinaryPrefix = "rccl-UnitTestsMicro";
+// Written by the build beside the binaries it lists (RCCL_MICRO_MANIFEST in CMakeLists.txt).
+constexpr std::string_view kBinaryManifest = "host_test_binaries.txt";
 
-// Dropped from a binary's name to form the case-name qualifier, leaving e.g. "Micro",
-// "MicroInit-uncached". Kept distinct from kBinaryPrefix so the qualifier stays short.
+constexpr std::string_view kMicroSubdirectory = "micro";
+
+// Dropped from a binary's name to form the case-name qualifier.
 constexpr std::string_view kQualifierStrip = "rccl-UnitTests";
 
-// Written beside the .profraw files, naming every binary that contributed profile data.
-constexpr std::string_view kCoverageManifest = "coverage-objects.txt";
+// Merged lcov tracefile, written beside the .profraw files.
+constexpr std::string_view kCoverageTracefile = "host-coverage.lcov";
 
-// Longest --gtest_filter handed to one child. The kernel caps a single argv entry at
-// MAX_ARG_STRLEN (32 pages, 128KiB on Linux) and rejects the exec outright with E2BIG, which the
-// biggest host binary's 2199 case names comfortably exceed, so a long selection is split across
-// several invocations of that binary rather than truncated.
+// Holds one <Qualifier>.log per binary, relative to the working directory.
+constexpr std::string_view kDefaultLogDirectory = "host-test-dispatch.logs";
+
+// Overrides kDefaultLogDirectory; "-" lets the children inherit stdout and stderr.
+constexpr std::string_view kLogDirectoryEnv = "RCCL_HOST_DISPATCH_LOG_DIR";
+
+constexpr std::string_view kParallelismEnv = "NUM_PARALLEL_HOST_TEST_BINARIES";
+
+// Per-child time limit in seconds; unset or 0 means none.
+constexpr std::string_view kChildTimeoutEnv = "RCCL_HOST_DISPATCH_CHILD_TIMEOUT";
+
+// Time between SIGTERM and SIGKILL.
+constexpr std::chrono::seconds kTerminateGrace{5};
+
+// Source files kept out of the exported coverage.
+constexpr std::string_view kCoverageIgnoreRegex = "(/test/|nvtx)";
+
+// Set to 0 to skip the lcov export.
+constexpr std::string_view kCoverageExportEnv = "RCCL_HOST_COVERAGE_EXPORT";
+
+// Longest --gtest_filter per child; must stay under MAX_ARG_STRLEN (128KiB).
 constexpr size_t kMaxFilterChars = 60000;
 
 // ── small helpers ───────────────────────────────────────────────────
 
-// Whether *text* begins with *prefix*. C++20's std::string::starts_with in all but name; this
-// tree is C++17, and the std::string::rfind(x, 0) == 0 idiom it replaces reads as a backwards
-// search, which is not what any of its call sites mean.
 constexpr bool startsWith(std::string_view text, std::string_view prefix)
 {
     return text.size() >= prefix.size() && text.compare(0, prefix.size(), prefix) == 0;
 }
 
-// *text* as an integer, or *fallback* when it does not parse.
 long toLong(std::string_view text, long fallback)
 {
     long value = 0;
@@ -81,10 +103,6 @@ long toLong(std::string_view text, long fallback)
     return error == std::errc() ? value : fallback;
 }
 
-// *text* as a double, or *fallback* when it does not parse.
-//
-// std::from_chars for floating point is deliberately not used: it only reached libstdc++ in
-// GCC 11, and the host tests also build under older toolchains where it is still missing.
 double toDouble(std::string_view text, double fallback)
 {
     const std::string copy(text);
@@ -104,9 +122,7 @@ double jsonSeconds(std::string_view text)
 
 // ── --gtest_list_tests parsing ──────────────────────────────────────
 
-// One case as its binary reports it, kept split because only the listing knows where the suite
-// ends: a parameterized case name can itself contain '.' (it is printed from the parameter), so
-// rejoining and re-splitting a full name is not lossless.
+// Kept split: a parameterized case name can itself contain '.'.
 struct TestCaseName {
     std::string suite;
     std::string test;
@@ -118,10 +134,6 @@ struct TestCaseName {
 };
 
 // The cases in one binary's --gtest_list_tests *output*.
-//
-// The format is a suite line ending in '.' at column 0, then its cases indented beneath it.
-// Trailing "  # GetParam() = ..." annotations and any banner printed before the first suite line
-// are discarded.
 std::vector<TestCaseName> parseListTests(const std::string &output)
 {
     std::vector<TestCaseName> cases;
@@ -143,8 +155,7 @@ std::vector<TestCaseName> parseListTests(const std::string &output)
             continue;
         }
         if (line[0] != ' ') {
-            // A suite line is "Name." -- anything else at column 0 is a banner we ignore, and
-            // ignoring it must also drop the cases of the suite before it from the listing.
+            // Anything at column 0 other than "Name." is a banner; drop what follows it.
             suite = line.back() == '.' ? line.substr(0, line.size() - 1) : "";
             continue;
         }
@@ -160,14 +171,7 @@ std::vector<TestCaseName> parseListTests(const std::string &output)
 // ── name qualification ──────────────────────────────────────────────
 
 // The case-name qualifier for *binary*, e.g. "rccl-UnitTestsMicroInit-uncached" ->
-// "MicroInitUncached".
-//
-// The variant dashes are folded away rather than kept: gtest splits a --gtest_filter at its FIRST
-// '-', so a qualifier containing one could never be named by a positive pattern -- "MicroInit-
-// uncached/*" would read as "everything in MicroInit, except uncached/*".
-//
-// The plain "rccl-UnitTestsMicro" has nothing left after the strip, so it keeps "Micro": a
-// qualifier must never be empty, or its cases would be indistinguishable from an unqualified name.
+// "MicroInitUncached". Dashes are dropped because gtest treats '-' in a filter as negation.
 std::string qualifierFor(const std::string &binary)
 {
     const std::string stripped = startsWith(binary, kQualifierStrip)
@@ -186,7 +190,6 @@ std::string qualifierFor(const std::string &binary)
     return qualifier.empty() ? std::string("Micro") : qualifier;
 }
 
-// The suite name the dispatcher publishes *suite* as: "<qualifier>/<Suite>".
 std::string qualifiedSuite(const std::string &qualifier, const std::string &suite)
 {
     return qualifier + "/" + suite;
@@ -194,7 +197,6 @@ std::string qualifiedSuite(const std::string &qualifier, const std::string &suit
 
 // ── filter resolution ─────────────────────────────────────────────
 
-// One case this dispatcher could run: the binary that owns it and the name it publishes.
 struct CandidateCase {
     size_t binary = 0;        // index into the caller's binary list
     std::string suite;        // qualified
@@ -203,20 +205,22 @@ struct CandidateCase {
 
 namespace {
 
-// A registered stand-in with nothing to run. See :func:`resolveFilter`.
 class NoopTest : public ::testing::Test {
     void TestBody() override {}
 };
 
 }  // namespace
 
-// The indices of *candidates* that *filter* selects, decided by gtest itself.
-//
-// The empty tests have to be "run" to be selected: should_run() is meaningless until the filter
-// is applied inside UnitTest::Run(). Why gtest resolves this rather than a matcher of our own:
-// MICROTEST_README.md, "rccl-UnitTestsHostAll".
-std::vector<size_t> resolveFilter(const std::vector<CandidateCase> &candidates,
-                                  const std::string &filter, bool also_run_disabled)
+// What a filter selected, in candidate order. *suppressed* are matched DISABLED_ cases, which
+// gtest reports but does not run.
+struct FilterMatches {
+    std::vector<size_t> runnable;
+    std::vector<size_t> suppressed;
+};
+
+// The indices of *candidates* that *filter* selects, decided by gtest by running no-op tests.
+FilterMatches resolveFilter(const std::vector<CandidateCase> &candidates,
+                            const std::string &filter, bool also_run_disabled)
 {
     ::testing::GTEST_FLAG(filter) = filter;
     ::testing::GTEST_FLAG(also_run_disabled_tests) = also_run_disabled;
@@ -232,52 +236,55 @@ std::vector<size_t> resolveFilter(const std::vector<CandidateCase> &candidates,
     delete listeners.Release(listeners.default_result_printer());
     (void)RUN_ALL_TESTS();
 
-    // Matched back by name rather than by registration order: gtest groups its reporting by
-    // suite, so the two orders agree only while every suite's cases are contiguous here.
+    // By name: gtest's order groups by suite and need not match registration order.
     std::unordered_set<std::string> runnable;
+    std::unordered_set<std::string> suppressed;
     for (int s = 0; s < unit_test->total_test_suite_count(); ++s) {
         const ::testing::TestSuite *suite = unit_test->GetTestSuite(s);
         for (int t = 0; t < suite->total_test_count(); ++t) {
-            if (suite->GetTestInfo(t)->should_run()) {
-                runnable.insert(std::string(suite->name()) + "." + suite->GetTestInfo(t)->name());
+            const ::testing::TestInfo *info = suite->GetTestInfo(t);
+            const std::string name = std::string(suite->name()) + "." + info->name();
+            if (info->should_run()) {
+                runnable.insert(name);
+            } else if (info->is_reportable()) {
+                suppressed.insert(name);
             }
         }
     }
 
-    std::vector<size_t> selected;
+    FilterMatches matches;
     for (size_t i = 0; i < candidates.size(); ++i) {
-        if (runnable.count(fmt::format("{}.{}", candidates[i].suite, candidates[i].raw.test)) > 0) {
-            selected.push_back(i);
+        const std::string name =
+            fmt::format("{}.{}", candidates[i].suite, candidates[i].raw.test);
+        if (runnable.count(name) > 0) {
+            matches.runnable.push_back(i);
+        } else if (suppressed.count(name) > 0) {
+            matches.suppressed.push_back(i);
         }
     }
-    return selected;
+    return matches;
 }
 
-// Whether gtest would refuse to run *name* for being disabled.
-//
-// gtest's own rule: a DISABLED_ prefix on either half of the name, no wildcards involved.
 bool isDisabled(const TestCaseName &name)
 {
     constexpr std::string_view prefix = "DISABLED_";
     return startsWith(name.suite, prefix) || startsWith(name.test, prefix);
 }
 
-// One discovered binary and the cases the caller's filter selects from it.
+// One binary and the cases the caller's filter selects from it.
 struct Selection {
     std::string path;
     std::string qualifier;
-    std::vector<TestCaseName> cases;   // as the binary itself knows them
-    size_t runnable = 0;               // cases the binary holds that this run could run at all
+    std::vector<TestCaseName> cases;
+    std::vector<TestCaseName> suppressed;
+    size_t runnable = 0;  // cases the binary holds that this run could run at all
 };
 
-// *candidates* at *indices*, grouped into one Selection per owning binary.
-//
-// *also_run_disabled* decides whether a binary's DISABLED_ cases count towards what it holds,
-// and so whether selecting everything else still counts as selecting the whole binary.
+// The matched *candidates*, grouped into one Selection per owning binary, in binary order.
 std::vector<Selection> group(const std::string &directory,
                              const std::vector<std::string> &binaries,
                              const std::vector<CandidateCase> &candidates,
-                             const std::vector<size_t> &indices, bool also_run_disabled)
+                             const FilterMatches &matches, bool also_run_disabled)
 {
     std::vector<size_t> held(binaries.size(), 0);
     for (const CandidateCase &candidate : candidates) {
@@ -286,31 +293,42 @@ std::vector<Selection> group(const std::string &directory,
         }
     }
     std::vector<Selection> selections;
-    for (const size_t index : indices) {
+    std::vector<size_t> slot(binaries.size(), std::numeric_limits<size_t>::max());
+    size_t run = 0;
+    size_t sup = 0;
+    while (run < matches.runnable.size() || sup < matches.suppressed.size()) {
+        const bool takeRunnable =
+            sup == matches.suppressed.size() ||
+            (run < matches.runnable.size() && matches.runnable[run] < matches.suppressed[sup]);
+        const size_t index = takeRunnable ? matches.runnable[run++] : matches.suppressed[sup++];
         const CandidateCase &candidate = candidates[index];
-        const std::string path = directory + "/" + binaries[candidate.binary];
-        if (selections.empty() || selections.back().path != path) {
-            selections.push_back(Selection{path, qualifierFor(binaries[candidate.binary]), {},
+        if (slot[candidate.binary] == std::numeric_limits<size_t>::max()) {
+            slot[candidate.binary] = selections.size();
+            selections.push_back(Selection{directory + "/" + binaries[candidate.binary],
+                                           qualifierFor(binaries[candidate.binary]),
+                                           {},
+                                           {},
                                            held[candidate.binary]});
         }
-        selections.back().cases.push_back(candidate.raw);
+        Selection &selection = selections[slot[candidate.binary]];
+        (takeRunnable ? selection.cases : selection.suppressed).push_back(candidate.raw);
     }
     return selections;
 }
 
 // The --gtest_filter(s) to hand *selection*'s binary, one per invocation of it.
-//
-// An exact list of case names, never the caller's pattern, which would also select the
-// identically named cases of a multi-arm binary's other arm. Why "*" and why the split:
-// MICROTEST_README.md, "rccl-UnitTestsHostAll".
 std::vector<std::string> childFilters(const Selection &selection)
 {
     if (selection.cases.size() == selection.runnable) {
         return {"*"};
     }
+    // Name the suppressed cases too, so gtest reports them as it would under "*".
+    std::vector<TestCaseName> named = selection.cases;
+    named.insert(named.end(), selection.suppressed.begin(), selection.suppressed.end());
+
     std::vector<std::string> filters;
     std::string current;
-    for (const TestCaseName &name : selection.cases) {
+    for (const TestCaseName &name : named) {
         const std::string entry = name.suite + "." + name.test;
         if (!current.empty() && current.size() + 1 + entry.size() > kMaxFilterChars) {
             filters.push_back(current);
@@ -329,25 +347,18 @@ std::vector<std::string> childFilters(const Selection &selection)
 
 // ── report merging ──────────────────────────────────────────────────
 
-// The report formats gtest can write, and this dispatcher therefore has to merge.
-//
-// Both are real consumers: run_host_tests.sh asks for xml, and the coco test runner asks for
-// json through GTEST_OUTPUT (tools/scripts/test_runner/lib/test_executor.py).
 enum class ReportFormat { Xml, Json };
 
-// *format* as gtest spells it in --gtest_output=<format>:<path>.
 std::string_view formatName(ReportFormat format)
 {
     return format == ReportFormat::Json ? "json" : "xml";
 }
 
-// One child's report, as merged into the dispatcher's own.
-//
-// Only the member matching the run's format is populated, except in crashFragment(), which
-// fills both so the crash path never has to know which format is in play.
+// One child's report. Only the member matching the run's format is populated, except by
+// crashFragment(), which fills both.
 struct SuiteFragment {
-    std::string xml;   // the child's <testsuite> elements, qualifier applied
-    nlohmann::json suites = nlohmann::json::array();   // the same suites, as JSON objects
+    std::string xml;
+    nlohmann::json suites = nlohmann::json::array();
     long tests = 0;
     long failures = 0;
     long disabled = 0;
@@ -373,11 +384,7 @@ std::string_view attributeValue(std::string_view xml, std::string_view attribute
     return xml.substr(from, end - from);
 }
 
-// Rewrite every suite and case name in *xml* to carry *qualifier*.
-//
-// gtest writes the suite name twice -- as <testsuite name=...> and as each <testcase
-// classname=...> -- and both are part of the identity a results consumer reconstructs, so both
-// have to move together. <testcase name=...> is the case, not the suite, and is left alone.
+// Prefix every <testsuite name=...> and <testcase classname=...> in *xml* with *qualifier*.
 std::string applyQualifier(std::string_view xml, std::string_view qualifier)
 {
     constexpr std::string_view kSuiteAttribute = "<testsuite name=\"";
@@ -404,12 +411,7 @@ std::string applyQualifier(std::string_view xml, std::string_view qualifier)
     return out;
 }
 
-// *text* (one child's whole JSON report) reduced to the fragment the dispatcher splices in.
-//
-// Parsed rather than pattern-matched: gtest's JSON escapes strings (its own report writes
-// \/ for every path separator) and nests failure messages that contain braces and quotes, none
-// of which survives being cut out of the text by hand. nlohmann also gives the only honest
-// answer to "is this a gtest report at all?" -- a parse error, or a missing testsuites array.
+// One child's whole JSON report reduced to a fragment, or nullopt if it is not a gtest report.
 std::optional<SuiteFragment> parseChildJsonReport(const std::string &text,
                                                   std::string_view qualifier)
 {
@@ -427,8 +429,6 @@ std::optional<SuiteFragment> parseChildJsonReport(const std::string &text,
     fragment.skipped = root.value("skipped", 0);
     fragment.time = jsonSeconds(root.value("time", std::string("0s")));
 
-    // Suite and case keep their own identity; only the names that carry the suite's identity
-    // move, exactly as in the XML path: the suite's name and each case's classname.
     for (nlohmann::json suite : root["testsuites"]) {
         if (!suite.is_object()) {
             continue;
@@ -448,10 +448,7 @@ std::optional<SuiteFragment> parseChildJsonReport(const std::string &text,
     return fragment;
 }
 
-// *xml* (one child's whole report) reduced to the fragment the dispatcher splices in.
-//
-// Returns nullopt when the document has no <testsuites> root, which is how a child that died
-// before writing its report, or wrote something that is not a gtest report, is recognised.
+// One child's whole XML report reduced to a fragment, or nullopt if it is not a gtest report.
 std::optional<SuiteFragment> parseChildXmlReport(std::string_view xml, std::string_view qualifier)
 {
     const size_t root = xml.find("<testsuites");
@@ -475,7 +472,6 @@ std::optional<SuiteFragment> parseChildXmlReport(std::string_view xml, std::stri
     return fragment;
 }
 
-// *text* (one child's whole report, in *format*) reduced to the fragment to splice in.
 std::optional<SuiteFragment> parseChildReport(const std::string &text, std::string_view qualifier,
                                               ReportFormat format)
 {
@@ -483,10 +479,24 @@ std::optional<SuiteFragment> parseChildReport(const std::string &text, std::stri
                                         : parseChildXmlReport(text, qualifier);
 }
 
-// A one-case <testsuite> standing in for a child that produced no usable report.
-//
-// Synthesised rather than ignored: a binary that crashes, or that rejects an argument and exits
-// without running anything, is a failure of the run and has to reach the results consumer as one.
+std::string escapeXml(std::string_view text)
+{
+    std::string escaped;
+    escaped.reserve(text.size());
+    for (const char c : text) {
+        switch (c) {
+            case '&': escaped += "&amp;"; break;
+            case '<': escaped += "&lt;"; break;
+            case '>': escaped += "&gt;"; break;
+            case '"': escaped += "&quot;"; break;
+            case '\'': escaped += "&apos;"; break;
+            default: escaped += c; break;
+        }
+    }
+    return escaped;
+}
+
+// A failing one-case suite standing in for a child that produced no usable report.
 SuiteFragment crashFragment(std::string_view qualifier, std::string_view detail)
 {
     SuiteFragment fragment;
@@ -500,12 +510,9 @@ SuiteFragment crashFragment(std::string_view qualifier, std::string_view detail)
         "      <failure message=\"{detail}\" type=\"\"/>\n"
         "    </testcase>\n"
         "  </testsuite>\n",
-        fmt::arg("qualifier", qualifier), fmt::arg("detail", detail));
+        fmt::arg("qualifier", escapeXml(qualifier)), fmt::arg("detail", escapeXml(detail)));
 
-    // The same case as JSON. Spelled with the keys the results consumer actually reads -- a
-    // non-empty failures array, status RUN and result COMPLETED -- because a case missing them
-    // is classified as not-run and would drop the failure rather than report it (see
-    // _leaf_case_status in tools/scripts/test_runner/lib/test_executor.py).
+    // The consumer needs status RUN, result COMPLETED and a non-empty failures array.
     const std::string suiteName = fmt::format("{}/HostTestDispatch", qualifier);
     fragment.suites.push_back(nlohmann::json{
         {"name", suiteName},
@@ -526,7 +533,6 @@ SuiteFragment crashFragment(std::string_view qualifier, std::string_view detail)
     return fragment;
 }
 
-// The merged report for *fragments*, as a complete gtest JSON document.
 std::string mergeJsonReports(const std::vector<SuiteFragment> &fragments)
 {
     long tests = 0, failures = 0, disabled = 0, errors = 0, skipped = 0;
@@ -551,8 +557,7 @@ std::string mergeJsonReports(const std::vector<SuiteFragment> &fragments)
                               {"time", fmt::format("{:g}s", time)},
                               {"name", "AllTests"},
                               {"testsuites", suites}};
-    // Two-space indent and a trailing newline, as gtest's own JSON writer produces, so a
-    // report from one binary and a merged one still diff cleanly against each other.
+    // Matches gtest's own JSON layout.
     return root.dump(2) + "\n";
 }
 
@@ -581,7 +586,6 @@ std::string mergeXmlReports(const std::vector<SuiteFragment> &fragments)
         tests, failures, disabled, errors, skipped, time, body);
 }
 
-// The merged report for *fragments*, in *format*.
 std::string mergeReports(const std::vector<SuiteFragment> &fragments, ReportFormat format)
 {
     return format == ReportFormat::Json ? mergeJsonReports(fragments) : mergeXmlReports(fragments);
@@ -589,15 +593,9 @@ std::string mergeReports(const std::vector<SuiteFragment> &fragments, ReportForm
 
 // ── command line ────────────────────────────────────────────────────
 
-// The help flags gtest itself recognises. Spelled out here because gtest offers no predicate
-// for them: the decision has to be made before gtest ever sees the caller's argv.
+// The help flags gtest itself recognises.
 constexpr std::string_view kHelpFlags[] = {"--help", "-h", "-?", "/?"};
 
-// Whether *arg* asks for help rather than for a run.
-//
-// gtest also treats an UNRECOGNISED --gtest_* flag as a help request. That one cannot be
-// mirrored here: knowing which --gtest_* flags exist is exactly the knowledge this dispatcher
-// refuses to carry, so a misspelled flag still reaches the children, each of which prints help.
 bool isHelpFlag(std::string_view arg)
 {
     return std::find(std::begin(kHelpFlags), std::end(kHelpFlags), arg) != std::end(kHelpFlags);
@@ -609,16 +607,13 @@ struct Options {
     bool listTests = false;
     bool alsoRunDisabled = false;
     std::string filter = "*";
-    std::string outputPath;       // empty: the caller asked for no report
+    std::string outputPath;  // empty: no report
     ReportFormat outputFormat = ReportFormat::Xml;
     std::vector<std::string> passthrough;
 };
 
-// A --gtest_output= value ("<format>:<path>", a bare format, or a bare path) applied to *options*.
-//
-// gtest's own rules, mirrored: a colon-less value that is "xml" or "json" names the FORMAT and
-// leaves the path at gtest's default, any other colon-less value is a path in xml, and a path
-// ending in '/' is a directory to write the default filename into.
+// A --gtest_output= value ("<format>:<path>", a bare format, or a bare path) applied to
+// *options*, following gtest's own rules.
 void applyOutputSpec(std::string_view value, Options *options)
 {
     const size_t colon = value.find(':');
@@ -637,29 +632,15 @@ void applyOutputSpec(std::string_view value, Options *options)
     options->outputPath = path;
 }
 
-// *args* (argv[1:]) parsed into :class:`Options`, with *outputEnv* standing for GTEST_OUTPUT and
-// *filterEnv* for GTEST_FILTER.
-//
-// Everything the dispatcher does not act on is forwarded verbatim, so flags it has never heard of
-// (--gtest_repeat, --gtest_shuffle, a binary's own env-driven switches) keep working.
-//
-// GTEST_OUTPUT is read here rather than left to gtest because gtest would act on it in THIS
-// process: it seeds the output flag at static init, so the no-op run that resolves the filter
-// would write its own all-pass report over the caller's file and the real results would never
-// reach it. Taking the variable ourselves turns it into the destination of the merged report.
-//
-// GTEST_FILTER is taken for the same reason in reverse: left in the environment it would reach
-// the children, which hold UNQUALIFIED names, so a pattern written against the published
-// qualified names would select nothing in any of them while this process still asked for every
-// case. Taken here it is a default for the dispatcher's own filter, resolved over the published
-// names like a --gtest_filter flag, and clearConsumedEnvironment() keeps it from the children.
-// gtest's rule for a boolean GTEST_ variable: "0" is the only false value, unset aside. An empty
-// value is true, which is why the unset case is a nullopt rather than an empty string.
+// gtest's rule for a boolean GTEST_ variable: set and not "0".
 bool environmentFlagIsSet(std::optional<std::string_view> value)
 {
     return value && *value != "0";
 }
 
+// *args* (argv[1:]) parsed into Options, with *outputEnv*, *filterEnv* and *disabledEnv* standing
+// for GTEST_OUTPUT, GTEST_FILTER and GTEST_ALSO_RUN_DISABLED_TESTS. Anything not acted on is
+// forwarded to the children verbatim.
 Options parseArgs(const std::vector<std::string> &args, std::string_view outputEnv = "",
                   std::string_view filterEnv = "",
                   std::optional<std::string_view> disabledEnv = std::nullopt)
@@ -675,24 +656,16 @@ Options parseArgs(const std::vector<std::string> &args, std::string_view outputE
         options.filter = std::string(filterEnv);   // an explicit flag below overrides this
     }
     if (environmentFlagIsSet(disabledEnv)) {
-        // Acted on AND forwarded, exactly as the flag is: the selection here has to include the
-        // DISABLED_ cases, and each child has to be told to run the ones it is handed. Without
-        // this, a binary sent a name list would skip them while one sent "*" ran them.
         options.alsoRunDisabled = true;
         options.passthrough.emplace_back("--gtest_also_run_disabled_tests");
     }
     for (const std::string &arg : args) {
         if (isHelpFlag(arg)) {
-            // Acted on and NOT forwarded: help is a question about this binary, and forwarding
-            // it would fork every child to print its own copy of the same gtest help screen,
-            // none of which writes a report -- which the run would then score as a failure.
             options.help = true;
         } else if (arg == "--gtest_list_tests") {
             options.listTests = true;
         } else if (arg == "--gtest_also_run_disabled_tests") {
-            // Acted on AND forwarded: the children need it to run their DISABLED_ cases, and
-            // the filter resolution here needs it to select them in the first place.
-            if (!options.alsoRunDisabled) {   // the environment may have added it already
+            if (!options.alsoRunDisabled) {
                 options.passthrough.push_back(arg);
             }
             options.alsoRunDisabled = true;
@@ -709,20 +682,6 @@ Options parseArgs(const std::vector<std::string> &args, std::string_view outputE
 
 // ── process and filesystem plumbing ─────────────────────────────────
 
-// Whether *path* is a regular file with an execute bit.
-//
-// The execute bit is asked of access() and not of the filesystem permissions: only access()
-// answers it for THIS process, which is what deciding whether we can exec the file needs.
-bool isExecutableFile(const fs::path &path)
-{
-    std::error_code ec;
-    if (!fs::is_regular_file(path, ec) || ec) {
-        return false;
-    }
-    return access(path.c_str(), X_OK) == 0;
-}
-
-// This executable's own path, resolved through /proc, or empty when that is unavailable.
 std::string selfPath()
 {
     std::error_code ec;
@@ -730,7 +689,6 @@ std::string selfPath()
     return ec ? std::string() : resolved.string();
 }
 
-// The directory holding this executable, resolved through /proc so a PATH-less argv[0] works.
 std::string selfDirectory(const char *argv0)
 {
     std::string path = selfPath();
@@ -741,45 +699,60 @@ std::string selfDirectory(const char *argv0)
     return parent.empty() ? std::string(".") : parent.string();
 }
 
-// Every binary this dispatcher fronts, by name, in a stable order.
-//
-// Self-exclusion is by resolved path, not by name, so renaming this binary cannot make it
-// recurse into itself.
-std::vector<std::string> discoverBinaries(const std::string &directory, const std::string &self)
+// The binaries named by *directory*'s manifest, in order; empty when there is no manifest.
+std::vector<std::string> manifestBinaries(const std::string &directory)
 {
-    std::vector<std::string> binaries;
-    std::error_code ec;
-    for (const fs::directory_entry &entry : fs::directory_iterator(directory, ec)) {
-        const std::string name = entry.path().filename().string();
-        if (!startsWith(name, kBinaryPrefix)) {
-            continue;
-        }
-        if (entry.path().string() == self || !isExecutableFile(entry.path())) {
-            continue;
-        }
-        binaries.push_back(name);
+    std::ifstream manifest((fs::path(directory) / kBinaryManifest).string());
+    if (!manifest) {
+        return {};
     }
-    std::sort(binaries.begin(), binaries.end());
-    return binaries;
+    std::error_code selfEc;
+    const fs::path self = fs::weakly_canonical(selfPath(), selfEc);
+
+    std::vector<std::string> names;
+    std::string line;
+    while (std::getline(manifest, line)) {
+        while (!line.empty() && (line.back() == '\r' || line.back() == ' ' || line.back() == '\t')) {
+            line.pop_back();
+        }
+        if (line.empty()) {
+            continue;
+        }
+        if (fs::path(line).filename() != fs::path(line)) {
+            fmt::print(stderr, "host-test-dispatch: ignoring \"{}\" in {}: a binary name, not a"
+                               " path, is expected on each line\n",
+                       line, kBinaryManifest);
+            continue;
+        }
+        std::error_code ec;
+        const fs::path resolved = fs::weakly_canonical(fs::path(directory) / line, ec);
+        if (!selfEc && !ec && resolved == self) {
+            fmt::print(stderr, "host-test-dispatch: ignoring \"{}\" in {}: it resolves to this"
+                               " executable, which would run the front door inside itself\n",
+                       line, kBinaryManifest);
+            continue;
+        }
+        if (std::find(names.begin(), names.end(), line) != names.end()) {
+            fmt::print(stderr, "host-test-dispatch: ignoring \"{}\" in {}: already named, and a"
+                               " second child of that name would overwrite the first's report\n",
+                       line, kBinaryManifest);
+            continue;
+        }
+        names.push_back(line);
+    }
+    return names;
+}
+
+std::string binaryDirectory(const std::string &selfDir)
+{
+    return (fs::path(selfDir) / kMicroSubdirectory).string();
 }
 
 // ── the gtest environment the children are given ────────────────────
 //
-// gtest configures itself from GTEST_* variables as well as from flags, and a dispatcher sits in
-// the one place where that is dangerous: this process reads them too. Each variable is therefore
-// one of two things, and the table below says which.
-//
-//   Consume  this process acts on it, and re-expresses the decision as an explicit per-child
-//            flag. A child that saw the variable as well would act on it a SECOND time, over a
-//            case list that has already been narrowed -- running a fraction of what it was told
-//            to run, and exiting 0 for it.
-//   Forward  the variable means the same thing in a child as it does here and changes nothing
-//            about which cases run, so the children keep it.
-//
-// An unknown GTEST_* variable is consumed, which is the safe default of the two: a variable a
-// future gtest adds then costs a redundant strip and a line on stderr, where inheriting it could
-// silently cost coverage. Nothing here needs updating for gtest to stay correct -- the table only
-// buys back the forwarding of variables we have decided are harmless.
+// Consume: acted on here and kept from the children, which would otherwise apply it a second
+// time to an already-narrowed case list. Forward: harmless to inherit. Unknown GTEST_* variables
+// are consumed.
 enum class Disposition { Consume, Forward };
 
 constexpr std::string_view kGtestVariablePrefix = "GTEST_";
@@ -788,20 +761,12 @@ constexpr struct {
     std::string_view name;
     Disposition how;
 } kGtestVariables[] = {
-    // Resolved here over the published, qualified names; each child is handed its cases by name.
     {"GTEST_FILTER", Disposition::Consume},
-    // Becomes the destination of the merged report; each child writes the report directory.
     {"GTEST_OUTPUT", Disposition::Consume},
-    // Decides the selection here, so a child must not re-decide it for the list it is handed.
     {"GTEST_ALSO_RUN_DISABLED_TESTS", Disposition::Consume},
-    // Sharding happens once, over the published names. A child that sharded its own list again
-    // would run 1/N of it, so the run as a whole would cover 1/N of the tree and still be green.
-    // test/common/ProcessIsolatedTestRunner.cpp keeps these from its own forks for the same
-    // reason.
     {"GTEST_TOTAL_SHARDS", Disposition::Consume},
     {"GTEST_SHARD_INDEX", Disposition::Consume},
     {"GTEST_SHARD_STATUS_FILE", Disposition::Consume},
-    // Presentation and repetition: identical meaning in a child, and no effect on the selection.
     {"GTEST_COLOR", Disposition::Forward},
     {"GTEST_BRIEF", Disposition::Forward},
     {"GTEST_PRINT_TIME", Disposition::Forward},
@@ -817,7 +782,6 @@ constexpr struct {
     {"GTEST_STACK_TRACE_DEPTH", Disposition::Forward},
 };
 
-// Whether *name* is a GTEST_ variable the table names as harmless to inherit.
 bool isForwardedVariable(std::string_view name)
 {
     for (const auto &entry : kGtestVariables) {
@@ -825,10 +789,9 @@ bool isForwardedVariable(std::string_view name)
             return entry.how == Disposition::Forward;
         }
     }
-    return false;   // unknown: consumed, per the fail-closed default above
+    return false;
 }
 
-// Whether *name* is a GTEST_ variable the table does not name at all.
 bool isUnknownGtestVariable(std::string_view name)
 {
     if (!startsWith(name, kGtestVariablePrefix)) {
@@ -838,10 +801,7 @@ bool isUnknownGtestVariable(std::string_view name)
                         [name](const auto &entry) { return entry.name == name; });
 }
 
-// The GTEST_ variables currently set that a child must not see, in the environment's order.
-//
-// Read from the live environment rather than from the table, so a variable this build has never
-// heard of is still found and still stripped.
+// The GTEST_ variables currently set that a child must not see.
 std::vector<std::string> gtestVariablesToStrip()
 {
     std::vector<std::string> names;
@@ -859,13 +819,7 @@ std::vector<std::string> gtestVariablesToStrip()
     return names;
 }
 
-// Drop those variables from THIS process's environment.
-//
-// Called between fork() and exec() in the children, never in the dispatcher: the dispatcher goes
-// on using the originals after the first fork -- resolveFilter() shards over them -- and a child
-// owns its own copy of the environment, so stripping there cannot reach back. Putting it at the
-// fork sites is what makes the guarantee unconditional: there is no ordering in main() to get
-// right, and a fork site added later gets it by construction.
+// Called between fork() and exec(); the dispatcher itself keeps the originals.
 void stripGtestVariablesInChild(const std::vector<std::string> &names)
 {
     for (const std::string &name : names) {
@@ -873,10 +827,6 @@ void stripGtestVariablesInChild(const std::vector<std::string> &names)
     }
 }
 
-// Name on stderr any GTEST_ variable being stripped only because the table has not heard of it.
-//
-// The strip is the safe choice, but it is a choice made without knowing what the variable does,
-// so it is said out loud rather than left to be discovered as missing coverage.
 void warnAboutUnknownGtestVariables(const std::vector<std::string> &names)
 {
     for (const std::string &name : names) {
@@ -889,7 +839,6 @@ void warnAboutUnknownGtestVariables(const std::vector<std::string> &names)
     }
 }
 
-// *argument* quoted for a /bin/sh command line.
 std::string shellQuote(const std::string &argument)
 {
     std::string quoted = "'";
@@ -903,63 +852,48 @@ std::string shellQuote(const std::string &argument)
     return quoted + "'";
 }
 
-// *path*'s --gtest_list_tests output, or nullopt when the binary failed to produce one.
-//
-// The two are deliberately distinguishable: a healthy binary that holds no cases lists nothing
-// and is not a problem, whereas one that cannot start (missing .so, an abort in static init)
-// fails here FIRST, before anything else the dispatcher does to it, and must not be mistaken
-// for the former. See enumerate().
-std::optional<std::string> listTestsOutput(const std::string &path)
+// LLVM_PROFILE_FILE for the child at *path*, given the *pattern* this process inherited.
+std::string childProfileFile(std::string_view pattern, std::string_view path)
 {
-    // The listing children are fork sites like any other, so they get the same stripped
-    // environment. popen() hands them this process's one, which must keep its originals, so the
-    // strip is expressed to the shell instead -- same list, same guarantee.
-    std::string unset;
-    for (const std::string &name : gtestVariablesToStrip()) {
-        unset += fmt::format("-u {} ", shellQuote(name));
+    if (pattern.empty()) {
+        return "";
     }
-    const std::string command =
-        fmt::format("env {}{} --gtest_list_tests 2>/dev/null", unset, shellQuote(path));
-    std::unique_ptr<FILE, int (*)(FILE *)> pipe(popen(command.c_str(), "r"), pclose);
-    if (pipe == nullptr) {
-        return std::nullopt;
-    }
-    std::string output;
-    char buffer[4096];
-    while (fgets(buffer, sizeof(buffer), pipe.get()) != nullptr) {
-        output += buffer;
-    }
-    // pclose() is the child's exit status, so it has to be read before the handle is released;
-    // a non-zero status means the listing is partial, whatever arrived on stdout.
-    if (pclose(pipe.release()) != 0) {
-        return std::nullopt;
-    }
-    return output;
+    const fs::path profile{std::string(pattern)};
+    const std::string binary = fs::path(std::string(path)).filename().string();
+    return (profile.parent_path() / binary / profile.filename()).string();
+}
+
+std::string childProfileFile(const std::string &path)
+{
+    const char *pattern = std::getenv("LLVM_PROFILE_FILE");
+    return childProfileFile(pattern == nullptr ? std::string_view() : std::string_view(pattern),
+                            path);
 }
 
 // ── enumeration ───────────────────────────────────────────────────
 
-// What the discovered binaries hold, and which of them would not say.
 struct Enumeration {
     std::vector<CandidateCase> candidates;
-    std::vector<std::string> unlistable;   // binaries whose --gtest_list_tests failed
+    std::vector<std::string> unlistable;  // --gtest_list_tests failed
+    std::vector<std::string> unlisted;    // not reached before a stop
 };
 
-// How a binary is asked for its cases. A seam so the enumeration can be tested without one.
 using ListingFn = std::function<std::optional<std::string>(const std::string &)>;
 
-// Every case every discovered binary holds, published name and all, in discovery order.
-//
-// A binary that will not list its cases is RECORDED, never skipped. Dropping it would be the
-// one failure this dispatcher must not have: discovery is what replaced the hand-kept binary
-// lists, so a binary that cannot start would otherwise disappear from the run entirely -- unrun,
-// unreported, absent from the coverage manifest -- and the run would still exit 0. The
-// hand-kept list it replaced caught exactly this, by checking each binary wrote a report.
+// Whether the run has been asked to stop.
+using TerminatedFn = std::function<bool()>;
+
+// Every case every binary holds, in order. A binary that will not list its cases is recorded,
+// never skipped, so it is reported as a failure.
 Enumeration enumerate(const std::string &directory, const std::vector<std::string> &binaries,
-                      const ListingFn &listing)
+                      const ListingFn &listing, const TerminatedFn &terminated = {})
 {
     Enumeration enumeration;
     for (size_t i = 0; i < binaries.size(); ++i) {
+        if (terminated && terminated()) {
+            enumeration.unlisted.assign(binaries.begin() + static_cast<long>(i), binaries.end());
+            break;
+        }
         const std::optional<std::string> output =
             listing((fs::path(directory) / binaries[i]).string());
         if (!output) {
@@ -975,8 +909,111 @@ Enumeration enumerate(const std::string &directory, const std::vector<std::strin
     return enumeration;
 }
 
-// Run *path* with *args*, inheriting stdio, and return its exit status (128+signal if killed).
-int runChild(const std::string &path, const std::vector<std::string> &args)
+std::string childLogPath(std::string_view directory, std::string_view qualifier)
+{
+    return (fs::path(std::string(directory)) / fmt::format("{}.log", qualifier)).string();
+}
+
+// Empty means the children write to the console.
+std::string resolveLogDirectory(const char *override_)
+{
+    if (override_ == nullptr || *override_ == '\0') {
+        return std::string(kDefaultLogDirectory);
+    }
+    return std::string_view(override_) == "-" ? std::string() : std::string(override_);
+}
+
+// Why an existing *directory* cannot be trusted with this process's output, or nullopt if it can:
+// in a shared parent such as /tmp, another user can create it first and plant symlinks in it.
+std::optional<std::string> untrustedDirectoryReason(const std::string &directory)
+{
+    struct stat info {};
+    if (lstat(directory.c_str(), &info) != 0) {
+        return std::string(std::strerror(errno));
+    }
+    if (S_ISLNK(info.st_mode)) {
+        return "it is a symbolic link";
+    }
+    if (!S_ISDIR(info.st_mode)) {
+        return "it is not a directory";
+    }
+    if (info.st_uid != geteuid()) {
+        return fmt::format("it belongs to uid {}, not to this process", info.st_uid);
+    }
+    return std::nullopt;
+}
+
+// Make *directory* ready to hold this process's output (the children's logs or profiles), or say
+// why it cannot be trusted with it.
+std::optional<std::string> preparePrivateDirectory(const std::string &directory)
+{
+    const fs::path path{directory};
+    if (path.has_parent_path() && !path.parent_path().empty()) {
+        std::error_code ec;
+        fs::create_directories(path.parent_path(), ec);
+    }
+    if (mkdir(directory.c_str(), 0700) == 0) {
+        return std::nullopt;
+    }
+    if (errno != EEXIST) {
+        return std::string(std::strerror(errno));
+    }
+    return untrustedDirectoryReason(directory);
+}
+
+size_t resolveParallelism(const char *request, size_t fallbackJobs)
+{
+    const size_t fallback = fallbackJobs < 1 ? 1 : fallbackJobs;
+    if (request == nullptr || *request == '\0') {
+        return fallback;
+    }
+    const long requested = toLong(std::string_view(request), 0);
+    return requested >= 1 ? static_cast<size_t>(requested) : fallback;
+}
+
+// nullopt means no limit; "0" asks for that explicitly.
+std::optional<std::chrono::seconds> resolveChildTimeout(const char *request)
+{
+    if (request == nullptr || *request == '\0') {
+        return std::nullopt;
+    }
+    const long seconds = toLong(std::string_view(request), -1);
+    if (seconds == 0) {
+        return std::nullopt;
+    }
+    if (seconds < 0) {
+        fmt::print(stderr,
+                   "host-test-dispatch: {}=\"{}\" is not a number of seconds -- no child timeout"
+                   " will be applied\n",
+                   kChildTimeoutEnv, request);
+        return std::nullopt;
+    }
+    return std::chrono::seconds{seconds};
+}
+
+// The processors in this process's affinity mask, or 1 when that cannot be determined.
+size_t detectedParallelism()
+{
+    cpu_set_t affinity;
+    if (sched_getaffinity(0, sizeof(affinity), &affinity) == 0) {
+        const int usable = CPU_COUNT(&affinity);
+        if (usable > 0) {
+            return static_cast<size_t>(usable);
+        }
+    }
+    const long online = sysconf(_SC_NPROCESSORS_ONLN);
+    return online > 0 ? static_cast<size_t>(online) : 1;
+}
+
+size_t defaultParallelism(size_t processors)
+{
+    return processors / 2 < 1 ? 1 : processors / 2;
+}
+
+// Start *path* with *args* in its own process group and return its pid, or -1. A non-empty
+// *logPath* receives stdout (and stderr, unless *errPath* is given).
+pid_t spawnChild(const std::string &path, const std::vector<std::string> &args,
+                 const std::string &logPath = "", const std::string &errPath = "")
 {
     std::vector<char *> argv;
     argv.push_back(const_cast<char *>(path.c_str()));
@@ -985,34 +1022,261 @@ int runChild(const std::string &path, const std::vector<std::string> &args)
     }
     argv.push_back(nullptr);
 
-    // Collected before the fork: it reads the environment, which is cheaper and simpler to do
-    // here than in the narrow async-signal-safe window after it.
     const std::vector<std::string> strip = gtestVariablesToStrip();
+    std::string profile = childProfileFile(path);
+    if (!profile.empty()) {
+        // The profile runtime creates this directory only for some patterns (those with %m),
+        // so a child given a plain %p one would otherwise fail to write its profile.
+        const std::string profileDir = fs::path(profile).parent_path().string();
+        if (const std::optional<std::string> problem = preparePrivateDirectory(profileDir)) {
+            fmt::print(stderr, "host-test-dispatch: cannot use {}: {} -- {} will not write a"
+                               " coverage profile\n",
+                       profileDir, *problem, path);
+            profile = "/dev/null";
+        }
+    }
+    const pid_t parent = getpid();
 
     const pid_t pid = fork();
     if (pid < 0) {
         fmt::print(stderr, "host-test-dispatch: fork failed: {}\n", std::strerror(errno));
-        return 1;
+        return -1;
     }
     if (pid == 0) {
-        // In the child, on its own copy of the environment: what the dispatcher has already
-        // decided must not be decided again over the case list this child was handed.
+        // Die with the dispatcher; the getppid() check covers it dying before the prctl.
+        prctl(PR_SET_PDEATHSIG, SIGKILL);
+        if (getppid() != parent) {
+            _exit(128 + SIGKILL);
+        }
+        setpgid(0, 0);
         stripGtestVariablesInChild(strip);
+        if (!profile.empty()) {
+            setenv("LLVM_PROFILE_FILE", profile.c_str(), 1);
+        }
+        if (!logPath.empty()) {
+            const int fd =
+                open(logPath.c_str(), O_WRONLY | O_CREAT | O_APPEND | O_NOFOLLOW, 0644);
+            if (fd < 0) {
+                fmt::print(stderr, "host-test-dispatch: cannot write {}: {} -- {} will print to"
+                                   " the console instead\n",
+                           logPath, std::strerror(errno), path);
+            } else {
+                dup2(fd, STDOUT_FILENO);
+                if (errPath.empty()) {
+                    dup2(fd, STDERR_FILENO);
+                }
+                if (fd > STDERR_FILENO) {
+                    close(fd);
+                }
+            }
+        }
+        if (!errPath.empty()) {
+            const int fd = open(errPath.c_str(), O_WRONLY | O_CREAT | O_APPEND | O_NOFOLLOW, 0644);
+            if (fd >= 0) {
+                dup2(fd, STDERR_FILENO);
+                if (fd > STDERR_FILENO) {
+                    close(fd);
+                }
+            }
+        }
         execv(path.c_str(), argv.data());
         fmt::print(stderr, "host-test-dispatch: exec {} failed: {}\n", path,
                    std::strerror(errno));
         _exit(127);
     }
-    int status = 0;
-    while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {
-    }
-    if (WIFEXITED(status)) {
-        return WEXITSTATUS(status);
-    }
-    return WIFSIGNALED(status) ? 128 + WTERMSIG(status) : 1;
+    // Also in the parent, so the group exists before any signal is sent.
+    setpgid(pid, pid);
+    return pid;
 }
 
-// Read *path* whole, or return an empty string.
+// Self-pipe the signal handlers write to, so a wait can poll() for a signal and a deadline
+// together.
+class WakePipe {
+public:
+    void open()
+    {
+        if (fds_[0] >= 0) {
+            return;
+        }
+        if (pipe2(fds_, O_CLOEXEC | O_NONBLOCK) != 0) {
+            fmt::print(stderr, "host-test-dispatch: cannot create wake pipe: {}\n",
+                       std::strerror(errno));
+            std::exit(1);
+        }
+    }
+
+    int readFd() const { return fds_[0]; }
+
+    // Async-signal-safe.
+    void wake() const
+    {
+        const char byte = 1;
+        const ssize_t written = ::write(fds_[1], &byte, 1);
+        (void)written;
+    }
+
+    void drain() const
+    {
+        if (fds_[0] < 0) {
+            return;
+        }
+        char buffer[64];
+        while (::read(fds_[0], buffer, sizeof(buffer)) > 0) {
+        }
+    }
+
+private:
+    int fds_[2] = {-1, -1};
+};
+
+WakePipe g_wake;
+
+volatile std::sig_atomic_t g_stopRequested = 0;
+
+bool stopRequested() { return g_stopRequested != 0; }
+
+extern "C" void requestStop(int)
+{
+    g_stopRequested = 1;
+    g_wake.wake();
+}
+
+extern "C" void noteChildExit(int)
+{
+    g_wake.wake();
+}
+
+// Make SIGTERM and SIGINT stop the run rather than end the process, and SIGCHLD wake the wait.
+void installStopHandler()
+{
+    g_wake.open();
+
+    struct sigaction action {};
+    action.sa_handler = requestStop;
+    sigemptyset(&action.sa_mask);
+    action.sa_flags = SA_RESTART;
+    sigaction(SIGTERM, &action, nullptr);
+    sigaction(SIGINT, &action, nullptr);
+
+    struct sigaction child {};
+    child.sa_handler = noteChildExit;
+    sigemptyset(&child.sa_mask);
+    child.sa_flags = SA_RESTART | SA_NOCLDSTOP;
+    sigaction(SIGCHLD, &child, nullptr);
+}
+
+// Send *signal* to *pid*'s process group, or to *pid* alone when there is no group.
+void signalChildGroup(pid_t pid, int signal)
+{
+    if (::kill(-pid, signal) == 0 || errno != ESRCH) {
+        return;
+    }
+    ::kill(pid, signal);
+}
+
+using Deadline = std::optional<std::chrono::steady_clock::time_point>;
+
+// *now* + *limit*, or no deadline when there is no limit.
+Deadline deadlineAfter(std::chrono::steady_clock::time_point now,
+                       std::optional<std::chrono::seconds> limit)
+{
+    return limit ? Deadline(now + *limit) : std::nullopt;
+}
+
+// How long until *deadline*, never negative; nullopt when there is none.
+std::optional<std::chrono::milliseconds> timeUntil(Deadline deadline,
+                                                   std::chrono::steady_clock::time_point now)
+{
+    if (!deadline) {
+        return std::nullopt;
+    }
+    return std::max(std::chrono::milliseconds{0},
+                    std::chrono::duration_cast<std::chrono::milliseconds>(*deadline - now));
+}
+
+// The TERM, grace, KILL sequence for one child: each advance() sends the next signal and sets
+// *due* to when the one after it should be sent. With no due, nothing is signalled until
+// advance() is called (e.g. on a stop).
+class Escalation {
+public:
+    Escalation() = default;
+    explicit Escalation(Deadline due) : due_(due) {}
+
+    Deadline due() const { return due_; }
+    bool termed() const { return signalsSent_ > 0; }
+    bool killed() const { return signalsSent_ > 1; }
+
+    void advance(pid_t pid, std::chrono::steady_clock::time_point now,
+                 const std::function<void(pid_t, int)> &kill)
+    {
+        kill(pid, termed() ? SIGKILL : SIGTERM);
+        ++signalsSent_;
+        due_ = now + kTerminateGrace;
+    }
+
+private:
+    Deadline due_;
+    int signalsSent_ = 0;
+};
+
+// Sleep until a signal handler wakes the pipe or *until* passes. Every event a wait cares about
+// (a stop, a child exit) writes the pipe, so with no *until* this blocks until one does.
+void waitForWake(std::optional<std::chrono::steady_clock::time_point> until)
+{
+    int timeout = -1;
+    if (until) {
+        const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
+            *until - std::chrono::steady_clock::now());
+        timeout = static_cast<int>(std::max<std::chrono::milliseconds::rep>(0, left.count()));
+    }
+
+    struct pollfd woken {};
+    woken.fd = g_wake.readFd();
+    woken.events = POLLIN;
+    if (::poll(&woken, 1, timeout) > 0) {
+        g_wake.drain();
+    }
+}
+
+struct ChildExit {
+    int status = 0;          // 128 + signal when it was killed
+    bool signalled = false;
+};
+
+// Wait for whichever child finishes first and return its pid; 0 when *within* elapsed, or when a
+// stop is requested and *returnOnStop*; -1 when there is nothing left to wait for.
+pid_t reapAnyChild(ChildExit &exit, std::optional<std::chrono::milliseconds> within,
+                   bool returnOnStop)
+{
+    const std::optional<std::chrono::steady_clock::time_point> deadline =
+        within ? std::optional<std::chrono::steady_clock::time_point>(
+                     std::chrono::steady_clock::now() + *within)
+               : std::nullopt;
+    for (;;) {
+        int status = 0;
+        const pid_t pid = waitpid(-1, &status, WNOHANG);
+        if (pid > 0) {
+            exit.signalled = !WIFEXITED(status);
+            exit.status = WIFEXITED(status) ? WEXITSTATUS(status)
+                                            : (WIFSIGNALED(status) ? 128 + WTERMSIG(status) : 1);
+            return pid;
+        }
+        if (pid < 0 && errno != EINTR) {
+            exit = ChildExit{1, false};
+            return -1;
+        }
+        if (returnOnStop && stopRequested()) {
+            exit = ChildExit{};
+            return 0;
+        }
+        if (deadline && std::chrono::steady_clock::now() >= *deadline) {
+            exit = ChildExit{};
+            return 0;
+        }
+        waitForWake(deadline);
+    }
+}
+
 std::string readFile(const std::string &path)
 {
     std::ifstream file(path, std::ios::binary);
@@ -1024,10 +1288,82 @@ std::string readFile(const std::string &path)
     return contents.str();
 }
 
+// ── the listing each binary is asked for ───────────────────────────
+
+// A mkstemp file removed on destruction.
+class ScopedTempFile {
+public:
+    explicit ScopedTempFile(const std::string &pattern)
+    {
+        std::vector<char> name(pattern.begin(), pattern.end());
+        name.push_back('\0');
+        const int fd = mkstemp(name.data());
+        if (fd >= 0) {
+            close(fd);
+            path_ = name.data();
+        }
+    }
+
+    ~ScopedTempFile()
+    {
+        if (!path_.empty()) {
+            std::error_code ec;
+            fs::remove(path_, ec);
+        }
+    }
+
+    ScopedTempFile(const ScopedTempFile &) = delete;
+    ScopedTempFile &operator=(const ScopedTempFile &) = delete;
+
+    const std::string &path() const { return path_; }
+    bool valid() const { return !path_.empty(); }
+
+private:
+    std::string path_;
+};
+
+// *path*'s --gtest_list_tests output, or nullopt when the binary failed, timed out or was
+// stopped.
+std::optional<std::string> listTestsOutput(const std::string &path,
+                                           std::optional<std::chrono::seconds> timeout)
+{
+    const ScopedTempFile listing(
+        (fs::temp_directory_path() / "rccl-host-dispatch-listing-XXXXXX").string());
+    if (!listing.valid()) {
+        return std::nullopt;
+    }
+
+    const pid_t pid = spawnChild(path, {"--gtest_list_tests"}, listing.path(), "/dev/null");
+    if (pid < 0) {
+        return std::nullopt;
+    }
+
+    Escalation escalation(deadlineAfter(std::chrono::steady_clock::now(), timeout));
+    for (;;) {
+        ChildExit exit;
+        const pid_t finished =
+            reapAnyChild(exit, timeUntil(escalation.due(), std::chrono::steady_clock::now()),
+                         !escalation.termed());
+        if (finished == pid) {
+            return (exit.status == 0 && !escalation.termed())
+                       ? std::optional<std::string>(readFile(listing.path()))
+                       : std::nullopt;
+        }
+        if (finished < 0) {
+            return std::nullopt;
+        }
+        if (finished > 0) {
+            continue;
+        }
+        // Timed out, stopped, or a grace period ran out.
+        if (escalation.killed()) {
+            return std::nullopt;
+        }
+        escalation.advance(pid, std::chrono::steady_clock::now(), signalChildGroup);
+    }
+}
+
 // The directory LLVM_PROFILE_FILE points into, or empty when coverage is not being collected.
-//
-// The variable holds a filename pattern (…/rccl_%h_%p_%m.profraw), so only its directory part is
-// meaningful here, and a pattern with no directory part means the profiles land in the cwd.
 std::string coverageDirectory()
 {
     const char *profile = std::getenv("LLVM_PROFILE_FILE");
@@ -1038,32 +1374,523 @@ std::string coverageDirectory()
     return parent.empty() ? std::string(".") : parent.string();
 }
 
-// Record *binaries* as llvm-cov --object candidates next to the profile data.
-//
-// Appended, never rewritten, and deliberately not deduplicated: several dispatcher invocations
-// (one per lane) write here concurrently, and an append of one short line is the only write that
-// is atomic between them. The reader dedupes.
-void recordCoverageObjects(const std::string &directory, const std::vector<std::string> &binaries)
+// ── coverage merge ──────────────────────────────────────────────────
+
+// Runs a shell command and returns its exit status.
+using CommandFn = std::function<int(const std::string &)>;
+
+// Wait for the shell child *pid* and return its exit status, terminating it if the run is
+// stopped.
+int waitForShellChild(pid_t pid)
+{
+    Escalation escalation;
+    for (;;) {
+        int status = 0;
+        const pid_t done = waitpid(pid, &status, WNOHANG);
+        if (done == pid) {
+            return WIFEXITED(status) ? WEXITSTATUS(status) : 1;
+        }
+        if (done < 0 && errno != EINTR) {
+            return 1;
+        }
+        const auto now = std::chrono::steady_clock::now();
+        if ((stopRequested() && !escalation.termed()) ||
+            (!escalation.killed() && escalation.due() && now >= *escalation.due())) {
+            escalation.advance(pid, now, signalChildGroup);
+        }
+        // After the KILL there is nothing left to send, so wait for the exit alone.
+        waitForWake(escalation.killed() ? std::nullopt : escalation.due());
+    }
+}
+
+// Run *command* through /bin/sh and return its exit status. Not std::system(), which ignores
+// SIGINT in the caller while the command runs.
+int runShell(const std::string &command)
+{
+    std::fflush(nullptr);
+
+    const pid_t pid = fork();
+    if (pid < 0) {
+        fmt::print(stderr, "host-test-dispatch: fork failed: {}\n", std::strerror(errno));
+        return 1;
+    }
+    if (pid == 0) {
+        struct sigaction dfl {};
+        dfl.sa_handler = SIG_DFL;
+        sigemptyset(&dfl.sa_mask);
+        sigaction(SIGINT, &dfl, nullptr);
+        sigaction(SIGTERM, &dfl, nullptr);
+        sigaction(SIGCHLD, &dfl, nullptr);
+        prctl(PR_SET_PDEATHSIG, SIGKILL);
+        setpgid(0, 0);
+        execl("/bin/sh", "sh", "-c", command.c_str(), static_cast<char *>(nullptr));
+        _exit(127);
+    }
+    setpgid(pid, pid);
+    return waitForShellChild(pid);
+}
+
+// The llvm tool named *name* from $ROCM_PATH/llvm/bin, falling back to PATH.
+std::string llvmTool(std::string_view name)
+{
+    const char *rocm = std::getenv("ROCM_PATH");
+    const fs::path candidate =
+        fs::path(rocm == nullptr || *rocm == '\0' ? "/opt/rocm" : rocm) / "llvm" / "bin" / name;
+    std::error_code ec;
+    return fs::is_regular_file(candidate, ec) ? candidate.string() : std::string(name);
+}
+
+std::string profdataMergeCommand(const std::string &tool, const std::vector<std::string> &profiles,
+                                 const std::string &output)
+{
+    std::string command = fmt::format("{} merge -sparse", shellQuote(tool));
+    for (const std::string &profile : profiles) {
+        command += fmt::format(" {}", shellQuote(profile));
+    }
+    return command + fmt::format(" -o {}", shellQuote(output));
+}
+
+std::string lcovExportCommand(const std::string &tool, const std::string &binary,
+                              const std::string &profdata, std::string_view ignoreRegex,
+                              const std::string &output)
+{
+    return fmt::format("{} export {} -instr-profile={} --ignore-filename-regex={} -format=lcov"
+                       " > {}",
+                       shellQuote(tool), shellQuote(binary), shellQuote(profdata),
+                       shellQuote(std::string(ignoreRegex)), shellQuote(output));
+}
+
+// The lcov flags needed to read llvm-cov's tracefiles, given the text of `lcov --version`.
+// Kept identical to run_host_tests.sh and the python runner's _merge_host_coverage().
+std::string lcovMergeFlags(std::string_view versionText)
+{
+    const size_t digit = versionText.find_first_of("0123456789");
+    const long major = digit == std::string_view::npos ? 0 : toLong(versionText.substr(digit), 0);
+    if (major >= 2) {
+        return "--rc branch_coverage=1 --rc check_data_consistency=0"
+               " --ignore-errors inconsistent,unsupported,corrupt,format";
+    }
+    return "--rc lcov_branch_coverage=1";
+}
+
+std::string lcovMergeCommand(const std::string &tool, const std::string &flags,
+                             const std::vector<std::string> &tracefiles,
+                             const std::string &output)
+{
+    std::string command = fmt::format("{} {}", shellQuote(tool), flags);
+    for (const std::string &tracefile : tracefiles) {
+        command += fmt::format(" --add-tracefile {}", shellQuote(tracefile));
+    }
+    return command + fmt::format(" -o {}", shellQuote(output));
+}
+
+std::vector<std::string> profilesIn(const std::string &directory)
+{
+    std::vector<std::string> profiles;
+    std::error_code ec;
+    for (const fs::directory_entry &entry : fs::directory_iterator(directory, ec)) {
+        if (entry.path().extension() == ".profraw") {
+            profiles.push_back(entry.path().string());
+        }
+    }
+    std::sort(profiles.begin(), profiles.end());
+    return profiles;
+}
+
+bool coverageExportRequested(const char *request)
+{
+    return request == nullptr || std::string_view(request) != "0";
+}
+
+// Turn the children's profiles into one merged lcov tracefile beside them. Best effort: every
+// problem is a warning.
+void writeMergedCoverage(const std::string &directory, const std::vector<std::string> &binaries,
+                         const CommandFn &run, const TerminatedFn &terminated = {})
 {
     if (directory.empty() || binaries.empty()) {
         return;
     }
-    const std::string path = (fs::path(directory) / kCoverageManifest).string();
-    const int fd = open(path.c_str(), O_WRONLY | O_CREAT | O_APPEND, 0644);
-    if (fd < 0) {
-        fmt::print(stderr, "host-test-dispatch: cannot record coverage objects in {}: {}\n", path,
-                   std::strerror(errno));
+    if (!coverageExportRequested(std::getenv(std::string(kCoverageExportEnv).c_str()))) {
         return;
     }
+    if (terminated && terminated()) {
+        fmt::print(stderr, "host-test-dispatch: run was stopped -- skipping the coverage export;"
+                           " the children's profiles are untouched in {}\n",
+                   directory);
+        return;
+    }
+
+    std::vector<std::pair<std::string, std::vector<std::string>>> pending;
     for (const std::string &binary : binaries) {
-        const std::string line = fmt::format("{}\n", binary);
-        if (write(fd, line.c_str(), line.size()) < 0) {
-            fmt::print(stderr, "host-test-dispatch: short write to {}: {}\n", path,
-                       std::strerror(errno));
-            break;
+        const fs::path binaryDir = fs::path(directory) / fs::path(binary).filename();
+        // The export writes merged.profdata and coverage.lcov here; never through a directory
+        // someone else could have filled with symlinks.
+        if (const std::optional<std::string> problem =
+                untrustedDirectoryReason(binaryDir.string());
+            problem && fs::exists(fs::symlink_status(binaryDir))) {
+            fmt::print(stderr, "host-test-dispatch: not exporting coverage from {}: {}\n",
+                       binaryDir.string(), *problem);
+            continue;
+        }
+        std::vector<std::string> profiles = profilesIn(binaryDir.string());
+        if (!profiles.empty()) {
+            pending.emplace_back(binary, std::move(profiles));
         }
     }
-    close(fd);
+    if (pending.empty()) {
+        return;
+    }
+
+    const char *ignore = std::getenv("RCCL_HOST_COVERAGE_IGNORE_REGEX");
+    const std::string ignoreRegex =
+        ignore == nullptr ? std::string(kCoverageIgnoreRegex) : std::string(ignore);
+    const std::string profdataTool = llvmTool("llvm-profdata");
+    const std::string covTool = llvmTool("llvm-cov");
+
+    fmt::print("----- coverage: exporting {} binaries into {} -----\n", pending.size(),
+               (fs::path(directory) / kCoverageTracefile).string());
+    std::fflush(stdout);
+
+    std::vector<std::string> tracefiles;
+    size_t exported = 0;
+    for (const auto &[binary, profiles] : pending) {
+        if (terminated && terminated()) {
+            fmt::print(stderr, "host-test-dispatch: run was stopped after {} of {} binaries --"
+                               " abandoning the coverage export rather than writing a partial"
+                               " {}\n",
+                       exported, pending.size(), kCoverageTracefile);
+            return;
+        }
+        fmt::print("[{}/{}] {}\n", ++exported, pending.size(),
+                   fs::path(binary).filename().string());
+        std::fflush(stdout);
+        const fs::path binaryDir = fs::path(directory) / fs::path(binary).filename();
+        const std::string profdata = (binaryDir / "merged.profdata").string();
+        const std::string tracefile = (binaryDir / "coverage.lcov").string();
+        if (run(profdataMergeCommand(profdataTool, profiles, profdata)) != 0) {
+            fmt::print(stderr, "host-test-dispatch: llvm-profdata failed for {} -- its coverage"
+                               " is missing from {}\n",
+                       binary, kCoverageTracefile);
+            continue;
+        }
+        if (run(lcovExportCommand(covTool, binary, profdata, ignoreRegex, tracefile)) != 0) {
+            fmt::print(stderr, "host-test-dispatch: llvm-cov export failed for {} -- its coverage"
+                               " is missing from {}\n",
+                       binary, kCoverageTracefile);
+            // The redirect already created it; an empty one would look like a finished export.
+            std::error_code ec;
+            fs::remove(tracefile, ec);
+            continue;
+        }
+        // A binary that only tests test/ code exports no records, and lcov rejects an empty
+        // tracefile, which would sink the whole union.
+        const std::string records = readFile(tracefile);
+        if (records.rfind("SF:", 0) != 0 && records.find("\nSF:") == std::string::npos) {
+            fmt::print("{}: no src/ lines covered, left out of {}\n",
+                       fs::path(binary).filename().string(), kCoverageTracefile);
+            continue;
+        }
+        tracefiles.push_back(tracefile);
+    }
+
+    if (tracefiles.empty()) {
+        return;
+    }
+    const std::string path = (fs::path(directory) / kCoverageTracefile).string();
+    const std::string versionPath = (fs::path(directory) / "lcov-version.txt").string();
+    if (run(fmt::format("lcov --version > {} 2>/dev/null", shellQuote(versionPath))) != 0) {
+        fmt::print(stderr, "host-test-dispatch: lcov is not installed -- {} was not written; the"
+                           " {} per-binary tracefiles are in place under {}\n",
+                   kCoverageTracefile, tracefiles.size(), directory);
+        return;
+    }
+    const std::string flags = lcovMergeFlags(readFile(versionPath));
+    std::error_code ec;
+    fs::remove(versionPath, ec);
+    if (run(lcovMergeCommand("lcov", flags, tracefiles, path)) != 0) {
+        fmt::print(stderr, "host-test-dispatch: lcov could not union the {} per-binary tracefiles"
+                           " -- {} was not written\n",
+                   tracefiles.size(), path);
+        return;
+    }
+    fmt::print("----- coverage: merged {} tracefiles into {} -----\n", tracefiles.size(), path);
+    std::fflush(stdout);
+}
+
+// The operations runSelections() performs on the world outside its loop.
+using SpawnFn = std::function<pid_t(const std::string &path, const std::vector<std::string> &args,
+                                    const std::string &logPath)>;
+// Returns the pid reaped, 0 if *within* elapsed first (or a stop was requested and
+// *returnOnStop*), or -1 if there was nothing to wait for.
+using ReapFn = std::function<pid_t(ChildExit &exit, std::optional<std::chrono::milliseconds> within,
+                                   bool returnOnStop)>;
+using KillFn = std::function<void(pid_t pid, int signal)>;
+using NowFn = std::function<std::chrono::steady_clock::time_point()>;
+using ReportPathFn = std::function<std::string(const std::string &qualifier, size_t part)>;
+
+struct SchedulerOperations {
+    SpawnFn spawn;
+    ReapFn reap;
+    KillFn kill;
+    NowFn now;
+    ReportPathFn reportPath;
+    TerminatedFn terminated;  // unset: cannot be stopped
+};
+
+struct ScheduleOptions {
+    size_t jobs = 1;
+    ReportFormat outputFormat = ReportFormat::Xml;
+    std::vector<std::string> passthrough;
+    std::string logDirectory;              // empty: children inherit our stdio
+    std::optional<std::chrono::seconds> childTimeout;  // nullopt: no limit
+};
+
+struct ChildOutcome {
+    ChildExit exit;
+    bool abandoned = false;  // signalled because the run was stopped
+    bool timedOut = false;
+};
+
+struct ChildContext {
+    std::string qualifier;
+    std::string logPath;  // empty when the child inherited our stdio
+    std::optional<std::chrono::seconds> timeout;
+    size_t remainingParts = 0;  // parts of this binary not yet run
+};
+
+struct ChildVerdict {
+    std::vector<SuiteFragment> fragments;
+    bool failed = false;
+    bool skipRemainingParts = false;
+};
+
+// Decide a child's result from how it ended and the report it left. A killed child's report is
+// discarded.
+ChildVerdict classifyChild(const ChildOutcome &outcome, const ChildContext &context,
+                           std::optional<SuiteFragment> report)
+{
+    const std::string where =
+        context.logPath.empty() ? std::string() : fmt::format("; output in {}", context.logPath);
+    const std::string skipped =
+        context.remainingParts == 0
+            ? std::string()
+            : fmt::format("; its {} remaining part(s) were skipped", context.remainingParts);
+
+    ChildVerdict verdict;
+    if (outcome.abandoned && outcome.exit.signalled) {
+        verdict.fragments.push_back(crashFragment(
+            context.qualifier,
+            fmt::format("run was stopped and this binary was killed before it finished{}", where)));
+        verdict.failed = true;
+        verdict.skipRemainingParts = true;
+        return verdict;
+    }
+    if (outcome.timedOut && outcome.exit.signalled) {
+        verdict.fragments.push_back(crashFragment(
+            context.qualifier,
+            fmt::format("binary timed out after {} s and was killed{}{}", context.timeout->count(),
+                        where, skipped)));
+        verdict.failed = true;
+        verdict.skipRemainingParts = true;
+        return verdict;
+    }
+
+    bool cleanReport = false;
+    if (report) {
+        cleanReport = report->failures == 0 && report->errors == 0;
+        verdict.failed = !cleanReport;
+        verdict.fragments.push_back(std::move(*report));
+    } else {
+        verdict.fragments.push_back(crashFragment(
+            context.qualifier, fmt::format("binary wrote no gtest report (exit status {}){}",
+                                           outcome.exit.status, where)));
+        verdict.failed = true;
+    }
+    if (outcome.exit.status != 0) {
+        if (cleanReport) {
+            verdict.fragments.push_back(crashFragment(
+                context.qualifier,
+                fmt::format("binary exited {} after writing a passing report",
+                            outcome.exit.status)));
+        }
+        verdict.failed = true;
+    }
+    if (outcome.abandoned && context.remainingParts != 0) {
+        verdict.fragments.push_back(crashFragment(
+            context.qualifier,
+            fmt::format("run was stopped{}", skipped)));
+        verdict.failed = true;
+        verdict.skipRemainingParts = true;
+    }
+    return verdict;
+}
+
+// Run every part of every selection, at most *schedule.jobs* at a time, and return their
+// fragments in selection order. *failures* is incremented once per child that failed. Parts of
+// one selection run one at a time, since they share a log.
+std::vector<SuiteFragment> runSelections(const std::vector<Selection> &selections,
+                                         const std::vector<std::vector<std::string>> &filters,
+                                         const ScheduleOptions &schedule,
+                                         const SchedulerOperations &ops, int &failures)
+{
+    std::vector<size_t> nextPart(selections.size(), 0);
+    std::vector<std::vector<SuiteFragment>> perSelection(selections.size());
+
+    struct RunningChild {
+        pid_t pid;
+        size_t selection;
+        std::string reportPath;
+        std::string logPath;
+        Escalation escalation;  // first due at the child's timeout, if it has one
+        bool timedOut = false;
+        bool abandoned = false;
+    };
+    bool stopping = false;
+    std::deque<size_t> ready;  // selections with a part still to start
+    for (size_t index = 0; index < selections.size(); ++index) {
+        ready.push_back(index);
+    }
+    std::vector<RunningChild> running;
+
+    while (!ready.empty() || !running.empty()) {
+        // Stop: start nothing more and terminate what is running.
+        if (!stopping && ops.terminated && ops.terminated()) {
+            stopping = true;
+            const std::chrono::steady_clock::time_point now = ops.now();
+            for (const size_t index : ready) {
+                perSelection[index].push_back(
+                    crashFragment(selections[index].qualifier,
+                                  "run was stopped before this binary started"));
+                ++failures;
+                nextPart[index] = filters[index].size();
+            }
+            ready.clear();
+            for (RunningChild &child : running) {
+                child.abandoned = true;
+                if (!child.escalation.termed()) {
+                    child.escalation.advance(child.pid, now, ops.kill);
+                }
+            }
+        }
+
+        while (!ready.empty() && running.size() < schedule.jobs) {
+            const size_t index = ready.front();
+            ready.pop_front();
+            const Selection &selection = selections[index];
+            const size_t part = nextPart[index]++;
+            const std::string reportPath = ops.reportPath(selection.qualifier, part);
+            std::vector<std::string> childArgs = {
+                fmt::format("--gtest_filter={}", filters[index][part]),
+                fmt::format("--gtest_output={}:{}", formatName(schedule.outputFormat), reportPath),
+            };
+            childArgs.insert(childArgs.end(), schedule.passthrough.begin(),
+                             schedule.passthrough.end());
+
+            const std::string part_note =
+                filters[index].size() > 1
+                    ? fmt::format(", part {}/{}", part + 1, filters[index].size())
+                    : std::string();
+            const std::string logPath =
+                schedule.logDirectory.empty()
+                    ? std::string()
+                    : childLogPath(schedule.logDirectory, selection.qualifier);
+            if (part == 0 && !logPath.empty()) {
+                const int fd = open(logPath.c_str(),
+                                    O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0644);
+                if (fd >= 0) {
+                    close(fd);
+                }
+            }
+            fmt::print("----- {} ({} cases{}){} -----\n", selection.qualifier,
+                       selection.cases.size(), part_note,
+                       logPath.empty() ? std::string() : fmt::format(" -> {}", logPath));
+            std::fflush(stdout);
+
+            const pid_t pid = ops.spawn(selection.path, childArgs, logPath);
+            if (pid < 0) {
+                perSelection[index].push_back(crashFragment(
+                    selection.qualifier, "binary could not be started -- fork failed"));
+                ++failures;
+                nextPart[index] = filters[index].size();
+                continue;
+            }
+            running.push_back({pid, index, reportPath, logPath,
+                               Escalation{deadlineAfter(ops.now(), schedule.childTimeout)}});
+        }
+
+        // Bounded by the nearest deadline, if any.
+        Deadline nearest;
+        for (const RunningChild &child : running) {
+            const Deadline due = child.escalation.due();
+            if (due && (!nearest || *due < *nearest)) {
+                nearest = due;
+            }
+        }
+
+        ChildExit exit;
+        const pid_t finished = ops.reap(exit, timeUntil(nearest, ops.now()), !stopping);
+        if (finished == 0) {
+            // Signal every child past its deadline and give it another grace period.
+            const std::chrono::steady_clock::time_point now = ops.now();
+            for (RunningChild &child : running) {
+                if (!child.escalation.due() || now < *child.escalation.due()) {
+                    continue;
+                }
+                child.timedOut = !child.abandoned;
+                child.escalation.advance(child.pid, now, ops.kill);
+            }
+            continue;
+        }
+        const auto slot = std::find_if(running.begin(), running.end(),
+                                       [finished](const RunningChild &child) {
+                                           return child.pid == finished;
+                                       });
+        if (slot == running.end() && finished > 0) {
+            fmt::print(stderr, "host-test-dispatch: ignoring exit of unknown child {}\n",
+                       finished);
+            continue;
+        }
+        if (slot == running.end()) {
+            for (const RunningChild &child : running) {
+                perSelection[child.selection].push_back(
+                    crashFragment(selections[child.selection].qualifier,
+                                  "binary disappeared before its result could be collected"));
+                ++failures;
+            }
+            running.clear();
+            break;
+        }
+
+        const size_t index = slot->selection;
+        const Selection &selection = selections[index];
+        ChildVerdict verdict = classifyChild(
+            ChildOutcome{exit, slot->abandoned, slot->timedOut},
+            ChildContext{selection.qualifier, slot->logPath, schedule.childTimeout,
+                         filters[index].size() - nextPart[index]},
+            parseChildReport(readFile(slot->reportPath), selection.qualifier,
+                             schedule.outputFormat));
+        for (SuiteFragment &fragment : verdict.fragments) {
+            perSelection[index].push_back(std::move(fragment));
+        }
+        failures += verdict.failed ? 1 : 0;
+        if (verdict.skipRemainingParts) {
+            nextPart[index] = filters[index].size();
+        }
+        std::error_code ec;
+        fs::remove(slot->reportPath, ec);
+        running.erase(slot);
+        if (nextPart[index] < filters[index].size()) {
+            ready.push_back(index);
+        }
+    }
+
+    std::vector<SuiteFragment> fragments;
+    for (std::vector<SuiteFragment> &selectionFragments : perSelection) {
+        for (SuiteFragment &fragment : selectionFragments) {
+            fragments.push_back(std::move(fragment));
+        }
+    }
+    return fragments;
 }
 
 }  // namespace rccl_host_dispatch
@@ -1074,10 +1901,7 @@ namespace {
 
 using namespace rccl_host_dispatch;
 
-// A temporary directory for the children's reports, removed when the guard goes out of scope.
-//
-// mkdtemp and not std::filesystem: the standard has no atomic create-unique-directory, and an
-// invented name races the other dispatchers running beside us.
+// A temporary directory for the children's reports, removed on destruction.
 class ReportDirectory {
 public:
     ReportDirectory()
@@ -1101,7 +1925,6 @@ public:
 
     bool valid() const { return !path_.empty(); }
 
-    // Where part *part* of *qualifier*'s report should be written, in *format*.
     std::string reportPath(const std::string &qualifier, size_t part, ReportFormat format) const
     {
         return (fs::path(path_) /
@@ -1128,22 +1951,18 @@ int main(int argc, char **argv)
                                          : std::optional<std::string_view>(disabledEnv));
     warnAboutUnknownGtestVariables(gtestVariablesToStrip());
 
-    const std::string directory = selfDirectory(argv[0]);
+    const std::string directory = binaryDirectory(selfDirectory(argv[0]));
 
     if (options.help) {
-        // Answered before anything is enumerated: listing the cases costs a fork per binary,
-        // and a caller asking what the flags are has not asked for any of that. The binary
-        // names come from the directory scan alone, which is one readdir.
         fmt::print("{} runs the host-only test binaries beside it, as one gtest suite.\n",
                    fs::path(argv[0]).filename().string());
-        for (const std::string &binary : discoverBinaries(directory, selfPath())) {
+        for (const std::string &binary : manifestBinaries(directory)) {
             fmt::print("  {}\n", binary);
         }
         fmt::print("\nCase names are qualified with the owning binary, e.g. MicroInit/Suite.Case,"
                    "\nso --gtest_filter patterns can name one binary's cases.\n\n");
         std::fflush(stdout);
-        // gtest prints its own help from InitGoogleTest, so the caller sees the real flag list
-        // for the gtest this was built against rather than a copy of it that can go stale.
+        // Then gtest's own help.
         int help_argc = 2;
         char help_flag[] = "--help";
         char *help_argv[] = {argv[0], help_flag, nullptr};
@@ -1151,48 +1970,51 @@ int main(int argc, char **argv)
         return 0;
     }
 
-    // gtest is initialised from an argv of our own, never the caller's: the flags the caller
-    // passed are meant for the children, and letting gtest read --gtest_output here would have
-    // the filter resolution in resolveFilter() overwrite the caller's report with an empty one.
-    // Cleared before the init, which is where gtest builds the printer: the flag is seeded from
-    // GTEST_OUTPUT at static init, and parseArgs() has already taken that as the destination for
-    // the merged report.
+    // Init gtest without the caller's flags or GTEST_OUTPUT, which belong to the children and the
+    // merged report; resolveFilter() would otherwise write a report of its own.
     ::testing::GTEST_FLAG(output) = "";
     int gtest_argc = 1;
     char *gtest_argv[] = {argv[0], nullptr};
     ::testing::InitGoogleTest(&gtest_argc, gtest_argv);
 
-    const std::vector<std::string> binaries = discoverBinaries(directory, selfPath());
+    const std::vector<std::string> binaries = manifestBinaries(directory);
     if (binaries.empty()) {
-        fmt::print(stderr, "host-test-dispatch: no {}* binaries next to {} -- nothing to run\n",
-                   kBinaryPrefix, directory);
+        fmt::print(stderr,
+                   "host-test-dispatch: no {} in {} -- the build writes it beside the binaries"
+                   " it produced, so re-run cmake, or write the file yourself with one binary"
+                   " name per line.\n",
+                   kBinaryManifest, directory);
         return 1;
     }
 
-    const Enumeration enumeration = enumerate(directory, binaries, listTestsOutput);
+    // Before the enumeration, so a stop can end a hung listing.
+    installStopHandler();
+    const std::optional<std::chrono::seconds> childTimeout =
+        resolveChildTimeout(std::getenv(std::string(kChildTimeoutEnv).c_str()));
+    const TerminatedFn terminated = stopRequested;
+
+    const Enumeration enumeration = enumerate(
+        directory, binaries,
+        [childTimeout](const std::string &binary) {
+            return listTestsOutput(binary, childTimeout);
+        },
+        terminated);
     for (const std::string &binary : enumeration.unlistable) {
         fmt::print(stderr, "host-test-dispatch: {} could not list its tests\n", binary);
     }
     const std::vector<CandidateCase> &candidates = enumeration.candidates;
-    const std::vector<size_t> chosen =
+    const FilterMatches chosen =
         resolveFilter(candidates, options.filter, options.alsoRunDisabled);
 
     if (options.listTests) {
-        // gtest resolved the filter over the published names, so it can print the listing too,
-        // in exactly the format a caller parsing it expects.
         ::testing::GTEST_FLAG(list_tests) = true;
         const int status = RUN_ALL_TESTS();
-        // A listing missing a binary's cases is wrong, not merely short, and a caller building
-        // a work list from it cannot tell. The warnings above name the binaries; this makes the
-        // incompleteness something a script notices too.
-        return enumeration.unlistable.empty() ? status : 1;
+        // An incomplete listing fails.
+        return enumeration.unlistable.empty() && enumeration.unlisted.empty() ? status : 1;
     }
 
-    if (chosen.empty() && !candidates.empty()) {
-        // Not an error -- gtest exits 0 for a filter that matches nothing, and the shared
-        // categories yaml hands every binary every category's patterns, most of which it does
-        // not own. But the usual cause here is a pattern written against a single binary, whose
-        // names carry no qualifier, so say so rather than leave an empty report to explain it.
+    // Not an error, as in gtest; usually an unqualified pattern.
+    if (chosen.runnable.empty() && chosen.suppressed.empty() && !candidates.empty()) {
         fmt::print(stderr,
                    "host-test-dispatch: filter \"{}\" selected no case. Published names are"
                    " qualified, e.g. \"{}\"; lead the pattern with '*' to match any binary.\n",
@@ -1208,71 +2030,66 @@ int main(int argc, char **argv)
         return 1;
     }
 
+    // An unusable log directory falls back to the console.
+    std::string logDir =
+        resolveLogDirectory(std::getenv(std::string(kLogDirectoryEnv).c_str()));
+    if (!logDir.empty()) {
+        if (const std::optional<std::string> problem = preparePrivateDirectory(logDir)) {
+            fmt::print(stderr, "host-test-dispatch: cannot use {}: {} -- the binaries will"
+                               " print to the console instead\n",
+                       logDir, *problem);
+            logDir.clear();
+        }
+    }
+
     std::vector<SuiteFragment> fragments;
     std::vector<std::string> ran;
     int failures = 0;
 
-    // A binary that would not list its cases is reported before any are run: it holds an
-    // unknown number of them, so the run cannot be green whatever the rest of the tree does.
     for (const std::string &binary : enumeration.unlistable) {
         fragments.push_back(crashFragment(qualifierFor(binary),
-                                          "binary could not list its tests -- it likely failed "
-                                          "to start"));
+                                          "binary could not list its tests -- it is missing, or "
+                                          "failed to start"));
         ++failures;
     }
-    for (const Selection &selection : selections) {
-        const std::vector<std::string> filters = childFilters(selection);
-        ran.push_back(selection.path);
-        for (size_t part = 0; part < filters.size(); ++part) {
-            const std::string reportPath =
-                reportDir.reportPath(selection.qualifier, part, options.outputFormat);
-            // The child is asked for the format the caller wants, so the merge is always of
-            // like with like and no report is ever transcoded between the two.
-            std::vector<std::string> childArgs = {
-                fmt::format("--gtest_filter={}", filters[part]),
-                fmt::format("--gtest_output={}:{}", formatName(options.outputFormat), reportPath),
-            };
-            childArgs.insert(childArgs.end(), options.passthrough.begin(),
-                             options.passthrough.end());
-
-            const std::string part_note =
-                filters.size() > 1 ? fmt::format(", part {}/{}", part + 1, filters.size())
-                                   : std::string();
-            fmt::print("----- {} ({} cases{}) -----\n", selection.qualifier,
-                       selection.cases.size(), part_note);
-            std::fflush(stdout);
-            const int status = runChild(selection.path, childArgs);
-
-            bool cleanReport = false;
-            if (std::optional<SuiteFragment> fragment =
-                    parseChildReport(readFile(reportPath), selection.qualifier,
-                                     options.outputFormat)) {
-                cleanReport = fragment->failures == 0 && fragment->errors == 0;
-                fragments.push_back(std::move(*fragment));
-            } else {
-                // No report: the binary died or never started. Its cases are unaccounted for, so
-                // the run has to fail even if the exit status somehow did not say so.
-                fragments.push_back(crashFragment(
-                    selection.qualifier,
-                    fmt::format("binary wrote no gtest report (exit status {})", status)));
-                ++failures;
-            }
-            if (status != 0) {
-                if (cleanReport) {
-                    fragments.push_back(crashFragment(
-                        selection.qualifier,
-                        fmt::format("binary exited {} after writing a passing report", status)));
-                }
-                ++failures;
-            }
-            std::error_code ec;
-            fs::remove(reportPath, ec);
-        }
+    for (const std::string &binary : enumeration.unlisted) {
+        fragments.push_back(crashFragment(qualifierFor(binary),
+                                          "run was stopped before this binary was listed"));
+        ++failures;
     }
 
-    recordCoverageObjects(coverageDirectory(), ran);
+    const size_t jobs = resolveParallelism(std::getenv(std::string(kParallelismEnv).c_str()),
+                                           defaultParallelism(detectedParallelism()));
+
+    std::vector<std::vector<std::string>> filters;
+    filters.reserve(selections.size());
+    for (const Selection &selection : selections) {
+        filters.push_back(childFilters(selection));
+        ran.push_back(selection.path);
+    }
+    const ScheduleOptions schedule{jobs, options.outputFormat, options.passthrough, logDir,
+                                   childTimeout};
+    const SchedulerOperations ops{
+        [](const std::string &path, const std::vector<std::string> &args,
+           const std::string &logPath) { return spawnChild(path, args, logPath); },
+        reapAnyChild,
+        signalChildGroup,
+        [] { return std::chrono::steady_clock::now(); },
+        [&reportDir, &options](const std::string &qualifier, size_t part) {
+            return reportDir.reportPath(qualifier, part, options.outputFormat);
+        },
+        terminated,
+    };
+    std::vector<SuiteFragment> ranFragments =
+        runSelections(selections, filters, schedule, ops, failures);
+    for (SuiteFragment &fragment : ranFragments) {
+        fragments.push_back(std::move(fragment));
+    }
 
     if (!options.outputPath.empty()) {
+        fmt::print("----- report: merging {} suites into {} -----\n", fragments.size(),
+                   options.outputPath);
+        std::fflush(stdout);
         std::ofstream report(options.outputPath, std::ios::binary | std::ios::trunc);
         if (!report) {
             fmt::print(stderr, "host-test-dispatch: cannot write {}: {}\n", options.outputPath,
@@ -1280,7 +2097,13 @@ int main(int argc, char **argv)
             return 1;
         }
         report << mergeReports(fragments, options.outputFormat);
+        report.close();
+        fmt::print("----- report: wrote {} -----\n", options.outputPath);
+        std::fflush(stdout);
     }
+
+    // After the report, so a timeout during the slow export cannot lose it.
+    writeMergedCoverage(coverageDirectory(), ran, runShell, terminated);
 
     return failures == 0 ? 0 : 1;
 }
