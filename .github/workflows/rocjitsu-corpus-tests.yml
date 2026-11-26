@@ -54,6 +54,8 @@ env:
   ROCJITSU_CORPUS_DIR: ${{ github.workspace }}/rocjitsu-test-corpus
   ROCJITSU_VULKAN_CORPUS_DIR: ${{ github.workspace }}/rocjitsu-vulkan-corpus
   ROCJITSU_VULKAN_CORPUS_REF: 66c893a57a39ffb8e914cc173dc534f1430939de
+  ROCJITSU_PREFILL_SUITE: ${{ github.workspace }}/iree-test-suites/sharktank_models/llama3.1
+  ROCJITSU_PREFILL_VENV: ${{ github.workspace }}/consan-prefill-venv-${{ github.run_id }}-${{ github.run_attempt }}
   ROCJITSU_DBT_VENV: ${{ github.workspace }}/gfx1250-dbt-venv-${{ github.run_id }}-${{ github.run_attempt }}
   ROCJITSU_HSACO_CORPUS: ${{ github.workspace }}/gfx1250-packaged-hsacos-${{ github.run_id }}-${{ github.run_attempt }}
   # Pins HIP, race, file-limit, and DBT tests; keep equal to the corpus_ref default.
@@ -218,6 +220,22 @@ jobs:
           repository: ${{ github.event.inputs.corpus_repository || 'ROCm/rocjitsu-test-corpus' }}
           ref: ${{ github.event.inputs.corpus_ref || env.ROCJITSU_DBT_CORPUS_REF }}
           path: rocjitsu-test-corpus
+          persist-credentials: false
+
+      - name: Checkout pinned ConSan prefill inputs
+        id: checkout_consan_prefill
+        if: matrix.name == 'release'
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          repository: iree-org/iree-test-suites
+          ref: 08a7187a92d6496e50c7f2f7fb0251711990ed09
+          path: iree-test-suites
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /sharktank_models/llama3.1/README.md
+            /sharktank_models/llama3.1/test_llama.py
+            /sharktank_models/llama3.1/assets/toy_llama.mlir
+            /sharktank_models/llama3.1/assets/toy_llama.irpa
           persist-credentials: false
 
       - name: Set up Python
@@ -650,6 +668,49 @@ jobs:
             --index-url https://rocm.nightlies.amd.com/whl-multi-arch/ \
             "${ROCM_SDK_DEVICE_PACKAGES[@]}"
           rocm-sdk init
+
+      - name: Set up isolated ConSan prefill environment
+        id: setup_consan_prefill
+        if: ${{ !cancelled() && matrix.name == 'release' && steps.build_rocjitsu.outcome == 'success' && steps.checkout_consan_prefill.outcome == 'success' }}
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          prefill_evidence="${ROCJITSU_BUILD_DIR}/Testing/ConSanPrefill"
+          mkdir -p "${prefill_evidence}"
+          uv venv --python 3.12 "${ROCJITSU_PREFILL_VENV}" \
+            2>&1 | tee "${prefill_evidence}/venv.log"
+          # This fixture is qualified with IREE 3.13. Keep it separate from
+          # the corpus's IREE environment rather than changing its compiler.
+          uv pip install --python "${ROCJITSU_PREFILL_VENV}/bin/python" \
+            'numpy==2.5.5' 'pytest==9.2.0' \
+            'https://github.com/iree-org/iree/releases/download/iree-3.13.0rc20261006/iree_base_runtime-3.13.0rc20261006-cp312-abi3-manylinux_2_28_x86_64.whl#sha256=aff2fc90c5bd8998fe40f7d89697593b78c26bcfcb586336b853186e7569c825' \
+            'https://github.com/iree-org/iree/releases/download/iree-3.13.0rc20261006/iree_base_compiler-3.13.0rc20261006-cp312-abi3-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl#sha256=b1de2208a8b9b9e8fcedfd130bc00f096e0e8924c789f70ca38bf7b50dffdbf3' \
+            2>&1 | tee "${prefill_evidence}/install.log"
+
+      - name: Require ConSan prefill capture and offline replay
+        if: ${{ !cancelled() && matrix.name == 'release' && steps.build_rocjitsu.outcome == 'success' && steps.setup_consan_prefill.outcome == 'success' }}
+        timeout-minutes: 3
+        shell: bash
+        run: |
+          # Run once outside full CTest and required-ConSan selection. The
+          # original and instrumented applications share the same inputs.
+          "${ROCJITSU_PREFILL_VENV}/bin/python" -B \
+            "${ROCJITSU_SOURCE_DIR}/tests/patch/consan/consan_iree_prefill_e2e.py" \
+            --source "${ROCJITSU_SOURCE_DIR}" \
+            --build "${ROCJITSU_BUILD_DIR}" \
+            --suite "${ROCJITSU_PREFILL_SUITE}" \
+            --root "${ROCJITSU_BUILD_DIR}/Testing/ConSanPrefill" \
+            --cpu-thread-budget "${ROCJITSU_CPU_THREAD_BUDGET}" \
+            --timeout 60
+
+      - name: Upload ConSan prefill evidence
+        if: always() && matrix.name == 'release'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: consan-prefill-${{ matrix.name }}
+          path: ${{ env.ROCJITSU_BUILD_DIR }}/Testing/ConSanPrefill
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Run amdisa tests
         if: matrix.name == 'release'
