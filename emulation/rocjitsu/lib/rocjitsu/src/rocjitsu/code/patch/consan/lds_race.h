@@ -33,6 +33,15 @@ struct NativeLdsAccess {
   uint32_t width = 0;
   LdsRangeRecipe lds_ranges{};
   AccessOrigin origin = AccessOrigin::Native;
+  FlatAssumption assumption = FlatAssumption::None;
+};
+
+struct FlatSitePolicy {
+  const RegisterSet &shared_high;
+  const RegisterSet &non_group_high;
+  const RegisterSet &selected_shared_high;
+  FlatPolicy mode;
+  std::vector<FlatExclusion> &exclusions;
 };
 
 /// @brief Qualify LDS scope and select sites without owning binary/CFG machinery.
@@ -56,8 +65,7 @@ qualify_lds_race_cfg(std::span<const std::unique_ptr<BasicBlock>> blocks, InputE
 [[nodiscard]] Result
 classify_lds_race_instruction(const Instruction &instruction, rocjitsu::IsaFamily arch,
                               uint32_t allocated_vgprs, std::vector<NativeLdsAccess> &accesses,
-                              InputError &error, const RegisterSet *shared_high = nullptr,
-                              const RegisterSet *private_high = nullptr);
+                              InputError &error, const FlatSitePolicy *flat_policy = nullptr);
 [[nodiscard]] FailureOr<uint32_t> lds_race_row_stride(size_t sites, InputError &error,
                                                       bool has_barriers);
 

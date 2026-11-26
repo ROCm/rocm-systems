@@ -178,7 +178,7 @@ original code-object files nor live HSA state.
 ## Available analysis
 
 `LdsRaceDetection` is the only implemented analysis. It checks ordinary native LDS
-reads/writes, proven Group-FLAT B32 loads/stores, and admitted relaxed LDS atomics
+reads/writes, admitted Group-FLAT B32 loads/stores, and admitted relaxed LDS atomics
 at naturally aligned addresses. It uses the same observations for two checks.
 All supported targets admit ordinary single-range b8, b16, b32, b64, b96, and
 b128 native LDS operations on gfx942/gfx950 wave64, gfx1100/gfx1201 wave32 or
@@ -235,15 +235,28 @@ widths and byte immediates, and preserve every guest result word. For b96 the
 range spans three dwords. Its effective start must be 16-byte aligned so the
 range is independent of the launch alignment mode. The minimum fixed LDS extent is four bytes.
 
-A generic FLAT B32 load or store contributes a four-byte LDS range when its
-address belongs to the shared aperture. Preparation follows copies of the
-shared-aperture high word into the address VGPR pair and
-requires that proof on every incoming path for every active lane. The probe
-samples the low word before the access, including when the load overwrites an
-address register. It adds the byte displacement and records an exact Group-FLAT
-site. gfx942, gfx950, and gfx1100 use 8-byte instructions. gfx1201 and gfx1250
-use 12-byte VFLAT instructions with a signed displacement. A proven private
-access contributes no LDS site. An unresolved address prevents preparation.
+Group-FLAT B32 loads and stores record four-byte LDS ranges. Preparation follows
+the shared-aperture high word through register copies into the address VGPR pair.
+A site is exact when the shared high word is proven on every incoming path for
+every active lane. The probe samples the low word before the access, including
+when the load overwrites an address register, and adds the byte displacement.
+gfx942, gfx950, and gfx1100 use 8-byte instructions. gfx1201 and gfx1250 use
+12-byte VFLAT instructions with a signed displacement.
+
+The default policy also admits a scalar pointer-high select between a known
+shared high word and either an unknown SGPR or the inline zero used in a
+null-pointer check. Its range and findings are conditional on the shared high
+word being selected. The guest executes the original instruction on either
+branch. If the other arm selects a valid global address, its sampled low word
+can fall outside the LDS allocation. Replay then reports
+`invalid_or_out_of_bounds_effective_range` and marks coverage incomplete.
+
+Append `--flat-policy=strict` to the prepare command to observe proven sites
+only. Known global/private accesses and unresolved pointers are excluded under
+both policies. Saved analysis reports the policy, original site offsets,
+conditional premises and exclusion reasons. An unresolved or policy-excluded
+site leaves coverage incomplete. Preparing an entry requires at least one
+observed site. Barrier ordering still requires independent completion evidence.
 
 Two-address native LDS loads and stores support 32- and 64-bit elements.
 One guest instruction produces one occurrence and shares the four sampled

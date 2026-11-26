@@ -1158,6 +1158,31 @@ TEST_F(ConSanAnalysis,
   }
 }
 
+TEST_F(ConSanAnalysis, SelectedSharedPremiseSurvivesBothCompleteAndMissingOrderingEvidence) {
+  access(0, 0, 1);
+  access(1, 1, 1);
+  SiteFacts &flat = test::manifest(capture_.header).sites[1];
+  flat.origin = AccessOrigin::GroupFlat;
+  flat.assumption = FlatAssumption::SelectedSharedHigh;
+  flat.original_size = flat.prepared_guest_size = 12;
+  barrier();
+  for (const bool completed : {true, false}) {
+    if (!completed)
+      wire::write_u32(capture_.executions.front().report, completion(1) + wire::kSyncCommit, 0);
+    const auto result = analyze();
+    ASSERT_TRUE(result.succeeded()) << error_.message();
+    const auto &execution = result.value().executions.front();
+    EXPECT_EQ(execution.ordered_pairs, completed ? 1u : 0u);
+    EXPECT_EQ(execution.ordering_unresolved_pairs, completed ? 0u : 1u);
+    EXPECT_EQ(execution.cross_wave_pairs, 0u);
+    const auto &examples = completed ? execution.ordered_examples : execution.unresolved_examples;
+    ASSERT_EQ(examples.size(), 1u);
+    EXPECT_EQ(examples.front().second.assumption, FlatAssumption::SelectedSharedHigh);
+    EXPECT_NE(render_lds_race_analysis(result.value()).find(flat_assumption_text(flat.assumption)),
+              std::string::npos);
+  }
+}
+
 TEST_F(ConSanAnalysis, FixedBarrierDoesNotEraseIndependentSameInstructionCollision) {
   access(0, 0, 1, 0, 3);
   access(1, 1, 1);
@@ -2470,6 +2495,43 @@ TEST_F(ConSanAnalysis, SecondSelectedEntryContributesDualAndTransposeMetadata) {
   ASSERT_EQ(result.value().executions.size(), 1u);
   EXPECT_EQ(result.value().executions.front().entry_key, second.entry.original_descriptor_offset);
   EXPECT_EQ(result.value().executions.front().valid_observations, 2u);
+}
+
+TEST_F(ConSanAnalysis, GroupFlatPremisesAndCoverageBelongToTheirSelectedEntry) {
+  capture_.header = test::multi_entry_header();
+  capture_.executions.clear();
+  Manifest &first = *capture_.header.image.entries[0].selected;
+  Manifest &second = *capture_.header.image.entries[1].selected;
+  first.sites[1].origin = AccessOrigin::GroupFlat;
+  first.sites[1].assumption = FlatAssumption::SelectedSharedHigh;
+  second.sites[1].origin = AccessOrigin::GroupFlat;
+  second.flat_exclusions.push_back(
+      {.original_offset = 80, .original_size = 8, .reason = FlatExclusionReason::Unresolved});
+  for (const Manifest *manifest : {&first, &second}) {
+    const uint32_t serial = static_cast<uint32_t>(capture_.executions.size()) + 1;
+    CapturedExecution execution = test::execution(*manifest, serial, serial);
+    for (uint32_t wave = 0; wave < 2; ++wave) {
+      wire::write_u32(execution.report, row(wave) + wire::kRowStatus,
+                      wire::kRowEntered | wire::kRowExited);
+    }
+    capture_.executions.push_back(std::move(execution));
+    access(0, 1, 1, 0, 1, 0, serial - 1);
+  }
+  const FailureOr<LdsRaceResult> result = analyze();
+  ASSERT_TRUE(result.succeeded()) << error_.message();
+  ASSERT_EQ(result.value().entries.size(), 2u);
+  const auto &first_row = result.value().entries[0];
+  const auto &second_row = result.value().entries[1];
+  EXPECT_EQ(first_row.key, first.entry.original_descriptor_offset);
+  EXPECT_EQ(first_row.flat_sites, std::vector{first.sites[1]});
+  EXPECT_TRUE(first_row.flat_exclusions.empty());
+  EXPECT_EQ(second_row.key, second.entry.original_descriptor_offset);
+  EXPECT_EQ(second_row.flat_sites, std::vector{second.sites[1]});
+  EXPECT_EQ(second_row.flat_exclusions, second.flat_exclusions);
+  ASSERT_EQ(result.value().executions.size(), 2u);
+  EXPECT_TRUE(result.value().executions[0].coverage_complete);
+  EXPECT_FALSE(result.value().executions[1].coverage_complete);
+  EXPECT_FALSE(result.value().coverage_complete);
 }
 
 TEST_F(ConSanAnalysis, SameImageEntriesUseTheirOwnFactsAndRepeatAttribution) {

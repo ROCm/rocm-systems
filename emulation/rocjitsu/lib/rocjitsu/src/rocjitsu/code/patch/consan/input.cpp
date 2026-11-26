@@ -117,7 +117,7 @@ struct ApertureWords {
   RegisterSet all_lanes;
 
   void transfer(const Instruction &inst, const InstDefUse &effects, ExecState exec,
-                ApertureSelector base) {
+                std::optional<ApertureSelector> base) {
     using Op = amdgpu::Operation;
     const Op op = inst.amdgpu_operation();
     const auto *source = inst.num_src_operands() ? inst.src_operand(0) : nullptr;
@@ -130,10 +130,23 @@ struct ApertureWords {
       const auto dst = destination->to_register_ref();
       const auto src = source->to_register_ref();
       writes_exec |= dst && dst->cls == RegClass::EXEC;
-      if (dst && op == Op::S_MOV_B64 && dst->cls == RegClass::SGPR && dst->width == 2 &&
-          source->has_register_selector() && source->encoding_value() == static_cast<int>(base)) {
+      if (dst && op == Op::S_MOV_B64 && dst->cls == RegClass::SGPR && dst->width == 2 && base &&
+          source->has_register_selector() && source->encoding_value() == static_cast<int>(*base)) {
         proven = RegisterRef{RegClass::SGPR, static_cast<uint16_t>(dst->index + 1), 1};
         all = true;
+      } else if (op == Op::S_MOV_B64 && dst && src && dst->cls == RegClass::SGPR &&
+                 src->cls == RegClass::SGPR && dst->width == 2 && src->width == 2 &&
+                 active.contains({RegClass::SGPR, static_cast<uint16_t>(src->index + 1), 1})) {
+        proven = RegisterRef{RegClass::SGPR, static_cast<uint16_t>(dst->index + 1), 1};
+        all = true;
+      } else if (op == Op::S_CSELECT_B32 && dst && dst->cls == RegClass::SGPR && src &&
+                 active.contains(*src) && inst.num_src_operands() >= 2) {
+        // Both SGPR inputs retain their common aperture class whichever SCC selects.
+        const auto rhs = inst.src_operand(1)->to_register_ref();
+        if (rhs && active.contains(*rhs)) {
+          proven = dst;
+          all = true;
+        }
       } else if (dst && src && dst->width == 1 && src->width == 1 && active.contains(*src) &&
                  ((op == Op::S_MOV_B32 && dst->cls == RegClass::SGPR &&
                    src->cls == RegClass::SGPR) ||
@@ -161,12 +174,45 @@ struct ApertureWords {
 };
 
 struct FlatPointers {
-  ApertureWords shared, scratch;
+  ApertureWords shared, non_group, selected;
+  void transfer(const Instruction &inst, const InstDefUse &effects, ExecState exec) {
+    // Qualify a shared high word paired with an unknown SGPR or inline zero
+    // (the null arm of a generic LDS pointer select).
+    std::optional<RegisterRef> selected_dst;
+    if (inst.amdgpu_operation() == amdgpu::Operation::S_CSELECT_B32 &&
+        inst.num_src_operands() >= 2 && inst.num_dst_operands() == 1) {
+      const auto shared_with_alternative = [&](const Operand &source, const Operand &alternative) {
+        const auto reg = source.to_register_ref();
+        if (!reg || reg->cls != RegClass::SGPR || !shared.active.contains(*reg))
+          return false;
+        if (const auto other = alternative.to_register_ref())
+          return other->cls == RegClass::SGPR && !shared.active.contains(*other) &&
+                 !non_group.active.contains(*other);
+        return alternative.has_register_selector() && alternative.const_value() == 0;
+      };
+      const Operand &lhs = *inst.src_operand(0);
+      const Operand &rhs = *inst.src_operand(1);
+      const auto dst = inst.dst_operand(0)->to_register_ref();
+      if (dst && dst->cls == RegClass::SGPR &&
+          (shared_with_alternative(lhs, rhs) || shared_with_alternative(rhs, lhs)))
+        selected_dst = dst;
+    }
+    shared.transfer(inst, effects, exec, ApertureSelector::SharedBase);
+    non_group.transfer(inst, effects, exec, ApertureSelector::PrivateBase);
+    selected.transfer(inst, effects, exec, {});
+    if (selected_dst) {
+      selected.active.expand(*selected_dst);
+      selected.all_lanes.expand(*selected_dst);
+    }
+  }
+
   void intersect(const FlatPointers &other) {
     shared.active &= other.shared.active;
     shared.all_lanes &= other.shared.all_lanes;
-    scratch.active &= other.scratch.active;
-    scratch.all_lanes &= other.scratch.all_lanes;
+    non_group.active &= other.non_group.active;
+    non_group.all_lanes &= other.non_group.all_lanes;
+    selected.active &= other.selected.active;
+    selected.all_lanes &= other.selected.all_lanes;
   }
 };
 
@@ -196,6 +242,14 @@ Result collect_original_code(const std::vector<std::unique_ptr<BasicBlock>> &blo
                     block->start_offset());
     }
     FlatPointers aperture;
+    if (block->start_offset() == program.kernel.entry_text_offset &&
+        block->predecessors().empty()) {
+      // validate_entry_abi admits the kernarg pointer as the only enabled user pointer.
+      // The high dword of its global address cannot be a shared aperture.
+      const RegisterRef kernarg_high{RegClass::SGPR, 1, 1};
+      aperture.non_group.active.expand(kernarg_high);
+      aperture.non_group.all_lanes.expand(kernarg_high);
+    }
     bool first = true;
     for (const BasicBlock *predecessor : block->predecessors()) {
       // A deferred backedge cannot inherit first-iteration proofs.
@@ -221,9 +275,11 @@ Result collect_original_code(const std::vector<std::unique_ptr<BasicBlock>> &blo
                       offset);
       }
       const size_t previous_accesses = program.accesses.size();
+      const FlatSitePolicy flat{aperture.shared.active, aperture.non_group.active,
+                                aperture.selected.active, program.flat_policy,
+                                program.flat_exclusions};
       if (classify_lds_race_instruction(instruction, program.target->arch, program.original_vgprs,
-                                        program.accesses, error, &aperture.shared.active,
-                                        &aperture.scratch.active)
+                                        program.accesses, error, &flat)
               .failed()) {
         return Result::failure();
       }
@@ -239,13 +295,7 @@ Result collect_original_code(const std::vector<std::unique_ptr<BasicBlock>> &blo
         latest = access;
       }
       const InstDefUse effects(instruction, program.wave_size);
-      aperture.shared.transfer(instruction, effects, exec.before(instruction),
-                               ApertureSelector::SharedBase);
-      aperture.scratch.transfer(instruction, effects, exec.before(instruction),
-                                ApertureSelector::PrivateBase);
-      if (program.accesses.size() == previous_accesses &&
-          instruction.amdgpu_memory_addressing() == amdgpu::MemoryAddressing::Flat)
-        program.non_lds_flat.push_back(offset);
+      aperture.transfer(instruction, effects, exec.before(instruction));
       used |= effects.uses;
       used |= effects.defs;
       const std::optional<int64_t> branch = instruction.branch_offset_bytes();
@@ -273,9 +323,12 @@ Result collect_original_code(const std::vector<std::unique_ptr<BasicBlock>> &blo
       }
     }
   }
+  std::ranges::sort(program.flat_exclusions, {}, &FlatExclusion::original_offset);
   if (program.accesses.empty()) {
     return reject(error, InputErrorCode::UnsupportedAccess,
-                  "selected entry has no native LDS sites");
+                  program.flat_exclusions.empty()
+                      ? "selected entry has no native LDS sites"
+                      : "selected entry has no observed LDS sites after FLAT policy exclusions");
   }
   std::ranges::sort(program.exit_offsets);
   std::ranges::sort(program.accesses, {}, &NativeLdsAccess::original_offset);
@@ -305,7 +358,7 @@ Result validate_original_registers(const RegisterSet &used, uint32_t declared_vg
 FailureOr<InputProgram> build_entry_program(std::span<const uint8_t> image,
                                             const TargetProfile &target, std::string_view entry,
                                             InputError &error, const InputLimits &limits,
-                                            bool allow_siblings) {
+                                            FlatPolicy flat_policy, bool allow_siblings) {
   error = {};
   if (image.size() > limits.image_bytes) {
     return reject(error, InputErrorCode::ResourceLimit, "code object exceeds image budget");
@@ -367,6 +420,7 @@ FailureOr<InputProgram> build_entry_program(std::span<const uint8_t> image,
     return Result::failure();
   }
   InputProgram program;
+  program.flat_policy = flat_policy;
   program.kernel = kernel;
   program.target = profile;
   program.wave_size = kernel_wavefront_size(arch, kernel.descriptor);
@@ -448,15 +502,19 @@ FailureOr<InputProgram> build_entry_program(std::span<const uint8_t> image,
 
 FailureOr<InputProgram> build_input_program(std::span<const uint8_t> image,
                                             const TargetProfile &target, std::string_view entry,
-                                            InputError &error, const InputLimits &limits) {
-  return build_entry_program(image, target, entry, error, limits, /*allow_siblings=*/false);
+                                            InputError &error, const InputLimits &limits,
+                                            FlatPolicy flat_policy) {
+  return build_entry_program(image, target, entry, error, limits, flat_policy,
+                             /*allow_siblings=*/false);
 }
 
 FailureOr<InputProgram> build_image_entry_program(std::span<const uint8_t> image,
                                                   const TargetProfile &target,
                                                   std::string_view entry, InputError &error,
-                                                  const InputLimits &limits) {
-  return build_entry_program(image, target, entry, error, limits, /*allow_siblings=*/true);
+                                                  const InputLimits &limits,
+                                                  FlatPolicy flat_policy) {
+  return build_entry_program(image, target, entry, error, limits, flat_policy,
+                             /*allow_siblings=*/true);
 }
 
 } // namespace rocjitsu::consan

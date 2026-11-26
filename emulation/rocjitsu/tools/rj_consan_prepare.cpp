@@ -24,23 +24,38 @@ bool write(const std::filesystem::path &path, std::span<const uint8_t> bytes) {
 int run(int argc, char **argv) {
   std::vector<std::string_view> entries;
   std::filesystem::path destination;
-  if (argc == 5) {
+  if (argc < 5) {
+    std::cerr << "Usage: rj_consan_prepare ORIGINAL TARGET ENTRY NEW-DIRECTORY "
+                 "[--flat-policy=likely|strict]\n"
+                 "   or: rj_consan_prepare ORIGINAL TARGET NEW-DIRECTORY --entry NAME "
+                 "[--entry NAME] [--flat-policy=likely|strict]\n";
+    return 2;
+  }
+  int index = 5;
+  if (argc == 5 || std::string_view(argv[4]) != "--entry") {
     entries.push_back(argv[3]);
     destination = argv[4];
-  } else if (argc >= 6 && (argc % 2) == 0) {
+  } else {
     destination = argv[3];
-    for (int index = 4; index < argc; index += 2) {
+    for (index = 4; index + 1 < argc; index += 2) {
       if (std::string_view(argv[index]) != "--entry") {
         std::cerr << "Expected --entry NAME\n";
         return 2;
       }
       entries.push_back(argv[index + 1]);
     }
-  } else {
-    std::cerr
-        << "Usage: rj_consan_prepare ORIGINAL TARGET NEW-DIRECTORY --entry NAME [--entry NAME]\n"
-           "   or: rj_consan_prepare ORIGINAL TARGET ENTRY NEW-DIRECTORY\n";
-    return 2;
+  }
+  rocjitsu::consan::FlatPolicy policy = rocjitsu::consan::FlatPolicy::Likely;
+  if (index < argc) {
+    const std::string_view option(argv[index]);
+    if (index + 1 != argc ||
+        (option != "--flat-policy=likely" && option != "--flat-policy=strict")) {
+      std::cerr << "Expected --flat-policy=likely or --flat-policy=strict\n";
+      return 2;
+    }
+    if (option == "--flat-policy=strict") {
+      policy = rocjitsu::consan::FlatPolicy::Strict;
+    }
   }
   const rocjitsu::consan::TargetProfile *target = rocjitsu::consan::target_profile(argv[2]);
   if (target == nullptr) {
@@ -65,7 +80,7 @@ int run(int argc, char **argv) {
   }
   rocjitsu::consan::InputError error;
   const rocjitsu::FailureOr<rocjitsu::consan::PreparedImageArtifact> artifact =
-      rocjitsu::consan::prepare_image(original, *target, entries, error);
+      rocjitsu::consan::prepare_image(original, *target, entries, error, policy);
   if (artifact.failed()) {
     std::cerr << "Preparation rejected input: " << error.message << '\n';
     return 2;

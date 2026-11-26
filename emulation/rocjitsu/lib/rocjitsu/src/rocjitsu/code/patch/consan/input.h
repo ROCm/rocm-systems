@@ -58,8 +58,8 @@ struct InputProgram {
   uint32_t original_vgprs = 0;
   std::vector<uint64_t> exit_offsets;
   std::vector<NativeLdsAccess> accesses;
-  // PCs of proven private FLAT operations which execute without LDS probes.
-  std::vector<uint64_t> non_lds_flat;
+  FlatPolicy flat_policy = FlatPolicy::Likely;
+  std::vector<FlatExclusion> flat_exclusions;
   std::vector<BarrierFacts> barriers;
   bool repeated = false;
 };
@@ -70,18 +70,17 @@ struct InputProgram {
 /// preparation failure, never an omitted operation interpreted as no ordering.
 /// The profile must match a supported table entry; copies/temporaries are valid.
 /// A successful result retains the static entry, independent of caller lifetime.
-[[nodiscard]] FailureOr<InputProgram> build_input_program(std::span<const uint8_t> image,
-                                                          const TargetProfile &target,
-                                                          std::string_view entry, InputError &error,
-                                                          const InputLimits &limits = {});
+[[nodiscard]] FailureOr<InputProgram>
+build_input_program(std::span<const uint8_t> image, const TargetProfile &target,
+                    std::string_view entry, InputError &error, const InputLimits &limits = {},
+                    FlatPolicy flat_policy = FlatPolicy::Likely);
 
 /// @brief Qualify one selected entry inside an intact multi-entry source image.
 /// @details Generic SBI independently proves disjoint ownership for the whole
 /// image. This analysis rejects selected control flow that enters a sibling.
-[[nodiscard]] FailureOr<InputProgram> build_image_entry_program(std::span<const uint8_t> image,
-                                                                const TargetProfile &target,
-                                                                std::string_view entry,
-                                                                InputError &error,
-                                                                const InputLimits &limits = {});
+[[nodiscard]] FailureOr<InputProgram>
+build_image_entry_program(std::span<const uint8_t> image, const TargetProfile &target,
+                          std::string_view entry, InputError &error, const InputLimits &limits = {},
+                          FlatPolicy flat_policy = FlatPolicy::Likely);
 
 } // namespace rocjitsu::consan
