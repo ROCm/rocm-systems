@@ -172,7 +172,7 @@ HIP_TEST_CASE(Unit_hipMemAddressReserve_Capture) {
   CTX_DESTROY();
 }
 
-#if HT_AMD && HT_WIN
+#if HT_AMD
 namespace {
 constexpr size_t kExhaustChunkSize = 256ull << 30;  // 256 GiB
 constexpr int kExhaustMaxChunks = 1024;             // 256 TiB, more than any VA aperture
@@ -318,7 +318,7 @@ HIP_TEST_CASE(Unit_hipMemAddressReserve_Exhaustion) {
  *      not hipSuccess with a null pointer. The capture stays active and ends
  *      with an empty graph, and once the address space is freed the stream
  *      captures and runs a graph allocation again.
- *    - AMD on Windows only, as Unit_hipMemAddressReserve_Exhaustion.
+ *    - AMD only (Windows and Linux).
  * ------------------------
  *    - unit/virtualMemoryManagement/hipMemAddressReserve.cc
  * Test requirements
@@ -326,8 +326,8 @@ HIP_TEST_CASE(Unit_hipMemAddressReserve_Exhaustion) {
  *    - HIP_VERSION >= 7.18
  */
 HIP_TEST_CASE(Unit_hipMemAddressReserve_Exhaustion_CaptureMallocAsync) {
-#if !(HT_AMD && HT_WIN)
-  HIP_SKIP_TEST("needs the AMD Windows (PAL) runtime");
+#if !HT_AMD
+  HIP_SKIP_TEST("needs the AMD runtime");
 #else
   hipDevice_t device;
   HIP_CHECK(hipDeviceGet(&device, 0));
@@ -385,7 +385,7 @@ HIP_TEST_CASE(Unit_hipMemAddressReserve_Exhaustion_CaptureMallocAsync) {
  *      pointer, not hipSuccess with a null pointer, and leave no node in the
  *      graph. Once the address space is freed the graph takes and runs an
  *      allocation again.
- *    - AMD on Windows only, as Unit_hipMemAddressReserve_Exhaustion.
+ *    - AMD only (Windows and Linux).
  * ------------------------
  *    - unit/virtualMemoryManagement/hipMemAddressReserve.cc
  * Test requirements
@@ -393,8 +393,8 @@ HIP_TEST_CASE(Unit_hipMemAddressReserve_Exhaustion_CaptureMallocAsync) {
  *    - HIP_VERSION >= 7.18
  */
 HIP_TEST_CASE(Unit_hipMemAddressReserve_Exhaustion_GraphMemAllocNode) {
-#if !(HT_AMD && HT_WIN)
-  HIP_SKIP_TEST("needs the AMD Windows (PAL) runtime");
+#if !HT_AMD
+  HIP_SKIP_TEST("needs the AMD runtime");
 #else
   hipDevice_t device;
   HIP_CHECK(hipDeviceGet(&device, 0));
