@@ -17692,8 +17692,7 @@ class CodeGenerator:
                     ),
                     ('rocjitsu/isa/arch/amdgpu/shared/simd_glue.h', False),
                     ('rocjitsu/isa/arch/amdgpu/shared/fp_mode.h', False),
-                    ('rocjitsu/isa/arch/amdgpu/shared/gfx11_dot2.h', False),
-                    ('rocjitsu/isa/arch/amdgpu/shared/gfx12_dot.h', False),
+                    ('rocjitsu/isa/arch/amdgpu/shared/dot_packed16.h', False),
                     ('util/except.h', False),
                 ]
                 if self.isa_spec.arch_name == 'cdna1':
@@ -19365,15 +19364,6 @@ class CodeGenerator:
                 'optional': 'std::optional',
                 'rocjitsu/base/rj_compiler.h': 'RJ_NOINLINE',
                 'rocjitsu/isa/arch/amdgpu/shared/fp_mode.h': 'fp_mode::',
-                'rocjitsu/isa/arch/amdgpu/shared/gfx11_dot2.h': (
-                    'gfx11_dot2_f32',
-                    'gfx11_dot2_packed16',
-                ),
-                'rocjitsu/isa/arch/amdgpu/shared/gfx12_dot.h': (
-                    'gfx12_dot2_f32',
-                    'gfx12_dot2_packed16',
-                    'gfx12_dot4_f32_fp8',
-                ),
                 'rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h': 'pseudo_scalar::',
                 'rocjitsu/isa/arch/amdgpu/shared/scalar_f16_source.h': 'read_scalar_f16_carrier',
             }
@@ -19843,9 +19833,7 @@ class CodeGenerator:
             '#include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"',
-            '#include "rocjitsu/isa/arch/amdgpu/shared/gfx11_dot2.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/lds_direct.h"',
-            '#include "rocjitsu/isa/arch/amdgpu/shared/gfx12_dot.h"',
             *simd_extra_includes(),
             '#include "util/data_types.h"',
             '#include "util/except.h"',
