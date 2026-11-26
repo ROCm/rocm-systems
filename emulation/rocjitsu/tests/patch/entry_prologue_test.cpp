@@ -75,8 +75,9 @@ public:
       return;
     }
     blocks_ = build_valid_blocks(co_, *decoder_, arch);
-    for (const auto &block : blocks_)
+    for (const auto &block : blocks_) {
       scope_.push_back(block.get());
+    }
   }
 
   [[nodiscard]] KernelBlockScope scope() const { return KernelBlockScope(scope_); }
@@ -143,8 +144,9 @@ util::FailureOr<std::vector<uint32_t>> kernel_naming_sgpr(uint16_t sgpr) {
   static_assert(kEndpgmResult.succeeded());
 
   const auto move = build_s_mov_b32(sgpr, kInlineZero, kArch);
-  if (move.failed())
+  if (move.failed()) {
     return util::Result::failure();
+  }
   return std::vector<uint32_t>{move.value(), kEndpgmResult.value()};
 }
 

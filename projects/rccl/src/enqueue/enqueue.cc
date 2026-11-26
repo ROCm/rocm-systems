@@ -2474,6 +2474,65 @@ static bool ncclGraphStreamOrderingSerialize(struct ncclComm* comm) {
 }
 } // namespace
 
+static ncclResult_t getImplicitOrder(enum ncclImplicitOrder* mode, struct ncclComm* comm, bool capturing,
+                                     int driver = -1) {
+  if (comm->config.launchOrderImplicit == 1) {
+#if !defined(__HIP_PLATFORM_AMD__) || !defined(__HIPCC__)
+    if (driver < 0) {
+      NCCLCHECK(ncclCudaDriverVersion(&driver));
+    }
+    if (capturing && driver < 12090) {
+      *mode = ncclImplicitOrderSerial;
+      return ncclSuccess;
+    }
+    *mode = 12030 <= std::min<int>(CUDART_VERSION, driver) ? ncclImplicitOrderLaunch : ncclImplicitOrderSerial;
+#else
+    *mode = ncclImplicitOrderSerial;
+#endif
+    return ncclSuccess;
+  }
+  *mode = ncclImplicitOrderNone;
+  return ncclSuccess;
+}
+
+// The launchOrder halves of an implicitly ordered launch, shared by kernel plans (ncclLaunchPrepare /
+// ncclLaunchFinish) and addon launches. A capture with GRAPH_STREAM_ORDERING=0 (useLaunchStream) is
+// ordered through the graph origin and acquires nothing. Otherwise context->launchOrder is acquired and the
+// caller owes ncclStrongStreamRelease on it, including when the launch fails. `acquired` may be null for a
+// caller that releases on !useLaunchStream instead, as ncclLaunchFinish does.
+static ncclResult_t implicitOrderPrepare(struct ncclComm* comm, struct ncclCudaGraph graph, bool useLaunchStream,
+                                         cudaStream_t stream, bool* acquired) {
+  cudaStream_t launchOrder;
+  if (useLaunchStream) {
+    launchOrder = graph.origin;
+  } else {
+    // Concurrent access is required under capture. Outside it, concurrency would break the deterministic
+    // program order of launches.
+    NCCLCHECK(ncclStrongStreamAcquire(graph, &comm->context->launchOrder, /*concurrent=*/ncclCudaGraphValid(graph),
+                                      &launchOrder));
+    if (acquired) *acquired = true;
+  }
+  if (launchOrder != stream) {
+    NCCLCHECK(ncclStreamWaitStream(stream, launchOrder, comm->sharedRes->scratchEvent));
+  }
+  return ncclSuccess;
+}
+
+// `event` marks the point the next launch on this device must wait for: the launch event under
+// ncclImplicitOrderLaunch, an event recorded after the work under ncclImplicitOrderSerial.
+static ncclResult_t implicitOrderFinish(struct ncclComm* comm, struct ncclCudaGraph graph, bool useLaunchStream,
+                                        cudaEvent_t event) {
+  cudaStream_t launchOrder;
+  if (useLaunchStream) {
+    launchOrder = graph.origin;
+  } else {
+    NCCLCHECK(ncclStrongStreamAcquiredWorkStream(graph, &comm->context->launchOrder,
+                                                 /*concurrent=*/ncclCudaGraphValid(graph), &launchOrder));
+  }
+  CUDACHECK(cudaStreamWaitEvent(launchOrder, event, 0));
+  return ncclSuccess;
+}
+
 // GRAPH_STREAM_ORDERING=0: makes a capture on the graph origin wait on serialEvent via
 // hipEventWaitExternal, which HIP allows on the origin stream during capture. That wait is what
 // serializes graph launches of one communicator.
@@ -2529,6 +2588,9 @@ ncclResult_t rcclAddonLaunchBegin(struct ncclComm* comm, cudaStream_t stream, st
   state->capturing = false;
   state->deviceStreamAcquired = false;
   state->deviceStream = nullptr;
+  state->launchOrderAcquired = false;
+  state->implicitOrdered = false;
+  state->implicitUseLaunchStream = false;
   comm->addonStopEvent = nullptr;
 
   CUDACHECK(hipGetDevice(&state->savedDev));
@@ -2557,6 +2619,16 @@ ncclResult_t rcclAddonLaunchBegin(struct ncclComm* comm, cudaStream_t stream, st
     comm->addonStopEvent = comm->doneEvent;
   }
 
+  // Without this an addon kernel would bypass the per-device order the other communicators rely on.
+  enum ncclImplicitOrder implicitOrder;
+  NCCLCHECK(getImplicitOrder(&implicitOrder, comm, state->capturing));
+  if (implicitOrder != ncclImplicitOrderNone) {
+    state->implicitOrdered = true;
+    state->implicitUseLaunchStream = state->capturing && !ncclGraphStreamOrderingSerialize(comm);
+    NCCLCHECK(implicitOrderPrepare(comm, state->graph, state->implicitUseLaunchStream, stream,
+                                   &state->launchOrderAcquired));
+  }
+
   return ncclSuccess;
 }
 
@@ -2578,9 +2650,22 @@ ncclResult_t rcclAddonLaunchEnd(struct ncclComm* comm, cudaStream_t stream,
     if (state.capturing) {
       NCCLCHECKGOTO(rcclAddonCaptureOrderEnd(comm, stream, state), result, release);
     }
+    if (state.implicitOrdered) {
+      // An addon launch has no launch-completion event, so it is always ordered Serial: the next launch on
+      // this device waits for this one to finish.
+      CUDACHECKGOTO(cudaEventRecord(comm->sharedRes->scratchEvent, stream), result, release);
+      NCCLCHECKGOTO(implicitOrderFinish(comm, state.graph, state.implicitUseLaunchStream,
+                                        comm->sharedRes->scratchEvent),
+                    result, release);
+    }
   }
 
 release:
+  if (state.launchOrderAcquired) {
+    ncclResult_t releaseRes =
+        ncclStrongStreamRelease(state.graph, &comm->context->launchOrder, /*concurrent=*/state.capturing);
+    if (result == ncclSuccess) result = releaseRes;
+  }
   if (state.deviceStreamAcquired) {
     ncclResult_t releaseRes = ncclStrongStreamRelease(state.graph, &comm->sharedRes->deviceStream,
                                                       /*concurrent=*/false);
@@ -2595,27 +2680,6 @@ release:
     }
   }
   return result;
-}
-
-static ncclResult_t getImplicitOrder(enum ncclImplicitOrder* mode, struct ncclComm* comm, bool capturing,
-                                     int driver = -1) {
-  if (comm->config.launchOrderImplicit == 1) {
-#if !defined(__HIP_PLATFORM_AMD__) || !defined(__HIPCC__)
-    if (driver < 0) {
-      NCCLCHECK(ncclCudaDriverVersion(&driver));
-    }
-    if (capturing && driver < 12090) {
-      *mode = ncclImplicitOrderSerial;
-      return ncclSuccess;
-    }
-    *mode = 12030 <= std::min<int>(CUDART_VERSION, driver) ? ncclImplicitOrderLaunch : ncclImplicitOrderSerial;
-#else
-    *mode = ncclImplicitOrderSerial;
-#endif
-    return ncclSuccess;
-  }
-  *mode = ncclImplicitOrderNone;
-  return ncclSuccess;
 }
 
 static bool ncclPlanCanScheduleP2p(struct ncclKernelPlan* plan) {
@@ -2773,7 +2837,7 @@ ncclResult_t ncclLaunchPrepare(struct ncclComm* comm) {
 #endif
 
     cudaStream_t launchStream = planner->streams->stream;
-    cudaStream_t deviceStream, launchOrder;
+    cudaStream_t deviceStream;
     bool capturing = ncclCudaGraphValid(planner->capturingGraph);
     bool useLaunchStream = capturing && !ncclGraphStreamOrderingSerialize(comm);
 
@@ -2811,20 +2875,9 @@ ncclResult_t ncclLaunchPrepare(struct ncclComm* comm) {
     NCCLCHECKGOTO(getImplicitOrder(&implicitOrder, comm, capturing), result, failure);
 
     if (implicitOrder != ncclImplicitOrderNone) {
-      // userStream[0] waits on per-device (context) launchOrder. Concurrent strong stream access is
-      // required if this is a graph capture, non-captured cannot be concurrent because that would violate
-      // deterministic program order of launches.
-      bool concurrent = capturing;
-      if (useLaunchStream) {
-        launchOrder = planner->capturingGraph.origin;
-      } else {
-        NCCLCHECKGOTO(ncclStrongStreamAcquire(planner->capturingGraph, &comm->context->launchOrder, concurrent,
-                                              &launchOrder),
-                      result, failure);
-      }
-      if (launchOrder != launchStream) {
-        NCCLCHECKGOTO(ncclStreamWaitStream(launchStream, launchOrder, comm->sharedRes->scratchEvent), result, failure);
-      }
+      // userStream[0] waits on per-device (context) launchOrder; ncclLaunchFinish releases it.
+      NCCLCHECKGOTO(implicitOrderPrepare(comm, planner->capturingGraph, useLaunchStream, launchStream, nullptr),
+                    result, failure);
     }
 
     if (!persistent && comm->sharedRes->persistentRefs)
@@ -3116,7 +3169,7 @@ ncclResult_t ncclLaunchFinish(struct ncclComm* comm) {
     bool capturing = ncclCudaGraphValid(planner->capturingGraph);
     bool useLaunchStream = capturing && !ncclGraphStreamOrderingSerialize(comm);
     cudaStream_t launchStream = planner->streams->stream; // First user stream gets launch
-    cudaStream_t deviceStream, launchOrder;
+    cudaStream_t deviceStream;
     cudaEvent_t finishedEvent = comm->sharedRes->scratchEvent;
 
     if (comm->workFifoProduced - comm->workFifoProducedLastRecorded > comm->workFifoBytes / 8) {
@@ -3164,25 +3217,19 @@ ncclResult_t ncclLaunchFinish(struct ncclComm* comm) {
     enum ncclImplicitOrder implicitOrder;
     NCCLCHECK(getImplicitOrder(&implicitOrder, comm, capturing));
     if (implicitOrder != ncclImplicitOrderNone) {
-      // As in ncclLaunchPrepare, strong stream can be non-concurrent when non-captured.
-      bool concurrent = capturing;
       // Incorporate launch event into per-device (context) launch order.
       // NOTE: launchOrder cannot be eliminated even when NCCL_GRAPH_STREAM_ORDERING=0.
       // comm->sharedRes->launchEvent is filled by CUDA via CU_LAUNCH_ATTRIBUTE_LAUNCH_COMPLETION_EVENT
       // when cuLaunchKernelEx returns. Users cannot query a stream for the launch event of its last
       // kernel, so this ordering dependency can never be delegated to the user's stream.
-      if (useLaunchStream) {
-        launchOrder = planner->capturingGraph.origin;
-      } else {
-        NCCLCHECK(ncclStrongStreamAcquiredWorkStream(planner->capturingGraph, &comm->context->launchOrder, concurrent,
-                                                     &launchOrder));
-      }
       // If we don't have launch events (requires CUDA 12.3) then just use completion event (serialize execution).
-      CUDACHECK(cudaStreamWaitEvent(
-        launchOrder, implicitOrder == ncclImplicitOrderLaunch ? comm->sharedRes->launchEvent : finishedEvent));
+      NCCLCHECK(implicitOrderFinish(
+        comm, planner->capturingGraph, useLaunchStream,
+        implicitOrder == ncclImplicitOrderLaunch ? comm->sharedRes->launchEvent : finishedEvent));
       if (!useLaunchStream) {
         // Release launchOrder as acquired in ncclLaunchPrepare()
-        NCCLCHECK(ncclStrongStreamRelease(planner->capturingGraph, &comm->context->launchOrder, concurrent));
+        NCCLCHECK(ncclStrongStreamRelease(planner->capturingGraph, &comm->context->launchOrder,
+                                          /*concurrent=*/capturing));
       }
     }
     if (!useLaunchStream) {
@@ -3250,12 +3297,12 @@ static ncclResult_t updateCollCostTable(struct ncclComm* comm, struct ncclTaskCo
   // (a * NCCL_NUM_PROTOCOLS + p); see src/config/algorithm_registry.cc.
   // NCCL_ALGO/NCCL_PROTO/NCCL_SYM_KERNEL set forced[] and win here, as in ncclMakeSymmetricTaskList.
   // RCCL_OVERRIDE_* do not, and getAlgoInfo drops their error, so a blanked cell loses the override.
-  uint64_t effAlgMask = comm->tuningContext.forced[info->func] ? 0 : info->algMask;
-  uint64_t generalMask = effAlgMask & NCCL_TUNING_MASK_GENERAL_KERNELS;
+  rcclTuningMask effAlgMask = comm->tuningContext.forced[info->func] ? rcclTuningMask() : info->algMask;
+  rcclTuningMask generalMask = effAlgMask & NCCL_TUNING_MASK_GENERAL_KERNELS;
   // Naming a row per call is as explicit as naming it in NCCL_ALGO or NCCL_PROTO, so it lifts the
   // same heuristic gates those env vars lift. Otherwise one selection string succeeds at 1 MiB and
   // fails at 4 MiB, or works only on an all-XGMI node.
-  auto algNamed = [&](int a, int p) { return ((generalMask >> (a * NCCL_NUM_PROTOCOLS + p)) & 1) != 0; };
+  auto algNamed = [&](int a, int p) { return generalMask.test(a * NCCL_NUM_PROTOCOLS + p); };
 
   for (int a = 0; a < NCCL_NUM_ALGORITHMS; a++) {
     if ((a == NCCL_ALGO_COLLNET_DIRECT || a == NCCL_ALGO_COLLNET_CHAIN) && collNetSupport != 1) continue;
@@ -3313,7 +3360,7 @@ static ncclResult_t updateCollCostTable(struct ncclComm* comm, struct ncclTaskCo
 
   // Apply the filter. A symmetric-only selection ("SYMK_LL") names no general row; leave the table
   // as the fallback the symmetric scheduler declines to.
-  if (generalMask != 0) {
+  if (generalMask.any()) {
     // Decide before blanking. `>= 0.0`, not `!= IGNORE`: the fp8 relegation above scales a -1.0
     // sentinel cell to -1024.0, and topoGetAlgoInfo's argmin accepts only a non-negative time.
     bool anyLeft = false;
@@ -4898,7 +4945,7 @@ static ncclResult_t rawTaskAppend(struct ncclComm* comm, struct ncclInfo* info) 
     if (info->count == 0) return ncclSuccess;
 
     // Validate any per-call algorithm selection up front.
-    uint64_t algMask;
+    rcclTuningMask algMask{};
     NCCLCHECK(ncclCollConfigGetAlgMask(&info->collConfig, info->coll, &algMask));
 
     // Reductions in FP8 require sm90+.
@@ -4982,7 +5029,7 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
     // kernel selector, so without this an unsatisfiable selection (bad syntax, or a function with
     // no selectable algorithm) would be silently accepted despite forceAlgSelection. getAlgMask
     // rejects it when forceAlgSelection is set, else logs and falls back to automatic.
-    uint64_t algMask;
+    rcclTuningMask algMask{};
     NCCLCHECK(ncclCollConfigGetAlgMask(&info->collConfig, info->coll, &algMask));
 
     if (info->datatype == ncclFloat8e4m3 || info->datatype == ncclFloat8e5m2) {
@@ -5314,13 +5361,32 @@ void rcclLogCollInfo(const struct ncclInfo& info) {
        info.comm->localRankToRank[info.comm->localRank]);
 }
 
-ncclResult_t ncclEnqueueCheck(struct ncclInfo* info) {
-  // Early-out on invalid or revoked communicator
-  ncclResult_t ret = CommCheck(info->comm, info->opName, "comm");
-  if (ret != ncclSuccess) return ncclGroupErrCheck(ret);
-  if (info->comm->revokedFlag) {
-    WARN("%s: communicator was revoked", info->opName);
+// Early-out on an invalid, revoked or not-yet-ready comm. Call it before any comm read that precedes ncclEnqueueCheck.
+ncclResult_t ncclEnqueueCommCheck(struct ncclComm* comm, const char* opName) {
+  ncclResult_t ret = CommCheck(comm, opName, "comm");
+  if (ret != ncclSuccess) {
+    return ncclGroupErrCheck(ret);
+  }
+  if (COMPILER_ATOMIC_LOAD(&comm->revokedFlag, std::memory_order_acquire) != 0) {
+    WARN("%s: communicator was revoked", opName);
     return ncclGroupErrCheck(ncclInvalidUsage);
+  }
+  // A comm whose init or grow job has not finished passes CommCheck while the job still writes the fields callers
+  // read next. initState also covers a comm used in the same group as its own init, where asyncResult is still zero.
+  // Read the atomics directly: ncclCommGetAsyncError also reads proxyState and ginState and records to the Recorder.
+  if (COMPILER_ATOMIC_LOAD(&comm->initState, std::memory_order_acquire) == ncclInProgress ||
+      COMPILER_ATOMIC_LOAD(&comm->asyncResult, std::memory_order_acquire) == ncclInProgress) {
+    WARN("%s: communicator %p is not ready; wait until ncclCommGetAsyncError no longer returns ncclInProgress",
+         opName, comm);
+    return ncclGroupErrCheck(ncclInvalidArgument);
+  }
+  return ncclSuccess;
+}
+
+ncclResult_t ncclEnqueueCheck(struct ncclInfo* info) {
+  ncclResult_t ret = ncclEnqueueCommCheck(info->comm, info->opName);
+  if (ret != ncclSuccess) {
+    return ret;
   }
   // Profiler - If a group API event has already started, update the profilerGroupDepth so that the depth
   // updates correctly for implicit ncclGroupStartInternal and ncclGroupEndInternal calls

@@ -17,8 +17,9 @@ namespace rocjitsu::amdgpu {
 inline bool cdna1_ds_atomic_nullified(const VectorMemState &d, rocjitsu::IsaFamily arch,
                                       const RegAllocation &vgprs) {
   if (arch != rocjitsu::IsaFamily::Cdna1 || d.flat_local_lane_mask || !d.is_load ||
-      d.atomic_op == AtomicOp::NONE)
+      d.atomic_op == AtomicOp::NONE) {
     return false;
+  }
   // MI100 3.6.1 nullifies the RMW when any returned VGPR is unallocated.
   return !vgprs.contains(d.dst_reg_base, d.destination_vgpr_count()) ||
          (d.ds2_active && !vgprs.contains(d.ds2_dst_reg_base, d.ds2_destination_vgpr_count()));
@@ -52,8 +53,9 @@ inline std::optional<IndexedDsAccessBounds> indexed_ds_access_bounds(const Vecto
                                                                      uint32_t lds_base,
                                                                      uint32_t lds_size) {
   if (!checks_entire_native_ds_address(arch) || state.flat_local_lane_mask || state.gds ||
-      (state.gds_m0 && arch != rocjitsu::IsaFamily::Rdna1))
+      (state.gds_m0 && arch != rocjitsu::IsaFamily::Rdna1)) {
     return std::nullopt;
+  }
   const uint64_t begin = state.ds_base(lds_base);
   const uint64_t end = state.gds_m0 ? std::min<uint64_t>(65536, begin + (*state.gds_m0 & 0xffffu))
                                     : begin + lds_size;

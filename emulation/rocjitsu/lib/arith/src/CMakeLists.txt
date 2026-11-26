@@ -7,6 +7,7 @@
 add_library(
     rj_arith
     STATIC
+    mfma/gfx942_exact.cpp
     mfma/mfma_half.cpp
     mfma/mfma_f32.cpp
     mfma/mfma_fp8.cpp
@@ -15,9 +16,11 @@ add_library(
     mfma/matrix_i8.cpp
     mfma/sparse_matrix_i8.cpp
     mfma/smfmac_float.cpp
+    wmma/wmma_gfx1251_f64.cpp
     wmma/swmmac_gfx1250_float.cpp
     common/cpu.cpp
     common/cpu_decode.cpp
+    common/sdwa_dispatch.cpp
     conversion/float16_conversion.cpp
     conversion/byte_conversion.cpp
     conversion/conversion16.cpp
@@ -38,6 +41,9 @@ add_library(
     compare/constant_compare.cpp
     compare/float_compare.cpp
     compare/float_compare_gfx1150.cpp
+    compare/float_compare_gfx908.cpp
+    compare/float_compare_gfx10.cpp
+    compare/float_compare_half_gfx10.cpp
     compare/integer_compare.cpp
     dot/scalar_repair.cpp
     dot/dot.cpp
@@ -46,12 +52,17 @@ add_library(
     dot/integer_dot.cpp
     dual/dual.cpp
     dual/dual_gfx1250.cpp
+    dual/dual_gfx1150.cpp
     fp/scalar_repair.cpp
     fp/fma.cpp
+    fp/separately_rounded_mad.cpp
     fp/binary.cpp
+    fp/gfx1150_fp32.cpp
+    fp/gfx908_fp32.cpp
     fp/div_fixup.cpp
     fp/div_fmas.cpp
     fp/div_scale.cpp
+    fp/packed_f64_gfx1251.cpp
     fp/fp64.cpp
     fp/frexp_exp.cpp
     fp/half_mad.cpp
@@ -87,6 +98,7 @@ add_library(
     integer/byte_shift.cpp
     integer/integer16.cpp
     integer/integer16_ternary.cpp
+    integer/packed_u64.cpp
     integer/integer_add.cpp
     integer/integer_mad.cpp
     integer/integer_minmax.cpp
@@ -96,10 +108,15 @@ add_library(
     integer/sad.cpp
     integer/shift.cpp
     register/cndmask.cpp
+    math/cdna_half.cpp
+    math/cdna_unary.cpp
+    math/bf16_gfx1250.cpp
     math/half_trig.cpp
     math/half_unary.cpp
     math/rcp_iflag.cpp
+    math/tanh_gfx1250.cpp
     math/trig.cpp
+    math/cdna_trig_preop.cpp
     math/trig_preop.cpp
     math/unary.cpp
     register/dpp.cpp

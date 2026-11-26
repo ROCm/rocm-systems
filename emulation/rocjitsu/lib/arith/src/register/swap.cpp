@@ -4,7 +4,7 @@
 // Whole-word, halfword, and relative-register swaps.
 // Owns public entry points and their validation/dispatch policy.
 
-#include "common/simd.h"
+#include "register/swap.h"
 #include "common/validation.h"
 #include "rj_arith/detail/rj_arith_register.h"
 
@@ -25,6 +25,22 @@ int swap(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags, uint32_
   if (!exec_mask) {
     return RJ_ARITH_SUCCESS;
   }
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+    for (int base = 0; base < Lanes; base += 32) {
+      rocjitsu::arith::swap_words_x86_64_v4(uint32_t(exec_mask >> base), d[0] + base, a[0] + base);
+    }
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+    for (int base = 0; base < Lanes; base += 32) {
+      rocjitsu::arith::swap_words_x86_64_v3(uint32_t(exec_mask >> base), d[0] + base, a[0] + base);
+    }
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
   for (int lane = 0; lane < Lanes; ++lane) {
     uint32_t old_d = d[0][lane], old_a = a[0][lane];
     if ((exec_mask >> lane) & 1) {
@@ -107,12 +123,6 @@ int swap_rows(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const
   if (!exec_mask || Lanes <= Stride) {
     return RJ_ARITH_SUCCESS;
   }
-#if defined(RJ_ARITH_HAVE_X86_64_V4)
-  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
-    rocjitsu::arith::swap_rows_x86_64_v4(Lanes, Stride, exec_mask, d[0], a[0]);
-    return RJ_ARITH_SUCCESS;
-  }
-#endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
   if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
     rocjitsu::arith::swap_rows_x86_64_v3(Lanes, Stride, exec_mask, d[0], a[0]);

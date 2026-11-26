@@ -13,7 +13,7 @@ from .rj_arith_names import wave_api
 def gen_vopd_execution(
     arch: str, slot_ops: tuple[VopdSlotOp, ...], wave64_guard: str
 ) -> str | None:
-    if arch not in ('rdna3', 'rdna4', 'cdna5'):
+    if arch not in ('rdna3', 'rdna4', 'rdna3_5', 'cdna5'):
         return None
     cases = []
     for op in slot_ops:
@@ -31,21 +31,33 @@ def gen_vopd_execution(
             'v_dual_min_num_f32',
             'v_dual_max_num_f32',
         )
+        inherited_arithmetic = arch == 'rdna3_5' and name in {
+            'v_dual_fmac_f32',
+            'v_dual_fmaak_f32',
+            'v_dual_fmamk_f32',
+            'v_dual_mul_f32',
+            'v_dual_add_f32',
+            'v_dual_sub_f32',
+            'v_dual_subrev_f32',
+            'v_dual_mul_dx9_zero_f32',
+        }
         api = 'rj_arith_' + name
         if arch == 'cdna5' and (not integer or cnd):
             api += '_gfx12' if literal_fma else '_gfx1250'
+        if inherited_arithmetic:
+            api += '_gfx1150'
         if arch == 'rdna4' and not integer and not selection:
             api += '_gfx12'
         lines = [
             f'case k{op.enum_name}: {{',
             '  uint64_t flags = wf.cu().arithmetic_flags();',
         ]
-        # VOPD has no CLAMP modifier, so do not forward its architecture-specific control.
+        # DX10_CLAMP still gates gfx1150 status, despite VOPD having no CLAMP field.
         if not integer and not dot:
-            lines += [
-                f'  flags = amdgpu::arith::{"float16_f64_flags" if wide else "float32_flags"}(wf, flags, {str(arch == "rdna3").lower()})',
-                '      & ~RJ_ARITH_FP_DX10_CLAMP_OFF;',
-            ]
+            expression = f'amdgpu::arith::{"float16_f64_flags" if wide else "float32_flags"}(wf, flags, {str(arch in ("rdna3", "rdna3_5")).lower()})'
+            if not inherited_arithmetic or name == 'v_dual_mul_dx9_zero_f32':
+                expression += ' & ~RJ_ARITH_FP_DX10_CLAMP_OFF'
+            lines.append(f'  flags = {expression};')
         if dot:
             lines += [
                 '  const bool replicate = slot.src0->opr_type_ == OperandType::OPR_SRC &&',
@@ -107,12 +119,6 @@ def gen_vopd_execution(
             args += ', condition'
         if not integer:
             args += ', state'
-        if arch == 'rdna4' and name == 'v_dual_mul_f32':
-            lines += [
-                '  if ((flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY)',
-                '    return amdgpu::arith::gfx12_compat_dual_mul(',
-                '        wf, flags, exec_mask, result, a.data, b.data, state);',
-            ]
         lines += [f'  return {wave_api(api, 32)}({args});', '}']
         cases.append('\n'.join(lines))
     return (

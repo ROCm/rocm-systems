@@ -516,6 +516,20 @@ amdsmi_status_t WSLGPUBackend::GetDriverInfo(amdsmi_driver_info_t* info) {
   return AMDSMI_STATUS_SUCCESS;
 }
 
+amdsmi_status_t WSLGPUBackend::GetDriverInfoV2(amdsmi_driver_info_v2_t* info) {
+  amdsmi_status_t r = load_device_info();
+  if (r != AMDSMI_STATUS_SUCCESS) return r;
+  // Feature support checked before nullptr so NOT_SUPPORTED takes priority over INVAL.
+  if (info == nullptr) return AMDSMI_STATUS_INVAL;
+  std::memset(info, 0, sizeof(*info));
+  copy_rocdxg_string(info->driver_version, device_info_.driver.driver_version);
+  copy_rocdxg_string(info->driver_date, device_info_.driver.driver_date);
+  copy_rocdxg_string(info->driver_name, device_info_.driver.driver_name);
+  // The WDDM version has no amdgpu parts and no Linux driver package behind it.
+  copy_rocdxg_string(info->driver_full_version, device_info_.driver.driver_version);
+  return AMDSMI_STATUS_SUCCESS;
+}
+
 amdsmi_status_t WSLGPUBackend::GetVbiosInfo(amdsmi_vbios_info_t* info) {
   amdsmi_status_t r = load_device_info();
   if (r != AMDSMI_STATUS_SUCCESS) return r;

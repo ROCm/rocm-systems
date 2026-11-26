@@ -1,10 +1,10 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// gfx942/gfx950 FP64 MFMA validation, baseline evaluation and SIMD dispatch.
+// Shared CDNA FP64 MFMA validation, baseline evaluation and SIMD dispatch.
+#include "common/dense_f64.h"
+#include "common/dense_f64_backends.h"
 #include "common/internal.h"
-#include "mfma/backends.h"
-#include "mfma/f64.h"
 #include "rj_arith/detail/rj_arith_common.h"
 #include "rj_arith/detail/rj_arith_mfma.h"
 namespace {
@@ -23,17 +23,17 @@ int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32
   }
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
   if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
-    mfma_f64_x86_64_v4<M, Batch>(controls, d, a, b, c);
+    dense_f64_x86_64_v4<M, Batch>(controls, d, a, b, c);
     return RJ_ARITH_SUCCESS;
   }
 #endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
   if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
-    mfma_f64_x86_64_v3<M, Batch>(controls, d, a, b, c);
+    dense_f64_x86_64_v3<M, Batch>(controls, d, a, b, c);
     return RJ_ARITH_SUCCESS;
   }
 #endif
-  mfma_f64_kernel<M, Batch>(controls, d, a, b, c);
+  dense_f64_kernel<M, Batch, 64>(controls, d, a, b, c);
   return RJ_ARITH_SUCCESS;
 }
 } // namespace

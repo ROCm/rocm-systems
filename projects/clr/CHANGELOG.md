@@ -45,11 +45,11 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 ### Changed
 
-* Code object version 4 and earlier are now rejected on devices that use the extended dispatch packet (gfx1250). COV4 device-libs read grid dimensions from the AQL dispatch packet, which has different field semantics on these devices, producing silently wrong results. Users must rebuild with `-mcode-object-version=5` or later.
 * After `hipFuncSetCacheConfig`, `preferredShmemCarveout` reads back `-1` for `hipFuncCachePreferNone` (was `0`) and `0` for `hipFuncCachePreferL1` (was `1`).
 * `hipCtxDestroy` returns `hipErrorInvalidContext` for a context the caller did not create with `hipCtxCreate` (was `hipSuccess`).
 * On gfx12 and later, pitched allocations use 128-byte alignment instead of 256, matching the hardware's linear pitch granularity. `hipMallocPitch`, `hipMemAllocPitch` and `hipMalloc3D` return a 128-byte-aligned pitch, and `hipDeviceProp_t::texturePitchAlignment` (OpenCL `CL_DEVICE_IMAGE_PITCH_ALIGNMENT`) reports 128. A 260-byte row now yields a 384-byte pitch rather than 512, so the allocation size changes with it. Earlier hardware is unchanged at 256 bytes. Applications that hard-coded the previous pitch, or derived a buffer size from it, will see different values.
 * Stream completion signals are now placed in device memory by default, as graph signals already are, on GPUs with a large BAR whose ROCr reports a signal-capable device pool, while no profiler tool is attached. Empty kernel dispatches and multi-stream launches get faster, while host reads of completion state get slower: `hipEventQuery`, `hipEventElapsedTime`, and a short kernel launched and synchronized on its own can take a few microseconds longer. Set `DEBUG_CLR_DEV_SIGNALS=0` to keep stream completion signals in host memory.
+* `hipMemPrefetchAsync` and `hipMemPrefetchAsync_v2` with a null stream and a GPU destination now enqueue the prefetch on the current device's null stream, as they already did for a host destination and as CUDA does (was the destination GPU's null stream). Null-stream prefetches are now ordered with each other and with other work on the current device's null stream, and `hipStreamSynchronize(nullptr)` and `hipDeviceSynchronize` wait for them. They are no longer ordered after work on the destination GPU's null stream.
 
 ## HIP 7.17.0 for ROCm 10.2.0
 

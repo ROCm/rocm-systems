@@ -24,14 +24,17 @@ constexpr std::chrono::microseconds kHostDoorbellPollInterval = 100us;
 constexpr std::chrono::microseconds kRetryInterval = 100us;
 
 uint64_t *host_doorbell_word(void *base, uint32_t offset) {
-  if (base == nullptr)
+  if (base == nullptr) {
     return nullptr;
+  }
   const uintptr_t base_address = reinterpret_cast<uintptr_t>(base);
-  if (base_address > std::numeric_limits<uintptr_t>::max() - offset)
+  if (base_address > std::numeric_limits<uintptr_t>::max() - offset) {
     return nullptr;
+  }
   const uintptr_t address = base_address + offset;
-  if (address % alignof(uint64_t) != 0)
+  if (address % alignof(uint64_t) != 0) {
     return nullptr;
+  }
   return reinterpret_cast<uint64_t *>(address);
 }
 
@@ -96,19 +99,22 @@ SdmaQueueScheduler::~SdmaQueueScheduler() { shutdown(); }
 
 std::shared_ptr<SdmaQueueScheduler::QueueRecord>
 SdmaQueueScheduler::find_locked(Handle handle) const {
-  if (!handle || handle.slot_ >= slots_.size())
+  if (!handle || handle.slot_ >= slots_.size()) {
     return {};
+  }
   const Slot &slot = slots_[handle.slot_];
-  if (slot.generation != handle.generation_)
+  if (slot.generation != handle.generation_) {
     return {};
+  }
   return slot.queue;
 }
 
 std::shared_ptr<SdmaQueueScheduler::QueueRecord>
 SdmaQueueScheduler::find_locked(uint32_t process_id, uint32_t queue_id) const {
   for (const Slot &slot : slots_) {
-    if (slot.queue && slot.queue->process_id_ == process_id && slot.queue->queue_id_ == queue_id)
+    if (slot.queue && slot.queue->process_id_ == process_id && slot.queue->queue_id_ == queue_id) {
       return slot.queue;
+    }
   }
   return {};
 }
@@ -128,16 +134,18 @@ SdmaQueueScheduler::Handle SdmaQueueScheduler::allocate_locked(std::shared_ptr<Q
 }
 
 void SdmaQueueScheduler::ensure_worker_locked() {
-  if (worker_.joinable())
+  if (worker_.joinable()) {
     return;
+  }
   worker_ = std::jthread([this](std::stop_token stop_token) { worker_loop(stop_token); });
 }
 
 SdmaQueueScheduler::Handle SdmaQueueScheduler::attach(SdmaQueueConfig config,
                                                       SdmaPacketCallbacks callbacks,
                                                       SdmaQueueProgressObserver progress_observer) {
-  if (!valid_sdma_ring_config(config.ring))
+  if (!valid_sdma_ring_config(config.ring)) {
     return {};
+  }
   // A host-polled queue needs two indivisible publication words: the doorbell
   // bounds executable bytes, while the canonical producer pointer supplies the
   // release/acquire edge that makes those packet bytes visible.
@@ -146,16 +154,19 @@ SdmaQueueScheduler::Handle SdmaQueueScheduler::attach(SdmaQueueConfig config,
        config.producer_pointer_address % alignof(uint64_t) != 0 ||
        config.doorbell_offset % alignof(uint64_t) != 0 ||
        (config.doorbell_base != nullptr &&
-        host_doorbell_word(config.doorbell_base, config.doorbell_offset) == nullptr)))
+        host_doorbell_word(config.doorbell_base, config.doorbell_offset) == nullptr))) {
     return {};
+  }
 
   std::lock_guard lock(mutex_);
-  if (shutting_down_)
+  if (shutting_down_) {
     return {};
+  }
   std::optional<GpuVmBindingLease> address_space_lease =
       gpu_vm_.retain_binding(config.ring.address_space);
-  if (!address_space_lease)
+  if (!address_space_lease) {
     return {};
+  }
   std::shared_ptr<QueueRecord> queue =
       std::make_shared<QueueRecord>(gpu_vm_, std::move(config), std::move(*address_space_lease),
                                     dialect_, std::move(callbacks), std::move(progress_observer));
@@ -170,8 +181,9 @@ QueueReconfigureStatus SdmaQueueScheduler::update(Handle handle, uint64_t ring_b
                                                   uint32_t scheduling_percentage) {
   std::unique_lock lock(mutex_);
   std::shared_ptr<QueueRecord> queue = find_locked(handle);
-  if (!queue || queue->closing_)
+  if (!queue || queue->closing_) {
     return QueueReconfigureStatus::Stale;
+  }
   // Reserve the next idle interval before dropping the lock in wait().
   ++queue->management_operations_;
   condition_.wait(lock, [&queue]() { return queue->closing_ || !queue->service_active_; });
@@ -190,8 +202,9 @@ QueueReconfigureStatus SdmaQueueScheduler::update(Handle handle, uint64_t ring_b
       const bool ring_changed = config.ring_base != ring_base || config.ring_bytes != ring_size;
       config.ring_base = ring_base;
       config.ring_bytes = ring_size;
-      if (ring_changed)
+      if (ring_changed) {
         config.initial_cursor.reset();
+      }
       if (!valid_sdma_ring_config(config)) {
         status = QueueReconfigureStatus::Invalid;
       } else if (ring_changed) {
@@ -208,10 +221,12 @@ QueueReconfigureStatus SdmaQueueScheduler::update(Handle handle, uint64_t ring_b
       if (status == QueueReconfigureStatus::Applied) {
         queue->enabled_ = scheduling_percentage != 0;
         if (queue->enabled_ &&
-            (queue->retry_pending_ || queue->producer_cursor_ != queue->ring_consumer_.cursor()))
+            (queue->retry_pending_ || queue->producer_cursor_ != queue->ring_consumer_.cursor())) {
           queue->ready_ = true;
-        if (!queue->enabled_)
+        }
+        if (!queue->enabled_) {
           status = QueueReconfigureStatus::Disabled;
+        }
       }
     }
   }
@@ -224,8 +239,9 @@ QueueReconfigureStatus SdmaQueueScheduler::update(Handle handle, uint64_t ring_b
 QueueSubmissionStatus SdmaQueueScheduler::notify(Handle handle, uint64_t producer_cursor) {
   std::lock_guard lock(mutex_);
   std::shared_ptr<QueueRecord> queue = find_locked(handle);
-  if (!queue || queue->closing_ || queue->terminal_)
+  if (!queue || queue->closing_ || queue->terminal_) {
     return QueueSubmissionStatus::Faulted;
+  }
 
   queue->producer_cursor_ = std::max(queue->producer_cursor_, producer_cursor);
   queue->last_doorbell_ = producer_cursor;
@@ -250,8 +266,9 @@ QueuePrepareCloseStatus SdmaQueueScheduler::detach(Handle handle, bool force) no
   {
     std::unique_lock lock(mutex_);
     queue = find_locked(handle);
-    if (!queue || queue->closing_)
+    if (!queue || queue->closing_) {
       return QueuePrepareCloseStatus::Faulted;
+    }
     queue->closing_ = true;
     queue->ready_ = false;
     queue->retry_pending_ = false;
@@ -274,14 +291,16 @@ QueuePrepareCloseStatus SdmaQueueScheduler::detach(Handle handle, bool force) no
 
     // The worker can retain a QueueRecord after publishing service_active_=false.
     // Cancel its deferred owner effect before detach reports force-close done.
-    if (force)
+    if (force) {
       queue->ring_consumer_.cancel_in_flight();
+    }
 
     Slot &slot = slots_[handle.slot_];
     slot.queue.reset();
     ++slot.generation;
-    if (slot.generation == 0)
+    if (slot.generation == 0) {
       ++slot.generation;
+    }
     free_slots_.push_back(handle.slot_);
     // Service is quiescent and the queue cannot be selected again. Worker or
     // management references may outlive detach, but must not keep the VM bound.
@@ -294,8 +313,9 @@ QueuePrepareCloseStatus SdmaQueueScheduler::detach(Handle handle, bool force) no
 void SdmaQueueScheduler::set_process_doorbell_base(uint32_t process_id, void *base) {
   std::lock_guard lock(mutex_);
   for (const Slot &slot : slots_) {
-    if (!slot.queue || slot.queue->process_id_ != process_id || !slot.queue->host_accessible_)
+    if (!slot.queue || slot.queue->process_id_ != process_id || !slot.queue->host_accessible_) {
       continue;
+    }
     slot.queue->doorbell_base_ = base;
   }
   condition_.notify_all();
@@ -308,18 +328,21 @@ bool SdmaQueueScheduler::synchronize_host_queue_for_test(uint32_t process_id, ui
   scan_host_doorbells_locked();
 
   std::shared_ptr<QueueRecord> queue = find_locked(process_id, queue_id);
-  if (!queue || queue->closing_ || queue->terminal_ || !queue->enabled_)
+  if (!queue || queue->closing_ || queue->terminal_ || !queue->enabled_) {
     return false;
+  }
 
   const uint64_t producer_cursor = queue->producer_cursor_;
-  if (!queue->service_active_ && queue->ring_consumer_.cursor() < producer_cursor)
+  if (!queue->service_active_ && queue->ring_consumer_.cursor() < producer_cursor) {
     queue->ready_ = true;
+  }
   condition_.notify_all();
   if (!condition_.wait_until(lock, deadline, [&queue, producer_cursor]() {
         return queue->closing_ || queue->terminal_ || !queue->enabled_ ||
                (!queue->service_active_ && queue->ring_consumer_.cursor() >= producer_cursor);
-      }))
+      })) {
     return false;
+  }
   return !queue->closing_ && !queue->terminal_ && queue->enabled_ && !queue->service_active_ &&
          queue->ring_consumer_.cursor() >= producer_cursor;
 }
@@ -332,23 +355,28 @@ bool SdmaQueueScheduler::synchronize_queue_for_test(
   {
     const std::lock_guard lock(mutex_);
     const std::shared_ptr<QueueRecord> queue = find_locked(process_id, queue_id);
-    if (!queue || queue->closing_ || queue->terminal_ || !queue->enabled_)
+    if (!queue || queue->closing_ || queue->terminal_ || !queue->enabled_) {
       return false;
+    }
     producer_cursor = queue->producer_cursor_;
   }
 
   while (true) {
-    if (service_dependencies)
+    if (service_dependencies) {
       service_dependencies();
+    }
 
     std::unique_lock lock(mutex_);
     const std::shared_ptr<QueueRecord> queue = find_locked(process_id, queue_id);
-    if (!queue || queue->closing_ || queue->terminal_ || !queue->enabled_)
+    if (!queue || queue->closing_ || queue->terminal_ || !queue->enabled_) {
       return false;
-    if (!queue->service_active_ && queue->ring_consumer_.cursor() >= producer_cursor)
+    }
+    if (!queue->service_active_ && queue->ring_consumer_.cursor() >= producer_cursor) {
       return true;
-    if (std::chrono::steady_clock::now() >= deadline)
+    }
+    if (std::chrono::steady_clock::now() >= deadline) {
       return false;
+    }
 
     const uint64_t completed_service_turns = queue->completed_service_turns_;
     queue->ready_ = true;
@@ -357,8 +385,9 @@ bool SdmaQueueScheduler::synchronize_queue_for_test(
     if (!condition_.wait_until(lock, deadline, [&queue, completed_service_turns]() {
           return queue->closing_ || queue->terminal_ || !queue->enabled_ ||
                  queue->completed_service_turns_ != completed_service_turns;
-        }))
+        })) {
       return false;
+    }
   }
 }
 
@@ -367,8 +396,9 @@ bool SdmaQueueScheduler::wait_for_blocked_packet_for_test(uint32_t process_id, u
   std::unique_lock lock(mutex_);
   for (const Slot &slot : slots_) {
     const std::shared_ptr<QueueRecord> &queue = slot.queue;
-    if (!queue || queue->process_id_ != process_id || queue->queue_id_ != queue_id)
+    if (!queue || queue->process_id_ != process_id || queue->queue_id_ != queue_id) {
       continue;
+    }
     return condition_.wait_for(lock, timeout,
                                [&queue]() {
                                  return queue->closing_ || queue->terminal_ ||
@@ -384,8 +414,9 @@ bool SdmaQueueScheduler::set_packet_dialect(SdmaPacketDialect dialect) {
   std::lock_guard lock(mutex_);
   const bool has_queue =
       std::ranges::any_of(slots_, [](const Slot &slot) { return static_cast<bool>(slot.queue); });
-  if (has_queue)
+  if (has_queue) {
     return false;
+  }
   dialect_ = dialect;
   return true;
 }
@@ -395,12 +426,15 @@ void SdmaQueueScheduler::shutdown() noexcept {
     std::jthread worker;
     {
       std::lock_guard lock(mutex_);
-      if (shutting_down_ && !worker_.joinable())
+      if (shutting_down_ && !worker_.joinable()) {
         return;
+      }
       shutting_down_ = true;
-      for (Slot &slot : slots_)
-        if (slot.queue)
+      for (Slot &slot : slots_) {
+        if (slot.queue) {
           slot.queue->closing_ = true;
+        }
+      }
       if (worker_.joinable()) {
         worker_.request_stop();
         worker = std::move(worker_);
@@ -436,14 +470,17 @@ void SdmaQueueScheduler::scan_host_doorbells_locked() {
   for (Slot &slot : slots_) {
     std::shared_ptr<QueueRecord> &queue = slot.queue;
     if (!queue || queue->closing_ || queue->terminal_ || !queue->enabled_ ||
-        !queue->host_accessible_ || queue->doorbell_base_ == nullptr)
+        !queue->host_accessible_ || queue->doorbell_base_ == nullptr) {
       continue;
+    }
     uint64_t *doorbell = host_doorbell_word(queue->doorbell_base_, queue->doorbell_offset_);
-    if (doorbell == nullptr)
+    if (doorbell == nullptr) {
       continue;
+    }
     const uint64_t value = std::atomic_ref<uint64_t>(*doorbell).load(std::memory_order_acquire);
-    if (value == std::numeric_limits<uint64_t>::max() || value == queue->last_doorbell_)
+    if (value == std::numeric_limits<uint64_t>::max() || value == queue->last_doorbell_) {
       continue;
+    }
     queue->last_doorbell_ = value;
     if (value > queue->producer_cursor_) {
       queue->producer_cursor_ = value;
@@ -453,18 +490,21 @@ void SdmaQueueScheduler::scan_host_doorbells_locked() {
 }
 
 std::shared_ptr<SdmaQueueScheduler::QueueRecord> SdmaQueueScheduler::select_queue_locked() {
-  if (slots_.empty())
+  if (slots_.empty()) {
     return {};
+  }
   const std::size_t start = next_slot_ % slots_.size();
   const std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
   for (std::size_t offset = 0; offset < slots_.size(); ++offset) {
     const std::size_t slot_index = (start + offset) % slots_.size();
     std::shared_ptr<QueueRecord> queue = slots_[slot_index].queue;
     if (!queue || queue->closing_ || queue->terminal_ || !queue->enabled_ ||
-        queue->service_active_ || queue->management_operations_ != 0)
+        queue->service_active_ || queue->management_operations_ != 0) {
       continue;
-    if (!queue->ready_ && !(queue->retry_pending_ && queue->retry_deadline_ <= now))
+    }
+    if (!queue->ready_ && !(queue->retry_pending_ && queue->retry_deadline_ <= now)) {
       continue;
+    }
     queue->ready_ = false;
     queue->retry_pending_ = false;
     queue->service_active_ = true;
@@ -480,14 +520,17 @@ SdmaQueueScheduler::next_wake_deadline_locked() const {
   const std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
   for (const Slot &slot : slots_) {
     const std::shared_ptr<QueueRecord> &queue = slot.queue;
-    if (!queue || queue->closing_ || queue->terminal_ || !queue->enabled_)
+    if (!queue || queue->closing_ || queue->terminal_ || !queue->enabled_) {
       continue;
-    if (queue->retry_pending_ && (!deadline || queue->retry_deadline_ < *deadline))
+    }
+    if (queue->retry_pending_ && (!deadline || queue->retry_deadline_ < *deadline)) {
       deadline = queue->retry_deadline_;
+    }
     if (queue->host_accessible_ && queue->doorbell_base_ != nullptr) {
       const std::chrono::steady_clock::time_point poll_deadline = now + kHostDoorbellPollInterval;
-      if (!deadline || poll_deadline < *deadline)
+      if (!deadline || poll_deadline < *deadline) {
         deadline = poll_deadline;
+      }
     }
   }
   return deadline;
@@ -506,14 +549,16 @@ void SdmaQueueScheduler::worker_loop(std::stop_token stop_token) {
         // shutdown() requests stop while holding mutex_ and then notifies this
         // condition. Recheck under the same mutex before waiting so the worker
         // cannot miss that notification between the loop condition and wait().
-        if (stop_token.stop_requested())
+        if (stop_token.stop_requested()) {
           break;
+        }
         const std::optional<std::chrono::steady_clock::time_point> deadline =
             next_wake_deadline_locked();
-        if (deadline)
+        if (deadline) {
           condition_.wait_until(lock, *deadline);
-        else
+        } else {
           condition_.wait(lock);
+        }
         continue;
       }
       producer = queue->producer_cursor_;
@@ -553,8 +598,9 @@ void SdmaQueueScheduler::worker_loop(std::stop_token stop_token) {
                                                                         : SdmaRingStatus::Faulted;
       }
     }
-    if (publication_ready)
+    if (publication_ready) {
       outcome = queue->ring_consumer_.service(producer, kPacketsPerTurn);
+    }
 
     const bool terminal_outcome =
         outcome == SdmaRingStatus::Faulted || outcome == SdmaRingStatus::Malformed;
@@ -580,8 +626,9 @@ void SdmaQueueScheduler::worker_loop(std::stop_token stop_token) {
       if (!queue->closing_) {
         switch (outcome) {
         case SdmaRingStatus::Idle:
-          if (queue->producer_cursor_ != producer)
+          if (queue->producer_cursor_ != producer) {
             queue->ready_ = true;
+          }
           break;
         case SdmaRingStatus::Runnable:
           queue->ready_ = true;
@@ -601,9 +648,11 @@ void SdmaQueueScheduler::worker_loop(std::stop_token stop_token) {
   }
 
   std::lock_guard lock(mutex_);
-  for (Slot &slot : slots_)
-    if (slot.queue)
+  for (Slot &slot : slots_) {
+    if (slot.queue) {
       slot.queue->service_active_ = false;
+    }
+  }
   condition_.notify_all();
 }
 

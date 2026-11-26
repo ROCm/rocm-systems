@@ -1,0 +1,1 @@
+* Fixed AMD MNNVL env overrides being ignored in the ROCm `fillInfo` path. `NCCL_MNNVL_CLIQUE_ID` and `NCCL_MNNVL_UUID` are now applied for MNNVL-capable ranks, enabling soft partitioning of MNNVL domains on AMD as documented.

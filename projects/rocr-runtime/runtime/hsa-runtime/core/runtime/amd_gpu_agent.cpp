@@ -332,7 +332,10 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
   const auto link_info =
       core::Runtime::runtime_singleton_->GetLinkInfo(nearest_cpu->node_id(), node_id());
 
-  if (link_info.num_hop >= 1 && !properties_.Integrated) {
+  // With HSA_DEVICE_MEM_NO_HOST_ACCESS the CPU cannot access device memory, so treat the
+  // device as small-BAR.
+  if (link_info.num_hop >= 1 && !properties_.Integrated &&
+      !core::Runtime::runtime_singleton_->flag().device_mem_no_host_access()) {
     large_bar_enabled_ = true;
   }
 
@@ -2773,7 +2776,7 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
       *((uint32_t*)value) = static_cast<uint32_t>(properties_.FamilyID);
       break;
     case HSA_AMD_AGENT_INFO_UCODE_VERSION:
-      *((uint32_t*)value) = static_cast<uint32_t>(properties_.EngineId.ui32.uCode);
+      *((uint32_t*)value) = static_cast<uint32_t>(properties_.uCodeEngineVersions.uCodeCompute);
       break;
     case HSA_AMD_AGENT_INFO_SDMA_UCODE_VERSION:
       *((uint32_t*)value) = static_cast<uint32_t>(properties_.uCodeEngineVersions.uCodeSDMA);
@@ -3419,7 +3422,7 @@ void GpuAgent::TranslateTime(core::Signal* signal, hsa_amd_profiling_dispatch_ti
   uint64_t start, end;
   signal->GetRawTs(start, end);
 
-  if ((start == 0) || (end == 0) || (start < t0_.GPUClockCounter) || (end < t0_.GPUClockCounter)) {
+  if (!RawTsValid(start, end)) {
     debug_print("Signal %p time stamps may be invalid (start=%" PRIu64 ", end=%" PRIu64 ", t0=%" PRIu64 ").\n",
                 &signal->signal_, start, end, t0_.GPUClockCounter);
     time.start = 0;
@@ -3437,7 +3440,7 @@ void GpuAgent::TranslateTime(core::Signal* signal, hsa_amd_profiling_async_copy_
   uint64_t start, end;
   signal->GetRawTs(start, end);
 
-  if ((start == 0) || (end == 0) || (start < t0_.GPUClockCounter) || (end < t0_.GPUClockCounter)) {
+  if (!RawTsValid(start, end)) {
     debug_print("Signal %p async copy time stamps may be invalid (start=%" PRIu64 ", end=%" PRIu64 ", t0=%" PRIu64 ").\n",
                 &signal->signal_, start, end, t0_.GPUClockCounter);
     time.start = 0;
@@ -3466,12 +3469,21 @@ uint64_t GpuAgent::TranslateTime(uint64_t tick) {
 
   std::lock_guard<std::mutex> lock(t1_lock_);
 
-#ifdef _WIN32
-  // On Windows, AQL dispatch timestamps may have a fixed epoch offset from
-  // D3DKMTQueryClockCalibration's GPUClockCounter (same clock domain, different
-  // base).  Subtract the offset before interpolation (0 until first detection).
+  // Packet timestamps may have a fixed epoch offset from GetClockCounters'
+  // GPUClockCounter (same clock domain, different base), e.g. on Windows and WSL
+  // (DXG).  Subtract the offset before interpolation (0 until first detection).
   // gpu_clock_offset_ is read and written under t1_lock_ to avoid data races.
+#ifdef _WIN32
   tick -= gpu_clock_offset_;
+#else
+  // Detect the offset here as well as in RawTsValid, so scalar conversions through
+  // hsa_amd_profiling_convert_tick_to_system_domain (e.g. CLR's batched
+  // CacheTimingFromTicks, which reads raw start_ts/end_ts and converts them
+  // directly) latch it without depending on an earlier signal-based profiling
+  // query.  t1_lock_ is already held, so call the locked helper directly; it is a
+  // no-op once latched.  Detecting before the tick < t0_ branch below also keeps
+  // an epoch-offset tick from seeding historical_clock_ratio_.
+  tick -= ClockEpochOffsetLocked(tick);
 #endif
   // Limit errors due to correlated pair certainty to ~0.5us.
   // extrapolated time < (0.5us / half clock read certainty) * delay between clock measures
@@ -3538,7 +3550,7 @@ bool GpuAgent::current_coherency_type(hsa_amd_coherency_type_t type) {
 }
 
 uint16_t GpuAgent::GetMicrocodeVersion() const {
-  return (properties_.EngineId.ui32.uCode);
+  return (properties_.uCodeEngineVersions.uCodeCompute);
 }
 
 uint16_t GpuAgent::GetSdmaMicrocodeVersion() const {
@@ -3548,6 +3560,40 @@ uint16_t GpuAgent::GetSdmaMicrocodeVersion() const {
 void GpuAgent::SyncClocks() {
   [[maybe_unused]] hsa_status_t sync_err = driver().GetClockCounters(node_id(), &t1_);
   assert(sync_err == HSA_STATUS_SUCCESS && "hsaGetClockCounters error");
+}
+
+bool GpuAgent::RawTsValid(uint64_t start, uint64_t end) {
+  if ((start == 0) || (end == 0)) return false;
+  // The upstream check, lock-free: ticks that do not predate t0_ are valid.  This
+  // is the common case on every platform and keeps t1_lock_ off the native path.
+  if ((start >= t0_.GPUClockCounter) && (end >= t0_.GPUClockCounter)) return true;
+  // A tick predates t0_: valid only if the packet clock lags the calibration clock
+  // by an epoch offset (WSL/DXG, negative offset) that explains it.  A zero or
+  // positive offset (KFD, native Windows) leaves these ticks invalid, as upstream.
+  const int64_t off = ClockEpochOffset(end);
+  if (off >= 0) return false;
+  const uint64_t lag = uint64_t(-off);
+  return (start + lag >= t0_.GPUClockCounter) && (end + lag >= t0_.GPUClockCounter);
+}
+
+int64_t GpuAgent::ClockEpochOffset(uint64_t raw_tick) {
+  std::lock_guard<std::mutex> lock(t1_lock_);
+  return ClockEpochOffsetLocked(raw_tick);
+}
+
+// The caller must hold t1_lock_.  Only a tick that predates t0_ can reveal an
+// offset, so ticks at or after t0_ (every valid tick on KFD) return without asking
+// the driver.  The driver decides whether such a tick is an epoch offset; see
+// KfdDriver::GetTimestampEpochOffset for the WSL heuristic and its limits.
+int64_t GpuAgent::ClockEpochOffsetLocked(uint64_t raw_tick) {
+  if (gpu_clock_offset_ != 0 || raw_tick == 0 || raw_tick >= t0_.GPUClockCounter)
+    return gpu_clock_offset_;
+  int64_t offset = 0;
+  if (driver().GetTimestampEpochOffset(node_id(), raw_tick, t0_, &t1_, &offset) ==
+          HSA_STATUS_SUCCESS &&
+      offset != 0)
+    gpu_clock_offset_ = offset;
+  return gpu_clock_offset_;
 }
 
 hsa_status_t GpuAgent::UpdateTrapHandlerWithPCS(pcs_sampling_data_t* pcs_hosttrap_buffers,
@@ -3609,6 +3655,22 @@ hsa_status_t GpuAgent::UpdateTrapHandlerWithPCS(pcs_sampling_data_t* pcs_hosttra
                                  tma_size);
 }
 
+void GpuAgent::WarnIfNoSecondLevelTrapHandler() {
+  if (!trap_handler_unavailable_) return;
+
+  // One message per agent, however many queues it ends up with.
+  if (queue_exception_warned_.exchange(true)) return;
+
+  // Cap 0 is deliberate: the per-agent latch above bounds this, and a shared
+  // call-site cap would hide the second affected agent.
+  log_warning_n(0,
+                "No second-level trap handler bound for GPU node %u (%s): exception "
+                "debugging is not available to the runtime. A device-side abort will not "
+                "be reported, and on gfx11 the dispatch never retires, so the host may "
+                "wait indefinitely. PC sampling is unavailable.\n",
+                node_id(), supported_isas()[0]->GetIsaName().c_str());
+}
+
 void GpuAgent::BindTrapHandler() {
   if (supported_isas()[0]->GetMajorVersion() == 7) {
     // No trap handler support on Gfx7, soft error.
@@ -3628,19 +3690,9 @@ void GpuAgent::BindTrapHandler() {
         (supported_isas()[0]->GetMinorVersion() == 4 || supported_isas()[0]->GetMinorVersion() == 5)) ||
        (supported_isas()[0]->GetMajorVersion() == 10 && supported_isas()[0]->GetMinorVersion() == 3 &&
         supported_isas()[0]->GetStepping() == 6)) {
-      // No trap handler support without exception handling, soft error.
-      // gfx1036 (Granite Ridge iGPU): KMD does not support the trap handler escape.
-      //
-      // Nothing is bound on this path, and the queue is also created without an event or
-      // an ErrorReason, so there is no way left to deliver a queue exception. Say so once
-      // per agent rather than failing silently - a device-side abort then parks its wave
-      // forever and presents as an unexplained hang rather than as an error.
-      log_warning_n(0,
-                    "No trap handler bound for GPU node %u (%s): the kernel driver does not "
-                    "report support for exception debugging. Queue exceptions such as a "
-                    "device-side abort will not be reported, and a kernel that aborts will "
-                    "leave its dispatch unretired, so the host may wait indefinitely.\n",
-                    node_id(), supported_isas()[0]->GetIsaName().c_str());
+      // No second-level trap handler on this path, soft error. Record it so the
+      // first queue created on this agent can report it.
+      trap_handler_unavailable_ = true;
       return;
     }
 
@@ -3671,12 +3723,12 @@ void GpuAgent::InvalidateCodeCaches(void *ptr, size_t size) {
   // Check for microcode cache invalidation support.
   // This is deprecated in later microcode builds.
   if (supported_isas()[0]->GetMajorVersion() == 7) {
-    if (properties_.EngineId.ui32.uCode < 420) {
+    if (properties_.uCodeEngineVersions.uCodeCompute < 420) {
       // Microcode is handling code cache invalidation.
       return;
     }
   } else if (supported_isas()[0]->GetMajorVersion() == 8 && supported_isas()[0]->GetMinorVersion() == 0) {
-    if (properties_.EngineId.ui32.uCode < 685) {
+    if (properties_.uCodeEngineVersions.uCodeCompute < 685) {
       // Microcode is handling code cache invalidation.
       return;
     }

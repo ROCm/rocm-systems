@@ -518,6 +518,27 @@ install(
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    option(
+        RJ_INSTALL_MINIDEBUGINFO
+        "Compress private symbols in the installed Release librocjitsu.so"
+        ON
+    )
+    if(
+        RJ_INSTALL_MINIDEBUGINFO
+        AND NOT THEROCK_SPLIT_DEBUG_INFO
+        AND CMAKE_OBJCOPY
+        AND CMAKE_READELF
+    )
+        configure_file(
+            cmake/rj_install_minidebuginfo.cmake.in
+            rj_install_minidebuginfo.cmake
+            @ONLY
+        )
+        install(
+            SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/rj_install_minidebuginfo.cmake"
+        )
+    endif()
+
     # The translator ships alongside the hook: both must resolve to the SAME
     # shared object, or the cache identity they derive from it would differ and
     # neither could read what the other wrote.
@@ -526,6 +547,9 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     )
 endif()
+
+# Ship the standalone host CLI for offline code-object mutation workflows.
+install(TARGETS rj_code_mutate RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # rj_pretranslate ships because the tier it fills is only worth having if an

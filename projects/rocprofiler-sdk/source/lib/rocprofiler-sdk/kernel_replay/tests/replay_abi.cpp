@@ -64,6 +64,16 @@ size_t
 rocprofiler_test_c_replay_offset_replay_start_context(void);
 size_t
 rocprofiler_test_c_replay_offset_replay_stop_context(void);
+size_t
+rocprofiler_test_c_replay_offset_replay_options(void);
+size_t
+rocprofiler_test_c_replay_options_size(void);
+size_t
+rocprofiler_test_c_replay_options_offset_flags(void);
+int
+rocprofiler_test_c_replay_option_snapshot_host_pinned(void);
+int
+rocprofiler_test_c_replay_option_snapshot_disk(void);
 int
 rocprofiler_test_c_replay_operation_last(void);
 int
@@ -126,7 +136,9 @@ TEST(kernel_replay_abi, members_are_in_declaration_order)
               offsetof(replay_data_t, replay_start_context));
     EXPECT_LT(offsetof(replay_data_t, replay_start_context),
               offsetof(replay_data_t, replay_stop_context));
-    EXPECT_LT(offsetof(replay_data_t, replay_stop_context), sizeof(replay_data_t));
+    EXPECT_LT(offsetof(replay_data_t, replay_stop_context),
+              offsetof(replay_data_t, replay_options));
+    EXPECT_LT(offsetof(replay_data_t, replay_options), sizeof(replay_data_t));
 }
 
 // No member may overlap the one after it, and the last member must fit inside the struct. This
@@ -150,8 +162,10 @@ TEST(kernel_replay_abi, members_do_not_overlap_and_fit)
               offsetof(replay_data_t, replay_start_context) +
                   sizeof(replay_data_t{}.replay_start_context));
     EXPECT_GE(
-        sizeof(replay_data_t),
+        offsetof(replay_data_t, replay_options),
         offsetof(replay_data_t, replay_stop_context) + sizeof(replay_data_t{}.replay_stop_context));
+    EXPECT_GE(sizeof(replay_data_t),
+              offsetof(replay_data_t, replay_options) + sizeof(replay_data_t{}.replay_options));
 }
 
 // Pass counters are documented as uint64_t. A tool reading them through the header's type must see
@@ -190,6 +204,7 @@ TEST(kernel_replay_abi, zero_initialized_record_opts_out_of_replay)
     EXPECT_EQ(rec.replay_continue, nullptr);
     EXPECT_EQ(rec.replay_start_context, nullptr);
     EXPECT_EQ(rec.replay_stop_context, nullptr);
+    EXPECT_EQ(rec.replay_options, nullptr);
     EXPECT_EQ(rec.current_pass, 0u);
     EXPECT_EQ(rec.total_passes, 0u);
     EXPECT_EQ(rec.size, 0u);
@@ -203,7 +218,21 @@ TEST(kernel_replay_abi, size_member_carries_the_layout_prefix)
     replay_data_t rec = {};
     rec.size          = sizeof(replay_data_t);
     EXPECT_EQ(rec.size, sizeof(replay_data_t));
-    EXPECT_GT(rec.size, offsetof(replay_data_t, replay_stop_context));
+    EXPECT_GT(rec.size, offsetof(replay_data_t, replay_options));
+}
+
+// A tool's options struct is versioned by its own size, which comes first, and its flags are
+// 64 bits wide.
+TEST(kernel_replay_abi, options_struct_has_size_then_flags)
+{
+    using options_t = rocprofiler_kernel_replay_options_t;
+    EXPECT_TRUE(std::is_standard_layout<options_t>::value);
+    EXPECT_TRUE(std::is_trivially_copyable<options_t>::value);
+    EXPECT_EQ(offsetof(options_t, size), 0u);
+    EXPECT_EQ(offsetof(options_t, flags), sizeof(uint64_t));
+    EXPECT_EQ(sizeof(options_t), 2 * sizeof(uint64_t));
+    EXPECT_TRUE((std::is_same<decltype(options_t{}.flags), uint64_t>::value));
+    EXPECT_TRUE((std::is_same<decltype(replay_data_t{}.replay_options), options_t*>::value));
 }
 
 // A record is passed by pointer and read field-by-field; it must be aligned for its widest member
@@ -225,6 +254,17 @@ TEST(kernel_replay_abi, operation_enum_values_are_stable)
     EXPECT_EQ(static_cast<int>(ROCPROFILER_KERNEL_REPLAY_NONE), 0);
     EXPECT_EQ(static_cast<int>(ROCPROFILER_KERNEL_REPLAY_CONFIG), 1);
     EXPECT_EQ(static_cast<int>(ROCPROFILER_KERNEL_REPLAY_PASS), 2);
+}
+
+// Option flags are bits a tool ORs together, so their values are part of the ABI. NONE must stay 0
+// so zeroed options mean the SDK's defaults.
+TEST(kernel_replay_abi, option_flag_values_are_stable)
+{
+    EXPECT_EQ(static_cast<int>(ROCPROFILER_KERNEL_REPLAY_OPTION_NONE), 0);
+    EXPECT_EQ(static_cast<int>(ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_DEVICE), 1 << 0);
+    EXPECT_EQ(static_cast<int>(ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_HOST_PINNED), 1 << 1);
+    EXPECT_EQ(static_cast<int>(ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_HOST_PAGEABLE), 1 << 2);
+    EXPECT_EQ(static_cast<int>(ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_DISK), 1 << 3);
 }
 
 // New operations must be appended before LAST, never inserted among the existing ones. If this
@@ -366,6 +406,20 @@ TEST(kernel_replay_abi, c_and_cxx_agree_on_every_field_offset)
               offsetof(replay_data_t, replay_start_context));
     EXPECT_EQ(rocprofiler_test_c_replay_offset_replay_stop_context(),
               offsetof(replay_data_t, replay_stop_context));
+    EXPECT_EQ(rocprofiler_test_c_replay_offset_replay_options(),
+              offsetof(replay_data_t, replay_options));
+}
+
+TEST(kernel_replay_abi, c_and_cxx_agree_on_the_options_struct)
+{
+    EXPECT_EQ(rocprofiler_test_c_replay_options_size(),
+              sizeof(rocprofiler_kernel_replay_options_t));
+    EXPECT_EQ(rocprofiler_test_c_replay_options_offset_flags(),
+              offsetof(rocprofiler_kernel_replay_options_t, flags));
+    EXPECT_EQ(rocprofiler_test_c_replay_option_snapshot_host_pinned(),
+              static_cast<int>(ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_HOST_PINNED));
+    EXPECT_EQ(rocprofiler_test_c_replay_option_snapshot_disk(),
+              static_cast<int>(ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_DISK));
 }
 
 TEST(kernel_replay_abi, c_and_cxx_agree_on_enum_values)
@@ -394,4 +448,5 @@ TEST(kernel_replay_abi, record_written_by_c_reads_back_in_cxx)
     EXPECT_EQ(rec.replay_continue, nullptr);
     EXPECT_EQ(rec.replay_start_context, nullptr);
     EXPECT_EQ(rec.replay_stop_context, nullptr);
+    EXPECT_EQ(rec.replay_options, nullptr);
 }

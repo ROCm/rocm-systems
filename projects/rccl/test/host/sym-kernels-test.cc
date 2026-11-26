@@ -374,11 +374,11 @@ TEST_F(SymKernelMaskTest, NeedGinTrue_UnregisteredGinWindow_EverythingCleared) {
     return t;
   });
   ScopedHook loadParam(g_loadParam, SymGinKernelsEnable(1));
-  uint32_t blocked =
+  ncclSymkKernelMask blocked =
       ncclSymkMask(comm_.get(), ncclFuncAllGather, ncclDevSum, kTy, /*nElts=*/1024, /*symAligned16B=*/true,
                    /*ginWindowsUnregistered=*/true);
   EXPECT_EQ(blocked, 0u);
-  uint32_t kept =
+  ncclSymkKernelMask kept =
       ncclSymkMask(comm_.get(), ncclFuncAllGather, ncclDevSum, kTy, /*nElts=*/1024, /*symAligned16B=*/true,
                    /*ginWindowsUnregistered=*/false);
   EXPECT_TRUE(KernelBitSet(kept, ncclSymkKernelId_AllGather_RailRing_LsaST));
@@ -556,7 +556,7 @@ TEST_F(SymKernelMicrotest, HierScaleInSize_EqualRunsOfConsecutiveRanksPerDevice)
   comm_->peerInfo = nullptr;
 }
 
-TEST_F(SymKernelMaskTest, HierLsaST_OnlyOnGfx1250PartitionModeWithTwoOrMorePackages) {
+TEST_F(SymKernelMaskTest, HierKernels_OnlyOnGfx1250PartitionModeWithTwoOrMorePackages) {
   struct {
     const char* name;
     bool gfx1250;
@@ -581,11 +581,33 @@ TEST_F(SymKernelMaskTest, HierLsaST_OnlyOnGfx1250PartitionModeWithTwoOrMorePacka
     EXPECT_EQ(KernelBitSet(kmask, ncclSymkKernelId_AllGather_HierLsaTmaST), c.offered && TmaReachableOnThisBuild())
         << c.name;
     EXPECT_TRUE(KernelBitSet(kmask, ncclSymkKernelId_AllGather_ST)) << c.name;
+    // The hierarchical ReduceScatter has the same gate, and is sum only.
+    ncclSymkKernelMask rsSum = ncclSymkMask(comm_.get(), ncclFuncReduceScatter, ncclDevSum, kTy, /*nElts=*/1024);
+    EXPECT_EQ(KernelBitSet(rsSum, ncclSymkKernelId_ReduceScatter_HierLsaLDST), c.offered) << c.name;
+    ncclSymkKernelMask rsAvg = ncclSymkMask(comm_.get(), ncclFuncReduceScatter, ncclDevSumPostDiv, kTy, /*nElts=*/1024);
+    EXPECT_FALSE(KernelBitSet(rsAvg, ncclSymkKernelId_ReduceScatter_HierLsaLDST)) << c.name;
   }
 }
 
+// Blocks step up at 16 and 64 MiB of bus bytes. The chunk drops to the small one below 512 KiB per block, and never
+// exceeds what the slots were sized for.
+TEST_F(SymKernelMicrotest, RsHierLaunch_BlocksAndChunkSize) {
+  EXPECT_EQ(ncclSymkRsHierLaunchBlocks(4, (size_t(4) << 20) - 1), 64);
+  EXPECT_EQ(ncclSymkRsHierLaunchBlocks(4, size_t(4) << 20), 80);
+  EXPECT_EQ(ncclSymkRsHierLaunchBlocks(4, (size_t(16) << 20) - 1), 80);
+  EXPECT_EQ(ncclSymkRsHierLaunchBlocks(4, size_t(16) << 20), ncclSymkRsHierMaxBlocks);
+
+  comm_->symkState.kcomm.rsHierChunkSize = ncclSymkRsHierMaxChunkBytes;
+  EXPECT_EQ(ncclSymkRsHierLaunchChunkSize(comm_.get(), ncclSymkRsHierChunkSwitchBlockBytes - 1),
+            ncclSymkRsHierMinChunkBytes);
+  EXPECT_EQ(ncclSymkRsHierLaunchChunkSize(comm_.get(), ncclSymkRsHierChunkSwitchBlockBytes),
+            ncclSymkRsHierMaxChunkBytes);
+  comm_->symkState.kcomm.rsHierChunkSize = 16 << 10;  // slots shrunk to fit many packages
+  EXPECT_EQ(ncclSymkRsHierLaunchChunkSize(comm_.get(), 0), 16u << 10);
+}
+
 // The mask drops the hierarchical kernels across LSA teams, so the groups that open their window must be 0 too.
-TEST_F(SymKernelMaskTest, AgHierGroups_LsaTeamSmallerThanTheComm_NoGroups) {
+TEST_F(SymKernelMaskTest, HierGroups_LsaTeamSmallerThanTheComm_NoGroups) {
   SetTdmCapableArch(comm_.get());
   comm_->hasMloPart = true;
   comm_->symkState.kcomm.hierScaleInSize = 2;
@@ -594,9 +616,9 @@ TEST_F(SymKernelMaskTest, AgHierGroups_LsaTeamSmallerThanTheComm_NoGroups) {
     t.nRanks = 4;
     return t;
   });
-  EXPECT_EQ(ncclSymkAgHierGroups(comm_.get()), 2);
+  EXPECT_EQ(ncclSymkHierGroups(comm_.get()), 2);
   comm_->nRanks = 8;
-  EXPECT_EQ(ncclSymkAgHierGroups(comm_.get()), 0);
+  EXPECT_EQ(ncclSymkHierGroups(comm_.get()), 0);
 }
 
 TEST_F(SymKernelMaskTest, UnsupportedCollective_EntireMaskZeroed) {

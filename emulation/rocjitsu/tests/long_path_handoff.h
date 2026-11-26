@@ -75,8 +75,9 @@ inline constexpr size_t kMinHandoffPayloadSize = 4096;
 /// separator, since dropping it would leave a relative path.
 inline std::string normalized_handoff_parent(const std::filesystem::path &dir) {
   std::string parent = dir.string();
-  while (parent.size() > 1 && parent.back() == '/')
+  while (parent.size() > 1 && parent.back() == '/') {
     parent.pop_back();
+  }
   return parent;
 }
 
@@ -134,8 +135,9 @@ inline LongPathHandoff install_oversized_handoff(const std::filesystem::path &di
   // Re-checked here rather than trusted from the caller, so the helper stays correct
   // standalone and the budget arithmetic below cannot underflow.
   if (LongPathHandoff supported = long_path_handoff_supported(dir);
-      supported.status() != LongPathHandoff::Status::kOk)
+      supported.status() != LongPathHandoff::Status::kOk) {
     return supported;
+  }
 
   try {
     const std::string parent = normalized_handoff_parent(dir);
@@ -148,8 +150,9 @@ inline LongPathHandoff install_oversized_handoff(const std::filesystem::path &di
       // characters left after the separators spread as evenly as possible.
       const size_t components = (pad_budget + kMaxComponentLength) / (kMaxComponentLength + 1);
       const size_t chars = pad_budget - components;
-      for (size_t i = 0; i < components; ++i)
+      for (size_t i = 0; i < components; ++i) {
         config_dir /= std::string(chars / components + (i < chars % components ? 1 : 0), 'a');
+      }
     }
 
     // Self-check on the sizing arithmetic above, deliberately before anything touches
@@ -167,8 +170,9 @@ inline LongPathHandoff install_oversized_handoff(const std::filesystem::path &di
     std::ofstream config(config_path);
     config << config_json;
     config.close();
-    if (!config)
+    if (!config) {
       return LongPathHandoff::fail("failed to write config to the long path");
+    }
 
     std::ostringstream payload;
     payload << config_path.string() << '\n' << kOversizedHandoffHostGpuId << '\n';
@@ -184,8 +188,9 @@ inline LongPathHandoff install_oversized_handoff(const std::filesystem::path &di
     std::filesystem::create_directories(dir);
     std::ofstream handoff(dir / "config_path", std::ios::trunc);
     handoff << payload.str();
-    if (!handoff.good())
+    if (!handoff.good()) {
       return LongPathHandoff::fail("failed to rewrite the config_path handoff");
+    }
     return LongPathHandoff::ok();
   } catch (const std::filesystem::filesystem_error &error) {
     // The built path is already proven to be the intended length, so ENAMETOOLONG
@@ -195,8 +200,9 @@ inline LongPathHandoff install_oversized_handoff(const std::filesystem::path &di
     std::ostringstream reason;
     reason << "filesystem error building the " << kTargetPathLength
            << "-byte path: " << error.what();
-    if (error.code() == std::errc::filename_too_long)
+    if (error.code() == std::errc::filename_too_long) {
       return LongPathHandoff::skip(reason.str());
+    }
     return LongPathHandoff::fail(reason.str());
   }
 }

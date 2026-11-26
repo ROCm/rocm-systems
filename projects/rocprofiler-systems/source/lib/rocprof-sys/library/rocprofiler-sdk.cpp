@@ -6,6 +6,7 @@
 #include "backends/rocprofiler_sdk/backend.hpp"
 #include "backends/rocprofiler_sdk/wrapper.hpp"
 #include "binary/analysis.hpp"
+#include "common/defines.h"
 #include "common/delimit.hpp"
 #include "common/env_vars.hpp"
 #include "common/environment.hpp"
@@ -33,6 +34,7 @@
 #include "library/rocprofiler-sdk/domain_selection.hpp"
 #include "library/rocprofiler-sdk/domain_service.hpp"
 #include "library/rocprofiler-sdk/fwd.hpp"
+#include "library/rocprofiler-sdk/types.hpp"
 #include "library/tracing.hpp"
 #include "rocprofiler-sdk.hpp"
 
@@ -62,6 +64,12 @@
 #    include <rocprofiler-sdk/experimental/registration.h>
 #else
 #    include <rocprofiler-sdk/registration.h>
+#endif
+
+#if defined(ROCPROFSYS_USE_OMPT) && ROCPROFSYS_USE_OMPT > 0 && ROCPROFILER_VERSION >= 600
+#    define ROCPROFSYS_SDK_HAS_OMPT_START_TOOL 1
+#    include <rocprofiler-sdk/ompt.h>
+#    include <rocprofiler-sdk/ompt/omp-tools.h>
 #endif
 
 #include <rocprofiler-sdk/fwd.h>
@@ -903,11 +911,9 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     using sdk_backend_t    = backends::rocprofiler_sdk::backend<wrapper>;
     using tracing_config_t = tracing_config<sdk_backend_t, default_externals>;
 
-    auto const _callback_domains = tracing_config_t::get_callback_domains();
-    auto const _buffered_domain  = tracing_config_t::get_buffered_domains();
-    auto const _counter_events   = config::get_rocm_counter_events();
-    auto const _version          = tracing_config_t::get_version();
-    if(_version.formatted() == 0)
+    auto const counter_events = config::get_rocm_counter_events();
+    auto const sdk_version    = tracing_config_t::get_version();
+    if(sdk_version.formatted() == 0)
     {
         LOG_WARNING("rocprofiler-sdk version not initialized");
     }
@@ -915,7 +921,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     auto* data        = static_cast<client_data*>(user_data);
     data->client_fini = fini_func;
 
-    if(!_counter_events.empty())
+    if(!counter_events.empty())
     {
         data->initialize_counter_info();
     }
@@ -933,332 +939,57 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 
     std::vector<domain_selection> domain_selection_list;
 
-    if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH))
-    {
-        domain_selection selection;
-        selection.name = "kernel_dispatch";
-        domain_selection_list.push_back(selection);
-    }
-
-    if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY))
-    {
-        domain_selection selection;
-        selection.name = "memory_copy";
-        domain_selection_list.push_back(selection);
-    }
-
-#if(ROCPROFILER_VERSION >= 700)
-    if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH) ||
-       _buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY))
-    {
-        domain_selection selection;
-        selection.name = "hip_stream";
-        domain_selection_list.push_back(selection);
-    }
-#endif
-
-#if(ROCPROFILER_VERSION >= 600)
-    if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION))
-    {
-        domain_selection selection;
-        selection.name = "memory_allocation";
-        domain_selection_list.push_back(selection);
-    }
-#endif
-
-    if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY))
-    {
-        domain_selection selection;
-        selection.name = "scratch_memory";
-        domain_selection_list.push_back(selection);
-    }
-
-#if(ROCPROFILER_VERSION >= 10202)
-    if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT))
-    {
-        domain_selection selection;
-        selection.name = "kfd_page_fault";
-        domain_selection_list.push_back(selection);
-    }
-
-    if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE))
-    {
-        domain_selection selection;
-        selection.name = "kfd_page_migrate";
-        domain_selection_list.push_back(selection);
-    }
-
-    if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_FAULT))
-    {
-        domain_selection selection;
-        selection.name = "kfd_event_page_fault";
-        domain_selection_list.push_back(selection);
-    }
-
-    if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE))
-    {
-        domain_selection selection;
-        selection.name = "kfd_event_page_migrate";
-        domain_selection_list.push_back(selection);
-    }
-
-    if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_QUEUE))
-    {
-        domain_selection selection;
-        selection.name = "kfd_queue";
-        domain_selection_list.push_back(selection);
-    }
-
-    if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE))
-    {
-        domain_selection selection;
-        selection.name       = "kfd_event_queue";
-        selection.operations = { "ROCPROFILER_KFD_EVENT_QUEUE_RESTORE_RESCHEDULED" };
-
-        domain_selection_list.push_back(selection);
-    }
-
-    if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU))
-    {
-        domain_selection selection;
-        selection.name = "kfd_event_unmap_from_gpu";
-
-        domain_selection_list.push_back(selection);
-    }
-
-    if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS))
-    {
-        domain_selection selection;
-        selection.name = "kfd_event_dropped_events";
-
-        domain_selection_list.push_back(selection);
-    }
-#endif
-
-    // A std::nullopt tells domain_service::configure() to trace every operation of
-    // the domain, so only build an explicit name list when the resolved selection is
-    // narrower than the full operation set for the kind.
-    auto const get_operation_names = [](sdk_backend_t::callback_tracing_kind_t kind)
-        -> std::optional<std::vector<std::string>> {
-        auto const selected_operations = tracing_config_t::get_operations(kind);
-
-        std::size_t total_operations = 0;
-        for(const auto& entry : sdk_backend_t::get_callback_tracing_names())
-        {
-            if(static_cast<sdk_backend_t::callback_tracing_kind_t>(entry.value) == kind)
-            {
-                total_operations = std::ranges::size(entry.operations);
-                break;
-            }
-        }
-
-        if(selected_operations.size() == total_operations)
-        {
-            return std::nullopt;
-        }
-
-        std::vector<std::string> names;
-        names.reserve(selected_operations.size());
-        for(auto const operation : selected_operations)
-        {
-            names.emplace_back(
-                sdk_backend_t::get_callback_tracing_names().at(kind, operation));
-        }
-        return names;
-    };
-
-    if(_callback_domains.contains(ROCPROFILER_CALLBACK_TRACING_RCCL_API))
-    {
-        data->backtrace_operations.emplace(ROCPROFILER_CALLBACK_TRACING_RCCL_API,
-                                           tracing_config_t::get_backtrace_operations(
-                                               ROCPROFILER_CALLBACK_TRACING_RCCL_API));
-
-        domain_selection selection;
-        selection.name       = "rccl_api";
-        selection.operations = get_operation_names(ROCPROFILER_CALLBACK_TRACING_RCCL_API);
-        domain_selection_list.push_back(selection);
-    }
-
-    if(_callback_domains.contains(ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API))
-    {
-        data->backtrace_operations.emplace(
-            ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API,
-            tracing_config_t::get_backtrace_operations(
-                ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API));
-
-        domain_selection selection;
-        selection.name = "hip_compiler_api";
-        selection.operations =
-            get_operation_names(ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API);
-        domain_selection_list.push_back(selection);
-    }
-
-    if(_callback_domains.contains(ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API))
-    {
-        data->backtrace_operations.emplace(
-            ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API,
-            tracing_config_t::get_backtrace_operations(
-                ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API));
-
-        domain_selection selection;
-        selection.name = "hip_runtime_api";
-        selection.operations =
-            get_operation_names(ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API);
-        domain_selection_list.push_back(selection);
-    }
-
-    if(_callback_domains.contains(ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API))
-    {
-        data->backtrace_operations.emplace(
-            ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API,
-            tracing_config_t::get_backtrace_operations(
-                ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API));
-
-        domain_selection selection;
-        selection.name = "hsa_core_api";
-        selection.operations =
-            get_operation_names(ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API);
-        domain_selection_list.push_back(selection);
-    }
-
-    if(_callback_domains.contains(ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API))
-    {
-        data->backtrace_operations.emplace(
-            ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API,
-            tracing_config_t::get_backtrace_operations(
-                ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API));
-
-        domain_selection selection;
-        selection.name = "hsa_amd_ext_api";
-        selection.operations =
-            get_operation_names(ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API);
-        domain_selection_list.push_back(selection);
-    }
-
-    if(_callback_domains.contains(ROCPROFILER_CALLBACK_TRACING_HSA_IMAGE_EXT_API))
-    {
-        data->backtrace_operations.emplace(
-            ROCPROFILER_CALLBACK_TRACING_HSA_IMAGE_EXT_API,
-            tracing_config_t::get_backtrace_operations(
-                ROCPROFILER_CALLBACK_TRACING_HSA_IMAGE_EXT_API));
-
-        domain_selection selection;
-        selection.name = "hsa_image_ext_api";
-        selection.operations =
-            get_operation_names(ROCPROFILER_CALLBACK_TRACING_HSA_IMAGE_EXT_API);
-        domain_selection_list.push_back(selection);
-    }
-
-    if(_callback_domains.contains(ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API))
-    {
-        data->backtrace_operations.emplace(
-            ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API,
-            tracing_config_t::get_backtrace_operations(
-                ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API));
-
-        domain_selection selection;
-        selection.name = "hsa_finalize_ext_api";
-        selection.operations =
-            get_operation_names(ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API);
-        domain_selection_list.push_back(selection);
-    }
-
-#if(ROCPROFILER_VERSION >= 600)
-    if(_callback_domains.contains(ROCPROFILER_CALLBACK_TRACING_OMPT))
-    {
-        data->backtrace_operations.emplace(ROCPROFILER_CALLBACK_TRACING_OMPT,
-                                           tracing_config_t::get_backtrace_operations(
-                                               ROCPROFILER_CALLBACK_TRACING_OMPT));
-
-        domain_selection selection;
-        selection.name       = "ompt";
-        selection.operations = get_operation_names(ROCPROFILER_CALLBACK_TRACING_OMPT);
-        domain_selection_list.push_back(selection);
-    }
-#endif
-
-#if(ROCPROFILER_VERSION >= 600)
-    if(_callback_domains.contains(ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API))
-    {
-        data->backtrace_operations.emplace(
-            ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API,
-            tracing_config_t::get_backtrace_operations(
-                ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API));
-
-        domain_selection selection;
-        selection.name = "rocdecode_api";
-        selection.operations =
-            get_operation_names(ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API);
-        domain_selection_list.push_back(selection);
-    }
-#endif
-
-#if(ROCPROFILER_VERSION >= 700)
-    if(_callback_domains.contains(ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API))
-    {
-        data->backtrace_operations.emplace(ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API,
-                                           tracing_config_t::get_backtrace_operations(
-                                               ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API));
-
-        domain_selection selection;
-        selection.name = "rocjpeg_api";
-        selection.operations =
-            get_operation_names(ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API);
-        domain_selection_list.push_back(selection);
-    }
-#endif
-
-#if(ROCPROFILER_VERSION >= 10304)
-    if(_callback_domains.contains(ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API))
-    {
-        data->backtrace_operations.emplace(
-            ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API,
-            tracing_config_t::get_backtrace_operations(
-                ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API));
-
-        domain_selection selection;
-        selection.name = "rocshmem_api";
-        selection.operations =
-            get_operation_names(ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API);
-        domain_selection_list.push_back(selection);
-    }
-#endif
-
-#if(ROCPROFILER_VERSION >= 10305)
-    if(_callback_domains.contains(ROCPROFILER_CALLBACK_TRACING_HIPFILE_API))
-    {
-        data->backtrace_operations.emplace(ROCPROFILER_CALLBACK_TRACING_HIPFILE_API,
-                                           tracing_config_t::get_backtrace_operations(
-                                               ROCPROFILER_CALLBACK_TRACING_HIPFILE_API));
-
-        domain_selection selection;
-        selection.name = "hipfile_api";
-        selection.operations =
-            get_operation_names(ROCPROFILER_CALLBACK_TRACING_HIPFILE_API);
-        domain_selection_list.push_back(selection);
-    }
-#endif
-
+    // An exception escaping tool_init ends in an unrelated rocprofiler-sdk check
+    // failure that does not name the cause, so log it here.
     try
     {
-        if(g_domain_service)
+        // Backtrace checks run per SDK record, so they are keyed by the callback kind
+        // the domain service reports for each requested domain.
+        const auto available_domains = g_domain_service->available_domains();
+        for(auto& request : tracing_config_t::get_domains())
         {
-            g_domain_service->configure(domain_selection_list);
+            const auto domain = std::ranges::find_if(
+                available_domains, [&request](const domains::domain_info& info) {
+                    return utility::string::equals_ignore_case(info.name, request.name);
+                });
+            if(domain != available_domains.end() &&
+               domain->key.mode == domains::collection_mode::callback)
+            {
+                data->backtrace_operations.emplace(
+                    static_cast<sdk_backend_t::callback_tracing_kind_t>(
+                        domain->key.value),
+                    std::move(request.backtrace_operations));
+            }
+
+            domain_selection selection;
+            selection.name       = std::move(request.name);
+            selection.operations = std::move(request.operations);
+            // Only the restore-rescheduled event is traced for the KFD queue-event
+            // domain.
+            if(selection.name == "kfd_event_queue")
+            {
+                selection.operations = {
+                    "ROCPROFILER_KFD_EVENT_QUEUE_RESTORE_RESCHEDULED"
+                };
+            }
+            domain_selection_list.push_back(std::move(selection));
         }
+
+        g_domain_service->configure(domain_selection_list);
     } catch(const std::exception& e)
     {
-        LOG_CRITICAL("domain_service::configure failed: {}", e.what());
+        LOG_CRITICAL("ROCm domain configuration failed: {}", e.what());
         throw;
     }
 
-    if(!_counter_events.empty())
+    if(!counter_events.empty())
     {
         // Resolve counter names to counter IDs per agent
         for(const auto& itr :
             get_agent_manager_instance().get_agents_by_type(agent_type::gpu))
         {
             const auto& agent_id = rocprofiler_agent_id_t{ itr->handle };
-            create_agent_profile(agent_id, _counter_events, data);
+            create_agent_profile(agent_id, counter_events, data);
         }
 
         // --- Dispatch-mode kernel counters ---
@@ -1402,12 +1133,29 @@ reset_sdk_session_guards()
 
 void
 setup()
-{}
+{
+#if defined(ROCPROFSYS_SDK_HAS_OMPT_START_TOOL)
+    // rocprofiler-register initializes the SDK when HSA or HIP loads; a host-only OpenMP
+    // process loads neither, and OMPT discovery is honored only when the SDK is already
+    // initialized. Bring it up here instead of waiting for that registration.
+    int initialized = 0;
+    if(rocprofiler_is_initialized(&initialized) == ROCPROFILER_STATUS_SUCCESS &&
+       initialized != 0)
+    {
+        return;
+    }
+
+    ROCPROFILER_CALL(rocprofiler_force_configure(&::rocprofiler_configure));
+#endif
+}
 
 void
-shutdown()
+shutdown(client_registration registration)
 {
-    if(g_tool_data && g_tool_data->client_id && g_tool_data->client_fini)
+    // client_fini makes the SDK finalize and drop this client, after which the process
+    // cannot be attached again.
+    if(registration == client_registration::release && g_tool_data &&
+       g_tool_data->client_id && g_tool_data->client_fini)
     {
         g_tool_data->client_fini(*g_tool_data->client_id);
     }
@@ -1485,7 +1233,7 @@ tool_attach_fini(void* /* tool_data */)
     // Flush any pending region cache entries
     rocprofsys_flush_pending_region_cache_hidden();
 
-    rocprofsys_finalize_hidden();
+    rocprofsys_finalize_attach_session_hidden();
 }
 
 int
@@ -1654,4 +1402,19 @@ extern "C"
         return &cfg;
     }
 #endif  // ROCPROFILER_VERSION >= 10200
+
+#if defined(ROCPROFSYS_SDK_HAS_OMPT_START_TOOL)
+    ompt_start_tool_result_t* ompt_start_tool(
+        unsigned int omp_version, const char* runtime_version) ROCPROFSYS_PUBLIC_API;
+
+    // OMPT tool entry point. The OpenMP runtime calls this while holding its init lock,
+    // and offloading binaries call it from a static initializer, so the body is a plain
+    // forward with no initialization or library loading. A NULL result means
+    // rocprofiler-sdk declined the OMPT tool role and it stays with this library.
+    ompt_start_tool_result_t* ompt_start_tool(unsigned int omp_version,
+                                              const char*  runtime_version)
+    {
+        return rocprofiler_ompt_start_tool(omp_version, runtime_version);
+    }
+#endif  // ROCPROFSYS_SDK_HAS_OMPT_START_TOOL
 }

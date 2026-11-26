@@ -53,7 +53,11 @@ class TestRocattach:
         except FileNotFoundError:
             pytest.skip("transpose target not found")
 
-        target_env = {**os.environ, "ROCP_TOOL_ATTACH": "1"}
+        target_env = {
+            **os.environ,
+            "ROCP_TOOL_ATTACH": "1",
+            "LD_LIBRARY_PATH": rocprof_config.get_library_path(),
+        }
         target_proc = subprocess.Popen(
             [str(transpose), "2", "0"],  # 2 threads, nitr=0 (infinite)
             stdout=subprocess.DEVNULL,

@@ -42,10 +42,11 @@ std::array<uint32_t, 2> encode_vector16(uint16_t opcode, uint16_t source, uint8_
   fields.src0 = source;
   fields.src1 = 128;
   fields.src2 = 128;
-  if constexpr (requires { fields.opsel; })
+  if constexpr (requires { fields.opsel; }) {
     fields.opsel = half;
-  else
+  } else {
     fields.op_sel = half;
+  }
   return Build(opcode, fields);
 }
 
@@ -110,8 +111,9 @@ protected:
   }
 
   void TearDown() override {
-    if (wave_)
+    if (wave_) {
       wave_->halt();
+    }
   }
 
   bool legacy_cdna() const {
@@ -138,8 +140,9 @@ protected:
     EXPECT_EQ(regs.read_lane(source, 0) & mask, expected & mask);
     std::array<uint32_t, 3> chunk{};
     regs.read_chunk(source, 0, chunk.size(), chunk.data());
-    for (uint32_t value : chunk)
+    for (uint32_t value : chunk) {
       EXPECT_EQ(value & mask, expected & mask);
+    }
   }
 
   void expect_raw_scalar(const Operand &source, uint32_t expected) {
@@ -170,8 +173,9 @@ protected:
     const uint64_t exec = wave_->exec();
     const uint32_t destination = wave_->vgpr_alloc().base + 4;
     auto canary = [](uint32_t lane) { return 0xDEAD0000u | (0xB000u + lane); };
-    for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane)
+    for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane) {
       cu_->write_vgpr(destination, lane, canary(lane));
+    }
     ASSERT_TRUE(cu_->execute_instruction(&instruction, *wave_).succeeded());
     for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane) {
       const uint32_t expected_word =
@@ -246,8 +250,9 @@ TEST_P(Vector16InlineConstantTest, RegisterAndLiteralCarriersKeepTheirStoredBits
       ASSERT_NE(high, nullptr);
       expect_result(*high, 0x4000u);
     }
-    if (legacy_cdna())
+    if (legacy_cdna()) {
       continue; // GFX9 VOP3 does not encode an appended literal.
+    }
     for (uint32_t literal : {0x3F800000u, 0x40003C00u}) {
       SCOPED_TRACE(literal);
       std::unique_ptr<Instruction> instruction = decode(opcode, 255, 0, literal);
@@ -285,8 +290,9 @@ TEST_P(Vector16InlineConstantTest, HighHalfSelectionUsesTheFormattedCarrier) {
   // CDNA1-4 retain the model choice from the manual's generic VOP3A OPSEL
   // description. LLVM rejects OPSEL on these ADD16 forms; the disagreement
   // has no physical qualification here. gfx1100/gfx1201 controls are separate.
-  if (legacy_rdna())
+  if (legacy_rdna()) {
     GTEST_SKIP() << "RDNA1/2 numeric ADD has no OPSEL form; integer ADD OPSEL is not modeled.";
+  }
   for (const auto &[selector, high] : {std::pair{242u, 0x3F80u}, std::pair{248u, 0x3E22u}}) {
     SCOPED_TRACE(selector);
     std::unique_ptr<Instruction> integer = decode(GetParam().add_integer, selector, 1);
@@ -398,8 +404,9 @@ TEST_P(Bf16InlineConstantTest, NumericInlineSourceKeepsLaneChunkAndRawScalarCont
 }
 
 TEST_P(Bf16InlineConstantTest, Cdna5Vop1AndVop3SelectRawInlineCarrierHalves) {
-  if (!fp32_carrier())
+  if (!fp32_carrier()) {
     GTEST_SKIP() << "CDNA5 raw BF16 carrier policy";
+  }
 
   // CDNA5 manual sections 4.1 and 7.2.2 disagree on no-OPSEL inline inputs.
   // Follow LLVM's raw low-half VOP1 interpretation until hardware qualifies it;
@@ -495,8 +502,9 @@ protected:
         raw.src0 = amdgpu::SRC_DPP;
         // GFX11.0 DPP requires a VGPR in SRC1. v1 contains zero on every lane;
         // the inline or scalar accumulator being tested is independently in SRC2.
-        if (GetParam().arch == rocjitsu::IsaFamily::Rdna3)
+        if (GetParam().arch == rocjitsu::IsaFamily::Rdna3) {
           raw.src1 = 257;
+        }
         raw.vsrc0 = 1;
         raw.dpp_ctrl = amdgpu::dpp::ROW_MIRROR;
         raw.bound_ctrl = 1;
@@ -505,10 +513,12 @@ protected:
         return std::unique_ptr<Instruction>(
             decode_valid(*decoder_, reinterpret_cast<const uint32_t *>(&raw)));
       };
-      if (GetParam().arch == rocjitsu::IsaFamily::Rdna3)
+      if (GetParam().arch == rocjitsu::IsaFamily::Rdna3) {
         return decode_dpp.template operator()<rdna3::Vop3VopDpp16MachineInst>();
-      if (GetParam().arch == rocjitsu::IsaFamily::Rdna3_5)
+      }
+      if (GetParam().arch == rocjitsu::IsaFamily::Rdna3_5) {
         return decode_dpp.template operator()<rdna3_5::Vop3VopDpp16MachineInst>();
+      }
       return decode_dpp.template operator()<rdna4::Vop3VopDpp16MachineInst>();
     }
     return std::unique_ptr<Instruction>(decode_valid(*decoder_, words.data()));
@@ -549,8 +559,9 @@ TEST_P(Dot2InlineConstantTest, AccumulatorRegistersAndLiteralsKeepIndependentHal
     const uint16_t low = bf16 ? 0x3F80u : 0x3C00u;
     const uint32_t carrier = 0x40000000u | low;
     cu_->write_sgpr(wave_->sgpr_alloc().base, carrier);
-    for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane)
+    for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane) {
       cu_->write_vgpr(wave_->vgpr_alloc().base, lane, carrier);
+    }
     for (uint16_t source : {0u, 256u, 255u}) {
       for (uint8_t opsel : {0u, 4u}) {
         SCOPED_TRACE(::testing::Message()
@@ -587,8 +598,9 @@ TEST_P(Dot2InlineConstantTest, IntegerAccumulatorReplicatesRawHalfBits) {
 
 TEST_P(Dot2InlineConstantTest, DppAccumulatorReplicatesInlineAndPreservesRegisterHalves) {
   wave_->set_exec(wave_->wf_size() == 64 ? UINT64_MAX : UINT32_MAX);
-  for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane)
+  for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane) {
     cu_->write_vgpr(wave_->vgpr_alloc().base + 1, lane, 0);
+  }
   for (bool bf16 : {false, true}) {
     const uint16_t low = bf16 ? 0x3F80u : 0x3C00u;
     cu_->write_sgpr(wave_->sgpr_alloc().base, 0x40000000u | low);
