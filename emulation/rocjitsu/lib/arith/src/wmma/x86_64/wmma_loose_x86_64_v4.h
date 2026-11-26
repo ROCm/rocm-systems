@@ -247,7 +247,8 @@ template <bool Bf16, int Lanes, bool Rdna3, bool Packed, bool Saturate>
                                                        __m512i rhs) {
   RJ_ARITH_UNROLL(16)
   for (int row = 0; row < 16; ++row) {
-    __m512i factor = _mm512_set1_epi32(int(left_row[row]));
+    // Keep the vector load to avoid Clang 17's crash when casting a scalar splat to BF16.
+    __m512i factor = _mm512_broadcastd_epi32(_mm_loadu_si32(&left_row[row]));
     sums[row] = _mm512_dpbf16_ps(sums[row], bit_cast<__m512bh>(rhs), bit_cast<__m512bh>(factor));
   }
 }
