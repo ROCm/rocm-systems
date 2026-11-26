@@ -563,6 +563,134 @@ HIP_TEST_CASE(Unit_hipGraphAddMemsetNode_hipMallocManaged) {
   HIP_CHECK(hipFree(A_d));
 }
 
+/*
+ * A graph memset node targeting another device's hipMalloc buffer works without
+ * hipDeviceEnablePeerAccess: the runtime grants peer access implicitly, as it
+ * does for copy operations.  Three shapes are tested:
+ *   (a) height == 1 (fully linear)
+ *   (b) height > 1 with pitch == width * elementSize (no row padding)
+ *   (c) a captured hipMemsetAsync that is instantiated and launched as a graph
+ */
+HIP_TEST_CASE(Unit_hipGraphAddMemsetNode_PeerBufferFromOtherDevice) {
+  if (HipTest::getDeviceCount() < 2) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+  }
+  int can_access_peer = 0;
+  HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, 0, 1));
+  if (!can_access_peer) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+  }
+
+  // Ensure peer access 0->1 is off so a prior test cannot make this one pass.
+  HIP_CHECK(hipSetDevice(0));
+  { hipError_t e = hipDeviceDisablePeerAccess(1);
+    if (e != hipSuccess && e != hipErrorPeerAccessNotEnabled) HIP_CHECK(e);
+    static_cast<void>(hipGetLastError()); }
+  // Restore device 0 on scope exit (also fires if a REQUIRE inside a SECTION throws).
+  struct DevGuard { ~DevGuard() { static_cast<void>(hipSetDevice(0)); } } dg;
+
+  constexpr size_t kN = 1024;  // bytes
+
+  // Allocate the target buffer on device 1 without enabling peer access.
+  HIP_CHECK(hipSetDevice(1));
+  LinearAllocGuard<uint8_t> dev1_alloc(LinearAllocs::hipMalloc, kN);
+  uint8_t* dev1_buf = dev1_alloc.ptr();
+
+  // Stream and graph work are issued from device 0.
+  HIP_CHECK(hipSetDevice(0));
+  StreamGuard stream0_guard(Streams::created);
+  hipStream_t stream0 = stream0_guard.stream();
+
+  SECTION("height == 1 (linear)") {
+    // hipGraphAddMemsetNode with height=1 targets the flat fill path that grants
+    // peer access to the device-1 allocation.
+    hipGraph_t graph = nullptr;
+    HIP_CHECK(hipGraphCreate(&graph, 0));
+    hipGraphNode_t node = nullptr;
+    hipMemsetParams params{};
+    params.dst = reinterpret_cast<void*>(dev1_buf);
+    params.value = 0x5A;
+    params.elementSize = sizeof(uint8_t);
+    params.width = kN;
+    params.height = 1;
+    params.pitch = kN;
+    HIP_CHECK(hipGraphAddMemsetNode(&node, graph, nullptr, 0, &params));
+    hipGraphExec_t exec = nullptr;
+    HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphLaunch(exec, stream0));
+    HIP_CHECK(hipStreamSynchronize(stream0));
+
+    std::vector<uint8_t> host(kN, 0);
+    HIP_CHECK(hipSetDevice(1));
+    HIP_CHECK(hipMemcpy(host.data(), dev1_buf, kN, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipSetDevice(0));
+    for (size_t i = 0; i < kN; ++i) {
+      INFO("byte " << i);
+      REQUIRE(host[i] == 0x5Au);
+    }
+    HIP_CHECK(hipGraphExecDestroy(exec));
+    HIP_CHECK(hipGraphDestroy(graph));
+  }
+
+  SECTION("height > 1, pitch == width * elementSize (unpitched 2D)") {
+    // A 2D shape with pitch == row bytes (no padding) is equivalent to a linear
+    // fill and must also grant peer access implicitly.
+    constexpr size_t kWidth = 64;         // elements
+    constexpr size_t kHeight = kN / kWidth;
+    hipGraph_t graph = nullptr;
+    HIP_CHECK(hipGraphCreate(&graph, 0));
+    hipGraphNode_t node = nullptr;
+    hipMemsetParams params{};
+    params.dst = reinterpret_cast<void*>(dev1_buf);
+    params.value = 0xAB;
+    params.elementSize = sizeof(uint8_t);
+    params.width = kWidth;
+    params.height = kHeight;
+    params.pitch = kWidth;  // pitch == width * elementSize (1 byte each)
+    HIP_CHECK(hipGraphAddMemsetNode(&node, graph, nullptr, 0, &params));
+    hipGraphExec_t exec = nullptr;
+    HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphLaunch(exec, stream0));
+    HIP_CHECK(hipStreamSynchronize(stream0));
+
+    std::vector<uint8_t> host(kN, 0);
+    HIP_CHECK(hipSetDevice(1));
+    HIP_CHECK(hipMemcpy(host.data(), dev1_buf, kN, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipSetDevice(0));
+    for (size_t i = 0; i < kN; ++i) {
+      INFO("byte " << i);
+      REQUIRE(host[i] == 0xABu);
+    }
+    HIP_CHECK(hipGraphExecDestroy(exec));
+    HIP_CHECK(hipGraphDestroy(graph));
+  }
+
+  SECTION("captured hipMemsetAsync into peer buffer") {
+    // Stream-capturing hipMemsetAsync targeting a peer allocation and launching
+    // the graph must succeed and produce the correct fill value.
+    hipGraph_t graph = nullptr;
+    HIP_CHECK(hipStreamBeginCapture(stream0, hipStreamCaptureModeGlobal));
+    HIP_CHECK(hipMemsetAsync(dev1_buf, 0xCD, kN, stream0));
+    HIP_CHECK(hipStreamEndCapture(stream0, &graph));
+    hipGraphExec_t exec = nullptr;
+    HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphLaunch(exec, stream0));
+    HIP_CHECK(hipStreamSynchronize(stream0));
+
+    std::vector<uint8_t> host(kN, 0);
+    HIP_CHECK(hipSetDevice(1));
+    HIP_CHECK(hipMemcpy(host.data(), dev1_buf, kN, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipSetDevice(0));
+    for (size_t i = 0; i < kN; ++i) {
+      INFO("byte " << i);
+      REQUIRE(host[i] == 0xCDu);
+    }
+    HIP_CHECK(hipGraphExecDestroy(exec));
+    HIP_CHECK(hipGraphDestroy(graph));
+  }
+
+}
+
 /**
  * End doxygen group GraphTest.
  * @}

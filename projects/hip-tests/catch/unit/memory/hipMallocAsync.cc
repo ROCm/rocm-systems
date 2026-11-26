@@ -756,6 +756,99 @@ HIP_TEST_CASE(Unit_hipMallocAsync_InteriorPointer_Memcpy2DAsync) {
   }
 }
 
+// Fills every element of ptr[0..n) with val.
+static __global__ void fill_int_kernel(int* ptr, int val, size_t n) {
+  for (size_t i = blockIdx.x * static_cast<size_t>(blockDim.x) + threadIdx.x;
+       i < n; i += static_cast<size_t>(gridDim.x) * blockDim.x) {
+    ptr[i] = val;
+  }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Allocate pool memory on device 1 with hipMallocAsync BEFORE enabling peer access from
+ *    device 0.  Then enable peer access (device 0 -> device 1) and launch a kernel on device 0
+ *    that writes a known value into every element.  hipDeviceSynchronize must succeed and
+ *    device 1 must read back the written value from every element.
+ *    Without the peer-box batch fix, device 0's kernel causes hipErrorIllegalAddress on sync.
+ * Test source
+ * ------------------------
+ *  - /unit/memory/hipMallocAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.2
+ */
+HIP_TEST_CASE(Unit_hipMallocAsync_PeerKernelWritesPoolMemoryAfterEnable) {
+  if (HipTest::getDeviceCount() < 2) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+  }
+  int can_access_peer = 0;
+  HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, 0, 1));
+  if (!can_access_peer) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+  }
+  checkMempoolSupported(1)
+
+  // Ensure peer access 0->1 is off so a prior test cannot make this one pass.
+  HIP_CHECK(hipSetDevice(0));
+  { hipError_t e = hipDeviceDisablePeerAccess(1);
+    if (e != hipSuccess && e != hipErrorPeerAccessNotEnabled) HIP_CHECK(e);
+    static_cast<void>(hipGetLastError()); }
+  // Restore device 0 on scope exit (also fires if a REQUIRE throws).
+  struct DevGuard { ~DevGuard() { static_cast<void>(hipSetDevice(0)); } } dg;
+
+  constexpr size_t n = 1u << 18;  // 256 K ints
+  constexpr int kValue = 0x5A5A5A5A;
+
+  // --- device 1: allocate pool memory and memset to 0 ---
+  HIP_CHECK(hipSetDevice(1));
+  StreamGuard sg1(Streams::created);
+  int* pool_ptr = nullptr;
+  HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&pool_ptr), n * sizeof(int), sg1.stream()));
+  HIP_CHECK(hipMemsetAsync(pool_ptr, 0, n * sizeof(int), sg1.stream()));
+  HIP_CHECK(hipStreamSynchronize(sg1.stream()));
+
+  // Guard that frees the pool allocation even if a REQUIRE throws.
+  struct PoolFreeGuard {
+    int** ptr;
+    hipStream_t stream;
+    ~PoolFreeGuard() {
+      if (*ptr) {
+        static_cast<void>(hipFreeAsync(*ptr, stream));
+        static_cast<void>(hipStreamSynchronize(stream));
+      }
+    }
+  } pfg{&pool_ptr, sg1.stream()};
+
+  // --- device 0: enable peer access, then write into device-1 pool memory ---
+  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipDeviceEnablePeerAccess(1, 0));
+  // Guard disables peer access and restores device 0 even if a REQUIRE throws.
+  struct PeerGuard {
+    ~PeerGuard() {
+      static_cast<void>(hipSetDevice(0));
+      static_cast<void>(hipDeviceDisablePeerAccess(1));
+    }
+  } pg;
+
+  StreamGuard sg0(Streams::created);
+  hipLaunchKernelGGL(fill_int_kernel, dim3(256), dim3(256), 0, sg0.stream(),
+                     pool_ptr, kValue, n);
+  HIP_CHECK(hipGetLastError());
+  // On CRUX master this sync returns hipErrorIllegalAddress because pool_ptr
+  // was not registered in device 0's peer-box when it was allocated.
+  HIP_CHECK(hipDeviceSynchronize());
+
+  // --- device 1: read back and verify ---
+  HIP_CHECK(hipSetDevice(1));
+  std::vector<int> host(n);
+  HIP_CHECK(hipMemcpy(host.data(), pool_ptr, n * sizeof(int), hipMemcpyDeviceToHost));
+  for (size_t i = 0; i < n; ++i) {
+    REQUIRE(host[i] == kValue);
+  }
+}
+
 /**
  * End doxygen group StreamOTest.
  * @}

@@ -2498,6 +2498,18 @@ memory:
   Unit_hipMemsetAsync_PeerBufferFromOtherDeviceStream:
     <<: *level_default
     tags: [multigpu, memset, P1]
+  Unit_hipMemcpy2DToArray_PeerBufferFromOtherDevice:
+    <<: *level_default
+    tags: [multigpu, transfer, image, P1]
+  Unit_hipMemcpy2D_SameDeviceCopyGrantsPeers:
+    <<: *level_default
+    tags: [multigpu, transfer, P1]
+  Unit_hipMemset3D_PeerBufferFromOtherDevice:
+    <<: *level_default
+    tags: [multigpu, memset, P1]
+  Unit_hipMallocAsync_PeerKernelWritesPoolMemoryAfterEnable:
+    <<: *level_default
+    tags: [alloc, multigpu, P1]
   Unit_hipMemAdvise_TstAccessedByPeer:
     <<: *level_default
     tags: [multigpu, query, P1, managed_memory]

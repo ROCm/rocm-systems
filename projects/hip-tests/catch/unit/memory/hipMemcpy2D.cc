@@ -14,6 +14,7 @@
 #include <resource_guards.hh>
 #include <utils.hh>
 
+
 HIP_TEST_CASE(Unit_hipMemcpy2D_Positive_Basic) {
   constexpr bool async = false;
 
@@ -250,4 +251,96 @@ HIP_TEST_CASE(Unit_hipMemcpy2D_Positive_NarrowTallHostRect) {
   const double elapsed_ms = std::chrono::duration<double, std::milli>(elapsed).count();
   INFO("copy took " << elapsed_ms << " ms");
   REQUIRE(elapsed < std::chrono::seconds(1));
+}
+
+// Kernel used by Unit_hipMemcpy2D_SameDeviceCopyGrantsPeers below.
+static __global__ void AddOnePitchedKernel(int* buf, size_t pitch_in_ints, int width, int height) {
+  int row = blockIdx.y * blockDim.y + threadIdx.y;
+  int col = blockIdx.x * blockDim.x + threadIdx.x;
+  if (row < height && col < width) {
+    buf[row * pitch_in_ints + col] += 1;
+  }
+}
+
+/*
+ * A same-device D-to-D hipMemcpy2D (src and dst both on device 0) must grant
+ * both buffers to all XGMI/PCIe peer GPUs for the duration of the copy, so
+ * that a kernel launched on device 1 afterwards can read and write them
+ * without hipDeviceEnablePeerAccess ever being called.  On CRUX master the
+ * grant is absent and the device-1 kernel faults (hipErrorIllegalAddress /
+ * error 700), which is caught by the REQUIRE on hipDeviceSynchronize.
+ * Note: a plain linear hipMemcpy D2D on the same device does NOT exhibit this
+ * behavior on the reference runtime; this test is specific to hipMemcpy2D.
+ */
+HIP_TEST_CASE(Unit_hipMemcpy2D_SameDeviceCopyGrantsPeers) {
+  if (HipTest::getDeviceCount() < 2) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+  }
+  int can_access_peer = 0;
+  HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, 1, 0));
+  if (!can_access_peer) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+  }
+
+  // Disable peer access in both directions so residual state from a prior test
+  // cannot mask the absence of the per-copy grant we are testing.
+  HIP_CHECK(hipSetDevice(0));
+  { hipError_t e = hipDeviceDisablePeerAccess(1);
+    if (e != hipSuccess && e != hipErrorPeerAccessNotEnabled) HIP_CHECK(e);
+    static_cast<void>(hipGetLastError()); }
+  HIP_CHECK(hipSetDevice(1));
+  { hipError_t e = hipDeviceDisablePeerAccess(0);
+    if (e != hipSuccess && e != hipErrorPeerAccessNotEnabled) HIP_CHECK(e);
+    static_cast<void>(hipGetLastError()); }
+
+  // Restore device 0 on scope exit (fires even when a REQUIRE throws).
+  struct DevGuard { ~DevGuard() { static_cast<void>(hipSetDevice(0)); } } dg;
+
+  constexpr size_t kWidth      = 16;                       // elements per row
+  constexpr size_t kHeight     = 16;                       // rows
+  constexpr size_t kWidthBytes = kWidth * sizeof(int);     // bytes of data per row
+
+  // Allocate src and dst as 2D pitched buffers on device 0.
+  HIP_CHECK(hipSetDevice(0));
+  LinearAllocGuard2D<int> src_alloc(kWidth, kHeight);
+  LinearAllocGuard2D<int> dst_alloc(kWidth, kHeight);
+
+  // Fill src from host with a simple sequential pattern.
+  std::vector<int> host_src(kWidth * kHeight);
+  for (size_t i = 0; i < host_src.size(); ++i) host_src[i] = static_cast<int>(i + 1);
+  HIP_CHECK(hipMemcpy2D(src_alloc.ptr(), src_alloc.pitch(),
+                         host_src.data(), kWidthBytes,
+                         kWidthBytes, kHeight, hipMemcpyHostToDevice));
+
+  // The copy under test: same-device D2D on device 0.
+  // The reference runtime grants both buffers to peer GPUs during this copy.
+  HIP_CHECK(hipMemcpy2D(dst_alloc.ptr(), dst_alloc.pitch(),
+                         src_alloc.ptr(), src_alloc.pitch(),
+                         kWidthBytes, kHeight, hipMemcpyDeviceToDevice));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  // Launch a kernel on device 1 that increments every element of dst_alloc.
+  // No hipDeviceEnablePeerAccess is called: the grant from the copy above is
+  // the only thing that makes this access legal.  On CRUX master (no grant)
+  // the kernel triggers a page fault and hipDeviceSynchronize returns
+  // hipErrorIllegalAddress (error 700) or the process aborts.
+  HIP_CHECK(hipSetDevice(1));
+  const size_t pitch_in_ints = dst_alloc.pitch() / sizeof(int);
+  AddOnePitchedKernel<<<dim3(1, 1), dim3(static_cast<unsigned>(kWidth),
+                                         static_cast<unsigned>(kHeight))>>>(
+      dst_alloc.ptr(), pitch_in_ints,
+      static_cast<int>(kWidth), static_cast<int>(kHeight));
+  hipError_t sync_err = hipDeviceSynchronize();
+  REQUIRE(sync_err == hipSuccess);  // fails (error 700) on CRUX master
+
+  // Read dst back to host and verify every element was incremented by the kernel.
+  HIP_CHECK(hipSetDevice(0));
+  std::vector<int> host_dst(kWidth * kHeight, 0);
+  HIP_CHECK(hipMemcpy2D(host_dst.data(), kWidthBytes,
+                         dst_alloc.ptr(), dst_alloc.pitch(),
+                         kWidthBytes, kHeight, hipMemcpyDeviceToHost));
+  for (size_t i = 0; i < host_dst.size(); ++i) {
+    INFO("element " << i);
+    REQUIRE(host_dst[i] == host_src[i] + 1);
+  }
 }
