@@ -19,10 +19,11 @@ Status words:
 | [Fork 1](#fork-1-core-gate) | 15 | 14 | 1 |
 | [Fork 3](#fork-3-registration-and-p2p) | 22 | 19 | 3 |
 | [Fork 4](#fork-4-rma-and-gin) | 11 | 8 | 3 |
+| [Documentation and pull request text](#documentation-and-pull-request-text) | 1 | 1 | 0 |
 | [No longer applies](#no-longer-applies) | 18 | | |
 | [Fork 6 requirements](#fork-6-requirements) | 12 | | |
 | [Open](#open-items) | 10 | | |
-| Total | 88 | 41 | 7 |
+| Total | 89 | 42 | 7 |
 
 Comment ids are GitHub review comment ids on the PR in the "Superseded PR" column. "internal" rows are findings from internal reviews of the superseded branches, and "class" rows are recurring defect classes compiled from about 350 automated (GitHub Argus) and Copilot review threads.
 
@@ -52,7 +53,7 @@ Comment ids are GitHub review comment ids on the PR in the "Superseded PR" colum
 |---|---|---|---|---|---|
 | 4466075968 | [PR 10886](https://github.com/ROCm/rocm-systems/pull/10886) | Aleksandr | Failure cleanup should call the deregister helper | `rcclIbSegRegister` releases every slot in [0, index] through `deregOne` on failure; `rcclIbSegDeregister` is the one release path (`seg_reg_mseg.h`, used by `reg.cc` and `gin.cc`) | fixed |
 | 4466103032 | [PR 10886](https://github.com/ROCm/rocm-systems/pull/10886) | Aleksandr | One allocation instead of four `calloc`s | `rcclIbRegMrDmaBufFromRange` allocates one block of `rcclIbSegWalkBytes(nSeg)` and `rcclIbSegWalkBind` points the four arrays into it | fixed |
-| 4466846579 | [PR 10886](https://github.com/ROCm/rocm-systems/pull/10886) | Aleksandr | One splitter, one lookup and one table for RMA and P2P | `rcclIbSegTable`, `rcclIbSegCursor` (`seg_mseg.h`) and `rcclIbSegAppendWrs` (`seg_wr_mseg.h`); P2P slices in `p2p_multiseg.cc` and RMA in `gin.cc` (fork 4) both go through `rcclIbSegAppendWrs`. The IB-CAST half is a [fork 6 requirement](#fork-6-requirements) | fixed |
+| 4466846579 | [PR 10886](https://github.com/ROCm/rocm-systems/pull/10886) | Aleksandr | One splitter, one lookup and one table for RMA and P2P | `rcclIbSegTable`, `rcclIbSegCursor` (`seg_mseg.h`) and `rcclIbSegFillWr` (`seg_wr_mseg.h`); the P2P `rcclIbSendSegTable` embeds `rcclIbSegTable`, and `IbMsegSegmentForZeroLengthOffset` uses `rcclIbSegIndexOf`. P2P slices in `p2p_multiseg.cc` and RMA in `gin.cc` (fork 4, through `rcclIbSegAppendWrs`) both fill WRs with `rcclIbSegFillWr`. The IB-CAST half is a [fork 6 requirement](#fork-6-requirements) | fixed |
 | 4466941047 | [PR 10886](https://github.com/ROCm/rocm-systems/pull/10886) | Aleksandr | Do not copy `ncclIbMultiSend`; build the WRs from the develop function | the fork's `IbMsegMultiSend` (`p2p.cc`) calls `rcclIbFillSendWrs` for every chain, one WR when each side is one segment. The IB-CAST half is a [fork 6 requirement](#fork-6-requirements) | fixed |
 | 4466000659 | [PR 10886](https://github.com/ROCm/rocm-systems/pull/10886) | Aleksandr | Move a test-only header into the test tree | no separate header; `IbMsegRegMrDmaBufMultiSeg` is declared in `seg_reg_mseg.h`, because `IbMsegRegMrDmaBuf` calls it | fixed |
 | 4466498776 | [PR 10886](https://github.com/ROCm/rocm-systems/pull/10886) | Aleksandr | The uniform-segment decline is artificial | `rcclIbRegMrDmaBufFromRange` declines only on the count (`rcclIbSegCountSupported`); there is no layout check | fixed |
@@ -88,6 +89,12 @@ Comment ids are GitHub review comment ids on the PR in the "Superseded PR" colum
 | class 12 | several | GitHub Argus, Copilot | Export and registration rounded differently | `rcclIbSegExportNext` (`seg_export_mseg.h`) exports the whole pages the MR spans; it is not confirmed that every registration path rounds the same way | not verified in fork |
 | class 9 | several | GitHub Argus, Copilot | Fakes with stale signatures across stacked layers | not re-audited; fork 4's compile-twice host tests build the fork's fakes, but they were not checked against this class | not verified in fork |
 | internal | [PR 10890](https://github.com/ROCm/rocm-systems/pull/10890) | internal review | Hybrid require knob and `hipMemLocationTypeHost` shim placement | not re-checked in the fork's hybrid tests (`test/common/HybridVmmHelpers.hpp`) | not verified in fork |
+
+## Documentation and pull request text
+
+| Source | Reviewer | Request | Change | Status |
+|---|---|---|---|---|
+| fork 2 draft pull request description | internal review | Describe the problem in neutral terms; do not justify the design by what it avoids editing or by who asked for it | the pull request descriptions open with the problem (a buffer of several physical segments needs one MR per segment), and the design docs state the separate plugin as a trade-off: `net_ib` and `net_ib_cast` stay at develop, at the cost of syncing the copy | fixed |
 
 ## No longer applies
 

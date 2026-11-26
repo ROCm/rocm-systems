@@ -71,7 +71,7 @@ The shared multi-segment logic lives in `net_ib_multiseg/seg_*` files written wi
 | `seg_rma_mseg.h` | RMA limits, `rcclRmaMultiSegEnabled`, `rcclRmaCompletePostedRequest`, `rcclRmaSignalOffsetValid`, `rcclRmaSegMrTag`, `rcclRmaMrSegmentCount` |
 | `seg_rma_round_mseg.h` | rounds and per-peer queues |
 | `seg_sym_mseg.h` | `rcclIbSegSymRecord`, `rcclIbSegSymTable`, `rcclIbSegSymAgree`, `rcclIbSegSymExchange` |
-| `seg_export_mseg.h`, `seg_reg_mseg.h`, `seg_wr_mseg.h` | per-segment export and owner-fd lookup, register and deregister, `rcclIbSegAppendWrs` |
+| `seg_export_mseg.h`, `seg_reg_mseg.h`, `seg_wr_mseg.h` | per-segment export and owner-fd lookup, register and deregister, the one-slice `rcclIbSegFillWr` (fork 3) and the chain builder `rcclIbSegAppendWrs` this fork adds on top of it |
 
 Plugin-only glue is in `ib_multiseg_mseg.h` (`rcclRmaReleaseSeqId`, the `rcclRmaIbProxy*` declarations) and `gin_mseg.h` (`IbMsegGinIbCollComm::regRecords`).
 
@@ -138,7 +138,7 @@ sequenceDiagram
 
 ## Segmented WR builder
 
-`rcclRmaBuildSegmentedWrs` walks the transfer with `rcclIbSegCursor` over the local and remote rank's offsets and emits slices with the shared `rcclIbSegAppendWrs`, each cut at the nearer of the two boundaries and at `RCCL_IB_SGE_MAX_BYTES`. Out-of-range transfers are rejected before any WR is posted (`rcclRmaRangeOk`).
+`rcclRmaBuildSegmentedWrs` walks the transfer with `rcclIbSegCursor` over the local and remote rank's offsets and emits slices with `rcclIbSegAppendWrs`, each cut at the nearer of the two boundaries and at `RCCL_IB_SGE_MAX_BYTES`; each slice's WR is filled by `rcclIbSegFillWr`, which the P2P send also uses. Out-of-range transfers are rejected before any WR is posted (`rcclRmaRangeOk`).
 
 - **Put and get** use one lkey and one rkey per slice.
 - **IPutSignal** adds one `IBV_WR_ATOMIC_FETCH_AND_ADD` on the segment holding `signalOff`, which must be 8-byte aligned and inside one segment (`rcclRmaSignalOffsetValid`); it rides the last round (`rcclRmaRoundSetSignal`).
@@ -170,6 +170,10 @@ flowchart TD
 A chain with nothing queued ahead posts at once (`rcclRmaIbProxyPostChain`): data chains go through the WR batch (`NCCL_RMA_IB_WR_BATCHSIZE`, 64), flushes post directly. The proxy rings its pending batch before it publishes a queued request (`rcclRmaIbProxyEnqueue`), so a doorbell failure leaves nothing queued.
 
 **In-flight cap.** When `comm->rcclMultiSegRma` is set, `rcclRmaProxyMaxInflightRequests` (`rccl_dev_runtime.cc`, fork 1) caps each peer and context at `RCCL_RMA_MAX_INFLIGHT_REQUESTS` (32). The RMA proxy (`rma/rma_proxy.cc`) and the GIN proxy (`gin/gin_host_proxy.cc`, told through `rcclGinProxySetMultiSeg`) log an INFO line when this lowers the per-peer request count or `NCCL_GIN_PROXY_QUEUE_SIZE`.
+
+## Observability
+
+Each fully posted round adds to the peer comm's `segStats`: one post, its data WRs (the signal WR of an `iputSignal` is not counted) and, when the round's last local or remote byte lies past segment 0, one later-segment post. Rounds are counted when they post, not when they are built, because the submit path builds a probe copy of the first round to decide between posting directly and queueing. `rcclRmaIbProxySegStats` reads the counters for one context and peer; with `NCCL_DEBUG=TRACE` each round logs where it ends on both sides (`NET/IB/RMA: opcode ... round of ... WRs ends at`).
 
 ## Send-queue depth by role
 

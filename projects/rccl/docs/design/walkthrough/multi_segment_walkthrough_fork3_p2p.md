@@ -7,19 +7,19 @@ Fork 3 makes IB-MSEG register a NET send or receive buffer that spans several ph
 | File | Role in this fork |
 |---|---|
 | `src/init.cc` | `commAlloc` sets `comm->rcclMultiSegNet` from `rcclMultiSegOn(comm->ncclNet == &ncclNetIbMseg)`, which lets `transport/net.cc` pass fd -1 to IB-MSEG |
-| `ib_multiseg_mseg.h` | new: `IbMsegUseMultiSeg`, the connect-time decision |
+| `ib_multiseg_mseg.h` | new: `IbMsegUseMultiSeg`, the connect-time decision; `struct rcclIbSegStats` and the `rcclIbSendCommSegStats` test hook |
 | `connect.cc` | resolves, sends and checks `useMultiSeg`; allocates and frees the CTS block, the send cursor, the layout cache and the receiver's legacy FIFO; `rcclIbMarkGinListen`; frees the layout cache on close |
 | `connect_mseg.h` | `IbMsegConnectionMetadata::useMultiSeg` |
-| `common_mseg.h` | `IbMsegCtsSlot`, `rcclIbSendCursor`, `IbMsegMrHandle::seg`, `IbMsegDev::maxMr`, `IbMsegRequest::send.mh`, the new comm fields (`sendCursor` and `layoutCache` are pointers, and so is `IbMsegRemCtsFifo::elems`), `rcclIbMrAdmit` declaration |
+| `common_mseg.h` | `IbMsegCtsSlot`, `rcclIbSendCursor`, `IbMsegMrHandle::seg`, `IbMsegDev::maxMr`, `IbMsegRequest::send.mh`, the new comm fields (`sendCursor` and `layoutCache` are pointers, and so is `IbMsegRemCtsFifo::elems`), the send comm's `segStats` with `rcclIbSegStatsAdd` and `rcclIbSegStatsRead`, `rcclIbMrAdmit` declaration |
 | `init.cc` | stores `devAttr.max_mr` in `IbMsegDevs[].maxMr` |
 | `gin.cc` | marks GIN and RMA listeners with `rcclIbMarkGinListen` (`IbMsegGinIbGdakiListen`, new `IbMsegRmaIbProxyListen`, `IbMsegRmaIbProxyCreateContext`) |
 | `reg.cc` | fd -1 segment walk, `rcclIbMrAdmit`, `rcclIbMultiSegAdmit`, `IbMsegRegMrDmaBufMultiSeg`, layout publish, multi-segment deregistration |
 | `seg_reg_mseg.h` | `rcclIbSegRegister` and `rcclIbSegDeregister` with unwind, the walk scratch block |
 | `seg_mseg.h` | `rcclIbSegTable` and the two-sided `rcclIbSegCursor` |
-| `seg_wr_mseg.h` | `rcclIbSegAppendWrs`, the WR fill over a local and a remote table |
+| `seg_wr_mseg.h` | `rcclIbSegFillWr`, the WR and SGE fill for one slice of a local and a remote table |
 | `seg_p2p_mseg.h`, `seg_p2p.cc` | `IbMsegSegLayout` and the layout bit, `rcclIbSegMr`, sender segment tables, the referenced-layout cache |
 | `p2p_multiseg_mseg.h`, `p2p_multiseg.cc` | the hooks `p2p.cc` calls: CTS write shape, irecv layout fill, segmented WR fill, slice bookkeeping, layout readiness, `IbMsegMrForRange` |
-| `p2p.cc` | hook calls in `IbMsegMultiSend`, `IbMsegIsend`, `IbMsegPostFifo`, `IbMsegIrecv`, `IbMsegIflush`, completion handling and `IbMsegTest`; new `rcclIbSendProgress` and `rcclIbSendResume` |
+| `p2p.cc` | hook calls in `IbMsegMultiSend`, `IbMsegIsend`, `IbMsegPostFifo`, `IbMsegIrecv`, `IbMsegIflush`, completion handling and `IbMsegTest`; new `rcclIbSendProgress`, `rcclIbSendResume` and the shared post `rcclIbPostSendWrs` |
 | `CMakeLists.txt` | the new sources |
 | `docs/userguide/source/env.rst` | user-facing rules for `NCCL_MULTI_SEGMENT_REGISTER` on IB-MSEG |
 
@@ -345,7 +345,7 @@ flowchart TD
  last{"every receive at end?"}
  last -->|yes| tail["tail WR with the immediate"]
  last -->|no| sig["signal last slice, hold event"]
- tail --> post["ibv_post_send"]
+ tail --> post["rcclIbPostSendWrs"]
  sig --> post
  post --> st{"slices left?"}
  st -->|no| done["QP DONE"]
@@ -376,10 +376,11 @@ flowchart TD
   }
 ```
 
-5. `seg_p2p.cc` `rcclIbSegTableLocal` gives the local table from the send handle (one segment for a single-segment handle). `rcclIbBuildRemoteSegmentLayout` gives the remote table for the QP's remote device: one segment from the CTS entry, the inline layout through `rcclIbSegTableInline` (which copies the starts and rkeys once, validates them with `IbMsegCtsRemoteLayoutValid` and trims the table to the request's end), or the read blob through `rcclIbSegTableReferenced`. The local and remote tables each keep their own request offset into their registration, so the two sides may start in different segments ([why](../multi_segment_netib_wire.md#independent-offsets)).
-6. `rcclIbAppendSegmentedRequestWrs` emits one WR per receive per post. It finds the local segment holding the offset (`rcclIbSegIndexOf`), takes that segment's lkey on this device from `rcclIbSegMrAt`, and calls `seg_wr_mseg.h` `rcclIbSegAppendWrs` with a one-segment local window and `maxWr = 1`. The `rcclIbSegCursor` in `seg_mseg.h` cuts the slice at the nearer of the local and remote boundary, at `RCCL_IB_SGE_MAX_BYTES`, or at the end of the range, and picks the remote segment's rkey; `moved` is the slice length. A zero-length receive writes one 0-byte WR on the first post, with the rkey of the segment from `IbMsegSegmentForZeroLengthOffset`.
-7. When every receive reached its end, `rcclIbAppendSegmentedTailWr` adds develop's tail: the sizes write and this QP's flush-flag write for a flag flush, a dedicated sizes or immediate WR, or the last data WR turned into the `WRITE_WITH_IMM`; it is signaled. Otherwise the post's last data WR is signaled and `rcclIbSendHoldSlice` adds one event per request on that device, so the request cannot complete while the slice is outstanding. The WRs are chained and posted on the QP.
-8. A QP with slices left becomes INFLIGHT and the slot is recorded in the cursor (`active`, `wrId`, `immData` and the tail flags). A single-segment send on both sides finishes in the first post on every QP, so the cursor never becomes active, and a legacy-CTS comm never allocates one for it.
+5. `seg_p2p.cc` `rcclIbSegTableLocal` gives the local table from the send handle (one segment for a single-segment handle). `rcclIbBuildRemoteSegmentLayout` gives the remote table for the QP's remote device: one segment from the CTS entry, the inline layout through `rcclIbSegTableInline` (which copies the starts and rkeys once, validates them with `IbMsegCtsRemoteLayoutValid` and trims the table to the request's end), or the read blob through `rcclIbSegTableReferenced`. Both are `rcclIbSendSegTable`s (`seg_p2p_mseg.h`): each embeds the shared `rcclIbSegTable seg` (`base`, `nSeg`, `off`) and adds `multi`, the rkeys and its own `reqOff` from `seg.base`, so the two sides may start in different segments ([why](../multi_segment_netib_wire.md#independent-offsets)).
+6. `rcclIbAppendSegmentedRequestWrs` emits one WR per receive per post. It takes one step of an `rcclIbSegCursor` (`seg_mseg.h`, `rcclIbSegCursorInit` and `rcclIbSegCursorNext`) over `local->seg` and `remote->seg`, which cuts the slice at the nearer of the local and remote boundary, at `RCCL_IB_SGE_MAX_BYTES`, or at the end of the range. It takes the lkey of the slice's local segment on this device from `rcclIbSegMrAt` and the remote segment's rkey, and fills the WR and SGE with `seg_wr_mseg.h` `rcclIbSegFillWr`; `moved` is the slice length. A zero-length receive writes one 0-byte WR on the first post, with the rkey of the segment from `IbMsegSegmentForZeroLengthOffset`, which range-checks the offset and then uses `rcclIbSegIndexOf`. Each slice logs its offset, length and local and remote segment at TRACE (`NET/IB: segmented send slice`), and marks the post as reaching a later segment when either side is past segment 0.
+7. `rcclIbFillSendWrs` adds the post to the comm's `segStats` (`common_mseg.h` `rcclIbSegStatsAdd`, relaxed atomic adds): one post, its data WRs, and one later-segment post if any slice reached a later segment. `rcclIbSendCommSegStats` (end of `p2p_multiseg.cc`) reads the three counters for tests and rejects a null comm.
+8. When every receive reached its end, `rcclIbAppendSegmentedTailWr` adds develop's tail: the sizes write and this QP's flush-flag write for a flag flush, a dedicated sizes or immediate WR, or the last data WR turned into the `WRITE_WITH_IMM`; it is signaled. Otherwise the post's last data WR is signaled and `rcclIbSendHoldSlice` adds one event per request on that device, so the request cannot complete while the slice is outstanding. The WRs are chained and posted on the QP by `p2p.cc` `rcclIbPostSendWrs`, which takes that hold just before the post.
+9. A QP with slices left becomes INFLIGHT and the slot is recorded in the cursor (`active`, `wrId`, `immData` and the tail flags). A single-segment send on both sides finishes in the first post on every QP, so the cursor never becomes active, and a legacy-CTS comm never allocates one for it.
 
 ### Completion and resume
 
@@ -454,7 +455,7 @@ flowchart TD
  class err failpath
 ```
 
-1. `p2p.cc` `IbMsegIflush` keeps develop's choice of the last non-zero receive and its scratchpad path (`RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING`, on by default), which never reads a receive buffer.
+1. `p2p.cc` `IbMsegIflush` keeps develop's choice of the last non-zero receive and its scratchpad path (`RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING`, on by default), which never reads a receive buffer. The scratchpad write carries `IBV_SEND_INLINE`, and `connect.cc` sizes the flush QP's `maxInlineData` to the flush word, both taken from develop's `net_ib`.
 2. On the direct path, `p2p_multiseg.cc` `IbMsegMrForRange(mhandle, data[last], 1, i)` returns `mrs[i]` for a single-segment handle, else `seg_p2p.cc` `rcclIbSegMrForRange`, the MR of the segment that contains the byte (`IbMsegSegmentIndexForRange`). The read uses that MR's rkey. One read per device fences the device, so the flush QP keeps develop's depth.
 
 ## Close
@@ -509,7 +510,7 @@ A mismatch fails the accepting rank with `ncclInvalidUsage` before it replies; t
 flowchart TD
  p["wrap_ibv_post_send fails"]
  p --> hold["undo the held slice event"]
- hold --> drop["MultiSend: drop unposted QP events"]
+ hold --> drop["drop unposted QP events"]
  drop --> fatal["IbMsegStatsFatalError"]
  fatal --> where{"called from"}
  where -->|IbMsegIsend| ev{"request still has events?"}
@@ -522,10 +523,10 @@ flowchart TD
  class where,ev netib
 ```
 
-1. In `IbMsegMultiSend`, a failed post first undoes `rcclIbSendHoldSlice` if the post was a non-final slice. On a segmented send it then counts the WRs accepted before `bad_wr`: if some were, this QP keeps its event (its accepted prefix will complete); every QP after it, and this QP when nothing posted, drops one event per request, except QPs that resiliency already delivered. It marks the comm fatal and returns the error.
+1. `IbMsegMultiSend` and `rcclIbSendResume` both post through `p2p.cc` `rcclIbPostSendWrs`. A failed post first undoes `rcclIbSendHoldSlice` if the post was a non-final slice. It then counts the WRs accepted before `bad_wr` and asks the caller's `unposted` callback which QPs will never complete: if some WRs were accepted, this QP keeps its event (its accepted prefix will complete), otherwise it is listed too. Each listed QP drops one event per request. It marks the comm fatal and returns the error. From `IbMsegMultiSend` the list is empty for a send that is not segmented, and otherwise holds every QP after this one, except QPs that resiliency already delivered.
 2. `IbMsegIsend` keeps that error in `ret`. A request that still has events becomes `NCCL_NET_IB_REQ_FAILED` and is returned with `ncclSuccess`, so the caller drains it with `IbMsegTest`, where the fatal count fails it. A request with no events left is unlinked from `sendReqs[slot]`, `sendReqsCnt` is decremented, the request is freed and the error is returned.
 3. A fill error (invalid inline layout, a referenced layout that is not READY, a split that runs off a table, a missing segment MR, the WR pool exceeded) WARNs and returns `ncclInternalError` before that QP posts. From `IbMsegIsend` it takes the same failed-request path; when nothing posted, the request keeps its events and the next `IbMsegTest` fails on the fatal count.
-4. From `rcclIbSendResume` a failed post undoes the held event, marks the comm fatal and returns the error; from `rcclIbSendProgress` the error goes to `IbMsegTest`'s `fail` label, which marks the connection and device fatal, sets the request FAILED and `done`, and returns the error.
+4. From `rcclIbSendResume` the list holds the QPs after this one that are still IDLE, since they will not post their next slice this pass; INFLIGHT QPs keep their events because their posted slices still complete. From `rcclIbSendProgress` the error goes to `IbMsegTest`'s `fail` label, which marks the connection and device fatal, sets the request FAILED and `done`, and returns the error.
 
 ### Layout reads
 
@@ -545,7 +546,7 @@ The IB-MSEG host binaries are defined in `test/host/transport/host_tests.cmake` 
 |---|---|---|
 | `rccl-UnitTestsMicroTransportNetIbMsegConnect` (`connect-test.cc`) | `NetIbMsegConnectUseMultiSeg`, `NetIbMsegConnectMultiSegMicrotest`, `NetIbMsegConnectResilientMicrotest`, `NetIbMsegParamCopies` | the decision, CTS slots on connect and accept, GIN keeps the legacy FIFO, switch off, cuMem off, peer mismatch; `ConnectAndAccept_MultiSegStateFollowsUseMultiSeg` (cursor, cache and receiver FIFO follow `useMultiSeg`); `Connect_ResilientCommKeepsTheLegacyCts` and `Accept_ResilientCommKeepsTheLegacyCts`; `EveryCopiedStatementMatchesItsNetIbSource`, which fails when the hand-copied `test/host/fakes/net_ib_mseg_params*.cc` drift from the `net_ib` sources |
 | `rccl-UnitTestsMicroTransportNetIbMsegReg` (`reg-test.cc`) | `NetIbMsegRegMicrotest` (`RegMrDmaBufMultiSeg_*`, `DeregMr_MultiSegment*`), `NetIbMsegRegRangeMicrotest` | unwind, resilient and `max_mr` declines, inline limit and layout publish, range walk, fd close, cap and resilient decline before export, base-zero walk |
-| `rccl-UnitTestsMicroTransportNetIbMsegP2p` (`net-ib-p2p-test.cc`) | `NetIbMsegP2pMicrotest` | develop's P2P behavior on the fork, `LayoutCacheFree_DeregistersEachReadLayoutAndClearsItsEntry` |
+| `rccl-UnitTestsMicroTransportNetIbMsegP2p` (`net-ib-p2p-test.cc`) | `NetIbMsegP2pMicrotest` | develop's P2P behavior on the fork, `LayoutCacheFree_DeregistersEachReadLayoutAndClearsItsEntry`, `SendCommSegStats_ReadsTheCommCountersAndRejectsNull` |
 | `rccl-UnitTestsMicroTransportNetIbMsegGin` (`gin-test.cc`) | `NetIbMsegGinMicrotest` | `GinListens_MarkHandleAndListenCommAsGin`, `CreateContext_MarksTheRmaListenCommAsGin`, and develop's GIN behavior on the fork |
 | `rccl-UnitTestsMicroInit` (`init-test.cc`) | `InitMicrotest.CommAlloc_MultiSegNet*` | `rcclMultiSegNet` follows the IB-MSEG plugin and the gate |
 
@@ -607,9 +608,10 @@ NCCL_MULTI_SEGMENT_REGISTER=1 NCCL_DMABUF_ENABLE=1 mpirun -np 2 --map-by ppr:1:n
 - The inline limit or the layout lines: `RCCL_IB_CTS_INLINE_SEGS`, `RCCL_IB_LAYOUT_RKEYS_HEAD`, `RCCL_IB_LAYOUT_RKEYS_LINE` and `IbMsegSegLayout` in `seg_p2p_mseg.h`; its `static_assert`s pin the 192-byte size and the stamp offsets, and `IbMsegCtsSlot` in `common_mseg.h` follows it.
 - The CTS write shape: `p2p_multiseg.cc` `rcclIbPrepareCtsWrite`, `rcclIbCtsFlagLayout` and `rcclIbCtsLayoutsArrived`.
 - The layout cache size or eviction: `RCCL_IB_LAYOUT_CACHE_ENTRIES` and `seg_p2p.cc` `rcclIbLayoutsReady`.
-- How much one post carries: `maxWr` in `p2p_multiseg.cc` `rcclIbAppendSegmentedRequestWrs`. More than one WR per receive per post changes the send QP depth, which then needs `connect.cc` and [QP depths](../multi_segment_current.md#qp-depths).
+- How much one post carries: the single cursor step in `p2p_multiseg.cc` `rcclIbAppendSegmentedRequestWrs`. More than one WR per receive per post changes the send QP depth, which then needs `connect.cc` and [QP depths](../multi_segment_current.md#qp-depths).
 - The tail of a segmented send: `rcclIbAppendSegmentedTailWr`, kept in step with `needSizesWr` and `extraImmWr` in `p2p.cc` `IbMsegMultiSend`.
 - Slot ordering or resume: `p2p.cc` `rcclIbSendProgress` and `rcclIbSendResume`, with `rcclIbSendSliceDone` for the completion match.
+- Event accounting after a failed post: `p2p.cc` `rcclIbPostSendWrs`, and the `unposted` callbacks its two callers pass.
 - Which comms carry the cursor and the layout cache: `connect.cc` `IbMsegSendCommAllocCts` and `IbMsegSendCommFreeCts`, and the on-demand cursor in `p2p.cc` `IbMsegMultiSend`; every reader must keep handling a NULL pointer.
 - A `net_ib` parameter change: update the hand-copied definitions in `test/host/fakes/net_ib_mseg_params*.cc`; `NetIbMsegParamCopies.EveryCopiedStatementMatchesItsNetIbSource` fails until they match.
 - The flush rkey: `p2p_multiseg.cc` `IbMsegMrForRange`.

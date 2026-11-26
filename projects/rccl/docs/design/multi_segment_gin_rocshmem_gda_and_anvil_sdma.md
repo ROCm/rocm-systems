@@ -1,14 +1,14 @@
 # Proposal: multi-segment windows on rocSHMEM GDA and Anvil SDMA
 
 > [!NOTE]
-> Status: proposal, not implemented; checked against fork 4.
+> Status: proposal, not implemented. Rechecked against the current stack tip (forks 1 to 4 and the tests-only change on develop): neither backend plugin has changed, so nothing here is implemented yet. The next step is an owner decision on whether and in what order to take it up.
 
-The host-proxy GIN type registers per physical segment through its RMA backend ([GIN/RMA](multi_segment_gin_rma.md)). The two AMD device-initiated GIN backends are rocSHMEM GDA (`NCCL_GIN_TYPE=6`) and Anvil SDMA (`NCCL_GIN_TYPE=7`); both plugins compile only with `ENABLE_ROCSHMEM_GIN`. This doc records what develop and the fork stack do with multi-segment windows on those two backends, what is missing, and the proposed changes. The fork stack does not change either backend plugin; it changes only the core gate in front of them. Tickets: AIRUNTIME-2351, AICOMRCCL-1526 follow-on.
+The host-proxy GIN type registers per physical segment through its RMA backend ([GIN/RMA](multi_segment_gin_rma.md)). The two AMD device-initiated GIN backends are rocSHMEM GDA (`NCCL_GIN_TYPE=6`) and Anvil SDMA (`NCCL_GIN_TYPE=7`); both plugins compile only with `ENABLE_ROCSHMEM_GIN`. This doc records what develop and the fork stack do with multi-segment windows on those two backends, what is missing, and the proposed changes. The fork stack does not change either backend plugin; it changes only the core registration code in front of them (`gin_host.cc`, `gin_host_proxy.cc`, `dev_runtime.cc`). Tickets: AIRUNTIME-2351, AICOMRCCL-1526 follow-on.
 
 ## Summary
 
 - **Windows with host segments are split but not registered.** DeepEP's `[GPU][CPU]` and hybrid windows contain host segments, so develop builds one GIN segment per physical segment, and the device `ncclGin` put and get split at segment boundaries before they reach the backend. Registration, however, asks every active GIN backend for DMA-BUF support whenever a window has a host segment or more than one segment, and GDA and Anvil report only `NCCL_PTR_CUDA`, so `ncclGinRegister` fails these windows with `ncclInvalidArgument` on types 6 and 7. The same check is in develop and in fork 4.
-- **Device-only windows with 2 to `RCCL_IB_REG_SEG_DEFAULT` segments are the other gap.** Develop registers them as one range. GDA's whole-range DMA-BUF covers only segment 0 on ROCm, so fork 1's `rcclDevrGinRegistersMultiSegment` gate rejects these windows with `ncclInvalidUsage` on every GIN type except the proxy. Anvil exports nothing and addresses every segment through the LSA flat mapping, so only that gate (and the DMA-BUF check behind it) stops it.
+- **Device-only windows with 2 to `RCCL_IB_REG_SEG_DEFAULT` segments are the other gap.** Because a whole-range DMA-BUF covers only segment 0 on ROCm, develop's HIP gate in `symMemoryRegisterGin` keeps these windows off GIN: a `NCCL_WIN_GIN_ONLY` window fails with `ncclInvalidUsage`, and any other stays unregistered with GIN and usable for LSA. Fork 1's `rcclDevrGinRegistersMultiSegment` lets them through only when every GIN backend is the proxy over IB-MSEG's RMA backend, so types 6 and 7 still hit the gate. Anvil exports nothing and addresses every segment through the LSA flat mapping, so only that gate (and the DMA-BUF check behind it) stops it.
 - **Proposed:** let Anvil through both checks; give GDA one GIN window per segment so develop's device loop does the split; make GDA register host segments with the owner's fd and then report DMA-BUF support; stop Anvil spending an IPC-table row per segment.
 - **Open:** whether SDMA reaches host segments, VA signal cells outside a window's first GIN segment, and GDA's missing device get.
 
@@ -29,7 +29,7 @@ Corrections to the first draft: the GIN types are 6 and 7 (type 5 is EFA GDA); A
 
 `ncclDevrBuildGinSegmentInfos` (`dev_runtime_segments.cc`) sets `numGinSegments = 1` for a device-only window and one GIN segment per physical segment, with its memory type, otherwise. `symMemoryRegisterGin` then calls `ncclGinRegister` once per GIN segment, so a backend's `regMrSym` sees one physical segment at a time. Develop requires identical segment counts and sizes on every rank (`ncclDevrVerifySegmentLayouts`).
 
-On AMD, `rcclDevrGinSegmentRegType` (`rccl_dev_runtime.cc`) sets the pointer type to `NCCL_PTR_CUDA` for every segment, host or device, and asks for DMA-BUF when the window has more than one segment on any rank or any host segment; a host window without `NCCL_DMABUF_ENABLE=1` fails with `ncclInvalidUsage`. With DMA-BUF requested, `ncclGinRegister` (`gin/gin_host.cc`) fails with `ncclInvalidArgument` unless every connection of every active backend reports `NCCL_PTR_DMABUF`. `ginRocshmemGdaGetProperties` and `ginAnvilGetProperties` set `ptrSupport = NCCL_PTR_CUDA` only, so on types 6 and 7 no window with a host segment or with more than one segment registers today.
+On AMD, before that, a HIP-only gate in `symMemoryRegisterGin` keeps a device-only window with more than one segment on some rank off GIN, because one HIP DMA-BUF covers only the first segment: a `NCCL_WIN_GIN_ONLY` window fails with `ncclInvalidUsage`, and any other gets `numGinSegments = 0` (INFO line) and stays usable for LSA. For the windows that pass, `rcclDevrGinSegmentRegType` (`rccl_dev_runtime.cc`) sets the pointer type to `NCCL_PTR_CUDA` for every segment, host or device, and asks for DMA-BUF when the window has more than one segment on any rank or any host segment; a host window without `NCCL_DMABUF_ENABLE=1` fails with `ncclInvalidUsage`. With DMA-BUF requested, `ncclGinRegister` (`gin/gin_host.cc`) fails with `ncclInvalidArgument` unless every connection of every active backend reports `NCCL_PTR_DMABUF`. `ginRocshmemGdaGetProperties` and `ginAnvilGetProperties` set `ptrSupport = NCCL_PTR_CUDA` only, so on types 6 and 7 no window with a host segment or with more than one segment registers today.
 
 On the device, `ncclDevrAllocAndPopulateSegmentWindows` publishes `ginMultiSegmentWins[backend * numSegments + seg]` with each segment's size and type. With the `ncclGin_SegmentMixed` or `ncclGin_SegmentHostNuma` tag, `put` and `get` find the segment of each offset (`findSegmentFromWindow`), cut every slice at both boundaries (`getSegmentChunkSize`), and call the backend once per slice with that segment's GIN window. The signal and counter ride on the last slice, and a host source raises the first slice's release to system scope. The default tag, `ncclGin_SegmentDevice`, takes the one-window path; RCCL's own kernels use it, and only `test/device/GinBackendMaskDispatch_test.cpp` passes the mixed tag.
 
@@ -37,13 +37,13 @@ On the device, `ncclDevrAllocAndPopulateSegmentWindows` publishes `ginMultiSegme
 
 ## What the fork stack adds
 
-Fork 1 adds the gate in `symMemoryRegisterGin` (`dev_runtime.cc`, AMD builds only). A window with more than one segment on some rank and no host segment on any rank fails with `ncclInvalidUsage` unless `rcclDevrGinRegistersMultiSegment` (`rccl_dev_runtime.cc`, declared in `include/rccl_common.h`) holds. The gate runs before `ncclDevrVerifySegmentLayouts`. As of fork 4 the predicate requires all of the following:
+Fork 1 adds an exception to develop's HIP gate in `symMemoryRegisterGin` (`dev_runtime.cc`, AMD builds only): a device-only multi-segment window passes when `rcclDevrGinRegistersMultiSegment` (`rccl_dev_runtime.cc`, declared in `include/rccl_common.h`) holds, and otherwise keeps develop's outcome (`ncclInvalidUsage` for a GIN-only window, unregistered with GIN for any other). The gate runs before `ncclDevrVerifySegmentLayouts`. At the current stack tip the predicate is `rcclDevrRmaRegistersMultiSegment` plus a backend check, so it requires all of the following:
 
 - `comm->rcclMultiSegRma` is set. `init.cc` sets it through `rcclMultiSegOn` only when `NCCL_MULTI_SEGMENT_REGISTER=1`, `NCCL_DMABUF_ENABLE=1` and the RMA backend is IB-MSEG's `IbMsegRmaIbProxy`; a child comm copies its parent's flag.
 - Every rank has the same segment count, and `rcclRmaSegTableFits` holds: 1 to `RCCL_IB_REG_SEG_DEFAULT` (`transport/rccl_mseg.h`) segments, and ranks times segments at most `RCCL_RMA_SEG_TABLE_MAX_ENTRIES` (2^20, `transport/rccl_mseg_rma.h`).
 - Every active, non-closed GIN backend is `NCCL_GIN_TYPE_PROXY`.
 
-So a device-only multi-segment window fails at the gate on type 6 and on type 7 whatever the other settings are, and on a proxy comm whose RMA backend is not IB-MSEG. A window with host segments skips the gate and reaches the DMA-BUF check above, which rejects it on types 6 and 7.
+So a device-only multi-segment window is kept off GIN on type 6 and on type 7 whatever the other settings are, and on a proxy comm whose RMA backend is not IB-MSEG. A window that passes registers as one GIN window through `rcclGinRegisterMultiSeg` (`gin/gin_host.cc`), which always asks for DMA-BUF support and hands fd -1 only to the proxy so its RMA backend walks the segments; any other backend would get a plain `regMrSym` over the whole range. A window with host segments skips the gate and reaches the DMA-BUF check above, which rejects it on types 6 and 7.
 
 Fork 1 also publishes host segments' owner DMA-BUF fds by VA (`rcclHostSegmentFdRegister`). A rank uses its own fd when it exported one, and an importer borrows the owner's fd only when exactly one LSA rank can export that segment. `ncclGinRegister` looks the fd up (`rcclHostSegmentFdLookup`) and, when it finds one, calls the backend's `regMrSymDmaBuf` with it. Both device backends implement `regMrSymDmaBuf` but ignore the offset and fd.
 
@@ -51,8 +51,8 @@ Fork 1 also publishes host segments' owner DMA-BUF fds by VA (`rcclHostSegmentFd
 %% caption: How develop and the fork stack route a multi-segment window on GIN types 6 and 7
 flowchart TD
  w["multi-segment window"] --> host{"any host segment?"}
- host -->|no| gate{"fork 1 gate passes?"}
- gate -->|"no: types 6 and 7"| rej["ncclInvalidUsage"]
+ host -->|no| gate{"fork 1 exception?"}
+ gate -->|"no: types 6 and 7"| rej["off GIN; GIN-only fails"]
  gate -->|"yes: proxy only"| proxy["proxy: per-segment MRs"]
  host -->|yes| per["one GIN window per segment"]
  per --> dma{"backend reports DMA-BUF?"}
@@ -76,7 +76,7 @@ flowchart TD
 
 `ginRocshmemGdaRegMrSym` (`gin_plugin_rocshmem_gda.cc`) calls `rocshmem_gin_reg_mr_vmm(qpSet, data, size, atomic=1, ...)` once. That exports one DMA-BUF for the whole range with `hipMemGetHandleForAddressRange`, registers it with the VA as IOVA, and tries a fallback when the export fails. Remote atomics are on because a VA signal lands in the window. The plugin then allgathers one rkey and one base VA per rank. `ginRocshmemGdaRegMrSymDmaBuf` ignores `offset` and `fd` and calls `RegMrSym`.
 
-The plugin finds its NICs in IB-CAST's device table (`IbCastInitDevices`, `IbCastDevs`, `IbCastGetPhysProperties`). Fork 5 (planned) moves rocSHMEM GDA to the fork's device table; that changes where GDA gets its NIC properties, not the registration entry points this proposal changes.
+The plugin finds its NICs in IB-CAST's device table (`IbCastInitDevices`, `IbCastDevs`, `IbCastGetPhysProperties`). Fork 5, which is paused, would move rocSHMEM GDA to the fork's device table; that would change where GDA gets its NIC properties, not the registration entry points this proposal changes.
 
 The device handle is `ncclGinRocshmemGdaMemHandle {local_va, remote_vas[nRanks], lkey, rkeys[nRanks]}`. The put issues one `put_nbi(remote_vas[peer] + dstOff, rkeys[peer], local_va + srcOff, lkey, bytes)`, skips zero-byte RDMA but still signals, and sends the signal as an `atomic_add` on the same QP. A VA signal targets `remote_vas[peer] + signalOffset` with `rkeys[peer]` of the signal window. Put-value inlines the value into the WQE, and flush runs `quiet` on every peer QP.
 
@@ -98,7 +98,7 @@ The put uses IPC flat stores up to `sdmaThreshold` bytes (default 128, `NCCL_GIN
 | Window | GDA (type 6) | Anvil (type 7) |
 |---|---|---|
 | One device segment | works | works |
-| Device-only, 2 to `RCCL_IB_REG_SEG_DEFAULT` segments | one MR would cover segment 0 only; the fork 1 gate rejects it | addressing reaches every segment; the fork 1 gate rejects it |
+| Device-only, 2 to `RCCL_IB_REG_SEG_DEFAULT` segments | one MR would cover segment 0 only; the HIP gate keeps it off GIN | addressing reaches every segment; the HIP gate keeps it off GIN |
 | Host segments, local CPU segment | rejected at registration (no `NCCL_PTR_DMABUF`); past that, per-segment MRs and the mixed-tag split would work | rejected at registration; past that, per-segment rows and the split would work, and SDMA into the host segment is unverified |
 | Host segments, imported CPU segment (hybrid) | rejected at registration; past that, re-exports instead of using the owner fd | rejected at registration; past that, works through the LSA mapping and IPC rows run out |
 | VA signal cell in a multi-GIN-segment window | no valid window on backend 0 | no valid window on backend 0 |
@@ -108,7 +108,7 @@ The put uses IPC flat stores up to `sdmaThreshold` bytes (default 128, `NCCL_GIN
 
 ### Anvil: accept device-only windows
 
-Split `rcclDevrGinRegistersMultiSegment` so the proxy keeps its RMA requirement (`rcclDevrRmaRegistersMultiSegment`) and Anvil needs only `NCCL_MULTI_SEGMENT_REGISTER=1`, the same segment count on every rank, and `rcclIbSegCountSupported` (at most `RCCL_IB_REG_SEG_DEFAULT`). Anvil uses no RMA segment table, so the ranks-times-segments bound does not apply. Because the window has more than one segment, `ncclGinRegister` also asks for DMA-BUF, so Anvil must report `NCCL_PTR_DMABUF` (it already accepts `regMrSymDmaBuf` and addresses by LSA VA), or the check must skip backends that do not register NIC memory. The window stays one GIN window over the LSA flat range, and no device code changes.
+Change the backend check in `rcclDevrGinRegistersMultiSegment`: today it requires `rcclDevrRmaRegistersMultiSegment` and then rejects any non-proxy backend. Keep that RMA requirement for the proxy, and let Anvil pass with only `NCCL_MULTI_SEGMENT_REGISTER=1`, the same segment count on every rank, and `rcclIbSegCountSupported` (at most `RCCL_IB_REG_SEG_DEFAULT`). Anvil uses no RMA segment table, so the ranks-times-segments bound does not apply. A window that passes registers through `rcclGinRegisterMultiSeg`, which asks every backend for DMA-BUF support, so Anvil must report `NCCL_PTR_DMABUF` (it already accepts `regMrSymDmaBuf` and addresses by LSA VA), or the check must skip backends that do not register NIC memory. Anvil then gets a plain `regMrSym` over the whole range, so the window stays one GIN window over the LSA flat range, and no device code changes.
 
 ### Anvil: no IPC row per segment
 
@@ -120,7 +120,7 @@ Host-segment windows reach Anvil once it reports `NCCL_PTR_DMABUF`. Check on MI3
 
 ### GDA: one GIN window per segment
 
-When an active GIN backend is GDA, build one GIN segment per physical segment for device-only windows too, so each segment gets its own `rocshmem_gin_reg_mr_vmm` MR and develop's device loop splits every put. The fork 1 gate then needs a GDA branch like Anvil's (switch, same count, at most `RCCL_IB_REG_SEG_DEFAULT` segments), and GDA must report `NCCL_PTR_DMABUF`, which it can do honestly only after the owner-fd change below. Default-tag callers would then hit the one-window path, so the device-only branch in `gin__funcs.h` must fall through to the loop when `numSegments > 1`. That is one compare in an upstream-shared file and needs a `// RCCL:` marker.
+When an active GIN backend is GDA, build one GIN segment per physical segment for device-only windows too, so each segment gets its own `rocshmem_gin_reg_mr_vmm` MR and develop's device loop splits every put. The fork 1 gate then needs a GDA branch like Anvil's (switch, same count, at most `RCCL_IB_REG_SEG_DEFAULT` segments), and `symMemoryRegisterGin` must send these per-segment GIN windows through `ncclGinRegister` at each segment's offset instead of `rcclGinRegisterMultiSeg`, which registers one window from the window base. GDA must also report `NCCL_PTR_DMABUF`, which it can do honestly only after the owner-fd change below. Default-tag callers would then hit the one-window path, so the device-only branch in `gin__funcs.h` must fall through to the loop when `numSegments > 1`. That is one compare in an upstream-shared file and needs a `// RCCL:` marker.
 
 | Option | Idea | Verdict |
 |---|---|---|
@@ -157,7 +157,7 @@ Until the generic descriptor resolves the GIN segment that holds `signalOffset`,
 |---|---|---|---|
 | `[GPU][CPU]` non-hybrid | per-segment GIN windows, mixed tag; types 6 and 7 fail at registration | needs the owner-fd change and DMA-BUF support; then puts work, but no Engram IGet, since get traps | needs DMA-BUF support; then puts and gets work, and SDMA into the CPU segment is to verify |
 | `[GPU k][CPU 0]…[CPU N-1]` hybrid ([hybrid DeepEP windows](multi_segment_testing.md#hybrid-deepep-windows)) | same | needs the owner-fd change | needs DMA-BUF support and the IPC-row change for a second window |
-| GPU-only, N segments | one GIN window; the fork 1 gate rejects it | needs per-segment GIN windows | needs the gate change |
+| GPU-only, N segments | kept off GIN by the HIP gate (GIN-only windows fail) | needs per-segment GIN windows | needs the gate change |
 
 `NCCL_WIN_STRICT_ORDERING` stays a window flag. A split must not move the signal ahead of data slices: on GDA the atomic follows the last `put_nbi` on the same QP, and on Anvil the last slice carries the fused signal or the signal follows a quiet.
 
@@ -169,7 +169,7 @@ Until the generic descriptor resolves the GIN segment that holds `signalOffset`,
 
 ## Implementation sequence
 
-1. Tests that pin today's behavior on types 6 and 7: the `ncclInvalidArgument` registration failure for windows with host segments, and the fork 1 gate's `ncclInvalidUsage` for device-only multi-segment windows.
+1. Tests that pin today's behavior on types 6 and 7: the `ncclInvalidArgument` registration failure for windows with host segments, and the HIP gate for device-only multi-segment windows (`ncclInvalidUsage` for a GIN-only window, no GIN registration for any other).
 2. Anvil DMA-BUF support, gate and IPC-row changes, then mixed-tag puts and gets on host-segment windows.
 3. GDA owner-fd registration and DMA-BUF support, then mixed-tag puts on host-segment windows.
 4. GDA per-segment GIN windows, its gate branch and the device-only fall-through.
@@ -199,7 +199,7 @@ Capability skips must be collective.
 
 | GIN type | RCCL on AMD | Multi-segment status |
 |---|---|---|
-| 2 | proxy over an RMA backend | per-segment MRs over IB-MSEG's RMA backend (forks 1 to 4); IB-CAST's RMA backend comes with fork 6 |
+| 2 | proxy over an RMA backend | per-segment MRs over IB-MSEG's RMA backend (forks 1 to 4); IB-CAST's RMA backend would come with fork 6, which waits on the paused fork 5 |
 | 3 | GDAKI: the internal plugin is not built on AMD; `IbCastGinIbGdaki` registers only with `RCCL_NET_IB_CAST_ENABLE_GDAKI` and `NCCL_NET=IB-CAST`, with `regMrSymDmaBuf = NULL` | out of scope |
 | 4 | GPI: device templates only, loadable as an external plugin | not an RCCL deliverable |
 | 5 | EFA GDA | not an AMD backend |
@@ -214,7 +214,7 @@ Out of scope: raising the `RCCL_IB_REG_SEG_DEFAULT` segment cap, multi-segment i
 |---|---|---|
 | Window gate | `src/rccl_dev_runtime.cc`, `src/include/rccl_common.h` | `rcclDevrGinRegistersMultiSegment` accepts Anvil, and GDA once it has per-segment windows |
 | DMA-BUF support | `src/gin/gin_plugin_anvil_sdma.cc`, `src/gin/gin_plugin_rocshmem_gda.cc` | report `NCCL_PTR_DMABUF` in the properties |
-| GDA GIN segments | `src/dev_runtime_segments.cc`, `src/dev_runtime.cc` | one GIN segment per physical segment when GDA is active |
+| GDA GIN segments | `src/dev_runtime_segments.cc`, `src/dev_runtime.cc` | one GIN segment per physical segment when GDA is active, registered through `ncclGinRegister` at each segment's offset |
 | Device-only fall-through, VA signal lookup | `src/include/nccl_device/impl/gin__funcs.h` | loop when `numSegments > 1`; find the signal's segment |
 | GDA DMA-BUF entry | `src/gin/gin_rocshmem_gda_factory.cc`, `src/gin/gin_plugin_rocshmem_gda.cc` | register with the given fd |
 | Anvil IPC rows | `src/gin/gin_plugin_anvil_sdma.cc` | no row for stride-addressed windows |

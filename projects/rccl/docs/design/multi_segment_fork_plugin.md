@@ -1,12 +1,12 @@
 # IB-MSEG: multi-segment registration in one forked plugin
 
-Instead of editing classic `net_ib` and `net_ib_cast` in place, multi-segment support goes into one separate plugin, IB-MSEG (`src/transport/net_ib_multiseg/`), a renamed copy of `net_ib` that `NCCL_MULTI_SEGMENT_REGISTER=1` selects. This note covers why the fork exists, how it is selected, what each fork changes, the copy and its rename map, the compile-twice host tests, the phases, and how the code can later move back into `net_ib` and `net_ib_cast`. Terms follow the [overview](multi_segment_overview.md#terms); the stack table is in [stack and pull requests](multi_segment_overview.md#stack-and-pull-requests).
+Multi-segment support lives in one separate plugin, IB-MSEG (`src/transport/net_ib_multiseg/`), a renamed copy of `net_ib` that `NCCL_MULTI_SEGMENT_REGISTER=1` selects. This note covers why it is a separate plugin, how it is selected, what each fork changes, the copy and its rename map, the compile-twice host tests, the phases, and how the code can later move back into `net_ib` and `net_ib_cast`. Terms follow the [overview](multi_segment_overview.md#terms); the stack table is in [stack and pull requests](multi_segment_overview.md#stack-and-pull-requests).
 
 The code paths of each fork, in execution order, are in the code walkthrough book: [fork 1](walkthrough/multi_segment_walkthrough_fork1_core.md), [fork 2](walkthrough/multi_segment_walkthrough_fork2_copy.md), [fork 3](walkthrough/multi_segment_walkthrough_fork3_p2p.md) and [fork 4](walkthrough/multi_segment_walkthrough_fork4_gin_rma.md).
 
 ## Why a fork
 
-The reviewers asked to keep multi-segment code out of production `net_ib` and `net_ib_cast`. With the fork, both stay at develop, so with the switch off nothing changes and there is no performance question for them. Inside the fork there is no compatibility machinery (capability negotiation, old-peer fallbacks) and no segmented copies of develop functions beside the originals, because the fork edits its own `ncclIbMultiSend`, flush, `iput` and `iget` in place.
+Multi-segment support changes registration, the CTS and the send path of every transfer that uses it. A separate plugin keeps `net_ib` and `net_ib_cast` at develop, so with the switch off nothing changes and their performance is unaffected. Inside the fork there is no compatibility machinery (capability negotiation, old-peer fallbacks) and no segmented copies of develop functions beside the originals, because the fork edits its own `ncclIbMultiSend`, flush, `iput` and `iget` in place.
 
 What stays is what the hardware limit forces: a ROCm DMA-BUF export covers one physical segment, so a multi-segment buffer still needs one MR and one rkey per segment, the receiver still tells the sender its per-segment layout, and a transfer still posts more than one WR. Those pieces go away only when ROCm can export one DMA-BUF over a whole VA range; then develop `net_ib` handles such buffers unchanged and the fork can be retired.
 
@@ -37,10 +37,10 @@ flowchart TD
 - `plugin/net.cc` canonicalizes `NCCL_NET` (`ROCM-IB` becomes `IB-CAST`) and keeps IB-CAST first for `IB-CAST`, or for `NCCL_NET` unset on an AINIC host (`rcclUseAinic`), but only when no external plugin is named in `NCCL_NET_PLUGIN`. Otherwise `rcclIbMsegRequested` (the switch on, or `NCCL_NET=IB-MSEG`) registers `ncclNetIbMseg`, named `IB-MSEG`, in the IB slot, and a request for `IB` (from the environment or the comm's `netName`) matches it. With an external plugin, IB-MSEG takes the internal slot even with `NCCL_NET=IB-CAST`.
 - `plugin/rma.cc` uses the same inputs. Whenever the internal net plugin is IB-CAST, IB-CAST's RMA backend leads with develop's `ncclRmaIbProxy` as the fallback, so `ROCM-IB` and AINIC autodetect use IB-CAST for both net and RMA. Otherwise `rcclIbMsegRequested` puts `IbMsegRmaIbProxy` in the IB slot. `plugin/gin.cc` is unchanged, so IB-CAST keeps its GDAKI backend; multi-segment GIN runs over the proxy backend (GIN type 2).
 - `NCCL_NET=IB-MSEG` also selects the fork without turning on multi-segment registration. It is a temporary developer selector, documented as such, and is removed without an alias at fold-back.
-- Jobs and runner configs select only by the switch, so folding the code back later changes nothing for them.
-- GDAKI is not copied. A multi-segment GIN window on a non-proxy backend keeps failing with `ncclInvalidUsage`; GDAKI support would be new kernel work (per-segment rkey lookup and slicing in the WQE builder), not a port.
+- Jobs and runner configs select only by the switch, so folding the code back later changes nothing for them. The one exception is the MI455 AINIC configs: there the IB-MSEG jobs of forks 2 to 4 also set `NCCL_NET=IB`, because without it AINIC autodetect keeps IB-CAST first. With the switch on and `NCCL_NET=IB`, AINIC uses IB-MSEG for net and RMA; with `NCCL_NET` unset it still uses IB-CAST until IB-CAST's features are in the fork.
+- GDAKI is not copied. A device-only multi-segment GIN window on a non-proxy backend keeps develop's HIP outcome (`ncclInvalidUsage` for a GIN-only window, no GIN registration otherwise); GDAKI support would be new kernel work (per-segment rkey lookup and slicing in the WQE builder), not a port.
 
-## No edits to net_ib or net_ib_cast
+## Boundary with net_ib and net_ib_cast
 
 No fork edits `src/transport/net_ib/`, `src/transport/net_ib_cast/`, or the sibling headers `net_ib_gid_inspect.h` and `net_ib_wqe_lat_inspect.h`. The fork gets their behaviour by copying and renaming, never by calling into them. Shared code outside those directories (core files, `misc/ibvwrap`, the GID helpers) may change. Each fork is checked with `git diff --stat <develop base> HEAD -- <those paths>`, which must be empty.
 
@@ -53,8 +53,8 @@ flowchart TD
  f1 --> f2["fork 2: net_ib copy"]
  f2 --> f3["fork 3: registration and P2P"]
  f3 --> f4["fork 4: RMA and GIN"]
- f4 --> f5["fork 5: IB-CAST base, planned"]
- f5 --> f6["fork 6: IB-CAST multi-segment, planned"]
+ f4 --> f5["fork 5: IB-CAST base, paused"]
+ f5 --> f6["fork 6: IB-CAST multi-segment, not started"]
  dev --> pd["PD-reference fix, standalone"]
  classDef planned fill:#fff9e0,stroke:#ffcc00,color:#1d1d1f
  class f5,f6 planned
@@ -62,12 +62,12 @@ flowchart TD
 
 | Fork | Approximate change over the parent (whole tree) |
 |---|---|
-| 1: core gate | 50 files, about +2,200 / −50 over develop |
-| 2: net_ib copy | 61 files, about +12,500 / −130 |
-| 3: registration and P2P | 64 files, about +13,300 / −130 |
-| 4: RMA and GIN | 68 files, about +9,200 / −5,200 (the compile-twice test change removes the hand-copied host tests) |
-| 5: IB-CAST base (planned) | the develop `net_ib` to `net_ib_cast` delta, a few thousand lines |
-| 6: IB-CAST multi-segment (planned) | CAST-specific multi-segment hooks |
+| 1: core gate | 51 files, about +2,200 / −50 over develop |
+| 2: net_ib copy | 62 files, about +12,900 / −120; about 10,900 of the added lines are the renamed copy |
+| 3: registration and P2P | 65 files, about +14,200 / −140, most of it tests |
+| 4: RMA and GIN | 70 files, about +10,700 / −5,200 (the compile-twice test change removes the hand-copied host tests) |
+| 5: IB-CAST base (paused) | the develop `net_ib` to `net_ib_cast` delta, a few thousand lines; no commits yet |
+| 6: IB-CAST multi-segment (not started) | CAST-specific multi-segment hooks |
 
 The AICOMRCCL-3085 PD-reference fix for IB-CAST is a standalone change from develop, outside the stack. The tests each fork adds are in the [validation plan](multi_segment_validation_plan.md#coverage-by-area).
 
@@ -87,6 +87,7 @@ The AICOMRCCL-3085 PD-reference fix for IB-CAST is a standalone change from deve
 - `src/transport/net_ib_multiseg/` is develop `net_ib` without `gdaki/`, plus the two test-hook headers, renamed as described in [the copy and the rename map](#the-copy-and-the-rename-map). Like IB-CAST, the copy is plain code that later forks edit directly.
 - `transport/net.cc` applies `IbMsegNetP2pPolicy` when the fork is the active net, as it does for `net_ib` and IB-CAST. RAS lists `IB-MSEG` as a verbs plugin.
 - `RCCL_IB_GDR_FLUSH_FLAG` works on IB-MSEG: `init.cc` and `net.cc` reach the flag through `rcclIbGdrFlushOpsFor(net)` instead of comparing with `&ncclNetIb`. While the fork is selected, the RAS live link speed stays tied to `net_ib` and the active bandwidth diagnostic does not run, as for IB-CAST.
+- The copy tracks develop `net_ib`. The latest sync brought in develop's inline GDR flush scratchpad write and the flush QP's inline room for it.
 - New `*_mseg` runner jobs rerun develop's NET-IB MPI whitebox suites on IB-MSEG.
 
 ### Fork 3: registration and P2P
@@ -98,7 +99,8 @@ The AICOMRCCL-3085 PD-reference fix for IB-CAST is a standalone change from deve
 - CTS: the receiver sends the overlapped segments in the CTS write and marks it with the layout bit, inline for up to four, otherwise as a reference the sender reads once into a cache. Single-segment receives keep the short CTS write. Each layout line carries the receive's index.
 - Memory: only a `useMultiSeg` comm pays for the multi-segment state. Each side's 128 KiB CTS FIFO becomes a 512 KiB slot array, and the sender adds the send cursor and the layout cache (about 11 KiB); a legacy comm keeps develop's FIFO on each side as a separate allocation and allocates a cursor only if it sends from a multi-segment handle.
 - Send: one WR fill builds every send, single-segment being the one-entry case; each write stays inside one local and one remote segment; a segmented send posts one slice per progress call; a partial post keeps or frees its request correctly; `isend` returns the post error.
-- Flush: one read through the MR of the segment that holds the last receive's first byte; segmented sends write the GDR flush flag.
+- Flush: one read through the MR of the segment that holds the last receive's first byte; segmented sends write the GDR flush flag. With relaxed ordering off, the scratchpad write is posted inline, as in `net_ib`.
+- Observability: each send comm counts its segmented posts, their WRs and the posts that reach a later segment (`rcclIbSegStats`); `rcclIbSendCommSegStats` reads them for tests, and a `NET/IB` TRACE line logs each segmented slice.
 - Code: `seg_*.h`, `seg_p2p.cc` and `p2p_multiseg.cc` inside the fork, with hooks in the copied files. The design is in [IB-MSEG NET/IB P2P](multi_segment_netib_wire.md).
 
 ### Fork 4: RMA and GIN
@@ -107,17 +109,30 @@ The AICOMRCCL-3085 PD-reference fix for IB-CAST is a standalone change from deve
 - Registration: one DMA-BUF MR per segment, up to `RCCL_IB_REG_SEG_DEFAULT` segments and within `max_mr` (`rcclIbMrAdmit`); every rank needs the same count, or registration fails on every rank with `ncclInvalidUsage` before the tables are gathered; ranks times segments is capped at `RCCL_RMA_SEG_TABLE_MAX_ENTRIES`. Connect allocates the per-rank registration records before the first registration collective; close frees them.
 - Data path: `iput`, `iget` and `iputSignal` split at segment boundaries and post in fixed-size rounds; the in-flight cap bounds the send queue; RMA QPs get `RCCL_RMA_SEND_QP_WRS` send WRs, and only GIN and RMA connects pass `nQpsPerDev`, which marks the comm as RMA. `iflush` reads one device segment, or nothing when every segment is host memory. A failed batch doorbell fails every request with a WR in the batch, including aggregated requests already returned.
 - Hybrid windows register host segments with the fd the core publishes by VA.
+- Observability: each RMA context counts the rounds it posts, their data WRs and the rounds that end past the first segment, at post time so the probe build of a first round is not counted; `rcclRmaIbProxySegStats` reads them per peer, and a `NET/IB/RMA` TRACE line logs where each round ends.
 - `alloc.h`'s host-segment query is `rcclCuMemIsSysmemSegment` and releases the retained handle when the properties query fails.
 - Fork-local helpers: `seg_export_mseg.h`, `seg_sym_mseg.h`, `seg_rma_mseg.h`, `seg_rma_round_mseg.h`. The design is in [GIN/RMA](multi_segment_gin_rma.md).
 - The hand-copied IB-MSEG host tests are replaced by the [compile-twice host tests](#compile-twice-host-tests).
 
 ### Fork 5: IB-CAST base (planned)
 
-Phase 3 replays the develop diff from `net_ib` to `net_ib_cast` onto the fork: multiplane, QP sharing, CTS offload, the `ionicdv` helpers, AINIC recovery, BY_INDEX ordering, and the per-WR cap `IbCastMaxPostSendBytes`. It has no multi-segment logic and can be split in two if reviewers ask. It also adds the AINIC runner entries. The replay produces `rename_map_cast.txt` (CAST symbol to IB-MSEG symbol) and keeps CAST's internal names and struct shapes where possible, so CAST's develop host tests compile against the fork through the same compile-twice module, as a second base (`BASE net_ib_cast`). Where CAST and `net_ib` disagree on a name, the fork follows CAST and the `net_ib` base lists that test as `replaced`; CAST tests the fork cannot run yet start as `lagging`.
+> [!WARNING]
+> Paused since 2026-11-24 by decision: forks 1 to 4 are stabilized on IB and AINIC first, and IB-CAST's features come later. The fork 5 branch exists with no commits and is not rebased onto the current stack.
+
+Phase 3 replays the develop diff from `net_ib` to `net_ib_cast` onto the fork: multiplane, QP sharing, CTS offload, the `ionicdv` helpers, AINIC recovery, BY_INDEX ordering, and the per-WR cap `IbCastMaxPostSendBytes`. It has no multi-segment logic and can be split in two pull requests if its size calls for it. The AINIC runner entries already exist: forks 2 to 4 each define their IB-MSEG jobs on the MI455 AINIC configs with `NCCL_NET=IB`. What fork 5 brings to AINIC is IB-CAST's features in the fork and AINIC autodetect selecting it. The replay produces `rename_map_cast.txt` (CAST symbol to IB-MSEG symbol) and keeps CAST's internal names and struct shapes where possible, so CAST's develop host tests compile against the fork through the same compile-twice module, as a second base (`BASE net_ib_cast`). Where CAST and `net_ib` disagree on a name, the fork follows CAST and the `net_ib` base lists that test as `replaced`; CAST tests the fork cannot run yet start as `lagging`.
+
+Two probes were made before the pause, and both were set aside uncommitted:
+
+- A minimal port: uDMA affinity, IB-CAST's per-WR cap and selection, adding `cast.cc` and `cast_mseg.h`, a CAST rename map, and host-test parameter fakes.
+- A replay probe on an earlier fork 4 tip. It rendered `net_ib_cast` into the IB-MSEG namespace and ran a per-file three-way merge, with the fork as ours, `net_ib` renamed at the copy point as the base, and renamed CAST as theirs. 16 CAST-only files arrive unchanged. 15 shared files merge, 8 of them with conflicts, 60 conflict hunks in total: `p2p.cc` 19, `connect.cc` 15, `gin.cc` 12, `common_mseg.h` 9, `init.cc` 2, and `connect_mseg.h`, `gin_mseg.h` and `reg.cc` 1 each. 18 fork files have no CAST counterpart and are kept (`seg_*`, `p2p_multiseg`, `wqe_lat_mon`, the GID and WQE inspect headers).
+
+Develop has changed IB-CAST files since, so the replay probe must be redone on the current fork 4 before fork 5 resumes.
 
 ### Fork 6: IB-CAST multi-segment (planned)
 
-Fork 6 adds only what is specific to IB-CAST, because the shared send, receive, flush and RMA paths are already in the fork: the BY_INDEX immediate flag, the scheduler interaction (one segmented group at a time), CAST's own CQ poll, `IbCastMaxPostSendBytes` over segmented P2P chains and multi-segment RMA rounds, and the IB-CAST RMA registration record with a magic and a version. After it, the switch selects the fork on AINIC too, with AINIC features. The requirements carried from review are in [IB-CAST P2P open items](multi_segment_netib_cast.md#open-items); the designs are [IB-CAST P2P](multi_segment_netib_cast.md) and [IB-CAST GIN/RMA](multi_segment_netib_cast_gin.md).
+Not started; it waits on fork 5. The design below is unchanged, and the old stack's IB-CAST branches stay read-only references. Fork 6 must also fix three review items found on the old IB-CAST layer: the scope must exclude AINIC inline CTS (`IbCastMultiSegScopeOk`), the receiver must not size CTS slots from scope-masked `peerCaps`, and `rcclIbCastSendResume` must bound `nreqs`.
+
+Fork 6 adds only what is specific to IB-CAST, because the shared send, receive, flush and RMA paths are already in the fork: the BY_INDEX immediate flag, the scheduler interaction (one segmented group at a time), CAST's own CQ poll, `IbCastMaxPostSendBytes` over segmented P2P chains and multi-segment RMA rounds, and the IB-CAST RMA registration record with a magic and a version. After it, the switch selects the fork on AINIC with AINIC features, also when `NCCL_NET` is unset and AINIC autodetect chooses the plugin. The requirements carried from review are in [IB-CAST P2P open items](multi_segment_netib_cast.md#open-items); the designs are [IB-CAST P2P](multi_segment_netib_cast.md) and [IB-CAST GIN/RMA](multi_segment_netib_cast_gin.md).
 
 ## The copy and the rename map
 
@@ -139,7 +154,7 @@ The IB-MSEG host binaries compile the `net_ib` host test files and fakes a secon
 - A self-check suite in each binary (`NetIbMsegBaseTestExclusions`) fails on a stale or wrong exclusion, including a `replaced` entry with no fork test.
 - The IB-MSEG configuration is `test/host/transport/net_ib_multiseg/host_tests.cmake`, included from `transport/host_tests.cmake`, with four binaries (`rccl-UnitTestsMicroTransportNetIbMseg{Connect,Gin,P2p,Reg}`) on `BASE net_ib`. They include the `net_ib` host test files `connect-test.cc`, `gin-test.cc`, `net-ib-p2p-test.cc` and `reg-test.cc` (180 tests together). The P2P binary excludes thirteen tests as `replaced` (the fork's `ctsFifo` and the receiver's `remCtsFifo.elems` are pointers, so these base tests would dereference a NULL legacy FIFO) and one as `diverged` (`DISABLED_Iflush_ReadPostFailurePropagatesError`: the fork chains the flush write and read in one post), and the registration binary re-enables `DISABLED_RegMr_MultiDeviceFailureUnwindsEarlierRegistrations`.
 - Developer rule: when a `net_ib` change breaks an IB-MSEG host test, add that test to its binary's `EXCLUDE_BASE_TESTS` as `lagging` with a reason; the fork owner ports the change and removes the entry. There is no Python step for developers.
-- Fork 5 adds `BASE net_ib_cast` as one more base block in the same file, with its own seam list and exclusions.
+- Fork 5, when it resumes, adds `BASE net_ib_cast` as one more base block in the same file, with its own seam list and exclusions.
 
 ```mermaid
 %% caption: How one net_ib host test runs against the fork
@@ -161,7 +176,7 @@ flowchart TD
 flowchart TD
  p0["P0: split the PD fix"] --> p1["P1: forks 1 to 4"]
  p1 --> p2["P2: validation and performance"]
- p2 --> p3["P3: IB-CAST into the fork, forks 5 and 6"]
+ p2 --> p3["P3: IB-CAST into the fork, forks 5 and 6, paused"]
  p3 --> p4["P4: refactor, fold back or retire"]
  classDef done fill:#e8f8ec,stroke:#34c759,color:#1d1d1f
  classDef planned fill:#fff9e0,stroke:#ffcc00,color:#1d1d1f
@@ -171,8 +186,8 @@ flowchart TD
 
 - **P0.** Split the AICOMRCCL-3085 PD-reference fix into a standalone change.
 - **P1.** Forks 1 to 4: copy, rename, select, add per-segment registration, P2P, RMA and GIN to the fork in place, keep in the core only the segment walk and gate, the DMA-BUF path in `net.cc`, the owner fd table and `rccl_mseg.h`/`rccl_mseg_rma.h`, give the fork its own host tests, and make the jobs set the switch.
-- **P2.** Validation on ROCm 7.0.2.x and 10.3 on Mellanox IB (MI300X), Thor2 (MI355X) and AINIC, single and multi node, plus the host tests including the gate-off build. Performance: switch off identical to develop; switch on with single-segment buffers at parity with develop `net_ib`; switch on with multi-segment buffers against develop staging at 2, 17, 64, 256 and 1024 segments; registration time and MR count. AINIC runs as plain RoCE until P3.
-- **P3.** IB-CAST into the fork (forks 5 and 6, see the [consolidation plan](#consolidation-plan)).
+- **P2.** Validation on ROCm 7.0.2.x and 10.3 on Mellanox IB (MI300X), Thor2 (MI355X) and AINIC, single and multi node, plus the host tests including the gate-off build. Performance: switch off identical to develop; switch on with single-segment buffers at parity with develop `net_ib`; switch on with multi-segment buffers against develop staging at 2, 17, 64, 256 and 1024 segments; registration time and MR count. Forks 1 to 4 and a tests-only change on top are on develop as of 2026-11-25, validated on two MI355X Thor2 nodes (242 of 242 units on ROCm 7.0.2.1 and 10.3). Until P3, AINIC runs IB-MSEG with classic features through `NCCL_NET=IB`; the AINIC jobs are defined but have not run on AINIC hardware yet.
+- **P3.** IB-CAST into the fork (forks 5 and 6, see the [consolidation plan](#consolidation-plan)). Paused until forks 1 to 4 are stable on IB and AINIC.
 - **P4.** Reduce the remaining protocol surface, merge upstream changes, and decide between keeping the fork, folding it back, or retiring it once ROCm DMA-BUF range export exists. The ROCm request should be filed in parallel with P1, because it is the only change that removes the per-segment design.
 
 ## Consolidation plan

@@ -119,11 +119,11 @@ Each hook, where it is called from and the order the code runs in are in the [fo
 
 ### Send progress
 
-Every IB-MSEG send goes through `rcclIbFillSendWrs`, called from `IbMsegMultiSend`. Per QP, `IbMsegMultiSend` computes develop's chunk and stores `[off, end)` per receive in `comm->sendCursor` (`rcclIbSendCursor`, `common_mseg.h`), allocated with the CTS slots; a legacy-CTS comm allocates it on its first segmented send and otherwise keeps the offsets on the stack. Each fill moves at most one slice per receive, a slice being the run inside one local and one remote segment (`rcclIbSegCursor`, `rcclIbSegAppendWrs`). The post that finishes every receive ends with develop's tail (sizes write, flush flag write, or the last data WR with the immediate); an earlier post signals its last write instead. While a QP's slice is outstanding the requests hold one extra event on that device (`rcclIbSendHoldSlice`); `rcclIbSendSliceDone` clears it on completion and `rcclIbSendProgress` posts the next slice. Slots post in FIFO order, so a later slot waits (`sendCursor->queued`) until the active one has posted its last slice.
+Every IB-MSEG send goes through `rcclIbFillSendWrs`, called from `IbMsegMultiSend`. Per QP, `IbMsegMultiSend` computes develop's chunk and stores `[off, end)` per receive in `comm->sendCursor` (`rcclIbSendCursor`, `common_mseg.h`), allocated with the CTS slots; a legacy-CTS comm allocates it on its first segmented send and otherwise keeps the offsets on the stack. Each fill moves at most one slice per receive, a slice being the run inside one local and one remote segment (`rcclIbSegCursor` over the `seg` table each side's `rcclIbSendSegTable` embeds, filled by `rcclIbSegFillWr`). The post that finishes every receive ends with develop's tail (sizes write, flush flag write, or the last data WR with the immediate); an earlier post signals its last write instead. While a QP's slice is outstanding the requests hold one extra event on that device (`rcclIbSendHoldSlice`); `rcclIbSendSliceDone` clears it on completion and `rcclIbSendProgress` posts the next slice. Slots post in FIFO order, so a later slot waits (`sendCursor->queued`) until the active one has posted its last slice.
 
 A send whose buffers are one segment on both sides finishes in the first fill, as on develop. A zero-length receive posts one 0-byte write in the first fill; its rkey comes from `IbMsegSegmentForZeroLengthOffset`. A sizes WR is added when `nreqs > 1`, or when the send is split and the receiver does not match by index, so a single segmented receive reports its full size.
 
-**Failed posts.** If a slice post fails, the held event of that QP is dropped, so the request fails through `Test()` instead of waiting for a completion that will not come. `NetIbSegmentedSendPrefixTests` covers these cases on the host.
+**Failed posts.** If a slice post fails, the held event of that QP is dropped, so the request fails through `Test()` instead of waiting for a completion that will not come. The first post and a resumed post share `rcclIbPostSendWrs` (`p2p.cc`), which also drops one event per request for each later QP that will not post (and for this QP when it accepted nothing), then marks the comm fatal. `NetIbSegmentedSendPrefixTests` covers these cases on the host.
 
 ### Independent offsets
 
@@ -172,7 +172,11 @@ sequenceDiagram
 
 ## Flush
 
-`IbMsegIflush` posts one read per device, using the last non-empty receive. With the scratchpad flush on (`RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING=1`, the default) it chains develop's scratchpad write and read. Otherwise it reads the first byte of that receive with the rkey of the segment holding that byte (`IbMsegMrForRange`, which returns `mrs[dev]` for a single-segment handle). One read fences the device, so the flush QP keeps develop's `2 * NET_IB_MAX_REQUESTS` entries. The flush QP is a loopback QP, created with `devIndex` and `remDevIdx` set to the receive device.
+`IbMsegIflush` posts one read per device, using the last non-empty receive. With the scratchpad flush on (`RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING=1`, the default) it chains develop's scratchpad write and read; the write is posted inline, and the flush QP reserves inline room for the flush word, as in develop. Otherwise it reads the first byte of that receive with the rkey of the segment holding that byte (`IbMsegMrForRange`, which returns `mrs[dev]` for a single-segment handle). One read fences the device, so the flush QP keeps develop's `2 * NET_IB_MAX_REQUESTS` entries. The flush QP is a loopback QP, created with `devIndex` and `remDevIdx` set to the receive device.
+
+## Observability
+
+Each send comm counts its segmented posts, their data WRs and the posts in which a slice reached a segment past the first on either side (`rcclIbSegStats` in `segStats`, relaxed atomic adds). The counters exist so tests can prove a transfer took the segmented path rather than only checking its bytes; `rcclIbSendCommSegStats` reads them. With `NCCL_DEBUG=TRACE`, every slice logs its offset, length and local and remote segment (`NET/IB: segmented send slice`).
 
 ## Queue sizing
 

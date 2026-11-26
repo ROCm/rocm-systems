@@ -1,7 +1,7 @@
 # Multi-segment: current contract
 
 > [!NOTE]
-> This note describes the IB-MSEG fork stack through fork 4. Multi-segment support lives in the IB-MSEG plugin (`src/transport/net_ib_multiseg/`) and in RCCL-marked core gates; classic `net_ib` and `net_ib_cast` stay at develop. IB-CAST support is planned for fork 6; see [the fork plugin](multi_segment_fork_plugin.md). File names below are relative to `src/`, and plugin files without a directory are in `transport/net_ib_multiseg/`.
+> This note describes the IB-MSEG fork stack through fork 4. Multi-segment support lives in the IB-MSEG plugin (`src/transport/net_ib_multiseg/`) and in RCCL-marked core gates; classic `net_ib` and `net_ib_cast` stay at develop. On AINIC, the switch with `NCCL_NET=IB` selects IB-MSEG for net and RMA; with `NCCL_NET` unset, AINIC autodetect still selects IB-CAST. IB-CAST support waits on fork 5 (paused) and fork 6 (not started); see [the fork plugin](multi_segment_fork_plugin.md). File names below are relative to `src/`, and plugin files without a directory are in `transport/net_ib_multiseg/`.
 
 This doc lists the rules the multi-segment code must keep, its limits, and what the switch does when it is off. It is the checklist for reviewing a change, not a design explanation; each item links to the doc that explains it. Terms are defined in the [overview](multi_segment_overview.md#terms). The review history behind these rules is in [review feedback](multi_segment_review_feedback.md).
 
@@ -24,7 +24,7 @@ This doc lists the rules the multi-segment code must keep, its limits, and what 
 
 ### Data path
 
-13. **Split at local and remote boundaries independently.** Local and remote request bases can start at different offsets in their registrations, so the splitters keep two tables in one `rcclIbSegCursor` (`seg_mseg.h`) and emit slices with `rcclIbSegAppendWrs` (`seg_wr_mseg.h`). P2P (`p2p_multiseg.cc`) and RMA (`gin.cc`) use the same cursor. See [the offset bug](multi_segment_netib_wire.md#independent-offsets).
+13. **Split at local and remote boundaries independently.** Local and remote request bases can start at different offsets in their registrations, so the splitters keep two `rcclIbSegTable`s in one `rcclIbSegCursor` (`seg_mseg.h`) and fill each slice with `rcclIbSegFillWr` (`seg_wr_mseg.h`). P2P (`p2p_multiseg.cc`) and RMA (`gin.cc`) use the same table type, cursor and fill; RMA chains its slices with fork 4's `rcclIbSegAppendWrs`. See [the offset bug](multi_segment_netib_wire.md#independent-offsets).
 14. **Slices are at most `RCCL_IB_SGE_MAX_BYTES` (`UINT32_MAX`) bytes**, because `ibv_sge::length` is 32 bits.
 15. **Only the final WR of a chain or round is signaled** (`rcclRmaWrIsSignaled`, `seg_rma_mseg.h`). `IPutSignal` signals only its trailing atomic, which must be 8-byte aligned and inside one segment (`rcclRmaSignalOffsetValid`).
 16. **RMA posts in rounds.** An operation posts at most `RCCL_RMA_MAX_DATA_WRS` (64) data WRs per round, plus the atomic on the last round of `IPutSignal` (`RCCL_RMA_MAX_SIGNAL_WRS` = 65), and its next round once the plugin reports the previous one done. Operations queue per peer in request order (`seg_rma_round_mseg.h`), so a later operation never passes an earlier one. See [rounds](multi_segment_gin_rma.md#rounds).
@@ -49,7 +49,7 @@ This doc lists the rules the multi-segment code must keep, its limits, and what 
 29. **Mixed host and device windows fail closed.** With sysmem-handle reuse on, a host segment on one LSA rank and a device segment at the same index on another is rejected. On the non-symmetric path every LSA rank allgathers a fixed-size kind array before any IPC exchange (`rcclDevrProbeNonSymWindow`).
 30. **Imported host segments register from an exporter's DMA-BUF fd**, because the importer cannot re-export them. A rank that exported its own host fd registers that fd. Another rank borrows an exporter's fd only when exactly one LSA rank reports `hostExportable` for that segment (`dev_runtime.cc`), and never falls back to a non-exporter. Ranks agree on the result (`hostOwnerFdStatus`, gathered as `ownerFdStatus`) before the collective registration, so a rank-local failure fails every rank. See [host owner DMA-BUF](multi_segment_gin_rma.md#host-owner-dma-buf).
 31. **A window without an RMA registration never posts.** An RMA put on it returns `ncclInvalidUsage` (`ncclRmaProxyPutBuildOp`), and hierarchical CE falls back when either window has none (`ncclHierCeAvailable`).
-32. **Develop's plugins are untouched.** `net_ib` and `net_ib_cast` are develop code. Multi-segment code in IB-MSEG sits in its `seg_*` files and `p2p_multiseg.cc`, reached from `RCCL:`-marked hooks in the copied files; core changes are `RCCL:`-marked blocks.
+32. **Develop's plugins are unchanged.** `net_ib` and `net_ib_cast` are develop code. Multi-segment code in IB-MSEG sits in its `seg_*` files and `p2p_multiseg.cc`, reached from `RCCL:`-marked hooks in the copied files; core changes are `RCCL:`-marked blocks.
 
 ## Limits
 
@@ -90,9 +90,9 @@ The switch selects the plugin, the handle type and the data path, so it is fixed
 
 ## Open follow-ups
 
-- **Forks 5 and 6** are planned. Their IB-CAST requirements from review are listed in [IB-CAST P2P open items](multi_segment_netib_cast.md#open-items).
+- **Forks 5 and 6**: fork 5 is paused until forks 1 to 4 are stable on IB and AINIC, and fork 6 is not started. Their IB-CAST requirements from review are listed in [IB-CAST P2P open items](multi_segment_netib_cast.md#open-items).
 - **Driver off-ramp**: no predicate yet lets a driver that exports whole ranges bypass per-segment registration; the workaround stays on whenever the switch is on.
-- **Device-initiated GIN backends** (rocSHMEM GDA, Anvil SDMA): proposed in [rocSHMEM GDA and Anvil SDMA](multi_segment_gin_rocshmem_gda_and_anvil_sdma.md).
+- **Device-initiated GIN backends** (rocSHMEM GDA, Anvil SDMA): proposed in [rocSHMEM GDA and Anvil SDMA](multi_segment_gin_rocshmem_gda_and_anvil_sdma.md), not implemented; it waits on an owner decision.
 - **Test and platform gaps** (Mellanox runs, the RMA send-queue depth on Mellanox, unported tests, switch-off performance) are listed in [known gaps](multi_segment_validation_plan.md#known-gaps).
 - **Open review threads** are listed in [review feedback](multi_segment_review_feedback.md#open-items).
 

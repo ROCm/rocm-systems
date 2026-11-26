@@ -150,7 +150,7 @@ These files exist only in the fork. Design: [NET/IB P2P](multi_segment_netib_wir
 |---|---|---|
 | `seg_mseg.h` | 3 | segment table, slice and cursor |
 | `seg_reg_mseg.h` | 3 | register-all-or-unwind helper and the walk block |
-| `seg_wr_mseg.h` | 3 | appends per-segment WRs and SGEs |
+| `seg_wr_mseg.h` | 3, 4 | fills one slice's WR and SGE (fork 3); chains per-segment WRs (fork 4) |
 | `seg_p2p_mseg.h`, `seg_p2p.cc` | 3 | CTS layout prefix, layout blob, per-segment MR set, send segment tables, layout cache |
 | `p2p_multiseg_mseg.h`, `p2p_multiseg.cc` | 3 | the P2P send and receive builders |
 | `ib_multiseg_mseg.h` | 3, 4 | connect-time decision (fork 3) and the RMA entry points (fork 4) |
@@ -159,7 +159,7 @@ These files exist only in the fork. Design: [NET/IB P2P](multi_segment_netib_wir
 | `seg_rma_round_mseg.h` | 4 | RMA rounds and per-peer queues |
 | `seg_sym_mseg.h` | 4 | per-rank segment consensus and key exchange |
 
-### `seg_mseg.h`, `seg_reg_mseg.h`, `seg_wr_mseg.h` (fork 3)
+### `seg_mseg.h`, `seg_reg_mseg.h`, `seg_wr_mseg.h` (forks 3 and 4)
 
 | File | Symbol | Role |
 |---|---|---|
@@ -169,7 +169,8 @@ These files exist only in the fork. Design: [NET/IB P2P](multi_segment_netib_wir
 | `seg_reg_mseg.h` | `rcclIbSegRegOps`, `rcclIbSegRegister`, `rcclIbSegDeregister` | register every segment or unwind the ones done |
 | `seg_reg_mseg.h` | `rcclIbSegWalkBytes`, `rcclIbSegWalk`, `rcclIbSegWalkBind` | one allocation for the per-segment address, length and offset arrays |
 | `seg_reg_mseg.h` | `IbMsegRegMrDmaBufMultiSeg` (declaration) | defined in `reg.cc` |
-| `seg_wr_mseg.h` | `rcclIbSegWrIn`, `rcclIbSegAppendWrs` | split one transfer into per-segment WRs |
+| `seg_wr_mseg.h` | `rcclIbSegFillWr` | fill the WR and SGE for one slice of a local and a remote table |
+| `seg_wr_mseg.h` | `rcclIbSegWrIn`, `rcclIbSegAppendWrs` | fork 4: split one transfer into a chain of per-segment WRs through `rcclIbSegFillWr` |
 
 ### `seg_p2p_mseg.h` and `seg_p2p.cc` (fork 3)
 
@@ -183,7 +184,7 @@ These files exist only in the fork. Design: [NET/IB P2P](multi_segment_netib_wir
 | `seg_p2p_mseg.h` | `rcclIbSegLayoutRef`, `IbMsegSegLayout` | the 192-byte layout slot the receiver writes with the CTS |
 | `seg_p2p_mseg.h` | `rcclIbLayoutRkey`, `rcclIbLayoutSetRkey`, `rcclIbLayoutStamp`, `rcclIbLayoutArrived` | read, write and stamp a layout slot; detect a torn write |
 | `seg_p2p_mseg.h` | `rcclIbSegMr`, `rcclIbSegMrAt` | per-segment, per-device MR set |
-| `seg_p2p_mseg.h` | `rcclIbSendSegTable` | the sender's view of the remote segments |
+| `seg_p2p_mseg.h` | `rcclIbSendSegTable` | the sender's per-request table of one side: an embedded `rcclIbSegTable seg`, the request offset and the rkeys |
 | `seg_p2p_mseg.h` | `rcclIbLayoutState`, `rcclIbLayoutCacheEntry`, `rcclIbLayoutCache`, `rcclIbLayoutReadQp` | cache of receiver layouts the sender read by RDMA |
 | `seg_p2p.cc` | `rcclIbSegMrInit`, `rcclIbSegMrFreeArrays`, `rcclIbSegMrPublishLayout`, `rcclIbSegMrFreeLayout` | build and free the MR set and its published layout |
 | `seg_p2p.cc` | `rcclIbSegMrForRange`, `rcclIbSegLayoutFill` | MR for a range; fill a layout slot for a receive |
@@ -198,9 +199,10 @@ These files exist only in the fork. Design: [NET/IB P2P](multi_segment_netib_wir
 | `p2p_multiseg_mseg.h` | `rcclIbSendCtsRow`, `rcclIbRecvCtsRow`, `rcclIbCtsLayout` | CTS row and layout slot addressing |
 | `p2p_multiseg.cc` | `IbMsegMrForRange` | the MR covering a range on a device |
 | `p2p_multiseg.cc` | `rcclIbCtsRemoteLayout`, `IbMsegCtsRemoteMultiSeg`, `rcclIbBuildRemoteSegmentLayout` | read the receiver's layout from the CTS |
-| `p2p_multiseg.cc` | `rcclIbSegSendNextWr`, `rcclIbAppendSegmentedRequestWrs` | build per-segment write WRs for one request |
+| `p2p_multiseg.cc` | `rcclIbSegSendNextWr`, `rcclIbAppendSegmentedRequestWrs` | one cursor step and `rcclIbSegFillWr` per request per post |
 | `p2p_multiseg.cc` | `rcclIbSegSendSizesWr`, `rcclIbAppendSegmentedTailWr` | sizes write and the signaled tail |
-| `p2p_multiseg.cc` | `rcclIbFillSendWrs`, `rcclIbSendSliceDone`, `rcclIbMultiSendNeedsSegmented` | sliced send: fill, completion and the decision to segment |
+| `p2p_multiseg.cc` | `rcclIbFillSendWrs`, `rcclIbSendSliceDone`, `rcclIbMultiSendNeedsSegmented` | sliced send: fill, completion and the decision to segment; the fill counts each post in `segStats` |
+| `p2p_multiseg.cc` | `rcclIbSendCommSegStats` | test hook: reads a send comm's segmented-post counters |
 | `p2p_multiseg.cc` | `rcclIbPrepareCtsWrite` | the one-write CTS with the layout prefix |
 | `p2p_multiseg.cc` | `rcclIbIrecvCheckHandle`, `rcclIbIrecvFillLayout` | receiver: check the MR handle, fill the layout slot |
 | `p2p_multiseg.cc` | `rcclIbLayoutReadStamp`, `rcclIbLayoutReadArg`, `rcclIbLayoutReadQp` | QP and WR for a layout read |
@@ -215,6 +217,7 @@ These files exist only in the fork. Design: [NET/IB P2P](multi_segment_netib_wir
 | `rcclRmaIbProxyConnectFinish`, `rcclRmaIbProxyRegMrSym`, `rcclRmaIbProxyRegMrSymDmaBuf`, `rcclRmaIbProxyDeregMrSym` | 4 | declarations of the multi-segment RMA registration entry points in `gin.cc` |
 | `rcclRmaIbProxyIPut`, `rcclRmaIbProxyIGet`, `rcclRmaIbProxyIPutSignal`, `rcclRmaIbProxyIFlush`, `rcclRmaIbProxyTestFailed`, `rcclRmaIbProxyMrSegmentCount` | 4 | declarations of the multi-segment RMA data entry points |
 | `IbMsegUseMultiSeg` | 3 | the connect-time decision: switch on, not GIN, not resilient |
+| `rcclIbSegStats`, `rcclIbSendCommSegStats`, `rcclRmaIbProxySegStats` | 3, 4 | the segmented-post counters (posts, data WRs, posts that reach a later segment) and their test hooks for P2P (fork 3) and RMA (fork 4) |
 
 ### `seg_export_mseg.h`, `seg_sym_mseg.h` (fork 4)
 
@@ -272,6 +275,7 @@ These are edits to fork 2's copy of `net_ib` inside `transport/net_ib_multiseg/`
 | `common_mseg.h` | `IbMsegRequest` | 3 | changed | adds `send.mh`, the MR handle the segmented send reads per-segment lkeys from |
 | `common_mseg.h` | `IbMsegCtsSlot`, `NCCL_IB_CTS_FIFO_BYTES`, `NCCL_IB_CTS_SLOTS_BYTES` | 3 | new | combined CTS entry and layout slot |
 | `common_mseg.h` | `rcclIbSendCursor` | 3 | new | the slot whose segmented send is still posting |
+| `common_mseg.h` | `IbMsegSendComm::segStats`, `rcclIbSegStatsAdd`, `rcclIbSegStatsRead` | 3 | new | per-comm segmented-post counters, updated with relaxed atomic adds |
 | `common_mseg.h` | `IbMsegMrHandle` | 3 | changed | adds `seg`, the per-segment MR set |
 | `common_mseg.h` | `IbMsegNetCommBase` | 4 | changed | adds `isRma` |
 | `common_mseg.h` | `rcclIbMrAdmit` (declaration) | 3 | new | defined in `reg.cc` |
@@ -301,6 +305,7 @@ These are edits to fork 2's copy of `net_ib` inside `transport/net_ib_multiseg/`
 | Symbol | Fork | Kind | Role |
 |---|---|---|---|
 | `rcclIbSendHoldSlice` | 3 | new | holds one more event per request until a slice's signaled write completes |
+| `rcclIbPostSendWrs` | 3 | new | shared post for `IbMsegMultiSend` and `rcclIbSendResume`: holds, stamps and posts; on failure drops the events of QPs that will not complete and marks the comm fatal |
 | `IbMsegMultiSend` | 3 | changed | segmented send through `rcclIbFillSendWrs`; uses the validated `nreqs`; allocates the cursor on a legacy-CTS comm's first segmented send |
 | `rcclIbSendResume`, `rcclIbSendProgress` | 3 | new | resume a partly posted segmented send |
 | `IbMsegIsend` | 3 | changed | strips the layout bit; waits for layouts |
@@ -327,6 +332,7 @@ These are edits to fork 2's copy of `net_ib` inside `transport/net_ib_multiseg/`
 | `rcclRmaBuildSegmentedWrs`, `rcclRmaPostWrs` | 4 | new | split an op at segment boundaries and post it |
 | `rcclRmaIbProxyQueueWrs`, `rcclRmaFinishPostedRequest`, `rcclRmaIbProxyStartRequest`, `rcclRmaIbProxyQueueRequest` | 4 | new | request bookkeeping for a partial post |
 | `rcclRmaIbRoundBuild`, `rcclRmaIbRoundOutstanding`, `rcclRmaIbRoundPost`, `rcclRmaIbRoundRetire`, `rcclRmaIbRoundFailed`, `rcclRmaIbRoundHooks` | 4 | new | the round hooks for `seg_rma_round_mseg.h` |
+| `rcclRmaIbNoteRound`, `rcclRmaIbProxySegStats` | 4 | new | counts a fully posted round in the peer comm's `segStats` and logs its end at TRACE; the test hook reads one context and peer |
 | `rcclRmaIbProxyQueueOf`, `rcclRmaIbProxyPeerBusy`, `rcclRmaIbProxyPostChain`, `rcclRmaIbProxyEnqueue`, `rcclRmaIbProxySubmit` | 4 | new | per-peer ordering: post now or queue behind earlier rounds |
 | `rcclRmaDeregOneSegment`, `rcclRmaIbProxySegMrHandleFree`, `rcclRmaSegRegCtx`, `rcclRmaRegOneSegment`, `rcclRmaRegAllGather` | 4 | new | per-segment register, unwind and the consensus all-gather |
 | `rcclRmaIbProxyConnectFinish` | 4 | new | allocates the per-rank registration records |

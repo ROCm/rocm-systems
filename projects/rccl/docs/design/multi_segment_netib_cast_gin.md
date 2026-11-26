@@ -1,7 +1,7 @@
 # IB-CAST GIN/RMA on IB-MSEG: fork 6 design
 
 > [!NOTE]
-> Planned, fork 6 ("IB-CAST on IB-MSEG"). See [the fork plugin](multi_segment_fork_plugin.md#fork-6-ib-cast-multi-segment-planned).
+> Planned, fork 6 ("IB-CAST on IB-MSEG"), not started. It waits on fork 5, which is paused while forks 1 to 4 are stabilized on IB and AINIC. Until then, AINIC runs GIN/RMA multi-segment on IB-MSEG's classic RMA backend when `NCCL_NET=IB` is set. See [the fork plugin](multi_segment_fork_plugin.md#fork-6-ib-cast-multi-segment-planned).
 
 IB-CAST RMA multi-segment is not added to develop's `IbCastRmaIbProxy` again. IB-MSEG first takes develop's `net_ib` to `net_ib_cast` differences in [fork 5](multi_segment_fork_plugin.md#fork-5-ib-cast-base-planned), which brings CAST's RMA proxy behavior (per-peer QPs, the per-WR cap `IbCastMaxPostSendBytes` with develop's `IbCastPostDataChunks`, AINIC recovery) into the fork. Fork 6 then adds only what is specific to IB-CAST on top of the fork's RMA path from [fork 4](multi_segment_fork_plugin.md#fork-4-rma-and-gin): one MR per segment, the shared consensus exchange, the shared segment cursor and RMA rounds. Read [GIN/RMA](multi_segment_gin_rma.md) first for that shared design. This doc states what fork 6 must add: a versioned registration record with physical device numbers, rkey lookup by physical device, the per-WR cap over rounds, error-owner propagation in CAST's CQ poll, the AINIC recovery hook, and CAST's queue depths.
 
@@ -62,7 +62,7 @@ flowchart TD
 
 Operations go through fork 4's rounds. Fork 6 must keep fork 4's round hooks and change only the build and post steps:
 
-- **Build.** The build hook emits slices with the shared `rcclIbSegAppendWrs` (`seg_wr_mseg.h`), looks up device slots and keys by physical device, then splits any slice above `IbCastMaxPostSendBytes`. A round that runs out of WRs ends early and covers fewer bytes; a single chain that cannot fit is refused with `ncclInternalError`.
+- **Build.** The build hook emits slices with fork 4's `rcclIbSegAppendWrs` (`seg_wr_mseg.h`), built on the one-slice `rcclIbSegFillWr` that the P2P send shares, looks up device slots and keys by physical device, then splits any slice above `IbCastMaxPostSendBytes`. A round that runs out of WRs ends early and covers fewer bytes; a single chain that cannot fit is refused with `ncclInternalError`.
 - **IPut, IGet.** Each round posts at most `RCCL_RMA_MAX_DATA_WRS` data WRs and signals only its last WR; the request completes only after every round.
 - **IPutSignal.** The fetch-and-add on the segment holding the signal offset rides the last round.
 - **IFlush.** One loopback read of one byte of `flushSeg`, the first device segment, with the rkey of the slot holding the local device. A window that is all host memory posts nothing.

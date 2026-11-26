@@ -1,7 +1,7 @@
 # IB-CAST P2P on IB-MSEG: fork 6 design
 
 > [!NOTE]
-> Planned, fork 6 ("IB-CAST on IB-MSEG"). See [the fork plugin](multi_segment_fork_plugin.md#fork-6-ib-cast-multi-segment-planned) for where fork 6 sits in the stack.
+> Planned, fork 6 ("IB-CAST on IB-MSEG"), not started. It waits on fork 5, which is paused while forks 1 to 4 are stabilized on IB and AINIC. The design is unchanged; the old stack's IB-CAST branches stay read-only references. See [the fork plugin](multi_segment_fork_plugin.md#fork-6-ib-cast-multi-segment-planned) for where fork 6 sits in the stack.
 
 Multi-segment support for IB-CAST is not added to `net_ib_cast` again. IB-MSEG first takes develop's `net_ib` to `net_ib_cast` differences in [fork 5](multi_segment_fork_plugin.md#fork-5-ib-cast-base-planned) (multiplane, QP sharing, CTS offload, the `ionicdv` helpers, AINIC recovery, BY_INDEX and BY_ORDER matching, and the per-WR cap `IbCastMaxPostSendBytes`). Fork 6 then adds only what is specific to IB-CAST on top of the fork's shared send, receive and flush paths from [fork 3](multi_segment_fork_plugin.md#fork-3-registration-and-p2p). This doc states what fork 6 must do for P2P: the multi-segment scope, one segmented group at a time under the CAST scheduler, the BY_INDEX completion flag, the per-WR cap over segmented chains, and the requirements carried from review. IB-CAST GIN/RMA has no CTS and is covered in [IB-CAST GIN/RMA](multi_segment_netib_cast_gin.md).
 
@@ -85,7 +85,7 @@ Dependency: fork 5 should include the standalone connect and teardown fix for AI
 
 ## Requirements carried from review
 
-Internal review of the superseded IB-CAST layer found three problems that were not fixed there either. They are fork 6 requirements, together with the scope rules above; see [review feedback](multi_segment_review_feedback.md#summary).
+Internal review of the superseded IB-CAST layer found three problems that were not fixed there either: its scope check (`IbCastMultiSegScopeOk`) let AINIC inline CTS through, its receiver sized CTS slots from scope-masked `peerCaps`, and `rcclIbCastSendResume` did not bound `nreqs`. They are fork 6 requirements, together with the scope rules above; see [review feedback](multi_segment_review_feedback.md#summary).
 
 ### Open items
 
