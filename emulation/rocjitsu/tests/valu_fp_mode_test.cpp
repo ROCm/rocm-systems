@@ -21,6 +21,7 @@
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "scoped_fp_environment.h"
 #include "util/host_target.h"
 #include "util/simd_test_hooks.h"
 
@@ -5668,19 +5669,47 @@ INSTANTIATE_TEST_SUITE_P(Fp8, ValuConversionTest, testing::ValuesIn(fp8_cases())
                          });
 
 TEST(ValuFpModeHelpers, RoundingAndSignedZero) {
-  using amdgpu::fp_mode::Arithmetic;
   for (uint32_t mode = 0; mode < 4; ++mode) {
     const uint32_t expected = mode == 1 ? 0x3f800001u : 0x3f800000u;
     EXPECT_EQ(std::bit_cast<uint32_t>(
-                  amdgpu::fp_mode::arithmetic<Arithmetic::ADD>(1.0f, 0x1p-24f, 0.0f, mode, 3)),
+                  amdgpu::fp_mode::fma_f32(1.0f, 1.0f, 0x1p-24f, mode, 3, IsaFamily::Rdna2, false)),
               expected);
     EXPECT_EQ(std::bit_cast<uint32_t>(
-                  amdgpu::fp_mode::arithmetic<Arithmetic::ADD>(1.0f, -1.0f, 0.0f, mode, 3)),
+                  amdgpu::fp_mode::fma_f32(1.0f, 1.0f, -1.0f, mode, 3, IsaFamily::Rdna2, false)),
               mode == 2 ? 0x80000000u : 0u);
     EXPECT_EQ(std::bit_cast<uint32_t>(
-                  amdgpu::fp_mode::arithmetic<Arithmetic::MUL>(-0.0f, 1.0f, 0.0f, mode, 3)),
+                  amdgpu::fp_mode::fma_f32(-0.0f, 1.0f, -0.0f, mode, 3, IsaFamily::Rdna2, false)),
               0x80000000u);
   }
+}
+
+// Guest rounding must not become host rounding, including the atomic exact-zero path.
+TEST(ValuFpModeHelpers, ExplicitRoundingPreservesHostControls) {
+  ASSERT_EQ(std::fegetround(), FE_TONEAREST);
+#if RJ_HOST_ARCH_X86
+  const uint32_t controls = _mm_getcsr() & ~uint32_t(_MM_EXCEPT_MASK);
+#endif
+  const float tiny = std::bit_cast<float>(1u);
+  for (uint32_t mode = 0; mode < 4; ++mode) {
+    SCOPED_TRACE(mode);
+    EXPECT_EQ(std::bit_cast<uint32_t>(amdgpu::fp_mode::detail::add_f32(1.0f, tiny, mode)),
+              mode == 1 ? 0x3f800001u : 0x3f800000u);
+    EXPECT_EQ(std::bit_cast<uint32_t>(amdgpu::fp_mode::detail::multiply_f32(tiny, 0.5f, mode)),
+              mode == 1 ? 1u : 0u);
+    EXPECT_EQ(std::bit_cast<uint32_t>(amdgpu::fp_mode::detail::multiply_f32(
+                  std::bit_cast<float>(0x7f7fffffu), 2.0f, mode)),
+              mode <= 1 ? 0x7f800000u : 0x7f7fffffu);
+    EXPECT_EQ(std::bit_cast<uint32_t>(
+                  amdgpu::fp_mode::fma_f32(1.0f, 1.0f, -1.0f, mode, 3, IsaFamily::Rdna2, false)),
+              mode == 2 ? 0x80000000u : 0u);
+    EXPECT_EQ(std::fegetround(), FE_TONEAREST);
+  }
+  EXPECT_EQ(amdgpu::fp_mode::atomic_add_packed_16(0x3f803f80u, 0xbf80bf80u, true, 3), 0u);
+  EXPECT_EQ(amdgpu::fp_mode::atomic_add_packed_16(0x80008000u, 0x80008000u, true, 3), 0x80008000u);
+#if RJ_HOST_ARCH_X86
+  // Ordinary arithmetic is allowed to raise sticky flags; compare controls only.
+  EXPECT_EQ(_mm_getcsr() & ~uint32_t(_MM_EXCEPT_MASK), controls);
+#endif
 }
 
 TEST(ValuFpModeHelpers, MixedF16FmaExactZeroSigns) {
@@ -5707,7 +5736,7 @@ TEST(ValuFpModeHelpers, MixedF16FmaExactZeroSigns) {
             if (swap) {
               std::swap(a, b);
             }
-            amdgpu::fp_mode::ScopedEnvironment environment(0);
+            rocjitsu::ScopedDefaultFpEnvironment environment;
             const uint16_t actual = amdgpu::fp_mode::detail::fma_f32_to_f16_nearest_environment(
                 std::bit_cast<float>(a), std::bit_cast<float>(b), std::bit_cast<float>(test.c),
                 mode, clamp, false, false);
@@ -5729,7 +5758,7 @@ TEST(ValuFpModeHelpers, MixedF16FmaCancellationAcrossF32Range) {
   }};
   for (const auto &test : cases) {
     for (uint32_t mode = 0; mode < 4; ++mode) {
-      amdgpu::fp_mode::ScopedEnvironment environment(0);
+      rocjitsu::ScopedDefaultFpEnvironment environment;
       EXPECT_EQ(amdgpu::fp_mode::detail::fma_f32_to_f16_nearest_environment(
                     std::bit_cast<float>(test[0]), std::bit_cast<float>(test[1]),
                     std::bit_cast<float>(test[2]), mode, false, false, false),
@@ -5739,7 +5768,7 @@ TEST(ValuFpModeHelpers, MixedF16FmaCancellationAcrossF32Range) {
   // These products are far below F16 range, but are nonzero F64 values. A
   // sign-only repair must not turn directed underflow into exact cancellation.
   for (uint32_t mode = 0; mode < 4; ++mode) {
-    amdgpu::fp_mode::ScopedEnvironment environment(0);
+    rocjitsu::ScopedDefaultFpEnvironment environment;
     EXPECT_EQ(
         amdgpu::fp_mode::detail::fma_f32_to_f16_nearest_environment(
             std::bit_cast<float>(1u), std::bit_cast<float>(1u), 0.0f, mode, false, false, false),
@@ -5752,12 +5781,11 @@ TEST(ValuFpModeHelpers, MixedF16FmaCancellationAcrossF32Range) {
 }
 
 TEST(ValuFpModeHelpers, FusedResultAndOutputFlush) {
-  using amdgpu::fp_mode::Arithmetic;
-  EXPECT_EQ(std::bit_cast<uint32_t>(amdgpu::fp_mode::arithmetic<Arithmetic::FMA>(
-                0x1.000002p0f, 0x1.fffffcp-1f, -1.0f, 0, 3)),
+  EXPECT_EQ(std::bit_cast<uint32_t>(amdgpu::fp_mode::fma_f32(0x1.000002p0f, 0x1.fffffcp-1f, -1.0f,
+                                                             0, 3, IsaFamily::Rdna2, false)),
             0xa8800000u);
   EXPECT_EQ(std::bit_cast<uint32_t>(
-                amdgpu::fp_mode::arithmetic<Arithmetic::MUL>(-0x1p-126f, 0.5f, 0.0f, 0, 1)),
+                amdgpu::fp_mode::fma_f32(-0x1p-126f, 0.5f, -0.0f, 0, 1, IsaFamily::Rdna2, false)),
             0x80000000u);
 }
 

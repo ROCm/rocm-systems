@@ -158,6 +158,19 @@ Foo foo = static_cast<Foo>(bar); // OK but could use auto instead to avoid repet
 - Do not add `try`/`catch` except at a boundary that must translate an error
   (e.g. the C API layer). Assume code is not exception-safe unless documented.
 
+## Host floating-point environment
+
+Production rocjitsu code assumes the host's default floating-point environment:
+nearest-even rounding, denormals preserved, and exceptions masked. It never
+explicitly changes rounding, denormal controls, exception masks or sticky flags.
+Ordinary arithmetic may raise sticky flags. Guest MODE settings are implemented
+in arithmetic and result bits, not by changing the host environment.
+
+This contract applies to all CPU execution paths, including graphics and memory
+atomics, which remain outside rj-arith. Saving/restoring the environment around
+compliant code is unnecessary. Tests may change it to establish a reference or
+check the contract.
+
 ## Formatting
 
 - The repo uses pre-commit hooks : clang-format (C++), black (Python), and
