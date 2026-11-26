@@ -196,6 +196,28 @@ TEST(HostHierAllReduce, NeedsChildComms)
               rcclHostHierAllReduce(nullptr, nullptr, 1024, ncclFloat32, ncclSum, mock.get(), nullptr));
 }
 
+TEST(HostHierLayout, ChildrenListsTheChildCommsThatExist)
+{
+    HostHierMockComm mock(blockHosts(2, 8), 0);
+    ncclComm_t       children[2] = {};
+    EXPECT_EQ(0, rcclHostHierChildren(mock.get(), children)) << "before the layout probe";
+    ASSERT_NE(nullptr, rcclHostHierGetLayout(mock.get()));
+    EXPECT_EQ(0, rcclHostHierChildren(mock.get(), children)) << "before the split";
+
+    // Stand-ins for the split comms; cleared before teardown, which would release them.
+    auto intra = std::make_unique<ncclComm>();
+    auto inter = std::make_unique<ncclComm>();
+    mock.comm.hostHier->intra = intra.get();
+    EXPECT_EQ(1, rcclHostHierChildren(mock.get(), children)) << "one host: no inter-host comm";
+    EXPECT_EQ(intra.get(), children[0]);
+    mock.comm.hostHier->inter = inter.get();
+    ASSERT_EQ(2, rcclHostHierChildren(mock.get(), children));
+    EXPECT_EQ(intra.get(), children[0]);
+    EXPECT_EQ(inter.get(), children[1]);
+    mock.comm.hostHier->intra = nullptr;
+    mock.comm.hostHier->inter = nullptr;
+}
+
 TEST(HostHierAllReduce, AutoWindowEdges)
 {
     EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(2, kMiB));

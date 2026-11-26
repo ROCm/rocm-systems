@@ -216,6 +216,15 @@ exit:
   return res;
 }
 
+int rcclHostHierChildren(const struct ncclComm* comm, ncclComm_t children[2]) {
+  const struct rcclHostHier* h = comm != nullptr ? comm->hostHier : nullptr;
+  if (h == nullptr) return 0;
+  int n = 0;
+  if (h->intra != nullptr) children[n++] = h->intra;
+  if (h->inter != nullptr) children[n++] = h->inter;
+  return n;
+}
+
 bool rcclHostHierAllReduceAutoWindow(int nHosts, size_t bytes) {
   constexpr size_t MiB = size_t{1} << 20;
   switch (nHosts) {

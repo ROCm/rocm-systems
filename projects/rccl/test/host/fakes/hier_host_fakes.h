@@ -27,5 +27,7 @@ extern std::function<ncclResult_t(const void*, void*, size_t, ncclDataType_t, nc
 // Default clears comm->hostHier and succeeds, which is what every comm without
 // child comms sees in commFree.
 extern std::function<ncclResult_t(ncclComm*)> g_hostHierTeardown;
+// Default reports no child comms, so setCommAbortFlags sets only the comm's own flags.
+extern std::function<int(const ncclComm*, ncclComm_t*)> g_hostHierChildren;
 
 #endif  // RCCL_TEST_HOST_HIER_HOST_FAKES_H_
