@@ -2924,7 +2924,7 @@ current limits.</p>
 <ul>
 <li>Multiple queued <code>InstrumentationPoint</code>s per <code>patch()</code> call are supported; sites sharing the same <code>(probe_obj, probe_symbol)</code> reuse one copied probe body, and a site whose declared argument count, argument sources, or mask policy disagrees with the first declaration of that probe is rejected. All-or-nothing: any per-site failure fails the whole patch.</li>
 <li>Single <code>.text</code> section (multi-text is fatal).</li>
-<li><code>ReplaceWithInst</code> omits one complete 4/8/12-byte source instruction and executes an independently sized replacement sequence in its trampoline, including empty deletion. <code>BeforeInst</code> relocates an ordinary anchor. Callable <code>AfterInst</code> relocates the same supported anchors and observes their resulting state; callable sites follow the <a href="#key-design-constraint">admission contract</a>. Callable <code>KernelEntry</code> runs once through the descriptor stub and composes before a before-site on the original entry. It leaves that entry instruction in place, so it does not impose the ordinary 4/8-byte relocation limit. Callable <code>KernelExit</code> runs before <code>s_endpgm</code> without a return branch. Other kinds are rejected.</li>
+<li><code>ReplaceWithInst</code> omits one complete 4/8/12-byte source instruction and executes an independently sized replacement sequence in its trampoline, including empty deletion. <code>BeforeInst</code> relocates an ordinary anchor. Callable <code>AfterInst</code> relocates the same supported anchors and observes their resulting state; callable sites follow the <a href="#key-design-constraint">admission contract</a>. Callable <code>KernelEntry</code> runs once through the descriptor stub and composes before a before-site on the original entry. The stub returns to the original entry instruction in place. Callable <code>KernelExit</code> runs before <code>s_endpgm</code> without a return branch. Other kinds are rejected.</li>
 <li>Replacement and observation requests share a batch. A replacement can carry its callable probe directly or coalesce one same-site callable BeforeInst. Probe analysis reflects all replacements in the batch; pristine CFG/liveness cannot be reused for the changed guest program.</li>
 <li>For observational points, <code>probe_obj</code> + <code>probe_symbol</code> are <strong>consumed</strong>: set both to request a probe-call trampoline, or leave both empty for the inline nop. Setting only one is fatal.</li>
 <li><code>filter_flags</code> is still a reserved milestone guardrail; a non-default value is fatal until it gains a real consumer. <code>force_full_exec</code> is consumed by callable points (see <a href="#mask-policy">Mask policy</a>); points without a probe reject it because they have no call envelope whose mask could be widened.</li>
@@ -3152,10 +3152,10 @@ For example, an MFMA result spilled by the envelope can require instruction
 spacing that the envelope's load drain does not establish. Live-after preservation
 alone does not establish readiness. The builder neither validates these
 obligations nor inserts anchor-specific hazard spacing.</p>
-<p>The emitted call-target displacement includes the relocated instruction's four
-or eight bytes only when <code>emit_original</code> is true. With the original omitted,
-both placements emit the envelope at the trampoline start and call the same
-probe body, with identical bytes and attribution offsets. <code>original_byte_offset</code>
+<p>For callable <code>AfterInst</code>, the call-target displacement accounts for the full
+<code>original_size</code> of the instruction emitted before the call envelope. With the
+original omitted, both placements emit the envelope at the trampoline start and
+call the same probe body, with identical bytes and attribution offsets. <code>original_byte_offset</code>
 then names the replacement body when present, or the return branch/end of the
 trampoline for empty deletion.
 <code>TrampolineBytes</code> reports the call envelope's offset and size separately from the
@@ -3182,7 +3182,7 @@ results.</p>
 <ul>
 <li>Encoding the forward <code>s_branch</code> that goes into the anchor slot, pointing at the trampoline's first word.</li>
 <li>Emitting the trampoline body in order: <code>before_items</code> (each an <code>InlineAsmItem</code> containing one or more pre-encoded words), then the original instruction words when <code>emit_original</code>, then <code>after_items</code>. A return <code>s_branch</code> to <code>return_target</code> follows only when <code>returns_to_kernel</code>; nonterminal replacement uses <code>anchor_offset + original_size</code>, while terminal bodies omit the return.</li>
-<li>Plan well-formedness: <code>original_size</code> is nonzero and dword-aligned, and <code>original_words.size() * sizeof(uint32_t) == original_size</code>. Original replay accepts 4/8-byte extents; an anchor splice accepts 4/8/12 bytes, with 12 allowed only when the original is omitted. Emitted branches must fit SOPP <code>simm16</code>. Source splices fill any bytes after the forward branch with NOPs.</li>
+<li>Plan well-formedness: <code>original_size</code> is nonzero and dword-aligned, and <code>original_words.size() * sizeof(uint32_t) == original_size</code>. Replay and anchor splices accept complete 4/8/12-byte instructions. Emitted branches must fit SOPP <code>simm16</code>. Source splices fill any bytes after the forward branch with NOPs.</li>
 <li>Architecture awareness — SOPP encoding format is uniform across AMDGPU but opcodes differ (e.g. <code>s_branch</code> is opcode 2 on GFX9/CDNA, opcode 32 on GFX12/RDNA4). All opcode selection goes through <code>instruction_builder.h</code> helpers.</li>
 </ul>
 <h3 id="what-it-does-not-handle">What it does NOT handle<a class="headerlink" href="#what-it-does-not-handle" title="Permanent link">&para;</a></h3>
@@ -3201,7 +3201,7 @@ results.</p>
 <p>Rules enforced:</p>
 <ul>
 <li><code>anchor_offset</code> is dword aligned.</li>
-<li><code>anchor.size()</code> is 4 or 8 and fits inside <code>text_bytes</code> (subtraction-based bounds check; resists overflow when <code>anchor_offset</code> is huge).</li>
+<li><code>anchor.size()</code> is 4, 8 or 12 and fits inside <code>text_bytes</code> (subtraction-based bounds check; resists overflow when <code>anchor_offset</code> is huge).</li>
 <li><code>anchor.raw_encoding()</code> is non-null.</li>
 <li><code>anchor</code> is not a branch / cond branch / indirect branch / indirect call / program terminator, and <code>branch_offset_bytes()</code> is <code>nullopt</code>.</li>
 <li><code>anchor.reads_pc()</code> is false: decoded ISA metadata identifies PC readers independently of their target-specific spellings. Set-PC and return-from-exception operations are also excluded by their decoded operation.</li>
@@ -3346,8 +3346,7 @@ collector checks full-text boundary coverage, ELF/section aliases, relocation
 admission, symbol endpoints, raw relative destinations and descriptor entries.
 Observation can supply its already decoded pristine index, existing patcher and
 resolved descriptor entries. Replacement/query/fork share pristine facts for
-independent mutants; both operations use local transactions. Observation's replay
-admission remains 4/8 bytes; the shared splice supports complete 4/8/12-byte extents.</p>
+independent mutants; both operations use local transactions. Both observation replay and the shared splice accept complete 4/8/12-byte extents.</p>
 <p>Replacement/query/fork are the consumers of reusable ownership. A private
 <code>SourceTextFacts</code> owns the full-text index and collected references behind
 <code>shared_ptr&lt;const ...&gt;</code>; it does not own the source ELF. Instrumentor performs a
@@ -3540,7 +3539,7 @@ usage, allocation and spill requirements.</p>
   [local cave, after the original bytes]
   @ trampoline_offset:
     s_nop 0                     &lt;-- inline-nop body (the probe-call variant is described below)
-    &lt;relocated original word(s)&gt; &lt;-- 4 or 8 bytes, same encoding as the anchor
+    &lt;relocated original word(s)&gt; &lt;-- 4, 8 or 12 bytes, same encoding as the anchor
     s_branch &lt;return&gt;           &lt;-- back to anchor_offset + original_size
 </code></pre></div>
 <p>Branch offsets are computed in SOPP <code>simm16</code> units; the trampoline must lie within <code>±32768 * 4</code> bytes of the anchor. For unusually large kernels this would require trampoline islands, which remain future work (same constraint as DBT code caves).</p>
