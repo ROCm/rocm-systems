@@ -65,14 +65,9 @@ inline constexpr std::array<AtomicTargetCase, 6> kAtomicTargetCases = {{
 
 enum class AtomicTestForm { FlatAdd, GlobalAdd, FlatCas, GlobalCas };
 
-inline std::array<uint32_t, 3> atomic_test_words(const AtomicTargetCase &fixture,
-                                                 AtomicTestForm form = AtomicTestForm::FlatAdd,
-                                                 int32_t offset = 0, bool scale = false) {
-  const bool global = form == AtomicTestForm::GlobalAdd || form == AtomicTestForm::GlobalCas;
-  const bool compare_exchange =
-      form == AtomicTestForm::FlatCas || form == AtomicTestForm::GlobalCas;
-  const uint16_t opcode =
-      compare_exchange ? rdna4::kFlatAtomicCmpswapB32Vflat : rdna4::kFlatAtomicAddU32Vflat;
+inline std::array<uint32_t, 3> atomic_opcode_test_words(const AtomicTargetCase &fixture,
+                                                        uint16_t opcode, bool global,
+                                                        int32_t offset = 0, bool scale = false) {
   const uint32_t encoded_offset = static_cast<uint32_t>(offset) & 0xffffffu;
   if (fixture.arch == IsaFamily::Cdna5) {
     if (global)
@@ -108,6 +103,17 @@ inline std::array<uint32_t, 3> atomic_test_words(const AtomicTargetCase &fixture
                                      .vsrc = 4,
                                      .vaddr = 2,
                                      .ioffset = encoded_offset});
+}
+
+inline std::array<uint32_t, 3> atomic_test_words(const AtomicTargetCase &fixture,
+                                                 AtomicTestForm form = AtomicTestForm::FlatAdd,
+                                                 int32_t offset = 0, bool scale = false) {
+  const bool global = form == AtomicTestForm::GlobalAdd || form == AtomicTestForm::GlobalCas;
+  const bool compare_exchange =
+      form == AtomicTestForm::FlatCas || form == AtomicTestForm::GlobalCas;
+  const uint16_t opcode =
+      compare_exchange ? rdna4::kFlatAtomicCmpswapB32Vflat : rdna4::kFlatAtomicAddU32Vflat;
+  return atomic_opcode_test_words(fixture, opcode, global, offset, scale);
 }
 
 inline std::vector<uint8_t> make_atomic_sequence_elf(const AtomicTargetCase &fixture,

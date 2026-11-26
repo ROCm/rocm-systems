@@ -57,6 +57,90 @@ bool flat_like_atomic(std::string_view form) {
   return form.starts_with("flat_atomic") || form.starts_with("global_atomic");
 }
 
+uint32_t flat_atomic_alignment(amdgpu::Operation operation) {
+  // Alignment follows the memory element, not CAS's two-element input or the
+  // scalar type of a packed operation. Unknown operations have no recipe.
+  switch (operation) {
+  case amdgpu::Operation::FLAT_ATOMIC_ADD_F32:
+  case amdgpu::Operation::FLAT_ATOMIC_ADD_U32:
+  case amdgpu::Operation::FLAT_ATOMIC_AND_B32:
+  case amdgpu::Operation::FLAT_ATOMIC_CMPSWAP_B32:
+  case amdgpu::Operation::FLAT_ATOMIC_COND_SUB_U32:
+  case amdgpu::Operation::FLAT_ATOMIC_DEC_U32:
+  case amdgpu::Operation::FLAT_ATOMIC_INC_U32:
+  case amdgpu::Operation::FLAT_ATOMIC_MAX_I32:
+  case amdgpu::Operation::FLAT_ATOMIC_MAX_NUM_F32:
+  case amdgpu::Operation::FLAT_ATOMIC_MAX_U32:
+  case amdgpu::Operation::FLAT_ATOMIC_MIN_I32:
+  case amdgpu::Operation::FLAT_ATOMIC_MIN_NUM_F32:
+  case amdgpu::Operation::FLAT_ATOMIC_MIN_U32:
+  case amdgpu::Operation::FLAT_ATOMIC_OR_B32:
+  case amdgpu::Operation::FLAT_ATOMIC_PK_ADD_BF16:
+  case amdgpu::Operation::FLAT_ATOMIC_PK_ADD_F16:
+  case amdgpu::Operation::FLAT_ATOMIC_SUB_CLAMP_U32:
+  case amdgpu::Operation::FLAT_ATOMIC_SUB_U32:
+  case amdgpu::Operation::FLAT_ATOMIC_SWAP_B32:
+  case amdgpu::Operation::FLAT_ATOMIC_XOR_B32:
+  case amdgpu::Operation::GLOBAL_ATOMIC_ADD_F32:
+  case amdgpu::Operation::GLOBAL_ATOMIC_ADD_U32:
+  case amdgpu::Operation::GLOBAL_ATOMIC_AND_B32:
+  case amdgpu::Operation::GLOBAL_ATOMIC_CMPSWAP_B32:
+  case amdgpu::Operation::GLOBAL_ATOMIC_COND_SUB_U32:
+  case amdgpu::Operation::GLOBAL_ATOMIC_DEC_U32:
+  case amdgpu::Operation::GLOBAL_ATOMIC_INC_U32:
+  case amdgpu::Operation::GLOBAL_ATOMIC_MAX_I32:
+  case amdgpu::Operation::GLOBAL_ATOMIC_MAX_NUM_F32:
+  case amdgpu::Operation::GLOBAL_ATOMIC_MAX_U32:
+  case amdgpu::Operation::GLOBAL_ATOMIC_MIN_I32:
+  case amdgpu::Operation::GLOBAL_ATOMIC_MIN_NUM_F32:
+  case amdgpu::Operation::GLOBAL_ATOMIC_MIN_U32:
+  case amdgpu::Operation::GLOBAL_ATOMIC_OR_B32:
+  case amdgpu::Operation::GLOBAL_ATOMIC_PK_ADD_BF16:
+  case amdgpu::Operation::GLOBAL_ATOMIC_PK_ADD_F16:
+  case amdgpu::Operation::GLOBAL_ATOMIC_SUB_CLAMP_U32:
+  case amdgpu::Operation::GLOBAL_ATOMIC_SUB_U32:
+  case amdgpu::Operation::GLOBAL_ATOMIC_SWAP_B32:
+  case amdgpu::Operation::GLOBAL_ATOMIC_XOR_B32:
+    return 4;
+  case amdgpu::Operation::FLAT_ATOMIC_ADD_F64:
+  case amdgpu::Operation::FLAT_ATOMIC_ADD_U64:
+  case amdgpu::Operation::FLAT_ATOMIC_AND_B64:
+  case amdgpu::Operation::FLAT_ATOMIC_CMPSWAP_B64:
+  case amdgpu::Operation::FLAT_ATOMIC_DEC_U64:
+  case amdgpu::Operation::FLAT_ATOMIC_INC_U64:
+  case amdgpu::Operation::FLAT_ATOMIC_MAX_I64:
+  case amdgpu::Operation::FLAT_ATOMIC_MAX_NUM_F64:
+  case amdgpu::Operation::FLAT_ATOMIC_MAX_U64:
+  case amdgpu::Operation::FLAT_ATOMIC_MIN_I64:
+  case amdgpu::Operation::FLAT_ATOMIC_MIN_NUM_F64:
+  case amdgpu::Operation::FLAT_ATOMIC_MIN_U64:
+  case amdgpu::Operation::FLAT_ATOMIC_OR_B64:
+  case amdgpu::Operation::FLAT_ATOMIC_SUB_U64:
+  case amdgpu::Operation::FLAT_ATOMIC_SWAP_B64:
+  case amdgpu::Operation::FLAT_ATOMIC_XOR_B64:
+  case amdgpu::Operation::GLOBAL_ATOMIC_ADD_F64:
+  case amdgpu::Operation::GLOBAL_ATOMIC_ADD_U64:
+  case amdgpu::Operation::GLOBAL_ATOMIC_AND_B64:
+  case amdgpu::Operation::GLOBAL_ATOMIC_CMPSWAP_B64:
+  case amdgpu::Operation::GLOBAL_ATOMIC_DEC_U64:
+  case amdgpu::Operation::GLOBAL_ATOMIC_INC_U64:
+  case amdgpu::Operation::GLOBAL_ATOMIC_MAX_I64:
+  case amdgpu::Operation::GLOBAL_ATOMIC_MAX_NUM_F64:
+  case amdgpu::Operation::GLOBAL_ATOMIC_MAX_U64:
+  case amdgpu::Operation::GLOBAL_ATOMIC_MIN_I64:
+  case amdgpu::Operation::GLOBAL_ATOMIC_MIN_NUM_F64:
+  case amdgpu::Operation::GLOBAL_ATOMIC_MIN_U64:
+  case amdgpu::Operation::GLOBAL_ATOMIC_ORDERED_ADD_B64:
+  case amdgpu::Operation::GLOBAL_ATOMIC_OR_B64:
+  case amdgpu::Operation::GLOBAL_ATOMIC_SUB_U64:
+  case amdgpu::Operation::GLOBAL_ATOMIC_SWAP_B64:
+  case amdgpu::Operation::GLOBAL_ATOMIC_XOR_B64:
+    return 8;
+  default:
+    return 0;
+  }
+}
+
 bool atomic_instruction(std::string_view form) {
   if (flat_like_atomic(form) || form.starts_with("scratch_atomic") ||
       form.starts_with("buffer_atomic") || form.starts_with("s_atomic"))
@@ -134,11 +218,15 @@ FailureOr<AtomicInventory> discover_atomic_wrong_address(const FaultMutationCont
         std::ranges::count_if(*owner_kernels, [&](const KernelDescriptorInfo &kernel) {
           return kernel.kernel_name == entry;
         });
-    if (matches != 1)
-      return reject_fault_mutation(error,
-                                   matches == 0 ? FaultMutationErrorCode::BadIdentity
-                                                : FaultMutationErrorCode::AmbiguousSelection,
-                                   "entry must match one exact kernel name");
+    if (matches == 0) {
+      std::string message = "entry must match one exact kernel name; descriptor entries:";
+      for (const KernelDescriptorInfo &kernel : *owner_kernels)
+        message += " " + kernel.kernel_name;
+      return reject_fault_mutation(error, FaultMutationErrorCode::BadIdentity, std::move(message));
+    }
+    if (matches > 1)
+      return reject_fault_mutation(error, FaultMutationErrorCode::AmbiguousSelection,
+                                   "exact entry name identifies multiple descriptors");
     const std::span<const KernelDescriptorInfo>::iterator kernel =
         std::ranges::find_if(*owner_kernels, [&](const KernelDescriptorInfo &item) {
           return item.kernel_name == entry;
@@ -224,8 +312,9 @@ FailureOr<AtomicInventory> discover_atomic_wrong_address(const FaultMutationCont
       }
       const InstructionBoundaries::Entry *boundary = facts.boundaries->find(offset);
       const bool supported =
-          modern_atomic_target(target) && flat_like_atomic(instruction.mnemonic()) && byte_offset &&
-          boundary && boundary->size == size && !boundary->clause && !boundary->clause_member;
+          modern_atomic_target(target) && flat_like_atomic(instruction.mnemonic()) &&
+          flat_atomic_alignment(instruction.amdgpu_operation()) != 0 && byte_offset && boundary &&
+          boundary->size == size && !boundary->clause && !boundary->clause_member;
       record->source_bytes.emplace(offset, std::move(original));
       record->sites.push_back({.offset = offset,
                                .instruction_size = size,
@@ -328,6 +417,15 @@ FailureOr<AtomicResult> apply_atomic_wrong_address(const FaultMutationContext &c
       original_offset != selection.site_.byte_offset)
     return reject_fault_mutation(error, FaultMutationErrorCode::BadIdentity,
                                  "stale atomic form or offset", offset);
+  const uint32_t alignment = flat_atomic_alignment(decoded.value()->amdgpu_operation());
+  if (alignment == 0)
+    return reject_fault_mutation(error, FaultMutationErrorCode::UnsupportedForm,
+                                 "selected atomic operation has no alignment recipe", offset);
+  if (*byte_delta % alignment != 0)
+    return reject_fault_mutation(error, FaultMutationErrorCode::InvalidParameters,
+                                 "atomic byte delta must preserve the selected operation's " +
+                                     std::to_string(alignment) + "-byte natural alignment",
+                                 offset);
   const int64_t replacement_offset = static_cast<int64_t>(*original_offset) + *byte_delta;
   const std::optional<std::array<uint32_t, 3>> replacement = amdgpu::replace_vmem_signed24_offset(
       context.source().target_id(), original, replacement_offset);
