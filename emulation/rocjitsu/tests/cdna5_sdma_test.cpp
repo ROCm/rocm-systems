@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
 #include <functional>
 #include <limits>
 #include <optional>
@@ -557,7 +558,8 @@ public:
                      .request_mutex = {},
                      .access_admission = std::move(admission)});
     if (!address_space_) {
-      throw std::runtime_error("cannot register the translated SDMA test address space");
+      ADD_FAILURE() << "cannot register the translated SDMA test address space";
+      std::abort();
     }
     process_.map_pages(kRingVa, ring_.data(), ring_.size() * sizeof(ring_[0]));
     process_.map_pages(kQueueStateVa, queue_state_.data(),

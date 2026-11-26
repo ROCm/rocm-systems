@@ -408,6 +408,25 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused")
 # set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pedantic")
 
+# ThreadSanitizer flags
+# Check both CMake variables and environment variables
+if(THREAD_SANITIZER OR THEROCK_SANITIZER STREQUAL "TSAN" OR
+   DEFINED ENV{THREAD_SANITIZER} OR "$ENV{THEROCK_SANITIZER}" STREQUAL "TSAN")
+  # -Wno-tsan is only needed for GCC, as clang has no -Wtsan warning
+  if(CMAKE_COMPILER_IS_GNUCXX)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=thread -g -O1 -Wno-tsan")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=thread -g -O1 -Wno-tsan")
+  else()
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=thread -g -O1")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=thread -g -O1")
+  endif()
+  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=thread")
+  message(STATUS "ThreadSanitizer (TSAN) enabled for rocrtst")
+
+  # TSAN options at runtime can be set via TSAN_OPTIONS environment variable
+  # Example: export TSAN_OPTIONS="halt_on_error=0:history_size=7:second_deadlock_stack=1"
+endif()
+
 #
 # Add compiler flags to include symbol information for debug builds
 #
@@ -703,6 +722,18 @@ if(COMPILER_HAS_ASAN AND (CMAKE_CXX_FLAGS MATCHES "-fsanitize=address" OR CMAKE_
   message(STATUS "AddressSanitizer detected - defining ROCRTST_ASAN")
 endif()
 
+# Detect ThreadSanitizer and define ROCRTST_TSAN
+# Note: CMAKE_REQUIRED_LINK_OPTIONS must be set because check_cxx_compiler_flag
+# only adds the flag during compilation, not linking. Without this, the test
+# fails with "undefined reference to __tsan_init"
+set(CMAKE_REQUIRED_LINK_OPTIONS "-fsanitize=thread")
+check_cxx_compiler_flag("-fsanitize=thread" COMPILER_HAS_TSAN)
+unset(CMAKE_REQUIRED_LINK_OPTIONS)
+if(COMPILER_HAS_TSAN AND (CMAKE_CXX_FLAGS MATCHES "-fsanitize=thread" OR CMAKE_C_FLAGS MATCHES "-fsanitize=thread"))
+  target_compile_definitions(${ROCRTST} PRIVATE ROCRTST_TSAN=1)
+  message(STATUS "ThreadSanitizer detected - defining ROCRTST_TSAN")
+endif()
+
 # Link libraries - CMake will automatically handle RPATH for imported targets
 target_link_libraries(${ROCRTST} ${ROCRTST_LIBS} ${YAML_CPP_TARGET} c stdc++ dl pthread rt)
 if(HAVE_NUMA)
@@ -739,17 +770,17 @@ add_custom_target(rocrtst_links ALL DEPENDS ${ROCRTST_LINKS_LIST} )
 # This works for SHARED IMPORTED targets (numa) found via pkg-config
 set_target_properties(${ROCRTST} PROPERTIES
   LINK_FLAGS "-Wl,--enable-new-dtags"
-  INSTALL_RPATH "$ORIGIN/lib;$ORIGIN/../rocm_sysdeps/lib;$ORIGIN/../../lib"
+  INSTALL_RPATH "$ORIGIN/../lib/rocrtst/lib;$ORIGIN/../lib/rocm_sysdeps/lib"
   BUILD_RPATH "$ORIGIN/../../dist/lib/rocm_sysdeps/lib;$ORIGIN/../lib/rocrtst/lib"
 )
 
 install(TARGETS ${ROCRTST}
-        ARCHIVE DESTINATION lib/rocrtst
-        LIBRARY DESTINATION lib/rocrtst
-        RUNTIME DESTINATION lib/rocrtst)
+        ARCHIVE DESTINATION lib
+        LIBRARY DESTINATION lib
+        RUNTIME DESTINATION bin)
 
 install(TARGETS intercept_queue_logic_test
-        RUNTIME DESTINATION lib/rocrtst)
+        RUNTIME DESTINATION bin)
 
 # Install platform configuration file
 install(FILES ${ROCRTST_ROOT}/config/platform_config.yaml

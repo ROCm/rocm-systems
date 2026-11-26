@@ -65,11 +65,12 @@ inline __m512i wmma_pack(__m512i total, __m512i grid, __m512i frame, bool satura
   auto keep = _mm512_test_epi32_mask(total, total);
   if constexpr (Rdna3) {
     keep = _mm512_mask_cmpgt_epi32_mask(keep, exponent, splat(0));
-  } else if (_mm512_mask_cmple_epi32_mask(keep, exponent, splat(0))) {
+  } else if (_mm512_mask_cmple_epi32_mask(keep, exponent, splat(0))) [[unlikely]] {
     // Gradual underflow requires rounding directly on the subnormal grid.
     return wmma_extend<Packed>(pack<Bf16, Rdna3, Packed>(total, grid, frame, saturate));
   }
-  bits = _mm512_maskz_ternarylogic_epi32(keep, bits, bit_xor(rounded, frame), splat(Sign), 0xf8);
+  bits = _mm512_maskz_ternarylogic_epi32(keep, bits, Rdna3 ? bit_xor(rounded, frame) : rounded,
+                                         splat(Sign), 0xf8);
   if constexpr (Packed) {
     bits = signed_shift_right(bits, 16);
   }
@@ -100,8 +101,10 @@ template <bool Bf16, bool Rdna3> inline WmmaFactor wmma_factor(__m512i bits, int
   auto grid = _mm512_mask_mov_epi32(splat(gfx12_dot_detail::kEmptyExponent),
                                     _mm512_test_epi32_mask(units, units),
                                     sub(maximum(exponent, splat(1)), splat(Bias + 12 - grid_bias)));
-  auto sign = signed_shift_right(shift_left(bits, 16), 31);
-  if constexpr (!Rdna3) {
+  __m512i sign = splat(0);
+  if constexpr (Rdna3) {
+    sign = signed_shift_right(shift_left(bits, 16), 31);
+  } else {
     units =
         _mm512_mask_sub_epi32(units, _mm512_test_epi32_mask(bits, splat(0x8000)), splat(0), units);
   }

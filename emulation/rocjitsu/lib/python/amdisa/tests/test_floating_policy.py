@@ -48,8 +48,10 @@ _EXPECTED_TRANS_SIMD_TEMPLATES = {
     'v_rsq_f16_vop3',
     'v_sqrt_f16_vop3',
 }
-# COS and the legacy EXP/LOG forms have no specialized SIMD probe.
-_SCALAR_ONLY_FLUSH_NEAREST_F32_OPS = {
+_MIGRATED_ROOT_F32 = {'V_RCP_F32', 'V_RSQ_F32', 'V_SQRT_F32'}
+
+# These forms have no specialized legacy SIMD probe.
+_NO_LEGACY_SIMD_PROBE_F32 = {
     'V_COS_F32',
     'V_EXP_LEGACY_F32',
     'V_LOG_LEGACY_F32',
@@ -208,7 +210,12 @@ def test_scalar_flush_nearest_f32_forces_omod_despite_output_keep(instruction: s
 
 @pytest.mark.parametrize(
     'instruction',
-    sorted(FLUSH_NEAREST_F32_OPS - _SCALAR_ONLY_FLUSH_NEAREST_F32_OPS),
+    sorted(
+        FLUSH_NEAREST_F32_OPS
+        - _NO_LEGACY_SIMD_PROBE_F32
+        - {'V_EXP_F32', 'V_LOG_F32'}
+        - _MIGRATED_ROOT_F32
+    ),
 )
 def test_simd_flush_nearest_f32_forces_output_flush(instruction: str):
     line = simd_probe_line(f'{instruction.lower()}_vop3')
@@ -216,8 +223,8 @@ def test_simd_flush_nearest_f32_forces_output_flush(instruction: str):
     assert 'true /* force_output_flush */' in line
 
 
-@pytest.mark.parametrize('instruction', sorted(_SCALAR_ONLY_FLUSH_NEAREST_F32_OPS))
-def test_scalar_only_flush_nearest_f32_has_no_specialized_simd_probe(instruction: str):
+@pytest.mark.parametrize('instruction', sorted(_NO_LEGACY_SIMD_PROBE_F32))
+def test_math_without_legacy_probe_has_no_specialized_simd_probe(instruction: str):
     assert simd_probe_line(f'{instruction.lower()}_vop3') is None
 
 
@@ -228,3 +235,23 @@ def test_sdwa_flush_nearest_f32_uses_matching_output_policy(instruction: str):
     assert CodeGenerator._sdwa_output_policy(sem) == (
         ', amdgpu::sdwa::OutputPolicy::FLUSH_NEAREST'
     )
+
+
+@pytest.mark.parametrize(
+    'instruction',
+    sorted(
+        _MIGRATED_ROOT_F32
+        | {
+            'V_RCP_IFLAG_F32',
+            'V_EXP_F32',
+            'V_LOG_F32',
+            'V_SIN_F32',
+            'V_COS_F32',
+            'V_EXP_LEGACY_F32',
+            'V_LOG_LEGACY_F32',
+        }
+    ),
+)
+def test_migrated_math_has_no_legacy_simd_probe(instruction: str):
+    for form in ('vop1', 'vop3'):
+        assert simd_probe_line(f'{instruction.lower()}_{form}') is None

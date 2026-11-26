@@ -5,13 +5,13 @@
 #pragma once
 #include "common/compiler.h"
 #include "common/internal.h"
+#include "mfma/f32_model.h"
 #include "mfma/layout.h"
-#include <cstring>
-#include <immintrin.h>
-
 #if defined(__AVX512F__)
 #include "mfma/x86_64/batch4.h"
 #endif
+#include <cstring>
+#include <immintrin.h>
 
 namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE {
 // Operate across output columns at the width selected for this translation unit.
@@ -117,21 +117,53 @@ void mfma_reduce_columns(uint64_t controls, float (*result)[64], const float *le
 }
 #endif
 
+// Flush each FP32 subnormal to signed zero; normal, infinite and NaN bits pass through.
+inline __m256i mfma_flush_f32x8(__m256i bits) {
+  auto zero_exponent = _mm256_cmpeq_epi32(_mm256_and_si256(bits, _mm256_set1_epi32(0x7f800000)),
+                                          _mm256_setzero_si256());
+  auto sign = _mm256_and_si256(bits, _mm256_set1_epi32(int(0x80000000U)));
+  return _mm256_blendv_epi8(bits, sign, zero_exponent);
+}
+
+// Flush one staged physical register, retaining its alignment and signed zeros.
+inline void mfma_flush_register(float *values) {
+  RJ_ARITH_UNROLL(8)
+  for (int lane = 0; lane < 64; lane += kMfmaWidth) {
+#if defined(__AVX512F__)
+    auto bits = _mm512_load_si512(values + lane);
+    auto zero_exponent = _mm512_cmpeq_epi32_mask(
+        _mm512_and_si512(bits, _mm512_set1_epi32(0x7f800000)), _mm512_setzero_si512());
+    auto sign = _mm512_and_si512(bits, _mm512_set1_epi32(int(0x80000000U)));
+    _mm512_store_si512(values + lane, _mm512_mask_mov_epi32(bits, zero_exponent, sign));
+#else
+    auto bits = _mm256_load_si256(reinterpret_cast<const __m256i *>(values + lane));
+    _mm256_store_si256(reinterpret_cast<__m256i *>(values + lane), mfma_flush_f32x8(bits));
+#endif
+  }
+}
+
 // Reduce decoded packed sources with FMA, staging all outputs to preserve overlap.
-template <int M, int K, int Batch, int PerWord>
+template <int M, int K, int Batch, int PerWord, MfmaF32Model Model = MfmaF32Model::Default>
 void mfma_reduce_simd(uint64_t controls, uint32_t *const *d, const float *left, const float *right,
-                      const uint32_t *const *c, bool clamp_overflow = false) {
+                      const uint32_t *const *c, bool clamp_overflow = false,
+                      uint64_t fp_flags = 0) {
   // Each matrix row is a contiguous slice of one physical accumulator. Stage it
   // in register order so source aliases remain valid through overflow checking.
+  constexpr int ABlockLanes = Model == MfmaF32Model::Gfx90a ? M : 0;
   constexpr int registers = M * M * Batch / 64;
   alignas(64) float result[registers][64];
   for (int reg = 0; reg < registers; ++reg) {
     std::memcpy(result[reg], c[reg], sizeof(result[reg]));
+    if constexpr (Model == MfmaF32Model::Gfx90a) {
+      if (fp_flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS) {
+        mfma_flush_register(result[reg]);
+      }
+    }
   }
 #if defined(__AVX512F__)
-  if constexpr (M == 4 && Batch == 16 && (PerWord == 1 || PerWord == 2)) {
+  if constexpr (ABlockLanes == 0 && M == 4 && Batch == 16 && (PerWord == 1 || PerWord == 2)) {
     mfma_reduce_batch4<K, PerWord>(controls, result, left, right);
-  } else if constexpr (M >= 16 && (PerWord == 1 || PerWord == 2)) {
+  } else if constexpr (ABlockLanes == 0 && M >= 16 && (PerWord == 1 || PerWord == 2)) {
     mfma_reduce_columns<M, K, Batch, PerWord>(controls, result, left, right);
   } else
 #endif
@@ -144,8 +176,8 @@ void mfma_reduce_simd(uint64_t controls, uint32_t *const *d, const float *left, 
             rows[i][k] = left[index];
             columns[k][i] = right[index];
           } else {
-            rows[i][k] = left[mfma_permute_input<PerWord>(index, controls, true)];
-            columns[k][i] = right[mfma_permute_input<PerWord>(index, controls, false)];
+            rows[i][k] = left[mfma_permute_input<PerWord, ABlockLanes>(index, controls, true)];
+            columns[k][i] = right[mfma_permute_input<PerWord, ABlockLanes>(index, controls, false)];
           }
         }
       }
@@ -185,19 +217,26 @@ void mfma_reduce_simd(uint64_t controls, uint32_t *const *d, const float *left, 
         }
       }
     }
-  if (clamp_overflow) {
-    for (int batch = 0; batch < Batch; ++batch) {
-      for (int row = 0; row < M; ++row) {
-        const auto first = mfma_output<M, Batch>(row, 0, batch);
-        for (int col = 0; col < M; ++col) {
-          result[first.reg][first.lane + col] = mfma_clamp_overflow<M, K, Batch, PerWord>(
-              result[first.reg][first.lane + col], as_float(c[first.reg][first.lane + col]), left,
-              right, row, col, batch, controls);
+  if constexpr (Model == MfmaF32Model::Default) {
+    if (clamp_overflow) {
+      for (int batch = 0; batch < Batch; ++batch) {
+        for (int row = 0; row < M; ++row) {
+          const auto first = mfma_output<M, Batch>(row, 0, batch);
+          for (int col = 0; col < M; ++col) {
+            result[first.reg][first.lane + col] = mfma_clamp_overflow<M, K, Batch, PerWord>(
+                result[first.reg][first.lane + col], as_float(c[first.reg][first.lane + col]), left,
+                right, row, col, batch, controls);
+          }
         }
       }
     }
   }
   for (int reg = 0; reg < registers; ++reg) {
+    if constexpr (Model == MfmaF32Model::Gfx90a) {
+      if (fp_flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) {
+        mfma_flush_register(result[reg]);
+      }
+    }
     std::memcpy(d[reg], result[reg], sizeof(result[reg]));
   }
 }

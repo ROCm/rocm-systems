@@ -887,6 +887,9 @@ typedef enum hsa_amd_agent_info_s {
   HSA_AMD_AGENT_INFO_ASIC_FAMILY_ID = 0xA107,
   /**
    * Queries for the Packet Processor(CP Firmware) ucode version of an agent.
+   * The value is the full 16-bit microcode version reported by the driver. It
+   * can exceed 10 bits on some targets (for example gfx9 parts that set bit 15),
+   * so do not mask it to 10 bits.
    * The type of this attribute is uint32_t.
    */
   HSA_AMD_AGENT_INFO_UCODE_VERSION = 0xA108,

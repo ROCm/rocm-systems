@@ -9,7 +9,6 @@
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/denormal.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/denormal_value.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/division.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/input_denormal.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/minmax.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/output_denormal.h"
@@ -1171,61 +1170,6 @@ inline uint64_t fma_f64(uint64_t src0, uint64_t src1, uint64_t src2, uint32_t ro
                                                        output_denormal::Policy::make(denorm_mode));
 }
 
-/// @brief Binary F64 operations implemented by the shared MODE-aware helper.
-enum class BinaryF64Op { Add, Multiply, MaximumNumber, MinimumNumber };
-
-/// @brief Execute a binary F64 operation under MODE.FP_ROUND and MODE.FP_DENORM.
-/// @details MaximumNumber and MinimumNumber return the numeric operand for a
-/// one-NaN input and explicitly select +0/-0 for signed-zero ties respectively.
-inline uint64_t binary_f64(uint64_t src0, uint64_t src1, BinaryF64Op operation, uint32_t round_mode,
-                           uint32_t denorm_mode) {
-  const auto input = input_denormal::Policy::make(denorm_mode);
-  src0 = input_denormal::flush_input<fp_format::F64>(src0, input);
-  src1 = input_denormal::flush_input<fp_format::F64>(src1, input);
-
-  uint64_t result;
-  {
-    detail::ScopedFenv environment(round_mode);
-    const double lhs = std::bit_cast<double>(src0);
-    const double rhs = std::bit_cast<double>(src1);
-    const double value = [&] {
-      switch (operation) {
-      // evaluate_arithmetic keeps these inside the guest rounding environment.
-      case BinaryF64Op::Add:
-        return detail::evaluate_arithmetic<Arithmetic::ADD>(lhs, rhs, 0.0);
-      case BinaryF64Op::Multiply:
-        return detail::evaluate_arithmetic<Arithmetic::MUL>(lhs, rhs, 0.0);
-      case BinaryF64Op::MaximumNumber:
-        if (std::isnan(lhs)) {
-          return std::isnan(rhs) ? std::numeric_limits<double>::quiet_NaN() : rhs;
-        }
-        if (std::isnan(rhs)) {
-          return lhs;
-        }
-        if ((src0 & 0x7fffffffffffffffULL) == 0 && (src1 & 0x7fffffffffffffffULL) == 0) {
-          return std::bit_cast<double>((src0 & src1) & 0x8000000000000000ULL);
-        }
-        return std::fmax(lhs, rhs);
-      case BinaryF64Op::MinimumNumber:
-        if (std::isnan(lhs)) {
-          return std::isnan(rhs) ? std::numeric_limits<double>::quiet_NaN() : rhs;
-        }
-        if (std::isnan(rhs)) {
-          return lhs;
-        }
-        if ((src0 & 0x7fffffffffffffffULL) == 0 && (src1 & 0x7fffffffffffffffULL) == 0) {
-          return std::bit_cast<double>((src0 | src1) & 0x8000000000000000ULL);
-        }
-        return std::fmin(lhs, rhs);
-      }
-      return std::numeric_limits<double>::quiet_NaN();
-    }();
-    result = std::bit_cast<uint64_t>(value);
-  }
-  return output_denormal::flush_output<fp_format::F64>(result,
-                                                       output_denormal::Policy::make(denorm_mode));
-}
-
 /// @brief Apply F64 OMOD/CLAMP under the architectural rounding mode.
 /// @details A nonzero OMOD flushes a denormal result and converts either signed zero to +0.
 /// With OMOD and CLAMP disabled, no floating-point work is needed, so the original bits are
@@ -1267,15 +1211,6 @@ inline uint64_t scale_u53_f64_rtz(uint64_t significand, int exponent) {
 } // namespace rocjitsu::amdgpu::fp_mode
 
 namespace rocjitsu::amdgpu {
-
-/// @brief Preserve the FIXUP NaN payload when narrowing its promoted result.
-inline uint16_t narrow_div_fixup_f16(float value, bool fp16_ovfl) {
-  const uint32_t bits = std::bit_cast<uint32_t>(value);
-  if ((bits & 0x7fffffffu) > 0x7f800000u) {
-    return static_cast<uint16_t>(((bits >> 16) & 0x8000u) | 0x7c00u | ((bits >> 13) & 0x3ffu));
-  }
-  return util::f32_to_f16_mode(value, fp16_ovfl);
-}
 
 /// Convert the F32 source of a scaled narrowing instruction before applying its E8M0 scale.
 /// A preserved F32 subnormal is normal in double, even if the host flushes F32 operands.

@@ -57,11 +57,7 @@ def test_division_operands_and_guest_policy(arch, name):
             )
             is None
         )
-    for excluded_arch in ('cdna2', 'rdna3_5'):
-        assert (
-            gen_division(context(excluded_arch, name, dst, ['a', 'b', 'c'], True))
-            is None
-        )
+    assert gen_division(context('rv64i', name, dst, ['a', 'b', 'c'], True)) is None
     assert gen_division(context(arch, name, dst, ['a', 'b'], True)) is None
     assert gen_division(context(arch, name, dst, ['a', 'b', 'c'], False)) is None
 
@@ -169,3 +165,27 @@ def test_legacy_half_fixup_uses_cdna_policy(arch):
         )
         is None
     )
+
+
+@pytest.mark.parametrize('arch', ['cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5'])
+@pytest.mark.parametrize('name', sorted(DIVISION_NAMES))
+def test_older_division_reuses_the_inherited_model(arch, name):
+    scale = '_SCALE_' in name
+    dst = ['d', 'condition'] if scale else ['d']
+    body = gen_division(context(arch, name, dst, ['a', 'b', 'c'], True))
+    for wave in (32, 64):
+        assert f'rj_arith_{name.lower()}_w{wave}_gfx942,' in body
+    assert 'rdna3=*/true' in body
+    assert ('preserve_inactive_condition=*/true' in body) == scale
+    if name.endswith('F16'):
+        assert 'low_dst_zeroes_high=*/false' in body
+
+
+@pytest.mark.parametrize('arch', ['cdna1', 'cdna2'])
+def test_older_legacy_half_fixup_clears_only_its_low_write(arch):
+    body = gen_division(
+        context(arch, 'V_DIV_FIXUP_LEGACY_F16', ['d'], ['a', 'b', 'c'], True)
+    )
+    assert 'rj_arith_v_div_fixup_legacy_f16_w32,' in body
+    assert 'rj_arith_v_div_fixup_legacy_f16_w64,' in body
+    assert 'low_dst_zeroes_high=*/true' in body

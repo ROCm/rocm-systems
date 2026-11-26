@@ -20,7 +20,7 @@ namespace {
 
 // Check all three precisions and both wave sizes against selected encodings, not host NaN
 // arithmetic.
-template <int Width, int Lanes, bool Packed = false, typename Call>
+template <int Width, int Lanes, bool Packed = false, bool FirstNaN = false, typename Call>
 void check(Call call, bool maximum) {
   using namespace rocjitsu::arith::test;
   using Mask = std::conditional_t<Lanes == 32, uint32_t, uint64_t>;
@@ -95,10 +95,11 @@ void check(Call call, bool maximum) {
             for (int lane = 0; lane < Lanes; ++lane) {
               uint64_t expected;
               if (lane < 4) {
-                // IEEE prioritizes signaling A, then signaling B. Otherwise take B unchanged.
+                // IEEE prioritizes signaling A, then signaling B. Otherwise gfx950 F16 takes A
+                // and earlier CDNA takes B unchanged.
                 expected = ieee && !(a[lane] & Quiet)   ? a[lane] | Quiet
                            : ieee && !(b[lane] & Quiet) ? b[lane] | Quiet
-                                                        : b[lane];
+                                                        : (FirstNaN ? a[lane] : b[lane]);
               } else if (lane == 4) {
                 expected = maximum ? 0 : Sign;
               } else if (lane == 5) {
@@ -159,4 +160,24 @@ TEST(FpCdnaSelection, PackedF16Wave32) {
 TEST(FpCdnaSelection, PackedF16Wave64) {
   check<16, 64, true>(rj_arith_v_pk_min_f16_w64_gfx942, false);
   check<16, 64, true>(rj_arith_v_pk_max_f16_w64_gfx942, true);
+}
+
+TEST(FpCdnaSelection, F16Wave32Gfx950) {
+  check<16, 32, false, true>(rj_arith_v_min_f16_w32_gfx950, false);
+  check<16, 32, false, true>(rj_arith_v_max_f16_w32_gfx950, true);
+}
+
+TEST(FpCdnaSelection, F16Wave64Gfx950) {
+  check<16, 64, false, true>(rj_arith_v_min_f16_w64_gfx950, false);
+  check<16, 64, false, true>(rj_arith_v_max_f16_w64_gfx950, true);
+}
+
+TEST(FpCdnaSelection, PackedF16Wave32Gfx950) {
+  check<16, 32, true, true>(rj_arith_v_pk_min_f16_w32_gfx950, false);
+  check<16, 32, true, true>(rj_arith_v_pk_max_f16_w32_gfx950, true);
+}
+
+TEST(FpCdnaSelection, PackedF16Wave64Gfx950) {
+  check<16, 64, true, true>(rj_arith_v_pk_min_f16_w64_gfx950, false);
+  check<16, 64, true, true>(rj_arith_v_pk_max_f16_w64_gfx950, true);
 }

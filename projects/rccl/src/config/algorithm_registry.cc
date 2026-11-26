@@ -95,9 +95,10 @@ static constexpr struct ncclAlgRegEntry algRegistry[] = {
   // NCCL's kernels have the same ids as upstream NCCL, so their rows use upstream's bits. RCCL's kernels follow
   // NCCL's, so their ids move whenever NCCL adds kernels: their bits come from the enum.
 #define SYMBIT(k) ALGBIT(NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ncclSymkKernelId_##k)
-  {"SYMK_RailRing_LsaST",    SYMBIT(AllGather_RailRing_LsaST), F_AG, -1, -1, ncclSymkKernelId_AllGather_RailRing_LsaST},
-  {"SYMK_HierLsaST",         SYMBIT(AllGather_HierLsaST),      F_AG, -1, -1, ncclSymkKernelId_AllGather_HierLsaST},
-  {"SYMK_HierLsaTmaST",      SYMBIT(AllGather_HierLsaTmaST),   F_AG, -1, -1, ncclSymkKernelId_AllGather_HierLsaTmaST},
+  {"SYMK_RailRing_LsaST",    SYMBIT(AllGather_RailRing_LsaST),  F_AG, -1, -1, ncclSymkKernelId_AllGather_RailRing_LsaST},
+  {"SYMK_HierLsaST",         SYMBIT(AllGather_HierLsaST),       F_AG, -1, -1, ncclSymkKernelId_AllGather_HierLsaST},
+  {"SYMK_HierLsaTmaST",      SYMBIT(AllGather_HierLsaTmaST),    F_AG, -1, -1, ncclSymkKernelId_AllGather_HierLsaTmaST},
+  {"SYMK_HierLsaLDST",       SYMBIT(ReduceScatter_HierLsaLDST), F_RS, -1, -1, ncclSymkKernelId_ReduceScatter_HierLsaLDST},
 #undef SYMBIT
 };
 // clang-format on

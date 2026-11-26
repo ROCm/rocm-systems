@@ -180,10 +180,20 @@ typedef union
     struct
     {
         unsigned int uCodeSDMA: 10; // ucode version SDMA engine
-        unsigned int uCodeRes : 10; // ucode version (reserved)
-        unsigned int Reserved : 12; // Reserved, must be 0
+        // Full compute (MEC) microcode version. KFD stores mec_fw_version in a
+        // uint16_t and gfx9 sets bit 15 (for example 0x817a), so 10 bits are not
+        // enough. This field starts where uCodeRes did, and the bits it takes
+        // from Reserved were always zero, so a reader built against the old
+        // layout sees the low 10 bits and a reader of an old producer sees a
+        // value below 1024. HSA_ENGINE_ID.ui32.uCode still holds the low 10 bits.
+        unsigned int uCodeCompute : 16; // ucode version Compute engine
+        unsigned int Reserved : 6; // Reserved, must be 0
     };
 } HSA_ENGINE_VERSION;
+
+// Set when HSA_ENGINE_VERSION has uCodeCompute (it was uCodeRes in older
+// headers). Source that reads the field by name can test it.
+#define HSAKMT_HAS_UCODE_COMPUTE 1
 
 typedef union
 {

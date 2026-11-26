@@ -58,7 +58,15 @@ mk_a:
   v_cmp_eq_u32 vcc_lo, 0, v4
   s_and_saveexec_b32 s8, vcc_lo
 #endif
+#ifdef MK_LOCAL_HELPER
+#define MK_LOAD_HELPER _ZN7hip_moi7context11lds_load_atIjEET_PKS2_jNS_7site_idE
+  s_mov_b64 s[10:11], src_shared_base
+  v_mov_b32_e32 v4, v1
+  v_mov_b32_e32 v5, s11
+  s_call_b64 s[12:13], MK_LOAD_HELPER
+#else
   ds_load_b32 v3, v1
+#endif
   wait_all
   global_store_b32 v1, v3, s[6:7]
   s_mov_b32 exec_lo, s8
@@ -72,6 +80,13 @@ mk_a:
   s_endpgm
 .Lend_a:
 .size mk_a, .Lend_a-mk_a
+#ifdef MK_LOCAL_HELPER
+  .type MK_LOAD_HELPER,@function
+MK_LOAD_HELPER:
+  flat_load_b32 v3, v[4:5]
+  s_setpc_b64 s[12:13]
+  .size MK_LOAD_HELPER, .-MK_LOAD_HELPER
+#endif
 #endif
 
 #if MK_ENTRY_MASK & 2

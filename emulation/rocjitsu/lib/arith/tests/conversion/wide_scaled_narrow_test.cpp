@@ -25,11 +25,20 @@ namespace {
 using namespace rocjitsu::arith::test;
 
 // Interpret source encodings independently of production conversion helpers.
-float decode(int source, uint32_t raw) {
-  uint32_t bits = source == 0   ? raw
-                  : source == 1 ? uint32_t(conversion_reencode(uint16_t(raw), 10, 15, 23, 127))
-                                : raw << 16;
-  return std::bit_cast<float>(bits);
+float decode(int source, uint32_t raw, bool flush_input) {
+  if (source == 0) {
+    return std::bit_cast<float>(flush_input && (raw & 0x7f800000U) == 0 ? (raw & 0x80000000U)
+                                                                        : raw);
+  }
+  if (source == 1) {
+    uint16_t h = uint16_t(raw);
+    if (flush_input && (h & 0x7c00U) == 0) {
+      h &= 0x8000U;
+    }
+    return std::bit_cast<float>(uint32_t(conversion_reencode(h, 10, 15, 23, 127)));
+  }
+  uint32_t b = uint32_t(uint16_t(raw)) << 16;
+  return std::bit_cast<float>(flush_input && (b & 0x7f800000U) == 0 ? (b & 0x80000000U) : b);
 }
 
 // Bind operand shapes once, then share contracts, arithmetic and aliases across
@@ -101,6 +110,7 @@ void check(Call call) {
         return invoke(flags, ~Mask(0), mode, nullptr, nullptr, nullptr, nullptr);
       },
       0);
+  constexpr int src_fraction = Src == 0 ? 23 : Src == 1 ? 10 : 7;
   for (uint64_t cpu : supported_cpu_levels()) {
     for (uint64_t semantics : semantics_modes()) {
       for (int scenario = 0; scenario < 5; ++scenario) {
@@ -110,18 +120,20 @@ void check(Call call) {
         Mask exec_mask = exec_mask_for_case<Lanes>(scenario);
         uint64_t flags =
             cpu | semantics |
-            (scenario % 2 ? RJ_ARITH_FP16_OVFL | (Src == 0 ? RJ_ARITH_FP_FLUSH_INPUT_DENORMALS : 0)
+            (scenario % 2 ? RJ_ARITH_FP16_OVFL |
+                                ((!Gfx1250 || Src == 0) ? RJ_ARITH_FP_FLUSH_INPUT_DENORMALS : 0)
                           : 0);
         auto actual = input, expected = input;
         int error = invoke(flags, exec_mask, 0, actual.v + destination, actual.v, actual.v + 32,
                            actual.v + 48);
         bool exact = semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
                      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL;
-        ASSERT_EQ(error, exact ? RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS : RJ_ARITH_SUCCESS);
-        if (!exact) {
+        bool rejected = Gfx1250 && exact;
+        ASSERT_EQ(error, rejected ? RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS : RJ_ARITH_SUCCESS);
+        if (!rejected) {
           for (int lane = 0; lane < Lanes; ++lane) {
             int exponent = (input.v[48][lane] >> 23) & 255;
-            if (!((exec_mask >> lane) & 1) || (!Gfx1250 && exponent == 255)) {
+            if (!((exec_mask >> lane) & 1)) {
               continue;
             }
             for (int word = 0; word < words; ++word) {
@@ -133,13 +145,14 @@ void check(Call call) {
                                              ? input.v[element][lane]
                                              : input.v[(element % 2 ? 32 : 0) + element / 2][lane])
                                       : input.v[element / 2][lane] >> ((element % 2) * 16);
-              if (Src == 0 && (flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS) &&
-                  (raw & 0x7f800000U) == 0) {
-                raw &= 0x80000000U;
-              }
-              float value = exponent == 255
-                                ? std::numeric_limits<float>::quiet_NaN()
-                                : float(double(decode(Src, raw)) / std::ldexp(1.0, exponent - 127));
+              float decoded = decode(Src, raw, (flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS) != 0);
+              float value =
+                  exponent == 255
+                      ? (Gfx1250
+                             ? std::numeric_limits<float>::quiet_NaN()
+                             : std::bit_cast<float>(
+                                   (std::bit_cast<uint32_t>(decoded) & 0x80000000U) | 0x7fc00000U))
+                      : float(double(decoded) / std::ldexp(1.0, exponent - 127));
               uint32_t code;
               if constexpr (Format >= 3) {
                 code = fp8_narrow_reference(Format == 4, Stochastic, std::bit_cast<uint32_t>(value),
@@ -147,7 +160,8 @@ void check(Call call) {
               } else {
                 code = quantize_finite<(Bf6 ? 3 : 2), (Format == 2 ? 1
                                                        : Bf6       ? 2
-                                                                   : 3)>(value, Stochastic, seed);
+                                                                   : 3)>(value, Stochastic, seed,
+                                                                   !Gfx1250, src_fraction);
               }
               for (int bit = 0; bit < bits; ++bit) {
                 int offset = element * bits + bit;
@@ -163,7 +177,7 @@ void check(Call call) {
                 << "word=" << word << ", lane=" << lane;
           }
         }
-        actual.expect_preserved(input, destination, exact ? 0 : words);
+        actual.expect_preserved(input, destination, rejected ? 0 : words);
       }
     }
   }

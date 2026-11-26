@@ -723,6 +723,49 @@ int rj_arith_v_med3_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t 
   return minmax3_wave64<rocjitsu::arith::Minmax3::MedianCdna>(flags, exec_mask, mode, d, a, b, c);
 }
 
+// MI350X (gfx950) ternary FP32 selection uses first-NaN priority and ordered signed-zero median.
+int rj_arith_v_min3_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, const uint32_t *const *c,
+                                   uint32_t *trapsts) {
+  return rj_arith_v_min3_f32_w32(flags, exec_mask, mode, d, a, b, c, trapsts);
+}
+
+int rj_arith_v_min3_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, const uint32_t *const *c,
+                                   uint32_t *trapsts) {
+  return rj_arith_v_min3_f32_w64(flags, exec_mask, mode, d, a, b, c, trapsts);
+}
+
+int rj_arith_v_max3_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, const uint32_t *const *c,
+                                   uint32_t *trapsts) {
+  return rj_arith_v_max3_f32_w32(flags, exec_mask, mode, d, a, b, c, trapsts);
+}
+
+int rj_arith_v_max3_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, const uint32_t *const *c,
+                                   uint32_t *trapsts) {
+  return rj_arith_v_max3_f32_w64(flags, exec_mask, mode, d, a, b, c, trapsts);
+}
+
+int rj_arith_v_med3_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, const uint32_t *const *c,
+                                   uint32_t *trapsts) {
+  return rj_arith_v_med3_f32_w32(flags, exec_mask, mode, d, a, b, c, trapsts);
+}
+
+int rj_arith_v_med3_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, const uint32_t *const *c,
+                                   uint32_t *trapsts) {
+  return rj_arith_v_med3_f32_w64(flags, exec_mask, mode, d, a, b, c, trapsts);
+}
+
 // Apply CDNA4's inherited OMOD/CLAMP policy to NaN-propagating selection.
 int rj_arith_v_minimum3_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t mode,
                                        uint32_t *const *d, const uint32_t *const *a,

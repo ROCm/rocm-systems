@@ -482,7 +482,7 @@ TEST(CdnaDivFixup, LegacyHalf) {
   check_cdna_fixup<16, 64, true>(rj_arith_v_div_fixup_legacy_f16_w64);
 }
 
-// The inherited CDNA output order differs from RDNA's signed-underflow stage.
+// Inherited promoted narrowing and recovery stay separate from RDNA's output stage.
 TEST(CdnaDivFixup, HalfOutputOrder) {
   using namespace rocjitsu::arith::test;
   struct Case {
@@ -494,6 +494,11 @@ TEST(CdnaDivFixup, HalfOutputOrder) {
       {0x7bff, 0x3c00, RJ_ARITH_ALU_OMOD_2, 0x7c00,
        RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS | RJ_ARITH_FP_ROUND_ZERO},
       {0x7c00, 0x3c00, 0, 0x7c00, RJ_ARITH_FP16_OVFL},
+      {0x7c00, 0x3c00, 0, 0x7bff, RJ_ARITH_FP_ROUND_DOWN | RJ_ARITH_FP16_OVFL},
+      {0x7c00, 0xbc00, 0, 0xfbff, RJ_ARITH_FP_ROUND_UP | RJ_ARITH_FP16_OVFL},
+      {0x7c00, 0xbc00, 0, 0xfc00, RJ_ARITH_FP_ROUND_DOWN | RJ_ARITH_FP16_OVFL},
+      {0x7c00, 0x3c00, 0, 0x7c00, RJ_ARITH_FP_ROUND_UP | RJ_ARITH_FP16_OVFL},
+      {0x7c00, 0x3c00, 0, 0x7bff, RJ_ARITH_FP_ROUND_ZERO},
       {0x7bff, 0x3c00, RJ_ARITH_ALU_OMOD_2, 0x7bff,
        RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS | RJ_ARITH_FP16_OVFL}};
   for (auto cpu : supported_cpu_levels()) {

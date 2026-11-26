@@ -235,7 +235,7 @@ unit concurrently, thereby potentially reducing occupancy.
 
 An overview of the size of the local data share (LDS), that backs up shared
 memory, is given in the
-:doc:`GPU hardware specifications <rocm:reference/gpu-arch-specs>`.
+:doc:`GPU hardware specifications <rocm:reference/gpu-specs>`.
 
 Allocate shared memory
 --------------------------------------------------------------------------------

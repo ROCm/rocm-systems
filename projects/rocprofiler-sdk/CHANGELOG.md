@@ -42,7 +42,10 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - `rocpd summary --summary-by-rank` writes only the per-rank summaries. Run without `--summary-by-rank` to get the aggregate summaries.
 - Per-rank summaries name the process ID column Process_Id instead of ProcessID.
 - `rocpd summary --domain-summary` includes a MARKER row when the database contains marker data.
-
+- `librocprofiler-sdk` no longer exports an `ompt_start_tool` symbol; OMPT is now engaged only via the rocprofv3 tool library.
+- `rocprofv3` takes the OMPT tool role only when it was asked to collect OMPT, so another OMPT tool such as TAU or Score-P can hold the role while `rocprofv3` continues tracing everything else it was asked for.
+- `rocprofv3` collects OMPT only when rocprofiler-sdk is initialized before the OpenMP runtime; otherwise a warning is emitted and the OMPT tool role is handed to the next tool.
+- `rocprofiler_ompt_start_tool()` now returns `NULL` unless a registered client subscribes to OMPT tracing. A tool deferring to rocprofiler-sdk for OMPT must be prepared to keep the OMPT tool role.
 
 ### Resolved issues
 
@@ -199,7 +202,6 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
     - Decoder integration tests have been migrated to Python, simplifying test authoring and making it easier for downstream tools to validate their trace-decoding pipelines.
 
 ### Changed
-
 
 ### Resolved issues
 
