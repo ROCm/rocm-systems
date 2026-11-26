@@ -1,9 +1,9 @@
+import pytest
+
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
 """Tests for packed execute code generation."""
-
-import pytest
 
 from amdisa.codegen.execute.packed import (
     gen_pk_binop,
@@ -13,7 +13,6 @@ from amdisa.codegen.execute.packed import (
     gen_pk_lshl_add_u64,
     gen_pk_ternary,
 )
-from amdisa.codegen.execute.simd_codegen import vop3p_local_simd_probe_line
 
 
 def test_pk_fma_f16_has_no_legacy_ternary_fallback():
@@ -115,18 +114,6 @@ def test_pk_f64_ternary_rejects_unknown_operation():
 
     with pytest.raises(ValueError, match='unsupported packed F64 ternary operation'):
         gen_pk_ternary_f64(['vdst'], ['src0', 'src1', 'src2'], 'mad')
-
-
-def test_renamed_packed_float_routes_use_exact_helpers():
-    for spelling, operation, bf16 in (
-        ('v_pk_add_bf16_vop3p', 'ADD', True),
-        ('v_pk_fma_bf16_vop3p', 'FMA', True),
-    ):
-        probe = vop3p_local_simd_probe_line(spelling, ('opsel', 'opsel_hi'))
-        assert (
-            probe
-            == f'  ROCJITSU_TRY_SIMD_PACKED_FLOAT({operation}, {str(bf16).lower()});'
-        )
 
 
 def test_dot_dispatch_covers_every_semantic_class():

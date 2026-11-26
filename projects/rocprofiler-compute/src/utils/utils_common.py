@@ -1000,15 +1000,39 @@ def print_status(msg: str) -> None:
     console_log("")
 
 
+def select_arch_counter_definitions(
+    sdk_config: Dict[str, Any], arch: str
+) -> Dict[str, Any]:
+    """Return sdk_config with only the counter definitions for arch.
+
+    rocprofiler-sdk reads the definitions of every architecture. An older
+    rocprofiler-sdk can fail on a newer definition for another GPU.
+    """
+    counters = []
+    for counter in sdk_config["rocprofiler-sdk"]["counters"]:
+        definitions = [
+            {**definition, "architectures": [arch]}
+            for definition in counter["definitions"]
+            if arch in definition["architectures"]
+        ]
+        if definitions:
+            counters.append({**counter, "definitions": definitions})
+    return {
+        **sdk_config,
+        "rocprofiler-sdk": {**sdk_config["rocprofiler-sdk"], "counters": counters},
+    }
+
+
 def create_temp_rocprofiler_metrics_path(
-    sdk_config: Dict[str, Any], parent_dir: Path = Path("/tmp")
+    sdk_config: Dict[str, Any], arch: str, parent_dir: Path = Path("/tmp")
 ) -> str:
     """Create a temporary directory with the rocprofiler-sdk counter definitions.
 
-    The directory is created in parent_dir. It holds config.yaml with the full
-    config, and counter_defs.yaml without firmware restrictions for older
-    rocprofiler-sdk versions. Return the path of the directory.
+    The directory is created in parent_dir. It holds config.yaml with the
+    definitions for arch, and counter_defs.yaml without firmware restrictions for
+    older rocprofiler-sdk versions. Return the path of the directory.
     """
+    sdk_config = select_arch_counter_definitions(sdk_config, arch)
     tmpfile_parent = Path(
         tempfile.mkdtemp(prefix="rocprof_compute_sdk_config_", dir=parent_dir)
     )

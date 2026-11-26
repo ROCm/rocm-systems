@@ -1023,13 +1023,60 @@ def test_resolve_rocm_library_path(tmp_path):
 def test_create_temp_rocprofiler_metrics_path_in_parent_dir(tmp_path):
     metrics_path = Path(
         utils_common.create_temp_rocprofiler_metrics_path(
-            {"rocprofiler-sdk": {"counters": []}}, tmp_path
+            {"rocprofiler-sdk": {"counters": []}}, "gfx_a", tmp_path
         )
     )
 
     assert metrics_path.parent == tmp_path
     assert (metrics_path / "config.yaml").is_file()
     assert (metrics_path / "counter_defs.yaml").is_file()
+
+
+def test_select_arch_counter_definitions_keeps_only_target_arch():
+    sdk_config = {
+        "rocprofiler-sdk": {
+            "counters-schema-version": 1,
+            "counters": [
+                {
+                    "name": "SHARED",
+                    "definitions": [
+                        {"architectures": ["gfx_a", "gfx_b"], "expression": "X"}
+                    ],
+                },
+                {
+                    "name": "PER_ARCH",
+                    "definitions": [
+                        {"architectures": ["gfx_a"], "block": "A", "event": 1},
+                        {"architectures": ["gfx_b"], "block": "B", "event": 2},
+                    ],
+                },
+                {
+                    "name": "OTHER_ONLY",
+                    "definitions": [{"architectures": ["gfx_b"], "expression": "Y"}],
+                },
+            ],
+        }
+    }
+
+    selected = utils_common.select_arch_counter_definitions(sdk_config, "gfx_a")
+
+    assert selected == {
+        "rocprofiler-sdk": {
+            "counters-schema-version": 1,
+            "counters": [
+                {
+                    "name": "SHARED",
+                    "definitions": [{"architectures": ["gfx_a"], "expression": "X"}],
+                },
+                {
+                    "name": "PER_ARCH",
+                    "definitions": [
+                        {"architectures": ["gfx_a"], "block": "A", "event": 1}
+                    ],
+                },
+            ],
+        }
+    }
 
 
 # =============================================================================
