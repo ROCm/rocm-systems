@@ -251,31 +251,6 @@ def test_launcher_marker_attributes_actual_recording_frames_to_user(monkeypatch)
     assert pops == ["pop"]
 
 
-def test_format_triton_args_named_operands_keep_block_size_not_grid():
-    kernel = types.SimpleNamespace(params=["x_ptr", "n_elements", "BLOCK_SIZE"])
-    tensor = types.SimpleNamespace(shape=(2, 3), dtype="float32")
-    blob = triton_backend._format_triton_args(
-        kernel,
-        False,
-        (tensor, 1024),
-        {"grid": (8,), "BLOCK_SIZE": 256},
-    )
-    assert blob == "(x_ptr=float32[2x3], n_elements=1024, BLOCK_SIZE=256)"
-    assert "grid" not in blob
-
-
-def test_format_triton_args_drops_bound_instance():
-    kernel = types.SimpleNamespace(params=["x_ptr", "n_elements", "BLOCK_SIZE"])
-    tensor = types.SimpleNamespace(shape=(2, 3), dtype="float32")
-    blob = triton_backend._format_triton_args(
-        kernel,
-        False,
-        (kernel, tensor, 1024),
-        {"grid": (8,), "BLOCK_SIZE": 256},
-    )
-    assert blob == "(x_ptr=float32[2x3], n_elements=1024, BLOCK_SIZE=256)"
-
-
 def test_format_triton_args_jit_ignores_extra_trailing_positionals():
     kernel = types.SimpleNamespace(params=["x_ptr", "n_elements"])
     tensor = types.SimpleNamespace(shape=(8,), dtype="float32")
@@ -421,7 +396,6 @@ def test_triton_wrap_records_kernel_operand_on_marker(monkeypatch):
     assert FakeJIT().run(tensor, 8, grid=(8,), BLOCK_SIZE=256) == "launched"
     assert recorded
     assert recorded[0] == "(x_ptr=float32[2x4], n_elements=8, BLOCK_SIZE=256)"
-    assert "grid" not in recorded[0]
 
 
 def test_triton_wrap_records_compiled_kernel_operands_from_src_fn(monkeypatch):

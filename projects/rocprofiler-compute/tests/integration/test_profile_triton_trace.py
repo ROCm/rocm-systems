@@ -14,6 +14,17 @@ from tests.integration.common import config, require_triton
 from utils import csv_compression
 
 
+def assert_marker_records_named_operands(markers, kernel_name):
+    """Require each marker for kernel_name to carry named tensor args, not grid."""
+    rows = [fn for fn in markers if kernel_name in fn]
+    assert rows, f"missing {kernel_name} in markers"
+    for fn in rows:
+        assert "|args=(" in fn, fn
+        assert "a_ptr=float32[" in fn, fn
+        assert "grid=" not in fn, fn
+        assert "|args=n/a|" not in fn, fn
+
+
 @pytest.fixture(scope="module")
 def triton_trace_workload_state():
     state = {"dir": None, "profiled": False}
@@ -71,10 +82,9 @@ def test_triton_trace_profile_csvs(triton_trace_profiled_workload):
             for row in csv.DictReader(f):
                 functions.append(row["Function"])
     assert any("|triton" in fn for fn in functions)
-    assert any("triton.JITFunction.matmul_kernel" in fn for fn in functions)
-    assert any(
-        "|args=(" in fn and "float32[" in fn and "|args=n/a|triton" not in fn
-        for fn in functions
+    assert_marker_records_named_operands(functions, "triton.JITFunction.matmul_kernel")
+    assert_marker_records_named_operands(
+        functions, "triton.CompiledKernel.matmul_kernel"
     )
 
 
@@ -93,8 +103,11 @@ def test_list_triton_operators_prints_call_tree(
     captured = capsys.readouterr()
     out = captured.out + captured.err
     assert "Triton Operator Call Tree:" in out
-    assert "triton.JITFunction.matmul_kernel" in out
-    assert "float32[" in out
+    flattened = " ".join(out.split())
+    assert "triton.JITFunction.matmul_kernel" in flattened
+    assert "triton.CompiledKernel.matmul_kernel" in flattened
+    assert "a_ptr=float32[" in flattened
+    assert "grid=" not in flattened
 
 
 def test_triton_operator_matmul_selects_kernels(
