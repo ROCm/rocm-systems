@@ -27,7 +27,11 @@ TIME_UNITS = {"s": 10**9, "ms": 10**6, "us": 10**3, "ns": 1}
 
 def make_args(**overrides) -> argparse.Namespace:
     """Minimal args for the plain-table render path, plus any overrides."""
-    defaults = {"decimal": 2, "debug_table_view": False, "normal_unit": "per_wave"}
+    defaults = {
+        "debug_table_decimal": 2,
+        "debug_table_view": False,
+        "normal_unit": "per_wave",
+    }
     return argparse.Namespace(**{**defaults, **overrides})
 
 
@@ -327,7 +331,7 @@ def test_mathematical_correctness_all_units() -> None:
 
 def test_integration_conversion_flow() -> None:
     """has_time_data gates convert_time_columns in the show_all flow."""
-    args = argparse.Namespace(time_unit="ms", decimal=2)
+    args = argparse.Namespace(time_unit="ms", debug_table_decimal=2)
 
     sample_df = pd.DataFrame({
         "Metric_ID": ["7.2.0"],
@@ -381,7 +385,7 @@ def test_show_all_membw_analysis_panel_gate(
 ) -> None:
     """Panel 3000 is rendered only when its table was built."""
     args = argparse.Namespace(
-        decimal=2,
+        debug_table_decimal=2,
         filter_metrics=None,
         normal_unit="per_wave",
         path=[["fixture"]],
@@ -452,9 +456,9 @@ def test_show_all_membw_analysis_panel_gate(
 def test_show_all_draws_the_memory_chart_from_raw_values_and_config_units(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The chart gets the evaluated values, not the ones rounded to --decimal."""
+    """The chart gets the evaluated values, not the table values rounded for display."""
     args = argparse.Namespace(
-        decimal=2,
+        debug_table_decimal=2,
         filter_metrics=None,
         membw_analysis=False,
         normal_unit="per_wave",

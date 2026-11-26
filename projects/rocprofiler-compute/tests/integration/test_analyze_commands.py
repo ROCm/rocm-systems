@@ -574,7 +574,7 @@ def test_decimal_1(binary_handler_analyze_rocprof_compute):
             "analyze",
             "--path",
             workload_dir,
-            "--decimal",
+            "--debug-table-decimal",
             "0",
         ])
         assert code == 0
@@ -590,7 +590,7 @@ def test_decimal_2(binary_handler_analyze_rocprof_compute):
             "analyze",
             "--path",
             workload_dir,
-            "--decimal",
+            "--debug-table-decimal",
             "1",
         ])
         assert code == 0
@@ -606,7 +606,7 @@ def test_decimal_3(binary_handler_analyze_rocprof_compute):
             "analyze",
             "--path",
             workload_dir,
-            "--decimal",
+            "--debug-table-decimal",
             "4",
         ])
         assert code == 0

@@ -9,7 +9,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Changed
 
-* Memory chart values in `--output-format db` and `csv` keep their full precision, like the other panels.
+* The analyze option `--decimal` is now the debug option `--debug-table-decimal`, which sets the decimals of the analyze tables.
 
 * The Memory Chart now uses the same metric names as the metric tables.
   * Scratch Allocation is in bytes per work-item, and LDS Allocation is in bytes, as in the Wavefront panel.
@@ -31,7 +31,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Fixed the peak of the `L2 Cache BW` metric in the `System Speed-of-Light` panel on MI200 (gfx90a). The peak was half the intended value, so the metric could exceed its peak.
 
-* Fixed Memory Chart values that were rounded twice and so differed from the same metric elsewhere, for example L2 Hit showed 34.0% while the memory bandwidth analysis showed 34.2%; `--decimal` now sets the decimals of tables only.
+* Fixed Memory Chart values that did not match the same metrics in the analyze tables.
 
 * Fixed Wavefront Occupancy in the System Speed-of-Light panel on gfx1250, which counted wavefronts per CU but compared them with the peak of all CUs.
 

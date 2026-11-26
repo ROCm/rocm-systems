@@ -967,6 +967,9 @@ Analyze mode has these debug options:
 * ``--debug-metric-expression``: Print the counter data, and each metric's
   expression and inputs.
 
+* ``--debug-table-decimal <digits>``: Print the analyze tables with ``<digits>``
+  decimals instead of 2. The memory chart sets the decimals of each unit itself.
+
 * ``--debug-table-view``: Print every block as plain tables, including blocks
   that are normally drawn as a memory chart or a per-kernel roofline layout.
 
