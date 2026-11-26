@@ -343,6 +343,51 @@ TEST(ConSanImageFacts, BoundedAggregateMetadataAndSiteCounts) {
   EXPECT_TRUE(decode_image_facts(encoded.value(), error.emitter(), limits).failed());
 }
 
+TEST(ConSanImageFacts, PolicyAndFlatOmissionsRoundTripWithAggregateBoundsAndEntryOwnership) {
+  const std::array<uint8_t, 4096> original{};
+  const std::array<uint8_t, 8192> prepared{};
+  const std::array<EntryKey, 2> keys{2048, 2112};
+  for (const FlatPolicy policy : {FlatPolicy::Likely, FlatPolicy::Strict}) {
+    auto facts = example_image(mvp_options_digest(policy));
+    Manifest &a = *facts.entries[0].selected;
+    Manifest &b = *facts.entries[1].selected;
+    a.sites[0].origin = AccessOrigin::GroupFlat;
+    a.sites[0].original_size = a.sites[0].prepared_guest_size = 12;
+    if (policy == FlatPolicy::Likely)
+      a.sites[0].assumption = FlatAssumption::SelectedSharedHigh;
+    b.flat_exclusions = {{320, 12, FlatExclusionReason::Unresolved}};
+    if (policy == FlatPolicy::Strict)
+      b.flat_exclusions[0] = {320, 12, FlatExclusionReason::Strict,
+                              FlatAssumption::SelectedSharedHigh};
+    const auto bytes = encode_image_facts(facts);
+    ASSERT_TRUE(bytes.succeeded());
+    ContractLimits limits;
+    limits.metadata_bytes = bytes.value().size();
+    limits.sites = 3;
+    const auto saved = decode_image_facts(bytes.value(), {}, limits);
+    ASSERT_TRUE(saved.succeeded());
+    EXPECT_EQ(saved.value(), facts);
+    EXPECT_TRUE(
+        match_image_facts(saved.value(), original, prepared, facts.selection_profile, {}, limits)
+            .succeeded());
+    auto opposite = policy == FlatPolicy::Likely ? FlatPolicy::Strict : FlatPolicy::Likely;
+    auto wrong = selection_profile_digest(keys, a.scope, mvp_options_digest(opposite));
+    EXPECT_TRUE(match_image_facts(saved.value(), original, prepared, wrong).failed());
+    limits.sites = 2;
+    EXPECT_TRUE(encode_image_facts(facts, {}, limits).failed());
+    EXPECT_TRUE(decode_image_facts(bytes.value(), {}, limits).failed());
+    limits.sites = 3;
+    --limits.metadata_bytes;
+    EXPECT_TRUE(encode_image_facts(facts, {}, limits).failed());
+    b.flat_exclusions.front().original_offset = a.sites[0].original_offset;
+    EXPECT_TRUE(validate_manifest(b).succeeded());
+    EXPECT_TRUE(validate_image_facts(facts).failed());
+    b.flat_exclusions.front().original_offset =
+        facts.entries[2].native_code.front().original_offset;
+    EXPECT_TRUE(validate_image_facts(facts).failed());
+  }
+}
+
 TEST(ConSanImageFacts, DecoderRejectsTruncationCorruptionAndOversizedEntryClaims) {
   const FailureOr<std::vector<uint8_t>> encoded = encode_image_facts(example_image());
   ASSERT_TRUE(encoded.succeeded());

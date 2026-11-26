@@ -100,6 +100,7 @@ if(AMDCXX AND EXISTS "${ROCM_PATH}/lib/llvm/bin/ld.lld")
             CONSAN_MULTI_ENTRY_MIXED_FIXTURE="${_fixture_dir}/multi-entry-mixed.hsaco"
             CONSAN_MULTI_ENTRY_NATIVE_GLOBAL_FIXTURE="${_fixture_dir}/multi-entry-native-global.hsaco"
             CONSAN_MULTI_ENTRY_UNREACHABLE_PC_FIXTURE="${_fixture_dir}/multi-entry-unreachable-pc.hsaco"
+            CONSAN_MULTI_ENTRY_LOCAL_HELPER_FIXTURE="${_fixture_dir}/multi-entry-local-helper.hsaco"
     )
 else()
     message(
@@ -516,8 +517,14 @@ if(TARGET consan_hsa_runner)
                         endforeach()
                     endforeach()
                 endif()
-                foreach(_atomic IN LISTS _atomic_cases_${_gpu}_${_wave_size})
-                    string(REPLACE "-" "_" _case ${_atomic})
+                foreach(
+                    _fixture
+                    IN
+                    LISTS
+                        _atomic_cases_${_gpu}_${_wave_size}
+                        _flat_cases_${_gpu}_${_wave_size}
+                )
+                    string(REPLACE "-" "_" _case ${_fixture})
                     consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
                         ${_case} ${_threads} production analysis
                     )

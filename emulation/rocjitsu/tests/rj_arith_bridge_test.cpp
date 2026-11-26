@@ -18293,7 +18293,7 @@ TEST(ArithBridgeTest, Gfx942MfmaExactUsesGroupedRounding) {
   }
 }
 
-TEST(ArithBridgeTest, Gfx942MfmaFp16OvflRestrictsOnlyExactQualification) {
+TEST(ArithBridgeTest, Gfx942MfmaFp16OvflSanitizesExactAndLeavesApproximateUnchanged) {
   for (bool bf16 : {false, true}) {
     for (bool overflow : {false, true}) {
       for (auto semantics : {ArithmeticSemantics::Compatibility, ArithmeticSemantics::Loose,
@@ -18318,21 +18318,18 @@ TEST(ArithBridgeTest, Gfx942MfmaFp16OvflRestrictsOnlyExactQualification) {
                                              {.vdst = 16, .src0 = 256, .src1 = 260, .src2 = 128});
         auto decoded = fixture.decoder->decode_window(words);
         ASSERT_TRUE(decoded.succeeded());
-        const bool rejected =
-            overflow && (semantics == ArithmeticSemantics::BitExactEmpiricalNoFpStatus ||
-                         semantics == ArithmeticSemantics::BitExactEmpirical);
-        fixture.recorder->writes.clear();
-        EXPECT_EQ(fixture.cu->execute_instruction(decoded.value().get(), *fixture.wave).succeeded(),
-                  !rejected);
-        if (rejected) {
-          EXPECT_TRUE(fixture.recorder->writes.empty());
-        }
-        // FP16_OVFL must not turn the inherited gfx942 BF16 infinity into saturated finite output.
+        const bool exact = semantics != ArithmeticSemantics::Compatibility &&
+                           semantics != ArithmeticSemantics::Loose;
+        ASSERT_TRUE(
+            fixture.cu->execute_instruction(decoded.value().get(), *fixture.wave).succeeded());
+        // Exact modes clamp BF16 overflow to MAX_FLOAT when FP16_OVFL=1; approximate modes
+        // preserve gfx942's legacy policy and leave BF16 infinity unsaturated.
+        const uint32_t expected = !bf16               ? 0x41000000U
+                                  : exact && overflow ? 0x7f7fffffU
+                                                      : 0x7f800000U;
         for (uint32_t reg = 0; reg < 4; ++reg) {
           for (uint32_t lane = 0; lane < 64; ++lane) {
-            EXPECT_EQ(fixture.cu->read_vgpr(base + 16 + reg, lane), rejected ? 0xdeadbeefU
-                                                                    : bf16   ? 0x7f800000U
-                                                                             : 0x41000000U);
+            EXPECT_EQ(fixture.cu->read_vgpr(base + 16 + reg, lane), expected);
           }
         }
       }
@@ -18481,7 +18478,7 @@ TEST(ArithBridgeTest, Gfx942SmfmacExactUsesGroupedRoundingAndIsolatesGfx950) {
   }
 }
 
-TEST(ArithBridgeTest, Gfx942SmfmacFp16OvflRestrictsOnlyExactQualification) {
+TEST(ArithBridgeTest, Gfx942SmfmacFp16OvflSanitizesExactAndLeavesApproximateUnchanged) {
   for (bool bf16 : {false, true}) {
     for (bool overflow : {false, true}) {
       for (auto semantics : {ArithmeticSemantics::Compatibility, ArithmeticSemantics::Loose,
@@ -18507,20 +18504,16 @@ TEST(ArithBridgeTest, Gfx942SmfmacFp16OvflRestrictsOnlyExactQualification) {
             {.vdst = 16, .acc_cd = 0, .src0 = 256, .src1 = 260, .src2 = 268});
         auto decoded = fixture.decoder->decode_window(words);
         ASSERT_TRUE(decoded.succeeded());
-        const bool rejected =
-            overflow && (semantics == ArithmeticSemantics::BitExactEmpiricalNoFpStatus ||
-                         semantics == ArithmeticSemantics::BitExactEmpirical);
-        fixture.recorder->writes.clear();
-        EXPECT_EQ(fixture.cu->execute_instruction(decoded.value().get(), *fixture.wave).succeeded(),
-                  !rejected);
-        if (rejected) {
-          EXPECT_TRUE(fixture.recorder->writes.empty());
-        }
+        const bool exact = semantics != ArithmeticSemantics::Compatibility &&
+                           semantics != ArithmeticSemantics::Loose;
+        ASSERT_TRUE(
+            fixture.cu->execute_instruction(decoded.value().get(), *fixture.wave).succeeded());
+        const uint32_t expected = !bf16               ? 0x42000000U
+                                  : exact && overflow ? 0x7f7fffffU
+                                                      : 0x7f800000U;
         for (uint32_t reg = 0; reg < 4; ++reg) {
           for (uint32_t lane = 0; lane < 64; ++lane) {
-            EXPECT_EQ(fixture.cu->read_vgpr(base + 16 + reg, lane), rejected ? 0x80000000U
-                                                                    : bf16   ? 0x7f800000U
-                                                                             : 0x42000000U);
+            EXPECT_EQ(fixture.cu->read_vgpr(base + 16 + reg, lane), expected);
           }
         }
       }

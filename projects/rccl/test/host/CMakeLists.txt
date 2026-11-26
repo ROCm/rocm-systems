@@ -519,6 +519,12 @@ function(rccl_add_unit_micro_binary _name _test)
     message(FATAL_ERROR "rccl_add_unit_micro_binary(${_name}): unknown arguments: ${_raumb_UNPARSED_ARGUMENTS}")
   endif()
   set(_raumb_shared ${_raumb_SOURCES} ../common/main_altrsmi.cpp)
+  # ppc64le: TOC entries survive --gc-sections, so dead references to the
+  # devComm-compat / debug / allocTracker symbols fail to link. Add weak
+  # fallback definitions on POWER only; x86 link lines are unchanged.
+  if(CMAKE_SYSTEM_PROCESSOR MATCHES "ppc64|powerpc")
+    list(APPEND _raumb_shared ../common/toc_compat_stubs.cc)
+  endif()
   if(_raumb_PROCESS_ISOLATED)
     # GpuCountProbe.cpp resolves the runner's gpuCountViaFreshImage(); the two always link together.
     list(APPEND _raumb_shared ../common/GpuCountProbe.cpp ../common/ProcessIsolatedTestRunner.cpp)

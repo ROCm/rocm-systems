@@ -212,11 +212,13 @@ Result validate_image_facts(const ImageFacts &image, util::DiagnosticEmitter dia
           manifest.prepared_text_bytes != image.prepared_text_bytes) {
         return diagnostic.emit() << "entry manifest differs from image";
       }
-      if (!add_extent(total_sites, manifest.sites.size(), limits.sites) ||
+      if (!add_extent(total_sites, manifest.sites.size() + manifest.flat_exclusions.size(),
+                      limits.sites) ||
           !add_extent(encoded_bytes,
                       kManifestFixedBytes + manifest.entry.name.size() +
                           uint64_t{manifest.sites.size()} * kSiteBytes +
-                          uint64_t{manifest.barriers.size()} * kBarrierBytes,
+                          uint64_t{manifest.barriers.size()} * kBarrierBytes +
+                          wire::flat_exclusion_table_bytes(manifest.flat_exclusions.size()),
                       limits.metadata_bytes)) {
         return diagnostic.emit() << "aggregate image facts exceed budget";
       }
@@ -227,6 +229,9 @@ Result validate_image_facts(const ImageFacts &image, util::DiagnosticEmitter dia
                                            site.prepared_guest_offset + site.prepared_guest_size);
         prepared_observations.emplace_back(site.probe_offset, site.probe_offset + site.probe_size);
       }
+      for (const FlatExclusion &excluded : manifest.flat_exclusions)
+        original_sites.emplace_back(excluded.original_offset,
+                                    excluded.original_offset + excluded.original_size);
       for (const BarrierFacts &barrier : manifest.barriers) {
         original_sites.emplace_back(barrier.original_drain, barrier.original_wait + 4);
         if (barrier.prepared_signal != barrier.prepared_wait) {
@@ -352,6 +357,7 @@ FailureOr<ImageFacts> decode_image_facts(std::span<const uint8_t> bytes,
     return diagnostic.emit() << "entry count disagrees with extent";
   }
   image.entries.reserve(count);
+  ContractLimits remaining_limits = limits;
   for (uint32_t index = 0; index < count; ++index) {
     ImageEntryFacts entry;
     uint32_t disposition = 0;
@@ -380,11 +386,13 @@ FailureOr<ImageFacts> decode_image_facts(std::span<const uint8_t> bytes,
     }
     entry.disposition = static_cast<EntryDisposition>(disposition);
     if (manifest_bytes != 0) {
-      FailureOr<Manifest> manifest =
-          decode_manifest(payload.remaining_bytes().first(manifest_bytes), diagnostic, limits);
+      FailureOr<Manifest> manifest = decode_manifest(
+          payload.remaining_bytes().first(manifest_bytes), diagnostic, remaining_limits);
       if (manifest.failed()) {
         return Result::failure();
       }
+      remaining_limits.sites -=
+          manifest.value().sites.size() + manifest.value().flat_exclusions.size();
       entry.selected = std::move(manifest.value());
     }
     if (!payload.skip(manifest_bytes)) {
