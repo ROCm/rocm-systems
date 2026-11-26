@@ -603,8 +603,9 @@ HIP_TEST_CASE(Unit_hipMemSetAccess_SegmentsAccess) {
  * first mapping and ends in the last one, so that rows cross both mapping
  * boundaries. Copy it with hipMemcpy2DAsync (H2D, D2H, D2D), hipMemcpy3DAsync
  * and fill it with hipMemset2DAsync, also captured in a graph, and validate the
- * data in the whole range. A region that runs past the last mapping is still
- * rejected.
+ * data in the whole range. Copy and fill a 3D region whose slices are more rows
+ * apart than its height with hipMemcpy3DAsync and hipMemset3DAsync. A region
+ * that runs past the last mapping is still rejected.
  * ------------------------
  *    - unit/virtualMemoryManagement/hipMemSetGetAccess.cc
  * Test requirements
@@ -675,6 +676,29 @@ HIP_TEST_CASE(Unit_hipMemSetAccess_SegmentsMemcpy2D) {
   for (size_t y = 0; y < height; y++) {
     std::copy_n(init.begin() + offset + y * pitch, width, expected_rows.begin() + y * width);
   }
+
+  // 3D region: 4 slices of 2 rows, 4 rows apart (ysize > height), from `offset`. The slices start
+  // in segments 0, 1, 1 and 2.
+  const size_t pitch_3d = granularity / 2;
+  const size_t width_3d = granularity / 4;
+  const size_t height_3d = 2;
+  const size_t ysize_3d = 4;
+  const size_t depth_3d = 4;
+  const size_t slice_3d = pitch_3d * ysize_3d;
+  REQUIRE(offset + (depth_3d - 1) * slice_3d > segment_size[0] + segment_size[1]);
+  REQUIRE(offset + (depth_3d - 1) * slice_3d + (height_3d - 1) * pitch_3d + width_3d <= total_size);
+  // Range contents expected after writing `value(i)` to byte i of the packed 3D region
+  auto expected_3d = [&](auto value) {
+    std::vector<char> out = init;
+    for (size_t z = 0; z < depth_3d; z++) {
+      for (size_t y = 0; y < height_3d; y++) {
+        for (size_t x = 0; x < width_3d; x++) {
+          out[offset + z * slice_3d + y * pitch_3d + x] = value((z * height_3d + y) * width_3d + x);
+        }
+      }
+    }
+    return out;
+  };
 
   HIP_CHECK(hipMemcpy(base, init.data(), total_size, hipMemcpyHostToDevice));
   char* dev_rows = nullptr;
@@ -761,6 +785,29 @@ HIP_TEST_CASE(Unit_hipMemSetAccess_SegmentsMemcpy2D) {
     REQUIRE(result == expected_set);
   }
 
+  SECTION("hipMemcpy3DAsync host to VMM, slices more rows apart than the height") {
+    std::vector<char> src(width_3d * height_3d * depth_3d);
+    for (size_t i = 0; i < src.size(); i++) src[i] = static_cast<char>(~pattern(i));
+    hipMemcpy3DParms params{};
+    params.srcPtr = make_hipPitchedPtr(src.data(), width_3d, width_3d, height_3d);
+    params.dstPtr = make_hipPitchedPtr(region, pitch_3d, width_3d, ysize_3d);
+    params.extent = make_hipExtent(width_3d, height_3d, depth_3d);
+    params.kind = hipMemcpyHostToDevice;
+    HIP_CHECK(hipMemcpy3DAsync(&params, stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipMemcpy(result.data(), base, total_size, hipMemcpyDeviceToHost));
+    REQUIRE(result == expected_3d([&](size_t i) { return src[i]; }));
+  }
+
+  SECTION("hipMemset3DAsync, slices more rows apart than the height") {
+    constexpr int value = 0x3c;
+    HIP_CHECK(hipMemset3DAsync(make_hipPitchedPtr(region, pitch_3d, width_3d, ysize_3d), value,
+                               make_hipExtent(width_3d, height_3d, depth_3d), stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipMemcpy(result.data(), base, total_size, hipMemcpyDeviceToHost));
+    REQUIRE(result == expected_3d([](size_t) { return static_cast<char>(value); }));
+  }
+
   SECTION("Region past the last mapping is rejected") {
     const size_t past_height = (total_size - offset) / pitch + 2;
     std::vector<char> out(width * past_height);
@@ -774,6 +821,29 @@ HIP_TEST_CASE(Unit_hipMemSetAccess_SegmentsMemcpy2D) {
     REQUIRE(offset + width * past_height <= total_size);
     HIP_CHECK_ERROR(hipMemset2DAsync(region, pitch, 0, width, past_height, stream),
                     hipErrorInvalidValue);
+
+    // One more slice of the 3D region reaches the unmapped tail of the range, though the packed
+    // size and the rows of one slice would fit
+    const size_t past_depth = depth_3d + 1;
+    REQUIRE(offset + (past_depth - 1) * slice_3d + (height_3d - 1) * pitch_3d + width_3d >
+            total_size);
+    REQUIRE(offset + (past_depth * height_3d - 1) * pitch_3d + width_3d <= total_size);
+    HIP_CHECK_ERROR(hipMemset3DAsync(make_hipPitchedPtr(region, pitch_3d, width_3d, ysize_3d), 0,
+                                     make_hipExtent(width_3d, height_3d, past_depth), stream),
+                    hipErrorInvalidValue);
+
+    // 3D copy from a pointer deep in the last mapping: its last slice reaches the unmapped tail
+    const size_t deep_offset = total_size - granularity / 2;
+    const size_t deep_end = deep_offset + (2 * height_3d - 1) * pitch_3d + width_3d;
+    REQUIRE(deep_end > total_size);
+    REQUIRE(deep_end <= reserve_size);
+    std::vector<char> out_3d(width_3d * height_3d * depth_3d);
+    hipMemcpy3DParms params{};
+    params.srcPtr = make_hipPitchedPtr(base_c + deep_offset, pitch_3d, width_3d, height_3d);
+    params.dstPtr = make_hipPitchedPtr(out_3d.data(), width_3d, width_3d, height_3d);
+    params.extent = make_hipExtent(width_3d, height_3d, 2);
+    params.kind = hipMemcpyDeviceToHost;
+    HIP_CHECK_ERROR(hipMemcpy3DAsync(&params, stream), hipErrorInvalidValue);
     // Consume the error the rejected calls leave behind
     (void)hipGetLastError();
     HIP_CHECK(hipStreamSynchronize(stream));
