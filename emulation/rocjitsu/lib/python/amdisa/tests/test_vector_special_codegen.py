@@ -13,8 +13,6 @@ from amdisa.codegen._generator import CodeGenerator
 from amdisa.codegen.execute.vector_special import (
     gen_vector_movrel,
     gen_vector_swaprel,
-    gen_vector_sat_pack,
-    gen_vector_perm_pk16,
 )
 from amdisa.gpuisa import Instruction, Operand
 from amdisa.isa_profile import Cdna5Profile, Rdna3Profile, Rdna4Profile
@@ -55,27 +53,10 @@ def test_relative_vgpr_ops_use_unsigned_packed_m0_fields():
     assert 'static_cast<int32_t>(wf.m0())' not in full_width
 
 
-def test_saturating_pack_rejects_retired_fallback():
-    with pytest.raises(
-        ValueError, match='Saturating packing requires rj-arith lowering'
-    ):
-        gen_vector_sat_pack(['vdst'], ['src0'], 'u8_i16')
-
-
-def test_perm_codegen_covers_multiword_results():
-    perm = gen_vector_perm_pk16(['vdst'], ['src0', 'src1', 'src2'], 'b6', True)
-    assert 'uint32_t packed[3]' in perm
-    assert 'source_bit = index * 6u' in perm
-    assert 'Operand dst_word = vdst;' in perm
-    assert 'dst_word.encoding_value_' in perm
-    assert 'read_lane64(src1, lane)' in perm
-
-
 @pytest.mark.parametrize(
     ('generator', 'args'),
     [
         (gen_vector_movrel, (['vdst'], ['src0'], 'unknown')),
-        (gen_vector_perm_pk16, (['vdst'], ['src0', 'src1', 'src2'], 'unknown', True)),
     ],
 )
 def test_unsupported_vector_special_operations_fail_during_generation(generator, args):

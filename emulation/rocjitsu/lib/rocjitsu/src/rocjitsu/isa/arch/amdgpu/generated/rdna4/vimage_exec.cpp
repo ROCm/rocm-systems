@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vimage.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/dot_packed16.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/image_access.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/image_resource.h"

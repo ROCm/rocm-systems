@@ -48,7 +48,7 @@ inline void execute_cdna1_binary32(Inst &inst, Wavefront &wave, FloatBinary32Fun
   }
   for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
     if ((exec_mask >> lane) & 1) {
-      sdwa::write_lane<sdwa::ResultFormat::NONE>(inst, wave, destination, lane, results[lane]);
+      sdwa::write_lane(inst, wave, destination, lane, results[lane]);
     }
   }
   wave.set_trapsts(wave.trapsts() | causes);
