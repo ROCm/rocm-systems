@@ -408,8 +408,11 @@ void MemoryCopyEngineTest::PeerCopyTest() {
 
   hsa_amd_memory_pool_t pool_a = {0};
   hsa_amd_memory_pool_t pool_b = {0};
-  ASSERT_SUCCESS(hsa_amd_agent_iterate_memory_pools(gpu_a, rocrtst::FindStandardPool, &pool_a));
-  ASSERT_SUCCESS(hsa_amd_agent_iterate_memory_pools(gpu_b, rocrtst::FindStandardPool, &pool_b));
+  // FindStandardPool stops the iteration with HSA_STATUS_INFO_BREAK once it finds a pool.
+  ASSERT_EQ(hsa_amd_agent_iterate_memory_pools(gpu_a, rocrtst::FindStandardPool, &pool_a),
+            HSA_STATUS_INFO_BREAK);
+  ASSERT_EQ(hsa_amd_agent_iterate_memory_pools(gpu_b, rocrtst::FindStandardPool, &pool_b),
+            HSA_STATUS_INFO_BREAK);
 
   SharedBuffer host_src, host_dst, dev_a, dev_b;
   ASSERT_SUCCESS(host_src.Allocate(cpu_pool(), kCopyBytes, agents));
