@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "group_flat_oracle.h"
 #include "native_d16_oracle.h"
 #include "rocjitsu/code/consan/target.h"
 #include "rocjitsu/hooks/consan/api.h"
@@ -110,7 +111,8 @@ int run(int argc, char **argv) {
            "wide_b8_peer, wide_d16_u8, wide_d16_i8, wide_d16_u16, wide_d16_peer, wide_u16, "
            "wide_i16, "
            "wide_b64, wide_b96, wide_b128, atomic_u32_count, atomic_u64_count, atomic_f32_count, "
-           "atomic_f64_count, atomic_cas_count, transpose_BITS_SCENARIO, observe\n";
+           "atomic_f64_count, atomic_cas_count, flat_half_values, flat_b64_values, "
+           "flat_b128_values, transpose_BITS_SCENARIO, observe\n";
     return 3;
   }
   uint32_t launches = 0;
@@ -138,6 +140,8 @@ int run(int argc, char **argv) {
       return 3;
     }
   }
+  const uint32_t flat_width = mode == "flat_b64_values" ? 8 : mode == "flat_b128_values" ? 16 : 0;
+  const bool flat_half = mode == "flat_half_values";
   const bool atomic_cas = mode == "atomic_cas_count";
   const bool atomic_wide = mode == "atomic_u64_count" || mode == "atomic_f64_count";
   const bool defined =
@@ -154,8 +158,8 @@ int run(int argc, char **argv) {
                               : mode == "wide_b96"                                             ? 12
                               : mode == "wide_b128"                                            ? 16
                                                                                                : 0;
-  if (!atomic_wide && !atomic_cas && !defined && !synchronized && !grouped && wide_width == 0 &&
-      !d16 && !transpose_bits && mode != "observe") {
+  if (!flat_width && !flat_half && !atomic_wide && !atomic_cas && !defined && !synchronized &&
+      !grouped && wide_width == 0 && !d16 && !transpose_bits && mode != "observe") {
     return 3;
   }
   std::string_view target = "gfx1100";
@@ -209,6 +213,8 @@ int run(int argc, char **argv) {
   const uint32_t wave_count = (threads + wave_size - 1) / wave_size;
   const uint32_t output_words =
       transpose_bits ? 4u * threads * workgroups
+      : flat_width   ? (2 * flat_width / 4) * wave_count * workgroups
+      : flat_half    ? 6u * wave_count * workgroups
                      : std::max(((wide_width || d16 || atomic_cas) ? 4u : (atomic_wide ? 2u : 1u)) *
                                     wave_count * workgroups,
                                 2u);
@@ -468,6 +474,21 @@ int run(int argc, char **argv) {
                                       : input + wave + (mode == "atomic_u32_count" ? 2u : 0u);
         if (last_output[wave] != expected) {
           result = 23;
+        }
+      }
+    }
+    if (flat_width || flat_half) {
+      for (uint32_t wave = 0; wave < wave_count; ++wave) {
+        const std::vector<uint32_t> expected =
+            flat_width ? rocjitsu::consan::test::flat_wide_output(flat_width, input, wave)
+                       : rocjitsu::consan::test::flat_half_output(target, wave);
+        for (size_t word = 0; word < expected.size(); ++word) {
+          const uint32_t observed = last_output[wave * expected.size() + word];
+          if (observed != expected[word]) {
+            std::cerr << "wave " << wave << " word " << word << " expected " << expected[word]
+                      << " observed " << observed << '\n';
+            result = 23;
+          }
         }
       }
     }

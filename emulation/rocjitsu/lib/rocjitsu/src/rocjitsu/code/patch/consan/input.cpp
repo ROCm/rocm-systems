@@ -279,7 +279,7 @@ Result collect_original_code(const std::vector<std::unique_ptr<BasicBlock>> &blo
                                 aperture.selected.active, program.flat_policy,
                                 program.flat_exclusions};
       if (classify_lds_race_instruction(instruction, program.target->arch, program.original_vgprs,
-                                        program.accesses, error, &flat)
+                                        program.accesses, error, &flat, program.original_sgprs)
               .failed()) {
         return Result::failure();
       }
