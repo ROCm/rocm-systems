@@ -202,7 +202,7 @@
     <div class="md-source__repository md-source__repository--active">
       ROCm/rocm-systems
       <ul class="md-source__facts">
-        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 573 · build snapshot" aria-label="Stars: 573">573</li>
+        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 574 · build snapshot" aria-label="Stars: 574">574</li>
         <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 514 · build snapshot" aria-label="Forks: 514">514</li>
       </ul>
     </div>
@@ -255,7 +255,7 @@
     <div class="md-source__repository md-source__repository--active">
       ROCm/rocm-systems
       <ul class="md-source__facts">
-        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 573 · build snapshot" aria-label="Stars: 573">573</li>
+        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 574 · build snapshot" aria-label="Stars: 574">574</li>
         <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 514 · build snapshot" aria-label="Forks: 514">514</li>
       </ul>
     </div>
@@ -1115,6 +1115,51 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Implementation strategy">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#when-a-speedup-justifies-more-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When a speedup justifies more code
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="When a speedup justifies more code">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#cpu-paths" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CPU paths
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#semantics-paths" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Semantics paths
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -2049,6 +2094,51 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Implementation strategy">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#when-a-speedup-justifies-more-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When a speedup justifies more code
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="When a speedup justifies more code">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#cpu-paths" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CPU paths
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#semantics-paths" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Semantics paths
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2395,6 +2485,50 @@ establish that it matches hardware.</p>
 outside a fast path without unnecessarily discarding SIMD work for other lanes.
 Reporting and non-reporting modes share arithmetic, with FP status calculations
 performed only when requested. EXEC masks generally control stores, not computation.</p>
+<h3 id="when-a-speedup-justifies-more-code">When a speedup justifies more code<a class="headerlink" href="#when-a-speedup-justifies-more-code" title="Permanent link">&para;</a></h3>
+<p>An extra code path must earn its size and complexity through speedup. The same
+trade-off applies within a path, for example when unrolling a loop.</p>
+<h4 id="cpu-paths">CPU paths<a class="headerlink" href="#cpu-paths" title="Permanent link">&para;</a></h4>
+<p><code>RJ_ARITH_CPU_*</code> paths implement equivalent behavior. Always keep
+<code>RJ_ARITH_CPU_BASELINE</code> as a simple reference for even the oldest supported
+CPUs. Its speed is secondary, and it never needs extra complexity for speed.</p>
+<p>Benchmark each additional path against the implementation dispatch would select
+without it, on the same host with the same inputs and requested semantics. If
+a Zen 4 host would fall back to V3 for that entry point, compare against V3.</p>
+<p>Run <code>rj_arith_benchmark &gt; results.csv</code> to obtain the measurements. The CSV's
+<code>Speedup</code> column compares against scalar, not against the path being replaced.
+For a V4 path that otherwise falls back to V3, divide V3 <code>ns/wave</code> by V4
+<code>ns/wave</code>, matching the instruction, requested semantics, variant and input kind.
+A V4 speedup above 1.2x against scalar does not establish a 1.2x gain over V3.</p>
+<p>Use these thresholds as guidelines. Raise borderline cases and exceptions for
+discussion.</p>
+<ul>
+<li><strong>Dense WMMA/MFMA and other typically performance-critical instructions.</strong>
+  Unless a different threshold applies, generally omit paths below 1.1x speedup,
+  discuss 1.1x through 1.2x, and keep paths above 1.2x.</li>
+<li><strong>Sparse WMMA/MFMA.</strong> Less frequent use raises the discussion range to
+  1.2x–1.4x. For both dense and sparse WMMA/MFMA, the thresholds apply across
+  element types and tile shapes.</li>
+<li><strong>Other instructions.</strong> Adjust the threshold to the instruction's importance
+  in real workloads. For rarely performance-critical operations such as sine
+  and cosine, use at least 2x.</li>
+</ul>
+<p><code>RJ_ARITH_CPU_X86_64_V3</code> is the effective baseline for many older CPUs. With
+no feature level between V3 and baseline x86-64, V3 should readily clear the
+usual thresholds.</p>
+<p><code>RJ_ARITH_CPU_X86_64_V4</code> plays a narrower role between V3 and
+<code>RJ_ARITH_CPU_X86_64_ZEN4</code>. Use V4 when it lets older CPUs run the same
+AVX-512 code. Require Zen 4 features when they help. Keeping both paths for
+the same instruction and semantics should be rare and warrants discussion.</p>
+<h4 id="semantics-paths">Semantics paths<a class="headerlink" href="#semantics-paths" title="Permanent link">&para;</a></h4>
+<p>A stricter implementation already satisfies the looser semantics contract, so a
+separate looser path must justify its cost with a speedup. Benchmark the same
+request with and without the looser path, applying the same instruction-specific
+thresholds used for CPU paths. Share common arithmetic when both paths earn
+their place.</p>
+<p>To isolate the gain from looser semantics, compare reasonably optimized paths
+at the same CPU feature level. If dispatch falls back to a different level,
+the measured gain includes both CPU specialization and the change in semantics.</p>
 <h2 id="testing">Testing<a class="headerlink" href="#testing" title="Permanent link">&para;</a></h2>
 <h3 id="explicit-tests-with-shared-family-helpers">Explicit tests with shared family helpers<a class="headerlink" href="#explicit-tests-with-shared-family-helpers" title="Permanent link">&para;</a></h3>
 <p>Every entry point has a named test that calls it explicitly. Related operations,
