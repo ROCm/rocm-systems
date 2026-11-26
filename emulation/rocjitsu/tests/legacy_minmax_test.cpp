@@ -175,6 +175,7 @@ TEST_P(LegacyMinMaxInstruction, DoubleSelectionPreservesEncodings) {
 }
 
 TEST_P(LegacyMinMaxInstruction, MedianNanThirdSourceUsesMinimum) {
+  const uint32_t f16_hi = std::get<0>(GetParam()) == rocjitsu::IsaFamily::Cdna4 ? 0xdead0000u : 0u;
   for (bool ieee : {false, true}) {
     wave_->set_mode_raw(ieee ? amdgpu::Wavefront::IEEE_BIT : 0);
     put(0, 0x3f800000);
@@ -186,25 +187,26 @@ TEST_P(LegacyMinMaxInstruction, MedianNanThirdSourceUsesMinimum) {
     put(0, 0x3c00);
     put(1, 0x4000);
     put(2, 0x7e01);
-    check(vop3(cdna4::kVMed3F16Vop3), 0x3c00);
+    check(vop3(cdna4::kVMed3F16Vop3), f16_hi | 0x3c00);
     put(2, 0x7c01);
-    check(vop3(cdna4::kVMed3F16Vop3), ieee ? 0x7e01 : 0x3c00);
+    check(vop3(cdna4::kVMed3F16Vop3), f16_hi | (ieee ? 0x7e01 : 0x3c00));
   }
 }
 
 TEST_P(LegacyMinMaxInstruction, PackedHalfMinMaxSelectNanPayloads) {
+  const bool cdna4 = std::get<0>(GetParam()) == rocjitsu::IsaFamily::Cdna4;
   for (bool ieee : {false, true}) {
     wave_->set_mode_raw((3u << 6) | (ieee ? amdgpu::Wavefront::IEEE_BIT : 0));
     for (auto opcode : {cdna4::kVPkMinF16Vop3p, cdna4::kVPkMaxF16Vop3p}) {
-      for (const auto &input :
-           std::array<std::array<uint16_t, 4>, 4>{{{0x7e01, 0x7e02, 0x7e02, 0x7e02},
-                                                   {0x7e01, 0x7c02, 0x7c02, 0x7e02},
-                                                   {0x7c01, 0x3c00, 0x3c00, 0x7e01},
-                                                   {0x7c01, 0x7c02, 0x7c02, 0x7e01}}}) {
+      for (const auto &input : std::array<std::array<uint16_t, 6>, 4>{
+               {{0x7e01, 0x7e02, 0x7e02, 0x7e01, 0x7e02, 0x7e01},
+                {0x7e01, 0x7c02, 0x7c02, 0x7e01, 0x7e02, 0x7e02},
+                {0x7c01, 0x3c00, 0x3c00, 0x3c00, 0x7e01, 0x7e01},
+                {0x7c01, 0x7c02, 0x7c02, 0x7c01, 0x7e01, 0x7e01}}}) {
         put(0, uint32_t(input[0]) * 0x10001u);
         put(1, uint32_t(input[1]) * 0x10001u);
         check(cdna4::build_vop3p(opcode, {.vdst = 4, .src0 = 256, .src1 = 257, .op_sel_hi = 3}),
-              uint32_t(input[ieee ? 3 : 2]) * 0x10001u);
+              uint32_t(input[(ieee ? 4 : 2) + cdna4]) * 0x10001u);
       }
     }
   }
@@ -213,6 +215,8 @@ TEST_P(LegacyMinMaxInstruction, PackedHalfMinMaxSelectNanPayloads) {
 // CDNA1-4, RDNA1/2 and RDNA3/3.5 each share the encodings used here.
 class LegacySelectionPolicy : public LegacyMinMaxInstruction {
 protected:
+  bool cdna4() const { return std::get<0>(GetParam()) == rocjitsu::IsaFamily::Cdna4; }
+
   bool rdna12() const {
     return std::get<0>(GetParam()) == rocjitsu::IsaFamily::Rdna1 ||
            std::get<0>(GetParam()) == rocjitsu::IsaFamily::Rdna2;
@@ -225,8 +229,8 @@ protected:
 
   void check_vop3(uint32_t cdna_opcode, uint32_t rdna_opcode, uint32_t expected,
                   bool half = false) {
-    if (half && rdna()) {
-      expected |= 0xdead0000u; // RDNA half writes preserve the other destination half.
+    if (half && (rdna() || (cdna4() && cdna_opcode == cdna4::kVMed3F16Vop3))) {
+      expected |= 0xdead0000u; // RDNA half writes and CDNA4 MED3_F16 preserve the upper half.
     }
     if (rdna12()) {
       // Binary min/max opcodes agree across RDNA; MED3 moved in RDNA3.
@@ -306,7 +310,7 @@ TEST_P(LegacySelectionPolicy, HalfVop2NanAndZeroSelection) {
         SCOPED_TRACE(testing::Message() << std::hex << input[0] << ":" << input[1]);
         put(0, input[0]);
         put(1, input[1]);
-        select(input[(ieee ? 4 : 2) + rdna()]);
+        select(input[(ieee ? 4 : 2) + (rdna() || cdna4())]);
       }
       for (bool reverse : {false, true}) {
         put(0, reverse ? 0 : 0x8000);
@@ -369,7 +373,7 @@ TEST_P(LegacySelectionPolicy, MedianNanSourceAndPayloadPriority) {
       put(0, quiet);
       put(1, quiet + 1);
       put(2, quiet + 2);
-      median(rdna() ? quiet : quiet + 2);
+      median((rdna() || cdna4()) ? quiet : quiet + 2);
     }
   }
 }
@@ -380,8 +384,8 @@ TEST_P(LegacySelectionPolicy, MedianSignedZeroOrdering) {
     const uint32_t negative_one = half ? 0xbc00 : 0xbf800000;
     for (bool ieee : {false, true}) {
       wave_->set_mode_raw(ieee ? amdgpu::Wavefront::IEEE_BIT : 0);
-      // gfx1010/gfx1030/gfx1100 measurements distinguish these cases from
-      // floating == in the manual's MAX3/source comparison. CDNA follows that
+      // gfx1010/gfx1030/gfx1100 and MI350X measurements distinguish these cases from
+      // floating == in the manual's MAX3/source comparison. CDNA1-3 follow that
       // pseudocode.
       for (auto inputs :
            std::array<std::array<uint32_t, 3>, 5>{{{negative_zero, negative_one, 0},
@@ -393,8 +397,8 @@ TEST_P(LegacySelectionPolicy, MedianSignedZeroOrdering) {
           put(source, inputs[source]);
         }
         check_vop3(half ? cdna4::kVMed3F16Vop3 : cdna4::kVMed3F32Vop3,
-                   half ? rdna3::kVMed3F16Vop3 : rdna3::kVMed3F32Vop3, rdna() ? negative_zero : 0,
-                   half);
+                   half ? rdna3::kVMed3F16Vop3 : rdna3::kVMed3F32Vop3,
+                   (rdna() || cdna4()) ? negative_zero : 0, half);
       }
     }
   }
@@ -416,7 +420,7 @@ TEST_P(LegacySelectionPolicy, PackedHalfNanPriorityAndClamp) {
         };
         put(0, 0x7e017e01);
         put(1, 0x7e027e02);
-        packed(rdna() ? 0x7e017e01 : 0x7e027e02);
+        packed((rdna() || cdna4()) ? 0x7e017e01 : 0x7e027e02);
         put(0, 0x80008000);
         put(1, 0x80008000);
         packed(clamp ? 0 : 0x80008000);

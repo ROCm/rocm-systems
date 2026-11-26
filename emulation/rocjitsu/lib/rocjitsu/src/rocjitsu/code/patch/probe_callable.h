@@ -84,6 +84,7 @@ enum class ProbeArgSource {
   EntryVgprLane0, ///< Lane zero of a VGPR, captured once at dispatch entry.
   EntrySgpr,      ///< Original guest SGPR, captured after wrapper restoration.
   EntryTtmp,      ///< Original guest trap-temporary register, indexed from zero.
+  AnchorSgpr,     ///< Ordinary guest SGPR at the selected observation point.
 };
 
 /// @brief One argument dword: where it comes from, and its value when that is a
@@ -109,14 +110,22 @@ struct ProbeArgValue {
   return ProbeArgValue{.source = ProbeArgSource::AnchorVgpr, .register_index = index};
 }
 
+/// @brief Broadcast an ordinary guest SGPR at the observation point to all probe lanes.
+[[nodiscard]] inline constexpr ProbeArgValue probe_arg_sgpr(uint16_t index) {
+  return ProbeArgValue{.source = ProbeArgSource::AnchorSgpr, .register_index = index};
+}
+
 /// @brief Registers an observation requires in addition to the guest's own uses.
-/// @details Callers must validate indices against the kernel's ordinary VGPR
-/// allocation before using the set for resource planning.
+/// @details Callers must validate indices against the kernel's ordinary register
+/// allocations before using the set for resource planning.
 [[nodiscard]] inline RegisterSet probe_argument_registers(std::span<const ProbeArgValue> args) {
   RegisterSet registers;
   for (const ProbeArgValue &arg : args) {
     if (arg.source == ProbeArgSource::AnchorVgpr && arg.register_index < 256) {
       registers.expand(RegisterRef{RegClass::VGPR, arg.register_index, 1});
+    } else if (arg.source == ProbeArgSource::AnchorSgpr &&
+               arg.register_index < REGISTER_SET_MAX_SGPRS) {
+      registers.expand(RegisterRef{RegClass::SGPR, arg.register_index, 1});
     }
   }
   return registers;
@@ -170,6 +179,7 @@ struct ProbeArgValue {
   case ProbeArgSource::LogBufferPtrLo:
   case ProbeArgSource::LogBufferPtrHi:
   case ProbeArgSource::AnchorVgpr:
+  case ProbeArgSource::AnchorSgpr:
   case ProbeArgSource::EntryVgprLane0:
   case ProbeArgSource::EntrySgpr:
   case ProbeArgSource::EntryTtmp:

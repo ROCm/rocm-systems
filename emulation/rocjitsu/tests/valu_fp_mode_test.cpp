@@ -1198,6 +1198,7 @@ std::vector<ArithmeticCase> vopd_mul_dx9_cases() {
            {{6, expected}, {7, expected}},
            mode,
            mode == 0xf0u ? expect_simd_path(amdgpu::SimdFastPath::VOPD) : expect_simd_fallback()});
+      cases.back().arith_dispatch = arch == rocjitsu::IsaFamily::Rdna3_5;
     };
     add("Preserve", 0x00000001u, 0x4b000000u, 0x00800000u, 0xf0u);
     add("PreserveNegative", 0x80000001u, 0x4b000000u, 0x80800000u, 0xf0u);
@@ -3535,8 +3536,9 @@ std::vector<ArithmeticCase> fp8_cases() {
   add("SrBf8Neg", sr(rdna4::kVCvtSrBf8F32Vop3, {.neg = 1}), pair(0x3f800000u, 1u, 0u), {{6, 0xbcu}},
       0xf0u, expect_simd_fallback());
 
-  // gfx950 is uncaptured. Its manual's FP16_OVFL rule saturates an infinity to
-  // the largest finite value, unlike the gfx1201 PkFp8InfinityFp16Ovfl row.
+  // MI350X (gfx950, ROCm 7.2.4, gfx950_cvt_valu.bin idx=263/264) preserves signed
+  // infinities (0x7f/0xff in FP8, 0x7c/0xfc in BF8) on both PK and SR even when
+  // FP16_OVFL is set, matching gfx1201 PkFp8InfinityFp16Ovfl rather than CDNA4 §7.3.
   const auto manual_pk = [&](const char *name, rocjitsu::IsaFamily arch,
                              std::array<uint32_t, 2> words, uint32_t low, uint32_t result) {
     cases.push_back({name,
@@ -3551,9 +3553,14 @@ std::vector<ArithmeticCase> fp8_cases() {
     manual_pk(name, rocjitsu::IsaFamily::Cdna4,
               cdna4::build_vop3(op, {.vdst = 6, .src0 = 256, .src1 = 257}), low, result);
   };
-  cdna4_pk("Gfx950PkFp8InfinityFp16Ovfl", cdna4::kVCvtPkFp8F32Vop3, 0x7f800000u, 0x7eu);
-  cdna4_pk("Gfx950PkFp8NegInfinityFp16Ovfl", cdna4::kVCvtPkFp8F32Vop3, 0xff800000u, 0xfeu);
-  cdna4_pk("Gfx950PkBf8InfinityFp16Ovfl", cdna4::kVCvtPkBf8F32Vop3, 0x7f800000u, 0x7bu);
+  cdna4_pk("Gfx950PkFp8InfinityFp16Ovfl", cdna4::kVCvtPkFp8F32Vop3, 0x7f800000u, 0x7fu);
+  cdna4_pk("Gfx950PkFp8NegInfinityFp16Ovfl", cdna4::kVCvtPkFp8F32Vop3, 0xff800000u, 0xffu);
+  cdna4_pk("Gfx950PkBf8InfinityFp16Ovfl", cdna4::kVCvtPkBf8F32Vop3, 0x7f800000u, 0x7cu);
+  cdna4_pk("Gfx950PkBf8NegInfinityFp16Ovfl", cdna4::kVCvtPkBf8F32Vop3, 0xff800000u, 0xfcu);
+  cdna4_pk("Gfx950SrFp8InfinityFp16Ovfl", cdna4::kVCvtSrFp8F32Vop3, 0x7f800000u, 0x7fu);
+  cdna4_pk("Gfx950SrFp8NegInfinityFp16Ovfl", cdna4::kVCvtSrFp8F32Vop3, 0xff800000u, 0xffu);
+  cdna4_pk("Gfx950SrBf8InfinityFp16Ovfl", cdna4::kVCvtSrBf8F32Vop3, 0x7f800000u, 0x7cu);
+  cdna4_pk("Gfx950SrBf8NegInfinityFp16Ovfl", cdna4::kVCvtSrBf8F32Vop3, 0xff800000u, 0xfcu);
   // CDNA5 Table 7 (p. 22) preserves true infinity outside WMMA. Section 7.6.2
   // (p. 81) instead specifies max finite with FP16_OVFL set for these converts.
   // These encodings use physical gfx1201 results as a proxy pending gfx1250 data.

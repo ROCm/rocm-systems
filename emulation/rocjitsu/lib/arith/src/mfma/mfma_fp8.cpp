@@ -24,10 +24,10 @@ int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32
   // Only the captured gfx942 forms with default source controls are qualified.
   // Compatibility retains the existing fast approximate implementation.
   if constexpr (Fnuz) {
-    if (is_exact(flags) && !controls && !(flags & RJ_ARITH_FP16_OVFL)) {
+    if (is_exact(flags) && !controls) {
       mfma_gfx942_exact(Bf8A ? (Bf8B ? MfmaGfx942Format::Bf8Bf8 : MfmaGfx942Format::Bf8Fp8)
                              : (Bf8B ? MfmaGfx942Format::Fp8Bf8 : MfmaGfx942Format::Fp8Fp8),
-                        M, K, 1, d, a, b, c);
+                        M, K, 1, (flags & RJ_ARITH_FP16_OVFL) != 0, d, a, b, c);
       return RJ_ARITH_SUCCESS;
     }
   }

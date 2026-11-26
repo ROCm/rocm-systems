@@ -167,6 +167,21 @@ These settings may impact performance and stability and should only be used when
       - | 0: Fragment allocator enabled (normal operation).
         | 1: Fragment allocator disabled. Helps debug tools identify memory faults at their origin by preventing cached memory blocks from masking out-of-bounds writes.
 
+    * - | ``HSA_DEVICE_MEM_NO_HOST_ACCESS``
+        | Makes CPU access to GPU device-local memory fault, for example to check portability to platforms where device allocations are not host-accessible. Not intended for production performance runs.
+      - ``0``
+      - | 0: Normal operation.
+        | 1: All GPU device-local pools (coarse-grain, fine-grain and extended-scope fine-grain, such as what ``hipMalloc`` returns) are mapped without CPU access, so CPU loads and stores to them raise SIGSEGV. Side effects while set:
+        | - Device pools report no CPU access (``NEVER_ALLOWED``) and CPU-to-device-pool link info reports no link.
+        | - Device pools are not signal capable. Together with the reported lack of CPU access, this makes HIP keep kernargs and signals in host memory, as with ``ROC_ENABLE_LARGE_BAR=0``. On large-BAR dGPUs this adds kernel launch latency; for example, RCCL all-reduce on MI300X measured about 20 µs slower per call from 512 KB message size up.
+        | - Code objects are always loaded using DMA copies.
+        | - Queues in device memory are unavailable.
+        | - PC sampling uses the PM4 path.
+        | - On large-BAR dGPUs, dmabuf export with ``HSA_AMD_DMABUF_MAPPING_TYPE_PCIE`` returns ``NOT_SUPPORTED``.
+        | - Explicit CPU access granted through ``hsa_amd_vmem_set_access`` is still honored.
+        | - ``HSA_USE_UDMABUF`` is ignored for device memory.
+        | - Device memory imported from another process through legacy KFD IPC (``HSA_ENABLE_IPC_MODE_LEGACY``, or kernels without dma-buf IPC support) remains CPU-accessible; the default dma-buf IPC path does not map imported memory for the CPU.
+
     * - | ``HSAKMT_DEBUG_LEVEL``
         | Controls the verbosity level of debug messages from the ``libhsakmt.so`` driver layer.
       - ``3``

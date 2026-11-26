@@ -440,76 +440,108 @@ discover_text_function_symbol_ranges(const AmdGpuCodeObject &object) {
   return ranges;
 }
 
-static std::vector<TextFunctionSymbolRange>
-discover_text_function_symbol_candidates(const AmdGpuCodeObject &object,
-                                         bool externally_resolvable_only) {
+template <typename Visitor>
+static void visit_text_function_symbols(const AmdGpuCodeObject &object, Visitor visit) {
   const auto *bytes = reinterpret_cast<const uint8_t *>(object.image_data());
   const std::span<const uint8_t> image(bytes, object.image_size());
   Elf64_Ehdr ehdr{};
   if (!read_object(image, 0, ehdr) || ehdr.e_shentsize != sizeof(Elf64_Shdr) ||
       !range_in_image(image, ehdr.e_shoff,
-                      static_cast<uint64_t>(ehdr.e_shnum) * sizeof(Elf64_Shdr))) {
-    return {};
-  }
+                      static_cast<uint64_t>(ehdr.e_shnum) * sizeof(Elf64_Shdr)))
+    return;
 
   std::vector<Elf64_Shdr> sections(ehdr.e_shnum);
   std::memcpy(sections.data(), image.data() + ehdr.e_shoff, sections.size() * sizeof(Elf64_Shdr));
 
-  if (object.text_sections().size() != 1) {
-    return {};
-  }
+  if (object.text_sections().size() != 1)
+    return;
   const Section &text = *object.text_sections().front();
   const uint64_t text_vaddr = text.vaddr();
   const uint64_t text_size = text.size();
   // Without the section index a symbol value cannot be interpreted. Refuse to guess: returning
   // nothing costs the caller its extra split points, while guessing would invent them.
   const auto text_index = text_section_index(sections, text);
-  if (!text_index) {
-    return {};
-  }
+  if (!text_index)
+    return;
 
-  std::vector<TextFunctionSymbolRange> ranges;
   for (const Elf64_Shdr &symtab : sections) {
     if ((symtab.sh_type != SHT_SYMTAB && symtab.sh_type != SHT_DYNSYM) ||
         symtab.sh_entsize != sizeof(Elf64_Sym) ||
-        !range_in_image(image, symtab.sh_offset, symtab.sh_size)) {
+        !range_in_image(image, symtab.sh_offset, symtab.sh_size))
       continue;
-    }
     const size_t count = symtab.sh_size / sizeof(Elf64_Sym);
     for (size_t index = 0; index < count; ++index) {
       Elf64_Sym symbol{};
-      if (!read_object(image, symtab.sh_offset + index * sizeof(Elf64_Sym), symbol)) {
+      if (!read_object(image, symtab.sh_offset + index * sizeof(Elf64_Sym), symbol))
         continue;
-      }
-      if (elf_symbol_type(symbol.st_info) != kElfSymbolTypeFunc || symbol.st_size == 0) {
+      if (elf_symbol_type(symbol.st_info) != kElfSymbolTypeFunc)
         continue;
-      }
-      if (externally_resolvable_only &&
-          !elf_symbol_is_externally_resolvable(symbol.st_info, symbol.st_other)) {
-        continue;
-      }
       // The symbol has to belong to `.text` before its value means anything here. This is what
       // makes the ET_REL branch below safe: st_value is section-relative there, so a sized
       // function in some other section would otherwise be read as an offset near the start of
       // `.text` and split a real block. SHN_UNDEF and the other reserved indices are excluded by
       // the same test, since none of them equal the text index.
-      if (symbol.st_shndx != *text_index) {
+      if (symbol.st_shndx != *text_index)
         continue;
-      }
       // ET_REL symbol values are already section-relative; every other kind is a virtual address.
       uint64_t offset = symbol.st_value;
       if (ehdr.e_type != ET_REL) {
-        if (symbol.st_value < text_vaddr) {
+        if (symbol.st_value < text_vaddr)
           continue;
-        }
         offset = symbol.st_value - text_vaddr;
       }
-      if (offset >= text_size || (offset % sizeof(uint32_t)) != 0) {
+      if (offset >= text_size)
         continue;
-      }
-      ranges.push_back({.start_offset = offset, .size = symbol.st_size});
+      visit(offset, symbol, image,
+            symtab.sh_link < sections.size() ? &sections[symtab.sh_link] : nullptr);
     }
   }
+}
+
+std::optional<std::string_view> local_text_function_name(const AmdGpuCodeObject &object,
+                                                         uint64_t begin, uint64_t end) {
+  if (begin >= end || object.text_sections().size() != 1 ||
+      end > object.text_sections().front()->size())
+    return std::nullopt;
+  bool ambiguous = false;
+  std::optional<std::string_view> name;
+  visit_text_function_symbols(object, [&](uint64_t offset, const Elf64_Sym &symbol,
+                                          std::span<const uint8_t> image,
+                                          const Elf64_Shdr *strings) {
+    if (offset >= end || (offset < begin && begin - offset >= symbol.st_size))
+      return;
+    if (offset != begin || symbol.st_size != end - begin ||
+        elf_symbol_bind(symbol.st_info) != kElfSymbolBindLocal || !strings ||
+        strings->sh_type != SHT_STRTAB ||
+        !range_in_image(image, strings->sh_offset, strings->sh_size) ||
+        symbol.st_name >= strings->sh_size) {
+      ambiguous = true;
+      return;
+    }
+    const char *first =
+        reinterpret_cast<const char *>(image.data() + strings->sh_offset + symbol.st_name);
+    const size_t bound = strings->sh_size - symbol.st_name;
+    const size_t length = ::strnlen(first, bound);
+    const std::string_view candidate(first, length);
+    if (!length || length == bound || (name && *name != candidate))
+      ambiguous = true;
+    else
+      name = candidate;
+  });
+  return ambiguous ? std::nullopt : name;
+}
+
+static std::vector<TextFunctionSymbolRange>
+discover_text_function_symbol_candidates(const AmdGpuCodeObject &object,
+                                         bool externally_resolvable_only) {
+  std::vector<TextFunctionSymbolRange> ranges;
+  visit_text_function_symbols(object, [&](uint64_t offset, const Elf64_Sym &symbol,
+                                          std::span<const uint8_t>, const Elf64_Shdr *) {
+    if ((offset % sizeof(uint32_t)) == 0 && symbol.st_size &&
+        (!externally_resolvable_only ||
+         elf_symbol_is_externally_resolvable(symbol.st_info, symbol.st_other)))
+      ranges.push_back({.start_offset = offset, .size = symbol.st_size});
+  });
   const auto range_key = [](const TextFunctionSymbolRange &range) {
     return std::pair{range.start_offset, range.size};
   };

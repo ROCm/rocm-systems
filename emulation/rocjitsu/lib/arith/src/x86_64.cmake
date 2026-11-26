@@ -44,7 +44,7 @@ set(rj_arith_x86_64_v3_sources
     wmma/x86_64/wmma_gfx1250_fp8_x86_64_v3.cpp
     wmma/x86_64/wmma_gfx1250_f32_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/mfma_half_x86_64_v3.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/mfma_f64_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/common/x86_64/dense_f64_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/gfx1250_integer_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/matrix_i8_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/sparse_matrix_i8_x86_64_v3.cpp
@@ -84,8 +84,10 @@ set(rj_arith_x86_64_v3_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/fma_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/fma_exact_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/fp64_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/packed_f64_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/frexp_exp_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/half_mad_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/common/x86_64/sdwa_output_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/half_binary_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/half_exponent_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/half_fma_x86_64_v3.cpp
@@ -162,7 +164,7 @@ set(rj_arith_x86_64_v4_sources
     wmma/x86_64/wmma_gfx1250_fp8_x86_64_v4.cpp
     wmma/x86_64/wmma_gfx1250_f32_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/mfma_half_x86_64_v4.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/mfma_f64_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/common/x86_64/dense_f64_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/gfx1250_integer_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/matrix_i8_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/sparse_matrix_i8_x86_64_v4.cpp
@@ -198,6 +200,7 @@ set(rj_arith_x86_64_v4_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/dot/x86_64/half_dot_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/binary_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/fp64_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/packed_f64_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/frexp_exp_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/selection_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/div_fixup_x86_64_v4.cpp
@@ -206,6 +209,7 @@ set(rj_arith_x86_64_v4_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/fma_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/fma_exact_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/half_mad_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/common/x86_64/sdwa_output_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/half_fma_exact_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/half_ldexp_exact_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/half_binary_x86_64_v4.cpp
@@ -240,6 +244,8 @@ set(rj_arith_x86_64_v4_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/root_exact_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/exp_exact_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/round_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/fract_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/frexp_mant_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/trans_f64_exact_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/trig_exact_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/trig_preop_x86_64_v4.cpp
@@ -250,6 +256,7 @@ set(rj_arith_x86_64_v4_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/register/x86_64/packed_permute_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/register/x86_64/permlane_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/register/x86_64/screen_partition_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/integer_wmma_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/swmmac_exact8_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/swmmac_exact16_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/swmmac_float_x86_64_v4.cpp
@@ -278,13 +285,25 @@ function(rj_arith_add_x86_64_backend feature)
     if(feature STREQUAL "AVX512VNNI")
         set(domain x86_64_v4_vnni)
     endif()
+    # Source-local CPU levels describe the flags for this translation unit.
+    # RJ_ARITH_HAVE_* describes the backends linked into the baseline dispatcher.
+    set(definitions
+        RJ_ARITH_IMPL_NAMESPACE=${domain}
+        RJ_ARITH_TARGET_X86_64_V3=1
+    )
+    if(NOT feature STREQUAL "X86_64_V3")
+        list(APPEND definitions RJ_ARITH_TARGET_X86_64_V4=1)
+    endif()
+    if(feature STREQUAL "X86_64_V4_BF16" OR feature STREQUAL "AVX512VNNI")
+        list(APPEND definitions RJ_ARITH_TARGET_${feature}=1)
+    endif()
     target_sources(rj_arith PRIVATE ${rj_arith_${backend}_sources})
     set_source_files_properties(
         ${rj_arith_${backend}_sources}
         TARGET_DIRECTORY rj_arith
         PROPERTIES
             COMPILE_OPTIONS "${rj_arith_${backend}_flags}"
-            COMPILE_DEFINITIONS "RJ_ARITH_IMPL_NAMESPACE=${domain}"
+            COMPILE_DEFINITIONS "${definitions}"
     )
     target_compile_definitions(rj_arith PRIVATE RJ_ARITH_HAVE_${feature}=1)
 endfunction()
