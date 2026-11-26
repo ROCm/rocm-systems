@@ -16,8 +16,9 @@ driver (``/dev/dxg``) instead of the amdgpu driver, and that path doesn't
 implement AMD Infinity Storage.
 
 hipFile also requires a direct path from the GPU to the storage device. A
-block-backed filesystem must reside on a local NVMe device or its partition,
-or be stacked on it through LVM or MD software RAID. Any
+block-backed filesystem must reside on an NVMe device or its partition,
+or be stacked on it through LVM or MD software RAID. For NVMe-oF, use the
+RDMA transport described in :doc:`/how-to/setup-nvmeof`. Any
 other interposing block layer between the filesystem and the device breaks the
 direct path and forces a fallback to compatibility mode. This includes, but is
 not limited to:
@@ -33,7 +34,7 @@ LVM logical volumes
 ===================
 
 LVM (Logical Volume Manager) volumes are supported for the fastpath when their
-underlying physical volumes are all local NVMe devices. A volume whose physical
+underlying physical volumes are all NVMe devices. A volume whose physical
 volumes include any non-NVMe or multipath device falls back to compatibility
 mode.
 
@@ -42,7 +43,7 @@ This includes RAID logical volumes, with the same restrictions as apply to MD ar
 LVM implements a RAID LV with the ``dm-raid`` target, which
 runs the MD personality code. A RAID LV qualifies for the fastpath only when
 it uses a pass-through RAID level (``raid0``, ``raid1``, or ``raid10``) and
-every member resides on a local NVMe physical volume. A parity RAID LV
+every member resides on an NVMe physical volume. A parity RAID LV
 (``raid4``, ``raid5``, ``raid6``) falls back to compatibility mode, as does a
 volume with any member on a non-NVMe physical volume.
 
@@ -63,7 +64,7 @@ fastpath when both of the following hold:
 
 - The array runs one of the pass-through personalities, ``linear``, ``raid0``,
   ``raid1``, or ``raid10``, and
-- Every member device of the array is a local NVMe device.
+- Every member device of the array is an NVMe device.
 
 The pass-through personalities remap the original request onto a member device without
 interposing a buffer, so the direct path survives. An array with any non-NVMe
@@ -74,7 +75,7 @@ whole array.
 
 The parity personalities, ``raid4``, ``raid5``, and ``raid6``, are not
 supported and always fall back to compatibility mode even when every member is
-a local NVMe device. They route the transfer through the MD stripe cache to
+an NVMe device. They route the transfer through the MD stripe cache to
 compute parity, copying it into host memory instead of handing the original
 request to a member device, so there is no direct path left to use. This is the
 same code an LVM parity RAID LV runs, which is why both are excluded. The same
@@ -89,7 +90,7 @@ Stacking LVM and MD RAID
 
 LVM and MD RAID can be combined in either order, to any depth, as long as every
 RAID layer uses a pass-through level and every device at the bottom of the
-stack is a local NVMe. An LVM volume group built on MD arrays, or an MD array
+stack is an NVMe device. An LVM volume group built on MD arrays, or an MD array
 assembled from logical volumes, both keep the direct path. Inserting any other
 layer anywhere in the stack, such as multipath, dm-crypt, or a parity array,
 forces the fallback to compatibility mode.

@@ -98,10 +98,10 @@ uses one of the following storage configurations:
 * ext4 on an NVMe block device mounted with ``data=ordered``
 * xfs on an NVMe block device
 * NFS over RDMA using a hardware RDMA NIC (see :doc:`/how-to/setup-nfsordma`)
-* an LVM logical volume whose physical volumes are all local NVMe and which is
+* an LVM logical volume whose physical volumes are all NVMe and which is
   linear, striped, or a ``raid0``, ``raid1``, or ``raid10`` RAID LV
 * an MD software RAID array running a ``linear``, ``raid0``, ``raid1``, or
-  ``raid10`` personality whose member devices are all local NVMe
+  ``raid10`` personality whose member devices are all NVMe
 
 Parity RAID (``raid4``, ``raid5``, ``raid6``) is not supported, as an MD array
 or as an LVM RAID LV. It stages the transfer in the MD stripe cache instead of

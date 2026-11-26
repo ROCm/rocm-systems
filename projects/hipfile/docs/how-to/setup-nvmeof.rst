@@ -2,11 +2,11 @@
    :description: Set up an NVMe-oF disk for use with hipFile.
    :keywords: hipFile, NVMe-oF, install, ROCm, direct storage, GPU I/O
 
-****************************************************
-Setting up a local NVMe-oF disk for use with hipFile
-****************************************************
+***********************************************
+Setting up an NVMe-oF disk for use with hipFile
+***********************************************
 
-To use hipFile with storage exported over NVMe-oF, first :ref:`set up a local NVMe drive <hipfile-setup-local-nvme>`. 
+To use hipFile with storage exported over NVMe-oF, first :ref:`set up a local NVMe drive <hipfile-setup-local-nvme>` on the target.
 
 NVMe-oF also requires:
 

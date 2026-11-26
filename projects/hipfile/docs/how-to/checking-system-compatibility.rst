@@ -49,16 +49,16 @@ For the block-backed mounts shown above, the columns have the following meanings
 | ``MOUNTPOINT``: Location where the file system is mounted.
 | ``FSTYPE``: The file system type. For block-backed mounts, hipFile's fastpath accepts only ``xfs`` or ``ext4`` with ``data=ordered`` journaling. When ext4 uses the default mode, ``ais-check`` labels it ``ext4 (ordered)``. NFS mounts require proto=rdma or proto=rdma6 and a hardware RDMA NIC.
 | ``DEVICE``: The underlying block device.
-| ``BACKING``: The type of block device that backs the mount. For example ``nvme``, ``lvm``, ``md``, or ``mpath``. Direct local NVMe backing is required, either raw or through LVM logical volumes and non-parity MD RAID arrays whose member devices are all local NVMe.
+| ``BACKING``: The type of block device that backs the mount. For example ``nvme``, ``lvm``, ``md``, or ``mpath``. Direct NVMe backing is required, either raw or through LVM logical volumes and non-parity MD RAID arrays whose member devices are all NVMe.
 | ``O_DIRECT``: Whether an ``O_DIRECT`` open succeeded on the volume.
-| ``HIPFILE``: Will be "yes" when the file system qualifies, the backing is direct local NVMe (raw, or LVM or a non-parity MD RAID array on local NVMe), and ``O_DIRECT`` works. Will be "no" otherwise.
+| ``HIPFILE``: Will be "yes" when the file system qualifies, the backing is direct NVMe (raw, or LVM or a non-parity MD RAID array on NVMe), and ``O_DIRECT`` works. Will be "no" otherwise.
 
 
 For ``lvm`` and ``md`` backing, ``ais-check`` follows the block stack and
 reports the volume as capable only when every layer is an LVM target or an
 MD RAID array, every RAID layer runs a pass-through personality (``linear``,
 ``raid0``, ``raid1``, ``raid10``), and all of the devices underneath them
-are local NVMe. The LVM target and RAID array can be stacked on each other in either order. The
+are NVMe. The LVM target and RAID array can be stacked on each other in either order. The
 parity personalities (``raid4``, ``raid5``, ``raid6``) are always reported as not
 capable because they stage the transfer in the MD stripe cache rather than
 passing it to a member device. This applies to an LVM RAID logical volume
