@@ -17771,6 +17771,46 @@ TEST(ArithBridgeTest, CdnaHalfMathSdwa) {
   }
 }
 
+// Inherited SDWA output scaling canonicalizes negative zero before byte placement.
+TEST(ArithBridgeTest, OlderHalfMathSdwaSignedZero) {
+  for (auto arch : {rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2,
+                    rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2}) {
+    for (bool sine : {false, true}) {
+      SCOPED_TRACE(::testing::Message() << arch << '/' << sine);
+      const unsigned lanes =
+          arch == rocjitsu::IsaFamily::Cdna1 || arch == rocjitsu::IsaFamily::Cdna2 ? 64 : 32;
+      BridgeFixture f(arch, lanes, ArithmeticPolicy{ArithmeticSemantics::Compatibility});
+      f.wave->set_mode_raw(sine ? 0x40 : 0);
+      f.wave->set_exec(1);
+      f.wave->set_trapsts(0x10);
+      const uint32_t input = sine ? 0x80a31234U : 0xf0011234U;
+      f.cu->write_vgpr(f.base(), 0, input);
+      f.cu->write_vgpr(f.base(), 1, input);
+      const uint32_t first =
+          arch == rocjitsu::IsaFamily::Cdna1
+              ? cdna1::build_vop1(sine ? cdna1::kVSinF16Vop1 : cdna1::kVRcpF16Vop1,
+                                  {.src0 = SRC_SDWA, .vdst = 0})[0]
+          : arch == rocjitsu::IsaFamily::Cdna2
+              ? cdna2::build_vop1(sine ? cdna2::kVSinF16Vop1 : cdna2::kVRcpF16Vop1,
+                                  {.src0 = SRC_SDWA, .vdst = 0})[0]
+          : arch == rocjitsu::IsaFamily::Rdna1
+              ? rdna1::build_vop1(sine ? rdna1::kVSinF16Vop1 : rdna1::kVRcpF16Vop1,
+                                  {.src0 = SRC_SDWA, .vdst = 0})[0]
+              : rdna2::build_vop1(sine ? rdna2::kVSinF16Vop1 : rdna2::kVRcpF16Vop1,
+                                  {.src0 = SRC_SDWA, .vdst = 0})[0];
+      const std::array<uint32_t, 2> words{first, (sdwa::WORD_1 << 8) |
+                                                     (sdwa::UNUSED_PRESERVE << 11) | (3U << 14) |
+                                                     (sdwa::WORD_1 << 16)};
+      auto instruction = f.decoder->decode_window(words);
+      ASSERT_TRUE(instruction.succeeded());
+      ASSERT_TRUE(f.cu->execute_instruction(instruction.value().get(), *f.wave).succeeded());
+      EXPECT_EQ(f.cu->read_vgpr(f.base(), 0), 0x00001234U);
+      EXPECT_EQ(f.cu->read_vgpr(f.base(), 1), input);
+      EXPECT_EQ(f.wave->trapsts(), 0x10U);
+    }
+  }
+}
+
 TEST(ArithBridgeTest, CdnaFp64Math) {
   const double inputs[] = {16.0,
                            -4.0,

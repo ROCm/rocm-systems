@@ -1068,7 +1068,8 @@ inline void execute_float_unary16(Wavefront &wave, FloatUnary32Function wave32,
 template <typename Inst>
 inline void execute_half_unary_sdwa(Inst &inst, Wavefront &wave, FloatUnary32Function wave32,
                                     FloatUnary64Function wave64, uint64_t flags,
-                                    const Operand &destination, const Operand &source) {
+                                    const Operand &destination, const Operand &source,
+                                    uint64_t extra_modifiers = 0) {
   if (!wave.exec()) {
     return;
   }
@@ -1082,7 +1083,7 @@ inline void execute_half_unary_sdwa(Inst &inst, Wavefront &wave, FloatUnary32Fun
   uint32_t result[64]{};
   uint32_t *d = result;
   uint32_t causes = 0;
-  const uint64_t modifiers = sdwa_float_modifiers(inst);
+  const uint64_t modifiers = sdwa_float_modifiers(inst) | extra_modifiers;
   const int status = wave.wf_size() == 32
                          ? wave32(flags, uint32_t(exec_mask), modifiers, &d, &a.data, &causes)
                          : wave64(flags, exec_mask, modifiers, &d, &a.data, &causes);

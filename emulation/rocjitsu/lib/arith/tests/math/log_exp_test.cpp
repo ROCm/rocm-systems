@@ -5,6 +5,7 @@
 
 #include "common/cpu.h"
 #include "common/integer.h"
+#include "math/older_half_unary_test.h"
 #include "math/unary_test.h"
 #include "rj_arith/detail/rj_arith_common.h"
 #include "rj_arith/detail/rj_arith_math.h"
