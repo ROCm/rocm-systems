@@ -100,7 +100,7 @@ bool fusedKernelRuns(struct ncclComm* comm, const struct rcclHostLayout& layout,
   return ncclAllReduceDdaFabricHierEligible(comm, count, datatype, op, layout.nHosts, layout.ranksPerHost);
 }
 
-// On two hosts with 8 ranks the three collectives gained over the default path at 2, 8-16 and 128 MiB in fp32 sum, but
+// On two hosts with 8 ranks the three collectives gained over the default path at 2, 8-16 and 64-128 MiB in fp32 sum, but
 // not between 2 and 8 MiB, where the auto window needs the fused kernel. fp8, which the kernel does not take, gained
 // across the window on the three collectives.
 bool needsFusedKernel(const struct rcclHostLayout& layout, ncclDataType_t datatype, size_t bytes) {
@@ -278,11 +278,11 @@ bool rcclHostHierAllReduceAutoWindow(int nHosts, int ranksPerHost, size_t bytes)
   if (ranksPerHost == 8) {
     switch (nHosts) {
     case 2:
-      return (bytes >= 2 * MiB && bytes <= 16 * MiB) || (bytes > 64 * MiB && bytes <= 128 * MiB);
+      return (bytes >= 2 * MiB && bytes <= 16 * MiB) || (bytes >= 64 * MiB && bytes <= 128 * MiB);
     case 4:
-      return bytes >= 2 * MiB && bytes <= 1024 * MiB;
+      return bytes >= 2 * MiB && bytes <= 256 * MiB;
     case 8:
-      return bytes >= 2 * MiB && bytes <= 2048 * MiB;
+      return bytes >= 2 * MiB && bytes <= 512 * MiB;
     default:
       return false;
     }
