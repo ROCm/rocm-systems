@@ -357,6 +357,218 @@ TEST_P(FaultLegacyAtomic, IndependentOracleRejectsOffsetOperandCacheWaitAndMappi
   }
 }
 
+TEST(FaultLegacyAtomicNative, Rdna3AddCasReturnModesMatchNativeAssemblerGoldens) {
+  struct NativeGolden {
+    LegacyAtomicForm form;
+    bool returning;
+    int32_t offset;
+    std::array<uint32_t, 2> original;
+    std::array<uint32_t, 2> replacement;
+  };
+  // Native gfx1100 llvm-mc encodings; non-returning forms use canonical VDST zero.
+  constexpr std::array<NativeGolden, 12> cases = {{
+      {.form = LegacyAtomicForm::FlatAdd,
+       .returning = false,
+       .offset = 4,
+       .original = {0xdcd4a004u, 0x007c0204u},
+       .replacement = {0xdcd4a00cu, 0x007c0204u}},
+      {.form = LegacyAtomicForm::FlatAdd,
+       .returning = true,
+       .offset = 4,
+       .original = {0xdcd4e004u, 0x067c0204u},
+       .replacement = {0xdcd4e00cu, 0x067c0204u}},
+      {.form = LegacyAtomicForm::FlatCas,
+       .returning = false,
+       .offset = 4,
+       .original = {0xdcd0a004u, 0x007c0204u},
+       .replacement = {0xdcd0a00cu, 0x007c0204u}},
+      {.form = LegacyAtomicForm::FlatCas,
+       .returning = true,
+       .offset = 4,
+       .original = {0xdcd0e004u, 0x067c0204u},
+       .replacement = {0xdcd0e00cu, 0x067c0204u}},
+      {.form = LegacyAtomicForm::GlobalAdd,
+       .returning = false,
+       .offset = -4,
+       .original = {0xdcd6bffcu, 0x00040204u},
+       .replacement = {0xdcd6a004u, 0x00040204u}},
+      {.form = LegacyAtomicForm::GlobalAdd,
+       .returning = true,
+       .offset = -4,
+       .original = {0xdcd6fffcu, 0x06040204u},
+       .replacement = {0xdcd6e004u, 0x06040204u}},
+      {.form = LegacyAtomicForm::GlobalCas,
+       .returning = false,
+       .offset = -4,
+       .original = {0xdcd2bffcu, 0x00040204u},
+       .replacement = {0xdcd2a004u, 0x00040204u}},
+      {.form = LegacyAtomicForm::GlobalCas,
+       .returning = true,
+       .offset = -4,
+       .original = {0xdcd2fffcu, 0x06040204u},
+       .replacement = {0xdcd2e004u, 0x06040204u}},
+      {.form = LegacyAtomicForm::BufferAdd,
+       .returning = false,
+       .offset = 4,
+       .original = {0xe0d43004u, 0x07c20204u},
+       .replacement = {0xe0d4300cu, 0x07c20204u}},
+      {.form = LegacyAtomicForm::BufferAdd,
+       .returning = true,
+       .offset = 4,
+       .original = {0xe0d47004u, 0x07c20204u},
+       .replacement = {0xe0d4700cu, 0x07c20204u}},
+      {.form = LegacyAtomicForm::BufferCas,
+       .returning = false,
+       .offset = 4,
+       .original = {0xe0d03004u, 0x07c20204u},
+       .replacement = {0xe0d0300cu, 0x07c20204u}},
+      {.form = LegacyAtomicForm::BufferCas,
+       .returning = true,
+       .offset = 4,
+       .original = {0xe0d07004u, 0x07c20204u},
+       .replacement = {0xe0d0700cu, 0x07c20204u}},
+  }};
+  for (const LegacyAtomicTargetCase &target : test::kLegacyAtomicTargetCases) {
+    if (target.cdna)
+      continue;
+    SCOPED_TRACE(target.name);
+    for (const NativeGolden &golden : cases) {
+      SCOPED_TRACE(test::legacy_atomic_mnemonic(target, golden.form));
+      SCOPED_TRACE(golden.returning);
+      EXPECT_EQ(test::legacy_atomic_words(target, golden.form, golden.offset, golden.returning),
+                golden.original);
+      EXPECT_EQ(test::legacy_atomic_words(target, golden.form, golden.offset + 8, golden.returning),
+                golden.replacement);
+      const std::vector<uint8_t> image =
+          test::make_legacy_atomic_elf(target, golden.form, golden.offset, golden.returning);
+      const FaultMutationContext source(image);
+      FaultMutationError error;
+      const FailureOr<AtomicSelection> selected = select_legacy(source, error);
+      ASSERT_TRUE(selected.succeeded()) << error.message;
+      EXPECT_EQ(selected.value().site().byte_offset, golden.offset);
+      const FailureOr<AtomicResult> mutant =
+          apply_atomic_wrong_address(source, selected.value(), 8, error);
+      ASSERT_TRUE(mutant.succeeded()) << error.message;
+      EXPECT_TRUE(test::legacy_atomic_output_matches(source, 0, 8, mutant.value().image));
+      const AmdGpuCodeObject output(mutant.value().image.data(), mutant.value().image.size());
+      ASSERT_TRUE(output.is_valid());
+      const Section &text = *output.text_sections().front();
+      const std::optional<uint64_t> guest = test::legacy_atomic_guest(text, 0, target.target);
+      ASSERT_TRUE(guest);
+      std::array<uint32_t, 2> actual = {};
+      ASSERT_LE(*guest + sizeof(actual), text.size());
+      std::memcpy(actual.data(), text.data() + *guest, sizeof(actual));
+      EXPECT_EQ(actual, golden.replacement);
+      EXPECT_TRUE(std::ranges::equal(source.image(), image));
+    }
+  }
+}
+
+TEST(FaultLegacyAtomicNative, Rdna3IgnoredVdstSixNonreturningFormsKeepFullGuests) {
+  struct IgnoredVdstGolden {
+    LegacyAtomicForm form;
+    int32_t offset;
+    std::array<uint32_t, 2> original;
+    std::array<uint32_t, 2> replacement;
+  };
+  // Native disassembly accepts VDST six with GLC zero; keep these valid source bits.
+  constexpr std::array<IgnoredVdstGolden, 4> cases = {{
+      {.form = LegacyAtomicForm::GlobalAdd,
+       .offset = -4,
+       .original = {0xdcd6bffcu, 0x06040204u},
+       .replacement = {0xdcd6a004u, 0x06040204u}},
+      {.form = LegacyAtomicForm::GlobalCas,
+       .offset = -4,
+       .original = {0xdcd2bffcu, 0x06040204u},
+       .replacement = {0xdcd2a004u, 0x06040204u}},
+      {.form = LegacyAtomicForm::FlatAdd,
+       .offset = 4,
+       .original = {0xdcd4a004u, 0x067c0204u},
+       .replacement = {0xdcd4a00cu, 0x067c0204u}},
+      {.form = LegacyAtomicForm::FlatCas,
+       .offset = 4,
+       .original = {0xdcd0a004u, 0x067c0204u},
+       .replacement = {0xdcd0a00cu, 0x067c0204u}},
+  }};
+  for (const LegacyAtomicTargetCase &target : test::kLegacyAtomicTargetCases) {
+    if (target.cdna)
+      continue;
+    SCOPED_TRACE(target.name);
+    for (const IgnoredVdstGolden &golden : cases) {
+      SCOPED_TRACE(test::legacy_atomic_mnemonic(target, golden.form));
+      std::array<uint32_t, 2> words =
+          test::legacy_atomic_words(target, golden.form, golden.offset, false);
+      words[1] = (words[1] & 0x00ffffffu) | 0x06000000u;
+      ASSERT_EQ(words, golden.original);
+      EXPECT_EQ(words[0] & 0x4000u, 0u);
+      const std::vector<uint8_t> image =
+          test::make_legacy_atomic_sequence_elf(target, {words[0], words[1]});
+      const FaultMutationContext source(image);
+      FaultMutationError error;
+      const FailureOr<AtomicSelection> selected = select_legacy(source, error);
+      ASSERT_TRUE(selected.succeeded()) << error.message;
+      const FailureOr<AtomicResult> mutant =
+          apply_atomic_wrong_address(source, selected.value(), 8, error);
+      ASSERT_TRUE(mutant.succeeded()) << error.message;
+      EXPECT_TRUE(test::legacy_atomic_output_matches(source, 0, 8, mutant.value().image));
+      const AmdGpuCodeObject output(mutant.value().image.data(), mutant.value().image.size());
+      ASSERT_TRUE(output.is_valid());
+      const Section &text = *output.text_sections().front();
+      const std::optional<uint64_t> guest = test::legacy_atomic_guest(text, 0, target.target);
+      ASSERT_TRUE(guest);
+      std::array<uint32_t, 2> actual = {};
+      ASSERT_LE(*guest + sizeof(actual), text.size());
+      std::memcpy(actual.data(), text.data() + *guest, sizeof(actual));
+      EXPECT_EQ(actual, golden.replacement);
+      EXPECT_TRUE(std::ranges::equal(source.image(), image));
+    }
+  }
+}
+
+TEST_P(FaultLegacyAtomic, IgnoredFlatBit12KeepsUnsignedOffsetAndCannotHideOverflow) {
+  const LegacyAtomicTargetCase &target = GetParam();
+  for (LegacyAtomicForm form : {LegacyAtomicForm::FlatAdd, LegacyAtomicForm::FlatCas}) {
+    for (int32_t offset : {4, 4092}) {
+      SCOPED_TRACE(test::legacy_atomic_mnemonic(target, form));
+      SCOPED_TRACE(offset);
+      for (bool padding : {false, true}) {
+        SCOPED_TRACE(padding);
+        std::array<uint32_t, 2> words = test::legacy_atomic_words(target, form, offset);
+        if (padding)
+          words[0] |= 0x1000u;
+        const std::vector<uint8_t> image =
+            test::make_legacy_atomic_sequence_elf(target, {words[0], words[1]});
+        const FaultMutationContext source(image);
+        FaultMutationError error;
+        const FailureOr<AtomicSelection> selected = select_legacy(source, error);
+        ASSERT_TRUE(selected.succeeded()) << error.message;
+        EXPECT_EQ(selected.value().site().byte_offset, offset);
+        const FailureOr<AtomicResult> mutant =
+            apply_atomic_wrong_address(source, selected.value(), 8, error);
+        EXPECT_TRUE(std::ranges::equal(source.image(), image));
+        if (offset == 4092) {
+          EXPECT_TRUE(mutant.failed());
+          EXPECT_EQ(error.code, FaultMutationErrorCode::InvalidParameters);
+          continue;
+        }
+        ASSERT_TRUE(mutant.succeeded()) << error.message;
+        EXPECT_TRUE(test::legacy_atomic_output_matches(source, 0, 8, mutant.value().image));
+        const AmdGpuCodeObject output(mutant.value().image.data(), mutant.value().image.size());
+        ASSERT_TRUE(output.is_valid());
+        const Section &text = *output.text_sections().front();
+        const std::optional<uint64_t> guest = test::legacy_atomic_guest(text, 0, target.target);
+        ASSERT_TRUE(guest);
+        std::array<uint32_t, 2> actual = {};
+        ASSERT_LE(*guest + sizeof(actual), text.size());
+        std::memcpy(actual.data(), text.data() + *guest, sizeof(actual));
+        EXPECT_EQ(actual[0], (words[0] & ~0xfffu) | 12u);
+        EXPECT_EQ(actual[1], words[1]);
+        EXPECT_TRUE(std::ranges::equal(source.image(), image));
+      }
+    }
+  }
+}
+
 INSTANTIATE_TEST_SUITE_P(Targets, FaultLegacyAtomic,
                          ::testing::ValuesIn(test::kLegacyAtomicTargetCases),
                          [](const ::testing::TestParamInfo<LegacyAtomicTargetCase> &info) {
