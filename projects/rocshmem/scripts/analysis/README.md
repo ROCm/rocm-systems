@@ -1,16 +1,17 @@
 # scripts/analysis
 
-Two commit-vs-commit comparison tools for AMDGPU compiler-codegen regressions, plus the Python helpers they drive:
+Three commit-vs-commit comparison tools, plus the Python helpers they drive. Two answer "did this change regress AMDGPU compiler codegen?"; the third answers "did this change make the build slower?":
 
 - **`resource_usage_compare.sh`** — per-kernel GPU resource usage (VGPR/SGPR/AGPR/scratch/LDS/occupancy) from `-Rpass-analysis=kernel-resource-usage` compiler remarks. Answers "did this change increase register pressure or drop occupancy for kernel X?".
 - **`lto_inline_remarks_compare.sh`** — the whole-program AMDGPU LTO inliner's optimization-record remarks (`-Xoffload-linker --plugin-opt=opt-remarks-filename=...`). Answers "did this change flip an inlining decision the LTO inliner was making?".
+- **`build_time_compare.sh`** — wall-clock build time (total / ninja-tracked build / configure+install) and per-component ninja time. Answers "did this change make the build (or one component of it) slower?".
 
-Both scripts build each commit under test in its own isolated `git worktree` (under `/tmp`), so your working tree — including uncommitted changes — is never touched, and drive the same pipeline: build → extract remarks → CSV → diff → a self-contained interactive HTML dashboard (plus PNG charts for quick viewing). The Python helpers (`resource_usage_to_csv.py`/`_diff.py`/`_dashboard.py`, `lto_inline_remarks_to_csv.py`/`_diff.py`/`_dashboard.py`/`_report.py`) are plain CSV/YAML parsers and chart/dashboard generators with no project-specific logic — they only need whatever CSV/YAML the shell drivers hand them.
+All three scripts build each commit under test in its own isolated `git worktree` (under `/tmp`), so your working tree — including uncommitted changes — is never touched, and work against **any commit**, including ones that predate the analysis tooling itself: only the build-config script invoked is read from that commit's worktree, everything else (the CSV/diff/report generators) always runs at its current, already-checked-out version. `resource_usage_compare.sh`/`lto_inline_remarks_compare.sh` drive build → extract remarks → CSV → diff → a self-contained interactive HTML dashboard (plus PNG charts for quick viewing); `build_time_compare.sh` drives build → `.ninja_log`/`build_timing.log` → CSV → diff (text + CSV + PNG chart) → a full per-commit `build-time-analysis.md` report (timeline + dependency graphs). The Python helpers (`resource_usage_to_csv.py`/`_diff.py`/`_dashboard.py`, `lto_inline_remarks_to_csv.py`/`_diff.py`/`_dashboard.py`/`_report.py`, `build_time_to_csv.py`/`_diff.py`) are plain CSV/YAML parsers and chart generators with no project-specific logic — they only need whatever CSV/YAML/build-dir the shell drivers hand them.
 
-One more script answers a different question — not "did codegen change" but "where does build time actually go":
+Underlying the build-time tool:
 
 - **`build_time_report.py`** — a single entry point that parses `.ninja_log` once (Ninja timestamps every edge it runs, so this is free) and produces: a per-component time budget (`src/gda`, `tests/functional`, link steps, ...) and slowest-individual-edges table (text); a `-ftime-trace` phase/template-instantiation summary (text), if the build was configured with `-DROCSHMEM_BUILD_TIME_TRACE=ON` (adds `-ftime-trace` to every compile job) — skipped with a note otherwise; an interactive `build-timeline.json` (Chrome Trace Event Format — drag it into [ui.perfetto.dev](https://ui.perfetto.dev) or `chrome://tracing`) with one slice per ninja edge, grouped into per-component tracks, and flow arrows connecting each edge to the edges that consume its output (real producer/consumer dependencies read straight off `build.ninja`, not inferred from timing overlap) — real zoom/pan means sub-second serial steps are just as inspectable as multi-minute parallel phases; `build-dependency-graph.dot`/`-compact.dot` rendered to `.svg` (and `.png` with `--png`) if Graphviz's `dot` is on `PATH`; and a combined `build-time-analysis.md` report. It recognizes rocSHMEM's device-bitcode/`device_bitcode_tester` HSACO build shape specifically, and detects straight from `build.ninja` which target `add_dependencies(${PROJECT_NAME}, device_bitcode_tester_hsacos)` actually gates and whether `examples`/`rocshmem_unit_tests` exist in this configuration (commonly absent without external MPI), so the graphs/report stay correct even if that wiring or environment changes. Works with any Ninja build, no special flags needed for the first (text) section.
-- **`timed_build.sh`** — wraps any `scripts/build_configs/*` script (default `all_backends`) with wall-clock stage timing and a post-build `build_time_report.py --summary-only` call, without touching that script or `_common.sh`. Appends to `build_timing.log` in the cwd, same convention `all_backends` itself used to follow before that instrumentation was moved out here to keep the build-config scripts identical to `develop`.
+- **`build_time.sh`** — wraps any `scripts/build_configs/*` script (default `all_backends`) with wall-clock stage timing and a post-build `build_time_report.py --summary-only` call, without touching that script or `_common.sh`. Appends to `build_timing.log` in the cwd, same convention `all_backends` itself used to follow before that instrumentation was moved out here to keep the build-config scripts identical to `develop`. Accepts either a build-config name (looked up under `scripts/build_configs/`) or a path to any executable build script as its first argument — `build_time_compare.sh` relies on the latter to point it at a worktree-checked-out build-config script.
 
 ```bash
 python3 scripts/analysis/build_time_report.py --build-dir build
@@ -18,14 +19,18 @@ python3 scripts/analysis/build_time_report.py --build-dir build
 # or, to produce build/build_timing.log for the above to read stage timings
 # from, run the build itself through the timing wrapper instead of directly:
 mkdir build && cd build
-../scripts/analysis/timed_build.sh -DROCSHMEM_BUILD_TIME_TRACE=ON -DGPU_TARGETS=gfx950
+../scripts/analysis/build_time.sh -DROCSHMEM_BUILD_TIME_TRACE=ON -DGPU_TARGETS=gfx950
+
+# or, to compare build time between two commits (any two commits -- doesn't
+# require either one to have this tooling checked in):
+./scripts/analysis/build_time_compare.sh --commit1 HEAD~20 --commit2 HEAD
 ```
 
 To view `build-timeline.json`, drag it onto [ui.perfetto.dev](https://ui.perfetto.dev)/`chrome://tracing`.
 
 ## Prerequisites
 
-- The target project must be a **git repository** (both scripts isolate builds via `git worktree add`/`remove` and resolve commits via `git rev-parse`/`merge-base`).
+- The target project must be a **git repository** (all three `*_compare.sh` scripts isolate builds via `git worktree add`/`remove` and resolve commits via `git rev-parse`/`merge-base`).
 - A ROCm `clang++`/`hipcc` toolchain with the AMDGPU backend.
 - `python3` (stdlib only for most of the pipeline).
 - `PyYAML` — only needed by `lto_inline_remarks_compare.sh` (parses the linker's opt-remarks YAML).
@@ -44,9 +49,11 @@ These tools don't actually know anything about rocSHMEM — they call out to *a 
        analysis/          <- copied verbatim from here
          resource_usage_compare.sh
          lto_inline_remarks_compare.sh
+         build_time_compare.sh
+         build_time.sh
          *.py
    ```
-   Both scripts locate your project root as two directories up from themselves (`scripts/analysis/../..`), so this nesting matters — it's what lets them find `git` and place cache/output dirs correctly.
+   All three `*_compare.sh` scripts locate your project root as two directories up from themselves (`scripts/analysis/../..`), so this nesting matters — it's what lets them find `git` and place cache/output dirs correctly.
 
 2. Point the scripts at your build, with either option:
 
@@ -77,6 +84,10 @@ These tools don't actually know anything about rocSHMEM — they call out to *a 
      --gpu-target gfx942 --config-path ./scripts/my_build.sh
 
    ./scripts/analysis/lto_inline_remarks_compare.sh \
+     --commit1 HEAD~1 --commit2 HEAD \
+     --gpu-target gfx942 --config-path ./scripts/my_build.sh
+
+   ./scripts/analysis/build_time_compare.sh \
      --commit1 HEAD~1 --commit2 HEAD \
      --gpu-target gfx942 --config-path ./scripts/my_build.sh
    ```
@@ -136,6 +147,33 @@ Output DIR default value is: `<parent-of-project>/lto-inline-remarks/<gpu>-<conf
 ./lto_inline_remarks_compare.sh --commit1 923767a9 --commit2 41b678fa --commit2-extra-args "-DUSE_TDM=1"
 ```
 
+### `build_time_compare.sh`
+
+| Option                      | Default        | Description                                                                       |
+| --------------------------- | -------------- | --------------------------------------------------------------------------------- |
+| `--commit1 REF`             | `HEAD`         | First commit/branch to measure                                                    |
+| `--commit2 REF`             | *(none)*       | Second commit to diff against `commit1`; omit for a single-commit snapshot        |
+| `--pr NUM`                  |                | Fetch GitHub PR #NUM and diff it against its merge-base with `--base-branch`      |
+| `--base-branch NAME`        | `origin/develop` | Base branch for `--pr` merge-base resolution                                    |
+| `--gpu-target ARCH`         | `gfx950`       | GPU target architecture                                                           |
+| `--build-config CFG`        | `all_backends` | Named build script under `scripts/build_configs/`                                 |
+| `--config-path PATH`        |                | Direct path to an executable build script; takes precedence over `--build-config` |
+| `--commit1-extra-args ARGS` |                | Extra args appended to the build-config invocation for `commit1` only             |
+| `--commit2-extra-args ARGS` |                | Same as `--commit1-extra-args`, for `commit2` only                                |
+| `--time-trace`              | off            | Add `-DROCSHMEM_BUILD_TIME_TRACE=ON` to both builds (adds compile overhead; enables the `-ftime-trace` section in each side's full report) |
+| `--force-rebuild`           | off            | Force a fresh rebuild even if cached (build-time noise caveat below)              |
+| `--top N`                   | `30`           | Edges shown in the diff report/chart                                              |
+| `--output-dir DIR`          | See below      | Where to write the report                                                         |
+
+Output DIR default value is: `<parent-of-project>/build-time/<gpu>-<config>-<sha1>-vs-<sha2>/`
+
+```bash
+./build_time_compare.sh --commit1 HEAD~20 --commit2 HEAD
+./build_time_compare.sh --pr 42 --build-config all_backends
+./build_time_compare.sh --commit1 d48c64f6e      # single-commit snapshot, no diff
+./build_time_compare.sh --commit1 HEAD~1 --commit2 HEAD --config-path ./scripts/my_build.sh
+```
+
 ## Output layout
 
 Everything lands as a **sibling** of your project directory, never inside your source tree:
@@ -148,14 +186,19 @@ Everything lands as a **sibling** of your project directory, never inside your s
   build-cache-lto-remarks/<gpu>-<config>-<sha>/       # scratch build dirs for the LTO tool
   lto-inline-remarks/cache/<gpu>-<config>-<sha>/      # durable per-commit remarks CSV/YAML
   lto-inline-remarks/<gpu>-<config>-<sha1>[-vs-<sha2>]/  # report + lto_inline_dashboard.html
+  build-cache-timed-build/<gpu>-<config>-<sha>/       # scratch cmake build dirs for the timing tool (safe to delete)
+  build-time/cache/<gpu>-<config>-<sha>/              # durable per-commit build_time-*.csv + build.log
+  build-time/cache/<gpu>-<config>-<sha>/report/        # that commit's full build-time-analysis.md + diagrams/
+  build-time/<gpu>-<config>-<sha1>-vs-<sha2>/         # report: build_time-*.csv, build_time_diff.{csv,png,txt}
 ```
 
-Each report directory's `*_dashboard.html` is fully self-contained (data inlined) — open it directly in a browser, no server needed.
+Each `resource_usage_compare.sh`/`lto_inline_remarks_compare.sh` report directory's `*_dashboard.html` is fully self-contained (data inlined) — open it directly in a browser, no server needed. `build_time_compare.sh` doesn't generate an HTML dashboard; instead each commit gets a full `build-time-analysis.md` (with its own `build-timeline.json`/dot-graph diagrams) left under its `build-time/cache/<key>/report/` dir, referenced by path from the diff output rather than copied, so its relative diagram links keep working.
 
 ## Notes & caveats
 
-- **`--force-rebuild`**: AMDGPU LTO codegen (register allocation, scheduling, symbol layout) is *not* build-to-build deterministic, even for identical source. A real before/after regression decision needs a matched-fresh-pair rebuild of both sides — pass `--force-rebuild` rather than trusting a fresh build against a stale cached one.
+- **`--force-rebuild`**: AMDGPU LTO codegen (register allocation, scheduling, symbol layout) is *not* build-to-build deterministic, even for identical source — a real before/after regression decision needs a matched-fresh-pair rebuild of both sides for `resource_usage_compare.sh`/`lto_inline_remarks_compare.sh`. For `build_time_compare.sh`, the analogous risk is wall-clock noise (machine load, thermal throttling, filesystem cache state) rather than codegen non-determinism, but the fix is the same: pass `--force-rebuild` rather than trusting a fresh build against a stale cached one built on a different day/under different load.
 - **Device-bitcode measurement** (`resource_usage_compare.sh` only): this script additionally backend-compiles rocSHMEM's whole-program device bitcode artifact (`librocshmem_device_<arch>.bc`) for a second, ungated-inliner set of numbers. This is rocSHMEM-specific — it just prints a "skipping device-bitcode resource-usage measurement" note and continues for any project that doesn't produce a matching artifact.
 - **Forced CMake flags** (`lto_inline_remarks_compare.sh` only): this script always appends `-DBUILD_TOOLS=OFF -DBUILD_UNIT_TESTS=OFF -DBUILD_EXAMPLES=OFF` to whichever build script it resolves. These are rocSHMEM CMake option names that guarantee exactly one `-fgpu-rdc` LTO-linked executable gets built — required so the single `opt-remarks-filename` isn't clobbered by concurrent parallel links. CMake silently ignores unrecognized `-D` flags, so this is harmless for another project, but *your* build script is responsible for the same one-LTO-executable guarantee if you need it.
+- **`build_time_compare.sh` works against commits that predate it**: only the build-config script is read out of each commit's worktree; `build_time.sh`/`build_time_report.py`/`build_time_to_csv.py` always run at the version currently checked out in your main working tree, not the worktree's. So you can compare `HEAD` against a commit from before this tooling (or `build_time.sh`) existed at all.
 - **`--config-path` vs `--build-config` caching**: each is cached independently (keyed by the resolved config), so switching between them for the same commit never serves a stale/mismatched result.
 - `"Cannot find <name> in worktree"` means your named `--build-config` script is missing or not executable at that path in the checked-out worktree; `"--config-path ... is not an executable file"` means the same for a `--config-path` script.

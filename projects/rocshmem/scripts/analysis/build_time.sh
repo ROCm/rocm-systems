@@ -11,9 +11,9 @@
 # build-config scripts themselves:
 #
 #   mkdir build && cd build
-#   ../scripts/analysis/timed_build.sh                         # defaults to all_backends
-#   ../scripts/analysis/timed_build.sh ipc_single -DGPU_TARGETS=gfx950
-#   ROCSHMEM_BUILD_TIMING=0 ../scripts/analysis/timed_build.sh  # disable timing, just run the build
+#   ../scripts/analysis/build_time.sh                         # defaults to all_backends
+#   ../scripts/analysis/build_time.sh ipc_single -DGPU_TARGETS=gfx950
+#   ROCSHMEM_BUILD_TIMING=0 ../scripts/analysis/build_time.sh  # disable timing, just run the build
 #
 # The first argument may be a build-config name (looked up under
 # scripts/build_configs/, like all_backends does for itself) or a path to any

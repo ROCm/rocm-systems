@@ -338,17 +338,20 @@ def detect_unit_tests_built(edges):
 
 
 def read_stage_timings(timing_log):
-    """Reads configure/install stage durations out of build_timing.log, if
-    present. Supports two producers: a prior version of this tooling that
+    """Reads configure/install/total stage durations out of build_timing.log,
+    if present. Supports two producers: a prior version of this tooling that
     hooked _common.sh directly and timed configure/build/install separately
     (`[timing] configure 4.97s` / `[timing] install 0.10s`), and the current
-    scripts/analysis/timed_build.sh, which wraps an unmodified build script
+    scripts/analysis/build_time.sh, which wraps an unmodified build script
     from the outside and can only measure build (read back exactly from
-    .ninja_log, not from here) and a combined configure+install remainder
+    .ninja_log, not from here), a combined configure+install remainder
     (`[timing] configure+install (approx) 5.07s`, reported as configure_s
-    with install_s left at 0 -- install is normally under a second anyway).
+    with install_s left at 0 -- install is normally under a second anyway),
+    and the whole wrapped invocation (`[timing] total 12.34s`, reported as
+    total_s -- 0.0 if the log predates that line or wasn't produced by
+    build_time.sh at all).
     """
-    configure_s = install_s = 0.0
+    configure_s = install_s = total_s = 0.0
     if timing_log and os.path.exists(timing_log):
         with open(timing_log) as f:
             for line in f:
@@ -361,7 +364,10 @@ def read_stage_timings(timing_log):
                 m = re.match(r"\[timing\]\s+configure\+install \(approx\)\s+(-?[\d.]+)s", line)
                 if m:
                     configure_s = max(float(m.group(1)), 0.0)
-    return configure_s, install_s
+                m = re.match(r"\[timing\]\s+total\s+([\d.]+)s", line)
+                if m:
+                    total_s = float(m.group(1))
+    return configure_s, install_s, total_s
 
 
 def _assign_lanes(items):
@@ -1153,7 +1159,7 @@ def main():
         print("no -ftime-trace JSON found; skip with -DROCSHMEM_BUILD_TIME_TRACE=ON off, "
               "or configure with it ON and rebuild for that section.", file=sys.stderr)
 
-    configure_s, install_s = read_stage_timings(timing_log)
+    configure_s, install_s, _total_s = read_stage_timings(timing_log)
     build_s = (wall_end - wall_start) / 1000.0
 
     milestones = find_milestones(edges)

@@ -99,14 +99,14 @@ trusting the checked-in files for anything but relative scale.
 configure/install stage split in its "Summary" section (everything else
 comes from ``.ninja_log``/``build.ninja``/``-ftime-trace`` JSON directly).
 That file isn't produced by a plain ``scripts/build_configs/all_backends``
-invocation — run the build through ``scripts/analysis/timed_build.sh``
+invocation — run the build through ``scripts/analysis/build_time.sh``
 instead to get it, with no change to ``all_backends``/``_common.sh``
 themselves:
 
 .. code-block:: bash
 
   mkdir build && cd build
-  ../scripts/analysis/timed_build.sh -DROCSHMEM_BUILD_TIME_TRACE=ON -DGPU_TARGETS=gfx950
+  ../scripts/analysis/build_time.sh -DROCSHMEM_BUILD_TIME_TRACE=ON -DGPU_TARGETS=gfx950
 
 Codegen regression analysis
 ---------------------------
