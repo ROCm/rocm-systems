@@ -10540,6 +10540,7 @@ def test_cdna4_mixed_mfma_delegates_with_independent_operand_widths(m, k, output
     )
     assert f'rj_arith_v_mfma_f32_{m}x{m}x{k}_f8f6f4_w64' in body
     assert f'exec_dense_fp_matrix<8, {outputs}, 64>' in body
+    assert 'wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0' in body
     assert 'registers_for(inst_.cbsz), registers_for(inst_.blgp)' in body
     assert 'inst_.cbsz > 4 || inst_.blgp > 4' in body
     assert 'RJ_ARITH_MATRIX_FORMAT_B_SHIFT' in body

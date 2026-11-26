@@ -104,10 +104,20 @@ model contributed in #14809 for both `FP16_OVFL` clear and set (flushing NaN to
 +0.0 and clamping +-Inf to +-MAX_FLOAT after each internal K-step). Exact modes
 use that model; exact-allow-Loose falls back outside its qualified controls.
 All-negative-zero sums (+0), negative subnormal underflow to +0, subnormal C
-preservation, XF32 NaNs with payload only in bits 12:0 (truncating to
-infinity), BF16 2^128 product overflow, and subnormal BF16 product outputs and
-ties are all MI300X hardware-captured. This qualification does not extend to
-gfx950 or gfx1250, whose strict modes remain unsupported.
+preservation, XF32 NaNs with payload only in bits 12:0 (truncating to infinity),
+BF16 2^128 product overflow, and subnormal BF16 product outputs and ties are all
+MI300X hardware-captured. This qualification does not extend to gfx950
+dense/sparse half and fixed-FP8 forms or gfx1250, whose strict modes remain
+unsupported. On gfx950, the four mixed-format MXFP matrix instructions
+(`V_MFMA_F32_{16X16X128,32X32X64}_F8F6F4` and
+`V_MFMA_SCALE_F32_{16X16X128,32X32X64}_F8F6F4`) support MI350X-calibrated
+empirical exact modes across all 25 `(FP8, BF8, FP6, BF6, FP4)` format pairs,
+scale byte selectors and `FP16_OVFL` states when `NEG_C`/`ABS_C` C modifiers are
+clear (13-bit chunk alignment, 16-product passes when an 8-bit input is present
+and 32-product passes for subbyte pairs, `ce < te - 25` far-C drop, canonical
+`0xffc00000` NaN under `FP16_OVFL=0`, and per-pass NaN-to-+0.0 flush / +-Inf
+clamp to +-MAX_FLOAT when `FP16_OVFL=1`), while Compatibility and Loose retain
+their fast SIMD/scalar paths.
 Comparison and register-routing instructions also use rj-arith. Other families
 are migrating independently; an entry point's header documents its supported
 semantics and controls.
