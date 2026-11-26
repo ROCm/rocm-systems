@@ -13,6 +13,7 @@ DEVICE_COVERAGE_MODULE = RCCL_ROOT / "cmake" / "DeviceCoverage.cmake"
 # The amdgcn profile-runtime candidates probed by DeviceCoverage.cmake, in the
 # same priority order as RCCL_DEVICE_PROFILE_RUNTIME_RELPATHS.
 PRIMARY_RUNTIME_RELPATH = "lib/amdgcn-amd-amdhsa/libclang_rt.profile.a"
+AMDGPU_RUNTIME_RELPATH = "lib/amdgpu-amd-amdhsa/libclang_rt.profile.a"
 FALLBACK_RUNTIME_RELPATH = "lib/linux/libclang_rt.profile-amdgcn.a"
 
 
@@ -113,9 +114,34 @@ class DeviceCoverageCMakeTest(unittest.TestCase):
         self.assertIn("-fcoverage-mapping", argv)
         self.assertIn("-print-resource-dir", argv)
 
+    def test_probe_finds_amdgpu_triple_profile_runtime(self):
+        # Newer ROCm compilers (10.3 nightlies) install the device runtime only
+        # under lib/amdgpu-amd-amdhsa/. Without this candidate AUTO resolved
+        # device coverage OFF and only the host report was produced.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            resource_dir = root / "resource"
+            runtime = resource_dir / AMDGPU_RUNTIME_RELPATH
+            runtime.parent.mkdir(parents=True)
+            runtime.touch()
+            compiler_body = (
+                'printf "%s\\n" "$@" >> "${ARGV_FILE:-/dev/null}"\n'
+                f"printf '%s\\n' '{resource_dir}'\n"
+            )
+            probe_call = (
+                "rccl_find_device_profile_runtime("
+                '"${COMPILER}" runtime reason)\n'
+                'file(WRITE "${RESULT_FILE}" "${runtime}\\n${reason}")\n'
+            )
+            _probe_root, result, _argv, _ = self._run_cmake_probe(
+                compiler_body, probe_call
+            )
+
+        self.assertEqual(result, f"{runtime}\n")
+
     def test_probe_finds_linux_fallback_profile_runtime(self):
-        # Only the second candidate (lib/linux/...-amdgcn.a) exists, exercising
-        # the second loop iteration in rccl_find_device_profile_runtime.
+        # Only the last candidate (lib/linux/...-amdgcn.a) exists, exercising
+        # the final loop iteration in rccl_find_device_profile_runtime.
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             resource_dir = root / "resource"
