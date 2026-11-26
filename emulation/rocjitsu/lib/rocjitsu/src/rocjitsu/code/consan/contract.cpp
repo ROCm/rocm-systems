@@ -306,7 +306,9 @@ Result validate_manifest(const Manifest &manifest, util::DiagnosticEmitter diagn
          (target->arch == IsaFamily::Cdna3 || target->arch == IsaFamily::Cdna4 ||
           target->arch == IsaFamily::Rdna3 || target->arch == IsaFamily::Rdna4 ||
           target->arch == IsaFamily::Cdna5) &&
-         (site.access == AccessKind::Read || site.access == AccessKind::Write) && site.width == 4 &&
+         (site.access == AccessKind::Read || site.access == AccessKind::Write) &&
+         (site.width == 4 ||
+          (policy && (site.width == 2 || site.width == 8 || site.width == 16))) &&
          ranges.shape == LdsRangeShape::Single);
     const bool wide_flat = site.origin == AccessOrigin::GroupFlat &&
                            (target->arch == IsaFamily::Rdna4 || target->arch == IsaFamily::Cdna5);

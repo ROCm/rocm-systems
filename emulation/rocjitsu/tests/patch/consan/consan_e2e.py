@@ -10,6 +10,11 @@ import subprocess
 import struct
 import sys
 
+from group_flat_width_oracle import (
+    FLAT_WIDTH_CASES,
+    assert_flat_width_findings,
+    flat_width_pairs,
+)
 from consan_runtime_e2e import (
     Driver,
     HardwareUnavailable,
@@ -109,6 +114,8 @@ class AnalysisDriver(Driver):
             pairs = 1
         if case == 'wide_d16_overlap':
             pairs = 8
+        if case in FLAT_WIDTH_CASES:
+            pairs = flat_width_pairs(case)
         dual = case.startswith('wide_dual_')
         if dual:
             pairs = 2 if case.endswith('_overlap') else 0
@@ -129,6 +136,8 @@ class AnalysisDriver(Driver):
         # without linking a runtime or adding a live-registry input to the tool.
         environment = self.environment | {'LD_DEBUG': 'files'}
         analysis_command = [self.args.analyze, capture]
+        if case in FLAT_WIDTH_CASES and pairs:
+            analysis_command += ['--examples', pairs]
         if case.startswith('grouped_'):
             analysis_command += ['--examples', 64]
         first = self.run('analyze', analysis_command, status, environment)
@@ -227,7 +236,15 @@ class AnalysisDriver(Driver):
             )
             assert analyzed['cross_wave_pairs'] == per_launch_pairs
             assert analyzed['collision_groups'] == collisions
-            if case.startswith('flat_'):
+            if case in FLAT_WIDTH_CASES:
+                assert (
+                    result['scope']
+                    == 'native_and_group_flat_lds_single_range_no_sync_bounded_1d'
+                )
+                assert_flat_width_findings(
+                    raw['sites'], analyzed, case, self.args.wave_size
+                )
+            elif case.startswith('flat_'):
                 ordered = case.endswith('_ordered')
                 suffix = 'epoch_workgroup_barriers' if ordered else 'no_sync_bounded_1d'
                 excludes = {

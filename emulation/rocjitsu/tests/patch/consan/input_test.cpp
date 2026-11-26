@@ -180,6 +180,29 @@ TEST(ConSanInput, IdenticalFlatOpcodesKeepTheirSharedAndNonGroupMappings) {
   EXPECT_TRUE(validate_prepared(image, result.value(), error).succeeded()) << error.message;
 }
 
+TEST(ConSanInput, GroupFlatChecksBothAddressWordsAndTheCompleteValueTuple) {
+  const std::unique_ptr<Decoder> decoder = Decoder::create(IsaFamily::Cdna4);
+  ASSERT_NE(decoder, nullptr);
+  const auto check = [&](uint16_t opcode, cdna4::FlatBuilderFields fields) {
+    const DecodeResult decoded = decoder->decode_window(cdna4::build_flat(opcode, fields));
+    ASSERT_TRUE(decoded.succeeded());
+    InputError error;
+    std::vector<NativeLdsAccess> sites;
+    EXPECT_TRUE(classify_lds_race_instruction(*decoded.value(), IsaFamily::Cdna4, 8, sites, error)
+                    .failed());
+    EXPECT_EQ(error.code, InputErrorCode::UnsupportedAccess);
+    EXPECT_EQ(error.message, "FLAT operands exceed allocation");
+    EXPECT_TRUE(sites.empty());
+  };
+  check(cdna4::kFlatLoadShortD16HiFlat, {.addr = 7, .vdst = 0});
+  check(cdna4::kFlatLoadShortD16Flat, {.addr = 0, .vdst = 8});
+  check(cdna4::kFlatStoreShortD16HiFlat, {.addr = 0, .data = 8});
+  check(cdna4::kFlatLoadDwordx2Flat, {.addr = 0, .vdst = 7});
+  check(cdna4::kFlatStoreDwordx2Flat, {.addr = 0, .data = 7});
+  check(cdna4::kFlatLoadDwordx4Flat, {.addr = 0, .vdst = 5});
+  check(cdna4::kFlatStoreDwordx4Flat, {.addr = 0, .data = 5});
+}
+
 TEST(ConSanInput, AtomicAddRequiresQualifiedLdsFormAndAllocatedOperands) {
   const auto decoder = Decoder::create(IsaFamily::Cdna4);
   ASSERT_NE(decoder, nullptr);
