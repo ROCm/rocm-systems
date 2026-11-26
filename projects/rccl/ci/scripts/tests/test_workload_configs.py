@@ -125,6 +125,18 @@ class WorkflowsMatchConfigs(unittest.TestCase):
             self.assertEqual(tm.WORKLOAD_CONFIGS[workload]["schedule"], "weekly", workload)
         self.assertEqual(sorted([nightly, *weekly]), sorted(tm.WORKLOAD_CONFIGS))
 
+    def test_crusoe_weekly_runs_rubys_entries(self):
+        jobs = load_workflow("therock-rccl-ci-linux.yml")["jobs"]
+        ruby = jobs["therock-test-madengine-weekly"]
+        crusoe = jobs["therock-test-madengine-weekly-crusoe"]
+        self.assertEqual(crusoe["with"]["cluster"], "crusoe")
+        self.assertEqual(crusoe["if"], ruby["if"])
+        self.assertIn("therock-test-madengine-crusoe", crusoe["needs"])
+        self.assertEqual(crusoe["strategy"]["max-parallel"], 1)
+        entries = {e["workload"]: e for e in ruby["strategy"]["matrix"]["include"]}
+        for entry in crusoe["strategy"]["matrix"]["include"]:
+            self.assertEqual(entry, entries[entry["workload"]])
+
     def test_job_budget_covers_time_limit(self):
         for leg in madengine_legs():
             config = tm.WORKLOAD_CONFIGS[leg["workload"]]

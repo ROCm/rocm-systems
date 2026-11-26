@@ -352,6 +352,46 @@ jobs:
       notify_email: ${{ inputs.notify_email }}
       teams_webhook: ${{ inputs.notify_webhook }}
 
+  # The weekly workloads on Crusoe, after its own nightly job, as above. A job
+  # of its own rather than a cluster axis on the matrix above: max-parallel
+  # would then also queue each cluster behind the other.
+  # deepseek-r1-sglang-disagg is left out: Crusoe's models_dir has no
+  # DeepSeek-R1 weights, and the workload mounts it read-only.
+  therock-test-madengine-weekly-crusoe:
+    name: "Test MADEngine workloads on Crusoe (weekly)"
+    if: ${{ !cancelled() && contains(fromJSON(needs.test-plan.outputs.suites || '[]'), 'madengine') && (needs.therock-build-linux.result == 'success' || needs.therock-build-linux.result == 'skipped') && inputs.amdgpu_families == 'gfx950-dcgpu' && inputs.test_scope == 'all' && (inputs.event_name == 'schedule' || inputs.event_name == 'workflow_dispatch') }}
+    needs: [test-plan, therock-build-linux, therock-test-madengine-crusoe]
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          - workload: gpt-oss-120b-training
+            nodes: '2'
+            job_timeout_minutes: '390'
+          - workload: llama-3.1-70b-pp4-training
+            nodes: '2'
+            job_timeout_minutes: '390'
+          - workload: llama-3.1-405b-maxtext
+            nodes: '4'
+            job_timeout_minutes: '450'
+    uses: ./.github/workflows/therock-rccl-test-madengine.yml
+    secrets: inherit
+    with:
+      amdgpu_families: ${{ inputs.amdgpu_families }}
+      artifact_group: ${{ inputs.artifact_group }}
+      test_runs_on: crusoe-linux-slurm-scale-runner
+      cluster: crusoe
+      artifact_run_id: ${{ inputs.artifact_run_id || github.run_id }}
+      workload: ${{ matrix.workload }}
+      nodes: ${{ matrix.nodes }}
+      job_timeout_minutes: ${{ matrix.job_timeout_minutes }}
+      notify_email: ${{ inputs.notify_email }}
+      teams_webhook: ${{ inputs.notify_webhook }}
+
   therock-test-accl-profiler:
     name: "Test ACCL profiler decomposition (scheduled)"
     if: ${{ !cancelled() && contains(fromJSON(needs.test-plan.outputs.suites || '[]'), 'accl-profiler') }}
