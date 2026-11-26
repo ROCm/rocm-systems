@@ -65,6 +65,11 @@ CASES = (
         for peer in ('count', 'read', 'write', 'atomic', 'adjacent')
     ),
     *(
+        f'flat_{direction}_{mode}'
+        for direction in ('load', 'store')
+        for mode in ('scalar', 'backward')
+    ),
+    *(
         f'flat_load_{scenario}'
         for scenario in (
             'overlap',
@@ -376,7 +381,7 @@ class Driver:
             mode = fixture_name if fixture_name.endswith('_count') else 'defined'
         if fixture_name.startswith('flat_'):
             mode = (
-                fixture_name
+                fixture_name.replace('flat_saddr', 'flat_')
                 if fixture_name in FLAT_WIDTH_CASES and fixture_name.endswith('_values')
                 else 'defined'
             )
