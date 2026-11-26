@@ -487,24 +487,6 @@ inline native<double> ordered_clamp_f64_simd(native<double> v, double lo, double
   return result;
 }
 
-inline native<double> sqrt_f64_simd(native<double> a) {
-  native<double> r = stdx::sqrt(a);
-  constexpr std::size_t W = native<double>::size();
-  alignas(64) double in[W];
-  alignas(64) double out[W];
-  a.copy_to(in, stdx::element_aligned);
-  r.copy_to(out, stdx::element_aligned);
-  for (std::size_t i = 0; i < W; ++i) {
-    if (std::isnan(in[i])) {
-      out[i] = in[i];
-    } else if (in[i] < 0.0) {
-      out[i] = std::numeric_limits<double>::quiet_NaN();
-    }
-  }
-  r.copy_from(out, stdx::element_aligned);
-  return r;
-}
-
 /// Vectorized, bit-exact port of `f16_to_f32` (util/data_types.h). Each lane's
 /// low 16 bits hold the f16; high bits are ignored. All branch selection is
 /// done with `where`-masks in the uint32 domain. Bit-identical to the scalar
@@ -824,32 +806,6 @@ inline float ceil_scalar(float a) { return quiet_snan_scalar(a, std::ceil(a)); }
 inline double ceil_scalar(double a) { return quiet_snan_scalar(a, std::ceil(a)); }
 inline float trunc_scalar(float a) { return quiet_snan_scalar(a, std::trunc(a)); }
 inline double trunc_scalar(double a) { return quiet_snan_scalar(a, std::trunc(a)); }
-
-/// Native-width adapters for the shared integer transcendental mappings.
-inline native<float> rcp_f32_simd(native<float> a, bool quiet_snan = true) {
-  return map_native_convert_scalar<float, float>(
-      a, [quiet_snan](float value) { return amdgpu_rcp_f32(value, quiet_snan); });
-}
-
-inline native<float> rsq_f32_simd(native<float> a, bool quiet_snan = true) {
-  return map_native_convert_scalar<float, float>(
-      a, [quiet_snan](float value) { return amdgpu_rsq_f32(value, quiet_snan); });
-}
-
-inline native<float> sqrt_f32_simd(native<float> a, bool quiet_snan = true) {
-  return map_native_convert_scalar<float, float>(
-      a, [quiet_snan](float value) { return amdgpu_sqrt_f32(value, quiet_snan); });
-}
-
-inline native<float> log_f32_simd(native<float> a, bool quiet_snan = true) {
-  return map_native_convert_scalar<float, float>(
-      a, [quiet_snan](float value) { return amdgpu_log_f32(value, quiet_snan); });
-}
-
-inline native<float> exp_f32_simd(native<float> a, bool quiet_snan = true) {
-  return map_native_convert_scalar<float, float>(
-      a, [quiet_snan](float value) { return amdgpu_exp_f32(value, quiet_snan); });
-}
 
 /// @brief Widen unsigned E5M3 scale values from the low byte of each lane.
 inline native<float> fp8_e5m3_to_f32_simd(native<uint32_t> value) {

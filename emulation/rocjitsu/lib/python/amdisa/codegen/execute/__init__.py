@@ -86,10 +86,6 @@ def _register_handlers() -> None:
         gen_vector_swaprel,
         gen_vector_sat_pack,
         gen_vector_perm_pk16,
-        gen_vector_trig_preop,
-        gen_vector_div_fixup,
-        gen_vector_div_scale,
-        gen_vector_div_fmas,
         gen_vector_dot2c_bf16,
         gen_vector_bitop3,
         gen_vector_cvt_pk,
@@ -153,23 +149,6 @@ def _register_handlers() -> None:
     )
     DISPATCH['vector_perm_pk16'] = lambda c: gen_vector_perm_pk16(
         c.dst_ops, c.src_ops, c.op, c.profile.uses_vgpr_msb_indexing
-    )
-    DISPATCH['vector_trig_preop'] = lambda c: gen_vector_trig_preop(
-        c.dst_ops, c.src_ops, c.is_vop3, c.has_abs
-    )
-    DISPATCH['vector_div_fixup'] = lambda c: gen_vector_div_fixup(
-        c.dst_ops, c.src_ops, c.dtype, c.is_vop3, c.has_abs
-    )
-    DISPATCH['vector_div_scale'] = lambda c: gen_vector_div_scale(
-        c.dst_ops,
-        c.src_ops,
-        c.dtype,
-        c.is_vop3,
-        c.has_abs,
-        c.result_writer,
-    )
-    DISPATCH['vector_div_fmas'] = lambda c: gen_vector_div_fmas(
-        c.dst_ops, c.src_ops, c.dtype, c.is_vop3, c.has_abs
     )
     from .rj_arith_vector import gen_integer_dot
     from .rj_arith_float import gen_float_dot32

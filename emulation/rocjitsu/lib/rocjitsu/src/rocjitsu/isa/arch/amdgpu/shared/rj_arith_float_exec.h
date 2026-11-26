@@ -999,8 +999,8 @@ struct HalfUnaryWriter {
   }
 };
 
-// SDWA receives an already scaled half result. Its writer only finalizes OMOD,
-// applies clamp and places bytes; it does not multiply the result again.
+// Place bytes from a library-finalized SDWA half result; ordinary encodings retain
+// the usual half destination policy. Arithmetic and output controls stay in rj-arith.
 template <typename Inst> inline auto sdwa_half_math_writer(Inst &inst) {
   return [&inst](Wavefront &wave, RegisterAccess &registers, const Operand &destination,
                  uint64_t exec_mask, auto invoke, uint8_t byte_mask) {
@@ -1018,7 +1018,7 @@ template <typename Inst> inline auto sdwa_half_math_writer(Inst &inst) {
     }
     for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
       if (exec_mask & (uint64_t{1} << lane)) {
-        sdwa::write_lane<sdwa::ResultFormat::F16>(inst, wave, destination, lane, result[lane]);
+        sdwa::write_lane<sdwa::ResultFormat::NONE>(inst, wave, destination, lane, result[lane]);
       }
     }
     return !wave.instruction_execution_failed();
