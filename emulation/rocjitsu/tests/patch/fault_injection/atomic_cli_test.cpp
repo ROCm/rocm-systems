@@ -206,6 +206,56 @@ TEST_F(FaultAtomicCli, UnsupportedAtomicFormsRemainInOrdinalInventory) {
   EXPECT_EQ(read(input_), image);
 }
 
+TEST_F(FaultAtomicCli, Misaligned64BitDeltaDoesNotPublishOutput) {
+  for (const test::AtomicTargetCase &target : test::kAtomicTargetCases) {
+    SCOPED_TRACE(target.name);
+    const std::array<uint32_t, 3> words =
+        test::atomic_opcode_test_words(target, rdna4::kFlatAtomicAddU64Vflat, true);
+    const std::vector<uint8_t> image =
+        test::make_atomic_sequence_elf(target, {words[0], words[1], words[2]});
+    ASSERT_NO_FATAL_FAILURE(write(input_, image));
+    std::vector<std::string> list = args();
+    list.push_back("--list");
+    ASSERT_EQ(run(list), 0) << stderr_;
+    EXPECT_NE(stdout_.find("form=global_atomic_add_u64"), std::string::npos);
+    EXPECT_NE(stdout_.find("address_supported=1"), std::string::npos);
+    for (const std::vector<std::string> &selector :
+         {std::vector<std::string>{"--ordinal", "0"},
+          std::vector<std::string>{"--exact", "0", "--ordinal", "999"}}) {
+      std::vector<std::string> command = args();
+      command.insert(command.end(), {"--output", output_.string(), "--address-delta", "4"});
+      command.insert(command.end(), selector.begin(), selector.end());
+      const int status = run(command);
+      EXPECT_EQ(status, 2) << stderr_;
+      EXPECT_NE(stderr_.find("code=InvalidParameters"), std::string::npos);
+      EXPECT_FALSE(std::filesystem::exists(output_));
+      EXPECT_EQ(read(input_), image);
+      if (std::filesystem::exists(output_)) {
+        ASSERT_TRUE(std::filesystem::remove(output_));
+      }
+      ASSERT_EQ(run(mutation_args(selector)), 0) << stderr_;
+      const FaultMutationContext source(image);
+      EXPECT_TRUE(test::atomic_output_matches(source, 0, 8, read(output_)));
+      EXPECT_EQ(read(input_), image);
+      ASSERT_TRUE(std::filesystem::remove(output_));
+    }
+  }
+}
+
+TEST_F(FaultAtomicCli, UnknownSharedKernelListsDescriptorEntries) {
+  const std::vector<uint8_t> image = test::make_shared_atomic_elf(test::kAtomicTargetCases.front());
+  ASSERT_NO_FATAL_FAILURE(write(input_, image));
+  std::vector<std::string> list = args("test_kernel");
+  list.push_back("--list");
+  EXPECT_EQ(run(list), 2);
+  EXPECT_NE(stderr_.find("code=BadIdentity"), std::string::npos);
+  EXPECT_NE(stderr_.find("descriptor entries:"), std::string::npos);
+  EXPECT_NE(stderr_.find("test_kernel0"), std::string::npos);
+  EXPECT_NE(stderr_.find("test_kernel1"), std::string::npos);
+  EXPECT_FALSE(std::filesystem::exists(output_));
+  EXPECT_EQ(read(input_), image);
+}
+
 TEST_F(FaultAtomicCli, InvalidRequestsDoNotPublishOrChangeSource) {
   const test::AtomicTargetCase &target = test::kAtomicTargetCases.front();
   const std::vector<uint8_t> image = test::make_atomic_elf(target);

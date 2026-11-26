@@ -63,9 +63,12 @@ constexpr std::string_view kMutationHelp =
     "The caller supplies its runtime value.\n"
     "AtomicWrongAddress lists all owned atomic sites before form admission.\n"
     "Mutation currently supports gfx1250/gfx1251 wave32 and gfx1200/gfx1201\n"
-    "wave32/wave64 flat/global forms; see --capabilities. It requires positive,\n"
-    "four-byte-aligned --address-delta, at most 8388607 bytes. Only the immediate\n"
-    "offset changes; data, returning behavior, modifiers and waits remain.\n"
+    "wave32/wave64 flat/global forms; see --capabilities. It requires a positive\n"
+    "--address-delta, at most 8388607 bytes, divisible by four and preserving\n"
+    "the operation's natural alignment (8 bytes for 64-bit, 4 for 32-bit and\n"
+    "packed pairs; CAS uses the memory element width). The caller must supply\n"
+    "an aligned original address and valid source and mutant addresses. Only the\n"
+    "immediate offset changes; data, returning behavior, modifiers and waits remain.\n"
     "An unsupported selected form fails without renumbering atomic ordinals.\n"
     "Output must be new; existing files, aliases and in-place mutation are refused.\n"
     "Host transformation only; no GPU execution or detector qualification.\n";
@@ -245,7 +248,7 @@ int run(int argc, char **argv) {
   auto address_delta_flag = std::make_shared<MutationFlag<uint64_t>>(
       cli::FlagInfo{.name = "--address-delta",
                     .aliases = {},
-                    .description = "Positive atomic byte offset increment",
+                    .description = "Positive atomic byte delta preserving natural alignment",
                     .value_placeholder = "N"});
   auto list_flag = std::make_shared<MutationFlag<bool>>(
       cli::FlagInfo{.name = "--list",

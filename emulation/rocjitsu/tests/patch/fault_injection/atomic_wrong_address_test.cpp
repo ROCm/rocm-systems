@@ -109,6 +109,70 @@ TEST_P(FaultAtomicWrongAddress, FlatGlobalReturningAndCasPreserveGuestFields) {
   }
 }
 
+TEST_P(FaultAtomicWrongAddress, DeltaPreservesAtomicAccessAlignment) {
+  const test::AtomicTargetCase &fixture = GetParam();
+  struct AlignmentCase {
+    uint16_t opcode;
+    uint32_t alignment;
+  };
+  std::vector<AlignmentCase> cases = {
+      {.opcode = rdna4::kFlatAtomicAddU32Vflat, .alignment = 4},
+      {.opcode = rdna4::kFlatAtomicCmpswapB32Vflat, .alignment = 4},
+      {.opcode = rdna4::kFlatAtomicPkAddF16Vflat, .alignment = 4},
+      {.opcode = rdna4::kFlatAtomicAddU64Vflat, .alignment = 8},
+      {.opcode = rdna4::kFlatAtomicCmpswapB64Vflat, .alignment = 8}};
+  if (fixture.arch == IsaFamily::Cdna5)
+    cases.push_back({.opcode = cdna5::kFlatAtomicAddF64Vflat, .alignment = 8});
+  for (const AlignmentCase &sample : cases) {
+    SCOPED_TRACE(sample.opcode);
+    for (bool global : {false, true}) {
+      SCOPED_TRACE(global);
+      const size_t scale_states = fixture.arch == IsaFamily::Cdna5 ? 2 : 1;
+      for (size_t scale = 0; scale < scale_states; ++scale) {
+        SCOPED_TRACE(scale);
+        const std::array<uint32_t, 3> words =
+            test::atomic_opcode_test_words(fixture, sample.opcode, global, -8, scale != 0);
+        const std::vector<uint8_t> image =
+            test::make_atomic_sequence_elf(fixture, {words[0], words[1], words[2]});
+        const FaultMutationContext source(image);
+        FaultMutationError error;
+        const FailureOr<AtomicInventory> inventory =
+            discover_atomic_wrong_address(source, "test_kernel", error);
+        ASSERT_TRUE(inventory.succeeded()) << error.message;
+        ASSERT_EQ(inventory.value().sites().size(), 1u);
+        ASSERT_TRUE(inventory.value().sites().front().address_supported);
+        const FailureOr<AtomicSelection> selected =
+            select_atomic_wrong_address(inventory.value(), {}, error);
+        ASSERT_TRUE(selected.succeeded()) << error.message;
+        if (sample.alignment == 8) {
+          for (uint32_t delta : {4u, 12u}) {
+            const FailureOr<AtomicResult> rejected =
+                apply_atomic_wrong_address(source, selected.value(), delta, error);
+            EXPECT_TRUE(rejected.failed());
+            EXPECT_EQ(error.code, FaultMutationErrorCode::InvalidParameters);
+          }
+        }
+        const uint32_t delta = sample.alignment;
+        const FailureOr<AtomicResult> accepted =
+            apply_atomic_wrong_address(source, selected.value(), delta, error);
+        ASSERT_TRUE(accepted.succeeded()) << error.message;
+        EXPECT_TRUE(test::atomic_output_matches(source, 0, delta, accepted.value().image));
+        EXPECT_TRUE(std::ranges::equal(source.image(), image));
+      }
+    }
+  }
+}
+
+TEST_P(FaultAtomicWrongAddress, UnknownSharedKernelListsDescriptorEntries) {
+  const FaultMutationContext source(test::make_shared_atomic_elf(GetParam()));
+  FaultMutationError error;
+  EXPECT_TRUE(discover_atomic_wrong_address(source, "test_kernel", error).failed());
+  EXPECT_EQ(error.code, FaultMutationErrorCode::BadIdentity);
+  EXPECT_NE(error.message.find("descriptor entries:"), std::string::npos);
+  EXPECT_NE(error.message.find("test_kernel0"), std::string::npos);
+  EXPECT_NE(error.message.find("test_kernel1"), std::string::npos);
+}
+
 TEST_P(FaultAtomicWrongAddress, DeltaAlignmentBoundsAndOverflowRejectWithoutMutation) {
   const test::AtomicTargetCase &fixture = GetParam();
   const std::vector<uint8_t> image = test::make_atomic_elf(fixture);
