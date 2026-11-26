@@ -71,7 +71,8 @@ jobs:
             -DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX} \
             -DPROFILER_HUB_BUILD_TESTS=OFF \
             -DPROFILER_HUB_BUILD_BENCHMARKS=OFF \
-            -DPROFILER_HUB_FETCH_DEPENDENCIES=ON
+            -DPROFILER_HUB_FETCH_DEPENDENCIES=ON \
+            -DPROFILER_HUB_ENABLE_PYTORCH_KINETO=ON
 
       - name: Build profiler-hub
         working-directory: profilers/profiler-hub

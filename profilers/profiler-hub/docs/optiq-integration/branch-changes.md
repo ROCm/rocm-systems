@@ -165,7 +165,7 @@ so the justification can be typed in directly.
 
 | Change | Files affected | Justification |
 |---|---|---|
-| Added the `PROFILER_HUB_ENABLE_PYTORCH_KINETO` build switch, on by default. Off leaves the PyTorch sources out of the build and does not look for zlib. | `CMakeLists.txt`, `source/CMakeLists.txt` | Like the rocpd switches, a format can be left out of a build. |
+| Added the `PROFILER_HUB_ENABLE_PYTORCH_KINETO` build switch, off by default. On builds the PyTorch sources and looks up zlib. | `CMakeLists.txt`, `source/CMakeLists.txt` | Like the rocpd switches, a format can be left out of a build. |
 | Added zlib as a dependency, through `cmake/zlib.cmake`: found first, fetched when `PROFILER_HUB_FETCH_DEPENDENCIES` is ON, an error naming that flag otherwise. It joins the installed static target's link requirements only when the switch is on. | `cmake/zlib.cmake`, `CMakeLists.txt`, `cmake/profiler-hub-config.cmake.in` | The Kineto loader reads gzip traces. |
 | Added the Kineto parser: the loader, the category table, and the format check. The `pytorch` registry entry calls them. | `source/formats/pytorch/`, `source/common/utility.hpp` | The first part of reading PyTorch traces through the format registry. |
 | Added the Kineto store and catalog fill: the events grouped into host-thread and GPU-stream tracks, and the node, process, thread, agent, stream and track entries in the shared catalog. | `source/formats/pytorch/pytorch_store.*`, `source/formats/pytorch/pytorch_catalog.*` | The catalog is what `ph_ctx` builds its C structures from, for any format. |

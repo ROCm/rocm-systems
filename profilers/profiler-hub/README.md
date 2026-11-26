@@ -27,7 +27,7 @@ These options apply on Linux and Windows.
 | `PROFILER_HUB_BUILD_TESTS` | ON | Build unit tests |
 | `PROFILER_HUB_BUILD_BENCHMARKS` | ON | Build performance benchmarks |
 | `PROFILER_HUB_ENABLE_LOGGING` | OFF | Enable debug logging |
-| `PROFILER_HUB_ENABLE_PYTORCH_KINETO` | ON | Build the PyTorch Kineto trace parser. Needs zlib 1.3.2 or newer. OFF leaves its sources out of the build and does not look for zlib |
+| `PROFILER_HUB_ENABLE_PYTORCH_KINETO` | OFF | Build the PyTorch Kineto trace parser. Needs zlib 1.3.2 or newer. OFF leaves its sources out of the build and does not look for zlib |
 | `PROFILER_HUB_ENABLE_COVERAGE` | OFF | Enable code coverage instrumentation (requires Debug build, gcov, and lcov or gcovr) |
 | `PROFILER_HUB_FETCH_DEPENDENCIES` | OFF | Download missing dependencies at configure time. Required on Windows when SQLite3 is not already on `CMAKE_PREFIX_PATH` |
 | `SQLITE3_AMALGAMATION_URL` | sqlite.org amalgamation zip for 3.45.3 | URL of the prebuilt amalgamation zip used on Windows |
@@ -41,7 +41,7 @@ These options apply on Linux and Windows.
 - C++20 compatible compiler
 - SQLite3 (bundled via CMake module)
 - spdlog and fmt (system packages or FetchContent fallback)
-- zlib 1.3.2 or newer, for PyTorch traces (system package, or fetched when `-DPROFILER_HUB_FETCH_DEPENDENCIES=ON`; with `PROFILER_HUB_FETCH_DEPENDENCIES` OFF, configure fails on a system zlib below 1.3.2, such as Ubuntu 22.04's 1.2.11 or 24.04's 1.3; not looked up when `PROFILER_HUB_ENABLE_PYTORCH_KINETO` is OFF)
+- zlib 1.3.2 or newer, only with `-DPROFILER_HUB_ENABLE_PYTORCH_KINETO=ON`, for PyTorch traces (system package, or fetched when `-DPROFILER_HUB_FETCH_DEPENDENCIES=ON`; with `PROFILER_HUB_FETCH_DEPENDENCIES` OFF, configure fails on a system zlib below 1.3.2, such as Ubuntu 22.04's 1.2.11 or 24.04's 1.3; not looked up when `PROFILER_HUB_ENABLE_PYTORCH_KINETO` is OFF, its default)
 
 ### System package dependencies
 
@@ -60,7 +60,7 @@ sudo dnf install sqlite-devel spdlog-devel fmt-devel zlib-devel
 sudo zypper install sqlite3-devel spdlog-devel fmt-devel zlib-devel
 ```
 
-Where the distribution's zlib is older than 1.3.2 (Ubuntu 22.04 and 24.04, RHEL/Rocky 9), configure with `-DPROFILER_HUB_FETCH_DEPENDENCIES=ON` or `-DPROFILER_HUB_ENABLE_PYTORCH_KINETO=OFF`.
+Where the distribution's zlib is older than 1.3.2 (Ubuntu 22.04 and 24.04, RHEL/Rocky 9), a build with `-DPROFILER_HUB_ENABLE_PYTORCH_KINETO=ON` also needs `-DPROFILER_HUB_FETCH_DEPENDENCIES=ON`.
 
 ### Build
 
@@ -178,7 +178,8 @@ profiler-hub targets use distinct base names: `profiler-hub.lib` (import lib, pa
   run time.
 - **Dependencies:** fmt, spdlog, nlohmann_json, GoogleTest, and Google Benchmark are
   fetched via CMake `FetchContent` when not found on the system. zlib 1.3.2 or newer is
-  fetched the same way only when `PROFILER_HUB_FETCH_DEPENDENCIES` is ON.
+  fetched the same way only when `PROFILER_HUB_ENABLE_PYTORCH_KINETO` and
+  `PROFILER_HUB_FETCH_DEPENDENCIES` are both ON.
 - **Language standard:** library, tests, and benchmarks are built as **C++20**.
 
 ### Installation

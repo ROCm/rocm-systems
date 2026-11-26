@@ -69,7 +69,8 @@ jobs:
             -DPROFILER_HUB_ENABLE_COVERAGE=ON \
             -DPROFILER_HUB_BUILD_TESTS=ON \
             -DPROFILER_HUB_BUILD_BENCHMARKS=OFF \
-            -DPROFILER_HUB_FETCH_DEPENDENCIES=ON
+            -DPROFILER_HUB_FETCH_DEPENDENCIES=ON \
+            -DPROFILER_HUB_ENABLE_PYTORCH_KINETO=ON
 
       - name: Build
         working-directory: profilers/profiler-hub

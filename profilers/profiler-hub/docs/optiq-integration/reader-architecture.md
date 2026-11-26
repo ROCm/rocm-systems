@@ -136,7 +136,7 @@ and trim sources and make the rocpd entry stop reading it. The entry itself is
 always built. A file of a removed version probes as
 `PH_RESULT_UNSUPPORTED_FILE`.
 
-The compile option `PROFILER_HUB_ENABLE_PYTORCH_KINETO` (on by default) builds
+The compile option `PROFILER_HUB_ENABLE_PYTORCH_KINETO` (off by default) builds
 the pytorch entry and its sources and looks up zlib. With it off, the entry does
 not exist and a Kineto file probes as `PH_RESULT_UNSUPPORTED_FILE`.
 
