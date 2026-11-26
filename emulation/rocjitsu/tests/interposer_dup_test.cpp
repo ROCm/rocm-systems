@@ -81,8 +81,9 @@ extern "C" __attribute__((visibility("default"))) ssize_t getrandom(void *buffer
                                                                     unsigned flags) {
   if (random_pause) {
     random_pause->entered.store(true);
-    while (!random_pause->resume.load())
+    while (!random_pause->resume.load()) {
       std::this_thread::yield();
+    }
   }
   return syscall(SYS_getrandom, buffer, size, flags);
 }
@@ -135,8 +136,9 @@ void check_hidden_backing_after_dup(HiddenBacking kind, bool use_dup3) {
   constexpr int kOrdinaryFdLimit = 4096;
   struct rlimit limit {};
   ASSERT_EQ(getrlimit(RLIMIT_NOFILE, &limit), 0);
-  if (limit.rlim_max < kTestNofileLimit)
+  if (limit.rlim_max < kTestNofileLimit) {
     GTEST_SKIP() << "the driver backing descriptor range is unavailable";
+  }
   RestoreLimit restore{limit};
   limit.rlim_cur = std::max(limit.rlim_cur, kTestNofileLimit);
   ASSERT_EQ(setrlimit(RLIMIT_NOFILE, &limit), 0);
@@ -213,15 +215,17 @@ TEST(InterposerDupTest, ConstructorPreservesDescriptorLimit) {
   // Exec resets the descriptor table and reloads the interposer. Check the
   // application-visible soft limit before opening KFD can raise it itself.
   for (rlim_t limit : {64, 1024, 4096, 65536}) {
-    if (limit > original.rlim_max)
+    if (limit > original.rlim_max) {
       continue;
+    }
     struct rlimit limited = original;
     limited.rlim_cur = limit;
     ASSERT_EQ(setrlimit(RLIMIT_NOFILE, &limited), 0);
     std::string expected = std::string(kExpectedLimitEnv) + "=" + std::to_string(limit);
     std::vector<char *> environment;
-    for (char **entry = environ; *entry; ++entry)
+    for (char **entry = environ; *entry; ++entry) {
       environment.push_back(*entry);
+    }
     environment.push_back(expected.data());
     environment.push_back(nullptr);
     char executable[] = "/proc/self/exe";
@@ -518,8 +522,9 @@ void check_final_close_reports_deferred_writeback_failure(bool use_drm, bool use
       close_error = errno;
     });
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-    while (!close_waiting() && std::chrono::steady_clock::now() < deadline)
+    while (!close_waiting() && std::chrono::steady_clock::now() < deadline) {
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
     const bool observed_wait = close_waiting() != 0;
     release_snapshot(snapshot);
     closer.join();
@@ -588,10 +593,12 @@ TEST(InterposerDupTest, ProcMapsNamesRemoteKfdMarker) {
   // nothing under a plain `rocjitsu --config ... --` run and fails for a reason
   // that is not a defect.
   const char *invocation_dir = getenv("ROCJITSU_INVOCATION_DIR");
-  if (invocation_dir == nullptr || *invocation_dir == '\0')
+  if (invocation_dir == nullptr || *invocation_dir == '\0') {
     GTEST_SKIP() << "remote backend required";
-  if (access((std::string(invocation_dir) + "/daemon.sock").c_str(), F_OK) != 0)
+  }
+  if (access((std::string(invocation_dir) + "/daemon.sock").c_str(), F_OK) != 0) {
     GTEST_SKIP() << "remote backend required";
+  }
 
   int kfd = open_kfd();
   ASSERT_GE(kfd, 0);
@@ -670,8 +677,9 @@ TEST(InterposerDupTest, RemotePrimeImportRetainsExportedBacking) {
   std::string import_env = "RJ_TEST_REMOTE_PRIME_FD=" + std::to_string(child_export);
   std::string gate_env = "RJ_TEST_REMOTE_PRIME_GATE=" + std::to_string(child_gate);
   std::vector<char *> environment;
-  for (char **entry = environ; *entry; ++entry)
+  for (char **entry = environ; *entry; ++entry) {
     environment.push_back(*entry);
+  }
   environment.push_back(import_env.data());
   environment.push_back(gate_env.data());
   environment.push_back(nullptr);
@@ -701,8 +709,9 @@ TEST(InterposerDupTest, RemotePrimeImportRetainsExportedBacking) {
 TEST(InterposerDupTest, RemotePrimeSecondClientImport) {
   const char *import_env = getenv("RJ_TEST_REMOTE_PRIME_FD");
   const char *gate_env = getenv("RJ_TEST_REMOTE_PRIME_GATE");
-  if (!import_env || !gate_env)
+  if (!import_env || !gate_env) {
     GTEST_SKIP() << "run by RemotePrimeImportRetainsExportedBacking after exec";
+  }
   const int export_fd = std::atoi(import_env);
   const int gate_fd = std::atoi(gate_env);
   ASSERT_GE(export_fd, 0);
@@ -1156,8 +1165,9 @@ TEST(InterposerDupTest, SerializedReopenUnderContentionStaysRoutable) {
   std::thread churn([&] {
     while (!stop.load(std::memory_order_relaxed)) {
       int d = dup(keeper);
-      if (d >= 0)
+      if (d >= 0) {
         close(d);
+      }
       std::this_thread::sleep_for(std::chrono::microseconds(50));
     }
   });
@@ -1201,8 +1211,9 @@ TEST(InterposerDupTest, SerializedReopenUnderContentionStaysRoutable) {
       }
       continue;
     }
-    if (!kfd_version_ok(primary))
+    if (!kfd_version_ok(primary)) {
       ++bad;
+    }
   }
 
   stop.store(true);
@@ -1221,8 +1232,9 @@ TEST(InterposerDupTest, FcntlDupfdReplacesStaleDrmTracking) {
   ASSERT_GE(kfd, 0);
   ASSERT_TRUE(kfd_version_ok(kfd));
   int first = open_drm_render();
-  if (first < 0)
+  if (first < 0) {
     GTEST_SKIP() << "synthetic DRM render node unavailable in this configuration";
+  }
   int stale_fd = dup(first);
   ASSERT_GE(stale_fd, 0);
   int second = open_drm_render();
@@ -1256,8 +1268,9 @@ TEST(InterposerDupTest, NonDrmDuplicatesClearStaleDrmTracking) {
   ASSERT_GE(kfd, 0);
   ASSERT_TRUE(kfd_version_ok(kfd));
   int drm = open_drm_render();
-  if (drm < 0)
+  if (drm < 0) {
     GTEST_SKIP() << "synthetic DRM render node unavailable in this configuration";
+  }
 
   drm_syncobj_create create{};
   ASSERT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_CREATE, &create), 0);
@@ -1459,8 +1472,9 @@ bool query_drm_device_info(int drm_fd, drm_amdgpu_info_device *device) {
 // sized, mappable object; a memfd satisfies both without a KFD allocation.
 int make_sized_memfd(size_t size) {
   int fd = memfd_create("rocjitsu_gem_test", MFD_CLOEXEC);
-  if (fd < 0)
+  if (fd < 0) {
     return -1;
+  }
   if (ftruncate(fd, static_cast<off_t>(size)) != 0) {
     close(fd);
     return -1;
@@ -1472,8 +1486,9 @@ int make_sized_memfd(size_t size) {
 bool prime_import(int drm_fd, int dmabuf_fd, uint32_t *handle) {
   drm_prime_handle prime{};
   prime.fd = dmabuf_fd;
-  if (ioctl(drm_fd, DRM_IOCTL_PRIME_FD_TO_HANDLE, &prime) != 0)
+  if (ioctl(drm_fd, DRM_IOCTL_PRIME_FD_TO_HANDLE, &prime) != 0) {
     return false;
+  }
   *handle = prime.handle;
   return true;
 }
@@ -1492,8 +1507,9 @@ int gem_close(int drm_fd, uint32_t handle) {
 
 int64_t monotonic_deadline_after(std::chrono::nanoseconds delay) {
   timespec now{};
-  if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+  if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) {
     return 0;
+  }
   return static_cast<int64_t>(now.tv_sec) * 1'000'000'000LL + now.tv_nsec + delay.count();
 }
 
@@ -1623,24 +1639,28 @@ public:
   bool create(int kfd_fd, uint32_t flags) {
     kfd = kfd_fd;
     uint32_t gpu_id = 0;
-    if (!read_gpu_id(gpu_id))
+    if (!read_gpu_id(gpu_id)) {
       return false;
+    }
     reserved = mmap(nullptr, 4096, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
-    if (reserved == MAP_FAILED)
+    if (reserved == MAP_FAILED) {
       return false;
+    }
     kfd_ioctl_alloc_memory_of_gpu_args allocation{};
     allocation.va_addr = reinterpret_cast<uint64_t>(reserved);
     allocation.size = 4096;
     allocation.gpu_id = gpu_id;
     allocation.flags = flags;
-    if (ioctl(kfd, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation) != 0)
+    if (ioctl(kfd, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation) != 0) {
       return false;
+    }
     handle = allocation.handle;
     kfd_ioctl_export_dmabuf_args exported{};
     exported.handle = handle;
     exported.flags = O_CLOEXEC;
-    if (ioctl(kfd, AMDKFD_IOC_EXPORT_DMABUF, &exported) != 0)
+    if (ioctl(kfd, AMDKFD_IOC_EXPORT_DMABUF, &exported) != 0) {
       return false;
+    }
     dmabuf = static_cast<int>(exported.dmabuf_fd);
     return true;
   }
@@ -1685,8 +1705,9 @@ uint64_t gem_domains(int drm, uint32_t handle) {
   op.handle = handle;
   op.op = AMDGPU_GEM_OP_GET_GEM_CREATE_INFO;
   op.value = reinterpret_cast<uint64_t>(&info);
-  if (ioctl(drm, DRM_IOCTL_AMDGPU_GEM_OP, &op) != 0)
+  if (ioctl(drm, DRM_IOCTL_AMDGPU_GEM_OP, &op) != 0) {
     return ~uint64_t{0};
+  }
   return info.domains;
 }
 
@@ -1730,11 +1751,13 @@ std::string mapping_dump_flags(void *address) {
   bool selected = false;
   while (std::getline(smaps, line)) {
     unsigned long begin = 0, end = 0;
-    if (std::sscanf(line.c_str(), "%lx-%lx", &begin, &end) == 2)
+    if (std::sscanf(line.c_str(), "%lx-%lx", &begin, &end) == 2) {
       selected = reinterpret_cast<uintptr_t>(address) >= begin &&
                  reinterpret_cast<uintptr_t>(address) < end;
-    if (selected && line.starts_with("VmFlags:"))
+    }
+    if (selected && line.starts_with("VmFlags:")) {
       return line + " ";
+    }
   }
   return {};
 }
@@ -1843,8 +1866,9 @@ TEST(InterposerDrmTest, AllocationFailsWhenBackingDescriptorsAreExhausted) {
   ASSERT_EQ(setrlimit(RLIMIT_NOFILE, &limited), 0);
   std::vector<int> fillers;
   int fd;
-  while ((fd = open("/dev/null", O_RDONLY | O_CLOEXEC)) >= 0)
+  while ((fd = open("/dev/null", O_RDONLY | O_CLOEXEC)) >= 0) {
     fillers.push_back(fd);
+  }
   const int exhaustion_error = errno;
   kfd_ioctl_alloc_memory_of_gpu_args allocation{};
   allocation.va_addr = reinterpret_cast<uint64_t>(reserved);
@@ -1854,8 +1878,9 @@ TEST(InterposerDrmTest, AllocationFailsWhenBackingDescriptorsAreExhausted) {
   errno = 0;
   const int result = ioctl(kfd, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation);
   const int allocation_error = errno;
-  for (int filler : fillers)
+  for (int filler : fillers) {
     EXPECT_EQ(close(filler), 0);
+  }
   EXPECT_EQ(setrlimit(RLIMIT_NOFILE, &original), 0);
   EXPECT_EQ(exhaustion_error, EMFILE);
   EXPECT_EQ(result, -1);
@@ -2230,8 +2255,9 @@ TEST(InterposerDrmTest, DupRacingTheCloseOfAPrimeExportKeepsTheBoState) {
       copy = dup(prime.fd);
     }
     closer.join();
-    if (copy < 0)
+    if (copy < 0) {
       continue;
+    }
     struct stat copied {};
     if (fstat(copy, &copied) != 0 || copied.st_dev != exported.st_dev ||
         copied.st_ino != exported.st_ino) {
@@ -2246,8 +2272,9 @@ TEST(InterposerDrmTest, DupRacingTheCloseOfAPrimeExportKeepsTheBoState) {
     query.handle = imported;
     query.op = AMDGPU_GEM_METADATA_OP_GET_METADATA;
     ASSERT_EQ(ioctl(importer, DRM_IOCTL_AMDGPU_GEM_METADATA, &query), 0);
-    if (query.data.data_size_bytes != sizeof(uint32_t) || query.data.tiling_info != 0x11u)
+    if (query.data.data_size_bytes != sizeof(uint32_t) || query.data.tiling_info != 0x11u) {
       ++lost;
+    }
     EXPECT_EQ(gem_close(importer, imported), 0);
     EXPECT_EQ(close(copy), 0);
   }
@@ -2490,8 +2517,9 @@ TEST(InterposerDrmTest, DeviceViewRetainsDumpIdentityAfterReleaseAndMove) {
   EXPECT_EQ(*static_cast<uint32_t *>(target), 0x12345678u);
   // The token variant also exercises proc snapshots when memfd_create is unavailable.
   const char *token = std::getenv("RJ_TEST_FORCE_TOKEN_BACKING");
-  if (token && std::strcmp(token, "1") == 0)
+  if (token && std::strcmp(token, "1") == 0) {
     rocjitsu::test::set_syscall_error(SYS_memfd_create, ENOSYS);
+  }
   for (const char *path : {"/proc/self/maps", "/proc/self/smaps"}) {
     std::ifstream maps(path);
     std::string line;
@@ -2515,8 +2543,9 @@ TEST(InterposerDrmTest, GemMappingsFollowGpuCoreDumpPolicy) {
   constexpr rlim_t kTestNofileLimit = 8192;
   struct rlimit limit {};
   ASSERT_EQ(getrlimit(RLIMIT_NOFILE, &limit), 0);
-  if (limit.rlim_max < kTestNofileLimit)
+  if (limit.rlim_max < kTestNofileLimit) {
     GTEST_SKIP() << "the driver backing descriptor range is unavailable";
+  }
   RestoreLimit restore{limit};
   limit.rlim_cur = std::max(limit.rlim_cur, kTestNofileLimit);
   ASSERT_EQ(setrlimit(RLIMIT_NOFILE, &limit), 0);
@@ -2562,8 +2591,9 @@ TEST(InterposerDrmTest, MappingStillSucceedsAtTheDescriptorLimit) {
     std::vector<int> descriptors;
     ~DescriptorLimitGuard() {
       setrlimit(RLIMIT_NOFILE, &original);
-      for (int fd : descriptors)
+      for (int fd : descriptors) {
         syscall(SYS_close, fd);
+      }
     }
   } guard;
   ASSERT_EQ(getrlimit(RLIMIT_NOFILE, &guard.original), 0);
@@ -2572,8 +2602,9 @@ TEST(InterposerDrmTest, MappingStillSucceedsAtTheDescriptorLimit) {
   ASSERT_EQ(setrlimit(RLIMIT_NOFILE, &bounded), 0);
   for (;;) {
     const int extra = static_cast<int>(syscall(SYS_dup, file));
-    if (extra < 0)
+    if (extra < 0) {
       break;
+    }
     guard.descriptors.push_back(extra);
   }
   ASSERT_EQ(errno, EMFILE);
@@ -2613,9 +2644,10 @@ TEST(InterposerDrmTest, DumpPolicyRetainsTheMappedFileAcrossDescriptorReuse) {
       bool selected = false, found = false;
       while (std::getline(smaps, line)) {
         unsigned long begin = 0, end = 0;
-        if (std::sscanf(line.c_str(), "%lx-%lx", &begin, &end) == 2)
+        if (std::sscanf(line.c_str(), "%lx-%lx", &begin, &end) == 2) {
           selected = reinterpret_cast<uintptr_t>(mapped) >= begin &&
                      reinterpret_cast<uintptr_t>(mapped) < end;
+        }
         if (selected && line.starts_with("VmFlags:")) {
           EXPECT_EQ((line + " ").find(" dd ") != std::string::npos, map_device);
           found = true;
@@ -2722,14 +2754,16 @@ public:
   bool wait_until_paused() {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     while (!pause_.entered.load() && !finished_.load() &&
-           std::chrono::steady_clock::now() < deadline)
+           std::chrono::steady_clock::now() < deadline) {
       std::this_thread::yield();
+    }
     return pause_.entered.load();
   }
   int finish() {
     pause_.resume.store(true);
-    if (thread_.joinable())
+    if (thread_.joinable()) {
       thread_.join();
+    }
     return result_;
   }
 
@@ -2911,12 +2945,14 @@ TEST(InterposerDrmTest, DmabufExportKeepsStoresMadeDuringTheExport) {
   std::thread writer([&] {
     for (size_t i = 0; i < kWords; ++i) {
       words[i] = expected(i);
-      if (i == kWords / 8)
+      if (i == kWords / 8) {
         writing.store(true, std::memory_order_release);
+      }
     }
   });
-  while (!writing.load(std::memory_order_acquire))
+  while (!writing.load(std::memory_order_acquire)) {
     std::this_thread::yield();
+  }
   kfd_ioctl_export_dmabuf_args exported{};
   exported.handle = allocation.handle;
   exported.flags = O_CLOEXEC;
@@ -3026,8 +3062,9 @@ TEST(InterposerDrmTest, PrimeHandleToFdReturnsTheBuffer) {
     } else {
       EXPECT_EQ(write_view, MAP_FAILED);
       EXPECT_EQ(errno, EACCES);
-      if (write_view != MAP_FAILED)
+      if (write_view != MAP_FAILED) {
         munmap(write_view, 4096);
+      }
     }
     // Importing the BO keeps GPU and DRM-file mappings usable even when the
     // public dma-buf view is read-only. Re-export retains the original mode.
@@ -3234,14 +3271,18 @@ protected:
   }
 
   void TearDown() override {
-    if (memory_)
+    if (memory_) {
       munmap(memory_, 8192);
-    if (bo_)
+    }
+    if (bo_) {
       gem_close(drm_, bo_);
-    if (drm_ >= 0)
+    }
+    if (drm_ >= 0) {
       close(drm_);
-    if (kfd_ >= 0)
+    }
+    if (kfd_ >= 0) {
       close(kfd_);
+    }
   }
 
   int submit(uint32_t dwords, bool wait_input, uint64_t *sequence,
@@ -3277,16 +3318,19 @@ protected:
     drm_amdgpu_cs_chunk_syncobj output{};
     output.handle = output_;
     output.point = point;
-    if (point)
+    if (point) {
       add(AMDGPU_CHUNK_ID_SYNCOBJ_TIMELINE_SIGNAL, output);
-    else
+    } else {
       add(AMDGPU_CHUNK_ID_SYNCOBJ_OUT, output_);
+    }
     add(AMDGPU_CHUNK_ID_FENCE, fence);
-    if (wait_input)
+    if (wait_input) {
       add(AMDGPU_CHUNK_ID_SYNCOBJ_TIMELINE_WAIT, dependency);
+    }
     std::vector<uint64_t> pointers;
-    for (auto &chunk : chunks)
+    for (auto &chunk : chunks) {
       pointers.push_back(reinterpret_cast<uint64_t>(&chunk));
+    }
     drm_amdgpu_cs cs{};
     cs.in.ctx_id = context_;
     cs.in.num_chunks = pointers.size();
@@ -3395,8 +3439,9 @@ protected:
       info.query = AMDGPU_INFO_DEV_INFO;
       info.return_pointer = reinterpret_cast<uint64_t>(&device);
       info.return_size = sizeof(device);
-      if (ioctl(drm_, DRM_IOCTL_AMDGPU_INFO, &info) != 0)
+      if (ioctl(drm_, DRM_IOCTL_AMDGPU_INFO, &info) != 0) {
         return -1;
+      }
       const bool is_rdna4 = device.family == AMDGPU_FAMILY_GC_12_0_0;
       shader = is_rdna4 ? rdna4 : rdna3;
       bytes = is_rdna4 ? sizeof(rdna4) : sizeof(rdna3);
@@ -3624,12 +3669,14 @@ TEST_F(InterposerPm4Test, GemResidentVaRejectsCallerVaKfdDmabufImport) {
   ASSERT_GE(import_dmabuf, 0);
   const auto open_fd_count = [] {
     DIR *directory = opendir("/proc/self/fd");
-    if (!directory)
+    if (!directory) {
       return size_t{0};
+    }
     size_t count = 0;
     while (dirent *entry = readdir(directory)) {
-      if (entry->d_name[0] != '.')
+      if (entry->d_name[0] != '.') {
         ++count;
+      }
     }
     closedir(directory);
     return count;
@@ -3914,8 +3961,9 @@ TEST_F(InterposerPm4Test, TransferWaitsForSubmissionWithoutWaitingForCompletion)
     started.store(true, std::memory_order_release);
     transfer_rc = ioctl(drm_, DRM_IOCTL_SYNCOBJ_TRANSFER, &transfer);
   });
-  while (!started.load(std::memory_order_acquire))
+  while (!started.load(std::memory_order_acquire)) {
     std::this_thread::yield();
+  }
   std::this_thread::sleep_for(std::chrono::milliseconds(10));
   memory_[0] = 0xffff1000;
   uint64_t sequence = 0;
@@ -3954,9 +4002,10 @@ TEST_F(InterposerPm4Test, GraphicsRegistersRetainAllPacketForms) {
   emit(0x9b, {0x30000087, 0xcccccccc});
   const std::array<uint32_t, 13> registers{0xa300, 0xa301, 0xa302, 0xa303, 0xa304, 0xa305, 0xa306,
                                            0xa307, 0xc440, 0xc242, 0xc441, 0xc442, 0x2c87};
-  for (uint32_t i = 0; i < registers.size(); ++i)
+  for (uint32_t i = 0; i < registers.size(); ++i) {
     emit(0x40,
          {5u << 8, registers[i], 0, uint32_t(kAddress + 6144 + i * 4), uint32_t(kAddress >> 32)});
+  }
   std::memcpy(memory_, packets.data(), packets.size() * 4);
   uint64_t sequence = 0;
   ASSERT_EQ(submit(packets.size(), false, &sequence, AMDGPU_HW_IP_GFX), 0);
@@ -3964,8 +4013,9 @@ TEST_F(InterposerPm4Test, GraphicsRegistersRetainAllPacketForms) {
   const std::array<uint32_t, 13> expected{
       0x11111111, 0x22222222, 0x33333333, 0x44444444, 0x55555555, 0x66666666, 0x77777777,
       0x88888888, 0x99999999, 4,          0xaaaaaaaa, 0xbbbbbbbb, 0xcccccccc};
-  for (uint32_t i = 0; i < expected.size(); ++i)
+  for (uint32_t i = 0; i < expected.size(); ++i) {
     EXPECT_EQ(memory_[1536 + i], expected[i]) << "register " << std::hex << registers[i];
+  }
 }
 
 TEST_F(InterposerPm4Test, ContextMaskedUpdatesAndTranslationPrefetchPreserveOtherState) {
@@ -4138,11 +4188,12 @@ TEST_F(InterposerPm4Test, InterleavedDispatchExecutesDirectAndIndirectShaders) {
                                  0x240,
                                  uint32_t(data),
                                  uint32_t(data >> 32)};
-    if (indirect)
+    if (indirect) {
       packet.insert(packet.end(), {0xc0021100, 1, uint32_t(arguments), uint32_t(arguments >> 32),
                                    0xc001a802, 0, 0x48005});
-    else
+    } else {
       packet.insert(packet.end(), {0xc003a702, 1, 1, 1, 0x48005});
+    }
     std::memcpy(memory_, packet.data(), packet.size() * 4);
     uint64_t sequence = 0;
     ASSERT_EQ(submit(packet.size(), false, &sequence, AMDGPU_HW_IP_GFX), 0);
@@ -4276,8 +4327,9 @@ TEST_F(InterposerPm4Test, ClearStateResetUsesRdna3Defaults) {
   info.return_pointer = reinterpret_cast<uint64_t>(&device);
   info.return_size = sizeof(device);
   ASSERT_EQ(ioctl(drm_, DRM_IOCTL_AMDGPU_INFO, &info), 0);
-  if (device.family == AMDGPU_FAMILY_GC_12_0_0)
+  if (device.family == AMDGPU_FAMILY_GC_12_0_0) {
     GTEST_SKIP() << "GFX12 CLEAR_STATE has only push and pop modes";
+  }
   for (uint32_t command : {0u, 3u}) {
     SCOPED_TRACE(command);
     std::vector<uint32_t> packets;
@@ -4287,21 +4339,25 @@ TEST_F(InterposerPm4Test, ClearStateResetUsesRdna3Defaults) {
     };
     // A zero default, three nonzero defaults, and a gap outside the shadow ranges.
     const uint32_t registers[] = {0, 0xd, 0x81, 0xb5, 0x22};
-    for (uint32_t reg : registers)
+    for (uint32_t reg : registers) {
       emit(0x69, {reg, 99});
-    if (command == 0)
+    }
+    if (command == 0) {
       emit(0x12, {1});
+    }
     emit(0x12, {command});
     uint32_t destination = uint32_t(kAddress + 6144);
     const auto read = [&](uint32_t reg) {
       emit(0x40, {5u << 8, 0xa000 + reg, 0, destination, uint32_t(kAddress >> 32)});
       destination += 4;
     };
-    for (uint32_t reg : registers)
+    for (uint32_t reg : registers) {
       read(reg);
+    }
     emit(0x12, {2});
-    for (uint32_t reg : registers)
+    for (uint32_t reg : registers) {
       read(reg);
+    }
     std::memcpy(memory_, packets.data(), packets.size() * 4);
     uint64_t sequence = 0;
     ASSERT_EQ(submit(packets.size(), false, &sequence, AMDGPU_HW_IP_GFX), 0);
@@ -4362,17 +4418,19 @@ TEST_F(InterposerPm4Test, ShadowRegisterLoadsUseSparseMemoryOffsets) {
   for (size_t i = 0; i < loads.size(); ++i) {
     emit(sets[i], {4, 11, 22, 33, 44, 88, 77});
     emit(loads[i], {uint32_t(kAddress + 4608), uint32_t(kAddress >> 32), 9, 1, 5, 2});
-    for (uint32_t reg = 4; reg <= 9; ++reg)
+    for (uint32_t reg = 4; reg <= 9; ++reg) {
       emit(0x40, {5u << 8, bases[i] + reg, 0, uint32_t(kAddress + 6144 + (i * 6 + reg - 4) * 4),
                   uint32_t(kAddress >> 32)});
+    }
   }
   std::memcpy(memory_, packets.data(), packets.size() * 4);
   uint64_t sequence = 0;
   ASSERT_EQ(submit(packets.size(), false, &sequence, AMDGPU_HW_IP_GFX), 0);
   ASSERT_EQ(wait_output(monotonic_deadline_after(std::chrono::seconds(5))), 0);
   const std::array<uint32_t, 6> expected{11, 55, 66, 44, 88, 99};
-  for (size_t i = 0; i < 18; ++i)
+  for (size_t i = 0; i < 18; ++i) {
     EXPECT_EQ(memory_[1536 + i], expected[i % 6]) << "result " << i;
+  }
 }
 
 TEST_F(InterposerPm4Test, MemoryAtomicsApplyIntegerOperationsAtBothWidths) {
@@ -4812,8 +4870,9 @@ TEST_F(InterposerPm4Test, TimelineSubmissionWaitsForEarlierQueue) {
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
   do {
     std::memcpy(&completed, memory_ + 1026, sizeof(completed));
-    if (completed == sequence)
+    if (completed == sequence) {
       break;
+    }
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
   } while (std::chrono::steady_clock::now() < deadline);
   EXPECT_EQ(completed, sequence);
@@ -4905,7 +4964,7 @@ TEST_F(InterposerPm4Test, ThreadDimensionsMaskPartialGroupsForDirectAndIndirectD
   const bool is_gfx12 = device.family == AMDGPU_FAMILY_GC_12_0_0;
   std::memcpy(memory_ + 1152, is_gfx12 ? gfx12 : gfx11, sizeof(gfx11));
   const uint64_t code = kAddress + 4608, data = kAddress + 6144, arguments = kAddress + 5120;
-  for (bool indirect : {false, true})
+  for (bool indirect : {false, true}) {
     for (uint32_t x : {0u, 1u, 64u, 70u}) {
       SCOPED_TRACE(testing::Message() << "indirect=" << indirect << " x=" << x);
       memory_[1536] = 10;
@@ -4927,17 +4986,19 @@ TEST_F(InterposerPm4Test, ThreadDimensionsMaskPartialGroupsForDirectAndIndirectD
                                    0x240,
                                    uint32_t(data),
                                    uint32_t(data >> 32)};
-      if (indirect)
+      if (indirect) {
         packet.insert(packet.end(),
                       {0xc0021600, uint32_t(arguments), uint32_t(arguments >> 32), 0x8025});
-      else
+      } else {
         packet.insert(packet.end(), {0xc0031500, x, 3, 3, 0x8025});
+      }
       std::memcpy(memory_, packet.data(), packet.size() * 4);
       uint64_t sequence = 0;
       ASSERT_EQ(submit(packet.size(), false, &sequence), 0);
       ASSERT_EQ(wait_output(monotonic_deadline_after(std::chrono::seconds(5))), 0);
       EXPECT_EQ(memory_[1536], 10 + x * 9);
     }
+  }
 }
 
 TEST_F(InterposerPm4Test, GridProductOverflowFailsFence) {
@@ -5316,12 +5377,14 @@ void InterposerPm4FileLimitTest::check_large_fence_mapping(bool token) {
   ASSERT_EQ(getrlimit(RLIMIT_AS, &original), 0);
   const uint64_t virtual_size = pages * page_size;
   const rlim_t headroom = original.rlim_cur > virtual_size ? original.rlim_cur - virtual_size : 0;
-  if (headroom < experiment_headroom + page_size)
+  if (headroom < experiment_headroom + page_size) {
     GTEST_SKIP() << "inherited RLIMIT_AS needs 128 MiB plus the observer page for the experiment";
+  }
   if (token) {
-    if (headroom < size + 2 * page_size)
+    if (headroom < size + 2 * page_size) {
       GTEST_SKIP() << "inherited RLIMIT_AS needs the full token attachment plus observer and "
                       "fence pages for mapping and retry";
+    }
     // The keeper has its own address space and may have less headroom than us.
     // Query it through the existing fixture BO before creating the large BO.
     drm_prime_handle prime{};
@@ -5345,8 +5408,9 @@ void InterposerPm4FileLimitTest::check_large_fence_mapping(bool token) {
     const uint64_t keeper_size = keeper_pages * page_size;
     const rlim_t keeper_headroom =
         keeper_limit.rlim_cur > keeper_size ? keeper_limit.rlim_cur - keeper_size : 0;
-    if (keeper_headroom < size + 2 * page_size)
+    if (keeper_headroom < size + 2 * page_size) {
       GTEST_SKIP() << "keeper RLIMIT_AS needs the full token attachment plus allocation records";
+    }
   }
 
   memory_[0] = 0xffff1000;
@@ -5576,8 +5640,9 @@ TEST(InterposerDrmTest, BorrowedDisplayDescriptorUsesSimulatedIdentity) {
     struct stat info {};
     ASSERT_EQ(fstat(imported, &info), 0);
     ASSERT_TRUE(S_ISCHR(info.st_mode));
-    if (presentation_device == 0)
+    if (presentation_device == 0) {
       presentation_device = info.st_rdev;
+    }
     EXPECT_EQ(info.st_rdev, presentation_device);
     const std::string sys = "/sys/dev/char/226:" + std::to_string(minor(info.st_rdev));
     struct stat node {};
@@ -5587,8 +5652,9 @@ TEST(InterposerDrmTest, BorrowedDisplayDescriptorUsesSimulatedIdentity) {
     bool matched = false;
     while (const dirent *entry = readdir(dir)) {
       const std::string path = std::string("/dev/dri/") + entry->d_name;
-      if (stat(path.c_str(), &node) == 0 && S_ISCHR(node.st_mode) && node.st_rdev == info.st_rdev)
+      if (stat(path.c_str(), &node) == 0 && S_ISCHR(node.st_mode) && node.st_rdev == info.st_rdev) {
         matched = true;
+      }
     }
     EXPECT_EQ(closedir(dir), 0);
     EXPECT_TRUE(matched) << "libdrm must find the fd in the enumerated DRM nodes";
@@ -5635,8 +5701,9 @@ TEST(InterposerSyncobjTest, VmTimelineWaitObservesSynchronousMapAndUnmap) {
   ASSERT_GE(kfd, 0);
   ASSERT_TRUE(kfd_version_ok(kfd));
   int drm = open_drm_render();
-  if (drm < 0)
+  if (drm < 0) {
     GTEST_SKIP() << "synthetic DRM render node unavailable in this configuration";
+  }
 
   drm_syncobj_create create{};
   ASSERT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_CREATE, &create), 0);
@@ -5711,8 +5778,9 @@ TEST(InterposerSyncobjTest, VmDelayUpdateSuppressesTimelinePublication) {
   ASSERT_GE(kfd, 0);
   ASSERT_TRUE(kfd_version_ok(kfd));
   int drm = open_drm_render();
-  if (drm < 0)
+  if (drm < 0) {
     GTEST_SKIP() << "synthetic DRM render node unavailable in this configuration";
+  }
 
   drm_syncobj_create create{};
   ASSERT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_CREATE, &create), 0);
@@ -5762,12 +5830,14 @@ TEST(InterposerSyncobjTest, GemVaSignalsBinarySyncobjsAtPointZero) {
   ASSERT_GE(kfd, 0);
   ASSERT_TRUE(kfd_version_ok(kfd));
   int drm = open_drm_render();
-  if (drm < 0)
+  if (drm < 0) {
     GTEST_SKIP() << "synthetic DRM render node unavailable in this configuration";
+  }
 
   std::array<drm_syncobj_create, 3> syncobjs{};
-  for (auto &syncobj : syncobjs)
+  for (auto &syncobj : syncobjs) {
     ASSERT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_CREATE, &syncobj), 0);
+  }
 
   constexpr size_t kBoSize = 0x1000;
   constexpr uint64_t kVa = 0x1000000000ULL;
@@ -5835,8 +5905,9 @@ TEST(InterposerSyncobjTest, PointZeroOutputReplacesTimelinePayload) {
   ASSERT_GE(kfd, 0);
   ASSERT_TRUE(kfd_version_ok(kfd));
   int drm = open_drm_render();
-  if (drm < 0)
+  if (drm < 0) {
     GTEST_SKIP() << "synthetic DRM render node unavailable in this configuration";
+  }
 
   drm_syncobj_create create{};
   ASSERT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_CREATE, &create), 0);
@@ -5891,8 +5962,9 @@ TEST(InterposerSyncobjTest, DuplicateDrmFdsShareNamespaceAndLifetime) {
   ASSERT_GE(kfd, 0);
   ASSERT_TRUE(kfd_version_ok(kfd));
   int drm = open_drm_render();
-  if (drm < 0)
+  if (drm < 0) {
     GTEST_SKIP() << "synthetic DRM render node unavailable in this configuration";
+  }
   int drm_dup = dup(drm);
   ASSERT_GE(drm_dup, 0);
 
@@ -5924,8 +5996,9 @@ TEST(InterposerSyncobjTest, IndependentDrmOpensHaveSeparateNamespaces) {
   ASSERT_TRUE(kfd_version_ok(kfd));
   int first_drm = open_drm_render();
   int second_drm = open_drm_render();
-  if (first_drm < 0 || second_drm < 0)
+  if (first_drm < 0 || second_drm < 0) {
     GTEST_SKIP() << "synthetic DRM render node unavailable in this configuration";
+  }
 
   drm_syncobj_create create{};
   ASSERT_EQ(ioctl(first_drm, DRM_IOCTL_SYNCOBJ_CREATE, &create), 0);
@@ -5945,8 +6018,9 @@ TEST(InterposerSyncobjTest, CreateSignaledSeedsOnlyTheInitialPoint) {
   ASSERT_GE(kfd, 0);
   ASSERT_TRUE(kfd_version_ok(kfd));
   int drm = open_drm_render();
-  if (drm < 0)
+  if (drm < 0) {
     GTEST_SKIP() << "synthetic DRM render node unavailable in this configuration";
+  }
 
   drm_syncobj_create create{};
   create.flags = DRM_SYNCOBJ_CREATE_SIGNALED;
@@ -5999,8 +6073,9 @@ TEST(InterposerSyncobjTest, WaitValidationMatchesDrm) {
   ASSERT_GE(kfd, 0);
   ASSERT_TRUE(kfd_version_ok(kfd));
   int drm = open_drm_render();
-  if (drm < 0)
+  if (drm < 0) {
     GTEST_SKIP() << "synthetic DRM render node unavailable in this configuration";
+  }
 
   drm_syncobj_timeline_wait empty{};
   EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &empty), 0);
@@ -6067,16 +6142,18 @@ TEST(InterposerSyncobjTest, WaitValidationMatchesDrm) {
 TEST(InterposerSyncobjTest, OversizedBinaryWaitReturnsEnomem) {
   // These runtimes reserve large shadow mappings and may abort on allocation
   // failure instead of letting the C++ allocation throw.
-  if (dlsym(RTLD_DEFAULT, "__asan_init") || dlsym(RTLD_DEFAULT, "__tsan_init"))
+  if (dlsym(RTLD_DEFAULT, "__asan_init") || dlsym(RTLD_DEFAULT, "__tsan_init")) {
     GTEST_SKIP() << "address-space limits are incompatible with ASan and TSan";
+  }
 
   constexpr char kChildEnv[] = "RJ_TEST_SYNCOBJ_MEMORY_LIMIT";
   if (!getenv(kChildEnv)) {
     // Re-exec before limiting memory so the interposer owns a fresh backend.
     std::string child_env = std::string(kChildEnv) + "=1";
     std::vector<char *> environment;
-    for (char **entry = environ; *entry; ++entry)
+    for (char **entry = environ; *entry; ++entry) {
       environment.push_back(*entry);
+    }
     environment.push_back(child_env.data());
     environment.push_back(nullptr);
     char executable[] = "/proc/self/exe";
@@ -6129,8 +6206,9 @@ TEST(InterposerSyncobjTest, DestroyRejectsInvalidInput) {
   ASSERT_GE(kfd, 0);
   ASSERT_TRUE(kfd_version_ok(kfd));
   int drm = open_drm_render();
-  if (drm < 0)
+  if (drm < 0) {
     GTEST_SKIP() << "synthetic DRM render node unavailable in this configuration";
+  }
 
   drm_syncobj_destroy destroy{};
   destroy.handle = UINT32_MAX;
@@ -6155,8 +6233,9 @@ TEST(InterposerSyncobjTest, TimelineWaitBlocksUntilSignalOrDeadline) {
   ASSERT_GE(kfd, 0);
   ASSERT_TRUE(kfd_version_ok(kfd));
   int drm = open_drm_render();
-  if (drm < 0)
+  if (drm < 0) {
     GTEST_SKIP() << "synthetic DRM render node unavailable in this configuration";
+  }
 
   drm_syncobj_create create{};
   ASSERT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_CREATE, &create), 0);
@@ -6229,8 +6308,9 @@ TEST(InterposerSyncobjTest, TimelineWaitReturnsEintrForSignal) {
   ASSERT_GE(kfd, 0);
   ASSERT_TRUE(kfd_version_ok(kfd));
   int drm = open_drm_render();
-  if (drm < 0)
+  if (drm < 0) {
     GTEST_SKIP() << "synthetic DRM render node unavailable in this configuration";
+  }
 
   drm_syncobj_create create{};
   ASSERT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_CREATE, &create), 0);
@@ -6259,8 +6339,9 @@ TEST(InterposerSyncobjTest, TimelineWaitReturnsEintrForSignal) {
     wait_rc = ioctl(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait);
     wait_errno = errno;
   });
-  while (!entered.load(std::memory_order_acquire))
+  while (!entered.load(std::memory_order_acquire)) {
     std::this_thread::yield();
+  }
   const auto signal_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
   while (wait_rc.load(std::memory_order_acquire) == -2 &&
          std::chrono::steady_clock::now() < signal_deadline) {
@@ -6282,8 +6363,12 @@ TEST(InterposerSyncobjTest, TimelineWaitReturnsEintrForSignal) {
 }
 
 TEST(InterposerSyncobjTest, TimelineWaitAllowsThreadExitFromSignal) {
+  auto ref_count =
+      reinterpret_cast<int (*)()>(dlsym(RTLD_DEFAULT, "rj_interposer_test_local_ref_count"));
+  ASSERT_NE(ref_count, nullptr);
   int kfd = open_kfd();
   ASSERT_GE(kfd, 0);
+  const int refs_before_drm = ref_count();
   int drm = open_drm_render();
   ASSERT_GE(drm, 0);
   drm_syncobj_create create{};
@@ -6300,24 +6385,27 @@ TEST(InterposerSyncobjTest, TimelineWaitAllowsThreadExitFromSignal) {
   // inheriting the C++ libc header's noexcept declaration in the caller, too.
   auto call = reinterpret_cast<int (*)(int, unsigned long, ...)>(dlsym(RTLD_DEFAULT, "ioctl"));
   ASSERT_NE(call, nullptr);
+  // TSan delivers SIGSYS immediately. It can defer SIGUSR1 until the waiter
+  // tries to reacquire the mutex, which would unwind from inside the lock call.
+  constexpr int kExitSignal = SIGSYS;
   struct sigaction action {
   }, old_action{};
   action.sa_handler = +[](int) { pthread_exit(nullptr); };
   sigemptyset(&action.sa_mask);
-  ASSERT_EQ(sigaction(SIGUSR1, &action, &old_action), 0);
+  ASSERT_EQ(sigaction(kExitSignal, &action, &old_action), 0);
   std::atomic<pid_t> tid{0};
-  bool unwound = false, returned = false;
+  bool cleaned_up = false, returned = false;
   std::thread waiter([&] {
-    struct Cleanup {
-      bool &unwound;
-      ~Cleanup() { unwound = true; }
-    } cleanup{unwound};
+    // Observe native cleanup even when C++ exception unwinding is disabled.
+    pthread_cleanup_push(
+        +[](void *argument) { *static_cast<bool *>(argument) = true; }, &cleaned_up);
     tid.store(syscall(SYS_gettid), std::memory_order_release);
     (void)call(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait);
     returned = true;
+    pthread_cleanup_pop(0);
   });
   // Wait for the actual futex sleep so a signal during setup cannot make this
-  // pass without exercising forced unwinding through the interposer.
+  // pass without exercising native thread exit through the interposer.
   bool blocked = false;
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
   while (std::chrono::steady_clock::now() < deadline) {
@@ -6334,18 +6422,19 @@ TEST(InterposerSyncobjTest, TimelineWaitAllowsThreadExitFromSignal) {
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
   }
   if (blocked) {
-    EXPECT_EQ(pthread_kill(waiter.native_handle(), SIGUSR1), 0);
+    EXPECT_EQ(pthread_kill(waiter.native_handle(), kExitSignal), 0);
   }
   waiter.join();
   EXPECT_TRUE(blocked);
-  EXPECT_TRUE(unwound);
+  EXPECT_TRUE(cleaned_up);
   EXPECT_FALSE(returned);
-  EXPECT_EQ(sigaction(SIGUSR1, &old_action, nullptr), 0);
+  EXPECT_EQ(sigaction(kExitSignal, &old_action, nullptr), 0);
   drm_syncobj_destroy destroy{};
   destroy.handle = create.handle;
   EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_DESTROY, &destroy), 0);
-  // Closing the file also checks that unwinding released its ioctl reservation.
+  // Check before final KFD close so backend teardown cannot hide a leaked lease.
   EXPECT_EQ(close(drm), 0);
+  EXPECT_EQ(ref_count(), refs_before_drm);
   EXPECT_EQ(close(kfd), 0);
 }
 
@@ -6358,8 +6447,9 @@ void check_fresh_fork_backends(bool concurrent_mappings) {
       while (!stop.stop_requested()) {
         void *page =
             mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-        if (page != MAP_FAILED)
+        if (page != MAP_FAILED) {
           munmap(page, 4096);
+        }
       }
     });
   }
@@ -6369,22 +6459,27 @@ void check_fresh_fork_backends(bool concurrent_mappings) {
     if (child == 0) {
       alarm(10);
       const pid_t grandchild = fork();
-      if (grandchild < 0)
+      if (grandchild < 0) {
         _exit(10);
+      }
       if (grandchild > 0) {
         int status = 0;
         if (waitpid(grandchild, &status, 0) != grandchild || !WIFEXITED(status) ||
-            WEXITSTATUS(status) != 0)
+            WEXITSTATUS(status) != 0) {
           _exit(11);
+        }
       }
       const int kfd = open_kfd();
-      if (kfd < 0 || !kfd_version_ok(kfd))
+      if (kfd < 0 || !kfd_version_ok(kfd)) {
         _exit(12);
+      }
       struct stat info {};
-      if (syscall(SYS_fstat, kfd, &info) != 0 || S_ISCHR(info.st_mode))
+      if (syscall(SYS_fstat, kfd, &info) != 0 || S_ISCHR(info.st_mode)) {
         _exit(13); // The child must use a simulator descriptor, never host KFD.
-      if (close(kfd) != 0)
+      }
+      if (close(kfd) != 0) {
         _exit(14);
+      }
       _exit(0);
     }
     int status = 0;
@@ -6441,14 +6536,17 @@ TEST(InterposerForkTest, ChildRefusesGpuEndpointsBeforeExec) {
     alarm(10);
     // Must fail, and must not hand back a real-hardware descriptor.
     int child_kfd = open("/dev/kfd", O_RDWR | O_CLOEXEC);
-    if (child_kfd >= 0)
+    if (child_kfd >= 0) {
       _exit(10); // opened something -- emulator or host -- both wrong here.
-    if (errno != ENODEV)
+    }
+    if (errno != ENODEV) {
       _exit(11);
+    }
     // Ordinary filesystem work still passes through normally.
     int devnull = open("/dev/null", O_RDONLY | O_CLOEXEC);
-    if (devnull < 0)
+    if (devnull < 0) {
       _exit(12);
+    }
     close(devnull);
     _exit(0);
   }
@@ -6481,17 +6579,22 @@ TEST(InterposerForkTest, ChildRefusesEveryGpuEndpointSpelling) {
       }
       return errno == ENODEV;
     };
-    if (!refused(open("/dev/kfd", O_RDWR | O_CLOEXEC)))
+    if (!refused(open("/dev/kfd", O_RDWR | O_CLOEXEC))) {
       _exit(20);
-    if (!refused(open("/dev//kfd", O_RDWR | O_CLOEXEC)))
+    }
+    if (!refused(open("/dev//kfd", O_RDWR | O_CLOEXEC))) {
       _exit(21);
-    if (!refused(open("/dev/./kfd", O_RDWR | O_CLOEXEC)))
+    }
+    if (!refused(open("/dev/./kfd", O_RDWR | O_CLOEXEC))) {
       _exit(22);
+    }
     int devdir = open("/dev", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-    if (devdir < 0)
+    if (devdir < 0) {
       _exit(23);
-    if (!refused(openat(devdir, "kfd", O_RDWR | O_CLOEXEC)))
+    }
+    if (!refused(openat(devdir, "kfd", O_RDWR | O_CLOEXEC))) {
       _exit(24);
+    }
     close(devdir);
     // A refused freopen must still CLOSE the caller's original stream. POSIX freopen
     // closes it first and does so even when opening the replacement fails, so
@@ -6499,21 +6602,26 @@ TEST(InterposerForkTest, ChildRefusesEveryGpuEndpointSpelling) {
     // failed freopen -- and past the exec that follows. Use a throwaway stream rather
     // than stdin so the check is observable.
     FILE *victim = fopen("/dev/null", "r");
-    if (!victim)
+    if (!victim) {
       _exit(25);
+    }
     const int victim_fd = fileno(victim);
     errno = 0;
-    if (freopen("/dev/kfd", "r", victim) != nullptr)
+    if (freopen("/dev/kfd", "r", victim) != nullptr) {
       _exit(26);
-    if (errno != ENODEV)
+    }
+    if (errno != ENODEV) {
       _exit(27);
-    if (fcntl(victim_fd, F_GETFD) >= 0)
+    }
+    if (fcntl(victim_fd, F_GETFD) >= 0) {
       _exit(28); // original descriptor outlived a failed freopen.
+    }
     // Ordinary character devices must still work -- the classifier refuses GPU
     // nodes, not every device.
     int devnull = open("/dev/null", O_RDONLY | O_CLOEXEC);
-    if (devnull < 0)
+    if (devnull < 0) {
       _exit(29);
+    }
     close(devnull);
     _exit(0);
   }
@@ -6552,8 +6660,9 @@ TEST(InterposerForkTest, ChildRefusesAnEmulatedEndpointTheHostDoesNotHave) {
       break;
     }
   }
-  if (absent.empty())
+  if (absent.empty()) {
     GTEST_SKIP() << "every render minor 128-255 exists on this host";
+  }
 
   const std::string node = absent.substr(absent.rfind('/') + 1);
   // The same node reached by every spelling ChildRefusesEveryGpuEndpointSpelling
@@ -6575,28 +6684,35 @@ TEST(InterposerForkTest, ChildRefusesAnEmulatedEndpointTheHostDoesNotHave) {
       }
       return errno == ENODEV;
     };
-    if (!refused(open(absent.c_str(), O_RDWR | O_CLOEXEC)))
+    if (!refused(open(absent.c_str(), O_RDWR | O_CLOEXEC))) {
       _exit(30);
-    if (!refused(open(doubled.c_str(), O_RDWR | O_CLOEXEC)))
+    }
+    if (!refused(open(doubled.c_str(), O_RDWR | O_CLOEXEC))) {
       _exit(31);
-    if (!refused(open(dotted.c_str(), O_RDWR | O_CLOEXEC)))
+    }
+    if (!refused(open(dotted.c_str(), O_RDWR | O_CLOEXEC))) {
       _exit(32);
-    if (!refused(open(parented.c_str(), O_RDWR | O_CLOEXEC)))
+    }
+    if (!refused(open(parented.c_str(), O_RDWR | O_CLOEXEC))) {
       _exit(33);
+    }
     int dridir = open("/dev/dri", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
     if (dridir >= 0) {
       // Relative to a dirfd there is no absolute name to inspect at all, so this
       // is the spelling that proves the classifier resolves rather than matches.
-      if (!refused(openat(dridir, node.c_str(), O_RDWR | O_CLOEXEC)))
+      if (!refused(openat(dridir, node.c_str(), O_RDWR | O_CLOEXEC))) {
         _exit(34);
+      }
       close(dridir);
     }
     // A path that merely does not exist must still report ENOENT: the fallback
     // matches the endpoints the parent synthesizes, not everything absent.
-    if (open("/dev/dri/definitely-not-a-render-node", O_RDWR | O_CLOEXEC) >= 0)
+    if (open("/dev/dri/definitely-not-a-render-node", O_RDWR | O_CLOEXEC) >= 0) {
       _exit(35);
-    if (errno != ENOENT)
+    }
+    if (errno != ENOENT) {
       _exit(36);
+    }
     _exit(0);
   }
   int status = 0;
@@ -6637,14 +6753,17 @@ TEST(InterposerForkTest, ChildFailsClosedOnAnUnclassifiablePath) {
       close(fd);
       _exit(40);
     }
-    if (errno != ENODEV)
+    if (errno != ENODEV) {
       _exit(41);
+    }
     // ...and a path that IS classifiable still reports its own error, so failing
     // closed has not swallowed ordinary errno reporting.
-    if (open(missing.c_str(), O_RDONLY | O_CLOEXEC) >= 0)
+    if (open(missing.c_str(), O_RDONLY | O_CLOEXEC) >= 0) {
       _exit(42);
-    if (errno != ENOENT)
+    }
+    if (errno != ENOENT) {
       _exit(43);
+    }
     _exit(0);
   }
   int status = 0;
@@ -6670,11 +6789,13 @@ TEST(InterposerForkTest, AppDescriptorCarriesNoRealHardwareAuthority) {
 
   auto is_real_gpu = [](int fd) {
     struct stat st {};
-    if (::fstat(fd, &st) != 0 || !S_ISCHR(st.st_mode))
+    if (::fstat(fd, &st) != 0 || !S_ISCHR(st.st_mode)) {
       return false;
+    }
     struct stat kfd_st {};
-    if (::stat("/dev/kfd", &kfd_st) == 0 && st.st_rdev == kfd_st.st_rdev)
+    if (::stat("/dev/kfd", &kfd_st) == 0 && st.st_rdev == kfd_st.st_rdev) {
       return true;
+    }
     return major(st.st_rdev) == 226u;
   };
 
@@ -6692,8 +6813,9 @@ TEST(InterposerForkTest, AppDescriptorCarriesNoRealHardwareAuthority) {
       if (::fstat(200, &st) == 0 && S_ISCHR(st.st_mode)) {
         struct stat kfd_st {};
         if ((::stat("/dev/kfd", &kfd_st) == 0 && st.st_rdev == kfd_st.st_rdev) ||
-            major(st.st_rdev) == 226u)
+            major(st.st_rdev) == 226u) {
           _exit(40); // real GPU authority survived into the child.
+        }
       }
     }
     _exit(0);
@@ -6720,22 +6842,27 @@ TEST(InterposerForkTest, ChildRefusesOperationsOnInheritedRealGpuDescriptors) {
   // genuinely hands real GPU authority to the child -- the same shape as a hardware
   // guest's private KFD descriptor.
   int real_gpu = ::open("/dev/dri/card0", O_RDWR | O_CLOEXEC);
-  if (real_gpu < 0)
+  if (real_gpu < 0) {
     GTEST_SKIP() << "no real DRM device available to inherit";
+  }
 
   const pid_t child = fork();
   ASSERT_GE(child, 0) << "fork failed: " << std::strerror(errno);
   if (child == 0) {
     alarm(10);
     auto refused = [](int rc) { return rc < 0 && errno == ENODEV; };
-    if (!refused(ioctl(real_gpu, 0, 0)))
+    if (!refused(ioctl(real_gpu, 0, 0))) {
       _exit(50); // operated real hardware through an inherited descriptor.
-    if (!refused(dup(real_gpu)))
+    }
+    if (!refused(dup(real_gpu))) {
       _exit(51);
-    if (!refused(dup2(real_gpu, 210)))
+    }
+    if (!refused(dup2(real_gpu, 210))) {
       _exit(52); // dup2 also strips FD_CLOEXEC, so this is the exec-laundering route.
-    if (!refused(fcntl(real_gpu, F_DUPFD_CLOEXEC, 0)))
+    }
+    if (!refused(fcntl(real_gpu, F_DUPFD_CLOEXEC, 0))) {
       _exit(53);
+    }
     _exit(0);
   }
   int status = 0;
@@ -6752,22 +6879,26 @@ TEST(InterposerForkTest, ChildRefusesOperationsOnInheritedRealGpuDescriptors) {
 // The child gate must cover both, while leaving harmless fcntl use working.
 TEST(InterposerForkTest, ChildCannotLaunderInheritedGpuFdAcrossExec) {
   int real_gpu = ::open("/dev/dri/card0", O_RDWR | O_CLOEXEC);
-  if (real_gpu < 0)
+  if (real_gpu < 0) {
     GTEST_SKIP() << "no real DRM device available to inherit";
+  }
 
   const pid_t child = fork();
   ASSERT_GE(child, 0) << "fork failed: " << std::strerror(errno);
   if (child == 0) {
     alarm(10);
     // Clearing FD_CLOEXEC is the no-duplication laundering route.
-    if (!(fcntl(real_gpu, F_SETFD, 0) < 0 && errno == ENODEV))
+    if (!(fcntl(real_gpu, F_SETFD, 0) < 0 && errno == ENODEV)) {
       _exit(60);
+    }
     // Setting it is harmless and must still be permitted.
-    if (fcntl(real_gpu, F_SETFD, FD_CLOEXEC) != 0)
+    if (fcntl(real_gpu, F_SETFD, FD_CLOEXEC) != 0) {
       _exit(61);
+    }
     // Ordinary queries must keep working.
-    if (fcntl(real_gpu, F_GETFD) < 0)
+    if (fcntl(real_gpu, F_GETFD) < 0) {
       _exit(62);
+    }
     _exit(0);
   }
   int status = 0;
@@ -6787,8 +6918,9 @@ TEST(InterposerForkTest, ChildCannotLaunderInheritedGpuFdAcrossExec) {
 // on an ordinary descriptor must keep working.
 TEST(InterposerForkTest, ChildRefusesDup3OnInheritedGpuFd) {
   int real_gpu = ::open("/dev/dri/card0", O_RDWR | O_CLOEXEC);
-  if (real_gpu < 0)
+  if (real_gpu < 0) {
     GTEST_SKIP() << "no real DRM device available to inherit";
+  }
   int ordinary = ::open("/dev/null", O_RDONLY | O_CLOEXEC);
   ASSERT_GE(ordinary, 0);
 
@@ -6797,15 +6929,18 @@ TEST(InterposerForkTest, ChildRefusesDup3OnInheritedGpuFd) {
   if (child == 0) {
     alarm(10);
     // Without O_CLOEXEC the copy would survive exec -- the laundering route.
-    if (!(dup3(real_gpu, 220, 0) < 0 && errno == ENODEV))
+    if (!(dup3(real_gpu, 220, 0) < 0 && errno == ENODEV)) {
       _exit(90);
+    }
     // With O_CLOEXEC it would not survive exec, but the child still must not get a
     // usable real-hardware descriptor.
-    if (!(dup3(real_gpu, 221, O_CLOEXEC) < 0 && errno == ENODEV))
+    if (!(dup3(real_gpu, 221, O_CLOEXEC) < 0 && errno == ENODEV)) {
       _exit(91);
+    }
     // Ordinary descriptors are unaffected.
-    if (dup3(ordinary, 222, O_CLOEXEC) < 0)
+    if (dup3(ordinary, 222, O_CLOEXEC) < 0) {
       _exit(92);
+    }
     _exit(0);
   }
   int status = 0;
@@ -6826,16 +6961,18 @@ extern "C" void *mmap64(void *, size_t, int, int, int, __off64_t);
 
 TEST(InterposerForkTest, ChildRefusesMmap64OnInheritedGpuFd) {
   int real_gpu = ::open("/dev/dri/card0", O_RDWR | O_CLOEXEC);
-  if (real_gpu < 0)
+  if (real_gpu < 0) {
     GTEST_SKIP() << "no real DRM device available to inherit";
+  }
 
   const pid_t child = fork();
   ASSERT_GE(child, 0) << "fork failed: " << std::strerror(errno);
   if (child == 0) {
     alarm(10);
     void *p = mmap64(nullptr, 4096, PROT_READ, MAP_SHARED, real_gpu, 0);
-    if (!(p == MAP_FAILED && errno == ENODEV))
+    if (!(p == MAP_FAILED && errno == ENODEV)) {
       _exit(70);
+    }
     _exit(0);
   }
   int status = 0;
@@ -6864,20 +7001,24 @@ void check_child_fopen_modes() {
     ::umask(0);
 
     FILE *w = fopen(target.c_str(), "w");
-    if (!w)
+    if (!w) {
       _exit(80);
+    }
     fclose(w);
     struct stat st {};
-    if (::stat(target.c_str(), &st) != 0)
+    if (::stat(target.c_str(), &st) != 0) {
       _exit(81);
-    if ((st.st_mode & 07777) != 0666)
+    }
+    if ((st.st_mode & 07777) != 0666) {
       _exit(82); // must be exactly 0666 & ~umask(0); mode 0000 was the old bug.
+    }
 
     // Seed content so "wx" failing is distinguishable from "wx" truncating and then
     // failing -- a null return alone does not prove the file was left alone.
     FILE *seed = fopen(target.c_str(), "w");
-    if (!seed)
+    if (!seed) {
       _exit(83);
+    }
     fputs("SENTINEL", seed);
     fclose(seed);
 
@@ -6888,16 +7029,19 @@ void check_child_fopen_modes() {
       fclose(excl);
       _exit(84); // "x" must refuse an existing file.
     }
-    if (excl_errno != EEXIST)
+    if (excl_errno != EEXIST) {
       _exit(85);
+    }
     char buf[32] = {};
     FILE *rd = fopen(target.c_str(), "r");
-    if (!rd)
+    if (!rd) {
       _exit(86);
+    }
     const char *got = fgets(buf, sizeof(buf), rd);
     fclose(rd);
-    if (!got || std::strcmp(buf, "SENTINEL") != 0)
+    if (!got || std::strcmp(buf, "SENTINEL") != 0) {
       _exit(87); // truncated despite failing: the destructive-then-fail shape.
+    }
     _exit(0);
   }
   int status = 0;
@@ -6925,8 +7069,9 @@ TEST(InterposerForkTest, ChildFopenPreservesLibcModeSemantics) {
 // including the reverse case, which a substring check would wrongly refuse.
 TEST(InterposerForkTest, ChildClassifiesGpuEndpointsByIdentityNotName) {
   struct stat kfd_st {};
-  if (::stat("/dev/kfd", &kfd_st) != 0 || !S_ISCHR(kfd_st.st_mode))
+  if (::stat("/dev/kfd", &kfd_st) != 0 || !S_ISCHR(kfd_st.st_mode)) {
     GTEST_SKIP() << "host has no real /dev/kfd to alias";
+  }
 
   rocjitsu::test::ScopedTempDirectory tmp;
   ASSERT_TRUE(tmp.initialize("rj_alias_"));
@@ -6953,13 +7098,16 @@ TEST(InterposerForkTest, ChildClassifiesGpuEndpointsByIdentityNotName) {
       }
       return errno == ENODEV;
     };
-    if (!refused(aliased))
+    if (!refused(aliased)) {
       _exit(30); // differently named alias leaked real hardware.
-    if (!refused(chained))
+    }
+    if (!refused(chained)) {
       _exit(31); // chained alias leaked real hardware.
+    }
     int ok = open(lookalike.c_str(), O_RDONLY | O_CLOEXEC);
-    if (ok < 0)
+    if (ok < 0) {
       _exit(32); // a node merely NAMED like KFD must not be refused.
+    }
     close(ok);
     _exit(0);
   }
@@ -6986,8 +7134,9 @@ TEST(InterposerForkTest, MultithreadedForkExecAlwaysReachesExec) {
     churn.emplace_back([&] {
       while (!stop.load(std::memory_order_acquire)) {
         int d = dup(kfd);
-        if (d >= 0)
+        if (d >= 0) {
           close(d);
+        }
       }
     });
   }
@@ -7017,8 +7166,9 @@ TEST(InterposerForkTest, MultithreadedForkExecAlwaysReachesExec) {
   }
 
   stop.store(true, std::memory_order_release);
-  for (auto &t : churn)
+  for (auto &t : churn) {
     t.join();
+  }
   EXPECT_EQ(close(kfd), 0);
 }
 
@@ -7035,8 +7185,9 @@ TEST(InterposerForkTest, SystemAndPopenWorkFromAMultithreadedParent) {
     churn.emplace_back([&] {
       while (!stop.load(std::memory_order_acquire)) {
         int d = dup(kfd);
-        if (d >= 0)
+        if (d >= 0) {
           close(d);
+        }
       }
     });
   }
@@ -7052,8 +7203,9 @@ TEST(InterposerForkTest, SystemAndPopenWorkFromAMultithreadedParent) {
   }
 
   stop.store(true, std::memory_order_release);
-  for (auto &t : churn)
+  for (auto &t : churn) {
     t.join();
+  }
   EXPECT_EQ(close(kfd), 0);
 }
 
@@ -7070,8 +7222,9 @@ TEST(InterposerForkTest, PosixSpawnFromAMultithreadedParent) {
     churn.emplace_back([&] {
       while (!stop.load(std::memory_order_acquire)) {
         int d = dup(kfd);
-        if (d >= 0)
+        if (d >= 0) {
           close(d);
+        }
       }
     });
   }
@@ -7088,8 +7241,9 @@ TEST(InterposerForkTest, PosixSpawnFromAMultithreadedParent) {
   }
 
   stop.store(true, std::memory_order_release);
-  for (auto &t : churn)
+  for (auto &t : churn) {
     t.join();
+  }
   // The parent's own KFD routing must be untouched by all that spawning.
   EXPECT_TRUE(kfd_version_ok(kfd));
   EXPECT_EQ(close(kfd), 0);
@@ -7111,8 +7265,9 @@ TEST(InterposerSyncobjTest, ConcurrentVmUpdatesShareTimeline) {
   ASSERT_GE(kfd, 0);
   ASSERT_TRUE(kfd_version_ok(kfd));
   int drm = open_drm_render();
-  if (drm < 0)
+  if (drm < 0) {
     GTEST_SKIP() << "synthetic DRM render node unavailable in this configuration";
+  }
 
   drm_syncobj_create create{};
   ASSERT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_CREATE, &create), 0);
@@ -7180,8 +7335,9 @@ TEST(InterposerSyncobjTest, OutOfOrderTimelinePointPreservesWatermark) {
   ASSERT_GE(kfd, 0);
   ASSERT_TRUE(kfd_version_ok(kfd));
   int drm = open_drm_render();
-  if (drm < 0)
+  if (drm < 0) {
     GTEST_SKIP() << "synthetic DRM render node unavailable in this configuration";
+  }
 
   drm_syncobj_create create{};
   ASSERT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_CREATE, &create), 0);
@@ -7236,8 +7392,9 @@ TEST(InterposerGemTest, GemNamespaceIsPrivateButSharedByDuplicates) {
   ASSERT_TRUE(kfd_version_ok(kfd));
   int owner = open_drm_render();
   int foreign = open_drm_render();
-  if (owner < 0 || foreign < 0)
+  if (owner < 0 || foreign < 0) {
     GTEST_SKIP() << "synthetic DRM render node unavailable in this configuration";
+  }
   int owner_dup = dup(owner);
   ASSERT_GE(owner_dup, 0);
 
@@ -7373,8 +7530,9 @@ TEST(InterposerGemTest, IndependentDrmFilesRejectOverlappingMappings) {
   ASSERT_TRUE(kfd_version_ok(kfd));
   int first_drm = open_drm_render();
   int second_drm = open_drm_render();
-  if (first_drm < 0 || second_drm < 0)
+  if (first_drm < 0 || second_drm < 0) {
     GTEST_SKIP() << "synthetic DRM render node unavailable in this configuration";
+  }
 
   constexpr size_t kBoSize = 0x1000;
   constexpr uint64_t kVa = 0x1000000000ULL;
@@ -7439,8 +7597,9 @@ TEST(InterposerGemTest, ReusedDmabufFdMintsDistinctHandles) {
   ASSERT_TRUE(kfd_version_ok(kfd));
 
   int drm = open_drm_render();
-  if (drm < 0)
+  if (drm < 0) {
     GTEST_SKIP() << "synthetic DRM render node unavailable in this configuration";
+  }
 
   constexpr size_t kBoSize = 0x1000;
   const unsigned long gem_va = DRM_AMDGPU_GEM_VA_request();
@@ -7530,8 +7689,9 @@ TEST(InterposerGemTest, UnmapWithWrongHandleFails) {
   ASSERT_GE(kfd, 0);
   ASSERT_TRUE(kfd_version_ok(kfd));
   int drm = open_drm_render();
-  if (drm < 0)
+  if (drm < 0) {
     GTEST_SKIP() << "synthetic DRM render node unavailable in this configuration";
+  }
 
   constexpr size_t kBoSize = 0x1000;
   int dmabuf_a = make_sized_memfd(kBoSize);
@@ -7585,8 +7745,9 @@ TEST(InterposerGemTest, MapSucceedsAfterExportFdClosed) {
   ASSERT_GE(kfd, 0);
   ASSERT_TRUE(kfd_version_ok(kfd));
   int drm = open_drm_render();
-  if (drm < 0)
+  if (drm < 0) {
     GTEST_SKIP() << "synthetic DRM render node unavailable in this configuration";
+  }
 
   constexpr size_t kBoSize = 0x1000;
   int dmabuf = make_sized_memfd(kBoSize);
@@ -7640,8 +7801,9 @@ TEST(InterposerGemTest, ReplaceEvictsOverlappingDifferentSizeRange) {
   ASSERT_GE(kfd, 0);
   ASSERT_TRUE(kfd_version_ok(kfd));
   int drm = open_drm_render();
-  if (drm < 0)
+  if (drm < 0) {
     GTEST_SKIP() << "synthetic DRM render node unavailable in this configuration";
+  }
 
   constexpr size_t kBigBo = 0x4000;
   constexpr size_t kSmallBo = 0x1000;
@@ -7715,8 +7877,9 @@ TEST(InterposerGemTest, ReplaceTransfersOwnershipAcrossOldOwnerClose) {
   ASSERT_GE(kfd, 0);
   ASSERT_TRUE(kfd_version_ok(kfd));
   int drm = open_drm_render();
-  if (drm < 0)
+  if (drm < 0) {
     GTEST_SKIP() << "synthetic DRM render node unavailable in this configuration";
+  }
 
   constexpr size_t kBoSize = 0x1000;
   const unsigned long gem_va = DRM_AMDGPU_GEM_VA_request();
@@ -7785,8 +7948,9 @@ TEST(InterposerGemTest, ClearUpdatesOwnerBookkeeping) {
   ASSERT_GE(kfd, 0);
   ASSERT_TRUE(kfd_version_ok(kfd));
   int drm = open_drm_render();
-  if (drm < 0)
+  if (drm < 0) {
     GTEST_SKIP() << "synthetic DRM render node unavailable in this configuration";
+  }
 
   constexpr size_t kBoSize = 0x1000;
   const unsigned long gem_va = DRM_AMDGPU_GEM_VA_request();

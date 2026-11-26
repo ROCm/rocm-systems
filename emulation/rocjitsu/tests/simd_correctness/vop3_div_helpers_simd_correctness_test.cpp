@@ -124,8 +124,9 @@ struct Fixture {
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
     rocjitsu::test::initialize_compute_unit(cu, "cu_vop3_div", cfg, &gpu_mem, &l2);
-    if (!cu)
+    if (!cu) {
       return;
+    }
     decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
   }
@@ -166,8 +167,9 @@ struct Fixture {
     EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     std::array<uint32_t, WF_SIZE> out{};
     uint32_t vb = wf->vgpr_alloc().base;
-    for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+    for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       out[lane] = cu->read_vgpr(vb + kDstVgpr32, lane);
+    }
     return out;
   }
 
@@ -202,8 +204,9 @@ void check_div_fixup_f32(uint64_t exec) {
                         uint32_t r2) -> std::array<uint32_t, WF_SIZE> {
       util::set_force_scalar_for_testing(force_scalar);
       Fixture fx;
-      if (::testing::Test::HasFatalFailure())
+      if (::testing::Test::HasFatalFailure()) {
         return {};
+      }
       EXPECT_NE(fx.cu, nullptr);
       EXPECT_NE(fx.wf, nullptr);
       uint32_t words[4] = {0u, 0u, 0u, 0u};
@@ -216,15 +219,16 @@ void check_div_fixup_f32(uint64_t exec) {
       return out;
     };
     // Sweep rotations so every (b,c) class pairing hits the cascade.
-    for (uint32_t r1 = 0; r1 < kF32.size(); ++r1)
+    for (uint32_t r1 = 0; r1 < kF32.size(); ++r1) {
       for (uint32_t r2 = 0; r2 < kF32.size(); r2 += 3) {
         const auto scalar_out = run_mode(/*force_scalar=*/true, r1, r2);
         const auto simd_out = run_mode(/*force_scalar=*/false, r1, r2);
 
         for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
           const bool active = (exec >> lane) & 1ULL;
-          if (active && (is_f32_nan(scalar_out[lane]) || is_f32_nan(simd_out[lane])))
+          if (active && (is_f32_nan(scalar_out[lane]) || is_f32_nan(simd_out[lane]))) {
             continue;
+          }
           if (active) {
             EXPECT_EQ(scalar_out[lane], simd_out[lane])
                 << name << " r1=" << r1 << " r2=" << r2 << " lane " << lane
@@ -237,6 +241,7 @@ void check_div_fixup_f32(uint64_t exec) {
           }
         }
       }
+    }
   }
 }
 
@@ -245,8 +250,9 @@ std::array<uint32_t, WF_SIZE> run_div_fixup_f16_opsel(bool force_scalar, uint32_
                                                       uint32_t op_sel = 0xFu) {
   util::set_force_scalar_for_testing(force_scalar);
   Fixture fx;
-  if (::testing::Test::HasFatalFailure())
+  if (::testing::Test::HasFatalFailure()) {
     return {};
+  }
   EXPECT_NE(fx.cu, nullptr);
   EXPECT_NE(fx.wf, nullptr);
   uint32_t words[4] = {0u, 0u, 0u, 0u};
@@ -268,8 +274,9 @@ std::array<uint32_t, WF_SIZE> run_div_fixup_f16_opsel(bool force_scalar, uint32_
   delete inst;
 
   std::array<uint32_t, WF_SIZE> out{};
-  for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+  for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
     out[lane] = fx.cu->read_vgpr(vb + kDstVgpr32, lane);
+  }
   return out;
 }
 
@@ -279,8 +286,9 @@ void check_div_fixup_f64(uint64_t exec) {
                       uint32_t r2) -> std::array<uint64_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
-    if (::testing::Test::HasFatalFailure())
+    if (::testing::Test::HasFatalFailure()) {
       return {};
+    }
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[4] = {0u, 0u, 0u, 0u};
@@ -294,15 +302,16 @@ void check_div_fixup_f64(uint64_t exec) {
     delete inst;
     return out;
   };
-  for (uint32_t r1 = 0; r1 < kF64.size(); ++r1)
+  for (uint32_t r1 = 0; r1 < kF64.size(); ++r1) {
     for (uint32_t r2 = 0; r2 < kF64.size(); r2 += 3) {
       const auto scalar_out = run_mode(/*force_scalar=*/true, r1, r2);
       const auto simd_out = run_mode(/*force_scalar=*/false, r1, r2);
 
       for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
         const bool active = (exec >> lane) & 1ULL;
-        if (active && (is_f64_nan(scalar_out[lane]) || is_f64_nan(simd_out[lane])))
+        if (active && (is_f64_nan(scalar_out[lane]) || is_f64_nan(simd_out[lane]))) {
           continue;
+        }
         if (active) {
           EXPECT_EQ(scalar_out[lane], simd_out[lane])
               << "v_div_fixup_f64 r1=" << r1 << " r2=" << r2 << " lane " << lane
@@ -316,13 +325,15 @@ void check_div_fixup_f64(uint64_t exec) {
         }
       }
     }
+  }
 }
 
 std::array<uint32_t, WF_SIZE> run_div_fixup_f32_nan_precedence(bool force_scalar, uint32_t opcode) {
   util::set_force_scalar_for_testing(force_scalar);
   Fixture fx;
-  if (::testing::Test::HasFatalFailure())
+  if (::testing::Test::HasFatalFailure()) {
     return {};
+  }
   EXPECT_NE(fx.cu, nullptr);
   EXPECT_NE(fx.wf, nullptr);
   uint32_t words[4] = {0u, 0u, 0u, 0u};
@@ -346,16 +357,18 @@ std::array<uint32_t, WF_SIZE> run_div_fixup_f32_nan_precedence(bool force_scalar
   delete inst;
 
   std::array<uint32_t, WF_SIZE> out{};
-  for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+  for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
     out[lane] = fx.cu->read_vgpr(vb + kDstVgpr32, lane);
+  }
   return out;
 }
 
 std::array<uint64_t, WF_SIZE> run_div_fixup_f64_nan_precedence(bool force_scalar) {
   util::set_force_scalar_for_testing(force_scalar);
   Fixture fx;
-  if (::testing::Test::HasFatalFailure())
+  if (::testing::Test::HasFatalFailure()) {
     return {};
+  }
   EXPECT_NE(fx.cu, nullptr);
   EXPECT_NE(fx.wf, nullptr);
   uint32_t words[4] = {0u, 0u, 0u, 0u};
@@ -398,8 +411,9 @@ void check_div_fmas_f32(uint64_t exec) {
                       uint32_t r1) -> std::array<uint32_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
-    if (::testing::Test::HasFatalFailure())
+    if (::testing::Test::HasFatalFailure()) {
       return {};
+    }
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[4] = {0u, 0u, 0u, 0u};
@@ -419,8 +433,9 @@ void check_div_fmas_f32(uint64_t exec) {
 
       for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
         const bool active = (exec >> lane) & 1ULL;
-        if (active && (is_f32_nan(scalar_out[lane]) || is_f32_nan(simd_out[lane])))
+        if (active && (is_f32_nan(scalar_out[lane]) || is_f32_nan(simd_out[lane]))) {
           continue;
+        }
         if (active) {
           EXPECT_EQ(scalar_out[lane], simd_out[lane])
               << "v_div_fmas_f32 vcc=0x" << std::hex << vcc << " r1=" << std::dec << r1 << " lane "
@@ -444,8 +459,9 @@ void check_div_fmas_f64(uint64_t exec) {
                       uint32_t r1) -> std::array<uint64_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
-    if (::testing::Test::HasFatalFailure())
+    if (::testing::Test::HasFatalFailure()) {
       return {};
+    }
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[4] = {0u, 0u, 0u, 0u};
@@ -465,8 +481,9 @@ void check_div_fmas_f64(uint64_t exec) {
 
       for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
         const bool active = (exec >> lane) & 1ULL;
-        if (active && (is_f64_nan(scalar_out[lane]) || is_f64_nan(simd_out[lane])))
+        if (active && (is_f64_nan(scalar_out[lane]) || is_f64_nan(simd_out[lane]))) {
           continue;
+        }
         if (active) {
           EXPECT_EQ(scalar_out[lane], simd_out[lane])
               << "v_div_fmas_f64 vcc=0x" << std::hex << vcc << " r1=" << std::dec << r1 << " lane "
@@ -521,9 +538,10 @@ TEST(Vop3DivHelpersSimdCorrectness, DivFixupF32Family_Source2NaNPrecedence) {
   constexpr uint32_t kS2Nan = 0x7FC54321u;
   for (const bool force_scalar : {true, false}) {
     const auto out = run_div_fixup_f32_nan_precedence(force_scalar, /*opcode=*/478);
-    for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+    for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       EXPECT_EQ(out[lane], kS2Nan)
           << "v_div_fixup_f32_vop3 force_scalar=" << force_scalar << " lane " << lane;
+    }
   }
 }
 TEST(Vop3DivHelpersSimdCorrectness, DivFixupF16Family_OpSelHighHalves) {
@@ -584,9 +602,10 @@ TEST(Vop3DivHelpersSimdCorrectness, DivFixupF64_Source2NaNPrecedence) {
   constexpr uint64_t kS2Nan = 0x7FF8000000054321ULL;
   for (const bool force_scalar : {true, false}) {
     const auto out = run_div_fixup_f64_nan_precedence(force_scalar);
-    for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+    for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       EXPECT_EQ(out[lane], kS2Nan)
           << "v_div_fixup_f64_vop3 force_scalar=" << force_scalar << " lane " << lane;
+    }
   }
 }
 TEST(Vop3DivHelpersSimdCorrectness, DivFmasF32_FullExec) {

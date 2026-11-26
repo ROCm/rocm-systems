@@ -32,18 +32,22 @@ bool has_saddr(uint32_t saddr) {
 }
 
 std::optional<uint32_t> read_optional_sreg_m0(uint32_t reg, amdgpu::Wavefront &wf) {
-  if (reg == OPR_SREG_M0_NULL)
+  if (reg == OPR_SREG_M0_NULL) {
     return 0;
-  if (reg == OPR_SREG_M0_M0)
+  }
+  if (reg == OPR_SREG_M0_M0) {
     return wf.m0();
+  }
   return amdgpu::try_read_scalar_selector(wf, reg);
 }
 
 std::optional<uint32_t> read_smem_offset(uint32_t soffset, amdgpu::Wavefront &wf) {
-  if (soffset == OPR_SMEM_OFFSET_NULL || soffset == 0x7F)
+  if (soffset == OPR_SMEM_OFFSET_NULL || soffset == 0x7F) {
     return 0;
-  if (soffset == OPR_SMEM_OFFSET_M0)
+  }
+  if (soffset == OPR_SMEM_OFFSET_M0) {
     return wf.m0();
+  }
   return amdgpu::try_read_scalar_selector(wf, soffset);
 }
 
@@ -66,21 +70,24 @@ std::optional<uint64_t> smem_calculate_address(const SmemMachineInst &inst, amdg
   // Byte and halfword scalar loads retain their sub-dword address bits.
   const uint64_t align_mask = (state && state->elem_size < 4 ? state->elem_size : 4) - 1;
   auto base = amdgpu::try_read_scalar_selector64(wf, sbase_sel);
-  if (!base)
+  if (!base) {
     return std::nullopt;
+  }
   int64_t off = static_cast<int64_t>(static_cast<int32_t>(inst.ioffset << 8) >> 8);
   const int64_t immediate = off;
   auto soffset = read_smem_offset(inst.soffset, wf);
-  if (!soffset)
+  if (!soffset) {
     return std::nullopt;
+  }
   *base &= ~align_mask;
   off = (off & ~static_cast<int64_t>(align_mask)) + (*soffset & ~align_mask);
   // RDNA4 section 8.1.1 restricts the immediate for buffer loads, the sum otherwise.
   const bool buffer_load = amdgpu::addr_calc::gfx12_smem_is_buffer_load_op(inst.op);
   const bool ordinary_load = amdgpu::addr_calc::gfx12_smem_is_ordinary_load_op(inst.op);
-  if ((buffer_load && immediate < 0) || (ordinary_load && immediate + *soffset < 0))
+  if ((buffer_load && immediate < 0) || (ordinary_load && immediate + *soffset < 0)) {
     wf.report_undefined_behavior(buffer_load ? "negative scalar-buffer load immediate"
                                              : "negative combined scalar-memory offset");
+  }
   if (buffer_load) {
     return amdgpu::addr_calc::scalar_buffer_address(wf, sbase_sel, *base, off, state, align_mask,
                                                     align_mask);
@@ -109,8 +116,9 @@ void flat_calculate_addresses(const VflatMachineInst &inst, amdgpu::Wavefront &w
   uint32_t vbase = wf.vgpr_alloc().base + inst.vaddr;
   auto vaddr_region = regs.read_vgpr_region(vbase, has_saddr(inst.saddr) ? 1 : 2, exec);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     uint64_t vaddr;
     if (has_saddr(inst.saddr)) {
       vaddr = vaddr_region.lane(0, lane);
@@ -127,8 +135,9 @@ void flat_calculate_addresses(const VglobalMachineInst &inst, amdgpu::Wavefront 
   // GFX12 VGLOBAL: 24-bit signed offset, optional SGPR base via saddr.
   auto &cu = wf.cu();
   init_vector_mem_state(wf, d);
-  if (d.transpose && !d.exec_mask)
+  if (d.transpose && !d.exec_mask) {
     return;
+  }
   const uint64_t address_lanes = amdgpu::transpose_request_lane_mask(d, wf.wf_size());
   int64_t offset = static_cast<int64_t>(static_cast<int32_t>(inst.ioffset << 8) >> 8);
   amdgpu::RegisterAccess regs(cu);
@@ -145,8 +154,9 @@ void flat_calculate_addresses(const VglobalMachineInst &inst, amdgpu::Wavefront 
   uint32_t vbase = wf.vgpr_alloc().base + inst.vaddr;
   auto vaddr_region = regs.read_vgpr_region(vbase, has_saddr(inst.saddr) ? 1 : 2, address_lanes);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(address_lanes & (1ULL << lane)))
+    if (!(address_lanes & (1ULL << lane))) {
       continue;
+    }
     uint64_t vaddr;
     if (has_saddr(inst.saddr)) {
       vaddr = vaddr_region.lane(0, lane);
@@ -180,11 +190,13 @@ void flat_calculate_addresses(const VscratchMachineInst &inst, amdgpu::Wavefront
   }
   uint32_t vbase = wf.vgpr_alloc().base + inst.vaddr;
   std::optional<amdgpu::RegisterAccess::VgprReadRegion> vaddr_region;
-  if (inst.sve)
+  if (inst.sve) {
     vaddr_region.emplace(regs.read_vgpr_region(vbase, 1, exec));
+  }
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     const int64_t vaddr =
         inst.sve ? amdgpu::flat_vector_offset(vaddr_region->lane(0, lane), /*signed_offset=*/true)
                  : 0;
@@ -227,21 +239,24 @@ void mubuf_calculate_addresses(const VbufferMachineInst &inst, amdgpu::Wavefront
   const int64_t ioff = static_cast<int32_t>(inst.ioffset << 8) >> 8;
   amdgpu::RegisterAccess regs(wf);
   std::optional<amdgpu::RegisterAccess::VgprReadRegion> vaddr;
-  if (inst.idxen || inst.offen)
+  if (inst.idxen || inst.offen) {
     vaddr.emplace(regs.read_vgpr_region(wf.vgpr_alloc().base + inst.vaddr,
                                         inst.idxen && inst.offen ? 2 : 1, d.exec_mask));
+  }
   amdgpu::addr_calc::rdna_buffer_apply_swizzle(d, srd1, srd3, inst.idxen != 0, d.exec_mask,
                                                base_addr, *soffset);
   const bool per_element =
       d.num_elems > 1 && !d.buffer_components && d.atomic_op == amdgpu::AtomicOp::NONE;
   d.element_lane_masks.clear();
-  if (per_element)
+  if (per_element) {
     d.element_lane_masks.assign(d.num_elems, d.exec_mask);
+  }
   const amdgpu::addr_calc::RdnaBufferOobSelect mode =
       amdgpu::addr_calc::rdna_buffer_oob_select(srd3);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(d.exec_mask & (1ULL << lane)))
+    if (!(d.exec_mask & (1ULL << lane))) {
       continue;
+    }
     const uint32_t index = inst.idxen ? vaddr->lane(0, lane) : 0;
     const uint32_t voffset = inst.offen ? vaddr->lane(inst.idxen ? 1 : 0, lane) : 0;
     const uint32_t offset = amdgpu::addr_calc::buffer_offset_part(voffset, ioff);

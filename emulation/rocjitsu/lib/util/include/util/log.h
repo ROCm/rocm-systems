@@ -130,8 +130,9 @@ public:
       std::ostringstream buf;
       auto pos_before = buf.tellp();
       fn(buf);
-      if (buf.tellp() == pos_before)
+      if (buf.tellp() == pos_before) {
         return;
+      }
       std::ostringstream out;
       out << std::format("[rj log {}] ", group_name(GroupId));
       out << buf.str() << '\n';

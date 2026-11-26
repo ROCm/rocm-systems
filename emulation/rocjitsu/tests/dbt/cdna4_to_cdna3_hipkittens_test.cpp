@@ -85,8 +85,9 @@ Gl make_gl(uint16_t *ptr, size_t rows, size_t cols) {
 }
 
 std::string kernel_dir() {
-  if (const char *env = std::getenv("ROCJITSU_HIPKITTENS_KERNEL_DIR"))
+  if (const char *env = std::getenv("ROCJITSU_HIPKITTENS_KERNEL_DIR")) {
     return env;
+  }
   return (std::filesystem::current_path() / "kernels").string();
 }
 

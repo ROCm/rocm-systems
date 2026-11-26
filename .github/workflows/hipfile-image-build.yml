@@ -4,14 +4,11 @@ run-name: Build the Docker image for hipFile CI
 env:
   AIS_INPUT_CI_IMAGE_NAME: ${{ inputs.ci_image_name }}
   AIS_INPUT_CI_IMAGE_CACHE: ${{ inputs.ci_image_cache }}
-  AIS_INPUT_CI_IMAGE_NAME_NVIDIA: ${{ inputs.ci_image_name_nvidia }}
-  AIS_INPUT_CI_IMAGE_CACHE_NVIDIA: ${{ inputs.ci_image_cache_nvidia }}
   AIS_INPUT_ROCM_VERSION: ${{ inputs.rocm_version }}
   AIS_INPUT_ROCM_NIGHTLY_BUILD: ${{ inputs.rocm_nightly_build }}
   AIS_INPUT_PLATFORM: ${{ inputs.platform }}
   # When publish_cache is set, also produce the floating registry cache.
   AIS_BASE_CACHE_TO: ${{ case(inputs.publish_cache, format('--cache-to=type=registry,ref={0}', inputs.ci_image_cache), '') }}
-  AIS_NVIDIA_CACHE_TO: ${{ case(inputs.publish_cache, format('--cache-to=type=registry,ref={0}', inputs.ci_image_cache_nvidia), '') }}
 
 on:
   workflow_call:
@@ -22,14 +19,6 @@ on:
         type: string
       ci_image_cache:
         description: "Full CI cache image name & tag for Docker build cache"
-        required: true
-        type: string
-      ci_image_name_nvidia:
-        description: "Full CI image name & nvidia tag to build/push"
-        required: true
-        type: string
-      ci_image_cache_nvidia:
-        description: "Full CI cache image name & nvidia tag for Docker build cache"
         required: true
         type: string
       platform:
@@ -53,9 +42,6 @@ on:
       ci_image:
         description: "The full name & tag of the CI image to use."
         value: ${{ inputs.ci_image_name }}
-      ci_image_nvidia:
-        description: "The full name & nvidia tag of the CI image to use."
-        value: ${{ inputs.ci_image_name_nvidia }}
 
 permissions:
   contents: read
@@ -95,28 +81,13 @@ jobs:
           docker buildx build \
             -f "${GITHUB_WORKSPACE}/projects/hipfile/util/docker/DOCKERFILE.ais_ci_${AIS_INPUT_PLATFORM}" \
             --target base \
+            --provenance=false \
             --build-arg BUILDKIT_INLINE_CACHE=1 \
-            --build-arg ROCM_VERSION=${AIS_INPUT_ROCM_VERSION} \
-            --build-arg ROCM_NIGHTLY_BUILD=${AIS_INPUT_ROCM_NIGHTLY_BUILD} \
+            --build-arg ROCM_VERSION="${AIS_INPUT_ROCM_VERSION}" \
+            --build-arg ROCM_NIGHTLY_BUILD="${AIS_INPUT_ROCM_NIGHTLY_BUILD}" \
             --cache-from=type=registry,ref="${AIS_INPUT_CI_IMAGE_NAME}" \
             --cache-from=type=registry,ref="${AIS_INPUT_CI_IMAGE_CACHE}" \
-            ${AIS_BASE_CACHE_TO} \
+            ${AIS_BASE_CACHE_TO:+"${AIS_BASE_CACHE_TO}"} \
             --push \
             -t "${AIS_INPUT_CI_IMAGE_NAME}" \
-            "${GITHUB_WORKSPACE}/projects/hipfile/util/docker"
-
-      - name: Build NVIDIA image for AIS CI
-        run: |
-          docker buildx build \
-            -f "${GITHUB_WORKSPACE}/projects/hipfile/util/docker/DOCKERFILE.ais_ci_${AIS_INPUT_PLATFORM}" \
-            --target nvidia \
-            --build-arg BUILDKIT_INLINE_CACHE=1 \
-            --build-arg ROCM_VERSION=${AIS_INPUT_ROCM_VERSION} \
-            --build-arg ROCM_NIGHTLY_BUILD=${AIS_INPUT_ROCM_NIGHTLY_BUILD} \
-            --cache-from=type=registry,ref="${AIS_INPUT_CI_IMAGE_NAME}" \
-            --cache-from=type=registry,ref="${AIS_INPUT_CI_IMAGE_NAME_NVIDIA}" \
-            --cache-from=type=registry,ref="${AIS_INPUT_CI_IMAGE_CACHE_NVIDIA}" \
-            ${AIS_NVIDIA_CACHE_TO} \
-            --push \
-            -t "${AIS_INPUT_CI_IMAGE_NAME_NVIDIA}" \
             "${GITHUB_WORKSPACE}/projects/hipfile/util/docker"

@@ -299,6 +299,7 @@ if(BUILD_TESTS)
     GraphCaptureStreamOrderingTests.cpp
     GroupCallTests.cpp
     NonBlockingTests.cpp
+    RasClientHelpersTests.cpp
     RasDiagnosticsTests.cpp
     RasJsonTests.cpp
     ReduceScatterTests.cpp
@@ -306,6 +307,7 @@ if(BUILD_TESTS)
     RegisterTests.cpp
     ScatterTests.cpp
     TeamTopologyTests.cpp
+    UniqueIdHexTests.cpp
     P2pChannelScalingTests.cpp
     PipeUtilsTests.cpp
     VersionGateTests.cpp
@@ -327,6 +329,7 @@ if(BUILD_TESTS)
     ProfilerApiEventRankTests.cpp
     TunerPluginConstantsTests.cpp
     CpuAffinityTests.cpp
+    ProxyProtocolTests.cpp
     TopoCpuArchTests.cpp
     TeardownStressTests.cpp
     _RecorderTests.cpp

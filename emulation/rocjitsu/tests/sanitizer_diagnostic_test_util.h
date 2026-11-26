@@ -15,9 +15,11 @@ inline bool has_sanitizer_diagnostic(std::string_view output) {
   constexpr std::array markers = {
       "AddressSanitizer",           "LeakSanitizer", "ThreadSanitizer", "MemorySanitizer",
       "UndefinedBehaviorSanitizer", "runtime error:"};
-  for (std::string_view marker : markers)
-    if (output.find(marker) != std::string_view::npos)
+  for (std::string_view marker : markers) {
+    if (output.find(marker) != std::string_view::npos) {
       return true;
+    }
+  }
   return false;
 }
 
@@ -28,10 +30,12 @@ inline bool has_assertion_diagnostic(std::string_view output) {
     if ((line.find("Assertion") != std::string_view::npos ||
          line.find("assertion") != std::string_view::npos) &&
         (line.find("failed") != std::string_view::npos ||
-         line.find("failure") != std::string_view::npos))
+         line.find("failure") != std::string_view::npos)) {
       return true;
-    if (end == std::string_view::npos)
+    }
+    if (end == std::string_view::npos) {
       break;
+    }
     output.remove_prefix(end + 1);
   }
   return false;

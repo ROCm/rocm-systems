@@ -24,7 +24,7 @@ def supports_integer_compare(arch, mnemonic):
         return False
     return arch in ('rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5') or (
         arch in ('cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5')
-        and INTEGER_COMPARISONS[mnemonic][0] == 32
+        and INTEGER_COMPARISONS[mnemonic][0] in (16, 32, 64)
     )
 
 
@@ -108,7 +108,7 @@ FLOAT_COMPARISONS = {
 }
 
 
-# CDNA spells the floating always-true predicate TRU rather than T.
+# GFX9/GFX10 XML spells the floating always-true predicate TRU rather than T.
 for prefix in ('V_CMP', 'V_CMPX'):
     for bits in (16, 32, 64):
         FLOAT_COMPARISONS[f'{prefix}_TRU_F{bits}'] = (bits, True)
@@ -126,19 +126,28 @@ def gen_float_compare(ctx: ExecuteContext) -> str | None:
     dst, src = ctx.dst_ops, ctx.src_ops
     is_vop3, result_writer = ctx.is_vop3, ctx.result_writer
     if (
-        arch not in ('rdna2', 'rdna3', 'rdna3_5', 'rdna4', 'cdna3', 'cdna4', 'cdna5')
+        arch
+        not in (
+            'rdna1',
+            'rdna2',
+            'rdna3',
+            'rdna3_5',
+            'rdna4',
+            'cdna1',
+            'cdna2',
+            'cdna3',
+            'cdna4',
+            'cdna5',
+        )
         or mnemonic not in FLOAT_COMPARISONS
     ):
-        return None
-    # TRU aliases are CDNA-only; RDNA2 retains its legacy constant predicate
-    # handler, including strict semantics and CLAMP's signaling NaN status.
-    if '_TRU_' in mnemonic and not arch.startswith('cdna'):
-        return None
-    if arch == 'rdna2' and not is_vop3:
         return None
     if len(src) != 2 or len(dst) > 1:
         return None
     bits, constant = FLOAT_COMPARISONS[mnemonic]
+    gfx10 = arch in ('rdna1', 'rdna2')
+    if '_TRU_' in mnemonic and not (arch.startswith('cdna') or gfx10):
+        return None
     # GFX12 removed the constant predicates; their rj-arith APIs describe RDNA3.
     if arch == 'rdna4' and constant:
         return None
@@ -152,7 +161,7 @@ def gen_float_compare(ctx: ExecuteContext) -> str | None:
             '                       ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |',
             '                       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);',
         ]
-        if bits == 16 and arch != 'rdna2':
+        if bits == 16 and not gfx10:
             lines += [
                 '  const uint32_t opsel = amdgpu::vop3_opsel(inst_);',
                 '  modifiers |= ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) |',
@@ -183,9 +192,40 @@ def gen_float_compare(ctx: ExecuteContext) -> str | None:
         + mnemonic.lower().replace('_tru_', '_t_')
         + ('_gfx12' if arch == 'rdna4' else '')
     )
-    signaling = ', true' if arch == 'rdna2' else ''
+    if arch == 'cdna3' and is_vop3:
+        # Gfx942's inherited CLAMP/status contract is identical to gfx908's.
+        skip_inputs = '!inst_.clamp' if constant else 'false'
+        lines += [
+            f'  amdgpu::arith::execute_float_compare_wave64<{bits}>(wf, {wave_api(api, 64)}_gfx908,',
+            f'      wf.cu().arithmetic_flags(), {modifiers},',
+            f'      {src[0]}, {src[1]}, {skip_inputs}, {result_writer}, exec_mask);',
+        ]
+        return '\n'.join(lines)
+    if arch == 'cdna1' or gfx10:
+        # Signaling constant predicates still need operands when reporting FP status.
+        skip_inputs = str(constant).lower()
+        if constant and is_vop3:
+            semantics = '(wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK)'
+            reports = f'{semantics} == RJ_ARITH_SEMANTICS_COMPATIBILITY'
+            if arch in ('rdna1', 'rdna2'):
+                reports += f' || {semantics} == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL'
+            skip_inputs = f'!(inst_.clamp && ({reports}))'
+        if arch == 'cdna1':
+            call = (
+                f'execute_float_compare_wave64<{bits}>(wf, {wave_api(api, 64)}_gfx908,'
+            )
+        else:
+            api += '_gfx10'
+            call = f'execute_float_compare<{bits}>(wf, {wave_api(api, 32)}, {wave_api(api, 64)},'
+        lines += [
+            f'  amdgpu::arith::{call}',
+            f'      wf.cu().arithmetic_flags(), {modifiers},',
+            f'      {src[0]}, {src[1]}, {skip_inputs},',
+            f'      {result_writer}, exec_mask);',
+        ]
+        return '\n'.join(lines)
     lines += [
-        f'  amdgpu::arith::execute_float_compare<{bits}{signaling}>(wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
+        f'  amdgpu::arith::execute_float_compare<{bits}>(wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
         f'      wf.cu().arithmetic_flags(), {modifiers},',
         f'      {src[0]}, {src[1]}, {str(constant).lower()},',
         f'      {result_writer}, exec_mask);',

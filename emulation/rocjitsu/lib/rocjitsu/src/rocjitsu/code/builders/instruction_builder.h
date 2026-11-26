@@ -124,9 +124,10 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
 inline constexpr util::FailureOr<uint32_t>
 build_sopp_encoding(rocjitsu::IsaFamily arch, uint16_t op, uint16_t simm16,
                     const util::DiagnosticEmitter *error = nullptr) {
-  if (op > 0x7Fu)
+  if (op > 0x7Fu) {
     return error != nullptr ? error->emit() << "SOPP encoding field out of range"
                             : util::Result::failure();
+  }
   switch (arch) {
   case rocjitsu::IsaFamily::Cdna1:
     return cdna1::build_sopp(op, {.simm16 = simm16})[0];
@@ -161,9 +162,10 @@ build_sopp_encoding(rocjitsu::IsaFamily arch, uint16_t op, uint16_t simm16,
 inline constexpr util::FailureOr<uint32_t>
 build_sop1_encoding(rocjitsu::IsaFamily arch, uint16_t op, uint16_t sdst, uint16_t ssrc0,
                     const util::DiagnosticEmitter *error = nullptr) {
-  if (op > 0xFFu || sdst > 0x7Fu || ssrc0 > 0xFFu)
+  if (op > 0xFFu || sdst > 0x7Fu || ssrc0 > 0xFFu) {
     return error != nullptr ? error->emit() << "SOP1 encoding field out of range"
                             : util::Result::failure();
+  }
   switch (arch) {
   case rocjitsu::IsaFamily::Cdna1:
     return cdna1::build_sop1(
@@ -209,9 +211,10 @@ build_sop1_encoding(rocjitsu::IsaFamily arch, uint16_t op, uint16_t sdst, uint16
 inline constexpr util::FailureOr<uint32_t>
 build_sop2_encoding(rocjitsu::IsaFamily arch, uint16_t op, uint16_t sdst, uint16_t ssrc0,
                     uint16_t ssrc1, const util::DiagnosticEmitter *error = nullptr) {
-  if (op > 0x5Fu || sdst > 0x7Fu || ssrc0 > 0xFFu || ssrc1 > 0xFFu)
+  if (op > 0x5Fu || sdst > 0x7Fu || ssrc0 > 0xFFu || ssrc1 > 0xFFu) {
     return error != nullptr ? error->emit() << "SOP2 encoding field out of range"
                             : util::Result::failure();
+  }
   switch (arch) {
   case rocjitsu::IsaFamily::Cdna1:
     return cdna1::build_sop2(op, {.ssrc0 = static_cast<uint8_t>(ssrc0),
@@ -275,9 +278,10 @@ build_sop2_encoding(rocjitsu::IsaFamily arch, uint16_t op, uint16_t sdst, uint16
 inline constexpr util::FailureOr<uint32_t>
 build_sopc_encoding(rocjitsu::IsaFamily arch, uint16_t op, uint16_t ssrc0, uint16_t ssrc1,
                     const util::DiagnosticEmitter *error = nullptr) {
-  if (op > 0x7Fu || ssrc0 > 0xFFu || ssrc1 > 0xFFu)
+  if (op > 0x7Fu || ssrc0 > 0xFFu || ssrc1 > 0xFFu) {
     return error != nullptr ? error->emit() << "SOPC encoding field out of range"
                             : util::Result::failure();
+  }
   switch (arch) {
   case rocjitsu::IsaFamily::Cdna1:
     return cdna1::build_sopc(
@@ -328,9 +332,10 @@ build_sopc_encoding(rocjitsu::IsaFamily arch, uint16_t op, uint16_t ssrc0, uint1
 inline constexpr util::FailureOr<uint32_t>
 build_sopk_encoding(rocjitsu::IsaFamily arch, uint16_t op, uint16_t sdst, uint16_t simm16,
                     const util::DiagnosticEmitter *error = nullptr) {
-  if (op > 0x1Cu || sdst > 0x7Fu)
+  if (op > 0x1Cu || sdst > 0x7Fu) {
     return error != nullptr ? error->emit() << "SOPK encoding field out of range"
                             : util::Result::failure();
+  }
 #define ROCJITSU_BUILD_SOPK(isa)                                                                   \
   return isa::build_sopk(op, {.simm16 = simm16, .sdst = static_cast<uint8_t>(sdst)})[0]
   switch (arch) {
@@ -531,20 +536,23 @@ scalar_inline_neg_one(rocjitsu::IsaFamily arch, const util::DiagnosticEmitter *e
   constexpr uint64_t kMaxSignedTarget = static_cast<uint64_t>(std::numeric_limits<int64_t>::max());
   constexpr uint64_t kMaxSignedBranchPc =
       static_cast<uint64_t>(std::numeric_limits<int64_t>::max() - kBranchPcBiasBytes);
-  if (branch_pc > kMaxSignedBranchPc || target > kMaxSignedTarget)
+  if (branch_pc > kMaxSignedBranchPc || target > kMaxSignedTarget) {
     return std::nullopt;
+  }
 
   // The SOPP immediate is a signed *dword* offset, so both the branch base
   // (branch_pc + 4) and the target must be dword-aligned.
-  if (branch_pc % sizeof(uint32_t) != 0 || target % sizeof(uint32_t) != 0)
+  if (branch_pc % sizeof(uint32_t) != 0 || target % sizeof(uint32_t) != 0) {
     return std::nullopt;
+  }
 
   const int64_t delta_bytes =
       static_cast<int64_t>(target) - (static_cast<int64_t>(branch_pc) + kBranchPcBiasBytes);
   const int64_t delta_dwords = delta_bytes / static_cast<int64_t>(sizeof(uint32_t));
   if (delta_dwords < std::numeric_limits<int16_t>::min() ||
-      delta_dwords > std::numeric_limits<int16_t>::max())
+      delta_dwords > std::numeric_limits<int16_t>::max()) {
     return std::nullopt;
+  }
 
   return static_cast<int16_t>(delta_dwords);
 }
@@ -861,8 +869,9 @@ inline constexpr util::FailureOr<uint32_t>
 build_s_branch(int16_t offset_dwords, rocjitsu::IsaFamily arch,
                const util::DiagnosticEmitter *error = nullptr) {
   util::FailureOr<uint32_t> op = sopp_op_branch(arch, error);
-  if (op.failed())
+  if (op.failed()) {
     return util::Result::failure();
+  }
   return build_sopp_encoding(arch, op.value(), static_cast<uint16_t>(offset_dwords), error);
 }
 
@@ -874,11 +883,13 @@ inline constexpr util::FailureOr<uint32_t>
 build_s_getpc_b64(uint16_t sdst, rocjitsu::IsaFamily arch,
                   const util::DiagnosticEmitter *error = nullptr) {
   util::FailureOr<uint32_t> op = sop1_op_getpc_b64(arch, error);
-  if (op.failed())
+  if (op.failed()) {
     return util::Result::failure();
+  }
   util::FailureOr<uint32_t> word = build_sop1_encoding(arch, op.value(), sdst, 0);
-  if (word.failed() && error != nullptr)
+  if (word.failed() && error != nullptr) {
     return error->emit() << "s_getpc_b64 encoding field out of range";
+  }
   return word;
 }
 
@@ -890,11 +901,13 @@ inline constexpr util::FailureOr<uint32_t>
 build_s_setpc_b64(uint16_t ssrc0, rocjitsu::IsaFamily arch,
                   const util::DiagnosticEmitter *error = nullptr) {
   util::FailureOr<uint32_t> op = sop1_op_setpc_b64(arch, error);
-  if (op.failed())
+  if (op.failed()) {
     return util::Result::failure();
+  }
   util::FailureOr<uint32_t> word = build_sop1_encoding(arch, op.value(), 0, ssrc0);
-  if (word.failed() && error != nullptr)
+  if (word.failed() && error != nullptr) {
     return error->emit() << "s_setpc_b64 encoding field out of range";
+  }
   return word;
 }
 
@@ -906,11 +919,13 @@ inline constexpr util::FailureOr<uint32_t>
 build_s_swappc_b64(uint16_t sdst, uint16_t ssrc0, rocjitsu::IsaFamily arch,
                    const util::DiagnosticEmitter *error = nullptr) {
   util::FailureOr<uint32_t> op = sop1_op_swappc_b64(arch, error);
-  if (op.failed())
+  if (op.failed()) {
     return util::Result::failure();
+  }
   util::FailureOr<uint32_t> word = build_sop1_encoding(arch, op.value(), sdst, ssrc0);
-  if (word.failed() && error != nullptr)
+  if (word.failed() && error != nullptr) {
     return error->emit() << "s_swappc_b64 encoding field out of range";
+  }
   return word;
 }
 
@@ -922,12 +937,14 @@ inline constexpr util::FailureOr<uint32_t>
 build_s_call_b64(uint16_t sdst, int16_t offset_dwords, rocjitsu::IsaFamily arch,
                  const util::DiagnosticEmitter *error = nullptr) {
   util::FailureOr<uint32_t> op = sopk_op_call_b64(arch, error);
-  if (op.failed())
+  if (op.failed()) {
     return util::Result::failure();
+  }
   util::FailureOr<uint32_t> word =
       build_sopk_encoding(arch, op.value(), sdst, static_cast<uint16_t>(offset_dwords));
-  if (word.failed() && error != nullptr)
+  if (word.failed() && error != nullptr) {
     return error->emit() << "s_call_b64 encoding field out of range";
+  }
   return word;
 }
 
@@ -973,8 +990,9 @@ inline constexpr util::FailureOr<uint32_t>
 build_s_nop(uint16_t cycles = 0, rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Rdna4,
             const util::DiagnosticEmitter *error = nullptr) {
   util::FailureOr<uint32_t> op = sopp_op_nop(arch, error);
-  if (op.failed())
+  if (op.failed()) {
     return util::Result::failure();
+  }
   return build_sopp_encoding(arch, op.value(), cycles, error);
 }
 
@@ -986,8 +1004,9 @@ build_s_nop(uint16_t cycles = 0, rocjitsu::IsaFamily arch = rocjitsu::IsaFamily:
 inline constexpr util::FailureOr<uint32_t>
 build_s_endpgm(rocjitsu::IsaFamily arch, const util::DiagnosticEmitter *error = nullptr) {
   util::FailureOr<uint32_t> op = sopp_op_endpgm(arch, error);
-  if (op.failed())
+  if (op.failed()) {
     return util::Result::failure();
+  }
   return build_sopp_encoding(arch, op.value(), 0, error);
 }
 
@@ -1000,8 +1019,9 @@ inline constexpr util::FailureOr<uint32_t>
 build_s_trap(rocjitsu::IsaFamily arch, uint16_t simm16 = 0,
              const util::DiagnosticEmitter *error = nullptr) {
   util::FailureOr<uint32_t> op = sopp_op_trap(arch, error);
-  if (op.failed())
+  if (op.failed()) {
     return util::Result::failure();
+  }
   return build_sopp_encoding(arch, op.value(), simm16, error);
 }
 
@@ -1013,8 +1033,9 @@ build_s_delay_alu(uint16_t simm16, rocjitsu::IsaFamily arch,
                   const util::DiagnosticEmitter *error = nullptr) {
   const auto op = sopp_op_delay_alu(arch);
   if (op.failed()) {
-    if (error != nullptr)
+    if (error != nullptr) {
       return error->emit() << "s_delay_alu for target architecture";
+    }
     return util::Result::failure();
   }
   return pack_sopp(op.value(), simm16);
@@ -1025,8 +1046,9 @@ build_s_delay_alu(uint16_t simm16, rocjitsu::IsaFamily arch,
 /// @returns std::nullopt on an ISA that has no XCNT counter, where nothing can
 /// have required the drain in the first place.
 [[nodiscard]] inline constexpr std::optional<uint32_t> build_s_wait_xcnt(rocjitsu::IsaFamily arch) {
-  if (arch != rocjitsu::IsaFamily::Cdna5)
+  if (arch != rocjitsu::IsaFamily::Cdna5) {
     return std::nullopt;
+  }
   return build_sopp_encoding(arch, cdna5::kSWaitXcntSopp, 0).value();
 }
 
@@ -1038,11 +1060,13 @@ inline constexpr util::FailureOr<uint32_t>
 build_s_mov_b32(uint16_t sdst, uint16_t ssrc0, rocjitsu::IsaFamily arch,
                 const util::DiagnosticEmitter *error = nullptr) {
   util::FailureOr<uint32_t> op = sop1_op_mov_b32(arch, error);
-  if (op.failed())
+  if (op.failed()) {
     return util::Result::failure();
+  }
   util::FailureOr<uint32_t> word = build_sop1_encoding(arch, op.value(), sdst, ssrc0);
-  if (word.failed() && error != nullptr)
+  if (word.failed() && error != nullptr) {
     return error->emit() << "s_mov_b32 encoding field out of range";
+  }
   return word;
 }
 
@@ -1054,11 +1078,13 @@ inline constexpr util::FailureOr<uint32_t>
 build_s_mov_b64(uint16_t sdst, uint16_t ssrc0, rocjitsu::IsaFamily arch,
                 const util::DiagnosticEmitter *error = nullptr) {
   util::FailureOr<uint32_t> op = sop1_op_mov_b64(arch, error);
-  if (op.failed())
+  if (op.failed()) {
     return util::Result::failure();
+  }
   util::FailureOr<uint32_t> word = build_sop1_encoding(arch, op.value(), sdst, ssrc0);
-  if (word.failed() && error != nullptr)
+  if (word.failed() && error != nullptr) {
     return error->emit() << "s_mov_b64 encoding field out of range";
+  }
   return word;
 }
 
@@ -1070,11 +1096,13 @@ inline constexpr util::FailureOr<uint32_t>
 build_s_lshl_b32(uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1, rocjitsu::IsaFamily arch,
                  const util::DiagnosticEmitter *error = nullptr) {
   util::FailureOr<uint32_t> op = sop2_op_lshl_b32(arch, error);
-  if (op.failed())
+  if (op.failed()) {
     return util::Result::failure();
+  }
   util::FailureOr<uint32_t> word = build_sop2_encoding(arch, op.value(), sdst, ssrc0, ssrc1);
-  if (word.failed() && error != nullptr)
+  if (word.failed() && error != nullptr) {
     return error->emit() << "s_lshl_b32 encoding field out of range";
+  }
   return word;
 }
 
@@ -1086,11 +1114,13 @@ inline constexpr util::FailureOr<uint32_t>
 build_s_lshr_b32(uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1, rocjitsu::IsaFamily arch,
                  const util::DiagnosticEmitter *error = nullptr) {
   util::FailureOr<uint32_t> op = sop2_op_lshr_b32(arch, error);
-  if (op.failed())
+  if (op.failed()) {
     return util::Result::failure();
+  }
   util::FailureOr<uint32_t> word = build_sop2_encoding(arch, op.value(), sdst, ssrc0, ssrc1);
-  if (word.failed() && error != nullptr)
+  if (word.failed() && error != nullptr) {
     return error->emit() << "s_lshr_b32 encoding field out of range";
+  }
   return word;
 }
 
@@ -1103,8 +1133,9 @@ build_s_add_u32(uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1, rocjitsu::IsaFami
                 const util::DiagnosticEmitter *error = nullptr) {
   constexpr uint16_t kSop2AddU32 = 0;
   util::FailureOr<uint32_t> word = build_sop2_encoding(arch, kSop2AddU32, sdst, ssrc0, ssrc1);
-  if (word.failed() && error != nullptr)
+  if (word.failed() && error != nullptr) {
     return error->emit() << "s_add_u32 encoding for target architecture or field out of range";
+  }
   return word;
 }
 
@@ -1117,8 +1148,9 @@ build_s_addc_u32(uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1, rocjitsu::IsaFam
                  const util::DiagnosticEmitter *error = nullptr) {
   constexpr uint16_t kSop2AddcU32 = 4;
   util::FailureOr<uint32_t> word = build_sop2_encoding(arch, kSop2AddcU32, sdst, ssrc0, ssrc1);
-  if (word.failed() && error != nullptr)
+  if (word.failed() && error != nullptr) {
     return error->emit() << "s_addc_u32 encoding for target architecture or field out of range";
+  }
   return word;
 }
 
@@ -1130,11 +1162,13 @@ inline constexpr util::FailureOr<uint32_t>
 build_s_cselect_b32(uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1, rocjitsu::IsaFamily arch,
                     const util::DiagnosticEmitter *error = nullptr) {
   util::FailureOr<uint32_t> op = sop2_op_cselect_b32(arch, error);
-  if (op.failed())
+  if (op.failed()) {
     return util::Result::failure();
+  }
   util::FailureOr<uint32_t> word = build_sop2_encoding(arch, op.value(), sdst, ssrc0, ssrc1);
-  if (word.failed() && error != nullptr)
+  if (word.failed() && error != nullptr) {
     return error->emit() << "s_cselect_b32 encoding field out of range";
+  }
   return word;
 }
 
@@ -1146,11 +1180,13 @@ inline constexpr util::FailureOr<uint32_t>
 build_s_cmp_lg_u32(uint16_t ssrc0, uint16_t ssrc1, rocjitsu::IsaFamily arch,
                    const util::DiagnosticEmitter *error = nullptr) {
   util::FailureOr<uint32_t> op = sopc_op_cmp_lg_u32(arch, error);
-  if (op.failed())
+  if (op.failed()) {
     return util::Result::failure();
+  }
   util::FailureOr<uint32_t> word = build_sopc_encoding(arch, op.value(), ssrc0, ssrc1);
-  if (word.failed() && error != nullptr)
+  if (word.failed() && error != nullptr) {
     return error->emit() << "s_cmp_lg_u32 encoding field out of range";
+  }
   return word;
 }
 

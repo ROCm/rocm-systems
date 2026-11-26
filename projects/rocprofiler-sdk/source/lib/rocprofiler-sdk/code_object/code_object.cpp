@@ -1031,12 +1031,15 @@ executable_freeze_internal(hsa_executable_t executable)
                  ctx->callback_tracer->domains(CODE_OBJECT_KIND, CODE_OBJECT_KERNEL_SYMBOL)));
     };
 
-    static thread_local auto ctxs = context_array_t{};
+    // Must not be thread_local: the first use on a thread registers a TLS destructor, which takes
+    // glibc's dl_load_lock while the runtime loading this code object may hold its own lock, and
+    // dlopen takes those two locks in the opposite order.
+    auto ctxs = context_array_t{};
     context::get_active_contexts(ctxs, std::move(context_filter));
 
     if(!ctxs.empty())
     {
-        code_obj_vec->wlock([](code_object_array_t& data) {
+        code_obj_vec->wlock([&ctxs](code_object_array_t& data) {
             auto tidx = common::get_tid();
             // set the contexts for each code object
             for(const auto& ditr : data)

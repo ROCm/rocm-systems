@@ -11,9 +11,16 @@
 namespace rocjitsu::arith::x86_64_v3::scaled_widen_detail {
 // Narrow FP32 to F16/BF16 with RNE and optional finite-overflow saturation.
 // OCP decoding supplies quiet NaNs; native F16 conversion retains their bits.
-inline __m256i encode(__m256 value, ScaledDestination destination, bool saturate) {
+inline __m256i encode(__m256 value, ScaledDestination destination, bool saturate,
+                      bool flush_output = false) {
   auto bits = _mm256_castps_si256(value);
   if (destination == ScaledDestination::F32) {
+    if (flush_output) {
+      auto sub = _mm256_cmpeq_epi32(_mm256_and_si256(bits, _mm256_set1_epi32(0x7f800000)),
+                                    _mm256_setzero_si256());
+      bits = _mm256_blendv_epi8(bits, _mm256_and_si256(bits, _mm256_set1_epi32(int(0x80000000U))),
+                                sub);
+    }
     return bits;
   }
   auto magnitude = _mm256_and_si256(bits, _mm256_set1_epi32(0x7fffffff));
@@ -37,6 +44,11 @@ inline __m256i encode(__m256 value, ScaledDestination destination, bool saturate
                                        _mm256_set1_epi32(infinity));
     auto saturated = _mm256_sub_epi32(result, _mm256_set1_epi32(1));
     result = _mm256_blendv_epi8(result, saturated, _mm256_and_si256(finite, overflow));
+  }
+  if (flush_output) {
+    auto sub = _mm256_cmpeq_epi32(_mm256_and_si256(result, _mm256_set1_epi32(infinity)),
+                                  _mm256_setzero_si256());
+    result = _mm256_blendv_epi8(result, _mm256_and_si256(result, _mm256_set1_epi32(0x8000)), sub);
   }
   return result;
 }

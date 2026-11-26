@@ -43,28 +43,36 @@ constexpr std::string_view kMutationHelp =
     "Input: extracted little-endian AMDHSA ET_DYN ELF64, at most 256 MiB.\n"
     "Complete builtin split pairs: RDNA4 workgroup; CDNA5 workgroup/cluster.\n"
     "Full s_barrier singletons: RDNA3/CDNA3/CDNA4. See --capabilities for linked\n"
-    "concrete target/wave admission. Partial/named/dynamic barriers, shared\n"
-    "owners/helpers and multiple .text sections are not supported.\n"
+    "concrete target/wave admission. Drop rejects partial/named/dynamic barriers\n"
+    "and shared owners/helpers. Multiple .text sections are not supported.\n"
     "Trap-handler barrier IDs are rejected. Cluster barriers require a clustered\n"
     "dispatch that activates cluster semantics.\n"
-    "LdsWrongAddress admits gfx1200/gfx1201 wave32/wave64 ds_store_b32/ds_load_b32 and "
-    "gfx942/gfx950\n"
-    "wave64 ds_write_b32/ds_write_b128, and gfx1250 wave32 ds_store_b32/\n"
-    "ds_load_b32. It requires a distinct allocated --address-vgpr for mutation.\n"
+    "LdsWrongAddress admits gfx1100/gfx1200/gfx1201 wave32/wave64 scalar and two-address\n"
+    "loads/stores, gfx942/gfx950 wave64 scalar and read2/write2 forms, and\n"
+    "gfx1250 wave32 scalar loads/stores and gfx1251 wave32 scalar/two-address forms.\n"
+    "Scalar widths: b32/b64/b96/b128.\n"
+    "Two-address widths: b32/b64, including stride64 forms, except on gfx1250.\n"
+    "Selected subword and transpose forms are also supported.\n"
+    "See --capabilities for exact forms. It requires a distinct\n"
+    "allocated --address-vgpr for mutation.\n"
     "This argument is an encoded selector; allocation uses the address bank.\n"
+    "LDS output lists every affected owner when a helper is shared.\n"
+    "Discovery can succeed while replacement growth or branch range prevents emission.\n"
     "The caller supplies its runtime value.\n"
     "Output must be new; existing files, aliases and in-place mutation are refused.\n"
     "Host transformation only; no GPU execution or detector qualification.\n";
 
 util::FailureOr<uint64_t> parse_number(std::string_view text, util::DiagnosticEmitter diagnostic) {
-  if (!text.starts_with("0x"))
+  if (!text.starts_with("0x")) {
     return cli::parse_uint(text, diagnostic);
+  }
   text.remove_prefix(2);
   uint64_t number = 0;
   const std::from_chars_result parsed =
       std::from_chars(text.data(), text.data() + text.size(), number, 16);
-  if (text.empty() || parsed.ec != std::errc{} || parsed.ptr != text.data() + text.size())
+  if (text.empty() || parsed.ec != std::errc{} || parsed.ptr != text.data() + text.size()) {
     return diagnostic.emit() << "expected an unsigned decimal or 0x hexadecimal integer";
+  }
   return number;
 }
 
@@ -76,32 +84,38 @@ public:
   const std::optional<T> &value() const { return value_; }
   bool allows_switch_mode() const override { return std::is_same_v<T, bool>; }
   std::string format_value() const override {
-    if (!value_)
+    if (!value_) {
       return "unset";
-    if constexpr (std::is_same_v<T, std::string>)
+    }
+    if constexpr (std::is_same_v<T, std::string>) {
       return *value_;
-    else if constexpr (std::is_same_v<T, bool>)
+    } else if constexpr (std::is_same_v<T, bool>) {
       return *value_ ? "true" : "false";
-    else
+    } else {
       return std::to_string(*value_);
+    }
   }
 
 private:
   util::Result parse_value(std::string_view text, util::DiagnosticEmitter diagnostic) override {
-    if (value_)
+    if (value_) {
       return diagnostic.emit() << "duplicate option";
-    if (text.empty() || text.starts_with("--"))
+    }
+    if (text.empty() || text.starts_with("--")) {
       return diagnostic.emit() << "requires a nonempty value";
+    }
     if constexpr (std::is_same_v<T, std::string>) {
       value_ = std::string(text);
     } else if constexpr (std::is_same_v<T, bool>) {
-      if (text != "true")
+      if (text != "true") {
         return diagnostic.emit() << "expected a bare switch or '=true'";
+      }
       value_ = true;
     } else {
       const util::FailureOr<uint64_t> number = parse_number(text, diagnostic);
-      if (number.failed())
+      if (number.failed()) {
         return util::Result::failure();
+      }
       value_ = number.value();
     }
     return util::Result::success();
@@ -113,8 +127,9 @@ private:
 // A failed write/close removes our incomplete output and never reports a mutant.
 bool write_new_file(const char *path, std::span<const uint8_t> image) {
   std::FILE *file = std::fopen(path, "wbx");
-  if (!file)
+  if (!file) {
     return false;
+  }
   const bool written = std::fwrite(image.data(), 1, image.size(), file) == image.size();
   const bool closed = std::fclose(file) == 0;
   if (!written || !closed) {
@@ -160,8 +175,9 @@ int reject(const FaultMutationError &error, std::string_view operation,
            std::optional<uint64_t> known_offset = std::nullopt) {
   std::cerr << "rj_code_mutate: " << operation << " failed: code=" << error_code_name(error.code);
   // Library offsets do not encode presence; callers supply a known CLI coordinate explicitly.
-  if (known_offset.has_value())
+  if (known_offset.has_value()) {
     std::cerr << " offset=" << *known_offset;
+  }
   std::cerr << ' ' << error.message << '\n';
   return 2;
 }
@@ -241,16 +257,20 @@ int run(int argc, char **argv) {
                       ordinal_flag, address_vgpr_flag, list_flag},
                      diagnostic)
           .failed() ||
-      command.add_flags("Information", {capabilities_flag, help_flag}, diagnostic).failed())
+      command.add_flags("Information", {capabilities_flag, help_flag}, diagnostic).failed()) {
     return 2;
+  }
   const std::vector<std::string_view> arguments(argv + 1, argv + argc);
   const util::FailureOr<cli::ParsedArguments> parsed = cli::parse(command, arguments, diagnostic);
-  if (parsed.failed())
+  if (parsed.failed()) {
     return 2;
-  if (!parsed.value().positional.empty() || parsed.value().saw_separator)
+  }
+  if (!parsed.value().positional.empty() || parsed.value().saw_separator) {
     return reject("positional arguments are not supported");
-  if ((help_flag->value() || capabilities_flag->value()) && argc != 2)
+  }
+  if ((help_flag->value() || capabilities_flag->value()) && argc != 2) {
     return reject("--help and --capabilities must be used alone");
+  }
   if (help_flag->value()) {
     std::cout << cli::format_help(command) << kMutationHelp;
     return finish_stdout();
@@ -267,7 +287,7 @@ int run(int argc, char **argv) {
     for (const LdsCapability &capability : lds_wrong_address_capabilities()) {
       const IsaTargetBinding *target = default_isa_target_registry().find_target(capability.target);
       std::cout << "kind=LdsWrongAddress target=" << target->id << " wave=" << capability.wave_size
-                << " form=" << capability.form << " admission=direct-single-owner\n";
+                << " form=" << capability.form << " admission=proven-all-owners\n";
     }
     return finish_stdout();
   }
@@ -278,14 +298,16 @@ int run(int argc, char **argv) {
   const std::string target_assertion = target_flag->value().value_or("");
   const std::optional<uint64_t> exact = exact_flag->value();
   const uint64_t requested_ordinal = ordinal_flag->value().value_or(0);
-  if (requested_ordinal > SIZE_MAX)
+  if (requested_ordinal > SIZE_MAX) {
     return reject("invalid unsigned integer for --ordinal");
+  }
   const size_t ordinal = static_cast<size_t>(requested_ordinal);
   std::optional<uint32_t> address_vgpr = std::nullopt;
   if (address_vgpr_flag->value()) {
     const uint64_t requested_address_vgpr = *address_vgpr_flag->value();
-    if (requested_address_vgpr > UINT32_MAX)
+    if (requested_address_vgpr > UINT32_MAX) {
       return reject("invalid unsigned integer for --address-vgpr");
+    }
     address_vgpr = static_cast<uint32_t>(requested_address_vgpr);
   }
   const bool list = list_flag->value().value_or(false);
@@ -296,31 +318,42 @@ int run(int argc, char **argv) {
     std::cerr << cli::format_help(command) << kMutationHelp;
     return reject("require input, exact kernel, and either --list or --output");
   }
-  if (kind != "DropBarrier" && kind != "LdsWrongAddress")
+  if (kind != "DropBarrier" && kind != "LdsWrongAddress") {
     return reject("unsupported mutation kind: " + kind);
-  if ((kind == "DropBarrier" && address_vgpr) || (list && address_vgpr))
+  }
+  if ((kind == "DropBarrier" && address_vgpr) || (list && address_vgpr)) {
     return reject("--address-vgpr applies only to LdsWrongAddress mutation");
+  }
   const util::FailureOr<std::vector<char>> bytes =
       detail::read_file_bytes(input.c_str(), kMaxImageBytes);
-  if (bytes.failed() || bytes.value().empty())
+  if (bytes.failed() || bytes.value().empty()) {
     return reject("cannot read bounded input code object (regular file, 1..256 MiB)");
+  }
   const FaultMutationContext context(
       std::span(reinterpret_cast<const uint8_t *>(bytes.value().data()), bytes.value().size()));
   FaultMutationError error;
   if (kind == "LdsWrongAddress") {
     const FailureOr<LdsInventory> inventory = discover_lds_wrong_address(context, kernel, error);
-    if (inventory.failed())
+    if (inventory.failed()) {
       return reject(error, "discovery");
+    }
     const IsaTargetBinding *target =
         default_isa_target_registry().find_target(context.source().target_id());
-    if (!target_assertion.empty() && target_assertion != target->id)
+    if (!target_assertion.empty() && target_assertion != target->id) {
       return reject("target assertion does not match source ELF identity");
+    }
     if (list) {
       size_t index = 0;
-      for (const LdsSite &site : inventory.value().sites())
+      for (const LdsSite &site : inventory.value().sites()) {
         std::cout << "ordinal=" << index++ << " exact=" << site.offset
                   << " address_vgpr=" << site.address_vgpr << " address_bank=" << site.address_bank
-                  << " target=" << target->id << " form=" << site.form << '\n';
+                  << " target=" << target->id << " form=" << site.form
+                  << " affected_owners=" << site.affected_owners.size();
+        for (const FaultMutationOwner &owner : site.affected_owners)
+          std::cout << " owner=" << owner.entry << ':' << owner.entry_offset << ':'
+                    << owner.descriptor_file_offset;
+        std::cout << '\n';
+      }
       return finish_stdout();
     }
     LdsSelector selector = {.exact = std::nullopt, .ordinal = ordinal};
@@ -328,37 +361,47 @@ int run(int argc, char **argv) {
       const std::span<const LdsSite> sites = inventory.value().sites();
       const std::span<const LdsSite>::iterator found =
           std::ranges::find(sites, *exact, &LdsSite::offset);
-      if (found == sites.end())
+      if (found == sites.end()) {
         return reject({.code = FaultMutationErrorCode::InvalidParameters,
                        .offset = *exact,
                        .message = "no LDS site at the requested offset"},
                       "selection", exact);
+      }
       selector.ordinal = static_cast<size_t>(found - sites.begin());
     }
     const FailureOr<LdsSelection> selection =
         select_lds_wrong_address(inventory.value(), selector, error);
-    if (selection.failed())
+    if (selection.failed()) {
       return reject(error, "selection");
+    }
     const FailureOr<LdsResult> mutant =
         apply_lds_wrong_address(context, selection.value(), address_vgpr, error);
-    if (mutant.failed())
+    if (mutant.failed()) {
       return reject(error, "mutation");
+    }
     if (!write_new_file(output.c_str(), mutant.value().image)) {
       std::cerr << "rj_code_mutate: cannot create/write/close new output file\n";
       return 3;
     }
     std::cout << "kind=LdsWrongAddress target=" << target->id
               << " exact=" << selection.value().site().offset << " address_vgpr=" << *address_vgpr
-              << " logical_mutations=1 output_bytes=" << mutant.value().image.size() << '\n';
+              << " logical_mutations=1 output_bytes=" << mutant.value().image.size()
+              << " affected_owners=" << selection.value().site().affected_owners.size();
+    for (const FaultMutationOwner &owner : selection.value().site().affected_owners)
+      std::cout << " owner=" << owner.entry << ':' << owner.entry_offset << ':'
+                << owner.descriptor_file_offset;
+    std::cout << '\n';
     return finish_stdout();
   }
   const FailureOr<FaultBarrierInventory> inventory = discover_drop_barriers(context, kernel, error);
-  if (inventory.failed())
+  if (inventory.failed()) {
     return reject(error, "discovery");
+  }
   const IsaTargetBinding *target =
       default_isa_target_registry().find_target(context.source().target_id());
-  if (!target_assertion.empty() && target_assertion != target->id)
+  if (!target_assertion.empty() && target_assertion != target->id) {
     return reject("target assertion does not match source ELF identity");
+  }
   if (list) {
     size_t logical_ordinal = 0;
     for (const StaticBarrier &barrier : inventory.value().barriers()) {
@@ -371,8 +414,9 @@ int run(int argc, char **argv) {
                 << (barrier.scope == StaticBarrierScope::Workgroup ? "workgroup" : "cluster")
                 << " members=";
       for (size_t index = 0; index < barrier.members.size(); ++index) {
-        if (index)
+        if (index) {
           std::cout << ',';
+        }
         std::cout << barrier.members[index].offset << ':' << barrier.members[index].bytes.size();
       }
       std::cout << '\n';
@@ -388,30 +432,35 @@ int run(int argc, char **argv) {
         std::ranges::find_if(barriers, [&](const StaticBarrier &barrier) {
           return barrier.members.front().offset == *exact;
         });
-    if (found == barriers.end())
+    if (found == barriers.end()) {
       return reject({.code = FaultMutationErrorCode::InvalidParameters,
                      .offset = *exact,
                      .message = "no complete barrier starts at .text offset " +
                                 std::to_string(*exact) + " for this entry"},
                     "selection", exact);
+    }
     selector.ordinal = static_cast<size_t>(found - barriers.begin());
   }
   const FailureOr<DropBarrierSelection> selection =
       select_drop_barrier(inventory.value(), selector, error);
-  if (selection.failed())
+  if (selection.failed()) {
     return reject(error, "selection");
+  }
   const FailureOr<DropBarrierResult> mutant = apply_drop_barrier(context, selection.value(), error);
-  if (mutant.failed())
+  if (mutant.failed()) {
     return reject(error, "mutation");
+  }
   if (!write_new_file(output.c_str(), mutant.value().image)) {
     std::cerr << "rj_code_mutate: cannot create/write/close new output file\n";
     return 3;
   }
-  for (const std::string &assumption : mutant.value().assumptions)
+  for (const std::string &assumption : mutant.value().assumptions) {
     std::cerr << "rj_code_mutate: assumption: " << assumption << '\n';
+  }
   std::cerr.flush();
-  if (!std::cerr)
+  if (!std::cerr) {
     return 3;
+  }
   std::cout << "kind=DropBarrier target=" << target->id
             << " exact=" << selection.value().barrier().members.front().offset
             << " logical_mutations=" << mutant.value().logical_mutation_count

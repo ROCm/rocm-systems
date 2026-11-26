@@ -8,7 +8,7 @@ FROM opensuse/leap:${SUSE_MAJOR_VERSION}.${SUSE_MINOR_VERSION} AS base
 LABEL org.opencontainers.image.source=https://github.com/ROCm/hipFile
 ARG SUSE_MAJOR_VERSION
 ARG SUSE_MINOR_VERSION
-ARG ROCM_VERSION=7.14.0
+ARG ROCM_VERSION=10.2.0
 
 # If the target ROCm Version on the package repository is non-standard, you can forcibly
 # set the ROCm version used in the package repo URL.
@@ -181,34 +181,3 @@ VOLUME /mnt/ais
 
 # Generic Mount point for container to access AIS-capable storage.
 VOLUME /mnt/ais-fs
-
-# ---- Stage 2: NVIDIA (extends base with CUDA SDK) ----
-# The HIP runtime must be present to use hipFile with NVIDIA GPUs,
-# which is why this stage inherits from base rather than a bare CUDA image.
-FROM base AS nvidia
-ARG SUSE_MAJOR_VERSION=15
-
-# Install a minimal CUDA SDK
-RUN curl https://developer.download.nvidia.com/compute/cuda/repos/opensuse${SUSE_MAJOR_VERSION}/$(uname -m)/cuda-opensuse${SUSE_MAJOR_VERSION}.repo \
-        -o /etc/zypp/repos.d/cuda-opensuse${SUSE_MAJOR_VERSION}.repo && \
-    zypper --gpg-auto-import-keys refresh
-
-# https://gitlab.com/nvidia/container-images/cuda/blob/master/dist/12.6.1/ubuntu2404/devel/Dockerfile
-# Attempt a "minimal" CUDA Dev install.
-# libcufile-dev-X.Y == libcufile-devel-X.Y
-# libnvidia-compute-570-server == nvidia-open-driver-G06 + nvidia-computer-G06
-#   (Must specify also specify full package version to install.)
-#   (No named version packages in zypper.)
-#   (opensuse15.6 Nvidia supports starts at 575.)
-RUN zypper install -y \
-        cuda-minimal-build-12-9 \
-        libcufile-devel-12-9 \
-        nvidia-compute-G06=575.57.08-1 \
-        nvidia-open-driver-G06=575.57.08-1
-
-# Repair set alternative in case above zypper install
-# broke the symlink.
-RUN update-alternatives --auto gcc
-
-# Add CUDA bin directory to the path
-ENV PATH=/usr/local/cuda/bin:${PATH}

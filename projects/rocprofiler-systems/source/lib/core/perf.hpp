@@ -261,6 +261,14 @@ hw_config  get_hw_config(std::string_view);
 sw_config  get_sw_config(std::string_view);
 int        get_hw_cache_config(std::string_view);
 
+/// @brief Fill the event selection, sample period and sample clock of an overflow event.
+/// @param attr Attributes to fill; the caller sets the remaining fields.
+/// @param event Event name as listed by rocprof-sys-avail, for example
+///        `perf::PERF_COUNT_HW_CACHE_L1D:READ:MISS`.
+/// @param freq Samples per second for the CPU and task clock events, otherwise the
+///        number of events between two samples.
+/// @throws std::runtime_error if the event name is not recognized.
 void
-config_overflow_sampling(struct perf_event_attr&, std::string_view, double);
+config_overflow_sampling(struct perf_event_attr& attr, std::string_view event,
+                         double freq);
 }  // namespace rocprofsys::perf

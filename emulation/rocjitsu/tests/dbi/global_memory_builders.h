@@ -51,8 +51,9 @@ inline util::FailureOr<uint32_t> checked_global_offset(uint32_t byte_offset,
                                                        rocjitsu::IsaFamily arch,
                                                        util::DiagnosticEmitter emit_error = {}) {
   const uint32_t limit = arch == rocjitsu::IsaFamily::Rdna4 ? 0x7FFFFFu : 0xFFFu;
-  if (byte_offset > limit)
+  if (byte_offset > limit) {
     return emit_error.emit() << "global memory offset does not fit the immediate field";
+  }
   return byte_offset;
 }
 
@@ -62,8 +63,9 @@ inline util::FailureOr<uint32_t> checked_global_offset(uint32_t byte_offset,
 /// pass there and be illegal on hardware.
 inline util::Result check_tuple_alignment(uint8_t base, uint32_t dwords, rocjitsu::IsaFamily arch,
                                           util::DiagnosticEmitter emit_error = {}) {
-  if (dwords > 1 && base % 2 != 0 && arch != rocjitsu::IsaFamily::Rdna4)
+  if (dwords > 1 && base % 2 != 0 && arch != rocjitsu::IsaFamily::Rdna4) {
     return emit_error.emit() << "multi-dword VGPR operand must start on an even register";
+  }
   return util::Result::success();
 }
 
@@ -75,13 +77,15 @@ inline util::Result check_tuple_alignment(uint8_t base, uint32_t dwords, rocjits
 /// pair instead), and from 128 a wrap of the 7-bit field (128 encodes s0).
 inline util::Result check_scalar_base(uint8_t saddr, rocjitsu::IsaFamily arch,
                                       util::DiagnosticEmitter emit_error = {}) {
-  if (saddr % 2 != 0)
+  if (saddr % 2 != 0) {
     return emit_error.emit() << "SGPR base pair must start on an even register";
+  }
   const uint32_t ordinary_sgprs = arch == rocjitsu::IsaFamily::Rdna4
                                       ? amdgpu::RdnaIsaBase::MAX_SGPRS_PER_WF
                                       : amdgpu::CdnaIsaBase::MAX_SGPRS_PER_WF;
-  if (saddr + 1u >= ordinary_sgprs)
+  if (saddr + 1u >= ordinary_sgprs) {
     return emit_error.emit() << "SGPR base pair must lie within the ordinary SGPRs";
+  }
   return util::Result::success();
 }
 
@@ -92,8 +96,9 @@ build_global_load(GlobalOpcodes ops, uint32_t dwords, uint8_t vdst, uint8_t voff
   const util::FailureOr<uint32_t> maybe_offset =
       checked_global_offset(byte_offset, arch, emit_error);
   if (maybe_offset.failed() || check_tuple_alignment(vdst, dwords, arch, emit_error).failed() ||
-      check_scalar_base(saddr, arch, emit_error).failed())
+      check_scalar_base(saddr, arch, emit_error).failed()) {
     return util::Result::failure();
+  }
   const uint32_t offset = maybe_offset.value();
   switch (arch) {
   case rocjitsu::IsaFamily::Cdna3: {
@@ -129,8 +134,9 @@ build_global_store(GlobalOpcodes ops, uint32_t dwords, uint8_t vdata, uint8_t vo
   const util::FailureOr<uint32_t> maybe_offset =
       checked_global_offset(byte_offset, arch, emit_error);
   if (maybe_offset.failed() || check_tuple_alignment(vdata, dwords, arch, emit_error).failed() ||
-      check_scalar_base(saddr, arch, emit_error).failed())
+      check_scalar_base(saddr, arch, emit_error).failed()) {
     return util::Result::failure();
+  }
   const uint32_t offset = maybe_offset.value();
   switch (arch) {
   case rocjitsu::IsaFamily::Cdna3: {

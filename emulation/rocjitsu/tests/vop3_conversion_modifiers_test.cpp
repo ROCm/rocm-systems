@@ -150,8 +150,9 @@ TEST(RdnaVop3ConversionTest, IntegerToFloatAppliesOutputModifiers) {
                                    ? static_cast<float>(input)
                                    : static_cast<float>((input >> ((opcode - 401) * 8)) & 255);
               expected *= std::array{1.0f, 2.0f, 4.0f, 0.5f}[omod];
-              if (clamp)
+              if (clamp) {
                 expected = std::clamp(expected, 0.0f, 1.0f);
+              }
               EXPECT_EQ(cu->read_vgpr(vb + 1, 0), std::bit_cast<uint32_t>(expected))
                   << "arch=" << arch << " opcode=" << opcode << " omod=" << omod
                   << " clamp=" << clamp << " scalar=" << force_scalar;
@@ -281,9 +282,10 @@ TEST_P(Vop3ConversionModifierTest, FloatToIntegerConversionAppliesSourceModifier
                                       : positive                 ? 7u
                                       : (op == 391 || op == 327) ? 0u
                                                                  : uint32_t(-7);
-            for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+            for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
               EXPECT_EQ(cu->read_vgpr(vb + 2, lane),
                         exec & (1ull << lane) ? expected : 0xdeadbeefu);
+            }
           }
         }
       }
@@ -335,8 +337,9 @@ TEST_P(Vop3ConversionModifierTest, FloatToDoubleConversionAppliesModifiers) {
             const bool positive = source_modifiers == 1 || source_modifiers == 2;
             double expected_value = positive ? 7.75 : -7.75;
             expected_value *= std::array{1.0, 2.0, 4.0, 0.5}[omod];
-            if (clamp)
+            if (clamp) {
               expected_value = std::clamp(expected_value, 0.0, 1.0);
+            }
             const uint64_t expected = std::bit_cast<uint64_t>(expected_value);
             for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
               const uint64_t actual = static_cast<uint64_t>(cu->read_vgpr(vb + 2, lane)) |
@@ -483,12 +486,15 @@ TEST_P(Vop3ConversionModifierTest, PackedRtzPreservesIndependentSourceModifiers)
               uint32_t expected = 0;
               for (uint32_t src = 0; src < 2; ++src) {
                 uint32_t half = cases[(lane + 3 * src) % std::size(cases)].packed;
-                if (abs_mask & (1u << src))
+                if (abs_mask & (1u << src)) {
                   half &= 0x7fff;
-                if (neg_mask & (1u << src))
+                }
+                if (neg_mask & (1u << src)) {
                   half ^= 0x8000;
-                if (flush_f16 && (half & 0x7c00) == 0)
+                }
+                if (flush_f16 && (half & 0x7c00) == 0) {
                   half &= 0x8000;
+                }
                 expected |= half << (16 * src);
               }
               EXPECT_EQ(cu->read_vgpr(vb + 2, lane), exec & (1ull << lane) ? expected : 0xdeadbeefu)
@@ -504,8 +510,9 @@ TEST_P(Vop3ConversionModifierTest, PackedRtzPreservesIndependentSourceModifiers)
 
 TEST_P(Vop3ConversionModifierTest, PackedRtzDppPermutesBeforeSourceModifiers) {
   if (gfx9() || GetParam() == rocjitsu::IsaFamily::Rdna1 ||
-      GetParam() == rocjitsu::IsaFamily::Rdna2)
+      GetParam() == rocjitsu::IsaFamily::Rdna2) {
     GTEST_SKIP() << "This DPP8 encoding is available on RDNA3/3.5/4 and CDNA5.";
+  }
   for (bool force_scalar : {false, true}) {
     ForceScalarGuard guard(force_scalar);
     amdgpu::GpuMemory memory("packed_rtz_dpp_memory");
@@ -596,8 +603,9 @@ TEST_P(Vop3ConversionModifierTest, PackedNormalizedRoundsOnceAndSaturatesSymmetr
       const bool early_rdna =
           GetParam() == rocjitsu::IsaFamily::Rdna1 || GetParam() == rocjitsu::IsaFamily::Rdna2;
       std::vector<Case> cases(std::begin(exact_half_cases), std::end(exact_half_cases));
-      if (!half)
+      if (!half) {
         cases.insert(cases.end(), std::begin(f32_only_cases), std::end(f32_only_cases));
+      }
       for (bool signed_result : {false, true}) {
         // F16 uses opcode 665 on GFX9 and 786 elsewhere; F32 uses 660 on GFX9,
         // 872 on RDNA1/2, and 801 on later targets. The unsigned opcode follows
@@ -707,8 +715,9 @@ TEST_P(Vop3ConversionModifierTest, PackedNormalizedHalfReadsOpSelSelectedHalves)
         }
         ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
         const uint32_t expected = signed_result ? 0x40004000u : 0x80008000u;
-        for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+        for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
           EXPECT_EQ(cu->read_vgpr(vb + 2, lane), expected) << "lane=" << lane;
+        }
       }
     }
     wf->halt();
@@ -770,9 +779,10 @@ TEST_P(Vop3ConversionModifierTest, PackedNormalizedHalfFlushesSubnormalSourcesUn
         cu->write_vgpr(vb + 2, lane, 0xdeadbeef);
       }
       ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
-      for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+      for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
         EXPECT_EQ(cu->read_vgpr(vb + 2, lane), exec & (1ull << lane) ? c.expected : 0xdeadbeefu)
             << "lane=" << lane;
+      }
     }
     wf->halt();
   }
@@ -1082,11 +1092,12 @@ TEST_P(Vop3ConversionModifierTest, HalfToFloatAppliesOutputModifiers) {
           cu->write_vgpr(vb + 2, lane, 0xdeadbeef);
         }
         ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
-        for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+        for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
           EXPECT_EQ(cu->read_vgpr(vb + 2, lane),
                     exec & (1ull << lane) ? (modern ? test.modern : test.legacy) : 0xdeadbeefu)
               << "input=" << test.input << " mode=" << test.mode << " omod=" << test.omod
               << " clamp=" << test.clamp << " scalar=" << force_scalar << " lane=" << lane;
+        }
       }
     }
   }
@@ -1175,10 +1186,12 @@ TEST_P(Vop3ConversionModifierTest, HalfInputConversionsApplyModifiersAndMode) {
                   uint32_t expected;
                   if (floating) {
                     expected = c.widened;
-                    if (!(mode & 0x40u) && c.half < 0x0400u)
+                    if (!(mode & 0x40u) && c.half < 0x0400u) {
                       expected = 0;
-                    if ((always_quiet || (mode & 0x200u)) && c.half > 0x7c00u)
+                    }
+                    if ((always_quiet || (mode & 0x200u)) && c.half > 0x7c00u) {
                       expected |= 0x00400000u;
+                    }
                     expected |= negative ? 0x80000000u : 0;
                   } else {
                     const uint32_t value = kind == 0

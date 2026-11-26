@@ -11,6 +11,11 @@
 
 #include "compute_unit_test_util.h"
 #include "execution_plugin_test_util.h"
+#include "mfma_f32_test_dispatch.h"
+#include "mfma_f64_test_dispatch.h"
+#include "mfma_f8_test_dispatch.h"
+#include "mfma_half_test_dispatch.h"
+#include "mfma_integer_test_dispatch.h"
 #include "mma_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
@@ -111,8 +116,9 @@ struct Wave32PluginFixture {
     cfg.memory_wait_diagnostics = wait_checks;
     cfg.arithmetic.semantics = semantics;
     rocjitsu::test::initialize_compute_unit(cu, "wave32_plugin_cu", cfg, gpu_mem.get(), l2.get());
-    if (!cu)
+    if (!cu) {
       return;
+    }
   }
 
   OrderingPlugin *attach_ordering_plugin() {
@@ -125,12 +131,6 @@ struct Wave32PluginFixture {
     return p;
   }
 };
-
-static_assert(!amdgpu::mma_f32_native_width_supported(16, 1));
-static_assert(amdgpu::mma_f32_native_width_supported(16, 4));
-static_assert(amdgpu::mma_f32_native_width_supported(16, 8));
-static_assert(amdgpu::mma_f32_native_width_supported(16, 16));
-static_assert(!amdgpu::mma_f32_native_width_supported(16, 32));
 
 TEST(ExecutionPluginTest, Gfx11TfeRequiresTheWholeDestinationBeforeReadingAddressOperands) {
   for (auto arch : {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5}) {
@@ -160,10 +160,12 @@ TEST(ExecutionPluginTest, Gfx11TfeRequiresTheWholeDestinationBeforeReadingAddres
         ASSERT_TRUE(fixture.cu->execute_instruction(inst.value().get(), *wave).succeeded());
         std::set<uint32_t> scalar_reads, vector_reads;
         for (const auto &event : observer->events) {
-          if (event.kind == HookEvent::READ_SGPR)
+          if (event.kind == HookEvent::READ_SGPR) {
             scalar_reads.insert(event.physical_reg - wave->sgpr_alloc().base);
-          if (event.kind == HookEvent::READ_VGPR)
+          }
+          if (event.kind == HookEvent::READ_VGPR) {
             vector_reads.insert(event.physical_reg - wave->vgpr_alloc().base);
+          }
         }
         if (first == 30) {
           EXPECT_EQ(vector_reads, std::set<uint32_t>{4});
@@ -261,8 +263,9 @@ TEST(ExecutionPluginTest, MultiplyClassificationPreservesActiveReadsAndException
         std::map<uint32_t, uint64_t> expected;
         if (exec) {
           expected[1] = exec;
-          if (source == 256)
+          if (source == 256) {
             expected[0] = exec;
+          }
         }
         EXPECT_EQ(reads, expected);
       }
@@ -307,9 +310,10 @@ TEST(ExecutionPluginTest, AddUsesEachActiveSourceOnceForArithmeticAndStatus) {
         EXPECT_EQ(observed[0], active);
         EXPECT_EQ(observed[1], active);
         EXPECT_EQ(wave->trapsts(), 0x40u);
-        for (unsigned lane : {0u, 4u})
+        for (unsigned lane : {0u, 4u}) {
           EXPECT_EQ(f.cu->read_vgpr(base, lane),
                     (active & (1ull << lane)) ? (half ? 0x4000u : 0x40000000u) : one);
+        }
       }
     }
     wave->halt();
@@ -393,8 +397,9 @@ TEST(ExecutionPluginTest, Gfx11IndexedGdsUsesOneLaneForInputsAndResults) {
         scoreboard.clear();
         f.cu->track_memory_wait(*inst.value(), *wave);
         EXPECT_EQ(scoreboard.outstanding(amdgpu::WaitCounterKind::Ds), gds || active ? 1u : 0u);
-        for (const auto &event : scoreboard.events())
+        for (const auto &event : scoreboard.events()) {
           EXPECT_EQ(event.lanes, expected);
+        }
         scoreboard.clear();
         plugin->events.clear();
         ASSERT_TRUE(f.cu->execute_instruction(inst.value().get(), *wave).succeeded());
@@ -419,8 +424,9 @@ TEST(ExecutionPluginTest, Gfx11IndexedGdsUsesOneLaneForInputsAndResults) {
         scoreboard.clear();
         f.cu->track_memory_wait(*inst.value(), *wave);
         EXPECT_EQ(scoreboard.outstanding(amdgpu::WaitCounterKind::Ds), 1u);
-        for (const auto &event : scoreboard.events())
+        for (const auto &event : scoreboard.events()) {
           EXPECT_EQ(event.lanes, active);
+        }
         scoreboard.clear();
         ASSERT_TRUE(f.cu->execute_instruction(inst.value().get(), *wave).succeeded());
         const auto *data = inst.value()->data_as<amdgpu::VectorMemState>();
@@ -501,8 +507,9 @@ TEST(ExecutionPluginTest, Gfx115CompareUsesAllocatedSources) {
         unsigned hazards = 0;
         state.clear();
         state.bind(0x200, &hazards, [](void *ctx, const auto &hazard) {
-          if (!hazard.write)
+          if (!hazard.write) {
             ++*static_cast<unsigned *>(ctx);
+          }
         });
         constexpr auto counter = amdgpu::WaitCounterKind::Load;
         state.add({state.issue(counter), 0x100, 1, {RegClass::VGPR, reg, 1}, counter, 0xf});
@@ -542,11 +549,13 @@ TEST(ExecutionPluginTest, Gfx115ValuAllocationSuppressesTheIssueOrSelectsTheWhol
         SCOPED_TRACE(testing::Message() << std::hex << words[0] << " " << words[1]
                                         << " slot=" << slot << " scalar=" << scalar);
         wave->set_exec(1);
-        for (unsigned i = 0; i < slot; ++i)
+        for (unsigned i = 0; i < slot; ++i) {
           f.cu->write_vgpr(base + i, 0, ((0x100u + i) << 16) | (100u + i));
-        if (width == 4)
+        }
+        if (width == 4) {
           f.cu->write_vgpr(base + 10, 0,
                            0); // Zero reference bytes leave each accumulator unchanged.
+        }
         const bool carry = (words[0] >> 16) == 0xd700; // V_ADD_CO_U32 writes VCC and VDST.
         if (carry) {
           wave->set_exec(UINT32_MAX);
@@ -587,8 +596,9 @@ TEST(ExecutionPluginTest, Gfx115ValuAllocationSuppressesTheIssueOrSelectsTheWhol
           state.clear();
           unsigned warnings = 0;
           state.bind(0x200, &warnings, [](void *ctx, const auto &hazard) {
-            if (!hazard.write)
+            if (!hazard.write) {
               ++*static_cast<unsigned *>(ctx);
+            }
           });
           constexpr auto c = amdgpu::WaitCounterKind::Load;
           state.add({state.issue(c), 0x100, 1, {RegClass::VGPR, reg, 1}, c, 0xf});
@@ -620,9 +630,11 @@ TEST(ExecutionPluginTest, Gfx115M0RelativeDppReadsOnlyAnAdmittedDestination) {
         const bool split = opc == 0x7e089000u;
         wave->set_m0(split ? (offset << 16) | 1u : offset);
         const auto source = opc == 0x7e088800u ? 3 + offset : split ? 4u : 3u;
-        for (unsigned reg = 0; reg < 32; ++reg)
-          for (unsigned lane = 0; lane < 2; ++lane)
+        for (unsigned reg = 0; reg < 32; ++reg) {
+          for (unsigned lane = 0; lane < 2; ++lane) {
             f.cu->write_vgpr(base + reg, lane, 100 * reg + lane);
+          }
+        }
         auto op = decoder->decode_window(words);
         ASSERT_TRUE(op.succeeded());
         observer->events.clear();
@@ -635,8 +647,9 @@ TEST(ExecutionPluginTest, Gfx115M0RelativeDppReadsOnlyAnAdmittedDestination) {
         state.clear();
         unsigned warnings = 0;
         state.bind(0x200, &warnings, [](void *ctx, const auto &hazard) {
-          if (!hazard.write)
+          if (!hazard.write) {
             ++*static_cast<unsigned *>(ctx);
+          }
         });
         constexpr auto counter = amdgpu::WaitCounterKind::Load;
         state.add(
@@ -734,9 +747,11 @@ TEST(ExecutionPluginTest, Gfx115WmmaUsesWholeTwoRegisterIu4Factors) {
       const unsigned b = right ? start : 2u;
       auto inst = decoder->decode_window(std::array{0xcc454008u, 0x1a020100u | (b << 9) | a});
       ASSERT_TRUE(inst.succeeded());
-      for (unsigned reg : {0u, 1u, 2u, 3u, 14u, 15u, 16u})
-        for (unsigned lane = 0; lane < 32; ++lane)
+      for (unsigned reg : {0u, 1u, 2u, 3u, 14u, 15u, 16u}) {
+        for (unsigned lane = 0; lane < 32; ++lane) {
           f.cu->write_vgpr(base + reg, lane, reg < 4 ? 0x11111111u : 0x22222222u);
+        }
+      }
       observer->events.clear();
       ASSERT_TRUE(f.cu->execute_instruction(inst.value().get(), *wave).succeeded());
       EXPECT_EQ(f.cu->read_vgpr(base + 8, 0), start == 15 ? 16u : 32u);
@@ -750,8 +765,9 @@ TEST(ExecutionPluginTest, Gfx115WmmaUsesWholeTwoRegisterIu4Factors) {
         state.clear();
         unsigned hazards = 0;
         state.bind(0x200, &hazards, [](void *ctx, const auto &hazard) {
-          if (!hazard.write)
+          if (!hazard.write) {
             ++*static_cast<unsigned *>(ctx);
+          }
         });
         constexpr auto counter = amdgpu::WaitCounterKind::Load;
         state.add(
@@ -774,24 +790,29 @@ TEST(ExecutionPluginTest, Gfx115WmmaUsesPerWaveAccumulatorAndDestinationTuples) 
     const unsigned count = 256 / width;
     for (unsigned start : {0u, 8u, 12u, 14u}) {
       SCOPED_TRACE(testing::Message() << "wave=" << width << " accumulator=" << start);
-      for (unsigned reg = 0; reg < 24; ++reg)
-        for (unsigned lane = 0; lane < width; ++lane)
+      for (unsigned reg = 0; reg < 24; ++reg) {
+        for (unsigned lane = 0; lane < width; ++lane) {
           f.cu->write_vgpr(base + reg, lane,
                            reg < 8 ? 0 : std::bit_cast<uint32_t>(float(100 + reg)));
+        }
+      }
       const unsigned dst = 16 - count;
       auto op = decoder->decode_window(std::array{0xcc404000u | dst, 0x1c020100u | (start << 18)});
       ASSERT_TRUE(op.succeeded());
       ASSERT_TRUE(f.cu->execute_instruction(op.value().get(), *wave).succeeded());
-      for (unsigned i = 0; i < count; ++i)
+      for (unsigned i = 0; i < count; ++i) {
         EXPECT_EQ(f.cu->read_vgpr(base + dst + i, 0),
                   start && start + count <= 16 ? std::bit_cast<uint32_t>(float(100 + start + i))
                                                : 0u);
+      }
     }
     // A and B keep their full eight-word extent at both wave sizes.
     for (uint32_t factors : {0x1a02010eu, 0x1a021d00u}) {
-      for (unsigned reg = 0; reg < 24; ++reg)
-        for (unsigned lane = 0; lane < width; ++lane)
+      for (unsigned reg = 0; reg < 24; ++reg) {
+        for (unsigned lane = 0; lane < width; ++lane) {
           f.cu->write_vgpr(base + reg, lane, reg < 8 ? 0x3c003c00u : 0x40004000u);
+        }
+      }
       auto op = decoder->decode_window(std::array{0xcc404008u, factors});
       ASSERT_TRUE(op.succeeded());
       ASSERT_TRUE(f.cu->execute_instruction(op.value().get(), *wave).succeeded());
@@ -844,9 +865,11 @@ TEST(ExecutionPluginTest, Gfx115ConstantCompareAndDppAddObserveTheirPendingSourc
           observed->events.clear();
           ASSERT_TRUE(f.cu->execute_instruction(inst.value().get(), *wave).succeeded());
           uint64_t actual = 0;
-          for (const auto &e : vgpr_read_events(*observed))
-            if (e.physical_reg == base)
+          for (const auto &e : vgpr_read_events(*observed)) {
+            if (e.physical_reg == base) {
               actual |= e.lane_mask;
+            }
+          }
           if (add) {
             EXPECT_EQ(actual, active);
             EXPECT_EQ(f.cu->read_vgpr(base + 3, 0), 0x40400000u);
@@ -862,8 +885,9 @@ TEST(ExecutionPluginTest, Gfx115ConstantCompareAndDppAddObserveTheirPendingSourc
             state.clear();
             unsigned warnings = 0;
             state.bind(0x200, &warnings, [](void *ctx, const auto &hazard) {
-              if (!hazard.write)
+              if (!hazard.write) {
                 ++*static_cast<unsigned *>(ctx);
+              }
             });
             constexpr auto counter = amdgpu::WaitCounterKind::Load;
             state.add({state.issue(counter),
@@ -894,8 +918,9 @@ TEST(ExecutionPluginTest, Gfx115ValuReadsAndWaitsUseTheSameAllocatedSource) {
     auto decoder = Decoder::create(rocjitsu::IsaFamily::Rdna3_5);
     const auto base = wave->vgpr_alloc().base;
     wave->set_exec(1);
-    if (slots > 20)
+    if (slots > 20) {
       f.cu->write_vgpr(base + 20, 0, 0x40000000u);
+    }
     for (bool scalar : {false, true}) {
       ForceScalarOverride mode(scalar);
       for (const auto &[word, second, add, pair] : {std::tuple{0x06040314u, 0u, true, false},
@@ -952,8 +977,9 @@ TEST(ExecutionPluginTest, Gfx115ValuReadsAndWaitsUseTheSameAllocatedSource) {
           unsigned hazards = 0;
           state.clear();
           state.bind(0x200, &hazards, [](void *ctx, const auto &hazard) {
-            if (!hazard.write)
+            if (!hazard.write) {
               ++*static_cast<unsigned *>(ctx);
+            }
           });
           constexpr auto counter = amdgpu::WaitCounterKind::Load;
           state.add({state.issue(counter), 0x100, 1, {RegClass::VGPR, reg, 1}, counter, 0xf});
@@ -1180,8 +1206,9 @@ TEST(ExecutionPluginTest, DppObservationReportsExactSourceAndDestinationLanes) {
     for (bool force_scalar : {false, true}) {
       SCOPED_TRACE(force_scalar ? "scalar" : "simd");
       ForceScalarOverride force_scalar_override(force_scalar);
-      for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+      for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
         cu->write_vgpr(vb + kDst, lane, kOldDst);
+      }
 
       Instruction *inst = decode_valid(*decoder, words);
       ASSERT_NE(inst, nullptr);
@@ -1274,8 +1301,9 @@ TEST(ExecutionPluginTest, DppSourceDestinationAliasStagesBeforeWriting) {
   constexpr uint32_t kReg = 5;
   constexpr std::array<uint32_t, 4> kValues{10u, 20u, 30u, 40u};
   const uint32_t vb = wf->vgpr_alloc().base;
-  for (uint32_t lane = 0; lane < kValues.size(); ++lane)
+  for (uint32_t lane = 0; lane < kValues.size(); ++lane) {
     cu->write_vgpr(vb + kReg, lane, kValues[lane]);
+  }
 
   auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
   uint32_t words[2] = {
@@ -1411,8 +1439,9 @@ TEST(ExecutionPluginTest, True16InstructionsReportSelectedSourceAndDestinationHa
 }
 
 TEST(ExecutionPluginTest, Rdna2F16TernaryPreservesDestinationWithoutObservingAnExtraRead) {
-  if constexpr (!util::has_stdx_simd)
+  if constexpr (!util::has_stdx_simd) {
     GTEST_SKIP() << "<experimental/simd> unavailable";
+  }
   ForceScalarOverride force_simd(false);
   Wave32PluginFixture f(rocjitsu::IsaFamily::Rdna2);
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
@@ -1610,9 +1639,11 @@ TEST(ExecutionPluginTest, Rdna4DppTrue16SourceReportsOpSelHalf) {
               source_high ? (lane2_result << 16) | 0x4002u : (0x7002u << 16) | lane2_result);
 
     std::vector<HookEvent> src0_reads;
-    for (const auto &event : vgpr_read_events(*plugin))
-      if (event.physical_reg == vb + kSrc0)
+    for (const auto &event : vgpr_read_events(*plugin)) {
+      if (event.physical_reg == vb + kSrc0) {
         src0_reads.push_back(event);
+      }
+    }
     ASSERT_EQ(src0_reads.size(), 1u);
     EXPECT_EQ(src0_reads[0].lane_mask, 0x3u);
     EXPECT_EQ(src0_reads[0].byte_mask,
@@ -1734,9 +1765,10 @@ TEST(ExecutionPluginTest, SdwaFp8ConversionsIgnoreNumericalOutputModifiers) {
               cu->write_vgpr(base + 6, lane, 0xdeadbeefu);
             }
             ASSERT_TRUE(cu->execute_instruction(instruction.get(), *wave).succeeded());
-            for (uint32_t lane = 0; lane < wave->wf_size(); ++lane)
+            for (uint32_t lane = 0; lane < wave->wf_size(); ++lane) {
               EXPECT_EQ(cu->read_vgpr_storage(base + 6, lane),
                         (exec & (uint64_t{1} << lane)) ? 0x40000000u : 0xdeadbeefu);
+            }
           }
         }
       }
@@ -1946,9 +1978,11 @@ TEST(ExecutionPluginTest, SdwaVop2Src1SelectorReportsExactBytes) {
   EXPECT_EQ(cu->read_vgpr_storage(vb + kDst, 0), 0xFFFFFF8Au);
 
   std::vector<HookEvent> src1_reads;
-  for (const auto &event : vgpr_read_events(*plugin))
-    if (event.physical_reg == vb + kSrc1)
+  for (const auto &event : vgpr_read_events(*plugin)) {
+    if (event.physical_reg == vb + kSrc1) {
       src1_reads.push_back(event);
+    }
+  }
   ASSERT_EQ(src1_reads.size(), 1u);
   EXPECT_EQ(src1_reads[0].lane_mask, 1u);
   EXPECT_EQ(src1_reads[0].byte_mask, 0b0100);
@@ -2003,8 +2037,9 @@ TEST(ExecutionPluginTest, SdwaVop2ScalarSelectorsUseSgprs) {
     expect_vgpr_read_set(vgpr_read_events(*plugin), vb, {kVectorSrc}, kActiveMask);
 
     uint32_t sgpr_reads = 0;
-    for (const HookEvent &event : plugin->events)
+    for (const HookEvent &event : plugin->events) {
       sgpr_reads += event.kind == HookEvent::READ_SGPR;
+    }
     EXPECT_EQ(sgpr_reads, 1u);
   };
 
@@ -2034,9 +2069,11 @@ TEST(ExecutionPluginTest, SgprWriteObservationUsesExplicitWavePhysicalBlock) {
   EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
   std::vector<HookEvent> writes;
-  for (const HookEvent &event : plugin->events)
-    if (event.kind == HookEvent::WRITE_SGPR)
+  for (const HookEvent &event : plugin->events) {
+    if (event.kind == HookEvent::WRITE_SGPR) {
       writes.push_back(event);
+    }
+  }
   ASSERT_EQ(writes.size(), 1u);
   EXPECT_EQ(writes[0].physical_reg, wf->sgpr_alloc().base + kLastAllocated);
   EXPECT_EQ(writes[0].wf_id, wf->wf_id());
@@ -2257,9 +2294,10 @@ TEST(ExecutionPluginTest, SdwaF16ClampPrecedesDestinationPlacement) {
                                   : selection == amdgpu::sdwa::WORD_0
                                       ? 0xBEEF0000u | test_case.expected
                                       : (uint32_t{test_case.expected} << 16) | 0xBEEFu;
-        for (uint32_t lane = 0; lane < wavefront->wf_size(); ++lane)
+        for (uint32_t lane = 0; lane < wavefront->wf_size(); ++lane) {
           EXPECT_EQ(compute_unit->read_vgpr_storage(register_base + kDst, lane),
                     (kActiveLanes & (uint64_t{1} << lane)) ? expected : kOldDst);
+        }
         const std::vector<HookEvent> writes = vgpr_write_events(*plugin);
         uint64_t written_lanes = 0;
         for (const HookEvent &write : writes) {
@@ -2375,9 +2413,10 @@ TEST(ExecutionPluginTest, SdwaPackedConversionClampsBothHalvesBeforePlacement) {
               }
               plugin->events.clear();
               ASSERT_TRUE(cu->execute_instruction(instruction.get(), *wave).succeeded());
-              for (uint32_t lane = 0; lane < wave->wf_size(); ++lane)
+              for (uint32_t lane = 0; lane < wave->wf_size(); ++lane) {
                 EXPECT_EQ(cu->read_vgpr_storage(base + kDst, lane),
                           (exec & (uint64_t{1} << lane)) ? expected : kOldDst);
+              }
               uint64_t written_lanes = 0;
               for (const HookEvent &write : vgpr_write_events(*plugin)) {
                 EXPECT_EQ(write.physical_reg, base + kDst);
@@ -2387,8 +2426,9 @@ TEST(ExecutionPluginTest, SdwaPackedConversionClampsBothHalvesBeforePlacement) {
                 written_lanes |= write.lane_mask;
               }
               EXPECT_EQ(written_lanes, exec);
-              for (const HookEvent &read : vgpr_read_events(*plugin))
+              for (const HookEvent &read : vgpr_read_events(*plugin)) {
                 EXPECT_NE(read.physical_reg, base + kDst);
+              }
             }
           }
         }
@@ -2645,10 +2685,12 @@ TEST(ExecutionPluginTest, VopdIntegerPairsPreserveMasksAliasesAndObservation) {
     }
   };
   const auto evaluate = [](uint32_t op, uint32_t src0, uint32_t src1) {
-    if (op == kMov)
+    if (op == kMov) {
       return src0;
-    if (op == kAdd)
+    }
+    if (op == kAdd) {
       return src0 + src1;
+    }
     return src1 << (src0 & 31u);
   };
   for (rocjitsu::IsaFamily arch : {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
@@ -2667,13 +2709,15 @@ TEST(ExecutionPluginTest, VopdIntegerPairsPreserveMasksAliasesAndObservation) {
       auto decoder = Decoder::create(arch);
       ASSERT_NE(decoder, nullptr);
       for (bool vopd3 : {false, true}) {
-        if (vopd3 && arch != rocjitsu::IsaFamily::Cdna5)
+        if (vopd3 && arch != rocjitsu::IsaFamily::Cdna5) {
           continue;
+        }
         SCOPED_TRACE(vopd3);
         for (uint32_t x_op : {kMov, kAdd, kShift}) {
           // Classic VOPD has no encoding for ADD/LSHL in the X slot.
-          if (!vopd3 && x_op != kMov)
+          if (!vopd3 && x_op != kMov) {
             continue;
+          }
           for (uint32_t y_op : {kMov, kAdd, kShift}) {
             SCOPED_TRACE(x_op);
             SCOPED_TRACE(y_op);
@@ -2694,9 +2738,11 @@ TEST(ExecutionPluginTest, VopdIntegerPairsPreserveMasksAliasesAndObservation) {
               for (uint64_t exec : {0u, 0xA5010081u, 0xFFFFFFFFu}) {
                 SCOPED_TRACE(exec);
                 wf->set_exec(exec);
-                for (uint32_t reg = 0; reg < 8; ++reg)
-                  for (uint32_t lane = 0; lane < 32; ++lane)
+                for (uint32_t reg = 0; reg < 8; ++reg) {
+                  for (uint32_t lane = 0; lane < 32; ++lane) {
                     f.cu->write_vgpr(base + reg, lane, initial_value(reg, lane));
+                  }
+                }
                 plugin->events.clear();
                 ASSERT_TRUE(f.cu->execute_instruction(inst.get(), *wf).succeeded());
                 for (uint32_t lane = 0; lane < 32; ++lane) {
@@ -2740,14 +2786,18 @@ TEST(ExecutionPluginTest, VopdIntegerPairsPreserveMasksAliasesAndObservation) {
                 std::map<uint32_t, uint64_t> expected_reads;
                 std::map<uint32_t, uint64_t> expected_writes;
                 if (exec != 0) {
-                  if (src.x0 >= kVgprSrcBase)
+                  if (src.x0 >= kVgprSrcBase) {
                     expected_reads[src.x0 - kVgprSrcBase] = exec;
-                  if (src.y0 >= kVgprSrcBase)
+                  }
+                  if (src.y0 >= kVgprSrcBase) {
                     expected_reads[src.y0 - kVgprSrcBase] = exec;
-                  if (x_op != kMov)
+                  }
+                  if (x_op != kMov) {
                     expected_reads[src.x1] = exec;
-                  if (y_op != kMov)
+                  }
+                  if (y_op != kMov) {
                     expected_reads[src.y1] = exec;
+                  }
                   expected_writes = {{kDstX, exec}, {kDstY, exec}};
                 }
                 if (util::has_stdx_simd && !force_scalar) {
@@ -2799,9 +2849,10 @@ TEST(ExecutionPluginTest, DisabledWaitCheckingPreservesRegisterHooksAcrossPlugin
       EXPECT_TRUE(plugin->events.empty());
       continue;
     }
-    for (auto kind :
-         {HookEvent::READ_VGPR, HookEvent::WRITE_VGPR, HookEvent::READ_SGPR, HookEvent::WRITE_SGPR})
+    for (auto kind : {HookEvent::READ_VGPR, HookEvent::WRITE_VGPR, HookEvent::READ_SGPR,
+                      HookEvent::WRITE_SGPR}) {
       EXPECT_EQ(std::ranges::count(plugin->events, kind, &HookEvent::kind), 2);
+    }
   }
 }
 
@@ -2991,17 +3042,20 @@ TEST(ExecutionPluginTest, F32ModeArithmeticObserversSeeCallerRounding) {
         _mm_setcsr(saved_mxcsr);
         EXPECT_EQ(after_mxcsr & ~_MM_EXCEPT_MASK, host_mxcsr & ~_MM_EXCEPT_MASK);
         ASSERT_FALSE(plugin->read_mxcsrs.empty());
-        for (const uint32_t seen : plugin->read_mxcsrs)
+        for (const uint32_t seen : plugin->read_mxcsrs) {
           EXPECT_EQ(seen & ~_MM_EXCEPT_MASK, host_mxcsr & ~_MM_EXCEPT_MASK);
+        }
 #endif
         ASSERT_TRUE(succeeded);
         EXPECT_EQ(std::fegetround(), FE_TONEAREST);
         ASSERT_FALSE(plugin->read_roundings.empty());
-        for (const int rounding : plugin->read_roundings)
+        for (const int rounding : plugin->read_roundings) {
           EXPECT_EQ(rounding, FE_TONEAREST);
-        for (uint32_t lane = 0; lane < 32; ++lane)
+        }
+        for (uint32_t lane = 0; lane < 32; ++lane) {
           EXPECT_EQ(f.cu->read_vgpr(base + 6, lane), mode == 0xF1u ? test.round_up : test.nearest)
               << "lane " << lane;
+        }
       }
     }
   }
@@ -3064,10 +3118,12 @@ TEST(ExecutionPluginTest, VopdArithmeticObserversSeeCallerFpState) {
         SCOPED_TRACE(exec);
         wave->set_exec(exec);
         for (uint32_t lane = 0; lane < wave->wf_size(); ++lane) {
-          for (const auto &[reg, bits] : test.sources)
+          for (const auto &[reg, bits] : test.sources) {
             fixture.cu->write_vgpr(base + reg, lane, bits);
-          for (const auto &[reg, bits] : test.expected)
+          }
+          for (const auto &[reg, bits] : test.expected) {
             fixture.cu->write_vgpr(base + reg, lane, 0xdeadbeefu);
+          }
         }
         observer->read_registers.clear();
         observer->read_roundings.clear();
@@ -3084,13 +3140,15 @@ TEST(ExecutionPluginTest, VopdArithmeticObserversSeeCallerFpState) {
           ASSERT_TRUE(succeeded);
           EXPECT_EQ(restored_mxcsr & observed_bits, host_mxcsr & observed_bits);
           EXPECT_NE(restored_mxcsr & _MM_EXCEPT_UNDERFLOW, 0u);
-          if (uses_arith || force_scalar || !util::has_stdx_simd)
+          if (uses_arith || force_scalar || !util::has_stdx_simd) {
             EXPECT_TRUE(tracker.no_tracked_path_executed());
-          else
+          } else {
             EXPECT_TRUE(tracker.only_tracked_path_executed(SimdFastPath::VOPD));
+          }
           std::set<uint32_t> expected_reads;
-          for (const auto &[reg, bits] : test.sources)
+          for (const auto &[reg, bits] : test.sources) {
             expected_reads.insert(base + reg);
+          }
           EXPECT_EQ(
               std::set<uint32_t>(observer->read_registers.begin(), observer->read_registers.end()),
               expected_reads);
@@ -3098,13 +3156,16 @@ TEST(ExecutionPluginTest, VopdArithmeticObserversSeeCallerFpState) {
             EXPECT_EQ(seen & observed_bits, host_mxcsr & observed_bits);
             EXPECT_NE(seen & _MM_EXCEPT_UNDERFLOW, 0u);
           }
-          for (int seen : observer->read_roundings)
+          for (int seen : observer->read_roundings) {
             EXPECT_EQ(seen, FE_TONEAREST);
+          }
         }
-        for (uint32_t lane = 0; lane < wave->wf_size(); ++lane)
-          for (const auto &[reg, bits] : test.expected)
+        for (uint32_t lane = 0; lane < wave->wf_size(); ++lane) {
+          for (const auto &[reg, bits] : test.expected) {
             EXPECT_EQ(fixture.cu->read_vgpr_storage(base + reg, lane),
                       (exec & (uint64_t{1} << lane)) ? bits : 0xdeadbeefu);
+          }
+        }
       }
     }
   }
@@ -3133,9 +3194,11 @@ TEST(ExecutionPluginTest, Vop3CompareObservesOnlyArchitecturalDestinationReads) 
 
   auto destination_reads = [&] {
     std::vector<uint32_t> reads;
-    for (const auto &event : plugin->events)
-      if (event.kind == HookEvent::READ_SGPR)
+    for (const auto &event : plugin->events) {
+      if (event.kind == HookEvent::READ_SGPR) {
         reads.push_back(event.physical_reg);
+      }
+    }
     return reads;
   };
 
@@ -3320,9 +3383,8 @@ TEST(ExecutionPluginTest, MfmaReadObservationUsesLaneMasks) {
   const uint32_t vb = wf->vgpr_alloc().base;
   constexpr uint32_t S0 = 0, S1 = 16, ACC = 32;
 
-  amdgpu::observe_mfma_fast_path_reads(*cu, vb + S0, vb + S1, vb + ACC, /*M=*/16, /*N=*/16,
-                                       /*K=*/32, /*B=*/1, /*data_bits=*/16, amdgpu::ACC_FROM_VGPR,
-                                       wf->wf_size());
+  rocjitsu::test::execute_mfma_half_shape<false, 16, 16, 32>(
+      *cu, vb + 48, vb + S0, vb + S1, vb + ACC, amdgpu::ACC_FROM_VGPR, 0, 0, 0);
 
   expect_vgpr_read_set(vgpr_read_events(*plugin), vb,
                        {S0 + 0, S0 + 1, S0 + 2, S0 + 3, S1 + 0, S1 + 1, S1 + 2, S1 + 3, ACC + 0,
@@ -3342,9 +3404,8 @@ TEST(ExecutionPluginTest, MfmaReadObservationSkipsConstantAccumulator) {
   const uint32_t vb = wf->vgpr_alloc().base;
   constexpr uint32_t S0 = 0, S1 = 16, ACC = 32;
 
-  amdgpu::observe_mfma_fast_path_reads(*cu, vb + S0, vb + S1, vb + ACC, /*M=*/16, /*N=*/16,
-                                       /*K=*/32, /*B=*/1, /*data_bits=*/16,
-                                       /*const_acc=*/0, wf->wf_size());
+  rocjitsu::test::execute_mfma_half_shape<false, 16, 16, 32>(*cu, vb + 48, vb + S0, vb + S1,
+                                                             vb + ACC, /*constant=*/0, 0, 0, 0);
 
   expect_vgpr_read_set(vgpr_read_events(*plugin), vb,
                        {S0 + 0, S0 + 1, S0 + 2, S0 + 3, S1 + 0, S1 + 1, S1 + 2, S1 + 3},
@@ -3361,9 +3422,11 @@ TEST(ExecutionPluginTest, Cdna4BlockScaleMfmaAbidZeroPrefixRejectsBeforeExecuteC
   f.run_kernel(code.data(), code.size());
 
   size_t before_count = 0;
-  for (const auto &event : plugin->events)
-    if (event.kind == HookEvent::BEFORE_INSTRUCTION)
+  for (const auto &event : plugin->events) {
+    if (event.kind == HookEvent::BEFORE_INSTRUCTION) {
       ++before_count;
+    }
+  }
   EXPECT_EQ(before_count, 0u);
 }
 
@@ -3377,9 +3440,11 @@ TEST(ExecutionPluginTest, Cdna4BlockScaleMfmaCompoundAdvancesCallbacksByFullPref
   f.run_kernel(code.data(), code.size());
 
   std::vector<HookEvent> before_events;
-  for (const auto &event : plugin->events)
-    if (event.kind == HookEvent::BEFORE_INSTRUCTION)
+  for (const auto &event : plugin->events) {
+    if (event.kind == HookEvent::BEFORE_INSTRUCTION) {
       before_events.push_back(event);
+    }
+  }
   ASSERT_EQ(before_events.size(), 2u);
   EXPECT_EQ(before_events[0].mnemonic, "v_mfma_scale_f32_16x16x128_f8f6f4");
   EXPECT_EQ(before_events[1].mnemonic, "s_endpgm");
@@ -3401,15 +3466,17 @@ TEST(ExecutionPluginTest, Gfx1250ScaledWmmaReadsOnlySelectedScaleLanes) {
       auto words = mma_test::make_cdna5_wmma_scale_words(4, 4, 336, 338);
       words[0] |= select << 11; // A and B independently select opposite halves.
       words[1] |= (select ^ 1) << 27;
-      if (wide)
+      if (wide) {
         words[2] = 0xcc880040U;
+      }
       auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
       std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
       ASSERT_NE(inst, nullptr);
       ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
       std::map<uint32_t, uint64_t> reads;
-      for (const auto &event : vgpr_read_events(*plugin))
+      for (const auto &event : vgpr_read_events(*plugin)) {
         reads[event.physical_reg - wf->vgpr_alloc().base] |= event.lane_mask;
+      }
       EXPECT_EQ(reads[80], wide ? 0xffffffffU : 0xffffU << (16 * select));
       EXPECT_EQ(reads[82], 0xffffU << (16 * (select ^ 1)));
     }
@@ -3438,8 +3505,9 @@ TEST(ExecutionPluginTest, Cdna4BlockScaleMfmaScaleReadsUseSelectedByteMask) {
         cu->write_vgpr(vb + kSrc0 + reg, lane, 0x2222'2222u);
         cu->write_vgpr(vb + kSrc1 + reg, lane, 0x2222'2222u);
       }
-      for (uint32_t reg = 0; reg < 4; ++reg)
+      for (uint32_t reg = 0; reg < 4; ++reg) {
         cu->write_vgpr(vb + kAccumulator + reg, lane, 0);
+      }
       cu->write_vgpr(vb + kScaleA, lane, 0x7F7F'7F7Fu);
       cu->write_vgpr(vb + kScaleB, lane, 0x7F7F'7F7Fu);
     }
@@ -3474,8 +3542,9 @@ TEST(ExecutionPluginTest, Cdna4BlockScaleMfmaScaleReadsUseSelectedByteMask) {
     std::map<uint32_t, std::pair<uint64_t, uint8_t>> expected_unions;
     for (uint32_t reg :
          {kSrc0, kSrc0 + 1, kSrc0 + 2, kSrc0 + 3, kSrc1, kSrc1 + 1, kSrc1 + 2, kSrc1 + 3,
-          kAccumulator, kAccumulator + 1, kAccumulator + 2, kAccumulator + 3})
+          kAccumulator, kAccumulator + 1, kAccumulator + 2, kAccumulator + 3}) {
       expected_unions.emplace(vb + reg, std::pair{~uint64_t{0}, ExecutionPlugin::kFullByteMask});
+    }
     expected_unions.emplace(vb + kScaleA, std::pair{~uint64_t{0}, expected_mask});
     expected_unions.emplace(vb + kScaleB, std::pair{~uint64_t{0}, expected_mask});
     EXPECT_EQ(read_unions, expected_unions) << "byte=" << byte;
@@ -3512,13 +3581,15 @@ TEST(ExecutionPluginTest, Cdna4BlockScaleMfmaInlineScalesDoNotReadVgprs) {
   EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
   std::set<uint32_t> actual_regs;
-  for (const auto &event : vgpr_read_events(*plugin))
+  for (const auto &event : vgpr_read_events(*plugin)) {
     actual_regs.insert(event.physical_reg - vb);
+  }
   std::set<uint32_t> expected_regs;
   for (uint32_t reg :
        {kSrc0, kSrc0 + 1, kSrc0 + 2, kSrc0 + 3, kSrc1, kSrc1 + 1, kSrc1 + 2, kSrc1 + 3,
-        kAccumulator, kAccumulator + 1, kAccumulator + 2, kAccumulator + 3})
+        kAccumulator, kAccumulator + 1, kAccumulator + 2, kAccumulator + 3}) {
     expected_regs.insert(reg);
+  }
   EXPECT_EQ(actual_regs, expected_regs);
 }
 
@@ -3534,9 +3605,11 @@ TEST(ExecutionPluginTest, WmmaF32UsesRegionReads) {
 
   const uint32_t vb = wf->vgpr_alloc().base;
   constexpr uint32_t S0 = 0, S1 = 16, ACC = 32, DST = 48;
-  for (uint32_t reg = 0; reg < 64; ++reg)
-    for (uint32_t lane = 0; lane < 32; ++lane)
+  for (uint32_t reg = 0; reg < 64; ++reg) {
+    for (uint32_t lane = 0; lane < 32; ++lane) {
       cu->write_vgpr(vb + reg, lane, 0x3f80'0000u);
+    }
+  }
 
   ASSERT_NO_FATAL_FAILURE(mma_test::execute(
       *cu, *wf,
@@ -3560,12 +3633,13 @@ TEST(ExecutionPluginTest, WmmaF16PreservesObservedReadWriteOrder) {
       auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
       ASSERT_NE(wf, nullptr);
       const uint32_t vb = wf->vgpr_alloc().base;
-      for (uint32_t reg = 0; reg < 8; ++reg)
+      for (uint32_t reg = 0; reg < 8; ++reg) {
         for (uint32_t lane = 0; lane < 32; ++lane) {
           cu->write_vgpr(vb + S0 + reg, lane, input);
           cu->write_vgpr(vb + S1 + reg, lane, 0x3c00'3c00u);
           cu->write_vgpr(vb + ACC + reg, lane, 0x3f80'0000u);
         }
+      }
       auto *plugin = f.attach_ordering_plugin();
       ASSERT_NO_FATAL_FAILURE(
           mma_test::execute(*cu, *wf,
@@ -3586,10 +3660,12 @@ TEST(ExecutionPluginTest, WmmaF16PreservesObservedReadWriteOrder) {
       expect_vgpr_read_set(vgpr_write_events(*plugin), vb, expected_writes, 0xFFFF'FFFFu);
       size_t last_read = 0, first_write = plugin->events.size();
       for (size_t i = 0; i < plugin->events.size(); ++i) {
-        if (plugin->events[i].kind == HookEvent::READ_VGPR)
+        if (plugin->events[i].kind == HookEvent::READ_VGPR) {
           last_read = i;
-        if (plugin->events[i].kind == HookEvent::WRITE_VGPR)
+        }
+        if (plugin->events[i].kind == HookEvent::WRITE_VGPR) {
           first_write = std::min(first_write, i);
+        }
       }
       EXPECT_LT(last_read, first_write);
     }
@@ -3608,9 +3684,11 @@ TEST(ExecutionPluginTest, WmmaBf16F32ReadsBeforePackedWrites) {
 
   const uint32_t vb = wf->vgpr_alloc().base;
   constexpr uint32_t S0 = 0, S1 = 16, ACC = 32, DST = 48;
-  for (uint32_t reg = 0; reg < 56; ++reg)
-    for (uint32_t lane = 0; lane < 32; ++lane)
+  for (uint32_t reg = 0; reg < 56; ++reg) {
+    for (uint32_t lane = 0; lane < 32; ++lane) {
       cu->write_vgpr(vb + reg, lane, 0);
+    }
+  }
   plugin->events.clear();
 
   ASSERT_NO_FATAL_FAILURE(mma_test::execute(
@@ -3629,50 +3707,48 @@ TEST(ExecutionPluginTest, WmmaBf16F32ReadsBeforePackedWrites) {
   size_t last_read = 0;
   size_t first_write = plugin->events.size();
   for (size_t i = 0; i < plugin->events.size(); ++i) {
-    if (plugin->events[i].kind == HookEvent::READ_VGPR)
+    if (plugin->events[i].kind == HookEvent::READ_VGPR) {
       last_read = i;
-    if (plugin->events[i].kind == HookEvent::WRITE_VGPR)
+    }
+    if (plugin->events[i].kind == HookEvent::WRITE_VGPR) {
       first_write = std::min(first_write, i);
+    }
   }
   ASSERT_LT(last_read, first_write);
 }
 
 TEST(ExecutionPluginTest, MfmaF32NativeWidthFastPathUsesRegionReads) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "stdx SIMD is unavailable";
-  } else {
-    constexpr uint32_t M = 16, N = 16, K = 4, B = 1;
-    constexpr uint32_t width = static_cast<uint32_t>(util::native<float>::size());
-    if (!amdgpu::mma_f32_native_width_supported(N, width))
-      GTEST_SKIP() << "f32 MFMA shape is not divisible by the native SIMD width";
+  constexpr uint32_t M = 16, N = 16, K = 4, B = 1;
 
-    ForceScalarOverride force_simd(false);
-    PluginFixture f;
-    ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
-    auto *plugin = f.attach_ordering_plugin();
-    auto *cu = f.cu();
-    auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
-    ASSERT_NE(wf, nullptr);
-    ASSERT_EQ(wf->wf_size(), 64u);
+  ForceScalarOverride force_simd(false);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
+  auto *plugin = f.attach_ordering_plugin();
+  auto *cu = f.cu();
+  auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->wf_size(), 64u);
 
-    const uint32_t vb = wf->vgpr_alloc().base;
-    constexpr uint32_t S0 = 0, S1 = 16, ACC = 32, DST = 48;
-    for (uint32_t reg = 0; reg < 64; ++reg)
-      for (uint32_t lane = 0; lane < 64; ++lane)
-        cu->write_vgpr(vb + reg, lane, 0x3f80'0000u);
-
-    amdgpu::exec_f32_mfma_f32_spec<M, N, K, B>(*cu, vb + DST, vb + S0, vb + S1, vb + ACC,
-                                               amdgpu::ACC_FROM_VGPR,
-                                               /*cbsz=*/0, /*abid=*/0, /*blgp=*/0);
-
-    expect_vgpr_read_set(vgpr_read_events(*plugin), vb,
-                         {S0, S1, ACC + 0, ACC + 1, ACC + 2, ACC + 3}, ~uint64_t{0});
+  const uint32_t vb = wf->vgpr_alloc().base;
+  constexpr uint32_t S0 = 0, S1 = 16, ACC = 32, DST = 48;
+  for (uint32_t reg = 0; reg < 64; ++reg) {
+    for (uint32_t lane = 0; lane < 64; ++lane) {
+      cu->write_vgpr(vb + reg, lane, 0x3f80'0000u);
+    }
   }
+
+  rocjitsu::test::execute_mfma_f32_shape<M, N, K, B>(*cu, vb + DST, vb + S0, vb + S1, vb + ACC,
+                                                     amdgpu::ACC_FROM_VGPR,
+                                                     /*cbsz=*/0, /*abid=*/0, /*blgp=*/0);
+
+  expect_vgpr_read_set(vgpr_read_events(*plugin), vb, {S0, S1, ACC + 0, ACC + 1, ACC + 2, ACC + 3},
+                       ~uint64_t{0});
 }
 
 TEST(ExecutionPluginTest, MfmaSnapshotsReadBeforeFullWaveWritesAndSkipConstantAccumulators) {
-  if constexpr (!util::has_stdx_simd)
+  if constexpr (!util::has_stdx_simd) {
     GTEST_SKIP() << "<experimental/simd> unavailable";
+  }
   ForceScalarOverride force_simd(false);
   struct Case {
     const char *name;
@@ -3682,21 +3758,21 @@ TEST(ExecutionPluginTest, MfmaSnapshotsReadBeforeFullWaveWritesAndSkipConstantAc
   const Case cases[] = {
       {"f64", 2, 8,
        [](ComputeUnitCore &cu, uint32_t d, uint32_t a, uint32_t b, uint32_t c, uint32_t acc) {
-         exec_f64(cu, 16, 16, 4, 1, d, a, b, c, acc);
+         rocjitsu::test::execute_mfma_f64_shape(cu, 16, 16, 4, 1, d, a, b, c, acc);
        }},
       {"fp8 chunked", 8, 4,
        [](ComputeUnitCore &cu, uint32_t d, uint32_t a, uint32_t b, uint32_t c, uint32_t acc) {
-         exec_f32<16, 16, 128, 1>(cu, 8, d, a, b, c, extract_fp8, extract_fp8, acc);
+         rocjitsu::test::execute_mfma_mixed_shape<16>(cu, d, a, b, c, acc, 0, 0);
        }},
       {"i8", 4, 4,
        [](ComputeUnitCore &cu, uint32_t d, uint32_t a, uint32_t b, uint32_t c, uint32_t acc) {
-         exec_i32_i8(cu, 16, 16, 64, 1, d, a, b, c, acc);
+         rocjitsu::test::execute_mfma_i8(cu, 16, 16, 64, 1, d, a, b, c, acc);
        }},
   };
   constexpr uint32_t A = 3, B = 19, C = 35;
-  for (const Case &test : cases)
-    for (uint32_t acc : {ACC_FROM_VGPR, 0u})
-      for (uint32_t destination : {67u, A, B, C})
+  for (const Case &test : cases) {
+    for (uint32_t acc : {ACC_FROM_VGPR, 0u}) {
+      for (uint32_t destination : {67u, A, B, C}) {
         for (uint64_t lane_mask : {~uint64_t{0}, kPartialExecMask}) {
           SCOPED_TRACE(test.name);
           SCOPED_TRACE(acc);
@@ -3709,9 +3785,11 @@ TEST(ExecutionPluginTest, MfmaSnapshotsReadBeforeFullWaveWritesAndSkipConstantAc
           auto *wf = cu->dispatch_wf(0, 0, 104, 256);
           ASSERT_NE(wf, nullptr);
           const uint32_t vb = wf->vgpr_alloc().base;
-          for (uint32_t reg = 0; reg < 80; ++reg)
-            for (uint32_t lane = 0; lane < 64; ++lane)
+          for (uint32_t reg = 0; reg < 80; ++reg) {
+            for (uint32_t lane = 0; lane < 64; ++lane) {
               cu->write_vgpr(vb + reg, lane, 0x3f800000u);
+            }
+          }
           wf->set_exec(lane_mask);
           plugin->events.clear();
           test.run(*cu, vb + destination, vb + A, vb + B, vb + C, acc);
@@ -3720,9 +3798,11 @@ TEST(ExecutionPluginTest, MfmaSnapshotsReadBeforeFullWaveWritesAndSkipConstantAc
             read_regs.push_back(A + reg);
             read_regs.push_back(B + reg);
           }
-          if (acc == ACC_FROM_VGPR)
-            for (uint32_t reg = 0; reg < test.result_regs; ++reg)
+          if (acc == ACC_FROM_VGPR) {
+            for (uint32_t reg = 0; reg < test.result_regs; ++reg) {
               read_regs.push_back(C + reg);
+            }
+          }
           expect_vgpr_read_set(vgpr_read_events(*plugin), vb, read_regs, ~uint64_t{0});
           const auto writes = vgpr_write_events(*plugin);
           ASSERT_EQ(writes.size(), test.result_regs);
@@ -3733,13 +3813,17 @@ TEST(ExecutionPluginTest, MfmaSnapshotsReadBeforeFullWaveWritesAndSkipConstantAc
           }
           bool saw_write = false;
           for (const auto &event : plugin->events) {
-            if (event.kind == HookEvent::WRITE_VGPR)
+            if (event.kind == HookEvent::WRITE_VGPR) {
               saw_write = true;
+            }
             if (event.kind == HookEvent::READ_VGPR) {
               EXPECT_FALSE(saw_write);
             }
           }
         }
+      }
+    }
+  }
 }
 
 // Register observers, such as the race detector, must see the same (register, lane) reads and
@@ -3747,8 +3831,9 @@ TEST(ExecutionPluginTest, MfmaSnapshotsReadBeforeFullWaveWritesAndSkipConstantAc
 // cbsz/abid or blgp broadcast part of a register. The snapshot path writes each destination
 // register once.
 TEST(ExecutionPluginTest, MfmaSnapshotObservationsMatchForcedScalar) {
-  if constexpr (!util::has_stdx_simd)
+  if constexpr (!util::has_stdx_simd) {
     GTEST_SKIP() << "<experimental/simd> unavailable";
+  }
   ForceScalarOverride restore(util::force_scalar());
   constexpr uint32_t A = 0, B = 16, C = 32, D = 64;
   using Run = std::function<void(ComputeUnitCore &, uint32_t)>;
@@ -3759,64 +3844,62 @@ TEST(ExecutionPluginTest, MfmaSnapshotObservationsMatchForcedScalar) {
   };
   std::vector<Case> cases;
   for (uint32_t acc : {ACC_FROM_VGPR, 0u}) {
-    for (const auto &[m, k, batch] : {std::tuple{16u, 4u, 1u}, std::tuple{4u, 4u, 4u}})
+    for (const auto &[m, k, batch] : {std::tuple{16u, 4u, 1u}, std::tuple{4u, 4u, 4u}}) {
       cases.push_back({std::format("f64 {}x{}x{}x{} acc={}", m, m, k, batch, acc),
                        [=](ComputeUnitCore &cu, uint32_t vb) {
-                         exec_f64(cu, m, m, k, batch, vb + D, vb + A, vb + B, vb + C, acc, 7);
+                         rocjitsu::test::execute_mfma_f64_shape(cu, m, m, k, batch, vb + D, vb + A,
+                                                                vb + B, vb + C, acc, 7);
                        }});
+    }
     for (const auto &[m, k, batch] :
          {std::tuple{16u, 64u, 1u}, std::tuple{32u, 32u, 1u}, std::tuple{32u, 16u, 1u},
           std::tuple{16u, 32u, 1u}, std::tuple{16u, 16u, 1u}, std::tuple{32u, 8u, 1u},
-          std::tuple{32u, 4u, 2u}, std::tuple{16u, 4u, 4u}, std::tuple{4u, 4u, 16u}})
-      for (uint32_t cbsz = 0; (1u << cbsz) <= batch; ++cbsz)
-        for (uint32_t blgp = 0; blgp < 8; ++blgp)
+          std::tuple{32u, 4u, 2u}, std::tuple{16u, 4u, 4u}, std::tuple{4u, 4u, 16u}}) {
+      for (uint32_t cbsz = 0; (1u << cbsz) <= batch; ++cbsz) {
+        for (uint32_t blgp = 0; blgp < 8; ++blgp) {
           cases.push_back({std::format("i8 {}x{}x{}x{} acc={} cbsz={} blgp={}", m, m, k, batch, acc,
                                        cbsz, blgp),
                            [=](ComputeUnitCore &cu, uint32_t vb) {
-                             exec_i32_i8(cu, m, m, k, batch, vb + D, vb + A, vb + B, vb + C, acc,
-                                         cbsz, (1u << cbsz) - 1, blgp);
+                             rocjitsu::test::execute_mfma_i8(cu, m, m, k, batch, vb + D, vb + A,
+                                                             vb + B, vb + C, acc, cbsz,
+                                                             (1u << cbsz) - 1, blgp);
                            },
-                           // 32 result registers exceed the snapshot.
-                           /*uses_snapshot=*/batch != 2});
-    for (const auto &[k, bits] : {std::pair{1u, 32u}, std::pair{2u, 16u}, std::pair{4u, 16u}})
-      for (uint32_t cbsz = 0; cbsz <= 4; ++cbsz)
-        for (uint32_t blgp = 0; blgp < 8; ++blgp)
-          cases.push_back(
-              {std::format("f32 4x4x{}x16 acc={} cbsz={} blgp={}", k, acc, cbsz, blgp),
-               [=](ComputeUnitCore &cu, uint32_t vb) {
-                 if (bits == 32)
-                   exec_f32<4, 4, 1, 16>(cu, 32, vb + D, vb + A, vb + B, vb + C, extract_f32,
-                                         extract_f32, acc, cbsz, 1, blgp);
-                 else if (k == 2)
-                   exec_f32<4, 4, 2, 16>(cu, 16, vb + D, vb + A, vb + B, vb + C, extract_bf16,
-                                         extract_bf16, acc, cbsz, 1, blgp);
-                 else
-                   exec_f32<4, 4, 4, 16>(cu, 16, vb + D, vb + A, vb + B, vb + C, extract_bf16,
-                                         extract_bf16, acc, cbsz, 1, blgp);
-               }});
-    // Four blocks of 4x4 outputs use only lanes 0-15 of each result register.
-    cases.push_back({std::format("f32 4x4x4x4 acc={}", acc),
-                     [=](ComputeUnitCore &cu, uint32_t vb) {
-                       exec_f32<4, 4, 4, 4>(cu, 32, vb + D, vb + A, vb + B, vb + C, extract_f32,
-                                            extract_f32, acc);
-                     },
-                     /*uses_snapshot=*/false});
-    for (uint32_t m : {16u, 32u})
-      for (uint32_t a_fmt = 0; a_fmt < 5; ++a_fmt)
-        for (uint32_t b_fmt = 0; b_fmt < 5; ++b_fmt)
-          cases.push_back(
-              {std::format("f8f6f4 {}x{} acc={} a={} b={}", m, m, acc, a_fmt, b_fmt),
-               [=](ComputeUnitCore &cu, uint32_t vb) {
-                 ASSERT_TRUE(dispatch_matrix_fmt_pair(
-                     a_fmt, b_fmt, [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {
-                       if (m == 16)
-                         exec_f32_mixed<16, 16, 128, 1>(cu, a_bits, b_bits, vb + D, vb + A, vb + B,
-                                                        vb + C, ea, eb, acc);
-                       else
-                         exec_f32_mixed<32, 32, 64, 1>(cu, a_bits, b_bits, vb + D, vb + A, vb + B,
-                                                       vb + C, ea, eb, acc);
-                     }));
-               }});
+                           // The library publishes whole registers for every shape.
+                           /*uses_snapshot=*/true});
+        }
+      }
+    }
+    for (const auto &[k, bits] : {std::pair{1u, 32u}, std::pair{2u, 16u}, std::pair{4u, 16u}}) {
+      for (uint32_t cbsz = 0; cbsz <= 4; ++cbsz) {
+        for (uint32_t blgp = 0; blgp < 8; ++blgp) {
+          cases.push_back({std::format("f32 4x4x{}x16 acc={} cbsz={} blgp={}", k, acc, cbsz, blgp),
+                           [=](ComputeUnitCore &cu, uint32_t vb) {
+                             if (bits == 32) {
+                               rocjitsu::test::execute_mfma_f32_shape<4, 4, 1, 16>(
+                                   cu, vb + D, vb + A, vb + B, vb + C, acc, cbsz, 1, blgp);
+                             } else {
+                               rocjitsu::test::execute_mfma_half_shape<true, 4, 4, 4, 16>(
+                                   cu, vb + D, vb + A, vb + B, vb + C, acc, cbsz, 1, blgp);
+                             }
+                           }});
+        }
+      }
+    }
+    for (uint32_t m : {16u, 32u}) {
+      for (const auto &[a_fmt, b_fmt] :
+           {std::pair{0U, 0U}, std::pair{0U, 4U}, std::pair{2U, 3U}, std::pair{4U, 1U}}) {
+        cases.push_back({std::format("f8f6f4 {}x{} acc={} a={} b={}", m, m, acc, a_fmt, b_fmt),
+                         [=](ComputeUnitCore &cu, uint32_t vb) {
+                           if (m == 16) {
+                             rocjitsu::test::execute_mfma_mixed_shape<16>(
+                                 cu, vb + D, vb + A, vb + B, vb + C, acc, a_fmt, b_fmt);
+                           } else {
+                             rocjitsu::test::execute_mfma_mixed_shape<32>(
+                                 cu, vb + D, vb + A, vb + B, vb + C, acc, a_fmt, b_fmt);
+                           }
+                         }});
+      }
+    }
   }
   using LaneSets = std::map<uint32_t, uint64_t>;
   using Counts = std::map<uint32_t, uint32_t>;
@@ -3830,8 +3913,9 @@ TEST(ExecutionPluginTest, MfmaSnapshotObservationsMatchForcedScalar) {
     auto *plugin = f.attach_ordering_plugin();
     util::set_force_scalar_for_testing(force_scalar);
     run(*f.cu(), vb);
-    for (const HookEvent &event : vgpr_read_events(*plugin))
+    for (const HookEvent &event : vgpr_read_events(*plugin)) {
       reads[event.physical_reg - vb] |= event.lane_mask;
+    }
     for (const HookEvent &event : vgpr_write_events(*plugin)) {
       writes[event.physical_reg - vb] |= event.lane_mask;
       ++write_counts[event.physical_reg - vb];
@@ -3849,13 +3933,15 @@ TEST(ExecutionPluginTest, MfmaSnapshotObservationsMatchForcedScalar) {
     EXPECT_EQ(snapshot_writes, scalar_writes);
     ASSERT_FALSE(snapshot_write_counts.empty());
     for (const auto &[reg, count] : snapshot_write_counts) {
-      if (test.uses_snapshot)
+      if (test.uses_snapshot) {
         EXPECT_EQ(count, 1u) << "v" << reg;
-      else
+      } else {
         EXPECT_GT(count, 1u) << "v" << reg;
+      }
     }
-    if (::testing::Test::HasFailure())
+    if (::testing::Test::HasFailure()) {
       return;
+    }
   }
 }
 

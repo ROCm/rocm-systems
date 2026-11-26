@@ -9,7 +9,7 @@ LABEL org.opencontainers.image.source=https://github.com/ROCm/hipFile
 # Brings ROCKY_VERSION in-scope
 ARG ROCKY_MAJOR_VERSION
 ARG ROCKY_VERSION
-ARG ROCM_VERSION=7.14.0
+ARG ROCM_VERSION=10.2.0
 
 # If the target ROCm Version on the package repository is non-standard, you can forcibly
 # set the ROCm version used in the package repo URL.
@@ -196,28 +196,3 @@ VOLUME /mnt/ais
 
 # Generic Mount point for container to access AIS-capable storage.
 VOLUME /mnt/ais-fs
-
-# ---- Stage 2: NVIDIA (extends base with CUDA SDK) ----
-# The HIP runtime must be present to use hipFile with NVIDIA GPUs,
-# which is why this stage inherits from base rather than a bare CUDA image.
-FROM base AS nvidia
-ARG ROCKY_MAJOR_VERSION=9
-
-# Install a minimal CUDA SDK
-RUN curl https://developer.download.nvidia.com/compute/cuda/repos/rhel${ROCKY_MAJOR_VERSION}/x86_64/cuda-rhel${ROCKY_MAJOR_VERSION}.repo \
-        -o /etc/yum.repos.d/cuda-rhel${ROCKY_MAJOR_VERSION}.repo && \
-    dnf makecache
-
-# https://gitlab.com/nvidia/container-images/cuda/blob/master/dist/12.6.1/ubuntu2404/devel/Dockerfile
-# Attempt a "minimal" CUDA Dev install.
-# libcufile-dev-X.Y == libcufile-devel-X.Y
-# libnvidia-compute-570-server == nvidia-driver-cuda + kmod-nvidia-open-dkms
-RUN dnf module enable -y nvidia-driver:570-open && \
-    dnf install -y \
-        cuda-minimal-build-12-9 \
-        kmod-nvidia-open-dkms \
-        libcufile-devel-12-9 \
-        nvidia-driver-cuda
-
-# Add CUDA bin directory to the path
-ENV PATH=/usr/local/cuda/bin:${PATH}

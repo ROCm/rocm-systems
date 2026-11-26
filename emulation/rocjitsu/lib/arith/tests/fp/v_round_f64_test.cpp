@@ -439,3 +439,60 @@ TEST(FpRoundF64Gfx11, CapturedRoundingOmodAndClampRules) {
   check_captured_gfx11_exact<32, 64>(rj_arith_v_trunc_f64_w32, trunc_f64_ieee_rules);
   check_captured_gfx11_exact<64, 64>(rj_arith_v_trunc_f64_w64, trunc_f64_ieee_rules);
 }
+
+// Check inherited legacy arithmetic, aliasing, EXEC and unsupported strict modes.
+TEST(FpIntegralF64Legacy, Arithmetic) {
+  const auto reference = [](int op, double x) {
+    switch (op) {
+    case 0:
+      return std::trunc(x);
+    case 1:
+      return std::ceil(x);
+    case 2:
+      return std::nearbyint(x);
+    default:
+      return std::floor(x);
+    }
+  };
+  rocjitsu::arith::test::check_loose_unary_f64<32>(
+      rj_arith_v_trunc_f64_w32_gfx908, [&](double x) { return reference(0, x); }, false,
+      /*check_omod=*/true, /*accepts_exact=*/false);
+  rocjitsu::arith::test::check_loose_unary_f64<32>(
+      rj_arith_v_ceil_f64_w32_gfx908, [&](double x) { return reference(1, x); }, false,
+      /*check_omod=*/true, /*accepts_exact=*/false);
+  rocjitsu::arith::test::check_loose_unary_f64<32>(
+      rj_arith_v_rndne_f64_w32_gfx908, [&](double x) { return reference(2, x); }, false,
+      /*check_omod=*/true, /*accepts_exact=*/false);
+  rocjitsu::arith::test::check_loose_unary_f64<32>(
+      rj_arith_v_floor_f64_w32_gfx908, [&](double x) { return reference(3, x); }, false,
+      /*check_omod=*/true, /*accepts_exact=*/false);
+  rocjitsu::arith::test::check_loose_unary_f64<64>(
+      rj_arith_v_trunc_f64_w64_gfx908, [&](double x) { return reference(0, x); }, false,
+      /*check_omod=*/true, /*accepts_exact=*/false);
+  rocjitsu::arith::test::check_loose_unary_f64<64>(
+      rj_arith_v_ceil_f64_w64_gfx908, [&](double x) { return reference(1, x); }, false,
+      /*check_omod=*/true, /*accepts_exact=*/false);
+  rocjitsu::arith::test::check_loose_unary_f64<64>(
+      rj_arith_v_rndne_f64_w64_gfx908, [&](double x) { return reference(2, x); }, false,
+      /*check_omod=*/true, /*accepts_exact=*/false);
+  rocjitsu::arith::test::check_loose_unary_f64<64>(
+      rj_arith_v_floor_f64_w64_gfx908, [&](double x) { return reference(3, x); }, false,
+      /*check_omod=*/true, /*accepts_exact=*/false);
+}
+
+// Legacy NaN quieting is unconditional, unlike gfx11 with guest IEEE clear.
+TEST(FpIntegralF64Legacy, SignalingNan) {
+  using namespace rocjitsu::arith::test;
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (auto call : {rj_arith_v_trunc_f64_w64_gfx908, rj_arith_v_ceil_f64_w64_gfx908,
+                      rj_arith_v_rndne_f64_w64_gfx908, rj_arith_v_floor_f64_w64_gfx908}) {
+      Registers<4, 64> r;
+      write_fp(r.v, 0, 64, 0xfff0123456789abcULL);
+      uint32_t status = 0x100;
+      ASSERT_EQ(call(cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY, 1, 0, r.v + 2, r.v, &status),
+                RJ_ARITH_SUCCESS);
+      EXPECT_EQ(read_fp(r.v + 2, 0, 64), 0xfff8123456789abcULL);
+      EXPECT_EQ(status, 0x100U);
+    }
+  }
+}
