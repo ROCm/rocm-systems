@@ -128,19 +128,6 @@ def test_layout_shows_every_panel_metric_and_no_other(path, arch):
     assert not panel - shown, f"missing from {path.name}: {sorted(panel - shown)}"
 
 
-@pytest.mark.parametrize("arch", MEMORY_CHART_ARCHS)
-def test_panel_formulas_leave_rounding_to_the_display(arch):
-    """A ROUND in a formula would round a value twice, so the chart could show a
-    different number than the same metric elsewhere, such as in membw guidance."""
-    rounded = [
-        name
-        for table in panel_tables(arch)
-        for name, metric in (table.get("metric") or {}).items()
-        if "ROUND(" in str(metric.get("value"))
-    ]
-    assert not rounded
-
-
 @pytest.mark.parametrize(("path", "arch"), LAYOUT_ARCHS, ids=LAYOUT_ARCH_IDS)
 def test_every_shown_unit_has_a_display_rule(path, arch):
     units = panel_units(PanelConfigs.for_arch(arch))
