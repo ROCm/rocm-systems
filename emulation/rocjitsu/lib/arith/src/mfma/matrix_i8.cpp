@@ -31,6 +31,17 @@ int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32
   }
   const uint64_t effective_controls = (Gfx950 && Batch == 1) ? 0 : controls;
   const bool clamp_per_pass = Gfx950 && clamp && K > 16;
+#if defined(RJ_ARITH_HAVE_AVX512VNNI)
+  // K=4 forms have one B word per column. Their row-streaming x86-64-v4
+  // reduction is faster than a VNNI tile, so only single-batch forms use VNNI.
+  if constexpr (!Wmma && Batch == 1 && AllowSaturation) {
+    const bool use_zen4 = !clamp_per_pass && cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_ZEN4);
+    if (use_zen4) {
+      matrix_i8_avx512vnni<M, K, Batch>(effective_controls, clamp, d, a, b, c);
+      return RJ_ARITH_SUCCESS;
+    }
+  }
+#endif
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
   if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
     matrix_i8_x86_64_v4<M, K, Batch, Wmma, ABlockLanes>(effective_controls, clamp, clamp_per_pass,

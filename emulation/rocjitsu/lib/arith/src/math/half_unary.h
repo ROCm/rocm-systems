@@ -24,6 +24,12 @@ template <Unary Op, bool GuestDenormals = true, bool FractRounding = false>
 void half_unary_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *d,
                           const uint32_t *a);
 
+// Loose FP16 roots and EXP/LOG through FP32 SIMD, with selected halves and modifiers.
+// Requires v4 and validated controls; preserve inactive lanes and permit D/A overlap.
+template <Unary Op>
+void half_unary_loose_x86_64_v4(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *d,
+                                const uint32_t *a);
+
 // Exact FP16 RCP/RSQ/SQRT using the inherited approximation and half narrowing.
 // Preserve inactive lanes and the unselected half; D may alias A.
 // Requires AVX2 and validated instruction controls.

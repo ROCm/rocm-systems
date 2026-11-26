@@ -374,10 +374,12 @@ TEST(MfmaGfx942Exact, Fp16OvflSanitizesEachStepOutput) {
     for (const CCase tc : {CCase{0x7f800000U, 0x7f7fffffU}, CCase{0xff800000U, 0xff7fffffU},
                            CCase{0x7fc00001U, 0x00000000U}}) {
       c_buf[0][0] = tc.c_bits;
-      ASSERT_EQ(
-          form.entry(RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL | RJ_ARITH_FP16_OVFL, 0, d, a, b, c),
-          RJ_ARITH_SUCCESS);
-      EXPECT_EQ(d_buf[0][0], tc.expected);
+      for (uint64_t cpu : supported_cpu_levels()) {
+        SCOPED_TRACE(cpu);
+        const uint64_t flags = cpu | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL | RJ_ARITH_FP16_OVFL;
+        ASSERT_EQ(form.entry(flags, 0, d, a, b, c), RJ_ARITH_SUCCESS);
+        EXPECT_EQ(d_buf[0][0], tc.expected);
+      }
     }
   }
 
@@ -396,10 +398,12 @@ TEST(MfmaGfx942Exact, Fp16OvflSanitizesEachStepOutput) {
     b_buf[0][0] = 0x00005f80U;
     a_buf[0][32] = 0x0000df80U;
     b_buf[0][32] = 0x00005f00U;
-    ASSERT_EQ(rj_arith_v_mfma_f32_16x16x16_bf16_w64(
-                  RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL | RJ_ARITH_FP16_OVFL, 0, d, a, b, c),
-              RJ_ARITH_SUCCESS);
-    EXPECT_EQ(d_buf[0][0], 0x7efffffeU);
+    for (uint64_t cpu : supported_cpu_levels()) {
+      SCOPED_TRACE(cpu);
+      const uint64_t flags = cpu | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL | RJ_ARITH_FP16_OVFL;
+      ASSERT_EQ(rj_arith_v_mfma_f32_16x16x16_bf16_w64(flags, 0, d, a, b, c), RJ_ARITH_SUCCESS);
+      EXPECT_EQ(d_buf[0][0], 0x7efffffeU);
+    }
 
     // Step 0: +Inf * 0.0 -> NaN -> +0.0; Step 1: 1.0 * 3.0 -> 3.0 (0x40400000).
     a_buf[0][0] = 0x00007f80U;
@@ -495,10 +499,13 @@ TEST(MfmaGfx942Exact, Fp16OvflSanitizesEachStepOutput) {
     b_buf[0][0] = 0x00005f80U;
     a_buf[0][32] = 0x0000df80U;
     b_buf[0][32] = 0x00005f00U;
-    ASSERT_EQ(rj_arith_v_smfmac_f32_16x16x32_bf16_w64(
-                  RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL | RJ_ARITH_FP16_OVFL, 0, d, a, b, index),
-              RJ_ARITH_SUCCESS);
-    EXPECT_EQ(d_buf[0][0], 0x7efffffeU);
+    for (uint64_t cpu : supported_cpu_levels()) {
+      SCOPED_TRACE(cpu);
+      const uint64_t flags = cpu | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL | RJ_ARITH_FP16_OVFL;
+      ASSERT_EQ(rj_arith_v_smfmac_f32_16x16x32_bf16_w64(flags, 0, d, a, b, index),
+                RJ_ARITH_SUCCESS);
+      EXPECT_EQ(d_buf[0][0], 0x7efffffeU);
+    }
   }
 }
 

@@ -416,6 +416,14 @@ CDNA_HALF_SELECTION = BINARY_SELECTION_F16 | (
 OLDER_HALF_ROUNDING_TARGETS = {'cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5'}
 HALF_ROUNDING_NAMES = {f'V_{op}_F16' for op in ('TRUNC', 'CEIL', 'FLOOR', 'RNDNE')}
 OLDER_HALF_FREXP_NAMES = {'V_FREXP_MANT_F16', 'V_FREXP_EXP_I16_F16'}
+OLDER_HALF_TRANS_NAMES = {
+    'V_RCP_F16',
+    'V_RSQ_F16',
+    'V_SQRT_F16',
+    'V_EXP_F16',
+    'V_LOG_F16',
+}
+OLDER_HALF_TRIG_NAMES = {'V_SIN_F16', 'V_COS_F16'}
 
 UNARY_F16 = {
     'V_TRUNC_F16',
@@ -732,11 +740,7 @@ def gen_float_unary32_exponent(ctx: ExecuteContext) -> str | None:
         + ('_gfx12' if arch in ('rdna4', 'cdna5') else '')
     )
     # Reusing the model does not establish empirical qualification on new targets.
-    lines = (
-        (['  if (!wf.exec()) return;'] + unqualified_model_guard())
-        if inherited_exponent
-        else []
-    )
+    lines = (unqualified_model_guard()) if inherited_exponent else []
     if inherited_exponent and not is_vop3:
         lines += [
             '  if (inst_.src0 == amdgpu::SRC_SDWA) {',
@@ -1052,11 +1056,7 @@ def gen_float_unary64_exponent(ctx: ExecuteContext) -> str | None:
         + ('_gfx12' if arch in ('rdna4', 'cdna5') else '')
     )
     # Reusing the model does not establish empirical qualification on new targets.
-    lines = (
-        (['  if (!wf.exec()) return;'] + unqualified_model_guard())
-        if inherited_exponent
-        else []
-    )
+    lines = (unqualified_model_guard()) if inherited_exponent else []
     modifiers = '0'
     if is_vop3:
         lines += [
@@ -1256,11 +1256,7 @@ def gen_packed_conversion(ctx: ExecuteContext) -> str | None:
     if older_integer_pack:
         # These targets share the numeric model, without its RDNA3 qualification.
         api = 'rj_arith_' + mnemonic.lower()
-    lines = (
-        ['  if (!wf.exec()) { return; }'] + inherited_half_qualification_guard(arch)
-        if older_integer_pack
-        else []
-    )
+    lines = inherited_half_qualification_guard(arch) if older_integer_pack else []
     lines += ['  uint64_t flags = wf.cu().arithmetic_flags();']
     if mnemonic == 'V_CVT_PK_RTZ_F16_F32':
         lines += [
@@ -2323,11 +2319,7 @@ def gen_float_binary64(ctx: ExecuteContext) -> str | None:
         else ['  const uint64_t modifiers = 0;']
     )
     if arch in OLDER_SELECTION_ARCHS:
-        lines = (
-            ['  if (!wf.exec()) { return; }']
-            + inherited_half_qualification_guard(arch)
-            + lines
-        )
+        lines = inherited_half_qualification_guard(arch) + lines
     lines += [
         f'  amdgpu::arith::execute_float_binary64(wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
         '      wf.cu().arithmetic_flags(), modifiers,',
@@ -2516,11 +2508,7 @@ def gen_float_binary32(ctx: ExecuteContext) -> str | None:
         else []
     )
     if arch in OLDER_SELECTION_ARCHS and mnemonic in SELECTION_F32[arch]:
-        lines = (
-            ['  if (!wf.exec()) { return; }']
-            + inherited_half_qualification_guard(arch)
-            + lines
-        )
+        lines = inherited_half_qualification_guard(arch) + lines
     modifiers = '0'
     if is_vop3:
         lines += [
@@ -2599,7 +2587,7 @@ def gen_float_mad32(ctx: ExecuteContext) -> str | None:
     elif name == 'V_MADAK_F32':
         c = 'simm32'
     api = 'rj_arith_v_mad' + ('_legacy' if 'LEGACY' in name else '') + '_f32'
-    lines = ['  if (!wf.exec()) return;'] + unqualified_half_guard()
+    lines = unqualified_half_guard()
     modifiers = '0'
     if ctx.is_vop3:
         terms = []
@@ -2669,7 +2657,7 @@ def gen_float_fma32(ctx: ExecuteContext) -> str | None:
     if gfx1150 and mnemonic == 'V_FMA_F32':
         api += '_gfx1150'
     lines = (
-        ['  if (!wf.exec()) return;'] + unqualified_half_guard()
+        unqualified_half_guard()
         if arch in OLDER_NATIVE_FMA
         else cdna_qualification_guard(arch)
     )
@@ -2774,11 +2762,7 @@ def gen_mixed_fma(ctx: ExecuteContext) -> str | None:
         f'      {dst[0]}, {", ".join(src)}, narrow_sources, {byte_mask}, {str(older_radeon or arch in ("rdna3", "cdna1", "cdna2", "cdna3", "cdna4")).lower()}, {str(older_radeon or arch == "cdna5").lower()}{", true" if arch == "cdna1" else ""});',
     ]
     if older_radeon:
-        lines = (
-            ['  if (!wf.exec()) {', '    return;', '  }']
-            + inherited_half_qualification_guard(arch)
-            + lines
-        )
+        lines = inherited_half_qualification_guard(arch) + lines
     return '\n'.join(lines)
 
 
@@ -2790,8 +2774,11 @@ def inherited_half_qualification_guard(arch: str) -> list[str]:
 
 
 def unqualified_half_guard() -> list[str]:
-    """Reject active strict requests for an inherited, unqualified model."""
+    """Skip empty EXEC; reject active strict requests for an unqualified model."""
     return [
+        '  if (!wf.exec()) {',
+        '    return;',
+        '  }',
         '  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;',
         '  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||',
         '      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {',
@@ -2806,11 +2793,7 @@ def cdna_qualification_guard(arch: str) -> list[str]:
     """Skip empty EXEC before rejecting unqualified strict CDNA requests."""
     if not arch.startswith('cdna'):
         return []
-    return [
-        '  if (!wf.exec()) {',
-        '    return;',
-        '  }',
-    ] + inherited_half_qualification_guard(arch)
+    return inherited_half_qualification_guard(arch)
 
 
 def gen_packed_fma16(ctx: ExecuteContext) -> str | None:
@@ -2991,15 +2974,7 @@ def gen_packed_binary16(ctx: ExecuteContext) -> str | None:
     ]
     if older:
         # Reuse preserves the inherited model; it does not qualify older targets.
-        lines = (
-            [
-                '  if (!wf.exec()) {',
-                '    return;',
-                '  }',
-            ]
-            + inherited_half_qualification_guard('cdna1')
-            + lines
-        )
+        lines = inherited_half_qualification_guard('cdna1') + lines
     if arch == 'cdna5' and mnemonic == 'V_PK_ADD_F16':
         lines = inherited_half_qualification_guard(arch) + lines
     return '\n'.join(lines)
@@ -3106,11 +3081,7 @@ def gen_float_dot32(ctx: ExecuteContext) -> str | None:
         )
     )
     addend = dst[0] if accumulate else src[2]
-    guard = (
-        ['  if (!wf.exec()) return;'] + inherited_half_qualification_guard(arch)
-        if arch == 'rdna3_5'
-        else []
-    )
+    guard = inherited_half_qualification_guard(arch) if arch == 'rdna3_5' else []
     return '\n'.join(
         guard
         + [
@@ -3171,11 +3142,7 @@ def gen_half_dot(ctx: ExecuteContext) -> str | None:
         f'      {dst[0]}, {", ".join(src)}, {bf16}, narrow_sources, replicate_sources);',
     ]
     if arch == 'rdna3_5':
-        lines = (
-            ['  if (!wf.exec()) return;']
-            + inherited_half_qualification_guard(arch)
-            + lines
-        )
+        lines = inherited_half_qualification_guard(arch) + lines
     return '\n'.join(lines)
 
 
@@ -3255,8 +3222,6 @@ def gen_float_binary16(ctx: ExecuteContext) -> str | None:
         if older_selection or (arch == 'cdna5' and mnemonic == 'V_LDEXP_F16')
         else []
     )
-    if older_selection:
-        lines = ['  if (!wf.exec()) {', '    return;', '  }'] + lines
     if arch in ('cdna1', 'cdna2', 'cdna3', 'cdna4') and mnemonic in CDNA_HALF_SELECTION:
         api += '_gfx950' if arch == 'cdna4' else '_gfx942'
     modifiers = '0'
@@ -3384,7 +3349,7 @@ def gen_float_fma16(ctx: ExecuteContext) -> str | None:
     if older and not legacy_mad:
         # Empty decoded EXEC is a no-op; active requests retain qualification checks
         # even when a staged DPP mask suppresses all destination stores.
-        lines = ['  if (!wf.exec()) return;'] + unqualified_half_guard()
+        lines = unqualified_half_guard()
     if is_vop3:
         terms = [
             '((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u)',
@@ -3435,7 +3400,11 @@ def gen_float_unary16(ctx: ExecuteContext) -> str | None:
     src = ctx.src_ops
     is_vop3 = ctx.is_vop3
     older = arch in OLDER_HALF_ROUNDING_TARGETS and mnemonic in (
-        HALF_ROUNDING_NAMES | OLDER_HALF_FREXP_NAMES | {'V_FRACT_F16'}
+        HALF_ROUNDING_NAMES
+        | OLDER_HALF_FREXP_NAMES
+        | {'V_FRACT_F16'}
+        | OLDER_HALF_TRANS_NAMES
+        | OLDER_HALF_TRIG_NAMES
     )
     cdna = arch in ('cdna3', 'cdna4', 'cdna5')
     names = (
@@ -3479,9 +3448,7 @@ def gen_float_unary16(ctx: ExecuteContext) -> str | None:
     writer = ''
     modifiers = '0'
     lines = (
-        ['  if (!wf.exec()) { return; }']
-        if older
-        else cdna_qualification_guard(arch) if mnemonic == 'V_FREXP_EXP_I16_F16' else []
+        ['  if (!wf.exec()) { return; }'] if older else cdna_qualification_guard(arch)
     )
     if older:
         lines += [
@@ -3499,10 +3466,15 @@ def gen_float_unary16(ctx: ExecuteContext) -> str | None:
             if mnemonic == 'V_FREXP_EXP_I16_F16'
             else 'execute_half_unary_sdwa'
         )
+        sdwa_policy = (
+            ', RJ_ARITH_ALU_SDWA'
+            if mnemonic in OLDER_HALF_TRANS_NAMES | OLDER_HALF_TRIG_NAMES
+            else ''
+        )
         lines += [
             '  if (inst_.src0 == amdgpu::SRC_SDWA) {',
             f'    amdgpu::arith::{adapter}(*this, wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
-            f'        wf.cu().arithmetic_flags(), {dst[0]}, {src[0]});',
+            f'        wf.cu().arithmetic_flags(), {dst[0]}, {src[0]}{sdwa_policy});',
             '    return;',
             '  }',
         ]
@@ -3582,6 +3554,7 @@ def gen_float_ternary_selection(ctx: ExecuteContext) -> str | None:
             OLDER_SELECTION_ARCHS, {'V_MIN3_F32', 'V_MAX3_F32', 'V_MED3_F32'}
         ),
         'rdna3': TERNARY_SELECTION_RDNA3,
+        'rdna3_5': TERNARY_SELECTION_RDNA3,
         'rdna4': TERNARY_SELECTION_RDNA4,
         'cdna3': CDNA_TERNARY_SELECTION,
         'cdna4': CDNA_TERNARY_SELECTION | {'V_MINIMUM3_F32', 'V_MAXIMUM3_F32'},
@@ -3611,8 +3584,7 @@ def gen_float_ternary_selection(ctx: ExecuteContext) -> str | None:
         )
     )
     lines = (
-        ['  if (!wf.exec()) {', '    return;', '  }']
-        + inherited_half_qualification_guard(arch)
+        inherited_half_qualification_guard(arch)
         if older_selection or arch in OLDER_SELECTION_ARCHS
         else []
     )
