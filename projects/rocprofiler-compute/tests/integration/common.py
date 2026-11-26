@@ -252,6 +252,7 @@ def skip_unsupported_pc_sampling_soc(is_stochastic=False):
         "RDNA35_POINT_2",
         "RDNA35_GORGON_POINT",
         "NAVI44_1",
+        "NAVI44_2",
         "NAVI48_1",
         "NAVI48_2",
     }
