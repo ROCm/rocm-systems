@@ -212,6 +212,9 @@ hsa_status_t ImageRuntime::CreateImageManager(hsa_agent_t agent, void* data) {
       image_manager = new ImageManagerAi();
       break;
     default:
+      // Every GFX major in the ISA registry (isa.cpp) needs a case here. Returning an error
+      // here aborts CreateSingleton's agent iteration, which disables image support for the
+      // whole node rather than for this agent. Add a case when a new generation is added.
       return HSA_STATUS_ERROR_INVALID_AGENT;
     }
     hsa_error_code = image_manager->Initialize(agent);
