@@ -1509,6 +1509,13 @@ hsa_status_t Runtime::SetPtrInfoData(const void* ptr, void* userptr) {
 }
 
 #define IPC_SOCK_SERVER_DMABUF_FD_HANDLE_LENGTH 64
+// Magic stamped into hsa_amd_ipc_memory_t handle[5] (unused by the DMA-BUF
+// export layout and always zeroed by older runtimes via the memset in
+// IPCCreate) to identify handles whose handle[2] carries the IPC socket
+// server connection token rather than the legacy exporter pid. Checked in
+// IPCAttach so a handle from a mismatched runtime is rejected immediately
+// instead of timing out while connecting to a socket name that cannot exist.
+#define IPC_DMABUF_HANDLE_TOKEN_MAGIC 0x78687361u  // "xhsa"
 #define IPC_SOCK_SERVER_CONN_CLOSE_HANDLE UINT64_MAX
 void Runtime::AsyncIPCSockServerConnLoop(void*) {
   auto& ipc_sock_server_fd_ = runtime_singleton_->ipc_sock_server_fd_;
@@ -1615,6 +1622,9 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
   // System sub allocations are not supported for now.
   if (handle->handle[3] && useFrag) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   handle->handle[4] = agent->node_id();
+  // Mark this handle as carrying a connection token in handle[2]; older
+  // runtimes leave this word zero. See IPC_DMABUF_HANDLE_TOKEN_MAGIC.
+  handle->handle[5] = IPC_DMABUF_HANDLE_TOKEN_MAGIC;
   if (useFrag) handle->handle[6] |= 0x80000000 | fragOffset;
 
   // Work around to defer export on import call to minimize FD creation.
@@ -1963,6 +1973,11 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
   }
 
   if (ipc_dmabuf_supported_) {
+    // Reject handles from a runtime using a different handle[2] scheme
+    // (e.g. the legacy pid-named socket) before attempting to connect;
+    // such a connect could never succeed and would only time out.
+    if (importHandle.handle[5] != IPC_DMABUF_HANDLE_TOKEN_MAGIC)
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     uint64_t dmaBufFDHandleLo = importHandle.handle[0];
     uint64_t dmaBufFDHandleHi = importHandle.handle[1];
     dmaBufFDHandle = (dmaBufFDHandleHi << 32) | dmaBufFDHandleLo;
