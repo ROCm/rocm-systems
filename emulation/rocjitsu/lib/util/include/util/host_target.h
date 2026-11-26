@@ -54,18 +54,6 @@
 #define RJ_HOST_HAS_AVX512F 0
 #endif
 
-#if defined(__F16C__)
-#define RJ_HOST_HAS_F16C 1
-#else
-#define RJ_HOST_HAS_F16C 0
-#endif
-
-#if defined(__FMA__)
-#define RJ_HOST_HAS_FMA 1
-#else
-#define RJ_HOST_HAS_FMA 0
-#endif
-
 /// @brief Availability of the GNU x86 pause builtin used by bounded spin loops.
 /// Architecture support alone is insufficient for this compiler-specific entry point.
 #if RJ_HOST_ARCH_X86 && (defined(__GNUC__) || defined(__clang__))
@@ -73,12 +61,6 @@
 #else
 #define RJ_HOST_HAS_GNU_X86_PAUSE_BUILTIN 0
 #endif
-
-/// @brief Preserve the existing x86 block-conversion backend selection.
-/// @details This is an implementation choice shared by half, bf16 and integer
-/// converters. It does not imply that every conversion instruction needs F16C.
-#define RJ_HOST_USE_X86_BLOCK_CONVERSIONS                                                          \
-  (RJ_HOST_ARCH_X86 && (RJ_HOST_HAS_AVX512F || RJ_HOST_HAS_F16C))
 
 /// @brief GNU-compatible x86-64 targets with the indicated ISA enabled.
 /// @details These narrower capabilities preserve the qualified target set used

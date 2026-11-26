@@ -11,6 +11,7 @@
 
 #include "compute_unit_test_util.h"
 #include "decode_test_util.h"
+#include "float_format_reference.h"
 #include "mma_test_util.h"
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/code/analysis/def_use_chain.h"
@@ -65,7 +66,6 @@
 #include "rocjitsu/vm/plugins/execution_plugin.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 #include "test_encodings_util.h"
-#include "util/data_types.h"
 #include "util/except.h"
 #include "util/simd.h"
 #include "util/simd_test_hooks.h"
