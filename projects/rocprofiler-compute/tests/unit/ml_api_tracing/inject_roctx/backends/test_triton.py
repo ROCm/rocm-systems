@@ -124,8 +124,14 @@ def test_triton_wrappers_pass_launch_keywords_named_like_wrapper_parameters(
         triton_backend._CoreState, "compiled_kernel", FakeCompiledKernel
     )
     triton_backend.patch_triton_launcher()
-    assert triton_backend._wrap_launch(FakeCompiledKernel, "launcher", "prefix")
-    keywords = {"instance": 1, "marker_prefix": 2, "original": 3, "call": 4}
+    assert triton_backend._wrap_launch(FakeCompiledKernel, "launcher", "prefix", True)
+    keywords = {
+        "instance": 1,
+        "marker_prefix": 2,
+        "is_compiled": 3,
+        "original": 4,
+        "call": 5,
+    }
 
     FakeCompiledKernel().run(7, **keywords)
     FakeCompiledKernel().launcher(8, **keywords)
@@ -233,6 +239,7 @@ def test_launcher_marker_attributes_actual_recording_frames_to_user(monkeypatch)
     value = triton_backend._run_with_marker(
         types.SimpleNamespace(name="kernel"),
         "triton.CompiledKernel",
+        True,
         lambda: "launched",
     )
     assert value == "launched"
@@ -251,7 +258,7 @@ def test_format_triton_args_named_operands_keep_block_size_not_grid():
     tensor = types.SimpleNamespace(shape=(2, 3), dtype="float32")
     blob = triton_backend._format_triton_args(
         kernel,
-        triton_backend._JIT_MARKER_PREFIX,
+        False,
         (tensor, 1024),
         {"grid": (8,), "BLOCK_SIZE": 256},
     )
@@ -264,7 +271,7 @@ def test_format_triton_args_drops_bound_instance():
     tensor = types.SimpleNamespace(shape=(2, 3), dtype="float32")
     blob = triton_backend._format_triton_args(
         kernel,
-        triton_backend._JIT_MARKER_PREFIX,
+        False,
         (kernel, tensor, 1024),
         {"grid": (8,), "BLOCK_SIZE": 256},
     )
@@ -276,7 +283,7 @@ def test_format_triton_args_jit_ignores_extra_trailing_positionals():
     tensor = types.SimpleNamespace(shape=(8,), dtype="float32")
     blob = triton_backend._format_triton_args(
         kernel,
-        triton_backend._JIT_MARKER_PREFIX,
+        False,
         (tensor, 8, 256),
         {},
     )
@@ -301,7 +308,7 @@ def test_format_triton_args_compiled_takes_trailing_positionals():
     )
     blob = triton_backend._format_triton_args(
         kernel,
-        triton_backend._COMPILED_MARKER_PREFIX,
+        True,
         launcher_prefix + (tensor, tensor, 8, 256),
         {},
     )
@@ -319,7 +326,7 @@ def test_format_triton_args_compiled_reads_names_from_src_fn():
     )
     blob = triton_backend._format_triton_args(
         kernel,
-        triton_backend._COMPILED_MARKER_PREFIX,
+        True,
         (1, 1, 1, None, None, None, None, None, None, tensor, 8),
         {},
     )
@@ -330,7 +337,7 @@ def test_format_triton_args_uses_arg_names_when_params_empty():
     tensor = types.SimpleNamespace(shape=(2,), dtype="float32")
     blob = triton_backend._format_triton_args(
         types.SimpleNamespace(params=(), arg_names=["x_ptr"]),
-        triton_backend._JIT_MARKER_PREFIX,
+        False,
         (tensor,),
         {},
     )
@@ -340,7 +347,7 @@ def test_format_triton_args_uses_arg_names_when_params_empty():
 def test_format_triton_args_without_names_is_n_a():
     blob = triton_backend._format_triton_args(
         types.SimpleNamespace(),
-        triton_backend._JIT_MARKER_PREFIX,
+        False,
         (object(), 1024),
         {"grid": (8,)},
     )
@@ -357,7 +364,7 @@ def test_format_triton_args_exception_is_n_a():
 
     blob = triton_backend._format_triton_args(
         Boom(),
-        triton_backend._JIT_MARKER_PREFIX,
+        False,
         (1,),
         {},
     )
@@ -367,7 +374,7 @@ def test_format_triton_args_exception_is_n_a():
 def test_format_triton_args_encodes_pipe_in_string():
     blob = triton_backend._format_triton_args(
         types.SimpleNamespace(params=["msg"]),
-        triton_backend._JIT_MARKER_PREFIX,
+        False,
         ("a|b",),
         {},
     )
@@ -379,7 +386,7 @@ def test_format_triton_args_caps_at_32_items():
     names = ["p%d" % index for index in range(40)]
     blob = triton_backend._format_triton_args(
         types.SimpleNamespace(params=names),
-        triton_backend._JIT_MARKER_PREFIX,
+        False,
         tuple(range(40)),
         {},
     )
