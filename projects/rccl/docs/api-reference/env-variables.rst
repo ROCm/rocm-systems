@@ -1799,6 +1799,33 @@ threshold table introduced for gfx1250.
       - | ``512``: Default.
         | ``N``: A multiple of the LL128 warp, at most ``512``.
 
+    * - | ``RCCL_BC_SINGLE_NODE_RING_LL_MAX_BYTES``
+        | Ceiling, in total message bytes, up to which single-node
+          ``ncclBroadcast`` switches from Ring Simple to Ring LL. Only a Ring
+          Simple choice changes; LL and LL128 choices stay. By default the
+          ceiling follows the per-architecture table: on gfx950 it is 4 KiB x
+          the ring channel count x (ranks - 1) squared, at most 16 MiB; on
+          gfx942 it is 768 bytes x (the ring channel count x (ranks - 1)) to
+          the power 1.5, at most 5 MiB; gfx1250 keeps the tuning model. The
+          ring channel count is the ``coll channels`` value of the
+          ``NCCL_DEBUG=INFO`` init line, so ``NCCL_MIN_NCHANNELS``,
+          ``NCCL_MAX_NCHANNELS`` and ``maxCTAs`` move the ceiling too. The
+          table covers 2 to 8 ranks, one per unpartitioned GPU; a communicator
+          of more than 8 ranks, and most communicators with ranks on
+          partitioned GPUs (CPX, DPX or QPX), keep the tuning model. A value
+          above ``0`` sets the ceiling on those communicators too, in place of
+          both the formula and the cap.
+          Applies to single-node communicators with an architecture table
+          that has no total-byte Broadcast ceilings, which is gfx950, gfx942
+          and gfx1250 SPX; gfx1250 DPX uses its own Broadcast ceilings, and
+          ``RCCL_IGNORE_ARCH_TABLE=1`` removes the gfx1250 table. Ignored on
+          multi-node communicators, when ``NCCL_PROTO`` is set, when a tuner
+          plugin matches the call, and when a per-call algorithm selection
+          leaves out Ring LL.
+      - | ``-1``: Use the per-architecture table (default).
+        | ``0``: Keep the tuning model's protocol.
+        | ``N``: Use Ring LL up to ``N`` bytes.
+
     * - | ``RCCL_CE_ALLREDUCE``
         | Enables the Copy Engine (CE) registered-window AllReduce path. When ``-1`` (auto),
           CE AllReduce is on by default for gfx1250 communicators that meet all

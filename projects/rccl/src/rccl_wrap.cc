@@ -26,6 +26,7 @@ THE SOFTWARE.
 #include "graph/topo.h"
 #include "enqueue.h"
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <vector>
 #include "debug.h"
@@ -121,6 +122,8 @@ RCCL_PARAM(DdaLL128Threshold, "DDA_LL128_THRESHOLD", kDdaThresholdUnset);
 RCCL_PARAM(DdaBc, "DDA_BC", kDdaThresholdUnset);
 // Development only: lets Broadcast LL run on the single-node IPC DDA path (e.g. gfx950).
 RCCL_PARAM(DdaBcAllowIpc, "DDA_BC_ALLOW_IPC", 0);
+// Single-node Broadcast Ring LL ceiling in total bytes: -1 = arch table, 0 = tuning model, > 0 = this ceiling.
+RCCL_PARAM(BcSingleNodeRingLLMaxBytes, "BC_SINGLE_NODE_RING_LL_MAX_BYTES", -1);
 // When set, bypass the per-arch tuning table entirely and use base-commit
 // env-var defaults for all thresholds (DDA, CE, symMaxR2).  Useful for
 // isolating arch-table effects without rebuilding.
@@ -234,6 +237,55 @@ static const rcclArchThresholds* rcclBroadcastTotalByteTable(const struct ncclCo
   return t;
 }
 
+// x^(halves / 2): whole powers by multiplication, the odd half by one sqrt. IEEE rounds both exactly the same way on
+// every rank, so ranks given the same x and halves get the same bits. Unsigned halves: no negative powers.
+static double rcclHalfPow(int x, unsigned int halves) {
+  double v = 1.0;
+  for (unsigned int i = 0; i < halves / 2; ++i) {
+    v *= x;
+  }
+  if (halves % 2 != 0) {
+    v *= std::sqrt((double)x);
+  }
+  return v;
+}
+
+// Largest single-node rank count the Broadcast Ring LL ceilings were measured at (SPX nodes, one rank per GPU).
+static constexpr int kBcSingleNodeRingLLMaxRanks = 8;
+
+// Single-node Broadcast Ring LL ceiling in total bytes (rcclArchThresholds::bcSingleNodeRingLL*); 0 = tuning model.
+// min(base x nChannels^(p / 2) x (nRanks - 1)^(q / 2), cap). It reads only comm->nRanks, comm->nChannels and
+// comm->hasMloPart, all uniform across ranks like every other channel decision, so every rank computes the same
+// ceiling.
+// Measured domain: 2 to 8 ranks on SPX nodes, one rank per GPU. A partitioned comm (comm->hasMloPart, the same on
+// every rank) keeps the model; it catches most CPX / DPX / QPX comms but misses those built only from partition 0 of
+// each GPU. Separately, a comm of more than 8 ranks keeps the model. RCCL_BC_SINGLE_NODE_RING_LL_MAX_BYTES >= 0 is an
+// explicit user choice and replaces both terms on a single-node comm of at least 2 ranks whose arch table has no
+// total-byte Broadcast ceilings (not gfx1250 DPX), partitioned or past 8 ranks too.
+static size_t rcclBcSingleNodeRingLLMaxBytes(const struct ncclComm* comm) {
+  const rcclArchThresholds* t = rcclRingTreeTable(comm, /*rankScaled=*/false);
+  if (t == nullptr || comm->nRanks < 2) {
+    return 0;
+  }
+  const int64_t env = rcclParamBcSingleNodeRingLLMaxBytes();
+  if (env >= 0) {
+    return (size_t)env;
+  }
+  if (comm->nRanks > kBcSingleNodeRingLLMaxRanks || comm->hasMloPart) {
+    return 0;
+  }
+  if (t->bcSingleNodeRingLLBaseBytes == 0 || t->bcSingleNodeRingLLCapBytes == 0) {
+    return 0;
+  }
+  const double formula = (double)t->bcSingleNodeRingLLBaseBytes *
+                         rcclHalfPow(comm->nChannels, t->bcSingleNodeRingLLChannelPowHalves) *
+                         rcclHalfPow(comm->nRanks - 1, t->bcSingleNodeRingLLHopPowHalves);
+  if (formula >= (double)t->bcSingleNodeRingLLCapBytes) {
+    return t->bcSingleNodeRingLLCapBytes;
+  }
+  return (size_t)formula;
+}
+
 // ReduceScatter Ring LL128 ceiling per rank for 2- and 4-byte types.
 static size_t rcclRsRingLL128MaxPerRank(const rcclArchThresholds* t, int nRanks) {
   if (rcclRsSmallComm(t, nRanks) && t->rsSmallCommRingLL128MaxPerRank != 0) return t->rsSmallCommRingLL128MaxPerRank;
@@ -282,7 +334,8 @@ static bool rcclRemoteFlushTuned(struct ncclComm* comm) {
          IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950");
 }
 
-void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, struct ncclTaskColl* info) {
+void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, struct ncclTaskColl* info,
+                                  float (*table)[NCCL_NUM_PROTOCOLS]) {
   // Honor user input for protocol choice
   const bool userProtocolInput = rcclNcclProtoEnvIsSet();
   size_t sizePerRank = rcclGetSizePerRank(info->func, nBytes, comm->nRanks);
@@ -396,6 +449,19 @@ void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, s
         WARN("LL cutoff points not detected for a supported arch %s", comm->topo->nodes[GPU].nodes[0].gpu.gcn);
         failedWarn = true;
       }
+    }
+  }
+
+  // Single-node Broadcast: Ring Simple becomes Ring LL up to the ceiling. LL128 stays, a tuner match never gets here,
+  // and a per-call mask that leaves Ring LL out of the cost table keeps Simple. NCCL_PROTO still wins.
+  // It differs from the gfx1250 DPX block at the top on purpose: DPX ceilings hold at any node count and set the
+  // protocol outright, so they run first and return; this rule only upgrades the model's final Ring Simple pick on one
+  // node. The DPX block not checking the cost-table mask predates this rule and is left as is here.
+  if (!userProtocolInput && info->func == ncclFuncBroadcast && info->algorithm == NCCL_ALGO_RING &&
+      info->protocol == NCCL_PROTO_SIMPLE && (table == nullptr || table[NCCL_ALGO_RING][NCCL_PROTO_LL] >= 0.0)) {
+    const size_t llMax = rcclBcSingleNodeRingLLMaxBytes(comm);
+    if (nBytes > 0 && nBytes <= llMax) {
+      info->protocol = NCCL_PROTO_LL;
     }
   }
 }

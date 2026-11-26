@@ -2051,12 +2051,14 @@ void SetModelBroadcastRanges(ncclComm* comm) {
   comm->minMaxLLRange[RCCL_BR_TUNABLE][NCCL_PROTO_LL128][RCCL_PROTOCOL_MAX_IDX] = 16 * kMiB;
 }
 
-int ProtocolOf(ncclComm* comm, ncclFunc_t func, size_t nBytes) {
+// The protocol rcclUpdateCollectiveProtocol leaves for Ring `func` when the model picked `seeded` from `table`.
+int ProtocolOf(ncclComm* comm, ncclFunc_t func, size_t nBytes, int seeded = NCCL_PROTO_UNDEF,
+               float (*table)[NCCL_NUM_PROTOCOLS] = nullptr) {
   ncclTaskColl info{};
   info.func = func;
   info.algorithm = NCCL_ALGO_RING;
-  info.protocol = NCCL_PROTO_UNDEF;
-  rcclUpdateCollectiveProtocol(comm, nBytes, &info);
+  info.protocol = seeded;
+  rcclUpdateCollectiveProtocol(comm, nBytes, &info, table);
   return info.protocol;
 }
 }  // namespace
@@ -9028,6 +9030,455 @@ namespace real_arch_thresholds {
 // The real tables, namespaced so they do not collide with fakes/rccl_arch_thresholds_fakes.cc.
 #include "rccl_arch_thresholds.cc"
 }  // namespace real_arch_thresholds
+
+namespace {
+// Single-node Broadcast Ring LL ceiling with gfx950's shape: min(kBcLLBase x nChannels x (nRanks - 1)^2, kBcLLCap),
+// exponents in halves 2 and 4.
+constexpr size_t kBcLLBase = 4096;
+constexpr unsigned int kBcLLChannelPowHalves = 2;
+constexpr unsigned int kBcLLHopPowHalves = 4;
+constexpr size_t kBcLLCap = 16 * kMiB;
+
+rcclArchThresholds MakeBcLLCeilingTable() {
+  rcclArchThresholds t{};
+  t.bcSingleNodeRingLLBaseBytes = kBcLLBase;
+  t.bcSingleNodeRingLLChannelPowHalves = kBcLLChannelPowHalves;
+  t.bcSingleNodeRingLLHopPowHalves = kBcLLHopPowHalves;
+  t.bcSingleNodeRingLLCapBytes = kBcLLCap;
+  return t;
+}
+
+ncclComm* MakeBcLLCeilingComm(const rcclArchThresholds* table, int nRanks, int nChannels,
+                              const char* arch = "gfx950") {
+  ncclComm* comm = MakeCommWithArch(arch);
+  comm->archThresholds = table;
+  comm->nRanks = nRanks;
+  comm->nChannels = nChannels;
+  return comm;
+}
+
+size_t BcLLFormula(int nRanks, int nChannels) {
+  return kBcLLBase * nChannels * (size_t)(nRanks - 1) * (nRanks - 1);
+}
+
+size_t BcLLCeiling(int nRanks, int nChannels) {
+  return std::min(BcLLFormula(nRanks, nChannels), kBcLLCap);
+}
+}  // namespace
+
+// Ring Simple becomes Ring LL up to the ceiling and stays above it, for the ring channel counts gfx950 single-node
+// comms use. The model's LL and LL128 picks and other collectives keep their protocol.
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_SingleNodeBroadcastLLCeilingScalesWithChannelsAndHops) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveProtocol_SingleNodeBroadcastLLCeilingScalesWithChannelsAndHops",
+      []() {
+        SetMicroEnvAbsent("NCCL_PROTO");
+        const rcclArchThresholds table = MakeBcLLCeilingTable();
+        const struct {
+          int nRanks;
+          int nChannels;
+        } shapes[] = {{2, 32}, {3, 16}, {4, 48}, {5, 8}, {7, 8}, {8, 112}, {8, 8}};
+        for (const auto& sh : shapes) {
+          ncclComm* comm = MakeBcLLCeilingComm(&table, sh.nRanks, sh.nChannels);
+          const size_t llMax = BcLLCeiling(sh.nRanks, sh.nChannels);
+          SCOPED_TRACE(testing::Message() << sh.nRanks << " ranks, " << sh.nChannels << " channels");
+          EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, 0, NCCL_PROTO_SIMPLE));
+          EXPECT_EQ(NCCL_PROTO_LL, ProtocolOf(comm, ncclFuncBroadcast, 1, NCCL_PROTO_SIMPLE));
+          EXPECT_EQ(NCCL_PROTO_LL, ProtocolOf(comm, ncclFuncBroadcast, llMax, NCCL_PROTO_SIMPLE));
+          EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, llMax + 1, NCCL_PROTO_SIMPLE));
+          EXPECT_EQ(NCCL_PROTO_LL, ProtocolOf(comm, ncclFuncBroadcast, llMax + 1, NCCL_PROTO_LL));
+          EXPECT_EQ(NCCL_PROTO_LL128, ProtocolOf(comm, ncclFuncBroadcast, llMax, NCCL_PROTO_LL128));
+          EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncAllReduce, llMax, NCCL_PROTO_SIMPLE));
+          EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncReduce, llMax, NCCL_PROTO_SIMPLE));
+          DeleteCommWithArch(comm);
+        }
+        // The ceilings for the shapes above; the 8-rank, 112-channel formula is above the cap.
+        EXPECT_EQ(128 * kKiB, BcLLCeiling(2, 32));
+        EXPECT_EQ(1728 * kKiB, BcLLCeiling(4, 48));
+        EXPECT_EQ(21952 * kKiB, BcLLFormula(8, 112));
+        EXPECT_EQ(16 * kMiB, BcLLCeiling(8, 112));
+      });
+}
+
+// The ceiling is min(formula, cap), inclusive at the cap. Below the cap the formula rules; the cap bounds it at a high
+// channel count too, so a 7-rank comm is covered below and at the cap. A cap of 0 keeps the model.
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_SingleNodeBroadcastLLCeilingIsCapped) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveProtocol_SingleNodeBroadcastLLCeilingIsCapped",
+      []() {
+        SetMicroEnvAbsent("NCCL_PROTO");
+        const rcclArchThresholds table = MakeBcLLCeilingTable();
+
+        ncclComm* comm = MakeBcLLCeilingComm(&table, 8, 112);
+        EXPECT_EQ(NCCL_PROTO_LL, ProtocolOf(comm, ncclFuncBroadcast, kBcLLCap, NCCL_PROTO_SIMPLE)) << "at the cap";
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, kBcLLCap + 1, NCCL_PROTO_SIMPLE));
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, BcLLFormula(8, 112), NCCL_PROTO_SIMPLE))
+            << "the formula's ceiling is above the cap";
+        DeleteCommWithArch(comm);
+
+        comm = MakeBcLLCeilingComm(&table, 4, 48);
+        ASSERT_LT(BcLLFormula(4, 48), kBcLLCap);
+        EXPECT_EQ(NCCL_PROTO_LL, ProtocolOf(comm, ncclFuncBroadcast, BcLLFormula(4, 48), NCCL_PROTO_SIMPLE));
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, BcLLFormula(4, 48) + 1, NCCL_PROTO_SIMPLE));
+        DeleteCommWithArch(comm);
+
+        comm = MakeBcLLCeilingComm(&table, 7, 8);
+        ASSERT_LT(BcLLFormula(7, 8), kBcLLCap);
+        EXPECT_EQ(NCCL_PROTO_LL, ProtocolOf(comm, ncclFuncBroadcast, BcLLFormula(7, 8), NCCL_PROTO_SIMPLE))
+            << "7 ranks, 8 channels";
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, BcLLFormula(7, 8) + 1, NCCL_PROTO_SIMPLE))
+            << "7 ranks, 8 channels";
+        comm->nChannels = 128;
+        ASSERT_GT(BcLLFormula(7, 128), kBcLLCap);
+        EXPECT_EQ(NCCL_PROTO_LL, ProtocolOf(comm, ncclFuncBroadcast, kBcLLCap, NCCL_PROTO_SIMPLE))
+            << "7 ranks, 128 channels";
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, kBcLLCap + 1, NCCL_PROTO_SIMPLE))
+            << "7 ranks, 128 channels";
+        DeleteCommWithArch(comm);
+
+        rcclArchThresholds uncapped = table;
+        uncapped.bcSingleNodeRingLLCapBytes = 0;
+        comm = MakeBcLLCeilingComm(&uncapped, 8, 112);
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, 1, NCCL_PROTO_SIMPLE)) << "cap 0";
+        DeleteCommWithArch(comm);
+      });
+}
+
+// On a 1-rank comm, on multi-node comms, on a table without the base and without an arch table, the model's
+// protocol stands.
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_SingleNodeBroadcastLLCeilingScope) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveProtocol_SingleNodeBroadcastLLCeilingScope",
+      []() {
+        SetMicroEnvAbsent("NCCL_PROTO");
+        const rcclArchThresholds table = MakeBcLLCeilingTable();
+        ncclComm* comm = MakeBcLLCeilingComm(&table, 1, 8);
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, 1, NCCL_PROTO_SIMPLE)) << "1 rank";
+        comm->nRanks = 16;
+        comm->nNodes = 2;
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, 1, NCCL_PROTO_SIMPLE)) << "2 nodes";
+        DeleteCommWithArch(comm);
+
+        const rcclArchThresholds unmeasured{};
+        comm = MakeBcLLCeilingComm(&unmeasured, 8, 112);
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, 1, NCCL_PROTO_SIMPLE)) << "base 0";
+        DeleteCommWithArch(comm);
+
+        comm = MakeBcLLCeilingComm(nullptr, 8, 112);  // the arch-table fake returns no table
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, 1, NCCL_PROTO_SIMPLE)) << "no table";
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The fit covers 2 to 8 ranks (SPX nodes, one rank per GPU), so a single-node comm of more than 8 ranks keeps the
+// model even when it does not report a partition: 8 ranks is the last covered count, 9 the first that is not.
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_SingleNodeBroadcastLLCeilingKeepsTheModelPastEightRanks) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveProtocol_SingleNodeBroadcastLLCeilingKeepsTheModelPastEightRanks",
+      []() {
+        SetMicroEnvAbsent("NCCL_PROTO");
+        const rcclArchThresholds table = MakeBcLLCeilingTable();
+        ncclComm* comm = MakeBcLLCeilingComm(&table, 8, 8);
+        EXPECT_EQ(NCCL_PROTO_LL, ProtocolOf(comm, ncclFuncBroadcast, 1, NCCL_PROTO_SIMPLE)) << "8 ranks";
+        for (const int nRanks : {9, 16, 64}) {
+          comm->nRanks = nRanks;
+          EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, 1, NCCL_PROTO_SIMPLE)) << nRanks << " ranks";
+          EXPECT_EQ(NCCL_PROTO_LL, ProtocolOf(comm, ncclFuncBroadcast, 1, NCCL_PROTO_LL)) << nRanks << " ranks";
+        }
+        DeleteCommWithArch(comm);
+
+        for (const char* arch : {"gfx950", "gfx942"}) {
+          const rcclArchThresholds* real =
+              real_arch_thresholds::rcclGetArchThresholds(arch, RCCL_TUNING_PARTITION_SPX);
+          ASSERT_NE(nullptr, real) << arch;
+          for (const int nRanks : {9, 16, 64}) {
+            comm = MakeBcLLCeilingComm(real, nRanks, 4, arch);
+            EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, 1, NCCL_PROTO_SIMPLE))
+                << arch << ", " << nRanks << " ranks";
+            DeleteCommWithArch(comm);
+          }
+        }
+      });
+}
+
+// A partitioned comm (hasMloPart: CPX / DPX ranks) keeps the model at any rank count the fit covers, while
+// RCCL_BC_SINGLE_NODE_RING_LL_MAX_BYTES > 0 still sets the ceiling there.
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_SingleNodeBroadcastLLCeilingKeepsTheModelOnPartitionedComms) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveProtocol_SingleNodeBroadcastLLCeilingKeepsTheModelOnPartitionedComms",
+      []() {
+        SetMicroEnvAbsent("NCCL_PROTO");
+        const rcclArchThresholds table = MakeBcLLCeilingTable();
+        ncclComm* comm = MakeBcLLCeilingComm(&table, 8, 8);
+        EXPECT_EQ(NCCL_PROTO_LL, ProtocolOf(comm, ncclFuncBroadcast, 1, NCCL_PROTO_SIMPLE)) << "unpartitioned";
+        comm->hasMloPart = true;
+        for (const int nRanks : {2, 4, 8}) {
+          comm->nRanks = nRanks;
+          EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, 1, NCCL_PROTO_SIMPLE)) << nRanks << " ranks";
+          EXPECT_EQ(NCCL_PROTO_LL, ProtocolOf(comm, ncclFuncBroadcast, 1, NCCL_PROTO_LL)) << nRanks << " ranks";
+        }
+        {
+          ScopedHook loadParam(g_loadParam, ForceParam("RCCL_BC_SINGLE_NODE_RING_LL_MAX_BYTES", int64_t(4 * kMiB)));
+          for (const int nRanks : {8, 64}) {
+            comm->nRanks = nRanks;
+            EXPECT_EQ(NCCL_PROTO_LL, ProtocolOf(comm, ncclFuncBroadcast, 4 * kMiB, NCCL_PROTO_SIMPLE))
+                << nRanks << " ranks, env";
+            EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, 4 * kMiB + 1, NCCL_PROTO_SIMPLE))
+                << nRanks << " ranks, env";
+          }
+        }
+        DeleteCommWithArch(comm);
+
+        for (const char* arch : {"gfx950", "gfx942"}) {
+          const rcclArchThresholds* real =
+              real_arch_thresholds::rcclGetArchThresholds(arch, RCCL_TUNING_PARTITION_SPX);
+          ASSERT_NE(nullptr, real) << arch;
+          comm = MakeBcLLCeilingComm(real, 8, 8, arch);
+          comm->hasMloPart = true;
+          EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, 1, NCCL_PROTO_SIMPLE)) << arch;
+          DeleteCommWithArch(comm);
+        }
+      });
+}
+
+// RCCL_BC_SINGLE_NODE_RING_LL_MAX_BYTES: -1 follows the table, 0 keeps the model, > 0 is the ceiling at any
+// single-node rank count, past 8 ranks, above the cap and where the table has no base. It is an explicit user choice,
+// so the measured 2- to 8-rank domain does not bound it. A 1-rank comm, a multi-node comm and no arch table ignore it.
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_SingleNodeBroadcastLLCeilingEnvOverride) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveProtocol_SingleNodeBroadcastLLCeilingEnvOverride",
+      []() {
+        SetMicroEnvAbsent("NCCL_PROTO");
+        const rcclArchThresholds table = MakeBcLLCeilingTable();
+        const size_t llMax = BcLLCeiling(8, 112);
+        ncclComm* comm = MakeBcLLCeilingComm(&table, 8, 112);
+        {
+          ScopedHook loadParam(g_loadParam, ForceParam("RCCL_BC_SINGLE_NODE_RING_LL_MAX_BYTES", int64_t(-1)));
+          EXPECT_EQ(NCCL_PROTO_LL, ProtocolOf(comm, ncclFuncBroadcast, llMax, NCCL_PROTO_SIMPLE));
+          EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, llMax + 1, NCCL_PROTO_SIMPLE));
+        }
+        {
+          ScopedHook loadParam(g_loadParam, ForceParam("RCCL_BC_SINGLE_NODE_RING_LL_MAX_BYTES", int64_t(0)));
+          EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, 1, NCCL_PROTO_SIMPLE));
+        }
+        {
+          ScopedHook loadParam(g_loadParam, ForceParam("RCCL_BC_SINGLE_NODE_RING_LL_MAX_BYTES", int64_t(20 * kMiB)));
+          EXPECT_EQ(NCCL_PROTO_LL, ProtocolOf(comm, ncclFuncBroadcast, 20 * kMiB, NCCL_PROTO_SIMPLE))
+              << "above the cap";
+          EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, 20 * kMiB + 1, NCCL_PROTO_SIMPLE));
+        }
+        {
+          ScopedHook loadParam(g_loadParam, ForceParam("RCCL_BC_SINGLE_NODE_RING_LL_MAX_BYTES", int64_t(4 * kMiB)));
+          EXPECT_EQ(NCCL_PROTO_LL, ProtocolOf(comm, ncclFuncBroadcast, 4 * kMiB, NCCL_PROTO_SIMPLE));
+          EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, 4 * kMiB + 1, NCCL_PROTO_SIMPLE));
+          comm->nRanks = 1;
+          EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, 1, NCCL_PROTO_SIMPLE)) << "1 rank";
+          comm->nRanks = 16;
+          EXPECT_EQ(NCCL_PROTO_LL, ProtocolOf(comm, ncclFuncBroadcast, 4 * kMiB, NCCL_PROTO_SIMPLE)) << "16 ranks";
+          EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, 4 * kMiB + 1, NCCL_PROTO_SIMPLE))
+              << "16 ranks";
+          comm->nNodes = 2;
+          EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, 1, NCCL_PROTO_SIMPLE)) << "2 nodes";
+        }
+        DeleteCommWithArch(comm);
+
+        const rcclArchThresholds unmeasured{};
+        comm = MakeBcLLCeilingComm(&unmeasured, 8, 112);
+        ScopedHook loadParam(g_loadParam, ForceParam("RCCL_BC_SINGLE_NODE_RING_LL_MAX_BYTES", int64_t(4 * kMiB)));
+        EXPECT_EQ(NCCL_PROTO_LL, ProtocolOf(comm, ncclFuncBroadcast, 4 * kMiB, NCCL_PROTO_SIMPLE)) << "base 0";
+        DeleteCommWithArch(comm);
+
+        comm = MakeBcLLCeilingComm(nullptr, 8, 112);  // the arch-table fake returns no table
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, 1, NCCL_PROTO_SIMPLE)) << "no table";
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_SingleNodeBroadcastLLCeilingHonorsUserProto) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveProtocol_SingleNodeBroadcastLLCeilingHonorsUserProto",
+      []() {
+        SetMicroEnv("NCCL_PROTO", "SIMPLE");
+        const rcclArchThresholds table = MakeBcLLCeilingTable();
+        ncclComm* comm = MakeBcLLCeilingComm(&table, 8, 112);
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, 1, NCCL_PROTO_SIMPLE));
+        DeleteCommWithArch(comm);
+      });
+}
+
+// A per-call algorithm mask that blanks Ring LL in the cost table keeps Ring Simple; a table that offers it does not.
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_SingleNodeBroadcastLLCeilingNeedsRingLLInTheCostTable) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveProtocol_SingleNodeBroadcastLLCeilingNeedsRingLLInTheCostTable",
+      []() {
+        SetMicroEnvAbsent("NCCL_PROTO");
+        const rcclArchThresholds table = MakeBcLLCeilingTable();
+        ncclComm* comm = MakeBcLLCeilingComm(&table, 8, 112);
+        CostTable cost;
+        EXPECT_EQ(NCCL_PROTO_LL, ProtocolOf(comm, ncclFuncBroadcast, 1, NCCL_PROTO_SIMPLE, cost.t));
+        cost.t[NCCL_ALGO_RING][NCCL_PROTO_LL] = NCCL_ALGO_PROTO_IGNORE;
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, 1, NCCL_PROTO_SIMPLE, cost.t));
+        DeleteCommWithArch(comm);
+      });
+}
+
+// gfx1250 DPX keeps its total-byte Broadcast ceilings even when the table also carries the single-node formula and
+// RCCL_BC_SINGLE_NODE_RING_LL_MAX_BYTES is set: past the DPX LL128 ceiling, Simple stands under a 1 GiB override.
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_SingleNodeBroadcastLLCeilingYieldsToDpxCeilings) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveProtocol_SingleNodeBroadcastLLCeilingYieldsToDpxCeilings",
+      []() {
+        SetMicroEnvAbsent("NCCL_PROTO");
+        rcclArchThresholds dpx = MakeDpxBroadcastTable();
+        dpx.bcSingleNodeRingLLBaseBytes = kBcLLBase;
+        dpx.bcSingleNodeRingLLChannelPowHalves = kBcLLChannelPowHalves;
+        dpx.bcSingleNodeRingLLHopPowHalves = kBcLLHopPowHalves;
+        dpx.bcSingleNodeRingLLCapBytes = kBcLLCap;
+        ncclComm* comm = MakeGfx1250ProtocolComm(8);
+        comm->nChannels = 112;
+        comm->archThresholds = &dpx;
+        // 1 MiB is far below the single-node ceiling (16 MiB) but above the DPX LL ceiling (16 KiB).
+        EXPECT_NE(NCCL_PROTO_LL, ProtocolOf(comm, ncclFuncBroadcast, kMiB, NCCL_PROTO_SIMPLE));
+        ScopedHook loadParam(g_loadParam, ForceParam("RCCL_BC_SINGLE_NODE_RING_LL_MAX_BYTES", int64_t(1024 * kMiB)));
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, 512 * kMiB + 1, NCCL_PROTO_SIMPLE));
+        DeleteCommWithArch(comm);
+      });
+}
+
+// Exponents in halves: an odd half is a square root. 768 B x (nChannels x (nRanks - 1))^1.5 (halves 3 and 3) on
+// 2 ranks / 32 channels is 768 x 32 x sqrt(32) = 139022.85 B, floored; each half alone, and 0 for a constant term.
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_SingleNodeBroadcastLLCeilingHalfPowers) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveProtocol_SingleNodeBroadcastLLCeilingHalfPowers",
+      []() {
+        SetMicroEnvAbsent("NCCL_PROTO");
+        rcclArchThresholds table = MakeBcLLCeilingTable();
+        table.bcSingleNodeRingLLBaseBytes = 768;
+        table.bcSingleNodeRingLLCapBytes = 5 * kMiB;
+        const struct {
+          unsigned int channelHalves;
+          unsigned int hopHalves;
+          int nRanks;
+          int nChannels;
+          size_t ceiling;
+        } cases[] = {
+            {3, 3, 2, 32, 139022},     // 768 x 32^1.5 x 1
+            {3, 3, 4, 24, 469202},     // 768 x 24^1.5 x 3^1.5 = 469202.12
+            {3, 3, 7, 8, 255401},      // 768 x 8^1.5 x 6^1.5 = 255401.28
+            {3, 3, 8, 56, 5 * kMiB},   // 5960604.70 is above the cap
+            {3, 2, 4, 24, 270893},     // 768 x 24^1.5 x 3 = 270893.97
+            {2, 3, 4, 24, 95775},      // 768 x 24 x 3^1.5 = 95775.48
+            {0, 0, 8, 56, 768},        // a constant ceiling
+            {1, 0, 2, 16, 3072},       // 768 x 16^0.5
+        };
+        for (const auto& c : cases) {
+          table.bcSingleNodeRingLLChannelPowHalves = c.channelHalves;
+          table.bcSingleNodeRingLLHopPowHalves = c.hopHalves;
+          ncclComm* comm = MakeBcLLCeilingComm(&table, c.nRanks, c.nChannels);
+          SCOPED_TRACE(testing::Message() << "halves " << c.channelHalves << "/" << c.hopHalves << ", " << c.nRanks
+                                          << " ranks, " << c.nChannels << " channels");
+          EXPECT_EQ(NCCL_PROTO_LL, ProtocolOf(comm, ncclFuncBroadcast, c.ceiling, NCCL_PROTO_SIMPLE));
+          EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, c.ceiling + 1, NCCL_PROTO_SIMPLE));
+          DeleteCommWithArch(comm);
+        }
+      });
+}
+
+namespace {
+// The real tables' ceiling at each single-node rank count, with the ring channel count measured on that shape.
+struct BcLLRealShape {
+  int nRanks;
+  int nChannels;
+  size_t ceiling;
+};
+
+// gfx950: 4 KiB x nChannels x (nRanks - 1)^2, at most 16 MiB (8 ranks: 22478848 B formula).
+constexpr BcLLRealShape kBcLLGfx950Shapes[] = {
+    {2, 32, 128 * kKiB}, {3, 16, 256 * kKiB}, {4, 48, 1728 * kKiB}, {5, 8, 512 * kKiB},
+    {6, 8, 800 * kKiB},  {7, 8, 1152 * kKiB}, {8, 112, 16 * kMiB},
+};
+// gfx942: 768 B x (nChannels x (nRanks - 1))^1.5, at most 5 MiB (8 ranks: 5960604.70 B formula).
+constexpr BcLLRealShape kBcLLGfx942Shapes[] = {
+    {2, 32, 139022}, {3, 8, 49152}, {4, 24, 469202}, {5, 4, 49152}, {6, 4, 68692}, {7, 4, 90297}, {8, 56, 5 * kMiB},
+};
+
+template <size_t N>
+void ExpectBcLLRealCeilings(const char* arch, const rcclArchThresholds* table, const BcLLRealShape (&shapes)[N]) {
+  for (const BcLLRealShape& sh : shapes) {
+    SCOPED_TRACE(testing::Message() << arch << ", " << sh.nRanks << " ranks, " << sh.nChannels << " channels");
+    ncclComm* comm = MakeBcLLCeilingComm(table, sh.nRanks, sh.nChannels, arch);
+    EXPECT_EQ(NCCL_PROTO_LL, ProtocolOf(comm, ncclFuncBroadcast, 1, NCCL_PROTO_SIMPLE));
+    EXPECT_EQ(NCCL_PROTO_LL, ProtocolOf(comm, ncclFuncBroadcast, sh.ceiling, NCCL_PROTO_SIMPLE));
+    EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, sh.ceiling + 1, NCCL_PROTO_SIMPLE));
+    DeleteCommWithArch(comm);
+  }
+}
+
+// The same boundaries with the comm's rank, local rank and device set to each rank's values in turn.
+template <size_t N>
+void ExpectBcLLIgnoresRankIndex(const char* arch, const BcLLRealShape (&shapes)[N]) {
+  const rcclArchThresholds* table = real_arch_thresholds::rcclGetArchThresholds(arch, RCCL_TUNING_PARTITION_SPX);
+  ASSERT_NE(nullptr, table) << arch;
+  for (const BcLLRealShape& sh : shapes) {
+    ncclComm* comm = MakeBcLLCeilingComm(table, sh.nRanks, sh.nChannels, arch);
+    for (int r = 0; r < sh.nRanks; ++r) {
+      comm->rank = r;
+      comm->localRank = r;
+      comm->cudaDev = sh.nRanks - 1 - r;
+      SCOPED_TRACE(testing::Message() << arch << ", " << sh.nRanks << " ranks, rank " << r);
+      EXPECT_EQ(NCCL_PROTO_LL, ProtocolOf(comm, ncclFuncBroadcast, sh.ceiling, NCCL_PROTO_SIMPLE));
+      EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, sh.ceiling + 1, NCCL_PROTO_SIMPLE));
+    }
+    DeleteCommWithArch(comm);
+  }
+}
+}  // namespace
+
+// The real tables: gfx950 and gfx942 each carry their own fit, gfx1250 keeps the model. The boundary at every rank
+// count from 2 to 8, with the channel count each shape runs on.
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_SingleNodeBroadcastLLCeilingRealTables) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveProtocol_SingleNodeBroadcastLLCeilingRealTables",
+      []() {
+        SetMicroEnvAbsent("NCCL_PROTO");
+        const rcclArchThresholds* gfx950 =
+            real_arch_thresholds::rcclGetArchThresholds("gfx950", RCCL_TUNING_PARTITION_SPX);
+        ASSERT_NE(nullptr, gfx950);
+        EXPECT_EQ(kBcLLBase, gfx950->bcSingleNodeRingLLBaseBytes);
+        EXPECT_EQ(kBcLLChannelPowHalves, gfx950->bcSingleNodeRingLLChannelPowHalves);
+        EXPECT_EQ(kBcLLHopPowHalves, gfx950->bcSingleNodeRingLLHopPowHalves);
+        EXPECT_EQ(kBcLLCap, gfx950->bcSingleNodeRingLLCapBytes);
+        ExpectBcLLRealCeilings("gfx950", gfx950, kBcLLGfx950Shapes);
+
+        const rcclArchThresholds* gfx942 =
+            real_arch_thresholds::rcclGetArchThresholds("gfx942", RCCL_TUNING_PARTITION_SPX);
+        ASSERT_NE(nullptr, gfx942);
+        EXPECT_EQ(768u, gfx942->bcSingleNodeRingLLBaseBytes);
+        EXPECT_EQ(3u, gfx942->bcSingleNodeRingLLChannelPowHalves);
+        EXPECT_EQ(3u, gfx942->bcSingleNodeRingLLHopPowHalves);
+        EXPECT_EQ(5 * kMiB, gfx942->bcSingleNodeRingLLCapBytes);
+        ExpectBcLLRealCeilings("gfx942", gfx942, kBcLLGfx942Shapes);
+
+        for (const rcclTuningPartition mode : {RCCL_TUNING_PARTITION_SPX, RCCL_TUNING_PARTITION_DPX}) {
+          const rcclArchThresholds* t = real_arch_thresholds::rcclGetArchThresholds("gfx1250", mode);
+          ASSERT_NE(nullptr, t) << mode;
+          EXPECT_EQ(0u, t->bcSingleNodeRingLLBaseBytes) << mode;
+          EXPECT_EQ(0u, t->bcSingleNodeRingLLCapBytes) << mode;
+        }
+      });
+}
+
+// Tripwire: fails if the ceiling starts reading the rank's own index, local rank or device. Rank uniformity itself
+// rests on nChannels and the env being the same on every rank, which no host test can reach.
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_SingleNodeBroadcastLLCeilingIgnoresRankLocalRankAndDevice) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveProtocol_SingleNodeBroadcastLLCeilingIgnoresRankLocalRankAndDevice",
+      []() {
+        SetMicroEnvAbsent("NCCL_PROTO");
+        ExpectBcLLIgnoresRankIndex("gfx950", kBcLLGfx950Shapes);
+        ExpectBcLLIgnoresRankIndex("gfx942", kBcLLGfx942Shapes);
+      });
+}
 
 // The registered AllReduce re-route reads its bounds from the arch table: the gfx1250 SPX table re-routes, while the
 // DPX table, no table and RCCL_IGNORE_ARCH_TABLE=1 keep the choice symk's withdrawal leaves, with no grid cap.

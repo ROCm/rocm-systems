@@ -46,13 +46,15 @@ std::function<void(struct ncclComm*, size_t const&, struct ncclTaskColl*)>
 std::function<void(struct ncclComm*, size_t const&, struct ncclTaskColl*)>
     g_rcclSetPipelining = DefaultNoOpTune;
 int g_rcclUpdateCollectiveProtocolCalls = 0;
+float (*g_rcclUpdateCollectiveProtocolTable)[NCCL_NUM_PROTOCOLS] = nullptr;
 int g_rcclSetPipeliningCalls = 0;
 int g_rcclUpdateThreadThresholdCalls = 0;
 int g_rcclOptThreadBlockSizeCalls = 0;
 
 void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes,
-                                  struct ncclTaskColl* info) {
+                                  struct ncclTaskColl* info, float (*table)[NCCL_NUM_PROTOCOLS]) {
   ++g_rcclUpdateCollectiveProtocolCalls;
+  g_rcclUpdateCollectiveProtocolTable = table;
   g_rcclUpdateCollectiveProtocol(comm, nBytes, info);
 }
 void rcclSetPipelining(struct ncclComm* comm, size_t const& nBytes, struct ncclTaskColl* info) {
@@ -375,6 +377,7 @@ void ResetRcclWrapFakes() {
   g_rcclParamCeArStagingBytes = -1;
   g_rcclCeArNonRegCap = DefaultCeArNonRegCap;
   g_rcclUpdateCollectiveProtocolCalls = 0;
+  g_rcclUpdateCollectiveProtocolTable = nullptr;
   g_rcclUpdateCollectiveAlgorithmCalls = 0;
   g_rcclUpdateCollectiveAlgorithmBeforeProtocol = false;
   g_rcclUpdateRemoteFlushAlgoProtoCalls = 0;

@@ -83,6 +83,29 @@ TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_ConsultsEveryRcclTuningHookExactlyOnce)
   EXPECT_EQ(1, g_rcclUpdateCollectiveChannelsCalls) << "rcclUpdateCollectiveChannels";
 }
 
+// rcclUpdateCollectiveProtocol gets the cost table the choice came from, so its single-node Broadcast Ring LL
+// ceiling can see that a per-call mask blanked Ring LL. A tuner match never reaches it, so the tuner's pick stands.
+TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_ProtocolHookGetsTheCostTableAndATunerMatchSkipsIt) {
+  AlgoInfoComm cc;
+  auto task = CostTask(ncclFuncBroadcast);
+  CostTable tbl;
+  tbl.t[NCCL_ALGO_RING][NCCL_PROTO_SIMPLE] = 0.5f;
+  ASSERT_EQ(ncclSuccess, topoGetAlgoInfo(cc.get(), &task, 1 << 20, tbl.ptr(), /*simInfo=*/nullptr));
+  EXPECT_EQ(1, g_rcclUpdateCollectiveProtocolCalls);
+  float (*const expected)[NCCL_NUM_PROTOCOLS] = tbl.t;
+  EXPECT_EQ(expected, g_rcclUpdateCollectiveProtocolTable);
+
+  ncclTuner_t tuner{};
+  cc.get()->tuner = &tuner;
+  CostTable tuned;
+  tuned.t[NCCL_ALGO_RING][NCCL_PROTO_SIMPLE] = 0.0f;  // a tuner match sets its cell to 0
+  task = CostTask(ncclFuncBroadcast);
+  ASSERT_EQ(ncclSuccess, topoGetAlgoInfo(cc.get(), &task, 1 << 20, tuned.ptr(), /*simInfo=*/nullptr));
+  EXPECT_EQ(1, g_rcclUpdateCollectiveProtocolCalls) << "a tuner match must not reach the protocol hook";
+  EXPECT_EQ(NCCL_PROTO_SIMPLE, task.protocol);
+  cc.get()->tuner = nullptr;
+}
+
 // LATENT BUG (enqueue.cc:2659): rcclOverrideChannels returns ncclResult_t, but
 // the call site discards it -- there is no NCCLCHECK, unlike every other
 // ncclResult_t-returning call in topoGetAlgoInfo. A failing channel override is
