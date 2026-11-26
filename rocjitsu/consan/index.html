@@ -2183,7 +2183,7 @@ capture owns the evidence needed for replay; analysis needs neither the
 original code-object files nor live HSA state.</p>
 <h2 id="available-analysis">Available analysis<a class="headerlink" href="#available-analysis" title="Permanent link">&para;</a></h2>
 <p><code>LdsRaceDetection</code> is the only implemented analysis. It checks ordinary native LDS
-reads/writes, admitted Group-FLAT B32 loads/stores, and admitted relaxed LDS atomics
+reads/writes, admitted Group-FLAT loads/stores, and admitted relaxed LDS atomics
 at naturally aligned addresses. It uses the same observations for two checks.
 All supported targets admit ordinary single-range b8, b16, b32, b64, b96, and
 b128 native LDS operations on gfx942/gfx950 wave64, gfx1100/gfx1201 wave32 or
@@ -2247,13 +2247,19 @@ Access probes capture addresses before an aliased load can overwrite them, recor
 widths and byte immediates, and preserve every guest result word. For b96 the
 range spans three dwords. Its effective start must be 16-byte aligned so the
 range is independent of the launch alignment mode. The minimum fixed LDS extent is four bytes.</p>
-<p>Group-FLAT B32 loads and stores record four-byte LDS ranges. Preparation follows
-the shared-aperture high word through register copies into the address VGPR pair.
-A site is exact when the shared high word is proven on every incoming path for
-every active lane. The probe samples the low word before the access, including
-when the load overwrites an address register, and adds the byte displacement.
-gfx942, gfx950, and gfx1100 use 8-byte instructions. gfx1201 and gfx1250 use
-12-byte VFLAT instructions with a signed displacement.</p>
+<p>On all seven supported target/wave profiles, Group-FLAT B32 loads and stores
+record four-byte LDS ranges. Unsigned and signed halfword loads, D16 low/high
+loads, and low/high halfword stores record two bytes. B64 and B128 loads and
+stores accept two- and four-word data tuples, respectively. They record a single
+eight- or sixteen-byte range. A native access that overlaps any part of the tuple
+can produce a finding. The saved site identifies the Group-FLAT origin and its
+byte width.</p>
+<p>Preparation follows the shared-aperture high word through register copies
+into the address VGPR pair. A site is exact when the shared high word is proven
+on every incoming path for every active lane. The probe samples the low word
+before the access, including when a load overwrites an address register, and
+adds the byte displacement. gfx942, gfx950, and gfx1100 use 8-byte instructions.
+gfx1201 and gfx1250 use 12-byte VFLAT instructions with a signed displacement.</p>
 <p>The default policy also admits a scalar pointer-high select between a known
 shared high word and either an unknown SGPR or the inline zero used in a
 null-pointer check. Its range and findings are conditional on the shared high
