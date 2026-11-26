@@ -409,6 +409,7 @@ __device__ __forceinline__ bool waveStore16Begin(uintptr_t addr, WaveStore16& w)
 // Only after waveStore16Begin() returned true.
 __device__ __forceinline__ void waveStore16(WaveStore16 const& w, uint32_t ioff, BytePack<16> value) {
   // cpol SCOPE_SYS, the scope the DWORDX4 store builtin gives.
+  // Fold CachePolicy into a constexpr variable since clang may pass it as a call, potentially hitting an assertion.
   constexpr CachePolicy cpol = createCachePolicy(TemporalHint::RT, MemScope::SYS);
   __builtin_amdgcn_raw_buffer_store_b128(value.v4u, w.rsrc, w.voff + ioff, 0, cpol);
 }
