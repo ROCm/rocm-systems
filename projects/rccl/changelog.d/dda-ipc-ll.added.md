@@ -1,0 +1,1 @@
+* `RCCL_DDA_IPC_LL_THRESHOLD` (default `-1`): ceiling, in total message bytes, of the DDA LL one-shot for gfx950 and gfx942 single-node 8-rank `ncclAllReduce` and `ncclReduceScatter`. `-1` follows the per-architecture table, `0` turns it off, and a positive value sets the ceiling for both collectives, up to 256 KiB for `ncclAllReduce` and 2 MiB for `ncclReduceScatter`.

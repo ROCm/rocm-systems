@@ -96,14 +96,14 @@ template <typename T, int NRANKS_CT>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
 #endif
-  __global__ void ddaAllReduceFlatLL(T* const* __restrict__ peerScratch,    // ddaPeerPtrsDev: nRanks scratch bases
+  __global__ void ddaAllReduceFlatLL(T* const* __restrict__ peerScratch,    // ddaLLRegion: nRanks LL region bases
                                      T* __restrict__ recvbuff,              // local user output
                                      const T* __restrict__ sendbuff,        // local user input
                                      size_t count,                          // full-message element count
                                      int selfRank, int nRanksRt,
                                      uint32_t* __restrict__ epochDev,       // per-block LL epoch cells (shared AG+AR)
                                      int epochLen,                          // number of cells in epochDev
-                                     size_t bankSize,                     // scratch bank size (from host)
+                                     size_t bankSize,                     // LL bank size (ddaLLRegion)
                                      DdaKernelParams params) {
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;

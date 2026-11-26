@@ -33,7 +33,7 @@ bool rcclWindowFits(size_t totalBytes, size_t minBytes, size_t maxBytes);
 
 struct rcclArchThresholds {
   // DDA tier upper bounds, per collective.  gfx1250 uses fabric LL/LL128/VMM;
-  // gfx942/gfx950 use ddaVmmMax as the DDA-IPC cap (LL128 unused; LL only for Broadcast).
+  // gfx942/gfx950 use ddaVmmMax as the DDA-IPC cap (LL128 unused; LL: IPC LL one-shots).
   // All arrays are indexed by ncclFunc_t; 0 disables that tier for that coll.
   // All collectives compare total message bytes against the table values.
   size_t ddaLLMax[RCCL_DDA_FUNC_COUNT];     // DDA LL tier:    0 .. ddaLLMax[func]

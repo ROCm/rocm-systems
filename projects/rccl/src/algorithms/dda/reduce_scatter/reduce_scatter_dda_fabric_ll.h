@@ -31,8 +31,8 @@
 
 namespace dda::common {
 
-// Per-shard payload cap, enforced by eligibility. The slot stride is fixed so
-// every rank addresses the same geometry. One bank is nRanks slots with the
+// Per-shard payload cap, enforced by eligibility. All ranks derive one slot
+// stride (ddaLLRsSlotPkts). One bank is nRanks slots with the
 // 8B payload expanded to 16B: 8 MiB at 1 MiB/rank and 4 ranks.
 constexpr size_t kDdaLLRsMaxBytes = 1ULL*1024*1024;         // 1 MiB per-rank (= 4 MiB total at 4 ranks)
 constexpr size_t kDdaLLRsSlotStridePkts = kDdaLLRsMaxBytes / 8;   // 131072
@@ -40,6 +40,12 @@ constexpr size_t kDdaLLRsSlotStridePkts = kDdaLLRsMaxBytes / 8;   // 131072
 // Bytes in one bank: nRanks slots at the fixed stride.
 constexpr size_t ddaLLRsBankBytes(int nRanks) {
   return (size_t)nRanks * kDdaLLRsSlotStridePkts * sizeof(LLPacket16);
+}
+
+// Per-rank slot stride: the fixed one, or the bank's per-rank share when smaller (the 4 MiB IPC LL bank).
+constexpr size_t ddaLLRsSlotPkts(size_t bankSize, int nRanks) {
+  const size_t bankSlot = ddaLLPeerSlotPkts(bankSize, nRanks);
+  return bankSlot < kDdaLLRsSlotStridePkts ? bankSlot : kDdaLLRsSlotStridePkts;
 }
 
 // Packet offset of this epoch's bank. Odd epochs start at bankSize, where the
@@ -66,20 +72,20 @@ template <typename T, int NRANKS_CT>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
 #endif
-  __global__ void ddaReduceScatterFabricLL(T* const* __restrict__ peerScratch, // ddaPeerPtrsDev: nRanks scratch bases
+  __global__ void ddaReduceScatterFabricLL(T* const* __restrict__ peerScratch, // ddaLLRegion: nRanks LL region bases
                                            T* __restrict__ recvbuff, // local user output (recvcount elems)
                                            const T* __restrict__ sendbuff, // local user input (recvcount*nRanks)
                                            size_t recvcount, // per-rank shard element count
                                            int selfRank, int nRanksRt,
                                            uint32_t* __restrict__ epochDev, // per-block LL epoch cells
                                            int epochLen, // number of cells in epochDev
-                                           size_t bankSize, // scratch bank size (from host)
+                                           size_t bankSize, // LL bank size (ddaLLRegion)
                                            DdaKernelParams params) {
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
   const size_t bytes = recvcount * sizeof(T);
   const size_t nPk = bytes >> 3; // 8 payload bytes per packet
-  const size_t slot = kDdaLLRsSlotStridePkts;
+  const size_t slot = ddaLLRsSlotPkts(bankSize, nRanks);
   const size_t chunkWords = nPk * 2; // uint32 words per shard chunk
 
 #if (defined(__gfx1250__) || defined(__gfx1250_strict__)) && __has_builtin(__builtin_amdgcn_global_prefetch)

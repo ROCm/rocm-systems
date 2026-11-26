@@ -173,7 +173,7 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
     tableOk && cudaOk(cudaStreamCreateWithFlags(&zeroStream, cudaStreamNonBlocking), "zero-fill stream create");
   // Zeroed once, so an LL line never false-matches a first epoch (>= 1); the copy-based paths overwrite per op.
   zeroed = zeroed && cudaOk(cudaMemsetAsync(scratch, 0, bytes, zeroStream), "scratch memset");
-  // LL epoch cells (DDA broadcast LL); optional, a failure only disables that tier. Zeroed cells make the first
+  // LL epoch cells (Broadcast, AR/RS LL); optional, a failure only disables those tiers. Zeroed cells make the first
   // flag 1. Sized for the CU-derived cap so the Broadcast grid is not limited by the cells.
   const size_t epochLen = nccl_dda_detail::ddaLLEpochCount(
     kDdaNranks, nccl_dda_detail::ddaFabricMaxNBlocksForScratch(comm->cuCount, nullptr));
@@ -215,7 +215,7 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
     return ncclSuccess;
   }
   if (ready == 1) {
-    ATTN("LL epoch cells unavailable on a rank; DDA Broadcast disabled");
+    ATTN("LL epoch cells unavailable on a rank; DDA IPC LL tiers (Broadcast, AR/RS one-shots) disabled");
   }
 
   comm->ddaIpcMemHandler = handler;

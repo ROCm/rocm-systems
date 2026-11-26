@@ -11,6 +11,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <utility>
 
 #include "../common/DdaFabricTestHelpers.hpp"
 #include "algorithms/dda/DdaCollSeams.h"
@@ -286,6 +287,56 @@ TEST_F(DdaReduceScatterFabricLLMicrotest, Blocks_MatchTheLaunchedGrid) {
       }
     }
   }
+}
+
+// The slot stride is the fixed one wherever the fabric bank holds it, else the 4 MiB IPC bank's per-rank share.
+TEST_F(DdaReduceScatterFabricLLMicrotest, SlotPkts_FixedStrideElseTheBankShare) {
+  using dda::common::ddaLLRsSlotPkts;
+  using dda::common::kDdaLLRsSlotStridePkts;
+  EXPECT_EQ(ddaLLRsSlotPkts(dda::common::ddaLLRsBankBytes(8), 8), kDdaLLRsSlotStridePkts);
+  EXPECT_EQ(ddaLLRsSlotPkts(dda::common::ddaBankSize(SIZE_MAX), 8), kDdaLLRsSlotStridePkts);
+  EXPECT_EQ(ddaLLRsSlotPkts(dda::common::kDdaIpcLLRegionBytes / 2, 8), 32768u);
+  EXPECT_EQ(ddaLLRsSlotPkts(dda::common::ddaLLRsBankBytes(8) - 16, 8), kDdaLLRsSlotStridePkts - 16);
+}
+
+// IPC: the shard fits a 4 MiB bank's 256 KiB slot whatever the Simple scratch, reads no pointer, and needs epoch cells.
+TEST_F(DdaReduceScatterFabricLLMicrotest, Eligible_IpcNeedsTheLLRegionAndFitsItsBank) {
+  mock_.setIpcResourcesPresent();
+  EXPECT_TRUE(Eligible(4));
+  EXPECT_TRUE(Eligible((256u << 10) / 4));
+  EXPECT_FALSE(Eligible((256u << 10) / 4 + 4));
+  comm().ddaScratchBytes = 4096;
+  EXPECT_TRUE(Eligible((256u << 10) / 4));
+  EXPECT_TRUE(ncclReduceScatterDdaFabricLLEligible(mock_.get(), reinterpret_cast<void*>(0x1002),
+                                                   reinterpret_cast<void*>(0x1002), 8, ncclBfloat16, ncclSum));
+  comm().ddaLLEpochDev = nullptr;
+  EXPECT_FALSE(Eligible(4));
+}
+
+TEST_F(DdaReduceScatterFabricLLMicrotest, Launch_IpcPassesTheLLRegionPeersAndBank) {
+  mock_.setIpcResourcesPresent();
+  const DdaLaunch& launch = RunOne(64);
+  EXPECT_EQ(launch.kernel, (Kernel<float, 8>()));
+  EXPECT_EQ(launch.block.x, 512u);
+  ASSERT_EQ(launch.args.size(), 10u);
+  EXPECT_EQ(launch.Arg<float**>(0), mock_.ipcLLPeers<float>());
+  EXPECT_EQ(launch.Arg<size_t>(3), 64u);
+  EXPECT_EQ(launch.Arg<int>(5), 8);
+  EXPECT_EQ(launch.Arg<size_t>(8), dda::common::kDdaIpcLLRegionBytes / 2);
+}
+
+// The IPC grid is the IPC Simple kernel's for the shard (512-thread blocks) or the epoch cells; the reporter agrees.
+TEST_F(DdaReduceScatterFabricLLMicrotest, Launch_IpcGridIsTheIpcKernelGrid) {
+  mock_.setIpcResourcesPresent();
+  // {shard bytes, blocks}: 2K-64K total run one block; then 2, 4, ..., 24.
+  const std::pair<size_t, unsigned> cases[] = {{256, 1},       {4u << 10, 1},   {8u << 10, 1},
+                                               {16u << 10, 2}, {32u << 10, 4},  {256u << 10, 24}};
+  for (const auto& [shard, blocks] : cases) {
+    EXPECT_EQ(RunOne(shard / 4).grid.x, blocks) << "shard " << shard;
+    EXPECT_EQ(ncclReduceScatterDdaFabricLLBlocks(mock_.get(), shard / 4, ncclFloat32), blocks) << "shard " << shard;
+  }
+  comm().ddaLLEpochLen = 10;
+  EXPECT_EQ(RunOne((256u << 10) / 4).grid.x, 10u);
 }
 
 TEST_F(DdaReduceScatterFabricLLMicrotest, Launch_LaunchErrorIsReported) {

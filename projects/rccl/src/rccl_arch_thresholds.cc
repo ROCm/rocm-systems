@@ -554,13 +554,14 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
 
 // gfx950: DDA-IPC cap is 64 MiB for AG, 128 MiB for AR/RS and 4 MiB for AlltoAll. No fabric LL/LL128.
 static const rcclArchThresholds rcclArchThresholds_gfx950 = {
-  // ddaLLMax: Broadcast LL one-shot over the IPC scratch; no fabric LL on gfx950.
+  // ddaLLMax: LL one-shots over the IPC LL region; no fabric LL on gfx950. AR and RS run them up to where IPC Simple
+  // catches up.
   .ddaLLMax = {
     256ULL*1024,          // [0] Broadcast      -- 8-rank IPC one-shot; Ring above it
     0,                    // [1] Reduce          -- not used
     0,                    // [2] AllGather       -- no fabric LL
-    0,                    // [3] ReduceScatter   -- no fabric LL
-    0,                    // [4] AllReduce       -- no fabric LL
+    32ULL*1024,           // [3] ReduceScatter   -- 8-rank IPC one-shot; IPC Simple above it
+    4ULL*1024,            // [4] AllReduce       -- 8-rank IPC one-shot; IPC Simple above it
     0,                    // [5] SendRecv        -- not used
     0,                    // [6] Send            -- not used
     0,                    // [7] Recv            -- not used
@@ -706,13 +707,14 @@ static const rcclArchThresholds rcclArchThresholds_gfx950 = {
 
 // gfx942: DDA-IPC cap is 8 MiB for AR/AG/RS and 4 MiB for AlltoAll. No fabric LL/LL128.
 static const rcclArchThresholds rcclArchThresholds_gfx942 = {
-  // ddaLLMax: Broadcast LL one-shot over the IPC scratch; no fabric LL on gfx942.
+  // ddaLLMax: LL one-shots over the IPC LL region; no fabric LL on gfx942. AR and RS run them up to where IPC Simple
+  // catches up.
   .ddaLLMax = {
     256ULL*1024,          // [0] Broadcast      -- 8-rank IPC one-shot; Ring above it
     0,                    // [1] Reduce          -- not used
     0,                    // [2] AllGather       -- no fabric LL
-    0,                    // [3] ReduceScatter   -- no fabric LL
-    0,                    // [4] AllReduce       -- no fabric LL
+    32ULL*1024,           // [3] ReduceScatter   -- 8-rank IPC one-shot; IPC Simple above it
+    4ULL*1024,            // [4] AllReduce       -- 8-rank IPC one-shot; IPC Simple above it
     0,                    // [5] SendRecv        -- not used
     0,                    // [6] Send            -- not used
     0,                    // [7] Recv            -- not used

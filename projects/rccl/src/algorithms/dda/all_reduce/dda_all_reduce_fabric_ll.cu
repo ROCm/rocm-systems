@@ -23,6 +23,7 @@
 #include "algorithms/dda/all_reduce/all_reduce_dda_ll128.h"
 #include "algorithms/dda/all_reduce/all_reduce_dda_ll128_twoshot.h"
 #include "algorithms/dda/all_reduce/all_reduce_dda_ll128_peerpar.h"
+#include "algorithms/dda/dda_ll_region.h"
 #include "archinfo.h"
 #include "checks.h"
 #include "comm.h"
@@ -80,9 +81,13 @@ static inline std::pair<dim3, dim3> ddaArFabricLLGrid(const ncclComm* comm, size
   return std::make_pair(dim3((unsigned)std::max<size_t>(blocks, 1)), dim3(threads));
 }
 
-// Per-tier geometry for `bytes` of message, shared by each launcher and the *Blocks reporters.
-// LL one-shot: 8-byte packets of the whole message, one thread each.
+// Per-tier geometry, shared by the launchers and *Blocks reporters.
+// LL one-shot: a thread per 8-byte packet; IPC: in the Simple grid (ddaIpcLLBlocks).
 static inline std::pair<dim3, dim3> ddaArLLOneShotGeom(const ncclComm* comm, size_t bytes, rcclDdaLaunchCap cap) {
+  if (nccl_dda_detail::ddaLLOnIpc(comm)) {
+    const unsigned threads = dda::common::ddaCapThreads(dda::common::kDdaSimpleThreads, cap.threads);
+    return std::make_pair(dim3(nccl_dda_detail::ddaIpcLLBlocks(comm, bytes, threads, cap.blocks)), dim3(threads));
+  }
   return ddaArFabricLLGrid(comm, bytes >> 3, ddaArLLOneShotThreads(comm), 1, cap);
 }
 
@@ -152,7 +157,8 @@ static bool ddaLLArSpreadWins(size_t bytes, int nRanks, unsigned oneShotThreads)
 // blocks are full width, a shard fits the two-shot slot and the spread wins.
 static bool ddaLLArSpreadSelected(ncclComm* comm, size_t bytes, unsigned threads) {
   const int nRanks = comm->nRanks;
-  if (nRanks < 2) {
+  // The IPC path runs the one-shot only.
+  if (nRanks < 2 || nccl_dda_detail::ddaLLOnIpc(comm)) {
     return false;
   }
   // The rule is tuned on full kDdaLLSpreadThreads blocks; a cap that narrows them keeps the one-shot.
@@ -199,12 +205,12 @@ static ncclResult_t ncclAllReduceDdaFabricLLTyped(const void* sendbuff, void* re
   const size_t bytes = count * sizeof(T);
   const size_t nPk = bytes >> 3; // 8 payload bytes per packet (for logging)
 
-  T** peers = reinterpret_cast<T**>(comm->ddaPeerPtrsDev);
-  // Shared epoch counter (same as AG/RS) so bank = flag & 1 is consistent
-  // across all LL operation types and cannot alias scratch banks.
+  // The LL region of either handler, under the epoch counter every LL tier shares, so bank = flag & 1 never aliases.
+  const nccl_dda_detail::DdaLLRegion region = nccl_dda_detail::ddaLLRegion(comm);
+  T** peers = reinterpret_cast<T**>(region.peers);
   uint32_t* epochDev = comm->ddaLLEpochDev;
   const int epochLen = comm->ddaLLEpochLen;
-  const size_t bankSize = ddaBankSize(comm->ddaScratchBytes);
+  const size_t bankSize = region.bank;
 
   const dda::common::DdaKernelParams params{comm->abortFlagDev};
   bool spread = false;
@@ -239,8 +245,8 @@ static ncclResult_t ncclAllReduceDdaFabricLLTyped(const void* sendbuff, void* re
     return ncclSuccess;
   }
 
-  INFO(NCCL_COLL, "DDA fabric AllReduce LL: nRanks=%d bytes=%zu nPk=%zu grid=%u block=%u", nRanks, bytes, nPk, grid.x,
-       block.x);
+  INFO(NCCL_COLL, "DDA fabric AllReduce LL%s: nRanks=%d bytes=%zu nPk=%zu grid=%u block=%u",
+       nccl_dda_detail::ddaLLOnIpc(comm) ? " (IPC)" : "", nRanks, bytes, nPk, grid.x, block.x);
 
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
   // NRANKS_CT 4/8: unrolled reduce loop; 0: runtime fallback (up to
@@ -496,8 +502,9 @@ bool ddaLLArOneShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff
   if (comm == nullptr || comm->bootstrap == nullptr) {
     return false;
   }
-  // Fabric path: requires the fabric handler + scratch + peer table.
-  if (comm->ddaFabricMemHandler == nullptr || comm->ddaScratch == nullptr || comm->ddaPeerPtrsDev == nullptr) {
+  // The fabric or the IPC LL region (nccl_dda_detail::ddaLLRegionReady). Nothing below reads the buffers, so every
+  // rank decides alike.
+  if (!nccl_dda_detail::ddaLLRegionReady(comm)) {
     return false;
   }
   if (comm->nRanks < 2 || comm->nRanks > dda::common::kDdaMaxNranks) {
@@ -521,7 +528,7 @@ bool ddaLLArOneShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff
   // One packet carries 8B of payload, so the whole message has to fit the slot
   // the bank gives each rank. A bank too small for one packet per rank takes the
   // tier out entirely.
-  if ((bytes >> 3) > ddaLLArSlotPkts(ddaBankSize(comm->ddaScratchBytes), comm->nRanks)) {
+  if ((bytes >> 3) > ddaLLArSlotPkts(nccl_dda_detail::ddaLLRegion(comm).bank, comm->nRanks)) {
     return false;
   }
 

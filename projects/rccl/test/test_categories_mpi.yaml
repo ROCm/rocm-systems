@@ -655,6 +655,17 @@ test_categories:
     env_variables:
       - "NCCL_DEBUG=INFO"
       - "NCCL_CUMEM_ENABLE=1"
+  standard_env_dda_ipc_ll:
+    description: "DDA LL one-shots over the IPC LL region on gfx950 and gfx942. RCCL_PARAM caches RCCL_DDA_IPC_LL_THRESHOLD for the process lifetime, so it is set before launch. Needs exactly 8 ranks on one node; skips otherwise and when the caps are lower."
+    test_patterns:
+      - "DdaIpcMPI_LL.*"
+      - "RevokeDdaIpcMPITest.IncompleteCollective_DdaIpcLLAllReduce"
+      - "RevokeDdaIpcMPITest.IncompleteCollective_DdaIpcLLReduceScatter"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_standard_labels
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "RCCL_DDA_IPC_LL_THRESHOLD=2097152"
   comprehensive:
     description: "MPI exhaustive — same suites as standard; env enables implicit launch, CE memcpy paths, and verbose rank logs."
     test_patterns: *mpi_all_patterns

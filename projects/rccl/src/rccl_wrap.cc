@@ -44,6 +44,7 @@ THE SOFTWARE.
 #endif
 #include "algorithms/dda/alltoall/dda_alltoall.h"
 #include "algorithms/dda/broadcast/dda_broadcast.h"
+#include "algorithms/dda/dda_ll_region.h"
 #include "algorithms/gin/gin_alltoall.h"
 #include "group.h"
 #include "sym_kernels.h"
@@ -119,6 +120,8 @@ RCCL_PARAM(DdaLL128, "DDA_LL128", kDdaThresholdUnset);
 RCCL_PARAM(DdaLL128Threshold, "DDA_LL128_THRESHOLD", kDdaThresholdUnset);
 // Broadcast DDA: unset follows the arch table (any Broadcast DDA tier), 0 off, >0 on.
 RCCL_PARAM(DdaBc, "DDA_BC", kDdaThresholdUnset);
+// Cap in total bytes of the IPC LL one-shot of AllReduce and ReduceScatter: unset follows the table, 0 off.
+RCCL_PARAM(DdaIpcLLThreshold, "DDA_IPC_LL_THRESHOLD", kDdaThresholdUnset);
 // When set, bypass the per-arch tuning table entirely and use base-commit
 // env-var defaults for all thresholds (DDA, CE, symMaxR2).  Useful for
 // isolating arch-table effects without rebuilding.
@@ -1310,8 +1313,16 @@ inline size_t rcclDdaLLThresholdTab(const rcclArchThresholds* table, ncclFunc_t 
   if (table == nullptr) return kDdaLLBaseDefault;
   return ddaLLTierCapFromTable(table, func, nRanks);
 }
+// The comm's LL tier cap. On IPC, RCCL_DDA_IPC_LL_THRESHOLD replaces it for AllReduce and ReduceScatter when set.
 size_t rcclDdaLLThreshold(const ncclComm* comm, ncclFunc_t func) {
-  return rcclDdaLLThresholdTab(extAlgoArchTable(comm), func, comm != nullptr ? comm->nRanks : 0);
+  const size_t cap = rcclDdaLLThresholdTab(extAlgoArchTable(comm), func, comm != nullptr ? comm->nRanks : 0);
+  const bool ipcLLFunc = func == ncclFuncAllReduce || func == ncclFuncReduceScatter;
+  size_t ipcCap = 0;
+  if (comm == nullptr || !ipcLLFunc || !nccl_dda_detail::ddaLLOnIpc(comm) || !rcclParamDdaLL() ||
+      !ddaThresholdFromEnv(rcclParamDdaIpcLLThreshold(), &ipcCap)) {
+    return cap;
+  }
+  return ipcCap;
 }
 
 // RCCL_DDA_LL_TWOSHOT_THRESHOLD wins when the user sets it. On rank-scaled comms
@@ -1555,8 +1566,10 @@ inline size_t rcclDdaEntryThresholdTab(const rcclArchThresholds* table, ncclFunc
   if (table != nullptr)    cap = std::max(cap, funcThresholdFromTable(table->ddaVmmMaxGraph, func));
   return cap;
 }
+// rcclDdaEntryThresholdTab, widened to the comm's LL cap (RCCL_DDA_IPC_LL_THRESHOLD on the IPC path).
 size_t rcclDdaEntryThreshold(const ncclComm* comm, ncclFunc_t func) {
-  return rcclDdaEntryThresholdTab(extAlgoArchTable(comm), func, comm != nullptr ? comm->nRanks : 0);
+  const size_t cap = rcclDdaEntryThresholdTab(extAlgoArchTable(comm), func, comm != nullptr ? comm->nRanks : 0);
+  return comm != nullptr ? std::max(cap, rcclDdaLLThreshold(comm, func)) : cap;
 }
 
 size_t rcclDdaScratchPayloadCap(const ncclComm* comm) {
@@ -2274,7 +2287,22 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
           if (!query) INFO(NCCL_TUNING, "AR cand DDA-VMM(fabric): inWindow=%d preferred=%d fallback=%d", (int)(msgBytes <= arDdaVmmMax), (int)cs.bestPreferredFound, (int)cs.bestFallbackFound);
         }
       } else {
-        if (arDdaVmmMax != 0 &&
+        // Single-node IPC: the LL one-shot (no barrier, no staging copy) up to its cap, then the Simple kernels.
+        const size_t arDdaLLMax = rcclDdaLLThreshold(comm, ncclFuncAllReduce);
+        if (arDdaLLMax > 0 && msgBytes <= arDdaLLMax &&
+            ncclAllReduceDdaFabricLLEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
+          rcclCollDecision cand = *decision;
+          cand.algo = RCCL_DDA_FABRIC_LL;
+          cand.protocol = NCCL_PROTO_LL;
+          cand.nMaxChannels = ncclAllReduceDdaFabricLLBlocks(comm, count, datatype, ddaCap);
+          rcclCandSearchRecord(cs, RCCL_BACKEND_DDA, cand);
+          if (!query) {
+            INFO(NCCL_TUNING, "AR cand DDA-LL(IPC): inWindow=1 preferred=%d fallback=%d", (int)cs.bestPreferredFound,
+                 (int)cs.bestFallbackFound);
+          }
+        }
+        // The entry gate admits the IPC LL cap, so the Simple kernels re-check their own.
+        if (!cs.bestPreferredFound && arDdaVmmMax != 0 && msgBytes <= arDdaVmmMax &&
             ncclAllReduceDdaIpcEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
           rcclCollDecision cand = *decision;
           cand.algo = RCCL_DDA_IPC;
@@ -2754,7 +2782,8 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
     // enters only when symk is unavailable. LL and LL128 have Blocks helpers, so the other tiers report 0.
     const size_t rsDdaVmmMax =
       rcclDdaVmmThresholdCtxTab(archTable, ncclFuncReduceScatter, rsWinRegType, /*graphMode=*/false, comm->nRanks);
-    const size_t rsDdaEntryMax = rcclDdaEntryThresholdTab(archTable, ncclFuncReduceScatter, comm->nRanks);
+    const size_t rsDdaEntryMax = rcclDdaEntryThreshold(comm, ncclFuncReduceScatter);
+    const size_t rsIpcLLMax = rcclDdaLLThreshold(comm, ncclFuncReduceScatter);
     if (!symEligible && rcclDdaEnabled(comm, totalBytes, rsDdaEntryMax, query, "RS")) {
       const bool ddaFabricArch   = IsArchMatch(comm->archName, "gfx1250");
       if (ddaFabricArch) {
@@ -2782,6 +2811,13 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
           decision->algo = RCCL_DDA_FABRIC_VMM;
           return rcclSelectDone("RS", query, decision);
         }
+      } else if (rsIpcLLMax > 0 && totalBytes <= rsIpcLLMax &&
+                 ncclReduceScatterDdaFabricLLEligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
+        // Single-node IPC LL one-shot: no barrier, no staging copy.
+        decision->algo = RCCL_DDA_FABRIC_LL;
+        decision->protocol = NCCL_PROTO_LL;
+        decision->nMaxChannels = ncclReduceScatterDdaFabricLLBlocks(comm, recvcount, datatype);
+        return rcclSelectDone("RS", query, decision);
       } else if (rsDdaVmmMax != 0 && totalBytes <= rsDdaVmmMax &&
                  ncclReduceScatterDdaIpcEligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
         decision->algo = RCCL_DDA_IPC;
