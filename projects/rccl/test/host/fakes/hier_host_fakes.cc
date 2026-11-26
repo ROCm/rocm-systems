@@ -41,4 +41,8 @@ std::function<ncclResult_t(ncclComm*)> g_hostHierTeardown = [](ncclComm* comm) {
 ncclResult_t rcclHostHierTeardown(ncclComm* comm) { return g_hostHierTeardown(comm); }
 ASSERT_HOOK_MATCHES_PROD(g_hostHierTeardown, rcclHostHierTeardown);
 
+std::function<int(const ncclComm*, ncclComm_t*)> g_hostHierChildren = [](const ncclComm*, ncclComm_t*) { return 0; };
+int rcclHostHierChildren(const ncclComm* comm, ncclComm_t children[2]) { return g_hostHierChildren(comm, children); }
+ASSERT_HOOK_MATCHES_PROD(g_hostHierChildren, rcclHostHierChildren);
+
 #undef ASSERT_HOOK_MATCHES_PROD

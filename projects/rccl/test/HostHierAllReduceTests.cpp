@@ -35,6 +35,7 @@ struct HostHierMockComm
     ncclComm&                 comm    = *storage;
     std::vector<ncclPeerInfo> peers;
     char                      archBuf[16]{};
+    char                      fakeDdaHandler = 0;
 
     HostHierMockComm(const std::vector<int>& hostOf, int rank, const char* arch = "gfx1250", bool mnnvl = true)
     {
@@ -45,6 +46,8 @@ struct HostHierMockComm
         comm.nRanks   = static_cast<int>(hostOf.size());
         // One clique holding every rank, as on a single MNNVL fabric.
         comm.clique.size = mnnvl ? comm.nRanks : 0;
+        // A parent comm on that fabric sets up DDA; eligibility only checks that it did.
+        comm.ddaFabricMemHandler = mnnvl ? reinterpret_cast<ncclFabricMemHandler*>(&fakeDdaHandler) : nullptr;
         comm.rank     = rank;
         setHosts(hostOf);
         comm.hostHierState = rcclHostHierUnprobed;
@@ -210,6 +213,28 @@ TEST(HostHierAllReduce, NeedsChildComms)
               rcclHostHierAllReduce(nullptr, nullptr, 1024, ncclFloat32, ncclSum, mock.get(), nullptr));
 }
 
+TEST(HostHierLayout, ChildrenListsTheChildCommsThatExist)
+{
+    HostHierMockComm mock(blockHosts(2, 8), 0);
+    ncclComm_t       children[2] = {};
+    EXPECT_EQ(0, rcclHostHierChildren(mock.get(), children)) << "before the layout probe";
+    ASSERT_NE(nullptr, rcclHostHierGetLayout(mock.get()));
+    EXPECT_EQ(0, rcclHostHierChildren(mock.get(), children)) << "before the split";
+
+    // Stand-ins for the split comms; cleared before teardown, which would release them.
+    auto intra = std::make_unique<ncclComm>();
+    auto inter = std::make_unique<ncclComm>();
+    mock.comm.hostHier->intra = intra.get();
+    EXPECT_EQ(1, rcclHostHierChildren(mock.get(), children)) << "one host: no inter-host comm";
+    EXPECT_EQ(intra.get(), children[0]);
+    mock.comm.hostHier->inter = inter.get();
+    ASSERT_EQ(2, rcclHostHierChildren(mock.get(), children));
+    EXPECT_EQ(intra.get(), children[0]);
+    EXPECT_EQ(inter.get(), children[1]);
+    mock.comm.hostHier->intra = nullptr;
+    mock.comm.hostHier->inter = nullptr;
+}
+
 TEST(HostHierAllReduce, AutoWindowEdges)
 {
     EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(2, 8, kMiB));
@@ -359,7 +384,7 @@ TEST(HostHierAllReduce, EligibilityPerMode_Isolated)
                     rcclHostHierAllReduceEligible(mock.get(), floats(128 * kMiB), ncclFloat32, ncclSum, false))
                     << "eight hosts of four ranks with the DPX table";
             }
-            // The mock comm has no DDA fabric, so the fused kernel never runs on it.
+            // The mock comm has no DDA scratch, so the fused kernel never runs on it.
             for(size_t bytes : {4 * kMiB, 8 * kMiB - 64})
             {
                 EXPECT_FALSE(eligible(blockHosts(2, 8), floats(bytes))) << bytes << " B on two hosts, no fused kernel";
@@ -375,6 +400,12 @@ TEST(HostHierAllReduce, EligibilityPerMode_Isolated)
             }
             for(size_t bytes : {2 * kMiB, 8 * kMiB, 16 * kMiB, 64 * kMiB, 128 * kMiB - 64, 128 * kMiB})
                 EXPECT_TRUE(eligible(blockHosts(2, 8), floats(bytes))) << bytes << " B on two hosts, three collectives";
+            {
+                HostHierMockComm mock(blockHosts(2, 8), 0);
+                mock.comm.ddaFabricMemHandler = nullptr;
+                EXPECT_FALSE(rcclHostHierAllReduceEligible(mock.get(), floats(2 * kMiB), ncclFloat32, ncclSum, false))
+                    << "no DDA fabric, as on a comm made by ncclCommSplit";
+            }
         })
         .withTimeout(std::chrono::seconds(30))
         .withNumGpus(0);

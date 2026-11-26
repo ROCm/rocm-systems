@@ -436,4 +436,29 @@ TEST_F(HostHierAllReduceMPITest, GroupedCallUsesDefaultPath)
     ASSERT_MPI_FALSE(builtChildComms());
 }
 
+// Every rank but rank 0 starts a call, so the child stages wait for it until the revoke aborts them. The revoke
+// syncs the comm's streams, so it only returns if the abort reaches the child comms.
+TEST_F(HostHierAllReduceMPITest, RevokeAbortsChildStagesWaitingOnAPeer)
+{
+    const size_t count = countFor(64 * 1024);
+    RunResult    run   = fp32Sum(count, false);
+    ASSERT_RUN_OK(run);
+    ASSERT_MPI_TRUE(builtChildComms());
+
+    // The same size as above, so the call needs no scratch-growth vote, which would wait for rank 0 on the host.
+    DeviceBuffer send, recv;
+    hipError_t   hip = hipMalloc(&send.ptr, count * sizeof(float));
+    if(hip == hipSuccess)
+        hip = hipMalloc(&recv.ptr, count * sizeof(float));
+    ASSERT_MPI_EQ(hipSuccess, hip);
+    ncclResult_t nccl = ncclSuccess;
+    if(rank_ != 0)
+        nccl = ncclAllReduce(send.ptr, recv.ptr, count, ncclFloat32, ncclSum, comm(), getActiveStream());
+    ASSERT_MPI_EQ(ncclSuccess, nccl);
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommRevoke(comm(), NCCL_REVOKE_DEFAULT));
+    ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+}
+
 #endif // MPI_TESTS_ENABLED

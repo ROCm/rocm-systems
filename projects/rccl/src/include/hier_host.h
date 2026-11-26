@@ -65,6 +65,10 @@ ncclResult_t rcclHostHierEnsure(struct ncclComm* comm);
 // Destroys the child comms, or aborts them when comm is being aborted. Called from commFree.
 ncclResult_t rcclHostHierTeardown(struct ncclComm* comm);
 
+// Stores the comm's child comms in children and returns how many there are, at most two. Split with splitShare = 0,
+// they keep their own abort flags, which the parent's abort and revoke must also set.
+int rcclHostHierChildren(const struct ncclComm* comm, ncclComm_t children[2]);
+
 // Sizes, in bytes, at which host-hierarchical AllReduce beat the default path in gfx1250
 // MNNVL fp32 sum measurements with 8 ranks per host on 2, 4 and 8 hosts and with 4 ranks
 // per host on 8 hosts. The rcclHostHierAllReduceAutoType combinations gain at the

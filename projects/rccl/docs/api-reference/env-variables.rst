@@ -532,10 +532,11 @@ collected in the following table.
           while a backend is forced. The first eligible call splits the
           communicator, so all ranks must use the same value.
       - | ``-1``: Auto (default). On gfx1250 when every rank is in one MNNVL
-          clique, used on buffers outside registered windows with these
-          layouts, message sizes and operations. With eight ranks per host: 2
-          to 16 MiB and 64 to 128 MiB on two hosts, 2 to 256 MiB on four
-          hosts and 2 to 512 MiB on eight hosts, for
+          clique and the communicator set up DDA fabric (communicators made
+          by ``ncclCommSplit`` do not), used on buffers outside registered
+          windows with these layouts, message sizes and operations. With eight
+          ranks per host: 2 to 16 MiB and 64 to 128 MiB on two hosts, 2 to
+          256 MiB on four hosts and 2 to 512 MiB on eight hosts, for
           ``ncclSum`` on ``ncclFloat32``, ``ncclFloat16``, ``ncclBfloat16``,
           ``ncclFloat8e4m3`` and ``ncclFloat8e5m2``. On two hosts, FP32, FP16
           and BF16 messages between 2 and 8 MiB use it only where the fused

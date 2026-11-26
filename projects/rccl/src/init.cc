@@ -5034,6 +5034,9 @@ static ncclResult_t setCommAbortFlags(ncclComm_t comm, int value) {
   setChildAbortFlags(comm, uval);
   if (comm->abortFlag != nullptr) COMPILER_ATOMIC_STORE(comm->abortFlag, uval, std::memory_order_release);
   if (comm->abortFlagDev != nullptr) COMPILER_ATOMIC_STORE(comm->abortFlagDev, uval, std::memory_order_release);
+  ncclComm_t hierChildren[2];
+  const int nHierChildren = rcclHostHierChildren(comm, hierChildren);
+  for (int i = 0; i < nHierChildren; i++) (void)setCommAbortFlags(hierChildren[i], value);
   return ncclSuccess;
 }
 
