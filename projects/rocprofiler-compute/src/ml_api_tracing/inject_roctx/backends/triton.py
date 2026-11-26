@@ -34,17 +34,13 @@ def patch_triton_launcher() -> None:
     jit_function = _CoreState.jit_function
     compiled_kernel = _CoreState.compiled_kernel
     if jit_function is not None:
-        wrapped_any |= _wrap_launch(jit_function, "run", _JIT_MARKER_PREFIX, False)
+        wrapped_any |= _wrap_launch(jit_function, "run", False)
     if compiled_kernel is not None:
         # Prefer run(); fall back to __call__.
         if hasattr(compiled_kernel, "run"):
-            wrapped_any |= _wrap_launch(
-                compiled_kernel, "run", _COMPILED_MARKER_PREFIX, True
-            )
+            wrapped_any |= _wrap_launch(compiled_kernel, "run", True)
         else:
-            wrapped_any |= _wrap_launch(
-                compiled_kernel, "__call__", _COMPILED_MARKER_PREFIX, True
-            )
+            wrapped_any |= _wrap_launch(compiled_kernel, "__call__", True)
     if not wrapped_any:
         console_warning(
             "ml api trace",
@@ -198,7 +194,6 @@ def _format_triton_args(
 
 def _run_with_marker(
     instance: object,
-    marker_prefix: str,
     is_compiled: bool,
     call: Callable[..., Any],
     /,
@@ -207,10 +202,11 @@ def _run_with_marker(
 ) -> object:
     """Run call(*call_args, **call_kwargs) inside a ROCTX range.
 
-    The first four parameters are positional-only so a keyword argument of the
+    The first three parameters are positional-only so a keyword argument of the
     wrapped call can never collide with them.
     """
     kernel_name = _extract_kernel_name(instance)
+    marker_prefix = _COMPILED_MARKER_PREFIX if is_compiled else _JIT_MARKER_PREFIX
     marker = f"{marker_prefix}.{kernel_name}"
     location = marker_ranges.resolve_user_caller_location()
     marker_ranges.push_scope(
@@ -227,7 +223,6 @@ def _run_with_marker(
 
 def _roctx_method_call(
     instance: object,
-    marker_prefix: str,
     is_compiled: bool,
     original: Callable[..., Any],
     /,
@@ -235,19 +230,16 @@ def _roctx_method_call(
     **kwargs: Any,
 ) -> object:
     """Run a wrapped method original inside a ROCTX range."""
-    return _run_with_marker(
-        instance, marker_prefix, is_compiled, original, instance, *args, **kwargs
-    )
+    return _run_with_marker(instance, is_compiled, original, instance, *args, **kwargs)
 
 
 def _wrap_method(
     owner: type,
     method_name: str,
-    marker_prefix: str,
     is_compiled: bool,
     original: Callable[..., Any],
 ) -> bool:
-    wrapper = partialmethod(_roctx_method_call, marker_prefix, is_compiled, original)
+    wrapper = partialmethod(_roctx_method_call, is_compiled, original)
     wrapper._roctx_wrapped = True
     setattr(owner, method_name, wrapper)
     return True
@@ -255,7 +247,6 @@ def _wrap_method(
 
 def _roctx_launch(
     instance: object,
-    marker_prefix: str,
     is_compiled: bool,
     launcher: Callable[..., Any],
     /,
@@ -263,22 +254,17 @@ def _roctx_launch(
     **kwargs: Any,
 ) -> object:
     """Run a property-returned launcher inside a ROCTX range."""
-    return _run_with_marker(
-        instance, marker_prefix, is_compiled, launcher, *args, **kwargs
-    )
+    return _run_with_marker(instance, is_compiled, launcher, *args, **kwargs)
 
 
 def _roctx_property_get(
-    marker_prefix: str,
-    is_compiled: bool,
-    original_getter: Callable[..., Any],
-    instance: object,
+    is_compiled: bool, original_getter: Callable[..., Any], instance: object
 ) -> object:
     """Property getter that wraps the launcher it returns with a ROCTX range."""
     launcher = original_getter(instance)
     if launcher is None or getattr(launcher, "_roctx_launcher", False):
         return launcher
-    wrapped = partial(_roctx_launch, instance, marker_prefix, is_compiled, launcher)
+    wrapped = partial(_roctx_launch, instance, is_compiled, launcher)
     wrapped._roctx_launcher = True
     return wrapped
 
@@ -286,14 +272,13 @@ def _roctx_property_get(
 def _wrap_property(
     owner: type,
     method_name: str,
-    marker_prefix: str,
     is_compiled: bool,
     wrapped_property: property,
 ) -> bool:
     original_getter = wrapped_property.fget
     if original_getter is None:
         return False
-    getter = partial(_roctx_property_get, marker_prefix, is_compiled, original_getter)
+    getter = partial(_roctx_property_get, is_compiled, original_getter)
     getter._roctx_wrapped = True
     setattr(
         owner,
@@ -306,7 +291,6 @@ def _wrap_property(
 def _wrap_launch(
     owner: type,
     method_name: str,
-    marker_prefix: str,
     is_compiled: bool,
 ) -> bool:
     """Wrap owner.method_name (a method or property) with a ROCTX range.
@@ -324,13 +308,9 @@ def _wrap_launch(
 
     try:
         if isinstance(attr, property):
-            installed = _wrap_property(
-                owner, method_name, marker_prefix, is_compiled, attr
-            )
+            installed = _wrap_property(owner, method_name, is_compiled, attr)
         else:
-            installed = _wrap_method(
-                owner, method_name, marker_prefix, is_compiled, attr
-            )
+            installed = _wrap_method(owner, method_name, is_compiled, attr)
     except Exception as exc:
         console_warning(
             "ml api trace",

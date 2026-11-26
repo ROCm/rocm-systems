@@ -124,13 +124,12 @@ def test_triton_wrappers_pass_launch_keywords_named_like_wrapper_parameters(
         triton_backend._CoreState, "compiled_kernel", FakeCompiledKernel
     )
     triton_backend.patch_triton_launcher()
-    assert triton_backend._wrap_launch(FakeCompiledKernel, "launcher", "prefix", True)
+    assert triton_backend._wrap_launch(FakeCompiledKernel, "launcher", True)
     keywords = {
         "instance": 1,
-        "marker_prefix": 2,
-        "is_compiled": 3,
-        "original": 4,
-        "call": 5,
+        "is_compiled": 2,
+        "original": 3,
+        "call": 4,
     }
 
     FakeCompiledKernel().run(7, **keywords)
@@ -238,7 +237,6 @@ def test_launcher_marker_attributes_actual_recording_frames_to_user(monkeypatch)
     caller_line = inspect.currentframe().f_lineno + 1
     value = triton_backend._run_with_marker(
         types.SimpleNamespace(name="kernel"),
-        "triton.CompiledKernel",
         True,
         lambda: "launched",
     )
