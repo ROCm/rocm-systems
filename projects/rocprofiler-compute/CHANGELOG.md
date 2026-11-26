@@ -7,6 +7,9 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Added
 
+* Added GPU metrics, the Memory Chart and the roofline for gfx1200.
+  * gfx1200 support is experimental and requires the `--experimental` option.
+
 ### Changed
 
 * Analyze mode accepts numpy versions from 1.26.4 to 2.5.x. It previously required exactly 1.26.4, or 2.5.2 on Python 3.13 and newer.
