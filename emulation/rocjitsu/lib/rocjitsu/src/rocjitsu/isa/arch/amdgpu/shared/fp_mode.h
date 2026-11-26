@@ -9,7 +9,6 @@
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/denormal.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/denormal_value.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/division.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/input_denormal.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/minmax.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/output_denormal.h"
@@ -1212,15 +1211,6 @@ inline uint64_t scale_u53_f64_rtz(uint64_t significand, int exponent) {
 } // namespace rocjitsu::amdgpu::fp_mode
 
 namespace rocjitsu::amdgpu {
-
-/// @brief Preserve the FIXUP NaN payload when narrowing its promoted result.
-inline uint16_t narrow_div_fixup_f16(float value, bool fp16_ovfl) {
-  const uint32_t bits = std::bit_cast<uint32_t>(value);
-  if ((bits & 0x7fffffffu) > 0x7f800000u) {
-    return static_cast<uint16_t>(((bits >> 16) & 0x8000u) | 0x7c00u | ((bits >> 13) & 0x3ffu));
-  }
-  return util::f32_to_f16_mode(value, fp16_ovfl);
-}
 
 /// Convert the F32 source of a scaled narrowing instruction before applying its E8M0 scale.
 /// A preserved F32 subnormal is normal in double, even if the host flushes F32 operands.

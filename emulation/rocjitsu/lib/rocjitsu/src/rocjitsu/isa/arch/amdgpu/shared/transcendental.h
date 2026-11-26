@@ -7,7 +7,7 @@
 /// @file transcendental.h
 /// @brief Shared transcendental evaluation for AMDGPU execute bodies.
 /// @details F32 reciprocal/root/log/exp/trigonometric mappings use RDNA3/4
-/// capture-based implementations; F64 and TANH use host arithmetic. These have
+/// capture-based implementations; half widening and TANH use host arithmetic. These have
 /// separate accuracy and hardware-coverage contracts.
 /// F16 callers flush the raw source half under MODE before widening, including
 /// for RSQ/SQRT. The half helpers round and flush the result; callers apply
@@ -208,48 +208,6 @@ inline float tanh_f32(float x) {
     return std::bit_cast<float>(std::bit_cast<uint32_t>(x) | 0x00400000u);
   }
   return std::tanh(x);
-}
-
-/// @brief Evaluate reciprocal using host double division.
-inline double rcp_f64(double x) {
-  if (std::isnan(x)) {
-    return x;
-  }
-  if (x == 0.0) {
-    return std::copysign(std::numeric_limits<double>::infinity(), x);
-  }
-  if (std::isinf(x)) {
-    return std::copysign(0.0, x);
-  }
-  return 1.0 / x;
-}
-
-/// @brief Evaluate reciprocal square root using host double sqrt/division.
-inline double rsq_f64(double x) {
-  if (std::isnan(x)) {
-    return x;
-  }
-  if (x == 0.0) {
-    return std::copysign(std::numeric_limits<double>::infinity(), x);
-  }
-  if (x < 0.0) {
-    return std::numeric_limits<double>::quiet_NaN();
-  }
-  if (std::isinf(x)) {
-    return 0.0;
-  }
-  return 1.0 / std::sqrt(x);
-}
-
-/// @brief Evaluate double-precision square root using host std::sqrt.
-inline double sqrt_f64(double x) {
-  if (std::isnan(x)) {
-    return x;
-  }
-  if (x < 0.0) {
-    return std::numeric_limits<double>::quiet_NaN();
-  }
-  return std::sqrt(x);
 }
 
 } // namespace transcendental

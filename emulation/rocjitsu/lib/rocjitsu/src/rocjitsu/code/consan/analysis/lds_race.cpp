@@ -318,9 +318,10 @@ void read_wave(const Manifest &facts, const CapturedExecution &execution,
       if (!phase_consistent) {
         issue(result, wave, site.id, "access_phase_contradicts_qualified_program", workgroup);
       }
-      group.records.push_back({{wave, site.id, sequence, mask, offset, width, site.original_offset,
-                                site.access, phase, workgroup, 0, group.transpose_exec},
-                               phase_valid});
+      group.records.push_back(
+          {{wave, site.id, sequence, mask, offset, width, site.original_offset, site.access, phase,
+            workgroup, 0, group.transpose_exec, site.origin, site.assumption},
+           phase_valid});
     }
   }
   std::map<uint32_t, std::vector<Operation>> occurrences;

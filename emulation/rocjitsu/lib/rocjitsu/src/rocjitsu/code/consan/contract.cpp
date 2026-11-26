@@ -78,7 +78,9 @@ void encode_site(wire::Encoder &encoder, const SiteFacts &site) {
   encoder.u32(static_cast<uint32_t>(site.analysis));
   encoder.u32(static_cast<uint32_t>(site.record));
   // The original single-range encoding wrote zero in this word.
-  encoder.u32((static_cast<uint32_t>(site.lds_ranges.shape) << 16) |
+  encoder.u32((static_cast<uint32_t>(site.origin) << 24) |
+              (static_cast<uint32_t>(site.assumption) << 20) |
+              (static_cast<uint32_t>(site.lds_ranges.shape) << 16) |
               (uint32_t{site.lds_ranges.offset1} << 8) | site.lds_ranges.offset0);
   encoder.u32(static_cast<uint32_t>(site.access));
   encoder.u32(site.width);
@@ -104,7 +106,9 @@ bool decode_site(wire::Decoder &decoder, SiteFacts &site) {
       !decoder.u32(site.probe_size) || !decoder.u32(site.first_slot)) {
     return false;
   }
-  site.lds_ranges = {.shape = static_cast<LdsRangeShape>(ranges >> 16),
+  site.origin = static_cast<AccessOrigin>(ranges >> 24);
+  site.assumption = static_cast<FlatAssumption>((ranges >> 20) & 0xf);
+  site.lds_ranges = {.shape = static_cast<LdsRangeShape>((ranges >> 16) & 0xf),
                      .offset0 = static_cast<uint8_t>(ranges),
                      .offset1 = static_cast<uint8_t>(ranges >> 8)};
   site.analysis = static_cast<AnalysisKind>(analysis);
@@ -121,16 +125,28 @@ Digest digest(std::span<const uint8_t> bytes) {
   return hash.finish();
 }
 
-Digest mvp_options_digest() {
+Digest mvp_options_digest(FlatPolicy policy) {
   util::Sha256 hash;
   hash.update(kMvpOptions);
+  hash.update(policy == FlatPolicy::Strict ? "strict" : "likely");
   return hash.finish();
+}
+
+std::optional<FlatPolicy> saved_flat_policy(const Digest &options) {
+  static const Digest likely = mvp_options_digest(FlatPolicy::Likely);
+  static const Digest strict = mvp_options_digest(FlatPolicy::Strict);
+  if (options == likely)
+    return FlatPolicy::Likely;
+  if (options == strict)
+    return FlatPolicy::Strict;
+  return std::nullopt;
 }
 
 Result validate_manifest(const Manifest &manifest, util::DiagnosticEmitter diagnostic,
                          const ContractLimits &limits) {
   if (manifest.original.bytes > limits.image_bytes ||
       manifest.prepared.bytes > limits.image_bytes || manifest.sites.size() > limits.sites ||
+      manifest.flat_exclusions.size() > limits.sites - manifest.sites.size() ||
       manifest.entry.name.size() > limits.string_bytes ||
       manifest.barriers.size() > kSyncCapacity) {
     return diagnostic.emit() << "image, site or name budget exceeded";
@@ -138,7 +154,8 @@ Result validate_manifest(const Manifest &manifest, util::DiagnosticEmitter diagn
 
   const uint64_t encoded_bytes = kEnvelopeBytes + kFixedPayloadBytes + manifest.entry.name.size() +
                                  uint64_t{manifest.sites.size()} * kSiteWireBytes +
-                                 (4 + manifest.barriers.size() * kBarrierWireBytes);
+                                 (4 + manifest.barriers.size() * kBarrierWireBytes) +
+                                 wire::flat_exclusion_table_bytes(manifest.flat_exclusions.size());
   if (encoded_bytes > limits.metadata_bytes) {
     return diagnostic.emit() << "static facts exceed metadata budget";
   }
@@ -159,7 +176,17 @@ Result validate_manifest(const Manifest &manifest, util::DiagnosticEmitter diagn
       0xff, 0xa2, 0xcf, 0xe2, 0xf3, 0x2b, 0xb4, 0x29, 0xc7, 0x23, 0x4b,
       0x13, 0x17, 0x87, 0x26, 0x0f, 0x4d, 0xfa, 0x19, 0xe6, 0x15,
   };
-  const bool admits_atomics = manifest.options == mvp_options_digest();
+  constexpr Digest kNativeAtomics = {
+      0x9d, 0x20, 0x4e, 0x58, 0xc8, 0xf7, 0x59, 0x94, 0x98, 0xf9, 0x43,
+      0xf5, 0x88, 0x81, 0x05, 0x51, 0x49, 0x7b, 0x7c, 0xed, 0xc3, 0xa9,
+      0x22, 0xd4, 0x08, 0x2a, 0x48, 0x51, 0x1b, 0x62, 0x88, 0x2e,
+  };
+  constexpr Digest kProvenFlat = {0x25, 0x93, 0xec, 0xdd, 0x1d, 0x63, 0x27, 0x5d, 0x64, 0xc9, 0xad,
+                                  0xf3, 0x23, 0x63, 0x16, 0x27, 0x38, 0x1e, 0x43, 0xcf, 0x2b, 0x21,
+                                  0xc2, 0xe1, 0xcc, 0x3e, 0x59, 0x39, 0x3,  0x3,  0x79, 0xf6};
+  const std::optional<FlatPolicy> policy = saved_flat_policy(manifest.options);
+  const bool admits_flat = policy || manifest.options == kProvenFlat;
+  const bool admits_atomics = admits_flat || manifest.options == kNativeAtomics;
   const bool admits_bytes = admits_atomics || manifest.options == kOrdinaryLds;
   const bool admits_b96 = admits_bytes || manifest.options == kB96Widths;
   const TargetProfile *target = target_profile(manifest.target);
@@ -273,13 +300,27 @@ Result validate_manifest(const Manifest &manifest, util::DiagnosticEmitter diagn
         site.access == AccessKind::Read || site.access == AccessKind::Write ||
         (site.access == AccessKind::Atomic && admits_atomics &&
          ranges.shape == LdsRangeShape::Single && (site.width == 4 || site.width == 8));
+    const bool valid_origin =
+        site.origin == AccessOrigin::Native ||
+        (site.origin == AccessOrigin::GroupFlat && admits_flat &&
+         (target->arch == IsaFamily::Cdna3 || target->arch == IsaFamily::Cdna4 ||
+          target->arch == IsaFamily::Rdna3 || target->arch == IsaFamily::Rdna4 ||
+          target->arch == IsaFamily::Cdna5) &&
+         (site.access == AccessKind::Read || site.access == AccessKind::Write) && site.width == 4 &&
+         ranges.shape == LdsRangeShape::Single);
+    const bool wide_flat = site.origin == AccessOrigin::GroupFlat &&
+                           (target->arch == IsaFamily::Rdna4 || target->arch == IsaFamily::Cdna5);
+    const uint32_t guest_size = wide_flat ? 12 : 8;
     if (site.id != index || site.owner_entry != entry.id ||
         site.analysis != AnalysisKind::LdsRaceDetection || site.record != RecordKind::Access ||
-        !valid_ranges || !valid_access ||
+        !valid_ranges || !valid_access || !valid_origin ||
+        (site.assumption != FlatAssumption::None &&
+         !(site.assumption == FlatAssumption::SelectedSharedHigh &&
+           site.origin == AccessOrigin::GroupFlat && policy == FlatPolicy::Likely)) ||
         (site.width != 2 && site.width != 4 && site.width != 8 && site.width != 16 &&
          (!admits_b96 || site.width != 12) && (!admits_bytes || site.width != 1)) ||
-        site.original_size != 8 || site.prepared_guest_size != 8 || site.probe_size == 0 ||
-        (site.probe_size % 4) != 0 || (site.original_offset % 4) != 0 ||
+        site.original_size != guest_size || site.prepared_guest_size != guest_size ||
+        site.probe_size == 0 || (site.probe_size % 4) != 0 || (site.original_offset % 4) != 0 ||
         (site.prepared_guest_offset % 4) != 0 || (site.probe_offset % 4) != 0 ||
         site.original_offset < previous_original_end ||
         !util::is_range_in_bounds(site.original_offset, site.original_size,
@@ -295,6 +336,31 @@ Result validate_manifest(const Manifest &manifest, util::DiagnosticEmitter diagn
     prepared_ranges.emplace_back(site.prepared_guest_offset,
                                  site.prepared_guest_offset + site.prepared_guest_size);
     prepared_ranges.emplace_back(site.probe_offset, site.probe_offset + site.probe_size);
+  }
+  uint64_t previous_excluded_end = 0;
+  for (const FlatExclusion &exclusion : manifest.flat_exclusions) {
+    const uint64_t pc = exclusion.original_offset;
+    if (!policy || (pc % 4) ||
+        exclusion.original_size !=
+            (manifest.target == 1201 || manifest.target == 1250 ? 12u : 8u) ||
+        pc < previous_excluded_end ||
+        !util::is_range_in_bounds(pc, exclusion.original_size, manifest.original_text_bytes) ||
+        (exclusion.assumption != (exclusion.reason == FlatExclusionReason::Strict
+                                      ? FlatAssumption::SelectedSharedHigh
+                                      : FlatAssumption::None)) ||
+        (exclusion.reason != FlatExclusionReason::NonGroup &&
+         exclusion.reason != FlatExclusionReason::Unresolved &&
+         !(exclusion.reason == FlatExclusionReason::Strict && policy == FlatPolicy::Strict)))
+      return diagnostic.emit() << "invalid excluded FLAT site";
+    previous_excluded_end = pc + exclusion.original_size;
+    const auto next = std::ranges::lower_bound(manifest.sites, pc, {}, &SiteFacts::original_offset);
+    if ((next != manifest.sites.end() && next->original_offset < previous_excluded_end) ||
+        (next != manifest.sites.begin() &&
+         std::prev(next)->original_offset + std::prev(next)->original_size > pc))
+      return diagnostic.emit() << "FLAT exclusion overlaps an observed site";
+    for (const auto &barrier : manifest.barriers)
+      if (pc < barrier.original_wait + 4 && previous_excluded_end > barrier.original_drain)
+        return diagnostic.emit() << "FLAT exclusion overlaps a barrier";
   }
   std::sort(prepared_ranges.begin(), prepared_ranges.end());
   for (size_t index = 1; index < prepared_ranges.size(); ++index) {
@@ -351,8 +417,16 @@ FailureOr<std::vector<uint8_t>> encode_manifest(const Manifest &manifest,
     payload.u32(barrier.probe_size);
     payload.u32(barrier.identity);
   }
+  if (!manifest.flat_exclusions.empty()) {
+    payload.u32(static_cast<uint32_t>(manifest.flat_exclusions.size()));
+    for (const auto &exclusion : manifest.flat_exclusions) {
+      payload.u64(exclusion.original_offset);
+      payload.u32(exclusion.original_size);
+      payload.u32(static_cast<uint32_t>(exclusion.reason));
+      payload.u32(static_cast<uint32_t>(exclusion.assumption));
+    }
+  }
   const std::vector<uint8_t> contents = payload.take();
-
   wire::Encoder envelope;
   envelope.bytes(kFactsMagic);
   envelope.bytes(kProducerContract);
@@ -412,7 +486,7 @@ FailureOr<Manifest> decode_manifest(std::span<const uint8_t> bytes,
   }
   uint32_t groups = 0;
   if (!decoder.u32(groups) || groups > kSyncCapacity ||
-      uint64_t{groups} * kBarrierWireBytes != decoder.remaining()) {
+      uint64_t{groups} * kBarrierWireBytes > decoder.remaining()) {
     return diagnostic.emit() << "barrier count disagrees with extent";
   }
   for (uint32_t group = 0; group < groups; ++group) {
@@ -424,6 +498,23 @@ FailureOr<Manifest> decode_manifest(std::span<const uint8_t> bytes,
       return diagnostic.emit() << "truncated barrier facts";
     }
     manifest.barriers.push_back(barrier);
+  }
+  if (decoder.remaining()) {
+    uint32_t excluded = 0;
+    if (!saved_flat_policy(manifest.options) || !decoder.u32(excluded) || !excluded ||
+        excluded > limits.sites - count ||
+        uint64_t{excluded} * wire::kFlatExclusionWireBytes != decoder.remaining())
+      return diagnostic.emit() << "invalid FLAT exclusion table";
+    for (uint32_t i = 0; i < excluded; ++i) {
+      FlatExclusion exclusion;
+      uint32_t reason = 0, assumption = 0;
+      if (!decoder.u64(exclusion.original_offset) || !decoder.u32(exclusion.original_size) ||
+          !decoder.u32(reason) || !decoder.u32(assumption))
+        return diagnostic.emit() << "truncated FLAT exclusion";
+      exclusion.reason = static_cast<FlatExclusionReason>(reason);
+      exclusion.assumption = static_cast<FlatAssumption>(assumption);
+      manifest.flat_exclusions.push_back(exclusion);
+    }
   }
   if (validate_manifest(manifest, diagnostic, limits).failed()) {
     return Result::failure();

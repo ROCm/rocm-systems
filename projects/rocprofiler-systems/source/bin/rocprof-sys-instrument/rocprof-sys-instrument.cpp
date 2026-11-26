@@ -16,6 +16,7 @@
 #include "internal_libs.hpp"
 #include "log.hpp"
 
+#include <fmt/format.h>
 #include <fmt/ranges.h>
 
 #include <algorithm>

@@ -75,6 +75,12 @@ class AnalysisDriver(Driver):
                     'high_lane',
                     'wide_b8_overlap',
                     'wide_b96_overlap',
+                    'flat_load_overlap',
+                    'flat_load_likely',
+                    'flat_load_provenstrict',
+                    'flat_load_offset',
+                    'flat_store_overlap',
+                    'flat_store_tail',
                     'mixed_overlap',
                     'mixed_b16',
                     'barrier_missing_second',
@@ -113,6 +119,11 @@ class AnalysisDriver(Driver):
                 'loop_no_b0_full_journal': 4,
                 'loop_no_b0_sync_loss': 4,
             }.get(case, 0)
+        raw = json.loads((self.directory / 'inspect.stdout').read_text())
+        if case == 'flat_load_alternate':
+            low = raw['executions'][0]['rows'][1]['records'][0]['offset']
+            rejected = int(low + 4 > 1024 or low % 4 != 0)
+            pairs = int(not rejected and low == 1020)
         status = 1 if pairs or collisions else 0
         # The dynamic loader's own trace records the analyzer's actual modules
         # without linking a runtime or adding a live-registry input to the tool.
@@ -150,8 +161,12 @@ class AnalysisDriver(Driver):
         assert result['collision_groups'] == collisions
         assert result['coverage_complete'] == (
             not transpose_loss
+            and not rejected
             and case
             not in (
+                'flat_load_strict',
+                'flat_load_unknown',
+                'flat_load_unknownstrict',
                 'exhausted',
                 'loop_access_loss',
                 'loop_sync_loss',
@@ -161,7 +176,6 @@ class AnalysisDriver(Driver):
             )
         )
         assert result['verdict'] == ('findings' if status else 'no_observed_findings')
-        raw = json.loads((self.directory / 'inspect.stdout').read_text())
         assert result['execution_conditions'] == raw['execution_conditions'] == 15
         assert len(raw['executions']) == len(result['executions'])
         for observed, analyzed in zip(raw['executions'], result['executions']):
@@ -174,7 +188,12 @@ class AnalysisDriver(Driver):
             assert analyzed['rejected_records'] == rejected
             if rejected:
                 assert any(
-                    issue['reason'] == 'partial_exec_lds_transpose'
+                    issue['reason']
+                    == (
+                        'invalid_or_out_of_bounds_effective_range'
+                        if case == 'flat_load_alternate'
+                        else 'partial_exec_lds_transpose'
+                    )
                     and issue['site'] == 1
                     for issue in analyzed['issues']
                 )
@@ -189,6 +208,7 @@ class AnalysisDriver(Driver):
             )
             assert analyzed['ordering_uncertain'] == (
                 bool(transpose_loss)
+                or bool(rejected)
                 or case
                 in (
                     'exhausted',
@@ -207,6 +227,95 @@ class AnalysisDriver(Driver):
             )
             assert analyzed['cross_wave_pairs'] == per_launch_pairs
             assert analyzed['collision_groups'] == collisions
+            if case.startswith('flat_'):
+                ordered = case.endswith('_ordered')
+                suffix = 'epoch_workgroup_barriers' if ordered else 'no_sync_bounded_1d'
+                excludes = {
+                    'flat_load_strict': 'strict_excludes_likely',
+                    'flat_load_unknown': 'unresolved',
+                    'flat_load_unknownstrict': 'unresolved',
+                    'flat_load_nongroup': 'non_group',
+                    'flat_load_nongroupstrict': 'non_group',
+                }
+                assert result['flat_policy'] == (
+                    'strict' if case.endswith('strict') else 'likely'
+                )
+                if case in excludes:
+                    (omission,) = result['flat_exclusions']
+                    assert (omission['site'], omission['reason']) == (1, excludes[case])
+                    if case == 'flat_load_strict':
+                        assert omission['confidence'] == 'conservative'
+                        assert (
+                            omission['assumption']
+                            == "the selected pointer high word belongs to this workgroup's shared aperture"
+                        )
+                    assert (
+                        omission['original_offset'] > raw['sites'][0]['original_offset']
+                    )
+                    assert omission['original_size'] == (
+                        12 if self.args.target in ('gfx1201', 'gfx1250') else 8
+                    )
+                else:
+                    assert (
+                        result['scope']
+                        == 'native_and_group_flat_lds_single_range_' + suffix
+                    )
+                    (site,) = result['flat_sites']
+                    if case in ('flat_load_likely', 'flat_load_alternate'):
+                        assert site['confidence'] == 'conservative'
+                        assert (
+                            site['assumption']
+                            == "the selected pointer high word belongs to this workgroup's shared aperture"
+                        )
+                    else:
+                        assert site['confidence'] == 'exact'
+                assert analyzed['ordered_pairs'] == int(ordered)
+                assert analyzed['ordering_unresolved_pairs'] == 0
+                assert (
+                    analyzed['required_barrier_waves']
+                    == analyzed['completed_barrier_waves']
+                    == (2 if ordered else 0)
+                )
+                if pairs or ordered:
+                    (finding,) = analyzed[
+                        'ordered_examples' if ordered else 'cross_wave_examples'
+                    ]
+                    assert finding['ordering'] == (
+                        'ordered' if ordered else 'unordered'
+                    )
+                    assert finding['lane_pairs'] == 1
+                    first, second = sorted(
+                        (finding['first'], finding['second']),
+                        key=lambda endpoint: endpoint['wave'],
+                    )
+                    flat = first if case.startswith('flat_store_') else second
+                    assert (
+                        first['site'],
+                        first['access'],
+                        second['site'],
+                        second['access'],
+                    ) == (0, 'write', 1, 'read')
+                    assert flat['origin'] == 'group_flat'
+                    if case in ('flat_load_likely', 'flat_load_alternate'):
+                        assert flat['confidence'] == 'conservative'
+                        assert (
+                            flat['assumption']
+                            == "the selected pointer high word belongs to this workgroup's shared aperture"
+                        )
+                    else:
+                        assert (
+                            flat['confidence'] == 'exact' and 'assumption' not in flat
+                        )
+                    for endpoint in (first, second):
+                        tail = endpoint['wave'] == 1 and case.endswith('_tail')
+                        assert (endpoint['offset'], endpoint['width']) == (
+                            (1016, 8) if tail else (1020, 4)
+                        )
+                        assert endpoint['mask'] == 1 << (self.args.wave_size - 1)
+                        assert (
+                            endpoint['original_offset']
+                            == raw['sites'][endpoint['site']]['original_offset']
+                        )
             if case.startswith('atomic_'):
                 assert (
                     analyzed['ordered_pairs']

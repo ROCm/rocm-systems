@@ -33,7 +33,7 @@ TEST(ConSanDigest, OptionsIdentityNamesTheSoftwareAddressGroupReservation) {
       "address-groups-per-site=" + std::to_string(kAddressGroupsPerSite) + ";";
   EXPECT_NE(kMvpOptions.find(reservation), std::string_view::npos);
   EXPECT_EQ(hex(mvp_options_digest()),
-            "9d204e58c8f7599498f943f588810551497b7cedc3a922d4082a48511b62882e");
+            "bb0b1d5a4d69edb2f6539d23c7e801ebabe6718b5eafa8b7e5420554333d6adb");
 }
 
 TEST(ConSanDigest, KnownAnswersIncludePaddingAndMultipleBlocks) {
@@ -449,7 +449,8 @@ TEST_F(ConSanContract, CountAndStringLengthsCannotCauseUnboundedAllocation) {
   put32(count_offset(), 1);
   rehash();
   EXPECT_TRUE(decode_manifest(bytes_, error_.emitter()).failed());
-  EXPECT_EQ(error_.message(), "barrier count disagrees with extent");
+  // The short site count leaves extra bytes behind the barrier table.
+  EXPECT_EQ(error_.message(), "invalid FLAT exclusion table");
   put32(kEntry + 4, std::numeric_limits<uint32_t>::max());
   rehash();
   EXPECT_TRUE(decode_manifest(bytes_, error_.emitter()).failed());
@@ -923,6 +924,72 @@ TEST_F(ConSanContract, GuestMappingsAndReservationsMustBeUnambiguous) {
   manifest = example();
   manifest.sites.clear();
   EXPECT_TRUE(validate_manifest(manifest, error_.emitter()).failed());
+}
+
+TEST_F(ConSanContract, GroupFlatOriginSurvivesRoundTripOnlyInItsProvenProfile) {
+  Manifest manifest = example();
+  manifest.target = 950;
+  manifest.wave_size = 64;
+  SiteFacts &site = manifest.sites.back();
+  site.origin = AccessOrigin::GroupFlat;
+  const auto bytes = encode_manifest(manifest, error_.emitter());
+  ASSERT_TRUE(bytes.succeeded()) << error_.message();
+  const auto decoded = decode_manifest(bytes.value(), error_.emitter());
+  ASSERT_TRUE(decoded.succeeded()) << error_.message();
+  EXPECT_EQ(decoded.value(), manifest);
+  site.origin = static_cast<AccessOrigin>(2);
+  EXPECT_TRUE(validate_manifest(manifest).failed());
+  site.origin = AccessOrigin::GroupFlat;
+  site.width = 8;
+  EXPECT_TRUE(validate_manifest(manifest).failed());
+  site.width = 4;
+  manifest.options = {
+      0x9d, 0x20, 0x4e, 0x58, 0xc8, 0xf7, 0x59, 0x94, 0x98, 0xf9, 0x43,
+      0xf5, 0x88, 0x81, 0x05, 0x51, 0x49, 0x7b, 0x7c, 0xed, 0xc3, 0xa9,
+      0x22, 0xd4, 0x08, 0x2a, 0x48, 0x51, 0x1b, 0x62, 0x88, 0x2e,
+  };
+  EXPECT_TRUE(validate_manifest(manifest).failed());
+  site.origin = AccessOrigin::Native;
+  site.access = AccessKind::Atomic;
+  EXPECT_TRUE(validate_manifest(manifest).succeeded());
+}
+
+TEST_F(ConSanContract, OnlyLikelyCanRetainConditionalSitesAndStrictPersistsItsReason) {
+  Manifest facts = example();
+  SiteFacts &site = facts.sites[1];
+  site.origin = AccessOrigin::GroupFlat;
+  site.assumption = FlatAssumption::SelectedSharedHigh;
+  facts.flat_exclusions = {{32, 8, FlatExclusionReason::Unresolved},
+                           {48, 8, FlatExclusionReason::NonGroup}};
+  ASSERT_EQ(saved_flat_policy(facts.options), FlatPolicy::Likely);
+  const auto likely = encode_manifest(facts, error_.emitter());
+  ASSERT_TRUE(likely.succeeded()) << error_.message();
+  ASSERT_EQ(decode_manifest(likely.value()).value(), facts);
+  site.origin = AccessOrigin::Native;
+  EXPECT_TRUE(validate_manifest(facts).failed());
+  site.origin = AccessOrigin::GroupFlat;
+  facts.options = mvp_options_digest(FlatPolicy::Strict);
+  EXPECT_TRUE(validate_manifest(facts).failed());
+  site.assumption = FlatAssumption::None;
+  facts.flat_exclusions[0] = {32, 8, FlatExclusionReason::Strict,
+                              FlatAssumption::SelectedSharedHigh};
+  const auto strict = encode_manifest(facts, error_.emitter());
+  ASSERT_TRUE(strict.succeeded()) << error_.message();
+  ASSERT_EQ(decode_manifest(strict.value()).value(), facts);
+  facts.flat_exclusions[0].assumption = FlatAssumption::None;
+  EXPECT_TRUE(validate_manifest(facts).failed());
+  facts.flat_exclusions[0].assumption = FlatAssumption::SelectedSharedHigh;
+  facts.flat_exclusions[1].original_offset = 32;
+  EXPECT_TRUE(validate_manifest(facts).failed());
+  facts.flat_exclusions[1].original_offset = 48;
+  facts.flat_exclusions[0].original_offset = 16;
+  EXPECT_TRUE(validate_manifest(facts).failed());
+  facts.flat_exclusions[0].original_offset = 32;
+  facts.flat_exclusions[0].original_size = 12;
+  EXPECT_TRUE(validate_manifest(facts).failed());
+  facts.flat_exclusions[0].original_size = 8;
+  facts.options = mvp_options_digest();
+  EXPECT_TRUE(validate_manifest(facts).failed());
 }
 
 TEST_F(ConSanContract, AtomicAccessRequiresASingleDwordOrQwordOnSupportedWaves) {

@@ -806,11 +806,9 @@ bool validate_anchor_bytes(const Instruction &anchor, uint64_t anchor_offset,
     report(error_out, "anchor_offset must be dword aligned");
     return false;
   }
-  // Instruction::size() returns int by convention; the `!= 4 && != 8` check
-  // also rejects negative values (which decoders never produce in practice).
   const int size = anchor.size();
-  if (size <= 0 || size % 4 != 0 || (relocated && size != 4 && size != 8)) {
-    report(error_out, relocated ? "anchor instruction size must be 4 or 8 bytes"
+  if (size <= 0 || size % 4 != 0 || (relocated && size > 12)) {
+    report(error_out, relocated ? "anchor instruction size must be 4, 8 or 12 bytes"
                                 : "anchor instruction size must contain complete dwords");
     return false;
   }

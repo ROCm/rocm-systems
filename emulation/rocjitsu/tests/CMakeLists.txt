@@ -590,6 +590,7 @@ add_executable(
     sdma_ring_consumer_test.cpp
     cdna5_tensor_dma_test.cpp
     ds_address_encoded_fields_test.cpp
+    ds_offset_encoded_fields_test.cpp
     gfx1100_ds_address_test.cpp
     gfx1251_ds_address_test.cpp
     ds_memory_snapshot_test.cpp
@@ -624,6 +625,7 @@ add_executable(
     rdna4_dot_dpp_test.cpp
     rdna1_valu_test.cpp
     rdna4_memory_test.cpp
+    memory_displacement_encoded_fields_test.cpp
     rdna4_encoded_fields_test.cpp
     readlane_selector_test.cpp
     pc_extension_test.cpp
@@ -640,6 +642,8 @@ add_executable(
     scalar_buffer_test.cpp
     scalar_cache_policy_test.cpp
     scalar_cache_discard_test.cpp
+    legacy_special_f32_test.cpp
+    legacy_native_f32_test.cpp
     transcendental_test.cpp
     comparison_test.cpp
     gfx1150_compare_test.cpp
@@ -724,6 +728,8 @@ add_executable(
     frexp_mantissa_test.cpp
     integral_rounding_f32_test.cpp
     gfx1150_dual_test.cpp
+    legacy_division_test.cpp
+    legacy_native_f64_test.cpp
     division_macro_test.cpp
     valu_floating_policy_test.cpp
     gfx11_dot2_test.cpp
@@ -919,6 +925,8 @@ target_link_libraries(
         GTest::gmock
         GTest::gtest_main
 )
+# Allow the VM config tests to fail creation of the synthetic DRM directory.
+target_link_options(rocjitsu_tests PRIVATE "LINKER:--wrap=mkdtemp")
 target_include_directories(rocjitsu_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 rj_configure_target(rocjitsu_tests TEST)
 # GCC 14.3, GCC 15.2, and GCC 16.0.1 (20260322) emit a false-positive
@@ -3287,7 +3295,7 @@ set(_rj_interposer_syncobj_tests
     IndependentDrmOpensHaveSeparateNamespaces
     CreateSignaledSeedsOnlyTheInitialPoint
     WaitValidationMatchesDrm
-    OversizedBinaryWaitReturnsEnomem
+    OversizedBinaryWaitAllocationIsFatal
     DestroyRejectsInvalidInput
     TimelineWaitBlocksUntilSignalOrDeadline
     TimelineWaitReturnsEintrForSignal

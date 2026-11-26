@@ -62,6 +62,29 @@ CASES = (
         for form in ('u32', 'u64', 'f32', 'f64', 'cas')
         for peer in ('count', 'read', 'write', 'atomic', 'adjacent')
     ),
+    *(
+        f'flat_load_{scenario}'
+        for scenario in (
+            'overlap',
+            'adjacent',
+            'empty',
+            'ordered',
+            'offset',
+            'readread',
+            'likely',
+            'strict',
+            'provenstrict',
+            'alternate',
+            'unknown',
+            'unknownstrict',
+            'nongroup',
+            'nongroupstrict',
+        )
+    ),
+    *(
+        f'flat_store_{scenario}'
+        for scenario in ('overlap', 'adjacent', 'ordered', 'tail')
+    ),
     'wide_u8',
     'wide_i8_alias_high',
     'wide_d16_u8',
@@ -238,9 +261,16 @@ class Driver:
         )
         if args.fixture_kind == 'named-assembly':
             fixture = fixture_directory / f'{fixture_name}.hsaco'
-        elif fixture_name.startswith(('transpose_', 'atomic_')):
+        elif fixture_name.startswith(('transpose_', 'atomic_', 'flat_')):
+            # Run both policies against identical original bytes.
+            source_name = {
+                'flat_load_strict': 'flat_load_likely',
+                'flat_load_provenstrict': 'flat_load_overlap',
+                'flat_load_unknownstrict': 'flat_load_unknown',
+                'flat_load_nongroupstrict': 'flat_load_nongroup',
+            }.get(fixture_name, fixture_name)
             fixture = fixture_directory / (
-                'width-' + fixture_name.replace('_', '-') + '.hsaco'
+                'width-' + source_name.replace('_', '-') + '.hsaco'
             )
         elif fixture_name.startswith('wide_'):
             name = {'wide_alias': 'b128-alias', 'wide_collision': 'b64-collision'}.get(
@@ -341,6 +371,8 @@ class Driver:
             mode = fixture_name
         if fixture_name.startswith('atomic_'):
             mode = fixture_name if fixture_name.endswith('_count') else 'defined'
+        if fixture_name.startswith('flat_'):
+            mode = 'defined'
         if wide:
             mode = (
                 'wide_b128'
@@ -377,7 +409,7 @@ class Driver:
         if (
             synchronized
             or wide
-            or fixture_name.startswith(('transpose_', 'atomic_'))
+            or fixture_name.startswith(('transpose_', 'atomic_', 'flat_'))
             or fixture_name == 'mixed_barrier'
             or (grouped and args.case not in ('grouped_oversized', 'grouped_edge'))
             or (
@@ -396,9 +428,10 @@ class Driver:
                 'original-baseline',
                 [args.runner, original, entry, launches, mode, '--baseline'],
             )
-        preparation = self.run(
-            'prepare', [args.prepare, original, args.target, entry, artifact]
-        )
+        command = [args.prepare, original, args.target, entry, artifact]
+        if args.case.startswith('flat_') and args.case.endswith('strict'):
+            command.append('--flat-policy=strict')
+        preparation = self.run('prepare', command)
         profile = next(
             token.split('=', 1)[1]
             for token in preparation.split()
@@ -736,7 +769,67 @@ class Driver:
                     mask,
                 )
 
+    def assert_flat_observations(self, decoded, fixture):
+        _, direction, scenario = fixture.split('_')
+        flat_store = direction == 'store'
+        high = 1 << (self.args.wave_size - 1)
+        ordered = scenario == 'ordered'
+        omitted = scenario in (
+            'strict',
+            'unknown',
+            'unknownstrict',
+            'nongroup',
+            'nongroupstrict',
+        )
+        expected = [(1 if scenario == 'readread' else 2, 4)]
+        if not omitted:
+            expected.append((1, 8 if scenario == 'tail' else 4))
+            flat = decoded['sites'][0 if flat_store else 1]
+            assert flat['origin'] == 'group_flat'
+            assert flat['confidence'] == (
+                'conservative' if scenario in ('likely', 'alternate') else 'exact'
+            )
+        assert [(s['access'], s['width']) for s in decoded['sites']] == expected
+        (execution,) = decoded['executions']
+        assert (
+            execution['grid_x']
+            == execution['workgroup_size_x']
+            == 2 * self.args.wave_size
+        )
+        assert len(execution['rows']) == 2
+        for wave, row in enumerate(execution['rows']):
+            assert row['wave'] == wave and row['serial'] == execution['serial'] == 1
+            assert row['status'] == ROW_ENTERED | ROW_EXITED and row['loss'] == 0
+            assert row['final_phase'] == len(row['completions']) == int(ordered)
+            if ordered:
+                (barrier,) = row['completions']
+                assert barrier['commit'] == 0x43534243 and barrier['participants'] == 2
+                assert barrier['sequence'] == 1 - wave
+            if wave == 1 and (scenario == 'empty' or omitted):
+                assert row['final_sequence'] == 0 and not row['records']
+                continue
+            (record,) = row['records']
+            assert (
+                record['site'] == wave
+                and row['final_sequence'] == record['sequence'] == 1
+            )
+            assert record['commit'] == 0x43534143 and record['flags'] == 1
+            assert record['phase'] == int(ordered and wave == 1)
+            if wave and scenario == 'alternate':
+                # This branch reads the global output buffer through its valid full pointer.
+                # Its low dword is allocator-dependent; it is never an exact LDS observation.
+                assert (record['width'], record['mask']) == (4, high)
+                continue
+            assert (record['width'], record['offset'], record['mask']) == (
+                8 if wave and scenario == 'tail' else 4,
+                1016 if wave and scenario in ('adjacent', 'tail') else 1020,
+                high,
+            )
+
     def assert_observations(self, decoded, fixture):
+        if fixture.startswith('flat_'):
+            self.assert_flat_observations(decoded, fixture)
+            return
         if fixture.startswith('atomic_'):
             self.assert_atomic_observations(decoded, fixture)
             return
@@ -1179,7 +1272,7 @@ def parse_target_arguments(parser, argv=None):
     parser.add_argument(
         '--threads',
         type=int,
-        help='threads per workgroup (default: two waves for atomic cases, otherwise 64)',
+        help='threads per workgroup (default: two waves for atomic and Group-FLAT cases, otherwise 64)',
     )
     parser.add_argument('--workgroups', type=int, default=1)
     parser.add_argument(
@@ -1191,10 +1284,10 @@ def parse_target_arguments(parser, argv=None):
     parser.add_argument('--config', type=lambda value: Path(value).resolve())
     parser.add_argument('--require-agent', action='store_true')
     args = parser.parse_args(argv)
-    atomic = args.case.startswith('atomic_')
+    two_waves = args.case.startswith(('atomic_', 'flat_'))
     if args.threads is None:
-        args.threads = 2 * args.wave_size if atomic else 64
-    if atomic and (args.threads != 2 * args.wave_size or args.workgroups != 1):
+        args.threads = 2 * args.wave_size if two_waves else 64
+    if two_waves and (args.threads != 2 * args.wave_size or args.workgroups != 1):
         parser.error(
             f'{args.case} requires one workgroup of two full waves '
             f'(--workgroups 1 --threads {2 * args.wave_size})'

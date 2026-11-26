@@ -121,12 +121,15 @@ rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, 
     // compatibility. Manifest routes can execute local effects through the
     // VM-owned fabric, but they do not establish native XGMI discovery through
     // the stock driver. Keep KFD links, hive IDs, and XGMI SDMA counts quiet.
-    if (!loaded.devices.empty()) {
-      s->vm->driver()->setup_topology(loaded.devices, num_xcds,
-                                      !loaded.system_graph.explicit_manifest,
-                                      loaded.system_graph.explicit_manifest, loaded.pci);
-    } else {
-      s->vm->driver()->setup_topology(loaded.device, num_xcds, loaded.pci);
+    const bool topology_ready =
+        !loaded.devices.empty()
+            ? s->vm->driver()->setup_topology(loaded.devices, num_xcds,
+                                              !loaded.system_graph.explicit_manifest,
+                                              loaded.system_graph.explicit_manifest, loaded.pci)
+            : s->vm->driver()->setup_topology(loaded.device, num_xcds, loaded.pci);
+    if (!topology_ready) {
+      emit_error.emit() << "failed to generate simulated KFD topology";
+      return ROCJITSU_STATUS_ERROR;
     }
     s->vm->driver()->open();
   }

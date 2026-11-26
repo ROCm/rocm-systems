@@ -255,11 +255,11 @@ TEST(TrampolineBuilder, OmittedOriginalChecksBothBranchRangesForTwelveByteAnchor
   }
 }
 
-TEST(TrampolineBuilder, OmittedOriginalDoesNotRelaxTheRelocatedOriginalSizeLimit) {
+TEST(TrampolineBuilder, ReplayRejectsOversizedInstructionsWithOrWithoutAnAnchorSplice) {
   for (const bool patch_anchor : {false, true}) {
     SCOPED_TRACE(patch_anchor);
     TrampolinePlan plan =
-        make_omitted_original_plan(rocjitsu::IsaFamily::Rdna4, {0xee068002u, 0x00800000u, 0});
+        make_omitted_original_plan(rocjitsu::IsaFamily::Rdna4, std::vector<uint32_t>(4));
     plan.emit_original = true;
     plan.patch_anchor = patch_anchor;
     std::string error;

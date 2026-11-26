@@ -1386,9 +1386,6 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     'tanh': 'amdgpu::transcendental::tanh_f32({0})',
     'log': 'amdgpu::transcendental::log_f32({0})',
     'exp': 'amdgpu::transcendental::exp_f32({0})',
-    'rcp_f64': 'amdgpu::transcendental::rcp_f64({0})',
-    'rsq_f64': 'amdgpu::transcendental::rsq_f64({0})',
-    'sqrt_f64': 'amdgpu::transcendental::sqrt_f64({0})',
     'abs': '[&]() {{ int32_t v = static_cast<int32_t>({0});'
     ' return static_cast<uint32_t>'
     '(v < 0 ? (0u - static_cast<uint32_t>(v))'
