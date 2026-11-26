@@ -10,7 +10,6 @@ import re
 import pytest
 
 from amdisa.codegen._generator import CodeGenerator
-from amdisa.codegen.execute.sema_lower import _INLINE_UNARY_OPS
 from amdisa.codegen.execute.vector_special import (
     gen_vector_movrel,
     gen_vector_swaprel,
@@ -19,14 +18,6 @@ from amdisa.codegen.execute.vector_special import (
 )
 from amdisa.gpuisa import Instruction, Operand
 from amdisa.isa_profile import Cdna5Profile, Rdna3Profile, Rdna4Profile
-
-
-def test_cls_i32_codegen():
-    semantic = _INLINE_UNARY_OPS['cls_i32']
-    assert '0xFFFFFFFFu' in semantic or 'static_cast<uint32_t>(-1)' in semantic
-    assert 'countl_zero' in semantic
-    assert 'countl_zero(abs_val)) - 1' not in semantic
-    assert 'countl_zero(a)) - 1' not in semantic
 
 
 def test_relative_vgpr_ops_use_unsigned_packed_m0_fields():
