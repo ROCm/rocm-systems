@@ -276,10 +276,11 @@ void MemoryCopyEngineTest::CopyOnEngineNegativeTest() {
   hsa_signal_t dep = done.get();
 
   // Engine ids must have exactly one bit set, and that bit must name an existing engine.
+  // The number of SDMA engines differs per GPU, so only ids that are invalid on every GPU
+  // are checked here; a high single-bit id can name a real engine on some parts.
   const hsa_amd_sdma_engine_id_t bad_engines[] = {
       static_cast<hsa_amd_sdma_engine_id_t>(0),
       static_cast<hsa_amd_sdma_engine_id_t>(HSA_AMD_SDMA_ENGINE_0 | HSA_AMD_SDMA_ENGINE_1),
-      HSA_AMD_SDMA_ENGINE_15,  // no GPU has this many engines
   };
   for (hsa_amd_sdma_engine_id_t engine : bad_engines) {
     EXPECT_EQ(hsa_amd_memory_async_copy_on_engine(dev.get(), gpu, host.get(), cpu, kCopyBytes, 0,
