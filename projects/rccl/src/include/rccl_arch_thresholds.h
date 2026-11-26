@@ -226,6 +226,10 @@ struct rcclArchThresholds {
   // tuning model's per-rank ranges. gfx1250 DPX sets both; other tables leave them 0.
   size_t bcRingLLMaxBytes;
   size_t bcRingLL128MaxBytes;
+
+  // DDA IPC AllReduce tree: largest message whose kernel copies sendbuff into scratch.
+  // 0 always copies before the launch.
+  size_t ddaArTreeKernelCopyMaxBytes;
 };
 
 // Compute-partition mode a gfx1250 comm is tuned for (RCCL_TUNING_PARTITION_MODE). It picks

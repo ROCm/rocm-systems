@@ -10,7 +10,8 @@
  *
  * DdaIpcMPI_IndexData: every rank sends rank- and index-dependent data, so each element and each slice of the result
  * is distinct. A per-rank constant fill sums to the same value everywhere and hides a kernel that reads or writes the
- * wrong offset.
+ * wrong offset. Data changes per call, so stale peer scratch never holds the next call's bytes. AllReduceTreeStaging
+ * runs back to back across the tree's kernel copy cap.
  *
  * DdaIpcMPI_CommLifecycle: DDA IPC must come up on a communicator created after another one is destroyed. It needs
  * cuMem, and NCCL_CUMEM_ENABLE is cached at the first read, so run this suite in its own process.
@@ -26,6 +27,7 @@
 #include <hip/hip_runtime.h>
 #include <mpi.h>
 
+#include <algorithm>
 #include <cstdlib>
 #include <string>
 #include <vector>
@@ -35,7 +37,9 @@
 #include "MPITestBase.hpp"
 #include "ResourceGuards.hpp"
 #include "TestChecks.hpp"
+#include "algorithms/dda/device/CollCommon.h"
 #include "comm.h"
+#include "rccl_arch_thresholds.h"
 #include "rccl_common.h"
 
 using namespace RCCLTestGuards;
@@ -48,6 +52,9 @@ constexpr int kDdaIpcRanks = 8;
 
 // Mirrors kDdaFlatTreeThresholdBytes in dda_all_reduce_ipc.cu: AllReduce runs the tree kernel above it.
 constexpr size_t kFlatTreeThresholdBytes = 1ULL << 18;
+
+// Tree kernel copy cap AllReduceTreeStaging sets: below every DDA IPC AllReduce cap, so both sides stay on DDA.
+constexpr size_t kArStagingCapBytes = 2ULL << 20;
 
 // The fixture's communicator stays alive throughout; cycle 1 is the first one created after a destroy.
 constexpr int kLifecycleCycles = 2;
@@ -64,18 +71,19 @@ size_t elemBytes(ncclDataType_t dtype) {
   return static_cast<size_t>(ncclTypeSize(dtype));
 }
 
-// fp32 sends rank * 1000 + j % 997 and bf16 rank + j % 29, so every partial sum is an integer the type holds exactly.
-float inputValue(ncclDataType_t dtype, int rank, size_t j) {
+// fp32 sends rank * 1000 + (j + 131 * call) % 997, bf16 rank + (j + 7 * call) % 29: exact sums, new values every call.
+float inputValue(ncclDataType_t dtype, int rank, size_t j, int call) {
+  const size_t c = static_cast<size_t>(call);
   if (dtype == ncclFloat32) {
-    return static_cast<float>(rank) * 1000.0f + static_cast<float>(j % 997);
+    return static_cast<float>(rank) * 1000.0f + static_cast<float>((j + 131 * c) % 997);
   }
-  return static_cast<float>(rank) + static_cast<float>(j % 29);
+  return static_cast<float>(rank) + static_cast<float>((j + 7 * c) % 29);
 }
 
-float expectedSum(ncclDataType_t dtype, int nRanks, size_t j) {
+float expectedSum(ncclDataType_t dtype, int nRanks, size_t j, int call) {
   float sum = 0.0f;
   for (int r = 0; r < nRanks; ++r) {
-    sum += inputValue(dtype, r, j);
+    sum += inputValue(dtype, r, j, call);
   }
   return sum;
 }
@@ -89,23 +97,46 @@ bool ddaRoutingOverridden(const ncclComm* comm) {
          std::getenv("RCCL_DDA_THRESHOLD") != nullptr;
 }
 
+// Points the comm at a copy of its arch table with ddaArTreeKernelCopyMaxBytes = cap; restores the table on scope exit.
+class ScopedTreeKernelCopyCap {
+public:
+  ScopedTreeKernelCopyCap(ncclComm* comm, size_t cap) : comm_(comm), saved_(comm->archThresholds) {
+    if (saved_ != nullptr) {
+      table_ = *saved_;
+      table_.ddaArTreeKernelCopyMaxBytes = cap;
+      comm_->archThresholds = &table_;
+    }
+  }
+  ~ScopedTreeKernelCopyCap() {
+    comm_->archThresholds = saved_;
+  }
+  ScopedTreeKernelCopyCap(const ScopedTreeKernelCopyCap&) = delete;
+  ScopedTreeKernelCopyCap& operator=(const ScopedTreeKernelCopyCap&) = delete;
+
+private:
+  ncclComm* comm_;
+  const rcclArchThresholds* saved_;
+  rcclArchThresholds table_{};
+};
+
 bool ddaIpcReady(const ncclComm* comm) {
   return comm->ddaIpcMemHandler != nullptr && comm->ddaIpcBarrierState != nullptr;
 }
 
 template <typename T>
-hipError_t fillInput(void* buf, size_t count, ncclDataType_t dtype, int rank) {
-  return initializeBufferWithPattern<T>(buf, count, [=](size_t j) { return T(inputValue(dtype, rank, j)); });
+hipError_t fillInput(void* buf, size_t count, ncclDataType_t dtype, int rank, int call) {
+  return initializeBufferWithPattern<T>(buf, count, [=](size_t j) { return T(inputValue(dtype, rank, j, call)); });
 }
 
-// Exact check of recv[i] against the analytic sum at global index base + i.
+// Exact check of recv[i] against the analytic sum of call `call` at global index base + i.
 template <typename T>
-bool verifyOutput(const void* buf, size_t count, ncclDataType_t dtype, int nRanks, size_t base, std::string* detail) {
+bool verifyOutput(const void* buf, size_t count, ncclDataType_t dtype, int nRanks, size_t base, int call,
+                  std::string* detail) {
   size_t badIdx = 0;
   T want{};
   T got{};
   const bool ok = verifyBufferData<T>(
-    buf, count, [=](size_t i) { return T(expectedSum(dtype, nRanks, base + i)); }, 0, 0.0, &badIdx, &want, &got);
+    buf, count, [=](size_t i) { return T(expectedSum(dtype, nRanks, base + i, call)); }, 0, 0.0, &badIdx, &want, &got);
   if (!ok) {
     *detail = "recv[" + std::to_string(badIdx) + "] = " + std::to_string(static_cast<float>(got)) + ", expected " +
               std::to_string(static_cast<float>(want));
@@ -119,6 +150,8 @@ class DdaIpcMPI_IndexData : public MPITestBase {
 protected:
   int rank_ = 0;
   int nRanks_ = 0;
+  // Salts each call's data. Every rank runs the same calls, so it advances identically everywhere.
+  int call_ = 0;
 
   void SetUp() override {
     MPITestBase::SetUp();
@@ -169,8 +202,9 @@ protected:
     }
 
     const bool fp32 = c.dtype == ncclFloat32;
-    ASSERT_MPI_EQ(hipSuccess, fp32 ? fillInput<float>(sendBuf, sendCount, c.dtype, rank_) :
-                                     fillInput<hip_bfloat16>(sendBuf, sendCount, c.dtype, rank_));
+    const int call = call_++;
+    ASSERT_MPI_EQ(hipSuccess, fp32 ? fillInput<float>(sendBuf, sendCount, c.dtype, rank_, call) :
+                                     fillInput<hip_bfloat16>(sendBuf, sendCount, c.dtype, rank_, call));
 
     const std::string tag = std::string(rs ? "ReduceScatter" : "AllReduce") + " count=" + std::to_string(c.count) +
                             (fp32 ? " fp32" : " bf16") + (inPlace ? " in-place" : " out-of-place");
@@ -192,8 +226,8 @@ protected:
     ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
 
     std::string detail;
-    const bool ok = fp32 ? verifyOutput<float>(recvBuf, c.count, c.dtype, nRanks_, base, &detail) :
-                           verifyOutput<hip_bfloat16>(recvBuf, c.count, c.dtype, nRanks_, base, &detail);
+    const bool ok = fp32 ? verifyOutput<float>(recvBuf, c.count, c.dtype, nRanks_, base, call, &detail) :
+                           verifyOutput<hip_bfloat16>(recvBuf, c.count, c.dtype, nRanks_, base, call, &detail);
     EXPECT_TRUE(ok) << "Rank " << rank_ << ": " << tag << ": " << detail;
     // Fail on every rank: rank 0's slice survives some offset bugs, and only rank 0's summary is shown by default.
     int badRanks = ok ? 0 : 1;
@@ -216,6 +250,80 @@ protected:
         return;
       }
     }
+  }
+
+  // Launches every case back to back at `cap` with no sync in between, then checks each; counts cases on each side.
+  void runTreeStaging(size_t cap, const std::vector<IndexCase>& cases, bool inPlace, int* inKernel, int* hostCopy) {
+    ncclComm* comm = getActiveCommunicator();
+    ScopedTreeKernelCopyCap capGuard(comm, cap);
+    constexpr size_t kAlign = 256;
+
+    std::vector<size_t> offsets;
+    size_t arenaBytes = 0;
+    for (const IndexCase& c : cases) {
+      offsets.push_back(arenaBytes);
+      arenaBytes += (c.count * elemBytes(c.dtype) + kAlign - 1) / kAlign * kAlign;
+    }
+    void* sendArena = nullptr;
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&sendArena, arenaBytes));
+    DeviceBufferAutoGuard sendGuard(sendArena);
+    void* recvArena = sendArena;
+    DeviceBufferAutoGuard recvGuard;
+    if (!inPlace) {
+      ASSERT_MPI_EQ(hipSuccess, hipMalloc(&recvArena, arenaBytes));
+      recvGuard.set(recvArena);
+      // 0xFF is NaN in both types, so an element the kernel never writes cannot match.
+      ASSERT_MPI_EQ(hipSuccess, hipMemset(recvArena, 0xFF, arenaBytes));
+    }
+
+    std::vector<int> calls;
+    for (size_t i = 0; i < cases.size(); ++i) {
+      const IndexCase& c = cases[i];
+      const size_t bytes = c.count * elemBytes(c.dtype);
+      ASSERT_MPI_TRUE(bytes > kFlatTreeThresholdBytes);
+      char* send = static_cast<char*>(sendArena) + offsets[i];
+      char* recv = static_cast<char*>(recvArena) + offsets[i];
+      const bool fp32 = c.dtype == ncclFloat32;
+      calls.push_back(call_++);
+      ASSERT_MPI_EQ(hipSuccess, fp32 ? fillInput<float>(send, c.count, c.dtype, rank_, calls[i]) :
+                                       fillInput<hip_bfloat16>(send, c.count, c.dtype, rank_, calls[i]));
+      int algo = -1;
+      int protocol = -1;
+      int maxChannels = -1;
+      ASSERT_MPI_EQ(ncclSuccess, rcclGetCollImplInfo(comm, ncclFuncAllReduce, c.count, c.dtype, ncclSum, send, recv, 0,
+                                                     &algo, &protocol, &maxChannels));
+      ASSERT_MPI_EQ(static_cast<int>(RCCL_DDA_IPC), algo);
+      if (dda::common::ddaAllReduceTreeIpcStagesInKernel(bytes, cap)) {
+        ++*inKernel;
+      } else {
+        ++*hostCopy;
+      }
+    }
+    // The fills above are synchronous; every launch below is queued without a sync in between.
+    for (size_t i = 0; i < cases.size(); ++i) {
+      const IndexCase& c = cases[i];
+      void* send = static_cast<char*>(sendArena) + offsets[i];
+      void* recv = static_cast<char*>(recvArena) + offsets[i];
+      ASSERT_MPI_EQ(ncclSuccess, ncclAllReduce(send, recv, c.count, c.dtype, ncclSum, comm, getActiveStream()));
+    }
+    ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+    bool ok = true;
+    std::string detail;
+    for (size_t i = 0; i < cases.size() && ok; ++i) {
+      const IndexCase& c = cases[i];
+      const void* recv = static_cast<char*>(recvArena) + offsets[i];
+      ok = c.dtype == ncclFloat32 ? verifyOutput<float>(recv, c.count, c.dtype, nRanks_, 0, calls[i], &detail) :
+                                    verifyOutput<hip_bfloat16>(recv, c.count, c.dtype, nRanks_, 0, calls[i], &detail);
+      if (!ok) {
+        detail = "count=" + std::to_string(c.count) + (c.dtype == ncclFloat32 ? " fp32 " : " bf16 ") + detail;
+      }
+    }
+    const std::string tag = "AllReduce cap=" + std::to_string(cap) + (inPlace ? " in-place" : " out-of-place");
+    EXPECT_TRUE(ok) << "Rank " << rank_ << ": " << tag << ": " << detail;
+    int badRanks = ok ? 0 : 1;
+    MPI_Allreduce(MPI_IN_PLACE, &badRanks, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+    EXPECT_EQ(0, badRanks) << tag << ": " << badRanks << " rank(s) received wrong values";
   }
 
   void runReduceScatter(const std::vector<IndexCase>& cases) {
@@ -254,6 +362,41 @@ TEST_F(DdaIpcMPI_IndexData, AllReduceTree) {
 // Each rank reduces slice rank * recvcount of every peer: one block, then several blocks per shard.
 TEST_F(DdaIpcMPI_IndexData, ReduceScatter) {
   runReduceScatter({{ncclFloat32, 1024}, {ncclFloat32, 65536}, {ncclBfloat16, 8192}});
+}
+
+// Cap 0 and 2 MiB, out of place then in place, sizes around the flat/tree split and the cap; rounds rotate the order.
+TEST_F(DdaIpcMPI_IndexData, AllReduceTreeStaging) {
+  const std::string skip =
+    mpiCoordinatedSkipReason(rcclCeAllReduceEnabled(getActiveCommunicator()), "CE AllReduce routes away from DDA IPC");
+  if (!skip.empty()) {
+    GTEST_SKIP() << skip;
+  }
+  constexpr int kRounds = 5;
+  const size_t capFloats = kArStagingCapBytes / elemBytes(ncclFloat32);
+  const size_t capBf16 = kArStagingCapBytes / elemBytes(ncclBfloat16);
+  std::vector<IndexCase> cases = {
+    {ncclFloat32, 65568},   {ncclFloat32, capFloats + 32}, {ncclFloat32, capFloats},   {ncclFloat32, 3u << 19},
+    {ncclBfloat16, 131136}, {ncclBfloat16, capBf16 + 64},  {ncclBfloat16, capBf16},
+  };
+  int inKernel = 0;
+  int hostCopy = 0;
+  for (int round = 0; round < kRounds; ++round) {
+    for (size_t cap : {size_t{0}, kArStagingCapBytes}) {
+      for (bool inPlace : {false, true}) {
+        runTreeStaging(cap, cases, inPlace, &inKernel, &hostCopy);
+        if (HasFailure() || IsSkipped()) {
+          return;
+        }
+      }
+    }
+    std::rotate(cases.begin(), cases.begin() + 1, cases.end());
+  }
+  // RCCL_DDA_AR_TREE_KERNEL_COPY_MAX_BYTES overrides the table cap, so the launch sides are only checked without it.
+  if (std::getenv("RCCL_DDA_AR_TREE_KERNEL_COPY_MAX_BYTES") != nullptr) {
+    return;
+  }
+  EXPECT_GT(inKernel, 0) << "no call copied in the kernel";
+  EXPECT_GT(hostCopy, 0) << "no call copied before the launch";
 }
 
 class DdaIpcMPI_CommLifecycle : public MPITestBase {

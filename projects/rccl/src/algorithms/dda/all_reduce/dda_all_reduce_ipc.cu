@@ -6,22 +6,28 @@
 
 #include "algorithms/dda/all_reduce/dda_all_reduce.h"
 
-#include "algorithms/dda/device/CollCommon.h"
-#include "algorithms/dda/all_reduce/all_reduce_dda.h"
-#include "checks.h"
-#include "comm.h"
-#include "debug.h"
-#include "algorithms/dda/ipc/ipc_gpu_barrier.h"
-#include "algorithms/dda/dda_init_detail.h"
-
 #include <cuda_runtime.h>
 #include <hip/hip_ext.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <memory>
 #include <new>
 #include <utility>
+
+#include "algorithms/dda/all_reduce/all_reduce_dda.h"
+#include "algorithms/dda/dda_init_detail.h"
+#include "algorithms/dda/device/CollCommon.h"
+#include "algorithms/dda/ipc/ipc_gpu_barrier.h"
+#include "checks.h"
+#include "comm.h"
+#include "debug.h"
+#include "param.h"
+#include "rccl_common.h"
+
+// Overrides the arch table's ddaArTreeKernelCopyMaxBytes. -1 (unset) reads the table; 0 and other negatives disable.
+RCCL_PARAM(DdaArTreeKernelCopyMaxBytes, "DDA_AR_TREE_KERNEL_COPY_MAX_BYTES", kDdaThresholdUnset);
 
 namespace {
 
@@ -36,6 +42,15 @@ constexpr size_t kDdaFlatTreeThresholdBytes = 1ULL << 18;
 // `typeSize` bytes, capped by the scratch-derived block count.
 static inline std::pair<dim3, dim3> ddaAllReduceIpcGeom(size_t count, int typeSize) {
   return dda::common::getGridAndBlockDims(count, typeSize, ddaMaxNBlocksForScratch());
+}
+
+// Largest tree message the kernel copies in: the env var unless unset (other negatives are 0), else the arch table.
+static inline size_t ddaAllReduceTreeIpcKernelCopyMaxBytes(const ncclComm* comm) {
+  const int64_t user = rcclParamDdaArTreeKernelCopyMaxBytes();
+  if (user != kDdaThresholdUnset) {
+    return user > 0 ? static_cast<size_t>(user) : 0;
+  }
+  return rcclDdaIpcArTreeKernelCopyMaxBytes(comm);
 }
 
 template <typename T>
@@ -72,7 +87,13 @@ static ncclResult_t ncclAllReduceDdaIpcTyped(const void* sendbuff, void* recvbuf
   T** d_ipcbuffs = reinterpret_cast<T**>(peerPtrsDev);
 
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
-  if (treeOk) {
+  const bool treeCopyInKernel =
+    treeOk && dda::common::ddaAllReduceTreeIpcStagesInKernel(sizeBytes, ddaAllReduceTreeIpcKernelCopyMaxBytes(comm));
+  if (treeCopyInKernel) {
+    hipExtLaunchKernelGGL((dda::common::ddaAllReduceTreeIpc<T, kDdaNranks, false, true>), grid, block, 0, stream,
+                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff), count,
+                          static_cast<const T*>(sendbuff), comm->rank, barrierHost, nullptr);
+  } else if (treeOk) {
     CUDACHECK(cudaMemcpyAsync(comm->ddaScratch, sendbuff, count * sizeof(T), cudaMemcpyDeviceToDevice, stream));
     hipExtLaunchKernelGGL((dda::common::ddaAllReduceTreeIpc<T, kDdaNranks, false>), grid, block, 0, stream,
                           /*startEvent=*/nullptr, stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff), count,

@@ -1,0 +1,1 @@
+* `RCCL_DDA_AR_TREE_KERNEL_COPY_MAX_BYTES` sets the largest DDA IPC tree `ncclAllReduce` message whose kernel copies the send buffer itself, overriding the 4 MiB gfx942 and gfx950 default; `0` keeps every tree message on the copy before the launch.

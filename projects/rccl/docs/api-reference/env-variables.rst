@@ -1770,6 +1770,14 @@ threshold table introduced for gfx1250.
         | ``0``: Use the batched kernel at every size.
         | ``N`` (bytes): Use the peer-parallel kernel up to ``N``, overriding the table.
 
+    * - | ``RCCL_DDA_AR_TREE_KERNEL_COPY_MAX_BYTES``
+        | Largest single-node DDA IPC ``ncclAllReduce`` message in bytes on the tree
+          path (above 256 KiB) whose kernel copies the send buffer into the DDA
+          scratch itself. Larger tree messages copy it before the kernel launch.
+      - | ``-1``: Resolved from the per-arch table at runtime (default; 4 MiB on gfx942 and gfx950).
+        | ``0``: Copy before the launch at every tree size.
+        | ``N`` (bytes): Copy in the kernel up to ``N``, overriding the table.
+
     * - | ``RCCL_DDA_BC_MAX_BLOCKS``
         | Lowers the per-rank block budget of the DDA Broadcast kernels. The
           budget is otherwise the DDA fabric block cap (``RCCL_DDA_FABRIC_MAXBLOCKS``)

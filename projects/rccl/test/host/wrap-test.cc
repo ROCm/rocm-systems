@@ -9253,6 +9253,36 @@ TEST(WrapMicrotestIsolated, DdaFabricRsLL128PeerMaxBytes_FromSpxTable) {
       });
 }
 
+// DDA IPC AllReduce tree kernel copy cap: 4 MiB on gfx942 and gfx950, also under RCCL_IGNORE_ARCH_TABLE=1.
+// gfx1250 and no comm give 0.
+TEST(WrapMicrotestIsolated, DdaIpcArTreeKernelCopyMaxBytes_FromTable) {
+  RUN_ISOLATED_TEST(
+      "Wrap_DdaIpcArTreeKernelCopyMaxBytes_FromTable",
+      []() {
+        int64_t ignoreTable = 0;
+        g_loadParam = [&ignoreTable](const char* env, int64_t def) -> int64_t {
+          return std::strcmp(env, "RCCL_IGNORE_ARCH_TABLE") == 0 ? ignoreTable : def;
+        };
+        for (const char* arch : {"gfx942", "gfx950"}) {
+          ncclComm* comm = MakeCommWithArch(arch);
+          comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds(arch, RCCL_TUNING_PARTITION_SPX);
+          ASSERT_NE(nullptr, comm->archThresholds) << arch;
+          ignoreTable = 0;
+          EXPECT_EQ(4 * kMiB, rcclDdaIpcArTreeKernelCopyMaxBytes(comm)) << arch;
+          ignoreTable = 1;
+          EXPECT_EQ(4 * kMiB, rcclDdaIpcArTreeKernelCopyMaxBytes(comm)) << arch << " RCCL_IGNORE_ARCH_TABLE=1";
+          DeleteCommWithArch(comm);
+        }
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
+        ASSERT_NE(nullptr, comm->archThresholds);
+        ignoreTable = 0;
+        EXPECT_EQ(0u, rcclDdaIpcArTreeKernelCopyMaxBytes(comm)) << "gfx1250";
+        EXPECT_EQ(0u, rcclDdaIpcArTreeKernelCopyMaxBytes(nullptr));
+        DeleteCommWithArch(comm);
+      });
+}
+
 // DDA LL128 AlltoAll reads its own ddaA2aLL128* window, inclusive at both ends; a synthetic table pins
 // the accessors. The real tables and no table keep 0 threads; SPX and no table keep the init cap, and DPX
 // caps the grid at 72 blocks from 256 KiB to 16 MiB, where DPX runs LL128 (LL stops at 128 KiB).

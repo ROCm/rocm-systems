@@ -3231,6 +3231,23 @@ TEST(RcclDdaTierThresholds, ForceCeScratchPerArch)
     EXPECT_TRUE(rcclGetArchThresholds("gfx942")->forceCeScratch);
 }
 
+// The DDA IPC AllReduce tree kernel copies its own input up to 4 MiB on gfx942 and gfx950; gfx1250 keeps the host copy.
+TEST(RcclDdaTierThresholds, DdaArTreeKernelCopyMaxPerArch)
+{
+    constexpr size_t MiB = 1024 * 1024;
+    EXPECT_EQ(rcclGetArchThresholds("gfx1250")->ddaArTreeKernelCopyMaxBytes, 0u);
+    EXPECT_EQ(rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX)->ddaArTreeKernelCopyMaxBytes, 0u);
+    auto comm = std::make_unique<ncclComm>();
+    for (const char* arch : {"gfx942", "gfx950"})
+    {
+        EXPECT_EQ(rcclGetArchThresholds(arch)->ddaArTreeKernelCopyMaxBytes, 4 * MiB) << arch;
+        InitDdaDecisionComm(*comm, arch, 8, 1, /*symmetricSupport=*/false);
+        comm->archThresholds = rcclGetArchThresholds(arch);
+        EXPECT_EQ(rcclDdaIpcArTreeKernelCopyMaxBytes(comm.get()), 4 * MiB) << arch;
+    }
+    EXPECT_EQ(rcclDdaIpcArTreeKernelCopyMaxBytes(nullptr), 0u);
+}
+
 // Only the gfx1250 SPX table opens the AllGather TDM window.
 TEST(RcclDdaTierThresholds, SymTdmWindowPerArch)
 {
