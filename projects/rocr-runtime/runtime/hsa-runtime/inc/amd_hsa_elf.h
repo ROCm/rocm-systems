@@ -302,7 +302,7 @@ typedef enum {
 #define NT_AMD_HSA_ISA_NAME            11
 /* AMDGPU snapshots of runtime, agent and queues state for use in core dump */
 #define NT_AMDGPU_CORE_STATE           33
-#define NT_AMDGPU_CORE_TARGET_PID      34
+#define NT_AMDGPU_CORE_EXT_INFO        34
 #define NT_AMD_HSA_HLDEBUG_DEBUG       101
 #define NT_AMD_HSA_HLDEBUG_TARGET      102
 

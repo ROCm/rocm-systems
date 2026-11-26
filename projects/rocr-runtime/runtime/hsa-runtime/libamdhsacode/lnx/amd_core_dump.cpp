@@ -525,21 +525,21 @@ struct NoteSegmentBuilder : public SegmentBuilder {
     noteHeaderBuilder.Write<uint32_t> (NT_AMDGPU_CORE_STATE);  /* type.  */
     noteHeaderBuilder.Write<char[8]> ("AMDGPU\0");
 
-    /* Note core target PID for stand alone runtime core file parsing.  */
-    PackageBuilder pidNoteBuilder;
-    int pid = getpid();
-    pidNoteBuilder.Write<uint32_t>(7);              /* namesz */
-    pidNoteBuilder.Write<uint32_t>(sizeof(pid));    /* descsz */
-    pidNoteBuilder.Write<uint32_t>(NT_AMDGPU_CORE_TARGET_PID);
-    pidNoteBuilder.Write<char[8]>("AMDGPU\0");
-    pidNoteBuilder.Write<int>(pid);
+    /* Note core extended info for standalone GPU core file parsing.  */
+    PackageBuilder extInfoNoteBuilder;
+    extInfoNoteBuilder.Write<uint32_t>(7);                     /* namesz */
+    extInfoNoteBuilder.Write<uint32_t>(2 * sizeof(uint32_t));  /* descsz */
+    extInfoNoteBuilder.Write<uint32_t>(NT_AMDGPU_CORE_EXT_INFO);
+    extInfoNoteBuilder.Write<char[8]>("AMDGPU\0");
+    extInfoNoteBuilder.Write<uint32_t>(1);                     /* version */
+    extInfoNoteBuilder.Write<uint32_t>(getpid());              /* pid */
 
     raw_.resize(noteHeaderBuilder.Size() + note_package_builder_.Size()
-                + pidNoteBuilder.Size());
+                + extInfoNoteBuilder.Size());
     if (!(noteHeaderBuilder.GetBuffer(raw_.data())
           && note_package_builder_.GetBuffer(&raw_[noteHeaderBuilder.Size()])
-          && pidNoteBuilder.GetBuffer(&raw_[noteHeaderBuilder.Size()
-                                            + note_package_builder_.Size()]))) {
+          && extInfoNoteBuilder.GetBuffer(&raw_[noteHeaderBuilder.Size()
+                                                + note_package_builder_.Size()]))) {
       fprintf(stderr, "Failed to build the NT_AMDGPU_CORE_STATE note.\n");
       return HSA_STATUS_ERROR;
     }
@@ -592,9 +592,9 @@ struct LoadSegmentBuilder : public SegmentBuilder {
       }
     }
 
-    // register load segments required for stand alone gpu core dump
+    // register load segments required for standalone gpu core dump
     std::vector<std::pair<uintptr_t, size_t>> shader_info;
-    if (!lightweight_dump &&
+    if (!lightweight_dump && runtime_info.r_debug &&
         core::Runtime::runtime_singleton_->flag().gpu_standalone_core_enable()) {
 
       // add of r_debug and code object info
@@ -690,7 +690,7 @@ struct LoadSegmentBuilder : public SegmentBuilder {
       flags |= (perms.find('w', 0) != std::string::npos) ? SHF_WRITE : 0;
       flags |= (perms.find('x', 0) != std::string::npos) ? SHF_EXECINSTR : 0;
 
-      // Add mapping for shader core info in host for stand alone GPU core
+      // Add mapping for shader core info in host for standalone GPU core
       bool seg_added = false;
       for (auto it = shader_info.begin(); it != shader_info.end(); ) {
         if (start > it->first || it->first >= end) {
