@@ -614,8 +614,7 @@ void GpuAgent::InitRegionList() {
           // and the kernel refuses anything beyond the cap anyway.
           {
             dmem_cgroup::VramLimit cgroup_limit;
-            if (dmem_cgroup::QueryVramLimit(properties_.Domain, properties_.LocationId,
-                                            &cgroup_limit)) {
+            if (dmem_cgroup::QueryVramLimit(properties_.DrmRenderMinor, &cgroup_limit)) {
               debug_print("dmem cgroup caps node %u VRAM at %" PRIu64 " bytes\n", node_id(),
                           cgroup_limit.max);
               mem_props[mem_idx].SizeInBytes =
@@ -2786,8 +2785,7 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
       // cgroup will still allow, counting the reclaimable memory the same way.
       {
         dmem_cgroup::VramLimit cgroup_limit;
-        if (dmem_cgroup::QueryVramLimit(properties_.Domain, properties_.LocationId,
-                                        &cgroup_limit)) {
+        if (dmem_cgroup::QueryVramLimit(properties_.DrmRenderMinor, &cgroup_limit)) {
           availableBytes =
               std::min<HSAuint64>(availableBytes, cgroup_limit.available + reclaimableBytes);
         }

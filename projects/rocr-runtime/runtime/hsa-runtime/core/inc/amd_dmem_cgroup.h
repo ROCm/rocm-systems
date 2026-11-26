@@ -20,14 +20,13 @@ struct VramLimit {
   HSAuint64 available;  // Least dmem.max minus dmem.current at any of those levels
 };
 
-/// @brief Looks up the dmem cgroup VRAM cap applying to the calling process for the GPU at the
-/// given PCI address. Inside a cgroup namespace only the levels within the namespace are visible,
-/// so a cap set above it is not observed.
-/// @param[in] domain PCI domain, from HsaNodeProperties::Domain
-/// @param[in] location_id PCI bus/device/function, from HsaNodeProperties::LocationId
+/// @brief Looks up the dmem cgroup VRAM cap applying to the calling process for the given GPU.
+/// Inside a cgroup namespace only the levels within the namespace are visible, so a cap set above
+/// it is not observed.
+/// @param[in] drm_render_minor Render node minor of the GPU, from HsaNodeProperties::DrmRenderMinor
 /// @param[out] limit The cap, written only when a finite cap applies
 /// @return true if a finite cap applies, false if none does or the cgroup files cannot be read.
-bool QueryVramLimit(HSAuint32 domain, HSAuint32 location_id, VramLimit* limit);
+bool QueryVramLimit(HSAuint32 drm_render_minor, VramLimit* limit);
 
 }  // namespace dmem_cgroup
 }  // namespace AMD

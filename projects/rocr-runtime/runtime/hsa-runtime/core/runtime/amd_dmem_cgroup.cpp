@@ -6,9 +6,11 @@
 
 #include "core/inc/amd_dmem_cgroup.h"
 
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include <algorithm>
 #include <fstream>
@@ -22,13 +24,19 @@ namespace {
 
 constexpr const char kCgroupMount[] = "/sys/fs/cgroup";
 
-// The key the dmem controller uses for a GPU's framebuffer region:
-// "drm/<domain>:<bus>:<device>.<function>/vram".
-std::string VramRegionKey(HSAuint32 domain, HSAuint32 location_id) {
-  char key[64];
-  snprintf(key, sizeof(key), "drm/%04x:%02x:%02x.%x/vram", domain, (location_id >> 8) & 0xFF,
-           (location_id >> 3) & 0x1F, location_id & 0x7);
-  return std::string(key);
+// The dmem region for a GPU is "drm/<device name>/vram", where the device name is
+// what the render node's sysfs entry links to (the PCI address on PCI devices).
+// Read from sysfs rather than decoded from LocationId, which KFD ORs the
+// partition id into on partitioned GPUs.
+bool VramRegionKey(HSAuint32 drm_render_minor, std::string* key) {
+  const std::string link = "/sys/class/drm/renderD" + std::to_string(drm_render_minor) + "/device";
+  char target[PATH_MAX];
+  const ssize_t len = readlink(link.c_str(), target, sizeof(target) - 1);
+  if (len <= 0) return false;
+  target[len] = '\0';
+  const char* name = strrchr(target, '/');
+  *key = std::string("drm/") + (name ? name + 1 : target) + "/vram";
+  return true;
 }
 
 // The calling process's cgroup as a path relative to the cgroup2 mount, from the "0::<path>" line
@@ -77,10 +85,11 @@ bool ReadRegionValue(const std::string& path, const std::string& key, HSAuint64*
 
 }  // namespace
 
-bool QueryVramLimit(HSAuint32 domain, HSAuint32 location_id, VramLimit* limit) {
+bool QueryVramLimit(HSAuint32 drm_render_minor, VramLimit* limit) {
   std::string cgroup;
   if (!SelfCgroupPath(&cgroup)) return false;
-  const std::string key = VramRegionKey(domain, location_id);
+  std::string key;
+  if (!VramRegionKey(drm_render_minor, &key)) return false;
 
   // Any level from the process's cgroup up to the root can refuse an allocation,
   // so the cap is the tightest dmem.max on that path and the headroom the least
