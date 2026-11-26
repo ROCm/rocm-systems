@@ -147,6 +147,50 @@ TEST_F(ConSanWholeImageStructure, ChecksAllThreeDescriptorsAndDistinctMetadataRo
   EXPECT_EQ(facts_.entries[2].binding.original_group_bytes, 64u);
 }
 
+TEST_F(ConSanWholeImageStructure, NativeInventoryPreservesCompilerAbiWithoutSelectedCoverage) {
+  const std::filesystem::path path =
+      std::filesystem::path(CONSAN_MULTI_ENTRY_FIXTURE).parent_path() / "multi-entry-abi.hsaco";
+  std::ifstream input(path, std::ios::binary);
+  const std::vector<uint8_t> original = {std::istreambuf_iterator<char>(input),
+                                         std::istreambuf_iterator<char>()};
+  ASSERT_FALSE(original.empty());
+  const FailureOr<NativeImageInventory> inventory =
+      inspect_native_image(original, "gfx1250", error_.emitter());
+  ASSERT_TRUE(inventory.succeeded()) << error_.message();
+  EXPECT_EQ(inventory.value().identity.sha256, digest(original));
+  EXPECT_EQ(inventory.value().identity.bytes, original.size());
+  ASSERT_EQ(inventory.value().entries.size(), 3u);
+  for (const ImageEntryFacts &entry : inventory.value().entries) {
+    EXPECT_EQ(entry.disposition, EntryDisposition::Native);
+    EXPECT_FALSE(entry.selected);
+  }
+  const EntryFacts &native = inventory.value().entries.back().binding;
+  EXPECT_EQ(native.kernarg_alignment, 32u);
+  EXPECT_EQ(native.original_private_bytes, 68u);
+  EXPECT_EQ(native.prepared_private_bytes, 68u);
+  EXPECT_EQ(native.required_workgroup_size, (std::array<uint32_t, 3>{32, 2, 1}));
+  EXPECT_TRUE(inspect_native_image(original, "gfx1100", error_.emitter()).failed());
+  KernelDescriptorInfo kernel = {.descriptor_file_offset = native.original_descriptor_offset,
+                                 .kernel_name = native.name,
+                                 .entry_text_offset = native.original_entry_offset,
+                                 .descriptor = {}};
+  std::memcpy(&kernel.descriptor, original.data() + kernel.descriptor_file_offset,
+              sizeof(kernel.descriptor));
+  EXPECT_TRUE(inspect_metadata(original, kernel).failed());
+  EXPECT_TRUE(inspect_metadata(original, kernel, nullptr, MetadataPolicy::Native).succeeded());
+  std::vector<uint8_t> invalid = original;
+  const FailureOr<amdhsa::MetadataDocument> metadata = amdhsa::MetadataDocument::parse(invalid);
+  ASSERT_TRUE(metadata.succeeded());
+  const amdhsa::MetadataValue *entries = metadata.value().root().field("amdhsa.kernels");
+  ASSERT_NE(entries, nullptr);
+  const amdhsa::MetadataValue *vgprs = entries->array.back().field(".vgpr_count");
+  ASSERT_NE(vgprs, nullptr);
+  ASSERT_EQ(vgprs->integer_bytes, 0u);
+  const size_t payload_offset = metadata.value().payload().data() - invalid.data();
+  invalid[payload_offset + vgprs->offset] = 127;
+  EXPECT_TRUE(inspect_native_image(invalid, "gfx1250", error_.emitter()).failed());
+}
+
 TEST_F(ConSanWholeImageStructure, RecomputedHashCannotHideNativeBodyOrDescriptorMutation) {
   const std::vector<uint8_t> saved = prepared_;
   const ImageEntryFacts &native = facts_.entries.back();

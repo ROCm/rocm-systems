@@ -44,6 +44,8 @@ void encode_entry(Encoder &encoder, const EntryFacts &entry) {
   encoder.u32(entry.prepared_vgprs);
   encoder.u32(entry.maximum_workgroup_size);
   encoder.u32(entry.workgroup_id_scalar);
+  for (const uint32_t dimension : entry.required_workgroup_size)
+    encoder.u32(dimension);
 }
 
 bool decode_entry(Decoder &decoder, EntryFacts &entry, uint32_t string_limit) {
@@ -55,7 +57,10 @@ bool decode_entry(Decoder &decoder, EntryFacts &entry, uint32_t string_limit) {
          decoder.u32(entry.original_group_bytes) && decoder.u32(entry.prepared_group_bytes) &&
          decoder.u32(entry.original_private_bytes) && decoder.u32(entry.prepared_private_bytes) &&
          decoder.u32(entry.prepared_sgprs) && decoder.u32(entry.prepared_vgprs) &&
-         decoder.u32(entry.maximum_workgroup_size) && decoder.u32(entry.workgroup_id_scalar);
+         decoder.u32(entry.maximum_workgroup_size) && decoder.u32(entry.workgroup_id_scalar) &&
+         decoder.u32(entry.required_workgroup_size[0]) &&
+         decoder.u32(entry.required_workgroup_size[1]) &&
+         decoder.u32(entry.required_workgroup_size[2]);
 }
 
 } // namespace wire
@@ -68,9 +73,9 @@ constexpr std::array<uint8_t, 8> kFactsMagic = {'R', 'J', 'C', 'S', 'F', 'A', 'C
 constexpr size_t kEnvelopeBytes = 8 + 16 + 8 + 32;
 constexpr size_t kSiteWireBytes = 68;
 constexpr size_t kBarrierWireBytes = 56;
-// Manifest prefix (144), entry fields including the name length (80), and site
+// Manifest prefix (144), entry fields including the name length (92), and site
 // count (4). Name bytes and per-site records are accounted for separately.
-constexpr size_t kFixedPayloadBytes = 144 + 80 + 4;
+constexpr size_t kFixedPayloadBytes = 144 + 92 + 4;
 
 void encode_site(wire::Encoder &encoder, const SiteFacts &site) {
   encoder.u32(site.id);
@@ -114,6 +119,18 @@ bool decode_site(wire::Decoder &decoder, SiteFacts &site) {
 }
 
 } // namespace
+
+bool valid_workgroup_requirement(const std::array<uint32_t, 3> &shape, uint32_t maximum) {
+  if (shape == std::array<uint32_t, 3>{})
+    return true;
+  uint32_t product = 1;
+  for (const uint32_t dimension : shape) {
+    if (dimension == 0 || dimension > maximum / product)
+      return false;
+    product *= dimension;
+  }
+  return true;
+}
 
 Digest digest(std::span<const uint8_t> bytes) {
   util::Sha256 hash;
@@ -185,6 +202,7 @@ Result validate_manifest(const Manifest &manifest, util::DiagnosticEmitter diagn
       entry.prepared_sgprs > 106 || entry.prepared_vgprs == 0 || entry.prepared_vgprs > 256 ||
       (entry.prepared_vgprs % 4) != 0 || entry.maximum_workgroup_size == 0 ||
       entry.maximum_workgroup_size > 1024 ||
+      !valid_workgroup_requirement(entry.required_workgroup_size, entry.maximum_workgroup_size) ||
       (entry.workgroup_id_scalar != UINT32_MAX &&
        (isa_properties(target->arch).uses_ttmp_workgroup_ids
             ? entry.workgroup_id_scalar != kWorkgroupIdTtmp9Selector
@@ -445,6 +463,10 @@ FailureOr<LaunchLayout> plan_launch(const Manifest &manifest, const LaunchDimens
       dimensions.grid[0] % dimensions.workgroup[0] != 0) {
     return diagnostic.emit()
            << "capture requires complete bounded 1D workgroups and no private segment";
+  }
+  if (manifest.entry.required_workgroup_size != std::array<uint32_t, 3>{} &&
+      dimensions.workgroup != manifest.entry.required_workgroup_size) {
+    return diagnostic.emit() << "launch differs from original required workgroup shape";
   }
   const uint32_t workgroups = dimensions.grid[0] / dimensions.workgroup[0];
   if (workgroups > kWorkgroupCapacity ||

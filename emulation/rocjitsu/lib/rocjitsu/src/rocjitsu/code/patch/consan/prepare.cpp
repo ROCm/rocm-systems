@@ -81,13 +81,14 @@ Result finish_manifest(const InputProgram &program, std::span<const uint8_t> ima
                     .original_entry_offset = program.kernel.entry_text_offset,
                     .prepared_entry_offset = kernel.entry_text_offset,
                     .original_kernarg_bytes = program.kernel.descriptor.kernarg_size,
-                    .kernarg_alignment = 8,
+                    .kernarg_alignment = program.kernarg_alignment,
                     .original_group_bytes = program.kernel.descriptor.group_segment_fixed_size,
                     .prepared_group_bytes = program.kernel.descriptor.group_segment_fixed_size,
                     .prepared_sgprs = sgprs,
                     .prepared_vgprs = vgprs,
                     .maximum_workgroup_size = program.maximum_workgroup_size,
-                    .workgroup_id_scalar = workgroup_id_scalar(program)};
+                    .workgroup_id_scalar = workgroup_id_scalar(program),
+                    .required_workgroup_size = program.required_workgroup_size};
   util::StringDiagnostic diagnostic;
   if (validate_manifest(manifest, diagnostic.emitter()).failed()) {
     return reject(error, "invalid lowered facts: " + diagnostic.message());
@@ -400,9 +401,14 @@ FailureOr<PreparedImageArtifact> lower_image(std::span<const uint8_t> original,
                .message = "entry name is not valid UTF-8 for JSON output"};
       return Result::failure();
     }
+    const std::vector<InputProgram>::const_iterator selected =
+        std::ranges::find_if(programs, [&](const InputProgram &program) {
+          return program.kernel.descriptor_file_offset == kernel.descriptor_file_offset;
+        });
     std::string metadata_error;
-    const FailureOr<MetadataResources> metadata =
-        inspect_metadata(original, kernel, &metadata_error);
+    const FailureOr<MetadataResources> metadata = inspect_metadata(
+        original, kernel, &metadata_error,
+        selected == programs.end() ? MetadataPolicy::Native : MetadataPolicy::Selected);
     if (metadata.failed()) {
       return reject(error, metadata_error);
     }
@@ -415,10 +421,6 @@ FailureOr<PreparedImageArtifact> lower_image(std::span<const uint8_t> original,
     row.key = kernel.descriptor_file_offset;
     row.original_sgprs = metadata.value().sgprs;
     row.original_vgprs = metadata.value().vgprs;
-    const std::vector<InputProgram>::const_iterator selected =
-        std::ranges::find_if(programs, [&](const InputProgram &program) {
-          return program.kernel.descriptor_file_offset == row.key;
-        });
     if (selected != programs.end()) {
       row.disposition = EntryDisposition::Selected;
       const std::vector<InstrumentedEntry>::const_iterator mapping = std::ranges::find(
@@ -448,13 +450,16 @@ FailureOr<PreparedImageArtifact> lower_image(std::span<const uint8_t> original,
                      .original_entry_offset = kernel.entry_text_offset,
                      .prepared_entry_offset = final_kernel->entry_text_offset,
                      .original_kernarg_bytes = kernel.descriptor.kernarg_size,
-                     .kernarg_alignment = 8,
+                     .kernarg_alignment = metadata.value().kernarg_alignment,
                      .original_group_bytes = kernel.descriptor.group_segment_fixed_size,
                      .prepared_group_bytes = final_kernel->descriptor.group_segment_fixed_size,
+                     .original_private_bytes = kernel.descriptor.private_segment_fixed_size,
+                     .prepared_private_bytes = final_kernel->descriptor.private_segment_fixed_size,
                      .prepared_sgprs = metadata.value().sgprs,
                      .prepared_vgprs = metadata.value().vgprs,
                      .maximum_workgroup_size = metadata.value().maximum_workgroup_size,
-                     .workgroup_id_scalar = workgroup_id_scalar(kernel, *first.target)};
+                     .workgroup_id_scalar = workgroup_id_scalar(kernel, *first.target),
+                     .required_workgroup_size = metadata.value().required_workgroup_size};
       std::unique_ptr<Decoder> decoder =
           Decoder::create(default_isa_target_registry(), first.target->public_id);
       if (decoder == nullptr) {

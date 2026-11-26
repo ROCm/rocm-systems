@@ -21,6 +21,18 @@
 #ifndef MK_UNREACHABLE_PC_READ
 #define MK_UNREACHABLE_PC_READ 0
 #endif
+#ifndef MK_EXTENDED_ABI
+#define MK_EXTENDED_ABI 0
+#endif
+#ifndef MK_NATIVE_SCALAR
+#define MK_NATIVE_SCALAR 0
+#endif
+#ifndef MK_NATIVE_VGPRS
+#define MK_NATIVE_VGPRS 16
+#endif
+#ifndef MK_A_KERNARG_ALIGNMENT
+#define MK_A_KERNARG_ALIGNMENT 8
+#endif
 .amdgcn_target "amdgcn-amd-amdhsa--gfx1250"
 
 .macro wait_all
@@ -126,6 +138,10 @@ mk_b:
 .type mk_c,@function
 .p2align 8
 mk_c:
+#if MK_NATIVE_SCALAR
+  s_load_b32 s4, s[0:1], 0
+  wait_all
+#else
   s_load_b64 s[16:17], s[0:1], 0
   s_load_b32 s18, s[0:1], 16
   wait_all
@@ -159,17 +175,18 @@ mk_c:
   s_mov_b32 exec_lo, s19
   wait_all
   s_wait_storecnt 0
+#endif
   s_endpgm
 .Lend_c:
 .size mk_c, .Lend_c-mk_c
 #endif
 
-.macro descriptor name, args, sgprs, vgprs, lds
+.macro descriptor name, args, sgprs, vgprs, lds, private=0
 .rodata
 .p2align 6
 .amdhsa_kernel \name
   .amdhsa_group_segment_fixed_size \lds
-  .amdhsa_private_segment_fixed_size 0
+  .amdhsa_private_segment_fixed_size \private
   .amdhsa_kernarg_size \args
   .amdhsa_user_sgpr_kernarg_segment_ptr 1
   .amdhsa_user_sgpr_count 15
@@ -188,30 +205,51 @@ mk_c:
   descriptor mk_b, 32, 32, 24, 256
 #endif
 #if MK_ENTRY_MASK & 4
-  descriptor mk_c, 24, 24, 16, 64
+#if MK_NATIVE_SCALAR
+  descriptor mk_c, 4, 16, 8, 0
+#elif MK_EXTENDED_ABI
+  descriptor mk_c, 24, 24, 32, 64, 68
+#else
+  descriptor mk_c, 24, 24, MK_NATIVE_VGPRS, 64
+#endif
 #endif
 
 .amdgpu_metadata
 ---
 amdhsa.version: [1, 2]
+#if MK_EXTENDED_ABI
+amdhsa.target: "amdgpu12.50-amd-amdhsa-unknown-gfx1250"
+#else
 amdhsa.target: "amdgcn-amd-amdhsa--gfx1250"
+#endif
 amdhsa.kernels:
 #if MK_ENTRY_MASK & 1
   - .name: mk_a
     .symbol: mk_a.kd
     .kernarg_segment_size: 16
-    .kernarg_segment_align: 8
+    .kernarg_segment_align: MK_A_KERNARG_ALIGNMENT
     .group_segment_fixed_size: 8
     .private_segment_fixed_size: 0
     .sgpr_count: 16
     .vgpr_count: 8
     .wavefront_size: 32
     .max_flat_workgroup_size: 64
+#if MK_EXTENDED_ABI
+    .reqd_workgroup_size: [64, 1, 1]
+#endif
+#if MK_EXTENDED_ABI
+    .uses_dynamic_stack: false
+#endif
     .args:
       - .name: seed
         .size: 4
         .offset: 0
         .value_kind: by_value
+#if MK_EXTENDED_ABI
+      - .size: 4
+        .offset: 4
+        .value_kind: hidden_block_count_x
+#endif
       - .name: output
         .size: 8
         .offset: 8
@@ -229,6 +267,9 @@ amdhsa.kernels:
     .vgpr_count: 24
     .wavefront_size: 32
     .max_flat_workgroup_size: 64
+#if MK_EXTENDED_ABI
+    .reqd_workgroup_size: [64, 1, 1]
+#endif
     .args:
       - .name: output
         .size: 8
@@ -247,24 +288,63 @@ amdhsa.kernels:
 #if MK_ENTRY_MASK & 4
   - .name: mk_c
     .symbol: mk_c.kd
-    .kernarg_segment_size: 24
-    .kernarg_segment_align: 8
-    .group_segment_fixed_size: 64
+#if MK_NATIVE_SCALAR
+    .kernarg_segment_size: 4
+    .kernarg_segment_align: 4
+    .group_segment_fixed_size: 0
     .private_segment_fixed_size: 0
+    .sgpr_count: 16
+    .vgpr_count: 8
+#else
+    .kernarg_segment_size: 24
+#if MK_EXTENDED_ABI
+    .kernarg_segment_align: 32
+#else
+    .kernarg_segment_align: 8
+#endif
+    .group_segment_fixed_size: 64
+#if MK_EXTENDED_ABI
+    .private_segment_fixed_size: 68
+#else
+    .private_segment_fixed_size: 0
+#endif
     .sgpr_count: 24
-    .vgpr_count: 16
+    .vgpr_count: MK_NATIVE_VGPRS
+#endif
     .wavefront_size: 32
     .max_flat_workgroup_size: 64
+#if MK_EXTENDED_ABI
+    .reqd_workgroup_size: [32, 2, 1]
+#endif
     .args:
+#if MK_NATIVE_SCALAR
+      - .name: seed
+        .size: 4
+        .offset: 0
+        .value_kind: by_value
+#else
       - .name: output
         .size: 8
         .offset: 0
         .value_kind: global_buffer
         .address_space: global
+#if MK_EXTENDED_ABI
+      - .name: readonly_input
+        .size: 8
+        .offset: 8
+        .value_kind: global_buffer
+        .address_space: constant
+#endif
       - .name: seed
         .size: 4
         .offset: 16
         .value_kind: by_value
+#if MK_EXTENDED_ABI
+      - .size: 4
+        .offset: 20
+        .value_kind: hidden_block_count_x
+#endif
+#endif
 #endif
 ...
 .end_amdgpu_metadata

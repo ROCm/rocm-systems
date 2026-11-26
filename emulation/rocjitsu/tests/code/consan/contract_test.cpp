@@ -351,7 +351,7 @@ protected:
     rehash();
   }
 
-  size_t count_offset() const { return kEntry + 80 + example().entry.name.size(); }
+  size_t count_offset() const { return kEntry + 92 + example().entry.name.size(); }
   size_t site_offset() const { return count_offset() + 4; }
 
   util::StringDiagnostic error_;
@@ -376,7 +376,7 @@ TEST_F(ConSanContract, OwningFactsRoundTripIsCanonicalAndLittleEndian) {
   const FailureOr<std::vector<uint8_t>> reencoded = encode_manifest(decoded.value());
   ASSERT_TRUE(reencoded.succeeded());
   EXPECT_EQ(reencoded.value(), bytes_);
-  EXPECT_EQ(bytes_.size(), 64u + 144u + 80u + original.entry.name.size() + 4u + 2u * 68u + 4u);
+  EXPECT_EQ(bytes_.size(), 64u + 144u + 92u + original.entry.name.size() + 4u + 2u * 68u + 4u);
   // gfx1100 is encoded as the integer 1100, after the two image identities
   // and the options digest. This also pins the independently specified layout.
   EXPECT_EQ(bytes_[64 + 112], 0x4c);
@@ -384,6 +384,24 @@ TEST_F(ConSanContract, OwningFactsRoundTripIsCanonicalAndLittleEndian) {
   EXPECT_EQ(bytes_[64 + 114], 0);
   bytes_.assign(bytes_.size(), 0xa5);
   EXPECT_EQ(decoded.value(), original);
+}
+
+TEST_F(ConSanContract, RequiredWorkgroupShapeSurvivesEncodingAndConstrainsLaunches) {
+  Manifest manifest = example();
+  manifest.entry.required_workgroup_size = {64, 1, 1};
+  const FailureOr<std::vector<uint8_t>> encoded = encode_manifest(manifest, error_.emitter());
+  ASSERT_TRUE(encoded.succeeded()) << error_.message();
+  const FailureOr<Manifest> decoded = decode_manifest(encoded.value(), error_.emitter());
+  ASSERT_TRUE(decoded.succeeded()) << error_.message();
+  EXPECT_EQ(decoded.value(), manifest);
+  EXPECT_TRUE(plan_launch(decoded.value(), {{64, 1, 1}, {64, 1, 1}}, 8, 0).succeeded());
+  EXPECT_TRUE(plan_launch(decoded.value(), {{32, 1, 1}, {32, 1, 1}}, 8, 0).failed());
+  for (const std::array<uint32_t, 3> shape :
+       {std::array<uint32_t, 3>{0, 1, 1}, {64, 64, 1}, {UINT32_MAX, 2, 1}}) {
+    manifest.entry.required_workgroup_size = shape;
+    EXPECT_TRUE(validate_manifest(manifest, error_.emitter()).failed());
+    EXPECT_TRUE(encode_manifest(manifest, error_.emitter()).failed());
+  }
 }
 
 TEST_F(ConSanContract, EveryTruncatedPrefixAndTrailingBytesAreRejected) {
@@ -785,8 +803,8 @@ TEST_F(ConSanContract, BarrierMaximumWorkgroupMustPermitTwoWaves) {
                   "barrier profile requires a maximum workgroup size permitting two waves");
         EXPECT_TRUE(encode_manifest(manifest, error_.emitter()).failed());
         bytes_ = encoded.value();
-        // workgroup_id_scalar follows maximum_workgroup_size before the site count.
-        put32(count_offset() - 2 * sizeof(uint32_t), maximum);
+        // Workgroup source and three required dimensions follow the maximum.
+        put32(count_offset() - 5 * sizeof(uint32_t), maximum);
         rehash();
         EXPECT_TRUE(decode_manifest(bytes_, error_.emitter()).failed());
         EXPECT_EQ(error_.message(),

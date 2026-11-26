@@ -124,12 +124,12 @@ void rehash(std::vector<uint8_t> &bytes) {
 TEST(ConSanImageFacts, EncodingPreservesKnownWireIdentity) {
   // Pin the image envelope, selected manifests and native entry for the
   // current producer contract, including its token in each nested manifest.
-  const Digest expected = {0xbb, 0xe5, 0xc6, 0x24, 0x70, 0x8c, 0xba, 0xde, 0xa9, 0xac, 0xb7,
-                           0x75, 0x88, 0xd6, 0xde, 0x57, 0xff, 0x4e, 0xee, 0xfc, 0xb9, 0x4a,
-                           0x05, 0xe9, 0x58, 0x89, 0x36, 0x30, 0x4a, 0x6a, 0xd8, 0x45};
+  const Digest expected = {0x84, 0x43, 0x22, 0x84, 0x4a, 0x13, 0xbf, 0xac, 0x13, 0xfd, 0xdb,
+                           0xb6, 0xc9, 0x62, 0xef, 0x10, 0x3b, 0x5e, 0x4c, 0x5a, 0x84, 0xc6,
+                           0x73, 0x94, 0x03, 0xe7, 0x5a, 0x4c, 0x7f, 0xfb, 0xa5, 0x3d};
   const FailureOr<std::vector<uint8_t>> encoded = encode_image_facts(example_image(kPriorOptions));
   ASSERT_TRUE(encoded.succeeded());
-  EXPECT_EQ(encoded.value().size(), 1331u);
+  EXPECT_EQ(encoded.value().size(), 1391u);
   EXPECT_EQ(digest(encoded.value()), expected);
 }
 
@@ -187,6 +187,207 @@ TEST(ConSanImageFacts, NativeOwnershipRoundTripsAcrossAnotherEntry) {
   const FailureOr<ImageFacts> decoded = decode_image_facts(encoded.value(), error.emitter());
   ASSERT_TRUE(decoded.succeeded()) << error.message();
   EXPECT_EQ(decoded.value(), image);
+}
+
+TEST(ConSanImageFacts, NativeKernargAlignmentPreservesSmallPowersOfTwo) {
+  for (const uint32_t alignment : {1u, 2u, 4u}) {
+    SCOPED_TRACE(alignment);
+    ImageFacts image = example_image();
+    image.entries.back().binding.kernarg_alignment = alignment;
+    util::StringDiagnostic error;
+    EXPECT_TRUE(validate_image_facts(image, error.emitter()).succeeded()) << error.message();
+    const FailureOr<std::vector<uint8_t>> encoded = encode_image_facts(image, error.emitter());
+    EXPECT_TRUE(encoded.succeeded()) << error.message();
+    if (encoded.failed())
+      continue;
+    const FailureOr<ImageFacts> decoded = decode_image_facts(encoded.value(), error.emitter());
+    ASSERT_TRUE(decoded.succeeded()) << error.message();
+    EXPECT_EQ(decoded.value(), image);
+    const FailureOr<std::vector<uint8_t>> reencoded = encode_image_facts(decoded.value());
+    ASSERT_TRUE(reencoded.succeeded());
+    EXPECT_EQ(reencoded.value(), encoded.value());
+  }
+}
+
+TEST(ConSanImageFacts, NativeZeroKernargAndVgprUsageRoundTrip) {
+  for (const TargetProfile &target : kNativeLdsTargets) {
+    SCOPED_TRACE(target.name);
+    for (const std::array<uint32_t, 2> resources :
+         {std::array<uint32_t, 2>{0, 8}, {16, 0}, {0, 0}}) {
+      SCOPED_TRACE(resources[0]);
+      SCOPED_TRACE(resources[1]);
+      ImageFacts image =
+          qualified_image(target, target.default_wave_size, ScopeKind::NativeLdsNoSynchronization);
+      ImageEntryFacts &native = image.entries.back();
+      native.binding.original_kernarg_bytes = resources[0];
+      native.original_vgprs = resources[1];
+      native.binding.prepared_vgprs = resources[1];
+      util::StringDiagnostic diagnostic;
+      const FailureOr<std::vector<uint8_t>> encoded =
+          encode_image_facts(image, diagnostic.emitter());
+      ASSERT_TRUE(encoded.succeeded()) << diagnostic.message();
+      const FailureOr<ImageFacts> decoded =
+          decode_image_facts(encoded.value(), diagnostic.emitter());
+      ASSERT_TRUE(decoded.succeeded()) << diagnostic.message();
+      EXPECT_EQ(decoded.value(), image);
+      const FailureOr<std::vector<uint8_t>> reencoded = encode_image_facts(decoded.value());
+      ASSERT_TRUE(reencoded.succeeded());
+      EXPECT_EQ(reencoded.value(), encoded.value());
+    }
+  }
+}
+
+TEST(ConSanImageFacts, SelectedEntriesRetainNonemptyKernargRequirement) {
+  ImageFacts image = example_image();
+  ImageEntryFacts &selected = image.entries.front();
+  selected.binding.original_kernarg_bytes = 0;
+  selected.selected->entry = selected.binding;
+  EXPECT_TRUE(validate_manifest(*selected.selected).failed());
+  EXPECT_TRUE(validate_image_facts(image).failed());
+  EXPECT_TRUE(encode_image_facts(image).failed());
+}
+
+TEST(ConSanImageFacts, SelectedEntriesRetainNonzeroOriginalVgprRequirement) {
+  for (const uint32_t prepared_vgprs : {0u, 8u}) {
+    SCOPED_TRACE(prepared_vgprs);
+    ImageFacts image = example_image();
+    ImageEntryFacts &selected = image.entries.front();
+    selected.original_vgprs = 0;
+    selected.binding.prepared_vgprs = prepared_vgprs;
+    selected.selected->entry = selected.binding;
+    EXPECT_EQ(validate_manifest(*selected.selected).succeeded(), prepared_vgprs != 0);
+    EXPECT_TRUE(validate_image_facts(image).failed());
+    EXPECT_TRUE(encode_image_facts(image).failed());
+  }
+}
+
+TEST(ConSanImageFacts, NativeZeroVgprUsageCannotChangeDuringPreparation) {
+  ImageFacts image = example_image();
+  ImageEntryFacts &native = image.entries.back();
+  native.original_vgprs = 0;
+  native.binding.prepared_vgprs = 0;
+  ASSERT_TRUE(validate_image_facts(image).succeeded());
+  native.binding.prepared_vgprs = 1;
+  util::StringDiagnostic diagnostic;
+  EXPECT_TRUE(validate_image_facts(image, diagnostic.emitter()).failed());
+  EXPECT_EQ(diagnostic.message(), "native entry changes ABI or resources");
+}
+
+TEST(ConSanImageFacts, NativeVgprsPreserveTheGfx1250AddressableRange) {
+  for (const uint32_t vgprs : {384u, 1024u}) {
+    SCOPED_TRACE(vgprs);
+    ImageFacts image = example_image();
+    ImageEntryFacts &native = image.entries.back();
+    native.original_vgprs = vgprs;
+    native.binding.prepared_vgprs = vgprs;
+    util::StringDiagnostic diagnostic;
+    ASSERT_TRUE(validate_image_facts(image, diagnostic.emitter()).succeeded())
+        << diagnostic.message();
+    const FailureOr<std::vector<uint8_t>> encoded = encode_image_facts(image, diagnostic.emitter());
+    ASSERT_TRUE(encoded.succeeded()) << diagnostic.message();
+    const FailureOr<ImageFacts> decoded = decode_image_facts(encoded.value(), diagnostic.emitter());
+    ASSERT_TRUE(decoded.succeeded()) << diagnostic.message();
+    EXPECT_EQ(decoded.value(), image);
+    const FailureOr<std::vector<uint8_t>> reencoded = encode_image_facts(decoded.value());
+    ASSERT_TRUE(reencoded.succeeded());
+    EXPECT_EQ(reencoded.value(), encoded.value());
+  }
+}
+
+TEST(ConSanImageFacts, NativeVgprsRejectCountsAboveTheTargetRange) {
+  for (const TargetProfile &target : kNativeLdsTargets) {
+    SCOPED_TRACE(target.name);
+    ImageFacts image =
+        qualified_image(target, target.default_wave_size, ScopeKind::NativeLdsNoSynchronization);
+    ImageEntryFacts &native = image.entries.back();
+    const uint32_t vgprs = target.id == 1250                      ? 1025
+                           : target.id == 942 || target.id == 950 ? 513
+                                                                  : 257;
+    native.original_vgprs = vgprs;
+    native.binding.prepared_vgprs = vgprs;
+    EXPECT_TRUE(validate_image_facts(image).failed());
+    EXPECT_TRUE(encode_image_facts(image).failed());
+  }
+}
+
+TEST(ConSanImageFacts, SelectedVgprsRetainTheInstrumentationLimit) {
+  ImageFacts image = example_image();
+  ImageEntryFacts &selected = image.entries.front();
+  selected.original_vgprs = 256;
+  selected.binding.prepared_vgprs = 256;
+  selected.selected->entry = selected.binding;
+  ASSERT_TRUE(validate_manifest(*selected.selected).succeeded());
+  ASSERT_TRUE(validate_image_facts(image).succeeded());
+  selected.original_vgprs = 257;
+  selected.binding.prepared_vgprs = 257;
+  selected.selected->entry = selected.binding;
+  EXPECT_TRUE(validate_manifest(*selected.selected).failed());
+  EXPECT_TRUE(validate_image_facts(image).failed());
+  EXPECT_TRUE(encode_image_facts(image).failed());
+}
+
+TEST(ConSanImageFacts, NativeCdnaVgprsPreserveTheUnifiedAllocationRange) {
+  for (const char *name : {"gfx942", "gfx950"}) {
+    SCOPED_TRACE(name);
+    const TargetProfile &target = *target_profile(name);
+    for (const uint32_t vgprs : {384u, 512u}) {
+      SCOPED_TRACE(vgprs);
+      ImageFacts image = qualified_image(target, 64, ScopeKind::NativeLdsNoSynchronization);
+      ImageEntryFacts &native = image.entries.back();
+      native.original_vgprs = vgprs;
+      native.binding.prepared_vgprs = vgprs;
+      util::StringDiagnostic diagnostic;
+      ASSERT_TRUE(validate_image_facts(image, diagnostic.emitter()).succeeded())
+          << diagnostic.message();
+      const FailureOr<std::vector<uint8_t>> encoded =
+          encode_image_facts(image, diagnostic.emitter());
+      ASSERT_TRUE(encoded.succeeded()) << diagnostic.message();
+      const FailureOr<ImageFacts> decoded =
+          decode_image_facts(encoded.value(), diagnostic.emitter());
+      ASSERT_TRUE(decoded.succeeded()) << diagnostic.message();
+      EXPECT_EQ(decoded.value(), image);
+    }
+  }
+}
+
+TEST(ConSanImageFacts, NativeVgprsCannotGrowWithinTheTargetRange) {
+  ImageFacts image = example_image();
+  ImageEntryFacts &native = image.entries.back();
+  native.original_vgprs = 384;
+  native.binding.prepared_vgprs = 400;
+  util::StringDiagnostic diagnostic;
+  EXPECT_TRUE(validate_image_facts(image, diagnostic.emitter()).failed());
+  EXPECT_EQ(diagnostic.message(), "native entry changes ABI or resources");
+  EXPECT_TRUE(encode_image_facts(image).failed());
+}
+
+TEST(ConSanImageFacts, RejectsZeroAndNonPowerOfTwoKernargAlignment) {
+  for (const uint32_t alignment : {0u, 3u}) {
+    SCOPED_TRACE(alignment);
+    for (const size_t index : {size_t{0}, size_t{2}}) {
+      SCOPED_TRACE(index);
+      ImageFacts image = example_image();
+      ImageEntryFacts &entry = image.entries[index];
+      entry.binding.kernarg_alignment = alignment;
+      if (entry.selected)
+        entry.selected->entry = entry.binding;
+      EXPECT_TRUE(validate_image_facts(image).failed());
+      EXPECT_TRUE(encode_image_facts(image).failed());
+    }
+  }
+}
+
+TEST(ConSanImageFacts, SelectedKernargAlignmentRetainsMinimumEight) {
+  for (const uint32_t alignment : {1u, 2u, 4u}) {
+    SCOPED_TRACE(alignment);
+    ImageFacts image = example_image();
+    ImageEntryFacts &selected = image.entries.front();
+    selected.binding.kernarg_alignment = alignment;
+    selected.selected->entry = selected.binding;
+    EXPECT_TRUE(validate_manifest(*selected.selected).failed());
+    EXPECT_TRUE(validate_image_facts(image).failed());
+    EXPECT_TRUE(encode_image_facts(image).failed());
+  }
 }
 
 TEST(ConSanImageFacts, SuccessfulValidationEmitsNoDiagnostic) {
@@ -483,6 +684,75 @@ TEST(ConSanImageFacts, SelectedEntriesCannotShareOriginalOrPreparedBarrierObserv
     ASSERT_TRUE(validate_manifest(*image.entries[1].selected).succeeded());
     EXPECT_TRUE(validate_image_facts(image).failed());
   }
+}
+
+TEST(ConSanImageFacts, RequiredShapesPreserveQScopesSourcesAndMultiWorkgroupRows) {
+  for (const TargetProfile &target : kNativeLdsTargets)
+    for (const uint32_t wave_size : {32u, 64u}) {
+      if (!supports_wave(target, wave_size))
+        continue;
+      for (const ScopeKind scope :
+           {ScopeKind::NativeLdsNoSynchronization, ScopeKind::NativeLdsWorkgroupBarrier,
+            ScopeKind::NativeLdsWorkgroupBarrierLoop}) {
+        SCOPED_TRACE(target.id);
+        SCOPED_TRACE(wave_size);
+        SCOPED_TRACE(static_cast<uint32_t>(scope));
+        ImageFacts image = qualified_image(target, wave_size, scope, 16);
+        const uint32_t threads = 2 * wave_size;
+        for (ImageEntryFacts &entry : image.entries) {
+          entry.binding.required_workgroup_size = {threads, 1, 1};
+          if (entry.selected)
+            entry.selected->entry = entry.binding;
+        }
+        util::StringDiagnostic error;
+        const FailureOr<std::vector<uint8_t>> encoded = encode_image_facts(image, error.emitter());
+        ASSERT_TRUE(encoded.succeeded()) << error.message();
+        const FailureOr<ImageFacts> decoded = decode_image_facts(encoded.value(), error.emitter());
+        ASSERT_TRUE(decoded.succeeded()) << error.message();
+        EXPECT_EQ(decoded.value(), image);
+        ContractLimits limits;
+        limits.metadata_bytes = encoded.value().size();
+        EXPECT_TRUE(encode_image_facts(image, error.emitter(), limits).succeeded())
+            << error.message();
+        --limits.metadata_bytes;
+        EXPECT_TRUE(encode_image_facts(image, error.emitter(), limits).failed());
+        EXPECT_EQ(error.message(), "native code ranges exceed metadata budget");
+        for (const ImageEntryFacts &entry : decoded.value().entries) {
+          if (!entry.selected)
+            continue;
+          const FailureOr<LaunchLayout> layout = plan_launch(
+              *entry.selected, {{4 * threads, 1, 1}, {threads, 1, 1}}, 256, 0, error.emitter());
+          ASSERT_TRUE(layout.succeeded()) << error.message();
+          EXPECT_EQ(layout.value().workgroup_count, 4u);
+          EXPECT_EQ(layout.value().wave_count, 8u);
+          EXPECT_EQ(layout.value().row_stride,
+                    report_row_bytes(1, scope != ScopeKind::NativeLdsNoSynchronization));
+          EXPECT_TRUE(plan_launch(*entry.selected, {{4 * wave_size, 1, 1}, {wave_size, 1, 1}}, 256,
+                                  0, error.emitter())
+                          .failed());
+          EXPECT_NE(error.message().find("required workgroup shape"), std::string::npos);
+        }
+      }
+    }
+}
+
+TEST(ConSanImageFacts, NativePrivateSegmentsArePreservedWhileSelectedPrivateSegmentsReject) {
+  ImageFacts image = example_image();
+  ImageEntryFacts &native = image.entries.back();
+  native.binding.original_private_bytes = 68;
+  native.binding.prepared_private_bytes = 68;
+  const FailureOr<std::vector<uint8_t>> encoded = encode_image_facts(image);
+  ASSERT_TRUE(encoded.succeeded());
+  const FailureOr<ImageFacts> decoded = decode_image_facts(encoded.value());
+  ASSERT_TRUE(decoded.succeeded());
+  EXPECT_EQ(decoded.value(), image);
+  ++native.binding.prepared_private_bytes;
+  EXPECT_TRUE(validate_image_facts(image).failed());
+  image = example_image();
+  image.entries.front().binding.original_private_bytes = 68;
+  image.entries.front().binding.prepared_private_bytes = 68;
+  image.entries.front().selected->entry = image.entries.front().binding;
+  EXPECT_TRUE(validate_image_facts(image).failed());
 }
 
 } // namespace

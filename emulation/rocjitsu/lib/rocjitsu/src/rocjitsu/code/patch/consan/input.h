@@ -8,6 +8,7 @@
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/patch/consan/lds_race.h"
 
+#include <array>
 #include <optional>
 #include <span>
 #include <string>
@@ -54,6 +55,8 @@ struct InputProgram {
   const TargetProfile *target = nullptr;
   uint32_t wave_size = 0;
   uint32_t maximum_workgroup_size = 0;
+  uint32_t kernarg_alignment = 8;
+  std::array<uint32_t, 3> required_workgroup_size = {};
   uint32_t original_sgprs = 0;
   uint32_t original_vgprs = 0;
   std::vector<uint64_t> exit_offsets;

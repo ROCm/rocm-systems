@@ -23,6 +23,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <cstring>
 #include <fstream>
 #include <iterator>
@@ -100,6 +101,89 @@ TEST_F(ConSanPrepareImage, WholeImageHasIndependentEntryPlansAndNativeSibling) {
     extensions_found = true;
   }
   EXPECT_TRUE(extensions_found);
+}
+
+TEST_F(ConSanPrepareImage, PreservesNativeVgprsAboveSelectedLimit) {
+  const std::filesystem::path path =
+      std::filesystem::path(CONSAN_MULTI_ENTRY_FIXTURE).parent_path() /
+      "multi-entry-native-wide-vgprs.hsaco";
+  const std::vector<uint8_t> baseline = test::read_fixture(path);
+  ASSERT_FALSE(baseline.empty());
+  for (const uint32_t count : {384u, 1024u}) {
+    SCOPED_TRACE(count);
+    std::vector<uint8_t> original = baseline;
+    const AmdGpuCodeObject object(original.data(), original.size());
+    ASSERT_TRUE(object.is_valid());
+    ASSERT_EQ(object.text_sections().size(), 1u);
+    const Section &text = *object.text_sections().front();
+    const std::vector<KernelDescriptorInfo> kernels =
+        scan_kernel_descriptors(original, text.sectionOffset(), text.size());
+    const std::vector<KernelDescriptorInfo>::const_iterator sibling =
+        std::ranges::find(kernels, std::string("mk_c"), &KernelDescriptorInfo::kernel_name);
+    ASSERT_NE(sibling, kernels.end());
+    KernelDescriptorInfo kernel = *sibling;
+    RJ_AMDHSA_BITS_SET(kernel.descriptor.compute_pgm_rsrc1,
+                       amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, count / 16 - 1);
+    std::memcpy(original.data() + kernel.descriptor_file_offset, &kernel.descriptor,
+                sizeof(kernel.descriptor));
+    ASSERT_TRUE(
+        amdhsa::update_resource_metadata(original, kernel, kernel.descriptor, std::nullopt, count)
+            .succeeded());
+    const FailureOr<MetadataResources> metadata =
+        inspect_metadata(original, kernel, nullptr, MetadataPolicy::Native);
+    ASSERT_TRUE(metadata.succeeded());
+    EXPECT_EQ(metadata.value().vgprs, count);
+    ASSERT_TRUE(inspect_native_image(original, "gfx1250").succeeded());
+    const std::array<std::string_view, 2> selected = {"mk_a", "mk_b"};
+    const FailureOr<PreparedImageArtifact> artifact =
+        prepare_image(original, *target_profile("gfx1250"), selected, error_);
+    EXPECT_TRUE(artifact.succeeded()) << error_.message;
+    if (artifact.failed())
+      continue;
+    const ImageEntryFacts &native = artifact.value().facts.entries.back();
+    ASSERT_EQ(native.binding.name, "mk_c");
+    EXPECT_EQ(native.disposition, EntryDisposition::Native);
+    EXPECT_EQ(native.original_vgprs, count);
+    EXPECT_EQ(native.binding.prepared_vgprs, count);
+    util::StringDiagnostic diagnostic;
+    EXPECT_TRUE(verify_artifact_images(artifact.value().facts, original, artifact.value().image,
+                                       diagnostic.emitter())
+                    .succeeded())
+        << diagnostic.message();
+    const FailureOr<std::vector<uint8_t>> encoded = encode_image_facts(artifact.value().facts);
+    ASSERT_TRUE(encoded.succeeded());
+    const FailureOr<ImageFacts> decoded = decode_image_facts(encoded.value());
+    ASSERT_TRUE(decoded.succeeded());
+    EXPECT_EQ(decoded.value(), artifact.value().facts);
+
+    // Counts can fit the target while exceeding an individual descriptor.
+    KernelDescriptorInfo undersized = kernel;
+    RJ_AMDHSA_BITS_SET(undersized.descriptor.compute_pgm_rsrc1,
+                       amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, count / 16 - 2);
+    std::vector<uint8_t> invalid_original = original;
+    std::memcpy(invalid_original.data() + kernel.descriptor_file_offset, &undersized.descriptor,
+                sizeof(undersized.descriptor));
+    EXPECT_TRUE(
+        inspect_metadata(invalid_original, undersized, nullptr, MetadataPolicy::Native).failed());
+    EXPECT_TRUE(inspect_native_image(invalid_original, "gfx1250").failed());
+    EXPECT_TRUE(
+        prepare_image(invalid_original, *target_profile("gfx1250"), selected, error_).failed());
+
+    std::vector<uint8_t> changed = artifact.value().image;
+    // Preserve the prepared entry address; only shrink its register allocation.
+    const size_t rsrc1_offset = native.binding.prepared_descriptor_offset +
+                                offsetof(amdhsa::kernel_descriptor_t, compute_pgm_rsrc1);
+    std::memcpy(changed.data() + rsrc1_offset, &undersized.descriptor.compute_pgm_rsrc1,
+                sizeof(undersized.descriptor.compute_pgm_rsrc1));
+    ImageFacts facts = artifact.value().facts;
+    facts.prepared.sha256 = digest(changed);
+    for (ImageEntryFacts &entry : facts.entries)
+      if (entry.selected)
+        entry.selected->prepared = facts.prepared;
+    ASSERT_TRUE(validate_image_facts(facts).succeeded());
+    EXPECT_TRUE(verify_artifact_images(facts, original, changed, diagnostic.emitter()).failed());
+    EXPECT_NE(diagnostic.message().find("metadata"), std::string::npos);
+  }
 }
 
 TEST_F(ConSanPrepareImage, SelectedCodeCanBranchPastNativeEntries) {
@@ -202,6 +286,177 @@ TEST_F(ConSanPrepareImage, InvalidNativeNameCannotPublishFactsThatJsonAnalysisRe
   EXPECT_EQ(error_.message, "entry name is not valid UTF-8 for JSON output");
 }
 
+TEST_F(ConSanPrepareImage, PreservesCompilerHiddenArgumentsAndNativePrivateAbi) {
+  const std::filesystem::path path =
+      std::filesystem::path(CONSAN_MULTI_ENTRY_FIXTURE).parent_path() / "multi-entry-abi.hsaco";
+  const std::vector<uint8_t> original = test::read_fixture(path);
+  ASSERT_FALSE(original.empty());
+  const std::array<std::string_view, 2> selected = {"mk_a", "mk_b"};
+  const FailureOr<PreparedImageArtifact> artifact =
+      prepare_image(original, *target_profile("gfx1250"), selected, error_);
+  ASSERT_TRUE(artifact.succeeded()) << error_.message;
+  const ImageEntryFacts &native = artifact.value().facts.entries.back();
+  EXPECT_EQ(native.disposition, EntryDisposition::Native);
+  EXPECT_EQ(native.binding.kernarg_alignment, 32u);
+  EXPECT_EQ(native.binding.original_private_bytes, 68u);
+  EXPECT_EQ(native.binding.prepared_private_bytes, 68u);
+  EXPECT_EQ(native.binding.required_workgroup_size, (std::array<uint32_t, 3>{32, 2, 1}));
+  const Manifest &manifest = *artifact.value().facts.entries.front().selected;
+  for (const ImageEntryFacts &entry : artifact.value().facts.entries)
+    EXPECT_EQ(entry.binding.workgroup_id_scalar, kWorkgroupIdTtmp9Selector);
+  EXPECT_EQ(manifest.entry.required_workgroup_size, (std::array<uint32_t, 3>{64, 1, 1}));
+  EXPECT_TRUE(plan_launch(manifest, {{64, 1, 1}, {64, 1, 1}}, 8, 0).succeeded());
+  EXPECT_TRUE(plan_launch(manifest, {{32, 1, 1}, {32, 1, 1}}, 8, 0).failed());
+  util::StringDiagnostic contract_error;
+  EXPECT_TRUE(verify_artifact_images(artifact.value().facts, original, artifact.value().image,
+                                     contract_error.emitter())
+                  .succeeded())
+      << contract_error.message();
+  const FailureOr<std::vector<uint8_t>> encoded = encode_image_facts(artifact.value().facts);
+  ASSERT_TRUE(encoded.succeeded());
+  const FailureOr<ImageFacts> decoded = decode_image_facts(encoded.value());
+  ASSERT_TRUE(decoded.succeeded());
+  EXPECT_EQ(decoded.value(), artifact.value().facts);
+}
+
+TEST_F(ConSanPrepareImage, PreservesFourByteAlignedNativeScalarSibling) {
+  const std::filesystem::path path =
+      std::filesystem::path(CONSAN_MULTI_ENTRY_FIXTURE).parent_path() /
+      "multi-entry-native-scalar.hsaco";
+  const std::vector<uint8_t> original = test::read_fixture(path);
+  ASSERT_FALSE(original.empty());
+  const std::array<std::string_view, 2> selected = {"mk_a", "mk_b"};
+  const FailureOr<PreparedImageArtifact> artifact =
+      prepare_image(original, *target_profile("gfx1250"), selected, error_);
+  ASSERT_TRUE(artifact.succeeded()) << error_.message;
+  const ImageEntryFacts &native = artifact.value().facts.entries.back();
+  EXPECT_EQ(native.binding.name, "mk_c");
+  EXPECT_EQ(native.disposition, EntryDisposition::Native);
+  EXPECT_FALSE(native.selected);
+  EXPECT_EQ(native.binding.original_kernarg_bytes, 4u);
+  EXPECT_EQ(native.binding.kernarg_alignment, 4u);
+  EXPECT_EQ(native.binding.required_workgroup_size, (std::array<uint32_t, 3>{32, 2, 1}));
+  util::StringDiagnostic diagnostic;
+  EXPECT_TRUE(verify_artifact_images(artifact.value().facts, original, artifact.value().image,
+                                     diagnostic.emitter())
+                  .succeeded())
+      << diagnostic.message();
+  const FailureOr<std::vector<uint8_t>> encoded =
+      encode_image_facts(artifact.value().facts, diagnostic.emitter());
+  ASSERT_TRUE(encoded.succeeded()) << diagnostic.message();
+  const FailureOr<ImageFacts> decoded = decode_image_facts(encoded.value(), diagnostic.emitter());
+  ASSERT_TRUE(decoded.succeeded()) << diagnostic.message();
+  EXPECT_EQ(decoded.value(), artifact.value().facts);
+}
+
+TEST_F(ConSanPrepareImage, SelectedMultidimensionalRequirementsCannotPublishPreparedFacts) {
+  const std::filesystem::path path =
+      std::filesystem::path(CONSAN_MULTI_ENTRY_FIXTURE).parent_path() / "multi-entry-abi.hsaco";
+  const std::vector<uint8_t> original = test::read_fixture(path);
+  ASSERT_FALSE(original.empty());
+  for (const size_t dimension : {1u, 2u}) {
+    SCOPED_TRACE(dimension);
+    std::vector<uint8_t> image = original;
+    const FailureOr<amdhsa::MetadataDocument> metadata = amdhsa::MetadataDocument::parse(image);
+    ASSERT_TRUE(metadata.succeeded());
+    const amdhsa::MetadataValue *entries = metadata.value().root().field("amdhsa.kernels");
+    ASSERT_NE(entries, nullptr);
+    const amdhsa::MetadataValue *shape = entries->array.front().field(".reqd_workgroup_size");
+    ASSERT_NE(shape, nullptr);
+    ASSERT_EQ(shape->array.size(), 3u);
+    const size_t payload_offset = metadata.value().payload().data() - image.data();
+    ASSERT_EQ(shape->array[0].integer_bytes, 0u);
+    ASSERT_EQ(shape->array[dimension].integer_bytes, 0u);
+    image[payload_offset + shape->array[0].offset] = 32;
+    image[payload_offset + shape->array[dimension].offset] = 2;
+    const std::array<std::string_view, 2> selected = {"mk_a", "mk_b"};
+    const FailureOr<PreparedImageArtifact> artifact =
+        prepare_image(image, *target_profile("gfx1250"), selected, error_);
+    EXPECT_TRUE(artifact.failed());
+    EXPECT_EQ(error_.code, InputErrorCode::UnsupportedEntry);
+    EXPECT_EQ(error_.message, "selected entry requires a 1D workgroup shape");
+  }
+}
+
+TEST_F(ConSanPrepareImage, SelectedDynamicStackCannotPublishPreparedFacts) {
+  const std::filesystem::path path =
+      std::filesystem::path(CONSAN_MULTI_ENTRY_FIXTURE).parent_path() / "multi-entry-abi.hsaco";
+  std::vector<uint8_t> image = test::read_fixture(path);
+  ASSERT_FALSE(image.empty());
+  const FailureOr<amdhsa::MetadataDocument> metadata = amdhsa::MetadataDocument::parse(image);
+  ASSERT_TRUE(metadata.succeeded());
+  const amdhsa::MetadataValue *entries = metadata.value().root().field("amdhsa.kernels");
+  ASSERT_NE(entries, nullptr);
+  ASSERT_EQ(entries->array.size(), 3u);
+  const amdhsa::MetadataValue *dynamic_stack = entries->array.front().field(".uses_dynamic_stack");
+  ASSERT_NE(dynamic_stack, nullptr);
+  ASSERT_EQ(dynamic_stack->kind, amdhsa::MetadataValue::Kind::Boolean);
+  const size_t payload_offset = metadata.value().payload().data() - image.data();
+  const size_t flag_offset = payload_offset + dynamic_stack->offset;
+  ASSERT_LT(flag_offset, image.size());
+  ASSERT_EQ(image[flag_offset], 0xc2u);
+  image[flag_offset] = 0xc3u;
+  const std::array<std::string_view, 2> selected = {"mk_a", "mk_b"};
+  const FailureOr<PreparedImageArtifact> artifact =
+      prepare_image(image, *target_profile("gfx1250"), selected, error_);
+  EXPECT_TRUE(artifact.failed());
+  EXPECT_EQ(error_.code, InputErrorCode::UnsupportedEntry);
+  EXPECT_EQ(error_.message, "selected entry requires a statically bounded private frame");
+}
+
+TEST_F(ConSanPrepareImage, CompilerAbiCompatibilityRetainsStructuralRejections) {
+  const std::filesystem::path path =
+      std::filesystem::path(CONSAN_MULTI_ENTRY_FIXTURE).parent_path() / "multi-entry-abi.hsaco";
+  const std::vector<uint8_t> original = test::read_fixture(path);
+  ASSERT_FALSE(original.empty());
+  const std::array<std::string_view, 2> selected = {"mk_a", "mk_b"};
+  for (const std::pair<std::string_view, std::string_view> mutation :
+       {std::pair{"amdgpu12.50", "amdgpu12.51"},
+        {"hidden_block_count_x", "hidden_block_count_q"},
+        {"constant", "private_"}}) {
+    std::vector<uint8_t> image = original;
+    const std::vector<uint8_t>::iterator found =
+        std::search(image.begin(), image.end(), mutation.first.begin(), mutation.first.end());
+    ASSERT_NE(found, image.end());
+    ASSERT_EQ(mutation.first.size(), mutation.second.size());
+    std::copy(mutation.second.begin(), mutation.second.end(), found);
+    EXPECT_TRUE(prepare_image(image, *target_profile("gfx1250"), selected, error_).failed());
+    EXPECT_NE(error_.message.find("metadata"), std::string::npos);
+  }
+  for (const uint32_t variant : {0u, 1u, 2u, 3u}) {
+    SCOPED_TRACE(variant);
+    std::vector<uint8_t> image = original;
+    const FailureOr<amdhsa::MetadataDocument> metadata = amdhsa::MetadataDocument::parse(image);
+    ASSERT_TRUE(metadata.succeeded());
+    const amdhsa::MetadataValue *entries = metadata.value().root().field("amdhsa.kernels");
+    ASSERT_NE(entries, nullptr);
+    ASSERT_EQ(entries->array.size(), 3u);
+    const amdhsa::MetadataValue &first = entries->array.front();
+    const amdhsa::MetadataValue &native = entries->array.back();
+    const amdhsa::MetadataValue *number = nullptr;
+    uint8_t replacement = 0;
+    if (variant == 0) {
+      number = native.field(".kernarg_segment_align");
+      replacement = 3;
+    } else if (variant == 1) {
+      number = &first.field(".reqd_workgroup_size")->array.front();
+    } else if (variant == 2) {
+      number = &native.field(".reqd_workgroup_size")->array.front();
+      replacement = 64; // 64 * 2 exceeds the declared flat bound of 64.
+    } else {
+      number = first.field(".args")->array[1].field(".size");
+      replacement = 2; // hidden_block_count_x is a four-byte ABI scalar.
+    }
+    ASSERT_NE(number, nullptr);
+    ASSERT_EQ(number->kind, amdhsa::MetadataValue::Kind::Integer);
+    ASSERT_EQ(number->integer_bytes, 0u);
+    const size_t payload_offset = metadata.value().payload().data() - image.data();
+    image[payload_offset + number->offset] = replacement;
+    EXPECT_TRUE(prepare_image(image, *target_profile("gfx1250"), selected, error_).failed());
+    EXPECT_NE(error_.message.find("metadata"), std::string::npos);
+  }
+}
+
 TEST_F(ConSanPrepareImage, InvalidOrIncompleteSelectionPublishesNoResult) {
   const TargetProfile &target = *target_profile("gfx1250");
   EXPECT_TRUE(prepare_image(original_, target, {}, error_).failed());
@@ -222,6 +477,284 @@ TEST_F(ConSanPrepareImage, InvalidOrIncompleteSelectionPublishesNoResult) {
     }
   }
   EXPECT_TRUE(prepare_image(original_, target, selected, error_).failed());
+}
+#endif
+
+#ifdef CONSAN_FIXTURE_DIR
+TEST(ConSanPrepareImageCdna, NativeSgprMetadataIncludesReservedRegisters) {
+  for (const char *name : {"gfx942", "gfx950"}) {
+    SCOPED_TRACE(name);
+    const TargetProfile &target = *target_profile(name);
+    const std::vector<uint8_t> original = test::read_fixture(
+        test::target_fixture_path({.target = name, .wave_size = 64}, "cdna-multi-0"));
+    ASSERT_FALSE(original.empty());
+    InputError error;
+    const std::array<std::string_view, 2> both = {"sel", "sib"};
+    ASSERT_TRUE(prepare_image(original, target, both, error).succeeded()) << error.message;
+    const AmdGpuCodeObject object(original.data(), original.size());
+    ASSERT_TRUE(object.is_valid());
+    ASSERT_EQ(object.text_sections().size(), 1u);
+    const Section &text = *object.text_sections().front();
+    const std::vector<KernelDescriptorInfo> kernels =
+        scan_kernel_descriptors(original, text.sectionOffset(), text.size());
+    const std::vector<KernelDescriptorInfo>::const_iterator sibling =
+        std::ranges::find(kernels, std::string("sib"), &KernelDescriptorInfo::kernel_name);
+    ASSERT_NE(sibling, kernels.end());
+    const FailureOr<MetadataResources> metadata =
+        inspect_metadata(original, *sibling, nullptr, MetadataPolicy::Native);
+    ASSERT_TRUE(metadata.succeeded());
+    const uint32_t allocated =
+        (RJ_AMDHSA_BITS_GET(sibling->descriptor.compute_pgm_rsrc1,
+                            amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT) +
+         1) *
+        8;
+    EXPECT_EQ(metadata.value().sgprs, 11u);
+    EXPECT_LE(metadata.value().sgprs, allocated);
+    EXPECT_GT(metadata.value().sgprs, ordinary_sgpr_bound(target.arch, allocated));
+    const std::array<std::string_view, 1> selected = {"sel"};
+    const FailureOr<PreparedImageArtifact> artifact =
+        prepare_image(original, target, selected, error);
+    EXPECT_TRUE(artifact.succeeded()) << error.message;
+    if (artifact.failed())
+      continue;
+    const ImageEntryFacts *native =
+        find_image_entry(artifact.value().facts, sibling->descriptor_file_offset);
+    ASSERT_NE(native, nullptr);
+    EXPECT_EQ(native->disposition, EntryDisposition::Native);
+    EXPECT_EQ(native->binding.prepared_sgprs, metadata.value().sgprs);
+    util::StringDiagnostic diagnostic;
+    EXPECT_TRUE(verify_artifact_images(artifact.value().facts, original, artifact.value().image,
+                                       diagnostic.emitter())
+                    .succeeded())
+        << diagnostic.message();
+    const FailureOr<std::vector<uint8_t>> encoded = encode_image_facts(artifact.value().facts);
+    ASSERT_TRUE(encoded.succeeded());
+    const FailureOr<ImageFacts> decoded = decode_image_facts(encoded.value());
+    ASSERT_TRUE(decoded.succeeded());
+    EXPECT_EQ(decoded.value(), artifact.value().facts);
+  }
+}
+
+TEST(ConSanPrepareImageCdna, NativeVgprMetadataIncludesAccumulatorRegisters) {
+  for (const char *name : {"gfx942", "gfx950"}) {
+    SCOPED_TRACE(name);
+    const TargetProfile &target = *target_profile(name);
+    const std::vector<uint8_t> original = test::read_fixture(
+        test::target_fixture_path({.target = name, .wave_size = 64}, "cdna-multi-1"));
+    ASSERT_FALSE(original.empty());
+    const AmdGpuCodeObject object(original.data(), original.size());
+    ASSERT_TRUE(object.is_valid());
+    ASSERT_EQ(object.text_sections().size(), 1u);
+    const Section &text = *object.text_sections().front();
+    const std::vector<KernelDescriptorInfo> kernels =
+        scan_kernel_descriptors(original, text.sectionOffset(), text.size());
+    const std::vector<KernelDescriptorInfo>::const_iterator sibling =
+        std::ranges::find(kernels, std::string("sib"), &KernelDescriptorInfo::kernel_name);
+    ASSERT_NE(sibling, kernels.end());
+    const uint32_t accumulator_base =
+        (RJ_AMDHSA_BITS_GET(sibling->descriptor.compute_pgm_rsrc3,
+                            amdhsa::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET) +
+         1) *
+        4;
+    EXPECT_EQ(accumulator_base, 4u);
+    const FailureOr<MetadataResources> metadata =
+        inspect_metadata(original, *sibling, nullptr, MetadataPolicy::Native);
+    EXPECT_TRUE(metadata.succeeded());
+    EXPECT_TRUE(inspect_metadata(original, *sibling).failed());
+    InputError error;
+    const std::array<std::string_view, 1> selected = {"sel"};
+    const FailureOr<PreparedImageArtifact> artifact =
+        prepare_image(original, target, selected, error);
+    EXPECT_TRUE(artifact.succeeded()) << error.message;
+    if (artifact.failed() || metadata.failed())
+      continue;
+    EXPECT_EQ(metadata.value().vgprs, 5u);
+    EXPECT_GT(metadata.value().vgprs, accumulator_base);
+    const ImageEntryFacts *native =
+        find_image_entry(artifact.value().facts, sibling->descriptor_file_offset);
+    ASSERT_NE(native, nullptr);
+    EXPECT_EQ(native->binding.prepared_vgprs, metadata.value().vgprs);
+    util::StringDiagnostic diagnostic;
+    EXPECT_TRUE(verify_artifact_images(artifact.value().facts, original, artifact.value().image,
+                                       diagnostic.emitter())
+                    .succeeded())
+        << diagnostic.message();
+  }
+}
+
+TEST(ConSanPrepareImageCdna, NativeUnifiedVgprMetadataUsesFullDescriptorCapacity) {
+  for (const char *name : {"gfx942", "gfx950"}) {
+    SCOPED_TRACE(name);
+    const TargetProfile &target = *target_profile(name);
+    const std::vector<uint8_t> original = test::read_fixture(
+        test::target_fixture_path({.target = name, .wave_size = 64}, "cdna-multi-2"));
+    ASSERT_FALSE(original.empty());
+    const AmdGpuCodeObject object(original.data(), original.size());
+    ASSERT_TRUE(object.is_valid());
+    ASSERT_EQ(object.text_sections().size(), 1u);
+    const Section &text = *object.text_sections().front();
+    const std::vector<KernelDescriptorInfo> kernels =
+        scan_kernel_descriptors(original, text.sectionOffset(), text.size());
+    const std::vector<KernelDescriptorInfo>::const_iterator sibling =
+        std::ranges::find(kernels, std::string("sib"), &KernelDescriptorInfo::kernel_name);
+    ASSERT_NE(sibling, kernels.end());
+    const uint32_t accumulator_base =
+        (RJ_AMDHSA_BITS_GET(sibling->descriptor.compute_pgm_rsrc3,
+                            amdhsa::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET) +
+         1) *
+        4;
+    const uint32_t allocated =
+        (RJ_AMDHSA_BITS_GET(sibling->descriptor.compute_pgm_rsrc1,
+                            amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT) +
+         1) *
+        descriptor_vgpr_granularity_for_wavefront(target.arch, 64);
+    EXPECT_EQ(accumulator_base, 192u);
+    EXPECT_EQ(allocated, 384u);
+    const FailureOr<MetadataResources> metadata =
+        inspect_metadata(original, *sibling, nullptr, MetadataPolicy::Native);
+    ASSERT_TRUE(metadata.succeeded());
+    EXPECT_EQ(metadata.value().vgprs, 384u);
+    const std::array<std::string_view, 1> selected = {"sel"};
+    InputError error;
+    const FailureOr<PreparedImageArtifact> artifact =
+        prepare_image(original, target, selected, error);
+    EXPECT_TRUE(artifact.succeeded()) << error.message;
+    if (artifact.failed())
+      continue;
+    const ImageEntryFacts *native =
+        find_image_entry(artifact.value().facts, sibling->descriptor_file_offset);
+    ASSERT_NE(native, nullptr);
+    EXPECT_EQ(native->disposition, EntryDisposition::Native);
+    EXPECT_EQ(native->original_vgprs, 384u);
+    EXPECT_EQ(native->binding.prepared_vgprs, 384u);
+    util::StringDiagnostic diagnostic;
+    EXPECT_TRUE(verify_artifact_images(artifact.value().facts, original, artifact.value().image,
+                                       diagnostic.emitter())
+                    .succeeded())
+        << diagnostic.message();
+    const FailureOr<std::vector<uint8_t>> encoded =
+        encode_image_facts(artifact.value().facts, diagnostic.emitter());
+    ASSERT_TRUE(encoded.succeeded()) << diagnostic.message();
+    const FailureOr<ImageFacts> decoded = decode_image_facts(encoded.value(), diagnostic.emitter());
+    ASSERT_TRUE(decoded.succeeded()) << diagnostic.message();
+    EXPECT_EQ(decoded.value(), artifact.value().facts);
+  }
+}
+
+TEST(ConSanPrepareImageCdna, EmptyNativeSiblingPreservesZeroResourceAbi) {
+  for (const char *name : {"gfx942", "gfx950"}) {
+    SCOPED_TRACE(name);
+    const TargetProfile &target = *target_profile(name);
+    const std::vector<uint8_t> original = test::read_fixture(
+        test::target_fixture_path({.target = name, .wave_size = 64}, "cdna-multi-3"));
+    ASSERT_FALSE(original.empty());
+    const AmdGpuCodeObject object(original.data(), original.size());
+    ASSERT_TRUE(object.is_valid());
+    ASSERT_EQ(object.text_sections().size(), 1u);
+    const Section &text = *object.text_sections().front();
+    const std::vector<KernelDescriptorInfo> kernels =
+        scan_kernel_descriptors(original, text.sectionOffset(), text.size());
+    ASSERT_EQ(kernels.size(), 2u);
+    const std::vector<KernelDescriptorInfo>::const_iterator sibling =
+        std::ranges::find(kernels, std::string("sib"), &KernelDescriptorInfo::kernel_name);
+    ASSERT_NE(sibling, kernels.end());
+    EXPECT_EQ(sibling->descriptor.kernarg_size, 0u);
+    const FailureOr<amdhsa::MetadataDocument> document = amdhsa::MetadataDocument::parse(original);
+    ASSERT_TRUE(document.succeeded());
+    const amdhsa::MetadataValue *entries = document.value().root().field("amdhsa.kernels");
+    ASSERT_NE(entries, nullptr);
+    const amdhsa::MetadataValue *sibling_metadata = nullptr;
+    for (const amdhsa::MetadataValue &entry : entries->array) {
+      if (entry.text_field_is(".name", "sib")) {
+        sibling_metadata = &entry;
+      }
+    }
+    ASSERT_NE(sibling_metadata, nullptr);
+    EXPECT_EQ(sibling_metadata->integer_field(".kernarg_segment_size"), 0u);
+    EXPECT_EQ(sibling_metadata->integer_field(".vgpr_count"), 0u);
+    const amdhsa::MetadataValue *arguments = sibling_metadata->field(".args");
+    if (arguments != nullptr) {
+      ASSERT_EQ(arguments->kind, amdhsa::MetadataValue::Kind::Array);
+      EXPECT_TRUE(arguments->array.empty());
+    }
+    const FailureOr<MetadataResources> metadata =
+        inspect_metadata(original, *sibling, nullptr, MetadataPolicy::Native);
+    ASSERT_TRUE(metadata.succeeded());
+    EXPECT_EQ(metadata.value().vgprs, 0u);
+    EXPECT_TRUE(inspect_metadata(original, *sibling).failed());
+    const FailureOr<NativeImageInventory> inventory = inspect_native_image(original, name);
+    ASSERT_TRUE(inventory.succeeded());
+    ASSERT_EQ(inventory.value().entries.size(), 2u);
+    const std::vector<ImageEntryFacts>::const_iterator native_inventory = std::ranges::find(
+        inventory.value().entries, sibling->descriptor_file_offset, &ImageEntryFacts::key);
+    ASSERT_NE(native_inventory, inventory.value().entries.end());
+    EXPECT_EQ(native_inventory->binding.original_kernarg_bytes, 0u);
+    EXPECT_EQ(native_inventory->original_vgprs, 0u);
+    EXPECT_FALSE(native_inventory->selected);
+
+    const std::array<std::string_view, 1> selected = {"sel"};
+    InputError error;
+    const FailureOr<PreparedImageArtifact> artifact =
+        prepare_image(original, target, selected, error);
+    ASSERT_TRUE(artifact.succeeded()) << error.message;
+    const ImageEntryFacts *native =
+        find_image_entry(artifact.value().facts, sibling->descriptor_file_offset);
+    ASSERT_NE(native, nullptr);
+    EXPECT_EQ(native->disposition, EntryDisposition::Native);
+    EXPECT_EQ(native->binding.original_kernarg_bytes, 0u);
+    EXPECT_EQ(native->original_vgprs, 0u);
+    EXPECT_EQ(native->binding.prepared_vgprs, 0u);
+    EXPECT_FALSE(native->selected);
+    util::StringDiagnostic diagnostic;
+    EXPECT_TRUE(verify_artifact_images(artifact.value().facts, original, artifact.value().image,
+                                       diagnostic.emitter())
+                    .succeeded())
+        << diagnostic.message();
+    const FailureOr<std::vector<uint8_t>> encoded =
+        encode_image_facts(artifact.value().facts, diagnostic.emitter());
+    ASSERT_TRUE(encoded.succeeded()) << diagnostic.message();
+    const FailureOr<ImageFacts> decoded = decode_image_facts(encoded.value(), diagnostic.emitter());
+    ASSERT_TRUE(decoded.succeeded()) << diagnostic.message();
+    EXPECT_EQ(decoded.value(), artifact.value().facts);
+    const FailureOr<std::vector<uint8_t>> reencoded = encode_image_facts(decoded.value());
+    ASSERT_TRUE(reencoded.succeeded());
+    EXPECT_EQ(reencoded.value(), encoded.value());
+
+    // The argument-pointer bootstrap remains restricted to selected kernels
+    // with a nonempty argument block.
+    const std::array<std::string_view, 1> select_empty = {"sib"};
+    EXPECT_TRUE(prepare_image(original, target, select_empty, error).failed());
+  }
+}
+
+TEST(ConSanPrepareImageCdna, NativeMetadataRejectsCountsAboveDescriptorCapacity) {
+  for (const char *name : {"gfx942", "gfx950"}) {
+    SCOPED_TRACE(name);
+    for (const bool vector : {false, true}) {
+      SCOPED_TRACE(vector);
+      std::vector<uint8_t> image = test::read_fixture(test::target_fixture_path(
+          {.target = name, .wave_size = 64}, vector ? "cdna-multi-1" : "cdna-multi-0"));
+      ASSERT_FALSE(image.empty());
+      const FailureOr<amdhsa::MetadataDocument> document = amdhsa::MetadataDocument::parse(image);
+      ASSERT_TRUE(document.succeeded());
+      const amdhsa::MetadataValue *entries = document.value().root().field("amdhsa.kernels");
+      ASSERT_NE(entries, nullptr);
+      const amdhsa::MetadataValue *sibling = nullptr;
+      for (const amdhsa::MetadataValue &entry : entries->array)
+        if (entry.text_field_is(".name", "sib"))
+          sibling = &entry;
+      ASSERT_NE(sibling, nullptr);
+      const amdhsa::MetadataValue *count = sibling->field(vector ? ".vgpr_count" : ".sgpr_count");
+      ASSERT_NE(count, nullptr);
+      ASSERT_EQ(count->integer_bytes, 0u);
+      const size_t payload_offset = document.value().payload().data() - image.data();
+      image[payload_offset + count->offset] = vector ? 9 : 17;
+      EXPECT_TRUE(inspect_native_image(image, name).failed());
+      InputError error;
+      const std::array<std::string_view, 1> selected = {"sel"};
+      EXPECT_TRUE(prepare_image(image, *target_profile(name), selected, error).failed());
+    }
+  }
 }
 #endif
 
@@ -380,6 +913,96 @@ void expect_scoped_multi_entry_image(const char *fixture, ScopeKind expected_sco
 #endif
 
 #ifdef CONSAN_MULTI_ENTRY_BARRIER_FIXTURE
+TEST(ConSanPrepareImageScopes, RequiredBarrierWorkgroupMustPermitTwoWavesBeforePreparation) {
+  const std::filesystem::path abi_path =
+      std::filesystem::path(CONSAN_MULTI_ENTRY_BARRIER_FIXTURE).parent_path() /
+      "multi-entry-abi.hsaco";
+  const std::vector<uint8_t> original = test::read_fixture(abi_path);
+  const std::vector<uint8_t> barrier_image = test::read_fixture(CONSAN_MULTI_ENTRY_BARRIER_FIXTURE);
+  ASSERT_FALSE(original.empty());
+  ASSERT_FALSE(barrier_image.empty());
+  const TargetProfile &target = *target_profile("gfx1250");
+  InputError error;
+  const FailureOr<InputProgram> no_sync =
+      build_image_entry_program(original, target, "mk_a", error);
+  ASSERT_TRUE(no_sync.succeeded()) << error.message;
+  ASSERT_EQ(no_sync.value().wave_size, 32u);
+  ASSERT_EQ(no_sync.value().accesses.size(), 2u);
+  const FailureOr<InputProgram> barrier =
+      build_image_entry_program(barrier_image, target, "mk_a", error);
+  ASSERT_TRUE(barrier.succeeded()) << error.message;
+  ASSERT_EQ(barrier.value().barriers.size(), 1u);
+  const BarrierFacts &group = barrier.value().barriers.front();
+  ASSERT_EQ(group.original_signal, group.original_drain + 4);
+  ASSERT_EQ(group.original_wait, group.original_drain + 8);
+  ASSERT_GE(no_sync.value().accesses.back().original_offset, 12u);
+  const uint64_t wait_offset =
+      no_sync.value().text_file_offset + no_sync.value().accesses.back().original_offset - 12;
+  struct Requirement {
+    bool barrier;
+    uint32_t required;
+    uint32_t maximum;
+  };
+  const std::array<Requirement, 6> requirements = {{
+      {.barrier = true, .required = 16, .maximum = 64},
+      {.barrier = true, .required = 32, .maximum = 64},
+      {.barrier = true, .required = 33, .maximum = 64},
+      {.barrier = true, .required = 64, .maximum = 64},
+      {.barrier = true, .required = 32, .maximum = 32},
+      {.barrier = false, .required = 32, .maximum = 64},
+  }};
+  for (const Requirement &requirement : requirements) {
+    SCOPED_TRACE(requirement.barrier);
+    SCOPED_TRACE(requirement.required);
+    SCOPED_TRACE(requirement.maximum);
+    std::vector<uint8_t> image = original;
+    // Replace the fixture's three wait words after the write with a canonical
+    // drain/signal/wait group, retaining the argument note's required shape.
+    if (requirement.barrier)
+      std::copy_n(barrier_image.begin() + barrier.value().text_file_offset + group.original_drain,
+                  12, image.begin() + wait_offset);
+    const FailureOr<amdhsa::MetadataDocument> metadata = amdhsa::MetadataDocument::parse(image);
+    ASSERT_TRUE(metadata.succeeded());
+    const amdhsa::MetadataValue *entries = metadata.value().root().field("amdhsa.kernels");
+    ASSERT_NE(entries, nullptr);
+    const amdhsa::MetadataValue &entry = entries->array.front();
+    const amdhsa::MetadataValue *shape = entry.field(".reqd_workgroup_size");
+    const amdhsa::MetadataValue *maximum = entry.field(".max_flat_workgroup_size");
+    ASSERT_NE(shape, nullptr);
+    ASSERT_NE(maximum, nullptr);
+    ASSERT_EQ(shape->array.size(), 3u);
+    ASSERT_EQ(shape->array.front().integer_bytes, 0u);
+    ASSERT_EQ(maximum->integer_bytes, 0u);
+    const size_t payload_offset = metadata.value().payload().data() - image.data();
+    image[payload_offset + shape->array.front().offset] =
+        static_cast<uint8_t>(requirement.required);
+    image[payload_offset + maximum->offset] = static_cast<uint8_t>(requirement.maximum);
+    const std::array<std::string_view, 1> selected = {"mk_a"};
+    const FailureOr<PreparedImageArtifact> artifact = prepare_image(image, target, selected, error);
+    if (requirement.barrier && requirement.required <= no_sync.value().wave_size) {
+      EXPECT_TRUE(artifact.failed());
+      EXPECT_EQ(error.code, InputErrorCode::UnsupportedEntry);
+      const char *diagnostic =
+          requirement.maximum <= no_sync.value().wave_size
+              ? "barrier profile requires a maximum workgroup size permitting two waves"
+              : "required workgroup size must permit two waves for barrier profile";
+      EXPECT_EQ(error.message, diagnostic);
+      continue;
+    }
+    ASSERT_TRUE(artifact.succeeded()) << error.message;
+    ASSERT_TRUE(artifact.value().facts.entries.front().selected);
+    const Manifest &manifest = *artifact.value().facts.entries.front().selected;
+    EXPECT_EQ(manifest.entry.required_workgroup_size,
+              (std::array<uint32_t, 3>{requirement.required, 1, 1}));
+    EXPECT_EQ(manifest.scope, requirement.barrier ? ScopeKind::NativeLdsWorkgroupBarrier
+                                                  : ScopeKind::NativeLdsNoSynchronization);
+    EXPECT_EQ(manifest.barriers.size(), requirement.barrier ? 1u : 0u);
+    EXPECT_TRUE(plan_launch(manifest, {{requirement.required, 1, 1}, {requirement.required, 1, 1}},
+                            manifest.entry.original_group_bytes, 0)
+                    .succeeded());
+  }
+}
+
 TEST(ConSanPrepareImageScopes, WholeImageKeepsPerEntryBarrierCompletionAndWorkgroupFacts) {
   ASSERT_NO_FATAL_FAILURE(expect_scoped_multi_entry_image(
       CONSAN_MULTI_ENTRY_BARRIER_FIXTURE, ScopeKind::NativeLdsWorkgroupBarrier, false));

@@ -60,10 +60,9 @@ protected:
     const char *root = std::getenv("CONSAN_TEST_ARTIFACT_ROOT");
     const std::filesystem::path parent = root ? root : std::filesystem::temp_directory_path();
     std::filesystem::create_directories(parent);
-    std::string pattern =
-        (parent / (std::string("fake-hsa-") +
-                   ::testing::UnitTest::GetInstance()->current_test_info()->name() + "-XXXXXX"))
-            .string();
+    std::string test_name = ::testing::UnitTest::GetInstance()->current_test_info()->name();
+    std::ranges::replace(test_name, '/', '-');
+    std::string pattern = (parent / ("fake-hsa-" + test_name + "-XXXXXX")).string();
     std::vector<char> temporary(pattern.begin(), pattern.end());
     temporary.push_back(0);
     char *created = ::mkdtemp(temporary.data());
@@ -449,6 +448,12 @@ protected:
       *static_cast<uint32_t *>(value) = entry.binding.prepared_group_bytes;
     } else if (attribute == HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_PRIVATE_SEGMENT_SIZE) {
       *static_cast<uint32_t *>(value) = entry.binding.prepared_private_bytes;
+    } else if (attribute == HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_DYNAMIC_CALLSTACK) {
+      current_->dynamic_callstack_queries_.push_back(symbol.handle);
+      if (current_->dynamic_callstack_status_ != HSA_STATUS_SUCCESS) {
+        return current_->dynamic_callstack_status_;
+      }
+      *static_cast<bool *>(value) = symbol.handle == current_->dynamic_callstack_symbol_;
     } else {
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     }
@@ -654,6 +659,7 @@ protected:
   bool following_wait_reported_ = false;
   std::map<uint64_t, hsa_signal_value_t> signal_values_;
   std::map<uint64_t, std::span<const uint8_t>> readers_;
+  std::vector<uint64_t> dynamic_callstack_queries_;
   std::map<void *, size_t> allocations_;
   std::map<std::string, std::optional<std::string>> environment_;
   std::filesystem::path directory_, capture_;
@@ -673,6 +679,8 @@ protected:
   hsa_status_t freeze_status_ = HSA_STATUS_SUCCESS;
   uint32_t freeze_calls_ = 0;
   hsa_status_t load_status_ = HSA_STATUS_SUCCESS;
+  hsa_status_t dynamic_callstack_status_ = HSA_STATUS_SUCCESS;
+  uint64_t dynamic_callstack_symbol_ = 0;
   uint32_t load_calls_ = 0;
   std::span<const uint8_t> partial_load_bytes_;
   bool check_partial_load_storage_ = false;
@@ -683,6 +691,142 @@ protected:
   uint64_t amd_signal_attributes_ = 0;
   bool installed_ = false, preserve_ = false, fail_proxy_ = false, auto_complete_ = true;
 };
+
+#if defined(CONSAN_NATIVE_SHAPE_ARTIFACT_FIXTURE)
+class ConSanLegacyNativeShapeHsaPlugin : public ConSanHsaPlugin {
+protected:
+  const char *original_fixture() const override { return CONSAN_NATIVE_SHAPE_ORIGINAL_FIXTURE; }
+  const char *artifact_fixture() const override { return CONSAN_NATIVE_SHAPE_ARTIFACT_FIXTURE; }
+
+  void submit_native(uint16_t threads) {
+    hsa_kernel_dispatch_packet_t packet = dispatch_packet(signal_, threads, nullptr, threads);
+    packet.header |= (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
+                     (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+    handler_(&packet, 1, 0, handler_context_, packet_writer);
+  }
+};
+
+TEST_F(ConSanLegacyNativeShapeHsaPlugin, RejectsWorkgroupDifferentFromOriginalRequiredShape) {
+  ASSERT_FALSE(image_facts_.entries[0].selected.has_value());
+  const std::array<uint32_t, 3> required = {64, 1, 1};
+  ASSERT_EQ(image_facts_.entries[0].binding.required_workgroup_size, required);
+  ASSERT_TRUE(bind());
+  ASSERT_TRUE(create_queue_and_signal());
+  submit_native(32);
+  EXPECT_EQ(published_packets_, 0u);
+  EXPECT_EQ(statistics_().native_submitted, 0u);
+  EXPECT_EQ(load_signal(signal_), -1);
+  EXPECT_NE(finish_(), 0);
+  EXPECT_FALSE(std::filesystem::exists(capture_));
+}
+
+TEST_F(ConSanLegacyNativeShapeHsaPlugin, RetainsTheOriginalRequiredShapeAndNativePacket) {
+  ASSERT_TRUE(bind());
+  ASSERT_TRUE(create_queue_and_signal());
+  submit_native(64);
+  ASSERT_EQ(published_packets_, 1u);
+  EXPECT_EQ(published_.workgroup_size_x, 64u);
+  EXPECT_EQ(drain_(), 0);
+  EXPECT_EQ(statistics_().native_submitted, 1u);
+  EXPECT_EQ(statistics_().native_completed, 1u);
+  EXPECT_EQ(finish_(), 0);
+}
+#endif
+
+#if defined(CONSAN_ALIGNMENT_ORIGINAL_FIXTURE) &&                                                  \
+    defined(CONSAN_SELECTED_ALIGNMENT_ARTIFACT_FIXTURE) &&                                         \
+    defined(CONSAN_NATIVE_ALIGNMENT_ARTIFACT_FIXTURE)
+class ConSanKernargAlignmentHsaPlugin : public ConSanHsaPlugin,
+                                        public ::testing::WithParamInterface<bool> {
+protected:
+  const char *original_fixture() const override { return CONSAN_ALIGNMENT_ORIGINAL_FIXTURE; }
+  const char *artifact_fixture() const override {
+    return GetParam() ? CONSAN_SELECTED_ALIGNMENT_ARTIFACT_FIXTURE
+                      : CONSAN_NATIVE_ALIGNMENT_ARTIFACT_FIXTURE;
+  }
+
+  void SetUp() override {
+    ASSERT_NO_FATAL_FAILURE(ConSanHsaPlugin::SetUp());
+    const ImageEntryFacts &entry = image_facts_.entries.front();
+    ASSERT_EQ(entry.binding.name, "mk_a");
+    ASSERT_EQ(entry.selected.has_value(), GetParam());
+    ASSERT_EQ(entry.binding.kernarg_alignment, 32u);
+    ASSERT_EQ(entry.binding.original_kernarg_bytes, 16u);
+    ASSERT_EQ(argument_extent_, arguments_.size());
+    hsa_amd_pointer_info_t info = {};
+    info.size = sizeof(info);
+    ASSERT_EQ(pointer_info(arguments_.data() + 16, &info, nullptr, nullptr, nullptr),
+              HSA_STATUS_SUCCESS);
+    ASSERT_EQ(info.hostBaseAddress, arguments_.data());
+    ASSERT_EQ(info.sizeInBytes, 32u);
+    ASSERT_LE(size_t{16} + entry.binding.original_kernarg_bytes, info.sizeInBytes);
+    ASSERT_TRUE(bind());
+    ASSERT_EQ(core_.hsa_executable_symbol_get_info_fn(
+                  {10}, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_ALIGNMENT,
+                  &reported_alignment_),
+              HSA_STATUS_SUCCESS);
+    ASSERT_EQ(reported_alignment_, 32u);
+    ASSERT_TRUE(create_queue_and_signal());
+  }
+
+  hsa_kernel_dispatch_packet_t alignment_packet(const void *arguments) {
+    hsa_kernel_dispatch_packet_t packet = dispatch_packet(signal_, 64, arguments, 64);
+    packet.group_segment_size = image_facts_.entries.front().binding.original_group_bytes;
+    packet.private_segment_size = image_facts_.entries.front().binding.original_private_bytes;
+    packet.header |= (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
+                     (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+    return packet;
+  }
+
+  uint32_t reported_alignment_ = 0;
+};
+
+TEST_P(ConSanKernargAlignmentHsaPlugin, RejectsArgumentsBelowReportedAlignment) {
+  const uint8_t *arguments = arguments_.data() + reported_alignment_ / 2;
+  ASSERT_EQ(reinterpret_cast<uintptr_t>(arguments) % 16, 0u);
+  ASSERT_EQ(reinterpret_cast<uintptr_t>(arguments) % reported_alignment_, reported_alignment_ / 2);
+  const hsa_kernel_dispatch_packet_t packet = alignment_packet(arguments);
+  handler_(&packet, 1, 0, handler_context_, packet_writer);
+  EXPECT_EQ(published_packets_, 0u);
+  EXPECT_EQ(statistics_().submitted, 0u);
+  EXPECT_EQ(statistics_().native_submitted, 0u);
+  EXPECT_EQ(load_signal(signal_), -1);
+  EXPECT_NE(finish_(), 0);
+  EXPECT_FALSE(std::filesystem::exists(capture_));
+}
+
+TEST_P(ConSanKernargAlignmentHsaPlugin, AcceptsArgumentsMeetingReportedAlignment) {
+  ASSERT_EQ(reinterpret_cast<uintptr_t>(arguments_.data()) % reported_alignment_, 0u);
+  const hsa_kernel_dispatch_packet_t packet = alignment_packet(arguments_.data());
+  handler_(&packet, 1, 0, handler_context_, packet_writer);
+  ASSERT_EQ(published_packets_, 1u);
+  if (GetParam())
+    EXPECT_NE(published_.completion_signal.handle, signal_.handle);
+  else
+    EXPECT_EQ(std::memcmp(&published_, &packet, sizeof(packet)), 0);
+  ASSERT_EQ(drain_(), 0);
+  EXPECT_EQ(load_signal(signal_), 0);
+  ASSERT_EQ(finish_(), 0);
+  const uint64_t selected = GetParam() ? 1 : 0;
+  const uint64_t native = GetParam() ? 0 : 1;
+  const rj_consan_statistics statistics = statistics_();
+  EXPECT_EQ(statistics.submitted, selected);
+  EXPECT_EQ(statistics.forwarded, selected);
+  EXPECT_EQ(statistics.copied, selected);
+  EXPECT_EQ(statistics.written, selected);
+  EXPECT_EQ(statistics.native_submitted, native);
+  EXPECT_EQ(statistics.native_completed, native);
+  const FailureOr<Capture> captured = decode_capture(read_capture());
+  ASSERT_TRUE(captured.succeeded());
+  EXPECT_EQ(captured.value().executions.size(), selected);
+}
+
+INSTANTIATE_TEST_SUITE_P(SelectedAndNative, ConSanKernargAlignmentHsaPlugin,
+                         ::testing::Values(true, false),
+                         [](const ::testing::TestParamInfo<bool> &info) {
+                           return info.param ? "Selected" : "Native";
+                         });
+#endif
 
 #if defined(CONSAN_MULTI_ORIGINAL_FIXTURE) && defined(CONSAN_MULTI_ARTIFACT_FIXTURE)
 class ConSanMultiEntryHsaPlugin : public ConSanHsaPlugin {
@@ -763,6 +907,73 @@ TEST_F(ConSanMultiEntryHsaPlugin, SelectedEntriesAndNativeSiblingPreserveBinding
     EXPECT_EQ(execution.arguments.size(), selected[index] == 1 ? 32u : 16u);
     EXPECT_EQ(execution.storage_generation, index + 1);
   }
+}
+
+TEST_F(ConSanMultiEntryHsaPlugin, DynamicCallstackNativeSiblingKeepsSelectedDispatchAvailable) {
+  dynamic_callstack_symbol_ = 12;
+  ASSERT_TRUE(bind());
+  EXPECT_EQ(dynamic_callstack_queries_, (std::vector<uint64_t>{12}));
+  bool dynamic_callstack = false;
+  ASSERT_EQ(core_.hsa_executable_symbol_get_info_fn(
+                {12}, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_DYNAMIC_CALLSTACK, &dynamic_callstack),
+            HSA_STATUS_SUCCESS);
+  ASSERT_TRUE(dynamic_callstack);
+  ASSERT_TRUE(create_queue_and_signal());
+  const hsa_kernel_dispatch_packet_t selected = entry_packet(0, signal_);
+  handler_(&selected, 1, 0, handler_context_, packet_writer);
+  ASSERT_EQ(published_packets_, 1u);
+  ASSERT_EQ(drain_(), 0);
+  EXPECT_EQ(load_signal(signal_), 0);
+  EXPECT_EQ(statistics_().submitted, 1u);
+  EXPECT_EQ(statistics_().native_submitted, 0u);
+  ASSERT_EQ(finish_(), 0);
+  const FailureOr<Capture> captured = decode_capture(read_capture());
+  ASSERT_TRUE(captured.succeeded());
+  ASSERT_EQ(captured.value().executions.size(), 1u);
+  EXPECT_EQ(captured.value().executions.front().entry_key, image_facts_.entries[0].key);
+}
+
+class ConSanDynamicCallstackHsaPlugin : public ConSanMultiEntryHsaPlugin,
+                                        public ::testing::WithParamInterface<uint32_t> {};
+
+TEST_P(ConSanDynamicCallstackHsaPlugin, RejectsNativeBeforePublishingFixedOrExpandedPrivateSize) {
+  ASSERT_FALSE(image_facts_.entries[2].selected.has_value());
+  ASSERT_EQ(image_facts_.entries[2].binding.original_private_bytes, 0u);
+  dynamic_callstack_symbol_ = 12;
+  ASSERT_TRUE(bind());
+  EXPECT_EQ(dynamic_callstack_queries_, (std::vector<uint64_t>{12}));
+  ASSERT_TRUE(create_queue_and_signal());
+  hsa_kernel_dispatch_packet_t native = entry_packet(2, signal_);
+  native.private_segment_size = image_facts_.entries[2].binding.original_private_bytes + GetParam();
+  handler_(&native, 1, 0, handler_context_, packet_writer);
+  EXPECT_EQ(published_packets_, 0u);
+  EXPECT_EQ(statistics_().submitted, 0u);
+  EXPECT_EQ(statistics_().native_submitted, 0u);
+  EXPECT_EQ(statistics_().native_completed, 0u);
+  EXPECT_EQ(allocation_calls_, 0u);
+  EXPECT_EQ(load_signal(signal_), -1);
+  EXPECT_NE(finish_(), 0);
+  EXPECT_FALSE(std::filesystem::exists(capture_));
+}
+
+INSTANTIATE_TEST_SUITE_P(StaticAndExpandedPrivateSegments, ConSanDynamicCallstackHsaPlugin,
+                         ::testing::Values(0u, 128u),
+                         [](const ::testing::TestParamInfo<uint32_t> &info) {
+                           return info.param == 0 ? "StaticFrameOnly" : "Extra128Bytes";
+                         });
+
+TEST_F(ConSanMultiEntryHsaPlugin, NativeDynamicCallstackQueryFailureDoesNotPublishBindings) {
+  dynamic_callstack_status_ = HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  EXPECT_FALSE(bind());
+  EXPECT_EQ(dynamic_callstack_queries_, (std::vector<uint64_t>{12}));
+  EXPECT_EQ(freeze_calls_, 1u);
+  EXPECT_FALSE(create_queue_and_signal());
+  EXPECT_EQ(handler_, nullptr);
+  EXPECT_EQ(published_packets_, 0u);
+  EXPECT_EQ(statistics_().submitted, 0u);
+  EXPECT_EQ(statistics_().native_submitted, 0u);
+  EXPECT_NE(finish_(), 0);
+  EXPECT_FALSE(std::filesystem::exists(capture_));
 }
 
 TEST_F(ConSanMultiEntryHsaPlugin, CompletedNativeAllowsNextEntryBeforeObserverBookkeeping) {

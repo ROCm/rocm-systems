@@ -5,6 +5,7 @@
 
 #include "rocjitsu/code/consan/contract_internal.h"
 #include "rocjitsu/code/consan/target.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "util/bit.h"
 #include "util/sha256.h"
 
@@ -17,9 +18,9 @@ namespace {
 constexpr std::array<uint8_t, 8> kImageFactsMagic = {'R', 'J', 'C', 'S', 'I', 'M', 'G', 'F'};
 constexpr uint64_t kEnvelopeBytes = 64;
 constexpr uint64_t kImageFixedBytes = 144;
-constexpr uint64_t kEntryFixedBytes = 112;
+constexpr uint64_t kEntryFixedBytes = 124;
 constexpr uint64_t kNativeCodeRangeBytes = 24;
-constexpr uint64_t kManifestFixedBytes = 64 + 232;
+constexpr uint64_t kManifestFixedBytes = 64 + 244;
 constexpr uint64_t kSiteBytes = 68;
 constexpr uint64_t kBarrierBytes = 56;
 
@@ -112,6 +113,12 @@ Result validate_image_facts(const ImageFacts &image, util::DiagnosticEmitter dia
     return diagnostic.emit() << "invalid common image facts";
   }
 
+  // CDNA3/4 metadata counts the unified VGPR/AccVGPR allocation, whose
+  // descriptor has 64 blocks of eight registers, beyond the ordinary VGPR file.
+  const uint32_t native_vgpr_capacity =
+      target->arch == IsaFamily::Cdna3 || target->arch == IsaFamily::Cdna4
+          ? 512
+          : isa_properties(target->arch).max_addressable_vgprs_per_wf;
   uint64_t encoded_bytes = kEnvelopeBytes + kImageFixedBytes;
   uint64_t total_sites = 0;
   std::vector<EntryKey> selected_keys;
@@ -125,6 +132,8 @@ Result validate_image_facts(const ImageFacts &image, util::DiagnosticEmitter dia
   uint64_t previous_descriptor_end = 0;
   for (const ImageEntryFacts &entry : image.entries) {
     const EntryFacts &binding = entry.binding;
+    const bool native = entry.disposition == EntryDisposition::Native;
+    const uint32_t maximum_vgprs = native ? native_vgpr_capacity : 256;
     if (binding.name.size() > limits.string_bytes) {
       return diagnostic.emit() << "entry name exceeds budget";
     }
@@ -138,14 +147,16 @@ Result validate_image_facts(const ImageFacts &image, util::DiagnosticEmitter dia
         !util::is_range_in_bounds(binding.original_entry_offset, 4, image.original_text_bytes) ||
         !util::is_range_in_bounds(binding.prepared_entry_offset, 4, image.prepared_text_bytes) ||
         binding.original_entry_offset % 4 != 0 || binding.prepared_entry_offset % 4 != 0 ||
-        !std::has_single_bit(binding.kernarg_alignment) || binding.kernarg_alignment < 8 ||
-        binding.original_kernarg_bytes == 0 || binding.maximum_workgroup_size == 0 ||
-        binding.maximum_workgroup_size > 1024 || binding.original_group_bytes > 65536 ||
-        binding.prepared_group_bytes > 65536 || binding.original_private_bytes != 0 ||
-        binding.prepared_private_bytes != 0 || entry.original_sgprs == 0 ||
-        entry.original_sgprs > 106 || entry.original_vgprs == 0 || entry.original_vgprs > 256 ||
-        binding.prepared_sgprs < entry.original_sgprs || binding.prepared_sgprs > 106 ||
-        binding.prepared_vgprs < entry.original_vgprs || binding.prepared_vgprs > 256) {
+        !std::has_single_bit(binding.kernarg_alignment) ||
+        (!native && (binding.original_kernarg_bytes == 0 || entry.original_vgprs == 0)) ||
+        binding.maximum_workgroup_size == 0 || binding.maximum_workgroup_size > 1024 ||
+        binding.original_group_bytes > 65536 || binding.prepared_group_bytes > 65536 ||
+        !valid_workgroup_requirement(binding.required_workgroup_size,
+                                     binding.maximum_workgroup_size) ||
+        entry.original_sgprs == 0 || entry.original_sgprs > 106 ||
+        entry.original_vgprs > maximum_vgprs || binding.prepared_sgprs < entry.original_sgprs ||
+        binding.prepared_sgprs > 106 || binding.prepared_vgprs < entry.original_vgprs ||
+        binding.prepared_vgprs > maximum_vgprs) {
       return diagnostic.emit() << "invalid or duplicate image entry binding";
     }
     previous_descriptor_end = entry.key + 64;
@@ -158,6 +169,7 @@ Result validate_image_facts(const ImageFacts &image, util::DiagnosticEmitter dia
     if (entry.disposition == EntryDisposition::Native) {
       if (entry.selected || entry.native_code.empty() ||
           binding.original_group_bytes != binding.prepared_group_bytes ||
+          binding.original_private_bytes != binding.prepared_private_bytes ||
           entry.original_sgprs != binding.prepared_sgprs ||
           entry.original_vgprs != binding.prepared_vgprs) {
         return diagnostic.emit() << "native entry changes ABI or resources";

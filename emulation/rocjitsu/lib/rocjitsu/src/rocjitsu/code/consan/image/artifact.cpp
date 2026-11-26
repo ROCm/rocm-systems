@@ -237,7 +237,8 @@ FailureOr<InspectedImage> inspect_image(const ImageFacts &facts, std::span<const
         ((text->sh_addr + entry_offset) % 256) != 0 ||
         kernel_wavefront_size(target->arch, kernel.descriptor) != facts.wave_size ||
         kernel.descriptor.kernarg_size != kernarg ||
-        kernel.descriptor.private_segment_fixed_size != 0 ||
+        kernel.descriptor.private_segment_fixed_size !=
+            (prepared ? entry.prepared_private_bytes : entry.original_private_bytes) ||
         kernel.descriptor.group_segment_fixed_size !=
             (prepared ? entry.prepared_group_bytes : entry.original_group_bytes) ||
         (target->id == 1100 && facts.wave_size == 32 &&
@@ -269,7 +270,10 @@ FailureOr<InspectedImage> inspect_image(const ImageFacts &facts, std::span<const
       return diagnostic.emit() << "artifact entry/descriptor is not loaded";
     }
     std::string metadata_error;
-    const FailureOr<MetadataResources> metadata = inspect_metadata(image, kernel, &metadata_error);
+    const FailureOr<MetadataResources> metadata =
+        inspect_metadata(image, kernel, &metadata_error,
+                         row.disposition == EntryDisposition::Native ? MetadataPolicy::Native
+                                                                     : MetadataPolicy::Selected);
     if (metadata.failed()) {
       return diagnostic.emit() << metadata_error;
     }
@@ -278,10 +282,15 @@ FailureOr<InspectedImage> inspect_image(const ImageFacts &facts, std::span<const
     if (metadata.value().maximum_workgroup_size != entry.maximum_workgroup_size) {
       return diagnostic.emit() << "kernel launch bound differs from facts";
     }
+    if (metadata.value().required_workgroup_size != entry.required_workgroup_size ||
+        metadata.value().kernarg_alignment != entry.kernarg_alignment) {
+      return diagnostic.emit() << "kernel argument alignment or required shape differs from facts";
+    }
     if (metadata.value().sgprs != expected_sgprs || metadata.value().vgprs != expected_vgprs) {
       return diagnostic.emit() << "artifact metadata resources differ from facts";
     }
-    if (prepared && (target->arch == IsaFamily::Cdna3 || target->arch == IsaFamily::Cdna4)) {
+    if (prepared && row.disposition == EntryDisposition::Selected &&
+        (target->arch == IsaFamily::Cdna3 || target->arch == IsaFamily::Cdna4)) {
       const uint32_t allocated_sgprs =
           (RJ_AMDHSA_BITS_GET(kernel.descriptor.compute_pgm_rsrc1,
                               amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT) +
@@ -311,6 +320,118 @@ FailureOr<std::vector<uint8_t>> read(const std::filesystem::path &path, uint64_t
   return bytes;
 }
 } // namespace
+
+FailureOr<LoadedNativeImage> load_native_image(const std::filesystem::path &path,
+                                               util::DiagnosticEmitter diagnostic) {
+  FailureOr<std::vector<uint8_t>> original = read(path, ContractLimits{}.image_bytes, diagnostic);
+  if (original.failed()) {
+    return Result::failure();
+  }
+  if (original.value().size() < sizeof(Elf64_Ehdr)) {
+    return diagnostic.emit() << "native image has a truncated header";
+  }
+  Elf64_Ehdr header = {};
+  std::memcpy(&header, original.value().data(), sizeof(header));
+  const std::string_view target = elf_mach_name(header.e_flags);
+  FailureOr<NativeImageInventory> inventory =
+      inspect_native_image(original.value(), target, diagnostic);
+  if (inventory.failed()) {
+    return Result::failure();
+  }
+  return LoadedNativeImage{.inventory = std::move(inventory.value()),
+                           .original = std::move(original.value())};
+}
+
+FailureOr<NativeImageInventory> inspect_native_image(std::span<const uint8_t> original,
+                                                     std::string_view concrete_target,
+                                                     util::DiagnosticEmitter diagnostic) {
+  const TargetProfile *target = target_profile(concrete_target);
+  if (target == nullptr || original.size() < sizeof(Elf64_Ehdr) ||
+      original.size() > ContractLimits{}.image_bytes) {
+    return diagnostic.emit() << "invalid native image target or extent";
+  }
+  Elf64_Ehdr header = {};
+  std::memcpy(&header, original.data(), sizeof(header));
+  const std::optional<std::vector<Elf64_Shdr>> sections =
+      read_elf_table<Elf64_Shdr>(original, header.e_shoff, header.e_shnum, header.e_shentsize);
+  if (!sections) {
+    return diagnostic.emit() << "invalid native image section table";
+  }
+  std::optional<Elf64_Shdr> text;
+  size_t text_index = 0;
+  for (size_t index = 0; index < sections->size(); ++index) {
+    const Elf64_Shdr &section = (*sections)[index];
+    if ((section.sh_flags & (SHF_ALLOC | SHF_EXECINSTR)) != (SHF_ALLOC | SHF_EXECINSTR)) {
+      continue;
+    }
+    if (text || !util::is_range_in_bounds(section.sh_offset, section.sh_size, original.size())) {
+      return diagnostic.emit() << "native executable section is ambiguous or truncated";
+    }
+    text = section;
+    text_index = index;
+  }
+  if (!text) {
+    return diagnostic.emit() << "native image has no executable text";
+  }
+  const std::vector<KernelDescriptorInfo> kernels =
+      scan_kernel_descriptors(original, text->sh_offset, text->sh_size, text_index);
+  if (kernels.empty() || kernels.size() > kImageEntryLimit) {
+    return diagnostic.emit() << "native entry inventory is empty or oversized";
+  }
+  ImageFacts bindings;
+  bindings.original = {.sha256 = digest(original), .bytes = original.size()};
+  bindings.prepared = bindings.original;
+  bindings.target = target->id;
+  bindings.wave_size = kernel_wavefront_size(target->arch, kernels.front().descriptor);
+  bindings.code_object_abi = 5;
+  bindings.original_text_bytes = text->sh_size;
+  bindings.prepared_text_bytes = text->sh_size;
+  for (const KernelDescriptorInfo &kernel : kernels) {
+    std::string message;
+    const FailureOr<MetadataResources> metadata =
+        inspect_metadata(original, kernel, &message, MetadataPolicy::Native);
+    if (metadata.failed()) {
+      return diagnostic.emit() << message;
+    }
+    ImageEntryFacts entry;
+    entry.key = kernel.descriptor_file_offset;
+    entry.original_sgprs = metadata.value().sgprs;
+    entry.original_vgprs = metadata.value().vgprs;
+    entry.binding = {
+        .name = kernel.kernel_name,
+        .original_descriptor_offset = entry.key,
+        .prepared_descriptor_offset = entry.key,
+        .original_entry_offset = kernel.entry_text_offset,
+        .prepared_entry_offset = kernel.entry_text_offset,
+        .original_kernarg_bytes = kernel.descriptor.kernarg_size,
+        .kernarg_alignment = metadata.value().kernarg_alignment,
+        .original_group_bytes = kernel.descriptor.group_segment_fixed_size,
+        .prepared_group_bytes = kernel.descriptor.group_segment_fixed_size,
+        .original_private_bytes = kernel.descriptor.private_segment_fixed_size,
+        .prepared_private_bytes = kernel.descriptor.private_segment_fixed_size,
+        .prepared_sgprs = metadata.value().sgprs,
+        .prepared_vgprs = metadata.value().vgprs,
+        .maximum_workgroup_size = metadata.value().maximum_workgroup_size,
+        .workgroup_id_scalar =
+            RJ_AMDHSA_BITS_GET(kernel.descriptor.compute_pgm_rsrc2,
+                               amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X)
+                ? (isa_properties(target->arch).uses_ttmp_workgroup_ids
+                       ? kWorkgroupIdTtmp9Selector
+                       : kernel_descriptor_user_sgpr_count(target->arch, kernel.descriptor))
+                : UINT32_MAX,
+        .required_workgroup_size = metadata.value().required_workgroup_size};
+    bindings.entries.push_back(std::move(entry));
+  }
+  std::ranges::sort(bindings.entries, {}, &ImageEntryFacts::key);
+  const FailureOr<InspectedImage> checked = inspect_image(bindings, original, false, diagnostic);
+  if (checked.failed()) {
+    return Result::failure();
+  }
+  return NativeImageInventory{.identity = bindings.original,
+                              .target = bindings.target,
+                              .wave_size = bindings.wave_size,
+                              .entries = std::move(bindings.entries)};
+}
 
 Result verify_artifact_images(const ImageFacts &facts, std::span<const uint8_t> original,
                               std::span<const uint8_t> prepared,

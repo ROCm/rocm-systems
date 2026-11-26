@@ -27,7 +27,7 @@ using Digest = std::array<uint8_t, 32>;
 // and internal API changes alone do not require a new token; no negotiation is
 // performed between producers and consumers.
 inline constexpr std::array<uint8_t, 16> kProducerContract = {
-    0x8e, 0x0e, 0x82, 0xe9, 0xcf, 0xff, 0x4b, 0x43, 0x88, 0x29, 0x4e, 0x68, 0xad, 0x33, 0xce, 0xc8};
+    0x3b, 0x46, 0x97, 0xdc, 0xc7, 0xfc, 0x4d, 0xa5, 0x9e, 0xad, 0xb0, 0xd7, 0xb8, 0x36, 0x25, 0xfe};
 // Canonical hash input for the manifest's options identity. Changing any byte
 // changes the identity required by artifact and capture admission.
 inline constexpr std::string_view kMvpOptions =
@@ -235,8 +235,14 @@ public:
   // Scalar operand selector for the original workgroup-X input: an ordinary
   // SGPR or TTMP9 on gfx12. UINT32_MAX means the descriptor does not request X.
   uint32_t workgroup_id_scalar = UINT32_MAX;
+  // All zero means no required shape; otherwise all dimensions are nonzero.
+  std::array<uint32_t, 3> required_workgroup_size{};
   bool operator==(const EntryFacts &) const = default;
 };
+
+/// @brief Check an optional required shape without overflowing its flat size.
+[[nodiscard]] bool valid_workgroup_requirement(const std::array<uint32_t, 3> &shape,
+                                               uint32_t maximum);
 
 /// @brief A qualified full-workgroup barrier with an implicit identity.
 /// @details Legacy barriers use the same signal/wait position; split barriers use identity -1.
