@@ -33,20 +33,79 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtImportExternalSemaphore(
   if (NtHandle == nullptr || OutHandle == nullptr)
     return HSAKMT_STATUS_INVALID_PARAMETER;
 
-  // Only OPAQUE_WIN32 (NT handle) is wired today. The other enum
-  // values are accepted in the typedef for forward compatibility but
-  // must be rejected here.
-  if (Type != HSA_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32)
+  // NT and KMT are both openable, by different D3DKMT entry points; an FD
+  // is not routable through WDDM at all.
+  if (Type != HSA_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32 &&
+      Type != HSA_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_KMT)
     return HSAKMT_STATUS_NOT_SUPPORTED;
 
   WDDMDevice *device = get_wddmdev(NodeId);
   if (device == nullptr) return HSAKMT_STATUS_INVALID_NODE_UNIT;
 
   D3DKMT_HANDLE syncobj = 0;
-  if (!device->OpenSyncobjFromNtHandle(NtHandle, &syncobj))
-    return HSAKMT_STATUS_ERROR;
+  if (Type == HSA_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32) {
+    if (!device->OpenSyncobjFromNtHandle(NtHandle, &syncobj))
+      return HSAKMT_STATUS_ERROR;
+  } else {
+    // A KMT handle is a D3DKMT_HANDLE smuggled through a void*, not a
+    // pointer; narrow it back rather than dereferencing it.
+    const auto kmt = static_cast<D3DKMT_HANDLE>(
+        reinterpret_cast<uintptr_t>(NtHandle));
+    if (!device->OpenSyncobjFromKmtHandle(kmt, &syncobj))
+      return HSAKMT_STATUS_ERROR;
+  }
 
   OutHandle->handle = EncodeExtSemHandle(syncobj, NodeId);
+  return HSAKMT_STATUS_SUCCESS;
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtCreateExternalSemaphore(
+    HSAuint32 NodeId,
+    HSA_EXTERNAL_SEMAPHORE_HANDLE_TYPE Type,
+    HSAuint64 InitialValue,
+    HSAuint32 Timeline,
+    HSA_EXTERNAL_SEMAPHORE_HANDLE *OutHandle,
+    void **OutNtHandle) {
+  CHECK_DXG_OPEN();
+
+  if (OutHandle == nullptr || OutNtHandle == nullptr)
+    return HSAKMT_STATUS_INVALID_PARAMETER;
+
+  // NT and KMT are both exportable, by different mechanisms; nothing else is.
+  const bool nt_sharing = (Type == HSA_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32);
+  if (Type != HSA_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32 &&
+      Type != HSA_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_KMT)
+    return HSAKMT_STATUS_NOT_SUPPORTED;
+
+  WDDMDevice *device = get_wddmdev(NodeId);
+  if (device == nullptr) return HSAKMT_STATUS_INVALID_NODE_UNIT;
+
+  D3DKMT_HANDLE syncobj = 0;
+  D3DKMT_HANDLE kmt_shared = 0;
+  if (!device->CreateSharedSyncobj(&syncobj, InitialValue, Timeline != 0, nt_sharing,
+                                   &kmt_shared))
+    return HSAKMT_STATUS_ERROR;
+
+  void *nt_handle = nullptr;
+  if (nt_sharing) {
+    if (!device->ExportSyncobjToNtHandle(syncobj, &nt_handle)) {
+      // Roll back so a failed export does not strand a shared syncobj, which
+      // the KMD refcounts and would not reclaim with the device.
+      device->DestroySyncobj(syncobj);
+      return HSAKMT_STATUS_ERROR;
+    }
+  } else {
+    // The KMD hands back the global handle at creation; there is nothing to
+    // create here and nothing for the caller to close.
+    if (kmt_shared == 0) {
+      device->DestroySyncobj(syncobj);
+      return HSAKMT_STATUS_ERROR;
+    }
+    nt_handle = reinterpret_cast<void *>(static_cast<uintptr_t>(kmt_shared));
+  }
+
+  OutHandle->handle = EncodeExtSemHandle(syncobj, NodeId);
+  *OutNtHandle = nt_handle;
   return HSAKMT_STATUS_SUCCESS;
 }
 

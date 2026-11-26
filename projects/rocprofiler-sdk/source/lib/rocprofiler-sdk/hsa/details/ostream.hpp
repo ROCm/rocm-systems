@@ -1578,6 +1578,60 @@ operator<<(std::ostream& out, const hsa_amd_queue_create_desc_t& v)
     return out;
 }
 #endif
+
+#if defined(HSA_AMD_EXT_API_TABLE_STEP_VERSION) && HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x18
+inline static std::ostream&
+operator<<(std::ostream& out, const hsa_amd_external_semaphore_t& v)
+{
+    std::operator<<(out, '{');
+    HSA_depth_max_cnt++;
+    if(HSA_depth_max == -1 || HSA_depth_max_cnt <= HSA_depth_max)
+    {
+        if(std::string_view{"hsa_amd_external_semaphore_t::handle"}.find(HSA_structs_regex) !=
+           std::string_view::npos)
+        {
+            rocprofiler::hsa::detail::operator<<(out, "handle=");
+            rocprofiler::hsa::detail::operator<<(out, v.handle);
+        }
+    };
+    HSA_depth_max_cnt--;
+    std::operator<<(out, '}');
+    return out;
+}
+
+inline static std::ostream&
+operator<<(std::ostream& out, const hsa_amd_external_semaphore_create_descriptor_t& v)
+{
+    std::operator<<(out, '{');
+    HSA_depth_max_cnt++;
+    if(HSA_depth_max == -1 || HSA_depth_max_cnt <= HSA_depth_max)
+    {
+        if(std::string_view{"hsa_amd_external_semaphore_create_descriptor_t::type"}.find(
+               HSA_structs_regex) != std::string_view::npos)
+        {
+            rocprofiler::hsa::detail::operator<<(out, "type=");
+            rocprofiler::hsa::detail::operator<<(out, v.type);
+            rocprofiler::hsa::detail::operator<<(out, ", ");
+        }
+        if(std::string_view{"hsa_amd_external_semaphore_create_descriptor_t::initial_value"}.find(
+               HSA_structs_regex) != std::string_view::npos)
+        {
+            rocprofiler::hsa::detail::operator<<(out, "initial_value=");
+            rocprofiler::hsa::detail::operator<<(out, v.initial_value);
+            rocprofiler::hsa::detail::operator<<(out, ", ");
+        }
+        if(std::string_view{"hsa_amd_external_semaphore_create_descriptor_t::timeline"}.find(
+               HSA_structs_regex) != std::string_view::npos)
+        {
+            rocprofiler::hsa::detail::operator<<(out, "timeline=");
+            rocprofiler::hsa::detail::operator<<(out, v.timeline);
+        }
+    };
+    HSA_depth_max_cnt--;
+    std::operator<<(out, '}');
+    return out;
+}
+#endif
 // end ostream ops for HSA
 }  // namespace detail
 }  // namespace hsa
@@ -1887,6 +1941,22 @@ operator<<(std::ostream& out, const hsa_amd_svm_attribute_pair_t& v)
 #if defined(HSA_AMD_EXT_API_TABLE_STEP_VERSION) && HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x10
 inline static std::ostream&
 operator<<(std::ostream& out, const hsa_amd_queue_create_desc_t& v)
+{
+    rocprofiler::hsa::detail::operator<<(out, v);
+    return out;
+}
+#endif
+
+#if defined(HSA_AMD_EXT_API_TABLE_STEP_VERSION) && HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x18
+inline static std::ostream&
+operator<<(std::ostream& out, const hsa_amd_external_semaphore_t& v)
+{
+    rocprofiler::hsa::detail::operator<<(out, v);
+    return out;
+}
+
+inline static std::ostream&
+operator<<(std::ostream& out, const hsa_amd_external_semaphore_create_descriptor_t& v)
 {
     rocprofiler::hsa::detail::operator<<(out, v);
     return out;

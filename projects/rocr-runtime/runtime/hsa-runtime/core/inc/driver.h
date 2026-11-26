@@ -389,6 +389,29 @@ public:
     return HSA_STATUS_ERROR_INVALID_AGENT;
   }
 
+  /// @brief Creates a semaphore owned by this device and exportable to
+  /// another API, the mirror of @ref ImportExternalSemaphore.
+  ///
+  /// Returns both an opaque semaphore - the same flavour @ref
+  /// ImportExternalSemaphore produces, so signal/wait/destroy are shared -
+  /// and a NEW OS handle that the CALLER owns and must close. @ref
+  /// DestroyExternalSemaphore does not close it, because the importer does
+  /// not take ownership and may outlive the semaphore.
+  /// @param[in] node_id Node ID of the agent that will use the semaphore.
+  /// @param[in] type Handle type from the public hsa_amd extension.
+  /// @param[in] initial_value Starting fence value.
+  /// @param[out] out_sem On success, the created semaphore.
+  /// @param[out] out_os_handle On success, a new caller-owned OS handle.
+  /// @retval HSA_STATUS_ERROR_INVALID_AGENT if the agent's driver does
+  /// not support external semaphore export.
+  virtual hsa_status_t CreateExternalSemaphore(uint32_t node_id,
+                                               hsa_amd_external_semaphore_handle_type_t type,
+                                               uint64_t initial_value, bool timeline,
+                                               hsa_amd_external_semaphore_t* out_sem,
+                                               void** out_os_handle) const {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+
   /// @brief Releases an external semaphore handle previously returned by
   /// @ref ImportExternalSemaphore.
   /// @param[in] sem Semaphore to release.

@@ -611,8 +611,40 @@ hsaKmtImportExternalSemaphore(
     );
 
 /**
+  Creates a semaphore owned by this device and exportable to another API
+  (e.g. Vulkan), which is the mirror of hsaKmtImportExternalSemaphore.
+
+  Returns two things for one object: OutHandle is the same opaque flavour
+  hsaKmtImportExternalSemaphore produces, so the queue signal/wait and
+  destroy paths are shared verbatim; OutNtHandle is a NEW OS handle the
+  caller owns and must close independently of the semaphore. The importer
+  (Vulkan OPAQUE_WIN32) does not take ownership of it.
+
+  Both HSA_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32 and
+  OPAQUE_WIN32_KMT are supported; any other type returns
+  HSAKMT_STATUS_NOT_SUPPORTED. OPAQUE_WIN32 creates an NT handle carrying
+  sharing security attributes, which the caller must close. OPAQUE_WIN32_KMT
+  instead returns the syncobj's globally shared KMT handle, which is
+  process-local and owned by the semaphore, so the caller must not close it.
+  The OpenCL CTS requires both: advertising NT alone fails its KMT subtest.
+*/
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtCreateExternalSemaphore(
+    HSAuint32                          NodeId,       //IN
+    HSA_EXTERNAL_SEMAPHORE_HANDLE_TYPE Type,         //IN
+    HSAuint64                          InitialValue, //IN
+    HSAuint32                          Timeline,     //IN, 0 = binary
+    HSA_EXTERNAL_SEMAPHORE_HANDLE     *OutHandle,    //OUT
+    void                             **OutNtHandle   //OUT, caller closes
+    );
+
+/**
   Releases an external semaphore previously imported via
-  hsaKmtImportExternalSemaphore.
+  hsaKmtImportExternalSemaphore or created via
+  hsaKmtCreateExternalSemaphore. Does NOT close any OS handle created by
+  the latter - those are owned by the caller.
 */
 
 HSAKMT_STATUS

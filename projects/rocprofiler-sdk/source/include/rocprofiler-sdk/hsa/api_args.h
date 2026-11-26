@@ -1635,6 +1635,15 @@ typedef union rocprofiler_hsa_api_args_t
         hsa_amd_signal_batch_t batch;
     } hsa_amd_signal_batch_destroy;
 #    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x18
+    struct
+    {
+        hsa_agent_t                                           agent;
+        const hsa_amd_external_semaphore_create_descriptor_t* desc;
+        hsa_amd_external_semaphore_t*                         out_sem;
+        void**                                                out_os_handle;
+    } hsa_amd_external_semaphore_handle_create;
+#    endif
 #endif
 } rocprofiler_hsa_api_args_t;
 

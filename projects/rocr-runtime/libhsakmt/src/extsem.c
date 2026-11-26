@@ -14,6 +14,16 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtImportExternalSemaphore(
   return HSAKMT_STATUS_NOT_SUPPORTED;
 }
 
+HSAKMT_STATUS HSAKMTAPI hsaKmtCreateExternalSemaphore(
+    HSAuint32 NodeId, HSA_EXTERNAL_SEMAPHORE_HANDLE_TYPE Type,
+    HSAuint64 InitialValue, HSAuint32 Timeline,
+    HSA_EXTERNAL_SEMAPHORE_HANDLE *OutHandle,
+    void **OutNtHandle) {
+  (void)NodeId; (void)Type; (void)InitialValue; (void)Timeline;
+  (void)OutHandle; (void)OutNtHandle;
+  return HSAKMT_STATUS_NOT_SUPPORTED;
+}
+
 HSAKMT_STATUS HSAKMTAPI hsaKmtDestroyExternalSemaphore(
     HSA_EXTERNAL_SEMAPHORE_HANDLE Handle) {
   (void)Handle;
