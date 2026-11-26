@@ -3656,9 +3656,9 @@ def test_calc_roofline_data_includes_all_kernels(monkeypatch):
 def test_calc_roofline_data_stores_each_point_in_its_level_column(
     monkeypatch, metric, column
 ):
-    """The column keeps its hbm_cache_data name. MI architectures fill it from
-    AI HBM, and gfx1201, which has no HBM, fills it from AI VRAM. gfx1250
-    names its cache points AI GL0 and AI GL2."""
+    """Each point fills the column of its memory level. gfx120x has no HBM, so
+    AI VRAM fills hbm_cache_data. gfx1250 names its cache points AI GL0 and
+    AI GL2."""
     pmc_df = pd.DataFrame({
         "Kernel_Name": ["kernel"],
         "Start_Timestamp": [0],

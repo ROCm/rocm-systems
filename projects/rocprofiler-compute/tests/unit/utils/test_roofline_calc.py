@@ -276,7 +276,7 @@ def test_roofline_mem_levels_are_measured_levels_in_hierarchy_order() -> None:
 def test_extract_ai_metrics_reads_each_point_into_its_level_field(
     metric: str, field: str
 ) -> None:
-    """gfx1201 names its device-memory point AI VRAM. gfx1250 names its cache
+    """gfx120x names its device-memory point AI VRAM. gfx1250 names its cache
     points AI GL0 and AI GL2. Each fills the field of its memory level."""
     ai_metrics = _extract_ai_metrics(pd.DataFrame({"Metric": [metric], "Value": [3.5]}))
 
