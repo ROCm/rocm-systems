@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/analysis/waitcheck/target.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/instruction.h"
@@ -14,15 +15,17 @@ using amdgpu::MemoryKind;
 using amdgpu::Operation;
 
 std::optional<RegisterRef> WaitcheckTarget::register_operand(const Operand &operand,
-                                                             rj_code_arch_t arch) {
-  if (const auto ref = operand.to_register_ref())
+                                                             rocjitsu::IsaFamily arch) {
+  if (const auto ref = operand.to_register_ref()) {
     return ref;
+  }
   // Mesh exports read M0 through a fieldless input. Scalar instructions such
   // as S_SENDMSG_RTN_B32 can produce the same register through a selector.
   if ((amdgpu::has_typed_export_waits(arch) && operand.to_special_reg_class() == RegClass::M0) ||
       (operand.has_register_selector() &&
-       static_cast<uint32_t>(operand.encoding_value()) == amdgpu::scalar_m0_selector(arch)))
+       static_cast<uint32_t>(operand.encoding_value()) == amdgpu::scalar_m0_selector(arch))) {
     return RegisterRef{RegClass::M0, 0, 1};
+  }
   return std::nullopt;
 }
 
@@ -52,8 +55,9 @@ WaitcheckTarget::normalized_hardware_event_kind(WaitCounterKind counter, WaitEve
     // Generic FLAT and ordinary VMEM loads both raise VMEM_READ_ACCESS.
     // GLOBAL_INV is explicitly ignored by LLVM's LOAD_CNT out-of-order
     // test. Pre-gfx12 image event kinds share that same hardware event.
-    if (kind == WaitEventKind::GlobalInv)
+    if (kind == WaitEventKind::GlobalInv) {
       return std::nullopt;
+    }
     if (kind == WaitEventKind::FlatLoad || kind == WaitEventKind::LdsDirect ||
         (amdgpu::uses_legacy_waitcnt(model) &&
          (kind == WaitEventKind::Sample || kind == WaitEventKind::Bvh))) {
@@ -62,29 +66,36 @@ WaitcheckTarget::normalized_hardware_event_kind(WaitCounterKind counter, WaitEve
     return kind;
   case WaitCounterKind::Ds:
     // A generic FLAT access raises the same LDS_ACCESS event as native DS.
-    if (kind == WaitEventKind::FlatLoad || kind == WaitEventKind::FlatStore)
+    if (kind == WaitEventKind::FlatLoad || kind == WaitEventKind::FlatStore) {
       return WaitEventKind::Ds;
+    }
     return kind;
   case WaitCounterKind::Store:
     // Generic FLAT and ordinary VMEM stores share the store-completion event.
-    if (kind == WaitEventKind::GlobalWb || kind == WaitEventKind::FlatStore)
+    if (kind == WaitEventKind::GlobalWb || kind == WaitEventKind::FlatStore) {
       return WaitEventKind::VmemStore;
+    }
     return kind;
   case WaitCounterKind::X:
     // X_CNT distinguishes VMEM_GROUP from SMEM_GROUP, not the underlying
     // load/store/image operation.
-    if (kind == WaitEventKind::Smem)
+    if (kind == WaitEventKind::Smem) {
       return WaitEventKind::Smem;
-    if (is_xcnt_vmem_kind(kind))
+    }
+    if (is_xcnt_vmem_kind(kind)) {
       return WaitEventKind::VmemNoSamplerLoad;
+    }
     return kind;
   case WaitCounterKind::VmVsrc:
-    if (kind == WaitEventKind::Ds)
+    if (kind == WaitEventKind::Ds) {
       return WaitEventKind::Ds;
-    if (kind == WaitEventKind::FlatLoad || kind == WaitEventKind::FlatStore)
+    }
+    if (kind == WaitEventKind::FlatLoad || kind == WaitEventKind::FlatStore) {
       return WaitEventKind::FlatLoad;
-    if (is_xcnt_vmem_kind(kind))
+    }
+    if (is_xcnt_vmem_kind(kind)) {
       return WaitEventKind::VmemNoSamplerLoad;
+    }
     return kind;
   case WaitCounterKind::Async:
     // Load, store, and barrier forms all raise ASYNC_ACCESS.
@@ -97,15 +108,16 @@ WaitcheckTarget::normalized_hardware_event_kind(WaitCounterKind counter, WaitEve
 }
 
 [[nodiscard]] util::FailureOr<std::optional<WaitFields>>
-WaitcheckTarget::embedded_wait_fields(const Instruction &inst, rj_code_arch_t arch) {
+WaitcheckTarget::embedded_wait_fields(const Instruction &inst, rocjitsu::IsaFamily arch) {
   const auto model = amdgpu::waitcnt_model(arch);
-  if (model.failed())
+  if (model.failed()) {
     return util::Result::failure();
+  }
   WaitFields fields;
   bool has_wait = false;
-  const bool has_vinterp_wait = arch == ROCJITSU_CODE_ARCH_RDNA3 ||
-                                arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-                                arch == ROCJITSU_CODE_ARCH_RDNA4;
+  const bool has_vinterp_wait = arch == rocjitsu::IsaFamily::Rdna3 ||
+                                arch == rocjitsu::IsaFamily::Rdna3_5 ||
+                                arch == rocjitsu::IsaFamily::Rdna4;
   if (const auto wait_exp = vinterp_wait_exp(inst);
       has_vinterp_wait && wait_exp && *wait_exp < 0x7u) {
     fields[counter_index(WaitCounterKind::Exp)] = *wait_exp;
@@ -144,17 +156,20 @@ bool WaitcheckTarget::is_xcnt_drain(const Instruction &inst) {
 
 [[nodiscard]] std::optional<int64_t> WaitcheckTarget::first_barrier_id(const Instruction &inst) {
   const Operand *op = inst.src_operand(0);
-  if (!op)
+  if (!op) {
     return std::nullopt;
-  if (const auto value = op->const_value())
+  }
+  if (const auto value = op->const_value()) {
     return static_cast<int64_t>(*value);
+  }
   return static_cast<int64_t>(static_cast<int32_t>(op->encoding_value()));
 }
 
 [[nodiscard]] bool WaitcheckTarget::is_cdna_lds_dma_load(const Instruction &inst,
-                                                         rj_code_arch_t arch) {
-  if (arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4)
+                                                         rocjitsu::IsaFamily arch) {
+  if (arch != rocjitsu::IsaFamily::Cdna3 && arch != rocjitsu::IsaFamily::Cdna4) {
     return false;
+  }
   const MemoryAddressing addressing = inst.amdgpu_memory_addressing();
   return inst.transfers_to_lds() && inst.amdgpu_memory_kind() == MemoryKind::Load &&
          (addressing == MemoryAddressing::Scratch || addressing == MemoryAddressing::Global ||
@@ -163,8 +178,9 @@ bool WaitcheckTarget::is_xcnt_drain(const Instruction &inst) {
 
 [[nodiscard]] std::optional<uint32_t> WaitcheckTarget::vinterp_wait_exp(const Instruction &inst) {
   if (!inst.is_interpolation() || inst.raw_encoding() == nullptr ||
-      inst.size() < static_cast<int>(sizeof(uint32_t)))
+      inst.size() < static_cast<int>(sizeof(uint32_t))) {
     return std::nullopt;
+  }
   return (inst.raw_encoding()[0] >> 8u) & 0x7u;
 }
 
@@ -174,16 +190,18 @@ bool WaitcheckTarget::is_xcnt_drain(const Instruction &inst) {
 
 [[nodiscard]] std::optional<uint32_t> WaitcheckTarget::dsdir_wait_va_vdst(const Instruction &inst) {
   if (!is_dsdir(inst) || inst.raw_encoding() == nullptr ||
-      inst.size() < static_cast<int>(sizeof(uint32_t)))
+      inst.size() < static_cast<int>(sizeof(uint32_t))) {
     return std::nullopt;
+  }
   return (inst.raw_encoding()[0] >> 16u) & 0xFu;
 }
 
 [[nodiscard]] std::optional<uint32_t> WaitcheckTarget::dsdir_wait_vm_vsrc(const Instruction &inst) {
   const Operation operation = inst.amdgpu_operation();
   if ((operation != Operation::DS_PARAM_LOAD && operation != Operation::DS_DIRECT_LOAD) ||
-      inst.raw_encoding() == nullptr || inst.size() < static_cast<int>(sizeof(uint32_t)))
+      inst.raw_encoding() == nullptr || inst.size() < static_cast<int>(sizeof(uint32_t))) {
     return std::nullopt;
+  }
   return (inst.raw_encoding()[0] >> 23u) & 0x1u;
 }
 
@@ -197,8 +215,9 @@ bool WaitcheckTarget::is_xcnt_drain(const Instruction &inst) {
   default:
     break;
   }
-  if (!(inst.flags() & SMEM))
+  if (!(inst.flags() & SMEM)) {
     return false;
+  }
   switch (inst.amdgpu_memory_kind()) {
   case MemoryKind::Load:
   case MemoryKind::Store:
@@ -212,8 +231,9 @@ bool WaitcheckTarget::is_xcnt_drain(const Instruction &inst) {
 }
 
 [[nodiscard]] bool WaitcheckTarget::is_vmem_store(const Instruction &inst) {
-  if (inst.amdgpu_memory_kind() != MemoryKind::Store || (inst.flags() & SMEM))
+  if (inst.amdgpu_memory_kind() != MemoryKind::Store || (inst.flags() & SMEM)) {
     return false;
+  }
   switch (inst.amdgpu_memory_addressing()) {
   case MemoryAddressing::Global:
   case MemoryAddressing::Scratch:
@@ -227,8 +247,9 @@ bool WaitcheckTarget::is_xcnt_drain(const Instruction &inst) {
 }
 
 [[nodiscard]] bool WaitcheckTarget::is_vmem_atomic(const Instruction &inst) {
-  if (inst.amdgpu_memory_kind() != MemoryKind::Atomic)
+  if (inst.amdgpu_memory_kind() != MemoryKind::Atomic) {
     return false;
+  }
   switch (inst.amdgpu_memory_addressing()) {
   case MemoryAddressing::Global:
   case MemoryAddressing::Flat:
@@ -290,24 +311,28 @@ bool WaitcheckTarget::is_xcnt_drain(const Instruction &inst) {
 }
 
 [[nodiscard]] util::FailureOr<std::vector<ClassifiedEvent>>
-WaitcheckTarget::classify_events(const Instruction &inst, rj_code_arch_t arch) {
+WaitcheckTarget::classify_events(const Instruction &inst, rocjitsu::IsaFamily arch) {
   std::vector<ClassifiedEvent> events;
-  if (classify_events_into(inst, arch, events).failed())
+  if (classify_events_into(inst, arch, events).failed()) {
     return util::Result::failure();
+  }
   return events;
 }
 
 [[nodiscard]] util::Result
-WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t arch,
+WaitcheckTarget::classify_events_into(const Instruction &inst, rocjitsu::IsaFamily arch,
                                       std::vector<ClassifiedEvent> &events) {
   events.clear();
   const auto model = amdgpu::waitcnt_model(arch);
-  if (model.failed())
+  if (model.failed()) {
     return util::Result::failure();
+  }
   auto has_register_result = [&] {
     for (int i = 0; i < inst.num_dst_operands(); ++i) {
-      if (const Operand *operand = inst.dst_operand(i); operand && register_operand(*operand, arch))
+      if (const Operand *operand = inst.dst_operand(i);
+          operand && register_operand(*operand, arch)) {
         return true;
+      }
     }
     return false;
   };
@@ -316,10 +341,11 @@ WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t ar
   const MemoryAddressing addressing = inst.amdgpu_memory_addressing();
   const MemoryKind memory_kind = inst.amdgpu_memory_kind();
   auto add_xcnt_event = [&](WaitEventKind kind) {
-    if (arch == ROCJITSU_CODE_ARCH_CDNA5)
+    if (arch == rocjitsu::IsaFamily::Cdna5) {
       events.emplace_back(WaitCounterKind::X, kind, TrackedRegisterSource::Uses,
                           /*check_uses=*/false, /*check_defs=*/true,
                           /*check_exec_defs=*/is_xcnt_vmem_kind(kind));
+    }
   };
   if (is_async_lds_load(inst) || is_async_lds_store(inst)) {
     const bool is_load = is_async_lds_load(inst);
@@ -356,12 +382,14 @@ WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t ar
         amdgpu::uses_legacy_waitcnt(model.value()) && addressing == MemoryAddressing::Gds;
     events.push_back({WaitCounterKind::Ds, gds ? WaitEventKind::Gds : WaitEventKind::Ds});
     // CDNA4 retains the legacy wait encoding, but EXPCNT is unused (ISA 3.1/4.4).
-    if (gds && arch != ROCJITSU_CODE_ARCH_CDNA4)
+    if (gds && arch != rocjitsu::IsaFamily::Cdna4) {
       events.push_back({WaitCounterKind::Exp, WaitEventKind::Gds, TrackedRegisterSource::VectorUses,
                         false, true, true});
-    if (expert)
+    }
+    if (expert) {
       events.push_back({WaitCounterKind::VmVsrc, WaitEventKind::Ds,
                         TrackedRegisterSource::VectorUses, false, true});
+    }
     return util::Result::success();
   }
 
@@ -383,9 +411,10 @@ WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t ar
     // Keep the instruction kind distinct: generic FLAT and native DS can
     // complete out of order even though both contribute to the DS counter.
     events.push_back({WaitCounterKind::Ds, WaitEventKind::FlatLoad});
-    if (expert)
+    if (expert) {
       events.push_back({WaitCounterKind::VmVsrc, WaitEventKind::FlatLoad,
                         TrackedRegisterSource::VectorUses, false, true});
+    }
     add_xcnt_event(WaitEventKind::FlatLoad);
     return util::Result::success();
   }
@@ -422,9 +451,10 @@ WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t ar
         (addressing == MemoryAddressing::Image && operation != Operation::IMAGE_MSAA_LOAD))) ||
       operation == Operation::IMAGE_GET_RESINFO) {
     events.push_back({WaitCounterKind::Load, WaitEventKind::VmemNoSamplerLoad});
-    if (expert)
+    if (expert) {
       events.push_back({WaitCounterKind::VmVsrc, WaitEventKind::VmemNoSamplerLoad,
                         TrackedRegisterSource::VectorUses, false, true});
+    }
     add_xcnt_event(WaitEventKind::VmemNoSamplerLoad);
     return util::Result::success();
   }
@@ -437,7 +467,7 @@ WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t ar
     bool returns_value = has_register_result();
     if (inst.raw_encoding() != nullptr && inst.size() >= 8) {
       const unsigned glc_bit =
-          arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ? 14u : 13u;
+          arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5 ? 14u : 13u;
       returns_value = amdgpu::uses_legacy_waitcnt(model.value())
                           ? (inst.raw_encoding()[0] & (1u << glc_bit)) != 0
                           : (inst.raw_encoding()[1] & (1u << 20u)) != 0;
@@ -449,9 +479,10 @@ WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t ar
     events.emplace_back(counter, kind,
                         returns_value ? TrackedRegisterSource::Defs : TrackedRegisterSource::None,
                         /*check_uses=*/returns_value, /*check_defs=*/returns_value);
-    if (expert)
+    if (expert) {
       events.push_back(
           {WaitCounterKind::VmVsrc, kind, TrackedRegisterSource::VectorUses, false, true});
+    }
     add_xcnt_event(kind);
     return util::Result::success();
   }
@@ -467,13 +498,15 @@ WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t ar
     events.emplace_back(counter, kind,
                         returns_value ? TrackedRegisterSource::Defs : TrackedRegisterSource::None,
                         /*check_uses=*/returns_value, /*check_defs=*/returns_value);
-    if (addressing == MemoryAddressing::Flat)
+    if (addressing == MemoryAddressing::Flat) {
       events.emplace_back(WaitCounterKind::Ds, kind,
                           returns_value ? TrackedRegisterSource::Defs : TrackedRegisterSource::None,
                           /*check_uses=*/returns_value, /*check_defs=*/returns_value);
-    if (expert)
+    }
+    if (expert) {
       events.emplace_back(WaitCounterKind::VmVsrc, kind, TrackedRegisterSource::VectorUses,
                           /*check_uses=*/false, /*check_defs=*/true);
+    }
     add_xcnt_event(kind);
     return util::Result::success();
   }
@@ -483,9 +516,10 @@ WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t ar
                       TrackedRegisterSource::None, false, false});
     events.push_back(
         {WaitCounterKind::Ds, WaitEventKind::FlatStore, TrackedRegisterSource::None, false, false});
-    if (expert)
+    if (expert) {
       events.push_back({WaitCounterKind::VmVsrc, WaitEventKind::FlatStore,
                         TrackedRegisterSource::VectorUses, false, true});
+    }
     add_xcnt_event(WaitEventKind::FlatStore);
     return util::Result::success();
   }
@@ -497,15 +531,17 @@ WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t ar
       const auto *issue = inst.amdgpu_memory_issue_info();
       if (issue && std::ranges::any_of(issue->counter_obligations(), [](const auto &obligation) {
             return obligation.wait_counter_type() == amdgpu::WaitCounterType::LGKMCNT;
-          }))
+          })) {
         events.emplace_back(WaitCounterKind::Ds, WaitEventKind::Unknown,
                             TrackedRegisterSource::None, false, false);
+      }
     }
     events.push_back({amdgpu::vmem_store_wait_counter(model.value()), WaitEventKind::VmemStore,
                       TrackedRegisterSource::None, false, false});
-    if (expert)
+    if (expert) {
       events.push_back({WaitCounterKind::VmVsrc, WaitEventKind::VmemStore,
                         TrackedRegisterSource::VectorUses, false, true});
+    }
     add_xcnt_event(WaitEventKind::VmemStore);
     return util::Result::success();
   }
@@ -524,8 +560,9 @@ WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t ar
     // but unlike SMRD instructions they do not translate a scalar address.
     if (operation != Operation::S_MEMTIME && operation != Operation::S_MEMREALTIME &&
         operation != Operation::S_GET_BARRIER_STATE &&
-        operation != Operation::S_GET_WAVEID_IN_WORKGROUP)
+        operation != Operation::S_GET_WAVEID_IN_WORKGROUP) {
       add_xcnt_event(WaitEventKind::Smem);
+    }
     return util::Result::success();
   }
 
@@ -542,21 +579,23 @@ WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t ar
       (addressing == MemoryAddressing::Image && memory_kind == MemoryKind::Sample)) {
     events.push_back({amdgpu::image_sample_wait_counter(model.value()), WaitEventKind::Sample});
     events.back().point_sample_accel =
-        arch == ROCJITSU_CODE_ARCH_RDNA3_5 &&
+        arch == rocjitsu::IsaFamily::Rdna3_5 &&
         (operation == Operation::IMAGE_SAMPLE || operation == Operation::IMAGE_SAMPLE_L ||
          operation == Operation::IMAGE_SAMPLE_LZ);
-    if (expert)
+    if (expert) {
       events.push_back({WaitCounterKind::VmVsrc, WaitEventKind::Sample,
                         TrackedRegisterSource::VectorUses, false, true});
+    }
     add_xcnt_event(WaitEventKind::Sample);
     return util::Result::success();
   }
 
   if (addressing == MemoryAddressing::Image && memory_kind == MemoryKind::Bvh) {
     events.push_back({amdgpu::image_bvh_wait_counter(model.value()), WaitEventKind::Bvh});
-    if (expert)
+    if (expert) {
       events.push_back({WaitCounterKind::VmVsrc, WaitEventKind::Bvh,
                         TrackedRegisterSource::VectorUses, false, true});
+    }
     add_xcnt_event(WaitEventKind::Bvh);
     return util::Result::success();
   }
@@ -574,18 +613,19 @@ WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t ar
         using Export = amdgpu::ShaderExportOperands;
         const uint8_t target = modifiers.shader_export->target;
         // RDNA4 groups color with depth but gives the blend pair a separate FIFO (ISA 5.7).
-        if (target <= Export::kLastMrt)
+        if (target <= Export::kLastMrt) {
           kind = WaitEventKind::ExportMrt;
-        else if (target == Export::kDualSource0 || target == Export::kDualSource1)
-          kind = arch == ROCJITSU_CODE_ARCH_RDNA4 ? WaitEventKind::ExportDualSourceBlend
-                                                  : WaitEventKind::ExportMrt;
-        else if (target == Export::kDepth)
-          kind =
-              arch == ROCJITSU_CODE_ARCH_RDNA4 ? WaitEventKind::ExportMrt : WaitEventKind::ExportZ;
-        else if (target >= Export::kFirstPosition && target <= Export::kLastPosition)
+        } else if (target == Export::kDualSource0 || target == Export::kDualSource1) {
+          kind = arch == rocjitsu::IsaFamily::Rdna4 ? WaitEventKind::ExportDualSourceBlend
+                                                    : WaitEventKind::ExportMrt;
+        } else if (target == Export::kDepth) {
+          kind = arch == rocjitsu::IsaFamily::Rdna4 ? WaitEventKind::ExportMrt
+                                                    : WaitEventKind::ExportZ;
+        } else if (target >= Export::kFirstPosition && target <= Export::kLastPosition) {
           kind = WaitEventKind::ExportPosition;
-        else if (target == Export::kPrimitive)
+        } else if (target == Export::kPrimitive) {
           kind = WaitEventKind::ExportPrimitive;
+        }
       }
     }
     events.push_back({WaitCounterKind::Exp, kind, sources, false, true, true});
@@ -593,10 +633,11 @@ WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t ar
   }
 
   if (operation == Operation::S_BARRIER_SIGNAL_ISFIRST) {
-    if (!amdgpu::uses_legacy_waitcnt(model.value()))
+    if (!amdgpu::uses_legacy_waitcnt(model.value())) {
       events.push_back({WaitCounterKind::Km, WaitEventKind::SccWrite, TrackedRegisterSource::None,
                         true, true, false, RegisterRef{RegClass::SCC, 0, 1},
                         first_barrier_id(inst)});
+    }
     return util::Result::success();
   }
 

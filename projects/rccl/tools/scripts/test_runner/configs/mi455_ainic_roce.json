@@ -2496,7 +2496,7 @@
         {
           "name": "ImplicitLaunchOrder_MultiCommunicatorChain",
           "description": "Test NCCL_LAUNCH_ORDER_IMPLICIT serialization across multiple communicators",
-          "test_filter": "ImplicitLaunchOrderMPITest.MultiCommunicatorChain"
+          "test_filter": "ImplicitLaunchOrderMPITest.MultiCommunicatorChain*"
         }
       ]
     },
@@ -6553,7 +6553,7 @@
         "NCCL_DEBUG_SUBSYS": "REG,INIT,TUNING",
         "NCCL_LOCAL_REGISTER": "1",
         "NCCL_LEGACY_CUDA_REGISTER": "1",
-        "NCCL_LAUNCH_ORDER_IMPLICIT": "1",
+        "RCCL_DDA_ENABLE": "0",
         "RCCL_DIRECT_ALLGATHER_THRESHOLD": "2147483648",
         "RCCL_MPI_LOG_ALL_RANKS": "1"
       },
@@ -6902,6 +6902,11 @@
           "name": "Symk_AllGatherHierLsaTmaStData",
           "description": "Forced AllGather_HierLsaTmaST with position-dependent data, including a per-rank size that makes each block push several chunks; own process so RCCL_SYM_K_MIN/MAX_BYTES are not read earlier; skips outside partition mode with two or more packages",
           "test_filter": "SymmetricKernelCorruptionTest.AllGatherHierLsaTmaST_PositionDependentData"
+        },
+        {
+          "name": "Symk_ReduceScatterHierLsaLDSTData",
+          "description": "Forced ReduceScatter_HierLsaLDST (sum, fp32 and bf16) with position-dependent data, in place and out of place, including per-rank sizes that make each block run several chunk rounds; own process so RCCL_SYM_K_MIN/MAX_BYTES are not read earlier; skips below four ranks or outside partition mode with two or more packages",
+          "test_filter": "SymmetricKernelCorruptionTest.ReduceScatterHierLsaLDST_PositionDependentData"
         }
       ]
     },
@@ -7105,6 +7110,77 @@
     },
     "dda_fabric_broadcast_8rank": {
       "extends": "dda_fabric_broadcast_base",
+      "num_ranks": 8,
+      "num_gpus": 8
+    },
+    "dda_fabric_broadcast_ll128_base": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_nodes": 1,
+      "timeout": 300,
+      "env_variables": {
+        "UT_DDA_FABRIC_REQUIRE_INIT": "1",
+        "RCCL_DDA_BC": "1",
+        "RCCL_DDA_LL_THRESHOLD": "0",
+        "RCCL_DDA_LL128_THRESHOLD": "2097152",
+        "RCCL_DDA_LL128_BC_FANOUT": "1"
+      },
+      "tests": [
+        {
+          "name": "DDA_Fabric_Broadcast_LL128_AllRootsOutOfPlace",
+          "description": "DDA fabric Broadcast LL128 two-shot: every root, fanOut=1, out of place",
+          "test_filter": "DdaMPI_BroadcastLL128.AllRootsOutOfPlace"
+        },
+        {
+          "name": "DDA_Fabric_Broadcast_LL128_AllRootsInPlace",
+          "description": "DDA fabric Broadcast LL128 two-shot: every root, fanOut=1, in place",
+          "test_filter": "DdaMPI_BroadcastLL128.AllRootsInPlace"
+        },
+        {
+          "name": "DDA_Fabric_Broadcast_LL128_PartialLastChunk",
+          "description": "DDA fabric Broadcast LL128 two-shot: partial last chunk (5.5 slices), fanOut=1",
+          "test_filter": "DdaMPI_BroadcastLL128.PartialLastChunk"
+        },
+        {
+          "name": "DDA_Fabric_Broadcast_LL128_BackToBackNoSync",
+          "description": "DDA fabric Broadcast LL128 two-shot: seven back-to-back launches, fanOut=1",
+          "test_filter": "DdaMPI_BroadcastLL128.BackToBackNoSync"
+        },
+        {
+          "name": "DDA_Fabric_Broadcast_LL128_DefaultFanOut_AllRootsOutOfPlace",
+          "description": "DDA fabric Broadcast LL128 two-shot: every root, default fanOut=0, out of place",
+          "test_filter": "DdaMPI_BroadcastLL128DefaultFanOut.AllRootsOutOfPlace"
+        },
+        {
+          "name": "DDA_Fabric_Broadcast_LL128_DefaultFanOut_AllRootsInPlace",
+          "description": "DDA fabric Broadcast LL128 two-shot: every root, default fanOut=0, in place",
+          "test_filter": "DdaMPI_BroadcastLL128DefaultFanOut.AllRootsInPlace"
+        },
+        {
+          "name": "DDA_Fabric_Broadcast_LL128_DefaultFanOut_PartialLastChunk",
+          "description": "DDA fabric Broadcast LL128 two-shot: partial last chunk, default fanOut=0",
+          "test_filter": "DdaMPI_BroadcastLL128DefaultFanOut.PartialLastChunk"
+        },
+        {
+          "name": "DDA_Fabric_Broadcast_LL128_DefaultFanOut_BackToBackNoSync",
+          "description": "DDA fabric Broadcast LL128 two-shot: seven back-to-back launches, default fanOut=0",
+          "test_filter": "DdaMPI_BroadcastLL128DefaultFanOut.BackToBackNoSync"
+        }
+      ]
+    },
+    "dda_fabric_broadcast_ll128_2rank": {
+      "extends": "dda_fabric_broadcast_ll128_base",
+      "num_ranks": 2,
+      "num_gpus": 2
+    },
+    "dda_fabric_broadcast_ll128_4rank": {
+      "extends": "dda_fabric_broadcast_ll128_base",
+      "num_ranks": 4,
+      "num_gpus": 4
+    },
+    "dda_fabric_broadcast_ll128_8rank": {
+      "extends": "dda_fabric_broadcast_ll128_base",
       "num_ranks": 8,
       "num_gpus": 8
     }
@@ -8210,6 +8286,24 @@
       "name": "DDA Fabric Broadcast LL/LL128 - 8-Rank",
       "description": "DDA fabric Broadcast one-shot data checks on 8 GPUs (RCCL_DDA_BC=1, own process: RCCL_PARAM caches the caps). Fails on every rank under UT_DDA_FABRIC_REQUIRE_INIT=1 unless gfx1250 with MNNVL fabric DDA initialised.",
       "config": "dda_fabric_broadcast_8rank",
+      "enabled": true
+    },
+    {
+      "name": "DDA Fabric Broadcast LL128 - 2-Rank",
+      "description": "DDA fabric Broadcast LL128 two-shot data checks on 2 GPUs (fanOut=1 and default). Requires gfx1250 with MNNVL fabric DDA under UT_DDA_FABRIC_REQUIRE_INIT=1.",
+      "config": "dda_fabric_broadcast_ll128_2rank",
+      "enabled": true
+    },
+    {
+      "name": "DDA Fabric Broadcast LL128 - 4-Rank",
+      "description": "DDA fabric Broadcast LL128 two-shot data checks on 4 GPUs (fanOut=1 and default). Requires gfx1250 with MNNVL fabric DDA under UT_DDA_FABRIC_REQUIRE_INIT=1.",
+      "config": "dda_fabric_broadcast_ll128_4rank",
+      "enabled": true
+    },
+    {
+      "name": "DDA Fabric Broadcast LL128 - 8-Rank",
+      "description": "DDA fabric Broadcast LL128 two-shot data checks on 8 GPUs (fanOut=1 and default). Requires gfx1250 with MNNVL fabric DDA under UT_DDA_FABRIC_REQUIRE_INIT=1.",
+      "config": "dda_fabric_broadcast_ll128_8rank",
       "enabled": true
     }
   ]

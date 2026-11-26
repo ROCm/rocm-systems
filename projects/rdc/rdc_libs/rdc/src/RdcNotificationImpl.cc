@@ -77,7 +77,17 @@ const uint32_t kMaxRSMIEvents = 64;
 
 RdcNotificationImpl::RdcNotificationImpl() {}
 
-RdcNotificationImpl::~RdcNotificationImpl() {}
+// RDC's AMD SMI session outlives this, so the handles are still valid here.
+RdcNotificationImpl::~RdcNotificationImpl() {
+  std::lock_guard<std::mutex> guard(notif_mutex_);
+  for (const auto& started : notif_started_) {
+    amdsmi_status_t ret = amdsmi_stop_gpu_event_notification(started.second);
+    if (ret != AMDSMI_STATUS_SUCCESS) {
+      RDC_LOG(RDC_ERROR, "amdsmi_stop_gpu_event_notification() returned " << ret << " for device "
+                                                                          << started.first);
+    }
+  }
+}
 
 bool RdcNotificationImpl::is_notification_event(rdc_field_t field) const {
   if (rdc_2_smi_event_notif_map.find(field) == rdc_2_smi_event_notif_map.end()) {
@@ -110,6 +120,11 @@ rdc_status_t RdcNotificationImpl::set_listen_events(const std::vector<RdcFieldKe
     // Get processor handle from GPU id
     amdsmi_processor_handle processor_handle;
     ret = get_processor_handle_from_id(it->first, &processor_handle);
+    if (ret == AMDSMI_STATUS_NOT_FOUND) {
+      // An unavailable GPU sends no events; its mask is set once a later call finds it.
+      RDC_LOG(RDC_DEBUG, "GPU " << it->first << " is unavailable; not listening for its events");
+      continue;
+    }
     if (ret != AMDSMI_STATUS_SUCCESS) {
       RDC_LOG(RDC_ERROR,
               "Failed to get processor handle for GPU " << it->first << " error: " << ret);
@@ -131,6 +146,7 @@ rdc_status_t RdcNotificationImpl::set_listen_events(const std::vector<RdcFieldKe
                              << "  Will not listen for events on this device");
       continue;
     }
+    notif_started_[it->first] = processor_handle;
 
     ret = amdsmi_set_gpu_event_notification_mask(processor_handle, it->second);
     // Release DAC capability
@@ -194,6 +210,9 @@ rdc_status_t RdcNotificationImpl::listen(rdc_evnt_notification_t* events, uint32
 
 rdc_status_t RdcNotificationImpl::stop_listening(uint32_t gpu_id) {
   amdsmi_status_t ret;
+  // As in set_listen_events(): a start between this stop and the bookkeeping below would be
+  // forgotten, and its event file never stopped.
+  std::lock_guard<std::mutex> guard(notif_mutex_);
 
   // Get processor handle from GPU id
   amdsmi_processor_handle processor_handle;
@@ -211,8 +230,8 @@ rdc_status_t RdcNotificationImpl::stop_listening(uint32_t gpu_id) {
 
   ret = amdsmi_stop_gpu_event_notification(processor_handle);
   if (ret == AMDSMI_STATUS_SUCCESS) {
-    std::lock_guard<std::mutex> guard(notif_mutex_);
     gpu_evnt_notif_masks_[gpu_id] = 0;
+    notif_started_.erase(gpu_id);
   } else {
     RDC_LOG(RDC_ERROR,
             "amdsmi_stop_gpu_event_notification() returned " << ret << " for device " << gpu_id);

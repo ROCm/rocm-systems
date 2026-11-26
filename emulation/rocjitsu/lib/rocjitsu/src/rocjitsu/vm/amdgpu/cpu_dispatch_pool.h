@@ -14,11 +14,8 @@
 #include <cassert>
 #include <condition_variable>
 #include <cstdint>
-#include <exception>
 #include <mutex>
-#include <optional>
 #include <span>
-#include <stdexcept>
 #include <thread>
 #include <vector>
 
@@ -34,9 +31,10 @@ class CpuDispatchPoolTestAccess;
 /// For a pool constructed with N threads, run() uses its caller and up to N-1
 /// shared workers, capped by that call's requested thread count.
 /// Concurrent submissions must own disjoint CUs and result storage. Each CU runs
-/// exactly once per submission; results and exceptions belong to that submission.
+/// exactly once per submission; results belong to that submission.
 /// The caller keeps its spans alive until run() returns, and the pool must outlive
-/// all run() calls.
+/// all run() calls. CU execution and observer callbacks must return normally;
+/// expected guest failures remain in the CU's checked execution path.
 ///
 /// Workers take submission assignments under a short shared lock, then claim CUs
 /// with a submission-local atomic counter. Callers always drain their own work.
@@ -46,19 +44,28 @@ class CpuDispatchPoolTestAccess;
 /// independent of the number of callers; no additional worker pool is created per XCD.
 class CpuDispatchPool {
 public:
-  explicit CpuDispatchPool(uint32_t threads) : CpuDispatchPool(threads, std::nullopt) {}
+  explicit CpuDispatchPool(uint32_t threads) {
+    const uint32_t worker_count = std::max(threads, 1u) - 1;
+    workers_.reserve(worker_count);
+    for (uint32_t i = 0; i < worker_count; ++i) {
+      workers_.emplace_back([this](std::stop_token stop) { worker_loop(stop); });
+    }
+  }
 
   ~CpuDispatchPool() {
     {
       std::lock_guard lock(mutex_);
       stopping_ = true;
     }
-    for (auto &worker : workers_)
+    for (auto &worker : workers_) {
       worker.request_stop();
+    }
     work_cv_.notify_all();
-    for (auto &worker : workers_)
-      if (worker.joinable())
+    for (auto &worker : workers_) {
+      if (worker.joinable()) {
         worker.join();
+      }
+    }
   }
 
   uint32_t thread_count() const { return static_cast<uint32_t>(workers_.size() + 1); }
@@ -71,8 +78,9 @@ public:
   /// For nonempty tasks, results.size() must equal tasks.size().
   FunctionalQuantumResult run(std::span<ComputeUnitCore *> tasks, uint32_t threads,
                               std::span<FunctionalQuantumResult> results) {
-    if (tasks.empty())
+    if (tasks.empty()) {
       return {};
+    }
     assert(results.size() == tasks.size() && "dispatch result count must match task count");
     std::ranges::fill(results, FunctionalQuantumResult{});
     threads = std::clamp<uint32_t>(threads, 1, static_cast<uint32_t>(tasks.size()));
@@ -84,8 +92,9 @@ public:
         std::lock_guard lock(mutex_);
         enqueue(submission);
       }
-      for (uint32_t i = 0; i < worker_goal; ++i)
+      for (uint32_t i = 0; i < worker_goal; ++i) {
         work_cv_.notify_one();
+      }
     }
 
     drain_tasks(submission);
@@ -97,13 +106,11 @@ public:
     // can be destroyed by its caller.
     cancel_pending_assignments(submission);
     submission.done_cv.wait(lock, [&] { return submission.active_workers == 0; });
-    auto first_exception = submission.first_exception;
     lock.unlock();
-    if (first_exception)
-      std::rethrow_exception(first_exception);
     FunctionalQuantumResult result;
-    for (const auto &task_result : results)
+    for (const auto &task_result : results) {
       result.merge(task_result);
+    }
     return result;
   }
 
@@ -120,7 +127,6 @@ private:
     std::atomic<size_t> next_task{0};
     // Remaining fields are protected by the pool mutex.
     std::condition_variable done_cv;
-    std::exception_ptr first_exception;
     uint32_t worker_tickets;
     uint32_t active_workers = 0;
     Submission *previous = nullptr;
@@ -128,40 +134,33 @@ private:
     bool queued = false;
   };
 
-  CpuDispatchPool(uint32_t threads, std::optional<uint32_t> fail_after) {
-    const uint32_t worker_count = std::max(threads, 1u) - 1;
-    workers_.reserve(worker_count);
-    for (uint32_t i = 0; i < worker_count; ++i) {
-      if (fail_after && i == *fail_after)
-        throw std::runtime_error("injected worker construction failure");
-      workers_.emplace_back([this](std::stop_token stop) { worker_loop(stop); });
-    }
-  }
-
   // Intrusive links keep publication and cancellation allocation-free. The
   // queue contains only submissions with unclaimed worker assignments.
   void enqueue(Submission &submission) {
     assert(!submission.queued && submission.worker_tickets != 0);
     submission.previous = ready_tail_;
     submission.next = nullptr;
-    if (ready_tail_)
+    if (ready_tail_) {
       ready_tail_->next = &submission;
-    else
+    } else {
       ready_head_ = &submission;
+    }
     ready_tail_ = &submission;
     submission.queued = true;
   }
 
   void unlink(Submission &submission) {
     assert(submission.queued);
-    if (submission.previous)
+    if (submission.previous) {
       submission.previous->next = submission.next;
-    else
+    } else {
       ready_head_ = submission.next;
-    if (submission.next)
+    }
+    if (submission.next) {
       submission.next->previous = submission.previous;
-    else
+    } else {
       ready_tail_ = submission.previous;
+    }
     submission.previous = submission.next = nullptr;
     submission.queued = false;
   }
@@ -170,23 +169,19 @@ private:
   // retain their assignments and must still finish before the caller returns.
   void cancel_pending_assignments(Submission &submission) {
     assert(submission.next_task.load(std::memory_order_relaxed) >= submission.tasks.size());
-    if (submission.queued)
+    if (submission.queued) {
       unlink(submission);
+    }
     submission.worker_tickets = 0;
   }
 
-  void drain_tasks(Submission &submission) {
+  void drain_tasks(Submission &submission) noexcept {
     while (true) {
       const size_t i = submission.next_task.fetch_add(1, std::memory_order_relaxed);
-      if (i >= submission.tasks.size())
+      if (i >= submission.tasks.size()) {
         return;
-      try {
-        submission.results[i] = submission.tasks[i]->run_quantum();
-      } catch (...) {
-        std::lock_guard lock(mutex_);
-        if (!submission.first_exception)
-          submission.first_exception = std::current_exception();
       }
+      submission.results[i] = submission.tasks[i]->run_quantum();
     }
   }
 
@@ -194,23 +189,26 @@ private:
     while (true) {
       std::unique_lock lock(mutex_);
       work_cv_.wait(lock, stop, [this] { return stopping_ || ready_head_ != nullptr; });
-      if (stopping_ || stop.stop_requested())
+      if (stopping_ || stop.stop_requested()) {
         return;
+      }
       Submission &submission = *ready_head_;
       unlink(submission);
       --submission.worker_tickets;
       ++submission.active_workers;
       // Rotate pending assignments so arrivals can share free workers.
-      if (submission.worker_tickets != 0)
+      if (submission.worker_tickets != 0) {
         enqueue(submission);
+      }
       lock.unlock();
       drain_tasks(submission);
       lock.lock();
       // Draining exhausted the task index. Cancel tickets before another worker
       // claims an empty assignment while other CUs are still running.
       cancel_pending_assignments(submission);
-      if (--submission.active_workers == 0)
+      if (--submission.active_workers == 0) {
         submission.done_cv.notify_one();
+      }
     }
   }
 
@@ -219,7 +217,6 @@ private:
   Submission *ready_head_ = nullptr;
   Submission *ready_tail_ = nullptr;
   bool stopping_ = false;
-  // Destroy jthreads before the state they inspect if construction throws.
   std::vector<std::jthread> workers_;
 };
 

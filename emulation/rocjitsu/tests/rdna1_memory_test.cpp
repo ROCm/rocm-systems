@@ -6,6 +6,7 @@
 #include "decode_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/opcodes.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -28,7 +29,7 @@ namespace rocjitsu {
 namespace {
 class Rdna1Memory : public testing::Test {
 protected:
-  virtual rj_code_arch_t arch() const { return ROCJITSU_CODE_ARCH_RDNA1; }
+  virtual rocjitsu::IsaFamily arch() const { return rocjitsu::IsaFamily::Rdna1; }
 
   void SetUp() override {
     config_.arch = arch();
@@ -47,8 +48,9 @@ protected:
     wf_->set_lds_size(512);
   }
   void TearDown() override {
-    if (wf_)
+    if (wf_) {
       wf_->halt();
+    }
   }
   void execute(std::array<uint32_t, 2> words) {
     inst_.reset(decode_valid(*decoder_, words.data()));
@@ -58,9 +60,9 @@ protected:
   void issue(std::array<uint32_t, 2> words) {
     ASSERT_NO_FATAL_FAILURE(execute(words));
     ASSERT_NE(inst_->data(), nullptr);
-    if (inst_->data()->tag() == amdgpu::LOCAL_MEM)
+    if (inst_->data()->tag() == amdgpu::LOCAL_MEM) {
       ASSERT_EQ(local_.issue(inst_.release(), *wf_), amdgpu::VmAccessOutcome::Complete);
-    else {
+    } else {
       amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &cache_);
       ASSERT_EQ(pipeline.issue(inst_.release(), *wf_), amdgpu::VmAccessOutcome::Complete);
     }
@@ -132,8 +134,9 @@ public:
   }
   std::shared_ptr<const amdgpu::PrtRanges> nonresident_prt_ranges() const override {
     auto snapshot = holes;
-    if (next_holes)
+    if (next_holes) {
       holes = *next_holes;
+    }
     return snapshot;
   }
 
@@ -144,12 +147,12 @@ public:
 };
 
 class Gfx10MemoryAllocation : public Rdna1Memory,
-                              public testing::WithParamInterface<rj_code_arch_t> {
+                              public testing::WithParamInterface<rocjitsu::IsaFamily> {
 protected:
-  rj_code_arch_t arch() const override { return GetParam(); }
+  rocjitsu::IsaFamily arch() const override { return GetParam(); }
 
   void bind_single_texel_image(uint64_t address) {
-    const bool gfx1010 = arch() == ROCJITSU_CODE_ARCH_RDNA1;
+    const bool gfx1010 = arch() == rocjitsu::IsaFamily::Rdna1;
     scalar(0, address >> 8);
     scalar(1, (20u << 20) | (gfx1010 ? 1u << 29 : 0u));
     scalar(3, (9u << 28) | 4u);
@@ -159,7 +162,7 @@ protected:
 };
 
 INSTANTIATE_TEST_SUITE_P(Gfx10, Gfx10MemoryAllocation,
-                         testing::Values(ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2));
+                         testing::Values(rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2));
 
 TEST_P(Gfx10MemoryAllocation, DebuggerAndTexelPipelineShareTheIssuedResidencySnapshot) {
   constexpr uint32_t code = 0x8000, texel = 0x5000, value = 0x13579000;
@@ -185,8 +188,9 @@ TEST_P(Gfx10MemoryAllocation, DebuggerAndTexelPipelineShareTheIssuedResidencySna
   const auto sample = rdna1::build_mimg(rdna1::kImageSampleLzMimg,
                                         {.dim = 1, .dmask = 1, .tfe = 1, .vdata = 8, .ssamp = 2});
   for (bool sampled : {false, true}) {
-    for (unsigned reg = 0; reg < 12; ++reg)
+    for (unsigned reg = 0; reg < 12; ++reg) {
       scalar(reg, 0);
+    }
     if (sampled) {
       bind_single_texel_image(texel);
     } else {
@@ -273,8 +277,9 @@ TEST_P(Gfx10MemoryAllocation, BufferLdsLoadsExtendNarrowValuesAtM0PlusOffset) {
         std::tuple{rdna1::kBufferLoadSshort, 0xffff80abu, 0xffff81f5u},
         std::tuple{rdna1::kBufferLoadFormatX, first, second}}) {
     SCOPED_TRACE(op);
-    for (unsigned i = 0; i < 5; ++i)
+    for (unsigned i = 0; i < 5; ++i) {
       wf_->lds().write32(destination - 4 + 4 * i, sentinel);
+    }
     ASSERT_NO_FATAL_FAILURE(issue(rdna1::build_mubuf(
         op, {.offset = offset, .offen = 1, .lds = 1, .vaddr = 2, .vdata = 8, .soffset = 128})));
     EXPECT_EQ(wf_->lds().read32(destination - 4), sentinel);
@@ -313,12 +318,14 @@ TEST_P(Gfx10MemoryAllocation, FlatWaitUsesTheSharedApertureAtIssue) {
   const auto full_wait = rdna1::build_sopp(rdna1::kSWaitcnt, {.simm16 = 0});
   constexpr uint64_t pc = 0x1000;
   const std::array code{setreg[0], load[0], load[1], vm_wait[0], read[0], full_wait[0], read[0]};
-  for (size_t i = 0; i < code.size(); ++i)
+  for (size_t i = 0; i < code.size(); ++i) {
     memory_.write32(pc + 4 * i, code[i]);
+  }
 
   for (bool ptr32 : {false, true}) {
-    if (ptr32 && arch() != ROCJITSU_CODE_ARCH_RDNA1)
+    if (ptr32 && arch() != rocjitsu::IsaFamily::Rdna1) {
       continue;
+    }
     const uint64_t launch = uint64_t{1} << (ptr32 ? 16 : 48);
     for (bool relocate : {false, true}) {
       SCOPED_TRACE(ptr32);
@@ -451,8 +458,9 @@ TEST_P(Gfx10MemoryAllocation, InlineImageResultHonorsMaskWidth) {
   scalar(1, (20u << 20) | (1u << 29));
   scalar(2, 0);
   scalar(3, 9u << 28);
-  for (unsigned i = 4; i < 8; ++i)
+  for (unsigned i = 4; i < 8; ++i) {
     scalar(i, 0);
+  }
   vector(0, 0, 0);
   vector(15, 0, 0x1515);
   vector(16, 0, 0x1616);
@@ -523,8 +531,9 @@ TEST_F(Rdna1Memory, ImageTfeTakesPrecedenceOverLodWarningAndPreservesResidentSta
   cu_->set_gpu_vm(&vm);
   wf_->set_address_space(handle);
   wf_->set_process_id(5);
-  for (unsigned i = 0; i < 12; ++i)
+  for (unsigned i = 0; i < 12; ++i) {
     scalar(i, 0);
+  }
   scalar(0, 0x4000 >> 8);
   scalar(1, (20u << 20) | (1u << 29)); // 1x1 linear R32_UINT resource.
   scalar(3, (9u << 28) | 4);
@@ -611,8 +620,9 @@ TEST_P(Gfx10MemoryAllocation, DebuggerProbesOnlyResidentTexelRanges) {
 
   const auto step = [&](unsigned pc_offset, uint64_t address, bool debug, bool mixed = false) {
     SCOPED_TRACE(testing::Message() << pc_offset << "/" << address << "/" << debug << "/" << mixed);
-    for (unsigned sgpr = 0; sgpr < 12; ++sgpr)
+    for (unsigned sgpr = 0; sgpr < 12; ++sgpr) {
       scalar(sgpr, 0);
+    }
     if (pc_offset == 0) {
       scalar(0, address);
       scalar(2, 2 * amdgpu::kLegacyPageSize + 4);
@@ -773,8 +783,9 @@ TEST_F(Rdna1Memory, Wave64PermutesWithinEachPhysicalHalf) {
   }
   ASSERT_NO_FATAL_FAILURE(
       execute(rdna1::build_ds(rdna1::kDsBpermuteB32, {.addr = 0, .data0 = 1, .vdst = 2})));
-  for (unsigned lane = 0; lane < 64; ++lane)
+  for (unsigned lane = 0; lane < 64; ++lane) {
     EXPECT_EQ(vector(2, lane), lane < 32 ? 100u : 132u);
+  }
 }
 
 TEST_P(Gfx10MemoryAllocation, ConditionalExchangeAlignsToTheGdsWindowWithNonzeroLdsBase) {
@@ -837,9 +848,11 @@ TEST_F(Rdna1Memory, OrderedCountBroadcastsAcrossTheWaveIndependentlyOfExec) {
       scoreboard.clear();
       cu_->track_memory_wait(*inst_, *wf_);
       uint64_t tracked = 0;
-      for (const auto &event : scoreboard.events())
-        if (event.reg.cls == RegClass::VGPR && event.reg.index == dst)
+      for (const auto &event : scoreboard.events()) {
+        if (event.reg.cls == RegClass::VGPR && event.reg.index == dst) {
           tracked |= event.lanes;
+        }
+      }
       const bool valid = dst < wf_->num_vgprs();
       const uint64_t wave_lanes = width == 64 ? ~uint64_t{0} : uint64_t{0xffffffff};
       EXPECT_EQ(tracked, valid ? wave_lanes : 0);
@@ -858,21 +871,24 @@ TEST_F(Rdna1Memory, OrderedCountBroadcastsAcrossTheWaveIndependentlyOfExec) {
     vector(0, 0, 87);
     vector(0, 1, 3);
     ASSERT_NO_FATAL_FAILURE(issue_ordered(2));
-    for (uint32_t lane = 0; lane < 64; ++lane)
+    for (uint32_t lane = 0; lane < 64; ++lane) {
       EXPECT_EQ(vector(2, lane), lane < width ? 9u : 0xdeadbeefu) << lane;
+    }
 
     // Empty EXEC contributes zero and still broadcasts the pre-operation value.
     wf_->set_exec(0);
     ASSERT_NO_FATAL_FAILURE(issue_ordered(2));
-    for (uint32_t lane = 0; lane < width; ++lane)
+    for (uint32_t lane = 0; lane < width; ++lane) {
       EXPECT_EQ(vector(2, lane), 12u) << lane;
+    }
 
     // V16 has physical backing but falls outside this wave's logical allocation.
     // The release must advance the walker without accumulating or writing a result.
     wf_->set_exec(2);
     ASSERT_NO_FATAL_FAILURE(issue_ordered(16, true));
-    for (uint32_t lane = 0; lane < 64; ++lane)
+    for (uint32_t lane = 0; lane < 64; ++lane) {
       EXPECT_EQ(vector(16, lane), 0xbaadf00du) << lane;
+    }
     wf_->set_m0(1);
     ASSERT_NO_FATAL_FAILURE(issue_ordered(2, true));
     EXPECT_EQ(vector(2, width - 1), 12u);

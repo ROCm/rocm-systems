@@ -11,8 +11,9 @@
 namespace {
 
 const char *plugin_path() {
-  if (const char *path = std::getenv("RJ_CLI_PLUGIN_PATH"))
+  if (const char *path = std::getenv("RJ_CLI_PLUGIN_PATH")) {
     return path;
+  }
   return RJ_CLI_PLUGIN_PATH;
 }
 
@@ -47,8 +48,9 @@ TEST(CliPlugin, RetainedFlagPinsLibraryBeyondTreeLifetime) {
   EXPECT_TRUE(library.expired());
   void *unexpected = dlopen(plugin_path(), RTLD_NOW | RTLD_NOLOAD);
   EXPECT_EQ(unexpected, nullptr) << "fixture must really unload to exercise the lifetime guard";
-  if (unexpected)
+  if (unexpected) {
     dlclose(unexpected);
+  }
 }
 
 TEST(CliPlugin, MissingLibraryAndRegistrationCollisionFail) {

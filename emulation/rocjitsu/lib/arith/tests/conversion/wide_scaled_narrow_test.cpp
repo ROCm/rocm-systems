@@ -17,6 +17,7 @@
 #include <bit>
 #include <cmath>
 #include <gtest/gtest.h>
+#include <limits>
 #include <random>
 #include <stdint.h>
 
@@ -24,16 +25,25 @@ namespace {
 using namespace rocjitsu::arith::test;
 
 // Interpret source encodings independently of production conversion helpers.
-float decode(int source, uint32_t raw) {
-  uint32_t bits = source == 0   ? raw
-                  : source == 1 ? uint32_t(conversion_reencode(uint16_t(raw), 10, 15, 23, 127))
-                                : raw << 16;
-  return std::bit_cast<float>(bits);
+float decode(int source, uint32_t raw, bool flush_input) {
+  if (source == 0) {
+    return std::bit_cast<float>(flush_input && (raw & 0x7f800000U) == 0 ? (raw & 0x80000000U)
+                                                                        : raw);
+  }
+  if (source == 1) {
+    uint16_t h = uint16_t(raw);
+    if (flush_input && (h & 0x7c00U) == 0) {
+      h &= 0x8000U;
+    }
+    return std::bit_cast<float>(uint32_t(conversion_reencode(h, 10, 15, 23, 127)));
+  }
+  uint32_t b = uint32_t(uint16_t(raw)) << 16;
+  return std::bit_cast<float>(flush_input && (b & 0x7f800000U) == 0 ? (b & 0x80000000U) : b);
 }
 
 // Bind operand shapes once, then share contracts, arithmetic and aliases across
 // source formats and rounding modes without multiplying per-instruction fixtures.
-template <int Lanes, int Src, int Format, bool Stochastic, bool FullScale = false, typename Call>
+template <int Lanes, int Src, int Format, bool Stochastic, bool Gfx1250 = false, typename Call>
 void check(Call call) {
   constexpr bool Bf6 = Format == 1;
   constexpr int bits = Format == 2 ? 4 : Format >= 3 ? 8 : 6;
@@ -41,13 +51,13 @@ void check(Call call) {
   using Sources = const uint32_t *const *;
   auto invoke = [&](uint64_t flags, Mask exec_mask, uint64_t mode, uint32_t *const *d, Sources a,
                     Sources b, Sources c) {
-    if constexpr (Stochastic || (!FullScale && Src == 0)) {
+    if constexpr (Stochastic || (!Gfx1250 && Src == 0)) {
       return call(flags, exec_mask, mode, d, a, b, c);
     } else {
       return call(flags, exec_mask, mode, d, a, c);
     }
   };
-  constexpr int elements = FullScale ? (bits == 6 ? 16 : 8) : 32;
+  constexpr int elements = Gfx1250 ? (bits == 6 ? 16 : 8) : 32;
   constexpr int words = elements * bits / 32;
   Registers<56, Lanes> input;
   std::minstd_rand random;
@@ -64,7 +74,7 @@ void check(Call call) {
       input.v[32][lane] = seeds[lane % 4];
     }
   }
-  if constexpr (FullScale) {
+  if constexpr (Gfx1250) {
     const uint32_t scales[] = {0x3f800000U, 0, 0x80000000U, 0x7f800000U,
                                0x7fc12345U, 1, 0x7f7fffffU, 0xc0200000U};
     for (int lane = 0; lane < Lanes; ++lane) {
@@ -83,10 +93,14 @@ void check(Call call) {
   input.v[1][0] = Format == 2 ? fp4_cutoff : cutoff;
   input.v[2][0] = Src == 0 ? 0x7fc12345U : Src == 1 ? 0x7e017c00U : 0x7fc17f80U;
   input.v[3][0] = Src == 0 ? 0xff800000U : Src == 1 ? 0xfc007c00U : 0xff807f80U;
-  if constexpr (Src == 0 && !FullScale) {
+  if constexpr (Src == 0) {
     // Scaling by 2^-127 makes input-denormal handling observable after narrowing.
     input.v[0][1] = 0x00400000U;
-    input.v[32][1] = 0x80400000U;
+    if constexpr (Gfx1250) {
+      input.v[1][1] = 0;
+    } else {
+      input.v[32][1] = 0x80400000U;
+    }
   }
   if constexpr (Stochastic) {
     input.v[32][0] = ~0U;
@@ -96,6 +110,7 @@ void check(Call call) {
         return invoke(flags, ~Mask(0), mode, nullptr, nullptr, nullptr, nullptr);
       },
       0);
+  constexpr int src_fraction = Src == 0 ? 23 : Src == 1 ? 10 : 7;
   for (uint64_t cpu : supported_cpu_levels()) {
     for (uint64_t semantics : semantics_modes()) {
       for (int scenario = 0; scenario < 5; ++scenario) {
@@ -105,18 +120,20 @@ void check(Call call) {
         Mask exec_mask = exec_mask_for_case<Lanes>(scenario);
         uint64_t flags =
             cpu | semantics |
-            (scenario % 2 ? RJ_ARITH_FP16_OVFL | (Src == 0 ? RJ_ARITH_FP_FLUSH_INPUT_DENORMALS : 0)
+            (scenario % 2 ? RJ_ARITH_FP16_OVFL |
+                                ((!Gfx1250 || Src == 0) ? RJ_ARITH_FP_FLUSH_INPUT_DENORMALS : 0)
                           : 0);
         auto actual = input, expected = input;
         int error = invoke(flags, exec_mask, 0, actual.v + destination, actual.v, actual.v + 32,
                            actual.v + 48);
         bool exact = semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
                      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL;
-        ASSERT_EQ(error, exact ? RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS : RJ_ARITH_SUCCESS);
-        if (!exact) {
+        bool rejected = Gfx1250 && exact;
+        ASSERT_EQ(error, rejected ? RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS : RJ_ARITH_SUCCESS);
+        if (!rejected) {
           for (int lane = 0; lane < Lanes; ++lane) {
             int exponent = (input.v[48][lane] >> 23) & 255;
-            if (!((exec_mask >> lane) & 1) || (!FullScale && exponent == 255)) {
+            if (!((exec_mask >> lane) & 1)) {
               continue;
             }
             for (int word = 0; word < words; ++word) {
@@ -124,17 +141,18 @@ void check(Call call) {
             }
             uint32_t seed = Stochastic ? input.v[32][lane] : 0;
             for (int element = 0; element < elements; ++element) {
-              uint32_t raw = Src == 0 ? ((Stochastic || FullScale)
+              uint32_t raw = Src == 0 ? ((Stochastic || Gfx1250)
                                              ? input.v[element][lane]
                                              : input.v[(element % 2 ? 32 : 0) + element / 2][lane])
                                       : input.v[element / 2][lane] >> ((element % 2) * 16);
-              if (Src == 0 && (flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS) &&
-                  (raw & 0x7f800000U) == 0) {
-                raw &= 0x80000000U;
-              }
-              float value = FullScale
-                                ? decode(Src, raw) / std::bit_cast<float>(input.v[48][lane])
-                                : float(double(decode(Src, raw)) / std::ldexp(1.0, exponent - 127));
+              float decoded = decode(Src, raw, (flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS) != 0);
+              float value =
+                  exponent == 255
+                      ? (Gfx1250
+                             ? std::numeric_limits<float>::quiet_NaN()
+                             : std::bit_cast<float>(
+                                   (std::bit_cast<uint32_t>(decoded) & 0x80000000U) | 0x7fc00000U))
+                      : float(double(decoded) / std::ldexp(1.0, exponent - 127));
               uint32_t code;
               if constexpr (Format >= 3) {
                 code = fp8_narrow_reference(Format == 4, Stochastic, std::bit_cast<uint32_t>(value),
@@ -142,7 +160,8 @@ void check(Call call) {
               } else {
                 code = quantize_finite<(Bf6 ? 3 : 2), (Format == 2 ? 1
                                                        : Bf6       ? 2
-                                                                   : 3)>(value, Stochastic, seed);
+                                                                   : 3)>(value, Stochastic, seed,
+                                                                   !Gfx1250, src_fraction);
               }
               for (int bit = 0; bit < bits; ++bit) {
                 int offset = element * bits + bit;
@@ -158,7 +177,7 @@ void check(Call call) {
                 << "word=" << word << ", lane=" << lane;
           }
         }
-        actual.expect_preserved(input, destination, exact ? 0 : words);
+        actual.expect_preserved(input, destination, rejected ? 0 : words);
       }
     }
   }

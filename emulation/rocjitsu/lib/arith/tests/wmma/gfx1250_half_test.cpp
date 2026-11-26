@@ -21,7 +21,8 @@ using Entry = decltype(&rj_arith_v_wmma_f32_16x16x32_f16_w32);
 
 // Exercise one matrix instruction with common data, including special lanes and
 // aliases.
-template <bool Bf16, bool Packed = false, bool Mixed = false> void arithmetic(Entry entry) {
+template <bool Bf16, bool Packed, bool Mixed>
+void check_arithmetic(Entry entry, bool inject_nonfinite) {
   constexpr bool PackedC = Packed && !Mixed;
   constexpr bool DotFirst = Bf16 && !PackedC;
   constexpr float inline_value = 0x1.45f306p-3f;
@@ -37,9 +38,11 @@ template <bool Bf16, bool Packed = false, bool Mixed = false> void arithmetic(En
       }
     }
   }
-  for (int reg : {0, 8}) {
-    input[reg][0] = Bf16 ? kBF16QuietNaNBits : kF16QuietNaNBits;
-    input[reg][1] = Bf16 ? kBF16PositiveInfinityBits : kF16PositiveInfinityBits;
+  if (inject_nonfinite) {
+    for (int reg : {0, 8}) {
+      input[reg][0] = Bf16 ? kBF16QuietNaNBits : kF16QuietNaNBits;
+      input[reg][1] = Bf16 ? kBF16PositiveInfinityBits : kF16PositiveInfinityBits;
+    }
   }
   // At (row 3, column 7), a dot of 32 ones survives addition to 2^25,
   // whereas adding each product to C individually loses every one to rounding.
@@ -188,6 +191,13 @@ template <bool Bf16> void inline_precision(Entry entry) {
               RJ_ARITH_SUCCESS);
     uint16_t expected = Bf16 ? 0x3e23U : half_bits(0x1.46p-3);
     EXPECT_EQ(uint16_t(d[0][0]), expected);
+  }
+}
+
+template <bool Bf16, bool Packed = false, bool Mixed = false> void arithmetic(Entry entry) {
+  for (bool inject_nonfinite : {false, true}) {
+    SCOPED_TRACE(inject_nonfinite);
+    check_arithmetic<Bf16, Packed, Mixed>(entry, inject_nonfinite);
   }
 }
 

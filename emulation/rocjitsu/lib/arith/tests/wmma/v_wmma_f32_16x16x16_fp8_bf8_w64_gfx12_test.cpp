@@ -138,3 +138,27 @@ TEST(WmmaF32FP8BF8W64Gfx12, Arithmetic) {
     }
   }
 }
+
+// The last term of DOT8 #1 adds 1 to 2^24 and rounds to even. The first
+// term of DOT8 #2 then subtracts 1, which is exactly representable.
+TEST(WmmaF32FP8BF8W64Gfx12, ExactDot8StageBoundary) {
+  using rocjitsu::arith::test::set_wmma_gfx12_small;
+  using rocjitsu::arith::test::wmma_gfx12_acc;
+  for (uint64_t cpu : rocjitsu::arith::test::supported_cpu_levels()) {
+    SCOPED_TRACE(cpu);
+    Registers regs;
+    for (auto *v : regs.v) {
+      std::fill_n(v, 64, 0U);
+    }
+    set_wmma_gfx12_small<8, 64>(regs.v, 15, 7, 0x38);
+    set_wmma_gfx12_small<8, 64>(regs.v, 15, 8, 0xb8);
+    set_wmma_gfx12_small<8, 64>(regs.v + 1, 15, 7, 0x3c);
+    set_wmma_gfx12_small<8, 64>(regs.v + 1, 15, 8, 0x3c);
+    wmma_gfx12_acc<64>(regs.v + 2, 15, 15) = 0x4b800000;
+    ASSERT_EQ(rj_arith_v_wmma_f32_16x16x16_fp8_bf8_w64_gfx12(
+                  cpu | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL, 0, regs.v + 2, regs.v, regs.v + 1,
+                  regs.v + 2),
+              RJ_ARITH_SUCCESS);
+    EXPECT_EQ(wmma_gfx12_acc<64>(regs.v + 2, 15, 15), 0x4b7fffffU);
+  }
+}

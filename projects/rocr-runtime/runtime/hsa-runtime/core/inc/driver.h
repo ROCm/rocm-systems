@@ -463,6 +463,24 @@ public:
   virtual hsa_status_t GetClockCounters(uint32_t node_id,
                                         HsaClockCounters* clock_counter) const = 0;
 
+  /// @brief Gets the offset between the clock that stamps AQL/SDMA packets and the
+  /// GPUClockCounter returned by GetClockCounters, inferred from a packet tick that
+  /// predates the calibration taken at agent creation.
+  /// @param[in] node_id Node ID of the agent
+  /// @param[in] raw_tick Raw packet timestamp, earlier than @p t0.GPUClockCounter
+  /// @param[in] t0 Clock counters sampled at agent creation
+  /// @param[in,out] t1 Most recent clock counters; the driver may refresh them
+  /// @param[out] offset GPU ticks to subtract from raw packet timestamps; 0 when the
+  ///             clocks share an epoch or no offset can be established
+  /// @return HSA_STATUS_SUCCESS
+  virtual hsa_status_t GetTimestampEpochOffset(uint32_t /*node_id*/, uint64_t /*raw_tick*/,
+                                               const HsaClockCounters& /*t0*/,
+                                               HsaClockCounters* /*t1*/,
+                                               int64_t* offset) const {
+    *offset = 0;
+    return HSA_STATUS_SUCCESS;
+  }
+
   /// @brief Get the tile configuration for a specific node.
   ///
   /// @param[in] node_id Node ID of the agent

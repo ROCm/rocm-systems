@@ -12,11 +12,11 @@
 #include <type_traits>
 
 namespace rocjitsu::amdgpu::arith {
-// Read the scale before data: exponent-255 lanes do not depend on data or seeds.
-// Narrowing preserves those lanes; widening still publishes canonical NaNs there.
+// Read the scale before data: exponent-255 lanes do not depend on seeds, and only
+// signed finite-only narrowing (FP4) depends on source sign bits there.
 // PairA describes FP4 stochastic pairs; PairD describes packed FP32 widening.
-template <bool Narrow, bool Ternary, bool PairA = false, bool PairD = false, typename Wave32,
-          typename Wave64>
+template <bool Narrow, bool Ternary, bool PairA = false, bool PairD = false,
+          bool SignedSpecialScale = false, bool SeedB = false, typename Wave32, typename Wave64>
 inline void execute_scaled_conversion(Wavefront &wave, Wave32 wave32, Wave64 wave64, uint64_t flags,
                                       uint64_t modifiers, const Operand &destination,
                                       const Operand &source_a, const Operand *source_b,
@@ -34,19 +34,21 @@ inline void execute_scaled_conversion(Wavefront &wave, Wave32 wave32, Wave64 wav
       data_mask &= ~(1ULL << lane);
     }
   }
+  const uint64_t a_mask = SignedSpecialScale ? exec_mask : data_mask;
+  const uint64_t b_mask = (SignedSpecialScale && !SeedB) ? exec_mask : data_mask;
   using Input = std::conditional_t<PairA, VectorInput64, VectorInput32>;
   // Paired input uses all bytes; the single-register form selects its encoded bytes.
   auto read_a = [&]() {
     if constexpr (PairA) {
-      return Input(registers, wave, source_a, data_mask);
+      return Input(registers, wave, source_a, a_mask);
     } else {
-      return Input(registers, wave, source_a, data_mask, source_bytes);
+      return Input(registers, wave, source_a, a_mask, source_bytes);
     }
   };
   Input a = read_a();
   std::optional<VectorInput32> b;
   if constexpr (Ternary) {
-    b.emplace(registers, wave, *source_b, data_mask);
+    b.emplace(registers, wave, *source_b, b_mask);
   }
   const uint32_t *const *a_words;
   if constexpr (PairA) {
@@ -65,24 +67,19 @@ inline void execute_scaled_conversion(Wavefront &wave, Wave32 wave32, Wave64 wav
                  : wave64(flags, lanes, modifiers, d, a_words, &scale.data);
     }
   };
-  const uint64_t write_mask = Narrow ? data_mask : exec_mask;
-  if (!write_mask) {
-    if (!wave.instruction_execution_failed() && invoke(nullptr, 0) != RJ_ARITH_SUCCESS) {
-      wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
-    }
-  } else if constexpr (PairD) {
-    write_vector64_result(wave, registers, destination, write_mask, invoke);
+  if constexpr (PairD) {
+    write_vector64_result(wave, registers, destination, exec_mask, invoke);
   } else {
-    write_vector32_result(wave, registers, destination, write_mask, invoke,
+    write_vector32_result(wave, registers, destination, exec_mask, invoke,
                           /*allow_direct=*/destination_bytes == 0xf || Narrow, destination_bytes,
                           /*preserve_destination=*/Narrow);
   }
 }
 
 // Widen packed narrow registers using pre-resolved physical A/D bases.
-// ByteScale selects gfx1250 PK8/PK16 and E8M0; gfx950 PK32 special scales perform
-// no source-A reads or destination writes. Decoded E8M0 lane/byte selection is
-// gathered here so the arithmetic API consumes one selected scale per data lane.
+// ByteScale selects gfx1250 PK8/PK16 and E8M0; special scales emit canonical NaN
+// without reading source-A data on exponent-255 lanes. Decoded E8M0 lane/byte
+// selection is gathered here so the arithmetic API consumes one selected scale per data lane.
 // Decoders provide at most six input registers and 32 output registers.
 template <bool ByteScale = false>
 inline void execute_wide_scaled_widen(Wavefront &wave, Binary32Function wave32,
@@ -101,18 +98,19 @@ inline void execute_wide_scaled_widen(Wavefront &wave, Binary32Function wave32,
   std::array<uint32_t, 64> selected_scales{};
   std::optional<VectorInput32> b;
   const uint32_t *scale_data;
+  uint64_t data_mask = exec_mask;
   if constexpr (ByteScale) {
     // Each data half-wave shares a source half-wave and one observed scale byte.
     for (uint32_t half = 0; half < 2; ++half) {
-      const uint64_t data_mask = exec_mask & (0xffffULL << (16 * half));
-      if (!data_mask) {
+      const uint64_t half_mask = exec_mask & (0xffffULL << (16 * half));
+      if (!half_mask) {
         continue;
       }
       const unsigned byte = selection.byte(16 * half);
-      const uint64_t read_mask = ((data_mask >> (16 * half)) << selection.lane_base);
+      const uint64_t read_mask = ((half_mask >> (16 * half)) << selection.lane_base);
       auto scales = registers.read_operand(scale, read_mask, 1u << byte);
       for (uint32_t lane = 16 * half; lane < 16 * (half + 1); ++lane) {
-        if ((data_mask >> lane) & 1) {
+        if ((half_mask >> lane) & 1) {
           selected_scales[lane] = (scales.lane(selection.lane(lane)) >> (8 * byte)) & 0xff;
         }
       }
@@ -123,30 +121,29 @@ inline void execute_wide_scaled_widen(Wavefront &wave, Binary32Function wave32,
     scale_data = b->data;
     for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
       if (((scale_data[lane] >> 23) & 255) == 255) {
-        exec_mask &= ~(1ULL << lane);
+        data_mask &= ~(1ULL << lane);
       }
     }
   }
   if (wave.instruction_execution_failed()) {
     return;
   }
-  if (!exec_mask) {
-    // Special scales suppress data accesses, not semantics validation.
-    const int status = wave.wf_size() == 32 ? wave32(flags, 0, mode, nullptr, nullptr, nullptr)
-                                            : wave64(flags, 0, mode, nullptr, nullptr, nullptr);
-    if (status != RJ_ARITH_SUCCESS) {
-      wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
-    }
-    return;
-  }
-  auto input = registers.read_vgpr_region(source, input_words, exec_mask);
+  std::array<uint32_t, 64> zero_words{};
+  std::optional<decltype(registers.read_vgpr_region(source, input_words, data_mask))> input;
   std::array<const uint32_t *, 6> a;
-  for (uint32_t reg = 0; reg < input_words; ++reg) {
-    auto lanes = input.lanes(reg);
-    if (lanes.failed()) {
-      return;
+  if (data_mask) {
+    input.emplace(registers.read_vgpr_region(source, input_words, data_mask));
+    for (uint32_t reg = 0; reg < input_words; ++reg) {
+      auto lanes = input->lanes(reg);
+      if (lanes.failed()) {
+        return;
+      }
+      a[reg] = lanes.value().data();
     }
-    a[reg] = lanes.value().data();
+  } else {
+    for (uint32_t reg = 0; reg < input_words; ++reg) {
+      a[reg] = zero_words.data();
+    }
   }
   auto invoke = [&](uint32_t *const *d) {
     return wave.wf_size() == 32 ? wave32(flags, uint32_t(exec_mask), mode, d, a.data(), &scale_data)
@@ -180,11 +177,10 @@ inline void execute_wide_scaled_widen(Wavefront &wave, Binary32Function wave32,
 }
 // Narrow 32 elements into six registers. Interleaved FP32 RNE consumes A16/B16;
 // other gfx950 forms consume A16 or A32 and optionally a stochastic seed.
-// gfx950 scale-exponent255 lanes perform no data reads or destination writes.
-// FullScale selects gfx1250: eight or 16 elements, one to three outputs, full
-// FP32 division scales and no special-scale suppression.
-template <bool Ternary, bool FullScale = false, int OutputWords = FullScale ? 3 : 6,
-          typename Wave32, typename Wave64>
+// gfx1250 narrows eight or 16 elements into one to three registers.
+// Every active lane writes its result; special-scale lanes do not observe seeds.
+template <bool Ternary, bool Gfx1250 = false, int OutputWords = Gfx1250 ? 3 : 6, typename Wave32,
+          typename Wave64>
 void execute_wide_scaled_narrow(Wavefront &wave, Wave32 wave32, Wave64 wave64, uint64_t flags,
                                 uint32_t destination, uint32_t source_a, uint32_t source_b,
                                 uint32_t input_words, bool interleaved, const Operand *seed_operand,
@@ -200,31 +196,14 @@ void execute_wide_scaled_narrow(Wavefront &wave, Wave32 wave32, Wave64 wave64, u
     return;
   }
   VectorInput32 scale(registers, wave, scale_operand, exec_mask);
+  uint64_t seed_mask = exec_mask;
   for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
-    if (!FullScale && ((scale.data[lane] >> 23) & 255) == 255) {
-      exec_mask &= ~(1ULL << lane);
+    if (!Gfx1250 && ((scale.data[lane] >> 23) & 255) == 255) {
+      seed_mask &= ~(1ULL << lane);
     }
   }
   if (wave.instruction_execution_failed()) {
     return;
-  }
-  if constexpr (!FullScale) {
-    if (!exec_mask) {
-      // Validate even when every special-scale lane suppresses its result. The
-      // zero EXEC API contract permits null data pointers and performs no reads.
-      int status;
-      if constexpr (Ternary) {
-        status = wave.wf_size() == 32 ? wave32(flags, 0, 0, nullptr, nullptr, nullptr, nullptr)
-                                      : wave64(flags, 0, 0, nullptr, nullptr, nullptr, nullptr);
-      } else {
-        status = wave.wf_size() == 32 ? wave32(flags, 0, 0, nullptr, nullptr, nullptr)
-                                      : wave64(flags, 0, 0, nullptr, nullptr, nullptr);
-      }
-      if (status != RJ_ARITH_SUCCESS) {
-        wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
-      }
-      return;
-    }
   }
   auto input = registers.read_vgpr_region(source_a, input_words, exec_mask);
   std::array<const uint32_t *, 32> a;
@@ -247,14 +226,14 @@ void execute_wide_scaled_narrow(Wavefront &wave, Wave32 wave32, Wave64 wave64, u
       b[reg] = lanes.value().data();
     }
   } else if (seed_operand) {
-    seed.emplace(registers, wave, *seed_operand, exec_mask);
+    seed.emplace(registers, wave, *seed_operand, seed_mask);
     b[0] = seed->data;
   }
   if (wave.instruction_execution_failed()) {
     return;
   }
   auto invoke = [&](uint32_t *const *d) {
-    if constexpr (FullScale) {
+    if constexpr (Gfx1250) {
       if constexpr (Ternary) {
         return wave32(flags, uint32_t(exec_mask), 0, d, a.data(), b.data(), &scale.data);
       } else {

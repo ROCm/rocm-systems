@@ -17,8 +17,9 @@ ASSERT_HOOK_MATCHES_PROD(g_symkAvailable, ncclSymkAvailable);
 ASSERT_HOOK_MATCHES_PROD(g_symkKernelIdIsLL, rcclSymkKernelIdIsLL);
 ASSERT_HOOK_MATCHES_PROD(g_symkKernelIdIsTma, rcclSymkKernelIdIsTma);
 ASSERT_HOOK_MATCHES_PROD(g_symkFinalize, ncclSymkFinalize);
-ASSERT_HOOK_MATCHES_PROD(g_symkAgHierAvailable, ncclSymkAgHierAvailable);
-ASSERT_HOOK_MATCHES_PROD(g_symkAgHierGroups, ncclSymkAgHierGroups);
+ASSERT_HOOK_MATCHES_PROD(g_symkHierAvailable, ncclSymkHierAvailable);
+ASSERT_HOOK_MATCHES_PROD(g_symkHierGroups, ncclSymkHierGroups);
+ASSERT_HOOK_MATCHES_PROD(g_symkRsHierLaunchChunkSize, ncclSymkRsHierLaunchChunkSize);
 ASSERT_HOOK_MATCHES_PROD(g_symkAlltoAllLLForced, ncclSymkAlltoAllLLForced);
 #undef ASSERT_HOOK_MATCHES_PROD
 
@@ -60,13 +61,21 @@ static ncclResult_t DefaultSymkFinalize(struct ncclComm*) { return ncclSuccess; 
 std::function<ncclResult_t(struct ncclComm*)> g_symkFinalize = DefaultSymkFinalize;
 ncclResult_t ncclSymkFinalize(struct ncclComm* comm) { return g_symkFinalize(comm); }
 
-static bool DefaultSymkAgHierAvailable(struct ncclComm*) { return false; }
-std::function<bool(struct ncclComm*)> g_symkAgHierAvailable = DefaultSymkAgHierAvailable;
-bool ncclSymkAgHierAvailable(struct ncclComm* comm) { return g_symkAgHierAvailable(comm); }
+static bool DefaultSymkHierAvailable(struct ncclComm*) { return false; }
+std::function<bool(struct ncclComm*)> g_symkHierAvailable = DefaultSymkHierAvailable;
+bool ncclSymkHierAvailable(struct ncclComm* comm) { return g_symkHierAvailable(comm); }
 
-static int DefaultSymkAgHierGroups(struct ncclComm*) { return 0; }
-std::function<int(struct ncclComm*)> g_symkAgHierGroups = DefaultSymkAgHierGroups;
-int ncclSymkAgHierGroups(struct ncclComm* comm) { return g_symkAgHierGroups(comm); }
+static int DefaultSymkHierGroups(struct ncclComm*) { return 0; }
+std::function<int(struct ncclComm*)> g_symkHierGroups = DefaultSymkHierGroups;
+int ncclSymkHierGroups(struct ncclComm* comm) { return g_symkHierGroups(comm); }
+
+static uint32_t DefaultSymkRsHierLaunchChunkSize(struct ncclComm* comm, size_t) {
+  return comm->symkState.kcomm.rsHierChunkSize;
+}
+std::function<uint32_t(struct ncclComm*, size_t)> g_symkRsHierLaunchChunkSize = DefaultSymkRsHierLaunchChunkSize;
+uint32_t ncclSymkRsHierLaunchChunkSize(struct ncclComm* comm, size_t blockBytes) {
+  return g_symkRsHierLaunchChunkSize(comm, blockBytes);
+}
 
 int ncclSymkAgHierMaxBlocksLimit() { return ncclSymkAgHierMaxBlocks; }
 size_t ncclSymkAgHierMaxChunkBytesLimit() { return ncclSymkAgHierMaxChunkBytes; }
@@ -79,8 +88,9 @@ bool ncclSymkAlltoAllLLForced(struct ncclComm* comm) { return g_symkAlltoAllLLFo
 
 // [RCCL] tuning.cc now calls ncclSymkMask() once per ncclTuningCompute() invocation.
 // Return all bits set so no sym kernel entry is pre-filtered in host tests.
+// The last flag matches src/sym_kernels.cc; host tests do not model unregistered GIN windows.
 ncclSymkKernelMask ncclSymkMask(struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
-                                size_t, bool) { return ~ncclSymkKernelMask{0}; }
+                                size_t, bool, bool) { return ~ncclSymkKernelMask{0}; }
 
 void ResetSymKernelsFakes() {
   g_symRegType = ncclSymSendNonregRecvNonreg;
@@ -92,7 +102,8 @@ void ResetSymKernelsFakes() {
   g_symkKernelIdIsLL = DefaultSymkKernelIdIsLL;
   g_symkKernelIdIsTma = DefaultSymkKernelIdIsTma;
   g_symkFinalize = DefaultSymkFinalize;
-  g_symkAgHierAvailable = DefaultSymkAgHierAvailable;
-  g_symkAgHierGroups = DefaultSymkAgHierGroups;
+  g_symkHierAvailable = DefaultSymkHierAvailable;
+  g_symkHierGroups = DefaultSymkHierGroups;
+  g_symkRsHierLaunchChunkSize = DefaultSymkRsHierLaunchChunkSize;
   g_symkAlltoAllLLForced = DefaultSymkAlltoAllLLForced;
 }

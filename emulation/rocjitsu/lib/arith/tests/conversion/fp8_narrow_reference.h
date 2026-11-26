@@ -16,7 +16,7 @@ namespace rocjitsu::arith::test {
 // Independent numeric reference: quantize in units of the output spacing.
 inline uint32_t fp8_narrow_reference(bool bf8, bool stochastic, uint32_t raw, uint32_t seed,
                                      bool saturate, int arch = 12, bool e5m3 = false,
-                                     bool half = false) {
+                                     bool half = false, bool flush_out = false) {
   bool fnuz = arch == 942;
   const bool rdna = (arch == 12 || arch == 1250) && !e5m3 && !half;
   unsigned sign = e5m3 ? 0 : (raw >> 24) & 128, magnitude = raw & 0x7fffffff;
@@ -70,14 +70,26 @@ inline uint32_t fp8_narrow_reference(bool bf8, bool stochastic, uint32_t raw, ui
     rounded += fraction > 0.5 || (fraction == 0.5 && (rounded & 1));
   }
   unsigned code = rounded + (unsigned(power - minimum_power) << fraction_bits);
-  return encode(code < limit ? code : limit);
+  code = code < limit ? code : limit;
+  if (flush_out) {
+    if (stochastic) {
+      if ((code >> fraction_bits) == 0) {
+        code = 0;
+      }
+    } else if (magnitude < (bf8 ? 0x38700000U : 0x3c780000U)) {
+      code = 0;
+    }
+  }
+  return encode(code);
 }
 
 // Return a packed FP8/BF8 narrowing result, preserving destination bytes not written by the
 // operation.
 inline uint32_t fp8_narrow_result(int op, uint32_t a, uint32_t b, uint32_t old, uint32_t mode,
-                                  bool saturate, int arch = 12, bool half = false) {
+                                  bool saturate, int arch = 12, bool half = false,
+                                  bool flush_out = false) {
   bool e5m3 = arch == 1250 && !(op & 1) && (mode & RJ_ARITH_ALU_CLAMP);
+  int ref_arch = (arch == 950 && !half) ? 12 : arch;
   if (e5m3 || (half && op >= 2)) {
     mode &= ~(RJ_ARITH_ALU_ABS_A | RJ_ARITH_ALU_ABS_B | RJ_ARITH_ALU_NEG_A | RJ_ARITH_ALU_NEG_B);
   }
@@ -87,7 +99,8 @@ inline uint32_t fp8_narrow_result(int op, uint32_t a, uint32_t b, uint32_t old, 
   if (mode & RJ_ARITH_ALU_NEG_A) {
     a ^= 0x80000000;
   }
-  uint32_t value = fp8_narrow_reference(op & 1, op >= 2, a, b, saturate, arch, e5m3, half);
+  uint32_t value =
+      fp8_narrow_reference(op & 1, op >= 2, a, b, saturate, ref_arch, e5m3, half, flush_out);
   int shift = ((mode >> 16) & 3) * 8;
   uint32_t selected = 255;
   if (op < 2) {
@@ -97,7 +110,8 @@ inline uint32_t fp8_narrow_result(int op, uint32_t a, uint32_t b, uint32_t old, 
     if (mode & RJ_ARITH_ALU_NEG_B) {
       b ^= 0x80000000;
     }
-    value |= fp8_narrow_reference(op & 1, false, b, 0, saturate, arch, e5m3, half) << 8;
+    value |= fp8_narrow_reference(op & 1, false, b, 0, saturate, ref_arch, e5m3, half, flush_out)
+             << 8;
     shift = mode & RJ_ARITH_ALU_HIGH_D ? 16 : 0;
     selected = 65535;
   }

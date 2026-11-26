@@ -5,10 +5,12 @@
 
 #include "hsa/hsa_api_trace.h"
 #include "rocjitsu/code/amdgpu_elf.h"
-#include "rocjitsu/code/rj_gfx1250_b0_to_a0.h"
+#include "rocjitsu/code/dbt/gfx1250_b0_to_a0_library.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
+#include "scoped_temp.h"
+#include "shell_quote.h"
 #include "support/gfx1250_test_code_object.h"
 
 #include <array>
@@ -40,7 +42,7 @@ extern "C" void rj_test_clear_retained_storage();
 extern "C" void rj_test_log_translation(uint64_t source_id, size_t changed);
 extern "C" void
 rj_test_log_translation_diagnostic(uint64_t source_id,
-                                   const rj_gfx1250_b0_to_a0_diagnostic_t *diagnostic);
+                                   const rocjitsu::Gfx1250B0ToA0DiagnosticView *diagnostic);
 extern "C" uint64_t rj_test_translation_count();
 extern "C" uint64_t rj_test_translation_memo_bytes();
 extern "C" void rj_test_set_translation_memo_capacity(uint64_t bytes);
@@ -121,8 +123,9 @@ hsa_status_t HSA_API fake_iterate_agents(hsa_status_t (*callback)(hsa_agent_t, v
 hsa_status_t HSA_API fake_agent_get_info(hsa_agent_t agent, hsa_agent_info_t attribute,
                                          void *value) {
   if (agent.handle != kA0Agent.handle || value == nullptr ||
-      static_cast<uint32_t>(attribute) != kAsicRevisionAttribute)
+      static_cast<uint32_t>(attribute) != kAsicRevisionAttribute) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
   *static_cast<uint32_t *>(value) = g_asic_revision;
   return HSA_STATUS_SUCCESS;
 }
@@ -130,15 +133,17 @@ hsa_status_t HSA_API fake_agent_get_info(hsa_agent_t agent, hsa_agent_info_t att
 hsa_status_t HSA_API fake_agent_iterate_isas(hsa_agent_t agent,
                                              hsa_status_t (*callback)(hsa_isa_t, void *),
                                              void *data) {
-  if (agent.handle != kA0Agent.handle || callback == nullptr)
+  if (agent.handle != kA0Agent.handle || callback == nullptr) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
   return callback(hsa_isa_t{1250}, data);
 }
 
 hsa_status_t HSA_API fake_isa_get_info(hsa_isa_t isa, hsa_isa_info_t attribute, void *value) {
   constexpr char kIsaName[] = "amdgcn-amd-amdhsa--gfx1250";
-  if (isa.handle != 1250 || value == nullptr)
+  if (isa.handle != 1250 || value == nullptr) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
   if (attribute == HSA_ISA_INFO_NAME_LENGTH) {
     *static_cast<uint32_t *>(value) = sizeof(kIsaName);
     return HSA_STATUS_SUCCESS;
@@ -156,8 +161,9 @@ hsa_status_t HSA_API fake_isa_get_info(hsa_isa_t isa, hsa_isa_info_t attribute, 
 std::mutex g_fake_mutex;
 
 hsa_status_t HSA_API fake_create_file(hsa_file_t, hsa_code_object_reader_t *reader) {
-  if (reader == nullptr)
+  if (reader == nullptr) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
   std::lock_guard fake_lock(g_fake_mutex);
   *reader = hsa_code_object_reader_t{g_next_reader++};
   return HSA_STATUS_SUCCESS;
@@ -165,8 +171,9 @@ hsa_status_t HSA_API fake_create_file(hsa_file_t, hsa_code_object_reader_t *read
 
 hsa_status_t HSA_API fake_create_memory(const void *bytes, size_t size,
                                         hsa_code_object_reader_t *reader) {
-  if (bytes == nullptr || size == 0 || reader == nullptr)
+  if (bytes == nullptr || size == 0 || reader == nullptr) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
   std::lock_guard fake_lock(g_fake_mutex);
   *reader = hsa_code_object_reader_t{g_next_reader++};
   g_readers.emplace(reader->handle, ReaderView{static_cast<const uint8_t *>(bytes), size});
@@ -176,8 +183,9 @@ hsa_status_t HSA_API fake_create_memory(const void *bytes, size_t size,
 hsa_status_t HSA_API fake_destroy_reader(hsa_code_object_reader_t reader) {
   std::lock_guard fake_lock(g_fake_mutex);
   ++g_reader_destroy_calls;
-  if (g_reader_destroy_status == HSA_STATUS_SUCCESS)
+  if (g_reader_destroy_status == HSA_STATUS_SUCCESS) {
     g_readers.erase(reader.handle);
+  }
   return g_reader_destroy_status;
 }
 
@@ -190,14 +198,17 @@ hsa_status_t HSA_API fake_load_agent(hsa_executable_t, hsa_agent_t, hsa_code_obj
   std::lock_guard fake_lock(g_fake_mutex);
   ++g_load_agent_calls;
   g_loaded_reader = reader;
-  if (g_load_agent_status != HSA_STATUS_SUCCESS)
+  if (g_load_agent_status != HSA_STATUS_SUCCESS) {
     return g_load_agent_status;
+  }
   const auto it = g_readers.find(reader.handle);
-  if (it == g_readers.end())
+  if (it == g_readers.end()) {
     return HSA_STATUS_ERROR_INVALID_CODE_OBJECT_READER;
+  }
   g_loaded_bytes.assign(it->second.bytes, it->second.bytes + it->second.size);
-  if (loaded != nullptr)
+  if (loaded != nullptr) {
     loaded->handle = 99;
+  }
   return HSA_STATUS_SUCCESS;
 }
 
@@ -219,8 +230,9 @@ hsa_status_t fake_vendor_reader_create(hsa_file_t file, size_t offset, size_t si
   g_vendor_file = file;
   g_vendor_offset = offset;
   g_vendor_size = size;
-  if (reader == nullptr)
+  if (reader == nullptr) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
   *reader = hsa_code_object_reader_t{g_next_reader++};
   return HSA_STATUS_SUCCESS;
 }
@@ -248,35 +260,14 @@ std::vector<uint8_t> make_invalid_gfx1250_elf() {
   return image;
 }
 
-/// @brief A directory that exists for one test case.
-class ScopedTempDirectory {
-public:
-  ScopedTempDirectory() {
-    char pattern[] = "/tmp/rocjitsu-hotswap-dump-XXXXXX";
-    const char *created = mkdtemp(pattern);
-    if (created != nullptr)
-      path_ = created;
-  }
-  ScopedTempDirectory(const ScopedTempDirectory &) = delete;
-  ScopedTempDirectory &operator=(const ScopedTempDirectory &) = delete;
-  ~ScopedTempDirectory() {
-    if (path_.empty())
-      return;
-    std::error_code error;
-    std::filesystem::remove_all(path_, error);
-  }
-
-  const std::string &path() const { return path_; }
-
-private:
-  std::string path_;
-};
+using rocjitsu::test::ScopedTempDirectory;
 
 size_t count_occurrences(const std::string &text, std::string_view needle) {
   size_t count = 0;
   for (size_t at = text.find(needle); at != std::string::npos;
-       at = text.find(needle, at + needle.size()))
+       at = text.find(needle, at + needle.size())) {
     ++count;
+  }
   return count;
 }
 
@@ -290,7 +281,7 @@ std::vector<uint8_t> make_invalid_gfx1250_elf(uint8_t salt) {
 void expect_failure_dump(const std::string &log_text, const std::vector<uint8_t> &source) {
   std::smatch match;
   const std::regex path_pattern(
-      R"(path=([^;\s]+); please file a bug report and attach this code object)");
+      R"(path=([^\n]+); please file a bug report and attach this code object)");
   ASSERT_TRUE(std::regex_search(log_text, match, path_pattern)) << log_text;
   const std::string path = match[1].str();
   std::ifstream input(path, std::ios::binary);
@@ -305,8 +296,9 @@ void expect_failure_dump(const std::string &log_text, const std::vector<uint8_t>
 #ifdef GFX1250_B0_TO_A0_FIXTURE
 std::vector<uint8_t> read_translation_fixture() {
   std::ifstream input(GFX1250_B0_TO_A0_FIXTURE, std::ios::binary);
-  if (!input)
+  if (!input) {
     return {};
+  }
   return std::vector<uint8_t>(std::istreambuf_iterator<char>(input),
                               std::istreambuf_iterator<char>());
 }
@@ -354,10 +346,11 @@ protected:
     OnUnload();
     rj_test_clear_retained_storage();
     for (const auto &[name, value] : saved_environment_) {
-      if (value)
+      if (value) {
         (void)setenv(name, value->c_str(), 1);
-      else
+      } else {
         (void)unsetenv(name);
+      }
     }
     saved_environment_.clear();
   }
@@ -370,16 +363,17 @@ protected:
     hsa_code_object_reader_t reader{};
     const hsa_status_t create_status = api.core.hsa_code_object_reader_create_from_memory_fn(
         source.data(), source.size(), &reader);
-    if (create_status != HSA_STATUS_SUCCESS)
+    if (create_status != HSA_STATUS_SUCCESS) {
       return create_status;
+    }
     return api.core.hsa_executable_load_agent_code_object_fn(executable, kA0Agent, reader, nullptr,
                                                              nullptr);
   }
 
   // Every case runs with these cleared and gets whatever the process had back,
   // so one case cannot decide what a later one observes.
-  static constexpr std::array<const char *, 4> kIsolatedEnvironment = {
-      "HSA_HOTSWAP_VERBOSE", "HSA_HOTSWAP_DUMP_SOURCE", "HSA_HOTSWAP_DUMP_DIR", "TMPDIR"};
+  static constexpr std::array<const char *, 3> kIsolatedEnvironment = {
+      "HSA_HOTSWAP_VERBOSE", "HSA_HOTSWAP_DUMP_SOURCE", "HSA_HOTSWAP_DUMP_DIR"};
 
   FakeApi api;
   std::vector<std::pair<const char *, std::optional<std::string>>> saved_environment_;
@@ -428,8 +422,9 @@ TEST_F(HsaHotswapHookTest, EmitsConcurrentTranslationRecordsAtomically) {
       }
     });
   }
-  for (auto &worker : workers)
+  for (auto &worker : workers) {
     worker.join();
+  }
   const std::string log_text = testing::internal::GetCapturedStderr();
   ASSERT_EQ(unsetenv("HSA_HOTSWAP_VERBOSE"), 0);
 
@@ -535,7 +530,7 @@ TEST_F(HsaHotswapHookTest, TranslationFailureDoesNotLoadOrRetain) {
       api.core.hsa_code_object_reader_create_from_memory_fn(source.data(), source.size(), &reader),
       HSA_STATUS_SUCCESS);
   ScopedTempDirectory capture_directory;
-  ASSERT_FALSE(capture_directory.path().empty());
+  ASSERT_TRUE(capture_directory.initialize("rj-hotswap-dump-"));
   ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_SOURCE", "1", 1), 0);
   ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_DIR", capture_directory.path().c_str(), 1), 0);
   testing::internal::CaptureStderr();
@@ -573,7 +568,7 @@ TEST_F(HsaHotswapHookTest, RendersTranslatorDiagnosticsAndDumpsFailedSource) {
       HSA_STATUS_SUCCESS);
 
   ScopedTempDirectory capture_directory;
-  ASSERT_FALSE(capture_directory.path().empty());
+  ASSERT_TRUE(capture_directory.initialize("rj-hotswap-dump-"));
   ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_SOURCE", "1", 1), 0);
   ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_DIR", capture_directory.path().c_str(), 1), 0);
   testing::internal::CaptureStderr();
@@ -598,7 +593,7 @@ TEST_F(HsaHotswapHookTest, RendersTranslatorDiagnosticsAndDumpsFailedSource) {
 }
 
 TEST_F(HsaHotswapHookTest, DiagnosticPrefixMatchesWarningSeverity) {
-  const rj_gfx1250_b0_to_a0_diagnostic_t diagnostic{
+  const rocjitsu::Gfx1250B0ToA0DiagnosticView diagnostic{
       "warning", "translator-data-only", 0, 0, "", "test warning", 0,
   };
   testing::internal::CaptureStderr();
@@ -612,7 +607,7 @@ TEST_F(HsaHotswapHookTest, DiagnosticPrefixMatchesWarningSeverity) {
 }
 
 TEST_F(HsaHotswapHookTest, RendersRequiredWorkDiagnostic) {
-  const rj_gfx1250_b0_to_a0_diagnostic_t diagnostic{
+  const rocjitsu::Gfx1250B0ToA0DiagnosticView diagnostic{
       "error", "translator-expand-missing", 1, 8, "v_test", "required step", 1,
   };
   testing::internal::CaptureStderr();
@@ -662,7 +657,7 @@ TEST_F(HsaHotswapHookTest, CapturedSourceHonorsTheConfiguredDirectory) {
   ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
   const std::vector<uint8_t> source = make_invalid_gfx1250_elf();
   ScopedTempDirectory directory;
-  ASSERT_FALSE(directory.path().empty());
+  ASSERT_TRUE(directory.initialize("rj-hotswap-dump-"));
   ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_SOURCE", "1", 1), 0);
   ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_DIR", directory.path().c_str(), 1), 0);
 
@@ -678,7 +673,7 @@ TEST_F(HsaHotswapHookTest, CapturedSourceHonorsTheConfiguredDirectory) {
 
   std::smatch match;
   const std::regex path_pattern(
-      R"(path=([^;\s]+); please file a bug report and attach this code object)");
+      R"(path=([^\n]+); please file a bug report and attach this code object)");
   ASSERT_TRUE(std::regex_search(log_text, match, path_pattern)) << log_text;
   EXPECT_EQ(match[1].str().rfind(directory.path() + "/", 0), 0u) << match[1].str();
   expect_failure_dump(log_text, source);
@@ -688,7 +683,7 @@ TEST_F(HsaHotswapHookTest, RepeatedEnvironmentalFailuresCaptureOneArtifact) {
   ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
   const std::vector<uint8_t> source = make_invalid_gfx1250_elf();
   ScopedTempDirectory capture_directory;
-  ASSERT_FALSE(capture_directory.path().empty());
+  ASSERT_TRUE(capture_directory.initialize("rj-hotswap-dump-"));
   ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_SOURCE", "1", 1), 0);
   ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_DIR", capture_directory.path().c_str(), 1), 0);
   constexpr size_t kLoads = 8;
@@ -717,7 +712,7 @@ TEST_F(HsaHotswapHookTest, AnOutOfResourcesFailureCapturesNothing) {
   ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
   const std::vector<uint8_t> source = make_invalid_gfx1250_elf();
   ScopedTempDirectory capture_directory;
-  ASSERT_FALSE(capture_directory.path().empty());
+  ASSERT_TRUE(capture_directory.initialize("rj-hotswap-dump-"));
   ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_SOURCE", "1", 1), 0);
   ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_DIR", capture_directory.path().c_str(), 1), 0);
   rj_test_force_next_translation_status(3 /* ROCJITSU_STATUS_OUT_OF_RESOURCES */);
@@ -759,7 +754,7 @@ TEST_F(HsaHotswapHookTest, EnablingCaptureAfterAHintStillProducesTheArtifact) {
   ASSERT_EQ(rj_test_dump_path_count(), 0u);
 
   ScopedTempDirectory capture_directory;
-  ASSERT_FALSE(capture_directory.path().empty());
+  ASSERT_TRUE(capture_directory.initialize("rj-hotswap-dump-"));
   ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_SOURCE", "1", 1), 0);
   ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_DIR", capture_directory.path().c_str(), 1), 0);
   rj_test_force_next_translation_status(1 /* ROCJITSU_STATUS_ERROR */);
@@ -794,7 +789,7 @@ TEST_F(HsaHotswapHookTest, CorrectingTheCaptureDirectoryRetriesTheArtifact) {
   // A capture that could not be written must not spend the source's slot: the
   // operator fixes the destination and the next failure produces the artifact.
   ScopedTempDirectory directory;
-  ASSERT_FALSE(directory.path().empty());
+  ASSERT_TRUE(directory.initialize("rj-hotswap-dump-"));
   ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_DIR", directory.path().c_str(), 1), 0);
   rj_test_force_next_translation_status(1 /* ROCJITSU_STATUS_ERROR */);
   testing::internal::CaptureStderr();
@@ -809,11 +804,11 @@ TEST_F(HsaHotswapHookTest, CaptureFallsBackToTmpdirWhenNoDirectoryIsNamed) {
   ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
   const std::vector<uint8_t> source = make_invalid_gfx1250_elf();
   ScopedTempDirectory directory;
-  ASSERT_FALSE(directory.path().empty());
+  ASSERT_TRUE(directory.initialize("rj-hotswap-dump-"));
   // HSA_HOTSWAP_DUMP_DIR stays unset: TMPDIR is the next choice, and /tmp only
   // after that.
   ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_SOURCE", "1", 1), 0);
-  ASSERT_EQ(setenv("TMPDIR", directory.path().c_str(), 1), 0);
+  const rocjitsu::test::ScopedEnvironmentVariable tmpdir("TMPDIR", directory.path());
 
   testing::internal::CaptureStderr();
   EXPECT_EQ(load_through_new_reader(source), HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
@@ -821,7 +816,7 @@ TEST_F(HsaHotswapHookTest, CaptureFallsBackToTmpdirWhenNoDirectoryIsNamed) {
 
   std::smatch match;
   const std::regex path_pattern(
-      R"(path=([^;\s]+); please file a bug report and attach this code object)");
+      R"(path=([^\n]+); please file a bug report and attach this code object)");
   ASSERT_TRUE(std::regex_search(log_text, match, path_pattern)) << log_text;
   EXPECT_EQ(match[1].str().rfind(directory.path() + "/", 0), 0u) << match[1].str();
   expect_failure_dump(log_text, source);
@@ -830,7 +825,7 @@ TEST_F(HsaHotswapHookTest, CaptureFallsBackToTmpdirWhenNoDirectoryIsNamed) {
 TEST_F(HsaHotswapHookTest, CaptureStopsAtTheSourceCapAndSaysWhy) {
   ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
   ScopedTempDirectory capture_directory;
-  ASSERT_FALSE(capture_directory.path().empty());
+  ASSERT_TRUE(capture_directory.initialize("rj-hotswap-dump-"));
   ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_SOURCE", "1", 1), 0);
   ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_DIR", capture_directory.path().c_str(), 1), 0);
   // kMaxCapturedSources in the hook. One more source than the registry holds.
@@ -1091,8 +1086,9 @@ TEST_F(HsaHotswapHookTest, CallbackApiSnapshotIsSafeDuringUnload) {
     while (!stop.load(std::memory_order_acquire)) {
       hsa_code_object_reader_t reader{};
       const hsa_status_t status = create(source.data(), source.size(), &reader);
-      if (status != HSA_STATUS_SUCCESS && status != HSA_STATUS_ERROR)
+      if (status != HSA_STATUS_SUCCESS && status != HSA_STATUS_ERROR) {
         unexpected_statuses.fetch_add(1, std::memory_order_relaxed);
+      }
     }
   });
   while (!started.load(std::memory_order_acquire)) {
@@ -1150,8 +1146,9 @@ protected:
     for (size_t offset = base.size(); offset < original.size(); ++offset) {
       std::vector<uint8_t> twin = original;
       twin[offset] = 0x5a;
-      if (rj_test_sample_fingerprint(twin.data(), twin.size()) == target)
+      if (rj_test_sample_fingerprint(twin.data(), twin.size()) == target) {
         return twin;
+      }
     }
     return {};
   }
@@ -1163,8 +1160,9 @@ protected:
   // it throw. Returns empty if .text cannot be located.
   static std::vector<uint8_t> patch_first_instruction(const std::vector<uint8_t> &base,
                                                       uint32_t word) {
-    if (base.size() < sizeof(rocjitsu::Elf64_Ehdr))
+    if (base.size() < sizeof(rocjitsu::Elf64_Ehdr)) {
       return {};
+    }
     rocjitsu::Elf64_Ehdr header{};
     std::memcpy(&header, base.data(), sizeof(header));
     // Bounds-check what the fixture claims before believing it. A truncated or
@@ -1172,26 +1170,32 @@ protected:
     // whole test process down with it.
     const size_t table_bytes = size_t{header.e_shnum} * sizeof(rocjitsu::Elf64_Shdr);
     if (header.e_shoff > base.size() || table_bytes > base.size() - header.e_shoff ||
-        header.e_shstrndx >= header.e_shnum)
+        header.e_shstrndx >= header.e_shnum) {
       return {};
+    }
     const auto *sections =
         reinterpret_cast<const rocjitsu::Elf64_Shdr *>(base.data() + header.e_shoff);
     const size_t names_offset = sections[header.e_shstrndx].sh_offset;
-    if (names_offset >= base.size())
+    if (names_offset >= base.size()) {
       return {};
+    }
     const char *names = reinterpret_cast<const char *>(base.data() + names_offset);
     const size_t names_limit = base.size() - names_offset;
     for (uint16_t index = 0; index < header.e_shnum; ++index) {
-      if (sections[index].sh_name >= names_limit)
+      if (sections[index].sh_name >= names_limit) {
         return {};
+      }
       const char *name = names + sections[index].sh_name;
       const size_t name_limit = names_limit - sections[index].sh_name;
-      if (std::memchr(name, '\0', name_limit) == nullptr)
+      if (std::memchr(name, '\0', name_limit) == nullptr) {
         return {}; // Unterminated: comparing it would run off the end.
-      if (std::strcmp(name, ".text") != 0)
+      }
+      if (std::strcmp(name, ".text") != 0) {
         continue;
-      if (sections[index].sh_offset + sizeof(word) > base.size())
+      }
+      if (sections[index].sh_offset + sizeof(word) > base.size()) {
         return {};
+      }
       std::vector<uint8_t> patched = base;
       std::memcpy(patched.data() + sections[index].sh_offset, &word, sizeof(word));
       return patched;
@@ -1209,8 +1213,9 @@ TEST_F(HsaHotswapMemoTest, RemembersARefusalInsteadOfRepeatingIt) {
   constexpr size_t kLoads = 256;
 
   testing::internal::CaptureStderr();
-  for (size_t load = 0; load < kLoads; ++load)
+  for (size_t load = 0; load < kLoads; ++load) {
     EXPECT_EQ(load_through_new_reader(source), HSA_STATUS_ERROR_INVALID_CODE_OBJECT) << load;
+  }
   const std::string log_text = testing::internal::GetCapturedStderr();
 
   // A refusal is a property of the bytes: reaching it once is enough, and every
@@ -1231,8 +1236,9 @@ TEST_F(HsaHotswapMemoTest, VerboseLoggingStillShowsEveryRememberedRefusal) {
   constexpr size_t kLoads = 4;
 
   testing::internal::CaptureStderr();
-  for (size_t load = 0; load < kLoads; ++load)
+  for (size_t load = 0; load < kLoads; ++load) {
     EXPECT_EQ(load_through_new_reader(source), HSA_STATUS_ERROR_INVALID_CODE_OBJECT) << load;
+  }
   const std::string log_text = testing::internal::GetCapturedStderr();
 
   EXPECT_EQ(count_occurrences(log_text, " outcome=translation_failed "), 1u) << log_text;
@@ -1300,9 +1306,11 @@ TEST_F(HsaHotswapMemoTest, DistinctObjectsAreTranslatedOncePerContent) {
   objects[1].push_back(0x5a);
   constexpr size_t kLoadsPerObject = 64;
 
-  for (size_t load = 0; load < kLoadsPerObject; ++load)
-    for (const auto &object : objects)
+  for (size_t load = 0; load < kLoadsPerObject; ++load) {
+    for (const auto &object : objects) {
       ASSERT_EQ(load_through_new_reader(object), HSA_STATUS_SUCCESS) << load;
+    }
+  }
 
   EXPECT_EQ(rj_test_translation_count(), objects.size());
 }
@@ -1346,8 +1354,9 @@ TEST_F(HsaHotswapMemoTest, ConcurrentLoadsOfOneObjectTranslateOnce) {
   workers.reserve(kThreadCount);
   for (size_t thread_index = 0; thread_index < kThreadCount; ++thread_index) {
     workers.emplace_back([&] {
-      if (load_through_new_reader(source) != HSA_STATUS_SUCCESS)
+      if (load_through_new_reader(source) != HSA_STATUS_SUCCESS) {
         failures.fetch_add(1, std::memory_order_relaxed);
+      }
     });
   }
 
@@ -1359,8 +1368,9 @@ TEST_F(HsaHotswapMemoTest, ConcurrentLoadsOfOneObjectTranslateOnce) {
   const uint64_t waiters = wait_for_memo_waiters(kThreadCount - 1);
   const uint64_t translations_while_held = wait_for_translations(1);
   rj_test_open_translation_gate();
-  for (auto &worker : workers)
+  for (auto &worker : workers) {
     worker.join();
+  }
 
   EXPECT_EQ(waiters, kThreadCount - 1);
   EXPECT_EQ(translations_while_held, 1u);
@@ -1399,8 +1409,9 @@ TEST_F(HsaHotswapMemoTest, ObjectsThatShareAFingerprintDoNotWaitForEachOther) {
   std::vector<std::thread> workers;
   for (const std::vector<uint8_t> *object : {&first, &second}) {
     workers.emplace_back([&, object] {
-      if (load_through_new_reader(*object) != HSA_STATUS_SUCCESS)
+      if (load_through_new_reader(*object) != HSA_STATUS_SUCCESS) {
         failures.fetch_add(1, std::memory_order_relaxed);
+      }
     });
   }
 
@@ -1409,8 +1420,9 @@ TEST_F(HsaHotswapMemoTest, ObjectsThatShareAFingerprintDoNotWaitForEachOther) {
   const uint64_t translations_while_held = wait_for_translations(2);
   const uint64_t waiters = rj_test_translation_waiters();
   rj_test_open_translation_gate();
-  for (auto &worker : workers)
+  for (auto &worker : workers) {
     worker.join();
+  }
 
   EXPECT_EQ(failures.load(std::memory_order_relaxed), 0);
   EXPECT_EQ(translations_while_held, 2u) << "a colliding object was serialised behind the other";
@@ -1436,15 +1448,17 @@ TEST_F(HsaHotswapMemoTest, WaitersResumeWhenAClaimIsReleasedWithoutPublishing) {
   workers.reserve(kThreadCount);
   for (size_t thread_index = 0; thread_index < kThreadCount; ++thread_index) {
     workers.emplace_back([&] {
-      if (load_through_new_reader(source) == HSA_STATUS_SUCCESS)
+      if (load_through_new_reader(source) == HSA_STATUS_SUCCESS) {
         succeeded.fetch_add(1, std::memory_order_relaxed);
+      }
     });
   }
 
   const uint64_t waiters = wait_for_memo_waiters(kThreadCount - 1);
   rj_test_open_translation_gate();
-  for (auto &worker : workers)
+  for (auto &worker : workers) {
     worker.join();
+  }
 
   EXPECT_EQ(waiters, kThreadCount - 1);
   // One load hit the forced failure; the rest resumed and one of them translated
@@ -1465,9 +1479,10 @@ TEST_F(HsaHotswapMemoTest, NonDispatchableAndInvalidInstructionVerdictsAreRememb
   // A zero opcode translates to completion but yields nothing dispatchable.
   const std::vector<uint8_t> non_dispatchable = patch_first_instruction(base, 0x00000000u);
   ASSERT_FALSE(non_dispatchable.empty()) << "could not locate .text";
-  for (size_t load = 0; load < 4; ++load)
+  for (size_t load = 0; load < 4; ++load) {
     ASSERT_EQ(load_through_new_reader(non_dispatchable), HSA_STATUS_ERROR_INVALID_CODE_OBJECT)
         << load;
+  }
   EXPECT_EQ(rj_test_translation_count(), 1u) << "a verdict on the bytes was re-derived";
 
   // An invalid instruction is now a structured, deterministic translation
@@ -1475,9 +1490,10 @@ TEST_F(HsaHotswapMemoTest, NonDispatchableAndInvalidInstructionVerdictsAreRememb
   rj_test_clear_retained_storage();
   const std::vector<uint8_t> invalid_instruction = patch_first_instruction(base, 0xffffffffu);
   ASSERT_FALSE(invalid_instruction.empty());
-  for (size_t load = 0; load < 4; ++load)
+  for (size_t load = 0; load < 4; ++load) {
     ASSERT_EQ(load_through_new_reader(invalid_instruction), HSA_STATUS_ERROR_INVALID_CODE_OBJECT)
         << load;
+  }
   EXPECT_EQ(rj_test_translation_count(), 1u) << "an invalid-instruction verdict was re-derived";
 }
 
@@ -1511,8 +1527,9 @@ TEST_F(HsaHotswapMemoTest, ACapacityOfZeroDisablesTheMemo) {
 
   rj_test_set_translation_memo_capacity(0);
   constexpr size_t kLoads = 4;
-  for (size_t load = 0; load < kLoads; ++load)
+  for (size_t load = 0; load < kLoads; ++load) {
     ASSERT_EQ(load_through_new_reader(source), HSA_STATUS_SUCCESS) << load;
+  }
 
   EXPECT_EQ(rj_test_translation_count(), kLoads);
   EXPECT_EQ(rj_test_translation_memo_bytes(), 0u);
@@ -1565,15 +1582,17 @@ TEST_F(HsaHotswapMemoTest, AnOversizedResultStillServesTheWaitersItAlreadyHas) {
   workers.reserve(kThreadCount);
   for (size_t thread_index = 0; thread_index < kThreadCount; ++thread_index) {
     workers.emplace_back([&] {
-      if (load_through_new_reader(source) != HSA_STATUS_SUCCESS)
+      if (load_through_new_reader(source) != HSA_STATUS_SUCCESS) {
         failures.fetch_add(1, std::memory_order_relaxed);
+      }
     });
   }
 
   const uint64_t waiters = wait_for_memo_waiters(kThreadCount - 1);
   rj_test_open_translation_gate();
-  for (auto &worker : workers)
+  for (auto &worker : workers) {
     worker.join();
+  }
 
   EXPECT_EQ(failures.load(std::memory_order_relaxed), 0);
   EXPECT_EQ(waiters, kThreadCount - 1);
@@ -1609,14 +1628,16 @@ TEST_F(HsaHotswapMemoTest, ALateLoadTakesAResultThatIsStillDraining) {
   workers.reserve(2);
   for (size_t thread_index = 0; thread_index < 2; ++thread_index) {
     workers.emplace_back([&] {
-      if (load_through_new_reader(source) != HSA_STATUS_SUCCESS)
+      if (load_through_new_reader(source) != HSA_STATUS_SUCCESS) {
         failures.fetch_add(1, std::memory_order_relaxed);
+      }
     });
   }
   const uint64_t waiters = wait_for_memo_waiters(1);
   rj_test_open_translation_gate();
-  for (auto &worker : workers)
+  for (auto &worker : workers) {
     worker.join();
+  }
 
   EXPECT_EQ(failures.load(std::memory_order_relaxed), 0);
   EXPECT_EQ(waiters, 1u);
@@ -1644,8 +1665,9 @@ TEST_F(HsaHotswapMemoTest, ShrinkingTheCeilingDisplacesEveryEntryItHasTo) {
     std::vector<uint8_t> object = base;
     object.resize(base.size() + 64 + index, 0x11);
     ASSERT_EQ(load_through_new_reader(object), HSA_STATUS_SUCCESS) << index;
-    if (index == 0)
+    if (index == 0) {
       one_entry = rj_test_translation_memo_bytes();
+    }
   }
   ASSERT_EQ(rj_test_translation_count(), kObjects);
   const uint64_t all_entries = rj_test_translation_memo_bytes();
@@ -1667,8 +1689,9 @@ TEST_F(HsaHotswapMemoTest, AnObjectLargerThanTheCapIsNotRemembered) {
 
   rj_test_set_translation_memo_capacity(1);
   constexpr size_t kLoads = 4;
-  for (size_t load = 0; load < kLoads; ++load)
+  for (size_t load = 0; load < kLoads; ++load) {
     ASSERT_EQ(load_through_new_reader(source), HSA_STATUS_SUCCESS) << load;
+  }
 
   // Never over the ceiling, and never a failed load -- only slower ones.
   EXPECT_LE(rj_test_translation_memo_bytes(), 1u);
@@ -1706,58 +1729,31 @@ TEST_F(HsaHotswapMemoTest, ReuseIsReportedAgainstTheSameSourceObject) {
   size_t reuse_records = 0;
   while (std::getline(lines, line)) {
     EXPECT_NE(line.find(expected_identity.str()), std::string::npos) << line;
-    if (line.find(" outcome=reused ") != std::string::npos)
+    if (line.find(" outcome=reused ") != std::string::npos) {
       ++reuse_records;
+    }
   }
   EXPECT_EQ(reuse_records, 1u);
 }
 #endif
 
 #if defined(GFX1250_B0_TO_A0_FIXTURE) && defined(RJ_PRETRANSLATE_TOOL)
-/// @brief A private pre-translated tier for one test.
-///
-/// @details A failed mkdtemp points the store at a path that cannot exist rather
-/// than passing nullptr, which would restore the REAL install tier: on a machine
-/// where someone had pre-translated, a test could then pass without ever touching
-/// its own directory.
-class ScopedPretranslationRoot {
-public:
-  static constexpr const char *kUnusableRoot = "/dev/null/rj-fixture-has-no-root";
-
-  ScopedPretranslationRoot() {
-    std::strcpy(path_, "/tmp/rj-hotswap-aot-XXXXXX");
-    if (mkdtemp(path_) == nullptr)
-      path_[0] = '\0';
-    rj_test_set_pretranslation_root(path_[0] == '\0' ? kUnusableRoot : path_);
-  }
-  ~ScopedPretranslationRoot() {
-    rj_test_set_pretranslation_root(nullptr);
-    if (path_[0] != '\0')
-      std::filesystem::remove_all(path_);
-  }
-  ScopedPretranslationRoot(const ScopedPretranslationRoot &) = delete;
-  ScopedPretranslationRoot &operator=(const ScopedPretranslationRoot &) = delete;
-
-  [[nodiscard]] bool has_root() const { return path_[0] != '\0'; }
-  [[nodiscard]] const char *path() const { return path_; }
-
-  /// @brief Re-run the tier's checks after filling its directory.
-  /// @details It opens once and holds the descriptor, so a tier populated after
-  /// the first lookup would otherwise stay closed.
-  void reopen() const { rj_test_set_pretranslation_root(path_); }
-
-private:
-  char path_[64] = {};
-};
-
 class HsaHotswapPretranslationTest : public HsaHotswapHookTest {
 protected:
   void SetUp() override {
     HsaHotswapHookTest::SetUp();
-    ASSERT_TRUE(store_root.has_root()) << "fixture could not create its private store root";
+    // TranslationStore requires a path without symlink components.
+    const auto parent = std::filesystem::canonical(std::filesystem::temp_directory_path());
+    ASSERT_TRUE(store_root.initialize("rj-hotswap-aot-", parent));
+    rj_test_set_pretranslation_root(store_root.path().c_str());
     ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
     source = read_translation_fixture();
     ASSERT_FALSE(source.empty()) << GFX1250_B0_TO_A0_FIXTURE;
+  }
+
+  void TearDown() override {
+    HsaHotswapHookTest::TearDown();
+    rj_test_set_pretranslation_root(nullptr);
   }
 
   /// @brief Run one A0 load of @p bytes and return what reached the loader.
@@ -1783,14 +1779,17 @@ protected:
                 static_cast<std::streamsize>(bytes.size()));
       ASSERT_TRUE(out.good());
     }
-    const std::string command = std::string(RJ_PRETRANSLATE_TOOL) + " --store-root '" +
-                                store_root.path() + "' '" + input.string() + "' > /dev/null 2>&1";
+    using rocjitsu::test::shell_quote;
+    const std::string command = shell_quote(RJ_PRETRANSLATE_TOOL) + " --store-root " +
+                                shell_quote(store_root.path()) + " " + shell_quote(input.string()) +
+                                " > /dev/null 2>&1";
     ASSERT_EQ(std::system(command.c_str()), 0) << command;
     std::filesystem::remove(input);
-    store_root.reopen();
+    // Reopen the tier after populating it, since it keeps the first descriptor.
+    rj_test_set_pretranslation_root(store_root.path().c_str());
   }
 
-  ScopedPretranslationRoot store_root;
+  ScopedTempDirectory store_root;
   std::vector<uint8_t> source;
 };
 
@@ -1813,8 +1812,9 @@ TEST_F(HsaHotswapPretranslationTest, WhatTheToolWritesAheadOfTimeServesALoad) {
   // Nothing was added to the tier: it is read-only to this process, so a runtime
   // never writes back what it was handed.
   size_t objects = 0;
-  for (const auto &item : std::filesystem::recursive_directory_iterator(store_root.path()))
+  for (const auto &item : std::filesystem::recursive_directory_iterator(store_root.path())) {
     objects += item.path().extension() == ".obj" ? 1 : 0;
+  }
   EXPECT_EQ(objects, 1u);
 }
 

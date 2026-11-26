@@ -8,8 +8,11 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vop3.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_cdna_unary_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_compare_exec.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_division_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_fma64_variants_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_lane_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_vector_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_wide_conversion_exec.h"
@@ -34,26 +37,64 @@ void VFmaDx9ZeroF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
-  amdgpu::execute_v_fma_dx9_zero_f32_vop3(*this, wf);
+  if (!wf.exec()) {
+    return;
+  }
+  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
+      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
+      ((inst_.abs & 4) ? RJ_ARITH_ALU_ABS_C : 0u) | ((inst_.neg & 4) ? RJ_ARITH_ALU_NEG_C : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_fma32<true>(
+      wf, rj_arith_v_fma_dx9_zero_f32_w32_gfx12, rj_arith_v_fma_dx9_zero_f32_w64_gfx12,
+      wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1, src2, false);
 }
 
 RJ_NOINLINE void VFmaDx9ZeroF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
-  amdgpu::execute_v_fma_dx9_zero_f32_vop3(*this, wf);
+  }
+  if (!wf.exec()) {
+    return;
+  }
+  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
+      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
+      ((inst_.abs & 4) ? RJ_ARITH_ALU_ABS_C : 0u) | ((inst_.neg & 4) ? RJ_ARITH_ALU_NEG_C : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_fma32<true>(
+      wf, rj_arith_v_fma_dx9_zero_f32_w32_gfx12, rj_arith_v_fma_dx9_zero_f32_w64_gfx12,
+      wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1, src2, false);
   dpp_write_mask_scope_.restore();
 }
 
@@ -70,19 +111,23 @@ void VMadI32I24Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VMadI32I24Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   amdgpu::arith::execute_ternary32(wf, rj_arith_v_mad_i32_i24_w32, rj_arith_v_mad_i32_i24_w64,
                                    wf.cu().arithmetic_flags(),
                                    inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
@@ -102,19 +147,23 @@ void VMadU32U24Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VMadU32U24Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   amdgpu::arith::execute_ternary32(wf, rj_arith_v_mad_u32_u24_w32, rj_arith_v_mad_u32_u24_w64,
                                    wf.cu().arithmetic_flags(),
                                    inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
@@ -134,19 +183,23 @@ void VBfeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VBfeU32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   amdgpu::arith::execute_ternary32(wf, rj_arith_v_bfe_u32_w32, rj_arith_v_bfe_u32_w64,
                                    wf.cu().arithmetic_flags(),
                                    inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
@@ -166,19 +219,23 @@ void VBfeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VBfeI32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   amdgpu::arith::execute_ternary32(wf, rj_arith_v_bfe_i32_w32, rj_arith_v_bfe_i32_w64,
                                    wf.cu().arithmetic_flags(),
                                    inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
@@ -198,19 +255,23 @@ void VBfiB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VBfiB32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   amdgpu::arith::execute_ternary32(wf, rj_arith_v_bfi_b32_w32, rj_arith_v_bfi_b32_w64,
                                    wf.cu().arithmetic_flags(),
                                    inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
@@ -222,26 +283,64 @@ void VFmaF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
-  amdgpu::execute_v_fma_f32_vop3(*this, wf);
+  if (!wf.exec()) {
+    return;
+  }
+  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
+      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
+      ((inst_.abs & 4) ? RJ_ARITH_ALU_ABS_C : 0u) | ((inst_.neg & 4) ? RJ_ARITH_ALU_NEG_C : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_fma32<false>(
+      wf, rj_arith_v_fma_f32_w32_gfx12, rj_arith_v_fma_f32_w64_gfx12, wf.cu().arithmetic_flags(),
+      modifiers, vdst, src0, src1, src2, false);
 }
 
 RJ_NOINLINE void VFmaF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
-  amdgpu::execute_v_fma_f32_vop3(*this, wf);
+  }
+  if (!wf.exec()) {
+    return;
+  }
+  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
+      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
+      ((inst_.abs & 4) ? RJ_ARITH_ALU_ABS_C : 0u) | ((inst_.neg & 4) ? RJ_ARITH_ALU_NEG_C : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_fma32<false>(
+      wf, rj_arith_v_fma_f32_w32_gfx12, rj_arith_v_fma_f32_w64_gfx12, wf.cu().arithmetic_flags(),
+      modifiers, vdst, src0, src1, src2, false);
   dpp_write_mask_scope_.restore();
 }
 
@@ -250,24 +349,41 @@ void VFmaF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
-  amdgpu::execute_v_fma_f64_vop3(*this, wf);
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
+      ((inst_.abs & 4) ? RJ_ARITH_ALU_ABS_C : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) | ((inst_.neg & 4) ? RJ_ARITH_ALU_NEG_C : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_ternary64(wf, rj_arith_v_fma_f64_w32_gfx1250,
+                                         rj_arith_v_fma_f64_w64_gfx1250, wf.cu().arithmetic_flags(),
+                                         modifiers, vdst, src0, src1, src2, false);
 }
 
 RJ_NOINLINE void VFmaF64Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
-  amdgpu::execute_v_fma_f64_vop3(*this, wf);
+  }
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
+      ((inst_.abs & 4) ? RJ_ARITH_ALU_ABS_C : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) | ((inst_.neg & 4) ? RJ_ARITH_ALU_NEG_C : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_ternary64(wf, rj_arith_v_fma_f64_w32_gfx1250,
+                                         rj_arith_v_fma_f64_w64_gfx1250, wf.cu().arithmetic_flags(),
+                                         modifiers, vdst, src0, src1, src2, false);
   dpp_write_mask_scope_.restore();
 }
 
@@ -284,19 +400,23 @@ void VLerpU8Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VLerpU8Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   amdgpu::arith::execute_ternary32(wf, rj_arith_v_lerp_u8_w32, rj_arith_v_lerp_u8_w64,
                                    wf.cu().arithmetic_flags(),
                                    inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
@@ -318,19 +438,23 @@ void VAlignbitB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VAlignbitB32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   amdgpu::arith::execute_ternary32(
       wf, rj_arith_v_alignbit_b32_w32, rj_arith_v_alignbit_b32_w64, wf.cu().arithmetic_flags(),
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) |
@@ -354,19 +478,23 @@ void VAlignbyteB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VAlignbyteB32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   amdgpu::arith::execute_ternary32(
       wf, rj_arith_v_alignbyte_b32_w32, rj_arith_v_alignbyte_b32_w64, wf.cu().arithmetic_flags(),
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) |
@@ -388,19 +516,23 @@ void VMin3I32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VMin3I32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   amdgpu::arith::execute_ternary32(wf, rj_arith_v_min3_i32_w32, rj_arith_v_min3_i32_w64,
                                    wf.cu().arithmetic_flags(),
                                    inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
@@ -420,19 +552,23 @@ void VMin3U32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VMin3U32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   amdgpu::arith::execute_ternary32(wf, rj_arith_v_min3_u32_w32, rj_arith_v_min3_u32_w64,
                                    wf.cu().arithmetic_flags(),
                                    inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
@@ -452,19 +588,23 @@ void VMax3I32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VMax3I32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   amdgpu::arith::execute_ternary32(wf, rj_arith_v_max3_i32_w32, rj_arith_v_max3_i32_w64,
                                    wf.cu().arithmetic_flags(),
                                    inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
@@ -484,19 +624,23 @@ void VMax3U32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VMax3U32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   amdgpu::arith::execute_ternary32(wf, rj_arith_v_max3_u32_w32, rj_arith_v_max3_u32_w64,
                                    wf.cu().arithmetic_flags(),
                                    inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
@@ -516,19 +660,23 @@ void VMed3I32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VMed3I32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   amdgpu::arith::execute_ternary32(wf, rj_arith_v_med3_i32_w32, rj_arith_v_med3_i32_w64,
                                    wf.cu().arithmetic_flags(),
                                    inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
@@ -548,19 +696,23 @@ void VMed3U32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VMed3U32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   amdgpu::arith::execute_ternary32(wf, rj_arith_v_med3_u32_w32, rj_arith_v_med3_u32_w64,
                                    wf.cu().arithmetic_flags(),
                                    inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
@@ -580,19 +732,23 @@ void VSadU8Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VSadU8Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   amdgpu::arith::execute_ternary32(wf, rj_arith_v_sad_u8_w32, rj_arith_v_sad_u8_w64,
                                    wf.cu().arithmetic_flags(),
                                    inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
@@ -612,19 +768,23 @@ void VSadHiU8Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VSadHiU8Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   amdgpu::arith::execute_ternary32(wf, rj_arith_v_sad_hi_u8_w32, rj_arith_v_sad_hi_u8_w64,
                                    wf.cu().arithmetic_flags(),
                                    inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
@@ -644,19 +804,23 @@ void VSadU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VSadU16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   amdgpu::arith::execute_ternary32(wf, rj_arith_v_sad_u16_w32, rj_arith_v_sad_u16_w64,
                                    wf.cu().arithmetic_flags(),
                                    inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
@@ -676,19 +840,23 @@ void VSadU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VSadU32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   amdgpu::arith::execute_ternary32(wf, rj_arith_v_sad_u32_w32, rj_arith_v_sad_u32_w64,
                                    wf.cu().arithmetic_flags(),
                                    inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
@@ -713,19 +881,23 @@ void VMin3NumF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VMin3NumF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   const uint64_t modifiers =
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
       ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
@@ -755,19 +927,23 @@ void VMax3NumF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VMax3NumF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   const uint64_t modifiers =
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
       ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
@@ -800,21 +976,25 @@ void VMin3NumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VMin3NumF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
                             amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   const uint32_t opsel = amdgpu::vop3_opsel(inst_);
   const uint64_t modifiers =
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
@@ -850,21 +1030,25 @@ void VMax3NumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VMax3NumF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
                             amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   const uint32_t opsel = amdgpu::vop3_opsel(inst_);
   const uint64_t modifiers =
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
@@ -897,19 +1081,23 @@ void VMinimum3F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VMinimum3F32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   const uint64_t modifiers =
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
       ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
@@ -939,19 +1127,23 @@ void VMaximum3F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VMaximum3F32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   const uint64_t modifiers =
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
       ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
@@ -984,21 +1176,25 @@ void VMinimum3F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VMinimum3F16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
                             amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   const uint32_t opsel = amdgpu::vop3_opsel(inst_);
   const uint64_t modifiers =
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
@@ -1034,21 +1230,25 @@ void VMaximum3F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VMaximum3F16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
                             amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   const uint32_t opsel = amdgpu::vop3_opsel(inst_);
   const uint64_t modifiers =
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
@@ -1081,19 +1281,23 @@ void VMed3NumF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VMed3NumF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   const uint64_t modifiers =
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
       ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
@@ -1126,21 +1330,25 @@ void VMed3NumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VMed3NumF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
                             amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   const uint32_t opsel = amdgpu::vop3_opsel(inst_);
   const uint64_t modifiers =
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
@@ -1168,17 +1376,20 @@ void VMadU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VMadU32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   amdgpu::arith::execute_ternary32(wf, rj_arith_v_mad_u32_w32, rj_arith_v_mad_u32_w64,
                                    wf.cu().arithmetic_flags(),
                                    inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
@@ -1198,19 +1409,23 @@ void VMsadU8Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VMsadU8Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   amdgpu::arith::execute_ternary32(wf, rj_arith_v_msad_u8_w32, rj_arith_v_msad_u8_w64,
                                    wf.cu().arithmetic_flags(),
                                    inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
@@ -1230,19 +1445,23 @@ void VXor3B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VXor3B32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   amdgpu::arith::execute_ternary32(wf, rj_arith_v_xor3_b32_w32, rj_arith_v_xor3_b32_w64,
                                    wf.cu().arithmetic_flags(),
                                    inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
@@ -1267,21 +1486,25 @@ void VMadU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VMadU16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
                             amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   const uint32_t opsel = amdgpu::vop3_opsel(inst_);
   const uint64_t modifiers =
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) | ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u) |
@@ -1306,19 +1529,23 @@ void VXadU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VXadU32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   amdgpu::arith::execute_ternary32(wf, rj_arith_v_xad_u32_w32, rj_arith_v_xad_u32_w64,
                                    wf.cu().arithmetic_flags(),
                                    inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
@@ -1338,19 +1565,23 @@ void VLshlAddU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VLshlAddU32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   amdgpu::arith::execute_ternary32(wf, rj_arith_v_lshl_add_u32_w32, rj_arith_v_lshl_add_u32_w64,
                                    wf.cu().arithmetic_flags(),
                                    inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
@@ -1370,19 +1601,23 @@ void VAddLshlU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VAddLshlU32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   amdgpu::arith::execute_ternary32(wf, rj_arith_v_add_lshl_u32_w32, rj_arith_v_add_lshl_u32_w64,
                                    wf.cu().arithmetic_flags(),
                                    inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
@@ -1417,21 +1652,25 @@ void VFmaF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VFmaF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
                             amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
   if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
       semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
@@ -1471,21 +1710,25 @@ void VMin3I16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VMin3I16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
                             amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   const uint32_t opsel = amdgpu::vop3_opsel(inst_);
   const uint64_t modifiers =
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) | ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u) |
@@ -1515,21 +1758,25 @@ void VMin3U16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VMin3U16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
                             amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   const uint32_t opsel = amdgpu::vop3_opsel(inst_);
   const uint64_t modifiers =
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) | ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u) |
@@ -1559,21 +1806,25 @@ void VMax3I16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VMax3I16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
                             amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   const uint32_t opsel = amdgpu::vop3_opsel(inst_);
   const uint64_t modifiers =
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) | ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u) |
@@ -1603,21 +1854,25 @@ void VMax3U16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VMax3U16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
                             amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   const uint32_t opsel = amdgpu::vop3_opsel(inst_);
   const uint64_t modifiers =
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) | ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u) |
@@ -1647,21 +1902,25 @@ void VMed3I16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VMed3I16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
                             amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   const uint32_t opsel = amdgpu::vop3_opsel(inst_);
   const uint64_t modifiers =
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) | ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u) |
@@ -1691,21 +1950,25 @@ void VMed3U16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VMed3U16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
                             amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   const uint32_t opsel = amdgpu::vop3_opsel(inst_);
   const uint64_t modifiers =
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) | ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u) |
@@ -1730,17 +1993,20 @@ void VLshlAddU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VLshlAddU64Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   amdgpu::arith::execute_shift_add64(wf, rj_arith_v_lshl_add_u64_w32, rj_arith_v_lshl_add_u64_w64,
                                      wf.cu().arithmetic_flags(),
                                      inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
@@ -1765,21 +2031,25 @@ void VMadI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VMadI16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
                             amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   const uint32_t opsel = amdgpu::vop3_opsel(inst_);
   const uint64_t modifiers =
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) | ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u) |
@@ -1804,19 +2074,23 @@ void VAdd3U32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VAdd3U32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   amdgpu::arith::execute_ternary32(wf, rj_arith_v_add3_u32_w32, rj_arith_v_add3_u32_w64,
                                    wf.cu().arithmetic_flags(),
                                    inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
@@ -1836,19 +2110,23 @@ void VLshlOrB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VLshlOrB32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   amdgpu::arith::execute_ternary32(wf, rj_arith_v_lshl_or_b32_w32, rj_arith_v_lshl_or_b32_w64,
                                    wf.cu().arithmetic_flags(),
                                    inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
@@ -1868,19 +2146,23 @@ void VAndOrB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VAndOrB32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   amdgpu::arith::execute_ternary32(wf, rj_arith_v_and_or_b32_w32, rj_arith_v_and_or_b32_w64,
                                    wf.cu().arithmetic_flags(),
                                    inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
@@ -1900,19 +2182,23 @@ void VOr3B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VOr3B32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   amdgpu::arith::execute_ternary32(wf, rj_arith_v_or3_b32_w32, rj_arith_v_or3_b32_w64,
                                    wf.cu().arithmetic_flags(),
                                    inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
@@ -1936,21 +2222,25 @@ void VMadU32U16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VMadU32U16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
                             amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   const uint32_t opsel = amdgpu::vop3_opsel(inst_);
   const uint64_t modifiers = (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) |
                              ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) |
@@ -1978,21 +2268,25 @@ void VMadI32I16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VMadI32I16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
                             amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   const uint32_t opsel = amdgpu::vop3_opsel(inst_);
   const uint64_t modifiers = (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) |
                              ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) |
@@ -2016,19 +2310,23 @@ void VAddMaxI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VAddMaxI32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   amdgpu::arith::execute_ternary32(wf, rj_arith_v_add_max_i32_w32, rj_arith_v_add_max_i32_w64,
                                    wf.cu().arithmetic_flags(),
                                    inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
@@ -2048,19 +2346,23 @@ void VAddMaxU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VAddMaxU32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   amdgpu::arith::execute_ternary32(wf, rj_arith_v_add_max_u32_w32, rj_arith_v_add_max_u32_w64,
                                    wf.cu().arithmetic_flags(),
                                    inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
@@ -2080,19 +2382,23 @@ void VAddMinI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VAddMinI32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   amdgpu::arith::execute_ternary32(wf, rj_arith_v_add_min_i32_w32, rj_arith_v_add_min_i32_w64,
                                    wf.cu().arithmetic_flags(),
                                    inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
@@ -2112,19 +2418,23 @@ void VAddMinU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VAddMinU32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   amdgpu::arith::execute_ternary32(wf, rj_arith_v_add_min_u32_w32, rj_arith_v_add_min_u32_w64,
                                    wf.cu().arithmetic_flags(),
                                    inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
@@ -2144,19 +2454,23 @@ void VMaxminU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VMaxminU32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   amdgpu::arith::execute_ternary32(wf, rj_arith_v_maxmin_u32_w32, rj_arith_v_maxmin_u32_w64,
                                    wf.cu().arithmetic_flags(),
                                    inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
@@ -2176,19 +2490,23 @@ void VMinmaxU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VMinmaxU32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   amdgpu::arith::execute_ternary32(wf, rj_arith_v_minmax_u32_w32, rj_arith_v_minmax_u32_w64,
                                    wf.cu().arithmetic_flags(),
                                    inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
@@ -2208,19 +2526,23 @@ void VMaxminI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VMaxminI32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   amdgpu::arith::execute_ternary32(wf, rj_arith_v_maxmin_i32_w32, rj_arith_v_maxmin_i32_w64,
                                    wf.cu().arithmetic_flags(),
                                    inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
@@ -2240,19 +2562,23 @@ void VMinmaxI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VMinmaxI32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   amdgpu::arith::execute_ternary32(wf, rj_arith_v_minmax_i32_w32, rj_arith_v_minmax_i32_w64,
                                    wf.cu().arithmetic_flags(),
                                    inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
@@ -2277,19 +2603,23 @@ void VMinmaxNumF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VMinmaxNumF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   const uint64_t modifiers =
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
       ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
@@ -2319,19 +2649,23 @@ void VMaxminNumF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VMaxminNumF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   const uint64_t modifiers =
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
       ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
@@ -2364,21 +2698,25 @@ void VMinmaxNumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VMinmaxNumF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
                             amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   const uint32_t opsel = amdgpu::vop3_opsel(inst_);
   const uint64_t modifiers =
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
@@ -2414,21 +2752,25 @@ void VMaxminNumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VMaxminNumF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
                             amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   const uint32_t opsel = amdgpu::vop3_opsel(inst_);
   const uint64_t modifiers =
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
@@ -2461,19 +2803,23 @@ void VMinimummaximumF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VMinimummaximumF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   const uint64_t modifiers =
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
       ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
@@ -2503,19 +2849,23 @@ void VMaximumminimumF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VMaximumminimumF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   const uint64_t modifiers =
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
       ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
@@ -2548,21 +2898,25 @@ void VMinimummaximumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VMinimummaximumF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
                             amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   const uint32_t opsel = amdgpu::vop3_opsel(inst_);
   const uint64_t modifiers =
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
@@ -2598,21 +2952,25 @@ void VMaximumminimumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VMaximumminimumF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
                             amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   const uint32_t opsel = amdgpu::vop3_opsel(inst_);
   const uint64_t modifiers =
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
@@ -2642,19 +3000,23 @@ void VAshrPkI8I32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VAshrPkI8I32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   const uint32_t opsel = amdgpu::vop3_opsel(inst_);
   const uint64_t modifiers = (opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u;
   amdgpu::arith::execute_integer16<3, false, true>(
@@ -2678,19 +3040,23 @@ void VAshrPkU8I32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VAshrPkU8I32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   const uint32_t opsel = amdgpu::vop3_opsel(inst_);
   const uint64_t modifiers = (opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u;
   amdgpu::arith::execute_integer16<3, false, true>(
@@ -2712,17 +3078,20 @@ void VMadNcU64U32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VMadNcU64U32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   amdgpu::arith::execute_mad64_nc(wf, rj_arith_v_mad_nc_u64_u32_w32, rj_arith_v_mad_nc_u64_u32_w64,
                                   wf.cu().arithmetic_flags(), inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u,
                                   vdst, src0, src1, src2);
@@ -2742,17 +3111,20 @@ void VMadNcI64I32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VMadNcI64I32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  }
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
+  if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
   amdgpu::arith::execute_mad64_nc(wf, rj_arith_v_mad_nc_i64_i32_w32, rj_arith_v_mad_nc_i64_i32_w64,
                                   wf.cu().arithmetic_flags(), inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u,
                                   vdst, src0, src1, src2);

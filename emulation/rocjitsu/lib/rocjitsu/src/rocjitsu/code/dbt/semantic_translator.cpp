@@ -5,6 +5,7 @@
 /// @brief Small dispatch facade for ISA-pair semantic expansion rules.
 
 #include "rocjitsu/code/dbt/semantic_translator.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/dbt/semantic/rules.h"
 #include "rocjitsu/isa/instruction.h"
@@ -21,21 +22,26 @@ namespace {
 /// @brief Select the handwritten rewrite registry for one ISA pair.
 /// @details Most ISA pairs currently have only an opcode table and do not offer
 /// complete registry-level rewrite-discharge verification.
-[[nodiscard]] RewriteRegistry rewrite_registry_for(rj_code_arch_t guest, rj_code_arch_t host,
+[[nodiscard]] RewriteRegistry rewrite_registry_for(rocjitsu::IsaFamily guest,
+                                                   rocjitsu::IsaFamily host,
                                                    ProcessorRevision input_revision,
                                                    ProcessorRevision output_revision) {
-  if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA4)
+  if (guest == rocjitsu::IsaFamily::Cdna4 && host == rocjitsu::IsaFamily::Rdna4) {
     return {semantic_expand_rules_cdna4_to_rdna4(), cdna4_reverse_shift_rules_for_rdna(host)};
-  if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_CDNA3)
+  }
+  if (guest == rocjitsu::IsaFamily::Cdna4 && host == rocjitsu::IsaFamily::Cdna3) {
     return {semantic_expand_rules_cdna4_to_cdna3(), {}};
+  }
   // gfx1250 A0 and B0 share one architectural target ID. Select the B0-to-A0
   // profile only for that explicit revision pair.
-  if (guest == ROCJITSU_CODE_ARCH_CDNA5 && host == ROCJITSU_CODE_ARCH_CDNA5 &&
+  if (guest == rocjitsu::IsaFamily::Cdna5 && host == rocjitsu::IsaFamily::Cdna5 &&
       input_revision == ProcessorRevision::Gfx1250B0 &&
-      output_revision == ProcessorRevision::Gfx1250A0)
+      output_revision == ProcessorRevision::Gfx1250A0) {
     return rewrite_registry_gfx1250_b0_to_a0();
-  if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA3)
+  }
+  if (guest == rocjitsu::IsaFamily::Cdna4 && host == rocjitsu::IsaFamily::Rdna3) {
     return {semantic_expand_rules_cdna4_to_rdna3(), cdna4_reverse_shift_rules_for_rdna(host)};
+  }
   return {};
 }
 
@@ -51,7 +57,7 @@ namespace {
 
 } // namespace
 
-SemanticTranslator::SemanticTranslator(rj_code_arch_t guest, rj_code_arch_t host,
+SemanticTranslator::SemanticTranslator(rocjitsu::IsaFamily guest, rocjitsu::IsaFamily host,
                                        ProcessorRevision input_revision,
                                        ProcessorRevision output_revision)
     : rewrite_registry_(rewrite_registry_for(guest, host, input_revision, output_revision)),
@@ -78,19 +84,22 @@ SemanticTranslator::SemanticTranslator(rj_code_arch_t guest, rj_code_arch_t host
     // Most encodings have no handwritten semantic rules, so this tiny bitset
     // avoids probing the sorted (encoding, opcode) table for obvious misses.
     expand_rule_encoding_bits_.assign(static_cast<size_t>(max_encoding_id / 64) + 1, 0);
-    for (const TranslationRule &rule : expand_rules_)
+    for (const TranslationRule &rule : expand_rules_) {
       expand_rule_encoding_bits_[rule.src_encoding_id / 64] |= uint64_t{1}
                                                                << (rule.src_encoding_id % 64);
+    }
   }
 }
 
 const TranslationRule *SemanticTranslator::find_expand_rule(const Instruction &inst) const {
-  if (!has_expand_rule_encoding(inst.encoding_id()))
+  if (!has_expand_rule_encoding(inst.encoding_id())) {
     return nullptr;
+  }
   const uint32_t key = packed_rule_key(inst.encoding_id(), inst.opcode());
   auto it = std::ranges::lower_bound(expand_rule_keys_, key);
-  if (it == expand_rule_keys_.end() || *it != key)
+  if (it == expand_rule_keys_.end() || *it != key) {
     return nullptr;
+  }
   const size_t index = static_cast<size_t>(it - expand_rule_keys_.begin());
   const TranslationRule &rule = expand_rules_[index];
   return rule.expand_fn ? &rule : nullptr;
@@ -115,8 +124,9 @@ ExpandResult SemanticTranslator::try_lower_instruction_rewrite(const Instruction
                                                                const LivenessAnalysis &liveness,
                                                                TranslationContext &context) const {
   for (const RegisteredInstructionRewrite &rule : instruction_rewrite_rules_) {
-    if (!rule.applies(inst))
+    if (!rule.applies(inst)) {
       continue;
+    }
     auto result = rule.lower(inst, offset, source_text, liveness, context);
     if (result.status == ExpandStatus::NotHandled) {
       return ExpandResult::failed("registered instruction rewrite '" + std::string(rule.name) +
@@ -140,8 +150,9 @@ bool SemanticTranslator::has_instruction_rewrite(const Instruction &inst) const 
 
 bool SemanticTranslator::rewrite_requires_liveness(const Instruction &inst) const {
   const TranslationRule *rule = find_expand_rule(inst);
-  if (rule != nullptr && rule->requires_liveness)
+  if (rule != nullptr && rule->requires_liveness) {
     return true;
+  }
   return std::ranges::any_of(instruction_rewrite_rules_,
                              [&](const RegisteredInstructionRewrite &candidate) {
                                return candidate.requires_liveness && candidate.applies != nullptr &&
@@ -159,8 +170,9 @@ bool SemanticTranslator::instruction_local_residual_rewrite_applies(const Instru
 }
 
 bool SemanticTranslator::residual_rewrite_needs_basic_block(const Instruction &inst) const {
-  if (instruction_rewrites_require_basic_block_)
+  if (instruction_rewrites_require_basic_block_) {
     return true;
+  }
   const TranslationRule *rule = find_expand_rule(inst);
   if (rule != nullptr && rule->discharge.disposition == RewriteDischargeDisposition::Checked &&
       rule->discharge.context == RewriteDischargeContext::BasicBlock) {

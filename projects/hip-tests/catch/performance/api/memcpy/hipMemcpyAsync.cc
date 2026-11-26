@@ -185,6 +185,96 @@ HIP_TEST_CASE(Performance_hipMemcpyAsync_DeviceToDevice_EnablePeerAccess) {
                true);
 }
 
+// Times on the host what a caller waits for: the copy's submission, the copy, and the stream
+// synchronize, which the CPU timer runs when the section ends. An event timer sees only the copy.
+class MemcpyAsyncSynchronizedBenchmark : public Benchmark<MemcpyAsyncSynchronizedBenchmark> {
+ public:
+  void operator()(void* dst, const void* src, size_t size, hipMemcpyKind kind,
+                  const hipStream_t& stream) {
+    TIMED_SECTION_STREAM(kTimerTypeCpu, stream) {
+      HIP_CHECK(hipMemcpyAsync(dst, src, size, kind, stream));
+    }
+  }
+};
+
+__global__ void MemcpyAsyncDependentKernel() {}
+
+// The same, with a kernel that waits for the copy before the stream synchronize
+class MemcpyAsyncDependentKernelBenchmark
+    : public Benchmark<MemcpyAsyncDependentKernelBenchmark> {
+ public:
+  void operator()(void* dst, const void* src, size_t size, const hipStream_t& stream) {
+    TIMED_SECTION_STREAM(kTimerTypeCpu, stream) {
+      HIP_CHECK(hipMemcpyAsync(dst, src, size, hipMemcpyHostToDevice, stream));
+      MemcpyAsyncDependentKernel<<<1, 1, 0, stream>>>();
+      HIP_CHECK(hipGetLastError());
+    }
+  }
+};
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Executes `hipMemcpyAsync` between pinned host memory and device memory and synchronizes the
+ *    stream, timed on the host, so the time includes submitting the copy and noticing that it
+ *    completed:
+ *    -# Allocation size
+ *      - 256 KB, 1 MB, 4 MB
+ *    -# Direction
+ *      - Host to Device and Device to Host
+ * Test source
+ * ------------------------
+ * - performance/api/memcpy/hipMemcpyAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+HIP_TEST_CASE(Performance_hipMemcpyAsync_PinnedSynchronized) {
+  const auto allocation_size = GENERATE(256_KB, 1_MB, 4_MB);
+  const auto kind = GENERATE(hipMemcpyHostToDevice, hipMemcpyDeviceToHost);
+  MemcpyAsyncSynchronizedBenchmark benchmark;
+  benchmark.AddSectionName(std::to_string(allocation_size));
+  benchmark.AddSectionName(kind == hipMemcpyHostToDevice ? "host to device" : "device to host");
+  benchmark.RegisterBandwidth(allocation_size);
+
+  const StreamGuard stream_guard{Streams::created};
+  LinearAllocGuard<int> host_allocation(LinearAllocs::hipHostMalloc, allocation_size);
+  LinearAllocGuard<int> device_allocation(LinearAllocs::hipMalloc, allocation_size);
+  if (kind == hipMemcpyHostToDevice) {
+    benchmark.Run(device_allocation.ptr(), host_allocation.ptr(), allocation_size, kind,
+                  stream_guard.stream());
+  } else {
+    benchmark.Run(host_allocation.ptr(), device_allocation.ptr(), allocation_size, kind,
+                  stream_guard.stream());
+  }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Executes `hipMemcpyAsync` from pinned host memory to device memory, then a kernel on the same
+ *    stream that waits for the copy, and synchronizes the stream, timed on the host:
+ *    -# Allocation size
+ *      - 256 KB, 1 MB
+ * Test source
+ * ------------------------
+ * - performance/api/memcpy/hipMemcpyAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+HIP_TEST_CASE(Performance_hipMemcpyAsync_HostToDevice_DependentKernel) {
+  const auto allocation_size = GENERATE(256_KB, 1_MB);
+  MemcpyAsyncDependentKernelBenchmark benchmark;
+  benchmark.AddSectionName(std::to_string(allocation_size));
+
+  const StreamGuard stream_guard{Streams::created};
+  LinearAllocGuard<int> host_allocation(LinearAllocs::hipHostMalloc, allocation_size);
+  LinearAllocGuard<int> device_allocation(LinearAllocs::hipMalloc, allocation_size);
+  benchmark.Run(device_allocation.ptr(), host_allocation.ptr(), allocation_size,
+                stream_guard.stream());
+}
+
 /**
  * End doxygen group memcpy.
  * @}

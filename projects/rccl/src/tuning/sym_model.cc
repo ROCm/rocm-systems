@@ -28,6 +28,9 @@ int ncclSymkModelCtasEnvOverride(enum ncclSymkKernelId kernelId) {
   if (kernelId == ncclSymkKernelId_AllGather_HierLsaTmaST) {
     maxBlocks = ncclSymkAgHierTmaMaxBlocks;
   }
+  if (kernelId == ncclSymkKernelId_ReduceScatter_HierLsaLDST) {
+    maxBlocks = ncclSymkRsHierMaxBlocks;
+  }
   int64_t nUserCTAs = ncclParamSymCTAs();
   if (hier && nUserCTAs < 1) nUserCTAs = ncclParamSymAgHierCtas();
   if (nUserCTAs < 1) return 0;
@@ -59,10 +62,17 @@ static bool rcclSymkAllGatherLLYieldsToST(struct ncclTuningInput_t* const inputs
   struct ncclComm* comm = inputs->comm;
   return kernelId == ncclSymkKernelId_AllGather_LL && ncclSymkIsGfx950(comm) &&
          !rcclSymkFuncForced(comm, inputs->func) && (valid_kmask >> ncclSymkKernelId_AllGather_ST & 1) &&
-         (inputs->tuningMask >> (NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ncclSymkKernelId_AllGather_ST) & 1) &&
+         inputs->tuningMask.test(NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ncclSymkKernelId_AllGather_ST) &&
          (inputs->winRegType == ncclSymSendRegRecvReg || inputs->winRegType == ncclSymSendNonregRecvReg) &&
          ncclSymkGfx950AllGatherPrefersStore(comm->nRanks, inputs->nBytes);
 }
+
+struct AllowMask {
+  ncclSymkKernelMask bits;
+  bool has(int id) const {
+    return bits >> id & 1;
+  }
+};
 
 // In gfx1250 partition mode AllGather runs LL, then the store kernel, then the hierarchical kernel, each
 // from where it overtakes the one before, unless the user forced the choice. If either of the latter two
@@ -80,11 +90,7 @@ static bool rcclSymkAllGatherYieldsInPartitionMode(struct ncclTuningInput_t* con
       (inputs->winRegType != ncclSymSendRegRecvReg && inputs->winRegType != ncclSymSendNonregRecvReg)) {
     return false;
   }
-  struct AllowMask {
-    ncclSymkKernelMask bits;
-    bool has(int id) const { return bits >> id & 1; }
-  };
-  const AllowMask allowed{valid_kmask & ncclSymkKernelMask(inputs->tuningMask >> NCCL_TUNING_SYM_KERNEL_ID_OFFSET)};
+  const AllowMask allowed{valid_kmask & rcclSymkMaskFromTuning(inputs->tuningMask)};
   int st = allowed.has(vecSt) ? vecSt : tmaSt;
   int hier = allowed.has(vecHier) ? vecHier : tmaHier;
   bool hasSt = allowed.has(st);
@@ -94,6 +100,36 @@ static bool rcclSymkAllGatherYieldsInPartitionMode(struct ncclTuningInput_t* con
   if (hasHier && ncclSymkGfx1250AllGatherPrefersHier(comm->nRanks, inputs->nBytes)) return kernelId != hier;
   if (ncclSymkGfx1250AllGatherPrefersStore(comm->nRanks, inputs->nBytes)) return kernelId != afterLL;
   return kernelId != afterLL && kernelId != ncclSymkKernelId_AllGather_LL;
+}
+
+// In gfx1250 partition mode ReduceScatter runs LL, then the hierarchical kernel from where it overtakes LL,
+// unless the user forced the choice. Where the preferred kernel can't run, such as LL for a grouped launch
+// or the others without a registered send window, the flat load kernel is next: below the crossover it
+// beats the hierarchical kernel's fixed cost, and above it LL falls far behind it from 16 MiB. Elsewhere
+// the hierarchical kernel can't run at all.
+static bool rcclSymkReduceScatterYieldsInPartitionMode(struct ncclTuningInput_t* const inputs,
+                                                       enum ncclSymkKernelId kernelId, ncclSymkKernelMask valid_kmask) {
+  constexpr int ll = ncclSymkKernelId_ReduceScatter_LL;
+  constexpr int ld = ncclSymkKernelId_ReduceScatter_LD;
+  constexpr int tmaLd = ncclSymkKernelId_ReduceScatter_TmaLD;
+  constexpr int hier = ncclSymkKernelId_ReduceScatter_HierLsaLDST;
+  struct ncclComm* comm = inputs->comm;
+  if (inputs->func != ncclFuncReduceScatter || !ncclSymkIsGfx1250(comm) || !comm->hasMloPart ||
+      comm->tuningContext.forced[inputs->func]) {
+    return false;
+  }
+  const AllowMask allowed{valid_kmask & rcclSymkMaskFromTuning(inputs->tuningMask)};
+  // The same conditions ncclTuningSymkModelSim puts on LL (no grouping) and on the rest (a registered send).
+  bool sendReg = inputs->winRegType == ncclSymSendRegRecvReg || inputs->winRegType == ncclSymSendRegRecvNonreg;
+  bool hierFirst = ncclSymkGfx1250ReduceScatterPrefersHier(comm->nRanks, inputs->nBytes);
+  // TmaLD stands in for LD where a selection allows only the TDM flat load kernel.
+  int load = allowed.has(ld) ? ld : tmaLd;
+  for (int k : {hierFirst ? hier : ll, load, hierFirst ? ll : hier}) {
+    if (allowed.has(k) && (k == ll ? inputs->nWorks <= 1 : sendReg)) {
+      return kernelId != k;
+    }
+  }
+  return false;  // None of the three can run; leave the choice to the cost model.
 }
 
 static int rcclSymkCalculateWarps(struct ncclTuningInput_t* const inputs, enum ncclSymkKernelId kernelId) {
@@ -137,7 +173,7 @@ ncclResult_t ncclTuningSymkModelSim(struct ncclTuningInput_t* const inputs, stru
   ncclSymkKernelMask valid_kmask = inputs->symkMaskCache != 0
     ? inputs->symkMaskCache
     : ncclSymkMask(inputs->comm, inputs->func, inputs->devRedOp, inputs->datatype,
-                   inputs->countMax, inputs->symAligned16B);
+                   inputs->countMax, inputs->symAligned16B, inputs->ginWindowsUnregistered);
   ncclSymkKernelMask window_optional_kmask = ncclSymkLLKernelMask() | ncclGenkKernelMask();
   // Kernels that don't support grouping -- these are symmetric LL kernels.
   ncclSymkKernelMask ungrouped_kmask = ncclSymkLLKernelMask() & ~ncclGenkKernelMask();
@@ -187,7 +223,8 @@ ncclResult_t ncclTuningSymkModelSim(struct ncclTuningInput_t* const inputs, stru
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   if (rcclSymkAllGatherLLYieldsToST(inputs, (enum ncclSymkKernelId)tuning->symKernelId, valid_kmask) ||
-      rcclSymkAllGatherYieldsInPartitionMode(inputs, (enum ncclSymkKernelId)tuning->symKernelId, valid_kmask)) {
+      rcclSymkAllGatherYieldsInPartitionMode(inputs, (enum ncclSymkKernelId)tuning->symKernelId, valid_kmask) ||
+      rcclSymkReduceScatterYieldsInPartitionMode(inputs, (enum ncclSymkKernelId)tuning->symKernelId, valid_kmask)) {
     tuning->valid = 0;
     tuning->timeUs = -1.0;
     return ncclSuccess;

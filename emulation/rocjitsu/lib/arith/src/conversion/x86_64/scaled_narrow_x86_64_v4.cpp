@@ -19,25 +19,33 @@ void scaled_narrow_x86_64_v4(int lanes, uint64_t exec_mask, ScaledNarrowSource s
                              const uint32_t *upper_a) {
   constexpr bool fp4 = Dst == ScaledNarrowDestination::Fp4;
   auto selected = _mm512_set1_epi32(int((Stochastic || fp4 ? 0xffU : 0xffffU) << shift));
+  auto sig_mask = _mm512_set1_epi32(int(scaled_sig_mask(source)));
+  auto sign_mask = _mm512_set1_epi32(int(0x80000000U));
+  auto qnan_mag = _mm512_set1_epi32(0x7fc00000);
   for (int lane = 0; lane < lanes; lane += 16) {
+    if (uint16_t(exec_mask >> lane) == 0) {
+      continue;
+    }
     auto av = _mm512_loadu_si512(reinterpret_cast<const __m512i *>(a + lane));
     auto bv = _mm512_loadu_si512(reinterpret_cast<const __m512i *>(b + lane));
     auto old = _mm512_loadu_si512(reinterpret_cast<const __m512i *>(d + lane));
     auto exponent = _mm512_and_si512(
         _mm512_srli_epi32(_mm512_loadu_si512(reinterpret_cast<const __m512i *>(scale + lane)), 23),
         _mm512_set1_epi32(255));
-    auto preserve = _mm512_cmpeq_epi32_mask(exponent, _mm512_set1_epi32(255));
+    auto nan_scale = _mm512_cmpeq_epi32_mask(exponent, _mm512_set1_epi32(255));
     auto subnormal_scale = _mm512_cmpeq_epi32_mask(exponent, _mm512_set1_epi32(254));
     auto inverse_bits = _mm512_slli_epi32(_mm512_sub_epi32(_mm512_set1_epi32(254), exponent), 23);
     inverse_bits =
         _mm512_mask_blend_epi32(subnormal_scale, inverse_bits, _mm512_set1_epi32(0x00400000));
-    // Exponent 255 keeps D, so use a harmless multiplier in those lanes.
-    inverse_bits = _mm512_mask_blend_epi32(preserve, inverse_bits, _mm512_set1_epi32(0x3f800000));
+    inverse_bits = _mm512_mask_blend_epi32(nan_scale, inverse_bits, _mm512_set1_epi32(0x3f800000));
     auto inverse_scale = _mm512_castsi512_ps(inverse_bits);
-    auto scaled =
-        _mm512_mul_ps(x86_64_v4::scaled_narrow_decode(av, source, flush_input), inverse_scale);
+    auto decoded = x86_64_v4::scaled_narrow_decode(av, source, flush_input);
+    auto scaled = _mm512_castps_si512(_mm512_mul_ps(decoded, inverse_scale));
+    scaled = _mm512_mask_blend_epi32(
+        nan_scale, scaled,
+        _mm512_or_si512(_mm512_and_si512(_mm512_castps_si512(decoded), sign_mask), qnan_mag));
     auto value =
-        x86_64_v4::scaled_narrow_encode<Dst, Stochastic>(_mm512_castps_si512(scaled), bv, saturate);
+        x86_64_v4::scaled_narrow_encode<Dst, Stochastic, true>(scaled, bv, saturate, sig_mask);
     if constexpr (!Stochastic || fp4) {
       auto upper = source == ScaledNarrowSource::F32 ? bv : _mm512_srli_epi32(av, 16);
       if constexpr (Stochastic && fp4) {
@@ -48,15 +56,18 @@ void scaled_narrow_x86_64_v4(int lanes, uint64_t exec_mask, ScaledNarrowSource s
       auto next_seed =
           _mm512_xor_si512(_mm512_slli_epi32(bv, 1),
                            _mm512_and_si512(_mm512_srai_epi32(bv, 31), _mm512_set1_epi32(197)));
-      auto high_scaled =
-          _mm512_mul_ps(x86_64_v4::scaled_narrow_decode(upper, source, flush_input), inverse_scale);
-      auto high = x86_64_v4::scaled_narrow_encode<Dst, Stochastic>(_mm512_castps_si512(high_scaled),
-                                                                   next_seed, saturate);
+      auto high_decoded = x86_64_v4::scaled_narrow_decode(upper, source, flush_input);
+      auto high_scaled = _mm512_castps_si512(_mm512_mul_ps(high_decoded, inverse_scale));
+      high_scaled = _mm512_mask_blend_epi32(
+          nan_scale, high_scaled,
+          _mm512_or_si512(_mm512_and_si512(_mm512_castps_si512(high_decoded), sign_mask),
+                          qnan_mag));
+      auto high = x86_64_v4::scaled_narrow_encode<Dst, Stochastic, true>(high_scaled, next_seed,
+                                                                         saturate, sig_mask);
       value = _mm512_or_si512(value, _mm512_slli_epi32(high, fp4 ? 4 : 8));
     }
     value = _mm512_or_si512(_mm512_andnot_si512(selected, old),
                             _mm512_sll_epi32(value, _mm_cvtsi32_si128(shift)));
-    value = _mm512_mask_blend_epi32(preserve, value, old);
     _mm512_mask_storeu_epi32(d + lane, __mmask16(exec_mask >> lane), value);
   }
 }

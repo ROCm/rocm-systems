@@ -405,7 +405,8 @@ collected in the following table.
         | fuse. This does not turn batching on; that is
         | ``RCCL_P2P_BATCH_ENABLE``.
         | A negative value selects the architecture default: 64 KiB on gfx950
-        | (MI350) with 16 or more nodes, and no size limit elsewhere. An
+        | (MI350) with 16 or more nodes, 1 MiB on gfx942 (MI300), and no size
+        | limit elsewhere. An
         | explicit ``-1`` is the same as leaving the variable unset. A
         | non-negative value, including ``65536``, is the cutoff on every
         | architecture. ``0`` fuses no positive-size message.
@@ -786,6 +787,8 @@ in the following table.
         | Minimum message size (in bytes) before the payload is split across
         | multiple NICs/QPs.
         | Smaller messages use one QP for data to reduce latency.
+        | The threshold now also applies when the CAST QP scheduler is disabled;
+        | previously it was honoured only while the scheduler was active.
         | This variable can be leveraged when NIC Fusion (``NCCL_NET_MERGE_LEVEL``) and/or data splitting on QPs (``NCCL_IB_SPLIT_DATA_ON_QPS``) is enabled.
       - | Integer value in bytes (default: ``128``)
         | ``N``: Split only when message size >= N bytes
@@ -1051,6 +1054,25 @@ in the following table.
         | All listed backends connect together, so if one fails to connect,
           GIN fails on that communicator for every backend in the list.
         | Default: unset (every backend except rocSHMEM GDA may be active)
+
+    * - | ``NCCL_GIN_ALLGATHER_ENABLE``
+        | GIN-SDMA AllGather on a single node. Compiled only in the
+          ``--rocshmem-gin`` build.
+      - | ``1``: a symmetric single-segment AllGather on gfx950 may use GIN (default)
+        | ``0``: leave AllGather on the non-GIN selectors
+
+    * - | ``NCCL_GIN_ALLGATHER_MIN_BYTES``
+        | Per-rank byte floor for GIN-SDMA AllGather.
+      - | ``0`` (default): no extra size floor
+
+    * - | ``NCCL_GIN_ALLGATHER_SDMA_MIN_BYTES``
+        | Per-rank size at which AllGather switches from LSA stores to SDMA puts.
+      - | ``8388608`` (8 MiB, default)
+
+    * - | ``NCCL_GIN_ALLGATHER_GFX1250_ENABLE``
+        | Opt in to GIN-SDMA AllGather on gfx1250, including DPX.
+      - | ``0``: gfx1250 keeps the pre-existing AllGather selectors (default)
+        | ``1``: gfx1250 may use the same single-node GIN AllGather path as gfx950
 
     * - | ``NCCL_GIN_ALLREDUCE_GFX1250_ENABLE``
         | Opt in to GinScatter AllReduce on gfx1250.
@@ -1646,6 +1668,18 @@ threshold table introduced for gfx1250.
         | ``N`` (bytes): Use ``N`` as the LL128 tier ceiling, overriding the table.
           Pre-table default: ``0`` (LL128 tier was off before the arch table).
 
+    * - | ``RCCL_DDA_LL128_ONESHOT_THRESHOLD``
+        | Largest ``ncclAllReduce`` message in bytes that the DDA LL128 tier sends
+          through its one-shot kernel; larger messages take the two-shot when they
+          split into whole 16-byte shards per rank. When unset, the cap is 4 MiB,
+          divided by ``nRanks`` while the peer-parallel kernels are on
+          (``RCCL_DDA_LL128_AR_PEER_PARALLEL``) on architectures whose arch table
+          sets ``ddaArLL128OneShotRankBytes`` (gfx1250 SPX). A message past the
+          scaled cap that the two-shot cannot split stays on the one-shot up to
+          4 MiB.
+      - | Unset: 4 MiB, or 4 MiB / ``nRanks`` on gfx1250 SPX (default).
+        | ``N`` (bytes): One-shot up to ``N`` at every rank count, not scaled.
+
     * - | ``RCCL_DDA_LL128_AG_THREADS``
         | Threads per block for the DDA LL128 ``ncclAllGather`` kernel. When ``0``
           (default), resolved from ``ddaAgLL128Threads`` in the arch table: the
@@ -1664,6 +1698,15 @@ threshold table introduced for gfx1250.
           warp of dynamic LDS. It is off by default. Other architectures are unaffected.
       - | ``0``: Cooperative writer for every launch, no dynamic LDS (default).
         | ``1``: Staged writer from 2 MiB shards on gfx1250 wave32 communicators.
+
+    * - | ``RCCL_DDA_LL128_AR_PEER_PARALLEL``
+        | Selects the DDA LL128 ``ncclAllReduce`` one-shot and two-shot kernels.
+          The peer-parallel kernels give each slice a group of up to 16 warps, one
+          per rank, that split its peers, so the per-slice peer loop shrinks as
+          ``nRanks`` grows. With them, the one-shot cap is rank-scaled (4 MiB /
+          ``nRanks`` on gfx1250 SPX).
+      - | ``1``: Peer-parallel kernels (default).
+        | ``0``: One warp per slice, and the fixed one-shot cap.
 
     * - | ``RCCL_DDA_A2A_PUSH``
         | Selects the ``ncclAllToAll`` kernel on the DDA fabric (VMM) tier. The push

@@ -111,6 +111,7 @@
 /emulation/                                                           @atgutier
 /emulation/mirage/                                                    @amd-arosa @ROCm/rocjitsu-core-team
 /emulation/rocjitsu/                                                  @atgutier @ROCm/rocjitsu-core-team
+/emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/vm/plugins/             @atgutier @ROCm/rocjitsu-core-team @newling
 
 # Profilers
 /profilers/profiler-hub                                               @ROCm/rocm-profiler-hub
@@ -169,7 +170,6 @@
 /projects/rocjpeg/**/*.rst                                            @ROCm/rocjpeg-docs-reviewers
 /projects/rocjpeg/**/.readthedocs.yaml                                @ROCm/rocjpeg-docs-reviewers
 
-/projects/hipfile/CHANGELOG.md                                        @ROCm/hipfile-docs-reviewers @ROCm/hipfile-reviewers
 /projects/hipfile/**/.readthedocs.yaml                                @ROCm/hipfile-docs-reviewers
 /projects/hipfile/docs/                                               @ROCm/hipfile-docs-reviewers @ROCm/hipfile-reviewers
 

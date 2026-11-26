@@ -257,6 +257,9 @@ constexpr int ncclSymkAgHierBlocksForSize(int nRanks, size_t nBytes) {
 // Max blocks for the hierarchical TDM AllGather kernel.
 constexpr int ncclSymkAgHierTmaMaxBlocks = 48;
 
+// Max blocks for the hierarchical LSA ReduceScatter kernel.
+constexpr int ncclSymkRsHierMaxBlocks = 96;
+
 // How the hierarchical LSA AllGather kernel splits nBlocks over nGroups packages. Group 0 copies with
 // whole blocks where a pushing group forwards with half of each, so it gets about half as many blocks
 // as each pushing group, and at least one.
@@ -267,6 +270,26 @@ constexpr __host__ __device__ int ncclSymkAgHierG0Blocks(int nBlocks, int nGroup
 constexpr __host__ __device__ int ncclSymkAgHierGroupBlocks(int nBlocks, int nGroups) {
   int n = (nBlocks - ncclSymkAgHierG0Blocks(nBlocks, nGroups)) / (nGroups - 1);
   return n > 1 ? n : 1;
+}
+// Chunk size: the bytes a block pushes to each other package per round. Small launches use this one, since a
+// bigger chunk would leave their blocks too few rounds to overlap.
+constexpr size_t ncclSymkRsHierMinChunkBytes = 64 << 10;
+// Chunk size of big launches. Twice the small one, so a launch does half as many flag handshakes.
+constexpr size_t ncclSymkRsHierMaxChunkBytes = 2 * ncclSymkRsHierMinChunkBytes;
+// Bytes per block at which a launch switches from the min to the max chunk size, so that a block always gets
+// several rounds of the max chunk to overlap.
+constexpr size_t ncclSymkRsHierChunkSwitchBlockBytes = 4 * ncclSymkRsHierMaxChunkBytes;
+// Alignment of the landing slots. Every slot is a whole number of chunks past the first, so with chunks that
+// are multiples of it, no slot, warp tile or store crosses a 4 KiB page.
+constexpr size_t ncclSymkRsHierSlotsAlign = 4 << 10;
+// Per-rank budget for the landing slots, which grow with the package count: ncclSymkRsHierMaxBlocks blocks
+// times two rounds in flight times one slot per other package. Within it the chunk is
+// ncclSymkRsHierMaxChunkBytes, which holds up to 11 packages; beyond that the chunk shrinks to fit.
+constexpr size_t ncclSymkRsHierSlotsMaxBytes = 256 << 20;
+// Flags a block of it keeps: a ready count from each other package, the block's round count, then a
+// credit count from each other package.
+constexpr __host__ __device__ int ncclSymkRsHierFlagsPerBlock(int nGroups) {
+  return 2 * nGroups;
 }
 
 // One block's row of hierPushFlags. Words [0, nGroups) are the push flags; group 0 raises none, so its
@@ -313,10 +336,7 @@ enum ncclSymkKernelId {
   ncclSymkKernelId_AllGather_ST,
   ncclSymkKernelId_AllGather_TmaSTMC,
   ncclSymkKernelId_AllGather_STMC,
-  ncclSymkKernelId_AllGather_RailRing_LsaST,
   ncclSymkKernelId_AllGather_RailRing_LsaSTMC,
-  ncclSymkKernelId_AllGather_HierLsaST,
-  ncclSymkKernelId_AllGather_HierLsaTmaST,
 
   ncclSymkKernelId_ReduceScatter_LL,
   ncclSymkKernelId_ReduceScatter_TmaLD,
@@ -351,6 +371,13 @@ enum ncclSymkKernelId {
   // Append new kernels so existing tuning IDs remain stable.
   ncclSymkKernelId_AlltoAll_LL,
 
+  // RCCL's own kernels follow NCCL's, so NCCL's kernels have the same ids, tuning ids and algorithm-registry bits as
+  // upstream NCCL. Add RCCL kernels at the end of this list.
+  ncclSymkKernelId_AllGather_RailRing_LsaST,
+  ncclSymkKernelId_AllGather_HierLsaST,
+  ncclSymkKernelId_AllGather_HierLsaTmaST,
+  ncclSymkKernelId_ReduceScatter_HierLsaLDST,
+
   ncclSymkKernelId_Count
 };
 
@@ -361,14 +388,15 @@ constexpr char const* ncclSymKernelStr[] = {
   // Must align with enum ncclSymkKernelId definition in src/include/sym_kernels.h
   "AllReduce_AGxLL_R", "AllReduce_AGxLLMC_R", "AllReduce_RSxTmaLD_AGxTmaST", "AllReduce_RSxLD_AGxST",
   "AllReduce_RSxLDMC_AGxSTMC", "AllGather_LL", "AllGather_LLMC", "AllGather_TmaST", "AllGather_ST", "AllGather_TmaSTMC",
-  "AllGather_STMC", "AllGather_RailRing_LsaST", "AllGather_RailRing_LsaSTMC", "AllGather_HierLsaST",
-  "AllGather_HierLsaTmaST", "ReduceScatter_LL", "ReduceScatter_TmaLD", "ReduceScatter_LD", "ReduceScatter_LDMC",
-  "ReduceScatter_RailA2A_LsaLD", "ReduceScatter_RailA2A_LsaLDMC",
+  "AllGather_STMC", "AllGather_RailRing_LsaSTMC", "ReduceScatter_LL", "ReduceScatter_TmaLD", "ReduceScatter_LD",
+  "ReduceScatter_LDMC", "ReduceScatter_RailA2A_LsaLD", "ReduceScatter_RailA2A_LsaLDMC",
   // Genk kernels
   "AllReduce_Ring_Simple", "AllReduce_Tree_Simple", "AllGather_Ring_Simple", "ReduceScatter_Ring_Simple",
   "Broadcast_Ring_Simple", "Reduce_Ring_Simple", "AllReduce_Ring_LL", "AllReduce_Tree_LL", "AllGather_Ring_LL",
   "ReduceScatter_Ring_LL", "Broadcast_Ring_LL", "Reduce_Ring_LL", "AllReduce_Ring_LL128", "AllReduce_Tree_LL128",
-  "AllGather_Ring_LL128", "ReduceScatter_Ring_LL128", "Broadcast_Ring_LL128", "Reduce_Ring_LL128", "AlltoAll_LL"
+  "AllGather_Ring_LL128", "ReduceScatter_Ring_LL128", "Broadcast_Ring_LL128", "Reduce_Ring_LL128", "AlltoAll_LL",
+  // RCCL kernels, which follow NCCL's
+  "AllGather_RailRing_LsaST", "AllGather_HierLsaST", "AllGather_HierLsaTmaST", "ReduceScatter_HierLsaLDST"
 };
 
 // Per-channel view of the finalized topology ring for this rank. index is this rank's position in the ring when rank
@@ -446,6 +474,14 @@ struct ncclSymkDevComm {
   ncclDevResourceHandle hierPushFlags;
   // 0 selects ncclSymkAgHierMaxChunkBytes.
   uint32_t hierMaxChunkBytes;
+  // Per block of the hierarchical ReduceScatter, two rounds of landing slots, one for each other
+  // package, that the same block on that package's counterpart rank stores partial sums into.
+  ncclDevResourceHandle rsHierSlots;
+  // Per block of the hierarchical ReduceScatter, the flags that pace those slots: counterparts raise a
+  // ready count when a round's sums land, and owners raise a credit count once they have read them.
+  ncclDevResourceHandle rsHierFlags;
+  // Chunk size: bytes of partial sums a block sends each other package per round.
+  uint32_t rsHierChunkSize;
   // Profiler counters (host-pinned), indexed by channel id and per-channel entry.
   // workPhases holds per-phase timestamps published behind a fence.
   struct ncclDevProfiler* workStarted;
@@ -588,15 +624,19 @@ bool ncclSymkAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedO
                        size_t nElts);
 bool ncclSymkAlltoAllLLForced(struct ncclComm* comm);
 ncclSymkKernelMask ncclSymkMask(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
-                                size_t nElts, bool symAligned16B = true);
-// Whether the hierarchical LSA AllGather kernel can run on this arch and partition mode.
-bool ncclSymkAgHierAvailable(struct ncclComm* comm);
-// Packages the hierarchical LSA AllGather kernel spans on this comm, or 0 where it can't run.
-int ncclSymkAgHierGroups(struct ncclComm* comm);
+                                size_t nElts, bool symAligned16B = true, bool ginWindowsUnregistered = false);
+// Whether the hierarchical LSA kernels (AllGather and ReduceScatter) can run on this arch and partition mode.
+bool ncclSymkHierAvailable(struct ncclComm* comm);
+// Packages the hierarchical LSA kernels span on this comm, or 0 where they can't run.
+int ncclSymkHierGroups(struct ncclComm* comm);
 // How many of nBlocks the hierarchical LSA AllGather kernel puts to work; the rest would sit out.
 int ncclSymkAgHierLaunchBlocks(struct ncclComm* comm, int nBlocks);
 int ncclSymkAgHierMaxBlocksLimit();
 size_t ncclSymkAgHierMaxChunkBytesLimit();
+// The chunk size a hierarchical ReduceScatter launch uses when each of its blocks handles blockBytes.
+uint32_t ncclSymkRsHierLaunchChunkSize(struct ncclComm* comm, size_t blockBytes);
+// Blocks the hierarchical ReduceScatter launches with for nBytes per rank.
+int ncclSymkRsHierLaunchBlocks(int nRanks, size_t nBytes);
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
 bool ncclSymkIsGfx950(struct ncclComm* comm);
@@ -615,6 +655,8 @@ bool ncclSymkGfx1250AllGatherPrefersStore(int nRanks, size_t nBytes);
 // Whether AllGather should take the hierarchical kernel over the store kernel on gfx1250 in partition
 // mode, which the shared cost model never does.
 bool ncclSymkGfx1250AllGatherPrefersHier(int nRanks, size_t nBytes);
+// Whether ReduceScatter on gfx1250 in partition mode should take the hierarchical kernel over LL.
+bool ncclSymkGfx1250ReduceScatterPrefersHier(int nRanks, size_t nBytes);
 #endif
 
 ncclResult_t ncclSymkMakeDevWork(struct ncclComm* comm, struct ncclTaskColl* task, struct ncclSymkDevWork* outDevWork);

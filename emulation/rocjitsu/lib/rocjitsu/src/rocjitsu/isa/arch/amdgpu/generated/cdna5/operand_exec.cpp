@@ -27,31 +27,38 @@ struct Packed16VgprSource {
 
 std::optional<Packed16VgprSource> packed_16bit_vgpr_source(bool packed_16bit_source, int size_bits,
                                                            OperandType opr_type, int ev) {
-  if (!packed_16bit_source || size_bits != 16)
+  if (!packed_16bit_source || size_bits != 16) {
     return std::nullopt;
+  }
   int selector_base;
-  if (opr_type == OperandType::OPR_VGPR)
+  if (opr_type == OperandType::OPR_VGPR) {
     selector_base = 0;
-  else if (opr_type == OperandType::OPR_SRC)
+  } else if (opr_type == OperandType::OPR_SRC) {
     selector_base = 256;
-  else
+  } else {
     return std::nullopt;
+  }
   int selector = ev - selector_base;
-  if (selector >= 0 && selector <= 127)
+  if (selector >= 0 && selector <= 127) {
     return Packed16VgprSource{static_cast<uint32_t>(selector), 0};
-  if (selector >= 128 && selector <= 255)
+  }
+  if (selector >= 128 && selector <= 255) {
     return Packed16VgprSource{static_cast<uint32_t>(selector - 128), 16};
+  }
   return std::nullopt;
 }
 
 std::optional<Packed16VgprSource> packed_16bit_vgpr_dst(bool packed_16bit_dst, int size_bits,
                                                         OperandType opr_type, int ev) {
-  if (!packed_16bit_dst || size_bits != 16 || opr_type != OperandType::OPR_VGPR)
+  if (!packed_16bit_dst || size_bits != 16 || opr_type != OperandType::OPR_VGPR) {
     return std::nullopt;
-  if (ev >= 0 && ev <= 127)
+  }
+  if (ev >= 0 && ev <= 127) {
     return Packed16VgprSource{static_cast<uint32_t>(ev), 0};
-  if (ev >= 128 && ev <= 255)
+  }
+  if (ev >= 128 && ev <= 255) {
     return Packed16VgprSource{static_cast<uint32_t>(ev - 128), 16};
+  }
   return std::nullopt;
 }
 
@@ -66,14 +73,16 @@ bool is_vgpr_only_type(OperandType t) {
 }
 
 uint32_t vgpr_index(OperandType opr_type, int ev) {
-  if (opr_type == OperandType::OPR_VGPR)
+  if (opr_type == OperandType::OPR_VGPR) {
     return static_cast<uint32_t>(ev);
+  }
   return static_cast<uint32_t>(ev - 256);
 }
 
 uint64_t read_immediate64(OperandType opr_type, int ev) {
-  if (opr_type == OperandType::OPR_SIMM32)
+  if (opr_type == OperandType::OPR_SIMM32) {
     return static_cast<uint64_t>(static_cast<uint32_t>(ev));
+  }
   return static_cast<uint64_t>(static_cast<int64_t>(static_cast<int32_t>(ev)));
 }
 
@@ -82,37 +91,45 @@ uint64_t read_immediate64(OperandType opr_type, int ev) {
 // ISA-scoped SIMD traits are used directly by split execution output.
 // Non-split profiles consume them through AmdgpuIsaOperand<Isa>.
 std::optional<uint32_t> Isa::resolved_vgpr_offset(OperandType opr_type, int ev) {
-  if (is_vgpr_only_type(opr_type))
+  if (is_vgpr_only_type(opr_type)) {
     return vgpr_index(opr_type, ev);
-  if (is_immediate_type(opr_type))
+  }
+  if (is_immediate_type(opr_type)) {
     return std::nullopt;
-  if (ev >= 256 && ev <= 511)
+  }
+  if (ev >= 256 && ev <= 511) {
     return static_cast<uint32_t>(ev - 256);
+  }
   return std::nullopt;
 }
 
 std::optional<uint32_t> Isa::resolved_vgpr_offset(const amdgpu::Wavefront &wf, OperandType opr_type,
                                                   int ev, amdgpu::VgprMsbRole role) {
   auto off = resolved_vgpr_offset(opr_type, ev);
-  if (!off)
+  if (!off) {
     return std::nullopt;
+  }
   return *off + (wf.vgpr_msb_for_role(role) << 8);
 }
 
 bool Isa::simd_capable_value(OperandType opr_type, int ev) {
   return resolved_vgpr_offset(opr_type, ev).has_value() || is_immediate_type(opr_type) ||
-         amdgpu::can_resolve_src_scalar(ev, ROCJITSU_CODE_ARCH_CDNA5);
+         amdgpu::can_resolve_src_scalar(ev, rocjitsu::IsaFamily::Cdna5);
 }
 
 bool Operand::simd_capable_exec() const {
-  if (delegate())
+  if (delegate()) {
     return delegate()->simd_capable();
-  if (!reads_value())
+  }
+  if (!reads_value()) {
     return false;
-  if (packed_16bit_vgpr_source(packed_16bit_source_, size_bits_, opr_type_, encoding_value_))
+  }
+  if (packed_16bit_vgpr_source(packed_16bit_source_, size_bits_, opr_type_, encoding_value_)) {
     return false;
-  if (packed_16bit_vgpr_dst(packed_16bit_dst_, size_bits_, opr_type_, encoding_value_))
+  }
+  if (packed_16bit_vgpr_dst(packed_16bit_dst_, size_bits_, opr_type_, encoding_value_)) {
     return false;
+  }
   return Isa::simd_capable_value(opr_type_, encoding_value_);
 }
 
@@ -129,8 +146,9 @@ void Operand::read_lane_chunk_exec(const amdgpu::Wavefront &wf, uint32_t lane_ba
   assert(lane_base <= wf.wf_size());
   assert(count <= wf.wf_size() - lane_base);
   if (packed_16bit_vgpr_source(packed_16bit_source_, size_bits_, opr_type_, encoding_value_)) {
-    for (uint32_t i = 0; i < count; ++i)
+    for (uint32_t i = 0; i < count; ++i) {
       out[i] = read_lane_exec(wf, lane_base + i);
+    }
     return;
   }
   if (auto off = resolved_vgpr_offset_exec(wf)) {
@@ -140,8 +158,9 @@ void Operand::read_lane_chunk_exec(const amdgpu::Wavefront &wf, uint32_t lane_ba
     auto region =
         amdgpu::RegisterAccess(wf).read_vgpr_region(wf.vgpr_alloc().base + voff, 1, lane_mask);
     auto maybe_lanes = region.lanes();
-    if (maybe_lanes.failed())
+    if (maybe_lanes.failed()) {
       return;
+    }
     std::ranges::copy_n(maybe_lanes.value().begin() + lane_base, count, out);
     return;
   }
@@ -150,53 +169,65 @@ void Operand::read_lane_chunk_exec(const amdgpu::Wavefront &wf, uint32_t lane_ba
 
 void Operand::write_lane_chunk_exec(amdgpu::Wavefront &wf, uint32_t lane_base, uint32_t count,
                                     const uint32_t *vals, uint64_t mask) const {
-  if (!is_writable())
+  if (!is_writable()) {
     return;
+  }
   assert(lane_base <= wf.wf_size());
   assert(count <= wf.wf_size() - lane_base);
   if (packed_16bit_vgpr_dst(packed_16bit_dst_, size_bits_, opr_type_, encoding_value_)) {
-    for (uint32_t i = 0; i < count; ++i)
-      if (mask & (1ULL << i))
+    for (uint32_t i = 0; i < count; ++i) {
+      if (mask & (1ULL << i)) {
         write_lane_exec(wf, lane_base + i, vals[i]);
+      }
+    }
     return;
   }
   auto off = resolved_vgpr_offset_exec(wf);
   if (!off) {
-    for (uint32_t i = 0; i < count; ++i)
-      if (mask & (1ULL << i))
+    for (uint32_t i = 0; i < count; ++i) {
+      if (mask & (1ULL << i)) {
         write_lane_exec(wf, lane_base + i, vals[i]);
+      }
+    }
     return;
   }
   amdgpu::VgprMsbRole role =
       vgpr_msb_role() == amdgpu::VgprMsbRole::None ? amdgpu::VgprMsbRole::Dst : vgpr_msb_role();
   uint32_t voff = amdgpu::apply_gpr_idx(wf, *off, role);
   uint32_t reg = wf.vgpr_alloc().base + voff;
-  if (!amdgpu::OperandExecutionAccess::raw_compute_unit(wf.cu()).owns_vgpr_range(wf, reg, 1))
+  if (!amdgpu::OperandExecutionAccess::raw_compute_unit(wf.cu()).owns_vgpr_range(wf, reg, 1)) {
     return;
+  }
   uint64_t full_mask = util::mask<uint64_t>(static_cast<int>(count));
   uint8_t *dst = amdgpu::OperandExecutionAccess::raw_compute_unit(wf.cu()).raw_vgpr_data(reg);
   if ((mask & full_mask) == full_mask) {
     std::memcpy(dst + lane_base * sizeof(uint32_t), vals, count * sizeof(uint32_t));
     return;
   }
-  for (uint32_t i = 0; i < count; ++i)
-    if (mask & (1ULL << i))
+  for (uint32_t i = 0; i < count; ++i) {
+    if (mask & (1ULL << i)) {
       std::memcpy(dst + (lane_base + i) * sizeof(uint32_t), &vals[i], sizeof(uint32_t));
+    }
+  }
 }
 
 uint32_t Operand::read_scalar_exec(const amdgpu::Wavefront &wf) const {
-  if (delegate())
+  if (delegate()) {
     return amdgpu::RegisterAccess(wf).read_scalar(*delegate());
+  }
   // Fieldless operands whose capability policy makes this
   // accessor inert (reads yield a benign 0, writes are no-ops).
   // Driven by the construction-time capability flags applied
   // via apply_fieldless_caps() (see fieldless_policy.py).
-  if (!reads_value())
+  if (!reads_value()) {
     return 0u;
-  if (has_literal64_)
+  }
+  if (has_literal64_) {
     return static_cast<uint32_t>(literal64_value_);
-  if (is_immediate_type(opr_type_))
+  }
+  if (is_immediate_type(opr_type_)) {
     return static_cast<uint32_t>(encoding_value_);
+  }
   return amdgpu::resolve_src_scalar(wf, encoding_value_, kM0EncodingValue);
 }
 
@@ -208,8 +239,9 @@ uint32_t Operand::read_lane_exec(const amdgpu::Wavefront &wf, uint32_t lane) con
   // accessor inert (reads yield a benign 0, writes are no-ops).
   // Driven by the construction-time capability flags applied
   // via apply_fieldless_caps() (see fieldless_policy.py).
-  if (!reads_value())
+  if (!reads_value()) {
     return 0u;
+  }
   int ev = encoding_value_;
   if (auto packed = packed_16bit_vgpr_source(packed_16bit_source_, size_bits_, opr_type_, ev)) {
     uint32_t off = packed->reg + (wf.vgpr_msb_for_role(vgpr_msb_role()) << 8);
@@ -224,10 +256,12 @@ uint32_t Operand::read_lane_exec(const amdgpu::Wavefront &wf, uint32_t lane) con
     uint32_t voff = amdgpu::apply_gpr_idx(wf, *off, vgpr_msb_role());
     return amdgpu::RegisterAccess(wf).read_vgpr(wf.vgpr_alloc().base + voff, lane);
   }
-  if (is_immediate_type(opr_type_))
+  if (is_immediate_type(opr_type_)) {
     return static_cast<uint32_t>(ev);
-  if (size_bits_ == 16)
+  }
+  if (size_bits_ == 16) {
     return amdgpu::resolve_src_scalar16(wf, ev, kM0EncodingValue, lane_inline_float_format());
+  }
   return amdgpu::resolve_src_scalar(wf, ev, kM0EncodingValue);
 }
 
@@ -236,8 +270,9 @@ void Operand::write_scalar_exec(amdgpu::Wavefront &wf, uint32_t val) const {
   // accessor inert (reads yield a benign 0, writes are no-ops).
   // Driven by the construction-time capability flags applied
   // via apply_fieldless_caps() (see fieldless_policy.py).
-  if (!is_writable())
+  if (!is_writable()) {
     return;
+  }
   amdgpu::resolve_dst_write(wf, encoding_value_, val, kM0EncodingValue);
 }
 
@@ -246,8 +281,9 @@ void Operand::write_lane_exec(amdgpu::Wavefront &wf, uint32_t lane, uint32_t val
   // accessor inert (reads yield a benign 0, writes are no-ops).
   // Driven by the construction-time capability flags applied
   // via apply_fieldless_caps() (see fieldless_policy.py).
-  if (!is_writable())
+  if (!is_writable()) {
     return;
+  }
   if (auto packed =
           packed_16bit_vgpr_dst(packed_16bit_dst_, size_bits_, opr_type_, encoding_value_)) {
     uint32_t off = packed->reg + (wf.vgpr_msb_for_role(vgpr_msb_role()) << 8);
@@ -272,26 +308,31 @@ void Operand::write_lane_exec(amdgpu::Wavefront &wf, uint32_t lane, uint32_t val
 }
 
 uint64_t Operand::read_lane64_exec(const amdgpu::Wavefront &wf, uint32_t lane) const {
-  if (delegate())
+  if (delegate()) {
     return amdgpu::RegisterAccess(wf).read_lane64(*delegate(), lane);
+  }
   // Fieldless operands whose capability policy makes this
   // accessor inert (reads yield a benign 0, writes are no-ops).
   // Driven by the construction-time capability flags applied
   // via apply_fieldless_caps() (see fieldless_policy.py).
-  if (!reads_value())
+  if (!reads_value()) {
     return 0;
+  }
   int ev = encoding_value_;
   if (auto off = Isa::resolved_vgpr_offset(wf, opr_type_, ev, vgpr_msb_role())) {
     uint32_t voff = amdgpu::apply_gpr_idx(wf, *off, vgpr_msb_role());
     uint32_t idx = wf.vgpr_alloc().base + voff;
     return amdgpu::RegisterAccess(wf).read_vgpr64(idx, lane);
   }
-  if (literal32_widening_)
+  if (literal32_widening_) {
     return widened_literal32_value();
-  if (has_literal64_)
+  }
+  if (has_literal64_) {
     return literal64_value_;
-  if (is_immediate_type(opr_type_))
+  }
+  if (is_immediate_type(opr_type_)) {
     return read_immediate64(opr_type_, ev);
+  }
   return amdgpu::resolve_src_scalar64(wf, ev, kM0EncodingValue);
 }
 
@@ -300,8 +341,9 @@ void Operand::write_lane64_exec(amdgpu::Wavefront &wf, uint32_t lane, uint64_t v
   // accessor inert (reads yield a benign 0, writes are no-ops).
   // Driven by the construction-time capability flags applied
   // via apply_fieldless_caps() (see fieldless_policy.py).
-  if (!is_writable())
+  if (!is_writable()) {
     return;
+  }
   if (auto off = Isa::resolved_vgpr_offset(wf, opr_type_, encoding_value_, vgpr_msb_role())) {
     amdgpu::VgprMsbRole role =
         vgpr_msb_role() == amdgpu::VgprMsbRole::None ? amdgpu::VgprMsbRole::Dst : vgpr_msb_role();
@@ -318,14 +360,18 @@ uint64_t Operand::read_scalar64_exec(const amdgpu::Wavefront &wf) const {
   // accessor inert (reads yield a benign 0, writes are no-ops).
   // Driven by the construction-time capability flags applied
   // via apply_fieldless_caps() (see fieldless_policy.py).
-  if (!reads_value())
+  if (!reads_value()) {
     return 0;
-  if (literal32_widening_)
+  }
+  if (literal32_widening_) {
     return widened_literal32_value();
-  if (has_literal64_)
+  }
+  if (has_literal64_) {
     return literal64_value_;
-  if (is_immediate_type(opr_type_))
+  }
+  if (is_immediate_type(opr_type_)) {
     return read_immediate64(opr_type_, encoding_value_);
+  }
   return amdgpu::resolve_src_scalar64(wf, encoding_value_, kM0EncodingValue);
 }
 
@@ -334,14 +380,16 @@ void Operand::write_scalar64_exec(amdgpu::Wavefront &wf, uint64_t val) const {
   // accessor inert (reads yield a benign 0, writes are no-ops).
   // Driven by the construction-time capability flags applied
   // via apply_fieldless_caps() (see fieldless_policy.py).
-  if (!is_writable())
+  if (!is_writable()) {
     return;
+  }
   amdgpu::resolve_dst_write64(wf, encoding_value_, val);
 }
 
 std::optional<uint32_t> Operand::simd_vgpr_base_exec(const amdgpu::Wavefront &wf) const {
-  if (auto off = resolved_vgpr_offset_exec(wf))
+  if (auto off = resolved_vgpr_offset_exec(wf)) {
     return wf.vgpr_alloc().base + amdgpu::apply_gpr_idx(wf, *off, vgpr_msb_role());
+  }
   return std::nullopt;
 }
 
@@ -519,20 +567,25 @@ bool Operand::full_execution_backend_complete() {
 }
 
 std::optional<uint32_t> Operand::resolved_vgpr_offset_exec(const amdgpu::Wavefront &wf) const {
-  if (!reads_value())
+  if (!reads_value()) {
     return std::nullopt;
+  }
   if (size_bits_ != 16 && wf.vgpr_msb_mode() == 0) {
-    if (opr_type_ == OperandType::OPR_VGPR)
+    if (opr_type_ == OperandType::OPR_VGPR) {
       return static_cast<uint32_t>(encoding_value_);
-    if (opr_type_ == OperandType::OPR_SRC && encoding_value_ >= 256 && encoding_value_ <= 511)
+    }
+    if (opr_type_ == OperandType::OPR_SRC && encoding_value_ >= 256 && encoding_value_ <= 511) {
       return static_cast<uint32_t>(encoding_value_ - 256);
+    }
   }
   auto packed =
       packed_16bit_vgpr_source(packed_16bit_source_, size_bits_, opr_type_, encoding_value_);
-  if (!packed)
+  if (!packed) {
     packed = packed_16bit_vgpr_dst(packed_16bit_dst_, size_bits_, opr_type_, encoding_value_);
-  if (packed)
+  }
+  if (packed) {
     return packed->reg + (wf.vgpr_msb_for_role(vgpr_msb_role()) << 8);
+  }
   return detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this);
 }
 

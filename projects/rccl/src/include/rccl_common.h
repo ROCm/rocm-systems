@@ -97,6 +97,7 @@ typedef enum {
   // Reporting only (rcclGetCollImplInfo / rcclSymKGetInfo): a symmetric dispatch that
   // resolves to a Tensor Data Mover kernel. Live dispatch always tags RCCL_SYMMETRIC.
   RCCL_SYMMETRIC_TDM,
+  RCCL_AG_GIN_SDMA,     // AllGather via GIN LSA/SDMA
   RCCL_ALGO_COUNT
 } rcclAddonAlgos_t;
 
@@ -389,9 +390,18 @@ size_t rcclDdaVmmThreshold(const ncclComm* comm, ncclFunc_t func);
 // when set, else the AllReduce LL128 tier cap where the arch table has that tier,
 // else the env var's default.
 size_t rcclDdaLL128TwoShotThreshold(const ncclComm* comm);
+// Ceiling for the DDA LL128 one-shot AllReduce: RCCL_DDA_LL128_ONESHOT_THRESHOLD
+// when set; with the peer-parallel kernels and an arch table that sets
+// ddaArLL128OneShotRankBytes, min(the env var's default, that / nRanks); else the
+// env var's default.
+size_t rcclDdaLL128OneShotThreshold(const ncclComm* comm);
 // Ceiling for the DDA LL two-shot AllReduce: RCCL_DDA_LL_TWOSHOT_THRESHOLD when
 // set; on rank-scaled comms the AllReduce LL tier cap; else the env var's default.
 size_t rcclDdaLLTwoShotThreshold(const ncclComm* comm);
+// Ceiling for the DDA LL one-shot AllReduce tier: RCCL_DDA_LL_ONESHOT_THRESHOLD when
+// set, else the arch table's ddaLargeCommArLLOneShotMax where it applies, else the
+// env var's default.
+size_t rcclDdaLLOneShotThreshold(const ncclComm* comm);
 // Largest registered gfx1250 AllReduce that graph capture keeps on fabric DDA instead of Ring; 0 = no re-route.
 size_t rcclDdaArRegCaptureMaxBytes(const ncclComm* comm);
 // Whether an eager registered AllReduce of `bytes` has a shard the DDA LL128 two-shot takes over from CE-registered.
@@ -401,12 +411,16 @@ bool rcclDdaArRegEagerShardFits(const ncclComm* comm, size_t bytes);
 int rcclDdaFabricVmmBlocks(const ncclComm* comm);
 // DDA LL128 AllGather block size for this total from the arch table, or 0 when it sets none.
 int rcclDdaFabricAgLL128Threads(const ncclComm* comm, size_t totalBytes);
+// Narrow DDA LL one-shot block width for this comm from the arch table (ddaNarrowThreads), or 0 when it sets none.
+int rcclDdaFabricNarrowThreads(const ncclComm* comm);
 // Blocks the DDA LL128 AllGather may launch for this total: the init cap, lowered by the arch table.
 int rcclDdaFabricAgLL128Blocks(const ncclComm* comm, size_t totalBytes);
 // DDA LL128 AllToAll block size for this total from the arch table, or 0 when it sets none.
 int rcclDdaFabricA2aLL128Threads(const ncclComm* comm, size_t totalBytes);
 // Blocks the DDA LL128 AllToAll may launch for this total: the init cap, lowered by the arch table.
 int rcclDdaFabricA2aLL128Blocks(const ncclComm* comm, size_t totalBytes);
+// DDA LL128 Broadcast thread count from the arch table, or 0 when it sets none.
+int rcclDdaFabricBcLL128Threads(const ncclComm* comm);
 // DDA LL128 ReduceScatter batched kernel block size from the arch table, or 0 when it sets none.
 int rcclDdaFabricRsLL128Threads(const ncclComm* comm);
 // Largest message the DDA LL128 ReduceScatter sends through its peer-parallel kernel, from the arch table, or 0.
@@ -550,15 +564,13 @@ int rcclWarpSpeedAdjustChannels(struct ncclComm* comm, struct ncclTaskColl* info
 // Ranks at or below this are not penalized. An FP8 ring above it gets 1024 unless exempted.
 constexpr int kFp8RingPenaltyRanks = 8;
 
-// 1024 for an FP8 ring above kFp8RingPenaltyRanks, or 1 when a single-node
-// gfx1250 allreduce above that sentinel is at or above the DDA LL128 ceiling.
-// Callers pass rcclDdaLL128Threshold(). A zero ceiling keeps the penalty, which is
-// what RCCL_IGNORE_ARCH_TABLE and DDA LL128 off produce.
-inline float rcclFp8RingCostFactor(ncclDataType_t dtype, ncclFunc_t func, int nRanks, int nNodes, size_t nBytes,
+// 1024 for an FP8 ring above kFp8RingPenaltyRanks, except a single-node gfx1250 AllReduce
+// with DDA LL128 on (ddaLl128Ceiling, from rcclDdaLL128Threshold(), is nonzero).
+inline float rcclFp8RingCostFactor(ncclDataType_t dtype, ncclFunc_t func, int nRanks, int nNodes,
                                    size_t ddaLl128Ceiling, const char* arch) {
   if ((dtype != ncclFloat8e4m3 && dtype != ncclFloat8e5m2) || nRanks <= kFp8RingPenaltyRanks) return 1.0f;
-  const bool exempt = func == ncclFuncAllReduce && nRanks > kFp8RingPenaltyRanks && nNodes == 1 &&
-                      ddaLl128Ceiling != 0 && nBytes >= ddaLl128Ceiling && IsArchMatch(arch, "gfx1250");
+  const bool exempt = func == ncclFuncAllReduce && nNodes == 1 && ddaLl128Ceiling != 0 &&
+                      IsArchMatch(arch, "gfx1250");
   return exempt ? 1.0f : 1024.0f;
 }
 #endif

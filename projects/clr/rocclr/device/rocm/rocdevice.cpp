@@ -1464,6 +1464,14 @@ bool Device::populateOCLDeviceConstants() {
   info_.maxGridDim_[1] = std::min(grid_max_dim.y, static_cast<uint32_t>(std::numeric_limits<int32_t>::max()));
   info_.maxGridDim_[2] = std::min(grid_max_dim.z, static_cast<uint32_t>(std::numeric_limits<int32_t>::max()));
 
+  // gfx12+ packs workgroup IDs Y and Z into 16-bit halves of an architected SGPR,
+  // so a kernel can't address more than 2^16 work-groups in those dimensions.
+  if (isa().versionMajor() >= 12) {
+    constexpr uint32_t kMaxWorkGroupCountYZ = std::numeric_limits<uint16_t>::max() + 1;
+    info_.maxWorkGroupCount_[1] = kMaxWorkGroupCountYZ;
+    info_.maxWorkGroupCount_[2] = kMaxWorkGroupCountYZ;
+  }
+
   info_.nativeVectorWidthChar_ = info_.preferredVectorWidthChar_ = 4;
   info_.nativeVectorWidthShort_ = info_.preferredVectorWidthShort_ = 2;
   info_.nativeVectorWidthInt_ = info_.preferredVectorWidthInt_ = 1;
@@ -2491,7 +2499,8 @@ void* Device::hostNumaAlloc(size_t size, size_t alignment, MemorySegment mem_seg
   return ptr;
 }
 
-void* Device::hostLock(void* hostMem, size_t size, const MemorySegment memSegment) const {
+void* Device::hostLock(void* hostMem, size_t size, const MemorySegment memSegment,
+                        bool mapAllAgents) const {
   hsa_amd_memory_pool_t pool = getHostMemoryPool(memSegment);
   void* deviceMemory = nullptr;
   uint32_t memFlags = 0;
@@ -2499,8 +2508,16 @@ void* Device::hostLock(void* hostMem, size_t size, const MemorySegment memSegmen
     memFlags |= HSA_AMD_MEMORY_POOL_UNCACHED_FLAG;
   }
 
+  // gpu_agents_ is every GPU visible to this process.
+  hsa_agent_t* agents = const_cast<hsa_agent_t*>(&bkendDevice_);
+  int numAgents = 1;
+  if (mapAllAgents && !gpu_agents_.empty()) {
+    agents = gpu_agents_.data();
+    numAgents = static_cast<int>(gpu_agents_.size());
+  }
+
   hsa_status_t status = Hsa::memory_lock_to_pool(
-      hostMem, size, const_cast<hsa_agent_t*>(&bkendDevice_), 1, pool, memFlags, &deviceMemory);
+      hostMem, size, agents, numAgents, pool, memFlags, &deviceMemory);
   ClPrint(amd::LOG_DEBUG, amd::LOG_MEM,
           "Locking to pool %p, size 0x%zx, hostMem = %p,"
           " deviceMemory = %p, memSegment = %d",
@@ -3594,7 +3611,7 @@ bool Device::IsHwEventReady(const amd::Event& event, bool wait, amd::SyncPolicy 
   auto* signal = reinterpret_cast<ProfilingSignal*>(hw_event);
   // A signal in device memory loads across the bus, and callers such as WaitActiveStreams check
   // the same finished command on every launch
-  uint64_t completion = signal->use_completion_.load(std::memory_order_acquire);
+  const uint64_t completion = signal->use_completion_.load(std::memory_order_acquire);
   if ((completion & ProfilingSignal::kUseCompleteBit) != 0) {
     return true;
   }
@@ -3606,18 +3623,21 @@ bool Device::IsHwEventReady(const amd::Event& event, bool wait, amd::SyncPolicy 
     bool active_wait =
         !((policy == amd::SyncPolicy::Blocking) & kHipEventBlockingSync) && ActiveWait();
     bool yield = (policy == amd::SyncPolicy::Yield);
-    // Not cached: after a GPU error the wait gives up and returns true with the use unfinished
-    return WaitForSignal(signal->signal_, active_wait, yield, signal->in_device_memory_);
+    const bool waited =
+        WaitForSignal(signal->signal_, active_wait, yield, signal->in_device_memory_);
+    // After a GPU error, with HIP_SKIP_ABORT_ON_GPU_ERROR, the wait gives up and returns true
+    // with the use unfinished
+    if (waited && !(HIP_SKIP_ABORT_ON_GPU_ERROR && amd::Device::IsGPUInError())) {
+      signal->MarkUseComplete(completion);
+    }
+    return waited;
   }
 
   ClPrint(amd::LOG_INFO, amd::LOG_SIG, "Check HW event = 0x%lx", signal->signal_.handle);
   if (Hsa::signal_load_relaxed(signal->signal_) != 0) {
     return false;
   }
-  // Fails if a new use started since the load, which must not be marked
-  signal->use_completion_.compare_exchange_strong(
-      completion, completion | ProfilingSignal::kUseCompleteBit, std::memory_order_release,
-      std::memory_order_relaxed);
+  signal->MarkUseComplete(completion);
   return true;
 }
 
@@ -4592,10 +4612,13 @@ uint8_t* Device::CreateBarrierPacket(int num_deps) const {
 
 // ================================================================================================
 void Device::ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
-                                 const std::vector<void*>& hw_events, bool profiled) const {
+                                 const std::vector<void*>& hw_events, bool profiled,
+                                 void* external_hw_event) const {
   // Starts no use: the set comes new from CreateHwEvents or re-armed by ResetHwEvents, which did
   for (const auto& patch : patches) {
-    auto* ps = reinterpret_cast<ProfilingSignal*>(hw_events[patch.hw_event_index]);
+    const bool external = (patch.hw_event_index == HwEventPatch::kExternalHwEvent);
+    auto* ps = reinterpret_cast<ProfilingSignal*>(external ? external_hw_event
+                                                           : hw_events[patch.hw_event_index]);
     hsa_signal_t sig = ps->signal_;
 
     // Patch the flat buffer copy (dispatched to GPU) directly.

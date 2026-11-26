@@ -28,6 +28,7 @@
 #ifdef MPI_TESTS_ENABLED
 
 #include "DdaFabricMPITestFixture.hpp"
+#include "DdaMPITestHelpers.hpp"
 #include "DeviceBufferHelpers.hpp"
 #include "ResourceGuards.hpp"
 #include "VerifiableFp8.hpp"
@@ -469,9 +470,11 @@ protected:
     }
 };
 
+// The largest count is cut to the LL128 one-shot cap (4 MiB / nRanks with the peer-parallel kernels).
 TEST_F(DdaFp8MPI_LL128, AllReduceOneShot)
 {
-    forEachFp8AndCount({kLine, kPrimeLines, 64 * 1024}, [this](ncclDataType_t datatype, size_t count) {
+    const size_t bigCount = DdaMPITestHelpers::ll128OneShotBytes(64 * 1024, nRanks_);
+    forEachFp8AndCount({kLine, kPrimeLines, bigCount}, [this](ncclDataType_t datatype, size_t count) {
         runAllReduce(datatype, count, RCCL_DDA_FABRIC_LL128, ArVariant::LL128OneShot);
     });
 }

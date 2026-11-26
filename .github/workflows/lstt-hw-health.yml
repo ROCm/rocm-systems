@@ -1,28 +1,35 @@
 # Purpose: host monitoring, not a test of any code change. The CI hosts run
 # real CI jobs, and a broken host (full disk, wedged GPU, wrong GPU or BIOS
 # state) makes unrelated PRs fail. This check names the unhealthy host and
-# layer, so those failures are not blamed on the code. It checks that the host
-# is the machine its labels say it is, that the amdgpu module is loaded, and
-# that ROCm sees the expected GPU. The BIOS version is reported. There is no
-# BMC check yet (see the end of this comment). Nothing is stored or compared.
+# layer, so those failures are not blamed on the code. It checks that the amdgpu
+# module is loaded and that ROCm sees the expected GPU. The BIOS version is
+# reported. For hosts in the bmc job it also checks that the BMC responds.
+# Nothing is stored or compared. Each row's runner labels pick its host, and no
+# host name or secret is used in this file. Each row has a unique id: its GPU
+# architecture and a number (gfx1151-01, gfx90a-01), never a host name. A second
+# machine with the same GPU takes the next number (gfx1151-02). The mapping from
+# an id to a machine is kept internally, and hardware that is not public yet is
+# not added to this file.
 #
 # Why this is not part of TheRock CI: these hosts are not in TheRock's runner
 # pool, so TheRock CI does not cover them. This is a per-host check, not a build
 # or test of a component, so it is its own workflow and its failures do not
 # appear on unrelated PRs.
 #
-# Why there is no pull_request trigger: the job runs on the host itself, not in
-# a container, and this repository is public. A PR could change the script and
+# Why there is no pull_request trigger: the jobs run on the hosts themselves and
+# this repository is public. A PR could change the script and
 # print anything from the host into a log anyone can download. It runs only from
 # develop (nightly, or by hand from develop), so the code that runs there has
 # been reviewed.
 # To try a change, run the script by hand on the host:
-#   python3 .github/scripts/lstt_hw_health.py --host <host> --gfx <gfx>
+#   python3 .github/scripts/lstt_hw_health.py --id <id> --gfx <gfx>
 #
-# There is no BMC step yet: no host in the matrix has a BMC. Add one with the
-# first host that does, together with a green run. It needs ipmitool and
-# /dev/ipmi0 on the host, and a passwordless sudo rule for the runner user so
-# that `sudo -n ipmitool` fails at once, with a clear message, without it.
+# BMC check (reachability only, the firmware version is never printed): add a
+# row to the bmc job for each host that has a BMC. That job runs on the host,
+# not in the container. It needs ipmitool and /dev/ipmi0
+# on the host, and a passwordless sudo rule for the runner user, so that
+# `sudo -n ipmitool mc info` fails at once, with a clear message, without it.
+# Run the script by hand with --bmc on the host before enabling it.
 name: LSTT hardware health
 
 on:
@@ -40,36 +47,112 @@ concurrency:
 
 jobs:
   health:
-    name: ${{ matrix.host }}
+    name: ${{ matrix.id }} (${{ matrix.gfx }})
     # A manual run can pick any branch; only develop's reviewed code may run here.
     if: ${{ github.ref == 'refs/heads/develop' }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - host: lsttstrix
+          - id: gfx1151-01
             label: lstt-gfx1151
             gfx: gfx1151
+          # One row per runner entry, so the arches check in parallel. The MI210
+          # label is shared by several hosts, so that row also needs a host label
+          # on its runner: its own id, gfx90a-01.
+          - id: gfx90a-01
+            label: lstt-gfx90a
+            host_label: gfx90a-01
+            gfx: gfx90a
+          - id: gfx1100-01
+            label: lstt-gfx1100
+            gfx: gfx1100
+          # These two GPUs are on one machine whose single runner carries both
+          # labels, so their rows run one after the other on it.
+          - id: gfx908-01
+            label: lstt-gfx908
+            gfx: gfx908
+          - id: gfx1030-01
+            label: lstt-gfx1030
+            gfx: gfx1030
+          # Same again for this machine: its runner carries lstt-gfx1201 and
+          # lstt-gfx90a. The MI210 is the second machine with that GPU, so its
+          # row takes the next number and needs its own host label, gfx90a-02.
+          - id: gfx1201-01
+            label: lstt-gfx1201
+            gfx: gfx1201
+          - id: gfx90a-02
+            label: lstt-gfx90a
+            host_label: gfx90a-02
+            gfx: gfx90a
     runs-on:
       - ${{ matrix.label }}
-      - ${{ matrix.host }}
+      - ${{ matrix.host_label || matrix.label }}
     timeout-minutes: 20
+    # The GPU check runs rocminfo in the ROCm image, pinned by digest. The
+    # BIOS and module checks read /sys, which the container shares with the host.
+    container:
+      image: rocm/dev-ubuntu-22.04:7.2@sha256:05af5f04a06b04676d4c7438997d0deadaeb7478961ad621376e199bf3aeb644
+      options: --device=/dev/kfd --device=/dev/dri --group-add video
 
     steps:
+      # actions/checkout needs git to do a sparse fetch.
+      - name: Install git
+        run: apt-get update -qq && apt-get install -y -qq --no-install-recommends git
+
       # Only the script is needed, so the fetch is sparse.
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: .github/scripts/lstt_hw_health.py
           sparse-checkout-cone-mode: false
+          persist-credentials: false
 
-      # Host-level, so no container: /sys/class/dmi is what the firmware
-      # exposes to the booted kernel. The script checks the host identity first
-      # (a GPU label can be on several hosts, so runs-on also selects by host
-      # name), then BIOS, the amdgpu module and the GPU, and reports every
-      # layer even when one fails.
       - name: Hardware health
         shell: bash
         env:
-          HOST: ${{ matrix.host }}
+          ID: ${{ matrix.id }}
           GFX: ${{ matrix.gfx }}
-        run: python3 .github/scripts/lstt_hw_health.py --host "$HOST" --gfx "$GFX"
+        run: python3 .github/scripts/lstt_hw_health.py --id "$ID" --gfx "$GFX"
+
+      # The container runs as root, so give the shared workspace back to the
+      # runner user or the next job on this runner cannot clean it.
+      - name: Give the workspace back to the runner user
+        if: always()
+        shell: bash
+        run: chown -R "$(stat -c '%u:%g' "$RUNNER_TEMP")" "$GITHUB_WORKSPACE"
+
+  # Host level, no container: ipmitool and /dev/ipmi0 are the host's.
+  bmc:
+    name: ${{ matrix.id }} BMC
+    if: ${{ github.ref == 'refs/heads/develop' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: gfx90a-01
+            label: lstt-gfx90a
+            host_label: gfx90a-01
+    runs-on:
+      - ${{ matrix.label }}
+      - ${{ matrix.host_label }}
+    timeout-minutes: 10
+    steps:
+      # No checkout: this job runs as the runner user in the workspace that other
+      # jobs on this runner share, and a root container job can leave files there
+      # that stop a checkout. The one script is fetched at this commit instead,
+      # into the runner's own temp folder.
+      - name: Fetch the check script
+        shell: bash
+        env:
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          curl -fsSL --retry 3 \
+            "https://raw.githubusercontent.com/${REPO}/${SHA}/.github/scripts/lstt_hw_health.py" \
+            -o "$RUNNER_TEMP/lstt_hw_health.py"
+
+      - name: BMC reachability
+        shell: bash
+        env:
+          ID: ${{ matrix.id }}
+        run: python3 "$RUNNER_TEMP/lstt_hw_health.py" --id "$ID" --gfx unused --bmc-only

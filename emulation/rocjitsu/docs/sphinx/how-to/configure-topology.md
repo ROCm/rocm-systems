@@ -1,13 +1,13 @@
 ---
 myst:
     html_meta:
-        "description": "How to select, edit, and use a JSON configuration file to define a simulated GPU topology in rocJITsu, including multi-GPU setups and C API usage."
-        "keywords": "rocJITsu, ROCm, GPU topology, JSON configuration, simulation, rj_vm_create, multi-GPU, CDNA, RDNA"
+        "description": "How to select, edit, and use a JSON configuration file to define a simulated GPU topology in rocjitsu, including multi-GPU setups and C API usage."
+        "keywords": "rocjitsu, ROCm, GPU topology, JSON configuration, simulation, rj_vm_create, multi-GPU, CDNA, RDNA"
 ---
 
 # Configure a simulated GPU topology
 
-rocJITsu uses a declarative JSON configuration file to describe the simulated GPU hardware: the component hierarchy, link connectivity, simulation parameters, and device properties exposed through the emulated sysfs topology. This page explains how to choose a configuration, adjust its key fields, build a multi-GPU configuration, and create a virtual machine from C code.
+rocjitsu uses a declarative JSON configuration file to describe the simulated GPU hardware: the component hierarchy, link connectivity, simulation parameters, and device properties exposed through the emulated sysfs topology. This page explains how to choose a configuration, adjust its key fields, build a multi-GPU configuration, and create a virtual machine from C code.
 
 For a full description of the JSON schema and its FlatBuffers validation, see [JSON topology configuration](/conceptual/json-configuration.md).
 
@@ -72,7 +72,7 @@ explicit stop request).
 
 ### `num_threads`
 
-The number of Simdojo engine partitions. rocJITsu assigns whole XCD subtrees to
+The number of Simdojo engine partitions. rocjitsu assigns whole XCD subtrees to
 these partitions and clamps the value to the aggregate XCD count. Set to `1` to
 keep all XCDs on one engine partition.
 
@@ -89,25 +89,25 @@ Clocked mode always uses a width of one.
 ### `async_helper_threads`
 
 Shared MMA helpers across the VM's CUs. Omission or -1 selects from the target
-table; zero disables helpers. Explicit values range from 0 to 128. The gfx950
-and gfx1250 single-GPU tables enable helpers within the shared thread budget;
-other shipped targets and multi-GPU defaults keep H=0. See
+table. Zero disables helpers. Explicit values range from 0 to 128. All current
+matrix handlers execute synchronously and all shipped presets use zero helpers. See
 [asynchronous MMA execution](../../async-instructions.md).
 
 ### Execution budget and preferred allocations
 
 `cpu_thread_budget` is a ceiling for engines, retained dispatch workers and shared MMA helpers:
 E + sum(D - 1) + H. Its default is process affinity and the target allocation
-table. Desktop/older CDNA presets stop at 24 engine/dispatch threads; gfx950
-adds eight helpers, while gfx1250 uses up to 40 engine/dispatch threads and
-eight helpers. A positive budget overrides affinity. The selector picks the largest fitting
+table. The single-GPU gfx942 and gfx950 presets use up to 48 execution threads,
+and gfx1250 uses up to 64. See the
+[preferred allocations](../../configuration.md#thread-accounting-and-preferred-allocations)
+for per-target granules. A positive budget overrides affinity. The selector picks the largest fitting
 entry in `thread_allocations`; it leaves unused budget between granules.
 Explicit E/D/H knobs take priority and may exceed the automatic budget. A config
 without a table uses serial defaults for unspecified knobs.
 
 Use `rocjitsu --config <path> --thread-budget-table` to show expected allocations
 without starting a VM. `rocjitsu --cpu-thread-budget N` replaces the JSON ceiling
-for that launch. Mirage embeds the native tables in its RocJITsu backend.
+for that launch. Mirage embeds the native tables in its rocjitsu backend.
 
 ### `exec_mode`
 
@@ -135,7 +135,7 @@ configuration used by the RCCL collective tests. To extend it:
 
 ## Create a VM from C code
 
-The rocJITsu C API provides file and string creators, each with a node-aware
+The rocjitsu C API provides file and string creators, each with a node-aware
 variant:
 
 -   `rj_vm_create` --- accepts a file path to a JSON config.

@@ -41,9 +41,30 @@ RUNTIME_CASES = (
 )
 ANALYSIS_CASES = (*RUNTIME_CASES, 'repeat_race', 'utf8_entry')
 CORE_WIDTH_CASES = (
+    'wide_u8',
+    'wide_i8_alias_high',
+    'wide_d16_u8',
+    'wide_d16_i8_high',
+    'wide_d16_u16',
+    'wide_d16_overlap',
+    'wide_d16_adjacent',
+    'wide_b8_overlap',
+    'wide_b8_adjacent',
+    'wide_b8_disjoint',
     'wide_u16',
     'wide_i16',
     'wide_b64',
+    *(
+        f'wide_dual_b{bits}_{spacing}_{scenario}'
+        for bits in (32, 64)
+        for spacing in ('normal', 'stride64')
+        for scenario in ('values_high', 'overlap', 'gap')
+    ),
+    'wide_b96',
+    'wide_b96_alias_high',
+    'wide_b96_overlap',
+    'wide_b96_adjacent',
+    'wide_b96_disjoint',
     'wide_b128',
 )
 GFX1250_WIDTH_CASES = (
@@ -61,12 +82,34 @@ GFX1250_WIDTH_CASES = (
 )
 
 
+BARRIER_CASES = (
+    'barrier',
+    'barrier_empty',
+    'barrier_high',
+    'barrier_separated',
+    'barrier_multiple',
+    'barrier_missing_second',
+)
+LOOP_CASES = (
+    'loop_zero',
+    'loop_one',
+    'loop_three',
+    'loop_access_loss',
+    'loop_sync_loss',
+    'loop_no_b0',
+    'loop_no_b0_full_journal',
+    'loop_no_b0_sync_loss',
+    'loop_no_b1',
+    'loop_late',
+)
+
+
 def required_names():
     names = {
         'ConSanConfigure.EnvironmentOnlySdk',
         'ConSanRuntimeIntegration.Guards',
         'ConSanRuntime.SymbolBoundary',
-        'ConSanHsaPlugin.RuntimeConfigurationRequiresBothPrefixedPaths',
+        'ConSanHsaPlugin.RuntimeConfigurationRequiresPathsAndIndependentProfile',
         'ConSanHsaPlugin.AmdSignalsCompleteAdmittedDispatches',
         'ConSanHsaPlugin.AmdSignalCreationPreservesArgumentsAndFailedOutputsRemainUntracked',
         'ConSanHsaPlugin.RejectedAmdDispatchNotifiesItsCompletion',
@@ -76,23 +119,9 @@ def required_names():
         'ConSanHsaPlugin.UntrackedBarriersAfterARejectionRetainTheirSignalsWithoutPublication',
         'ConSanHsaPlugin.MissingAmdSignalCreationKeepsCoreSignalSupportAvailable',
         'ConSanSimProductionE2E.gfx1250.wave32.assembly.mixed_barrier',
-        'ConSanSimProductionE2E.gfx1250.wave32.assembly.barrier',
-        'ConSanSimProductionE2E.gfx1250.wave32.assembly.barrier_empty',
-        'ConSanSimProductionE2E.gfx1250.wave32.assembly.barrier_high',
-        'ConSanSimProductionE2E.gfx1250.wave32.assembly.barrier_separated',
-        'ConSanSimProductionE2E.gfx1250.wave32.assembly.barrier_multiple',
-        'ConSanSimProductionE2E.gfx1250.wave32.assembly.barrier_missing_second',
-        'ConSanSimProductionE2E.gfx1250.wave32.assembly.loop_zero',
-        'ConSanSimProductionE2E.gfx1250.wave32.assembly.loop_one',
-        'ConSanSimProductionE2E.gfx1250.wave32.assembly.loop_three',
-        'ConSanSimProductionE2E.gfx1250.wave32.assembly.loop_access_loss',
-        'ConSanSimProductionE2E.gfx1250.wave32.assembly.loop_sync_loss',
-        'ConSanSimProductionE2E.gfx1250.wave32.assembly.loop_no_b0',
-        'ConSanSimProductionE2E.gfx1250.wave32.assembly.loop_no_b0_full_journal',
-        'ConSanSimProductionE2E.gfx1250.wave32.assembly.loop_no_b0_sync_loss',
-        'ConSanSimProductionE2E.gfx1250.wave32.assembly.loop_no_b1',
-        'ConSanSimProductionE2E.gfx1250.wave32.assembly.loop_late',
         'ConSanSimProductionE2E.gfx1250.wave32.assembly.missing-statistics',
+        'ConSanBootstrapSim.TransposeIssuesOnceAndRoutesPhysicalSourceLanes',
+        'ConSanNativeWidthsStatic.TransposeMappingsRequireTheDecodedFormAndLegalRegisterTuple',
         'ConSanContract.TargetWaveFactsRoundTripAndRowsFollowActualGeometry',
         'ConSanAnalysis.Wave64HighLanesAndFullMasksRetainExactLanePairCounts',
         'ConSanAnalysis.InvalidUtf8EntryNamesAreAnalysisInputErrorsAfterBinaryRoundTrip',
@@ -122,12 +151,14 @@ def required_names():
         'ConSanAnalysis.EveryTargetNeverJoinsIdenticalLdsOffsetsAcrossWorkgroups',
         'ConSanAnalysis.Wave64WorkgroupsKeepHighLanesAndRejectOnlyInvalidPartialWaveMasks',
     }
-    for groups in (1, 4, 16):
-        for case in ('grouped_barrier', 'grouped_empty'):
-            names.add(
-                f'ConSanSimProductionE2E.gfx1250.wave32.assembly.{case}.groups{groups}'
-            )
     for gpu, wave_size in MODES:
+        for case in (*BARRIER_CASES, *LOOP_CASES):
+            names.add(f'ConSanSimProductionE2E.{gpu}.wave{wave_size}.assembly.{case}')
+        for groups in (1, 4, 16):
+            for case in ('grouped_barrier', 'grouped_empty'):
+                names.add(
+                    f'ConSanSimProductionE2E.{gpu}.wave{wave_size}.assembly.{case}.groups{groups}'
+                )
         for groups in (1, 4, 16):
             names.add(
                 f'ConSanSimProductionE2E.{gpu}.wave{wave_size}.assembly.grouped_disjoint.groups{groups}'
@@ -149,6 +180,21 @@ def required_names():
         names.add(
             f'ConSanSimProductionE2E.{gpu}.wave{wave_size}.assembly.single_missing_id.groups1'
         )
+        if gpu in ('gfx950', 'gfx1250'):
+            for bits in (4, 6, 8, 16):
+                for scenario in (
+                    'full',
+                    'empty',
+                    'partial',
+                    'overlap',
+                    'adjacent',
+                    'short',
+                ):
+                    if scenario == 'short' and gpu != 'gfx1250':
+                        continue
+                    names.add(
+                        f'ConSanSimProductionE2E.{gpu}.wave{wave_size}.assembly.transpose_{bits}_{scenario}'
+                    )
         suffix = f'{gpu}Wave{wave_size}'
         width_cases = GFX1250_WIDTH_CASES if gpu == 'gfx1250' else CORE_WIDTH_CASES
         for case in width_cases:
@@ -179,7 +225,7 @@ def required_names():
             'UnreachableEntryOrDenseSitesFailBeforeArtifactPublication',
             'HipWorkloadsMustContainQualifiedNativeLdsSites',
             'GdsAndAccumulatorAliasingAreRejectedAtTheirActualBoundaries',
-            'QualifyOnlyWholeRegisterSingleRangeForms',
+            'QualifySingleRangeFormsWithExactDataWidths',
             'BoundedWorkgroupFixturesRetainQualifiedLdsSites',
         ):
             names.add(f'ConSanTargets/ConSanTargetStatic.{case}/{suffix}')
@@ -188,6 +234,16 @@ def required_names():
             'HighLaneMasksAndEmptyExecHaveRealPublicationEvidence',
             'ThreeWavesAndPartialTailUseDistinctRows',
             'NativeWidthsPreserveEveryWordAndAllGuestState',
+            'ByteAccessPreservesNeighborBytesAndExtendsOnlyActiveLanes',
+            'D16AccessesSelectSubwordsAndExecuteEachGuestFormOnce',
+            'PublicationBarrierBlocksAnEarlyConsumer',
+            'BarrierPreservesOutputAndGuestStateAtEmptyExecAndHighLanes',
+            'RepeatedBarrierLoopsPreserveStateAndRetainIndependentSites',
+            'RepeatedBarrierLoopsRetainHighLaneMasks',
+            'ThreeBarrierGroupsRetainEachOccurrenceWithoutChangingGuestState',
+            'RemovingLoopPublicationOrReuseBarrierRetainsConfirmedEndpoints',
+            'SeededNearLimitLoopCountersSaturateWithoutStoppingGuest',
+            'RepeatedAddressGroupExhaustionIsSeparateFromOccupiedBanks',
         ):
             names.add(f'ConSanTargets/ConSanTargetSim.{case}/{suffix}')
         names.add(f'ConSanSimE2E.{gpu}.wave{wave_size}.assembly.high_lane')
@@ -244,6 +300,9 @@ def physical_names():
         name.replace('ConSanSim', 'ConSanPhysical', 1)
         for name in required_names()
         if name.startswith('ConSanSim')
+        and not re.search(
+            r'\.gfx950\.wave64\.assembly\.transpose_(4|6|8|16)_partial$', name
+        )
     }
 
 

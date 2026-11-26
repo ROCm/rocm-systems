@@ -44,10 +44,10 @@ endif()
 ###############################################################################
 
 option(PROFILE "Enable statistics and timing support" OFF)
-option(USE_RO "Enable RO conduit" OFF)
+option(USE_RO "Enable RO backend" OFF)
 option(USE_HOST_VERBS "Enable host-side verbs networking layer (src/net)" OFF)
 option(USE_IPC "Enable IPC support (using HIP)" ON)
-option(USE_GDA "Enable GDA conduit" OFF)
+option(USE_GDA "Enable GDA backend" OFF)
 option(USE_SDMA "Enable SDMA transport (MI300X+). Implied by USE_IPC." ${USE_IPC})
 option(USE_LDS_STAGE "Enable LDS-staged async IPC copy on gfx1250, using the portable async global<->LDS backend" OFF)
 option(USE_TDM "Enable TDM (Tensor Data Mover) specifically for LDS-staged IPC transfers on gfx1250." OFF)
@@ -174,6 +174,8 @@ include(ROCMCheckTargetIds)
 
 rocm_setup_version(VERSION ${VERSION_STRING})
 
+find_package(hip REQUIRED)
+
 #############################################################################
 # DETECT POD CAPABILITY
 #############################################################################
@@ -193,15 +195,9 @@ if(TARGET amd_smi)
   check_library_exists(amd_smi amdsmi_get_gpu_fabric_info "" HAVE_AMDSMI_FABRIC_FUNC)
   cmake_pop_check_state()
 
-  find_path(_hip_include_dir
-    hip/hip_runtime_api.h
-    HINTS "${ROCM_PATH}"
-    PATH_SUFFIXES include
-    NO_DEFAULT_PATH
-  )
   cmake_push_check_state(RESET)
-  if(_hip_include_dir)
-    set(CMAKE_REQUIRED_INCLUDES ${_hip_include_dir})
+  if(hip_INCLUDE_DIRS)
+    set(CMAKE_REQUIRED_INCLUDES ${hip_INCLUDE_DIRS})
   endif()
   set(CMAKE_REQUIRED_DEFINITIONS -D__HIP_PLATFORM_AMD__)
   check_cxx_source_compiles("
@@ -645,9 +641,6 @@ if (NOT BUILD_TESTS_ONLY)
   )
 
   set(_rocshmem_export_deps)
-  if(USE_SDMA AND TARGET hsakmt::hsakmt)
-    list(APPEND _rocshmem_export_deps PACKAGE hsakmt)
-  endif()
   if(USE_ROCPROFILER_REGISTER AND TARGET rocprofiler-register::rocprofiler-register)
     list(APPEND _rocshmem_export_deps PACKAGE rocprofiler-register)
   endif()
@@ -681,6 +674,10 @@ if (NOT BUILD_TESTS_ONLY)
     unset(_numa_lib)
     unset(_numa_inc)
     set(_rocshmem_numa_include "${CMAKE_CURRENT_BINARY_DIR}/rocshmem-numa-targets.cmake")
+  endif()
+
+  if(USE_SDMA AND TARGET hsakmt::hsakmt)
+    list(APPEND _rocshmem_export_deps PACKAGE hsakmt)
   endif()
 
   set(_rocshmem_include_arg)

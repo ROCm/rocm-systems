@@ -580,6 +580,7 @@ static ncclResult_t commFree(ncclComm_t comm) {
     if (ret == ncclSuccess) ret = finalizeResult;
   }
   // Self-guarded no-op if the GIN-SDMA path was never used. Must precede ncclDevrFinalize.
+  NCCLCHECK(ncclGinAllGatherFinalize(comm));
   NCCLCHECK(ncclGinA2AFinalize(comm));
   NCCLCHECK(ncclGinAllReduceFinalize(comm));
 
@@ -1320,6 +1321,8 @@ static void showVersion() {
 NCCL_PARAM(MNNVLUUID, "MNNVL_UUID", -1);
 NCCL_PARAM(MNNVLCliqueId, "MNNVL_CLIQUE_ID", -1);
 NCCL_PARAM(MNNVLCrossClique, "MNNVL_CROSS_CLIQUE", 0);
+// MNNVL: Flag to indicate whether to enable Multi-Node NVLink
+NCCL_PARAM(MNNVLEnable, "MNNVL_ENABLE", 2);
 
 #if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
 static const char* mnnvlDegradedBwStr(unsigned int healthMask) {
@@ -1568,6 +1571,23 @@ static ncclResult_t fillInfo(struct ncclComm* comm, struct ncclPeerInfo* info, u
     info->fabricInfo.fabricSupported = false;
     (void)amd_smi_getFabricDeviceInfo(deviceIndex, &info->fabricInfo);
     if (info->fabricInfo.fabricSupported) {
+      // Apply AMD MNNVL env overrides only for MNNVL-capable ranks; fabric state is validated
+      // later across all ranks in ncclMnnvlCheck().
+      const bool allowMnnvlOverrides =
+        ncclParamMNNVLEnable() != 0 && ncclCuMemEnable() && info->fabricHandleSupport;
+      if (allowMnnvlOverrides) {
+        if (ncclParamMNNVLUUID() != -1) {
+          uint64_t temp_uuid0 = (uint64_t)ncclParamMNNVLUUID();
+          uint64_t temp_uuid1 = (uint64_t)ncclParamMNNVLUUID();
+          memcpy(info->fabricInfo.clusterUuid, &temp_uuid0, sizeof(temp_uuid0));
+          memcpy(info->fabricInfo.clusterUuid + sizeof(temp_uuid0), &temp_uuid1, sizeof(temp_uuid1));
+        }
+        // On AMD, -2 is not applicable (NV-only rack-hash semantics), so only
+        // apply explicit non-negative user clique IDs here.
+        if (ncclParamMNNVLCliqueId() >= 0) {
+          info->fabricInfo.cliqueId = (uint32_t)ncclParamMNNVLCliqueId();
+        }
+      }
       uint64_t uuid0 = 0;
       uint64_t uuid1 = 0;
       memcpy(&uuid0, info->fabricInfo.clusterUuid, sizeof(uuid0));
@@ -1736,9 +1756,6 @@ NCCL_PARAM(AllocP2pNetLLBuffers, "ALLOC_P2P_NET_LL_BUFFERS", 0);
 extern int64_t rcclParamWarpSpeedForceEnable();
 extern int64_t rcclParamWarpSpeedAutoMode();
 #endif
-// MNNVL: Flag to indicate whether to enable Multi-Node NVLink
-NCCL_PARAM(MNNVLEnable, "MNNVL_ENABLE", 2);
-
 #define TIMER_INIT_TOTAL 0
 #define TIMER_INIT_KERNELS 1
 #define TIMER_INIT_BOOTSTRAP 2
@@ -2612,7 +2629,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
 
   // The hierarchical AllGather pairs blocks across ranks by index and chunk, so ranks that size its grid or
   // chunks differently hang
-  if (ncclSymkAgHierAvailable(comm)) {
+  if (ncclSymkHierAvailable(comm)) {
     for (int r = 0; r < nranks; r++) {
       const auto& mine = allGather3Data[rank];
       const auto& peer = allGather3Data[r];

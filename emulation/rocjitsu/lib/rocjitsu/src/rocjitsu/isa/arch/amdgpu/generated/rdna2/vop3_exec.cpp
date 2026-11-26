@@ -6,10 +6,16 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/vop3.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx10_interp.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_cdna_unary_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_compare_exec.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_division_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_lane_exec.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_legacy_mul_exec.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_sdwa_binary_exec.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_sdwa_selection_exec.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_vector_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/signaling_compare.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
@@ -40,105 +46,360 @@ void VInterpMovF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 
 void VNopVop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_nop_vop3(*this, wf); }
 
-void VMovB32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_mov_b32_vop3(*this, wf); }
+void VMovB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::arith::execute_unary32(
+      wf, rj_arith_v_mov_b32_w32, rj_arith_v_mov_b32_w64, wf.cu().arithmetic_flags(),
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u),
+      vdst, src0);
+}
 
 void VReadfirstlaneB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint32_t lane = exec ? static_cast<uint32_t>(std::countr_zero(exec)) : 0;
-  uint32_t val = amdgpu::RegisterAccess(wf).read_scalar_selected_lane(src0, lane);
-  amdgpu::RegisterAccess(wf).write_scalar(vdst, val);
+  amdgpu::arith::execute_read_lane<true>(wf, wf.cu().arithmetic_flags(), vdst, src0);
 }
 
 void VCvtI32F64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_i32_f64_vop3(*this, wf);
+  uint64_t flags = wf.cu().arithmetic_flags();
+  if (wf.ieee_mode()) {
+    flags |= RJ_ARITH_FP_IEEE_MODE;
+  }
+  if (!(wf.fp_denorm_mode_f16_f64() & 1)) {
+    flags |= RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
+  }
+  const uint64_t modifiers =
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) |
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u);
+  amdgpu::arith::execute_float_conversion(wf, rj_arith_v_cvt_i32_f64_w32_gfx10,
+                                          rj_arith_v_cvt_i32_f64_w64_gfx10, flags, modifiers, vdst,
+                                          src0, /*from_double=*/true,
+                                          /*to_double=*/false);
 }
 
 void VCvtF64I32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_f64_i32_vop3(*this, wf);
+  uint64_t flags = wf.cu().arithmetic_flags();
+  if (wf.ieee_mode()) {
+    flags |= RJ_ARITH_FP_IEEE_MODE;
+  }
+  if (!(wf.fp_denorm_mode_f16_f64() & 2)) {
+    flags |= RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
+  }
+  flags |= uint64_t(wf.fp_round_mode_f16_f64()) << 24;
+  if (!wf.dx10_clamp()) {
+    flags |= RJ_ARITH_FP_DX10_CLAMP_OFF;
+  }
+  const uint64_t modifiers =
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_widen32_to_pair(wf, rj_arith_v_cvt_f64_i32_w32_gfx10,
+                                         rj_arith_v_cvt_f64_i32_w64_gfx10, flags, modifiers, vdst,
+                                         src0, 0xF);
 }
 
 void VCvtF32I32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_f32_i32_vop3(*this, wf);
+  const uint64_t flags = amdgpu::arith::float32_flags(wf, wf.cu().arithmetic_flags(), false) &
+                         ~(RJ_ARITH_FP_DX10_CLAMP_OFF);
+  const uint64_t modifiers =
+      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) | (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2);
+  amdgpu::arith::execute_unary32(wf, rj_arith_v_cvt_f32_i32_w32_gfx10,
+                                 rj_arith_v_cvt_f32_i32_w64_gfx10, flags, modifiers, vdst, src0);
 }
 
 void VCvtF32U32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_f32_u32_vop3(*this, wf);
+  const uint64_t flags = amdgpu::arith::float32_flags(wf, wf.cu().arithmetic_flags(), false) &
+                         ~(RJ_ARITH_FP_DX10_CLAMP_OFF);
+  const uint64_t modifiers =
+      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) | (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2);
+  amdgpu::arith::execute_unary32(wf, rj_arith_v_cvt_f32_u32_w32_gfx10,
+                                 rj_arith_v_cvt_f32_u32_w64_gfx10, flags, modifiers, vdst, src0);
 }
 
 void VCvtU32F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_u32_f32_vop3(*this, wf);
+  const uint64_t flags = amdgpu::arith::float32_flags(wf, wf.cu().arithmetic_flags(), false) &
+                         ~(RJ_ARITH_FP_DX10_CLAMP_OFF | RJ_ARITH_FP_ROUND_MASK);
+  const uint64_t modifiers =
+      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) | (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) |
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u);
+  amdgpu::arith::execute_float_conversion(wf, rj_arith_v_cvt_u32_f32_w32_gfx10,
+                                          rj_arith_v_cvt_u32_f32_w64_gfx10, flags, modifiers, vdst,
+                                          src0, /*from_double=*/false, /*to_double=*/false);
 }
 
 void VCvtI32F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_i32_f32_vop3(*this, wf);
+  const uint64_t flags = amdgpu::arith::float32_flags(wf, wf.cu().arithmetic_flags(), false) &
+                         ~(RJ_ARITH_FP_DX10_CLAMP_OFF | RJ_ARITH_FP_ROUND_MASK);
+  const uint64_t modifiers =
+      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) | (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) |
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u);
+  amdgpu::arith::execute_float_conversion(wf, rj_arith_v_cvt_i32_f32_w32_gfx10,
+                                          rj_arith_v_cvt_i32_f32_w64_gfx10, flags, modifiers, vdst,
+                                          src0, /*from_double=*/false, /*to_double=*/false);
 }
 
 void VCvtF16F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_f16_f32_vop3(*this, wf);
+  uint64_t flags = wf.cu().arithmetic_flags();
+  if (wf.ieee_mode()) {
+    flags |= RJ_ARITH_FP_IEEE_MODE;
+  }
+  if (!wf.dx10_clamp()) {
+    flags |= RJ_ARITH_FP_DX10_CLAMP_OFF;
+  }
+  if (wf.fp16_ovfl()) {
+    flags |= RJ_ARITH_FP16_OVFL;
+  }
+  if (!(wf.fp_denorm_mode_f32() & 1)) {
+    flags |= RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
+  }
+  if (!(wf.fp_denorm_mode_f16_f64() & 2)) {
+    flags |= RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
+  }
+  flags |= uint64_t(wf.fp_round_mode_f16_f64()) << 24;
+  const uint32_t opsel = 0u;
+  const uint64_t modifiers =
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) |
+      ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u) | ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) |
+      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u);
+  const uint8_t source_bytes = 0xF;
+  const uint8_t destination_bytes = (modifiers & RJ_ARITH_ALU_HIGH_D) ? 0xC : 0x3;
+  amdgpu::arith::execute_float_conversion(
+      wf, rj_arith_v_cvt_f16_f32_w32_gfx10, rj_arith_v_cvt_f16_f32_w64_gfx10, flags, modifiers,
+      vdst, src0, /*from_double=*/false, /*to_double=*/false, source_bytes, destination_bytes);
 }
 
 void VCvtF32F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_f32_f16_vop3(*this, wf);
+  uint64_t flags = wf.cu().arithmetic_flags();
+  if (wf.ieee_mode()) {
+    flags |= RJ_ARITH_FP_IEEE_MODE;
+  }
+  if (!wf.dx10_clamp()) {
+    flags |= RJ_ARITH_FP_DX10_CLAMP_OFF;
+  }
+  if (!(wf.fp_denorm_mode_f16_f64() & 1)) {
+    flags |= RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
+  }
+  if (!(wf.fp_denorm_mode_f32() & 2)) {
+    flags |= RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
+  }
+  flags |= uint64_t(wf.fp_round_mode_f32()) << 24;
+  const uint32_t opsel = 0u;
+  const uint64_t modifiers =
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) |
+      ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) | ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) |
+      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u);
+  const uint8_t source_bytes = (modifiers & RJ_ARITH_ALU_HIGH_A) ? 0xC : 0x3;
+  const uint8_t destination_bytes = 0xF;
+  amdgpu::arith::execute_float_conversion(
+      wf, rj_arith_v_cvt_f32_f16_w32_gfx10, rj_arith_v_cvt_f32_f16_w64_gfx10, flags, modifiers,
+      vdst, src0, /*from_double=*/false, /*to_double=*/false, source_bytes, destination_bytes);
 }
 
 void VCvtRpiI32F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_rpi_i32_f32_vop3(*this, wf);
+  const uint64_t flags = amdgpu::arith::float32_flags(wf, wf.cu().arithmetic_flags(), false) &
+                         ~(RJ_ARITH_FP_DX10_CLAMP_OFF | RJ_ARITH_FP_ROUND_MASK);
+  const uint64_t modifiers = (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) |
+                             ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) |
+                             ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u);
+  amdgpu::arith::execute_unary32(wf, rj_arith_v_cvt_nearest_i32_f32_w32_gfx10,
+                                 rj_arith_v_cvt_nearest_i32_f32_w64_gfx10, flags, modifiers, vdst,
+                                 src0);
 }
 
 void VCvtFlrI32F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_flr_i32_f32_vop3(*this, wf);
+  const uint64_t flags = amdgpu::arith::float32_flags(wf, wf.cu().arithmetic_flags(), false) &
+                         ~(RJ_ARITH_FP_DX10_CLAMP_OFF | RJ_ARITH_FP_ROUND_MASK);
+  const uint64_t modifiers = (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) |
+                             ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) |
+                             ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u);
+  amdgpu::arith::execute_unary32(wf, rj_arith_v_cvt_floor_i32_f32_w32_gfx10,
+                                 rj_arith_v_cvt_floor_i32_f32_w64_gfx10, flags, modifiers, vdst,
+                                 src0);
 }
 
 void VCvtOffF32I4Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_off_f32_i4_vop3(*this, wf);
+  uint64_t flags = wf.cu().arithmetic_flags();
+  if (wf.ieee_mode()) {
+    flags |= RJ_ARITH_FP_IEEE_MODE;
+  }
+  if (!(wf.fp_denorm_mode_f32() & 2)) {
+    flags |= RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
+  }
+  const uint64_t modifiers =
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_unary32(wf, rj_arith_v_cvt_off_f32_i4_w32, rj_arith_v_cvt_off_f32_i4_w64,
+                                 flags, modifiers, vdst, src0, 1);
 }
 
 void VCvtF32F64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_f32_f64_vop3(*this, wf);
+  uint64_t flags = wf.cu().arithmetic_flags();
+  if (wf.ieee_mode()) {
+    flags |= RJ_ARITH_FP_IEEE_MODE;
+  }
+  if (!(wf.fp_denorm_mode_f16_f64() & 1)) {
+    flags |= RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
+  }
+  if (!(wf.fp_denorm_mode_f32() & 2)) {
+    flags |= RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
+  }
+  flags |= uint64_t(wf.fp_round_mode_f32()) << 24;
+  if (!wf.dx10_clamp()) {
+    flags |= RJ_ARITH_FP_DX10_CLAMP_OFF;
+  }
+  const uint64_t modifiers =
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) |
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u);
+  amdgpu::arith::execute_float_conversion(wf, rj_arith_v_cvt_f32_f64_w32_gfx10,
+                                          rj_arith_v_cvt_f32_f64_w64_gfx10, flags, modifiers, vdst,
+                                          src0, /*from_double=*/true,
+                                          /*to_double=*/false);
 }
 
 void VCvtF64F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_f64_f32_vop3(*this, wf);
+  uint64_t flags = wf.cu().arithmetic_flags();
+  if (wf.ieee_mode()) {
+    flags |= RJ_ARITH_FP_IEEE_MODE;
+  }
+  if (!(wf.fp_denorm_mode_f32() & 1)) {
+    flags |= RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
+  }
+  if (!(wf.fp_denorm_mode_f16_f64() & 2)) {
+    flags |= RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
+  }
+  flags |= uint64_t(wf.fp_round_mode_f16_f64()) << 24;
+  if (!wf.dx10_clamp()) {
+    flags |= RJ_ARITH_FP_DX10_CLAMP_OFF;
+  }
+  const uint64_t modifiers =
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) |
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u);
+  amdgpu::arith::execute_float_conversion(wf, rj_arith_v_cvt_f64_f32_w32_gfx10,
+                                          rj_arith_v_cvt_f64_f32_w64_gfx10, flags, modifiers, vdst,
+                                          src0, /*from_double=*/false,
+                                          /*to_double=*/true);
 }
 
 void VCvtF32Ubyte0Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_f32_ubyte0_vop3(*this, wf);
+  uint64_t flags = wf.cu().arithmetic_flags();
+  if (wf.ieee_mode()) {
+    flags |= RJ_ARITH_FP_IEEE_MODE;
+  }
+  if (!(wf.fp_denorm_mode_f32() & 2)) {
+    flags |= RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
+  }
+  const uint64_t modifiers =
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_unary32(wf, rj_arith_v_cvt_f32_ubyte0_w32, rj_arith_v_cvt_f32_ubyte0_w64,
+                                 flags, modifiers, vdst, src0, 1);
 }
 
 void VCvtF32Ubyte1Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_f32_ubyte1_vop3(*this, wf);
+  uint64_t flags = wf.cu().arithmetic_flags();
+  if (wf.ieee_mode()) {
+    flags |= RJ_ARITH_FP_IEEE_MODE;
+  }
+  if (!(wf.fp_denorm_mode_f32() & 2)) {
+    flags |= RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
+  }
+  const uint64_t modifiers =
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_unary32(wf, rj_arith_v_cvt_f32_ubyte1_w32, rj_arith_v_cvt_f32_ubyte1_w64,
+                                 flags, modifiers, vdst, src0, 2);
 }
 
 void VCvtF32Ubyte2Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_f32_ubyte2_vop3(*this, wf);
+  uint64_t flags = wf.cu().arithmetic_flags();
+  if (wf.ieee_mode()) {
+    flags |= RJ_ARITH_FP_IEEE_MODE;
+  }
+  if (!(wf.fp_denorm_mode_f32() & 2)) {
+    flags |= RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
+  }
+  const uint64_t modifiers =
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_unary32(wf, rj_arith_v_cvt_f32_ubyte2_w32, rj_arith_v_cvt_f32_ubyte2_w64,
+                                 flags, modifiers, vdst, src0, 4);
 }
 
 void VCvtF32Ubyte3Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_f32_ubyte3_vop3(*this, wf);
+  uint64_t flags = wf.cu().arithmetic_flags();
+  if (wf.ieee_mode()) {
+    flags |= RJ_ARITH_FP_IEEE_MODE;
+  }
+  if (!(wf.fp_denorm_mode_f32() & 2)) {
+    flags |= RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
+  }
+  const uint64_t modifiers =
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_unary32(wf, rj_arith_v_cvt_f32_ubyte3_w32, rj_arith_v_cvt_f32_ubyte3_w64,
+                                 flags, modifiers, vdst, src0, 8);
 }
 
 void VCvtU32F64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_u32_f64_vop3(*this, wf);
+  uint64_t flags = wf.cu().arithmetic_flags();
+  if (wf.ieee_mode()) {
+    flags |= RJ_ARITH_FP_IEEE_MODE;
+  }
+  if (!(wf.fp_denorm_mode_f16_f64() & 1)) {
+    flags |= RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
+  }
+  const uint64_t modifiers =
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) |
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u);
+  amdgpu::arith::execute_float_conversion(wf, rj_arith_v_cvt_u32_f64_w32_gfx10,
+                                          rj_arith_v_cvt_u32_f64_w64_gfx10, flags, modifiers, vdst,
+                                          src0, /*from_double=*/true,
+                                          /*to_double=*/false);
 }
 
 void VCvtF64U32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_f64_u32_vop3(*this, wf);
+  uint64_t flags = wf.cu().arithmetic_flags();
+  if (wf.ieee_mode()) {
+    flags |= RJ_ARITH_FP_IEEE_MODE;
+  }
+  if (!(wf.fp_denorm_mode_f16_f64() & 2)) {
+    flags |= RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
+  }
+  flags |= uint64_t(wf.fp_round_mode_f16_f64()) << 24;
+  if (!wf.dx10_clamp()) {
+    flags |= RJ_ARITH_FP_DX10_CLAMP_OFF;
+  }
+  const uint64_t modifiers =
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_widen32_to_pair(wf, rj_arith_v_cvt_f64_u32_w32_gfx10,
+                                         rj_arith_v_cvt_f64_u32_w64_gfx10, flags, modifiers, vdst,
+                                         src0, 0xF);
 }
 
 void VTruncF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_trunc_f64_vop3(*this, wf);
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_unary64(wf, rj_arith_v_trunc_f64_w32_gfx908,
+                                       rj_arith_v_trunc_f64_w64_gfx908, wf.cu().arithmetic_flags(),
+                                       modifiers, vdst, src0, true);
 }
 
 void VCeilF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_ceil_f64_vop3(*this, wf);
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_unary64(wf, rj_arith_v_ceil_f64_w32_gfx908,
+                                       rj_arith_v_ceil_f64_w64_gfx908, wf.cu().arithmetic_flags(),
+                                       modifiers, vdst, src0, true);
 }
 
 void VRndneF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_rndne_f64_vop3(*this, wf);
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_unary64(wf, rj_arith_v_rndne_f64_w32_gfx908,
+                                       rj_arith_v_rndne_f64_w64_gfx908, wf.cu().arithmetic_flags(),
+                                       modifiers, vdst, src0, true);
 }
 
 void VFloorF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_floor_f64_vop3(*this, wf);
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_unary64(wf, rj_arith_v_floor_f64_w32_gfx908,
+                                       rj_arith_v_floor_f64_w64_gfx908, wf.cu().arithmetic_flags(),
+                                       modifiers, vdst, src0, true);
 }
 
 void VPipeflushVop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -146,89 +407,242 @@ void VPipeflushVop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VFractF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_fract_f32_vop3(*this, wf);
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_unary32(wf, rj_arith_v_fract_f32_w32_gfx908,
+                                       rj_arith_v_fract_f32_w64_gfx908, wf.cu().arithmetic_flags(),
+                                       modifiers, vdst, src0, true, /*guest_rounding=*/true);
 }
 
 void VTruncF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_trunc_f32_vop3(*this, wf);
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_unary32(wf, rj_arith_v_trunc_f32_w32_gfx908,
+                                       rj_arith_v_trunc_f32_w64_gfx908, wf.cu().arithmetic_flags(),
+                                       modifiers, vdst, src0, true, /*guest_rounding=*/true);
 }
 
 void VCeilF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_ceil_f32_vop3(*this, wf);
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_unary32(wf, rj_arith_v_ceil_f32_w32_gfx908,
+                                       rj_arith_v_ceil_f32_w64_gfx908, wf.cu().arithmetic_flags(),
+                                       modifiers, vdst, src0, true, /*guest_rounding=*/true);
 }
 
 void VRndneF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_rndne_f32_vop3(*this, wf);
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_unary32(wf, rj_arith_v_rndne_f32_w32_gfx908,
+                                       rj_arith_v_rndne_f32_w64_gfx908, wf.cu().arithmetic_flags(),
+                                       modifiers, vdst, src0, true, /*guest_rounding=*/true);
 }
 
 void VFloorF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_floor_f32_vop3(*this, wf);
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_unary32(wf, rj_arith_v_floor_f32_w32_gfx908,
+                                       rj_arith_v_floor_f32_w64_gfx908, wf.cu().arithmetic_flags(),
+                                       modifiers, vdst, src0, true, /*guest_rounding=*/true);
 }
 
-void VExpF32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_exp_f32_vop3(*this, wf); }
+void VExpF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_unary32(wf, rj_arith_v_exp_f32_w32_gfx942,
+                                       rj_arith_v_exp_f32_w64_gfx942, wf.cu().arithmetic_flags(),
+                                       modifiers, vdst, src0, true, /*guest_rounding=*/false);
+}
 
-void VLogF32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_log_f32_vop3(*this, wf); }
+void VLogF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_unary32(wf, rj_arith_v_log_f32_w32_gfx942,
+                                       rj_arith_v_log_f32_w64_gfx942, wf.cu().arithmetic_flags(),
+                                       modifiers, vdst, src0, true, /*guest_rounding=*/false);
+}
 
-void VRcpF32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_rcp_f32_vop3(*this, wf); }
+void VRcpF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_unary32(wf, rj_arith_v_rcp_f32_w32_gfx942,
+                                       rj_arith_v_rcp_f32_w64_gfx942, wf.cu().arithmetic_flags(),
+                                       modifiers, vdst, src0, true, /*guest_rounding=*/false);
+}
 
 void VRcpIflagF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_rcp_iflag_f32_vop3(*this, wf);
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_unary32(wf, rj_arith_v_rcp_iflag_f32_w32_gfx942,
+                                       rj_arith_v_rcp_iflag_f32_w64_gfx942,
+                                       wf.cu().arithmetic_flags(), modifiers, vdst, src0, true,
+                                       /*guest_rounding=*/false, /*compatibility_all_exec=*/true);
 }
 
-void VRsqF32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_rsq_f32_vop3(*this, wf); }
+void VRsqF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_unary32(wf, rj_arith_v_rsq_f32_w32_gfx942,
+                                       rj_arith_v_rsq_f32_w64_gfx942, wf.cu().arithmetic_flags(),
+                                       modifiers, vdst, src0, true, /*guest_rounding=*/false);
+}
 
-void VRcpF64Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_rcp_f64_vop3(*this, wf); }
+void VRcpF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_unary64(wf, rj_arith_v_rcp_f64_w32_gfx908,
+                                       rj_arith_v_rcp_f64_w64_gfx908, wf.cu().arithmetic_flags(),
+                                       modifiers, vdst, src0, true);
+}
 
-void VRsqF64Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_rsq_f64_vop3(*this, wf); }
+void VRsqF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_unary64(wf, rj_arith_v_rsq_f64_w32_gfx908,
+                                       rj_arith_v_rsq_f64_w64_gfx908, wf.cu().arithmetic_flags(),
+                                       modifiers, vdst, src0, true);
+}
 
 void VSqrtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_sqrt_f32_vop3(*this, wf);
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_unary32(wf, rj_arith_v_sqrt_f32_w32_gfx942,
+                                       rj_arith_v_sqrt_f32_w64_gfx942, wf.cu().arithmetic_flags(),
+                                       modifiers, vdst, src0, true, /*guest_rounding=*/false,
+                                       /*compatibility_all_exec=*/true);
 }
 
 void VSqrtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_sqrt_f64_vop3(*this, wf);
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_unary64(wf, rj_arith_v_sqrt_f64_w32_gfx908,
+                                       rj_arith_v_sqrt_f64_w64_gfx908, wf.cu().arithmetic_flags(),
+                                       modifiers, vdst, src0, true);
 }
 
-void VSinF32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_sin_f32_vop3(*this, wf); }
+void VSinF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_unary32(wf, rj_arith_v_sin_f32_w32_gfx942,
+                                       rj_arith_v_sin_f32_w64_gfx942, wf.cu().arithmetic_flags(),
+                                       modifiers, vdst, src0, true, /*guest_rounding=*/false);
+}
 
-void VCosF32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_cos_f32_vop3(*this, wf); }
+void VCosF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_unary32(wf, rj_arith_v_cos_f32_w32_gfx942,
+                                       rj_arith_v_cos_f32_w64_gfx942, wf.cu().arithmetic_flags(),
+                                       modifiers, vdst, src0, true, /*guest_rounding=*/false);
+}
 
-void VNotB32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_not_b32_vop3(*this, wf); }
+void VNotB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::arith::execute_unary32(wf, rj_arith_v_not_b32_w32, rj_arith_v_not_b32_w64,
+                                 wf.cu().arithmetic_flags(), inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u,
+                                 vdst, src0);
+}
 
 void VBfrevB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_bfrev_b32_vop3(*this, wf);
+  amdgpu::arith::execute_unary32(wf, rj_arith_v_bfrev_b32_w32, rj_arith_v_bfrev_b32_w64,
+                                 wf.cu().arithmetic_flags(), inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u,
+                                 vdst, src0);
 }
 
 void VFfbhU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_ffbh_u32_vop3(*this, wf);
+  amdgpu::arith::execute_unary32(wf, rj_arith_v_clz_i32_u32_w32, rj_arith_v_clz_i32_u32_w64,
+                                 wf.cu().arithmetic_flags(), inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u,
+                                 vdst, src0);
 }
 
 void VFfblB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_ffbl_b32_vop3(*this, wf);
+  amdgpu::arith::execute_unary32(wf, rj_arith_v_ctz_i32_b32_w32, rj_arith_v_ctz_i32_b32_w64,
+                                 wf.cu().arithmetic_flags(), inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u,
+                                 vdst, src0);
 }
 
 void VFfbhI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_ffbh_i32_vop3(*this, wf);
+  amdgpu::arith::execute_unary32(wf, rj_arith_v_cls_i32_w32, rj_arith_v_cls_i32_w64,
+                                 wf.cu().arithmetic_flags(), inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u,
+                                 vdst, src0);
 }
 
 void VFrexpExpI32F64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_frexp_exp_i32_f64_vop3(*this, wf);
+  if (!wf.exec()) {
+    return;
+  }
+  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u);
+  amdgpu::arith::execute_float_unary64(wf, rj_arith_v_frexp_exp_i32_f64_w32,
+                                       rj_arith_v_frexp_exp_i32_f64_w64, wf.cu().arithmetic_flags(),
+                                       modifiers, vdst, src0, true, /*integer_result=*/true);
 }
 
 void VFrexpMantF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_frexp_mant_f64_vop3(*this, wf);
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_unary64(wf, rj_arith_v_frexp_mant_f64_w32_gfx908,
+                                       rj_arith_v_frexp_mant_f64_w64_gfx908,
+                                       wf.cu().arithmetic_flags(), modifiers, vdst, src0, true);
 }
 
 void VFractF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_fract_f64_vop3(*this, wf);
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_unary64(wf, rj_arith_v_fract_f64_w32_gfx908,
+                                       rj_arith_v_fract_f64_w64_gfx908, wf.cu().arithmetic_flags(),
+                                       modifiers, vdst, src0, true);
 }
 
 void VFrexpExpI32F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_frexp_exp_i32_f32_vop3(*this, wf);
+  if (!wf.exec()) {
+    return;
+  }
+  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u);
+  amdgpu::arith::execute_float_unary32(wf, rj_arith_v_frexp_exp_i32_f32_w32,
+                                       rj_arith_v_frexp_exp_i32_f32_w64, wf.cu().arithmetic_flags(),
+                                       modifiers, vdst, src0, true, /*guest_rounding=*/false);
 }
 
 void VFrexpMantF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_frexp_mant_f32_vop3(*this, wf);
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_unary32(
+      wf, rj_arith_v_frexp_mant_f32_w32_gfx908, rj_arith_v_frexp_mant_f32_w64_gfx908,
+      wf.cu().arithmetic_flags(), modifiers, vdst, src0, true, /*guest_rounding=*/false);
 }
 
 void VClrexcpVop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -243,16 +657,11 @@ void VMovreldB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   bool rel_dst_valid = amdgpu::relative_vgpr_index(rel_dst_base, wf.m0(), vdst.vgpr_count(),
                                                    wf.vgpr_alloc().count, wf.cu().arch())
                            .has_value();
-  if (!rel_dst_valid)
+  if (!rel_dst_valid) {
     return;
-  Operand rel_dst(vdst.size_bits(), OperandType::OPR_VGPR, static_cast<int>(rel_dst_index));
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
-        *this, wf, rel_dst, lane, amdgpu::RegisterAccess(wf).read_lane(src0, lane));
   }
+  Operand rel_dst(vdst.size_bits(), OperandType::OPR_VGPR, static_cast<int>(rel_dst_index));
+  amdgpu::arith::execute_move32(*this, wf, rel_dst, src0);
 }
 
 void VMovrelsB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -265,13 +674,7 @@ void VMovrelsB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
                            .has_value();
   Operand rel_src(src0.size_bits(), OperandType::OPR_VGPR,
                   static_cast<int>(rel_src_valid ? rel_src_index : 0u));
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
-        *this, wf, vdst, lane, amdgpu::RegisterAccess(wf).read_lane(rel_src, lane));
-  }
+  amdgpu::arith::execute_move32(*this, wf, vdst, rel_src);
 }
 
 void VMovrelsdB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -291,18 +694,13 @@ void VMovrelsdB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   bool rel_dst_valid = amdgpu::relative_vgpr_index(rel_dst_base, rel_dst_offset, vdst.vgpr_count(),
                                                    wf.vgpr_alloc().count, wf.cu().arch())
                            .has_value();
-  if (!rel_dst_valid)
+  if (!rel_dst_valid) {
     return;
+  }
   Operand rel_src(src0.size_bits(), OperandType::OPR_VGPR,
                   static_cast<int>(rel_src_valid ? rel_src_index : 0u));
   Operand rel_dst(vdst.size_bits(), OperandType::OPR_VGPR, static_cast<int>(rel_dst_index));
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
-        *this, wf, rel_dst, lane, amdgpu::RegisterAccess(wf).read_lane(rel_src, lane));
-  }
+  amdgpu::arith::execute_move32(*this, wf, rel_dst, rel_src);
 }
 
 void VMovrelsd2B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -322,34 +720,105 @@ void VMovrelsd2B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   bool rel_dst_valid = amdgpu::relative_vgpr_index(rel_dst_base, rel_dst_offset, vdst.vgpr_count(),
                                                    wf.vgpr_alloc().count, wf.cu().arch())
                            .has_value();
-  if (!rel_dst_valid)
+  if (!rel_dst_valid) {
     return;
+  }
   Operand rel_src(src0.size_bits(), OperandType::OPR_VGPR,
                   static_cast<int>(rel_src_valid ? rel_src_index : 0u));
   Operand rel_dst(vdst.size_bits(), OperandType::OPR_VGPR, static_cast<int>(rel_dst_index));
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
-        *this, wf, rel_dst, lane, amdgpu::RegisterAccess(wf).read_lane(rel_src, lane));
-  }
+  amdgpu::arith::execute_move32(*this, wf, rel_dst, rel_src);
 }
 
 void VCvtF16U16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_f16_u16_vop3(*this, wf);
+  uint64_t flags = wf.cu().arithmetic_flags();
+  if (wf.ieee_mode()) {
+    flags |= RJ_ARITH_FP_IEEE_MODE;
+  }
+  if (!wf.dx10_clamp()) {
+    flags |= RJ_ARITH_FP_DX10_CLAMP_OFF;
+  }
+  if (wf.fp16_ovfl()) {
+    flags |= RJ_ARITH_FP16_OVFL;
+  }
+  if (!(wf.fp_denorm_mode_f16_f64() & 2)) {
+    flags |= RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
+  }
+  flags |= uint64_t(wf.fp_round_mode_f16_f64()) << 24;
+  const uint32_t opsel = 0u;
+  const uint64_t modifiers =
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) |
+      ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) | ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u);
+  const uint8_t source_bytes = (modifiers & RJ_ARITH_ALU_HIGH_A) ? 0xC : 0x3;
+  const uint8_t destination_bytes = (modifiers & RJ_ARITH_ALU_HIGH_D) ? 0xC : 0x3;
+  amdgpu::arith::execute_float_conversion(
+      wf, rj_arith_v_cvt_f16_u16_w32_gfx10, rj_arith_v_cvt_f16_u16_w64_gfx10, flags, modifiers,
+      vdst, src0, /*from_double=*/false, /*to_double=*/false, source_bytes, destination_bytes);
 }
 
 void VCvtF16I16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_f16_i16_vop3(*this, wf);
+  uint64_t flags = wf.cu().arithmetic_flags();
+  if (wf.ieee_mode()) {
+    flags |= RJ_ARITH_FP_IEEE_MODE;
+  }
+  if (!wf.dx10_clamp()) {
+    flags |= RJ_ARITH_FP_DX10_CLAMP_OFF;
+  }
+  if (wf.fp16_ovfl()) {
+    flags |= RJ_ARITH_FP16_OVFL;
+  }
+  if (!(wf.fp_denorm_mode_f16_f64() & 2)) {
+    flags |= RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
+  }
+  flags |= uint64_t(wf.fp_round_mode_f16_f64()) << 24;
+  const uint32_t opsel = 0u;
+  const uint64_t modifiers =
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) |
+      ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) | ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u);
+  const uint8_t source_bytes = (modifiers & RJ_ARITH_ALU_HIGH_A) ? 0xC : 0x3;
+  const uint8_t destination_bytes = (modifiers & RJ_ARITH_ALU_HIGH_D) ? 0xC : 0x3;
+  amdgpu::arith::execute_float_conversion(
+      wf, rj_arith_v_cvt_f16_i16_w32_gfx10, rj_arith_v_cvt_f16_i16_w64_gfx10, flags, modifiers,
+      vdst, src0, /*from_double=*/false, /*to_double=*/false, source_bytes, destination_bytes);
 }
 
 void VCvtU16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_u16_f16_vop3(*this, wf);
+  uint64_t flags = wf.cu().arithmetic_flags();
+  if (wf.ieee_mode()) {
+    flags |= RJ_ARITH_FP_IEEE_MODE;
+  }
+  if (!(wf.fp_denorm_mode_f16_f64() & 1)) {
+    flags |= RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
+  }
+  const uint32_t opsel = 0u;
+  const uint64_t modifiers =
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) |
+      ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) | ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u) |
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u);
+  const uint8_t source_bytes = (modifiers & RJ_ARITH_ALU_HIGH_A) ? 0xC : 0x3;
+  const uint8_t destination_bytes = (modifiers & RJ_ARITH_ALU_HIGH_D) ? 0xC : 0x3;
+  amdgpu::arith::execute_float_conversion(
+      wf, rj_arith_v_cvt_u16_f16_w32_gfx10, rj_arith_v_cvt_u16_f16_w64_gfx10, flags, modifiers,
+      vdst, src0, /*from_double=*/false, /*to_double=*/false, source_bytes, destination_bytes);
 }
 
 void VCvtI16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_i16_f16_vop3(*this, wf);
+  uint64_t flags = wf.cu().arithmetic_flags();
+  if (wf.ieee_mode()) {
+    flags |= RJ_ARITH_FP_IEEE_MODE;
+  }
+  if (!(wf.fp_denorm_mode_f16_f64() & 1)) {
+    flags |= RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
+  }
+  const uint32_t opsel = 0u;
+  const uint64_t modifiers =
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) |
+      ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) | ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u) |
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u);
+  const uint8_t source_bytes = (modifiers & RJ_ARITH_ALU_HIGH_A) ? 0xC : 0x3;
+  const uint8_t destination_bytes = (modifiers & RJ_ARITH_ALU_HIGH_D) ? 0xC : 0x3;
+  amdgpu::arith::execute_float_conversion(
+      wf, rj_arith_v_cvt_i16_f16_w32_gfx10, rj_arith_v_cvt_i16_f16_w64_gfx10, flags, modifiers,
+      vdst, src0, /*from_double=*/false, /*to_double=*/false, source_bytes, destination_bytes);
 }
 
 void VRcpF16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_rcp_f16_vop3(*this, wf); }
@@ -365,31 +834,142 @@ void VLogF16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_log_f1
 void VExpF16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_exp_f16_vop3(*this, wf); }
 
 void VFrexpMantF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_frexp_mant_f16_vop3(*this, wf);
+  if (!wf.exec()) {
+    return;
+  }
+  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_unary16(wf, rj_arith_v_frexp_mant_f16_w32_gfx908,
+                                       rj_arith_v_frexp_mant_f16_w64_gfx908,
+                                       wf.cu().arithmetic_flags(), modifiers, vdst, src0, true,
+                                       /*guest_rounding=*/false, /*zero_extend_low=*/false);
 }
 
 void VFrexpExpI16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_frexp_exp_i16_f16_vop3(*this, wf);
+  if (!wf.exec()) {
+    return;
+  }
+  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u);
+  amdgpu::arith::execute_float_unary16(wf, rj_arith_v_frexp_exp_i16_f16_w32,
+                                       rj_arith_v_frexp_exp_i16_f16_w64, wf.cu().arithmetic_flags(),
+                                       modifiers, vdst, src0, true, /*guest_rounding=*/false,
+                                       /*zero_extend_low=*/false);
 }
 
 void VFloorF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_floor_f16_vop3(*this, wf);
+  if (!wf.exec()) {
+    return;
+  }
+  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_unary16(wf, rj_arith_v_floor_f16_w32_gfx908,
+                                       rj_arith_v_floor_f16_w64_gfx908, wf.cu().arithmetic_flags(),
+                                       modifiers, vdst, src0, true, /*guest_rounding=*/true,
+                                       /*zero_extend_low=*/false);
 }
 
 void VCeilF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_ceil_f16_vop3(*this, wf);
+  if (!wf.exec()) {
+    return;
+  }
+  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_unary16(wf, rj_arith_v_ceil_f16_w32_gfx908,
+                                       rj_arith_v_ceil_f16_w64_gfx908, wf.cu().arithmetic_flags(),
+                                       modifiers, vdst, src0, true, /*guest_rounding=*/true,
+                                       /*zero_extend_low=*/false);
 }
 
 void VTruncF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_trunc_f16_vop3(*this, wf);
+  if (!wf.exec()) {
+    return;
+  }
+  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_unary16(wf, rj_arith_v_trunc_f16_w32_gfx908,
+                                       rj_arith_v_trunc_f16_w64_gfx908, wf.cu().arithmetic_flags(),
+                                       modifiers, vdst, src0, true, /*guest_rounding=*/true,
+                                       /*zero_extend_low=*/false);
 }
 
 void VRndneF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_rndne_f16_vop3(*this, wf);
+  if (!wf.exec()) {
+    return;
+  }
+  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_unary16(wf, rj_arith_v_rndne_f16_w32_gfx908,
+                                       rj_arith_v_rndne_f16_w64_gfx908, wf.cu().arithmetic_flags(),
+                                       modifiers, vdst, src0, true, /*guest_rounding=*/true,
+                                       /*zero_extend_low=*/false);
 }
 
 void VFractF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_fract_f16_vop3(*this, wf);
+  if (!wf.exec()) {
+    return;
+  }
+  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_unary16(wf, rj_arith_v_fract_f16_w32_gfx908,
+                                       rj_arith_v_fract_f16_w64_gfx908, wf.cu().arithmetic_flags(),
+                                       modifiers, vdst, src0, true, /*guest_rounding=*/true,
+                                       /*zero_extend_low=*/false);
 }
 
 void VSinF16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_sin_f16_vop3(*this, wf); }
@@ -397,30 +977,98 @@ void VSinF16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_sin_f1
 void VCosF16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_cos_f16_vop3(*this, wf); }
 
 void VSatPkU8I16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_sat_pk_u8_i16_vop3(*this, wf);
+  const uint64_t modifiers = 0u;
+  amdgpu::arith::execute_unary32(wf, rj_arith_v_sat_pk_u8_i16_w32_gfx942,
+                                 rj_arith_v_sat_pk_u8_i16_w64_gfx942, wf.cu().arithmetic_flags(),
+                                 modifiers, vdst, src0, 0xF,
+                                 modifiers & RJ_ARITH_ALU_HIGH_D ? 0xC : 0xF);
 }
 
 void VCvtNormI16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_norm_i16_f16_vop3(*this, wf);
+  uint64_t flags = wf.cu().arithmetic_flags();
+  if (!(wf.fp_denorm_mode_f16_f64() & 1)) {
+    flags |= RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
+  }
+  const uint32_t opsel = amdgpu::vop3_opsel(inst_);
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) | ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u);
+  const uint8_t source_bytes = (modifiers & RJ_ARITH_ALU_HIGH_A) ? 0xC : 0x3;
+  const uint8_t destination_bytes = (modifiers & RJ_ARITH_ALU_HIGH_D) ? 0xC : 0x3;
+  amdgpu::arith::execute_unary32(wf, rj_arith_v_cvt_norm_i16_f16_w32_gfx10,
+                                 rj_arith_v_cvt_norm_i16_f16_w64_gfx10, flags, modifiers, vdst,
+                                 src0, source_bytes, destination_bytes);
 }
 
 void VCvtNormU16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_norm_u16_f16_vop3(*this, wf);
+  uint64_t flags = wf.cu().arithmetic_flags();
+  if (!(wf.fp_denorm_mode_f16_f64() & 1)) {
+    flags |= RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
+  }
+  const uint32_t opsel = amdgpu::vop3_opsel(inst_);
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) | ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u);
+  const uint8_t source_bytes = (modifiers & RJ_ARITH_ALU_HIGH_A) ? 0xC : 0x3;
+  const uint8_t destination_bytes = (modifiers & RJ_ARITH_ALU_HIGH_D) ? 0xC : 0x3;
+  amdgpu::arith::execute_unary32(wf, rj_arith_v_cvt_norm_u16_f16_w32_gfx10,
+                                 rj_arith_v_cvt_norm_u16_f16_w64_gfx10, flags, modifiers, vdst,
+                                 src0, source_bytes, destination_bytes);
 }
 
 void VCndmaskB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cndmask_b32_vop3(*this, wf);
+  if (!wf.exec()) {
+    return;
+  }
+  uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
+      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u);
+  amdgpu::arith::execute_conditional<false>(
+      *this, wf, rj_arith_v_cndmask_b32_w32, rj_arith_v_cndmask_b32_w64, wf.cu().arithmetic_flags(),
+      modifiers, vdst, src0, src1, amdgpu::read_wave_mask_scalar(src2, wf));
 }
 
-void VAddF32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_add_f32_vop3(*this, wf); }
+void VAddF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
+      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_binary32(wf, rj_arith_v_add_f32_w32, rj_arith_v_add_f32_w64,
+                                        wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1,
+                                        /*rdna3=*/true, /*compatibility_mul=*/false);
+}
 
-void VSubF32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_sub_f32_vop3(*this, wf); }
+void VSubF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
+      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_binary32(wf, rj_arith_v_sub_f32_w32, rj_arith_v_sub_f32_w64,
+                                        wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1,
+                                        /*rdna3=*/true, /*compatibility_mul=*/false);
+}
 
 void VSubrevF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_subrev_f32_vop3(*this, wf);
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
+      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_binary32(wf, rj_arith_v_subrev_f32_w32, rj_arith_v_subrev_f32_w64,
+                                        wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1,
+                                        /*rdna3=*/true, /*compatibility_mul=*/false);
 }
 
 void VFmacLegacyF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!wf.exec()) {
+    return;
+  }
+  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   const uint64_t modifiers =
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
@@ -431,79 +1079,209 @@ void VFmacLegacyF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VMulLegacyF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_mul_legacy_f32_vop3(*this, wf);
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
+      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_legacy_multiply32(*this, wf, rj_arith_v_mul_legacy_f32_w32,
+                                           rj_arith_v_mul_legacy_f32_w64,
+                                           wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1);
 }
 
-void VMulF32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_mul_f32_vop3(*this, wf); }
+void VMulF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
+      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_binary32(wf, rj_arith_v_mul_f32_w32, rj_arith_v_mul_f32_w64,
+                                        wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1,
+                                        /*rdna3=*/true, /*compatibility_mul=*/true);
+}
 
 void VMulI32I24Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_mul_i32_i24_vop3(*this, wf);
+  amdgpu::arith::execute_binary32(wf, rj_arith_v_mul_i32_i24_w32, rj_arith_v_mul_i32_i24_w64,
+                                  wf.cu().arithmetic_flags(), inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u,
+                                  vdst, src0, src1);
 }
 
 void VMulHiI32I24Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_mul_hi_i32_i24_vop3(*this, wf);
+  amdgpu::arith::execute_binary32(wf, rj_arith_v_mul_hi_i32_i24_w32, rj_arith_v_mul_hi_i32_i24_w64,
+                                  wf.cu().arithmetic_flags(), 0u, vdst, src0, src1);
 }
 
 void VMulU32U24Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_mul_u32_u24_vop3(*this, wf);
+  amdgpu::arith::execute_binary32(wf, rj_arith_v_mul_u32_u24_w32, rj_arith_v_mul_u32_u24_w64,
+                                  wf.cu().arithmetic_flags(), inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u,
+                                  vdst, src0, src1);
 }
 
 void VMulHiU32U24Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_mul_hi_u32_u24_vop3(*this, wf);
+  amdgpu::arith::execute_binary32(wf, rj_arith_v_mul_hi_u32_u24_w32, rj_arith_v_mul_hi_u32_u24_w64,
+                                  wf.cu().arithmetic_flags(), 0u, vdst, src0, src1);
 }
 
-void VMinF32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_min_f32_vop3(*this, wf); }
+void VMinF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!wf.exec()) {
+    return;
+  }
+  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
+      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_binary32(wf, rj_arith_v_min_f32_w32, rj_arith_v_min_f32_w64,
+                                        wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1,
+                                        /*rdna3=*/true, /*compatibility_mul=*/false);
+}
 
-void VMaxF32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_max_f32_vop3(*this, wf); }
+void VMaxF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!wf.exec()) {
+    return;
+  }
+  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
+      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_binary32(wf, rj_arith_v_max_f32_w32, rj_arith_v_max_f32_w64,
+                                        wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1,
+                                        /*rdna3=*/true, /*compatibility_mul=*/false);
+}
 
-void VMinI32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_min_i32_vop3(*this, wf); }
+void VMinI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::arith::execute_binary32(wf, rj_arith_v_min_i32_w32, rj_arith_v_min_i32_w64,
+                                  wf.cu().arithmetic_flags(), inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u,
+                                  vdst, src0, src1);
+}
 
-void VMaxI32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_max_i32_vop3(*this, wf); }
+void VMaxI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::arith::execute_binary32(wf, rj_arith_v_max_i32_w32, rj_arith_v_max_i32_w64,
+                                  wf.cu().arithmetic_flags(), inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u,
+                                  vdst, src0, src1);
+}
 
-void VMinU32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_min_u32_vop3(*this, wf); }
+void VMinU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::arith::execute_binary32(wf, rj_arith_v_min_u32_w32, rj_arith_v_min_u32_w64,
+                                  wf.cu().arithmetic_flags(), inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u,
+                                  vdst, src0, src1);
+}
 
-void VMaxU32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_max_u32_vop3(*this, wf); }
+void VMaxU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::arith::execute_binary32(wf, rj_arith_v_max_u32_w32, rj_arith_v_max_u32_w64,
+                                  wf.cu().arithmetic_flags(), inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u,
+                                  vdst, src0, src1);
+}
 
 void VLshrrevB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_lshrrev_b32_vop3(*this, wf);
+  amdgpu::arith::execute_binary32(wf, rj_arith_v_lshrrev_b32_w32, rj_arith_v_lshrrev_b32_w64,
+                                  wf.cu().arithmetic_flags(), inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u,
+                                  vdst, src0, src1);
 }
 
 void VAshrrevI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_ashrrev_i32_vop3(*this, wf);
+  amdgpu::arith::execute_binary32(wf, rj_arith_v_ashrrev_i32_w32, rj_arith_v_ashrrev_i32_w64,
+                                  wf.cu().arithmetic_flags(), inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u,
+                                  vdst, src0, src1);
 }
 
 void VLshlrevB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_lshlrev_b32_vop3(*this, wf);
+  amdgpu::arith::execute_binary32(wf, rj_arith_v_lshlrev_b32_w32, rj_arith_v_lshlrev_b32_w64,
+                                  wf.cu().arithmetic_flags(), inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u,
+                                  vdst, src0, src1);
 }
 
-void VAndB32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_and_b32_vop3(*this, wf); }
+void VAndB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::arith::execute_binary32(wf, rj_arith_v_and_b32_w32, rj_arith_v_and_b32_w64,
+                                  wf.cu().arithmetic_flags(), inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u,
+                                  vdst, src0, src1);
+}
 
-void VOrB32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_or_b32_vop3(*this, wf); }
+void VOrB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::arith::execute_binary32(wf, rj_arith_v_or_b32_w32, rj_arith_v_or_b32_w64,
+                                  wf.cu().arithmetic_flags(), inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u,
+                                  vdst, src0, src1);
+}
 
-void VXorB32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_xor_b32_vop3(*this, wf); }
+void VXorB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::arith::execute_binary32(wf, rj_arith_v_xor_b32_w32, rj_arith_v_xor_b32_w64,
+                                  wf.cu().arithmetic_flags(), inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u,
+                                  vdst, src0, src1);
+}
 
 void VXnorB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_xnor_b32_vop3(*this, wf);
+  amdgpu::arith::execute_binary32(wf, rj_arith_v_xnor_b32_w32, rj_arith_v_xnor_b32_w64,
+                                  wf.cu().arithmetic_flags(), inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u,
+                                  vdst, src0, src1);
 }
 
 void VAddNcU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_add_nc_u32_vop3(*this, wf);
+  amdgpu::arith::execute_binary32(wf, rj_arith_v_add_nc_u32_w32, rj_arith_v_add_nc_u32_w64,
+                                  wf.cu().arithmetic_flags(), inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u,
+                                  vdst, src0, src1);
 }
 
 void VSubNcU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_sub_nc_u32_vop3(*this, wf);
+  amdgpu::arith::execute_binary32(wf, rj_arith_v_sub_nc_u32_w32, rj_arith_v_sub_nc_u32_w64,
+                                  wf.cu().arithmetic_flags(), inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u,
+                                  vdst, src0, src1);
 }
 
 void VSubrevNcU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_subrev_nc_u32_vop3(*this, wf);
+  amdgpu::arith::execute_binary32(wf, rj_arith_v_subrev_nc_u32_w32, rj_arith_v_subrev_nc_u32_w64,
+                                  wf.cu().arithmetic_flags(), inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u,
+                                  vdst, src0, src1);
 }
 
 void VFmacF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_fmac_f32_vop3(*this, wf);
+  if (!wf.exec()) {
+    return;
+  }
+  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
+      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_fma32<false>(wf, rj_arith_v_fma_f32_w32, rj_arith_v_fma_f32_w64,
+                                            wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1,
+                                            vdst, true);
 }
 
 void VCvtPkrtzF16F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_pkrtz_f16_f32_vop3(*this, wf);
+  uint64_t flags = wf.cu().arithmetic_flags();
+  if (!(wf.fp_denorm_mode_f32() & 1)) {
+    flags |= RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
+  }
+  if (!(wf.fp_denorm_mode_f16_f64() & 2)) {
+    flags |= RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
+  }
+  if (wf.fp16_ovfl()) {
+    flags |= RJ_ARITH_FP16_OVFL;
+  }
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
+      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
+      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) | (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2);
+  amdgpu::arith::execute_float_pack(wf, rj_arith_v_cvt_pk_rtz_f16_f32_w32_gfx10,
+                                    rj_arith_v_cvt_pk_rtz_f16_f32_w64_gfx10, flags, modifiers, vdst,
+                                    src0, src1, /*half_sources=*/false);
 }
 
 void VAddF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -514,9 +1292,9 @@ void VAddF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) | ((opsel & 2) ? RJ_ARITH_ALU_HIGH_B : 0u) |
       ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u) | (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_binary16<amdgpu::arith::HalfBinaryOperation::Add>(
-      wf, rj_arith_v_add_f16_w32, rj_arith_v_add_f16_w64, wf.cu().arithmetic_flags(), modifiers,
-      vdst, src0, src1, true);
+  amdgpu::arith::execute_float_binary16(wf, rj_arith_v_add_f16_w32_gfx1030,
+                                        rj_arith_v_add_f16_w64_gfx1030, wf.cu().arithmetic_flags(),
+                                        modifiers, vdst, src0, src1, true);
 }
 
 void VSubF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -527,9 +1305,9 @@ void VSubF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) | ((opsel & 2) ? RJ_ARITH_ALU_HIGH_B : 0u) |
       ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u) | (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_binary16<amdgpu::arith::HalfBinaryOperation::Sub>(
-      wf, rj_arith_v_sub_f16_w32, rj_arith_v_sub_f16_w64, wf.cu().arithmetic_flags(), modifiers,
-      vdst, src0, src1, true);
+  amdgpu::arith::execute_float_binary16(wf, rj_arith_v_sub_f16_w32_gfx1030,
+                                        rj_arith_v_sub_f16_w64_gfx1030, wf.cu().arithmetic_flags(),
+                                        modifiers, vdst, src0, src1, true);
 }
 
 void VSubrevF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -540,9 +1318,9 @@ void VSubrevF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) | ((opsel & 2) ? RJ_ARITH_ALU_HIGH_B : 0u) |
       ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u) | (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_binary16<amdgpu::arith::HalfBinaryOperation::Subrev>(
-      wf, rj_arith_v_subrev_f16_w32, rj_arith_v_subrev_f16_w64, wf.cu().arithmetic_flags(),
-      modifiers, vdst, src0, src1, true);
+  amdgpu::arith::execute_float_binary16(
+      wf, rj_arith_v_subrev_f16_w32_gfx1030, rj_arith_v_subrev_f16_w64_gfx1030,
+      wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1, true);
 }
 
 void VMulF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -553,14 +1331,15 @@ void VMulF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) | ((opsel & 2) ? RJ_ARITH_ALU_HIGH_B : 0u) |
       ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u) | (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_binary16<amdgpu::arith::HalfBinaryOperation::Mul>(
-      wf, rj_arith_v_mul_f16_w32, rj_arith_v_mul_f16_w64, wf.cu().arithmetic_flags(), modifiers,
-      vdst, src0, src1, true);
+  amdgpu::arith::execute_float_binary16(wf, rj_arith_v_mul_f16_w32_gfx1030,
+                                        rj_arith_v_mul_f16_w64_gfx1030, wf.cu().arithmetic_flags(),
+                                        modifiers, vdst, src0, src1, true);
 }
 
 void VFmacF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  if (!wf.exec())
+  if (!wf.exec()) {
     return;
+  }
   const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
   if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
       semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
@@ -580,15 +1359,75 @@ void VFmacF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
                                          vdst, true);
 }
 
-void VMaxF16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_max_f16_vop3(*this, wf); }
+void VMaxF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!wf.exec()) {
+    return;
+  }
+  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint32_t opsel = 0;
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
+      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
+      ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) | ((opsel & 2) ? RJ_ARITH_ALU_HIGH_B : 0u) |
+      ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u) | (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) |
+      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_binary16(wf, rj_arith_v_max_f16_w32, rj_arith_v_max_f16_w64,
+                                        wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1,
+                                        true);
+}
 
-void VMinF16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_min_f16_vop3(*this, wf); }
+void VMinF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!wf.exec()) {
+    return;
+  }
+  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint32_t opsel = 0;
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
+      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
+      ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) | ((opsel & 2) ? RJ_ARITH_ALU_HIGH_B : 0u) |
+      ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u) | (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) |
+      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_binary16(wf, rj_arith_v_min_f16_w32, rj_arith_v_min_f16_w64,
+                                        wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1,
+                                        true);
+}
 
 void VLdexpF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_ldexp_f16_vop3(*this, wf);
+  const uint32_t opsel = 0;
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) | ((opsel & 2) ? RJ_ARITH_ALU_HIGH_B : 0u) |
+      ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u) | (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) |
+      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_binary16(wf, rj_arith_v_ldexp_f16_w32_gfx942,
+                                        rj_arith_v_ldexp_f16_w64_gfx942, wf.cu().arithmetic_flags(),
+                                        modifiers, vdst, src0, src1, true);
 }
 
 void VFmaLegacyF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!wf.exec()) {
+    return;
+  }
+  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   const uint64_t modifiers =
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
@@ -600,36 +1439,131 @@ void VFmaLegacyF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VMadI32I24Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_mad_i32_i24_vop3(*this, wf);
+  amdgpu::arith::execute_ternary32(wf, rj_arith_v_mad_i32_i24_w32, rj_arith_v_mad_i32_i24_w64,
+                                   wf.cu().arithmetic_flags(),
+                                   inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
 }
 
 void VMadU32U24Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_mad_u32_u24_vop3(*this, wf);
+  amdgpu::arith::execute_ternary32(wf, rj_arith_v_mad_u32_u24_w32, rj_arith_v_mad_u32_u24_w64,
+                                   wf.cu().arithmetic_flags(),
+                                   inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
 }
 
 void VCubeidF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cubeid_f32_vop3(*this, wf);
+  uint64_t flags = wf.cu().arithmetic_flags();
+  flags |= uint64_t(wf.fp_round_mode_f32()) << 24;
+  if (wf.ieee_mode()) {
+    flags |= RJ_ARITH_FP_IEEE_MODE;
+  }
+  if (!wf.dx10_clamp()) {
+    flags |= RJ_ARITH_FP_DX10_CLAMP_OFF;
+  }
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
+      ((inst_.abs & 4) ? RJ_ARITH_ALU_ABS_C : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) | ((inst_.neg & 4) ? RJ_ARITH_ALU_NEG_C : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_ternary32(wf, rj_arith_v_cubeid_f32_w32, rj_arith_v_cubeid_f32_w64, flags,
+                                   modifiers, vdst, src0, src1, src2, 0xF, 0xF,
+                                   wf.exec() & wf.vgpr_write_mask());
 }
 
 void VCubescF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cubesc_f32_vop3(*this, wf);
+  uint64_t flags = wf.cu().arithmetic_flags();
+  flags |= uint64_t(wf.fp_round_mode_f32()) << 24;
+  if (wf.ieee_mode()) {
+    flags |= RJ_ARITH_FP_IEEE_MODE;
+  }
+  if (!wf.dx10_clamp()) {
+    flags |= RJ_ARITH_FP_DX10_CLAMP_OFF;
+  }
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
+      ((inst_.abs & 4) ? RJ_ARITH_ALU_ABS_C : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) | ((inst_.neg & 4) ? RJ_ARITH_ALU_NEG_C : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_ternary32(wf, rj_arith_v_cubesc_f32_w32, rj_arith_v_cubesc_f32_w64, flags,
+                                   modifiers, vdst, src0, src1, src2, 0xF, 0xF,
+                                   wf.exec() & wf.vgpr_write_mask());
 }
 
 void VCubetcF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cubetc_f32_vop3(*this, wf);
+  uint64_t flags = wf.cu().arithmetic_flags();
+  flags |= uint64_t(wf.fp_round_mode_f32()) << 24;
+  if (wf.ieee_mode()) {
+    flags |= RJ_ARITH_FP_IEEE_MODE;
+  }
+  if (!wf.dx10_clamp()) {
+    flags |= RJ_ARITH_FP_DX10_CLAMP_OFF;
+  }
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
+      ((inst_.abs & 4) ? RJ_ARITH_ALU_ABS_C : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) | ((inst_.neg & 4) ? RJ_ARITH_ALU_NEG_C : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_ternary32(wf, rj_arith_v_cubetc_f32_w32, rj_arith_v_cubetc_f32_w64, flags,
+                                   modifiers, vdst, src0, src1, src2, 0xF, 0xF,
+                                   wf.exec() & wf.vgpr_write_mask());
 }
 
 void VCubemaF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cubema_f32_vop3(*this, wf);
+  uint64_t flags = wf.cu().arithmetic_flags();
+  flags |= uint64_t(wf.fp_round_mode_f32()) << 24;
+  if (wf.ieee_mode()) {
+    flags |= RJ_ARITH_FP_IEEE_MODE;
+  }
+  if (!wf.dx10_clamp()) {
+    flags |= RJ_ARITH_FP_DX10_CLAMP_OFF;
+  }
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
+      ((inst_.abs & 4) ? RJ_ARITH_ALU_ABS_C : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) | ((inst_.neg & 4) ? RJ_ARITH_ALU_NEG_C : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_ternary32(wf, rj_arith_v_cubema_f32_w32, rj_arith_v_cubema_f32_w64, flags,
+                                   modifiers, vdst, src0, src1, src2, 0xF, 0xF,
+                                   wf.exec() & wf.vgpr_write_mask());
 }
 
-void VBfeU32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_bfe_u32_vop3(*this, wf); }
+void VBfeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::arith::execute_ternary32(wf, rj_arith_v_bfe_u32_w32, rj_arith_v_bfe_u32_w64,
+                                   wf.cu().arithmetic_flags(),
+                                   inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
+}
 
-void VBfeI32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_bfe_i32_vop3(*this, wf); }
+void VBfeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::arith::execute_ternary32(wf, rj_arith_v_bfe_i32_w32, rj_arith_v_bfe_i32_w64,
+                                   wf.cu().arithmetic_flags(),
+                                   inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
+}
 
-void VBfiB32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_bfi_b32_vop3(*this, wf); }
+void VBfiB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::arith::execute_ternary32(wf, rj_arith_v_bfi_b32_w32, rj_arith_v_bfi_b32_w64,
+                                   wf.cu().arithmetic_flags(),
+                                   inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
+}
 
-void VFmaF32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_fma_f32_vop3(*this, wf); }
+void VFmaF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!wf.exec()) {
+    return;
+  }
+  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
+      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
+      ((inst_.abs & 4) ? RJ_ARITH_ALU_ABS_C : 0u) | ((inst_.neg & 4) ? RJ_ARITH_ALU_NEG_C : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_fma32<false>(wf, rj_arith_v_fma_f32_w32, rj_arith_v_fma_f32_w64,
+                                            wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1,
+                                            src2, true);
+}
 
 void VFmaF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   const uint64_t modifiers =
@@ -637,455 +1571,557 @@ void VFmaF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 4) ? RJ_ARITH_ALU_ABS_C : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
       ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) | ((inst_.neg & 4) ? RJ_ARITH_ALU_NEG_C : 0u) |
       (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_ternary64(wf, rj_arith_v_fma_f64_w32, rj_arith_v_fma_f64_w64,
+  amdgpu::arith::execute_float_ternary64(wf, rj_arith_v_fma_f64_w32_gfx10,
+                                         rj_arith_v_fma_f64_w64_gfx10, wf.cu().arithmetic_flags(),
+                                         modifiers, vdst, src0, src1, src2, true);
+}
+
+void VLerpU8Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::arith::execute_ternary32(wf, rj_arith_v_lerp_u8_w32, rj_arith_v_lerp_u8_w64,
+                                   wf.cu().arithmetic_flags(),
+                                   inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
+}
+
+void VAlignbitB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::arith::execute_ternary32(wf, rj_arith_v_alignbit_b32_w32, rj_arith_v_alignbit_b32_w64,
+                                   wf.cu().arithmetic_flags(),
+                                   inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2,
+                                   0xF, 0xF, ~uint64_t{0}, 0, amdgpu::vop3_opsel(inst_) & 3u);
+}
+
+void VAlignbyteB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::arith::execute_ternary32(wf, rj_arith_v_alignbyte_b32_w32, rj_arith_v_alignbyte_b32_w64,
+                                   wf.cu().arithmetic_flags(),
+                                   inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2,
+                                   0xF, 0xF, ~uint64_t{0}, 0, amdgpu::vop3_opsel(inst_) & 3u);
+}
+
+void VMullitF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
+      ((inst_.abs & 4) ? RJ_ARITH_ALU_ABS_C : 0u) | ((inst_.neg & 4) ? RJ_ARITH_ALU_NEG_C : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_ternary32(
+      wf, rj_arith_v_mullit_f32_w32_gfx10, rj_arith_v_mullit_f32_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1, src2, true);
+}
+
+void VMin3F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!wf.exec()) {
+    return;
+  }
+  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
+      ((inst_.abs & 4) ? RJ_ARITH_ALU_ABS_C : 0u) | ((inst_.neg & 4) ? RJ_ARITH_ALU_NEG_C : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_ternary32(wf, rj_arith_v_min3_f32_w32, rj_arith_v_min3_f32_w64,
                                          wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1,
                                          src2, true);
 }
 
-void VLerpU8Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_lerp_u8_vop3(*this, wf); }
-
-void VAlignbitB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_alignbit_b32_vop3(*this, wf);
-}
-
-void VAlignbyteB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_alignbyte_b32_vop3(*this, wf);
-}
-
-void VMullitF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_mullit_f32_vop3(*this, wf);
-}
-
-void VMin3F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_min3_f32_vop3(*this, wf);
-}
-
 void VMin3I32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_min3_i32_vop3(*this, wf);
+  amdgpu::arith::execute_ternary32(wf, rj_arith_v_min3_i32_w32, rj_arith_v_min3_i32_w64,
+                                   wf.cu().arithmetic_flags(),
+                                   inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
 }
 
 void VMin3U32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_min3_u32_vop3(*this, wf);
+  amdgpu::arith::execute_ternary32(wf, rj_arith_v_min3_u32_w32, rj_arith_v_min3_u32_w64,
+                                   wf.cu().arithmetic_flags(),
+                                   inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
 }
 
 void VMax3F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_max3_f32_vop3(*this, wf);
+  if (!wf.exec()) {
+    return;
+  }
+  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
+      ((inst_.abs & 4) ? RJ_ARITH_ALU_ABS_C : 0u) | ((inst_.neg & 4) ? RJ_ARITH_ALU_NEG_C : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_ternary32(wf, rj_arith_v_max3_f32_w32, rj_arith_v_max3_f32_w64,
+                                         wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1,
+                                         src2, true);
 }
 
 void VMax3I32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_max3_i32_vop3(*this, wf);
+  amdgpu::arith::execute_ternary32(wf, rj_arith_v_max3_i32_w32, rj_arith_v_max3_i32_w64,
+                                   wf.cu().arithmetic_flags(),
+                                   inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
 }
 
 void VMax3U32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_max3_u32_vop3(*this, wf);
+  amdgpu::arith::execute_ternary32(wf, rj_arith_v_max3_u32_w32, rj_arith_v_max3_u32_w64,
+                                   wf.cu().arithmetic_flags(),
+                                   inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
 }
 
 void VMed3F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_med3_f32_vop3(*this, wf);
+  if (!wf.exec()) {
+    return;
+  }
+  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
+      ((inst_.abs & 4) ? RJ_ARITH_ALU_ABS_C : 0u) | ((inst_.neg & 4) ? RJ_ARITH_ALU_NEG_C : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_ternary32(wf, rj_arith_v_med3_f32_w32, rj_arith_v_med3_f32_w64,
+                                         wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1,
+                                         src2, true);
 }
 
 void VMed3I32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_med3_i32_vop3(*this, wf);
+  amdgpu::arith::execute_ternary32(wf, rj_arith_v_med3_i32_w32, rj_arith_v_med3_i32_w64,
+                                   wf.cu().arithmetic_flags(),
+                                   inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
 }
 
 void VMed3U32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_med3_u32_vop3(*this, wf);
+  amdgpu::arith::execute_ternary32(wf, rj_arith_v_med3_u32_w32, rj_arith_v_med3_u32_w64,
+                                   wf.cu().arithmetic_flags(),
+                                   inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
 }
 
-void VSadU8Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_sad_u8_vop3(*this, wf); }
+void VSadU8Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::arith::execute_ternary32(wf, rj_arith_v_sad_u8_w32, rj_arith_v_sad_u8_w64,
+                                   wf.cu().arithmetic_flags(),
+                                   inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
+}
 
 void VSadHiU8Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_sad_hi_u8_vop3(*this, wf);
+  amdgpu::arith::execute_ternary32(wf, rj_arith_v_sad_hi_u8_w32, rj_arith_v_sad_hi_u8_w64,
+                                   wf.cu().arithmetic_flags(),
+                                   inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
 }
 
-void VSadU16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_sad_u16_vop3(*this, wf); }
+void VSadU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::arith::execute_ternary32(wf, rj_arith_v_sad_u16_w32, rj_arith_v_sad_u16_w64,
+                                   wf.cu().arithmetic_flags(),
+                                   inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
+}
 
-void VSadU32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_sad_u32_vop3(*this, wf); }
+void VSadU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::arith::execute_ternary32(wf, rj_arith_v_sad_u32_w32, rj_arith_v_sad_u32_w64,
+                                   wf.cu().arithmetic_flags(),
+                                   inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
+}
 
 void VCvtPkU8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_pk_u8_f32_vop3(*this, wf);
+  uint64_t flags = wf.cu().arithmetic_flags();
+  if (!(wf.fp_denorm_mode_f32() & 1)) {
+    flags |= RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
+  }
+  flags |= uint64_t(wf.fp_round_mode_f32()) << 24;
+  const uint64_t modifiers = ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) |
+                             ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+                             (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_byte_pack(wf, rj_arith_v_cvt_pk_u8_f32_w32_gfx10,
+                                   rj_arith_v_cvt_pk_u8_f32_w64_gfx10, flags, modifiers, vdst, src0,
+                                   src1, src2);
 }
 
 void VDivFixupF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_div_fixup_f32_vop3(*this, wf);
+  const uint64_t modifiers =
+      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
+      ((inst_.neg & 4) ? RJ_ARITH_ALU_NEG_C : 0u) | ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) |
+      ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) | ((inst_.abs & 4) ? RJ_ARITH_ALU_ABS_C : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_division<32, amdgpu::arith::DivisionOperation::Fixup>(
+      wf, rj_arith_v_div_fixup_f32_w32_gfx942, rj_arith_v_div_fixup_f32_w64_gfx942,
+      wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1, src2,
+      /*rdna3=*/true);
 }
 
 void VDivFixupF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_div_fixup_f64_vop3(*this, wf);
+  const uint64_t modifiers =
+      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
+      ((inst_.neg & 4) ? RJ_ARITH_ALU_NEG_C : 0u) | ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) |
+      ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) | ((inst_.abs & 4) ? RJ_ARITH_ALU_ABS_C : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_division<64, amdgpu::arith::DivisionOperation::Fixup>(
+      wf, rj_arith_v_div_fixup_f64_w32_gfx942, rj_arith_v_div_fixup_f64_w64_gfx942,
+      wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1, src2,
+      /*rdna3=*/true);
 }
 
-void VAddF64Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_add_f64_vop3(*this, wf); }
+void VAddF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!wf.exec()) {
+    return;
+  }
+  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
+      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_binary64(wf, rj_arith_v_add_f64_w32_gfx950,
+                                        rj_arith_v_add_f64_w64_gfx950, wf.cu().arithmetic_flags(),
+                                        modifiers, vdst, src0, src1, true);
+}
 
-void VMulF64Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_mul_f64_vop3(*this, wf); }
+void VMulF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!wf.exec()) {
+    return;
+  }
+  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
+      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_binary64(wf, rj_arith_v_mul_f64_w32_gfx950,
+                                        rj_arith_v_mul_f64_w64_gfx950, wf.cu().arithmetic_flags(),
+                                        modifiers, vdst, src0, src1, true);
+}
 
-void VMinF64Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_min_f64_vop3(*this, wf); }
+void VMinF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!wf.exec()) {
+    return;
+  }
+  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
+      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_binary64(wf, rj_arith_v_min_f64_w32, rj_arith_v_min_f64_w64,
+                                        wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1,
+                                        true);
+}
 
-void VMaxF64Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_max_f64_vop3(*this, wf); }
+void VMaxF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!wf.exec()) {
+    return;
+  }
+  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
+      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_binary64(wf, rj_arith_v_max_f64_w32, rj_arith_v_max_f64_w64,
+                                        wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1,
+                                        true);
+}
 
 void VLdexpF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_ldexp_f64_vop3(*this, wf);
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float64_word(wf, rj_arith_v_ldexp_f64_w32_gfx942,
+                                      rj_arith_v_ldexp_f64_w64_gfx942, wf.cu().arithmetic_flags(),
+                                      modifiers, vdst, src0, src1, true, /*ldexp=*/true);
 }
 
 void VMulLoU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_mul_lo_u32_vop3(*this, wf);
+  amdgpu::arith::execute_binary32(wf, rj_arith_v_mul_lo_u32_w32, rj_arith_v_mul_lo_u32_w64,
+                                  wf.cu().arithmetic_flags(), 0u, vdst, src0, src1);
 }
 
 void VMulHiU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_mul_hi_u32_vop3(*this, wf);
+  amdgpu::arith::execute_binary32(wf, rj_arith_v_mul_hi_u32_w32, rj_arith_v_mul_hi_u32_w64,
+                                  wf.cu().arithmetic_flags(), 0u, vdst, src0, src1);
 }
 
 void VMulHiI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_mul_hi_i32_vop3(*this, wf);
+  amdgpu::arith::execute_binary32(wf, rj_arith_v_mul_hi_i32_w32, rj_arith_v_mul_hi_i32_w64,
+                                  wf.cu().arithmetic_flags(), 0u, vdst, src0, src1);
 }
 
 void VDivFmasF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_div_fmas_f32_vop3(*this, wf);
+  const uint64_t modifiers =
+      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
+      ((inst_.neg & 4) ? RJ_ARITH_ALU_NEG_C : 0u) | ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) |
+      ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) | ((inst_.abs & 4) ? RJ_ARITH_ALU_ABS_C : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_division<32, amdgpu::arith::DivisionOperation::Fmas>(
+      wf, rj_arith_v_div_fmas_f32_w32_gfx942, rj_arith_v_div_fmas_f32_w64_gfx942,
+      wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1, src2,
+      /*rdna3=*/true);
 }
 
 void VDivFmasF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_div_fmas_f64_vop3(*this, wf);
+  const uint64_t modifiers =
+      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
+      ((inst_.neg & 4) ? RJ_ARITH_ALU_NEG_C : 0u) | ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) |
+      ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) | ((inst_.abs & 4) ? RJ_ARITH_ALU_ABS_C : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_division<64, amdgpu::arith::DivisionOperation::Fmas>(
+      wf, rj_arith_v_div_fmas_f64_w32_gfx942, rj_arith_v_div_fmas_f64_w64_gfx942,
+      wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1, src2,
+      /*rdna3=*/true);
 }
 
-void VMsadU8Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_msad_u8_vop3(*this, wf); }
+void VMsadU8Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::arith::execute_ternary32(wf, rj_arith_v_msad_u8_w32, rj_arith_v_msad_u8_w64,
+                                   wf.cu().arithmetic_flags(),
+                                   inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
+}
 
 void VQsadPkU16U8Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint64_t source = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
-    uint32_t reference = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    uint64_t accum = amdgpu::RegisterAccess(wf).read_lane64(src2, lane);
-    uint64_t packed_result = 0;
-    for (uint32_t window = 0; window < 4; ++window) {
-      uint32_t sum = 0;
-      for (uint32_t byte = 0; byte < 4; ++byte) {
-        uint32_t a = (source >> ((window + byte) * 8)) & 0xffu;
-        uint32_t b = (reference >> (byte * 8)) & 0xffu;
-        sum += a > b ? a - b : b - a;
-      }
-      uint32_t value = sum + ((accum >> (window * 16)) & 0xffffu);
-      packed_result |=
-          static_cast<uint64_t>(inst_.clamp ? std::min(value, 0xffffu) : (value & 0xffffu))
-          << (window * 16);
-    }
-    amdgpu::sdwa::write_lane64<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane,
-                                                                 packed_result);
-  }
+  amdgpu::arith::execute_qsad(wf, rj_arith_v_qsad_pk_u16_u8_w32, rj_arith_v_qsad_pk_u16_u8_w64,
+                              wf.cu().arithmetic_flags(), inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u,
+                              vdst, src0, src1, src2, true);
 }
 
 void VMqsadPkU16U8Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint64_t source = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
-    uint32_t reference = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    uint64_t accum = amdgpu::RegisterAccess(wf).read_lane64(src2, lane);
-    uint64_t packed_result = 0;
-    for (uint32_t window = 0; window < 4; ++window) {
-      uint32_t sum = 0;
-      for (uint32_t byte = 0; byte < 4; ++byte) {
-        uint32_t a = (source >> ((window + byte) * 8)) & 0xffu;
-        uint32_t b = (reference >> (byte * 8)) & 0xffu;
-        if (b != 0)
-          sum += a > b ? a - b : b - a;
-      }
-      uint32_t value = sum + ((accum >> (window * 16)) & 0xffffu);
-      packed_result |=
-          static_cast<uint64_t>(inst_.clamp ? std::min(value, 0xffffu) : (value & 0xffffu))
-          << (window * 16);
-    }
-    amdgpu::sdwa::write_lane64<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane,
-                                                                 packed_result);
-  }
+  amdgpu::arith::execute_qsad(wf, rj_arith_v_mqsad_pk_u16_u8_w32, rj_arith_v_mqsad_pk_u16_u8_w64,
+                              wf.cu().arithmetic_flags(), inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u,
+                              vdst, src0, src1, src2, true);
 }
 
 void VTrigPreopF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_trig_preop_f64_vop3(*this, wf);
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float64_word(wf, rj_arith_v_trig_preop_f64_w32_gfx942,
+                                      rj_arith_v_trig_preop_f64_w64_gfx942,
+                                      wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1, true,
+                                      /*ldexp=*/false, /*preop_rounding=*/true);
 }
 
 void VMqsadU32U8Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint64_t source = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
-    uint32_t reference = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    uint32_t accum[4];
-    if (std::optional<uint64_t> constant = src2.const_value()) {
-      accum[0] = static_cast<uint32_t>(*constant);
-      accum[1] = static_cast<uint32_t>(*constant >> 32);
-      accum[2] = 0;
-      accum[3] = 0;
-    } else {
-      Operand accum_word = src2;
-      accum_word.size_bits_ = 32;
-      for (uint32_t window = 0; window < 4; ++window) {
-        accum_word.encoding_value_ = src2.encoding_value_ + static_cast<int>(window);
-        accum[window] = amdgpu::RegisterAccess(wf).read_lane(accum_word, lane);
-      }
-    }
-    Operand dst_word = vdst;
-    dst_word.size_bits_ = 32;
-    for (uint32_t window = 0; window < 4; ++window) {
-      uint32_t sum = 0;
-      for (uint32_t byte = 0; byte < 4; ++byte) {
-        uint32_t a = (source >> ((window + byte) * 8)) & 0xffu;
-        uint32_t b = (reference >> (byte * 8)) & 0xffu;
-        if (b != 0)
-          sum += a > b ? a - b : b - a;
-      }
-      dst_word.encoding_value_ = vdst.encoding_value_ + static_cast<int>(window);
-      amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
-          *this, wf, dst_word, lane,
-          amdgpu::vop3_integer_add<uint32_t>(accum[window], sum, inst_.clamp));
-    }
-  }
+  amdgpu::arith::execute_qsad(wf, rj_arith_v_mqsad_u32_u8_w32, rj_arith_v_mqsad_u32_u8_w64,
+                              wf.cu().arithmetic_flags(), inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u,
+                              vdst, src0, src1, src2, false);
 }
 
 void VXor3B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_xor3_b32_vop3(*this, wf);
+  amdgpu::arith::execute_ternary32(wf, rj_arith_v_xor3_b32_w32, rj_arith_v_xor3_b32_w64,
+                                   wf.cu().arithmetic_flags(),
+                                   inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
 }
 
 void VLshlrevB64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_lshlrev_b64_vop3(*this, wf);
+  amdgpu::arith::execute_shift64(wf, rj_arith_v_lshlrev_b64_w32, rj_arith_v_lshlrev_b64_w64,
+                                 wf.cu().arithmetic_flags(), inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u,
+                                 vdst, src0, src1);
 }
 
 void VLshrrevB64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_lshrrev_b64_vop3(*this, wf);
+  amdgpu::arith::execute_shift64(wf, rj_arith_v_lshrrev_b64_w32, rj_arith_v_lshrrev_b64_w64,
+                                 wf.cu().arithmetic_flags(), inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u,
+                                 vdst, src0, src1);
 }
 
 void VAshrrevI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_ashrrev_i64_vop3(*this, wf);
+  amdgpu::arith::execute_shift64(wf, rj_arith_v_ashrrev_i64_w32, rj_arith_v_ashrrev_i64_w64,
+                                 wf.cu().arithmetic_flags(), inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u,
+                                 vdst, src0, src1);
 }
 
 void VAddNcU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    {
-      uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(
-          static_cast<uint32_t>(static_cast<uint16_t>(amdgpu::vop3_integer_add<uint16_t>(
-              static_cast<uint16_t>(
-                  ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)),
-              static_cast<uint16_t>(
-                  ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)),
-              inst_.clamp)))));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
-    }
-  }
+  const uint32_t opsel = amdgpu::vop3_opsel(inst_);
+  const uint64_t modifiers =
+      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) | ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u) |
+      ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) | ((opsel & 2) ? RJ_ARITH_ALU_HIGH_B : 0u);
+  amdgpu::arith::execute_integer16<2>(wf, rj_arith_v_add_nc_u16_w32, rj_arith_v_add_nc_u16_w64,
+                                      wf.cu().arithmetic_flags(), modifiers, vdst, src0, &src1);
 }
 
 void VSubNcU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    {
-      uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(
-          static_cast<uint32_t>(static_cast<uint16_t>(amdgpu::vop3_integer_sub<uint16_t>(
-              static_cast<uint16_t>(
-                  ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)),
-              static_cast<uint16_t>(
-                  ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)),
-              inst_.clamp)))));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
-    }
-  }
+  const uint32_t opsel = amdgpu::vop3_opsel(inst_);
+  const uint64_t modifiers =
+      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) | ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u) |
+      ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) | ((opsel & 2) ? RJ_ARITH_ALU_HIGH_B : 0u);
+  amdgpu::arith::execute_integer16<2>(wf, rj_arith_v_sub_nc_u16_w32, rj_arith_v_sub_nc_u16_w64,
+                                      wf.cu().arithmetic_flags(), modifiers, vdst, src0, &src1);
 }
 
 void VMulLoU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    {
-      uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(
-          static_cast<uint32_t>(static_cast<uint16_t>(amdgpu::vop3_integer_mul<uint16_t, 16>(
-              static_cast<uint16_t>(
-                  ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)),
-              static_cast<uint16_t>(
-                  ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)),
-              inst_.clamp)))));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
-    }
-  }
+  const uint32_t opsel = amdgpu::vop3_opsel(inst_);
+  const uint64_t modifiers =
+      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) | ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u) |
+      ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) | ((opsel & 2) ? RJ_ARITH_ALU_HIGH_B : 0u);
+  amdgpu::arith::execute_integer16<2>(wf, rj_arith_v_mul_lo_u16_w32_gfx942,
+                                      rj_arith_v_mul_lo_u16_w64_gfx942, wf.cu().arithmetic_flags(),
+                                      modifiers, vdst, src0, &src1);
 }
 
 void VLshrrevB16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint32_t opsel = ::rocjitsu::amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
-    uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
-    uint32_t result = s1 >> (s0 & 15u);
-    ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, result, true);
-  }
+  const uint32_t opsel = amdgpu::vop3_opsel(inst_);
+  const uint64_t modifiers =
+      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) | ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u) |
+      ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) | ((opsel & 2) ? RJ_ARITH_ALU_HIGH_B : 0u);
+  amdgpu::arith::execute_integer16<2>(wf, rj_arith_v_lshrrev_b16_w32, rj_arith_v_lshrrev_b16_w64,
+                                      wf.cu().arithmetic_flags(), modifiers, vdst, src0, &src1);
 }
 
 void VAshrrevI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint32_t opsel = ::rocjitsu::amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
-    uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
-    auto v = static_cast<int16_t>(s1);
-    uint32_t result =
-        static_cast<uint32_t>(static_cast<uint16_t>(v >> (static_cast<int16_t>(s0) & 15u)));
-    ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, result, true);
-  }
+  const uint32_t opsel = amdgpu::vop3_opsel(inst_);
+  const uint64_t modifiers =
+      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) | ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u) |
+      ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) | ((opsel & 2) ? RJ_ARITH_ALU_HIGH_B : 0u);
+  amdgpu::arith::execute_integer16<2>(wf, rj_arith_v_ashrrev_i16_w32, rj_arith_v_ashrrev_i16_w64,
+                                      wf.cu().arithmetic_flags(), modifiers, vdst, src0, &src1);
 }
 
 void VMaxU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    {
-      uint32_t src_half =
-          static_cast<uint32_t>(static_cast<uint16_t>(static_cast<uint32_t>(static_cast<uint16_t>(
-              std::max(static_cast<uint16_t>(
-                           ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)),
-                       static_cast<uint16_t>(
-                           ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)))))));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
-    }
-  }
+  const uint32_t opsel = amdgpu::vop3_opsel(inst_);
+  const uint64_t modifiers =
+      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) | ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u) |
+      ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) | ((opsel & 2) ? RJ_ARITH_ALU_HIGH_B : 0u);
+  amdgpu::arith::execute_integer16<2>(wf, rj_arith_v_max_u16_w32, rj_arith_v_max_u16_w64,
+                                      wf.cu().arithmetic_flags(), modifiers, vdst, src0, &src1);
 }
 
 void VMaxI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    {
-      uint32_t src_half = static_cast<uint32_t>(
-          static_cast<uint16_t>(static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(
-              std::max(static_cast<int16_t>(
-                           ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)),
-                       static_cast<int16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(
-                           src1, wf, lane, opsel, 1))))))));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
-    }
-  }
+  const uint32_t opsel = amdgpu::vop3_opsel(inst_);
+  const uint64_t modifiers =
+      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) | ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u) |
+      ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) | ((opsel & 2) ? RJ_ARITH_ALU_HIGH_B : 0u);
+  amdgpu::arith::execute_integer16<2>(wf, rj_arith_v_max_i16_w32, rj_arith_v_max_i16_w64,
+                                      wf.cu().arithmetic_flags(), modifiers, vdst, src0, &src1);
 }
 
 void VMinU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    {
-      uint32_t src_half =
-          static_cast<uint32_t>(static_cast<uint16_t>(static_cast<uint32_t>(static_cast<uint16_t>(
-              std::min(static_cast<uint16_t>(
-                           ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)),
-                       static_cast<uint16_t>(
-                           ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)))))));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
-    }
-  }
+  const uint32_t opsel = amdgpu::vop3_opsel(inst_);
+  const uint64_t modifiers =
+      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) | ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u) |
+      ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) | ((opsel & 2) ? RJ_ARITH_ALU_HIGH_B : 0u);
+  amdgpu::arith::execute_integer16<2>(wf, rj_arith_v_min_u16_w32, rj_arith_v_min_u16_w64,
+                                      wf.cu().arithmetic_flags(), modifiers, vdst, src0, &src1);
 }
 
 void VMinI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    {
-      uint32_t src_half = static_cast<uint32_t>(
-          static_cast<uint16_t>(static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(
-              std::min(static_cast<int16_t>(
-                           ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)),
-                       static_cast<int16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(
-                           src1, wf, lane, opsel, 1))))))));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
-    }
-  }
+  const uint32_t opsel = amdgpu::vop3_opsel(inst_);
+  const uint64_t modifiers =
+      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) | ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u) |
+      ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) | ((opsel & 2) ? RJ_ARITH_ALU_HIGH_B : 0u);
+  amdgpu::arith::execute_integer16<2>(wf, rj_arith_v_min_i16_w32, rj_arith_v_min_i16_w64,
+                                      wf.cu().arithmetic_flags(), modifiers, vdst, src0, &src1);
 }
 
 void VAddNcI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    {
-      uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(static_cast<uint32_t>(
-          static_cast<uint16_t>(static_cast<int16_t>(amdgpu::vop3_integer_add<int16_t>(
-              ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
-              ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1), inst_.clamp))))));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
-    }
-  }
+  const uint32_t opsel = amdgpu::vop3_opsel(inst_);
+  const uint64_t modifiers =
+      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) | ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u) |
+      ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) | ((opsel & 2) ? RJ_ARITH_ALU_HIGH_B : 0u);
+  amdgpu::arith::execute_integer16<2>(wf, rj_arith_v_add_nc_i16_w32, rj_arith_v_add_nc_i16_w64,
+                                      wf.cu().arithmetic_flags(), modifiers, vdst, src0, &src1);
 }
 
 void VSubNcI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    {
-      uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(static_cast<uint32_t>(
-          static_cast<uint16_t>(static_cast<int16_t>(amdgpu::vop3_integer_sub<int16_t>(
-              ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
-              ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1), inst_.clamp))))));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
-    }
-  }
+  const uint32_t opsel = amdgpu::vop3_opsel(inst_);
+  const uint64_t modifiers =
+      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) | ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u) |
+      ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) | ((opsel & 2) ? RJ_ARITH_ALU_HIGH_B : 0u);
+  amdgpu::arith::execute_integer16<2>(wf, rj_arith_v_sub_nc_i16_w32, rj_arith_v_sub_nc_i16_w64,
+                                      wf.cu().arithmetic_flags(), modifiers, vdst, src0, &src1);
 }
 
 void VPackB32F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_pack_b32_f16_vop3(*this, wf);
+  uint64_t flags = wf.cu().arithmetic_flags();
+  if (!(wf.fp_denorm_mode_f16_f64() & 1)) {
+    flags |= RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
+  }
+  if (wf.ieee_mode()) {
+    flags |= RJ_ARITH_FP_IEEE_MODE;
+  }
+  const uint32_t opsel = amdgpu::vop3_opsel(inst_);
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
+      ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) | ((opsel & 2) ? RJ_ARITH_ALU_HIGH_B : 0u);
+  amdgpu::arith::execute_float_pack(wf, rj_arith_v_pack_b32_f16_w32_gfx10,
+                                    rj_arith_v_pack_b32_f16_w64_gfx10, flags, modifiers, vdst, src0,
+                                    src1, /*half_sources=*/true);
 }
 
 void VCvtPknormI16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_pknorm_i16_f16_vop3(*this, wf);
+  uint64_t flags = wf.cu().arithmetic_flags();
+  if (!(wf.fp_denorm_mode_f16_f64() & 1)) {
+    flags |= RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
+  }
+  const uint32_t opsel = amdgpu::vop3_opsel(inst_);
+  const uint64_t modifiers =
+      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) | ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) |
+      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) |
+      ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
+      ((opsel & 2) ? RJ_ARITH_ALU_HIGH_B : 0u);
+  amdgpu::arith::execute_float_pack(wf, rj_arith_v_cvt_pk_norm_i16_f16_w32_gfx10,
+                                    rj_arith_v_cvt_pk_norm_i16_f16_w64_gfx10, flags, modifiers,
+                                    vdst, src0, src1, /*half_sources=*/true);
 }
 
 void VCvtPknormU16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_pknorm_u16_f16_vop3(*this, wf);
+  uint64_t flags = wf.cu().arithmetic_flags();
+  if (!(wf.fp_denorm_mode_f16_f64() & 1)) {
+    flags |= RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
+  }
+  const uint32_t opsel = amdgpu::vop3_opsel(inst_);
+  const uint64_t modifiers =
+      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) | ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) |
+      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) |
+      ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
+      ((opsel & 2) ? RJ_ARITH_ALU_HIGH_B : 0u);
+  amdgpu::arith::execute_float_pack(wf, rj_arith_v_cvt_pk_norm_u16_f16_w32_gfx10,
+                                    rj_arith_v_cvt_pk_norm_u16_f16_w64_gfx10, flags, modifiers,
+                                    vdst, src0, src1, /*half_sources=*/true);
 }
 
 void VLshlrevB16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint32_t opsel = ::rocjitsu::amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
-    uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
-    uint32_t result = (s1 << (s0 & 15u)) & 0xffffu;
-    ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, result, true);
-  }
+  const uint32_t opsel = amdgpu::vop3_opsel(inst_);
+  const uint64_t modifiers =
+      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) | ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u) |
+      ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) | ((opsel & 2) ? RJ_ARITH_ALU_HIGH_B : 0u);
+  amdgpu::arith::execute_integer16<2>(wf, rj_arith_v_lshlrev_b16_w32, rj_arith_v_lshlrev_b16_w64,
+                                      wf.cu().arithmetic_flags(), modifiers, vdst, src0, &src1);
 }
 
 void VMadU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint32_t opsel = ::rocjitsu::amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
-    uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
-    uint32_t s2 = ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2);
-    uint32_t result = amdgpu::vop3_integer_mad<uint16_t, 16>(s0, s1, s2, inst_.clamp);
-    ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, result, false);
-  }
+  const uint32_t opsel = amdgpu::vop3_opsel(inst_);
+  const uint64_t modifiers =
+      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) | ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u) |
+      ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) | ((opsel & 2) ? RJ_ARITH_ALU_HIGH_B : 0u) |
+      ((opsel & 4) ? RJ_ARITH_ALU_HIGH_C : 0u);
+  amdgpu::arith::execute_integer16<3>(wf, rj_arith_v_mad_u16_w32, rj_arith_v_mad_u16_w64,
+                                      wf.cu().arithmetic_flags(), modifiers, vdst, src0, &src1,
+                                      &src2);
 }
 
 void VInterpP1llF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1097,22 +2133,33 @@ void VInterpP1lvF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VPermB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_perm_b32_vop3(*this, wf);
+  amdgpu::arith::execute_ternary32(wf, rj_arith_v_perm_b32_w32, rj_arith_v_perm_b32_w64,
+                                   wf.cu().arithmetic_flags(),
+                                   inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
 }
 
-void VXadU32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_xad_u32_vop3(*this, wf); }
+void VXadU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::arith::execute_ternary32(wf, rj_arith_v_xad_u32_w32, rj_arith_v_xad_u32_w64,
+                                   wf.cu().arithmetic_flags(),
+                                   inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
+}
 
 void VLshlAddU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_lshl_add_u32_vop3(*this, wf);
+  amdgpu::arith::execute_ternary32(wf, rj_arith_v_lshl_add_u32_w32, rj_arith_v_lshl_add_u32_w64,
+                                   wf.cu().arithmetic_flags(),
+                                   inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
 }
 
 void VAddLshlU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_add_lshl_u32_vop3(*this, wf);
+  amdgpu::arith::execute_ternary32(wf, rj_arith_v_add_lshl_u32_w32, rj_arith_v_add_lshl_u32_w64,
+                                   wf.cu().arithmetic_flags(),
+                                   inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
 }
 
 void VFmaF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  if (!wf.exec())
+  if (!wf.exec()) {
     return;
+  }
   const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
   if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
       semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
@@ -1134,191 +2181,141 @@ void VFmaF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VMin3F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_min3_f16_vop3(*this, wf);
+  if (!wf.exec()) {
+    return;
+  }
+  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint32_t opsel = amdgpu::vop3_opsel(inst_);
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
+      ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) | ((opsel & 2) ? RJ_ARITH_ALU_HIGH_B : 0u) |
+      ((inst_.abs & 4) ? RJ_ARITH_ALU_ABS_C : 0u) | ((inst_.neg & 4) ? RJ_ARITH_ALU_NEG_C : 0u) |
+      ((opsel & 4) ? RJ_ARITH_ALU_HIGH_C : 0u) | ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_ternary16(wf, rj_arith_v_min3_f16_w32, rj_arith_v_min3_f16_w64,
+                                         wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1,
+                                         src2, true);
 }
 
 void VMin3I16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16(uint32_t, [](auto a, auto b, auto c) {
-    using I = util::native<int32_t>;
-    auto sa = (util::stdx::static_simd_cast<I>(a) << 16) >> 16;
-    auto sb = (util::stdx::static_simd_cast<I>(b) << 16) >> 16;
-    auto sc = (util::stdx::static_simd_cast<I>(c) << 16) >> 16;
-    return util::stdx::static_simd_cast<util::native<uint32_t>>(
-               util::stdx::min(util::stdx::min(sa, sb), sc)) &
-           0xFFFFu;
-  });
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    {
-      uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(
-          static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(std::min(
-              std::min(static_cast<int16_t>(
-                           ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)),
-                       static_cast<int16_t>(
-                           ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1))),
-              static_cast<int16_t>(
-                  ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2))))))));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
-    }
-  }
+  const uint32_t opsel = amdgpu::vop3_opsel(inst_);
+  const uint64_t modifiers =
+      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) | ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u) |
+      ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) | ((opsel & 2) ? RJ_ARITH_ALU_HIGH_B : 0u) |
+      ((opsel & 4) ? RJ_ARITH_ALU_HIGH_C : 0u);
+  amdgpu::arith::execute_integer16<3>(wf, rj_arith_v_min3_i16_w32, rj_arith_v_min3_i16_w64,
+                                      wf.cu().arithmetic_flags(), modifiers, vdst, src0, &src1,
+                                      &src2);
 }
 
 void VMin3U16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16(uint32_t, [](auto a, auto b, auto c) {
-    auto sa = a & 0xFFFFu;
-    auto sb = b & 0xFFFFu;
-    auto sc = c & 0xFFFFu;
-    return util::stdx::min(util::stdx::min(sa, sb), sc) & 0xFFFFu;
-  });
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    {
-      uint32_t src_half =
-          static_cast<uint32_t>(static_cast<uint16_t>(static_cast<uint32_t>(static_cast<uint16_t>(
-              std::min(std::min(static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(
-                                    src0, wf, lane, opsel, 0)),
-                                static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(
-                                    src1, wf, lane, opsel, 1))),
-                       static_cast<uint16_t>(
-                           ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2)))))));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
-    }
-  }
+  const uint32_t opsel = amdgpu::vop3_opsel(inst_);
+  const uint64_t modifiers =
+      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) | ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u) |
+      ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) | ((opsel & 2) ? RJ_ARITH_ALU_HIGH_B : 0u) |
+      ((opsel & 4) ? RJ_ARITH_ALU_HIGH_C : 0u);
+  amdgpu::arith::execute_integer16<3>(wf, rj_arith_v_min3_u16_w32, rj_arith_v_min3_u16_w64,
+                                      wf.cu().arithmetic_flags(), modifiers, vdst, src0, &src1,
+                                      &src2);
 }
 
 void VMax3F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_max3_f16_vop3(*this, wf);
+  if (!wf.exec()) {
+    return;
+  }
+  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint32_t opsel = amdgpu::vop3_opsel(inst_);
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
+      ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) | ((opsel & 2) ? RJ_ARITH_ALU_HIGH_B : 0u) |
+      ((inst_.abs & 4) ? RJ_ARITH_ALU_ABS_C : 0u) | ((inst_.neg & 4) ? RJ_ARITH_ALU_NEG_C : 0u) |
+      ((opsel & 4) ? RJ_ARITH_ALU_HIGH_C : 0u) | ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_ternary16(wf, rj_arith_v_max3_f16_w32, rj_arith_v_max3_f16_w64,
+                                         wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1,
+                                         src2, true);
 }
 
 void VMax3I16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16(uint32_t, [](auto a, auto b, auto c) {
-    using I = util::native<int32_t>;
-    auto sa = (util::stdx::static_simd_cast<I>(a) << 16) >> 16;
-    auto sb = (util::stdx::static_simd_cast<I>(b) << 16) >> 16;
-    auto sc = (util::stdx::static_simd_cast<I>(c) << 16) >> 16;
-    return util::stdx::static_simd_cast<util::native<uint32_t>>(
-               util::stdx::max(util::stdx::max(sa, sb), sc)) &
-           0xFFFFu;
-  });
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    {
-      uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(
-          static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(std::max(
-              std::max(static_cast<int16_t>(
-                           ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)),
-                       static_cast<int16_t>(
-                           ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1))),
-              static_cast<int16_t>(
-                  ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2))))))));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
-    }
-  }
+  const uint32_t opsel = amdgpu::vop3_opsel(inst_);
+  const uint64_t modifiers =
+      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) | ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u) |
+      ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) | ((opsel & 2) ? RJ_ARITH_ALU_HIGH_B : 0u) |
+      ((opsel & 4) ? RJ_ARITH_ALU_HIGH_C : 0u);
+  amdgpu::arith::execute_integer16<3>(wf, rj_arith_v_max3_i16_w32, rj_arith_v_max3_i16_w64,
+                                      wf.cu().arithmetic_flags(), modifiers, vdst, src0, &src1,
+                                      &src2);
 }
 
 void VMax3U16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16(uint32_t, [](auto a, auto b, auto c) {
-    auto sa = a & 0xFFFFu;
-    auto sb = b & 0xFFFFu;
-    auto sc = c & 0xFFFFu;
-    return util::stdx::max(util::stdx::max(sa, sb), sc) & 0xFFFFu;
-  });
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    {
-      uint32_t src_half =
-          static_cast<uint32_t>(static_cast<uint16_t>(static_cast<uint32_t>(static_cast<uint16_t>(
-              std::max(std::max(static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(
-                                    src0, wf, lane, opsel, 0)),
-                                static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(
-                                    src1, wf, lane, opsel, 1))),
-                       static_cast<uint16_t>(
-                           ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2)))))));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
-    }
-  }
+  const uint32_t opsel = amdgpu::vop3_opsel(inst_);
+  const uint64_t modifiers =
+      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) | ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u) |
+      ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) | ((opsel & 2) ? RJ_ARITH_ALU_HIGH_B : 0u) |
+      ((opsel & 4) ? RJ_ARITH_ALU_HIGH_C : 0u);
+  amdgpu::arith::execute_integer16<3>(wf, rj_arith_v_max3_u16_w32, rj_arith_v_max3_u16_w64,
+                                      wf.cu().arithmetic_flags(), modifiers, vdst, src0, &src1,
+                                      &src2);
 }
 
 void VMed3F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_med3_f16_vop3(*this, wf);
+  if (!wf.exec()) {
+    return;
+  }
+  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const uint32_t opsel = amdgpu::vop3_opsel(inst_);
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
+      ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) | ((opsel & 2) ? RJ_ARITH_ALU_HIGH_B : 0u) |
+      ((inst_.abs & 4) ? RJ_ARITH_ALU_ABS_C : 0u) | ((inst_.neg & 4) ? RJ_ARITH_ALU_NEG_C : 0u) |
+      ((opsel & 4) ? RJ_ARITH_ALU_HIGH_C : 0u) | ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_ternary16(wf, rj_arith_v_med3_f16_w32, rj_arith_v_med3_f16_w64,
+                                         wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1,
+                                         src2, true);
 }
 
 void VMed3I16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16(uint32_t, [](auto a, auto b, auto c) {
-    using I = util::native<int32_t>;
-    auto sa = (util::stdx::static_simd_cast<I>(a) << 16) >> 16;
-    auto sb = (util::stdx::static_simd_cast<I>(b) << 16) >> 16;
-    auto sc = (util::stdx::static_simd_cast<I>(c) << 16) >> 16;
-    return util::stdx::static_simd_cast<util::native<uint32_t>>(util::stdx::max(
-               util::stdx::min(util::stdx::max(sa, sb), sc), util::stdx::min(sa, sb))) &
-           0xFFFFu;
-  });
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    {
-      uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(
-          static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>([&]() {
-            auto a = static_cast<int16_t>(
-                ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0));
-            auto b = static_cast<int16_t>(
-                ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1));
-            auto c = static_cast<int16_t>(
-                ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2));
-            return std::max(std::min(std::max(a, b), c), std::min(a, b));
-          }())))));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
-    }
-  }
+  const uint32_t opsel = amdgpu::vop3_opsel(inst_);
+  const uint64_t modifiers =
+      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) | ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u) |
+      ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) | ((opsel & 2) ? RJ_ARITH_ALU_HIGH_B : 0u) |
+      ((opsel & 4) ? RJ_ARITH_ALU_HIGH_C : 0u);
+  amdgpu::arith::execute_integer16<3>(wf, rj_arith_v_med3_i16_w32, rj_arith_v_med3_i16_w64,
+                                      wf.cu().arithmetic_flags(), modifiers, vdst, src0, &src1,
+                                      &src2);
 }
 
 void VMed3U16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16(uint32_t, [](auto a, auto b, auto c) {
-    auto sa = a & 0xFFFFu;
-    auto sb = b & 0xFFFFu;
-    auto sc = c & 0xFFFFu;
-    return util::stdx::max(util::stdx::min(util::stdx::max(sa, sb), sc), util::stdx::min(sa, sb)) &
-           0xFFFFu;
-  });
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    {
-      uint32_t src_half = static_cast<uint32_t>(
-          static_cast<uint16_t>(static_cast<uint32_t>(static_cast<uint16_t>([&]() {
-            auto a = static_cast<uint16_t>(
-                ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0));
-            auto b = static_cast<uint16_t>(
-                ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1));
-            auto c = static_cast<uint16_t>(
-                ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2));
-            return std::max(std::min(std::max(a, b), c), std::min(a, b));
-          }()))));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
-    }
-  }
+  const uint32_t opsel = amdgpu::vop3_opsel(inst_);
+  const uint64_t modifiers =
+      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) | ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u) |
+      ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) | ((opsel & 2) ? RJ_ARITH_ALU_HIGH_B : 0u) |
+      ((opsel & 4) ? RJ_ARITH_ALU_HIGH_C : 0u);
+  amdgpu::arith::execute_integer16<3>(wf, rj_arith_v_med3_u16_w32, rj_arith_v_med3_u16_w64,
+                                      wf.cu().arithmetic_flags(), modifiers, vdst, src0, &src1,
+                                      &src2);
 }
 
 void VInterpP2F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1326,192 +2323,174 @@ void VInterpP2F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VMadI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint32_t opsel = ::rocjitsu::amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
-    uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
-    uint32_t s2 = ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2);
-    uint32_t result = amdgpu::vop3_integer_mad<int16_t, 16>(s0, s1, s2, inst_.clamp);
-    ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, result, false);
-  }
+  const uint32_t opsel = amdgpu::vop3_opsel(inst_);
+  const uint64_t modifiers =
+      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) | ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u) |
+      ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) | ((opsel & 2) ? RJ_ARITH_ALU_HIGH_B : 0u) |
+      ((opsel & 4) ? RJ_ARITH_ALU_HIGH_C : 0u);
+  amdgpu::arith::execute_integer16<3>(wf, rj_arith_v_mad_i16_w32, rj_arith_v_mad_i16_w64,
+                                      wf.cu().arithmetic_flags(), modifiers, vdst, src0, &src1,
+                                      &src2);
 }
 
 void VDivFixupF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16(
-      [&wf](auto p, auto b, auto c) {
-        return ::rocjitsu::amdgpu::div_fixup_f16_promoted_simd(p, b, c, wf.fp_round_mode_f16_f64(),
-                                                               wf.fp_denorm_mode_f16_f64());
-      },
-      amdgpu::F16TernaryOutputOrder::MODIFY_THEN_ROUND, true);
-  uint64_t exec = wf.exec();
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float p = util::f16_to_f32(
-        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
-    float b = util::f16_to_f32(
-        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
-    float c = util::f16_to_f32(
-        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2)));
-    p = amdgpu::source_modifier::apply_to_float(p, 0, inst_.abs, inst_.neg);
-    b = amdgpu::source_modifier::apply_to_float(b, 1, inst_.abs, inst_.neg);
-    c = amdgpu::source_modifier::apply_to_float(c, 2, inst_.abs, inst_.neg);
-    float result =
-        amdgpu::div_fixup_f16(p, b, c, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64());
-    const uint32_t effective_omod = amdgpu::fp_mode::effective_f16_omod(
-        wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), false, inst_.omod);
-    if (effective_omod == 1)
-      result *= 2.0f;
-    else if (effective_omod == 2)
-      result *= 4.0f;
-    else if (effective_omod == 3)
-      result *= 0.5f;
-    if (inst_.clamp)
-      result = amdgpu::clamp_floating_result(result, wf);
-    result = amdgpu::fp_mode::finalize_omod_f32(result, effective_omod);
-    uint32_t result_bits = amdgpu::narrow_div_fixup_f16(result, wf.fp16_ovfl());
-    result_bits = amdgpu::fp_mode::finalize_omod_f16(result_bits, effective_omod);
-    ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, result_bits, true);
-  }
+  const uint32_t opsel = amdgpu::vop3_opsel(inst_);
+  const uint64_t modifiers =
+      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) |
+      ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
+      ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) | ((opsel & 2) ? RJ_ARITH_ALU_HIGH_B : 0u) |
+      ((inst_.neg & 4) ? RJ_ARITH_ALU_NEG_C : 0u) | ((inst_.abs & 4) ? RJ_ARITH_ALU_ABS_C : 0u) |
+      ((opsel & 4) ? RJ_ARITH_ALU_HIGH_C : 0u) | ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_ternary16(wf, rj_arith_v_div_fixup_f16_w32_gfx942,
+                                         rj_arith_v_div_fixup_f16_w64_gfx942,
+                                         wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1,
+                                         src2, /*rdna3=*/true, /*low_dst_zeroes_high=*/false);
 }
 
 void VReadlaneB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint32_t lane = amdgpu::RegisterAccess(wf).read_scalar(src1);
-  amdgpu::RegisterAccess(wf).write_scalar(
-      vdst, amdgpu::RegisterAccess(wf).read_scalar_selected_lane(src0, lane));
+  const uint32_t lane = amdgpu::RegisterAccess(wf).read_scalar(src1);
+  amdgpu::arith::execute_read_lane<false>(wf, wf.cu().arithmetic_flags(), vdst, src0, lane);
 }
 
 void VWritelaneB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint32_t val = amdgpu::RegisterAccess(wf).read_scalar(src0);
-  uint32_t lane = amdgpu::RegisterAccess(wf).read_scalar(src1);
-  amdgpu::RegisterAccess(wf).write_scalar_selected_lane(vdst, lane, val);
+  amdgpu::arith::execute_write_lane(wf, wf.cu().arithmetic_flags(), vdst, src0, src1);
 }
 
 void VLdexpF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_ldexp_f32_vop3(*this, wf);
+  const uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_binary32(wf, rj_arith_v_ldexp_f32_w32_gfx942,
+                                        rj_arith_v_ldexp_f32_w64_gfx942, wf.cu().arithmetic_flags(),
+                                        modifiers, vdst, src0, src1,
+                                        /*rdna3=*/true, /*compatibility_mul=*/false);
 }
 
-void VBfmB32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_bfm_b32_vop3(*this, wf); }
+void VBfmB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::arith::execute_binary32(wf, rj_arith_v_bfm_b32_w32, rj_arith_v_bfm_b32_w64,
+                                  wf.cu().arithmetic_flags(), inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u,
+                                  vdst, src0, src1);
+}
 
 void VBcntU32B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_bcnt_u32_b32_vop3(*this, wf);
+  amdgpu::arith::execute_binary32(wf, rj_arith_v_bcnt_u32_b32_w32, rj_arith_v_bcnt_u32_b32_w64,
+                                  wf.cu().arithmetic_flags(), inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u,
+                                  vdst, src0, src1);
 }
 
 void VMbcntLoU32B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_mbcnt_lo_u32_b32_vop3(*this, wf);
+  amdgpu::arith::execute_binary32(wf, rj_arith_v_mbcnt_lo_u32_b32_w32,
+                                  rj_arith_v_mbcnt_lo_u32_b32_w64, wf.cu().arithmetic_flags(),
+                                  inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1);
 }
 
 void VMbcntHiU32B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_mbcnt_hi_u32_b32_vop3(*this, wf);
+  amdgpu::arith::execute_binary32(wf, rj_arith_v_mbcnt_hi_u32_b32_w32,
+                                  rj_arith_v_mbcnt_hi_u32_b32_w64, wf.cu().arithmetic_flags(),
+                                  inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1);
 }
 
 void VCvtPknormI16F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_pknorm_i16_f32_vop3(*this, wf);
+  uint64_t flags = wf.cu().arithmetic_flags();
+  const uint64_t modifiers =
+      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) | ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) |
+      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
+      ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u);
+  amdgpu::arith::execute_binary32(wf, rj_arith_v_cvt_pk_norm_i16_f32_w32_gfx10,
+                                  rj_arith_v_cvt_pk_norm_i16_f32_w64_gfx10, flags, modifiers, vdst,
+                                  src0, src1);
 }
 
 void VCvtPknormU16F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_pknorm_u16_f32_vop3(*this, wf);
+  uint64_t flags = wf.cu().arithmetic_flags();
+  const uint64_t modifiers =
+      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) | ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) |
+      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
+      ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u);
+  amdgpu::arith::execute_binary32(wf, rj_arith_v_cvt_pk_norm_u16_f32_w32_gfx10,
+                                  rj_arith_v_cvt_pk_norm_u16_f32_w64_gfx10, flags, modifiers, vdst,
+                                  src0, src1);
 }
 
 void VCvtPkU16U32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_pk_u16_u32_vop3(*this, wf);
+  amdgpu::arith::execute_binary32(wf, rj_arith_v_cvt_pk_u16_u32_w32, rj_arith_v_cvt_pk_u16_u32_w64,
+                                  wf.cu().arithmetic_flags(), 0u, vdst, src0, src1);
 }
 
 void VCvtPkI16I32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_pk_i16_i32_vop3(*this, wf);
+  amdgpu::arith::execute_binary32(wf, rj_arith_v_cvt_pk_i16_i32_w32, rj_arith_v_cvt_pk_i16_i32_w64,
+                                  wf.cu().arithmetic_flags(), 0u, vdst, src0, src1);
 }
 
 void VAdd3U32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_add3_u32_vop3(*this, wf);
+  amdgpu::arith::execute_ternary32(wf, rj_arith_v_add3_u32_w32, rj_arith_v_add3_u32_w64,
+                                   wf.cu().arithmetic_flags(),
+                                   inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
 }
 
 void VLshlOrB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_lshl_or_b32_vop3(*this, wf);
+  amdgpu::arith::execute_ternary32(wf, rj_arith_v_lshl_or_b32_w32, rj_arith_v_lshl_or_b32_w64,
+                                   wf.cu().arithmetic_flags(),
+                                   inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
 }
 
 void VAndOrB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_and_or_b32_vop3(*this, wf);
+  amdgpu::arith::execute_ternary32(wf, rj_arith_v_and_or_b32_w32, rj_arith_v_and_or_b32_w64,
+                                   wf.cu().arithmetic_flags(),
+                                   inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
 }
 
-void VOr3B32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_or3_b32_vop3(*this, wf); }
+void VOr3B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::arith::execute_ternary32(wf, rj_arith_v_or3_b32_w32, rj_arith_v_or3_b32_w64,
+                                   wf.cu().arithmetic_flags(),
+                                   inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);
+}
 
 void VMadU32U16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_mad_u32_u16_vop3(*this, wf);
+  const uint32_t opsel = amdgpu::vop3_opsel(inst_);
+  const uint64_t modifiers = (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) |
+                             ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) |
+                             ((opsel & 2) ? RJ_ARITH_ALU_HIGH_B : 0u);
+  amdgpu::arith::execute_ternary32(wf, rj_arith_v_mad_u32_u16_w32, rj_arith_v_mad_u32_u16_w64,
+                                   wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1, src2,
+                                   (opsel & 1) ? 0xC : 0x3, (opsel & 2) ? 0xC : 0x3);
 }
 
 void VMadI32I16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_mad_i32_i16_vop3(*this, wf);
+  const uint32_t opsel = amdgpu::vop3_opsel(inst_);
+  const uint64_t modifiers = (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) |
+                             ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) |
+                             ((opsel & 2) ? RJ_ARITH_ALU_HIGH_B : 0u);
+  amdgpu::arith::execute_ternary32(wf, rj_arith_v_mad_i32_i16_w32, rj_arith_v_mad_i32_i16_w64,
+                                   wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1, src2,
+                                   (opsel & 1) ? 0xC : 0x3, (opsel & 2) ? 0xC : 0x3);
 }
 
 void VSubNcI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_sub_nc_i32_vop3(*this, wf);
+  amdgpu::arith::execute_binary32(wf, rj_arith_v_sub_nc_i32_w32, rj_arith_v_sub_nc_i32_w64,
+                                  wf.cu().arithmetic_flags(), inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u,
+                                  vdst, src0, src1);
 }
 
 void VPermlane16B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  bool fi = (inst_.op_sel & 0x1u) != 0;
-  bool bound_ctrl = (inst_.op_sel & 0x2u) != 0;
-  uint64_t exec = wf.exec();
-  uint32_t snap[64];
-  for (uint32_t i = 0; i < wf.wf_size(); ++i)
-    snap[i] = amdgpu::RegisterAccess(wf).read_lane(src0, i);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t sub = lane & 0xF;
-    uint32_t sel_word = (sub < 8u) ? amdgpu::RegisterAccess(wf).read_scalar(src1)
-                                   : amdgpu::RegisterAccess(wf).read_scalar(src2);
-    uint32_t sel = (sel_word >> ((sub & 7u) * 4u)) & 0xF;
-    uint32_t src_lane = amdgpu::valu_permutation_source(amdgpu::ValuPermutation::Perm16, lane, sel,
-                                                        16, wf.wf_size());
-    if (src_lane >= wf.wf_size())
-      continue;
-    bool src_active = (exec & (1ULL << src_lane)) != 0;
-    if (!src_active && !fi) {
-      if (bound_ctrl)
-        amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane, 0);
-      continue;
-    }
-    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane,
-                                                               snap[src_lane]);
-  }
+  const uint64_t modifiers = amdgpu::vop3_opsel(inst_) & 3;
+  amdgpu::arith::execute_permlane16<false, false>(
+      wf, rj_arith_v_permlane16_b32_w32, rj_arith_v_permlane16_b32_w64, wf.cu().arithmetic_flags(),
+      modifiers, vdst, src0, src1, &src2);
 }
 
 void VPermlanex16B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  bool fi = (inst_.op_sel & 0x1u) != 0;
-  bool bound_ctrl = (inst_.op_sel & 0x2u) != 0;
-  uint64_t exec = wf.exec();
-  uint32_t snap[64];
-  for (uint32_t i = 0; i < wf.wf_size(); ++i)
-    snap[i] = amdgpu::RegisterAccess(wf).read_lane(src0, i);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t sub = lane & 0xF;
-    uint32_t sel_word = (sub < 8u) ? amdgpu::RegisterAccess(wf).read_scalar(src1)
-                                   : amdgpu::RegisterAccess(wf).read_scalar(src2);
-    uint32_t sel = (sel_word >> ((sub & 7u) * 4u)) & 0xF;
-    uint32_t src_lane =
-        amdgpu::valu_permutation_source(amdgpu::ValuPermutation::X16, lane, sel, 16, wf.wf_size());
-    if (src_lane >= wf.wf_size())
-      continue;
-    bool src_active = (exec & (1ULL << src_lane)) != 0;
-    if (!src_active && !fi) {
-      if (bound_ctrl)
-        amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane, 0);
-      continue;
-    }
-    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane,
-                                                               snap[src_lane]);
-  }
+  const uint64_t modifiers = amdgpu::vop3_opsel(inst_) & 3;
+  amdgpu::arith::execute_permlane16<true, false>(
+      wf, rj_arith_v_permlanex16_b32_w32, rj_arith_v_permlanex16_b32_w64,
+      wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1, &src2);
 }
 
 void VAddNcI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_add_nc_i32_vop3(*this, wf);
+  amdgpu::arith::execute_binary32(wf, rj_arith_v_add_nc_i32_w32, rj_arith_v_add_nc_i32_w64,
+                                  wf.cu().arithmetic_flags(), inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u,
+                                  vdst, src0, src1);
 }
 
 void VCmpFF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1524,9 +2503,14 @@ void VCmpFF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<32, true>(
-      wf, rj_arith_v_cmp_f_f32_w32, rj_arith_v_cmp_f_f32_w64, wf.cu().arithmetic_flags(), modifiers,
-      src0, src1, true, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<32>(
+      wf, rj_arith_v_cmp_f_f32_w32_gfx10, rj_arith_v_cmp_f_f32_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1,
+      !(inst_.clamp && ((wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK) ==
+                            RJ_ARITH_SEMANTICS_COMPATIBILITY ||
+                        (wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK) ==
+                            RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL)),
+      commit_result, exec_mask);
 }
 
 void VCmpLtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1539,9 +2523,9 @@ void VCmpLtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<32, true>(
-      wf, rj_arith_v_cmp_lt_f32_w32, rj_arith_v_cmp_lt_f32_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<32>(
+      wf, rj_arith_v_cmp_lt_f32_w32_gfx10, rj_arith_v_cmp_lt_f32_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpEqF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1554,9 +2538,9 @@ void VCmpEqF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<32, true>(
-      wf, rj_arith_v_cmp_eq_f32_w32, rj_arith_v_cmp_eq_f32_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<32>(
+      wf, rj_arith_v_cmp_eq_f32_w32_gfx10, rj_arith_v_cmp_eq_f32_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpLeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1569,9 +2553,9 @@ void VCmpLeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<32, true>(
-      wf, rj_arith_v_cmp_le_f32_w32, rj_arith_v_cmp_le_f32_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<32>(
+      wf, rj_arith_v_cmp_le_f32_w32_gfx10, rj_arith_v_cmp_le_f32_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpGtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1584,9 +2568,9 @@ void VCmpGtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<32, true>(
-      wf, rj_arith_v_cmp_gt_f32_w32, rj_arith_v_cmp_gt_f32_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<32>(
+      wf, rj_arith_v_cmp_gt_f32_w32_gfx10, rj_arith_v_cmp_gt_f32_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpLgF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1599,9 +2583,9 @@ void VCmpLgF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<32, true>(
-      wf, rj_arith_v_cmp_lg_f32_w32, rj_arith_v_cmp_lg_f32_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<32>(
+      wf, rj_arith_v_cmp_lg_f32_w32_gfx10, rj_arith_v_cmp_lg_f32_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpGeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1614,9 +2598,9 @@ void VCmpGeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<32, true>(
-      wf, rj_arith_v_cmp_ge_f32_w32, rj_arith_v_cmp_ge_f32_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<32>(
+      wf, rj_arith_v_cmp_ge_f32_w32_gfx10, rj_arith_v_cmp_ge_f32_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpOF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1629,9 +2613,9 @@ void VCmpOF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<32, true>(
-      wf, rj_arith_v_cmp_o_f32_w32, rj_arith_v_cmp_o_f32_w64, wf.cu().arithmetic_flags(), modifiers,
-      src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<32>(
+      wf, rj_arith_v_cmp_o_f32_w32_gfx10, rj_arith_v_cmp_o_f32_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpUF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1644,9 +2628,9 @@ void VCmpUF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<32, true>(
-      wf, rj_arith_v_cmp_u_f32_w32, rj_arith_v_cmp_u_f32_w64, wf.cu().arithmetic_flags(), modifiers,
-      src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<32>(
+      wf, rj_arith_v_cmp_u_f32_w32_gfx10, rj_arith_v_cmp_u_f32_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpNgeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1659,9 +2643,9 @@ void VCmpNgeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<32, true>(
-      wf, rj_arith_v_cmp_nge_f32_w32, rj_arith_v_cmp_nge_f32_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<32>(
+      wf, rj_arith_v_cmp_nge_f32_w32_gfx10, rj_arith_v_cmp_nge_f32_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpNlgF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1674,9 +2658,9 @@ void VCmpNlgF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<32, true>(
-      wf, rj_arith_v_cmp_nlg_f32_w32, rj_arith_v_cmp_nlg_f32_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<32>(
+      wf, rj_arith_v_cmp_nlg_f32_w32_gfx10, rj_arith_v_cmp_nlg_f32_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpNgtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1689,9 +2673,9 @@ void VCmpNgtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<32, true>(
-      wf, rj_arith_v_cmp_ngt_f32_w32, rj_arith_v_cmp_ngt_f32_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<32>(
+      wf, rj_arith_v_cmp_ngt_f32_w32_gfx10, rj_arith_v_cmp_ngt_f32_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpNleF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1704,9 +2688,9 @@ void VCmpNleF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<32, true>(
-      wf, rj_arith_v_cmp_nle_f32_w32, rj_arith_v_cmp_nle_f32_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<32>(
+      wf, rj_arith_v_cmp_nle_f32_w32_gfx10, rj_arith_v_cmp_nle_f32_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpNeqF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1719,9 +2703,9 @@ void VCmpNeqF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<32, true>(
-      wf, rj_arith_v_cmp_neq_f32_w32, rj_arith_v_cmp_neq_f32_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<32>(
+      wf, rj_arith_v_cmp_neq_f32_w32_gfx10, rj_arith_v_cmp_neq_f32_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpNltF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1734,9 +2718,9 @@ void VCmpNltF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<32, true>(
-      wf, rj_arith_v_cmp_nlt_f32_w32, rj_arith_v_cmp_nlt_f32_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<32>(
+      wf, rj_arith_v_cmp_nlt_f32_w32_gfx10, rj_arith_v_cmp_nlt_f32_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpTruF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1744,12 +2728,19 @@ void VCmpTruF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  if (inst_.clamp) {
-    amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::T>(
-        wf, src0, src1, 0, inst_.abs, inst_.neg, wf.exec(), true, true, commit_result);
-    return;
-  }
-  amdgpu::execute_v_cmp_tru_f32_vop3(*this, wf, commit_result);
+  uint64_t exec_mask = wf.exec();
+  uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
+      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
+      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_compare<32>(
+      wf, rj_arith_v_cmp_t_f32_w32_gfx10, rj_arith_v_cmp_t_f32_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1,
+      !(inst_.clamp && ((wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK) ==
+                            RJ_ARITH_SEMANTICS_COMPATIBILITY ||
+                        (wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK) ==
+                            RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL)),
+      commit_result, exec_mask);
 }
 
 void VCmpxFF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1762,9 +2753,14 @@ void VCmpxFF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<32, true>(
-      wf, rj_arith_v_cmpx_f_f32_w32, rj_arith_v_cmpx_f_f32_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, true, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<32>(
+      wf, rj_arith_v_cmpx_f_f32_w32_gfx10, rj_arith_v_cmpx_f_f32_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1,
+      !(inst_.clamp && ((wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK) ==
+                            RJ_ARITH_SEMANTICS_COMPATIBILITY ||
+                        (wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK) ==
+                            RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL)),
+      commit_result, exec_mask);
 }
 
 void VCmpxLtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1777,9 +2773,9 @@ void VCmpxLtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<32, true>(
-      wf, rj_arith_v_cmpx_lt_f32_w32, rj_arith_v_cmpx_lt_f32_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<32>(
+      wf, rj_arith_v_cmpx_lt_f32_w32_gfx10, rj_arith_v_cmpx_lt_f32_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpxEqF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1792,9 +2788,9 @@ void VCmpxEqF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<32, true>(
-      wf, rj_arith_v_cmpx_eq_f32_w32, rj_arith_v_cmpx_eq_f32_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<32>(
+      wf, rj_arith_v_cmpx_eq_f32_w32_gfx10, rj_arith_v_cmpx_eq_f32_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpxLeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1807,9 +2803,9 @@ void VCmpxLeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<32, true>(
-      wf, rj_arith_v_cmpx_le_f32_w32, rj_arith_v_cmpx_le_f32_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<32>(
+      wf, rj_arith_v_cmpx_le_f32_w32_gfx10, rj_arith_v_cmpx_le_f32_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpxGtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1822,9 +2818,9 @@ void VCmpxGtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<32, true>(
-      wf, rj_arith_v_cmpx_gt_f32_w32, rj_arith_v_cmpx_gt_f32_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<32>(
+      wf, rj_arith_v_cmpx_gt_f32_w32_gfx10, rj_arith_v_cmpx_gt_f32_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpxLgF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1837,9 +2833,9 @@ void VCmpxLgF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<32, true>(
-      wf, rj_arith_v_cmpx_lg_f32_w32, rj_arith_v_cmpx_lg_f32_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<32>(
+      wf, rj_arith_v_cmpx_lg_f32_w32_gfx10, rj_arith_v_cmpx_lg_f32_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpxGeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1852,9 +2848,9 @@ void VCmpxGeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<32, true>(
-      wf, rj_arith_v_cmpx_ge_f32_w32, rj_arith_v_cmpx_ge_f32_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<32>(
+      wf, rj_arith_v_cmpx_ge_f32_w32_gfx10, rj_arith_v_cmpx_ge_f32_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpxOF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1867,9 +2863,9 @@ void VCmpxOF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<32, true>(
-      wf, rj_arith_v_cmpx_o_f32_w32, rj_arith_v_cmpx_o_f32_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<32>(
+      wf, rj_arith_v_cmpx_o_f32_w32_gfx10, rj_arith_v_cmpx_o_f32_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpxUF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1882,9 +2878,9 @@ void VCmpxUF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<32, true>(
-      wf, rj_arith_v_cmpx_u_f32_w32, rj_arith_v_cmpx_u_f32_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<32>(
+      wf, rj_arith_v_cmpx_u_f32_w32_gfx10, rj_arith_v_cmpx_u_f32_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpxNgeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1897,9 +2893,9 @@ void VCmpxNgeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<32, true>(
-      wf, rj_arith_v_cmpx_nge_f32_w32, rj_arith_v_cmpx_nge_f32_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<32>(
+      wf, rj_arith_v_cmpx_nge_f32_w32_gfx10, rj_arith_v_cmpx_nge_f32_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpxNlgF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1912,9 +2908,9 @@ void VCmpxNlgF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<32, true>(
-      wf, rj_arith_v_cmpx_nlg_f32_w32, rj_arith_v_cmpx_nlg_f32_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<32>(
+      wf, rj_arith_v_cmpx_nlg_f32_w32_gfx10, rj_arith_v_cmpx_nlg_f32_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpxNgtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1927,9 +2923,9 @@ void VCmpxNgtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<32, true>(
-      wf, rj_arith_v_cmpx_ngt_f32_w32, rj_arith_v_cmpx_ngt_f32_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<32>(
+      wf, rj_arith_v_cmpx_ngt_f32_w32_gfx10, rj_arith_v_cmpx_ngt_f32_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpxNleF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1942,9 +2938,9 @@ void VCmpxNleF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<32, true>(
-      wf, rj_arith_v_cmpx_nle_f32_w32, rj_arith_v_cmpx_nle_f32_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<32>(
+      wf, rj_arith_v_cmpx_nle_f32_w32_gfx10, rj_arith_v_cmpx_nle_f32_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpxNeqF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1957,9 +2953,9 @@ void VCmpxNeqF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<32, true>(
-      wf, rj_arith_v_cmpx_neq_f32_w32, rj_arith_v_cmpx_neq_f32_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<32>(
+      wf, rj_arith_v_cmpx_neq_f32_w32_gfx10, rj_arith_v_cmpx_neq_f32_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpxNltF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1972,9 +2968,9 @@ void VCmpxNltF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<32, true>(
-      wf, rj_arith_v_cmpx_nlt_f32_w32, rj_arith_v_cmpx_nlt_f32_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<32>(
+      wf, rj_arith_v_cmpx_nlt_f32_w32_gfx10, rj_arith_v_cmpx_nlt_f32_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpxTruF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1982,19 +2978,19 @@ void VCmpxTruF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     wf.set_exec(final_result);
   };
-  if (inst_.clamp) {
-    amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::T>(
-        wf, src0, src1, 0, inst_.abs, inst_.neg, wf.exec(), true, true, commit_result);
-    return;
-  }
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    result |= (1ULL << lane);
-  }
-  commit_result(result);
+  uint64_t exec_mask = wf.exec();
+  uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
+      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
+      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_compare<32>(
+      wf, rj_arith_v_cmpx_t_f32_w32_gfx10, rj_arith_v_cmpx_t_f32_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1,
+      !(inst_.clamp && ((wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK) ==
+                            RJ_ARITH_SEMANTICS_COMPATIBILITY ||
+                        (wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK) ==
+                            RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL)),
+      commit_result, exec_mask);
 }
 
 void VCmpFF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2007,9 +3003,14 @@ void VCmpFF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<64, true>(
-      wf, rj_arith_v_cmp_f_f64_w32, rj_arith_v_cmp_f_f64_w64, wf.cu().arithmetic_flags(), modifiers,
-      src0, src1, true, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<64>(
+      wf, rj_arith_v_cmp_f_f64_w32_gfx10, rj_arith_v_cmp_f_f64_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1,
+      !(inst_.clamp && ((wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK) ==
+                            RJ_ARITH_SEMANTICS_COMPATIBILITY ||
+                        (wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK) ==
+                            RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL)),
+      commit_result, exec_mask);
 }
 
 void VCmpLtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2022,9 +3023,9 @@ void VCmpLtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<64, true>(
-      wf, rj_arith_v_cmp_lt_f64_w32, rj_arith_v_cmp_lt_f64_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<64>(
+      wf, rj_arith_v_cmp_lt_f64_w32_gfx10, rj_arith_v_cmp_lt_f64_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpEqF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2037,9 +3038,9 @@ void VCmpEqF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<64, true>(
-      wf, rj_arith_v_cmp_eq_f64_w32, rj_arith_v_cmp_eq_f64_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<64>(
+      wf, rj_arith_v_cmp_eq_f64_w32_gfx10, rj_arith_v_cmp_eq_f64_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpLeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2052,9 +3053,9 @@ void VCmpLeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<64, true>(
-      wf, rj_arith_v_cmp_le_f64_w32, rj_arith_v_cmp_le_f64_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<64>(
+      wf, rj_arith_v_cmp_le_f64_w32_gfx10, rj_arith_v_cmp_le_f64_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpGtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2067,9 +3068,9 @@ void VCmpGtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<64, true>(
-      wf, rj_arith_v_cmp_gt_f64_w32, rj_arith_v_cmp_gt_f64_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<64>(
+      wf, rj_arith_v_cmp_gt_f64_w32_gfx10, rj_arith_v_cmp_gt_f64_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpLgF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2082,9 +3083,9 @@ void VCmpLgF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<64, true>(
-      wf, rj_arith_v_cmp_lg_f64_w32, rj_arith_v_cmp_lg_f64_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<64>(
+      wf, rj_arith_v_cmp_lg_f64_w32_gfx10, rj_arith_v_cmp_lg_f64_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpGeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2097,9 +3098,9 @@ void VCmpGeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<64, true>(
-      wf, rj_arith_v_cmp_ge_f64_w32, rj_arith_v_cmp_ge_f64_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<64>(
+      wf, rj_arith_v_cmp_ge_f64_w32_gfx10, rj_arith_v_cmp_ge_f64_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpOF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2112,9 +3113,9 @@ void VCmpOF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<64, true>(
-      wf, rj_arith_v_cmp_o_f64_w32, rj_arith_v_cmp_o_f64_w64, wf.cu().arithmetic_flags(), modifiers,
-      src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<64>(
+      wf, rj_arith_v_cmp_o_f64_w32_gfx10, rj_arith_v_cmp_o_f64_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpUF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2127,9 +3128,9 @@ void VCmpUF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<64, true>(
-      wf, rj_arith_v_cmp_u_f64_w32, rj_arith_v_cmp_u_f64_w64, wf.cu().arithmetic_flags(), modifiers,
-      src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<64>(
+      wf, rj_arith_v_cmp_u_f64_w32_gfx10, rj_arith_v_cmp_u_f64_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpNgeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2142,9 +3143,9 @@ void VCmpNgeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<64, true>(
-      wf, rj_arith_v_cmp_nge_f64_w32, rj_arith_v_cmp_nge_f64_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<64>(
+      wf, rj_arith_v_cmp_nge_f64_w32_gfx10, rj_arith_v_cmp_nge_f64_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpNlgF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2157,9 +3158,9 @@ void VCmpNlgF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<64, true>(
-      wf, rj_arith_v_cmp_nlg_f64_w32, rj_arith_v_cmp_nlg_f64_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<64>(
+      wf, rj_arith_v_cmp_nlg_f64_w32_gfx10, rj_arith_v_cmp_nlg_f64_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpNgtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2172,9 +3173,9 @@ void VCmpNgtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<64, true>(
-      wf, rj_arith_v_cmp_ngt_f64_w32, rj_arith_v_cmp_ngt_f64_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<64>(
+      wf, rj_arith_v_cmp_ngt_f64_w32_gfx10, rj_arith_v_cmp_ngt_f64_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpNleF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2187,9 +3188,9 @@ void VCmpNleF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<64, true>(
-      wf, rj_arith_v_cmp_nle_f64_w32, rj_arith_v_cmp_nle_f64_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<64>(
+      wf, rj_arith_v_cmp_nle_f64_w32_gfx10, rj_arith_v_cmp_nle_f64_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpNeqF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2202,9 +3203,9 @@ void VCmpNeqF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<64, true>(
-      wf, rj_arith_v_cmp_neq_f64_w32, rj_arith_v_cmp_neq_f64_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<64>(
+      wf, rj_arith_v_cmp_neq_f64_w32_gfx10, rj_arith_v_cmp_neq_f64_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpNltF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2217,9 +3218,9 @@ void VCmpNltF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<64, true>(
-      wf, rj_arith_v_cmp_nlt_f64_w32, rj_arith_v_cmp_nlt_f64_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<64>(
+      wf, rj_arith_v_cmp_nlt_f64_w32_gfx10, rj_arith_v_cmp_nlt_f64_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpTruF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2227,12 +3228,19 @@ void VCmpTruF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  if (inst_.clamp) {
-    amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F64, amdgpu::comparison::T>(
-        wf, src0, src1, 0, inst_.abs, inst_.neg, wf.exec(), true, true, commit_result);
-    return;
-  }
-  amdgpu::execute_v_cmp_tru_f64_vop3(*this, wf, commit_result);
+  uint64_t exec_mask = wf.exec();
+  uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
+      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
+      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_compare<64>(
+      wf, rj_arith_v_cmp_t_f64_w32_gfx10, rj_arith_v_cmp_t_f64_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1,
+      !(inst_.clamp && ((wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK) ==
+                            RJ_ARITH_SEMANTICS_COMPATIBILITY ||
+                        (wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK) ==
+                            RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL)),
+      commit_result, exec_mask);
 }
 
 void VCmpxFF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2245,9 +3253,14 @@ void VCmpxFF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<64, true>(
-      wf, rj_arith_v_cmpx_f_f64_w32, rj_arith_v_cmpx_f_f64_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, true, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<64>(
+      wf, rj_arith_v_cmpx_f_f64_w32_gfx10, rj_arith_v_cmpx_f_f64_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1,
+      !(inst_.clamp && ((wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK) ==
+                            RJ_ARITH_SEMANTICS_COMPATIBILITY ||
+                        (wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK) ==
+                            RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL)),
+      commit_result, exec_mask);
 }
 
 void VCmpxLtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2260,9 +3273,9 @@ void VCmpxLtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<64, true>(
-      wf, rj_arith_v_cmpx_lt_f64_w32, rj_arith_v_cmpx_lt_f64_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<64>(
+      wf, rj_arith_v_cmpx_lt_f64_w32_gfx10, rj_arith_v_cmpx_lt_f64_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpxEqF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2275,9 +3288,9 @@ void VCmpxEqF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<64, true>(
-      wf, rj_arith_v_cmpx_eq_f64_w32, rj_arith_v_cmpx_eq_f64_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<64>(
+      wf, rj_arith_v_cmpx_eq_f64_w32_gfx10, rj_arith_v_cmpx_eq_f64_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpxLeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2290,9 +3303,9 @@ void VCmpxLeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<64, true>(
-      wf, rj_arith_v_cmpx_le_f64_w32, rj_arith_v_cmpx_le_f64_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<64>(
+      wf, rj_arith_v_cmpx_le_f64_w32_gfx10, rj_arith_v_cmpx_le_f64_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpxGtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2305,9 +3318,9 @@ void VCmpxGtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<64, true>(
-      wf, rj_arith_v_cmpx_gt_f64_w32, rj_arith_v_cmpx_gt_f64_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<64>(
+      wf, rj_arith_v_cmpx_gt_f64_w32_gfx10, rj_arith_v_cmpx_gt_f64_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpxLgF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2320,9 +3333,9 @@ void VCmpxLgF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<64, true>(
-      wf, rj_arith_v_cmpx_lg_f64_w32, rj_arith_v_cmpx_lg_f64_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<64>(
+      wf, rj_arith_v_cmpx_lg_f64_w32_gfx10, rj_arith_v_cmpx_lg_f64_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpxGeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2335,9 +3348,9 @@ void VCmpxGeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<64, true>(
-      wf, rj_arith_v_cmpx_ge_f64_w32, rj_arith_v_cmpx_ge_f64_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<64>(
+      wf, rj_arith_v_cmpx_ge_f64_w32_gfx10, rj_arith_v_cmpx_ge_f64_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpxOF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2350,9 +3363,9 @@ void VCmpxOF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<64, true>(
-      wf, rj_arith_v_cmpx_o_f64_w32, rj_arith_v_cmpx_o_f64_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<64>(
+      wf, rj_arith_v_cmpx_o_f64_w32_gfx10, rj_arith_v_cmpx_o_f64_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpxUF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2365,9 +3378,9 @@ void VCmpxUF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<64, true>(
-      wf, rj_arith_v_cmpx_u_f64_w32, rj_arith_v_cmpx_u_f64_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<64>(
+      wf, rj_arith_v_cmpx_u_f64_w32_gfx10, rj_arith_v_cmpx_u_f64_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpxNgeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2380,9 +3393,9 @@ void VCmpxNgeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<64, true>(
-      wf, rj_arith_v_cmpx_nge_f64_w32, rj_arith_v_cmpx_nge_f64_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<64>(
+      wf, rj_arith_v_cmpx_nge_f64_w32_gfx10, rj_arith_v_cmpx_nge_f64_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpxNlgF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2395,9 +3408,9 @@ void VCmpxNlgF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<64, true>(
-      wf, rj_arith_v_cmpx_nlg_f64_w32, rj_arith_v_cmpx_nlg_f64_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<64>(
+      wf, rj_arith_v_cmpx_nlg_f64_w32_gfx10, rj_arith_v_cmpx_nlg_f64_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpxNgtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2410,9 +3423,9 @@ void VCmpxNgtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<64, true>(
-      wf, rj_arith_v_cmpx_ngt_f64_w32, rj_arith_v_cmpx_ngt_f64_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<64>(
+      wf, rj_arith_v_cmpx_ngt_f64_w32_gfx10, rj_arith_v_cmpx_ngt_f64_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpxNleF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2425,9 +3438,9 @@ void VCmpxNleF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<64, true>(
-      wf, rj_arith_v_cmpx_nle_f64_w32, rj_arith_v_cmpx_nle_f64_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<64>(
+      wf, rj_arith_v_cmpx_nle_f64_w32_gfx10, rj_arith_v_cmpx_nle_f64_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpxNeqF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2440,9 +3453,9 @@ void VCmpxNeqF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<64, true>(
-      wf, rj_arith_v_cmpx_neq_f64_w32, rj_arith_v_cmpx_neq_f64_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<64>(
+      wf, rj_arith_v_cmpx_neq_f64_w32_gfx10, rj_arith_v_cmpx_neq_f64_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpxNltF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2455,9 +3468,9 @@ void VCmpxNltF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<64, true>(
-      wf, rj_arith_v_cmpx_nlt_f64_w32, rj_arith_v_cmpx_nlt_f64_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<64>(
+      wf, rj_arith_v_cmpx_nlt_f64_w32_gfx10, rj_arith_v_cmpx_nlt_f64_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpxTruF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2465,19 +3478,19 @@ void VCmpxTruF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     wf.set_exec(final_result);
   };
-  if (inst_.clamp) {
-    amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F64, amdgpu::comparison::T>(
-        wf, src0, src1, 0, inst_.abs, inst_.neg, wf.exec(), true, true, commit_result);
-    return;
-  }
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    result |= (1ULL << lane);
-  }
-  commit_result(result);
+  uint64_t exec_mask = wf.exec();
+  uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
+      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
+      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_compare<64>(
+      wf, rj_arith_v_cmpx_t_f64_w32_gfx10, rj_arith_v_cmpx_t_f64_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1,
+      !(inst_.clamp && ((wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK) ==
+                            RJ_ARITH_SEMANTICS_COMPATIBILITY ||
+                        (wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK) ==
+                            RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL)),
+      commit_result, exec_mask);
 }
 
 void VCmpFI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2485,7 +3498,9 @@ void VCmpFI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_f_i32_vop3(*this, wf, commit_result);
+  amdgpu::arith::execute_compare<32>(wf, rj_arith_v_cmp_f_i32_w32, rj_arith_v_cmp_f_i32_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, true,
+                                     commit_result);
 }
 
 void VCmpLtI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2493,7 +3508,9 @@ void VCmpLtI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_lt_i32_vop3(*this, wf, commit_result);
+  amdgpu::arith::execute_compare<32>(wf, rj_arith_v_cmp_lt_i32_w32, rj_arith_v_cmp_lt_i32_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpEqI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2501,7 +3518,9 @@ void VCmpEqI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_eq_i32_vop3(*this, wf, commit_result);
+  amdgpu::arith::execute_compare<32>(wf, rj_arith_v_cmp_eq_i32_w32, rj_arith_v_cmp_eq_i32_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpLeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2509,7 +3528,9 @@ void VCmpLeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_le_i32_vop3(*this, wf, commit_result);
+  amdgpu::arith::execute_compare<32>(wf, rj_arith_v_cmp_le_i32_w32, rj_arith_v_cmp_le_i32_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpGtI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2517,7 +3538,9 @@ void VCmpGtI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_gt_i32_vop3(*this, wf, commit_result);
+  amdgpu::arith::execute_compare<32>(wf, rj_arith_v_cmp_gt_i32_w32, rj_arith_v_cmp_gt_i32_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpNeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2525,7 +3548,9 @@ void VCmpNeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_ne_i32_vop3(*this, wf, commit_result);
+  amdgpu::arith::execute_compare<32>(wf, rj_arith_v_cmp_ne_i32_w32, rj_arith_v_cmp_ne_i32_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpGeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2533,7 +3558,9 @@ void VCmpGeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_ge_i32_vop3(*this, wf, commit_result);
+  amdgpu::arith::execute_compare<32>(wf, rj_arith_v_cmp_ge_i32_w32, rj_arith_v_cmp_ge_i32_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpTI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2541,7 +3568,9 @@ void VCmpTI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_t_i32_vop3(*this, wf, commit_result);
+  amdgpu::arith::execute_compare<32>(wf, rj_arith_v_cmp_t_i32_w32, rj_arith_v_cmp_t_i32_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, true,
+                                     commit_result);
 }
 
 void VCmpClassF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2549,7 +3578,12 @@ void VCmpClassF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_class_f32_vop3(*this, wf, commit_result);
+  uint64_t modifiers = ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) |
+                       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+                       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_compare<32, 32>(wf, rj_arith_v_cmp_class_f32_w32,
+                                         rj_arith_v_cmp_class_f32_w64, wf.cu().arithmetic_flags(),
+                                         modifiers, src0, src1, false, commit_result);
 }
 
 void VCmpLtI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2559,7 +3593,9 @@ void VCmpLtI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   };
   CapturedArithmeticSource lhs_input(wf, src0, 0x3);
   CapturedArithmeticSource rhs_input(wf, src1, 0x3);
-  amdgpu::execute_v_cmp_lt_i16_vop3(*this, wf, commit_result);
+  amdgpu::arith::execute_compare<16>(wf, rj_arith_v_cmp_lt_i16_w32, rj_arith_v_cmp_lt_i16_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpEqI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2569,7 +3605,9 @@ void VCmpEqI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   };
   CapturedArithmeticSource lhs_input(wf, src0, 0x3);
   CapturedArithmeticSource rhs_input(wf, src1, 0x3);
-  amdgpu::execute_v_cmp_eq_i16_vop3(*this, wf, commit_result);
+  amdgpu::arith::execute_compare<16>(wf, rj_arith_v_cmp_eq_i16_w32, rj_arith_v_cmp_eq_i16_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpLeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2579,7 +3617,9 @@ void VCmpLeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   };
   CapturedArithmeticSource lhs_input(wf, src0, 0x3);
   CapturedArithmeticSource rhs_input(wf, src1, 0x3);
-  amdgpu::execute_v_cmp_le_i16_vop3(*this, wf, commit_result);
+  amdgpu::arith::execute_compare<16>(wf, rj_arith_v_cmp_le_i16_w32, rj_arith_v_cmp_le_i16_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpGtI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2589,7 +3629,9 @@ void VCmpGtI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   };
   CapturedArithmeticSource lhs_input(wf, src0, 0x3);
   CapturedArithmeticSource rhs_input(wf, src1, 0x3);
-  amdgpu::execute_v_cmp_gt_i16_vop3(*this, wf, commit_result);
+  amdgpu::arith::execute_compare<16>(wf, rj_arith_v_cmp_gt_i16_w32, rj_arith_v_cmp_gt_i16_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpNeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2599,7 +3641,9 @@ void VCmpNeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   };
   CapturedArithmeticSource lhs_input(wf, src0, 0x3);
   CapturedArithmeticSource rhs_input(wf, src1, 0x3);
-  amdgpu::execute_v_cmp_ne_i16_vop3(*this, wf, commit_result);
+  amdgpu::arith::execute_compare<16>(wf, rj_arith_v_cmp_ne_i16_w32, rj_arith_v_cmp_ne_i16_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpGeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2609,7 +3653,9 @@ void VCmpGeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   };
   CapturedArithmeticSource lhs_input(wf, src0, 0x3);
   CapturedArithmeticSource rhs_input(wf, src1, 0x3);
-  amdgpu::execute_v_cmp_ge_i16_vop3(*this, wf, commit_result);
+  amdgpu::arith::execute_compare<16>(wf, rj_arith_v_cmp_ge_i16_w32, rj_arith_v_cmp_ge_i16_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpClassF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2617,7 +3663,12 @@ void VCmpClassF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_class_f16_vop3(*this, wf, commit_result);
+  uint64_t modifiers = ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) |
+                       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+                       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_compare<16, 16>(wf, rj_arith_v_cmp_class_f16_w32,
+                                         rj_arith_v_cmp_class_f16_w64, wf.cu().arithmetic_flags(),
+                                         modifiers, src0, src1, false, commit_result);
 }
 
 void VCmpxFI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2625,14 +3676,9 @@ void VCmpxFI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    (void)lane;
-  }
-  commit_result(result);
+  amdgpu::arith::execute_compare<32>(wf, rj_arith_v_cmpx_f_i32_w32, rj_arith_v_cmpx_f_i32_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, true,
+                                     commit_result);
 }
 
 void VCmpxLtI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2640,17 +3686,9 @@ void VCmpxLtI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int32_t s0 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    int32_t s1 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    if (s0 < s1)
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  amdgpu::arith::execute_compare<32>(wf, rj_arith_v_cmpx_lt_i32_w32, rj_arith_v_cmpx_lt_i32_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpxEqI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2658,17 +3696,9 @@ void VCmpxEqI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int32_t s0 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    int32_t s1 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    if (s0 == s1)
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  amdgpu::arith::execute_compare<32>(wf, rj_arith_v_cmpx_eq_i32_w32, rj_arith_v_cmpx_eq_i32_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpxLeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2676,17 +3706,9 @@ void VCmpxLeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int32_t s0 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    int32_t s1 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    if (s0 <= s1)
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  amdgpu::arith::execute_compare<32>(wf, rj_arith_v_cmpx_le_i32_w32, rj_arith_v_cmpx_le_i32_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpxGtI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2694,17 +3716,9 @@ void VCmpxGtI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int32_t s0 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    int32_t s1 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    if (s0 > s1)
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  amdgpu::arith::execute_compare<32>(wf, rj_arith_v_cmpx_gt_i32_w32, rj_arith_v_cmpx_gt_i32_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpxNeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2712,17 +3726,9 @@ void VCmpxNeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int32_t s0 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    int32_t s1 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    if (s0 != s1)
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  amdgpu::arith::execute_compare<32>(wf, rj_arith_v_cmpx_ne_i32_w32, rj_arith_v_cmpx_ne_i32_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpxGeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2730,17 +3736,9 @@ void VCmpxGeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int32_t s0 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    int32_t s1 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    if (s0 >= s1)
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  amdgpu::arith::execute_compare<32>(wf, rj_arith_v_cmpx_ge_i32_w32, rj_arith_v_cmpx_ge_i32_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpxTI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2748,14 +3746,9 @@ void VCmpxTI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    result |= (1ULL << lane);
-  }
-  commit_result(result);
+  amdgpu::arith::execute_compare<32>(wf, rj_arith_v_cmpx_t_i32_w32, rj_arith_v_cmpx_t_i32_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, true,
+                                     commit_result);
 }
 
 void VCmpxClassF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2763,41 +3756,12 @@ void VCmpxClassF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    s0 = amdgpu::source_modifier::apply_to_float(s0, 0, inst_.abs, inst_.neg);
-    uint32_t mask = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    bool match = false;
-    if ((mask & 0x001) && std::isnan(s0) && (std::bit_cast<uint32_t>(s0) & 0x00400000) == 0)
-      match = true;
-    if ((mask & 0x002) && std::isnan(s0) && (std::bit_cast<uint32_t>(s0) & 0x00400000) != 0)
-      match = true;
-    if ((mask & 0x004) && std::isinf(s0) && s0 < 0)
-      match = true;
-    if ((mask & 0x008) && std::isnormal(s0) && s0 < 0)
-      match = true;
-    if ((mask & 0x010) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0f &&
-        std::signbit(s0))
-      match = true;
-    if ((mask & 0x020) && s0 == 0.0f && std::signbit(s0))
-      match = true;
-    if ((mask & 0x040) && s0 == 0.0f && !std::signbit(s0))
-      match = true;
-    if ((mask & 0x080) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0f &&
-        !std::signbit(s0))
-      match = true;
-    if ((mask & 0x100) && std::isnormal(s0) && s0 > 0)
-      match = true;
-    if ((mask & 0x200) && std::isinf(s0) && s0 > 0)
-      match = true;
-    if (match)
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  uint64_t modifiers = ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) |
+                       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+                       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_compare<32, 32>(wf, rj_arith_v_cmpx_class_f32_w32,
+                                         rj_arith_v_cmpx_class_f32_w64, wf.cu().arithmetic_flags(),
+                                         modifiers, src0, src1, false, commit_result);
 }
 
 void VCmpxLtI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2807,24 +3771,9 @@ void VCmpxLtI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   };
   CapturedArithmeticSource lhs_input(wf, src0, 0x3);
   CapturedArithmeticSource rhs_input(wf, src1, 0x3);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t s0_raw = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t s1_raw = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (opsel & (1u << 0))
-      s0_raw >>= 16;
-    if (opsel & (1u << 1))
-      s1_raw >>= 16;
-    int16_t s0 = static_cast<int16_t>(static_cast<uint16_t>(s0_raw));
-    int16_t s1 = static_cast<int16_t>(static_cast<uint16_t>(s1_raw));
-    if (s0 < s1)
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  amdgpu::arith::execute_compare<16>(wf, rj_arith_v_cmpx_lt_i16_w32, rj_arith_v_cmpx_lt_i16_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpxEqI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2834,24 +3783,9 @@ void VCmpxEqI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   };
   CapturedArithmeticSource lhs_input(wf, src0, 0x3);
   CapturedArithmeticSource rhs_input(wf, src1, 0x3);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t s0_raw = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t s1_raw = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (opsel & (1u << 0))
-      s0_raw >>= 16;
-    if (opsel & (1u << 1))
-      s1_raw >>= 16;
-    int16_t s0 = static_cast<int16_t>(static_cast<uint16_t>(s0_raw));
-    int16_t s1 = static_cast<int16_t>(static_cast<uint16_t>(s1_raw));
-    if (s0 == s1)
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  amdgpu::arith::execute_compare<16>(wf, rj_arith_v_cmpx_eq_i16_w32, rj_arith_v_cmpx_eq_i16_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpxLeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2861,24 +3795,9 @@ void VCmpxLeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   };
   CapturedArithmeticSource lhs_input(wf, src0, 0x3);
   CapturedArithmeticSource rhs_input(wf, src1, 0x3);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t s0_raw = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t s1_raw = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (opsel & (1u << 0))
-      s0_raw >>= 16;
-    if (opsel & (1u << 1))
-      s1_raw >>= 16;
-    int16_t s0 = static_cast<int16_t>(static_cast<uint16_t>(s0_raw));
-    int16_t s1 = static_cast<int16_t>(static_cast<uint16_t>(s1_raw));
-    if (s0 <= s1)
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  amdgpu::arith::execute_compare<16>(wf, rj_arith_v_cmpx_le_i16_w32, rj_arith_v_cmpx_le_i16_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpxGtI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2888,24 +3807,9 @@ void VCmpxGtI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   };
   CapturedArithmeticSource lhs_input(wf, src0, 0x3);
   CapturedArithmeticSource rhs_input(wf, src1, 0x3);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t s0_raw = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t s1_raw = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (opsel & (1u << 0))
-      s0_raw >>= 16;
-    if (opsel & (1u << 1))
-      s1_raw >>= 16;
-    int16_t s0 = static_cast<int16_t>(static_cast<uint16_t>(s0_raw));
-    int16_t s1 = static_cast<int16_t>(static_cast<uint16_t>(s1_raw));
-    if (s0 > s1)
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  amdgpu::arith::execute_compare<16>(wf, rj_arith_v_cmpx_gt_i16_w32, rj_arith_v_cmpx_gt_i16_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpxNeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2915,24 +3819,9 @@ void VCmpxNeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   };
   CapturedArithmeticSource lhs_input(wf, src0, 0x3);
   CapturedArithmeticSource rhs_input(wf, src1, 0x3);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t s0_raw = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t s1_raw = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (opsel & (1u << 0))
-      s0_raw >>= 16;
-    if (opsel & (1u << 1))
-      s1_raw >>= 16;
-    int16_t s0 = static_cast<int16_t>(static_cast<uint16_t>(s0_raw));
-    int16_t s1 = static_cast<int16_t>(static_cast<uint16_t>(s1_raw));
-    if (s0 != s1)
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  amdgpu::arith::execute_compare<16>(wf, rj_arith_v_cmpx_ne_i16_w32, rj_arith_v_cmpx_ne_i16_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpxGeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2942,24 +3831,9 @@ void VCmpxGeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   };
   CapturedArithmeticSource lhs_input(wf, src0, 0x3);
   CapturedArithmeticSource rhs_input(wf, src1, 0x3);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t s0_raw = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t s1_raw = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (opsel & (1u << 0))
-      s0_raw >>= 16;
-    if (opsel & (1u << 1))
-      s1_raw >>= 16;
-    int16_t s0 = static_cast<int16_t>(static_cast<uint16_t>(s0_raw));
-    int16_t s1 = static_cast<int16_t>(static_cast<uint16_t>(s1_raw));
-    if (s0 >= s1)
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  amdgpu::arith::execute_compare<16>(wf, rj_arith_v_cmpx_ge_i16_w32, rj_arith_v_cmpx_ge_i16_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpxClassF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2967,52 +3841,12 @@ void VCmpxClassF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint16_t s0_raw =
-        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0));
-    if (inst_.abs & (1u << 0))
-      s0_raw &= 0x7FFFu;
-    if (inst_.neg & (1u << 0))
-      s0_raw ^= 0x8000u;
-    uint32_t mask = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
-    bool match = false;
-    uint16_t f16_exp = (s0_raw >> 10) & 0x1F;
-    uint16_t f16_mant = s0_raw & 0x3FF;
-    bool f16_sign = (s0_raw & 0x8000) != 0;
-    bool is_nan = (f16_exp == 0x1F) && (f16_mant != 0);
-    bool is_inf = (f16_exp == 0x1F) && (f16_mant == 0);
-    bool is_zero = (f16_exp == 0) && (f16_mant == 0);
-    bool is_denorm = (f16_exp == 0) && (f16_mant != 0);
-    bool is_normal = (f16_exp >= 1) && (f16_exp <= 30);
-    if ((mask & 0x001) && is_nan && (s0_raw & 0x0200) == 0)
-      match = true;
-    if ((mask & 0x002) && is_nan && (s0_raw & 0x0200) != 0)
-      match = true;
-    if ((mask & 0x004) && is_inf && f16_sign)
-      match = true;
-    if ((mask & 0x008) && is_normal && f16_sign)
-      match = true;
-    if ((mask & 0x010) && is_denorm && f16_sign)
-      match = true;
-    if ((mask & 0x020) && is_zero && f16_sign)
-      match = true;
-    if ((mask & 0x040) && is_zero && !f16_sign)
-      match = true;
-    if ((mask & 0x080) && is_denorm && !f16_sign)
-      match = true;
-    if ((mask & 0x100) && is_normal && !f16_sign)
-      match = true;
-    if ((mask & 0x200) && is_inf && !f16_sign)
-      match = true;
-    if (match)
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  uint64_t modifiers = ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) |
+                       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+                       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_compare<16, 16>(wf, rj_arith_v_cmpx_class_f16_w32,
+                                         rj_arith_v_cmpx_class_f16_w64, wf.cu().arithmetic_flags(),
+                                         modifiers, src0, src1, false, commit_result);
 }
 
 void VCmpFI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3020,7 +3854,9 @@ void VCmpFI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_f_i64_vop3(*this, wf, commit_result);
+  amdgpu::arith::execute_compare<64>(wf, rj_arith_v_cmp_f_i64_w32, rj_arith_v_cmp_f_i64_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, true,
+                                     commit_result);
 }
 
 void VCmpLtI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3028,7 +3864,9 @@ void VCmpLtI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_lt_i64_vop3(*this, wf, commit_result);
+  amdgpu::arith::execute_compare<64>(wf, rj_arith_v_cmp_lt_i64_w32, rj_arith_v_cmp_lt_i64_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpEqI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3036,7 +3874,9 @@ void VCmpEqI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_eq_i64_vop3(*this, wf, commit_result);
+  amdgpu::arith::execute_compare<64>(wf, rj_arith_v_cmp_eq_i64_w32, rj_arith_v_cmp_eq_i64_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpLeI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3044,7 +3884,9 @@ void VCmpLeI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_le_i64_vop3(*this, wf, commit_result);
+  amdgpu::arith::execute_compare<64>(wf, rj_arith_v_cmp_le_i64_w32, rj_arith_v_cmp_le_i64_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpGtI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3052,7 +3894,9 @@ void VCmpGtI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_gt_i64_vop3(*this, wf, commit_result);
+  amdgpu::arith::execute_compare<64>(wf, rj_arith_v_cmp_gt_i64_w32, rj_arith_v_cmp_gt_i64_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpNeI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3060,7 +3904,9 @@ void VCmpNeI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_ne_i64_vop3(*this, wf, commit_result);
+  amdgpu::arith::execute_compare<64>(wf, rj_arith_v_cmp_ne_i64_w32, rj_arith_v_cmp_ne_i64_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpGeI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3068,7 +3914,9 @@ void VCmpGeI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_ge_i64_vop3(*this, wf, commit_result);
+  amdgpu::arith::execute_compare<64>(wf, rj_arith_v_cmp_ge_i64_w32, rj_arith_v_cmp_ge_i64_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpTI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3076,7 +3924,9 @@ void VCmpTI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_t_i64_vop3(*this, wf, commit_result);
+  amdgpu::arith::execute_compare<64>(wf, rj_arith_v_cmp_t_i64_w32, rj_arith_v_cmp_t_i64_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, true,
+                                     commit_result);
 }
 
 void VCmpClassF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3084,7 +3934,12 @@ void VCmpClassF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_class_f64_vop3(*this, wf, commit_result);
+  uint64_t modifiers = ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) |
+                       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+                       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_compare<64, 32>(wf, rj_arith_v_cmp_class_f64_w32,
+                                         rj_arith_v_cmp_class_f64_w64, wf.cu().arithmetic_flags(),
+                                         modifiers, src0, src1, false, commit_result);
 }
 
 void VCmpLtU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3094,7 +3949,9 @@ void VCmpLtU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   };
   CapturedArithmeticSource lhs_input(wf, src0, 0x3);
   CapturedArithmeticSource rhs_input(wf, src1, 0x3);
-  amdgpu::execute_v_cmp_lt_u16_vop3(*this, wf, commit_result);
+  amdgpu::arith::execute_compare<16>(wf, rj_arith_v_cmp_lt_u16_w32, rj_arith_v_cmp_lt_u16_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpEqU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3104,7 +3961,9 @@ void VCmpEqU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   };
   CapturedArithmeticSource lhs_input(wf, src0, 0x3);
   CapturedArithmeticSource rhs_input(wf, src1, 0x3);
-  amdgpu::execute_v_cmp_eq_u16_vop3(*this, wf, commit_result);
+  amdgpu::arith::execute_compare<16>(wf, rj_arith_v_cmp_eq_u16_w32, rj_arith_v_cmp_eq_u16_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpLeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3114,7 +3973,9 @@ void VCmpLeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   };
   CapturedArithmeticSource lhs_input(wf, src0, 0x3);
   CapturedArithmeticSource rhs_input(wf, src1, 0x3);
-  amdgpu::execute_v_cmp_le_u16_vop3(*this, wf, commit_result);
+  amdgpu::arith::execute_compare<16>(wf, rj_arith_v_cmp_le_u16_w32, rj_arith_v_cmp_le_u16_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpGtU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3124,7 +3985,9 @@ void VCmpGtU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   };
   CapturedArithmeticSource lhs_input(wf, src0, 0x3);
   CapturedArithmeticSource rhs_input(wf, src1, 0x3);
-  amdgpu::execute_v_cmp_gt_u16_vop3(*this, wf, commit_result);
+  amdgpu::arith::execute_compare<16>(wf, rj_arith_v_cmp_gt_u16_w32, rj_arith_v_cmp_gt_u16_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpNeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3134,7 +3997,9 @@ void VCmpNeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   };
   CapturedArithmeticSource lhs_input(wf, src0, 0x3);
   CapturedArithmeticSource rhs_input(wf, src1, 0x3);
-  amdgpu::execute_v_cmp_ne_u16_vop3(*this, wf, commit_result);
+  amdgpu::arith::execute_compare<16>(wf, rj_arith_v_cmp_ne_u16_w32, rj_arith_v_cmp_ne_u16_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpGeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3144,7 +4009,9 @@ void VCmpGeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   };
   CapturedArithmeticSource lhs_input(wf, src0, 0x3);
   CapturedArithmeticSource rhs_input(wf, src1, 0x3);
-  amdgpu::execute_v_cmp_ge_u16_vop3(*this, wf, commit_result);
+  amdgpu::arith::execute_compare<16>(wf, rj_arith_v_cmp_ge_u16_w32, rj_arith_v_cmp_ge_u16_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpxFI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3152,14 +4019,9 @@ void VCmpxFI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    (void)lane;
-  }
-  commit_result(result);
+  amdgpu::arith::execute_compare<64>(wf, rj_arith_v_cmpx_f_i64_w32, rj_arith_v_cmpx_f_i64_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, true,
+                                     commit_result);
 }
 
 void VCmpxLtI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3167,17 +4029,9 @@ void VCmpxLtI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int64_t s0 = static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    int64_t s1 = static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(src1, lane));
-    if (s0 < s1)
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  amdgpu::arith::execute_compare<64>(wf, rj_arith_v_cmpx_lt_i64_w32, rj_arith_v_cmpx_lt_i64_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpxEqI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3185,17 +4039,9 @@ void VCmpxEqI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int64_t s0 = static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    int64_t s1 = static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(src1, lane));
-    if (s0 == s1)
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  amdgpu::arith::execute_compare<64>(wf, rj_arith_v_cmpx_eq_i64_w32, rj_arith_v_cmpx_eq_i64_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpxLeI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3203,17 +4049,9 @@ void VCmpxLeI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int64_t s0 = static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    int64_t s1 = static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(src1, lane));
-    if (s0 <= s1)
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  amdgpu::arith::execute_compare<64>(wf, rj_arith_v_cmpx_le_i64_w32, rj_arith_v_cmpx_le_i64_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpxGtI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3221,17 +4059,9 @@ void VCmpxGtI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int64_t s0 = static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    int64_t s1 = static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(src1, lane));
-    if (s0 > s1)
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  amdgpu::arith::execute_compare<64>(wf, rj_arith_v_cmpx_gt_i64_w32, rj_arith_v_cmpx_gt_i64_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpxNeI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3239,17 +4069,9 @@ void VCmpxNeI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int64_t s0 = static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    int64_t s1 = static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(src1, lane));
-    if (s0 != s1)
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  amdgpu::arith::execute_compare<64>(wf, rj_arith_v_cmpx_ne_i64_w32, rj_arith_v_cmpx_ne_i64_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpxGeI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3257,17 +4079,9 @@ void VCmpxGeI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int64_t s0 = static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    int64_t s1 = static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(src1, lane));
-    if (s0 >= s1)
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  amdgpu::arith::execute_compare<64>(wf, rj_arith_v_cmpx_ge_i64_w32, rj_arith_v_cmpx_ge_i64_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpxTI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3275,14 +4089,9 @@ void VCmpxTI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    result |= (1ULL << lane);
-  }
-  commit_result(result);
+  amdgpu::arith::execute_compare<64>(wf, rj_arith_v_cmpx_t_i64_w32, rj_arith_v_cmpx_t_i64_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, true,
+                                     commit_result);
 }
 
 void VCmpxClassF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3290,43 +4099,12 @@ void VCmpxClassF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    s0 = amdgpu::source_modifier::apply_to_float(s0, 0, inst_.abs, inst_.neg);
-    uint32_t mask = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    bool match = false;
-    if ((mask & 0x001) && std::isnan(s0) &&
-        (std::bit_cast<uint64_t>(s0) & 0x0008000000000000ULL) == 0)
-      match = true;
-    if ((mask & 0x002) && std::isnan(s0) &&
-        (std::bit_cast<uint64_t>(s0) & 0x0008000000000000ULL) != 0)
-      match = true;
-    if ((mask & 0x004) && std::isinf(s0) && s0 < 0)
-      match = true;
-    if ((mask & 0x008) && std::isnormal(s0) && s0 < 0)
-      match = true;
-    if ((mask & 0x010) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0 &&
-        std::signbit(s0))
-      match = true;
-    if ((mask & 0x020) && s0 == 0.0 && std::signbit(s0))
-      match = true;
-    if ((mask & 0x040) && s0 == 0.0 && !std::signbit(s0))
-      match = true;
-    if ((mask & 0x080) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0 &&
-        !std::signbit(s0))
-      match = true;
-    if ((mask & 0x100) && std::isnormal(s0) && s0 > 0)
-      match = true;
-    if ((mask & 0x200) && std::isinf(s0) && s0 > 0)
-      match = true;
-    if (match)
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  uint64_t modifiers = ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) |
+                       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
+                       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_compare<64, 32>(wf, rj_arith_v_cmpx_class_f64_w32,
+                                         rj_arith_v_cmpx_class_f64_w64, wf.cu().arithmetic_flags(),
+                                         modifiers, src0, src1, false, commit_result);
 }
 
 void VCmpxLtU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3336,24 +4114,9 @@ void VCmpxLtU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   };
   CapturedArithmeticSource lhs_input(wf, src0, 0x3);
   CapturedArithmeticSource rhs_input(wf, src1, 0x3);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t s0_raw = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t s1_raw = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (opsel & (1u << 0))
-      s0_raw >>= 16;
-    if (opsel & (1u << 1))
-      s1_raw >>= 16;
-    uint16_t s0 = static_cast<uint16_t>(s0_raw);
-    uint16_t s1 = static_cast<uint16_t>(s1_raw);
-    if (s0 < s1)
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  amdgpu::arith::execute_compare<16>(wf, rj_arith_v_cmpx_lt_u16_w32, rj_arith_v_cmpx_lt_u16_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpxEqU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3363,24 +4126,9 @@ void VCmpxEqU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   };
   CapturedArithmeticSource lhs_input(wf, src0, 0x3);
   CapturedArithmeticSource rhs_input(wf, src1, 0x3);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t s0_raw = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t s1_raw = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (opsel & (1u << 0))
-      s0_raw >>= 16;
-    if (opsel & (1u << 1))
-      s1_raw >>= 16;
-    uint16_t s0 = static_cast<uint16_t>(s0_raw);
-    uint16_t s1 = static_cast<uint16_t>(s1_raw);
-    if (s0 == s1)
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  amdgpu::arith::execute_compare<16>(wf, rj_arith_v_cmpx_eq_u16_w32, rj_arith_v_cmpx_eq_u16_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpxLeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3390,24 +4138,9 @@ void VCmpxLeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   };
   CapturedArithmeticSource lhs_input(wf, src0, 0x3);
   CapturedArithmeticSource rhs_input(wf, src1, 0x3);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t s0_raw = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t s1_raw = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (opsel & (1u << 0))
-      s0_raw >>= 16;
-    if (opsel & (1u << 1))
-      s1_raw >>= 16;
-    uint16_t s0 = static_cast<uint16_t>(s0_raw);
-    uint16_t s1 = static_cast<uint16_t>(s1_raw);
-    if (s0 <= s1)
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  amdgpu::arith::execute_compare<16>(wf, rj_arith_v_cmpx_le_u16_w32, rj_arith_v_cmpx_le_u16_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpxGtU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3417,24 +4150,9 @@ void VCmpxGtU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   };
   CapturedArithmeticSource lhs_input(wf, src0, 0x3);
   CapturedArithmeticSource rhs_input(wf, src1, 0x3);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t s0_raw = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t s1_raw = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (opsel & (1u << 0))
-      s0_raw >>= 16;
-    if (opsel & (1u << 1))
-      s1_raw >>= 16;
-    uint16_t s0 = static_cast<uint16_t>(s0_raw);
-    uint16_t s1 = static_cast<uint16_t>(s1_raw);
-    if (s0 > s1)
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  amdgpu::arith::execute_compare<16>(wf, rj_arith_v_cmpx_gt_u16_w32, rj_arith_v_cmpx_gt_u16_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpxNeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3444,24 +4162,9 @@ void VCmpxNeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   };
   CapturedArithmeticSource lhs_input(wf, src0, 0x3);
   CapturedArithmeticSource rhs_input(wf, src1, 0x3);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t s0_raw = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t s1_raw = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (opsel & (1u << 0))
-      s0_raw >>= 16;
-    if (opsel & (1u << 1))
-      s1_raw >>= 16;
-    uint16_t s0 = static_cast<uint16_t>(s0_raw);
-    uint16_t s1 = static_cast<uint16_t>(s1_raw);
-    if (s0 != s1)
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  amdgpu::arith::execute_compare<16>(wf, rj_arith_v_cmpx_ne_u16_w32, rj_arith_v_cmpx_ne_u16_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpxGeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3471,24 +4174,9 @@ void VCmpxGeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   };
   CapturedArithmeticSource lhs_input(wf, src0, 0x3);
   CapturedArithmeticSource rhs_input(wf, src1, 0x3);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t s0_raw = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t s1_raw = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (opsel & (1u << 0))
-      s0_raw >>= 16;
-    if (opsel & (1u << 1))
-      s1_raw >>= 16;
-    uint16_t s0 = static_cast<uint16_t>(s0_raw);
-    uint16_t s1 = static_cast<uint16_t>(s1_raw);
-    if (s0 >= s1)
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  amdgpu::arith::execute_compare<16>(wf, rj_arith_v_cmpx_ge_u16_w32, rj_arith_v_cmpx_ge_u16_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpFU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3496,7 +4184,9 @@ void VCmpFU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_f_u32_vop3(*this, wf, commit_result);
+  amdgpu::arith::execute_compare<32>(wf, rj_arith_v_cmp_f_u32_w32, rj_arith_v_cmp_f_u32_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, true,
+                                     commit_result);
 }
 
 void VCmpLtU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3504,7 +4194,9 @@ void VCmpLtU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_lt_u32_vop3(*this, wf, commit_result);
+  amdgpu::arith::execute_compare<32>(wf, rj_arith_v_cmp_lt_u32_w32, rj_arith_v_cmp_lt_u32_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpEqU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3512,7 +4204,9 @@ void VCmpEqU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_eq_u32_vop3(*this, wf, commit_result);
+  amdgpu::arith::execute_compare<32>(wf, rj_arith_v_cmp_eq_u32_w32, rj_arith_v_cmp_eq_u32_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpLeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3520,7 +4214,9 @@ void VCmpLeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_le_u32_vop3(*this, wf, commit_result);
+  amdgpu::arith::execute_compare<32>(wf, rj_arith_v_cmp_le_u32_w32, rj_arith_v_cmp_le_u32_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpGtU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3528,7 +4224,9 @@ void VCmpGtU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_gt_u32_vop3(*this, wf, commit_result);
+  amdgpu::arith::execute_compare<32>(wf, rj_arith_v_cmp_gt_u32_w32, rj_arith_v_cmp_gt_u32_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpNeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3536,7 +4234,9 @@ void VCmpNeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_ne_u32_vop3(*this, wf, commit_result);
+  amdgpu::arith::execute_compare<32>(wf, rj_arith_v_cmp_ne_u32_w32, rj_arith_v_cmp_ne_u32_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpGeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3544,7 +4244,9 @@ void VCmpGeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_ge_u32_vop3(*this, wf, commit_result);
+  amdgpu::arith::execute_compare<32>(wf, rj_arith_v_cmp_ge_u32_w32, rj_arith_v_cmp_ge_u32_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpTU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3552,7 +4254,9 @@ void VCmpTU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_t_u32_vop3(*this, wf, commit_result);
+  amdgpu::arith::execute_compare<32>(wf, rj_arith_v_cmp_t_u32_w32, rj_arith_v_cmp_t_u32_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, true,
+                                     commit_result);
 }
 
 void VCmpFF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3565,9 +4269,14 @@ void VCmpFF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<16, true>(
-      wf, rj_arith_v_cmp_f_f16_w32, rj_arith_v_cmp_f_f16_w64, wf.cu().arithmetic_flags(), modifiers,
-      src0, src1, true, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<16>(
+      wf, rj_arith_v_cmp_f_f16_w32_gfx10, rj_arith_v_cmp_f_f16_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1,
+      !(inst_.clamp && ((wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK) ==
+                            RJ_ARITH_SEMANTICS_COMPATIBILITY ||
+                        (wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK) ==
+                            RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL)),
+      commit_result, exec_mask);
 }
 
 void VCmpLtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3580,9 +4289,9 @@ void VCmpLtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<16, true>(
-      wf, rj_arith_v_cmp_lt_f16_w32, rj_arith_v_cmp_lt_f16_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<16>(
+      wf, rj_arith_v_cmp_lt_f16_w32_gfx10, rj_arith_v_cmp_lt_f16_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpEqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3595,9 +4304,9 @@ void VCmpEqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<16, true>(
-      wf, rj_arith_v_cmp_eq_f16_w32, rj_arith_v_cmp_eq_f16_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<16>(
+      wf, rj_arith_v_cmp_eq_f16_w32_gfx10, rj_arith_v_cmp_eq_f16_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpLeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3610,9 +4319,9 @@ void VCmpLeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<16, true>(
-      wf, rj_arith_v_cmp_le_f16_w32, rj_arith_v_cmp_le_f16_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<16>(
+      wf, rj_arith_v_cmp_le_f16_w32_gfx10, rj_arith_v_cmp_le_f16_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpGtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3625,9 +4334,9 @@ void VCmpGtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<16, true>(
-      wf, rj_arith_v_cmp_gt_f16_w32, rj_arith_v_cmp_gt_f16_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<16>(
+      wf, rj_arith_v_cmp_gt_f16_w32_gfx10, rj_arith_v_cmp_gt_f16_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpLgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3640,9 +4349,9 @@ void VCmpLgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<16, true>(
-      wf, rj_arith_v_cmp_lg_f16_w32, rj_arith_v_cmp_lg_f16_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<16>(
+      wf, rj_arith_v_cmp_lg_f16_w32_gfx10, rj_arith_v_cmp_lg_f16_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpGeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3655,9 +4364,9 @@ void VCmpGeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<16, true>(
-      wf, rj_arith_v_cmp_ge_f16_w32, rj_arith_v_cmp_ge_f16_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<16>(
+      wf, rj_arith_v_cmp_ge_f16_w32_gfx10, rj_arith_v_cmp_ge_f16_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpOF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3670,9 +4379,9 @@ void VCmpOF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<16, true>(
-      wf, rj_arith_v_cmp_o_f16_w32, rj_arith_v_cmp_o_f16_w64, wf.cu().arithmetic_flags(), modifiers,
-      src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<16>(
+      wf, rj_arith_v_cmp_o_f16_w32_gfx10, rj_arith_v_cmp_o_f16_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpxFU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3680,14 +4389,9 @@ void VCmpxFU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    (void)lane;
-  }
-  commit_result(result);
+  amdgpu::arith::execute_compare<32>(wf, rj_arith_v_cmpx_f_u32_w32, rj_arith_v_cmpx_f_u32_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, true,
+                                     commit_result);
 }
 
 void VCmpxLtU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3695,17 +4399,9 @@ void VCmpxLtU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (s0 < s1)
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  amdgpu::arith::execute_compare<32>(wf, rj_arith_v_cmpx_lt_u32_w32, rj_arith_v_cmpx_lt_u32_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpxEqU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3713,17 +4409,9 @@ void VCmpxEqU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (s0 == s1)
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  amdgpu::arith::execute_compare<32>(wf, rj_arith_v_cmpx_eq_u32_w32, rj_arith_v_cmpx_eq_u32_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpxLeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3731,17 +4419,9 @@ void VCmpxLeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (s0 <= s1)
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  amdgpu::arith::execute_compare<32>(wf, rj_arith_v_cmpx_le_u32_w32, rj_arith_v_cmpx_le_u32_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpxGtU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3749,17 +4429,9 @@ void VCmpxGtU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (s0 > s1)
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  amdgpu::arith::execute_compare<32>(wf, rj_arith_v_cmpx_gt_u32_w32, rj_arith_v_cmpx_gt_u32_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpxNeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3767,17 +4439,9 @@ void VCmpxNeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (s0 != s1)
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  amdgpu::arith::execute_compare<32>(wf, rj_arith_v_cmpx_ne_u32_w32, rj_arith_v_cmpx_ne_u32_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpxGeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3785,17 +4449,9 @@ void VCmpxGeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (s0 >= s1)
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  amdgpu::arith::execute_compare<32>(wf, rj_arith_v_cmpx_ge_u32_w32, rj_arith_v_cmpx_ge_u32_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpxTU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3803,14 +4459,9 @@ void VCmpxTU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    result |= (1ULL << lane);
-  }
-  commit_result(result);
+  amdgpu::arith::execute_compare<32>(wf, rj_arith_v_cmpx_t_u32_w32, rj_arith_v_cmpx_t_u32_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, true,
+                                     commit_result);
 }
 
 void VCmpxFF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3823,9 +4474,14 @@ void VCmpxFF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<16, true>(
-      wf, rj_arith_v_cmpx_f_f16_w32, rj_arith_v_cmpx_f_f16_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, true, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<16>(
+      wf, rj_arith_v_cmpx_f_f16_w32_gfx10, rj_arith_v_cmpx_f_f16_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1,
+      !(inst_.clamp && ((wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK) ==
+                            RJ_ARITH_SEMANTICS_COMPATIBILITY ||
+                        (wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK) ==
+                            RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL)),
+      commit_result, exec_mask);
 }
 
 void VCmpxLtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3838,9 +4494,9 @@ void VCmpxLtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<16, true>(
-      wf, rj_arith_v_cmpx_lt_f16_w32, rj_arith_v_cmpx_lt_f16_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<16>(
+      wf, rj_arith_v_cmpx_lt_f16_w32_gfx10, rj_arith_v_cmpx_lt_f16_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpxEqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3853,9 +4509,9 @@ void VCmpxEqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<16, true>(
-      wf, rj_arith_v_cmpx_eq_f16_w32, rj_arith_v_cmpx_eq_f16_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<16>(
+      wf, rj_arith_v_cmpx_eq_f16_w32_gfx10, rj_arith_v_cmpx_eq_f16_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpxLeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3868,9 +4524,9 @@ void VCmpxLeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<16, true>(
-      wf, rj_arith_v_cmpx_le_f16_w32, rj_arith_v_cmpx_le_f16_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<16>(
+      wf, rj_arith_v_cmpx_le_f16_w32_gfx10, rj_arith_v_cmpx_le_f16_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpxGtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3883,9 +4539,9 @@ void VCmpxGtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<16, true>(
-      wf, rj_arith_v_cmpx_gt_f16_w32, rj_arith_v_cmpx_gt_f16_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<16>(
+      wf, rj_arith_v_cmpx_gt_f16_w32_gfx10, rj_arith_v_cmpx_gt_f16_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpxLgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3898,9 +4554,9 @@ void VCmpxLgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<16, true>(
-      wf, rj_arith_v_cmpx_lg_f16_w32, rj_arith_v_cmpx_lg_f16_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<16>(
+      wf, rj_arith_v_cmpx_lg_f16_w32_gfx10, rj_arith_v_cmpx_lg_f16_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpxGeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3913,9 +4569,9 @@ void VCmpxGeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<16, true>(
-      wf, rj_arith_v_cmpx_ge_f16_w32, rj_arith_v_cmpx_ge_f16_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<16>(
+      wf, rj_arith_v_cmpx_ge_f16_w32_gfx10, rj_arith_v_cmpx_ge_f16_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpxOF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3928,9 +4584,9 @@ void VCmpxOF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<16, true>(
-      wf, rj_arith_v_cmpx_o_f16_w32, rj_arith_v_cmpx_o_f16_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<16>(
+      wf, rj_arith_v_cmpx_o_f16_w32_gfx10, rj_arith_v_cmpx_o_f16_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpFU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3938,7 +4594,9 @@ void VCmpFU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_f_u64_vop3(*this, wf, commit_result);
+  amdgpu::arith::execute_compare<64>(wf, rj_arith_v_cmp_f_u64_w32, rj_arith_v_cmp_f_u64_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, true,
+                                     commit_result);
 }
 
 void VCmpLtU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3946,7 +4604,9 @@ void VCmpLtU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_lt_u64_vop3(*this, wf, commit_result);
+  amdgpu::arith::execute_compare<64>(wf, rj_arith_v_cmp_lt_u64_w32, rj_arith_v_cmp_lt_u64_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpEqU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3954,7 +4614,9 @@ void VCmpEqU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_eq_u64_vop3(*this, wf, commit_result);
+  amdgpu::arith::execute_compare<64>(wf, rj_arith_v_cmp_eq_u64_w32, rj_arith_v_cmp_eq_u64_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpLeU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3962,7 +4624,9 @@ void VCmpLeU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_le_u64_vop3(*this, wf, commit_result);
+  amdgpu::arith::execute_compare<64>(wf, rj_arith_v_cmp_le_u64_w32, rj_arith_v_cmp_le_u64_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpGtU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3970,7 +4634,9 @@ void VCmpGtU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_gt_u64_vop3(*this, wf, commit_result);
+  amdgpu::arith::execute_compare<64>(wf, rj_arith_v_cmp_gt_u64_w32, rj_arith_v_cmp_gt_u64_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpNeU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3978,7 +4644,9 @@ void VCmpNeU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_ne_u64_vop3(*this, wf, commit_result);
+  amdgpu::arith::execute_compare<64>(wf, rj_arith_v_cmp_ne_u64_w32, rj_arith_v_cmp_ne_u64_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpGeU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3986,7 +4654,9 @@ void VCmpGeU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_ge_u64_vop3(*this, wf, commit_result);
+  amdgpu::arith::execute_compare<64>(wf, rj_arith_v_cmp_ge_u64_w32, rj_arith_v_cmp_ge_u64_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpTU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3994,7 +4664,9 @@ void VCmpTU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_t_u64_vop3(*this, wf, commit_result);
+  amdgpu::arith::execute_compare<64>(wf, rj_arith_v_cmp_t_u64_w32, rj_arith_v_cmp_t_u64_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, true,
+                                     commit_result);
 }
 
 void VCmpUF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4007,9 +4679,9 @@ void VCmpUF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<16, true>(
-      wf, rj_arith_v_cmp_u_f16_w32, rj_arith_v_cmp_u_f16_w64, wf.cu().arithmetic_flags(), modifiers,
-      src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<16>(
+      wf, rj_arith_v_cmp_u_f16_w32_gfx10, rj_arith_v_cmp_u_f16_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpNgeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4022,9 +4694,9 @@ void VCmpNgeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<16, true>(
-      wf, rj_arith_v_cmp_nge_f16_w32, rj_arith_v_cmp_nge_f16_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<16>(
+      wf, rj_arith_v_cmp_nge_f16_w32_gfx10, rj_arith_v_cmp_nge_f16_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpNlgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4037,9 +4709,9 @@ void VCmpNlgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<16, true>(
-      wf, rj_arith_v_cmp_nlg_f16_w32, rj_arith_v_cmp_nlg_f16_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<16>(
+      wf, rj_arith_v_cmp_nlg_f16_w32_gfx10, rj_arith_v_cmp_nlg_f16_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpNgtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4052,9 +4724,9 @@ void VCmpNgtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<16, true>(
-      wf, rj_arith_v_cmp_ngt_f16_w32, rj_arith_v_cmp_ngt_f16_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<16>(
+      wf, rj_arith_v_cmp_ngt_f16_w32_gfx10, rj_arith_v_cmp_ngt_f16_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpNleF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4067,9 +4739,9 @@ void VCmpNleF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<16, true>(
-      wf, rj_arith_v_cmp_nle_f16_w32, rj_arith_v_cmp_nle_f16_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<16>(
+      wf, rj_arith_v_cmp_nle_f16_w32_gfx10, rj_arith_v_cmp_nle_f16_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpNeqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4082,9 +4754,9 @@ void VCmpNeqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<16, true>(
-      wf, rj_arith_v_cmp_neq_f16_w32, rj_arith_v_cmp_neq_f16_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<16>(
+      wf, rj_arith_v_cmp_neq_f16_w32_gfx10, rj_arith_v_cmp_neq_f16_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpNltF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4097,9 +4769,9 @@ void VCmpNltF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<16, true>(
-      wf, rj_arith_v_cmp_nlt_f16_w32, rj_arith_v_cmp_nlt_f16_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<16>(
+      wf, rj_arith_v_cmp_nlt_f16_w32_gfx10, rj_arith_v_cmp_nlt_f16_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpTruF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4107,12 +4779,19 @@ void VCmpTruF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  if (inst_.clamp) {
-    amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::T>(
-        wf, src0, src1, 0, inst_.abs, inst_.neg, wf.exec(), true, true, commit_result);
-    return;
-  }
-  amdgpu::execute_v_cmp_tru_f16_vop3(*this, wf, commit_result);
+  uint64_t exec_mask = wf.exec();
+  uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
+      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
+      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_compare<16>(
+      wf, rj_arith_v_cmp_t_f16_w32_gfx10, rj_arith_v_cmp_t_f16_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1,
+      !(inst_.clamp && ((wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK) ==
+                            RJ_ARITH_SEMANTICS_COMPATIBILITY ||
+                        (wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK) ==
+                            RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL)),
+      commit_result, exec_mask);
 }
 
 void VCmpxFU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4120,14 +4799,9 @@ void VCmpxFU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    (void)lane;
-  }
-  commit_result(result);
+  amdgpu::arith::execute_compare<64>(wf, rj_arith_v_cmpx_f_u64_w32, rj_arith_v_cmpx_f_u64_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, true,
+                                     commit_result);
 }
 
 void VCmpxLtU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4135,17 +4809,9 @@ void VCmpxLtU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
-    uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(src1, lane);
-    if (s0 < s1)
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  amdgpu::arith::execute_compare<64>(wf, rj_arith_v_cmpx_lt_u64_w32, rj_arith_v_cmpx_lt_u64_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpxEqU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4153,17 +4819,9 @@ void VCmpxEqU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
-    uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(src1, lane);
-    if (s0 == s1)
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  amdgpu::arith::execute_compare<64>(wf, rj_arith_v_cmpx_eq_u64_w32, rj_arith_v_cmpx_eq_u64_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpxLeU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4171,17 +4829,9 @@ void VCmpxLeU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
-    uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(src1, lane);
-    if (s0 <= s1)
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  amdgpu::arith::execute_compare<64>(wf, rj_arith_v_cmpx_le_u64_w32, rj_arith_v_cmpx_le_u64_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpxGtU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4189,17 +4839,9 @@ void VCmpxGtU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
-    uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(src1, lane);
-    if (s0 > s1)
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  amdgpu::arith::execute_compare<64>(wf, rj_arith_v_cmpx_gt_u64_w32, rj_arith_v_cmpx_gt_u64_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpxNeU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4207,17 +4849,9 @@ void VCmpxNeU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
-    uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(src1, lane);
-    if (s0 != s1)
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  amdgpu::arith::execute_compare<64>(wf, rj_arith_v_cmpx_ne_u64_w32, rj_arith_v_cmpx_ne_u64_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpxGeU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4225,17 +4859,9 @@ void VCmpxGeU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
-    uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(src1, lane);
-    if (s0 >= s1)
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  amdgpu::arith::execute_compare<64>(wf, rj_arith_v_cmpx_ge_u64_w32, rj_arith_v_cmpx_ge_u64_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, false,
+                                     commit_result);
 }
 
 void VCmpxTU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4243,14 +4869,9 @@ void VCmpxTU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    result |= (1ULL << lane);
-  }
-  commit_result(result);
+  amdgpu::arith::execute_compare<64>(wf, rj_arith_v_cmpx_t_u64_w32, rj_arith_v_cmpx_t_u64_w64,
+                                     wf.cu().arithmetic_flags(), 0, src0, src1, true,
+                                     commit_result);
 }
 
 void VCmpxUF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4263,9 +4884,9 @@ void VCmpxUF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<16, true>(
-      wf, rj_arith_v_cmpx_u_f16_w32, rj_arith_v_cmpx_u_f16_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<16>(
+      wf, rj_arith_v_cmpx_u_f16_w32_gfx10, rj_arith_v_cmpx_u_f16_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpxNgeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4278,9 +4899,9 @@ void VCmpxNgeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<16, true>(
-      wf, rj_arith_v_cmpx_nge_f16_w32, rj_arith_v_cmpx_nge_f16_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<16>(
+      wf, rj_arith_v_cmpx_nge_f16_w32_gfx10, rj_arith_v_cmpx_nge_f16_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpxNlgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4293,9 +4914,9 @@ void VCmpxNlgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<16, true>(
-      wf, rj_arith_v_cmpx_nlg_f16_w32, rj_arith_v_cmpx_nlg_f16_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<16>(
+      wf, rj_arith_v_cmpx_nlg_f16_w32_gfx10, rj_arith_v_cmpx_nlg_f16_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpxNgtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4308,9 +4929,9 @@ void VCmpxNgtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<16, true>(
-      wf, rj_arith_v_cmpx_ngt_f16_w32, rj_arith_v_cmpx_ngt_f16_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<16>(
+      wf, rj_arith_v_cmpx_ngt_f16_w32_gfx10, rj_arith_v_cmpx_ngt_f16_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpxNleF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4323,9 +4944,9 @@ void VCmpxNleF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<16, true>(
-      wf, rj_arith_v_cmpx_nle_f16_w32, rj_arith_v_cmpx_nle_f16_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<16>(
+      wf, rj_arith_v_cmpx_nle_f16_w32_gfx10, rj_arith_v_cmpx_nle_f16_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpxNeqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4338,9 +4959,9 @@ void VCmpxNeqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<16, true>(
-      wf, rj_arith_v_cmpx_neq_f16_w32, rj_arith_v_cmpx_neq_f16_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<16>(
+      wf, rj_arith_v_cmpx_neq_f16_w32_gfx10, rj_arith_v_cmpx_neq_f16_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpxNltF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4353,9 +4974,9 @@ void VCmpxNltF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_compare<16, true>(
-      wf, rj_arith_v_cmpx_nlt_f16_w32, rj_arith_v_cmpx_nlt_f16_w64, wf.cu().arithmetic_flags(),
-      modifiers, src0, src1, false, commit_result, exec_mask);
+  amdgpu::arith::execute_float_compare<16>(
+      wf, rj_arith_v_cmpx_nlt_f16_w32_gfx10, rj_arith_v_cmpx_nlt_f16_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1, false, commit_result, exec_mask);
 }
 
 void VCmpxTruF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4363,19 +4984,19 @@ void VCmpxTruF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     wf.set_exec(final_result);
   };
-  if (inst_.clamp) {
-    amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::T>(
-        wf, src0, src1, 0, inst_.abs, inst_.neg, wf.exec(), true, true, commit_result);
-    return;
-  }
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    result |= (1ULL << lane);
-  }
-  commit_result(result);
+  uint64_t exec_mask = wf.exec();
+  uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
+      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
+      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_float_compare<16>(
+      wf, rj_arith_v_cmpx_t_f16_w32_gfx10, rj_arith_v_cmpx_t_f16_w64_gfx10,
+      wf.cu().arithmetic_flags(), modifiers, src0, src1,
+      !(inst_.clamp && ((wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK) ==
+                            RJ_ARITH_SEMANTICS_COMPATIBILITY ||
+                        (wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK) ==
+                            RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL)),
+      commit_result, exec_mask);
 }
 
 void VAddCoCiU32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
@@ -4383,7 +5004,10 @@ void VAddCoCiU32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(sdst, wf, final_result);
   };
-  amdgpu::execute_v_add_co_ci_u32_vop3(*this, wf, commit_result);
+  const uint64_t input_carry = wf.exec() ? amdgpu::read_wave_mask_scalar(src2, wf) : 0u;
+  amdgpu::arith::execute_carry32<true, false>(
+      wf, rj_arith_v_add_co_ci_u32_w32, rj_arith_v_add_co_ci_u32_w64, wf.cu().arithmetic_flags(),
+      inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, input_carry, commit_result);
 }
 
 void VSubCoCiU32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
@@ -4391,7 +5015,10 @@ void VSubCoCiU32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(sdst, wf, final_result);
   };
-  amdgpu::execute_v_sub_co_ci_u32_vop3(*this, wf, commit_result);
+  const uint64_t input_carry = wf.exec() ? amdgpu::read_wave_mask_scalar(src2, wf) : 0u;
+  amdgpu::arith::execute_carry32<true, false>(
+      wf, rj_arith_v_sub_co_ci_u32_w32, rj_arith_v_sub_co_ci_u32_w64, wf.cu().arithmetic_flags(),
+      inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, input_carry, commit_result);
 }
 
 void VSubrevCoCiU32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
@@ -4399,7 +5026,11 @@ void VSubrevCoCiU32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(sdst, wf, final_result);
   };
-  amdgpu::execute_v_subrev_co_ci_u32_vop3(*this, wf, commit_result);
+  const uint64_t input_carry = wf.exec() ? amdgpu::read_wave_mask_scalar(src2, wf) : 0u;
+  amdgpu::arith::execute_carry32<true, false>(
+      wf, rj_arith_v_subrev_co_ci_u32_w32, rj_arith_v_subrev_co_ci_u32_w64,
+      wf.cu().arithmetic_flags(), inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1,
+      input_carry, commit_result);
 }
 
 void VDivScaleF32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
@@ -4407,7 +5038,14 @@ void VDivScaleF32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(sdst, wf, final_result);
   };
-  amdgpu::execute_v_div_scale_f32_vop3(*this, wf, commit_result);
+  const uint64_t modifiers =
+      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
+      ((inst_.neg & 4) ? RJ_ARITH_ALU_NEG_C : 0u) | (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) |
+      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_division<32, amdgpu::arith::DivisionOperation::Scale>(
+      wf, rj_arith_v_div_scale_f32_w32_gfx942, rj_arith_v_div_scale_f32_w64_gfx942,
+      wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1, src2,
+      /*rdna3=*/true, commit_result, /*preserve_inactive_condition=*/true);
 }
 
 void VDivScaleF64Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
@@ -4415,7 +5053,14 @@ void VDivScaleF64Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(sdst, wf, final_result);
   };
-  amdgpu::execute_v_div_scale_f64_vop3(*this, wf, commit_result);
+  const uint64_t modifiers =
+      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
+      ((inst_.neg & 4) ? RJ_ARITH_ALU_NEG_C : 0u) | (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) |
+      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
+  amdgpu::arith::execute_division<64, amdgpu::arith::DivisionOperation::Scale>(
+      wf, rj_arith_v_div_scale_f64_w32_gfx942, rj_arith_v_div_scale_f64_w64_gfx942,
+      wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1, src2,
+      /*rdna3=*/true, commit_result, /*preserve_inactive_condition=*/true);
 }
 
 void VMadU64U32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
@@ -4423,7 +5068,9 @@ void VMadU64U32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(sdst, wf, final_result);
   };
-  amdgpu::execute_v_mad_u64_u32_vop3(*this, wf, commit_result);
+  amdgpu::arith::execute_mad64(wf, rj_arith_v_mad_u64_u32_w32, rj_arith_v_mad_u64_u32_w64,
+                               wf.cu().arithmetic_flags(), inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u,
+                               vdst, src0, src1, src2, commit_result);
 }
 
 void VMadI64I32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
@@ -4431,7 +5078,9 @@ void VMadI64I32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(sdst, wf, final_result);
   };
-  amdgpu::execute_v_mad_i64_i32_vop3(*this, wf, commit_result);
+  amdgpu::arith::execute_mad64(wf, rj_arith_v_mad_i64_i32_w32, rj_arith_v_mad_i64_i32_w64,
+                               wf.cu().arithmetic_flags(), inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u,
+                               vdst, src0, src1, src2, commit_result);
 }
 
 void VAddCoU32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
@@ -4439,7 +5088,10 @@ void VAddCoU32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(sdst, wf, final_result);
   };
-  amdgpu::execute_v_add_co_u32_vop3(*this, wf, commit_result);
+  const uint64_t input_carry = 0u;
+  amdgpu::arith::execute_carry32<false, false>(
+      wf, rj_arith_v_add_co_u32_w32, rj_arith_v_add_co_u32_w64, wf.cu().arithmetic_flags(),
+      inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, input_carry, commit_result);
 }
 
 void VSubCoU32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
@@ -4447,7 +5099,10 @@ void VSubCoU32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(sdst, wf, final_result);
   };
-  amdgpu::execute_v_sub_co_u32_vop3(*this, wf, commit_result);
+  const uint64_t input_carry = 0u;
+  amdgpu::arith::execute_carry32<false, false>(
+      wf, rj_arith_v_sub_co_u32_w32, rj_arith_v_sub_co_u32_w64, wf.cu().arithmetic_flags(),
+      inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, input_carry, commit_result);
 }
 
 void VSubrevCoU32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
@@ -4455,7 +5110,10 @@ void VSubrevCoU32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(sdst, wf, final_result);
   };
-  amdgpu::execute_v_subrev_co_u32_vop3(*this, wf, commit_result);
+  const uint64_t input_carry = 0u;
+  amdgpu::arith::execute_carry32<false, false>(
+      wf, rj_arith_v_subrev_co_u32_w32, rj_arith_v_subrev_co_u32_w64, wf.cu().arithmetic_flags(),
+      inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, input_carry, commit_result);
 }
 
 } // namespace rdna2

@@ -9,8 +9,7 @@
 ///        basic_block_list_create) accepts each target by exercising the
 ///        provider-selected target registry in rj_code.cpp.
 ///
-/// Covers the only currently supported targets (gfx90a, gfx942, gfx950, gfx1100,
-/// gfx1200, gfx1201, gfx1250, gfx1251) plus an unknown-machine-flag case to
+/// Covers the registered AMDGPU targets plus an unknown-machine-flag case to
 /// guard the INVALID sentinel and prevent a future edit from silently aliasing
 /// one target onto another.
 
@@ -20,6 +19,7 @@
 #include "rocjitsu/code/kernel_symbol.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "scoped_temp.h"
 
 #include <gtest/gtest.h>
@@ -151,7 +151,7 @@ void expect_c_api_accepts_target(uint32_t mach_flag, rj_code_target_id_t target)
   // The returned code-object handle must keep its executable storage alive.
   rj_code_executable_destroy(exec);
 
-  auto pooled_decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  auto pooled_decoder = Decoder::create(rocjitsu::IsaFamily::Cdna3);
   ASSERT_NE(pooled_decoder, nullptr);
   pooled_decoder->enable_pool();
 
@@ -194,17 +194,20 @@ c_api_instruction_list_status(rj_status_t &output, uint32_t mach_flag, rj_code_t
   const auto image = make_minimal_amdgpu_elf(mach_flag, words);
   test::ScopedTempFile file;
   const testing::AssertionResult initialized = file.initialize("rj-code-object-target-cache-");
-  if (!initialized)
+  if (!initialized) {
     return initialized;
+  }
   const testing::AssertionResult written =
       file.write(std::string_view(reinterpret_cast<const char *>(image.data()), image.size()));
-  if (!written)
+  if (!written) {
     return written;
+  }
 
   rj_code_executable_t *exec = nullptr;
   const rj_status_t created = rj_code_executable_create(file.path().c_str(), &exec);
-  if (created != ROCJITSU_STATUS_SUCCESS || exec == nullptr)
+  if (created != ROCJITSU_STATUS_SUCCESS || exec == nullptr) {
     return testing::AssertionFailure() << "Failed to create executable: " << created;
+  }
   rj_code_object_t *obj = nullptr;
   const rj_status_t loaded = rj_code_executable_get_code_object(exec, target, 0, &obj);
   if (loaded != ROCJITSU_STATUS_SUCCESS || obj == nullptr) {
@@ -215,8 +218,9 @@ c_api_instruction_list_status(rj_status_t &output, uint32_t mach_flag, rj_code_t
 
   rj_code_inst_list_t *instructions = nullptr;
   const rj_status_t status = rj_code_inst_list_create(obj, target, &instructions);
-  if (instructions != nullptr)
+  if (instructions != nullptr) {
     rj_code_inst_list_destroy(instructions);
+  }
   rj_code_object_destroy(obj);
   rj_code_object_release(obj);
   output = status;
@@ -234,17 +238,21 @@ struct CApiListStatuses {
                                                            rj_code_target_id_t decoder_target) {
   const auto image = make_minimal_amdgpu_elf(mach_flag);
   test::ScopedTempFile file;
-  if (testing::AssertionResult result = file.initialize("rj-code-object-target-mismatch-"); !result)
+  if (testing::AssertionResult result = file.initialize("rj-code-object-target-mismatch-");
+      !result) {
     return result;
+  }
   if (testing::AssertionResult result =
           file.write(std::string_view(reinterpret_cast<const char *>(image.data()), image.size()));
-      !result)
+      !result) {
     return result;
+  }
 
   rj_code_executable_t *exec = nullptr;
   const rj_status_t created = rj_code_executable_create(file.path().c_str(), &exec);
-  if (created != ROCJITSU_STATUS_SUCCESS || exec == nullptr)
+  if (created != ROCJITSU_STATUS_SUCCESS || exec == nullptr) {
     return testing::AssertionFailure() << "Failed to create executable: " << created;
+  }
 
   rj_code_object_t *obj = nullptr;
   const rj_status_t loaded = rj_code_executable_get_code_object(exec, object_target, 0, &obj);
@@ -256,13 +264,15 @@ struct CApiListStatuses {
   rj_code_inst_list_t *instructions = nullptr;
   const rj_status_t instruction_status =
       rj_code_inst_list_create(obj, decoder_target, &instructions);
-  if (instructions != nullptr)
+  if (instructions != nullptr) {
     rj_code_inst_list_destroy(instructions);
+  }
 
   rj_code_basic_block_list_t *blocks = nullptr;
   const rj_status_t block_status = rj_code_basic_block_list_create(obj, decoder_target, &blocks);
-  if (blocks != nullptr)
+  if (blocks != nullptr) {
     rj_code_basic_block_list_destroy(blocks);
+  }
 
   rj_code_object_destroy(obj);
   rj_code_object_release(obj);
@@ -305,6 +315,20 @@ TEST(GfxCodeObjectTargets, LoadsGfx1251FromMachineFlags) {
 
 TEST(GfxCodeObjectTargets, LoadsGfx1100FromMachineFlags) {
   expect_machine_flag_maps_to_target(EF_AMDGPU_MACH_AMDGCN_GFX1100, ROCJITSU_CODE_TARGET_GFX1100);
+}
+
+TEST(GfxCodeObjectTargets, AddedConcreteTargetsSupportCodeObjectApis) {
+  constexpr std::array targets{
+      std::pair{EF_AMDGPU_MACH_AMDGCN_GFX908, ROCJITSU_CODE_TARGET_GFX908},
+      std::pair{EF_AMDGPU_MACH_AMDGCN_GFX1010, ROCJITSU_CODE_TARGET_GFX1010},
+      std::pair{EF_AMDGPU_MACH_AMDGCN_GFX1030, ROCJITSU_CODE_TARGET_GFX1030},
+      std::pair{EF_AMDGPU_MACH_AMDGCN_GFX1150, ROCJITSU_CODE_TARGET_GFX1150},
+  };
+  for (const auto &[machine, target] : targets) {
+    SCOPED_TRACE(machine);
+    expect_machine_flag_maps_to_target(machine, target);
+    expect_c_api_accepts_target(machine, target);
+  }
 }
 
 TEST(GfxCodeObjectTargets, LoadsGfx1100FromHipFatbinMetadata) {
@@ -432,6 +456,12 @@ TEST(GfxCodeObjectTargets, CApiRejectsConcreteTargetMismatchForBothListBuilders)
                                   ROCJITSU_CODE_TARGET_GFX1250));
   EXPECT_EQ(legacy_fallback.instructions, ROCJITSU_STATUS_SUCCESS);
   EXPECT_EQ(legacy_fallback.basic_blocks, ROCJITSU_STATUS_SUCCESS);
+
+  CApiListStatuses non_gpu{};
+  ASSERT_TRUE(c_api_list_statuses(non_gpu, /*mach_flag=*/0x1234, ROCJITSU_CODE_TARGET_INVALID,
+                                  ROCJITSU_CODE_TARGET_RV64I));
+  EXPECT_EQ(non_gpu.instructions, ROCJITSU_STATUS_INVALID_ARGUMENT);
+  EXPECT_EQ(non_gpu.basic_blocks, ROCJITSU_STATUS_INVALID_ARGUMENT);
 }
 
 TEST(GfxCodeObjectTargets, CApiContainsInvalidInstructionFromListBuilders) {

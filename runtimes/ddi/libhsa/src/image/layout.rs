@@ -71,12 +71,8 @@ pub(super) fn image_layout(
     let format = descriptor::format(descriptor.format).ok_or(IMAGE_FORMAT_UNSUPPORTED)?;
     let info = runtime.agents.gpus[index].info();
     let architecture = Generation::from_gpu(&info).ok_or(NOT_SUPPORTED)?;
-    let mut surface = if architecture == Generation::Gfx12 {
-        descriptor::layout(descriptor, format, row_pitch, slice_pitch)?
-    } else {
-        descriptor::layout(descriptor, format, 0, 0)?
-    };
-    if architecture != Generation::Gfx12 && descriptor.geometry != 5 {
+    let mut surface = descriptor::layout(descriptor, format, 0, 0)?;
+    if descriptor.geometry != 5 {
         let config = runtime.agents.gpus[index]
             .device
             .gpu()
@@ -97,31 +93,66 @@ pub(super) fn image_layout(
                 _ => ResourceType::Texture2D,
             },
         };
-        let explicit_pitch = architecture == Generation::Gfx9
-            || (architecture != Generation::Gfx10 && matches!(descriptor.geometry, 0 | 1 | 6));
-        if row_pitch % format.bytes != 0 {
-            return Err(IMAGE_PITCH_UNSUPPORTED);
-        }
-        let pitch = if explicit_pitch {
-            u32::try_from(row_pitch / format.bytes).map_err(|_| IMAGE_PITCH_UNSUPPORTED)?
-        } else {
-            0
-        };
-        let computed =
-            rocaddr3::compute_linear(request, pitch).map_err(|_| IMAGE_PITCH_UNSUPPORTED)?;
-        surface.row_pitch = computed.pitch as usize * format.bytes;
-        surface.slice_pitch =
-            usize::try_from(computed.slice_size).map_err(|_| IMAGE_SIZE_UNSUPPORTED)?;
-        surface.size = usize::try_from(computed.size).map_err(|_| IMAGE_SIZE_UNSUPPORTED)?;
-        if (row_pitch != 0 && row_pitch != surface.row_pitch)
-            || (slice_pitch != 0 && slice_pitch != surface.slice_pitch)
-        {
-            return Err(IMAGE_PITCH_UNSUPPORTED);
-        }
+        surface = linear_surface_layout(
+            architecture,
+            descriptor.geometry,
+            format,
+            request,
+            row_pitch,
+            slice_pitch,
+        )?;
     }
     // Size queries and creation must agree on representability of pitch fields.
     descriptor::descriptor(architecture, descriptor, format, surface, 0x10000)?;
     Ok((index, format, surface))
+}
+
+/// Computes representable linear strides while preserving native allocation padding.
+fn linear_surface_layout(
+    architecture: Generation,
+    geometry: u32,
+    format: Format,
+    request: SurfaceRequest,
+    row_pitch: usize,
+    slice_pitch: usize,
+) -> Result<Layout, Status> {
+    // GFX10 cannot encode a custom pitch; GFX11/12 can encode it only for
+    // ordinary 1D/2D images. Array and 3D descriptors use that field for depth.
+    let explicit_pitch = architecture == Generation::Gfx9
+        || (architecture != Generation::Gfx10 && matches!(geometry, 0 | 1 | 6));
+    if row_pitch % format.bytes != 0 {
+        return Err(IMAGE_PITCH_UNSUPPORTED);
+    }
+    let pitch = if explicit_pitch {
+        u32::try_from(row_pitch / format.bytes).map_err(|_| IMAGE_PITCH_UNSUPPORTED)?
+    } else {
+        0
+    };
+    let computed = rocaddr3::compute_linear(request, pitch).map_err(|_| IMAGE_PITCH_UNSUPPORTED)?;
+    let computed_row = computed.pitch as usize * format.bytes;
+    // AddrLib trims trailing padding for a single non-3D slice. HSA's default
+    // slice pitch is the row extent there, even when the allocation is padded.
+    let computed_slice =
+        if architecture == Generation::Gfx12 && geometry != 2 && request.slices == 1 {
+            computed_row
+                .checked_mul(computed.height as usize)
+                .ok_or(IMAGE_SIZE_UNSUPPORTED)?
+        } else {
+            usize::try_from(computed.slice_size).map_err(|_| IMAGE_SIZE_UNSUPPORTED)?
+        };
+    if (row_pitch != 0 && row_pitch != computed_row)
+        || (slice_pitch != 0 && slice_pitch != computed_slice)
+    {
+        return Err(IMAGE_PITCH_UNSUPPORTED);
+    }
+    Ok(Layout {
+        width: request.width as usize,
+        height: request.height as usize,
+        slices: request.slices as usize,
+        row_pitch: computed_row,
+        slice_pitch: computed_slice,
+        size: usize::try_from(computed.size).map_err(|_| IMAGE_SIZE_UNSUPPORTED)?,
+    })
 }
 
 /// Limits the mip count to the surface dimensions and descriptor.
@@ -263,4 +294,147 @@ pub(crate) unsafe fn get_info(
     // SAFETY: The caller supplied writable output storage for one info record.
     unsafe { output.write(descriptor::info(surface)) };
     SUCCESS
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    /// Builds native geometry for the fixed GFX12 host test device.
+    fn request(descriptor: HsaExtImageDescriptor, format: Format) -> SurfaceRequest {
+        SurfaceRequest {
+            family: 0x98,
+            chip_revision: 1,
+            gb_addr_config: 0,
+            bits_per_pixel: (format.bytes * 8) as u32,
+            width: descriptor.width as u32,
+            height: descriptor.height.max(1) as u32,
+            slices: descriptor.array_size.max(descriptor.depth).max(1) as u32,
+            mip_levels: 1,
+            resource_type: match descriptor.geometry {
+                0 | 3 => ResourceType::Texture1D,
+                2 => ResourceType::Texture3D,
+                _ => ResourceType::Texture2D,
+            },
+        }
+    }
+
+    #[test]
+    fn gfx12_linear_layout_separates_hsa_slice_pitch_from_allocation_padding() {
+        for (channel_type, width, row_pitch, slice_pitch, size) in
+            [(9, 179, 384, 1152, 1280), (15, 30, 128, 384, 512)]
+        {
+            let desc = HsaExtImageDescriptor {
+                geometry: 1,
+                width,
+                height: 3,
+                depth: 0,
+                array_size: 0,
+                format: HsaExtImageFormat {
+                    channel_order: 1,
+                    channel_type,
+                },
+            };
+            let format = descriptor::format(desc.format).unwrap();
+            let request = request(desc, format);
+            for requested_row in [0, row_pitch] {
+                for requested_slice in [0, slice_pitch] {
+                    let surface = linear_surface_layout(
+                        Generation::Gfx12,
+                        desc.geometry,
+                        format,
+                        request,
+                        requested_row,
+                        requested_slice,
+                    )
+                    .unwrap();
+                    assert_eq!(surface.row_pitch, row_pitch);
+                    assert_eq!(surface.slice_pitch, slice_pitch);
+                    assert_eq!(surface.size, size);
+                    let words =
+                        descriptor::descriptor(Generation::Gfx12, desc, format, surface, 0x10000)
+                            .unwrap();
+                    assert_eq!(words[4] as usize, row_pitch / format.bytes - 1);
+                }
+            }
+            assert_eq!(
+                linear_surface_layout(
+                    Generation::Gfx12,
+                    desc.geometry,
+                    format,
+                    request,
+                    row_pitch,
+                    size
+                )
+                .err(),
+                Some(IMAGE_PITCH_UNSUPPORTED)
+            );
+        }
+    }
+
+    #[test]
+    fn gfx12_array_and_3d_layouts_preserve_native_slice_padding() {
+        for (geometry, height, depth, array_size, slice_pitch) in
+            [(3, 0, 0, 2, 256), (4, 3, 0, 2, 768), (2, 3, 2, 0, 768)]
+        {
+            let desc = HsaExtImageDescriptor {
+                geometry,
+                width: 30,
+                height,
+                depth,
+                array_size,
+                format: HsaExtImageFormat {
+                    channel_order: 1,
+                    channel_type: 15,
+                },
+            };
+            let format = descriptor::format(desc.format).unwrap();
+            let request = request(desc, format);
+            for requested_row in [0, 128] {
+                let surface = linear_surface_layout(
+                    Generation::Gfx12,
+                    geometry,
+                    format,
+                    request,
+                    requested_row,
+                    slice_pitch,
+                )
+                .unwrap();
+                assert_eq!(surface.row_pitch, 128);
+                assert_eq!(surface.slice_pitch, slice_pitch);
+                assert_eq!(surface.size, slice_pitch * 2);
+                let words =
+                    descriptor::descriptor(Generation::Gfx12, desc, format, surface, 0x10000)
+                        .unwrap();
+                assert_eq!(words[4], 1);
+            }
+            // This field holds array/depth extent, so a custom row pitch cannot
+            // be represented even when it meets the hardware's alignment.
+            assert_eq!(
+                linear_surface_layout(
+                    Generation::Gfx12,
+                    geometry,
+                    format,
+                    request,
+                    256,
+                    slice_pitch
+                )
+                .err(),
+                Some(IMAGE_PITCH_UNSUPPORTED)
+            );
+            assert_eq!(
+                linear_surface_layout(
+                    Generation::Gfx12,
+                    geometry,
+                    format,
+                    request,
+                    128,
+                    128 * request.height as usize,
+                )
+                .err(),
+                Some(IMAGE_PITCH_UNSUPPORTED)
+            );
+        }
+    }
 }
