@@ -117,7 +117,7 @@ TEST_F(DdaAllReduceFabricHierMicrotest, Eligible_DdaGates) {
   EXPECT_FALSE(Eligible(kFp32Granule)) << "RCCL_DDA_ENABLE=0";
   g_ddaEnable = 1;
   comm().config.launchOrderImplicit = 1;
-  EXPECT_FALSE(Eligible(kFp32Granule)) << "implicit launch order";
+  EXPECT_TRUE(Eligible(kFp32Granule)) << "the addon launch keeps implicit launch order";
   comm().config.launchOrderImplicit = 0;
   comm().ddaDisabledAfterAbort = true;
   EXPECT_FALSE(Eligible(kFp32Granule)) << "DDA disabled after an abort";

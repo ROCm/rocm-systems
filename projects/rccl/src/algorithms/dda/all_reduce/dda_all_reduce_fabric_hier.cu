@@ -95,7 +95,7 @@ bool ncclAllReduceDdaFabricHierEligible(ncclComm* comm, size_t count, ncclDataTy
   const size_t elemSize = hierElemSize(datatype);
   if (comm == nullptr || op != ncclSum || elemSize == 0 || count == 0) return false;
   // The gates of rcclDdaEnabled: an abort can leave barrier slots unconsumed.
-  if (!rcclParamDdaEnable() || comm->config.launchOrderImplicit == 1 || comm->ddaDisabledAfterAbort) return false;
+  if (!rcclParamDdaEnable() || comm->ddaDisabledAfterAbort) return false;
   if (comm->ddaFabricMemHandler == nullptr || comm->ddaFabricBarrierState == nullptr || comm->ddaScratch == nullptr ||
       comm->ddaPeerPtrsDev == nullptr) {
     return false;
