@@ -9,7 +9,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Changed
 
-* Memory chart values in `--output-format db` and `csv` keep their full precision, like the other panels.
+* The analyze option `--decimal` is now the debug option `--debug-table-decimal`, which sets the decimals of the analyze tables.
 
 ### Removed
 
@@ -25,7 +25,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Fixed the peak of the `L2 Cache BW` metric in the `System Speed-of-Light` panel on MI200 (gfx90a). The peak was half the intended value, so the metric could exceed its peak.
 
-* Fixed Memory Chart values that were rounded twice and so differed from the same metric elsewhere, for example L2 Hit showed 34.0% while the memory bandwidth analysis showed 34.2%; `--decimal` now sets the decimals of tables only.
+* Fixed Memory Chart values that did not match the same metrics in the analyze tables.
 
 ### Upcoming changes
 
