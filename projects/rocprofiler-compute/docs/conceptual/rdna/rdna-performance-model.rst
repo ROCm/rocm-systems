@@ -24,7 +24,7 @@ For more details on AMD RDNA3 architecture, see page 5 of `RDNA3 shader instruct
 
    * For details on metrics available for CDNA-CDNA4 architecture-based Instinct GPUs, see :doc:`../cdna/cdna-performance-model`.
 
-   * For details on packaging, SIMD width, and generational differences between RDNA3, RDNA3.5, and later APUs, refer to :doc:`GPU hardware specifications <rocm:reference/gpu-arch-specs>` and the public architecture summaries.
+   * For details on packaging, SIMD width, and generational differences between RDNA3, RDNA3.5, and later APUs, refer to :doc:`GPU hardware specifications <rocm:reference/gpu-specs>` and the public architecture summaries.
 
 ROCm Compute Profiler includes analysis panels targeting RDNA3.5 parts reporting as
 gfx115x, such as,  integrated graphics on AMD Ryzen AI Max Series processors.
