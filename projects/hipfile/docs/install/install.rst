@@ -99,7 +99,7 @@ Where:
 
 .. note::
 
-   ``amdgpu-dkms`` version 31.40 or later must be installed to use NVMeoF and NFSoRDMA.
+   ``amdgpu-dkms`` version 31.70 or later must be installed to use NVMeoF and NFSoRDMA.
 
 
    See :doc:`/reference/hipFile-io-backends` for information on file type rules.

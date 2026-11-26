@@ -8,7 +8,7 @@ Setting up an NFSoRDMA share for use with hipFile
 
 The following prerequisites are required to use an RDMA-capable NFS server over RDMA or RoCE with hipFile:
 
-* ``amdgpu-dkms`` version 31.40 or later.
+* ``amdgpu-dkms`` version 31.70 or later.
 * An RDMA or RoCE fabric connecting the NFS server and client.
 * ``nfs-kernel-server`` installed on the server, with the ``svcrdma`` kernel
   module available.
