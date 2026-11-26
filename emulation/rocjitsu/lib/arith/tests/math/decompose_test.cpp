@@ -123,26 +123,30 @@ TEST(MathFrexpMantF32W64Gfx942, Arithmetic) {
 
 // Check inherited fractional arithmetic and unsupported strict semantics.
 TEST(MathFractF16W32Gfx942, Arithmetic) {
-  rocjitsu::arith::test::check_unary<32, true, false>(rj_arith_v_fract_f16_w32_gfx942, 9, false,
-                                                      false);
+  rocjitsu::arith::test::check_unary<32, true, false>(rj_arith_v_fract_f16_w32_gfx942, 9,
+                                                      /*iflag=*/false, RJ_ARITH_ALU_SDWA,
+                                                      /*accepts_exact=*/false);
 }
 
 // Check inherited fractional arithmetic and unsupported strict semantics.
 TEST(MathFractF16W64Gfx942, Arithmetic) {
-  rocjitsu::arith::test::check_unary<64, true, false>(rj_arith_v_fract_f16_w64_gfx942, 9, false,
-                                                      false);
+  rocjitsu::arith::test::check_unary<64, true, false>(rj_arith_v_fract_f16_w64_gfx942, 9,
+                                                      /*iflag=*/false, RJ_ARITH_ALU_SDWA,
+                                                      /*accepts_exact=*/false);
 }
 
 // Check inherited fractional arithmetic and unsupported strict semantics.
 TEST(MathFractF32W32Gfx942, Arithmetic) {
-  rocjitsu::arith::test::check_unary<32, false, false>(rj_arith_v_fract_f32_w32_gfx942, 9, false,
-                                                       false);
+  rocjitsu::arith::test::check_unary<32, false, false>(rj_arith_v_fract_f32_w32_gfx942, 9,
+                                                       /*iflag=*/false, RJ_ARITH_ALU_SDWA,
+                                                       /*accepts_exact=*/false);
 }
 
 // Check inherited fractional arithmetic and unsupported strict semantics.
 TEST(MathFractF32W64Gfx942, Arithmetic) {
-  rocjitsu::arith::test::check_unary<64, false, false>(rj_arith_v_fract_f32_w64_gfx942, 9, false,
-                                                       false);
+  rocjitsu::arith::test::check_unary<64, false, false>(rj_arith_v_fract_f32_w64_gfx942, 9,
+                                                       /*iflag=*/false, RJ_ARITH_ALU_SDWA,
+                                                       /*accepts_exact=*/false);
 }
 
 namespace {

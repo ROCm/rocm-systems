@@ -17694,7 +17694,6 @@ class CodeGenerator:
                     ('rocjitsu/isa/arch/amdgpu/shared/fp_mode.h', False),
                     ('rocjitsu/isa/arch/amdgpu/shared/gfx11_dot2.h', False),
                     ('rocjitsu/isa/arch/amdgpu/shared/gfx12_dot.h', False),
-                    ('rocjitsu/isa/arch/amdgpu/shared/division.h', False),
                     ('util/except.h', False),
                 ]
                 if self.isa_spec.arch_name == 'cdna1':
@@ -17931,14 +17930,28 @@ class CodeGenerator:
                         )
                     )
 
-                from amdisa.codegen.execute.rj_arith_float import UNARY_F32
+                from amdisa.codegen.execute.rj_arith_float import (
+                    UNARY_F32,
+                    OLDER_SPECIAL_F32,
+                    OLDER_ROOT_F32,
+                    OLDER_MATH_ARCHS,
+                )
 
                 from amdisa.codegen.execute.rj_arith_cdna_unary import (
                     CDNA_INTEGRAL_UNARY,
                 )
 
-                if self.isa_spec.arch_name in ('cdna3', 'cdna4', 'cdna5') and any(
-                    i.name in CDNA_INTEGRAL_UNARY | UNARY_F32 for i in all_insts
+                if (
+                    self.isa_spec.arch_name in ('cdna3', 'cdna4', 'cdna5')
+                    and any(
+                        i.name in CDNA_INTEGRAL_UNARY | UNARY_F32 for i in all_insts
+                    )
+                ) or (
+                    self.isa_spec.arch_name in OLDER_MATH_ARCHS
+                    and any(
+                        i.name in (OLDER_SPECIAL_F32 | OLDER_ROOT_F32)
+                        for i in all_insts
+                    )
                 ):
                     cpp_includes.append(
                         (
@@ -18016,6 +18029,29 @@ class CodeGenerator:
                             'rocjitsu/isa/arch/amdgpu/shared/rj_arith_sdwa_binary_exec.h',
                             False,
                         )
+                    )
+                if self.isa_spec.arch_name in (
+                    'cdna1',
+                    'cdna2',
+                    'rdna1',
+                    'rdna2',
+                    'rdna3_5',
+                ) and any(
+                    i.name
+                    in {
+                        'V_PK_FMA_F16',
+                        'V_PK_FMAC_F16',
+                        'V_MAD_MIX_F32',
+                        'V_MAD_MIXLO_F16',
+                        'V_MAD_MIXHI_F16',
+                        'V_FMA_MIX_F32',
+                        'V_FMA_MIXLO_F16',
+                        'V_FMA_MIXHI_F16',
+                    }
+                    for i in all_insts
+                ):
+                    cpp_includes.append(
+                        ('rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h', False)
                     )
                 if self.isa_spec.arch_name in ('cdna3', 'cdna4') and any(
                     i.name in CDNA_FP32_ARITHMETIC | {'V_MUL_LEGACY_F32'}
@@ -19338,11 +19374,6 @@ class CodeGenerator:
                     'gfx12_dot2_packed16',
                     'gfx12_dot4_f32_fp8',
                 ),
-                'rocjitsu/isa/arch/amdgpu/shared/division.h': (
-                    'div_scale(',
-                    'div_fmas(',
-                    'div_fixup(',
-                ),
                 'rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h': 'pseudo_scalar::',
                 'rocjitsu/isa/arch/amdgpu/shared/scalar_f16_source.h': 'read_scalar_f16_carrier',
             }
@@ -19815,7 +19846,6 @@ class CodeGenerator:
             '#include "rocjitsu/isa/arch/amdgpu/shared/gfx11_dot2.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/lds_direct.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/gfx12_dot.h"',
-            '#include "rocjitsu/isa/arch/amdgpu/shared/division.h"',
             *simd_extra_includes(),
             '#include "util/data_types.h"',
             '#include "util/except.h"',
@@ -19866,12 +19896,6 @@ class CodeGenerator:
             alu_classifiers = {
                 'v_mul_f32_vop2': 'classify_mul_f32_vop2',
                 'v_mul_f32_vop3': 'classify_mul_f32_vop3',
-                'v_sqrt_f32_vop1': 'classify_sqrt_f32_vop1',
-                'v_sqrt_f32_vop3': 'classify_sqrt_f32_vop3',
-                'v_div_fixup_f32_vop3': 'classify_div_fixup_f32_exceptions',
-                'v_div_fixup_f64_vop3': 'classify_div_fixup_f64_exceptions',
-                'v_rcp_iflag_f32_vop1': 'classify_rcp_iflag_f32_exceptions',
-                'v_rcp_iflag_f32_vop3': 'classify_rcp_iflag_f32_exceptions',
             }
             if mnemonic in ('v_add_f16_vop2', 'v_add_f16_vop3'):
                 lines.append(
