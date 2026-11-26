@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
@@ -63,8 +64,11 @@ void ParseGfx(const char* name, int* major, int* minor, int* step) {
   *major = *minor = *step = 0;
   if (strncmp(name, "gfx", 3) != 0) return;
   std::string s(name + 3);
-  const size_t colon = s.find(':');
-  if (colon != std::string::npos) s.resize(colon);
+  // Keep the leading hex digits only: drop ":xnack+" style features and
+  // suffixes such as "-strict".
+  size_t keep = 0;
+  while (keep < s.size() && isxdigit(static_cast<unsigned char>(s[keep]))) ++keep;
+  s.resize(keep);
   if (s.size() == 3) {
     *major = HexDigit(s[0]);
     *minor = HexDigit(s[1]);
@@ -1195,7 +1199,8 @@ void MemoryAsyncBatchCopy::NegativeTest() {
   EXPECT_EQ(HSA_STATUS_ERROR_INVALID_ARGUMENT, hsa_amd_memory_async_batch_copy(&op, 1, 0, &other_done))
       << "dependency signals without a count";
   const hsa_signal_t invalid_dep[1] = {bad_signal};
-  EXPECT_EQ(HSA_STATUS_ERROR_INVALID_SIGNAL, hsa_amd_memory_async_batch_copy(&op, 1, 1, invalid_dep))
+  // A null signal handle is rejected by the handle conversion itself.
+  EXPECT_EQ(HSA_STATUS_ERROR_INVALID_ARGUMENT, hsa_amd_memory_async_batch_copy(&op, 1, 1, invalid_dep))
       << "invalid dependency signal";
 
   // Common fields.
@@ -1210,7 +1215,7 @@ void MemoryAsyncBatchCopy::NegativeTest() {
   expect(op, HSA_STATUS_ERROR_INVALID_ARGUMENT, "unknown type");
   op = valid();
   op.completion_signal = bad_signal;
-  expect(op, HSA_STATUS_ERROR_INVALID_SIGNAL, "invalid completion signal");
+  expect(op, HSA_STATUS_ERROR_INVALID_ARGUMENT, "invalid completion signal");
   op = valid();
   op.src = nullptr;
   expect(op, HSA_STATUS_ERROR_INVALID_ARGUMENT, "null source");
