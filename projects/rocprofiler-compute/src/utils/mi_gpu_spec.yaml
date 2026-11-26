@@ -505,6 +505,11 @@ mi_gpu_spec:
               memory_levels: ["LDS", "L0", "L1", "L2", "MALL", "VRAM"]
             chip_ids:
               physical: 30096  # 0x7590
+          - gpu_model: navi44_2
+            design:
+              memory_levels: ["LDS", "L0", "L1", "L2", "MALL", "VRAM"]
+            chip_ids:
+              physical: 29839  # 0x748F
       - gpu_arch: gfx1201
         experimental: true
         perfmon_config:
