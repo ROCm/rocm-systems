@@ -65,7 +65,8 @@
 #    include <rocprofiler-sdk/registration.h>
 #endif
 
-#if defined(ROCPROFSYS_USE_OMPT) && ROCPROFSYS_USE_OMPT > 0
+#if defined(ROCPROFSYS_USE_OMPT) && ROCPROFSYS_USE_OMPT > 0 && ROCPROFILER_VERSION >= 600
+#    define ROCPROFSYS_SDK_HAS_OMPT_START_TOOL 1
 #    include <rocprofiler-sdk/ompt.h>
 #    include <rocprofiler-sdk/ompt/omp-tools.h>
 #endif
@@ -1409,6 +1410,7 @@ reset_sdk_session_guards()
 void
 setup()
 {
+#if defined(ROCPROFSYS_SDK_HAS_OMPT_START_TOOL)
     // rocprofiler-register initializes the SDK when HSA or HIP loads; a host-only OpenMP
     // process loads neither, and OMPT discovery is honored only when the SDK is already
     // initialized. Bring it up here instead of waiting for that registration.
@@ -1420,6 +1422,7 @@ setup()
     }
 
     ROCPROFILER_CALL(rocprofiler_force_configure(&::rocprofiler_configure));
+#endif
 }
 
 void
@@ -1676,7 +1679,7 @@ extern "C"
     }
 #endif  // ROCPROFILER_VERSION >= 10200
 
-#if defined(ROCPROFSYS_USE_OMPT) && ROCPROFSYS_USE_OMPT > 0
+#if defined(ROCPROFSYS_SDK_HAS_OMPT_START_TOOL)
     ompt_start_tool_result_t* ompt_start_tool(
         unsigned int omp_version, const char* runtime_version) ROCPROFSYS_PUBLIC_API;
 
@@ -1684,12 +1687,10 @@ extern "C"
     // and offloading binaries call it from a static initializer, so the body is a plain
     // forward with no initialization or library loading. A NULL result means
     // rocprofiler-sdk declined the OMPT tool role and it stays with this library.
-    // <rocprofiler-sdk/ompt.h> gates availability: an SDK without
-    // rocprofiler_ompt_start_tool() does not ship that header.
     ompt_start_tool_result_t* ompt_start_tool(unsigned int omp_version,
                                               const char*  runtime_version)
     {
         return rocprofiler_ompt_start_tool(omp_version, runtime_version);
     }
-#endif  // ROCPROFSYS_USE_OMPT
+#endif  // ROCPROFSYS_SDK_HAS_OMPT_START_TOOL
 }
