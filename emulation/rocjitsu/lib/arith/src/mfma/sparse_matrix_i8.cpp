@@ -43,10 +43,21 @@ int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32
     return RJ_ARITH_SUCCESS;
   }
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
-  // The 16-column K=128 tile reduces faster in two AVX2 halves.
-  if (K != 128 && cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
-    sparse_matrix_i8_x86_64_v4<M, K, Wmma>(controls, clamp, clamp_per_pass, d, a, b, index);
-    return RJ_ARITH_SUCCESS;
+  // The 32-column forms use the dedicated x86-64-v4 kernel; 16-column forms
+  // use Zen4 VNNI (single-pass) or x86-64-v3 (both single-pass and per-pass).
+  if constexpr (!Wmma && M == 32) {
+    if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+      sparse_matrix_i8_x86_64_v4<M, K, Wmma>(controls, clamp, clamp_per_pass, d, a, b, index);
+      return RJ_ARITH_SUCCESS;
+    }
+  }
+#endif
+#if defined(RJ_ARITH_HAVE_AVX512VNNI)
+  if constexpr (!Wmma && M == 16) {
+    if (!clamp_per_pass && cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_ZEN4)) {
+      sparse_matrix_i8_avx512vnni<M, K>(controls, clamp, d, a, b, index);
+      return RJ_ARITH_SUCCESS;
+    }
   }
 #endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)

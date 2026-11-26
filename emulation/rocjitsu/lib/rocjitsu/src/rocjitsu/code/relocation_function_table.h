@@ -9,7 +9,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
+#include <string_view>
 #include <vector>
 
 namespace rocjitsu {
@@ -140,6 +142,11 @@ struct RelocationPairAnalysis {
 analyze_relocation_pairs(std::span<const std::unique_ptr<BasicBlock>> blocks,
                          std::span<const RelocationFunctionTable> tables, uint64_t text_vaddr,
                          uint8_t wave_size);
+
+/// @brief Symbol owning a complete local function body with no overlapping function alias.
+/// @details The result borrows the input object's string table. Both bounds are .text-relative.
+[[nodiscard]] std::optional<std::string_view>
+local_text_function_name(const AmdGpuCodeObject &object, uint64_t begin, uint64_t end);
 
 /// @brief Discover finite device-call tables from ELF symbols and relocations.
 ///
