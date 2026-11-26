@@ -14,12 +14,13 @@
 
 namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE {
 
-// Vector form of fixup_exceptions: preserve its precedence, especially NaN
-// suppression of denormal causes and underflow precedence over quotient overflow.
+// Vector classification with explicit legacy versus captured-RDNA precedence.
+// Legacy retains denormal causes beside NaNs; both prioritize underflow recovery
+// over provisional-quotient overflow.
 // Reuses the numeric FIXUP backend's integer lane operations at either width.
 template <int Width, typename Ops>
 uint32_t fixup_exception_lanes(typename Ops::V p, typename Ops::V b, typename Ops::V c,
-                               uint32_t mode, uint32_t exec_mask) {
+                               uint32_t mode, uint32_t exec_mask, bool legacy = false) {
   using F = IeeeFormat<Width>;
   auto zero = Ops::set(0), inf = Ops::set(F::infinity), magnitude = Ops::set(F::sign - 1);
   p = Ops::band(p, magnitude);
@@ -36,8 +37,12 @@ uint32_t fixup_exception_lanes(typename Ops::V p, typename Ops::V b, typename Op
   auto div0 = Ops::both(bz, Ops::both(Ops::gt(c, zero), Ops::gt(inf, c)));
   auto remaining = Ops::inverse(Ops::either(nan, Ops::either(invalid, div0)));
   auto tiny = Ops::set(uint64_t(1) << F::fraction);
-  auto denorm = Ops::both(remaining, Ops::either(Ops::both(Ops::gt(b, zero), Ops::gt(tiny, b)),
-                                                 Ops::both(Ops::gt(c, zero), Ops::gt(tiny, c))));
+  auto denorm = Ops::either(Ops::both(Ops::gt(b, zero), Ops::gt(tiny, b)),
+                            Ops::both(Ops::gt(c, zero), Ops::gt(tiny, c)));
+  // Legacy CDNA retains input-denormal causes alongside exceptional operands.
+  if (!legacy) {
+    denorm = Ops::both(remaining, denorm);
+  }
   auto finite = Ops::both(remaining, Ops::both(Ops::both(Ops::gt(b, zero), Ops::gt(inf, b)),
                                                Ops::both(Ops::gt(c, zero), Ops::gt(inf, c))));
   auto underflow = Ops::eq(zero, Ops::set(1));

@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "util/diagnostic.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -59,14 +61,20 @@ struct RunStats {
 /// per-packet completion publication and primary lifetime. For raw kernels, modes must agree on
 /// terminal queue fault state. In the absence of a terminal fault, the exit reason and code must
 /// also agree. Racy control flow can lead to stalls or budget exhaustion in some modes.
-/// Retirement is compared when every mode completes.
-[[nodiscard]] RunStats run_input(std::span<const uint8_t> input);
+/// Retirement is compared when every mode completes. Invalid harness inputs, setup failures,
+/// and oracle failures return failure and emit a diagnostic; host failures remain visible.
+[[nodiscard]] util::FailureOr<RunStats> run_input(std::span<const uint8_t> input,
+                                                  util::DiagnosticEmitter diagnostic = {});
 
 /// @brief Produce a deterministic input with a target-specific instruction stream.
-[[nodiscard]] std::vector<uint8_t> random_input(uint64_t seed);
+/// @details Unavailable canonical encodings fail with a diagnostic.
+[[nodiscard]] util::FailureOr<std::vector<uint8_t>>
+random_input(uint64_t seed, util::DiagnosticEmitter diagnostic = {});
 
 /// @brief Return one terminating input-carried kernel for every supported execution target.
-[[nodiscard]] std::vector<std::vector<uint8_t>> seed_corpus();
+/// @details Unavailable canonical encodings fail with a diagnostic.
+[[nodiscard]] util::FailureOr<std::vector<std::vector<uint8_t>>>
+seed_corpus(util::DiagnosticEmitter diagnostic = {});
 
 namespace detail {
 

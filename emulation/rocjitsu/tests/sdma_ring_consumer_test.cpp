@@ -26,8 +26,9 @@ public:
   explicit QueueMemory(std::size_t size = 0x1000) : bytes_(size) {}
 
   VmTranslationResult translate(uint64_t address, std::size_t size, VmAccessKind) const override {
-    if (size == 0 || address > bytes_.size() || size > bytes_.size() - address)
+    if (size == 0 || address > bytes_.size() || size > bytes_.size() - address) {
       return {.outcome = VmAccessOutcome::Faulted, .translation = {}};
+    }
     constexpr uint64_t kSegmentBytes = 16;
     return {
         .outcome = VmAccessOutcome::Complete,
@@ -42,10 +43,12 @@ public:
     ++read_attempts_[address];
     read_bytes_[address] += bytes.size();
     if (const VmAccessOutcome outcome = next(read_outcomes_, address);
-        outcome != VmAccessOutcome::Complete)
+        outcome != VmAccessOutcome::Complete) {
       return outcome;
-    if (address > bytes_.size() || bytes.size() > bytes_.size() - address)
+    }
+    if (address > bytes_.size() || bytes.size() > bytes_.size() - address) {
       return VmAccessOutcome::Faulted;
+    }
     std::ranges::copy_n(bytes_.begin() + static_cast<std::ptrdiff_t>(address), bytes.size(),
                         bytes.begin());
     return VmAccessOutcome::Complete;
@@ -55,10 +58,12 @@ public:
                         std::span<const std::byte> bytes) override {
     ++write_attempts_[address];
     if (const VmAccessOutcome outcome = next(write_outcomes_, address);
-        outcome != VmAccessOutcome::Complete)
+        outcome != VmAccessOutcome::Complete) {
       return outcome;
-    if (address > bytes_.size() || bytes.size() > bytes_.size() - address)
+    }
+    if (address > bytes_.size() || bytes.size() > bytes_.size() - address) {
       return VmAccessOutcome::Faulted;
+    }
     std::ranges::copy(bytes, bytes_.begin() + static_cast<std::ptrdiff_t>(address));
     return VmAccessOutcome::Complete;
   }
@@ -66,10 +71,12 @@ public:
   AtomicLoadResult atomic_load(VmMemoryDomain, uint64_t address, uint32_t width) override {
     ++atomic_load_attempts_[address];
     if (const VmAccessOutcome outcome = next(atomic_load_outcomes_, address);
-        outcome != VmAccessOutcome::Complete)
+        outcome != VmAccessOutcome::Complete) {
       return {.outcome = outcome};
-    if ((width != 4 && width != 8) || address > bytes_.size() || width > bytes_.size() - address)
+    }
+    if ((width != 4 && width != 8) || address > bytes_.size() || width > bytes_.size() - address) {
       return {.outcome = VmAccessOutcome::Faulted};
+    }
     uint64_t value = 0;
     std::memcpy(&value, bytes_.data() + address, width);
     return {.outcome = VmAccessOutcome::Complete, .value = value};
@@ -79,10 +86,12 @@ public:
                                uint64_t value) override {
     ++atomic_store_attempts_[address];
     if (const VmAccessOutcome outcome = next(atomic_store_outcomes_, address);
-        outcome != VmAccessOutcome::Complete)
+        outcome != VmAccessOutcome::Complete) {
       return outcome;
-    if ((width != 4 && width != 8) || address > bytes_.size() || width > bytes_.size() - address)
+    }
+    if ((width != 4 && width != 8) || address > bytes_.size() || width > bytes_.size() - address) {
       return VmAccessOutcome::Faulted;
+    }
     std::memcpy(bytes_.data() + address, &value, width);
     return VmAccessOutcome::Complete;
   }
@@ -91,10 +100,12 @@ public:
                                                uint32_t width, uint64_t expected,
                                                uint64_t desired) override {
     const AtomicLoadResult loaded = atomic_load(domain, address, width);
-    if (loaded.outcome != VmAccessOutcome::Complete)
+    if (loaded.outcome != VmAccessOutcome::Complete) {
       return {.outcome = loaded.outcome};
-    if (loaded.value != expected)
+    }
+    if (loaded.value != expected) {
       return {.outcome = VmAccessOutcome::Complete, .observed = loaded.value, .exchanged = false};
+    }
     const VmAccessOutcome outcome = atomic_store(domain, address, width, desired);
     return {.outcome = outcome,
             .observed = loaded.value,
@@ -128,8 +139,9 @@ public:
   std::size_t read_bytes(uint64_t begin, uint64_t end) const {
     std::size_t bytes = 0;
     for (const auto &[address, count] : read_bytes_) {
-      if (address >= begin && address < end)
+      if (address >= begin && address < end) {
         bytes += count;
+      }
     }
     return bytes;
   }
@@ -144,8 +156,9 @@ private:
   static VmAccessOutcome next(std::map<uint64_t, std::deque<VmAccessOutcome>> &outcomes,
                               uint64_t address) {
     std::map<uint64_t, std::deque<VmAccessOutcome>>::iterator found = outcomes.find(address);
-    if (found == outcomes.end() || found->second.empty())
+    if (found == outcomes.end() || found->second.empty()) {
       return VmAccessOutcome::Complete;
+    }
     const VmAccessOutcome outcome = found->second.front();
     found->second.pop_front();
     return outcome;
@@ -384,9 +397,10 @@ TEST(SdmaRingConsumerTest, NestedMalformedHeaderSurvivesRetirementPublicationRet
           4, static_cast<uint32_t>(kIndirect), 0, nested.size(), 0, 0};
       fixture.memory->store(kIndirect, nested);
       fixture.memory->store(RingConsumerFixture::kRing, packet);
-      if (retry)
+      if (retry) {
         fixture.memory->return_next_atomic_store(RingConsumerFixture::kReadPointer,
                                                  VmAccessOutcome::Unavailable);
+      }
       fixture.memory->return_next_atomic_store(RingConsumerFixture::kReadPointer, publication);
       SdmaRingConsumer consumer = fixture.make_consumer();
 
@@ -484,8 +498,9 @@ TEST(SdmaRingConsumerTest, ClosedIngressBlocksRingFetchAndCursorPublicationWitho
     const MemoryIngressSpan &span = spans.front();
     if ((span.address == RingConsumerFixture::kRing && !ring_open) ||
         (span.address == RingConsumerFixture::kReadPointer && span.access == VmAccessKind::Write &&
-         !cursor_write_open))
+         !cursor_write_open)) {
       return MemoryIngressAdmission{.outcome = VmAccessOutcome::Unavailable, .permit = {}};
+    }
     return MemoryIngressAdmission{};
   };
   SdmaRingConsumer consumer = fixture.make_consumer(0, 64, std::move(callbacks));
@@ -694,8 +709,9 @@ TEST(SdmaRingConsumerTest, CacheMaintenanceFailureIsTerminalAndRetiresOnlyCommit
     RingConsumerFixture fixture;
     constexpr uint64_t kSource = 0x400;
     constexpr uint64_t kDestination = 0x500;
-    for (uint32_t index = 0; index < 32; ++index)
+    for (uint32_t index = 0; index < 32; ++index) {
       fixture.memory->store<uint8_t>(kSource + index, static_cast<uint8_t>(index + 1));
+    }
     const std::array<uint32_t, 7> copy = {
         1, 31, 0, static_cast<uint32_t>(kSource), 0, static_cast<uint32_t>(kDestination), 0};
     fixture.memory->store(RingConsumerFixture::kRing, copy);
@@ -711,8 +727,9 @@ TEST(SdmaRingConsumerTest, CacheMaintenanceFailureIsTerminalAndRetiresOnlyCommit
       }
       return CacheMaintenanceResult{};
     };
-    if (committed_prefix)
+    if (committed_prefix) {
       fixture.memory->return_next_write(kDestination + 16, VmAccessOutcome::Unavailable);
+    }
     SdmaRingConsumer consumer = fixture.make_consumer(0, 64, std::move(callbacks));
     if (committed_prefix) {
       ASSERT_EQ(consumer.service(sizeof(copy)), SdmaRingStatus::Blocked);
@@ -730,9 +747,10 @@ TEST(SdmaRingConsumerTest, CacheMaintenanceFailureIsTerminalAndRetiresOnlyCommit
     EXPECT_EQ(consumer.service(sizeof(copy)), SdmaRingStatus::Faulted);
     EXPECT_GE(maintenance_calls, committed_prefix ? 2u : 1u);
     EXPECT_EQ(maintenance_rejections, 1u);
-    for (uint32_t index = 0; index < 32; ++index)
+    for (uint32_t index = 0; index < 32; ++index) {
       EXPECT_EQ(fixture.memory->load<uint8_t>(kDestination + index),
                 committed_prefix && index < 16 ? static_cast<uint8_t>(index + 1) : 0);
+    }
   }
 }
 

@@ -141,12 +141,14 @@ bool VramStore::write_all(std::span<const std::byte> bytes, uint64_t at) {
 
 std::optional<VramAtomicLoadResult> VramStore::atomic_load(uint64_t offset, uint32_t width) {
   if ((width != sizeof(uint16_t) && width != sizeof(uint32_t) && width != sizeof(uint64_t)) ||
-      offset % width != 0)
+      offset % width != 0) {
     return std::nullopt;
+  }
 
   const std::lock_guard lock(access_mutex_);
-  if (fd_ < 0 || offset > bytes_ || width > bytes_ - offset)
+  if (fd_ < 0 || offset > bytes_ || width > bytes_ - offset) {
     return std::nullopt;
+  }
 
   if (mapping_ != nullptr && offset <= aperture_bytes_ && width <= aperture_bytes_ - offset) {
     std::byte *target = mapping_ + offset;
@@ -166,19 +168,22 @@ std::optional<VramAtomicLoadResult> VramStore::atomic_load(uint64_t offset, uint
 
   VramAtomicLoadResult result;
   std::array<std::byte, sizeof(uint64_t)> raw{};
-  if (::pread(fd_, raw.data(), width, static_cast<off_t>(offset)) != static_cast<ssize_t>(width))
+  if (::pread(fd_, raw.data(), width, static_cast<off_t>(offset)) != static_cast<ssize_t>(width)) {
     return std::nullopt;
+  }
   std::memcpy(&result.value, raw.data(), width);
   return result;
 }
 
 bool VramStore::atomic_store(uint64_t offset, uint32_t width, uint64_t value) {
-  if ((width != sizeof(uint32_t) && width != sizeof(uint64_t)) || offset % width != 0)
+  if ((width != sizeof(uint32_t) && width != sizeof(uint64_t)) || offset % width != 0) {
     return false;
+  }
 
   const std::lock_guard lock(access_mutex_);
-  if (fd_ < 0 || offset > bytes_ || width > bytes_ - offset)
+  if (fd_ < 0 || offset > bytes_ || width > bytes_ - offset) {
     return false;
+  }
 
   if (mapping_ != nullptr && offset <= aperture_bytes_ && width <= aperture_bytes_ - offset) {
     std::byte *target = mapping_ + offset;
@@ -200,12 +205,14 @@ bool VramStore::atomic_store(uint64_t offset, uint32_t width, uint64_t value) {
 
 std::optional<VramAtomicCompareExchangeResult>
 VramStore::compare_exchange(uint64_t offset, uint32_t width, uint64_t expected, uint64_t desired) {
-  if ((width != sizeof(uint32_t) && width != sizeof(uint64_t)) || offset % width != 0)
+  if ((width != sizeof(uint32_t) && width != sizeof(uint64_t)) || offset % width != 0) {
     return std::nullopt;
+  }
 
   const std::lock_guard lock(access_mutex_);
-  if (fd_ < 0 || offset > bytes_ || width > bytes_ - offset)
+  if (fd_ < 0 || offset > bytes_ || width > bytes_ - offset) {
     return std::nullopt;
+  }
 
   VramAtomicCompareExchangeResult result{.observed = 0, .exchanged = false};
   if (mapping_ != nullptr && offset <= aperture_bytes_ && width <= aperture_bytes_ - offset) {
@@ -228,15 +235,18 @@ VramStore::compare_exchange(uint64_t offset, uint32_t width, uint64_t expected, 
   }
 
   std::array<std::byte, sizeof(uint64_t)> raw{};
-  if (::pread(fd_, raw.data(), width, static_cast<off_t>(offset)) != static_cast<ssize_t>(width))
+  if (::pread(fd_, raw.data(), width, static_cast<off_t>(offset)) != static_cast<ssize_t>(width)) {
     return std::nullopt;
+  }
   std::memcpy(&result.observed, raw.data(), width);
   const uint64_t mask = width == sizeof(uint64_t) ? UINT64_MAX : UINT32_MAX;
-  if ((result.observed & mask) != (expected & mask))
+  if ((result.observed & mask) != (expected & mask)) {
     return result;
+  }
   std::memcpy(raw.data(), &desired, width);
-  if (::pwrite(fd_, raw.data(), width, static_cast<off_t>(offset)) != static_cast<ssize_t>(width))
+  if (::pwrite(fd_, raw.data(), width, static_cast<off_t>(offset)) != static_cast<ssize_t>(width)) {
     return std::nullopt;
+  }
   result.exchanged = true;
   return result;
 }

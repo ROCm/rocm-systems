@@ -393,8 +393,9 @@ TEST(IsaTargetRegistryTest, BuiltinRegistryUsesDescriptorOwnedPublicEnumBindings
       "rdna3", "rdna3_5", "rdna4", "cdna5", "risc-v",
   };
   std::vector<std::string> actual;
-  for (const IsaTargetDescriptor &target : registry.targets())
+  for (const IsaTargetDescriptor &target : registry.targets()) {
     actual.emplace_back(target.id);
+  }
   EXPECT_EQ(actual, expected);
 
   const IsaTargetDescriptor *gfx1201 = registry.find("gfx1201");

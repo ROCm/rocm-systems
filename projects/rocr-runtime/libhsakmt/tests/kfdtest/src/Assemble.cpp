@@ -260,6 +260,33 @@ int Assembler::RunAssembleBuf(const char* const AssemblySource, char* OutBuf,
 }
 
 /**
+ * Check whether the linked LLVM knows the target ASIC
+ *
+ * @return true if shaders can be assembled for the target
+ */
+bool Assembler::IsTargetSupported() {
+    Triple TheTriple;
+
+    const Target* TheTarget =
+        TargetRegistry::lookupTarget(ArchName, TheTriple, Error);
+    if (!TheTarget)
+        return false;
+
+    TheTriple.setVendorName(VendorName);
+    TheTriple.setOSName(OSName);
+
+    // Default CPU, so LLVM does not warn about the one being checked
+#if LLVM_VERSION_MAJOR < 22
+    std::unique_ptr<MCSubtargetInfo> STI(
+            TheTarget->createMCSubtargetInfo(TheTriple.getTriple(), "", std::string()));
+#else
+    std::unique_ptr<MCSubtargetInfo> STI(
+            TheTarget->createMCSubtargetInfo(TheTriple, "", std::string()));
+#endif
+    return STI && STI->isCPUStringValid(MCPU);
+}
+
+/**
  * Assemble shader and fill member vars
  *
  * @param AssemblySource Shader source represented as a raw C string

@@ -56,14 +56,16 @@ template <typename V> constexpr V bit_width(V value) {
     static_assert(std::is_unsigned_v<Lane>);
     constexpr unsigned kLaneBits = 8 * sizeof(Lane);
     // Set every bit below the leading one; the width is then the number of ones.
-    for (unsigned shift = 1; shift < kLaneBits; shift <<= 1)
+    for (unsigned shift = 1; shift < kLaneBits; shift <<= 1) {
       value |= value >> shift;
+    }
     value = value - ((value >> 1) & V(static_cast<Lane>(0x5555555555555555ull)));
     value = (value & V(static_cast<Lane>(0x3333333333333333ull))) +
             ((value >> 2) & V(static_cast<Lane>(0x3333333333333333ull)));
     value = (value + (value >> 4)) & V(static_cast<Lane>(0x0f0f0f0f0f0f0f0full));
-    for (unsigned shift = 8; shift < kLaneBits; shift <<= 1)
+    for (unsigned shift = 8; shift < kLaneBits; shift <<= 1) {
       value = value + (value >> shift);
+    }
     return value & V(Lane{0x7f});
   }
 }

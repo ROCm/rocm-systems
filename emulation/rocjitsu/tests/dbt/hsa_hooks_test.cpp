@@ -60,8 +60,9 @@ struct GpuTarget {
 };
 
 std::string join_seen_isas(const std::vector<std::string> &isas) {
-  if (isas.empty())
+  if (isas.empty()) {
     return "<none>";
+  }
   std::string out = isas.front();
   for (size_t i = 1; i < isas.size(); ++i) {
     out += ", ";
@@ -81,8 +82,9 @@ GpuTarget find_gpu_agent_for_isa(const char *target_isa) {
         auto *ctx = static_cast<Ctx *>(data);
         hsa_device_type_t type{};
         hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &type);
-        if (type != HSA_DEVICE_TYPE_GPU)
+        if (type != HSA_DEVICE_TYPE_GPU) {
           return HSA_STATUS_SUCCESS;
+        }
 
         hsa_isa_t isa{};
         char isa_name[128]{};
@@ -131,13 +133,15 @@ hsa_amd_memory_pool_t find_pool(hsa_agent_t agent, hsa_amd_segment_t segment,
         auto *c = static_cast<Ctx *>(data);
         hsa_amd_segment_t seg{};
         hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &seg);
-        if (seg != c->seg)
+        if (seg != c->seg) {
           return HSA_STATUS_SUCCESS;
+        }
         if (c->host_acc) {
           bool acc = false;
           hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_ACCESSIBLE_BY_ALL, &acc);
-          if (!acc)
+          if (!acc) {
             return HSA_STATUS_SUCCESS;
+          }
         }
         c->pool = pool;
         return HSA_STATUS_INFO_BREAK;
@@ -220,20 +224,24 @@ TEST(HsaHooksTest, TranslateGfx950Mfma16x16ThroughToolsLib) {
     const uint32_t sign = (fbits >> 16) & 0x8000;
     const int32_t exp = static_cast<int32_t>((fbits >> 23) & 0xFF) - 127;
     const uint32_t mant = fbits & 0x7FFFFF;
-    if ((fbits & 0x7FFFFFFF) == 0)
+    if ((fbits & 0x7FFFFFFF) == 0) {
       return static_cast<uint16_t>(sign);
-    if (exp > 15)
+    }
+    if (exp > 15) {
       return static_cast<uint16_t>(sign | 0x7BFF);
-    if (exp < -14)
+    }
+    if (exp < -14) {
       return static_cast<uint16_t>(sign);
+    }
     return static_cast<uint16_t>(sign | ((exp + 15) << 10) | (mant >> 13));
   };
   auto f16_to_f32 = [](uint16_t h) -> float {
     const uint32_t sign = (h >> 15) & 1;
     const uint32_t exp = (h >> 10) & 0x1F;
     const uint32_t mant = h & 0x3FF;
-    if (exp == 0)
+    if (exp == 0) {
       return sign ? -0.0f : 0.0f;
+    }
     const uint32_t f = (sign << 31) | ((exp + 112) << 23) | (mant << 13);
     float result;
     std::memcpy(&result, &f, 4);
@@ -273,10 +281,12 @@ TEST(HsaHooksTest, TranslateGfx950Mfma16x16ThroughToolsLib) {
 
   for (int iter = 0; iter < kNumIterations; ++iter) {
     std::vector<uint16_t> a_host(M * K), b_host(K * N);
-    for (uint16_t &value : a_host)
+    for (uint16_t &value : a_host) {
       value = f32_to_f16(dist(rng));
-    for (uint16_t &value : b_host)
+    }
+    for (uint16_t &value : b_host) {
       value = f32_to_f16(dist(rng));
+    }
 
     ASSERT_EQ(hsa_memory_copy(a_dev, a_host.data(), ab_size), HSA_STATUS_SUCCESS);
     ASSERT_EQ(hsa_memory_copy(b_dev, b_host.data(), ab_size), HSA_STATUS_SUCCESS);
@@ -284,10 +294,13 @@ TEST(HsaHooksTest, TranslateGfx950Mfma16x16ThroughToolsLib) {
     ASSERT_EQ(hsa_memory_copy(c_dev, zero.data(), c_size), HSA_STATUS_SUCCESS);
 
     std::vector<float> c_golden(M * N, 0.0f);
-    for (uint32_t i = 0; i < M; ++i)
-      for (uint32_t j = 0; j < N; ++j)
-        for (uint32_t k = 0; k < K; ++k)
+    for (uint32_t i = 0; i < M; ++i) {
+      for (uint32_t j = 0; j < N; ++j) {
+        for (uint32_t k = 0; k < K; ++k) {
           c_golden[i * N + j] += f16_to_f32(a_host[i * K + k]) * f16_to_f32(b_host[k * N + j]);
+        }
+      }
+    }
 
     uint64_t write_idx = hsa_queue_add_write_index_relaxed(queue, 1);
     auto *aql = static_cast<hsa_kernel_dispatch_packet_t *>(queue->base_address) +
@@ -324,8 +337,9 @@ TEST(HsaHooksTest, TranslateGfx950Mfma16x16ThroughToolsLib) {
       const float expected = c_golden[i];
       const float got = c_result[i];
       const float tol = std::max(0.01f * std::abs(expected), 0.001f);
-      if (std::abs(got - expected) > tol)
+      if (std::abs(got - expected) > tol) {
         ++mismatches;
+      }
     }
     total_mismatches += mismatches;
 

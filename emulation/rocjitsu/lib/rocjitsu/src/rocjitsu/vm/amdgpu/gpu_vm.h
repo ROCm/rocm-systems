@@ -505,8 +505,9 @@ public:
   /// lifetime, or beyond the outer quantum for a borrowed snapshot.
   template <typename Operation>
   decltype(auto) with_vmid_snapshot(uint32_t vmid, Operation &&operation) const {
-    if (GpuVmAccessBatchGuard::active())
+    if (GpuVmAccessBatchGuard::active()) {
       return std::invoke(std::forward<Operation>(operation), borrow_snapshot_vmid(vmid));
+    }
     const std::optional<GpuVmAccess> access = snapshot_vmid(vmid);
     return std::invoke(std::forward<Operation>(operation), access ? &*access : nullptr);
   }

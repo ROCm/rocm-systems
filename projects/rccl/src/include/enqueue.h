@@ -79,6 +79,11 @@ struct rcclAddonLaunchState {
   // Set once sharedRes->deviceStream is acquired; the epilogue must release it on every path.
   bool deviceStreamAcquired;
   cudaStream_t deviceStream;
+  // Set once context->launchOrder is acquired (NCCL_LAUNCH_ORDER_IMPLICIT=1); released on every path.
+  bool launchOrderAcquired;
+  // Implicit-order decision made in the prologue, so the epilogue applies the same one.
+  bool implicitOrdered;
+  bool implicitUseLaunchStream;
 };
 
 ncclResult_t rcclAddonLaunchBegin(struct ncclComm* comm, cudaStream_t stream, struct rcclAddonLaunchState* state);

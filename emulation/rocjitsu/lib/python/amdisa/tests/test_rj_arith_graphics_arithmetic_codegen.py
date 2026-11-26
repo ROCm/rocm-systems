@@ -30,7 +30,9 @@ def context(arch, name, dst, src, *, is_vop3=False, enc_name=""):
     )
 
 
-@pytest.mark.parametrize('arch', ['rdna3', 'rdna4', 'cdna5'])
+@pytest.mark.parametrize(
+    'arch', ['rdna1', 'rdna2', 'rdna3', 'rdna3_5', 'rdna4', 'cdna5']
+)
 def test_mullit_loose_policy_and_modifiers(arch):
     assert 'V_MULLIT_F32' in FLOAT_NAMES
     body = gen_mullit(
@@ -51,6 +53,15 @@ def test_mullit_loose_policy_and_modifiers(arch):
         'CLAMP',
     ):
         assert 'RJ_ARITH_ALU_' + modifier in body
+    suffix = {
+        'rdna1': '_gfx10',
+        'rdna2': '_gfx10',
+        'rdna3_5': '_gfx1150',
+        'rdna3': '',
+        'rdna4': '_gfx12',
+        'cdna5': '_gfx1250',
+    }[arch]
+    assert f'rj_arith_v_mullit_f32_w32{suffix},' in body
     assert ('rj_arith_v_mullit_f32_w32_gfx12,' in body) == (arch == 'rdna4')
     assert ('rj_arith_v_mullit_f32_w32_gfx1250' in body) == (arch == 'cdna5')
     assert (
@@ -144,10 +155,6 @@ def test_cube_reuses_ternary_adapter_and_guest_policies(arch):
             'CLAMP',
         ):
             assert 'RJ_ARITH_ALU_' + modifier in body
-        assert (
-            gen_cube(context('cdna2', name, ['dst'], ['x', 'y', 'z'], is_vop3=True))
-            is None
-        )
         assert gen_cube(context(arch, name, ['dst'], ['x', 'y'], is_vop3=True)) is None
         assert (
             gen_cube(context(arch, name, ['dst'], ['x', 'y', 'z'], is_vop3=False))
@@ -155,7 +162,9 @@ def test_cube_reuses_ternary_adapter_and_guest_policies(arch):
         )
 
 
-@pytest.mark.parametrize('arch', ['cdna3', 'cdna4', 'cdna5'])
+@pytest.mark.parametrize(
+    'arch', ['cdna1', 'cdna2', 'cdna3', 'cdna4', 'cdna5', 'rdna1', 'rdna2', 'rdna3_5']
+)
 def test_cdna_cube_reuses_matching_nan_and_omod_policy(arch):
     from amdisa.codegen.execute.rj_arith_graphics import CUBE_NAMES, gen_cube
 
@@ -168,3 +177,48 @@ def test_cdna_cube_reuses_matching_nan_and_omod_policy(arch):
         assert 'wf.fp_round_mode_f32()' in body
         assert 'wf.ieee_mode()' in body
         assert 'd, x, y, z' in body
+
+
+@pytest.mark.parametrize('arch', ['cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5'])
+def test_older_graphics_routes_and_preserves_interpolation_dispatch(arch):
+    root = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
+    )
+    found = {'Cube': 0, 'Mullit': 0, 'Interp': 0}
+    for path in (root / arch).glob('*exec.cpp'):
+        source = path.read_text()
+        for match in re.finditer(
+            r'void (V(Cube|Mullit|Interp)\w+)::execute(?:_modifier)?_impl\([^)]*\)\s*\{',
+            source,
+        ):
+            end, depth = match.end(), 1
+            while depth:
+                depth += (source[end] == '{') - (source[end] == '}')
+                end += 1
+            body = source[match.end() : end - 1]
+            family = match[2]
+            found[family] += 1
+            if family == 'Interp':
+                if arch in ('rdna1', 'rdna2'):
+                    assert 'amdgpu::execute_gfx10_interp<' in body
+                elif arch == 'rdna3_5':
+                    assert 'amdgpu::arith::execute_interp<' in body
+                    assert 'gfx115_interp<' in body
+                else:
+                    assert (
+                        'no-op in compute simulation' in body
+                        or 'UnimplementedInstruction' in body
+                    )
+            else:
+                assert (
+                    '#include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h"'
+                    in source
+                )
+                assert 'rj_arith_v_' + family.lower() in body
+                assert 'amdgpu::execute_v_' not in body
+    assert found['Cube'] == (8 if arch == 'rdna3_5' else 4)
+    assert found['Mullit'] == (
+        2 if arch == 'rdna3_5' else 1 if arch in ('rdna1', 'rdna2') else 0
+    )
+    assert found['Interp'] > 0 or arch == 'cdna2'

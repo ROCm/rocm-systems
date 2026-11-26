@@ -733,7 +733,7 @@ ncclResult_t ncclIbIflush(void* recvComm, int n, void** data, int* sizes, void**
       writeWr.sg_list = &comm->devs[i].gpuFlush.sge;
       writeWr.num_sge = 1;
       writeWr.opcode = IBV_WR_RDMA_WRITE;
-      writeWr.send_flags = 0;
+      writeWr.send_flags = IBV_SEND_INLINE;
       writeWr.next = &wr;
 
       wr.wr.rdma.remote_addr = (uint64_t)(comm->devs[i].gpuFlush.gpuFlushGpuMem);

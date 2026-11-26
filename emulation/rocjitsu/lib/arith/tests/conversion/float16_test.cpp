@@ -101,7 +101,7 @@ void check_float16(Call call, Conversion16 operation) {
       modifiers, Exact,
       RJ_ARITH_FP_IEEE_MODE | RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
           RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS | (op == 5 && !Gfx12 ? RJ_ARITH_FP_DX10_CLAMP_OFF : 0),
-      Cdna && (op < 2 || op == 4) ? RJ_ARITH_CVT_SDWA : 0);
+      (Cdna && (op < 2 || op == 4)) || (!Gfx12 && op == 5) ? RJ_ARITH_CVT_SDWA : 0);
 }
 
 } // namespace
@@ -227,56 +227,57 @@ TEST(ConversionCvtF32F16W64Gfx12, Arithmetic) {
 }
 
 TEST(ConversionCvtF16I16W32Gfx942, Arithmetic) {
-  check_float16<32, false, true, false>(rj_arith_v_cvt_f16_i16_w32_gfx942,
-                                        Conversion16::SignedToHalf);
+  check_float16<32, false, true, true>(rj_arith_v_cvt_f16_i16_w32_gfx942,
+                                       Conversion16::SignedToHalf);
 }
 
 TEST(ConversionCvtF16I16W64Gfx942, Arithmetic) {
-  check_float16<64, false, true, false>(rj_arith_v_cvt_f16_i16_w64_gfx942,
-                                        Conversion16::SignedToHalf);
+  check_float16<64, false, true, true>(rj_arith_v_cvt_f16_i16_w64_gfx942,
+                                       Conversion16::SignedToHalf);
 }
 
 TEST(ConversionCvtF16U16W32Gfx942, Arithmetic) {
-  check_float16<32, false, true, false>(rj_arith_v_cvt_f16_u16_w32_gfx942,
-                                        Conversion16::UnsignedToHalf);
+  check_float16<32, false, true, true>(rj_arith_v_cvt_f16_u16_w32_gfx942,
+                                       Conversion16::UnsignedToHalf);
 }
 
 TEST(ConversionCvtF16U16W64Gfx942, Arithmetic) {
-  check_float16<64, false, true, false>(rj_arith_v_cvt_f16_u16_w64_gfx942,
-                                        Conversion16::UnsignedToHalf);
+  check_float16<64, false, true, true>(rj_arith_v_cvt_f16_u16_w64_gfx942,
+                                       Conversion16::UnsignedToHalf);
 }
 
 TEST(ConversionCvtI16F16W32Gfx942, Arithmetic) {
-  check_float16<32, false, true, false>(rj_arith_v_cvt_i16_f16_w32_gfx942,
-                                        Conversion16::HalfToSigned);
+  check_float16<32, false, true, true>(rj_arith_v_cvt_i16_f16_w32_gfx942,
+                                       Conversion16::HalfToSigned);
 }
 
 TEST(ConversionCvtI16F16W64Gfx942, Arithmetic) {
-  check_float16<64, false, true, false>(rj_arith_v_cvt_i16_f16_w64_gfx942,
-                                        Conversion16::HalfToSigned);
+  check_float16<64, false, true, true>(rj_arith_v_cvt_i16_f16_w64_gfx942,
+                                       Conversion16::HalfToSigned);
 }
 
 TEST(ConversionCvtU16F16W32Gfx942, Arithmetic) {
-  check_float16<32, false, true, false>(rj_arith_v_cvt_u16_f16_w32_gfx942,
-                                        Conversion16::HalfToUnsigned);
+  check_float16<32, false, true, true>(rj_arith_v_cvt_u16_f16_w32_gfx942,
+                                       Conversion16::HalfToUnsigned);
 }
 
 TEST(ConversionCvtU16F16W64Gfx942, Arithmetic) {
-  check_float16<64, false, true, false>(rj_arith_v_cvt_u16_f16_w64_gfx942,
-                                        Conversion16::HalfToUnsigned);
+  check_float16<64, false, true, true>(rj_arith_v_cvt_u16_f16_w64_gfx942,
+                                       Conversion16::HalfToUnsigned);
 }
 
 TEST(ConversionCvtF16F32W32Gfx942, Arithmetic) {
-  check_float16<32, false, true, false>(rj_arith_v_cvt_f16_f32_w32_gfx942,
-                                        Conversion16::FloatToHalf);
+  check_float16<32, false, true, true>(rj_arith_v_cvt_f16_f32_w32_gfx942,
+                                       Conversion16::FloatToHalf);
 }
 
 TEST(ConversionCvtF16F32W64Gfx942, Arithmetic) {
-  check_float16<64, false, true, false>(rj_arith_v_cvt_f16_f32_w64_gfx942,
-                                        Conversion16::FloatToHalf);
+  check_float16<64, false, true, true>(rj_arith_v_cvt_f16_f32_w64_gfx942,
+                                       Conversion16::FloatToHalf);
 }
 
 // The inherited SDWA prescale keeps 65535/2 finite; VOP3 rounds 65535 to Inf first.
+// SDWA prescaling remains loose-only until SDWA captures are reviewed.
 TEST(ConversionCvtF16F32Gfx942, SdwaPrescaling) {
   using namespace rocjitsu::arith::test;
   const uint32_t source_bits[] = {0x477fff00U, 0x7f800000U, 0x7fc00000U, 0x80000000U};
@@ -300,6 +301,17 @@ TEST(ConversionCvtF16F32Gfx942, SdwaPrescaling) {
       }
       EXPECT_EQ(status, 0x10U);
     }
+    uint32_t source[64]{0x477fff00U}, result[64]{0xdeadbeefU};
+    const uint32_t *a = source;
+    uint32_t *d = result;
+    uint32_t status = 0x10;
+    EXPECT_EQ(rj_arith_v_cvt_f16_f32_w64_gfx942(
+                  cpu | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS |
+                      RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS,
+                  1ULL, RJ_ARITH_CVT_SDWA | RJ_ARITH_ALU_OMOD_HALF, &d, &a, &status),
+              RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
+    EXPECT_EQ(result[0], 0xdeadbeefU);
+    EXPECT_EQ(status, 0x10U);
   }
 }
 
@@ -421,16 +433,150 @@ TEST(ConversionCvtU16F16W64Gfx1250, Arithmetic) {
                                         Conversion16::HalfToUnsigned);
 }
 
-// gfx942/gfx950 inherit the RDNA3 model but stay loose-only until the CDNA captures are reviewed.
+// gfx942 shares the RDNA3 widening model and matches MI300X captures.
 TEST(ConversionCvtF32F16W32Gfx942, Arithmetic) {
-  check_float16<32, false, false, false>(rj_arith_v_cvt_f32_f16_w32_gfx942,
+  check_float16<32, false, false, true>(rj_arith_v_cvt_f32_f16_w32_gfx942,
+                                        Conversion16::HalfToFloat);
+}
+
+TEST(ConversionCvtF32F16W64Gfx942, Arithmetic) {
+  check_float16<64, false, false, true>(rj_arith_v_cvt_f32_f16_w64_gfx942,
+                                        Conversion16::HalfToFloat);
+}
+
+// gfx950 shares the gfx942 model and matches MI350X captures.
+TEST(ConversionCvtF16I16W32Gfx950, Arithmetic) {
+  check_float16<32, false, true, true>(rj_arith_v_cvt_f16_i16_w32_gfx950,
+                                       Conversion16::SignedToHalf);
+}
+
+TEST(ConversionCvtF16I16W64Gfx950, Arithmetic) {
+  check_float16<64, false, true, true>(rj_arith_v_cvt_f16_i16_w64_gfx950,
+                                       Conversion16::SignedToHalf);
+}
+
+TEST(ConversionCvtF16U16W32Gfx950, Arithmetic) {
+  check_float16<32, false, true, true>(rj_arith_v_cvt_f16_u16_w32_gfx950,
+                                       Conversion16::UnsignedToHalf);
+}
+
+TEST(ConversionCvtF16U16W64Gfx950, Arithmetic) {
+  check_float16<64, false, true, true>(rj_arith_v_cvt_f16_u16_w64_gfx950,
+                                       Conversion16::UnsignedToHalf);
+}
+
+TEST(ConversionCvtI16F16W32Gfx950, Arithmetic) {
+  check_float16<32, false, true, true>(rj_arith_v_cvt_i16_f16_w32_gfx950,
+                                       Conversion16::HalfToSigned);
+}
+
+TEST(ConversionCvtI16F16W64Gfx950, Arithmetic) {
+  check_float16<64, false, true, true>(rj_arith_v_cvt_i16_f16_w64_gfx950,
+                                       Conversion16::HalfToSigned);
+}
+
+TEST(ConversionCvtU16F16W32Gfx950, Arithmetic) {
+  check_float16<32, false, true, true>(rj_arith_v_cvt_u16_f16_w32_gfx950,
+                                       Conversion16::HalfToUnsigned);
+}
+
+TEST(ConversionCvtU16F16W64Gfx950, Arithmetic) {
+  check_float16<64, false, true, true>(rj_arith_v_cvt_u16_f16_w64_gfx950,
+                                       Conversion16::HalfToUnsigned);
+}
+
+TEST(ConversionCvtF16F32W32Gfx950, Arithmetic) {
+  check_float16<32, false, true, true>(rj_arith_v_cvt_f16_f32_w32_gfx950,
+                                       Conversion16::FloatToHalf);
+}
+
+TEST(ConversionCvtF16F32W64Gfx950, Arithmetic) {
+  check_float16<64, false, true, true>(rj_arith_v_cvt_f16_f32_w64_gfx950,
+                                       Conversion16::FloatToHalf);
+}
+
+TEST(ConversionCvtF32F16W32Gfx950, Arithmetic) {
+  check_float16<32, false, false, true>(rj_arith_v_cvt_f32_f16_w32_gfx950,
+                                        Conversion16::HalfToFloat);
+}
+
+TEST(ConversionCvtF32F16W64Gfx950, Arithmetic) {
+  check_float16<64, false, false, true>(rj_arith_v_cvt_f32_f16_w64_gfx950,
+                                        Conversion16::HalfToFloat);
+}
+
+// gfx10/gfx115x/gfx908/gfx90a share the RDNA3/gfx942 models via loose-only _gfx10 wrappers.
+TEST(ConversionCvtF16I16W32Gfx10, Arithmetic) {
+  check_float16<32, false, true, false>(rj_arith_v_cvt_f16_i16_w32_gfx10,
+                                        Conversion16::SignedToHalf);
+}
+TEST(ConversionCvtF16I16W64Gfx10, Arithmetic) {
+  check_float16<64, false, true, false>(rj_arith_v_cvt_f16_i16_w64_gfx10,
+                                        Conversion16::SignedToHalf);
+}
+TEST(ConversionCvtF16U16W32Gfx10, Arithmetic) {
+  check_float16<32, false, true, false>(rj_arith_v_cvt_f16_u16_w32_gfx10,
+                                        Conversion16::UnsignedToHalf);
+}
+TEST(ConversionCvtF16U16W64Gfx10, Arithmetic) {
+  check_float16<64, false, true, false>(rj_arith_v_cvt_f16_u16_w64_gfx10,
+                                        Conversion16::UnsignedToHalf);
+}
+TEST(ConversionCvtI16F16W32Gfx10, Arithmetic) {
+  check_float16<32, false, true, false>(rj_arith_v_cvt_i16_f16_w32_gfx10,
+                                        Conversion16::HalfToSigned);
+}
+TEST(ConversionCvtI16F16W64Gfx10, Arithmetic) {
+  check_float16<64, false, true, false>(rj_arith_v_cvt_i16_f16_w64_gfx10,
+                                        Conversion16::HalfToSigned);
+}
+TEST(ConversionCvtU16F16W32Gfx10, Arithmetic) {
+  check_float16<32, false, true, false>(rj_arith_v_cvt_u16_f16_w32_gfx10,
+                                        Conversion16::HalfToUnsigned);
+}
+TEST(ConversionCvtU16F16W64Gfx10, Arithmetic) {
+  check_float16<64, false, true, false>(rj_arith_v_cvt_u16_f16_w64_gfx10,
+                                        Conversion16::HalfToUnsigned);
+}
+TEST(ConversionCvtF16F32W32Gfx10, Arithmetic) {
+  check_float16<32, false, true, false>(rj_arith_v_cvt_f16_f32_w32_gfx10,
+                                        Conversion16::FloatToHalf);
+}
+TEST(ConversionCvtF16F32W64Gfx10, Arithmetic) {
+  check_float16<64, false, true, false>(rj_arith_v_cvt_f16_f32_w64_gfx10,
+                                        Conversion16::FloatToHalf);
+}
+TEST(ConversionCvtF32F16W32Gfx10, Arithmetic) {
+  check_float16<32, false, false, false>(rj_arith_v_cvt_f32_f16_w32_gfx10,
+                                         Conversion16::HalfToFloat);
+}
+TEST(ConversionCvtF32F16W64Gfx10, Arithmetic) {
+  check_float16<64, false, false, false>(rj_arith_v_cvt_f32_f16_w64_gfx10,
                                          Conversion16::HalfToFloat);
 }
 
-// gfx942/gfx950 inherit the RDNA3 model but stay loose-only until the CDNA captures are reviewed.
-TEST(ConversionCvtF32F16W64Gfx942, Arithmetic) {
-  check_float16<64, false, false, false>(rj_arith_v_cvt_f32_f16_w64_gfx942,
-                                         Conversion16::HalfToFloat);
+// MI300X (2026-11-24) captures: low-half 16-bit results zero-extend bit[31:16], HIGH_D preserves
+// bit[15:0], FP16_OVFL saturates finite overflow, and F32_F16 quiets sNaNs only when IEEE is set.
+TEST(ConversionFloat16Gfx942, ExactMatchesHardware) {
+  constexpr uint64_t d = 0xa5a5a5a5U;
+  rocjitsu::arith::test::expect_captured_conversion<1, 1>(
+      rj_arith_v_cvt_f16_f32_w32_gfx942, RJ_ARITH_FP16_OVFL, 0x7f7fffffU, 0, 0, d, 0x00007bffU);
+  rocjitsu::arith::test::expect_captured_conversion<1, 1>(rj_arith_v_cvt_f16_f32_w32_gfx942, 0,
+                                                          0x7f7fffffU, 0, 0, d, 0x00007c00U);
+  rocjitsu::arith::test::expect_captured_conversion_lane<1, 1>(
+      rj_arith_v_cvt_f16_f32_w32_gfx942, RJ_ARITH_FP_IEEE_MODE | RJ_ARITH_FP16_OVFL,
+      RJ_ARITH_ALU_HIGH_D, 0x7f7fffffU, 0, 0, d, 0x7bffa5a5U);
+  rocjitsu::arith::test::expect_captured_conversion<1, 1>(
+      rj_arith_v_cvt_f16_u16_w32_gfx942, RJ_ARITH_FP16_OVFL, 0xed09ffffU, 0, 0, d, 0x00007bffU);
+  rocjitsu::arith::test::expect_captured_conversion<1, 1>(rj_arith_v_cvt_i16_f16_w32_gfx942, 0,
+                                                          0x1ec97bffU, 0, 0, d, 0x00007fffU);
+  rocjitsu::arith::test::expect_captured_conversion<1, 1>(rj_arith_v_cvt_u16_f16_w32_gfx942, 0,
+                                                          0x457a7bffU, 0, 0, d, 0x0000ffe0U);
+  rocjitsu::arith::test::expect_captured_conversion_lane<1, 1>(
+      rj_arith_v_cvt_f32_f16_w32_gfx942, 0, 0, 0xd70f7c01U, 0, 0, d, 0x7f802000U);
+  rocjitsu::arith::test::expect_captured_conversion_lane<1, 1>(rj_arith_v_cvt_f32_f16_w32_gfx942,
+                                                               RJ_ARITH_FP_IEEE_MODE, 0,
+                                                               0xd70f7c01U, 0, 0, d, 0x7fc02000U);
 }
 
 // gfx1100 (W7900, mkm2) lanes, MODE words as captured (bit 8 DX10_CLAMP set, bit 9 IEEE as
@@ -482,4 +628,30 @@ TEST(ConversionFloat16Gfx11, ExactMatchesHardware) {
       rj_arith_v_cvt_f16_i16_w32, 0x1f5, 0, 0xd6a37fff, 0, 0, d, 0xa5a57800U);
   rocjitsu::arith::test::expect_captured_conversion_gfx11<1, 1, 16>(
       rj_arith_v_cvt_f16_i16_w32, 0x1fa, 0, 0xd6a37fff, 0, 0, d, 0xa5a577ffU);
+}
+
+// Active SDWA scaling quiets widened NaNs and normalizes zero's sign with IEEE clear.
+TEST(ConversionCvtF32F16W64Gfx11, SdwaOutput) {
+  using namespace rocjitsu::arith::test;
+  const uint32_t source_bits[] = {0x7c01U, 0xfc21U, 0x8000U, 1};
+  const uint32_t expected[] = {0x7fc02000U, 0xffc42000U, 0, 0x34000000U};
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (uint64_t semantics : {RJ_ARITH_SEMANTICS_LOOSE, RJ_ARITH_SEMANTICS_COMPATIBILITY}) {
+      uint32_t source[64], result[64];
+      for (int lane = 0; lane < 64; ++lane) {
+        source[lane] = source_bits[lane % 4];
+      }
+      const uint32_t *a = source;
+      uint32_t *d = result;
+      uint32_t status = 0x10;
+      ASSERT_EQ(rj_arith_v_cvt_f32_f16_w64(cpu | semantics | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS,
+                                           ~0ULL, RJ_ARITH_CVT_SDWA | RJ_ARITH_ALU_OMOD_2, &d, &a,
+                                           &status),
+                RJ_ARITH_SUCCESS);
+      for (int lane = 0; lane < 64; ++lane) {
+        EXPECT_EQ(result[lane], expected[lane % 4]);
+      }
+      EXPECT_EQ(status, 0x10U);
+    }
+  }
 }

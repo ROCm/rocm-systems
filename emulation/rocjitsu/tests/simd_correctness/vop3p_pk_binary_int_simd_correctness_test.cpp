@@ -3,7 +3,7 @@
 
 /// @file vop3p_pk_binary_int_simd_correctness_test.cpp
 /// @brief Bit-identity check (SIMD fast path vs scalar body) for the VOP3P
-/// packed-16 integer binary family wired into SIMD_VOP3P_PK_BINARY_INT on CDNA4.
+/// packed-16 integer binary family on CDNA4.
 /// Each (case, rot) runs TWICE in the same process -- once forcing the scalar
 /// body, once the SIMD fast path, with identical inputs/EXEC -- and the two
 /// 64-lane result arrays are asserted equal with EXPECT_EQ
@@ -24,7 +24,6 @@
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -123,8 +122,9 @@ struct Fixture {
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
     rocjitsu::test::initialize_compute_unit(cu, "cu_vop3p_pk_bin_int", cfg, &gpu_mem, &l2);
-    if (!cu)
+    if (!cu) {
       return;
+    }
     decoder = Decoder::create(arch);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
   }
@@ -145,8 +145,9 @@ struct Fixture {
     EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     std::array<uint32_t, WF_SIZE> out{};
     uint32_t vb = wf->vgpr_alloc().base;
-    for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+    for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       out[lane] = cu->read_vgpr(vb + kDstVgpr, lane);
+    }
     return out;
   }
 };
@@ -167,16 +168,18 @@ void check_case(const Case &c, uint64_t exec) {
   auto run_mode = [&](bool force_scalar, uint32_t rot) -> std::array<uint32_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
-    if (::testing::Test::HasFatalFailure())
+    if (::testing::Test::HasFatalFailure()) {
       return {};
+    }
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[2] = {0u, 0u};
-    if (c.ternary)
+    if (c.ternary) {
       vop3p_encode_default_ternary(c.opcode, kDstVgpr, /*src0=*/256, /*src1=*/257, /*src2=*/258,
                                    words);
-    else
+    } else {
       vop3p_encode_default_binary(c.opcode, kDstVgpr, /*src0=*/256, /*src1=*/257, words);
+    }
     Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << c.name << " decode failed";
     auto out = fx.run(inst, rot, exec);
@@ -249,8 +252,9 @@ TEST(Vop3pPkBinaryIntSimdCorrectness, FullExec) {
     GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
     return;
   }
-  for (const auto &c : kCases)
+  for (const auto &c : kCases) {
     check_case(c, /*exec=*/~0ULL);
+  }
 }
 
 TEST(Vop3pPkBinaryIntSimdCorrectness, PartialExec) {
@@ -258,8 +262,9 @@ TEST(Vop3pPkBinaryIntSimdCorrectness, PartialExec) {
     GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
     return;
   }
-  for (const auto &c : kCases)
+  for (const auto &c : kCases) {
     check_case(c, /*exec=*/0xA5A5'F0F0'1234'8001ULL);
+  }
 }
 
 } // namespace

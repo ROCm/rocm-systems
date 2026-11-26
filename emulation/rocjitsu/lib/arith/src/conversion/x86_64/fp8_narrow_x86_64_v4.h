@@ -18,11 +18,12 @@ inline __m512i select_greater(__m512i a, __m512i b, __m512i yes, __m512i no) {
 // Narrow FP32 bits to FP8/BF8 using nearest or seeded stochastic rounding and optional
 // saturation.
 template <bool Bf8, bool Stochastic>
-inline __m512i narrow(__m512i raw, __m512i seed, bool saturate, Fp8NarrowPolicy policy) {
+inline __m512i narrow(__m512i raw, __m512i seed, bool saturate, Fp8NarrowPolicy policy,
+                      bool flush_out = false) {
   constexpr int fraction_bits = Bf8 ? 2 : 3;
   bool fnuz = policy == Fp8NarrowPolicy::Fnuz;
   bool unsigned_format = policy == Fp8NarrowPolicy::E5M3;
-  bool rdna = policy == Fp8NarrowPolicy::Gfx12;
+  bool rdna = policy == Fp8NarrowPolicy::Gfx12 || policy == Fp8NarrowPolicy::Gfx950;
   int terminal = fnuz ? 128 : unsigned_format ? 255 : Bf8 ? 124 : 127;
   int bias = unsigned_format ? 15 : (Bf8 ? 15 : 7) + int(fnuz);
   auto one = _mm512_set1_epi32(1), zero = _mm512_setzero_si512();
@@ -63,6 +64,14 @@ inline __m512i narrow(__m512i raw, __m512i seed, bool saturate, Fp8NarrowPolicy 
                  : finite_limit;
   }
   result = _mm512_min_epu32(result, limit);
+  if (flush_out) {
+    if constexpr (Stochastic) {
+      result = select_greater(_mm512_set1_epi32(1 << fraction_bits), result, zero, result);
+    } else {
+      result =
+          select_greater(_mm512_set1_epi32(Bf8 ? 0x38700000 : 0x3c780000), magnitude, zero, result);
+    }
+  }
   auto sign =
       unsigned_format ? zero : _mm512_and_si512(_mm512_srli_epi32(raw, 24), _mm512_set1_epi32(128));
   if (fnuz) {

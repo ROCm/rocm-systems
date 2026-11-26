@@ -7,6 +7,7 @@
 #include "rocjitsu/vm/plugins/race_detector/core/interval_set.h"
 #include "rocjitsu/vm/plugins/race_detector/core/types.h"
 #include "rocjitsu/vm/plugins/race_detector/core/wave_race_state.h"
+#include "util/diagnostic.h"
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -85,6 +86,10 @@ namespace rocjitsu::plugins::race_detector {
 ///     barrier or an LDS barrier cell.
 class RaceDetector {
 public:
+  /// @brief Reject wave counts that exceed the barrier-round bit capacity.
+  static util::Result validate_wave_count(size_t waves, util::DiagnosticEmitter diagnostic = {});
+
+  /// @pre nWaves is nonnegative and passes validate_wave_count().
   /// ldsSizeBytes is the CU backing capacity, independent of workgroup
   /// allocation metadata and the lazily materialized byte count.
   RaceDetector(int nWaves, int vgprCount, int sgprCount, Dim3d workgroupId,
@@ -196,8 +201,9 @@ public:
   /// Bytes in complete elements that fit the LDS backing. Vector transfers
   /// can retain a valid prefix when later elements are dropped as out of bounds.
   uint64_t ldsBytesInRange(uint64_t address, uint64_t bytes, uint64_t elementBytes) const {
-    if (elementBytes == 0 || !validLdsRange(address, elementBytes))
+    if (elementBytes == 0 || !validLdsRange(address, elementBytes)) {
       return 0;
+    }
     return std::min(bytes, ldsSizeBytes_ - address) / elementBytes * elementBytes;
   }
 

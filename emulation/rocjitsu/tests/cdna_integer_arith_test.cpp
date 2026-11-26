@@ -224,9 +224,10 @@ TEST(CdnaIntegerArith, OlderProfilesMasksAliasesAndSelectors) {
               const unsigned selected = (0x04030201U >> (8 * (selector & 3))) & 0xff;
               const unsigned count = (selected & (bytes ? 3u : 31u)) * (bytes ? 8 : 1);
               const uint32_t expected = uint32_t(0x123456789abcdef0ULL >> count);
-              for (unsigned lane = 0; lane < lanes; ++lane)
+              for (unsigned lane = 0; lane < lanes; ++lane) {
                 EXPECT_EQ(cu->read_vgpr(base, lane),
                           (wave->exec() >> lane) & 1 ? expected : 0x12345678U);
+              }
             }
           }
         }
@@ -263,9 +264,10 @@ TEST(CdnaIntegerArith, OlderProfilesMasksAliasesAndSelectors) {
           decoded = decoder->decode_window(std::bit_cast<std::array<uint32_t, 2>>(raw));
           ASSERT_TRUE(decoded.succeeded());
           ASSERT_TRUE(cu->execute_instruction(decoded.value().get(), *wave).succeeded());
-          for (unsigned lane = 0; lane < lanes; ++lane)
+          for (unsigned lane = 0; lane < lanes; ++lane) {
             EXPECT_EQ(cu->read_vgpr(base, lane),
                       (wave->exec() >> lane) & 1 ? 0x12f6f678U : 0x1234f678U);
+          }
         }
       }
     }

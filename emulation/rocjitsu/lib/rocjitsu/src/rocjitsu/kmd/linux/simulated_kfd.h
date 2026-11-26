@@ -98,8 +98,9 @@ constexpr TrapInterruptSite classify_pre_gfx12_trap_interrupt_site(rocjitsu::Isa
                                                                    uint32_t payload_move,
                                                                    uint32_t delay) {
   constexpr uint32_t kSNop0 = 0xBF800000u;
-  if (delay != kSNop0)
+  if (delay != kSNop0) {
     return TrapInterruptSite::Unknown;
+  }
 
   uint32_t profiling_move = 0;
   uint32_t exception_move = 0;
@@ -125,10 +126,12 @@ constexpr TrapInterruptSite classify_pre_gfx12_trap_interrupt_site(rocjitsu::Isa
     return TrapInterruptSite::Unknown;
   }
 
-  if (payload_move == profiling_move)
+  if (payload_move == profiling_move) {
     return TrapInterruptSite::Profiling;
-  if (payload_move == exception_move)
+  }
+  if (payload_move == exception_move) {
     return TrapInterruptSite::QueueException;
+  }
   return TrapInterruptSite::Unknown;
 }
 
@@ -143,9 +146,10 @@ struct IpcHandleKey {
 struct IpcHandleKeyHash {
   size_t operator()(const IpcHandleKey &key) const {
     size_t hash_value = std::hash<uint32_t>{}(key.words[0]);
-    for (int idx = 1; idx < 4; idx++)
+    for (int idx = 1; idx < 4; idx++) {
       hash_value ^= std::hash<uint32_t>{}(key.words[idx]) + 0x9e3779b9 + (hash_value << 6) +
                     (hash_value >> 2);
+    }
     return hash_value;
   }
 };
@@ -402,8 +406,9 @@ public:
 
     void report_memory_fault(uint32_t vmid, uint64_t addr,
                              amdgpu::MemoryFaultCause cause) override {
-      if (process_ != nullptr && process_->process_id() == vmid)
+      if (process_ != nullptr && process_->process_id() == vmid) {
         driver_->report_memory_fault(process_, addr, gpu_id_, cause);
+      }
     }
 
   private:
@@ -462,10 +467,10 @@ public:
   [[nodiscard]] std::optional<int> dup_mmap_memfd(uint32_t process_id, off_t offset) const;
   /// @}
 
-  void setup_topology(const Sysfs::GpuInfo &gpu);
-  void setup_topology(const config::KfdDeviceConfig &dev, uint32_t num_xcc,
+  bool setup_topology(const Sysfs::GpuInfo &gpu);
+  bool setup_topology(const config::KfdDeviceConfig &dev, uint32_t num_xcc,
                       const config::PciDeviceConfig &pci = {});
-  void setup_topology(const std::vector<config::KfdDeviceConfig> &devs, uint32_t num_xcc,
+  bool setup_topology(const std::vector<config::KfdDeviceConfig> &devs, uint32_t num_xcc,
                       bool publish_peer_links = true, bool strict_render_minor = false,
                       const config::PciDeviceConfig &pci = {});
   /// @brief Whether render-node opens must match a configured minor exactly.
@@ -675,7 +680,7 @@ public:
   /// @brief Close and drain without running maintenance on the releasing thread.
   [[nodiscard]] bool close_gpu_alias_ingress(const KfdProcess::GpuAliasRecord &alias,
                                              GpuAliasIngressGate::OwnerPost owner_post,
-                                             std::function<void()> drained) {
+                                             std::function<int()> drained) {
     return alias_ingress_gate_->close(GpuAliasIngressGate::key(alias), std::move(owner_post),
                                       std::move(drained));
   }
@@ -950,7 +955,7 @@ private:
   void finish_ordinary_mapping(const KfdProcess &proc, uint64_t handle);
   int run_ordinary_mapping_drain(KfdProcess &proc, uint64_t handle,
                                  const PendingOrdinaryMapping &pending, bool retry,
-                                 const std::function<void()> &work);
+                                 const std::function<int()> &work);
 
   /// Resolve a multi-GPU DRM render minor through published node metadata.
   /// Before topology setup, retain the legacy ordinal fallback used by tests.
@@ -981,7 +986,7 @@ private:
   has_exclusive_canonical_lines(std::span<const KfdProcess::GpuAliasRecord> aliases) const;
 
   /// @brief Select owner GPU domains for local-only retirement, all domains for canonical aliases.
-  [[nodiscard]] std::vector<amdgpu::DeviceCacheDomain>
+  [[nodiscard]] util::FailureOr<std::vector<amdgpu::DeviceCacheDomain>>
   maintenance_domains_for_aliases(std::span<const KfdProcess::GpuAliasRecord> aliases) const;
 
   /// @brief Form an exact UC scope for a current canonical grant and VM.
@@ -997,9 +1002,11 @@ private:
 
   /// @brief Get the ordinal (0-based index) for a gpu_id. Returns 0 if not found.
   uint32_t gpu_ordinal(uint32_t gpu_id) const {
-    for (uint32_t i = 0; i < gpus_.size(); ++i)
-      if (gpus_[i].gpu_id == gpu_id)
+    for (uint32_t i = 0; i < gpus_.size(); ++i) {
+      if (gpus_[i].gpu_id == gpu_id) {
         return i;
+      }
+    }
     return 0;
   }
 

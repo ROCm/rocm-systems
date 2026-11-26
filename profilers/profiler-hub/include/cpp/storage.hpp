@@ -65,6 +65,14 @@ public:
      */
     [[nodiscard]] profiler_hub::version_t get_writer_schema_version() const;
 
+    /**
+     * @brief RocPD schema version stamped into the opened trace's rocpd_metadata table.
+     * @return The schema version of the trace, read once and cached. An empty database
+     *         path has no trace, so the library version is returned. An unreadable
+     *         table or missing rows yield 0.0.0 and log an error.
+     */
+    [[nodiscard]] profiler_hub::version_t get_trace_schema_version() const;
+
 private:
     friend struct writer_t;
     friend struct reader_t;

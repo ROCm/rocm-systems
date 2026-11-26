@@ -52,6 +52,7 @@ public:
   static constexpr int products = Bits == 4 ? 4 : 2;
   static constexpr bool biased = Bits == 4;
   static constexpr bool staged_clamp = Clamp && !Positive;
+  static constexpr bool early_store = true;
   static constexpr bool narrow_clamp = Bits == 4 && staged_clamp;
   struct Accumulator {
     V value, base;
