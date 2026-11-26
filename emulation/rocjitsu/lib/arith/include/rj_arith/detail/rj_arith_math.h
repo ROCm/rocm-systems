@@ -605,6 +605,8 @@ int rj_arith_v_log_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t in
                                  uint32_t *const *d, const uint32_t *const *a,
                                  uint32_t *excp_flag_user);
 
+// These gfx942/gfx950 integral/mantissa APIs and FRACT accept ALU_SDWA to scale
+// the rounded result, then clamp; byte placement stays separate. SDWA excludes DPP.
 // gfx942/gfx950 integral rounding and mantissa extraction share the existing
 // integer models, but always quiet NaNs independently of MODE.IEEE. OMOD remains
 // enabled only with IEEE clear and output denormals flushed. Compatibility and
@@ -686,6 +688,10 @@ int rj_arith_v_fract_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t
                                     uint32_t *trapsts);
 
 // Inherited CDNA FP32 math models, also used for gfx950 through the gfx942 APIs.
+// EXP/LOG/SIN/COS reuse these models on gfx908/gfx90a/gfx1010/gfx1030/gfx1150;
+// gfx908/gfx90a also reuse the legacy EXP/LOG forms.
+// RCP, RCP_IFLAG, RSQ and SQRT also carry the same inherited model on
+// gfx908/gfx90a/gfx1010/gfx1030/gfx1150, without new empirical qualification.
 // Compatibility preserves Rocjitsu's existing numeric and FP-status policies;
 // strict empirical semantics are unsupported pending validation on these architectures.
 // Loose and allow-Loose requests retain the corresponding existing math paths.
@@ -693,6 +699,10 @@ int rj_arith_v_fract_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t
 // gfx11 (gfx942/gfx950) or gfx12 (gfx1250) math entry point. RCP_IFLAG instead
 // retains the CDNA legacy rule: always quiet NaNs; in Compatibility, signed zero
 // raises INT_DIV0 even with CLAMP, while subnormal inputs do not raise it.
+// gfx942 forms accept ALU_SDWA: arithmetic uses nearest rounding, then output
+// scaling/clamp follows the inherited SDWA policy before separate byte placement.
+// SIN/IFLAG output follows guest MODE rounding/denormal gating; other math output
+// uses nearest rounding and the IEEE gate. SDWA excludes DPP; gfx1250 does not accept it.
 int rj_arith_v_rcp_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
 int rj_arith_v_rcp_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
@@ -757,6 +767,8 @@ int rj_arith_v_cos_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t 
 // Strict empirical modes are unsupported pending validation on these architectures.
 // One VGPR per operand; HIGH_A/HIGH_D select halves, preserving the other destination half.
 // Controls and DPP follow the corresponding gfx11 (gfx942/gfx950) or gfx12 (gfx1250) APIs.
+// gfx942/gfx950 also accept ALU_SDWA to finalize the already-scaled selected half;
+// byte placement is separate, and SDWA cannot be combined with DPP.
 int rj_arith_v_rcp_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
 int rj_arith_v_rcp_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
@@ -812,6 +824,110 @@ int rj_arith_v_cos_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t i
 int rj_arith_v_cos_f16_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *const *d, const uint32_t *const *a,
                                    uint32_t *excp_flag_user);
+// Older-profile integral rounding always quiets NaNs, preserves selected halves,
+// and accepts DX10_CLAMP_OFF. OMOD requires IEEE=0 and output-denormal flushing;
+// its overflow follows guest rounding and FP16_OVFL. Compatibility and fallback
+// semantics reuse the inherited model; strict exact modes are unqualified.
+// FP status is not produced. Source and destination may overlap.
+int rj_arith_v_trunc_f16_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    uint32_t *trapsts);
+
+int rj_arith_v_ceil_f16_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
+
+int rj_arith_v_rndne_f16_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    uint32_t *trapsts);
+
+int rj_arith_v_floor_f16_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    uint32_t *trapsts);
+
+int rj_arith_v_trunc_f16_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    uint32_t *trapsts);
+
+int rj_arith_v_ceil_f16_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
+
+int rj_arith_v_rndne_f16_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    uint32_t *trapsts);
+
+int rj_arith_v_floor_f16_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    uint32_t *trapsts);
+
+// Older-profile FREXP mantissas use the same NaN/OMOD/CLAMP policy as the
+// _gfx908 integral operations above. Input-denormal flushing precedes normalization;
+// signed zeros and infinities are preserved. Strict exact modes are unqualified.
+int rj_arith_v_frexp_mant_f16_w32_gfx908(uint64_t flags, uint32_t exec_mask,
+                                         uint64_t instruction_flags, uint32_t *const *d,
+                                         const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_frexp_mant_f16_w64_gfx908(uint64_t flags, uint64_t exec_mask,
+                                         uint64_t instruction_flags, uint32_t *const *d,
+                                         const uint32_t *const *a, uint32_t *trapsts);
+
+// Older-profile fractional parts round under guest MODE before OMOD/CLAMP.
+// NaNs are quieted, infinities produce negative quiet NaN, integer inputs +0.
+// Compatibility inherits the existing model without new strict qualification.
+int rj_arith_v_fract_f16_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    uint32_t *trapsts);
+int rj_arith_v_fract_f16_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    uint32_t *trapsts);
+
+// Legacy FRACT preserves inherited NaN quieting and guest rounding/denormal/output controls.
+// Compatibility and Loose reuse the existing model; newly inherited strict modes are unqualified.
+// No FP status is produced. ALU_SDWA selects inherited SDWA output rounding.
+int rj_arith_v_fract_f32_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    uint32_t *trapsts);
+
+int rj_arith_v_fract_f32_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    uint32_t *trapsts);
+
+// Legacy mantissa extraction preserves zeros/infinities and always quiets NaNs.
+// Guest output controls apply; newly inherited targets remain unqualified for strict semantics.
+// FP status is not produced. ALU_SDWA shares the ordinary mantissa scaling policy.
+int rj_arith_v_frexp_mant_f32_w32_gfx908(uint64_t flags, uint32_t exec_mask,
+                                         uint64_t instruction_flags, uint32_t *const *d,
+                                         const uint32_t *const *a, uint32_t *trapsts);
+
+int rj_arith_v_frexp_mant_f32_w64_gfx908(uint64_t flags, uint64_t exec_mask,
+                                         uint64_t instruction_flags, uint32_t *const *d,
+                                         const uint32_t *const *a, uint32_t *trapsts);
+
+// Older-target FP32 integral rounding reuses the inherited model: NaNs are
+// quieted regardless of IEEE; OMOD still follows guest IEEE/denormal controls.
+// Compatibility and fallback semantics are supported, without new empirical
+// qualification. Strict exact semantics are rejected; FP status is not produced.
+int rj_arith_v_trunc_f32_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a, uint32_t *state);
+
+int rj_arith_v_ceil_f32_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a, uint32_t *state);
+
+int rj_arith_v_rndne_f32_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a, uint32_t *state);
+
+int rj_arith_v_floor_f32_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a, uint32_t *state);
+
+int rj_arith_v_trunc_f32_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a, uint32_t *state);
+
+int rj_arith_v_ceil_f32_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a, uint32_t *state);
+
+int rj_arith_v_rndne_f32_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a, uint32_t *state);
+
+int rj_arith_v_floor_f32_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a, uint32_t *state);
 
 #ifdef __cplusplus
 } // extern "C"

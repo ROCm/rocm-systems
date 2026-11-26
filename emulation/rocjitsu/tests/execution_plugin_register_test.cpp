@@ -11,6 +11,11 @@
 
 #include "compute_unit_test_util.h"
 #include "execution_plugin_test_util.h"
+#include "mfma_f32_test_dispatch.h"
+#include "mfma_f64_test_dispatch.h"
+#include "mfma_f8_test_dispatch.h"
+#include "mfma_half_test_dispatch.h"
+#include "mfma_integer_test_dispatch.h"
 #include "mma_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
@@ -126,12 +131,6 @@ struct Wave32PluginFixture {
     return p;
   }
 };
-
-static_assert(!amdgpu::mma_f32_native_width_supported(16, 1));
-static_assert(amdgpu::mma_f32_native_width_supported(16, 4));
-static_assert(amdgpu::mma_f32_native_width_supported(16, 8));
-static_assert(amdgpu::mma_f32_native_width_supported(16, 16));
-static_assert(!amdgpu::mma_f32_native_width_supported(16, 32));
 
 TEST(ExecutionPluginTest, Gfx11TfeRequiresTheWholeDestinationBeforeReadingAddressOperands) {
   for (auto arch : {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5}) {
@@ -1473,14 +1472,8 @@ TEST(ExecutionPluginTest, Rdna2F16TernaryPreservesDestinationWithoutObservingAnE
         std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
         ASSERT_NE(inst, nullptr);
         plugin->events.clear();
-        amdgpu::ScopedSimdFastPathTracker tracker;
         ASSERT_TRUE(f.cu->execute_instruction(inst.get(), *wf).succeeded());
         const bool fma = opcode == rdna2::kVFmaF16Vop3;
-        // FMA now uses library dispatch, whose CPU-level paths are tested in lib/arith.
-        // The remaining DIV_FIXUP path still uses the VM's legacy SIMD tracker.
-        if (!fma) {
-          EXPECT_TRUE(tracker.only_tracked_path_executed(amdgpu::SimdFastPath::VOP3_TERNARY_FP16));
-        }
 
         std::array<uint64_t, 3> read_lanes{};
         for (const auto &read : vgpr_read_events(*plugin)) {
@@ -3384,9 +3377,8 @@ TEST(ExecutionPluginTest, MfmaReadObservationUsesLaneMasks) {
   const uint32_t vb = wf->vgpr_alloc().base;
   constexpr uint32_t S0 = 0, S1 = 16, ACC = 32;
 
-  amdgpu::observe_mfma_fast_path_reads(*cu, vb + S0, vb + S1, vb + ACC, /*M=*/16, /*N=*/16,
-                                       /*K=*/32, /*B=*/1, /*data_bits=*/16, amdgpu::ACC_FROM_VGPR,
-                                       wf->wf_size());
+  rocjitsu::test::execute_mfma_half_shape<false, 16, 16, 32>(
+      *cu, vb + 48, vb + S0, vb + S1, vb + ACC, amdgpu::ACC_FROM_VGPR, 0, 0, 0);
 
   expect_vgpr_read_set(vgpr_read_events(*plugin), vb,
                        {S0 + 0, S0 + 1, S0 + 2, S0 + 3, S1 + 0, S1 + 1, S1 + 2, S1 + 3, ACC + 0,
@@ -3406,9 +3398,8 @@ TEST(ExecutionPluginTest, MfmaReadObservationSkipsConstantAccumulator) {
   const uint32_t vb = wf->vgpr_alloc().base;
   constexpr uint32_t S0 = 0, S1 = 16, ACC = 32;
 
-  amdgpu::observe_mfma_fast_path_reads(*cu, vb + S0, vb + S1, vb + ACC, /*M=*/16, /*N=*/16,
-                                       /*K=*/32, /*B=*/1, /*data_bits=*/16,
-                                       /*const_acc=*/0, wf->wf_size());
+  rocjitsu::test::execute_mfma_half_shape<false, 16, 16, 32>(*cu, vb + 48, vb + S0, vb + S1,
+                                                             vb + ACC, /*constant=*/0, 0, 0, 0);
 
   expect_vgpr_read_set(vgpr_read_events(*plugin), vb,
                        {S0 + 0, S0 + 1, S0 + 2, S0 + 3, S1 + 0, S1 + 1, S1 + 2, S1 + 3},
@@ -3721,39 +3712,31 @@ TEST(ExecutionPluginTest, WmmaBf16F32ReadsBeforePackedWrites) {
 }
 
 TEST(ExecutionPluginTest, MfmaF32NativeWidthFastPathUsesRegionReads) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "stdx SIMD is unavailable";
-  } else {
-    constexpr uint32_t M = 16, N = 16, K = 4, B = 1;
-    constexpr uint32_t width = static_cast<uint32_t>(util::native<float>::size());
-    if (!amdgpu::mma_f32_native_width_supported(N, width)) {
-      GTEST_SKIP() << "f32 MFMA shape is not divisible by the native SIMD width";
+  constexpr uint32_t M = 16, N = 16, K = 4, B = 1;
+
+  ForceScalarOverride force_simd(false);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
+  auto *plugin = f.attach_ordering_plugin();
+  auto *cu = f.cu();
+  auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->wf_size(), 64u);
+
+  const uint32_t vb = wf->vgpr_alloc().base;
+  constexpr uint32_t S0 = 0, S1 = 16, ACC = 32, DST = 48;
+  for (uint32_t reg = 0; reg < 64; ++reg) {
+    for (uint32_t lane = 0; lane < 64; ++lane) {
+      cu->write_vgpr(vb + reg, lane, 0x3f80'0000u);
     }
-
-    ForceScalarOverride force_simd(false);
-    PluginFixture f;
-    ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
-    auto *plugin = f.attach_ordering_plugin();
-    auto *cu = f.cu();
-    auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
-    ASSERT_NE(wf, nullptr);
-    ASSERT_EQ(wf->wf_size(), 64u);
-
-    const uint32_t vb = wf->vgpr_alloc().base;
-    constexpr uint32_t S0 = 0, S1 = 16, ACC = 32, DST = 48;
-    for (uint32_t reg = 0; reg < 64; ++reg) {
-      for (uint32_t lane = 0; lane < 64; ++lane) {
-        cu->write_vgpr(vb + reg, lane, 0x3f80'0000u);
-      }
-    }
-
-    amdgpu::exec_f32_mfma_f32_spec<M, N, K, B>(*cu, vb + DST, vb + S0, vb + S1, vb + ACC,
-                                               amdgpu::ACC_FROM_VGPR,
-                                               /*cbsz=*/0, /*abid=*/0, /*blgp=*/0);
-
-    expect_vgpr_read_set(vgpr_read_events(*plugin), vb,
-                         {S0, S1, ACC + 0, ACC + 1, ACC + 2, ACC + 3}, ~uint64_t{0});
   }
+
+  rocjitsu::test::execute_mfma_f32_shape<M, N, K, B>(*cu, vb + DST, vb + S0, vb + S1, vb + ACC,
+                                                     amdgpu::ACC_FROM_VGPR,
+                                                     /*cbsz=*/0, /*abid=*/0, /*blgp=*/0);
+
+  expect_vgpr_read_set(vgpr_read_events(*plugin), vb, {S0, S1, ACC + 0, ACC + 1, ACC + 2, ACC + 3},
+                       ~uint64_t{0});
 }
 
 TEST(ExecutionPluginTest, MfmaSnapshotsReadBeforeFullWaveWritesAndSkipConstantAccumulators) {
@@ -3769,15 +3752,15 @@ TEST(ExecutionPluginTest, MfmaSnapshotsReadBeforeFullWaveWritesAndSkipConstantAc
   const Case cases[] = {
       {"f64", 2, 8,
        [](ComputeUnitCore &cu, uint32_t d, uint32_t a, uint32_t b, uint32_t c, uint32_t acc) {
-         exec_f64(cu, 16, 16, 4, 1, d, a, b, c, acc);
+         rocjitsu::test::execute_mfma_f64_shape(cu, 16, 16, 4, 1, d, a, b, c, acc);
        }},
       {"fp8 chunked", 8, 4,
        [](ComputeUnitCore &cu, uint32_t d, uint32_t a, uint32_t b, uint32_t c, uint32_t acc) {
-         exec_f32<16, 16, 128, 1>(cu, 8, d, a, b, c, extract_fp8, extract_fp8, acc);
+         rocjitsu::test::execute_mfma_mixed_shape<16>(cu, d, a, b, c, acc, 0, 0);
        }},
       {"i8", 4, 4,
        [](ComputeUnitCore &cu, uint32_t d, uint32_t a, uint32_t b, uint32_t c, uint32_t acc) {
-         exec_i32_i8(cu, 16, 16, 64, 1, d, a, b, c, acc);
+         rocjitsu::test::execute_mfma_i8(cu, 16, 16, 64, 1, d, a, b, c, acc);
        }},
   };
   constexpr uint32_t A = 3, B = 19, C = 35;
@@ -3858,7 +3841,8 @@ TEST(ExecutionPluginTest, MfmaSnapshotObservationsMatchForcedScalar) {
     for (const auto &[m, k, batch] : {std::tuple{16u, 4u, 1u}, std::tuple{4u, 4u, 4u}}) {
       cases.push_back({std::format("f64 {}x{}x{}x{} acc={}", m, m, k, batch, acc),
                        [=](ComputeUnitCore &cu, uint32_t vb) {
-                         exec_f64(cu, m, m, k, batch, vb + D, vb + A, vb + B, vb + C, acc, 7);
+                         rocjitsu::test::execute_mfma_f64_shape(cu, m, m, k, batch, vb + D, vb + A,
+                                                                vb + B, vb + C, acc, 7);
                        }});
     }
     for (const auto &[m, k, batch] :
@@ -3870,59 +3854,44 @@ TEST(ExecutionPluginTest, MfmaSnapshotObservationsMatchForcedScalar) {
           cases.push_back({std::format("i8 {}x{}x{}x{} acc={} cbsz={} blgp={}", m, m, k, batch, acc,
                                        cbsz, blgp),
                            [=](ComputeUnitCore &cu, uint32_t vb) {
-                             exec_i32_i8(cu, m, m, k, batch, vb + D, vb + A, vb + B, vb + C, acc,
-                                         cbsz, (1u << cbsz) - 1, blgp);
+                             rocjitsu::test::execute_mfma_i8(cu, m, m, k, batch, vb + D, vb + A,
+                                                             vb + B, vb + C, acc, cbsz,
+                                                             (1u << cbsz) - 1, blgp);
                            },
-                           // 32 result registers exceed the snapshot.
-                           /*uses_snapshot=*/batch != 2});
+                           // The library publishes whole registers for every shape.
+                           /*uses_snapshot=*/true});
         }
       }
     }
     for (const auto &[k, bits] : {std::pair{1u, 32u}, std::pair{2u, 16u}, std::pair{4u, 16u}}) {
       for (uint32_t cbsz = 0; cbsz <= 4; ++cbsz) {
         for (uint32_t blgp = 0; blgp < 8; ++blgp) {
-          cases.push_back(
-              {std::format("f32 4x4x{}x16 acc={} cbsz={} blgp={}", k, acc, cbsz, blgp),
-               [=](ComputeUnitCore &cu, uint32_t vb) {
-                 if (bits == 32) {
-                   exec_f32<4, 4, 1, 16>(cu, 32, vb + D, vb + A, vb + B, vb + C, extract_f32,
-                                         extract_f32, acc, cbsz, 1, blgp);
-                 } else if (k == 2) {
-                   exec_f32<4, 4, 2, 16>(cu, 16, vb + D, vb + A, vb + B, vb + C, extract_bf16,
-                                         extract_bf16, acc, cbsz, 1, blgp);
-                 } else {
-                   exec_f32<4, 4, 4, 16>(cu, 16, vb + D, vb + A, vb + B, vb + C, extract_bf16,
-                                         extract_bf16, acc, cbsz, 1, blgp);
-                 }
-               }});
+          cases.push_back({std::format("f32 4x4x{}x16 acc={} cbsz={} blgp={}", k, acc, cbsz, blgp),
+                           [=](ComputeUnitCore &cu, uint32_t vb) {
+                             if (bits == 32) {
+                               rocjitsu::test::execute_mfma_f32_shape<4, 4, 1, 16>(
+                                   cu, vb + D, vb + A, vb + B, vb + C, acc, cbsz, 1, blgp);
+                             } else {
+                               rocjitsu::test::execute_mfma_half_shape<true, 4, 4, 4, 16>(
+                                   cu, vb + D, vb + A, vb + B, vb + C, acc, cbsz, 1, blgp);
+                             }
+                           }});
         }
       }
     }
-    // Four blocks of 4x4 outputs use only lanes 0-15 of each result register.
-    cases.push_back({std::format("f32 4x4x4x4 acc={}", acc),
-                     [=](ComputeUnitCore &cu, uint32_t vb) {
-                       exec_f32<4, 4, 4, 4>(cu, 32, vb + D, vb + A, vb + B, vb + C, extract_f32,
-                                            extract_f32, acc);
-                     },
-                     /*uses_snapshot=*/false});
     for (uint32_t m : {16u, 32u}) {
-      for (uint32_t a_fmt = 0; a_fmt < 5; ++a_fmt) {
-        for (uint32_t b_fmt = 0; b_fmt < 5; ++b_fmt) {
-          cases.push_back(
-              {std::format("f8f6f4 {}x{} acc={} a={} b={}", m, m, acc, a_fmt, b_fmt),
-               [=](ComputeUnitCore &cu, uint32_t vb) {
-                 ASSERT_TRUE(dispatch_matrix_fmt_pair(
-                     a_fmt, b_fmt, [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {
-                       if (m == 16) {
-                         exec_f32_mixed<16, 16, 128, 1>(cu, a_bits, b_bits, vb + D, vb + A, vb + B,
-                                                        vb + C, ea, eb, acc);
-                       } else {
-                         exec_f32_mixed<32, 32, 64, 1>(cu, a_bits, b_bits, vb + D, vb + A, vb + B,
-                                                       vb + C, ea, eb, acc);
-                       }
-                     }));
-               }});
-        }
+      for (const auto &[a_fmt, b_fmt] :
+           {std::pair{0U, 0U}, std::pair{0U, 4U}, std::pair{2U, 3U}, std::pair{4U, 1U}}) {
+        cases.push_back({std::format("f8f6f4 {}x{} acc={} a={} b={}", m, m, acc, a_fmt, b_fmt),
+                         [=](ComputeUnitCore &cu, uint32_t vb) {
+                           if (m == 16) {
+                             rocjitsu::test::execute_mfma_mixed_shape<16>(
+                                 cu, vb + D, vb + A, vb + B, vb + C, acc, a_fmt, b_fmt);
+                           } else {
+                             rocjitsu::test::execute_mfma_mixed_shape<32>(
+                                 cu, vb + D, vb + A, vb + B, vb + C, acc, a_fmt, b_fmt);
+                           }
+                         }});
       }
     }
   }

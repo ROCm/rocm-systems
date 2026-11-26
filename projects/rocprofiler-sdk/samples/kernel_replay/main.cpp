@@ -42,6 +42,15 @@ nudge(int* x)
 int
 main()
 {
+    // KR_REPLAYS: how many times the replayed kernel is dispatched (default 1)
+    const char* replays_env = std::getenv("KR_REPLAYS");
+    const int   replays     = replays_env != nullptr ? std::atoi(replays_env) : 1;
+    if(replays < 1)
+    {
+        fprintf(stderr, "[app] FAIL: KR_REPLAYS=%s is not a positive count\n", replays_env);
+        return EXIT_FAILURE;
+    }
+
     // Workaround for MI325: ensure device ready before allocations
     HIP_CHECK(hipSetDevice(0));
     HIP_CHECK(hipDeviceSynchronize());
@@ -57,8 +66,11 @@ main()
     HIP_CHECK(hipMemset(opted, 0, sizeof(int)));
     HIP_CHECK(hipDeviceSynchronize());
 
-    bump<<<1, kReplayBlock>>>(replayed);
-    HIP_CHECK(hipGetLastError());
+    for(int i = 0; i < replays; ++i)
+    {
+        bump<<<1, kReplayBlock>>>(replayed);
+        HIP_CHECK(hipGetLastError());
+    }
     nudge<<<1, kOptOutBlock>>>(opted);
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
@@ -72,12 +84,13 @@ main()
     HIP_CHECK(hipFree(opted));
 
     printf("[app] replayed_bump=%d opted_nudge=%d\n", replayed_h, opted_h);
-    if(replayed_h != 1)
+    if(replayed_h != replays)
     {
         fprintf(stderr,
-                "[app] FAIL: replayed_bump=%d (expected 1; snapshot/restore did not isolate "
+                "[app] FAIL: replayed_bump=%d (expected %d; snapshot/restore did not isolate "
                 "passes)\n",
-                replayed_h);
+                replayed_h,
+                replays);
         return EXIT_FAILURE;
     }
     if(opted_h != 1)

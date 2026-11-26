@@ -3,6 +3,10 @@
 
 // Tests for rounding to integral values and rounding-related FP status.
 
+#include "common/cpu.h"
+#include "common/semantics.h"
+#include "common/wave.h"
+#include "math/older_half_unary_test.h"
 #include "math/unary_test.h"
 #include "rj_arith/detail/rj_arith_fp.h"
 #include "rj_arith/detail/rj_arith_math.h"
@@ -363,4 +367,84 @@ TEST(MathFloorF32W32Gfx942, Arithmetic) {
 // Share the arithmetic contract while checking the CDNA NaN-policy difference.
 TEST(MathFloorF32W64Gfx942, Arithmetic) {
   rocjitsu::arith::test::check_cdna_integral_unary<64, false>(rj_arith_v_floor_f32_w64_gfx942, 3);
+}
+
+TEST(MathIntegralF32Legacy, Arithmetic) {
+  using Function32 =
+      int (*)(uint64_t, uint32_t, uint64_t, uint32_t *const *, const uint32_t *const *, uint32_t *);
+  using Function64 =
+      int (*)(uint64_t, uint64_t, uint64_t, uint32_t *const *, const uint32_t *const *, uint32_t *);
+  const Function32 wave32[] = {rj_arith_v_trunc_f32_w32_gfx908, rj_arith_v_ceil_f32_w32_gfx908,
+                               rj_arith_v_rndne_f32_w32_gfx908, rj_arith_v_floor_f32_w32_gfx908};
+  const Function64 wave64[] = {rj_arith_v_trunc_f32_w64_gfx908, rj_arith_v_ceil_f32_w64_gfx908,
+                               rj_arith_v_rndne_f32_w64_gfx908, rj_arith_v_floor_f32_w64_gfx908};
+  // The inherited model agrees with fixed-direction rounding and always quiets NaNs.
+  const uint32_t source[] = {0x3fc00000, 0xbfc00000, 0x40200000, 0xc0200000,
+                             1,          0x80000001, 0x7f812345, 0xff812345};
+  const uint32_t expected[][8] = {
+      {0x3f800000, 0xbf800000, 0x40000000, 0xc0000000, 0, 0x80000000, 0x7fc12345, 0xffc12345},
+      {0x40000000, 0xbf800000, 0x40400000, 0xc0000000, 0x3f800000, 0x80000000, 0x7fc12345,
+       0xffc12345},
+      {0x40000000, 0xc0000000, 0x40000000, 0xc0000000, 0, 0x80000000, 0x7fc12345, 0xffc12345},
+      {0x3f800000, 0xc0000000, 0x40000000, 0xc0400000, 0, 0xbf800000, 0x7fc12345, 0xffc12345}};
+  for (uint64_t cpu : rocjitsu::arith::test::supported_cpu_levels()) {
+    for (int lanes : {32, 64}) {
+      for (int op = 0; op < 4; ++op) {
+        for (uint64_t semantics : rocjitsu::arith::test::semantics_modes()) {
+          SCOPED_TRACE(::testing::Message()
+                       << cpu << ':' << lanes << ':' << op << ':' << semantics);
+          uint32_t input[64], output[64];
+          for (int lane = 0; lane < lanes; ++lane) {
+            input[lane] = source[lane % 8];
+            output[lane] = 0xdeadbeef;
+          }
+          const uint32_t *a = input;
+          uint32_t *d = output, status = 0x100;
+          const uint64_t exec_mask = (lanes == 64 ? ~0ULL : 0xffffffffULL) & 0x80000003fffffffeULL;
+          const int error =
+              lanes == 32 ? wave32[op](cpu | semantics, uint32_t(exec_mask), 0, &d, &a, &status)
+                          : wave64[op](cpu | semantics, exec_mask, 0, &d, &a, &status);
+          const bool strict = semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+                              semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL;
+          ASSERT_EQ(error, strict ? RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS : RJ_ARITH_SUCCESS);
+          EXPECT_EQ(status, 0x100U);
+          for (int lane = 0; lane < lanes; ++lane) {
+            const bool written = !strict && (exec_mask >> lane & 1);
+            if (semantics == RJ_ARITH_SEMANTICS_LOOSE && written) {
+              rocjitsu::arith::test::expect_f32(
+                  output[lane], std::bit_cast<float>(expected[op][lane % 8]), semantics,
+                  /*atol=*/1e-6, /*rtol=*/1e-6);
+            } else {
+              EXPECT_EQ(output[lane], written ? expected[op][lane % 8] : 0xdeadbeefU) << lane;
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(MathRoundF32, DirectedOmodOverflow) {
+  using namespace rocjitsu::arith::test;
+  for (uint64_t semantics :
+       {RJ_ARITH_SEMANTICS_LOOSE, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS}) {
+    for (auto call : {rj_arith_v_trunc_f32_w32_gfx12, rj_arith_v_ceil_f32_w32_gfx12,
+                      rj_arith_v_rndne_f32_w32_gfx12, rj_arith_v_floor_f32_w32_gfx12}) {
+      for (uint64_t cpu : supported_cpu_levels()) {
+        for (uint64_t rounding = 0; rounding < 4; ++rounding) {
+          for (uint64_t mode : {RJ_ARITH_ALU_OMOD_2, RJ_ARITH_ALU_OMOD_4}) {
+            Registers<2, 32> values{};
+            values.v[0][0] = 0x7f7fffffU;
+            values.v[0][1] = 0xff7fffffU;
+            const uint64_t flags = cpu | semantics | (rounding << 24);
+            ASSERT_EQ(call(flags, 3, mode, values.v + 1, values.v, nullptr), RJ_ARITH_SUCCESS);
+            EXPECT_EQ(values.v[1][0], rounding == 0 || rounding == 1 ? 0x7f800000U : 0x7f7fffffU)
+                << cpu << ':' << rounding << ':' << mode;
+            EXPECT_EQ(values.v[1][1], rounding == 0 || rounding == 2 ? 0xff800000U : 0xff7fffffU)
+                << cpu << ':' << rounding << ':' << mode;
+          }
+        }
+      }
+    }
+  }
 }

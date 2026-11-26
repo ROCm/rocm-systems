@@ -98,6 +98,7 @@ jobs:
           docker buildx build \
             -f "${GITHUB_WORKSPACE}/projects/hipfile/util/docker/DOCKERFILE.${AIS_CI_IMAGE_NAME}" \
             --target base \
+            --provenance=false \
             --build-arg ROCM_VERSION=${{ matrix.rocm_versions }} \
             --cache-to=type=registry,ref="${{ steps.ci-image.outputs.AIS_CI_IMAGE }}-cache" \
             ${{ steps.use-cache.outputs.CACHE_FROM_CMD }} \

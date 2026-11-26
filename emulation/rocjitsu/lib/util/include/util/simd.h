@@ -139,22 +139,6 @@ template <class Simd>
   }
 }
 
-/// Expand the low native<uint32_t>::size() bits into 0/1 uint32_t lanes. This
-/// is the numeric form needed by carry-in arithmetic; selection paths should
-/// use simd_mask_from_bits directly. AVX-512 materializes the lanes with a
-/// k-mask zero-masked broadcast; narrower targets use vector bit tests.
-[[gnu::always_inline]] inline native<uint32_t> simd_u32_lanes_from_bits(uint64_t bits) {
-  using U = native<uint32_t>;
-  static_assert(U::size() <= 32);
-#if RJ_HOST_HAS_AVX512F
-  static_assert(U::size() == 16);
-  return std::bit_cast<U>(_mm512_maskz_set1_epi32(static_cast<__mmask16>(bits), 1));
-#else
-  const U lane_bits([](auto i) { return uint32_t{1} << i; });
-  const U lane_indices([](auto i) { return static_cast<uint32_t>(i); });
-  return (U(static_cast<uint32_t>(bits)) & lane_bits) >> lane_indices;
-#endif
-}
 #else
 // Fallback definitions so `if constexpr (has_stdx_simd)` discarded
 // branches compile out even in non-template callers (e.g. gtest TEST
@@ -170,7 +154,6 @@ template <class T> native<T> load(const uint32_t *) { return {}; }
 template <class T> native<T> broadcast(uint32_t) { return {}; }
 template <class Mask> uint64_t simd_mask_to_bits(const Mask &) { return 0; }
 template <class Simd> bool simd_mask_from_bits(uint64_t) { return false; }
-inline native<uint32_t> simd_u32_lanes_from_bits(uint64_t) { return {}; }
 inline native<float> native_fma(native<float>, native<float>, native<float>) { return {}; }
 template <class T> void masked_store(uint32_t *, native<T>, uint64_t) {}
 template <class T> void blit_to_buffer(uint32_t (&)[native<T>::size()], native<T>) {}
@@ -504,24 +487,6 @@ inline native<double> ordered_clamp_f64_simd(native<double> v, double lo, double
   return result;
 }
 
-inline native<double> sqrt_f64_simd(native<double> a) {
-  native<double> r = stdx::sqrt(a);
-  constexpr std::size_t W = native<double>::size();
-  alignas(64) double in[W];
-  alignas(64) double out[W];
-  a.copy_to(in, stdx::element_aligned);
-  r.copy_to(out, stdx::element_aligned);
-  for (std::size_t i = 0; i < W; ++i) {
-    if (std::isnan(in[i])) {
-      out[i] = in[i];
-    } else if (in[i] < 0.0) {
-      out[i] = std::numeric_limits<double>::quiet_NaN();
-    }
-  }
-  r.copy_from(out, stdx::element_aligned);
-  return r;
-}
-
 /// Vectorized, bit-exact port of `f16_to_f32` (util/data_types.h). Each lane's
 /// low 16 bits hold the f16; high bits are ignored. All branch selection is
 /// done with `where`-masks in the uint32 domain. Bit-identical to the scalar
@@ -842,32 +807,6 @@ inline double ceil_scalar(double a) { return quiet_snan_scalar(a, std::ceil(a));
 inline float trunc_scalar(float a) { return quiet_snan_scalar(a, std::trunc(a)); }
 inline double trunc_scalar(double a) { return quiet_snan_scalar(a, std::trunc(a)); }
 
-/// Native-width adapters for the shared integer transcendental mappings.
-inline native<float> rcp_f32_simd(native<float> a, bool quiet_snan = true) {
-  return map_native_convert_scalar<float, float>(
-      a, [quiet_snan](float value) { return amdgpu_rcp_f32(value, quiet_snan); });
-}
-
-inline native<float> rsq_f32_simd(native<float> a, bool quiet_snan = true) {
-  return map_native_convert_scalar<float, float>(
-      a, [quiet_snan](float value) { return amdgpu_rsq_f32(value, quiet_snan); });
-}
-
-inline native<float> sqrt_f32_simd(native<float> a, bool quiet_snan = true) {
-  return map_native_convert_scalar<float, float>(
-      a, [quiet_snan](float value) { return amdgpu_sqrt_f32(value, quiet_snan); });
-}
-
-inline native<float> log_f32_simd(native<float> a, bool quiet_snan = true) {
-  return map_native_convert_scalar<float, float>(
-      a, [quiet_snan](float value) { return amdgpu_log_f32(value, quiet_snan); });
-}
-
-inline native<float> exp_f32_simd(native<float> a, bool quiet_snan = true) {
-  return map_native_convert_scalar<float, float>(
-      a, [quiet_snan](float value) { return amdgpu_exp_f32(value, quiet_snan); });
-}
-
 /// @brief Widen unsigned E5M3 scale values from the low byte of each lane.
 inline native<float> fp8_e5m3_to_f32_simd(native<uint32_t> value) {
   using U = native<uint32_t>;
@@ -1011,37 +950,9 @@ inline native<float> round_to_nearest_even_simd(native<float> value) {
   return lower;
 }
 
-/// Round a normalized value scaled by 32767 or 65535 to the nearest integer,
-/// with ties to even. Clamp inputs to [minimum, 1] and convert NaNs to zero.
-/// An FP32 product can round onto an integer midpoint. The FMA residual
-/// distinguishes these false ties so the conversion rounds only once.
-inline native<float> round_normalized_simd(native<float> f, float scale, float minimum) {
-  using F = native<float>;
-  stdx::where(f < F(minimum), f) = F(minimum);
-  stdx::where(f > F(1.0f), f) = F(1.0f);
-  stdx::where(stdx::isnan(f), f) = F(0.0f);
-  const F product = f * F(scale);
-  const F residual = stdx::fma(f, F(scale), -product);
-  const F lower = stdx::floor(product);
-  const auto midpoint = product == lower + F(0.5f);
-  F rounded = rndne_simd(product);
-  stdx::where(midpoint && (residual < F(0.0f)), rounded) = lower;
-  stdx::where(midpoint && (residual > F(0.0f)), rounded) = lower + F(1.0f);
-  return rounded;
-}
-
-/// Convert to signed normalized integers in [-32767, 32767]; NaNs become zero.
-inline native<int32_t> cvt_pknorm_i16_f32_simd(native<float> f) {
-  return stdx::static_simd_cast<native<int32_t>>(round_normalized_simd(f, 32767.0f, -1.0f));
-}
-/// Convert to unsigned normalized integers in [0, 65535]; NaNs become zero.
-inline native<uint32_t> cvt_pknorm_u16_f32_simd(native<float> f) {
-  return stdx::static_simd_cast<native<uint32_t>>(round_normalized_simd(f, 65535.0f, 0.0f));
-}
-
 /// Vector port of the f32 `std::frexp` mantissa over raw float bits. Returns the
-/// significand m with |m| in [0.5, 1) such that input = m * 2^e (e via
-/// frexp_exp_f32_simd). Normal lanes force the exponent field to 126 and keep
+/// significand m with |m| in [0.5, 1) such that input = m * 2^e.
+/// Normal lanes force the exponent field to 126 and keep
 /// the mantissa; ±0 / Inf / NaN pass through unchanged (matching glibc frexp,
 /// which the scalar body calls unguarded); denormals are renormalized via the
 /// highest-set-bit index p = floor(log2(M)) (M < 2^24, so the int->float cast is
@@ -1089,92 +1000,6 @@ inline native<uint32_t> frexp_exp_f32_simd(native<uint32_t> v) {
   return out;
 }
 
-/// 64-bit-lane port of the f64 `std::frexp` mantissa over native<double>. Same
-/// structure as frexp_mant_f32_simd at f64 widths (11 exp bits bias 1023, 52
-/// mantissa bits): normal lanes force the exponent field to 1022; denormals
-/// renormalize via p = floor(log2(M)) read from double(M)'s exponent (M < 2^53,
-/// exact); ±0 / Inf pass through; NaN is quieted (mantissa MSB set). Bit-identical
-/// to the scalar v_frexp_mant_f64 body.
-inline native<double> frexp_mant_f64_simd(native<double> x) {
-  using U = native<uint64_t>;
-  U v = std::bit_cast<U>(x);
-#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
-  U out = map_native64_scalar<uint64_t>(v, [](uint64_t bits) -> uint64_t {
-    constexpr uint64_t kSign = 0x8000000000000000ull;
-    constexpr uint64_t kMant = 0x000FFFFFFFFFFFFFull;
-    constexpr uint64_t kQuiet = 0x0008000000000000ull;
-    uint64_t sign = bits & kSign;
-    uint64_t E = (bits >> 52) & 0x7FFull;
-    uint64_t M = bits & kMant;
-    if (E == 0ull) {
-      if (M == 0ull) {
-        return bits;
-      }
-      uint64_t p = 63u - static_cast<uint64_t>(std::countl_zero(M));
-      return sign | (1022ull << 52) | ((M << (52ull - p)) & kMant);
-    }
-    if (E == 2047ull) {
-      return M == 0ull ? bits : bits | kQuiet;
-    }
-    return sign | (1022ull << 52) | M;
-  });
-  return std::bit_cast<native<double>>(out);
-#else
-  U sign = v & U(0x8000000000000000ull);
-  U E = (v >> 52) & U(0x7FFull);
-  U M = v & U(0xFFFFFFFFFFFFFull); // 52 mantissa bits
-  U normal = sign | (U(1022ull) << 52) | M;
-  const native<double> mf = stdx::static_simd_cast<native<double>>(M);
-  const U p = (std::bit_cast<U>(mf) >> 52) - U(1023ull);
-  U dn = sign | (U(1022ull) << 52) | ((M << (U(52ull) - p)) & U(0xFFFFFFFFFFFFFull));
-  U out = normal;
-  stdx::where(E == 0ull, out) = v;                   // ±0 (M==0); overwritten if denormal
-  stdx::where((E == 0ull) && (M != 0ull), out) = dn; // denormal -> renormalized
-  stdx::where(E == 2047ull, out) = v;                // Inf passes through unchanged
-  stdx::where((E == 2047ull) && (M != 0ull), out) = v | U(0x0008000000000000ull); // quiet NaN
-  return std::bit_cast<native<double>>(out);
-#endif
-}
-
-/// 64-bit-lane port of the f64 `std::frexp` exponent. Returns each int32 result
-/// in the low 32 bits of a native<uint64_t> lane (sign-extended), so the CVT
-/// f64->b32 glue narrows it with one static_simd_cast. Normal lanes give
-/// E - 1022; denormals p - 1073; ±0 / Inf / NaN give 0 (the scalar guards
-/// frexp to finite non-zero inputs). Bit-identical to v_frexp_exp_i32_f64.
-inline native<uint64_t> frexp_exp_f64_simd(native<double> x) {
-  using U = native<uint64_t>;
-  U v = std::bit_cast<U>(x);
-#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
-  return map_native64_scalar<uint64_t>(v, [](uint64_t bits) -> uint64_t {
-    uint64_t E = (bits >> 52) & 0x7FFull;
-    uint64_t M = bits & 0x000FFFFFFFFFFFFFull;
-    if (E == 0ull) {
-      if (M == 0ull) {
-        return 0ull;
-      }
-      uint64_t p = 63u - static_cast<uint64_t>(std::countl_zero(M));
-      return static_cast<uint64_t>(static_cast<int64_t>(p) - 1073);
-    }
-    if (E == 2047ull) {
-      return 0ull;
-    }
-    return static_cast<uint64_t>(static_cast<int64_t>(E) - 1022);
-  });
-#else
-  U E = (v >> 52) & U(0x7FFull);
-  U M = v & U(0xFFFFFFFFFFFFFull);
-  U normal = E - U(1022ull);
-  const native<double> mf = stdx::static_simd_cast<native<double>>(M);
-  const U p = (std::bit_cast<U>(mf) >> 52) - U(1023ull);
-  U dn = p - U(1073ull);
-  U out = normal;
-  stdx::where(E == 0ull, out) = U(0ull);
-  stdx::where((E == 0ull) && (M != 0ull), out) = dn;
-  stdx::where(E == 2047ull, out) = U(0ull);
-  return out;
-#endif
-}
-
 #endif // RJ_HOST_HAS_STDX_SIMD
 
 #if !RJ_HOST_HAS_STDX_SIMD
@@ -1188,6 +1013,7 @@ inline native<double> trunc_simd(native<double>) { return {}; }
 inline native<double> ceil_simd(native<double>) { return {}; }
 inline native<double> floor_simd(native<double>) { return {}; }
 inline native<double> rndne_simd(native<double>) { return {}; }
+
 #endif
 
 } // namespace util

@@ -41,8 +41,6 @@ class FcollectWaveTester : public Tester {
   explicit FcollectWaveTester(TesterArguments args);
   virtual ~FcollectWaveTester();
 
-  std::string typeName() const override { return type_name<T1>(); }
-
  protected:
   virtual void resetBuffers(size_t size) override;
 

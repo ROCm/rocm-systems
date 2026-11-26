@@ -10,6 +10,7 @@
 #define RCCL_TEST_HOST_SYM_KERNELS_FAKES_H_
 
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 
 #include "nccl.h"
@@ -29,10 +30,11 @@ extern std::function<bool(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, siz
 extern std::function<bool(int)> g_symkKernelIdIsLL;
 extern std::function<bool(int)> g_symkKernelIdIsTma;
 extern std::function<ncclResult_t(struct ncclComm*)> g_symkFinalize;
-// Whether the hierarchical AllGather can run; defaults to false, so init skips its cross-rank sizing check.
-extern std::function<bool(struct ncclComm*)> g_symkAgHierAvailable;
-// Packages of the hierarchical AllGather; defaults to 0, so the hierarchical symk window is off.
-extern std::function<int(struct ncclComm*)> g_symkAgHierGroups;
+// Whether the hierarchical kernels can run; defaults to false, so init skips its cross-rank sizing check.
+extern std::function<bool(struct ncclComm*)> g_symkHierAvailable;
+// Packages of the hierarchical kernels; defaults to 0, so the hierarchical symk window is off.
+extern std::function<int(struct ncclComm*)> g_symkHierGroups;
+extern std::function<uint32_t(struct ncclComm*, size_t)> g_symkRsHierLaunchChunkSize;
 extern std::function<bool(struct ncclComm*)> g_symkAlltoAllLLForced;
 
 // The ncclSymk* index seams (kernel masks, ncclSymkGetKernelIndex, ncclSymkKernelIdToString,

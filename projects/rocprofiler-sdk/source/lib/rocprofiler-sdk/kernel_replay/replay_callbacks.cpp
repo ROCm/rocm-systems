@@ -37,6 +37,7 @@
 #include <rocprofiler-sdk/experimental/kernel_replay.h>
 
 #include <atomic>
+#include <cstddef>
 #include <type_traits>
 
 namespace rocprofiler
@@ -77,6 +78,11 @@ context_has_kernel_replay(const tracing::context_t* ctx)
             ctx->callback_tracer->domains(ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY,
                                           ROCPROFILER_KERNEL_REPLAY_CONFIG));
 }
+
+constexpr auto device_flag   = uint64_t{ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_DEVICE};
+constexpr auto pinned_flag   = uint64_t{ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_HOST_PINNED};
+constexpr auto pageable_flag = uint64_t{ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_HOST_PAGEABLE};
+constexpr auto disk_flag     = uint64_t{ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_DISK};
 }  // namespace
 
 void
@@ -190,6 +196,30 @@ make_dispatch_info(const hsa::Queue&              queue,
     return info;
 }
 
+const char*
+options_rejection(const rocprofiler_kernel_replay_options_t* options)
+{
+    if(options == nullptr) return nullptr;
+
+    constexpr auto known_flags = device_flag | pinned_flag | pageable_flag | disk_flag;
+    if((options->flags & ~known_flags) != 0) return "it has an unknown flag";
+    if((options->flags & (pageable_flag | disk_flag)) != 0)
+        return "this SDK cannot keep a snapshot in pageable host memory or on disk yet";
+    return nullptr;
+}
+
+std::optional<memory_snapshot::capture_mode>
+capture_mode_for(const rocprofiler_kernel_replay_options_t* options)
+{
+    using memory_snapshot::capture_mode;
+    if(options_rejection(options) != nullptr) return std::nullopt;
+    if(options == nullptr) return capture_mode::automatic;
+    if(options->flags == device_flag) return capture_mode::force_gpu;
+    if(options->flags == pinned_flag) return capture_mode::force_pinned;
+    if(options->flags == (device_flag | pinned_flag)) return capture_mode::gpu_then_pinned;
+    return capture_mode::automatic;
+}
+
 replay_plan_t
 execute_config_phase_enter(const hsa::Queue&              queue,
                            const hsa::rocprofiler_packet& pkt,
@@ -215,6 +245,8 @@ execute_config_phase_enter(const hsa::Queue&              queue,
     plan.config_data =
         common::init_public_api_struct(rocprofiler_callback_tracing_kernel_replay_data_t{});
     plan.config_data.dispatch_info = make_dispatch_info(queue, pkt, dispatch_id);
+    common::init_public_api_struct(plan.options);
+    plan.config_data.replay_options = &plan.options;
 
     tracing::execute_phase_enter_callbacks(config_contexts,
                                            thr_id,
@@ -224,6 +256,12 @@ execute_config_phase_enter(const hsa::Queue&              queue,
                                            ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY,
                                            ROCPROFILER_KERNEL_REPLAY_CONFIG,
                                            plan.config_data);
+
+    // The plan is returned by value, so no record may keep a pointer into it.
+    if(plan.config_data.replay_options != &plan.options)
+        LOG_FIRST_N(WARNING, 1) << "kernel replay: the tool replaced replay_options instead of "
+                                   "changing the options it points to; the replacement is ignored";
+    plan.config_data.replay_options = nullptr;
 
     // We expect only one context for kernel replay
     ROCP_FATAL_IF(config_contexts.size() > 1) << fmt::format(
@@ -253,6 +291,22 @@ execute_config_phase_enter(const hsa::Queue&              queue,
 
     plan.indefinite       = (plan.total_passes == 0);
     plan.replay_requested = plan.indefinite || plan.total_passes > 1;
+
+    if(plan.replay_requested)
+    {
+        if(const auto mode = capture_mode_for(&plan.options))
+        {
+            plan.snapshot_mode = *mode;
+        }
+        else
+        {
+            LOG_FIRST_N(WARNING, 1)
+                << "kernel replay: cannot honor replay_options, because "
+                << options_rejection(&plan.options) << "; dispatch will not be replayed";
+            plan.replay_requested = false;
+        }
+    }
+
     if(!plan.replay_requested)
         execute_config_phase_exit(plan, thr_id, internal_corr_id, ancestor_corr_id);
 

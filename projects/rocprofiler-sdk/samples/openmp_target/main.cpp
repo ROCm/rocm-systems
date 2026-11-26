@@ -25,7 +25,13 @@
 #include <rocprofiler-sdk-roctx/roctx.h>
 
 #include <math.h>
+#include <stdint.h>
 #include <stdio.h>
+
+// Defined by the client library, which is preloaded rather than linked; the symbol is
+// null when that library is absent.
+extern "C" uint64_t
+openmp_target_sample_ompt_count(void) __attribute__((weak));
 
 constexpr float  EPS_FLOAT  = 1.0e-7f;
 constexpr double EPS_DOUBLE = 1.0e-15;
@@ -142,20 +148,29 @@ main()
             }
         }
     }
-    if(N_errors == 0)
-    {
-        printf("Success\n");
-        return 0;
-    }
-    else
+    roctxRangeStop(range_id);
+
+    if(N_errors > 0)
     {
         printf("Total %d failures\n", N_errors);
         printf("Fail\n");
         return 1;
     }
 
-    roctxRangeStop(range_id);
+    if(openmp_target_sample_ompt_count == nullptr)
+    {
+        printf("Fail: the client tool was not loaded, so no OMPT records were collected\n");
+        return 1;
+    }
 
-    // client::stop();
-    // client::shutdown();
+    uint64_t ompt_count = openmp_target_sample_ompt_count();
+    if(ompt_count == 0)
+    {
+        printf("Fail: the client tool collected no OMPT records\n");
+        return 1;
+    }
+
+    printf("Collected %lu OMPT records\n", static_cast<unsigned long>(ompt_count));
+    printf("Success\n");
+    return 0;
 }

@@ -11,7 +11,6 @@
 
 namespace rocjitsu {
 namespace {
-
 class LineKey {
 public:
   uint64_t backing_id;
@@ -106,29 +105,26 @@ CanonicalLineFreshness::ReadStamp::try_acquire_fill(uint64_t backing_id, uint64_
   if (!state_ || !covers(backing_id, offset, size)) {
     return {};
   }
-  try {
-    std::shared_lock lock(state_->mutex, std::try_to_lock);
-    if (!lock.owns_lock() || state_->disabled || state_->epoch != snapshot_->epoch) {
-      return {};
-    }
-    const uint64_t first = offset & ~(kLineSize - 1);
-    const uint64_t last = (offset + size - 1) & ~(kLineSize - 1);
-    const size_t begin = static_cast<size_t>((first - snapshot_->first_line) / kLineSize);
-    const size_t end = static_cast<size_t>((last - snapshot_->first_line) / kLineSize);
-    if (end >= snapshot_->versions.size()) {
-      return {};
-    }
-    for (size_t i = begin; i <= end; ++i) {
-      const LineKey key{backing_id, snapshot_->first_line + i * kLineSize};
-      const auto found = state_->versions.find(key);
-      if (found == state_->versions.end() || found->second != snapshot_->versions[i]) {
-        return {};
-      }
-    }
-    return FillAuthority(state_, std::move(lock));
-  } catch (...) {
+
+  std::shared_lock lock(state_->mutex, std::try_to_lock);
+  if (!lock.owns_lock() || state_->disabled || state_->epoch != snapshot_->epoch) {
     return {};
   }
+  const uint64_t first = offset & ~(kLineSize - 1);
+  const uint64_t last = (offset + size - 1) & ~(kLineSize - 1);
+  const size_t begin = static_cast<size_t>((first - snapshot_->first_line) / kLineSize);
+  const size_t end = static_cast<size_t>((last - snapshot_->first_line) / kLineSize);
+  if (end >= snapshot_->versions.size()) {
+    return {};
+  }
+  for (size_t i = begin; i <= end; ++i) {
+    const LineKey key{backing_id, snapshot_->first_line + i * kLineSize};
+    const auto found = state_->versions.find(key);
+    if (found == state_->versions.end() || found->second != snapshot_->versions[i]) {
+      return {};
+    }
+  }
+  return FillAuthority(state_, std::move(lock));
 }
 
 CanonicalLineFreshness::WriterAuthority::WriterAuthority(
@@ -189,56 +185,49 @@ std::optional<CanonicalLineFreshness::ReadStamp> CanonicalLineFreshness::capture
   if (line_count > state_->capacity) {
     return std::nullopt;
   }
-  try {
-    auto snapshot = std::make_shared<Snapshot>();
-    snapshot->backing_id = backing_id;
-    snapshot->offset = offset;
-    snapshot->size = size;
-    snapshot->first_line = first;
-    snapshot->epoch = state_->epoch;
-    snapshot->versions.reserve(static_cast<size_t>(line_count));
-    for (uint64_t i = 0; i < line_count; ++i) {
-      const LineKey key{backing_id, first + i * kLineSize};
-      auto found = state_->versions.find(key);
-      if (found == state_->versions.end()) {
-        if (state_->next_version == std::numeric_limits<uint64_t>::max()) {
-          state_->invalidate_all_locked();
-          state_->disabled = true;
+
+  auto snapshot = std::make_shared<Snapshot>();
+  snapshot->backing_id = backing_id;
+  snapshot->offset = offset;
+  snapshot->size = size;
+  snapshot->first_line = first;
+  snapshot->epoch = state_->epoch;
+  snapshot->versions.reserve(static_cast<size_t>(line_count));
+  for (uint64_t i = 0; i < line_count; ++i) {
+    const LineKey key{backing_id, first + i * kLineSize};
+    auto found = state_->versions.find(key);
+    if (found == state_->versions.end()) {
+      if (state_->next_version == std::numeric_limits<uint64_t>::max()) {
+        state_->invalidate_all_locked();
+        state_->disabled = true;
+        return std::nullopt;
+      }
+      if (state_->versions.size() == state_->capacity) {
+        // Keep the current read's lines resident. An evicted older stamp
+        // simply fails its later freshness check.
+        auto victim = state_->versions.begin();
+        while (victim != state_->versions.end() && victim->first.backing_id == backing_id &&
+               victim->first.line_offset >= first && victim->first.line_offset <= last) {
+          ++victim;
+        }
+        if (victim == state_->versions.end()) {
           return std::nullopt;
         }
-        if (state_->versions.size() == state_->capacity) {
-          // Keep the current read's lines resident. An evicted older stamp
-          // simply fails its later freshness check.
-          auto victim = state_->versions.begin();
-          while (victim != state_->versions.end() && victim->first.backing_id == backing_id &&
-                 victim->first.line_offset >= first && victim->first.line_offset <= last) {
-            ++victim;
-          }
-          if (victim == state_->versions.end()) {
-            return std::nullopt;
-          }
-          state_->versions.erase(victim);
-        }
-        found = state_->versions.emplace(key, state_->next_version++).first;
+        state_->versions.erase(victim);
       }
-      snapshot->versions.push_back(found->second);
+      found = state_->versions.emplace(key, state_->next_version++).first;
     }
-    return ReadStamp(state_, std::move(snapshot));
-  } catch (...) {
-    return std::nullopt;
+    snapshot->versions.push_back(found->second);
   }
+  return ReadStamp(state_, std::move(snapshot));
 }
 
 CanonicalLineFreshness::WriterAuthority CanonicalLineFreshness::try_acquire_writer() noexcept {
-  try {
-    std::unique_lock lock(state_->mutex, std::try_to_lock);
-    if (!lock.owns_lock()) {
-      return {};
-    }
-    return WriterAuthority(state_, std::move(lock));
-  } catch (...) {
+  std::unique_lock lock(state_->mutex, std::try_to_lock);
+  if (!lock.owns_lock()) {
     return {};
   }
+  return WriterAuthority(state_, std::move(lock));
 }
 
 void CanonicalLineFreshness::invalidate_all() {
@@ -247,16 +236,12 @@ void CanonicalLineFreshness::invalidate_all() {
 }
 
 bool CanonicalLineFreshness::try_invalidate_all() noexcept {
-  try {
-    std::unique_lock lock(state_->mutex, std::try_to_lock);
-    if (!lock.owns_lock()) {
-      return false;
-    }
-    state_->invalidate_all_locked();
-    return true;
-  } catch (...) {
+  std::unique_lock lock(state_->mutex, std::try_to_lock);
+  if (!lock.owns_lock()) {
     return false;
   }
+  state_->invalidate_all_locked();
+  return true;
 }
 
 } // namespace rocjitsu

@@ -29,7 +29,6 @@ from amdisa.codegen.execute import (
     input_policy,
     vop3_modifiers,
 )
-from amdisa.codegen.execute.cube import CUBE_OPERATIONS, cube_expression, cube_omod
 from amdisa.codegen.execute.fp8_formats import fp8_helper_name, uses_shared_fp8_widening
 from amdisa.sema_derive import CONVERSION_CALL, FLOAT_COMPARE_CALL, FLOAT_MINMAX_CALL
 from amdisa.sema_ast import (
@@ -1378,7 +1377,6 @@ def _lower_arrayderef(node: SemaNode, ctx: LoweringContext) -> str:
 
 
 _INLINE_UNARY_OPS: dict[str, str] = {
-    'screen_partition_4se': 'amdgpu::screen_partition_4se({0})',
     'rcp': 'amdgpu::transcendental::rcp_f32({0})',
     'rcp_iflag': 'amdgpu::transcendental::rcp_f32({0})',
     'rsq': 'amdgpu::transcendental::rsq_f32({0})',
@@ -1388,9 +1386,6 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     'tanh': 'amdgpu::transcendental::tanh_f32({0})',
     'log': 'amdgpu::transcendental::log_f32({0})',
     'exp': 'amdgpu::transcendental::exp_f32({0})',
-    'rcp_f64': 'amdgpu::transcendental::rcp_f64({0})',
-    'rsq_f64': 'amdgpu::transcendental::rsq_f64({0})',
-    'sqrt_f64': 'amdgpu::transcendental::sqrt_f64({0})',
     'abs': '[&]() {{ int32_t v = static_cast<int32_t>({0});'
     ' return static_cast<uint32_t>'
     '(v < 0 ? (0u - static_cast<uint32_t>(v))'
@@ -1487,18 +1482,12 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     ' return a == 0 ? static_cast<uint32_t>(-1)'
     ' : static_cast<uint32_t>(std::countl_zero(a)); }}()',
     'prng_advance': 'util::prng_advance({0})',
-    'frexp_exp_f32': 'static_cast<uint32_t>(amdgpu::frexp_f32({0}, wf.fp_denorm_mode_f32()).exponent)',
+    # FP16 mantissa lowering still widens through the shared FP32 model.
+    'frexp_mant_f32': 'amdgpu::frexp_f32({0}, wf.fp_denorm_mode_f32()).mantissa',
     # Signed 16-bit exponent in the low half.
     'frexp_exp_f16': '[&]() -> uint32_t {{ float s = {0}; int exp = 0;'
     ' if (s != 0.0f && !std::isnan(s) && !std::isinf(s)) std::frexp(s, &exp);'
     ' return static_cast<uint16_t>(exp); }}()',
-    'frexp_exp_f64': '[&]() {{ double s = {0};'
-    ' int exp = 0;'
-    ' if (s != 0.0 && !std::isnan(s) && !std::isinf(s)) std::frexp(s, &exp);'
-    ' return static_cast<uint32_t>(exp); }}()',
-    'frexp_mant_f64': '[&]() {{ double s = {0};'
-    ' int exp = 0;'
-    ' return std::frexp(s, &exp); }}()',
     'frexp_mant_f32': 'amdgpu::frexp_f32({0}, wf.fp_denorm_mode_f32()).mantissa',
     'log2': 'amdgpu::transcendental::log_f32({0})',
     'cvt_f32_i32': 'std::bit_cast<uint32_t>(static_cast<float>(static_cast<int32_t>({0})))',
@@ -1516,8 +1505,6 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     # generic generated scalar F16 arithmetic is gated out in CodeGenerator.
     'cvt_f16_f32': 'util::f32_to_f16_mode(std::bit_cast<float>(static_cast<uint32_t>({0})), wf.fp16_ovfl())',
     'cvt_f32_f16': 'std::bit_cast<uint32_t>(util::f16_to_f32(static_cast<uint16_t>({0})))',
-    # VALU applies MODE policy; keep the existing raw SALU conversion separate.
-    'cvt_f32_f16_valu': 'amdgpu::fp_mode::cvt_f32_f16({0}, wf.cu().arch(), wf.ieee_mode())',
     'cvt_f32_bf16': 'std::bit_cast<uint32_t>(util::bf16_to_f32(static_cast<uint16_t>({0})))',
     'cvt_f32_fp8': 'std::bit_cast<uint32_t>(util::fp8_e4m3_to_f32(static_cast<uint8_t>({0})))',
     'cvt_f32_bf8': 'std::bit_cast<uint32_t>(util::bf8_e5m2_to_f32(static_cast<uint8_t>({0})))',
@@ -1549,26 +1536,8 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     ' if (s >= 32768.0f) return static_cast<uint32_t>(static_cast<uint16_t>(INT16_MAX));'
     ' if (s < -32768.0f) return static_cast<uint32_t>(static_cast<uint16_t>(INT16_MIN));'
     ' return static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(s))); }}()',
-    # These arguments are decoded floats, including source modifiers. Conversion
-    # rounds once with ties to even, independently of MODE.FP_ROUND. F16 sources
-    # are widened with MODE.FP_DENORM input flushing (unpacked NORM only).
-    'cvt_norm_i16_f16': '[&]() -> uint32_t {{ float s = {0};'
-    ' if (std::isnan(s)) return 0u;'
-    ' double scaled = util::rndne_scalar(std::clamp(static_cast<double>(s) * 32767.0, -32767.0, 32767.0));'
-    ' return static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(scaled))); }}()',
-    'cvt_norm_u16_f16': '[&]() -> uint32_t {{ float s = {0};'
-    ' if (std::isnan(s)) return 0u;'
-    ' double scaled = util::rndne_scalar(std::clamp(static_cast<double>(s) * 65535.0, 0.0, 65535.0));'
-    ' return static_cast<uint32_t>(static_cast<uint16_t>(scaled)); }}()',
-    'cvt_off_f32_i4': '[&]() -> float {{ int32_t nibble = static_cast<int32_t>({0} & 0xfu);'
-    ' if (nibble & 0x8) nibble -= 16;'
-    ' return static_cast<float>(nibble) * 0.0625f; }}()',
     'cvt_i32_i16': 'static_cast<uint32_t>(static_cast<int32_t>(static_cast<int16_t>({0} & 0xFFFF)))',
     'cvt_u32_u16': '({0} & 0xFFFFu)',
-    'cvt_f32_ubyte0': 'std::bit_cast<uint32_t>(static_cast<float>({0} & 0xFFu))',
-    'cvt_f32_ubyte1': 'std::bit_cast<uint32_t>(static_cast<float>(({0} >> 8) & 0xFFu))',
-    'cvt_f32_ubyte2': 'std::bit_cast<uint32_t>(static_cast<float>(({0} >> 16) & 0xFFu))',
-    'cvt_f32_ubyte3': 'std::bit_cast<uint32_t>(static_cast<float>(({0} >> 24) & 0xFFu))',
     'cvt': '{0}',
 }
 
@@ -1953,7 +1922,6 @@ _INLINE_TERNARY_OPS: dict[str, str] = {
     ' if (w == 0) return 0u; uint32_t mask = (uint32_t{{1}} << w) - 1u;'
     ' uint32_t extracted = static_cast<uint32_t>(static_cast<int32_t>(src) >> off) & mask;'
     ' uint32_t signbit = uint32_t{{1}} << (w - 1u); return (extracted ^ signbit) - signbit; }}()',
-    **{op: cube_expression(op, '{0}', '{1}', '{2}') for op in CUBE_OPERATIONS},
 }
 
 
@@ -1967,7 +1935,7 @@ def _takes_flushed_f16_source(node: SemaNode, ctx: LoweringContext) -> bool:
         return True
     if ctx.exec_model != ExecModel.VECTOR:
         return False
-    if callee in ('cvt_f32_f16_valu', 'cvt_norm_i16_f16', 'cvt_norm_u16_f16'):
+    if callee == 'cvt_f32_f16_valu':
         return True
     return callee in F16_FLUSHED_SOURCE_CALLS and node.ty == SemaType.F16
 
@@ -1992,6 +1960,10 @@ def _frexp_flushed_source(node: SemaNode, ctx: LoweringContext) -> str | None:
 def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
     """Lower a .call node through inline ops, helper registry, or VOP3 modifiers."""
     callee = node.call_name or ''
+    if callee == 'cvt_f32_f16_valu':
+        raise ValueError('Half conversions require rj-arith lowering')
+    if callee == 'cvt_off_f32_i4' or callee.startswith('cvt_f32_ubyte'):
+        raise ValueError('Byte conversions require rj-arith lowering')
 
     if callee == 'apply_src_mod':
         return _lower_apply_src_mod(node, ctx)
@@ -2696,8 +2668,6 @@ def _lower_apply_omod(node: SemaNode, ctx: LoweringContext) -> str:
         raise ValueError('F16 output modifiers must be handled by _destination_result')
     if len(node.children) < 2:
         return '0'
-    if any(_contains_call(node.children[1], op) for op in CUBE_OPERATIONS):
-        return cube_omod(_lower_expr(node.children[1], ctx))
     is_f64 = node.ty and node.ty.size == 64
     mode_arithmetic = ctx.mode_arithmetic and _contains_mode_arithmetic(node)
     fp_type = 'double' if is_f64 else 'float'

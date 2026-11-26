@@ -3,6 +3,7 @@
 
 from types import SimpleNamespace
 from amdisa.codegen.execute import ExecuteContext
+from amdisa.__main__ import _PROFILES
 
 
 from pathlib import Path
@@ -18,7 +19,7 @@ def context(arch, name, dst, src, *, is_vop3=False, result_writer=None):
     return ExecuteContext(
         inst=SimpleNamespace(name=name),
         sem=None,
-        profile=None,
+        profile=_PROFILES[arch](),
         arch_name=arch,
         dst_ops=dst,
         src_ops=src,
@@ -105,7 +106,7 @@ def test_all_move_and_selection_encodings_route_to_rj_arith(arch):
     assert count == 20  # Six scalar methods, eight MOV and six CNDMASK methods.
 
 
-@pytest.mark.parametrize('arch', ['cdna3', 'cdna4'])
+@pytest.mark.parametrize('arch', ['cdna1', 'cdna2', 'cdna3', 'cdna4'])
 def test_accumulator_moves_reuse_raw_word_copy(arch):
     from amdisa.codegen.execute.rj_arith_vector import ACCUMULATOR_MOVES
 
@@ -113,5 +114,5 @@ def test_accumulator_moves_reuse_raw_word_copy(arch):
         body = gen_vector32(context(arch, name, ['acc_dst'], ['acc_src'], is_vop3=True))
         assert 'execute_move32(*this, wf, acc_dst, acc_src)' in body
         assert 'inst_.' not in body
-        assert gen_vector32(context('cdna2', name, ['d'], ['a'])) is None
-        assert gen_vector32(context('cdna2', name, ['d'], ['a'])) is None
+        for unsupported_arch in ('rdna3', 'cdna5'):
+            assert gen_vector32(context(unsupported_arch, name, ['d'], ['a'])) is None

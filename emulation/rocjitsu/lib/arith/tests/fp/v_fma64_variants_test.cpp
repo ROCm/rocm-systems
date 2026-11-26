@@ -4,6 +4,7 @@
 // CDNA accumulating and literal FP64 FMA forms share directed-rounding goldens.
 #include "common/cpu.h"
 #include "common/semantics.h"
+#include "fp/fp64_impl.h"
 #include "rj_arith/detail/rj_arith_common.h"
 #include "rj_arith/detail/rj_arith_fp.h"
 
@@ -13,8 +14,8 @@
 
 namespace {
 
-// Check the low/high VGPR mapping, masked stores and inherited semantics support.
-template <int Lanes, typename Call> void check_variant(Call call) {
+// Check the low/high VGPR mapping, masked stores and target semantics support.
+template <int Lanes, bool Exact = false, typename Call> void check_variant(Call call) {
   using Mask = std::conditional_t<Lanes == 32, uint32_t, uint64_t>;
   for (uint64_t cpu : rocjitsu::arith::test::supported_cpu_levels()) {
     for (uint64_t semantics : rocjitsu::arith::test::semantics_modes()) {
@@ -31,9 +32,12 @@ template <int Lanes, typename Call> void check_variant(Call call) {
         uint32_t status = 0x1234;
         const int result = call(cpu | semantics | (uint64_t(rounding) << 24),
                                 Mask(1) << (Lanes - 1), d, a, b, &status);
-        if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL ||
-            semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
-          EXPECT_NE(result, RJ_ARITH_SUCCESS);
+        if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+          EXPECT_EQ(result, RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS);
+          continue;
+        }
+        if (!Exact && semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
+          EXPECT_EQ(result, RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
           continue;
         }
         ASSERT_EQ(result, RJ_ARITH_SUCCESS);
@@ -107,14 +111,24 @@ template <int Lanes, typename Call> void check_min_normal(Call call) {
 } // namespace
 
 TEST(FpFmacF64W32Gfx942, Arithmetic) {
-  check_variant<32>(accumulating<32>(rj_arith_v_fmac_f64_w32_gfx942));
+  check_variant<32, true>(accumulating<32>(rj_arith_v_fmac_f64_w32_gfx942));
   check_accumulator_alias<32>(rj_arith_v_fmac_f64_w32_gfx942);
   check_min_normal<32>(rj_arith_v_fmac_f64_w32_gfx942);
 }
 TEST(FpFmacF64W64Gfx942, Arithmetic) {
-  check_variant<64>(accumulating<64>(rj_arith_v_fmac_f64_w64_gfx942));
+  check_variant<64, true>(accumulating<64>(rj_arith_v_fmac_f64_w64_gfx942));
   check_accumulator_alias<64>(rj_arith_v_fmac_f64_w64_gfx942);
   check_min_normal<64>(rj_arith_v_fmac_f64_w64_gfx942);
+}
+TEST(FpFmacF64W32Gfx950, Arithmetic) {
+  check_variant<32, true>(accumulating<32>(rj_arith_v_fmac_f64_w32_gfx950));
+  check_accumulator_alias<32>(rj_arith_v_fmac_f64_w32_gfx950);
+  check_min_normal<32>(rj_arith_v_fmac_f64_w32_gfx950);
+}
+TEST(FpFmacF64W64Gfx950, Arithmetic) {
+  check_variant<64, true>(accumulating<64>(rj_arith_v_fmac_f64_w64_gfx950));
+  check_accumulator_alias<64>(rj_arith_v_fmac_f64_w64_gfx950);
+  check_min_normal<64>(rj_arith_v_fmac_f64_w64_gfx950);
 }
 TEST(FpFmacF64W32Gfx1250, Arithmetic) {
   check_variant<32>(accumulating<32>(rj_arith_v_fmac_f64_w32_gfx1250));
@@ -167,4 +181,177 @@ TEST(FpF64Cdna, ProductRoundThenFlush) {
   check_min_normal<32>([](auto flags, auto mask, auto mode, auto d, auto a, auto b, auto status) {
     return rj_arith_v_fmaak_f64_w32_gfx1250(flags, mask, mode, d, a, b, 0, status);
   });
+}
+
+// gfx942 and gfx950 FP64 entry points accept mode 2 against MI300X and MI350X captures.
+TEST(FpF64Cdna, ExactAndLooseOnlyQualification) {
+  using Unary32 = decltype(&rj_arith_v_trunc_f64_w32_gfx942);
+  using Unary64 = decltype(&rj_arith_v_trunc_f64_w64_gfx942);
+  using Binary32 = decltype(&rj_arith_v_add_f64_w32_gfx942);
+  using Binary64 = decltype(&rj_arith_v_add_f64_w64_gfx942);
+  const Unary32 unary_942_w32[] = {
+      rj_arith_v_trunc_f64_w32_gfx942, rj_arith_v_ceil_f64_w32_gfx942,
+      rj_arith_v_rndne_f64_w32_gfx942, rj_arith_v_floor_f64_w32_gfx942,
+      rj_arith_v_fract_f64_w32_gfx942, rj_arith_v_frexp_mant_f64_w32_gfx942};
+  const Unary64 unary_942_w64[] = {
+      rj_arith_v_trunc_f64_w64_gfx942, rj_arith_v_ceil_f64_w64_gfx942,
+      rj_arith_v_rndne_f64_w64_gfx942, rj_arith_v_floor_f64_w64_gfx942,
+      rj_arith_v_fract_f64_w64_gfx942, rj_arith_v_frexp_mant_f64_w64_gfx942};
+  const Unary32 unary_950_w32[] = {
+      rj_arith_v_trunc_f64_w32_gfx950, rj_arith_v_ceil_f64_w32_gfx950,
+      rj_arith_v_rndne_f64_w32_gfx950, rj_arith_v_floor_f64_w32_gfx950,
+      rj_arith_v_fract_f64_w32_gfx950, rj_arith_v_frexp_mant_f64_w32_gfx950};
+  const Unary64 unary_950_w64[] = {
+      rj_arith_v_trunc_f64_w64_gfx950, rj_arith_v_ceil_f64_w64_gfx950,
+      rj_arith_v_rndne_f64_w64_gfx950, rj_arith_v_floor_f64_w64_gfx950,
+      rj_arith_v_fract_f64_w64_gfx950, rj_arith_v_frexp_mant_f64_w64_gfx950};
+  const Binary32 binary_942_w32[] = {rj_arith_v_add_f64_w32_gfx942, rj_arith_v_mul_f64_w32_gfx942,
+                                     rj_arith_v_fmac_f64_w32_gfx942};
+  const Binary64 binary_942_w64[] = {rj_arith_v_add_f64_w64_gfx942, rj_arith_v_mul_f64_w64_gfx942,
+                                     rj_arith_v_fmac_f64_w64_gfx942};
+  const Binary32 binary_950_w32[] = {rj_arith_v_add_f64_w32_gfx950, rj_arith_v_mul_f64_w32_gfx950,
+                                     rj_arith_v_fmac_f64_w32_gfx950};
+  const Binary64 binary_950_w64[] = {rj_arith_v_add_f64_w64_gfx950, rj_arith_v_mul_f64_w64_gfx950,
+                                     rj_arith_v_fmac_f64_w64_gfx950};
+
+  for (uint64_t cpu : rocjitsu::arith::test::supported_cpu_levels()) {
+    for (uint64_t semantics : rocjitsu::arith::test::semantics_modes()) {
+      const int expected_942 = semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL
+                                   ? RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS
+                                   : RJ_ARITH_SUCCESS;
+      const int expected_950 = expected_942;
+      uint32_t av[2][64]{}, bv[2][64]{}, cv[2][64]{}, dv[2][64]{};
+      av[1][0] = 0x3ff80000U;
+      bv[1][0] = 0x40000000U;
+      cv[1][0] = 0x3fe00000U;
+      const uint32_t *a[] = {av[0], av[1]}, *b[] = {bv[0], bv[1]}, *c[] = {cv[0], cv[1]};
+      uint32_t *d[] = {dv[0], dv[1]};
+      uint32_t status = 0x55;
+      for (int i = 0; i < 6; ++i) {
+        EXPECT_EQ(unary_942_w32[i](cpu | semantics, 1U, 0, d, a, &status), expected_942);
+        EXPECT_EQ(unary_942_w64[i](cpu | semantics, 1ULL, 0, d, a, &status), expected_942);
+        EXPECT_EQ(unary_950_w32[i](cpu | semantics, 1U, 0, d, a, &status), expected_950);
+        EXPECT_EQ(unary_950_w64[i](cpu | semantics, 1ULL, 0, d, a, &status), expected_950);
+      }
+      for (int i = 0; i < 3; ++i) {
+        dv[1][0] = 0x3fe00000U;
+        EXPECT_EQ(binary_942_w32[i](cpu | semantics, 1U, 0, d, a, b, &status), expected_942);
+        dv[1][0] = 0x3fe00000U;
+        EXPECT_EQ(binary_942_w64[i](cpu | semantics, 1ULL, 0, d, a, b, &status), expected_942);
+        dv[1][0] = 0x3fe00000U;
+        EXPECT_EQ(binary_950_w32[i](cpu | semantics, 1U, 0, d, a, b, &status), expected_950);
+        dv[1][0] = 0x3fe00000U;
+        EXPECT_EQ(binary_950_w64[i](cpu | semantics, 1ULL, 0, d, a, b, &status), expected_950);
+      }
+      EXPECT_EQ(rj_arith_v_fma_f64_w32_gfx942(cpu | semantics, 1U, 0, d, a, b, c, &status),
+                expected_942);
+      EXPECT_EQ(rj_arith_v_fma_f64_w64_gfx942(cpu | semantics, 1ULL, 0, d, a, b, c, &status),
+                expected_942);
+      EXPECT_EQ(rj_arith_v_fma_f64_w32_gfx950(cpu | semantics, 1U, 0, d, a, b, c, &status),
+                expected_950);
+      EXPECT_EQ(rj_arith_v_fma_f64_w64_gfx950(cpu | semantics, 1ULL, 0, d, a, b, c, &status),
+                expected_950);
+      EXPECT_EQ(status, 0x55U);
+    }
+  }
+}
+
+// MI300X (2026-11-24) captures: invalid-operation results when no source is NaN (+Inf + -Inf,
+// 0 * +-Inf, Fract(+-Inf)) produce canonical negative qNaN 0xfff8000000000000 across all CPU paths,
+// while incoming NaNs keep their quieted payload and sign.
+TEST(FpF64Cdna, InvalidOpCanonicalNegativeNan) {
+  using rocjitsu::arith::as_double;
+  using rocjitsu::arith::double_bits;
+  using rocjitsu::arith::fp64_nan_priority;
+
+  constexpr uint64_t kPosCanonQnan = 0x7ff8000000000000ULL;
+  constexpr uint64_t kNegQnan = 0xfff8000000000000ULL;
+  constexpr uint64_t kPosInf = 0x7ff0000000000000ULL;
+  constexpr uint64_t kNegInf = 0xfff0000000000000ULL;
+  constexpr uint64_t kOne = 0x3ff0000000000000ULL;
+  constexpr uint64_t kPosSnan = 0x7ff0000012345678ULL;
+  constexpr uint64_t kPosQnan = 0x7ff8000012345678ULL;
+
+  // Exercise fp64_nan_priority directly with a synthetic +qNaN host result so the
+  // canonical -qNaN fallback is verified on x86-64 too (where hardware +Inf + -Inf
+  // already yields 0xfff8000000000000).
+  EXPECT_EQ(double_bits(fp64_nan_priority<false>(as_double(kPosCanonQnan), as_double(kPosInf),
+                                                 as_double(kNegInf))),
+            kNegQnan);
+  EXPECT_EQ(
+      double_bits(fp64_nan_priority<false>(as_double(kPosCanonQnan), 0.0, as_double(kPosInf))),
+      kNegQnan);
+  EXPECT_EQ(double_bits(fp64_nan_priority<true>(as_double(kPosCanonQnan), as_double(kOne),
+                                                as_double(kPosInf), as_double(kNegInf))),
+            kNegQnan);
+  EXPECT_EQ(double_bits(fp64_nan_priority<true>(as_double(kPosCanonQnan), 0.0, as_double(kPosInf),
+                                                as_double(kPosSnan))),
+            kNegQnan);
+  EXPECT_EQ(double_bits(fp64_nan_priority<false>(as_double(kNegQnan), as_double(kPosSnan),
+                                                 as_double(kNegInf), 0.0, true)),
+            kPosQnan);
+  EXPECT_EQ(double_bits(fp64_nan_priority<false>(as_double(kNegQnan), as_double(kPosSnan),
+                                                 as_double(kNegInf), 0.0, false)),
+            kPosSnan);
+
+  for (uint64_t cpu : rocjitsu::arith::test::supported_cpu_levels()) {
+    for (uint64_t semantics : rocjitsu::arith::test::hardware_semantics()) {
+      for (uint64_t ieee : {uint64_t(0), RJ_ARITH_FP_IEEE_MODE}) {
+        const uint64_t flags = cpu | semantics | ieee;
+        uint32_t av[2][64]{}, bv[2][64]{}, cv[2][64]{}, dv[2][64]{};
+        const uint32_t *a[] = {av[0], av[1]}, *b[] = {bv[0], bv[1]}, *c[] = {cv[0], cv[1]};
+        uint32_t *d[] = {dv[0], dv[1]};
+        auto set = [](uint32_t v[2][64], uint64_t bits) {
+          v[0][0] = uint32_t(bits);
+          v[1][0] = uint32_t(bits >> 32);
+        };
+        auto get = [&]() { return uint64_t(dv[0][0]) | (uint64_t(dv[1][0]) << 32); };
+
+        set(av, kPosInf);
+        set(bv, kNegInf);
+        ASSERT_EQ(rj_arith_v_add_f64_w32_gfx942(flags, 1U, 0, d, a, b, nullptr), RJ_ARITH_SUCCESS);
+        EXPECT_EQ(get(), kNegQnan);
+        ASSERT_EQ(rj_arith_v_add_f64_w64_gfx942(flags, 1ULL, 0, d, a, b, nullptr),
+                  RJ_ARITH_SUCCESS);
+        EXPECT_EQ(get(), kNegQnan);
+
+        set(av, 0);
+        set(bv, kPosInf);
+        ASSERT_EQ(rj_arith_v_mul_f64_w32_gfx942(flags, 1U, 0, d, a, b, nullptr), RJ_ARITH_SUCCESS);
+        EXPECT_EQ(get(), kNegQnan);
+        set(cv, kOne);
+        ASSERT_EQ(rj_arith_v_fma_f64_w32_gfx942(flags, 1U, 0, d, a, b, c, nullptr),
+                  RJ_ARITH_SUCCESS);
+        EXPECT_EQ(get(), kNegQnan);
+        set(cv, kPosSnan);
+        ASSERT_EQ(rj_arith_v_fma_f64_w32_gfx942(flags, 1U, 0, d, a, b, c, nullptr),
+                  RJ_ARITH_SUCCESS);
+        EXPECT_EQ(get(), kNegQnan);
+        set(av, kOne);
+        set(bv, kOne);
+        ASSERT_EQ(rj_arith_v_fma_f64_w32_gfx942(flags, 1U, 0, d, a, b, c, nullptr),
+                  RJ_ARITH_SUCCESS);
+        EXPECT_EQ(get(), kPosQnan);
+
+        set(av, 0);
+        set(bv, kPosInf);
+        set(dv, kOne);
+        ASSERT_EQ(rj_arith_v_fmac_f64_w64_gfx942(flags, 1ULL, 0, d, a, b, nullptr),
+                  RJ_ARITH_SUCCESS);
+        EXPECT_EQ(get(), kNegQnan);
+
+        for (uint64_t inf : {kPosInf, kNegInf}) {
+          set(av, inf);
+          ASSERT_EQ(rj_arith_v_fract_f64_w32_gfx942(flags, 1U, 0, d, a, nullptr), RJ_ARITH_SUCCESS);
+          EXPECT_EQ(get(), kNegQnan);
+          ASSERT_EQ(rj_arith_v_fract_f64_w64_gfx942(flags, 1ULL, 0, d, a, nullptr),
+                    RJ_ARITH_SUCCESS);
+          EXPECT_EQ(get(), kNegQnan);
+        }
+        set(av, kPosSnan);
+        ASSERT_EQ(rj_arith_v_fract_f64_w32_gfx942(flags, 1U, 0, d, a, nullptr), RJ_ARITH_SUCCESS);
+        EXPECT_EQ(get(), kPosQnan);
+      }
+    }
+  }
 }

@@ -8,6 +8,42 @@
 #include "wmma/x86_64/wmma_loose_x86_64_v4.h"
 
 namespace rocjitsu::arith {
+namespace {
+
+template <bool Bf8> inline __m512i wmma_fp8_bf16_pairs(__m512i words, int half) {
+  __m256i packed = _mm512_cvtepi32_epi16(_mm512_srli_epi32(words, half * 16));
+  __m512i raw = _mm512_cvtepu8_epi16(packed);
+  __m512i magnitude = _mm512_and_si512(raw, _mm512_set1_epi16(127));
+  // Rebase normal exponents directly in the BF16 encoding.
+  __m512i encoded = _mm512_add_epi16(_mm512_slli_epi16(magnitude, Bf8 ? 5 : 4),
+                                     _mm512_set1_epi16((Bf8 ? 112 : 120) << 7));
+  // Positive subnormal FP8 encodings indexed by their fraction.
+  alignas(64) static constexpr uint16_t Bf8Subnormals[32] = {0, 0x3780, 0x3800, 0x3840};
+  alignas(64) static constexpr uint16_t Fp8Subnormals[32] = {0,      0x3b00, 0x3b80, 0x3bc0,
+                                                             0x3c00, 0x3c20, 0x3c40, 0x3c60};
+  __m512i subnormal_values = _mm512_load_si512(Bf8 ? Bf8Subnormals : Fp8Subnormals);
+  encoded = _mm512_mask_permutexvar_epi16(
+      encoded, _mm512_cmplt_epi16_mask(magnitude, _mm512_set1_epi16(Bf8 ? 4 : 8)), magnitude,
+      subnormal_values);
+  if constexpr (Bf8) {
+    encoded = _mm512_mask_set1_epi16(
+        encoded, _mm512_cmpeq_epi16_mask(magnitude, _mm512_set1_epi16(124)), 0x7f80);
+  }
+  encoded = _mm512_mask_set1_epi16(
+      encoded, _mm512_cmpgt_epi16_mask(magnitude, _mm512_set1_epi16(Bf8 ? 124 : 126)), 0x7fc0);
+  encoded = _mm512_or_si512(
+      encoded, _mm512_and_si512(_mm512_slli_epi16(raw, 8), _mm512_set1_epi16(INT16_MIN)));
+  return _mm512_rol_epi32(encoded, 16);
+}
+
+// DPBF16 flushes a nonzero subnormal input accumulator even with DAZ disabled.
+inline __mmask16 wmma_f32_subnormal(__m512i bits) {
+  __m512i magnitude = _mm512_and_si512(bits, _mm512_set1_epi32(INT32_MAX));
+  return _mm512_cmplt_epu32_mask(_mm512_sub_epi32(magnitude, _mm512_set1_epi32(1)),
+                                 _mm512_set1_epi32(0x7fffff));
+}
+
+} // namespace
 
 template <bool Bf8A, bool Bf8B, int Wave>
 bool swmmac_fp8_x86_64_v4_bf16(uint32_t mode, uint32_t *const *d, const uint32_t *const *a,
@@ -58,7 +94,7 @@ bool swmmac_fp8_x86_64_v4_bf16(uint32_t mode, uint32_t *const *d, const uint32_t
     for (int row = 0; row < 16; ++row) {
       auto lhs = _mm512_broadcastd_epi32(_mm_loadu_si32(&left[pair][row]));
       auto rhs = _mm512_loadu_si512(right[pair] + selected[pair][row]);
-      acc[row] = _mm512_dpbf16_ps(acc[row], (__m512bh)lhs, (__m512bh)rhs);
+      acc[row] = _mm512_dpbf16_ps(acc[row], bit_cast<__m512bh>(lhs), bit_cast<__m512bh>(rhs));
     }
   }
   // All input reads precede the public dispatcher's ordered destination stores.

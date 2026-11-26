@@ -6,6 +6,7 @@
 #include "rj_arith/detail/rj_arith_register.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_vector_exec.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
@@ -27,7 +28,11 @@ inline void execute_read_lane(Wavefront &wave, uint64_t flags, const Operand &de
   const uint64_t exec_mask = wave.exec();
   lane = First ? (exec_mask ? std::countr_zero(exec_mask) : 0) : lane & (wave.wf_size() - 1);
   RegisterAccess registers(wave);
-  VectorInput32 a(registers, wave, source, 1ULL << lane);
+  // The API reads only its selected lane. Avoid building a whole-wave view
+  // for a scalar transfer; unselected array elements are never accessed.
+  std::array<uint32_t, 64> values;
+  values[lane] = registers.read_scalar_selected_lane(source, lane);
+  const uint32_t *a = values.data();
   if (wave.instruction_execution_failed()) {
     return;
   }
@@ -35,11 +40,11 @@ inline void execute_read_lane(Wavefront &wave, uint64_t flags, const Operand &de
   int status;
   if constexpr (First) {
     status = wave.wf_size() == 32
-                 ? rj_arith_v_readfirstlane_b32_w32(flags, uint32_t(exec_mask), 0, &result, &a.data)
-                 : rj_arith_v_readfirstlane_b32_w64(flags, exec_mask, 0, &result, &a.data);
+                 ? rj_arith_v_readfirstlane_b32_w32(flags, uint32_t(exec_mask), 0, &result, &a)
+                 : rj_arith_v_readfirstlane_b32_w64(flags, exec_mask, 0, &result, &a);
   } else {
-    status = wave.wf_size() == 32 ? rj_arith_v_readlane_b32_w32(flags, 0, &result, &a.data, lane)
-                                  : rj_arith_v_readlane_b32_w64(flags, 0, &result, &a.data, lane);
+    status = wave.wf_size() == 32 ? rj_arith_v_readlane_b32_w32(flags, 0, &result, &a, lane)
+                                  : rj_arith_v_readlane_b32_w64(flags, 0, &result, &a, lane);
   }
   if (status != RJ_ARITH_SUCCESS) {
     wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
@@ -69,6 +74,46 @@ inline void execute_write_lane(Wavefront &wave, uint64_t flags, const Operand &d
   registers.write_scalar_selected_lane(destination, lane, result[lane]);
 }
 
+// Handle gfx1150's packed VOP1 halves on physical VGPRs when bulk access is permitted.
+// Observed, delegated or out-of-allocation operands retain the logical operand path.
+inline bool try_swap_gfx1150_packed_halves(Wavefront &wave, RegisterAccess &registers,
+                                           uint64_t flags, uint64_t exec_mask,
+                                           const Operand &destination, const Operand &source) {
+  if (wave.instruction_execution_failed() || wave.cu().arch() != rocjitsu::IsaFamily::Rdna3_5 ||
+      destination.delegate() || source.delegate() || destination.size_bits() != 16 ||
+      source.size_bits() != 16 || !destination.reads_value() || !source.reads_value() ||
+      !destination.is_writable() || !source.is_writable()) {
+    return false;
+  }
+  const auto d_bytes = destination.register_byte_mask(), a_bytes = source.register_byte_mask();
+  if ((d_bytes != 0x3 && d_bytes != 0xc) || (a_bytes != 0x3 && a_bytes != 0xc)) {
+    return false;
+  }
+  const auto d_reg = destination.to_register_ref(), a_reg = source.to_register_ref();
+  if (!d_reg || !a_reg || d_reg->cls != RegClass::VGPR || a_reg->cls != RegClass::VGPR) {
+    return false;
+  }
+  const uint64_t halves =
+      (d_bytes == 0xc ? RJ_ARITH_ALU_HIGH_D : 0) | (a_bytes == 0xc ? RJ_ARITH_ALU_HIGH_A : 0);
+  const uint32_t base = wave.vgpr_alloc().base;
+  // These are normalized physical indices on gfx1150, which has no GPR_IDX mode.
+  // Both acquisitions must succeed before the kernel can change either operand.
+  auto status = registers.try_bulk_write_vgprs<1>(base + d_reg->index, 1, [&](uint32_t *const *d) {
+    return registers.try_bulk_write_vgprs<1>(base + a_reg->index, 1, [&](uint32_t *const *a) {
+      return wave.wf_size() == 32
+                 ? rj_arith_v_swap_b16_w32(flags, uint32_t(exec_mask), halves, d, a)
+                 : rj_arith_v_swap_b16_w64(flags, exec_mask, halves, d, a);
+    });
+  });
+  if (!status) {
+    return false;
+  }
+  if (*status != RJ_ARITH_SUCCESS) {
+    wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+  }
+  return true;
+}
+
 // Snapshot both read/write operands before either commit. VOP1 half operands
 // already resolve their encoded halves; commit only their logical low halves.
 template <bool Half>
@@ -79,6 +124,11 @@ inline void execute_swap(Wavefront &wave, uint64_t flags, const Operand &destina
     return;
   }
   RegisterAccess registers(wave);
+  if constexpr (Half) {
+    if (try_swap_gfx1150_packed_halves(wave, registers, flags, exec_mask, destination, source)) {
+      return;
+    }
+  }
   constexpr uint8_t bytes = Half ? 0x3 : 0xf;
   VectorInput32 old_d(registers, wave, destination, exec_mask, bytes);
   VectorInput32 old_a(registers, wave, source, exec_mask, bytes);

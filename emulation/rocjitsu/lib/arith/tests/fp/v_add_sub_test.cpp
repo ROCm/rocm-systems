@@ -37,7 +37,7 @@ TEST(FpAddF16W64Gfx11, Arithmetic) {
 TEST(FpAddF32W32Gfx12, Arithmetic) {
   rocjitsu::arith::test::check_binary_arithmetic<32, 32>(
       rj_arith_v_add_f32_w32_gfx12, [](double x, double y) { return x + y; }, /*gfx12=*/true,
-      /*fp_status_supported=*/false, /*compatibility_status=*/true);
+      /*fp_status_supported=*/false, {.compatibility_reports_status = true});
 }
 
 // Check arithmetic results, modifiers, masks, aliases, and supported FP status.
@@ -50,7 +50,7 @@ TEST(FpAddF32W32Gfx11, Arithmetic) {
 TEST(FpAddF32W64Gfx12, Arithmetic) {
   rocjitsu::arith::test::check_binary_arithmetic<32, 64>(
       rj_arith_v_add_f32_w64_gfx12, [](double x, double y) { return x + y; }, /*gfx12=*/true,
-      /*fp_status_supported=*/false, /*compatibility_status=*/true);
+      /*fp_status_supported=*/false, {.compatibility_reports_status = true});
 }
 
 // Check arithmetic results, modifiers, masks, aliases, and supported FP status.
@@ -111,7 +111,7 @@ TEST(FpSubF16W64Gfx11, Arithmetic) {
 TEST(FpSubF32W32Gfx12, Arithmetic) {
   rocjitsu::arith::test::check_binary_arithmetic<32, 32>(
       rj_arith_v_sub_f32_w32_gfx12, [](double x, double y) { return x - y; }, /*gfx12=*/true,
-      /*fp_status_supported=*/false, /*compatibility_status=*/true);
+      /*fp_status_supported=*/false, {.compatibility_reports_status = true});
 }
 
 // Check arithmetic results, modifiers, masks, aliases, and supported FP status.
@@ -124,7 +124,7 @@ TEST(FpSubF32W32Gfx11, Arithmetic) {
 TEST(FpSubF32W64Gfx12, Arithmetic) {
   rocjitsu::arith::test::check_binary_arithmetic<32, 64>(
       rj_arith_v_sub_f32_w64_gfx12, [](double x, double y) { return x - y; }, /*gfx12=*/true,
-      /*fp_status_supported=*/false, /*compatibility_status=*/true);
+      /*fp_status_supported=*/false, {.compatibility_reports_status = true});
 }
 
 // Check arithmetic results, modifiers, masks, aliases, and supported FP status.
@@ -162,7 +162,7 @@ TEST(FpAddF16W32Gfx1250, Arithmetic) {
   rocjitsu::arith::test::check_binary_arithmetic<16, 32>(
       rj_arith_v_add_f16_w32_gfx1250, [](double x, double y) { return x + y; },
       /*gfx12=*/true, /*fp_status_supported=*/false,
-      /*compatibility_status=*/false, /*half_exact=*/false);
+      /*options=*/{.compatibility_reports_status = false, .half_exact = false});
 }
 
 // RDNA2 keeps the RDNA3 model but refuses strict exact until its captures are reviewed.
@@ -170,7 +170,7 @@ TEST(FpAddF16W32Gfx10, Arithmetic) {
   rocjitsu::arith::test::check_binary_arithmetic<16, 32>(
       rj_arith_v_add_f16_w32_gfx10, [](double x, double y) { return x + y; },
       /*gfx12=*/false, /*fp_status_supported=*/false,
-      /*compatibility_status=*/false, /*half_exact=*/false);
+      /*options=*/{.compatibility_reports_status = false, .half_exact = false});
 }
 
 // gfx1250 keeps the gfx12 model but refuses strict exact until its captures are reviewed.
@@ -178,7 +178,7 @@ TEST(FpAddF16W64Gfx1250, Arithmetic) {
   rocjitsu::arith::test::check_binary_arithmetic<16, 64>(
       rj_arith_v_add_f16_w64_gfx1250, [](double x, double y) { return x + y; },
       /*gfx12=*/true, /*fp_status_supported=*/false,
-      /*compatibility_status=*/false, /*half_exact=*/false);
+      /*options=*/{.compatibility_reports_status = false, .half_exact = false});
 }
 
 // RDNA2 keeps the RDNA3 model but refuses strict exact until its captures are reviewed.
@@ -186,7 +186,7 @@ TEST(FpAddF16W64Gfx10, Arithmetic) {
   rocjitsu::arith::test::check_binary_arithmetic<16, 64>(
       rj_arith_v_add_f16_w64_gfx10, [](double x, double y) { return x + y; },
       /*gfx12=*/false, /*fp_status_supported=*/false,
-      /*compatibility_status=*/false, /*half_exact=*/false);
+      /*options=*/{.compatibility_reports_status = false, .half_exact = false});
 }
 
 // gfx1250 keeps the gfx12 model but refuses strict exact until its captures are reviewed.
@@ -194,7 +194,7 @@ TEST(FpSubF16W32Gfx1250, Arithmetic) {
   rocjitsu::arith::test::check_binary_arithmetic<16, 32>(
       rj_arith_v_sub_f16_w32_gfx1250, [](double x, double y) { return x - y; },
       /*gfx12=*/true, /*fp_status_supported=*/false,
-      /*compatibility_status=*/false, /*half_exact=*/false);
+      /*options=*/{.compatibility_reports_status = false, .half_exact = false});
 }
 
 // RDNA2 keeps the RDNA3 model but refuses strict exact until its captures are reviewed.
@@ -202,7 +202,7 @@ TEST(FpSubF16W32Gfx10, Arithmetic) {
   rocjitsu::arith::test::check_binary_arithmetic<16, 32>(
       rj_arith_v_sub_f16_w32_gfx10, [](double x, double y) { return x - y; },
       /*gfx12=*/false, /*fp_status_supported=*/false,
-      /*compatibility_status=*/false, /*half_exact=*/false);
+      /*options=*/{.compatibility_reports_status = false, .half_exact = false});
 }
 
 // gfx1250 keeps the gfx12 model but refuses strict exact until its captures are reviewed.
@@ -210,7 +210,7 @@ TEST(FpSubF16W64Gfx1250, Arithmetic) {
   rocjitsu::arith::test::check_binary_arithmetic<16, 64>(
       rj_arith_v_sub_f16_w64_gfx1250, [](double x, double y) { return x - y; },
       /*gfx12=*/true, /*fp_status_supported=*/false,
-      /*compatibility_status=*/false, /*half_exact=*/false);
+      /*options=*/{.compatibility_reports_status = false, .half_exact = false});
 }
 
 // RDNA2 keeps the RDNA3 model but refuses strict exact until its captures are reviewed.
@@ -218,7 +218,7 @@ TEST(FpSubF16W64Gfx10, Arithmetic) {
   rocjitsu::arith::test::check_binary_arithmetic<16, 64>(
       rj_arith_v_sub_f16_w64_gfx10, [](double x, double y) { return x - y; },
       /*gfx12=*/false, /*fp_status_supported=*/false,
-      /*compatibility_status=*/false, /*half_exact=*/false);
+      /*options=*/{.compatibility_reports_status = false, .half_exact = false});
 }
 
 // gfx1250 keeps the gfx12 model but refuses strict exact until its captures are reviewed.
@@ -226,7 +226,7 @@ TEST(FpSubrevF16W32Gfx1250, Arithmetic) {
   rocjitsu::arith::test::check_binary_arithmetic<16, 32>(
       rj_arith_v_subrev_f16_w32_gfx1250, [](double x, double y) { return y - x; },
       /*gfx12=*/true, /*fp_status_supported=*/false,
-      /*compatibility_status=*/false, /*half_exact=*/false);
+      /*options=*/{.compatibility_reports_status = false, .half_exact = false});
 }
 
 // RDNA2 keeps the RDNA3 model but refuses strict exact until its captures are reviewed.
@@ -234,7 +234,7 @@ TEST(FpSubrevF16W32Gfx10, Arithmetic) {
   rocjitsu::arith::test::check_binary_arithmetic<16, 32>(
       rj_arith_v_subrev_f16_w32_gfx10, [](double x, double y) { return y - x; },
       /*gfx12=*/false, /*fp_status_supported=*/false,
-      /*compatibility_status=*/false, /*half_exact=*/false);
+      /*options=*/{.compatibility_reports_status = false, .half_exact = false});
 }
 
 // gfx1250 keeps the gfx12 model but refuses strict exact until its captures are reviewed.
@@ -242,7 +242,7 @@ TEST(FpSubrevF16W64Gfx1250, Arithmetic) {
   rocjitsu::arith::test::check_binary_arithmetic<16, 64>(
       rj_arith_v_subrev_f16_w64_gfx1250, [](double x, double y) { return y - x; },
       /*gfx12=*/true, /*fp_status_supported=*/false,
-      /*compatibility_status=*/false, /*half_exact=*/false);
+      /*options=*/{.compatibility_reports_status = false, .half_exact = false});
 }
 
 // RDNA2 keeps the RDNA3 model but refuses strict exact until its captures are reviewed.
@@ -250,14 +250,14 @@ TEST(FpSubrevF16W64Gfx10, Arithmetic) {
   rocjitsu::arith::test::check_binary_arithmetic<16, 64>(
       rj_arith_v_subrev_f16_w64_gfx10, [](double x, double y) { return y - x; },
       /*gfx12=*/false, /*fp_status_supported=*/false,
-      /*compatibility_status=*/false, /*half_exact=*/false);
+      /*options=*/{.compatibility_reports_status = false, .half_exact = false});
 }
 
 // Check arithmetic results, modifiers, masks, aliases, and supported FP status.
 TEST(FpSubrevF32W32Gfx12, Arithmetic) {
   rocjitsu::arith::test::check_binary_arithmetic<32, 32>(
       rj_arith_v_subrev_f32_w32_gfx12, [](double x, double y) { return y - x; }, /*gfx12=*/true,
-      /*fp_status_supported=*/false, /*compatibility_status=*/true);
+      /*fp_status_supported=*/false, {.compatibility_reports_status = true});
 }
 
 // Check arithmetic results, modifiers, masks, aliases, and supported FP status.
@@ -270,7 +270,7 @@ TEST(FpSubrevF32W32Gfx11, Arithmetic) {
 TEST(FpSubrevF32W64Gfx12, Arithmetic) {
   rocjitsu::arith::test::check_binary_arithmetic<32, 64>(
       rj_arith_v_subrev_f32_w64_gfx12, [](double x, double y) { return y - x; }, /*gfx12=*/true,
-      /*fp_status_supported=*/false, /*compatibility_status=*/true);
+      /*fp_status_supported=*/false, {.compatibility_reports_status = true});
 }
 
 // Check arithmetic results, modifiers, masks, aliases, and supported FP status.
@@ -672,5 +672,67 @@ TEST(FpBinaryF32, CompatibilityStatus) {
         }
       }
     }
+  }
+}
+
+namespace {
+// Exercise rounded-result scaling, masked aliases, status preservation and rejected combinations.
+template <int Lanes, typename Call> void check_sdwa_binary(Call call, uint32_t expected) {
+  using namespace rocjitsu::arith::test;
+  using Mask = WaveMask<Lanes>;
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (uint64_t semantics : semantics_modes()) {
+      for (int aliasing_offset : {0, 1, 2}) {
+        Registers<3, Lanes> input;
+        for (int lane = 0; lane < Lanes; ++lane) {
+          input.v[0][lane] = 0x3fc00000U; // 1.5
+          input.v[1][lane] = 0x3f000000U; // 0.5
+        }
+        Registers<3, Lanes> actual = input;
+        const uint64_t flags = cpu | semantics | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
+        const uint64_t mode = RJ_ARITH_ALU_SDWA | RJ_ARITH_ALU_OMOD_2;
+        const Mask exec_mask = Mask(1) | (Mask(1) << (Lanes - 1));
+        uint32_t status = 0x100;
+        const int result = call(flags, exec_mask, mode, actual.v + aliasing_offset, actual.v,
+                                actual.v + 1, &status);
+        EXPECT_EQ(status, 0x100U);
+        if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+          EXPECT_EQ(result, RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS);
+          actual.expect_preserved(input, 0, 0);
+          continue;
+        }
+        ASSERT_EQ(result, RJ_ARITH_SUCCESS);
+        for (int lane = 0; lane < Lanes; ++lane) {
+          EXPECT_EQ(actual.v[aliasing_offset][lane],
+                    (exec_mask >> lane) & 1U ? expected : input.v[aliasing_offset][lane]);
+        }
+        actual.expect_preserved(input, aliasing_offset, 1);
+        EXPECT_EQ(call(flags, Mask(0), mode, nullptr, nullptr, nullptr, nullptr), 0);
+        EXPECT_EQ(call(flags, Mask(0), mode | RJ_ARITH_DPP16, nullptr, nullptr, nullptr, nullptr),
+                  RJ_ARITH_ERROR_INVALID_FLAGS);
+      }
+    }
+  }
+}
+} // namespace
+
+// The four ordinary FP32 operations share SDWA output rules for both wave widths.
+TEST(FpBinary, SdwaOutput) {
+  using Call32 = decltype(&rj_arith_v_add_f32_w32);
+  using Call64 = decltype(&rj_arith_v_add_f32_w64);
+  struct Case {
+    Call32 wave32;
+    Call64 wave64;
+    uint32_t expected;
+  };
+  const Case cases[] = {
+      {rj_arith_v_add_f32_w32, rj_arith_v_add_f32_w64, 0x40800000U},
+      {rj_arith_v_sub_f32_w32, rj_arith_v_sub_f32_w64, 0x40000000U},
+      {rj_arith_v_subrev_f32_w32, rj_arith_v_subrev_f32_w64, 0xc0000000U},
+      {rj_arith_v_mul_f32_w32, rj_arith_v_mul_f32_w64, 0x3fc00000U},
+  };
+  for (const Case &sample : cases) {
+    check_sdwa_binary<32>(sample.wave32, sample.expected);
+    check_sdwa_binary<64>(sample.wave64, sample.expected);
   }
 }
