@@ -944,9 +944,10 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMapMemoryToGPUNodes(
       }
     }
 
-    // Reuse the user-pointer mapping already registered for this address.
+    // Reuse the user-pointer mapping already registered for this address. Only the host-address
+    // entry (user_data set) describes a host range; the GPU-address entry must not match here.
     auto *allocation = FindAllocation(MemoryAddress, aligned_size);
-    if (allocation != nullptr && allocation->userptr) {
+    if (allocation != nullptr && allocation->userptr && allocation->user_data != nullptr) {
       auto* mapped = wsl::thunk::GpuMemory::Convert(allocation->handle);
       *AlternateVAGPU = (uintptr_t)allocation->gpu_addr +
           ((uintptr_t)MemoryAddress - (uintptr_t)allocation->cpu_addr);
