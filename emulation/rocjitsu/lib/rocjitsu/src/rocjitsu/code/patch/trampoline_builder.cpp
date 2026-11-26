@@ -125,13 +125,8 @@ bool plan_argument_moves(std::span<const ProbeArgValue> args, const ProbeAbi &ab
     report(err, "trampoline plan: original_size must be nonzero and dword aligned");
     return false;
   }
-  if (plan.emit_original && plan.original_size != 4 && plan.original_size != 8) {
-    report(err, "trampoline plan: original_size must be 4 or 8 when relocating the original");
-    return false;
-  }
-  if (plan.patch_anchor && plan.original_size != 4 && plan.original_size != 8 &&
-      plan.original_size != 12) {
-    report(err, "trampoline plan: original_size must be 4, 8 or 12 when patching the anchor");
+  if ((plan.emit_original || plan.patch_anchor) && plan.original_size > 12) {
+    report(err, "trampoline plan: original_size must be 4, 8 or 12 for anchor replay or splice");
     return false;
   }
   const size_t expected_words = plan.original_size / sizeof(uint32_t);
