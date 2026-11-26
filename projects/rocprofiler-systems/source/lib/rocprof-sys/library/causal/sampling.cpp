@@ -201,14 +201,18 @@ causal_offload_buffer(std::int64_t, causal_sampler_buffer_t&& _buf)
     }
 }
 
-// On the main thread this fails during init, before the process is Active. std::exit
-// would run static destructors, and the causal thread_data teardown then reads the
-// timemory hash id map that exit already destroyed. _exit is not wrapped by GOTCHA.
+// Before Active (main thread init), std::exit would tear down the hash id map while
+// causal thread_data still reads it, so use _exit. Once Active (new threads), use
+// std::exit so the exit wrapper finalizes and keeps the causal data collected so far.
 [[noreturn]] void
 exit_failed_backend()
 {
     logger_t::instance().flush();
-    ::_exit(EXIT_FAILURE);
+    if(state::process::get() < state::process::Active)
+    {
+        ::_exit(EXIT_FAILURE);
+    }
+    std::exit(EXIT_FAILURE);
 }
 
 std::set<int>

@@ -23,6 +23,10 @@ from conftest import (
 )
 from rocprofsys import GPUInfo, ValidationResult, cache
 from rocprofsys import TestResult as RocprofsysTestResult
+from rocprofsys.capabilities import (
+    deny_perf_events_supported,
+    make_deny_perf_events_hook,
+)
 from rocprofsys.gpu import GFX_XXXX_PATTERN, ROCMINFO_NAME_GFX_PATTERN
 from rocprofsys.runners import (
     BinaryRewriteRunner,
@@ -673,3 +677,35 @@ class TestHostCountersExpected:
     def test_passthrough_without_frequency(self, monkeypatch):
         monkeypatch.setattr("conftest.cpu_frequency_available", lambda: False)
         assert host_counters_expected(["Load (S)"]) == ["Load (S)"]
+
+
+# ---------------------------------------------------------------------------
+# deny_perf_events (seccomp filter used by the causal open-failure tests)
+# ---------------------------------------------------------------------------
+class TestDenyPerfEvents:
+    # perf_event_open() with a NULL attr; the kernel rejects it before any
+    # paranoid-level permission check, so only the seccomp filter can return EPERM.
+    PROBE = (
+        "import ctypes, platform, sys\n"
+        "nr = {'x86_64': 298, 'aarch64': 241}[platform.machine()]\n"
+        "libc = ctypes.CDLL(None, use_errno=True)\n"
+        "libc.syscall(nr, None, 0, -1, -1, 0)\n"
+        "sys.exit(ctypes.get_errno())\n"
+    )
+
+    @pytest.fixture(autouse=True)
+    def _require_support(self):
+        if not deny_perf_events_supported():
+            pytest.skip("seccomp perf_event_open filter is not supported here")
+
+    def _probe_errno(self, **kwargs) -> int:
+        import subprocess
+        import sys
+
+        return subprocess.run([sys.executable, "-c", self.PROBE], **kwargs).returncode
+
+    def test_hook_returns_eperm(self):
+        assert self._probe_errno(preexec_fn=make_deny_perf_events_hook()) == 1
+
+    def test_without_hook_is_not_eperm(self):
+        assert self._probe_errno() != 1
