@@ -46,8 +46,9 @@ Before writing new infrastructure, check these existing libraries:
 - **Data types** — `util/data_types.h` provides FP16/BF16 storage conversions.
   Instruction conversions belong in `lib/arith/`; independent test models for
   FP8/BF8/FP4/FP6 belong in `tests/float_format_reference.h`.
-- **SIMD** — `util/simd.h` wraps `<experimental/simd>` with scalar
-  fallback. Add new SIMD primitives here, not inline in ISA execute bodies.
+- **Register transport** — `util/simd.h` provides native-width raw lane blocks
+  and masked stores. ALU/matrix SIMD backends belong to `lib/arith/`; texture
+  sampling and memory-atomic semantics stay in rocjitsu.
 - **Intrusive list** — `util/intrusive_list.h` for linked data structures
   that need O(1) insert/erase without heap allocation per node.
 - **Arena allocator** — `util/arena_alloc.h` for fixed-size block pools.

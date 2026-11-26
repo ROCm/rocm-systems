@@ -313,19 +313,11 @@ void check_all_vop3(uint64_t exec) {
 }
 
 TEST(VopcCmpClassSimdCorrectness, FullExecMask) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   check_all(/*exec=*/~0ULL);
   check_all_vop3(/*exec=*/~0ULL);
 }
 
 TEST(VopcCmpClassSimdCorrectness, PartialExecMask) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   check_all(/*exec=*/0xA5A5'F0F0'1234'8001ULL);
   check_all_vop3(/*exec=*/0xA5A5'F0F0'1234'8001ULL);
 }

@@ -149,7 +149,7 @@ TEST(MfmaSimdExact, F32Spec_AllShapes) {
 }
 
 TEST(MfmaSimdExact, F32SpecDestructiveSourceOverlap) {
-  constexpr uint32_t W = static_cast<uint32_t>(util::native<float>::size());
+  constexpr uint32_t W = static_cast<uint32_t>(util::RegisterBlock<float>::size());
   if (W <= 1 || 32 % W != 0) {
     GTEST_SKIP() << "test requires a supported native SIMD width";
   }
@@ -238,9 +238,6 @@ TEST(MfmaSimdExact, I32_i8_AllShapes) {
 
 // --- f64 MFMA ---
 TEST(MfmaSimdExact, F64_AllShapes) {
-  if (util::native<double>::size() <= 1) {
-    GTEST_SKIP() << "no native f64 SIMD";
-  }
   const struct {
     uint32_t m, n, k, b;
   } shapes[] = {{16, 16, 4, 1}, {4, 4, 4, 4}};

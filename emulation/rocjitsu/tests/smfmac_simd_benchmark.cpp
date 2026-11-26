@@ -342,10 +342,6 @@ void benchmark_case(const Shape &shape, size_t variant) {
 } // namespace
 
 TEST(SmfmacSimdBenchmark, DecodedF32Forms) {
-  SKIP_IF_NO_SIMD();
-  if (util::native<float>::size() != 16) {
-    GTEST_SKIP() << "SMFMAC AVX-512 paths require 16-lane native SIMD";
-  }
 
   for (const auto &shape : SHAPES) {
     const size_t variants = shape.fp8 ? 4 : 2;

@@ -134,9 +134,6 @@ RunResult run_fmac(bool force_scalar, uint64_t exec, uint32_t mode, bool literal
 }
 
 TEST(Vop2FmaF64SimdCorrectness, InlineLiteralUsesEncodedHighWord) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-  }
   ForceScalarGuard guard;
   const RunResult scalar = run_fmac(true, ~uint64_t{0}, /*mode=*/3u << 6, true);
   const RunResult simd = run_fmac(false, ~uint64_t{0}, /*mode=*/3u << 6, true);
@@ -145,9 +142,6 @@ TEST(Vop2FmaF64SimdCorrectness, InlineLiteralUsesEncodedHighWord) {
 }
 
 TEST(Vop2FmaF64SimdCorrectness, PartialExecPreservesBothInactiveVgprWords) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-  }
   ForceScalarGuard guard;
   constexpr uint64_t kExec = 0xa5a5f0f012348001ULL;
   const RunResult scalar = run_fmac(true, kExec, /*mode=*/3u << 6);
@@ -161,9 +155,6 @@ TEST(Vop2FmaF64SimdCorrectness, PartialExecPreservesBothInactiveVgprWords) {
 }
 
 TEST(Vop2FmaF64SimdCorrectness, AllRoundAndDenormModesMatchScalar) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-  }
   ForceScalarGuard guard;
   for (uint32_t round = 0; round < 4; ++round) {
     for (uint32_t denorm = 0; denorm < 4; ++denorm) {
@@ -176,9 +167,6 @@ TEST(Vop2FmaF64SimdCorrectness, AllRoundAndDenormModesMatchScalar) {
 }
 
 TEST(Vop2FmaF64SimdCorrectness, SpecialValuesAndDenormBoundariesMatchScalarExactly) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-  }
   ForceScalarGuard guard;
 
   constexpr uint64_t kPositiveZero = 0x0000'0000'0000'0000ULL;

@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// Check raw SIMD register transport, lane-mask bridges and the VM dispatch
-// override. Numerical instruction behavior is tested through rj-arith.
+// Check raw register transport, masked stores and the VM dispatch override.
+// Numerical instruction behavior is tested through rj-arith.
 
 #include "util/simd.h"
 #include "util/simd_test_hooks.h"
@@ -24,52 +24,10 @@
 
 namespace {
 
-// Each test skips at runtime when `<experimental/simd>` is unavailable;
-// the SIMD body is type-checked but compiles out via `if constexpr`.
-#define SKIP_IF_NO_SIMD()                                                                          \
-  if constexpr (!util::has_stdx_simd) {                                                            \
-    GTEST_SKIP() << "<experimental/simd> unavailable; util SIMD helpers skipped.";                 \
-    return;                                                                                        \
-  }
-
-constexpr std::size_t kW = util::native_width_v<uint32_t>;
-
-struct FallbackMask {
-  static constexpr std::size_t kSize = 5;
-  explicit FallbackMask(bool value) { lanes.fill(value); }
-  static constexpr std::size_t size() { return kSize; }
-  bool operator[](std::size_t i) const { return lanes[i]; }
-  bool &operator[](std::size_t i) { return lanes[i]; }
-
-  std::array<bool, kSize> lanes{};
-};
-
-struct FallbackSimd {
-  using mask_type = FallbackMask;
-  static constexpr std::size_t size() { return mask_type::size(); }
-};
-
-TEST(UtilSimd, Native64MaskWorkaroundMacroIsBooleanOverridePoint) {
-  constexpr int workaround = RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS;
-  constexpr int user_override = RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS_USER_OVERRIDE;
-  static_assert(workaround == 0 || workaround == 1);
-  static_assert(user_override == 0 || user_override == 1);
-
-  if constexpr (!user_override) {
-    // Keep the expected policy independent of host_target.h. This reference
-    // checks detection; it does not select a production implementation.
-#if defined(__clang__) && defined(__GLIBCXX__) && defined(__AVX512F__)
-    constexpr int kExpectedDefaultMaskFallback = 1;
-#else
-    constexpr int kExpectedDefaultMaskFallback = 0;
-#endif
-    EXPECT_EQ(workaround, kExpectedDefaultMaskFallback);
-  }
-}
+constexpr std::size_t kW = util::register_block_lanes_v<uint32_t>;
 
 TEST(UtilSimd, Load_Contiguous_U32) {
-  SKIP_IF_NO_SIMD();
-  alignas(util::native<uint32_t>) uint32_t src[kW];
+  alignas(util::RegisterBlock<uint32_t>) uint32_t src[kW];
   for (std::size_t i = 0; i < kW; ++i) {
     src[i] = static_cast<uint32_t>(0xDEAD'0000u + i);
   }
@@ -80,8 +38,7 @@ TEST(UtilSimd, Load_Contiguous_U32) {
 }
 
 TEST(UtilSimd, Load_Contiguous_F32) {
-  SKIP_IF_NO_SIMD();
-  alignas(util::native<float>) uint32_t src[kW];
+  alignas(util::RegisterBlock<float>) uint32_t src[kW];
   std::array<float, kW> expected{};
   for (std::size_t i = 0; i < kW; ++i) {
     expected[i] = 1.5f * static_cast<float>(i) - 7.25f;
@@ -94,7 +51,6 @@ TEST(UtilSimd, Load_Contiguous_F32) {
 }
 
 TEST(UtilSimd, Broadcast_U32) {
-  SKIP_IF_NO_SIMD();
   constexpr uint32_t kBits = 0xCAFEBABEu;
   auto v = util::broadcast<uint32_t>(kBits);
   for (std::size_t i = 0; i < kW; ++i) {
@@ -103,7 +59,6 @@ TEST(UtilSimd, Broadcast_U32) {
 }
 
 TEST(UtilSimd, Broadcast_F32) {
-  SKIP_IF_NO_SIMD();
   constexpr float kVal = -3.14159f;
   const uint32_t bits = std::bit_cast<uint32_t>(kVal);
   auto v = util::broadcast<float>(bits);
@@ -112,55 +67,9 @@ TEST(UtilSimd, Broadcast_F32) {
   }
 }
 
-TEST(UtilSimd, MaskBitBridgeRoundTripsEveryPattern) {
-  SKIP_IF_NO_SIMD();
-#if RJ_HOST_HAS_STDX_SIMD
-  const auto check = []<typename Simd>() {
-    constexpr std::size_t W = Simd::size();
-    ASSERT_LE(W, 16u) << "exhaustive mask sweep is intentionally bounded";
-    const uint64_t full = util::mask<uint64_t>(static_cast<int>(W));
-    for (uint64_t bits = 0; bits <= full; ++bits) {
-      const auto mask = util::simd_mask_from_bits<Simd>(bits);
-      for (std::size_t i = 0; i < W; ++i) {
-        ASSERT_EQ(static_cast<bool>(mask[i]), ((bits >> i) & 1u) != 0)
-            << "width " << W << ", bits " << bits << ", lane " << i;
-      }
-      ASSERT_EQ(util::simd_mask_to_bits(mask), bits) << "width " << W << ", bits " << bits;
-    }
-    EXPECT_EQ(util::simd_mask_to_bits(util::simd_mask_from_bits<Simd>(~uint64_t{0})), full)
-        << "input bits above the SIMD width must be ignored";
-    EXPECT_EQ(util::simd_mask_to_bits(util::simd_mask_from_bits<Simd>(~full)), 0u)
-        << "high-only input bits must not set SIMD lanes";
-  };
-
-  check.template operator()<util::native<uint32_t>>();
-#if !RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
-  check.template operator()<util::native<uint64_t>>();
-  check.template operator()<util::narrow32<uint32_t>>();
-#endif
-#endif
-}
-
-TEST(UtilSimd, MaskBitBridgePortableFallbackRoundTripsEveryPattern) {
-  SKIP_IF_NO_SIMD();
-#if RJ_HOST_HAS_STDX_SIMD
-  const uint64_t full = util::mask<uint64_t>(FallbackSimd::size());
-  for (uint64_t bits = 0; bits <= full; ++bits) {
-    const auto mask = util::simd_mask_from_bits<FallbackSimd>(bits);
-    for (std::size_t i = 0; i < FallbackSimd::size(); ++i) {
-      ASSERT_EQ(mask[i], ((bits >> i) & 1u) != 0) << "bits " << bits << ", lane " << i;
-    }
-    ASSERT_EQ(util::simd_mask_to_bits(mask), bits);
-  }
-  EXPECT_EQ(util::simd_mask_to_bits(util::simd_mask_from_bits<FallbackSimd>(~uint64_t{0})), full);
-  EXPECT_EQ(util::simd_mask_to_bits(util::simd_mask_from_bits<FallbackSimd>(~full)), 0u);
-#endif
-}
-
 TEST(UtilSimd, MaskedStore_FullMask) {
-  SKIP_IF_NO_SIMD();
-  alignas(util::native<uint32_t>) uint32_t dst[kW] = {};
-  alignas(util::native<uint32_t>) uint32_t src[kW];
+  alignas(util::RegisterBlock<uint32_t>) uint32_t dst[kW] = {};
+  alignas(util::RegisterBlock<uint32_t>) uint32_t src[kW];
   for (std::size_t i = 0; i < kW; ++i) {
     src[i] = 0xA5A5'0000u + i;
   }
@@ -171,9 +80,8 @@ TEST(UtilSimd, MaskedStore_FullMask) {
 }
 
 TEST(UtilSimd, MaskedStore_PartialMask) {
-  SKIP_IF_NO_SIMD();
-  alignas(util::native<uint32_t>) uint32_t dst[kW];
-  alignas(util::native<uint32_t>) uint32_t src[kW];
+  alignas(util::RegisterBlock<uint32_t>) uint32_t dst[kW];
+  alignas(util::RegisterBlock<uint32_t>) uint32_t src[kW];
   for (std::size_t i = 0; i < kW; ++i) {
     dst[i] = 0x1111'1111u;
     src[i] = 0x2222'0000u + i;
@@ -195,9 +103,8 @@ TEST(UtilSimd, MaskedStore_PartialMask) {
 }
 
 TEST(UtilSimd, MaskedStore_EmptyMask) {
-  SKIP_IF_NO_SIMD();
-  alignas(util::native<uint32_t>) uint32_t dst[kW];
-  alignas(util::native<uint32_t>) uint32_t src[kW];
+  alignas(util::RegisterBlock<uint32_t>) uint32_t dst[kW];
+  alignas(util::RegisterBlock<uint32_t>) uint32_t src[kW];
   for (std::size_t i = 0; i < kW; ++i) {
     dst[i] = 0xDEAD'BEEFu;
     src[i] = 0x0BAD'F00Du;
@@ -210,103 +117,70 @@ TEST(UtilSimd, MaskedStore_EmptyMask) {
 }
 
 TEST(UtilSimd, BlitToBuffer_F32) {
-  SKIP_IF_NO_SIMD();
-  alignas(util::native<float>) uint32_t src[kW];
+  alignas(util::RegisterBlock<float>) uint32_t src[kW];
   for (std::size_t i = 0; i < kW; ++i) {
     src[i] = std::bit_cast<uint32_t>(2.0f * static_cast<float>(i) + 0.5f);
   }
   auto v = util::load<float>(src);
-  alignas(util::native<float>) uint32_t buf[util::native<float>::size()] = {};
+  alignas(util::RegisterBlock<float>) uint32_t buf[util::RegisterBlock<float>::size()] = {};
   util::blit_to_buffer<float>(buf, v);
   for (std::size_t i = 0; i < kW; ++i) {
     EXPECT_EQ(buf[i], src[i]) << "lane " << i;
   }
 }
 
-// --- narrow32 prims (native_width64-wide 32-bit lanes) for the f64<->32-bit
-// conversion glue. Round-trips and the double<->narrow32 bridge cast. ---
-
-TEST(UtilSimd, LoadNarrow_RoundTrip_F32) {
-  SKIP_IF_NO_SIMD();
-  constexpr std::size_t W = util::native_width64;
-  alignas(util::narrow32<float>) uint32_t src[W];
-  std::array<float, W> expected{};
-  for (std::size_t i = 0; i < W; ++i) {
-    expected[i] = 1.5f * static_cast<float>(i) - 7.25f;
-    src[i] = std::bit_cast<uint32_t>(expected[i]);
+// Transport must preserve payloads and signaling bits without FP arithmetic.
+TEST(UtilSimd, RawFloatingEncodings) {
+  const std::array<uint32_t, 8> patterns = {0x7f812345u, 0xffc54321u, 0x80000000u, 0x7f800000u,
+                                            1u,          0x7f7fffffu, 0xff800000u, 0u};
+  std::array<uint32_t, kW> words;
+  for (std::size_t lane = 0; lane < kW; ++lane) {
+    words[lane] = patterns[lane % patterns.size()] ^ uint32_t(lane / patterns.size()) * 0x1234567u;
   }
-  auto v = util::load_narrow<float>(src);
-  for (std::size_t i = 0; i < W; ++i) {
-    EXPECT_EQ(v[i], expected[i]) << "lane " << i;
-  }
-}
-
-TEST(UtilSimd, BroadcastNarrow_I32) {
-  SKIP_IF_NO_SIMD();
-  constexpr int32_t kVal = -123456789;
-  auto v = util::broadcast_narrow<int32_t>(std::bit_cast<uint32_t>(kVal));
-  for (std::size_t i = 0; i < util::native_width64; ++i) {
-    EXPECT_EQ(v[i], kVal) << "lane " << i;
-  }
-}
-
-TEST(UtilSimd, MaskedStoreNarrow_FullAndPartial) {
-  SKIP_IF_NO_SIMD();
-  constexpr std::size_t W = util::native_width64;
-  alignas(util::narrow32<int32_t>) int32_t vals[W];
-  for (std::size_t i = 0; i < W; ++i) {
-    vals[i] = static_cast<int32_t>(i) - 3;
-  }
-  util::narrow32<int32_t> v(vals, util::stdx::vector_aligned);
-
-  uint32_t dst_full[W] = {};
-  util::masked_store_narrow<int32_t>(dst_full, v, util::mask<uint64_t>(static_cast<int>(W)));
-  for (std::size_t i = 0; i < W; ++i) {
-    EXPECT_EQ(dst_full[i], std::bit_cast<uint32_t>(vals[i])) << "full lane " << i;
-  }
-
-  uint32_t dst_part[W];
-  for (std::size_t i = 0; i < W; ++i) {
-    dst_part[i] = 0x1111'1111u;
-  }
-  uint64_t mask = 0;
-  for (std::size_t i = 1; i < W; i += 2) {
-    mask |= (1ULL << i);
-  }
-  util::masked_store_narrow<int32_t>(dst_part, v, mask);
-  for (std::size_t i = 0; i < W; ++i) {
-    if (mask & (1ULL << i)) {
-      EXPECT_EQ(dst_part[i], std::bit_cast<uint32_t>(vals[i])) << "part write lane " << i;
-    } else {
-      EXPECT_EQ(dst_part[i], 0x1111'1111u) << "part preserve lane " << i;
+  const uint64_t full_mask = util::mask<uint64_t>(kW);
+  std::array<uint32_t, kW> output;
+  // All lane masks, including ignored high bits, preserve the other words.
+  for (uint64_t exec_mask = 0; exec_mask <= full_mask; ++exec_mask) {
+    output.fill(0xdeadbeefu);
+    util::masked_store(output.data(), util::load<float>(words.data()), exec_mask | ~full_mask);
+    for (std::size_t lane = 0; lane < kW; ++lane) {
+      EXPECT_EQ(output[lane], ((exec_mask >> lane) & 1) ? words[lane] : 0xdeadbeefu)
+          << "exec_mask=" << exec_mask << " lane=" << lane;
     }
   }
-}
+  for (uint32_t word : words) {
+    uint32_t broadcast[kW];
+    util::blit_to_buffer<float>(broadcast, util::broadcast<float>(word));
+    for (uint32_t value : broadcast) {
+      EXPECT_EQ(value, word);
+    }
+  }
 
-TEST(UtilSimd, NarrowBridgeCast_DoubleToFromB32) {
-  SKIP_IF_NO_SIMD();
-  constexpr std::size_t W = util::native_width64;
-  // f64 -> f32: a direct static_simd_cast between native<double> and
-  // narrow32<float> is the cvt_f32_f64 bridge; matches a per-lane (float)cast.
-  alignas(util::native<double>) double in[W];
-  for (std::size_t i = 0; i < W; ++i) {
-    in[i] = 0.1 * static_cast<double>(i) - 1.3 + 1e30;
+  const std::array<uint32_t, util::register_block_lanes64> low = {0x12345678u, 0u, 1u, 0u};
+  const std::array<uint32_t, util::register_block_lanes64> high = {0x7ff00000u, 0x80000000u, 0u,
+                                                                   0xfff00000u};
+  std::array<uint32_t, util::register_block_lanes64> out_low, out_high;
+  const uint64_t full_mask64 = util::mask<uint64_t>(low.size());
+  for (uint64_t exec_mask = 0; exec_mask <= full_mask64; ++exec_mask) {
+    out_low.fill(0xdeadbeefu);
+    out_high.fill(0xdeadbeefu);
+    util::masked_store64(out_low.data(), out_high.data(),
+                         util::load64<double>(low.data(), high.data()), exec_mask | ~full_mask64);
+    for (std::size_t lane = 0; lane < low.size(); ++lane) {
+      const bool active = (exec_mask >> lane) & 1;
+      EXPECT_EQ(out_low[lane], active ? low[lane] : 0xdeadbeefu);
+      EXPECT_EQ(out_high[lane], active ? high[lane] : 0xdeadbeefu);
+    }
   }
-  util::native<double> d(in, util::stdx::vector_aligned);
-  auto f = util::stdx::static_simd_cast<util::narrow32<float>>(d);
-  for (std::size_t i = 0; i < W; ++i) {
-    EXPECT_EQ(f[i], static_cast<float>(in[i])) << "f64->f32 lane " << i;
-  }
-  // i32 -> f64: the cvt_f64_i32 bridge (exact widening).
-  alignas(util::narrow32<int32_t>) int32_t iv[W];
-  for (std::size_t i = 0; i < W; ++i) {
-    iv[i] = static_cast<int32_t>(i) * -1000003;
-  }
-  util::narrow32<int32_t> ni(iv, util::stdx::vector_aligned);
-  auto dd = util::stdx::static_simd_cast<util::native<double>>(ni);
-  for (std::size_t i = 0; i < W; ++i) {
-    EXPECT_EQ(dd[i], static_cast<double>(iv[i])) << "i32->f64 lane " << i;
-  }
+  // A repeated register destination retains the high word of each active lane.
+  out_low.fill(0xdeadbeefu);
+  util::masked_store64(out_low.data(), out_low.data(),
+                       util::load64<double>(low.data(), high.data()), 0x5);
+  std::array<uint32_t, util::register_block_lanes64> expected;
+  expected.fill(0xdeadbeefu);
+  expected[0] = high[0];
+  expected[2] = high[2];
+  EXPECT_EQ(out_low, expected);
 }
 
 TEST(UtilSimd, ForceScalar_StableAcrossThreadsWithinImage) {
@@ -395,7 +269,5 @@ TEST(UtilSimd, ForceScalarOverrideDoesNotReachADlopenedModule) {
   util::set_force_scalar_for_testing(original);
   ::dlclose(module);
 }
-
-#undef SKIP_IF_NO_SIMD
 
 } // namespace

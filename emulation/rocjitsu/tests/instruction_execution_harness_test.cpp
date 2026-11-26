@@ -5911,9 +5911,6 @@ TEST(Rdna4True16Vop3Test, AddF16DppPreservesMaskedDestinationHalf) {
 }
 
 TEST(Rdna4True16Vop3Test, UnaryDpp16ScalarAndSimdMatchMaskedLaneRouting) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-  }
 
   constexpr uint32_t kWaveSize = 32;
   constexpr uint32_t kSrc = 0;
@@ -6002,9 +5999,6 @@ TEST(Rdna4True16Vop3Test, UnaryDpp16ScalarAndSimdMatchMaskedLaneRouting) {
 }
 
 TEST(Rdna4True16Vop3Test, VopcDpp16ScalarAndSimdMatchMaskedLaneRouting) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-  }
 
   constexpr uint32_t kWaveSize = 32;
   constexpr uint32_t kSrc0 = 0;
@@ -6098,9 +6092,6 @@ TEST(Rdna4True16Vop3Test, VopcDpp16ScalarAndSimdMatchMaskedLaneRouting) {
 }
 
 TEST(Rdna4True16Vop3Test, UnaryDpp8ScalarAndSimdMatchPermutedLanes) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-  }
 
   constexpr uint32_t kWaveSize = 32;
   constexpr uint32_t kSrc = 0;

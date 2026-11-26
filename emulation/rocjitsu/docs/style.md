@@ -146,6 +146,17 @@ Foo foo = static_cast<Foo>(bar); // OK but could use auto instead to avoid repet
   diagnostics that must survive a log-groups-OFF build, plus an
   async-signal-safe `::write` backtrace path).
 
+## Register transport and arithmetic SIMD
+
+Raw register transport uses backend-owned blocks in `util/simd.h`. Do not use
+`std::experimental::simd` or add numerical operations to that transport API.
+Use explicit AVX2/AVX-512 intrinsics when enabled by the compiler, with scalar
+fallbacks otherwise. Derive lane counts from the block type. VM objects share
+the configured CPU baseline; transport blocks must not cross compilation-target
+boundaries. Backend namespaces keep feature-dependent types and helpers distinct.
+Arithmetic SIMD backends use explicit ISA intrinsics and names that identify
+their CPU feature level, as described in the rj-arith design.
+
 ## Error Handling
 
 - Expected failures such as a rejected instruction encoding return `Result` or

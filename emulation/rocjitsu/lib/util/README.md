@@ -24,7 +24,7 @@ INTERFACE library that contributes an include path and nothing to link.
 
 | File | Description |
 |------|-------------|
-| `simd.h` | Vectorized operations via `<experimental/simd>` with scalar fallback. Float conversions, integer arithmetic (`mul_hi`, `popcount`, `clz`), rounding, and transcendental approximations (`rcp`, `rsq`, `log`, `exp`). |
+| `simd.h` | Native-width raw register blocks, broadcasts and masked stores for operand transport. |
 | `simd_test_hooks.h` | Test-only seam for forcing scalar execution to compare against SIMD paths. |
 
 ### Memory and Concurrency

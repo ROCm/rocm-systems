@@ -231,7 +231,6 @@ void bench(const char *label, BenchFixture &fx, const std::function<void()> &run
 // v_mfma_f32_16x16x32_f16: the dominant MFMA shape in fp16 transformer
 // forward passes (N=16 == one AVX-512 f32 lane group).
 TEST(MfmaSimdBenchmark, F32Scaled_16x16x128_fp8) {
-  SKIP_IF_NO_SIMD();
   BenchFixture fx;
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
   constexpr uint32_t M = 16, N = 16, K = 128, B = 1;

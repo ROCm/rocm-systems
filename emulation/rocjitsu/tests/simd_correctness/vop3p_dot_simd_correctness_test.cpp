@@ -184,10 +184,6 @@ void check_int_case(const IntCase &c, uint64_t exec, uint32_t clamp) {
 }
 
 TEST(Vop3pDotIntSimdCorrectness, FullExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   for (const auto &c : kIntCases) {
     for (uint32_t clamp = 0; clamp < 2; ++clamp) {
       check_int_case(c, /*exec=*/~0ULL, clamp);
@@ -196,10 +192,6 @@ TEST(Vop3pDotIntSimdCorrectness, FullExec) {
 }
 
 TEST(Vop3pDotIntSimdCorrectness, PartialExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   for (const auto &c : kIntCases) {
     for (uint32_t clamp = 0; clamp < 2; ++clamp) {
       check_int_case(c, /*exec=*/0xA5A5'F0F0'1234'8001ULL, clamp);
@@ -404,10 +396,6 @@ void check_f16_case(uint64_t exec, uint32_t neg, uint32_t neg_hi, uint32_t clamp
 }
 
 TEST(Vop3pDotF16SimdCorrectness, FullExecAllModifiers) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   for (uint32_t neg = 0; neg < 8; ++neg) {
     for (uint32_t neg_hi = 0; neg_hi < 4; ++neg_hi) {
       for (uint32_t clamp = 0; clamp < 2; ++clamp) {
@@ -418,10 +406,6 @@ TEST(Vop3pDotF16SimdCorrectness, FullExecAllModifiers) {
 }
 
 TEST(Vop3pDotF16SimdCorrectness, PartialExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   check_f16_case(/*exec=*/0xA5A5'F0F0'1234'8001ULL, /*neg=*/0, /*neg_hi=*/0, /*clamp=*/0);
 }
 

@@ -359,10 +359,6 @@ void check_mad64(const char *name, uint32_t op, bool is_signed, uint64_t exec) {
 }
 
 TEST(Vop3Shift64SimdCorrectness, MadWide64) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   check_mad64("v_mad_u64_u32_vop3", 488, /*is_signed=*/false, ~0ULL);
   check_mad64("v_mad_i64_i32_vop3", 489, /*is_signed=*/true, ~0ULL);
   check_mad64("v_mad_u64_u32_vop3", 488, /*is_signed=*/false, 0xA5A5'F0F0'1234'8001ULL);
@@ -495,40 +491,20 @@ TEST(Vop3Shift64SimdCorrectness, MadWide64ClampSaturatesAndPreservesCarry) {
 }
 
 TEST(Vop3Shift64SimdCorrectness, RevShiftsFullExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   check_revshift("v_lshlrev_b64_vop3", 655, ~0ULL);
   check_revshift("v_lshrrev_b64_vop3", 656, ~0ULL);
   check_revshift("v_ashrrev_i64_vop3", 657, ~0ULL);
 }
 
 TEST(Vop3Shift64SimdCorrectness, RevShiftsPartialExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   const uint64_t exec = 0xA5A5'F0F0'1234'8001ULL;
   check_revshift("v_lshlrev_b64_vop3", 655, exec);
   check_revshift("v_lshrrev_b64_vop3", 656, exec);
   check_revshift("v_ashrrev_i64_vop3", 657, exec);
 }
 
-TEST(Vop3Shift64SimdCorrectness, LshlAddFullExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
-  check_lshl_add(~0ULL);
-}
+TEST(Vop3Shift64SimdCorrectness, LshlAddFullExec) { check_lshl_add(~0ULL); }
 
-TEST(Vop3Shift64SimdCorrectness, LshlAddPartialExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
-  check_lshl_add(0xA5A5'F0F0'1234'8001ULL);
-}
+TEST(Vop3Shift64SimdCorrectness, LshlAddPartialExec) { check_lshl_add(0xA5A5'F0F0'1234'8001ULL); }
 
 } // namespace

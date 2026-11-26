@@ -308,20 +308,12 @@ void check_representative_mods(const Case &c, uint64_t exec) {
 }
 
 TEST(Vop3TernaryFpSimdCorrectness, FullExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   for (const auto &c : kCases) {
     check_representative_mods(c, /*exec=*/~0ULL);
   }
 }
 
 TEST(Vop3TernaryFpSimdCorrectness, PartialExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   for (const auto &c : kCases) {
     check_case(c, /*abs=*/0, /*neg=*/0, /*omod=*/0, /*clamp=*/0, /*exec=*/0xA5A5'F0F0'1234'8001ULL);
   }
@@ -558,10 +550,6 @@ std::array<uint32_t, 2> f16_output_words(const F16OutputCase &test, uint8_t opse
 class Vop3F16TernaryOutputOrderTest : public testing::TestWithParam<F16OutputCase> {};
 
 TEST_P(Vop3F16TernaryOutputOrderTest, MatchesScalarOutputContractWithSimdEnabledAndForcedScalar) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   ForceScalarGuard guard;
   rocjitsu::ScopedDefaultFpEnvironment environment;
   const auto &test = GetParam();

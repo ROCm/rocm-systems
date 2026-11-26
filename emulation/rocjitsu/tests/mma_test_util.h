@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 /// @file mma_test_util.h
-/// @brief Shared generators and skip guard for the MFMA/WMMA SIMD test
+/// @brief Shared generators for the MFMA/WMMA SIMD test
 /// suites and benchmarks.
 
 #pragma once
@@ -83,10 +83,3 @@ struct SmallI8Gen {
 };
 
 } // namespace mma_test
-
-#define SKIP_IF_NO_SIMD()                                                                          \
-  if constexpr (!util::has_stdx_simd) {                                                            \
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";                    \
-  } else if (util::native<float>::size() <= 1) {                                                   \
-    GTEST_SKIP() << "host native_simd width is 1 — no SIMD fast path";                             \
-  }

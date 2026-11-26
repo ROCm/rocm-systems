@@ -365,52 +365,24 @@ void check_rdna4_wave64_carry_in_oracle() {
   }
 }
 
-TEST(Vop3CarrySimdCorrectness, Cdna4FullExecMask) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
-  run_cdna4(/*exec=*/~0ULL);
-}
+TEST(Vop3CarrySimdCorrectness, Cdna4FullExecMask) { run_cdna4(/*exec=*/~0ULL); }
 
 TEST(Vop3CarrySimdCorrectness, Cdna4PartialExecMask) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   run_cdna4(/*exec=*/0xA5A5'F0F0'1234'8001ULL);
 }
 
 TEST(Vop3CarrySimdCorrectness, RdnaFullExecMask) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   // Wave32 — exec only meaningful in low 32 bits.
   run_rdna(/*exec=*/0x00000000'FFFFFFFFULL);
 }
 
-TEST(Vop3CarrySimdCorrectness, RdnaPartialExecMask) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
-  run_rdna(/*exec=*/0x00000000'A5A5F0F1ULL);
-}
+TEST(Vop3CarrySimdCorrectness, RdnaPartialExecMask) { run_rdna(/*exec=*/0x00000000'A5A5F0F1ULL); }
 
 TEST(Vop3CarrySimdCorrectness, Gfx1250Wave32MaskOperands) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   run_gfx1250_wave32(/*exec=*/0x00000000'A5A5F0F1ULL);
 }
 
 TEST(Vop3CarrySimdCorrectness, Rdna4Wave64MaskOperands) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   run_rdna4_wave64(/*exec=*/0xA5A5'F0F0'1234'8001ULL);
   check_rdna4_wave64_carry_in_oracle();
 }
