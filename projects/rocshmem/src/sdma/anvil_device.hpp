@@ -189,7 +189,7 @@ struct SdmaQueueDeviceHandle {
     return (uptoIndex - cachedHwReadIndex) < queue_size_in_bytes;
   }
 
-  __device__ __forceinline__ uint64_t ReserveQueueSpace(const size_t size_in_bytes,
+  __device__ inline uint64_t ReserveQueueSpace(const size_t size_in_bytes,
                                                         uint64_t& offset) {
     const uint64_t queue_size_in_bytes = SDMA_QUEUE_SIZE;
 
@@ -224,7 +224,7 @@ struct SdmaQueueDeviceHandle {
   }
 
   template <typename PacketType>
-  __device__ __forceinline__ void placePacket(PacketType& packet, uint64_t& pendingWptr,
+  __device__ inline void placePacket(PacketType& packet, uint64_t& pendingWptr,
                                               uint64_t offset) {
     // Ensure that one warp can write the whole packet
     static_assert(sizeof(PacketType) / sizeof(uint32_t) <= 64);
@@ -251,7 +251,7 @@ struct SdmaQueueDeviceHandle {
     pendingWptr += sizeof(PacketType);
   }
 
-  __device__ __forceinline__ void submitPacket(uint64_t base, uint64_t pendingWptr) {
+  __device__ inline void submitPacket(uint64_t base, uint64_t pendingWptr) {
     int retries = 0;
     while (true) {
       uint64_t val = __scoped_atomic_load_n(committedWptr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
@@ -335,7 +335,7 @@ struct SdmaQueueDeviceHandle {
   __device__ inline void quietAll() { flushTo(quietTarget()); }
 
  private:
-  __device__ __forceinline__ bool nontemporal_compare_exchange(uint64_t* vaddr, uint64_t expected,
+  __device__ inline bool nontemporal_compare_exchange(uint64_t* vaddr, uint64_t expected,
                                                                uint64_t value) {
     uint64_t vdst;
     [[maybe_unused]] unsigned __int128 vdata = ((unsigned __int128)expected << 64) | value;
@@ -375,7 +375,7 @@ struct SdmaQueueDeviceHandle {
 struct SdmaQueueSingleProducerDeviceHandle : SdmaQueueDeviceHandle {
 #if defined(__HIPCC__) || defined(__CUDACC__)
   // Pad remaining ring space with NOPs up to the next ring boundary
-  __device__ __forceinline__ void PadRingToEnd(uint64_t cur_index) {
+  __device__ inline void PadRingToEnd(uint64_t cur_index) {
     uint64_t new_index = cur_index + (SDMA_QUEUE_SIZE - WrapIntoRing(cur_index));
     if (!CanWriteUpto(new_index))
       return;
@@ -389,7 +389,7 @@ struct SdmaQueueSingleProducerDeviceHandle : SdmaQueueDeviceHandle {
   }
 
   // Single-producer ReserveQueueSpace: direct pointer write, no CAS
-  __device__ __forceinline__ uint64_t ReserveQueueSpace(const size_t size_in_bytes) {
+  __device__ inline uint64_t ReserveQueueSpace(const size_t size_in_bytes) {
     const uint32_t queue_size = SDMA_QUEUE_SIZE;
     uint64_t cur_index;
     while (true) {
@@ -408,14 +408,14 @@ struct SdmaQueueSingleProducerDeviceHandle : SdmaQueueDeviceHandle {
   }
 
   // API-compatible overload for shared put_signal_counter_impl (ring wrap uses PadRingToEnd).
-  __device__ __forceinline__ uint64_t ReserveQueueSpace(const size_t size_in_bytes,
+  __device__ inline uint64_t ReserveQueueSpace(const size_t size_in_bytes,
                                                         uint64_t& offset) {
     offset = 0;
     return ReserveQueueSpace(size_in_bytes);
   }
 
   // Single-producer submitPacket: no committedWptr serialization
-  __device__ __forceinline__ void submitPacket([[maybe_unused]] uint64_t base,
+  __device__ inline void submitPacket([[maybe_unused]] uint64_t base,
                                                uint64_t pendingWptr) {
     *wptr = pendingWptr;
 #if defined(__GFX9__) || defined(__GFX10__) || defined(__GFX11__)
@@ -437,7 +437,7 @@ static_assert(sizeof(SdmaQueueSingleProducerDeviceHandle) == sizeof(SdmaQueueDev
 
 // Internal template: reserves space for enabled operations, places packets, submits.
 template <bool PUT_EN, bool SIGNAL_EN, bool COUNTER_EN, typename QueueHandle>
-__device__ __forceinline__ void put_signal_counter_impl(QueueHandle& handle, void* dst,
+__device__ inline void put_signal_counter_impl(QueueHandle& handle, void* dst,
                                                         void* src, size_t size, uint64_t* signal,
                                                         uint64_t* counter,
                                                         uint64_t* put_index = nullptr) {

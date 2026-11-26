@@ -33,7 +33,7 @@
 namespace rocshmem {
 
 template <TileScope Scope>
-__device__ __forceinline__ void tile_scope_workers(int* worker_id,
+__device__ inline void tile_scope_workers(int* worker_id,
                                                    int* worker_count) {
   if constexpr (Scope == TileScope::Lane) {
     *worker_id = 0;
@@ -52,7 +52,7 @@ __device__ __forceinline__ void tile_scope_workers(int* worker_id,
 // loop in the caller avoids the call frame and distributes the vectors over
 // the whole workgroup.
 template <MemcpyKind Kind, int W>
-__device__ __forceinline__ void tile_copy_contig_wg_vectors(
+__device__ inline void tile_copy_contig_wg_vectors(
     char* dst, char* src, uint32_t bytes, int worker_id, int worker_count) {
   constexpr CachePolicy LP =
       is_put(Kind) ? CachePolicy::Standard : CachePolicy::SystemScope;
@@ -98,7 +98,7 @@ __device__ __forceinline__ void tile_copy_contig_wg_vectors(
 }
 
 template <MemcpyKind Kind>
-__device__ __forceinline__ void tile_memcpy_contig_wg(char* dst, char* src,
+__device__ inline void tile_memcpy_contig_wg(char* dst, char* src,
                                                        size_t bytes,
                                                        int worker_id,
                                                        int worker_count) {
@@ -130,7 +130,7 @@ __device__ __forceinline__ void tile_memcpy_contig_wg(char* dst, char* src,
 }
 
 template <MemcpyKind Kind, TileScope Scope>
-__device__ __forceinline__ void tile_memcpy_contig(char* dst, char* src,
+__device__ inline void tile_memcpy_contig(char* dst, char* src,
                                                    size_t bytes,
                                                    int worker_id) {
   if constexpr (Scope == TileScope::Wave) {
@@ -250,7 +250,7 @@ __device__ inline bool tile_make_runs(const TileView& view, TileRuns* r) {
 }
 
 // Widest access size that keeps every vector of every run naturally aligned.
-__device__ __forceinline__ int tile_runs_vec_width(const TileRuns& r,
+__device__ inline int tile_runs_vec_width(const TileRuns& r,
                                                    const char* dst,
                                                    const char* src) {
   uintptr_t bits = r.run_bytes | reinterpret_cast<uintptr_t>(dst) |

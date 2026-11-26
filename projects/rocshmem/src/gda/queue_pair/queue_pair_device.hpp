@@ -319,7 +319,7 @@ public:
    * discarded at compile time, so a provider never emits copy code for widths it
    * cannot inline. Non-power-of-two sizes fall back to a correct byte copy.
    */
-  static __device__ __forceinline__ void copy_inline_payload(uint8_t* dst, uintptr_t laddr, size_t size);
+  static __device__ inline void copy_inline_payload(uint8_t* dst, uintptr_t laddr, size_t size);
 
   /**
    * @brief Convert value to ProviderEndianness, byteswapping if necessary.
@@ -339,7 +339,7 @@ public:
 
 
 template <typename Provider>
-__device__ __forceinline__ void
+__device__ inline void
 QueuePairDevice<Provider>::copy_inline_payload(uint8_t* dst, uintptr_t laddr, size_t size) {
   constexpr size_t kMax = Traits::InlineThreshold;
   static_assert(kMax <= 32, "inline payload fast-path only covers widths up to 32B");

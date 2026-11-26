@@ -53,7 +53,7 @@ struct TileView {
 };
 
 // Layout classification for 2D tiles (element strides).
-__device__ __forceinline__ TileLayout tile_classify_2d(
+__device__ inline TileLayout tile_classify_2d(
     size_t src_stride0, size_t src_stride1, size_t dst_stride0,
     size_t dst_stride1, size_t extent0, size_t extent1) {
   const bool row_contig = (src_stride1 == 1 && dst_stride1 == 1);
@@ -73,7 +73,7 @@ __device__ __forceinline__ TileLayout tile_classify_2d(
   return TileLayout::Strided;
 }
 
-__device__ __forceinline__ TileLayout tile_classify(const TileView& view) {
+__device__ inline TileLayout tile_classify(const TileView& view) {
   if (view.ndim == 2) {
     return tile_classify_2d(view.src_s[0], view.src_s[1],
                             view.dst_s[0], view.dst_s[1],
@@ -102,7 +102,7 @@ __device__ __forceinline__ TileLayout tile_classify(const TileView& view) {
   return TileLayout::Strided;
 }
 
-__device__ __forceinline__ TileView tile_make_view(
+__device__ inline TileView tile_make_view(
     void* dst_data, const void* src_data, const size_t* dst_strides,
     const size_t* src_strides, const size_t* start_coord,
     const size_t* boundary, int ndim, size_t element_size) {
