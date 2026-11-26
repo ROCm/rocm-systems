@@ -32,9 +32,6 @@ The following environment variables affect the hipFile runtime.
      - | Controls whether fastpath is used with unsupported file systems.
        | ``true``: Fastpath is used with any file system without validation.
        | ``false``: Fastpath is only used with supported file systems. (default)
-   * - ``HIPFILE_ASYNC_BUFFER_SIZE``
-     - | Controls the size of the host bounce buffer allocated for asynchronous fallback I/O.
-       | Default size is 16 MiB. Setting to 0 will use the default size.
    * - ``HIPFILE_HOST``
      - | Controls whether file I/O with registered host-memory buffers is enabled.
        | Host memory regions must be registered prior to starting any transfers involving them.
