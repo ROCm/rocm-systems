@@ -77,14 +77,18 @@ constexpr std::string_view kMutationHelp =
     "gfx1100 wave32/wave64, as well as the modern targets above. DS mutation\n"
     "increments only raw offset0 and requires an aligned result without carry.\n"
     "For two-address exchange this retains the original element-offset policy.\n"
-    "OrdinaryWrongAddress lists only bounded acquire-qualified global_load_b32 loads,\n"
-    "with their exact wait/cache members and complete affected owners.\n"
+    "OrdinaryWrongAddress lists only bounded acquire-qualified GLOBAL 32-bit loads,\n"
+    "using global_load_b32 or global_load_dword with exact wait/cache members\n"
+    "and complete affected owners.\n"
     "Mutation supports gfx1250/gfx1251 wave32 profile Cdna5GlobalB32 and\n"
     "gfx1200/gfx1201 wave32/wave64 profile Rdna4GlobalB32; see --capabilities\n"
     "and each listed address_supported value.\n"
+    "gfx950/gfx942 wave64 profile Cdna34GlobalDword uses waitcnt vmcnt(0)+buffer_inv.\n"
+    "Legacy GLOBAL scope is implicit Agent; encoded cache flags are preserved.\n"
     "For ordinary sites --exact selects the qualified load and --ordinal counts\n"
     "qualified loads only. Mutation requires a positive, four-byte-aligned\n"
-    "--address-delta, at most 8388607 bytes; the signed24 sum must fit and align.\n"
+    "--address-delta, at most 8388607 bytes; the native signed sum must fit and align.\n"
+    "Modern profiles use signed24; Cdna34GlobalDword uses signed13.\n"
     "Only the load offset changes; cache/wait/bookkeeping, data and scope remain.\n"
     "CDNA5 scale_offset is preserved; the immediate and delta remain byte offsets.\n"
     "Output must be new; existing files, aliases and in-place mutation are refused.\n"
@@ -96,6 +100,8 @@ std::string_view ordinary_profile_name(OrdinaryAcquireProfile profile) {
     return "Cdna5GlobalB32";
   case OrdinaryAcquireProfile::Rdna4GlobalB32:
     return "Rdna4GlobalB32";
+  case OrdinaryAcquireProfile::Cdna34GlobalDword:
+    return "Cdna34GlobalDword";
   }
   return "Unknown";
 }

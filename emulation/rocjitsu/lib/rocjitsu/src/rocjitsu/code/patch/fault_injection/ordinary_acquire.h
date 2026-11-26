@@ -16,7 +16,8 @@
 
 namespace rocjitsu {
 
-enum class OrdinaryAcquireProfile { Cdna5GlobalB32, Rdna4GlobalB32 };
+/// @brief A family-specific acquire shape proving at least Agent scope.
+enum class OrdinaryAcquireProfile { Cdna5GlobalB32, Rdna4GlobalB32, Cdna34GlobalDword };
 enum class OrdinaryAcquirePath { SameBlock, ExactFallthroughJoin, ExactSelfLoopExit };
 
 /// @brief One exact pristine instruction used by a bounded acquire proof.
@@ -29,10 +30,11 @@ struct OrdinaryAcquireMember {
 
 /// @brief One acquire-qualified load and its exact cache/wait association.
 /// @details All offsets refer to the context's pristine .text. Cache members
-/// are an ordered list, not a fixed load/cache pair. Raw scope is present only when
-/// the load encodes a scope field; cache instructions need not encode the same
-/// raw scope. Legacy profiles define an implicit Agent scope and leave this
-/// field absent; their cache modifiers are not scope-field encodings.
+/// are an ordered list, not a fixed load/cache pair. Raw scope carries only the
+/// literal GFX12 load scope field; cache instructions need not encode the same
+/// value. Legacy profiles prove minimum Agent scope with native load controls
+/// (CDNA SC1 or RDNA3 GLC) and leave raw_scope absent rather than fabricate a
+/// GFX12 field value.
 /// This query does not advertise any particular mutation or execution support.
 struct OrdinaryAcquireSite {
   uint64_t offset = 0;
@@ -92,7 +94,7 @@ struct OrdinaryAcquireSelector {
   size_t ordinal = 0;
 };
 
-/// @brief Discover bounded CDNA5/RDNA4 acquire-qualified global_load_b32 sites.
+/// @brief Discover supported family-specific acquire-qualified GLOBAL loads.
 /// @details Inventories contain qualified sites only, in pristine source order.
 /// Endpoint owners must be complete and equal; the kernel name only selects a
 /// real affected owner. Shared helper container identity is preserved separately.

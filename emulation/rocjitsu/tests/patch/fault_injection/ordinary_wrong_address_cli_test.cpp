@@ -435,7 +435,7 @@ TEST_F(FaultOrdinaryCliSupport, HelpAndCapabilitiesMatchEnabledOrdinaryProfiles)
        (position = stdout_.find("kind=OrdinaryWrongAddress ", position)) != std::string::npos;
        ++position)
     ++lines;
-  EXPECT_EQ(lines, 6u);
+  EXPECT_EQ(lines, 8u);
   for (const test::OrdinaryTargetCase &fixture : test::kOrdinaryTargetCases) {
     const IsaTargetBinding *description = default_isa_target_registry().find_target(fixture.target);
     ASSERT_NE(description, nullptr);
