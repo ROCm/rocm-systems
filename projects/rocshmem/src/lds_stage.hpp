@@ -425,7 +425,7 @@ template <uint16_t Cnt>
 
 // This lane's strided slice of tile_bytes -- the raw chunk issues, no mark.
 template <int CachePolicy = DefaultLoadCachePolicy>
-__device__ __forceinline__ void issue_load_lane_chunks(void *lds_tile, const void *src_tile,
+__device__ inline void issue_load_lane_chunks(void *lds_tile, const void *src_tile,
                                                        uint32_t tile_bytes, uint32_t lane_id,
                                                        uint32_t num_lanes) {
   auto *lds_bytes = static_cast<uint8_t *>(lds_tile);
@@ -437,7 +437,7 @@ __device__ __forceinline__ void issue_load_lane_chunks(void *lds_tile, const voi
 
 // Store leg, mirrors issue_load_lane_chunks.
 template <int CachePolicy = DefaultStoreCachePolicy>
-__device__ __forceinline__ void issue_store_lane_chunks(void *dst_tile, const void *lds_tile,
+__device__ inline void issue_store_lane_chunks(void *dst_tile, const void *lds_tile,
                                                         uint32_t tile_bytes, uint32_t lane_id,
                                                         uint32_t num_lanes) {
   auto *dst_bytes = static_cast<uint8_t *>(dst_tile);
@@ -449,7 +449,7 @@ __device__ __forceinline__ void issue_store_lane_chunks(void *dst_tile, const vo
 
 // _mark variants append one mark() per tile so wait_mark<N>() can count tiles.
 template <int CachePolicy = DefaultLoadCachePolicy>
-__device__ __forceinline__ void issue_load_tile_lane(void *lds_tile, const void *src_tile,
+__device__ inline void issue_load_tile_lane(void *lds_tile, const void *src_tile,
                                                      uint32_t tile_bytes, uint32_t lane_id,
                                                      uint32_t num_lanes) {
   issue_load_lane_chunks<CachePolicy>(lds_tile, src_tile, tile_bytes, lane_id, num_lanes);
@@ -457,7 +457,7 @@ __device__ __forceinline__ void issue_load_tile_lane(void *lds_tile, const void 
 }
 
 template <int CachePolicy = DefaultStoreCachePolicy>
-__device__ __forceinline__ void issue_store_tile_lane(void *dst_tile, const void *lds_tile,
+__device__ inline void issue_store_tile_lane(void *dst_tile, const void *lds_tile,
                                                       uint32_t tile_bytes, uint32_t lane_id,
                                                       uint32_t num_lanes) {
   issue_store_lane_chunks<CachePolicy>(dst_tile, lds_tile, tile_bytes, lane_id, num_lanes);

@@ -49,7 +49,7 @@ namespace rocshmem {
 #define ROCSHMEM_XNACK_XCNT_WAIT ""
 #endif
 
-__device__ __forceinline__ int uncached_load_ubyte([[maybe_unused]] uint8_t* src) {
+__device__ inline int uncached_load_ubyte([[maybe_unused]] uint8_t* src) {
   int ret = 0;
 #if defined(__gfx90a__)
   int16_t val16;
@@ -90,7 +90,7 @@ __device__ __forceinline__ int uncached_load_ubyte([[maybe_unused]] uint8_t* src
   return ret;
 }
 
-__device__ __forceinline__ void refresh_volatile_sbyte([[maybe_unused]] volatile int *assigned_value,
+__device__ inline void refresh_volatile_sbyte([[maybe_unused]] volatile int *assigned_value,
                                                        [[maybe_unused]] volatile char *read_value) {
 #if defined(__gfx90a__)
   int16_t val16;
@@ -130,7 +130,7 @@ __device__ __forceinline__ void refresh_volatile_sbyte([[maybe_unused]] volatile
 #endif
 }
 
-__device__ __forceinline__ void refresh_volatile_dwordx2([[maybe_unused]] volatile uint64_t *assigned_value,
+__device__ inline void refresh_volatile_dwordx2([[maybe_unused]] volatile uint64_t *assigned_value,
                                                          [[maybe_unused]] volatile uint64_t *read_value) {
 #if defined(__gfx90a__) || defined(__GFX11__)
   asm volatile(
@@ -159,7 +159,7 @@ __device__ __forceinline__ void refresh_volatile_dwordx2([[maybe_unused]] volati
 }
 
 template <typename T>
-__device__ __forceinline__ T uncached_load([[maybe_unused]] T* src) {
+__device__ inline T uncached_load([[maybe_unused]] T* src) {
   static_assert(sizeof(T) == 1 || sizeof(T) == 2 || sizeof(T) == 4 ||
                 sizeof(T) == 8 || sizeof(T) == 16,
                 "uncached_load only supports 1/2/4/8/16-byte types");
@@ -335,7 +335,7 @@ __device__ __forceinline__ T uncached_load([[maybe_unused]] T* src) {
   return ret;
 }
 
-__device__ __forceinline__ void __roc_flush() {
+__device__ inline void __roc_flush() {
 #if not defined USE_HDP_FLUSH
 #if defined(__gfx906__)
 #endif
@@ -352,7 +352,7 @@ __device__ __forceinline__ void __roc_flush() {
 #endif
 }
 
-__device__ __forceinline__ void put_asm([[maybe_unused]] uint8_t* src,
+__device__ inline void put_asm([[maybe_unused]] uint8_t* src,
                                         [[maybe_unused]] uint8_t* dst,
                                         int size) {
   switch (size) {
@@ -488,7 +488,7 @@ __device__ __forceinline__ void put_asm([[maybe_unused]] uint8_t* src,
   }
 }
 
-__device__ __forceinline__ void get_asm([[maybe_unused]] uint8_t* src,
+__device__ inline void get_asm([[maybe_unused]] uint8_t* src,
                                         [[maybe_unused]] uint8_t* dst,
                                         int size) {
   switch (size) {
@@ -763,7 +763,7 @@ __host__ __device__ constexpr uint32_t cache_policy_aux(CachePolicy p) {
 #endif
 }
 
-__device__ __forceinline__ i32x4_t
+__device__ inline i32x4_t
 make_buffer_resource(const void* base, uint32_t num_bytes) {
   uint64_t addr = reinterpret_cast<uint64_t>(base);
   i32x4_t rsrc;
@@ -795,7 +795,7 @@ template <CachePolicy LoadPolicy, CachePolicy StorePolicy>
 struct AsmAccess<16, LoadPolicy, StorePolicy> {
   using type = __int128_t;
 
-  static __device__ __forceinline__ type load(void* src) {
+  static __device__ inline type load(void* src) {
     if constexpr (LoadPolicy == CachePolicy::Standard) {
       return *reinterpret_cast<type*>(src);
     } else {
@@ -855,7 +855,7 @@ struct AsmAccess<16, LoadPolicy, StorePolicy> {
     }
   }
 
-  static __device__ __forceinline__ void store(void* dst, type val) {
+  static __device__ inline void store(void* dst, type val) {
     if constexpr (StorePolicy == CachePolicy::Standard) {
       *reinterpret_cast<type*>(dst) = val;
     } else {
@@ -902,13 +902,13 @@ struct AsmAccess<16, LoadPolicy, StorePolicy> {
     }
   }
 
-  static __device__ __forceinline__ type load_buffer(const void *ptr,
+  static __device__ inline type load_buffer(const void *ptr,
                                                      uint32_t buf_size,
                                                      uint32_t offset) {
     return load_buffer(make_buffer_resource(ptr, buf_size), offset);
   }
 
-  static __device__ __forceinline__ void store_buffer(void *ptr,
+  static __device__ inline void store_buffer(void *ptr,
                                                       uint32_t buf_size,
                                                       uint32_t offset,
                                                       type val) {
@@ -919,14 +919,14 @@ struct AsmAccess<16, LoadPolicy, StorePolicy> {
   // loop so the compiler doesn't have to prove src/dst are wave-uniform on
   // every iteration (it can't, across a __noinline__ boundary, and falls
   // back to an expensive v_readfirstlane waterfall per call otherwise).
-  static __device__ __forceinline__ type load_buffer(i32x4_t rsrc,
+  static __device__ inline type load_buffer(i32x4_t rsrc,
                                                      uint32_t offset) {
     constexpr uint32_t aux = cache_policy_aux(LoadPolicy);
     return __builtin_bit_cast(type,
         llvm_amdgcn_raw_buffer_load_b128(rsrc, offset, 0, aux));
   }
 
-  static __device__ __forceinline__ void store_buffer(i32x4_t rsrc,
+  static __device__ inline void store_buffer(i32x4_t rsrc,
                                                       uint32_t offset,
                                                       type val) {
     constexpr uint32_t aux = cache_policy_aux(StorePolicy);
@@ -942,7 +942,7 @@ template <CachePolicy LoadPolicy, CachePolicy StorePolicy>
 struct AsmAccess<8, LoadPolicy, StorePolicy> {
   using type = int64_t;
 
-  static __device__ __forceinline__ type load(void* src) {
+  static __device__ inline type load(void* src) {
     if constexpr (LoadPolicy == CachePolicy::Standard) {
       return *reinterpret_cast<type*>(src);
     } else {
@@ -1002,7 +1002,7 @@ struct AsmAccess<8, LoadPolicy, StorePolicy> {
     }
   }
 
-  static __device__ __forceinline__ void store(void* dst, type val) {
+  static __device__ inline void store(void* dst, type val) {
     if constexpr (StorePolicy == CachePolicy::Standard) {
       *reinterpret_cast<type*>(dst) = val;
     } else {
@@ -1049,27 +1049,27 @@ struct AsmAccess<8, LoadPolicy, StorePolicy> {
     }
   }
 
-  static __device__ __forceinline__ type load_buffer(const void *ptr,
+  static __device__ inline type load_buffer(const void *ptr,
                                                      uint32_t buf_size,
                                                      uint32_t offset) {
     return load_buffer(make_buffer_resource(ptr, buf_size), offset);
   }
 
-  static __device__ __forceinline__ void store_buffer(void *ptr,
+  static __device__ inline void store_buffer(void *ptr,
                                                       uint32_t buf_size,
                                                       uint32_t offset,
                                                       type val) {
     store_buffer(make_buffer_resource(ptr, buf_size), offset, val);
   }
 
-  static __device__ __forceinline__ type load_buffer(i32x4_t rsrc,
+  static __device__ inline type load_buffer(i32x4_t rsrc,
                                                      uint32_t offset) {
     constexpr uint32_t aux = cache_policy_aux(LoadPolicy);
     return __builtin_bit_cast(type,
         llvm_amdgcn_raw_buffer_load_b64(rsrc, offset, 0, aux));
   }
 
-  static __device__ __forceinline__ void store_buffer(i32x4_t rsrc,
+  static __device__ inline void store_buffer(i32x4_t rsrc,
                                                       uint32_t offset,
                                                       type val) {
     constexpr uint32_t aux = cache_policy_aux(StorePolicy);
@@ -1085,7 +1085,7 @@ template <CachePolicy LoadPolicy, CachePolicy StorePolicy>
 struct AsmAccess<4, LoadPolicy, StorePolicy> {
   using type = int32_t;
 
-  static __device__ __forceinline__ type load(void* src) {
+  static __device__ inline type load(void* src) {
     if constexpr (LoadPolicy == CachePolicy::Standard) {
       return *reinterpret_cast<type*>(src);
     } else {
@@ -1145,7 +1145,7 @@ struct AsmAccess<4, LoadPolicy, StorePolicy> {
     }
   }
 
-  static __device__ __forceinline__ void store(void* dst, type val) {
+  static __device__ inline void store(void* dst, type val) {
     if constexpr (StorePolicy == CachePolicy::Standard) {
       *reinterpret_cast<type*>(dst) = val;
     } else {
@@ -1192,27 +1192,27 @@ struct AsmAccess<4, LoadPolicy, StorePolicy> {
     }
   }
 
-  static __device__ __forceinline__ type load_buffer(const void *ptr,
+  static __device__ inline type load_buffer(const void *ptr,
                                                      uint32_t buf_size,
                                                      uint32_t offset) {
     return load_buffer(make_buffer_resource(ptr, buf_size), offset);
   }
 
-  static __device__ __forceinline__ void store_buffer(void *ptr,
+  static __device__ inline void store_buffer(void *ptr,
                                                       uint32_t buf_size,
                                                       uint32_t offset,
                                                       type val) {
     store_buffer(make_buffer_resource(ptr, buf_size), offset, val);
   }
 
-  static __device__ __forceinline__ type load_buffer(i32x4_t rsrc,
+  static __device__ inline type load_buffer(i32x4_t rsrc,
                                                      uint32_t offset) {
     constexpr uint32_t aux = cache_policy_aux(LoadPolicy);
     return __builtin_bit_cast(type,
         llvm_amdgcn_raw_buffer_load_b32(rsrc, offset, 0, aux));
   }
 
-  static __device__ __forceinline__ void store_buffer(i32x4_t rsrc,
+  static __device__ inline void store_buffer(i32x4_t rsrc,
                                                       uint32_t offset,
                                                       type val) {
     constexpr uint32_t aux = cache_policy_aux(StorePolicy);
@@ -1228,7 +1228,7 @@ template <CachePolicy LoadPolicy, CachePolicy StorePolicy>
 struct AsmAccess<2, LoadPolicy, StorePolicy> {
   using type = int16_t;
 
-  static __device__ __forceinline__ type load(void* src) {
+  static __device__ inline type load(void* src) {
     if constexpr (LoadPolicy == CachePolicy::Standard) {
       return *reinterpret_cast<type*>(src);
     } else {
@@ -1305,7 +1305,7 @@ struct AsmAccess<2, LoadPolicy, StorePolicy> {
     }
   }
 
-  static __device__ __forceinline__ void store(void* dst, type val) {
+  static __device__ inline void store(void* dst, type val) {
     if constexpr (StorePolicy == CachePolicy::Standard) {
       *reinterpret_cast<type*>(dst) = val;
     } else {
@@ -1366,27 +1366,27 @@ struct AsmAccess<2, LoadPolicy, StorePolicy> {
     }
   }
 
-  static __device__ __forceinline__ type load_buffer(const void *ptr,
+  static __device__ inline type load_buffer(const void *ptr,
                                                      uint32_t buf_size,
                                                      uint32_t offset) {
     return load_buffer(make_buffer_resource(ptr, buf_size), offset);
   }
 
-  static __device__ __forceinline__ void store_buffer(void *ptr,
+  static __device__ inline void store_buffer(void *ptr,
                                                       uint32_t buf_size,
                                                       uint32_t offset,
                                                       type val) {
     store_buffer(make_buffer_resource(ptr, buf_size), offset, val);
   }
 
-  static __device__ __forceinline__ type load_buffer(i32x4_t rsrc,
+  static __device__ inline type load_buffer(i32x4_t rsrc,
                                                      uint32_t offset) {
     constexpr uint32_t aux = cache_policy_aux(LoadPolicy);
     return static_cast<type>(
         llvm_amdgcn_raw_buffer_load_b16(rsrc, offset, 0, aux));
   }
 
-  static __device__ __forceinline__ void store_buffer(i32x4_t rsrc,
+  static __device__ inline void store_buffer(i32x4_t rsrc,
                                                       uint32_t offset,
                                                       type val) {
     constexpr uint32_t aux = cache_policy_aux(StorePolicy);
@@ -1402,7 +1402,7 @@ template <CachePolicy LoadPolicy, CachePolicy StorePolicy>
 struct AsmAccess<1, LoadPolicy, StorePolicy> {
   using type = uint8_t;
 
-  static __device__ __forceinline__ type load(void* src) {
+  static __device__ inline type load(void* src) {
     if constexpr (LoadPolicy == CachePolicy::Standard) {
       return *reinterpret_cast<type*>(src);
     } else {
@@ -1479,7 +1479,7 @@ struct AsmAccess<1, LoadPolicy, StorePolicy> {
     }
   }
 
-  static __device__ __forceinline__ void store(void* dst, type val) {
+  static __device__ inline void store(void* dst, type val) {
     if constexpr (StorePolicy == CachePolicy::Standard) {
       *reinterpret_cast<type*>(dst) = val;
     } else {
@@ -1540,27 +1540,27 @@ struct AsmAccess<1, LoadPolicy, StorePolicy> {
     }
   }
 
-  static __device__ __forceinline__ type load_buffer(const void *ptr,
+  static __device__ inline type load_buffer(const void *ptr,
                                                      uint32_t buf_size,
                                                      uint32_t offset) {
     return load_buffer(make_buffer_resource(ptr, buf_size), offset);
   }
 
-  static __device__ __forceinline__ void store_buffer(void *ptr,
+  static __device__ inline void store_buffer(void *ptr,
                                                       uint32_t buf_size,
                                                       uint32_t offset,
                                                       type val) {
     store_buffer(make_buffer_resource(ptr, buf_size), offset, val);
   }
 
-  static __device__ __forceinline__ type load_buffer(i32x4_t rsrc,
+  static __device__ inline type load_buffer(i32x4_t rsrc,
                                                      uint32_t offset) {
     constexpr uint32_t aux = cache_policy_aux(LoadPolicy);
     return static_cast<type>(
         llvm_amdgcn_raw_buffer_load_b8(rsrc, offset, 0, aux));
   }
 
-  static __device__ __forceinline__ void store_buffer(i32x4_t rsrc,
+  static __device__ inline void store_buffer(i32x4_t rsrc,
                                                       uint32_t offset,
                                                       type val) {
     constexpr uint32_t aux = cache_policy_aux(StorePolicy);
@@ -1568,7 +1568,7 @@ struct AsmAccess<1, LoadPolicy, StorePolicy> {
   }
 };
 
-__device__ __forceinline__ void wait_on_vmem_loads([[maybe_unused]] int waits) {
+__device__ inline void wait_on_vmem_loads([[maybe_unused]] int waits) {
 #if defined(__GFX12__)
   switch (waits) {
     case 15: asm volatile("s_wait_loadcnt 15" ::: "memory"); break;
@@ -1611,7 +1611,7 @@ __device__ __forceinline__ void wait_on_vmem_loads([[maybe_unused]] int waits) {
 #endif
 }
 
-__device__ __forceinline__ void wait_on_vmem_stores([[maybe_unused]] int waits) {
+__device__ inline void wait_on_vmem_stores([[maybe_unused]] int waits) {
 #if defined(__GFX12__)
   switch (waits) {
     case 15: asm volatile("s_wait_storecnt 15" ::: "memory"); break;
@@ -1654,7 +1654,7 @@ __device__ __forceinline__ void wait_on_vmem_stores([[maybe_unused]] int waits) 
 #endif
 }
 
-__device__ __forceinline__ void wait_on_vmem([[maybe_unused]] int waits) {
+__device__ inline void wait_on_vmem([[maybe_unused]] int waits) {
 #if defined(__GFX12__)
   // GFX12 has no unified vmcnt; issue both load and store waits separately.
   wait_on_vmem_loads(waits);
@@ -1666,7 +1666,7 @@ __device__ __forceinline__ void wait_on_vmem([[maybe_unused]] int waits) {
 }
 
 // Waits for all in-flight vector memory operations and LDS operations to complete.
-__device__ __forceinline__ void wait_on_vmem_and_lds([[maybe_unused]] int waits) {
+__device__ inline void wait_on_vmem_and_lds([[maybe_unused]] int waits) {
 #if defined(__GFX12__)
   // GFX12 splits counters: loads, stores, and DS (LDS) are tracked separately.
   wait_on_vmem_loads(waits);

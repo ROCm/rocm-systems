@@ -51,7 +51,7 @@ __device__ inline uint32_t resolve_tile_bytes(size_t cap_bytes) {
 
 // Thread 0 drives TDM; the rest covers what TDM doesn't.
 template <MemcpyKind Kind = MemcpyKind::Put>
-[[maybe_unused]] __device__ __forceinline__ void memcpy_wg_lds_stage(void* dst, void* src,
+[[maybe_unused]] __device__ inline void memcpy_wg_lds_stage(void* dst, void* src,
                                                                       size_t size) {
   constexpr int LoadPolicy = is_put(Kind)
       ? lds_stage::tdm::make_cache_policy(lds_stage::tdm::LoadTemporalHint::Default,
@@ -93,7 +93,7 @@ template <MemcpyKind Kind = MemcpyKind::Put>
 // asymmetry). Buffer splits one fixed slot per possible wave, so slots
 // stay disjoint without runtime coordination.
 template <MemcpyKind Kind = MemcpyKind::Put>
-[[maybe_unused]] __device__ __forceinline__ void memcpy_wave_lds_stage(void* dst, void* src,
+[[maybe_unused]] __device__ inline void memcpy_wave_lds_stage(void* dst, void* src,
                                                                         size_t size) {
   constexpr int LoadPolicy = is_put(Kind)
       ? lds_stage::tdm::make_cache_policy(lds_stage::tdm::LoadTemporalHint::Default,
@@ -149,7 +149,7 @@ template <MemcpyKind Kind = MemcpyKind::Put>
 // Every thread tiles together (striped across lanes), no single-lane
 // driver; remainder runs right after, not overlapped.
 template <MemcpyKind Kind = MemcpyKind::Put>
-[[maybe_unused]] __device__ __forceinline__ void memcpy_wg_lds_stage(void* dst, void* src,
+[[maybe_unused]] __device__ inline void memcpy_wg_lds_stage(void* dst, void* src,
                                                                       size_t size) {
   if (size < (is_put(Kind) ? constmem.lds_stage_put_threshold : constmem.lds_stage_get_threshold)) {
     memcpy_wg<Kind, 4>(dst, src, size);
@@ -182,7 +182,7 @@ template <MemcpyKind Kind = MemcpyKind::Put>
 // Wave counterpart: every lane tiles together, no single-lane driver.
 // Buffer splits one fixed slot per possible wave.
 template <MemcpyKind Kind = MemcpyKind::Put>
-[[maybe_unused]] __device__ __forceinline__ void memcpy_wave_lds_stage(void* dst, void* src,
+[[maybe_unused]] __device__ inline void memcpy_wave_lds_stage(void* dst, void* src,
                                                                         size_t size) {
   if (size < (is_put(Kind) ? constmem.lds_stage_put_threshold : constmem.lds_stage_get_threshold)) {
     memcpy_wave<Kind>(dst, src, size);
@@ -225,13 +225,13 @@ template <MemcpyKind Kind = MemcpyKind::Put>
 
 // Neither backend is built/usable here: plain copy.
 template <MemcpyKind Kind = MemcpyKind::Put>
-[[maybe_unused]] __device__ __forceinline__ void memcpy_wg_lds_stage(void* dst, void* src,
+[[maybe_unused]] __device__ inline void memcpy_wg_lds_stage(void* dst, void* src,
                                                                       size_t size) {
   memcpy_wg<Kind>(dst, src, size);
 }
 
 template <MemcpyKind Kind = MemcpyKind::Put>
-[[maybe_unused]] __device__ __forceinline__ void memcpy_wave_lds_stage(void* dst, void* src,
+[[maybe_unused]] __device__ inline void memcpy_wave_lds_stage(void* dst, void* src,
                                                                         size_t size) {
   memcpy_wave<Kind>(dst, src, size);
 }

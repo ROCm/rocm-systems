@@ -405,7 +405,7 @@ constexpr bool is_blocking(MemcpyKind k) {
 // AsmAccess::load/store (assembly.hpp) require dst/src to be genuine global
 // addresses (symmetric heap, or an IPC/RDMA-mapped remote of it).
 template <int ChunkSize, CachePolicy LoadPolicy, CachePolicy StorePolicy, int Unroll>
-__device__ __forceinline__ void copy_bulk(void* dst, void* src, int n_chunks, 
+__device__ inline void copy_bulk(void* dst, void* src, int n_chunks, 
                                           int tid, int stride) {
   using Acc = AsmAccess<ChunkSize, LoadPolicy, StorePolicy>;
   using T = typename Acc::type;
@@ -442,7 +442,7 @@ __device__ __forceinline__ void copy_bulk(void* dst, void* src, int n_chunks,
 }
 
 template <CachePolicy LP, CachePolicy SP>
-__device__ __forceinline__ void copy_prefix(uint8_t* dst, uint8_t* src, size_t prefix) {
+__device__ inline void copy_prefix(uint8_t* dst, uint8_t* src, size_t prefix) {
   // Bottom-up evaluation mathematically guarantees alignment buildup without checking
   if (prefix & 1) {
     AsmAccess<1, LP, SP>::store(dst, AsmAccess<1, LP, SP>::load(src));
@@ -462,7 +462,7 @@ __device__ __forceinline__ void copy_prefix(uint8_t* dst, uint8_t* src, size_t p
 }
 
 template <CachePolicy LP, CachePolicy SP>
-__device__ __forceinline__ void copy_suffix(uint8_t* dst, uint8_t* src, size_t remainder) {
+__device__ inline void copy_suffix(uint8_t* dst, uint8_t* src, size_t remainder) {
   if (remainder & 8) {
     AsmAccess<8, LP, SP>::store(dst, AsmAccess<8, LP, SP>::load(src));
     dst += 8; src += 8;
@@ -481,7 +481,7 @@ __device__ __forceinline__ void copy_suffix(uint8_t* dst, uint8_t* src, size_t r
 }
 
 template <CachePolicy LP, CachePolicy SP>
-__device__ __forceinline__ void copy_remainder(uint8_t* dst, uint8_t* src, int size) {
+__device__ inline void copy_remainder(uint8_t* dst, uint8_t* src, int size) {
   while (size > 0) {
     // Dynamically check alignment at the current pointer position
     uintptr_t align = reinterpret_cast<uintptr_t>(dst) | reinterpret_cast<uintptr_t>(src);
@@ -510,7 +510,7 @@ __device__ __forceinline__ void copy_remainder(uint8_t* dst, uint8_t* src, int s
 }
 
 template <int ChunkSize, CachePolicy LP, CachePolicy SP, int Unroll>
-__device__ __forceinline__ void copy_aligned_body(uint8_t* dst, uint8_t* src,
+__device__ inline void copy_aligned_body(uint8_t* dst, uint8_t* src,
                                                   size_t size, int tid,
                                                   int stride) {
   uintptr_t dst_addr = reinterpret_cast<uintptr_t>(dst);
@@ -550,7 +550,7 @@ __device__ __forceinline__ void copy_aligned_body(uint8_t* dst, uint8_t* src,
 // LANE, WAVE, AND WG IMPLEMENTATIONS
 // ==============================================================================
 template <MemcpyKind Kind = MemcpyKind::Put, int Unroll = 8>
-[[maybe_unused]] __device__ __forceinline__ void memcpy_lane(void* dst, void* src, size_t size) {
+[[maybe_unused]] __device__ inline void memcpy_lane(void* dst, void* src, size_t size) {
   if (size == 0) return;
 
   constexpr CachePolicy LP = is_put(Kind) ? CachePolicy::Standard : CachePolicy::SystemScope;
@@ -588,7 +588,7 @@ template <MemcpyKind Kind = MemcpyKind::Put, int Unroll = 8>
 // memcpy_wave is group-cooperative: every lane in the wave passes the same
 // dst/src and only differs by wave_tid/wave_size
 template <MemcpyKind Kind = MemcpyKind::Put, int Unroll = 8>
-[[maybe_unused]] __device__ __forceinline__ void memcpy_wave(void* dst, void* src, size_t size) {
+[[maybe_unused]] __device__ inline void memcpy_wave(void* dst, void* src, size_t size) {
   if (size == 0) return;
 
   constexpr CachePolicy LP = is_put(Kind) ? CachePolicy::Standard : CachePolicy::SystemScope;
@@ -612,7 +612,7 @@ template <MemcpyKind Kind = MemcpyKind::Put, int Unroll = 8>
 }
 
 template <MemcpyKind Kind = MemcpyKind::Put, int Unroll = 8>
-[[maybe_unused]] __device__ __forceinline__ void memcpy_wg(void* dst, void* src,
+[[maybe_unused]] __device__ inline void memcpy_wg(void* dst, void* src,
                                                              size_t size) {
   if (size == 0) return;
 
