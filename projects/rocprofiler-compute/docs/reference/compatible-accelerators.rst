@@ -51,7 +51,7 @@ ROCm Compute Profiler. See :doc:`rocm:reference/gpu-arch-specs` for full AMD Ins
       * - Platform
         - Status
 
-      * - Strix Halo, Gorgon Halo, Gorgon Point, Krackan Point and Strix Point
+      * - Strix Halo, Strix Point, Gorgon Halo, Gorgon Point and Krackan Point
         - Supported ✅ (see :doc:`/conceptual/rdna/rdna-performance-model`)
 
   .. tab-item:: AMD Radeon GPUs

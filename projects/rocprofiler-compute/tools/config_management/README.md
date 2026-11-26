@@ -182,7 +182,7 @@ Panel YAMLs (src/) → Per-Arch YAMLs (tools/) → Docs YAMLs (docs/) → Sphinx
 **Files:**
 ```bash
 tools/per_arch_metric_definitions/
-  ├── gfx{908,90a,940,941,942,950,115x,1201,1250}_metrics_description.yaml   # plain + rst + unit
+  ├── gfx{908,90a,942,950,115x,120x,1250}_metrics_description.yaml   # plain + rst + unit
 
 docs/data/metrics/
   └── <arch>_metrics.yaml                                  # per-arch rst + unit (generated)
