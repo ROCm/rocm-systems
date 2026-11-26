@@ -1,7 +1,7 @@
 {
   "archs": ["gfx1201"],
   "description": "RDNA 4 Navi 48: WGPs, LDS/GL0/SQC, GL1, GL2, Infinity Cache, VRAM.",
-  "scope": {"labels": ["GPU", "VRAM"], "split": "vram"},
+  "scope": [{"label": "GPU", "columns": [0, 4]}, {"label": "VRAM", "columns": [5, 5]}],
   "blocks": [
     {"id": "cu", "title": "WGPs", "column": 0, "row": 0, "order": 0, "style": "list", "content": [
       {"metric_id": "3.10.0", "title": "Wave Occ", "category": "util", "bar": false},
