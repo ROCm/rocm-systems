@@ -10,6 +10,28 @@
 #include "rj_arith/detail/rj_arith_mfma.h"
 
 namespace {
+// Keep the scalar stack buffer out of the SIMD dispatch prologue.
+template <int M, int K, int Batch, bool Xf32, rocjitsu::arith::MfmaF32Model Model>
+[[gnu::noinline]] void evaluate_scalar(uint64_t controls, uint64_t flags, bool clamp_overflow,
+                                       uint32_t *const *d, const uint32_t *const *a,
+                                       const uint32_t *const *b, const uint32_t *const *c) {
+  using namespace rocjitsu::arith;
+  constexpr uint32_t input_mask = Xf32 ? kMfmaXf32InputMask : UINT32_MAX;
+  float left[M * K * Batch], right[M * K * Batch];
+  for (int i = 0; i < M * K * Batch; ++i) {
+    left[i] = as_float(a[i / 64][i % 64] & input_mask);
+    right[i] = as_float(b[i / 64][i % 64] & input_mask);
+    if constexpr (Model == MfmaF32Model::Gfx90a) {
+      if (flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS) {
+        left[i] = mfma_flush_f32(left[i]);
+        right[i] = mfma_flush_f32(right[i]);
+      }
+    }
+  }
+  mfma_reduce_scalar<M, K, Batch, 1, false, Model>(controls, d, left, right, c, clamp_overflow,
+                                                   flags);
+}
+
 // Validate the approximate model and evaluate a full matrix; errors do not touch operands.
 template <int M, int K, int Batch, bool Xf32 = false, bool Gfx942 = false,
           rocjitsu::arith::MfmaF32Model Model = rocjitsu::arith::MfmaF32Model::Default>
@@ -25,8 +47,20 @@ int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32
   // Compatibility retains the existing fast approximate implementation.
   if constexpr (Gfx942) {
     if (is_exact(flags) && !controls) {
-      mfma_gfx942_exact(MfmaGfx942Format::Xf32, M, K, Batch, (flags & RJ_ARITH_FP16_OVFL) != 0, d,
-                        a, b, c);
+      const bool no_inf_nan = (flags & RJ_ARITH_FP16_OVFL) != 0;
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+      if (!no_inf_nan && cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+        mfma_gfx942_exact_x86_64_v4<MfmaGfx942Format::Xf32, M, K, Batch>(d, a, b, c);
+        return RJ_ARITH_SUCCESS;
+      }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+      if (!no_inf_nan && cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+        mfma_gfx942_exact_x86_64_v3<MfmaGfx942Format::Xf32, M, K, Batch>(d, a, b, c);
+        return RJ_ARITH_SUCCESS;
+      }
+#endif
+      mfma_gfx942_exact(MfmaGfx942Format::Xf32, M, K, Batch, no_inf_nan, d, a, b, c);
       return RJ_ARITH_SUCCESS;
     }
   }
@@ -47,20 +81,7 @@ int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32
     return RJ_ARITH_SUCCESS;
   }
 #endif
-  constexpr uint32_t input_mask = Xf32 ? kMfmaXf32InputMask : UINT32_MAX;
-  float left[M * K * Batch], right[M * K * Batch];
-  for (int i = 0; i < M * K * Batch; ++i) {
-    left[i] = as_float(a[i / 64][i % 64] & input_mask);
-    right[i] = as_float(b[i / 64][i % 64] & input_mask);
-    if constexpr (Model == MfmaF32Model::Gfx90a) {
-      if (flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS) {
-        left[i] = mfma_flush_f32(left[i]);
-        right[i] = mfma_flush_f32(right[i]);
-      }
-    }
-  }
-  mfma_reduce_scalar<M, K, Batch, 1, false, Model>(controls, d, left, right, c, clamp_overflow,
-                                                   flags);
+  evaluate_scalar<M, K, Batch, Xf32, Model>(controls, flags, clamp_overflow, d, a, b, c);
   return RJ_ARITH_SUCCESS;
 }
 } // namespace

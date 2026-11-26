@@ -103,11 +103,6 @@ def _register_handlers() -> None:
         gen_mfma,
     )
 
-    # Vector ALU — vector_unary, pseudo_scalar_unary, vector_binop, and
-    # vector_ternary are handled by the SemaAST pipeline (_SEMA_CLASSES).
-    # pseudo_scalar_unary retains its VALU expression/encoding contract but
-    # uses ExecModel.SCALAR because the ISA says V_S_* ignores EXEC.
-
     # Relational CMPX keeps the legacy fallback; CLASS is handled by rj-arith.
     DISPATCH['vector_cmpx'] = lambda c: gen_vector_cmpx(
         c.src_ops,

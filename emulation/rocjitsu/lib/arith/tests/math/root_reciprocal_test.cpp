@@ -3,6 +3,7 @@
 
 // Tests for reciprocal, reciprocal-square-root, and square-root entry points.
 
+#include "math/older_half_unary_test.h"
 #include "math/unary_test.h"
 #include "rj_arith/detail/rj_arith_math.h"
 
@@ -124,4 +125,14 @@ TEST(MathRcpF16W64Gfx12, Arithmetic) {
 // Check unary math results and semantics/status support across CPU levels.
 TEST(MathRsqF16W64Gfx12, Arithmetic) {
   rocjitsu::arith::test::check_unary<64, true, true>(rj_arith_v_rsq_f16_w64_gfx12, 6);
+}
+
+// Inherited half mappings share selected-half aliasing and qualification checks.
+TEST(MathOlderHalfRoots, Arithmetic) {
+  rocjitsu::arith::test::check_older_half_unary<32>(rj_arith_v_rcp_f16_w32_gfx908, 5);
+  rocjitsu::arith::test::check_older_half_unary<64>(rj_arith_v_rcp_f16_w64_gfx908, 5);
+  rocjitsu::arith::test::check_older_half_unary<32>(rj_arith_v_rsq_f16_w32_gfx908, 6);
+  rocjitsu::arith::test::check_older_half_unary<64>(rj_arith_v_rsq_f16_w64_gfx908, 6);
+  rocjitsu::arith::test::check_older_half_unary<32>(rj_arith_v_sqrt_f16_w32_gfx908, 7);
+  rocjitsu::arith::test::check_older_half_unary<64>(rj_arith_v_sqrt_f16_w64_gfx908, 7);
 }

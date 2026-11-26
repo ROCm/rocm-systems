@@ -66,7 +66,7 @@ bool reporting(uint64_t flags) {
          (flags & RJ_ARITH_FP_DX10_CLAMP_OFF);
 }
 
-// Classify the same modified FMA triples as rdna3_5/valu.h, before destination CLAMP.
+// Classify modified FMA triples before destination CLAMP.
 template <Operation Op>
 uint32_t causes(uint64_t flags, uint32_t exec_mask, uint32_t modifiers, const uint32_t *a,
                 const uint32_t *b, const uint32_t *c, const uint32_t *results) {
