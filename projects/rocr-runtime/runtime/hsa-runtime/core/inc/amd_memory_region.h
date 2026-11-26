@@ -170,9 +170,12 @@ class MemoryRegion : public core::MemoryRegion {
 
   __forceinline const HsaMemFlags &mem_flags() const { return mem_flag_; }
 
-  void *fragment_alloc(size_t size) const {
-    return fragment_allocator_.alloc(size);
+  void *fragment_alloc(size_t size, bool* recycled = nullptr) const {
+    return fragment_allocator_.alloc(size, recycled);
   }
+  // Largest request the fragment allocator can recycle. A larger request gets
+  // a block of its own that is discarded when it is freed.
+  size_t fragment_block_size() const { return fragment_allocator_.default_block_size(); }
   bool fragment_free(void *mem) const { return fragment_allocator_.free(mem); }
 
 private:

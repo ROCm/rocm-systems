@@ -3,11 +3,17 @@
 
 # Multi-Arch CI ASAN for rocm-systems
 #
-# Presubmit and on-demand ASAN builds. TheRock's configure_multi_arch_ci.py
-# automatically selects host-asan for pull_request events (faster, host-only)
-# and full asan for workflow_dispatch (comprehensive device-side instrumentation).
+# Presubmit and on-demand ASAN builds. This workflow requests host-asan and
+# pins TheRock at the same commit as rocm-systems develop (034bf04, #9964).
+# The default family is gfx90a, which has no sandbox runner, so it uses its
+# normal runner (linux-gfx90a-1gpu-ossci-rocm). ci:gfx90a forces the gfx90a
+# tests on a pull request.
 #
-# For scheduled nightly runs, see therock-multi-arch-ci-asan-nightly.yml.
+# The presubmit is scoped to a runtime-only build (compiler-runtime and
+# runtime-tests) testing hip-tests and rocrtst, so that it is cheap enough to
+# run automatically on every pull request. See ROCm/TheRock#7202.
+#
+# For scheduled nightly runs with full ASAN, see therock-multi-arch-ci-asan-nightly.yml.
 
 name: TheRock Multi-Arch CI ASAN
 
@@ -60,20 +66,30 @@ concurrency:
 
 jobs:
   setup:
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@990742a25e980ab5eca39a6bd824bcca5a626634 # 2026-11-20
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@35d0ff7aa66762c903ff0228f69553459bc1703b # 2026-11-26
     with:
-      build_variant: "asan"
+      build_variant: "host-asan"
+      # From TheRock#10034, same as rocm-systems#15589. 034bf04 does not
+      # declare these inputs, so this workflow fails to parse until develop's
+      # TheRock pin includes #10034.
+      run_rocm_tests: true
+      pull_request_opt_out_label: "ci:no-host-asan"
+      pull_request_opt_in_label: "ci:host-asan"
+      build_stages: "compiler-runtime,runtime-tests"
       # Python/PyTorch/JAX builds are not supported with ASAN yet
       build_python_packages: false
       build_pytorch: false
       build_jax: false
-      linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || 'gfx94X,gfx950,gfx125X' }}
-      pr_labels: ${{ inputs.pr_labels || '' }}
+      build_native_linux: false
+      # gfx90a is the host-asan pull request test target. An empty value would
+      # fall back to the presubmit families, which do not include it.
+      linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || 'gfx90a' }}
+      pr_labels: ${{ inputs.pr_labels || 'test:hip-tests,test:rocrtst' }}
       prebuilt_stages: ${{ inputs.prebuilt_stages || '' }}
       baseline_run_id: ${{ inputs.baseline_run_id || '' }}
       baseline_repository: ${{ inputs.baseline_repository || (inputs.baseline_run_id != '' && github.repository) || '' }}
       repository: ROCm/TheRock
-      ref: 990742a25e980ab5eca39a6bd824bcca5a626634 # 2026-11-20
+      ref: 35d0ff7aa66762c903ff0228f69553459bc1703b # 2026-11-26
       external_repo: >-
         {
           "repository": "${{ github.repository }}",
@@ -93,7 +109,7 @@ jobs:
         needs.setup.outputs.linux_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@990742a25e980ab5eca39a6bd824bcca5a626634 # 2026-11-20
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@35d0ff7aa66762c903ff0228f69553459bc1703b # 2026-11-26
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
       test_labels: ${{ needs.setup.outputs.linux_test_labels }}
@@ -103,7 +119,7 @@ jobs:
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       repository: ROCm/TheRock
-      ref: 990742a25e980ab5eca39a6bd824bcca5a626634 # 2026-11-20
+      ref: 35d0ff7aa66762c903ff0228f69553459bc1703b # 2026-11-26
     permissions:
       contents: read
       id-token: write
@@ -121,7 +137,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          ref: 990742a25e980ab5eca39a6bd824bcca5a626634 # 2026-11-20
+          ref: 35d0ff7aa66762c903ff0228f69553459bc1703b # 2026-11-26
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 

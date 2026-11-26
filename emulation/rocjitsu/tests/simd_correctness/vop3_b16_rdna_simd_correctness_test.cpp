@@ -12,7 +12,7 @@
 ///   - v_cndmask_b16: low-half SGPR-pair select. The gfx1201 MODE test asserts
 ///     the generated generic SIMD route.
 ///
-/// The scalar bodies write through write_vop3_true16_dst, which preserves the
+/// The scalar bodies write through the destination-half writer, which preserves the
 /// destination's high half on RDNA. The CU and decoder are built for RDNA3;
 /// encoding marker is 0x35<<26.
 
@@ -120,8 +120,9 @@ struct Fixture {
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
     rocjitsu::test::initialize_compute_unit(cu, "cu_vop3_b16", cfg, &gpu_mem, &l2);
-    if (!cu)
+    if (!cu) {
       return;
+    }
     decoder = Decoder::create(rocjitsu::IsaFamily::Rdna3);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
   }
@@ -141,8 +142,9 @@ struct Fixture {
     EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     std::array<uint32_t, WF_SIZE> out{};
     uint32_t vb = wf->vgpr_alloc().base;
-    for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+    for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       out[lane] = cu->read_vgpr(vb + kDstVgpr, lane);
+    }
     return out;
   }
 };
@@ -172,8 +174,9 @@ void check_binary(const BinCase &c, uint64_t exec) {
   auto run_mode = [&](bool force_scalar, uint32_t rot) -> std::array<uint32_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
-    if (::testing::Test::HasFatalFailure())
+    if (::testing::Test::HasFatalFailure()) {
       return {};
+    }
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[4] = {0u, 0u, 0u, 0u};
@@ -210,8 +213,9 @@ void check_not_b16(uint64_t exec) {
   auto run_mode = [&](bool force_scalar) -> std::array<uint32_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
-    if (::testing::Test::HasFatalFailure())
+    if (::testing::Test::HasFatalFailure()) {
       return {};
+    }
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[4] = {0u, 0u, 0u, 0u};
@@ -245,8 +249,9 @@ void check_cndmask_b16(uint64_t exec, uint64_t sel) {
   auto run_mode = [&](bool force_scalar, uint32_t rot) -> std::array<uint32_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
-    if (::testing::Test::HasFatalFailure())
+    if (::testing::Test::HasFatalFailure()) {
       return {};
+    }
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t sb = fx.wf->sgpr_alloc().base;
@@ -287,16 +292,18 @@ TEST(Vop3B16RdnaSimdCorrectness, BitwiseBinary_FullExec) {
     GTEST_SKIP() << "<experimental/simd> unavailable";
     return;
   }
-  for (const auto &c : kBinCases)
+  for (const auto &c : kBinCases) {
     check_binary(c, /*exec=*/0xFFFFFFFFULL);
+  }
 }
 TEST(Vop3B16RdnaSimdCorrectness, BitwiseBinary_PartialExec) {
   if constexpr (!util::has_stdx_simd) {
     GTEST_SKIP() << "<experimental/simd> unavailable";
     return;
   }
-  for (const auto &c : kBinCases)
+  for (const auto &c : kBinCases) {
     check_binary(c, /*exec=*/0xA5A58001ULL);
+  }
 }
 TEST(Vop3B16RdnaSimdCorrectness, NotB16_FullExec) {
   if constexpr (!util::has_stdx_simd) {
@@ -318,8 +325,9 @@ TEST(Vop3B16RdnaSimdCorrectness, CndmaskB16_FullExec) {
     return;
   }
   for (uint64_t sel :
-       {uint64_t{0}, uint64_t{~0ULL}, uint64_t{0xAAAAAAAAULL}, uint64_t{0x12345678ULL}})
+       {uint64_t{0}, uint64_t{~0ULL}, uint64_t{0xAAAAAAAAULL}, uint64_t{0x12345678ULL}}) {
     check_cndmask_b16(/*exec=*/0xFFFFFFFFULL, sel);
+  }
 }
 TEST(Vop3B16RdnaSimdCorrectness, CndmaskB16_PartialExec) {
   if constexpr (!util::has_stdx_simd) {
@@ -327,8 +335,9 @@ TEST(Vop3B16RdnaSimdCorrectness, CndmaskB16_PartialExec) {
     return;
   }
   for (uint64_t sel :
-       {uint64_t{0}, uint64_t{~0ULL}, uint64_t{0xAAAAAAAAULL}, uint64_t{0x12345678ULL}})
+       {uint64_t{0}, uint64_t{~0ULL}, uint64_t{0xAAAAAAAAULL}, uint64_t{0x12345678ULL}}) {
     check_cndmask_b16(/*exec=*/0xA5A58001ULL, sel);
+  }
 }
 
 // --- v_mov_b16: u16 src0 -> f32 -> omod / clamp -> u16 dst (zero-extended) ---
@@ -339,8 +348,9 @@ void check_mov_b16(uint64_t exec, uint32_t omod, uint32_t clamp) {
   auto run_mode = [&](bool force_scalar) -> std::array<uint32_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
-    if (::testing::Test::HasFatalFailure())
+    if (::testing::Test::HasFatalFailure()) {
       return {};
+    }
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[4] = {0u, 0u, 0u, 0u};
@@ -375,18 +385,22 @@ TEST(Vop3B16RdnaSimdCorrectness, MovB16_FullExec) {
     GTEST_SKIP() << "<experimental/simd> unavailable";
     return;
   }
-  for (uint32_t omod : {0u, 1u, 2u, 3u})
-    for (uint32_t clamp : {0u, 1u})
+  for (uint32_t omod : {0u, 1u, 2u, 3u}) {
+    for (uint32_t clamp : {0u, 1u}) {
       check_mov_b16(/*exec=*/0xFFFFFFFFULL, omod, clamp);
+    }
+  }
 }
 TEST(Vop3B16RdnaSimdCorrectness, MovB16_PartialExec) {
   if constexpr (!util::has_stdx_simd) {
     GTEST_SKIP() << "<experimental/simd> unavailable";
     return;
   }
-  for (uint32_t omod : {0u, 1u, 2u, 3u})
-    for (uint32_t clamp : {0u, 1u})
+  for (uint32_t omod : {0u, 1u, 2u, 3u}) {
+    for (uint32_t clamp : {0u, 1u}) {
       check_mov_b16(/*exec=*/0xA5A58001ULL, omod, clamp);
+    }
+  }
 }
 
 } // namespace

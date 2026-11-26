@@ -114,7 +114,7 @@ can_replay(const std::vector<uint64_t>& words, const um::pointer_facts_fn_t& fac
         return facts(address);
     };
     return um::can_replay_dispatch(
-        kernarg.data(), kernarg.size(), nullptr, msnp::device_snapshot_t{}, query);
+        kernarg.data(), kernarg.size(), nullptr, msnp::snapshot_t{}, query);
 }
 }  // namespace
 
@@ -125,7 +125,7 @@ TEST(kernel_replay_untracked_memory_DeathTest, reads_only_verified_kernarg_buffe
     const auto check =
         [&](const uint8_t* data, size_t size, const um::pointer_facts_t& allocation) {
             return um::can_replay_dispatch(
-                data, size, nullptr, msnp::device_snapshot_t{}, [&](uint64_t address) {
+                data, size, nullptr, msnp::snapshot_t{}, [&](uint64_t address) {
                     if(address == reinterpret_cast<uint64_t>(data)) return allocation;
                     EXPECT_EQ(address, vmem_addr);
                     ++argument_queries;

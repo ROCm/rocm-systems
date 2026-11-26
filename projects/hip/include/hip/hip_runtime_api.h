@@ -3432,14 +3432,26 @@ hipError_t hipStreamSynchronize(hipStream_t stream);
  * All future work submitted to @p stream will wait until @p event reports completion before
  * beginning execution.
  *
+ * The wait captures the state of @p event at the time of this call. A subsequent
+ * hipEventRecord() on the same event does not modify or extend a wait already enqueued:
+ * the pending wait still completes when the work of the earlier record completes.
+ *
+ * @p event may have been recorded on a different device than @p stream. The synchronization
+ * is enforced on the GPU without blocking the host.
+ *
+ * This function uses standard default stream semantics. When @p stream is the legacy default
+ * stream (@p hipStreamLegacy, or NULL when the per-thread default stream is not enabled), the
+ * wait is inserted after all prior work on every blocking stream of the same device has been
+ * observed, and all subsequent work on those blocking streams waits for the wait to complete.
+ * When @p stream is the per-thread default stream (@p hipStreamPerThread, or NULL or
+ * @p hipStreamLegacy when the per-thread default stream is enabled), the wait applies only
+ * to that per-thread stream. It still synchronizes bidirectionally with the legacy default
+ * stream, but does not synchronize with other user-created blocking streams on the device.
+ *
  * Flags include:
  *   hipEventWaitDefault: Default event creation flag.
  *   hipEventWaitExternal: Wait is captured in the graph as an external event node when
  *                           performing stream capture
- *
- * This function only waits for commands in the current stream to complete.  Notably, this function
- * does not implicitly wait for commands in the default stream to complete, even if the specified
- * stream is created with hipStreamNonBlocking = 0.
  *
  * @see hipStreamCreate, hipStreamCreateWithFlags, hipStreamCreateWithPriority,
  * hipStreamSynchronize, hipStreamDestroy
@@ -3887,11 +3899,15 @@ hipError_t hipEventCreate(hipEvent_t* event);
  *   hipEventRecordExternal: Event is captured in the graph as an external event node when
  *                           performing stream capture
  *
- * If hipEventRecord() has been previously called on this event, then this call will overwrite any
- * existing state in event.
+ * This function can be called multiple times on the same event and will overwrite the previously
+ * captured state. The event then refers to the new record. Any hipStreamWaitEvent() calls
+ * enqueued after this call will wait on the new record. Calls to hipStreamWaitEvent() that were
+ * already enqueued before this call are not affected and will complete when the earlier record
+ * completes.
  *
- * If this function is called on an event that is currently being recorded, results are undefined
- * - either outstanding recording may save state into the event, and the order is not guaranteed.
+ * If this function is called on an event whose previous record has not yet completed, the new
+ * record replaces the previous one. Timing data from hipEventElapsedTime() may be undefined if
+ * the previous record has not completed when this function is called.
  *
  * @note: If this function is not called before use hipEventQuery() or hipEventSynchronize(),
  * #hipSuccess is returned, meaning no pending event in the stream.
@@ -3919,11 +3935,15 @@ hipError_t hipEventRecordWithFlags(hipEvent_t event, hipStream_t stream __dparm(
  * the specified stream, after all previous
  * commands in that stream have completed executing.
  *
- * If hipEventRecord() has been previously called on this event, then this call will overwrite any
- * existing state in event.
+ * This function can be called multiple times on the same event and will overwrite the previously
+ * captured state. The event then refers to the new record. Any hipStreamWaitEvent() calls
+ * enqueued after this call will wait on the new record. Calls to hipStreamWaitEvent() that were
+ * already enqueued before this call are not affected and will complete when the earlier record
+ * completes.
  *
- * If this function is called on an event that is currently being recorded, results are undefined
- * - either outstanding recording may save state into the event, and the order is not guaranteed.
+ * If this function is called on an event whose previous record has not yet completed, the new
+ * record replaces the previous one. Timing data from hipEventElapsedTime() may be undefined if
+ * the previous record has not completed when this function is called.
  *
  * @note If this function is not called before use hipEventQuery() or hipEventSynchronize(),
  * #hipSuccess is returned, meaning no pending event in the stream.
@@ -3944,12 +3964,15 @@ hipError_t hipEventRecord(hipEvent_t event, hipStream_t stream);
  *  @returns #hipSuccess, #hipErrorNotInitialized, #hipErrorInvalidValue,
  * #hipErrorLaunchFailure
  *
- *  Releases memory associated with the event.  If the event is recording but has not completed
- * recording when hipEventDestroy() is called, the function will return immediately and the
- * completion_future resources will be released later, when the hipDevice is synchronized.
+ *  @p hipEventDestroy returns immediately. An event may be destroyed before it is complete
+ * (i.e., before all work preceding the last hipEventRecord() has finished). Associated resources
+ * are automatically released asynchronously at completion. Any hipStreamWaitEvent() waits that
+ * were already enqueued on other streams or devices before the event is destroyed will still
+ * complete correctly when the recorded work finishes; destroying the event does not break or
+ * cancel those pending waits.
  *
- * @see hipEventCreate, hipEventCreateWithFlags, hipEventQuery, hipEventSynchronize, hipEventRecord,
- * hipEventElapsedTime
+ * @see hipEventCreate, hipEventCreateWithFlags, hipEventQuery, hipEventSynchronize,
+ * hipEventRecord, hipEventElapsedTime
  *
  * @returns #hipSuccess
  */

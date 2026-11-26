@@ -115,7 +115,7 @@ endif()
 add_executable(rccl_tcp_bootstrap_test rccl_tcp_bootstrap_test.cpp)
 target_link_libraries(
     rccl_tcp_bootstrap_test
-    PRIVATE GTest::gtest_main Threads::Threads
+    PRIVATE GTest::gtest_main Threads::Threads util
 )
 rj_configure_target(rccl_tcp_bootstrap_test TEST)
 rj_add_gtest_tests(rccl_tcp_bootstrap_test)
@@ -238,13 +238,31 @@ target_link_libraries(
         GTest::gtest_main
 )
 rj_configure_target(rj_concurrent_dispatch_fuzz_test PRIVATE_INCLUDES WARNINGS)
-add_dependencies(rj_concurrent_dispatch_fuzz_test rj_concurrent_dispatch_fuzz)
+# Link the CLI against a deterministic failing harness to test error handling
+# without adding fault injection to the production executable.
+add_executable(
+    rj_concurrent_dispatch_fuzz_oracle_fixture
+    ../fuzz/concurrent_dispatch/concurrent_dispatch_fuzz_main.cpp
+    fuzz/concurrent_dispatch/concurrent_dispatch_fuzz_oracle_fixture.cpp
+)
+target_include_directories(
+    rj_concurrent_dispatch_fuzz_oracle_fixture
+    PRIVATE ../fuzz/concurrent_dispatch
+)
+target_link_libraries(rj_concurrent_dispatch_fuzz_oracle_fixture PRIVATE util)
+rj_configure_target(rj_concurrent_dispatch_fuzz_oracle_fixture WARNINGS)
+add_dependencies(
+    rj_concurrent_dispatch_fuzz_test
+    rj_concurrent_dispatch_fuzz
+    rj_concurrent_dispatch_fuzz_oracle_fixture
+)
 rj_add_gtest_tests(rj_concurrent_dispatch_fuzz_test)
 add_test(
     NAME ConcurrentDispatchFuzzCliTest
     COMMAND
         ${CMAKE_COMMAND}
         -DFUZZ_EXECUTABLE=$<TARGET_FILE:rj_concurrent_dispatch_fuzz>
+        -DORACLE_FAILURE_EXECUTABLE=$<TARGET_FILE:rj_concurrent_dispatch_fuzz_oracle_fixture>
         -DWORK_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}/concurrent-dispatch-fuzz-cli
         -P
         ${CMAKE_CURRENT_SOURCE_DIR}/fuzz/concurrent_dispatch/test_concurrent_dispatch_fuzz_cli.cmake
@@ -521,8 +539,18 @@ add_executable(
     cdna_integer_arith_test.cpp
     older_scalar_integer_test.cpp
     older_fp_class_compare_test.cpp
+    older_integer_compare_test.cpp
+    older_integer64_compare_test.cpp
+    older_packed_integer_test.cpp
+    older_carry_wide_integer_test.cpp
+    older_integer16_compare_test.cpp
+    older_lane_routing_test.cpp
+    older_ds_routing_test.cpp
+    older_relative_move_test.cpp
+    older_word_routing_test.cpp
     rj_arith_policy_test.cpp
     rj_arith_config_test.cpp
+    gfx90a_f64_mfma_test.cpp
     rj_arith_bridge_test.cpp
     gfx1251_compiled_kernel_test.cpp
     daemon_api_test.cpp
@@ -534,10 +562,19 @@ add_executable(
     cdna5_architecture_test.cpp
     cdna5_cluster_test.cpp
     cdna5_dispatch_memory_test.cpp
+    cdna5_encoded_fields_test.cpp
     cdna5_execution_test.cpp
+    cdna_ds_encoded_fields_test.cpp
     numeric_encoding_regression_test.cpp
     older_conversion32_test.cpp
     older_conversion64_test.cpp
+    older_half_unary_test.cpp
+    older_screen_partition_test.cpp
+    older_packed_routing_test.cpp
+    older_conversion16_test.cpp
+    older_accumulator_transfer_test.cpp
+    older_f32_mfma_test.cpp
+    older_integer_mfma_test.cpp
     cdna5_gfx1251_simulation_test.cpp
     cdna5_instruction_test.cpp
     cdna5_sdma_test.cpp
@@ -552,6 +589,10 @@ add_executable(
     sdma_packet_processor_test.cpp
     sdma_ring_consumer_test.cpp
     cdna5_tensor_dma_test.cpp
+    ds_address_encoded_fields_test.cpp
+    ds_offset_encoded_fields_test.cpp
+    gfx1100_ds_address_test.cpp
+    gfx1251_ds_address_test.cpp
     ds_memory_snapshot_test.cpp
     rdna1_memory_test.cpp
     ds_gws_test.cpp
@@ -584,6 +625,8 @@ add_executable(
     rdna4_dot_dpp_test.cpp
     rdna1_valu_test.cpp
     rdna4_memory_test.cpp
+    memory_displacement_encoded_fields_test.cpp
+    rdna4_encoded_fields_test.cpp
     readlane_selector_test.cpp
     pc_extension_test.cpp
     pc_fetch_test.cpp
@@ -599,10 +642,14 @@ add_executable(
     scalar_buffer_test.cpp
     scalar_cache_policy_test.cpp
     scalar_cache_discard_test.cpp
-    transcendental_test.cpp
+    legacy_native_f32_test.cpp
+    legacy_special_f32_test.cpp
     comparison_test.cpp
     gfx1150_compare_test.cpp
-    conversion_test.cpp
+    older_packed_conversion_test.cpp
+    older_byte_conversion_test.cpp
+    older_normalized_conversion_test.cpp
+    older_packing_test.cpp
     denormal_test.cpp
     floating_operation_test.cpp
     input_denormal_test.cpp
@@ -667,9 +714,21 @@ add_executable(
     simd_correctness/mfma_register_paths_test.cpp
     vgpr_redispatch_test.cpp
     instruction_execution_harness_test.cpp
+    gfx908_compare_test.cpp
+    gfx10_compare_test.cpp
     vop3_conversion_modifiers_test.cpp
+    vop3_modifier_policy_test.cpp
     cube_instruction_test.cpp
+    older_graphics_test.cpp
     division_test.cpp
+    integral_rounding_f64_test.cpp
+    fract_test.cpp
+    frexp_exponent_test.cpp
+    frexp_mantissa_test.cpp
+    integral_rounding_f32_test.cpp
+    gfx1150_dual_test.cpp
+    legacy_division_test.cpp
+    legacy_native_f64_test.cpp
     division_macro_test.cpp
     valu_floating_policy_test.cpp
     gfx11_dot2_test.cpp
@@ -677,6 +736,7 @@ add_executable(
     packed_wmma_test.cpp
     rdna_wmma_i32_test.cpp
     rdna_swmmac_i32_test.cpp
+    gfx1150_wmma_test.cpp
     rdna_wmma_float_test.cpp
     rdna_swmmac_float_test.cpp
     atomic_semantics_and_decode_test.cpp
@@ -732,7 +792,6 @@ add_executable(
     simd_correctness/vop1_cvt_f64_simd_correctness_test.cpp
     simd_correctness/vopc_simd_correctness_test.cpp
     simd_correctness/vopc_cmp_class_simd_correctness_test.cpp
-    simd_correctness/vop3_modifier_simd_test.cpp
     simd_correctness/vop3_binary_simd_correctness_test.cpp
     simd_correctness/vop3_unary_simd_correctness_test.cpp
     simd_correctness/vopc_vop3_int_simd_correctness_test.cpp
@@ -748,8 +807,6 @@ add_executable(
     simd_correctness/vop_alias_rdna_simd_correctness_test.cpp
     simd_correctness/vop3_shift64_simd_correctness_test.cpp
     simd_correctness/vop3_shift64_scalar_correctness_test.cpp
-    simd_correctness/vop3_fp16_unary_simd_correctness_test.cpp
-    simd_correctness/vop3_fp16_transcendental_simd_correctness_test.cpp
     simd_correctness/vop3_cndmask_pack_simd_correctness_test.cpp
     simd_correctness/vop3_div_helpers_simd_correctness_test.cpp
     simd_correctness/vop3_b16_rdna_simd_correctness_test.cpp
@@ -864,6 +921,8 @@ target_link_libraries(
         GTest::gmock
         GTest::gtest_main
 )
+# Allow the VM config tests to fail creation of the synthetic DRM directory.
+target_link_options(rocjitsu_tests PRIVATE "LINKER:--wrap=mkdtemp")
 target_include_directories(rocjitsu_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 rj_configure_target(rocjitsu_tests TEST)
 # GCC 14.3, GCC 15.2, and GCC 16.0.1 (20260322) emit a false-positive
@@ -1245,6 +1304,8 @@ add_executable(
     consan_contract_test
     code/consan/contract_test.cpp
     code/consan/capture_test.cpp
+    code/consan/encoding_test.cpp
+    code/consan/image_facts_test.cpp
 )
 target_link_libraries(
     consan_contract_test
@@ -1357,10 +1418,18 @@ target_link_libraries(
 rj_configure_target(rocjitsu_text_edit_tests PRIVATE_INCLUDES WARNINGS)
 rj_add_gtest_tests(rocjitsu_text_edit_tests)
 
-# Host-only Drop recipe tests use shared DBI replacement and model ISA providers.
+# Host-only FI recipe tests use shared DBI replacement and model ISA providers.
 add_executable(
     rocjitsu_fault_injection_tests
     patch/fault_injection/drop_barrier_test.cpp
+    patch/fault_injection/b96_lds_test.cpp
+    patch/fault_injection/scalar_two_lds_test.cpp
+    patch/fault_injection/lds_wrong_address_test.cpp
+    patch/fault_injection/lds_ownership_test.cpp
+    patch/fault_injection/lds_target_ownership_test.cpp
+    patch/fault_injection/gfx1100_lds_test.cpp
+    patch/fault_injection/gfx1251_lds_test.cpp
+    patch/fault_injection/cdna_lds_wrong_address_test.cpp
 )
 target_include_directories(
     rocjitsu_fault_injection_tests
@@ -1404,6 +1473,54 @@ if(RJ_FAULT_INJECTION_CORPUS_OBJECT)
 endif()
 rj_add_gtest_tests(rocjitsu_fault_injection_tests)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_executable(
+        rocjitsu_fault_mutation_cli_tests
+        patch/fault_injection/mutation_cli_test.cpp
+        patch/fault_injection/b96_lds_cli_test.cpp
+        patch/fault_injection/scalar_two_lds_cli_test.cpp
+        patch/fault_injection/lds_cli_test.cpp
+        patch/fault_injection/gfx1251_lds_cli_test.cpp
+        patch/fault_injection/gfx1100_lds_cli_test.cpp
+        patch/fault_injection/cdna_lds_cli_test.cpp
+    )
+    target_include_directories(
+        rocjitsu_fault_mutation_cli_tests
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    target_link_libraries(
+        rocjitsu_fault_mutation_cli_tests
+        PRIVATE
+            rocjitsu_dbt_internal
+            rocjitsu_amdgpu_isa_model_registry
+            simdojo_headers
+            GTest::gtest_main
+    )
+    rj_add_test_path(rocjitsu_fault_mutation_cli_tests RJ_CODE_MUTATE_PATH "$<TARGET_FILE:rj_code_mutate>")
+    rj_add_test_path(rocjitsu_fault_mutation_cli_tests RJ_CODE_MUTATE_TEST_PATH "$<TARGET_FILE:rocjitsu_fault_mutation_cli_tests>")
+    _rj_path_from_installed_test_bin(
+        _rj_installed_code_mutate
+        "${CMAKE_INSTALL_BINDIR}"
+        "rj_code_mutate"
+    )
+    rj_add_test_path(rocjitsu_fault_mutation_cli_tests RJ_INSTALLED_CODE_MUTATE_PATH "${_rj_installed_code_mutate}")
+    add_dependencies(rocjitsu_fault_mutation_cli_tests rj_code_mutate)
+    rj_configure_target(rocjitsu_fault_mutation_cli_tests PRIVATE_INCLUDES WARNINGS)
+    rj_add_gtest_tests(rocjitsu_fault_mutation_cli_tests PROPERTIES TIMEOUT 30)
+    if(RJ_INSTALL_TESTS)
+        file(
+            APPEND "${RJ_INSTALL_CTEST_FILE}"
+            "include(\"rocjitsu_fault_mutation_cli_tests.cmake\")\n"
+        )
+    endif()
+    add_test(
+        NAME FaultMutationCli.SymbolBoundary
+        COMMAND
+            ${CMAKE_COMMAND} -DNM=${CMAKE_NM}
+            -DMODEL_BINARY=$<TARGET_FILE:rj_code_mutate>
+            -DREQUIRED_MODEL_ARCHES=cdna1,cdna2,cdna3,cdna4,cdna5,rdna1,rdna2,rdna3,rdna3_5,rdna4
+            -P
+            ${CMAKE_CURRENT_SOURCE_DIR}/patch/fault_injection/check_fault_injection_symbols.cmake
+    )
     add_test(
         NAME FaultDropBarrier.SymbolBoundary
         COMMAND
@@ -1528,38 +1645,10 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             GTest::gtest_main
     )
     rj_configure_target(queue_registration_allocation_failure_test PRIVATE_INCLUDES WARNINGS)
+    rj_add_test_path(queue_registration_allocation_failure_test RJ_KFD_MMAP_TEST_CONFIG
+                     "${CMAKE_SOURCE_DIR}/configs/gfx950_mi350x.json"
+    )
     rj_add_gtest_tests(queue_registration_allocation_failure_test)
-
-    add_executable(
-        kfd_mmap_allocation_failure_test
-        kfd_mmap_allocation_failure_test.cpp
-    )
-    target_link_libraries(
-        kfd_mmap_allocation_failure_test
-        PRIVATE
-            ${RJ_OBJECT_LIBS}
-            util
-            flatbuffers
-            Threads::Threads
-            GTest::gtest_main
-    )
-    rj_configure_target(kfd_mmap_allocation_failure_test TEST)
-    rj_add_gtest_tests(kfd_mmap_allocation_failure_test)
-    if(RJ_INSTALL_TESTS)
-        file(
-            APPEND "${RJ_INSTALL_CTEST_FILE}"
-            "include(\"kfd_mmap_allocation_failure_test.cmake\")\n"
-        )
-    endif()
-    rj_add_test(
-        NAME KfdMmapAllocationFailureTest.FixedDoorbellReplacementPublishesOnceAndRetries.token
-        COMMAND $<TARGET_FILE:kfd_mmap_allocation_failure_test>
-            --gtest_filter=KfdMmapAllocationFailureTest.FixedDoorbellReplacementPublishesOnceAndRetries
-        ENVIRONMENT "RJ_TEST_FORCE_TOKEN_BACKING=1"
-        INSTALL_COMMAND "bin/kfd_mmap_allocation_failure_test"
-            --gtest_filter=KfdMmapAllocationFailureTest.FixedDoorbellReplacementPublishesOnceAndRetries
-        INSTALL_ENVIRONMENT "RJ_TEST_FORCE_TOKEN_BACKING=1"
-    )
 
     # Native dispatch must extract both the relative tables and their factories
     # from a static archive, including when the C++ objects use LTO.
@@ -2150,6 +2239,19 @@ if(RJ_ASAN_SHARED_LIBRARY)
 elseif(RJ_TSAN_SHARED_LIBRARY)
     set(RJ_SANITIZER_PRELOAD_PREFIX "${RJ_TSAN_SHARED_LIBRARY}:")
 endif()
+
+add_library(topology_probe_preload SHARED topology_probe_preload_test.cpp)
+rj_configure_target(topology_probe_preload TEST)
+target_link_libraries(topology_probe_preload PRIVATE ${CMAKE_DL_LIBS})
+add_test(
+    NAME RocjitsuTopologyProbeCliTest
+    COMMAND
+        ${CMAKE_COMMAND} -E env RJ_ROCJITSU=$<TARGET_FILE:rocjitsu_bin>
+        RJ_DBT_CONFIG=${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_gfx942.json
+        "RJ_TOPOLOGY_PRELOAD=${RJ_SANITIZER_PRELOAD_PREFIX}$<TARGET_FILE:topology_probe_preload>"
+        ${Python3_EXECUTABLE} -B
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/test_topology_probe_cli.py -v
+)
 
 # ROCr retains process-global allocations after HIP and DBT guest processes
 # exit. DBT guests additionally need the ASan shadow gap unprotected so ROCr can
@@ -2815,6 +2917,7 @@ set(_rj_maintenance_interposer_cases
     FinalDrmCloseWaitsForSnapshotOnWritebackFailure
 )
 set(_rj_hook_interposer_cases
+    TimelineWaitAllowsThreadExitFromSignal
     LiveSvmDenialEndsOnHostVmaReplacement
     ${_rj_maintenance_interposer_cases}
 )
@@ -3188,7 +3291,7 @@ set(_rj_interposer_syncobj_tests
     IndependentDrmOpensHaveSeparateNamespaces
     CreateSignaledSeedsOnlyTheInitialPoint
     WaitValidationMatchesDrm
-    OversizedBinaryWaitReturnsEnomem
+    OversizedBinaryWaitAllocationIsFatal
     DestroyRejectsInvalidInput
     TimelineWaitBlocksUntilSignalOrDeadline
     TimelineWaitReturnsEintrForSignal
@@ -4607,10 +4710,11 @@ if(RJ_ENABLE_HIP_TESTS)
                 ${AMDCXX} -x hip --offload-arch=${ARG_ARCH}
                 --rocm-path=${ROCM_PATH} -std=c++20 -O2
                 ${RJ_HIP_SANITIZER_FLAGS} -isystem ${GTEST_INC}
-                -I${CMAKE_CURRENT_SOURCE_DIR} -o ${HIP_TEST_BIN} ${HIP_TEST_SRC}
-                ${HIP_EXTRA_LIBS} -L${GTEST_LIB_DIR} -lgtest -lpthread
-                -Wl,-rpath,${GTEST_LIB_DIR} -Wl,-rpath,${RJ_HSA_LIBRARY_DIR}
-                ${RJ_HIP_SANITIZER_LINK_FLAGS}
+                -I${CMAKE_CURRENT_SOURCE_DIR}
+                -I${PROJECT_SOURCE_DIR}/lib/util/include -o ${HIP_TEST_BIN}
+                ${HIP_TEST_SRC} ${HIP_EXTRA_LIBS} -L${GTEST_LIB_DIR} -lgtest
+                -lpthread -Wl,-rpath,${GTEST_LIB_DIR}
+                -Wl,-rpath,${RJ_HSA_LIBRARY_DIR} ${RJ_HIP_SANITIZER_LINK_FLAGS}
             DEPENDS
                 ${HIP_TEST_SRC}
                 ${AMDCXX}

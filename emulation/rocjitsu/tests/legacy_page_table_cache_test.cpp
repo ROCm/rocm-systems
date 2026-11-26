@@ -123,15 +123,18 @@ TEST(LegacyPageTableCacheStateTest, NoOpMutationRestoresLockFreeHits) {
                                           process.page_table_generation(),
                                           process.page_table_request_mutex(),
                                           process.page_table_cache_state())
-                        .failed())
+                        .failed()) {
                   _exit(4);
-                if (space.read8(kAddress, 7) != page[0])
+                }
+                if (space.read8(kAddress, 7) != page[0]) {
                   _exit(1);
+                }
                 const uint64_t generation = *process.page_table_generation();
                 process.set_page_mtype(kAddress, page.size(), Mtype::RW);
                 if (*process.page_table_generation() != generation ||
-                    space.read8(kAddress, 7) != page[0])
+                    space.read8(kAddress, 7) != page[0]) {
                   _exit(2);
+                }
 
                 // The lookup after the no-op must restore admission. Holding
                 // the table lock on another thread distinguishes a copied-PTE
@@ -141,13 +144,16 @@ TEST(LegacyPageTableCacheStateTest, NoOpMutationRestoresLockFreeHits) {
                 std::thread locker([&] {
                   std::unique_lock lock(process.page_table_mutex_);
                   locked.store(true);
-                  while (!read_done.load())
+                  while (!read_done.load()) {
                     std::this_thread::yield();
+                  }
                 });
-                while (!locked.load())
+                while (!locked.load()) {
                   std::this_thread::yield();
-                if (space.read8(kAddress, 7) != page[0])
+                }
+                if (space.read8(kAddress, 7) != page[0]) {
                   _exit(3);
+                }
                 read_done.store(true);
                 locker.join();
                 alarm(0);
@@ -171,46 +177,57 @@ TEST(LegacyPageTableCacheStateTest, InvalidationDrainsEveryNestedReader) {
                 std::vector<std::thread> readers;
                 for (size_t index = 0; index < kReaders; ++index) {
                   readers.emplace_back([&, index] {
-                    if (!state.try_acquire(generation) || !state.try_acquire(generation))
+                    if (!state.try_acquire(generation) || !state.try_acquire(generation)) {
                       _exit(1);
+                    }
                     entered.fetch_add(1);
-                    while (phase.load() == 0)
+                    while (phase.load() == 0) {
                       std::this_thread::yield();
+                    }
                     state.release();
                     partially_released.fetch_add(1);
-                    while (!release_last[index].load())
+                    while (!release_last[index].load()) {
                       std::this_thread::yield();
+                    }
                     state.release();
                     left[index].store(true);
                   });
                 }
-                while (entered.load() != kReaders)
+                while (entered.load() != kReaders) {
                   std::this_thread::yield();
+                }
                 std::thread writer([&] {
                   state.invalidate_and_wait();
                   writer_done.store(true);
                 });
-                while (state.generation() == generation)
+                while (state.generation() == generation) {
                   std::this_thread::yield();
-                if (state.try_acquire(generation) || writer_done.load())
+                }
+                if (state.try_acquire(generation) || writer_done.load()) {
                   _exit(2);
+                }
                 phase.store(1);
-                while (partially_released.load() != kReaders)
+                while (partially_released.load() != kReaders) {
                   std::this_thread::yield();
+                }
                 // Release readers individually: a writer must drain every admission,
                 // including collisions and the second admission on each thread.
                 for (size_t index = 0; index < kReaders; ++index) {
-                  if (writer_done.load())
+                  if (writer_done.load()) {
                     _exit(3);
+                  }
                   release_last[index].store(true);
-                  while (!left[index].load())
+                  while (!left[index].load()) {
                     std::this_thread::yield();
+                  }
                 }
-                for (auto &reader : readers)
+                for (auto &reader : readers) {
                   reader.join();
+                }
                 writer.join();
-                if (!writer_done.load() || state.try_acquire(generation))
+                if (!writer_done.load() || state.try_acquire(generation)) {
                   _exit(4);
+                }
                 alarm(0);
                 _exit(0);
               }()),
@@ -233,17 +250,20 @@ TEST(LegacyPageTableCacheStateTest, ConcurrentAdmissionsObserveOnlyPublishedCopi
                     started.fetch_add(1);
                     while (!stop.load()) {
                       const uint64_t copy_generation = published.load();
-                      if (!state.try_acquire(copy_generation))
+                      if (!state.try_acquire(copy_generation)) {
                         continue;
-                      if (payload != copy_generation)
+                      }
+                      if (payload != copy_generation) {
                         _exit(1);
+                      }
                       reads.fetch_add(1, std::memory_order_relaxed);
                       state.release();
                     }
                   });
                 }
-                while (started.load() != readers.size() || reads.load() == 0)
+                while (started.load() != readers.size() || reads.load() == 0) {
                   std::this_thread::yield();
+                }
                 for (size_t mutation = 0; mutation < 2000; ++mutation) {
                   state.invalidate_and_wait();
                   // Real PTE copies are published under the mutation-side locks only
@@ -254,11 +274,13 @@ TEST(LegacyPageTableCacheStateTest, ConcurrentAdmissionsObserveOnlyPublishedCopi
                   std::this_thread::yield();
                 }
                 stop.store(true);
-                for (auto &reader : readers)
+                for (auto &reader : readers) {
                   reader.join();
+                }
                 state.invalidate_and_wait();
-                if (state.try_acquire(published.load()))
+                if (state.try_acquire(published.load())) {
                   _exit(2);
+                }
                 alarm(0);
                 _exit(0);
               }()),

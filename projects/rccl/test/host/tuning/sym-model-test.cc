@@ -103,7 +103,7 @@ class SymModelTdmTest : public ::testing::Test {
   ncclTuningInput_t Input(ncclFunc_t func, size_t nBytes) const {
     ncclTuningInput_t in{};
     in.comm = comm_.get();
-    in.tuningMask = ~uint64_t(0);
+    in.tuningMask = NCCL_TUNING_MASK_ALL;
     in.func = func;
     in.redOp = ncclSum;
     in.devRedOp = ncclDevSum;
@@ -477,11 +477,150 @@ TEST_F(SymModelTdmHierTest, TmaForced_TdmKernelsSplitAllGatherLikeTheirVectorTwi
   }
 }
 
+// gfx1250 partition mode runs ReduceScatter on LL up to 1 MiB of bus bytes, then on the hierarchical kernel. avg has
+// no hierarchical kernel, so LD takes its range.
+TEST_F(SymModelTdmTest, Gfx1250PartitionMode_ReduceScatterOrder) {
+  comm_->hasMloPart = true;
+  comm_->symkState.kcomm.hierScaleInSize = 2;  // the fixture's four ranks make two packages
+  struct {
+    size_t nBytes;  // per rank; the crossover counts bus bytes, four times this
+    bool avg;
+    ncclSymkKernelId expected;
+  } const cases[] = {
+      {size_t(256) << 10, false, ncclSymkKernelId_ReduceScatter_LL},
+      {size_t(512) << 10, false, ncclSymkKernelId_ReduceScatter_HierLsaLDST},
+      {size_t(256) << 10, true, ncclSymkKernelId_ReduceScatter_LL},
+      {size_t(512) << 10, true, ncclSymkKernelId_ReduceScatter_LD},
+  };
+  for (const auto& c : cases) {
+    ncclTuningInput_t in = Input(ncclFuncReduceScatter, c.nBytes);
+    if (c.avg) {
+      in.redOp = ncclAvg;
+      in.devRedOp = ncclDevSumPostDiv;
+    }
+    Pick p = Select(in);
+    EXPECT_EQ(p.kernelId, c.expected) << c.nBytes << " B " << (c.avg ? "avg" : "sum") << " picked "
+                                      << ncclSymkKernelIdToString(p.kernelId);
+  }
+}
+
+// Where the preferred ReduceScatter kernel can't run, the next one takes its range: LD for a grouped launch below the
+// crossover, LL for an unregistered send above it, and TmaLD for a selection that allows it but not LD. A forced
+// choice skips the ordering.
+TEST_F(SymModelTdmTest, Gfx1250PartitionMode_ReduceScatterFallbacks) {
+  comm_->hasMloPart = true;
+  comm_->symkState.kcomm.hierScaleInSize = 2;  // the fixture's four ranks make two packages
+  constexpr ncclSymkKernelId ll = ncclSymkKernelId_ReduceScatter_LL;
+  constexpr ncclSymkKernelId tmaLd = ncclSymkKernelId_ReduceScatter_TmaLD;
+
+  ncclTuningInput_t grouped = Input(ncclFuncReduceScatter, size_t(256) << 10);
+  grouped.nWorks = 2;
+  EXPECT_EQ(Select(grouped).kernelId, ncclSymkKernelId_ReduceScatter_LD) << "grouped, below the crossover";
+
+  ncclTuningInput_t unregistered = Input(ncclFuncReduceScatter, size_t(512) << 10);
+  unregistered.winRegType = ncclSymSendNonregRecvReg;
+  EXPECT_EQ(Select(unregistered).kernelId, ll) << "unregistered send, above the crossover";
+
+  // Select() ignores the selection, so check the two kernels it allows directly.
+  if (TmaReachableOnThisBuild()) {
+    ncclTuningInput_t tdmOnly = Input(ncclFuncReduceScatter, size_t(512) << 10);
+    tdmOnly.tuningMask = rcclTuningMask::bit(NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ll) |
+                         rcclTuningMask::bit(NCCL_TUNING_SYM_KERNEL_ID_OFFSET + tmaLd);
+    EXPECT_TRUE(Evaluate(tdmOnly, tmaLd).valid) << "TmaLD takes LD's place";
+    EXPECT_FALSE(Evaluate(tdmOnly, ll).valid);
+  }
+
+  ncclTuningInput_t forced = Input(ncclFuncReduceScatter, size_t(512) << 10);
+  EXPECT_TRUE(rcclSymkReduceScatterYieldsInPartitionMode(&forced, ll, ~ncclSymkKernelMask(0)));
+  comm_->tuningContext.forced[ncclFuncReduceScatter] = 1;
+  EXPECT_FALSE(rcclSymkReduceScatterYieldsInPartitionMode(&forced, ll, ~ncclSymkKernelMask(0)))
+    << "a forced choice leaves the kernel to the cost model";
+}
+
 // An algorithm selection naming only the TDM hierarchical kernel reaches it without NCCL_SYM_KERNEL.
 TEST_F(SymModelTdmHierTest, SelectionOfOnlyHierTma_KeepsItValid) {
   ncclTuningInput_t in = Input(ncclFuncAllGather, size_t(1) << 20);
-  in.tuningMask = uint64_t(1) << (NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ncclSymkKernelId_AllGather_HierLsaTmaST);
+  in.tuningMask = rcclTuningMask::bit(NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ncclSymkKernelId_AllGather_HierLsaTmaST);
   EXPECT_TRUE(Evaluate(in, ncclSymkKernelId_AllGather_HierLsaTmaST).valid);
+}
+
+// ---- LSA CTA selection: the legacy rule lsa.cc keeps after the NCCL 2.32.3 refactor ----
+
+// The vector AllGather on eight ranks of a non-gfx950 AMD GPU, so lsa.cc may use all ncclSymkMaxBlocks CTAs.
+class SymModelLsaCtaTest : public SymModelTdmTest {
+ protected:
+  void SetUp() override {
+    SymModelTdmTest::SetUp();
+    SetArch("gfx942", /*compCap=*/94, /*warpSize=*/64);
+    comm_->nRanks = 8;
+  }
+
+  ncclTuningInput_t LsaInput(size_t nBytes, int minCTAs, int maxCTAs) const {
+    ncclTuningInput_t in = Input(ncclFuncAllGather, nBytes);
+    in.minCTAs = minCTAs;
+    in.maxCTAs = maxCTAs;
+    return in;
+  }
+
+  struct Choice {
+    int nBlocks = 0;
+    float timeUs = 0.0f;
+    float selectionTimeUs = 0.0f;
+  };
+
+  Choice ChooseCtas(ncclTuningInput_t in) const {
+    Choice c;
+    EXPECT_EQ(ncclSuccess, ncclSymkLsaModel(&in, ncclSymkKernelId_AllGather_ST, in.nBytes, &c.timeUs,
+                                            &c.selectionTimeUs, &c.nBlocks));
+    return c;
+  }
+};
+
+// Pick the fewest CTAs whose estimate, without the per-CTA resource penalty, is within 1.5% (withinPeakFactor for
+// the vector AllGather) of the widest count's. Charging the penalty inside that comparison instead picks 1, 1, 1, 6,
+// 18, 54, 62 here. The expected counts were worked out outside the code under test, from the AllGather cost model
+// at baseLat 13 us, 5 GiB/s per CTA and a 1200 GiB/s peak, so a wrong factor or model moves only the result.
+TEST_F(SymModelLsaCtaTest, AllGatherST_PicksFewestCtasWithinPeakOfTheWidestEstimate) {
+  const struct {
+    size_t nBytes;
+    int expectedCtas;
+  } cases[] = {{size_t(1) << 10, 4},  {size_t(4) << 10, 10},  {size_t(16) << 10, 26}, {size_t(64) << 10, 52},
+               {size_t(256) << 10, 62}, {size_t(1) << 20, 64}, {size_t(4) << 20, 64}};
+  for (const auto& c : cases) {
+    Choice choice = ChooseCtas(LsaInput(c.nBytes, 1, ncclSymkMaxBlocks));
+    EXPECT_EQ(choice.nBlocks, c.expectedCtas) << c.nBytes << " B";
+  }
+}
+
+// gfx950 caps the vector AllGather at 24 CTAs, so the same rule runs over a narrower range.
+TEST_F(SymModelLsaCtaTest, AllGatherST_Gfx950_PicksWithinTheCap) {
+  SetArch("gfx950", /*compCap=*/95, /*warpSize=*/64);
+  const struct {
+    size_t nBytes;
+    int expectedCtas;
+  } cases[] = {{size_t(1) << 10, 4},  {size_t(4) << 10, 8},  {size_t(16) << 10, 18}, {size_t(64) << 10, 24},
+               {size_t(1) << 20, 24}, {size_t(4) << 20, 24}};
+  for (const auto& c : cases) {
+    Choice choice = ChooseCtas(LsaInput(c.nBytes, 1, ncclSymkMaxBlocks));
+    EXPECT_EQ(choice.nBlocks, c.expectedCtas) << c.nBytes << " B";
+  }
+}
+
+// The penalty is charged to selectionTimeUs only, at 2.5% per CTA, never to the timeUs the selection compares.
+// timeUs is the unpenalized estimate, 13 us + softplus(7 * 64 KiB / (nBlocks * 5 GiB/s) - 1), worked out outside the
+// code under test.
+TEST_F(SymModelLsaCtaTest, AllGatherST_ChargesThePerCtaPenaltyOnlyToSelectionTime) {
+  constexpr float kSelectionCostPerCta = 0.025f;
+  const struct {
+    int nBlocks;
+    float unpenalizedTimeUs;
+  } cases[] = {{1, 97.4492f}, {6, 26.2415f}, {24, 15.6348f}};
+  for (const auto& c : cases) {
+    Choice choice = ChooseCtas(LsaInput(size_t(64) << 10, c.nBlocks, c.nBlocks));
+    ASSERT_EQ(choice.nBlocks, c.nBlocks);
+    EXPECT_NEAR(choice.timeUs, c.unpenalizedTimeUs, 0.001f) << c.nBlocks << " CTAs";
+    EXPECT_FLOAT_EQ(choice.selectionTimeUs, choice.timeUs * (1.0f + kSelectionCostPerCta * c.nBlocks));
+  }
 }
 
 }  // namespace

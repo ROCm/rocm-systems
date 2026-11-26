@@ -41,8 +41,19 @@ template <int M, int K, bool Wmma = false> void arithmetic(Entry entry) {
     input[Dest][lane] = lane % 2 ? 0x7fffffffU : 0x80000000U;
   }
   const auto levels = supported_cpu_levels();
-  for (uint64_t controls :
-       Wmma ? std::array<uint64_t, 4>{0, 3, 64, 65} : std::array<uint64_t, 4>{0, 8, 1, 127}) {
+  const auto control_cases = [] {
+    if constexpr (Wmma) {
+      return std::array<uint64_t, 6>{0,
+                                     3,
+                                     64,
+                                     65,
+                                     RJ_ARITH_SWMMAC_INDEX_KEY_1 | 2,
+                                     RJ_ARITH_SWMMAC_INDEX_KEY_1 | RJ_ARITH_WMMA_CLAMP | 3};
+    } else {
+      return std::array<uint64_t, 4>{0, 8, 1, 127};
+    }
+  }();
+  for (uint64_t controls : control_cases) {
     for (int aliasing_offset : {0, A, Index, Dest}) {
       // D is an input too: the reference must use the accumulator at the selected alias.
       uint32_t expected[D][L];
@@ -62,8 +73,12 @@ template <int M, int K, bool Wmma = false> void arithmetic(Entry entry) {
               if constexpr (Wmma) {
                 al = row + 16 * (ck / 16 % 2);
                 ae = ck / 32 * 16 + ck % 16;
-                selected =
-                    int(input[Index + (ck % 32) / 16][row + 16 * (ck / 32)] >> (2 * (ck % 16)) & 3);
+                uint32_t metadata = input[Index + (ck % 32) / 16][row + 16 * (ck / 32)];
+                if (controls & RJ_ARITH_SWMMAC_INDEX_KEY_1) {
+                  // The high bank shifts down, leaving repeated zero selectors above it.
+                  metadata >>= 16;
+                }
+                selected = int(metadata >> (2 * (ck % 16)) & 3);
               } else {
                 int nibble;
                 if constexpr (M * K < 2048) {
@@ -134,8 +149,14 @@ template <int M, int K, bool Wmma = false> void arithmetic(Entry entry) {
 TEST(SparseIntegerMatrix, smfmac_i32_16x16x64_i8_w64) {
   arithmetic<16, 64>(rj_arith_v_smfmac_i32_16x16x64_i8_w64);
 }
+TEST(SparseIntegerMatrix, smfmac_i32_16x16x64_i8_w64_gfx950) {
+  arithmetic<16, 64>(rj_arith_v_smfmac_i32_16x16x64_i8_w64_gfx950);
+}
 TEST(SparseIntegerMatrix, smfmac_i32_32x32x32_i8_w64) {
   arithmetic<32, 32>(rj_arith_v_smfmac_i32_32x32x32_i8_w64);
+}
+TEST(SparseIntegerMatrix, smfmac_i32_32x32x32_i8_w64_gfx950) {
+  arithmetic<32, 32>(rj_arith_v_smfmac_i32_32x32x32_i8_w64_gfx950);
 }
 TEST(SparseIntegerMatrix, smfmac_i32_16x16x128_i8_w64) {
   arithmetic<16, 128>(rj_arith_v_smfmac_i32_16x16x128_i8_w64);
@@ -145,5 +166,90 @@ TEST(SparseIntegerMatrix, smfmac_i32_32x32x64_i8_w64) {
 }
 TEST(SparseIntegerMatrix, swmmac_i32_16x16x128_iu8_w32) {
   arithmetic<16, 128, true>(rj_arith_v_swmmac_i32_16x16x128_iu8_w32);
+}
+
+TEST(SparseIntegerMatrix, SmfmacOverflowModeSaturatesPerHardwarePassOnGfx950) {
+  std::array<std::array<uint32_t, 64>, 2> a;
+  std::array<std::array<uint32_t, 64>, 4> b;
+  std::array<uint32_t, 64> idx;
+  std::array<std::array<uint32_t, 64>, 4> result;
+  idx.fill(0x44444444u);
+  for (auto &reg : b) {
+    reg.fill(0x01010101u);
+  }
+  // In 16x16x64 SMFMAC, pass 0 consumes lanes 0..31 (groups 0..3 and 8..11: 16 products = +16)
+  // and pass 1 consumes lanes 32..63 (groups 4..7 and 12..15: 16 products = -16).
+  for (auto &reg : a) {
+    std::fill_n(reg.begin(), 32, 0x01010101u);
+    std::fill_n(reg.begin() + 32, 32, 0xffffffffu);
+  }
+  const uint32_t *src_a[] = {a[0].data(), a[1].data()};
+  const uint32_t *src_b[] = {b[0].data(), b[1].data(), b[2].data(), b[3].data()};
+  const uint32_t *src_idx[] = {idx.data()};
+  uint32_t *dst[] = {result[0].data(), result[1].data(), result[2].data(), result[3].data()};
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (bool gfx950 : {false, true}) {
+      for (bool saturate : {false, true}) {
+        for (auto &reg : result) {
+          reg.fill(0x7ffffffcu);
+        }
+        const uint64_t flags =
+            cpu | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL | (saturate ? RJ_ARITH_FP16_OVFL : 0);
+        Entry fn = gfx950 ? rj_arith_v_smfmac_i32_16x16x64_i8_w64_gfx950
+                          : rj_arith_v_smfmac_i32_16x16x64_i8_w64;
+        ASSERT_EQ(fn(flags, 0, dst, src_a, src_b, src_idx), RJ_ARITH_SUCCESS);
+        const uint32_t expected = saturate && gfx950 ? 0x7fffffefu : 0x7ffffffcu;
+        for (const auto &reg : result) {
+          for (uint32_t value : reg) {
+            EXPECT_EQ(value, expected);
+          }
+        }
+      }
+    }
+  }
+}
+TEST(SparseIntegerMatrix, SmfmacGfx950PerPassSaturationWideShapes) {
+  // Verify 32x32x64 (2 passes) and 16x16x128 (4 passes) saturate after each K=32
+  // hardware pass across all CPU tiers, matching the scalar reference bit-for-bit.
+  std::array<std::array<uint32_t, 64>, 4> a;
+  std::array<std::array<uint32_t, 64>, 8> b;
+  std::array<uint32_t, 64> idx;
+  idx.fill(0x44444444u);
+  for (auto &reg : b) {
+    reg.fill(0x01010101u);
+  }
+  for (auto &reg : a) {
+    std::fill_n(reg.begin(), 32, 0x01010101u);
+    std::fill_n(reg.begin() + 32, 32, 0xffffffffu);
+  }
+  const uint32_t *src_a[] = {a[0].data(), a[1].data(), a[2].data(), a[3].data()};
+  const uint32_t *src_b[] = {b[0].data(), b[1].data(), b[2].data(), b[3].data(),
+                             b[4].data(), b[5].data(), b[6].data(), b[7].data()};
+  const uint32_t *src_idx[] = {idx.data()};
+  auto check = [&]<int OutputRegs>(Entry fn) {
+    std::array<std::array<uint32_t, 64>, OutputRegs> ref;
+    std::array<uint32_t *, OutputRegs> ref_d;
+    for (int r = 0; r < OutputRegs; ++r) {
+      ref[r].fill(0x7ffffffcu);
+      ref_d[r] = ref[r].data();
+    }
+    const uint64_t base_flags = RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL | RJ_ARITH_FP16_OVFL;
+    ASSERT_EQ(fn(RJ_ARITH_CPU_BASELINE | base_flags, 0, ref_d.data(), src_a, src_b, src_idx),
+              RJ_ARITH_SUCCESS);
+    // Pass 0 saturates INT_MAX; pass 1 steps down below INT_MAX (distinct from final-sum clamp).
+    EXPECT_NE(ref[0][0], 0x7ffffffcu);
+    for (uint64_t cpu : supported_cpu_levels()) {
+      std::array<std::array<uint32_t, 64>, OutputRegs> out;
+      std::array<uint32_t *, OutputRegs> out_d;
+      for (int r = 0; r < OutputRegs; ++r) {
+        out[r].fill(0x7ffffffcu);
+        out_d[r] = out[r].data();
+      }
+      ASSERT_EQ(fn(cpu | base_flags, 0, out_d.data(), src_a, src_b, src_idx), RJ_ARITH_SUCCESS);
+      EXPECT_EQ(out, ref) << "cpu=" << cpu;
+    }
+  };
+  check.template operator()<16>(rj_arith_v_smfmac_i32_32x32x64_i8_w64);
+  check.template operator()<4>(rj_arith_v_smfmac_i32_16x16x128_i8_w64);
 }
 } // namespace

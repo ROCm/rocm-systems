@@ -5,6 +5,7 @@
 // FP4/FP8/BF8/FP6/BF6 values, sharing format rounding and register staging. Shares finite
 // rounding with FP4 while retaining source interleaving and per-element seeds.
 
+#include "common/exec_mask.h"
 #include "common/float_encoding.h"
 #include "common/validation.h"
 #include "conversion/scaled_narrow.h"
@@ -21,11 +22,13 @@ using Destination = ScaledNarrowDestination;
 // Decode a FP32 value or the low FP16/BF16 half without modifying FP controls.
 template <Source Src> float decode(uint32_t raw, bool flush_input) {
   if constexpr (Src == Source::F16) {
-    return f16_to_float(uint16_t(raw));
+    uint16_t h = uint16_t(raw);
+    return f16_to_float(flush_input && (h & 0x7c00U) == 0 ? uint16_t(h & 0x8000U) : h);
   } else if constexpr (Src == Source::Bf16) {
-    return bf16_to_float(uint16_t(raw));
+    uint32_t b = uint32_t(uint16_t(raw)) << 16;
+    return as_float(flush_input && (b & 0x7f800000U) == 0 ? (b & 0x80000000U) : b);
   } else {
-    return as_float(flush_input && (raw & 0x7f800000U) == 0 ? raw & 0x80000000U : raw);
+    return as_float(flush_input && (raw & 0x7f800000U) == 0 ? (raw & 0x80000000U) : raw);
   }
 }
 
@@ -36,12 +39,16 @@ template <Source Src> float decode(uint32_t raw, bool flush_input) {
 template <int Lanes, Source Src, Destination Dst, bool Stochastic, bool Gfx1250 = false>
 int convert(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *d,
             const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c) {
-  flags = resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
-  if (int error =
-          validate(flags, mode, Src == Source::F32 ? RJ_ARITH_FP_FLUSH_INPUT_DENORMALS : 0)) {
+  flags =
+      resolve_compatibility(flags, Gfx1250 ? RJ_ARITH_SEMANTICS_LOOSE
+                                           : RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  constexpr uint64_t allowed_flags =
+      (!Gfx1250 || Src == Source::F32) ? RJ_ARITH_FP_FLUSH_INPUT_DENORMALS : 0;
+  if (int error = validate(flags, mode, allowed_flags)) {
     return error;
   }
-  if ((flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
+  if (Gfx1250 &&
+      (flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
     return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
   }
   if (!exec_mask) {
@@ -53,8 +60,22 @@ int convert(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *
   constexpr int elements = Gfx1250 ? (bits == 6 ? 16 : 8) : 32;
   constexpr int words = elements * bits / 32;
   const uint32_t *scale = Stochastic || (!Gfx1250 && Src == Source::F32) ? c[0] : b[0];
+  [[maybe_unused]] auto level = flags & RJ_ARITH_CPU_MASK;
+#if defined(RJ_ARITH_HAVE_X86_64_V3) || defined(RJ_ARITH_HAVE_X86_64_V4)
+  if (!has_more_than_four_lanes(exec_mask)) {
+    // AVX2 setup needs more active lanes. AVX-512 can amortize its FP6 encoder
+    // on two lanes. Shorter packs benefit when both lanes share a 16-lane chunk.
+    bool use_wide = bits == 6;
+    if constexpr (Lanes == 32 && Gfx1250 && (bits == 4 || !Stochastic || Src == Source::F16)) {
+      use_wide |= !(exec_mask >> 16) || !(exec_mask & 0xffff);
+    }
+    if (!(exec_mask & (exec_mask - 1)) || !use_wide || level < RJ_ARITH_CPU_X86_64_V4) {
+      level = RJ_ARITH_CPU_BASELINE;
+    }
+  }
+#endif
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
-  if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+  if (level >= RJ_ARITH_CPU_X86_64_V4) {
     wide_scaled_narrow_x86_64_v4<Dst, Stochastic, Gfx1250>(
         Lanes, exec_mask, Src, d, a, b, scale, flags & RJ_ARITH_FP16_OVFL,
         flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS);
@@ -62,26 +83,22 @@ int convert(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *
   }
 #endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
-  if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+  if (level >= RJ_ARITH_CPU_X86_64_V3) {
     wide_scaled_narrow_x86_64_v3<Dst, Stochastic, Gfx1250>(
         Lanes, exec_mask, Src, d, a, b, scale, flags & RJ_ARITH_FP16_OVFL,
         flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS);
     return RJ_ARITH_SUCCESS;
   }
 #endif
-  const bool flush_input = flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
+  constexpr uint32_t sig_mask = scaled_sig_mask(Src);
+  const bool flush_input = (flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS) != 0;
   uint32_t result[words][Lanes];
-  uint64_t write_mask = exec_mask;
-  for (int lane = 0; lane < Lanes; ++lane) {
-    if (!((exec_mask >> lane) & 1)) {
-      continue;
-    }
+  for (uint64_t active = exec_mask; active; active &= active - 1) {
+    int lane = __builtin_ctzll(active);
     uint32_t exponent = (scale[lane] >> 23) & 255;
-    if (!Gfx1250 && exponent == 255) {
-      write_mask &= ~(1ULL << lane);
-      continue;
-    }
-    float inverse_scale = as_float(exponent == 254 ? 0x00400000U : (254 - exponent) << 23);
+    float inverse_scale = as_float(exponent == 255   ? 0x3f800000U
+                                   : exponent == 254 ? 0x00400000U
+                                                     : (254 - exponent) << 23);
     uint32_t seed = Stochastic ? b[0][lane] : 0;
     for (int word = 0; word < words; ++word) {
       result[word][lane] = 0;
@@ -99,11 +116,13 @@ int convert(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *
       } else {
         raw = a[element / 2][lane] >> ((element % 2) * 16);
       }
-      uint32_t scaled = Gfx1250 && exponent == 255
-                            ? kE8M0ScaleNaNBits
-                            : as_bits(decode<Src>(raw, flush_input) * inverse_scale);
-      uint32_t value =
-          scaled_narrow_encode<Dst, Stochastic>(scaled, seed, flags & RJ_ARITH_FP16_OVFL);
+      float decoded = decode<Src>(raw, flush_input);
+      uint32_t scaled =
+          exponent == 255
+              ? (Gfx1250 ? kE8M0ScaleNaNBits : ((as_bits(decoded) & 0x80000000U) | 0x7fc00000U))
+              : as_bits(decoded * inverse_scale);
+      uint32_t value = scaled_narrow_encode<Dst, Stochastic, !Gfx1250>(
+          scaled, seed, flags & RJ_ARITH_FP16_OVFL, sig_mask);
       int bit = element * bits, word = bit / 32, shift = bit % 32;
       result[word][lane] |= value << shift;
       if (shift > 32 - bits) {
@@ -115,10 +134,9 @@ int convert(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *
     }
   }
   for (int word = 0; word < words; ++word) {
-    for (int lane = 0; lane < Lanes; ++lane) {
-      if ((write_mask >> lane) & 1) {
-        d[word][lane] = result[word][lane];
-      }
+    for (uint64_t active = exec_mask; active; active &= active - 1) {
+      int lane = __builtin_ctzll(active);
+      d[word][lane] = result[word][lane];
     }
   }
   return RJ_ARITH_SUCCESS;

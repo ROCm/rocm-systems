@@ -18,7 +18,8 @@
 namespace {
 
 // Exercise modifiers, EXEC, aliases and selected legacy encoding differences.
-template <int Width, int Lanes, class Call> void check(Call call, int operation) {
+template <int Width, int Lanes, bool Gfx950 = false, class Call>
+void check(Call call, int operation) {
   using namespace rocjitsu::arith::test;
   check_selection<Width, Lanes, 3>(call, [=](double x, double y, double z) {
     auto pick = [](double a, double b, bool maximum) { return select_fp(a, b, maximum, false); };
@@ -27,6 +28,9 @@ template <int Width, int Lanes, class Call> void check(Call call, int operation)
     }
     if (std::isnan(x) || std::isnan(y) || std::isnan(z)) {
       return pick(pick(x, y, false), z, false);
+    }
+    if constexpr (Gfx950) {
+      return pick(pick(x, y, false), pick(pick(x, y, true), z, false), true);
     }
     double largest = pick(pick(x, y, true), z, true);
     return largest == x ? pick(y, z, true) : largest == y ? pick(x, z, true) : pick(x, y, true);
@@ -37,7 +41,7 @@ template <int Width, int Lanes, class Call> void check(Call call, int operation)
   for (uint64_t cpu : supported_cpu_levels()) {
     for (bool ieee : {false, true}) {
       Registers<8, Lanes> r;
-      // The first lane distinguishes CDNA's median zero tie from RDNA's.
+      // The first lane distinguishes CDNA3's median zero tie from CDNA4/RDNA's.
       write_fp(r.v, 0, Width, sign);
       write_fp(r.v + 2, 0, Width, 0);
       write_fp(r.v + 4, 0, Width, sign);
@@ -48,9 +52,11 @@ template <int Width, int Lanes, class Call> void check(Call call, int operation)
       uint64_t flags = cpu | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS |
                        (ieee ? RJ_ARITH_FP_IEEE_MODE : 0);
       ASSERT_EQ(call(flags, 7, 0, r.v + 6, r.v, r.v + 2, r.v + 4, nullptr), RJ_ARITH_SUCCESS);
-      EXPECT_EQ(read_fp(r.v + 6, 0, Width), operation == 0 ? sign : 0);
-      EXPECT_EQ(read_fp(r.v + 6, 1, Width), infinity | quiet | 3);
-      EXPECT_EQ(read_fp(r.v + 6, 2, Width), infinity | (ieee ? quiet : 0) | 3);
+      EXPECT_EQ(read_fp(r.v + 6, 0, Width),
+                Gfx950 ? (operation == 1 ? 0 : sign) : (operation == 0 ? sign : 0));
+      EXPECT_EQ(read_fp(r.v + 6, 1, Width), infinity | quiet | (Gfx950 ? 1 : 3));
+      EXPECT_EQ(read_fp(r.v + 6, 2, Width),
+                infinity | (ieee ? quiet : 0) | (Gfx950 && !ieee ? 1 : 3));
     }
   }
   if constexpr (Lanes == 32) {
@@ -83,6 +89,30 @@ TEST(FpCdnaTernarySelection, F32Wave64) {
   check<32, 64>(rj_arith_v_min3_f32_w64_gfx942, 0);
   check<32, 64>(rj_arith_v_max3_f32_w64_gfx942, 1);
   check<32, 64>(rj_arith_v_med3_f32_w64_gfx942, 2);
+}
+
+TEST(FpCdnaTernarySelection, F16Wave32Gfx950) {
+  check<16, 32, true>(rj_arith_v_min3_f16_w32_gfx950, 0);
+  check<16, 32, true>(rj_arith_v_max3_f16_w32_gfx950, 1);
+  check<16, 32, true>(rj_arith_v_med3_f16_w32_gfx950, 2);
+}
+
+TEST(FpCdnaTernarySelection, F16Wave64Gfx950) {
+  check<16, 64, true>(rj_arith_v_min3_f16_w64_gfx950, 0);
+  check<16, 64, true>(rj_arith_v_max3_f16_w64_gfx950, 1);
+  check<16, 64, true>(rj_arith_v_med3_f16_w64_gfx950, 2);
+}
+
+TEST(FpCdnaTernarySelection, F32Wave32Gfx950) {
+  check<32, 32, true>(rj_arith_v_min3_f32_w32_gfx950, 0);
+  check<32, 32, true>(rj_arith_v_max3_f32_w32_gfx950, 1);
+  check<32, 32, true>(rj_arith_v_med3_f32_w32_gfx950, 2);
+}
+
+TEST(FpCdnaTernarySelection, F32Wave64Gfx950) {
+  check<32, 64, true>(rj_arith_v_min3_f32_w64_gfx950, 0);
+  check<32, 64, true>(rj_arith_v_max3_f32_w64_gfx950, 1);
+  check<32, 64, true>(rj_arith_v_med3_f32_w64_gfx950, 2);
 }
 
 namespace {

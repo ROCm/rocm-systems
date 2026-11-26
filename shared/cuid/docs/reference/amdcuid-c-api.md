@@ -2,7 +2,7 @@
 myst:
   html_meta:
     "description lang=en": "Explore the AMD CUID C API."
-    "keywords": "api, cuid, c, header, compute, unit, id, amd"
+    "keywords": "api, cuid, c, header, component, unified, id, amd"
 ---
 
 # CUID API library

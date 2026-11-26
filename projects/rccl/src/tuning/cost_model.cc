@@ -284,10 +284,7 @@ Enable order: Broadcast, Reduce, AllGather, ReduceScatter, AllReduce, AlltoAll
   {nullptr, ncclTuningSymkModelSim, nullptr, {0, 0, 1, 0, 0}, {}}, // AllGather_ST
   {nullptr, ncclTuningSymkModelSim, nullptr, {0, 0, 1, 0, 0}, {}}, // AllGather_TmaSTMC
   {nullptr, ncclTuningSymkModelSim, nullptr, {0, 0, 1, 0, 0}, {}}, // AllGather_STMC
-  {nullptr, ncclTuningSymkModelSim, nullptr, {0, 0, 1, 0, 0}, {}}, // AllGather_RailRing_LsaST
   {nullptr, ncclTuningSymkModelSim, nullptr, {0, 0, 1, 0, 0}, {}}, // AllGather_RailRing_LsaSTMC
-  {nullptr, ncclTuningSymkModelSim, nullptr, {0, 0, 1, 0, 0}, {}}, // AllGather_HierLsaST
-  {nullptr, ncclTuningSymkModelSim, nullptr, {0, 0, 1, 0, 0}, {}}, // AllGather_HierLsaTmaST
   {nullptr, ncclTuningSymkModelSim, nullptr, {0, 0, 0, 1, 0}, {}}, // ReduceScatter_LL
   {nullptr, ncclTuningSymkModelSim, nullptr, {0, 0, 0, 1, 0}, {}}, // ReduceScatter_TmaLD
   {nullptr, ncclTuningSymkModelSim, nullptr, {0, 0, 0, 1, 0}, {}}, // ReduceScatter_LD
@@ -313,6 +310,11 @@ Enable order: Broadcast, Reduce, AllGather, ReduceScatter, AllReduce, AlltoAll
   {nullptr, ncclTuningSymkModelSim, nullptr, {1, 0, 0, 0, 0}, {}}, // Broadcast_Ring_LL128
   {nullptr, ncclTuningSymkModelSim, nullptr, {0, 1, 0, 0, 0}, {}}, // Reduce_Ring_LL128
   {nullptr, ncclTuningSymkModelSim, nullptr, {0, 0, 0, 0, 0, 1}, {}}, // AlltoAll_LL
+  // [RCCL] RCCL symmetric kernels, which follow NCCL's
+  {nullptr, ncclTuningSymkModelSim, nullptr, {0, 0, 1, 0, 0}, {}}, // AllGather_RailRing_LsaST
+  {nullptr, ncclTuningSymkModelSim, nullptr, {0, 0, 1, 0, 0}, {}}, // AllGather_HierLsaST
+  {nullptr, ncclTuningSymkModelSim, nullptr, {0, 0, 1, 0, 0}, {}}, // AllGather_HierLsaTmaST
+  {nullptr, ncclTuningSymkModelSim, nullptr, {0, 0, 0, 1, 0}, {}}, // ReduceScatter_HierLsaLDST
   {nullptr, ncclTuningCeModelSim, nullptr, {0, 0, 1, 0, 0}, {}}, // CE AllGather Unicast
   {nullptr, ncclTuningCeModelSim, nullptr, {0, 0, 1, 0, 0}, {}}, // CE AllGather Multicast
 };

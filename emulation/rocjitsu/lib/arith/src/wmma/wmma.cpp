@@ -17,51 +17,11 @@
 
 namespace {
 
-// Evaluate a gfx12 FP16/BF16 tile with already-resolved semantics. D may
-// overlap inputs; invalid flags return an error without modifying D.
-template <bool Bf16, int WaveSize = 32, bool Packed = false>
-int wmma(uint64_t flags, uint64_t instruction_flags, uint32_t *const *d, const uint32_t *const *a,
-         const uint32_t *const *b, const uint32_t *const *c) {
-  if (int error = rocjitsu::arith::validate(
-          flags, instruction_flags & ~uint64_t(rocjitsu::arith::kWmmaInstructionFlags),
-          rocjitsu::arith::kMatrixIgnoredFpFlags)) {
-    return error;
-  }
-
-#if defined(RJ_ARITH_HAVE_X86_64_V4_BF16)
-  if constexpr (Bf16) {
-    if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_ZEN4) &&
-        !rocjitsu::arith::is_exact(flags) &&
-        rocjitsu::arith::wmma_x86_64_v4_bf16<WaveSize, false, Packed>(uint32_t(instruction_flags),
-                                                                      d, a, b, c)) {
-      return RJ_ARITH_SUCCESS;
-    }
-  }
-#endif
-#if defined(RJ_ARITH_HAVE_X86_64_V4)
-  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4) &&
-      rocjitsu::arith::is_exact(flags)) {
-    rocjitsu::arith::wmma_exact_x86_64_v4<Bf16, WaveSize, false, Packed>(
-        uint32_t(instruction_flags), flags & RJ_ARITH_FP16_OVFL, d, a, b, c);
-    return RJ_ARITH_SUCCESS;
-  }
-#endif
-#if defined(RJ_ARITH_HAVE_X86_64_V3)
-  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
-    if (rocjitsu::arith::is_exact(flags)) {
-      rocjitsu::arith::wmma_exact_x86_64_v3<Bf16, WaveSize, false, Packed>(
-          uint32_t(instruction_flags), flags & RJ_ARITH_FP16_OVFL, d, a, b, c);
-    } else if constexpr (Packed) {
-      rocjitsu::arith::wmma_packed_x86_64_v3<Bf16, WaveSize, false>(
-          uint32_t(instruction_flags), flags & RJ_ARITH_FP16_OVFL, d, a, b, c);
-    } else {
-      rocjitsu::arith::wmma_f32_x86_64_v3<Bf16, WaveSize, false>(uint32_t(instruction_flags), d, a,
-                                                                 b, c);
-    }
-    return RJ_ARITH_SUCCESS;
-  }
-#endif
-
+// Keep the scalar reference out of line so SIMD dispatch needs no result buffer.
+template <bool Bf16, int WaveSize, bool Packed>
+[[gnu::noinline]] void wmma_scalar(uint64_t flags, uint64_t instruction_flags, uint32_t *const *d,
+                                   const uint32_t *const *a, const uint32_t *const *b,
+                                   const uint32_t *const *c) {
   // Each source lane holds eight K elements in Wave32, four in Wave64;
   // output lanes select columns and row groups (rocjitsu shared/mma_exec.h).
   constexpr int OutputRegs = 256 / WaveSize;
@@ -154,6 +114,58 @@ int wmma(uint64_t flags, uint64_t instruction_flags, uint32_t *const *d, const u
       d[reg][lane] = result[reg][lane];
     }
   }
+}
+
+// Evaluate a gfx12 FP16/BF16 tile with already-resolved semantics. D may
+// overlap inputs; invalid flags return an error without modifying D.
+template <bool Bf16, int WaveSize = 32, bool Packed = false>
+int wmma(uint64_t flags, uint64_t instruction_flags, uint32_t *const *d, const uint32_t *const *a,
+         const uint32_t *const *b, const uint32_t *const *c) {
+  if (int error = rocjitsu::arith::validate(
+          flags, instruction_flags & ~uint64_t(rocjitsu::arith::kWmmaInstructionFlags),
+          rocjitsu::arith::kMatrixIgnoredFpFlags)) {
+    return error;
+  }
+
+#if defined(RJ_ARITH_HAVE_X86_64_V4_BF16)
+  if constexpr (Bf16) {
+    if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_ZEN4) &&
+        !rocjitsu::arith::is_exact(flags) &&
+        rocjitsu::arith::wmma_x86_64_v4_bf16<WaveSize, false, Packed>(uint32_t(instruction_flags),
+                                                                      d, a, b, c)) {
+      return RJ_ARITH_SUCCESS;
+    }
+  }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+    if (rocjitsu::arith::is_exact(flags)) {
+      rocjitsu::arith::wmma_exact_x86_64_v4<Bf16, WaveSize, false, Packed>(
+          uint32_t(instruction_flags), flags & RJ_ARITH_FP16_OVFL, d, a, b, c);
+    } else {
+      rocjitsu::arith::wmma_loose_x86_64_v4<Bf16, WaveSize, false, Packed>(
+          uint32_t(instruction_flags), flags & RJ_ARITH_FP16_OVFL, d, a, b, c);
+    }
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+    if (rocjitsu::arith::is_exact(flags)) {
+      rocjitsu::arith::wmma_exact_x86_64_v3<Bf16, WaveSize, false, Packed>(
+          uint32_t(instruction_flags), flags & RJ_ARITH_FP16_OVFL, d, a, b, c);
+    } else if constexpr (Packed) {
+      rocjitsu::arith::wmma_packed_x86_64_v3<Bf16, WaveSize, false>(
+          uint32_t(instruction_flags), flags & RJ_ARITH_FP16_OVFL, d, a, b, c);
+    } else {
+      rocjitsu::arith::wmma_f32_x86_64_v3<Bf16, WaveSize, false>(uint32_t(instruction_flags), d, a,
+                                                                 b, c);
+    }
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
+
+  wmma_scalar<Bf16, WaveSize, Packed>(flags, instruction_flags, d, a, b, c);
   return RJ_ARITH_SUCCESS;
 }
 

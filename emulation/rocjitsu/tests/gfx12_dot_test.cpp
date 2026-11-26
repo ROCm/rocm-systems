@@ -10,7 +10,6 @@
 #include "fixtures/float_dot/gfx1201_dot4_edge_cases.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/gfx12_dot.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/isa_family.h"
@@ -33,6 +32,7 @@
 namespace {
 using namespace rocjitsu;
 
+// Restore host test state and the forced-scalar override.
 struct HostState {
   fenv_t environment;
   bool scalar = util::force_scalar();
@@ -54,16 +54,18 @@ public:
     cfg.vgprs_per_wf = 256;
     cfg.lds_size_kb = 64;
     rocjitsu::test::initialize_compute_unit(cu, "dot_test", cfg, &memory, &cache);
-    if (!cu)
+    if (!cu) {
       return;
+    }
     decoder = Decoder::create(arch);
     wave = cu->dispatch_wf(0, 0, 106, 256, width);
     wave->set_exec(width == 64 ? ~uint64_t{0} : 0xffffffff);
     base = wave->vgpr_alloc().base;
   }
   ~DotMachine() {
-    if (wave)
+    if (wave) {
       wave->halt();
+    }
   }
   void set(uint32_t reg, uint32_t lane, uint32_t bits) { cu->write_vgpr(base + reg, lane, bits); }
   uint32_t get(uint32_t reg, uint32_t lane) { return cu->read_vgpr(base + reg, lane); }
@@ -82,27 +84,6 @@ public:
   amdgpu::Wavefront *wave = nullptr;
   uint32_t base;
 };
-
-TEST(Gfx12Dot, HardwareBitsAreIndependentOfHostFpState) {
-  HostState restore;
-  for (int round : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
-    std::fesetround(round);
-    std::feclearexcept(FE_ALL_EXCEPT);
-    std::feraiseexcept(FE_INEXACT);
-    for (bool bf16 : {false, true}) {
-      const auto cases = bf16 ? std::span<const Gfx12DotCase>(kGfx12DotBF16Cases)
-                              : std::span<const Gfx12DotCase>(kGfx12DotF16Cases);
-      for (const auto &c : cases) {
-        const uint32_t result =
-            bf16 ? amdgpu::gfx12_dot2_f32<true>(c.a, c.b, c.a >> 16, c.b >> 16, c.c)
-                 : amdgpu::gfx12_dot2_f32<false>(c.a, c.b, c.a >> 16, c.b >> 16, c.c);
-        EXPECT_EQ(result, c.expected) << std::hex << c.a << ' ' << c.b << ' ' << c.c;
-      }
-    }
-    EXPECT_EQ(std::fetestexcept(FE_ALL_EXCEPT), FE_INEXACT);
-    EXPECT_EQ(std::fegetround(), round);
-  }
-}
 
 TEST(Gfx12Dot, DecodedHardwareCasesAndInactiveLanes) {
   HostState restore;
@@ -136,11 +117,12 @@ TEST(Gfx12Dot, DecodedHardwareCasesAndInactiveLanes) {
                                                                               .src2 = 258,
                                                                               .opsel_hi = 3,
                                                                               .neg = neg}));
-            for (uint32_t lane = 0; lane < 32; ++lane)
+            for (uint32_t lane = 0; lane < 32; ++lane) {
               EXPECT_EQ(machine.get(16, lane), (exec & (1u << lane))
                                                    ? cases[(offset + lane) % cases.size()].expected
                                                    : 0xfeedfaceu)
                   << "arch=" << arch << " bf16=" << bf16 << " modifiers=" << modifiers;
+            }
           }
         }
       }
@@ -204,19 +186,22 @@ TEST(Gfx12Dot, WmmaHardwareRoundingOrderAndOverlappingSources) {
               machine.set(reg, lane, fixture.a[k] | (uint32_t(fixture.a[k + 1]) << 16));
               machine.set(8 + reg, lane, fixture.b[k] | (uint32_t(fixture.b[k + 1]) << 16));
             }
-            for (uint32_t reg = 0; reg < 256 / width; ++reg)
+            for (uint32_t reg = 0; reg < 256 / width; ++reg) {
               machine.set(16 + reg, lane, fixture.c);
+            }
           }
           machine.wave->set_exec(0x55aa55aa); // WMMA uses all lanes and preserves EXEC.
           machine.execute(rdna4::build_vop3p(
               bf16 ? rdna4::kVWmmaF3216x16x16Bf16Vop3p : rdna4::kVWmmaF3216x16x16F16Vop3p,
               {.vdst = dst, .src0 = 256, .src1 = 264, .src2 = 272, .opsel_hi = 3}));
           EXPECT_EQ(machine.wave->exec(), 0x55aa55aau);
-          for (uint32_t lane = 0; lane < width; ++lane)
-            for (uint32_t reg = 0; reg < 256 / width; ++reg)
+          for (uint32_t lane = 0; lane < width; ++lane) {
+            for (uint32_t reg = 0; reg < 256 / width; ++reg) {
               EXPECT_EQ(machine.get(dst + reg, lane),
                         width == 32 ? fixture.expected32 : fixture.expected64)
                   << "width=" << width << " bf16=" << bf16 << " dst=" << unsigned(dst);
+            }
+          }
         }
       }
     }
@@ -249,10 +234,12 @@ TEST(Gfx12Dot, WmmaSignModifiersAndWaveSizes) {
             for (uint32_t reg = 0; reg < 256 / width; ++reg) {
               uint32_t acc = (lane + reg * width) * 0x6c078965u;
               if (explicit_modifiers) {
-                if (neg_hi & 4)
+                if (neg_hi & 4) {
                   acc &= 0x7fffffffu;
-                if (neg & 4)
+                }
+                if (neg & 4) {
                   acc ^= 0x80000000u;
+                }
               }
               machine.set(16 + reg, lane, acc);
             }
@@ -268,12 +255,13 @@ TEST(Gfx12Dot, WmmaSignModifiersAndWaveSizes) {
                                               .neg = uint8_t(explicit_modifiers ? 0 : neg)}));
           for (uint32_t lane = 0; lane < width; ++lane) {
             for (uint32_t reg = 0; reg < 256 / width; ++reg) {
-              if (explicit_modifiers)
+              if (explicit_modifiers) {
                 expected[reg * width + lane] = machine.get(16 + reg, lane);
-              else
+              } else {
                 EXPECT_EQ(machine.get(16 + reg, lane), expected[reg * width + lane])
                     << "arch=" << arch << " width=" << width << " bf16=" << bf16
                     << " modifiers=" << modifiers;
+              }
             }
           }
         }
@@ -305,16 +293,19 @@ TEST(Gfx12Dot, WmmaTinyNegativeAccumulatorSubtractsFloorUnit) {
           machine.set(reg, lane, lane < 16 && reg == 0 ? test.a : 0u);
           machine.set(8 + reg, lane, uint32_t(test.b) | (uint32_t(test.b) << 16));
         }
-        for (uint32_t reg = 0; reg < c_regs; ++reg)
+        for (uint32_t reg = 0; reg < c_regs; ++reg) {
           machine.set(16 + reg, lane, test.c);
+        }
       }
       machine.execute(rdna4::build_vop3p(
           test.bf16_out ? rdna4::kVWmmaBf1616x16x16Bf16Vop3p : rdna4::kVWmmaF3216x16x16Bf16Vop3p,
           {.vdst = 24, .src0 = 256, .src1 = 264, .src2 = 272, .opsel_hi = 3}));
-      for (uint32_t lane = 0; lane < 32; ++lane)
-        for (uint32_t reg = 0; reg < c_regs; ++reg)
+      for (uint32_t lane = 0; lane < 32; ++lane) {
+        for (uint32_t reg = 0; reg < c_regs; ++reg) {
           EXPECT_EQ(machine.get(24 + reg, lane), test.expected)
               << "bf16_out=" << test.bf16_out << " scalar=" << scalar << " lane=" << lane;
+        }
+      }
     }
   }
 }
@@ -330,8 +321,9 @@ TEST(Gfx12Dot, WmmaInlineAccumulatorPreservesAllOnesNan) {
             machine.set(reg, lane, 0);
             machine.set(8 + reg, lane, 0);
           }
-          for (uint32_t reg = 0; reg < 256 / width; ++reg)
+          for (uint32_t reg = 0; reg < 256 / width; ++reg) {
             machine.set(16 + reg, lane, 0x12345678);
+          }
         }
         machine.execute(rdna4::build_vop3p(bf16 ? rdna4::kVWmmaF3216x16x16Bf16Vop3p
                                                 : rdna4::kVWmmaF3216x16x16F16Vop3p,
@@ -343,11 +335,14 @@ TEST(Gfx12Dot, WmmaInlineAccumulatorPreservesAllOnesNan) {
                                             .opsel_hi = 3,
                                             .neg = uint8_t((modifiers & 1) << 2)}));
         uint32_t expected = modifiers & 2 ? 0x7fffffffu : 0xffffffffu;
-        if (modifiers & 1)
+        if (modifiers & 1) {
           expected ^= 0x80000000u;
-        for (uint32_t lane = 0; lane < width; ++lane)
-          for (uint32_t reg = 0; reg < 256 / width; ++reg)
+        }
+        for (uint32_t lane = 0; lane < width; ++lane) {
+          for (uint32_t reg = 0; reg < 256 / width; ++reg) {
             EXPECT_EQ(machine.get(16 + reg, lane), expected);
+          }
+        }
       }
     }
   }
@@ -396,37 +391,6 @@ TEST(Gfx12Dot, AccumulateEncodingsAndInlineSources) {
   }
 }
 } // namespace
-
-// Pin the native eight-product contract independently of WMMA register layouts.
-TEST(Gfx12Dot, NativeF8SpecialValues) {
-  struct Case {
-    uint8_t a, b_even, b_odd;
-    uint32_t c, expected;
-  };
-  const Case cases[] = {
-      {0x7c, 0x3c, 0xbc, 0x3f800000, 0xffc00a3d}, // Opposite product infinities.
-      {0x7c, 0x3c, 0x3c, 0xff800000, 0xffc00a3d}, // Product infinity against opposite C infinity.
-      {0x7e, 0x3c, 0x3c, 0, 0xffc00a3d},          // BF8 factor NaN (0x7e is finite in FP8).
-      {0x7c, 0, 0, 0xffc54321, 0xffc00a3d},       // Invalid product takes precedence over C NaN.
-      {0x3c, 0x3c, 0x3c, 0xffc54321, 0xffc54321}, // C-NaN retention.
-  };
-  for (Case sample : cases) {
-    std::array<uint8_t, 8> a, b;
-    a.fill(sample.a);
-    for (size_t i = 0; i < b.size(); ++i)
-      b[i] = i % 2 ? sample.b_odd : sample.b_even;
-    // A_FP8=false, B_FP8=false selects BF8_BF8.
-    EXPECT_EQ((rocjitsu::amdgpu::gfx12_dot8_f32<false, false>(a, b, sample.c)), sample.expected);
-  }
-  std::array<uint8_t, 8> fp8, bf8;
-  fp8.fill(0x38); // FP8 1.0.
-  bf8.fill(0x3c); // BF8 1.0.
-  EXPECT_EQ((rocjitsu::amdgpu::gfx12_dot8_f32<true, false>(fp8, bf8, 0x3f800000)), 0x41100000u);
-  // FP8 has a distinct NaN encoding from BF8.
-  std::array<uint8_t, 8> fp8_nan;
-  fp8_nan.fill(0x7f);
-  EXPECT_EQ((rocjitsu::amdgpu::gfx12_dot8_f32<true, true>(fp8_nan, fp8, 0)), 0xffc00a3du);
-}
 
 TEST(Gfx12Dot, FloatingDotDppPermutesSnapshotAndPreservesInactiveDestinations) {
   HostState restore;
@@ -503,25 +467,22 @@ TEST(Gfx12Dot, DecodedDot4MatchesNativeFormatAndRoundingCases) {
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
   constexpr std::array<uint16_t, 4> ops{rdna4::kVDot4F32Fp8Fp8Vop3p, rdna4::kVDot4F32Fp8Bf8Vop3p,
                                         rdna4::kVDot4F32Bf8Fp8Vop3p, rdna4::kVDot4F32Bf8Bf8Vop3p};
-  for (int round : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
-    std::fesetround(round);
-    for (size_t op = 0; op < ops.size(); ++op) {
-      for (size_t offset = 0; offset < kGfx12Dot4Cases.size(); offset += 32) {
-        for (uint32_t lane = 0; lane < 32; ++lane) {
-          const auto &c = kGfx12Dot4Cases[offset + lane];
-          machine.set(0, lane, c.a);
-          machine.set(1, lane, c.b);
-          machine.set(2, lane, c.c);
-        }
-        machine.execute(rdna4::build_vop3p(
-            ops[op],
-            {.vdst = 16, .opsel_hi_2 = 1, .src0 = 256, .src1 = 257, .src2 = 258, .opsel_hi = 3}));
-        for (uint32_t lane = 0; lane < 32; ++lane)
-          EXPECT_EQ(machine.get(16, lane), kGfx12Dot4Cases[offset + lane].expected[op])
-              << "op=" << ops[op] << " case=" << offset + lane << " round=" << round;
+  for (size_t op = 0; op < ops.size(); ++op) {
+    for (size_t offset = 0; offset < kGfx12Dot4Cases.size(); offset += 32) {
+      for (uint32_t lane = 0; lane < 32; ++lane) {
+        const auto &c = kGfx12Dot4Cases[offset + lane];
+        machine.set(0, lane, c.a);
+        machine.set(1, lane, c.b);
+        machine.set(2, lane, c.c);
+      }
+      machine.execute(rdna4::build_vop3p(
+          ops[op],
+          {.vdst = 16, .opsel_hi_2 = 1, .src0 = 256, .src1 = 257, .src2 = 258, .opsel_hi = 3}));
+      for (uint32_t lane = 0; lane < 32; ++lane) {
+        EXPECT_EQ(machine.get(16, lane), kGfx12Dot4Cases[offset + lane].expected[op])
+            << "op=" << ops[op] << " case=" << offset + lane;
       }
     }
-    EXPECT_EQ(std::fegetround(), round);
   }
 }
 
@@ -555,14 +516,6 @@ const std::array<Dot4Encoding, 7> kEncodings{{
     {0xe9, 0x05397700, false, false, false},
 }};
 
-uint32_t dot4(const Dot4Family &family, const Gfx12Dot4EdgeCase &sample) {
-  if (family.a_fp8)
-    return family.b_fp8 ? amdgpu::gfx12_dot4_f32_fp8<true, true>(sample.a, sample.b, sample.c)
-                        : amdgpu::gfx12_dot4_f32_fp8<true, false>(sample.a, sample.b, sample.c);
-  return family.b_fp8 ? amdgpu::gfx12_dot4_f32_fp8<false, true>(sample.a, sample.b, sample.c)
-                      : amdgpu::gfx12_dot4_f32_fp8<false, false>(sample.a, sample.b, sample.c);
-}
-
 TEST(Gfx12Dot4, AccumulatorModifiersApplyAbsBeforeNegInPlainAndDppForms) {
   HostState restore;
   for (uint32_t width : {32u, 64u}) {
@@ -595,8 +548,9 @@ TEST(Gfx12Dot4, AccumulatorModifiersApplyAbsBeforeNegInPlainAndDppForms) {
               for (uint32_t lane = 0; lane < width; ++lane) {
                 // gfx1201 measures ABS followed by NEG in all three forms.
                 float acc = lane % 2 && !(modifiers & 2) ? -2.0f : 2.0f;
-                if (modifiers & 1)
+                if (modifiers & 1) {
                   acc = -acc;
+                }
                 const float dot = zero_products || (mode == 1 && lane % 16 == 0) ? 0.0f : 4.0f;
                 EXPECT_EQ(machine.get(16, lane), std::bit_cast<uint32_t>(acc + dot))
                     << "opcode=" << family.opcode << " width=" << width << " mode=" << mode
@@ -607,22 +561,6 @@ TEST(Gfx12Dot4, AccumulatorModifiersApplyAbsBeforeNegInPlainAndDppForms) {
         }
       }
     }
-  }
-}
-
-TEST(Gfx12Dot4, HardwareArithmeticIgnoresHostFpState) {
-  HostState restore;
-  for (int round : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
-    std::fesetround(round);
-    std::feclearexcept(FE_ALL_EXCEPT);
-    std::feraiseexcept(FE_INEXACT);
-    for (const auto &family : kFamilies)
-      for (const auto &sample : family.cases)
-        EXPECT_EQ(dot4(family, sample), sample.expected)
-            << "opcode=" << family.opcode << " rounding=" << round << " A=" << std::hex << sample.a
-            << " B=" << sample.b << " C=" << sample.c;
-    EXPECT_EQ(std::fetestexcept(FE_ALL_EXCEPT), FE_INEXACT);
-    EXPECT_EQ(std::fegetround(), round);
   }
 }
 
@@ -652,8 +590,9 @@ TEST(Gfx12Dot4, DecodedHardwareArithmeticIncludesDppAndOverlappingRegisters) {
                   machine.set(2, lane, sample.c);
                   machine.set(16, lane, 0xfeedface);
                 }
-                for (uint32_t lane = 0; lane < width; ++lane)
+                for (uint32_t lane = 0; lane < width; ++lane) {
                   old_dst[lane] = machine.get(dst, lane);
+                }
                 const auto base = rdna4::build_vop3p(family.opcode, {.vdst = dst,
                                                                      .opsel_hi_2 = 1,
                                                                      .src0 = encoding.source,

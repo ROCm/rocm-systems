@@ -13,6 +13,7 @@
 #include "functional/gpu/clock/frequencies_read_write.h"
 #include "functional/gpu/events/evt_notif_read_write.h"
 #include "functional/gpu/identity/device_cuid_read.h"
+#include "functional/gpu/identity/driver_info_read.h"
 #include "functional/gpu/identity/id_info_read.h"
 #include "functional/gpu/identity/version_read.h"
 #include "functional/gpu/memory/mem_page_info_read.h"
@@ -238,6 +239,10 @@ TEST(GpuFunctionalReadOnly, TestIdInfoRead) {
 }
 TEST(GpuFunctionalReadOnly, TestDeviceCuidRead) {
   TestDeviceCuidRead tst;
+  RunGenericTest(&tst);
+}
+TEST(GpuFunctionalReadOnly, TestDriverInfoRead) {
+  TestDriverInfoRead tst;
   RunGenericTest(&tst);
 }
 TEST(GpuFunctionalReadWrite, TestPerfCntrReadWrite) {

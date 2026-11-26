@@ -122,13 +122,14 @@ TEST(InstructionSnapshotTest, EqualityComparesPcAndEncoding) {
   EXPECT_NE(one_word, InstructionSnapshot(0x10, std::array{0xbf800007u}));
   // A trailing zero word is part of the encoding, not unused storage.
   EXPECT_NE(one_word, InstructionSnapshot(0x10, words));
-  for (const bool preserve_in_trace : {false, true})
+  for (const bool preserve_in_trace : {false, true}) {
     for (const bool is_nop : {false, true}) {
       const InstructionSnapshot with_metadata(0x10, std::span(words).first(1), preserve_in_trace,
                                               is_nop);
       EXPECT_EQ(one_word, with_metadata);
       EXPECT_EQ(with_metadata, one_word);
     }
+  }
 }
 
 class RaceEventRegistrationTest : public ::testing::Test {
@@ -155,8 +156,9 @@ TEST(EventRegistry, CompletedLdsHistoryKeepsItsProducerWhileWaitedLoadsAreTrimme
                           counterCapacitiesForArch(rocjitsu::IsaFamily::Rdna2),
                           1024};
     auto &reader = detector.getWaveRaceState(0);
-    if (direct_read)
+    if (direct_read) {
       reader.recordLdsOperandRead(kInstruction, 64, 4, 0);
+    }
 
     PendingWaitCount wait;
     wait.add(WaitCounterType::VMCNT, 0);
@@ -184,11 +186,13 @@ TEST(EventRegistry, CompletedLdsHistoryKeepsItsProducerWhileWaitedLoadsAreTrimme
     for (uint64_t generation : {0, 1}) {
       const BarrierRoundId round{.barrier = 1, .namedId = 0, .generation = generation};
       const std::array members{WaveId{0}, WaveId{1}};
-      for (WaveId wave : members)
+      for (WaveId wave : members) {
         detector.barrierSignaled(wave, round);
+      }
       detector.barrierRoundCompleted(round, members, /*wholeWorkgroup=*/true);
-      for (WaveId wave : members)
+      for (WaveId wave : members) {
         detector.barrierWaitPassed(wave, round);
+      }
     }
     detector.validateWrite(65, WaveId{1}, 0, 1);
     EXPECT_EQ(violations.size(), direct_read ? 1u : 0u);
@@ -220,8 +224,9 @@ TEST_F(RaceEventRegistrationTest, WaveApisRetainCapturedPcAndEncoding) {
                         4, 0xf, kObligations, MemoryOrderClass::UNORDERED);
 
   ASSERT_EQ(detector.events().totalAllocated(), 4);
-  for (int i = 0; i < 4; ++i)
+  for (int i = 0; i < 4; ++i) {
     EXPECT_EQ(detector.events().instruction(EventId{i}), at(i));
+  }
   const auto &intervals = detector.events().ldsIntervals(EventId{3});
   EXPECT_TRUE(intervals.overlapsRange(8, 12));
   EXPECT_TRUE(intervals.overlapsRange(16, 20));
@@ -355,8 +360,9 @@ TEST(RaceDetector, SingleWave_RetiredLdsEventsAreTrimmed) {
     auto &wave = detector->getWaveRaceState(0);
     for (int index = 0; index < EventRegistry::kTrimAttemptInterval; ++index) {
       asyncStoreTile(wave, static_cast<uint64_t>(index), /*address=*/0);
-      if (index + 1 < EventRegistry::kTrimAttemptInterval)
+      if (index + 1 < EventRegistry::kTrimAttemptInterval) {
         waitAsynccnt(wave, 0);
+      }
     }
     EXPECT_EQ(detector->events().trimmedCount(),
               nWaves == 1 ? EventRegistry::kTrimAttemptInterval - 1 : 0);

@@ -1,0 +1,10 @@
+spi.compute_wave_dispatches:
+  name: Compute Wave Dispatches
+  formula: SUM(SQ_WAVES_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Total wavefronts dispatched (SQ_WAVES_sum).
+spi.wave_dispatch_rate:
+  name: Wave Dispatch Rate
+  formula: SUM(SQ_WAVES_sum) / SUM(GRBM_GUI_ACTIVE)
+  unit: Wavefronts per Cycle
+  description: Average wavefronts launched per busy cycle.

@@ -82,7 +82,8 @@ class SdmaQueue {
   // (NO_MEMORY) apart from other failures.
   HSAKMT_STATUS createStatus() const;
   uint32_t engineId() const { return engineId_; }
-  // How the engine was chosen, so a test can check the choice against the mask HSA reported.
+  // How the engine was chosen. RCCL's AnvilEngineChoice test checks it against the mask HSA
+  // reported; rocSHMEM's own tests do not create SDMA queues.
   const EngineSelection& selection() const { return selection_; }
 
  private:
@@ -126,17 +127,17 @@ class AnvilLib {
   // and a fully abandoned create must bring it back to where it started.
   uint32_t queuesUsed() const { return queuesUsedTotal_; }
   SdmaQueue* getSdmaQueue(int srcDeviceId, int dstDeviceId, int channel_idx = 0);
+  // `vec` is the channel list the queue is stored in: the local-device map or the remote-peer map.
+  SdmaQueue* createSdmaQueue(std::vector<std::unique_ptr<SdmaQueue>>& vec, int srcDeviceId,
+                             int dstDeviceId, uint32_t engineId, const EngineSelection& selection,
+                             int* channelIdx = nullptr);
   SdmaQueue* createSdmaQueue(int srcDeviceId, int dstDeviceId, uint32_t engineId,
                              const EngineSelection& selection, int* channelIdx = nullptr);
-  // Queues for a peer on another host, which copies reach through its fabric-mapped memory. They
-  // are keyed by the caller's peer key rather than a local device id, so such a peer never shares a
-  // queue (and its in-order ring) with a peer on this host. Each queue goes on the usable engine
-  // carrying the fewest of this process's queues.
+  // Queues for an off-host peer, keyed by peerKey so they never share a ring with a local peer.
   bool connectRemotePeer(int srcDeviceId, uint64_t peerKey, int numChannels = 1);
   SdmaQueue* getRemotePeerQueue(uint64_t peerKey, int channel_idx = 0);
   void disconnectRemotePeer(uint64_t peerKey);
-  // This process's queues per engine, across both maps; empty when the engine total is unknown.
-  // Public for the same reason as queuesUsed(): it is the load the engine choice is made from.
+  // This process's queues per engine, across both maps. Empty when the engine total is unknown.
   std::vector<uint32_t> queuesPerEngine() const;
 
  private:
@@ -185,6 +186,8 @@ class AnvilLib {
   void querySdmaEngineCounts();
   // Pop `vec` back to `keep` entries, crediting each popped queue to the budget.
   void releaseQueues(std::vector<std::unique_ptr<SdmaQueue>>& vec, size_t keep);
+  // `peerKey` is set for a remote-peer connect and null for a local one.
+  void reportQueueBudget(uint32_t used, int numChannels, const uint64_t* peerKey = nullptr) const;
   int getOamId(int deviceId);
   int getSdmaEngineIdFromOamMap(int srcDeviceId, int dstDeviceId);
   // Chooses an engine for the pair and records why, so the caller can hand the same record to

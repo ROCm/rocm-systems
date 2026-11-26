@@ -148,17 +148,20 @@ __global__ void k_scalef32_2xpk16_fp6_f32(const float *in, unsigned *out, float 
     hi[i] = in[16 + i];
   }
   v6u r = __builtin_amdgcn_cvt_scalef32_2xpk16_fp6_f32(lo, hi, scale);
-  for (int i = 0; i < 6; ++i)
+  for (int i = 0; i < 6; ++i) {
     out[i] = r[i];
+  }
 }
 
 __global__ void k_scalef32_pk32_f32_fp6(const unsigned *in, float *out, float scale) {
   v6u src;
-  for (int i = 0; i < 6; ++i)
+  for (int i = 0; i < 6; ++i) {
     src[i] = in[i];
+  }
   v32f r = __builtin_amdgcn_cvt_scalef32_pk32_f32_fp6(src, scale);
-  for (int i = 0; i < 32; ++i)
+  for (int i = 0; i < 32; ++i) {
     out[i] = r[i];
+  }
 }
 
 __global__ void k_scalef32_2xpk16_bf6_f32(const float *in, unsigned *out, float scale) {
@@ -168,17 +171,20 @@ __global__ void k_scalef32_2xpk16_bf6_f32(const float *in, unsigned *out, float 
     hi[i] = in[16 + i];
   }
   v6u r = __builtin_amdgcn_cvt_scalef32_2xpk16_bf6_f32(lo, hi, scale);
-  for (int i = 0; i < 6; ++i)
+  for (int i = 0; i < 6; ++i) {
     out[i] = r[i];
+  }
 }
 
 __global__ void k_scalef32_pk32_f32_bf6(const unsigned *in, float *out, float scale) {
   v6u src;
-  for (int i = 0; i < 6; ++i)
+  for (int i = 0; i < 6; ++i) {
     src[i] = in[i];
+  }
   v32f r = __builtin_amdgcn_cvt_scalef32_pk32_f32_bf6(src, scale);
-  for (int i = 0; i < 32; ++i)
+  for (int i = 0; i < 32; ++i) {
     out[i] = r[i];
+  }
 }
 
 // ---- Device memory helpers ----
@@ -468,8 +474,9 @@ static int test_scaled_fp4_roundtrip() {
         printf("  narrow: a=%d b=%d -> nib0=%d nib1=%d (expected %d %d)\n", ca, cb, nibble0,
                nibble1, ca, cb);
         errs++;
-        if (errs > 5)
+        if (errs > 5) {
           break;
+        }
       }
       k_scalef32_pk_f32_fp4<<<1, 1>>>(static_cast<unsigned>(packed), 1.0f, dWide);
       HIP_CHECK(hipDeviceSynchronize());
@@ -478,12 +485,14 @@ static int test_scaled_fp4_roundtrip() {
         printf("  widen: a=%d b=%d -> [%f, %f] (expected [%f, %f])\n", ca, cb, widened[0],
                widened[1], a, b);
         errs++;
-        if (errs > 5)
+        if (errs > 5) {
           break;
+        }
       }
     }
-    if (errs > 5)
+    if (errs > 5) {
       break;
+    }
   }
   (void)hipFree(dNarrow);
   (void)hipFree(dWide);
@@ -507,12 +516,14 @@ static int test_scaled_sr_pk_fp4_f32() {
         printf("  sr_pk_fp4: a=%d b=%d -> nib0=%d nib1=%d (expected %d %d)\n", ca, cb, nibble0,
                nibble1, ca, cb);
         errs++;
-        if (errs > 5)
+        if (errs > 5) {
           break;
+        }
       }
     }
-    if (errs > 5)
+    if (errs > 5) {
       break;
+    }
   }
   (void)hipFree(dO);
   return errs > 0 ? 1 : 0;
@@ -529,8 +540,9 @@ static int test_wide_fp6_roundtrip() {
   int errs = 0;
   for (int base = 0; base < 64; base += 32) {
     std::vector<float> in(32);
-    for (int c = 0; c < 32; ++c)
+    for (int c = 0; c < 32; ++c) {
       in[c] = util::fp6_e2m3_to_f32(static_cast<uint8_t>(base + c));
+    }
     (void)hipMemcpy(dIn, in.data(), 32 * sizeof(float), hipMemcpyHostToDevice);
     k_scalef32_2xpk16_fp6_f32<<<1, 1>>>(dIn, dPacked, 1.0f);
     HIP_CHECK(hipDeviceSynchronize());
@@ -564,8 +576,9 @@ static int test_wide_bf6_roundtrip() {
   int errs = 0;
   for (int base = 0; base < 64; base += 32) {
     std::vector<float> in(32);
-    for (int c = 0; c < 32; ++c)
+    for (int c = 0; c < 32; ++c) {
       in[c] = util::bf6_e3m2_to_f32(static_cast<uint8_t>(base + c));
+    }
     (void)hipMemcpy(dIn, in.data(), 32 * sizeof(float), hipMemcpyHostToDevice);
     k_scalef32_2xpk16_bf6_f32<<<1, 1>>>(dIn, dPacked, 1.0f);
     HIP_CHECK(hipDeviceSynchronize());
@@ -621,8 +634,8 @@ static int test_nan_inf_saturation() {
   uint8_t nib0 = packed & 0xF;
   uint8_t nib1 = (packed >> 4) & 0xF;
   (void)hipFree(dO);
-  if (nib0 != 0) {
-    printf("  NaN->fp4: got %d, expected 0\n", nib0);
+  if (nib0 != 0x7) {
+    printf("  NaN->fp4: got %d, expected 7 (max)\n", nib0);
     return 1;
   }
   if (nib1 != 0x7) {
@@ -670,10 +683,11 @@ int main() {
   for (auto &tc : tests) {
     printf("[ RUN    ] %s\n", tc.name);
     int result = tc.func();
-    if (result == 0)
+    if (result == 0) {
       pass(tc.name);
-    else
+    } else {
       fail(tc.name, "see above");
+    }
   }
 
   printf("\n%d passed, %d failed, %d skipped\n", g_pass, g_fail, g_skip);

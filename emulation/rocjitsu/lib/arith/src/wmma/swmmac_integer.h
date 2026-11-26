@@ -17,15 +17,13 @@ struct SwmmacIntegerInputs {
   uint8_t selected[16][32];
 };
 
-// Accumulate decoded sparse INT8/INT4 operands and write eight 32-lane D
-// sections. k is the dense reduction size (32 or 64); clamp saturates each
-// stage, otherwise results wrap. Input snapshots must not overlap D.
-void swmmac_integer_x86_64_v3(int k, bool clamp, uint32_t *const *d,
-                              const SwmmacIntegerInputs &input);
-// Accumulate decoded sparse INT8/INT4 operands and write eight 32-lane D
-// sections. k is the dense reduction size (32 or 64); clamp saturates each
-// stage, otherwise results wrap. Input snapshots must not overlap D.
-void swmmac_integer_x86_64_v4(int k, bool clamp, uint32_t *const *d,
-                              const SwmmacIntegerInputs &input);
+// Raw SIMD backend signatures. Public entry points validate mode and adapt tied D
+// into 32-lane sections. All input arrays may overlap the destination registers.
+using SwmmacIntegerBackend = void(uint32_t, uint32_t *const *, const uint32_t *const *,
+                                  const uint32_t *const *, const uint32_t *const *);
+
+// SIMD backends consume packed architectural operands after public validation.
+template <int Bits, int K, int WaveSize> SwmmacIntegerBackend swmmac_integer_x86_64_v3;
+template <int Bits, int K, int WaveSize> SwmmacIntegerBackend swmmac_integer_x86_64_v4;
 
 } // namespace rocjitsu::arith

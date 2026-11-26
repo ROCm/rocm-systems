@@ -16,8 +16,16 @@
 
 #pragma once
 
+#include "rocjitsu/code/analysis/liveness.h"
+#include "rocjitsu/code/kernel_descriptor_scan.h"
+#include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/result.h"
+
 #include <cstdint>
 #include <memory>
+#include <optional>
+#include <span>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -80,5 +88,73 @@ struct KernelScopeSpec {
 [[nodiscard]] std::vector<BasicBlock *> reachable_kernel_blocks(
     const std::vector<std::unique_ptr<BasicBlock>> &blocks, const BlockOffsetIndex &block_index,
     const BlockPositionIndex &block_positions, BasicBlock &entry, const KernelScopeSpec &spec);
+
+class AmdGpuCodeObject;
+enum class KernelOwnerProof { KernelLocal, DirectCall, RecoveredIndirectCall };
+struct KernelExecutionOwner {
+  size_t kernel_index = 0;
+  KernelOwnerProof proof = KernelOwnerProof::KernelLocal;
+  bool operator==(const KernelExecutionOwner &) const = default;
+};
+
+/// @brief Borrowed, owner-specific inputs to existing CFG analyses.
+/// @details The pointed-to graph is logically immutable: callers must not mutate
+/// blocks or edges. Current analysis APIs require BasicBlock pointers despite that
+/// contract. All views expire with the source or KernelOwnership instance.
+struct KernelOwnerFlow {
+  std::span<BasicBlock *const> blocks;
+  std::span<BasicBlock *const> roots;
+  std::span<const ScopedCfgEdge> call_return_edges;
+  std::span<const uint8_t> text;
+  rj_code_target_id_t target = ROCJITSU_CODE_TARGET_INVALID;
+  uint8_t wave_size = 0;
+};
+
+/// @brief Complete all-descriptor execution ownership for one immutable source.
+/// @details The result borrows the immutable source via weak_ptr and owns its CFG.
+/// The factory discovers and validates descriptor roots and constructs the
+/// target-bound CFG itself. Unknown flow or unproved returns fail without facts.
+/// Shared multi-target transfers require kernel-specific provenance; PC builders
+/// carried across calls require callee-preservation proof. Both fail in this profile.
+/// For CDNA1-4, VCC writes invalidate return links through their descriptor-dependent
+/// backing SGPRs. FLAT_SCRATCH backing is qualified only on CDNA3/4; writes on
+/// CDNA1/2 invalidate all saved links and exclude recovered-PC proofs in that scope,
+/// even if they precede a builder. Recovered pairs must name ordinary SGPRs that
+/// do not overlap the qualified aliases.
+/// Query spans are valid only while both this result and the source remain alive;
+/// callers must retain the source when consuming a returned span.
+class KernelOwnership {
+public:
+  ~KernelOwnership();
+  KernelOwnership(KernelOwnership &&) noexcept;
+  KernelOwnership &operator=(KernelOwnership &&) noexcept;
+  KernelOwnership(const KernelOwnership &) = delete;
+  KernelOwnership &operator=(const KernelOwnership &) = delete;
+
+  [[nodiscard]] static FailureOr<KernelOwnership>
+  build(std::shared_ptr<const AmdGpuCodeObject> source, rj_code_target_id_t expected_target,
+        std::string &error);
+  [[nodiscard]] std::optional<std::span<const KernelExecutionOwner>>
+  owners_at(uint64_t offset) const;
+  [[nodiscard]] bool belongs_to(const AmdGpuCodeObject &source) const;
+  [[nodiscard]] std::optional<std::span<const KernelDescriptorInfo>> kernels() const;
+  [[nodiscard]] std::optional<KernelOwnerFlow> owner_flow(size_t kernel_index) const;
+  [[nodiscard]] const Instruction *instruction_at(size_t kernel_index, uint64_t offset) const;
+
+private:
+  struct FlowStorage {
+    std::vector<BasicBlock *> blocks;
+    std::vector<BasicBlock *> roots;
+    std::vector<ScopedCfgEdge> edges;
+    uint8_t wave_size = 0;
+  };
+  KernelOwnership();
+  std::weak_ptr<const AmdGpuCodeObject> source_;
+  std::vector<KernelDescriptorInfo> kernels_;
+  std::vector<FlowStorage> flows_;
+  std::vector<std::unique_ptr<BasicBlock>> blocks_;
+  BlockOffsetIndex offsets_;
+  std::unordered_map<const BasicBlock *, std::vector<KernelExecutionOwner>> owners_;
+};
 
 } // namespace rocjitsu

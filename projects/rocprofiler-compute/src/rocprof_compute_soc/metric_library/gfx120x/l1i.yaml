@@ -1,0 +1,11 @@
+l1i.hits_per_req:
+  name: L1I Hit Rate
+  formula: 100 * SUM(SQC_ICACHE_HITS_sum) / SUM(SQC_ICACHE_REQ_sum)
+  unit: Percent
+  description: Percentage of Instruction Cache requests that hit in the cache.
+  peak: 100
+l1i.req:
+  name: L1I Requests
+  formula: SUM(SQC_ICACHE_REQ_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: Total Instruction Cache fetch requests.

@@ -10,16 +10,19 @@
 inline util::FailureOr<std::shared_ptr<void>>
 load_plugin(const char *path, rocjitsu::cli::Command &root, util::DiagnosticEmitter diagnostic) {
   void *handle = dlopen(path, RTLD_NOW | RTLD_LOCAL);
-  if (!handle)
+  if (!handle) {
     return diagnostic.emit() << "cannot load plugin '" << path << "': " << dlerror();
+  }
   std::shared_ptr<void> library(handle, [](void *p) { dlclose(p); });
   RegisterPluginEntry entry =
       reinterpret_cast<RegisterPluginEntry>(dlsym(handle, "register_cli_plugin"));
-  if (!entry)
+  if (!entry) {
     return diagnostic.emit() << "missing register_cli_plugin: " << dlerror();
+  }
   RegisterPlugin registration = entry();
-  if (!registration)
+  if (!registration) {
     return diagnostic.emit() << "invalid register_cli_plugin entry";
+  }
 
   PluginHost host{
       &library,
@@ -29,7 +32,8 @@ load_plugin(const char *path, rocjitsu::cli::Command &root, util::DiagnosticEmit
             flag, [pin = std::move(pin)](rocjitsu::cli::Flag *value) { delete value; });
       },
   };
-  if (registration(root, host, diagnostic).failed())
+  if (registration(root, host, diagnostic).failed()) {
     return util::Result::failure();
+  }
   return library;
 }

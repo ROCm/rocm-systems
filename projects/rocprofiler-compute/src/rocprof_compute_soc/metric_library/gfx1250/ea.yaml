@@ -2,13 +2,13 @@ ea.dram_rd_bw:
   name: DRAM Bandwidth - Read
   formula: 32 * SUM(GC_EA_SE_SARB_DRAM_RD_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
-  description: Total HBM read bandwidth.
+  description: The number of bytes per second read from HBM (DRAM) through the EA.
   peak: $hbmBandwidth
 ea.dram_wr_bw:
   name: DRAM Bandwidth - Write
   formula: 32 * SUM(GC_EA_SE_SARB_DRAM_WR_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
-  description: Total HBM write bandwidth.
+  description: The number of bytes per second written to HBM (DRAM) through the EA.
   peak: $hbmBandwidth
 ea.gl2_to_dram_rd_lat:
   name: GL2 to DRAM Read Latency
@@ -24,90 +24,105 @@ ea.gmi_bw_rd:
   name: GMI Bandwidth - Read
   formula: 32 * SUM(GC_EA_SE_SARB_GMI_RD_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
-  description: Total read bandwidth from peer GPU HBM via Infinity Fabric.
+  description: >-
+    The number of bytes per second read from peer GPU HBM over Infinity Fabric through
+    the EA.
 ea.gmi_bw_wr:
   name: GMI Bandwidth - Write
   formula: 32 * SUM(GC_EA_SE_SARB_GMI_WR_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
-  description: Total write bandwidth to peer GPU HBM via Infinity Fabric.
+  description: >-
+    The number of bytes per second written to peer GPU HBM over Infinity Fabric through
+    the EA.
 ea.hdm_bw_rd:
   name: HDM Bandwidth - Read
   formula: 32 * SUM(GC_EA_SE_SARB_HDM_RD_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    Total read bandwidth from Host Data Memory (unified memory pages) through the
-    EA.
+    The number of bytes per second read from Host Data Memory (unified memory pages)
+    through the EA.
 ea.hdm_bw_wr:
   name: HDM Bandwidth - Write
   formula: 32 * SUM(GC_EA_SE_SARB_HDM_WR_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    Total write bandwidth to Host Data Memory (unified memory pages) through the EA.
+    The number of bytes per second written to Host Data Memory (unified memory pages)
+    through the EA.
 ea.io_bw_rd:
   name: IO Bandwidth - Read
   formula: 32 * SUM(GC_EA_SE_SARB_IO_RD_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    Total read bandwidth from host CPU memory (pinned or mapped) through the EA.
+    The number of bytes per second read from host CPU memory (pinned or mapped) through
+    the EA.
 ea.io_bw_wr:
   name: IO Bandwidth - Write
   formula: 32 * SUM(GC_EA_SE_SARB_IO_WR_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    Total write bandwidth to host CPU memory (pinned or mapped) through the EA.
+    The number of bytes per second written to host CPU memory (pinned or mapped) through
+    the EA.
 ea.outstanding_req:
   name: EA Outstanding Requests
   formula: SUM(GC_EA_SE_SARB_OUTSTANDING_ALL_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
   unit: Requests
-  description: Average number of in-flight requests from EA to SDP.
+  description: >-
+    Average number of in-flight requests from EA to the Scalable Data Port (SDP).
 ea.outstanding_req_dram_rd:
   name: EA Outstanding Requests - DRAM Read
   formula: SUM(GC_EA_SE_SARB_OUTSTANDING_DRAM_RD_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
   unit: Requests
-  description: Average in-flight HBM read requests from EA to SDP.
+  description: >-
+    Average in-flight HBM read requests from EA to the Scalable Data Port (SDP).
 ea.outstanding_req_dram_wr:
   name: EA Outstanding Requests - DRAM Write
   formula: SUM(GC_EA_SE_SARB_OUTSTANDING_DRAM_WR_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
   unit: Requests
-  description: Average in-flight HBM write requests from EA to SDP.
+  description: >-
+    Average in-flight HBM write requests from EA to the Scalable Data Port (SDP).
 ea.outstanding_req_gmi_rd:
   name: EA Outstanding Requests - GMI Read
   formula: SUM(GC_EA_SE_SARB_OUTSTANDING_GMI_RD_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
   unit: Requests
-  description: Average in-flight GMI read requests from EA to SDP.
+  description: >-
+    Average in-flight GMI read requests from EA to the Scalable Data Port (SDP).
 ea.outstanding_req_gmi_wr:
   name: EA Outstanding Requests - GMI Write
   formula: SUM(GC_EA_SE_SARB_OUTSTANDING_GMI_WR_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
   unit: Requests
-  description: Average in-flight GMI write requests from EA to SDP.
+  description: >-
+    Average in-flight GMI write requests from EA to the Scalable Data Port (SDP).
 ea.outstanding_req_hdm_rd:
   name: EA Outstanding Requests - HDM Read
   formula: SUM(GC_EA_SE_SARB_OUTSTANDING_HDM_RD_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
   unit: Requests
-  description: Average in-flight HDM read requests from EA to SDP.
+  description: >-
+    Average in-flight HDM read requests from EA to the Scalable Data Port (SDP).
 ea.outstanding_req_hdm_wr:
   name: EA Outstanding Requests - HDM Write
   formula: SUM(GC_EA_SE_SARB_OUTSTANDING_HDM_WR_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
   unit: Requests
-  description: Average in-flight HDM write requests from EA to SDP.
+  description: >-
+    Average in-flight HDM write requests from EA to the Scalable Data Port (SDP).
 ea.outstanding_req_io_rd:
   name: EA Outstanding Requests - IO Read
   formula: SUM(GC_EA_SE_SARB_OUTSTANDING_IO_RD_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
   unit: Requests
   description: >-
-    Average in-flight PCI-E and other IO read requests from EA to SDP.
+    Average in-flight PCI-E and other IO read requests from EA to the Scalable Data Port
+    (SDP).
 ea.outstanding_req_io_wr:
   name: EA Outstanding Requests - IO Write
   formula: SUM(GC_EA_SE_SARB_OUTSTANDING_IO_WR_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
   unit: Requests
   description: >-
-    Average in-flight PCI-E and other IO write requests from EA to SDP.
+    Average in-flight PCI-E and other IO write requests from EA to the Scalable Data
+    Port (SDP).
 ea.outstanding_req_probe_req:
   name: EA Outstanding Requests - Probe Request
   formula: SUM(GC_EA_SE_PROBE_OUTSTANDING_REQ_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
   unit: Requests
-  description: >-
-    Time-averaged number of in-flight cache coherence probe requests from EA.
+  description: Time-averaged number of in-flight cache coherence probe requests from EA.
 ea.outstanding_req_probe_response:
   name: EA Outstanding Requests - Probe Response
   formula: SUM(GC_EA_SE_PROBE_OUTSTANDING_RESP_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
@@ -117,46 +132,48 @@ ea.stalled_by_sdp:
   name: EA Stalled by SDP
   formula: 100 * SUM(GC_EA_SE_SARB_STALLED_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
   unit: Percent
-  description: Percentage of EA-busy cycles where the EA is stalled.
+  description: >-
+    Percentage of EA-busy cycles where the EA has a request ready but cannot send it to
+    the Scalable Data Port (SDP), the EA's link to the data fabric.
 ea.stalled_by_sdp_dram:
   name: EA Stalled by SDP - DRAM
   formula: 100 * SUM(GC_EA_SE_STALL_DRAM_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
   unit: Percent
   description: >-
-    Percentage of EA-busy cycles the EA is stalled by downstream memory pipeline on
-    DRAM path.
+    Percentage of EA-busy cycles where the EA cannot send DRAM requests to the Scalable
+    Data Port (SDP).
 ea.stalled_by_sdp_gmi:
   name: EA Stalled by SDP - GMI
   formula: 100 * SUM(GC_EA_SE_STALL_GMI_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
   unit: Percent
   description: >-
-    Percentage of EA-busy cycles the EA is stalled by downstream memory pipeline on
-    GMI path.
+    Percentage of EA-busy cycles where the EA cannot send GMI requests to the Scalable
+    Data Port (SDP).
 ea.stalled_by_sdp_hdm:
   name: EA Stalled by SDP - HDM
   formula: 100 * SUM(GC_EA_SE_STALL_HDM_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
   unit: Percent
   description: >-
-    Percentage of EA-busy cycles the EA is stalled by downstream memory pipeline on
-    HDM path.
+    Percentage of EA-busy cycles where the EA cannot send HDM requests to the Scalable
+    Data Port (SDP).
 ea.stalled_by_sdp_io_rd:
   name: EA Stalled by SDP - IO Read
   formula: 100 * SUM(GC_EA_SE_STALL_IO_RD_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
   unit: Percent
   description: >-
-    Percentage of EA-busy cycles the EA is stalled by downstream memory pipeline on
-    PCI-E and other IO read path.
+    Percentage of EA-busy cycles where the EA cannot send IO read requests to the
+    Scalable Data Port (SDP).
 ea.stalled_by_sdp_io_wr:
   name: EA Stalled by SDP - IO Write
   formula: 100 * SUM(GC_EA_SE_STALL_IO_WR_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
   unit: Percent
   description: >-
-    Percentage of EA-busy cycles the EA is stalled by downstream memory pipeline on
-    PCI-E and other IO write path.
+    Percentage of EA-busy cycles where the EA cannot send IO write requests to the
+    Scalable Data Port (SDP).
 ea.util:
   name: EA Utilization
   formula: 100 * SUM(GC_EA_SE_BUSY_CYCLE_sum) / SUM(GC_EA_SE_CYCLE_sum)
   unit: Percent
   description: >-
-    Percentage of cycles the Efficiency Arbiter is routing requests toward HBM, IO,
-    or fabric.
+    Percentage of cycles the Efficiency Arbiter is routing requests toward HBM, IO, or
+    fabric.
