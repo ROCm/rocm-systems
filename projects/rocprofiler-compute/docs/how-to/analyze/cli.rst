@@ -941,7 +941,16 @@ Triton operator analysis
 After profiling with ``--experimental --trace-ml-api triton`` (see
 :ref:`triton-trace`), use ``--list-operators triton`` and
 ``--operator 'triton:PATTERN'``, such as ``--operator 'triton:*rmsnorm_kernel*'``.
-They show only Triton kernels.
+They show only Triton kernels. Each node that recorded operands prints them
+after the operator name:
+
+.. code-block:: text
+
+   triton.JITFunction.scale_kernel torch_triton_net.py:33 args=(x_ptr=float32[64x64], out_ptr=float32[64x64], n=4096,
+   BLOCK_SIZE=1024) (calls: 2)
+      └─ triton.CompiledKernel.scale_kernel torch_triton_net.py:33 args=(x_ptr=float32[64x64], out_ptr=float32[64x64],
+         n=4096, BLOCK_SIZE=1024) (calls: 2)
+         └─ scale_kernel (id 3) (dispatches: 2, total: 3.40 us)
 
 
 .. _cli-debug-options:
