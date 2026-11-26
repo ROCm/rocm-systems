@@ -2,12 +2,15 @@
 // SPDX-License-Identifier: MIT
 
 #include "cpu.hpp"
+#include "agent.hpp"
+#include "agent_manager.hpp"
 #include "common/string_utility.hpp"
 
 #include <algorithm>
 #include <charconv>
 #include <cstdint>
 #include <fcntl.h>
+#include <fmt/format.h>
 #include <fstream>
 #include <functional>
 #include <map>
@@ -131,6 +134,39 @@ device_count()
         sockets.insert(std::max(0L, cpu.physical_id));
     }
     return sockets.empty() ? (cpu_data.empty() ? 0 : 1) : sockets.size();
+}
+
+void
+query_cpu_agents()
+{
+    const auto cpu_data = get_cpu_info();
+
+    // Ascending socket order makes device_type_index equal to the socket id.
+    std::map<size_t, cpu_info> sockets;
+    for(const auto& cpu : cpu_data)
+    {
+        sockets.try_emplace(static_cast<size_t>(std::max(0L, cpu.physical_id)), cpu);
+    }
+
+    auto&         manager = get_agent_manager_instance();
+    std::uint32_t node_id = 0;
+    for(const auto& [socket_id, cpu] : sockets)
+    {
+        const auto logical_id = static_cast<std::int32_t>(socket_id);
+
+        agent cpu_agent;
+        cpu_agent.type                 = agent_type::cpu;
+        cpu_agent.handle               = 0;
+        cpu_agent.device_id            = socket_id;
+        cpu_agent.node_id              = node_id++;
+        cpu_agent.logical_node_id      = logical_id;
+        cpu_agent.logical_node_type_id = logical_id;
+        cpu_agent.name                 = fmt::format("CPU{}", socket_id);
+        cpu_agent.model_name           = cpu.model_name;
+        cpu_agent.vendor_name          = cpu.vendor_id;
+        cpu_agent.agent_info           = "{}";
+        manager.insert_agent(cpu_agent);
+    }
 }
 
 }  // namespace rocprofsys::cpu

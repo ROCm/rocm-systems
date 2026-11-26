@@ -34,6 +34,8 @@ struct agent_manager
 
     size_t get_gpu_agents_count() const;
 
+    size_t get_cpu_agents_count() const;
+
 private:
     size_t                                 get_agent_count(agent_type type) const;
     std::vector<std::shared_ptr<agent>>    _agents;
