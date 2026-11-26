@@ -193,6 +193,41 @@ if(TARGET consan_original_fixtures)
         VERBATIM
     )
     add_custom_target(consan_artifact_fixture DEPENDS ${_artifact}/facts.bin)
+    set(_application_lds_artifacts)
+    foreach(_scope IN ITEMS barrier loop)
+        if(_scope STREQUAL "barrier")
+            set(_case 15)
+        else()
+            set(_case 27)
+        endif()
+        set(_application_${_scope}_artifact
+            ${CMAKE_CURRENT_BINARY_DIR}/prepared/application-${_scope}
+        )
+        set(_scope_artifact ${_application_${_scope}_artifact})
+        set(_scope_image
+            ${_fixture_dir}/targets/gfx1100/wave32/native-${_case}.hsaco
+        )
+        add_custom_command(
+            OUTPUT ${_scope_artifact}/facts.bin
+            BYPRODUCTS
+                ${_scope_artifact}/prepared.hsaco
+                ${_scope_artifact}/ready
+            COMMAND
+                ${CMAKE_COMMAND} -E make_directory
+                ${CMAKE_CURRENT_BINARY_DIR}/prepared
+            COMMAND ${CMAKE_COMMAND} -E rm -rf ${_scope_artifact}
+            COMMAND
+                $<TARGET_FILE:rj_consan_prepare> ${_scope_image} gfx1100
+                lds_producer_consumer ${_scope_artifact}
+            DEPENDS rj_consan_prepare ${_scope_image}
+            VERBATIM
+        )
+        list(APPEND _application_lds_artifacts ${_scope_artifact}/facts.bin)
+    endforeach()
+    add_custom_target(
+        consan_application_lds_artifacts
+        DEPENDS ${_application_lds_artifacts}
+    )
     set(_multi_artifact ${CMAKE_CURRENT_BINARY_DIR}/prepared/multi-entry)
     add_custom_command(
         OUTPUT ${_multi_artifact}/facts.bin
@@ -300,6 +335,7 @@ if(RJ_BUILD_CONSAN_RUNTIME AND TARGET consan_original_fixtures)
         PRIVATE
             rocjitsu_hsa_tools_headers
             rocjitsu_consan_contract
+            rocjitsu_consan_image
             GTest::gtest_main
             Threads::Threads
             ${CMAKE_DL_LIBS}
@@ -310,6 +346,7 @@ if(RJ_BUILD_CONSAN_RUNTIME AND TARGET consan_original_fixtures)
         hsa_consan_testable
         consan_artifact_fixture
         consan_multi_artifact_fixture
+        consan_application_lds_artifacts
         consan_native_shape_artifact_fixture
         consan_selected_alignment_artifact_fixture
         consan_native_alignment_artifact_fixture
@@ -322,6 +359,8 @@ if(RJ_BUILD_CONSAN_RUNTIME AND TARGET consan_original_fixtures)
             CONSAN_ARTIFACT_FIXTURE="${_artifact}"
             CONSAN_MULTI_ORIGINAL_FIXTURE="${_fixture_dir}/multi-entry.hsaco"
             CONSAN_MULTI_ARTIFACT_FIXTURE="${_multi_artifact}"
+            CONSAN_APPLICATION_BARRIER_ARTIFACT="${_application_barrier_artifact}"
+            CONSAN_APPLICATION_LOOP_ARTIFACT="${_application_loop_artifact}"
             CONSAN_NATIVE_SHAPE_ORIGINAL_FIXTURE="${_fixture_dir}/multi-entry-abi.hsaco"
             CONSAN_NATIVE_SHAPE_ARTIFACT_FIXTURE="${_native_shape_artifact}"
             CONSAN_ALIGNMENT_ORIGINAL_FIXTURE="${_fixture_dir}/multi-entry-alignment.hsaco"
@@ -768,18 +807,24 @@ endif()
 
 if(TARGET consan_multi_entry_runner AND TARGET rj_consan_analyze)
     add_dependencies(consan_multi_entry_runner consan_multi_entry_fixture)
-    foreach(_profile IN ITEMS SelectedAB WrongProfile BarrierAB LoopAB)
-        set(_negative)
+    foreach(
+        _profile
+        IN
+        ITEMS SelectedAB WrongProfile BarrierAB LoopAB NativeApplication
+    )
+        set(_profile_options)
         set(_multi_case_image ${_fixture_dir}/multi-entry.hsaco)
         set(_multi_variant no-sync)
         if(_profile STREQUAL "WrongProfile")
-            set(_negative --wrong-profile)
+            set(_profile_options --wrong-profile)
         elseif(_profile STREQUAL "BarrierAB")
             set(_multi_case_image ${_fixture_dir}/multi-entry-barrier.hsaco)
             set(_multi_variant barrier)
         elseif(_profile STREQUAL "LoopAB")
             set(_multi_case_image ${_fixture_dir}/multi-entry-loop.hsaco)
             set(_multi_variant loop)
+        elseif(_profile STREQUAL "NativeApplication")
+            set(_profile_options --native-application)
         endif()
         set(_test ConSanMultiEntrySim.${_profile})
         add_test(
@@ -796,7 +841,7 @@ if(TARGET consan_multi_entry_runner AND TARGET rj_consan_analyze)
                 --variant ${_multi_variant} --config
                 ${PROJECT_SOURCE_DIR}/configs/gfx1250_mi455x.json --root
                 ${RJ_CONSAN_TEST_ARTIFACT_ROOT} --source ${PROJECT_SOURCE_DIR}
-                ${_negative}
+                ${_profile_options}
         )
         rj_test_runtime_dir_env(_runtime ${_test})
         set_tests_properties(

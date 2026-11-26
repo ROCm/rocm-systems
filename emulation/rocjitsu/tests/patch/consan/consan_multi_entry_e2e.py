@@ -1,7 +1,7 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Whole-image A/B/C/A, independent CPU outputs, and artifact-free replay."""
+"""Whole-image A/B/C/A outputs, native application dispatch, and capture replay."""
 
 import argparse
 import hashlib
@@ -24,6 +24,8 @@ def run(args):
         'RJ_CONSAN_ARTIFACT_DIR',
         'RJ_CONSAN_CAPTURE_PATH',
         'RJ_CONSAN_SELECTION_PROFILE',
+        'RJ_CONSAN_APPLICATION_PROFILE',
+        'RJ_CONSAN_NATIVE_IMAGES',
     ):
         environment.pop(name, None)
 
@@ -84,6 +86,38 @@ def run(args):
         'mk_c.kd',
         'mk_a.kd',
     ]
+    if args.native_application:
+        active = environment | {
+            'HSA_TOOLS_LIB': str(args.plugin),
+            'RJ_CONSAN_PLUGIN_PATH': str(args.plugin),
+            'RJ_CONSAN_APPLICATION_PROFILE': '1',
+            'RJ_CONSAN_NATIVE_IMAGES': str(original),
+        }
+        application = execute(
+            'native-application', [*app, 'native-application'], env=active
+        )
+        ledger = [
+            json.loads(line)
+            for line in application.splitlines()
+            if line.startswith('{')
+        ]
+        expected = [row | {'native': True} for row in baseline[:-1]]
+        assert ledger[:-1] == expected, 'native original ABI/output changed'
+        summary = ledger[-1]
+        assert summary['app_status'] == 0 and summary['finish_status'] is None
+        assert summary['initializations'] == summary['shutdowns'] == 2
+        assert summary['queues_created'] == summary['queues_destroyed'] == 17
+        assert summary['loads'] == 1 and summary['completed'] == 4
+        assert summary['native_submitted'] == summary['native_completed'] == 4
+        for counter in ('submitted', 'forwarded', 'copied', 'written', 'reused'):
+            assert summary[counter] == 0, (counter, summary)
+        assert not (directory / 'capture.bin').exists()
+        assert not (directory / 'artifact').exists()
+        stderr = (directory / 'native-application.stderr').read_text()
+        assert 'ConSan unloaded without finish' not in stderr, stderr
+        (directory / 'native-ledger.json').write_text(json.dumps(ledger, indent=2))
+        print(directory)
+        return
     artifact = directory / 'artifact'
     preparation = execute(
         'prepare',
@@ -220,7 +254,9 @@ def main():
         parser.add_argument(
             '--' + name, type=lambda value: Path(value).resolve(), required=True
         )
-    parser.add_argument('--wrong-profile', action='store_true')
+    profile = parser.add_mutually_exclusive_group()
+    profile.add_argument('--wrong-profile', action='store_true')
+    profile.add_argument('--native-application', action='store_true')
     parser.add_argument(
         '--variant', choices=('no-sync', 'barrier', 'loop'), default='no-sync'
     )
