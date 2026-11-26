@@ -18,7 +18,6 @@
 #include <limits>
 #include <map>
 #include <optional>
-#include <ranges>
 #include <span>
 #include <stdexcept>
 #include <utility>
@@ -881,10 +880,10 @@ pytorch_source::call_stack(const reader_types::timeline_event_t& event)
                 stack.push_back(std::move(frame));
             };
             add_frame(region, id);
-            for(const auto& ancestor : active | std::views::reverse)
+            for(auto it = active.rbegin(); it != active.rend(); ++it)
             {
-                if(ancestor.level >= level) continue;
-                add_frame(*ancestor.row, ancestor.id);
+                if(it->level >= level) continue;
+                add_frame(*it->row, it->id);
             }
             return stack;
         }
