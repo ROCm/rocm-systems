@@ -5794,6 +5794,55 @@ TEST_F(LegacySubPageCacheTest, ScalarAccessCachesOnlyAccessibleBytesOfIncomplete
   EXPECT_EQ(backing_, before_invalid_store);
 }
 
+TEST_F(L1CacheMtypeTest, WideScalarLoadFillsMissingWordsUnderLocalGrant) {
+  using namespace rocjitsu::amdgpu;
+  std::array<uint32_t, 16> expected{};
+  for (uint32_t i = 0; i < expected.size(); ++i) {
+    expected[i] = 100 + i;
+  }
+  std::memcpy(first_page_.data(), expected.data(), sizeof(expected));
+  process_.map_pages(kBase, first_page_.data(), first_page_.size(), Mtype::RW);
+  address_space_ = legacy_vm_.register_address_space(
+      kVmid, {.page_table = &process_.page_table_,
+              .page_table_mutex = &process_.page_table_mutex_,
+              .page_table_generation = process_.page_table_generation(),
+              .request_mutex = process_.page_table_request_mutex(),
+              .mutation_epoch = process_.page_table_mutation_epoch(),
+              .page_table_cache_state = process_.page_table_cache_state(),
+              .local_grant_epoch = std::make_shared<std::atomic<uint64_t>>(1),
+              .local_grant = [](uint64_t, size_t) {
+                return VmLocalGrant{kBase, kBase + GpuMemory::PAGE_SIZE, 1};
+              }});
+  ASSERT_TRUE(address_space_);
+  auto access = gpu_vm_.snapshot_vmid(kVmid);
+  ASSERT_TRUE(access);
+  ASSERT_TRUE(access->local_grant_view(kBase, L1ScalarCache::CacheStore::LINE_SIZE));
+  l2_.set_backing_memory(&memory_);
+  l2_.set_gpu_vm(&gpu_vm_);
+  L1ScalarCache l1(&l2_);
+  l1.set_gpu_vm(&gpu_vm_);
+
+  // The write-through store makes only the first dword valid in scalar L1.
+  expected.front() = kFirstReplacement;
+  ASSERT_EQ(l1.store(kBase, 1, expected.data(), kVmid), VmAccessOutcome::Complete);
+  std::array<uint32_t, 16> observed{};
+  ASSERT_EQ(l1.load(kBase, observed.size(), observed.data(), kVmid), VmAccessOutcome::Complete);
+  ASSERT_EQ(observed, expected);
+
+  auto newer = expected;
+  newer.fill(kSecondReplacement);
+  ASSERT_EQ(l2_.write(kBase, reinterpret_cast<const uint8_t *>(newer.data()), sizeof(newer),
+                      Mtype::RW, kVmid),
+            VmAccessOutcome::Complete);
+  observed.fill(0);
+  ASSERT_EQ(l1.load(kBase, observed.size(), observed.data(), kVmid), VmAccessOutcome::Complete);
+  EXPECT_EQ(observed, expected);
+  ASSERT_EQ(l1.load(kBase, observed.size(), observed.data(), kVmid, /*allow_private_batch=*/false,
+                    Mtype::RW, /*force_l1_bypass=*/true),
+            VmAccessOutcome::Complete);
+  EXPECT_EQ(observed, newer);
+}
+
 TEST_F(L1CacheMtypeTest, ScalarLoadKeepsPageSpecificMtypeAcrossBoundary) {
   write_words(kFirst, kSecond);
   map_pages(Mtype::RW, Mtype::UC);
