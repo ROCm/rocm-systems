@@ -164,6 +164,7 @@ private:
   std::string drm_dir_;
   GpuInfo gpu_info_{};
   std::vector<BackingFile> pending_files_;
+  bool generation_failed_ = false;
 
   void queue_file(const std::string &path, const std::string &content);
   void make_dir(const std::string &path);

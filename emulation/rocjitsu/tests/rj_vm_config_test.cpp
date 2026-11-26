@@ -9,6 +9,7 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <cerrno>
 #include <cstddef>
 #include <cstring>
 #include <filesystem>
@@ -18,6 +19,26 @@
 #include <set>
 #include <string>
 #include <string_view>
+#include <utility>
+
+namespace {
+thread_local bool fail_next_drm_directory = false;
+} // namespace
+
+extern "C" char *__real_mkdtemp(char *path);
+
+extern "C" char *__wrap_mkdtemp(char *path) {
+  if (fail_next_drm_directory) {
+    const char *slash = std::strrchr(path, '/');
+    const std::string_view basename(slash ? slash + 1 : path);
+    if (basename.starts_with("rocjitsu_drm_")) {
+      fail_next_drm_directory = false;
+      errno = ENOSPC;
+      return nullptr;
+    }
+  }
+  return __real_mkdtemp(path);
+}
 
 namespace {
 
@@ -155,6 +176,56 @@ TEST(VmConfigApi, CanonicalGpuProfilesAreDiscoverableWithoutActivation) {
     EXPECT_EQ(directory_entries("/proc/self/fd"), descriptors);
     EXPECT_TRUE(std::filesystem::is_empty(runtime.path()));
   }
+}
+
+TEST(VmConfigApi, TopologyGenerationFailureRejectsLocalAndDaemonVms) {
+  rocjitsu::test::ScopedTempFile blocked_runtime;
+  ASSERT_TRUE(blocked_runtime.initialize("rocjitsu-blocked-runtime-"));
+  rocjitsu::test::ScopedTempDirectory runtime;
+  ASSERT_TRUE(runtime.initialize("rocjitsu-topology-retry-"));
+  const rocjitsu::test::ScopedEnvironmentVariable runtime_dir("ROCJITSU_RUNTIME_DIR",
+                                                              runtime.path());
+  for (const auto mode : {RJ_VM_MODE_LOCAL, RJ_VM_MODE_DAEMON}) {
+    SCOPED_TRACE(mode);
+    for (const bool replicated : {false, true}) {
+      SCOPED_TRACE(replicated);
+      const std::string json = small_config(replicated);
+      rj_vm_config_t *raw = nullptr;
+      ASSERT_EQ(rj_vm_config_create_from_string(json.c_str(), &raw), ROCJITSU_STATUS_SUCCESS);
+      Config config(raw, rj_vm_config_destroy);
+      rj_vm_t *raw_vm = nullptr;
+      {
+        // A regular file cannot contain the synthetic topology directories.
+        const rocjitsu::test::ScopedEnvironmentVariable blocked_dir("ROCJITSU_RUNTIME_DIR",
+                                                                    blocked_runtime.path());
+        EXPECT_EQ(rj_vm_create_from_config(config.get(), mode, &raw_vm), ROCJITSU_STATUS_ERROR);
+        Vm failed_vm(raw_vm, rj_vm_destroy);
+        EXPECT_EQ(failed_vm.get(), nullptr);
+      }
+      raw_vm = nullptr;
+      ASSERT_EQ(rj_vm_create_from_config(config.get(), mode, &raw_vm), ROCJITSU_STATUS_SUCCESS);
+      Vm vm(raw_vm, rj_vm_destroy);
+      EXPECT_NE(vm.get(), nullptr);
+    }
+  }
+}
+
+TEST(VmConfigApi, DrmDirectoryCreationFailureRejectsLocalVm) {
+  rocjitsu::test::ScopedTempDirectory runtime;
+  ASSERT_TRUE(runtime.initialize("rocjitsu-drm-failure-"));
+  const rocjitsu::test::ScopedEnvironmentVariable runtime_dir("ROCJITSU_RUNTIME_DIR",
+                                                              runtime.path());
+  const std::string json = small_config(false);
+  rj_vm_t *raw_vm = nullptr;
+  fail_next_drm_directory = true;
+  const rj_status_t status = rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_LOCAL, &raw_vm);
+  const bool failure_injected = !std::exchange(fail_next_drm_directory, false);
+  Vm failed_vm(raw_vm, rj_vm_destroy);
+
+  EXPECT_TRUE(failure_injected);
+  EXPECT_EQ(status, ROCJITSU_STATUS_ERROR);
+  EXPECT_EQ(failed_vm.get(), nullptr);
+  EXPECT_TRUE(std::filesystem::is_empty(runtime.path()));
 }
 
 TEST(VmConfigApi, MetadataMatchesIndependentLocalAndDaemonVms) {

@@ -3130,13 +3130,13 @@ std::optional<uint32_t> SimulatedKfd::gpu_ordinal_for_render_minor(uint32_t mino
                                                   : std::nullopt;
 }
 
-void SimulatedKfd::setup_topology(const config::KfdDeviceConfig &dev, uint32_t num_xcc,
+bool SimulatedKfd::setup_topology(const config::KfdDeviceConfig &dev, uint32_t num_xcc,
                                   const config::PciDeviceConfig &pci) {
   if (!dev.present) {
-    return;
+    return true;
   }
 
-  setup_topology(gpu_info_from_config(dev, num_xcc, pci));
+  return setup_topology(gpu_info_from_config(dev, num_xcc, pci));
 }
 
 SimulatedKfd::SimulatedKfd(SoC &soc, bool daemon_mode,
@@ -3285,17 +3285,20 @@ void SimulatedKfd::reap_exited_debug_sessions(std::stop_token stop) {
   }
 }
 
-void SimulatedKfd::setup_topology(const Sysfs::GpuInfo &gpu) {
+bool SimulatedKfd::setup_topology(const Sysfs::GpuInfo &gpu) {
   strict_render_minor_ = false;
   if (!gpus_.empty()) {
     gpus_[0].gpu_id = gpu.gpu_id;
   }
   gpu_infos_ = {gpu};
-  topology_.generate(gpu);
+  if (topology_.generate(gpu).empty()) {
+    return false;
+  }
   topology_.setup_environment();
+  return true;
 }
 
-void SimulatedKfd::setup_topology(const std::vector<config::KfdDeviceConfig> &devs,
+bool SimulatedKfd::setup_topology(const std::vector<config::KfdDeviceConfig> &devs,
                                   uint32_t num_xcc, bool publish_peer_links,
                                   bool strict_render_minor, const config::PciDeviceConfig &pci) {
   strict_render_minor_ = strict_render_minor;
@@ -3309,14 +3312,17 @@ void SimulatedKfd::setup_topology(const std::vector<config::KfdDeviceConfig> &de
     infos.push_back(std::move(info));
   }
   if (infos.empty()) {
-    return;
+    return true;
   }
   for (size_t i = 0; i < infos.size() && i < gpus_.size(); ++i) {
     gpus_[i].gpu_id = infos[i].gpu_id;
   }
   gpu_infos_ = std::move(infos);
-  topology_.generate(gpu_infos_, publish_peer_links);
+  if (topology_.generate(gpu_infos_, publish_peer_links).empty()) {
+    return false;
+  }
   topology_.setup_environment();
+  return true;
 }
 
 bool SimulatedKfd::is_doorbell_range(const void *addr, size_t length) const {
