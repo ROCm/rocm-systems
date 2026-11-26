@@ -72,9 +72,9 @@ int rcclHostHierChildren(const struct ncclComm* comm, ncclComm_t children[2]);
 // Sizes, in bytes, at which host-hierarchical AllReduce beat the default path in gfx1250
 // MNNVL fp32 sum measurements with 8 ranks per host on 2, 4 and 8 hosts and with 4 ranks
 // per host on 8 hosts. The rcclHostHierAllReduceAutoType combinations gain at the
-// same sizes. False for unmeasured layouts. Auto mode also needs the SPX tuning table
-// for 4 ranks per host, and on two hosts the fused kernel between 2 and 8 MiB for the
-// types the kernel takes.
+// same sizes. False for unmeasured layouts. Auto mode also needs every rank's GPU to
+// report SPX for 4 ranks per host, and on two hosts the fused kernel between 2 and 8
+// MiB for the types the kernel takes.
 bool rcclHostHierAllReduceAutoWindow(int nHosts, int ranksPerHost, size_t bytes);
 
 // Sizes, in bytes, at which the fused DDA kernel beat the three collectives in gfx1250 fp32, fp16 and bf16 sum

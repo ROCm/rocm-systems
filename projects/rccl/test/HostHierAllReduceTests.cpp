@@ -55,6 +55,8 @@ struct HostHierMockComm
         const bool spx = std::count(hostOf.begin(), hostOf.end(), hostOf.empty() ? 0 : hostOf[0]) == 4;
         comm.archThresholds
             = rcclGetArchThresholds(archBuf, spx ? RCCL_TUNING_PARTITION_SPX : RCCL_TUNING_PARTITION_DPX);
+        for(ncclPeerInfo& peer : peers)
+            peer.spxReported = spx;
     }
 
     HostHierMockComm(const HostHierMockComm&)            = delete;
@@ -383,6 +385,14 @@ TEST(HostHierAllReduce, EligibilityPerMode_Isolated)
                 EXPECT_FALSE(
                     rcclHostHierAllReduceEligible(mock.get(), floats(128 * kMiB), ncclFloat32, ncclSum, false))
                     << "eight hosts of four ranks with the DPX table";
+            }
+            {
+                // The SPX table also serves CPX GPUs, GPUs that report no mode and comms whose ranks disagree.
+                HostHierMockComm mock(blockHosts(8, 4), 0);
+                mock.peers[5].spxReported = false;
+                EXPECT_FALSE(
+                    rcclHostHierAllReduceEligible(mock.get(), floats(128 * kMiB), ncclFloat32, ncclSum, false))
+                    << "eight hosts of four ranks, one GPU not reporting SPX";
             }
             // The mock comm has no DDA scratch, so the fused kernel never runs on it.
             for(size_t bytes : {4 * kMiB, 8 * kMiB - 64})

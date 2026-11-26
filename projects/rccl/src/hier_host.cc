@@ -110,10 +110,18 @@ bool needsFusedKernel(const struct rcclHostLayout& layout, ncclDataType_t dataty
   return bytes > 2 * MiB && bytes < 8 * MiB;
 }
 
-// Every rank of a comm reads the same table (rcclSetTuningPartition), so this matches on all of them.
-bool spxTuningTable(const struct ncclComm* comm) {
-  return comm->archName != nullptr && comm->archThresholds != nullptr &&
-         comm->archThresholds == rcclGetArchThresholds(comm->archName, RCCL_TUNING_PARTITION_SPX);
+// The SPX table and every rank's GPU reporting SPX: the table also serves CPX GPUs, GPUs that report no mode and comms
+// whose ranks disagree, none of which was measured. Every rank reads the same table (rcclSetTuningPartition) and peer
+// info, so this matches on all of them.
+bool spxComm(const struct ncclComm* comm) {
+  if (comm->archName == nullptr || comm->archThresholds == nullptr ||
+      comm->archThresholds != rcclGetArchThresholds(comm->archName, RCCL_TUNING_PARTITION_SPX)) {
+    return false;
+  }
+  for (int r = 0; r < comm->nRanks; r++) {
+    if (!comm->peerInfo[r].spxReported) return false;
+  }
+  return true;
 }
 
 } // namespace
@@ -349,7 +357,7 @@ bool rcclHostHierAllReduceEligible(struct ncclComm* comm, size_t count, ncclData
   const size_t bytes = count * ncclTypeSize(datatype);
   if (!rcclHostHierAllReduceAutoWindow(layout->nHosts, layout->ranksPerHost, bytes)) return false;
   // The 4-ranks-per-host window was measured in SPX; a DPX comm with half of each host's ranks keeps the default path.
-  if (layout->ranksPerHost == 4 && !spxTuningTable(comm)) return false;
+  if (layout->ranksPerHost == 4 && !spxComm(comm)) return false;
   return !needsFusedKernel(*layout, datatype, bytes) || fusedKernelRuns(comm, *layout, count, datatype, op);
 }
 

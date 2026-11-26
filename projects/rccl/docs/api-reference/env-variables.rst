@@ -541,8 +541,8 @@ collected in the following table.
           ``ncclFloat8e4m3`` and ``ncclFloat8e5m2``. On two hosts, FP32, FP16
           and BF16 messages between 2 and 8 MiB use it only where the fused
           kernel runs (see ``RCCL_HOST_HIER_ALLREDUCE_FUSED``). With four
-          ranks per host, only with the SPX tuning table: 64 to 512 MiB on
-          eight hosts, for ``ncclSum`` on every
+          ranks per host, only when every rank's GPU reports the SPX partition
+          mode: 64 to 512 MiB on eight hosts, for ``ncclSum`` on every
           type, ``ncclProd`` on every type except FP8, ``ncclMax`` and
           ``ncclMin`` on every type except FP8, ``ncclInt8`` and
           ``ncclUint8``, and ``ncclAvg`` on ``ncclFloat16``, ``ncclFloat32``,
