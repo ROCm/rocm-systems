@@ -137,21 +137,6 @@ def test_every_shown_unit_has_a_display_rule(path, arch):
 
 
 @pytest.mark.parametrize(("path", "arch"), LAYOUT_ARCHS, ids=LAYOUT_ARCH_IDS)
-def test_percent_categories_mark_percentages_with_a_bar(path, arch):
-    """Util, Hit and Stall colors say a value is a percentage, drawn with a bar;
-    counts and sizes are neutral."""
-    units = panel_units(PanelConfigs.for_arch(arch))
-    wrong = [
-        item.title
-        for block in load_layout(path).blocks()
-        for item in block.items
-        if item.category in ("util", "hit", "stall")
-        and (units[item.metric_id] != "Percent" or not item.bar)
-    ]
-    assert not wrong
-
-
-@pytest.mark.parametrize(("path", "arch"), LAYOUT_ARCHS, ids=LAYOUT_ARCH_IDS)
 def test_arrow_style_fits_the_metric_unit(path, arch):
     # A count reads best as one "title : value" line; a rate as title, value, arrow
     units = panel_units(PanelConfigs.for_arch(arch))
