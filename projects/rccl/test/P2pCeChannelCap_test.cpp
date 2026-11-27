@@ -59,10 +59,14 @@ TEST(P2pCeChannelCapTests, Gfx1250CeStepIsCappedAt32MiB)
               32 * 1024 * 1024);
 }
 
-TEST(P2pCeChannelCapTests, Gfx1250CeConnectionsShareTheProxyStream)
+TEST(P2pCeChannelCapTests, CeConnectionsShareTheProxyStreamOnEveryArch)
 {
+    // Per-connection streams stall SDMA completions cross-process (AICOMRCCL-4050), so every
+    // architecture shares one non-blocking proxy stream, not only gfx1250.
     EXPECT_TRUE(rcclP2pCeSharesProxyStream(/*cudaArch=*/1250));
-    EXPECT_FALSE(rcclP2pCeSharesProxyStream(/*cudaArch=*/1200));
+    EXPECT_TRUE(rcclP2pCeSharesProxyStream(/*cudaArch=*/1200));
+    EXPECT_TRUE(rcclP2pCeSharesProxyStream(/*cudaArch=*/942));
+    EXPECT_TRUE(rcclP2pCeSharesProxyStream(/*cudaArch=*/950));
 }
 
 TEST(P2pCeChannelCapTests, SimpleChunkFollowsCopyEngineConnectorSteps)

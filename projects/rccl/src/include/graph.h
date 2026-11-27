@@ -51,8 +51,13 @@ inline size_t rcclP2pCeStepSizePolicy(int cudaArch, bool useMemcpy, int64_t conf
   size_t step = configured > (int64_t)fallback ? (size_t)configured : fallback;
   return step < (size_t)kRcclP2pCeMaxStepSize ? step : (size_t)kRcclP2pCeMaxStepSize;
 }
+// The Copy Engine proxy copies must share one non-blocking stream per proxy thread on every
+// architecture. Per-connection streams stall SDMA completions cross-process: this deadlocked
+// direct Send/Recv on gfx1250 (AICOMRCCL-2753) and still deadlocked it on gfx942/gfx950
+// (AICOMRCCL-4050) after the shared stream had been limited to gfx1250.
 inline bool rcclP2pCeSharesProxyStream(int cudaArch) {
-  return cudaArch == 1250;
+  (void)cudaArch;
+  return true;
 }
 inline int rcclP2pConnectorStepSize(int p2pChunkSize, bool useCe, int connStepSize) {
   return useCe && connStepSize > 0 ? connStepSize : p2pChunkSize;

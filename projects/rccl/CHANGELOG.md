@@ -110,6 +110,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 ### Removed
 
 ### Resolved issues
+* Fixed a cross-process Copy Engine P2P deadlock on gfx942 and gfx950 with `NCCL_P2P_USE_CUDA_MEMCPY=1` (AICOMRCCL-4050). Direct `ncclSend`/`ncclRecv` through the Copy Engine proxy hung from the first payload step: with one non-blocking proxy stream per connection, SDMA completions stalled and the proxy threads stayed in KFD event waits that never fired. The shared non-blocking proxy stream that #13348 had applied to gfx1250 now applies to every architecture, so `P2pMPITest.P2pWithMemcpyTest` passes on MI350X again.
 * Fixed `NCCL_CE_BATCH_CAPTURE_ENABLE=1` producing wrong results under HIP graph capture. `hipMemcpyBatchAsync` does not support graph capture, so Copy Engine copies recorded into a graph now always use per-copy `hipMemcpyAsync`, as with the variable unset, and RCCL logs once that it ignored the variable.
 * Fixed hierarchical Copy Engine `ncclAlltoAllv` failing with `ncclInvalidArgument` on rail-only host RMA (`NCCL_CROSS_NIC=0`). Like `ncclAlltoAll`, it puts to every remote rank, so it now falls back to the kernel path unless host RMA reaches every rank.
 * When mlx5 data-direct DMA-BUF registration is missing or fails, RCCL uses `ibv_reg_dmabuf_mr` and reports a failed data-direct attempt once per protection domain. A missing `mlx5dv_reg_dmabuf_mr` leaves data-direct off.
