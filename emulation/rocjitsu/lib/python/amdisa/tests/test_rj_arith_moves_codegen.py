@@ -19,7 +19,7 @@ def context(arch, name, dst, src, *, is_vop3=False, result_writer=None):
     return ExecuteContext(
         inst=SimpleNamespace(name=name),
         sem=None,
-        profile=_PROFILES[arch](),
+        profile=_PROFILES[arch.replace('rdna3_5', 'rdna3.5')](),
         arch_name=arch,
         dst_ops=dst,
         src_ops=src,
@@ -77,6 +77,14 @@ def test_vector_move_and_conditional_controls(arch):
     assert 'wf.vcc_mask()' in gen_vector32(
         context(arch, 'V_CNDMASK_B32', ['d'], ['a', 'b'], is_vop3=False)
     )
+
+
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna3_5', 'rdna4', 'cdna5'])
+def test_packed_half_move_uses_direct_vgpr_helper(arch):
+    packed = gen_integer16(context(arch, 'V_MOV_B16', ['d'], ['a']))
+    assert 'try_move_packed_vgpr_half' in packed
+    vop3 = gen_integer16(context(arch, 'V_MOV_B16', ['d'], ['a'], is_vop3=True))
+    assert 'try_move_packed_vgpr_half' not in vop3
 
 
 @pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])

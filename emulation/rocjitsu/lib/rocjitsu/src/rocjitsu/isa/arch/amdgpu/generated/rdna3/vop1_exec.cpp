@@ -877,6 +877,9 @@ void VMovB16Vop1::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   const uint64_t modifiers = 0;
+  if (amdgpu::arith::try_move_packed_vgpr_half(wf, vdst, src0)) {
+    return;
+  }
   amdgpu::arith::execute_integer16<1>(wf, rj_arith_v_mov_b16_w32, rj_arith_v_mov_b16_w64,
                                       wf.cu().arithmetic_flags(), modifiers, vdst, src0);
 }
@@ -903,6 +906,9 @@ RJ_NOINLINE void VMovB16Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   }
   const uint64_t modifiers = 0;
+  if (amdgpu::arith::try_move_packed_vgpr_half(wf, vdst, src0)) {
+    return;
+  }
   amdgpu::arith::execute_integer16<1>(wf, rj_arith_v_mov_b16_w32, rj_arith_v_mov_b16_w64,
                                       wf.cu().arithmetic_flags(), modifiers, vdst, src0);
   dpp_write_mask_scope_.restore();

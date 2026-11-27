@@ -9491,6 +9491,82 @@ TEST(ArithBridgeTest, RelativeVectorMovesAndSwapsKeepAddressingMasksAndAliases) 
   }
 }
 
+class PackedVgprMoveTest : public ::testing::TestWithParam<rocjitsu::IsaFamily> {};
+
+TEST_P(PackedVgprMoveTest, PreservesOtherHalfAndInactiveLanes) {
+  constexpr unsigned source = 7;
+  for (unsigned lanes : {32U, 64U}) {
+    BridgeFixture fixture(GetParam(), lanes);
+    ASSERT_NE(fixture.wave, nullptr);
+    fixture.cu->set_plugin_group(nullptr);
+    const uint64_t all_lanes = lanes == 32 ? 0xffffffffULL : ~0ULL;
+    for (uint64_t exec : std::array<uint64_t, 3>{all_lanes, all_lanes & 0xa55af00f0f0f00f3ULL, 0}) {
+      for (bool masked_write : {false, true}) {
+        const uint64_t write_mask = masked_write ? all_lanes & ~1ULL : all_lanes;
+        fixture.wave->set_exec(exec);
+        fixture.wave->set_vgpr_write_mask(write_mask);
+        for (bool alias : {false, true}) {
+          const unsigned destination = alias ? source : 5;
+          for (unsigned source_high : {0U, 1U}) {
+            for (unsigned destination_high : {0U, 1U}) {
+              SCOPED_TRACE(::testing::Message()
+                           << "lanes=" << lanes << " exec=" << exec << " writes=" << write_mask
+                           << " alias=" << alias << " source_high=" << source_high
+                           << " destination_high=" << destination_high);
+              for (unsigned lane = 0; lane < lanes; ++lane) {
+                fixture.cu->write_vgpr(fixture.base() + source, lane,
+                                       0x11002200U + lane * 0x10001U);
+                if (!alias) {
+                  fixture.cu->write_vgpr(fixture.base() + destination, lane, 0x55006600U + lane);
+                }
+              }
+              // The RDNA variants share the packed VOP1 encoding.
+              const auto words = rdna4::build_vop1(
+                  rdna4::kVMovB16Vop1, {.src0 = uint16_t(256 + source + 128 * source_high),
+                                        .vdst = uint8_t(destination + 128 * destination_high)});
+              auto instruction = fixture.decoder->decode_window(words);
+              ASSERT_TRUE(instruction.succeeded());
+              ASSERT_TRUE(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
+                              .succeeded());
+              for (unsigned lane = 0; lane < lanes; ++lane) {
+                const uint32_t input = 0x11002200U + lane * 0x10001U;
+                const uint32_t before = alias ? input : 0x55006600U + lane;
+                const unsigned shift = 16 * destination_high;
+                const uint32_t write_bits = ((input >> (16 * source_high)) & 0xffffU) << shift;
+                const bool active = ((exec & write_mask) >> lane) & 1;
+                const uint32_t expected =
+                    active ? (before & ~(0xffffU << shift)) | write_bits : before;
+                EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + destination, lane), expected)
+                    << "lane=" << lane;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(True16, PackedVgprMoveTest,
+                         ::testing::Values(rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
+                                           rocjitsu::IsaFamily::Rdna4));
+
+TEST(ArithBridgeTest, Rdna35PackedVgprMoveUsesSelectedHalfOfVgpr0ForUnallocatedSource) {
+  BridgeFixture fixture(rocjitsu::IsaFamily::Rdna3_5, 32, {}, 8);
+  ASSERT_NE(fixture.wave, nullptr);
+  fixture.cu->set_plugin_group(nullptr);
+  fixture.wave->set_exec(1);
+  fixture.cu->write_vgpr(fixture.base(), 0, 0xabcd1234U);
+  fixture.cu->write_vgpr(fixture.base() + 5, 0, 0xfeed5678U);
+  const auto words =
+      rdna3_5::build_vop1(rdna3_5::kVMovB16Vop1, {.src0 = 256 + 128 + 127, .vdst = 128 + 5});
+  auto instruction = fixture.decoder->decode_window(words);
+  ASSERT_TRUE(instruction.succeeded());
+  ASSERT_TRUE(
+      fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
+  EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 5, 0), 0xabcd5678U);
+}
+
 TEST(ArithBridgeTest, DppMoveHalfNegatesSelectedHalfAndPreservesTheOther) {
   for (bool gfx11 : {false, true}) {
     for (bool high : {false, true}) {

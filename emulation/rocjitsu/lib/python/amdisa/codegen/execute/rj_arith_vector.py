@@ -687,7 +687,7 @@ def gen_integer16(ctx: ExecuteContext) -> str | None:
             f'  if (amdgpu::arith::try_execute_sdwa_integer32(*this, wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
             f'      wf.cu().arithmetic_flags(), modifiers, {dst[0]}, {", ".join(src)})) return;',
         ]
-    if arch == 'cdna5' and mnemonic == 'V_MOV_B16' and not is_vop3:
+    if mnemonic == 'V_MOV_B16' and not is_vop3:
         lines += [
             f'  if (amdgpu::arith::try_move_packed_vgpr_half(wf, {dst[0]}, {src[0]}))',
             '    return;',
