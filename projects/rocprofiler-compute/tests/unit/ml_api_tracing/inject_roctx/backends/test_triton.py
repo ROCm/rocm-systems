@@ -317,6 +317,16 @@ def test_format_triton_args_exception_is_n_a():
     assert blob == "n/a"
 
 
+def test_format_triton_args_renders_float_and_bool():
+    blob = triton_backend._format_triton_args(
+        types.SimpleNamespace(params=["scale", "flag"]),
+        False,
+        (0.5, True),
+        {},
+    )
+    assert blob == "(scale=0.5, flag=True)"
+
+
 def test_format_triton_args_caps_at_32_items():
     names = ["p%d" % index for index in range(40)]
     blob = triton_backend._format_triton_args(
