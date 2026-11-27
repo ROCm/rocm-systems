@@ -86,6 +86,7 @@ add_library(
     dot/half_dot.cpp
     dot/integer_dot.cpp
     dot/scalar_repair.cpp
+    graphics/image_lod.cpp
     graphics/bvh.cpp
     graphics/cube.cpp
     graphics/interp_gfx10.cpp

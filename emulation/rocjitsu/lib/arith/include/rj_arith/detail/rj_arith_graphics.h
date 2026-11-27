@@ -6,6 +6,7 @@
 #ifndef RJ_ARITH_GRAPHICS_H_
 #define RJ_ARITH_GRAPHICS_H_
 
+#include "image_footprint.h"
 #include "rj_arith_common.h"
 
 #include <stdint.h>
@@ -13,6 +14,39 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+// Resolved numeric sampler controls for IMAGE_GET_LOD. Memory addressing,
+// descriptor decoding, unbound-resource handling and destination DMASK belong
+// to the caller. Mip bounds are view-relative; resident_min_lod is absolute.
+typedef struct rj_arith_image_lod_controls {
+  uint32_t extents[3], dimensions, max_anisotropy;
+  double bias, min_lod, max_lod, resident_min_lod;
+  uint32_t first_level, last_level, mip_filter, perf_mip, perf_mod;
+} rj_arith_image_lod_controls;
+
+// Return selected-mip and raw footprint LOD in two VGPRs. QUAD_INPUTS has
+// one already-captured derivative pair per four lanes, including inactive
+// helper-lane contributions. Each active quad produces one shared result.
+// The caller captures source VGPRs before the call, permitting source/destination
+// VGPR overlap. Decoded input/control records must not overlap D.
+// Extents must be positive; dimensions=1..3, anisotropy=0 (isotropic) or a
+// power of two <=16, first_level<=last_level, mip_filter=0..2. Other control
+// fields have their decoded ISA ranges. No guest FP controls/status apply.
+// Compatibility/Loose inherit rocjitsu's model; strict empirical modes reject.
+int rj_arith_image_get_lod_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const rj_arith_image_gradients *quad_inputs,
+                               const rj_arith_image_lod_controls *controls);
+int rj_arith_image_get_lod_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const rj_arith_image_gradients *quad_inputs,
+                               const rj_arith_image_lod_controls *controls);
+int rj_arith_image_get_lod_w32_gfx10(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d,
+                                     const rj_arith_image_gradients *quad_inputs,
+                                     const rj_arith_image_lod_controls *controls);
+int rj_arith_image_get_lod_w64_gfx10(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d,
+                                     const rj_arith_image_gradients *quad_inputs,
+                                     const rj_arith_image_lod_controls *controls);
 
 // Prefetched ray/node operands for IMAGE_BVH_INTERSECT_RAY. Node types are
 // tags 0..3 (triangles), 4 (FP16 boxes), 5 (FP32 boxes), 6/7 (not intersected).

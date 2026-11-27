@@ -629,6 +629,7 @@ prepare_image_transfer(Wavefront &wf, VectorMemState &state, uint32_t resource, 
     const uint32_t value = regs.read_vgpr(wf.vgpr_alloc().base + coords[index], lane, bytes);
     return packed ? (value >> (16 * half)) & 0xffffu : value;
   };
+  rj_arith_image_gradients lod_inputs[16]{};
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(wf.exec() & (uint64_t{1} << lane))) {
       continue;
@@ -721,7 +722,6 @@ prepare_image_transfer(Wavefront &wf, VectorMemState &state, uint32_t resource, 
         layer += static_cast<uint32_t>(std::clamp(rounded, 0.0, double(last_layer - first_layer)));
       }
       double lod = 0;
-      bool zero_isotropic_footprint = false;
       uint32_t filter_count = 1;
       double sample_step_u = 0, sample_step_v = 0;
       if (sample_mode == ImageSampleMode::Explicit) {
@@ -732,19 +732,16 @@ prepare_image_transfer(Wavefront &wf, VectorMemState &state, uint32_t resource, 
       } else if (query && volume) {
         const ImageDerivativeQuad quad(lane);
         std::array<double, 3> dx{}, dy{};
-        zero_isotropic_footprint = true;
         for (unsigned axis = 0; axis < dx.size(); ++axis) {
           const double origin = read(coordinate_offset + axis, quad.origin);
           dx[axis] = read(coordinate_offset + axis, quad.right()) - origin;
           dy[axis] = read(coordinate_offset + axis, quad.bottom()) - origin;
-          zero_isotropic_footprint &=
-              (dx[axis] == 0 || std::isnan(dx[axis])) && (dy[axis] == 0 || std::isnan(dy[axis]));
         }
-        const std::array<uint32_t, 3> extents{width, height,
-                                              std::max(1u, resource_depth >> first_level)};
-        lod =
-            image_gradient_lod(dx, dy, normalized ? extents : std::array<uint32_t, 3>{1, 1, 1}, 3);
-        lod += lod_bias;
+        for (int axis = 0; axis < 3; ++axis) {
+          lod_inputs[lane / 4].dx[axis] = dx[axis];
+          lod_inputs[lane / 4].dy[axis] = dy[axis];
+        }
+        continue;
       } else if (needs_gradients) {
         double dxu, dxv, dyu, dyv;
         std::array<int, 4> gradient_rounding{};
@@ -849,8 +846,21 @@ prepare_image_transfer(Wavefront &wf, VectorMemState &state, uint32_t resource, 
         dxv = finite_gradient(dxv);
         dyu = finite_gradient(dyu);
         dyv = finite_gradient(dyv);
-        const auto footprint_axes = image_footprint(dxu, dxv, dyu, dyv, normalized ? width : 1,
-                                                    normalized ? height : 1, gradient_rounding);
+        if (query) {
+          auto &input = lod_inputs[lane / 4];
+          input.dx[0] = dxu;
+          input.dx[1] = dxv;
+          input.dy[0] = dyu;
+          input.dy[1] = dyv;
+          for (int i = 0; i < 4; ++i) {
+            input.rounding[i] = gradient_rounding[i];
+          }
+          input.unbounded = unbounded_cube_footprint;
+          continue;
+        }
+        const auto footprint_axes =
+            image_footprint(dxu, dxv, dyu, dyv, normalized ? width : 1, normalized ? height : 1,
+                            gradient_rounding, wf.cu().arithmetic_flags());
         const auto [major_lod, minor_lod] = footprint_axes.lods;
         const bool zero_footprint = footprint_axes.norms[0] == 0 && footprint_axes.norms[1] == 0;
         if ((min_filter & 2) || (mag_filter & 2)) {
@@ -870,7 +880,6 @@ prepare_image_transfer(Wavefront &wf, VectorMemState &state, uint32_t resource, 
             sample_step_v = image_filter_step_truncate(direction_v * spacing);
           }
         } else {
-          zero_isotropic_footprint = zero_footprint;
           lod = major_lod / 256.0;
         }
         lod += lod_bias;
@@ -900,7 +909,6 @@ prepare_image_transfer(Wavefront &wf, VectorMemState &state, uint32_t resource, 
         }
         lod = *clamped;
       }
-      const double raw_lod = zero_isotropic_footprint ? 0 : lod;
       lod = std::clamp(lod, min_lod, max_lod);
       const double requested_lod = first_level + lod;
       // LZ gather stays at its fixed mip. Other samples clamp to the resource's
@@ -935,11 +943,6 @@ prepare_image_transfer(Wavefront &wf, VectorMemState &state, uint32_t resource, 
           mip_filter == 2 ? image_mip_fraction(static_cast<uint32_t>((lod - std::floor(lod)) * 256),
                                                perf_mip, perf_mod)
                           : 0;
-      if (query) {
-        const double clamped_lod = level - first_level + mip_fraction / 256.0;
-        (*queried_lods)[lane] = {static_cast<float>(clamped_lod), static_cast<float>(raw_lod)};
-        continue;
-      }
       if (controls.gather && level < uint32_t(resident_min_lod)) {
         continue;
       }
@@ -1198,6 +1201,40 @@ prepare_image_transfer(Wavefront &wf, VectorMemState &state, uint32_t resource, 
       state.image_metadata->levels[lane] = level;
     }
     state.lane_mask |= uint64_t{1} << lane;
+  }
+  if (query) {
+    alignas(64) uint32_t output[2][64]{};
+    uint32_t *destinations[] = {output[0], output[1]};
+    const bool anisotropic = !volume && ((min_filter | mag_filter) & 2);
+    const rj_arith_image_lod_controls control{
+        {normalized ? width : 1, normalized ? height : 1,
+         normalized ? std::max(1u, resource_depth >> first_level) : 1},
+        spatial_components,
+        anisotropic ? max_anisotropy : 0,
+        lod_bias,
+        min_lod,
+        max_lod,
+        resident_min_lod,
+        first_level,
+        last_level,
+        mip_filter,
+        perf_mip,
+        perf_mod};
+    const uint64_t flags = wf.cu().arithmetic_flags();
+    const int status = wf.wf_size() == 32
+                           ? rj_arith_image_get_lod_w32(flags, uint32_t(state.exec_mask), 0,
+                                                        destinations, lod_inputs, &control)
+                           : rj_arith_image_get_lod_w64(flags, state.exec_mask, 0, destinations,
+                                                        lod_inputs, &control);
+    if (status != RJ_ARITH_SUCCESS) {
+      return unsupported();
+    }
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if ((state.exec_mask >> lane) & 1) {
+        (*queried_lods)[lane] = {std::bit_cast<float>(output[0][lane]),
+                                 std::bit_cast<float>(output[1][lane])};
+      }
+    }
   }
   if (dropped) {
     state.lane_mask = 0;

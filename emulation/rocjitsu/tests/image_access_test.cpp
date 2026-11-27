@@ -8478,12 +8478,13 @@ TEST_P(ImageSamplerControlTest, ShaderClampSelectsTheSameMipInBothPreparations) 
                                              amdgpu::ImageSampleMode::Zero)
                     .succeeded());
     ASSERT_EQ(compute.texel_status->lod[0], uint8_t(minimum));
-    amdgpu::ImageLodResults query{};
     ASSERT_TRUE(amdgpu::prepare_image_transfer(*wf_, transfer, 0, 8, coords, fields, 8,
-                                               amdgpu::ImageSampleMode::Zero, &query)
+                                               amdgpu::ImageSampleMode::Zero)
                     .succeeded());
-    EXPECT_EQ(query[0][0], minimum);
-    EXPECT_EQ(query[0][1], minimum);
+    // Both preparations must address the texel in the shader-clamped mip.
+    ASSERT_NE(compute.image_sample, nullptr);
+    ASSERT_FALSE(compute.image_sample->taps.empty());
+    EXPECT_EQ(transfer.per_lane_addr[0], compute.image_sample->taps[0].addresses[0]);
   }
 }
 

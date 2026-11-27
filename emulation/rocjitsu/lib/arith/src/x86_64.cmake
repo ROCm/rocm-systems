@@ -100,6 +100,7 @@ set(rj_arith_x86_64_v3_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/minmax_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/mixed_fma_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/packed_fma_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/graphics/x86_64/image_lod_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graphics/x86_64/bvh_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graphics/x86_64/cube_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graphics/x86_64/interp16_x86_64_v3.cpp
