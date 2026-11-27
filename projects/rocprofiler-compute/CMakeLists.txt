@@ -1258,13 +1258,13 @@ option(ENABLE_PERFORMANCE_TESTS "Register manual GPU performance tests" OFF)
 message(STATUS "Enable performance tests: ${ENABLE_PERFORMANCE_TESTS}")
 if(ENABLE_PERFORMANCE_TESTS)
     add_test(
-        NAME test_perf_vcopy_nbody
+        NAME test_perf_transpose_nbody
         COMMAND
-            ${PYTHON_TEST_COMMAND} tests/performance/run_perf_vcopy_nbody.py --iters 5000
-            ${WORKING_DIR_OPTION}
+            ${PYTHON_TEST_COMMAND} tests/performance/run_perf_transpose_nbody.py --iters
+            5000 ${WORKING_DIR_OPTION}
     )
     set_tests_properties(
-        test_perf_vcopy_nbody
+        test_perf_transpose_nbody
         PROPERTIES LABELS "performance;manual" RESOURCE_GROUPS gpus:1 TIMEOUT 28800
     )
 endif()

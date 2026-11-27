@@ -1,22 +1,24 @@
 #!/usr/bin/env python3
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
-"""HipRTC Fibonacci ping-pong of vecCopy and mini-nbody update_bodies.
+"""HipRTC Fibonacci ping-pong of tiled transpose and mini-nbody.
 
-Shared SoA buffers: vecCopy writes dst from src then swaps; update_bodies
-runs in-place on the current src (nbody input = vcopy output; nbody output
-is the next vcopy input). Schedule is 1v,1n,2v,2n,3v,3n,5v,5n,... until
---iters launches.
+Shared device buffers: LDS tiled matrix transpose writes dst from src then
+swaps; update_bodies runs in-place on the current src (nbody input =
+transpose output; nbody output is the next transpose input). Schedule is
+1t,1n,2t,2n,3t,3n,5t,5n,... until --iters launches.
+
+The transpose kernel follows the LDS tiling approach from
+ROCm/rocm-examples tiling_matrix_transpose (tile_dim=16).
 """
 
-from __future__ import annotations
-
 import argparse
+import math
 import random
 import sys
 from ctypes import POINTER, byref, c_float, c_int, c_void_p, cast
 from pathlib import Path
-from typing import Any
+from typing import Any, List, Optional, Tuple
 
 _REPO_SRC = Path(__file__).resolve().parents[2] / "src"
 if str(_REPO_SRC) not in sys.path:
@@ -26,15 +28,27 @@ import utils.hip_interface as hip  # noqa: E402
 import utils.hiprtc_interface as hiprtc  # noqa: E402
 
 _KERNEL_SOURCE = r"""
-extern "C" __global__ void vecCopy(
-    float *a, float *b, float *c, int n, int stride)
+constexpr int kTileDim = 16;
+
+// LDS tiled matrix transpose (coalesced load/store via shared tile).
+extern "C" __global__ void transpose_lds(
+    float *in, float *out, int width, int height)
 {
-    (void)b;
-    (void)stride;
-    int id = blockIdx.x * blockDim.x + threadIdx.x;
-    if (id < n) {
-        c[id] = a[id];
-    }
+    __shared__ float tile[kTileDim][kTileDim];
+
+    int x_tile_index = blockIdx.x * kTileDim;
+    int y_tile_index = blockIdx.y * kTileDim;
+
+    int in_index =
+        (y_tile_index + threadIdx.y) * width + (x_tile_index + threadIdx.x);
+    int out_index =
+        (x_tile_index + threadIdx.y) * height + (y_tile_index + threadIdx.x);
+
+    tile[threadIdx.y][threadIdx.x] = in[in_index];
+
+    __syncthreads();
+
+    out[out_index] = tile[threadIdx.x][threadIdx.y];
 }
 
 constexpr int kBlockSize = 128;
@@ -99,16 +113,17 @@ extern "C" __global__ void update_bodies(
 """
 
 _COORDINATES_PER_BODY = 6
-_VCOPY_BLOCK = 256
+_TILE_DIM = 16
 _NBODY_BLOCK = 128
 _STEP = 0.01
+_DEFAULT_MATRIX_DIM = 8192
 
 
 class HiprtcProgram:
     """Compile HipRTC source and resolve kernels by name."""
 
     def __init__(self, source: str) -> None:
-        self._prog = hiprtc.hiprtcCreateProgram(source, "fib_vcopy_nbody")
+        self._prog = hiprtc.hiprtcCreateProgram(source, "fib_transpose_nbody")
         try:
             hiprtc.hiprtcCompileProgram(self._prog)
         except hiprtc.HIPRTCError:
@@ -122,22 +137,29 @@ class HiprtcProgram:
         return hip.hipModuleGetFunction(self._module, name)
 
 
-def build_fibonacci_launch_kinds(total_launches: int) -> list[str]:
-    """Return kinds for 1v,1n,2v,2n,3v,3n,5v,... truncated to total_launches."""
-    kinds: list[str] = []
+def build_fibonacci_launch_kinds(total_launches: int) -> List[str]:
+    """Return kinds for 1t,1n,2t,2n,3t,3n,5t,... truncated to total_launches."""
+    kinds = []  # type: List[str]
     fib = 1
     next_fib = 2
     while len(kinds) < total_launches:
         for _ in range(fib):
             if len(kinds) >= total_launches:
                 break
-            kinds.append("vcopy")
+            kinds.append("transpose")
         for _ in range(fib):
             if len(kinds) >= total_launches:
                 break
             kinds.append("nbody")
         fib, next_fib = next_fib, fib + next_fib
     return kinds
+
+
+def matrix_side_for_bodies(body_count: int, tile_dim: int) -> int:
+    """Smallest tile-aligned square side that holds body SoA floats."""
+    min_elements = body_count * _COORDINATES_PER_BODY
+    side = int(math.ceil(math.sqrt(float(min_elements))))
+    return ((side + tile_dim - 1) // tile_dim) * tile_dim
 
 
 def _device_byte_offset(memory: hip.HIPDeviceMemory, float_offset: int) -> c_void_p:
@@ -147,7 +169,7 @@ def _device_byte_offset(memory: hip.HIPDeviceMemory, float_offset: int) -> c_voi
     return c_void_p(base + float_offset * 4)
 
 
-def _soa_pointers(memory: hip.HIPDeviceMemory, body_count: int) -> list[c_void_p]:
+def _soa_pointers(memory: hip.HIPDeviceMemory, body_count: int) -> List[c_void_p]:
     return [
         _device_byte_offset(memory, body_count * index)
         for index in range(_COORDINATES_PER_BODY)
@@ -156,11 +178,11 @@ def _soa_pointers(memory: hip.HIPDeviceMemory, body_count: int) -> list[c_void_p
 
 def _launch_kernel(
     func: Any,
-    grid: tuple[int, int, int],
-    block: tuple[int, int, int],
-    args: list[Any],
+    grid: Tuple[int, int, int],
+    block: Tuple[int, int, int],
+    args: List[Any],
 ) -> None:
-    converted: list[Any] = []
+    converted = []  # type: List[Any]
     for arg in args:
         if isinstance(arg, int):
             converted.append(c_int(arg))
@@ -186,9 +208,9 @@ def _launch_kernel(
     )
 
 
-def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+def _parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="HipRTC Fibonacci vcopy + nbody ping-pong workload"
+        description=("HipRTC Fibonacci tiled transpose + nbody ping-pong workload")
     )
     parser.add_argument(
         "--iters",
@@ -203,6 +225,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="N-body particle count / SoA length (default: 81920)",
     )
     parser.add_argument(
+        "--matrix-dim",
+        type=int,
+        default=_DEFAULT_MATRIX_DIM,
+        help=(
+            "Square matrix side for tiled transpose "
+            "(default: 8192; must be a multiple of 16)"
+        ),
+    )
+    parser.add_argument(
         "--device",
         type=int,
         default=0,
@@ -211,7 +242,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: Optional[List[str]] = None) -> int:
     args = _parse_args(argv)
     if args.iters < 1:
         print("--iters must be >= 1", file=sys.stderr)
@@ -219,17 +250,33 @@ def main(argv: list[str] | None = None) -> int:
     if args.bodies < 1:
         print("--bodies must be >= 1", file=sys.stderr)
         return 1
+    if args.matrix_dim < _TILE_DIM or args.matrix_dim % _TILE_DIM != 0:
+        print(
+            f"--matrix-dim must be a positive multiple of {_TILE_DIM}",
+            file=sys.stderr,
+        )
+        return 1
+
+    soa_floats = args.bodies * _COORDINATES_PER_BODY
+    matrix_elements = args.matrix_dim * args.matrix_dim
+    if matrix_elements < soa_floats:
+        min_side = matrix_side_for_bodies(args.bodies, _TILE_DIM)
+        print(
+            f"--matrix-dim={args.matrix_dim} is too small for "
+            f"--bodies={args.bodies} (need side >= {min_side})",
+            file=sys.stderr,
+        )
+        return 1
 
     hip.hipSetDevice(args.device)
     program = HiprtcProgram(_KERNEL_SOURCE)
-    vec_copy = program.get_kernel("vecCopy")
+    transpose = program.get_kernel("transpose_lds")
     update_bodies = program.get_kernel("update_bodies")
 
-    element_count = args.bodies * _COORDINATES_PER_BODY
-    byte_count = element_count * 4
-    host_state = (c_float * element_count)()
+    byte_count = matrix_elements * 4
+    host_state = (c_float * matrix_elements)()
     rng = random.Random(0)
-    for index in range(element_count):
+    for index in range(matrix_elements):
         host_state[index] = 2.0 * rng.random() - 1.0
 
     buffer_a = hip.hipMalloc(byte_count)
@@ -240,11 +287,9 @@ def main(argv: list[str] | None = None) -> int:
     src = buffer_a
     dst = buffer_b
     kinds = build_fibonacci_launch_kinds(args.iters)
-    vcopy_grid = (
-        (element_count + _VCOPY_BLOCK - 1) // _VCOPY_BLOCK,
-        1,
-        1,
-    )
+    blocks_per_side = args.matrix_dim // _TILE_DIM
+    transpose_grid = (blocks_per_side, blocks_per_side, 1)
+    transpose_block = (_TILE_DIM, _TILE_DIM, 1)
     nbody_grid = (
         (args.bodies + _NBODY_BLOCK - 1) // _NBODY_BLOCK,
         1,
@@ -252,12 +297,12 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     for kind in kinds:
-        if kind == "vcopy":
+        if kind == "transpose":
             _launch_kernel(
-                vec_copy,
-                vcopy_grid,
-                (_VCOPY_BLOCK, 1, 1),
-                [src, src, dst, element_count, 1],
+                transpose,
+                transpose_grid,
+                transpose_block,
+                [src, dst, args.matrix_dim, args.matrix_dim],
             )
             src, dst = dst, src
         else:
@@ -280,8 +325,9 @@ def main(argv: list[str] | None = None) -> int:
 
     hip.hipDeviceSynchronize()
     print(
-        f"fib_vcopy_nbody: launches={len(kinds)} bodies={args.bodies} "
-        f"vcopy={kinds.count('vcopy')} nbody={kinds.count('nbody')}"
+        f"fib_transpose_nbody: launches={len(kinds)} "
+        f"matrix={args.matrix_dim}x{args.matrix_dim} bodies={args.bodies} "
+        f"transpose={kinds.count('transpose')} nbody={kinds.count('nbody')}"
     )
     return 0
 

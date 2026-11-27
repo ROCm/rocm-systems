@@ -7,8 +7,6 @@ Pass --rocprof-compute once (or omit for this tree) to print timings. Pass it
 two or more times to print a comparison table with deltas vs the first path.
 """
 
-from __future__ import annotations
-
 import argparse
 import os
 import re
@@ -18,11 +16,12 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Dict, List, Optional, Tuple
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_APP_PATH = Path(__file__).resolve().parent / "fib_vcopy_nbody_app.py"
+_APP_PATH = Path(__file__).resolve().parent / "fib_transpose_nbody_app.py"
 _DEFAULT_ROCPROF = _REPO_ROOT / "src" / "rocprof-compute"
-_WORKLOAD_NAME = "fib_vcopy_nbody"
+_WORKLOAD_NAME = "fib_transpose_nbody"
 _REPO_SRC = _REPO_ROOT / "src"
 if str(_REPO_SRC) not in sys.path:
     sys.path.insert(0, str(_REPO_SRC))
@@ -43,7 +42,7 @@ class PhaseTiming:
     workload_dir: Path
 
 
-def resolve_rocprof_compute_command(path: Path) -> list[str]:
+def resolve_rocprof_compute_command(path: Path) -> List[str]:
     """Map a file or project root to an argv prefix for rocprof-compute."""
     resolved = path.expanduser().resolve()
     if resolved.is_dir():
@@ -96,7 +95,7 @@ def detect_gpu_arch() -> str:
     raise RuntimeError("could not detect GPU arch from rocminfo")
 
 
-def non_roofline_block_ids(arch: str) -> list[str]:
+def non_roofline_block_ids(arch: str) -> List[str]:
     """Top-level block ids for arch, excluding roof / PC sampling / membw."""
     panels = get_arch_panel_id_to_alias(arch)
     if not panels:
@@ -111,11 +110,10 @@ def non_roofline_block_ids(arch: str) -> list[str]:
 
 
 def run_timed(
-    command: list[str],
-    *,
-    env: dict[str, str],
+    command: List[str],
+    env: Dict[str, str],
     cwd: Path,
-) -> tuple[float, int]:
+) -> Tuple[float, int]:
     start = time.perf_counter()
     completed = subprocess.run(command, env=env, cwd=str(cwd), check=False)
     elapsed = time.perf_counter() - start
@@ -124,10 +122,10 @@ def run_timed(
 
 def run_instance(
     rocprof_path: Path,
-    *,
     work_parent: Path,
     iters: int,
     bodies: int,
+    matrix_dim: int,
     device: int,
     experimental: bool,
     no_native_tool: bool,
@@ -164,6 +162,8 @@ def run_instance(
         str(iters),
         "--bodies",
         str(bodies),
+        "--matrix-dim",
+        str(matrix_dim),
         "--device",
         str(device),
     ]
@@ -205,15 +205,15 @@ def print_single(timing: PhaseTiming) -> None:
     print(f"  total_s:   {timing.total_s:.3f}")
 
 
-def print_comparison(timings: list[PhaseTiming]) -> None:
+def print_comparison(timings: List[PhaseTiming]) -> None:
     baseline = timings[0]
     headers = ["metric", baseline.label]
     for timing in timings[1:]:
         headers.append(timing.label)
-        headers.append(f"Δ vs {baseline.label}")
+        headers.append(f"d vs {baseline.label}")
         headers.append(f"% vs {baseline.label}")
 
-    rows: list[list[str]] = []
+    rows = []  # type: List[List[str]]
     for metric_name, attr in (
         ("profile_s", "profile_s"),
         ("analyze_s", "analyze_s"),
@@ -235,19 +235,20 @@ def print_comparison(timings: list[PhaseTiming]) -> None:
         for index in range(len(headers))
     ]
 
-    def fmt(cells: list[str]) -> str:
-        return " | ".join(cell.ljust(widths[index]) for index, cell in enumerate(cells))
-
-    print(fmt(headers))
+    print(_format_table_row(headers, widths))
     print("-+-".join("-" * width for width in widths))
     for row in rows:
-        print(fmt(row))
+        print(_format_table_row(row, widths))
 
 
-def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+def _format_table_row(cells: List[str], widths: List[int]) -> str:
+    return " | ".join(cell.ljust(widths[index]) for index, cell in enumerate(cells))
+
+
+def _parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Performance harness: HipRTC Fibonacci vcopy+nbody "
+            "Performance harness: HipRTC Fibonacci tiled transpose+nbody "
             "profile (all blocks except roofline) + analyze"
         )
     )
@@ -263,6 +264,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--iters", type=int, default=5000)
     parser.add_argument("--bodies", type=int, default=81920)
+    parser.add_argument(
+        "--matrix-dim",
+        type=int,
+        default=8192,
+        help="Square matrix side for tiled transpose (default: 8192)",
+    )
     parser.add_argument(
         "--device",
         type=int,
@@ -294,7 +301,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: Optional[List[str]] = None) -> int:
     args = _parse_args(argv)
     paths = args.rocprof_compute or [_DEFAULT_ROCPROF]
     work_parent = args.work_dir
@@ -304,7 +311,7 @@ def main(argv: list[str] | None = None) -> int:
         created_tmp = True
     work_parent.mkdir(parents=True, exist_ok=True)
 
-    timings: list[PhaseTiming] = []
+    timings = []  # type: List[PhaseTiming]
     try:
         for path in paths:
             print(f"=== running {path} ===", flush=True)
@@ -314,6 +321,7 @@ def main(argv: list[str] | None = None) -> int:
                     work_parent=work_parent,
                     iters=args.iters,
                     bodies=args.bodies,
+                    matrix_dim=args.matrix_dim,
                     device=args.device,
                     experimental=args.experimental,
                     no_native_tool=args.no_native_tool,
