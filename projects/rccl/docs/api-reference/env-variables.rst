@@ -534,8 +534,8 @@ collected in the following table.
       - | ``-1``: Auto (default). On gfx1250 when every rank is in one MNNVL
           clique and the communicator set up DDA fabric (communicators made
           by ``ncclCommSplit`` do not), used for ``ncclFloat32`` ``ncclSum``
-          on buffers outside registered windows, with eight ranks per host and
-          these message sizes: above 1 MiB to 2 MiB, 8 to 16 MiB and 64 to
+          on buffers outside registered windows, with eight ranks per host on
+          the DPX tuning table and these message sizes: above 1 MiB to 2 MiB, 8 to 16 MiB and 64 to
           128 MiB on two hosts, 2 to 256 MiB on four hosts, and 2 to 512 MiB on
           eight hosts. Not used with other host counts.
         | ``0``: Disabled.

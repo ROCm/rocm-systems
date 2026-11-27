@@ -9,6 +9,7 @@
 #include "comm.h"
 #include "hier_host.h"
 #include "nccl.h"
+#include "rccl_arch_thresholds.h"
 
 #include "gtest/gtest.h"
 
@@ -46,6 +47,8 @@ struct HostHierMockComm
         comm.clique.size = mnnvl ? comm.nRanks : 0;
         // A parent comm on that fabric sets up DDA; eligibility only checks that it did.
         comm.ddaFabricMemHandler = mnnvl ? reinterpret_cast<ncclFabricMemHandler*>(&fakeDdaHandler) : nullptr;
+        // The table every rank reads when all of them run in DPX, where the windows were measured.
+        comm.archThresholds = rcclGetArchThresholds(archBuf, RCCL_TUNING_PARTITION_DPX);
         comm.rank     = rank;
         setHosts(hostOf);
         comm.hostHierState = rcclHostHierUnprobed;
@@ -290,6 +293,14 @@ TEST(HostHierAllReduce, EligibilityPerMode_Isolated)
                 mock.comm.ddaFabricMemHandler = nullptr;
                 EXPECT_FALSE(rcclHostHierAllReduceEligible(mock.get(), floats(2 * kMiB), ncclFloat32, ncclSum, false))
                     << "no DDA fabric, as on a comm made by ncclCommSplit";
+            }
+            {
+                // A rank whose GPU reports CPX or no mode, or RCCL_TUNING_PARTITION_MODE=SPX, gives every rank the
+                // SPX table.
+                HostHierMockComm mock(blockHosts(2, 8), 0);
+                mock.comm.archThresholds = rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
+                EXPECT_FALSE(rcclHostHierAllReduceEligible(mock.get(), floats(2 * kMiB), ncclFloat32, ncclSum, false))
+                    << "eight ranks per host with the SPX table";
             }
         })
         .withTimeout(std::chrono::seconds(30))

@@ -13,6 +13,7 @@
 #include "comm.h"
 #include "debug.h"
 #include "param.h"
+#include "rccl_arch_thresholds.h"
 #include "recorder.h"
 
 #include <algorithm>
@@ -84,6 +85,13 @@ bool opSplitsAcrossStages(ncclRedOp_t op, ncclDataType_t datatype) {
   default:
     return false;
   }
+}
+
+// The windows were measured against the default path of the DPX tuning table, which every rank of a comm reads only
+// when all of them ask for it (rcclSetTuningPartition).
+bool dpxTuningTable(const struct ncclComm* comm) {
+  return comm->archName != nullptr && comm->archThresholds != nullptr &&
+         comm->archThresholds == rcclGetArchThresholds(comm->archName, RCCL_TUNING_PARTITION_DPX);
 }
 
 } // namespace
@@ -257,7 +265,8 @@ bool rcclHostHierAllReduceEligible(struct ncclComm* comm, size_t count, ncclData
   const struct rcclHostLayout* layout = rcclHostHierGetLayout(comm);
   if (layout == nullptr || count % layout->ranksPerHost != 0) return false;
   if (forced) return true;
-  return layout->ranksPerHost == 8 && rcclHostHierAllReduceAutoWindow(layout->nHosts, count * ncclTypeSize(datatype));
+  return layout->ranksPerHost == 8 && dpxTuningTable(comm) &&
+         rcclHostHierAllReduceAutoWindow(layout->nHosts, count * ncclTypeSize(datatype));
 }
 
 ncclResult_t rcclHostHierAllReduce(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
