@@ -416,6 +416,14 @@ TEST(HostHierAllReduce, EligibilityPerMode_Isolated)
                 EXPECT_FALSE(rcclHostHierAllReduceEligible(mock.get(), floats(2 * kMiB), ncclFloat32, ncclSum, false))
                     << "no DDA fabric, as on a comm made by ncclCommSplit";
             }
+            {
+                // A rank whose GPU reports CPX or no mode, or RCCL_TUNING_PARTITION_MODE=SPX, gives every rank the
+                // SPX table.
+                HostHierMockComm mock(blockHosts(2, 8), 0);
+                mock.comm.archThresholds = rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
+                EXPECT_FALSE(rcclHostHierAllReduceEligible(mock.get(), floats(2 * kMiB), ncclFloat32, ncclSum, false))
+                    << "eight ranks per host with the SPX table";
+            }
         })
         .withTimeout(std::chrono::seconds(30))
         .withNumGpus(0);

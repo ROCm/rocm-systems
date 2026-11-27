@@ -124,6 +124,13 @@ bool spxComm(const struct ncclComm* comm) {
   return true;
 }
 
+// The windows were measured against the default path of the DPX tuning table, which every rank of a comm reads only
+// when all of them ask for it (rcclSetTuningPartition).
+bool dpxTuningTable(const struct ncclComm* comm) {
+  return comm->archName != nullptr && comm->archThresholds != nullptr &&
+         comm->archThresholds == rcclGetArchThresholds(comm->archName, RCCL_TUNING_PARTITION_DPX);
+}
+
 } // namespace
 
 bool rcclHostLayoutGet(const struct ncclComm* comm, struct rcclHostLayout* layout) {
@@ -358,6 +365,8 @@ bool rcclHostHierAllReduceEligible(struct ncclComm* comm, size_t count, ncclData
   if (!rcclHostHierAllReduceAutoWindow(layout->nHosts, layout->ranksPerHost, bytes)) return false;
   // The 4-ranks-per-host window was measured in SPX; a DPX comm with half of each host's ranks keeps the default path.
   if (layout->ranksPerHost == 4 && !spxComm(comm)) return false;
+  // The 8-ranks-per-host windows, types and fused kernel were measured in DPX.
+  if (layout->ranksPerHost == 8 && !dpxTuningTable(comm)) return false;
   return !needsFusedKernel(*layout, datatype, bytes) || fusedKernelRuns(comm, *layout, count, datatype, op);
 }
 

@@ -5349,6 +5349,10 @@ ncclResult_t ncclCommShrink_impl(ncclComm_t comm, int* excludeRanksList, int exc
   if (shrinkFlags & NCCL_SHRINK_ABORT) {
     // [RCCL] Disable DDA on the parent comm; see ncclComm::ddaDisabledAfterAbort.
     comm->ddaDisabledAfterAbort = true;
+    // The abort below also reaches the host-hierarchical child comms, which pick their own algorithms.
+    ncclComm_t hierChildren[2];
+    const int nHierChildren = rcclHostHierChildren(comm, hierChildren);
+    for (int i = 0; i < nHierChildren; i++) hierChildren[i]->ddaDisabledAfterAbort = true;
     NCCLCHECKGOTO(setCommAbortFlags(comm, 1), res, exit);
     NCCLCHECKGOTO(ncclStrongStreamSynchronize(&comm->sharedRes->deviceStream), res, exit);
     if (__atomic_load_n(&comm->revokedFlag, __ATOMIC_ACQUIRE) && comm->localPersistentRefs != 0) {
