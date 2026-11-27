@@ -92,6 +92,17 @@ function(rj_configure_target target)
                     ${target}
                     PRIVATE -Wno-error=maybe-uninitialized
                 )
+                # ppc64le only: GCC 15's array-bounds analysis trips a
+                # false positive in libstdc++ std::uninitialized_* inlining
+                # of rocjitsu's SIMD/vector code (util::native<T>), which
+                # x86_64 does not hit. Demote from error on ppc64 targets
+                # only; the warning stays visible.
+                if(CMAKE_SYSTEM_PROCESSOR MATCHES "ppc64")
+                    target_compile_options(
+                        ${target}
+                        PRIVATE -Wno-error=array-bounds
+                    )
+                endif()
             endif()
         endif()
     endif()
