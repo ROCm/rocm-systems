@@ -10,12 +10,18 @@
 #include "thread-pool.h"
 
 #include <atomic>
+#include <condition_variable>
 #include <cstddef>
+#include <cstdint>
+#include <list>
 #include <memory>
+#include <mutex>
 #include <sys/types.h>
+#include <thread>
 #include <variant>
 
 namespace hipFile {
+class CooperativeCopy;
 class IBuffer;
 class IFile;
 class IStream;
@@ -43,6 +49,14 @@ public:
     // The stream's signal slot, cached in the constructor (before the op is shared) so the pool thread
     // bumps it without touching Stream::signal_slot. Null on default and non-wait-value streams.
     uint64_t *signal_slot{nullptr};
+
+    // Only registered, wait-value-capable streams have a copy workspace. The stream owns it until drain.
+    CooperativeCopy  *copy{};
+    uint64_t          ticket{};
+    std::atomic<bool> cancel_copy{};
+    size_t            copy_size{};
+    hoff_t            copy_file_offset{};
+    size_t            copy_buffer_offset{};
 
     // Set before the dispatch host function is queued and never changed: true when the stream can't be gated
     // on a wait value, so the host function blocks until the IO finishes.
@@ -81,8 +95,17 @@ public:
     void submitIo(std::shared_ptr<AsyncOp> op) override;
 
 private:
-    std::unique_ptr<IThreadPool> pool;       // Dedicated async pool; never the batch Context<IThreadPool>.
-    std::unique_ptr<ITaskGroup>  task_group; // From pool; waited and destroyed before pool joins.
+    void runDirect(const std::shared_ptr<AsyncOp> &op);
+    void progressCopies();
+
+    // Guards pending and stopping. Only resident kernels are handed to a worker.
+    std::mutex                          mutex;
+    std::condition_variable             changed;
+    std::list<std::shared_ptr<AsyncOp>> pending;
+    bool                                stopping{};
+    std::unique_ptr<IThreadPool>        pool; // Dedicated async pool; never the batch Context<IThreadPool>.
+    std::unique_ptr<ITaskGroup>         task_group; // From pool; waited and destroyed before pool joins.
+    std::thread                         progress;
 };
 
 HIPFILE_CONTEXT_DEFAULT_IMPL(IAsyncMonitor, AsyncMonitor);

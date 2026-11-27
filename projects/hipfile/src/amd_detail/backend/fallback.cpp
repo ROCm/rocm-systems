@@ -15,20 +15,17 @@
 #include "io.h"
 #include "stats.h"
 #include "sys.h"
-#include "stream.h"
-#include "util.h"
 
 #include <algorithm>
 #include <cerrno>
 #include <cstdint>
-#include <hip/hip_runtime_api.h>
 #include <hip/driver_types.h>
+#include <hip/hip_runtime_api.h>
 #include <memory>
 #include <stdexcept>
 #include <sys/mman.h>
 #include <syslog.h>
 #include <system_error>
-#include <variant>
 #include <utility>
 
 using namespace hipFile;
@@ -101,6 +98,16 @@ Fallback::score(const std::shared_ptr<IFile> &file, const std::shared_ptr<IBuffe
     (void)size;
 
     return Context<Configuration>::get()->fallback() && buffer->getType() == hipMemoryTypeDevice ? 0 : -1;
+}
+
+std::optional<ssize_t>
+Fallback::tryDirectIo(IoType, const std::shared_ptr<IFile> &, const std::shared_ptr<IBuffer> &, size_t,
+                      hoff_t, hoff_t)
+{
+    if (!Context<Configuration>::get()->fallback()) {
+        throw BackendDisabled();
+    }
+    return std::nullopt;
 }
 
 ssize_t

@@ -31,9 +31,14 @@ stream to get the faster wait-value-gated path.
 How a transfer runs depends on the stream and the device:
 
 Registered streams on devices that support stream wait values
-   hipFile hands the transfer to an internal thread pool and makes the stream
-   wait for it to finish, so later work on the stream still runs after the
-   transfer. Transfers on different streams can run at the same time, and
+   The first asynchronous I/O on each such stream allocates two 16 MiB pinned
+   host buffers. hipFile reuses them until the stream is deregistered.
+   A thread pool worker attempts direct I/O when the request is eligible. If
+   the request needs fallback I/O, a kernel on the caller's stream copies
+   between device memory and those buffers. A worker can read or
+   write one buffer while the kernel copies the other. Later work on the
+   stream waits for both the file I/O and the copies to finish.
+   Transfers on different streams can run at the same time, and
    queuing a request never waits for the stream, so you can hold a stream with
    your own wait value, queue requests, and release it afterward. Do not
    deregister a registered stream on the same device that has processed I/O

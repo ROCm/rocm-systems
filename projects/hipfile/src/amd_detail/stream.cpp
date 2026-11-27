@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 #include "context.h"
+#include "cooperative-copy.h"
 #include "device-guard.h"
 #include "hip.h"
 #include "hipfile.h"
@@ -77,6 +78,18 @@ Stream::Stream(const hipStream_t _hip_stream, uint32_t flags, bool blocking_only
 #endif
 
     // The signal slot is allocated lazily by ensureSignalSlot() on first gated use, not here.
+}
+
+Stream::~Stream() = default;
+
+CooperativeCopy &
+Stream::ensureCooperativeCopy()
+{
+    if (!copy) {
+        DeviceGuard guard{device_id};
+        copy = std::make_unique<CooperativeCopy>(*Context<Hip>::get());
+    }
+    return *copy;
 }
 
 void
@@ -185,6 +198,7 @@ Stream::drainAndRelease()
         }
     }
     signal_slot.reset();
+    copy.reset();
 }
 
 void

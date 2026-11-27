@@ -4,21 +4,14 @@
  */
 
 #include "backend.h"
-#include "buffer.h"
-#include "context.h"
-#include "file.h"
-#include "io.h"
-#include "sys.h"
 
-#include <algorithm>
 #include <cstddef>
 #include <exception>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <sys/types.h>
-#include <syslog.h>
 #include <system_error>
-#include <unistd.h>
 #include <utility>
 
 using namespace hipFile;
@@ -30,9 +23,38 @@ Backend::io(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer> b
     return _io_impl(type, std::move(file), std::move(buffer), size, file_offset, buffer_offset);
 }
 
+std::optional<ssize_t>
+Backend::tryDirectIo(IoType type, const std::shared_ptr<IFile> &file, const std::shared_ptr<IBuffer> &buffer,
+                     size_t size, hoff_t file_offset, hoff_t buffer_offset)
+{
+    return io(type, file, buffer, size, file_offset, buffer_offset);
+}
+
 ssize_t
 BackendWithFallback::io(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer> buffer,
                         size_t size, hoff_t file_offset, hoff_t buffer_offset)
+{
+    if (auto result = tryPrimary(type, file, buffer, size, file_offset, buffer_offset)) {
+        return *result;
+    }
+    return fallback_backend->io(type, std::move(file), std::move(buffer), size, file_offset, buffer_offset);
+}
+
+std::optional<ssize_t>
+BackendWithFallback::tryDirectIo(IoType type, const std::shared_ptr<IFile> &file,
+                                 const std::shared_ptr<IBuffer> &buffer, size_t size, hoff_t file_offset,
+                                 hoff_t buffer_offset)
+{
+    if (auto result = tryPrimary(type, file, buffer, size, file_offset, buffer_offset)) {
+        return result;
+    }
+    return fallback_backend->tryDirectIo(type, file, buffer, size, file_offset, buffer_offset);
+}
+
+std::optional<ssize_t>
+BackendWithFallback::tryPrimary(IoType type, const std::shared_ptr<IFile> &file,
+                                const std::shared_ptr<IBuffer> &buffer, size_t size, hoff_t file_offset,
+                                hoff_t buffer_offset)
 {
     ssize_t nbytes{0};
     try {
@@ -48,13 +70,9 @@ BackendWithFallback::io(IoType type, std::shared_ptr<IFile> file, std::shared_pt
         if (fallback_backend && is_fallback_eligible(e_ptr, nbytes) &&
             fallback_backend->score(file, buffer, size, file_offset, buffer_offset) >= 0) {
             on_fallback();
-            nbytes = fallback_backend->io(type, std::move(file), std::move(buffer), size, file_offset,
-                                          buffer_offset);
+            return std::nullopt;
         }
-        else {
-            throw;
-        }
-        return nbytes;
+        throw;
     }
     return nbytes;
 }

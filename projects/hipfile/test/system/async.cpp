@@ -4,9 +4,13 @@
  */
 
 #ifdef __HIP_PLATFORM_AMD__
+#include "async.h"
 #include "configuration.h"
 #include "context.h"
+#include "cooperative-copy.h"
 #include "hip.h"
+#include "sys.h"
+#include "thread-pool.h"
 #endif
 
 #include "ais-capability.h"
@@ -17,19 +21,22 @@
 #include "test-common.h"
 #include "test-options.h"
 
+#include <algorithm>
 #include <array>
+#include <atomic>
 #include <cerrno>
-#include <cstdint>
 #include <cstddef>
-#include <fcntl.h>
+#include <cstdint>
+#include <cstdlib>
 #include <gtest/gtest.h>
+#include <hip/driver_types.h>
 #include <hip/hip_runtime_api.h>
+#include <stdexcept>
 #include <string>
 #include <sys/types.h>
 #include <system_error>
 #include <tuple>
 #include <vector>
-#include <unistd.h>
 
 #ifdef __HIP_PLATFORM_NVIDIA__
 #include <cuda.h>
@@ -797,6 +804,150 @@ INSTANTIATE_TEST_SUITE_P(HipAsyncUnregistered, HipAsyncUnregisteredStream, ::tes
                          [](const testing::TestParamInfo<HipAsyncUnregisteredStream::ParamType> &param_info) {
                              return param_info.param.name;
                          });
+
+// A single pool worker must be able to service overlapping streams, including when their
+// kernels share a hardware queue. A write immediately following a read consumes its result.
+class HipAsyncCooperative : public HipAsync {
+public:
+    explicit HipAsyncCooperative(size_t region_size = 1_MiB)
+    {
+        file_size   = 2 * region_size;
+        buffer_size = file_size;
+    }
+    void SetUp() override
+    {
+        HipAsync::SetUp();
+        Context<Configuration>::get()->fastpath(false);
+        for (auto &stream : streams) {
+            ASSERT_EQ(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking), hipSuccess);
+            ASSERT_EQ(hipFileStreamRegister(stream, 0), HIPFILE_SUCCESS);
+        }
+        int device{};
+        int wait_supported{};
+        ASSERT_EQ(hipGetDevice(&device), hipSuccess);
+        ASSERT_EQ(hipDeviceGetAttribute(&wait_supported, hipDeviceAttributeCanUseStreamWaitValue, device),
+                  hipSuccess);
+        if (!wait_supported) {
+            GTEST_SKIP() << "Device lacks stream wait values";
+        }
+    }
+    void TearDown() override
+    {
+        for (auto stream : streams) {
+            ASSERT_EQ(hipFileStreamDeregister(stream), HIPFILE_SUCCESS);
+            ASSERT_EQ(hipStreamDestroy(stream), hipSuccess);
+        }
+        Context<Configuration>::get()->fastpath(true);
+        HipAsync::TearDown();
+    }
+    std::array<hipStream_t, 2> streams{};
+};
+
+class HipAsyncCooperativeMultiChunk : public HipAsyncCooperative {
+protected:
+    // A third, partial chunk reuses the first slot in both transfer directions.
+    static constexpr size_t RegionSize = 2 * CopySlot::Capacity + 4_KiB;
+    HipAsyncCooperativeMultiChunk() : HipAsyncCooperative{RegionSize}
+    {
+    }
+};
+
+TEST_F(HipAsyncCooperativeMultiChunk, twoStreamsShareOneWorker)
+{
+    struct KernelOnlyHip : Hip {
+        void hipMemcpyWithStream(void *, const void *, size_t, hipMemcpyKind, hipStream_t) const override
+        {
+            throw std::runtime_error("registered fallback submitted a bounce-stream copy");
+        }
+    } hip;
+    ContextOverride<Hip>           hip_override{&hip};
+    AsyncMonitor                   monitor{std::make_unique<ThreadPool>(1)};
+    ContextOverride<IAsyncMonitor> monitor_override{&monitor};
+    std::array<hoff_t, 2>          source{1, RegionSize + 1};
+    std::array<hoff_t, 2>          destination{2 * RegionSize + 1, 3 * RegionSize + 1};
+    std::array<ssize_t, 2>         reads{};
+    std::array<ssize_t, 2>         writes{};
+    io_size = RegionSize - 7;
+    for (size_t i = 0; i < streams.size(); ++i) {
+        ASSERT_EQ(hipFileReadAsync(fh, dev_ptr, &io_size, &source[i], &source[i], &reads[i], streams[i]),
+                  HIPFILE_SUCCESS);
+        ASSERT_EQ(
+            hipFileWriteAsync(fh, dev_ptr, &io_size, &destination[i], &source[i], &writes[i], streams[i]),
+            HIPFILE_SUCCESS);
+    }
+    for (auto stream : streams) {
+        ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
+    }
+    for (size_t i = 0; i < streams.size(); ++i) {
+        ASSERT_EQ(reads[i], io_size);
+        ASSERT_EQ(writes[i], io_size);
+        HipFileDataOps::assertFileAndMemoryRegionsMatch(dev_ptr, source[i], tf.fd, source[i], io_size);
+        HipFileDataOps::assertFileAndMemoryRegionsMatch(dev_ptr, source[i], tf.fd, destination[i], io_size);
+    }
+}
+
+TEST_F(HipAsyncCooperative, shortIoAndInterruptedSyncPreserveOffsets)
+{
+    struct ShortIo : Sys {
+        mutable std::atomic<bool> interrupt{true};
+        ssize_t                   pread(int fd, void *data, size_t count, off_t offset) const override
+        {
+            return Sys::pread(fd, data, std::min(count, size_t{65521}), offset);
+        }
+        ssize_t pwrite(int fd, void *data, size_t count, off_t offset) const override
+        {
+            return Sys::pwrite(fd, data, std::min(count, size_t{32749}), offset);
+        }
+        void fdatasync(int fd) const override
+        {
+            if (interrupt.exchange(false)) {
+                throw std::system_error(EINTR, std::generic_category());
+            }
+            Sys::fdatasync(fd);
+        }
+    } sys;
+    ContextOverride<Sys> override_sys{&sys};
+    hoff_t               destination = 2_MiB;
+    ssize_t              written{};
+    ASSERT_EQ(
+        hipFileReadAsync(fh, dev_ptr, &io_size, &file_offset, &buffer_offset, &bytes_transferred, streams[0]),
+        HIPFILE_SUCCESS);
+    ASSERT_EQ(hipFileWriteAsync(fh, dev_ptr, &io_size, &destination, &buffer_offset, &written, streams[0]),
+              HIPFILE_SUCCESS);
+    ASSERT_EQ(hipStreamSynchronize(streams[0]), hipSuccess);
+    ASSERT_EQ(bytes_transferred, io_size);
+    ASSERT_EQ(written, io_size);
+    HipFileDataOps::assertFileAndMemoryRegionsMatch(dev_ptr, buffer_offset, tf.fd, file_offset, io_size);
+    HipFileDataOps::assertFileAndMemoryRegionsMatch(dev_ptr, buffer_offset, tf.fd, destination, io_size);
+}
+
+TEST_F(HipAsyncCooperative, fileErrorReleasesStreamForNextRead)
+{
+    struct FailingRead : Sys {
+        ssize_t pread(int fd, void *data, size_t count, off_t offset) const override
+        {
+            if (offset > 0) {
+                throw std::system_error(EIO, std::generic_category());
+            }
+            // Force a second pread even when the request fits in one slot.
+            return Sys::pread(fd, data, std::min(count, 4_KiB), offset);
+        }
+    } sys;
+    {
+        ContextOverride<Sys> override_sys{&sys};
+        ASSERT_EQ(hipFileReadAsync(fh, dev_ptr, &io_size, &file_offset, &buffer_offset, &bytes_transferred,
+                                   streams[0]),
+                  HIPFILE_SUCCESS);
+        ASSERT_EQ(hipStreamSynchronize(streams[0]), hipSuccess);
+        EXPECT_EQ(bytes_transferred, -hipFileInternalError);
+    }
+    ASSERT_EQ(
+        hipFileReadAsync(fh, dev_ptr, &io_size, &file_offset, &buffer_offset, &bytes_transferred, streams[0]),
+        HIPFILE_SUCCESS);
+    ASSERT_EQ(hipStreamSynchronize(streams[0]), hipSuccess);
+    EXPECT_EQ(bytes_transferred, io_size);
+    HipFileDataOps::assertFileAndMemoryRegionsMatch(dev_ptr, buffer_offset, tf.fd, file_offset, io_size);
+}
 
 // The greatest priority is reserved for the fallback path's bounce streams.
 TEST_F(HipAsync, reservedPriorityStreamIsRejected)

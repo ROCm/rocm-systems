@@ -12,6 +12,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <sys/types.h>
 #include <vector>
 
@@ -65,6 +66,10 @@ struct Fallback : public Backend {
     // below here should be made protected.
     ssize_t io(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer> buffer, size_t size,
                hoff_t file_offset, hoff_t buffer_offset, size_t chunk_size);
+
+    std::optional<ssize_t> tryDirectIo(IoType type, const std::shared_ptr<IFile> &file,
+                                       const std::shared_ptr<IBuffer> &buffer, size_t size,
+                                       hoff_t file_offset, hoff_t buffer_offset) override;
 
     void driver_state_teardown() override;
 

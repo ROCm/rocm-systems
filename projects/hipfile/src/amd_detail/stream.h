@@ -15,6 +15,8 @@ template <typename T> class PassKey;
 
 namespace hipFile {
 
+class CooperativeCopy;
+
 /// @brief True for the null stream and hipStreamPerThread, which are never registered
 bool isDefaultStream(hipStream_t hip_stream);
 
@@ -48,6 +50,8 @@ public:
     virtual uint64_t releaseSignalTarget() = 0;
     virtual void     ensureSignalSlot()    = 0; // Allocates the signal slot once, on first gated use.
 
+    virtual CooperativeCopy &ensureCooperativeCopy() = 0; // Caller holds getLock().
+
     virtual void drainAndRelease() = 0; // Takes the lock; must not be called with it held.
 };
 
@@ -61,7 +65,7 @@ class StreamMap;
 
 class Stream : public IStream {
 public:
-    virtual ~Stream() override = default;
+    ~Stream() override;
 
     hipStream_t                  getHipStream() const override;
     hipDevice_t                  getHipDevice() const override;
@@ -80,7 +84,8 @@ public:
     uint64_t releaseSignalTarget() override;
     void     ensureSignalSlot() override;
 
-    void drainAndRelease() override;
+    CooperativeCopy &ensureCooperativeCopy() override;
+    void             drainAndRelease() override;
 
     // blocking_only forces the blocking offload path (no wait-value gating, no signal slot), used for
     // transient streams that are never registered.
@@ -103,8 +108,9 @@ private:
     bool        fixed_io_size{false};
     bool        page_aligned{false};
     bool        retired{false};
-    uint64_t    signal_counter{0}; // Targets reserved; each is bumped into signal_slot exactly once.
-    SignalSlot  signal_slot;       // Device signal memory; freed by drainAndRelease or the dtor.
+    uint64_t    signal_counter{0};         // Targets reserved; each is bumped into signal_slot exactly once.
+    std::unique_ptr<CooperativeCopy> copy; // Reused in stream order, freed after the drain.
+    SignalSlot signal_slot;                // Device signal memory; freed by drainAndRelease or the dtor.
 };
 
 class StreamMap {

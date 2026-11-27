@@ -4,10 +4,14 @@
  */
 
 #include "async.h"
+#include "backend/fallback.h"
+#include "configuration.h"
 #include "context.h"
+#include "cooperative-copy.h"
 #include "hip.h"
-#include "hipfile.h"
+#include "hipfile-literals.h"
 #include "hipfile-warnings.h"
+#include "hipfile.h"
 #include "io.h"
 #include "masyncmonitor.h"
 #include "mbackend.h"
@@ -15,8 +19,10 @@
 #include "mfile.h"
 #include "mhip.h"
 #include "mstream.h"
+#include "msys.h"
 #include "thread-pool.h"
 
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <gmock/gmock.h>
@@ -24,7 +30,8 @@
 #include <hip/hip_runtime_api.h>
 #include <memory>
 #include <stdexcept>
-#include <utility>
+#include <string>
+#include <system_error>
 
 using namespace hipFile;
 using ::testing::_;
@@ -66,6 +73,10 @@ struct InlinePool : IThreadPool {
 struct AsyncTest : public ::testing::Test {
     AsyncTest()
     {
+        ON_CALL(mhip, hipHostMalloc).WillByDefault(Return(storage.get()));
+        ON_CALL(mhip, hipHostGetDevicePointer).WillByDefault(Return(storage.get()));
+        copy = std::make_unique<CooperativeCopy>(mhip);
+        ON_CALL(*stream, ensureCooperativeCopy).WillByDefault(::testing::ReturnRef(*copy));
         configure(nonnull_stream(), true);
         ON_CALL(*buffer, getLength).WillByDefault(Return(4096));
         ON_CALL(*buffer, getType).WillByDefault(Return(hipMemoryTypeDevice));
@@ -115,6 +126,8 @@ struct AsyncTest : public ::testing::Test {
     std::shared_ptr<NiceMock<MBuffer>>  buffer{std::make_shared<NiceMock<MBuffer>>()};
     std::shared_ptr<NiceMock<MFile>>    file{std::make_shared<NiceMock<MFile>>()};
     std::shared_ptr<NiceMock<MBackend>> backend{std::make_shared<NiceMock<MBackend>>()};
+    std::unique_ptr<CopyExchange>       storage{std::make_unique<CopyExchange>()};
+    std::unique_ptr<CooperativeCopy>    copy;
     uint64_t                            slot{0};
     size_t                              size{512};
     hoff_t                              file_offset{0};
@@ -123,6 +136,33 @@ struct AsyncTest : public ::testing::Test {
     std::shared_ptr<AsyncOp>            queued;
 };
 
+}
+
+TEST_F(AsyncTest, SecondReadUsesOtherSlotBeforeGpuAcknowledgesFirst)
+{
+    NiceMock<MSys>   sys;
+    auto            &first  = storage->slots.front();
+    auto            &second = storage->slots.back();
+    constexpr hoff_t start  = 17;
+    EXPECT_CALL(sys, pread(3, first.data.data(), 16_MiB, start)).WillOnce(Return(16_MiB));
+    EXPECT_CALL(sys, pread(3, second.data.data(), 1, start + 16_MiB))
+        .WillOnce([&](int, void *, size_t, off_t) {
+            EXPECT_EQ(first.requested, 1U);
+            EXPECT_EQ(first.count, 16_MiB);
+            EXPECT_EQ(first.offset, 5U);
+            return 1;
+        });
+    EXPECT_EQ(copy->transfer(sys, IoType::Read, 3, 16_MiB + 1, start, 5), 16_MiB + 1);
+    EXPECT_EQ(second.requested, 1U);
+    EXPECT_EQ(second.offset, 16_MiB + 5);
+}
+
+TEST_F(AsyncTest, InvalidReadCountNeverReachesKernel)
+{
+    NiceMock<MSys> sys;
+    EXPECT_CALL(sys, pread).WillOnce(Return(2));
+    EXPECT_THROW((void)copy->transfer(sys, IoType::Read, 3, 1, 0, 0), std::system_error);
+    EXPECT_EQ(storage->slots.front().requested, 0U);
 }
 
 TEST_F(AsyncTest, RunIoRecordsBytes)
@@ -234,6 +274,40 @@ TEST_F(AsyncTest, ArmFailureAfterStartWaitsForIo)
     EXPECT_NO_THROW(enqueue());
     EXPECT_EQ(queued->state.load(), AsyncOpState::Done);
     EXPECT_EQ(bytes, 512);
+}
+
+TEST_F(AsyncTest, KernelLaunchFailureAbandonsPendingIo)
+{
+    captureDispatch();
+    EXPECT_CALL(mhip, hipLaunchKernel).WillOnce(Throw(Hip::RuntimeError(hipErrorInvalidDeviceFunction)));
+    EXPECT_THROW(enqueue(), Hip::RuntimeError);
+    ASSERT_NE(queued, nullptr);
+    EXPECT_EQ(queued->state.load(), AsyncOpState::Abandoned);
+    AsyncMonitor                   monitor{std::make_unique<InlinePool>()};
+    ContextOverride<IAsyncMonitor> co{&monitor};
+    async_dispatch(queued.get());
+    EXPECT_EQ(slot, 1u);
+    EXPECT_EQ(bytes, 0);
+}
+
+TEST_F(AsyncTest, KernelLaunchFailureCancelsDeferredFallback)
+{
+    AsyncMonitor                   monitor{std::make_unique<InlinePool>()};
+    ContextOverride<IAsyncMonitor> co{&monitor};
+    captureDispatch();
+    EXPECT_CALL(mhip, hipLaunchKernel)
+        .WillOnce([this](const void *, dim3, dim3, void **, size_t, hipStream_t) {
+            async_dispatch(queued.get());
+            EXPECT_EQ(slot, 1u);
+            EXPECT_EQ(storage->ticket, 1u);
+            throw Hip::RuntimeError(hipErrorInvalidDeviceFunction);
+        });
+    EXPECT_CALL(mhip, hipMemcpyWithStream).Times(0);
+    Context<Configuration>::get()->fallback(true);
+    enqueueAsync(std::make_shared<Fallback>(), IoType::Read, file, buffer, &size, &file_offset,
+                 &buffer_offset, &bytes, stream);
+    EXPECT_EQ(queued->state.load(), AsyncOpState::Done);
+    EXPECT_EQ(bytes, -hipFileInternalError);
 }
 
 TEST_F(AsyncTest, LaunchFailureReleasesReservation)

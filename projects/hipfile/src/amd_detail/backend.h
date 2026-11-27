@@ -8,6 +8,7 @@
 #include "buffer.h"
 #include "file.h"
 #include "hip.h"
+#include "hipfile.h"
 #include "io.h"
 #include "stream.h"
 #include "sys.h"
@@ -16,6 +17,8 @@
 #include <cstddef>
 #include <exception>
 #include <memory>
+#include <optional>
+#include <stdexcept>
 #include <sys/types.h>
 #include <unistd.h>
 
@@ -92,6 +95,11 @@ struct Backend {
     virtual ssize_t io(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer> buffer, size_t size,
                        hoff_t file_offset, hoff_t buffer_offset);
 
+    /// Execute the stream-ordered direct phase. An empty result requests the cooperative copy kernel.
+    virtual std::optional<ssize_t> tryDirectIo(IoType type, const std::shared_ptr<IFile> &file,
+                                               const std::shared_ptr<IBuffer> &buffer, size_t size,
+                                               hoff_t file_offset, hoff_t buffer_offset);
+
     /// @brief Callback when Driver state refcount reaches zero, allowing the backend to perform any necessary
     /// cleanup.
     virtual void driver_state_teardown()
@@ -123,6 +131,10 @@ struct BackendWithFallback : public Backend {
     ssize_t io(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer> buffer, size_t size,
                hoff_t file_offset, hoff_t buffer_offset) override final;
 
+    std::optional<ssize_t> tryDirectIo(IoType type, const std::shared_ptr<IFile> &file,
+                                       const std::shared_ptr<IBuffer> &buffer, size_t size,
+                                       hoff_t file_offset, hoff_t buffer_offset) override;
+
     /// @brief Register a Backend to retry a failed IO operation.
     ///
     /// @param backend Backend to retry a failed IO operation.
@@ -143,6 +155,9 @@ protected:
     virtual void on_fallback() const = 0;
 
 private:
+    std::optional<ssize_t>   tryPrimary(IoType type, const std::shared_ptr<IFile> &file,
+                                        const std::shared_ptr<IBuffer> &buffer, size_t size, hoff_t file_offset,
+                                        hoff_t buffer_offset);
     std::shared_ptr<Backend> fallback_backend;
 };
 

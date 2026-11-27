@@ -15,6 +15,8 @@ set(HIPFILE_SOURCES
     backend/host.cpp
     batch/batch.cpp
     buffer.cpp
+    cooperative-copy.cpp
+    cooperative-copy-kernel.hip
     configuration.cpp
     context.cpp
     environment.cpp
