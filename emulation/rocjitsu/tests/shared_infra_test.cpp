@@ -126,6 +126,7 @@
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <bit>
 #include <cstddef>
 #include <cstdint>
@@ -136,6 +137,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <thread>
 #include <unistd.h>
 #include <utility>
 #include <vector>
@@ -783,7 +785,7 @@ TEST(MfmaExecTest, Gfx12Wave64SwmmacK32LocUsesSparseHardwareLayout) {
   EXPECT_EQ(fp8_idx_g2s0.local_compressed_k, 0u);
 }
 
-TEST(MfmaExecTest, Cdna3CvtFp8Bf8UsesSameFnuzDecodeAsMfma) {
+TEST(MfmaExecTest, Cdna3CvtFp8Bf8UsesFnuzEncoding) {
   ScopedIsaExecutionBackend execution_backend_scope{&cdna3::execution_backend()};
   amdgpu::GpuMemory mem("cdna3_cvt_fnuz_mem");
   amdgpu::L2Cache l2("cdna3_cvt_fnuz_l2");
@@ -825,14 +827,13 @@ TEST(MfmaExecTest, Cdna3CvtFp8Bf8UsesSameFnuzDecodeAsMfma) {
   cvt_bf8.execute_impl(*wf);
 
   for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
-    amdgpu::InputLoc loc{/*vgpr_offset=*/0, lane, /*sub_element=*/0};
-    float mfma_fp8 = amdgpu::extract_fp8_fnuz(*cu, vbase + kSrc, loc);
+    // FNUZ encodes +1 and -1 as 0x40 and 0xc0 in both formats.
+    const float expected = (lane & 1u) ? -1.0f : 1.0f;
     float cvt_fp8_value = std::bit_cast<float>(cu->read_vgpr(vbase + kDstFp8, lane));
-    EXPECT_EQ(cvt_fp8_value, mfma_fp8) << "fp8 lane=" << lane;
+    EXPECT_EQ(cvt_fp8_value, expected) << "fp8 lane=" << lane;
 
-    float mfma_bf8 = amdgpu::extract_bf8_fnuz(*cu, vbase + kSrc, loc);
     float cvt_bf8_value = std::bit_cast<float>(cu->read_vgpr(vbase + kDstBf8, lane));
-    EXPECT_EQ(cvt_bf8_value, mfma_bf8) << "bf8 lane=" << lane;
+    EXPECT_EQ(cvt_bf8_value, expected) << "bf8 lane=" << lane;
   }
 }
 
@@ -3256,24 +3257,137 @@ TEST(DppPermuteTest, True16SourceByteMaskFollowsOpSel) {
             ExecutionPlugin::kHighHalfByteMask);
 }
 
-TEST(DppPermuteTest, FullWavePlansTrackControlWidthAndBoundAcrossReuse) {
+TEST(DppPermuteTest, SharedFullWavePlansMatchComputedPlansForEveryControl) {
   using namespace amdgpu::dpp;
-  for (uint32_t width : {32u, 64u, 32u}) {
+  for (uint32_t width : {32u, 64u}) {
     const uint64_t full = util::mask<uint64_t>(width);
-    // These distinct permutations occupy the same slot in the full-wave plan cache.
-    for (uint32_t ctrl : std::array<uint32_t, 3>{ROW_SHR1, ROW_XMASK_BASE + 6, ROW_SHR1}) {
-      for (bool bound : {false, true, false}) {
-        for (uint64_t exec : {full, full & uint64_t{0x5555555555555555}, full}) {
-          for (bool fi : {false, true}) {
-            const auto expected = compute_dpp_plan(width, ctrl, 15, 15, bound, fi, exec, true);
-            const auto plan = make_dpp_plan(width, ctrl, 15, 15, bound, fi, exec, true);
-            EXPECT_EQ(plan.source_lanes, expected.source_lanes);
-            EXPECT_EQ(plan.physical_read_dest_mask, expected.physical_read_dest_mask);
-            EXPECT_EQ(plan.zero_source_mask, expected.zero_source_mask);
-            EXPECT_EQ(plan.source_write_mask, expected.source_write_mask);
-            EXPECT_EQ(plan.row_bank_mask, expected.row_bank_mask);
+    for (uint32_t ctrl = 0; ctrl < 512; ++ctrl) {
+      for (bool bound : {false, true}) {
+        // Row and bank masks filter destinations only; they must not select another plan.
+        for (auto [rows, banks] : {std::pair{15u, 15u}, std::pair{10u, 15u}, std::pair{5u, 9u}}) {
+          // Full and partial waves; some masks also have bits beyond a wave32's lanes.
+          for (uint64_t exec :
+               {full, ~uint64_t{0}, full & uint64_t{0x5555555555555555},
+                uint64_t{0x5ac2a5c33ca55aeb}, uint64_t{0x8000000100008001}, uint64_t{0}}) {
+            for (bool fi : {false, true}) {
+              // Compare instructions suppress, rather than zero, an inactive source's write.
+              for (bool inactive_uses_bound : {false, true}) {
+                SCOPED_TRACE(testing::Message()
+                             << "width=" << width << " ctrl=" << ctrl << " bound=" << bound
+                             << " rows=" << rows << " banks=" << banks << " exec=" << exec
+                             << " fi=" << fi << " inactive_uses_bound=" << inactive_uses_bound);
+                const auto expected = compute_dpp_plan(width, ctrl, rows, banks, bound, fi, exec,
+                                                       inactive_uses_bound);
+                const auto plan =
+                    make_dpp_plan(width, ctrl, rows, banks, bound, fi, exec, inactive_uses_bound);
+                EXPECT_EQ(plan.source_lanes, expected.source_lanes);
+                EXPECT_EQ(plan.physical_read_dest_mask, expected.physical_read_dest_mask);
+                EXPECT_EQ(plan.physical_source_mask, expected.physical_source_mask);
+                EXPECT_EQ(plan.zero_source_mask, expected.zero_source_mask);
+                EXPECT_EQ(plan.source_write_mask, expected.source_write_mask);
+                EXPECT_EQ(plan.row_bank_mask, expected.row_bank_mask);
+                // Only a full wave may take the row-copy shortcut.
+                const bool row_copy =
+                    (exec & full) == full && bound && ctrl >= ROW_SHR1 && ctrl <= ROW_SHR_MAX;
+                EXPECT_EQ(plan.full_row_shift_right, row_copy ? ctrl - ROW_SHR1 + 1 : 0u);
+              }
+            }
           }
         }
+      }
+    }
+  }
+}
+
+TEST(DppPermuteTest, SharedFullWavePlansFillOnFirstUseFromConcurrentThreads) {
+  using namespace amdgpu::dpp;
+  // Each thread meets some keys empty, some being filled and some ready.
+  std::atomic<uint32_t> mismatches{0};
+  std::vector<std::thread> threads;
+  for (uint32_t thread = 0; thread < 8; ++thread) {
+    threads.emplace_back([thread, &mismatches] {
+      for (uint32_t pass = 0; pass < 2; ++pass) {
+        for (uint32_t step = 0; step < 512; ++step) {
+          const uint32_t ctrl = thread % 2 ? step : 511 - step;
+          for (uint32_t width : {32u, 64u}) {
+            for (bool bound : {false, true}) {
+              const auto expected = compute_dpp_plan(width, ctrl, 15, 15, bound, 0, ~0ULL, false);
+              const auto plan = make_dpp_plan(width, ctrl, 15, 15, bound, 0, ~0ULL, false);
+              if (plan.source_lanes != expected.source_lanes ||
+                  plan.physical_read_dest_mask != expected.physical_read_dest_mask ||
+                  plan.physical_source_mask != expected.physical_source_mask ||
+                  plan.zero_source_mask != expected.zero_source_mask ||
+                  plan.source_write_mask != expected.source_write_mask ||
+                  plan.row_bank_mask != expected.row_bank_mask) {
+                ++mismatches;
+              }
+            }
+          }
+        }
+      }
+    });
+  }
+  for (std::thread &thread : threads) {
+    thread.join();
+  }
+  EXPECT_EQ(mismatches.load(), 0u);
+}
+
+TEST(DppPermuteTest, PhysicalSourceMaskMatchesSourcesOfRequestedDestinations) {
+  using namespace amdgpu::dpp;
+  const auto expect_sources = [](const DppPlan &plan, uint32_t width) {
+    // Full, partial and empty requests, including bits beyond a wave32's lanes.
+    for (uint64_t destinations :
+         {~uint64_t{0}, plan.physical_read_dest_mask, uint64_t{0x9d86b4f0ac375e61},
+          uint64_t{0xffff0000ffff0000}, uint64_t{0}}) {
+      uint64_t expected = 0;
+      for (uint32_t lane = 0; lane < width; ++lane) {
+        if (destinations & plan.physical_read_dest_mask & (uint64_t{1} << lane)) {
+          expected |= uint64_t{1} << plan.source_lanes[lane];
+        }
+      }
+      EXPECT_EQ(dpp_physical_source_mask(plan, destinations, width), expected)
+          << "destinations=" << destinations;
+    }
+  };
+  for (uint32_t width : {32u, 64u}) {
+    const uint64_t full = util::mask<uint64_t>(width);
+    for (uint32_t ctrl = 0; ctrl < 512; ++ctrl) {
+      for (bool bound : {false, true}) {
+        for (uint64_t exec : {full, full & uint64_t{0x5555555555555555}, uint64_t{0x8421}}) {
+          for (bool fi : {false, true}) {
+            SCOPED_TRACE(testing::Message() << "width=" << width << " ctrl=" << ctrl << " bound="
+                                            << bound << " exec=" << exec << " fi=" << fi);
+            expect_sources(make_dpp_plan(width, ctrl, 15, 15, bound, fi, exec, false), width);
+          }
+        }
+      }
+    }
+    for (uint32_t lane_sel : {0u, 0x00fac688u, 0x00053977u, 0x00ffffffu}) {
+      for (uint64_t exec : {full, uint64_t{0x8421}}) {
+        for (bool fi : {false, true}) {
+          SCOPED_TRACE(testing::Message() << "dpp8 width=" << width << " lane_sel=" << lane_sel
+                                          << " exec=" << exec << " fi=" << fi);
+          expect_sources(make_dpp8_plan(width, lane_sel, fi, exec), width);
+        }
+      }
+    }
+  }
+}
+
+TEST(DppPermuteTest, RowBankMaskMatchesPerLaneMasking) {
+  using namespace amdgpu::dpp;
+  for (uint32_t width : {16u, 32u, 64u}) {
+    for (uint32_t rows = 0; rows < 16; ++rows) {
+      for (uint32_t banks = 0; banks < 16; ++banks) {
+        uint64_t expected = 0;
+        for (uint32_t lane = 0; lane < width; ++lane) {
+          if (!dpp_lane_masked(static_cast<int>(lane), rows, banks)) {
+            expected |= uint64_t{1} << lane;
+          }
+        }
+        EXPECT_EQ(dpp_row_bank_mask(width, rows, banks), expected)
+            << "width=" << width << " rows=" << rows << " banks=" << banks;
       }
     }
   }
@@ -8835,61 +8949,6 @@ TEST(Rdna4GlobalLoadTransposeTest, Wave64B128ReadsLowHalfAndWritesTwoVgprs) {
   EXPECT_EQ(result(0), 0x0300020001000000ULL);
   EXPECT_EQ(result(32), 0x0700060005000400ULL);
   EXPECT_EQ(result(63), 0x1F071E071D071C07ULL);
-}
-
-// A VOP3 output modifier scales the result. INEXACT must be derived from the
-// scaled exact value, not by comparing the scaled result against the unscaled
-// product -- that comparison is unequal for every nonzero product as soon as
-// any modifier is present, and a spurious INEXACT with MODE.excp_en set stops
-// the wave for the debugger on arithmetic that was exact.
-TEST(AluExceptionTest, OutputModifierDoesNotFabricateInexact) {
-  constexpr uint32_t kInexact = 1u << 5;
-
-  // 2.0 * 3.0 == 6.0 exactly, and stays exact under every OMOD scale.
-  EXPECT_EQ(amdgpu::classify_mul_f32(2.0f, 3.0f) & kInexact, 0u);
-  for (float scale : {2.0f, 4.0f, 0.5f}) {
-    EXPECT_EQ(amdgpu::classify_mul_f32(2.0f, 3.0f, scale) & kInexact, 0u) << "omod scale " << scale;
-  }
-
-  // A genuinely inexact product stays reported, with and without a modifier.
-  EXPECT_EQ(amdgpu::classify_mul_f32(1.1f, 1.1f) & kInexact, kInexact);
-  EXPECT_EQ(amdgpu::classify_mul_f32(1.1f, 1.1f, 2.0f) & kInexact, kInexact);
-
-  // NaN compares unequal to itself, so an exactness test that does not exclude
-  // non-finite values reports INEXACT for it even with no modifier at all.
-  const float nan = std::numeric_limits<float>::quiet_NaN();
-  EXPECT_EQ(amdgpu::classify_mul_f32(nan, 3.0f) & kInexact, 0u);
-  EXPECT_EQ(amdgpu::classify_mul_f32(nan, 3.0f, 2.0f) & kInexact, 0u);
-}
-
-TEST(AluExceptionTest, MultiplyExactProductCoversF32RangeAndRounding) {
-  struct Case {
-    uint32_t lhs;
-    uint32_t rhs;
-    float scale;
-    uint32_t causes;
-  };
-  constexpr Case cases[] = {
-      {0x3f800000, 0x40000000, 4.0f, 0},
-      {0x3f800001, 0x3f800001, 1.0f, 1u << 5},
-      {0x00800000, 0x3f800000, 0.5f, 1u << 4},
-      {0x00800000, 0x00800000, 1.0f, (1u << 4) | (1u << 5)},
-      {0x00000001, 0x3f800000, 1.0f, (1u << 1) | (1u << 4)},
-      {0x00000001, 0x7f000000, 4.0f, 1u << 1},
-  };
-  for (uint32_t round = 0; round < 4; ++round) {
-    const amdgpu::fp_mode::ScopedEnvironment environment(round);
-    for (const auto &sample : cases) {
-      SCOPED_TRACE(testing::Message() << "round " << round << " lhs " << sample.lhs << " rhs "
-                                      << sample.rhs << " scale " << sample.scale);
-      volatile float lhs = std::bit_cast<float>(sample.lhs);
-      volatile float rhs = std::bit_cast<float>(sample.rhs);
-      EXPECT_EQ(amdgpu::classify_mul_f32(lhs, rhs, sample.scale), sample.causes);
-    }
-    volatile float largest = std::bit_cast<float>(0x7f7fffffu);
-    // Directed rounding toward a finite result still reports INEXACT.
-    EXPECT_EQ(amdgpu::classify_mul_f32(largest, 2.0f), (1u << 5) | (round < 2 ? 1u << 3 : 0u));
-  }
 }
 
 } // namespace

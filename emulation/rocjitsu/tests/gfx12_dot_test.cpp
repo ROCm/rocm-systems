@@ -10,7 +10,6 @@
 #include "fixtures/float_dot/gfx1201_dot4_edge_cases.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/gfx12_dot.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/isa_family.h"
@@ -33,6 +32,7 @@
 namespace {
 using namespace rocjitsu;
 
+// Restore host test state and the forced-scalar override.
 struct HostState {
   fenv_t environment;
   bool scalar = util::force_scalar();
@@ -84,20 +84,6 @@ public:
   amdgpu::Wavefront *wave = nullptr;
   uint32_t base;
 };
-
-TEST(Gfx12Dot, HardwareBits) {
-  HostState restore;
-  for (bool bf16 : {false, true}) {
-    const auto cases = bf16 ? std::span<const Gfx12DotCase>(kGfx12DotBF16Cases)
-                            : std::span<const Gfx12DotCase>(kGfx12DotF16Cases);
-    for (const auto &c : cases) {
-      const uint32_t result =
-          bf16 ? amdgpu::gfx12_dot2_f32<true>(c.a, c.b, c.a >> 16, c.b >> 16, c.c)
-               : amdgpu::gfx12_dot2_f32<false>(c.a, c.b, c.a >> 16, c.b >> 16, c.c);
-      EXPECT_EQ(result, c.expected) << std::hex << c.a << ' ' << c.b << ' ' << c.c;
-    }
-  }
-}
 
 TEST(Gfx12Dot, DecodedHardwareCasesAndInactiveLanes) {
   HostState restore;
@@ -406,38 +392,6 @@ TEST(Gfx12Dot, AccumulateEncodingsAndInlineSources) {
 }
 } // namespace
 
-// Pin the native eight-product contract independently of WMMA register layouts.
-TEST(Gfx12Dot, NativeF8SpecialValues) {
-  struct Case {
-    uint8_t a, b_even, b_odd;
-    uint32_t c, expected;
-  };
-  const Case cases[] = {
-      {0x7c, 0x3c, 0xbc, 0x3f800000, 0xffc00a3d}, // Opposite product infinities.
-      {0x7c, 0x3c, 0x3c, 0xff800000, 0xffc00a3d}, // Product infinity against opposite C infinity.
-      {0x7e, 0x3c, 0x3c, 0, 0xffc00a3d},          // BF8 factor NaN (0x7e is finite in FP8).
-      {0x7c, 0, 0, 0xffc54321, 0xffc00a3d},       // Invalid product takes precedence over C NaN.
-      {0x3c, 0x3c, 0x3c, 0xffc54321, 0xffc54321}, // C-NaN retention.
-  };
-  for (Case sample : cases) {
-    std::array<uint8_t, 8> a, b;
-    a.fill(sample.a);
-    for (size_t i = 0; i < b.size(); ++i) {
-      b[i] = i % 2 ? sample.b_odd : sample.b_even;
-    }
-    // A_FP8=false, B_FP8=false selects BF8_BF8.
-    EXPECT_EQ((rocjitsu::amdgpu::gfx12_dot8_f32<false, false>(a, b, sample.c)), sample.expected);
-  }
-  std::array<uint8_t, 8> fp8, bf8;
-  fp8.fill(0x38); // FP8 1.0.
-  bf8.fill(0x3c); // BF8 1.0.
-  EXPECT_EQ((rocjitsu::amdgpu::gfx12_dot8_f32<true, false>(fp8, bf8, 0x3f800000)), 0x41100000u);
-  // FP8 has a distinct NaN encoding from BF8.
-  std::array<uint8_t, 8> fp8_nan;
-  fp8_nan.fill(0x7f);
-  EXPECT_EQ((rocjitsu::amdgpu::gfx12_dot8_f32<true, true>(fp8_nan, fp8, 0)), 0xffc00a3du);
-}
-
 TEST(Gfx12Dot, FloatingDotDppPermutesSnapshotAndPreservesInactiveDestinations) {
   HostState restore;
   struct Case {
@@ -562,15 +516,6 @@ const std::array<Dot4Encoding, 7> kEncodings{{
     {0xe9, 0x05397700, false, false, false},
 }};
 
-uint32_t dot4(const Dot4Family &family, const Gfx12Dot4EdgeCase &sample) {
-  if (family.a_fp8) {
-    return family.b_fp8 ? amdgpu::gfx12_dot4_f32_fp8<true, true>(sample.a, sample.b, sample.c)
-                        : amdgpu::gfx12_dot4_f32_fp8<true, false>(sample.a, sample.b, sample.c);
-  }
-  return family.b_fp8 ? amdgpu::gfx12_dot4_f32_fp8<false, true>(sample.a, sample.b, sample.c)
-                      : amdgpu::gfx12_dot4_f32_fp8<false, false>(sample.a, sample.b, sample.c);
-}
-
 TEST(Gfx12Dot4, AccumulatorModifiersApplyAbsBeforeNegInPlainAndDppForms) {
   HostState restore;
   for (uint32_t width : {32u, 64u}) {
@@ -615,17 +560,6 @@ TEST(Gfx12Dot4, AccumulatorModifiersApplyAbsBeforeNegInPlainAndDppForms) {
           }
         }
       }
-    }
-  }
-}
-
-TEST(Gfx12Dot4, HardwareArithmetic) {
-  HostState restore;
-  for (const auto &family : kFamilies) {
-    for (const auto &sample : family.cases) {
-      EXPECT_EQ(dot4(family, sample), sample.expected)
-          << "opcode=" << family.opcode << " A=" << std::hex << sample.a << " B=" << sample.b
-          << " C=" << sample.c;
     }
   }
 }

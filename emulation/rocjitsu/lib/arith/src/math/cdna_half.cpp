@@ -29,18 +29,9 @@ int inherited_half_math(Call call, uint64_t flags, Mask exec_mask, uint64_t mode
     return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
   }
   if constexpr (AllowSdwa) {
-    if (mode & RJ_ARITH_ALU_SDWA) {
-      // SDWA and DPP are distinct encodings; the forwarded RDNA core validates other fields.
-      if (mode >> 32) {
-        return RJ_ARITH_ERROR_INVALID_FLAGS;
-      }
-      const int error = call(flags, exec_mask, mode & ~uint64_t(RJ_ARITH_ALU_SDWA), d, a, state);
-      if (!error && exec_mask) {
-        rocjitsu::arith::finalize_sdwa_half_wave(flags, exec_mask, int(sizeof(Mask) * 8),
-                                                 uint32_t(mode), d[0]);
-      }
-      return error;
-    }
+    return rocjitsu::arith::with_sdwa_half_finalization(
+        flags, exec_mask, mode, d,
+        [&](uint64_t core_mode) { return call(flags, exec_mask, core_mode, d, a, state); });
   }
   return call(flags, exec_mask, mode, d, a, state);
 }

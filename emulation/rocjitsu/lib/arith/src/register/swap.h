@@ -15,7 +15,9 @@ void swap_words_x86_64_v3(uint32_t exec_mask, uint32_t *d, uint32_t *a);
 void swap_half_x86_64_v3(int lanes, uint64_t exec_mask, uint32_t mode, uint32_t *d, uint32_t *a);
 
 // Exchange adjacent rows using AVX2, with independent destination masks.
-void swap_rows_x86_64_v3(int lanes, int stride, uint64_t exec_mask, uint32_t *d, uint32_t *a);
+// Defined for each wave size that holds a row pair.
+template <int Lanes, int Stride>
+void swap_rows_x86_64_v3(uint64_t exec_mask, uint32_t *d, uint32_t *a);
 #endif
 
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
@@ -26,7 +28,9 @@ void swap_words_x86_64_v4(uint32_t exec_mask, uint32_t *d, uint32_t *a);
 void swap_half_x86_64_v4(int lanes, uint64_t exec_mask, uint32_t mode, uint32_t *d, uint32_t *a);
 
 // Exchange adjacent rows using AVX-512, with independent destination masks.
-void swap_rows_x86_64_v4(int lanes, int stride, uint64_t exec_mask, uint32_t *d, uint32_t *a);
+// Defined for each wave size that holds a row pair.
+template <int Lanes, int Stride>
+void swap_rows_x86_64_v4(uint64_t exec_mask, uint32_t *d, uint32_t *a);
 #endif
 
 } // namespace rocjitsu::arith

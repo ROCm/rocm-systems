@@ -718,6 +718,7 @@ global:
     hipGraphExecGetId;
     hipDeviceGetExecAffinitySupport;
     hipArrayGetPlane;
+    hipArrayGetMemoryRequirements;
 local:
     *;
 } hip_7.17;

@@ -463,8 +463,12 @@ constexpr uint64_t RJ_ARITH_MATRIX_FORMAT_B_SHIFT = 3ULL;
 // gfx950 D=A*B+C, Wave64, ignoring EXEC. A/B independently use 8,6,4 VGPRs
 // for 8,6,4-bit formats; each pointer addresses 64 words. C/D use M*M/64 VGPRs.
 // Reserved formats/controls reject before operand access. Aliases are supported.
-// Compatibility retains legacy scalar unfused / SIMD fused accumulation; strict
-// empirical modes are unsupported. FP modes are ignored and FP status is untouched.
+// Compatibility and Loose retain fast approximate accumulation. Empirical exact
+// modes are MI350X-calibrated across all 25 format pairs: RJ_ARITH_FP16_OVFL=0
+// emits canonical 0xffc00000 on NaN and preserves +-Inf, whereas only
+// RJ_ARITH_FP16_OVFL=1 flushes NaN to +0.0 and clamps +-Inf to +-MAX_FLOAT after
+// each 16- or 32-product hardware pass. Other FP modes are ignored and FP status
+// is untouched.
 int rj_arith_v_mfma_f32_16x16x128_f8f6f4_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
                                              const uint32_t *const *a, const uint32_t *const *b,
                                              const uint32_t *const *c);
@@ -480,11 +484,15 @@ constexpr uint64_t RJ_ARITH_MFMA_SCALE_ABS_C = 1ULL << 11;
 
 // gfx950 block-scaled MFMA, with the same format/layout and overlap contract above.
 // scale_a/scale_b each address 64 packed words (one VGPR); byte selectors choose
-// the E8M0 exponent for each lane. Scale lane M*block+row/column applies to one
-// fused 32-product dot, followed by combined-exponent scaling and addition to C.
-// Scale 0xff produces NaN. RJ_ARITH_FP16_OVFL saturates final FP32 overflow for
-// finite inputs. Inline scale sourcing is the caller's responsibility.
-// Loose and Compatibility supported; strict empirical modes remain unsupported.
+// the E8M0 exponent for each lane. Scale lane M*block+row/column scales the
+// corresponding 32-element K block, and scale 0xff produces NaN. Inline scale
+// sourcing is the caller's responsibility. Compatibility and Loose retain fast
+// approximate accumulation (where RJ_ARITH_FP16_OVFL saturates finite-input
+// overflow). Empirical exact modes are MI350X-calibrated across all 25 format
+// pairs and scale byte selectors when C modifiers are zero, following the same
+// RJ_ARITH_FP16_OVFL=0 vs RJ_ARITH_FP16_OVFL=1 per-pass NaN/infinity rule above;
+// non-zero NEG_C/ABS_C controls fall back in allow-Loose and reject in strict
+// exact modes.
 int rj_arith_v_mfma_scale_f32_16x16x128_f8f6f4_w64(uint64_t flags, uint64_t controls,
                                                    uint32_t *const *d, const uint32_t *const *a,
                                                    const uint32_t *const *b,

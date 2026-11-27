@@ -55,9 +55,11 @@ def madengine_legs() -> list[dict]:
 class WorkflowsMatchConfigs(unittest.TestCase):
 
     def test_dispatch_choices_are_the_configs(self):
-        callee = load_workflow("therock-rccl-test-madengine.yml")
-        options = callee[True]["workflow_dispatch"]["inputs"]["workload"]["options"]
-        self.assertEqual(sorted(options), sorted(tm.WORKLOAD_CONFIGS))
+        for name in ("therock-rccl-test-madengine.yml", "therock-rccl-madengine-history.yml"):
+            workload = load_workflow(name)[True]["workflow_dispatch"]["inputs"]["workload"]
+            with self.subTest(workflow=name):
+                self.assertEqual(sorted(workload["options"]), sorted(tm.WORKLOAD_CONFIGS))
+                self.assertIn(workload["default"], workload["options"])
 
     def test_scheduled_workloads_exist(self):
         legs = madengine_legs()

@@ -12,6 +12,30 @@
 
 namespace {
 
+// Keep the scalar stack buffer out of the SIMD dispatch prologue.
+template <int M, int K, int Batch, bool Bf16, rocjitsu::arith::MfmaF32Model Model>
+[[gnu::noinline]] void mfma_half_scalar(uint64_t instruction_flags, uint64_t flags,
+                                        bool clamp_overflow, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        const uint32_t *const *c) {
+  using namespace rocjitsu::arith;
+  // Convert each source once, even when multiple output rows reuse it.
+  float left[M * K * Batch], right[M * K * Batch];
+  for (int i = 0; i < M * K * Batch; ++i) {
+    uint16_t x = static_cast<uint16_t>(a[i / 128][i / 2 % 64] >> (16 * (i % 2)));
+    uint16_t y = static_cast<uint16_t>(b[i / 128][i / 2 % 64] >> (16 * (i % 2)));
+    if constexpr (Model == MfmaF32Model::Gfx90a) {
+      constexpr uint16_t Exponent = Bf16 ? 0x7f80U : 0x7c00U;
+      x = (x & Exponent) ? x : x & 0x8000U;
+      y = (y & Exponent) ? y : y & 0x8000U;
+    }
+    left[i] = Bf16 ? bf16_to_float(x) : f16_to_float(x);
+    right[i] = Bf16 ? bf16_to_float(y) : f16_to_float(y);
+  }
+  mfma_reduce_scalar<M, K, Batch, 2, Bf16, Model>(instruction_flags, d, left, right, c,
+                                                  clamp_overflow, flags);
+}
+
 // Evaluate a full MFMA wave after validating controls; errors do not access
 // operands.
 template <int M, int K, int Batch, bool Bf16, bool Gfx942 = false,
@@ -28,8 +52,21 @@ int mfma(uint64_t flags, uint64_t instruction_flags, uint32_t *const *d, const u
   // both FP16_OVFL=0 and 1. Compatibility retains the fast approximate reduction.
   if constexpr (Gfx942) {
     if (is_exact(flags) && !instruction_flags) {
-      mfma_gfx942_exact(Bf16 ? MfmaGfx942Format::Bf16 : MfmaGfx942Format::F16, M, K, Batch,
-                        (flags & RJ_ARITH_FP16_OVFL) != 0, d, a, b, c);
+      constexpr MfmaGfx942Format format = Bf16 ? MfmaGfx942Format::Bf16 : MfmaGfx942Format::F16;
+      const bool no_inf_nan = (flags & RJ_ARITH_FP16_OVFL) != 0;
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+      if (!no_inf_nan && cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+        mfma_gfx942_exact_x86_64_v4<format, M, K, Batch>(d, a, b, c);
+        return RJ_ARITH_SUCCESS;
+      }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+      if (!no_inf_nan && cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+        mfma_gfx942_exact_x86_64_v3<format, M, K, Batch>(d, a, b, c);
+        return RJ_ARITH_SUCCESS;
+      }
+#endif
+      mfma_gfx942_exact(format, M, K, Batch, no_inf_nan, d, a, b, c);
       return RJ_ARITH_SUCCESS;
     }
   }
@@ -47,6 +84,14 @@ int mfma(uint64_t flags, uint64_t instruction_flags, uint32_t *const *d, const u
   if constexpr (Model == MfmaF32Model::Gfx90a) {
     flags |= RJ_ARITH_FP_FLUSH_INPUT_DENORMALS | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
   }
+#if defined(RJ_ARITH_HAVE_X86_64_V4_BF16)
+  if constexpr (Model == MfmaF32Model::Default && Bf16 && (Batch == 1 || M == 4)) {
+    if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_ZEN4) &&
+        mfma_half_x86_64_v4_bf16<M, K, Batch>(instruction_flags, clamp_overflow, d, a, b, c)) {
+      return RJ_ARITH_SUCCESS;
+    }
+  }
+#endif
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
   if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
     mfma_half_x86_64_v4<M, K, Batch, Bf16, Model>(instruction_flags, flags, d, a, b, c);
@@ -59,21 +104,7 @@ int mfma(uint64_t flags, uint64_t instruction_flags, uint32_t *const *d, const u
     return RJ_ARITH_SUCCESS;
   }
 #endif
-  // Convert each source once, even when multiple output rows reuse it.
-  float left[M * K * Batch], right[M * K * Batch];
-  for (int i = 0; i < M * K * Batch; ++i) {
-    uint16_t x = uint16_t(a[i / 128][i / 2 % 64] >> (16 * (i % 2)));
-    uint16_t y = uint16_t(b[i / 128][i / 2 % 64] >> (16 * (i % 2)));
-    if constexpr (Model == MfmaF32Model::Gfx90a) {
-      constexpr uint16_t Exponent = Bf16 ? 0x7f80U : 0x7c00U;
-      x = (x & Exponent) ? x : x & 0x8000U;
-      y = (y & Exponent) ? y : y & 0x8000U;
-    }
-    left[i] = Bf16 ? bf16_to_float(x) : f16_to_float(x);
-    right[i] = Bf16 ? bf16_to_float(y) : f16_to_float(y);
-  }
-  mfma_reduce_scalar<M, K, Batch, 2, Bf16, Model>(instruction_flags, d, left, right, c,
-                                                  clamp_overflow, flags);
+  mfma_half_scalar<M, K, Batch, Bf16, Model>(instruction_flags, flags, clamp_overflow, d, a, b, c);
   return RJ_ARITH_SUCCESS;
 }
 } // namespace

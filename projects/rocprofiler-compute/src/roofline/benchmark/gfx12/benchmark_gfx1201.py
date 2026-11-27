@@ -52,7 +52,7 @@ class Bench_gfx1201(benchmark_gfx12_base.Bench_gfx12):
             "F16": "wmma_f16",
             "BF16": "wmma_bf16",
         }
-        # Tests that mi_gpu_spec.yaml does not list for gfx1201 are skipped
+        # Tests that mi_gpu_spec.yaml does not list for gpu_arch are skipped
         # and written as 0.
         self.apply_roofline_spec(gpu_arch)
 

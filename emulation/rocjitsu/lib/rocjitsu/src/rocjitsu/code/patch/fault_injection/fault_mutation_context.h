@@ -24,7 +24,7 @@ class InstructionBoundaries;
 class Instrumentor;
 class KernelOwnership;
 
-enum class FaultMutationKind { DropBarrier, LdsWrongAddress };
+enum class FaultMutationKind { DropBarrier, LdsWrongAddress, AtomicWrongAddress };
 enum class FaultMutationErrorCode {
   None,
   BadIdentity,
@@ -73,6 +73,8 @@ class FaultBarrierInventory;
 class DropBarrierSelection;
 class LdsInventory;
 class LdsSelection;
+class AtomicInventory;
+class AtomicSelection;
 
 /// @brief Own an immutable source snapshot and its selection lifetime.
 /// @details Copies the input once. Independently constructed contexts have distinct
@@ -129,6 +131,13 @@ private:
                                                              const LdsSelection &,
                                                              std::optional<uint32_t>,
                                                              FaultMutationError &);
+  friend FailureOr<AtomicInventory> discover_atomic_wrong_address(const FaultMutationContext &,
+                                                                  std::string_view,
+                                                                  FaultMutationError &);
+  friend FailureOr<struct AtomicResult> apply_atomic_wrong_address(const FaultMutationContext &,
+                                                                   const AtomicSelection &,
+                                                                   std::optional<uint32_t>,
+                                                                   FaultMutationError &);
 };
 
 } // namespace rocjitsu

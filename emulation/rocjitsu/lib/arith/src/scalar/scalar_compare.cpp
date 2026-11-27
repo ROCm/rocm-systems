@@ -4,8 +4,8 @@
 // Scalar integer/FP comparisons and bit tests producing SCC.
 // Owns public entry points and their validation/dispatch policy.
 
-// Raw float ordering follows rocjitsu shared/comparison.h and reuses the vector
-// predicate helpers. Integer and bit tests follow generated/execute_shared.h.
+// Scalar float ordering reuses the vector predicate helpers. Integer and bit
+// tests follow the decoded instruction semantics.
 
 #include "common/validation.h"
 #include "compare/float_compare_impl.h"

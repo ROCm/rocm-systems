@@ -22,11 +22,24 @@ int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32
   // Compatibility retains the existing fast approximate implementation.
   if constexpr (Gfx942) {
     if (is_exact(flags)) {
-      constexpr auto format =
+      constexpr MfmaGfx942Format format =
           Bits == 16 ? (BfA ? MfmaGfx942Format::Bf16 : MfmaGfx942Format::F16)
                      : (BfA ? (BfB ? MfmaGfx942Format::Bf8Bf8 : MfmaGfx942Format::Bf8Fp8)
                             : (BfB ? MfmaGfx942Format::Fp8Bf8 : MfmaGfx942Format::Fp8Fp8));
-      smfmac_gfx942_exact(format, M, controls, (flags & RJ_ARITH_FP16_OVFL) != 0, d, a, b, index);
+      const bool no_inf_nan = (flags & RJ_ARITH_FP16_OVFL) != 0;
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+      if (!no_inf_nan && cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+        smfmac_gfx942_exact_x86_64_v4<format, M, K>(controls, d, a, b, index);
+        return RJ_ARITH_SUCCESS;
+      }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+      if (!no_inf_nan && cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+        smfmac_gfx942_exact_x86_64_v3<format, M, K>(controls, d, a, b, index);
+        return RJ_ARITH_SUCCESS;
+      }
+#endif
+      smfmac_gfx942_exact(format, M, controls, no_inf_nan, d, a, b, index);
       return RJ_ARITH_SUCCESS;
     }
   }
