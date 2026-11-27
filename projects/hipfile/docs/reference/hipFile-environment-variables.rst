@@ -44,4 +44,4 @@ The following environment variables affect the hipFile runtime.
      - | Controls how asynchronous I/O runs on streams registered with ``hipFileStreamRegister()``.
        | ``true``: Every asynchronous transfer runs inside a stream host function that waits for it. (default)
        | ``false``: Registered streams on devices that support stream wait values wait on a wait value instead, so transfers on different streams can overlap.
-       | ``false`` can deadlock unless the HIP runtime honors stream priorities. See :doc:`/reference/api-async`.
+       | ``false`` can deadlock unless the HIP runtime honors stream priorities. See :ref:`hipfile-force-blocking-async`.

@@ -23,14 +23,16 @@ of bytes transferred, or a negative value if the transfer failed. Synchronize
 the stream before you read the result, and keep the pointer arguments valid
 until then. If a call returns an error, nothing was queued.
 
-Registering a stream with ``hipFileStreamRegister()`` is optional and only an
-optimization. Asynchronous I/O on an unregistered stream runs the transfer
-without registering it, on the blocking path described below; register the
-stream to get the faster wait-value-gated path.
+Registering a stream with ``hipFileStreamRegister()`` is optional. Asynchronous
+I/O on an unregistered stream runs the transfer without registering it, on the
+blocking path described below. By default a registered stream uses the same
+path; registration selects the faster wait-value-gated path only when
+``HIPFILE_FORCE_BLOCKING_ASYNC`` is ``false`` (see
+:ref:`hipfile-force-blocking-async`).
 
-How a transfer runs depends on the stream and the device:
+How a transfer runs depends on the stream, the device, and that setting:
 
-Registered streams on devices that support stream wait values
+Registered streams on devices that support stream wait values, with ``HIPFILE_FORCE_BLOCKING_ASYNC=false``
    hipFile hands the transfer to an internal thread pool and makes the stream
    wait for it to finish, so later work on the stream still runs after the
    transfer. Transfers on different streams can run at the same time, and
@@ -41,12 +43,13 @@ Registered streams on devices that support stream wait values
    stream's signal memory, which synchronizes the device and hangs until the
    held stream unblocks.
 
-Unregistered streams, and registered streams on devices without stream wait values
-   The transfer runs in stream order inside a stream host function that waits
-   for it to finish. The ROCm runtime runs host functions on a single thread, so
-   these transfers run one at a time and delay host functions queued on other
-   streams. Register a stream on a wait-value-capable device for the faster path
-   above.
+All other streams (the default)
+   This covers every stream while ``HIPFILE_FORCE_BLOCKING_ASYNC`` is ``true``,
+   unregistered streams, and registered streams on devices without stream wait
+   values. The transfer runs in stream order inside a stream host function that
+   waits for it to finish. The ROCm runtime runs host functions on a single
+   thread, so these transfers run one at a time and delay host functions queued
+   on other streams.
 
 The null stream and ``hipStreamPerThread``
    The call runs synchronously: it synchronizes the stream, runs the transfer,
@@ -81,6 +84,45 @@ Asynchronous I/O accepts only device memory. ``hipFileReadAsync()`` and
 ``hipFileWriteAsync()`` return ``hipFileAsyncNotSupported`` for a buffer
 registered from host memory; use the synchronous ``hipFileRead()`` and
 ``hipFileWrite()`` for host buffers.
+
+.. _hipfile-force-blocking-async:
+
+Forced blocking path and stream priorities
+============================================
+
+hipFile runs every asynchronous transfer on the blocking path by default, even
+on a registered stream on a device that supports stream wait values. The
+``HIPFILE_FORCE_BLOCKING_ASYNC`` environment variable controls this, and
+defaults to ``true``.
+
+The default avoids a deadlock. On the wait-value-gated path, the application's
+stream is parked on a stream wait value until its transfer finishes. A transfer
+on the fallback path finishes only after hipFile copies the data through the
+GPU on streams of its own. hipFile creates those streams at the device's
+greatest priority so that they get hardware queues that application streams
+don't use. Since ROCm 10.2, the HIP runtime disables stream priorities and
+gives every stream a normal-priority hardware queue, so a fallback copy can be
+queued behind the parked application stream. The copy then waits for the
+stream, the stream waits for the copy, and neither ever runs.
+
+On the blocking path the stream is not parked on a wait value, so this deadlock
+does not occur. The cost is that transfers run one at a time, as described in
+the previous section.
+
+You can set ``HIPFILE_FORCE_BLOCKING_ASYNC=false`` to restore the
+wait-value-gated path, but only if you also restore stream priorities in the
+HIP runtime by setting its ``DEBUG_HIP_IGNORE_STREAM_PRIORITY`` environment
+variable to ``0``. Set both before the process makes its first HIP or hipFile
+call.
+
+.. warning::
+
+   Do this at your own risk. The HIP runtime disables stream priorities to
+   avoid known hardware queue priority problems in the GPU kernel driver, and
+   ``DEBUG_HIP_IGNORE_STREAM_PRIORITY`` is a HIP debugging setting, not a
+   supported interface. Setting ``HIPFILE_FORCE_BLOCKING_ASYNC=false`` without
+   restoring stream priorities can deadlock asynchronous I/O that uses the
+   fallback path.
 
 Stream registration flags
 ===========================

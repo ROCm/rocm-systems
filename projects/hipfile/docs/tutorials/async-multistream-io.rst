@@ -19,6 +19,12 @@ Use multi-stream registered asynchronous I/O when you need to:
   GPU.
 - Pipeline storage I/O with GPU compute on separate streams.
 
+.. note::
+
+   By default, hipFile runs asynchronous transfers one at a time, so the slices
+   in this example don't overlap unless ``HIPFILE_FORCE_BLOCKING_ASYNC`` is
+   ``false``. See :ref:`hipfile-force-blocking-async` before you change it.
+
 Prerequisites
 ===============
 
