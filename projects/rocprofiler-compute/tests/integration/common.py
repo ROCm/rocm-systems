@@ -26,6 +26,7 @@ import yaml
 from common import SUPPORTED_ARCHS
 from sqlalchemy.dialects import sqlite
 
+from config import rocprof_compute_home
 from utils.analysis_orm import Database
 from utils.utils_common import canonical_config_arch
 
@@ -359,7 +360,7 @@ def get_available_sets_for_arch(gpu_arch):
         return []
     config_arch = canonical_config_arch(gpu_arch) or gpu_arch
     sets_file = (
-        Path(common.SRC)
+        rocprof_compute_home
         / "rocprof_compute_soc"
         / "profile_configs"
         / "sets"

@@ -8,12 +8,15 @@ from pathlib import Path
 
 import pytest
 import yaml
-from common import ROOT, SRC
+from common import ROOT
 
+import config
 import utils.utils_common as utils_common
 from utils.mi_gpu_spec import mi_gpu_specs
 
-ANALYSIS_CONFIGS = Path(SRC) / "rocprof_compute_soc" / "analysis_configs"
+ANALYSIS_CONFIGS = (
+    config.rocprof_compute_home / "rocprof_compute_soc" / "analysis_configs"
+)
 # Profiled with filter_blocks cu_ins and cu_pipe (blocks 10 and 11) on gfx90a
 FILTERED_WORKLOAD = Path(ROOT) / "tests" / "workloads" / "ipblocks_SQ" / "MI200"
 
