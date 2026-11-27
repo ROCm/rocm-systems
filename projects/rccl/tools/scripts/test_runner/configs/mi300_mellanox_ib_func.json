@@ -2883,6 +2883,32 @@
         }
       ]
     },
+    "bc_ll128_window_gfx942": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_nodes": 1,
+      "timeout": 300,
+      "env_variables": {
+        "RCCL_DDA_ENABLE": "0"
+      },
+      "tests": [
+        {
+          "name": "BroadcastLl128Window_3Ranks",
+          "description": "With NCCL_PROTO and NCCL_ALGO unset, the tuning model picks Ring LL128 for a Broadcast in the gfx942 LL128 window and the data is right; 3 ranks, the low end of the window's rank range",
+          "test_filter": "BroadcastLl128WindowMPITest.*",
+          "num_ranks": 3,
+          "num_gpus": 3
+        },
+        {
+          "name": "BroadcastLl128Window_8Ranks",
+          "description": "With NCCL_PROTO and NCCL_ALGO unset, the tuning model picks Ring LL128 for a Broadcast in the gfx942 LL128 window and the data is right; 8 ranks, the high end of the window's rank range",
+          "test_filter": "BroadcastLl128WindowMPITest.*",
+          "num_ranks": 8,
+          "num_gpus": 8
+        }
+      ]
+    },
     "revoke_mpi_tests_dda_ipc": {
       "extends": "default",
       "is_gtest": true,
@@ -4137,6 +4163,12 @@
       "name": "Comm MPI Tests - 8-Rank (persistent communicator)",
       "description": "All 15 persistent-communicator rows from CommMPITests.cpp on 8 GPUs/ranks, single node: Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator",
       "config": "comm_mpi_tests_8rank",
+      "enabled": true
+    },
+    {
+      "name": "Broadcast LL128 Window (gfx942, 3 and 8 ranks, single-node)",
+      "description": "Single-node gfx942 Broadcast takes Ring LL128 in its window when no protocol is forced; NCCL_PROTO is cached per process, so it runs alone with NCCL_PROTO and NCCL_ALGO unset and DDA off",
+      "config": "bc_ll128_window_gfx942",
       "enabled": true
     },
     {
