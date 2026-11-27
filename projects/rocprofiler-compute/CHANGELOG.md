@@ -28,6 +28,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Optimized
 
+* `rocprof-compute analyze` evaluates per-kernel roofline data faster on workloads with many kernels.
+
 ### Resolved issues
 
 * Fixed kernel points missing from the gfx1250 roofline plot.

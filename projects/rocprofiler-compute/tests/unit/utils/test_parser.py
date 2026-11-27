@@ -5,7 +5,7 @@
 load_pc_sampling_data, correct_sys_info, utils_analysis filter resolution, and
 utils_common.expand_placeholder_ranges."""
 
-from collections import OrderedDict
+from collections import ChainMap, OrderedDict
 from types import SimpleNamespace
 from typing import Any
 
@@ -20,6 +20,7 @@ from utils.parser import (
     apply_kernel_filter,
     build_dfs,
     correct_sys_info,
+    evaluate_kernel_tables,
     load_pc_sampling_data,
 )
 from utils.specs import MachineSpecsCDNA
@@ -871,3 +872,48 @@ class TestCorrectSysInfo:
 
         assert pair in str(error_calls[0])
         assert "sysinfo.csv" in str(error_calls[0])
+
+
+def test_evaluate_kernel_tables_evaluates_each_kernel_on_its_own_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Each top kernel is evaluated once, on its own dispatches; -k picks kernels."""
+    calls = []
+
+    def record_eval_metric(dfs, dfs_type, expressions, sys_info, peaks, pmc, **kwargs):
+        calls.append((
+            sorted(dfs),
+            pmc.index.tolist(),
+            [table.maps[0].index.tolist() for table in kwargs["pass_tables"]],
+        ))
+
+    monkeypatch.setattr("utils.parser.eval_metric", record_eval_metric)
+    arch_config = _two_block_config()
+    build_dfs(
+        arch_config, filter_metrics=None, sys_info=_sys_info(), profiling_config={}
+    )
+    # Kernel "c" has no dispatches, and the dispatches of "a" and "b" interleave
+    pmc = pd.DataFrame({"Kernel_Name": ["a", "b", "a", "b"]}, index=[10, 11, 12, 13])
+    workload = schema.Workload()
+    workload.dfs = {1: pd.DataFrame({"Kernel_Name": ["b", "a", "c"]})}
+    workload.filter_kernel_ids = []
+    workload.sys_info = pd.DataFrame([_sys_info()])
+    # A pass table reads its own counters, then the dispatch columns all passes share
+    workload.pass_tables = {"pass_1": ChainMap(pmc[[]].copy(), pmc.copy())}
+
+    evaluated = evaluate_kernel_tables(arch_config, workload, pmc, [201, 999])
+
+    assert [(kernel_id, kernel.name) for kernel_id, kernel in evaluated.items()] == [
+        (0, "b"),
+        (1, "a"),
+    ]
+    assert calls == [
+        ([201], [11, 13], [[11, 13]]),
+        ([201], [10, 12], [[10, 12]]),
+    ]
+
+    calls.clear()
+    workload.filter_kernel_ids = [1]
+
+    assert list(evaluate_kernel_tables(arch_config, workload, pmc, [201])) == [1]
+    assert calls == [([201], [10, 12], [[10, 12]])]

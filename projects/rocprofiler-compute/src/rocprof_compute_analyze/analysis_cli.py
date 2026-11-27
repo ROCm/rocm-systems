@@ -18,7 +18,7 @@ from roofline.roofline_main import ROOFLINE_SUPPORTED, Roofline
 from utils import file_io, parser, tty
 from utils.logger import console_log, console_warning, demarcate
 from utils.mi_gpu_spec import mi_gpu_specs
-from utils.roofline_calc import calc_ai_analyze
+from utils.roofline_calc import ROOFLINE_TABLE_IDS, calc_ai_analyze
 from utils.utils_analysis import impute_counters_iteration_multiplex
 from utils.utils_common import selects_roofline, validate_roofline_csv
 
@@ -192,8 +192,9 @@ class cli_analysis(OmniAnalyze_Base):
                         )
                         ai_data = calc_ai_analyze(
                             workload=workload,
-                            pmc_df=pmc_df,
-                            arch_config=arch_config,
+                            kernel_tables=parser.evaluate_kernel_tables(
+                                arch_config, workload, pmc_df, ROOFLINE_TABLE_IDS
+                            ),
                         )
 
                         (
