@@ -172,6 +172,7 @@ ncclResult_t ncclSymkLsaBaseModel(struct ncclTuningInput_t* input, enum ncclSymk
     busMultiplier = 0.55 * nRanks;
     break;
   case ncclSymkKernelId_ReduceScatter_HierLsaLDST:
+  case ncclSymkKernelId_ReduceScatter_HierLsaTmaLDST:
     busBytes = (nRanks - 1) * nBytes;
     break;
   }

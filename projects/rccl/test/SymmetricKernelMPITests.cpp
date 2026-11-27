@@ -259,6 +259,10 @@ protected:
         }
         return mpiCoordinatedSkipReason(!ok, "Symmetric memory not available (VMM/cuMem unsupported)");
     }
+
+    // The hierarchical ReduceScatter kernels (sum only, fp32 and bf16) on gfx1250 partition mode. Defined after the
+    // data patterns it uses.
+    void runHierReduceScatterDataTest(const char* kernel);
 };
 
 // ===========================================================================
@@ -1254,8 +1258,7 @@ TEST_F(SymmetricKernelCorruptionTest, AllGatherHierLsaTmaST_PositionDependentDat
     runHierAllGatherDataTest("AllGather_HierLsaTmaST");
 }
 
-// ReduceScatter_HierLsaLDST (sum only, fp32 and bf16) on gfx1250 partition mode.
-TEST_F(SymmetricKernelCorruptionTest, ReduceScatterHierLsaLDST_PositionDependentData)
+void SymmetricKernelCorruptionTest::runHierReduceScatterDataTest(const char* kernel)
 {
     // Partition mode can put more than 8 ranks on a node, and each package needs two or more.
     if(!validateTestPrerequisites(4))
@@ -1264,7 +1267,7 @@ TEST_F(SymmetricKernelCorruptionTest, ReduceScatterHierLsaLDST_PositionDependent
     }
 
     // Read at communicator init, so the guard must outlive createTestCommunicator.
-    MPIHelpers::MpiEnvGuard symKernelGuard("NCCL_SYM_KERNEL", "ReduceScatter_HierLsaLDST");
+    MPIHelpers::MpiEnvGuard symKernelGuard("NCCL_SYM_KERNEL", kernel);
     // Lift the size window the symmetric kernels get, as runHierAllGatherDataTest does.
     MPIHelpers::MpiEnvGuard symkMinGuard("RCCL_SYM_K_MIN_BYTES", "0");
     MPIHelpers::MpiEnvGuard symkMaxGuard("RCCL_SYM_K_MAX_BYTES",
@@ -1341,9 +1344,9 @@ TEST_F(SymmetricKernelCorruptionTest, ReduceScatterHierLsaLDST_PositionDependent
                                                      getActiveCommunicator(), getActiveStream());
                 // Drain before the vote so a skip never leaves a kernel reading a window that ~SymBuf deregisters.
                 hipError_t syncErr = (res == ncclSuccess) ? hipStreamSynchronize(getActiveStream()) : hipSuccess;
-                const std::string ineligible = mpiCoordinatedSkipReason(
-                    res == ncclInvalidUsage && first,
-                    "ReduceScatter_HierLsaLDST symmetric kernel not eligible on this topology");
+                const std::string notEligible = std::string(kernel) + " symmetric kernel not eligible on this topology";
+                const std::string ineligible
+                    = mpiCoordinatedSkipReason(res == ncclInvalidUsage && first, notEligible.c_str());
                 if(!ineligible.empty())
                 {
                     GTEST_SKIP() << ineligible;
@@ -1359,7 +1362,7 @@ TEST_F(SymmetricKernelCorruptionTest, ReduceScatterHierLsaLDST_PositionDependent
                     &expVal, &actVal);
                 if(!ok)
                 {
-                    ADD_FAILURE() << "ReduceScatter_HierLsaLDST mismatch, " << NcclTypeTraits<T>::name << ", "
+                    ADD_FAILURE() << kernel << " mismatch, " << NcclTypeTraits<T>::name << ", "
                                   << (inPlace ? "in-place" : "out-of-place") << ", recvCount=" << recvCount
                                   << " index=" << errIdx << " expected=" << static_cast<float>(expVal)
                                   << " got=" << static_cast<float>(actVal);
@@ -1376,6 +1379,18 @@ TEST_F(SymmetricKernelCorruptionTest, ReduceScatterHierLsaLDST_PositionDependent
     }
     // bf16 data whose every partial sum is exact in bf16, so the comparison is exact too.
     runAll(hip_bfloat16{}, bf16PatternValue, bf16PatternSum, 0.0);
+}
+
+TEST_F(SymmetricKernelCorruptionTest, ReduceScatterHierLsaLDST_PositionDependentData)
+{
+    runHierReduceScatterDataTest("ReduceScatter_HierLsaLDST");
+}
+
+// Covers the TDM tile path: the larger counts give every block whole tiles per round, and the odd counts leave a
+// vector tail behind them.
+TEST_F(SymmetricKernelCorruptionTest, ReduceScatterHierLsaTmaLDST_PositionDependentData)
+{
+    runHierReduceScatterDataTest("ReduceScatter_HierLsaTmaLDST");
 }
 
 #endif // MPI_TESTS_ENABLED

@@ -430,23 +430,28 @@ static __device__ char* rsHierSlots(ncclDevComm const& comm, ncclTeam scaleUp, n
 }
 
 // How the hierarchical ReduceScatter runs reduceBatch: plain loads through the global aperture, the
-// packages' slots written side by side, and each group of sources in flight together.
+// packages' slots written side by side, and each group of sources in flight together. EnableTma stages
+// the aligned whole tiles through the TDM engine, keeping the cross-package stores in flight.
+template <bool EnableTma>
 struct rsHierBatchMode : ReduceBatchMode {
   using SrcSpace = GMemApertureTag;
   static constexpr bool Interleave = true;
   static constexpr bool Overlap = true;
+  static constexpr bool Tdm = EnableTma;
 };
 
 // A sender's part of a round: for each other package, sums our package's copies of the block its
-// counterpart of us owns and stores that into our slot there.
-template <typename T, typename Red>
-static __device__ void rsHierSend(ncclDevComm const& comm, ncclTeam scaleIn, ncclTeam scaleUp, Red red,
-                                  ncclCoopWarpSpan role, ncclSymPtr<T> input, size_t nAllElts,
-                                  ncclDevResourceHandle slotsBuf, uint64_t round, int nElts, size_t chunkBytes,
-                                  bool aligned) {
+// counterpart of us owns and stores that into our slot there. Both roles are forced inline: with the TDM
+// path, reduceBatch grows past the inliner's budget, and an out-of-line call makes the kernel reserve
+// registers for it.
+template <typename T, bool EnableTma, typename Red>
+static __device__ __forceinline__ void rsHierSend(ncclDevComm const& comm, ncclTeam scaleIn, ncclTeam scaleUp, Red red,
+                                                  ncclCoopWarpSpan role, ncclSymPtr<T> input, size_t nAllElts,
+                                                  ncclDevResourceHandle slotsBuf, uint64_t round, int nElts,
+                                                  size_t chunkBytes, bool aligned) {
   // A pointer getter so the window is read before the loops: ncclSymPtr re-reads it after every store.
   ncclLsaPointerGetter<T> inputLsa(input);
-  reduceBatch</*PostOp=*/false, rsHierBatchMode>(
+  reduceBatch</*PostOp=*/false, rsHierBatchMode<EnableTma>>(
     role, /*inPlace=*/false, /*nBatch=*/scaleUp.nRanks - 1, nElts, GMemApertureTag(), /*dstAlignMin=*/16,
     /*getDst=*/
     [&] __device__(int s) -> T* {
@@ -463,13 +468,14 @@ static __device__ void rsHierSend(ncclDevComm const& comm, ncclTeam scaleIn, ncc
 
 // A finisher's part of a round: sums our package's copies of our own block with the sums the other
 // packages stored into our slots, and writes that to output with the post-op applied.
-template <typename T, typename Red>
-static __device__ void rsHierFinish(ncclDevComm const& comm, ncclTeam scaleIn, ncclTeam scaleUp, Red red,
-                                    ncclCoopWarpSpan role, ncclSymPtr<T> input, size_t nAllElts, char const* slots,
-                                    T* output, int nElts, size_t chunkBytes, bool aligned) {
+template <typename T, bool EnableTma, typename Red>
+static __device__ __forceinline__ void rsHierFinish(ncclDevComm const& comm, ncclTeam scaleIn, ncclTeam scaleUp,
+                                                    Red red, ncclCoopWarpSpan role, ncclSymPtr<T> input,
+                                                    size_t nAllElts, char const* slots, T* output, int nElts,
+                                                    size_t chunkBytes, bool aligned) {
   ncclLsaPointerGetter<T> blockLsa(input + comm.rank * nAllElts);
   size_t const slotElts = chunkBytes / sizeof(T);
-  reduceBatch</*PostOp=*/true, rsHierBatchMode>(
+  reduceBatch</*PostOp=*/true, rsHierBatchMode<EnableTma>>(
     role, /*inPlace=*/false, /*nBatch=*/1, nElts, GMemApertureTag(), /*dstAlignMin=*/16,
     /*getDst=*/[&] __device__(int) -> T* { return output; }, red, /*nSrcs=*/scaleIn.nRanks + scaleUp.nRanks - 1,
     /*getSrc=*/
@@ -503,8 +509,9 @@ static __device__ void rsHierWaitFlags(ncclDevComm const& comm, uint64_t* flags,
 
 // Two-level ReduceScatter: LD within a package, ST one partial sum per other package, so a block crosses packages once.
 // Sender and finisher warps run concurrently, handing off through double-buffered slots with ready and credit flags.
-template <bool EnableProfiler, template <typename> typename Red, typename T>
-__device__ __forceinline__ void ncclSymkRun_ReduceScatter_HierLsaLDST(ncclSymkDevWorkArgs const* args) {
+// EnableTma stages the aligned whole tiles of both roles' loads and stores through the TDM engine.
+template <bool EnableProfiler, template <typename> typename Red, typename T, bool EnableTma>
+__device__ __forceinline__ void ncclSymkRun_ReduceScatter_HierLsaLDST_impl(ncclSymkDevWorkArgs const* args) {
   // The host picks the chunk size per launch, at most the size the slots were sized for.
   size_t const chunkBytes = args->kcomm.rsHierChunkSize;
   size_t const RoundElts = chunkBytes / sizeof(T);
@@ -564,7 +571,8 @@ __device__ __forceinline__ void ncclSymkRun_ReduceScatter_HierLsaLDST(ncclSymkDe
           if (role.thread_rank() == 0) rsHierWaitFlags(comm, credit, nPeers, seq + round - 1);
           role.sync();
         }
-        rsHierSend<T>(comm, scaleIn, scaleUp, red, role, input + lo, dw.nElts, slotsBuf, round, n, chunkBytes, aligned);
+        rsHierSend<T, EnableTma>(comm, scaleIn, scaleUp, red, role, input + lo, dw.nElts, slotsBuf, round, n,
+                                 chunkBytes, aligned);
         role.sync();
         if (role.thread_rank() == 0) {
           cuda::atomic_thread_fence(cuda::memory_order_release, cuda::thread_scope_system);
@@ -578,8 +586,8 @@ __device__ __forceinline__ void ncclSymkRun_ReduceScatter_HierLsaLDST(ncclSymkDe
         char const* slots = rsHierSlots(comm, scaleUp, slotsBuf, scaleUp.rank, round, chunkBytes);
         if (role.thread_rank() == 0) rsHierWaitFlags(comm, ready, nPeers, seq + round + 1);
         role.sync();
-        rsHierFinish<T>(comm, scaleIn, scaleUp, red, role, input + lo, dw.nElts, slots, output + lo, n, chunkBytes,
-                        aligned);
+        rsHierFinish<T, EnableTma>(comm, scaleIn, scaleUp, red, role, input + lo, dw.nElts, slots, output + lo, n,
+                                   chunkBytes, aligned);
         role.sync();
         if (role.thread_rank() == 0) {
           cuda::atomic_thread_fence(cuda::memory_order_release, cuda::thread_scope_system);
@@ -597,6 +605,16 @@ __device__ __forceinline__ void ncclSymkRun_ReduceScatter_HierLsaLDST(ncclSymkDe
 
   if NCCL_IF_CONSTEXPR (EnableProfiler) ncclSymkProfilerPhase(args, NCCL_KERNEL_PHASE_BEFORE_CLOSE);
   bar.sync(ncclCoopCta(), cuda::memory_order_release);
+}
+
+template <bool EnableProfiler, template <typename> typename Red, typename T>
+__device__ __forceinline__ void ncclSymkRun_ReduceScatter_HierLsaLDST(ncclSymkDevWorkArgs const* args) {
+  ncclSymkRun_ReduceScatter_HierLsaLDST_impl<EnableProfiler, Red, T, /*EnableTma=*/false>(args);
+}
+
+template <bool EnableProfiler, template <typename> typename Red, typename T>
+__device__ __forceinline__ void ncclSymkRun_ReduceScatter_HierLsaTmaLDST(ncclSymkDevWorkArgs const* args) {
+  ncclSymkRun_ReduceScatter_HierLsaLDST_impl<EnableProfiler, Red, T, /*EnableTma=*/true>(args);
 }
 
 template <typename Red, typename T>

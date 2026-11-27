@@ -53,7 +53,7 @@ EXPECTED_DIMS = {
 # only when a target carries a DMA tile mover (gfx1250's Tensor Data Mover). Those
 # kernels are therefore invisible to the baselines above, so guard them separately:
 # +2 AllGather (TmaST, HierLsaTmaST), +5 AllReduce (RSxTmaLD_AGxTmaST, sum only),
-# +10 ReduceScatter (TmaLD, sum and avg).
+# +12 ReduceScatter (TmaLD, sum and avg; HierLsaTmaLDST, sum only in f32 and bf16).
 #
 # These two are GPU_TARGETS lists, not lists of movers: gfx942 has no TDM and is in
 # both on purpose. A build always passes GPU_TARGETS whole (src/CMakeLists.txt), so a
@@ -62,13 +62,13 @@ EXPECTED_DIMS = {
 # arch from one that only asks whether any target was given.
 GPU_TARGETS_WITHOUT_TDM = "gfx942;gfx950"
 GPU_TARGETS_WITH_TDM = "gfx942;gfx1250"
-EXPECTED_TDM_TOTAL = 63
+EXPECTED_TDM_TOTAL = 65
 EXPECTED_TDM_PER_COLL = {
     "AllGather": 6,
     "AllReduce": 15,
-    "ReduceScatter": 42,
+    "ReduceScatter": 44,
 }
-EXPECTED_TDM_ALGOS = {"TmaST", "HierLsaTmaST", "RSxTmaLD_AGxTmaST", "TmaLD"}
+EXPECTED_TDM_ALGOS = {"TmaST", "HierLsaTmaST", "RSxTmaLD_AGxTmaST", "TmaLD", "HierLsaTmaLDST"}
 
 # Anchors for parsing kernel names. Reductions carry a trailing _<red>_<ty>;
 # non-reductions (AllGather) carry only _<algo>. Algorithm tokens themselves

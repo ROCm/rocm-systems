@@ -31,6 +31,9 @@ int ncclSymkModelCtasEnvOverride(enum ncclSymkKernelId kernelId) {
   if (kernelId == ncclSymkKernelId_ReduceScatter_HierLsaLDST) {
     maxBlocks = ncclSymkRsHierMaxBlocks;
   }
+  if (kernelId == ncclSymkKernelId_ReduceScatter_HierLsaTmaLDST) {
+    maxBlocks = ncclSymkRsHierTmaMaxBlocks;
+  }
   int64_t nUserCTAs = ncclParamSymCTAs();
   if (hier && nUserCTAs < 1) nUserCTAs = ncclParamSymAgHierCtas();
   if (nUserCTAs < 1) return 0;
@@ -112,7 +115,8 @@ static bool rcclSymkReduceScatterYieldsInPartitionMode(struct ncclTuningInput_t*
   constexpr int ll = ncclSymkKernelId_ReduceScatter_LL;
   constexpr int ld = ncclSymkKernelId_ReduceScatter_LD;
   constexpr int tmaLd = ncclSymkKernelId_ReduceScatter_TmaLD;
-  constexpr int hier = ncclSymkKernelId_ReduceScatter_HierLsaLDST;
+  constexpr int vecHier = ncclSymkKernelId_ReduceScatter_HierLsaLDST;
+  constexpr int tmaHier = ncclSymkKernelId_ReduceScatter_HierLsaTmaLDST;
   struct ncclComm* comm = inputs->comm;
   if (inputs->func != ncclFuncReduceScatter || !ncclSymkIsGfx1250(comm) || !comm->hasMloPart ||
       comm->tuningContext.forced[inputs->func]) {
@@ -122,8 +126,10 @@ static bool rcclSymkReduceScatterYieldsInPartitionMode(struct ncclTuningInput_t*
   // The same conditions ncclTuningSymkModelSim puts on LL (no grouping) and on the rest (a registered send).
   bool sendReg = inputs->winRegType == ncclSymSendRegRecvReg || inputs->winRegType == ncclSymSendRegRecvNonreg;
   bool hierFirst = ncclSymkGfx1250ReduceScatterPrefersHier(comm->nRanks, inputs->nBytes);
-  // TmaLD stands in for LD where a selection allows only the TDM flat load kernel.
+  // TmaLD stands in for LD where a selection allows only the TDM flat load kernel, and likewise the TDM
+  // hierarchical kernel for the vector one.
   int load = allowed.has(ld) ? ld : tmaLd;
+  int hier = allowed.has(vecHier) ? vecHier : tmaHier;
   for (int k : {hierFirst ? hier : ll, load, hierFirst ? ll : hier}) {
     if (allowed.has(k) && (k == ll ? inputs->nWorks <= 1 : sendReg)) {
       return kernelId != k;

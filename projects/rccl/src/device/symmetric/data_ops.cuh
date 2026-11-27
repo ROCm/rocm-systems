@@ -290,6 +290,12 @@ struct ReduceBatchMode {
   // Keeps a blob's source loads in flight together: each group of sources issues all of its loads
   // before its first add, with no test in between.
   static constexpr bool Overlap = false;
+  // Moves each blob through the warp's TDM window on gfx1250 instead of per-lane loads and stores, as
+  // bcastDeep does for AllGather. Needs Overlap, a Coop of whole warps, a launch that grants every warp its
+  // ncclTmaShmemScratchWarpSize() of dynamic LDS, and sources and destinations of one size. Falls back to
+  // the per-lane path where there is no TDM engine, for an inPlace batch, and for any pointer that is not
+  // 16-byte aligned.
+  static constexpr bool Tdm = false;
 };
 
 // Adds N sources, from srcIx on, into accs, issuing all of their loads before the first add. Init starts
@@ -466,6 +472,46 @@ __device__ void reduceBatch(Coop coop, bool inPlace, int nBatch, int nElts, DstS
     // With Overlap, blobs are taken only while nElts fills them whatever the padding, so that none of
     // their packs is empty. The packs that leaves go one at a time below.
     int nBlobs = Mode::Overlap ? unsigned(nElts) / (nPackPerBlob * nEltPerPack) : unsigned(nPacks) / nPackPerBlob;
+    // Whether this batch's blobs go through the warp's TDM window (Mode::Tdm). Constant false otherwise.
+    bool tiled = false;
+#if NCCL_SYMK_TILE_TDM
+    // The window holds NBufs source tiles and one result tile. A blob's store is left in flight while the
+    // next blob's first sources load, and the wait for those loads drains it too: every wait here waits for
+    // all of the warp's TDM transfers, so nothing depends on the order they complete in. That wait comes
+    // before the result tile is refilled, so one is enough.
+    constexpr int NBufs = 2, TileOut = NBufs;
+    constexpr int TileBytes = nPackPerBlob * sizeof(SrcPack);
+    using TileSmem = tmaSmemStruct<SrcPack, UnrollData, NBufs + 1>;
+    TileSmem* tile = nullptr;
+    size_t pending = 0;
+    bool dstLine = true;
+    // Starts the loads of sources [s0, s0 + NBufs) of a row's blob into the source tiles.
+    [[maybe_unused]] auto tileLoads = [&] __device__(int row, int s0) {
+      int b = Mode::Interleave ? unsigned(row) % unsigned(nBatch) : unsigned(row) / unsigned(nBlobs);
+      int blob = Mode::Interleave ? unsigned(row) / unsigned(nBatch) : unsigned(row) % unsigned(nBlobs);
+      NVCC_PRAGMA_UNROLL_AUTO
+      for (int k = 0; k < NBufs; k++) {
+        if (s0 + k < nSrcs) {
+          ncclSymkTileLoad(tile->buff[k], (SrcPack*)getSrc(b, s0 + k) + blob * nPackPerBlob, TileBytes, tile->bar,
+                           pending, unsigned(t) % 32);
+        }
+      }
+    };
+    if NCCL_IF_CONSTEXPR (Mode::Tdm) {
+      static_assert(Mode::Overlap && sizeof(SrcT) == sizeof(DstT) && WARP_SIZE == 32 &&
+                      TileBytes == ncclSymkReduceBatchTileBytes,
+                    "TDM blobs are whole 4 KiB tiles of one element size");
+      // Whole tiles need every source and destination 16-byte aligned and nothing to read back.
+      tiled = !inPlace && tn % 32 == 0;
+      for (int b = 0; tiled && b < nBatch; b++) {
+        uintptr_t dst = reinterpret_cast<uintptr_t>(getDst(b));
+        tiled = getSrcPtrMasked(b) % sizeof(SrcPack) == 0 && dst % sizeof(SrcPack) == 0;
+        dstLine = dstLine && dst % ncclSymkTileLine == 0;
+      }
+      tile = ncclSymkTileSmem<TileSmem>(threadIdx.x / WARP_SIZE);
+      if (tiled && int(unsigned(t) / 32) < nBatch * nBlobs) tileLoads(unsigned(t) / 32, 0);
+    }
+#endif
     NVCC_PRAGMA_UNROLL_DISABLED
     for (int row = unsigned(t) / 32; row < nBatch * nBlobs; row += unsigned(tn) / 32) {
       int batchIx = Mode::Interleave ? unsigned(row) % unsigned(nBatch) : unsigned(row) / unsigned(nBlobs);
@@ -477,16 +523,42 @@ __device__ void reduceBatch(Coop coop, bool inPlace, int nBatch, int nElts, DstS
       int packIx = blobIx * nPackPerBlob + lane;
       bool lastPackEmpty = !Mode::Overlap && padElts + nElts <= (packIx + (UnrollData - 1) * 32) * nEltPerPack;
       AccPack acc[UnrollData] = {};
-      if (inPlace) {
-        DstPack dstVal[UnrollData];
-        loadPacks(dstVal, dstMem, dstAlignMin, dstPtr, nElts, padElts, packIx, 32, lastPackEmpty);
-        NVCC_PRAGMA_UNROLL_AUTO
-        for (int u = 0; u < UnrollData; u++) acc[u] = applyCast<DstT, Acc>(dstVal[u]);
+#if NCCL_SYMK_TILE_TDM
+      if NCCL_IF_CONSTEXPR (Mode::Tdm) {
+        if (tiled) {
+          NVCC_PRAGMA_UNROLL_DISABLED
+          for (int s0 = 0; s0 < nSrcs; s0 += NBufs) {
+            // The first group was started with the previous blob still storing; this waits for both.
+            if (s0 != 0) tileLoads(row, s0);
+            ncclSymkTileLoadWait</*Arrivers=*/32>(tile->bar, pending, lane);
+            NVCC_PRAGMA_UNROLL_AUTO
+            for (int k = 0; k < NBufs; k++) {
+              if (s0 + k < nSrcs) {
+                NVCC_PRAGMA_UNROLL_AUTO
+                for (int u = 0; u < UnrollData; u++) {
+                  AccPack v = applyCast<SrcT, Acc>(tile->buff[k][lane + 32 * u]);
+                  acc[u] = (s0 == 0 && k == 0) ? v : applyReduce(red, acc[u], v);
+                }
+              }
+            }
+            // The next loads refill these same tiles, so hold until every lane has read them.
+            __syncwarp();
+          }
+        }
       }
-      accumulateLoads<SrcT, Mode>(red, inPlace, acc, /*stride=*/32, lastPackEmpty, nSrcs,
-                            [&] __device__(int srcIx) -> SrcPack* {
-                              return (SrcPack*)(getSrc(batchIx, srcIx) - padElts) + packIx;
-                            });
+#endif
+      if (!tiled) {
+        if (inPlace) {
+          DstPack dstVal[UnrollData];
+          loadPacks(dstVal, dstMem, dstAlignMin, dstPtr, nElts, padElts, packIx, 32, lastPackEmpty);
+          NVCC_PRAGMA_UNROLL_AUTO
+          for (int u = 0; u < UnrollData; u++) acc[u] = applyCast<DstT, Acc>(dstVal[u]);
+        }
+        accumulateLoads<SrcT, Mode>(red, inPlace, acc, /*stride=*/32, lastPackEmpty, nSrcs,
+                              [&] __device__(int srcIx) -> SrcPack* {
+                                return (SrcPack*)(getSrc(batchIx, srcIx) - padElts) + packIx;
+                              });
+      }
       if NCCL_IF_CONSTEXPR (PostOp) {
         NVCC_PRAGMA_UNROLL_AUTO
         for (int u = 0; u < UnrollData; u++) acc[u] = applyPostOp(red, acc[u]);
@@ -494,8 +566,35 @@ __device__ void reduceBatch(Coop coop, bool inPlace, int nBatch, int nElts, DstS
       DstPack dstVal[UnrollData];
       NVCC_PRAGMA_UNROLL_AUTO
       for (int u = 0; u < UnrollData; u++) dstVal[u] = applyCast<Acc, DstT>(acc[u]);
-      storePacks(dstVal, dstMem, dstAlignMin, dstPtr, nElts, padElts, packIx, 32, lastPackEmpty);
+#if NCCL_SYMK_TILE_TDM
+      if NCCL_IF_CONSTEXPR (Mode::Tdm) {
+        if (tiled) {
+          // Start the next blob's first sources, so they load while this one is written out and stored.
+          if (row + int(unsigned(tn) / 32) < nBatch * nBlobs) tileLoads(row + unsigned(tn) / 32, 0);
+          NVCC_PRAGMA_UNROLL_AUTO
+          for (int u = 0; u < UnrollData; u++) tile->buff[TileOut][lane + 32 * u] = dstVal[u];
+          // Publish the lanes' sums to the engine, then leave the store to the next wait.
+          ncclSymkTileFenceSmem();
+          DstPack* dstBlob = (DstPack*)dstPtr + blobIx * nPackPerBlob;
+          if (dstLine) {
+            ncclSymkTileStore</*TileAligned=*/true>(dstBlob, tile->buff[TileOut], TileBytes, lane);
+          } else {
+            ncclSymkTileStore</*TileAligned=*/false>(dstBlob, tile->buff[TileOut], TileBytes, lane);
+          }
+        }
+      }
+#endif
+      if (!tiled) storePacks(dstVal, dstMem, dstAlignMin, dstPtr, nElts, padElts, packIx, 32, lastPackEmpty);
     }
+#if NCCL_SYMK_TILE_TDM
+    if NCCL_IF_CONSTEXPR (Mode::Tdm) {
+      // Drain the last store so the caller's sync and release fence publish it, and the window is free.
+      if (tiled) {
+        ncclSymkTileStoreWait(unsigned(t) % 32);
+        __syncwarp();
+      }
+    }
+#endif
     int nRemPacks = nPacks - nBlobs * nPackPerBlob;
     NVCC_PRAGMA_UNROLL_DISABLED
     for (int row = t; row < nBatch * nRemPacks; row += tn) {
