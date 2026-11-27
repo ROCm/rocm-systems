@@ -30,7 +30,7 @@ struct sample_processor_t
         }
     }
 
-    ROCPROFSYS_INLINE void prepare_for_processing() const noexcept
+    ROCPROFSYS_INLINE void prepare_for_processing() const
     {
         for(const auto& processor : m_processors)
         {
@@ -38,7 +38,7 @@ struct sample_processor_t
         }
     }
 
-    ROCPROFSYS_INLINE void finalize_processing() const noexcept
+    ROCPROFSYS_INLINE void finalize_processing() const
     {
         for(const auto& processor : m_processors)
         {
