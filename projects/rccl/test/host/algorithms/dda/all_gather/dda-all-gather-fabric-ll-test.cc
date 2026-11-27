@@ -217,6 +217,87 @@ TEST_F(DdaAllGatherFabricLLMicrotest, Blocks_SizedOnBytesNotElements) {
   EXPECT_EQ(ncclAllGatherDdaFabricLLBlocks(mock_.get(), 1024, ncclFloat32), 16u);
 }
 
+// IPC: the 8-rank single-node LL region with its epoch cells, the table's wide window for the gathered total (not the
+// LL cap), and the shard within a 4 MiB bank's 256 KiB slot whatever the Simple scratch holds. No pointer is read.
+TEST_F(DdaAllGatherFabricLLMicrotest, Eligible_IpcNeedsTheLLRegionAndTheWideWindow) {
+  mock_.setIpcResourcesPresent();
+  g_rcclDdaLLThreshold = [](const ncclComm*, ncclFunc_t) { return size_t{0}; };
+  size_t seenTotal = 0;
+  g_rcclDdaIpcLLWideBlocks = [&](const ncclComm* c, ncclFunc_t func, size_t totalBytes) -> uint32_t {
+    EXPECT_EQ(c, mock_.get());
+    EXPECT_EQ(func, ncclFuncAllGather);
+    seenTotal = totalBytes;
+    return totalBytes >= (64u << 10) && totalBytes <= (2u << 20) ? 16 : 0;
+  };
+  EXPECT_TRUE(Eligible((64u << 10) / 32));
+  EXPECT_EQ(seenTotal, 64u << 10);
+  EXPECT_FALSE(Eligible((64u << 10) / 32 - 4)) << "below the window";
+  comm().ddaScratchBytes = 4096;
+  EXPECT_TRUE(Eligible((256u << 10) / 4));
+  EXPECT_FALSE(Eligible((256u << 10) / 4 + 4)) << "past the 256 KiB slot";
+  EXPECT_TRUE(ncclAllGatherDdaFabricLLEligible(mock_.get(), reinterpret_cast<void*>(0x1002),
+                                               reinterpret_cast<void*>(0x1002), 4096, ncclBfloat16));
+  for (int missing = 0; missing < 5; ++missing) {
+    mock_.setIpcResourcesPresent();
+    comm().ddaLLEpochDev = missing == 0 ? nullptr : comm().ddaLLEpochDev;
+    comm().nRanks = missing == 1 ? 4 : comm().nRanks;
+    comm().nNodes = missing == 2 ? 2 : comm().nNodes;
+    comm().ddaIpcMemHandler = missing == 3 ? nullptr : comm().ddaIpcMemHandler;
+    comm().ddaLLEpochLen = missing == 4 ? 0 : comm().ddaLLEpochLen;
+    EXPECT_FALSE(Eligible((64u << 10) / 32)) << "missing " << missing;
+  }
+}
+
+TEST_F(DdaAllGatherFabricLLMicrotest, Launch_IpcPassesTheLLRegionPeersAndBank) {
+  mock_.setIpcResourcesPresent();
+  g_rcclDdaIpcLLWideBlocks = [](const ncclComm*, ncclFunc_t, size_t) { return 16u; };
+  ASSERT_EQ(Run((64u << 10) / 32), ncclSuccess);
+  ASSERT_EQ(g_ddaLaunches.size(), 1u);
+  const DdaLaunch& launch = g_ddaLaunches[0];
+  EXPECT_EQ(launch.kernel, Kernel<8>());
+  EXPECT_EQ(launch.block.x, 512u);
+  ASSERT_EQ(launch.args.size(), 10u);
+  EXPECT_EQ(launch.Arg<int8_t**>(0), mock_.ipcLLPeers<int8_t>());
+  EXPECT_EQ(launch.Arg<size_t>(3), 8u << 10);
+  EXPECT_EQ(launch.Arg<int>(5), 8);
+  EXPECT_EQ(launch.Arg<uint32_t*>(6), comm().ddaLLEpochDev);
+  EXPECT_EQ(launch.Arg<size_t>(8), dda::common::kDdaIpcLLRegionBytes / 2);
+}
+
+// IPC grid: a 512-thread block column per peer, rows for the shard within the window's blocks per peer and at most
+// kDdaLLAgMaxBlocksPerPeer; the reporter agrees, and the blocks are asked for the gathered total.
+TEST_F(DdaAllGatherFabricLLMicrotest, Launch_IpcGridIsAColumnPerPeerWithinTheWindowBlocks) {
+  mock_.setIpcResourcesPresent();
+  uint32_t budget = 16;
+  size_t seenTotal = 0;
+  g_rcclDdaIpcLLWideBlocks = [&](const ncclComm*, ncclFunc_t, size_t totalBytes) {
+    seenTotal = totalBytes;
+    return budget;
+  };
+  struct Case {
+    uint32_t budget;
+    size_t shard;
+    unsigned rows;
+  };
+  // 64 KiB and 128 KiB total on 16 blocks; a smaller shard keeps one row; budgets under 8 still keep a column per peer.
+  const Case cases[] = {{16, 8u << 10, 2}, {16, 16u << 10, 2}, {16, 4u << 10, 1}, {64, 16u << 10, 4},
+                        {1024, 256u << 10, 8}, {8, 16u << 10, 1}, {4, 16u << 10, 1}, {0, 16u << 10, 1}};
+  for (const Case& c : cases) {
+    budget = c.budget;
+    g_ddaLaunches.clear();
+    ASSERT_EQ(Run(c.shard / 4), ncclSuccess);
+    ASSERT_EQ(g_ddaLaunches.size(), 1u);
+    EXPECT_EQ(seenTotal, c.shard * 8) << "shard " << c.shard;
+    EXPECT_EQ(g_ddaLaunches[0].grid.x, 8u) << "shard " << c.shard;
+    EXPECT_EQ(g_ddaLaunches[0].grid.y, c.rows) << "budget " << c.budget << " shard " << c.shard;
+    EXPECT_EQ(ncclAllGatherDdaFabricLLBlocks(mock_.get(), c.shard / 4, ncclFloat32), 8 * c.rows);
+  }
+  // A column per peer still, but no more rows than the epoch cells hold.
+  budget = 16;
+  comm().ddaLLEpochLen = 8;
+  EXPECT_EQ(ncclAllGatherDdaFabricLLBlocks(mock_.get(), (16u << 10) / 4, ncclFloat32), 8u);
+}
+
 TEST_F(DdaAllGatherFabricLLMicrotest, Launch_LaunchErrorIsReported) {
   g_hipGetLastError = [] { return hipErrorLaunchFailure; };
   EXPECT_EQ(Run(4), ncclUnhandledCudaError);

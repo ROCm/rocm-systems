@@ -215,7 +215,7 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
     return ncclSuccess;
   }
   if (ready == 1) {
-    ATTN("LL epoch cells unavailable on a rank; DDA IPC LL tiers (Broadcast, AR/RS one-shots) disabled");
+    ATTN("LL epoch cells unavailable on a rank; DDA IPC LL tiers (Broadcast and the LL one-shots) disabled");
   }
 
   comm->ddaIpcMemHandler = handler;

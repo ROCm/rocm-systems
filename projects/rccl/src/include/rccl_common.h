@@ -415,6 +415,8 @@ int rcclDdaFabricAgLL128Threads(const ncclComm* comm, size_t totalBytes);
 int rcclDdaFabricNarrowThreads(const ncclComm* comm);
 // Blocks the DDA LL128 AllGather may launch for this total: the init cap, lowered by the arch table.
 int rcclDdaFabricAgLL128Blocks(const ncclComm* comm, size_t totalBytes);
+// Blocks of func's single-node IPC DDA LL one-shot on its wide grid for this total, or 0 outside the table window.
+uint32_t rcclDdaIpcLLWideBlocks(const ncclComm* comm, ncclFunc_t func, size_t totalBytes);
 // DDA LL128 AllToAll block size for this total from the arch table, or 0 when it sets none.
 int rcclDdaFabricA2aLL128Threads(const ncclComm* comm, size_t totalBytes);
 // Blocks the DDA LL128 AllToAll may launch for this total: the init cap, lowered by the arch table.

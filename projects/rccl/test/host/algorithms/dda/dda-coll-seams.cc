@@ -32,6 +32,7 @@ static int DefaultDdaFabricNarrowThreads(const ncclComm*) { return 0; }  // no t
 static int DefaultDdaFabricAgLL128Blocks(const ncclComm* comm, size_t) {
   return comm != nullptr ? comm->ddaFabricMaxBlocks : 0;
 }
+static uint32_t DefaultDdaIpcLLWideBlocks(const ncclComm*, ncclFunc_t, size_t) { return 0; }  // no table: none
 static int DefaultDdaFabricA2aLL128Threads(const ncclComm*, size_t) { return 0; }  // no table: 256 threads
 static int DefaultDdaFabricA2aLL128Blocks(const ncclComm* comm, size_t) {
   return comm != nullptr ? comm->ddaFabricMaxBlocks : 0;
@@ -63,6 +64,7 @@ std::function<int(const ncclComm*)> g_rcclDdaFabricVmmBlocks = DefaultDdaFabricV
 std::function<int(const ncclComm*, size_t)> g_rcclDdaFabricAgLL128Threads = DefaultDdaFabricAgLL128Threads;
 std::function<int(const ncclComm*, size_t)> g_rcclDdaFabricAgLL128Blocks = DefaultDdaFabricAgLL128Blocks;
 std::function<int(const ncclComm*)> g_rcclDdaFabricNarrowThreads = DefaultDdaFabricNarrowThreads;
+std::function<uint32_t(const ncclComm*, ncclFunc_t, size_t)> g_rcclDdaIpcLLWideBlocks = DefaultDdaIpcLLWideBlocks;
 std::function<int(const ncclComm*, size_t)> g_rcclDdaFabricA2aLL128Threads = DefaultDdaFabricA2aLL128Threads;
 std::function<int(const ncclComm*, size_t)> g_rcclDdaFabricA2aLL128Blocks = DefaultDdaFabricA2aLL128Blocks;
 std::function<int(const ncclComm*)> g_rcclDdaFabricBcLL128Threads = DefaultDdaFabricBcLL128Threads;
@@ -84,6 +86,9 @@ int rcclDdaFabricAgLL128Blocks(const ncclComm* comm, size_t totalBytes) {
   return g_rcclDdaFabricAgLL128Blocks(comm, totalBytes);
 }
 int rcclDdaFabricNarrowThreads(const ncclComm* comm) { return g_rcclDdaFabricNarrowThreads(comm); }
+uint32_t rcclDdaIpcLLWideBlocks(const ncclComm* comm, ncclFunc_t func, size_t totalBytes) {
+  return g_rcclDdaIpcLLWideBlocks(comm, func, totalBytes);
+}
 int rcclDdaFabricA2aLL128Threads(const ncclComm* comm, size_t totalBytes) {
   return g_rcclDdaFabricA2aLL128Threads(comm, totalBytes);
 }
@@ -109,6 +114,7 @@ void ResetDdaCollSeams() {
   g_rcclDdaFabricAgLL128Threads = DefaultDdaFabricAgLL128Threads;
   g_rcclDdaFabricAgLL128Blocks = DefaultDdaFabricAgLL128Blocks;
   g_rcclDdaFabricNarrowThreads = DefaultDdaFabricNarrowThreads;
+  g_rcclDdaIpcLLWideBlocks = DefaultDdaIpcLLWideBlocks;
   g_rcclDdaFabricA2aLL128Threads = DefaultDdaFabricA2aLL128Threads;
   g_rcclDdaFabricA2aLL128Blocks = DefaultDdaFabricA2aLL128Blocks;
   g_rcclDdaFabricBcLL128Threads = DefaultDdaFabricBcLL128Threads;

@@ -7,14 +7,6 @@
 
 #include "algorithms/dda/all_gather/dda_all_gather.h"
 
-#include "algorithms/dda/all_gather/all_gather_dda_fabric_ll.h"
-#include "checks.h"
-#include "comm.h"
-#include "rccl_common.h"
-#include "algorithms/dda/dda_init_detail.h" // nccl_dda_detail::kDdaLLAgMaxBlocksPerPeer
-#include "debug.h"
-#include "algorithms/dda/fabric/fabric_gpu_barrier.h" // dda::common::kDdaMaxNranks
-
 #include <cuda_runtime.h>
 #include <hip/hip_ext.h>
 
@@ -22,9 +14,17 @@
 #include <cstdint>
 #include <utility>
 
+#include "algorithms/dda/all_gather/all_gather_dda_fabric_ll.h"
+#include "algorithms/dda/dda_init_detail.h" // nccl_dda_detail::kDdaLLAgMaxBlocksPerPeer
+#include "algorithms/dda/dda_ll_region.h"
+#include "algorithms/dda/fabric/fabric_gpu_barrier.h" // dda::common::kDdaMaxNranks
+#include "checks.h"
+#include "comm.h"
+#include "debug.h"
+#include "rccl_common.h"
+
 namespace {
 
-using dda::common::ddaBankSize;
 using dda::common::ddaLLAgSlotPkts;
 using dda::common::LLPacket16;
 using nccl_dda_detail::kDdaLLAgMaxBlocksPerPeer;
@@ -51,8 +51,15 @@ static inline int ddaLLAgBlocksPerPeer(size_t perRankBytes) {
 }
 
 // Single source of the launch geometry: grid.x = peer (nRanks), grid.y = the
-// per-peer packet split; 256 threads/block.
+// per-peer packet split; 256 threads/block. IPC: kDdaSimpleThreads-wide blocks, rows within the wide window's blocks
+// (nccl_dda_detail::ddaIpcLLPeerRows).
 static inline std::pair<dim3, dim3> ddaAllGatherFabricLLGeom(ncclComm* comm, size_t perRankBytes) {
+  if (nccl_dda_detail::ddaLLOnIpc(comm)) {
+    const unsigned threads = dda::common::kDdaSimpleThreads;
+    const uint32_t wide = rcclDdaIpcLLWideBlocks(comm, ncclFuncAllGather, perRankBytes * (size_t)comm->nRanks);
+    const unsigned rows = nccl_dda_detail::ddaIpcLLPeerRows(comm, perRankBytes, threads, wide);
+    return std::make_pair(dim3((unsigned)comm->nRanks, rows), dim3(threads));
+  }
   const unsigned threads = 256;
   const int blocksPerPeer = ddaLLAgBlocksPerPeer(perRankBytes);
   return std::make_pair(dim3((unsigned)comm->nRanks, (unsigned)blocksPerPeer), dim3(threads));
@@ -71,13 +78,16 @@ static ncclResult_t ncclAllGatherDdaFabricLLTyped(
   const dim3 block = gridBlock.second;
   const uint32_t blocksPerPeer = grid.y;
 
-  T** peers = reinterpret_cast<T**>(comm->ddaPeerPtrsDev);
+  // The LL region of either handler, under the epoch cells every LL tier shares.
+  const nccl_dda_detail::DdaLLRegion region = nccl_dda_detail::ddaLLRegion(comm);
+  T** peers = reinterpret_cast<T**>(region.peers);
   uint32_t* epochDev = comm->ddaLLEpochDev;
   const int epochLen = comm->ddaLLEpochLen;
-  const size_t bankSize = ddaBankSize(comm->ddaScratchBytes);
+  const size_t bankSize = region.bank;
 
-  INFO(NCCL_COLL, "DDA fabric AllGather LL: nRanks=%d perRankBytes=%zu grid=%ux%u block=%u (block-per-peer, bpp=%u)",
-       nRanks, perRankBytes, grid.x, grid.y, block.x, blocksPerPeer);
+  INFO(NCCL_COLL, "DDA fabric AllGather LL%s: nRanks=%d perRankBytes=%zu grid=%ux%u block=%u (block-per-peer, bpp=%u)",
+       nccl_dda_detail::ddaLLOnIpc(comm) ? " (IPC)" : "", nRanks, perRankBytes, grid.x, grid.y, block.x,
+       blocksPerPeer);
 
   const dda::common::DdaKernelParams params{comm->abortFlagDev};
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
@@ -114,7 +124,8 @@ bool ncclAllGatherDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, void
   if (comm == nullptr || comm->bootstrap == nullptr) {
     return false;
   }
-  if (comm->ddaFabricMemHandler == nullptr || comm->ddaScratch == nullptr || comm->ddaPeerPtrsDev == nullptr) {
+  // The fabric or the IPC LL region. Nothing below reads the buffers, so every rank decides alike.
+  if (!nccl_dda_detail::ddaLLRegionReady(comm)) {
     return false;
   }
   if (sendcount == 0) {
@@ -132,13 +143,18 @@ bool ncclAllGatherDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, void
     return false;
   }
 
-  if (perRankBytes * (size_t)comm->nRanks > rcclDdaLLThreshold(comm, ncclFuncAllGather)) {
+  // Fabric: up to the LL cap. IPC: only in the wide window, the sizes its grid is set for.
+  const size_t totalBytes = perRankBytes * (size_t)comm->nRanks;
+  const bool inWindow = nccl_dda_detail::ddaLLOnIpc(comm) ?
+                          rcclDdaIpcLLWideBlocks(comm, ncclFuncAllGather, totalBytes) > 0 :
+                          totalBytes <= rcclDdaLLThreshold(comm, ncclFuncAllGather);
+  if (!inWindow) {
     return false;
   }
   // One packet carries 8B of payload, so this rank's contribution has to fit the
   // slot the bank gives each rank. A bank too small for one packet per rank takes
   // the tier out entirely.
-  if ((perRankBytes >> 3) > ddaLLAgSlotPkts(ddaBankSize(comm->ddaScratchBytes), comm->nRanks)) {
+  if ((perRankBytes >> 3) > ddaLLAgSlotPkts(nccl_dda_detail::ddaLLRegion(comm).bank, comm->nRanks)) {
     return false;
   }
 

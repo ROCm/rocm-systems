@@ -98,6 +98,7 @@ extern std::function<int(const ncclComm*)> g_rcclDdaFabricVmmBlocks;
 extern std::function<int(const ncclComm*, size_t)> g_rcclDdaFabricAgLL128Threads;
 extern std::function<int(const ncclComm*, size_t)> g_rcclDdaFabricAgLL128Blocks;
 extern std::function<int(const ncclComm*)> g_rcclDdaFabricNarrowThreads;
+extern std::function<uint32_t(const ncclComm*, ncclFunc_t, size_t)> g_rcclDdaIpcLLWideBlocks;
 extern std::function<int(const ncclComm*, size_t)> g_rcclDdaFabricA2aLL128Threads;
 extern std::function<int(const ncclComm*, size_t)> g_rcclDdaFabricA2aLL128Blocks;
 extern std::function<int(const ncclComm*)> g_rcclDdaFabricBcLL128Threads;
