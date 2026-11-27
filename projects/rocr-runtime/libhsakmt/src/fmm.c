@@ -5048,6 +5048,28 @@ bool hsakmt_fmm_get_handle(HsaKFDContext *ctx,
 	return found;
 }
 
+/* Upgrade a read-only userptr BO to read/write in place via the kernel ioctl
+ * and clear the object's read-only flag. Caller holds aperture->fmm_mutex.
+ */
+static HSAKMT_STATUS fmm_upgrade_userptr_writable(HsaKFDContext *ctx,
+					       vm_object_t *object, void *addr)
+{
+	struct kfd_ioctl_upgrade_userptr_writable_args args;
+	uint32_t i;
+
+	for (i = 0; i < object->handle_num; i++) {
+		args.handle = object->handles[i];
+		if (hsakmt_ioctl(ctx->fd, AMDKFD_IOC_UPGRADE_USERPTR_WRITABLE,
+				 &args) != 0) {
+			pr_err("Failed to upgrade read-only userptr %p: %s\n",
+			       addr, strerror(errno));
+			return HSAKMT_STATUS_ERROR;
+		}
+	}
+	object->mflags.ui32.ReadOnly = 0;
+	return HSAKMT_STATUS_SUCCESS;
+}
+
 static HSAKMT_STATUS fmm_register_user_memory(HsaKFDContext *ctx,
 						void *addr,
 						HSAuint64 size,
@@ -5057,6 +5079,8 @@ static HSAKMT_STATUS fmm_register_user_memory(HsaKFDContext *ctx,
 	HSAuint32 page_offset = (HSAuint64)addr & (PAGE_SIZE-1);
 	HSAuint64 aligned_addr = (HSAuint64)addr - page_offset;
 	HSAuint64 aligned_size = PAGE_ALIGN_UP(page_offset + size);
+	HSAKMT_STATUS ret = HSAKMT_STATUS_SUCCESS;
+	bool readonly = flags.ui32.ReadOnly;
 	void *svm_addr;
 	HSAuint32 gpu_id;
 	vm_object_t *obj, *exist_obj;
@@ -5076,7 +5100,7 @@ static HSAKMT_STATUS fmm_register_user_memory(HsaKFDContext *ctx,
 	svm_addr = __fmm_allocate_device(ctx,
 			 gpu_id, NULL, aligned_size, aperture,
 			 &aligned_addr, KFD_IOC_ALLOC_MEM_FLAGS_USERPTR |
-			 KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE |
+			 (readonly ? 0 : KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE) |
 			 KFD_IOC_ALLOC_MEM_FLAGS_EXECUTABLE |
 			 (flags.ui32.CoarseGrain ? 0 : KFD_IOC_ALLOC_MEM_FLAGS_COHERENT) |
 			 (flags.ui32.ExtendedCoherent ? KFD_IOC_ALLOC_MEM_FLAGS_EXT_COHERENT : 0),
@@ -5095,6 +5119,18 @@ static HSAKMT_STATUS fmm_register_user_memory(HsaKFDContext *ctx,
 	 */
 	exist_obj = vm_find_object_by_userptr(aperture, addr, size);
 	if (exist_obj) {
+		/* Raced: another thread already registered this userptr.
+		* A read-only userptr needs to be upgraded to read/write in place.
+		*/
+		if (exist_obj->mflags.ui32.ReadOnly && !readonly) {
+			ret = fmm_upgrade_userptr_writable(ctx, exist_obj, addr);
+
+			if (ret != HSAKMT_STATUS_SUCCESS) {
+				pthread_mutex_unlock(&aperture->fmm_mutex);
+				__fmm_release(ctx, obj, aperture);
+				return ret;
+			}
+		}
 		++exist_obj->registration_count;
 	} else {
 		uint64_t extent;
@@ -5159,6 +5195,14 @@ HSAKMT_STATUS hsakmt_fmm_register_memory(HsaKFDContext *ctx,
 		pthread_mutex_lock(&aperture->fmm_mutex);
 		/* fall through for registered device ID array setup */
 	} else if (object->userptr) {
+		/* A read-only userptr needs to be upgraded to read/write in place */
+		if (object->mflags.ui32.ReadOnly && !flags.ui32.ReadOnly) {
+			ret = fmm_upgrade_userptr_writable(ctx, object, address);
+			if (ret != HSAKMT_STATUS_SUCCESS) {
+				pthread_mutex_unlock(&aperture->fmm_mutex);
+				return ret;
+			}
+		}
 		/* Update an existing userptr */
 		++object->registration_count;
 	} else {
