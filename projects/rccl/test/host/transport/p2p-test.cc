@@ -669,6 +669,18 @@ ncclResult_t CallIpcRegisterBuffer(ncclComm& comm,
 // names CommBuilder / RegRecordCleaner / ScopedHook / ForceLegacyCudaRegister
 // from that namespace.
 // ===========================================================================
+// The cuMem arms share an allocation with a type it was created with; report the comm's type.
+static std::function<hipError_t(hipMemAllocationProp*, hipMemGenericAllocationHandle_t)> CommHandleTypeProps() {
+    return [](hipMemAllocationProp* prop, hipMemGenericAllocationHandle_t) -> hipError_t {
+        if (prop) {
+            *prop = hipMemAllocationProp{};
+            prop->location.type = hipMemLocationTypeDevice;
+            prop->requestedHandleType = ncclCuMemHandleType;
+        }
+        return hipSuccess;
+    };
+}
+
 class FreshRegistrationMicrotest : public P2pMicrotest {
 protected:
     static constexpr int          kPeerRank      = 2;
@@ -696,12 +708,15 @@ protected:
 
     const void* const kUserbuff =
         reinterpret_cast<const void*>(kBegAddr + kBuffOffset);
+    std::vector<ncclPeerInfo> peers;
 
     void SetUp() override {
         cb.WithLocalRank(kPeerRank, kPeerLocalRank)
           .WithMaxLocalRanks()
           .WithSharedRes()
           .WithProxyConnArray(kNRanks);
+        peers.assign(kNRanks, ncclPeerInfo{});  // one host, so a POSIX fd may reach the peer
+        cb.comm().peerInfo = peers.data();
         regRecord.begAddr = kBegAddr;
         regRecord.endAddr = kBegAddr + 0x1000;
         regCleanup.emplace(regRecord);
@@ -738,6 +753,9 @@ protected:
                 if (psize) *psize = kBaseSize;
                 return hipSuccess;
             });
+    }
+    auto MakeCommHandleTypePropsHook() {
+        return ScopedHook(g_hipMemGetAllocationPropertiesFromHandle, CommHandleTypeProps());
     }
     auto MakeDefaultIpcGetHook() {
         return ScopedHook(g_hipIpcGetMemHandle,
@@ -2421,6 +2439,7 @@ TEST_F(FreshRegistrationMicrotest, CuMemPosixFdSucceeds)
             return hipSuccess;
         });
     ScopedHook retain(g_hipMemRetainAllocationHandle, RetainSentinelHandle());
+    auto props = MakeCommHandleTypePropsHook();
 
     // Hand back a real fd so the subsequent SYSCHECKGOTO(close(expFd))
     // doesn't fail with EBADF. dup(STDERR_FILENO) is cheap and always
@@ -2522,6 +2541,7 @@ TEST_F(FreshRegistrationMicrotest, CuMemFabricExportFailureReleasesHandle)
             return hipSuccess;
         });
     ScopedHook retain(g_hipMemRetainAllocationHandle, RetainSentinelHandle());
+    auto props = MakeCommHandleTypePropsHook();
     StickyHipLastError lastError;
     // Export fails on the fabric arm.
     ScopedHook xport(g_hipMemExportToShareableHandle,
@@ -2944,6 +2964,7 @@ TEST_F(FreshRegistrationMicrotest, CuMemFabricExportSucceeds)
     ScopedHook cuMemEnable(g_cuMemEnable, [] { return 1; });
     auto memGet = MakeDefaultMemGetHook();
     ScopedHook retain(g_hipMemRetainAllocationHandle, RetainSentinelHandle());
+    auto props = MakeCommHandleTypePropsHook();
     // Fabric export *succeeds* -- the seam under test.
     ScopedHook xport(g_hipMemExportToShareableHandle,
         [](void* shareableHandle, hipMemGenericAllocationHandle_t h,
@@ -6140,6 +6161,8 @@ protected:
         saved_handle_type_ = ncclCuMemHandleType;
         ncclCuMemHandleType = hipMemHandleTypeWin32;  // anything != POSIX_FD
         proxyConn_.sameProcess = 1;
+        peers_.assign(2, ncclPeerInfo{});  // the walk checks whether the peer shares this host
+        comm_.peerInfo = peers_.data();
     }
     void TearDown() override {
         ncclCuMemHandleType = saved_handle_type_;
@@ -6149,6 +6172,7 @@ protected:
     hipMemAllocationHandleType saved_handle_type_{};
     ncclComm            comm_{};
     ncclProxyConnector  proxyConn_{};
+    std::vector<ncclPeerInfo> peers_;
 
     // Every walk test issues the same call, differing only in the user-buffer
     // size; hoist the declare-and-call preamble behind this accessor and
@@ -6255,16 +6279,14 @@ TEST_F(P2pMultiSegmentMicrotest, Walk_PosixFdCrossProcess_ExportsFdsAndStoresImp
             return hipSuccess;
         });
 
-    // The batch query returns a recognisable imported fd per segment.
+    ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle, CommHandleTypeProps());
+    // Each segment's fd query returns a recognisable imported fd.
     constexpr int kImpFdBase = 1000;
-    int   batchCalls    = 0;
-    int   batchSegments = -1;
-    ScopedHook batch(g_proxyClientBatchQueryFdBlocking,
-        [&](struct ncclComm*, struct ncclProxyConnector*, int*, int* rmtFds,
-            int numSegments) -> ncclResult_t {
-            ++batchCalls;
-            batchSegments = numSegments;
-            for (int i = 0; i < numSegments; ++i) rmtFds[i] = kImpFdBase + i;
+    int   queryCalls    = 0;
+    ScopedHook query(g_proxyClientQueryFdBlocking,
+        [&](struct ncclComm*, struct ncclProxyConnector*, int, int* rmtFd) -> ncclResult_t {
+            if (rmtFd) *rmtFd = kImpFdBase + queryCalls;
+            ++queryCalls;
             return ncclSuccess;
         });
 
@@ -6274,8 +6296,7 @@ TEST_F(P2pMultiSegmentMicrotest, Walk_PosixFdCrossProcess_ExportsFdsAndStoresImp
     EXPECT_EQ(r, ncclSuccess);
     EXPECT_EQ(numSegments, kNumSegments);
     EXPECT_EQ(exportCalls, kNumSegments);      // one export per segment
-    EXPECT_EQ(batchCalls, 1);                  // a single batched fd query
-    EXPECT_EQ(batchSegments, kNumSegments);
+    EXPECT_EQ(queryCalls, kNumSegments);       // one fd query per POSIX segment
     ASSERT_NE(ipcInfos, nullptr);
     // Each segment carries the imported fd the proxy handed back.
     for (int i = 0; i < numSegments; ++i) {
@@ -6283,7 +6304,7 @@ TEST_F(P2pMultiSegmentMicrotest, Walk_PosixFdCrossProcess_ExportsFdsAndStoresImp
     }
     EXPECT_EQ(seg.retainCalls, kNumSegments);
     EXPECT_EQ(seg.releaseCalls, kNumSegments);
-    // Production close()s each exported fd once the batch query has consumed it
+    // Production close()s each exported fd once its query has consumed it
     // (p2p.cc); a second close of each must fail with EBADF.
     EXPECT_EQ(static_cast<int>(exportedFds.size()), kNumSegments);
     for (int fd : exportedFds) {
@@ -6296,7 +6317,7 @@ TEST_F(P2pMultiSegmentMicrotest, Walk_PosixFdCrossProcess_ExportsFdsAndStoresImp
 
 // Cross-process registration with a fabric (non-POSIX) handle type exports
 // each segment's handle straight into that segment's ipcDesc; there is no
-// fd batch-query, and every retained handle is still released.
+// fd query, and every retained handle is still released.
 TEST_F(P2pMultiSegmentMicrotest, Walk_FabricCrossProcess_ExportsHandlesIntoIpcDesc)
 {
     // SetUp() already selected the fabric handle type; make it cross-process.
@@ -6316,11 +6337,11 @@ TEST_F(P2pMultiSegmentMicrotest, Walk_FabricCrossProcess_ExportsHandlesIntoIpcDe
             if (shareableHandle) std::memset(shareableHandle, 0x5A, 4);
             return hipSuccess;
         });
-    // The batch fd-query must not run on the non-POSIX arm.
-    ScopedHook batch(g_proxyClientBatchQueryFdBlocking,
-        [](struct ncclComm*, struct ncclProxyConnector*, int*, int*, int)
-            -> ncclResult_t {
-            ADD_FAILURE() << "non-POSIX arm must not batch-query fds";
+    ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle, CommHandleTypeProps());
+    // The fd query must not run on the non-POSIX arm.
+    ScopedHook query(g_proxyClientQueryFdBlocking,
+        [](struct ncclComm*, struct ncclProxyConnector*, int, int*) -> ncclResult_t {
+            ADD_FAILURE() << "non-POSIX arm must not query fds";
             return ncclSystemError;
         });
 
@@ -6343,10 +6364,10 @@ TEST_F(P2pMultiSegmentMicrotest, Walk_FabricCrossProcess_ExportsHandlesIntoIpcDe
     std::free(ipcInfos);
 }
 
-// A POSIX-fd, cross-process registration whose batch fd-query fails takes the
+// A POSIX-fd, cross-process registration whose fd query fails takes the
 // cleanup path: the exported fds are closed, every retained handle released,
 // and the ipcInfos array freed.
-TEST_F(P2pMultiSegmentMicrotest, Walk_PosixFdBatchQueryFails_ClosesFdsAndReleasesHandles)
+TEST_F(P2pMultiSegmentMicrotest, Walk_PosixFdQueryFails_ClosesFdsAndReleasesHandles)
 {
     ncclCuMemHandleType    = hipMemHandleTypePosixFileDescriptor;
     proxyConn_.sameProcess = 0;
@@ -6368,9 +6389,9 @@ TEST_F(P2pMultiSegmentMicrotest, Walk_PosixFdBatchQueryFails_ClosesFdsAndRelease
             }
             return hipSuccess;
         });
-    ScopedHook batch(g_proxyClientBatchQueryFdBlocking,
-        [](struct ncclComm*, struct ncclProxyConnector*, int*, int*, int)
-            -> ncclResult_t {
+    ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle, CommHandleTypeProps());
+    ScopedHook query(g_proxyClientQueryFdBlocking,
+        [](struct ncclComm*, struct ncclProxyConnector*, int, int*) -> ncclResult_t {
             return ncclSystemError;   // force the cleanup path
         });
 
@@ -6682,6 +6703,7 @@ TEST_F(P2pProxyRegisterMicrotest, ProxyRegister_CrossProcessPosixFd_ImportsFromF
     std::array<p2pIpcExpInfo, kNumSegments> req{};
     for (auto& seg : req) {
         seg.size  = 0x1000;
+        seg.handleType = hipMemHandleTypePosixFileDescriptor;  // set by the requester per segment
         seg.impFd = ::dup(STDERR_FILENO);   // a real, closeable fd for production's close()
         ASSERT_GE(seg.impFd, 0);             // stdin may be closed in a ctest child
     }

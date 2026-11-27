@@ -11,6 +11,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
+#include <cstring>
 #include <utility>
 #include <vector>
 
@@ -49,16 +51,92 @@ inline void ReleaseMappedVmm(hipDeviceptr_t base, size_t totalSize,
     if (base != 0 && totalSize != 0) (void)hipMemAddressFree(base, totalSize);
 }
 
-// Pinned, fd-exportable VMM allocation properties at one location.
-inline hipMemAllocationProp MakeVmmProp(hipMemLocationType locType, int locId, bool gpuDirectRdma)
+// 0 in MakeVmmProp means "the default type for the segment's location".
+constexpr hipMemAllocationHandleType kVmmDefaultHandleType = static_cast<hipMemAllocationHandleType>(0);
+
+#ifdef HIP_FABRIC_API
+constexpr hipMemAllocationHandleType kVmmFabricHandleType = hipMemHandleTypeFabric;
+#else
+// Runtimes without the FABRIC API never export FABRIC; the value only names the type in segment layouts.
+inline const hipMemAllocationHandleType kVmmFabricHandleType = static_cast<hipMemAllocationHandleType>(0x8);
+#endif
+
+// gfx9 parts (gfx942, gfx950) have no MNNVL, so RCCL never shares their memory as FABRIC.
+inline bool GpuArchHasMnnvl(int dev)
+{
+    hipDeviceProp_t prop{};
+    if (hipGetDeviceProperties(&prop, dev) != hipSuccess)
+    {
+        (void)hipGetLastError();
+        return false;
+    }
+    return std::strncmp(prop.gcnArchName, "gfx9", 4) != 0;
+}
+
+// Device segments default to the type RCCL shares memory with: FABRIC with NCCL_MNNVL_ENABLE=1 on an MNNVL device that
+// supports it, else a POSIX fd. RCCL_TEST_VMM_HANDLE_TYPE=posix|fabric forces it. An allocation carries one type.
+inline hipMemAllocationHandleType DefaultDeviceVmmHandleType(int dev)
+{
+    if (const char* force = std::getenv("RCCL_TEST_VMM_HANDLE_TYPE"))
+    {
+        if (std::strcmp(force, "fabric") == 0) return kVmmFabricHandleType;
+        if (std::strcmp(force, "posix") == 0) return hipMemHandleTypePosixFileDescriptor;
+    }
+#ifdef HIP_FABRIC_API
+    const char* mnnvl = std::getenv("NCCL_MNNVL_ENABLE");
+    int fabric = 0;
+    if (mnnvl != nullptr && std::atoi(mnnvl) == 1 && GpuArchHasMnnvl(dev) &&
+        hipDeviceGetAttribute(&fabric, hipDeviceAttributeHandleTypeFabricSupported, dev) == hipSuccess && fabric)
+        return hipMemHandleTypeFabric;
+    (void)hipGetLastError();
+#else
+    (void)dev;
+#endif
+    return hipMemHandleTypePosixFileDescriptor;
+}
+
+// Pinned, shareable VMM allocation properties at one location. Host VMM can only be shared as a POSIX fd.
+inline hipMemAllocationProp MakeVmmProp(hipMemLocationType locType, int locId, bool gpuDirectRdma,
+                                        hipMemAllocationHandleType handleType = kVmmDefaultHandleType)
 {
     hipMemAllocationProp prop            = {};
     prop.type                            = hipMemAllocationTypePinned;
     prop.location.type                   = locType;
     prop.location.id                     = locId;
-    prop.requestedHandleType             = hipMemHandleTypePosixFileDescriptor;
+    if (locType == hipMemLocationTypeHost)
+        prop.requestedHandleType = hipMemHandleTypePosixFileDescriptor;
+    else
+        prop.requestedHandleType = handleType != kVmmDefaultHandleType ? handleType : DefaultDeviceVmmHandleType(locId);
     prop.allocFlags.gpuDirectRDMACapable = gpuDirectRdma ? 1 : 0;
     return prop;
+}
+
+// True when `dev` has MNNVL and a FABRIC device allocation can be created and exported on it (not just advertised).
+inline bool FabricVmmExportSupported(int dev)
+{
+#ifndef HIP_FABRIC_API
+    (void)dev;
+    return false;
+#else
+    int fabric = 0;
+    if (!GpuArchHasMnnvl(dev) ||
+        hipDeviceGetAttribute(&fabric, hipDeviceAttributeHandleTypeFabricSupported, dev) != hipSuccess || !fabric)
+    {
+        (void)hipGetLastError();
+        return false;
+    }
+    const hipMemAllocationProp prop = MakeVmmProp(hipMemLocationTypeDevice, dev, /*gpuDirectRdma=*/true,
+                                                  hipMemHandleTypeFabric);
+    size_t g = 0;
+    hipMemGenericAllocationHandle_t h = 0;
+    hipMemFabricHandle_t fh;
+    const bool ok = hipMemGetAllocationGranularity(&g, &prop, hipMemAllocationGranularityMinimum) == hipSuccess &&
+                    hipMemCreate(&h, g, &prop, 0) == hipSuccess &&
+                    hipMemExportToShareableHandle(&fh, h, hipMemHandleTypeFabric, 0) == hipSuccess;
+    if (h != 0) (void)hipMemRelease(h);
+    (void)hipGetLastError();
+    return ok;
+#endif
 }
 
 // Contiguous VA range backed by N distinct VMM allocations mapped back-to-back.

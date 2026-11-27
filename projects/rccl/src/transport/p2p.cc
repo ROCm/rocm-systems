@@ -57,6 +57,8 @@ struct p2pIpcExpInfo {
   ncclIpcFd impFd;
   size_t size;
   uintptr_t offset;
+  // RCCL: per segment, set by the requester for a cuMem export; selects impFd or ipcDesc.cuDesc on import.
+  CUmemAllocationHandleType handleType;
 };
 
 struct p2pShm {
@@ -1148,6 +1150,27 @@ static ncclResult_t p2pSendProxyProgress(struct ncclProxyState* proxyState, stru
   return ncclSuccess;
 }
 
+// RCCL: an allocation carries one handle type (host VMM is POSIX fd only), so a user buffer is shared with a type it
+// was created with, preferring the communicator's. Imported handles report their exporter's type.
+static ncclResult_t p2pShareableHandleType(CUmemGenericAllocationHandle handle, CUmemAllocationHandleType* type) {
+  CUmemAllocationProp prop = {};
+  CUCHECK(cuMemGetAllocationPropertiesFromHandle(&prop, handle));
+  const unsigned types = static_cast<unsigned>(prop.requestedHandleTypes);
+  *type = ncclCuMemHandleType;
+  if (types & static_cast<unsigned>(ncclCuMemHandleType)) return ncclSuccess;
+  if (types & static_cast<unsigned>(CU_MEM_HANDLE_TYPE_FABRIC)) {
+    *type = CU_MEM_HANDLE_TYPE_FABRIC;
+  } else if (types & static_cast<unsigned>(CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR)) {
+    *type = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
+  }
+  return ncclSuccess;
+}
+
+// RCCL: a POSIX fd only travels over the proxy's local socket.
+static bool p2pPeerSharesHost(struct ncclComm* comm, int peerRank) {
+  return comm->peerInfo[peerRank].hostHash == comm->peerInfo[comm->rank].hostHash;
+}
+
 ncclResult_t ipcHandleMultiSegmentRegistration(CUdeviceptr userBuff, size_t userBuffSize, ncclComm* comm,
                                                struct ncclProxyConnector* proxyConn, size_t* totalMappedBufferSize,
                                                int* numSegments, struct p2pIpcExpInfo** ipcInfos) {
@@ -1163,14 +1186,14 @@ ncclResult_t ipcHandleMultiSegmentRegistration(CUdeviceptr userBuff, size_t user
   ncclIpcFd* expFds = nullptr;
   ncclIpcFd* impFds = nullptr;
   int capacity = 2;
+  const bool peerSharesHost = p2pPeerSharesHost(comm, proxyConn->rank);
   *ipcInfos = nullptr;
   // Minimum of two segments in this codepath
   NCCLCHECK(ncclCalloc(ipcInfos, capacity));
-  if (ncclCuMemHandleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
-    NCCLCHECKGOTO(ncclCalloc(&expFds, capacity), ret, fail);
-    for (int idx = 0; idx < capacity; idx++) {
-      expFds[idx] = NCCL_INVALID_IPC_FD;
-    }
+  // RCCL: segments pick their own handle type, so any of them may need an fd.
+  NCCLCHECKGOTO(ncclCalloc(&expFds, capacity), ret, fail);
+  for (int idx = 0; idx < capacity; idx++) {
+    expFds[idx] = NCCL_INVALID_IPC_FD;
   }
   NCCLCHECKGOTO(ncclCalloc(&segmentHandles, capacity), ret, fail);
 
@@ -1179,11 +1202,9 @@ ncclResult_t ipcHandleMultiSegmentRegistration(CUdeviceptr userBuff, size_t user
     if (segment == capacity) {
       capacity = capacity * 2;
       NCCLCHECKGOTO(ncclRealloc(ipcInfos, segment, capacity), ret, fail);
-      if (ncclCuMemHandleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
-        NCCLCHECKGOTO(ncclRealloc(&expFds, segment, capacity), ret, fail);
-        for (int idx = segment; idx < capacity; idx++) {
-          expFds[idx] = NCCL_INVALID_IPC_FD;
-        }
+      NCCLCHECKGOTO(ncclRealloc(&expFds, segment, capacity), ret, fail);
+      for (int idx = segment; idx < capacity; idx++) {
+        expFds[idx] = NCCL_INVALID_IPC_FD;
       }
       NCCLCHECKGOTO(ncclRealloc(&segmentHandles, segment, capacity), ret, fail);
     }
@@ -1204,12 +1225,20 @@ ncclResult_t ipcHandleMultiSegmentRegistration(CUdeviceptr userBuff, size_t user
     if (proxyConn->sameProcess) {
       memcpy(&ipcInfo->ipcDesc.memHandle, &segmentHandles[segment], sizeof(CUmemGenericAllocationHandle));
     } else {
-      if (ncclCuMemHandleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
-        CUCHECKGOTO(cuMemExportToShareableHandle(&expFds[segment], segmentHandles[segment], ncclCuMemHandleType, 0),
+      NCCLCHECKGOTO(p2pShareableHandleType(segmentHandles[segment], &ipcInfo->handleType), ret, fail);
+      if (ipcInfo->handleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
+        if (!peerSharesHost) {
+          // Same as a failed single-segment export: leave the buffer unregistered for this peer.
+          INFO(NCCL_REG, "Multi-segment IPC: segment %d is POSIX fd only and peer rank %d is on another host; "
+                         "skipping registration", segment, proxyConn->rank);
+          goto fail;
+        }
+        CUCHECKGOTO(cuMemExportToShareableHandle(&expFds[segment], segmentHandles[segment],
+                                                 CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR, 0),
                     ret, fail);
       } else {
         CUCHECKGOTO(cuMemExportToShareableHandle(&ipcInfo->ipcDesc.cuDesc.handle, segmentHandles[segment],
-                                                 ncclCuMemHandleType, 0),
+                                                 ipcInfo->handleType, 0),
                     ret, fail);
       }
     }
@@ -1218,18 +1247,19 @@ ncclResult_t ipcHandleMultiSegmentRegistration(CUdeviceptr userBuff, size_t user
     mappedPtrEnd = (CUdeviceptr)((char*)tmpBase + tmpBaseSize);
   }
 
-  if (ncclCuMemHandleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
-    NCCLCHECKGOTO(ncclCalloc(&impFds, *numSegments), ret, fail);
-    NCCLCHECKGOTO(ncclProxyClientBatchQueryFdBlocking(comm, proxyConn, expFds, impFds, *numSegments), ret, fail);
+  NCCLCHECKGOTO(ncclCalloc(&impFds, *numSegments), ret, fail);
+  if (!proxyConn->sameProcess) {
+    for (int segment = 0; segment < *numSegments; segment++) {
+      if ((*ipcInfos)[segment].handleType != CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) continue;
+      NCCLCHECKGOTO(ncclProxyClientQueryFdBlocking(comm, proxyConn, expFds[segment], &impFds[segment]), ret, fail);
+    }
   }
   for (int segment = 0; segment < *numSegments; segment++) {
     struct p2pIpcExpInfo* ipcInfo = *ipcInfos + segment;
-    if (!proxyConn->sameProcess) {
-      if (ncclCuMemHandleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
-        ipcInfo->impFd = impFds[segment];
-        ncclIpcFdClose(expFds[segment]);
-        expFds[segment] = NCCL_INVALID_IPC_FD;
-      }
+    if (!proxyConn->sameProcess && ipcInfo->handleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
+      ipcInfo->impFd = impFds[segment];
+      ncclIpcFdClose(expFds[segment]);
+      expFds[segment] = NCCL_INVALID_IPC_FD;
     }
     CUCHECKGOTO(cuMemRelease(segmentHandles[segment]), ret, fail);
   }
@@ -1248,11 +1278,9 @@ fail:
     *ipcInfos = nullptr;
   }
   for (int segment = 0; segment < *numSegments; segment++) {
-    if (ncclCuMemHandleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
-      if (expFds[segment] != NCCL_INVALID_IPC_FD) {
-        ncclIpcFdClose(expFds[segment]);
-        expFds[segment] = NCCL_INVALID_IPC_FD;
-      }
+    if (expFds != nullptr && expFds[segment] != NCCL_INVALID_IPC_FD) {
+      ncclIpcFdClose(expFds[segment]);
+      expFds[segment] = NCCL_INVALID_IPC_FD;
     }
     CUCHECKIGNORE(cuMemRelease(segmentHandles[segment]));
   }
@@ -1364,6 +1392,8 @@ static ncclResult_t ipcRegisterBuffer(ncclComm* comm, const void* userbuff, size
             NCCLCHECKGOTO(ipcHandleMultiSegmentRegistration((CUdeviceptr)regBeg, regSize, comm, proxyConn,
                                                             &totalMappedSize, &numSegments, &ipcInfo),
                           ret, fail);
+            // RCCL: no infos without an error means this peer cannot import a segment; stay unregistered.
+            if (ipcInfo == nullptr) goto fail;
           } else {
             CUmemGenericAllocationHandle handle;
             if (CUPROBE(cuMemRetainAllocationHandle(&handle, baseAddr)) != CUDA_SUCCESS) {
@@ -1381,15 +1411,27 @@ static ncclResult_t ipcRegisterBuffer(ncclComm* comm, const void* userbuff, size
               if (proxyConn->sameProcess) {
                 memcpy(&ipcInfo->ipcDesc.memHandle, &handle, sizeof(CUmemGenericAllocationHandle));
               } else {
-                if (ncclCuMemHandleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
+                if (p2pShareableHandleType(handle, &ipcInfo->handleType) != ncclSuccess) {
+                  CUCHECKGOTO(cuMemRelease(handle), ret, fail);
+                  goto fail;
+                }
+                if (ipcInfo->handleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
+                  if (!p2pPeerSharesHost(comm, peerRank)) {
+                    // RCCL: same as a failed export below: leave the buffer unregistered for this peer.
+                    INFO(NCCL_REG, "IPC: buffer %p is POSIX fd only and peer rank %d is on another host; skipping",
+                         userbuff, peerRank);
+                    CUCHECKGOTO(cuMemRelease(handle), ret, fail);
+                    goto fail;
+                  }
                   ncclIpcFd expFd = NCCL_INVALID_IPC_FD;
-                  CUCHECKGOTO(cuMemExportToShareableHandle(&expFd, handle, ncclCuMemHandleType, 0), ret, fail);
+                  CUCHECKGOTO(cuMemExportToShareableHandle(&expFd, handle, CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR, 0),
+                              ret, fail);
                   NCCLCHECKGOTO(ncclProxyClientQueryFdBlocking(comm, proxyConn, expFd, &ipcInfo->impFd), ret, fail);
                   SYSCHECKGOTO(ncclIpcFdClose(expFd), "close", ret, fail);
                 } else {
                   // Allow this to silently fail for cases where the user buff cannot be registered
-                  if (CUPFN(cuMemExportToShareableHandle(&ipcInfo->ipcDesc.cuDesc.handle, handle, ncclCuMemHandleType,
-                                                         0)) != CUDA_SUCCESS) {
+                  if (CUPFN(cuMemExportToShareableHandle(&ipcInfo->ipcDesc.cuDesc.handle, handle,
+                                                         ipcInfo->handleType, 0)) != CUDA_SUCCESS) {
                     // RCCL: HIP keeps the failed export as the thread's last error
                     (void)cudaGetLastError();
                     CUCHECKGOTO(cuMemRelease(handle), ret, fail);
@@ -1672,16 +1714,18 @@ static ncclResult_t p2pProxyRegister(struct ncclProxyConnection* connection, str
         // if proxy is same process as request peer, we just need to map the handle.
         memcpy(&segmentHandles[segment], &ipcExpInfo[segment].ipcDesc.memHandle, sizeof(CUmemGenericAllocationHandle));
       } else {
-        if (ncclCuMemHandleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
+        // RCCL: the requester records each segment's handle type.
+        const CUmemAllocationHandleType type = ipcExpInfo[segment].handleType;
+        if (type == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
           CUCHECKGOTO(cuMemImportFromShareableHandle(&segmentHandles[segment],
-                                                     (void*)(uintptr_t)ipcExpInfo[segment].impFd, ncclCuMemHandleType),
+                                                     (void*)(uintptr_t)ipcExpInfo[segment].impFd, type),
                       ret, fail);
           // Must be set before the fd close below can jump to fail:, which releases only imported handles.
           imported[segment] = true;
           SYSCHECKGOTO(ncclIpcFdClose(ipcExpInfo[segment].impFd), "close", ret, fail);
         } else {
           CUCHECKGOTO(cuMemImportFromShareableHandle(&segmentHandles[segment],
-                                                     (void*)&ipcExpInfo[segment].ipcDesc.cuDesc, ncclCuMemHandleType),
+                                                     (void*)&ipcExpInfo[segment].ipcDesc.cuDesc, type),
                       ret, fail);
           imported[segment] = true;
         }
