@@ -371,13 +371,25 @@ def kpack_offload_binary(
         if verbose:
             print("\nPhase 3: Zero-page .hip_fatbin (optimization)")
 
-        zero_result = conservative_zero_page(surgery, ".hip_fatbin")
-        if not zero_result.success:
-            raise RuntimeError(f"Zero-page optimization failed: {zero_result.error}")
+        # Snapshot before zero-paging so we can fall back to the unmodified
+        # binary if zero-paging produces a layout the verifier rejects.
+        pre_zeropage = bytes(surgery.data)
 
-        if verbose:
-            print(f"  Pages zeroed: {zero_result.pages_zeroed}")
-            print(f"  Bytes saved: {zero_result.bytes_saved:,}")
+        zero_result = conservative_zero_page(surgery, ".hip_fatbin")
+        zero_ok = False
+        if zero_result.success:
+            # Run PHDR normalization here too so the check covers the final layout.
+            normalize_phdr_vaddr(surgery)
+            zero_ok = ElfVerifier.verify_data(surgery.data).passed
+
+        if zero_ok:
+            if verbose:
+                print(f"  Pages zeroed: {zero_result.pages_zeroed}")
+                print(f"  Bytes saved: {zero_result.bytes_saved:,}")
+        else:
+            reason = zero_result.error or "post-zero-page verification failed"
+            print(f"WARNING: skipping zero-page for {input_path}: {reason}")
+            surgery = ElfSurgery(bytearray(pre_zeropage), input_path)
 
     else:
         # No .hip_fatbin, skip pointer update, magic rewrite, and zero-page
