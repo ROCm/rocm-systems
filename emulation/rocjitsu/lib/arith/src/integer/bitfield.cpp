@@ -387,6 +387,53 @@ int rj_arith_v_alignbyte_b32_w64(uint64_t flags, uint64_t exec_mask, uint64_t in
                                                                d, a, b, c);
 }
 
+// Use shifts and masks to pack the low or high BF16 halves of two full VGPRs.
+int rj_arith_v_perm_b32_uniform_w64(uint64_t flags, uint64_t exec_mask, uint32_t *d,
+                                    const uint32_t *a, const uint32_t *b, uint32_t selector) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate(flags, 0)) {
+    return error;
+  }
+  if (!exec_mask) {
+    return RJ_ARITH_SUCCESS;
+  }
+  const bool high_halves = selector == 0x07060302u;
+  if (exec_mask == ~uint64_t{0} && (high_halves || selector == 0x05040100u)) {
+    [[maybe_unused]] const auto level = rocjitsu::arith::wave_cpu_level(
+        flags, rocjitsu::arith::aligned_for_512(a, b) && rocjitsu::arith::aligned_for_512(d));
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+    if (level >= RJ_ARITH_CPU_X86_64_V4) {
+      rocjitsu::arith::perm_pack_halves_x86_64_v4(d, a, b, high_halves);
+      return RJ_ARITH_SUCCESS;
+    }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+    if (level >= RJ_ARITH_CPU_X86_64_V3) {
+      rocjitsu::arith::perm_pack_halves_x86_64_v3(d, a, b, high_halves);
+      return RJ_ARITH_SUCCESS;
+    }
+#endif
+    if (high_halves) {
+      for (int lane = 0; lane < 64; ++lane) {
+        d[lane] = (a[lane] & 0xffff0000u) | (b[lane] >> 16);
+      }
+    } else {
+      for (int lane = 0; lane < 64; ++lane) {
+        d[lane] = (a[lane] << 16) | (b[lane] & 0xffffu);
+      }
+    }
+    return RJ_ARITH_SUCCESS;
+  }
+  uint32_t control[64];
+  for (auto &word : control) {
+    word = selector;
+  }
+  const uint32_t *uniform = control;
+  return bitfield_wave64<rocjitsu::arith::Bitfield::Permute>(flags, exec_mask, 0, &d, &a, &b,
+                                                             &uniform);
+}
+
 // Permute source bytes for selected lanes.
 // Return errors before changing outputs. Inactive destination lanes are preserved.
 int rj_arith_v_perm_b32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
