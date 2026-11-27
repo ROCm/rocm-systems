@@ -41,7 +41,10 @@ jobs:
     runs-on: [ubuntu-24.04]
     timeout-minutes: 45
     container:
-      image: ${{ inputs.ci_image }}
+      # The hipFile CI image is built from this repo's Dockerfiles by
+      # hipfile-image-build.yml and published to GHCR under floating tags that
+      # are refreshed on purpose, so it is not pinned to a digest.
+      image: ${{ inputs.ci_image }} # zizmor: ignore[unpinned-images]
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
