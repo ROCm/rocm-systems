@@ -1773,9 +1773,9 @@
 
 <h1 id="fault-injection">Fault injection<a class="headerlink" href="#fault-injection" title="Permanent link">&para;</a></h1>
 <p>The fault-injection library creates deliberately modified AMDGPU code objects
-for experiments with synchronization and LDS address failures. It runs offline
-on the host: callers supply an image, select a qualified operation, and receive a mutant
-image or a typed error. It neither initializes HSA nor dispatches GPU work.</p>
+for experiments with synchronization, LDS and atomic address failures. It runs
+offline on the host: callers supply an image, select a qualified operation, and
+receive a mutant image or a typed error. It neither initializes HSA nor dispatches GPU work.</p>
 <p>The internal C++ library and <code>rj_code_mutate</code> CLI perform the same mutation.
 ConSan is an optional consumer of the output; both the library and CLI build
 and run host tests with the ConSan compiler, runtime, and analyzer disabled.
@@ -1884,8 +1884,13 @@ See <a href="../isa-target-providers/">ISA target providers</a> and the
 <td><a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/lds_wrong_address.h">LDS API</a>, <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/patch/fault_injection/lds_wrong_address_test.cpp">library tests</a>, <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/patch/fault_injection/lds_cli_test.cpp">CLI tests</a></td>
 </tr>
 <tr>
+<td>Atomic wrong address (<code>AtomicWrongAddress</code>)</td>
+<td>Lists all owned atomic sites before recipe admission. Mutates the signed24 byte offset of twelve-byte FLAT/GLOBAL atomics on gfx1200/gfx1201 wave32/wave64 and gfx1250/gfx1251 wave32, preserving the operation's alignment. Unsupported forms retain their ordinals and fail on apply.</td>
+<td><a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/atomic_wrong_address.h">Atomic API</a>, <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/patch/fault_injection/atomic_wrong_address_test.cpp">library tests</a>, <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/patch/fault_injection/atomic_cli_test.cpp">CLI tests</a></td>
+</tr>
+<tr>
 <td>Exact and logical-ordinal selection</td>
-<td>An exact kernel name chooses one inventory; an exact context-bound handle takes precedence over the zero-based logical ordinal. Invalid exact requests fail without fallback. Ordinal zero chooses the first barrier by first-member offset, or the first LDS instruction by source offset. There is no race ranking or legacy physical-index adapter.</td>
+<td>An exact kernel name chooses one inventory; an exact context-bound handle takes precedence over the zero-based logical ordinal. Invalid exact requests fail without fallback. Ordinal zero chooses the first barrier by first-member offset, or the first LDS instruction or atomic site by source offset. Atomic ordinals include unsupported forms. There is no race ranking or legacy physical-index adapter.</td>
 <td><a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/drop_barrier.h"><code>DropBarrierSelector</code></a>, <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/drop_barrier.cpp"><code>select_drop_barrier</code></a>, <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/lds_wrong_address.h"><code>LdsSelector</code></a> and <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/lds_wrong_address.cpp"><code>select_lds_wrong_address</code></a>, <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/patch/fault_injection/drop_barrier_test.cpp">selection regressions</a></td>
 </tr>
 <tr>
@@ -1900,7 +1905,7 @@ See <a href="../isa-target-providers/">ISA target providers</a> and the
 </tr>
 <tr>
 <td>Offline CLI</td>
-<td>Lists current-input sites and emits one complete Drop or one supported LDS address mutation using the same library.</td>
+<td>Lists current-input sites and emits one complete Drop, supported LDS address mutation, or supported atomic address mutation using the same library.</td>
 <td><a href="#command-line-usage">usage</a>, <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tools/rj_code_mutate.cpp">frontend</a>, <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/patch/fault_injection/mutation_cli_test.cpp">integration tests</a></td>
 </tr>
 <tr>
@@ -1915,7 +1920,7 @@ See <a href="../isa-target-providers/">ISA target providers</a> and the
 </tr>
 <tr>
 <td>Other mutation recipes and composition</td>
-<td>Planned. Barrier movement, other address/order/scope changes, grouped or destructive partial Drop, and multi-mutation composition are not implemented here.</td>
+<td>Planned. Barrier movement, ordinary address changes, order/scope changes, grouped or destructive partial Drop, and multi-mutation composition are not implemented here.</td>
 <td>—</td>
 </tr>
 <tr>
@@ -1935,6 +1940,19 @@ members and <code>selection.owner()</code> retains pristine owner offsets. Resca
 emitted image for its section and descriptor file locations. Fresh CFG block
 boundaries can differ because of the added branches. FI does not expose a
 second generic edit plan, validator, or writer.</p>
+<p>Atomic callers use <code>discover_atomic_wrong_address</code>, <code>select_atomic_wrong_address</code>
+and <code>apply_atomic_wrong_address</code> with the same context lifetime rule. Inventory
+ordinals include unsupported atomic forms. A delta must be positive, at most
+<code>0x7fffff</code> bytes, and a multiple of four bytes and of the selected operation's
+natural alignment: eight bytes for 64-bit atomics, four for 32-bit and packed
+16-bit-pair atomics. Compare-and-swap uses the memory element's width, not the
+combined compare/replacement payload width. The resulting offset must fit the
+signed24 field. These checks preserve an already aligned runtime address; the
+caller remains responsible for the original address's alignment and both
+addresses' validity. CDNA5 <code>scale_offset</code> does not change the immediate's byte
+units. Mutation changes only the immediate and preserves operands, return/CAS
+behavior, modifiers, waits and the guest continuation. Successful discovery
+does not guarantee that the shared writer can emit an input's layout.</p>
 <h2 id="target-coverage-and-qualification">Target coverage and qualification<a class="headerlink" href="#target-coverage-and-qualification" title="Permanent link">&para;</a></h2>
 <p><code>fault_mutation_capabilities()</code> lists transformation admission from the linked
 default ISA registry and family policy used by discovery and apply. The current
@@ -2363,6 +2381,29 @@ application. Handle the returned typed error at each failure; on success,
 <code>LdsSelection</code> in <code>LdsSelector::exact</code> and call <code>select_lds_wrong_address</code> on
 an inventory from the same context and entry. Exact takes precedence over the
 ordinal; a foreign or expired handle fails without fallback.</p>
+<p>For atomics, list the exact kernel's complete inventory first:</p>
+<div class="highlight"><pre><span></span><code>emulation/rocjitsu/build/tools/rj_code_mutate<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--input<span class="w"> </span>original.hsaco<span class="w"> </span>--kernel<span class="w"> </span>my_kernel<span class="w"> </span>--kind<span class="w"> </span>AtomicWrongAddress<span class="w"> </span>--list
+</code></pre></div>
+<p>For example, a gfx1201 input containing an eight-byte <code>ds_consume</code> followed by
+a twelve-byte <code>global_atomic_add_u64</code> with an immediate offset of zero can
+produce the following abbreviated listing. All coordinates are relative to pristine <code>.text</code>:</p>
+<div class="highlight"><pre><span></span><code>ordinal=0 exact=0 size=8 byte_offset=unknown address_supported=0 ... form=ds_consume ...
+ordinal=1 exact=8 size=12 byte_offset=0 address_supported=1 ... form=global_atomic_add_u64 ...
+</code></pre></div>
+<p>The DS atomic occupies ordinal zero even though this recipe cannot mutate it.
+Copy <code>exact=8</code> from the row with <code>address_supported=1</code> and supply an eight-byte
+delta to preserve the selected 64-bit atomic's natural alignment:</p>
+<div class="highlight"><pre><span></span><code>emulation/rocjitsu/build/tools/rj_code_mutate<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--input<span class="w"> </span>original.hsaco<span class="w"> </span>--kernel<span class="w"> </span>my_kernel<span class="w"> </span>--kind<span class="w"> </span>AtomicWrongAddress<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--exact<span class="w"> </span><span class="m">8</span><span class="w"> </span>--address-delta<span class="w"> </span><span class="m">8</span><span class="w"> </span>--output<span class="w"> </span>atomic-mutant.hsaco
+</code></pre></div>
+<p>The selected immediate changes from 0 to 8. <code>--address-delta 4</code> is rejected
+with <code>code=InvalidParameters</code> before output creation for this 64-bit operation;
+32-bit atomics accept a delta of four bytes. Selecting <code>--exact 0</code> fails with
+<code>code=UnsupportedForm</code>, including when <code>--ordinal 1</code> is also supplied. An exact
+selection never falls back to the ordinal. Adding a future DS address recipe
+will not renumber the global atomic.</p>
 <p>For a <code>gfx1250</code> Drop mutant that meets ConSan's native LDS admission, fresh
 preparation consumes <code>mutant.hsaco</code> as its new original image:</p>
 <div class="highlight"><pre><span></span><code>emulation/rocjitsu/build/tools/rj_consan_prepare<span class="w"> </span><span class="se">\</span>
@@ -2383,12 +2424,16 @@ one member; a split pair has two. <code>LdsWrongAddress</code> listing lines con
 <code>ordinal</code>, the instruction's <code>.text</code>-relative <code>exact</code> byte offset, its original
 <code>address_vgpr</code>, <code>address_bank</code>, target, form, <code>affected_owners</code>, and one
 <code>owner=name:entry_offset:descriptor_file_offset</code> field for every affected kernel.
+<code>AtomicWrongAddress</code> listing lines contain <code>ordinal</code>, <code>.text</code>-relative <code>exact</code>,
+instruction <code>size</code>, <code>byte_offset</code> (or <code>unknown</code>), <code>address_supported</code>, target,
+form and the same affected-owner fields. <code>address_supported=1</code> describes the
+instruction's recipe, not whether any particular delta is aligned or in range.
 The mutation summary reports that same source-coordinate owner set. These fields
 do not claim per-dispatch isolation. Coordinates describe only this input and exact entry;
 they are not reusable handles for another image or legacy physical indices.</p>
-<p>Drop emission redirects each selected member through a NOP trampoline. LDS
-emission redirects the selected instruction through a trampoline containing the
-replacement instruction. The mutant's text and ELF layout can grow, and
+<p>Drop emission redirects each selected member through a NOP trampoline. LDS and
+atomic emission redirect the selected instruction through a trampoline containing
+the replacement instruction. The mutant's text and ELF layout can grow, and
 descriptor-relative entry fields can change. Reparse the output and list its
 sites again before selecting another mutation.</p>
 <p>Drop discovery rejects trap-handler forms (-2 on RDNA4/CDNA5 and -4 on CDNA5)
@@ -2399,8 +2444,9 @@ that cluster semantics are active.</p>
 <p>Use <code>--exact TEXT-OFFSET</code> to resolve that coordinate into a context-bound library
 selection. Exact takes precedence over <code>--ordinal</code>, including an out-of-range
 ordinal; invalid exact requests fail without fallback. Without either selector,
-ordinal zero selects the first complete barrier or supported LDS instruction in
-source order. Numbers accept unsigned decimal or <code>0x</code> hexadecimal.
+ordinal zero selects the first complete barrier, supported LDS instruction, or
+atomic site in source order. The first atomic can be unsupported. Numbers accept
+unsigned decimal or <code>0x</code> hexadecimal.
 <code>--target gfx1250</code>, if supplied, asserts the parsed identity and never selects a
 different decoder. Input ABI and wave admission are the library's shared DBI
 checks, without another CLI version gate.</p>
@@ -2437,20 +2483,24 @@ prints returned library assumptions to stderr, prefixed by
 and the clustered dispatch requirement when applicable. Failure to write Drop
 assumptions returns status 3 before printing a success summary. LDS reports its
 replacement <code>address_vgpr</code>; its runtime preconditions are described above. The
+atomic summary reports <code>address_delta</code> in bytes and the affected-owner set. The
 CLI emits only the mutant file and does not load HSA or a capture plugin.
 Mutation success and the capability listing make no execution or detector
 qualification claim.</p>
 <p>The <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/patch/fault_injection/mutation_cli_test.cpp">Drop CLI tests</a> exercise
 all ten Drop rows above using the built executable. The <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/patch/fault_injection/lds_cli_test.cpp">LDS CLI tests</a>
-cover the bounded LDS profile. The <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/patch/fault_injection/b96_lds_test.cpp">b96 library</a>, <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/patch/fault_injection/b96_lds_cli_test.cpp">b96 CLI</a>, <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/patch/fault_injection/scalar_two_lds_test.cpp">scalar/two-address library</a>, and <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/patch/fault_injection/scalar_two_lds_cli_test.cpp">scalar/two-address CLI</a> suites exercise the additional widths and forms, including RDNA4 wave32. These tests compare library and CLI bytes, decode
+cover the bounded LDS profile. The <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/patch/fault_injection/atomic_wrong_address_test.cpp">atomic library</a>
+and <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/patch/fault_injection/atomic_cli_test.cpp">atomic CLI</a> tests cover
+stable unsupported ordinals, source identities, aligned deltas and emitted
+instruction preservation on the six modern target/wave profiles. The <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/patch/fault_injection/b96_lds_test.cpp">b96 library</a>, <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/patch/fault_injection/b96_lds_cli_test.cpp">b96 CLI</a>, <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/patch/fault_injection/scalar_two_lds_test.cpp">scalar/two-address library</a>, and <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/patch/fault_injection/scalar_two_lds_cli_test.cpp">scalar/two-address CLI</a> suites exercise the additional widths and forms, including RDNA4 wave32. These tests compare library and CLI bytes, decode
 selected instructions, reparse mutants and check preservation and rejection
 paths; the Drop tests also cover sibling kernels and I/O paths. The
 symbol-boundary test checks the actual executable for runtime and execution
 provider dependencies. To run the focused suites:</p>
 <div class="highlight"><pre><span></span><code>ctest<span class="w"> </span>--test-dir<span class="w"> </span>emulation/rocjitsu/build<span class="w"> </span>--show-only<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-R<span class="w"> </span><span class="s1">'FaultMutationCli|FaultDropBarrier|FaultLds|CheckedTextEdits|B96Lds|ScalarTwoLds|CdnaLds'</span>
+<span class="w">  </span>-R<span class="w"> </span><span class="s1">'FaultMutationCli|FaultDropBarrier|FaultLds|FaultAtomic|CheckedTextEdits|B96Lds|ScalarTwoLds|CdnaLds'</span>
 ctest<span class="w"> </span>--test-dir<span class="w"> </span>emulation/rocjitsu/build<span class="w"> </span>--output-on-failure<span class="w"> </span>--no-tests<span class="o">=</span>error<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-R<span class="w"> </span><span class="s1">'FaultMutationCli|FaultDropBarrier|FaultLds|CheckedTextEdits|B96Lds|ScalarTwoLds|CdnaLds'</span>
+<span class="w">  </span>-R<span class="w"> </span><span class="s1">'FaultMutationCli|FaultDropBarrier|FaultLds|FaultAtomic|CheckedTextEdits|B96Lds|ScalarTwoLds|CdnaLds'</span>
 </code></pre></div>
 
 
