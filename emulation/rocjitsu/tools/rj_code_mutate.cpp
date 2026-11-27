@@ -70,7 +70,7 @@ constexpr std::string_view kMutationHelp =
     "an aligned original address and valid source and mutant addresses. Only the\n"
     "immediate offset changes; data, returning behavior, modifiers and waits remain.\n"
     "An unsupported selected form fails without renumbering atomic ordinals.\n"
-    "Modern buffer atomics require a nonnegative original immediate offset.\n"
+    "CDNA5 and RDNA4 buffer atomics require a nonnegative original immediate offset.\n"
     "Output must be new; existing files, aliases and in-place mutation are refused.\n"
     "Host transformation only; no GPU execution or detector qualification.\n";
 
