@@ -14,6 +14,7 @@
 #include "rocjitsu/isa/target_provider.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
+#include "scoped_fp_environment.h"
 #include "util/host_target.h"
 
 #include <array>
@@ -302,31 +303,22 @@ TEST(Gfx1250ExecutionTest, ArchitectureDecoderVectorScalarSourceFailureRejectsMe
   }
 }
 
-TEST(FpModePolicyTest, F32ToBf16RoundHonorsMode) {
-  const auto convert = [](uint32_t bits, uint32_t round_mode) {
-    return amdgpu::fp_mode::detail::f32_to_bf16_round(std::bit_cast<float>(bits), round_mode);
+// Selected IEEE BF16-add boundaries; packed halves have independent results.
+TEST(FpModePolicyTest, PackedBf16Addition) {
+  rocjitsu::ScopedDefaultFpEnvironment environment;
+  struct Case {
+    uint32_t a, b, expected;
   };
-
-  for (uint32_t mode = 0; mode < 4; ++mode) {
-    EXPECT_EQ(convert(0x3f800000u, mode), 0x3f80u); // Exact.
-    EXPECT_EQ(convert(0x7f800000u, mode), 0x7f80u); // Infinity.
-    EXPECT_EQ(convert(0x7f800001u, mode), 0x7f81u); // Preserve a low-payload NaN.
+  constexpr Case cases[] = {
+      {0x3f813f80, 0x3b803b80, 0x3f823f80}, // Half-ULP ties, odd and even mantissas.
+      {0x7f7fff7f, 0x7b00fb00, 0x7f80ff80}, // Positive/negative overflow midpoint.
+      {0x00018001, 0x00018001, 0x00028002}, // Preserved subnormals.
+      {0x00808080, 0x80010001, 0x007f807f}, // Cancellation into the subnormal range.
+      {0x80000000, 0x80008000, 0x80000000}, // Same/opposite signed zeros.
+  };
+  for (const auto &c : cases) {
+    EXPECT_EQ(amdgpu::fp_mode::atomic_add_packed_16(c.a, c.b, true, 3), c.expected);
   }
-
-  EXPECT_EQ(convert(0x3f808001u, 0), 0x3f81u);
-  EXPECT_EQ(convert(0x3f808001u, 1), 0x3f81u);
-  EXPECT_EQ(convert(0x3f808001u, 2), 0x3f80u);
-  EXPECT_EQ(convert(0x3f808001u, 3), 0x3f80u);
-
-  EXPECT_EQ(convert(0xbf808001u, 0), 0xbf81u);
-  EXPECT_EQ(convert(0xbf808001u, 1), 0xbf80u);
-  EXPECT_EQ(convert(0xbf808001u, 2), 0xbf81u);
-  EXPECT_EQ(convert(0xbf808001u, 3), 0xbf80u);
-
-  EXPECT_EQ(convert(0x7f7fffffu, 0), 0x7f80u);
-  EXPECT_EQ(convert(0x7f7fffffu, 1), 0x7f80u);
-  EXPECT_EQ(convert(0x7f7fffffu, 2), 0x7f7fu);
-  EXPECT_EQ(convert(0x7f7fffffu, 3), 0x7f7fu);
 }
 
 TEST(Gfx1250ExecutionTest, GenericF16OmodStaysActiveAndFinalizesWithIeeeDenormMode) {

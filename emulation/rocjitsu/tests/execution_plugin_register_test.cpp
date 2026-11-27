@@ -28,6 +28,7 @@
 #include "rocjitsu/vm/amdgpu/hwreg.h"
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
 #include "rocjitsu/vm/amdgpu/memory_wait_scoreboard.h"
+#include "scoped_fp_environment.h"
 #include "util/host_target.h"
 #include "util/simd.h"
 #include "util/simd_test_hooks.h"
@@ -3071,7 +3072,7 @@ TEST(ExecutionPluginTest, VopdArithmeticObserversSeeCallerFpState) {
         observer->read_mxcsrs.clear();
         {
           // Restore the original host environment even after a fatal assertion.
-          fp_mode::detail::ScopedFenv environment(0);
+          rocjitsu::ScopedDefaultFpEnvironment environment;
           _mm_setcsr((_mm_getcsr() & ~_MM_EXCEPT_MASK) | _MM_EXCEPT_UNDERFLOW);
           const uint32_t host_mxcsr = _mm_getcsr();
 
@@ -3278,7 +3279,7 @@ TEST(ExecutionPluginTest, Vop3FmacSimdReadObservationReportsAccumulator) {
     return;
   } else {
     ForceScalarOverride force_simd(false);
-    amdgpu::fp_mode::detail::ScopedFenv floating_environment(0);
+    rocjitsu::ScopedDefaultFpEnvironment floating_environment;
     PluginFixture f;
     ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
     auto *plugin = f.attach_ordering_plugin();
