@@ -1,5 +1,5 @@
 The profiling environment variables in HIP are collected in the following table. For
-more information, check :doc:`setting the number of CUs page <rocm:how-to/setting-cus>`.
+more information, check :doc:`setting the number of CUs page <rocm:reference/environment-variables/setting-cus>`.
 
 .. _hip-env-prof:
 .. list-table::

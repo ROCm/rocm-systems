@@ -13,7 +13,7 @@ install RCCL is to install ROCm using the package manager for your Linux
 distribution, which provides RCCL along with the rest of the ROCm stack.
 
 Before you begin, verify that your system is supported. For more information,
-see :doc:`ROCm components <rocm:what-is-rocm>`.
+see :ref:`ROCm Core SDK components <rocm:release-components>`.
 
 For advanced workflows, source builds, or custom configurations, see
 :doc:`./building-installing`.

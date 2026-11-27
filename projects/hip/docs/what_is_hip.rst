@@ -17,7 +17,7 @@ systems, using CPUs and AMD GPUs from a single source code base.
     :align: center
 
 * HIP is a thin API with little or no performance impact over coding directly
-  in AMD :doc:`ROCm <rocm:what-is-rocm>`.
+  in AMD :doc:`ROCm <rocm:about/what-is-rocm>`.
 
 * HIP enables coding in a single-source C++ programming language, including
   features such as templates, C++11 lambdas, classes, namespaces, and more.
