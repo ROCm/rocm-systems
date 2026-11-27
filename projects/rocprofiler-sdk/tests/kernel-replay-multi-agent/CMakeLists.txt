@@ -84,9 +84,12 @@ add_multi_agent_test(
     ENVIRONMENT
     "KR_SNAPSHOT=device")
 
-# Fills both GPUs with fine-grained memory, so nothing else may run on them meanwhile.
+# Fills both GPUs with fine-grained memory, so it fails if another process allocates on
+# them while it runs. CI jobs can share GPUs, so it is marked unstable and runs only with
+# ROCPROFILER_DISABLE_UNSTABLE_CTESTS=OFF.
 add_multi_agent_test(test-kernel-replay-multi-agent-spill BUFFER_MIB 2048 LEAVE_FREE_MIB
                      1024 TIMEOUT 300)
 rocprofiler_set_integration_test_name(_spill_test test-kernel-replay-multi-agent-spill
                                       "execute")
-set_tests_properties(${_spill_test} PROPERTIES RUN_SERIAL ON)
+set_tests_properties(${_spill_test} PROPERTIES RUN_SERIAL ON DISABLED
+                                               ${ROCPROFILER_DISABLE_UNSTABLE_CTESTS})
