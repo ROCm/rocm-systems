@@ -5758,6 +5758,12 @@ hipError_t hipMemcpyFromSymbolAsync(void* dst, const void* symbol, size_t sizeBy
  *  @note If host or dst are not pinned, the memory copy will be performed synchronously. For
  * best performance, use hipHostMalloc to allocate host memory that is transferred asynchronously.
  *
+ *  @note A host-to-device copy from pageable (not pinned) memory is not guaranteed to read the
+ * source after earlier work in the stream: the runtime may copy the source on the host when
+ * hipMemcpyAsync is called. If earlier work in the stream writes the source, for example a host
+ * function enqueued with hipLaunchHostFunc or hipStreamAddCallback, copy from pinned memory
+ * (hipHostMalloc), which is read in stream order.
+ *
  *  @param[out] dst Data being copy to
  *  @param[in]  src Data being copy from
  *  @param[in]  sizeBytes Data size in bytes
@@ -8336,6 +8342,10 @@ hipError_t hipLaunchKernel(const void* function_address, dim3 numBlocks, dim3 di
  *
  * Host functions that are enqueued respectively in different non-blocking streams can run
  * concurrently.
+ *
+ * A host-to-device hipMemcpyAsync enqueued after the host function, whose source is pageable
+ * memory the host function writes, may read the source before the host function runs. Use
+ * pinned memory (hipHostMalloc) for such a source; see hipMemcpyAsync.
  *
  * @warning  This API is marked as beta, meaning, while this is feature complete,
  * it is still open to changes and may have outstanding issues.
