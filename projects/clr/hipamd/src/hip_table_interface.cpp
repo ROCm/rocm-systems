@@ -801,6 +801,14 @@ HIP_PUBLIC_API hipError_t hipGraphAddDependencies(hipGraph_t graph, const hipGra
   return hip::GetHipDispatchTable()->hipGraphAddDependencies_fn(graph, from, to, numDependencies);
   CATCH;
 }
+HIP_PUBLIC_API hipError_t hipGraphAddDependencies_v2(hipGraph_t graph, const hipGraphNode_t* from,
+                                   const hipGraphNode_t* to, const hipGraphEdgeData* edgeData,
+                                   size_t numDependencies) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipGraphAddDependencies_v2_fn(graph, from, to, edgeData,
+                                                                   numDependencies);
+  CATCH;
+}
 HIP_PUBLIC_API hipError_t hipGraphAddEmptyNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
                                 const hipGraphNode_t* pDependencies, size_t numDependencies) {
   TRY;
@@ -1055,6 +1063,12 @@ HIP_PUBLIC_API hipError_t hipGraphGetEdges(hipGraph_t graph, hipGraphNode_t* fro
   return hip::GetHipDispatchTable()->hipGraphGetEdges_fn(graph, from, to, numEdges);
   CATCH;
 }
+HIP_PUBLIC_API hipError_t hipGraphGetEdges_v2(hipGraph_t graph, hipGraphNode_t* from,
+                            hipGraphNode_t* to, hipGraphEdgeData* edgeData, size_t* numEdges) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipGraphGetEdges_v2_fn(graph, from, to, edgeData, numEdges);
+  CATCH;
+}
 HIP_PUBLIC_API hipError_t hipGraphGetNodes(hipGraph_t graph, hipGraphNode_t* nodes, size_t* numNodes) {
   TRY;
   return hip::GetHipDispatchTable()->hipGraphGetNodes_fn(graph, nodes, numNodes);
@@ -1189,11 +1203,28 @@ HIP_PUBLIC_API hipError_t hipGraphNodeGetDependencies(hipGraphNode_t node, hipGr
                                                                     pNumDependencies);
   CATCH;
 }
+HIP_PUBLIC_API hipError_t hipGraphNodeGetDependencies_v2(hipGraphNode_t node,
+                                       hipGraphNode_t* pDependencies, hipGraphEdgeData* edgeData,
+                                       size_t* pNumDependencies) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipGraphNodeGetDependencies_v2_fn(node, pDependencies,
+                                                                       edgeData, pNumDependencies);
+  CATCH;
+}
 HIP_PUBLIC_API hipError_t hipGraphNodeGetDependentNodes(hipGraphNode_t node, hipGraphNode_t* pDependentNodes,
                                          size_t* pNumDependentNodes) {
   TRY;
   return hip::GetHipDispatchTable()->hipGraphNodeGetDependentNodes_fn(node, pDependentNodes,
                                                                       pNumDependentNodes);
+  CATCH;
+}
+HIP_PUBLIC_API hipError_t hipGraphNodeGetDependentNodes_v2(hipGraphNode_t node,
+                                         hipGraphNode_t* pDependentNodes, hipGraphEdgeData* edgeData,
+                                         size_t* pNumDependentNodes) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipGraphNodeGetDependentNodes_v2_fn(node, pDependentNodes,
+                                                                         edgeData,
+                                                                         pNumDependentNodes);
   CATCH;
 }
 HIP_PUBLIC_API hipError_t hipGraphNodeGetEnabled(hipGraphExec_t hGraphExec, hipGraphNode_t hNode,
@@ -1221,6 +1252,14 @@ HIP_PUBLIC_API hipError_t hipGraphRemoveDependencies(hipGraph_t graph, const hip
   TRY;
   return hip::GetHipDispatchTable()->hipGraphRemoveDependencies_fn(graph, from, to,
                                                                    numDependencies);
+  CATCH;
+}
+HIP_PUBLIC_API hipError_t hipGraphRemoveDependencies_v2(hipGraph_t graph, const hipGraphNode_t* from,
+                                      const hipGraphNode_t* to, const hipGraphEdgeData* edgeData,
+                                      size_t numDependencies) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipGraphRemoveDependencies_v2_fn(graph, from, to, edgeData,
+                                                                      numDependencies);
   CATCH;
 }
 HIP_PUBLIC_API hipError_t hipGraphRetainUserObject(hipGraph_t graph, hipUserObject_t object, unsigned int count,

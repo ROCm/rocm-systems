@@ -48,7 +48,7 @@
 #define HIP_API_TABLE_STEP_VERSION 0
 #define HIP_COMPILER_API_TABLE_STEP_VERSION 0
 #define HIP_TOOLS_API_TABLE_STEP_VERSION 1
-#define HIP_RUNTIME_API_TABLE_STEP_VERSION 44
+#define HIP_RUNTIME_API_TABLE_STEP_VERSION 45
 
 // HIP API interface
 // HIP compiler dispatch functions
@@ -245,6 +245,10 @@ typedef hipError_t (*t_hipGraphAddChildGraphNode)(hipGraphNode_t* pGraphNode, hi
                                                   size_t numDependencies, hipGraph_t childGraph);
 typedef hipError_t (*t_hipGraphAddDependencies)(hipGraph_t graph, const hipGraphNode_t* from,
                                                 const hipGraphNode_t* to, size_t numDependencies);
+typedef hipError_t (*t_hipGraphAddDependencies_v2)(hipGraph_t graph, const hipGraphNode_t* from,
+                                                   const hipGraphNode_t* to,
+                                                   const hipGraphEdgeData* edgeData,
+                                                   size_t numDependencies);
 typedef hipError_t (*t_hipGraphAddEmptyNode)(hipGraphNode_t* pGraphNode, hipGraph_t graph,
                                              const hipGraphNode_t* pDependencies,
                                              size_t numDependencies);
@@ -343,6 +347,9 @@ typedef hipError_t (*t_hipGraphExecUpdate)(hipGraphExec_t hGraphExec, hipGraph_t
                                            hipGraphExecUpdateResult* updateResult_out);
 typedef hipError_t (*t_hipGraphGetEdges)(hipGraph_t graph, hipGraphNode_t* from, hipGraphNode_t* to,
                                          size_t* numEdges);
+typedef hipError_t (*t_hipGraphGetEdges_v2)(hipGraph_t graph, hipGraphNode_t* from,
+                                            hipGraphNode_t* to, hipGraphEdgeData* edgeData,
+                                            size_t* numEdges);
 typedef hipError_t (*t_hipGraphGetNodes)(hipGraph_t graph, hipGraphNode_t* nodes, size_t* numNodes);
 typedef hipError_t (*t_hipGraphGetRootNodes)(hipGraph_t graph, hipGraphNode_t* pRootNodes,
                                              size_t* pNumRootNodes);
@@ -392,9 +399,17 @@ typedef hipError_t (*t_hipGraphNodeFindInClone)(hipGraphNode_t* pNode, hipGraphN
 typedef hipError_t (*t_hipGraphNodeGetDependencies)(hipGraphNode_t node,
                                                     hipGraphNode_t* pDependencies,
                                                     size_t* pNumDependencies);
+typedef hipError_t (*t_hipGraphNodeGetDependencies_v2)(hipGraphNode_t node,
+                                                       hipGraphNode_t* pDependencies,
+                                                       hipGraphEdgeData* edgeData,
+                                                       size_t* pNumDependencies);
 typedef hipError_t (*t_hipGraphNodeGetDependentNodes)(hipGraphNode_t node,
                                                       hipGraphNode_t* pDependentNodes,
                                                       size_t* pNumDependentNodes);
+typedef hipError_t (*t_hipGraphNodeGetDependentNodes_v2)(hipGraphNode_t node,
+                                                         hipGraphNode_t* pDependentNodes,
+                                                         hipGraphEdgeData* edgeData,
+                                                         size_t* pNumDependentNodes);
 typedef hipError_t (*t_hipGraphNodeGetEnabled)(hipGraphExec_t hGraphExec, hipGraphNode_t hNode,
                                                unsigned int* isEnabled);
 typedef hipError_t (*t_hipGraphNodeGetType)(hipGraphNode_t node, hipGraphNodeType* pType);
@@ -405,6 +420,11 @@ typedef hipError_t (*t_hipGraphReleaseUserObject)(hipGraph_t graph, hipUserObjec
 typedef hipError_t (*t_hipGraphRemoveDependencies)(hipGraph_t graph, const hipGraphNode_t* from,
                                                    const hipGraphNode_t* to,
                                                    size_t numDependencies);
+typedef hipError_t (*t_hipGraphRemoveDependencies_v2)(hipGraph_t graph,
+                                                      const hipGraphNode_t* from,
+                                                      const hipGraphNode_t* to,
+                                                      const hipGraphEdgeData* edgeData,
+                                                      size_t numDependencies);
 typedef hipError_t (*t_hipGraphRetainUserObject)(hipGraph_t graph, hipUserObject_t object,
                                                  unsigned int count, unsigned int flags);
 typedef hipError_t (*t_hipGraphUpload)(hipGraphExec_t graphExec, hipStream_t stream);
@@ -1910,8 +1930,15 @@ struct HipDispatchTable {
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 44
   t_hipArrayGetPlane hipArrayGetPlane_fn;
 
-  // DO NOT EDIT ABOVE!
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 45
+  t_hipGraphAddDependencies_v2 hipGraphAddDependencies_v2_fn;
+  t_hipGraphRemoveDependencies_v2 hipGraphRemoveDependencies_v2_fn;
+  t_hipGraphGetEdges_v2 hipGraphGetEdges_v2_fn;
+  t_hipGraphNodeGetDependencies_v2 hipGraphNodeGetDependencies_v2_fn;
+  t_hipGraphNodeGetDependentNodes_v2 hipGraphNodeGetDependentNodes_v2_fn;
+
+  // DO NOT EDIT ABOVE!
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 46
 
   // ******************************************************************************************* //
   //

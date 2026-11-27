@@ -7,14 +7,32 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstring>
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
 #include <contract_cleanup.hh>
 
 namespace {
+constexpr unsigned char kSentinelByte = 0xAB;
+
 bool ContainsNode(const hipGraphNode_t* nodes, size_t count, hipGraphNode_t expected) {
   return std::find(nodes, nodes + count, expected) != nodes + count;
+}
+
+// hipGraphEdgeData is a POD struct of unsigned char fields; a byte-wise compare against a
+// zero-initialized instance is the portable way to check "left at its default value".
+bool IsZeroEdgeData(const hipGraphEdgeData& edge) {
+  hipGraphEdgeData zero{};
+  return std::memcmp(&edge, &zero, sizeof(hipGraphEdgeData)) == 0;
+}
+
+bool IsSentinelEdgeData(const hipGraphEdgeData& edge) {
+  const auto* bytes = reinterpret_cast<const unsigned char*>(&edge);
+  for (size_t i = 0; i < sizeof(hipGraphEdgeData); i++) {
+    if (bytes[i] != kSentinelByte) return false;
+  }
+  return true;
 }
 
 struct TwoNodeGraph {
@@ -118,4 +136,70 @@ HIP_TEST_CASE(Contract_GraphTopology_HipGraphNodeGetDependentNodes_NodeDependent
 
   REQUIRE(dependent_count == 1);
   REQUIRE(dependents[0] == graph.dependent);
+}
+
+// @asserts: hipGraphGetEdges_v2 - edgeData is written only for the entries that actually exist (the returned count), not up to the full capacity of the buffer supplied
+HIP_TEST_CASE(Contract_GraphTopology_HipGraphGetEdgesV2_OversizedBuffer_FillsOnlyReturnedCount) {
+  hip::contract::ContractCleanup cleanup;
+  auto graph = CreateTwoNodeGraph();
+  cleanup.Add([p0 = graph.graph] { (void)hipGraphDestroy(p0); });
+
+  // Request room for 2 edges even though only 1 exists.
+  std::array<hipGraphNode_t, 2> from{};
+  std::array<hipGraphNode_t, 2> to{};
+  std::array<hipGraphEdgeData, 2> edge_data{};
+  std::memset(edge_data.data(), kSentinelByte, sizeof(edge_data));
+  size_t edge_count = edge_data.size();
+
+  HIP_CHECK(hipGraphGetEdges_v2(graph.graph, from.data(), to.data(), edge_data.data(),
+                                &edge_count));
+
+  REQUIRE(edge_count == 1);
+  REQUIRE(from[0] == graph.root);
+  REQUIRE(to[0] == graph.dependent);
+  REQUIRE(IsZeroEdgeData(edge_data[0]));
+  // The unused second slot must be left untouched, not zero-filled to capacity.
+  REQUIRE(IsSentinelEdgeData(edge_data[1]));
+}
+
+// @asserts: hipGraphNodeGetDependencies_v2 - edgeData is written only for the entries that actually exist (the returned count), not up to the full capacity of the buffer supplied
+HIP_TEST_CASE(
+    Contract_GraphTopology_HipGraphNodeGetDependenciesV2_OversizedBuffer_FillsOnlyReturnedCount) {
+  hip::contract::ContractCleanup cleanup;
+  auto graph = CreateTwoNodeGraph();
+  cleanup.Add([p0 = graph.graph] { (void)hipGraphDestroy(p0); });
+
+  std::array<hipGraphNode_t, 2> dependencies{};
+  std::array<hipGraphEdgeData, 2> edge_data{};
+  std::memset(edge_data.data(), kSentinelByte, sizeof(edge_data));
+  size_t dependency_count = dependencies.size();
+
+  HIP_CHECK(hipGraphNodeGetDependencies_v2(graph.dependent, dependencies.data(), edge_data.data(),
+                                           &dependency_count));
+
+  REQUIRE(dependency_count == 1);
+  REQUIRE(dependencies[0] == graph.root);
+  REQUIRE(IsZeroEdgeData(edge_data[0]));
+  REQUIRE(IsSentinelEdgeData(edge_data[1]));
+}
+
+// @asserts: hipGraphNodeGetDependentNodes_v2 - edgeData is written only for the entries that actually exist (the returned count), not up to the full capacity of the buffer supplied
+HIP_TEST_CASE(
+    Contract_GraphTopology_HipGraphNodeGetDependentNodesV2_OversizedBuffer_FillsOnlyReturnedCount) {
+  hip::contract::ContractCleanup cleanup;
+  auto graph = CreateTwoNodeGraph();
+  cleanup.Add([p0 = graph.graph] { (void)hipGraphDestroy(p0); });
+
+  std::array<hipGraphNode_t, 2> dependents{};
+  std::array<hipGraphEdgeData, 2> edge_data{};
+  std::memset(edge_data.data(), kSentinelByte, sizeof(edge_data));
+  size_t dependent_count = dependents.size();
+
+  HIP_CHECK(hipGraphNodeGetDependentNodes_v2(graph.root, dependents.data(), edge_data.data(),
+                                             &dependent_count));
+
+  REQUIRE(dependent_count == 1);
+  REQUIRE(dependents[0] == graph.dependent);
+  REQUIRE(IsZeroEdgeData(edge_data[0]));
+  REQUIRE(IsSentinelEdgeData(edge_data[1]));
 }

@@ -718,6 +718,11 @@ global:
     hipGraphExecGetId;
     hipDeviceGetExecAffinitySupport;
     hipArrayGetPlane;
+    hipGraphAddDependencies_v2;
+    hipGraphRemoveDependencies_v2;
+    hipGraphGetEdges_v2;
+    hipGraphNodeGetDependencies_v2;
+    hipGraphNodeGetDependentNodes_v2;
 local:
     *;
 } hip_7.17;

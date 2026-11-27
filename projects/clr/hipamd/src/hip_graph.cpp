@@ -11,6 +11,8 @@
 #include "hip_platform.hpp"
 #include "hip_event.hpp"
 #include "hip_mempool_impl.hpp"
+#include <algorithm>
+#include <cstring>
 
 namespace hip {
 
@@ -2095,16 +2097,15 @@ hipError_t hipGraphExecMemsetNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNo
   HIP_RETURN(status);
 }
 
-hipError_t hipGraphAddDependencies(hipGraph_t graph, const hipGraphNode_t* from,
-                                   const hipGraphNode_t* to, size_t numDependencies) {
-  HIP_INIT_API(hipGraphAddDependencies, graph, from, to, numDependencies);
+hipError_t hipGraphAddDependencies_common(hipGraph_t graph, const hipGraphNode_t* from,
+                                          const hipGraphNode_t* to, size_t numDependencies) {
   if (graph == nullptr) {
-    HIP_RETURN(hipErrorInvalidValue);
+    return hipErrorInvalidValue;
   }
   if (numDependencies == 0) {
-    HIP_RETURN(hipSuccess);
+    return hipSuccess;
   } else if (from == nullptr || to == nullptr) {
-    HIP_RETURN(hipErrorInvalidValue);
+    return hipErrorInvalidValue;
   }
   hip::GraphNode* const* fromNode = reinterpret_cast<hip::GraphNode* const*>(from);
   hip::GraphNode* const* toNode = reinterpret_cast<hip::GraphNode* const*>(to);
@@ -2115,7 +2116,7 @@ hipError_t hipGraphAddDependencies(hipGraph_t graph, const hipGraphNode_t* from,
         !hip::GraphNode::isNodeValid(toNode[i]) || !hip::GraphNode::isNodeValid(fromNode[i]) ||
         // making sure the nodes belong toNode the graph
         toNode[i]->GetParentGraph() != g || fromNode[i]->GetParentGraph() != g) {
-      HIP_RETURN(hipErrorInvalidValue);
+      return hipErrorInvalidValue;
     }
   }
 
@@ -2124,12 +2125,46 @@ hipError_t hipGraphAddDependencies(hipGraph_t graph, const hipGraphNode_t* from,
     const std::vector<hip::GraphNode*>& edges = fromNode[i]->GetEdges();
     for (auto edge : edges) {
       if (edge == toNode[i]) {
-        HIP_RETURN(hipErrorInvalidValue);
+        return hipErrorInvalidValue;
       }
     }
     fromNode[i]->AddEdgeDep(toNode[i]);
   }
-  HIP_RETURN(hipSuccess);
+  return hipSuccess;
+}
+
+hipError_t hipGraphAddDependencies(hipGraph_t graph, const hipGraphNode_t* from,
+                                   const hipGraphNode_t* to,
+                                   size_t numDependencies) {
+  HIP_INIT_API(hipGraphAddDependencies, graph, from, to, numDependencies);
+  HIP_RETURN(hipGraphAddDependencies_common(graph, from, to, numDependencies));
+}
+
+hipError_t hipGraphAddDependencies_v2(hipGraph_t graph, const hipGraphNode_t* from,
+                                     const hipGraphNode_t* to,
+                                     const hipGraphEdgeData* edgeData,
+                                     size_t numDependencies)
+{
+  HIP_INIT_API(hipGraphAddDependencies_v2, graph, from, to, edgeData, numDependencies);
+
+  if (edgeData) {
+    // TODO g-h-c check equivalent CUDA error codes
+    size_t dependency = 0;
+
+    while (dependency < numDependencies) {
+      const hipGraphEdgeData& data = edgeData[dependency];
+      hipGraphEdgeData zeroedData = {};
+
+      // at the time of this writing only hipGraphKernelNodePortDefault (0) type is supported
+      // (the hipGraphEdgeData::reserved bytes must be zero too)
+      if (std::memcmp(&data, &zeroedData, sizeof(hipGraphEdgeData))) {
+        HIP_RETURN(hipErrorInvalidValue);
+      }
+
+      dependency++;
+    }
+  }
+  HIP_RETURN(hipGraphAddDependencies_common(graph, from, to, numDependencies));
 }
 
 hipError_t hipGraphExecKernelNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t node,
@@ -2366,11 +2401,10 @@ hipError_t hipStreamUpdateCaptureDependencies(hipStream_t stream, hipGraphNode_t
   HIP_RETURN(ihipStreamUpdateCaptureDependencies(stream, dependencies, numDependencies, flags));
 }
 
-hipError_t hipGraphRemoveDependencies(hipGraph_t graph, const hipGraphNode_t* from,
-                                      const hipGraphNode_t* to, size_t numDependencies) {
-  HIP_INIT_API(hipGraphRemoveDependencies, graph, from, to, numDependencies);
+hipError_t hipGraphRemoveDependencies_common(hipGraph_t graph, const hipGraphNode_t* from,
+                                             const hipGraphNode_t* to, size_t numDependencies) {
   if (graph == nullptr || (numDependencies > 0 && (from == nullptr || to == nullptr))) {
-    HIP_RETURN(hipErrorInvalidValue);
+    return hipErrorInvalidValue;
   }
   hip::GraphNode* const* fromNode = reinterpret_cast<hip::GraphNode* const*>(from);
   hip::GraphNode* const* toNode = reinterpret_cast<hip::GraphNode* const*>(to);
@@ -2378,25 +2412,30 @@ hipError_t hipGraphRemoveDependencies(hipGraph_t graph, const hipGraphNode_t* fr
   for (size_t i = 0; i < numDependencies; i++) {
     if (toNode[i]->GetParentGraph() != g || fromNode[i]->GetParentGraph() != g ||
         fromNode[i]->RemoveEdgeDep(toNode[i]) == false) {
-      HIP_RETURN(hipErrorInvalidValue);
+      return hipErrorInvalidValue;
     }
   }
-  HIP_RETURN(hipSuccess);
+  return hipSuccess;
 }
 
-hipError_t hipGraphGetEdges(hipGraph_t graph, hipGraphNode_t* from, hipGraphNode_t* to,
-                            size_t* numEdges) {
-  HIP_INIT_API(hipGraphGetEdges, graph, from, to, numEdges);
+hipError_t hipGraphRemoveDependencies(hipGraph_t graph, const hipGraphNode_t* from,
+                                      const hipGraphNode_t* to, size_t numDependencies) {
+  HIP_INIT_API(hipGraphRemoveDependencies, graph, from, to, numDependencies);
+  HIP_RETURN(hipGraphRemoveDependencies_common(graph, from, to, numDependencies));
+}
+
+hipError_t hipGraphGetEdges_common(hipGraph_t graph, hipGraphNode_t* from, hipGraphNode_t* to,
+                                   size_t* numEdges) {
   if (graph == nullptr || numEdges == nullptr || (from == nullptr && to != nullptr) ||
       (to == nullptr && from != nullptr)) {
-    HIP_RETURN(hipErrorInvalidValue);
+    return hipErrorInvalidValue;
   }
   const std::vector<std::pair<hip::GraphNode*, hip::GraphNode*>> edges =
       reinterpret_cast<hip::Graph*>(graph)->GetEdges();
   // returns only the number of edges in numEdges when from and to are null
   if (from == nullptr && to == nullptr) {
     *numEdges = edges.size();
-    HIP_RETURN(hipSuccess);
+    return hipSuccess;
   } else if (*numEdges <= edges.size()) {
     for (size_t i = 0; i < *numEdges; i++) {
       from[i] = reinterpret_cast<hipGraphNode_t>(edges[i].first);
@@ -2416,20 +2455,78 @@ hipError_t hipGraphGetEdges(hipGraph_t graph, hipGraphNode_t* from, hipGraphNode
     *numEdges = edges.size();
   }
 
-  HIP_RETURN(hipSuccess);
+  return hipSuccess;
 }
 
-hipError_t hipGraphNodeGetDependencies(hipGraphNode_t node, hipGraphNode_t* pDependencies,
-                                       size_t* pNumDependencies) {
-  HIP_INIT_API(hipGraphNodeGetDependencies, node, pDependencies, pNumDependencies);
+hipError_t hipGraphRemoveDependencies_v2(hipGraph_t graph, const hipGraphNode_t* from,
+                                         const hipGraphNode_t* to,
+                                         const hipGraphEdgeData* edgeData,
+                                         size_t numDependencies)
+{
+  HIP_INIT_API(hipGraphRemoveDependencies_v2, graph, from, to, edgeData, numDependencies);
+  if (edgeData) {
+    // TODO g-h-c check equivalent CUDA error codes
+    size_t dependency = 0;
+
+    if (!to || !from) {
+      HIP_RETURN(hipErrorInvalidValue);
+    }
+
+    while (dependency < numDependencies) {
+      const hipGraphEdgeData& data = edgeData[dependency];
+      hipGraphEdgeData zeroedData = {};
+
+      // at the time of this writing only hipGraphKernelNodePortDefault (0) type is supported
+      // (the hipGraphEdgeData::reserved bytes must be zero too)
+      if (std::memcmp(&data, &zeroedData, sizeof(hipGraphEdgeData))) {
+        HIP_RETURN(hipErrorInvalidValue);
+      }
+
+      dependency++;
+    }
+  }
+  HIP_RETURN(hipGraphRemoveDependencies_common(graph, from, to, numDependencies));
+}
+
+hipError_t hipGraphGetEdges(hipGraph_t graph, hipGraphNode_t* from, hipGraphNode_t* to,
+                            size_t* numEdges) {
+  HIP_INIT_API(hipGraphGetEdges, graph, from, to, numEdges);
+  HIP_RETURN(hipGraphGetEdges_common(graph, from, to, numEdges));
+}
+
+hipError_t hipGraphGetEdges_v2(hipGraph_t graph, hipGraphNode_t* from, hipGraphNode_t* to,
+                               hipGraphEdgeData *edgeData, size_t* numEdges) {
+  HIP_INIT_API(hipGraphGetEdges_v2, graph, from, to, edgeData, numEdges);
+  hipError_t result;
+  size_t capacity = 0;
+
+  if (edgeData) {
+    capacity = numEdges? *numEdges : 0;
+
+    if (!to || !from) {
+      HIP_RETURN(hipErrorInvalidValue);
+    }
+  }
+
+  result = hipGraphGetEdges_common(graph, from, to, numEdges);
+
+  if (!result && capacity) {
+    std::fill_n(edgeData, *numEdges, hipGraphEdgeData {});
+  }
+
+  HIP_RETURN(result);
+}
+
+hipError_t hipGraphNodeGetDependencies_common(hipGraphNode_t node, hipGraphNode_t* pDependencies,
+                                              size_t* pNumDependencies) {
   hip::GraphNode* n = reinterpret_cast<hip::GraphNode*>(node);
   if (!hip::GraphNode::isNodeValid(n) || pNumDependencies == nullptr) {
-    HIP_RETURN(hipErrorInvalidValue);
+    return hipErrorInvalidValue;
   }
   const std::vector<hip::GraphNode*>& dependencies = n->GetDependencies();
   if (pDependencies == NULL) {
     *pNumDependencies = dependencies.size();
-    HIP_RETURN(hipSuccess);
+    return hipSuccess;
   } else if (*pNumDependencies <= dependencies.size()) {
     for (size_t i = 0; i < *pNumDependencies; i++) {
       pDependencies[i] = reinterpret_cast<hipGraphNode_t>(dependencies[i]);
@@ -2445,20 +2542,53 @@ hipError_t hipGraphNodeGetDependencies(hipGraphNode_t node, hipGraphNode_t* pDep
     }
     *pNumDependencies = dependencies.size();
   }
-  HIP_RETURN(hipSuccess);
+  return hipSuccess;
 }
 
-hipError_t hipGraphNodeGetDependentNodes(hipGraphNode_t node, hipGraphNode_t* pDependentNodes,
-                                         size_t* pNumDependentNodes) {
-  HIP_INIT_API(hipGraphNodeGetDependentNodes, node, pDependentNodes, pNumDependentNodes);
+hipError_t hipGraphNodeGetDependencies(hipGraphNode_t node, hipGraphNode_t* pDependencies,
+                                       size_t* pNumDependencies) {
+  HIP_INIT_API(hipGraphNodeGetDependencies, node, pDependencies, pNumDependencies);
+  HIP_RETURN(hipGraphNodeGetDependencies_common(node, pDependencies, pNumDependencies));
+}
+
+hipError_t hipGraphNodeGetDependencies_v2(hipGraphNode_t node,
+                                          hipGraphNode_t* pDependencies,
+                                          hipGraphEdgeData* edgeData,
+                                          size_t* pNumDependencies) {
+  hipError_t result;
+  HIP_INIT_API(hipGraphNodeGetDependencies_v2, node, pDependencies, edgeData, pNumDependencies);
+  // capture the edgeData array size before it gets overwritten
+  size_t capacity = 0;
+
+  if (edgeData) {
+    capacity = pNumDependencies? *pNumDependencies : 0;
+
+    // TODO g-h-c check this
+    if (!pDependencies) {
+      HIP_RETURN(hipErrorInvalidValue);
+    }
+  }
+
+  result = hipGraphNodeGetDependencies_common(node, pDependencies, pNumDependencies);
+
+  if (!result && capacity) {
+    std::fill_n(edgeData, *pNumDependencies, hipGraphEdgeData {});
+  }
+
+  HIP_RETURN(result);
+}
+
+hipError_t hipGraphNodeGetDependentNodes_common(hipGraphNode_t node,
+                                                hipGraphNode_t* pDependentNodes,
+                                                size_t* pNumDependentNodes) {
   hip::GraphNode* n = reinterpret_cast<hip::GraphNode*>(node);
   if (!hip::GraphNode::isNodeValid(n) || pNumDependentNodes == nullptr) {
-    HIP_RETURN(hipErrorInvalidValue);
+    return hipErrorInvalidValue;
   }
   const std::vector<hip::GraphNode*>& dependents = n->GetEdges();
   if (pDependentNodes == NULL) {
     *pNumDependentNodes = dependents.size();
-    HIP_RETURN(hipSuccess);
+    return hipSuccess;
   } else if (*pNumDependentNodes <= dependents.size()) {
     for (size_t i = 0; i < *pNumDependentNodes; i++) {
       pDependentNodes[i] = reinterpret_cast<hipGraphNode_t>(dependents[i]);
@@ -2474,7 +2604,37 @@ hipError_t hipGraphNodeGetDependentNodes(hipGraphNode_t node, hipGraphNode_t* pD
     }
     *pNumDependentNodes = dependents.size();
   }
-  HIP_RETURN(hipSuccess);
+  return hipSuccess;
+}
+
+hipError_t hipGraphNodeGetDependentNodes(hipGraphNode_t node, hipGraphNode_t* pDependentNodes,
+                                         size_t* pNumDependentNodes) {
+  HIP_INIT_API(hipGraphNodeGetDependentNodes, node, pDependentNodes, pNumDependentNodes);
+  HIP_RETURN(hipGraphNodeGetDependentNodes_common(node, pDependentNodes, pNumDependentNodes));
+}
+
+hipError_t hipGraphNodeGetDependentNodes_v2(hipGraphNode_t node, hipGraphNode_t* pDependentNodes,
+                                            hipGraphEdgeData* edgeData,
+                                            size_t* pNumDependentNodes) {
+  HIP_INIT_API(hipGraphNodeGetDependentNodes_v2, node, pDependentNodes, edgeData,
+                                                 pNumDependentNodes);
+  hipError_t result;
+  size_t capacity = 0;
+
+  if (edgeData) {
+    capacity = pNumDependentNodes? *pNumDependentNodes : 0;
+    // TODO g-h-c check this
+    if (!pDependentNodes) {
+      HIP_RETURN(hipErrorInvalidValue);
+    }
+  }
+
+  result = hipGraphNodeGetDependentNodes_common(node, pDependentNodes, pNumDependentNodes);
+
+  if (!result && capacity) {
+    std::fill_n(edgeData, *pNumDependentNodes, hipGraphEdgeData {});
+  }
+  HIP_RETURN(result);
 }
 
 hipError_t hipGraphNodeGetType(hipGraphNode_t node, hipGraphNodeType* pType) {

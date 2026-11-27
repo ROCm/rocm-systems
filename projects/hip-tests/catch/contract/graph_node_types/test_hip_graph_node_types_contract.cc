@@ -126,3 +126,50 @@ HIP_TEST_CASE(Contract_GraphNodeTypes_HipGraphRemoveDependencies_Default_ClearsE
   HIP_CHECK(hipGraphGetEdges(graph, nullptr, nullptr, &edge_count));
   REQUIRE(edge_count == 0);
 }
+
+// @asserts: hipGraphAddDependencies_v2 - adding a dependency with default (all-zero) edge data creates one edge, same as the v1 API
+HIP_TEST_CASE(Contract_GraphNodeTypes_HipGraphAddDependenciesV2_DefaultEdgeData_CreatesEdge) {
+  hip::contract::ContractCleanup cleanup;
+  hipGraph_t graph = nullptr;
+  hipGraphNode_t from = nullptr;
+  hipGraphNode_t to = nullptr;
+  hipGraphEdgeData edge_data{};
+  size_t edge_count = 0;
+
+  HIP_CHECK(hipGraphCreate(&graph, 0));
+  cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
+  HIP_CHECK(hipGraphAddEmptyNode(&from, graph, nullptr, 0));
+  HIP_CHECK(hipGraphAddEmptyNode(&to, graph, nullptr, 0));
+
+  HIP_CHECK(hipGraphGetEdges(graph, nullptr, nullptr, &edge_count));
+  REQUIRE(edge_count == 0);
+
+  HIP_CHECK(hipGraphAddDependencies_v2(graph, &from, &to, &edge_data, 1));
+
+  HIP_CHECK(hipGraphGetEdges(graph, nullptr, nullptr, &edge_count));
+  REQUIRE(edge_count == 1);
+}
+
+// @asserts: hipGraphRemoveDependencies_v2 - removing a previously added dependency with default (all-zero) edge data clears the edge back to zero, same as the v1 API
+HIP_TEST_CASE(Contract_GraphNodeTypes_HipGraphRemoveDependenciesV2_DefaultEdgeData_ClearsEdge) {
+  hip::contract::ContractCleanup cleanup;
+  hipGraph_t graph = nullptr;
+  hipGraphNode_t from = nullptr;
+  hipGraphNode_t to = nullptr;
+  hipGraphEdgeData edge_data{};
+  size_t edge_count = 0;
+
+  HIP_CHECK(hipGraphCreate(&graph, 0));
+  cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
+  HIP_CHECK(hipGraphAddEmptyNode(&from, graph, nullptr, 0));
+  HIP_CHECK(hipGraphAddEmptyNode(&to, graph, nullptr, 0));
+
+  HIP_CHECK(hipGraphAddDependencies_v2(graph, &from, &to, &edge_data, 1));
+  HIP_CHECK(hipGraphGetEdges(graph, nullptr, nullptr, &edge_count));
+  REQUIRE(edge_count == 1);
+
+  HIP_CHECK(hipGraphRemoveDependencies_v2(graph, &from, &to, &edge_data, 1));
+
+  HIP_CHECK(hipGraphGetEdges(graph, nullptr, nullptr, &edge_count));
+  REQUIRE(edge_count == 0);
+}
