@@ -275,12 +275,12 @@ TEST_F(HostHierAllReduceMPITest, UnalignedBuffersOnOneRankInTheFusedKernel)
     }
 }
 
-// 8 MiB, inside the window where auto mode picks the fused kernel on one or two hosts of 8 ranks.
+// 12 MiB, inside the window where auto mode picks the fused kernel on one or two hosts of 8 ranks.
 TEST_F(HostHierAllReduceMPITest, Fp16SumFusedWindow)
 {
     if(3 * nRanks_ > 2048)
         GTEST_SKIP() << "fp16 sums are exact only up to 2048";
-    const size_t count = countFor((size_t{4} << 20) / layout_.ranksPerHost);
+    const size_t count = countFor((size_t{6} << 20) / layout_.ranksPerHost);
     RunResult    run   = runAllReduce<__half>(
         comm(), getActiveStream(), count, ncclFloat16, ncclSum, false, false,
         [this](size_t i) { return __float2half(static_cast<float>((rank_ + i) % 4)); },
@@ -294,7 +294,7 @@ TEST_F(HostHierAllReduceMPITest, Bf16SumFusedWindow)
 {
     if(3 * nRanks_ > 256)
         GTEST_SKIP() << "bf16 sums are exact only up to 256";
-    const size_t count = countFor((size_t{4} << 20) / layout_.ranksPerHost);
+    const size_t count = countFor((size_t{6} << 20) / layout_.ranksPerHost);
     RunResult    run   = runAllReduce<uint16_t>(
         comm(), getActiveStream(), count, ncclBfloat16, ncclSum, false, false,
         [this](size_t i) { return toBf16(static_cast<float>((rank_ + i) % 4)); },

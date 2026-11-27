@@ -276,8 +276,12 @@ TEST(HostHierAllReduce, FusedWindowEdges)
 {
     for(int nHosts : {1, 2})
     {
-        EXPECT_FALSE(rcclHostHierAllReduceFusedWindow(nHosts, 8, 4 * kMiB - 1)) << nHosts << " hosts";
-        EXPECT_TRUE(rcclHostHierAllReduceFusedWindow(nHosts, 8, 4 * kMiB)) << nHosts << " hosts";
+        EXPECT_FALSE(rcclHostHierAllReduceFusedWindow(nHosts, 8, 2 * kMiB)) << nHosts << " hosts";
+        EXPECT_TRUE(rcclHostHierAllReduceFusedWindow(nHosts, 8, 2 * kMiB + 1)) << nHosts << " hosts";
+        EXPECT_TRUE(rcclHostHierAllReduceFusedWindow(nHosts, 8, 7 * kMiB - 1)) << nHosts << " hosts";
+        EXPECT_FALSE(rcclHostHierAllReduceFusedWindow(nHosts, 8, 7 * kMiB)) << nHosts << " hosts";
+        EXPECT_FALSE(rcclHostHierAllReduceFusedWindow(nHosts, 8, 8 * kMiB)) << nHosts << " hosts";
+        EXPECT_TRUE(rcclHostHierAllReduceFusedWindow(nHosts, 8, 8 * kMiB + 1)) << nHosts << " hosts";
         EXPECT_TRUE(rcclHostHierAllReduceFusedWindow(nHosts, 8, 16 * kMiB)) << nHosts << " hosts";
         EXPECT_FALSE(rcclHostHierAllReduceFusedWindow(nHosts, 8, 16 * kMiB + 1)) << nHosts << " hosts";
         EXPECT_FALSE(rcclHostHierAllReduceFusedWindow(nHosts, 8, 128 * kMiB)) << nHosts << " hosts";
@@ -352,11 +356,11 @@ TEST(HostHierAllReduce, EligibilityPerMode_Isolated)
                 EXPECT_FALSE(rcclHostHierAllReduceEligible(mock.get(), floats(2 * kMiB), ncclFloat32, ncclSum, false))
                     << "two MNNVL cliques";
             }
-            // The mock comm has no DDA scratch, so the fused kernel never runs on it.
+            // The mock comm has no DDA scratch, so the fused kernel never runs on it; the three collectives take over.
             for(size_t bytes : {4 * kMiB, 8 * kMiB - 64})
             {
-                EXPECT_FALSE(eligible(blockHosts(2, 8), floats(bytes))) << bytes << " B on two hosts, no fused kernel";
-                EXPECT_FALSE(eligible(blockHosts(2, 8), bytes / 2, ncclBfloat16)) << bytes << " B bf16, no fused kernel";
+                EXPECT_TRUE(eligible(blockHosts(2, 8), floats(bytes))) << bytes << " B on two hosts, no fused kernel";
+                EXPECT_TRUE(eligible(blockHosts(2, 8), bytes / 2, ncclBfloat16)) << bytes << " B bf16, no fused kernel";
                 EXPECT_TRUE(eligible(blockHosts(2, 8), bytes, ncclFloat8e4m3)) << bytes << " B fp8 on two hosts";
                 EXPECT_TRUE(eligible(blockHosts(4, 8), floats(bytes))) << bytes << " B on four hosts";
             }

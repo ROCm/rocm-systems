@@ -674,7 +674,7 @@ test_categories:
     env_variables:
       - "RCCL_HOST_HIER_ALLREDUCE=1"
       - "RCCL_TEST_HOST_HIER_HOSTS=2"
-  # Auto mode picks the fused kernel only on hosts of 8 ranks within 4-16 MiB; forcing it covers every size.
+  # Auto mode picks the fused kernel only on hosts of 8 ranks at 2-16 MiB; forcing it covers every size.
   standard_env_host_hier_allreduce_fused:
     description: "Host-hierarchical AllReduce data checks in the fused DDA kernel on two emulated hosts, including its multi-round loop and short last round."
     test_patterns:

@@ -538,10 +538,8 @@ collected in the following table.
           ``ncclSum`` on ``ncclFloat32``, ``ncclFloat16``, ``ncclBfloat16``,
           ``ncclFloat8e4m3`` and ``ncclFloat8e5m2``, at these message sizes: 2
           to 16 MiB and 64 to 128 MiB on two hosts, 2 to 256 MiB on four hosts
-          and 2 to 512 MiB on eight hosts. On two hosts, FP32, FP16 and BF16
-          messages between 2 and 8 MiB use it only where the fused kernel runs
-          (see ``RCCL_HOST_HIER_ALLREDUCE_FUSED``). Auto mode is DPX only and
-          is not used with other layouts.
+          and 2 to 512 MiB on eight hosts. Auto mode is DPX only and is not
+          used with other layouts.
         | ``0``: Disabled.
         | ``1``: Enabled for every eligible AllReduce.
 
@@ -555,7 +553,8 @@ collected in the following table.
           16-byte pieces per local rank. Otherwise the three collectives run.
           All ranks must use the same value.
       - | ``-1``: Auto (default). Used on one or two hosts with eight ranks
-          per host for messages from 4 to 16 MiB.
+          per host for messages above 2 MiB and below 7 MiB, and above 8 MiB
+          up to 16 MiB.
         | ``0``: Disabled.
         | ``1``: Used wherever the kernel applies.
 

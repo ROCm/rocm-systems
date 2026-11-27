@@ -100,16 +100,6 @@ bool fusedKernelRuns(struct ncclComm* comm, const struct rcclHostLayout& layout,
   return ncclAllReduceDdaFabricHierEligible(comm, count, datatype, op, layout.nHosts, layout.ranksPerHost);
 }
 
-// On two hosts with 8 ranks the three collectives gained over the default path at 2, 8-16 and 64-128 MiB in fp32 sum, but
-// not between 2 and 8 MiB, where the auto window needs the fused kernel. fp8, which the kernel does not take, gained
-// across the window on the three collectives.
-bool needsFusedKernel(const struct rcclHostLayout& layout, ncclDataType_t datatype, size_t bytes) {
-  constexpr size_t MiB = size_t{1} << 20;
-  if (layout.nHosts != 2 || layout.ranksPerHost != 8) return false;
-  if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) return false;
-  return bytes > 2 * MiB && bytes < 8 * MiB;
-}
-
 // The windows were measured against the default path of the DPX tuning table, which every rank of a comm reads only
 // when all of them ask for it (rcclSetTuningPartition).
 bool dpxTuningTable(const struct ncclComm* comm) {
@@ -309,7 +299,8 @@ bool rcclHostHierAllReduceAutoWindow(int nHosts, int ranksPerHost, size_t bytes)
 
 bool rcclHostHierAllReduceFusedWindow(int nHosts, int ranksPerHost, size_t bytes) {
   constexpr size_t MiB = size_t{1} << 20;
-  return ranksPerHost == 8 && nHosts <= 2 && bytes >= 4 * MiB && bytes <= 16 * MiB;
+  return ranksPerHost == 8 && nHosts <= 2 &&
+         ((bytes > 2 * MiB && bytes < 7 * MiB) || (bytes > 8 * MiB && bytes <= 16 * MiB));
 }
 
 bool rcclHostHierAllReduceAutoType(ncclDataType_t datatype, ncclRedOp_t op) {
@@ -334,11 +325,8 @@ bool rcclHostHierAllReduceEligible(struct ncclComm* comm, size_t count, ncclData
   const struct rcclHostLayout* layout = rcclHostHierGetLayout(comm);
   if (layout == nullptr || count % layout->ranksPerHost != 0) return false;
   if (forced) return true;
-  const size_t bytes = count * ncclTypeSize(datatype);
-  if (!rcclHostHierAllReduceAutoWindow(layout->nHosts, layout->ranksPerHost, bytes) || !dpxTuningTable(comm)) {
-    return false;
-  }
-  return !needsFusedKernel(*layout, datatype, bytes) || fusedKernelRuns(comm, *layout, count, datatype, op);
+  return rcclHostHierAllReduceAutoWindow(layout->nHosts, layout->ranksPerHost, count * ncclTypeSize(datatype)) &&
+         dpxTuningTable(comm);
 }
 
 ncclResult_t rcclHostHierAllReduce(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
