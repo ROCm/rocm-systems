@@ -103,26 +103,38 @@ DEEP_TENSOR_METHOD_WRAPS_ENV = "ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS"
 
 
 def format_wrap_args(args: Tuple[object, ...], kwargs: Dict[str, object]) -> str:
-    """Render wrap args with readable shape and dtype as a marker blob.
+    """Render wrap args as a marker blob.
 
-    Skip other objects. Return n/a when none remain.
+    Use dtype[dims] when shape and dtype are readable. Otherwise use repr()
+    for int, float, bool, and str. Skip other objects. Return n/a when none
+    remain.
     """
     items: List[str] = []
     for value in args:
         if len(items) >= _MAX_TENSOR_ARGUMENT_ITEMS:
             break
-        rendered = render_dtype_shape(value)
+        rendered = _render_wrap_value(value)
         if rendered is None:
             continue
         items.append(rendered)
     for name, value in kwargs.items():
         if len(items) >= _MAX_TENSOR_ARGUMENT_ITEMS:
             break
-        rendered = render_dtype_shape(value)
+        rendered = _render_wrap_value(value)
         if rendered is None:
             continue
         items.append(f"{name}={rendered}")
     return format_args_blob(items)
+
+
+def _render_wrap_value(value: object) -> Optional[str]:
+    """Return dtype[dims], or repr() for Python scalars, else None."""
+    rendered = render_dtype_shape(value)
+    if rendered is not None:
+        return rendered
+    if isinstance(value, (int, float, bool, str)):
+        return repr(value)
+    return None
 
 
 # Structural wrappers for entry points the ATen dispatcher does not record.

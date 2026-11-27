@@ -383,12 +383,12 @@ def test_uninitialized_buffer_keeps_persistent_on_to(monkeypatch):
     assert moved.persistent is False
 
 
-def test_format_wrap_args_renders_readable_shapes_and_skips_others():
+def test_format_wrap_args_renders_tensors_scalars_and_skips_others():
     tensor = fake_tensor()
     rendered = torch_backend.format_wrap_args(
-        (tensor, "skip"), {"bias": tensor, "flag": True}
+        (tensor, 64, object()), {"bias": tensor, "flag": True}
     )
-    assert rendered == "(float32[2x4], bias=float32[2x4])"
+    assert rendered == "(float32[2x4], 64, bias=float32[2x4], flag=True)"
     assert torch_backend.format_wrap_args((), {}) == "n/a"
 
 
@@ -435,7 +435,7 @@ def test_format_wrap_args_preserves_readable_tensors(torch_module):
             (UnreadableShape(), tensor, 42),
             {"unreadable": UnreadableDtype(), "scalar": scalar},
         )
-        == "(float32[2x3], scalar=float64[])"
+        == "(float32[2x3], 42, scalar=float64[])"
     )
 
 
