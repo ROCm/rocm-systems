@@ -20,4 +20,4 @@ ROCm Compute Profiler example exercises
   `<https://github.com/amd/HPCTrainingExamples/tree/main/OmniperfExamples>`__
 
 AMD Instinct™ tuning guides
-  :doc:`rocm:how-to/rocm-for-ai/inference-optimization/workload`
+  `AMD Instinct MI300 Series / MI350 Series workload optimization <https://rocm.docs.amd.com/projects/ai-ecosystem/en/latest/optimization/workload-optimization.html>`_
