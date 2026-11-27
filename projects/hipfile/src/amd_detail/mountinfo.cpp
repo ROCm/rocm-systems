@@ -93,22 +93,30 @@ LibMountHelper::getMountInfo(dev_t dev) const
     if (fstype && !strcmp(fstype, "ext4")) {
         mountinfo.type = FilesystemType::ext4;
 
-        char *value;
-        switch (libmount->mnt_fs_get_option(mnt_fs, "data", &value, nullptr)) {
-            case 0: // option found
-                if (value && !strcmp(value, "ordered")) {
+        // libmount returns a pointer into the options string, so the value isn't
+        // NUL-terminated when other options follow it. Only its length is reliable.
+        char  *value{};
+        size_t length{};
+        switch (libmount->mnt_fs_get_option(mnt_fs, "data", &value, &length)) {
+            case 0: { // option found
+                std::string_view mode{};
+                if (value) {
+                    mode = std::string_view(value, length);
+                }
+                if (mode == "ordered") {
                     mountinfo.options.ext4.journaling_mode = ExtJournalingMode::ordered;
                 }
-                else if (value && !strcmp(value, "journal")) {
+                else if (mode == "journal") {
                     mountinfo.options.ext4.journaling_mode = ExtJournalingMode::journal;
                 }
-                else if (value && !strcmp(value, "writeback")) {
+                else if (mode == "writeback") {
                     mountinfo.options.ext4.journaling_mode = ExtJournalingMode::writeback;
                 }
                 else {
                     mountinfo.options.ext4.journaling_mode = ExtJournalingMode::unknown;
                 }
                 break;
+            }
             case 1: // option not found
                 mountinfo.options.ext4.journaling_mode = ExtJournalingMode::ordered;
                 break;

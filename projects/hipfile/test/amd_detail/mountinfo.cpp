@@ -102,7 +102,7 @@ TEST(LibMountHelper, GetMountInfoThrowsOnGetFilesystemOptionFailure)
         .WillOnce(DoAll(SetArgPointee<1>(tbl), Return(0)));
     EXPECT_CALL(mlibmount, mnt_table_find_devno(tbl, dev, MNT_ITER_FORWARD)).WillOnce(Return(fs));
     EXPECT_CALL(mlibmount, mnt_fs_get_fstype(fs)).WillOnce(Return("ext4"));
-    EXPECT_CALL(mlibmount, mnt_fs_get_option(fs, StrEq("data"), NotNull(), _)).WillOnce(Return(-1));
+    EXPECT_CALL(mlibmount, mnt_fs_get_option(fs, StrEq("data"), NotNull(), NotNull())).WillOnce(Return(-1));
     EXPECT_CALL(mlibmount, mnt_free_context(cxt));
 
     try {
@@ -239,15 +239,12 @@ INSTANTIATE_TEST_SUITE_P(NfsTransport, LibMountHelperNfsTransportParam,
                                         std::make_tuple(-1, nullptr, size_t{0}, NfsProto::unknown))));
 
 class LibMountHelperExt4FilesystemTypeParam
-    : public TestWithParam<std::tuple<int, const char *, ExtJournalingMode>> {};
+    : public TestWithParam<std::tuple<int, const char *, size_t, ExtJournalingMode>> {};
 
 TEST_P(LibMountHelperExt4FilesystemTypeParam, GetMountInfoHandlesExt4FilesystemType)
 {
     StrictMock<MLibMount> mlibmount;
-
-    auto mnt_fs_get_option_return{std::get<0>(GetParam())};
-    auto mnt_fs_get_option_value{std::get<1>(GetParam())};
-    auto expected_journaling_mode{std::get<2>(GetParam())};
+    const auto &[result, value, length, expected_journaling_mode] = GetParam();
 
     auto dev{makedev(123, 456)};
     auto cxt = reinterpret_cast<libmnt_context *>(0xFACEFEED);
@@ -259,9 +256,9 @@ TEST_P(LibMountHelperExt4FilesystemTypeParam, GetMountInfoHandlesExt4FilesystemT
         .WillOnce(DoAll(SetArgPointee<1>(tbl), Return(0)));
     EXPECT_CALL(mlibmount, mnt_table_find_devno(tbl, dev, MNT_ITER_FORWARD)).WillOnce(Return(fs));
     EXPECT_CALL(mlibmount, mnt_fs_get_fstype(fs)).WillOnce(Return("ext4"));
-    EXPECT_CALL(mlibmount, mnt_fs_get_option(fs, StrEq("data"), NotNull(), _))
-        .WillOnce(DoAll(SetArgPointee<2>(const_cast<char *>(mnt_fs_get_option_value)),
-                        Return(mnt_fs_get_option_return)));
+    EXPECT_CALL(mlibmount, mnt_fs_get_option(fs, StrEq("data"), NotNull(), NotNull()))
+        .WillOnce(
+            DoAll(SetArgPointee<2>(const_cast<char *>(value)), SetArgPointee<3>(length), Return(result)));
     EXPECT_CALL(mlibmount, mnt_free_context(cxt));
 
     auto optional_mountinfo = LibMountHelper().getMountInfo(dev);
@@ -272,14 +269,23 @@ TEST_P(LibMountHelperExt4FilesystemTypeParam, GetMountInfoHandlesExt4FilesystemT
     ASSERT_EQ(mountinfo.options.ext4.journaling_mode, expected_journaling_mode);
 }
 
-INSTANTIATE_TEST_SUITE_P(LibMountHelperExt4FilesystemType, LibMountHelperExt4FilesystemTypeParam,
-                         Values(std::make_tuple(1, nullptr, ExtJournalingMode::ordered),
-                                std::make_tuple(0, nullptr, ExtJournalingMode::unknown),
-                                std::make_tuple(0, "ordered", ExtJournalingMode::ordered),
-                                std::make_tuple(0, "journal", ExtJournalingMode::journal),
-                                std::make_tuple(0, "writeback", ExtJournalingMode::writeback),
-                                std::make_tuple(0, "foobar", ExtJournalingMode::unknown),
-                                std::make_tuple(0, "order", ExtJournalingMode::unknown)));
+// Like the real libmount, the value points into the options string, so it runs on
+// past the option's length when other options follow it.
+INSTANTIATE_TEST_SUITE_P(
+    LibMountHelperExt4FilesystemType, LibMountHelperExt4FilesystemTypeParam,
+    Values(std::make_tuple(1, nullptr, size_t{0}, ExtJournalingMode::ordered),
+           std::make_tuple(0, nullptr, size_t{0}, ExtJournalingMode::unknown),
+           std::make_tuple(0, "", size_t{0}, ExtJournalingMode::unknown),
+           std::make_tuple(0, "ordered", size_t{7}, ExtJournalingMode::ordered),
+           std::make_tuple(0, "journal", size_t{7}, ExtJournalingMode::journal),
+           std::make_tuple(0, "writeback", size_t{9}, ExtJournalingMode::writeback),
+           std::make_tuple(0, "ordered,stripe=32", size_t{7}, ExtJournalingMode::ordered),
+           std::make_tuple(0, "journal,errors=remount-ro", size_t{7}, ExtJournalingMode::journal),
+           std::make_tuple(0, "writeback,init_itable", size_t{9}, ExtJournalingMode::writeback),
+           std::make_tuple(0, "orderedx", size_t{8}, ExtJournalingMode::unknown),
+           std::make_tuple(0, "ordered", size_t{5}, ExtJournalingMode::unknown),
+           std::make_tuple(0, "foobar", size_t{6}, ExtJournalingMode::unknown),
+           std::make_tuple(0, "order", size_t{5}, ExtJournalingMode::unknown)));
 
 TEST(LibMountHelper, GetMountInfoHandlesXfsFileSystem)
 {
