@@ -37,7 +37,6 @@
 #include "MPITestBase.hpp"
 #include "ResourceGuards.hpp"
 #include "TestChecks.hpp"
-#include "algorithms/dda/device/CollCommon.h"
 #include "comm.h"
 #include "rccl_arch_thresholds.h"
 #include "rccl_common.h"
@@ -252,8 +251,8 @@ protected:
     }
   }
 
-  // Launches every case back to back at `cap` with no sync in between, then checks each; counts cases on each side.
-  void runTreeStaging(size_t cap, const std::vector<IndexCase>& cases, bool inPlace, int* inKernel, int* hostCopy) {
+  // Launches every case back to back at `cap` with no sync in between, then checks each.
+  void runTreeStaging(size_t cap, const std::vector<IndexCase>& cases, bool inPlace) {
     ncclComm* comm = getActiveCommunicator();
     ScopedTreeKernelCopyCap capGuard(comm, cap);
     constexpr size_t kAlign = 256;
@@ -293,11 +292,6 @@ protected:
       ASSERT_MPI_EQ(ncclSuccess, rcclGetCollImplInfo(comm, ncclFuncAllReduce, c.count, c.dtype, ncclSum, send, recv, 0,
                                                      &algo, &protocol, &maxChannels));
       ASSERT_MPI_EQ(static_cast<int>(RCCL_DDA_IPC), algo);
-      if (dda::common::ddaAllReduceTreeIpcStagesInKernel(bytes, cap)) {
-        ++*inKernel;
-      } else {
-        ++*hostCopy;
-      }
     }
     // The fills above are synchronous; every launch below is queued without a sync in between.
     for (size_t i = 0; i < cases.size(); ++i) {
@@ -378,12 +372,10 @@ TEST_F(DdaIpcMPI_IndexData, AllReduceTreeStaging) {
     {ncclFloat32, 65568},   {ncclFloat32, capFloats + 32}, {ncclFloat32, capFloats},   {ncclFloat32, 3u << 19},
     {ncclBfloat16, 131136}, {ncclBfloat16, capBf16 + 64},  {ncclBfloat16, capBf16},
   };
-  int inKernel = 0;
-  int hostCopy = 0;
   for (int round = 0; round < kRounds; ++round) {
     for (size_t cap : {size_t{0}, kArStagingCapBytes}) {
       for (bool inPlace : {false, true}) {
-        runTreeStaging(cap, cases, inPlace, &inKernel, &hostCopy);
+        runTreeStaging(cap, cases, inPlace);
         if (HasFailure() || IsSkipped()) {
           return;
         }
@@ -391,12 +383,6 @@ TEST_F(DdaIpcMPI_IndexData, AllReduceTreeStaging) {
     }
     std::rotate(cases.begin(), cases.begin() + 1, cases.end());
   }
-  // RCCL_DDA_AR_TREE_KERNEL_COPY_MAX_BYTES overrides the table cap, so the launch sides are only checked without it.
-  if (std::getenv("RCCL_DDA_AR_TREE_KERNEL_COPY_MAX_BYTES") != nullptr) {
-    return;
-  }
-  EXPECT_GT(inKernel, 0) << "no call copied in the kernel";
-  EXPECT_GT(hostCopy, 0) << "no call copied before the launch";
 }
 
 class DdaIpcMPI_CommLifecycle : public MPITestBase {

@@ -14,13 +14,13 @@
 
 namespace dda::common {
 
+// recvbuff and sendbuff are not __restrict__: an in-place AllReduce passes one pointer for both.
 template <typename T, int NRANKS, bool hasAcc>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
 #endif
-  __global__ void ddaAllReduceFlatIpc(T* const* __restrict__ ipcbuffs, T* __restrict__ recvbuff, size_t count,
-                                      const T* __restrict__ sendbuff, int selfRank, const IpcGpuBarrier barrier,
-                                      const T* __restrict__ acc) {
+  __global__ void ddaAllReduceFlatIpc(T* const* __restrict__ ipcbuffs, T* recvbuff, size_t count, const T* sendbuff,
+                                      int selfRank, const IpcGpuBarrier barrier, const T* __restrict__ acc) {
   bool barrierAborted = false; // sticky abort state, see IpcGpuBarrier::syncOnSameBlockIdx
   constexpr auto countPerThread = sizeof(uint4) / sizeof(T);
   const auto gtIdx = blockDim.x * blockIdx.x + threadIdx.x;
@@ -41,13 +41,13 @@ __launch_bounds__(512)
 
 // kCopyInKernel: the kernel copies sendbuff into its scratch first.
 // Otherwise the host copied it before the launch and barrier 1 only acquires.
+// recvbuff and sendbuff are not __restrict__, as in ddaAllReduceFlatIpc.
 template <typename T, int NRANKS, bool hasAcc, bool kCopyInKernel = false>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
 #endif
-  __global__ void ddaAllReduceTreeIpc(T* const* __restrict__ ipcbuffs, T* __restrict__ recvbuff, size_t count,
-                                      const T* __restrict__ sendbuff, int selfRank, const IpcGpuBarrier barrier,
-                                      const T* __restrict__ acc) {
+  __global__ void ddaAllReduceTreeIpc(T* const* __restrict__ ipcbuffs, T* recvbuff, size_t count, const T* sendbuff,
+                                      int selfRank, const IpcGpuBarrier barrier, const T* __restrict__ acc) {
   bool barrierAborted = false; // sticky abort state, see IpcGpuBarrier::syncOnSameBlockIdx
   const size_t countPerRank = count / NRANKS;
   constexpr auto countPerThread = sizeof(uint4) / sizeof(T);
