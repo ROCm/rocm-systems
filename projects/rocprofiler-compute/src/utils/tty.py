@@ -269,7 +269,7 @@ def show_roofline(
                     print(f"{base_indent}├─ {table_name}", file=output)
 
                     table_string = get_table_string(
-                        df, transpose=False, decimal=args.decimal
+                        df, transpose=False, decimal=args.debug_table_decimal
                     )
                     indented_table = textwrap.indent(table_string, table_indent_prefix)
                     print(indented_table, file=output)
@@ -346,17 +346,19 @@ def process_table_data(
                         ).fillna(0.0)
 
                         # Calculate absolute and percent differences
-                        absolute_diff = (cur_series - base_series).round(args.decimal)
+                        absolute_diff = (cur_series - base_series).round(
+                            args.debug_table_decimal
+                        )
                         percent_diff = (
                             absolute_diff / base_series.replace(0, 1) * 100
-                        ).round(args.decimal)
+                        ).round(args.debug_table_decimal)
 
                         if args.verbose >= 2:
                             console_log("---------", header, percent_diff)
 
                         # Format as "value (percent%)"
                         formatted_diff = (
-                            cur_series.round(args.decimal).astype(str)
+                            cur_series.round(args.debug_table_decimal).astype(str)
                             + " ("
                             + percent_diff.astype(str)
                             + "%)"
@@ -367,7 +369,8 @@ def process_table_data(
                         # Base run - just add the rounded values
                         cur_df_copy = copy.deepcopy(cur_df)
                         cur_df_copy[header] = [
-                            _safe_round_value(x, args.decimal) for x in base_df[header]
+                            _safe_round_value(x, args.debug_table_decimal)
+                            for x in base_df[header]
                         ]
                         result_df = pd.concat([result_df, cur_df_copy[header]], axis=1)
 
@@ -427,9 +430,12 @@ def format_table_output(
     if is_single_run and "Unit" in df.columns:
         # Identify value columns to format
         value_cols = ["Value", "Avg", "Min", "Max", "Peak", "Peak (Empirical)"]
-        df = scale_bw_columns(df, value_cols, args.decimal)
+        df = scale_bw_columns(df, value_cols, args.debug_table_decimal)
 
-    content += get_table_string(df, transpose=transpose, decimal=args.decimal) + "\n"
+    content += (
+        get_table_string(df, transpose=transpose, decimal=args.debug_table_decimal)
+        + "\n"
+    )
 
     return content
 
@@ -633,17 +639,6 @@ def show_all(
                         else:
                             run_data.dfs[table_config["id"]].index = initial_index
 
-                processed_df = process_table_data(
-                    args,
-                    runs,
-                    table_config,
-                    table_type,
-                    comparable_columns,
-                )
-
-                if processed_df.empty:
-                    continue
-
                 # For the memory chart panel, collect all tables and merge
                 # into a single chart; skip individual table output.
                 # Gate to architectures with a chart layout; others fall back to
@@ -655,15 +650,27 @@ def show_all(
                 )
 
                 if is_mem_chart and len(runs) == 1:
-                    # Metric tables are indexed by Metric_ID
-                    has_cols = (
-                        processed_df.index.name == "Metric_ID"
-                        and "Value" in processed_df.columns
-                    )
-                    if has_cols:
-                        table_mem = dict(zip(processed_df.index, processed_df["Value"]))
-                        mem_chart_data.update(table_mem)
+                    # The chart rounds each value when it draws it.
+                    # Metric tables are indexed by Metric_ID.
+                    table_df = first_run.dfs[table_config["id"]]
+                    if (
+                        not table_df.empty
+                        and table_df.index.name == "Metric_ID"
+                        and "Value" in table_df.columns
+                    ):
+                        mem_chart_data.update(zip(table_df.index, table_df["Value"]))
                     # Skip individual table output; merged chart emitted below
+                    continue
+
+                processed_df = process_table_data(
+                    args,
+                    runs,
+                    table_config,
+                    table_type,
+                    comparable_columns,
+                )
+
+                if processed_df.empty:
                     continue
 
                 panel_content += format_table_output(
@@ -742,7 +749,9 @@ def show_kernel_stats(
                         )
                         print(
                             get_table_string(
-                                display_df, transpose=False, decimal=args.decimal
+                                display_df,
+                                transpose=False,
+                                decimal=args.debug_table_decimal,
                             ),
                             file=output,
                         )
@@ -752,7 +761,9 @@ def show_kernel_stats(
                         print("Dispatch list", file=output)
                         print(
                             get_table_string(
-                                single_df, transpose=False, decimal=args.decimal
+                                single_df,
+                                transpose=False,
+                                decimal=args.debug_table_decimal,
                             ),
                             file=output,
                         )

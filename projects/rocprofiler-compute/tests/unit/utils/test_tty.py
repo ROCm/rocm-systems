@@ -27,7 +27,11 @@ TIME_UNITS = {"s": 10**9, "ms": 10**6, "us": 10**3, "ns": 1}
 
 def make_args(**overrides) -> argparse.Namespace:
     """Minimal args for the plain-table render path, plus any overrides."""
-    defaults = {"decimal": 2, "debug_table_view": False, "normal_unit": "per_wave"}
+    defaults = {
+        "debug_table_decimal": 2,
+        "debug_table_view": False,
+        "normal_unit": "per_wave",
+    }
     return argparse.Namespace(**{**defaults, **overrides})
 
 
@@ -327,7 +331,7 @@ def test_mathematical_correctness_all_units() -> None:
 
 def test_integration_conversion_flow() -> None:
     """has_time_data gates convert_time_columns in the show_all flow."""
-    args = argparse.Namespace(time_unit="ms", decimal=2)
+    args = argparse.Namespace(time_unit="ms", debug_table_decimal=2)
 
     sample_df = pd.DataFrame({
         "Metric_ID": ["7.2.0"],
@@ -381,7 +385,7 @@ def test_show_all_membw_analysis_panel_gate(
 ) -> None:
     """Panel 3000 is rendered only when its table was built."""
     args = argparse.Namespace(
-        decimal=2,
+        debug_table_decimal=2,
         filter_metrics=None,
         normal_unit="per_wave",
         path=[["fixture"]],
@@ -452,8 +456,9 @@ def test_show_all_membw_analysis_panel_gate(
 def test_show_all_draws_the_memory_chart_from_raw_values_and_config_units(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """The chart gets the evaluated values, not the table values rounded for display."""
     args = argparse.Namespace(
-        decimal=2,
+        debug_table_decimal=2,
         filter_metrics=None,
         membw_analysis=False,
         normal_unit="per_wave",
@@ -462,16 +467,19 @@ def test_show_all_draws_the_memory_chart_from_raw_values_and_config_units(
         debug_table_view=False,
     )
     metric_dataframe = pd.DataFrame({
-        "Metric_ID": ["3.1.0"],
-        "Metric": ["DRAM Read Bandwidth"],
-        "Value": [512e9],
-        "Unit": ["Bytes/s"],
+        "Metric_ID": ["3.1.0", "3.1.1"],
+        "Metric": ["DRAM Read Bandwidth", "L2 Hit"],
+        "Value": [512e9, 34.2468],
+        "Unit": ["Bytes/s", "Percent"],
     }).set_index("Metric_ID")
     table_config = {
         "id": 301,
         "title": "Instruction Cache",
         "header": {"metric": "Metric", "value": "Value", "unit": "Unit"},
-        "metric": {"DRAM Read Bandwidth": {"value": "X", "unit": "Bytes/s"}},
+        "metric": {
+            "DRAM Read Bandwidth": {"value": "X", "unit": "Bytes/s"},
+            "L2 Hit": {"value": "Y", "unit": "Percent"},
+        },
     }
     arch_configs = SimpleNamespace(
         panel_configs={
@@ -490,11 +498,6 @@ def test_show_all_draws_the_memory_chart_from_raw_values_and_config_units(
     }
     calls: list[tuple[dict, str, str, dict]] = []
 
-    monkeypatch.setattr(
-        "utils.tty.process_table_data",
-        lambda *_args, **_kwargs: metric_dataframe,
-    )
-
     def chart_stub(
         mem_data: dict, *, chart_title: str, gpu_arch: str, units: dict, membw=None
     ) -> str:
@@ -512,13 +515,13 @@ def test_show_all_draws_the_memory_chart_from_raw_values_and_config_units(
         profiling_config={"filter_blocks": []},
     )
 
-    # Values are unscaled Bytes/s; units are the config's, not the display's
+    # Values are unscaled and unrounded; units are the config's, not the display's
     assert calls == [
         (
-            {"3.1.0": 512e9},
+            {"3.1.0": 512e9, "3.1.1": 34.2468},
             "3. Memory Chart (Normalization: per_wave)",
             "gfx1250",
-            {"3.1.0": "Bytes/s"},
+            {"3.1.0": "Bytes/s", "3.1.1": "Percent"},
         )
     ]
     assert "rendered gfx1250 memory chart" in rendered_output.getvalue()

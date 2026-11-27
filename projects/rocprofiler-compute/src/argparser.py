@@ -127,8 +127,8 @@ def add_general_group(
         help=(
             "Show the debug options in --help:\n"
             "   Top level and profile: --debug-list-metrics-gfx-id\n"
-            "   Analyze: --debug-metric-expression, --debug-table-view, "
-            "--debug-verify-deps\n"
+            "   Analyze: --debug-metric-expression, --debug-table-decimal,\n"
+            "      --debug-table-view, --debug-verify-deps\n"
         ),
     )
 
@@ -598,7 +598,7 @@ rocprof-compute analyze --path <workload_path> [analyze options]
 -----------------------------------------------------------------------------------
 Examples:
 \trocprof-compute analyze -p workloads/vcopy/mi200/ --list-metrics
-\trocprof-compute analyze -p workloads/mixbench/mi200/ --dispatch 12 34 --decimal 3
+\trocprof-compute analyze -p workloads/mixbench/mi200/ --dispatch 12 34
 \trocprof-compute analyze -p workloads/vcopy/mi200/ --speed-of-light --roofline
 -----------------------------------------------------------------------------------
         """,
@@ -819,19 +819,22 @@ Examples:
         choices=["s", "ms", "us", "ns"],
         help="Specify display time unit (Default: ns).\nValues: %(choices)s",
     )
-    analyze_advanced_group.add_argument(
-        "--decimal",
-        type=int,
-        metavar="<digits>",
-        default=2,
-        help="Specify desired decimal precision of analysis results (Default: 2).",
-    )
     analyze_debug_group.add_argument(
         "--debug-metric-expression",
         action=DebugAction,
         base_action="store_true",
         debug_enabled=debug_enabled,
         help="Print the counter data, and each metric's expression and inputs.",
+    )
+    analyze_debug_group.add_argument(
+        "--debug-table-decimal",
+        type=int,
+        metavar="<digits>",
+        default=2,
+        action=DebugAction,
+        base_action="store",
+        debug_enabled=debug_enabled,
+        help="Print the analyze tables with <digits> decimals (Default: 2).",
     )
     analyze_debug_group.add_argument(
         "--debug-table-view",

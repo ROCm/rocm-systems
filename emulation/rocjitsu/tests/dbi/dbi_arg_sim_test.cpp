@@ -307,6 +307,40 @@ TEST_P(DbiGuestArgumentSim, OverlappingArgumentsCaptureGuestValuesBeforeOverwrit
   EXPECT_NE(observed.front(), 13u);
 }
 
+TEST_P(DbiGuestArgumentSim, ScalarArgumentTracksTheSelectedAnchor) {
+  const ArgSimArch &target = GetParam();
+  const auto initial = build_s_mov_b32(4, scalar_positive_inline_u32(7), target.arch);
+  const auto update = build_s_mov_b32(4, scalar_positive_inline_u32(13), target.arch);
+  const auto end = build_s_endpgm(target.arch);
+  const auto ret = build_s_setpc_b64(30, target.arch);
+  ASSERT_TRUE(initial.succeeded() && update.succeeded() && end.succeeded() && ret.succeeded());
+  const auto image = test::with_descriptor_metadata(
+      test::make_amdgpu_kernel_elf({initial.value(), update.value(), end.value()}, 64,
+                                   test::kCallableProbeGranulatedSgprCount, target.e_flags),
+      target.arch);
+  const auto callback =
+      test::make_amdgpu_probe_elf("scalar", {kMovV3V0, ret.value()}, target.e_flags);
+  AmdGpuCodeObject object(image.data(), image.size());
+  AmdGpuCodeObject body(callback.data(), callback.size());
+  for (const auto kind : {InstrumentationKind::BeforeInst, InstrumentationKind::AfterInst}) {
+    Instrumentor instrumentor(object, target.arch);
+    instrumentor.add_point({.anchor_offset = 4,
+                            .kind = kind,
+                            .probe_obj = &body,
+                            .probe_symbol = "scalar",
+                            .probe_args = {probe_arg_sgpr(4)}});
+    const auto result = instrumentor.patch();
+    ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+    AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+    test::DbiSim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize(target.sim_arch, target.wave_size));
+    const auto observed = sim.run_and_read_vgpr(test::section_words(patched, ".text"),
+                                                test::patched_private_segment_size(patched), 3);
+    EXPECT_EQ(observed, std::vector<uint32_t>(target.wave_size,
+                                              kind == InstrumentationKind::BeforeInst ? 7u : 13u));
+  }
+}
+
 INSTANTIATE_TEST_SUITE_P(Targets, DbiGuestArgumentSim,
                          ::testing::Values(kCdna3ArgArch, kCdna4ArgArch, kRdna4ArgArch),
                          [](const ::testing::TestParamInfo<ArgSimArch> &info) {

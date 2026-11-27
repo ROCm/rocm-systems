@@ -89,6 +89,7 @@ from utils.metrics.expression import transform_expression
 from utils.metrics.metric_evaluator import collectables_per_table, counter_table_index
 from utils.mi_gpu_spec import mi_gpu_specs, roofline_column
 from utils.roofline_calc import (
+    AI_METRIC_TO_FIELD,
     SUPPORTED_DATATYPES,
     OpsSupport,
 )
@@ -1577,20 +1578,19 @@ class db_analysis(OmniAnalyze_Base):
                 )
                 continue
 
-            roofline_data_expressions = dict(
-                zip(roofline_data_df["Metric"], roofline_data_df["Value"])
-            )
+            table = dict(zip(roofline_data_df["Metric"], roofline_data_df["Value"]))
             roofline_data_expressions = {
-                "total_flops": roofline_data_expressions.get(
-                    "Performance (GFLOPs)", ""
-                ),
-                "l0_cache_data": roofline_data_expressions.get("AI L0", ""),
-                "l1_cache_data": roofline_data_expressions.get("AI L1", ""),
-                "l2_cache_data": roofline_data_expressions.get("AI L2", ""),
-                "hbm_cache_data": roofline_data_expressions.get("AI HBM", "")
-                or roofline_data_expressions.get("AI VRAM", ""),
-                "lds_cache_data": roofline_data_expressions.get("AI LDS", ""),
+                "total_flops": table.get("Performance (GFLOPs)", "")
             }
+            for metric, expression in table.items():
+                field = AI_METRIC_TO_FIELD.get(metric)
+                if field is None:
+                    continue
+                # Each column is named after its memory level: "ai_l0" fills
+                # "l0_cache_data". The database has no VRAM column, so the
+                # VRAM point fills "hbm_cache_data".
+                level = "hbm" if field == "ai_vram" else field.removeprefix("ai_")
+                roofline_data_expressions[f"{level}_cache_data"] = expression
 
             # Calculate kernel-level roofline data
             top_kernels = (

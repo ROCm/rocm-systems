@@ -237,4 +237,308 @@ TEST(MfmaMixed, ScaleClampsFiniteOverflowAndPreservesNonfiniteInputs) {
     }
   }
 }
+
+TEST(MfmaMixed, SpecialValuesSubnormalCAndExtremeScales) {
+  // Verify independent expected values across all CPU levels (scalar, v3, v4, zen4 BF16/VNNI)
+  // on extreme E8M0 scales, subnormal C preservation, and FP16_OVFL saturation.
+  struct ScaleCase {
+    uint8_t sa, sb;
+    uint32_t c;
+    bool zero_ab;
+    bool clamp;
+  };
+  constexpr ScaleCase scale_cases[] = {
+      {0, 0, 0, false, false},              // extreme underflow to +0.0
+      {0, 254, 0, false, false},            // non-plain cancelling extremes (2^0 = 1)
+      {254, 0, 0, false, false},            // reversed cancelling extremes (2^0 = 1)
+      {1, 1, 0, false, false},              // non-plain underflow to +0.0 (2^-252)
+      {1, 120, 0, false, false},            // representable FP32 subnormal scaled product (2^-133)
+      {254, 254, 0, false, false},          // overflow to +Inf
+      {254, 254, 0, false, true},           // overflow clamped to FLT_MAX by FP16_OVFL
+      {254, 254, 0, true, false},           // extreme scale * 0.0 == +0.0 (not NaN)
+      {255, 127, 0, true, false},           // NaN scale * 0.0 == NaN
+      {127, 255, 0, true, true},            // NaN scale preserved under FP16_OVFL
+      {127, 127, 0x00000001u, true, false}, // subnormal +C preserved
+      {127, 127, 0x80000001u, true, false}, // subnormal -C preserved
+  };
+  constexpr std::pair<uint64_t, uint64_t> format_pairs[] = {
+      {RJ_ARITH_MATRIX_FORMAT_FP4, RJ_ARITH_MATRIX_FORMAT_FP4},
+      {RJ_ARITH_MATRIX_FORMAT_FP4, RJ_ARITH_MATRIX_FORMAT_FP6},
+      {RJ_ARITH_MATRIX_FORMAT_FP6, RJ_ARITH_MATRIX_FORMAT_FP6},
+      {RJ_ARITH_MATRIX_FORMAT_BF6, RJ_ARITH_MATRIX_FORMAT_BF6},
+      {RJ_ARITH_MATRIX_FORMAT_FP8, RJ_ARITH_MATRIX_FORMAT_BF8},
+  };
+  auto one_bits = [](uint64_t fmt) -> uint32_t {
+    switch (fmt) {
+    case RJ_ARITH_MATRIX_FORMAT_FP8:
+      return 0x38u;
+    case RJ_ARITH_MATRIX_FORMAT_BF8:
+      return 0x3cu;
+    case RJ_ARITH_MATRIX_FORMAT_FP6:
+      return 0x08u;
+    case RJ_ARITH_MATRIX_FORMAT_BF6:
+      return 0x0cu;
+    default:
+      return 0x02u;
+    }
+  };
+  auto check_scaled = [&]<int OutputRegs, int M, int Blocks>(
+                          decltype(&rj_arith_v_mfma_scale_f32_16x16x128_f8f6f4_w64) entry) {
+    for (const auto &[fa, fb] : format_pairs) {
+      const uint64_t controls = fa | (fb << RJ_ARITH_MATRIX_FORMAT_B_SHIFT);
+      for (const ScaleCase sc : scale_cases) {
+        std::array<std::array<uint32_t, 64>, 8> a_buf{}, b_buf{};
+        if (!sc.zero_ab) {
+          // Encode +1.0 at k=0 (reg 0, lanes 0..M-1): exactly one 1.0*1.0 product in block 0.
+          for (int lane = 0; lane < M; ++lane) {
+            a_buf[0][lane] = one_bits(fa);
+            b_buf[0][lane] = one_bits(fb);
+          }
+        }
+        // Independent expected value (block 0 has dot 1.0 or 0.0; remaining blocks are 0.0).
+        float expected = std::bit_cast<float>(sc.c);
+        for (int blk = 0; blk < Blocks; ++blk) {
+          const float block_dot = (!sc.zero_ab && blk == 0) ? 1.0f : 0.0f;
+          const float term = (sc.sa == 255 || sc.sb == 255)
+                                 ? std::numeric_limits<float>::quiet_NaN()
+                                 : std::ldexp(block_dot, int(sc.sa) + int(sc.sb) - 254);
+          expected += term;
+        }
+        if (sc.clamp && std::isinf(expected)) {
+          expected = std::copysign(std::numeric_limits<float>::max(), expected);
+        }
+        const uint32_t expected_bits = std::bit_cast<uint32_t>(expected);
+
+        std::array<uint32_t, 64> sa_buf, sb_buf;
+        sa_buf.fill(sc.sa);
+        sb_buf.fill(sc.sb);
+        std::array<std::array<uint32_t, 64>, OutputRegs> c_buf;
+        for (std::array<uint32_t, 64> &r : c_buf) {
+          r.fill(sc.c);
+        }
+        std::array<const uint32_t *, 8> a_ptrs, b_ptrs;
+        for (int i = 0; i < 8; ++i) {
+          a_ptrs[i] = a_buf[i].data();
+          b_ptrs[i] = b_buf[i].data();
+        }
+        std::array<const uint32_t *, OutputRegs> c_ptrs;
+        for (int i = 0; i < OutputRegs; ++i) {
+          c_ptrs[i] = c_buf[i].data();
+        }
+        for (uint64_t cpu : supported_cpu_levels()) {
+          std::array<std::array<uint32_t, 64>, OutputRegs> out{};
+          std::array<uint32_t *, OutputRegs> d_ptrs;
+          for (int i = 0; i < OutputRegs; ++i) {
+            d_ptrs[i] = out[i].data();
+          }
+          const uint64_t flags =
+              cpu | RJ_ARITH_SEMANTICS_LOOSE | (sc.clamp ? RJ_ARITH_FP16_OVFL : 0);
+          ASSERT_EQ(entry(flags, controls, d_ptrs.data(), a_ptrs.data(), b_ptrs.data(),
+                          c_ptrs.data(), sa_buf.data(), sb_buf.data()),
+                    RJ_ARITH_SUCCESS);
+          for (int r = 0; r < OutputRegs; ++r) {
+            for (int lane = 0; lane < 64; ++lane) {
+              if (std::isnan(expected)) {
+                EXPECT_TRUE(std::isnan(std::bit_cast<float>(out[r][lane])));
+              } else {
+                EXPECT_EQ(out[r][lane], expected_bits);
+              }
+            }
+          }
+        }
+      }
+    }
+  };
+  check_scaled.template operator()<4, 16, 4>(rj_arith_v_mfma_scale_f32_16x16x128_f8f6f4_w64);
+  check_scaled.template operator()<16, 32, 2>(rj_arith_v_mfma_scale_f32_32x32x64_f8f6f4_w64);
+
+  // Also check unscaled subnormal-C preservation across all supported CPU levels.
+  for (const auto &[fa, fb] : format_pairs) {
+    const uint64_t controls = fa | (fb << RJ_ARITH_MATRIX_FORMAT_B_SHIFT);
+    std::array<std::array<uint32_t, 64>, 8> zeros{};
+    std::array<const uint32_t *, 8> z_ptrs;
+    for (int i = 0; i < 8; ++i) {
+      z_ptrs[i] = zeros[i].data();
+    }
+    std::array<std::array<uint32_t, 64>, 4> c_buf;
+    for (int r = 0; r < 4; ++r) {
+      for (int lane = 0; lane < 64; ++lane) {
+        c_buf[r][lane] = (lane & 1) ? 0x80000001u : 0x00000001u;
+      }
+    }
+    const uint32_t *c_ptrs[] = {c_buf[0].data(), c_buf[1].data(), c_buf[2].data(), c_buf[3].data()};
+    for (uint64_t cpu : supported_cpu_levels()) {
+      std::array<std::array<uint32_t, 64>, 4> out{};
+      uint32_t *d_ptrs[] = {out[0].data(), out[1].data(), out[2].data(), out[3].data()};
+      ASSERT_EQ(rj_arith_v_mfma_f32_16x16x128_f8f6f4_w64(cpu | RJ_ARITH_SEMANTICS_LOOSE, controls,
+                                                         d_ptrs, z_ptrs.data(), z_ptrs.data(),
+                                                         c_ptrs),
+                RJ_ARITH_SUCCESS);
+      EXPECT_EQ(out, c_buf);
+    }
+  }
+}
+
+TEST(MfmaMixed, UnscaledFp4Fp6CompatibilityPreservesLegacyAccumulation) {
+  // Compatibility preserves legacy C-first fused accumulation (including C = 2^24 absorbing unit
+  // products and signed -0.0 preservation), while explicit Loose permits exact K-first VNNI dots
+  // within loose tolerances.
+  const uint64_t fp4_ctrl =
+      RJ_ARITH_MATRIX_FORMAT_FP4 | (RJ_ARITH_MATRIX_FORMAT_FP4 << RJ_ARITH_MATRIX_FORMAT_B_SHIFT);
+  const uint64_t fp6_ctrl =
+      RJ_ARITH_MATRIX_FORMAT_FP6 | (RJ_ARITH_MATRIX_FORMAT_FP6 << RJ_ARITH_MATRIX_FORMAT_B_SHIFT);
+
+  // Case 1: C = 2^24 with eight unit FP4 products (two per 32-element block across 4 blocks).
+  // Legacy C-first FMA absorbs every 1.0 into 2^24 -> exact 0x4b800000 in Compatibility.
+  {
+    std::array<std::array<uint32_t, 64>, 8> a_buf{}, b_buf{};
+    for (int lane = 0; lane < 64; ++lane) {
+      a_buf[0][lane] = 0x22u; // two FP4 +1.0 nibbles in reg 0
+      b_buf[0][lane] = 0x22u;
+    }
+    std::array<const uint32_t *, 8> a_ptrs, b_ptrs;
+    for (int i = 0; i < 8; ++i) {
+      a_ptrs[i] = a_buf[i].data();
+      b_ptrs[i] = b_buf[i].data();
+    }
+    for (uint64_t cpu : supported_cpu_levels()) {
+      for (uint64_t sem : {RJ_ARITH_SEMANTICS_COMPATIBILITY, RJ_ARITH_SEMANTICS_LOOSE}) {
+        std::array<std::array<uint32_t, 64>, 4> c_buf, d_buf{};
+        for (std::array<uint32_t, 64> &r : c_buf) {
+          r.fill(0x4b800000u); // 2^24
+        }
+        const uint32_t *c_ptrs[] = {c_buf[0].data(), c_buf[1].data(), c_buf[2].data(),
+                                    c_buf[3].data()};
+        uint32_t *d_ptrs[] = {d_buf[0].data(), d_buf[1].data(), d_buf[2].data(), d_buf[3].data()};
+        ASSERT_EQ(rj_arith_v_mfma_f32_16x16x128_f8f6f4_w64(cpu | sem, fp4_ctrl, d_ptrs,
+                                                           a_ptrs.data(), b_ptrs.data(), c_ptrs),
+                  RJ_ARITH_SUCCESS);
+        for (int r = 0; r < 4; ++r) {
+          for (int lane = 0; lane < 64; ++lane) {
+            if (sem == RJ_ARITH_SEMANTICS_COMPATIBILITY) {
+              EXPECT_EQ(d_buf[r][lane], 0x4b800000u);
+            } else {
+              expect_f32(d_buf[r][lane], float(16777216.0 + 8.0), RJ_ARITH_SEMANTICS_LOOSE,
+                         /*atol=*/1e-4f, /*rtol=*/1e-5f);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Case 2: C = -0.0 with A all +0.0 and B all -0.0 (every product -0.0) preserves -0.0 in
+  // Compatibility mode across all CPU tiers.
+  {
+    std::array<std::array<uint32_t, 64>, 8> a_buf{}, b_buf{};
+    for (int r = 0; r < 4; ++r) {
+      b_buf[r].fill(0x88888888u); // FP4 -0.0 in every nibble
+    }
+    std::array<const uint32_t *, 8> a_ptrs, b_ptrs;
+    for (int i = 0; i < 8; ++i) {
+      a_ptrs[i] = a_buf[i].data();
+      b_ptrs[i] = b_buf[i].data();
+    }
+    for (uint64_t cpu : supported_cpu_levels()) {
+      std::array<std::array<uint32_t, 64>, 4> c_buf, d_buf{};
+      for (std::array<uint32_t, 64> &r : c_buf) {
+        r.fill(0x80000000u); // -0.0
+      }
+      const uint32_t *c_ptrs[] = {c_buf[0].data(), c_buf[1].data(), c_buf[2].data(),
+                                  c_buf[3].data()};
+      uint32_t *d_ptrs[] = {d_buf[0].data(), d_buf[1].data(), d_buf[2].data(), d_buf[3].data()};
+      ASSERT_EQ(rj_arith_v_mfma_f32_16x16x128_f8f6f4_w64(cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY,
+                                                         fp4_ctrl, d_ptrs, a_ptrs.data(),
+                                                         b_ptrs.data(), c_ptrs),
+                RJ_ARITH_SUCCESS);
+      for (int r = 0; r < 4; ++r) {
+        for (int lane = 0; lane < 64; ++lane) {
+          EXPECT_EQ(d_buf[r][lane], 0x80000000u);
+        }
+      }
+    }
+  }
+
+  // Case 3: Nonzero FP6xFP6 products in both Compatibility and Loose (C = 2^24 + unit FP6).
+  {
+    std::array<std::array<uint32_t, 64>, 8> a_buf{}, b_buf{};
+    for (int lane = 0; lane < 64; ++lane) {
+      // Two FP6 +1.0 codes (0x08) at bits [0..5] and [6..11] of reg 0 -> 8 unit products total.
+      a_buf[0][lane] = 0x08u | (0x08u << 6);
+      b_buf[0][lane] = 0x08u | (0x08u << 6);
+    }
+    std::array<const uint32_t *, 8> a_ptrs, b_ptrs;
+    for (int i = 0; i < 8; ++i) {
+      a_ptrs[i] = a_buf[i].data();
+      b_ptrs[i] = b_buf[i].data();
+    }
+    for (uint64_t cpu : supported_cpu_levels()) {
+      for (uint64_t sem : {RJ_ARITH_SEMANTICS_COMPATIBILITY, RJ_ARITH_SEMANTICS_LOOSE}) {
+        std::array<std::array<uint32_t, 64>, 4> c_buf, d_buf{};
+        for (std::array<uint32_t, 64> &r : c_buf) {
+          r.fill(0x4b800000u);
+        }
+        const uint32_t *c_ptrs[] = {c_buf[0].data(), c_buf[1].data(), c_buf[2].data(),
+                                    c_buf[3].data()};
+        uint32_t *d_ptrs[] = {d_buf[0].data(), d_buf[1].data(), d_buf[2].data(), d_buf[3].data()};
+        ASSERT_EQ(rj_arith_v_mfma_f32_16x16x128_f8f6f4_w64(cpu | sem, fp6_ctrl, d_ptrs,
+                                                           a_ptrs.data(), b_ptrs.data(), c_ptrs),
+                  RJ_ARITH_SUCCESS);
+        for (int r = 0; r < 4; ++r) {
+          for (int lane = 0; lane < 64; ++lane) {
+            if (sem == RJ_ARITH_SEMANTICS_COMPATIBILITY) {
+              EXPECT_EQ(d_buf[r][lane], 0x4b800000u);
+            } else {
+              expect_f32(d_buf[r][lane], float(16777216.0 + 8.0), RJ_ARITH_SEMANTICS_LOOSE,
+                         /*atol=*/1e-4f, /*rtol=*/1e-5f);
+            }
+          }
+        }
+      }
+    }
+  }
+}
+TEST(MfmaMixed, ScaledFp4PreservesPartiallyOverlappingAccumulators) {
+  constexpr int Lanes = 64;
+  constexpr int MaxRegisters = 16;
+  const uint64_t fp4_ctrl =
+      RJ_ARITH_MATRIX_FORMAT_FP4 | (RJ_ARITH_MATRIX_FORMAT_FP4 << RJ_ARITH_MATRIX_FORMAT_B_SHIFT);
+  const std::array<uint32_t, Lanes> zero{};
+  std::array<uint32_t, Lanes> unit_scale;
+  unit_scale.fill(127u);
+  const std::array<const uint32_t *, 8> z_ptrs{zero.data(), zero.data(), zero.data(), zero.data(),
+                                               zero.data(), zero.data(), zero.data(), zero.data()};
+  struct Shape {
+    decltype(&rj_arith_v_mfma_scale_f32_16x16x128_f8f6f4_w64) entry;
+    int registers;
+  };
+  constexpr Shape shapes[] = {{rj_arith_v_mfma_scale_f32_16x16x128_f8f6f4_w64, 4},
+                              {rj_arith_v_mfma_scale_f32_32x32x64_f8f6f4_w64, 16}};
+  for (const Shape &shape : shapes) {
+    const int adjacent = (shape.registers - 1) * Lanes + 16;
+    const int layouts[][3] = {{0, adjacent, Lanes}, {adjacent, 0, Lanes}, {0, 0, Lanes - 16}};
+    for (const auto &[c_start, d_start, stride] : layouts) {
+      for (const uint64_t cpu : supported_cpu_levels()) {
+        std::array<uint32_t, 2 * MaxRegisters * Lanes> actual{};
+        for (size_t i = 0; i < actual.size(); ++i) {
+          actual[i] = std::bit_cast<uint32_t>(static_cast<float>(i + 1));
+        }
+        auto expected = actual;
+        std::array<const uint32_t *, MaxRegisters> c{};
+        std::array<uint32_t *, MaxRegisters> d{};
+        for (int reg = 0; reg < shape.registers; ++reg) {
+          c[reg] = actual.data() + c_start + reg * stride;
+          d[reg] = actual.data() + d_start + reg * stride;
+          for (int lane = 0; lane < Lanes; ++lane) {
+            expected[d_start + reg * stride + lane] = c[reg][lane];
+          }
+        }
+        ASSERT_EQ(shape.entry(cpu | RJ_ARITH_SEMANTICS_LOOSE, fp4_ctrl, d.data(), z_ptrs.data(),
+                              z_ptrs.data(), c.data(), unit_scale.data(), unit_scale.data()),
+                  RJ_ARITH_SUCCESS);
+        EXPECT_EQ(actual, expected) << "registers=" << shape.registers << " cpu=" << cpu;
+      }
+    }
+  }
+}
 } // namespace

@@ -236,18 +236,10 @@ DeviceCacheCoherence::acquire_cache_maintenance(DeviceCacheOperation operation,
                                      std::move(atomic_lock), std::move(coherence_lock));
 }
 
-std::vector<DeviceCacheMaintenanceLease> DeviceCacheCoherence::acquire_cache_maintenance_group(
-    std::span<const std::shared_ptr<DeviceCacheCoherence>> domains,
-    DeviceCacheOperation operation) {
-  util::StringDiagnostic diagnostic;
-  auto result = acquire_legacy_cache_maintenance_group(domains, operation, diagnostic.emitter());
-  if (result.failed()) {
-    throw util::Exception(diagnostic.message());
-  }
-  if (result.value().outcome == CacheMaintenanceOutcome::Retry) {
-    throw CacheMaintenanceUnavailable("legacy cache maintenance needs retry");
-  }
-  return std::move(result.value().leases);
+util::FailureOr<CacheMaintenanceGroupResult> DeviceCacheCoherence::acquire_cache_maintenance_group(
+    std::span<const std::shared_ptr<DeviceCacheCoherence>> domains, DeviceCacheOperation operation,
+    util::DiagnosticEmitter emit_error) {
+  return acquire_legacy_cache_maintenance_group(domains, operation, emit_error);
 }
 
 util::FailureOr<CacheMaintenanceGroupResult>
@@ -474,34 +466,14 @@ DeviceCacheCoherence::acquire_legacy_cache_maintenance_group(
     }
     return CacheMaintenanceGroupResult{.leases = std::move(leases)};
   };
-  try {
-    auto result = acquire();
-    if (result.failed() || result.value().outcome == CacheMaintenanceOutcome::Retry) {
-      release_unpublished();
-    }
-    if (result.failed()) {
-      return emit_error.emit() << failure_message;
-    }
-    return result;
-  } catch (...) {
+  auto result = acquire();
+  if (result.failed() || result.value().outcome == CacheMaintenanceOutcome::Retry) {
     release_unpublished();
-    throw;
   }
-}
-
-std::vector<DeviceCacheMaintenanceLease> DeviceCacheCoherence::acquire_cache_maintenance_group(
-    std::span<const DeviceCacheDomain> domains, DeviceCacheOperation operation,
-    const PreparedWritebackResolver &resolve_writeback) {
-  util::StringDiagnostic diagnostic;
-  auto leases =
-      acquire_cache_maintenance_group(domains, operation, resolve_writeback, diagnostic.emitter());
-  if (leases.failed()) {
-    throw util::Exception(diagnostic.message());
+  if (result.failed()) {
+    return emit_error.emit() << failure_message;
   }
-  if (leases.value().outcome == CacheMaintenanceOutcome::Retry) {
-    throw CacheMaintenanceUnavailable("prepared cache maintenance needs retry");
-  }
-  return std::move(leases.value().leases);
+  return result;
 }
 
 util::FailureOr<CacheMaintenanceGroupResult> DeviceCacheCoherence::acquire_cache_maintenance_group(
@@ -516,11 +488,15 @@ util::FailureOr<CacheMaintenanceGroupResult> DeviceCacheCoherence::acquire_cache
   return leases;
 }
 
-std::vector<DeviceCacheMaintenanceLease> DeviceCacheCoherence::acquire_prepared_atomic_boundary(
-    std::span<const DeviceCacheDomain> domains,
-    const PreparedWritebackResolver &resolve_writeback) {
-  std::vector<DeviceCacheMaintenanceLease> leases = acquire_cache_maintenance_group(
-      domains, DeviceCacheOperation::WritebackInvalidate, resolve_writeback);
+util::FailureOr<CacheMaintenanceGroupResult> DeviceCacheCoherence::acquire_prepared_atomic_boundary(
+    std::span<const DeviceCacheDomain> domains, const PreparedWritebackResolver &resolve_writeback,
+    util::DiagnosticEmitter emit_error) {
+  auto result = acquire_cache_maintenance_group(domains, DeviceCacheOperation::WritebackInvalidate,
+                                                resolve_writeback, emit_error);
+  if (result.failed() || result.value().outcome == CacheMaintenanceOutcome::Retry) {
+    return result;
+  }
+  auto &leases = result.value().leases;
   // Group acquisition has published every dirty MSC line and L2 run and still
   // holds all cache locks. Any L1 access that observes this epoch must refetch
   // through those locks, so no stale line can race an atomic lane.
@@ -532,27 +508,28 @@ std::vector<DeviceCacheMaintenanceLease> DeviceCacheCoherence::acquire_prepared_
     assert(next_epoch != 0 && "device cache coherence epoch wrapped");
     lease.atomic_data_epoch_published_ = true;
   }
-  return leases;
+  return result;
 }
 
-std::vector<DeviceCacheMaintenanceLease>
+util::FailureOr<CacheMaintenanceGroupResult>
 DeviceCacheCoherence::acquire_scoped_alias_maintenance_group(
     std::span<const DeviceCacheDomain> domains, std::span<const DeviceCacheAliasScope> aliases,
     const PreparedWritebackResolver &resolve_writeback,
-    const CanonicalLineWitnessResolver &resolve_witness) {
+    const CanonicalLineWitnessResolver &resolve_witness, util::DiagnosticEmitter emit_error) {
   return acquire_scoped_alias_maintenance_group_with_budget(
-      domains, aliases, resolve_writeback, resolve_witness, kScopedAdmissionRetryBudget);
+      domains, aliases, resolve_writeback, resolve_witness, kScopedAdmissionRetryBudget,
+      emit_error);
 }
 
-std::vector<DeviceCacheMaintenanceLease>
+util::FailureOr<CacheMaintenanceGroupResult>
 DeviceCacheCoherence::acquire_scoped_alias_maintenance_group_with_budget(
     std::span<const DeviceCacheDomain> domains, std::span<const DeviceCacheAliasScope> aliases,
     const PreparedWritebackResolver &resolve_writeback,
     const CanonicalLineWitnessResolver &resolve_witness,
-    std::chrono::milliseconds admission_retry_budget) {
+    std::chrono::milliseconds admission_retry_budget, util::DiagnosticEmitter emit_error) {
   static_assert(L2Cache::LINE_SIZE == MemorySideCache::LINE_SIZE);
   if (domains.empty() || aliases.empty()) {
-    throw util::ConfigError("scoped cache maintenance needs domains and aliases");
+    return emit_error.emit() << "scoped cache maintenance needs domains and aliases";
   }
   for (const DeviceCacheAliasScope &alias : aliases) {
     if (!alias.domain.coherence || alias.vmid == 0 || alias.admission_generation == 0 ||
@@ -560,20 +537,20 @@ DeviceCacheCoherence::acquire_scoped_alias_maintenance_group_with_budget(
         (alias.address & L2Cache::CacheStore::LINE_MASK) != 0 ||
         (alias.size & L2Cache::CacheStore::LINE_MASK) != 0 ||
         alias.size - 1 > std::numeric_limits<uint64_t>::max() - alias.address) {
-      throw util::ConfigError("scoped cache aliases need complete nonzero-VMID lines");
+      return emit_error.emit() << "scoped cache aliases need complete nonzero-VMID lines";
     }
     const auto existing = std::ranges::find_if(domains, [&](const DeviceCacheDomain &domain) {
       return domain.coherence.get() == alias.domain.coherence.get();
     });
     if (existing == domains.end() || existing->gpu_id != alias.domain.gpu_id) {
-      throw util::ConfigError("scoped cache aliases disagree on domain GPU ID");
+      return emit_error.emit() << "scoped cache aliases disagree on domain GPU ID";
     }
     if (resolve_witness &&
         (alias.backing_id == 0 ||
          alias.size > std::numeric_limits<uint64_t>::max() - alias.address ||
          (alias.backing_offset & L2Cache::CacheStore::LINE_MASK) != 0 ||
          alias.size > std::numeric_limits<uint64_t>::max() - alias.backing_offset)) {
-      throw util::ConfigError("scoped cache witness needs canonical alias lines");
+      return emit_error.emit() << "scoped cache witness needs canonical alias lines";
     }
   }
   // Duplicate selected scopes are harmless only when every shared VA byte
@@ -599,21 +576,18 @@ DeviceCacheCoherence::acquire_scoped_alias_maintenance_group_with_budget(
                 right.backing_offset + (overlap_address - right.address)) {
           continue;
         }
-        throw util::ConfigError("scoped cache witness has conflicting selected aliases");
+        return emit_error.emit() << "scoped cache witness has conflicting selected aliases";
       }
     }
   }
   util::StringDiagnostic diagnostic;
-  auto leases = acquire_prepared_cache_maintenance_group(
+  auto result = acquire_prepared_cache_maintenance_group(
       domains, DeviceCacheOperation::WritebackInvalidate, resolve_writeback, diagnostic.emitter(),
       aliases, true, resolve_witness, admission_retry_budget);
-  if (leases.failed()) {
-    throw util::Exception(diagnostic.message());
+  if (result.failed()) {
+    return emit_error.emit() << diagnostic.message();
   }
-  if (leases.value().outcome == CacheMaintenanceOutcome::Retry) {
-    throw CacheMaintenanceUnavailable("prepared cache maintenance needs retry");
-  }
-  return std::move(leases.value().leases);
+  return result;
 }
 
 util::FailureOr<CacheMaintenanceGroupResult>
@@ -1459,16 +1433,11 @@ DeviceCacheCoherence::acquire_prepared_cache_maintenance_group(
     }
     return CacheMaintenanceGroupResult{.leases = std::move(leases)};
   };
-  try {
-    auto result = acquire();
-    if (result.failed() || result.value().outcome == CacheMaintenanceOutcome::Retry) {
-      release_unpublished();
-    }
-    return result;
-  } catch (...) {
+  auto result = acquire();
+  if (result.failed() || result.value().outcome == CacheMaintenanceOutcome::Retry) {
     release_unpublished();
-    throw;
   }
+  return result;
 }
 
 void DeviceCacheCoherence::complete_cache_maintenance(size_t locked_l2_count,

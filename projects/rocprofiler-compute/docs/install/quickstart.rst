@@ -291,12 +291,12 @@ Show or display System speed-of-light (2) and roofline (4) analysis
 
    rocprof-compute analyze -p workloads/vcopy/MI200/ -b 2 4
 
-Analyze dispatches 12 and 34 from mixbench workload with 3 decimal precision:
-+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+Analyze dispatches 12 and 34 from mixbench workload:
+++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 .. code-block:: shell-session
 
-   rocprof-compute analyze -p workloads/mixbench/MI200/ --dispatch 13 35 --decimal 3
+   rocprof-compute analyze -p workloads/mixbench/MI200/ --dispatch 13 35
 
 Compare two workloads to evaluate the impact of code optimizations
 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++

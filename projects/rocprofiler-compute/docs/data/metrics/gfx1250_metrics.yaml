@@ -114,18 +114,21 @@ Memory chart - Workgroup Processors (WGPs):
   Wavefront Occupancy:
     rst: Resident :ref:`wavefronts <desc-wavefront>` per WGP, averaged over GPU-active cycles, as a percent of the maximum wavefronts per WGP.
     unit: Percent
-  VGPR:
+  VGPRs:
     rst: 'The number of architected vector general-purpose registers allocated for the kernel. Note: this may not exactly match the number of VGPRs requested by the compiler due to allocation granularity.'
     unit: Registers
-  SGPR:
+  SGPRs:
     rst: 'The number of scalar general-purpose registers allocated for the kernel. Note: this may not exactly match the number of SGPRs requested by the compiler due to allocation granularity.'
+    unit: Registers
+  AGPRs:
+    rst: Number of accumulation VGPRs allocated per wave.
     unit: Registers
   LDS Allocation:
     rst: 'The number of bytes of LDS memory (or, shared memory) allocated per :ref:`workgroup <desc-workgroup>`. Note: This may also be larger than what was requested at compile time due to both allocation granularity and dynamic per-dispatch LDS allocations.'
     unit: Bytes per Workgroup
   Scratch Allocation:
-    rst: 'The amount of scratch memory requested per :ref:`wavefront <desc-wavefront>`, in KB: the scratch bytes requested per :ref:`work-item <desc-work-item>` multiplied by the wavefront size. Scratch memory is used for stack memory on the accelerator, as well as for register spills and restores.'
-    unit: KB per Wave
+    rst: The number of bytes of scratch memory requested per :ref:`work-item <desc-work-item>` for this kernel. Scratch memory is used for stack memory on the accelerator, as well as for register spills and restores.
+    unit: Bytes per Work-item
   Workgroups:
     rst: The number of :ref:`workgroups <desc-workgroup>` in the launch divided by the number of WGPs.
     unit: Workgroups per WGP
@@ -199,21 +202,21 @@ Memory chart - GL0 Cache (Vector L0):
     rst: Average GL0 cache request latency.
     unit: Cycles
 Memory chart - LDS (Local Data Share):
-  LDS Load Requests:
-    rst: Number of LDS load requests.
-    unit: Requests per Normalization Unit
-  LDS Store Requests:
-    rst: Number of LDS store requests.
-    unit: Requests per Normalization Unit
-  LDS Atomic Requests:
-    rst: Number of LDS atomic requests.
-    unit: Requests per Normalization Unit
-  Async Load Requests:
-    rst: Number of async load requests.
-    unit: Requests per Normalization Unit
-  Async Store Requests:
-    rst: Number of async store requests.
-    unit: Requests per Normalization Unit
+  LDS Load Instructions:
+    rst: Number of LDS load instructions.
+    unit: Instructions per Normalization Unit
+  LDS Store Instructions:
+    rst: Number of LDS store instructions.
+    unit: Instructions per Normalization Unit
+  LDS Atomic Instructions:
+    rst: Number of LDS atomic instructions.
+    unit: Instructions per Normalization Unit
+  Async Load Instructions:
+    rst: Number of async load instructions.
+    unit: Instructions per Normalization Unit
+  Async Store Instructions:
+    rst: Number of async store instructions.
+    unit: Instructions per Normalization Unit
   LDS Utilization:
     rst: Percentage of VMW-busy cycles the LDS is executing any operation.
     unit: Percent
@@ -450,6 +453,9 @@ Roofline Plot Points:
     unit: FLOPs/Byte
   AI GL0:
     rst: Arithmetic intensity relative to GL0 data bandwidth.
+    unit: FLOPs/Byte
+  AI LDS:
+    rst: Arithmetic intensity relative to LDS bandwidth.
     unit: FLOPs/Byte
   Performance (GFLOPs):
     rst: Total achieved compute throughput combining all VALU and WMMA FLOPs.

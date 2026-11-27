@@ -39,11 +39,14 @@ template <bool Adjacent> __m512i packed_nibbles(__m512i words, int k) {
 }
 
 // VPDPBUSD takes unsigned bytes on the left and signed bytes on the right.
-// Swap puts unsigned IU8 B on the left. Bias only A, so one column sum of B
-// corrects every output row. Gfx11 clamped IU8 instead saturates each word dot.
+// Swap puts unsigned B on the left. Unbiased IU4 forms keep both operands
+// directly in range (unsigned nibbles fit in signed bytes); otherwise bias only
+// A so one column sum of B corrects every output row. Gfx11 clamped IU8 instead
+// saturates each word dot.
 template <int Bits, bool Rdna3, bool Swap, bool Clamp, bool Direct = false> class Products {
   static constexpr bool Pair = Bits == 8 && Rdna3 && Clamp;
   static constexpr bool Adjacent = Rdna3 && Clamp;
+  static constexpr bool DirectSat = Direct && Clamp && Rdna3 && Bits == 4;
 
 public:
   using V = __m512i;
@@ -52,11 +55,12 @@ public:
   static constexpr int products = Pair ? 2 : 4;
   static constexpr bool biased = !Pair && !Direct;
   static constexpr bool staged_clamp = Clamp;
+  static constexpr bool early_store = false;
 
   explicit Products(uint32_t flags) {
     bool signed_a = flags & RJ_ARITH_WMMA_SIGNED_A;
     bool signed_b = flags & RJ_ARITH_WMMA_SIGNED_B;
-    int offset = signed_a != Swap ? 1 << (Bits - 1) : 0;
+    int offset = Direct ? (signed_a ? 8 : 0) : (signed_a != Swap ? 1 << (Bits - 1) : 0);
     bias_a = Pair ? _mm512_set1_epi16(signed_a ? 128 : 0) : _mm512_set1_epi8(offset);
     bias_b = Pair ? _mm512_set1_epi16(signed_b ? 128 : 0) : _mm512_set1_epi8(signed_b ? 8 : 0);
   }
@@ -74,10 +78,11 @@ public:
     if constexpr (Bits == 4) {
       word = packed_nibbles<Adjacent>(word, k);
     }
-    // For a direct signed-A, unsigned-B nibble dot, B is the unsigned source.
-    if constexpr (Direct && Swap) {
-      auto sign = _mm512_set1_epi8(8);
-      return _mm512_sub_epi8(_mm512_xor_si512(word, sign), sign);
+    if constexpr (Direct) {
+      if constexpr (Bits == 4 && Swap) {
+        return _mm512_sub_epi8(_mm512_xor_si512(word, bias_a), bias_a);
+      }
+      return word;
     }
     return _mm512_xor_si512(word, bias_a);
   }
@@ -89,6 +94,9 @@ public:
     }
     if constexpr (Bits == 4) {
       word = packed_nibbles<Adjacent>(word, k);
+      if constexpr (Direct && Swap) {
+        return word;
+      }
       return _mm512_sub_epi8(_mm512_xor_si512(word, bias_b), bias_b);
     }
     return word;
@@ -106,8 +114,11 @@ public:
 
   // A clamped byte stage forms its complete signed contribution before adding C.
   static V start_stage(V acc, V bias) {
-    if constexpr (Pair || Direct) {
+    if constexpr (Pair || DirectSat) {
       return acc;
+    }
+    if constexpr (Direct) {
+      return Clamp ? V{} : acc;
     }
     return Clamp ? bias : _mm512_add_epi32(acc, bias);
   }
@@ -115,7 +126,7 @@ public:
     if constexpr (Pair) {
       return _mm512_dpwssds_epi32(sum, a, b);
     }
-    if constexpr (Direct) {
+    if constexpr (DirectSat) {
       return Swap ? _mm512_dpbusds_epi32(sum, b, a) : _mm512_dpbusds_epi32(sum, a, b);
     }
     return Swap ? _mm512_dpbusd_epi32(sum, b, a) : _mm512_dpbusd_epi32(sum, a, b);
@@ -125,7 +136,7 @@ public:
   // signed 24 bits, so sum = unsigned byte 0 + 256 * signed bytes 1..2.
   // One saturating word dot applies the full stage at the hardware boundary.
   static void finish_stage(V &acc, V sum) {
-    if constexpr (!Clamp || Pair || Direct) {
+    if constexpr (!Clamp || Pair || DirectSat) {
       acc = sum;
     } else if constexpr (Bits == 4) {
       acc = _mm512_dpwssds_epi32(acc, sum, _mm512_set1_epi32(1));
@@ -144,30 +155,36 @@ template <int Bits, int K, int Lanes = 32, bool Rdna3 = false>
 void dense_integer(uint32_t flags, uint32_t *const *d, const uint32_t *const *a,
                    const uint32_t *const *b, const uint32_t *const *c) {
   const auto run = [&](auto dot) {
-    rocjitsu::arith::integer_wmma_tile<Bits, K, Lanes, Rdna3, 2>(dot, d, a, b, c);
+    rocjitsu::arith::integer_wmma_tile<Bits, K, Lanes, Rdna3, 4>(dot, d, a, b, c);
   };
-  if (flags & RJ_ARITH_WMMA_CLAMP) {
-    if constexpr (Rdna3 && Bits == 8) {
+  const auto dispatch = [&]<bool Clamp>() {
+    if constexpr (Rdna3 && Bits == 8 && Clamp) {
       run(Products<Bits, Rdna3, false, true>(flags));
-    } else if constexpr (Rdna3 && Bits == 4) {
-      // A gfx11 quartet is a complete stage. Unbiased operands can saturate
-      // directly in the native byte dot, including signed A with unsigned B.
-      if (!(flags & RJ_ARITH_WMMA_SIGNED_A)) {
-        run(Products<Bits, Rdna3, false, true, true>(flags));
-      } else if (!(flags & RJ_ARITH_WMMA_SIGNED_B)) {
-        run(Products<Bits, Rdna3, true, true, true>(flags));
+    } else if constexpr (Bits == 4) {
+      // Unsigned nibbles [0..15] fit in both unsigned and signed bytes. When B
+      // is unsigned, swap operands so A sits in VPDPBUSD's broadcastable third
+      // operand with no bias correction.
+      if (!(flags & RJ_ARITH_WMMA_SIGNED_B)) {
+        run(Products<Bits, Rdna3, true, Clamp, true>(flags));
       } else {
-        run(Products<Bits, Rdna3, false, true>(flags));
+        run(Products<Bits, Rdna3, false, Clamp>(flags));
       }
-    } else if (Bits == 8 && !(flags & RJ_ARITH_WMMA_SIGNED_B)) {
-      run(Products<Bits, Rdna3, true, true>(flags));
+    } else if (!(flags & RJ_ARITH_WMMA_SIGNED_B)) {
+      run(Products<Bits, Rdna3, true, Clamp>(flags));
     } else {
-      run(Products<Bits, Rdna3, false, true>(flags));
+      run(Products<Bits, Rdna3, false, Clamp>(flags));
     }
-  } else if (Bits == 8 && !(flags & RJ_ARITH_WMMA_SIGNED_B)) {
-    run(Products<Bits, Rdna3, true, false>(flags));
+  };
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+  // The x86-64-v4 backend handles wrapping on gfx12 K=32 IU4.
+  constexpr bool clamp_only = Bits == 4 && K == 32;
+#else
+  constexpr bool clamp_only = false;
+#endif
+  if (clamp_only || (flags & RJ_ARITH_WMMA_CLAMP)) {
+    dispatch.template operator()<true>();
   } else {
-    run(Products<Bits, Rdna3, false, false>(flags));
+    dispatch.template operator()<false>();
   }
 }
 

@@ -18,7 +18,8 @@ namespace rocjitsu::arith {
 // Requires the named CPU features and validated instruction controls.
 template <bool Bf8, bool Stochastic, bool Half>
 void fp8_narrow_x86_64_v3(uint32_t exec_mask, uint32_t mode, bool saturate, uint32_t *d,
-                          const uint32_t *a, const uint32_t *b, Fp8NarrowPolicy policy) {
+                          const uint32_t *a, const uint32_t *b, Fp8NarrowPolicy policy,
+                          bool flush_out) {
   unsigned shift = Stochastic ? ((mode >> 16) & 3) * 8 : mode & RJ_ARITH_ALU_HIGH_D ? 16 : 0;
   auto count = _mm_cvtsi32_si128(int(shift));
   uint32_t selected_bits = (Stochastic ? 255U : 65535U) << shift;
@@ -53,11 +54,12 @@ void fp8_narrow_x86_64_v3(uint32_t exec_mask, uint32_t mode, bool saturate, uint
     }
     auto old = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(d + lane));
     av = _mm256_xor_si256(_mm256_and_si256(av, keep_a), flip_a);
-    auto value = x86_64_v3::fp8_narrow_detail::narrow<Bf8, Stochastic>(av, bv, saturate, policy);
+    auto value =
+        x86_64_v3::fp8_narrow_detail::narrow<Bf8, Stochastic>(av, bv, saturate, policy, flush_out);
     if constexpr (!Stochastic) {
       bv = _mm256_xor_si256(_mm256_and_si256(bv, keep_b), flip_b);
       auto high = x86_64_v3::fp8_narrow_detail::narrow<Bf8, false>(bv, _mm256_setzero_si256(),
-                                                                   saturate, policy);
+                                                                   saturate, policy, flush_out);
       value = _mm256_or_si256(value, _mm256_slli_epi32(high, 8));
     }
     value = _mm256_or_si256(_mm256_andnot_si256(selected, old), _mm256_sll_epi32(value, count));
@@ -69,34 +71,34 @@ void fp8_narrow_x86_64_v3(uint32_t exec_mask, uint32_t mode, bool saturate, uint
 
 template void fp8_narrow_x86_64_v3<false, false, false>(uint32_t, uint32_t, bool, uint32_t *,
                                                         const uint32_t *, const uint32_t *,
-                                                        Fp8NarrowPolicy);
+                                                        Fp8NarrowPolicy, bool);
 
 template void fp8_narrow_x86_64_v3<false, false, true>(uint32_t, uint32_t, bool, uint32_t *,
                                                        const uint32_t *, const uint32_t *,
-                                                       Fp8NarrowPolicy);
+                                                       Fp8NarrowPolicy, bool);
 
 template void fp8_narrow_x86_64_v3<false, true, false>(uint32_t, uint32_t, bool, uint32_t *,
                                                        const uint32_t *, const uint32_t *,
-                                                       Fp8NarrowPolicy);
+                                                       Fp8NarrowPolicy, bool);
 
 template void fp8_narrow_x86_64_v3<false, true, true>(uint32_t, uint32_t, bool, uint32_t *,
                                                       const uint32_t *, const uint32_t *,
-                                                      Fp8NarrowPolicy);
+                                                      Fp8NarrowPolicy, bool);
 
 template void fp8_narrow_x86_64_v3<true, false, false>(uint32_t, uint32_t, bool, uint32_t *,
                                                        const uint32_t *, const uint32_t *,
-                                                       Fp8NarrowPolicy);
+                                                       Fp8NarrowPolicy, bool);
 
 template void fp8_narrow_x86_64_v3<true, false, true>(uint32_t, uint32_t, bool, uint32_t *,
                                                       const uint32_t *, const uint32_t *,
-                                                      Fp8NarrowPolicy);
+                                                      Fp8NarrowPolicy, bool);
 
 template void fp8_narrow_x86_64_v3<true, true, false>(uint32_t, uint32_t, bool, uint32_t *,
                                                       const uint32_t *, const uint32_t *,
-                                                      Fp8NarrowPolicy);
+                                                      Fp8NarrowPolicy, bool);
 
 template void fp8_narrow_x86_64_v3<true, true, true>(uint32_t, uint32_t, bool, uint32_t *,
                                                      const uint32_t *, const uint32_t *,
-                                                     Fp8NarrowPolicy);
+                                                     Fp8NarrowPolicy, bool);
 
 } // namespace rocjitsu::arith

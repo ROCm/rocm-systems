@@ -314,6 +314,7 @@ Enable order: Broadcast, Reduce, AllGather, ReduceScatter, AllReduce, AlltoAll
   {nullptr, ncclTuningSymkModelSim, nullptr, {0, 0, 1, 0, 0}, {}}, // AllGather_RailRing_LsaST
   {nullptr, ncclTuningSymkModelSim, nullptr, {0, 0, 1, 0, 0}, {}}, // AllGather_HierLsaST
   {nullptr, ncclTuningSymkModelSim, nullptr, {0, 0, 1, 0, 0}, {}}, // AllGather_HierLsaTmaST
+  {nullptr, ncclTuningSymkModelSim, nullptr, {0, 0, 0, 1, 0}, {}}, // ReduceScatter_HierLsaLDST
   {nullptr, ncclTuningCeModelSim, nullptr, {0, 0, 1, 0, 0}, {}}, // CE AllGather Unicast
   {nullptr, ncclTuningCeModelSim, nullptr, {0, 0, 1, 0, 0}, {}}, // CE AllGather Multicast
 };

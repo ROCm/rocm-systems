@@ -464,18 +464,11 @@ int rj_arith_v_cvt_pk_rtz_f16_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask,
   return rj_arith_v_cvt_pk_rtz_f16_f32_w64(flags, exec_mask, instruction_flags, d, a, b, trapsts);
 }
 
-// gfx950 inherits the RDNA3/gfx942 numeric model; strict exact stays unsupported pending
-// architecture-specific captures.
+// gfx950 shares the gfx942 numeric model; empirically exact on MI350X.
 int rj_arith_v_cvt_pk_rtz_f16_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask,
                                              uint64_t instruction_flags, uint32_t *const *d,
                                              const uint32_t *const *a, const uint32_t *const *b,
                                              uint32_t *trapsts) {
-  if (instruction_flags & RJ_ARITH_CVT_SDWA) {
-    return RJ_ARITH_ERROR_INVALID_FLAGS;
-  }
-  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/true)) {
-    return error;
-  }
   return rj_arith_v_cvt_pk_rtz_f16_f32_w32_gfx942(flags, exec_mask, instruction_flags, d, a, b,
                                                   trapsts);
 }
@@ -484,9 +477,27 @@ int rj_arith_v_cvt_pk_rtz_f16_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask,
                                              uint64_t instruction_flags, uint32_t *const *d,
                                              const uint32_t *const *a, const uint32_t *const *b,
                                              uint32_t *trapsts) {
-  if (instruction_flags & RJ_ARITH_CVT_SDWA) {
-    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  return rj_arith_v_cvt_pk_rtz_f16_f32_w64_gfx942(flags, exec_mask, instruction_flags, d, a, b,
+                                                  trapsts);
+}
+
+// Older CDNA (gfx908/gfx90a) and RDNA1/2/3.5 inherit the RDNA3 numeric model; strict exact
+// stays unsupported pending per-architecture captures.
+int rj_arith_v_cvt_pk_rtz_f16_f32_w32_gfx10(uint64_t flags, uint32_t exec_mask,
+                                            uint64_t instruction_flags, uint32_t *const *d,
+                                            const uint32_t *const *a, const uint32_t *const *b,
+                                            uint32_t *trapsts) {
+  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/true)) {
+    return error;
   }
+  return rj_arith_v_cvt_pk_rtz_f16_f32_w32_gfx942(flags, exec_mask, instruction_flags, d, a, b,
+                                                  trapsts);
+}
+
+int rj_arith_v_cvt_pk_rtz_f16_f32_w64_gfx10(uint64_t flags, uint64_t exec_mask,
+                                            uint64_t instruction_flags, uint32_t *const *d,
+                                            const uint32_t *const *a, const uint32_t *const *b,
+                                            uint32_t *trapsts) {
   if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/true)) {
     return error;
   }

@@ -6,15 +6,16 @@
 #pragma once
 
 #include "common/bits.h"
+#include "common/compiler.h"
 #include "mfma/sparse_integer.h"
-#if defined(__AVX512F__)
+#if defined(RJ_ARITH_TARGET_X86_64_V4)
 #include "common/x86_64/alu_x86_64_v4.h"
 #else
 #include "common/x86_64/alu_x86_64_v3.h"
 #endif
 
 namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE::gfx1250_i8 {
-#if defined(__AVX512F__)
+#if defined(RJ_ARITH_TARGET_X86_64_V4)
 constexpr int Width = 16;
 using Native = __m512i;
 #else
@@ -23,6 +24,8 @@ using Native = __m256i;
 #endif
 constexpr int Parts = 16 / Width;
 using Words [[gnu::vector_size(Width * 4)]] = uint32_t;
+using Halves [[gnu::vector_size(Width * 4)]] = uint16_t;
+using SignedHalves [[gnu::vector_size(Width * 4)]] = int16_t;
 using Tile = Native[16][Parts];
 
 // Each quartet is one VGPR word per row of A or column of dense B.
@@ -41,7 +44,223 @@ inline Native load(const uint32_t *p) {
 }
 inline void store(uint32_t *p, Native v) { __builtin_memcpy(p, &v, sizeof(v)); }
 
-#if defined(__AVX512F__)
+template <bool Odd, bool Signed> inline Native extend(Native v) {
+  auto words = bit_cast<Halves>(v);
+  if constexpr (Signed) {
+    if constexpr (!Odd) {
+      words <<= 8;
+    }
+    return bit_cast<Native>(bit_cast<SignedHalves>(words) >> 8);
+  } else if constexpr (Odd) {
+    return bit_cast<Native>(words >> 8);
+  } else {
+    return bit_cast<Native>(words & 255u);
+  }
+}
+
+#if defined(RJ_ARITH_TARGET_X86_64_V4)
+// The 64-product byte dot fits in signed 24 bits for every signedness combination.
+// Add C before publishing D in ascending row order so all whole-VGPR aliases hold.
+[[gnu::always_inline]] inline void finish_regs(bool clamp, uint32_t *const *d,
+                                               const uint32_t *const *c, __m512i rows[16]) {
+  if (!clamp) {
+    RJ_ARITH_UNROLL(16)
+    for (int r = 0; r < 16; ++r) {
+      rows[r] = _mm512_add_epi32(rows[r], _mm512_loadu_si512(c[r & 7] + ((r & 8) << 1)));
+    }
+  } else {
+    RJ_ARITH_UNROLL(16)
+    for (int r = 0; r < 16; ++r) {
+      __m512i acc = _mm512_loadu_si512(c[r & 7] + ((r & 8) << 1));
+#if defined(RJ_ARITH_TARGET_AVX512VNNI)
+      rows[r] = saturate_signed_sum_24(acc, rows[r]);
+#else
+      __m512i sum = _mm512_add_epi32(acc, rows[r]);
+      rows[r] = saturate_signed_sum(acc, rows[r], sum);
+#endif
+    }
+  }
+  RJ_ARITH_UNROLL(16)
+  for (int r = 0; r < 16; ++r) {
+    _mm512_storeu_si512(d[r & 7] + ((r & 8) << 1), rows[r]);
+  }
+}
+
+// Dense A and B pair reg 0..7 lanes 0..15 with 0..15 and lanes 16..31 with 16..31.
+template <bool Signed>
+inline void unpack_dense_v4(const uint32_t *const *src, uint32_t even[16][16],
+                            uint32_t odd[16][16]) {
+  for (int reg = 0; reg < 8; ++reg) {
+    const uint32_t *sp = src[reg];
+    __m512i v0 = _mm512_loadu_si512(sp);
+    __m512i v1 = _mm512_loadu_si512(sp + 16);
+    _mm512_store_si512(even[2 * reg], extend<false, Signed>(v0));
+    _mm512_store_si512(odd[2 * reg], extend<true, Signed>(v0));
+    _mm512_store_si512(even[2 * reg + 1], extend<false, Signed>(v1));
+    _mm512_store_si512(odd[2 * reg + 1], extend<true, Signed>(v1));
+  }
+}
+
+// Two 8-row passes keep all 16 output rows in ZMM registers with zero accumulator spills.
+[[gnu::noinline]] inline void
+dense_v4_reduce(bool clamp, uint32_t *const *d, const uint32_t *const *c,
+                const uint32_t left_even[16][16], const uint32_t left_odd[16][16],
+                const uint32_t right_even[16][16], const uint32_t right_odd[16][16]) {
+  __m512i rows[16]{};
+  for (int q = 0; q < 16; ++q) {
+    __m512i re = _mm512_load_si512(right_even[q]);
+    __m512i ro = _mm512_load_si512(right_odd[q]);
+    RJ_ARITH_UNROLL(8)
+    for (int i = 0; i < 8; ++i) {
+      __m512i e = _mm512_set1_epi32(bit_cast<int32_t>(left_even[q][i]));
+      __m512i o = _mm512_set1_epi32(bit_cast<int32_t>(left_odd[q][i]));
+      rows[i] = _mm512_add_epi32(rows[i], _mm512_madd_epi16(re, e));
+      rows[i] = _mm512_add_epi32(rows[i], _mm512_madd_epi16(ro, o));
+    }
+  }
+  for (int q = 0; q < 16; ++q) {
+    __m512i re = _mm512_load_si512(right_even[q]);
+    __m512i ro = _mm512_load_si512(right_odd[q]);
+    RJ_ARITH_UNROLL(8)
+    for (int i = 0; i < 8; ++i) {
+      __m512i e = _mm512_set1_epi32(bit_cast<int32_t>(left_even[q][8 + i]));
+      __m512i o = _mm512_set1_epi32(bit_cast<int32_t>(left_odd[q][8 + i]));
+      rows[8 + i] = _mm512_add_epi32(rows[8 + i], _mm512_madd_epi16(re, e));
+      rows[8 + i] = _mm512_add_epi32(rows[8 + i], _mm512_madd_epi16(ro, o));
+    }
+  }
+  finish_regs(clamp, d, c, rows);
+}
+
+inline void dense_v4(uint64_t controls, bool clamp, uint32_t *const *d, const uint32_t *const *a,
+                     const uint32_t *const *b, const uint32_t *const *c) {
+  alignas(64) uint32_t left_even[16][16], left_odd[16][16];
+  alignas(64) uint32_t right_even[16][16], right_odd[16][16];
+  if (controls & RJ_ARITH_WMMA_SIGNED_A) {
+    unpack_dense_v4<true>(a, left_even, left_odd);
+  } else {
+    unpack_dense_v4<false>(a, left_even, left_odd);
+  }
+  if (controls & RJ_ARITH_WMMA_SIGNED_B) {
+    unpack_dense_v4<true>(b, right_even, right_odd);
+  } else {
+    unpack_dense_v4<false>(b, right_even, right_odd);
+  }
+  dense_v4_reduce(clamp, d, c, left_even, left_odd, right_even, right_odd);
+}
+
+#else
+template <bool Signed>
+inline void unpack_dense_left_v3(const uint32_t *const *src, uint32_t even[16][16],
+                                 uint32_t odd[16][16]) {
+  for (int reg = 0; reg < 8; ++reg) {
+    const uint32_t *sp = src[reg];
+    for (int bank = 0; bank < 2; ++bank) {
+      const int q = 2 * reg + bank;
+      __m256i v0 = load(sp + 16 * bank), v1 = load(sp + 16 * bank + 8);
+      store(even[q], extend<false, Signed>(v0));
+      store(even[q] + 8, extend<false, Signed>(v1));
+      store(odd[q], extend<true, Signed>(v0));
+      store(odd[q] + 8, extend<true, Signed>(v1));
+    }
+  }
+}
+
+template <bool Signed>
+inline void unpack_dense_right_v3(const uint32_t *const *src, Tile &even, Tile &odd) {
+  for (int reg = 0; reg < 8; ++reg) {
+    const uint32_t *sp = src[reg];
+    for (int bank = 0; bank < 2; ++bank) {
+      const int q = 2 * reg + bank;
+      __m256i v0 = load(sp + 16 * bank), v1 = load(sp + 16 * bank + 8);
+      even[q][0] = extend<false, Signed>(v0);
+      even[q][1] = extend<false, Signed>(v1);
+      odd[q][0] = extend<true, Signed>(v0);
+      odd[q][1] = extend<true, Signed>(v1);
+    }
+  }
+}
+
+template <int Rows>
+[[gnu::always_inline]] inline void
+dense_v3_block(int r0, bool clamp, const uint32_t *const *c, const uint32_t left_even[16][16],
+               const uint32_t left_odd[16][16], const Tile &right_even, const Tile &right_odd,
+               Tile &result) {
+  __m256i sums[Rows][2]{};
+  for (int q = 0; q < 16; ++q) {
+    __m256i re0 = right_even[q][0], re1 = right_even[q][1];
+    RJ_ARITH_UNROLL(6)
+    for (int i = 0; i < Rows; ++i) {
+      __m256i e = _mm256_set1_epi32(bit_cast<int32_t>(left_even[q][r0 + i]));
+      sums[i][0] = _mm256_add_epi32(sums[i][0], _mm256_madd_epi16(e, re0));
+      sums[i][1] = _mm256_add_epi32(sums[i][1], _mm256_madd_epi16(e, re1));
+    }
+    __m256i ro0 = right_odd[q][0], ro1 = right_odd[q][1];
+    RJ_ARITH_UNROLL(6)
+    for (int i = 0; i < Rows; ++i) {
+      __m256i o = _mm256_set1_epi32(bit_cast<int32_t>(left_odd[q][r0 + i]));
+      sums[i][0] = _mm256_add_epi32(sums[i][0], _mm256_madd_epi16(o, ro0));
+      sums[i][1] = _mm256_add_epi32(sums[i][1], _mm256_madd_epi16(o, ro1));
+    }
+  }
+  // Fuse C-read and optional saturation into the buffered result before any D store.
+  if (!clamp) {
+    RJ_ARITH_UNROLL(6)
+    for (int i = 0; i < Rows; ++i) {
+      const int r = r0 + i;
+      const uint32_t *cp = c[r & 7] + ((r & 8) << 1);
+      result[r][0] = _mm256_add_epi32(sums[i][0], load(cp));
+      result[r][1] = _mm256_add_epi32(sums[i][1], load(cp + 8));
+    }
+  } else {
+    RJ_ARITH_UNROLL(6)
+    for (int i = 0; i < Rows; ++i) {
+      const int r = r0 + i;
+      const uint32_t *cp = c[r & 7] + ((r & 8) << 1);
+      __m256i acc0 = load(cp), acc1 = load(cp + 8);
+      result[r][0] = saturate_signed_sum(acc0, sums[i][0], _mm256_add_epi32(acc0, sums[i][0]));
+      result[r][1] = saturate_signed_sum(acc1, sums[i][1], _mm256_add_epi32(acc1, sums[i][1]));
+    }
+  }
+}
+
+[[gnu::noinline]] inline void dense_v3_reduce(bool clamp, uint32_t *const *d,
+                                              const uint32_t *const *c,
+                                              const uint32_t left_even[16][16],
+                                              const uint32_t left_odd[16][16],
+                                              const Tile &right_even, const Tile &right_odd) {
+  Tile result;
+  // 6+6+4 blocking uses 12 YMM accumulators + 4 scratch YMMs, reducing B reloads from 4x to 3x.
+  dense_v3_block<6>(0, clamp, c, left_even, left_odd, right_even, right_odd, result);
+  dense_v3_block<6>(6, clamp, c, left_even, left_odd, right_even, right_odd, result);
+  dense_v3_block<4>(12, clamp, c, left_even, left_odd, right_even, right_odd, result);
+  for (int r = 0; r < 16; ++r) {
+    uint32_t *dp = d[r & 7] + ((r & 8) << 1);
+    store(dp, result[r][0]);
+    store(dp + 8, result[r][1]);
+  }
+}
+
+inline void dense_v3(uint64_t controls, bool clamp, uint32_t *const *d, const uint32_t *const *a,
+                     const uint32_t *const *b, const uint32_t *const *c) {
+  alignas(32) uint32_t left_even[16][16], left_odd[16][16];
+  Tile right_even, right_odd;
+  if (controls & RJ_ARITH_WMMA_SIGNED_A) {
+    unpack_dense_left_v3<true>(a, left_even, left_odd);
+  } else {
+    unpack_dense_left_v3<false>(a, left_even, left_odd);
+  }
+  if (controls & RJ_ARITH_WMMA_SIGNED_B) {
+    unpack_dense_right_v3<true>(b, right_even, right_odd);
+  } else {
+    unpack_dense_right_v3<false>(b, right_even, right_odd);
+  }
+  dense_v3_reduce(clamp, d, c, left_even, left_odd, right_even, right_odd);
+}
+
+#endif
+
+#if defined(RJ_ARITH_TARGET_X86_64_V4)
 [[gnu::always_inline]] inline void transpose(const Tile &columns, Tile &rows) {
   __m512i t[16], u[16];
   for (int i = 0; i < 8; ++i) {
@@ -112,81 +331,31 @@ inline void store(uint32_t *p, Native v) { __builtin_memcpy(p, &v, sizeof(v)); }
   }
 }
 
-using Halves [[gnu::vector_size(Width * 4)]] = uint16_t;
-using SignedHalves [[gnu::vector_size(Width * 4)]] = int16_t;
 inline Native add(Native a, Native b) {
   return bit_cast<Native>(bit_cast<Words>(a) + bit_cast<Words>(b));
 }
 inline Native broadcast(uint32_t v) { return bit_cast<Native>(Words{} + v); }
 inline Native broadcast128(__m128i v) {
-#if defined(__AVX512F__)
+#if defined(RJ_ARITH_TARGET_X86_64_V4)
   return _mm512_broadcast_i32x4(v);
 #else
   return _mm256_broadcastsi128_si256(v);
 #endif
 }
 inline Native shuffle_bytes(Native v, Native control) {
-#if defined(__AVX512F__)
+#if defined(RJ_ARITH_TARGET_X86_64_V4)
   return _mm512_shuffle_epi8(v, control);
 #else
   return _mm256_shuffle_epi8(v, control);
 #endif
 }
 inline Native madd(Native a, Native b) {
-#if defined(__AVX512F__)
+#if defined(RJ_ARITH_TARGET_X86_64_V4)
   return _mm512_madd_epi16(a, b);
 #else
   return _mm256_madd_epi16(a, b);
 #endif
 }
-template <bool Odd> inline Native extend(Native v, bool sign) {
-  auto words = bit_cast<Halves>(v);
-  if (sign) {
-    if constexpr (!Odd) {
-      words <<= 8;
-    }
-    return bit_cast<Native>(bit_cast<SignedHalves>(words) >> 8);
-  }
-  if constexpr (Odd) {
-    return bit_cast<Native>(words >> 8);
-  }
-  return bit_cast<Native>(words & 255u);
-}
-
-inline void dense(uint64_t controls, bool clamp, uint32_t *const *d, const uint32_t *const *a,
-                  const uint32_t *const *b, const uint32_t *const *c) {
-  const bool signed_a = controls & RJ_ARITH_WMMA_SIGNED_A,
-             signed_b = controls & RJ_ARITH_WMMA_SIGNED_B;
-  alignas(64) uint32_t left_even[16][16], left_odd[16][16];
-  Tile right_even, right_odd, result;
-  for (int q = 0; q < 16; ++q) {
-    for (int p = 0; p < Parts; ++p) {
-      auto left = load(quartet(a, q) + Width * p), right = load(quartet(b, q) + Width * p);
-      store(left_even[q] + Width * p, extend<false>(left, signed_a));
-      store(left_odd[q] + Width * p, extend<true>(left, signed_a));
-      right_even[q][p] = extend<false>(right, signed_b);
-      right_odd[q][p] = extend<true>(right, signed_b);
-    }
-  }
-  for (int tile = 0; tile < 16; tile += 4) {
-    Native sums[4][Parts]{};
-    for (int q = 0; q < 16; ++q) {
-      for (int i = 0; i < 4; ++i) {
-        auto e = broadcast(left_even[q][tile + i]), o = broadcast(left_odd[q][tile + i]);
-        for (int p = 0; p < Parts; ++p) {
-          sums[i][p] = add(sums[i][p], add(madd(e, right_even[q][p]), madd(o, right_odd[q][p])));
-        }
-      }
-    }
-    for (int i = 0; i < 4; ++i) {
-      for (int p = 0; p < Parts; ++p) {
-        result[tile + i][p] = sums[i][p];
-      }
-    }
-  }
-  finish(clamp, d, c, result);
-}
-
 // Expand two adjacent compressed A bytes per lane. A 32-bit B broadcast and
 // per-row byte shuffle select and zero-extend the matching B bytes to halfwords.
 // Flipping signed B to unsigned requires subtracting 128 times the A row sum.
@@ -270,7 +439,12 @@ void compute(uint64_t controls, bool clamp, uint32_t *const *d, const uint32_t *
   if constexpr (Sparse) {
     sparse(controls, clamp, d, a, b, c, index);
   } else {
-    dense(controls, clamp, d, a, b, c);
+#if defined(RJ_ARITH_TARGET_X86_64_V4)
+    dense_v4(controls, clamp, d, a, b, c);
+#else
+    dense_v3(controls, clamp, d, a, b, c);
+#endif
   }
 }
+
 } // namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE::gfx1250_i8

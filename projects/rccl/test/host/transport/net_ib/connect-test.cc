@@ -660,12 +660,14 @@ TEST_F(NetIbConnectMicrotest, QpCreate_OooPathUsesMlx5ExtendedCreation) {
                       EXPECT_NE(dvAttr->create_flags & MLX5DV_QP_CREATE_OOO_DP, 0u);
                       EXPECT_NE(dvAttr->comp_mask & MLX5DV_QP_INIT_ATTR_MASK_QP_CREATE_FLAGS, 0u);
                       EXPECT_NE(attr->comp_mask & IBV_QP_INIT_ATTR_PD, 0u);
+                      EXPECT_GE(attr->cap.max_inline_data, 8u);
                       return &verbsQp;
                     });
   ncclIbQpCreateAttr attrs{};
   attrs.pd = &pd;
   attrs.type = IBV_QPT_RC;
   attrs.oooRq = true;
+  attrs.maxInlineData = 8;
   ncclIbQp qp{};
 
   EXPECT_EQ(ncclIbQpCreate(&qp, &attrs), ncclSuccess);
@@ -1427,6 +1429,28 @@ TEST_F(NetIbConnectMicrotest, CreateFlushQp_FirstUseCreatesLoopbackQpAndHostMr) 
   EXPECT_EQ(comm.devs[0].gpuFlush.qp.rtrAttr.remoteQpNum, comm.devs[0].gpuFlush.qp.qp->qp_num);
   EXPECT_NE(comm.devs[0].gpuFlush.hostMr, nullptr);
   EXPECT_EQ(comm.devs[0].gpuFlush.sge.lkey, comm.devs[0].gpuFlush.hostMr->lkey);
+}
+
+TEST_F(NetIbConnectMicrotest, CreateFlushQp_ReservesInlineRoomForTheScratchpadWrite) {
+  ConfigureSingleDevice();
+  InstallSingleDeviceResourceFakes();
+  uint32_t maxInlineData = 0;
+  auto createQp = g_ibvCreateQp;
+  ScopedHook create(g_ibvCreateQp, [&](ibv_qp** out, ibv_pd* pd, ibv_qp_init_attr* attr) {
+    maxInlineData = attr->cap.max_inline_data;
+    return createQp(out, pd, attr);
+  });
+  ncclIbRecvComm comm{};
+  comm.flushEnabled = 1;
+  comm.base.vProps.ndevs = 1;
+  comm.devs[0].base.ibDevN = 0;
+  comm.devs[0].base.pd = &pd_;
+  comm.devs[0].base.cq = &cq_;
+  comm.devs[0].base.gidInfo = ncclIbDevs[0].gidInfo;
+
+  ASSERT_EQ(ncclIbCreateFlushQp(&comm), ncclSuccess);
+  EXPECT_EQ(create.calls, 1);
+  EXPECT_GE(maxInlineData, comm.devs[0].gpuFlush.sge.length);
 }
 
 TEST_F(NetIbConnectMicrotest, PostReceiveWorkRequests_ResiliencyDepthControlsPostCount) {

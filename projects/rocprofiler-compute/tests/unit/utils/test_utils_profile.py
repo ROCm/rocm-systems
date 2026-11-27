@@ -19,6 +19,8 @@ import pytest
 
 import utils.utils_profile as utils_profile
 
+FAKE_ARCH = "gfx_fake"
+
 # Long-form rocpd counter CSV header used by the run_prof tests.
 COUNTER_CSV_HEADER = (
     "PID,Dispatch_ID,Kernel_Name,Grid_Size,Workgroup_Size,LDS_Per_Workgroup,"
@@ -217,7 +219,7 @@ def run_prof_attached_to_container(tmp_path, monkeypatch, fake_attach):
     monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_warning", lambda *a, **k: None)
-    utils_profile.run_prof(str(fname), profiler_options, workload_dir)
+    utils_profile.run_prof(str(fname), profiler_options, workload_dir, FAKE_ARCH)
 
 
 def test_run_prof_success_rocprofiler_sdk(tmp_path, monkeypatch):
@@ -252,7 +254,7 @@ def test_run_prof_success_rocprofiler_sdk(tmp_path, monkeypatch):
     monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_warning", lambda *a, **k: None)
 
-    utils_profile.run_prof(str(fname), profiler_options, workload_dir)
+    utils_profile.run_prof(str(fname), profiler_options, workload_dir, FAKE_ARCH)
 
     assert captured["app_cmd"] == ["./test_app"]
     assert "APP_CMD" not in captured["env"]
@@ -294,6 +296,7 @@ def test_rocprofiler_sdk_env_log_excludes_user_env(tmp_path, monkeypatch):
             "ROCPROF_COUNTER_COLLECTION": "1",
         },
         workload_dir,
+        FAKE_ARCH,
     )
 
     assert sum("env vars" in m for m in logs) >= 1
@@ -342,7 +345,7 @@ def test_run_prof_rocpd_skips_pid_without_native_csv(tmp_path, monkeypatch):
     )
     monkeypatch.setattr("utils.utils_profile.console_warning", lambda *a, **k: None)
 
-    utils_profile.run_prof(str(fname), options, str(workload_dir))
+    utils_profile.run_prof(str(fname), options, str(workload_dir), FAKE_ARCH)
 
     assert update_calls == []
     assert any("No native counter CSV for pid 12345" in m for m in debug_msgs)
@@ -374,6 +377,7 @@ def test_run_prof_zero_kernels_writes_no_results_csv(
         str(fname),
         {"APP_CMD": ["./test_app"], "ROCPROF_COUNTER_COLLECTION": "1"},
         str(workload_dir),
+        FAKE_ARCH,
         ml_api_trace_enabled=ml_api_trace_enabled,
     )
 
@@ -417,6 +421,7 @@ def test_run_prof_ml_api_trace_retention_precedes_database_copy_and_cleanup(
             str(fname),
             {"APP_CMD": ["./test_app"], "ROCPROF_COUNTER_COLLECTION": "1"},
             str(workload_dir),
+            FAKE_ARCH,
             ml_api_trace_enabled=True,
             retain_rocpd_output=True,
         )
@@ -462,6 +467,7 @@ def test_run_prof_relabels_dispatch_and_kernel_ids(tmp_path, monkeypatch):
         str(fname),
         {"APP_CMD": ["./test_app"], "ROCPROF_COUNTER_COLLECTION": "1"},
         str(workload_dir),
+        FAKE_ARCH,
     )
 
     results_csv = workload_dir / "results_pmc_perf_test.csv.gz"
@@ -486,7 +492,7 @@ def test_run_prof_with_yaml_config(tmp_path, monkeypatch):
 
     captured_config = {}
 
-    def fake_metrics_path(sdk_config, parent_dir):
+    def fake_metrics_path(sdk_config, arch, parent_dir):
         captured_config["sdk_config"] = sdk_config
         return str(tmp_path / "metrics_path")
 
@@ -504,7 +510,7 @@ def test_run_prof_with_yaml_config(tmp_path, monkeypatch):
     monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_warning", lambda *a, **k: None)
 
-    utils_profile.run_prof(str(fname), ["--arg"], workload_dir)
+    utils_profile.run_prof(str(fname), ["--arg"], workload_dir, FAKE_ARCH)
 
     merged_counters = captured_config["sdk_config"]["rocprofiler-sdk"]["counters"]
     assert "TCC_HIT" in merged_counters
@@ -552,7 +558,7 @@ def test_run_prof_failure_subprocess(
     monkeypatch.setattr("utils.utils_profile.console_error", mock_console_error)
 
     with pytest.raises(RuntimeError, match="console_error called"):
-        utils_profile.run_prof(str(fname), profiler_options, workload_dir)
+        utils_profile.run_prof(str(fname), profiler_options, workload_dir, FAKE_ARCH)
 
     messages = [msg for msg, *_ in errors]
     assert utils_profile._DUPLICATE_ROCM_MESSAGE not in messages
@@ -613,7 +619,7 @@ def test_run_prof_failure_prints_diagnostic_message(
     monkeypatch.setattr("utils.utils_profile.console_error", mock_console_error)
 
     with pytest.raises(RuntimeError, match="console_error called"):
-        utils_profile.run_prof(str(fname), profiler_options, workload_dir)
+        utils_profile.run_prof(str(fname), profiler_options, workload_dir, FAKE_ARCH)
 
     # The raw failure output stays visible; the diagnosis follows it.
     assert (abort_line, False, 1) in errors
@@ -652,6 +658,7 @@ def test_run_prof_success_ignores_outdated_firmware_warning(tmp_path, monkeypatc
             "ROCPROF_COUNTER_COLLECTION": "1",
         },
         workload_dir,
+        FAKE_ARCH,
     )
 
     assert errors == []
@@ -676,7 +683,7 @@ def test_run_prof_rocprofv3_builds_command_and_env(tmp_path, monkeypatch):
     monkeypatch.setattr("utils.utils_profile.capture_subprocess_output", fake_capture)
     monkeypatch.setattr(
         "utils.utils_profile.create_temp_rocprofiler_metrics_path",
-        lambda sdk_config, parent_dir: str(tmp_path / "metrics_path"),
+        lambda sdk_config, arch, parent_dir: str(tmp_path / "metrics_path"),
     )
     monkeypatch.setattr(
         "utils.utils_profile.rocpd_data.convert_dbs_to_csv", lambda *a, **k: None
@@ -684,7 +691,7 @@ def test_run_prof_rocprofv3_builds_command_and_env(tmp_path, monkeypatch):
     monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_warning", lambda *a, **k: None)
 
-    utils_profile.run_prof(str(fname), ["--arg"], workload_dir)
+    utils_profile.run_prof(str(fname), ["--arg"], workload_dir, FAKE_ARCH)
 
     assert captured["cmd"] == [
         "rocprofv3",

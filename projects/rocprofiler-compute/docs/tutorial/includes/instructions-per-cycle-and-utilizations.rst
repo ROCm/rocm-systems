@@ -172,7 +172,7 @@ in the IPC example:
 
 .. code-block:: shell
 
-   $ rocprof-compute analyze -p workloads/ipc/mi200/ --dispatch 9 -b 11.2 --decimal 4
+   $ rocprof-compute analyze -p workloads/ipc/mi200/ --dispatch 9 -b 11.2 --debug-table-decimal 4
    <...>
    --------------------------------------------------------------------------------
    0. Top Stat
