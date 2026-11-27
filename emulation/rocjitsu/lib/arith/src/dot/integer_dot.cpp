@@ -98,6 +98,15 @@ int run(uint64_t flags, Mask exec_mask, uint64_t instruction_flags, uint32_t *co
   if constexpr (IgnoreClamp) {
     instruction_flags &= ~uint64_t(RJ_ARITH_DOT_CLAMP);
   }
+#if defined(RJ_ARITH_HAVE_AVX512VNNI)
+  if constexpr (Bits == 4 || Bits == 8) {
+    if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_ZEN4)) {
+      rocjitsu::arith::integer_dot_avx512vnni<int(sizeof(Mask) * 8), Bits, Unsigned>(
+          exec_mask, uint32_t(instruction_flags), d[0], a[0], b[0], Accumulate ? d[0] : c[0]);
+      return RJ_ARITH_SUCCESS;
+    }
+  }
+#endif
   for (int offset = 0; offset < int(sizeof(Mask) * 8); offset += 32) {
     uint32_t *dest = d[0] + offset;
     const uint32_t *source_a = a[0] + offset, *source_b = b[0] + offset;

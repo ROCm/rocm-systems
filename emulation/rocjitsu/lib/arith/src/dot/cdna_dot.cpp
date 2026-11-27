@@ -131,6 +131,8 @@ template <bool Bf16, bool Accumulate, typename Mask>
 int dot(uint64_t flags, Mask exec_mask, uint64_t mode, uint32_t *const *d, const uint32_t *const *a,
         const uint32_t *const *b, const uint32_t *const *c) {
   using namespace rocjitsu::arith;
+  [[maybe_unused]] const bool preserve_compatibility =
+      (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY;
   flags = resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
   if (int error = validate(flags, mode & ~(Accumulate ? 0ULL : 0x7ffULL), kMatrixIgnoredFpFlags)) {
     return error;
@@ -141,6 +143,15 @@ int dot(uint64_t flags, Mask exec_mask, uint64_t mode, uint32_t *const *d, const
   if (!exec_mask) {
     return RJ_ARITH_SUCCESS;
   }
+#if defined(RJ_ARITH_HAVE_X86_64_V4_BF16)
+  if constexpr (Bf16) {
+    if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_ZEN4) && !preserve_compatibility) {
+      dot2_bf16_x86_64_v4_bf16<int(sizeof(Mask) * 8), false>(exec_mask, uint32_t(mode), d[0], a[0],
+                                                             b[0], Accumulate ? d[0] : c[0]);
+      return RJ_ARITH_SUCCESS;
+    }
+  }
+#endif
   for (int base = 0; base < int(sizeof(Mask) * 8); base += 32) {
     const uint32_t *av = a[0] + base, *bv = b[0] + base;
     uint32_t *dv = d[0] + base;

@@ -155,12 +155,18 @@ void check_exact_dot2(Call call, const Dot2Case (&cases)[16]) {
   }
 }
 
-// Differential coverage of the new SIMD implementation against the unchanged
-// inherited scalar model; the independent captured cases above remain the oracle.
-template <int Lanes, bool Bf16, bool Accumulate, typename Call> void check_dot2_simd(Call call) {
+// Compare exact SIMD results with the inherited scalar model over arbitrary encodings.
+// Loose has a separate mathematical reference below: native intermediate rounding and
+// flushing need not match this scalar expression, including the sign of overflow.
+template <int Lanes, bool Accumulate, typename Call> void check_dot2_simd(Call call) {
   std::minstd_rand random;
-  auto word = [&] { return uint32_t(random() >> 7) ^ (uint32_t(random() >> 7) << 16); };
+  auto word = [&] {
+    const uint32_t lo = uint32_t(random() >> 7);
+    const uint32_t hi = uint32_t(random() >> 7);
+    return lo ^ (hi << 16);
+  };
   auto cpus = supported_cpu_levels();
+  constexpr uint64_t semantics = RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS;
   for (int scenario = 0; scenario < 128; ++scenario) {
     Registers<4, Lanes> input;
     for (int reg = 0; reg < 4; ++reg) {
@@ -174,36 +180,24 @@ template <int Lanes, bool Bf16, bool Accumulate, typename Call> void check_dot2_
     }
     auto exec_mask = exec_mask_for_case<Lanes>(scenario % 5);
     int aliasing_offset = scenario % 4;
-    for (uint64_t semantics :
-         {RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS, RJ_ARITH_SEMANTICS_LOOSE}) {
-      if (!Bf16 && semantics == RJ_ARITH_SEMANTICS_LOOSE) {
-        continue;
-      }
-      auto reference = input;
-      uint32_t status = 0x80000055U;
-      ASSERT_EQ((invoke_dot<Accumulate, true>(call, semantics, exec_mask, instruction_flags,
-                                              reference.v + aliasing_offset, reference.v,
-                                              reference.v + 1, reference.v + 2, &status)),
+    auto reference = input;
+    uint32_t status = 0x80000055U;
+    ASSERT_EQ((invoke_dot<Accumulate, true>(call, semantics, exec_mask, instruction_flags,
+                                            reference.v + aliasing_offset, reference.v,
+                                            reference.v + 1, reference.v + 2, &status)),
+              RJ_ARITH_SUCCESS);
+    for (uint64_t cpu : cpus) {
+      auto actual = input;
+      SCOPED_TRACE(::testing::Message() << scenario << '/' << cpu);
+      ASSERT_EQ((invoke_dot<Accumulate, true>(call, cpu | semantics, exec_mask, instruction_flags,
+                                              actual.v + aliasing_offset, actual.v, actual.v + 1,
+                                              actual.v + 2, &status)),
                 RJ_ARITH_SUCCESS);
-      for (uint64_t cpu : cpus) {
-        auto actual = input;
-        SCOPED_TRACE(::testing::Message() << scenario << '/' << cpu);
-        ASSERT_EQ((invoke_dot<Accumulate, true>(call, cpu | semantics, exec_mask, instruction_flags,
-                                                actual.v + aliasing_offset, actual.v, actual.v + 1,
-                                                actual.v + 2, &status)),
-                  RJ_ARITH_SUCCESS);
-        for (int lane = 0; lane < Lanes; ++lane) {
-          if (semantics == RJ_ARITH_SEMANTICS_LOOSE && ((exec_mask >> lane) & 1)) {
-            expect_f32(actual.v[aliasing_offset][lane],
-                       std::bit_cast<float>(reference.v[aliasing_offset][lane]), semantics,
-                       /*atol=*/0, /*rtol=*/1e-6);
-          } else {
-            ASSERT_EQ(actual.v[aliasing_offset][lane], reference.v[aliasing_offset][lane]) << lane;
-          }
-        }
-        actual.expect_preserved(input, aliasing_offset, 1);
-        EXPECT_EQ(status, 0x80000055U);
+      for (int lane = 0; lane < Lanes; ++lane) {
+        ASSERT_EQ(actual.v[aliasing_offset][lane], reference.v[aliasing_offset][lane]) << lane;
       }
+      actual.expect_preserved(input, aliasing_offset, 1);
+      EXPECT_EQ(status, 0x80000055U);
     }
   }
 }
@@ -211,7 +205,7 @@ template <int Lanes, bool Bf16, bool Accumulate, typename Call> void check_dot2_
 // Check DOT2 arithmetic, modifiers, aliases, and semantics support for the supplied entry point.
 template <int Lanes, bool Bf16, bool Gfx12, bool Accumulate = false, typename Call>
 void check_dot2(Call call) {
-  check_dot2_simd<Lanes, Bf16, Accumulate>(call);
+  check_dot2_simd<Lanes, Accumulate>(call);
   check_loose_dot<Lanes, Accumulate, true>(
       call, dot2_inputs<Lanes, Bf16, false>(),
       [](uint32_t actual, uint32_t a, uint32_t b, uint32_t c, uint32_t, uint64_t,
@@ -241,6 +235,23 @@ void check_dot2(Call call) {
     check_exact_dot2<Lanes, Accumulate, Gfx12>(call, Bf16 ? gfx12_bf16_cases : gfx12_f16_cases);
   } else {
     check_exact_dot2<Lanes, Accumulate, Gfx12>(call, Bf16 ? gfx11_bf16_cases : gfx11_f16_cases);
+  }
+}
+
+// Native BF16 input/accumulator flushing is an intentional Loose policy.
+TEST(Dot2F32Bf16W32Gfx12, LooseNativeFlushing) {
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (bool tiny_c : {false, true}) {
+      Registers<4, 32> r{};
+      r.v[0][0] = tiny_c ? 0 : 0x0000007fU;
+      r.v[1][0] = tiny_c ? 0 : 0x00007f00U;
+      r.v[2][0] = tiny_c ? 1U : 0;
+      ASSERT_EQ(rj_arith_v_dot2_f32_bf16_w32_gfx12(cpu | RJ_ARITH_SEMANTICS_LOOSE, ~0U, 0, r.v + 3,
+                                                   r.v, r.v + 1, r.v + 2, nullptr),
+                RJ_ARITH_SUCCESS);
+      const bool native = (cpu & RJ_ARITH_CPU_MASK) >= RJ_ARITH_CPU_X86_64_ZEN4;
+      EXPECT_EQ(r.v[3][0], native ? 0 : tiny_c ? 1U : 0x3ffe0000U) << cpu;
+    }
   }
 }
 
