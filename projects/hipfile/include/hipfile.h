@@ -866,7 +866,8 @@ void hipFileBatchIODestroy(hipFileBatchHandle_t batch_idp);
  *       valid until then. If the call returns an error, nothing was queued.
  * @note `hipStreamPerThread` is synchronous too. Async I/O on any other
  *       unregistered stream runs without registering it; registering a stream with
- *       `hipFileStreamRegister()` is optional and only improves performance.
+ *       `hipFileStreamRegister()` is optional. It only improves performance, and
+ *       only when the `HIPFILE_FORCE_BLOCKING_ASYNC` environment variable is `false`.
  * @note hipFile reserves the device's greatest stream priority for its fallback
  *       I/O. A stream created at that priority returns `hipFileAsyncNotSupported`,
  *       unless the device has only one priority level.
@@ -901,7 +902,8 @@ hipFileError_t hipFileReadAsync(hipFileHandle_t fh, void *buffer_base, size_t *s
  *       valid until then. If the call returns an error, nothing was queued.
  * @note `hipStreamPerThread` is synchronous too. Async I/O on any other
  *       unregistered stream runs without registering it; registering a stream with
- *       `hipFileStreamRegister()` is optional and only improves performance.
+ *       `hipFileStreamRegister()` is optional. It only improves performance, and
+ *       only when the `HIPFILE_FORCE_BLOCKING_ASYNC` environment variable is `false`.
  * @note hipFile reserves the device's greatest stream priority for its fallback
  *       I/O. A stream created at that priority returns `hipFileAsyncNotSupported`,
  *       unless the device has only one priority level.
@@ -923,8 +925,10 @@ hipFileError_t hipFileWriteAsync(hipFileHandle_t fh, void *buffer_base, size_t *
  * @param [in] flags Flags that can optimize stream processing if parameters
  *                   are known/are aligned at time of request submission
  *
- * @note Registration is an optional optimization: asynchronous I/O on an
- *       unregistered stream runs without registering it, on a slower path.
+ * @note Registration is optional: asynchronous I/O on an unregistered stream
+ *       runs without registering it. By default a registered stream runs its
+ *       transfers the same way; registration selects a faster path only when the
+ *       `HIPFILE_FORCE_BLOCKING_ASYNC` environment variable is `false`.
  *       Registering the default stream (a NULL handle or `hipStreamPerThread`)
  *       does nothing and returns success.
  * @note hipFile reserves the device's greatest stream priority for its fallback

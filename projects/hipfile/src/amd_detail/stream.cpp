@@ -2,6 +2,7 @@
  *
  * SPDX-License-Identifier: MIT
  */
+#include "configuration.h"
 #include "context.h"
 #include "device-guard.h"
 #include "hip.h"
@@ -63,18 +64,11 @@ Stream::Stream(const hipStream_t _hip_stream, uint32_t flags, bool blocking_only
     }
 
     // A transient (unregistered) stream always uses the blocking offload path, so it needs no signal
-    // slot and keeps no persistent per-stream state.
+    // slot and keeps no persistent per-stream state. So does every stream while forceBlockingAsync() is
+    // on: a stream parked on a wait value can deadlock fallback IO when HIP ignores stream priorities.
     can_use_stream_wait_value =
-        !blocking_only &&
+        !blocking_only && !Context<Configuration>::get()->forceBlockingAsync() &&
         Context<Hip>::get()->hipDeviceGetAttribute(hipDeviceAttributeCanUseStreamWaitValue, device_id) != 0;
-
-#ifdef AIS_TESTING
-    // Test hook: force the blocking (non-wait-value) async path even on capable hardware, so system
-    // tests can exercise it. Compiled out of consumer builds.
-    if (Context<Sys>::get()->getenv("HIPFILE_FORCE_BLOCKING_ASYNC") != nullptr) {
-        can_use_stream_wait_value = false;
-    }
-#endif
 
     // The signal slot is allocated lazily by ensureSignalSlot() on first gated use, not here.
 }

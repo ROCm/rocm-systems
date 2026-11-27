@@ -401,10 +401,10 @@ INSTANTIATE_TEST_SUITE_P(
         return std::get<0>(param_info.param).name + "_" + std::to_string(flags);
     });
 
-// HIPFILE_FORCE_BLOCKING_ASYNC (an AIS_TESTING-only hook) makes a stream take the blocking
-// host-function async path even on hardware that supports stream wait values, so the fallback path
-// is exercised here instead of only on devices that lack wait-value support. The variable is read in
-// the stream constructor, so it must be set before hipFileStreamRegister.
+// Configuration::forceBlockingAsync() makes a registered stream take the blocking host-function async
+// path even on hardware that supports stream wait values. It is on by default; set it here so the
+// blocking path is exercised whatever HIPFILE_FORCE_BLOCKING_ASYNC says. The setting is read in the
+// stream constructor, so it must be set before hipFileStreamRegister.
 class HipAsyncForcedBlocking : public HipAsync, public ::testing::WithParamInterface<AsyncIoFunction> {
 public:
     void SetUp() override
@@ -420,7 +420,8 @@ public:
             HipFileDataOps::zeroFileRegion(tf.fd, file_size);
             HipFileDataOps::randomizeMemoryRegion(dev_ptr, 0, buffer_size);
         }
-        ASSERT_EQ(setenv("HIPFILE_FORCE_BLOCKING_ASYNC", "1", 1), 0);
+        force_blocking_async = Context<Configuration>::get()->forceBlockingAsync();
+        Context<Configuration>::get()->forceBlockingAsync(true);
         ASSERT_EQ(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking), hipSuccess);
         ASSERT_EQ(hipFileStreamRegister(stream, 0), HIPFILE_SUCCESS);
     }
@@ -428,12 +429,13 @@ public:
     {
         ASSERT_EQ(hipFileStreamDeregister(stream), HIPFILE_SUCCESS);
         ASSERT_EQ(hipStreamDestroy(stream), hipSuccess);
-        ASSERT_EQ(unsetenv("HIPFILE_FORCE_BLOCKING_ASYNC"), 0);
+        Context<Configuration>::get()->forceBlockingAsync(force_blocking_async);
         HipAsync::TearDown();
     }
     hipFileError_t (*io_op)(hipFileHandle_t, void *, size_t *, hoff_t *, hoff_t *, ssize_t *, hipStream_t);
     std::string name;
     hipStream_t stream;
+    bool        force_blocking_async{true};
 };
 
 TEST_P(HipAsyncForcedBlocking, transfersCorrectlyOnBlockingPath)

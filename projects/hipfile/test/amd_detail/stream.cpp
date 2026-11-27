@@ -62,17 +62,15 @@ expectSignalMemory(StrictMock<MHip> &mhip, uint64_t *storage)
     EXPECT_CALL(mhip, hipFree).Times(AnyNumber());
 }
 
-// The Stream constructor reads HIPFILE_FORCE_BLOCKING_ASYNC (an AIS_TESTING-only hook) for every
-// non-default stream. Default it to unset so StrictMock<MSys> fixtures don't trip on the call.
+// The Stream constructor asks Configuration whether to force the blocking async path for every
+// non-default, non-transient stream. Default it to off so these tests cover the wait-value path.
+template <class MockConfiguration>
 static void
-expectNoForceBlocking(StrictMock<MSys> &msys)
+expectNoForceBlocking(MockConfiguration &mconfig)
 {
     using ::testing::AnyNumber;
     using ::testing::Return;
-    using ::testing::StrEq;
-    EXPECT_CALL(msys, getenv(StrEq("HIPFILE_FORCE_BLOCKING_ASYNC")))
-        .Times(AnyNumber())
-        .WillRepeatedly(Return(nullptr));
+    EXPECT_CALL(mconfig, forceBlockingAsync()).Times(AnyNumber()).WillRepeatedly(Return(false));
 }
 
 struct HipFileStream : public ::testing::Test {
@@ -80,7 +78,7 @@ struct HipFileStream : public ::testing::Test {
     {
         nonnull_stream = reinterpret_cast<hipStream_t>(1);
         expectSignalMemory(mhip, &signal_storage);
-        expectNoForceBlocking(msys);
+        expectNoForceBlocking(mconfig);
     }
     StrictMock<MConfiguration> mconfig;
     StrictMock<MHip>           mhip;
@@ -180,12 +178,13 @@ TEST_F(HipFileStream, deregister_returns_removed_stream)
 
 TEST(HipFileStreamDestructor, destructor_with_streams_in_use_logs)
 {
-    StrictMock<MHip>         mhip;
-    StrictMock<MSys>         msys;
-    uint64_t                 signal_storage{};
-    std::shared_ptr<IStream> stream;
+    StrictMock<MConfiguration> mconfig;
+    StrictMock<MHip>           mhip;
+    StrictMock<MSys>           msys;
+    uint64_t                   signal_storage{};
+    std::shared_ptr<IStream>   stream;
     expectSignalMemory(mhip, &signal_storage);
-    expectNoForceBlocking(msys);
+    expectNoForceBlocking(mconfig);
     {
         StreamMap stream_map;
         EXPECT_CALL(mhip, hipStreamGetDevice);
@@ -200,7 +199,7 @@ struct HipFileStreamExternal : public HipFileOpened {
     {
         nonnull_stream = reinterpret_cast<hipStream_t>(1);
         expectSignalMemory(mhip, &signal_storage);
-        expectNoForceBlocking(msys);
+        expectNoForceBlocking(mconfig);
     }
     StrictMock<MConfiguration> mconfig;
     StrictMock<MHip>           mhip;
@@ -334,6 +333,23 @@ TEST_F(HipFileStream, registered_stream_without_wait_value_support_has_no_signal
     EXPECT_EQ(stream->signalSlot(), nullptr);
 }
 
+TEST_F(HipFileStream, registered_stream_with_forced_blocking_has_no_signal_slot)
+{
+    EXPECT_CALL(mconfig, forceBlockingAsync()).WillOnce(::testing::Return(true));
+    EXPECT_CALL(mhip, hipStreamGetDevice);
+    EXPECT_CALL(mhip, hipDeviceGetAttribute).Times(0);
+    EXPECT_CALL(mhip, hipExtMallocWithFlags).Times(0);
+    stream_map.registerStream(nonnull_stream, 0);
+    auto stream = stream_map.findStream(nonnull_stream);
+    ASSERT_NE(stream, nullptr);
+    EXPECT_FALSE(stream->canUseStreamWaitValue());
+    {
+        auto lock = stream->getLock();
+        stream->ensureSignalSlot();
+    }
+    EXPECT_EQ(stream->signalSlot(), nullptr);
+}
+
 TEST_F(HipFileStream, find_stream_returns_only_registered_streams)
 {
     EXPECT_EQ(stream_map.findStream(nonnull_stream), nullptr);
@@ -406,7 +422,7 @@ struct HipFileStreamImplicit : public HipFileOpened {
         ON_CALL(mhip, hipExtMallocWithFlags)
             .WillByDefault(::testing::Return(static_cast<void *>(&signal_storage)));
         ON_CALL(mconfig, host()).WillByDefault(::testing::Return(true));
-        expectNoForceBlocking(msys);
+        expectNoForceBlocking(mconfig);
 
         hipFileDescr_t descr{};
         descr.handle.fd = 1234;

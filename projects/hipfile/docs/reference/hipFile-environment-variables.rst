@@ -1,6 +1,6 @@
 .. meta::
    :description: hipFile environment variables
-   :keywords: hipFile, environment variables, HIPFILE_ALLOW_COMPAT_MODE, HIPFILE_FORCE_COMPAT_MODE, HIPFILE_STATS_LEVEL, HIPFILE_UNSUPPORTED_FILE_SYSTEMS, ROCm, AMD, HIPFILE_HOST
+   :keywords: hipFile, environment variables, HIPFILE_ALLOW_COMPAT_MODE, HIPFILE_FORCE_COMPAT_MODE, HIPFILE_STATS_LEVEL, HIPFILE_UNSUPPORTED_FILE_SYSTEMS, ROCm, AMD, HIPFILE_HOST, HIPFILE_DEVICE_STREAM_POOL_SIZE, HIPFILE_FORCE_BLOCKING_ASYNC
 
 ******************************
 hipFile environment variables
@@ -40,3 +40,8 @@ The following environment variables affect the hipFile runtime.
    * - ``HIPFILE_DEVICE_STREAM_POOL_SIZE``
      - | Controls the size of the device stream pool.
        | Default size is 4 streams. Setting to 0 will use the default size.
+   * - ``HIPFILE_FORCE_BLOCKING_ASYNC``
+     - | Controls how asynchronous I/O runs on streams registered with ``hipFileStreamRegister()``.
+       | ``true``: Every asynchronous transfer runs inside a stream host function that waits for it. (default)
+       | ``false``: Registered streams on devices that support stream wait values wait on a wait value instead, so transfers on different streams can overlap.
+       | ``false`` can deadlock unless the HIP runtime honors stream priorities. See :doc:`/reference/api-async`.
