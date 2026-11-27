@@ -3584,6 +3584,22 @@
           "test_filter": "RevokeDdaIpcMPITest.IncompleteCollective_DdaIpcReduceScatter"
         },
         {
+          "name": "IncompleteCollective_DdaIpcLLAllReduce",
+          "description": "Rank 7 skips a DDA IPC LL one-shot AllReduce so ranks 0-6 poll peer flags; asserts DDA LL via rcclGetCollImplInfo; revoke must unblock stream sync then shrink",
+          "test_filter": "RevokeDdaIpcMPITest.IncompleteCollective_DdaIpcLLAllReduce",
+          "env_variables": {
+            "RCCL_DDA_IPC_LL_THRESHOLD": "2097152"
+          }
+        },
+        {
+          "name": "IncompleteCollective_DdaIpcLLReduceScatter",
+          "description": "Rank 7 skips a DDA IPC LL one-shot ReduceScatter so ranks 0-6 poll peer flags; asserts DDA LL via rcclGetCollImplInfo; revoke must unblock stream sync then shrink",
+          "test_filter": "RevokeDdaIpcMPITest.IncompleteCollective_DdaIpcLLReduceScatter",
+          "env_variables": {
+            "RCCL_DDA_IPC_LL_THRESHOLD": "2097152"
+          }
+        },
+        {
           "name": "IncompleteCollective_DdaIpcAlltoAll",
           "description": "Rank 7 skips DDA-IPC AlltoAll so ranks 0-6 wait in IpcGpuBarrier; asserts DDA-IPC via rcclGetCollImplInfo; revoke must unblock stream sync then shrink",
           "test_filter": "RevokeDdaIpcMPITest.IncompleteCollective_DdaIpcAlltoAll"
@@ -4092,6 +4108,14 @@
           "test_filter": "DdaIpcMPI_CommLifecycle.*",
           "env_variables": {
             "NCCL_CUMEM_ENABLE": "1"
+          }
+        },
+        {
+          "name": "DDA_IpcLL_8Ranks",
+          "description": "DDA LL one-shot AllReduce and ReduceScatter over the IPC LL region at 1 to 24 blocks, mixed calls and graph replays; RCCL_DDA_IPC_LL_THRESHOLD is cached per process and raised so the cases take LL",
+          "test_filter": "DdaIpcMPI_LL.*",
+          "env_variables": {
+            "RCCL_DDA_IPC_LL_THRESHOLD": "2097152"
           }
         }
       ]
