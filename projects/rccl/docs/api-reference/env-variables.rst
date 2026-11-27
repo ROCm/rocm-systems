@@ -1753,8 +1753,8 @@ threshold table introduced for gfx1250.
     * - | ``RCCL_DDA_LL128_RS_THREADS``
         | Threads per block for the batched gfx1250 DDA fabric LL128
           ``ncclReduceScatter`` kernel. When ``0`` (default), resolved from
-          ``ddaRsLL128Threads`` in the arch table: the gfx1250 table uses 256
-          threads on every partition but DPX, and every other case uses 512.
+          ``ddaRsLL128Threads`` in the arch table: the gfx1250 tables use 256
+          threads, and every other case uses 512.
           Values that are not a multiple of 32 from 32 to 512 are ignored. The
           peer-parallel kernel sizes its own block, a warp per rank, up to 512
           threads.
