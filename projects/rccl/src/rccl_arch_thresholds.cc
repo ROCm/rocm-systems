@@ -552,7 +552,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
   .bcRingLL128MaxBytes = 512ULL*1024*1024,
 };
 
-// gfx950: DDA-IPC cap is 64 MiB for AG, 128 MiB for AR/RS and 4 MiB for AlltoAll. No fabric LL/LL128.
+// gfx950: DDA-IPC cap is 64 MiB for AG and AlltoAll and 128 MiB for AR/RS. No fabric LL/LL128.
 static const rcclArchThresholds rcclArchThresholds_gfx950 = {
   // ddaLLMax: no fabric LL on gfx950.
   .ddaLLMax = {
@@ -588,7 +588,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx950 = {
     0,                    // [5] SendRecv        -- not used
     0,                    // [6] Send            -- not used
     0,                    // [7] Recv            -- not used
-    4ULL*1024*1024,       // [8] AlltoAll
+    64ULL*1024*1024,      // [8] AlltoAll        -- beats Direct p2p to 64M on the default grid; Direct above
   },
   // ddaVmmMaxR2: not used on gfx950 (no R2 DDA path).
   .ddaVmmMaxR2 = {
@@ -740,7 +740,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx942 = {
     0,                    // [5] SendRecv        -- not used
     0,                    // [6] Send            -- not used
     0,                    // [7] Recv            -- not used
-    4ULL*1024*1024,       // [8] AlltoAll
+    4ULL*1024*1024,       // [8] AlltoAll        -- Direct p2p is faster above 4M
   },
   // ddaVmmMaxR2: not used on gfx942 (no R2 DDA path).
   .ddaVmmMaxR2 = {

@@ -4087,6 +4087,11 @@
           "test_filter": "DdaIpcMPI_IndexData.ReduceScatter*"
         },
         {
+          "name": "DDA_IpcAlltoAllIndexData_8Ranks",
+          "description": "DDA IPC AlltoAll with pair- and index-dependent data, out-of-place and in-place, at every size up to the arch's DDA cap, each followed by a DDA IPC AllReduce",
+          "test_filter": "DdaIpcMPI_IndexData.AlltoAll*"
+        },
+        {
           "name": "DDA_IpcCommLifecycle_8Ranks",
           "description": "DDA IPC must come up, with no HIP error pending, on communicators created after another one is destroyed; needs cuMem, which is cached per process",
           "test_filter": "DdaIpcMPI_CommLifecycle.*",

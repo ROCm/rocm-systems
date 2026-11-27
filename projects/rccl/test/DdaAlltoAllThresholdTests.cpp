@@ -36,13 +36,19 @@ TEST_F(DdaAlltoAllThresholdTest, Gfx942_OneByteOverThreshold_Disabled)
         mockComm_.get(), kAlltoAllFloat32CountAt4MbThreshold + 1, ncclFloat32));
 }
 
-TEST_F(DdaAlltoAllThresholdTest, Gfx950_ExactlyAt4MbThreshold_Enabled)
+TEST_F(DdaAlltoAllThresholdTest, Gfx950_ExactlyAt64MbThreshold_Enabled)
 {
     mockComm_.reset("gfx950:sramecc+:xnack-");
-    const size_t totalBytes = rcclGetArchThresholds("gfx950")->ddaVmmMax[ncclFuncAlltoAll];
-    EXPECT_TRUE(rcclDdaEnabled(mockComm_.get(), totalBytes, rcclGetArchThresholds("gfx950")->ddaVmmMax[ncclFuncAlltoAll]));
+    EXPECT_EQ(rcclGetArchThresholds("gfx950")->ddaVmmMax[ncclFuncAlltoAll], size_t{64} * 1024 * 1024);
     EXPECT_TRUE(testRcclDdaAlltoAllThresholdEnabled(
-        mockComm_.get(), kAlltoAllFloat32CountAt4MbThreshold, ncclFloat32));
+        mockComm_.get(), kAlltoAllFloat32CountAt64MbThreshold, ncclFloat32));
+}
+
+TEST_F(DdaAlltoAllThresholdTest, Gfx950_OneLineOverThreshold_Disabled)
+{
+    mockComm_.reset("gfx950:sramecc+:xnack-");
+    EXPECT_FALSE(testRcclDdaAlltoAllThresholdEnabled(
+        mockComm_.get(), kAlltoAllFloat32CountAt64MbThreshold + kAlltoAllFloat32CountPerLine, ncclFloat32));
 }
 
 TEST_F(DdaAlltoAllThresholdTest, Gfx950_AlltoAllIgnoresHighUserThreshold)
@@ -51,9 +57,9 @@ TEST_F(DdaAlltoAllThresholdTest, Gfx950_AlltoAllIgnoresHighUserThreshold)
     const size_t overCap = rcclGetArchThresholds("gfx950")->ddaVmmMax[ncclFuncAlltoAll] + 1;
     EXPECT_FALSE(rcclDdaEnabled(mockComm_.get(), overCap, rcclGetArchThresholds("gfx950")->ddaVmmMax[ncclFuncAlltoAll]));
 
-    // Other collectives on gfx950 keep the arch table's much larger cap.
-    const size_t eightMb = 8 * 1024 * 1024;
-    EXPECT_TRUE(rcclDdaEnabled(mockComm_.get(), eightMb,
+    // AllReduce on gfx950 keeps its 128 MiB cap, above the AlltoAll one.
+    const size_t ninetySixMb = 96 * 1024 * 1024;
+    EXPECT_TRUE(rcclDdaEnabled(mockComm_.get(), ninetySixMb,
                                rcclDdaVmmThreshold(mockComm_.get(), ncclFuncAllReduce)));
 }
 

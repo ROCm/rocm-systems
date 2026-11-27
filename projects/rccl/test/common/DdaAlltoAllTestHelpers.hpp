@@ -80,6 +80,14 @@ constexpr size_t kAlltoAllFloat32CountAt4MbThreshold =
     4194304UL /
     (static_cast<size_t>(nccl_dda_detail::kDdaNranks) * sizeof(float));
 
+// Largest float32 per-rank count whose 8-rank AlltoAll totals exactly 64 MiB (the gfx950 cap).
+constexpr size_t kAlltoAllFloat32CountAt64MbThreshold =
+    67108864UL /
+    (static_cast<size_t>(nccl_dda_detail::kDdaNranks) * sizeof(float));
+
+// float32 elements in one 16-byte line, the step between eligible per-rank counts.
+constexpr size_t kAlltoAllFloat32CountPerLine = 16 / sizeof(float);
+
 // Per-rank float32 count whose 8-rank AlltoAll totals exactly 1 MiB.
 // Used as a mock threshold in boundary tests that exercise the rcclDdaEnabled
 // <= gate independent of the current arch table value.

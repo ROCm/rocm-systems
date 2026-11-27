@@ -1,0 +1,1 @@
+* gfx950 single-node 8-rank `ncclAlltoAll` takes DDA IPC up to 64 MiB total (was 4 MiB), on the same DDA IPC grid; larger messages take per-peer Send/Recv as before. As at smaller sizes, DDA IPC is chosen ahead of Copy Engine AlltoAll, also under `NCCL_CTA_POLICY_ZERO`. gfx942 keeps its 4 MiB cap.
