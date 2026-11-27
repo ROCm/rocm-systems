@@ -45,6 +45,7 @@ def rocshmem_env() -> dict[str, str]:
         "ROCPROFSYS_PROFILE": "ON",
         "ROCPROFSYS_USE_SAMPLING": "OFF",
         "ROCPROFSYS_USE_PROCESS_SAMPLING": "OFF",
+        "ROCPROFSYS_SAMPLING_FREQ": "50",
         "ROCPROFSYS_ROCM_DOMAINS": "hip_runtime_api,kernel_dispatch,memory_copy,rocshmem_api",
     }
 
@@ -59,7 +60,7 @@ def rocshmem_rocpd_rules(validation_rules_dir: Path) -> list[Path]:
 @pytest.mark.parametrize(
     "mode",
     [
-        "sampling",
+        pytest.param("sampling", marks=pytest.mark.timeout(600)),
         pytest.param("sys_run", marks=pytest.mark.rocpd("rocshmem_env")),
     ],
 )
