@@ -290,6 +290,9 @@ void Settings::setKernelArgImpl(const amd::Isa& isa, bool pcieStoresNeedFlush) {
   const bool isGfx90a = (gfxipMajor == 9 && gfxipMinor == 0 && gfxStepping == 10);
   // gfx12+ includes Navi4x (gfx120x) as well as gfx125x
   const bool isGfx12Plus = gfxipMajor >= 12;
+  // Use host kernel arguments for gfx120x
+  // since the per-launch PCIe readback overhead affectsperformance
+  const bool isGfx120x = (gfxipMajor == 12) && (gfxipMinor == 0);
 
   auto kernelArgImpl = KernelArgImpl::HostKernelArgs;
 
@@ -297,7 +300,7 @@ void Settings::setKernelArgImpl(const amd::Isa& isa, bool pcieStoresNeedFlush) {
     // Host stores reach device memory over coherent xGMI, so they need none of the manual
     // memory ordering workarounds that PCIe does
     kernelArgImpl = KernelArgImpl::DeviceKernelArgs;
-  } else if (isGfx94x || isGfx90a || isGfx12Plus) {
+  } else if ((isGfx94x || isGfx90a || isGfx12Plus) && !isGfx120x) {
     // Implement the kernel argument readback workaround
     // (write all args -> sfence -> write last byte -> mfence -> read last byte)
     kernelArgImpl = KernelArgImpl::DeviceKernelArgsReadback;
