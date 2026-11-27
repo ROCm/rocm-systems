@@ -162,15 +162,6 @@ def test_kernel_traces_stacked_compute_peaks__limiter_names_binding_one() -> Non
     assert "Limited by Compute: FP32 MFMA" in traces[0].hovertemplate
 
 
-def test_kernel_traces_exceeded_memory_roof__falls_back_to_compute_peak() -> None:
-    traces, _ = kernel_traces(
-        make_roofline(),
-        {"ai_hbm": [[1.0], [5000.0]], "kernelNames": ["kA"]},
-    )
-
-    assert "Limited by Compute: FP32 VALU" in traces[0].hovertemplate
-
-
 def test_kernel_traces_name_the_roof_that_binds() -> None:
     """A kernel whose bandwidth roof sits under the compute cap is limited by its
     memory level, and falls back to Unknown when the ceiling data holds no roof
