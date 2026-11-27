@@ -17,7 +17,7 @@ from typing import Any, Callable, List
 from ml_api_tracing.inject_roctx import marker_ranges
 from ml_api_tracing.inject_roctx.backend_contract import register
 from ml_api_tracing.marker_format import (
-    _MAX_TENSOR_ARGUMENT_ITEMS,
+    MAX_TENSOR_ARGUMENT_ITEMS,
     format_args_blob,
     render_dtype_shape,
 )
@@ -173,7 +173,7 @@ def _format_triton_args(
 
         parts = []
         for index, name in enumerate(names):
-            if len(parts) >= _MAX_TENSOR_ARGUMENT_ITEMS:
+            if len(parts) >= MAX_TENSOR_ARGUMENT_ITEMS:
                 break
             if index < len(positionals):
                 value = positionals[index]

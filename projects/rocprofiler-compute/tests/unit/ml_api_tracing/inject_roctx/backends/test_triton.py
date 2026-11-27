@@ -12,7 +12,7 @@ from typing import List
 
 from ml_api_tracing.inject_roctx import marker_ranges
 from ml_api_tracing.inject_roctx.backends import triton as triton_backend
-from ml_api_tracing.marker_format import _MAX_TENSOR_ARGUMENT_ITEMS, compose_marker
+from ml_api_tracing.marker_format import MAX_TENSOR_ARGUMENT_ITEMS, compose_marker
 
 
 class FindSpecWithout:
@@ -363,7 +363,7 @@ def test_format_triton_args_caps_at_32_items():
         tuple(range(40)),
         {},
     )
-    assert blob.count("=") == _MAX_TENSOR_ARGUMENT_ITEMS
+    assert blob.count("=") == MAX_TENSOR_ARGUMENT_ITEMS
     assert "p31=" in blob
     assert "p32=" not in blob
 
