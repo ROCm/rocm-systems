@@ -116,7 +116,8 @@ _COORDINATES_PER_BODY = 6
 _TILE_DIM = 16
 _NBODY_BLOCK = 128
 _STEP = 0.01
-_DEFAULT_MATRIX_DIM = 8192
+# 32768^2 floats x 4 bytes x 2 ping-pong buffers = 8 GiB device memory.
+_DEFAULT_MATRIX_DIM = 32768
 
 
 class HiprtcProgram:
@@ -230,7 +231,7 @@ def _parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         default=_DEFAULT_MATRIX_DIM,
         help=(
             "Square matrix side for tiled transpose "
-            "(default: 8192; must be a multiple of 16)"
+            "(default: 32768, ~8 GiB for two buffers; multiple of 16)"
         ),
     )
     parser.add_argument(

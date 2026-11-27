@@ -277,8 +277,11 @@ def _parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--matrix-dim",
         type=int,
-        default=8192,
-        help="Square matrix side for tiled transpose (default: 8192)",
+        default=32768,
+        help=(
+            "Square matrix side for tiled transpose "
+            "(default: 32768, ~8 GiB for two buffers)"
+        ),
     )
     parser.add_argument(
         "--device",

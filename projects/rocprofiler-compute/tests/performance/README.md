@@ -51,7 +51,7 @@ python3 tests/performance/run_perf_transpose_nbody.py \
 | `--rocprof-compute PATH` | Entrypoint or project root (repeatable) |
 | `--iters` | Total kernel launches (default 5000) |
 | `--bodies` | N-body particle count (default 81920) |
-| `--matrix-dim` | Square matrix side for tiled transpose (default 8192) |
+| `--matrix-dim` | Square matrix side for tiled transpose (default 32768, ~8 GiB for two buffers) |
 | `-d` / `--work-dir` | Workload parent directory |
 | `--keep` | Retain workload output after the run |
 | `--device` | HIP device id for the app |
