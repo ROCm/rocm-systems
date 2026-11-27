@@ -71,6 +71,10 @@ constexpr std::string_view kMutationHelp =
     "immediate offset changes; data, returning behavior, modifiers and waits remain.\n"
     "An unsupported selected form fails without renumbering atomic ordinals.\n"
     "CDNA5 and RDNA4 buffer atomics require a nonnegative original immediate offset.\n"
+    "32-bit DS atomics are also supported on gfx942/gfx950 wave64 and\n"
+    "gfx1100 wave32/wave64, as well as the modern targets above. DS mutation\n"
+    "increments only raw offset0 and requires an aligned result without carry.\n"
+    "For two-address exchange this retains the original element-offset policy.\n"
     "Output must be new; existing files, aliases and in-place mutation are refused.\n"
     "Host transformation only; no GPU execution or detector qualification.\n";
 
