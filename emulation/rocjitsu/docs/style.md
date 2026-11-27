@@ -178,7 +178,7 @@ Ordinary arithmetic may raise sticky flags. Guest MODE settings are implemented
 in arithmetic and result bits, not by changing the host environment.
 
 This contract applies to all CPU execution paths, including graphics and memory
-atomics, which remain outside rj-arith. Saving/restoring the environment around
+atomics. Memory atomics remain outside rj-arith. Saving/restoring the environment around
 compliant code is unnecessary. Tests may change it to establish a reference or
 check the contract.
 

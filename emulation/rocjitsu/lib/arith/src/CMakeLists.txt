@@ -87,6 +87,7 @@ add_library(
     dot/integer_dot.cpp
     dot/scalar_repair.cpp
     graphics/cube.cpp
+    graphics/interp_gfx10.cpp
     graphics/interp16.cpp
     graphics/interp32.cpp
     graphics/mullit.cpp

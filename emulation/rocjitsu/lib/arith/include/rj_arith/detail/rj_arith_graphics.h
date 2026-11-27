@@ -14,6 +14,67 @@
 extern "C" {
 #endif
 
+// gfx10 interpolation after LDS fetching: A contains the selected coefficient,
+// B the coordinate, and C the origin/previous accumulator. Each is one VGPR.
+// MOV consumes only A. P1LL/P1LV decode FP16 A/C, P2_F16 decodes FP16 A and
+// writes a selected FP16 half. All other inputs/results are FP32. HIGH_A/D
+// select the shared FP16 source half and destination half respectively.
+// ABS/NEG_B modify coordinates; ABS/NEG_C apply only to explicit P1LV/P2_F16
+// addends and are ignored by the other stages. OMOD/CLAMP follow the instruction.
+// Guest rounding and flushing use destination precision, except FP32 input
+// flushing and the independent FP16 input override. P2_F16 ignores OMOD.
+// Compatibility/Loose retain the inherited model; strict empirical modes are
+// unsupported. No FP status is produced. Inactive lanes and the unselected
+// destination half are preserved; inputs may overlap destinations.
+int rj_arith_v_interp_mov_f32_w32_gfx10(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        const uint32_t *const *c);
+int rj_arith_v_interp_mov_f32_w64_gfx10(uint64_t flags, uint64_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        const uint32_t *const *c);
+int rj_arith_v_interp_p1_f32_w32_gfx10(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       const uint32_t *const *c);
+int rj_arith_v_interp_p1_f32_w64_gfx10(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       const uint32_t *const *c);
+int rj_arith_v_interp_p2_f32_w32_gfx10(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       const uint32_t *const *c);
+int rj_arith_v_interp_p2_f32_w64_gfx10(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       const uint32_t *const *c);
+int rj_arith_v_interp_p1ll_f16_w32_gfx10(uint64_t flags, uint32_t exec_mask,
+                                         uint64_t instruction_flags, uint32_t *const *d,
+                                         const uint32_t *const *a, const uint32_t *const *b,
+                                         const uint32_t *const *c);
+int rj_arith_v_interp_p1ll_f16_w64_gfx10(uint64_t flags, uint64_t exec_mask,
+                                         uint64_t instruction_flags, uint32_t *const *d,
+                                         const uint32_t *const *a, const uint32_t *const *b,
+                                         const uint32_t *const *c);
+int rj_arith_v_interp_p1lv_f16_w32_gfx10(uint64_t flags, uint32_t exec_mask,
+                                         uint64_t instruction_flags, uint32_t *const *d,
+                                         const uint32_t *const *a, const uint32_t *const *b,
+                                         const uint32_t *const *c);
+int rj_arith_v_interp_p1lv_f16_w64_gfx10(uint64_t flags, uint64_t exec_mask,
+                                         uint64_t instruction_flags, uint32_t *const *d,
+                                         const uint32_t *const *a, const uint32_t *const *b,
+                                         const uint32_t *const *c);
+int rj_arith_v_interp_p2_f16_w32_gfx10(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       const uint32_t *const *c);
+int rj_arith_v_interp_p2_f16_w64_gfx10(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       const uint32_t *const *c);
+
 // Quad-local interpolation. For lane L and Q=L&~3, P10 computes
 // fma(A[Q+1],B[L],C[Q]); P2 computes fma(A[Q+2],B[L],C[L]). Source lanes are
 // read even if inactive in EXEC. Each operand uses one VGPR; whole VGPRs may
