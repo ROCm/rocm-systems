@@ -476,6 +476,145 @@ TEST(MfmaF32, mfma_f32_32x32x2_f32_w64) {
 TEST(MfmaF32, mfma_f32_16x16x4_f32_w64) {
   arithmetic<16, 4, 1, false, true>(rj_arith_v_mfma_f32_16x16x4_f32_w64);
 }
+
+TEST(MfmaF32, Gfx950ExactModesControlsAndGuards) {
+  const auto levels = supported_cpu_levels();
+  // Verify all 5 gfx950 F32 MFMA entry points succeed in exact and loose modes,
+  // ignore MODE.FP16_OVFL, flush subnormals symmetrically when FP_DENORM_32=0,
+  // and return canonical 0xffc00000 when 0 * Inf overrides qNaN(C).
+  const Entry entries[] = {
+      rj_arith_v_mfma_f32_32x32x1_2b_f32_w64_gfx950, rj_arith_v_mfma_f32_16x16x1_4b_f32_w64_gfx950,
+      rj_arith_v_mfma_f32_4x4x1_16b_f32_w64_gfx950,  rj_arith_v_mfma_f32_32x32x2_f32_w64_gfx950,
+      rj_arith_v_mfma_f32_16x16x4_f32_w64_gfx950,
+  };
+  const int out_counts[] = {32, 16, 4, 16, 4};
+  for (int idx = 0; idx < 5; ++idx) {
+    std::array<uint32_t, 64> a{}, b{};
+    std::array<std::array<uint32_t, 64>, 32> c{}, d{};
+    const uint32_t *ap[] = {a.data()};
+    const uint32_t *bp[] = {b.data()};
+    const uint32_t *cp[32];
+    uint32_t *dp[32];
+    for (int r = 0; r < out_counts[idx]; ++r) {
+      cp[r] = c[r].data();
+      dp[r] = d[r].data();
+    }
+    // Overflow ignores FP16_OVFL on physical MI350X F32 MFMA.
+    a.fill(0x7f7fffffU);
+    b.fill(0x40000000U);
+    for (uint64_t cpu : levels) {
+      for (uint64_t sem : semantics_modes()) {
+        for (uint64_t ovfl : {uint64_t{0}, RJ_ARITH_FP16_OVFL}) {
+          ASSERT_EQ(entries[idx](cpu | sem | ovfl, 0, dp, ap, bp, cp), RJ_ARITH_SUCCESS);
+          EXPECT_EQ(d[0][0], 0x7f800000U);
+        }
+      }
+      // Split denorm flags and cbsz >= 5 reject strict exact requests without writes.
+      d[0].fill(0xdeadbeefU);
+      EXPECT_EQ(entries[idx](cpu | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS |
+                                 RJ_ARITH_FP_FLUSH_INPUT_DENORMALS,
+                             0, dp, ap, bp, cp),
+                RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
+      EXPECT_EQ(d[0][0], 0xdeadbeefU);
+      EXPECT_EQ(entries[idx](cpu | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS, 5, dp, ap,
+                             bp, cp),
+                RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
+      EXPECT_EQ(d[0][0], 0xdeadbeefU);
+      EXPECT_EQ(entries[idx](cpu | RJ_ARITH_SEMANTICS_LOOSE, 1ULL << 10, nullptr, nullptr, nullptr,
+                             nullptr),
+                RJ_ARITH_ERROR_INVALID_FLAGS);
+    }
+  }
+
+  // MI350X wave2_3f capture rows on v_mfma_f32_4x4x1_16b_f32 (w=3, lane=0):
+  // - r=0: 0xdf800000 * 0xff000000 + 0xff7fffff -> 0x7f800000 under both FP16_OVFL=0 and 1.
+  // - r=1: 0x806043d5 * 0xff000000 + 0x0046078c -> 0x3fc087aa (kept) vs 0x00000000 (flushed).
+  std::array<uint32_t, 64> a{}, b{};
+  std::array<std::array<uint32_t, 64>, 16> c{}, d{};
+  const uint32_t *ap[] = {a.data()}, *bp[] = {b.data()};
+  const uint32_t *cp[16];
+  uint32_t *dp[16];
+  for (int r = 0; r < 16; ++r) {
+    cp[r] = c[r].data();
+    dp[r] = d[r].data();
+  }
+  a.fill(0U);
+  b.fill(0xff000000U);
+  a[0] = 0xdf800000U;
+  a[1] = 0x806043d5U;
+  c[0][0] = 0xff7fffffU;
+  c[1][0] = 0x0046078cU;
+  for (uint64_t cpu : levels) {
+    for (uint64_t ovfl : {uint64_t{0}, RJ_ARITH_FP16_OVFL}) {
+      ASSERT_EQ(
+          rj_arith_v_mfma_f32_4x4x1_16b_f32_w64_gfx950(
+              cpu | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS | ovfl, 0, dp, ap, bp, cp),
+          RJ_ARITH_SUCCESS);
+      EXPECT_EQ(d[0][0], 0x7f800000U);
+      EXPECT_EQ(d[1][0], 0x3fc087aaU);
+    }
+    ASSERT_EQ(rj_arith_v_mfma_f32_4x4x1_16b_f32_w64_gfx950(
+                  cpu | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS |
+                      RJ_ARITH_FP_FLUSH_INPUT_DENORMALS | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS,
+                  0, dp, ap, bp, cp),
+              RJ_ARITH_SUCCESS);
+    EXPECT_EQ(d[0][0], 0x7f800000U);
+    EXPECT_EQ(d[1][0], 0x00000000U);
+  }
+  a.fill(0x80000001U); // -min subnormal output flush
+  b.fill(0x3f800000U);
+  c[0].fill(0x80000000U);
+  for (uint64_t cpu : levels) {
+    ASSERT_EQ(rj_arith_v_mfma_f32_4x4x1_16b_f32_w64_gfx950(
+                  cpu | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS, 0, dp, ap, bp, cp),
+              RJ_ARITH_SUCCESS);
+    EXPECT_EQ(d[0][0], 0x80000001U);
+    ASSERT_EQ(rj_arith_v_mfma_f32_4x4x1_16b_f32_w64_gfx950(
+                  cpu | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS |
+                      RJ_ARITH_FP_FLUSH_INPUT_DENORMALS | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS,
+                  0, dp, ap, bp, cp),
+              RJ_ARITH_SUCCESS);
+    EXPECT_EQ(d[0][0], 0x80000000U);
+  }
+  // 0 * Inf overrides qNaN(C), while sNaN(A) * Inf quiets A.
+  a.fill(0U);
+  b.fill(0x7f800000U);
+  c[0].fill(0x7fc00123U);
+  ASSERT_EQ(rj_arith_v_mfma_f32_4x4x1_16b_f32_w64_gfx950(
+                RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS, 0, dp, ap, bp, cp),
+            RJ_ARITH_SUCCESS);
+  EXPECT_EQ(d[0][0], 0xffc00000U);
+  a.fill(0x7f800055U);
+  ASSERT_EQ(rj_arith_v_mfma_f32_4x4x1_16b_f32_w64_gfx950(
+                RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS, 0, dp, ap, bp, cp),
+            RJ_ARITH_SUCCESS);
+  EXPECT_EQ(d[0][0], 0x7fc00055U);
+
+  // 16x16x1_4b_f32 has M=16 (4 blocks of 16 lanes):
+  // cbsz=1, abid=1 broadcasts block 1 (lanes 16..31) to blocks 0..1;
+  // cbsz=4, abid=9 has G=16 > num_blocks=4 and clamps all blocks to lanes 0..15.
+  // Verify across every CPU level and every semantics mode (including Loose).
+  for (int lane = 0; lane < 64; ++lane) {
+    a[lane] = std::bit_cast<uint32_t>(float(lane + 1));
+    b[lane] = 0x3f800000U;
+  }
+  for (auto &reg : c) {
+    reg.fill(0U);
+  }
+  for (uint64_t cpu : levels) {
+    for (uint64_t sem : semantics_modes()) {
+      ASSERT_EQ(rj_arith_v_mfma_f32_16x16x1_4b_f32_w64_gfx950(cpu | sem, 1ULL | (1ULL << 3), dp, ap,
+                                                              bp, cp),
+                RJ_ARITH_SUCCESS);
+      EXPECT_EQ(d[0][0], std::bit_cast<uint32_t>(17.0f)) << "cpu=" << cpu << " sem=" << sem;
+      ASSERT_EQ(rj_arith_v_mfma_f32_16x16x1_4b_f32_w64_gfx950(cpu | sem, 4ULL | (9ULL << 3), dp, ap,
+                                                              bp, cp),
+                RJ_ARITH_SUCCESS);
+      // Batch 3 (lanes 48..63, d[12..15]) clamps to block 0 (lane 0 -> 1.0f).
+      EXPECT_EQ(d[12][0], std::bit_cast<uint32_t>(1.0f)) << "cpu=" << cpu << " sem=" << sem;
+    }
+  }
+}
 } // namespace
 
 TEST(MfmaF32, mfma_f32_32x32x1_2b_f32_w64_gfx908) {
