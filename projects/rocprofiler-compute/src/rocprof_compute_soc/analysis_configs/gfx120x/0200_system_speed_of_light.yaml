@@ -90,7 +90,7 @@ Panel Config:
     LDS Bank Conflicts: >-
       Cycles LDS stalled on conflicting bank addresses, averaged per dispatch.
     GL0 Cache Hit Rate (TCP Cache): >-
-      Percentage of GL0 requests that hit.
+      Percentage of GL0 vector cache (TCP Cache) requests that hit in cache.
     Scalar Data Cache Hit Rate: >-
       Percentage of scalar data cache requests that hit.
     Scalar Data Cache BW: >-

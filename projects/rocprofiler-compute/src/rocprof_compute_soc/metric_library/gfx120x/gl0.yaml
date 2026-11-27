@@ -17,7 +17,7 @@ gl0.hit_rate:
   name: GL0 Hit Rate
   formula: 100 * SUM(TCP_REQ_sum - TCP_REQ_MISS_sum) / SUM(TCP_REQ_sum)
   unit: Percent
-  description: Percentage of GL0 requests that hit.
+  description: Percentage of GL0 vector cache (TCP Cache) requests that hit in cache.
   peak: 100
 gl0.miss_req:
   name: GL0 Miss Requests

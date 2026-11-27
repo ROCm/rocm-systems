@@ -55,7 +55,7 @@ Panel Config:
           unit: (Cycles + $normUnit)
   metrics_description:
     Hit Rate: >-
-      Percentage of GL0 requests that hit.
+      Percentage of GL0 vector cache (TCP Cache) requests that hit in cache.
     Miss Requests: >-
       GL0 requests that missed and were sent toward GL1.
     TA Req Stall: >-

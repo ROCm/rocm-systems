@@ -136,7 +136,7 @@ Panel Config:
       The load bandwidth between the WGP and the scalar data cache. Each loaded
       dword counts as 4 bytes. Bounds-check reductions are ignored.
     GL0 Hit Rate: >-
-      Percentage of GL0 requests that hit.
+      Percentage of GL0 vector cache (TCP Cache) requests that hit in cache.
     LDS Instructions: >-
       LDS instructions issued, including FLAT instructions that resolve to LDS.
       This counts instructions, not bytes, and does not distinguish reads from

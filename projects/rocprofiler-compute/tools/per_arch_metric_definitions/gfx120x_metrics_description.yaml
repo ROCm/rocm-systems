@@ -28,8 +28,8 @@ System Speed-of-Light:
     rst: Cycles LDS stalled on conflicting bank addresses, averaged per dispatch.
     unit: Cycles
   GL0 Cache Hit Rate (TCP Cache):
-    plain: Percentage of GL0 requests that hit.
-    rst: Percentage of GL0 requests that hit.
+    plain: Percentage of GL0 vector cache (TCP Cache) requests that hit in cache.
+    rst: Percentage of GL0 vector cache (TCP Cache) requests that hit in cache.
     unit: Percent
   Scalar Data Cache Hit Rate:
     plain: Percentage of scalar data cache requests that hit.
@@ -67,8 +67,8 @@ Memory chart - Scalar Data Cache:
     unit: Bytes/s
 Memory chart - GL0 Cache (Vector L0):
   GL0 Hit Rate:
-    plain: Percentage of GL0 requests that hit.
-    rst: Percentage of GL0 requests that hit.
+    plain: Percentage of GL0 vector cache (TCP Cache) requests that hit in cache.
+    rst: Percentage of GL0 vector cache (TCP Cache) requests that hit in cache.
     unit: Percent
 Memory chart - LDS (Local Data Share):
   LDS Instructions:
@@ -322,8 +322,8 @@ WGP Wavefront Life:
     unit: Cycles
 GL0 Cache Performance:
   Hit Rate:
-    plain: Percentage of GL0 requests that hit.
-    rst: Percentage of GL0 requests that hit.
+    plain: Percentage of GL0 vector cache (TCP Cache) requests that hit in cache.
+    rst: Percentage of GL0 vector cache (TCP Cache) requests that hit in cache.
     unit: Percent
 GL0 Request Statistics:
   Miss Requests:
