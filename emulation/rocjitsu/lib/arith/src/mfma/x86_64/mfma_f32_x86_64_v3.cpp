@@ -12,27 +12,45 @@ template <int M, int K, int Batch, bool Xf32, MfmaF32Model Model>
 void mfma_f32_x86_64_v3(uint64_t controls, uint64_t flags, uint32_t *const *d,
                         const uint32_t *const *a, const uint32_t *const *b,
                         const uint32_t *const *c) {
-  const bool clamp_overflow =
-      Model == MfmaF32Model::Default && !Xf32 && (flags & RJ_ARITH_FP16_OVFL);
-  alignas(64) float left[M * K * Batch], right[M * K * Batch];
-  for (int i = 0; i < M * K * Batch; i += 8) {
-    auto x = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(a[i / 64] + i % 64));
-    auto y = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(b[i / 64] + i % 64));
-    if constexpr (Xf32) {
-      const auto mask = _mm256_set1_epi32(static_cast<int>(kMfmaXf32InputMask));
-      x = _mm256_and_si256(x, mask);
-      y = _mm256_and_si256(y, mask);
-    }
-    if constexpr (Model == MfmaF32Model::Gfx90a) {
-      if (flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS) {
-        x = mfma_flush_f32x8(x);
-        y = mfma_flush_f32x8(y);
+  if constexpr (Model == MfmaF32Model::Default) {
+    const bool clamp_overflow = !Xf32 && (flags & RJ_ARITH_FP16_OVFL);
+    constexpr int per_lane = K / (64 / (M * Batch));
+    alignas(64) float left[per_lane][64], right[per_lane][64];
+    for (int reg = 0; reg < per_lane; ++reg) {
+      for (int lane = 0; lane < 64; lane += 8) {
+        __m256i x = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(a[reg] + lane));
+        __m256i y = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(b[reg] + lane));
+        if constexpr (Xf32) {
+          const __m256i mask = _mm256_set1_epi32(static_cast<int>(kMfmaXf32InputMask));
+          x = _mm256_and_si256(x, mask);
+          y = _mm256_and_si256(y, mask);
+        }
+        _mm256_store_ps(left[reg] + lane, _mm256_castsi256_ps(x));
+        _mm256_store_ps(right[reg] + lane, _mm256_castsi256_ps(y));
       }
     }
-    _mm256_store_ps(left + i, _mm256_castsi256_ps(x));
-    _mm256_store_ps(right + i, _mm256_castsi256_ps(y));
+    mfma_reduce_planes<M, K, Batch>(controls, d, left, right, c, clamp_overflow);
+  } else {
+    alignas(64) float left[M * K * Batch], right[M * K * Batch];
+    for (int i = 0; i < M * K * Batch; i += 8) {
+      __m256i x = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(a[i / 64] + i % 64));
+      __m256i y = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(b[i / 64] + i % 64));
+      if constexpr (Xf32) {
+        const __m256i mask = _mm256_set1_epi32(static_cast<int>(kMfmaXf32InputMask));
+        x = _mm256_and_si256(x, mask);
+        y = _mm256_and_si256(y, mask);
+      }
+      if constexpr (Model == MfmaF32Model::Gfx90a) {
+        if (flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS) {
+          x = mfma_flush_f32x8(x);
+          y = mfma_flush_f32x8(y);
+        }
+      }
+      _mm256_store_ps(left + i, _mm256_castsi256_ps(x));
+      _mm256_store_ps(right + i, _mm256_castsi256_ps(y));
+    }
+    mfma_reduce_simd<M, K, Batch, 1, Model>(controls, d, left, right, c, false, flags);
   }
-  mfma_reduce_simd<M, K, Batch, 1, Model>(controls, d, left, right, c, clamp_overflow, flags);
 }
 template void mfma_f32_x86_64_v3<16, 8, 1, true>(uint64_t controls, uint64_t flags,
                                                  uint32_t *const *d, const uint32_t *const *a,

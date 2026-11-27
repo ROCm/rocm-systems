@@ -12,7 +12,7 @@
 ///   - v_cndmask_b16: low-half SGPR-pair select. The gfx1201 MODE test asserts
 ///     the generated generic SIMD route.
 ///
-/// The scalar bodies write through write_vop3_true16_dst, which preserves the
+/// The scalar bodies write through the destination-half writer, which preserves the
 /// destination's high half on RDNA. The CU and decoder are built for RDNA3;
 /// encoding marker is 0x35<<26.
 

@@ -940,9 +940,26 @@ TEST_F(ConSanContract, GroupFlatOriginSurvivesRoundTripOnlyInItsProvenProfile) {
   site.origin = static_cast<AccessOrigin>(2);
   EXPECT_TRUE(validate_manifest(manifest).failed());
   site.origin = AccessOrigin::GroupFlat;
-  site.width = 8;
-  EXPECT_TRUE(validate_manifest(manifest).failed());
+  for (uint32_t width : {2u, 8u, 16u}) {
+    site.width = width;
+    EXPECT_TRUE(validate_manifest(manifest).succeeded()) << width;
+  }
+  for (uint32_t width : {1u, 12u}) {
+    site.width = width;
+    EXPECT_TRUE(validate_manifest(manifest).failed()) << width;
+  }
+  // The original proven-only Group-FLAT profile admitted only B32.
+  manifest.options = {
+      0x25, 0x93, 0xec, 0xdd, 0x1d, 0x63, 0x27, 0x5d, 0x64, 0xc9, 0xad,
+      0xf3, 0x23, 0x63, 0x16, 0x27, 0x38, 0x1e, 0x43, 0xcf, 0x2b, 0x21,
+      0xc2, 0xe1, 0xcc, 0x3e, 0x59, 0x39, 0x03, 0x03, 0x79, 0xf6,
+  };
+  for (uint32_t width : {2u, 8u, 16u}) {
+    site.width = width;
+    EXPECT_TRUE(validate_manifest(manifest).failed()) << width;
+  }
   site.width = 4;
+  EXPECT_TRUE(validate_manifest(manifest).succeeded());
   manifest.options = {
       0x9d, 0x20, 0x4e, 0x58, 0xc8, 0xf7, 0x59, 0x94, 0x98, 0xf9, 0x43,
       0xf5, 0x88, 0x81, 0x05, 0x51, 0x49, 0x7b, 0x7c, 0xed, 0xc3, 0xa9,
@@ -952,6 +969,24 @@ TEST_F(ConSanContract, GroupFlatOriginSurvivesRoundTripOnlyInItsProvenProfile) {
   site.origin = AccessOrigin::Native;
   site.access = AccessKind::Atomic;
   EXPECT_TRUE(validate_manifest(manifest).succeeded());
+}
+
+TEST_F(ConSanContract, UnsignedHelperPremisesRequireMatchingFourByteReadsOrWrites) {
+  Manifest facts = example();
+  SiteFacts &site = facts.sites[1];
+  site.origin = AccessOrigin::GroupFlat;
+  for (const AccessKind access : {AccessKind::Read, AccessKind::Write}) {
+    site.access = access;
+    site.width = 4;
+    site.assumption =
+        access == AccessKind::Read ? FlatAssumption::HelperLoadAt : FlatAssumption::HelperStoreAt;
+    EXPECT_TRUE(validate_manifest(facts).succeeded());
+    site.width = 8;
+    EXPECT_TRUE(validate_manifest(facts).failed());
+    site.width = 4;
+    site.access = access == AccessKind::Read ? AccessKind::Write : AccessKind::Read;
+    EXPECT_TRUE(validate_manifest(facts).failed());
+  }
 }
 
 TEST_F(ConSanContract, OnlyLikelyCanRetainConditionalSitesAndStrictPersistsItsReason) {

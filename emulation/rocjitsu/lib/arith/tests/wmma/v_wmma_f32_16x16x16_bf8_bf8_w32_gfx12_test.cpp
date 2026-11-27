@@ -110,6 +110,28 @@ TEST(WmmaF32BF8BF8W32Gfx12, Arithmetic) {
   const uint64_t modes[] = {0, RJ_ARITH_WMMA_NEG_C | RJ_ARITH_WMMA_ABS_C};
   const auto cpu_levels = rocjitsu::arith::test::supported_cpu_levels();
   for (uint64_t cpu : cpu_levels) {
+    // Selected NaN-priority witnesses from the retired eight-product helper.
+    // Repetition over both WMMA steps preserves these same exceptional outcomes.
+    const struct {
+      uint32_t a, b, c, expected;
+    } special_cases[] = {
+        {0x7c7c7c7c, 0xbc3cbc3c, 0x3f800000, 0xffc00a3d},  // Opposite infinite products.
+        {0x7c7c7c7c, 0, 0xffc54321, 0xffc00a3d},           // Invalid product precedes C NaN.
+        {0x3c3c3c3c, 0x3c3c3c3c, 0xffc54321, 0xffc54321}}; // Retain C's payload.
+    for (const auto &sample : special_cases) {
+      Registers r;
+      for (int reg = 0; reg < 12; ++reg) {
+        for (int lane = 0; lane < 32; ++lane) {
+          r.v[reg][lane] = reg < 2 ? sample.a : reg < 4 ? sample.b : sample.c;
+        }
+      }
+      ASSERT_EQ(rj_arith_v_wmma_f32_16x16x16_bf8_bf8_w32_gfx12(
+                    cpu | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS, 0, r.v + 12, r.v,
+                    r.v + 2, r.v + 4),
+                RJ_ARITH_SUCCESS);
+      EXPECT_EQ(r.v[12][0], sample.expected);
+    }
+
     for (uint64_t semantics : rocjitsu::arith::test::semantics_modes()) {
       for (uint64_t mode : modes) {
         for (int aliasing_offset : {0, 1, 2, 3, 4, 13}) {

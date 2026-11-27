@@ -3,6 +3,7 @@
 
 #include "aql_queue.h"
 #include "config_test_util.h"
+#include "group_flat_oracle.h"
 #include "halt_snapshot_plugin.h"
 #include "native_d16_oracle.h"
 #include "rocjitsu/isa/isa_family.h"
@@ -594,6 +595,8 @@ class ConSanTargetSim : public ConSanBootstrapSim,
 protected:
   void check_atomic_add(const std::string &form, uint32_t width,
                         const std::vector<uint32_t> &expected_words);
+  void check_flat_width(std::string_view form, const std::vector<std::string> &expected_issues,
+                        const std::vector<uint32_t> &value_output);
   void check_atomic_peers(const std::string &form, uint32_t width);
 };
 
@@ -1176,6 +1179,85 @@ private:
   Masks &masks_;
 };
 
+class GroupFlatIssues final : public ExecutionPlugin {
+public:
+  using Trace = std::array<std::vector<std::string>, 2>;
+  GroupFlatIssues(Trace &trace, uint32_t wave_size)
+      : ExecutionPlugin("group_flat_issues"), trace_(trace), wave_size_(wave_size) {}
+  bool requires_serial_hot_hooks() const override { return true; }
+  void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &instruction,
+                                        amdgpu::Wavefront &wave) override {
+    if (wave.exec() && instruction.amdgpu_memory_addressing() == amdgpu::MemoryAddressing::Flat) {
+      EXPECT_EQ(wave.exec(), uint64_t{1} << (wave_size_ - 1));
+      trace_.at(wave.wave_in_group()).emplace_back(instruction.mnemonic());
+    }
+  }
+
+private:
+  Trace &trace_;
+  uint32_t wave_size_;
+};
+
+void ConSanTargetSim::check_flat_width(std::string_view form,
+                                       const std::vector<std::string> &expected_issues,
+                                       const std::vector<uint32_t> &value_output) {
+  const test::TargetMode target = GetParam();
+  for (std::string_view scenario : {"values", "overlap", "adjacent"}) {
+    SCOPED_TRACE(std::string(form) + "-" + std::string(scenario));
+    const bool values = scenario == "values";
+    const std::string fixture = "width-flat-" + std::string(form) + "-" + std::string(scenario);
+    const uint32_t output_words = values ? static_cast<uint32_t>(value_output.size() / 2) : 1;
+    RunResult before, after;
+    GroupFlatIssues::Trace original_issues, prepared_issues;
+    ASSERT_NO_FATAL_FAILURE(
+        run(fixture, Bootstrap::None, before, target, 2 * target.wave_size, true, output_words,
+            false, 1, std::make_unique<GroupFlatIssues>(original_issues, target.wave_size)));
+    ASSERT_NO_FATAL_FAILURE(run(
+        fixture, Bootstrap::Instrumented, after, target, 2 * target.wave_size, true, output_words,
+        false, 1, std::make_unique<GroupFlatIssues>(prepared_issues, target.wave_size)));
+    expect_guest_state(before, after);
+    EXPECT_EQ(prepared_issues, original_issues);
+    EXPECT_EQ(original_issues[0], expected_issues);
+    EXPECT_EQ(original_issues[1], values ? expected_issues : std::vector<std::string>{});
+    EXPECT_EQ(before.full_output, (values ? value_output : std::vector<uint32_t>{7, 8}));
+  }
+}
+
+TEST_P(ConSanTargetSim, GroupFlatHalfwordFormsPreserveEveryResultAndIssueOnce) {
+  const test::TargetMode target = GetParam();
+  const std::string_view gpu = target.target;
+  const bool legacy = gpu == "gfx950" || gpu == "gfx942";
+  const std::vector<std::string> expected =
+      legacy ? std::vector<std::string>{"flat_store_short",       "flat_load_ushort",
+                                        "flat_load_sshort",       "flat_load_short_d16",
+                                        "flat_load_short_d16_hi", "flat_store_short_d16_hi"}
+             : std::vector<std::string>{"flat_store_b16",       "flat_load_u16",
+                                        "flat_load_i16",        "flat_load_d16_b16",
+                                        "flat_load_d16_hi_b16", "flat_store_d16_hi_b16"};
+  std::vector<uint32_t> words;
+  for (uint32_t wave = 0; wave < 2; ++wave) {
+    const std::vector<uint32_t> expected_words = test::flat_half_output(gpu, wave);
+    words.insert(words.end(), expected_words.begin(), expected_words.end());
+  }
+  ASSERT_NO_FATAL_FAILURE(check_flat_width("half", expected, words));
+}
+
+TEST_P(ConSanTargetSim, GroupFlatWideTuplesPreserveEveryWordAndIssueOnce) {
+  const std::string_view gpu = GetParam().target;
+  const bool legacy = gpu == "gfx950" || gpu == "gfx942";
+  for (uint32_t width : {8u, 16u}) {
+    const std::string form = width == 8 ? "b64" : "b128";
+    const std::string suffix = legacy ? (width == 8 ? "dwordx2" : "dwordx4") : form;
+    const std::vector<std::string> expected = {"flat_load_" + suffix, "flat_store_" + suffix};
+    std::vector<uint32_t> words;
+    for (uint32_t wave = 0; wave < 2; ++wave) {
+      const std::vector<uint32_t> expected_words = test::flat_wide_output(width, 7, wave);
+      words.insert(words.end(), expected_words.begin(), expected_words.end());
+    }
+    ASSERT_NO_FATAL_FAILURE(check_flat_width(form, expected, words));
+  }
+}
+
 class ConSanGroupFlatSim : public ConSanTargetSim {};
 
 TEST_P(ConSanGroupFlatSim, GroupFlatUsesTheOriginalPointerAndGuestBarrier) {
@@ -1184,15 +1266,20 @@ TEST_P(ConSanGroupFlatSim, GroupFlatUsesTheOriginalPointerAndGuestBarrier) {
   const uint64_t high = uint64_t{1} << (target.wave_size - 1);
   const bool cdna =
       std::string_view(target.target) == "gfx942" || std::string_view(target.target) == "gfx950";
-  for (std::string_view form :
-       {"load-overlap", "load-adjacent", "load-ordered", "load-empty", "load-oob", "load-offset",
-        "load-readread", "store-overlap", "store-adjacent", "store-ordered", "store-tail"}) {
+  std::vector<std::string_view> forms{"load-overlap",       "load-adjacent", "load-ordered",
+                                      "load-empty",         "load-oob",      "load-offset",
+                                      "load-readread",      "store-overlap", "store-adjacent",
+                                      "store-ordered",      "store-tail",    "load-helper",
+                                      "load-helperordered", "store-helper",  "store-helperordered"};
+  if (std::string_view(target.target) == "gfx1250")
+    forms.insert(forms.end(), {"load-scalar", "store-scalar", "load-backward", "store-backward"});
+  for (const std::string_view form : forms) {
     const bool store = form.starts_with("store-");
     const std::string_view scenario = form.substr(form.find('-') + 1);
     const std::string_view mnemonic = store ? (cdna ? "flat_store_dword" : "flat_store_b32")
                                             : (cdna ? "flat_load_dword" : "flat_load_b32");
     SCOPED_TRACE(form);
-    const bool ordered = scenario == "ordered";
+    const bool ordered = scenario.ends_with("ordered");
     const bool empty = scenario == "empty";
     const bool oob = scenario == "oob";
     const std::string fixture = "width-flat-" + std::string(form);
@@ -1215,6 +1302,11 @@ TEST_P(ConSanGroupFlatSim, GroupFlatUsesTheOriginalPointerAndGuestBarrier) {
     EXPECT_EQ(after.manifest.sites[1].access, AccessKind::Read);
     const SiteFacts &flat = after.manifest.sites[store ? 0 : 1];
     EXPECT_EQ(flat.origin, AccessOrigin::GroupFlat);
+    EXPECT_EQ(flat.owner_entry, after.manifest.entry.id);
+    EXPECT_EQ(flat.assumption,
+              scenario.starts_with("helper")
+                  ? (store ? FlatAssumption::HelperStoreAt : FlatAssumption::HelperLoadAt)
+                  : FlatAssumption::None);
     const bool wide = std::string_view(target.target) == "gfx1201" ||
                       std::string_view(target.target) == "gfx1250";
     EXPECT_EQ(flat.original_size, wide ? 12u : 8u);
@@ -1240,8 +1332,11 @@ TEST_P(ConSanGroupFlatSim, GroupFlatUsesTheOriginalPointerAndGuestBarrier) {
     EXPECT_EQ(analysis.coverage_complete, !oob);
     EXPECT_EQ(analysis.rejected_records, oob ? 1u : 0u);
     EXPECT_EQ(analysis.valid_observations, records.size() - (oob ? 1u : 0u));
-    EXPECT_EQ(analysis.cross_wave_pairs,
-              scenario == "overlap" || scenario == "offset" || scenario == "tail" ? 1u : 0u);
+    EXPECT_EQ(analysis.cross_wave_pairs, scenario == "overlap" || scenario == "offset" ||
+                                                 scenario == "tail" || scenario == "scalar" ||
+                                                 scenario == "backward" || scenario == "helper"
+                                             ? 1u
+                                             : 0u);
     EXPECT_EQ(analysis.ordered_pairs, ordered ? 1u : 0u);
     EXPECT_EQ(analysis.ordering_unresolved_pairs, 0u);
 #endif

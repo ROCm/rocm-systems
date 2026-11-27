@@ -3,16 +3,15 @@
 
 """Matrix instruction execute body generators.
 
-Free functions that emit C++ execute_impl bodies for matrix
-instructions: WMMA, SWMMAC, MFMA, and AccVGPR read/write. Opted-in
-targets dispatch to rj-arith; other targets use the legacy mma_exec.h helpers.
+Emit C++ execute_impl bindings for WMMA, SWMMAC and MFMA.
+VM operand resolution and lane observations stay here; numerical operations
+are delegated to rj-arith.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from amdisa.codegen.execute.fp8_formats import fp8_helper_name
 from amdisa.codegen.execute.required_vgpr import append_required_vgpr_offset
 from amdisa.codegen.execute.rj_arith_matrix import gen_dense_wmma
 from amdisa.codegen.execute.rj_arith_sparse_matrix import gen_swmmac
@@ -36,14 +35,7 @@ def _matrix_base(supports_gpr_idx: bool, base: str, role: str) -> str:
 
 
 def gen_mfma(ctx: ExecuteContext) -> str:
-    """Generate MFMA / SMFMAC matrix multiply-accumulate.
-
-    Opted-in targets use rj-arith or reject a missing binding. Other targets
-    use the mma_exec.h helpers which implement the exact GFX9 register
-    mapping formulas. The helpers handle cross-lane data movement, WAR
-    hazard avoidance (buffered writes), and inline constant accumulator
-    initialization without clobbering overlapping source operands.
-    """
+    """Bind matrix operands and controls to the matching rj-arith operation."""
     if (rj_arith_body := gen_dense_wmma(ctx) or gen_swmmac(ctx)) is not None:
         return rj_arith_body
     if ctx.profile.uses_rj_arith_matrix:
@@ -171,7 +163,7 @@ def gen_mfma(ctx: ExecuteContext) -> str:
     else:
         B = 64 * dst_regs // (M * N)
 
-    # Determine input element size in bits and extract functions.
+    # Determine the input register count from the packed element width.
     _INPUT_BITS = {
         'F32': 32,
         'XF32': 32,
@@ -196,34 +188,6 @@ def gen_mfma(ctx: ExecuteContext) -> str:
         'F4': 4,
     }
     in_bits = _INPUT_BITS.get(input_type, 32)
-
-    # Map input types to amdgpu::extract_* function names.
-    _EXTRACT_A = {
-        'F32': 'amdgpu::extract_f32',
-        'XF32': 'amdgpu::extract_f32',
-        'F16': 'amdgpu::extract_f16',
-        'BF16': 'amdgpu::extract_bf16',
-        'FP8_FP8': 'amdgpu::extract_fp8',
-        'FP8_BF8': 'amdgpu::extract_fp8',
-        'BF8_FP8': 'amdgpu::extract_bf8',
-        'BF8_BF8': 'amdgpu::extract_bf8',
-        'F8_F6_F4': 'amdgpu::extract_fp8',
-        'F8F6F4': 'amdgpu::extract_fp8',
-        'F4': 'amdgpu::extract_fp4',
-    }
-    _EXTRACT_B = {
-        'F32': 'amdgpu::extract_f32',
-        'XF32': 'amdgpu::extract_f32',
-        'F16': 'amdgpu::extract_f16',
-        'BF16': 'amdgpu::extract_bf16',
-        'FP8_FP8': 'amdgpu::extract_fp8',
-        'FP8_BF8': 'amdgpu::extract_bf8',
-        'BF8_FP8': 'amdgpu::extract_fp8',
-        'BF8_BF8': 'amdgpu::extract_bf8',
-        'F8_F6_F4': 'amdgpu::extract_fp8',
-        'F8F6F4': 'amdgpu::extract_fp8',
-        'F4': 'amdgpu::extract_fp4',
-    }
 
     L = []
     L.append(f'  auto &cu = wf.cu();')
@@ -816,10 +780,3 @@ def gen_mfma(ctx: ExecuteContext) -> str:
         L.append('  throw util::UnimplementedInst(mnemonic());')
 
     return '\n'.join(L)
-
-
-def _mma_targ(M: int, N: int, K: int, B: int, *, batch_optional: bool) -> str:
-    """Spec template argument list, dropping a defaulted BATCH==1."""
-    if batch_optional and B == 1:
-        return f'{M}, {N}, {K}'
-    return f'{M}, {N}, {K}, {B}'

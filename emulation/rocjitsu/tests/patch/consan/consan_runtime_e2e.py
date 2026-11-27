@@ -16,6 +16,8 @@ import sys
 import tempfile
 import time
 
+from group_flat_width_oracle import FLAT_WIDTH_CASES, assert_flat_width_observations
+
 # Row publication flags from the shared ConSan wire contract.
 ROW_ENTERED = 1
 ROW_EXITED = 2
@@ -63,6 +65,11 @@ CASES = (
         for peer in ('count', 'read', 'write', 'atomic', 'adjacent')
     ),
     *(
+        f'flat_{direction}_{mode}'
+        for direction in ('load', 'store')
+        for mode in ('scalar', 'backward')
+    ),
+    *(
         f'flat_load_{scenario}'
         for scenario in (
             'overlap',
@@ -73,6 +80,9 @@ CASES = (
             'readread',
             'likely',
             'strict',
+            'helper',
+            'helperordered',
+            'helperstrict',
             'provenstrict',
             'alternate',
             'unknown',
@@ -83,8 +93,17 @@ CASES = (
     ),
     *(
         f'flat_store_{scenario}'
-        for scenario in ('overlap', 'adjacent', 'ordered', 'tail')
+        for scenario in (
+            'overlap',
+            'adjacent',
+            'ordered',
+            'tail',
+            'helper',
+            'helperordered',
+            'helperstrict',
+        )
     ),
+    *FLAT_WIDTH_CASES,
     'wide_u8',
     'wide_i8_alias_high',
     'wide_d16_u8',
@@ -264,6 +283,8 @@ class Driver:
         elif fixture_name.startswith(('transpose_', 'atomic_', 'flat_')):
             # Run both policies against identical original bytes.
             source_name = {
+                'flat_load_helperstrict': 'flat_load_helper',
+                'flat_store_helperstrict': 'flat_store_helper',
                 'flat_load_strict': 'flat_load_likely',
                 'flat_load_provenstrict': 'flat_load_overlap',
                 'flat_load_unknownstrict': 'flat_load_unknown',
@@ -372,7 +393,11 @@ class Driver:
         if fixture_name.startswith('atomic_'):
             mode = fixture_name if fixture_name.endswith('_count') else 'defined'
         if fixture_name.startswith('flat_'):
-            mode = 'defined'
+            mode = (
+                fixture_name.replace('flat_saddr', 'flat_')
+                if fixture_name in FLAT_WIDTH_CASES and fixture_name.endswith('_values')
+                else 'defined'
+            )
         if wide:
             mode = (
                 'wide_b128'
@@ -773,21 +798,24 @@ class Driver:
         _, direction, scenario = fixture.split('_')
         flat_store = direction == 'store'
         high = 1 << (self.args.wave_size - 1)
-        ordered = scenario == 'ordered'
+        ordered = scenario.endswith('ordered')
         omitted = scenario in (
+            'helperstrict',
             'strict',
             'unknown',
             'unknownstrict',
             'nongroup',
             'nongroupstrict',
         )
-        expected = [(1 if scenario == 'readread' else 2, 4)]
+        expected = [(1 if scenario == 'readread' or (flat_store and omitted) else 2, 4)]
         if not omitted:
             expected.append((1, 8 if scenario == 'tail' else 4))
             flat = decoded['sites'][0 if flat_store else 1]
             assert flat['origin'] == 'group_flat'
             assert flat['confidence'] == (
-                'conservative' if scenario in ('likely', 'alternate') else 'exact'
+                'conservative'
+                if scenario in ('likely', 'alternate', 'helper', 'helperordered')
+                else 'exact'
             )
         assert [(s['access'], s['width']) for s in decoded['sites']] == expected
         (execution,) = decoded['executions']
@@ -805,12 +833,14 @@ class Driver:
                 (barrier,) = row['completions']
                 assert barrier['commit'] == 0x43534243 and barrier['participants'] == 2
                 assert barrier['sequence'] == 1 - wave
-            if wave == 1 and (scenario == 'empty' or omitted):
+            if (wave == 1 and scenario == 'empty') or (
+                omitted and wave == int(not flat_store)
+            ):
                 assert row['final_sequence'] == 0 and not row['records']
                 continue
             (record,) = row['records']
             assert (
-                record['site'] == wave
+                record['site'] == (0 if omitted else wave)
                 and row['final_sequence'] == record['sequence'] == 1
             )
             assert record['commit'] == 0x43534143 and record['flags'] == 1
@@ -827,6 +857,11 @@ class Driver:
             )
 
     def assert_observations(self, decoded, fixture):
+        if fixture in FLAT_WIDTH_CASES:
+            assert_flat_width_observations(
+                decoded, fixture, self.args.wave_size, ROW_ENTERED | ROW_EXITED
+            )
+            return
         if fixture.startswith('flat_'):
             self.assert_flat_observations(decoded, fixture)
             return

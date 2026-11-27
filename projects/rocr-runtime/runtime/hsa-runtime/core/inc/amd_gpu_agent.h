@@ -752,9 +752,6 @@ class GpuAgent : public GpuAgentInt {
   // @brief Mutex to protect access to ::t1_.
   std::mutex t1_lock_;
 
-  // @brief Mutex to protect access to blit objects.
-  std::mutex blit_lock_;
-
   // @brief Mutex to protect sdma gang submissions.
   std::mutex sdma_gang_lock_;
 
@@ -870,6 +867,14 @@ class GpuAgent : public GpuAgentInt {
   // caller must hold scratch_lock_.
   void ReleaseScratch(void* base, size_t size, bool large);
 
+  // Whether blit creation would place this agent's copies on an SDMA engine.
+  // Extracted from the blit-creation lambda so a capability query can answer
+  // the same question without instantiating a blit.
+  bool PrefersSdmaBlit() const;
+
+  // Destination ceiling reported by HSA_AMD_AGENT_INFO_MAX_BROADCAST_DESTINATIONS.
+  uint32_t MaxBroadcastDestinations() const;
+
   // Broadcast copy: copies op.src to each destination in op.dst_list.
   // Uses HW broadcast for transfers < 1 MB when supported; otherwise falls
   // back to prologue/body/epilogue fan-out across available SDMA engines.
@@ -967,12 +972,6 @@ class GpuAgent : public GpuAgentInt {
 
   // @brief Protects aql_queues_ from concurrent modification/iteration.
   mutable std::mutex aql_queues_lock_;
-
-  // Sets and Tracks pending SDMA status check or request counts
-  void SetCopyRequestRefCount(bool set);
-  void SetCopyStatusCheckRefCount(bool set);
-  std::atomic<int> pending_copy_req_ref_;
-  std::atomic<int> pending_copy_stat_check_ref_;
 
   // Tracks what SDMA blits have been used since initialization.
   std::atomic<uint32_t> sdma_blit_used_mask_;
