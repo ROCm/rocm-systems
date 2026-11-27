@@ -3853,6 +3853,18 @@
           }
         },
         {
+          "name": "DDA_BroadcastIpc2Phase_8Ranks",
+          "description": "DDA IPC two-phase Broadcast (scatter + all-gather) across its window, with roots, in-place, unaligned and back-to-back calls; the caps are cached per process",
+          "test_filter": "DdaMPI_BroadcastIpc2Phase.*",
+          "env_variables": {
+            "RCCL_DDA_BC": "1",
+            "RCCL_DDA_LL_THRESHOLD": "262144",
+            "RCCL_DDA_LL128_THRESHOLD": "4194304",
+            "RCCL_DDA_BC_IPC_MIN_BYTES": "262272",
+            "RCCL_DDA_BC_IPC_MAX_BYTES": "8388608"
+          }
+        },
+        {
           "name": "HostApi_DenseAllToAllPutSignal_8Ranks",
           "description": "Dense all-to-all put/signal over the copy engine on 8 ranks; the uneven profile can split batches into chunks, which the 2-rank Host API suites never reach",
           "test_filter": "HostApiTest.DenseAllToAllPutSignal",
