@@ -158,6 +158,29 @@ TEST_P(FaultLegacyAtomic, SignednessDeltaBoundsAndUnalignedSourcesUseEachNativeF
   }
 }
 
+TEST_P(FaultLegacyAtomic, WideAddAndCasRequireEightByteDeltas) {
+  const LegacyAtomicTargetCase &target = GetParam();
+  for (LegacyAtomicForm form : test::kLegacyAtomicForms) {
+    SCOPED_TRACE(test::legacy_atomic_mnemonic(target, form));
+    std::array<uint32_t, 2> words = test::legacy_atomic_words(target, form, 8);
+    // Native ADD/CAS X2 opcodes are 32 above their 32-bit forms.
+    words[0] += 32u << 18;
+    const FaultMutationContext source(
+        test::make_legacy_atomic_sequence_elf(target, {words[0], words[1]}));
+    FaultMutationError error;
+    const FailureOr<AtomicSelection> selected = select_legacy(source, error);
+    ASSERT_TRUE(selected.succeeded()) << error.message;
+    EXPECT_TRUE(selected.value().site().form.ends_with("_x2"));
+    EXPECT_TRUE(selected.value().site().address_supported);
+    EXPECT_TRUE(apply_atomic_wrong_address(source, selected.value(), 4, error).failed());
+    EXPECT_EQ(error.code, FaultMutationErrorCode::InvalidParameters);
+    const FailureOr<AtomicResult> mutant =
+        apply_atomic_wrong_address(source, selected.value(), 8, error);
+    ASSERT_TRUE(mutant.succeeded()) << error.message;
+    EXPECT_TRUE(test::legacy_atomic_output_matches(source, 0, 8, mutant.value().image));
+  }
+}
+
 TEST_P(FaultLegacyAtomic, UnsupportedWidthDoesNotRenumberSupportedLegacyForms) {
   const LegacyAtomicTargetCase &target = GetParam();
   const std::array<uint32_t, 2> wide = test::legacy_wide_ds_atomic_words(target);
