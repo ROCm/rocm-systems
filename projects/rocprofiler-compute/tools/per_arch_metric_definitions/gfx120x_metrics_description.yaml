@@ -32,12 +32,12 @@ System Speed-of-Light:
     rst: Percentage of GL0 vector cache (TCP Cache) requests that hit in cache.
     unit: Percent
   Scalar Data Cache Hit Rate:
-    plain: Percentage of scalar data cache requests that hit.
-    rst: Percentage of scalar data cache requests that hit.
+    plain: Percentage of scalar data cache accesses that hit in cache.
+    rst: Percentage of scalar data cache accesses that hit in cache.
     unit: Percent
   Scalar Data Cache BW:
-    plain: The load bandwidth between the WGP and the scalar data cache. Each loaded dword counts as 4 bytes. Bounds-check reductions are ignored.
-    rst: The load bandwidth between the WGP and the scalar data cache. Each loaded dword counts as 4 bytes. Bounds-check reductions are ignored.
+    plain: Bytes loaded by scalar memory instructions, from the dwords each instruction loads.
+    rst: Bytes loaded by scalar memory instructions, from the dwords each instruction loads.
     unit: Bytes/s
   Instruction Cache Hit Rate:
     plain: Percentage of instruction cache requests that hit.
@@ -58,12 +58,12 @@ Memory chart - Scalar Data Cache:
     rst: Scalar data cache requests after bank serialization.
     unit: Requests per Normalization Unit
   DCache Hit Rate:
-    plain: Percentage of scalar data cache requests that hit.
-    rst: Percentage of scalar data cache requests that hit.
+    plain: Percentage of scalar data cache accesses that hit in cache.
+    rst: Percentage of scalar data cache accesses that hit in cache.
     unit: Percent
   DCache Load Bandwidth:
-    plain: The load bandwidth between the WGP and the scalar data cache. Each loaded dword counts as 4 bytes. Bounds-check reductions are ignored.
-    rst: The load bandwidth between the WGP and the scalar data cache. Each loaded dword counts as 4 bytes. Bounds-check reductions are ignored.
+    plain: Bytes loaded by scalar memory instructions, from the dwords each instruction loads. Bounds-check reductions are ignored.
+    rst: Bytes loaded by scalar memory instructions, from the dwords each instruction loads. Bounds-check reductions are ignored.
     unit: Bytes/s
 Memory chart - GL0 Cache (Vector L0):
   GL0 Hit Rate:
@@ -187,8 +187,8 @@ Wave Dispatch Statistics:
     unit: Wavefronts per Cycle
 WGP Scalar Data Cache:
   Dcache Hit Rate:
-    plain: Percentage of scalar data cache requests that hit.
-    rst: Percentage of scalar data cache requests that hit.
+    plain: Percentage of scalar data cache accesses that hit in cache.
+    rst: Percentage of scalar data cache accesses that hit in cache.
     unit: Percent
 WGP Wavefront Dispatch:
   Dispatched Threads:

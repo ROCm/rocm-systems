@@ -131,10 +131,10 @@ Panel Config:
     DCache Requests: >-
       Scalar data cache requests after bank serialization.
     DCache Hit Rate: >-
-      Percentage of scalar data cache requests that hit.
+      Percentage of scalar data cache accesses that hit in cache.
     DCache Load Bandwidth: >-
-      The load bandwidth between the WGP and the scalar data cache. Each loaded
-      dword counts as 4 bytes. Bounds-check reductions are ignored.
+      Bytes loaded by scalar memory instructions, from the dwords each
+      instruction loads. Bounds-check reductions are ignored.
     GL0 Hit Rate: >-
       Percentage of GL0 vector cache (TCP Cache) requests that hit in cache.
     LDS Instructions: >-

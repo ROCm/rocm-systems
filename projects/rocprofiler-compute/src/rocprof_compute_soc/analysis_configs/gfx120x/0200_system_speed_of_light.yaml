@@ -92,9 +92,9 @@ Panel Config:
     GL0 Cache Hit Rate (TCP Cache): >-
       Percentage of GL0 vector cache (TCP Cache) requests that hit in cache.
     Scalar Data Cache Hit Rate: >-
-      Percentage of scalar data cache requests that hit.
+      Percentage of scalar data cache accesses that hit in cache.
     Scalar Data Cache BW: >-
-      The load bandwidth between the WGP and the scalar data cache. Each loaded
-      dword counts as 4 bytes. Bounds-check reductions are ignored.
+      Bytes loaded by scalar memory instructions, from the dwords each
+      instruction loads.
     Instruction Cache Hit Rate: >-
       Percentage of instruction cache requests that hit.

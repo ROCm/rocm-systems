@@ -266,7 +266,7 @@ Panel Config:
           unit: Percent
   metrics_description:
     Dcache Hit Rate: >-
-      Percentage of scalar data cache requests that hit.
+      Percentage of scalar data cache accesses that hit in cache.
     Dispatched Threads: >-
       Work-items dispatched.
     Dispatched Waves: >-

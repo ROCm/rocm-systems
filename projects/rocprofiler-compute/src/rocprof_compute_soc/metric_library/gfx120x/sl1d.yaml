@@ -2,15 +2,15 @@ sl1d.hits_per_req:
   name: sL1D Hit Rate
   formula: 100 * SUM(SQC_DCACHE_HITS_sum) / SUM(SQC_DCACHE_REQ_sum)
   unit: Percent
-  description: Percentage of scalar data cache requests that hit.
+  description: Percentage of scalar data cache accesses that hit in cache.
   peak: 100
 sl1d.load_bw:
   name: sL1D Load Bandwidth
   formula: 4 * SUM(SQC_SMEM_LOAD_DWORDS_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The load bandwidth between the WGP and the scalar data cache. Each loaded
-    dword counts as 4 bytes. Bounds-check reductions are ignored.
+    Bytes loaded by scalar memory instructions, from the dwords each
+    instruction loads. Bounds-check reductions are ignored.
   peak: '$sqc_per_gpu * 64 * $max_sclk / 1000'
 sl1d.req:
   name: sL1D Requests
