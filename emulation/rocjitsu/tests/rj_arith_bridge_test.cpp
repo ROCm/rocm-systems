@@ -194,7 +194,7 @@ public:
                       policy, vgprs) {}
 
   explicit BridgeFixture(rocjitsu::IsaFamily arch, uint32_t lanes = 32,
-                         ArithmeticPolicy policy = {}, uint32_t vgprs = 256)
+                         ArithmeticPolicy policy = {}, uint32_t vgprs = 256, uint32_t sgprs = 104)
       : backend(bridge_backend(arch)) {
     ComputeUnitCore::Config config{};
     config.arch = arch;
@@ -213,7 +213,7 @@ public:
     recorder = observer.get();
     group->add(std::move(observer));
     cu->set_plugin_group(group);
-    wave = cu->dispatch_wf(0, 0, 104, vgprs, lanes);
+    wave = cu->dispatch_wf(0, 0, sgprs, vgprs, lanes);
     if (!wave) {
       ADD_FAILURE() << "Could not dispatch fixture wave";
       return;
@@ -4807,6 +4807,222 @@ TEST(ArithBridgeTest, CubeDppReadsOnlyWritingLanes) {
   EXPECT_EQ(unpermuted_reads, 2u);
   ASSERT_EQ(fixture.recorder->writes.size(), 1u);
   EXPECT_EQ(fixture.recorder->writes[0].lanes, 0xfff0u);
+}
+
+TEST(ArithBridgeTest, Cdna4PermuteHonorsSelectorAliasingAndWriteMask) {
+  BridgeFixture fixture(IsaFamily::Cdna4, 64);
+  ASSERT_NE(fixture.wave, nullptr);
+  fixture.cu->set_plugin_group(nullptr);
+  const uint64_t exec = 0xf0f0f0f0f0f0f0f0ULL;
+  const uint64_t write_mask = 0xaaaaaaaaaaaaaaaaULL;
+  fixture.wave->set_exec(exec);
+  fixture.wave->set_vgpr_write_mask(write_mask);
+  auto words = cdna4::build_vop3(cdna4::kVPermB32Vop3,
+                                 {.vdst = 2, .clamp = 1, .src0 = 256, .src1 = 257, .src2 = 258});
+  auto inst = fixture.decoder->decode_window(words);
+  ASSERT_TRUE(inst.succeeded());
+  for (int lane = 0; lane < 64; ++lane) {
+    fixture.cu->write_vgpr(fixture.base(), lane, 0xaabbccdd);
+    fixture.cu->write_vgpr(fixture.base() + 1, lane, 0x11223344);
+    fixture.cu->write_vgpr(fixture.base() + 2, lane, lane & 2 ? 0x05040100u : 0x07060302u);
+  }
+  ASSERT_TRUE(fixture.cu->execute_instruction(inst.value().get(), *fixture.wave).succeeded());
+  for (int lane = 0; lane < 64; ++lane) {
+    const uint32_t selector = lane & 2 ? 0x05040100u : 0x07060302u;
+    const uint32_t packed = lane & 2 ? 0xccdd3344u : 0xaabb1122u;
+    EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 2, lane),
+              ((write_mask & exec) >> lane) & 1 ? packed : selector);
+  }
+}
+
+TEST(ArithBridgeTest, Cdna4PermuteBroadcastsScalarDataAndInlineSelector) {
+  BridgeFixture fixture(IsaFamily::Cdna4, 64);
+  ASSERT_NE(fixture.wave, nullptr);
+  fixture.cu->set_plugin_group(nullptr);
+  fixture.wave->set_exec(~uint64_t{0});
+  fixture.cu->write_sgpr(fixture.wave->sgpr_alloc().base + 1, 0x87654321u);
+  // Inline integer 7 selects A's high byte for byte 0 and B's low byte for bytes 1-3.
+  auto words =
+      cdna4::build_vop3(cdna4::kVPermB32Vop3, {.vdst = 2, .src0 = 1, .src1 = 257, .src2 = 128 + 7});
+  auto inst = fixture.decoder->decode_window(words);
+  ASSERT_TRUE(inst.succeeded());
+  for (uint32_t lane = 0; lane < 64; ++lane) {
+    fixture.cu->write_vgpr(fixture.base() + 1, lane, lane);
+  }
+  ASSERT_TRUE(fixture.cu->execute_instruction(inst.value().get(), *fixture.wave).succeeded());
+  for (uint32_t lane = 0; lane < 64; ++lane) {
+    EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 2, lane), 0x01010100u * lane + 0x87);
+  }
+}
+
+TEST(ArithBridgeTest, Cdna4PermutePreservesSourceBankRemapping) {
+  BridgeFixture fixture(IsaFamily::Cdna4, 64, {}, 32);
+  ASSERT_NE(fixture.wave, nullptr);
+  fixture.cu->set_plugin_group(nullptr);
+  fixture.wave->set_accum_offset(16);
+  fixture.wave->set_exec(~uint64_t{0});
+  fixture.cu->write_sgpr(fixture.wave->sgpr_alloc().base + 3, 0x05040100u);
+  auto words = cdna4::build_vop3(cdna4::kVPermB32Vop3,
+                                 {.vdst = 2, .src0 = 256 + 18, .src1 = 257, .src2 = 3});
+  auto inst = fixture.decoder->decode_window(words);
+  ASSERT_TRUE(inst.succeeded());
+  for (int lane = 0; lane < 64; ++lane) {
+    fixture.cu->write_vgpr(fixture.base(), lane, 0xaabbccdd);
+    fixture.cu->write_vgpr(fixture.base() + 1, lane, 0x11223344);
+    fixture.cu->write_vgpr(fixture.base() + 18, lane, 0xdeadbeef);
+  }
+  ASSERT_TRUE(fixture.cu->execute_instruction(inst.value().get(), *fixture.wave).succeeded());
+  for (int lane = 0; lane < 64; ++lane) {
+    EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 2, lane), 0xccdd3344u);
+  }
+}
+
+// Without an observer, scalar sources are read straight from SGPR storage. An unallocated SGPR
+// still reads s0, and the FLAT_SCRATCH and VCC selectors are not SGPR storage words.
+TEST(ArithBridgeTest, Cdna4PermuteScalarSourcesHonorAllocationAndSpecialSelectors) {
+  struct Case {
+    uint16_t src0, src1, src2;
+    uint32_t expected;
+  };
+  constexpr uint16_t kA = 256, kB = 257;
+  const Case cases[] = {
+      {kA, kB, 5, 0xaabb1122u},   // Allocated s5 packs the high halves.
+      {kA, kB, 40, 0xccdd3344u},  // Unallocated s40 reads s0, which packs the low halves.
+      {kA, kB, 102, 0xccdd3344u}, // FLAT_SCRATCH_LO.
+      {kA, kB, 103, 0xaabb1122u}, // FLAT_SCRATCH_HI.
+      {kA, kB, 106, 0xccdd3344u}, // VCC_LO.
+      {kA, kB, 107, 0xaabb1122u}, // VCC_HI.
+      {40, kB, 5, 0x05041122u},   // Unallocated scalar A reads s0.
+      {kA, 40, 5, 0xaabb0504u},   // Unallocated scalar B reads s0.
+      {5, kB, 0, 0x03023344u},    // Allocated scalar A with the s0 selector.
+  };
+  for (bool observed : {false, true}) {
+    SCOPED_TRACE(observed);
+    BridgeFixture fixture(IsaFamily::Cdna4, 64, {}, 256, 24);
+    ASSERT_NE(fixture.wave, nullptr);
+    if (!observed) {
+      fixture.cu->set_plugin_group(nullptr);
+    }
+    fixture.wave->set_exec(~uint64_t{0});
+    const uint32_t sgpr_base = fixture.wave->sgpr_alloc().base;
+    fixture.cu->write_sgpr(sgpr_base, 0x05040100u);
+    fixture.cu->write_sgpr(sgpr_base + 5, 0x07060302u);
+    // Storage words that a selector must not read: every byte selects constant zero.
+    for (uint32_t reg : {40u, 102u, 103u}) {
+      fixture.cu->write_sgpr(sgpr_base + reg, 0x0c0c0c0cu);
+    }
+    fixture.wave->set_scratch_base(0x0706030205040100ULL);
+    fixture.wave->set_vcc(0x0706030205040100ULL);
+    for (const Case &test : cases) {
+      SCOPED_TRACE(testing::Message() << test.src0 << " " << test.src1 << " " << test.src2);
+      for (int lane = 0; lane < 64; ++lane) {
+        fixture.cu->write_vgpr(fixture.base(), lane, 0xaabbccdd);
+        fixture.cu->write_vgpr(fixture.base() + 1, lane, 0x11223344);
+        fixture.cu->write_vgpr(fixture.base() + 2, lane, 0xdeadbeef);
+      }
+      auto words =
+          cdna4::build_vop3(cdna4::kVPermB32Vop3,
+                            {.vdst = 2, .src0 = test.src0, .src1 = test.src1, .src2 = test.src2});
+      auto inst = fixture.decoder->decode_window(words);
+      ASSERT_TRUE(inst.succeeded());
+      ASSERT_TRUE(fixture.cu->execute_instruction(inst.value().get(), *fixture.wave).succeeded());
+      for (int lane = 0; lane < 64; ++lane) {
+        ASSERT_EQ(fixture.cu->read_vgpr(fixture.base() + 2, lane), test.expected) << lane;
+      }
+    }
+  }
+}
+
+// The observer-free path must agree with the logical operand path, which an installed observer
+// selects, for every 9-bit selector in each source slot. The second wave allocates fewer SGPRs
+// and VGPRs than the selectors can name, which covers s0 redirection and bank remapping.
+TEST(ArithBridgeTest, Cdna4PermuteFastPathMatchesObservedPathForEverySourceSelector) {
+  constexpr uint32_t kDst = 2, kSgprs = 104, kVgprs = 256;
+  for (const auto &[sgprs, vgprs] : {std::pair{104u, 256u}, std::pair{24u, 40u}}) {
+    SCOPED_TRACE(sgprs);
+    BridgeFixture fast(IsaFamily::Cdna4, 64, {}, vgprs, sgprs);
+    BridgeFixture logical(IsaFamily::Cdna4, 64, {}, vgprs, sgprs);
+    ASSERT_NE(fast.wave, nullptr);
+    ASSERT_NE(logical.wave, nullptr);
+    fast.cu->set_plugin_group(nullptr);
+    BridgeFixture *const both[] = {&fast, &logical};
+    // Every register byte is below 16, so each register is also a selector that mostly picks
+    // data bytes. A selector byte above 12 yields 0xff whatever the data is and would hide a
+    // wrong source.
+    for (BridgeFixture *fixture : both) {
+      uint32_t state = 0x9e3779b9u;
+      auto next = [&] {
+        state = state * 1664525u + 1013904223u;
+        return (state >> 4) & 0x0f0f0f0fu;
+      };
+      const uint32_t sgpr_base = fixture->wave->sgpr_alloc().base;
+      fixture->cu->write_sgpr(sgpr_base, 0x05040100u);
+      for (uint32_t reg = 1; reg < kSgprs; ++reg) {
+        fixture->cu->write_sgpr(sgpr_base + reg, next() ^ (reg & 0xf));
+      }
+      for (uint32_t reg = 0; reg < kVgprs; ++reg) {
+        for (uint32_t lane = 0; lane < 64; ++lane) {
+          fixture->cu->write_vgpr(fixture->base() + reg, lane, next());
+        }
+      }
+      fixture->wave->set_vcc(0x0102030405060708ULL);
+      fixture->wave->set_m0(0x0b0a0908u);
+      fixture->wave->set_scratch_base(0x0403020108070605ULL);
+    }
+    unsigned executed = 0;
+    for (int slot = 0; slot < 3; ++slot) {
+      for (uint16_t selector = 0; selector < 512; ++selector) {
+        uint16_t sources[3] = {256, 257, 3};
+        sources[slot] = selector;
+        auto words = cdna4::build_vop3(
+            cdna4::kVPermB32Vop3,
+            {.vdst = kDst, .src0 = sources[0], .src1 = sources[1], .src2 = sources[2]});
+        auto fast_inst = fast.decoder->decode_window(words);
+        auto logical_inst = logical.decoder->decode_window(words);
+        ASSERT_EQ(fast_inst.succeeded(), logical_inst.succeeded());
+        if (!fast_inst.succeeded()) {
+          continue;
+        }
+        for (uint64_t exec : {~uint64_t{0}, uint64_t{0x55aa55aa0ff0f00f}}) {
+          bool succeeded[2];
+          for (int i = 0; i < 2; ++i) {
+            BridgeFixture &fixture = *both[i];
+            for (uint32_t lane = 0; lane < 64; ++lane) {
+              fixture.cu->write_vgpr(fixture.base() + kDst, lane,
+                                     (0x0d0b0704u + lane * 0x01010101u) & 0x0f0f0f0fu);
+            }
+            fixture.wave->set_exec(exec);
+            succeeded[i] = fixture.cu
+                               ->execute_instruction((i ? logical_inst : fast_inst).value().get(),
+                                                     *fixture.wave)
+                               .succeeded();
+          }
+          ASSERT_EQ(succeeded[0], succeeded[1]) << "slot " << slot << " selector " << selector;
+          for (uint32_t lane = 0; lane < 64; ++lane) {
+            ASSERT_EQ(fast.cu->read_vgpr(fast.base() + kDst, lane),
+                      logical.cu->read_vgpr(logical.base() + kDst, lane))
+                << "slot " << slot << " selector " << selector << " exec " << exec << " lane "
+                << lane;
+          }
+          ++executed;
+        }
+      }
+    }
+    // Every selector class was reached: SGPRs, special registers, inline constants and VGPRs.
+    EXPECT_GT(executed, 2000u);
+    for (uint32_t reg = 0; reg < kVgprs; ++reg) {
+      for (uint32_t lane = 0; lane < 64; ++lane) {
+        ASSERT_EQ(fast.cu->read_vgpr(fast.base() + reg, lane),
+                  logical.cu->read_vgpr(logical.base() + reg, lane))
+            << "v" << reg;
+      }
+    }
+    for (uint32_t reg = 0; reg < kSgprs; ++reg) {
+      ASSERT_EQ(fast.cu->read_sgpr_storage(fast.wave->sgpr_alloc().base + reg),
+                logical.cu->read_sgpr_storage(logical.wave->sgpr_alloc().base + reg))
+          << "s" << reg;
+    }
+  }
 }
 
 TEST(ArithBridgeTest, TernaryVectorReadsAllInputsBeforeMaskedAliasedCommit) {
@@ -14488,8 +14704,6 @@ TEST(ArithBridgeTest, CdnaNumericQualification) {
         const bool fmac = variant == 13;
         const int op = fmac ? 0 : e32 ? variant - 6 : variant;
         for (uint64_t exec_mask : {0ULL, 1ULL}) {
-          SCOPED_TRACE(testing::Message()
-                       << arch << ":" << int(semantics) << ":" << variant << ":" << exec_mask);
           BridgeFixture f(arches[arch], arch == 2 ? 32 : 64, ArithmeticPolicy{semantics});
           f.wave->set_exec(exec_mask);
           f.wave->set_mode_raw(0xf0);
@@ -20081,6 +20295,79 @@ TEST(ArithBridgeTest, OlderFp32FmaMadQualification) {
                     !active);
         }
       }
+    }
+  }
+}
+
+// Decoded CDNA4 MXFP unscaled & block-scaled MFMA execution in BitExactEmpirical,
+// including guest MODE.FP16_OVFL forwarding on both unscaled and scaled forms.
+TEST(ArithBridgeTest, Cdna4MxfpMfmaExactAndFp16Ovfl) {
+  for (bool ovfl : {false, true}) {
+    const uint32_t mode = ovfl ? (1U << 23) : 0U; // MODE.FP16_OVFL is bit 23 on GFX9.
+
+    // 1) Decoded unscaled v_mfma_f32_16x16x128_f8f6f4 (FP4 x FP8, MI350X-captured row 0 col 3):
+    //    ovfl=0 -> 0xffc00000u, ovfl=1 -> 0x41340000u (11.25f).
+    {
+      ArithmeticPolicy policy{};
+      policy.semantics = ArithmeticSemantics::BitExactEmpirical;
+      BridgeFixture fixture(rocjitsu::IsaFamily::Cdna4, 64, policy);
+      ASSERT_NE(fixture.wave, nullptr);
+      fixture.wave->set_mode_raw(mode);
+      constexpr uint32_t kAFp4[16] = {0x7f800000u, 0x3f801fffu, 0x7f800001u, 0x3f800000u,
+                                      0xff7fe000u, 0x7f801fffu, 0x7f800001u, 0x00000001u,
+                                      0xff7fe000u, 0x7f800001u, 0xff7fe000u, 0x7f800000u,
+                                      0x7f800001u, 0x7f800001u, 0x80000000u, 0x7f802000u};
+      constexpr uint32_t kBFp8[32] = {
+          0xbf802000u, 0x00000001u, 0x3f801000u, 0x80000000u, 0x7f7fe000u, 0x3f801000u, 0xff7fe000u,
+          0x3f801fffu, 0x7fc04000u, 0x3f801000u, 0xff800000u, 0x7f801fffu, 0xff7fe000u, 0x7f7fe000u,
+          0x3f801fffu, 0x00000001u, 0x3f801fffu, 0x3f800000u, 0x7f802000u, 0x00000000u, 0x00000001u,
+          0x7f801fffu, 0x3f800000u, 0x3f801fffu, 0x7f801fffu, 0x7f800000u, 0xff7fe000u, 0x7f7fe000u,
+          0xbf802000u, 0x3f800000u, 0x00000001u, 0x3f800000u};
+      for (int g = 0; g < 4; ++g) {
+        for (int r = 0; r < 4; ++r) {
+          fixture.cu->write_vgpr(fixture.base() + r, g * 16 + 0, kAFp4[g * 4 + r]);
+        }
+        for (int r = 0; r < 8; ++r) {
+          fixture.cu->write_vgpr(fixture.base() + 8 + r, g * 16 + 3, kBFp8[g * 8 + r]);
+        }
+      }
+      fixture.cu->write_vgpr(fixture.base() + 16, 3, 0x7f7fffffu);
+      const auto words = cdna4::build_vop3p_mfma(
+          cdna4::kVMfmaF3216x16x128F8f6f4Vop3pMfma,
+          {.vdst = 20, .cbsz = 4, .src0 = 256, .src1 = 264, .src2 = 272, .blgp = 0});
+      auto inst = fixture.decoder->decode_window(words);
+      ASSERT_TRUE(inst.succeeded());
+      ASSERT_TRUE(fixture.cu->execute_instruction(inst.value().get(), *fixture.wave).succeeded());
+      EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 20, 3), ovfl ? 0x41340000u : 0xffc00000u);
+    }
+
+    // 2) Decoded block-scaled v_mfma_scale_f32_16x16x128_f8f6f4 (FP4 x FP4):
+    //    row 0 col 0 overflows finite sum at scale 0xfe*0x7f -> +Inf (ovfl=0) / +MAX_FLOAT
+    //    (ovfl=1), and row 0 col 1 with C=qNaN (0x7ffffff0) -> 0xffc00000u (ovfl=0) / +0.0
+    //    (ovfl=1).
+    {
+      ArithmeticPolicy policy{};
+      policy.semantics = ArithmeticSemantics::BitExactEmpirical;
+      BridgeFixture fixture(rocjitsu::IsaFamily::Cdna4, 64, policy);
+      ASSERT_NE(fixture.wave, nullptr);
+      fixture.wave->set_mode_raw(mode);
+      for (int r = 0; r < 4; ++r) {
+        fixture.cu->write_vgpr(fixture.base() + r, 0, 0x77777777u);      // FP4 +6.0
+        fixture.cu->write_vgpr(fixture.base() + 16 + r, 0, 0x77777777u); // FP4 +6.0
+      }
+      fixture.cu->write_vgpr(fixture.base() + 32, 0, 0x7f7fffffu);
+      fixture.cu->write_vgpr(fixture.base() + 32, 1, 0x7ffffff0u);
+      for (int lane = 0; lane < 64; ++lane) {
+        fixture.cu->write_vgpr(fixture.base() + 96, lane, 0xfeu);
+        fixture.cu->write_vgpr(fixture.base() + 97, lane, 0x7fu);
+      }
+      constexpr std::array<uint32_t, 4> scale_words = {0xD3AC0000u, 0x0002C360u, 0xD3AD0C40u,
+                                                       0x84822100u};
+      auto inst = fixture.decoder->decode_window(scale_words);
+      ASSERT_TRUE(inst.succeeded());
+      ASSERT_TRUE(fixture.cu->execute_instruction(inst.value().get(), *fixture.wave).succeeded());
+      EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 64, 0), ovfl ? 0x7f7fffffu : 0x7f800000u);
+      EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 64, 1), ovfl ? 0x00000000u : 0xffc00000u);
     }
   }
 }

@@ -77,44 +77,19 @@ DISPATCH: dict[str, Callable[[ExecuteContext], str]] = {}
 
 
 def _register_handlers() -> None:
-    """Populate DISPATCH with handlers from the extracted modules."""
-    from amdisa.codegen.execute.vector_cmp import (
-        gen_vector_cmpx,
-    )
+    """Register remaining VM/matrix/paired-word handlers after rj-arith routing."""
     from amdisa.codegen.execute.vector_special import (
         gen_vector_movrel,
         gen_vector_swaprel,
-        gen_vector_sat_pack,
-        gen_vector_perm_pk16,
-        gen_vector_dot2c_bf16,
-        gen_vector_bitop3,
-        gen_vector_cvt_pk,
-        gen_cvt_fp8,
     )
     from amdisa.codegen.execute.packed import (
-        gen_pk_binop,
-        gen_pk_ternary,
-        gen_pk_ternary_f64,
         gen_pk_binop_u64,
         gen_pk_binop_f64,
+        gen_pk_ternary_f64,
         gen_pk_lshl_add_u64,
     )
-    from amdisa.codegen.execute.matrix import (
-        gen_mfma,
-    )
+    from amdisa.codegen.execute.matrix import gen_mfma
 
-    # Relational CMPX keeps the legacy fallback; CLASS is handled by rj-arith.
-    DISPATCH['vector_cmpx'] = lambda c: gen_vector_cmpx(
-        c.src_ops,
-        c.op,
-        c.dtype,
-        c.cmpx_writes_vcc,
-        c.is_vop3,
-        c.dst_ops,
-        c.has_abs,
-        c.result_writer,
-    )
-    # Vector special
     DISPATCH['vector_movrel'] = lambda c: gen_vector_movrel(
         c.dst_ops,
         c.src_ops,
@@ -131,113 +106,23 @@ def _register_handlers() -> None:
         # Preserve legacy CDNA bit-move modifiers; RDNA treats signs as FP32.
         apply_dpp_source_modifiers=c.arch_name in ('rdna3', 'rdna4'),
     )
+
     DISPATCH['vector_swaprel'] = lambda c: gen_vector_swaprel(
         c.dst_ops,
         c.src_ops,
         c.profile.uses_vgpr_msb_indexing,
     )
-    DISPATCH['vector_sat_pack'] = lambda c: gen_vector_sat_pack(
-        c.dst_ops,
-        c.src_ops,
-        c.op,
-        true16_dst=c.is_vop3 and c.profile.uses_true16_vop3_opsel,
-    )
-    DISPATCH['vector_perm_pk16'] = lambda c: gen_vector_perm_pk16(
-        c.dst_ops, c.src_ops, c.op, c.profile.uses_vgpr_msb_indexing
-    )
-    from .rj_arith_vector import gen_integer_dot
-    from .rj_arith_float import gen_float_dot32
 
-    DISPATCH['vector_dot'] = lambda c: (
-        gen_integer_dot(c) if c.dtype == 'i32' else gen_float_dot32(c)
-    )
-    DISPATCH['vector_dot2c_bf16'] = lambda c: gen_vector_dot2c_bf16(
-        c.dst_ops, c.src_ops
-    )
-    DISPATCH['vector_bitop3'] = lambda c: gen_vector_bitop3(
-        c.dst_ops,
-        c.src_ops,
-        c.dtype,
-        (
-            c.opsel_exprs[0]
-            if c.arch_name == 'cdna5' and c.is_vop3 and c.dtype == 'b16'
-            else None
-        ),
-    )
-    DISPATCH['vector_cvt_pk'] = lambda c: gen_vector_cvt_pk(
-        c.dst_ops,
-        c.src_ops,
-        c.cls,
-        c.op,
-        opsel=(
-            'inst_.opsel'
-            if c.is_vop3 and 'opsel' in c.enc_field_names
-            else 'inst_.op_sel' if c.is_vop3 and 'op_sel' in c.enc_field_names else '0u'
-        ),
-        dtype=c.dtype,
-        is_vop3=c.is_vop3,
-        has_abs=c.has_abs,
-        fp8_format_select=(
-            'inst_.clamp'
-            if c.cls == 'vector_cvt_pk'
-            and c.op in ('fp8_f32', 'fp8_f16')
-            and c.is_vop3
-            and c.arch_name == 'cdna5'
-            else None
-        ),
-        arch_name=c.arch_name,
-    )
-    DISPATCH['cvt_fp8'] = lambda c: gen_cvt_fp8(c)
-
-    # Packed
-    DISPATCH['pk_binop'] = lambda c: gen_pk_binop(
-        c.dst_ops,
-        c.src_ops,
-        c.op,
-        c.dtype,
-        opsel_exprs=c.opsel_exprs,
-    )
-    DISPATCH['pk_ternary'] = lambda c: gen_pk_ternary(
-        c.dst_ops,
-        c.src_ops,
-        c.op,
-        c.dtype,
-        op_sel_hi_2_expr=c.op_sel_hi_2_expr,
-        opsel_exprs=c.opsel_exprs,
-    )
-    from amdisa.codegen.execute.rj_arith_packed_f32 import gen_packed_f32
-
-    DISPATCH['pk_binop_f32'] = gen_packed_f32
-    DISPATCH['pk_ternary_f32'] = gen_packed_f32
     DISPATCH['pk_binop_u64'] = lambda c: gen_pk_binop_u64(c.dst_ops, c.src_ops, c.op)
+
     DISPATCH['pk_binop_f64'] = lambda c: gen_pk_binop_f64(c.dst_ops, c.src_ops, c.op)
+
     DISPATCH['pk_ternary_f64'] = lambda c: gen_pk_ternary_f64(
         c.dst_ops, c.src_ops, c.op
     )
+
     DISPATCH['pk_lshl_add_u64'] = lambda c: gen_pk_lshl_add_u64(c.dst_ops, c.src_ops)
-    # DOT: every semantic class routes here, so the generator keeps no
-    # dot2_/dot4_/dot8_ fallback. test_dot_dispatch_covers_every_semantic_class
-    # fails if a new class arrives without an entry.
-    for _cls in ('dot2_f32_f16', 'dot2_f32_bf16'):
-        DISPATCH[_cls] = gen_float_dot32
-    from amdisa.codegen.execute.rj_arith_float import gen_half_dot
 
-    for _cls in ('dot2_f16_f16', 'dot2_bf16_bf16'):
-        DISPATCH[_cls] = gen_half_dot
-    for _cls in (
-        'dot2_i32_i16',
-        'dot2_u32_u16',
-        'dot4_i32_i8',
-        'dot4_i32_iu8',
-        'dot4_u32_u8',
-        'dot8_i32_i4',
-        'dot8_i32_iu4',
-        'dot8_u32_u4',
-    ):
-        DISPATCH[_cls] = gen_integer_dot
-    DISPATCH['dot4_f32_fp8'] = gen_float_dot32
-
-    # Matrix
     DISPATCH['mfma'] = gen_mfma
 
 

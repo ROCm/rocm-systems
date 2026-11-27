@@ -5,9 +5,11 @@ set(RCCL_DEVICE_COVERAGE_PROBE_FLAGS
 
 # Relative paths (under the compiler resource dir) where the amdgcn LLVM profile
 # runtime may live, in priority order. Hoisted here so the search set lives in
-# one place instead of inline string literals in the lookup loop.
+# one place instead of inline string literals in the lookup loop. Newer ROCm
+# compilers install the per-target runtime under the amdgpu-amd-amdhsa triple.
 set(RCCL_DEVICE_PROFILE_RUNTIME_RELPATHS
     "lib/amdgcn-amd-amdhsa/libclang_rt.profile.a"
+    "lib/amdgpu-amd-amdhsa/libclang_rt.profile.a"
     "lib/linux/libclang_rt.profile-amdgcn.a")
 
 # Host ROCm profile runtime archive names, in priority order: the per-target

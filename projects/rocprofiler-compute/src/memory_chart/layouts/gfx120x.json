@@ -1,6 +1,6 @@
 {
-  "archs": ["gfx1201"],
-  "description": "RDNA 4 Navi 48: WGPs, LDS/GL0/SQC, GL1, GL2, Infinity Cache, VRAM.",
+  "archs": ["gfx120x"],
+  "description": "RDNA 4: WGPs, LDS/GL0/SQC, GL1, GL2, Infinity Cache, VRAM.",
   "scope": {"labels": ["GPU", "VRAM"], "split": "vram"},
   "blocks": [
     {"id": "cu", "title": "WGPs", "column": 0, "row": 0, "order": 0, "style": "list", "content": [

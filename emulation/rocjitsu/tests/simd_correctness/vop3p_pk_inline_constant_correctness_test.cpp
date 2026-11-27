@@ -287,7 +287,7 @@ TEST(Vop3pPkInlineConstantCorrectness, AddF16InlineOneOnSixteenBitSourceOperand)
 }
 
 // v_dot2_f16_f16 is VOP3, not VOP3P, but src0/src1 are still 32-bit operands
-// consumed as packed v2 halves -- only src2 goes through read_vop3_true16_src,
+// consumed as packed v2 halves -- only src2 goes through the selected source half,
 // which is already 16-bit -- so it needs the same narrowing.
 //
 // v_dot2_f16_f16 v4, v0, 1.0, 0 with v0 = {1.0h, 0} is 1.0*1.0 + 0*0 + 0 = 1.0h.

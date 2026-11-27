@@ -954,6 +954,11 @@ int rj_arith_v_perm_b32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruc
                             uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
                             const uint32_t *const *c);
 
+// Wave64 V_PERM_B32 with a scalar selector. D may alias A or B. Inactive lanes
+// are preserved and invalid flags are rejected before accessing the operands.
+int rj_arith_v_perm_b32_uniform_w64(uint64_t flags, uint64_t exec_mask, uint32_t *d,
+                                    const uint32_t *a, const uint32_t *b, uint32_t selector);
+
 // Wave64 carry/borrow operations. EXEC, input_carry and the required carry
 // output have 64 bits. Inactive/DPP-filtered carry bits are zero. The scalar
 // output is stored after all VGPR reads/writes; zero EXEC permits null VGPR

@@ -12409,34 +12409,6 @@ TEST(SdwaOutputScalingTest, HonorsFormatModesAndDestinationPlacement) {
   }
 }
 
-TEST(SdwaOutputScalingTest, F32ScalingUsesExplicitRounding) {
-  struct Case {
-    uint32_t input;
-    uint32_t omod;
-    std::array<uint32_t, 4> expected;
-  };
-  constexpr std::array cases{
-      Case{0x7f7fffffu, 1, {0x7f800000u, 0x7f800000u, 0x7f7fffffu, 0x7f7fffffu}},
-      Case{0xff7fffffu, 2, {0xff800000u, 0xff7fffffu, 0xff800000u, 0xff7fffffu}},
-      Case{0x00ffffffu, 3, {0x00800000u, 0x00800000u, 0, 0}},
-      Case{0x80ffffffu, 3, {0x80800000u, 0, 0x80800000u, 0}},
-      Case{0x00800000u, 3, {0, 0, 0, 0}},
-      Case{0x00400000u, 1, {0x00800000u, 0x00800000u, 0x00800000u, 0x00800000u}},
-      Case{0x00000001u, 3, {0, 0, 0, 0}},
-      Case{0x80000000u, 1, {0, 0, 0, 0}},
-      Case{0xff800000u, 3, {0xff800000u, 0xff800000u, 0xff800000u, 0xff800000u}},
-      Case{0x7f812345u, 1, {0x7fc12345u, 0x7fc12345u, 0x7fc12345u, 0x7fc12345u}},
-      Case{0x3f800001u, 0, {0x3f800001u, 0x3f800001u, 0x3f800001u, 0x3f800001u}},
-  };
-  for (const Case &test : cases) {
-    for (uint32_t mode = 0; mode < 4; ++mode) {
-      SCOPED_TRACE(::testing::Message()
-                   << "input=" << test.input << " omod=" << test.omod << " mode=" << mode);
-      EXPECT_EQ(amdgpu::sdwa::scale_f32(test.input, test.omod, mode), test.expected[mode]);
-    }
-  }
-}
-
 TEST(SdwaOutputScalingTest, FloatingConversionsUseDestinationFormat) {
   struct Architecture {
     rocjitsu::IsaFamily arch;

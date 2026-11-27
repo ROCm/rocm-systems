@@ -69,9 +69,8 @@ template <int Width, int Lanes> Registers<4, Lanes> make_compare_float_inputs() 
   return input;
 }
 
-// Exact IEEE ordering needs no rounded arithmetic. This computes the same
-// relations as rocjitsu shared/comparison.h:
-// flush first, signed zeros equal, ordered predicates false for NaNs. Convert
+// Exact IEEE ordering needs no rounded arithmetic: flush first, signed zeros
+// compare equal, and ordered predicates are false for NaNs. Convert
 // NaNs to a quiet host NaN, leaving signaling classification to status tests.
 template <int Width>
 double compare_float_value(uint64_t bits, uint64_t mode, int operand, bool flush) {

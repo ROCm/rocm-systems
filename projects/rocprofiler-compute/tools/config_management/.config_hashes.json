@@ -17,7 +17,7 @@
         "1700_graphics_register_bus_manager.yaml": "5e61a4f7c346f2d4373b4f8ff995501c"
       }
     },
-    "gfx1201": {
+    "gfx120x": {
       "files": {
         "0000_top_stats.yaml": "8ff5ddd12ffcd2015ab184bbeefef3a3",
         "0100_system_info.yaml": "690a3492daf91b89479a8929828f5061",
