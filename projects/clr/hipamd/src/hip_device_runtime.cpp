@@ -432,6 +432,9 @@ hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int device)
     case hipDeviceAttributeNumberOfXccs:
       *pi = static_cast<int>(g_devices[device]->devices()[0]->info().numberOfXccs_);
       break;
+    case hipDeviceAttributeNumberOfAids:
+      *pi = static_cast<int>(g_devices[device]->devices()[0]->info().numberOfAids_);
+      break;
     case hipDeviceAttributeMaxAvailableVgprsPerThread:
       *pi = static_cast<int>(g_devices[device]->devices()[0]->info().availableVGPRs_);
       break;

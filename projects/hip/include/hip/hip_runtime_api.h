@@ -651,6 +651,13 @@ typedef enum hipDeviceAttribute_t {
                                                  ///< '0' otherwise.
   hipDeviceAttributeMaxDynDataPrefetchRegions,   ///< Maximum number of dynamic data prefetch regions
                                                  ///< per kernel launch (0 if unsupported).
+  hipDeviceAttributeNumberOfAids,  ///< Number of AID(s) (Active Interposer Dies) in the
+                                   ///< device's current compute partition.
+                                   ///< An AID is an I/O die that provides memory controllers
+                                   ///< and inter-die connectivity. Devices like MI300X and
+                                   ///< MI450 include multiple AIDs per package. Value reflects
+                                   ///< the partition visible to the current process, not the
+                                   ///< physical package count.
 
   hipDeviceAttributeAmdSpecificEnd = 19999,
   hipDeviceAttributeVendorSpecificBegin = 20000,

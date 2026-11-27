@@ -1264,6 +1264,8 @@ static HSAKMT_STATUS topology_sysfs_get_node_props(HsaKFDContext *ctx,
 			props->CtlStackSize = prop_val;
 		else if (strcmp(prop_name, "num_xcc") == 0)
 			props->NumXcc = prop_val;
+		else if (strcmp(prop_name, "num_aid") == 0)
+			props->NumAid = prop_val;
 		else if (strcmp(prop_name, "family_id") == 0)
 			props->FamilyID = prop_val;
 		else if (strcmp(prop_name, "gfx_target_version") == 0)
@@ -1378,6 +1380,16 @@ static HSAKMT_STATUS topology_sysfs_get_node_props(HsaKFDContext *ctx,
 	 */
 	if (!props->NumXcc)
 		props->NumXcc = 1;
+
+	/* KFD does not expose num_aid in sysfs. Compute it from NumXcc for
+	 * targets that have multiple AIDs; default to 1 for everything else.
+	 */
+	if (!props->NumAid) {
+		if (HSA_GET_GFX_VERSION_FULL(props->EngineId.ui32) == GFX_VERSION_GFX1250)
+			props->NumAid = (props->NumXcc + 3) / 4;
+		else
+			props->NumAid = 1;
+	}
 
 out:
 	free(read_buf);

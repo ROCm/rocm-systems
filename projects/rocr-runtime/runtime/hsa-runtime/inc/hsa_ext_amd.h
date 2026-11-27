@@ -1068,6 +1068,11 @@ typedef enum hsa_amd_agent_info_s {
   HSA_AMD_AGENT_INFO_HOST_ATOMICS_SUPPORTED = 0xA128,
   /* 0xA129 is not reused: it was HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED,
      replaced by ::HSA_AMD_AQL_PROPERTY_SIGNAL_HINTS. */
+  /**
+   * Queries for number of AIDs (Active Interposer Dies) within the agent.
+   * The type of this attribute is uint32_t.
+   */
+  HSA_AMD_AGENT_INFO_NUM_AID = 0xA12A,
 } hsa_amd_agent_info_t;
 
 /**
