@@ -117,9 +117,8 @@ compute.valu_flops:
   formula: SUM($wave_size * (SQ_INSTS_VALU_sum - SQ_WMMA_VALU_INSTS_sum)) / SUM(End_Timestamp - Start_Timestamp)
   unit: GFLOP/s
   description: >-
-    Estimated floating-point operations per second on the vector ALU, excluding WMMA.
-    The estimate comes from instruction issues, so integer and conversion instructions
-    are included and the value can read above or below the true rate.
+    Estimated floating-point operations per second on the vector ALU, excluding WMMA. It
+    can read above or below the true rate.
   peak_empirical: $FP32Flops_empirical_peak
 compute.valu_flops_f64:
   name: VALU FLOPs (F64)
@@ -132,8 +131,7 @@ compute.valu_inst_cycles:
   formula: SUM(SQ_INST_CYCLES_VALU_sum)
   unit: Cycles
   description: >-
-    Cycles needed to execute VALU instructions, with overlapping instructions counted
-    separately. This is not elapsed time.
+    Cycles needed to execute VALU instructions. This is not elapsed time.
 compute.valu_insts:
   name: VALU Instructions
   formula: SUM(SQ_INSTS_VALU_sum)
@@ -146,8 +144,8 @@ compute.valu_issue_rate:
   formula: SUM(SQ_INSTS_VALU_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GInstructions/s
   description: >-
-    Billions of VALU instruction issues per second. The counter includes floating-point
-    and integer instructions and does not count FLOPs or active lanes.
+    Billions of VALU instruction issues per second, including floating-point and integer
+    instructions. This is not a FLOP rate and does not account for active lanes.
 compute.valu_issue_rate_fp64:
   name: FP64 VALU Issue Rate
   formula: SUM(SQ_INSTS_VALU_DP_sum) / SUM(End_Timestamp - Start_Timestamp)
@@ -160,8 +158,8 @@ compute.wmma_flops_f16_16x16x16:
   formula: 8192 * SUM(SQ_WMMA_VALU_INSTS_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GFLOP/s
   description: >-
-    Estimated WMMA floating-point operations per second. WMMA instructions of all data
-    types (FP16, BF16, FP8, and BF8) are counted together, so the rate is not FP16-only.
+    Estimated matrix floating-point operations per second across all WMMA data types
+    (FP16, BF16, FP8, and BF8), so the rate is not FP16-only.
   peak: '$max_sclk * $cu_per_gpu * 1024 / 1000'
   peak_empirical: $WMMAF16Flops_empirical_peak
 compute.wmma_inst_cycles:

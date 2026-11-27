@@ -334,8 +334,7 @@ Panel Config:
       Raw vector arithmetic instruction count. This includes integer and
       floating-point instructions and is not a FLOP count.
     SQ_INST_CYCLES_VALU: >-
-      Cycles needed to execute VALU instructions, with overlapping instructions counted
-      separately. This is not elapsed time.
+      Cycles needed to execute VALU instructions. This is not elapsed time.
     SQ_INST_CYCLES_VALU_WMMA: >-
       Cycles of work sent for WMMA.
     SQ_WMMA_VALU_INSTS: >-
