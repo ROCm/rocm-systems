@@ -8691,8 +8691,10 @@ TEST(Gfx1250CvtScaleTest, UnpackSelectsE8M0ScaleLaneAndByte) {
   };
   constexpr Selection f4_f6[] = {{0, 0, 1}, {16, 0, 1}, {0, 2, 3}, {16, 2, 3},
                                  {0, 0, 2}, {16, 0, 2}, {0, 1, 3}, {16, 1, 3}};
-  constexpr Selection f8[] = {{0, 0, 0}, {16, 0, 0}, {0, 2, 2}, {16, 2, 2}, {0, 1, 1},  {16, 1, 1},
-                              {0, 3, 3}, {16, 3, 3}, {0, 0, 1}, {0, 0, 1},  {16, 2, 3}, {16, 2, 3}};
+  // In hardware, Block16 selectors 9 and 10 read the opposite scale half-wave
+  // from the one printed in Table 37.
+  constexpr Selection f8[] = {{0, 0, 0}, {16, 0, 0}, {0, 2, 2}, {16, 2, 2}, {0, 1, 1}, {16, 1, 1},
+                              {0, 3, 3}, {16, 3, 3}, {0, 0, 1}, {16, 0, 1}, {0, 2, 3}, {16, 2, 3}};
   struct Case {
     uint16_t opcode;
     // Every packed element is 1.0 in the source format.
