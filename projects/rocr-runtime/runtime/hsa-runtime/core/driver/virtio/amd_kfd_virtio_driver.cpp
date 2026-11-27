@@ -231,9 +231,10 @@ hsa_status_t KfdVirtioDriver::AllocateMemory(const core::MemoryRegion& mem_regio
   // Fills the caller's handle from whatever mem holds: a VA for fragment and
   // mapped allocations, or the opaque memory-only handle for NoAddress
   // allocations. Both are the allocation word reinterpreted as uint64_t.
-  auto populate_handle = [&]() {
+  auto populate_handle = [&](bool va_mapped = false) {
     handle->handle = reinterpret_cast<uint64_t>(mem);
     handle->vaddr = mem;
+    handle->va_mapped = va_mapped;
     handle->size = size;
     handle->owner = this;
     handle->owns_allocation = true;
@@ -287,7 +288,7 @@ hsa_status_t KfdVirtioDriver::AllocateMemory(const core::MemoryRegion& mem_regio
         return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
       }
 
-      populate_handle();
+      populate_handle(true);
       return HSA_STATUS_SUCCESS;
     }
   }
@@ -364,7 +365,7 @@ hsa_status_t KfdVirtioDriver::AllocateMemory(const core::MemoryRegion& mem_regio
       // TODO: Implement ASAN support for VIRTIO driver
       return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
     }
-    populate_handle();
+    populate_handle(is_resident);
     return HSA_STATUS_SUCCESS;
   }
 

@@ -177,6 +177,25 @@ hsa_status_t MemoryRegion::FreeImpl(const core::DriverMemoryHandle& handle) cons
   // use the fragment allocator.
   if (fragment_allocator_.free(reinterpret_cast<void*>(handle.handle))) return HSA_STATUS_SUCCESS;
 
+  // The pages behind this handle are about to go back to the kernel allocator, which
+  // may hand the same physical VRAM to a buffer object with a different MTYPE. 
+  // Cache lines left resident should be invalidates so writes at a different scope, 
+  // such as from a peer arn't corrupted.
+  if (IsLocalMemory() && !mem_flag_.ui32.Uncached &&
+      !core::Runtime::runtime_singleton_->flag().disable_vram_free_cache_flush() &&
+      owner()->device_type() == core::Agent::kAmdGpuDevice) {
+    GpuAgent* gpu_owner = static_cast<GpuAgent*>(owner());
+    if (!gpu_owner->is_destroying()) {
+      // A memory-only handle (hsa_amd_vmem_handle_create) has no GPU mapping, so we
+      // can skip invalidation
+      if (handle.va_mapped) {
+        gpu_owner->WritebackInvalidateDataCaches(handle.vaddr, handle.size);
+      } else {
+        gpu_owner->WritebackInvalidateDataCaches(nullptr, 0);
+      }
+    }
+  }
+
   return owner()->driver().FreeMemory(handle);
 }
 

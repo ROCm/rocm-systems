@@ -367,6 +367,13 @@ class Flag {
     var = os::GetEnvVar("HSA_DTIF_SKIP_INV_CODE_CACHE");
     enable_dtif_skip_inv_code_cache_ = (var == "1") ? true : false;
 
+    // Escape hatch for the cache maintenance performed when device memory is
+    // released. Setting this restores the pre-fix behaviour, in which freed VRAM
+    // could still be resident in the owning agent's GL2 when the pages were
+    // handed to the next allocation.
+    var = os::GetEnvVar("HSA_DISABLE_VRAM_FREE_CACHE_FLUSH");
+    disable_vram_free_cache_flush_ = (var == "1") ? true : false;
+
     // This allows detecting if the dxg driver is loaded.
     var = os::GetEnvVar("HSA_ENABLE_DXG_DETECTION");
     enable_dxg_detection_ = (var == "0") ? false : true;
@@ -560,6 +567,8 @@ class Flag {
 
   bool enable_dtif_skip_inv_code_cache() const { return enable_dtif_skip_inv_code_cache_; }
 
+  bool disable_vram_free_cache_flush() const { return disable_vram_free_cache_flush_; }
+
   bool enable_dxg_detection() const { return enable_dxg_detection_; }
 
   SDMA_OVERRIDE sdma_linear_b2b() const { return sdma_linear_b2b_; }
@@ -653,6 +662,7 @@ class Flag {
   bool enable_dtif_;
   bool enable_dtif_fast_copy_;
   bool enable_dtif_skip_inv_code_cache_;
+  bool disable_vram_free_cache_flush_;
   bool enable_dxg_detection_;
   SDMA_OVERRIDE sdma_linear_b2b_ = SDMA_DEFAULT;
 
