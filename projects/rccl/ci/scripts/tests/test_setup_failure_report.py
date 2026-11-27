@@ -245,6 +245,8 @@ class SetupFailureReportTest(ReportCapture):
 class HarnessSetupFailureTest(ReportCapture):
     """A forced setup failure in each harness's real main() sends a report."""
 
+    MADENGINE_CLUSTER = next(iter(test_madengine.CLUSTER_CONFIGS))
+
     def run_harness(self, module: types.ModuleType, subject: str, argv: list[str]) -> None:
         report = SetupFailureReport(subject)
         with mock.patch.object(module, "setup_report", report), \
@@ -284,7 +286,7 @@ class HarnessSetupFailureTest(ReportCapture):
             "--artifact-dir", self.empty_artifact_dir(),
             "--baseline-artifact-dir", self.empty_artifact_dir(),
             "--workload", workload,
-            "--cluster", next(iter(test_madengine.CLUSTER_CONFIGS)),
+            "--cluster", self.MADENGINE_CLUSTER,
             "--nodes", str(nodes or required or 2),
             "--work-dir", str(self.tmp / "work"),
             "--notify-email", "dev@example.com",
@@ -294,7 +296,8 @@ class HarnessSetupFailureTest(ReportCapture):
     def test_madengine(self) -> None:
         workload, argv = self.madengine_argv()
         self.run_harness(test_madengine, "RCCL MADEngine", argv)
-        self.assert_reported(f"RCCL MADEngine {workload}", "Discover RCCL libraries")
+        self.assert_reported(f"RCCL MADEngine {workload} on {self.MADENGINE_CLUSTER}",
+                             "Discover RCCL libraries")
 
     def test_madengine_fail_before_run_reports_once(self) -> None:
         workload, argv = self.madengine_argv()
@@ -316,7 +319,8 @@ class HarnessSetupFailureTest(ReportCapture):
         workload, argv = self.madengine_argv(nodes=1)
         with mock.patch("sys.stderr"):  # argparse prints usage
             self.run_harness(test_madengine, "RCCL MADEngine", argv)
-        self.assert_reported(f"RCCL MADEngine {workload}", "Check arguments")
+        self.assert_reported(f"RCCL MADEngine {workload} on {self.MADENGINE_CLUSTER}",
+                             "Check arguments")
 
     def test_scripts_report_when_run_as_scripts(self) -> None:
         # Covers the __main__ entry points; no notify targets, so only the

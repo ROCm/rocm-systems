@@ -99,8 +99,10 @@ OVERLAY_LIBS = {CANDIDATE: "rccl_libs", BASELINE: "rccl_libs_baseline"}
 SGLANG_MAD_DOCKERFILE = "docker/sglang_disagg_inference_full_overlay.ubuntu.amd.Dockerfile"
 
 # Must not predate ROCm/madengine#213: the A/B runs madengine inside salloc.
+# Nor #246: before it every container got --cap-add SYS_ADMIN, which
+# docker-authz on Crusoe refuses.
 MADENGINE_REPO = "https://github.com/ROCm/madengine.git"
-MADENGINE_REF = "00ee3e80c0a308599633caf74e5d91a72164a2fe"  # develop, has #190 and #213
+MADENGINE_REF = "32b9f30a609be88020a7083097700541a158d451"  # develop, has #190, #213 and #246
 MAD_REPO = "https://github.com/ROCm/MAD.git"
 MAD_REF = "36339bd825f9c3772e35a54adfeba9635d6765da"  # mad-rccl, has MAD#279, #280 and #284
 MAD_BRANCH = "mad-rccl"
@@ -434,6 +436,46 @@ CLUSTER_CONFIGS = {
         "results_base": "/apps/rccl-ci/madengine/perf",
         # Mounted read-only at /models for the inference workloads.
         "models_dir": "/apps/data/models",
+    },
+    "crusoe": {
+        "gpu_target": "gfx950",
+        "scheduler": "spur",
+        "slurm_partition": "amd-spur-v2",
+        "slurm_qos": "amd-collectives-qos",
+        "slurm_account": "amd-collectives",
+        "slurm_no_gres": False,
+        # The images' own rdma-core carries the ionic provider.
+        "mount_host_ib_libs": False,
+        # The nodes' docker-authz plugin refuses the whole run over either one.
+        "docker_run_options_denied": ["--privileged", "-v /run/udev:/run/udev:ro"],
+        # Bind-mounted read-only at the same path.
+        "docker_ro_mounts": ["/etc/crusoe/rccl_topo"],
+        "nccl_env": {
+            "NCCL_IB_DISABLE": "0",
+            "NCCL_IB_HCA": "ionic_0:1,ionic_1:1,ionic_2:1,ionic_3:1,ionic_4:1,ionic_5:1,ionic_6:1,ionic_7:1",
+            "NCCL_IB_GID_INDEX": "1",
+            # P2P connections otherwise get a single QP, and 4-node all-to-all
+            # then fails with ibv receive-completion errors.
+            "RCCL_IB_QPS_PER_P2P": "4",
+            "NCCL_SOCKET_IFNAME": "ens3",
+            "NCCL_DEBUG": "WARN",
+            "RCCL_AINIC_ROCE": "1",
+            "RCCL_USE_AMD_SMI_LIB": "1",
+            # The VMs flatten PCIe: without the hosts' topology file every
+            # GPU-NIC path looks like it crosses the host bridge, and RCCL
+            # builds 2 rings across nodes instead of 64 channels.
+            "NCCL_TOPO_FILE": "/etc/crusoe/rccl_topo/mi355x-288gb-ib.xml",
+            "NCCL_DMABUF_ENABLE": "1",
+            "NCCL_NET_GDR_LEVEL": "SYS",
+            "RDMAV_DRIVERS": "ionic",
+            "IBV_DRIVERS": "ionic",
+            # HIP init narrows the process CPU mask to cores 0-7 on these
+            # 236-vCPU VMs, and RCCL pins every rank's threads there: 2N
+            # bus bandwidth falls from 56 to 2.4 GB/s.
+            "NCCL_IGNORE_CPU_AFFINITY": "1",
+        },
+        "results_base": "/shared_nfs/rccl-ci/madengine/perf",
+        "models_dir": "/shared_nfs/mad/data/models",
     },
 }
 
@@ -1541,6 +1583,28 @@ def slurm_time_seconds(limit: str) -> int:
     return (hours * 60 + minutes) * 60 + seconds
 
 
+def drop_docker_run_options(opts: str, denied: list[str]) -> str:
+    """*opts* without each of *denied*, matched only as whole options."""
+    for option in denied:
+        opts = " ".join(re.sub(
+            rf"(?:^|\s){re.escape(option)}(?=\s|$)", " ", opts).split())
+    return opts
+
+
+def salloc_cluster_args(cluster_config: dict, workload_config: dict) -> list[str]:
+    """The salloc options a cluster needs beyond nodes, partition and time."""
+    args = []
+    qos = cluster_config.get("slurm_qos", "")
+    if qos:
+        args += ["--qos", qos]
+    account = cluster_config.get("slurm_account", "")
+    if account:
+        args += ["--account", account]
+    if cluster_config.get("scheduler") == "spur":
+        args += ["--gpus-per-node", str(workload_config["gpus_per_node"])]
+    return args
+
+
 def generate_manifest(
     workload_name: str,
     workload_config: dict,
@@ -1611,6 +1675,8 @@ def generate_manifest(
     docker_env_vars = {
         **nccl_env,
         "NCCL_DEBUG": "WARN",
+        # madengine's multi-node SLURM preset sets NCCL_IB_DISABLE=1 for a run
+        # that leaves it unset, and RCCL then runs over TCP sockets.
         "NCCL_IB_DISABLE": "0",
         "NCCL_TIMEOUT": "900",
         "IBV_SHOW_WARNINGS": "1",
@@ -1620,7 +1686,9 @@ def generate_manifest(
         docker_env_vars["GLOO_SOCKET_IFNAME"] = socket_ifname
 
     docker_mounts = dict(workload_config.get("docker_mounts", {}))
-    docker_run_opts = workload_config.get("docker_run_options", "")
+    docker_run_opts = drop_docker_run_options(
+        workload_config.get("docker_run_options", ""),
+        cluster_config.get("docker_run_options_denied", []))
 
     # Mount the host's rdma-core stack into the container.
     # The host's libibverbs has a compiled-in provider search path of
@@ -1637,6 +1705,8 @@ def generate_manifest(
             " -v /usr/lib64/libibumad.so.3"
             ":/usr/lib/x86_64-linux-gnu/libibumad.so.3:ro"
         )
+    for path in cluster_config.get("docker_ro_mounts", ()):
+        docker_run_opts += f" -v {path}:{path}:ro"
 
     if family == "sglang-disagg":
         # The launcher writes its server logs, and the RCCL banner the
@@ -1976,6 +2046,7 @@ def repro_env(
             "slurm_partition", workload_config["slurm_partition"]
         ),
         "REPRO_TIME_LIMIT": workload_config["time_limit"],
+        "REPRO_SALLOC_ARGS": " ".join(salloc_cluster_args(cluster_config, workload_config)),
         # ruby's per-job /tmp is invisible to the Docker daemon; the workflow
         # sets this, and a run by hand has to as well.
         "SLURM_TMPDIR": env.get("SLURM_TMPDIR", ""),
@@ -2004,8 +2075,9 @@ the refs, image digests and cluster settings. The run's own numbers are in the
 3. `export MAD_DOCKER_BUILDS=<shared dir>` and `chmod 0777` it: node 0 saves the
    image there for the others through `sudo docker`, which a root-squashed NFS
    maps to `nobody`.
-4. `salloc -p "$REPRO_PARTITION" -N "$REPRO_NODES" --exclusive -t "$REPRO_TIME_LIMIT"`, then inside it:
-   `madengine run --manifest-file manifest.repro.json --live-output`
+4. `salloc -p "$REPRO_PARTITION" -N "$REPRO_NODES" --exclusive -t "$REPRO_TIME_LIMIT" $REPRO_SALLOC_ARGS`
+   (unquoted: the cluster's QoS, account and GPU options, if it needs any),
+   then inside it: `madengine run --manifest-file manifest.repro.json --live-output`
    madengine runs in place in the allocation; node 0 builds the image from
    `overlay_ctx/` and the other nodes load it.
 
@@ -2267,19 +2339,21 @@ def run_ab_in_one_allocation(
     job_name = f"rccl-ab-{workload_name}-{run_tag}"
     (work_dir / "allocation.name").write_text(job_name + "\n")
 
-    cmd = [
-        "salloc",
-        "--nodes", str(nodes),
-        "--ntasks-per-node", "1",
+    # SPUR's salloc has no --ntasks-per-node (it starts one task per node
+    # anyway), binds no GPUs unless asked to, and takes no command: it runs
+    # what its shell reads on stdin.
+    spur = cluster_config.get("scheduler") == "spur"
+    cmd = ["salloc", "--nodes", str(nodes)]
+    if not spur:
+        cmd += ["--ntasks-per-node", "1"]
+    cmd += [
         "--exclusive",
         "--partition",
         cluster_config.get("slurm_partition", workload_config["slurm_partition"]),
         "--time", workload_config["time_limit"],
         "--job-name", job_name,
     ]
-    qos = cluster_config.get("slurm_qos", "")
-    if qos:
-        cmd += ["--qos", qos]
+    cmd += salloc_cluster_args(cluster_config, workload_config)
     # Set from a repository variable by the workflow: the nodes to avoid are
     # the cluster's business and their names do not belong in this file.
     exclude = os.environ.get("MADENGINE_SLURM_EXCLUDE", "").strip()
@@ -2289,9 +2363,15 @@ def run_ab_in_one_allocation(
                 f"MADENGINE_SLURM_EXCLUDE is not a SLURM hostlist: {exclude!r}"
             )
         cmd += ["--exclude", exclude]
-    cmd += ["bash", str(script_path)]
+    shell_input = None
+    if spur:
+        shell_input = f"exec bash {shlex.quote(str(script_path))}\n"
+    else:
+        cmd += ["bash", str(script_path)]
 
     log.info("Running: %s", " ".join(cmd))
+    if shell_input:
+        log.info("  its shell reads: %s", shell_input.strip())
     log.info("Phases: %s", ", ".join(p for p, _ in phases))
     log.info("Timeout: %d minutes (includes time spent queueing)", timeout_minutes)
 
@@ -2311,7 +2391,11 @@ def run_ab_in_one_allocation(
 
     # Own process group: killing salloc alone leaves run_phases.sh and its
     # madengine/srun children running on the allocation.
-    proc = subprocess.Popen(cmd, cwd=work_dir, env=env, start_new_session=True)
+    proc = subprocess.Popen(cmd, cwd=work_dir, env=env, start_new_session=True,
+                            stdin=subprocess.PIPE if shell_input else None, text=True)
+    if shell_input:
+        proc.stdin.write(shell_input)
+        proc.stdin.close()
     setup_report.tests_started()
 
     def release_allocation(reason: str) -> None:
@@ -2326,8 +2410,10 @@ def run_ab_in_one_allocation(
         try:
             # By name, not by the id in allocation.txt: the name also reaches
             # a request that is still queued, which has no id there yet.
+            # --user rather than --me, which SPUR's scancel lacks.
+            user = pwd.getpwuid(os.getuid()).pw_name
             try:
-                subprocess.run(["scancel", "--me", "--name", job_name], timeout=60)
+                subprocess.run(["scancel", "--user", user, "--name", job_name], timeout=60)
             except (OSError, subprocess.SubprocessError) as exc:
                 log.warning("scancel --name %s failed: %s", job_name, exc)
         finally:
@@ -2943,10 +3029,15 @@ def resolve_baseline(
     return build
 
 
+def report_subject(args: argparse.Namespace) -> str:
+    """Subject prefix of this run's reports; two clusters run the same workload."""
+    return f"RCCL MADEngine {args.workload} on {args.cluster}"
+
+
 def send_report(args: argparse.Namespace, report: str, exit_code: int) -> None:
     """Send *report* to the email and Teams channel the run was given."""
     status = "PASSED" if exit_code == 0 else "FAILED"
-    subject_prefix = f"RCCL MADEngine {args.workload}"
+    subject_prefix = report_subject(args)
     if args.notify_email:
         send_email_report(report, args.notify_email, status,
                           subject_prefix=subject_prefix)
@@ -3060,8 +3151,7 @@ def main() -> None:
     )
 
     args = parser.parse_args()
-    setup_report.notify(args.notify_email, args.teams_webhook,
-                        f"RCCL MADEngine {args.workload}")
+    setup_report.notify(args.notify_email, args.teams_webhook, report_subject(args))
     setup_report.step("Check arguments")
     # madengine runs inside our allocation only for multi-node workloads; a
     # single-node phase gets its own sbatch, possibly on other nodes.

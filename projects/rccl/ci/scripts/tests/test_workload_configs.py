@@ -4,6 +4,7 @@ Run from projects/rccl/ci/scripts:  python3 -m unittest discover -s tests
 """
 
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -59,6 +60,49 @@ class WorkflowsMatchConfigs(unittest.TestCase):
         options = callee[True]["workflow_dispatch"]["inputs"]["workload"]["options"]
         self.assertEqual(sorted(options), sorted(tm.WORKLOAD_CONFIGS))
 
+    def test_dispatch_clusters_are_the_configs(self):
+        callee = load_workflow("therock-rccl-test-madengine.yml")
+        options = callee[True]["workflow_dispatch"]["inputs"]["cluster"]["options"]
+        self.assertEqual(sorted(options), sorted(tm.CLUSTER_CONFIGS))
+
+    def test_each_job_runs_on_its_clusters_runner(self):
+        caller = load_workflow("therock-rccl-ci-linux.yml")
+        callee = load_workflow("therock-rccl-test-madengine.yml")
+        default = callee[True]["workflow_call"]["inputs"]["cluster"]["default"]
+        clusters = set()
+        for job in caller["jobs"].values():
+            if job.get("uses") != "./.github/workflows/therock-rccl-test-madengine.yml":
+                continue
+            cluster = job["with"].get("cluster", default)
+            clusters.add(cluster)
+            self.assertIn(cluster, tm.CLUSTER_CONFIGS)
+            self.assertEqual(job["with"]["test_runs_on"],
+                             f"{cluster}-linux-slurm-scale-runner", job["name"])
+        self.assertEqual(clusters, set(tm.CLUSTER_CONFIGS))
+
+    def test_results_dir_is_each_clusters_results_base(self):
+        callee = load_workflow("therock-rccl-test-madengine.yml")
+        results_dir = callee["jobs"]["test_madengine"]["env"]["RESULTS_DIR"]
+        m = re.fullmatch(r"\$\{\{ inputs\.cluster == '(\w+)' && '([^']+)' "
+                         r"\|\| '([^']+)' \}\}(/\S+)", results_dir)
+        self.assertIsNotNone(m, results_dir)
+        cluster, tree, default_tree, tail = m.groups()
+        for name, config in tm.CLUSTER_CONFIGS.items():
+            got = (tree if name == cluster else default_tree) + tail
+            self.assertEqual(got, config["results_base"], name)
+
+    def test_spur_clusters_load_the_controller_address_first(self):
+        callee = load_workflow("therock-rccl-test-madengine.yml")
+        steps = callee["jobs"]["test_madengine"]["steps"]
+        names = [s.get("name") for s in steps]
+        i = names.index("Load SPUR client environment")
+        self.assertLess(i, names.index("Run MADEngine workload"))
+        self.assertIn('SPUR_CONTROLLER_ADDR=${SPUR_CONTROLLER_ADDR}" >> "$GITHUB_ENV"',
+                      steps[i]["run"])
+        for name, config in tm.CLUSTER_CONFIGS.items():
+            if config.get("scheduler") == "spur":
+                self.assertIn(f"inputs.cluster == '{name}'", steps[i]["if"], name)
+
     def test_scheduled_workloads_exist(self):
         legs = madengine_legs()
         self.assertGreater(len(legs), 1)
@@ -80,6 +124,18 @@ class WorkflowsMatchConfigs(unittest.TestCase):
         for workload in weekly:
             self.assertEqual(tm.WORKLOAD_CONFIGS[workload]["schedule"], "weekly", workload)
         self.assertEqual(sorted([nightly, *weekly]), sorted(tm.WORKLOAD_CONFIGS))
+
+    def test_crusoe_weekly_runs_rubys_entries(self):
+        jobs = load_workflow("therock-rccl-ci-linux.yml")["jobs"]
+        ruby = jobs["therock-test-madengine-weekly"]
+        crusoe = jobs["therock-test-madengine-weekly-crusoe"]
+        self.assertEqual(crusoe["with"]["cluster"], "crusoe")
+        self.assertEqual(crusoe["if"], ruby["if"])
+        self.assertIn("therock-test-madengine-crusoe", crusoe["needs"])
+        self.assertEqual(crusoe["strategy"]["max-parallel"], 1)
+        entries = {e["workload"]: e for e in ruby["strategy"]["matrix"]["include"]}
+        for entry in crusoe["strategy"]["matrix"]["include"]:
+            self.assertEqual(entry, entries[entry["workload"]])
 
     def test_job_budget_covers_time_limit(self):
         for leg in madengine_legs():
