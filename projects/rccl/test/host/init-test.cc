@@ -2087,22 +2087,24 @@ TEST_F(InitMicrotest, FillInfo_NoPartitionModeReported_FunctionZeroLeavesMloPart
 
 // RCCL_TUNING_PARTITION_MODE: each rank asks for the gfx1250 tuning table of the mode its GPU
 // reports, from the same sysfs read the MLOPart probe uses; only DPX asks for the DPX table. The
-// env var forces a table either way, and "auto" or an empty value follow the GPU.
+// env var forces a table either way, and "auto" or an empty value follow the GPU. spxReported
+// records only what the GPU reports, whatever table the env var forces.
 TEST_F(InitMicrotest, FillInfo_TuningPartitionRequest) {
   struct Case {
     const char* env;  // nullptr = unset
     const char* gpu;
     int want;
+    bool spxReported;
   };
-  const Case cases[] = {{nullptr, "SPX", RCCL_TUNING_PARTITION_SPX},
-                        {nullptr, "DPX", RCCL_TUNING_PARTITION_DPX},
-                        {nullptr, "CPX", RCCL_TUNING_PARTITION_SPX},
-                        {nullptr, "", RCCL_TUNING_PARTITION_SPX},
-                        {"SPX", "DPX", RCCL_TUNING_PARTITION_SPX},
-                        {"DPX", "SPX", RCCL_TUNING_PARTITION_DPX},
-                        {"dpx", "", RCCL_TUNING_PARTITION_DPX},
-                        {"Auto", "DPX", RCCL_TUNING_PARTITION_DPX},
-                        {"", "DPX", RCCL_TUNING_PARTITION_DPX}};
+  const Case cases[] = {{nullptr, "SPX", RCCL_TUNING_PARTITION_SPX, true},
+                        {nullptr, "DPX", RCCL_TUNING_PARTITION_DPX, false},
+                        {nullptr, "CPX", RCCL_TUNING_PARTITION_SPX, false},
+                        {nullptr, "", RCCL_TUNING_PARTITION_SPX, false},
+                        {"SPX", "DPX", RCCL_TUNING_PARTITION_SPX, false},
+                        {"DPX", "SPX", RCCL_TUNING_PARTITION_DPX, true},
+                        {"dpx", "", RCCL_TUNING_PARTITION_DPX, false},
+                        {"Auto", "DPX", RCCL_TUNING_PARTITION_DPX, false},
+                        {"", "DPX", RCCL_TUNING_PARTITION_DPX, false}};
   for (const Case& tc : cases) {
     const std::string label = std::string("env '") + (tc.env ? tc.env : "<unset>") + "', GPU '" + tc.gpu + "'";
     SetMicroEnv("RCCL_TUNING_PARTITION_MODE", tc.env);
@@ -2112,11 +2114,13 @@ TEST_F(InitMicrotest, FillInfo_TuningPartitionRequest) {
     g_pciComputePartitionCalls = 0;
     ncclPeerInfo info{};
     info.tuningPartition = -1;
+    info.spxReported = !tc.spxReported;
     ncclResult_t res = ncclInternalError;
     ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
     const std::string log = RcclUnitTesting::CaptureLog([&] { res = fillInfo(c.get(), &info, 0); });
     EXPECT_EQ(ncclSuccess, res);
     EXPECT_EQ(tc.want, info.tuningPartition) << label;
+    EXPECT_EQ(tc.spxReported, info.spxReported) << label;
     EXPECT_EQ(1, g_pciComputePartitionCalls) << "one read serves MLOPart and tuning, " << label;
     EXPECT_EQ("0000:11:00.0", g_lastPciComputePartitionBusId) << "the mode lives on function 0";
     EXPECT_FALSE(LogHas(log, "RCCL_TUNING_PARTITION_MODE")) << "a valid value must not be reported:\n" << log;
