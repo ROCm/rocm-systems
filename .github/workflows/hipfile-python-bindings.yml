@@ -196,7 +196,7 @@ jobs:
               # artifact (named after the file) across all of them. Sanitized
               # compiler avoids a "+" being read as a PEP 440 local version.
               NEW_FILENAME="${OLD_FILENAME%.tar.gz}-${_AIS_INPUT_PLATFORM}-${_AIS_INPUT_ROCM_VERSION}-${_AIS_SAFE_COMPILER_NAME}-cxx${_AIS_INPUT_CXX_STANDARD}.tar.gz"
-              mv ./python/dist/${OLD_FILENAME} ./python/dist/${NEW_FILENAME}
+              mv "./python/dist/${OLD_FILENAME}" "./python/dist/${NEW_FILENAME}"
               echo "HIPFILE_PYTHON_SDIST_FILENAME=${NEW_FILENAME}" >> "${AIS_GITHUB_OUTPUT}"
             '
       - name: Install hipFile Python sdist into virtual environment

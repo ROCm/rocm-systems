@@ -128,7 +128,7 @@ jobs:
                 -DCMAKE_HIP_ARCHITECTURES="${{ env.AIS_HIP_ARCHITECTURES }}" \
                 -DCMAKE_HIP_PLATFORM=amd \
                 -DHIPFILE_USE_CLANG_TIDY=ON \
-                -DHIPFILE_CLANG_TIDY_EXECUTABLE=clang-tidy-${AIS_CLANG_TIDY_VERSION} \
+                -DHIPFILE_CLANG_TIDY_EXECUTABLE="clang-tidy-${AIS_CLANG_TIDY_VERSION}" \
                 ../../rocm-systems/projects/hipfile
             '
       - name: Compile hipFile with clang-tidy
