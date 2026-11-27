@@ -1,10 +1,14 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+import argparse
 import sys
 from pathlib import Path
 
 from membw_analysis.engine import run_membw_analysis
+from memory_chart.mem_chart_html import chart_view, mem_chart_document
+from memory_chart.render import format_mem_chart_heading
+from memory_chart.units import panel_units
 from ml_api_tracing.analyze.orchestrator import (
     apply_operator_filter,
     apply_sliced_kernel_top,
@@ -15,12 +19,16 @@ from ml_api_tracing.analyze.orchestrator import (
 from ml_api_tracing.analyze.output import list_operators, show_matched_operator_report
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from roofline.roofline_main import ROOFLINE_SUPPORTED, Roofline
-from utils import file_io, parser, tty
+from utils import file_io, parser, schema, tty
+from utils.html_report.report_shell import write_report
 from utils.logger import console_log, console_warning, demarcate
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.roofline_calc import ROOFLINE_TABLE_IDS, calc_ai_analyze
 from utils.utils_analysis import impute_counters_iteration_multiplex
 from utils.utils_common import selects_roofline, validate_roofline_csv
+
+# The device the HTML reports describe, which their file names show.
+_REPORT_DEVICE_ID = 0
 
 
 class cli_analysis(OmniAnalyze_Base):
@@ -130,6 +138,36 @@ class cli_analysis(OmniAnalyze_Base):
         if listing_requested:
             sys.exit(0)
 
+    def _write_mem_chart_html(
+        self,
+        args: argparse.Namespace,
+        workload: schema.Workload,
+        workload_path: str,
+        gpu_arch: str,
+        arch_config: schema.ArchConfig,
+    ) -> None:
+        """Write the memory chart page when the terminal shows the memory chart."""
+        for panel_id, panel in arch_config.panel_configs.items():
+            values = tty.mem_chart_values(
+                workload.dfs,
+                tty.mem_chart_tables(
+                    args, self._runs, panel_id, panel, self._profiling_config
+                ),
+            )
+            if not values:
+                continue
+            aggregate = chart_view(
+                gpu_arch, values, panel_units(panel), workload.membw_result
+            )
+            heading = format_mem_chart_heading(args.normal_unit, panel_id=panel_id)
+            workload.mem_chart_html_path = write_report(
+                workload_path,
+                "mem_chart",
+                _REPORT_DEVICE_ID,
+                args.gpu_kernel,
+                mem_chart_document(gpu_arch, heading, panel, aggregate),
+            )
+
     @demarcate
     def run_analysis(self) -> None:
         """Run CLI analysis."""
@@ -175,7 +213,7 @@ class cli_analysis(OmniAnalyze_Base):
                             mspec=soc_obj._mspec,
                             run_parameters={
                                 "workload_dir": workload_path,
-                                "device_id": 0,
+                                "device_id": _REPORT_DEVICE_ID,
                                 "gpu_arch": gpu_arch,
                                 "iteration_multiplexing": self._profiling_config.get(
                                     "iteration_multiplexing"
@@ -218,6 +256,11 @@ class cli_analysis(OmniAnalyze_Base):
                         f"{gpu_arch} does not support the roofline benchmark, so "
                         "analyze shows no roofline data.",
                     )
+
+            if len(args.path) == 1:
+                self._write_mem_chart_html(
+                    args, workload, workload_path, gpu_arch, arch_config
+                )
 
             tty.show_all(
                 args,

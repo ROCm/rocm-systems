@@ -169,6 +169,21 @@ class Layouts:
         return cls._by_arch.get(canonical_config_arch(gpu_arch) or "")
 
 
+def layout_data(gpu_arch: Optional[str]) -> Optional[Dict[str, Any]]:
+    """The layout file of an arch as read, with the format version added; None if
+    the arch has no chart.
+
+    README.md documents the format. The analysis database and the HTML memory
+    chart both store it.
+    """
+    layout = Layouts.for_arch(gpu_arch)
+    if layout is None:
+        return None
+    layout_json = json.loads(layout.path.read_text(encoding="utf-8"))
+    layout_json["version"] = LAYOUT_VERSION
+    return layout_json
+
+
 class PanelConfigs:
     """The memory chart panel config of each analysis-config arch, read on first use."""
 

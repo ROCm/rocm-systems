@@ -1,0 +1,239 @@
+/* Copyright (c) Advanced Micro Devices, Inc. */
+/* SPDX-License-Identifier:  MIT */
+
+:root {
+  /* Hues identify metric categories, not value thresholds or hardware levels.
+     Stall is the status red; values themselves are drawn in text colors. */
+  --mem-read: #2a78d6;
+  --mem-write: #1baf7a;
+  --mem-atomic: #e87ba4;
+  --mem-util: #eda100;
+  --mem-hit: #008300;
+  --mem-stall: #d03b3b;
+  --mem-bw: var(--mem-read);
+  --mem-neutral: #5c6570;
+  --mem-scope-0: #eef1f5;
+  --mem-scope-1: #f1efeb;
+  --mem-panel-width: 12rem;
+}
+
+:root.report-theme-dark {
+  --mem-read: #3987e5;
+  --mem-write: #199e70;
+  --mem-atomic: #e87ba4;
+  --mem-util: #c98500;
+  --mem-hit: #0ca30c;
+  --mem-stall: #d03b3b;
+  --mem-neutral: #abb4be;
+  --mem-scope-0: #202630;
+  --mem-scope-1: #292622;
+}
+
+.mem-cat-read { --mem-category: var(--mem-read); }
+.mem-cat-write { --mem-category: var(--mem-write); }
+.mem-cat-atomic { --mem-category: var(--mem-atomic); }
+.mem-cat-util { --mem-category: var(--mem-util); }
+.mem-cat-hit { --mem-category: var(--mem-hit); }
+.mem-cat-stall { --mem-category: var(--mem-stall); }
+.mem-cat-bw { --mem-category: var(--mem-bw); }
+.mem-cat-neutral { --mem-category: var(--mem-neutral); }
+
+.mem-chart-heading { margin: 0; font-size: 18px; }
+.mem-chart-selection { color: var(--report-muted); font-size: 13px; }
+
+.mem-chart-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: auto;
+}
+
+.mem-chart-diagram {
+  position: relative;
+  flex: 1 0 420px;
+  overflow: hidden;
+  border: 1px solid var(--report-border);
+  border-radius: 8px;
+  background: var(--report-surface);
+  cursor: grab;
+  touch-action: none;
+}
+
+.mem-chart-canvas {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: max-content;
+  padding: 16px;
+  transform-origin: 0 0;
+  font-size: 13px;
+  color: var(--report-text);
+}
+
+.mem-chart-grid {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  align-items: stretch;
+}
+
+/* One rectangle per scope label, behind the blocks it holds. */
+.mem-chart-scope {
+  z-index: 0;
+  margin: -10px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  color: var(--report-muted);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+}
+.mem-chart-scope-0 { background: var(--mem-scope-0); }
+.mem-chart-scope-1 { background: var(--mem-scope-1); }
+
+.mem-chart-column {
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 24px;
+}
+.mem-chart-column > .mem-chart-block:last-child { flex: 1 0 auto; }
+
+.mem-chart-block {
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--report-border);
+  border-radius: 6px;
+  background: var(--report-surface);
+}
+.mem-chart-panel { width: var(--mem-panel-width); }
+.mem-chart-block .mem-chart-block { width: auto; }
+.mem-chart-block.mem-chart-stalled { border-color: var(--mem-stall); }
+.mem-chart-list { white-space: nowrap; }
+.mem-chart-block-title { margin: 0 0 2px; font-size: 13px; font-weight: 700; }
+
+.mem-chart-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 8px;
+  align-items: baseline;
+}
+.mem-chart-item-title { overflow-wrap: anywhere; }
+.mem-chart-value {
+  color: var(--report-text);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.mem-chart-bar {
+  grid-column: 1 / -1;
+  height: 4px;
+  margin-top: 2px;
+  border-radius: 2px;
+  background: var(--report-border);
+  overflow: hidden;
+}
+.mem-chart-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--mem-category, var(--report-muted));
+}
+.mem-chart-stall { color: var(--mem-stall); text-decoration: none; }
+a.mem-chart-stall:hover .mem-chart-item-title { text-decoration: underline; }
+.mem-chart-stall .mem-chart-value { color: var(--mem-stall); }
+
+.mem-chart-edge { position: relative; min-width: 7rem; }
+.mem-chart-edge-empty { min-width: 2rem; }
+
+.mem-chart-lanes {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+}
+.mem-chart-vertical .mem-chart-lanes { position: static; }
+.mem-chart-lane-group { color: var(--report-muted); font-weight: 600; }
+.mem-chart-lane {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--report-text);
+  white-space: nowrap;
+}
+.mem-chart-lane-stacked { flex-direction: column; gap: 0; }
+.mem-chart-lane .mem-chart-value { font-weight: 700; }
+
+.mem-chart-attached { z-index: 1; display: flex; }
+.mem-chart-attached-above { align-items: flex-end; }
+.mem-chart-attached-above .mem-chart-block,
+.mem-chart-attached-below .mem-chart-block { width: max-content; margin: 0 auto; }
+.mem-chart-vertical {
+  z-index: 1;
+  display: flex;
+  padding: 8px 0 8px calc(50% + 16px);
+}
+
+.mem-chart-connectors {
+  position: absolute;
+  left: 16px;
+  top: 16px;
+  z-index: 2;
+  overflow: visible;
+  pointer-events: none;
+}
+.mem-chart-connectors path {
+  fill: none;
+  stroke: var(--mem-category, var(--report-muted));
+  stroke-width: 1.5;
+}
+
+.mem-chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  font-size: 12px;
+  color: var(--report-muted);
+}
+.mem-chart-legend span::before {
+  content: "";
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 5px;
+  border-radius: 2px;
+  background: var(--mem-category);
+  vertical-align: -1px;
+}
+
+.mem-chart-guidance:empty { display: none; }
+/* Each guidance box is as wide as its longest line, as in the terminal */
+.mem-chart-guidance {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 10px;
+}
+.mem-chart-status { flex: 1 1 100%; margin: 0; }
+.mem-chart-guidance-block {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--mem-stall);
+  border-radius: 6px;
+  background: var(--report-surface);
+  font-family: inherit;
+  box-sizing: border-box;
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: pre;
+}
+.mem-chart-guidance-block strong { color: var(--mem-stall); }
+.mem-chart-guidance-block:target { outline: 2px solid var(--mem-stall); }

@@ -3,7 +3,7 @@
 
 """Terminal-independent summaries of memory bandwidth analysis results."""
 
-from typing import Iterator, Optional, Tuple
+from typing import Iterator, List, Optional, Tuple
 
 from membw_analysis.models import BottleneckNode, MemBwAnalysisResult
 
@@ -28,6 +28,19 @@ def active_leaves(nodes: Tuple[BottleneckNode, ...]) -> Iterator[BottleneckNode]
         if not any(child.state == "active" for child in node.children):
             yield node
         yield from active_leaves(node.children)
+
+
+def stalls_at(
+    membw_result: Optional[MemBwAnalysisResult], level: Optional[str]
+) -> List[Tuple[BottleneckNode, Optional[float]]]:
+    """Each active leaf bottleneck at the given level, with its measured value."""
+    if membw_result is None or level is None:
+        return []
+    return [
+        (node, node.supporting[0].value if node.supporting else None)
+        for node in active_leaves(membw_result.nodes)
+        if node.level == level
+    ]
 
 
 def status_line(membw_result: MemBwAnalysisResult) -> Optional[str]:

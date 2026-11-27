@@ -12,6 +12,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Added GPU metrics, the Memory Chart and the roofline for gfx1200.
   * gfx1200 support is experimental and requires the `--experimental` option.
 
+* `rocprof-compute analyze` writes the memory chart as an HTML page next to the workload, for example `mem_chart_gpu-0.html`.
+  * It shows the same values as the terminal chart.
+  * Click a stall to see its memory bandwidth guidance.
+
 ### Changed
 
 * Analyze mode accepts numpy versions from 1.26.4 to 2.5.x. It previously required exactly 1.26.4, or 2.5.2 on Python 3.13 and newer.

@@ -204,7 +204,7 @@ or ``rocprof-compute analyze -h`` for the complete set.
 Output formats
 ================
 
-``analyze`` accepts an ``--output-format`` option for the analysis report. The following table lists the available values, plus the HTML roofline plots that ``analyze`` writes automatically, and the ``rocpd`` database that ``profile`` always writes:
+``analyze`` accepts an ``--output-format`` option for the analysis report. The following table lists the available values, plus the HTML roofline plots and memory chart page that ``analyze`` writes automatically, and the ``rocpd`` database that ``profile`` always writes:
 
 .. list-table::
    :header-rows: 1
@@ -231,6 +231,8 @@ Output formats
    * - ``html``
      - analyze
      - Standalone Plotly roofline plot(s) (``empirRoof_gpu-<id>...html``), written automatically whenever the workload includes roofline data, independent of ``--output-format``. See :ref:`standalone-roofline`.
+
+       The memory chart page (``mem_chart_gpu-<id>...html``), written automatically whenever ``analyze`` shows the memory chart, independent of ``--output-format``. See :ref:`cli-memory-chart-html`.
 
 Select the analyze output format with ``--output-format`` and override the file name with ``--output-name``. See :ref:`analysis-output-format` for details.
 
