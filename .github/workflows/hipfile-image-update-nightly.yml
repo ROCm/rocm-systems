@@ -27,9 +27,10 @@ concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: true
 
+# Read-only by default. packages: write only in update_nightly_AIS_CI_image,
+# the one job that pushes images.
 permissions:
   contents: read
-  packages: write
 
 jobs:
   # Resolve runs on the runner (not the docker:28.5 container) because the
@@ -53,6 +54,9 @@ jobs:
 
   update_nightly_AIS_CI_image:
     needs: resolve_nightly
+    permissions:
+      contents: read
+      packages: write
     strategy:
       fail-fast: false
       matrix:
