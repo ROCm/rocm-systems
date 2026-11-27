@@ -28,7 +28,7 @@ concurrency:
 
 jobs:
   setup:
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@35d0ff7aa66762c903ff0228f69553459bc1703b # 2026-11-26
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@ca768a2d07f0166d586de37b5460edca63512b24 # 2026-11-26
     with:
       build_variant: "asan"
       # Python/PyTorch/JAX builds are not supported with ASAN yet
@@ -71,7 +71,7 @@ jobs:
         needs.setup.outputs.linux_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@35d0ff7aa66762c903ff0228f69553459bc1703b # 2026-11-26
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@ca768a2d07f0166d586de37b5460edca63512b24 # 2026-11-26
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
       test_labels: ${{ needs.setup.outputs.linux_test_labels }}
@@ -95,7 +95,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout TheRock repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: "ROCm/TheRock"
           ref: 35d0ff7aa66762c903ff0228f69553459bc1703b # 2026-11-26
