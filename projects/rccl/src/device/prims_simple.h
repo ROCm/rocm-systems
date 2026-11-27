@@ -58,6 +58,9 @@ class Primitives<T, RedOp, Fan, Direct,
   uint64_t barrier_next_pat = 0;
   int repeat;
   bool skip_fence = false;
+#if RCCL_SIMPLE_STORE_FREE_STEP_START
+  bool stepStoreFree = false;  // stepStartBarrier() may order LDS only: no connFifo on any send or receive peer
+#endif
 
   // Don't use barrier 0 as it's used by the final sync
   inline __device__ void barrier() {
@@ -75,6 +78,19 @@ class Primitives<T, RedOp, Fan, Direct,
   inline __device__ void subBarrier() {
     if (nworkers == WARP_SIZE) __syncwarp();
     else barrier();
+  }
+
+  // Orders LDS only: the last step drained at its end barrier and post-send fence, and the post threads' tail or head
+  // only has to reach the peer. Slot loads issue after the wait thread's system-scope acquire. connFifo comms keep
+  // subBarrier().
+  inline __device__ void stepStartBarrier() {
+#if RCCL_SIMPLE_STORE_FREE_STEP_START
+    if (stepStoreFree && nworkers != WARP_SIZE) {
+      ldsOrderedBarrier(nworkers, threadsPerBlock, barrier_next, barriers);
+      return;
+    }
+#endif
+    subBarrier();
   }
 
   // Multi-RPN (hierarchical) PAT runs NCCL_PAT_MULTI_RPN_NWORKERS workers.
@@ -299,7 +315,7 @@ class Primitives<T, RedOp, Fan, Direct,
           ncclShmem.groups[group].acc = (Dst && userAcc != nullptr) ? userAcc + dstIx + offset : nullptr;
         }
         waitPeer<DirectRecv, DirectSend, Recv, Send, Src, Dst>(srcIx, dstIx, offset, sliceSize);
-        subBarrier();
+        stepStartBarrier();
         /* if user abort the kernel, we don't need to actually perform copy/reduce; just set size
          * to 0 to avoid unnecessary workload. */
         int workSize = ncclShmem.aborted ? 0 : sliceSize;
@@ -802,6 +818,11 @@ public:
     // coverity[overrun-call] => Coverity think prims.index can be greater than 1
     if (flags & (RoleWaitSend | RolePostSend))
       loadSendConn(channel->peers[peer], connIndexSend, collWork ? collWork->direct : 0, sendIpcReg, sendNetReg);
+#if RCCL_SIMPLE_STORE_FREE_STEP_START
+    // Every thread scans the same peers, so the whole block takes the same barrier.
+    stepStoreFree = !anySendConnFifo(channel, sendPeers, nsend, connIndexSend) &&
+                    !anyRecvConnFifo(channel, recvPeers, nrecv, connIndexRecv);
+#endif
 
     // if (barrierAny(flags & NetDeviceUnpack)) {
     //   flags |= AnyNetDeviceUnpack;

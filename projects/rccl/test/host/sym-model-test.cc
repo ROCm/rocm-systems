@@ -308,6 +308,25 @@ TEST_F(SymModelTdmReachableTest, DefaultParam_OneSidedRegistration_TmaValidOnlyO
   }
 }
 
+TEST_F(SymModelTdmTest, AgHierCtas_SymCtasCannotExceedTheDefaultCap) {
+  g_loadParam = ParamOverride({{"SYM_CTAS", 96}});
+  EXPECT_EQ(ncclSymkModelCtasEnvOverride(ncclSymkKernelId_AllGather_HierLsaST), ncclSymkAgHierMaxBlocks);
+  EXPECT_EQ(ncclSymkModelCtasEnvOverride(ncclSymkKernelId_AllGather_ST), ncclSymkMaxBlocks);
+}
+
+TEST_F(SymModelTdmTest, AgHierCtas_EnvSetsTheCountAboveTheDefaultCap) {
+  g_loadParam = ParamOverride({{"SYM_AG_HIER_CTAS", 96}});
+  EXPECT_EQ(ncclSymkModelCtasEnvOverride(ncclSymkKernelId_AllGather_HierLsaST), 96);
+  EXPECT_EQ(ncclSymkModelCtasEnvOverride(ncclSymkKernelId_AllGather_ST), 0);
+}
+
+TEST_F(SymModelTdmTest, AgHierCtas_SymCtasReducesFromTheOverriddenCap) {
+  g_loadParam = ParamOverride({{"SYM_AG_HIER_CTAS", 96}, {"SYM_CTAS", 40}});
+  EXPECT_EQ(ncclSymkModelCtasEnvOverride(ncclSymkKernelId_AllGather_HierLsaST), 40);
+  g_loadParam = ParamOverride({{"SYM_AG_HIER_CTAS", 96}, {"SYM_CTAS", 128}});
+  EXPECT_EQ(ncclSymkModelCtasEnvOverride(ncclSymkKernelId_AllGather_HierLsaST), 96);
+}
+
 // ---- Hierarchical AllGather: gfx1250 partition mode, the only place the mask offers it ----
 
 // g_loadParam stub: SYM_CTAS reads as ncclSymkMaxBlocks; every other param keeps its default.
@@ -332,6 +351,7 @@ class SymModelTdmHierTest : public SymModelTdmReachableTest {
     SymModelTdmReachableTest::SetUp();
     comm_->hasMloPart = true;
     comm_->symkState.kcomm.hierScaleInSize = 2;
+    comm_->symkState.agHierMaxBlocks = ncclSymkAgHierMaxBlocks;
   }
 
   // What NCCL_SYM_KERNEL=AllGather_HierLsaTmaST leaves to the model.
@@ -398,6 +418,27 @@ TEST_F(SymModelTdmHierTest, EightPackages_BlockCounts) {
   EXPECT_EQ(vec.nChannels, 67);
 }
 
+// The by-size block count never undercuts NCCL_MIN_CTAS.
+TEST_F(SymModelTdmHierTest, VectorKernel_HonorsMinCtas) {
+  comm_->nRanks = 16;
+  comm_->tuningContext.forced[ncclFuncAllGather] = 1;
+  ncclTuningInput_t in = Input(ncclFuncAllGather, size_t(1) << 20);
+  in.minCTAs = ncclSymkAgHierMaxBlocks;
+  in.maxCTAs = MAXCHANNELS;
+  ncclTuningResult_t r = Evaluate(in, ncclSymkKernelId_AllGather_HierLsaST);
+  ASSERT_TRUE(r.valid);
+  EXPECT_EQ(r.nChannels, ncclSymkAgHierLaunchBlocks(comm_.get(), ncclSymkAgHierMaxBlocks));
+}
+
+// hierPushFlags is sized at init, so NCCL_SYM_AG_HIER_CTAS raised after init cannot launch past its rows.
+TEST_F(SymModelTdmHierTest, VectorKernel_HierCtasAboveTheInitRows_LaunchesTheRows) {
+  ScopedHook loadParam(g_loadParam, ParamOverride({{"SYM_AG_HIER_CTAS", 96}}));
+  comm_->tuningContext.forced[ncclFuncAllGather] = 1;
+  ncclTuningResult_t r = Evaluate(Input(ncclFuncAllGather, size_t(64) << 20), ncclSymkKernelId_AllGather_HierLsaST);
+  ASSERT_TRUE(r.valid);
+  EXPECT_EQ(r.nChannels, ncclSymkAgHierLaunchBlocks(comm_.get(), comm_->symkState.agHierMaxBlocks));
+}
+
 // The vector kernels hold every size range, so neither TDM kernel runs unless asked for.
 TEST_F(SymModelTdmHierTest, DefaultParam_AllGatherStaysOnVectorKernels) {
   for (size_t nBytes : {size_t(16) << 10, size_t(1) << 20, size_t(64) << 20}) {
@@ -422,6 +463,66 @@ TEST_F(SymModelTdmHierTest, TmaForced_TdmKernelsSplitAllGatherLikeTheirVectorTwi
     Pick p = Select(Input(ncclFuncAllGather, c.nBytes));
     EXPECT_EQ(p.kernelId, c.expected) << c.nBytes << " B picked " << ncclSymkKernelIdToString(p.kernelId);
   }
+}
+
+// gfx1250 partition mode runs ReduceScatter on LL up to 1 MiB of bus bytes, then on the hierarchical kernel. avg has
+// no hierarchical kernel, so LD takes its range.
+TEST_F(SymModelTdmTest, Gfx1250PartitionMode_ReduceScatterOrder) {
+  comm_->hasMloPart = true;
+  comm_->symkState.kcomm.hierScaleInSize = 2;  // the fixture's four ranks make two packages
+  struct {
+    size_t nBytes;  // per rank; the crossover counts bus bytes, four times this
+    bool avg;
+    ncclSymkKernelId expected;
+  } const cases[] = {
+      {size_t(256) << 10, false, ncclSymkKernelId_ReduceScatter_LL},
+      {size_t(512) << 10, false, ncclSymkKernelId_ReduceScatter_HierLsaLDST},
+      {size_t(256) << 10, true, ncclSymkKernelId_ReduceScatter_LL},
+      {size_t(512) << 10, true, ncclSymkKernelId_ReduceScatter_LD},
+  };
+  for (const auto& c : cases) {
+    ncclTuningInput_t in = Input(ncclFuncReduceScatter, c.nBytes);
+    if (c.avg) {
+      in.redOp = ncclAvg;
+      in.devRedOp = ncclDevSumPostDiv;
+    }
+    Pick p = Select(in);
+    EXPECT_EQ(p.kernelId, c.expected) << c.nBytes << " B " << (c.avg ? "avg" : "sum") << " picked "
+                                      << ncclSymkKernelIdToString(p.kernelId);
+  }
+}
+
+// Where the preferred ReduceScatter kernel can't run, the next one takes its range: LD for a grouped launch below the
+// crossover, LL for an unregistered send above it, and TmaLD for a selection that allows it but not LD. A forced
+// choice skips the ordering.
+TEST_F(SymModelTdmTest, Gfx1250PartitionMode_ReduceScatterFallbacks) {
+  comm_->hasMloPart = true;
+  comm_->symkState.kcomm.hierScaleInSize = 2;  // the fixture's four ranks make two packages
+  constexpr ncclSymkKernelId ll = ncclSymkKernelId_ReduceScatter_LL;
+  constexpr ncclSymkKernelId tmaLd = ncclSymkKernelId_ReduceScatter_TmaLD;
+
+  ncclTuningInput_t grouped = Input(ncclFuncReduceScatter, size_t(256) << 10);
+  grouped.nWorks = 2;
+  EXPECT_EQ(Select(grouped).kernelId, ncclSymkKernelId_ReduceScatter_LD) << "grouped, below the crossover";
+
+  ncclTuningInput_t unregistered = Input(ncclFuncReduceScatter, size_t(512) << 10);
+  unregistered.winRegType = ncclSymSendNonregRecvReg;
+  EXPECT_EQ(Select(unregistered).kernelId, ll) << "unregistered send, above the crossover";
+
+  // Select() ignores the selection, so check the two kernels it allows directly.
+  if (TmaReachableOnThisBuild()) {
+    ncclTuningInput_t tdmOnly = Input(ncclFuncReduceScatter, size_t(512) << 10);
+    tdmOnly.tuningMask = uint64_t(1) << (NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ll) |
+                         uint64_t(1) << (NCCL_TUNING_SYM_KERNEL_ID_OFFSET + tmaLd);
+    EXPECT_TRUE(Evaluate(tdmOnly, tmaLd).valid) << "TmaLD takes LD's place";
+    EXPECT_FALSE(Evaluate(tdmOnly, ll).valid);
+  }
+
+  ncclTuningInput_t forced = Input(ncclFuncReduceScatter, size_t(512) << 10);
+  EXPECT_TRUE(rcclSymkReduceScatterYieldsInPartitionMode(&forced, ll, ~uint32_t(0)));
+  comm_->tuningContext.forced[ncclFuncReduceScatter] = 1;
+  EXPECT_FALSE(rcclSymkReduceScatterYieldsInPartitionMode(&forced, ll, ~uint32_t(0)))
+    << "a forced choice leaves the kernel to the cost model";
 }
 
 // An algorithm selection naming only the TDM hierarchical kernel reaches it without NCCL_SYM_KERNEL.

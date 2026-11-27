@@ -580,6 +580,29 @@ TEST_F(GraphConnectMicrotest, ConnectTrees_OverTheChannelLimitTheSecondHalfHasIt
   EXPECT_EQ(-1, comm_->channels[CHANNEL_LIMIT].tree.up);
 }
 
+TEST_F(GraphConnectMicrotest, TreeChannelLimit_OnlyGfx1250AcrossMnnvlCliquesFollowsThePostsetMax) {
+  // gfx1250 reports 192 CUs; ncclTopoPostset then doubles up to maxChannels / 2 = 96 when the 64 cap is skipped.
+  Use(4, 2, 0, "gfx1250");
+  comm_->topo->nodes[GPU].nodes[0].gpu.cu = 192;
+  comm_->MNNVL = 1;
+  EXPECT_EQ(96, getTreeChannelLimit(comm_.get()));
+
+  comm_->MNNVL = 0;  // over NET the 64 cap gives 32
+  EXPECT_EQ(2 * CHANNEL_LIMIT, getTreeChannelLimit(comm_.get()));
+
+  Use(4, 1, 0, "gfx1250");  // a single clique has no inter-node tree links
+  comm_->topo->nodes[GPU].nodes[0].gpu.cu = 192;
+  comm_->MNNVL = 1;
+  EXPECT_EQ(2 * CHANNEL_LIMIT, getTreeChannelLimit(comm_.get()));
+
+  for (const char* gcn : {"gfx942", "gfx950"}) {
+    Use(4, 2, 0, gcn);
+    EXPECT_EQ(2 * CHANNEL_LIMIT, getTreeChannelLimit(comm_.get())) << gcn;
+  }
+  Use(4, 2, 0, "gfx90a");
+  EXPECT_EQ(CHANNEL_LIMIT, getTreeChannelLimit(comm_.get()));
+}
+
 TEST_F(GraphConnectMicrotest, SetTreeDown_AFourthChildIsAnError) {
   ncclTree tree = {};
   int ranks[4] = {10, 11, 12, 13};
@@ -896,6 +919,38 @@ class GraphConnectPostsetMicrotest : public GraphConnectMicrotest {
   void Use(int nGpus, int nNodes, int rank, const std::string& gcn = "gfx942") {
     GraphConnectMicrotest::Use(nGpus, nNodes, rank, gcn);
     ResetChannels();
+  }
+
+  // Runs Postset on node 0 of a 2-node communicator (it holds every link to node 1); returns the final channel count
+  // and lists the channels without a link to the other node.
+  int CheckTreeReach(const char* gcn, bool mnnvl, int searched, std::vector<int>& unreached) {
+    constexpr int kGpus = 4;
+    int total = 0;
+    std::vector<bool> reaches;
+    for (int rank = 0; rank < kGpus; rank++) {
+      Use(kGpus, 2, rank, gcn);
+      comm_->nChannels = searched;
+      comm_->MNNVL = mnnvl ? 1 : 0;
+      std::vector<ncclTopoRanks> all = AllRanks(kGpus, 2, searched);
+      EXPECT_EQ(ncclSuccess, Postset(all, 1, rings_));
+      if (rank == 0) {
+        total = comm_->nChannels;
+        reaches.assign(total, false);
+      }
+      EXPECT_EQ(total, comm_->nChannels);
+      for (int c = 0; c < total; c++) {
+        const ncclTree& tree = comm_->channels[c].tree;
+        if (tree.up >= kGpus) reaches[c] = true;
+        for (int d = 0; d < NCCL_MAX_TREE_ARITY; d++) {
+          if (tree.down[d] >= kGpus) reaches[c] = true;
+        }
+      }
+    }
+    unreached.clear();
+    for (int c = 0; c < total; c++) {
+      if (!reaches[c]) unreached.push_back(c);
+    }
+    return total;
   }
 };
 
@@ -1251,6 +1306,35 @@ TEST_F(GraphConnectPostsetMicrotest, Postset_The64CapSkipsGfx1250SingleNodeAndMn
   all = AllRanks(2, 2, 2);
   ASSERT_EQ(ncclSuccess, Postset(all, 100, rings_));
   EXPECT_EQ(200, comm_->nChannels);
+}
+
+// gfx1250 over MNNVL doubles past 32, so every doubled tree channel must still reach the other clique.
+TEST_F(GraphConnectPostsetMicrotest, Postset_Gfx1250MnnvlEveryTreeChannelReachesTheOtherClique) {
+  // 130 is over half the max (128 with the fixture's 304 CUs): not doubled, split in two halves.
+  for (int searched : {16, 32, 33, 46, 96, 130}) {
+    SCOPED_TRACE("searched channels " + std::to_string(searched));
+    std::vector<int> unreached;
+    const int total = CheckTreeReach("gfx1250", /*mnnvl=*/true, searched, unreached);
+    EXPECT_EQ(searched <= 128 ? 2 * searched : searched, total);
+    EXPECT_TRUE(unreached.empty()) << "first channel without a link to the other clique: " << unreached.front();
+  }
+}
+
+// The split of other architectures and of gfx1250 over NET is unchanged: halve above the fixed limit.
+TEST_F(GraphConnectPostsetMicrotest, Postset_TreeSplitOfOtherSetupsIsUnchanged) {
+  for (const char* gcn : {"gfx942", "gfx950"}) {
+    SCOPED_TRACE(gcn);
+    std::vector<int> unreached;
+    // 34 is over 2 * CHANNEL_LIMIT: halved, and the 64-channel cap keeps Postset from doubling it.
+    EXPECT_EQ(34, CheckTreeReach(gcn, /*mnnvl=*/false, 34, unreached));
+    EXPECT_TRUE(unreached.empty());
+    // 16 is doubled.
+    EXPECT_EQ(32, CheckTreeReach(gcn, /*mnnvl=*/false, 16, unreached));
+    EXPECT_TRUE(unreached.empty());
+  }
+  std::vector<int> unreached;
+  EXPECT_EQ(34, CheckTreeReach("gfx1250", /*mnnvl=*/false, 34, unreached));  // NET keeps the 64 cap
+  EXPECT_TRUE(unreached.empty());
 }
 
 TEST_F(GraphConnectPostsetMicrotest, Postset_BrokenRingsAreReported) {

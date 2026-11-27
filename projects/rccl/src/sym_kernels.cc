@@ -9,14 +9,17 @@
 #include "archinfo.h"
 #include "comm.h"
 #include "device.h"
+#include "param.h"
 #include "nccl_device/core_tmp.h"
 #include "transport.h"
 #include "tuning.h"
 #if defined(__HIP_PLATFORM_AMD__)
 #include "tdm/tdmCopy.h" // TDM_TOOLCHAIN_AVAILABLE, for ncclSymkTmaAvailable()
 #endif
+#include <algorithm>
 #include <cmath>
 #include <cfloat>
+#include <mutex>
 
 constexpr uint32_t kernelMask_STMC =
   1 << ncclSymkKernelId_AllGather_LLMC | 1 << ncclSymkKernelId_AllGather_STMC |
@@ -48,7 +51,8 @@ constexpr uint32_t kernelMask_AR = 1 << ncclSymkKernelId_AllReduce_AGxLLMC_R | 1
 constexpr uint32_t kernelMask_RS = 1 << ncclSymkKernelId_ReduceScatter_LD | 1 << ncclSymkKernelId_ReduceScatter_LDMC |
                                    1 << ncclSymkKernelId_ReduceScatter_TmaLD | 1 << ncclSymkKernelId_ReduceScatter_LL |
                                    1 << ncclSymkKernelId_ReduceScatter_RailA2A_LsaLD |
-                                   1 << ncclSymkKernelId_ReduceScatter_RailA2A_LsaLDMC;
+                                   1 << ncclSymkKernelId_ReduceScatter_RailA2A_LsaLDMC |
+                                   1 << ncclSymkKernelId_ReduceScatter_HierLsaLDST;
 
 constexpr uint32_t kernelMask_LSA =
   1 << ncclSymkKernelId_AllReduce_AGxLL_R | 1 << ncclSymkKernelId_AllReduce_AGxLLMC_R |
@@ -72,8 +76,9 @@ constexpr uint32_t kernelMask_Tma = 1 << ncclSymkKernelId_AllGather_TmaST | 1 <<
 constexpr uint32_t kernelMask_DynamicSmem = (kernelMask_Gin & kernelMask_RS) | kernelMask_Tma;
 
 // Needs the LSA team to factor into equal-size packages
-constexpr uint32_t kernelMask_Hier =
-  1 << ncclSymkKernelId_AllGather_HierLsaST | 1 << ncclSymkKernelId_AllGather_HierLsaTmaST;
+constexpr uint32_t kernelMask_Hier = 1 << ncclSymkKernelId_AllGather_HierLsaST |
+                                     1 << ncclSymkKernelId_AllGather_HierLsaTmaST |
+                                     1 << ncclSymkKernelId_ReduceScatter_HierLsaLDST;
 
 int ncclSymkLLKernelMask() {
   return kernelMask_LL;
@@ -226,6 +231,38 @@ static void getRequirements_gin(struct ncclComm* comm, int* out_nBlocks, size_t*
 }
 
 extern int64_t ncclParamSymCTAs();
+// 0 keeps the compiled-in default.
+NCCL_PARAM(SymAgHierCtas, "SYM_AG_HIER_CTAS", 0);
+NCCL_PARAM(SymAgHierChunkBytes, "SYM_AG_HIER_CHUNK_BYTES", 0);
+
+static constexpr int64_t ncclSymkAgHierMaxChunkBytesEnv = int64_t(1) << 30;
+
+int ncclSymkAgHierMaxBlocksLimit() {
+  int64_t requested = ncclParamSymAgHierCtas();
+  if (requested < 1) return ncclSymkAgHierMaxBlocks;
+  if (requested > MAXCHANNELS) {
+    static std::once_flag warned;
+    std::call_once(warned, [&] {
+      INFO(NCCL_ENV, "NCCL_SYM_AG_HIER_CTAS=%lld exceeds %d, using %d", (long long)requested, MAXCHANNELS, MAXCHANNELS);
+    });
+    return MAXCHANNELS;
+  }
+  return static_cast<int>(requested);
+}
+
+size_t ncclSymkAgHierMaxChunkBytesLimit() {
+  int64_t requested = ncclParamSymAgHierChunkBytes();
+  if (requested < 1) return ncclSymkAgHierMaxChunkBytes;
+  if (requested > ncclSymkAgHierMaxChunkBytesEnv) {
+    static std::once_flag warned;
+    std::call_once(warned, [&] {
+      INFO(NCCL_ENV, "NCCL_SYM_AG_HIER_CHUNK_BYTES=%lld exceeds %lld, using %lld", (long long)requested,
+           (long long)ncclSymkAgHierMaxChunkBytesEnv, (long long)ncclSymkAgHierMaxChunkBytesEnv);
+    });
+    return static_cast<size_t>(ncclSymkAgHierMaxChunkBytesEnv);
+  }
+  return static_cast<size_t>(requested);
+}
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
 // The block width tuning is fitted to gfx950 and must not reach other architectures. It sizes the
@@ -243,8 +280,8 @@ bool ncclSymkIsGfx1250(struct ncclComm* comm) {
 }
 #endif
 
-// The hierarchical AllGather is tuned and validated only on gfx1250 in partition mode.
-static bool ncclSymkAgHierAvailable(struct ncclComm* comm) {
+// The hierarchical kernels are validated only on gfx1250 in partition mode.
+bool ncclSymkHierAvailable(struct ncclComm* comm) {
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   return ncclSymkIsGfx1250(comm) && comm->hasMloPart;
 #else
@@ -273,18 +310,33 @@ static int computeHierScaleInSize(struct ncclComm* comm) {
   return size;
 }
 
-// Packages the hierarchical AllGather spans, or 0 where it can't run: it needs gfx1250 in partition
-// mode and an LSA team of at least two equal packages, so there is a cross-package hop to save.
-static int ncclSymkAgHierGroups(struct ncclComm* comm) {
+// Packages the hierarchical kernels (AllGather and ReduceScatter) span, or 0 where they can't run: they need
+// gfx1250 in partition mode and an LSA team of at least two equal packages, so there is a cross-package hop
+// to save.
+int ncclSymkHierGroups(struct ncclComm* comm) {
   int scaleIn = comm->symkState.kcomm.hierScaleInSize;
+  if (!ncclSymkHierAvailable(comm) || scaleIn <= 0) return 0;
   int lsaRanks = ncclTeamLsa(comm).nRanks;
-  if (!ncclSymkAgHierAvailable(comm) || scaleIn <= 0 || lsaRanks % scaleIn != 0 || lsaRanks / scaleIn < 2) return 0;
+  if (lsaRanks < comm->nRanks || lsaRanks % scaleIn != 0 || lsaRanks / scaleIn < 2) return 0;
   return lsaRanks / scaleIn;
 }
 
+uint32_t ncclSymkRsHierLaunchChunkSize(struct ncclComm* comm, size_t blockBytes) {
+  // The communicator's chunk size is what the slots hold, so a launch may only go below it.
+  uint32_t chunk = comm->symkState.kcomm.rsHierChunkSize;
+  if (blockBytes >= ncclSymkRsHierChunkSwitchBlockBytes) return chunk;
+  return uint32_t(std::min<size_t>(ncclSymkRsHierMinChunkBytes, chunk));
+}
+
+int ncclSymkRsHierLaunchBlocks(int nRanks, size_t nBytes) {
+  size_t busBytes = size_t(nRanks) * nBytes;
+  return busBytes < (16 << 20) ? 64 : busBytes < (64 << 20) ? 80 : ncclSymkRsHierMaxBlocks;
+}
+
 int ncclSymkAgHierLaunchBlocks(struct ncclComm* comm, int nBlocks) {
-  int nGroups = ncclSymkAgHierGroups(comm);
+  int nGroups = ncclSymkHierGroups(comm);
   if (nGroups == 0) return nBlocks;
+  nBlocks = std::min(nBlocks, comm->symkState.agHierMaxBlocks);
   int nUsed = ncclSymkAgHierG0Blocks(nBlocks, nGroups) + (nGroups - 1) * ncclSymkAgHierGroupBlocks(nBlocks, nGroups);
   return std::min(nBlocks, nUsed);
 }
@@ -297,18 +349,24 @@ ncclResult_t ncclSymkInitOnce(struct ncclComm* comm) {
   if (!symk->initialized) {
     symk->initialized = true;
     symk->kcomm.hierScaleInSize = computeHierScaleInSize(comm);
-    int agHierGroups = ncclSymkAgHierGroups(comm);
-    if (ncclSymkAgHierAvailable(comm) && symk->kcomm.hierScaleInSize == 0) {
+    symk->kcomm.hierMaxChunkBytes = static_cast<uint32_t>(ncclSymkAgHierMaxChunkBytesLimit());
+    int agHierBlocks = std::max(ncclSymkAgHierMaxBlocksLimit(), ncclSymkAgHierTmaMaxBlocks);
+    symk->agHierMaxBlocks = agHierBlocks;
+    symk->kcomm.rsHierChunkSize = ncclSymkRsHierMinChunkBytes;
+    int hierGroups = ncclSymkHierGroups(comm);
+    if (ncclSymkHierAvailable(comm) && symk->kcomm.hierScaleInSize == 0) {
       INFO(NCCL_INIT,
-           "Symmetric hierarchical AllGather off: ranks do not form two or more consecutive, equal-size groups "
-           "per physical device (nRanks %d)", comm->nRanks);
+           "Symmetric hierarchical kernel off: ranks do not form two or more consecutive, equal-size groups "
+           "per physical device (nRanks %d)",
+           comm->nRanks);
     }
     struct ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
     // Disable LSA multicast for cross-clique since NVLS isn't available across cliques
     symk->hasLsaMultimem =
       ncclNvlsSymmetricMultimemEnabled(comm) && ncclTeamLsa(comm).nRanks > 2 && !comm->p2pCrossClique;
     reqs.lsaMultimem = symk->hasLsaMultimem;
-    reqs.lsaBarrierCount = agHierGroups > 0 ? std::max(ncclSymkMaxBlocks, ncclSymkAgHierMaxBlocks) : ncclSymkMaxBlocks;
+    reqs.lsaBarrierCount =
+      hierGroups > 0 ? std::max({ncclSymkMaxBlocks, agHierBlocks, ncclSymkRsHierMaxBlocks}) : ncclSymkMaxBlocks;
     reqs.ginStrongSignalsRequired = false;
     reqs.ginVaSignalsRequired = false;
 
@@ -327,12 +385,43 @@ ncclResult_t ncclSymkInitOnce(struct ncclComm* comm) {
     reqs.resourceRequirementsList = &lla2aReq;
 
     struct ncclDevResourceRequirements hierPushFlagsReq = {};
-    if (agHierGroups > 0) {
-      hierPushFlagsReq.bufferSize = size_t(ncclSymkAgHierMaxBlocks) * agHierGroups * sizeof(uint64_t);
+    struct ncclDevResourceRequirements rsHierSlotsReq = {};
+    struct ncclDevResourceRequirements rsHierFlagsReq = {};
+    if (hierGroups > 0) {
+      hierPushFlagsReq.bufferSize = size_t(agHierBlocks) * ncclSymkAgHierFlagStride(hierGroups) * sizeof(uint64_t);
       hierPushFlagsReq.bufferAlign = 128;
       hierPushFlagsReq.outBufferHandle = &symk->kcomm.hierPushFlags;
       hierPushFlagsReq.next = reqs.resourceRequirementsList;
       reqs.resourceRequirementsList = &hierPushFlagsReq;
+    }
+    if (hierGroups > 0 && ncclTeamLsa(comm).nRanks == comm->nRanks) {
+      // Slots hold a chunk per other package for two rounds of every block, so the chunk size decides how
+      // much memory they take.
+      size_t slotEntries = size_t(ncclSymkRsHierMaxBlocks) * 2 * (hierGroups - 1);
+      // The largest chunk a launch may pick, or less if the budget can't hold it. The chunk stays a multiple of
+      // the slots' alignment.
+      size_t chunk = std::min<size_t>(ncclSymkRsHierMaxChunkBytes, ncclSymkRsHierSlotsMaxBytes / slotEntries);
+      chunk = std::max<size_t>(chunk & ~(ncclSymkRsHierSlotsAlign - 1), ncclSymkRsHierSlotsAlign);
+      symk->kcomm.rsHierChunkSize = uint32_t(chunk);
+      INFO(NCCL_INIT,
+           "Symmetric hierarchical ReduceScatter: %d packages, %u bytes per round (smaller launches use less), "
+           "slots %zu bytes",
+           hierGroups, symk->kcomm.rsHierChunkSize, slotEntries * symk->kcomm.rsHierChunkSize);
+
+      rsHierSlotsReq.bufferSize = slotEntries * symk->kcomm.rsHierChunkSize;
+      rsHierSlotsReq.bufferAlign = ncclSymkRsHierSlotsAlign;
+      rsHierSlotsReq.outBufferHandle = &symk->kcomm.rsHierSlots;
+      rsHierSlotsReq.next = nullptr;
+      struct ncclDevResourceRequirements** tail = &reqs.resourceRequirementsList;
+      while (*tail != nullptr) tail = &(*tail)->next;
+      *tail = &rsHierSlotsReq;
+
+      rsHierFlagsReq.bufferSize =
+        size_t(ncclSymkRsHierMaxBlocks) * ncclSymkRsHierFlagsPerBlock(hierGroups) * sizeof(uint64_t);
+      rsHierFlagsReq.bufferAlign = 128;
+      rsHierFlagsReq.outBufferHandle = &symk->kcomm.rsHierFlags;
+      rsHierFlagsReq.next = reqs.resourceRequirementsList;
+      reqs.resourceRequirementsList = &rsHierFlagsReq;
     }
 
     struct ncclDevResourceRequirements ginInboxRailReq = {};
@@ -495,7 +584,11 @@ uint32_t ncclSymkMask(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp
   bool needGin = ncclTeamLsa(comm).nRanks < comm->nRanks;
   kmask &= needGin ? kernelMask_Gin : ~kernelMask_Gin;
 
-  if (ncclSymkAgHierGroups(comm) == 0) kmask &= ~kernelMask_Hier;
+  if (ncclSymkHierGroups(comm) == 0) kmask &= ~kernelMask_Hier;
+  // generate.py builds the hierarchical ReduceScatter for sum only, in fp32 and bf16.
+  if (red != ncclDevSum || (ty != ncclFloat32 && ty != ncclBfloat16)) {
+    kmask &= ~(1u << ncclSymkKernelId_ReduceScatter_HierLsaLDST);
+  }
   return kmask;
 }
 
@@ -543,6 +636,13 @@ bool ncclSymkGfx1250AllGatherPrefersStore(int nRanks, size_t nBytes) {
 
 bool ncclSymkGfx1250AllGatherPrefersHier(int nRanks, size_t nBytes) {
   return size_t(nRanks) * nBytes >= ncclSymkGfx1250AgSTMaxBusBytes;
+}
+
+// Where ReduceScatter on gfx1250 in partition mode moves from LL to the hierarchical kernel.
+static constexpr size_t ncclSymkGfx1250RsLLMaxBytes = 1 << 20;
+
+bool ncclSymkGfx1250ReduceScatterPrefersHier(int nRanks, size_t nBytes) {
+  return size_t(nRanks) * nBytes > ncclSymkGfx1250RsLLMaxBytes;
 }
 
 int ncclSymkGfx950BlockThreads(ncclFunc_t coll, bool isLL, int nRanks, size_t nBytes) {
