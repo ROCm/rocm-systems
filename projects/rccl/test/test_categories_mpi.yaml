@@ -429,6 +429,7 @@ test_categories:
       - "DdaIpcMPI_IndexData.*"
       - "DdaIpcMPI_WideLL.*"
       - "RevokeDdaIpcMPITest.IncompleteCollective_DdaIpcLLAllGather"
+      - "RevokeDdaIpcMPITest.IncompleteCollective_DdaIpcLLReduceScatterWide"
       - "DdaMPI_CollOpCount.*"
     exclude_windows: *mpi_exclude_windows
     labels: &mpi_standard_labels

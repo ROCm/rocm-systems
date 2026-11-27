@@ -13208,6 +13208,59 @@ TEST(WrapMicrotestIsolated, SelectAllGather_IpcLLInItsWindowIpcSimpleAroundIt) {
   });
 }
 
+// The ReduceScatter IPC LL wide window: 16 blocks from 64 KiB to 512 KiB total, above the 32 KiB IPC-grid cap.
+TEST(WrapMicrotestIsolated, DdaIpcLLWideBlocks_ReduceScatterWindow) {
+  RUN_ISOLATED_TEST("Wrap_DdaIpcLLWideBlocks_ReduceScatterWindow", []() {
+    for (const char* arch : {"gfx950", "gfx942"}) {
+      SCOPED_TRACE(arch);
+      ncclComm* comm = MakeBroadcastComm(arch, /*ipc=*/true);
+      std::vector<uint32_t> blocks;
+      g_loadParam = IpcLLParams(-1);
+      for (size_t total : {32 * kKiB, 64 * kKiB - 16, 64 * kKiB, 512 * kKiB, 512 * kKiB + 16}) {
+        blocks.push_back(rcclDdaIpcLLWideBlocks(comm, ncclFuncReduceScatter, total));
+      }
+      EXPECT_EQ(blocks, (std::vector<uint32_t>{0, 0, 16, 16, 0}));
+      g_loadParam = IpcLLParams(256 * kKiB);
+      EXPECT_EQ(0u, rcclDdaIpcLLWideBlocks(comm, ncclFuncReduceScatter, 256 * kKiB + 16)) << "env lowers the top";
+      g_loadParam = IpcLLParams(-1, -1, -1, /*vmmThreshold=*/0);
+      EXPECT_EQ(512 * kKiB, rcclDdaEntryThreshold(comm, ncclFuncReduceScatter)) << "entry gate admits the window";
+      DeleteCommWithArch(comm);
+    }
+  });
+}
+
+// ReduceScatter on the IPC comm by total bytes: LL on the IPC grid to its cap, IPC Simple, LL in its wide window, IPC
+// Simple again.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_IpcLLInItsWideWindow) {
+  RUN_ISOLATED_TEST("Wrap_SelectReduceScatter_IpcLLInItsWideWindow", []() {
+    ScopedHook llEligible(g_reduceScatterDdaFabricLLEligible,
+                          [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; });
+    ScopedHook ipcEligible(g_reduceScatterDdaIpcEligible,
+                           [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; });
+    for (const char* arch : {"gfx950", "gfx942"}) {
+      SCOPED_TRACE(arch);
+      ncclComm* comm = MakeBroadcastComm(arch, /*ipc=*/true);
+      const auto algo = [comm](size_t recvcount) {
+        rcclCollDecision d = PoisonedDecision();
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, recvcount, ncclFloat32, ncclSum,
+                                                        /*query=*/true, &d, /*graphCapturingHint=*/false));
+        return d.algo;
+      };
+      constexpr int kLL = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL;
+      constexpr int kIpc = (int)rcclAddonAlgos_t::RCCL_DDA_IPC;
+      // recvcount x 8 ranks x 4 B: 1024 = 32 KiB, 1536 = 48 KiB, 2048 = 64 KiB, 16384 = 512 KiB.
+      g_loadParam = IpcLLParams(-1);
+      EXPECT_EQ((std::vector<int>{kLL, kIpc, kLL, kLL, kIpc}),
+                (std::vector<int>{algo(1024), algo(1536), algo(2048), algo(16384), algo(16388)}));
+      g_loadParam = IpcLLParams(0);
+      EXPECT_EQ(kIpc, algo(2048)) << "RCCL_DDA_IPC_LL_THRESHOLD=0";
+      g_loadParam = IpcLLParams(-1, -1, -1, /*vmmThreshold=*/0);
+      EXPECT_EQ(kLL, algo(16384)) << "RCCL_DDA_THRESHOLD=0";
+      DeleteCommWithArch(comm);
+    }
+  });
+}
+
 // ReduceScatter on the IPC comm, by total bytes: LL up to its cap, then Simple; the entry gate admits the IPC cap.
 TEST(WrapMicrotestIsolated, SelectReduceScatter_IpcLLWithinItsCapThenIpcSimple) {
   RUN_ISOLATED_TEST("Wrap_SelectReduceScatter_IpcLLWithinItsCapThenIpcSimple", []() {
@@ -13231,10 +13284,12 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_IpcLLWithinItsCapThenIpcSimple) 
       EXPECT_EQ(NCCL_PROTO_LL, d.protocol);
       EXPECT_EQ(133u, d.nMaxChannels);  // ncclReduceScatterDdaFabricLLBlocks
       EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_IPC, select(1028).algo);
-      g_loadParam = IpcLLParams(64 * kKiB);
-      EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, select(2048).algo);
-      g_loadParam = IpcLLParams(64 * kKiB, -1, -1, /*vmmThreshold=*/1 * kKiB);
-      EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, select(2048).algo) << "entry gate";
+      // 1536 floats x 8 ranks = 48 KiB, between the IPC LL cap and the wide window.
+      g_loadParam = IpcLLParams(48 * kKiB);
+      EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, select(1536).algo);
+      EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_IPC, select(1540).algo);
+      g_loadParam = IpcLLParams(48 * kKiB, -1, -1, /*vmmThreshold=*/1 * kKiB);
+      EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, select(1536).algo) << "entry gate";
       g_loadParam = IpcLLParams(0);
       EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_IPC, select(4).algo) << "RCCL_DDA_IPC_LL_THRESHOLD=0";
       // At the LL cap: RCCL_DDA_THRESHOLD=0 and RCCL_IGNORE_ARCH_TABLE=1 keep the one-shot.

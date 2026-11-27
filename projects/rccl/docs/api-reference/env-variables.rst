@@ -1753,8 +1753,9 @@ threshold table introduced for gfx1250.
           it is the ceiling in total message bytes of the one-shot on no more blocks
           than the IPC kernel it replaces; above it the previous IPC path runs. The
           per-arch tables also set wide windows where a one-shot runs on more blocks:
-          ``ncclAllGather`` from 64 KiB to 128 KiB on 16 blocks. This variable only
-          lowers a window's top. When set, it replaces ``RCCL_DDA_LL_THRESHOLD`` and
+          ``ncclAllGather`` from 64 KiB to 128 KiB on 16 blocks, ``ncclReduceScatter``
+          from 64 KiB to 512 KiB on up to 16 blocks. This variable only lowers a
+          window's top. When set, it replaces ``RCCL_DDA_LL_THRESHOLD`` and
           the table for these one-shots; ``RCCL_DDA_LL=0`` also turns them off, and
           ``RCCL_DDA_THRESHOLD`` does not keep them off DDA. ``RCCL_IGNORE_ARCH_TABLE=1``
           keeps the table on gfx950 and gfx942, so ``0`` is the way to run the previous
