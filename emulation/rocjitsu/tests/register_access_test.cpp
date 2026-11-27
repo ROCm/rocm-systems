@@ -2499,6 +2499,104 @@ TEST(RegisterAccessTest, Packed16ReadsAndWritesObserveSelectedByteHalves) {
   EXPECT_EQ(fx.cu->read_vgpr(reg, lane), 0x33441122u);
 }
 
+TEST(RegisterAccessTest, DppRowShiftRightStagesRowsAndObservesSelectedSources) {
+  for (unsigned width : {32u, 64u}) {
+    Fixture fx(IsaFamily::Rdna4, kSgprsPerWave, 1, 8, width);
+    ASSERT_NE(fx.wf, nullptr);
+    fx.wf->set_exec(~uint64_t{0});
+    const uint32_t reg = fx.vgpr_base() + 1;
+    for (uint32_t lane = 0; lane < width; ++lane) {
+      fx.cu->write_vgpr(reg, lane, lane + 1);
+    }
+    rdna4::Operand source(32, rdna4::OperandType::OPR_VGPR, 1);
+    RegisterAccess regs(*fx.wf);
+    for (unsigned shift = 1; shift < dpp::ROW_SIZE; ++shift) {
+      const auto plan =
+          dpp::make_dpp_plan(width, dpp::ROW_SHR1 + shift - 1, 15, 15, 1, 0, fx.wf->exec(), false);
+      const uint64_t destinations = 0x9d86b4f0ac375e61ULL;
+      uint64_t expected_reads = 0;
+      fx.plugin->reads.clear();
+      std::optional<StagedOperand> staged;
+      dpp::apply_dpp(source, plan, destinations, staged, *fx.wf);
+      ASSERT_TRUE(staged.has_value());
+      for (unsigned lane = 0; lane < width; ++lane) {
+        if (!(destinations & (uint64_t{1} << lane))) {
+          continue;
+        }
+        const bool in_bounds = lane % dpp::ROW_SIZE >= shift;
+        EXPECT_EQ(regs.read_lane(*staged, lane), in_bounds ? lane - shift + 1 : 0);
+        if (in_bounds) {
+          expected_reads |= uint64_t{1} << (lane - shift);
+        }
+      }
+      ASSERT_EQ(fx.plugin->reads.size(), 1u);
+      EXPECT_EQ(fx.plugin->reads.front().physical_reg, reg);
+      EXPECT_EQ(fx.plugin->reads.front().lane_mask, expected_reads);
+      EXPECT_EQ(fx.plugin->reads.front().byte_mask, ExecutionPlugin::kFullByteMask);
+    }
+  }
+}
+
+TEST(RegisterAccessTest, DppFullWaveControlsStageSelectedSourcesAndObserveThem) {
+  // In-range permutations take the unconditional copy; the shifts keep out-of-bounds lanes.
+  const uint32_t controls[] = {0x1b,
+                               0x4e,
+                               0xb1,
+                               dpp::ROW_MIRROR,
+                               dpp::ROW_HALF_MIRROR,
+                               dpp::ROW_BCAST15,
+                               dpp::ROW_BCAST31,
+                               dpp::ROW_ROR1 + 2,
+                               dpp::WF_ROL1,
+                               dpp::ROW_SHL1 + 4,
+                               dpp::ROW_SHR1 + 2};
+  for (unsigned width : {32u, 64u}) {
+    Fixture fx(IsaFamily::Rdna4, kSgprsPerWave, 1, 8, width);
+    ASSERT_NE(fx.wf, nullptr);
+    fx.wf->set_exec(~uint64_t{0});
+    const uint32_t reg = fx.vgpr_base() + 1;
+    for (uint32_t lane = 0; lane < width; ++lane) {
+      fx.cu->write_vgpr(reg, lane, 0xa5000000u + lane);
+    }
+    rdna4::Operand source(32, rdna4::OperandType::OPR_VGPR, 1);
+    RegisterAccess regs(*fx.wf);
+    for (uint32_t control : controls) {
+      for (bool bound : {false, true}) {
+        // Generated bodies request every active lane; observers may request fewer.
+        for (uint64_t destinations : {fx.wf->exec(), uint64_t{0x9d86b4f0ac375e61}}) {
+          SCOPED_TRACE(testing::Message()
+                       << "width=" << width << " control=" << control << " bound=" << bound
+                       << " destinations=" << destinations);
+          const auto plan =
+              dpp::make_dpp_plan(width, control, 10, 15, bound, 0, fx.wf->exec(), false);
+          uint64_t expected_reads = 0;
+          fx.plugin->reads.clear();
+          std::optional<StagedOperand> staged;
+          dpp::apply_dpp(source, plan, destinations, staged, *fx.wf);
+          ASSERT_TRUE(staged.has_value());
+          for (unsigned lane = 0; lane < width; ++lane) {
+            const uint64_t lane_bit = uint64_t{1} << lane;
+            if (!(destinations & lane_bit)) {
+              continue;
+            }
+            if (plan.physical_read_dest_mask & lane_bit) {
+              EXPECT_EQ(regs.read_lane(*staged, lane), 0xa5000000u + plan.source_lanes[lane])
+                  << "lane=" << lane;
+              expected_reads |= uint64_t{1} << plan.source_lanes[lane];
+            } else if (plan.zero_source_mask & lane_bit) {
+              EXPECT_EQ(regs.read_lane(*staged, lane), 0u) << "lane=" << lane;
+            }
+          }
+          ASSERT_EQ(fx.plugin->reads.size(), 1u);
+          EXPECT_EQ(fx.plugin->reads.front().physical_reg, reg);
+          EXPECT_EQ(fx.plugin->reads.front().lane_mask, expected_reads);
+          EXPECT_EQ(fx.plugin->reads.front().byte_mask, ExecutionPlugin::kFullByteMask);
+        }
+      }
+    }
+  }
+}
+
 TEST(RegisterAccessTest, Packed16DppObservesSelectedPhysicalLanesAndHalves) {
   Fixture fx(rocjitsu::IsaFamily::Rdna4, kSgprsPerWave, 1, 8);
   ASSERT_NE(fx.wf, nullptr);

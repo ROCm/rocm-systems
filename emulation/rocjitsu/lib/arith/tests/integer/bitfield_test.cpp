@@ -141,15 +141,15 @@ TEST(IntegerPermB32UniformW64, SelectorsMasksAndAliasing) {
 // Check the half-packing selectors at every CPU level the host supports. The destination is
 // separate from, or identical to, either source, and the operands sit at each 16-byte
 // alignment a VGPR can have.
-TEST(IntegerPermB32UniformW64, HalfPackingAtEveryCpuLevel) {
+template <int Lanes, typename Function> void check_perm_half_packing(Function permute) {
   using namespace rocjitsu::arith::test;
   enum class Destination { Separate, IsA, IsB };
   for (uint64_t cpu : supported_cpu_levels()) {
     for (int offset : {0, 4, 8, 12}) {
       alignas(64) std::array<uint32_t, 80> a_block, b_block, d_block;
       uint32_t *a = a_block.data() + offset, *b = b_block.data() + offset;
-      std::array<uint32_t, 64> a_values, b_values;
-      for (int lane = 0; lane < 64; ++lane) {
+      std::array<uint32_t, Lanes> a_values, b_values;
+      for (int lane = 0; lane < Lanes; ++lane) {
         a_values[lane] = 0x9e3779b9u * (lane + 1) + offset;
         b_values[lane] = ~(0x85ebca6bu * (lane + 3));
       }
@@ -165,18 +165,17 @@ TEST(IntegerPermB32UniformW64, HalfPackingAtEveryCpuLevel) {
                                                              : b_block;
           const auto guard = block;
           uint32_t *d = block.data() + offset;
-          ASSERT_EQ(rj_arith_v_perm_b32_uniform_w64(cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY,
-                                                    ~uint64_t{0}, d, a, b, selector),
+          ASSERT_EQ(permute(cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY, -1, d, a, b, selector),
                     RJ_ARITH_SUCCESS);
-          for (int lane = 0; lane < 64; ++lane) {
+          for (int lane = 0; lane < Lanes; ++lane) {
             ASSERT_EQ(d[lane],
                       bitfield_reference(Bitfield::Perm, a_values[lane], b_values[lane], selector))
                 << "cpu " << cpu << " offset " << offset << " selector " << selector << " lane "
                 << lane;
           }
-          // Nothing outside the 64 destination lanes changes.
+          // Nothing outside the destination lanes changes.
           for (int word = 0; word < 80; ++word) {
-            if (word < offset || word >= offset + 64) {
+            if (word < offset || word >= offset + Lanes) {
               ASSERT_EQ(block[word], guard[word]) << "cpu " << cpu << " word " << word;
             }
           }
@@ -184,4 +183,12 @@ TEST(IntegerPermB32UniformW64, HalfPackingAtEveryCpuLevel) {
       }
     }
   }
+}
+
+TEST(IntegerPermB32UniformW32, HalfPackingAtEveryCpuLevel) {
+  check_perm_half_packing<32>(rj_arith_v_perm_b32_uniform_w32);
+}
+
+TEST(IntegerPermB32UniformW64, HalfPackingAtEveryCpuLevel) {
+  check_perm_half_packing<64>(rj_arith_v_perm_b32_uniform_w64);
 }
