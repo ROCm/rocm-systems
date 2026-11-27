@@ -540,8 +540,8 @@ collected in the following table.
           to 16 MiB and 64 to 128 MiB on two hosts, 2 to 256 MiB on four hosts
           and 2 to 512 MiB on eight hosts. On two hosts, FP32, FP16 and BF16
           messages between 2 and 8 MiB use it only where the fused kernel runs
-          (see ``RCCL_HOST_HIER_ALLREDUCE_FUSED``). Not used with other
-          layouts, including four ranks per host (SPX).
+          (see ``RCCL_HOST_HIER_ALLREDUCE_FUSED``). Auto mode is DPX only and
+          is not used with other layouts.
         | ``0``: Disabled.
         | ``1``: Enabled for every eligible AllReduce.
 
