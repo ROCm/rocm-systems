@@ -227,8 +227,16 @@ TEST(Gfx10InterpolationModel, ExplicitRoundingPreservesHostControls) {
 #if defined(__x86_64__)
   const uint32_t controls = _mm_getcsr() & ~uint32_t(_MM_EXCEPT_MASK);
 #endif
+  const float tiny = std::bit_cast<float>(1u);
   for (uint32_t mode = 0; mode < 4; ++mode) {
     SCOPED_TRACE(mode);
+    EXPECT_EQ(std::bit_cast<uint32_t>(graphics_rounding::add_f32(1.0f, tiny, mode)),
+              mode == 1 ? 0x3f800001u : 0x3f800000u);
+    EXPECT_EQ(std::bit_cast<uint32_t>(graphics_rounding::multiply_f32(tiny, 0.5f, mode)),
+              mode == 1 ? 1u : 0u);
+    EXPECT_EQ(std::bit_cast<uint32_t>(
+                  graphics_rounding::multiply_f32(std::bit_cast<float>(0x7f7fffffu), 2.0f, mode)),
+              mode <= 1 ? 0x7f800000u : 0x7f7fffffu);
     EXPECT_EQ(
         std::bit_cast<uint32_t>(graphics_rounding::fma_f32(1.0f, 1.0f, -1.0f, mode, 3, false)),
         mode == 2 ? 0x80000000u : 0u);

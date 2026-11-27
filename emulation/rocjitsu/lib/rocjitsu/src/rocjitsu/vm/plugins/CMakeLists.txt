@@ -118,7 +118,10 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         # nothing from the simulator at load time.
         target_link_libraries(
             ${target}
-            PRIVATE ${plugin_objects} rocm_runtime::runtime_headers
+            PRIVATE
+                ${plugin_objects}
+                rocm_runtime::runtime_headers
+                rj_arith_headers
         )
         add_dependencies(${target} flatbuffers_schemas)
         # Hide everything except the loader exports (which carry an explicit

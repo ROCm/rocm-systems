@@ -84,6 +84,32 @@ inline float sum_f32(ExactF64Sum sum, uint32_t rounding, bool flush_output) {
       narrow_f32_bits(bit_cast<uint64_t>(round_to_odd(sum)), flush_output, rounding));
 }
 
+// Add at F32 precision with explicit rounding, preserving matching signed zeros.
+inline float add_f32(float a, float b, uint32_t rounding) {
+  if (!__builtin_isfinite(a) || !__builtin_isfinite(b)) {
+    return a + b;
+  }
+  const auto sum = add_exact(double(a), double(b));
+  if (a == 0 && b == 0 && bool(__builtin_signbit(a)) == bool(__builtin_signbit(b))) {
+    return a;
+  }
+  return sum_f32(sum, rounding, false);
+}
+
+// Subtract without changing a NaN subtrahend's sign through source negation.
+inline float subtract_f32(float a, float b, uint32_t rounding) {
+  return __builtin_isfinite(a) && __builtin_isfinite(b) ? add_f32(a, -b, rounding) : a - b;
+}
+
+// Multiply at F32 precision; every finite F32 product is exact in FP64.
+inline float multiply_f32(float a, float b, uint32_t rounding) {
+  if (!__builtin_isfinite(a) || !__builtin_isfinite(b)) {
+    return a * b;
+  }
+  const double product = double(a) * double(b);
+  return bit_cast<float>(narrow_f32_bits(bit_cast<uint64_t>(product), false, rounding));
+}
+
 // Evaluate a finite F32 FMA with explicit rounding and optional output flushing.
 inline float fma_finite_f32(float a, float b, float c, uint32_t rounding, bool flush_output) {
   const auto sum = add_exact(double(a) * double(b), double(c));

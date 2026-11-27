@@ -635,7 +635,6 @@ add_executable(
     buffer_descriptor_vcc_test.cpp
     buffer_format_test.cpp
     image_access_test.cpp
-    bvh_rounding_test.cpp
     image_addressing_test.cpp
     image_resource_test.cpp
     smem_sbase_operand_test.cpp
@@ -2698,7 +2697,10 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # Keep inline register accessors in a separate DSO without linking core
     # objects into it, so missing exports cannot be hidden by static linkage.
     add_library(register_observer_probe MODULE register_observer_probe.cpp)
-    target_link_libraries(register_observer_probe PRIVATE util simdojo_headers)
+    target_link_libraries(
+        register_observer_probe
+        PRIVATE util simdojo_headers rj_arith_headers
+    )
     rj_configure_target(register_observer_probe LIB)
 
     add_executable(register_observer_abi_test register_observer_abi_test.cpp)

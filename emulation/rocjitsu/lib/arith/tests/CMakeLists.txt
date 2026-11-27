@@ -373,3 +373,20 @@ foreach(
 endforeach()
 
 rj_arith_add_test(rj_arith_interp_gfx10_test graphics/interp_gfx10_test.cpp)
+
+if(RJ_ARITH_ENABLE_X86_64)
+    foreach(tier IN ITEMS v3 v4)
+        set(target rj_arith_bvh_rounding_${tier}_test)
+        rj_arith_add_test(${target} graphics/bvh_rounding_test.cpp)
+        target_compile_options(${target} PRIVATE -march=x86-64-${tier})
+        target_compile_definitions(
+            ${target}
+            PRIVATE RJ_ARITH_IMPL_NAMESPACE=test_bvh_${tier}
+        )
+        if(tier STREQUAL "v4")
+            target_compile_definitions(${target} PRIVATE RJ_ARITH_BVH_AVX512=1)
+        endif()
+    endforeach()
+endif()
+
+rj_arith_add_test(rj_arith_bvh_test graphics/bvh_test.cpp)

@@ -14,6 +14,39 @@
 extern "C" {
 #endif
 
+// Prefetched ray/node operands for IMAGE_BVH_INTERSECT_RAY. Node types are
+// tags 0..3 (triangles), 4 (FP16 boxes), 5 (FP32 boxes), 6/7 (not intersected).
+// Direction and inverse are separate ISA operands; do not recompute either.
+typedef struct rj_arith_bvh_ray {
+  float origin[3], direction[3], inverse[3];
+  float extent;
+  uint32_t flags, node_type;
+} rj_arith_bvh_ray;
+
+typedef struct rj_arith_bvh_controls {
+  uint32_t grow, sort, sort_enabled, barycentrics, pointer_flags;
+} rj_arith_bvh_controls;
+
+// Compute IMAGE_BVH/IMAGE_BVH64 intersection arithmetic from already fetched nodes.
+// Pointer-width differences are resolved during fetching, outside this function.
+// NODES holds one NODE_STRIDE-byte record per lane (at least 64 bytes, or 128
+// for Box32). Unsupported node tags return invalid words. FETCH_MASK identifies successful fetches;
+// other active lanes return four invalid words. EXEC selects destination writes. D uses four VGPRs
+// and may overlap inputs; all operands are captured before writes. Controls are the decoded
+// resource fields; grow is 0..255, sort is 0..3 and other fields are 0/1. Compatibility/Loose
+// inherit rocjitsu's gfx11 model. Strict empirical modes are unsupported; guest FP controls do not
+// apply and no FP status is reported.
+int rj_arith_image_bvh_intersect_ray_w32(uint64_t flags, uint32_t exec_mask,
+                                         uint64_t instruction_flags, uint32_t *const *d,
+                                         const void *nodes, uint32_t node_stride,
+                                         uint32_t fetch_mask, const rj_arith_bvh_ray *rays,
+                                         const rj_arith_bvh_controls *controls);
+int rj_arith_image_bvh_intersect_ray_w64(uint64_t flags, uint64_t exec_mask,
+                                         uint64_t instruction_flags, uint32_t *const *d,
+                                         const void *nodes, uint32_t node_stride,
+                                         uint64_t fetch_mask, const rj_arith_bvh_ray *rays,
+                                         const rj_arith_bvh_controls *controls);
+
 // gfx10 interpolation after LDS fetching: A contains the selected coefficient,
 // B the coordinate, and C the origin/previous accumulator. Each is one VGPR.
 // MOV consumes only A. P1LL/P1LV decode FP16 A/C, P2_F16 decodes FP16 A and

@@ -4,8 +4,9 @@
 // Check BVH's vector rounding against native scalar RTZ arithmetic, including
 // widely separated exponents, gradual underflow and overflow. Only the reference
 // changes host controls; the vector operations execute under the default state.
-#include "rocjitsu/vm/graphics/bvh_rounding.h"
-#include "scoped_fp_environment.h"
+#include "common/cpu.h"
+#include "graphics/x86_64/bvh_rounding.h"
+#include <immintrin.h>
 
 #include <gtest/gtest.h>
 
@@ -16,7 +17,6 @@
 #include <iterator>
 #include <random>
 
-#if RJ_HOST_HAS_AVX512F || RJ_HOST_HAS_AVX2
 namespace {
 
 // Volatile reads keep each reference operation inside the selected environment.
@@ -33,8 +33,17 @@ namespace {
 }
 
 TEST(BvhRounding, RoundTowardZero) {
-  rocjitsu::ScopedDefaultFpEnvironment environment;
-  using namespace rocjitsu::amdgpu::bvh_rounding;
+  if (!rocjitsu::arith::test::cpu_level_supported(
+#if defined(RJ_ARITH_BVH_AVX512)
+          RJ_ARITH_CPU_X86_64_V4,
+#else
+          RJ_ARITH_CPU_X86_64_V3,
+#endif
+          rj_arith_init_cpu_flags())) {
+    GTEST_SKIP();
+  }
+  ASSERT_EQ(std::fegetround(), FE_TONEAREST);
+  using namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE::bvh::bvh_rounding;
   std::minstd_rand rng;
   const auto word = [&] {
     const uint32_t high = rng(), low = rng();
@@ -83,4 +92,3 @@ TEST(BvhRounding, RoundTowardZero) {
 }
 
 } // namespace
-#endif
