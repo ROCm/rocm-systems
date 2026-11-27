@@ -386,9 +386,9 @@ def test_uninitialized_buffer_keeps_persistent_on_to(monkeypatch):
 def test_format_wrap_args_renders_tensors_scalars_and_skips_others():
     tensor = fake_tensor()
     rendered = torch_backend.format_wrap_args(
-        (tensor, 64, object()), {"bias": tensor, "flag": True}
+        (tensor, 64, 1.5, object()), {"bias": tensor, "flag": True}
     )
-    assert rendered == "(float32[2x4], 64, bias=float32[2x4], flag=True)"
+    assert rendered == "(float32[2x4], 64, 1.5, bias=float32[2x4], flag=True)"
     assert torch_backend.format_wrap_args((), {}) == "n/a"
 
 
@@ -437,6 +437,15 @@ def test_format_wrap_args_preserves_readable_tensors(torch_module):
         )
         == "(float32[2x3], 42, scalar=float64[])"
     )
+
+
+def test_roctx_wrapper_includes_python_scalars_in_args(recorded_ranges):
+    wrapped = torch_backend.roctx_wrapper(
+        lambda *args, **kwargs: None, "aten::add", backend="torch"
+    )
+    wrapped(fake_tensor(), 64, name="n")
+    assert len(recorded_ranges) == 1
+    assert "|args=(float32[2x4], 64, name='n')|torch" in recorded_ranges[0]
 
 
 @pytest.mark.parametrize("conversion", ["device", "dtype"])
