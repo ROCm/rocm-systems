@@ -8,6 +8,7 @@
 #ifndef ROCJITSU_ISA_ARCH_AMDGPU_SHARED_DPP_SDWA_OPS_H_
 #define ROCJITSU_ISA_ARCH_AMDGPU_SHARED_DPP_SDWA_OPS_H_
 
+#include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -15,6 +16,7 @@
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/bit.h"
 #include <array>
+#include <atomic>
 #include <bit>
 #include <cassert>
 #include <cstdint>
@@ -327,19 +329,30 @@ struct DppPlan {
 
   std::array<uint8_t, 64> source_lanes{};
   uint64_t physical_read_dest_mask = 0;
+  /// Lanes read when every destination in physical_read_dest_mask is requested.
+  uint64_t physical_source_mask = 0;
   uint64_t zero_source_mask = 0;
   uint64_t source_write_mask = 0;
   uint64_t row_bank_mask = 0;
+  /// With full EXEC and BOUND_CTRL=1, each row consists of zeros and a contiguous source span.
+  uint32_t full_row_shift_right = 0;
 };
 
 inline uint64_t dpp_row_bank_mask(uint32_t wf_size, uint32_t row_mask, uint32_t bank_mask) {
-  uint64_t mask = 0;
-  for (uint32_t lane = 0; lane < wf_size; ++lane) {
-    if (!dpp_lane_masked(static_cast<int>(lane), row_mask, bank_mask)) {
-      mask |= uint64_t{1} << lane;
+  // Expand the bank bits to the lanes of one row, then repeat that row for each enabled row.
+  uint64_t row_lanes = 0;
+  for (uint32_t bank = 0; bank < NUM_BANKS; ++bank) {
+    if (bank_mask & (1u << bank)) {
+      row_lanes |= uint64_t{0xF} << (bank * (ROW_SIZE / NUM_BANKS));
     }
   }
-  return mask;
+  uint64_t mask = 0;
+  for (uint32_t row = 0; row < 64 / ROW_SIZE; ++row) {
+    if (row_mask & (1u << row)) {
+      mask |= row_lanes << (row * ROW_SIZE);
+    }
+  }
+  return mask & util::mask<uint64_t>(wf_size);
 }
 
 inline DppPlan compute_dpp_plan(uint32_t wf_size, uint32_t dpp_ctrl, uint32_t row_mask,
@@ -361,6 +374,7 @@ inline DppPlan compute_dpp_plan(uint32_t wf_size, uint32_t dpp_ctrl, uint32_t ro
     }
     if (!out_of_bounds && !inactive) {
       plan.physical_read_dest_mask |= lane_bit;
+      plan.physical_source_mask |= uint64_t{1} << source_lane;
     } else if (bound_ctrl || (inactive && !inactive_uses_bound_ctrl)) {
       plan.zero_source_mask |= lane_bit;
     }
@@ -371,35 +385,114 @@ inline DppPlan compute_dpp_plan(uint32_t wf_size, uint32_t dpp_ctrl, uint32_t ro
   return plan;
 }
 
-inline DppPlan make_dpp_plan(uint32_t wf_size, uint32_t dpp_ctrl, uint32_t row_mask,
-                             uint32_t bank_mask, uint32_t bound_ctrl, uint32_t fi,
-                             uint64_t exec_mask, bool inactive_uses_bound_ctrl) {
-  const uint64_t full_wave = util::mask<uint64_t>(wf_size);
-  if ((exec_mask & full_wave) != full_wave || row_mask != 0xf || bank_mask != 0xf) {
+/// @brief Plans for waves in which every lane is active.
+///
+/// Every in-range source is then active, so FI and the inactive-source rule cannot apply, and
+/// row/bank masks only filter destinations. The plan therefore depends on the wave width, the
+/// control and BOUND_CTRL alone. One table serves all threads, so the controls of a kernel
+/// cannot evict one another. A plan is computed when its key is first used; until then its
+/// zero-initialized slot costs neither time nor resident memory. make_dpp_plan() derives the
+/// plan of a partial wave from the same entry.
+class FullWavePlans {
+public:
+  static bool tabulated(uint32_t wf_size, uint32_t dpp_ctrl) {
+    return (wf_size == 32 || wf_size == 64) && dpp_ctrl < CONTROLS;
+  }
+
+  /// @returns The plan of a tabulated key with full row and bank masks.
+  static DppPlan get(uint32_t wf_size, uint32_t dpp_ctrl, uint32_t bound_ctrl) {
+    Slot &slot = slots_[index(wf_size, dpp_ctrl, bound_ctrl != 0)];
+    if (slot.state.load(std::memory_order_acquire) == READY) [[likely]] {
+      return slot.plan;
+    }
+    return fill(slot, wf_size, dpp_ctrl, bound_ctrl);
+  }
+
+private:
+  /// DPP_CTRL is a nine-bit field.
+  static constexpr uint32_t CONTROLS = 512;
+  /// EMPTY is the zero-initialized state of the table.
+  enum : uint8_t { EMPTY, FILLING, READY };
+
+  struct Slot {
+    std::atomic<uint8_t> state;
+    /// Written by the thread that moved state to FILLING; read only once state is READY.
+    DppPlan plan;
+  };
+
+  static constexpr uint32_t index(uint32_t wf_size, uint32_t dpp_ctrl, bool bound_ctrl) {
+    return ((wf_size == 64 ? 2u : 0u) + (bound_ctrl ? 1u : 0u)) * CONTROLS + dpp_ctrl;
+  }
+
+  RJ_NOINLINE static DppPlan fill(Slot &slot, uint32_t wf_size, uint32_t dpp_ctrl,
+                                  uint32_t bound_ctrl) {
+    DppPlan plan =
+        compute_dpp_plan(wf_size, dpp_ctrl, 0xf, 0xf, bound_ctrl, 1, ~uint64_t{0}, false);
+    if (bound_ctrl && dpp_ctrl >= ROW_SHR1 && dpp_ctrl <= ROW_SHR_MAX) {
+      plan.full_row_shift_right = dpp_ctrl - ROW_SHR1 + 1;
+    }
+    // Only the thread that claims an empty slot publishes it. A thread that loses the claim
+    // returns its own copy instead of waiting.
+    uint8_t expected = EMPTY;
+    if (slot.state.compare_exchange_strong(expected, FILLING)) {
+      slot.plan = plan;
+      slot.state.store(READY, std::memory_order_release);
+    }
+    return plan;
+  }
+
+  static inline constinit std::array<Slot, 4 * CONTROLS> slots_{};
+};
+
+// Generated instruction bodies share this lookup; only the plan copy stays in each of them.
+RJ_NOINLINE inline DppPlan make_dpp_plan(uint32_t wf_size, uint32_t dpp_ctrl, uint32_t row_mask,
+                                         uint32_t bank_mask, uint32_t bound_ctrl, uint32_t fi,
+                                         uint64_t exec_mask, bool inactive_uses_bound_ctrl) {
+  if (!FullWavePlans::tabulated(wf_size, dpp_ctrl)) {
     return compute_dpp_plan(wf_size, dpp_ctrl, row_mask, bank_mask, bound_ctrl, fi, exec_mask,
                             inactive_uses_bound_ctrl);
   }
-
-  // With every source active, only the permutation, the wave width and
-  // BOUND_CTRL affect the plan. Lane values are still read for each issue.
-  struct Entry {
-    uint32_t width = 0, control = 0, bound = 0;
-    DppPlan plan;
-  };
-  static thread_local std::array<Entry, 16> entries{};
-  auto &entry = entries[(dpp_ctrl ^ (dpp_ctrl >> 4)) % entries.size()];
-  if (entry.width != wf_size || entry.control != dpp_ctrl || entry.bound != bound_ctrl) {
-    entry = {wf_size, dpp_ctrl, bound_ctrl,
-             compute_dpp_plan(wf_size, dpp_ctrl, row_mask, bank_mask, bound_ctrl, fi, exec_mask,
-                              inactive_uses_bound_ctrl)};
+  // Lane values are still read for each issue; only the routing is shared.
+  DppPlan plan = FullWavePlans::get(wf_size, dpp_ctrl, bound_ctrl);
+  if (row_mask != 0xf || bank_mask != 0xf) {
+    plan.row_bank_mask = dpp_row_bank_mask(wf_size, row_mask, bank_mask);
   }
-  return entry.plan;
+  const uint64_t full_wave = util::mask<uint64_t>(wf_size);
+  const uint64_t exec = exec_mask & full_wave;
+  if (exec == full_wave) {
+    return plan;
+  }
+  plan.full_row_shift_right = 0;
+  if (fi) {
+    // FI reads in-range sources outside EXEC, so the routing is that of a full wave.
+    return plan;
+  }
+  // A partial wave differs only in its in-range sources outside EXEC, which are not read.
+  uint64_t inactive = 0;
+  for (uint64_t lanes = plan.physical_read_dest_mask; lanes; lanes &= lanes - 1) {
+    const uint32_t lane = std::countr_zero(lanes);
+    inactive |= (~exec >> plan.source_lanes[lane] & 1) << lane;
+  }
+  plan.physical_read_dest_mask &= ~inactive;
+  plan.physical_source_mask &= exec;
+  if (bound_ctrl || !inactive_uses_bound_ctrl) {
+    plan.zero_source_mask |= inactive;
+  } else {
+    plan.source_write_mask &= ~inactive;
+  }
+  return plan;
 }
 
 inline uint64_t dpp_physical_source_mask(const DppPlan &plan, uint64_t destination_mask,
                                          uint32_t wf_size) {
-  uint64_t source_mask = 0;
   const uint64_t read_destinations = destination_mask & plan.physical_read_dest_mask;
+  if (read_destinations == plan.physical_read_dest_mask) {
+    return plan.physical_source_mask;
+  }
+  if (plan.full_row_shift_right) {
+    return read_destinations >> plan.full_row_shift_right;
+  }
+  uint64_t source_mask = 0;
   for (uint32_t lane = 0; lane < wf_size; ++lane) {
     if (read_destinations & (uint64_t{1} << lane)) {
       source_mask |= uint64_t{1} << plan.source_lanes[lane];
@@ -497,6 +590,7 @@ inline DppPlan make_dpp8_plan(uint32_t wf_size, uint32_t lane_sel, uint32_t fi,
     }
     if (source_lane < wf_size && (fi || (exec_mask & (uint64_t{1} << source_lane)))) {
       plan.physical_read_dest_mask |= lane_bit;
+      plan.physical_source_mask |= uint64_t{1} << source_lane;
     } else {
       plan.zero_source_mask |= lane_bit;
     }
@@ -543,6 +637,24 @@ inline void stage_dpp_operand(const Operand &source, const DppPlan &plan,
                                                  : rocjitsu::ExecutionPlugin::kFullByteMask;
     }
     auto src_view = regs.read_operand(source, source_lane_mask, source_byte_mask);
+    if (const uint32_t shift = plan.full_row_shift_right) {
+      // The leading lanes in each zero-initialized row are out of bounds.
+      for (uint32_t row = 0; row < wf.wf_size(); row += ROW_SIZE) {
+        for (uint32_t offset = shift; offset < ROW_SIZE; ++offset) {
+          storage->set_lane(row + offset, src_view.lane(row + offset - shift));
+        }
+      }
+      return;
+    }
+    const uint32_t lanes = wf.wf_size();
+    const uint64_t wave = util::mask<uint64_t>(lanes);
+    if ((plan.physical_read_dest_mask & wave) == wave) {
+      // Every lane reads a source, as for any in-range permutation of a full wave.
+      for (uint32_t lane = 0; lane < lanes; ++lane) {
+        storage->set_lane(lane, src_view.lane(plan.source_lanes[lane]));
+      }
+      return;
+    }
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
       const uint64_t lane_bit = uint64_t{1} << lane;
       if (plan.physical_read_dest_mask & lane_bit) {

@@ -123,12 +123,21 @@ int swap_rows(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const
   if (!exec_mask || Lanes <= Stride) {
     return RJ_ARITH_SUCCESS;
   }
-#if defined(RJ_ARITH_HAVE_X86_64_V3)
-  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
-    rocjitsu::arith::swap_rows_x86_64_v3(Lanes, Stride, exec_mask, d[0], a[0]);
-    return RJ_ARITH_SUCCESS;
-  }
+  // The vector kernels exist only for waves that hold a row pair.
+  if constexpr (Lanes > Stride) {
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+    if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+      rocjitsu::arith::swap_rows_x86_64_v4<Lanes, Stride>(exec_mask, d[0], a[0]);
+      return RJ_ARITH_SUCCESS;
+    }
 #endif
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+    if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+      rocjitsu::arith::swap_rows_x86_64_v3<Lanes, Stride>(exec_mask, d[0], a[0]);
+      return RJ_ARITH_SUCCESS;
+    }
+#endif
+  }
   for (int base = 0; base + Stride < Lanes; base += 2 * Stride) {
     for (int i = 0; i < Stride; ++i) {
       int low = base + i, high = low + Stride;

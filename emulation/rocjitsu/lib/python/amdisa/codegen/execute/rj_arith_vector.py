@@ -347,6 +347,15 @@ def gen_vector32(ctx: ExecuteContext) -> str | None:
             f'  if (amdgpu::arith::try_execute_sdwa_integer32(*this, wf, {wave_api(api, 32)}, {wave_api(api, 64)},\n'
             f'      wf.cu().arithmetic_flags(), 0, {dst[0]}, {", ".join(src)})) return;\n'
         )
+    elif arch == 'rdna3' and is_vop3 and mnemonic == 'V_PERM_B32':
+        # The encoding names the literal form. Its Wave32 handler stays out of line.
+        fast_path = (
+            '  if (inst_.src2 == 255 && wf.wf_size() == 32) {\n'
+            '    amdgpu::arith::execute_rdna3_wave32_perm_b32_literal(wf,\n'
+            f'        {modifiers}, {dst[0]}, {", ".join(src)});\n'
+            '    return;\n'
+            '  }\n'
+        )
     elif arch == 'cdna4' and is_vop3 and mnemonic == 'V_PERM_B32':
         fast_path = (
             f'  if (!wf.exec() || amdgpu::arith::try_cdna4_perm_b32(wf, {dst[0]}, {", ".join(src)})) {{\n'
