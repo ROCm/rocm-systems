@@ -39,6 +39,7 @@ VramStore::VramStore(const std::string &name, uint64_t bytes, uint64_t aperture_
     return;
   }
 
+#ifdef __x86_64__
   void *mapped = ::mmap(nullptr, aperture_bytes_, PROT_READ | PROT_WRITE, MAP_SHARED, fd_, 0);
   if (mapped == MAP_FAILED) {
     util::Logger::warn(std::format("{}: cannot map the video memory aperture", name));
@@ -63,6 +64,7 @@ VramStore::VramStore(const std::string &name, uint64_t bytes, uint64_t aperture_
     fd_ = -1;
     return;
   }
+#endif // __x86_64__
   backing_id_ = allocate_canonical_backing_id();
 }
 

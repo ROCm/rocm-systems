@@ -83,9 +83,7 @@
 #error "util/shared_memory.h needs the GCC/Clang __atomic built-ins and may_alias"
 #endif
 
-#if !defined(__x86_64__)
-#error "util/shared_memory.h relies on x86-64 access atomicity; see the file comment before porting"
-#endif
+#ifdef __x86_64__
 
 namespace util {
 
@@ -404,3 +402,34 @@ inline void shared_store_word(std::byte *shared, std::size_t width, uint64_t val
 }
 
 } // namespace util
+
+#else // !defined(__x86_64__)
+
+// Stub implementations for non-x86-64.  The VRAM aperture is never mapped on
+// these hosts (vram_store.cpp gates mmap() on __x86_64__), so the stubs are
+// dead code but must compile to let the locked pread/pwrite path build on
+// every Linux target supported by TheRock.
+namespace util {
+
+inline void store_once(std::byte *dst, const std::byte *src, std::size_t n) {
+  std::memcpy(dst, src, n);
+}
+
+inline void load_once(std::byte *dst, const std::byte *src, std::size_t n) {
+  std::memcpy(dst, src, n);
+}
+
+[[nodiscard]] inline bool is_shared_word(const std::byte *, std::size_t) { return false; }
+
+[[nodiscard]] inline uint64_t shared_load_word(const std::byte *, std::size_t) { std::abort(); }
+
+inline void shared_store_word(std::byte *, std::size_t, uint64_t) { std::abort(); }
+
+[[nodiscard]] inline bool shared_compare_exchange_word(std::byte *, std::size_t, uint64_t &,
+                                                       uint64_t) {
+  std::abort();
+}
+
+} // namespace util
+
+#endif // defined(__x86_64__)

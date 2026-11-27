@@ -793,7 +793,6 @@ add_executable(
     util_unique_handle_test.cpp
     util_intrusive_shared_ptr_test.cpp
     util_simd_test.cpp
-    util_shared_memory_test.cpp
     v_add_simd_benchmark.cpp
     mfma_simd_benchmark.cpp
     wmma_simd_benchmark.cpp
@@ -871,7 +870,6 @@ add_executable(
     pci/gpu_pci_device_test.cpp
     pci/pci_transport_session_test.cpp
     pci/vram_store_test.cpp
-    pci/translated_local_line_fill_test.cpp
     pci/scratch_pci_device_test.cpp
     pci/ip_discovery_test.cpp
     pci/ip_block_model_test.cpp
@@ -937,6 +935,14 @@ if(ROCJITSU_ENABLE_VFIO)
     # Serving now builds a whole machine, so a test that drives the server end to
     # end needs a real config rather than a synthesized one.
     rj_add_test_path(rocjitsu_tests RJ_VFU_TEST_CONFIG_PATH "${CMAKE_SOURCE_DIR}/configs/gfx1250_mi455x.json")
+endif()
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64)$")
+    target_sources(
+        rocjitsu_tests
+        PRIVATE
+            util_shared_memory_test.cpp
+            pci/translated_local_line_fill_test.cpp
+    )
 endif()
 if(RJ_ENABLE_EXPENSIVE_CHECKS)
     target_sources(

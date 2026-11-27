@@ -870,7 +870,8 @@ class Variant:
 
 
 def split_variant_items(rest: str, text: str) -> list[str]:
-    """Split a variant's items at commas, except those inside a cfg JSON value."""
+    """Split a variant's items at commas, except those inside a cfg JSON value
+    or a cpus CPU-list value (e.g. cpus=0,2 is one item, not two)."""
     items, start, depth, quoted = [], 0, 0, False
     structured = rest.startswith("cfg=")
     for index, char in enumerate(rest):
@@ -887,7 +888,14 @@ def split_variant_items(rest: str, text: str) -> list[str]:
     if depth > 0 or quoted:
         raise HarnessError(f"unbalanced brackets or quotes in '{text}'")
     items.append(rest[start:])
-    return items
+    # Re-join comma-split fragments of cpus= values: "cpus=0", "2" → "cpus=0,2".
+    merged: list[str] = []
+    for item in items:
+        if merged and merged[-1].startswith("cpus=") and "=" not in item:
+            merged[-1] += "," + item
+        else:
+            merged.append(item)
+    return merged
 
 
 def parse_variant(
