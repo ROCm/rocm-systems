@@ -646,7 +646,7 @@ hsa_status_t hsa_amd_memory_async_batch_copy(const hsa_amd_memory_copy_op_t* cop
         IS_BAD_PTR(op.dst);
         dst_agent = core::Agent::Convert(op.dst_agent);
         IS_VALID(dst_agent);
-        if (op.unused_size != 0)
+        if (op.size == 0 || op.unused_size != 0)
           return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       }
       break;
@@ -681,8 +681,15 @@ hsa_status_t hsa_amd_memory_async_batch_copy(const hsa_amd_memory_copy_op_t* cop
       }
       break;
     case HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST:
+      // A zero transfer size is rejected here rather than left to the engine.
+      // Engine routes do not agree on it, so deferring the check makes the
+      // same request succeed or fail according to which engine happens to be
+      // selected. Rejecting it matches multi-entry LINEAR, both forms of
+      // LINEAR_SWAP and RECT, which all refuse a zero-sized transfer at this
+      // layer.
       if (op.dst_list == nullptr || op.dst_agent_list == nullptr ||
-          op.num_entries == 0 || op.num_entries > 65536 || op.unused_size != 0)
+          op.num_entries == 0 || op.num_entries > 65536 || op.unused_size != 0 ||
+          op.size == 0)
         return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       for (uint32_t d = 0; d < op.num_entries; ++d) {
         IS_BAD_PTR(op.dst_list[d]);
@@ -739,55 +746,45 @@ hsa_status_t hsa_amd_memory_async_batch_copy(const hsa_amd_memory_copy_op_t* cop
     const bool is_multi =
         (op.num_entries > 0);
 
-    bool has_work;
-    if (is_multi)
-      has_work = true;
-    else if (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP)
-      has_work = (op.src_size > 0);
-    else
-      has_work = (op.size > 0);
+    // Every single-entry form validated above now rejects a zero transfer
+    // size, and multi-entry forms were always queued, so every op is queued
+    // unconditionally.  Dropping one here instead would return success while
+    // leaving its completion signal untouched, hanging any waiter.
+    core::Agent* copy_agent = nullptr;
+    // Ops that carry a multi-entry dst_agent list (broadcast, multi-linear,
+    // rect, multi-swap, and multi-indirect) do not have a scalar dst_agent to
+    // fall back on, so copy_agent is resolved from src_agent or, when
+    // src_agent is not a GPU, from dst_agent_list[0].  Single-entry ops
+    // keep the original dst_agent-based fallback.
+    const bool is_swap =
+        (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP);
 
-    if (has_work) {
-      core::Agent* copy_agent = nullptr;
-      // Ops that carry a multi-entry dst_agent list (broadcast, multi-linear,
-      // rect, multi-swap, and multi-indirect) do not have a scalar dst_agent to
-      // fall back on, so copy_agent is resolved from src_agent or, when
-      // src_agent is not a GPU, from dst_agent_list[0].  Single-entry ops
-      // keep the original dst_agent-based fallback.
-      const bool is_indirect =
-          (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC) ||
-          (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST) ||
-          (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST);
-      const bool is_swap =
-          (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP);
-
-      if (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST) {
-        if (src_agent->device_type() != core::Agent::DeviceType::kAmdGpuDevice)
-          return HSA_STATUS_ERROR_INVALID_AGENT;
+    if (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST) {
+      if (src_agent->device_type() != core::Agent::DeviceType::kAmdGpuDevice)
+        return HSA_STATUS_ERROR_INVALID_AGENT;
+      copy_agent = src_agent;
+    } else if (is_multi && !is_swap && !is_indirect) {
+      if (src_agent->device_type() == core::Agent::DeviceType::kAmdGpuDevice) {
+        // D2D or D2H: use src GPU as the copy engine.
         copy_agent = src_agent;
-      } else if (is_multi && !is_swap && !is_indirect) {
-        if (src_agent->device_type() == core::Agent::DeviceType::kAmdGpuDevice) {
-          // D2D or D2H: use src GPU as the copy engine.
-          copy_agent = src_agent;
-        } else {
-          // H2D: every destination was validated as a GPU; route through the first one.
-          copy_agent = core::Agent::Convert(op.dst_agent_list[0]);
-        }
-      } else if (is_multi && (is_swap || is_indirect)) {
-        const bool src_gpu =
-            (src_agent->device_type() == core::Agent::DeviceType::kAmdGpuDevice);
-        copy_agent = src_gpu ? src_agent
-                             : core::Agent::Convert(op.dst_agent_list[0]);
       } else {
-        core::Agent* eff_dst = rev_copy_dir ? src_agent : dst_agent;
-        core::Agent* eff_src = rev_copy_dir ? dst_agent : src_agent;
-        const bool src_gpu =
-            (eff_src->device_type() == core::Agent::DeviceType::kAmdGpuDevice);
-        copy_agent = src_gpu ? eff_src : eff_dst;
+        // H2D: every destination was validated as a GPU; route through the first one.
+        copy_agent = core::Agent::Convert(op.dst_agent_list[0]);
       }
-
-      agent_batches[copy_agent].push_back(op);
+    } else if (is_multi && (is_swap || is_indirect)) {
+      const bool src_gpu =
+          (src_agent->device_type() == core::Agent::DeviceType::kAmdGpuDevice);
+      copy_agent = src_gpu ? src_agent
+                           : core::Agent::Convert(op.dst_agent_list[0]);
+    } else {
+      core::Agent* eff_dst = rev_copy_dir ? src_agent : dst_agent;
+      core::Agent* eff_src = rev_copy_dir ? dst_agent : src_agent;
+      const bool src_gpu =
+          (eff_src->device_type() == core::Agent::DeviceType::kAmdGpuDevice);
+      copy_agent = src_gpu ? eff_src : eff_dst;
     }
+
+    agent_batches[copy_agent].push_back(op);
   }
 
   // Dispatch each agent's batch via DmaCopyBatch.
