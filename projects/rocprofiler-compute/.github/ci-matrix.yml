@@ -1,8 +1,9 @@
 # Matrix definition for rocprofiler-compute-continuous-integration
 # Runner labels are resolved from ROCm/therock-ci-config at workflow runtime.
 
-# 'arch' selects the runner label family. 'gfx-target' is the exact GPU target
-# and picks the ROCm and PyTorch wheel device extras.
+# 'arch' selects the runner label family. 'gfx-target' is the exact GPU target,
+# or a list of targets when the runners have different GPUs. Each target picks
+# a ROCm and a PyTorch wheel device extra.
 # 'modes' lists the scheduled/automatic modes an entry runs in: 'continuous'
 # (push/PR) and/or 'nightly' (schedule). A manual workflow_dispatch that names
 # an arch bypasses 'modes' and can run any entry.
@@ -23,3 +24,5 @@ matrix-ubuntu:
   # Strix Halo
   - { os-release: '22.04', gpu: 'strix-halo', arch: 'gfx1151', gfx-target: 'gfx1151', modes: [nightly], test-label: 'full', timeout-minutes: 120 }
   - { os-release: '24.04', gpu: 'strix-halo', arch: 'gfx1151', gfx-target: 'gfx1151', modes: [continuous, nightly], test-label: 'full', timeout-minutes: 120, continuous: { test-label: 'standard', timeout-minutes: 30 } }
+  # Navi 4. A gfx120X runner has either a gfx1200 or a gfx1201 GPU.
+  - { os-release: '24.04', gpu: 'navi4', arch: 'gfx120X', gfx-target: ['gfx1200', 'gfx1201'], modes: [continuous, nightly], test-label: 'full', timeout-minutes: 120, continuous: { timeout-minutes: 90 } }

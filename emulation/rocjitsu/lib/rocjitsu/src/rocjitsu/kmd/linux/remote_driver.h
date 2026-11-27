@@ -21,10 +21,10 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <pthread.h>
 #include <span>
 #include <string>
 #include <sys/types.h>
-#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -286,7 +286,8 @@ private:
   int shutdown_efd_ = -1; ///< eventfd written by close() to wake WAIT_EVENTS pollers.
   const std::function<void()> on_disconnect_;
   /// Joined before closing sock_ or shutdown_efd_; never consumes RPC bytes.
-  std::thread disconnect_monitor_;
+  pthread_t disconnect_monitor_{};
+  bool disconnect_monitor_started_ = false;
   void *kfd_marker_ = nullptr; ///< Non-readable mapping identifying /dev/kfd in proc maps.
   size_t kfd_marker_size_ = 0;
 

@@ -162,7 +162,7 @@ UNIT_VARIANTS["gfx115x"] = {
     "11.4.1": ("GL2 Read 128B Requests", "(Count + $normUnit)"),
     "11.4.2": ("GL2 Write Requests", "(Count + $normUnit)"),
 }
-UNIT_VARIANTS["gfx1201"] = {
+UNIT_VARIANTS["gfx120x"] = {
     "2.1.6": ("LDS Bank Conflicts", "Cycles"),
     "3.4.0": ("LDS Req", "(Requests + $normUnit)"),
     "3.9.0": ("Memory Read Requests", "(Requests + $normUnit)"),

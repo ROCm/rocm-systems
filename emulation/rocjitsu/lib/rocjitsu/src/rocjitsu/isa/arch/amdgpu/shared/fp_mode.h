@@ -1,57 +1,33 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+// MODE-aware arithmetic for memory atomics and gfx10 interpolation.
+// Migrated VALU arithmetic is implemented by rj-arith.
 #pragma once
-
-/// @file fp_mode.h
-/// @brief Shared MODE-aware floating-point execution helpers.
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/denormal.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/denormal_value.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/division.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/input_denormal.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/minmax.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/output_denormal.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/output_modifier.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h"
 #include "rocjitsu/isa/isa_family.h"
 #include "util/data_types.h"
 #include "util/host_target.h"
-
-#include <algorithm>
 #include <bit>
 #include <cassert>
 #include <cfenv>
 #include <cmath>
 #include <cstdint>
-#include <cstdlib>
+#include <initializer_list>
 #include <limits>
 #include <type_traits>
-
 #if RJ_HOST_ARCH_X86
 #include <xmmintrin.h>
 #endif
 
 namespace rocjitsu::amdgpu::fp_mode {
-
 namespace detail {
-
-inline uint16_t modify_f16(uint16_t value, bool absolute, bool negate) {
-  if (absolute) {
-    value &= 0x7fffu;
-  }
-  if (negate) {
-    value ^= 0x8000u;
-  }
-  return value;
-}
-
-/// @brief Flush a raw F16 source under MODE input-denormal control.
-inline uint16_t flush_input_f16(uint16_t value, uint32_t denorm_mode) {
-  return static_cast<uint16_t>(input_denormal::flush_input<fp_format::F16>(
-      uint32_t{value}, input_denormal::Policy::make(denorm_mode)));
-}
 
 inline int host_round_mode(uint32_t round_mode) {
   switch (round_mode & 3u) {
@@ -137,17 +113,6 @@ inline ExactF64Sum add_exact(double lhs, double rhs) {
   const double rhs_virtual = value - lhs;
   const double error = (lhs - (value - rhs_virtual)) + (rhs - rhs_virtual);
   return {value, error};
-}
-
-/// Retain an exact sum's sticky information before rounding to a narrower format.
-/// An inexact F64 result gets an odd low bit, avoiding double rounding at F16
-/// boundaries while preserving directed rounding for tiny contributions.
-inline double round_to_odd(ExactF64Sum sum) {
-  if (sum.error == 0.0 || !std::isfinite(sum.value) || (std::bit_cast<uint64_t>(sum.value) & 1u)) {
-    return sum.value;
-  }
-  return std::nextafter(sum.value,
-                        std::copysign(std::numeric_limits<double>::infinity(), sum.error));
 }
 
 /// @brief Compare an exact two-component sum with an exactly representable value.
@@ -260,151 +225,6 @@ inline uint16_t round_exact_to_bf16(ExactF64Sum sum, uint32_t round_mode) {
   }
 }
 
-} // namespace detail
-
-/// @brief Legacy NaN priority, MODE.IEEE handling and qualified median zero ordering.
-inline minmax::LegacyPolicy legacy_minmax_policy(rocjitsu::IsaFamily arch,
-                                                 bool ieee_mode) noexcept {
-  switch (arch) {
-  case rocjitsu::IsaFamily::Rdna1:
-  case rocjitsu::IsaFamily::Rdna2:
-  case rocjitsu::IsaFamily::Rdna3:
-  case rocjitsu::IsaFamily::Rdna3_5:
-    return {.prefer_first_nan = true, .ieee = ieee_mode, .ordered_zero_median = true};
-  case rocjitsu::IsaFamily::Cdna1:
-  case rocjitsu::IsaFamily::Cdna2:
-  case rocjitsu::IsaFamily::Cdna3:
-  case rocjitsu::IsaFamily::Cdna4:
-    // CDNA follows the ISA rules for two-NaN priority and median zero ties.
-    return {.ieee = ieee_mode};
-  case rocjitsu::IsaFamily::Rdna4:
-  case rocjitsu::IsaFamily::Cdna5:
-  case rocjitsu::IsaFamily::Rv32i:
-  case rocjitsu::IsaFamily::Rv64i:
-  case rocjitsu::IsaFamily::Invalid:
-    break;
-  }
-  assert(false && "legacy min/max policy requires a legacy AMDGPU architecture");
-  std::abort();
-}
-
-/// @brief Whether floating operations with exception support quiet signaling NaNs.
-inline bool quiets_nan(rocjitsu::IsaFamily arch, bool ieee_mode) {
-  return arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5 || ieee_mode;
-}
-
-/// @brief Pack two rounded F16 results, applying the destination denormal mode to each half.
-/// @details gfx1250 flushes the exact subnormal 2^-20. At the normal boundary,
-/// the packed conversion models tininess using the rounded FP16 encoding.
-template <typename V> inline V pack_f16_results(V low, V high, uint32_t denorm_mode) {
-  const auto output = output_denormal::Policy::make(denorm_mode);
-  return output_denormal::flush_output<fp_format::F16>(low, output) |
-         (output_denormal::flush_output<fp_format::F16>(high, output) << 16);
-}
-
-/// @brief Convert one V_CVT_SR_PK_F16_F32 component with its half of the seed.
-inline uint16_t cvt_sr_pk_f16_f32(uint32_t bits, uint16_t seed, bool fp16_ovfl) {
-  // CDNA5 ISA 15.14, p. 646 adds the seed directly to the F32 bits. For 1.0,
-  // 0x3f800000 + 0x8000 gives 0x3f808000, or FP16 0x3c04. gfx1250 returns 0x3c00.
-  // Use the CDNA4 single-result helper util::f32_to_f16_sr_mode with the high 13
-  // seed bits. The exact-input capture also permits the low 13 bits and leaves
-  // the packed opcode's output denormal behavior unmeasured.
-  return util::f32_to_f16_sr_mode(std::bit_cast<float>(bits), uint32_t{seed} << 16, fp16_ovfl);
-}
-
-/// @brief Convert one V_CVT_SR_PK_BF16_F32 component with its 16-bit addend.
-inline uint16_t cvt_sr_pk_bf16_f32(uint32_t bits, uint16_t addend, bool fp16_ovfl) {
-  // The single-result converter consumes the high half of a 32-bit seed.
-  return util::f32_to_bf16_sr_mode(std::bit_cast<float>(bits), uint32_t{addend} << 16, fp16_ovfl);
-}
-
-/// @brief Return the OMOD value supported by an ordinary floating-point result.
-inline uint32_t effective_omod(rocjitsu::IsaFamily arch, uint32_t denorm_mode, bool ieee_mode,
-                               uint32_t omod) {
-  if (omod == 0) {
-    return 0;
-  }
-  if (arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5) {
-    return omod;
-  }
-  return (denorm_mode & 2u) == 0 && !ieee_mode ? omod : 0;
-}
-
-/// @brief Return the OMOD value that applies to an F16 result on the selected ISA.
-/// @details GFX11+ packed-F16 results explicitly ignore OMOD. Older profiles expose
-/// OMOD on the promoted VOP3 form of V_PK_FMAC_F16, subject to their ordinary
-/// output-denormal and MODE.IEEE restrictions. GFX12 and gfx1250 allow OMOD on
-/// non-packed F16 results regardless of output-denormal mode.
-inline uint32_t effective_f16_omod(rocjitsu::IsaFamily arch, uint32_t denorm_mode, bool ieee_mode,
-                                   bool packed_result, uint32_t omod) {
-  if (omod == 0) {
-    return 0;
-  }
-  if (packed_result &&
-      (arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5 ||
-       arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5)) {
-    return 0;
-  }
-  return effective_omod(arch, denorm_mode, ieee_mode, omod);
-}
-
-/// @brief Apply the result-format rules required by an active OMOD.
-/// @details OMOD always flushes an output subnormal and maps either signed zero
-/// to positive zero. These helpers operate after the result has been rounded to
-/// its architectural destination format.
-inline uint16_t finalize_omod_f16(uint16_t value, uint32_t omod) {
-  if (omod == 0) {
-    return value;
-  }
-  if ((value & 0x7c00u) == 0 && (value & 0x03ffu) != 0) {
-    value &= 0x8000u;
-  }
-  return (value & 0x7fffu) == 0 ? 0 : value;
-}
-
-inline uint16_t finalize_omod_bf16(uint16_t value, uint32_t omod) {
-  if (omod == 0) {
-    return value;
-  }
-  if ((value & 0x7f80u) == 0 && (value & 0x007fu) != 0) {
-    value &= 0x8000u;
-  }
-  return (value & 0x7fffu) == 0 ? 0 : value;
-}
-
-namespace detail {
-
-/// Round an F32-source FMA directly to F16 in a clean nearest environment.
-inline uint16_t fma_f32_to_f16_nearest_environment(float a, float b, float c, uint32_t round_mode,
-                                                   bool clamp, bool fp16_ovfl,
-                                                   bool clamp_nan_to_zero) {
-  double value;
-  if (std::isfinite(a) && std::isfinite(b) && std::isfinite(c)) {
-    const auto exact = add_exact(double(a) * double(b), double(c));
-    value = round_to_odd(exact);
-    if (exact.value == 0 && exact.error == 0) {
-      // Finite F32 products are exact, normal F64 values or signed zero.
-      // Matching signed zeros keep their sign; cancellation and opposite
-      // signed zeros are negative only when rounding toward negative infinity.
-      const uint32_t product_sign = (std::bit_cast<uint32_t>(a) ^ std::bit_cast<uint32_t>(b)) >> 31;
-      const uint32_t addend_bits = std::bit_cast<uint32_t>(c);
-      const bool matching_zeros =
-          (addend_bits & 0x7fffffffu) == 0 && product_sign == (addend_bits >> 31);
-      const bool negative = matching_zeros ? product_sign != 0 : (round_mode & 3u) == 2u;
-      value = std::bit_cast<double>(uint64_t{negative} << 63);
-    }
-  } else {
-    const uint32_t a_abs = std::bit_cast<uint32_t>(a) & 0x7fffffffu;
-    const uint32_t b_abs = std::bit_cast<uint32_t>(b) & 0x7fffffffu;
-    // The invalid product wins even when the addend supplies a NaN payload.
-    const bool invalid_product =
-        (a_abs == 0 && b_abs == 0x7f800000u) || (b_abs == 0 && a_abs == 0x7f800000u);
-    value = invalid_product ? std::bit_cast<double>(uint64_t{0xfff8000000000000})
-                            : std::fma(double(a), double(b), double(c));
-  }
-  return pseudo_scalar::round_f16_result(value, round_mode, 0, clamp, fp16_ovfl, clamp_nan_to_zero);
-}
-
 /// @brief Execute F32-source fused multiply-add in an established clean nearest environment.
 inline uint16_t fma_f32_to_bf16_nearest_environment(float multiplicand, float multiplier,
                                                     float addend, uint32_t round_mode, bool clamp,
@@ -442,265 +262,6 @@ inline uint16_t fma_f32_to_bf16_nearest_environment(float multiplicand, float mu
 }
 
 } // namespace detail
-
-/// @brief Execute an F32-source fused multiply-add and round once to BF16.
-/// @details An F32 product is exact in F64. The error-free sum retains the exact addend residual,
-/// which is needed when the rounded F64 value lands on a BF16 boundary or midpoint.
-inline uint16_t fma_f32_to_bf16(float multiplicand, float multiplier, float addend,
-                                uint32_t round_mode, bool clamp, bool clamp_nan_to_zero) {
-  return detail::fma_f32_to_bf16_nearest_environment(multiplicand, multiplier, addend, round_mode,
-                                                     clamp, clamp_nan_to_zero);
-}
-
-/// @brief Guest rounding through the host rounding mode, for the legacy paths that still use it.
-using ScopedEnvironment = detail::ScopedFenv;
-
-enum class PackedF32Op { ADD, MUL, FMA };
-
-enum class PackedBinaryOp { ADD, MUL, MIN, MAX, MINIMUM, MAXIMUM };
-
-/// @brief Packed F16 selection on scalar or SIMD encodings, followed by CLAMP.
-/// @details Selection applies input flushing only. gfx1100 and gfx1201 preserve
-/// selected denormals even when MODE disables output denormals.
-template <bool Minimum, typename V>
-inline V packed_minmax_f16(V a_bits, V b_bits, uint32_t denorm_mode, bool clamp,
-                           bool clamp_nan_to_zero, rocjitsu::IsaFamily arch, bool ieee_mode) {
-  const auto input_policy = input_denormal::Policy::make(denorm_mode);
-  V result;
-  if (arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5) {
-    using Selection = std::conditional_t<Minimum, minmax::MinNum, minmax::MaxNum>;
-    result = minmax::evaluate<fp_format::F16, Selection>(input_policy, a_bits, b_bits);
-  } else {
-    using Selection = std::conditional_t<Minimum, minmax::LegacyMin, minmax::LegacyMax>;
-    result = minmax::LegacyOperation<fp_format::F16, Selection>{
-        input_policy, legacy_minmax_policy(arch, ieee_mode)}(a_bits, b_bits);
-  }
-  return output_modifier::apply<fp_format::F16>(
-      result, {.clamp = clamp, .clamp_nan_to_zero = clamp_nan_to_zero});
-}
-
-/// @brief Packed F16 binary arithmetic uses the FP16/64 MODE controls.
-inline uint16_t packed_binary_f16(PackedBinaryOp operation, uint16_t a_bits, uint16_t b_bits,
-                                  uint32_t round_mode, uint32_t denorm_mode, bool clamp,
-                                  bool fp16_ovfl, bool clamp_nan_to_zero, rocjitsu::IsaFamily arch,
-                                  bool ieee_mode) {
-  if (operation == PackedBinaryOp::MIN) {
-    return packed_minmax_f16<true>(uint32_t(a_bits), uint32_t(b_bits), denorm_mode, clamp,
-                                   clamp_nan_to_zero, arch, ieee_mode);
-  }
-  if (operation == PackedBinaryOp::MAX) {
-    return packed_minmax_f16<false>(uint32_t(a_bits), uint32_t(b_bits), denorm_mode, clamp,
-                                    clamp_nan_to_zero, arch, ieee_mode);
-  }
-  a_bits = detail::flush_input_f16(a_bits, denorm_mode);
-  b_bits = detail::flush_input_f16(b_bits, denorm_mode);
-  const bool a_nan = (a_bits & 0x7fffu) > 0x7c00u;
-  const bool b_nan = (b_bits & 0x7fffu) > 0x7c00u;
-  const bool arithmetic = operation == PackedBinaryOp::ADD || operation == PackedBinaryOp::MUL;
-  if (arithmetic && (a_nan || b_nan)) {
-    const uint16_t selected = a_nan ? a_bits : b_bits;
-    return clamp && clamp_nan_to_zero ? 0 : selected | (quiets_nan(arch, ieee_mode) ? 0x0200u : 0u);
-  }
-  const double first = util::f16_to_f32(a_bits);
-  const double second = util::f16_to_f32(b_bits);
-  double value = std::numeric_limits<double>::quiet_NaN();
-  switch (operation) {
-  case PackedBinaryOp::ADD:
-    value = first + second;
-    // Exact cancellation follows the destination's directed rounding mode.
-    if (value == 0.0 && std::signbit(first) != std::signbit(second)) {
-      value = round_mode == 2 ? -0.0 : 0.0;
-    }
-    break;
-  case PackedBinaryOp::MUL:
-    value = first * second;
-    break;
-  case PackedBinaryOp::MIN:
-  case PackedBinaryOp::MAX:
-  case PackedBinaryOp::MINIMUM:
-  case PackedBinaryOp::MAXIMUM: {
-    const bool minimum = operation == PackedBinaryOp::MIN || operation == PackedBinaryOp::MINIMUM;
-    const bool propagate_nan =
-        operation == PackedBinaryOp::MINIMUM || operation == PackedBinaryOp::MAXIMUM;
-    if (propagate_nan && (std::isnan(first) || std::isnan(second))) {
-      value = std::numeric_limits<double>::quiet_NaN();
-    } else if (first == second) {
-      value =
-          minimum ? (std::signbit(first) ? first : second) : (std::signbit(first) ? second : first);
-    } else {
-      value = minimum ? std::fmin(first, second) : std::fmax(first, second);
-    }
-    break;
-  }
-  }
-  uint16_t result =
-      pseudo_scalar::round_f16_result(value, round_mode, 0, clamp, fp16_ovfl, clamp_nan_to_zero);
-  if (!(denorm_mode & 2u) && (result & 0x7c00u) == 0) {
-    result &= 0x8000u;
-  }
-  return result;
-}
-
-/// @brief Select three packed F16 operands, applying output controls only to the final result.
-inline uint16_t packed_select3_f16(PackedBinaryOp operation, uint16_t first, uint16_t second,
-                                   uint16_t third, uint32_t denorm_mode, bool clamp,
-                                   bool clamp_nan_to_zero, rocjitsu::IsaFamily arch,
-                                   bool ieee_mode) {
-  const uint16_t pair = packed_binary_f16(operation, first, second, 0, denorm_mode | 2u, false,
-                                          false, false, arch, ieee_mode);
-  return packed_binary_f16(operation, pair, third, 0, denorm_mode, clamp, false, clamp_nan_to_zero,
-                           arch, ieee_mode);
-}
-
-/// @brief Packed BF16 numeric min/max preserve denormals and order signed zeros explicitly.
-inline uint16_t packed_select_bf16(float first, float second, bool minimum) {
-  const float selected = first == second
-                             ? (minimum ? (std::signbit(first) ? first : second)
-                                        : (std::signbit(first) ? second : first))
-                             : (minimum ? std::fmin(first, second) : std::fmax(first, second));
-  return util::f32_to_bf16_rne(selected);
-}
-
-/// @brief Packed BF16 CLAMP is applied after the fixed-RNE operation.
-inline uint16_t clamp_bf16(uint16_t value, bool clamp, bool clamp_nan_to_zero) {
-  if (!clamp) {
-    return value;
-  }
-  const uint16_t magnitude = value & 0x7fffu;
-  if (magnitude > 0x7f80u) {
-    return clamp_nan_to_zero ? 0 : value;
-  }
-  if (value & 0x8000u) {
-    return 0;
-  }
-  return value > 0x3f80u ? 0x3f80u : value;
-}
-
-/// @brief F32 FMA with architectural NaN selection in the active FP environment.
-inline float fma_f32(float a, float b, float c, rocjitsu::IsaFamily arch, bool ieee_mode,
-                     uint32_t denorm_mode, bool force_output_flush = false) {
-#if defined(__clang__)
-#pragma STDC FENV_ACCESS ON
-#endif
-  auto input_bits = [denorm_mode](float value) {
-    const uint32_t bits = std::bit_cast<uint32_t>(value);
-    return !(denorm_mode & 1u) && (bits & 0x7f800000u) == 0 ? bits & 0x80000000u : bits;
-  };
-  const uint32_t a_bits = input_bits(a), b_bits = input_bits(b), c_bits = input_bits(c);
-  const uint32_t a_abs = a_bits & 0x7fffffffu, b_abs = b_bits & 0x7fffffffu;
-  // An invalid product takes precedence even when the addend is a NaN.
-  if ((a_abs == 0 && b_abs == 0x7f800000u) || (b_abs == 0 && a_abs == 0x7f800000u)) {
-    return std::bit_cast<float>(0xffc00000u);
-  }
-  for (const uint32_t bits : {a_bits, b_bits, c_bits}) {
-    if ((bits & 0x7fffffffu) > 0x7f800000u) {
-      return std::bit_cast<float>(bits | (quiets_nan(arch, ieee_mode) ? 0x00400000u : 0u));
-    }
-  }
-  volatile float left = std::bit_cast<float>(a_bits);
-  volatile float right = std::bit_cast<float>(b_bits);
-  volatile float addend = std::bit_cast<float>(c_bits);
-  const float result = std::fma(left, right, addend);
-  if (force_output_flush || !(denorm_mode & 2u)) {
-    const uint32_t bits = std::bit_cast<uint32_t>(result);
-    const uint32_t magnitude = bits & 0x7fffffffu;
-    if (magnitude < 0x00800000u) {
-      return std::bit_cast<float>(bits & 0x80000000u);
-    }
-    if (magnitude == 0x00800000u) {
-      // Detect tininess after rounding the 24-bit significand, before packing
-      // it into F32's exponent range. Subnormal F32 rounding has a wider step
-      // and can otherwise promote a still-tiny intermediate to minimum normal.
-      // The caller's scope installed the guest rounding; the residual needs nearest-even.
-      const int rounding = std::fegetround();
-      detail::ScopedFenv environment(0);
-      volatile double wide_left = left;
-      volatile double wide_right = right;
-      volatile double wide_addend = addend;
-      // A product of two F32 operands is exact in F64. TwoSum retains the
-      // residual of the addition, including products far below the addend.
-      volatile double product = wide_left * wide_right;
-      volatile double sum = product + wide_addend;
-      volatile double addend_part = sum - product;
-      const double residual = (product - (sum - addend_part)) + (wide_addend - addend_part);
-      const bool negative = bits >> 31;
-      const double magnitude_sum = negative ? -sum : sum;
-      const double magnitude_residual = negative ? -residual : residual;
-      double threshold = static_cast<double>(std::numeric_limits<float>::min());
-      const bool away_from_zero = rounding == (negative ? FE_DOWNWARD : FE_UPWARD);
-      if (rounding == FE_TONEAREST) {
-        threshold -= 0x1p-151;
-      } else if (away_from_zero) {
-        threshold -= 0x1p-150;
-      }
-      if (magnitude_sum < threshold ||
-          (magnitude_sum == threshold &&
-           (magnitude_residual < 0 || (away_from_zero && magnitude_residual == 0)))) {
-        return std::bit_cast<float>(bits & 0x80000000u);
-      }
-    }
-  }
-  // Opposite infinities also produce the architectural indefinite value.
-  return std::isnan(result) ? std::bit_cast<float>(0xffc00000u) : result;
-}
-
-/// @brief Packed F32 operations use FP32 MODE, independently of the host environment.
-inline uint32_t packed_f32(float first, float second, float third, PackedF32Op operation,
-                           uint32_t round_mode, uint32_t denorm_mode, bool clamp,
-                           bool clamp_nan_to_zero, rocjitsu::IsaFamily arch, bool ieee_mode) {
-  detail::ScopedFenv environment(round_mode);
-  auto flush = [](float value) {
-    const uint32_t bits = std::bit_cast<uint32_t>(value);
-    return (bits & 0x7f800000u) == 0 ? std::bit_cast<float>(bits & 0x80000000u) : value;
-  };
-  volatile float first_input = (denorm_mode & 1u) ? first : flush(first);
-  volatile float second_input = (denorm_mode & 1u) ? second : flush(second);
-  volatile float third_input = (denorm_mode & 1u) ? third : flush(third);
-  float result = std::numeric_limits<float>::quiet_NaN();
-  switch (operation) {
-  case PackedF32Op::ADD:
-    result = first_input + second_input;
-    break;
-  case PackedF32Op::MUL:
-    result = first_input * second_input;
-    break;
-  case PackedF32Op::FMA:
-    result = fma_f32(first_input, second_input, third_input, arch, ieee_mode, denorm_mode);
-    break;
-  }
-  if (clamp) {
-    if (std::isnan(result)) {
-      if (clamp_nan_to_zero) {
-        result = 0.0f;
-      }
-    } else {
-      result = result <= 0.0f ? 0.0f : result > 1.0f ? 1.0f : result;
-    }
-  }
-  return std::bit_cast<uint32_t>((denorm_mode & 2u) ? result : flush(result));
-}
-
-/// @brief Packed BF16 math always rounds once to nearest-even and preserves denormals.
-inline uint16_t packed_fma_bf16(float a, float b, float c, bool fp16_ovfl) {
-  uint16_t result = fma_f32_to_bf16(a, b, c, 0, false, false);
-  // FP16_OVFL clamps finite-input results that round to BF16 infinity;
-  // infinities supplied as operands retain their normal arithmetic behavior.
-  if (fp16_ovfl && (result & 0x7fffu) == 0x7f80u && std::isfinite(a) && std::isfinite(b) &&
-      std::isfinite(c)) {
-    result = static_cast<uint16_t>((result & 0x8000u) | 0x7f7fu);
-  }
-  return result;
-}
-
-inline uint16_t packed_add_bf16(float a, float b, bool fp16_ovfl) {
-  return packed_fma_bf16(a, 1.0f, b, fp16_ovfl);
-}
-
-inline uint16_t packed_mul_bf16(float a, float b, bool fp16_ovfl) {
-  // An addend with the product's sign preserves a negative zero product.
-  const float zero = std::signbit(a) != std::signbit(b) ? -0.0f : 0.0f;
-  return packed_fma_bf16(a, b, zero, fp16_ovfl);
-}
 
 enum class ScalarAtomicOp { FADD, FMIN, FMAX, FCMPSWAP };
 
@@ -850,18 +411,145 @@ inline uint32_t atomic_add_packed_16(uint32_t old_val, uint32_t src_val, bool bf
   return result;
 }
 
-inline float finalize_omod_f32(float value, uint32_t omod) {
+// gfx10 interpolation still uses these MODE-aware arithmetic stages.
+using ScopedEnvironment = detail::ScopedFenv;
+
+namespace detail {
+/// @brief Flush a raw F16 source under MODE input-denormal control.
+inline uint16_t flush_input_f16(uint16_t value, uint32_t denorm_mode) {
+  return static_cast<uint16_t>(input_denormal::flush_input<fp_format::F16>(
+      uint32_t{value}, input_denormal::Policy::make(denorm_mode)));
+}
+} // namespace detail
+
+namespace detail {
+/// Retain an exact sum's sticky information before rounding to a narrower format.
+/// An inexact F64 result gets an odd low bit, avoiding double rounding at F16
+/// boundaries while preserving directed rounding for tiny contributions.
+inline double round_to_odd(ExactF64Sum sum) {
+  if (sum.error == 0.0 || !std::isfinite(sum.value) || (std::bit_cast<uint64_t>(sum.value) & 1u)) {
+    return sum.value;
+  }
+  return std::nextafter(sum.value,
+                        std::copysign(std::numeric_limits<double>::infinity(), sum.error));
+}
+} // namespace detail
+
+/// @brief Whether floating operations with exception support quiet signaling NaNs.
+inline bool quiets_nan(rocjitsu::IsaFamily arch, bool ieee_mode) {
+  return arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5 || ieee_mode;
+}
+
+/// @brief Return the OMOD value supported by an ordinary floating-point result.
+inline uint32_t effective_omod(rocjitsu::IsaFamily arch, uint32_t denorm_mode, bool ieee_mode,
+                               uint32_t omod) {
   if (omod == 0) {
-    return value;
+    return 0;
   }
-  uint32_t bits = std::bit_cast<uint32_t>(value);
-  if ((bits & 0x7f800000u) == 0 && (bits & 0x007fffffu) != 0) {
-    bits &= 0x80000000u;
+  if (arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5) {
+    return omod;
   }
-  if ((bits & 0x7fffffffu) == 0) {
-    bits = 0;
+  return (denorm_mode & 2u) == 0 && !ieee_mode ? omod : 0;
+}
+
+namespace detail {
+/// Round an F32-source FMA directly to F16 in a clean nearest environment.
+inline uint16_t fma_f32_to_f16_nearest_environment(float a, float b, float c, uint32_t round_mode,
+                                                   bool clamp, bool fp16_ovfl,
+                                                   bool clamp_nan_to_zero) {
+  double value;
+  if (std::isfinite(a) && std::isfinite(b) && std::isfinite(c)) {
+    const auto exact = add_exact(double(a) * double(b), double(c));
+    value = round_to_odd(exact);
+    if (exact.value == 0 && exact.error == 0) {
+      // Finite F32 products are exact, normal F64 values or signed zero.
+      // Matching signed zeros keep their sign; cancellation and opposite
+      // signed zeros are negative only when rounding toward negative infinity.
+      const uint32_t product_sign = (std::bit_cast<uint32_t>(a) ^ std::bit_cast<uint32_t>(b)) >> 31;
+      const uint32_t addend_bits = std::bit_cast<uint32_t>(c);
+      const bool matching_zeros =
+          (addend_bits & 0x7fffffffu) == 0 && product_sign == (addend_bits >> 31);
+      const bool negative = matching_zeros ? product_sign != 0 : (round_mode & 3u) == 2u;
+      value = std::bit_cast<double>(uint64_t{negative} << 63);
+    }
+  } else {
+    const uint32_t a_abs = std::bit_cast<uint32_t>(a) & 0x7fffffffu;
+    const uint32_t b_abs = std::bit_cast<uint32_t>(b) & 0x7fffffffu;
+    // The invalid product wins even when the addend supplies a NaN payload.
+    const bool invalid_product =
+        (a_abs == 0 && b_abs == 0x7f800000u) || (b_abs == 0 && a_abs == 0x7f800000u);
+    value = invalid_product ? std::bit_cast<double>(uint64_t{0xfff8000000000000})
+                            : std::fma(double(a), double(b), double(c));
   }
-  return std::bit_cast<float>(bits);
+  return pseudo_scalar::round_f16_result(value, round_mode, 0, clamp, fp16_ovfl, clamp_nan_to_zero);
+}
+} // namespace detail
+
+/// @brief F32 FMA with architectural NaN selection in the active FP environment.
+inline float fma_f32(float a, float b, float c, rocjitsu::IsaFamily arch, bool ieee_mode,
+                     uint32_t denorm_mode, bool force_output_flush = false) {
+#if defined(__clang__)
+#pragma STDC FENV_ACCESS ON
+#endif
+  auto input_bits = [denorm_mode](float value) {
+    const uint32_t bits = std::bit_cast<uint32_t>(value);
+    return !(denorm_mode & 1u) && (bits & 0x7f800000u) == 0 ? bits & 0x80000000u : bits;
+  };
+  const uint32_t a_bits = input_bits(a), b_bits = input_bits(b), c_bits = input_bits(c);
+  const uint32_t a_abs = a_bits & 0x7fffffffu, b_abs = b_bits & 0x7fffffffu;
+  // An invalid product takes precedence even when the addend is a NaN.
+  if ((a_abs == 0 && b_abs == 0x7f800000u) || (b_abs == 0 && a_abs == 0x7f800000u)) {
+    return std::bit_cast<float>(0xffc00000u);
+  }
+  for (const uint32_t bits : {a_bits, b_bits, c_bits}) {
+    if ((bits & 0x7fffffffu) > 0x7f800000u) {
+      return std::bit_cast<float>(bits | (quiets_nan(arch, ieee_mode) ? 0x00400000u : 0u));
+    }
+  }
+  volatile float left = std::bit_cast<float>(a_bits);
+  volatile float right = std::bit_cast<float>(b_bits);
+  volatile float addend = std::bit_cast<float>(c_bits);
+  const float result = std::fma(left, right, addend);
+  if (force_output_flush || !(denorm_mode & 2u)) {
+    const uint32_t bits = std::bit_cast<uint32_t>(result);
+    const uint32_t magnitude = bits & 0x7fffffffu;
+    if (magnitude < 0x00800000u) {
+      return std::bit_cast<float>(bits & 0x80000000u);
+    }
+    if (magnitude == 0x00800000u) {
+      // Detect tininess after rounding the 24-bit significand, before packing
+      // it into F32's exponent range. Subnormal F32 rounding has a wider step
+      // and can otherwise promote a still-tiny intermediate to minimum normal.
+      const int rounding = std::fegetround();
+      detail::ScopedFenv environment(0);
+      volatile double wide_left = left;
+      volatile double wide_right = right;
+      volatile double wide_addend = addend;
+      // A product of two F32 operands is exact in F64. TwoSum retains the
+      // residual of the addition, including products far below the addend.
+      volatile double product = wide_left * wide_right;
+      volatile double sum = product + wide_addend;
+      volatile double addend_part = sum - product;
+      const double residual = (product - (sum - addend_part)) + (wide_addend - addend_part);
+      const bool negative = bits >> 31;
+      const double magnitude_sum = negative ? -sum : sum;
+      const double magnitude_residual = negative ? -residual : residual;
+      double threshold = static_cast<double>(std::numeric_limits<float>::min());
+      const bool away_from_zero = rounding == (negative ? FE_DOWNWARD : FE_UPWARD);
+      if (rounding == FE_TONEAREST) {
+        threshold -= 0x1p-151;
+      } else if (away_from_zero) {
+        threshold -= 0x1p-150;
+      }
+      if (magnitude_sum < threshold ||
+          (magnitude_sum == threshold &&
+           (magnitude_residual < 0 || (away_from_zero && magnitude_residual == 0)))) {
+        return std::bit_cast<float>(bits & 0x80000000u);
+      }
+    }
+  }
+  // Opposite infinities also produce the architectural indefinite value.
+  return std::isnan(result) ? std::bit_cast<float>(0xffc00000u) : result;
 }
 
 /// @brief Scale an F32 result by OMOD through the shared raw-bit stage.
@@ -876,52 +564,18 @@ inline float apply_omod_f32(float value, uint32_t omod, uint32_t round_mode) {
       output_modifier::scale<fp_format::F32>(std::bit_cast<uint32_t>(value), policy));
 }
 
-/// @brief Scale an already rounded half result represented in F32.
-/// @details Used by SDWA finish_rounded_f16. Active OMOD preserves NaNs, maps
-/// zero/subnormal results to +0, and rounds scaling to F16. Newly tiny results
-/// flush to signed zero. This path is outside the shared raw-bit output stage.
-inline float apply_omod_f16(float value, uint32_t omod, bool fp16_ovfl) {
-  if (omod == 0) {
-    return value;
-  }
-  const uint32_t magnitude = std::bit_cast<uint32_t>(value) & 0x7fffffffu;
-  if (magnitude > 0x7f800000u) {
-    return value;
-  }
-  if (magnitude < 0x38800000u) {
-    return 0.0f;
-  }
-  // A half value scaled by a power of two is exact in F32, including infinity.
-  value *= omod == 3 ? 0.5f : omod == 2 ? 4.0f : 2.0f;
-  uint16_t result = util::f32_to_f16_mode(value, fp16_ovfl);
-  if ((result & 0x7c00u) == 0) {
-    result &= 0x8000u;
-  }
-  return util::f16_to_f32(result);
-}
-
-inline double finalize_omod_f64(double value, uint32_t omod) {
-  if (omod == 0) {
-    return value;
-  }
-  uint64_t bits = denormal::flush<fp_format::F64>(std::bit_cast<uint64_t>(value));
-  if ((bits & 0x7fffffffffffffffULL) == 0) {
-    bits = 0;
-  }
-  return std::bit_cast<double>(bits);
-}
-
 /// @brief Ordinary VALU arithmetic operations governed by MODE.
 /// @details Subtraction is ADD of the negated subtrahend: host subtraction would keep a NaN
 /// subtrahend's sign, unlike the hardware.
 enum class Arithmetic : uint8_t { ADD, MUL, FMA, MUL_LEGACY, FMA_DX9_ZERO };
 
 namespace detail {
-
 template <typename Float> inline Float flush_denormal(Float value) {
   return denormal::flush_value(value);
 }
+} // namespace detail
 
+namespace detail {
 template <Arithmetic operation, typename Float>
 inline Float evaluate_arithmetic(Float lhs, Float rhs, Float addend) {
 #if defined(__clang__)
@@ -941,7 +595,9 @@ inline Float evaluate_arithmetic(Float lhs, Float rhs, Float addend) {
     return std::fma(left, right, accumulator);
   }
 }
+} // namespace detail
 
+namespace detail {
 template <Arithmetic operation, typename Float, typename Evaluate>
 inline Float arithmetic_with_policy(Float lhs, Float rhs, Float addend, uint32_t round_mode,
                                     uint32_t denorm_mode, Evaluate evaluate) {
@@ -954,7 +610,6 @@ inline Float arithmetic_with_policy(Float lhs, Float rhs, Float addend, uint32_t
   const Float result = evaluate(lhs, rhs, addend);
   return (denorm_mode & 2u) == 0 ? detail::flush_denormal(result) : result;
 }
-
 } // namespace detail
 
 /// @brief Evaluate F32/F64 arithmetic independently of the caller's host environment.
@@ -1002,312 +657,4 @@ inline float arithmetic(float lhs, float rhs, float addend, uint32_t round_mode,
       });
 }
 
-/// @brief Evaluate prepared F16 arithmetic operands in F64.
-/// @details The caller flushes each raw source half before widening. Destination
-/// rounding and output flushing belong to finish_arithmetic_f16; migrated VOP3
-/// callers apply OMOD/CLAMP to the returned half afterward.
-/// The unscoped form leaves the environment to the caller, for repairs running
-/// inside a region that already owns it.
-template <Arithmetic operation>
-inline double arithmetic_f16_unscoped(float lhs, float rhs, float addend) {
-  return detail::evaluate_arithmetic<operation>(static_cast<double>(lhs), static_cast<double>(rhs),
-                                                static_cast<double>(addend));
-}
-
-/// @brief arithmetic_f16_unscoped under its own guest FP environment.
-/// @details Installs `round_mode` and delegates, for callers that own no scope.
-template <Arithmetic operation>
-inline double arithmetic_f16(float lhs, float rhs, float addend, uint32_t round_mode) {
-  detail::ScopedFenv environment(round_mode);
-  return arithmetic_f16_unscoped<operation>(lhs, rhs, addend);
-}
-
-/// @brief Round an F16 arithmetic destination and apply output-denormal policy.
-/// @details Migrated VOP3 callers leave omod=0 and modify the rounded bits
-/// afterward. CDNA SDWA supplies omod for pre-round scaling here. GFX10 SDWA
-/// applies the modifier after arithmetic rounding, like VOP3.
-/// The unscoped form leaves the nearest-even environment to the caller, keeping
-/// the same rounding, output flushing and FP16_OVFL handling.
-inline uint16_t finish_arithmetic_f16_unscoped(double value, uint32_t round_mode,
-                                               uint32_t denorm_mode, bool fp16_ovfl,
-                                               uint32_t omod = 0) {
-  const uint16_t rounded =
-      pseudo_scalar::round_f16_result(value, round_mode, omod, false, fp16_ovfl, false);
-  const auto result = static_cast<uint16_t>(output_denormal::flush_output<fp_format::F16>(
-      uint32_t{rounded}, output_denormal::Policy::make(denorm_mode)));
-  return finalize_omod_f16(result, omod);
-}
-
-/// @brief finish_arithmetic_f16_unscoped for callers that own no guest-rounding scope.
-inline uint16_t finish_arithmetic_f16(double value, uint32_t round_mode, uint32_t denorm_mode,
-                                      bool fp16_ovfl, uint32_t omod = 0) {
-  return finish_arithmetic_f16_unscoped(value, round_mode, denorm_mode, fp16_ovfl, omod);
-}
-
-/// @brief Whether a host SIMD arithmetic fast path implements the wave's FP policy.
-/// @details Requires nearest rounding and preserved inputs/outputs; the host is in its
-/// default FP environment (docs/arith-design.md).
-inline bool native_arithmetic_matches(uint32_t round_mode, uint32_t denorm_mode) {
-  return denorm_mode == 3 && round_mode == 0;
-}
-
-/// @brief Round an F16 FMA significand before testing tininess and packing the exponent.
-inline uint16_t round_fma_f16(double value, uint32_t round_mode, uint32_t denorm_mode, bool clamp,
-                              bool fp16_ovfl, bool clamp_nan_to_zero) {
-  uint16_t result =
-      pseudo_scalar::round_f16_result(value, round_mode, 0, clamp, fp16_ovfl, clamp_nan_to_zero);
-  if (!(denorm_mode & 2u)) {
-    if ((result & 0x7fffu) == 0x0400u) {
-      const bool away = round_mode == ((result & 0x8000u) ? 2u : 1u);
-      const double threshold = 0x1p-14 - (round_mode == 0 ? 0x1p-26 : away ? 0x1p-25 : 0.0);
-      if (std::abs(value) < threshold || (away && std::abs(value) == threshold)) {
-        result &= 0x8000u;
-      }
-    }
-    if ((result & 0x7c00u) == 0) {
-      result &= 0x8000u;
-    }
-  }
-  return result;
-}
-
-/// @brief Apply F16 FMA arithmetic rounding and result modifiers.
-/// @details Active OMOD scales the rounded F16 result, so it cannot recover an
-/// arithmetic overflow or flushed tiny result. Newly tiny negative results
-/// retain their sign, while zeros entering the modifier become positive zero.
-inline uint16_t finish_fma_f16(double value, uint32_t round_mode, uint32_t denorm_mode,
-                               uint32_t omod, bool clamp, bool fp16_ovfl, bool clamp_nan_to_zero) {
-  if (omod == 0) {
-    return round_fma_f16(value, round_mode, denorm_mode, clamp, fp16_ovfl, clamp_nan_to_zero);
-  }
-  uint16_t result = round_fma_f16(value, round_mode, 0, false, fp16_ovfl, false);
-  const uint16_t magnitude = result & 0x7fffu;
-  if (magnitude < 0x0400u) {
-    result = 0;
-  } else if (omod == 3 && magnitude < 0x0800u) {
-    result &= 0x8000u;
-  } else {
-    result = pseudo_scalar::round_f16_result(util::f16_to_f32(result), round_mode, omod, false,
-                                             fp16_ovfl, false);
-  }
-  if (clamp) {
-    result = pseudo_scalar::round_f16_result(util::f16_to_f32(result), round_mode, 0, true,
-                                             fp16_ovfl, clamp_nan_to_zero);
-  }
-  return result;
-}
-
-/// @brief Execute an F16 fused multiply-add and return its raw F16 encoding.
-inline uint16_t fma_f16(uint16_t src0, uint16_t src1, uint16_t src2, bool abs0, bool abs1,
-                        bool abs2, bool neg0, bool neg1, bool neg2, uint32_t round_mode,
-                        uint32_t denorm_mode, uint32_t omod, bool clamp, bool fp16_ovfl,
-                        bool clamp_nan_to_zero, bool quiet_nan) {
-  src0 = detail::flush_input_f16(detail::modify_f16(src0, abs0, neg0), denorm_mode);
-  src1 = detail::flush_input_f16(detail::modify_f16(src1, abs1, neg1), denorm_mode);
-  src2 = detail::flush_input_f16(detail::modify_f16(src2, abs2, neg2), denorm_mode);
-
-  const uint16_t magnitude0 = src0 & 0x7fffu, magnitude1 = src1 & 0x7fffu;
-  if ((magnitude0 == 0 && magnitude1 == 0x7c00u) || (magnitude1 == 0 && magnitude0 == 0x7c00u)) {
-    return clamp && clamp_nan_to_zero ? 0u : 0xfe00u;
-  }
-  for (uint16_t bits : {src0, src1, src2}) {
-    if ((bits & 0x7fffu) > 0x7c00u) {
-      return clamp && clamp_nan_to_zero ? 0u : bits | (quiet_nan ? 0x0200u : 0u);
-    }
-  }
-
-  // Handle infinities before host arithmetic so invalid cancellation always
-  // produces the architectural indefinite, independent of the host's NaN sign.
-  if (magnitude0 == 0x7c00u || magnitude1 == 0x7c00u) {
-    const uint16_t product = ((src0 ^ src1) & 0x8000u) | 0x7c00u;
-    if ((src2 & 0x7fffu) == 0x7c00u && ((product ^ src2) & 0x8000u)) {
-      return clamp && clamp_nan_to_zero ? 0u : 0xfe00u;
-    }
-    return clamp ? ((product & 0x8000u) ? 0u : 0x3c00u) : product;
-  }
-  if ((src2 & 0x7fffu) == 0x7c00u) {
-    return clamp ? ((src2 & 0x8000u) ? 0u : 0x3c00u) : src2;
-  }
-
-  const double multiplicand = static_cast<double>(util::f16_to_f32(src0));
-  const double multiplier = static_cast<double>(util::f16_to_f32(src1));
-  const double addend = static_cast<double>(util::f16_to_f32(src2));
-  // Back to nearest-even: the CDNA2 MAD scalar fallback calls this inside its
-  // guest-rounding scope.
-  detail::ScopedFenv environment(0);
-  // The product is exact in F64, but a tiny product added to a large F16
-  // accumulator can still exceed F64's significand range.
-  volatile double product = multiplicand * multiplier;
-  double value = detail::round_to_odd(detail::add_exact(product, addend));
-  if (value == 0.0) {
-    // F16 products cannot underflow in double: zero here is exact. Cancellation
-    // uses the guest rounding mode; matching zero signs retain their sign.
-    const bool negative_product = ((src0 ^ src1) & 0x8000u) != 0;
-    const bool matching_zeros =
-        (src2 & 0x7fffu) == 0 && negative_product == ((src2 & 0x8000u) != 0);
-    const bool negative_zero = matching_zeros ? negative_product : round_mode == 2;
-    value = negative_zero ? -0.0 : 0.0;
-  }
-  return finish_fma_f16(value, round_mode, denorm_mode, omod, clamp, fp16_ovfl, clamp_nan_to_zero);
-}
-
-/// @brief Execute an F64 fused multiply-add under MODE.FP_ROUND and MODE.FP_DENORM.
-inline uint64_t fma_f64(uint64_t src0, uint64_t src1, uint64_t src2, uint32_t round_mode,
-                        uint32_t denorm_mode) {
-  const auto input = input_denormal::Policy::make(denorm_mode);
-  src0 = input_denormal::flush_input<fp_format::F64>(src0, input);
-  src1 = input_denormal::flush_input<fp_format::F64>(src1, input);
-  src2 = input_denormal::flush_input<fp_format::F64>(src2, input);
-
-  uint64_t result;
-  {
-    detail::ScopedFenv environment(round_mode);
-    // evaluate_arithmetic keeps the FMA inside the guest rounding environment.
-    const double value = detail::evaluate_arithmetic<Arithmetic::FMA>(
-        std::bit_cast<double>(src0), std::bit_cast<double>(src1), std::bit_cast<double>(src2));
-    result = std::bit_cast<uint64_t>(value);
-  }
-  return output_denormal::flush_output<fp_format::F64>(result,
-                                                       output_denormal::Policy::make(denorm_mode));
-}
-
-/// @brief Binary F64 operations implemented by the shared MODE-aware helper.
-enum class BinaryF64Op { Add, Multiply, MaximumNumber, MinimumNumber };
-
-/// @brief Execute a binary F64 operation under MODE.FP_ROUND and MODE.FP_DENORM.
-/// @details MaximumNumber and MinimumNumber return the numeric operand for a
-/// one-NaN input and explicitly select +0/-0 for signed-zero ties respectively.
-inline uint64_t binary_f64(uint64_t src0, uint64_t src1, BinaryF64Op operation, uint32_t round_mode,
-                           uint32_t denorm_mode) {
-  const auto input = input_denormal::Policy::make(denorm_mode);
-  src0 = input_denormal::flush_input<fp_format::F64>(src0, input);
-  src1 = input_denormal::flush_input<fp_format::F64>(src1, input);
-
-  uint64_t result;
-  {
-    detail::ScopedFenv environment(round_mode);
-    const double lhs = std::bit_cast<double>(src0);
-    const double rhs = std::bit_cast<double>(src1);
-    const double value = [&] {
-      switch (operation) {
-      // evaluate_arithmetic keeps these inside the guest rounding environment.
-      case BinaryF64Op::Add:
-        return detail::evaluate_arithmetic<Arithmetic::ADD>(lhs, rhs, 0.0);
-      case BinaryF64Op::Multiply:
-        return detail::evaluate_arithmetic<Arithmetic::MUL>(lhs, rhs, 0.0);
-      case BinaryF64Op::MaximumNumber:
-        if (std::isnan(lhs)) {
-          return std::isnan(rhs) ? std::numeric_limits<double>::quiet_NaN() : rhs;
-        }
-        if (std::isnan(rhs)) {
-          return lhs;
-        }
-        if ((src0 & 0x7fffffffffffffffULL) == 0 && (src1 & 0x7fffffffffffffffULL) == 0) {
-          return std::bit_cast<double>((src0 & src1) & 0x8000000000000000ULL);
-        }
-        return std::fmax(lhs, rhs);
-      case BinaryF64Op::MinimumNumber:
-        if (std::isnan(lhs)) {
-          return std::isnan(rhs) ? std::numeric_limits<double>::quiet_NaN() : rhs;
-        }
-        if (std::isnan(rhs)) {
-          return lhs;
-        }
-        if ((src0 & 0x7fffffffffffffffULL) == 0 && (src1 & 0x7fffffffffffffffULL) == 0) {
-          return std::bit_cast<double>((src0 | src1) & 0x8000000000000000ULL);
-        }
-        return std::fmin(lhs, rhs);
-      }
-      return std::numeric_limits<double>::quiet_NaN();
-    }();
-    result = std::bit_cast<uint64_t>(value);
-  }
-  return output_denormal::flush_output<fp_format::F64>(result,
-                                                       output_denormal::Policy::make(denorm_mode));
-}
-
-/// @brief Apply F64 OMOD/CLAMP under the architectural rounding mode.
-/// @details A nonzero OMOD flushes a denormal result and converts either signed zero to +0.
-/// With OMOD and CLAMP disabled, no floating-point work is needed, so the original bits are
-/// returned without entering the host floating-point environment.
-inline uint64_t finish_f64(uint64_t value, uint32_t round_mode, uint32_t omod, bool clamp,
-                           bool clamp_nan_to_zero) {
-  if (omod == 0 && !clamp) {
-    return value;
-  }
-  double result;
-  {
-    detail::ScopedFenv environment(round_mode);
-    result = std::bit_cast<double>(value);
-    if (omod == 1) {
-      result *= 2.0;
-    } else if (omod == 2) {
-      result *= 4.0;
-    } else if (omod == 3) {
-      result *= 0.5;
-    }
-    if (clamp) {
-      if ((clamp_nan_to_zero && std::isnan(result)) || result <= 0.0) {
-        result = 0.0;
-      } else if (result > 1.0) {
-        result = 1.0;
-      }
-    }
-  }
-  return std::bit_cast<uint64_t>(finalize_omod_f64(result, omod));
-}
-
-/// @brief Scale an exact unsigned 53-bit significand using round-toward-zero.
-/// @details The host floating-point environment is restored before returning.
-inline uint64_t scale_u53_f64_rtz(uint64_t significand, int exponent) {
-  detail::ScopedFenv environment(3);
-  return std::bit_cast<uint64_t>(std::ldexp(static_cast<double>(significand), exponent));
-}
-
 } // namespace rocjitsu::amdgpu::fp_mode
-
-namespace rocjitsu::amdgpu {
-
-/// @brief Preserve the FIXUP NaN payload when narrowing its promoted result.
-inline uint16_t narrow_div_fixup_f16(float value, bool fp16_ovfl) {
-  const uint32_t bits = std::bit_cast<uint32_t>(value);
-  if ((bits & 0x7fffffffu) > 0x7f800000u) {
-    return static_cast<uint16_t>(((bits >> 16) & 0x8000u) | 0x7c00u | ((bits >> 13) & 0x3ffu));
-  }
-  return util::f32_to_f16_mode(value, fp16_ovfl);
-}
-
-/// Convert the F32 source of a scaled narrowing instruction before applying its E8M0 scale.
-/// A preserved F32 subnormal is normal in double, even if the host flushes F32 operands.
-inline double widen_scalef32_source(uint32_t bits, uint32_t denorm_mode) {
-  const uint32_t magnitude = bits & 0x7fffffffu;
-  if (magnitude >= 0x00800000u) {
-    return static_cast<double>(std::bit_cast<float>(bits));
-  }
-  const double value = (denorm_mode & 1u) ? std::ldexp(static_cast<double>(magnitude), -149) : 0.0;
-  return (bits >> 31) ? -value : value;
-}
-
-struct FrexpF32Result {
-  float mantissa;
-  int32_t exponent;
-};
-
-/// @brief Split an F32 value without letting host DAZ flush a preserved guest input.
-inline FrexpF32Result frexp_f32(float value, uint32_t denorm) {
-  const uint32_t bits = std::bit_cast<uint32_t>(value);
-  const uint32_t magnitude = bits & 0x7fffffffu;
-  const int exponent = static_cast<int>(magnitude >> 23);
-  if (exponent == 255) {
-    return {std::bit_cast<float>(bits | (magnitude > 0x7f800000u ? 0x00400000u : 0u)), 0};
-  }
-  if (magnitude == 0 || (exponent == 0 && !(denorm & 1u))) {
-    return {std::bit_cast<float>(bits & 0x80000000u), 0};
-  }
-  const int shift = exponent ? 0 : std::countl_zero(magnitude) - 8;
-  return {std::bit_cast<float>((bits & 0x80000000u) | 0x3f000000u |
-                               ((magnitude << shift) & 0x007fffffu)),
-          exponent ? exponent - 126 : -125 - shift};
-}
-
-} // namespace rocjitsu::amdgpu

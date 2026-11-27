@@ -141,6 +141,12 @@ memory:
   Unit_hipMemcpyParam2DAsync_multiDevice_StreamOnDiffDevice:
     <<: *level_default
     tags: [multigpu, transfer, P1]
+  Unit_hipMemcpy2D_Positive_NarrowTallHostRect:
+    <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2744 - the narrow tall host rect copy takes several seconds on Windows PAL; the faster rect copy kernels are used only on the ROCr path."
+    tags: [transfer]
   Unit_hipMemcpy2D_Positive_Basic:
     <<: *level_default
     tags: [transfer, P0]
@@ -932,6 +938,7 @@ memory:
   Unit_hipMemcpyBatchAsync_Attrs_Negative:
     <<: *level_default
     tags: [transfer]
+  Unit_hipMemcpyBatchAsync_SingleOp_OrdersLaterWork: *level_default
   Unit_hipMemcpyBatchAsync_H2D_Functional:
     <<: *level_default
     tags: [transfer, P1]
@@ -944,6 +951,12 @@ memory:
   Unit_hipMemcpyBatchAsync_D2H_Functional:
     <<: *level_default
     tags: [transfer, P1]
+  Unit_hipMemcpyBatchAsync_Pageable_MixedChunks:
+    <<: *level_default
+    tags: [transfer, stream]
+  Unit_hipMemcpyBatchAsync_Vmm_DeviceMemory:
+    <<: *level_default
+    tags: [transfer]
   Unit_hipMemcpyBatchAsync_H2H_Functional:
     <<: *level_default
     tags: [transfer, P1]
@@ -1259,6 +1272,7 @@ memory:
   Unit_hipMemcpyDeviceToDeviceNoCU_WithCU_NoCU_Comb_SingleStrm:
     <<: *level_default
     tags: [transfer, P1]
+  Unit_hipMemcpyDeviceToDeviceNoCU_OversubscribedStreamsShareEngines: *level_default
   Unit_hipMemcpyDeviceToDeviceNoCU_NoCU_MulStrm:
     <<: *level_default
     tags: [transfer, P1]
@@ -1323,6 +1337,7 @@ memory:
     <<: *level_default
     tags: [query, managed_memory, P0]
   Unit_hipGetSymbolAddress_Negative_Parameters: *level_default
+  Unit_hipGetSymbolAddress_Negative_MissingFromCodeObject: *level_default
   Unit_hipGetSymbolSize_Negative_Parameters: *level_default
   Unit_hipMemPrefetchAsync_v2_Device_Host:
     <<: *level_default
@@ -2252,6 +2267,9 @@ memory:
   Unit_hipPointerGetAttribute_ipc_capable_Array:
     <<: *level_default
     tags: [query, image]
+  Unit_hipPointerGetAttribute_DevicePointer_PeerAccess:
+    <<: *level_default
+    tags: [multigpu, query, P1]
   Unit_hipDrvPtrGetAttributes_Negative:
     <<: *level_default
     tags: [query, P1]
@@ -2477,6 +2495,9 @@ memory:
   Unit_hipMemset3DASyncMulti:
     <<: *level_default
     tags: [memset, P1]
+  Unit_hipMemsetAsync_PeerBufferFromOtherDeviceStream:
+    <<: *level_default
+    tags: [multigpu, memset, P1]
   Unit_hipMemAdvise_TstAccessedByPeer:
     <<: *level_default
     tags: [multigpu, query, P1, managed_memory]
@@ -2732,6 +2753,9 @@ memory:
       targets: [amd_windows]
       reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [alloc, P1]
+  Unit_hipMipmappedArrayLevel_CopyRoundTrip:
+    <<: *level_default
+    tags: [image, P1]
   Unit_hipFreeMipmappedArrayImplicitSyncArray:
     <<: *level_default
     tags: [P1]
@@ -2898,6 +2922,18 @@ memory:
     <<: *level_default
     tags: [query, image, P1]
   Unit_hipArrayGetPlane_Negative_Parameters:
+    <<: *level_default
+    tags: [query, image, P1]
+  Unit_hipArrayGetMemoryRequirements_Positive_Basic:
+    <<: *level_default
+    tags: [query, image, P1]
+  Unit_hipArrayGetMemoryRequirements_Positive_SizeScalesWithExtent:
+    <<: *level_default
+    tags: [query, image, P1]
+  Unit_hipArrayGetMemoryRequirements_Negative_Parameters:
+    <<: *level_default
+    tags: [query, image, P1]
+  Unit_hipArrayGetMemoryRequirements_Positive_GetProcAddress:
     <<: *level_default
     tags: [query, image, P1]
   Unit_hipArrayCreate_DiffSizes:

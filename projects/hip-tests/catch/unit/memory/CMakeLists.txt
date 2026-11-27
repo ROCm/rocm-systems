@@ -99,6 +99,7 @@ if(HIP_PLATFORM MATCHES "amd")
       hipArray.cc
       hipMemcpyDeviceToDeviceNoCU.cc
       hipGetProcAddressMemoryApis.cc
+      hipGetSymbolMissingFromCodeObject.cc
       # Will be enabled for NVIDIA after fix for SWDEV-551244
       hipMemPrefetchAsync_v2.cc
       hipMemAdvise_v2.cc)
@@ -229,7 +230,10 @@ if(HIP_PLATFORM MATCHES "amd")
       # Below 3 tests should be compiled for NVIDIA as well after EXSWHTEC-349 is addressed
       hipArrayGetInfo.cc
       hipArrayGetDescriptor.cc
-      hipArray3DGetDescriptor.cc)
+      hipArray3DGetDescriptor.cc
+      # cudaArrayGetMemoryRequirements only accepts arrays created with cudaArrayDeferredMapping,
+      # which HIP does not have
+      hipArrayGetMemoryRequirements.cc)
 endif()
 
 set(NOT_FOR_gfx90a_AND_ABOVE_TEST hipMallocArray.cc hipArrayCreate.cc) # tests not for gfx90a+

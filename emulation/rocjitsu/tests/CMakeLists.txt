@@ -550,6 +550,7 @@ add_executable(
     older_word_routing_test.cpp
     rj_arith_policy_test.cpp
     rj_arith_config_test.cpp
+    gfx90a_f64_mfma_test.cpp
     rj_arith_bridge_test.cpp
     gfx1251_compiled_kernel_test.cpp
     daemon_api_test.cpp
@@ -571,6 +572,9 @@ add_executable(
     older_screen_partition_test.cpp
     older_packed_routing_test.cpp
     older_conversion16_test.cpp
+    older_accumulator_transfer_test.cpp
+    older_f32_mfma_test.cpp
+    older_integer_mfma_test.cpp
     cdna5_gfx1251_simulation_test.cpp
     cdna5_instruction_test.cpp
     cdna5_sdma_test.cpp
@@ -586,6 +590,7 @@ add_executable(
     sdma_ring_consumer_test.cpp
     cdna5_tensor_dma_test.cpp
     ds_address_encoded_fields_test.cpp
+    ds_offset_encoded_fields_test.cpp
     gfx1100_ds_address_test.cpp
     gfx1251_ds_address_test.cpp
     ds_memory_snapshot_test.cpp
@@ -620,6 +625,7 @@ add_executable(
     rdna4_dot_dpp_test.cpp
     rdna1_valu_test.cpp
     rdna4_memory_test.cpp
+    memory_displacement_encoded_fields_test.cpp
     rdna4_encoded_fields_test.cpp
     readlane_selector_test.cpp
     pc_extension_test.cpp
@@ -636,21 +642,16 @@ add_executable(
     scalar_buffer_test.cpp
     scalar_cache_policy_test.cpp
     scalar_cache_discard_test.cpp
-    transcendental_test.cpp
-    comparison_test.cpp
+    legacy_native_f32_test.cpp
+    legacy_special_f32_test.cpp
     gfx1150_compare_test.cpp
-    conversion_test.cpp
-    older_normalized_conversion_test.cpp
-    older_packing_test.cpp
     older_packed_conversion_test.cpp
     older_byte_conversion_test.cpp
+    older_normalized_conversion_test.cpp
+    older_packing_test.cpp
     denormal_test.cpp
-    floating_operation_test.cpp
     input_denormal_test.cpp
     legacy_minmax_test.cpp
-    minmax_test.cpp
-    output_denormal_test.cpp
-    output_modifier_test.cpp
     source_modifier_test.cpp
     amdgpu_elf_test_support.cpp
     amdgpu_elf_test_support_test.cpp
@@ -709,10 +710,20 @@ add_executable(
     vgpr_redispatch_test.cpp
     instruction_execution_harness_test.cpp
     gfx908_compare_test.cpp
+    gfx10_compare_test.cpp
     vop3_conversion_modifiers_test.cpp
+    vop3_modifier_policy_test.cpp
     cube_instruction_test.cpp
     older_graphics_test.cpp
     division_test.cpp
+    integral_rounding_f64_test.cpp
+    fract_test.cpp
+    frexp_exponent_test.cpp
+    frexp_mantissa_test.cpp
+    integral_rounding_f32_test.cpp
+    gfx1150_dual_test.cpp
+    legacy_division_test.cpp
+    legacy_native_f64_test.cpp
     division_macro_test.cpp
     valu_floating_policy_test.cpp
     gfx11_dot2_test.cpp
@@ -720,6 +731,7 @@ add_executable(
     packed_wmma_test.cpp
     rdna_wmma_i32_test.cpp
     rdna_swmmac_i32_test.cpp
+    gfx1150_wmma_test.cpp
     rdna_wmma_float_test.cpp
     rdna_swmmac_float_test.cpp
     atomic_semantics_and_decode_test.cpp
@@ -775,7 +787,6 @@ add_executable(
     simd_correctness/vop1_cvt_f64_simd_correctness_test.cpp
     simd_correctness/vopc_simd_correctness_test.cpp
     simd_correctness/vopc_cmp_class_simd_correctness_test.cpp
-    simd_correctness/vop3_modifier_simd_test.cpp
     simd_correctness/vop3_binary_simd_correctness_test.cpp
     simd_correctness/vop3_unary_simd_correctness_test.cpp
     simd_correctness/vopc_vop3_int_simd_correctness_test.cpp
@@ -791,8 +802,6 @@ add_executable(
     simd_correctness/vop_alias_rdna_simd_correctness_test.cpp
     simd_correctness/vop3_shift64_simd_correctness_test.cpp
     simd_correctness/vop3_shift64_scalar_correctness_test.cpp
-    simd_correctness/vop3_fp16_unary_simd_correctness_test.cpp
-    simd_correctness/vop3_fp16_transcendental_simd_correctness_test.cpp
     simd_correctness/vop3_cndmask_pack_simd_correctness_test.cpp
     simd_correctness/vop3_div_helpers_simd_correctness_test.cpp
     simd_correctness/vop3_b16_rdna_simd_correctness_test.cpp
@@ -907,6 +916,8 @@ target_link_libraries(
         GTest::gmock
         GTest::gtest_main
 )
+# Allow the VM config tests to fail creation of the synthetic DRM directory.
+target_link_options(rocjitsu_tests PRIVATE "LINKER:--wrap=mkdtemp")
 target_include_directories(rocjitsu_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 rj_configure_target(rocjitsu_tests TEST)
 # GCC 14.3, GCC 15.2, and GCC 16.0.1 (20260322) emit a false-positive
@@ -1409,11 +1420,14 @@ add_executable(
     patch/fault_injection/b96_lds_test.cpp
     patch/fault_injection/scalar_two_lds_test.cpp
     patch/fault_injection/lds_wrong_address_test.cpp
+    patch/fault_injection/atomic_wrong_address_test.cpp
+    patch/fault_injection/atomic_buffer_test.cpp
     patch/fault_injection/lds_ownership_test.cpp
     patch/fault_injection/lds_target_ownership_test.cpp
     patch/fault_injection/gfx1100_lds_test.cpp
     patch/fault_injection/gfx1251_lds_test.cpp
     patch/fault_injection/cdna_lds_wrong_address_test.cpp
+    patch/fault_injection/atomic_ds_test.cpp
 )
 target_include_directories(
     rocjitsu_fault_injection_tests
@@ -1463,6 +1477,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         patch/fault_injection/b96_lds_cli_test.cpp
         patch/fault_injection/scalar_two_lds_cli_test.cpp
         patch/fault_injection/lds_cli_test.cpp
+        patch/fault_injection/atomic_cli_test.cpp
         patch/fault_injection/gfx1251_lds_cli_test.cpp
         patch/fault_injection/gfx1100_lds_cli_test.cpp
         patch/fault_injection/cdna_lds_cli_test.cpp
@@ -1629,38 +1644,10 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             GTest::gtest_main
     )
     rj_configure_target(queue_registration_allocation_failure_test PRIVATE_INCLUDES WARNINGS)
+    rj_add_test_path(queue_registration_allocation_failure_test RJ_KFD_MMAP_TEST_CONFIG
+                     "${CMAKE_SOURCE_DIR}/configs/gfx950_mi350x.json"
+    )
     rj_add_gtest_tests(queue_registration_allocation_failure_test)
-
-    add_executable(
-        kfd_mmap_allocation_failure_test
-        kfd_mmap_allocation_failure_test.cpp
-    )
-    target_link_libraries(
-        kfd_mmap_allocation_failure_test
-        PRIVATE
-            ${RJ_OBJECT_LIBS}
-            util
-            flatbuffers
-            Threads::Threads
-            GTest::gtest_main
-    )
-    rj_configure_target(kfd_mmap_allocation_failure_test TEST)
-    rj_add_gtest_tests(kfd_mmap_allocation_failure_test)
-    if(RJ_INSTALL_TESTS)
-        file(
-            APPEND "${RJ_INSTALL_CTEST_FILE}"
-            "include(\"kfd_mmap_allocation_failure_test.cmake\")\n"
-        )
-    endif()
-    rj_add_test(
-        NAME KfdMmapAllocationFailureTest.FixedDoorbellReplacementPublishesOnceAndRetries.token
-        COMMAND $<TARGET_FILE:kfd_mmap_allocation_failure_test>
-            --gtest_filter=KfdMmapAllocationFailureTest.FixedDoorbellReplacementPublishesOnceAndRetries
-        ENVIRONMENT "RJ_TEST_FORCE_TOKEN_BACKING=1"
-        INSTALL_COMMAND "bin/kfd_mmap_allocation_failure_test"
-            --gtest_filter=KfdMmapAllocationFailureTest.FixedDoorbellReplacementPublishesOnceAndRetries
-        INSTALL_ENVIRONMENT "RJ_TEST_FORCE_TOKEN_BACKING=1"
-    )
 
     # Native dispatch must extract both the relative tables and their factories
     # from a static archive, including when the C++ objects use LTO.
@@ -3303,7 +3290,7 @@ set(_rj_interposer_syncobj_tests
     IndependentDrmOpensHaveSeparateNamespaces
     CreateSignaledSeedsOnlyTheInitialPoint
     WaitValidationMatchesDrm
-    OversizedBinaryWaitReturnsEnomem
+    OversizedBinaryWaitAllocationIsFatal
     DestroyRejectsInvalidInput
     TimelineWaitBlocksUntilSignalOrDeadline
     TimelineWaitReturnsEintrForSignal

@@ -194,3 +194,60 @@ HIP_TEST_CASE(Unit_hipMemcpy2D_Capture) {
       memcpy_err);
   END_CAPTURE_SYNC(memcpy_err);
 }
+
+/**
+ * Test Description
+ * ------------------------
+ *  - A tall, one-byte-wide host<->device rect has pitches that aren't dword aligned. The SDMA
+ *    rect copy can't take those, and copying them one SDMA submission per row took seconds for a
+ *    million rows; the copy must be done in one pass. Checks the data both ways and bounds the
+ *    time generously (well under the per-row cost).
+ * Test source
+ * ------------------------
+ *  - unit/memory/hipMemcpy2D.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.2
+ */
+HIP_TEST_CASE(Unit_hipMemcpy2D_Positive_NarrowTallHostRect) {
+  constexpr size_t kHeight = 1 << 20;
+  constexpr size_t kHostPitch = 1;
+  constexpr size_t kDevPitch = 3;
+  const hipMemcpyKind kind = GENERATE(hipMemcpyHostToDevice, hipMemcpyDeviceToHost);
+
+  LinearAllocGuard<uint8_t> host_src(LinearAllocs::hipHostMalloc, kHeight * kHostPitch);
+  LinearAllocGuard<uint8_t> host_dst(LinearAllocs::hipHostMalloc, kHeight * kHostPitch);
+  LinearAllocGuard<uint8_t> dev(LinearAllocs::hipMalloc, kHeight * kDevPitch);
+  for (size_t i = 0; i < kHeight; i++) {
+    host_src.host_ptr()[i] = static_cast<uint8_t>(i * 13 + 1);
+    host_dst.host_ptr()[i] = 0;
+  }
+
+  if (kind == hipMemcpyDeviceToHost) {
+    HIP_CHECK(hipMemcpy2D(dev.ptr(), kDevPitch, host_src.host_ptr(), kHostPitch, 1, kHeight,
+                          hipMemcpyHostToDevice));
+  }
+  const auto start = std::chrono::steady_clock::now();
+  if (kind == hipMemcpyHostToDevice) {
+    HIP_CHECK(hipMemcpy2D(dev.ptr(), kDevPitch, host_src.host_ptr(), kHostPitch, 1, kHeight,
+                          hipMemcpyHostToDevice));
+  } else {
+    HIP_CHECK(hipMemcpy2D(host_dst.host_ptr(), kHostPitch, dev.ptr(), kDevPitch, 1, kHeight,
+                          hipMemcpyDeviceToHost));
+  }
+  const auto elapsed = std::chrono::steady_clock::now() - start;
+  if (kind == hipMemcpyHostToDevice) {
+    HIP_CHECK(hipMemcpy2D(host_dst.host_ptr(), kHostPitch, dev.ptr(), kDevPitch, 1, kHeight,
+                          hipMemcpyDeviceToHost));
+  }
+
+  for (size_t i = 0; i < kHeight; i++) {
+    if (host_dst.host_ptr()[i] != host_src.host_ptr()[i]) {
+      INFO("row " << i);
+      REQUIRE(host_dst.host_ptr()[i] == host_src.host_ptr()[i]);
+    }
+  }
+  const double elapsed_ms = std::chrono::duration<double, std::milli>(elapsed).count();
+  INFO("copy took " << elapsed_ms << " ms");
+  REQUIRE(elapsed < std::chrono::seconds(1));
+}

@@ -42,6 +42,7 @@ template <rocjitsu::arith::Fp64 Op>
   }
   // gfx11 preserves signaling NaNs when IEEE mode is clear.
   const bool quiet_snan = !rdna3 || (flags & RJ_ARITH_FP_IEEE_MODE);
+
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
   if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
     rocjitsu::arith::trans_f64_exact_x86_64_v4(Op, flags, exec_mask, mode, d, a, quiet_snan);
@@ -75,7 +76,7 @@ template <rocjitsu::arith::Fp64 Op>
 // AcceptExact marks entry points whose results were checked against their architecture's
 // captures (gfx12 and RDNA3 arithmetic and rounding); the RDNA2 FMA entry stays loose-only.
 template <rocjitsu::arith::Fp64 Op, bool Rdna3 = false, bool Cdna = false, bool AcceptExact = false,
-          bool NativeMath = false>
+          bool NativeMath = false, bool LegacyRound = false, bool LegacyNative = false>
 int fp64(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_t *const *d,
          const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c) {
   // The RDNA empirical model does not describe CDNA's inherited host-double core.
@@ -113,7 +114,12 @@ int fp64(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_
     instruction_flags = uint32_t(rocjitsu::arith::rdna3_output_modifiers(flags, instruction_flags));
   }
   // gfx11 preserves signaling NaNs when IEEE mode is clear.
-  const bool quiet_snan = Cdna || !Rdna3 || (flags & RJ_ARITH_FP_IEEE_MODE);
+  const bool quiet_snan = LegacyRound || Cdna || !Rdna3 || (flags & RJ_ARITH_FP_IEEE_MODE);
+  if constexpr (LegacyNative) {
+    // Older host-double math did not flush inputs or unscaled results. Keep the
+    // guest OMOD decision above, then evaluate that inherited raw-input model.
+    flags &= ~(RJ_ARITH_FP_FLUSH_INPUT_DENORMALS | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS);
+  }
   // CDNA native math obeys guest input flushing. Reciprocal also obeys output
   // flushing; the root cores retain their inherited output policy.
   if constexpr (NativeMath) {
@@ -152,9 +158,9 @@ int fp64(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
   // AVX2 has no per-instruction directed FP64 ADD/MUL/FMA. Use the inherited integer
   // model for directed modes; nearest rounding retains the existing SIMD path.
-  constexpr bool directed_arithmetic =
-      Op == rocjitsu::arith::Fp64::Fma || Op == rocjitsu::arith::Fp64::Add ||
-      Op == rocjitsu::arith::Fp64::Mul || Op == rocjitsu::arith::Fp64::Fract;
+  constexpr bool directed_arithmetic = Op == rocjitsu::arith::Fp64::Fma ||
+                                       Op == rocjitsu::arith::Fp64::Add ||
+                                       Op == rocjitsu::arith::Fp64::Mul;
   if ((!directed_arithmetic || !(flags & RJ_ARITH_FP_ROUND_MASK)) &&
       rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
     rocjitsu::arith::fp64_x86_64_v3(Op, flags, exec_mask, instruction_flags, d, a, b, c, quiet_snan,
@@ -357,11 +363,11 @@ int fp64(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_
 // Evaluate FP64 arithmetic or selection for Wave64. Reject invalid controls before changing
 // outputs.
 template <rocjitsu::arith::Fp64 Op, bool Rdna3 = false, bool Cdna = false, bool AcceptExact = false,
-          bool NativeMath = false>
+          bool NativeMath = false, bool LegacyRound = false, bool LegacyNative = false>
 int fp64_wave64(uint64_t flags, uint64_t exec_mask, uint32_t instruction_flags, uint32_t *const *d,
                 const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c) {
   // Validate before either Wave64 half can modify outputs, even when EXEC is empty.
-  if (int error = fp64<Op, Rdna3, Cdna, AcceptExact, NativeMath>(
+  if (int error = fp64<Op, Rdna3, Cdna, AcceptExact, NativeMath, LegacyRound, LegacyNative>(
           flags, 0, instruction_flags, nullptr, nullptr, nullptr, nullptr)) {
     return error;
   }
@@ -382,7 +388,7 @@ int fp64_wave64(uint64_t flags, uint64_t exec_mask, uint32_t instruction_flags, 
         z[word] = c[word] + half * 32;
       }
     }
-    if (int error = fp64<Op, Rdna3, Cdna, AcceptExact, NativeMath>(
+    if (int error = fp64<Op, Rdna3, Cdna, AcceptExact, NativeMath, LegacyRound, LegacyNative>(
             flags, uint32_t(exec_mask >> (half * 32)), instruction_flags, dest, x, y, z)) {
       return error;
     }
@@ -412,8 +418,7 @@ int cdna_unary(uint64_t flags, Mask exec_mask, uint64_t mode, uint32_t *const *d
 
 } // namespace
 
-// Add the operands for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_add_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                            uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
                            [[maybe_unused]] uint32_t *trapsts) {
@@ -429,8 +434,7 @@ int rj_arith_v_add_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruct
                                                              a, b, nullptr);
 }
 
-// Add the operands for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_add_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                  uint32_t *const *d, const uint32_t *const *a,
                                  const uint32_t *const *b,
@@ -447,8 +451,7 @@ int rj_arith_v_add_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t in
                                                               d, a, b, nullptr);
 }
 
-// Multiply the operands for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_mul_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                            uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
                            [[maybe_unused]] uint32_t *trapsts) {
@@ -464,8 +467,7 @@ int rj_arith_v_mul_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruct
                                                              a, b, nullptr);
 }
 
-// Multiply the operands for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_mul_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                  uint32_t *const *d, const uint32_t *const *a,
                                  const uint32_t *const *b,
@@ -482,8 +484,7 @@ int rj_arith_v_mul_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t in
                                                               d, a, b, nullptr);
 }
 
-// Compute fused A*B+C for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_fma_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                            uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
                            const uint32_t *const *c, [[maybe_unused]] uint32_t *trapsts) {
@@ -499,8 +500,7 @@ int rj_arith_v_fma_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruct
                                                              a, b, c);
 }
 
-// Compute fused A*B+C for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_fma_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                  uint32_t *const *d, const uint32_t *const *a,
                                  const uint32_t *const *b, const uint32_t *const *c,
@@ -517,8 +517,7 @@ int rj_arith_v_fma_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t in
                                                               d, a, b, c);
 }
 
-// Round toward zero for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_trunc_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *const *d, const uint32_t *const *a,
                                    [[maybe_unused]] uint32_t *excp_flag_user) {
@@ -534,8 +533,7 @@ int rj_arith_v_trunc_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t 
                                                                 d, a, nullptr, nullptr);
 }
 
-// Round toward positive infinity for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_ceil_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a,
                                   [[maybe_unused]] uint32_t *excp_flag_user) {
@@ -551,8 +549,7 @@ int rj_arith_v_ceil_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t i
                                                                d, a, nullptr, nullptr);
 }
 
-// Round to the nearest integer with ties to even for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_rndne_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *const *d, const uint32_t *const *a,
                                    [[maybe_unused]] uint32_t *excp_flag_user) {
@@ -568,8 +565,7 @@ int rj_arith_v_rndne_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t 
                                                                 d, a, nullptr, nullptr);
 }
 
-// Round toward negative infinity for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_floor_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *const *d, const uint32_t *const *a,
                                    [[maybe_unused]] uint32_t *excp_flag_user) {
@@ -585,8 +581,7 @@ int rj_arith_v_floor_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t 
                                                                 d, a, nullptr, nullptr);
 }
 
-// Compute the fractional part for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_fract_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *const *d, const uint32_t *const *a,
                                    [[maybe_unused]] uint32_t *excp_flag_user) {
@@ -602,8 +597,7 @@ int rj_arith_v_fract_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t 
                                                                 d, a, nullptr, nullptr);
 }
 
-// Compute the square root for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_sqrt_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a,
                                   [[maybe_unused]] uint32_t *excp_flag_user) {
@@ -619,8 +613,7 @@ int rj_arith_v_sqrt_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t i
                                            nullptr);
 }
 
-// Compute the reciprocal for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_rcp_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                  uint32_t *const *d, const uint32_t *const *a,
                                  [[maybe_unused]] uint32_t *excp_flag_user) {
@@ -636,8 +629,7 @@ int rj_arith_v_rcp_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t in
                                           nullptr);
 }
 
-// Compute the reciprocal square root for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_rsq_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                  uint32_t *const *d, const uint32_t *const *a,
                                  [[maybe_unused]] uint32_t *excp_flag_user) {
@@ -653,8 +645,7 @@ int rj_arith_v_rsq_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t in
                                           nullptr);
 }
 
-// Select the minimum with numeric-preferred NaN selection for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_min_num_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                uint32_t *const *d, const uint32_t *const *a,
                                const uint32_t *const *b,
@@ -670,8 +661,7 @@ int rj_arith_v_min_num_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t inst
   return fp64<rocjitsu::arith::Fp64::MinNum>(flags, exec_mask, instruction_flags, d, a, b, nullptr);
 }
 
-// Select the maximum with numeric-preferred NaN selection for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_max_num_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                uint32_t *const *d, const uint32_t *const *a,
                                const uint32_t *const *b,
@@ -687,8 +677,7 @@ int rj_arith_v_max_num_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t inst
   return fp64<rocjitsu::arith::Fp64::MaxNum>(flags, exec_mask, instruction_flags, d, a, b, nullptr);
 }
 
-// Select the NaN-propagating minimum for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_minimum_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                uint32_t *const *d, const uint32_t *const *a,
                                const uint32_t *const *b,
@@ -705,8 +694,7 @@ int rj_arith_v_minimum_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t inst
                                               nullptr);
 }
 
-// Select the NaN-propagating maximum for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_maximum_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                uint32_t *const *d, const uint32_t *const *a,
                                const uint32_t *const *b,
@@ -723,8 +711,7 @@ int rj_arith_v_maximum_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t inst
                                               nullptr);
 }
 
-// Extract the requested exponent or mantissa component for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_frexp_mant_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask,
                                         uint64_t instruction_flags, uint32_t *const *d,
                                         const uint32_t *const *a,
@@ -741,8 +728,7 @@ int rj_arith_v_frexp_mant_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask,
       flags, exec_mask, instruction_flags, d, a, nullptr, nullptr);
 }
 
-// Select the minimum for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_min_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                            uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
                            [[maybe_unused]] uint32_t *trapsts) {
@@ -758,8 +744,7 @@ int rj_arith_v_min_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruct
                                                       nullptr);
 }
 
-// Select the maximum for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_max_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                            uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
                            [[maybe_unused]] uint32_t *trapsts) {
@@ -775,8 +760,7 @@ int rj_arith_v_max_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruct
                                                       nullptr);
 }
 
-// Add the operands for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_add_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                            uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
                            [[maybe_unused]] uint32_t *trapsts) {
@@ -792,8 +776,7 @@ int rj_arith_v_add_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruct
       flags, exec_mask, instruction_flags, d, a, b, nullptr);
 }
 
-// Add the operands for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_add_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                  uint32_t *const *d, const uint32_t *const *a,
                                  const uint32_t *const *b,
@@ -810,8 +793,7 @@ int rj_arith_v_add_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t in
       flags, exec_mask, instruction_flags, d, a, b, nullptr);
 }
 
-// Multiply the operands for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_mul_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                            uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
                            [[maybe_unused]] uint32_t *trapsts) {
@@ -827,8 +809,7 @@ int rj_arith_v_mul_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruct
       flags, exec_mask, instruction_flags, d, a, b, nullptr);
 }
 
-// Multiply the operands for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_mul_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                  uint32_t *const *d, const uint32_t *const *a,
                                  const uint32_t *const *b,
@@ -845,8 +826,7 @@ int rj_arith_v_mul_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t in
       flags, exec_mask, instruction_flags, d, a, b, nullptr);
 }
 
-// Compute fused A*B+C for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_fma_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                            uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
                            const uint32_t *const *c, [[maybe_unused]] uint32_t *trapsts) {
@@ -862,8 +842,7 @@ int rj_arith_v_fma_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruct
                                                                     instruction_flags, d, a, b, c);
 }
 
-// Compute fused A*B+C for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_fma_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                  uint32_t *const *d, const uint32_t *const *a,
                                  const uint32_t *const *b, const uint32_t *const *c,
@@ -880,8 +859,7 @@ int rj_arith_v_fma_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t in
                                                                      instruction_flags, d, a, b, c);
 }
 
-// Round toward zero for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_trunc_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *const *d, const uint32_t *const *a,
                                    [[maybe_unused]] uint32_t *excp_flag_user) {
@@ -897,8 +875,7 @@ int rj_arith_v_trunc_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t 
       flags, exec_mask, instruction_flags, d, a, nullptr, nullptr);
 }
 
-// Round toward positive infinity for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_ceil_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a,
                                   [[maybe_unused]] uint32_t *excp_flag_user) {
@@ -914,8 +891,7 @@ int rj_arith_v_ceil_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t i
       flags, exec_mask, instruction_flags, d, a, nullptr, nullptr);
 }
 
-// Round to the nearest integer with ties to even for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_rndne_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *const *d, const uint32_t *const *a,
                                    [[maybe_unused]] uint32_t *excp_flag_user) {
@@ -931,8 +907,7 @@ int rj_arith_v_rndne_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t 
       flags, exec_mask, instruction_flags, d, a, nullptr, nullptr);
 }
 
-// Round toward negative infinity for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_floor_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *const *d, const uint32_t *const *a,
                                    [[maybe_unused]] uint32_t *excp_flag_user) {
@@ -948,8 +923,7 @@ int rj_arith_v_floor_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t 
       flags, exec_mask, instruction_flags, d, a, nullptr, nullptr);
 }
 
-// Compute the fractional part for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_fract_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *const *d, const uint32_t *const *a,
                                    [[maybe_unused]] uint32_t *excp_flag_user) {
@@ -965,8 +939,7 @@ int rj_arith_v_fract_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t 
       flags, exec_mask, instruction_flags, d, a, nullptr, nullptr);
 }
 
-// Compute the square root for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_sqrt_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a,
                                   [[maybe_unused]] uint32_t *excp_flag_user) {
@@ -982,8 +955,7 @@ int rj_arith_v_sqrt_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t i
                                                   nullptr, nullptr);
 }
 
-// Compute the reciprocal for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_rcp_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                  uint32_t *const *d, const uint32_t *const *a,
                                  [[maybe_unused]] uint32_t *excp_flag_user) {
@@ -999,8 +971,7 @@ int rj_arith_v_rcp_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t in
                                                  nullptr);
 }
 
-// Compute the reciprocal square root for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_rsq_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                  uint32_t *const *d, const uint32_t *const *a,
                                  [[maybe_unused]] uint32_t *excp_flag_user) {
@@ -1016,8 +987,7 @@ int rj_arith_v_rsq_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t in
                                                  nullptr);
 }
 
-// Select the minimum with numeric-preferred NaN selection for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_min_num_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                uint32_t *const *d, const uint32_t *const *a,
                                const uint32_t *const *b,
@@ -1034,8 +1004,7 @@ int rj_arith_v_min_num_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t inst
                                                     nullptr);
 }
 
-// Select the maximum with numeric-preferred NaN selection for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_max_num_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                uint32_t *const *d, const uint32_t *const *a,
                                const uint32_t *const *b,
@@ -1052,8 +1021,7 @@ int rj_arith_v_max_num_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t inst
                                                     nullptr);
 }
 
-// Select the NaN-propagating minimum for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_minimum_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                uint32_t *const *d, const uint32_t *const *a,
                                const uint32_t *const *b,
@@ -1070,8 +1038,7 @@ int rj_arith_v_minimum_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t inst
                                                      nullptr);
 }
 
-// Select the NaN-propagating maximum for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_maximum_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                uint32_t *const *d, const uint32_t *const *a,
                                const uint32_t *const *b,
@@ -1088,8 +1055,7 @@ int rj_arith_v_maximum_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t inst
                                                      nullptr);
 }
 
-// Extract the requested exponent or mantissa component for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_frexp_mant_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask,
                                         uint64_t instruction_flags, uint32_t *const *d,
                                         const uint32_t *const *a,
@@ -1106,8 +1072,7 @@ int rj_arith_v_frexp_mant_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask,
       flags, exec_mask, instruction_flags, d, a, nullptr, nullptr);
 }
 
-// Select the minimum for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_min_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                            uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
                            [[maybe_unused]] uint32_t *trapsts) {
@@ -1123,8 +1088,7 @@ int rj_arith_v_min_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruct
                                                              a, b, nullptr);
 }
 
-// Select the maximum for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_max_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                            uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
                            [[maybe_unused]] uint32_t *trapsts) {
@@ -1140,8 +1104,7 @@ int rj_arith_v_max_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruct
                                                              a, b, nullptr);
 }
 
-// Round toward zero for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_trunc_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                              uint32_t *const *d, const uint32_t *const *a,
                              [[maybe_unused]] uint32_t *trapsts) {
@@ -1157,8 +1120,7 @@ int rj_arith_v_trunc_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instru
                                                                d, a, nullptr, nullptr);
 }
 
-// Round toward zero for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_trunc_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                              uint32_t *const *d, const uint32_t *const *a,
                              [[maybe_unused]] uint32_t *trapsts) {
@@ -1174,8 +1136,7 @@ int rj_arith_v_trunc_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instru
       flags, exec_mask, instruction_flags, d, a, nullptr, nullptr);
 }
 
-// Round toward positive infinity for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_ceil_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                             uint32_t *const *d, const uint32_t *const *a,
                             [[maybe_unused]] uint32_t *trapsts) {
@@ -1191,8 +1152,7 @@ int rj_arith_v_ceil_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruc
                                                               d, a, nullptr, nullptr);
 }
 
-// Round toward positive infinity for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_ceil_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                             uint32_t *const *d, const uint32_t *const *a,
                             [[maybe_unused]] uint32_t *trapsts) {
@@ -1208,8 +1168,7 @@ int rj_arith_v_ceil_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruc
       flags, exec_mask, instruction_flags, d, a, nullptr, nullptr);
 }
 
-// Round to the nearest integer with ties to even for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_rndne_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                              uint32_t *const *d, const uint32_t *const *a,
                              [[maybe_unused]] uint32_t *trapsts) {
@@ -1225,8 +1184,7 @@ int rj_arith_v_rndne_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instru
                                                                d, a, nullptr, nullptr);
 }
 
-// Round to the nearest integer with ties to even for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_rndne_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                              uint32_t *const *d, const uint32_t *const *a,
                              [[maybe_unused]] uint32_t *trapsts) {
@@ -1242,8 +1200,7 @@ int rj_arith_v_rndne_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instru
       flags, exec_mask, instruction_flags, d, a, nullptr, nullptr);
 }
 
-// Round toward negative infinity for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_floor_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                              uint32_t *const *d, const uint32_t *const *a,
                              [[maybe_unused]] uint32_t *trapsts) {
@@ -1259,8 +1216,7 @@ int rj_arith_v_floor_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instru
                                                                d, a, nullptr, nullptr);
 }
 
-// Round toward negative infinity for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_floor_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                              uint32_t *const *d, const uint32_t *const *a,
                              [[maybe_unused]] uint32_t *trapsts) {
@@ -1276,8 +1232,7 @@ int rj_arith_v_floor_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instru
       flags, exec_mask, instruction_flags, d, a, nullptr, nullptr);
 }
 
-// Compute the fractional part for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_fract_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                              uint32_t *const *d, const uint32_t *const *a,
                              [[maybe_unused]] uint32_t *trapsts) {
@@ -1293,8 +1248,7 @@ int rj_arith_v_fract_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instru
                                                                d, a, nullptr, nullptr);
 }
 
-// Compute the fractional part for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_fract_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                              uint32_t *const *d, const uint32_t *const *a,
                              [[maybe_unused]] uint32_t *trapsts) {
@@ -1310,8 +1264,7 @@ int rj_arith_v_fract_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instru
       flags, exec_mask, instruction_flags, d, a, nullptr, nullptr);
 }
 
-// Compute the square root for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_sqrt_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                             uint32_t *const *d, const uint32_t *const *a,
                             [[maybe_unused]] uint32_t *trapsts) {
@@ -1327,8 +1280,7 @@ int rj_arith_v_sqrt_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruc
                                                  nullptr);
 }
 
-// Compute the square root for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_sqrt_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                             uint32_t *const *d, const uint32_t *const *a,
                             [[maybe_unused]] uint32_t *trapsts) {
@@ -1344,8 +1296,7 @@ int rj_arith_v_sqrt_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruc
                                                         nullptr, nullptr);
 }
 
-// Compute the reciprocal for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_rcp_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                            uint32_t *const *d, const uint32_t *const *a,
                            [[maybe_unused]] uint32_t *trapsts) {
@@ -1361,8 +1312,7 @@ int rj_arith_v_rcp_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruct
                                                 nullptr);
 }
 
-// Compute the reciprocal for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_rcp_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                            uint32_t *const *d, const uint32_t *const *a,
                            [[maybe_unused]] uint32_t *trapsts) {
@@ -1378,8 +1328,7 @@ int rj_arith_v_rcp_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruct
                                                        nullptr, nullptr);
 }
 
-// Compute the reciprocal square root for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_rsq_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                            uint32_t *const *d, const uint32_t *const *a,
                            [[maybe_unused]] uint32_t *trapsts) {
@@ -1395,8 +1344,7 @@ int rj_arith_v_rsq_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruct
                                                 nullptr);
 }
 
-// Compute the reciprocal square root for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_rsq_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                            uint32_t *const *d, const uint32_t *const *a,
                            [[maybe_unused]] uint32_t *trapsts) {
@@ -1412,8 +1360,7 @@ int rj_arith_v_rsq_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruct
                                                        nullptr, nullptr);
 }
 
-// Extract the requested exponent or mantissa component for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_frexp_mant_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a,
                                   [[maybe_unused]] uint32_t *trapsts) {
@@ -1429,8 +1376,7 @@ int rj_arith_v_frexp_mant_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t i
       flags, exec_mask, instruction_flags, d, a, nullptr, nullptr);
 }
 
-// Extract the requested exponent or mantissa component for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_frexp_mant_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a,
                                   [[maybe_unused]] uint32_t *trapsts) {
@@ -1554,21 +1500,21 @@ int literal_fma64(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags
 }
 } // namespace
 
-// Fused arithmetic with a raw FP64 literal and no instruction modifiers.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_fmamk_f64_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *const *d, const uint32_t *const *a, uint64_t literal,
                                      const uint32_t *const *b, uint32_t *state) {
   return literal_fma64<true>(flags, exec_mask, instruction_flags, d, a, b, literal, state);
 }
 
-// Fused arithmetic with a raw FP64 literal and no instruction modifiers.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_fmaak_f64_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *const *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint64_t literal, uint32_t *state) {
   return literal_fma64<false>(flags, exec_mask, instruction_flags, d, a, b, literal, state);
 }
 
-// Evaluate CDNA reciprocal with guest input/output flushing.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_rcp_f64_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a,
                                   [[maybe_unused]] uint32_t *trapsts) {
@@ -1583,7 +1529,7 @@ int rj_arith_v_rcp_f64_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t i
       flags, exec_mask, uint32_t(instruction_flags), d, a, nullptr, nullptr);
 }
 
-// Evaluate CDNA reciprocal with guest input/output flushing.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_rcp_f64_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a,
                                   [[maybe_unused]] uint32_t *trapsts) {
@@ -1598,7 +1544,7 @@ int rj_arith_v_rcp_f64_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t i
       flags, exec_mask, uint32_t(instruction_flags), d, a, nullptr, nullptr);
 }
 
-// Evaluate CDNA reciprocal with guest input/output flushing.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_rcp_f64_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *const *d, const uint32_t *const *a,
                                    [[maybe_unused]] uint32_t *excp_flag_user) {
@@ -1613,7 +1559,7 @@ int rj_arith_v_rcp_f64_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t 
       flags, exec_mask, uint32_t(instruction_flags), d, a, nullptr, nullptr);
 }
 
-// Evaluate inherited CDNA host-double RSQ with guest input flushing.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_rsq_f64_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a,
                                   [[maybe_unused]] uint32_t *trapsts) {
@@ -1628,7 +1574,7 @@ int rj_arith_v_rsq_f64_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t i
       flags, exec_mask, uint32_t(instruction_flags), d, a, nullptr, nullptr);
 }
 
-// Evaluate inherited CDNA host-double RSQ with guest input flushing.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_rsq_f64_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a,
                                   [[maybe_unused]] uint32_t *trapsts) {
@@ -1643,7 +1589,7 @@ int rj_arith_v_rsq_f64_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t i
       flags, exec_mask, uint32_t(instruction_flags), d, a, nullptr, nullptr);
 }
 
-// Evaluate inherited CDNA host-double RSQ with guest input flushing.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_rsq_f64_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *const *d, const uint32_t *const *a,
                                    [[maybe_unused]] uint32_t *excp_flag_user) {
@@ -1658,7 +1604,7 @@ int rj_arith_v_rsq_f64_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t 
       flags, exec_mask, uint32_t(instruction_flags), d, a, nullptr, nullptr);
 }
 
-// Evaluate inherited CDNA host-double SQRT with guest input flushing.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_sqrt_f64_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *const *d, const uint32_t *const *a,
                                    [[maybe_unused]] uint32_t *trapsts) {
@@ -1673,7 +1619,7 @@ int rj_arith_v_sqrt_f64_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t 
       flags, exec_mask, uint32_t(instruction_flags), d, a, nullptr, nullptr);
 }
 
-// Evaluate inherited CDNA host-double SQRT with guest input flushing.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_sqrt_f64_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *const *d, const uint32_t *const *a,
                                    [[maybe_unused]] uint32_t *trapsts) {
@@ -1688,7 +1634,7 @@ int rj_arith_v_sqrt_f64_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t 
       flags, exec_mask, uint32_t(instruction_flags), d, a, nullptr, nullptr);
 }
 
-// Evaluate inherited CDNA host-double SQRT with guest input flushing.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_sqrt_f64_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                     uint32_t *const *d, const uint32_t *const *a,
                                     [[maybe_unused]] uint32_t *excp_flag_user) {
@@ -1703,7 +1649,7 @@ int rj_arith_v_sqrt_f64_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t
       flags, exec_mask, uint32_t(instruction_flags), d, a, nullptr, nullptr);
 }
 
-// CDNA retains inherited exponent-step scaling and NaN quieting.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_mul_f64_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a,
                                   const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts) {
@@ -1726,7 +1672,7 @@ int rj_arith_v_mul_f64_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t i
   return rj_arith_v_mul_f64_w32_gfx942(flags, exec_mask, instruction_flags, d, a, b, trapsts);
 }
 
-// CDNA retains inherited exponent-step scaling and NaN quieting.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_mul_f64_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *const *d, const uint32_t *const *a,
                                    const uint32_t *const *b,
@@ -1742,7 +1688,7 @@ int rj_arith_v_mul_f64_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t 
                                                        nullptr);
 }
 
-// CDNA retains inherited exponent-step scaling and NaN quieting.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_mul_f64_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a,
                                   const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts) {
@@ -1765,7 +1711,7 @@ int rj_arith_v_mul_f64_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t i
   return rj_arith_v_mul_f64_w64_gfx942(flags, exec_mask, instruction_flags, d, a, b, trapsts);
 }
 
-// CDNA retains inherited exponent-step scaling and NaN quieting.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_mul_f64_w64_gfx1250(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *const *d, const uint32_t *const *a,
                                    const uint32_t *const *b,
@@ -1781,7 +1727,7 @@ int rj_arith_v_mul_f64_w64_gfx1250(uint64_t flags, uint64_t exec_mask, uint64_t 
                                                               d, a, b, nullptr);
 }
 
-// CDNA retains inherited exponent-step scaling and NaN quieting.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_fma_f64_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a,
                                   const uint32_t *const *b, const uint32_t *const *c,
@@ -1806,7 +1752,7 @@ int rj_arith_v_fma_f64_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t i
   return rj_arith_v_fma_f64_w32_gfx942(flags, exec_mask, instruction_flags, d, a, b, c, trapsts);
 }
 
-// CDNA retains inherited exponent-step scaling and NaN quieting.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_fma_f64_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *const *d, const uint32_t *const *a,
                                    const uint32_t *const *b, const uint32_t *const *c,
@@ -1822,7 +1768,7 @@ int rj_arith_v_fma_f64_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t 
                                                        c);
 }
 
-// CDNA retains inherited exponent-step scaling and NaN quieting.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_fma_f64_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a,
                                   const uint32_t *const *b, const uint32_t *const *c,
@@ -1847,7 +1793,7 @@ int rj_arith_v_fma_f64_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t i
   return rj_arith_v_fma_f64_w64_gfx942(flags, exec_mask, instruction_flags, d, a, b, c, trapsts);
 }
 
-// CDNA retains inherited exponent-step scaling and NaN quieting.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_fma_f64_w64_gfx1250(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *const *d, const uint32_t *const *a,
                                    const uint32_t *const *b, const uint32_t *const *c,
@@ -1863,7 +1809,7 @@ int rj_arith_v_fma_f64_w64_gfx1250(uint64_t flags, uint64_t exec_mask, uint64_t 
                                                               d, a, b, c);
 }
 
-// CDNA retains inherited exponent-step scaling and NaN quieting.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_add_f64_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a,
                                   const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts) {
@@ -1886,7 +1832,7 @@ int rj_arith_v_add_f64_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t i
   return rj_arith_v_add_f64_w32_gfx942(flags, exec_mask, instruction_flags, d, a, b, trapsts);
 }
 
-// CDNA retains inherited exponent-step scaling and NaN quieting.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_add_f64_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *const *d, const uint32_t *const *a,
                                    const uint32_t *const *b,
@@ -1902,7 +1848,7 @@ int rj_arith_v_add_f64_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t 
                                                        nullptr);
 }
 
-// CDNA retains inherited exponent-step scaling and NaN quieting.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_add_f64_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a,
                                   const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts) {
@@ -1925,7 +1871,7 @@ int rj_arith_v_add_f64_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t i
   return rj_arith_v_add_f64_w64_gfx942(flags, exec_mask, instruction_flags, d, a, b, trapsts);
 }
 
-// CDNA retains inherited exponent-step scaling and NaN quieting.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_add_f64_w64_gfx1250(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *const *d, const uint32_t *const *a,
                                    const uint32_t *const *b,
@@ -1941,7 +1887,7 @@ int rj_arith_v_add_f64_w64_gfx1250(uint64_t flags, uint64_t exec_mask, uint64_t 
                                                               d, a, b, nullptr);
 }
 
-// CDNA3/4 legacy selection: prefer B for two NaNs; IEEE signaling priority is A then B.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_min_f64_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a,
                                   const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts) {
@@ -1957,7 +1903,7 @@ int rj_arith_v_min_f64_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t i
                                                           b, nullptr);
 }
 
-// CDNA3/4 legacy selection: prefer B for two NaNs; IEEE signaling priority is A then B.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_min_f64_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a,
                                   const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts) {
@@ -1973,7 +1919,7 @@ int rj_arith_v_min_f64_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t i
       flags, exec_mask, instruction_flags, d, a, b, nullptr);
 }
 
-// CDNA3/4 legacy selection: prefer B for two NaNs; IEEE signaling priority is A then B.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_max_f64_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a,
                                   const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts) {
@@ -1989,7 +1935,7 @@ int rj_arith_v_max_f64_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t i
                                                           b, nullptr);
 }
 
-// CDNA3/4 legacy selection: prefer B for two NaNs; IEEE signaling priority is A then B.
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_max_f64_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a,
                                   const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts) {
@@ -2176,4 +2122,290 @@ int rj_arith_v_fma_f64_w64_gfx10(uint64_t flags, uint64_t exec_mask, uint64_t in
     return error;
   }
   return rj_arith_v_fma_f64_w64(flags, exec_mask, instruction_flags, d, a, b, c, trapsts);
+}
+
+// Evaluate the instruction under its inherited architecture policy.
+int rj_arith_v_trunc_f64_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    [[maybe_unused]] uint32_t *state) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return fp64<rocjitsu::arith::Fp64::Trunc, true, false, false, false, true>(
+      flags, exec_mask, uint32_t(instruction_flags), d, a, nullptr, nullptr);
+}
+
+// Evaluate the instruction under its inherited architecture policy.
+int rj_arith_v_ceil_f64_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   [[maybe_unused]] uint32_t *state) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return fp64<rocjitsu::arith::Fp64::Ceil, true, false, false, false, true>(
+      flags, exec_mask, uint32_t(instruction_flags), d, a, nullptr, nullptr);
+}
+
+// Evaluate the instruction under its inherited architecture policy.
+int rj_arith_v_rndne_f64_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    [[maybe_unused]] uint32_t *state) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return fp64<rocjitsu::arith::Fp64::Rndne, true, false, false, false, true>(
+      flags, exec_mask, uint32_t(instruction_flags), d, a, nullptr, nullptr);
+}
+
+// Evaluate the instruction under its inherited architecture policy.
+int rj_arith_v_floor_f64_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    [[maybe_unused]] uint32_t *state) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return fp64<rocjitsu::arith::Fp64::Floor, true, false, false, false, true>(
+      flags, exec_mask, uint32_t(instruction_flags), d, a, nullptr, nullptr);
+}
+
+// Evaluate the instruction under its inherited architecture policy.
+int rj_arith_v_trunc_f64_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    [[maybe_unused]] uint32_t *state) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return fp64_wave64<rocjitsu::arith::Fp64::Trunc, true, false, false, false, true>(
+      flags, exec_mask, uint32_t(instruction_flags), d, a, nullptr, nullptr);
+}
+
+// Evaluate the instruction under its inherited architecture policy.
+int rj_arith_v_ceil_f64_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   [[maybe_unused]] uint32_t *state) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return fp64_wave64<rocjitsu::arith::Fp64::Ceil, true, false, false, false, true>(
+      flags, exec_mask, uint32_t(instruction_flags), d, a, nullptr, nullptr);
+}
+
+// Evaluate the instruction under its inherited architecture policy.
+int rj_arith_v_rndne_f64_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    [[maybe_unused]] uint32_t *state) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return fp64_wave64<rocjitsu::arith::Fp64::Rndne, true, false, false, false, true>(
+      flags, exec_mask, uint32_t(instruction_flags), d, a, nullptr, nullptr);
+}
+
+// Evaluate the instruction under its inherited architecture policy.
+int rj_arith_v_floor_f64_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    [[maybe_unused]] uint32_t *state) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return fp64_wave64<rocjitsu::arith::Fp64::Floor, true, false, false, false, true>(
+      flags, exec_mask, uint32_t(instruction_flags), d, a, nullptr, nullptr);
+}
+
+// Evaluate the instruction under its inherited architecture policy.
+int rj_arith_v_frexp_mant_f64_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                         uint32_t *const *d, const uint32_t *const *a,
+                                         [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (mode >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  if ((flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+  }
+  return fp64<rocjitsu::arith::Fp64::FrexpMant, true, false, false, false, true>(
+      flags, exec_mask, uint32_t(mode), d, a, nullptr, nullptr);
+}
+
+// Evaluate the instruction under its inherited architecture policy.
+int rj_arith_v_frexp_mant_f64_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                         uint32_t *const *d, const uint32_t *const *a,
+                                         [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (mode >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  if ((flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+  }
+  return fp64_wave64<rocjitsu::arith::Fp64::FrexpMant, true, false, false, false, true>(
+      flags, exec_mask, uint32_t(mode), d, a, nullptr, nullptr);
+}
+
+// Evaluate the instruction under its inherited architecture policy.
+int rj_arith_v_fract_f64_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (mode >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  if ((flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+  }
+  return fp64<rocjitsu::arith::Fp64::Fract, true, false, false, false, true>(
+      flags, exec_mask, uint32_t(mode), d, a, nullptr, nullptr);
+}
+
+// Evaluate the instruction under its inherited architecture policy.
+int rj_arith_v_fract_f64_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (mode >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  if ((flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+  }
+  return fp64_wave64<rocjitsu::arith::Fp64::Fract, true, false, false, false, true>(
+      flags, exec_mask, uint32_t(mode), d, a, nullptr, nullptr);
+}
+
+// Evaluate the instruction under its inherited architecture policy.
+int rj_arith_v_rcp_f64_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return fp64<rocjitsu::arith::Fp64::Rcp, true, false, false, true, false, true>(
+      flags, exec_mask, uint32_t(instruction_flags), d, a, nullptr, nullptr);
+}
+
+// Evaluate the instruction under its inherited architecture policy.
+int rj_arith_v_rsq_f64_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return fp64<rocjitsu::arith::Fp64::Rsq, true, false, false, true, false, true>(
+      flags, exec_mask, uint32_t(instruction_flags), d, a, nullptr, nullptr);
+}
+
+// Evaluate the instruction under its inherited architecture policy.
+int rj_arith_v_sqrt_f64_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return fp64<rocjitsu::arith::Fp64::Sqrt, true, false, false, true, false, true>(
+      flags, exec_mask, uint32_t(instruction_flags), d, a, nullptr, nullptr);
+}
+
+// Evaluate the instruction under its inherited architecture policy.
+int rj_arith_v_rcp_f64_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return fp64_wave64<rocjitsu::arith::Fp64::Rcp, true, false, false, true, false, true>(
+      flags, exec_mask, uint32_t(instruction_flags), d, a, nullptr, nullptr);
+}
+
+// Evaluate the instruction under its inherited architecture policy.
+int rj_arith_v_rsq_f64_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return fp64_wave64<rocjitsu::arith::Fp64::Rsq, true, false, false, true, false, true>(
+      flags, exec_mask, uint32_t(instruction_flags), d, a, nullptr, nullptr);
+}
+
+// Evaluate the instruction under its inherited architecture policy.
+int rj_arith_v_sqrt_f64_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return fp64_wave64<rocjitsu::arith::Fp64::Sqrt, true, false, false, true, false, true>(
+      flags, exec_mask, uint32_t(instruction_flags), d, a, nullptr, nullptr);
 }

@@ -47,6 +47,7 @@
 #include <cinttypes>
 #include <climits>
 #include <cstring>
+#include <limits>
 #include <map>
 #include <set>
 #include <sstream>
@@ -115,8 +116,6 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
       memory_max_frequency_(0),
       enum_index_(index),
       ape1_base_(0),
-      pending_copy_req_ref_(0),
-      pending_copy_stat_check_ref_(0),
       sdma_blit_used_mask_(0),
       scratch_limit_async_threshold_(0),
       scratch_cache_(
@@ -331,7 +330,10 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
   const auto link_info =
       core::Runtime::runtime_singleton_->GetLinkInfo(nearest_cpu->node_id(), node_id());
 
-  if (link_info.num_hop >= 1 && !properties_.Integrated) {
+  // With HSA_DEVICE_MEM_NO_HOST_ACCESS the CPU cannot access device memory, so treat the
+  // device as small-BAR.
+  if (link_info.num_hop >= 1 && !properties_.Integrated &&
+      !core::Runtime::runtime_singleton_->flag().device_mem_no_host_access()) {
     large_bar_enabled_ = true;
   }
 
@@ -1034,13 +1036,7 @@ void GpuAgent::InitDma() {
 
   // Decide which engine to use for blits.
   auto blit_lambda = [this](bool prefer_xgmi, lazy_ptr<core::Queue>& queue, bool isHostToDev, uint32_t rec_eng) {
-    Flag::SDMA_OVERRIDE sdma_override = core::Runtime::runtime_singleton_->flag().enable_sdma();
-
-    // User SDMA queues are unsupported on gfx1013.
-    bool use_sdma = supported_isas()[0]->GetVersion() != std::make_tuple(10, 1, 3);
-    if (sdma_override != Flag::SDMA_DEFAULT) use_sdma = (sdma_override == Flag::SDMA_ENABLE);
-
-    if (use_sdma && (HSA_PROFILE_BASE == profile_)) {
+    if (PrefersSdmaBlit()) {
       // On gfx90a ensure that HostToDevice queue is created first and so is placed on SDMA0.
       if ((!prefer_xgmi) && (!isHostToDev) && (supported_isas()[0]->GetMajorVersion() == 9) &&
           (supported_isas()[0]->GetMinorVersion() == 0) && (supported_isas()[0]->GetStepping() == 10)) {
@@ -1076,13 +1072,7 @@ void GpuAgent::InitDma() {
       if (ret != nullptr) return ret;
     }
 
-    // pending_copy_stat_check_ref_ will prevent unnecessary compute queue creation
-    // since there is no graceful way to handle lazy loading when the caller needs to know
-    // the status of available SDMA HW resources without a fallback.
-    // Call to isSDMA should be used as a proxy error check if !blit_copy_fallback.
-    auto ret = pending_copy_stat_check_ref_.load(std::memory_order_acquire) ?
-                                              new AMD::BlitKernel(NULL) :
-                                              CreateBlitKernel((*queue).get());
+    auto ret = CreateBlitKernel((*queue).get());
     if (ret == nullptr)
       throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES, "Blit creation failed.");
     return ret;
@@ -1229,32 +1219,6 @@ hsa_status_t GpuAgent::DmaCopy(void* dst, const void* src, size_t size) {
   return blits_[BlitDevToDev]->SubmitLinearCopyCommand(dst, src, size);
 }
 
-void GpuAgent::SetCopyRequestRefCount(bool set) {
-  std::unique_lock<std::mutex> lock(blit_lock_);
-  while (pending_copy_stat_check_ref_.load(std::memory_order_acquire)) {
-    lock.unlock();
-    os::YieldThread();
-    lock.lock();
-  }
-  if (!set && pending_copy_req_ref_.load(std::memory_order_relaxed))
-    pending_copy_req_ref_.fetch_sub(1, std::memory_order_release);
-  else
-    pending_copy_req_ref_.fetch_add(1, std::memory_order_release);
-}
-
-void GpuAgent::SetCopyStatusCheckRefCount(bool set) {
-  std::unique_lock<std::mutex> lock(blit_lock_);
-  while (pending_copy_req_ref_.load(std::memory_order_acquire)) {
-    lock.unlock();
-    os::YieldThread();
-    lock.lock();
-  }
-  if (!set && pending_copy_stat_check_ref_.load(std::memory_order_relaxed))
-    pending_copy_stat_check_ref_.fetch_sub(1, std::memory_order_release);
-  else
-    pending_copy_stat_check_ref_.fetch_add(1, std::memory_order_release);
-}
-
 // Assign direct peer gang factor to GPU
 void GpuAgent::RegisterGangPeer(core::Agent& peer, unsigned int max_bandwidth_factor) {
   gang_peers_info_[peer.public_handle().handle] = max_bandwidth_factor;
@@ -1333,8 +1297,6 @@ hsa_status_t GpuAgent::DmaCopy(void* dst, core::Agent& dst_agent,
   // and separate blit objects, no serialization needed.
   if (gang_factor == 1) {
     const bool is_h2d = (src_agent.device_type() == core::Agent::kAmdCpuDevice);
-    SetCopyRequestRefCount(true);
-    MAKE_SCOPE_GUARD([&]() { SetCopyRequestRefCount(false); });
     lazy_ptr<core::Blit>& blit = GetBlitObject(is_h2d ? BlitHostToDev : BlitDevToHost);
     std::vector<core::Signal*> no_gang;
     return blit->SubmitLinearCopyCommand(dst, src, size, dep_signals, out_signal, no_gang);
@@ -1370,8 +1332,6 @@ hsa_status_t GpuAgent::DmaCopy(void* dst, core::Agent& dst_agent,
   int gang_sig_count = 0;
   for (int i = 0; i < gang_factor; i++) {
     // Set leader and gang status to blit
-    SetCopyRequestRefCount(true);
-    MAKE_SCOPE_GUARD([&]() { SetCopyRequestRefCount(false); });
     lazy_ptr<core::Blit>& blit = gang_factor > 1 ?
                                  (has_aux_gang ? blits_[i + 1] : blits_[i + DefaultBlitCount]) :
                                  GetBlitObject(dst_agent, src_agent, size);
@@ -1466,8 +1426,6 @@ hsa_status_t GpuAgent::DmaCopyOnEngine(void* dst, core::Agent& dst_agent,
     engine_offset = is_same_gpu && !force_copy_on_sdma ? BlitDevToDev : engine_offset;
   }
 
-  SetCopyRequestRefCount(true);
-  MAKE_SCOPE_GUARD([&]() { SetCopyRequestRefCount(false); });
   lazy_ptr<core::Blit>& blit = GetBlitObject(engine_offset);
 
   if (profiling_enabled()) {
@@ -1495,14 +1453,16 @@ hsa_status_t GpuAgent::DmaCopyOnEngine(void* dst, core::Agent& dst_agent,
 }
 
 bool GpuAgent::DmaEngineIsFree(uint32_t engine_offset) {
-  SetCopyStatusCheckRefCount(true);
-  MAKE_SCOPE_GUARD([&]() { SetCopyStatusCheckRefCount(false); });
   // Atomic load to pair with atomic write in GetBlitObject
   uint32_t mask = sdma_blit_used_mask_.load(std::memory_order_relaxed);
-  bool is_free = !!!(mask & (1 << engine_offset)) ||
-                    (blits_[engine_offset]->isSDMA() &&
-                     !!!blits_[engine_offset]->PendingBytes());
-  return is_free;
+  if (!(mask & (1 << engine_offset))) return true;
+
+  // A status query must not construct the blit, since blits_[] caches it for every
+  // later copy. Nothing is queued on an engine whose blit is not built yet.
+  lazy_ptr<core::Blit>& blit = blits_[engine_offset];
+  if (blit.empty()) return true;
+
+  return blit->isSDMA() && !blit->PendingBytes();
 }
 
 hsa_status_t GpuAgent::DmaCopyStatus(core::Agent& dst_agent, core::Agent& src_agent,
@@ -1612,10 +1572,6 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
     uint32_t coord_engine,
     uint32_t max_engines,
     const size_t* dst_size_list) {
-
-  SetCopyRequestRefCount(true);
-  MAKE_SCOPE_GUARD([&]() { SetCopyRequestRefCount(false); });
-
   if (profiling_enabled())
     out_signal.async_copy_agent(core::Agent::Convert(this->public_handle()));
 
@@ -1983,6 +1939,50 @@ static std::string FormatDstList(void* const* dsts, uint32_t num) {
   return out;
 }
 
+bool GpuAgent::PrefersSdmaBlit() const {
+  // User SDMA queues are unsupported on gfx1013.
+  bool use_sdma = supported_isas()[0]->GetVersion() != std::make_tuple(10, 1, 3);
+
+  const Flag::SDMA_OVERRIDE sdma_override =
+      core::Runtime::runtime_singleton_->flag().enable_sdma();
+  if (sdma_override != Flag::SDMA_DEFAULT) use_sdma = (sdma_override == Flag::SDMA_ENABLE);
+
+  return use_sdma && (HSA_PROFILE_BASE == profile_);
+}
+
+uint32_t GpuAgent::MaxBroadcastDestinations() const {
+  // Only the SDMA engines carry a broadcast. When SDMA is unavailable
+  // DmaCopyBatchFallback has no shader equivalent for broadcast and rejects the
+  // op, so nothing can service it and the agent accepts no destinations at all.
+  // Answered from the SDMA preference rather than from a blit object so that
+  // querying this attribute does not force a blit - and its queue - to be
+  // created as a side effect.
+  //
+  // The preference is what the agent is configured for, which is not identical
+  // to what DmaCopyBroadcast finds at submit time: it tests the H2D blit's
+  // isSDMA(), and blit creation falls back to a kernel blit if CreateBlitSdma
+  // fails to initialise an SDMA queue. An agent in that state reports a ceiling
+  // it will not honour. That is deliberate - this attribute describes the
+  // agent's configuration, not the momentary availability of DMA resources, so
+  // it stays stable across queries and cannot be perturbed by asking. The
+  // header documents that a copy within the ceiling may still be rejected.
+  if (!PrefersSdmaBlit()) return 0;
+
+  // No routing inside DmaCopyBroadcast caps the destination count below the
+  // API's own. The dedicated multicast packet describes at most
+  // BlitSdmaBase::kMaxMulticastDsts destinations, but a request exceeding that
+  // is sent to per-entry fan-out rather than refused, so the count an agent
+  // accepts does not depend on which engine happens to service the copy - or,
+  // equivalently, on the transfer size that selects between them. That matters
+  // because this query carries no size and so could not describe a
+  // size-dependent ceiling honestly.
+  //
+  // What remains is the limit of the request itself:
+  // hsa_amd_memory_copy_op_t::num_entries is a uint16_t, so no larger count
+  // can even be expressed.
+  return std::numeric_limits<decltype(hsa_amd_memory_copy_op_t::num_entries)>::max();
+}
+
 hsa_status_t GpuAgent::DmaCopyBroadcast(
     const hsa_amd_memory_copy_op_t& op,
     std::vector<core::Signal*>& dep_signals) {
@@ -2007,9 +2007,6 @@ hsa_status_t GpuAgent::DmaCopyBroadcast(
 
   // Try HW broadcast/multicast or linearB2B on one engine.
   {
-    SetCopyRequestRefCount(true);
-    MAKE_SCOPE_GUARD([&]() { SetCopyRequestRefCount(false); });
-
     lazy_ptr<core::Blit>& blit = GetBlitObject(BlitHostToDev);
     if (blit->isSDMA()) {
       BlitSdmaBase* sdma_blit = static_cast<BlitSdmaBase*>((*blit).get());
@@ -2025,9 +2022,18 @@ hsa_status_t GpuAgent::DmaCopyBroadcast(
         // serialised writes become the bottleneck, so fan-out across multiple
         // SDMA engines wins on aggregate bandwidth.
         // HSA_SDMA_MULTICAST: 1=force on, 0=force off, unset=auto (threshold).
+        //
+        // The multicast packet addresses at most kMaxMulticastDsts
+        // destinations, so a broadcast with more than that takes fan-out
+        // instead of being rejected for a request the agent can still
+        // complete. Without this guard the accepted destination count would
+        // depend on the transfer size, since only copies at or under the
+        // threshold take the multicast route at all.
         const auto mc_flag = core::Runtime::runtime_singleton_->flag().sdma_multicast();
-        const bool use_multicast = (mc_flag == Flag::SDMA_ENABLE) ||
-            (mc_flag == Flag::SDMA_DEFAULT && op.size <= kMulticastMaxSize);
+        const bool use_multicast =
+            (num_entries <= BlitSdmaBase::kMaxMulticastDsts) &&
+            ((mc_flag == Flag::SDMA_ENABLE) ||
+             (mc_flag == Flag::SDMA_DEFAULT && op.size <= kMulticastMaxSize));
         if (use_multicast) {
           // SubmitLinearCopyMulticastCommand picks the WaitSignal packet
           // when profiling is off and the timestamp-capable plain packet when on.
@@ -2336,9 +2342,6 @@ hsa_status_t GpuAgent::DmaCopyRect(const hsa_amd_memory_copy_rect_ptr_t* srcs,
                                    std::vector<core::Signal*>& dep_signals,
                                    core::Signal& out_signal, core::Agent* peer_agent) {
   if (supported_isas()[0]->GetMajorVersion() < 9) return HSA_STATUS_ERROR_INVALID_AGENT;
-
-  SetCopyRequestRefCount(true);
-  MAKE_SCOPE_GUARD([&]() { SetCopyRequestRefCount(false); });
 
   // On platforms with dedicated xGMI engines, rects to another GPU of the hive go on
   // that link's engine, as DmaCopy does for linear copies; the blit queues are shared by every
@@ -2862,6 +2865,9 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
       break;
     case HSA_AMD_AGENT_INFO_HOST_ATOMICS_SUPPORTED:
       *static_cast<bool*>(value) = HostAtomicsSupported();
+      break;
+    case HSA_AMD_AGENT_INFO_MAX_BROADCAST_DESTINATIONS:
+      *static_cast<uint32_t*>(value) = MaxBroadcastDestinations();
       break;
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -3390,7 +3396,7 @@ void GpuAgent::TranslateTime(core::Signal* signal, hsa_amd_profiling_dispatch_ti
   uint64_t start, end;
   signal->GetRawTs(start, end);
 
-  if ((start == 0) || (end == 0) || (start < t0_.GPUClockCounter) || (end < t0_.GPUClockCounter)) {
+  if (!RawTsValid(start, end)) {
     debug_print("Signal %p time stamps may be invalid (start=%" PRIu64 ", end=%" PRIu64 ", t0=%" PRIu64 ").\n",
                 &signal->signal_, start, end, t0_.GPUClockCounter);
     time.start = 0;
@@ -3408,7 +3414,7 @@ void GpuAgent::TranslateTime(core::Signal* signal, hsa_amd_profiling_async_copy_
   uint64_t start, end;
   signal->GetRawTs(start, end);
 
-  if ((start == 0) || (end == 0) || (start < t0_.GPUClockCounter) || (end < t0_.GPUClockCounter)) {
+  if (!RawTsValid(start, end)) {
     debug_print("Signal %p async copy time stamps may be invalid (start=%" PRIu64 ", end=%" PRIu64 ", t0=%" PRIu64 ").\n",
                 &signal->signal_, start, end, t0_.GPUClockCounter);
     time.start = 0;
@@ -3437,12 +3443,21 @@ uint64_t GpuAgent::TranslateTime(uint64_t tick) {
 
   std::lock_guard<std::mutex> lock(t1_lock_);
 
-#ifdef _WIN32
-  // On Windows, AQL dispatch timestamps may have a fixed epoch offset from
-  // D3DKMTQueryClockCalibration's GPUClockCounter (same clock domain, different
-  // base).  Subtract the offset before interpolation (0 until first detection).
+  // Packet timestamps may have a fixed epoch offset from GetClockCounters'
+  // GPUClockCounter (same clock domain, different base), e.g. on Windows and WSL
+  // (DXG).  Subtract the offset before interpolation (0 until first detection).
   // gpu_clock_offset_ is read and written under t1_lock_ to avoid data races.
+#ifdef _WIN32
   tick -= gpu_clock_offset_;
+#else
+  // Detect the offset here as well as in RawTsValid, so scalar conversions through
+  // hsa_amd_profiling_convert_tick_to_system_domain (e.g. CLR's batched
+  // CacheTimingFromTicks, which reads raw start_ts/end_ts and converts them
+  // directly) latch it without depending on an earlier signal-based profiling
+  // query.  t1_lock_ is already held, so call the locked helper directly; it is a
+  // no-op once latched.  Detecting before the tick < t0_ branch below also keeps
+  // an epoch-offset tick from seeding historical_clock_ratio_.
+  tick -= ClockEpochOffsetLocked(tick);
 #endif
   // Limit errors due to correlated pair certainty to ~0.5us.
   // extrapolated time < (0.5us / half clock read certainty) * delay between clock measures
@@ -3519,6 +3534,40 @@ uint16_t GpuAgent::GetSdmaMicrocodeVersion() const {
 void GpuAgent::SyncClocks() {
   [[maybe_unused]] hsa_status_t sync_err = driver().GetClockCounters(node_id(), &t1_);
   assert(sync_err == HSA_STATUS_SUCCESS && "hsaGetClockCounters error");
+}
+
+bool GpuAgent::RawTsValid(uint64_t start, uint64_t end) {
+  if ((start == 0) || (end == 0)) return false;
+  // The upstream check, lock-free: ticks that do not predate t0_ are valid.  This
+  // is the common case on every platform and keeps t1_lock_ off the native path.
+  if ((start >= t0_.GPUClockCounter) && (end >= t0_.GPUClockCounter)) return true;
+  // A tick predates t0_: valid only if the packet clock lags the calibration clock
+  // by an epoch offset (WSL/DXG, negative offset) that explains it.  A zero or
+  // positive offset (KFD, native Windows) leaves these ticks invalid, as upstream.
+  const int64_t off = ClockEpochOffset(end);
+  if (off >= 0) return false;
+  const uint64_t lag = uint64_t(-off);
+  return (start + lag >= t0_.GPUClockCounter) && (end + lag >= t0_.GPUClockCounter);
+}
+
+int64_t GpuAgent::ClockEpochOffset(uint64_t raw_tick) {
+  std::lock_guard<std::mutex> lock(t1_lock_);
+  return ClockEpochOffsetLocked(raw_tick);
+}
+
+// The caller must hold t1_lock_.  Only a tick that predates t0_ can reveal an
+// offset, so ticks at or after t0_ (every valid tick on KFD) return without asking
+// the driver.  The driver decides whether such a tick is an epoch offset; see
+// KfdDriver::GetTimestampEpochOffset for the WSL heuristic and its limits.
+int64_t GpuAgent::ClockEpochOffsetLocked(uint64_t raw_tick) {
+  if (gpu_clock_offset_ != 0 || raw_tick == 0 || raw_tick >= t0_.GPUClockCounter)
+    return gpu_clock_offset_;
+  int64_t offset = 0;
+  if (driver().GetTimestampEpochOffset(node_id(), raw_tick, t0_, &t1_, &offset) ==
+          HSA_STATUS_SUCCESS &&
+      offset != 0)
+    gpu_clock_offset_ = offset;
+  return gpu_clock_offset_;
 }
 
 hsa_status_t GpuAgent::UpdateTrapHandlerWithPCS(pcs_sampling_data_t* pcs_hosttrap_buffers,

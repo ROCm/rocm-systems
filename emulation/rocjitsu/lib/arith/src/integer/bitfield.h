@@ -34,6 +34,18 @@ template <Bitfield Op>
 void bitfield_x86_64_v4(uint32_t exec_mask, uint32_t *d, const uint32_t *a, const uint32_t *b,
                         const uint32_t *c);
 
+// Pack the low or the high 16-bit halves of A and B for all lanes: the byte permute with
+// selector 0x05040100 or 0x07060302. D may be A or B. Requires the named CPU features.
+template <int Lanes>
+void perm_pack_halves_x86_64_v3(uint32_t *d, const uint32_t *a, const uint32_t *b,
+                                bool high_halves);
+
+// Pack the low or the high 16-bit halves of A and B for all lanes: the byte permute with
+// selector 0x05040100 or 0x07060302. D may be A or B. Requires the named CPU features.
+template <int Lanes>
+void perm_pack_halves_x86_64_v4(uint32_t *d, const uint32_t *a, const uint32_t *b,
+                                bool high_halves);
+
 } // namespace rocjitsu::arith
 
 #endif

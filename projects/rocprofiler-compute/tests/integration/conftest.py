@@ -20,6 +20,7 @@ from common import ROOT
 from conftest import ProfileModeImportGuard
 
 from tests.integration.common import gpu_soc, inject_mpirun
+from utils.mi_gpu_spec import mi_gpu_specs
 
 # Exit code rocprof-compute uses when the SDK reports the GPU firmware is too old.
 OUTDATED_FIRMWARE_EXIT_CODE = 3
@@ -33,6 +34,14 @@ if not rocprof_compute_script_path.exists():
 if not rocprof_compute_script_path.exists():
     raise FileNotFoundError("Cannot find rocprof-compute script")
 rocprof_compute_script_path = str(rocprof_compute_script_path)
+
+
+def experimental_gpu_options() -> List[str]:
+    """Return ["--experimental"] if the GPU under test is experimental, else []."""
+    gpu_arch, _ = gpu_soc()
+    if gpu_arch in mi_gpu_specs.get_experimental_archs():
+        return ["--experimental"]
+    return []
 
 
 def run_main_in_process(command_line: List[str]) -> int:
@@ -121,6 +130,7 @@ def binary_handler_profile_rocprof_compute(request):
             )
         baseline_opts = [
             "rocprof-compute",
+            *experimental_gpu_options(),
             "profile",
             "-VVV",
         ]
@@ -211,6 +221,10 @@ def binary_handler_analyze_rocprof_compute():
 
     def _handler(arguments):
         # No import guard needed for analyze mode
-        return run_main_in_process(["rocprof-compute", *arguments])
+        return run_main_in_process([
+            "rocprof-compute",
+            *experimental_gpu_options(),
+            *arguments,
+        ])
 
     return _handler

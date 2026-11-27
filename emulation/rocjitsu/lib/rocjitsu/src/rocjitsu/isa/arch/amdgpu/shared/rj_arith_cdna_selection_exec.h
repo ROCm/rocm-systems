@@ -38,6 +38,7 @@ inline void execute_cdna_selection(Inst &inst, Wavefront &wave, FloatBinary32Fun
   uint32_t *d = result;
   const uint64_t exec_mask = wave.exec() & wave.vgpr_write_mask();
   flags = Bits == 16 ? float16_flags(wave, flags, rdna3) : float32_flags(wave, flags, rdna3);
+  modifiers |= RJ_ARITH_ALU_SDWA | sdwa_float_modifiers(inst);
   const int status = wave64(flags, exec_mask, modifiers, &d, &a.data, &b.data, &causes);
   if (status != RJ_ARITH_SUCCESS) {
     wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
@@ -45,9 +46,7 @@ inline void execute_cdna_selection(Inst &inst, Wavefront &wave, FloatBinary32Fun
   }
   for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
     if ((exec_mask >> lane) & 1) {
-      sdwa::write_lane<Bits == 16 ? sdwa::ResultFormat::F16 : sdwa::ResultFormat::F32,
-                       Bits == 16 ? sdwa::OutputPolicy::ROUNDED : sdwa::OutputPolicy::MODE>(
-          inst, wave, destination, lane, result[lane]);
+      sdwa::write_lane(inst, wave, destination, lane, result[lane]);
     }
   }
   wave.set_trapsts(wave.trapsts() | causes);

@@ -20,6 +20,7 @@
 #if HT_AMD && HT_LINUX
 
 #include <hip_test_aqllog.hh>
+#include <hip/hip_ext.h>
 
 #include <cstdint>
 #include <cstdlib>
@@ -66,7 +67,47 @@ void runBarrierScenario(const std::string& scenario) {
   hipStream_t stream_c = nullptr;
   HIP_CHECK(hipStreamCreate(&stream_a));
 
-  if (scenario == "same_stream") {
+  if (scenario == "graph_any_order") {
+    // Captured ordered, any-order (hipExtAnyOrderLaunch), ordered kernels.
+    hipGraph_t graph = nullptr;
+    hipGraphExec_t graph_exec = nullptr;
+    HIP_CHECK(hipStreamBeginCapture(stream_a, hipStreamCaptureModeGlobal));
+    launchBarrierTestKernel(stream_a, 21);
+    hipExtLaunchKernelGGL(noopKernel, dim3(1), dim3(22), 0, stream_a, nullptr, nullptr,
+                          hipExtAnyOrderLaunch);
+    HIP_CHECK(hipGetLastError());
+    launchBarrierTestKernel(stream_a, 23);
+    HIP_CHECK(hipStreamEndCapture(stream_a, &graph));
+    HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphLaunch(graph_exec, stream_a));
+    HIP_CHECK(hipStreamSynchronize(stream_a));
+    HIP_CHECK(hipGraphExecDestroy(graph_exec));
+    HIP_CHECK(hipGraphDestroy(graph));
+  } else if (scenario == "graph_any_order_update") {
+    // An exec captured with an any-order kernel, updated from an ordered capture before launch.
+    auto capture = [stream_a](uint32_t flags) {
+      hipGraph_t graph = nullptr;
+      HIP_CHECK(hipStreamBeginCapture(stream_a, hipStreamCaptureModeGlobal));
+      launchBarrierTestKernel(stream_a, 21);
+      hipExtLaunchKernelGGL(noopKernel, dim3(1), dim3(22), 0, stream_a, nullptr, nullptr, flags);
+      HIP_CHECK(hipGetLastError());
+      HIP_CHECK(hipStreamEndCapture(stream_a, &graph));
+      return graph;
+    };
+    hipGraph_t any_order_graph = capture(hipExtAnyOrderLaunch);
+    hipGraph_t ordered_graph = capture(0);
+    hipGraphExec_t graph_exec = nullptr;
+    HIP_CHECK(hipGraphInstantiate(&graph_exec, any_order_graph, nullptr, nullptr, 0));
+    hipGraphNode_t error_node = nullptr;
+    hipGraphExecUpdateResult update_result = hipGraphExecUpdateError;
+    HIP_CHECK(hipGraphExecUpdate(graph_exec, ordered_graph, &error_node, &update_result));
+    REQUIRE(update_result == hipGraphExecUpdateSuccess);
+    HIP_CHECK(hipGraphLaunch(graph_exec, stream_a));
+    HIP_CHECK(hipStreamSynchronize(stream_a));
+    HIP_CHECK(hipGraphExecDestroy(graph_exec));
+    HIP_CHECK(hipGraphDestroy(ordered_graph));
+    HIP_CHECK(hipGraphDestroy(any_order_graph));
+  } else if (scenario == "same_stream") {
     launchBarrierTestKernel(stream_a, 17);
     launchBarrierTestKernel(stream_a, 18);
     launchBarrierTestKernel(stream_a, 19);
@@ -244,19 +285,46 @@ HIP_TEST_CASE(Unit_hipStreamAqlBarrierBit_Scenarios) {
     REQUIRE(aqllog::DispatchBarrierBitForWorkgroup(log, 20) == 1);
   }
 
+  SECTION("Captured hipExtAnyOrderLaunch kernel keeps its barrier bit clear") {
+    const std::string log = runBarrierScenarioChild("graph_any_order");
+    REQUIRE(aqllog::DispatchBarrierBitForWorkgroup(log, 22) == 0);
+    REQUIRE(aqllog::DispatchBarrierBitForWorkgroup(log, 23) == 1);
+  }
+
+  SECTION("Graph exec update takes the launch flags of the new kernel node") {
+    const std::string log = runBarrierScenarioChild("graph_any_order_update");
+    REQUIRE(aqllog::DispatchBarrierBitForWorkgroup(log, 22) == 1);
+  }
+
   SECTION("Event record and wait preserve stream ordering") {
     const std::string log = runBarrierScenarioChild("event_wait");
     REQUIRE(aqllog::DispatchBarrierBitForWorkgroup(log, 17) == 0);
     REQUIRE(aqllog::DispatchBarrierBitForWorkgroup(log, 18) == 0);
-    REQUIRE(aqllog::DispatchBarrierBitForWorkgroup(log, 19) == 1);
 
     // Runtime init also emits barrier packets before the scenario kernels run,
-    // so scope collection to the event record/wait pair between wg18 and wg19.
+    // so scope collection to the event record/wait packets between wg18 and wg19.
     const std::vector<aqllog::Packet> barriers = aqllog::BarriersBetweenDispatches(
         log, aqllog::WorkgroupToken(18), aqllog::WorkgroupToken(19));
-    REQUIRE(barriers.size() == 2);
+    // The record is a barrier packet with the barrier bit: it completes after wg17 and wg18.
+    REQUIRE(!barriers.empty());
     REQUIRE(barriers[0].barrier == 1);
-    REQUIRE(barriers[1].barrier == 0);
+    const std::optional<std::string> record_signal =
+        aqllog::FieldToken(barriers[0].line, "completion_signal=");
+    REQUIRE(record_signal.has_value());
+
+    // wg19 must start after the record completed. The runtime may order it by its own barrier
+    // bit, by a later barrier packet that waits on the record's signal, or by a dependency on
+    // that signal in the dispatch itself (AMD extended dispatch packet, no extra packet).
+    const std::optional<aqllog::Packet> wg19 = aqllog::DispatchForWorkgroup(log, 19);
+    REQUIRE(wg19.has_value());
+    bool waits_for_record =
+        wg19->barrier == 1 || aqllog::WaitsOnSignal(wg19->line, *record_signal);
+    for (size_t i = 1; i < barriers.size(); ++i) {
+      // The wait already waits on the record's signal, so it needs no barrier bit.
+      REQUIRE(barriers[i].barrier == 0);
+      waits_for_record = waits_for_record || aqllog::WaitsOnSignal(barriers[i].line, *record_signal);
+    }
+    REQUIRE(waits_for_record);
   }
 }
 

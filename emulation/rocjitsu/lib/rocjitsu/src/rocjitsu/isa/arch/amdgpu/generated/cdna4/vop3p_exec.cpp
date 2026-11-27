@@ -7,12 +7,12 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna4/mma_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/vop3p.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/dot_packed16.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_dense_matrix_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_packed_f32_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_vector_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
@@ -199,6 +199,9 @@ void VPkMinU16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VPkFmaF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
+  if (!wf.exec()) {
+    return;
+  }
   const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
   if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
       semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
@@ -602,7 +605,8 @@ void VMfmaF3216x16x128F8f6f4Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
   }
   uint64_t controls = inst_.cbsz | (uint64_t(inst_.blgp) << RJ_ARITH_MATRIX_FORMAT_B_SHIFT);
   amdgpu::arith::exec_dense_fp_matrix<8, 4, 64>(
-      wf, rj_arith_v_mfma_f32_16x16x128_f8f6f4_w64, cu.arithmetic_flags(), controls, dst, src0_base,
+      wf, rj_arith_v_mfma_f32_16x16x128_f8f6f4_w64,
+      cu.arithmetic_flags() | (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0), controls, dst, src0_base,
       src1_base, s2, !src2.decoded_vgpr() ? std::optional<uint32_t>(const_acc) : std::nullopt,
       ~uint64_t{0}, ~uint64_t{0}, registers_for(inst_.cbsz), registers_for(inst_.blgp));
 }
@@ -632,7 +636,8 @@ void VMfmaF3232x32x64F8f6f4Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
   }
   uint64_t controls = inst_.cbsz | (uint64_t(inst_.blgp) << RJ_ARITH_MATRIX_FORMAT_B_SHIFT);
   amdgpu::arith::exec_dense_fp_matrix<8, 16, 64>(
-      wf, rj_arith_v_mfma_f32_32x32x64_f8f6f4_w64, cu.arithmetic_flags(), controls, dst, src0_base,
+      wf, rj_arith_v_mfma_f32_32x32x64_f8f6f4_w64,
+      cu.arithmetic_flags() | (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0), controls, dst, src0_base,
       src1_base, s2, !src2.decoded_vgpr() ? std::optional<uint32_t>(const_acc) : std::nullopt,
       ~uint64_t{0}, ~uint64_t{0}, registers_for(inst_.cbsz), registers_for(inst_.blgp));
 }
