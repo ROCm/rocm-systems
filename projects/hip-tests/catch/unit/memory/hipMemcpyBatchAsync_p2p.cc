@@ -279,12 +279,22 @@ static std::vector<int> GetMutuallyPeeredDevices() {
   return devices;
 }
 
-// The number of allgather batches over `num_devices` GPUs: kBackToBackIterations up to 8 GPUs, then
-// fewer, so the peer copies stay at what 8 GPUs move and a run over every partition of a large
-// machine (64 GPUs: 8064 copies per batch) ends within its child deadline. A batch that large still
-// wraps the signal ring many times. The count is a multiple of `num_patterns`, at least one round,
-// so the last batch writes a different pattern from the first and the final contents show that
-// the last batch landed last.
+// How many batches RunAllgatherBackToBack submits on `num_devices` GPUs. Only the number of
+// batches shrinks on large systems; every batch still copies between every pair of GPUs.
+//
+// Up to 8 GPUs this is kBackToBackIterations (400), which already runs in a few seconds. Above 8
+// GPUs, the 8-GPU run is the budget: 400 batches * 112 peer copies per batch (8 * 7 * 2) = 44,800
+// peer copies. Divide the budget by the peer copies per batch on this system, then round down to
+// whole A/B rounds (a multiple of `num_patterns`), with at least one round. An odd count would end
+// on A, the same bytes the first batch wrote, and a run where only the first batch landed would
+// still pass the final check.
+//
+//   GPUs   peer copies per batch   batches
+//   <= 8   <= 112                  400
+//   16     16 * 15 * 2 = 480       44,800 / 480 = 93 -> 92
+//   64     64 * 63 * 2 = 8,064     44,800 / 8,064 = 5 -> 4 (A, B, A, B)
+//
+// Without this, 400 batches on 64 GPUs took about 277 s per child process, past its deadline.
 static size_t AllgatherIterations(size_t num_devices, size_t destinations_per_peer,
                                   size_t num_patterns) {
   constexpr size_t kReferenceDevices = 8;
@@ -297,15 +307,36 @@ static size_t AllgatherIterations(size_t num_devices, size_t destinations_per_pe
   return iterations - iterations % num_patterns;
 }
 
-// Allgather-style batches issued back to back on one stream with no synchronization in between,
-// over the first `max_devices` mutually peered GPUs: every GPU's buffer is copied to two
-// destinations on every other GPU, so each source feeds several destinations and one batch becomes
-// several SDMA operations that all wait on the stream's prior work. With `with_intra_device_copy`
-// each batch also carries an intra-device copy, which runs as a shader copy waiting on the same
-// prior work. The sources alternate between two patterns from batch to batch, so the final
-// contents show that the last batch landed after all the others. A batch grows with the square of
-// the number of GPUs, so the number of batches shrinks to keep the peer copies at what
-// kBackToBackIterations batches move across 8 GPUs (see AllgatherIterations).
+// Checks that hipMemcpyBatchAsync batches queued back to back on one stream, with no
+// synchronization in between, run in stream order. Uses the first `max_devices` mutually peered
+// GPUs. The example below uses two GPUs.
+//
+// 1. Buffers (set up once). Each GPU has two 2 MiB source buffers, A and B, each filled with one
+//    byte value unique to that GPU and pattern (1 + gpu * 2 + pattern):
+//
+//            A    B
+//      GPU0  1    2
+//      GPU1  3    4
+//
+//    For every ordered pair (src GPU, dst GPU), two zeroed destination buffers live on the dst GPU:
+//      d0, d1 on GPU1 receive from GPU0;  d2, d3 on GPU0 receive from GPU1.
+//    With `with_intra_device_copy`, d4 on GPU0 also receives from GPU0 itself.
+//
+// 2. One batch = one allgather: one hipMemcpyBatchAsync that writes every destination once.
+//      Batch A: GPU0.A -> d0, d1;  GPU1.A -> d2, d3;  (GPU0.A -> d4)
+//      Batch B: GPU0.B -> d0, d1;  GPU1.B -> d2, d3;  (GPU0.B -> d4)
+//    A and B write the same destinations, so each batch overwrites the one before it. The 2 MiB
+//    peer copies run on SDMA, split into several engine operations per batch; the d4 copy runs as
+//    a shader (blit kernel). All of them must wait for the previous batch to finish.
+//
+// 3. Submit A, B, A, B, ... on one stream without waiting, then synchronize once. The batch count
+//    comes from AllgatherIterations and is always even, so the last batch is B.
+//
+// 4. Read every destination back and check every byte against the last batch, B:
+//      d0, d1 == 2 (GPU0.B);  d2, d3 == 4 (GPU1.B);  d4 == 2 (GPU0.B)
+//    A destination holding A's value (1 or 3) means an earlier A batch finished after the last B
+//    batch: stream order was broken. A broken dependency that never resolves shows up as a hang,
+//    which the signal-tracker child deadline catches.
 static void RunAllgatherBackToBack(size_t max_devices, bool with_intra_device_copy) {
   if (HipTest::getDeviceCount() < 2) {
     HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
