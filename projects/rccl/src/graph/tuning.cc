@@ -1713,11 +1713,7 @@ ncclResult_t ncclTopoTuneModel(struct ncclComm* comm, int minCompCap, int maxCom
           const char* gcn = comm->topo->nodes[GPU].nodes[0].gpu.gcn;
           const bool archOk = IsArchMatch(gcn, "gfx90a") || IsArchMatch(gcn, "gfx942") || IsArchMatch(gcn, "gfx950") ||
                               IsArchMatch(gcn, "gfx1250");
-          // Enable LL128 by default only on gfx90a with available tuning table
-          pEnable = (graphs[a]->typeInter <= PATH_PXB) && graphs[a]->typeIntra <= PATH_NVL &&
-                        (archOk && comm->topo->ll128Enabled) ?
-                      1 :
-                      0;
+          pEnable = rcclLL128EnabledByDefault(comm, (ncclFunc_t)c, a, graphs[a], archOk);
           // Restore an explicit NCCL_PROTO=LL128 only when the arch supports LL128
           // (the path-check is what we want to override, not the arch gate); on
           // unsupported archs let dispatch fall back rather than failing later in

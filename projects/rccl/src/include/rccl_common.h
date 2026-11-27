@@ -156,10 +156,13 @@ ncclResult_t rcclOverrideProtocol(const char* ncclProtoStr[], float table[][NCCL
                                   struct ncclTaskColl* info);
 ncclResult_t rcclOverrideAlgorithm(const char* ncclAlgoStr[], float table[][NCCL_NUM_PROTOCOLS],
                                    struct ncclTaskColl* info);
-// `table` is the cost table the choice came from; the single-node Broadcast Ring LL ceiling needs Ring LL in it.
-// Null skips that check.
+// `table` is the cost table the choice came from; the single-node Broadcast Ring LL and LL128 switches need their cell
+// in it. Null skips that check.
 void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, struct ncclTaskColl* info,
                                   float (*table)[NCCL_NUM_PROTOCOLS] = nullptr);
+// ncclTopoTuneModel's default LL128 offer for one collective and algorithm on an LL128 arch (archOk), given its graph.
+bool rcclLL128EnabledByDefault(const struct ncclComm* comm, ncclFunc_t func, int algo,
+                               const struct ncclTopoGraph* graph, bool archOk);
 // Arch-table AllReduce Tree-over-Ring switch (rcclArchThresholds::arTreeMaxPerRank;
 // single-node comms of rankScaledMinRanks+ ranks, NCCL_ALGO / NCCL_PROTO unset, cost
 // table offering Tree LL and LL128). Call before rcclUpdateCollectiveProtocol, which

@@ -27,6 +27,7 @@
 #include "TestChecks.hpp"
 
 #include "comm.h"
+#include "graph/topo.h"
 #include "rccl_common.h"
 #include "transport.h"
 
@@ -34,6 +35,8 @@
 
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
+#include <cstring>
 #include <iterator>
 #include <thread>
 #include <vector>
@@ -388,6 +391,77 @@ TEST_F(LlStepBarrierMPITest, OneRankAllReduceMatchesPerIterationInput)
 TEST_F(LlStepBarrierMPITest, SendRecvToSelfMatchesPerIterationInput)
 {
     runCollectives({"Ring", -1, "Simple", NCCL_PROTO_SIMPLE, nullptr, kSelfCopy, std::size(kSelfCopy)});
+}
+
+// Its own suite and process: RCCL caches whether NCCL_PROTO is set, and the cases above set it. finish() is reused.
+class BroadcastLl128WindowMPITest : public LlStepBarrierMPITest
+{};
+
+// One gfx942 node of 3 to 8 GPUs on all-pairs XGMI with LL128 off in the topology model: with no NCCL_PROTO, some Ring
+// Broadcast size selects LL128, with right data. There only the tuning model's Broadcast offer enables LL128.
+TEST_F(BroadcastLl128WindowMPITest, ModelSelectsRingLl128OnGfx942)
+{
+    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI);
+    if(!mpiAllRanks(std::getenv("NCCL_PROTO") == nullptr && std::getenv("NCCL_ALGO") == nullptr
+                    && !MPIHelpers::mpiNcclProtoWasSet()))
+    {
+        GTEST_SKIP() << "Needs the tuning model's choice: NCCL_PROTO and NCCL_ALGO unset, and not set earlier in this "
+                     << "process";
+    }
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    ncclComm_t           comm = getActiveCommunicator();
+    const ncclTopoGraph& ring = comm->graphs[NCCL_ALGO_RING];
+    hipDeviceProp_t      prop{};
+    // gcnArchName reads like "gfx942:sramecc+:xnack-".
+    const bool gfx942 = hipGetDeviceProperties(&prop, comm->cudaDev) == hipSuccess
+                        && std::strncmp(prop.gcnArchName, "gfx942", 6) == 0;
+    if(!mpiAllRanks(gfx942 && comm->nNodes == 1 && comm->nRanks >= 3 && comm->nRanks <= 8 && !comm->hasMloPart
+                    && !comm->topo->ll128Enabled && (comm->topo->type & RCCL_TOPO_XGMI_ALL) != 0
+                    && ring.typeInter <= PATH_PXB && ring.typeIntra <= PATH_NVL))
+    {
+        GTEST_SKIP() << "Needs one gfx942 node of 3 to 8 unpartitioned GPUs on all-pairs XGMI with LL128 off";
+    }
+    constexpr size_t kMaxCount = size_t{16} << 20;
+    void*            buf       = nullptr;
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&buf, kMaxCount * sizeof(float)));
+    auto   buf_guard = makeDeviceBufferAutoGuard(buf);
+    size_t count     = 0;
+    bool   ringRuns  = false;
+    for(size_t c = size_t{16} << 10; c <= kMaxCount && count == 0; c *= 2)
+    {
+        int        algo = -1, protocol = -1, maxChannels = -1;
+        const bool ok   = rcclGetCollImplInfo(comm, ncclFuncBroadcast, c, ncclFloat32, ncclSum, buf, buf,
+                                            /*graphCapturing=*/0, &algo, &protocol, &maxChannels)
+                        == ncclSuccess;
+        ringRuns = ringRuns || mpiAllRanks(ok && algo == NCCL_ALGO_RING);
+        count    = mpiAllRanks(ok && algo == NCCL_ALGO_RING && protocol == NCCL_PROTO_LL128) ? c : 0;
+    }
+    if(!ringRuns)
+    {
+        GTEST_SKIP() << "Another algorithm runs Broadcast here";
+    }
+    ASSERT_MPI_TRUE(count != 0);
+
+    const int          root = comm->nRanks - 1;
+    std::vector<float> host(count);
+    for(size_t i = 0; i < count; ++i)
+    {
+        host[i] = comm->rank == root ? inputValue(root, 0, i) : -1.0f;
+    }
+    ASSERT_MPI_EQ(hipSuccess, hipMemcpy(buf, host.data(), count * sizeof(float), hipMemcpyHostToDevice));
+    ASSERT_MPI_TRUE(
+        finish(ncclBroadcast(buf, buf, count, ncclFloat32, root, comm, getActiveStream()) == ncclSuccess));
+    ASSERT_MPI_EQ(hipSuccess, hipMemcpy(host.data(), buf, count * sizeof(float), hipMemcpyDeviceToHost));
+    size_t wrong = 0;
+    for(size_t i = 0; i < count; ++i)
+    {
+        if(host[i] != inputValue(root, 0, i))
+        {
+            ++wrong;
+        }
+    }
+    EXPECT_EQ(size_t{0}, wrong) << count << " floats from root " << root;
+    ASSERT_MPI_TRUE(wrong == 0);
 }
 
 #endif // MPI_TESTS_ENABLED
