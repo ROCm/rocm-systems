@@ -1727,6 +1727,20 @@ threshold table introduced for gfx1250.
       - | ``1``: Use the TDM (default).
         | ``0``: Use vector loads and stores.
 
+    * - | ``RCCL_DDA_IPC_BANKED_SCRATCH``
+        | Banked scratch for the single-node DDA IPC ``ncclAllReduce``,
+          ``ncclAllGather``, ``ncclReduceScatter`` and ``ncclAllToAll`` calls whose
+          kernel copies the input into the DDA scratch. Such a call uses one of two
+          8 MiB banks right below the LL region of the scratch, alternating per
+          call, and skips the barrier at its end. The other DDA IPC calls, and the
+          copy-engine paths that use the DDA scratch, use the scratch below the
+          banks. When ``-1`` (default), resolved from ``ddaIpcBankedScratch`` in the
+          arch table: on for gfx950, off for gfx942. If any rank has it off, no rank
+          uses it.
+      - | ``-1``: Resolved from the per-arch table at runtime (default).
+        | ``0``: Off.
+        | Any other non-zero value: On.
+
     * - | ``RCCL_DDA_BC``
         | Controls DDA ``ncclBroadcast`` on the gfx1250 fabric path and the
           single-node 8-rank IPC path. When ``-1`` (default), Broadcast follows

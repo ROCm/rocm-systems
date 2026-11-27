@@ -226,6 +226,10 @@ struct rcclArchThresholds {
   // tuning model's per-rank ranges. gfx1250 DPX sets both; other tables leave them 0.
   size_t bcRingLLMaxBytes;
   size_t bcRingLL128MaxBytes;
+
+  // DDA IPC: in-kernel staged calls alternate between two scratch banks and skip the trailing barrier.
+  // RCCL_DDA_IPC_BANKED_SCRATCH overrides it.
+  bool ddaIpcBankedScratch;
 };
 
 // Compute-partition mode a gfx1250 comm is tuned for (RCCL_TUNING_PARTITION_MODE). It picks

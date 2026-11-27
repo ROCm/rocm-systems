@@ -11,6 +11,7 @@
 #include "algorithms/dda/fabric/fabric_gpu_barrier.h"
 #include "algorithms/dda/ipc/ipc_gpu_barrier.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -80,11 +81,65 @@ inline size_t ddaFabricScratchSizing(int nRanks, int64_t overrideBytes, int64_t 
   return bytes;
 }
 
+// IPC scratch top down: LL region, staging banks 1 and 0 when banked, then the Simple / CE payload (ddaScratchBytes).
+constexpr size_t kDdaIpcStagingBankBytes = size_t{8} << 20;  // larger in-kernel staging runs unbanked
+static_assert(DDA_IPC_BUFFER_SIZE > dda::common::kDdaIpcLLRegionBytes + 2 * kDdaIpcStagingBankBytes,
+              "the staging banks must leave IPC payload scratch");
+
+// Device peer table entries: scratch bases, LL region bases (ddaLLRegion), staging bank 0 bases, then bank 1 bases.
+constexpr int kDdaIpcStagingBankPeerIndex = 2 * kDdaNranks;
+constexpr int kDdaIpcPeerTableEntries = 4 * kDdaNranks;
+
 // Per-comm IPC barrier state stored in ncclComm::ddaIpcBarrierState.
 struct DdaIpcBarrierState {
   std::unique_ptr<dda::common::IpcGpuBarrierResources> resources;
   dda::common::IpcGpuBarrier barrierHost;
+  size_t scratchAllocBytes = 0;            // the whole IPC scratch, which fini frees
+  size_t stagingBankBytes = 0;             // set with stagingBankPeerPtrsDev, which gates banking
+  void* stagingBankPeerPtrsDev = nullptr;  // bank 0 then bank 1 peer bases inside ncclComm::ddaPeerPtrsDev; not owned
 };
+
+// RCCL_DDA_IPC_BANKED_SCRATCH: unset (-1) follows the arch table, 0 off, any other non-zero value on.
+inline bool ddaIpcBankedScratchWanted(int64_t param, bool archDefault) {
+  return param == -1 ? archDefault : param != 0;
+}
+
+// Simple / CE payload bytes of an allocBytes IPC scratch: below the LL region, and below the staging banks when banked.
+inline size_t ddaIpcPayloadBytes(size_t allocBytes, bool banked) {
+  return allocBytes - dda::common::kDdaIpcLLRegionBytes - (banked ? 2 * kDdaIpcStagingBankBytes : 0);
+}
+
+// Where staging bank 0 or 1 starts in an allocBytes IPC scratch, right below the LL region.
+inline size_t ddaIpcStagingBankOffset(size_t allocBytes, int bank) {
+  return ddaIpcPayloadBytes(allocBytes, /*banked=*/true) + static_cast<size_t>(bank) * kDdaIpcStagingBankBytes;
+}
+
+// For in-kernel staging only: a copy before the launch cannot read the device-side call count that picks the bank.
+inline bool ddaIpcCallBanked(const DdaIpcBarrierState* state, size_t footprintBytes) {
+  return state != nullptr && state->stagingBankPeerPtrsDev != nullptr && footprintBytes <= state->stagingBankBytes;
+}
+
+// The peer table an in-kernel staged call launches with: the staging bank table when it is banked, else ipcbuffs.
+template <typename T>
+inline T** ddaIpcStagingTable(const DdaIpcBarrierState* state, T** ipcbuffs, size_t footprintBytes, bool* banked) {
+  *banked = ddaIpcCallBanked(state, footprintBytes);
+  return *banked ? static_cast<T**>(state->stagingBankPeerPtrsDev) : ipcbuffs;
+}
+
+// The init ready gather also carries whether a rank wants banked scratch, so every rank banks or none does.
+inline int ddaIpcReadyWord(int ready, bool banked) {
+  return ready | (banked ? 1 << 8 : 0);
+}
+
+// The lowest ready level, and banked only when every rank wants it.
+inline void ddaIpcAgreeReadyWords(const int* words, int nRanks, int* ready, bool* banked) {
+  *ready = words[0] & 0xff;
+  *banked = true;
+  for (int r = 0; r < nRanks; ++r) {
+    *ready = std::min(*ready, words[r] & 0xff);
+    *banked = *banked && (words[r] >> 8) != 0;
+  }
+}
 
 // Per-comm fabric barrier state stored in ncclComm::ddaFabricBarrierState.
 struct DdaFabricBarrierState {

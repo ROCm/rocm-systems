@@ -183,6 +183,21 @@ TEST_F(DdaAllGatherIpcMicrotest, Blocks_SizedOnBytesNotElements) {
   EXPECT_EQ(ncclAllGatherDdaIpcBlocks(nullptr, 1u << 13, ncclFloat32), 4u);
 }
 
+void* const kStagingBankPeerPtrsDev = reinterpret_cast<void*>(0xBA0);
+
+// The banked footprint is the shard this rank stages, not the gathered total.
+TEST_F(DdaAllGatherIpcMicrotest, Launch_BankedScratchBanksAShardThatFitsABank) {
+  comm().ddaIpcBarrierState = BankedBarrierState<DdaIpcBarrierState>(1024, kStagingBankPeerPtrsDev);
+  ASSERT_EQ(Run(256), ncclSuccess);
+  ASSERT_EQ(Run(260), ncclSuccess);
+  ASSERT_EQ(g_ddaLaunches.size(), 2u);
+  EXPECT_EQ(g_ddaLaunches[0].kernel, KernelPtr(&dda::common::ddaAllGatherIpc<int8_t, 8, false, true>));
+  EXPECT_EQ(g_ddaLaunches[0].Arg<int8_t**>(0), kStagingBankPeerPtrsDev);
+  EXPECT_TRUE(SameBarrier(g_ddaLaunches[0].Arg<IpcGpuBarrier>(5), comm().ddaIpcBarrierState->barrierHost));
+  EXPECT_EQ(g_ddaLaunches[1].kernel, Kernel());
+  EXPECT_EQ(g_ddaLaunches[1].Arg<int8_t**>(0), comm().ddaPeerPtrsDev);
+}
+
 TEST_F(DdaAllGatherIpcMicrotest, Launch_LaunchErrorIsReported) {
   g_hipGetLastError = [] { return hipErrorLaunchFailure; };
   EXPECT_EQ(Run(4), ncclUnhandledCudaError);

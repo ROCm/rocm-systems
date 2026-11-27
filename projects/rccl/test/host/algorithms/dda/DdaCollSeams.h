@@ -82,6 +82,16 @@ State* SharedBarrierState(unsigned char fill) {
   return state;
 }
 
+// A never-destroyed banked IPC barrier state, filled like SharedBarrierState. The bank table pointer is only compared.
+template <typename State>
+State* BankedBarrierState(size_t stagingBankBytes, void* stagingBankPeerPtrsDev) {
+  static State* const state = new State();
+  std::memset(static_cast<void*>(&state->barrierHost), 0x5b, sizeof(state->barrierHost));
+  state->stagingBankBytes = stagingBankBytes;
+  state->stagingBankPeerPtrsDev = stagingBankPeerPtrsDev;
+  return state;
+}
+
 template <typename Barrier>
 bool SameBarrier(const Barrier& a, const Barrier& b) {
   return std::memcmp(&a, &b, sizeof(Barrier)) == 0;

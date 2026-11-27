@@ -24,6 +24,8 @@
 #include "ScopedHook.h"
 #include "fakes/bootstrap_stubs.h"
 #include "fakes/hip_fakes.h"
+#include "fakes/nccl_fakes.h"
+#include "fakes/param_redirect.h"  // ipc_init.cu reads RCCL_DDA_IPC_BANKED_SCRATCH through g_loadParam
 
 #include "bootstrap.h"
 #include "comm.h"
@@ -225,6 +227,7 @@ protected:
   std::set<void*> liveAllocations_;
   std::map<void*, int> openMappings_;
   int earlyFrees_ = 0;
+  std::map<void*, size_t> zeroFills_;
 
   ScopedHook<ncclResult_t(void*, void*, int)> bootstrapAllGatherHook_{
     g_bootstrapAllGather, [](void* state, void* allData, int size) {
@@ -264,8 +267,11 @@ protected:
     std::free(ptr);
     return hipSuccess;
   }};
-  ScopedHook<hipError_t(void*, int, size_t)> memsetHook_{
-    g_hipMemset, [](void*, int, size_t) { return hipSuccess; }};
+  ScopedHook<hipError_t(void*, int, size_t)> memsetHook_{g_hipMemset, [this](void* ptr, int, size_t bytes) {
+    std::lock_guard<std::mutex> lock(memoryMu_);
+    zeroFills_[ptr] = bytes;
+    return hipSuccess;
+  }};
   // The scratch is a 64 B stand-in, so its zero fill is not written.
   ScopedHook<hipError_t(void*, int, size_t, hipStream_t)> memsetAsyncHook_{
     g_hipMemsetAsync, [](void*, int, size_t, hipStream_t) { return hipSuccess; }};
@@ -317,6 +323,13 @@ TEST_F(DdaIpcLifecycleMicrotest, NormalDestroyClosesPeerMappingsBeforeSerialComm
     ASSERT_NE(nullptr, comms_[rank]->ddaIpcBarrierState) << "rank " << rank;
   }
   EXPECT_EQ(2 * kRanks * (kRanks - 1), openMappingCount());
+  // Every rank's barrier zero-fills its staging bank control words and keeps them live past init.
+  for (int rank = 0; rank < kRanks; ++rank) {
+    const auto& ctlBuf = comms_[rank]->ddaIpcBarrierState->resources->stagingBankCtlBuf;
+    ASSERT_NE(nullptr, ctlBuf) << "rank " << rank;
+    EXPECT_EQ(dda::common::kIpcStagingBankCtlBytes, zeroFills_[ctlBuf->get()]) << "rank " << rank;
+    EXPECT_EQ(1u, liveAllocations_.count(ctlBuf->get())) << "rank " << rank;
+  }
 
   // commDestroySync runs concurrently per local rank and closes mappings.
   closeDdaIpcPeerMappingsForAllRanks();

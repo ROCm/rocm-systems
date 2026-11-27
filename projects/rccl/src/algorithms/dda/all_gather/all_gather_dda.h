@@ -15,13 +15,15 @@
 
 namespace dda::common {
 
-template <typename T, int NRANKS, bool hasAcc>
+// kBanked: stage in this call's staging bank, no trailing barrier; ipcbuffs then holds both banks' peer pointers.
+template <typename T, int NRANKS, bool hasAcc, bool kBanked = false>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
 #endif
   __global__ void ddaAllGatherIpc(T* const* __restrict__ ipcbuffs, T* __restrict__ recvbuff, size_t count,
                                   const T* __restrict__ sendbuff, int selfRank, const IpcGpuBarrier barrier) {
   bool barrierAborted = false; // sticky abort state, see IpcGpuBarrier::syncOnSameBlockIdx
+  T* const* bufs = barrier.stagingBuffers<kBanked>(ipcbuffs);
 
   const size_t countPerRank = count;
   constexpr auto countPerThread = sizeof(uint4) / sizeof(T);
@@ -33,14 +35,15 @@ __launch_bounds__(512)
 
   // It is expensive to launch hipMemcpyAsync on ROCm
   // Move data copy here. Each block copies part of sendbuff data
-  copyFromSrcToDest<T>(sendbuff, ipcbuffs[selfRank], idxStart, idxEnd, idxStride);
+  copyFromSrcToDest<T>(sendbuff, bufs[selfRank], idxStart, idxEnd, idxStride);
 
-  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>(barrierAborted);
+  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */, kBanked>(
+    barrierAborted);
 
-  allGather<T, NRANKS>(ipcbuffs, recvbuff, selfRank, NRANKS, idxStart, idxEnd, idxStride, false);
+  allGather<T, NRANKS>(bufs, recvbuff, selfRank, NRANKS, idxStart, idxEnd, idxStride, false);
 
-  // barrier to ensure remote ranks won't free their buffers until I'm done
-  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>(barrierAborted);
+  // Peers finish reading this rank's staging buffer before its next call reuses it; a banked call skips it.
+  barrier.syncAfterPeerReads<kBanked>(barrierAborted);
 }
 
 } // namespace dda::common

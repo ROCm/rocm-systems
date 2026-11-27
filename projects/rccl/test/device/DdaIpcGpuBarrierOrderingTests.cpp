@@ -39,6 +39,10 @@ constexpr int kFlatIters = 20000;
 constexpr int kFlatThreads = 512;  // the DDA kernels' __launch_bounds__
 constexpr int kFlatSlice = kFlatThreads;  // one word per thread, so no lane idles
 constexpr int kSkewSleeps = 4;  // ~16 us of s_sleep 127, well above an XGMI flag round trip
+constexpr int kBankedCalls = 20000;
+// Banked shapes: the production 24-block mailbox, and per-call grids that differ from it, the same on every rank.
+constexpr int kBankedBlocks = 24;
+constexpr int kBankedGrids[] = {1, 8, 24, 3};
 
 // No host constructor works without a bootstrap, so build the objects bitwise; the asserts catch size changes only.
 struct MailboxImage {
@@ -50,21 +54,23 @@ struct BarrierImage {
   int selfRank;
   std::array<DeviceMailbox, kRanks> mailboxes;
   DdaKernelParams params;
+  uint32_t* stagingBankCtl;
 };
 static_assert(sizeof(MailboxImage) == sizeof(DeviceMailbox), "DeviceMailbox layout changed");
 static_assert(sizeof(BarrierImage) == sizeof(IpcGpuBarrier), "IpcGpuBarrier layout changed");
 static_assert(std::is_trivially_copyable<DeviceMailbox>::value, "DeviceMailbox must be bit-copyable");
 static_assert(std::is_trivially_copyable<IpcGpuBarrier>::value, "IpcGpuBarrier must be bit-copyable");
 
-DeviceMailbox makeMailbox(uint32_t* flags) {
-  MailboxImage img{kBlocks, flags};
+DeviceMailbox makeMailbox(uint32_t* flags, int nBlocks = kBlocks) {
+  MailboxImage img{nBlocks, flags};
   DeviceMailbox mb;
   std::memcpy(static_cast<void*>(&mb), &img, sizeof(mb));
   return mb;
 }
 
-IpcGpuBarrier makeBarrier(int selfRank, const std::vector<DeviceMailbox>& mailboxes, DdaKernelParams params = {}) {
-  BarrierImage img{kBlocks, selfRank, {}, params};
+IpcGpuBarrier makeBarrier(int selfRank, const std::vector<DeviceMailbox>& mailboxes, DdaKernelParams params = {},
+                          int nBlocks = kBlocks, uint32_t* stagingBankCtl = nullptr) {
+  BarrierImage img{nBlocks, selfRank, {}, params, stagingBankCtl};
   for (int r = 0; r < kRanks; ++r) {
     img.mailboxes[r] = mailboxes[r];
   }
@@ -161,6 +167,48 @@ __global__ void flatSync(IpcGpuBarrier bar, uint32_t* const* bufs, int self, int
   }
 }
 
+// One banked call per launch; half the ranks read late so early bank reuse shows. kMixUnbanked: every third unbanked.
+template <bool kMixUnbanked>
+__global__ void bankedCall(IpcGpuBarrier bar, uint32_t* const* bankTable, int self, int call, int slice,
+                           unsigned long long* bad) {
+  bool barAborted = false;
+  const bool unbanked = kMixUnbanked && call % 3 == 2;
+  uint32_t* const* bufs =
+    unbanked ? bar.stagingBuffers<false>(bankTable + 2 * kRanks) : bar.stagingBuffers<true>(bankTable);
+  const int b = blockIdx.x;
+  uint32_t* mine = bufs[self] + static_cast<size_t>(b) * slice;
+  for (int i = threadIdx.x; i < slice; i += blockDim.x) {
+    mine[i] = payloadValue(self, call, b, i);
+  }
+  if (unbanked) {
+    bar.syncOnSameBlockIdx<true, true>(barAborted);
+  } else {
+    bar.syncOnSameBlockIdx<true, true, true>(barAborted);
+  }
+  if ((self + call) % 2 == 1) {
+    for (int k = 0; k < kSkewSleeps; ++k) {
+      __builtin_amdgcn_s_sleep(127);
+    }
+  }
+  unsigned long long mismatches = 0;
+  for (int p = 0; p < kRanks; ++p) {
+    const uint32_t* peer = bufs[p] + static_cast<size_t>(b) * slice;
+    for (int i = threadIdx.x; i < slice; i += blockDim.x) {
+      if (peer[i] != payloadValue(p, call, b, i)) {
+        mismatches++;
+      }
+    }
+  }
+  if (mismatches != 0) {
+    atomicAdd(bad, mismatches);
+  }
+  if (unbanked) {
+    bar.syncAfterPeerReads<false>(barAborted);
+  } else {
+    bar.syncAfterPeerReads<true>(barAborted);
+  }
+}
+
 // One rank with its abort flag raised and no live peers: barrier 1 gives up, then late peers drain its flags.
 // Barrier 2 must signal nothing, or a late peer would pair with it and read a shard this rank never produced.
 __global__ void abortedBarrierStaysSilent(IpcGpuBarrier bar, uint32_t* const* flags, int self) {
@@ -182,8 +230,14 @@ enum class Shape {
   kPull,
   kPush,
   kFlat,
-  kFlatAcquireOnly
+  kFlatAcquireOnly,
+  kBanked,
+  kBankedMixed
 };
+
+bool isBankedShape(Shape shape) {
+  return shape == Shape::kBanked || shape == Shape::kBankedMixed;
+}
 
 bool haveEightPeerGpus() {
   int n = 0;
@@ -227,26 +281,38 @@ void runOrderingTest(Shape shape, Alloc alloc, int iters, int slice) {
       }
     }
   }
-  const bool flat = shape == Shape::kFlat || shape == Shape::kFlatAcquireOnly;
+  const bool flat = shape != Shape::kPull && shape != Shape::kPush;
   const int words = flat ? slice : kMpWords;
-  const size_t payloadBytes = static_cast<size_t>(kBlocks) * words * sizeof(uint32_t);
-  const size_t flagBytes = static_cast<size_t>(kRanks) * kBlocks * sizeof(uint32_t);
+  const int blocks = isBankedShape(shape) ? kBankedBlocks : kBlocks;
+  // Banked shapes hold bank 0, bank 1, then the unbanked region the mixed shape uses.
+  const size_t regions = isBankedShape(shape) ? 3 : 1;
+  const size_t payloadBytes = regions * blocks * words * sizeof(uint32_t);
+  const size_t flagBytes = static_cast<size_t>(kRanks) * blocks * sizeof(uint32_t);
 
   std::vector<void*> allocations;
   std::vector<uint32_t*> bufs(kRanks);
   std::vector<DeviceMailbox> dataMb(kRanks);
   std::vector<DeviceMailbox> ackMb(kRanks);
+  std::vector<uint32_t*> ctl(kRanks);  // staging bank control words
   for (int r = 0; r < kRanks; ++r) {
     HIP_CHECK(hipSetDevice(r));
     bufs[r] = static_cast<uint32_t*>(allocZeroed(payloadBytes, alloc));
-    // Mailbox flags always use the production DeviceBuffer allocation.
+    // Mailbox flags and control words always use the production DeviceBuffer allocation.
     void* d = allocZeroed(flagBytes, Alloc::kUncached);
     void* a = allocZeroed(flagBytes, Alloc::kUncached);
-    allocations.insert(allocations.end(), {bufs[r], d, a});
-    dataMb[r] = makeMailbox(static_cast<uint32_t*>(d));
-    ackMb[r] = makeMailbox(static_cast<uint32_t*>(a));
+    ctl[r] = static_cast<uint32_t*>(allocZeroed(dda::common::kIpcStagingBankCtlBytes, Alloc::kUncached));
+    allocations.insert(allocations.end(), {bufs[r], d, a, ctl[r]});
+    dataMb[r] = makeMailbox(static_cast<uint32_t*>(d), blocks);
+    ackMb[r] = makeMailbox(static_cast<uint32_t*>(a), blocks);
   }
 
+  // Banked shapes: kRanks pointers into bank 0, bank 1 (the production table), then the unbanked region.
+  std::vector<uint32_t*> bankTable(regions * kRanks);
+  for (size_t region = 0; region < regions; ++region) {
+    for (int r = 0; r < kRanks; ++r) {
+      bankTable[region * kRanks + r] = bufs[r] + region * blocks * words;
+    }
+  }
   std::vector<uint32_t**> dBufs(kRanks);
   std::vector<DeviceMailbox*> dData(kRanks);
   std::vector<DeviceMailbox*> dAck(kRanks);
@@ -254,8 +320,8 @@ void runOrderingTest(Shape shape, Alloc alloc, int iters, int slice) {
   std::vector<hipStream_t> streams(kRanks);
   for (int r = 0; r < kRanks; ++r) {
     HIP_CHECK(hipSetDevice(r));
-    HIP_CHECK(hipMalloc(&dBufs[r], kRanks * sizeof(uint32_t*)));
-    HIP_CHECK(hipMemcpy(dBufs[r], bufs.data(), kRanks * sizeof(uint32_t*), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMalloc(&dBufs[r], bankTable.size() * sizeof(uint32_t*)));
+    HIP_CHECK(hipMemcpy(dBufs[r], bankTable.data(), bankTable.size() * sizeof(uint32_t*), hipMemcpyHostToDevice));
     HIP_CHECK(hipMalloc(&dData[r], kRanks * sizeof(DeviceMailbox)));
     HIP_CHECK(hipMemcpy(dData[r], dataMb.data(), kRanks * sizeof(DeviceMailbox), hipMemcpyHostToDevice));
     HIP_CHECK(hipMalloc(&dAck[r], kRanks * sizeof(DeviceMailbox)));
@@ -266,7 +332,24 @@ void runOrderingTest(Shape shape, Alloc alloc, int iters, int slice) {
   }
 
   // All eight kernels spin on each other, so every launch precedes the first synchronize.
-  for (int r = 0; r < kRanks; ++r) {
+  uint32_t bankedCalls = 0;
+  for (int call = 0; isBankedShape(shape) && call < iters; ++call) {
+    const dim3 grid(kBankedGrids[call % std::size(kBankedGrids)]);
+    bankedCalls += (shape == Shape::kBanked || call % 3 != 2) ? 1 : 0;  // bankedCall<true> runs every third unbanked
+    for (int r = 0; r < kRanks; ++r) {
+      HIP_CHECK(hipSetDevice(r));
+      const IpcGpuBarrier bar = makeBarrier(r, dataMb, {}, blocks, ctl[r]);
+      if (shape == Shape::kBanked) {
+        hipLaunchKernelGGL(bankedCall<false>, grid, dim3(kFlatThreads), 0, streams[r], bar, dBufs[r], r, call, slice,
+                           dBad[r]);
+      } else {
+        hipLaunchKernelGGL(bankedCall<true>, grid, dim3(kFlatThreads), 0, streams[r], bar, dBufs[r], r, call, slice,
+                           dBad[r]);
+      }
+      HIP_CHECK(hipGetLastError());
+    }
+  }
+  for (int r = 0; !isBankedShape(shape) && r < kRanks; ++r) {
     HIP_CHECK(hipSetDevice(r));
     if (shape == Shape::kFlat) {
       hipLaunchKernelGGL(flatSync<false>, dim3(kBlocks), dim3(kFlatThreads), 0, streams[r], makeBarrier(r, dataMb),
@@ -293,6 +376,14 @@ void runOrderingTest(Shape shape, Alloc alloc, int iters, int slice) {
     totalBad += bad;
   }
   EXPECT_EQ(totalBad, 0ull) << "receivers observed payload words older than the flag they acquired";
+  // Each banked call bumps the call word once and leaves no arrivals behind.
+  for (int r = 0; isBankedShape(shape) && r < kRanks; ++r) {
+    uint32_t words[2] = {};
+    HIP_CHECK(hipSetDevice(r));
+    HIP_CHECK(hipMemcpy(words, ctl[r], sizeof(words), hipMemcpyDeviceToHost));
+    EXPECT_EQ(bankedCalls, words[dda::common::kIpcStagingBankCallWord]) << "rank " << r;
+    EXPECT_EQ(0u, words[dda::common::kIpcStagingBankArrivedWord]) << "rank " << r;
+  }
 
   for (int r = 0; r < kRanks; ++r) {
     HIP_CHECK(hipSetDevice(r));
@@ -410,6 +501,24 @@ TEST(DdaIpcGpuBarrierOrdering, FlatAcquireOnly_Coarse) {
   }
   RUN_ISOLATED_TESTS(makeConfig("DdaIpcGpuBarrierOrdering.FlatAcquireOnly_Coarse", Shape::kFlatAcquireOnly,
                                 Alloc::kCoarse, kFlatIters, kFlatSlice));
+}
+
+// Banked calls on the handshake barrier: one barrier per call, no trailing barrier, two banks, grids 1 to 24.
+TEST(DdaIpcGpuBarrierOrdering, BankedCallsHandshake_Uncached) {
+  if (shouldSkip()) {
+    GTEST_SKIP() << kSkipReason;
+  }
+  RUN_ISOLATED_TESTS(makeConfig("DdaIpcGpuBarrierOrdering.BankedCallsHandshake_Uncached", Shape::kBanked,
+                                Alloc::kUncached, kBankedCalls, kFlatSlice));
+}
+
+// The same with unbanked two-barrier calls in between: one or two barriers per call on the same handshake slots.
+TEST(DdaIpcGpuBarrierOrdering, BankedCallsHandshakeMixed_Uncached) {
+  if (shouldSkip()) {
+    GTEST_SKIP() << kSkipReason;
+  }
+  RUN_ISOLATED_TESTS(makeConfig("DdaIpcGpuBarrierOrdering.BankedCallsHandshakeMixed_Uncached", Shape::kBankedMixed,
+                                Alloc::kUncached, kBankedCalls, kFlatSlice));
 }
 
 TEST(DdaIpcGpuBarrierOrdering, AbortedBarrierStaysSilent) {

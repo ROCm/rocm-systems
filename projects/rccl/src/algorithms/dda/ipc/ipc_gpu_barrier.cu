@@ -50,8 +50,13 @@ __host__ DeviceMailbox::DeviceMailbox(int nRanks, int nBlocks, void* flagsBuf)
 }
 
 __host__ IpcGpuBarrier::IpcGpuBarrier(int nRanks, int nBlocks, int selfRank,
-                                      const std::array<DeviceMailbox, NRANKS>& allMailboxes, DdaKernelParams params)
-  : nBlocks_(nBlocks), selfRank_(selfRank), allMailboxes_(allMailboxes), params_(params) {
+                                      const std::array<DeviceMailbox, NRANKS>& allMailboxes, DdaKernelParams params,
+                                      FlagType* stagingBankCtl)
+  : nBlocks_(nBlocks),
+    selfRank_(selfRank),
+    allMailboxes_(allMailboxes),
+    params_(params),
+    stagingBankCtl_(stagingBankCtl) {
   assert(nRanks == NRANKS);
 }
 
@@ -100,11 +105,20 @@ __host__ IpcGpuBarrier::IpcGpuBarrier(int nRanks, int nBlocks, int selfRank,
     }
   }
 
-  IpcGpuBarrier barrier(nRanks, nBlocks, selfRank, allMailboxes, params);
+  // After the exchange, so a local failure here still lets every rank agree on ready = 0 in ncclDdaIpcCommInit.
+  // A separate small allocation avoids stale writes from a revoked comm under a known runtime coherence issue.
+  auto ctlBuf = std::make_unique<DeviceBuffer>(kIpcStagingBankCtlBytes);
+  if (ctlBuf->get() == nullptr || cudaMemset(ctlBuf->get(), 0, kIpcStagingBankCtlBytes) != cudaSuccess) {
+    WARN("IpcGpuBarrier::mallocAndInit: staging bank control words allocation or zero fill failed");
+    return {nullptr, IpcGpuBarrier{}};
+  }
+
+  IpcGpuBarrier barrier(nRanks, nBlocks, selfRank, allMailboxes, params, static_cast<FlagType*>(ctlBuf->get()));
 
   auto resources = std::make_unique<IpcGpuBarrierResources>();
   resources->ipcMemHandler = std::move(memHandler);
   resources->selfMailboxBuf = std::move(selfMboxBuf);
+  resources->stagingBankCtlBuf = std::move(ctlBuf);
   return {std::move(resources), barrier};
 }
 

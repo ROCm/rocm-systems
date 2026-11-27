@@ -60,10 +60,15 @@ static ncclResult_t ncclAllGatherDdaIpcTyped(const void* sendbuff, void* recvbuf
   void* peerPtrsDev = comm->ddaPeerPtrsDev;
   T** d_ipcbuffs = reinterpret_cast<T**>(peerPtrsDev);
 
+  // Every AllGather stages its shard (sendcount bytes) in the kernel, so it is banked whenever the shard fits a bank.
+  bool banked = false;
+  T** buffs = nccl_dda_detail::ddaIpcStagingTable(barrierState, d_ipcbuffs, sendcount * sizeof(T), &banked);
+
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
-  hipExtLaunchKernelGGL((dda::common::ddaAllGatherIpc<T, kDdaNranks, false>), grid, block, 0, stream,
-                        /*startEvent=*/nullptr, stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff),
-                        sendcount, static_cast<const T*>(sendbuff), comm->rank, barrierHost);
+  hipExtLaunchKernelGGL((banked ? &dda::common::ddaAllGatherIpc<T, kDdaNranks, false, true>
+                                : &dda::common::ddaAllGatherIpc<T, kDdaNranks, false>),
+                        grid, block, 0, stream, /*startEvent=*/nullptr, stopEvent, /*flags=*/0, buffs,
+                        static_cast<T*>(recvbuff), sendcount, static_cast<const T*>(sendbuff), comm->rank, barrierHost);
 
   CUDACHECK(cudaGetLastError());
 

@@ -254,6 +254,35 @@ TEST_F(DdaReduceScatterIpcMicrotest, Launch_GridFollowsShardAndCapsAt24) {
   }
 }
 
+void* const kStagingBankPeerPtrsDev = reinterpret_cast<void*>(0xBA0);
+
+// In-kernel staging is banked while the whole input fits a bank; the host copy keeps the unbanked scratch.
+TEST_F(DdaReduceScatterIpcMicrotest, Launch_BankedScratchBanksOnlyTheInKernelCopy) {
+  comm().ddaIpcBarrierState = BankedBarrierState<DdaIpcBarrierState>(8u << 20, kStagingBankPeerPtrsDev);
+  ASSERT_EQ(Run(kShardCutoffFloats - 4), ncclSuccess);
+  ASSERT_EQ(Run(kShardCutoffFloats), ncclSuccess);
+  ASSERT_EQ(g_ddaLaunches.size(), 2u);
+  EXPECT_EQ(g_ddaLaunches[0].kernel, KernelPtr(&dda::common::ddaReduceScatterIpc<float, 8, false, true, true>));
+  EXPECT_EQ(g_ddaLaunches[0].Arg<float**>(0), kStagingBankPeerPtrsDev);
+  EXPECT_TRUE(SameBarrier(g_ddaLaunches[0].Arg<IpcGpuBarrier>(5), comm().ddaIpcBarrierState->barrierHost));
+  EXPECT_EQ(g_ddaLaunches[1].kernel, (Kernel<float, false>()));
+  EXPECT_EQ(g_ddaLaunches[1].Arg<float**>(0), comm().ddaPeerPtrsDev);
+  ASSERT_EQ(copies_.size(), 1u);
+  EXPECT_EQ(copies_[0].dst, comm().ddaScratch);
+}
+
+// The banked footprint is all 8 shards; an input past the bank keeps the in-kernel copy unbanked.
+TEST_F(DdaReduceScatterIpcMicrotest, Launch_BankedScratchInKernelCopyAboveABankRunsTheUnbankedKernel) {
+  comm().ddaIpcBarrierState = BankedBarrierState<DdaIpcBarrierState>(8 * 64, kStagingBankPeerPtrsDev);
+  ASSERT_EQ(Run(16), ncclSuccess);
+  ASSERT_EQ(Run(20), ncclSuccess);
+  ASSERT_EQ(g_ddaLaunches.size(), 2u);
+  EXPECT_EQ(g_ddaLaunches[0].kernel, KernelPtr(&dda::common::ddaReduceScatterIpc<float, 8, false, true, true>));
+  EXPECT_EQ(g_ddaLaunches[1].kernel, (Kernel<float, true>()));
+  EXPECT_EQ(g_ddaLaunches[1].Arg<float**>(0), comm().ddaPeerPtrsDev);
+  EXPECT_TRUE(copies_.empty());
+}
+
 TEST_F(DdaReduceScatterIpcMicrotest, Launch_LaunchErrorIsReported) {
   g_hipGetLastError = [] { return hipErrorLaunchFailure; };
   EXPECT_EQ(Run(4), ncclUnhandledCudaError);

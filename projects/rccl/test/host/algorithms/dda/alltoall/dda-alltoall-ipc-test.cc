@@ -217,6 +217,35 @@ TEST_F(DdaAlltoallIpcMicrotest, Blocks_SizedOnBytesNotElements) {
   EXPECT_EQ(ncclAllToAllDdaIpcBlocks(nullptr, 1u << 13, ncclFloat32), 4u);
 }
 
+void* const kStagingBankPeerPtrsDev = reinterpret_cast<void*>(0xBA0);
+
+// In-kernel staging is banked; the host copy keeps the unbanked scratch and its trailing barrier.
+TEST_F(DdaAlltoallIpcMicrotest, Launch_BankedScratchBanksOnlyTheInKernelCopy) {
+  comm().ddaIpcBarrierState = BankedBarrierState<DdaIpcBarrierState>(8u << 20, kStagingBankPeerPtrsDev);
+  ASSERT_EQ(Run(kSingleBlockFloats - 4), ncclSuccess);
+  ASSERT_EQ(Run(kSingleBlockFloats), ncclSuccess);
+  ASSERT_EQ(g_ddaLaunches.size(), 2u);
+  EXPECT_EQ(g_ddaLaunches[0].kernel, KernelPtr(&dda::common::ddaAllToAllIpc<int8_t, 8, false, true, true>));
+  EXPECT_EQ(g_ddaLaunches[0].Arg<int8_t**>(0), kStagingBankPeerPtrsDev);
+  EXPECT_TRUE(SameBarrier(g_ddaLaunches[0].Arg<IpcGpuBarrier>(5), comm().ddaIpcBarrierState->barrierHost));
+  EXPECT_EQ(g_ddaLaunches[1].kernel, Kernel<false>());
+  EXPECT_EQ(g_ddaLaunches[1].Arg<int8_t**>(0), comm().ddaPeerPtrsDev);
+  ASSERT_EQ(copies_.size(), 1u);
+  EXPECT_EQ(copies_[0].dst, comm().ddaScratch);
+}
+
+// The banked footprint is the whole send buffer (8 peers), not one peer's slice.
+TEST_F(DdaAlltoallIpcMicrotest, Launch_BankedScratchInKernelCopyAboveABankRunsTheUnbankedKernel) {
+  comm().ddaIpcBarrierState = BankedBarrierState<DdaIpcBarrierState>(8 * 64, kStagingBankPeerPtrsDev);
+  ASSERT_EQ(Run(16), ncclSuccess);
+  ASSERT_EQ(Run(20), ncclSuccess);
+  ASSERT_EQ(g_ddaLaunches.size(), 2u);
+  EXPECT_EQ(g_ddaLaunches[0].kernel, KernelPtr(&dda::common::ddaAllToAllIpc<int8_t, 8, false, true, true>));
+  EXPECT_EQ(g_ddaLaunches[1].kernel, Kernel<true>());
+  EXPECT_EQ(g_ddaLaunches[1].Arg<int8_t**>(0), comm().ddaPeerPtrsDev);
+  EXPECT_TRUE(copies_.empty());
+}
+
 TEST_F(DdaAlltoallIpcMicrotest, Launch_LaunchErrorIsReported) {
   g_hipGetLastError = [] { return hipErrorLaunchFailure; };
   EXPECT_EQ(Run(4), ncclUnhandledCudaError);
