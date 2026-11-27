@@ -390,3 +390,5 @@ if(RJ_ARITH_ENABLE_X86_64)
 endif()
 
 rj_arith_add_test(rj_arith_bvh_test graphics/bvh_test.cpp)
+
+rj_arith_add_test(rj_arith_image_lod_test graphics/image_lod_test.cpp)

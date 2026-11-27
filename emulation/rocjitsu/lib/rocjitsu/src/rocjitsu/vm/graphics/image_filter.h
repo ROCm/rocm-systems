@@ -18,11 +18,7 @@ inline constexpr std::array<uint32_t, 8> kImagePerfScales{0, 2, 5, 7, 9, 11, 14,
 /// Remap a fixed8 mip fraction, snapping the outer transition intervals to
 /// one mip. Unlike LOD conversion, the remapped fraction is truncated.
 inline uint32_t image_mip_fraction(uint32_t fraction, uint32_t perf_mip, uint32_t perf_mod) {
-  constexpr std::array<int32_t, 16> gains{16, 17, 18, 20, 24, 32, 34,  36,
-                                          40, 48, 64, 72, 80, 96, 128, 192};
-  const uint32_t index = perf_mip * kImagePerfScales[perf_mod] >> 4;
-  const int32_t scaled = 2048 + (static_cast<int32_t>(fraction) - 128) * gains[index];
-  return static_cast<uint32_t>(std::clamp(scaled, 0, 4096)) / 16;
+  return rj_arith_detail_image_mip_fraction(fraction, perf_mip, perf_mod);
 }
 
 /// GFX11/12 reciprocal mantissas for a ten-fraction-bit norm input in [1, 2).
@@ -182,71 +178,19 @@ public:
 /// Input ties round in the supplied direction (-1 or +1), or away from zero
 /// when it is zero. Unfolded cube derivatives retain the source face's rounding.
 inline ImageFootprint image_footprint(double xu, double xv, double yu, double yv, uint32_t width,
-                                      uint32_t height,
-                                      std::array<int, 4> rounding_directions = {}) {
-  const std::array<double, 4> gradients{xu, xv, yu, yv};
-  const std::array largest{std::max(std::abs(xu), std::abs(yu)),
-                           std::max(std::abs(xv), std::abs(yv))};
-  if (largest[0] == 0 && largest[1] == 0) {
-    return {};
-  }
-  const std::array extents{width, height};
-  std::array<int, 2> exponents{};
-  std::array<double, 4> scaled{};
-  for (uint32_t coordinate = 0; coordinate < 2; ++coordinate) {
-    if (largest[coordinate] == 0) {
-      continue;
-    }
-    int coordinate_exponent;
-    std::frexp(largest[coordinate], &coordinate_exponent);
-    const int extent_exponent = std::bit_width(extents[coordinate]) - 1;
-    // The extent multiplier retains ten fractional bits, without rounding.
-    const double extent_mantissa =
-        std::floor(std::ldexp(double(extents[coordinate]), 10 - extent_exponent)) / 1024;
-    exponents[coordinate] = coordinate_exponent + extent_exponent;
-    for (uint32_t i : {coordinate, coordinate + 2}) {
-      const double mantissa = std::ldexp(std::abs(gradients[i]), 11 - coordinate_exponent);
-      const bool toward_zero =
-          rounding_directions[i] != 0 && (rounding_directions[i] < 0) != std::signbit(gradients[i]);
-      const double significand =
-          std::min(2047.0, toward_zero ? std::ceil(mantissa - 0.5) : std::floor(mantissa + 0.5));
-      // Multiplication rounds signed ties upward after input conversion.
-      scaled[i] = std::floor(std::copysign(significand, gradients[i]) * extent_mantissa + 0.5);
-    }
-  }
-  const int exponent = largest[0] == 0   ? exponents[1]
-                       : largest[1] == 0 ? exponents[0]
-                                         : std::max(exponents[0], exponents[1]);
-  std::array<int32_t, 4> fixed{};
-  for (uint32_t i = 0; i < gradients.size(); ++i) {
-    fixed[i] =
-        static_cast<int32_t>(std::floor(std::ldexp(scaled[i], exponents[i % 2] - exponent) + 0.5));
-  }
-  const uint32_t first_norm = image_polygon_norm(fixed[0] + fixed[3], fixed[1] - fixed[2]);
-  const uint32_t second_norm = image_polygon_norm(fixed[0] - fixed[3], fixed[1] + fixed[2]);
-  const uint32_t major = (first_norm + second_norm) >> 1;
-  // Round the signed difference before taking its magnitude. Negative odd
-  // differences therefore produce a larger minor axis than positive ones.
-  const uint32_t minor = std::abs((int32_t(first_norm) - int32_t(second_norm)) >> 1);
-  const auto logarithm = [exponent](uint32_t axis) -> int32_t {
-    if (axis == 0) {
-      return -8192;
-    }
-    const uint32_t leading = std::bit_width(axis) - 1;
-    const uint32_t denominator = 1u << leading;
-    const uint32_t fraction = (axis - denominator) * 1024;
-    const uint32_t segment = fraction / (128 * denominator);
-    constexpr std::array<uint32_t, 8> bases{0, 175, 330, 471, 599, 717, 827, 929};
-    constexpr std::array<uint32_t, 8> slopes{176, 155, 142, 129, 119, 110, 102, 95};
-    const uint32_t logarithm =
-        (bases[segment] * 128 * denominator +
-         slopes[segment] * (fraction - segment * 128 * denominator) + 256 * denominator) /
-        (512 * denominator);
-    return (exponent - 11 + static_cast<int32_t>(leading)) * 256 + static_cast<int32_t>(logarithm);
-  };
-  return {fixed,
-          {first_norm, second_norm},
-          {logarithm(major), minor ? logarithm(minor) : kMinimumAnisotropicLodFixed}};
+                                      uint32_t height, std::array<int, 4> rounding_directions = {},
+                                      uint64_t cpu_flags = 0) {
+  const rj_arith_image_gradients input{{xu, xv, 0},
+                                       {yu, yv, 0},
+                                       {rounding_directions[0], rounding_directions[1],
+                                        rounding_directions[2], rounding_directions[3]},
+                                       0};
+  const uint32_t extents[] = {width, height, 1};
+  rj_arith_image_footprint result{};
+  rj_arith_detail_image_footprint(cpu_flags, &input, extents, 2, &result);
+  return {{result.fixed[0], result.fixed[1], result.fixed[3], result.fixed[4]},
+          {result.norms[0], result.norms[1]},
+          {result.lods[0], result.lods[1]}};
 }
 
 /// Add a footprint offset with the coordinate adder's 24-bit significand.

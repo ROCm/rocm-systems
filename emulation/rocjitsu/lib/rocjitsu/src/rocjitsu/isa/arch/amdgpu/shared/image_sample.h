@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "rj_arith/rj_arith.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/image_access.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/image_footprint.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/image_sampler.h"
@@ -177,6 +178,7 @@ inline void execute_gfx10_image_get_lod(Wavefront &wf, uint32_t resource_reg, ui
       }
     }
   }
+  rj_arith_image_gradients inputs[16]{};
   for (uint32_t quad = 0; quad < wf.wf_size(); quad += 4) {
     if (!(wf.exec() & (uint64_t{15} << quad))) {
       continue;
@@ -187,30 +189,43 @@ inline void execute_gfx10_image_get_lod(Wavefront &wf, uint32_t resource_reg, ui
       dx[axis] = coordinate(axis, quad + 1) - origin;
       dy[axis] = coordinate(axis, quad + 2) - origin;
     }
-    const double raw = bound ? image_gradient_lod(dx, dy, extents, axes, max_anisotropy) +
-                                   double(sampler.lod_bias_fixed8) / kImageLodFractionScale
-                             : 0;
-    const double minimum =
-        double(std::max(sampler.min_lod_fixed8, resource.min_lod)) / kImageLodFractionScale;
-    const double maximum =
-        std::max(minimum, double(sampler.max_lod_fixed8) / kImageLodFractionScale);
-    const double clamped = bound && sampler.mip_filter != ImageMipFilter::None
-                               ? std::clamp(std::clamp(raw, minimum, maximum), 0.0,
-                                            double(resource.last_level - resource.base_level))
-                               : 0;
-    double selected = image_selected_mip(clamped, sampler.mip_filter);
-    if (sampler.mip_filter == ImageMipFilter::Linear) {
-      // PERF_MIP snaps the fractional result only for trilinear selection.
-      const uint32_t fraction =
-          static_cast<uint32_t>((clamped - selected) * kImageLodFractionScale);
-      selected += double(image_mip_fraction(fraction, sampler.perf_mip, resource.perf_mod)) /
-                  kImageLodFractionScale;
+    for (int axis = 0; axis < 3; ++axis) {
+      inputs[quad / 4].dx[axis] = dx[axis];
+      inputs[quad / 4].dy[axis] = dy[axis];
     }
-    for (uint32_t lane = quad; lane < quad + 4; ++lane) {
-      if (wf.exec() & (uint64_t{1} << lane)) {
-        write_image_lod(regs, dst, lane, fields.dmask, static_cast<float>(selected),
-                        static_cast<float>(raw));
-      }
+  }
+  alignas(64) uint32_t result[2][64]{};
+  uint32_t *destinations[] = {result[0], result[1]};
+  const double minimum = double(std::max(sampler.min_lod_fixed8, resource.min_lod)) / 256;
+  const double maximum = std::max(minimum, double(sampler.max_lod_fixed8) / 256);
+  const rj_arith_image_lod_controls control{{extents[0], extents[1], extents[2]},
+                                            axes,
+                                            max_anisotropy,
+                                            double(sampler.lod_bias_fixed8) / 256,
+                                            minimum,
+                                            maximum,
+                                            0,
+                                            resource.base_level,
+                                            resource.last_level,
+                                            static_cast<uint32_t>(sampler.mip_filter),
+                                            sampler.perf_mip,
+                                            resource.perf_mod};
+  if (bound) {
+    const uint64_t flags = wf.cu().arithmetic_flags();
+    const int status =
+        wf.wf_size() == 32
+            ? rj_arith_image_get_lod_w32_gfx10(flags, uint32_t(wf.exec()), 0, destinations, inputs,
+                                               &control)
+            : rj_arith_image_get_lod_w64_gfx10(flags, wf.exec(), 0, destinations, inputs, &control);
+    if (status != RJ_ARITH_SUCCESS) {
+      wf.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+      return;
+    }
+  }
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if ((wf.exec() >> lane) & 1) {
+      write_image_lod(regs, dst, lane, fields.dmask, std::bit_cast<float>(result[0][lane]),
+                      std::bit_cast<float>(result[1][lane]));
     }
   }
 }
@@ -470,7 +485,7 @@ inline util::Result prepare_image_sample(Wavefront &wf, VectorMemState &state,
         }
       }
       lod = image_gradient_lod(dx, dy, normalized ? extents : std::array<uint32_t, 3>{1, 1, 1},
-                               spatial_dimensions);
+                               spatial_dimensions, 0, wf.cu().arithmetic_flags());
       if (fields.coarse_derivatives) {
         // CD supplies one LOD per quad. A lane selection for disagreeing
         // gradients has not been qualified on GFX10.

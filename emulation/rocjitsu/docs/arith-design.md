@@ -17,6 +17,11 @@ and results are written through destination pointers supplied by the caller.
 The user explicitly chooses between loose and bit-exact semantics through the
 [semantics control](#one-semantics-control).
 
+Graphics arithmetic includes interpolation, BVH intersection and image LOD queries.
+Rocjitsu supplies decoded operands, fetched node bytes or captured quad gradients;
+resource validation, image-memory operations, texture sampling and format decoding
+remain in the VM. LOD footprint arithmetic is shared with the sampler.
+
 Entry points are reentrant. Concurrent calls may share read-only operands, but
 execution is not guaranteed to be correct if one call writes storage that another
 concurrent call reads or writes.
@@ -240,6 +245,17 @@ SIMD and scalar paths implement the same contract. Scalar fallbacks handle value
 outside a fast path without unnecessarily discarding SIMD work for other lanes.
 Reporting and non-reporting modes share arithmetic, with FP status calculations
 performed only when requested. EXEC masks generally control stores, not computation.
+
+### ISA-specific implementation boundaries
+
+CPU backends are compiled separately. Externally linkable implementation helpers
+carry their CPU tier in a namespace or name; runtime standard-library definitions
+must not be emitted from these objects. The Debug symbol audit checks both rules.
+
+Models shared with VM memory operations stay behind an out-of-line arithmetic
+interface, such as the internal sampler helpers in
+[`image_footprint.h`](../lib/arith/include/rj_arith/detail/image_footprint.h).
+The VM does not instantiate the library's ISA-specific implementation headers.
 
 ### When a speedup justifies more code
 
