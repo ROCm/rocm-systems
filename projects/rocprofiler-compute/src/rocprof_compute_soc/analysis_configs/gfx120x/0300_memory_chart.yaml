@@ -125,69 +125,60 @@ Panel Config:
           unit: Workgroups per WGP
   metrics_description:
     ICache Requests: >-
-      Instruction cache requests from the SQ, normalized by the chosen unit.
+      Instruction cache requests from the Sequencer.
     ICache Hit Rate: >-
-      Percentage of instruction cache accesses that are serviced from cache without fetching
-      from GL1. High hit rates indicate good instruction locality. Low hit rates
-      may indicate large kernels exceeding instruction cache capacity or divergent branches.
+      Percentage of instruction cache requests that hit.
     DCache Requests: >-
-      Scalar data cache requests after bank serialization, normalized by the chosen unit.
+      Scalar data cache requests after bank serialization.
     DCache Hit Rate: >-
-      Percentage of scalar data cache accesses that hit in cache. High hit rates indicate
-      efficient reuse of constant and uniform data. Low hit rates may indicate excessive
-      unique constant data or poor temporal locality.
+      Percentage of scalar data cache requests that hit.
     DCache Load Bandwidth: >-
-      Bytes loaded by scalar memory instructions, from the dwords each instruction loads.
-      Bounds-check reductions are ignored.
+      The load bandwidth between the WGP and the scalar data cache. Each loaded
+      dword counts as 4 bytes. Bounds-check reductions are ignored.
     GL0 Hit Rate: >-
-      Percentage of GL0 cache requests serviced from cache without accessing GL1.
+      Percentage of GL0 requests that hit.
     LDS Instructions: >-
-      Number of LDS instructions issued by the shader, including FLAT instructions that
-      resolve to LDS. This counts instructions rather than data movement, so it does not
-      distinguish reads from writes.
+      LDS instructions issued, including FLAT instructions that resolve to LDS.
+      This counts instructions, not bytes, and does not distinguish reads from
+      writes.
     LDS Utilization: >-
-      Percentage of the LDS cycle budget across all CUs spent servicing indexed
-      (non-direct, non-interpolation) accesses, measured over GPU-active cycles.
-      Because two CUs share a workgroup processor's LDS, a saturated LDS reads
-      well below 100% on this architecture.
+      Percentage of GPU-active cycles, across all CUs, spent on indexed LDS
+      accesses.
     LDS Bank Conflict Rate: >-
-      Percentage of indexed-access LDS cycles spent stalled on bank conflicts. Conflicts
-      occur when multiple work-items in a wavefront access different addresses in the
-      same LDS bank. High values mean lower effective LDS bandwidth. Restructuring data
-      layouts can help.
+      Percentage of indexed-access LDS cycles spent stalled on bank conflicts.
     LDS Bandwidth: >-
-      Bytes per second loaded, stored, and atomically updated in LDS.
+      The bandwidth between the WGP and LDS for loads, stores, and atomics. Each
+      dword counts as 4 bytes.
     GL2 Hit Rate: >-
-      Percentage of L2 lookups that hit.
+      Percentage of GL2 lookups that hit.
     Memory Read Requests: >-
-      L2 read requests over EA destined for VRAM. Infinity Cache can serve
-      them before they reach VRAM.
+      GL2 read requests over the Efficiency Arbiter destined for memory.
+      Requests served by Infinity Cache are included.
     Memory Write Requests: >-
-      L2 write requests over EA destined for VRAM. Infinity Cache can absorb
-      them before they reach VRAM.
+      GL2 write requests over the Efficiency Arbiter destined for memory.
+      Requests absorbed by Infinity Cache are included.
     Memory Read Bandwidth: >-
-      Bytes L2 read over EA for requests destined for VRAM, in 32-byte units. Infinity
-      Cache hits are included, so this can exceed the VRAM bandwidth peak.
+      The read bandwidth from GL2 toward memory over the Efficiency Arbiter.
+      Each counted request is 32 bytes. Requests served by Infinity Cache are
+      included.
     Memory Write Bandwidth: >-
-      Bytes L2 wrote over EA for requests destined for VRAM, in 32-byte units. Infinity
-      Cache hits are included.
+      The write bandwidth from GL2 toward memory over the Efficiency Arbiter.
+      Each counted request is 32 bytes. Requests absorbed by Infinity Cache are
+      included.
     Wavefront Occupancy: >-
-      Resident wavefronts per WGP, averaged over GPU-active cycles, as a percent of the
-      maximum wavefronts per WGP.
+      Resident wavefronts per WGP as a percentage of the maximum wavefronts per
+      WGP, averaged over GPU-active cycles.
     VGPRs: >-
-      The number of architected vector general-purpose registers allocated
-      for the kernel. Note: this may not exactly match the number of VGPRs
-      requested by the compiler due to allocation granularity.
+      Architected vector general-purpose registers allocated for the kernel.
+      Allocation granularity can increase this above the compiler request.
     SGPRs: >-
-      The number of scalar general-purpose registers allocated for the kernel.
-      Note: this may not exactly match the number of SGPRs requested by
-      the compiler due to allocation granularity.
+      Scalar general-purpose registers allocated for the kernel. Allocation
+      granularity can increase this above the compiler request.
     LDS Allocation: >-
-      The number of bytes of LDS memory (or, shared memory) allocated per workgroup. Note:
-      This may also be larger than what was requested at compile time due to both allocation
-      granularity and dynamic per-dispatch LDS allocations.
-    Scratch Allocation: The number of bytes of scratch memory requested per work-item
-      for this kernel. Scratch memory is used for stack memory on the accelerator,
-      as well as for register spills and restores.
+      Bytes of LDS allocated per workgroup. Allocation granularity and dynamic
+      per-dispatch allocations can increase this above the compile-time request.
+    Scratch Allocation: >-
+      Bytes of scratch memory requested per work-item for stack memory and
+      register spills and restores.
     Workgroups: >-
       Number of workgroups in the launch for each WGP.

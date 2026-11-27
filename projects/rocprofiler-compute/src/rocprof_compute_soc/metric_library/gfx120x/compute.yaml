@@ -2,175 +2,161 @@ compute.insts_flat_load:
   name: Instructions - Flat Load
   formula: SUM(SQ_INSTS_FLAT_LOAD_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of flat-addressed load instructions issued.
+  description: Issued flat-addressed load instructions.
 compute.insts_flat_store:
   name: Instructions - Flat Store
   formula: SUM(SQ_INSTS_FLAT_STORE_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of flat-addressed store instructions issued.
+  description: Issued flat-addressed store instructions.
 compute.insts_internal:
   name: Instructions - Internal
   formula: SUM(SQ_INSTS_INTERNAL_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
-    Internal instructions issued by the sequencer (SQ), per normalization unit. This is
-    bookkeeping work, not user code.
+    Internal Sequencer instructions. This is bookkeeping work, not user code.
 compute.insts_lds:
   name: Instructions - LDS
   formula: SUM(SQ_INSTS_LDS_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: >-
-    Number of LDS instructions issued, including FLAT instructions that resolve to LDS.
-    It counts instructions, not data movement, so it does not distinguish reads from
-    writes.
+  description: LDS instructions executed.
 compute.insts_salu:
   name: Instructions - SALU
   formula: SUM(SQ_INSTS_SALU_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: >-
-    Number of SALU instructions issued. The SALU runs operations on values that are
-    uniform across the wavefront. Efficient kernels often have a balance of VALU and
-    SALU operations.
+  description: Scalar ALU instructions executed.
 compute.insts_smem:
   name: Instructions - SMEM
   formula: SUM(SQ_INSTS_SMEM_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: >-
-    Number of scalar memory (SMEM) instructions issued. SMEM loads constant and uniform
-    data through the scalar cache. High counts may indicate heavy use of constant
-    buffers or kernel arguments.
+  description: Scalar memory instructions executed.
 compute.insts_tex_load:
   name: Instructions - TEX Load
   formula: SUM(SQ_INSTS_TEX_LOAD_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
-    Number of buffer load, image load, sample and atomic-with-return instructions
-    issued.
+    Issued buffer loads, image loads, samples, and atomics with a return value.
 compute.insts_tex_store:
   name: Instructions - TEX Store
   formula: SUM(SQ_INSTS_TEX_STORE_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
-    Number of buffer store, image store and atomic-without-return instructions issued.
+    Issued buffer stores, image stores, and atomics without a return value.
 compute.insts_transcendental:
   name: Instructions - Transcendental
   formula: SUM(SQ_INSTS_VALU_TRANS_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
-    Transcendental VALU instructions per normalization unit. These cover hardware
-    approximations such as sin, cos, and log on the vector ALU.
+    Transcendental VALU instructions, such as sin, cos, and log on the vector ALU.
 compute.insts_valu:
   name: Instructions - VALU
   formula: SUM(SQ_INSTS_VALU_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: >-
-    Number of VALU instructions issued. The VALU runs arithmetic and logic operations
-    across all work-items in a wavefront. High VALU counts indicate compute-intensive
-    kernels.
+  description: Vector ALU instructions executed.
 compute.insts_vmem:
   name: Instructions - VMEM
   formula: SUM(SQ_INSTS_TEX_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
-    Number of vector memory (VMEM) instructions issued, including global, buffer and
-    texture operations. High VMEM counts relative to VALU may indicate memory-bound
-    workloads.
+    Vector memory instructions executed, including global, buffer, and texture
+    operations.
 compute.insts_vmem_flat:
   name: Instructions - VMEM Flat
   formula: SUM(SQ_INSTS_FLAT_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of flat-addressed VMEM instructions issued.
+  description: Issued flat-addressed vector memory instructions.
 compute.ipc:
   name: IPC
   formula: SUM(SQ_INSTS_ALL_sum - SQ_INSTS_INTERNAL_sum) / SUM(SQ_BUSY_CYCLES_sum)
   unit: Instructions per Cycle
-  description: Average number of instructions per active WGP cycle.
+  description: >-
+    User instructions executed per Sequencer busy cycle, excluding internal
+    Sequencer instructions.
   peak: 5
 compute.lds_direct_load_insts:
   name: LDS Direct Load Instructions
   formula: SUM(SQ_INSTS_LDS_DIRECT_LOAD_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: >-
-    Number of direct LDS load instructions. Direct loads fetch data from LDS without
-    address indirection. These are typically faster than indexed LDS operations.
+  description: Direct LDS load instructions.
 compute.lds_parameter_load_insts:
   name: LDS Parameter Load Instructions
   formula: SUM(SQ_INSTS_LDS_PARAM_LOAD_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: >-
-    Number of LDS parameter load instructions. These load shader input parameters that
-    have been staged in LDS for efficient access by the wavefront.
+  description: LDS parameter load instructions.
 compute.total_flops:
   name: Performance (GFLOPs)
   formula: SUM($wave_size * (SQ_INSTS_VALU_sum - SQ_WMMA_VALU_INSTS_sum) + 8192 * SQ_WMMA_VALU_INSTS_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9) / 1e9
   unit: GFLOP/s
   description: >-
-    Estimated floating-point operations per second on the vector ALU and WMMA combined.
+    Estimated floating-point operations on the vector ALU and Wave Matrix
+    Multiply Accumulate combined.
 compute.total_insts:
   name: Total Instructions
   formula: SUM(SQ_INSTS_ALL_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Total instructions issued.
+  description: Instructions executed across all wavefronts.
 compute.valu_flops:
   name: VALU FLOPs
   # SQ_WMMA_VALU_INSTS counts per vec32, the unit of SQ_INSTS_VALU for gfx120x compute.
   formula: SUM($wave_size * (SQ_INSTS_VALU_sum - SQ_WMMA_VALU_INSTS_sum)) / SUM(End_Timestamp - Start_Timestamp)
   unit: GFLOP/s
   description: >-
-    Estimated floating-point operations per second on the vector ALU, excluding WMMA. It
-    can read above or below the true rate.
+    Estimated floating-point operations on the vector ALU, excluding Wave
+    Matrix Multiply Accumulate. Each VALU instruction counts as wavefront-size
+    FLOPs.
   peak_empirical: $FP32Flops_empirical_peak
 compute.valu_flops_f64:
   name: VALU FLOPs (F64)
   formula: SUM($wave_size * SQ_INSTS_VALU_DP_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GFLOP/s
   description: >-
-    Estimated 64-bit floating-point operations per second on the vector ALU. It can read
-    above or below the true rate.
+    Estimated 64-bit floating-point operations on the vector ALU. Each
+    double-precision VALU instruction counts as wavefront-size FLOPs.
   peak_empirical: $FP64Flops_empirical_peak
 compute.valu_inst_cycles:
   name: VALU Instruction Cycles
   formula: SUM(SQ_INST_CYCLES_VALU_sum)
   unit: Cycles
   description: >-
-    Cycles needed to execute VALU instructions. This is not elapsed time.
+    Sequencer cycles of work for VALU instructions. This is not elapsed time.
 compute.valu_insts:
   name: VALU Instructions
   formula: SUM(SQ_INSTS_VALU_sum)
   unit: Instructions
   description: >-
-    Raw vector arithmetic instruction count. This includes integer and floating-point
-    instructions and is not a FLOP count.
+    Vector ALU instructions, including integer and floating-point. This is not
+    a FLOP count.
 compute.valu_issue_rate:
   name: VALU Issue Rate
   formula: SUM(SQ_INSTS_VALU_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GInstructions/s
   description: >-
-    Billions of VALU instruction issues per second, including floating-point and integer
-    instructions. This is not a FLOP rate and does not account for active lanes.
+    VALU instruction issues, including floating-point and integer instructions.
+    This is not a FLOP count and does not account for active lanes.
 compute.valu_issue_rate_fp64:
   name: FP64 VALU Issue Rate
   formula: SUM(SQ_INSTS_VALU_DP_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GInstructions/s
   description: >-
-    Billions of double-precision VALU instruction issues per second. This is an
-    instruction rate, without accounting for FLOPs per instruction or active lanes.
+    Double-precision VALU instruction issues. This is not a FLOP count and does
+    not account for active lanes.
 compute.wmma_flops_f16_16x16x16:
   name: WMMA FLOPs (F16->F32 16x16x16)
   formula: 8192 * SUM(SQ_WMMA_VALU_INSTS_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GFLOP/s
   description: >-
-    Estimated matrix floating-point operations per second across all WMMA data types
-    (FP16, BF16, FP8, and BF8), so the rate is not FP16-only.
+    Estimated matrix floating-point operations from Wave Matrix Multiply
+    Accumulate instructions of every data type (FP16, BF16, FP8, and BF8). Each
+    instruction counts as 8192 FLOPs. This is not an FP16-only count.
   peak: '$max_sclk * $cu_per_gpu * 1024 / 1000'
   peak_empirical: $WMMAF16Flops_empirical_peak
 compute.wmma_inst_cycles:
   name: WMMA Instruction Cycles
   formula: SUM(SQ_INST_CYCLES_VALU_WMMA_sum)
   unit: Cycles
-  description: Cycles of work sent for WMMA.
+  description: >-
+    Sequencer cycles of work for Wave Matrix Multiply Accumulate instructions.
 compute.wmma_insts:
   name: WMMA Instructions
   formula: SUM(SQ_WMMA_VALU_INSTS_sum)
   unit: Instructions
-  description: Number of WMMA instructions issued.
+  description: Wave Matrix Multiply Accumulate instructions issued.

@@ -3,16 +3,14 @@ lds.ai:
   formula: SUM($wave_size * (SQ_INSTS_VALU_sum - SQ_WMMA_VALU_INSTS_sum) + 8192 * SQ_WMMA_VALU_INSTS_sum) / SUM((SQC_LDS_IDX_ACTIVE_sum - SQC_LDS_BANK_CONFLICT_sum) * 4 * $lds_banks_per_cu)
   unit: FLOPs/Byte
   description: >-
-    Arithmetic intensity relative to Local Data Share traffic.
+    Floating-point operations per byte transferred between the WGP and LDS for
+    indexed accesses after bank-conflict stalls.
 lds.bank_conflict_rate:
   name: LDS Bank Conflict Rate
   formula: 100 * SUM(SQC_LDS_BANK_CONFLICT_sum) / SUM(SQC_LDS_IDX_ACTIVE_sum)
   unit: Percent
   description: >-
-    Percentage of indexed-access LDS cycles spent stalled on bank conflicts. Conflicts
-    occur when multiple work-items in a wavefront access different addresses in the same
-    LDS bank. High values mean lower effective LDS bandwidth. Restructuring data layouts
-    can help.
+    Percentage of indexed-access LDS cycles spent stalled on bank conflicts.
 lds.bank_conflicts:
   name: LDS Bank Conflicts
   formula: AVG(SQC_LDS_BANK_CONFLICT_sum)
@@ -23,21 +21,20 @@ lds.bw:
   formula: 4 * SUM(SQC_LDS_LOAD_DWORDS_sum + SQC_LDS_STORE_DWORDS_sum + SQC_LDS_ATOMIC_DWORDS_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    Bytes per second loaded, stored, and atomically updated in LDS.
+    The bandwidth between the WGP and LDS for loads, stores, and atomics. Each
+    dword counts as 4 bytes.
 lds.theoretical_bw:
   name: Theoretical LDS Bandwidth
   formula: SUM((SQC_LDS_IDX_ACTIVE_sum - SQC_LDS_BANK_CONFLICT_sum) * 4 * $lds_banks_per_cu) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The maximum number of bytes per second the LDS could have moved, from its active
-    cycles without bank conflicts. It ignores the execution mask.
+    The bandwidth between the WGP and LDS for indexed accesses after bank-
+    conflict stalls. Each bank access counts as 4 bytes.
   peak_empirical: $LDSBw_empirical_peak
 lds.util:
   name: LDS Utilization
   formula: 100 * SUM(SQC_LDS_IDX_ACTIVE_sum) / (SUM(GRBM_GUI_ACTIVE) * $cu_per_gpu)
   unit: Percent
   description: >-
-    Percentage of the LDS cycle budget across all CUs spent servicing indexed
-    (non-direct, non-interpolation) accesses, measured over GPU-active cycles. Because
-    two CUs share a workgroup processor's LDS, a saturated LDS reads well below 100% on
-    this architecture.
+    Percentage of GPU-active cycles, across all CUs, spent on indexed LDS
+    accesses.

@@ -59,31 +59,35 @@ Panel Config:
 
   metrics_description:
     VALU FLOPs: >-
-      Estimated floating-point operations per second on the vector ALU, excluding WMMA.
-      It can read above or below the true rate.
+      Estimated floating-point operations on the vector ALU, excluding Wave
+      Matrix Multiply Accumulate. Each VALU instruction counts as wavefront-size
+      FLOPs.
     WMMA FLOPs (FP16): >-
-      Estimated matrix floating-point operations per second across all WMMA data types
-      (FP16, BF16, FP8, and BF8), so the rate is not FP16-only.
+      Estimated matrix floating-point operations from Wave Matrix Multiply
+      Accumulate instructions of every data type (FP16, BF16, FP8, and BF8).
+      Each instruction counts as 8192 FLOPs. This is not an FP16-only count.
     VALU FLOPs (F64): >-
-      Estimated 64-bit floating-point operations per second on the vector ALU. It can
-      read above or below the true rate.
+      Estimated 64-bit floating-point operations on the vector ALU. Each
+      double-precision VALU instruction counts as wavefront-size FLOPs.
     GL0 Cache BW (TCP Cache): >-
-      Bandwidth requested from the GL0 vector cache (TCP Cache). It is an upper bound.
+      The lookup bandwidth between the WGP and GL0. Each GL0 request counts as
+      128 bytes.
     LDS BW: >-
-      Achieved bandwidth for Local Data Share memory operations.
+      The bandwidth between the WGP and LDS for indexed accesses after bank-
+      conflict stalls. Each bank access counts as 4 bytes.
     L2 to Memory BW: >-
-      Bandwidth of read and write requests leaving L2 toward memory. It includes
-      requests the Infinity Cache serves, so it can exceed the true VRAM traffic and the
-      measured VRAM peak.
+      The read and write bandwidth from GL2 toward memory over the Efficiency
+      Arbiter. Each counted request is 32 bytes. Requests served by Infinity
+      Cache are included.
     AI L0: >-
-      Floating-point operations per byte requested from the GL0 vector cache (TCP). It
-      can read low, because the GL0 bytes are an upper bound.
+      Floating-point operations per byte requested between the WGP and GL0. Each
+      GL0 request counts as 128 bytes.
     AI LDS: >-
-      Arithmetic intensity relative to Local Data Share traffic.
+      Floating-point operations per byte transferred between the WGP and LDS
+      for indexed accesses after bank-conflict stalls.
     AI VRAM: >-
-      Floating-point operations per byte requested from L2 toward memory. Requests the
-      Infinity Cache serves are included, so this can be lower than the true VRAM
-      intensity.
+      Floating-point operations per byte requested from GL2 toward memory over
+      the Efficiency Arbiter. Requests served by Infinity Cache are included.
     Performance (GFLOPs): >-
-      Estimated floating-point operations per second on the vector ALU and WMMA
-      combined.
+      Estimated floating-point operations on the vector ALU and Wave Matrix
+      Multiply Accumulate combined.

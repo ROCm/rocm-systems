@@ -70,30 +70,22 @@ Panel Config:
           unit: (Count + $normUnit)
   metrics_description:
     Total Requests: >-
-      L2 requests, normalized by the chosen unit.
+      Requests to GL2.
     Read Requests: >-
-      Number of read requests to the GL2 cache. High read counts indicate memory-intensive
-      load operations. Compare with hit rate to assess GL2 cache effectiveness for reads.
+      Read requests to GL2.
     Write Requests: >-
-      Number of write requests to the GL2 cache. Write traffic includes stores and cache
-      writebacks from GL1. High write counts indicate write-intensive workloads.
+      Write requests to GL2, including stores and writebacks from GL1.
     Atomic Requests: >-
-      Number of atomic memory operations processed by the GL2 cache. Atomics provide
-      thread-safe memory access but may serialize at contended addresses. High counts
-      may impact performance.
+      Atomic requests processed by GL2.
     EA Read Requests (Memory): >-
-      L2 read requests over EA destined for memory. Infinity Cache can serve
-      these requests before they reach VRAM.
+      GL2 read requests over the Efficiency Arbiter destined for memory.
+      Requests served by Infinity Cache are included.
     EA Write Requests (Memory): >-
-      L2 write requests over EA destined for memory. Infinity Cache can absorb
-      these requests before they reach VRAM.
+      GL2 write requests over the Efficiency Arbiter destined for memory.
+      Requests absorbed by Infinity Cache are included.
     GL2 Cache Hit Rate: >-
-      Percentage of L2 lookups that hit.
+      Percentage of GL2 lookups that hit.
     GL2 Cache Hits: >-
-      Number of GL2 cache requests that were serviced from cache. High hit counts relative
-      to total requests indicate effective caching. Low hit counts suggest memory-bound
-      workloads or poor data locality.
+      GL2 requests that hit.
     GL2 Cache Misses: >-
-      Number of GL2 cache requests that missed and required fetching through GCEA
-      (Graphics Core Efficiency Arbiter). High miss counts indicate heavy memory traffic.
-      Consider improving data locality or reducing working set size.
+      GL2 requests that missed and were sent through the Efficiency Arbiter.

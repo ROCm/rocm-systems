@@ -2,4 +2,4 @@ gl1.total_req:
   name: GL1 Total Requests
   formula: SUM(GL1C_REQ_sum) / SUM($denom)
   unit: (Requests + $normUnit)
-  description: Total requests processed by GL1.
+  description: Requests received by GL1 from GL0.

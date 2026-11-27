@@ -70,40 +70,31 @@ Panel Config:
           pct_of_peak: true
   metrics_description:
     VALU Issue Rate: >-
-      Billions of VALU instruction issues per second, including floating-point and
-      integer instructions. This is not a FLOP rate and does not account for active
+      VALU instruction issues, including floating-point and integer
+      instructions. This is not a FLOP count and does not account for active
       lanes.
     WMMA FLOPs (F16->F32 16x16x16): >-
-      Achieved FP16 WMMA throughput.
+      Estimated matrix floating-point operations from Wave Matrix Multiply
+      Accumulate instructions. Each instruction counts as 8192 FLOPs for a
+      16x16x16 F16->F32 operation.
     FP64 VALU Issue Rate: >-
-      Billions of double-precision VALU instruction issues per second. This is
-      an instruction rate, without accounting for FLOPs per instruction or
-      active lanes.
+      Double-precision VALU instruction issues. This is not a FLOP count and
+      does not account for active lanes.
     IPC: >-
-      Instructions executed per cycle, measuring overall instruction throughput efficiency.
-      Higher IPC indicates better utilization of the shader pipeline. Low IPC may indicate
-      stalls due to memory latency, register dependencies, or insufficient wavefront
-      occupancy to hide latencies.
+      User instructions executed per Sequencer busy cycle, excluding internal
+      Sequencer instructions.
     Wavefront Occupancy: >-
-      Average number of wavefronts resident on the GPU during kernel execution. Higher
-      occupancy provides more opportunities to hide memory latency through wavefront
-      switching. However, maximum occupancy is not always optimal. Excessive register
-      or LDS usage per wavefront may limit occupancy.
+      Average number of wavefronts resident during GPU-active cycles.
     GL2 Cache Hit Rate: >-
-      Percentage of L2 lookups that hit.
+      Percentage of GL2 lookups that hit.
     LDS Bank Conflicts: >-
       Cycles LDS stalled on conflicting bank addresses, averaged per dispatch.
     GL0 Cache Hit Rate (TCP Cache): >-
-      Percentage of GL0 vector cache (TCP Cache) requests that hit in cache. The TCP cache
-      is the first-level cache for vector memory operations. High hit rates reduce
-      traffic to GL1 and improve memory access latency.
+      Percentage of GL0 requests that hit.
     Scalar Data Cache Hit Rate: >-
-      Percentage of scalar data cache accesses that hit in cache. The scalar cache
-      stores uniform data accessed by scalar instructions. High hit rates indicate
-      efficient reuse of constant and uniform data across wavefronts.
+      Percentage of scalar data cache requests that hit.
     Scalar Data Cache BW: >-
-      Bytes loaded by scalar memory instructions, from the dwords each instruction loads.
+      The load bandwidth between the WGP and the scalar data cache. Each loaded
+      dword counts as 4 bytes. Bounds-check reductions are ignored.
     Instruction Cache Hit Rate: >-
-      Percentage of instruction fetch requests that hit in the instruction cache.
-      High hit rates are essential for sustained instruction throughput. Low hit
-      rates may indicate large kernel code size or divergent control flow.
+      Percentage of instruction cache requests that hit.

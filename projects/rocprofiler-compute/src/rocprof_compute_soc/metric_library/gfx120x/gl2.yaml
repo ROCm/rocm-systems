@@ -2,96 +2,84 @@ gl2.atomic_req:
   name: GL2 Atomic Requests
   formula: SUM(GL2C_ATOMIC_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: >-
-    Number of atomic memory operations processed by the GL2 cache. Atomics provide
-    thread-safe memory access but may serialize at contended addresses. High counts may
-    impact performance.
+  description: Atomic requests processed by GL2.
 gl2.ea_rd_req_dram:
   name: EA Read Requests (DRAM)
   formula: SUM(GL2C_EA_RDREQ_DRAM_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
-    L2 read requests over EA destined for memory. Infinity Cache can serve these
-    requests before they reach VRAM.
+    GL2 read requests over the Efficiency Arbiter destined for memory.
+    Requests served by Infinity Cache are included.
 gl2.ea_wr_req_dram:
   name: EA Write Requests (DRAM)
   formula: SUM(GL2C_EA_WRREQ_DRAM_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
-    L2 write requests over EA destined for memory. Infinity Cache can absorb these
-    requests before they reach VRAM.
+    GL2 write requests over the Efficiency Arbiter destined for memory.
+    Requests absorbed by Infinity Cache are included.
 gl2.hit_rate:
   name: GL2 Cache Hit Rate
   formula: 100 * SUM(GL2C_HIT_sum) / SUM(GL2C_HIT_sum + GL2C_MISS_sum)
   unit: Percent
-  description: Percentage of GL2 cache requests that hit in the cache.
+  description: Percentage of GL2 lookups that hit.
   peak: 100
 gl2.hits:
   name: GL2 Cache Hits
   formula: SUM(GL2C_HIT_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: >-
-    Number of GL2 cache requests that were serviced from cache. High hit counts relative
-    to total requests indicate effective caching. Low hit counts suggest memory-bound
-    workloads or poor data locality.
+  description: GL2 requests that hit.
 gl2.memory_ai:
   name: Memory Arithmetic Intensity
   # FLOPs: VALU FLOPs without the WMMA instructions SQ_INSTS_VALU counts, plus 8192 per WMMA instruction.
   formula: SUM($wave_size * (SQ_INSTS_VALU_sum - SQ_WMMA_VALU_INSTS_sum) + 8192 * SQ_WMMA_VALU_INSTS_sum) / (32 * SUM(GL2C_EA_RDREQ_DRAM_32B_sum + GL2C_EA_WRREQ_DRAM_32B_sum))
   unit: FLOPs/Byte
   description: >-
-    Floating-point operations per byte requested from L2 toward memory. Requests the
-    Infinity Cache serves are included, so this can be lower than the true VRAM
-    intensity.
+    Floating-point operations per byte requested from GL2 toward memory over
+    the Efficiency Arbiter. Requests served by Infinity Cache are included.
 gl2.memory_bw:
   name: Memory Bandwidth
   # The unsized EA_RDREQ_DRAM and EA_WRREQ_DRAM counters mix 32-byte to 128-byte requests, so the 32B counters are used.
   formula: 32 * SUM(GL2C_EA_RDREQ_DRAM_32B_sum + GL2C_EA_WRREQ_DRAM_32B_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    Bandwidth of read and write requests leaving L2 toward memory. It includes requests
-    the Infinity Cache serves, so it can exceed the true VRAM traffic and the measured
-    VRAM peak.
+    The read and write bandwidth from GL2 toward memory over the Efficiency
+    Arbiter. Each counted request is 32 bytes. Requests served by Infinity
+    Cache are included.
   peak_empirical: $VRAMBw_empirical_peak
 gl2.memory_rd_bw:
   name: Memory Read Bandwidth
   formula: 32 * SUM(GL2C_EA_RDREQ_DRAM_32B_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes per second the L2 cache (GL2C) reads over the EA for requests
-    destined for VRAM. Infinity Cache hits are included, so this can exceed the VRAM
-    bandwidth peak.
+    The read bandwidth from GL2 toward memory over the Efficiency Arbiter.
+    Each counted request is 32 bytes. Requests served by Infinity Cache are
+    included.
 gl2.memory_wr_bw:
   name: Memory Write Bandwidth
   formula: 32 * SUM(GL2C_EA_WRREQ_DRAM_32B_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes per second the L2 cache (GL2C) writes over the EA for requests
-    destined for VRAM. Infinity Cache hits are included.
+    The write bandwidth from GL2 toward memory over the Efficiency Arbiter.
+    Each counted request is 32 bytes. Requests absorbed by Infinity Cache are
+    included.
 gl2.misses:
   name: GL2 Cache Misses
   formula: SUM(GL2C_MISS_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
-    Number of GL2 cache requests that missed and required fetching through GCEA
-    (Graphics Core Efficiency Arbiter). High miss counts indicate heavy memory traffic.
-    Consider improving data locality or reducing working set size.
+    GL2 requests that missed and were sent through the Efficiency Arbiter.
 gl2.rd_req:
   name: GL2 Read Requests
   formula: SUM(GL2C_READ_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: >-
-    Number of read requests to the GL2 cache. High read counts indicate memory-intensive
-    load operations. Compare with hit rate to assess GL2 cache effectiveness for reads.
+  description: Read requests to GL2.
 gl2.total_req:
   name: GL2 Total Requests
   formula: SUM(GL2C_REQ_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Total number of GL2 cache requests.
+  description: Requests to GL2.
 gl2.wr_req:
   name: GL2 Write Requests
   formula: SUM(GL2C_WRITE_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: >-
-    Number of write requests to the GL2 cache. Write traffic includes stores and cache
-    writebacks from GL1. High write counts indicate write-intensive workloads.
+  description: Write requests to GL2, including stores and writebacks from GL1.
