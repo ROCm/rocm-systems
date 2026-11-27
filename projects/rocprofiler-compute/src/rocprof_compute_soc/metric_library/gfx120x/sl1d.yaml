@@ -10,7 +10,7 @@ sl1d.load_bw:
   unit: GB/s
   description: >-
     Bytes loaded by scalar memory instructions, from the dwords each
-    instruction loads. Bounds-check reductions are ignored.
+    instruction loads.
   peak: '$sqc_per_gpu * 64 * $max_sclk / 1000'
 sl1d.req:
   name: sL1D Requests

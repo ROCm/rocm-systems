@@ -47,7 +47,7 @@ Memory chart - Scalar Data Cache:
     rst: Percentage of scalar data cache accesses that hit in cache.
     unit: Percent
   DCache Load Bandwidth:
-    rst: Bytes loaded by scalar memory instructions, from the dwords each instruction loads. Bounds-check reductions are ignored.
+    rst: Bytes loaded by scalar memory instructions, from the dwords each instruction loads.
     unit: Bytes/s
 Memory chart - GL0 Cache (Vector L0):
   GL0 Hit Rate:

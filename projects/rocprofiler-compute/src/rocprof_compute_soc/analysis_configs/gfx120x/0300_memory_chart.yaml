@@ -134,7 +134,7 @@ Panel Config:
       Percentage of scalar data cache accesses that hit in cache.
     DCache Load Bandwidth: >-
       Bytes loaded by scalar memory instructions, from the dwords each
-      instruction loads. Bounds-check reductions are ignored.
+      instruction loads.
     GL0 Hit Rate: >-
       Percentage of GL0 vector cache (TCP Cache) requests that hit in cache.
     LDS Instructions: >-
