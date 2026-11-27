@@ -521,7 +521,8 @@ enum hip_api_id_t {
   HIP_API_ID_hipGraphNodeGetToolsId = 499,
   HIP_API_ID_hipDeviceGetExecAffinitySupport = 500,
   HIP_API_ID_hipArrayGetPlane = 501,
-  HIP_API_ID_LAST = 501,
+  HIP_API_ID_hipArrayGetMemoryRequirements = 502,
+  HIP_API_ID_LAST = 502,
 
 
   HIP_API_ID_hipBindTexture = HIP_API_ID_NONE,
@@ -562,6 +563,7 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipArrayDestroy: return "hipArrayDestroy";
     case HIP_API_ID_hipArrayGetDescriptor: return "hipArrayGetDescriptor";
     case HIP_API_ID_hipArrayGetInfo: return "hipArrayGetInfo";
+    case HIP_API_ID_hipArrayGetMemoryRequirements: return "hipArrayGetMemoryRequirements";
     case HIP_API_ID_hipArrayGetPlane: return "hipArrayGetPlane";
     case HIP_API_ID_hipArrayGetSparseProperties: return "hipArrayGetSparseProperties";
     case HIP_API_ID_hipChooseDeviceR0000: return "hipChooseDeviceR0000";
@@ -1057,6 +1059,7 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipArrayDestroy", name) == 0) return HIP_API_ID_hipArrayDestroy;
   if (strcmp("hipArrayGetDescriptor", name) == 0) return HIP_API_ID_hipArrayGetDescriptor;
   if (strcmp("hipArrayGetInfo", name) == 0) return HIP_API_ID_hipArrayGetInfo;
+  if (strcmp("hipArrayGetMemoryRequirements", name) == 0) return HIP_API_ID_hipArrayGetMemoryRequirements;
   if (strcmp("hipArrayGetPlane", name) == 0) return HIP_API_ID_hipArrayGetPlane;
   if (strcmp("hipArrayGetSparseProperties", name) == 0) return HIP_API_ID_hipArrayGetSparseProperties;
   if (strcmp("hipChooseDeviceR0000", name) == 0) return HIP_API_ID_hipChooseDeviceR0000;
@@ -1595,6 +1598,12 @@ typedef struct hip_api_data_s {
       unsigned int flags__val;
       hipArray_t array;
     } hipArrayGetInfo;
+    struct {
+      hipArrayMemoryRequirements* memoryRequirements;
+      hipArrayMemoryRequirements memoryRequirements__val;
+      hipArray_t array;
+      hipDevice_t device;
+    } hipArrayGetMemoryRequirements;
     struct {
       hipArray_t* pPlaneArray;
       hipArray_t pPlaneArray__val;
@@ -4598,6 +4607,12 @@ typedef struct hip_api_data_s {
   cb_data.args.hipArrayGetInfo.extent = (hipExtent*)extent; \
   cb_data.args.hipArrayGetInfo.flags = (unsigned int*)flags; \
   cb_data.args.hipArrayGetInfo.array = (hipArray_t)array; \
+};
+// hipArrayGetMemoryRequirements[('hipArrayMemoryRequirements*', 'memoryRequirements'), ('hipArray_t', 'array'), ('hipDevice_t', 'device')]
+#define INIT_hipArrayGetMemoryRequirements_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipArrayGetMemoryRequirements.memoryRequirements = (hipArrayMemoryRequirements*)memoryRequirements; \
+  cb_data.args.hipArrayGetMemoryRequirements.array = (hipArray_t)array; \
+  cb_data.args.hipArrayGetMemoryRequirements.device = (hipDevice_t)device; \
 };
 // hipArrayGetPlane[('hipArray_t*', 'pPlaneArray'), ('hipArray_t', 'hArray'), ('unsigned int', 'planeIdx')]
 #define INIT_hipArrayGetPlane_CB_ARGS_DATA(cb_data) { \
@@ -7667,6 +7682,10 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
       if (data->args.hipArrayGetInfo.extent) data->args.hipArrayGetInfo.extent__val = *(data->args.hipArrayGetInfo.extent);
       if (data->args.hipArrayGetInfo.flags) data->args.hipArrayGetInfo.flags__val = *(data->args.hipArrayGetInfo.flags);
       break;
+// hipArrayGetMemoryRequirements[('hipArrayMemoryRequirements*', 'memoryRequirements'), ('hipArray_t', 'array'), ('hipDevice_t', 'device')]
+    case HIP_API_ID_hipArrayGetMemoryRequirements:
+      if (data->args.hipArrayGetMemoryRequirements.memoryRequirements) data->args.hipArrayGetMemoryRequirements.memoryRequirements__val = *(data->args.hipArrayGetMemoryRequirements.memoryRequirements);
+      break;
 // hipArrayGetPlane[('hipArray_t*', 'pPlaneArray'), ('hipArray_t', 'hArray'), ('unsigned int', 'planeIdx')]
     case HIP_API_ID_hipArrayGetPlane:
       if (data->args.hipArrayGetPlane.pPlaneArray) data->args.hipArrayGetPlane.pPlaneArray__val = *(data->args.hipArrayGetPlane.pPlaneArray);
@@ -9664,6 +9683,14 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       if (data->args.hipArrayGetInfo.flags == NULL) oss << ", flags=NULL";
       else { oss << ", flags="; roctracer::hip_support::detail::operator<<(oss, data->args.hipArrayGetInfo.flags__val); }
       oss << ", array="; roctracer::hip_support::detail::operator<<(oss, data->args.hipArrayGetInfo.array);
+      oss << ")";
+    break;
+    case HIP_API_ID_hipArrayGetMemoryRequirements:
+      oss << "hipArrayGetMemoryRequirements(";
+      if (data->args.hipArrayGetMemoryRequirements.memoryRequirements == NULL) oss << "memoryRequirements=NULL";
+      else { oss << "memoryRequirements="; roctracer::hip_support::detail::operator<<(oss, data->args.hipArrayGetMemoryRequirements.memoryRequirements__val); }
+      oss << ", array="; roctracer::hip_support::detail::operator<<(oss, data->args.hipArrayGetMemoryRequirements.array);
+      oss << ", device="; roctracer::hip_support::detail::operator<<(oss, data->args.hipArrayGetMemoryRequirements.device);
       oss << ")";
     break;
     case HIP_API_ID_hipArrayGetPlane:

@@ -235,6 +235,7 @@ def run_prof(
     fnames: Union[List[str], str],
     profiler_options: ProfilerOptions,
     workload_dir: str,
+    arch: str,
     ml_api_trace_enabled: bool = False,
     retain_rocpd_output: bool = False,
 ) -> None:
@@ -314,7 +315,7 @@ def run_prof(
         PROCFS_ROOT / str(attach_pid) / "root" / "tmp" if attach_pid else Path("/tmp")
     )
     metrics_path = Path(
-        create_temp_rocprofiler_metrics_path(sdk_config, metrics_parent)
+        create_temp_rocprofiler_metrics_path(sdk_config, arch, metrics_parent)
     )
     new_env["ROCPROFILER_METRICS_PATH"] = f"/tmp/{metrics_path.name}"
     console_debug(

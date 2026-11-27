@@ -696,7 +696,7 @@ enum SdwaUnused : uint32_t {
   UNUSED_PRESERVE = 2,
 };
 
-/// @brief Semantic arithmetic result format for SDWA output modifiers.
+/// @brief Result-layout metadata used by SDWA conversion bindings.
 enum class ResultFormat {
   NONE,
   F16,
