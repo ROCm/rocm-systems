@@ -13,7 +13,7 @@ from ml_api_tracing.inject_roctx.backends.torch_wraps import (
     DEEP_TENSOR_METHOD_WRAPS,
     TENSOR_METHOD_WRAPS,
 )
-from ml_api_tracing.marker_format import compose_marker
+from ml_api_tracing.marker_format import compose_marker, format_wrap_args
 from tests.integration.common import require_torch
 
 
@@ -135,29 +135,6 @@ def recorded_ranges(monkeypatch):
     monkeypatch.setattr(marker_ranges._thread_local, "depth", 0, raising=False)
     yield markers
     assert active == []
-
-
-def test_format_wrap_args_renders_tensors_and_skips_non_tensors():
-    tensor = fake_tensor()
-    rendered = torch_backend.format_wrap_args(
-        (tensor, "skip"), {"bias": tensor, "flag": True}
-    )
-    assert rendered == "(float32[2x4], bias=float32[2x4])"
-    assert torch_backend.format_wrap_args((), {}) == "n/a"
-
-
-@pytest.mark.parametrize(
-    ("delimiter", "encoded"),
-    [
-        pytest.param("|", "%7C", id="pipe"),
-        pytest.param(";", "%3B", id="semicolon"),
-        pytest.param("%", "%25", id="percent"),
-    ],
-)
-def test_format_wrap_args_caps_raw_text_before_encoding(delimiter, encoded):
-    rendered = torch_backend.format_wrap_args((), {delimiter * 512: fake_tensor()})
-
-    assert rendered == "(" + encoded * 511 + "...)"
 
 
 def test_dispatcher_marker_name_for_aten_packet():
@@ -406,26 +383,12 @@ def test_uninitialized_buffer_keeps_persistent_on_to(monkeypatch):
     assert moved.persistent is False
 
 
-@pytest.mark.parametrize(
-    ("value", "argument_kind"),
-    [
-        pytest.param(UnreadableShape(), "positional", id="shape-positional"),
-        pytest.param(UnreadableDtype(), "keyword", id="dtype-keyword"),
-    ],
-)
-def test_format_wrap_args_omits_unreadable_metadata(value, argument_kind):
-    args = (value,) if argument_kind == "positional" else ()
-    kwargs = {"tensor": value} if argument_kind == "keyword" else {}
-
-    assert torch_backend.format_wrap_args(args, kwargs) == "n/a"
-
-
 def test_format_wrap_args_preserves_readable_tensors(torch_module):
     tensor = torch_module.ones(2, 3)
     scalar = torch_module.tensor(1.0, dtype=torch_module.float64)
 
     assert (
-        torch_backend.format_wrap_args(
+        format_wrap_args(
             (UnreadableShape(), tensor, 42),
             {"unreadable": UnreadableDtype(), "scalar": scalar},
         )

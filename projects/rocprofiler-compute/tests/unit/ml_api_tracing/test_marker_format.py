@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 
 from ml_api_tracing.marker_format import (
+    _MAX_TENSOR_ARGUMENT_ITEMS,
     cap_args,
     compose_marker,
     decode_marker_args,
@@ -16,6 +17,7 @@ from ml_api_tracing.marker_format import (
     encode_args,
     encode_marker_name,
     format_args_blob,
+    format_wrap_args,
     parse_marker_function,
     render_dtype_shape,
     split_operator_args,
@@ -384,3 +386,55 @@ def test_format_args_blob_encodes_delimiters_after_cap():
     assert ";" not in blob
     assert "\r" not in blob
     assert "\n" not in blob
+
+
+def test_format_args_blob_caps_then_encodes_pipe_and_percent():
+    blob = format_args_blob(["|" * 400 + "%" * 200])
+    assert blob.startswith("(")
+    assert blob.endswith("...)")
+    assert blob.count("%7C") == 400
+    assert "%25" in blob
+    assert "|" not in blob
+
+
+def test_format_wrap_args_renders_readable_shapes_and_skips_others():
+    tensor = SimpleNamespace(shape=(2, 4), dtype=FakeDType("torch.float32"))
+    rendered = format_wrap_args((tensor, "skip"), {"bias": tensor, "flag": True})
+    assert rendered == "(float32[2x4], bias=float32[2x4])"
+    assert format_wrap_args((), {}) == "n/a"
+
+
+@pytest.mark.parametrize(
+    ("delimiter", "encoded"),
+    [
+        pytest.param("|", "%7C", id="pipe"),
+        pytest.param(";", "%3B", id="semicolon"),
+        pytest.param("%", "%25", id="percent"),
+    ],
+)
+def test_format_wrap_args_caps_raw_text_before_encoding(delimiter, encoded):
+    tensor = SimpleNamespace(shape=(2, 4), dtype=FakeDType("torch.float32"))
+    rendered = format_wrap_args((), {delimiter * 512: tensor})
+    assert rendered == "(" + encoded * 511 + "...)"
+
+
+@pytest.mark.parametrize(
+    ("value", "argument_kind"),
+    [
+        pytest.param(RaisingShape(), "positional", id="shape-positional"),
+        pytest.param(RaisingDtype(), "keyword", id="dtype-keyword"),
+    ],
+)
+def test_format_wrap_args_omits_unreadable_metadata(value, argument_kind):
+    args = (value,) if argument_kind == "positional" else ()
+    kwargs = {"tensor": value} if argument_kind == "keyword" else {}
+    assert format_wrap_args(args, kwargs) == "n/a"
+
+
+def test_format_wrap_args_drops_items_past_the_cap():
+    values = tuple(
+        SimpleNamespace(shape=(index,), dtype=FakeDType("float32"))
+        for index in range(40)
+    )
+    blob = format_wrap_args(values, {})
+    assert blob.count("float32[") == _MAX_TENSOR_ARGUMENT_ITEMS
