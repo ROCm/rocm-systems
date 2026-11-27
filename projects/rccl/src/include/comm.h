@@ -669,9 +669,6 @@ struct ncclPeerInfo {
   bool cuMemHostSupport;
   uint32_t cftUnicastCliqueId;
   uint32_t cftMulticastCliqueId;
-  // [RCCL] This rank's GPU reports the SPX compute-partition mode. The SPX tuning table also serves CPX GPUs, GPUs that
-  // report no mode and comms whose ranks disagree, so tuningPartition alone does not tell.
-  bool spxReported;
 };
 
 typedef enum ncclGroupTaskType {

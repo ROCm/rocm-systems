@@ -55,8 +55,6 @@ struct HostHierMockComm
         const bool spx = std::count(hostOf.begin(), hostOf.end(), hostOf.empty() ? 0 : hostOf[0]) == 4;
         comm.archThresholds
             = rcclGetArchThresholds(archBuf, spx ? RCCL_TUNING_PARTITION_SPX : RCCL_TUNING_PARTITION_DPX);
-        for(ncclPeerInfo& peer : peers)
-            peer.spxReported = spx;
     }
 
     HostHierMockComm(const HostHierMockComm&)            = delete;
@@ -263,19 +261,13 @@ TEST(HostHierAllReduce, AutoWindowEdges)
     EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(8, 8, 512 * kMiB));
     EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(8, 8, 512 * kMiB + 1));
 
-    for(size_t bytes : {2 * kMiB, 32 * kMiB, 128 * kMiB, 512 * kMiB})
-        EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(4, 4, bytes)) << bytes << " B on four hosts of four ranks";
-
-    EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(8, 4, 2 * kMiB));
-    EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(8, 4, 64 * kMiB - 1));
-    EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(8, 4, 64 * kMiB));
-    EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(8, 4, 512 * kMiB));
-    EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(8, 4, 512 * kMiB + 1));
+    for(int nHosts : {1, 2, 4, 8, 16})
+        for(size_t bytes : {2 * kMiB, 32 * kMiB, 128 * kMiB, 512 * kMiB})
+            EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(nHosts, 4, bytes)) << bytes << " B on " << nHosts
+                                                                            << " hosts of four ranks";
 
     for(int nHosts : {0, 1, 3, 5, 6, 7, 16})
         EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(nHosts, 8, 16 * kMiB)) << nHosts << " hosts";
-    for(int nHosts : {1, 2, 3, 16})
-        EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(nHosts, 4, 16 * kMiB)) << nHosts << " hosts, 4 ranks each";
     for(int ranksPerHost : {2, 16})
         EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(4, ranksPerHost, 16 * kMiB)) << ranksPerHost << " ranks per host";
 }
@@ -303,20 +295,10 @@ TEST(HostHierAllReduce, AutoTypes)
     for(ncclDataType_t t : all)
     {
         const bool fp8      = t == ncclFloat8e4m3 || t == ncclFloat8e5m2;
-        const bool byteInt  = t == ncclInt8 || t == ncclUint8;
-        const bool dpxFloat = fp8 || t == ncclFloat32 || t == ncclFloat16 || t == ncclBfloat16;
-        EXPECT_TRUE(rcclHostHierAllReduceAutoType(4, t, ncclSum)) << t;
-        EXPECT_EQ(!fp8, rcclHostHierAllReduceAutoType(4, t, ncclProd)) << t;
-        EXPECT_EQ(!fp8 && !byteInt, rcclHostHierAllReduceAutoType(4, t, ncclMax)) << t;
-        EXPECT_EQ(!fp8 && !byteInt, rcclHostHierAllReduceAutoType(4, t, ncclMin)) << t;
-        EXPECT_EQ(!fp8, rcclHostHierAllReduceAutoType(4, t, ncclAvg)) << t;
-
-        EXPECT_EQ(dpxFloat, rcclHostHierAllReduceAutoType(8, t, ncclSum)) << t;
+        const bool floatSum = fp8 || t == ncclFloat32 || t == ncclFloat16 || t == ncclBfloat16;
+        EXPECT_EQ(floatSum, rcclHostHierAllReduceAutoType(t, ncclSum)) << t;
         for(ncclRedOp_t op : {ncclProd, ncclMax, ncclMin, ncclAvg})
-            EXPECT_FALSE(rcclHostHierAllReduceAutoType(8, t, op)) << t << " op " << op;
-
-        for(int ranksPerHost : {2, 16})
-            EXPECT_FALSE(rcclHostHierAllReduceAutoType(ranksPerHost, t, ncclSum)) << t << " " << ranksPerHost;
+            EXPECT_FALSE(rcclHostHierAllReduceAutoType(t, op)) << t << " op " << op;
     }
 }
 
@@ -346,19 +328,10 @@ TEST(HostHierAllReduce, EligibilityPerMode_Isolated)
             EXPECT_FALSE(eligible(blockHosts(8, 8), floats(1024 * kMiB))) << "eight hosts, above the window";
             EXPECT_FALSE(eligible(blockHosts(1, 8), floats(16 * kMiB))) << "single host";
             EXPECT_FALSE(eligible(blockHosts(2, 4), floats(16 * kMiB))) << "two hosts of four ranks";
-            EXPECT_FALSE(eligible(blockHosts(4, 4), floats(2 * kMiB))) << "four hosts of four ranks";
-            EXPECT_FALSE(eligible(blockHosts(4, 4), floats(128 * kMiB))) << "four hosts of four ranks";
-            EXPECT_TRUE(eligible(blockHosts(8, 4), floats(64 * kMiB))) << "eight hosts of four ranks";
-            EXPECT_TRUE(eligible(blockHosts(8, 4), floats(512 * kMiB))) << "eight hosts of four ranks";
-            EXPECT_FALSE(eligible(blockHosts(8, 4), floats(32 * kMiB))) << "eight hosts of four ranks, below";
-            EXPECT_FALSE(eligible(blockHosts(8, 4), floats(1024 * kMiB))) << "eight hosts of four ranks, above";
-            EXPECT_TRUE(eligible(blockHosts(8, 4), 128 * kMiB, ncclBfloat16)) << "bf16, SPX";
-            EXPECT_TRUE(eligible(blockHosts(8, 4), 64 * kMiB, ncclInt32, ncclMax)) << "int32 max, SPX";
-            EXPECT_TRUE(eligible(blockHosts(8, 4), 16 * kMiB, ncclFloat64, ncclAvg)) << "fp64 avg, SPX";
-            EXPECT_FALSE(eligible(blockHosts(8, 4), 4 * kMiB, ncclInt32, ncclMax)) << "int32 max, SPX, below";
-            EXPECT_FALSE(eligible(blockHosts(8, 4), 128 * kMiB, ncclFloat8e4m3, ncclAvg)) << "fp8 avg, SPX";
-            EXPECT_FALSE(eligible(blockHosts(8, 4), 128 * kMiB, ncclUint8, ncclMin)) << "uint8 min, SPX";
-            EXPECT_FALSE(eligible(blockHosts(8, 4), 32 * kMiB, ncclInt32, ncclAvg)) << "int32 avg, SPX";
+            for(int nHosts : {4, 8})
+                for(size_t bytes : {2 * kMiB, 128 * kMiB, 512 * kMiB})
+                    EXPECT_FALSE(eligible(blockHosts(nHosts, 4), floats(bytes)))
+                        << bytes << " B on " << nHosts << " hosts of four ranks (SPX)";
             EXPECT_FALSE(eligible(blockHosts(4, 8), floats(16 * kMiB), ncclFloat32, ncclMax)) << "fp32 max, DPX";
             EXPECT_TRUE(eligible(blockHosts(2, 8), kMiB, ncclBfloat16)) << "bf16, 2 MiB";
             EXPECT_TRUE(eligible(blockHosts(2, 8), 64 * kMiB, ncclFloat16)) << "fp16, 128 MiB";
@@ -378,21 +351,6 @@ TEST(HostHierAllReduce, EligibilityPerMode_Isolated)
                 mock.comm.clique.size = 8;
                 EXPECT_FALSE(rcclHostHierAllReduceEligible(mock.get(), floats(2 * kMiB), ncclFloat32, ncclSum, false))
                     << "two MNNVL cliques";
-            }
-            {
-                HostHierMockComm mock(blockHosts(8, 4), 0);
-                mock.comm.archThresholds = rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
-                EXPECT_FALSE(
-                    rcclHostHierAllReduceEligible(mock.get(), floats(128 * kMiB), ncclFloat32, ncclSum, false))
-                    << "eight hosts of four ranks with the DPX table";
-            }
-            {
-                // The SPX table also serves CPX GPUs, GPUs that report no mode and comms whose ranks disagree.
-                HostHierMockComm mock(blockHosts(8, 4), 0);
-                mock.peers[5].spxReported = false;
-                EXPECT_FALSE(
-                    rcclHostHierAllReduceEligible(mock.get(), floats(128 * kMiB), ncclFloat32, ncclSum, false))
-                    << "eight hosts of four ranks, one GPU not reporting SPX";
             }
             // The mock comm has no DDA scratch, so the fused kernel never runs on it.
             for(size_t bytes : {4 * kMiB, 8 * kMiB - 64})

@@ -110,20 +110,6 @@ bool needsFusedKernel(const struct rcclHostLayout& layout, ncclDataType_t dataty
   return bytes > 2 * MiB && bytes < 8 * MiB;
 }
 
-// The SPX table and every rank's GPU reporting SPX: the table also serves CPX GPUs, GPUs that report no mode and comms
-// whose ranks disagree, none of which was measured. Every rank reads the same table (rcclSetTuningPartition) and peer
-// info, so this matches on all of them.
-bool spxComm(const struct ncclComm* comm) {
-  if (comm->archName == nullptr || comm->archThresholds == nullptr ||
-      comm->archThresholds != rcclGetArchThresholds(comm->archName, RCCL_TUNING_PARTITION_SPX)) {
-    return false;
-  }
-  for (int r = 0; r < comm->nRanks; r++) {
-    if (!comm->peerInfo[r].spxReported) return false;
-  }
-  return true;
-}
-
 // The windows were measured against the default path of the DPX tuning table, which every rank of a comm reads only
 // when all of them ask for it (rcclSetTuningPartition).
 bool dpxTuningTable(const struct ncclComm* comm) {
@@ -299,20 +285,17 @@ int rcclHostHierChildren(const struct ncclComm* comm, ncclComm_t children[2]) {
 
 bool rcclHostHierAllReduceAutoWindow(int nHosts, int ranksPerHost, size_t bytes) {
   constexpr size_t MiB = size_t{1} << 20;
-  if (ranksPerHost == 8) {
-    switch (nHosts) {
-    case 2:
-      return (bytes >= 2 * MiB && bytes <= 16 * MiB) || (bytes >= 64 * MiB && bytes <= 128 * MiB);
-    case 4:
-      return bytes >= 2 * MiB && bytes <= 256 * MiB;
-    case 8:
-      return bytes >= 2 * MiB && bytes <= 512 * MiB;
-    default:
-      return false;
-    }
+  if (ranksPerHost != 8) return false;
+  switch (nHosts) {
+  case 2:
+    return (bytes >= 2 * MiB && bytes <= 16 * MiB) || (bytes >= 64 * MiB && bytes <= 128 * MiB);
+  case 4:
+    return bytes >= 2 * MiB && bytes <= 256 * MiB;
+  case 8:
+    return bytes >= 2 * MiB && bytes <= 512 * MiB;
+  default:
+    return false;
   }
-  if (ranksPerHost == 4) return nHosts == 8 && bytes >= 64 * MiB && bytes <= 512 * MiB;
-  return false;
 }
 
 bool rcclHostHierAllReduceFusedWindow(int nHosts, int ranksPerHost, size_t bytes) {
@@ -320,26 +303,9 @@ bool rcclHostHierAllReduceFusedWindow(int nHosts, int ranksPerHost, size_t bytes
   return ranksPerHost == 8 && nHosts <= 2 && bytes >= 4 * MiB && bytes <= 16 * MiB;
 }
 
-bool rcclHostHierAllReduceAutoType(int ranksPerHost, ncclDataType_t datatype, ncclRedOp_t op) {
+bool rcclHostHierAllReduceAutoType(ncclDataType_t datatype, ncclRedOp_t op) {
   const bool fp8 = datatype == ncclFloat8e4m3 || datatype == ncclFloat8e5m2;
-  const bool byteInt = datatype == ncclInt8 || datatype == ncclUint8;
-  if (ranksPerHost == 8) {
-    return op == ncclSum && (datatype == ncclFloat32 || datatype == ncclFloat16 || datatype == ncclBfloat16 || fp8);
-  }
-  if (ranksPerHost != 4) return false;
-  switch (op) {
-  case ncclSum:
-    return true;
-  case ncclProd:
-    return !fp8;
-  case ncclMax:
-  case ncclMin:
-    return !fp8 && !byteInt;
-  case ncclAvg:
-    return !fp8;
-  default:
-    return false;
-  }
+  return op == ncclSum && (datatype == ncclFloat32 || datatype == ncclFloat16 || datatype == ncclBfloat16 || fp8);
 }
 
 bool rcclHostHierAllReduceEligible(struct ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op,
@@ -353,20 +319,16 @@ bool rcclHostHierAllReduceEligible(struct ncclComm* comm, size_t count, ncclData
   // without DDA fabric, such as one made by ncclCommSplit, whose default path was not measured.
   const bool measured =
     ncclDdaUseFabricPath(comm) && comm->clique.size == comm->nRanks && comm->ddaFabricMemHandler != nullptr;
-  if (!forced && (registeredBuffers || !(measured && (rcclHostHierAllReduceAutoType(8, datatype, op) ||
-                                                      rcclHostHierAllReduceAutoType(4, datatype, op))))) {
+  if (!forced && (registeredBuffers || !(measured && rcclHostHierAllReduceAutoType(datatype, op)))) {
     return false;
   }
   const struct rcclHostLayout* layout = rcclHostHierGetLayout(comm);
   if (layout == nullptr || count % layout->ranksPerHost != 0) return false;
   if (forced) return true;
-  if (!rcclHostHierAllReduceAutoType(layout->ranksPerHost, datatype, op)) return false;
   const size_t bytes = count * ncclTypeSize(datatype);
-  if (!rcclHostHierAllReduceAutoWindow(layout->nHosts, layout->ranksPerHost, bytes)) return false;
-  // The 4-ranks-per-host window was measured in SPX; a DPX comm with half of each host's ranks keeps the default path.
-  if (layout->ranksPerHost == 4 && !spxComm(comm)) return false;
-  // The 8-ranks-per-host windows, types and fused kernel were measured in DPX.
-  if (layout->ranksPerHost == 8 && !dpxTuningTable(comm)) return false;
+  if (!rcclHostHierAllReduceAutoWindow(layout->nHosts, layout->ranksPerHost, bytes) || !dpxTuningTable(comm)) {
+    return false;
+  }
   return !needsFusedKernel(*layout, datatype, bytes) || fusedKernelRuns(comm, *layout, count, datatype, op);
 }
 

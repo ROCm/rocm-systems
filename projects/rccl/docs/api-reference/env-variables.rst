@@ -534,20 +534,14 @@ collected in the following table.
       - | ``-1``: Auto (default). On gfx1250 when every rank is in one MNNVL
           clique and the communicator set up DDA fabric (communicators made
           by ``ncclCommSplit`` do not), used on buffers outside registered
-          windows with these layouts, message sizes and operations. With eight
-          ranks per host, only with the DPX tuning table: 2 to 16 MiB and 64
-          to 128 MiB on two hosts, 2 to 256 MiB on four hosts and 2 to 512 MiB
-          on eight hosts, for
+          windows with eight ranks per host on the DPX tuning table, for
           ``ncclSum`` on ``ncclFloat32``, ``ncclFloat16``, ``ncclBfloat16``,
-          ``ncclFloat8e4m3`` and ``ncclFloat8e5m2``. On two hosts, FP32, FP16
-          and BF16 messages between 2 and 8 MiB use it only where the fused
-          kernel runs (see ``RCCL_HOST_HIER_ALLREDUCE_FUSED``). With four
-          ranks per host, only when every rank's GPU reports the SPX partition
-          mode: 64 to 512 MiB on eight hosts, for ``ncclSum`` on every
-          type, ``ncclProd`` on every type except FP8, ``ncclMax`` and
-          ``ncclMin`` on every type except FP8, ``ncclInt8`` and
-          ``ncclUint8``, and ``ncclAvg`` on ``ncclFloat16``, ``ncclFloat32``,
-          ``ncclFloat64`` and ``ncclBfloat16``. Not used with other layouts.
+          ``ncclFloat8e4m3`` and ``ncclFloat8e5m2``, at these message sizes: 2
+          to 16 MiB and 64 to 128 MiB on two hosts, 2 to 256 MiB on four hosts
+          and 2 to 512 MiB on eight hosts. On two hosts, FP32, FP16 and BF16
+          messages between 2 and 8 MiB use it only where the fused kernel runs
+          (see ``RCCL_HOST_HIER_ALLREDUCE_FUSED``). Not used with other
+          layouts, including four ranks per host (SPX).
         | ``0``: Disabled.
         | ``1``: Enabled for every eligible AllReduce.
 
