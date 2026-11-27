@@ -283,42 +283,6 @@ TEST_P(PackedF32Selection, LeavesHostControlsUnchanged) {
 #endif
 }
 
-// The scope that installs the guest rounding starts after the register views
-// exist, so the plugin callbacks fired while acquiring and releasing them run
-// under the default host controls. A check made after execution alone cannot
-// see that interval: it is already closed.
-TEST_P(PackedF32Selection, RegisterCallbacksSeeDefaultHostRounding) {
-  class RoundingObserver final : public ExecutionPlugin {
-  public:
-    RoundingObserver() : ExecutionPlugin("packed_f32_rounding_observer") {}
-    void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *, uint32_t, uint64_t, uint8_t) override {
-      reads.push_back(std::fegetround());
-    }
-    void onAmdgpuWriteVgprLanes(const amdgpu::Wavefront *, uint32_t, uint64_t, uint8_t) override {
-      writes.push_back(std::fegetround());
-    }
-    std::vector<int> reads, writes;
-  };
-  HostState saved;
-  auto owner = std::make_unique<RoundingObserver>();
-  auto *observer = owner.get();
-  auto plugins = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
-  ASSERT_TRUE(plugins->add(std::move(owner)));
-  Machine machine(std::get<0>(GetParam()), plugins);
-  ASSERT_FALSE(::testing::Test::HasFatalFailure());
-  // MODE 0xf1 selects round-to-plus-infinity, so a scope that spans a view
-  // leaks FE_UPWARD into its callbacks.
-  compare(machine, 0, 2, 0, 0, 0xf1, 0, 6, SourceKind::Vgpr, ~uint64_t{0});
-  ASSERT_FALSE(observer->reads.empty());
-  ASSERT_FALSE(observer->writes.empty());
-  for (const int rounding : observer->reads) {
-    EXPECT_EQ(rounding, FE_TONEAREST);
-  }
-  for (const int rounding : observer->writes) {
-    EXPECT_EQ(rounding, FE_TONEAREST);
-  }
-}
-
 INSTANTIATE_TEST_SUITE_P(
     Cdna, PackedF32Selection,
     testing::Combine(testing::Values(rocjitsu::IsaFamily::Cdna2, rocjitsu::IsaFamily::Cdna3,

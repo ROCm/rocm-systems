@@ -25,13 +25,13 @@
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "util/data_types.h"
 #include "util/simd_test_hooks.h"
-
-#include "util/simd.h"
 
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <cmath>
 #include <cstdint>
 #include <gtest/gtest.h>
 #include <memory>
@@ -40,7 +40,8 @@
 namespace rocjitsu::amdgpu {
 namespace {
 
-// Evaluate the inherited double-product/RNE model independently of API dispatch.
+// Evaluate the inherited double-product/RNE model under the default host FP
+// environment, independently of API dispatch.
 uint16_t reference(uint32_t raw, bool half, bool is_unsigned, bool absolute, bool negate,
                    const Wavefront &wave) {
   if (half) {
@@ -62,7 +63,7 @@ uint16_t reference(uint32_t raw, bool half, bool is_unsigned, bool absolute, boo
   }
   const double scale = is_unsigned ? 65535 : 32767;
   return uint16_t(
-      int32_t(util::rndne_scalar(std::clamp(value * scale, is_unsigned ? 0.0 : -scale, scale))));
+      int32_t(std::nearbyint(std::clamp(value * scale, is_unsigned ? 0.0 : -scale, scale))));
 }
 
 // Restore the test dispatch override on every exit path.

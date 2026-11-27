@@ -134,7 +134,7 @@ GFX1250_PANEL_ID_TO_SECTION: dict[int, str] = {
     2101: "PC Sampling",
 }
 
-GFX1201_PANEL_ID_TO_SECTION: dict[int, str] = {
+GFX120X_PANEL_ID_TO_SECTION: dict[int, str] = {
     201: "System Speed-of-Light",
     301: "Memory chart - Instruction Cache",
     302: "Memory chart - Scalar Data Cache",
@@ -269,9 +269,9 @@ def is_gfx115x_ip_variant(arch_name: str) -> bool:
     return bool(re.fullmatch(r"gfx115([0-9a-f]|x)", arch_name, re.IGNORECASE))
 
 
-def is_gfx1201_arch(arch_name: str) -> bool:
-    """Check if arch is gfx1201 to use the Navi48 analysis layout."""
-    return arch_name == "gfx1201"
+def is_gfx120x_arch(arch_name: str) -> bool:
+    """Check if arch is gfx120x to use the RDNA 4 analysis layout."""
+    return arch_name == "gfx120x"
 
 
 def is_gfx1250_arch(arch_name: str) -> bool:
@@ -337,8 +337,8 @@ def panel_id_to_section(arch_name: str, table_id: int | None) -> str | None:
         return None
     if is_gfx115x_ip_variant(arch_name):
         return RDNA35_PANEL_ID_TO_SECTION_BY_ARCH.get(table_id)
-    if is_gfx1201_arch(arch_name):
-        return GFX1201_PANEL_ID_TO_SECTION.get(table_id)
+    if is_gfx120x_arch(arch_name):
+        return GFX120X_PANEL_ID_TO_SECTION.get(table_id)
     if is_gfx1250_arch(arch_name):
         return GFX1250_PANEL_ID_TO_SECTION.get(table_id)
     return CDNA_PANEL_ID_TO_SECTION.get(table_id)

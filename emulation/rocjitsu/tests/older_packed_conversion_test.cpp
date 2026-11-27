@@ -5,6 +5,7 @@
 // controls, source staging, destination placement, aliases and inactive lanes.
 
 #include "compute_unit_test_util.h"
+#include "conversion_binding.h"
 #include "decode_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/opcodes.h"
@@ -16,7 +17,6 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/opcodes.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/execution_backend.h"
 #include "rocjitsu/isa/instruction.h"
@@ -37,7 +37,8 @@
 namespace rocjitsu::amdgpu {
 namespace {
 
-// Evaluate inherited RTZ and saturating integer models independently of API dispatch.
+// Check RTZ packing against separately tested scalar narrowing; integer outputs
+// retain independent bounded references.
 uint32_t reference(int operation, uint32_t a, uint32_t b, const Wavefront &wave, unsigned absolute,
                    unsigned negate) {
   if (operation) {
@@ -59,11 +60,17 @@ uint32_t reference(int operation, uint32_t a, uint32_t b, const Wavefront &wave,
     };
     return narrow(a, absolute & 1, negate & 1) | (narrow(b, absolute & 2, negate & 2) << 16);
   }
-  auto low = conversion_to_float<fp_format::F32, fp_format::F16>(wave, absolute & 1, negate & 1);
-  auto high = conversion_to_float<fp_format::F32, fp_format::F16>(wave, (absolute >> 1) & 1,
-                                                                  (negate >> 1) & 1);
-  low.rounding.direction = high.rounding.direction = conversion::Rounding::TOWARD_ZERO;
-  return low(a) | (high(b) << 16);
+  uint64_t flags = RJ_ARITH_SEMANTICS_COMPATIBILITY | RJ_ARITH_FP_ROUND_ZERO;
+  flags |= (wave.fp_denorm_mode_f32() & 1) ? 0 : RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
+  flags |= (wave.fp_denorm_mode_f16_f64() & 2) ? 0 : RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
+  flags |= wave.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0;
+  const auto narrow = [&](uint32_t raw, unsigned operand) {
+    const uint64_t modifiers = ((absolute >> operand) & 1 ? RJ_ARITH_ALU_ABS_A : 0) |
+                               ((negate >> operand) & 1 ? RJ_ARITH_ALU_NEG_A : 0);
+    return uint32_t(rocjitsu::test::conversion_binding(rj_arith_v_cvt_f16_f32_w32_gfx942, flags,
+                                                       modifiers, raw));
+  };
+  return narrow(a, 0) | (narrow(b, 1) << 16);
 }
 
 // Restore the test dispatch override on every exit path.

@@ -1,0 +1,1 @@
+* Documentation for `NCCL_NET_GDR_MLOPART` (default `1`), which controls GPU Direct RDMA for MLO partitions. Setting `0` opts MLO partitions out of GPU Direct RDMA, except partition 0 on PCI function 0, which keeps it. The variable was missing from the environment-variable reference.
