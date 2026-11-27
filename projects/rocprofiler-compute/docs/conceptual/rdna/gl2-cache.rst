@@ -9,7 +9,7 @@ GL2 cache
 =========
 
 GL2 cache (RDNA naming for what Instinct documentation refers to as L2/TCC) is the final GFX on-chip cache for most clients before traffic reaches the memory system.
-On gfx115x, traffic then proceeds toward system memory through GCEA. On gfx1201, the GL2 size depends on the board (for example 8 MB on the Radeon RX 9070 and RX 9070 XT), modeled as 32 channels, and traffic then goes through GCEA toward the Infinity Cache and VRAM. Those panels are documented under :doc:`gcea`.
+On gfx115x, traffic then proceeds toward system memory through GCEA. On gfx1201, the GL2 size depends on the board, and traffic then goes through GCEA toward the Infinity Cache and VRAM. Those panels are documented under :doc:`gcea`.
 
 For Instinct L2 (TCC) coherence, channel hashing, and fabric metrics on CDNA
 architecture-based AMD Instinct MI-Series GPUs, see :doc:`../cdna/l2-cache` under
