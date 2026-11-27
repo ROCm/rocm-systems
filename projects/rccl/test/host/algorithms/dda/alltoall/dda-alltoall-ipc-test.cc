@@ -36,9 +36,9 @@ constexpr size_t kSingleBlockFloats = 8192 / 4;
 constexpr size_t kInKernelMaxFloats = (4u << 20) / (8 * sizeof(float));
 constexpr size_t kHostPreCopyFloats = kInKernelMaxFloats + 4;
 
-template <bool kStagingCopyInKernel>
+template <bool kStagingCopyInKernel, bool kChunkedStaging = false>
 const void* Kernel() {
-  return KernelPtr(&dda::common::ddaAllToAllIpc<int8_t, 8, false, kStagingCopyInKernel>);
+  return KernelPtr(&dda::common::ddaAllToAllIpc<int8_t, 8, false, kStagingCopyInKernel, kChunkedStaging>);
 }
 
 class DdaAlltoallIpcMicrotest : public ::testing::Test {
@@ -174,6 +174,7 @@ TEST_F(DdaAlltoallIpcMicrotest, Launch_EightKiBPerPeerIsOneBlockAndCopiesInKerne
 TEST_F(DdaAlltoallIpcMicrotest, Launch_MultiBlockAt4MiBCopiesInKernel) {
   ASSERT_EQ(Run(kInKernelMaxFloats), ncclSuccess);
   ASSERT_EQ(g_ddaLaunches.size(), 1u);
+  EXPECT_EQ(g_ddaLaunches[0].kernel, (Kernel<true, true>()));
   EXPECT_EQ(g_ddaLaunches[0].grid.x, 24u);
   EXPECT_TRUE(copies_.empty());
   EXPECT_EQ(g_ddaLaunches[0].stopEvent, kStopEvent);
