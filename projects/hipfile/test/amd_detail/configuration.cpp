@@ -92,6 +92,12 @@ struct HipFileConfiguration : public Test {
         EXPECT_CALL(msys, getenv(StrEq(hipFile::Environment::DEVICE_STREAM_POOL_SIZE)))
             .WillOnce(Return(const_cast<char *>(hipfile_device_stream_pool_size)));
     }
+
+    void expect_configuration_force_blocking_async(const char *hipfile_force_blocking_async)
+    {
+        EXPECT_CALL(msys, getenv(StrEq(hipFile::Environment::FORCE_BLOCKING_ASYNC)))
+            .WillOnce(Return(const_cast<char *>(hipfile_force_blocking_async)));
+    }
 };
 
 TEST_F(HipFileConfiguration, FastpathEnabledIfForceCompatModeEnvironmentVariableIsNotSet)
@@ -354,6 +360,48 @@ TEST_F(HipFileConfiguration, DeviceStreamPoolSizeEnvironmentVariableIsZero)
 {
     expect_configuration_device_stream_pool_size("0");
     ASSERT_EQ(4, Configuration().deviceStreamPoolSize());
+}
+
+TEST_F(HipFileConfiguration, ForceBlockingAsyncEnabledIfEnvironmentVariableIsNotSet)
+{
+    expect_configuration_force_blocking_async(nullptr);
+    ASSERT_TRUE(Configuration().forceBlockingAsync());
+}
+
+TEST_F(HipFileConfiguration, ForceBlockingAsyncEnabledIfEnvironmentVariableIsInvalid)
+{
+    expect_configuration_force_blocking_async("1");
+    ASSERT_TRUE(Configuration().forceBlockingAsync());
+}
+
+TEST_F(HipFileConfiguration, ForceBlockingAsyncEnabledIfEnvironmentVariableIsTrue)
+{
+    expect_configuration_force_blocking_async("true");
+    ASSERT_TRUE(Configuration().forceBlockingAsync());
+}
+
+TEST_F(HipFileConfiguration, ForceBlockingAsyncDisabledIfEnvironmentVariableIsFalse)
+{
+    expect_configuration_force_blocking_async("false");
+    ASSERT_FALSE(Configuration().forceBlockingAsync());
+}
+
+TEST_F(HipFileConfiguration, OverrideEnabledForceBlockingAsync)
+{
+    expect_configuration_force_blocking_async(nullptr);
+    Configuration config;
+    ASSERT_TRUE(config.forceBlockingAsync());
+    config.forceBlockingAsync(false);
+    ASSERT_FALSE(config.forceBlockingAsync());
+}
+
+TEST_F(HipFileConfiguration, OverrideDisabledForceBlockingAsync)
+{
+    expect_configuration_force_blocking_async("false");
+    Configuration config;
+    ASSERT_FALSE(config.forceBlockingAsync());
+    config.forceBlockingAsync(true);
+    ASSERT_TRUE(config.forceBlockingAsync());
 }
 
 HIPFILE_WARN_NO_GLOBAL_CTOR_ON

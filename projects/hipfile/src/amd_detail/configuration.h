@@ -18,6 +18,7 @@ class Configuration {
     std::atomic<std::optional<bool>> m_fastpath_override;
     std::optional<bool>              m_fallback_override;
     std::optional<bool>              m_host_override;
+    std::optional<bool>              m_force_blocking_async_override;
 
 public:
     virtual ~Configuration() = default;
@@ -59,6 +60,16 @@ public:
     /// @brief Gets the size of the device stream pool
     /// @return the size of the device stream pool in bytes
     virtual size_t deviceStreamPoolSize() const noexcept;
+
+    /// @brief Checks if asynchronous I/O is forced onto the blocking host-function path
+    /// @return true if every stream uses the blocking path (default), false if registered streams may
+    /// gate on a stream wait value
+    virtual bool forceBlockingAsync() const noexcept;
+
+    /// @brief Override whether asynchronous I/O is forced onto the blocking host-function path
+    ///
+    /// Only affects streams constructed after the call.
+    virtual void forceBlockingAsync(bool enabled) noexcept;
 };
 
 }

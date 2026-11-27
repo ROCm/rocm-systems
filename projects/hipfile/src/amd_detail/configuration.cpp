@@ -127,3 +127,16 @@ Configuration::deviceStreamPoolSize() const noexcept
     }()};
     return device_stream_pool_size_env;
 }
+
+bool
+Configuration::forceBlockingAsync() const noexcept
+{
+    static bool force_blocking_async_env{Environment::force_blocking_async().value_or(true)};
+    return m_force_blocking_async_override.value_or(force_blocking_async_env);
+}
+
+void
+Configuration::forceBlockingAsync(bool enabled) noexcept
+{
+    m_force_blocking_async_override = enabled;
+}
