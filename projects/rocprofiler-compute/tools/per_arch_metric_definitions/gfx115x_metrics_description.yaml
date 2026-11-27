@@ -141,8 +141,8 @@ Memory chart - LDS (Local Data Share):
     rst: Percentage of the LDS cycle budget across all CUs spent servicing indexed (non-direct, non-interpolation) accesses, measured over GPU-active cycles. Because two CUs share a workgroup processor's LDS, a saturated LDS reads well below 100% on this architecture.
     unit: Percent
   LDS Bank Conflict Rate:
-    plain: Percentage of LDS accesses that experienced bank conflicts. Conflicts occur when multiple work-items in a wavefront access different addresses in the same LDS bank. High conflict rates reduce effective LDS bandwidth. Restructuring data layouts can help.
-    rst: Percentage of LDS accesses that experienced bank conflicts. Conflicts occur when multiple work-items in a wavefront access different addresses in the same LDS bank. High conflict rates reduce effective LDS bandwidth. Restructuring data layouts can help.
+    plain: Percentage of indexed-access LDS cycles spent stalled on bank conflicts. Conflicts occur when multiple work-items in a wavefront access different addresses in the same LDS bank. High values mean lower effective LDS bandwidth. Restructuring data layouts can help.
+    rst: Percentage of indexed-access LDS cycles spent stalled on bank conflicts. Conflicts occur when multiple work-items in a wavefront access different addresses in the same LDS bank. High values mean lower effective LDS bandwidth. Restructuring data layouts can help.
     unit: Percent
   LDS Estimated Bandwidth:
     plain: Estimated achieved bandwidth for Local Data Share operations. This reflects the effective throughput after accounting for bank conflicts. RDNA 3.5 provides 32 LDS banks per compute unit for high-bandwidth shared memory access.

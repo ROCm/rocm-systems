@@ -62,5 +62,8 @@ ROCm Compute Profiler. See :doc:`rocm:reference/gpu-arch-specs` for full AMD Ins
       * - Platform
         - Status
 
-      * - Navi 44 and Navi 48
+      * - AMD Radeon RX 9070 series / Radeon AI PRO R9600 series / Radeon AI PRO R9700 series (Navi 48, gfx1201)
+        - Supported ✅ (experimental, see :doc:`/conceptual/rdna/rdna-performance-model`)
+
+      * - Navi 44 (gfx1200)
         - Supported ✅ (experimental)

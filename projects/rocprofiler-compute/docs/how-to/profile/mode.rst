@@ -54,6 +54,17 @@ Run ``rocprof-compute profile -h`` for more details. See
    - Some metrics may show reduced utilization compared to normal execution
      due to the lack of concurrent kernel execution.
 
+.. _profile-rdna-power-gating:
+
+.. warning::
+
+   **On RDNA3.5 and RDNA4 GPUs, profiling requires power-gating changes.**
+
+   The default ``AUTO`` performance level can gate the perfmon
+   clock. While that clock is gated, counters such as ``TCP_REQ`` report zero
+   even when the kernel issues global memory traffic. For the details and the
+   workaround, see :ref:`faq-tcp-req-zero`.
+
 .. _profile-example:
 
 Profiling example
@@ -707,6 +718,32 @@ that contains both ``roofline.csv`` and application performance counters
 
    * gfx9 (CDNA1/2/3/4) supports Matrix Fused MultiplyAdd (MFMA).
    * gfx10+ (RDNA3+) supports Wave Matrix Multiply Accumulate (WMMA).
+
+   On gfx1201 (Navi 48, for example the Radeon RX 9070), the roofline plots the
+   ``VRAM``, ``L0``, and ``LDS`` bandwidth roofs. ``VRAM`` is the measured
+   device-memory bandwidth (CSV column ``VRAMBw``). RDNA architectures do not have HBM. On the
+   Radeon RX 9070 and RX 9070 XT, the 256-bit, 20 Gbps VRAM interface peaks at
+   640 GB/s at the default performance level. The measured roof is lower under
+   ``STABLE_STD``.
+
+   The Infinity Cache serves some of the requests that the ``AI VRAM`` point
+   counts, so a kernel can sit above the ``VRAM`` roof. See :ref:`rdna4-roofline`
+   for the roofs, the VALU and WMMA estimates, and the WMMA counter requirements.
+
+   gfx1201 support is experimental, so add ``--experimental`` to every
+   ``rocprof-compute`` command. Before a gfx1201 collection, set the performance
+   level as described in
+   :ref:`profiling power-gating requirements <profile-rdna-power-gating>`. Then
+   collect System Speed-of-Light and the Memory Chart for a short workload:
+
+   .. code-block:: bash
+
+      HIP_VISIBLE_DEVICES=0 rocprof-compute --experimental profile --name vcopy-gfx1201 \
+          -b sol memchart -- ./vcopy -n 1048576 -b 256
+
+   ``HIP_VISIBLE_DEVICES`` selects the GPU used by the HIP application. List the
+   block aliases with
+   ``rocprof-compute --experimental --debug-list-metrics-gfx-id gfx1201 --list-metrics``.
 
    CDNA4+ also supports Microscaling formats, which can be identified by the "MX" prefix in datatypes. More details and other resources about MX per CDNA architecture can be found at `AMD CDNA Architecture <https://www.amd.com/en/technologies/cdna.html>`_.
 

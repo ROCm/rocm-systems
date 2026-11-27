@@ -2,7 +2,7 @@ spi.compute_wave_dispatches:
   name: Compute Wave Dispatches
   formula: SUM(SQ_WAVES_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Total wavefronts dispatched (SQ_WAVES_sum).
+  description: Wavefronts dispatched, per normalization unit.
 spi.wave_dispatch_rate:
   name: Wave Dispatch Rate
   formula: SUM(SQ_WAVES_sum) / SUM(GRBM_GUI_ACTIVE)

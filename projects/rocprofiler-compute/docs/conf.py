@@ -100,9 +100,14 @@ for context_name, section_name in cdna_section_map.items():
                 "data": arch_metrics[arch][section_name],
             }
 
-# Load gfx115x (RDNA 3.5) metrics YAML
-with open("data/metrics/gfx115x_metrics.yaml") as f:
-    gfx115x_metrics = yaml.safe_load(f)
+# Load per-arch RDNA metrics YAMLs
+rdna_metrics = {}
+for arch in ["gfx115x", "gfx120x"]:
+    with open(f"data/metrics/{arch}_metrics.yaml") as f:
+        rdna_metrics[arch] = yaml.safe_load(f)
+
+gfx115x_metrics = rdna_metrics["gfx115x"]
+gfx1201_metrics = rdna_metrics["gfx120x"]
 
 # RDNA gfx115x section mapping: jinja context id -> YAML section name
 rdna_gfx115x_section_map = {
@@ -170,9 +175,48 @@ rdna_gfx115x_section_map = {
 
 # Generate gfx115x jinja contexts
 for context_name, section_name in rdna_gfx115x_section_map.items():
-    jinja_contexts[context_name] = {
-        "data": gfx115x_metrics.get(section_name, {}),
-    }
+    jinja_contexts[context_name] = {"data": gfx115x_metrics[section_name]}
+
+rdna_gfx1201_section_map = {
+    "rdna4-gl2-request-statistics-gfx1201": "GL2 Cache Request Statistics",
+    "rdna4-gl2-cache-performance-gfx1201": "GL2 Cache Performance",
+    "rdna4-sys-sol-gfx1201": "System Speed-of-Light",
+    "rdna4-gl0-cache-performance-gfx1201": "GL0 Cache Performance",
+    "rdna4-gl0-request-statistics-gfx1201": "GL0 Request Statistics",
+    "rdna4-gl0-stalls-gfx1201": "GL0 Stalls",
+    "rdna4-gl1-request-statistics-gfx1201": "GL1 Cache Request Statistics",
+    "rdna4-grbm-metrics-gfx1201": "GRBM Metrics",
+    "rdna4-lds-instruction-mix-gfx1201": "WGP LDS Instruction Mix",
+    "rdna4-valu-instruction-mix-gfx1201": "WGP VALU Instruction Mix",
+    "rdna4-vmem-instruction-mix-gfx1201": "WGP VMEM Instruction Mix",
+    "rdna4-wave-dispatch-gfx1201": "WGP Wavefront Dispatch",
+    "rdna4-wave-dispatch-statistics-gfx1201": "Wave Dispatch Statistics",
+    "rdna4-wave-instruction-mix-gfx1201": "WGP Wavefront Instruction Mix",
+    "rdna4-wave-life-gfx1201": "WGP Wavefront Life",
+    "rdna4-wavefront-launch-stats-gfx1201": "WGP Wavefront Launch Stats",
+    "rdna4-wgp-instruction-cache-gfx1201": "WGP Instruction Cache",
+    "rdna4-wgp-scalar-data-cache-gfx1201": "WGP Scalar Data Cache",
+    "rdna4-wgp-utilization-gfx1201": "WGP Utilization",
+    "rdna4-wmma-instruction-counting-gfx1201": (
+        "WGP WMMA Instruction FLOPs and IOPs Counting"
+    ),
+    "rdna4-roofline-performance-rates-gfx1201": "Roofline Performance Rates",
+    "rdna4-roofline-plot-points-gfx1201": "Roofline Plot Points",
+    "rdna4-memory-chart-instruction-cache-gfx1201": (
+        "Memory chart - Instruction Cache"
+    ),
+    "rdna4-memory-chart-scalar-data-cache-gfx1201": (
+        "Memory chart - Scalar Data Cache"
+    ),
+    "rdna4-memory-chart-gl0-cache-gfx1201": "Memory chart - GL0 Cache (Vector L0)",
+    "rdna4-memory-chart-lds-gfx1201": "Memory chart - LDS (Local Data Share)",
+    "rdna4-memory-chart-gl2-cache-gfx1201": "Memory chart - GL2 Cache (L2)",
+    "rdna4-memory-chart-l2-to-memory-gfx1201": "Memory chart - L2 to Memory",
+    "rdna4-memory-chart-wgps-gfx1201": "Memory chart - Workgroup Processors (WGPs)",
+}
+
+for context_name, section_name in rdna_gfx1201_section_map.items():
+    jinja_contexts[context_name] = {"data": gfx1201_metrics[section_name]}
 
 external_toc_path = "./sphinx/_toc.yml"
 external_projects_current_project = "rocprofiler-compute"
