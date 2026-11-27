@@ -26,7 +26,7 @@ from ml_api_tracing.inject_roctx.backends.torch_wraps import (
     TENSOR_METHOD_WRAPS,
 )
 from ml_api_tracing.marker_format import (
-    _MAX_TENSOR_ARGUMENT_ITEMS,
+    MAX_TENSOR_ARGUMENT_ITEMS,
     format_args_blob,
     render_dtype_shape,
 )
@@ -109,14 +109,14 @@ def format_wrap_args(args: Tuple[object, ...], kwargs: Dict[str, object]) -> str
     """
     items: List[str] = []
     for value in args:
-        if len(items) >= _MAX_TENSOR_ARGUMENT_ITEMS:
+        if len(items) >= MAX_TENSOR_ARGUMENT_ITEMS:
             break
         rendered = render_dtype_shape(value)
         if rendered is None:
             continue
         items.append(rendered)
     for name, value in kwargs.items():
-        if len(items) >= _MAX_TENSOR_ARGUMENT_ITEMS:
+        if len(items) >= MAX_TENSOR_ARGUMENT_ITEMS:
             break
         rendered = render_dtype_shape(value)
         if rendered is None:

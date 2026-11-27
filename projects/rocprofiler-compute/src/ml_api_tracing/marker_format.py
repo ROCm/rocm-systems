@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from ml_api_tracing.constants import KNOWN_ML_API_BACKENDS, USER_REGION_BACKEND
 
 _MAX_ARGS_LEN = 512
-_MAX_TENSOR_ARGUMENT_ITEMS = 32
+MAX_TENSOR_ARGUMENT_ITEMS = 32
 _STACKED_MARKER_WIRE = re.compile(r":#\d+@")
 
 

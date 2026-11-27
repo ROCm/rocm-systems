@@ -13,7 +13,7 @@ from ml_api_tracing.inject_roctx.backends.torch_wraps import (
     DEEP_TENSOR_METHOD_WRAPS,
     TENSOR_METHOD_WRAPS,
 )
-from ml_api_tracing.marker_format import _MAX_TENSOR_ARGUMENT_ITEMS, compose_marker
+from ml_api_tracing.marker_format import MAX_TENSOR_ARGUMENT_ITEMS, compose_marker
 from tests.integration.common import require_torch
 
 
@@ -423,7 +423,7 @@ def test_format_wrap_args_drops_items_past_the_cap():
         fake_tensor(shape=(index,), dtype_name="float32") for index in range(40)
     )
     blob = torch_backend.format_wrap_args(values, {})
-    assert blob.count("float32[") == _MAX_TENSOR_ARGUMENT_ITEMS
+    assert blob.count("float32[") == MAX_TENSOR_ARGUMENT_ITEMS
 
 
 def test_format_wrap_args_preserves_readable_tensors(torch_module):
