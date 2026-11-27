@@ -225,11 +225,9 @@ TEST(HostHierAllReduce, AutoWindowEdges)
 {
     EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(2, kMiB));
     EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(2, kMiB + 1));
-    EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(2, 2 * kMiB));
-    EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(2, 2 * kMiB + 1));
-    EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(2, 4 * kMiB));
-    EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(2, 8 * kMiB));
+    EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(2, 4 * kMiB));
     EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(2, 16 * kMiB));
+    EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(2, 16 * kMiB + 1));
     EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(2, 32 * kMiB));
     EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(2, 64 * kMiB - 1));
     EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(2, 64 * kMiB));
@@ -266,7 +264,7 @@ TEST(HostHierAllReduce, EligibilityPerMode_Isolated)
             };
             EXPECT_TRUE(eligible(blockHosts(2, 8), floats(2 * kMiB)));
             EXPECT_FALSE(eligible(blockHosts(2, 8), floats(kMiB))) << "below the window";
-            EXPECT_FALSE(eligible(blockHosts(2, 8), floats(4 * kMiB))) << "2-host gap";
+            EXPECT_FALSE(eligible(blockHosts(2, 8), floats(32 * kMiB))) << "2-host gap";
             EXPECT_FALSE(eligible(blockHosts(4, 8), floats(kMiB))) << "four hosts, below the window";
             EXPECT_TRUE(eligible(blockHosts(4, 8), floats(2 * kMiB)));
             EXPECT_TRUE(eligible(blockHosts(4, 8), floats(256 * kMiB)));

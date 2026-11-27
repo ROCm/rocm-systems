@@ -246,8 +246,7 @@ bool rcclHostHierAllReduceAutoWindow(int nHosts, size_t bytes) {
   constexpr size_t MiB = size_t{1} << 20;
   switch (nHosts) {
   case 2:
-    return (bytes > 1 * MiB && bytes <= 2 * MiB) || (bytes >= 8 * MiB && bytes <= 16 * MiB) ||
-           (bytes >= 64 * MiB && bytes <= 128 * MiB);
+    return (bytes > 1 * MiB && bytes <= 16 * MiB) || (bytes >= 64 * MiB && bytes <= 128 * MiB);
   case 4:
     return bytes >= 2 * MiB && bytes <= 256 * MiB;
   case 8:
