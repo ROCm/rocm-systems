@@ -17,6 +17,14 @@ if(
     set(RJ_ARITH_ENABLE_X86_64 ON)
 endif()
 
+# VM request records use the C operand types without linking arithmetic into
+# analysis-only objects and plugins.
+add_library(rj_arith_headers INTERFACE)
+target_include_directories(
+    rj_arith_headers
+    INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
 add_subdirectory(src)
 
 if(BUILD_TESTING)

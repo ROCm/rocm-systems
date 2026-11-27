@@ -7,13 +7,10 @@
 // are consumed; backend-local vector types do not cross compilation targets.
 #pragma once
 
-#include "util/host_target.h"
-
-#if RJ_HOST_HAS_AVX512F || RJ_HOST_HAS_AVX2
 #include <immintrin.h>
 
-namespace rocjitsu::amdgpu::bvh_rounding {
-#if RJ_HOST_HAS_AVX512F
+namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE::bvh::bvh_rounding {
+#if defined(RJ_ARITH_BVH_AVX512)
 inline namespace avx512 {
 using Vector = __m512;
 
@@ -77,7 +74,7 @@ using Vector = __m128;
 // Pack the three vertices, with a spare fourth lane.
 inline Vector pack(float a, float b, float c) {
   const auto low = _mm_setr_ps(a, b, c, 0.0f);
-#if RJ_HOST_HAS_AVX512F
+#if defined(RJ_ARITH_BVH_AVX512)
   return _mm512_zextps128_ps512(low);
 #else
   return low;
@@ -86,7 +83,7 @@ inline Vector pack(float a, float b, float c) {
 
 // Repeat a ray coordinate across the packed vertices.
 inline Vector broadcast(float value) {
-#if RJ_HOST_HAS_AVX512F
+#if defined(RJ_ARITH_BVH_AVX512)
   return _mm512_set1_ps(value);
 #else
   return _mm_set1_ps(value);
@@ -95,7 +92,7 @@ inline Vector broadcast(float value) {
 
 // Permute within each four-lane group, using an immediate index encoding.
 template <int Indices> inline Vector permute(Vector value) {
-#if RJ_HOST_HAS_AVX512F
+#if defined(RJ_ARITH_BVH_AVX512)
   return _mm512_permute_ps(value, Indices);
 #else
   return _mm_shuffle_ps(value, value, Indices);
@@ -104,7 +101,7 @@ template <int Indices> inline Vector permute(Vector value) {
 
 // Interleave distances and edge weights for their two ordered reductions.
 inline Vector interleave_low(Vector a, Vector b) {
-#if RJ_HOST_HAS_AVX512F
+#if defined(RJ_ARITH_BVH_AVX512)
   return _mm512_unpacklo_ps(a, b);
 #else
   return _mm_unpacklo_ps(a, b);
@@ -112,7 +109,7 @@ inline Vector interleave_low(Vector a, Vector b) {
 }
 // Interleave the remaining vertex and spare lane for the final reduction.
 inline Vector interleave_high(Vector a, Vector b) {
-#if RJ_HOST_HAS_AVX512F
+#if defined(RJ_ARITH_BVH_AVX512)
   return _mm512_unpackhi_ps(a, b);
 #else
   return _mm_unpackhi_ps(a, b);
@@ -121,17 +118,16 @@ inline Vector interleave_high(Vector a, Vector b) {
 
 // Publish the low four lanes into scalar geometry/result storage.
 inline void store(float *destination, Vector value) {
-#if RJ_HOST_HAS_AVX512F
+#if defined(RJ_ARITH_BVH_AVX512)
   _mm_storeu_ps(destination, _mm512_castps512_ps128(value));
 #else
   _mm_storeu_ps(destination, value);
 #endif
 }
 
-#if RJ_HOST_HAS_AVX512F
+#if defined(RJ_ARITH_BVH_AVX512)
 } // namespace avx512
 #else
 } // namespace avx2
 #endif
-} // namespace rocjitsu::amdgpu::bvh_rounding
-#endif
+} // namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE::bvh::bvh_rounding

@@ -86,6 +86,7 @@ add_library(
     dot/half_dot.cpp
     dot/integer_dot.cpp
     dot/scalar_repair.cpp
+    graphics/bvh.cpp
     graphics/cube.cpp
     graphics/interp_gfx10.cpp
     graphics/interp16.cpp
@@ -160,11 +161,8 @@ add_library(
     wmma/wmma_replicated.cpp
 )
 
-target_include_directories(
-    rj_arith
-    PUBLIC ${rj_arith_source_dir}/include
-    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
-)
+target_include_directories(rj_arith PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(rj_arith PUBLIC rj_arith_headers)
 if(UNIX)
     target_link_libraries(rj_arith PRIVATE m)
 endif()
