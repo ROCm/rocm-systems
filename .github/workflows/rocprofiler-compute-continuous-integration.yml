@@ -85,6 +85,8 @@ env:
   # and PyTorch wheels".
   ROCM_VENV: "/opt/rocm-venv"
   WHEEL_INDEX_URL: "https://nightly.repo.amd.com/rocm/whl-next/"
+  JAX_VERSION: "0.11.2"
+  JAX_MIN_PYTHON: "3.12"
 
 jobs:
   ci_config:
@@ -254,7 +256,7 @@ jobs:
           apt install -y pkg-config
           echo "✅ ROCm Dependencies Installed!"
 
-      - name: Install nightly ROCm and PyTorch wheels
+      - name: Install nightly ROCm and ML API wheels
         shell: bash
         env:
           GFX_TARGETS: ${{ join(matrix.system.gfx-target, ' ') }}
@@ -262,9 +264,6 @@ jobs:
           set -e
           python3 -m venv "${ROCM_VENV}"
           "${ROCM_VENV}/bin/pip" install --upgrade pip
-
-          # cmake 3.21 misses Python 3.12 headers. Drop once the nightly image has this.
-          "${ROCM_VENV}/bin/pip" install 'cmake==3.28.*'
 
           device_extras=""
           for target in ${GFX_TARGETS}; do
@@ -279,6 +278,18 @@ jobs:
             --timeout 600 \
             "torch[${device_extras#,}]==2.14.*; python_version >= '3.11'" \
             "rocm[libraries,profiler,devel${device_extras}]"
+
+          # TheRock builds JAX for Python 3.12+ only, so Ubuntu 24.04 jobs get JAX and
+          # Ubuntu 22.04 jobs (Python 3.10) do not, as with PyTorch. The ROCm plugin
+          # and PJRT come from TheRock and must match the ROCm build installed above.
+          # jax comes from PyPI. Keep all three on the same version.
+          rocm_version="$("${ROCM_VENV}/bin/python" -c 'from importlib.metadata import version; print(version("rocm"))')"
+          "${ROCM_VENV}/bin/pip" install \
+            --extra-index-url "${WHEEL_INDEX_URL}" \
+            --timeout 600 \
+            "jax==${JAX_VERSION}; python_version >= '${JAX_MIN_PYTHON}'" \
+            "jax-rocm10-plugin==${JAX_VERSION}+rocm${rocm_version}; python_version >= '${JAX_MIN_PYTHON}'" \
+            "jax-rocm10-pjrt==${JAX_VERSION}+rocm${rocm_version}; python_version >= '${JAX_MIN_PYTHON}'"
 
           "${ROCM_VENV}/bin/rocm-sdk" init
 

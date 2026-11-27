@@ -3,7 +3,6 @@
 
 // SIMD register loads, stores and mask bridges for VM operand transport.
 // GPU instruction arithmetic and numerical conversions belong to rj-arith.
-// Scalar rounding recipes remain for the generic semantic emitter.
 
 #ifndef UTIL_SIMD_H_
 #define UTIL_SIMD_H_
@@ -14,10 +13,8 @@
 
 #include <bit>
 #include <bitset>
-#include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <limits>
 #include <type_traits>
 
 #if RJ_HOST_HAS_STDX_SIMD
@@ -25,40 +22,6 @@
 #endif
 
 namespace util {
-
-/// Round an IEEE F32/F64 value to an integral value with ties to even.
-/// Integer operations preserve signed zero and quiet NaN payloads without
-/// depending on or changing host rounding, denormal modes or exception flags.
-template <typename Float> inline Float rndne_scalar(Float value) {
-  static_assert(std::is_same_v<Float, float> || std::is_same_v<Float, double>);
-  using U = std::conditional_t<sizeof(Float) == 4, uint32_t, uint64_t>;
-  constexpr unsigned kFraction = std::numeric_limits<Float>::digits - 1;
-  constexpr unsigned kBias = std::numeric_limits<Float>::max_exponent - 1;
-  constexpr U kSign = U(1) << (sizeof(U) * 8 - 1);
-  constexpr U kInfinity = U(2 * kBias + 1) << kFraction;
-  const U bits = std::bit_cast<U>(value);
-  const U magnitude = bits & ~kSign;
-  const U sign = bits & kSign;
-  if (magnitude >= kInfinity) {
-    return std::bit_cast<Float>(bits | (magnitude > kInfinity ? U(1) << (kFraction - 1) : 0));
-  }
-  const unsigned exponent = static_cast<unsigned>(magnitude >> kFraction);
-  if (exponent >= kBias + kFraction) {
-    return value;
-  }
-  if (exponent < kBias) {
-    const U rounded = magnitude > (U(kBias - 1) << kFraction) ? U(kBias) << kFraction : 0;
-    return std::bit_cast<Float>(sign | rounded);
-  }
-  const unsigned shift = kBias + kFraction - exponent;
-  const U unit = U(1) << shift;
-  const U fraction = magnitude & (unit - 1);
-  U rounded = magnitude & ~(unit - 1);
-  if (fraction > unit / 2 || (fraction == unit / 2 && (rounded & unit) != 0)) {
-    rounded += unit;
-  }
-  return std::bit_cast<Float>(sign | rounded);
-}
 
 /// Compile-time switch for `<experimental/simd>` availability. Callers
 /// gate SIMD fast paths via `if constexpr (util::has_stdx_simd)` so the
@@ -349,23 +312,6 @@ template <class T> void masked_store_narrow(uint32_t *dst, narrow32<T> v, uint64
     }
   }
 }
-
-// Scalar numerical recipes in the generic semantic emitter use these helpers.
-#if defined(__GNUC__) && !defined(__clang__)
-template <class F> inline F quiet_snan_scalar(F a, F r) {
-  using U = std::conditional_t<sizeof(F) == 4, uint32_t, uint64_t>;
-  constexpr U kQuiet = U(1) << (sizeof(F) == 4 ? 22 : 51);
-  return std::isnan(a) ? std::bit_cast<F>(std::bit_cast<U>(a) | kQuiet) : r;
-}
-#else
-template <class F> inline F quiet_snan_scalar(F /*a*/, F r) { return r; }
-#endif
-inline float floor_scalar(float a) { return quiet_snan_scalar(a, std::floor(a)); }
-inline double floor_scalar(double a) { return quiet_snan_scalar(a, std::floor(a)); }
-inline float ceil_scalar(float a) { return quiet_snan_scalar(a, std::ceil(a)); }
-inline double ceil_scalar(double a) { return quiet_snan_scalar(a, std::ceil(a)); }
-inline float trunc_scalar(float a) { return quiet_snan_scalar(a, std::trunc(a)); }
-inline double trunc_scalar(double a) { return quiet_snan_scalar(a, std::trunc(a)); }
 
 #endif // RJ_HOST_HAS_STDX_SIMD
 

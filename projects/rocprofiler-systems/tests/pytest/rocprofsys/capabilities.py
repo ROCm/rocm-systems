@@ -3,8 +3,10 @@
 
 from __future__ import annotations
 
+import ctypes
 import functools
 import os
+import platform
 import re
 import shutil
 import subprocess
@@ -117,6 +119,78 @@ def find_roctx_site_packages(rocm_path: Path | None, python_version: str) -> Pat
         ),
         None,
     )
+
+
+# (AUDIT_ARCH_*, __NR_perf_event_open) per machine, used to build a seccomp filter.
+_SECCOMP_PERF_EVENT_OPEN = {
+    "x86_64": (0xC000003E, 298),
+    "aarch64": (0xC00000B7, 241),
+}
+
+
+class _SockFilter(ctypes.Structure):
+    _fields_ = [
+        ("code", ctypes.c_uint16),
+        ("jt", ctypes.c_uint8),
+        ("jf", ctypes.c_uint8),
+        ("k", ctypes.c_uint32),
+    ]
+
+
+class _SockFprog(ctypes.Structure):
+    _fields_ = [("len", ctypes.c_uint16), ("filter", ctypes.POINTER(_SockFilter))]
+
+
+def make_deny_perf_events_hook():
+    """Return a ``preexec_fn`` that makes perf_event_open() fail with EPERM.
+
+    The seccomp filter is inherited by child processes. None if unsupported.
+    """
+    arch = _SECCOMP_PERF_EVENT_OPEN.get(platform.machine())
+    if arch is None:
+        return None
+    audit_arch, syscall_nr = arch
+
+    ld_abs, jeq, ret = 0x20, 0x15, 0x06
+    allow, eperm = 0x7FFF0000, 0x00050000 | 1  # SECCOMP_RET_ERRNO | EPERM
+    insns = (_SockFilter * 6)(
+        _SockFilter(ld_abs, 0, 0, 4),  # load seccomp_data.arch
+        _SockFilter(jeq, 0, 3, audit_arch),  # other arch: allow
+        _SockFilter(ld_abs, 0, 0, 0),  # load seccomp_data.nr
+        _SockFilter(jeq, 0, 1, syscall_nr),  # not perf_event_open: allow
+        _SockFilter(ret, 0, 0, eperm),
+        _SockFilter(ret, 0, 0, allow),
+    )
+    prog = _SockFprog(len(insns), insns)
+    libc = ctypes.CDLL(None, use_errno=True)
+    pr_set_no_new_privs, pr_set_seccomp, seccomp_mode_filter = 38, 22, 2
+
+    def hook() -> None:
+        if libc.prctl(pr_set_no_new_privs, 1, 0, 0, 0) != 0:
+            raise OSError(ctypes.get_errno(), "PR_SET_NO_NEW_PRIVS failed")
+        if libc.prctl(pr_set_seccomp, seccomp_mode_filter, ctypes.byref(prog)) != 0:
+            raise OSError(ctypes.get_errno(), "PR_SET_SECCOMP failed")
+
+    return hook
+
+
+@functools.lru_cache(maxsize=1)
+def deny_perf_events_supported() -> bool:
+    """Whether child processes can be launched with perf_event_open() denied."""
+    hook = make_deny_perf_events_hook()
+    if hook is None:
+        return False
+    try:
+        probe = subprocess.run(
+            ["true"],
+            preexec_fn=hook,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return probe.returncode == 0
 
 
 @dataclass

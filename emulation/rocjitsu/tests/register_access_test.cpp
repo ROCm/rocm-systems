@@ -1702,6 +1702,52 @@ TEST(RegisterAccessTest, CdnaValuAllocationRedirectsSourcesAndSuppressesEveryRes
   }
 }
 
+// The VALU discard decision follows the ordinary VGPR bank for every destination register,
+// including a two-word result that crosses the end of the allocation, a destination moved by
+// GPR indexing, and an allocation split by an accumulator bank.
+TEST(RegisterAccessTest, CdnaValuDiscardFollowsTheBankForEveryDestinationRegister) {
+  constexpr uint32_t kOrdinaryVgprs = 8;
+  for (const auto arch :
+       {rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4}) {
+    SCOPED_TRACE(arch);
+    auto decoder = Decoder::create(arch);
+    ASSERT_NE(decoder, nullptr);
+    for (bool split : {false, true}) {
+      if (split && arch == rocjitsu::IsaFamily::Cdna1) {
+        continue;
+      }
+      SCOPED_TRACE(split);
+      Fixture fx(arch, kSgprsPerWave, 1, 64, 64, split ? 2 * kOrdinaryVgprs : kOrdinaryVgprs);
+      ASSERT_NE(fx.wf, nullptr);
+      if (split) {
+        fx.wf->set_accum_vgpr_base(kOrdinaryVgprs);
+      }
+      for (uint32_t index : {0u, 3u}) {
+        SCOPED_TRACE(index);
+        // M0[15:12] bit 3 applies the M0[7:0] index to the destination.
+        fx.wf->set_mode_raw(index ? Wavefront::GPR_IDX_EN_BIT : 0u);
+        fx.wf->set_m0(index | (0x8u << 12));
+        ASSERT_EQ(fx.wf->gpr_idx_en(), index != 0);
+        for (uint32_t reg = 0; reg < 256; ++reg) {
+          SCOPED_TRACE(reg);
+          const uint32_t mov[] = {0x7e000300u | (reg << 17), 0}; // v_mov_b32 vREG, v0
+          auto one_word = decoder->decode(mov);
+          ASSERT_TRUE(one_word.succeeded());
+          ASSERT_EQ(std::string_view(one_word.value()->mnemonic()), "v_mov_b32_e32");
+          EXPECT_EQ(fx.wf->discards_valu_result(*one_word.value()),
+                    reg + index + 1 > kOrdinaryVgprs);
+          const uint32_t add[] = {0xd2800000u | reg, 0x00020100u}; // v_add_f64 vREG, v0, v0
+          auto two_words = decoder->decode(add);
+          ASSERT_TRUE(two_words.succeeded());
+          ASSERT_EQ(std::string_view(two_words.value()->mnemonic()), "v_add_f64");
+          EXPECT_EQ(fx.wf->discards_valu_result(*two_words.value()),
+                    reg + index + 2 > kOrdinaryVgprs);
+        }
+      }
+    }
+  }
+}
+
 TEST(RegisterAccessTest, OutOfRangeScalarWritesDoNotAcquirePendingDestinations) {
   constexpr uint64_t code = 0x1000, data = 0x4000;
   for (const auto arch : {rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2,
@@ -2451,6 +2497,104 @@ TEST(RegisterAccessTest, Packed16ReadsAndWritesObserveSelectedByteHalves) {
   ASSERT_EQ(fx.plugin->writes.size(), 1u);
   EXPECT_EQ(fx.plugin->writes[0].byte_mask, ExecutionPlugin::kHighHalfByteMask);
   EXPECT_EQ(fx.cu->read_vgpr(reg, lane), 0x33441122u);
+}
+
+TEST(RegisterAccessTest, DppRowShiftRightStagesRowsAndObservesSelectedSources) {
+  for (unsigned width : {32u, 64u}) {
+    Fixture fx(IsaFamily::Rdna4, kSgprsPerWave, 1, 8, width);
+    ASSERT_NE(fx.wf, nullptr);
+    fx.wf->set_exec(~uint64_t{0});
+    const uint32_t reg = fx.vgpr_base() + 1;
+    for (uint32_t lane = 0; lane < width; ++lane) {
+      fx.cu->write_vgpr(reg, lane, lane + 1);
+    }
+    rdna4::Operand source(32, rdna4::OperandType::OPR_VGPR, 1);
+    RegisterAccess regs(*fx.wf);
+    for (unsigned shift = 1; shift < dpp::ROW_SIZE; ++shift) {
+      const auto plan =
+          dpp::make_dpp_plan(width, dpp::ROW_SHR1 + shift - 1, 15, 15, 1, 0, fx.wf->exec(), false);
+      const uint64_t destinations = 0x9d86b4f0ac375e61ULL;
+      uint64_t expected_reads = 0;
+      fx.plugin->reads.clear();
+      std::optional<StagedOperand> staged;
+      dpp::apply_dpp(source, plan, destinations, staged, *fx.wf);
+      ASSERT_TRUE(staged.has_value());
+      for (unsigned lane = 0; lane < width; ++lane) {
+        if (!(destinations & (uint64_t{1} << lane))) {
+          continue;
+        }
+        const bool in_bounds = lane % dpp::ROW_SIZE >= shift;
+        EXPECT_EQ(regs.read_lane(*staged, lane), in_bounds ? lane - shift + 1 : 0);
+        if (in_bounds) {
+          expected_reads |= uint64_t{1} << (lane - shift);
+        }
+      }
+      ASSERT_EQ(fx.plugin->reads.size(), 1u);
+      EXPECT_EQ(fx.plugin->reads.front().physical_reg, reg);
+      EXPECT_EQ(fx.plugin->reads.front().lane_mask, expected_reads);
+      EXPECT_EQ(fx.plugin->reads.front().byte_mask, ExecutionPlugin::kFullByteMask);
+    }
+  }
+}
+
+TEST(RegisterAccessTest, DppFullWaveControlsStageSelectedSourcesAndObserveThem) {
+  // In-range permutations take the unconditional copy; the shifts keep out-of-bounds lanes.
+  const uint32_t controls[] = {0x1b,
+                               0x4e,
+                               0xb1,
+                               dpp::ROW_MIRROR,
+                               dpp::ROW_HALF_MIRROR,
+                               dpp::ROW_BCAST15,
+                               dpp::ROW_BCAST31,
+                               dpp::ROW_ROR1 + 2,
+                               dpp::WF_ROL1,
+                               dpp::ROW_SHL1 + 4,
+                               dpp::ROW_SHR1 + 2};
+  for (unsigned width : {32u, 64u}) {
+    Fixture fx(IsaFamily::Rdna4, kSgprsPerWave, 1, 8, width);
+    ASSERT_NE(fx.wf, nullptr);
+    fx.wf->set_exec(~uint64_t{0});
+    const uint32_t reg = fx.vgpr_base() + 1;
+    for (uint32_t lane = 0; lane < width; ++lane) {
+      fx.cu->write_vgpr(reg, lane, 0xa5000000u + lane);
+    }
+    rdna4::Operand source(32, rdna4::OperandType::OPR_VGPR, 1);
+    RegisterAccess regs(*fx.wf);
+    for (uint32_t control : controls) {
+      for (bool bound : {false, true}) {
+        // Generated bodies request every active lane; observers may request fewer.
+        for (uint64_t destinations : {fx.wf->exec(), uint64_t{0x9d86b4f0ac375e61}}) {
+          SCOPED_TRACE(testing::Message()
+                       << "width=" << width << " control=" << control << " bound=" << bound
+                       << " destinations=" << destinations);
+          const auto plan =
+              dpp::make_dpp_plan(width, control, 10, 15, bound, 0, fx.wf->exec(), false);
+          uint64_t expected_reads = 0;
+          fx.plugin->reads.clear();
+          std::optional<StagedOperand> staged;
+          dpp::apply_dpp(source, plan, destinations, staged, *fx.wf);
+          ASSERT_TRUE(staged.has_value());
+          for (unsigned lane = 0; lane < width; ++lane) {
+            const uint64_t lane_bit = uint64_t{1} << lane;
+            if (!(destinations & lane_bit)) {
+              continue;
+            }
+            if (plan.physical_read_dest_mask & lane_bit) {
+              EXPECT_EQ(regs.read_lane(*staged, lane), 0xa5000000u + plan.source_lanes[lane])
+                  << "lane=" << lane;
+              expected_reads |= uint64_t{1} << plan.source_lanes[lane];
+            } else if (plan.zero_source_mask & lane_bit) {
+              EXPECT_EQ(regs.read_lane(*staged, lane), 0u) << "lane=" << lane;
+            }
+          }
+          ASSERT_EQ(fx.plugin->reads.size(), 1u);
+          EXPECT_EQ(fx.plugin->reads.front().physical_reg, reg);
+          EXPECT_EQ(fx.plugin->reads.front().lane_mask, expected_reads);
+          EXPECT_EQ(fx.plugin->reads.front().byte_mask, ExecutionPlugin::kFullByteMask);
+        }
+      }
+    }
+  }
 }
 
 TEST(RegisterAccessTest, Packed16DppObservesSelectedPhysicalLanesAndHalves) {

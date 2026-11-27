@@ -10,7 +10,6 @@
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -278,8 +277,8 @@ void check_pack_opsel_high_halves(uint64_t exec) {
   Fixture defaults;
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
   const bool flush = (defaults.wf->fp_denorm_mode_f16_f64() & 1u) == 0;
-  const bool quiet =
-      amdgpu::fp_mode::quiets_nan(rocjitsu::IsaFamily::Cdna4, defaults.wf->ieee_mode());
+  // CDNA4's pack quiets signaling NaNs under MODE.IEEE.
+  const bool quiet = defaults.wf->ieee_mode();
   const auto canonical = [&](uint16_t half) -> uint16_t {
     if (flush && (half & 0x7c00u) == 0) {
       return half & 0x8000u;

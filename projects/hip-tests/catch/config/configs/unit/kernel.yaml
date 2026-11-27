@@ -51,6 +51,12 @@ kernel:
   Unit_hipLaunchKernelExC_NegetiveTsts:
     <<: *level_default
     tags: [launch]
+  Unit_hipLaunchKernelExC_Negative_ClusterSize:
+    <<: *level_default
+    unsupported:
+      targets: [nvidia]
+      reason: "AIRUNTIME-2744 - AMD cluster size limits; the test is compiled only for AMD."
+    tags: [launch]
   Unit_hipLaunchKernelEx_NegetiveTsts:
     <<: *level_default
     tags: [launch]

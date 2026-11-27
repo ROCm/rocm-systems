@@ -28,6 +28,18 @@ Wavefront::Wavefront(ComputeUnitCore &cu, uint32_t wf_id, uint32_t default_wf_si
 bool Wavefront::valu_destinations_allocated(const Instruction &inst) const {
   for (int i = 0; i < inst.num_dst_operands(); ++i) {
     const auto *op = inst.dst_operand(i);
+    // The decoded VGPR identity matches the register reference of every operand
+    // that has a width, without the virtual lookup. A zero-width operand names no
+    // register, so it keeps the lookup below.
+    if (const auto reg = op->decoded_vgpr(); reg && op->size_bits() != 0) {
+      const bool acc = reg->index >= ACC_VGPR_OFFSET;
+      const uint32_t start =
+          acc ? reg->index : apply_gpr_idx(*this, reg->index, op->vgpr_msb_role());
+      if (!vgpr_bank(acc).contains(start, reg->width)) {
+        return false;
+      }
+      continue;
+    }
     const auto ref = op->to_register_ref();
     if (ref && ref->cls == RegClass::SGPR && inst.num_dst_operands() > 1 &&
         exceeds_rounded_sgpr_allocation(ref->index, ref->width)) {

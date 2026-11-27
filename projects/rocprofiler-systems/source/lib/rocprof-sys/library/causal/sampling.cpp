@@ -29,8 +29,10 @@
 #include <timemory/variadic.hpp>
 
 #include "logger/debug.hpp"
+#include "logger/logger.hpp"
 
 #include <csignal>
+#include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <memory>
@@ -38,6 +40,7 @@
 #include <sstream>
 #include <string>
 #include <type_traits>
+#include <unistd.h>
 
 namespace rocprofsys::causal::sampling
 {
@@ -198,6 +201,20 @@ causal_offload_buffer(std::int64_t, causal_sampler_buffer_t&& _buf)
     }
 }
 
+// Before Active (main thread init), std::exit would tear down the hash id map while
+// causal thread_data still reads it, so use _exit. Once Active (new threads), use
+// std::exit so the exit wrapper finalizes and keeps the causal data collected so far.
+[[noreturn]] void
+exit_failed_backend()
+{
+    logger_t::instance().flush();
+    if(state::process::get() < state::process::Active)
+    {
+        ::_exit(EXIT_FAILURE);
+    }
+    std::exit(EXIT_FAILURE);
+}
+
 std::set<int>
 configure(bool _setup, std::int64_t _tid)
 {
@@ -330,7 +347,7 @@ configure(bool _setup, std::int64_t _tid)
             {
                 LOG_ERROR("Perf backend for causal profiling failed to activate: {}",
                           *_perf_error);
-                std::exit(1);
+                exit_failed_backend();
             }
         }
         else if(get_causal_backend() == state::process::CausalBackend::timer)
@@ -338,7 +355,7 @@ configure(bool _setup, std::int64_t _tid)
             if(!_activate_timer_backend())
             {
                 LOG_ERROR("Timer backend for causal profiling failed to activate");
-                std::exit(1);
+                exit_failed_backend();
             }
         }
         else if(get_causal_backend() == state::process::CausalBackend::automatic)
@@ -357,7 +374,7 @@ configure(bool _setup, std::int64_t _tid)
                 if(!_activate_timer_backend())
                 {
                     LOG_ERROR("Timer backend for causal profiling failed to activate");
-                    std::exit(1);
+                    exit_failed_backend();
                 }
 
                 config::set_setting_value(std::string{ env_vars::CAUSAL_BACKEND },

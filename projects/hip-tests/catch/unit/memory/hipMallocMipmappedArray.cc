@@ -13,6 +13,7 @@ hipMallocMipmappedArray API test scenarios
 */
 
 #include <array>
+#include <vector>
 #include <hip_test_common.hh>
 #include "hipArrayCommon.hh"
 
@@ -406,4 +407,47 @@ HIP_TEST_CASE(Unit_hipGetMipmappedArrayLevel_Negative) {
                     hipErrorInvalidResourceHandle);
   }
   HIP_CHECK(hipFreeMipmappedArray(array));
+}
+
+/*
+Copies to and from every level of a 2D mipmapped array go through the blit kernels, which view
+formats they can't write natively (half, float, normalized types) as unsigned integers of the
+same size. The level view of such a format change must carry the new hardware format, or the
+copy converts the data.
+*/
+template <typename T>
+static void MipmappedArrayLevelRoundTrip(const hipChannelFormatDesc& desc) {
+  constexpr size_t kSize = 64;
+  constexpr unsigned int kLevels = 3;
+  hipMipmappedArray_t array;
+  HIP_CHECK(hipMallocMipmappedArray(&array, &desc, make_hipExtent(kSize, kSize, 0), kLevels,
+                                    hipArrayDefault));
+  for (unsigned int level = 0; level < kLevels; ++level) {
+    INFO("level " << level);
+    hipArray_t level_array;
+    HIP_CHECK(hipGetMipmappedArrayLevel(&level_array, array, level));
+    const size_t width = kSize >> level;
+    const size_t height = kSize >> level;
+    std::vector<T> in(width * height);
+    std::vector<T> out(width * height);
+    for (size_t i = 0; i < in.size(); ++i) {
+      in[i] = static_cast<T>(i * 7 + level * 131 + 1);
+    }
+    HIP_CHECK(hipMemcpy2DToArray(level_array, 0, 0, in.data(), width * sizeof(T),
+                                 width * sizeof(T), height, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy2DFromArray(out.data(), width * sizeof(T), level_array, 0, 0,
+                                   width * sizeof(T), height, hipMemcpyDeviceToHost));
+    REQUIRE(in == out);
+  }
+  HIP_CHECK(hipFreeMipmappedArray(array));
+}
+
+HIP_TEST_CASE(Unit_hipMipmappedArrayLevel_CopyRoundTrip) {
+  CHECK_IMAGE_SUPPORT
+
+  SECTION("half") {
+    MipmappedArrayLevelRoundTrip<uint16_t>(
+        hipCreateChannelDesc(16, 0, 0, 0, hipChannelFormatKindFloat));
+  }
+  SECTION("float") { MipmappedArrayLevelRoundTrip<float>(hipCreateChannelDesc<float>()); }
 }

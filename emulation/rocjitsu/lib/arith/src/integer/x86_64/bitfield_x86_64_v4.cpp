@@ -11,6 +11,25 @@
 
 namespace rocjitsu::arith {
 
+// Pack the low or the high 16-bit halves of A and B for all lanes. Each block is loaded
+// before it is stored, so D may be A or B.
+template <int Lanes>
+void perm_pack_halves_x86_64_v4(uint32_t *d, const uint32_t *a, const uint32_t *b,
+                                bool high_halves) {
+  // The odd 16-bit words of each lane come from A, the even ones from B.
+  const __mmask32 from_a = 0xaaaaaaaau;
+  for (int lane = 0; lane < Lanes; lane += 16) {
+    auto x = _mm512_loadu_si512(reinterpret_cast<const __m512i *>(a + lane));
+    auto y = _mm512_loadu_si512(reinterpret_cast<const __m512i *>(b + lane));
+    auto result = high_halves ? _mm512_mask_blend_epi16(from_a, _mm512_srli_epi32(y, 16), x)
+                              : _mm512_mask_blend_epi16(from_a, y, _mm512_slli_epi32(x, 16));
+    _mm512_storeu_si512(reinterpret_cast<__m512i *>(d + lane), result);
+  }
+}
+
+template void perm_pack_halves_x86_64_v4<32>(uint32_t *, const uint32_t *, const uint32_t *, bool);
+template void perm_pack_halves_x86_64_v4<64>(uint32_t *, const uint32_t *, const uint32_t *, bool);
+
 // Extract, insert, or align bitfields. Preserve destination lanes outside exec_mask.
 // Requires the named CPU features and validated instruction controls.
 template <Bitfield Op>

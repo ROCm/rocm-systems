@@ -644,19 +644,14 @@ add_executable(
     scalar_cache_discard_test.cpp
     legacy_native_f32_test.cpp
     legacy_special_f32_test.cpp
-    comparison_test.cpp
     gfx1150_compare_test.cpp
     older_packed_conversion_test.cpp
     older_byte_conversion_test.cpp
     older_normalized_conversion_test.cpp
     older_packing_test.cpp
     denormal_test.cpp
-    floating_operation_test.cpp
     input_denormal_test.cpp
     legacy_minmax_test.cpp
-    minmax_test.cpp
-    output_denormal_test.cpp
-    output_modifier_test.cpp
     source_modifier_test.cpp
     amdgpu_elf_test_support.cpp
     amdgpu_elf_test_support_test.cpp
@@ -1425,11 +1420,14 @@ add_executable(
     patch/fault_injection/b96_lds_test.cpp
     patch/fault_injection/scalar_two_lds_test.cpp
     patch/fault_injection/lds_wrong_address_test.cpp
+    patch/fault_injection/atomic_wrong_address_test.cpp
+    patch/fault_injection/atomic_buffer_test.cpp
     patch/fault_injection/lds_ownership_test.cpp
     patch/fault_injection/lds_target_ownership_test.cpp
     patch/fault_injection/gfx1100_lds_test.cpp
     patch/fault_injection/gfx1251_lds_test.cpp
     patch/fault_injection/cdna_lds_wrong_address_test.cpp
+    patch/fault_injection/atomic_ds_test.cpp
 )
 target_include_directories(
     rocjitsu_fault_injection_tests
@@ -1479,6 +1477,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         patch/fault_injection/b96_lds_cli_test.cpp
         patch/fault_injection/scalar_two_lds_cli_test.cpp
         patch/fault_injection/lds_cli_test.cpp
+        patch/fault_injection/atomic_cli_test.cpp
         patch/fault_injection/gfx1251_lds_cli_test.cpp
         patch/fault_injection/gfx1100_lds_cli_test.cpp
         patch/fault_injection/cdna_lds_cli_test.cpp

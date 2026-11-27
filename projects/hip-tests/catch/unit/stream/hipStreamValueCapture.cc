@@ -216,6 +216,70 @@ HIP_TEST_CASE(Unit_hipStreamBatchMemOp_Capture) {
 }
 
 /**
+ * Test Description
+ * ------------------------
+ * - A captured hipStreamWriteValue32 is recorded, not executed: the graph holds one batch
+ *   memory operation node, memory is untouched until the graph launches, and every launch
+ *   performs the write again.
+ * Test source
+ * ------------------------
+ *    - unit/stream/hipStreamValueCapture.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 7.14
+ */
+HIP_TEST_CASE(Unit_hipStreamWriteValue32_Capture_RecordsNode) {
+  if (!streamWaitValueSupported()) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kStreamWaitValueUnsupported);
+  }
+
+  hipDeviceptr_t devPtr = 0;
+  HIP_CHECK(hipExtMallocWithFlags(reinterpret_cast<void**>(&devPtr), sizeof(uint64_t),
+                                  hipMallocSignalMemory));
+  auto read = [devPtr]() {
+    uint32_t value = 0;
+    HIP_CHECK(hipMemcpy(&value, reinterpret_cast<void*>(devPtr), sizeof(value),
+                        hipMemcpyDeviceToHost));
+    return value;
+  };
+  HIP_CHECK(hipMemset(reinterpret_cast<void*>(devPtr), 0, sizeof(uint64_t)));
+
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+  HIP_CHECK(hipStreamWriteValue32(stream, reinterpret_cast<void*>(devPtr), 0x42,
+                                  hipStreamWriteValueDefault));
+  hipGraph_t graph;
+  HIP_CHECK(hipStreamEndCapture(stream, &graph));
+  HIP_CHECK(hipDeviceSynchronize());
+  REQUIRE(read() == 0);  // capture records the write, it doesn't perform it
+
+  size_t numNodes = 0;
+  HIP_CHECK(hipGraphGetNodes(graph, nullptr, &numNodes));
+  REQUIRE(numNodes == 1);
+  hipGraphNode_t node;
+  HIP_CHECK(hipGraphGetNodes(graph, &node, &numNodes));
+  hipGraphNodeType type;
+  HIP_CHECK(hipGraphNodeGetType(node, &type));
+  REQUIRE(type == hipGraphNodeTypeBatchMemOp);
+
+  hipGraphExec_t graphExec;
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  for (int launch = 0; launch < 2; ++launch) {
+    HIP_CHECK(hipMemset(reinterpret_cast<void*>(devPtr), 0, sizeof(uint64_t)));
+    HIP_CHECK(hipGraphLaunch(graphExec, stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+    INFO("launch " << launch);
+    REQUIRE(read() == 0x42);
+  }
+
+  HIP_CHECK(hipGraphExecDestroy(graphExec));
+  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFree(reinterpret_cast<void*>(devPtr)));
+}
+
+/**
  * End doxygen group StreamTest.
  * @}
  */
