@@ -1891,19 +1891,21 @@
         },
         {
           "name": "UBR_MultiSegment_MultiSegmentRegisterOff_SliceSkipsNet",
-          "description": "NCCL_MULTI_SEGMENT_REGISTER=0: a one-segment slice of an 8-segment registration skips NET and the AllReduce is correct",
+          "description": "NCCL_MULTI_SEGMENT_REGISTER=0: a one-segment slice of an 8-segment registration skips NET and the AllReduce is correct; NCCL_PROTO=Simple because only Simple registers user buffers",
           "test_filter": "UBR_MultiSegment.MultiSegmentRegisterOff_SliceSkipsNet",
           "env_variables": {
             "NCCL_MULTI_SEGMENT_REGISTER": "0",
+            "NCCL_PROTO": "Simple",
             "NCCL_NET": "IB-MSEG"
           }
         },
         {
           "name": "UBR_MultiSegment_MultiSegmentRegisterOff_GraphSliceSkipsNet",
-          "description": "NCCL_MULTI_SEGMENT_REGISTER=0: graph registration of a one-segment slice reusing an 8-segment record skips NET and drops its reference",
+          "description": "NCCL_MULTI_SEGMENT_REGISTER=0: graph registration of a one-segment slice reusing an 8-segment record skips NET and drops its reference; NCCL_PROTO=Simple because only Simple registers user buffers",
           "test_filter": "UBR_MultiSegment.MultiSegmentRegisterOff_GraphSliceSkipsNet",
           "env_variables": {
             "NCCL_MULTI_SEGMENT_REGISTER": "0",
+            "NCCL_PROTO": "Simple",
             "NCCL_GRAPH_REGISTER": "1",
             "NCCL_NET": "IB-MSEG"
           }

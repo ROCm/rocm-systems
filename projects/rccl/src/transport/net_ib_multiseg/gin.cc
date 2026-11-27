@@ -1285,9 +1285,9 @@ ncclResult_t rcclRmaIbProxyRegMrSymDmaBuf(void* collComm, void* data, size_t siz
   rmaMrHandle->flushSeg = 0;
 
   if (nSeg == 1) {
-    // Single segment: reuse the caller's fd (fd==-1 falls back to ibv_reg_mr).
-    NCCLCHECKGOTONOWARN(IbMsegRegMrDmaBufInternal(cComm->recvComm, data, size, type, offset, fd, mr_flags,
-                                                  &rmaMrHandle->mrHandle[0]),
+    // Single segment: reuse the caller's fd (fd==-1 falls back to ibv_reg_mr, or to an fd of its own without peermem).
+    NCCLCHECKGOTONOWARN(rcclRmaRegSingleMr(cComm->recvComm, data, size, type, offset, fd, mr_flags,
+                                           &rmaMrHandle->mrHandle[0]),
                         ret, reconcile, NCCL_NET);
     registered = 1;
     rmaMrHandle->segOff[1] = size;
