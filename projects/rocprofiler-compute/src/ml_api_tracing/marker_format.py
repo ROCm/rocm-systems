@@ -72,7 +72,12 @@ def format_args_blob(parts: List[str]) -> str:
 
 
 def render_dtype_shape(obj: object) -> Optional[str]:
-    """Return dtype[dims] for an object with shape and dtype, else None."""
+    """Return dtype[dims] for an object with shape and dtype, else None.
+
+    A 0-d value (empty shape) prints repr(obj.item()), for example 42. If
+    item() is missing or raises, print the dtype with empty brackets, for
+    example float64[].
+    """
     try:
         shape = getattr(obj, "shape", None)
         dtype = getattr(obj, "dtype", None)
@@ -80,9 +85,22 @@ def render_dtype_shape(obj: object) -> Optional[str]:
             return None
         dims = "x".join(str(int(d)) for d in shape)
         dt = str(dtype).replace("torch.", "")
-        return f"{dt}[{dims}]"
+        if dims:
+            return f"{dt}[{dims}]"
+        return _render_empty_shape(obj, dt)
     except Exception:
         return None
+
+
+def _render_empty_shape(obj: object, dt: str) -> str:
+    """Return repr(obj.item()), or the dtype with empty brackets if item() fails."""
+    item = getattr(obj, "item", None)
+    if not callable(item):
+        return f"{dt}[]"
+    try:
+        return repr(item())
+    except Exception:
+        return f"{dt}[]"
 
 
 def decode_marker_name(name: str) -> str:

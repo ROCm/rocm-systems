@@ -435,7 +435,7 @@ def test_format_wrap_args_preserves_readable_tensors(torch_module):
             (UnreadableShape(), tensor, 42),
             {"unreadable": UnreadableDtype(), "scalar": scalar},
         )
-        == "(float32[2x3], 42, scalar=float64[])"
+        == "(float32[2x3], 42, scalar=1.0)"
     )
 
 
