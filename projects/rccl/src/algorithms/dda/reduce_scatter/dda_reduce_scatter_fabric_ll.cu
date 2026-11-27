@@ -10,6 +10,7 @@
 
 #include "algorithms/dda/reduce_scatter/dda_reduce_scatter.h"
 
+#include "algorithms/dda/dda_ll_region.h"
 #include "algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric_ll.h"
 #include "algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric_ll_spread.h"
 #include "checks.h"
@@ -34,7 +35,12 @@ struct DdaLLRsGeom {
 };
 
 // The grid ncclReduceScatterDdaFabricLLBlocks reports: a thread per packet of a shard, or of the message when spread.
+// IPC, never spread: ddaIpcLLBlocks.
 static inline DdaLLRsGeom ddaReduceScatterFabricLLGeom(const ncclComm* comm, size_t shardBytes) {
+  if (nccl_dda_detail::ddaLLOnIpc(comm)) {
+    const unsigned threads = dda::common::kDdaSimpleThreads;
+    return {dim3(nccl_dda_detail::ddaIpcLLBlocks(comm, shardBytes, threads)), dim3(threads), false};
+  }
   const bool spread = comm->nRanks >= dda::common::kDdaLLRsSpreadMinRanks;
   const size_t nPk = shardBytes >> 3; // 8 payload bytes per packet
   const unsigned threads = (unsigned)dda::common::kDdaLLRsSpreadThreads;
@@ -71,14 +77,16 @@ static ncclResult_t ncclReduceScatterDdaFabricLLTyped(const void* sendbuff, void
   const dim3 grid = geom.grid;
   const dim3 block = geom.block;
 
-  T** peers = reinterpret_cast<T**>(comm->ddaPeerPtrsDev);
+  // The LL region of either handler; bank 1 starts at its bank size, matching the other LL tiers there.
+  const nccl_dda_detail::DdaLLRegion region = nccl_dda_detail::ddaLLRegion(comm);
+  T** peers = reinterpret_cast<T**>(region.peers);
   uint32_t* epochDev = comm->ddaLLEpochDev;
   const int epochLen = comm->ddaLLEpochLen;
-  // Bank 1 starts at ddaBankSize, matching the other LL tiers on this scratch.
-  const size_t bankSize = dda::common::ddaBankSize(comm->ddaScratchBytes);
+  const size_t bankSize = region.bank;
 
-  INFO(NCCL_COLL, "DDA fabric ReduceScatter LL: nRanks=%d shardBytes=%zu nPk=%zu grid=%u block=%u bankSize=%zu%s",
-       nRanks, bytes, nPk, grid.x, block.x, bankSize, geom.spread ? " (spread)" : "");
+  INFO(NCCL_COLL, "DDA fabric ReduceScatter LL: nRanks=%d shardBytes=%zu nPk=%zu grid=%u block=%u bankSize=%zu%s%s",
+       nRanks, bytes, nPk, grid.x, block.x, bankSize, geom.spread ? " (spread)" : "",
+       nccl_dda_detail::ddaLLOnIpc(comm) ? " (IPC)" : "");
 
   const dda::common::DdaKernelParams params{comm->abortFlagDev};
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
@@ -123,7 +131,8 @@ bool ncclReduceScatterDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, 
   if (comm == nullptr || comm->bootstrap == nullptr) {
     return false;
   }
-  if (comm->ddaFabricMemHandler == nullptr || comm->ddaScratch == nullptr || comm->ddaPeerPtrsDev == nullptr) {
+  // The fabric or the IPC LL region. Nothing below reads the buffers, so every rank decides alike.
+  if (!nccl_dda_detail::ddaLLRegionReady(comm)) {
     return false;
   }
   if (comm->nRanks < 2 || comm->nRanks > dda::common::kDdaMaxNranks) {
@@ -147,6 +156,10 @@ bool ncclReduceScatterDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, 
   // Slot holds kDdaLLRsMaxBytes of payload (stride = cap/8 packets).
   if (bytes > dda::common::kDdaLLRsMaxBytes) {
     return false;
+  }
+  // IPC: the shard fits the per-rank slot of the 4 MiB LL bank (dda::common::ddaLLRsSlotPkts).
+  if (nccl_dda_detail::ddaLLOnIpc(comm)) {
+    return (bytes >> 3) <= dda::common::ddaLLRsSlotPkts(nccl_dda_detail::ddaLLRegion(comm).bank, comm->nRanks);
   }
   // Bank 0 is [0, bankBytes). Bank 1 is [bankSize, bankSize + bankBytes).
   const size_t bankBytes = dda::common::ddaLLRsBankBytes(comm->nRanks);

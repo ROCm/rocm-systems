@@ -1643,7 +1643,8 @@ threshold table introduced for gfx1250.
           below this size use the LL protocol; larger messages move to LL128 or VMM.
           When ``-1`` (default), resolved from ``ddaLLMax`` in the arch table.
           On gfx950 and gfx942 it also moves the DDA Broadcast LL ceiling, which
-          stays bounded by the LL bank of the IPC scratch.
+          stays bounded by the LL bank of the IPC scratch, and the IPC LL ceilings
+          of AllReduce and ReduceScatter unless ``RCCL_DDA_IPC_LL_THRESHOLD`` is set.
       - | ``-1``: Resolved from the per-arch table at runtime (default).
         | ``0``: Disable the DDA LL tier.
         | ``N`` (bytes): Use ``N`` as the LL tier ceiling, overriding the table.
@@ -1745,6 +1746,20 @@ threshold table introduced for gfx1250.
         | ``0``: Disable DDA Broadcast.
         | ``1`` (or any positive value): Enable DDA Broadcast, subject to the tier
           ceilings and eligibility checks.
+    * - | ``RCCL_DDA_IPC_LL_THRESHOLD``
+        | Ceiling in total message bytes of the DDA LL one-shot for ``ncclAllReduce``
+          and ``ncclReduceScatter`` on the single-node 8-rank IPC path (gfx950 and
+          gfx942): no GPU barrier, no staging copy, no more blocks than the IPC kernel
+          it replaces. Above it the previous IPC path runs. When set, it replaces
+          ``RCCL_DDA_LL_THRESHOLD`` and the table there; ``RCCL_DDA_LL=0`` also turns
+          it off. ``RCCL_IGNORE_ARCH_TABLE=1`` keeps the table on gfx950 and gfx942,
+          so ``0`` is the way to run the previous IPC path at every size.
+      - | ``-1``: Per-arch table: 4 KiB for ``ncclAllReduce``, 32 KiB for
+          ``ncclReduceScatter`` (default).
+        | ``0``: Disable the IPC LL one-shot.
+        | ``N`` (bytes): Up to ``N`` total bytes for both. The LL region holds at most
+          256 KiB for ``ncclAllReduce`` and 2 MiB for ``ncclReduceScatter``; larger
+          messages take the previous IPC path whatever ``N`` is.
     * - | ``RCCL_DDA_LL128_A2A_THREADS``
         | Threads per block for the gfx1250 DDA fabric LL128 ``ncclAlltoAll`` kernel.
           When ``0`` (default), resolved from ``ddaA2aLL128Threads`` in the arch

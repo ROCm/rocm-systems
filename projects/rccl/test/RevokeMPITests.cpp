@@ -1062,7 +1062,7 @@ protected:
 
 TEST_F(RevokeDdaIpcMPITest, IncompleteCollective_DdaIpcAllReduce)
 {
-    runIncompleteDdaRevokeShrink(*this, {ncclFuncAllReduce, 1024, kDdaIpc, NCCL_PROTO_SIMPLE, {}});
+    runIncompleteDdaRevokeShrink(*this, {ncclFuncAllReduce, 2048, kDdaIpc, NCCL_PROTO_SIMPLE, {}});
 }
 
 // 512 KiB is above the 256 KiB flat/tree split, so this reaches the three-barrier ddaAllReduceTreeIpc.
@@ -1079,7 +1079,18 @@ TEST_F(RevokeDdaIpcMPITest, IncompleteCollective_DdaIpcAllGather)
 TEST_F(RevokeDdaIpcMPITest, IncompleteCollective_DdaIpcReduceScatter)
 {
     runIncompleteDdaRevokeShrink(*this,
-                                 {ncclFuncReduceScatter, 1024, kDdaIpc, NCCL_PROTO_SIMPLE, {}});
+                                 {ncclFuncReduceScatter, 2048, kDdaIpc, NCCL_PROTO_SIMPLE, {}});
+}
+
+// At the table caps (AllReduce 4 KiB, ReduceScatter 32 KiB total) the IPC LL one-shots poll peer flags until revoked.
+TEST_F(RevokeDdaIpcMPITest, IncompleteCollective_DdaIpcLLAllReduce)
+{
+    runIncompleteDdaRevokeShrink(*this, {ncclFuncAllReduce, 1024, kDdaLL, NCCL_PROTO_LL, {}});
+}
+
+TEST_F(RevokeDdaIpcMPITest, IncompleteCollective_DdaIpcLLReduceScatter)
+{
+    runIncompleteDdaRevokeShrink(*this, {ncclFuncReduceScatter, 1024, kDdaLL, NCCL_PROTO_LL, {}});
 }
 
 TEST_F(RevokeDdaIpcMPITest, IncompleteCollective_DdaIpcAlltoAll)

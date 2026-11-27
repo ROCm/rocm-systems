@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <map>
 #include <string>
+#include <utility>
 
 #include "../common/DdaFabricTestHelpers.hpp"
 #include "algorithms/dda/DdaCollSeams.h"
@@ -544,6 +545,74 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_OneShotGridFollowsMessagePackets) {
   comm().ddaFabricMaxBlocks = 0;
   EXPECT_EQ(RunOneLL(1u << 16).grid.x, 1u);
   EXPECT_EQ(ncclAllReduceDdaFabricLLBlocks(mock_.get(), 1u << 16, ncclFloat32), 1u);
+}
+
+// IPC (gfx942/gfx950): the one-shot needs the LL region, the epoch cells and the 8-rank single-node comm; the two-shot
+// stays fabric only.
+TEST_F(DdaAllReduceFabricLLMicrotest, LLOneShotEligible_IpcNeedsTheLLRegionAndEpochCells) {
+  mock_.setIpcResourcesPresent();
+  EXPECT_TRUE(Eligible(ddaLLArOneShotEligible, 64));
+  // No pointer enters the decision: a 2-byte aligned in-place bf16 buffer qualifies on every rank.
+  void* odd = reinterpret_cast<void*>(0x2002);
+  EXPECT_TRUE(Eligible(ddaLLArOneShotEligible, 64, ncclBfloat16, ncclSum, odd, odd));
+  EXPECT_FALSE(Eligible(ddaLLArTwoShotEligible, 64));
+  for (int missing = 0; missing < 5; ++missing) {
+    mock_.setIpcResourcesPresent();
+    comm().ddaLLEpochDev = missing == 0 ? nullptr : comm().ddaLLEpochDev;
+    comm().ddaLLEpochLen = missing == 1 ? 0 : comm().ddaLLEpochLen;
+    comm().nRanks = missing == 2 ? 4 : comm().nRanks;
+    comm().nNodes = missing == 3 ? 2 : comm().nNodes;
+    comm().ddaIpcMemHandler = missing == 4 ? nullptr : comm().ddaIpcMemHandler;
+    EXPECT_FALSE(Eligible(ddaLLArOneShotEligible, 64)) << "missing " << missing;
+  }
+}
+
+// The IPC slot is a 4 MiB bank's per-rank share, 256 KiB of payload, whatever the Simple scratch below it holds.
+TEST_F(DdaAllReduceFabricLLMicrotest, LLOneShotEligible_IpcSlotIsTheLLBank) {
+  mock_.setIpcResourcesPresent();
+  EXPECT_TRUE(Eligible(ddaLLArOneShotEligible, Floats(256u << 10)));
+  EXPECT_FALSE(Eligible(ddaLLArOneShotEligible, Floats(256u << 10) + 4));
+  comm().ddaScratchBytes = 4096;
+  EXPECT_TRUE(Eligible(ddaLLArOneShotEligible, Floats(256u << 10)));
+}
+
+TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_IpcPassesTheLLRegionPeersAndBank) {
+  mock_.setIpcResourcesPresent();
+  const DdaLaunch& launch = RunOneLL(64);
+  EXPECT_EQ(launch.kernel, (LLOneShot<float, 8>()));
+  EXPECT_EQ(launch.block.x, 512u);
+  ASSERT_EQ(launch.args.size(), 10u);
+  EXPECT_EQ(launch.Arg<float**>(0), mock_.ipcLLPeers<float>());
+  EXPECT_EQ(launch.Arg<int>(5), 8);
+  EXPECT_EQ(launch.Arg<uint32_t*>(6), comm().ddaLLEpochDev);
+  EXPECT_EQ(launch.Arg<int>(7), comm().ddaLLEpochLen);
+  EXPECT_EQ(launch.Arg<size_t>(8), dda::common::kDdaIpcLLRegionBytes / 2);
+}
+
+// The IPC grid is the IPC Simple kernel's for the message or the epoch cells, whichever is less; the kernel strides it.
+TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_IpcGridIsTheIpcKernelGrid) {
+  mock_.setIpcResourcesPresent();
+  const std::pair<size_t, unsigned> cases[] = {{2u << 10, 1},  {4u << 10, 1},   {8u << 10, 1},   {16u << 10, 2},
+                                               {32u << 10, 4}, {64u << 10, 8},  {128u << 10, 16}, {256u << 10, 24}};
+  for (const auto& [bytes, blocks] : cases) {
+    EXPECT_EQ(RunOneLL(Floats(bytes)).grid.x, blocks) << "bytes " << bytes;
+    EXPECT_EQ(ncclAllReduceDdaFabricLLBlocks(mock_.get(), Floats(bytes), ncclFloat32), blocks) << "bytes " << bytes;
+    EXPECT_EQ(nccl_dda_detail::ddaIpcSimpleGeom(bytes, 1).first.x, blocks) << "bytes " << bytes;
+  }
+  // 16 B is one packet: one block.
+  EXPECT_EQ(RunOneLL(4).grid.x, 1u);
+  comm().ddaLLEpochLen = 10;
+  EXPECT_EQ(RunOneLL(Floats(256u << 10)).grid.x, 10u);
+}
+
+// The spread two-shot rule would fire for this message on fabric; the IPC path runs the one-shot only.
+TEST_F(DdaAllReduceFabricLLMicrotest, LLSpreadSelected_NeverOnIpc) {
+  constexpr size_t kBytes = 1u << 20;
+  const unsigned threads = (unsigned)dda::common::kDdaLLSpreadThreads;
+  comm().nRanks = 8;
+  EXPECT_TRUE(ddaLLArSpreadSelected(mock_.get(), kBytes, threads));
+  mock_.setIpcResourcesPresent();
+  EXPECT_FALSE(ddaLLArSpreadSelected(mock_.get(), kBytes, threads));
 }
 
 // Two-shot LL: a block per 1024 packets of one shard.

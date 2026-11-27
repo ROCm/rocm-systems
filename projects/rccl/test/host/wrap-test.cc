@@ -10842,10 +10842,16 @@ auto BroadcastDdaParams(int64_t llMax, int64_t ll128Max, int64_t ddaEnable = 1, 
 }
 
 // gfx1250 comms get the fabric DDA handler, as after ncclDdaFabricCommInit.
-ncclComm* MakeBroadcastComm(const char* arch = "gfx1250") {
+// ipc: the IPC handler and the real SPX table instead (gfx950, gfx942).
+ncclComm* MakeBroadcastComm(const char* arch = "gfx1250", bool ipc = false) {
   ncclComm* comm = MakeCommWithArch(arch);
   comm->nRanks = 8;
-  if (std::strcmp(arch, "gfx1250") == 0) comm->ddaFabricMemHandler = reinterpret_cast<ncclFabricMemHandler*>(0x1);
+  if (ipc) {
+    comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds(arch, RCCL_TUNING_PARTITION_SPX);
+    comm->ddaIpcMemHandler = reinterpret_cast<ncclIpcMemHandler*>(0x1);
+  } else if (std::strcmp(arch, "gfx1250") == 0) {
+    comm->ddaFabricMemHandler = reinterpret_cast<ncclFabricMemHandler*>(0x1);
+  }
   return comm;
 }
 
@@ -12989,4 +12995,165 @@ TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250DisabledAfterAbortSkipsFabricP
 TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250SymmetricWindowSkipsFabricPaths) {
   RUN_ISOLATED_TEST("Wrap_SelectAlltoAll_Gfx1250SymmetricWindowSkipsFabricPaths",
                     []() { CheckA2aFabricGate(A2aGate::SymmetricWindow); });
+}
+
+// ===========================================================================
+// DDA LL one-shots over the single-node IPC LL region (gfx950, gfx942).
+// ===========================================================================
+
+namespace {
+// g_loadParam for the IPC LL env vars and the DDA threshold, force and ignore-table ones; < 0 leaves one unset.
+auto IpcLLParams(int64_t ipcLL, int64_t ddaLL = -1, int64_t llThreshold = -1, int64_t vmmThreshold = -1,
+                 int64_t forceDda = -1, int64_t ignoreTable = -1) {
+  return [=](const char* env, int64_t def) -> int64_t {
+    const auto pick = [def](int64_t v) { return v < 0 ? def : v; };
+    if (std::strcmp(env, "RCCL_DDA_IPC_LL_THRESHOLD") == 0) {
+      return pick(ipcLL);
+    }
+    if (std::strcmp(env, "RCCL_DDA_LL") == 0) {
+      return pick(ddaLL);
+    }
+    if (std::strcmp(env, "RCCL_DDA_LL_THRESHOLD") == 0) {
+      return pick(llThreshold);
+    }
+    if (std::strcmp(env, "RCCL_DDA_THRESHOLD") == 0) {
+      return pick(vmmThreshold);
+    }
+    if (std::strcmp(env, "RCCL_FORCE_DDA") == 0) {
+      return pick(forceDda);
+    }
+    if (std::strcmp(env, "RCCL_IGNORE_ARCH_TABLE") == 0) {
+      return pick(ignoreTable);
+    }
+    return def;
+  };
+}
+
+const ncclFunc_t kIpcLLFuncs[] = {ncclFuncAllReduce, ncclFuncReduceScatter};
+}  // namespace
+
+// RCCL_DDA_IPC_LL_THRESHOLD caps the AR and RS IPC LL one-shots over RCCL_DDA_LL_THRESHOLD; others keep the table.
+TEST(WrapMicrotestIsolated, DdaLLThreshold_IpcEnvSetsTheIpcOneShots) {
+  RUN_ISOLATED_TEST("Wrap_DdaLLThreshold_IpcEnvSetsTheIpcOneShots", []() {
+    for (const char* arch : {"gfx950", "gfx942"}) {
+      SCOPED_TRACE(arch);
+      ncclComm* comm = MakeBroadcastComm(arch, /*ipc=*/true);
+      g_loadParam = IpcLLParams(-1);
+      EXPECT_EQ(4 * kKiB, rcclDdaLLThreshold(comm, ncclFuncAllReduce));
+      EXPECT_EQ(32 * kKiB, rcclDdaLLThreshold(comm, ncclFuncReduceScatter));
+      g_loadParam = IpcLLParams(64 * kKiB);
+      for (ncclFunc_t func : kIpcLLFuncs) {
+        EXPECT_EQ(64 * kKiB, rcclDdaLLThreshold(comm, func)) << "func " << func;
+      }
+      EXPECT_EQ(0u, rcclDdaLLThreshold(comm, ncclFuncAllGather));
+      EXPECT_EQ(0u, rcclDdaLLThreshold(comm, ncclFuncAlltoAll));
+      EXPECT_EQ(256 * kKiB, rcclDdaLLThreshold(comm, ncclFuncBroadcast));
+
+      g_loadParam = IpcLLParams(0, /*ddaLL=*/-1, /*llThreshold=*/1 * kMiB);
+      EXPECT_EQ(0u, rcclDdaLLThreshold(comm, ncclFuncAllReduce));
+      EXPECT_EQ(1 * kMiB, rcclDdaLLThreshold(comm, ncclFuncBroadcast));
+      // Unset, RCCL_DDA_LL_THRESHOLD sets both IPC caps: a value on neither table entry.
+      g_loadParam = IpcLLParams(-1, /*ddaLL=*/-1, /*llThreshold=*/16 * kKiB);
+      for (ncclFunc_t func : kIpcLLFuncs) {
+        EXPECT_EQ(16 * kKiB, rcclDdaLLThreshold(comm, func)) << "func " << func;
+      }
+      g_loadParam = IpcLLParams(64 * kKiB, /*ddaLL=*/0);
+      EXPECT_EQ(0u, rcclDdaLLThreshold(comm, ncclFuncAllReduce));
+      // The DDA entry gate admits the IPC LL cap when RCCL_DDA_THRESHOLD puts the Simple IPC cap below it.
+      g_loadParam = IpcLLParams(64 * kKiB, -1, -1, /*vmmThreshold=*/1 * kKiB);
+      EXPECT_EQ(64 * kKiB, rcclDdaEntryThreshold(comm, ncclFuncReduceScatter));
+
+      g_loadParam = IpcLLParams(64 * kKiB);
+      comm->ddaIpcMemHandler = nullptr;
+      EXPECT_EQ(4 * kKiB, rcclDdaLLThreshold(comm, ncclFuncAllReduce)) << "no IPC handler: the table";
+      comm->ddaIpcMemHandler = reinterpret_cast<ncclIpcMemHandler*>(0x1);
+      comm->ddaFabricMemHandler = reinterpret_cast<ncclFabricMemHandler*>(0x1);
+      EXPECT_EQ(4 * kKiB, rcclDdaLLThreshold(comm, ncclFuncAllReduce)) << "fabric comm: the table";
+      DeleteCommWithArch(comm);
+    }
+  });
+}
+
+// AllReduce on the IPC comm: LL up to its cap, then the Simple kernel, which never runs past its own cap.
+TEST(WrapMicrotestIsolated, SelectAllReduce_IpcLLWithinItsCapThenIpcSimple) {
+  RUN_ISOLATED_TEST("Wrap_SelectAllReduce_IpcLLWithinItsCapThenIpcSimple", []() {
+    ScopedHook shouldTakeDda(g_allReduceShouldTakeDdaPath,
+                             [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool) { return true; });
+    ScopedHook llEligible(g_allReduceDdaFabricLLEligible,
+                          [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; });
+    ScopedHook ipcEligible(g_allReduceDdaIpcEligible,
+                           [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; });
+    for (const char* arch : {"gfx950", "gfx942"}) {
+      SCOPED_TRACE(arch);
+      ncclComm* comm = MakeBroadcastComm(arch, /*ipc=*/true);
+      const auto select = [comm](size_t count) {
+        rcclCollDecision d = PoisonedDecision();
+        EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, count, ncclFloat32, ncclSum,
+                                                    /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false,
+                                                    &d));
+        return d;
+      };
+      g_loadParam = IpcLLParams(-1);
+      rcclCollDecision d = select(1024);
+      EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, d.algo);
+      EXPECT_EQ(NCCL_PROTO_LL, d.protocol);
+      EXPECT_EQ(113u, d.nMaxChannels);  // ncclAllReduceDdaFabricLLBlocks
+      d = select(1028);
+      EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_IPC, d.algo);
+      EXPECT_EQ(111u, d.nMaxChannels);  // ncclAllReduceDdaIpcBlocks
+      g_loadParam = IpcLLParams(32 * kKiB);
+      EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, select(8192).algo);
+      EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_IPC, select(8196).algo);
+      g_loadParam = IpcLLParams(0);
+      EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_IPC, select(8).algo) << "RCCL_DDA_IPC_LL_THRESHOLD=0";
+      // RCCL_FORCE_DDA keeps an out-of-window candidate, so the Simple kernel re-checks its 4 KiB cap at 8 KiB.
+      g_loadParam = IpcLLParams(-1, -1, -1, /*vmmThreshold=*/4 * kKiB, /*forceDda=*/1);
+      EXPECT_EQ(NCCL_ALGO_RING, select(2048).algo) << "the plain-kernel fallback";
+      // At the LL cap: RCCL_DDA_THRESHOLD=0 and RCCL_IGNORE_ARCH_TABLE=1 keep the one-shot.
+      g_loadParam = IpcLLParams(-1, -1, -1, /*vmmThreshold=*/0);
+      EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, select(1024).algo) << "RCCL_DDA_THRESHOLD=0";
+      g_loadParam = IpcLLParams(-1, -1, -1, -1, -1, /*ignoreTable=*/1);
+      EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, select(1024).algo) << "RCCL_IGNORE_ARCH_TABLE=1";
+      DeleteCommWithArch(comm);
+    }
+  });
+}
+
+// ReduceScatter on the IPC comm, by total bytes: LL up to its cap, then Simple; the entry gate admits the IPC cap.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_IpcLLWithinItsCapThenIpcSimple) {
+  RUN_ISOLATED_TEST("Wrap_SelectReduceScatter_IpcLLWithinItsCapThenIpcSimple", []() {
+    ScopedHook llEligible(g_reduceScatterDdaFabricLLEligible,
+                          [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; });
+    ScopedHook ipcEligible(g_reduceScatterDdaIpcEligible,
+                           [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; });
+    for (const char* arch : {"gfx950", "gfx942"}) {
+      SCOPED_TRACE(arch);
+      ncclComm* comm = MakeBroadcastComm(arch, /*ipc=*/true);
+      const auto select = [comm](size_t recvcount) {
+        rcclCollDecision d = PoisonedDecision();
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, recvcount, ncclFloat32, ncclSum,
+                                                        /*query=*/true, &d, /*graphCapturingHint=*/false));
+        return d;
+      };
+      // 1024 floats per rank x 8 ranks = 32 KiB total.
+      g_loadParam = IpcLLParams(-1);
+      rcclCollDecision d = select(1024);
+      EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, d.algo);
+      EXPECT_EQ(NCCL_PROTO_LL, d.protocol);
+      EXPECT_EQ(133u, d.nMaxChannels);  // ncclReduceScatterDdaFabricLLBlocks
+      EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_IPC, select(1028).algo);
+      g_loadParam = IpcLLParams(64 * kKiB);
+      EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, select(2048).algo);
+      g_loadParam = IpcLLParams(64 * kKiB, -1, -1, /*vmmThreshold=*/1 * kKiB);
+      EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, select(2048).algo) << "entry gate";
+      g_loadParam = IpcLLParams(0);
+      EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_IPC, select(4).algo) << "RCCL_DDA_IPC_LL_THRESHOLD=0";
+      // At the LL cap: RCCL_DDA_THRESHOLD=0 and RCCL_IGNORE_ARCH_TABLE=1 keep the one-shot.
+      g_loadParam = IpcLLParams(-1, -1, -1, /*vmmThreshold=*/0);
+      EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, select(1024).algo) << "RCCL_DDA_THRESHOLD=0";
+      g_loadParam = IpcLLParams(-1, -1, -1, -1, -1, /*ignoreTable=*/1);
+      EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, select(1024).algo) << "RCCL_IGNORE_ARCH_TABLE=1";
+      DeleteCommWithArch(comm);
+    }
+  });
 }

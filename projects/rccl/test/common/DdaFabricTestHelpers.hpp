@@ -65,6 +65,28 @@ struct DdaFabricMockComm
         }
     }
 
+    // The 8-rank single-node IPC comm (gfx942/gfx950): IPC handler, no fabric budget, 256 epoch cells, Simple scratch.
+    void setIpcResourcesPresent()
+    {
+        setFabricResourcesPresent(true);
+        comm.ddaFabricMemHandler   = nullptr;
+        comm.ddaFabricBarrierState = nullptr;
+        comm.ddaIpcMemHandler      = reinterpret_cast<ncclIpcMemHandler*>(0x7);
+        comm.ddaFabricMaxBlocks    = 0;
+        comm.ddaLLEpochLen         = 256;
+        comm.ddaScratchBytes       = DDA_IPC_BUFFER_SIZE - dda::common::kDdaIpcLLRegionBytes;
+        comm.nRanks                = nccl_dda_detail::kDdaNranks;
+        comm.nNodes                = 1;
+        comm.archName              = const_cast<char*>("gfx950");
+    }
+
+    // Peer table entry r of the IPC LL region: ncclDdaIpcCommInit puts the region bases after the scratch bases.
+    template <typename T>
+    T** ipcLLPeers()
+    {
+        return reinterpret_cast<T**>(static_cast<void**>(comm.ddaPeerPtrsDev) + nccl_dda_detail::kDdaNranks);
+    }
+
     ncclComm* get() { return &comm; }
 };
 

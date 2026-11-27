@@ -12,11 +12,14 @@
  * is distinct. A per-rank constant fill sums to the same value everywhere and hides a kernel that reads or writes the
  * wrong offset. On gfx950 and gfx942 it also checks the DDA Broadcast LL one-shot over the IPC scratch.
  *
+ * DdaIpcMPI_LL: IPC LL one-shots at 1 to 24 blocks, mixed calls, graph replays; needs RCCL_DDA_IPC_LL_THRESHOLD raised.
+ *
  * DdaIpcMPI_CommLifecycle: DDA IPC must come up on a communicator created after another one is destroyed. It needs
  * cuMem, and NCCL_CUMEM_ENABLE is cached at the first read, so run this suite in its own process.
  *
  * Run (example):
  *   mpirun -np 8 ./rccl-UnitTestsMPI --gtest_filter=DdaIpcMPI_IndexData.*
+ *   RCCL_DDA_IPC_LL_THRESHOLD=2097152 mpirun -np 8 ./rccl-UnitTestsMPI --gtest_filter=DdaIpcMPI_LL.*
  *   mpirun -np 8 ./rccl-UnitTestsMPI --gtest_filter=DdaIpcMPI_CommLifecycle.*
  */
 
@@ -25,6 +28,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdlib>
+#include <initializer_list>
 #include <string>
 #include <vector>
 
@@ -37,6 +41,8 @@
 #include "MPITestBase.hpp"
 #include "ResourceGuards.hpp"
 #include "TestChecks.hpp"
+#include "algorithms/dda/all_reduce/dda_all_reduce.h"
+#include "algorithms/dda/reduce_scatter/dda_reduce_scatter.h"
 #include "comm.h"
 #include "rccl_common.h"
 
@@ -54,8 +60,8 @@ constexpr size_t kFlatTreeThresholdBytes = 1ULL << 18;
 // The fixture's communicator stays alive throughout; cycle 1 is the first one created after a destroy.
 constexpr int kLifecycleCycles = 2;
 
-// 4 KiB fp32: well below the DDA IPC AllReduce caps on gfx942 and gfx950.
-constexpr size_t kLifecycleCount = 1024;
+// AllReduce fp32 count of the LL one-shot case: 2 KiB, under the AllReduce IPC LL table cap.
+constexpr size_t kLifecycleLLCount = 512;
 
 struct IndexCase {
   ncclDataType_t dtype;
@@ -107,6 +113,15 @@ bool bcDdaIpcExpected(const ncclComm* comm) {
   return (arch.rfind("gfx950", 0) == 0 || arch.rfind("gfx942", 0) == 0) &&
          comm->ddaLLEpochDev != nullptr && (bc == nullptr || std::string(bc) != "0") &&
          std::getenv("RCCL_DDA_LL") == nullptr && std::getenv("RCCL_DDA_LL_THRESHOLD") == nullptr;
+}
+
+// Fail on every rank: rank 0's slice survives some offset bugs, and only rank 0's summary is shown by default.
+// Returns the shared verdict.
+bool expectAllRanksOk(bool ok, const std::string& tag) {
+  int badRanks = ok ? 0 : 1;
+  MPI_Allreduce(MPI_IN_PLACE, &badRanks, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+  EXPECT_EQ(0, badRanks) << tag << ": " << badRanks << " rank(s) failed";
+  return badRanks == 0;
 }
 
 template <typename T>
@@ -190,7 +205,12 @@ protected:
 
     const std::string tag = std::string(rs ? "ReduceScatter" : "AllReduce") + " count=" + std::to_string(c.count) +
                             (fp32 ? " fp32" : " bf16") + (inPlace ? " in-place" : " out-of-place");
-    expectAlgo(func, c.count, c.dtype, sendBuf, recvBuf, static_cast<int>(RCCL_DDA_IPC), tag);
+    // The LL one-shot runs up to the comm's IPC LL cap where production eligibility (LL slot, 16 B rule) holds.
+    ncclComm* comm = getActiveCommunicator();
+    const bool ll = sendCount * elem <= rcclDdaLLThreshold(comm, func) &&
+                    (rs ? ncclReduceScatterDdaFabricLLEligible : ncclAllReduceDdaFabricLLEligible)(
+                      comm, sendBuf, recvBuf, c.count, c.dtype, ncclSum);
+    expectAlgo(func, c.count, c.dtype, sendBuf, recvBuf, ll ? RCCL_DDA_FABRIC_LL : RCCL_DDA_IPC, tag);
     if (HasFailure() || IsSkipped()) {
       return;
     }
@@ -210,24 +230,17 @@ protected:
 
   // Checks on every rank that rcclGetCollImplInfo picks `want`, or any native algorithm when want < 0.
   void expectAlgo(ncclFunc_t func, size_t count, ncclDataType_t dtype, const void* sendBuf, void* recvBuf, int want,
-                  const std::string& tag) {
+                  const std::string& tag, int capturing = 0) {
     int algo = -1;
     int protocol = -1;
     int maxChannels = -1;
     ASSERT_MPI_EQ(ncclSuccess, rcclGetCollImplInfo(getActiveCommunicator(), func, count, dtype, ncclSum, sendBuf,
-                                                   recvBuf, 0, &algo, &protocol, &maxChannels));
+                                                   recvBuf, capturing, &algo, &protocol, &maxChannels));
     const char* algoName = nullptr;
     rcclGetAlgoName(algo, &algoName);
     const bool ok = want >= 0 ? algo == want : algo < NCCL_NUM_ALGORITHMS;
     EXPECT_TRUE(ok) << "Rank " << rank_ << ": " << tag << " selected " << (algoName ? algoName : "?");
     ASSERT_MPI_TRUE(ok);
-  }
-
-  // Fail on every rank: rank 0's slice survives some offset bugs, and only rank 0's summary is shown by default.
-  void expectAllRanksOk(bool ok, const std::string& tag) {
-    int badRanks = ok ? 0 : 1;
-    MPI_Allreduce(MPI_IN_PLACE, &badRanks, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
-    EXPECT_EQ(0, badRanks) << tag << ": " << badRanks << " rank(s) failed";
   }
 
   void runAllReduce(const std::vector<IndexCase>& cases, bool tree) {
@@ -335,7 +348,8 @@ TEST_F(DdaIpcMPI_IndexData, InitSetsLLEpochCells) {
 // One-shot flat kernel: every rank reduces the whole buffer, so a wrong source offset hides behind constant data.
 TEST_F(DdaIpcMPI_IndexData, AllReduceFlat) {
   runAllReduce(
-    {{ncclFloat32, 4}, {ncclFloat32, 1024}, {ncclFloat32, 49152}, {ncclFloat32, 65536}, {ncclBfloat16, 4096}},
+    {{ncclFloat32, 4}, {ncclFloat32, 1024}, {ncclFloat32, 1028}, {ncclFloat32, 49152}, {ncclFloat32, 65536},
+     {ncclBfloat16, 4096}},
     /*tree=*/false);
 }
 
@@ -350,7 +364,7 @@ TEST_F(DdaIpcMPI_IndexData, AllReduceTree) {
 
 // Each rank reduces slice rank * recvcount of every peer: one block, then several blocks per shard.
 TEST_F(DdaIpcMPI_IndexData, ReduceScatter) {
-  runReduceScatter({{ncclFloat32, 1024}, {ncclFloat32, 65536}, {ncclBfloat16, 8192}});
+  runReduceScatter({{ncclFloat32, 1024}, {ncclFloat32, 1028}, {ncclFloat32, 65536}, {ncclBfloat16, 8192}});
 }
 
 // DDA Broadcast LL one-shot: a root column per peer with 1, 2, 4 and 8 chunk rows (16 B to 16 KiB), uneven chunks, the
@@ -371,17 +385,19 @@ TEST_F(DdaIpcMPI_IndexData, BroadcastLL) {
   }
 }
 
-// A Simple DDA call stages user data in the scratch. Here every staged word equals the next LL flag, so an LL bank
-// sharing that scratch would take it for the root's packets and tokens. The LL region past ddaScratchBytes must not.
-// The non-roots launch before the root, so a shared bank would be polled stale before the root's packets land.
-TEST_F(DdaIpcMPI_IndexData, BroadcastLLIgnoresStaleSimpleScratch) {
+// Simple DDA calls stage words equal to the next LL flag in the scratch; LL tiers bank in the region past it, so must
+// not take them for packets.
+TEST_F(DdaIpcMPI_IndexData, LLIgnoresStaleSimpleScratch) {
   skipUnlessBcDdaIpc();
   if (IsSkipped()) {
     return;
   }
   // RCCL_CE_ALLREDUCE=1 lets CE take the staging AllReduce ahead of DDA.
-  const std::string ceSkip = mpiCoordinatedSkipReason(rcclCeAllReduceEnabled(getActiveCommunicator()),
-                                                      "CE AllReduce routes the staging call away from DDA IPC");
+  // An AllReduce LL cap at its size (RCCL_DDA_IPC_LL_THRESHOLD) runs it as LL.
+  const bool llStaging =
+    rcclDdaLLThreshold(getActiveCommunicator(), ncclFuncAllReduce) >= kFlatTreeThresholdBytes * 3 / 4;
+  const std::string ceSkip = mpiCoordinatedSkipReason(rcclCeAllReduceEnabled(getActiveCommunicator()) || llStaging,
+                                                      "CE AllReduce or the LL cap takes the staging call off DDA IPC");
   if (!ceSkip.empty()) {
     GTEST_SKIP() << ceSkip;
   }
@@ -393,7 +409,7 @@ TEST_F(DdaIpcMPI_IndexData, BroadcastLLIgnoresStaleSimpleScratch) {
   constexpr size_t kBank0Bytes = (kDdaIpcRanks + kBcCount * sizeof(float) / 8) * 16;
   static_assert(kArCount * sizeof(float) < kFlatTreeThresholdBytes, "staging AllReduce must run the flat kernel");
   static_assert(kBank0Bytes <= kArCount * sizeof(float), "staged words must cover the Broadcast's bank 0");
-  constexpr int kRounds = 4;
+  constexpr int kRounds = 6;
   void* arSend = nullptr;
   void* arRecv = nullptr;
   ASSERT_MPI_EQ(hipSuccess, hipMalloc(&arSend, kArCount * sizeof(float)));
@@ -440,11 +456,280 @@ TEST_F(DdaIpcMPI_IndexData, BroadcastLLIgnoresStaleSimpleScratch) {
     if (HasFailure()) {
       return;
     }
-    runBroadcast(kBcCount, round % nRanks_, /*rootLast=*/true);
+    // Rounds 0-3 broadcast from roots 0-3, root last, so a shared bank is polled stale; then AR and RS LL one-shots.
+    if (round == 4) {
+      runOnce(ncclFuncAllReduce, {ncclFloat32, 1024}, /*inPlace=*/false);
+    } else if (round == 5) {
+      runOnce(ncclFuncReduceScatter, {ncclFloat32, 1024}, /*inPlace=*/false);
+    } else {
+      runBroadcast(kBcCount, round % nRanks_, /*rootLast=*/true);
+    }
     if (HasFailure() || IsSkipped()) {
       return;
     }
   }
+}
+
+// One DDA IPC LL call with its own buffers. count is the API count: AllReduce and Broadcast elements, ReduceScatter
+// recvcount.
+struct LLOp {
+  LLOp(ncclFunc_t f, ncclDataType_t d, size_t n, bool ip = false, int r = 0, size_t off = 0)
+    : func(f), dtype(d), count(n), inPlace(ip), root(r), offsetBytes(off) {}
+  ncclFunc_t func;
+  ncclDataType_t dtype;
+  size_t count;
+  bool inPlace;
+  int root;               // Broadcast only
+  size_t offsetBytes;     // of every user buffer from its 256 B-aligned allocation
+  // Filled by prepare().
+  void* sendBuf = nullptr;
+  void* recvBuf = nullptr;
+  DeviceBufferAutoGuard sendGuard;
+  DeviceBufferAutoGuard recvGuard;
+};
+
+class DdaIpcMPI_LL : public DdaIpcMPI_IndexData {
+protected:
+  // DdaIpcMPI_IndexData's skips (no DDA IPC), then the env's; past both every op asserts the LL one-shot.
+  void SetUp() override {
+    DdaIpcMPI_IndexData::SetUp();
+    if (IsSkipped() || HasFatalFailure()) {
+      return;
+    }
+    ncclComm* comm = getActiveCommunicator();
+    const bool on = !rcclCeAllReduceEnabled(comm) && rcclDdaLLThreshold(comm, ncclFuncAllReduce) >= (256u << 10) &&
+                    rcclDdaLLThreshold(comm, ncclFuncReduceScatter) >= (2u << 20);
+    const std::string skip = mpiCoordinatedSkipReason(
+      !on, "CE AllReduce on, or DDA IPC LL caps below the cases (set RCCL_DDA_IPC_LL_THRESHOLD=2097152)");
+    if (!skip.empty()) {
+      GTEST_SKIP() << skip;
+    }
+  }
+
+  size_t sendCount(const LLOp& op) const {
+    return op.func == ncclFuncReduceScatter ? op.count * static_cast<size_t>(nRanks_) : op.count;
+  }
+
+  // Element offset of this rank's ReduceScatter shard: in place, recvbuff = sendbuff + rank * recvcount.
+  size_t inPlaceShardOffset(const LLOp& op) const {
+    return op.func == ncclFuncReduceScatter ? static_cast<size_t>(rank_) * op.count : 0;
+  }
+
+  // All ranks go on only when none failed; a coordinated ASSERT_MPI skips the passing ranks, which must not run on.
+  bool allRanksGoOn(const LLOp& op) {
+    return expectAllRanksOk(!HasFailure() && !IsSkipped(), tag(op));
+  }
+
+  // Value recv element i must hold on this rank: the root's input, or the sum at this rank's shard.
+  float wantValue(const LLOp& op, size_t i) const {
+    if (op.func == ncclFuncBroadcast) {
+      return inputValue(op.dtype, op.root, i);
+    }
+    return expectedSum(op.dtype, nRanks_, inPlaceShardOffset(op) + i);
+  }
+
+  // Allocates and fills op's buffers; in place they share one allocation, a Broadcast non-root sends its recv buffer.
+  void prepare(LLOp& op) {
+    const size_t elem = elemBytes(op.dtype);
+    const size_t recvBytes = op.count * elem;
+    const size_t sendBytes = sendCount(op) * elem;
+    const size_t bufBytes = op.inPlace ? std::max(recvBytes, sendBytes) : recvBytes;
+    void* alloc = nullptr;
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&alloc, bufBytes + 256));
+    op.recvGuard.set(alloc);
+    char* base = static_cast<char*>(alloc) + op.offsetBytes;
+    op.recvBuf = base;
+    // 0xFF is NaN in both types, so an element the kernel never writes cannot match.
+    ASSERT_MPI_EQ(hipSuccess, hipMemset(alloc, 0xFF, bufBytes + 256));
+    if (op.inPlace) {
+      op.sendBuf = base;
+      op.recvBuf = base + inPlaceShardOffset(op) * elem;
+    } else {
+      ASSERT_MPI_EQ(hipSuccess, hipMalloc(&alloc, sendBytes + 256));
+      op.sendGuard.set(alloc);
+      op.sendBuf = static_cast<char*>(alloc) + op.offsetBytes;
+    }
+    // Every rank reaches the ASSERT_MPI, also an in-place Broadcast non-root that fills nothing.
+    const bool rootOrNotBc = op.func != ncclFuncBroadcast || op.root == rank_ || !op.inPlace;
+    hipError_t filled = hipSuccess;
+    if (rootOrNotBc) {
+      const int r = op.func == ncclFuncBroadcast ? op.root : rank_;
+      filled = op.dtype == ncclFloat32 ? fillInput<float>(op.sendBuf, sendCount(op), op.dtype, r) :
+                                         fillInput<hip_bfloat16>(op.sendBuf, sendCount(op), op.dtype, r);
+    }
+    ASSERT_MPI_EQ(hipSuccess, filled);
+  }
+
+  std::string tag(const LLOp& op) const {
+    const char* name = op.func == ncclFuncAllReduce ? "AllReduce" :
+                       op.func == ncclFuncReduceScatter ? "ReduceScatter" : "Broadcast";
+    return std::string(name) + " count=" + std::to_string(op.count) + (op.dtype == ncclFloat32 ? " fp32" : " bf16") +
+           (op.inPlace ? " in-place" : " out-of-place") + " offset=" + std::to_string(op.offsetBytes) +
+           (op.func == ncclFuncBroadcast ? " root=" + std::to_string(op.root) : "");
+  }
+
+  ncclResult_t launch(const LLOp& op) {
+    ncclComm_t comm = getActiveCommunicator();
+    hipStream_t stream = getActiveStream();
+    switch (op.func) {
+    case ncclFuncAllReduce:
+      return ncclAllReduce(op.sendBuf, op.recvBuf, op.count, op.dtype, ncclSum, comm, stream);
+    case ncclFuncReduceScatter:
+      return ncclReduceScatter(op.sendBuf, op.recvBuf, op.count, op.dtype, ncclSum, comm, stream);
+    default:
+      return ncclBroadcast(op.sendBuf, op.recvBuf, op.count, op.dtype, op.root, comm, stream);
+    }
+  }
+
+  // Checks every recv element on every rank; fails on all ranks together.
+  void verify(const LLOp& op) {
+    size_t badIdx = 0;
+    std::string detail;
+    bool ok = false;
+    const auto want = [&](size_t i) { return wantValue(op, i); };
+    if (op.dtype == ncclFloat32) {
+      float w = 0, g = 0;
+      ok = verifyBufferData<float>(op.recvBuf, op.count, [&](size_t i) { return float(want(i)); }, 0, 0.0,
+                                   &badIdx, &w, &g);
+      detail = std::to_string(g) + ", expected " + std::to_string(w);
+    } else {
+      hip_bfloat16 w{}, g{};
+      ok = verifyBufferData<hip_bfloat16>(op.recvBuf, op.count, [&](size_t i) { return hip_bfloat16(want(i)); },
+                                          0, 0.0, &badIdx, &w, &g);
+      detail = std::to_string(static_cast<float>(g)) + ", expected " + std::to_string(static_cast<float>(w));
+    }
+    EXPECT_TRUE(ok) << "Rank " << rank_ << ": " << tag(op) << ": recv[" << badIdx << "] = " << detail;
+    expectAllRanksOk(ok, tag(op) + " received wrong values");
+  }
+
+  // Prepares each op and checks it takes the LL one-shot, eager or (capturing) in a graph. Same on every rank.
+  bool prepareAll(std::vector<LLOp>& ops, int capturing = 0) {
+    for (LLOp& op : ops) {
+      prepare(op);
+      if (!allRanksGoOn(op)) {
+        return false;
+      }
+      expectAlgo(op.func, op.count, op.dtype, op.sendBuf, op.recvBuf, static_cast<int>(RCCL_DDA_FABRIC_LL), tag(op),
+                 capturing);
+      if (!allRanksGoOn(op)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  // prepareAll, then launches all back to back with no sync and checks them. Same on every rank.
+  bool runLL(std::vector<LLOp>& ops) {
+    if (!prepareAll(ops)) {
+      return false;
+    }
+    launchAll(ops);
+    return ops.empty() || allRanksGoOn(ops.back());
+  }
+
+  // Launches ops back to back with no sync, then checks each; stops on every rank at the first failure.
+  void launchAll(const std::vector<LLOp>& ops) {
+    for (const LLOp& op : ops) {
+      ASSERT_MPI_EQ(ncclSuccess, launch(op));
+    }
+    ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+    for (const LLOp& op : ops) {
+      verify(op);
+      if (!allRanksGoOn(op)) {
+        return;
+      }
+    }
+  }
+
+  // Each op alone, out of place and in place. Returns true on every rank or on none.
+  bool runEach(ncclFunc_t func, ncclDataType_t dtype, std::initializer_list<size_t> counts) {
+    for (size_t count : counts) {
+      for (bool inPlace : {false, true}) {
+        std::vector<LLOp> ops;
+        ops.emplace_back(func, dtype, count, inPlace);
+        if (!runLL(ops)) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  // A small LL AllReduce, run and checked, to move the epoch on by one. Returns true on every rank or on none.
+  bool stepEpoch() {
+    std::vector<LLOp> ops;
+    ops.emplace_back(ncclFuncAllReduce, ncclFloat32, 4);
+    return runLL(ops);
+  }
+};
+
+// One-shot grids of 1, 2, 4, 8 and 24 blocks (2 KiB to 256 KiB, the LL slot), both banks through the case order.
+TEST_F(DdaIpcMPI_LL, AllReduce) {
+  if (!runEach(ncclFuncAllReduce, ncclFloat32, {4, 512, 4096, 8192, 16384, 65536})) {
+    return;
+  }
+  runEach(ncclFuncAllReduce, ncclBfloat16, {8, 1032, 131072});
+}
+
+// Shards of 16 B to 256 KiB (the LL slot): one block, then 2, 4 and 24.
+TEST_F(DdaIpcMPI_LL, ReduceScatter) {
+  if (!runEach(ncclFuncReduceScatter, ncclFloat32, {4, 2048, 4096, 8192, 65536})) {
+    return;
+  }
+  runEach(ncclFuncReduceScatter, ncclBfloat16, {8, 16384});
+}
+
+// Back-to-back LL calls with no sync, alternating collectives, sizes, places, roots and 2-byte aligned bf16 buffers.
+TEST_F(DdaIpcMPI_LL, InterleavedCalls) {
+  const bool bc = bcDdaIpcExpected(getActiveCommunicator());
+  std::vector<LLOp> ops;
+  for (int round = 0; round < 3; ++round) {
+    ops.emplace_back(ncclFuncAllReduce, ncclFloat32, 4096 << round, round == 1);
+    ops.emplace_back(ncclFuncReduceScatter, ncclFloat32, 1024 >> round, round != 1);
+    if (bc) {
+      ops.emplace_back(ncclFuncBroadcast, ncclFloat32, 2048 << round, false, (3 * round + 1) % nRanks_);
+    }
+    ops.emplace_back(ncclFuncAllReduce, ncclBfloat16, 8, round == 2, 0, /*offsetBytes=*/2);
+    ops.emplace_back(ncclFuncReduceScatter, ncclBfloat16, 16384 >> (2 * round), false, 0, /*offsetBytes=*/2);
+    ops.emplace_back(ncclFuncAllReduce, ncclFloat32, 65536 >> round, false);
+  }
+  runLL(ops);
+}
+
+// Captured LL calls take their flags from the epoch cells at replay, with eager LL calls flipping the bank between.
+TEST_F(DdaIpcMPI_LL, GraphReplays) {
+  std::vector<LLOp> ops;
+  ops.emplace_back(ncclFuncAllReduce, ncclFloat32, 4096);
+  ops.emplace_back(ncclFuncReduceScatter, ncclFloat32, 1024);
+  ops.emplace_back(ncclFuncAllReduce, ncclFloat32, 8);
+  if (!prepareAll(ops, /*capturing=*/1)) {
+    return;
+  }
+  hipGraph_t graph = nullptr;
+  hipGraphExec_t graphExec = nullptr;
+  ASSERT_MPI_EQ(hipSuccess, hipStreamBeginCapture(getActiveStream(), hipStreamCaptureModeThreadLocal));
+  for (const LLOp& op : ops) {
+    ASSERT_MPI_EQ(ncclSuccess, launch(op));
+  }
+  ASSERT_MPI_EQ(hipSuccess, hipStreamEndCapture(getActiveStream(), &graph));
+  ASSERT_MPI_EQ(hipSuccess, hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  for (int replay = 0; replay < 5; ++replay) {
+    ASSERT_MPI_EQ(hipSuccess, hipGraphLaunch(graphExec, getActiveStream()));
+    ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+    for (LLOp& op : ops) {
+      verify(op);
+      // Clear the outputs so the next replay has to write them again.
+      ASSERT_MPI_EQ(hipSuccess, hipMemset(op.recvBuf, 0xFF, op.count * elemBytes(op.dtype)));
+    }
+    if (!allRanksGoOn(ops.back())) {
+      break;
+    }
+    if (replay % 2 == 0 && !stepEpoch()) {
+      break;
+    }
+  }
+  EXPECT_EQ(hipSuccess, hipGraphExecDestroy(graphExec));
+  EXPECT_EQ(hipSuccess, hipGraphDestroy(graph));
 }
 
 class DdaIpcMPI_CommLifecycle : public MPITestBase {
@@ -485,37 +770,38 @@ protected:
     return ncclCommInitRank(comm, nRanks_, id, rank_);
   }
 
-  // Rank r sends r + 1, so every element sums to nRanks * (nRanks + 1) / 2.
-  bool prepareAllReduce(ncclComm_t comm, void* buf, std::string* detail) {
+  // Rank r sends r + 1 + salt, summing to nRanks(nRanks + 1)/2 + nRanks * salt; per-cycle salts fail stale LL lines.
+  bool prepareAllReduce(ncclComm_t comm, void* buf, size_t count, int wantAlgo, int salt, std::string* detail) {
     int algo = -1;
     int protocol = -1;
     int maxChannels = -1;
-    if (initializeBufferWithPattern<float>(buf, kLifecycleCount, [this](size_t) { return float(rank_ + 1); }) !=
+    if (initializeBufferWithPattern<float>(buf, count, [this, salt](size_t) { return float(rank_ + 1 + salt); }) !=
         hipSuccess) {
       *detail = "buffer init failed";
       return false;
     }
-    if (rcclGetCollImplInfo(comm, ncclFuncAllReduce, kLifecycleCount, ncclFloat32, ncclSum, buf, buf, 0, &algo,
-                            &protocol, &maxChannels) != ncclSuccess ||
-        algo != static_cast<int>(RCCL_DDA_IPC)) {
-      *detail = "AllReduce did not select DDA IPC (algo " + std::to_string(algo) + ")";
+    if (rcclGetCollImplInfo(comm, ncclFuncAllReduce, count, ncclFloat32, ncclSum, buf, buf, 0, &algo, &protocol,
+                            &maxChannels) != ncclSuccess ||
+        algo != wantAlgo) {
+      *detail = "count " + std::to_string(count) + ": AllReduce selected algo " + std::to_string(algo) + ", not " +
+                std::to_string(wantAlgo);
       return false;
     }
     return true;
   }
 
-  bool allReduceOk(ncclComm_t comm, void* buf, hipStream_t stream, std::string* detail) {
-    if (ncclAllReduce(buf, buf, kLifecycleCount, ncclFloat32, ncclSum, comm, stream) != ncclSuccess ||
+  bool allReduceOk(ncclComm_t comm, void* buf, size_t count, hipStream_t stream, int salt, std::string* detail) {
+    if (ncclAllReduce(buf, buf, count, ncclFloat32, ncclSum, comm, stream) != ncclSuccess ||
         hipStreamSynchronize(stream) != hipSuccess) {
       *detail = "AllReduce failed";
       return false;
     }
-    const float want = float(nRanks_ * (nRanks_ + 1) / 2);
+    const float want = float(nRanks_ * (nRanks_ + 1) / 2 + nRanks_ * salt);
     size_t badIdx = 0;
     float expected = 0.0f;
     float got = 0.0f;
     if (!verifyBufferData<float>(
-          buf, kLifecycleCount, [=](size_t) { return want; }, 0, 0.0, &badIdx, &expected, &got)) {
+          buf, count, [=](size_t) { return want; }, 0, 0.0, &badIdx, &expected, &got)) {
       *detail = "recv[" + std::to_string(badIdx) + "] = " + std::to_string(got) + ", expected " +
                 std::to_string(expected);
       return false;
@@ -524,9 +810,13 @@ protected:
   }
 };
 
-// Each communicator created next to the fixture's one, also after a destroy, must bring up DDA IPC with no HIP error
-// pending and run a DDA IPC AllReduce.
+// Each comm, also one created after a destroy, brings up DDA IPC with no HIP error pending,
+// then runs an IPC Simple and an LL one-shot AllReduce.
 TEST_F(DdaIpcMPI_CommLifecycle, RecreateAfterDestroy) {
+  // Sizes from the comm's AllReduce IPC LL cap: the Simple kernel one line above it, the LL one-shot below it.
+  const size_t llCap = rcclDdaLLThreshold(getActiveCommunicator(), ncclFuncAllReduce);
+  const size_t simpleCount = llCap / sizeof(float) / 4 * 4 + 4;
+  const bool runLL = llCap >= kLifecycleLLCount * sizeof(float);
   for (int cycle = 0; cycle < kLifecycleCycles; ++cycle) {
     (void)hipGetLastError();
     ncclComm_t comm = nullptr;
@@ -541,15 +831,21 @@ TEST_F(DdaIpcMPI_CommLifecycle, RecreateAfterDestroy) {
       detail = "DDA IPC init failed";
     } else if (pending != hipSuccess) {
       detail = std::string("HIP error pending after init: ") + hipGetErrorName(pending);
-    } else if (hipMalloc(&buf, kLifecycleCount * sizeof(float)) != hipSuccess) {
+    } else if (hipMalloc(&buf, std::max(simpleCount, kLifecycleLLCount) * sizeof(float)) != hipSuccess) {
       detail = "hipMalloc failed";
     } else {
       guard.set(buf);
-      ok = prepareAllReduce(comm, buf, &detail);
+      ok = prepareAllReduce(comm, buf, simpleCount, static_cast<int>(RCCL_DDA_IPC), cycle, &detail);
     }
     // A rank that does not launch leaves its peers blocked in the collective, so all ranks launch or none does.
     if (MPIHelpers::allRanksTrue(ok)) {
-      ok = allReduceOk(comm, buf, getActiveStream(), &detail);
+      ok = allReduceOk(comm, buf, simpleCount, getActiveStream(), cycle, &detail);
+    }
+    if (runLL && MPIHelpers::allRanksTrue(ok)) {
+      ok = prepareAllReduce(comm, buf, kLifecycleLLCount, static_cast<int>(RCCL_DDA_FABRIC_LL), cycle, &detail);
+      if (MPIHelpers::allRanksTrue(ok)) {
+        ok = allReduceOk(comm, buf, kLifecycleLLCount, getActiveStream(), cycle, &detail);
+      }
     }
     EXPECT_TRUE(ok) << "Rank " << rank_ << ", cycle " << cycle << ": " << detail;
     int badRanks = ok ? 0 : 1;

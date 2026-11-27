@@ -38,8 +38,6 @@ constexpr int kRank = 5;
 constexpr int kOtherRoot = 0;
 // 16 KiB is 2048 packets: eight 256-thread chunks.
 constexpr size_t kEightChunks = 16384;
-// The Simple scratch ncclDdaIpcCommInit leaves below the IPC LL region.
-constexpr size_t kIpcSimpleBytes = DDA_IPC_BUFFER_SIZE - dda::common::kDdaIpcLLRegionBytes;
 
 template <bool kAligned>
 const void* Kernel() {
@@ -71,9 +69,7 @@ class DdaBroadcastFabricLLMicrotest : public ::testing::Test {
 
   // The single-node IPC path: no fabric handler, and the Simple scratch ncclDdaIpcCommInit sets.
   void UseIpc() {
-    comm().ddaFabricMemHandler = nullptr;
-    comm().ddaIpcMemHandler = reinterpret_cast<ncclIpcMemHandler*>(0x1);
-    comm().ddaScratchBytes = kIpcSimpleBytes;
+    mock_.setIpcResourcesPresent();
   }
 
   // int8 so count is bytes; broadcast is datatype-agnostic.
