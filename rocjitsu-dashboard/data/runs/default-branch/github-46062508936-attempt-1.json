@@ -1,0 +1,1425 @@
+{
+  "benchmark_results": [
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "gpt_oss.window_batch4_seq3072",
+      "name": "Windowed attention",
+      "operation": "Attention",
+      "problem": {
+        "batch": 4,
+        "dtype": "bf16",
+        "head_dimension": 64,
+        "key_value_heads": 8,
+        "query_heads": 64,
+        "sequence": 3072,
+        "window": 128
+      },
+      "status": "completed",
+      "suite": "GPT-OSS",
+      "target": "gfx950",
+      "thread_policy": "default",
+      "timing_results_s": [
+        4.400991254
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "gpt_oss.causal_seq2560",
+      "name": "Full causal attention",
+      "operation": "Attention",
+      "problem": {
+        "batch": 1,
+        "dtype": "bf16",
+        "head_dimension": 64,
+        "key_value_heads": 8,
+        "query_heads": 64,
+        "sequence": 2560,
+        "window": 0
+      },
+      "status": "completed",
+      "suite": "GPT-OSS",
+      "target": "gfx950",
+      "thread_policy": "default",
+      "timing_results_s": [
+        4.155741276
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "triton.persistent_1024x4096x4096",
+      "name": "FP16 persistent matmul",
+      "operation": "GEMM",
+      "problem": {
+        "columns": 4096,
+        "dtype": "fp16",
+        "reduction": 4096,
+        "rows": 1024
+      },
+      "status": "completed",
+      "suite": "Triton",
+      "target": "gfx950",
+      "thread_policy": "default",
+      "timing_results_s": [
+        0.934014788
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "triton.grouped_4x2048",
+      "name": "FP16 grouped GEMM",
+      "operation": "Grouped GEMM",
+      "problem": {
+        "columns": 2048,
+        "dtype": "fp16",
+        "groups": 4,
+        "reduction": 2048,
+        "rows": 2048
+      },
+      "status": "completed",
+      "suite": "Triton",
+      "target": "gfx950",
+      "thread_policy": "default",
+      "timing_results_s": [
+        1.018192773
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "deepseek.mlp_w1_m64",
+      "name": "FP8 MLP first projection",
+      "operation": "GEMM",
+      "problem": {
+        "columns": 18432,
+        "dtype": "fp8",
+        "reduction": 7168,
+        "rows": 64
+      },
+      "status": "completed",
+      "suite": "DeepSeek",
+      "target": "gfx950",
+      "thread_policy": "default",
+      "timing_results_s": [
+        0.506132966
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "deepseek.mlp_w2_m64",
+      "name": "FP8 MLP second projection",
+      "operation": "GEMM",
+      "problem": {
+        "columns": 7168,
+        "dtype": "fp8",
+        "reduction": 18432,
+        "rows": 64
+      },
+      "status": "completed",
+      "suite": "DeepSeek",
+      "target": "gfx950",
+      "thread_policy": "default",
+      "timing_results_s": [
+        0.568338704
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "tensile.bf16_streamk_4096x4096x4096",
+      "name": "BF16 Stream-K 4096x4096x4096",
+      "operation": "GEMM",
+      "problem": {
+        "dtype": "bf16",
+        "k": 4096,
+        "m": 4096,
+        "n": 4096,
+        "variant": "bf16_streamk"
+      },
+      "status": "completed",
+      "suite": "TensileLite",
+      "target": "gfx950",
+      "thread_policy": "default",
+      "timing_results_s": [
+        1.683830943
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "tensile.mxfp8_subtile_4096x4096x4096",
+      "name": "MXFP8 subtile 4096x4096x4096",
+      "operation": "GEMM",
+      "problem": {
+        "dtype": "mxfp8",
+        "k": 4096,
+        "m": 4096,
+        "n": 4096,
+        "variant": "mxfp8_subtile"
+      },
+      "status": "completed",
+      "suite": "TensileLite",
+      "target": "gfx950",
+      "thread_policy": "default",
+      "timing_results_s": [
+        0.634232282
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "triton.softmax_131072x2048",
+      "name": "FP32 softmax",
+      "operation": "Softmax",
+      "problem": {
+        "columns": 2048,
+        "dtype": "fp32",
+        "rows": 131072
+      },
+      "status": "completed",
+      "suite": "Triton",
+      "target": "gfx950",
+      "thread_policy": "default",
+      "timing_results_s": [
+        3.014798671
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "triton.layernorm_131072x2048",
+      "name": "FP32 layer normalization",
+      "operation": "Layer normalization",
+      "problem": {
+        "columns": 2048,
+        "dtype": "fp32",
+        "epsilon": 0.00001,
+        "rows": 131072
+      },
+      "status": "completed",
+      "suite": "Triton",
+      "target": "gfx950",
+      "thread_policy": "default",
+      "timing_results_s": [
+        2.997956087
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "deepseek.act_quant_32768x8192",
+      "name": "BF16 activation quantization to FP8",
+      "operation": "Activation quantization",
+      "problem": {
+        "columns": 8192,
+        "dtype": "bf16",
+        "rows": 32768
+      },
+      "status": "completed",
+      "suite": "DeepSeek",
+      "target": "gfx950",
+      "thread_policy": "default",
+      "timing_results_s": [
+        12.66885577
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "deepseek.weight_dequant_32768x8192",
+      "name": "FP8 weight dequantization to FP32",
+      "operation": "Weight dequantization",
+      "problem": {
+        "columns": 8192,
+        "dtype": "fp8",
+        "rows": 32768
+      },
+      "status": "completed",
+      "suite": "DeepSeek",
+      "target": "gfx950",
+      "thread_policy": "default",
+      "timing_results_s": [
+        0.882148821
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "gpt_oss.causal_seq2560",
+      "name": "Full causal attention",
+      "operation": "Attention",
+      "problem": {
+        "batch": 1,
+        "dtype": "bf16",
+        "head_dimension": 64,
+        "key_value_heads": 8,
+        "query_heads": 64,
+        "sequence": 2560,
+        "window": 0
+      },
+      "status": "completed",
+      "suite": "GPT-OSS",
+      "target": "gfx950",
+      "thread_policy": "single",
+      "timing_results_s": [
+        149.3377206
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "triton.persistent_1024x4096x4096",
+      "name": "FP16 persistent matmul",
+      "operation": "GEMM",
+      "problem": {
+        "columns": 4096,
+        "dtype": "fp16",
+        "reduction": 4096,
+        "rows": 1024
+      },
+      "status": "completed",
+      "suite": "Triton",
+      "target": "gfx950",
+      "thread_policy": "single",
+      "timing_results_s": [
+        24.12227038
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "triton.grouped_4x2048",
+      "name": "FP16 grouped GEMM",
+      "operation": "Grouped GEMM",
+      "problem": {
+        "columns": 2048,
+        "dtype": "fp16",
+        "groups": 4,
+        "reduction": 2048,
+        "rows": 2048
+      },
+      "status": "completed",
+      "suite": "Triton",
+      "target": "gfx950",
+      "thread_policy": "single",
+      "timing_results_s": [
+        19.15616567
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "deepseek.mlp_w1_m64",
+      "name": "FP8 MLP first projection",
+      "operation": "GEMM",
+      "problem": {
+        "columns": 18432,
+        "dtype": "fp8",
+        "reduction": 7168,
+        "rows": 64
+      },
+      "status": "completed",
+      "suite": "DeepSeek",
+      "target": "gfx950",
+      "thread_policy": "single",
+      "timing_results_s": [
+        12.299430983
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "tensile.bf16_streamk_4096x4096x4096",
+      "name": "BF16 Stream-K 4096x4096x4096",
+      "operation": "GEMM",
+      "problem": {
+        "dtype": "bf16",
+        "k": 4096,
+        "m": 4096,
+        "n": 4096,
+        "variant": "bf16_streamk"
+      },
+      "status": "completed",
+      "suite": "TensileLite",
+      "target": "gfx950",
+      "thread_policy": "single",
+      "timing_results_s": [
+        39.477306443
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "gpt_oss.window_batch4_seq3072",
+      "name": "Windowed attention",
+      "operation": "Attention",
+      "problem": {
+        "batch": 4,
+        "dtype": "bf16",
+        "head_dimension": 64,
+        "key_value_heads": 8,
+        "query_heads": 64,
+        "sequence": 3072,
+        "window": 128
+      },
+      "status": "completed",
+      "suite": "GPT-OSS",
+      "target": "gfx1250",
+      "thread_policy": "default",
+      "timing_results_s": [
+        1.450899753
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "gpt_oss.causal_seq2560",
+      "name": "Full causal attention",
+      "operation": "Attention",
+      "problem": {
+        "batch": 1,
+        "dtype": "bf16",
+        "head_dimension": 64,
+        "key_value_heads": 8,
+        "query_heads": 64,
+        "sequence": 2560,
+        "window": 0
+      },
+      "status": "completed",
+      "suite": "GPT-OSS",
+      "target": "gfx1250",
+      "thread_policy": "default",
+      "timing_results_s": [
+        1.288568039
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "triton.persistent_1024x4096x4096",
+      "name": "FP16 persistent matmul",
+      "operation": "GEMM",
+      "problem": {
+        "columns": 4096,
+        "dtype": "fp16",
+        "reduction": 4096,
+        "rows": 1024
+      },
+      "status": "completed",
+      "suite": "Triton",
+      "target": "gfx1250",
+      "thread_policy": "default",
+      "timing_results_s": [
+        1.325215119
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "triton.grouped_4x2048",
+      "name": "FP16 grouped GEMM",
+      "operation": "Grouped GEMM",
+      "problem": {
+        "columns": 2048,
+        "dtype": "fp16",
+        "groups": 4,
+        "reduction": 2048,
+        "rows": 2048
+      },
+      "status": "completed",
+      "suite": "Triton",
+      "target": "gfx1250",
+      "thread_policy": "default",
+      "timing_results_s": [
+        1.213442423
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "deepseek.mlp_w1_m256",
+      "name": "FP8 MLP first projection",
+      "operation": "GEMM",
+      "problem": {
+        "columns": 18432,
+        "dtype": "fp8",
+        "reduction": 7168,
+        "rows": 256
+      },
+      "status": "completed",
+      "suite": "DeepSeek",
+      "target": "gfx1250",
+      "thread_policy": "default",
+      "timing_results_s": [
+        1.517320262
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "deepseek.mlp_w2_m256",
+      "name": "FP8 MLP second projection",
+      "operation": "GEMM",
+      "problem": {
+        "columns": 7168,
+        "dtype": "fp8",
+        "reduction": 18432,
+        "rows": 256
+      },
+      "status": "completed",
+      "suite": "DeepSeek",
+      "target": "gfx1250",
+      "thread_policy": "default",
+      "timing_results_s": [
+        1.543017858
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "tensile.bf16_subtile_4096x4096x4096",
+      "name": "BF16 subtile 4096x4096x4096",
+      "operation": "GEMM",
+      "problem": {
+        "dtype": "bf16",
+        "k": 4096,
+        "m": 4096,
+        "n": 4096,
+        "variant": "bf16_subtile"
+      },
+      "status": "completed",
+      "suite": "TensileLite",
+      "target": "gfx1250",
+      "thread_policy": "default",
+      "timing_results_s": [
+        0.774979349
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "tensile.mxfp4_streamk_4096x4096x4096",
+      "name": "MXFP4 Stream-K 4096x4096x4096",
+      "operation": "GEMM",
+      "problem": {
+        "dtype": "mxfp4",
+        "k": 4096,
+        "m": 4096,
+        "n": 4096,
+        "variant": "mxfp4_streamk"
+      },
+      "status": "completed",
+      "suite": "TensileLite",
+      "target": "gfx1250",
+      "thread_policy": "default",
+      "timing_results_s": [
+        1.641293508
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "deepseek.mlp_w1_m3072",
+      "name": "FP8 MLP first projection, 3072 tokens",
+      "operation": "GEMM",
+      "problem": {
+        "columns": 18432,
+        "configuration": "large_tile",
+        "dtype": "fp8",
+        "reduction": 7168,
+        "rows": 3072
+      },
+      "status": "completed",
+      "suite": "DeepSeek",
+      "target": "gfx1250",
+      "thread_policy": "default",
+      "timing_results_s": [
+        9.977542008
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "deepseek.mlp_w2_m3072",
+      "name": "FP8 MLP second projection, 3072 tokens",
+      "operation": "GEMM",
+      "problem": {
+        "columns": 7168,
+        "configuration": "large_tile",
+        "dtype": "fp8",
+        "reduction": 18432,
+        "rows": 3072
+      },
+      "status": "completed",
+      "suite": "DeepSeek",
+      "target": "gfx1250",
+      "thread_policy": "default",
+      "timing_results_s": [
+        10.319632906
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "triton.grouped_4x3584",
+      "name": "FP16 grouped GEMM, 4 groups of 3584x3584x3584",
+      "operation": "Grouped GEMM",
+      "problem": {
+        "columns": 3584,
+        "configuration": "large_tile",
+        "dtype": "fp16",
+        "groups": 4,
+        "reduction": 3584,
+        "rows": 3584
+      },
+      "status": "completed",
+      "suite": "Triton",
+      "target": "gfx1250",
+      "thread_policy": "default",
+      "timing_results_s": [
+        3.804412432
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "triton.persistent_8192x8192x4096",
+      "name": "FP16 persistent matmul, 8192 x 8192 x 4096",
+      "operation": "GEMM",
+      "problem": {
+        "columns": 8192,
+        "configuration": "large_tile",
+        "dtype": "fp16",
+        "reduction": 4096,
+        "rows": 8192
+      },
+      "status": "completed",
+      "suite": "Triton",
+      "target": "gfx1250",
+      "thread_policy": "default",
+      "timing_results_s": [
+        6.388304844
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "triton.softmax_131072x2048",
+      "name": "FP32 softmax",
+      "operation": "Softmax",
+      "problem": {
+        "columns": 2048,
+        "dtype": "fp32",
+        "rows": 131072
+      },
+      "status": "completed",
+      "suite": "Triton",
+      "target": "gfx1250",
+      "thread_policy": "default",
+      "timing_results_s": [
+        2.325521443
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "triton.layernorm_131072x2048",
+      "name": "FP32 layer normalization",
+      "operation": "Layer normalization",
+      "problem": {
+        "columns": 2048,
+        "dtype": "fp32",
+        "epsilon": 0.00001,
+        "rows": 131072
+      },
+      "status": "completed",
+      "suite": "Triton",
+      "target": "gfx1250",
+      "thread_policy": "default",
+      "timing_results_s": [
+        2.767076454
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "deepseek.act_quant_32768x8192",
+      "name": "BF16 activation quantization to FP8",
+      "operation": "Activation quantization",
+      "problem": {
+        "columns": 8192,
+        "dtype": "bf16",
+        "rows": 32768
+      },
+      "status": "completed",
+      "suite": "DeepSeek",
+      "target": "gfx1250",
+      "thread_policy": "default",
+      "timing_results_s": [
+        7.186496041
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "deepseek.weight_dequant_32768x8192",
+      "name": "FP8 weight dequantization to FP32",
+      "operation": "Weight dequantization",
+      "problem": {
+        "columns": 8192,
+        "dtype": "fp8",
+        "rows": 32768
+      },
+      "status": "completed",
+      "suite": "DeepSeek",
+      "target": "gfx1250",
+      "thread_policy": "default",
+      "timing_results_s": [
+        0.637498051
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "gpt_oss.causal_seq2560",
+      "name": "Full causal attention",
+      "operation": "Attention",
+      "problem": {
+        "batch": 1,
+        "dtype": "bf16",
+        "head_dimension": 64,
+        "key_value_heads": 8,
+        "query_heads": 64,
+        "sequence": 2560,
+        "window": 0
+      },
+      "status": "completed",
+      "suite": "GPT-OSS",
+      "target": "gfx1250",
+      "thread_policy": "single",
+      "timing_results_s": [
+        41.242777434
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "triton.persistent_1024x4096x4096",
+      "name": "FP16 persistent matmul",
+      "operation": "GEMM",
+      "problem": {
+        "columns": 4096,
+        "dtype": "fp16",
+        "reduction": 4096,
+        "rows": 1024
+      },
+      "status": "completed",
+      "suite": "Triton",
+      "target": "gfx1250",
+      "thread_policy": "single",
+      "timing_results_s": [
+        34.240605354
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "triton.grouped_4x2048",
+      "name": "FP16 grouped GEMM",
+      "operation": "Grouped GEMM",
+      "problem": {
+        "columns": 2048,
+        "dtype": "fp16",
+        "groups": 4,
+        "reduction": 2048,
+        "rows": 2048
+      },
+      "status": "completed",
+      "suite": "Triton",
+      "target": "gfx1250",
+      "thread_policy": "single",
+      "timing_results_s": [
+        22.217945632
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "deepseek.mlp_w1_m256",
+      "name": "FP8 MLP first projection",
+      "operation": "GEMM",
+      "problem": {
+        "columns": 18432,
+        "dtype": "fp8",
+        "reduction": 7168,
+        "rows": 256
+      },
+      "status": "completed",
+      "suite": "DeepSeek",
+      "target": "gfx1250",
+      "thread_policy": "single",
+      "timing_results_s": [
+        31.146505674
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "tensile.bf16_subtile_4096x4096x4096",
+      "name": "BF16 subtile 4096x4096x4096",
+      "operation": "GEMM",
+      "problem": {
+        "dtype": "bf16",
+        "k": 4096,
+        "m": 4096,
+        "n": 4096,
+        "variant": "bf16_subtile"
+      },
+      "status": "completed",
+      "suite": "TensileLite",
+      "target": "gfx1250",
+      "thread_policy": "single",
+      "timing_results_s": [
+        12.357550841
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "triton.persistent_1024x4096x4096",
+      "name": "FP16 persistent matmul",
+      "operation": "GEMM",
+      "problem": {
+        "columns": 4096,
+        "dtype": "fp16",
+        "reduction": 4096,
+        "rows": 1024
+      },
+      "status": "completed",
+      "suite": "Triton",
+      "target": "gfx1100",
+      "thread_policy": "default",
+      "timing_results_s": [
+        6.475931773
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "triton.grouped_4x2048",
+      "name": "FP16 grouped GEMM",
+      "operation": "Grouped GEMM",
+      "problem": {
+        "columns": 2048,
+        "dtype": "fp16",
+        "groups": 4,
+        "reduction": 2048,
+        "rows": 2048
+      },
+      "status": "completed",
+      "suite": "Triton",
+      "target": "gfx1100",
+      "thread_policy": "default",
+      "timing_results_s": [
+        6.040368269
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "triton.softmax_65536x2048",
+      "name": "FP32 softmax, 65536 x 2048",
+      "operation": "Softmax",
+      "problem": {
+        "columns": 2048,
+        "dtype": "fp32",
+        "rows": 65536
+      },
+      "status": "completed",
+      "suite": "Triton",
+      "target": "gfx1100",
+      "thread_policy": "default",
+      "timing_results_s": [
+        6.518131641
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "triton.layernorm_65536x2048",
+      "name": "FP32 layer normalization, 65536 x 2048",
+      "operation": "Layer normalization",
+      "problem": {
+        "columns": 2048,
+        "dtype": "fp32",
+        "epsilon": 0.00001,
+        "rows": 65536
+      },
+      "status": "completed",
+      "suite": "Triton",
+      "target": "gfx1100",
+      "thread_policy": "default",
+      "timing_results_s": [
+        9.385704908
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "gluon.copy_2d_fp32_16384x8192",
+      "name": "FP32 2D strided layout-converting copy",
+      "operation": "Layout conversion",
+      "problem": {
+        "columns": 8192,
+        "dtype": "fp32",
+        "rows": 16384
+      },
+      "status": "completed",
+      "suite": "Gluon",
+      "target": "gfx1100",
+      "thread_policy": "default",
+      "timing_results_s": [
+        2.004571065
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "full_tensile.valu_3072x2048x1024",
+      "name": "FP32 VALU GEMM",
+      "operation": "GEMM",
+      "problem": {
+        "beta": 0,
+        "dtype": "fp32",
+        "k": 1024,
+        "m": 3072,
+        "n": 2048,
+        "variant": "valu"
+      },
+      "status": "completed",
+      "suite": "Tensile",
+      "target": "gfx1100",
+      "thread_policy": "default",
+      "timing_results_s": [
+        3.638451605
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "full_tensile.tensor_2048x2048x16x64",
+      "name": "FP32 two-summation tensor contraction",
+      "operation": "Tensor contraction",
+      "problem": {
+        "beta": 1,
+        "dtype": "fp32",
+        "i": 2048,
+        "j": 2048,
+        "k": 16,
+        "l": 64,
+        "variant": "tensor"
+      },
+      "status": "completed",
+      "suite": "Tensile",
+      "target": "gfx1100",
+      "thread_policy": "default",
+      "timing_results_s": [
+        5.979669631
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "full_tensile.splitk_3072x2048x1536_gsu3",
+      "name": "FP32 split-K GEMM, GSU3",
+      "operation": "Split-K GEMM",
+      "problem": {
+        "beta": 1,
+        "dtype": "fp32",
+        "gsu": 3,
+        "k": 1536,
+        "m": 3072,
+        "n": 2048,
+        "variant": "splitk"
+      },
+      "status": "completed",
+      "suite": "Tensile",
+      "target": "gfx1100",
+      "thread_policy": "default",
+      "timing_results_s": [
+        14.45602579
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "full_tensile.pointer_8x1024x1024x1024",
+      "name": "FP32 pointer-array batched GEMM",
+      "operation": "Batched GEMM",
+      "problem": {
+        "batch": 8,
+        "beta": 1,
+        "dtype": "fp32",
+        "k": 1024,
+        "m": 1024,
+        "n": 1024,
+        "variant": "pointer"
+      },
+      "status": "completed",
+      "suite": "Tensile",
+      "target": "gfx1100",
+      "thread_policy": "default",
+      "timing_results_s": [
+        5.32054419
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "llama.rope_128x4096x32",
+      "name": "FP32 RoPE, independent-vector batching",
+      "operation": "RoPE",
+      "problem": {
+        "dtype": "fp32",
+        "heads": 4096,
+        "k": 128,
+        "tokens": 32
+      },
+      "status": "completed",
+      "suite": "llama.cpp",
+      "target": "gfx1100",
+      "thread_policy": "default",
+      "timing_results_s": [
+        15.807190302
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "llama.matvec_q4_4096x32768",
+      "name": "Q4_0 decode matrix-vector product",
+      "operation": "Quantized matrix-vector product",
+      "problem": {
+        "dtype": "fp32",
+        "k": 4096,
+        "rows": 32768,
+        "tokens": 1
+      },
+      "status": "completed",
+      "suite": "llama.cpp",
+      "target": "gfx1100",
+      "thread_policy": "default",
+      "timing_results_s": [
+        7.435307161
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "llama.gather_q8_4096x1024x4096",
+      "name": "Q8_0 embedding gather",
+      "operation": "Quantized embedding gather",
+      "problem": {
+        "dtype": "fp32",
+        "k": 4096,
+        "rows": 1024,
+        "tokens": 4096
+      },
+      "status": "completed",
+      "suite": "llama.cpp",
+      "target": "gfx1100",
+      "thread_policy": "default",
+      "timing_results_s": [
+        9.014626309
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "gluon.copy_fp32_100663296",
+      "name": "FP32 1D memory copy",
+      "operation": "Copy",
+      "problem": {
+        "dtype": "fp32",
+        "elements": 100663296
+      },
+      "status": "completed",
+      "suite": "Gluon",
+      "target": "gfx1100",
+      "thread_policy": "single",
+      "timing_results_s": [
+        18.67451111
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "llama.matvec_q4_4096x32768",
+      "name": "Q4_0 decode matrix-vector product",
+      "operation": "Quantized matrix-vector product",
+      "problem": {
+        "dtype": "fp32",
+        "k": 4096,
+        "rows": 32768,
+        "tokens": 1
+      },
+      "status": "completed",
+      "suite": "llama.cpp",
+      "target": "gfx1100",
+      "thread_policy": "single",
+      "timing_results_s": [
+        12.496579621
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "triton.persistent_1024x4096x4096",
+      "name": "FP16 persistent matmul",
+      "operation": "GEMM",
+      "problem": {
+        "columns": 4096,
+        "dtype": "fp16",
+        "reduction": 4096,
+        "rows": 1024
+      },
+      "status": "completed",
+      "suite": "Triton",
+      "target": "gfx1201",
+      "thread_policy": "default",
+      "timing_results_s": [
+        6.226285749
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "triton.grouped_4x2048",
+      "name": "FP16 grouped GEMM",
+      "operation": "Grouped GEMM",
+      "problem": {
+        "columns": 2048,
+        "dtype": "fp16",
+        "groups": 4,
+        "reduction": 2048,
+        "rows": 2048
+      },
+      "status": "completed",
+      "suite": "Triton",
+      "target": "gfx1201",
+      "thread_policy": "default",
+      "timing_results_s": [
+        5.829900041
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "triton.softmax_65536x2048",
+      "name": "FP32 softmax, 65536 x 2048",
+      "operation": "Softmax",
+      "problem": {
+        "columns": 2048,
+        "dtype": "fp32",
+        "rows": 65536
+      },
+      "status": "completed",
+      "suite": "Triton",
+      "target": "gfx1201",
+      "thread_policy": "default",
+      "timing_results_s": [
+        8.400323831
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "triton.layernorm_65536x2048",
+      "name": "FP32 layer normalization, 65536 x 2048",
+      "operation": "Layer normalization",
+      "problem": {
+        "columns": 2048,
+        "dtype": "fp32",
+        "epsilon": 0.00001,
+        "rows": 65536
+      },
+      "status": "completed",
+      "suite": "Triton",
+      "target": "gfx1201",
+      "thread_policy": "default",
+      "timing_results_s": [
+        9.984015328
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "gluon.copy_2d_fp32_16384x8192",
+      "name": "FP32 2D strided layout-converting copy",
+      "operation": "Layout conversion",
+      "problem": {
+        "columns": 8192,
+        "dtype": "fp32",
+        "rows": 16384
+      },
+      "status": "completed",
+      "suite": "Gluon",
+      "target": "gfx1201",
+      "thread_policy": "default",
+      "timing_results_s": [
+        2.245685942
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "full_tensile.valu_3072x2048x1024",
+      "name": "FP32 VALU GEMM",
+      "operation": "GEMM",
+      "problem": {
+        "beta": 0,
+        "dtype": "fp32",
+        "k": 1024,
+        "m": 3072,
+        "n": 2048,
+        "variant": "valu"
+      },
+      "status": "completed",
+      "suite": "Tensile",
+      "target": "gfx1201",
+      "thread_policy": "default",
+      "timing_results_s": [
+        4.419525736
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "full_tensile.tensor_2048x2048x16x64",
+      "name": "FP32 two-summation tensor contraction",
+      "operation": "Tensor contraction",
+      "problem": {
+        "beta": 1,
+        "dtype": "fp32",
+        "i": 2048,
+        "j": 2048,
+        "k": 16,
+        "l": 64,
+        "variant": "tensor"
+      },
+      "status": "completed",
+      "suite": "Tensile",
+      "target": "gfx1201",
+      "thread_policy": "default",
+      "timing_results_s": [
+        5.718238362
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "full_tensile.splitk_3072x2048x1536_gsu3",
+      "name": "FP32 split-K GEMM, GSU3",
+      "operation": "Split-K GEMM",
+      "problem": {
+        "beta": 1,
+        "dtype": "fp32",
+        "gsu": 3,
+        "k": 1536,
+        "m": 3072,
+        "n": 2048,
+        "variant": "splitk"
+      },
+      "status": "completed",
+      "suite": "Tensile",
+      "target": "gfx1201",
+      "thread_policy": "default",
+      "timing_results_s": [
+        14.397203007
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "full_tensile.pointer_8x1024x1024x1024",
+      "name": "FP32 pointer-array batched GEMM",
+      "operation": "Batched GEMM",
+      "problem": {
+        "batch": 8,
+        "beta": 1,
+        "dtype": "fp32",
+        "k": 1024,
+        "m": 1024,
+        "n": 1024,
+        "variant": "pointer"
+      },
+      "status": "completed",
+      "suite": "Tensile",
+      "target": "gfx1201",
+      "thread_policy": "default",
+      "timing_results_s": [
+        5.825733271
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "llama.rope_128x4096x32",
+      "name": "FP32 RoPE, independent-vector batching",
+      "operation": "RoPE",
+      "problem": {
+        "dtype": "fp32",
+        "heads": 4096,
+        "k": 128,
+        "tokens": 32
+      },
+      "status": "completed",
+      "suite": "llama.cpp",
+      "target": "gfx1201",
+      "thread_policy": "default",
+      "timing_results_s": [
+        15.581754614
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "llama.matvec_q4_4096x32768",
+      "name": "Q4_0 decode matrix-vector product",
+      "operation": "Quantized matrix-vector product",
+      "problem": {
+        "dtype": "fp32",
+        "k": 4096,
+        "rows": 32768,
+        "tokens": 1
+      },
+      "status": "completed",
+      "suite": "llama.cpp",
+      "target": "gfx1201",
+      "thread_policy": "default",
+      "timing_results_s": [
+        7.248436289
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "llama.gather_q8_4096x1024x4096",
+      "name": "Q8_0 embedding gather",
+      "operation": "Quantized embedding gather",
+      "problem": {
+        "dtype": "fp32",
+        "k": 4096,
+        "rows": 1024,
+        "tokens": 4096
+      },
+      "status": "completed",
+      "suite": "llama.cpp",
+      "target": "gfx1201",
+      "thread_policy": "default",
+      "timing_results_s": [
+        8.9643056
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "gluon.copy_fp32_100663296",
+      "name": "FP32 1D memory copy",
+      "operation": "Copy",
+      "problem": {
+        "dtype": "fp32",
+        "elements": 100663296
+      },
+      "status": "completed",
+      "suite": "Gluon",
+      "target": "gfx1201",
+      "thread_policy": "single",
+      "timing_results_s": [
+        17.479409178
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "llama.matvec_q4_4096x32768",
+      "name": "Q4_0 decode matrix-vector product",
+      "operation": "Quantized matrix-vector product",
+      "problem": {
+        "dtype": "fp32",
+        "k": 4096,
+        "rows": 32768,
+        "tokens": 1
+      },
+      "status": "completed",
+      "suite": "llama.cpp",
+      "target": "gfx1201",
+      "thread_policy": "single",
+      "timing_results_s": [
+        11.902037202
+      ]
+    }
+  ],
+  "execution_summary": {
+    "benchmark_suite": "performance-v2",
+    "finished_at": "2026-11-27T22:11:37.269763Z",
+    "samples": 1,
+    "timeout_seconds": 1200.0,
+    "timestamp": "2026-11-27T21:44:46.111413Z",
+    "wall_time_s": 1611.1583669930696,
+    "warmups": 0
+  },
+  "provenance": {
+    "auxiliary": {
+      "amd-torch-device-gfx1100": "2.14.0a0+rocm10.1.0a20260812",
+      "amd-torch-device-gfx1201": "2.14.0a0+rocm10.1.0a20260812",
+      "amd-torch-device-gfx1250": "2.14.0a0+rocm10.1.0a20260812",
+      "amd-torch-device-gfx950": "2.14.0a0+rocm10.1.0a20260812",
+      "python": "3.12.15",
+      "rocm-sdk-devel": "10.1.0a20260812",
+      "rocm-sdk-device-gfx1100": "10.1.0a20260812",
+      "rocm-sdk-device-gfx1201": "10.1.0a20260812",
+      "rocm-sdk-device-gfx1250": "10.1.0a20260812",
+      "rocm-sdk-device-gfx950": "10.1.0a20260812",
+      "rocm-sdk-libraries": "10.1.0a20260812",
+      "torch": "2.14.0a0+rocm10.1.0a20260812",
+      "triton": "3.8.0+git675c5987.rocm10.1.0a20260812"
+    },
+    "corpus": {
+      "corpus_commit_sha": "970fb7cb6d94f818a6dd65f9a928eeee26edce7a",
+      "corpus_commit_timestamp": "2026-11-18T11:52:50Z"
+    },
+    "machine": {
+      "cpu": "x86_64",
+      "hostname": "ff7300f95637",
+      "kernel": "7.0.0-38-generic",
+      "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.39"
+    },
+    "rocjitsu": {
+      "rocjitsu_commit_sha": "0964e75399c538cdcb6103e00e46d10f92dd0989",
+      "rocjitsu_commit_timestamp": "2026-11-27T20:16:29Z",
+      "rocm_sdk_version": "10.1.0a20260812"
+    }
+  },
+  "publication": {
+    "id": "github-46062508936-attempt-1",
+    "machine_label": "shark10-ci",
+    "source": {
+      "base": {
+        "branch": "develop",
+        "commit": "79bf9818db0441f3a42fb79e5a47be224589edc1"
+      },
+      "branch": "develop",
+      "message": "rocjitsu: suppress GCC 15 -Werror=array-bounds on ppc64le tests (#16965)",
+      "pull_request": null
+    },
+    "tensile_commit_sha": "dd77374194a3ea1a7258cd54f87af6747b6362a5",
+    "trigger": "auto",
+    "workflow_commit_sha": "0964e75399c538cdcb6103e00e46d10f92dd0989"
+  },
+  "schema_version": 1
+}
