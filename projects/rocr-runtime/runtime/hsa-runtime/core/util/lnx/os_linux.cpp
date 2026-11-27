@@ -54,6 +54,7 @@
 #include <sys/utsname.h>
 #include <unistd.h>
 #include <errno.h>
+#include <cassert>
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
@@ -1102,6 +1103,13 @@ IPCSocket CreateIPCServerUnique(uint32_t* token_out, int backlog) {
 
 IPCSocket ConnectToIPCServerByToken(uint32_t token, std::chrono::milliseconds timeout,
                                     std::chrono::milliseconds retryInterval) {
+  // Autobound abstract socket names are exactly 5 hex digits, so valid tokens
+  // occupy 20 bits. A larger value would be silently truncated by the %05x
+  // formatting below and connect to a name that cannot exist, burning the
+  // full retry window. Make the contract explicit and fail fast instead.
+  assert(token <= 0xFFFFFu && "IPC connection token exceeds the 20-bit autobind name domain");
+  if (token > 0xFFFFFu) return INVALID_SOCKET_VALUE;
+
   int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
   if (fd == -1) return INVALID_SOCKET_VALUE;
 
