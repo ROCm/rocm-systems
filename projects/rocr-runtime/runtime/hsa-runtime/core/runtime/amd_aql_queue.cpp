@@ -1085,7 +1085,6 @@ void AqlQueue::HandleInsufficientScratch(hsa_signal_value_t& error_code,
 
   if (use_physical_cus) {
     const uint32_t phys_cu_per_engine = agent_->properties().MaxPhysCUperEngine;
-    assert(phys_cu_per_engine > 0);
     if (phys_cu_per_engine > 0) {
       phys_cu_count = phys_cu_per_engine * agent_->properties().NumShaderBanks;
     } else {  // Fallback to old path if property is 0 or not set
