@@ -350,7 +350,12 @@ def test_render_dtype_shape_returns_none_without_readable_metadata(obj):
     assert render_dtype_shape(obj) is None
 
 
-def test_render_dtype_shape_empty_shape_is_scalar_brackets():
+def test_render_dtype_shape_empty_shape_uses_item_repr():
+    obj = SimpleNamespace(shape=(), dtype=FakeDType("torch.int64"), item=lambda: 42)
+    assert render_dtype_shape(obj) == "42"
+
+
+def test_render_dtype_shape_empty_shape_falls_back_without_item():
     obj = SimpleNamespace(shape=(), dtype=FakeDType("torch.float64"))
     assert render_dtype_shape(obj) == "float64[]"
 

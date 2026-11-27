@@ -14,6 +14,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Changed
 
+* `--trace-ml-api torch` operator call trees now show Python scalars (`int`, `float`, `bool`, and `str`) and 0-d tensor values next to tensor dtype and shape. Those values were previously omitted or shown as dtype with empty brackets.
+
 * Analyze mode accepts numpy versions from 1.26.4 to 2.5.x. It previously required exactly 1.26.4, or 2.5.2 on Python 3.13 and newer.
 
 * The analyze option `--decimal` is now the debug option `--debug-table-decimal`, which sets the decimals of the analyze tables.
