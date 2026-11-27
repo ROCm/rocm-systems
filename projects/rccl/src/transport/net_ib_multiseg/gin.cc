@@ -652,6 +652,47 @@ ncclResult_t IbMsegRmaIbProxyDestroyContext(void* rmaCtx) {
   return ncclSuccess;
 }
 
+// RCCL: a NIC without peermem (bng_re) cannot register a GPU VA, so a single-segment GPU buffer passed with fd -1
+// exports its own DMA-BUF fd. The ROCr export returns the offset of a suballocated plain buffer within its fd; it
+// rejects VMM memory, which the cuMem export of the exact range covers. *fd stays -1 when neither applies.
+static void rcclRmaExportSingleSegDmaBuf(void* data, size_t size, int type, int* fd, uint64_t* offset) {
+  *fd = -1;
+  *offset = 0;
+  if (type != NCCL_PTR_CUDA || !ncclParamDmaBufEnable() || IbMsegGdrSupport() == ncclSuccess ||
+      IbMsegDmaBufSupport(0) != ncclSuccess) {
+    return;
+  }
+  const uintptr_t pageSize = (uintptr_t)sysconf(_SC_PAGESIZE);
+  const uintptr_t aligned = (uintptr_t)data & ~(pageSize - 1);
+  const size_t alignedSize = ((uintptr_t)data + size - aligned + pageSize - 1) & ~(pageSize - 1);
+  if (hsa_amd_portable_export_dmabuf((const void*)aligned, alignedSize, fd, offset) == HSA_STATUS_SUCCESS &&
+      *fd >= 0) {
+    return;
+  }
+  *fd = -1;
+  *offset = 0;
+#if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
+  if (!ncclCuMemEnable() || cuMemGetHandleForAddressRange((void*)fd, (CUdeviceptr)aligned, alignedSize,
+                                                          CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, 0) != CUDA_SUCCESS) {
+    *fd = -1;
+  }
+#endif
+}
+
+// RCCL: registers one MR, with an fd of its own when fd is -1 and the NIC has no peermem.
+static ncclResult_t rcclRmaRegSingleMr(void* recvComm, void* data, size_t size, int type, uint64_t offset, int fd,
+                                       uint64_t mr_flags, void** mhandle) {
+  int ownFd = -1;
+  uint64_t ownOffset = 0;
+  if (fd == -1) rcclRmaExportSingleSegDmaBuf(data, size, type, &ownFd, &ownOffset);
+  ncclResult_t ret;
+  NOWARN(ret = IbMsegRegMrDmaBufInternal(recvComm, data, size, type, ownFd >= 0 ? ownOffset : offset,
+                                         ownFd >= 0 ? ownFd : fd, mr_flags, mhandle),
+         NCCL_NET);
+  if (ownFd >= 0) (void)close(ownFd);
+  return ret;
+}
+
 ncclResult_t IbMsegRmaIbProxyRegMrSymDmaBuf(void* collComm, void* data, size_t size, int type, uint64_t offset, int fd,
                                           uint64_t mr_flags, void** mhandle) {
   ncclResult_t ret = ncclSuccess;
@@ -659,8 +700,8 @@ ncclResult_t IbMsegRmaIbProxyRegMrSymDmaBuf(void* collComm, void* data, size_t s
   struct IbMsegRmaIbProxyMrHandle* rmaMrHandle = NULL;
   NCCLCHECKGOTO(ncclCalloc(&rmaMrHandle, 1), ret, fail);
 
-  NCCLCHECKGOTONOWARN(IbMsegRegMrDmaBufInternal(cComm->recvComm, data, size, type, offset, fd, mr_flags,
-                                                (void**)&rmaMrHandle->mrHandle),
+  NCCLCHECKGOTONOWARN(rcclRmaRegSingleMr(cComm->recvComm, data, size, type, offset, fd, mr_flags,
+                                         (void**)&rmaMrHandle->mrHandle),
                       ret, fail, NCCL_NET);
 
   NCCLCHECKGOTO(ncclCalloc(&rmaMrHandle->base_vas, cComm->nranks), ret, fail);

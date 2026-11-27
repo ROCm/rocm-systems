@@ -17,6 +17,8 @@
 static int IbMsegGdrModuleLoaded = 0; // 1 = true, 0 = false
 // Set when a platform-specific override (e.g. Hyper-V below) forces GDR off despite a present peermem client.
 static int IbMsegGdrBlocklisted = 0; // 1 = true, 0 = false
+// Set by RCCL_FORCE_ENABLE_GDRDMA=1, which skips the registration probe.
+static int IbMsegGdrForced = 0; // 1 = true, 0 = false
 
 // Introduce RCCL_FORCE_ENABLE_GDRDMA to force load GPU-NIC RDMA module
 // Use ONLY for debugging!
@@ -31,6 +33,7 @@ static void ibGdrSupportInitOnce() {
     // Requires support from NIC driver modules
     // Use ONLY for debugging!
     IbMsegGdrModuleLoaded = 1;
+    IbMsegGdrForced = 1;
     INFO(NCCL_INIT, "RCCL_FORCE_ENABLE_GDRDMA = 1, so explicitly setting IbMsegGdrModuleLoaded = 1");
   }
 
@@ -56,20 +59,29 @@ static void ibGdrSupportInitOnce() {
 #endif
 }
 
-// Returns ncclSuccess if a peermem module is loaded, or a device-0 runtime probe confirms GPU registration works without one.
+// Returns ncclSuccess if a device-0 runtime probe confirms GPU registration works. A loaded peermem module is trusted
+// only when the probe cannot run: a peer memory client serves only the RDMA drivers that use it (ib_peer_mem serves
+// ionic_rdma but not bng_re), so its presence does not mean this NIC can register GPU memory by address.
 ncclResult_t IbMsegGdrSupport() {
   static std::once_flag once;
   std::call_once(once, ibGdrSupportInitOnce);
-  if (IbMsegGdrModuleLoaded) return ncclSuccess;
+  if (IbMsegGdrForced) return ncclSuccess;
   // Don't probe past a deliberate safety override.
   if (IbMsegGdrBlocklisted) return ncclSystemError;
 
   static std::once_flag probeOnce;
-  static bool probeResult = false;
+  static int probeResult = -1;
   std::call_once(probeOnce, []() {
-    probeResult = ncclIbProbeGdrSupport(IbMsegDevs[0].context, IbMsegRelaxedOrderingEnabled) == 1;
+    probeResult = ncclIbProbeGdrSupport(IbMsegDevs[0].context, IbMsegRelaxedOrderingEnabled);
+    if (probeResult == 0 && IbMsegGdrModuleLoaded) {
+      INFO(NCCL_INIT | NCCL_NET,
+           "NET/IB: a peer memory client is loaded but %s cannot register GPU memory through it; GDR via peermem "
+           "disabled",
+           IbMsegDevs[0].devName);
+    }
   });
-  return probeResult ? ncclSuccess : ncclSystemError;
+  if (IbMsegGdrModuleLoaded) return probeResult == 0 ? ncclSystemError : ncclSuccess;
+  return probeResult == 1 ? ncclSuccess : ncclSystemError;
 }
 
 static int IbMsegPeerMemModuleLoaded = 0; // 1 = true, 0 = false
