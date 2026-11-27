@@ -101,9 +101,10 @@ def test_cdna_fmas_guest_policy(arch, width):
     body = gen_division(
         context(arch, f'V_DIV_FMAS_F{width}', ['vdst'], ['a', 'b', 'c'], True)
     )
-    suffix = 'gfx1250' if arch == 'cdna5' else 'gfx942'
+    suffix = 'gfx1250' if arch == 'cdna5' else 'gfx950' if arch == 'cdna4' else 'gfx942'
+    wide_suffix = 'gfx950' if arch == 'cdna4' else 'gfx942'
     assert f'rj_arith_v_div_fmas_f{width}_w32_{suffix}' in body
-    assert f'rj_arith_v_div_fmas_f{width}_w64_gfx942' in body
+    assert f'rj_arith_v_div_fmas_f{width}_w64_{wide_suffix}' in body
     assert f'/*rdna3=*/{str(arch != "cdna5").lower()}' in body
     assert 'DivisionOperation::Fmas' in body
     assert 'vdst, a, b, c' in body
@@ -116,7 +117,8 @@ def test_cdna_scale_preserves_inactive_condition(arch, width):
     body = gen_division(
         context(arch, name, ['vdst', 'sdst'], ['a', 'b', 'c'], True, 'commit_result')
     )
-    assert f'rj_arith_v_div_scale_f{width}_w32_gfx942' in body
+    scale_suffix = 'gfx950' if arch == 'cdna4' else 'gfx942'
+    assert f'rj_arith_v_div_scale_f{width}_w32_{scale_suffix}' in body
     assert 'commit_result, /*preserve_inactive_condition=*/true' in body
     assert 'RJ_ARITH_ALU_ABS_A' not in body
     root = (
@@ -127,7 +129,7 @@ def test_cdna_scale_preserves_inactive_condition(arch, width):
     source = '\n'.join(p.read_text() for p in root.glob('vop3_exec*.cpp'))
     start = source.index(f'void VDivScaleF{width}Vop3SdstEnc::execute_impl')
     end = source.index('\n}', start)
-    assert f'rj_arith_v_div_scale_f{width}_w32_gfx942' in source[start:end]
+    assert f'rj_arith_v_div_scale_f{width}_w32_{scale_suffix}' in source[start:end]
     assert '/*preserve_inactive_condition=*/true' in source[start:end]
 
 
@@ -137,9 +139,10 @@ def test_cdna_fixup_policy(arch, width):
     body = gen_division(
         context(arch, f'V_DIV_FIXUP_F{width}', ['vdst'], ['a', 'b', 'c'], True)
     )
-    suffix = 'gfx1250' if arch == 'cdna5' else 'gfx942'
+    suffix = 'gfx1250' if arch == 'cdna5' else 'gfx950' if arch == 'cdna4' else 'gfx942'
+    wide_suffix = 'gfx950' if arch == 'cdna4' else 'gfx942'
     assert f'rj_arith_v_div_fixup_f{width}_w32_{suffix}' in body
-    assert f'rj_arith_v_div_fixup_f{width}_w64_gfx942' in body
+    assert f'rj_arith_v_div_fixup_f{width}_w64_{wide_suffix}' in body
     assert f'/*rdna3=*/{str(arch != "cdna5").lower()}' in body
     if width == 16:
         # Ordinary FIXUP uses true16 writes; only LEGACY clears the other half.
@@ -153,8 +156,9 @@ def test_legacy_half_fixup_uses_cdna_policy(arch):
     body = gen_division(
         context(arch, 'V_DIV_FIXUP_LEGACY_F16', ['d'], ['a', 'b', 'c'], True)
     )
+    legacy_suffix = '_gfx950' if arch == 'cdna4' else ''
     for wave in (32, 64):
-        assert f'rj_arith_v_div_fixup_legacy_f16_w{wave}' in body
+        assert f'rj_arith_v_div_fixup_legacy_f16_w{wave}{legacy_suffix}' in body
     assert '/*rdna3=*/true' in body
     assert '/*low_dst_zeroes_high=*/true' in body
     for letter in 'ABCD':

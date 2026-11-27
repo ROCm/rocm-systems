@@ -790,9 +790,13 @@ std::vector<ArithmeticCase> adjacent_fp_cases() {
         0xf0u);
     add("FixupF16ProvisionalNaN", 6, {{0, 0x7e2au}, {1, 0xbc00u}, {2, 0x3c00u}}, {{6, 0xfc00u}},
         0xf0u);
-    // gfx1100 captures preserve the selected signaling NaN with IEEE mode clear.
+    // gfx1100 and gfx950 captures preserve the selected signaling NaN with IEEE mode clear.
     add("FixupF16NaNPayload", 6, {{0, 0u}, {1, 0x3c00u}, {2, 0xfc2au}},
-        {{6, encoding.arch == rocjitsu::IsaFamily::Rdna3 ? 0xfc2au : 0xfe2au}}, 0xf0u);
+        {{6,
+          encoding.arch == rocjitsu::IsaFamily::Rdna3 || encoding.arch == rocjitsu::IsaFamily::Cdna4
+              ? 0xfc2au
+              : 0xfe2au}},
+        0xf0u);
   }
   for (rocjitsu::IsaFamily arch : {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna4}) {
     for (uint32_t mode = 0; mode < 256; mode += 17) {

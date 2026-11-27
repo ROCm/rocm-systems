@@ -309,3 +309,68 @@ int rj_arith_v_div_scale_f64_w64_gfx942(uint64_t flags, uint64_t exec_mask,
                                         const uint32_t *const *b, const uint32_t *const *c) {
   return run_cdna<64, 64>(flags, exec_mask, instruction_flags, d, condition, a, b, c);
 }
+
+namespace {
+
+// MI350X (gfx950) uses the non-gradual scale-down window and preserves signaling NaNs.
+// Uncaptured OMOD/CLAMP controls are ignored in Compatibility/Loose/mode 1 and rejected in
+// strict modes 2 and 3.
+template <int Width, int Lanes, typename Mask>
+int run_gfx950(uint64_t flags, Mask exec_mask, uint64_t mode, uint32_t *const *d, Mask *condition,
+               const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c) {
+  using namespace rocjitsu::arith;
+  const uint64_t semantics = flags & RJ_ARITH_SEMANTICS_MASK;
+  flags = resolve_compatibility(flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = validate_semantics(flags)) {
+    return error;
+  }
+  if (mode >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  uint32_t dummy = 0;
+  if (int error = run<Width, true, false>(flags, 0, uint32_t(mode), nullptr, &dummy, nullptr,
+                                          nullptr, nullptr)) {
+    return error;
+  }
+  if ((mode & (RJ_ARITH_ALU_OMOD_MASK | RJ_ARITH_ALU_CLAMP)) &&
+      (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+       semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+  }
+  mode &= ~uint64_t(RJ_ARITH_ALU_OMOD_MASK | RJ_ARITH_ALU_CLAMP);
+  if constexpr (Lanes == 32) {
+    return run<Width, true, false>(flags, exec_mask, uint32_t(mode), d, condition, a, b, c);
+  } else {
+    return run_wave64<Width, true, false>(flags, exec_mask, uint32_t(mode), d, condition, a, b, c);
+  }
+}
+
+} // namespace
+
+int rj_arith_v_div_scale_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        uint32_t *condition, const uint32_t *const *a,
+                                        const uint32_t *const *b, const uint32_t *const *c) {
+  return run_gfx950<32, 32>(flags, exec_mask, instruction_flags, d, condition, a, b, c);
+}
+
+int rj_arith_v_div_scale_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        uint64_t *condition, const uint32_t *const *a,
+                                        const uint32_t *const *b, const uint32_t *const *c) {
+  return run_gfx950<32, 64>(flags, exec_mask, instruction_flags, d, condition, a, b, c);
+}
+
+int rj_arith_v_div_scale_f64_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        uint32_t *condition, const uint32_t *const *a,
+                                        const uint32_t *const *b, const uint32_t *const *c) {
+  return run_gfx950<64, 32>(flags, exec_mask, instruction_flags, d, condition, a, b, c);
+}
+
+int rj_arith_v_div_scale_f64_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        uint64_t *condition, const uint32_t *const *a,
+                                        const uint32_t *const *b, const uint32_t *const *c) {
+  return run_gfx950<64, 64>(flags, exec_mask, instruction_flags, d, condition, a, b, c);
+}

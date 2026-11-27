@@ -56,11 +56,11 @@ def gen_division(ctx: ExecuteContext) -> str | None:
             'rdna4': '_gfx12',
             **dict.fromkeys(OLDER_DIVISION_ARCHS, '_gfx942'),
             'cdna3': '_gfx942',
-            'cdna4': '_gfx942',
+            'cdna4': '_gfx950',
             'cdna5': '_gfx1250',
         }.get(arch, '')
         api = (
-            'rj_arith_v_div_fixup_legacy_f16'
+            'rj_arith_v_div_fixup_legacy_f16' + ('_gfx950' if arch == 'cdna4' else '')
             if mnemonic == 'V_DIV_FIXUP_LEGACY_F16'
             else 'rj_arith_v_div_fixup_f16' + suffix
         )
@@ -92,10 +92,10 @@ def gen_division(ctx: ExecuteContext) -> str | None:
         'rdna4': '_gfx12',
         **dict.fromkeys(OLDER_DIVISION_ARCHS, '_gfx942'),
         'cdna3': '_gfx942',
-        'cdna4': '_gfx942',
+        'cdna4': '_gfx950',
         'cdna5': '_gfx1250',
     }.get(arch, '')
-    if inherited_scale:
+    if inherited_scale and arch != 'cdna4':
         suffix = '_gfx942'
     api = 'rj_arith_' + mnemonic.lower() + suffix
     # gfx1250 is Wave32-only; the generic adapter still needs a typed Wave64 callback.
