@@ -44,6 +44,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Fixed Wavefront Occupancy in the System Speed-of-Light panel on gfx1250, which counted wavefronts per CU but compared them with the peak of all CUs.
 
+* Fixed ML API trace analysis failing with a `RecursionError` when the operator call tree is more than about 1,000 levels deep.
+
 ### Upcoming changes
 
 ### Known issues

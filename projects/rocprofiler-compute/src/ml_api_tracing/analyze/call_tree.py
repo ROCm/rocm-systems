@@ -30,6 +30,23 @@ from ml_api_tracing.marker_format import split_operator_args
 from utils.utils_common import NS_TO_MS
 
 
+def _iter_post_order(root: CallTreeNode) -> Iterator[CallTreeNode]:
+    """Yield every node under root, children before their parent.
+
+    Uses an explicit stack, so deep trees do not hit the recursion limit.
+    A parent's child list is read before the parent is yielded, so the caller
+    may replace it while iterating. Each node must appear once in the tree.
+    """
+    stack: List[Tuple[CallTreeNode, bool]] = [(root, False)]
+    while stack:
+        node, children_done = stack.pop()
+        if children_done:
+            yield node
+            continue
+        stack.append((node, True))
+        stack.extend((child, False) for child in reversed(node.children))
+
+
 def rollup_node_stats(node: CallTreeNode) -> NodeRollup:
     """Bottom-up rollup over this node and all descendants.
 
@@ -40,8 +57,13 @@ def rollup_node_stats(node: CallTreeNode) -> NodeRollup:
     Mean is None only when there are no launches; zero-duration launches
     contribute to the mean and can produce 0.
     """
-    child_rollups = [rollup_node_stats(child) for child in node.children]
-    return _roll_up_from_child_rollups(node, child_rollups)
+    rollups: Dict[int, NodeRollup] = {}
+    for current in _iter_post_order(node):
+        # pop frees each child's rollup once its parent has used it.
+        rollups[id(current)] = _roll_up_from_child_rollups(
+            current, [rollups.pop(id(child)) for child in current.children]
+        )
+    return rollups[id(node)]
 
 
 def _roll_up_from_child_rollups(
@@ -91,10 +113,12 @@ def iter_call_tree_paths(
     nodes: List[CallTreeNode], parent_path: Tuple[str, ...] = ()
 ) -> Iterator[Tuple[CallTreeNode, Tuple[str, ...]]]:
     """Yield each node depth-first with its operator path from the root."""
-    for node in nodes:
-        path = parent_path + (node.name,)
+    stack = [(node, parent_path) for node in reversed(nodes)]
+    while stack:
+        node, node_parent_path = stack.pop()
+        path = node_parent_path + (node.name,)
         yield node, path
-        yield from iter_call_tree_paths(node.children, path)
+        stack.extend((child, path) for child in reversed(node.children))
 
 
 def nest_marker_intervals(
@@ -249,7 +273,7 @@ def fold_identical_sibling_subtrees(
 
     Returns new nodes sorted by total GPU duration. Does not mutate nodes.
     """
-    return [node for node, _rollup in _fold_siblings(nodes, {})]
+    return [node for node, _rollup in _fold_siblings(nodes, _ShapeKeys())]
 
 
 def copy_matched_operator_subtree(
@@ -434,12 +458,12 @@ def _overlapping_marker_error(
 
 def _launcher_thread_id_from_tree(node: CallTreeNode) -> Optional[str]:
     """Find the first launcher thread ID on this node or its descendants."""
-    if node.launcher_thread_id is not None:
-        return node.launcher_thread_id
-    for child in node.children:
-        found = _launcher_thread_id_from_tree(child)
-        if found is not None:
-            return found
+    stack = [node]
+    while stack:
+        current = stack.pop()
+        if current.launcher_thread_id is not None:
+            return current.launcher_thread_id
+        stack.extend(reversed(current.children))
     return None
 
 
@@ -454,20 +478,28 @@ def _deepest_containing_node(
     nodes: List[CallTreeNode], start: float, end: float
 ) -> Optional[CallTreeNode]:
     """Find the innermost marker that contains the worker's start and end times."""
-    for node in nodes:
-        if not _interval_contains(node, start, end):
-            continue
-        nested = _deepest_containing_node(node.children, start, end)
-        return nested if nested is not None else node
-    return None
+    deepest: Optional[CallTreeNode] = None
+    candidates = nodes
+    while True:
+        container = next(
+            (node for node in candidates if _interval_contains(node, start, end)),
+            None,
+        )
+        if container is None:
+            return deepest
+        deepest = container
+        candidates = container.children
 
 
 def _prune_cpu_only_call_tree_node(node: CallTreeNode) -> bool:
     """Drop CPU-only children. True if this node has kernel work."""
-    node.children = [
-        child for child in node.children if _prune_cpu_only_call_tree_node(child)
-    ]
-    return bool(node.kernels) or bool(node.children)
+    has_kernel_work: Dict[int, bool] = {}
+    for current in _iter_post_order(node):
+        current.children = [
+            child for child in current.children if has_kernel_work[id(child)]
+        ]
+        has_kernel_work[id(current)] = bool(current.kernels) or bool(current.children)
+    return has_kernel_work[id(node)]
 
 
 def _nested_invocation_keys(
@@ -482,29 +514,44 @@ def _nested_invocation_keys(
     }
 
 
-def _subtree_shape_key(node: CallTreeNode, shape_keys: Dict[int, tuple]) -> tuple:
-    """Return a hashable key for a node's operator, location, kernels and children.
+class _ShapeKeys:
+    """Subtree shape keys, cached by node id.
 
-    shape_keys caches finished keys by node id. A node is keyed once even when
-    its ancestors are folded at several levels.
+    Two subtrees have the same key when their operator, location, backend,
+    kernel names and children match, in any order. Each distinct shape gets a
+    small integer, so comparing keys never walks a deep tree. A node is keyed
+    once even when its ancestors are folded at several levels. key() does not
+    reuse _iter_post_order because it skips subtrees that are already keyed.
     """
-    shape_key = shape_keys.get(id(node))
-    if shape_key is None:
-        line_number = "" if node.line_number is None else str(node.line_number)
-        child_keys = tuple(
-            sorted(_subtree_shape_key(child, shape_keys) for child in node.children)
-        )
-        kernel_names = tuple(sorted(node.kernels))
-        shape_key = (
-            node.name,
-            node.file_name or "",
-            line_number,
-            node.backend or "",
-            kernel_names,
-            child_keys,
-        )
-        shape_keys[id(node)] = shape_key
-    return shape_key
+
+    def __init__(self) -> None:
+        self._by_node: Dict[int, int] = {}
+        self._by_shape: Dict[tuple, int] = {}
+
+    def key(self, root: CallTreeNode) -> int:
+        """Return the shape key of root, keying its unkeyed descendants first."""
+        stack: List[Tuple[CallTreeNode, bool]] = [(root, False)]
+        while stack:
+            node, children_done = stack.pop()
+            if id(node) in self._by_node:
+                continue
+            if not children_done:
+                stack.append((node, True))
+                stack.extend((child, False) for child in node.children)
+                continue
+            line_number = "" if node.line_number is None else str(node.line_number)
+            shape = (
+                node.name,
+                node.file_name or "",
+                line_number,
+                node.backend or "",
+                tuple(sorted(node.kernels)),
+                tuple(sorted(self._by_node[id(child)] for child in node.children)),
+            )
+            self._by_node[id(node)] = self._by_shape.setdefault(
+                shape, len(self._by_shape)
+            )
+        return self._by_node[id(root)]
 
 
 def _add_kernel_stats(
@@ -544,34 +591,79 @@ def _merge_args_invocations(
         destination.setdefault(args_blob, set()).update(recorded_invocation_ids)
 
 
+class _FoldLevel:
+    """One sibling list being folded, and the folded nodes it produces."""
+
+    def __init__(self, groups: List[List[CallTreeNode]]) -> None:
+        self.groups = groups
+        self.merged: List[CallTreeNode] = []
+        self.child_levels: List[_FoldLevel] = []
+        self.folded: List[Tuple[CallTreeNode, NodeRollup]] = []
+
+
 def _fold_siblings(
-    nodes: List[CallTreeNode], shape_keys: Dict[int, tuple]
+    nodes: List[CallTreeNode], shape_keys: _ShapeKeys
 ) -> List[Tuple[CallTreeNode, NodeRollup]]:
-    """Fold identical siblings; return each new node with its completed rollup."""
-    groups: Dict[tuple, List[CallTreeNode]] = {}
+    """Fold identical siblings; return each new node with its completed rollup.
+
+    Merged nodes are created top-down. Their rollups and sort order are set
+    bottom-up, so the folded children of each node are ordered by their
+    completed totals.
+    """
+    root_level = _FoldLevel(_group_by_shape(nodes, shape_keys))
+    levels = [root_level]
+    # Top-down: the list grows while it is walked, because each level adds its
+    # child levels to the end.
+    for level in levels:
+        for group in level.groups:
+            level.merged.append(_merge_group_node(group))
+            level.child_levels.append(
+                _FoldLevel(
+                    _group_by_shape(
+                        [child for node in group for child in node.children],
+                        shape_keys,
+                    )
+                )
+            )
+        levels.extend(level.child_levels)
+    # Bottom-up: a child level always comes after its parent in the list, so
+    # popping from the end finishes the children first.
+    while levels:
+        level = levels.pop()
+        folded: List[Tuple[CallTreeNode, NodeRollup]] = []
+        for merged, child_level in zip(level.merged, level.child_levels):
+            merged.children = [child for child, _rollup in child_level.folded]
+            rollup = _roll_up_from_child_rollups(
+                merged, [child_rollup for _child, child_rollup in child_level.folded]
+            )
+            folded.append((merged, rollup))
+        folded.sort(
+            key=lambda folded_node: folded_node[0].total_duration_ms, reverse=True
+        )
+        level.folded = folded
+        level.child_levels = []  # frees the finished children
+    return root_level.folded
+
+
+def _group_by_shape(
+    nodes: List[CallTreeNode], shape_keys: _ShapeKeys
+) -> List[List[CallTreeNode]]:
+    """Group nodes with the same shape, in order of first appearance."""
+    groups: Dict[int, List[CallTreeNode]] = {}
     for node in nodes:
-        groups.setdefault(_subtree_shape_key(node, shape_keys), []).append(node)
-    folded = [
-        _merge_identical_sibling_group(group, shape_keys) for group in groups.values()
-    ]
-    folded.sort(key=lambda folded_node: folded_node[0].total_duration_ms, reverse=True)
-    return folded
+        groups.setdefault(shape_keys.key(node), []).append(node)
+    return list(groups.values())
 
 
-def _merge_identical_sibling_group(
-    group: List[CallTreeNode], shape_keys: Dict[int, tuple]
-) -> Tuple[CallTreeNode, NodeRollup]:
+def _merge_group_node(group: List[CallTreeNode]) -> CallTreeNode:
+    """Merge identical siblings into one node without children."""
     first = group[0]
     kernels: Dict[str, KernelStats] = {}
     for node in group:
         for kernel_name, stats in node.kernels.items():
             _add_kernel_stats(kernels, kernel_name, stats)
-    folded_children = _fold_siblings(
-        [child for node in group for child in node.children], shape_keys
-    )
     merged = CallTreeNode(
         name=first.name,
-        children=[child for child, _child_rollup in folded_children],
         kernels=kernels,
         file_name=first.file_name,
         line_number=first.line_number,
@@ -582,15 +674,18 @@ def _merge_identical_sibling_group(
     for node in group:
         merged.invocation_ids.update(node.invocation_ids)
         _merge_args_invocations(merged.args_invocations, node.args_invocations)
-    rollup = _roll_up_from_child_rollups(
-        merged, [child_rollup for _child, child_rollup in folded_children]
-    )
-    return merged, rollup
+    return merged
 
 
 def _copy_subtree(node: CallTreeNode) -> CallTreeNode:
     """Copy a node and its descendants; the copies share the kernel stats."""
-    return replace(node, children=[_copy_subtree(child) for child in node.children])
+    copies: Dict[int, CallTreeNode] = {}
+    for current in _iter_post_order(node):
+        # pop frees each child's copy once its parent has used it.
+        copies[id(current)] = replace(
+            current, children=[copies.pop(id(child)) for child in current.children]
+        )
+    return copies[id(node)]
 
 
 def _copy_scoped_operator_node(
@@ -604,33 +699,49 @@ def _copy_scoped_operator_node(
     node is kept. Ancestors use the rollups of their kept children instead of
     walking the copied descendants again.
     """
-    node_is_match = id(node) in matched_node_ids
-    if node_is_match and node.backend == USER_REGION_BACKEND:
-        copied_subtree = _copy_subtree(node)
-        return copied_subtree, rollup_node_stats(copied_subtree)
-    descendant_backends = inherited_backends
-    if node_is_match and node.backend is not None:
-        descendant_backends = set(inherited_backends)
-        descendant_backends.add(node.backend)
-    kept_children: List[Tuple[CallTreeNode, NodeRollup]] = []
-    for child in node.children:
-        scoped_child = _copy_scoped_operator_node(
-            child,
-            matched_node_ids,
-            descendant_backends,
+    scoped: Dict[int, Optional[Tuple[CallTreeNode, NodeRollup]]] = {}
+    stack: List[Tuple[CallTreeNode, Set[str], bool]] = [
+        (node, inherited_backends, False)
+    ]
+    while stack:
+        current, inherited, children_done = stack.pop()
+        node_is_match = id(current) in matched_node_ids
+        if not children_done:
+            if node_is_match and current.backend == USER_REGION_BACKEND:
+                copied_subtree = _copy_subtree(current)
+                scoped[id(current)] = (
+                    copied_subtree,
+                    rollup_node_stats(copied_subtree),
+                )
+                continue
+            descendant_backends = inherited
+            if node_is_match and current.backend is not None:
+                descendant_backends = set(inherited)
+                descendant_backends.add(current.backend)
+            stack.append((current, inherited, True))
+            stack.extend(
+                (child, descendant_backends, False)
+                for child in reversed(current.children)
+            )
+            continue
+        # pop frees each child's result once its parent has used it.
+        kept_children = [
+            scoped_child
+            for child in current.children
+            if (scoped_child := scoped.pop(id(child))) is not None
+        ]
+        backend_in_scope = current.backend is not None and current.backend in inherited
+        keep_kernels = node_is_match or backend_in_scope
+        if not keep_kernels and not kept_children:
+            scoped[id(current)] = None
+            continue
+        copied_node = replace(
+            current,
+            children=[child for child, _child_rollup in kept_children],
+            kernels=current.kernels if keep_kernels else {},
         )
-        if scoped_child is not None:
-            kept_children.append(scoped_child)
-    backend_in_scope = node.backend is not None and node.backend in inherited_backends
-    keep_kernels = node_is_match or backend_in_scope
-    if not keep_kernels and not kept_children:
-        return None
-    copied_node = replace(
-        node,
-        children=[child for child, _child_rollup in kept_children],
-        kernels=node.kernels if keep_kernels else {},
-    )
-    rollup = _roll_up_from_child_rollups(
-        copied_node, [child_rollup for _child, child_rollup in kept_children]
-    )
-    return copied_node, rollup
+        rollup = _roll_up_from_child_rollups(
+            copied_node, [child_rollup for _child, child_rollup in kept_children]
+        )
+        scoped[id(current)] = (copied_node, rollup)
+    return scoped[id(node)]

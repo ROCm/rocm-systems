@@ -6,7 +6,7 @@
 import math
 import shutil
 import textwrap
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 
 import pandas as pd
 from tabulate import tabulate
@@ -465,6 +465,15 @@ def show_operator_summary(summary_df: pd.DataFrame) -> None:
     )
 
 
+class _PrintStep(NamedTuple):
+    """A tree line to print, or a printed node's kernel lines to print next."""
+
+    node: CallTreeNode
+    indent: str
+    is_last: bool = True
+    kernels_only: bool = False
+
+
 def print_operator_node(
     node: CallTreeNode,
     kernel_ids: Dict[str, int],
@@ -472,16 +481,33 @@ def print_operator_node(
     parent_pipes: str = "",
 ) -> None:
     """Print a node and its descendants, folding identical sibling subtrees."""
-    indent = parent_pipes
+    steps = [_PrintStep(node, parent_pipes, is_last)]
+    while steps:
+        step = steps.pop()
+        if step.kernels_only:
+            _print_node_kernels(step.node, step.indent, kernel_ids)
+            continue
+        children_indent = _print_operator_line(step.node, step.is_last, step.indent)
+        children = fold_identical_sibling_subtrees(step.node.children)
+        # Steps pop in reverse, so the kernel lines print after the children.
+        steps.append(_PrintStep(step.node, children_indent, kernels_only=True))
+        has_kernels = len(step.node.kernels) > 0
+        for index in reversed(range(len(children))):
+            child_is_last = index == len(children) - 1 and not has_kernels
+            steps.append(_PrintStep(children[index], children_indent, child_is_last))
+
+
+def _print_operator_line(node: CallTreeNode, is_last: bool, indent: str) -> str:
+    """Print a node's line and argument variants; return its children's indent."""
     is_branching = len(node.children) + len(node.kernels) > 1
 
     branch_char = "└─ " if is_last else "├─ "
     node_prefix = f"{indent}{branch_char}"
 
     if is_last:
-        new_parent_pipes = parent_pipes + "   "
+        new_parent_pipes = indent + "   "
     else:
-        new_parent_pipes = parent_pipes + "|  "
+        new_parent_pipes = indent + "|  "
 
     args_segment = format_node_args(node)
     if is_branching:
@@ -505,15 +531,7 @@ def print_operator_node(
         print_wrapped_tree_line(
             new_parent_pipes, variant_line, continuation_prefix=new_parent_pipes
         )
-
-    children = fold_identical_sibling_subtrees(node.children)
-    for i, child in enumerate(children):
-        child_is_last = (i == len(children) - 1) and (len(node.kernels) == 0)
-        print_operator_node(
-            child, kernel_ids, is_last=child_is_last, parent_pipes=new_parent_pipes
-        )
-
-    _print_node_kernels(node, new_parent_pipes, kernel_ids)
+    return new_parent_pipes
 
 
 def _operator_listing_view(

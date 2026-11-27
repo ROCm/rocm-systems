@@ -3,6 +3,7 @@
 
 """Unit tests for ML API operator reports and summaries."""
 
+import sys
 from typing import Dict, List
 
 import pandas as pd
@@ -944,3 +945,33 @@ def test_build_operator_summary_skips_cpu_only_nodes_and_handles_zero_root_total
     assert summary.iloc[0]["Total_GPU"] == 0.0
     assert summary.iloc[0]["Mean_Per_Dispatch"] == 0.0
     assert pd.isna(summary.iloc[0]["Pct_Total_GPU"])
+
+
+def test_print_operator_node_handles_nesting_deeper_than_the_recursion_limit(capsys):
+    # Printing folds every level, so its cost grows with the square of the
+    # depth. A lower limit keeps this test fast while the depth stays above it.
+    original_limit = sys.getrecursionlimit()
+    sys.setrecursionlimit(250)
+    try:
+        nesting = 500
+        node = CallTreeNode(
+            name="leaf",
+            kernels={"gemm": KernelStats(1, 10.0, 10.0, 10.0)},
+            invocation_ids={"0"},
+        )
+        for level in range(nesting - 1):
+            node = CallTreeNode(
+                name=f"op{level}", children=[node], invocation_ids={str(level)}
+            )
+        rollup_node_stats(node)
+
+        print_operator_node(node, {"gemm": 0})
+    finally:
+        sys.setrecursionlimit(original_limit)
+
+    output = capsys.readouterr().out
+    operator_lines = [
+        line for line in output.splitlines() if "└─ op" in line or "└─ leaf" in line
+    ]
+    assert len(operator_lines) == nesting
+    assert "leaf" in operator_lines[-1]

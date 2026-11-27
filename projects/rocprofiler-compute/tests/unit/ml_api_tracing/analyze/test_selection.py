@@ -3,6 +3,8 @@
 
 """Unit tests for ML operator selection."""
 
+import sys
+
 import pandas as pd
 import pytest
 
@@ -282,3 +284,19 @@ def test_intersect_dispatch_ids_by_kernel_empty_selection_returns_no_dispatches(
     kernel_top = pd.DataFrame({"Kernel_Name": ["target"]})
 
     assert intersect_dispatch_ids_by_kernel([1], raw_pmc, kernel_top, []) == []
+
+
+def test_select_operators_handles_nesting_deeper_than_the_recursion_limit():
+    nesting = sys.getrecursionlimit() + 100
+    node = CallTreeNode(
+        name="leaf",
+        backend="torch",
+        kernels={"gemm": KernelStats(1, 10.0, 10.0, 10.0, [(1, "gemm")])},
+    )
+    for level in range(nesting - 1):
+        node = CallTreeNode(name=f"op{level}", backend="torch", children=[node])
+
+    subtree, pmc_group_keys = select_operators({"1": [node]}, {"torch": ["leaf"]})
+
+    assert pmc_group_keys == [(1, "gemm")]
+    assert len(list(iter_call_tree_paths(subtree["1"]))) == nesting

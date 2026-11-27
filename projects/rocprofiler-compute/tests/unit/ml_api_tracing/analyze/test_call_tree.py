@@ -3,6 +3,8 @@
 
 """Unit tests for ML API call-tree processing."""
 
+import sys
+
 import pandas as pd
 import pytest
 
@@ -82,6 +84,32 @@ def leaf_operator(
     )
     rollup_node_stats(node)
     return node
+
+
+def chain_depth(root: CallTreeNode) -> int:
+    """Count the nodes on the first-child chain from root down."""
+    depth = 1
+    while root.children:
+        root = root.children[0]
+        depth += 1
+    return depth
+
+
+def nested_rows(name, depth, start, end, **options):
+    """Marker rows that each sit one time unit inside the previous row."""
+    return [
+        parsed_marker_row(f"{name}{level}", start + level, end - level, **options)
+        for level in range(depth)
+    ]
+
+
+def with_kernel(row, kernel_name, start, end):
+    """Give a marker row one kernel dispatch."""
+    row["Kernel_Names"] = [kernel_name]
+    row["Kernel_Start_Timestamps"] = [start]
+    row["Kernel_End_Timestamps"] = [end]
+    row["Kernel_Pmc_Group_Keys"] = [("gpu", 1)]
+    return row
 
 
 def test_kernel_stats_length_mismatch_raises():
@@ -690,3 +718,35 @@ def test_copy_matched_operator_subtree_keeps_same_backend_descendants_across_bri
     assert list(copied_bridge.children[0].kernels) == ["descendant"]
     assert copied_root.kernel_launches == 2
     assert copied_root.total_duration_ms == pytest.approx(0.00004)
+
+
+def test_traversals_handle_nesting_deeper_than_the_recursion_limit():
+    """Two chains deeper than the recursion limit, joined by launcher attach."""
+    depth = sys.getrecursionlimit() + 100
+    region = parsed_marker_row(
+        "region", -1, 4 * depth + 1, file_name="net.py", backend="user"
+    )
+    main_chain = nested_rows("op", depth, 0, 4 * depth, file_name="net.py")
+    worker_chain = nested_rows("worker", depth, depth, 3 * depth, thread_id=2)
+    with_kernel(main_chain[-1], "gemm", 2 * depth, 2 * depth + 1)
+    with_kernel(worker_chain[-1], "worker_kernel", 2 * depth, 2 * depth + 1)
+    worker_chain[-1]["launcher_thread_id"] = "1"
+    trace_df = pd.DataFrame([region, *main_chain, *worker_chain])
+    forest = nest_marker_intervals(trace_df)
+    errors = []
+
+    attach_unlocated_trees_by_launcher_thread(forest, errors)
+    validate_all_markers_nested(trace_df, forest)
+    prune_cpu_only_call_trees(forest)
+    root = forest["1"][0]
+    rolled = rollup_node_stats(root)
+    twin = copy_matched_operator_subtree(forest, [root])["1"][0]
+    folded = fold_identical_sibling_subtrees([root, twin])
+
+    assert errors == []
+    assert list(forest) == ["1"]
+    assert chain_depth(root) == 2 * depth + 1
+    assert rolled.launches == 2
+    assert len(folded) == 1
+    assert chain_depth(folded[0]) == 2 * depth + 1
+    assert folded[0].kernel_launches == 4

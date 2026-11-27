@@ -119,8 +119,10 @@ def _collect_glob_matched_nodes(
 
 def _pmc_group_keys_from_node(node: CallTreeNode) -> List[Tuple]:
     pmc_group_keys: List[Tuple] = []
-    for stats in node.kernels.values():
-        pmc_group_keys.extend(stats.pmc_group_keys)
-    for child in node.children:
-        pmc_group_keys.extend(_pmc_group_keys_from_node(child))
+    stack = [node]
+    while stack:
+        current = stack.pop()
+        for stats in current.kernels.values():
+            pmc_group_keys.extend(stats.pmc_group_keys)
+        stack.extend(reversed(current.children))
     return pmc_group_keys
