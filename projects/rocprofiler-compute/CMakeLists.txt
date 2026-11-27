@@ -1266,7 +1266,7 @@ if(ENABLE_PERFORMANCE_TESTS AND NOT TEST_FROM_INSTALL)
     )
     set_tests_properties(
         test_perf_transpose_nbody
-        PROPERTIES LABELS "performance;manual" RESOURCE_GROUPS gpus:1 TIMEOUT 28800
+        PROPERTIES LABELS "performance;manual" RESOURCE_GROUPS gpus:1 TIMEOUT 7200
     )
 endif()
 
