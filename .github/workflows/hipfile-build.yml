@@ -146,11 +146,15 @@ jobs:
             '
       - name: Generate build files for hipFile targeting the AMD platform (${{ inputs.cxx_compiler }})
         # ${SLES_BUILD_ID} is mentioned for all platforms to match current ROCm build implementation.
+        env:
+          AIS_HIPFILE_USE_CODE_COVERAGE: ${{ env.AIS_USE_CODE_COVERAGE == 'true' && 'ON' || 'OFF' }}
         run: |
           docker exec \
             -e "_AIS_INPUT_CXX_COMPILER=${AIS_INPUT_CXX_COMPILER}" \
             -e "_AIS_SAFE_COMPILER_NAME=${AIS_SAFE_COMPILER_NAME}" \
             -e "_AIS_INPUT_CXX_STANDARD=${AIS_INPUT_CXX_STANDARD}" \
+            -e "_AIS_HIP_ARCHITECTURES=${AIS_HIP_ARCHITECTURES}" \
+            -e "_AIS_HIPFILE_USE_CODE_COVERAGE=${AIS_HIPFILE_USE_CODE_COVERAGE}" \
             -e "BUILD_ID=${AIS_INPUT_BUILD_ID}" \
             -e "JOB_DESIGNATOR=${AIS_INPUT_JOB_DESIGNATOR}" \
             -t \
@@ -165,12 +169,12 @@ jobs:
               cmake \
                 -DCMAKE_BUILD_TYPE=Debug \
                 -DCMAKE_CXX_COMPILER="${_AIS_INPUT_CXX_COMPILER}" \
-                -DHIPFILE_CXX_STANDARD="${{ env.AIS_INPUT_CXX_STANDARD }}" \
+                -DHIPFILE_CXX_STANDARD="${_AIS_INPUT_CXX_STANDARD}" \
                 -DCMAKE_CXX_FLAGS="-Werror" \
-                -DCMAKE_HIP_ARCHITECTURES="${{ env.AIS_HIP_ARCHITECTURES }}" \
+                -DCMAKE_HIP_ARCHITECTURES="${_AIS_HIP_ARCHITECTURES}" \
                 -DCMAKE_HIP_PLATFORM=amd \
                 -DHIPFILE_BUILD_DOCS=ON \
-                -DHIPFILE_USE_CODE_COVERAGE=${{ env.AIS_USE_CODE_COVERAGE == 'true' && 'ON' || 'OFF' }} \
+                -DHIPFILE_USE_CODE_COVERAGE="${_AIS_HIPFILE_USE_CODE_COVERAGE}" \
                 -DROCM_VERSION="${ROCM_VERSION}" \
                 -DHIPFILE_CAPABLE_DIR=/mnt/ais-fs \
                 ../../rocm-systems/projects/hipfile
@@ -201,6 +205,8 @@ jobs:
         run: |
           docker exec \
             -e "_AIS_INPUT_CXX_COMPILER=${AIS_INPUT_CXX_COMPILER}" \
+            -e "_AIS_INPUT_CXX_STANDARD=${AIS_INPUT_CXX_STANDARD}" \
+            -e "_AIS_HIP_ARCHITECTURES=${AIS_HIP_ARCHITECTURES}" \
             -t \
             -w /ais/build/hipfile-release \
             "${AIS_CONTAINER_NAME}" \
@@ -208,9 +214,9 @@ jobs:
               cmake \
                 -DCMAKE_BUILD_TYPE=Release \
                 -DCMAKE_CXX_COMPILER="${_AIS_INPUT_CXX_COMPILER}" \
-                -DHIPFILE_CXX_STANDARD="${{ env.AIS_INPUT_CXX_STANDARD }}" \
+                -DHIPFILE_CXX_STANDARD="${_AIS_INPUT_CXX_STANDARD}" \
                 -DCMAKE_CXX_FLAGS="-Werror" \
-                -DCMAKE_HIP_ARCHITECTURES="${{ env.AIS_HIP_ARCHITECTURES }}" \
+                -DCMAKE_HIP_ARCHITECTURES="${_AIS_HIP_ARCHITECTURES}" \
                 -DCMAKE_HIP_PLATFORM=amd \
                 -DROCM_VERSION="${ROCM_VERSION}" \
                 -DHIPFILE_CAPABLE_DIR=/mnt/ais-fs \
@@ -268,7 +274,8 @@ jobs:
         id: pkg-metadata
         run: |
           docker exec \
-            -e "AIS_GITHUB_OUTPUT=${{ env.AIS_GHA_CMD_FILES_DOCKER_DIR }}/${GITHUB_OUTPUT##*/}" \
+            -e "AIS_GITHUB_OUTPUT=${AIS_GHA_CMD_FILES_DOCKER_DIR}/${GITHUB_OUTPUT##*/}" \
+            -e "_AIS_PKG_TYPE=${AIS_PKG_TYPE}" \
             -t \
             -w /ais/build/hipfile \
             "${AIS_CONTAINER_NAME}" \
@@ -276,66 +283,73 @@ jobs:
               shopt -s nullglob
               AIS_HIPFILE_PKG_DEV_FILENAME="$(echo hipfile-de{v,vel}{-,_}[0-9]*.{deb,rpm})"
               AIS_HIPFILE_PKG_FILENAME="$(echo hipfile{-,_}[0-9]*.{deb,rpm})"
-              echo "AIS_HIPFILE_PKG_DEV_FILENAME=${AIS_HIPFILE_PKG_DEV_FILENAME}" >> "${AIS_GITHUB_OUTPUT}"
-              echo "AIS_HIPFILE_PKG_FILENAME=${AIS_HIPFILE_PKG_FILENAME}" >> "${AIS_GITHUB_OUTPUT}"
-              echo "AIS_HIPFILE_PKG_VERSION=$(
-                ${{
-                  env.AIS_PKG_TYPE == 'DEB' &&
-                  'dpkg-deb -f "${AIS_HIPFILE_PKG_FILENAME}" "Version"' ||
-                  'rpm -qp --qf "%{VERSION}" "${AIS_HIPFILE_PKG_FILENAME}"'
-                }}
-              )" >> "${AIS_GITHUB_OUTPUT}"
+              if [[ "${_AIS_PKG_TYPE}" == "DEB" ]]; then
+                AIS_HIPFILE_PKG_VERSION="$(dpkg-deb -f "${AIS_HIPFILE_PKG_FILENAME}" "Version")"
+              else
+                AIS_HIPFILE_PKG_VERSION="$(rpm -qp --qf "%{VERSION}" "${AIS_HIPFILE_PKG_FILENAME}")"
+              fi
+              {
+                echo "AIS_HIPFILE_PKG_DEV_FILENAME=${AIS_HIPFILE_PKG_DEV_FILENAME}"
+                echo "AIS_HIPFILE_PKG_FILENAME=${AIS_HIPFILE_PKG_FILENAME}"
+                echo "AIS_HIPFILE_PKG_VERSION=${AIS_HIPFILE_PKG_VERSION}"
+              } >> "${AIS_GITHUB_OUTPUT}"
             '
       # This information will be nice to have for debugging CPack configuration
       - name: Print package metadata for debugging
+        env:
+          AIS_HIPFILE_PKG_DEV_FILENAME: ${{ steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_DEV_FILENAME }}
+          AIS_HIPFILE_PKG_FILENAME: ${{ steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_FILENAME }}
         run: |
           docker exec \
+            -e "_AIS_PKG_TYPE=${AIS_PKG_TYPE}" \
+            -e "_AIS_HIPFILE_PKG_DEV_FILENAME=${AIS_HIPFILE_PKG_DEV_FILENAME}" \
+            -e "_AIS_HIPFILE_PKG_FILENAME=${AIS_HIPFILE_PKG_FILENAME}" \
             -t \
             -w /ais/build/hipfile \
             "${AIS_CONTAINER_NAME}" \
             /bin/bash -c '
+              print_pkg() {
+                if [[ "${_AIS_PKG_TYPE}" == "DEB" ]]; then
+                  dpkg-deb -I "$1" && dpkg-deb -c "$1"
+                else
+                  rpm -qpil --requires "$1"
+                fi
+              }
               echo "Runtime Package:"
-              ${{
-                format(
-                  env.AIS_PKG_TYPE == 'DEB' &&
-                    'dpkg-deb -I "{0}" && dpkg-deb -c "{0}"' ||
-                    'rpm -qpil --requires "{0}"',
-                  steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_FILENAME
-                )
-              }}
+              print_pkg "${_AIS_HIPFILE_PKG_FILENAME}"
               echo -e "\n\nDevelopment Package:"
-              ${{
-                format(
-                  env.AIS_PKG_TYPE == 'DEB' &&
-                    'dpkg-deb -I "{0}" && dpkg-deb -c "{0}"' ||
-                    'rpm -qpil --requires "{0}"',
-                  steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_DEV_FILENAME
-                )
-              }}
+              print_pkg "${_AIS_HIPFILE_PKG_DEV_FILENAME}"
             '
       - name: Validate metadata was stored correctly
+        env:
+          AIS_HIPFILE_PKG_DEV_FILENAME: ${{ steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_DEV_FILENAME }}
+          AIS_HIPFILE_PKG_FILENAME: ${{ steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_FILENAME }}
+          AIS_HIPFILE_PKG_VERSION: ${{ steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_VERSION }}
         run: |
-          echo "hipFile package dev filename: ${{ steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_DEV_FILENAME }}"
-          echo "hipFile package filename: ${{ steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_FILENAME }}"
-          echo "hipFile package version: ${{ steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_VERSION }}"
-          if [[ -z "${{ steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_VERSION }}" ]]; then exit 1; fi
+          echo "hipFile package dev filename: ${AIS_HIPFILE_PKG_DEV_FILENAME}"
+          echo "hipFile package filename: ${AIS_HIPFILE_PKG_FILENAME}"
+          echo "hipFile package version: ${AIS_HIPFILE_PKG_VERSION}"
+          if [[ -z "${AIS_HIPFILE_PKG_VERSION}" ]]; then exit 1; fi
       - name: Test installing the hipFile package.
+        env:
+          AIS_HIPFILE_PKG_DEV_FILENAME: ${{ steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_DEV_FILENAME }}
+          AIS_HIPFILE_PKG_FILENAME: ${{ steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_FILENAME }}
         run: |
           docker exec \
+            -e "_AIS_PKG_MGR=${AIS_PKG_MGR}" \
+            -e "_AIS_HIPFILE_PKG_DEV_FILENAME=${AIS_HIPFILE_PKG_DEV_FILENAME}" \
+            -e "_AIS_HIPFILE_PKG_FILENAME=${AIS_HIPFILE_PKG_FILENAME}" \
             -t \
             -w /ais/build/hipfile \
             "${AIS_CONTAINER_NAME}" \
             /bin/bash -c '
-              ${{
-                format(
-                  env.AIS_PKG_MGR == 'apt' && 'apt install -y "./{0}" "./{1}"' ||
-                    env.AIS_PKG_MGR == 'dnf' && 'dnf install -y --cacheonly "./{0}" "./{1}"' ||
-                    env.AIS_PKG_MGR == 'zypper' && 'zypper --no-refresh install -y --allow-unsigned-rpm "./{0}" "./{1}"' ||
-                    'echo "Unknown platform."; exit 1',
-                  steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_DEV_FILENAME,
-                  steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_FILENAME
-                )
-              }}
+              _AIS_PKGS=("./${_AIS_HIPFILE_PKG_DEV_FILENAME}" "./${_AIS_HIPFILE_PKG_FILENAME}")
+              case "${_AIS_PKG_MGR}" in
+                apt) apt install -y "${_AIS_PKGS[@]}" ;;
+                dnf) dnf install -y --cacheonly "${_AIS_PKGS[@]}" ;;
+                zypper) zypper --no-refresh install -y --allow-unsigned-rpm "${_AIS_PKGS[@]}" ;;
+                *) echo "Unknown platform."; exit 1 ;;
+              esac
             '
       # Build the examples the package installed, standalone, against the
       # installed hipFile, the way a user would. The package installs into
@@ -359,12 +373,15 @@ jobs:
             '
       - name: Copy hipFile packages out of the container
         if: ${{ inputs.upload_artifacts }}
+        env:
+          AIS_HIPFILE_PKG_DEV_FILENAME: ${{ steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_DEV_FILENAME }}
+          AIS_HIPFILE_PKG_FILENAME: ${{ steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_FILENAME }}
         run: |
           docker cp \
-            "${AIS_CONTAINER_NAME}:/ais/build/hipfile/${{ steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_DEV_FILENAME }}" \
+            "${AIS_CONTAINER_NAME}:/ais/build/hipfile/${AIS_HIPFILE_PKG_DEV_FILENAME}" \
             "${GITHUB_WORKSPACE}"
           docker cp \
-            "${AIS_CONTAINER_NAME}:/ais/build/hipfile/${{ steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_FILENAME }}" \
+            "${AIS_CONTAINER_NAME}:/ais/build/hipfile/${AIS_HIPFILE_PKG_FILENAME}" \
             "${GITHUB_WORKSPACE}"
       - name: Upload development hipFile Package as an Artifact
         if: ${{ inputs.upload_artifacts }}

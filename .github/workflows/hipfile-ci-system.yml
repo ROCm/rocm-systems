@@ -149,20 +149,20 @@ jobs:
       - name: Install the hipFile packages
         run: |
           docker exec \
+            -e "_AIS_PKG_MGR=${AIS_PKG_MGR}" \
+            -e "_AIS_HIPFILE_PKG_FILENAME=${AIS_INPUT_HIPFILE_PKG_FILENAME}" \
+            -e "_AIS_HIPFILE_PKG_DEV_FILENAME=${AIS_INPUT_HIPFILE_PKG_DEV_FILENAME}" \
             -t \
             -w /root \
             "${AIS_CONTAINER_NAME}" \
             /bin/bash -c '
-              ${{
-                format(
-                  env.AIS_PKG_MGR == 'apt' && 'apt install -y "./{0}" "./{1}"' ||
-                    env.AIS_PKG_MGR == 'dnf' && 'dnf install -y --cacheonly "./{0}" "./{1}"' ||
-                    env.AIS_PKG_MGR == 'zypper' && 'zypper --no-refresh install -y --allow-unsigned-rpm "./{0}" "./{1}"' ||
-                    'echo "Unknown platform."; exit 1',
-                  inputs.ais_hipfile_pkg_filename,
-                  inputs.ais_hipfile_pkg_dev_filename
-                )
-              }}
+              _AIS_PKGS=("./${_AIS_HIPFILE_PKG_FILENAME}" "./${_AIS_HIPFILE_PKG_DEV_FILENAME}")
+              case "${_AIS_PKG_MGR}" in
+                apt) apt install -y "${_AIS_PKGS[@]}" ;;
+                dnf) dnf install -y --cacheonly "${_AIS_PKGS[@]}" ;;
+                zypper) zypper --no-refresh install -y --allow-unsigned-rpm "${_AIS_PKGS[@]}" ;;
+                *) echo "Unknown platform."; exit 1 ;;
+              esac
             '
       # GitHub Build Artifacts do not preserve file permissions, namely the executable bit.
       - name: Fix file permissions on GTest executables
