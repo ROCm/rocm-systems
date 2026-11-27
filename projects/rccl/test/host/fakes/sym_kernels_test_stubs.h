@@ -24,41 +24,51 @@
   X(ncclSymkDevKernel_ReduceScatter_LL_sum_f32) \
   X(ncclSymkDevKernel_ReduceScatter_LD_sum_f32) \
   X(ncclSymkDevKernel_ReduceScatter_RailA2A_LsaLD_sum_f32) \
+  X(ncclSymkDevKernel_ReduceScatter_HierLsaLDST_sum_f32) \
   X(ncclSymkDevKernel_AllReduce_AGxLL_R_sum_f16) \
   X(ncclSymkDevKernel_AllReduce_RSxLD_AGxST_sum_f16) \
   X(ncclSymkDevKernel_ReduceScatter_LL_sum_f16) \
   X(ncclSymkDevKernel_ReduceScatter_LD_sum_f16) \
   X(ncclSymkDevKernel_ReduceScatter_RailA2A_LsaLD_sum_f16) \
+  X(ncclSymkDevKernel_ReduceScatter_HierLsaLDST_sum_f16) \
   X(ncclSymkDevKernel_AllReduce_AGxLL_R_sum_bf16) \
   X(ncclSymkDevKernel_AllReduce_RSxLD_AGxST_sum_bf16) \
   X(ncclSymkDevKernel_ReduceScatter_LL_sum_bf16) \
   X(ncclSymkDevKernel_ReduceScatter_LD_sum_bf16) \
   X(ncclSymkDevKernel_ReduceScatter_RailA2A_LsaLD_sum_bf16) \
+  X(ncclSymkDevKernel_ReduceScatter_HierLsaLDST_sum_bf16) \
   X(ncclSymkDevKernel_AllReduce_AGxLL_R_sum_f8e4m3) \
   X(ncclSymkDevKernel_AllReduce_RSxLD_AGxST_sum_f8e4m3) \
   X(ncclSymkDevKernel_ReduceScatter_LL_sum_f8e4m3) \
   X(ncclSymkDevKernel_ReduceScatter_LD_sum_f8e4m3) \
   X(ncclSymkDevKernel_ReduceScatter_RailA2A_LsaLD_sum_f8e4m3) \
+  X(ncclSymkDevKernel_ReduceScatter_HierLsaLDST_sum_f8e4m3) \
   X(ncclSymkDevKernel_AllReduce_AGxLL_R_sum_f8e5m2) \
   X(ncclSymkDevKernel_AllReduce_RSxLD_AGxST_sum_f8e5m2) \
   X(ncclSymkDevKernel_ReduceScatter_LL_sum_f8e5m2) \
   X(ncclSymkDevKernel_ReduceScatter_LD_sum_f8e5m2) \
   X(ncclSymkDevKernel_ReduceScatter_RailA2A_LsaLD_sum_f8e5m2) \
+  X(ncclSymkDevKernel_ReduceScatter_HierLsaLDST_sum_f8e5m2) \
   X(ncclSymkDevKernel_ReduceScatter_LL_avg_f32) \
   X(ncclSymkDevKernel_ReduceScatter_LD_avg_f32) \
   X(ncclSymkDevKernel_ReduceScatter_RailA2A_LsaLD_avg_f32) \
+  X(ncclSymkDevKernel_ReduceScatter_HierLsaLDST_avg_f32) \
   X(ncclSymkDevKernel_ReduceScatter_LL_avg_f16) \
   X(ncclSymkDevKernel_ReduceScatter_LD_avg_f16) \
   X(ncclSymkDevKernel_ReduceScatter_RailA2A_LsaLD_avg_f16) \
+  X(ncclSymkDevKernel_ReduceScatter_HierLsaLDST_avg_f16) \
   X(ncclSymkDevKernel_ReduceScatter_LL_avg_bf16) \
   X(ncclSymkDevKernel_ReduceScatter_LD_avg_bf16) \
   X(ncclSymkDevKernel_ReduceScatter_RailA2A_LsaLD_avg_bf16) \
+  X(ncclSymkDevKernel_ReduceScatter_HierLsaLDST_avg_bf16) \
   X(ncclSymkDevKernel_ReduceScatter_LL_avg_f8e4m3) \
   X(ncclSymkDevKernel_ReduceScatter_LD_avg_f8e4m3) \
   X(ncclSymkDevKernel_ReduceScatter_RailA2A_LsaLD_avg_f8e4m3) \
+  X(ncclSymkDevKernel_ReduceScatter_HierLsaLDST_avg_f8e4m3) \
   X(ncclSymkDevKernel_ReduceScatter_LL_avg_f8e5m2) \
   X(ncclSymkDevKernel_ReduceScatter_LD_avg_f8e5m2) \
   X(ncclSymkDevKernel_ReduceScatter_RailA2A_LsaLD_avg_f8e5m2) \
+  X(ncclSymkDevKernel_ReduceScatter_HierLsaLDST_avg_f8e5m2) \
   RCCL_SYMK_TEST_TMA_KERNEL_IDS(X)
 
 // The DMA-staged kernels, emitted only when gfx1250 is in GPU_TARGETS. Listed unconditionally:

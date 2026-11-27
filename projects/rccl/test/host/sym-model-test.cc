@@ -465,6 +465,66 @@ TEST_F(SymModelTdmHierTest, TmaForced_TdmKernelsSplitAllGatherLikeTheirVectorTwi
   }
 }
 
+// gfx1250 partition mode runs ReduceScatter on LL up to 1 MiB of bus bytes, then on the hierarchical kernel. avg has
+// no hierarchical kernel, so LD takes its range.
+TEST_F(SymModelTdmTest, Gfx1250PartitionMode_ReduceScatterOrder) {
+  comm_->hasMloPart = true;
+  comm_->symkState.kcomm.hierScaleInSize = 2;  // the fixture's four ranks make two packages
+  struct {
+    size_t nBytes;  // per rank; the crossover counts bus bytes, four times this
+    bool avg;
+    ncclSymkKernelId expected;
+  } const cases[] = {
+      {size_t(256) << 10, false, ncclSymkKernelId_ReduceScatter_LL},
+      {size_t(512) << 10, false, ncclSymkKernelId_ReduceScatter_HierLsaLDST},
+      {size_t(256) << 10, true, ncclSymkKernelId_ReduceScatter_LL},
+      {size_t(512) << 10, true, ncclSymkKernelId_ReduceScatter_LD},
+  };
+  for (const auto& c : cases) {
+    ncclTuningInput_t in = Input(ncclFuncReduceScatter, c.nBytes);
+    if (c.avg) {
+      in.redOp = ncclAvg;
+      in.devRedOp = ncclDevSumPostDiv;
+    }
+    Pick p = Select(in);
+    EXPECT_EQ(p.kernelId, c.expected) << c.nBytes << " B " << (c.avg ? "avg" : "sum") << " picked "
+                                      << ncclSymkKernelIdToString(p.kernelId);
+  }
+}
+
+// Where the preferred ReduceScatter kernel can't run, the next one takes its range: LD for a grouped launch below the
+// crossover, LL for an unregistered send above it, and TmaLD for a selection that allows it but not LD. A forced
+// choice skips the ordering.
+TEST_F(SymModelTdmTest, Gfx1250PartitionMode_ReduceScatterFallbacks) {
+  comm_->hasMloPart = true;
+  comm_->symkState.kcomm.hierScaleInSize = 2;  // the fixture's four ranks make two packages
+  constexpr ncclSymkKernelId ll = ncclSymkKernelId_ReduceScatter_LL;
+  constexpr ncclSymkKernelId tmaLd = ncclSymkKernelId_ReduceScatter_TmaLD;
+
+  ncclTuningInput_t grouped = Input(ncclFuncReduceScatter, size_t(256) << 10);
+  grouped.nWorks = 2;
+  EXPECT_EQ(Select(grouped).kernelId, ncclSymkKernelId_ReduceScatter_LD) << "grouped, below the crossover";
+
+  ncclTuningInput_t unregistered = Input(ncclFuncReduceScatter, size_t(512) << 10);
+  unregistered.winRegType = ncclSymSendNonregRecvReg;
+  EXPECT_EQ(Select(unregistered).kernelId, ll) << "unregistered send, above the crossover";
+
+  // Select() ignores the selection, so check the two kernels it allows directly.
+  if (TmaReachableOnThisBuild()) {
+    ncclTuningInput_t tdmOnly = Input(ncclFuncReduceScatter, size_t(512) << 10);
+    tdmOnly.tuningMask = uint64_t(1) << (NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ll) |
+                         uint64_t(1) << (NCCL_TUNING_SYM_KERNEL_ID_OFFSET + tmaLd);
+    EXPECT_TRUE(Evaluate(tdmOnly, tmaLd).valid) << "TmaLD takes LD's place";
+    EXPECT_FALSE(Evaluate(tdmOnly, ll).valid);
+  }
+
+  ncclTuningInput_t forced = Input(ncclFuncReduceScatter, size_t(512) << 10);
+  EXPECT_TRUE(rcclSymkReduceScatterYieldsInPartitionMode(&forced, ll, ~uint32_t(0)));
+  comm_->tuningContext.forced[ncclFuncReduceScatter] = 1;
+  EXPECT_FALSE(rcclSymkReduceScatterYieldsInPartitionMode(&forced, ll, ~uint32_t(0)))
+    << "a forced choice leaves the kernel to the cost model";
+}
+
 // An algorithm selection naming only the TDM hierarchical kernel reaches it without NCCL_SYM_KERNEL.
 TEST_F(SymModelTdmHierTest, SelectionOfOnlyHierTma_KeepsItValid) {
   ncclTuningInput_t in = Input(ncclFuncAllGather, size_t(1) << 20);

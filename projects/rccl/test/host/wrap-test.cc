@@ -7119,7 +7119,7 @@ TEST(WrapMicrotestIsolated, SelectAllGather_HierWindowOnlyWhereHierRuns) {
         };
         EXPECT_FALSE(picksSymk(64 * kMiB)) << "no hierarchical kernel: the regular window";
 
-        ScopedHook hier(g_symkAgHierGroups, [](struct ncclComm*) { return 8; });
+        ScopedHook hier(g_symkHierGroups, [](struct ncclComm*) { return 8; });
         EXPECT_TRUE(picksSymk(64 * kMiB)) << "hierarchical kernel: the hierarchical window";
 
         g_loadParam = ForceParam("RCCL_SYM_K_MAX_BYTES", 32 * kMiB);
