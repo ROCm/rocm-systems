@@ -146,6 +146,7 @@ This prints the operators as a call tree sorted by GPU duration, with
 launch statistics, so it also shows which operators are worth opening.
 
 The Triton equivalent is `--list-operators triton`.
+Each Triton node also shows kernel operands (`args=...`).
 
 `--list-operators user` lists each user ROCTx region with everything that
 ran inside it.

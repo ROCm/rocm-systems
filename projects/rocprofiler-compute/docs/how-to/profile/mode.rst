@@ -1074,6 +1074,9 @@ In addition to PyTorch, ROCm Compute Profiler can map performance counters to
 the Triton kernels that your code launches, such as ``@triton.jit`` functions.
 Enable it with the ``--trace-ml-api triton`` option. It writes the same
 ``ml_api_trace`` output as Torch trace and is analyzed the same way.
+Each traced Triton launch records the kernel operands on the operator tree:
+tensor dtype and shape, and scalar values. For example,
+``args=(x_ptr=float32[64x64], out_ptr=float32[64x64], n=4096, BLOCK_SIZE=1024)``.
 
 ``--trace-ml-api triton`` does not capture the Triton kernels that ``torch.compile``
 generates, because PyTorch launches those kernels itself. Use ``--trace-ml-api torch``
