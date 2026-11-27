@@ -41,5 +41,5 @@ hbm_write_bytes: (TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) * 32 + TCC_EA0_WRRE
 hbm_read_bandwidth: SUM($hbm_read_bytes) / SUM(End_Timestamp - Start_Timestamp)
 hbm_write_bandwidth: SUM($hbm_write_bytes) / SUM(End_Timestamp - Start_Timestamp)
 l2_bytes: 128 * (TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum + TCP_TCC_READ_REQ_sum)
-l1_bytes: 128 * TCP_TOTAL_CACHE_ACCESSES_sum
+l1_bytes: 64 * TCP_TOTAL_CACHE_ACCESSES_sum
 lds_bytes: (SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4 * $lds_banks_per_cu

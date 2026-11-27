@@ -54,7 +54,7 @@ System Speed-of-Light:
     rst: The ratio of the number of vL1D cache line requests that hit in vL1D cache over the total number of cache line requests to the :ref:`vL1D cache RAM <desc-tc>`.
     unit: Percent
   vL1D Cache BW:
-    rst: The number of bytes looked up in the vL1D cache as a result of :ref:`VMEM <desc-vmem>` instructions per unit time. The number of bytes is calculated as the number of cache lines requested multiplied by the cache line size. This value does not consider partial requests, so e.g., if only a single value is requested in a cache line, the data movement will still be counted as a full cache line. This is also presented as a percent of the peak theoretical bandwidth achievable on the specific accelerator.
+    rst: The CU-facing vL1D lookup bandwidth from :ref:`VMEM <desc-vmem>` instructions. Each TCP_TOTAL_CACHE_ACCESSES counts as 64 bytes, matching the TCP to TD return path (64 bytes per cycle per CU). The vL1D line is 128 bytes and fills from TCR at 128 bytes per cycle; that path is not what this metric reports. Unaligned or poorly coalesced access can raise the access count without a matching increase in duration, so percent of peak can exceed 100. This is also presented as a percent of the peak theoretical CU-facing bandwidth.
     unit: GB/s
   L2 Cache Hit Rate:
     rst: The ratio of the number of L2 cache line requests that hit in the L2 cache over the total number of incoming cache line requests to the L2 cache.
@@ -221,7 +221,7 @@ Roofline Performance Rates:
     rst: The number of bytes looked up in the L2 cache per unit time. The number of bytes is calculated as the number of cache lines requested multiplied by the cache line size. This value does not consider partial requests, so e.g., if only a single value is requested in a cache line, the data movement will still be counted as a full cache line. The peak empirically measured bandwidth achievable on the specific accelerator is displayed alongside for comparison.
     unit: GB/s
   L1 Cache Bandwidth:
-    rst: The number of bytes looked up in the vL1D cache as a result of VMEM instructions per unit time. The number of bytes is calculated as the number of cache lines requested multiplied by the cache line size. This value does not consider partial requests, so e.g., if only a single value is requested in a cache line, the data movement will still be counted as a full cache line. The peak empirically measured bandwidth achievable on the specific accelerator is displayed alongside for comparison.
+    rst: The CU-facing vL1D lookup bandwidth from VMEM instructions. Each TCP_TOTAL_CACHE_ACCESSES counts as 64 bytes, matching the TCP to TD return path. The vL1D line is 128 bytes and fills from TCR at 128 bytes per cycle; that path is not what this metric reports. The peak empirically measured bandwidth achievable on the specific accelerator is displayed alongside for comparison.
     unit: GB/s
   LDS Bandwidth:
     rst: Indicates the maximum amount of bytes that could have been loaded from, stored to, or atomically updated in the LDS per unit time (see LDS Bandwidth example for more detail). The peak empirically measured LDS bandwidth achievable on the specific accelerator is displayed alongside for comparison.
@@ -793,7 +793,7 @@ vL1D Speed-of-Light:
     rst: The ratio of the number of vL1D cache line requests that hit [#vl1d-hit]_ in vL1D cache over the total number of cache line requests to the :ref:`vL1D Cache RAM <desc-tc>`.
     unit: Percent
   Bandwidth Utilization:
-    rst: The number of bytes looked up in the vL1D cache as a result of :ref:`VMEM <desc-vmem>` instructions, as a percent of the peak theoretical bandwidth achievable on the specific accelerator. The number of bytes is calculated as the number of cache lines requested multiplied by the cache line size. This value does not consider partial requests, so for instance, if only a single value is requested in a cache line, the data movement will still be counted as a full cache line.
+    rst: The CU-facing vL1D lookup bandwidth from :ref:`VMEM <desc-vmem>` instructions as a percent of peak. Each TCP_TOTAL_CACHE_ACCESSES counts as 64 bytes, matching the TCP to TD return path (64 bytes per cycle per CU). The vL1D line is 128 bytes and fills from TCR at 128 bytes per cycle; that path is not what this metric reports. Unaligned or poorly coalesced access can raise the access count without a matching increase in duration, so this percent can exceed 100.
     unit: Percent
   Utilization:
     rst: Indicates how busy the :ref:`vL1D Cache RAM <desc-tc>` was during the kernel execution. The number of cycles where the vL1D Cache RAM is actively processing any request divided by the number of cycles where the vL1D is active [#vl1d-activity]_.
@@ -826,7 +826,7 @@ vL1D cache access metrics:
     rst: The total number of incoming atomic requests from the :ref:`address processing unit <desc-ta>` after coalescing per :ref:`normalization unit <normalization-units>`
     unit: Requests per Normalization Unit
   Cache BW:
-    rst: The number of bytes looked up in the vL1D cache as a result of :ref:`VMEM <desc-vmem>` instructions divided by total duration. The number of bytes is calculated as the number of cache lines requested multiplied by the cache line size. This value does not consider partial requests, so for instance, if only a single value is requested in a cache line, the data movement will still be counted as a full cache line.
+    rst: The CU-facing vL1D lookup bandwidth from :ref:`VMEM <desc-vmem>` instructions. Each TCP_TOTAL_CACHE_ACCESSES counts as 64 bytes, matching the TCP to TD return path. The vL1D line is 128 bytes and fills from TCR at 128 bytes per cycle; that path is not what this metric reports. Unaligned or poorly coalesced access can raise the access count without a matching increase in duration.
     unit: Gbps
   Cache Hit Rate:
     rst: The ratio of the number of vL1D cache line requests that hit in vL1D cache over the total number of cache line requests to the :ref:`vL1D Cache RAM <desc-tc>`.

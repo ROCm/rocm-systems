@@ -56,7 +56,7 @@ Panel Config:
           unit: GB/s
           peak: $L2Bw_empirical_peak
         L1 Cache Bandwidth:
-          value: 128 * SUM(TCP_TOTAL_CACHE_ACCESSES_sum) / SUM(End_Timestamp - Start_Timestamp)
+          value: 64 * SUM(TCP_TOTAL_CACHE_ACCESSES_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GB/s
           peak: $L1Bw_empirical_peak
         LDS Bandwidth:
@@ -144,13 +144,12 @@ Panel Config:
       if only a single value is requested in a cache line, the data movement will
       still be counted as a full cache line. The peak empirically measured bandwidth
       achievable on the specific accelerator is displayed alongside for comparison.
-    L1 Cache Bandwidth: The number of bytes looked up in the vL1D cache as a result
-      of VMEM instructions per unit time. The number of bytes is calculated as the
-      number of cache lines requested multiplied by the cache line size. This value
-      does not consider partial requests, so e.g., if only a single value is requested
-      in a cache line, the data movement will still be counted as a full cache line.
-      The peak empirically measured bandwidth achievable on the specific accelerator
-      is displayed alongside for comparison.
+    L1 Cache Bandwidth: The CU-facing vL1D lookup bandwidth from VMEM
+      instructions. Each TCP_TOTAL_CACHE_ACCESSES counts as 64 bytes, matching the
+      TCP to TD return path. The vL1D line is 128 bytes and fills from TCR at 128
+      bytes per cycle; that path is not what this metric reports. The peak
+      empirically measured bandwidth achievable on the specific accelerator is
+      displayed alongside for comparison.
     LDS Bandwidth: Indicates the maximum amount of bytes that could have been loaded
       from, stored to, or atomically updated in the LDS per unit time (see LDS Bandwidth
       example for more detail). The peak empirically measured LDS bandwidth achievable
