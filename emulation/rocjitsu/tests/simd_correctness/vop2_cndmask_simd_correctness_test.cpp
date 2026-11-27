@@ -151,20 +151,8 @@ void check_case(uint64_t exec) {
   }
 }
 
-TEST(Vop2CndmaskSimdCorrectness, FullExecMask) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
-  check_case(/*exec=*/~0ULL);
-}
+TEST(Vop2CndmaskSimdCorrectness, FullExecMask) { check_case(/*exec=*/~0ULL); }
 
-TEST(Vop2CndmaskSimdCorrectness, PartialExecMask) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
-  check_case(/*exec=*/0xA5A5'F0F0'1234'8001ULL);
-}
+TEST(Vop2CndmaskSimdCorrectness, PartialExecMask) { check_case(/*exec=*/0xA5A5'F0F0'1234'8001ULL); }
 
 } // namespace

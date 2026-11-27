@@ -2187,9 +2187,7 @@ TEST(Gfx1250LiteralOperandTest, NegativeI64CompareCoversScalarAndAvailableSimdPa
   };
 
   run_case(true);
-  if constexpr (util::has_stdx_simd && !RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS) {
-    run_case(false);
-  }
+  { run_case(false); }
 }
 
 TEST(Gfx1250LiteralOperandTest, ScalarFmaLiteralOrder) {
@@ -2289,9 +2287,7 @@ TEST(Gfx1250LiteralOperandTest, PkF32LiteralReplicatesAndUsesAvailableSimdPath) 
   };
 
   run_case(true);
-  if constexpr (util::has_stdx_simd) {
-    run_case(false);
-  }
+  { run_case(false); }
 }
 
 using PackedU64Pair = std::array<uint64_t, 2>;
@@ -5376,7 +5372,7 @@ TEST(Gfx1250ExecutionTest, PkF32AddMulSimdMatchesScalarWithPartialExec) {
     };
 
     run_case(true, scalar_result);
-    if constexpr (util::has_stdx_simd) {
+    {
       run_case(false, simd_result);
       EXPECT_EQ(simd_result, scalar_result);
     }
@@ -5464,7 +5460,7 @@ TEST(Gfx1250ExecutionTest, PkF32NondefaultSelectors) {
     };
 
     run_case(true, scalar_result);
-    if constexpr (util::has_stdx_simd) {
+    {
       run_case(false, simd_result);
       EXPECT_EQ(simd_result, scalar_result);
     }
@@ -5529,7 +5525,7 @@ TEST(Gfx1250ExecutionTest, PkFmaF32SimdMatchesScalarWithPartialExec) {
   };
 
   run_case(true, scalar_result);
-  if constexpr (util::has_stdx_simd) {
+  {
     run_case(false, simd_result);
     EXPECT_EQ(simd_result, scalar_result);
   }

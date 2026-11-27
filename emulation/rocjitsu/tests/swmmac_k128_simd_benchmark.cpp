@@ -261,13 +261,7 @@ void benchmark_case(const BenchCase &test) {
 
 class SwmmacK128SimdBenchmark : public testing::TestWithParam<size_t> {};
 
-TEST_P(SwmmacK128SimdBenchmark, DecodedInstruction) {
-  SKIP_IF_NO_SIMD();
-  if (util::native<float>::size() != 16) {
-    GTEST_SKIP() << "the K=128 SWMMAC fast paths require 16-lane native SIMD";
-  }
-  benchmark_case(BENCH_CASES[GetParam()]);
-}
+TEST_P(SwmmacK128SimdBenchmark, DecodedInstruction) { benchmark_case(BENCH_CASES[GetParam()]); }
 
 INSTANTIATE_TEST_SUITE_P(Forms, SwmmacK128SimdBenchmark,
                          testing::Range<size_t>(0, BENCH_CASES.size()),

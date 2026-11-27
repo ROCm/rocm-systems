@@ -218,21 +218,11 @@ void check_all(uint64_t exec) {
   }
 }
 
-TEST(VopcSimdCorrectness, FullExecMask) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
-  check_all(/*exec=*/~0ULL);
-}
+TEST(VopcSimdCorrectness, FullExecMask) { check_all(/*exec=*/~0ULL); }
 
 TEST(VopcSimdCorrectness, PartialExecMask) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
-  // Alternating/sparse pattern crossing the SIMD chunk boundaries (16-wide for
-  // 32-bit lanes, 8-wide for 64-bit).
+  // Mixed active/inactive lanes across SIMD chunks: AVX2 processes 8 32-bit or
+  // 4 64-bit lanes; AVX-512 processes 16 or 8, respectively.
   check_all(/*exec=*/0xA5A5'F0F0'1234'8001ULL);
 }
 

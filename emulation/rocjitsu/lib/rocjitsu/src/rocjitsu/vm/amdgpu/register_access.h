@@ -191,7 +191,8 @@ public:
              RegisterAccess::byte_bit_mask(byte_mask_);
     }
 
-    template <typename T> [[nodiscard]] util::native<T> load_native(uint32_t lane_base) const {
+    template <typename T>
+    [[nodiscard]] util::RegisterBlock<T> load_native(uint32_t lane_base) const {
       static_assert(sizeof(T) == sizeof(uint32_t), "load_native expects 32-bit lanes");
       assert((storage_ || scalar_fallback_) && "OperandReadView has no source");
       if (byte_mask_ == rocjitsu::ExecutionPlugin::kFullByteMask) {
@@ -201,22 +202,7 @@ public:
       auto bits = storage_ ? storage_.template simd_load<uint32_t>(lane_base)
                            : util::broadcast<uint32_t>(scalar_fallback());
       bits &= util::broadcast<uint32_t>(RegisterAccess::byte_bit_mask(byte_mask_));
-      return std::bit_cast<util::native<T>>(bits);
-    }
-
-    template <typename T> [[nodiscard]] util::narrow32<T> load_narrow(uint32_t lane_base) const {
-      static_assert(sizeof(T) == sizeof(uint32_t), "load_narrow expects 32-bit lanes");
-      assert((storage_ || scalar_fallback_) && "OperandReadView has no source");
-      if (byte_mask_ == rocjitsu::ExecutionPlugin::kFullByteMask) {
-        return storage_ ? storage_.template simd_load_narrow<T>(lane_base)
-                        : util::broadcast_narrow<T>(scalar_fallback());
-      }
-      auto bits = storage_ ? storage_.template simd_load_narrow<uint32_t>(lane_base)
-                           : util::broadcast_narrow<uint32_t>(scalar_fallback());
-      bits &= util::broadcast_narrow<uint32_t>(RegisterAccess::byte_bit_mask(byte_mask_));
-      alignas(util::narrow32<uint32_t>) uint32_t buffer[util::native_width64];
-      bits.copy_to(buffer, util::stdx::vector_aligned);
-      return util::load_narrow<T>(buffer);
+      return std::bit_cast<util::RegisterBlock<T>>(bits);
     }
 
   private:
@@ -246,13 +232,14 @@ public:
     [[nodiscard]] bool has_storage() const { return static_cast<bool>(storage_); }
 
     template <typename T>
-    Result store_native(uint32_t lane_base, util::native<T> value, uint64_t lane_mask) const {
+    Result store_native(uint32_t lane_base, util::RegisterBlock<T> value,
+                        uint64_t lane_mask) const {
       static_assert(sizeof(T) == sizeof(uint32_t), "store_native expects 32-bit lanes");
       assert(op_ && wf_ && "OperandWriteView is empty");
       if (wf_->instruction_execution_failed()) {
         return Result::failure();
       }
-      constexpr std::size_t W = util::native_width_v<T>;
+      constexpr std::size_t W = util::register_block_lanes_v<T>;
       FailureOr<uint64_t> checked_mask = RegisterAccess::checked_store_lane_mask(
           *wf_, permitted_write_lane_mask_, lane_base, W, lane_mask, static_cast<bool>(storage_));
       if (checked_mask.failed()) {
@@ -264,7 +251,7 @@ public:
           storage_.template simd_store<T>(lane_base, value, lane_mask);
           return Result::success();
         }
-        alignas(util::native<T>) uint32_t values[W];
+        alignas(util::RegisterBlock<T>) uint32_t values[W];
         util::blit_to_buffer<T>(values, value);
         const uint32_t bit_mask = RegisterAccess::byte_bit_mask(byte_mask_);
         for (std::size_t lane = 0; lane < W; ++lane) {
@@ -282,56 +269,8 @@ public:
       if (byte_mask_ != rocjitsu::ExecutionPlugin::kFullByteMask) {
         return RegisterAccess::reject(*wf_, "partial-byte OperandWriteView requires VGPR storage");
       }
-      alignas(util::native<T>) uint32_t buf[W];
+      alignas(util::RegisterBlock<T>) uint32_t buf[W];
       util::blit_to_buffer<T>(buf, value);
-      op_->write_lane_chunk(*wf_, lane_base, static_cast<uint32_t>(W), buf, lane_mask);
-      return Result::success();
-    }
-
-    template <typename T>
-    Result store_narrow(uint32_t lane_base, util::narrow32<T> value, uint64_t lane_mask) const {
-      static_assert(sizeof(T) == sizeof(uint32_t), "store_narrow expects 32-bit lanes");
-      assert(op_ && wf_ && "OperandWriteView is empty");
-      if (wf_->instruction_execution_failed()) {
-        return Result::failure();
-      }
-      constexpr std::size_t W = util::native_width64;
-      FailureOr<uint64_t> checked_mask = RegisterAccess::checked_store_lane_mask(
-          *wf_, permitted_write_lane_mask_, lane_base, W, lane_mask, static_cast<bool>(storage_));
-      if (checked_mask.failed()) {
-        return Result::failure();
-      }
-      lane_mask = checked_mask.value();
-      if (storage_) {
-        if (byte_mask_ == rocjitsu::ExecutionPlugin::kFullByteMask) {
-          storage_.template simd_store_narrow<T>(lane_base, value, lane_mask);
-          return Result::success();
-        }
-        alignas(util::narrow32<T>) T values[W];
-        value.copy_to(values, util::stdx::vector_aligned);
-        const uint32_t bit_mask = RegisterAccess::byte_bit_mask(byte_mask_);
-        for (std::size_t lane = 0; lane < W; ++lane) {
-          if ((lane_mask & (uint64_t{1} << lane)) == 0) {
-            continue;
-          }
-          uint32_t bits = std::bit_cast<uint32_t>(values[lane]);
-          uint32_t &destination = storage_[lane_base + static_cast<uint32_t>(lane)];
-          destination = (destination & ~bit_mask) | (bits & bit_mask);
-        }
-        return Result::success();
-      }
-      if (denied_) {
-        return Result::success();
-      }
-      if (byte_mask_ != rocjitsu::ExecutionPlugin::kFullByteMask) {
-        return RegisterAccess::reject(*wf_, "partial-byte OperandWriteView requires VGPR storage");
-      }
-      alignas(util::narrow32<T>) T vals[W];
-      value.copy_to(vals, util::stdx::vector_aligned);
-      uint32_t buf[W];
-      for (std::size_t i = 0; i < W; ++i) {
-        buf[i] = std::bit_cast<uint32_t>(vals[i]);
-      }
       op_->write_lane_chunk(*wf_, lane_base, static_cast<uint32_t>(W), buf, lane_mask);
       return Result::success();
     }
@@ -360,13 +299,14 @@ public:
     [[nodiscard]] bool has_storage() const { return static_cast<bool>(storage_.lo); }
 
     template <typename T>
-    Result store_native(uint32_t lane_base, util::native<T> value, uint64_t lane_mask) const {
+    Result store_native(uint32_t lane_base, util::RegisterBlock<T> value,
+                        uint64_t lane_mask) const {
       static_assert(sizeof(T) == sizeof(uint64_t), "store_native expects 64-bit lanes");
       assert(op_ && wf_ && "OperandWrite64View is empty");
       if (wf_->instruction_execution_failed()) {
         return Result::failure();
       }
-      constexpr std::size_t W = util::native_width64;
+      constexpr std::size_t W = util::register_block_lanes64;
       FailureOr<uint64_t> checked_mask =
           RegisterAccess::checked_store_lane_mask(*wf_, permitted_write_lane_mask_, lane_base, W,
                                                   lane_mask, static_cast<bool>(storage_.lo));
@@ -381,15 +321,15 @@ public:
       if (denied_) {
         return Result::success();
       }
-      alignas(util::native<T>) uint64_t buf[W];
-      util::stdx::native_simd<uint64_t> bits = [&] {
+      alignas(util::RegisterBlock<T>) uint64_t buf[W];
+      util::RegisterBlock<uint64_t> bits = [&] {
         if constexpr (std::is_same_v<T, uint64_t>) {
           return value;
         } else {
-          return std::bit_cast<util::stdx::native_simd<uint64_t>>(value);
+          return std::bit_cast<util::RegisterBlock<uint64_t>>(value);
         }
       }();
-      bits.copy_to(buf, util::stdx::vector_aligned);
+      bits.copy_to(buf);
       for (std::size_t i = 0; i < W; ++i) {
         if (lane_mask & (1ULL << i)) {
           op_->write_lane64(*wf_, lane_base + static_cast<uint32_t>(i), buf[i]);
@@ -419,7 +359,8 @@ public:
 
     [[nodiscard]] bool has_storage() const { return static_cast<bool>(storage_); }
 
-    template <typename T> [[nodiscard]] util::native<T> load_native(uint32_t lane_base) const {
+    template <typename T>
+    [[nodiscard]] util::RegisterBlock<T> load_native(uint32_t lane_base) const {
       static_assert(sizeof(T) == sizeof(uint32_t), "load_native expects 32-bit lanes");
       assert(op_ && wf_ && "OperandReadWriteView is empty");
       if (read_byte_mask_ == rocjitsu::ExecutionPlugin::kFullByteMask) {
@@ -429,32 +370,18 @@ public:
       auto bits = storage_ ? storage_.template simd_load<uint32_t>(lane_base)
                            : util::broadcast<uint32_t>(scalar_fallback());
       bits &= util::broadcast<uint32_t>(RegisterAccess::byte_bit_mask(read_byte_mask_));
-      return std::bit_cast<util::native<T>>(bits);
-    }
-
-    template <typename T> [[nodiscard]] util::narrow32<T> load_narrow(uint32_t lane_base) const {
-      static_assert(sizeof(T) == sizeof(uint32_t), "load_narrow expects 32-bit lanes");
-      assert(op_ && wf_ && "OperandReadWriteView is empty");
-      if (read_byte_mask_ == rocjitsu::ExecutionPlugin::kFullByteMask) {
-        return storage_ ? storage_.template simd_load_narrow<T>(lane_base)
-                        : util::broadcast_narrow<T>(scalar_fallback());
-      }
-      auto bits = storage_ ? storage_.template simd_load_narrow<uint32_t>(lane_base)
-                           : util::broadcast_narrow<uint32_t>(scalar_fallback());
-      bits &= util::broadcast_narrow<uint32_t>(RegisterAccess::byte_bit_mask(read_byte_mask_));
-      alignas(util::narrow32<uint32_t>) uint32_t buffer[util::native_width64];
-      bits.copy_to(buffer, util::stdx::vector_aligned);
-      return util::load_narrow<T>(buffer);
+      return std::bit_cast<util::RegisterBlock<T>>(bits);
     }
 
     template <typename T>
-    Result store_native(uint32_t lane_base, util::native<T> value, uint64_t lane_mask) const {
+    Result store_native(uint32_t lane_base, util::RegisterBlock<T> value,
+                        uint64_t lane_mask) const {
       static_assert(sizeof(T) == sizeof(uint32_t), "store_native expects 32-bit lanes");
       assert(op_ && wf_ && "OperandReadWriteView is empty");
       if (wf_->instruction_execution_failed()) {
         return Result::failure();
       }
-      constexpr std::size_t W = util::native_width_v<T>;
+      constexpr std::size_t W = util::register_block_lanes_v<T>;
       FailureOr<uint64_t> checked_mask = RegisterAccess::checked_store_lane_mask(
           *wf_, permitted_write_lane_mask_, lane_base, W, lane_mask, static_cast<bool>(storage_));
       if (checked_mask.failed()) {
@@ -466,7 +393,7 @@ public:
           storage_.template simd_store<T>(lane_base, value, lane_mask);
           return Result::success();
         }
-        alignas(util::native<T>) uint32_t values[W];
+        alignas(util::RegisterBlock<T>) uint32_t values[W];
         util::blit_to_buffer<T>(values, value);
         const uint32_t bit_mask = RegisterAccess::byte_bit_mask(byte_mask_);
         for (std::size_t lane = 0; lane < W; ++lane) {
@@ -485,57 +412,8 @@ public:
         return RegisterAccess::reject(*wf_,
                                       "partial-byte OperandReadWriteView requires VGPR storage");
       }
-      alignas(util::native<T>) uint32_t buf[W];
+      alignas(util::RegisterBlock<T>) uint32_t buf[W];
       util::blit_to_buffer<T>(buf, value);
-      op_->write_lane_chunk(*wf_, lane_base, static_cast<uint32_t>(W), buf, lane_mask);
-      return Result::success();
-    }
-
-    template <typename T>
-    Result store_narrow(uint32_t lane_base, util::narrow32<T> value, uint64_t lane_mask) const {
-      static_assert(sizeof(T) == sizeof(uint32_t), "store_narrow expects 32-bit lanes");
-      assert(op_ && wf_ && "OperandReadWriteView is empty");
-      if (wf_->instruction_execution_failed()) {
-        return Result::failure();
-      }
-      constexpr std::size_t W = util::native_width64;
-      FailureOr<uint64_t> checked_mask = RegisterAccess::checked_store_lane_mask(
-          *wf_, permitted_write_lane_mask_, lane_base, W, lane_mask, static_cast<bool>(storage_));
-      if (checked_mask.failed()) {
-        return Result::failure();
-      }
-      lane_mask = checked_mask.value();
-      if (storage_) {
-        if (byte_mask_ == rocjitsu::ExecutionPlugin::kFullByteMask) {
-          storage_.template simd_store_narrow<T>(lane_base, value, lane_mask);
-          return Result::success();
-        }
-        alignas(util::narrow32<T>) T values[W];
-        value.copy_to(values, util::stdx::vector_aligned);
-        const uint32_t bit_mask = RegisterAccess::byte_bit_mask(byte_mask_);
-        for (std::size_t lane = 0; lane < W; ++lane) {
-          if ((lane_mask & (uint64_t{1} << lane)) == 0) {
-            continue;
-          }
-          uint32_t bits = std::bit_cast<uint32_t>(values[lane]);
-          uint32_t &destination = storage_[lane_base + static_cast<uint32_t>(lane)];
-          destination = (destination & ~bit_mask) | (bits & bit_mask);
-        }
-        return Result::success();
-      }
-      if (denied_) {
-        return Result::success();
-      }
-      if (byte_mask_ != rocjitsu::ExecutionPlugin::kFullByteMask) {
-        return RegisterAccess::reject(*wf_,
-                                      "partial-byte OperandReadWriteView requires VGPR storage");
-      }
-      alignas(util::narrow32<T>) T vals[W];
-      value.copy_to(vals, util::stdx::vector_aligned);
-      uint32_t buf[W];
-      for (std::size_t i = 0; i < W; ++i) {
-        buf[i] = std::bit_cast<uint32_t>(vals[i]);
-      }
       op_->write_lane_chunk(*wf_, lane_base, static_cast<uint32_t>(W), buf, lane_mask);
       return Result::success();
     }
@@ -574,7 +452,8 @@ public:
 
     [[nodiscard]] bool has_storage() const { return static_cast<bool>(storage_.lo); }
 
-    template <typename T> [[nodiscard]] util::native<T> load_native(uint32_t lane_base) const {
+    template <typename T>
+    [[nodiscard]] util::RegisterBlock<T> load_native(uint32_t lane_base) const {
       static_assert(sizeof(T) == sizeof(uint64_t), "load_native expects 64-bit lanes");
       assert(op_ && wf_ && "OperandReadWrite64View is empty");
       auto value = storage_.lo ? storage_.lo.template simd_load64<T>(storage_.hi, lane_base)
@@ -582,20 +461,21 @@ public:
       if (read_byte_mask_ == rocjitsu::ExecutionPlugin::kFullByteMask) {
         return value;
       }
-      auto bits = std::bit_cast<util::native<uint64_t>>(value);
+      auto bits = std::bit_cast<util::RegisterBlock<uint64_t>>(value);
       uint64_t dword_mask = RegisterAccess::byte_bit_mask(read_byte_mask_);
       bits &= util::broadcast64<uint64_t>(dword_mask | (dword_mask << 32));
-      return std::bit_cast<util::native<T>>(bits);
+      return std::bit_cast<util::RegisterBlock<T>>(bits);
     }
 
     template <typename T>
-    Result store_native(uint32_t lane_base, util::native<T> value, uint64_t lane_mask) const {
+    Result store_native(uint32_t lane_base, util::RegisterBlock<T> value,
+                        uint64_t lane_mask) const {
       static_assert(sizeof(T) == sizeof(uint64_t), "store_native expects 64-bit lanes");
       assert(op_ && wf_ && "OperandReadWrite64View is empty");
       if (wf_->instruction_execution_failed()) {
         return Result::failure();
       }
-      constexpr std::size_t W = util::native_width64;
+      constexpr std::size_t W = util::register_block_lanes64;
       FailureOr<uint64_t> checked_mask =
           RegisterAccess::checked_store_lane_mask(*wf_, permitted_write_lane_mask_, lane_base, W,
                                                   lane_mask, static_cast<bool>(storage_.lo));
@@ -610,15 +490,15 @@ public:
       if (denied_) {
         return Result::success();
       }
-      alignas(util::native<T>) uint64_t buf[W];
-      util::stdx::native_simd<uint64_t> bits = [&] {
+      alignas(util::RegisterBlock<T>) uint64_t buf[W];
+      util::RegisterBlock<uint64_t> bits = [&] {
         if constexpr (std::is_same_v<T, uint64_t>) {
           return value;
         } else {
-          return std::bit_cast<util::stdx::native_simd<uint64_t>>(value);
+          return std::bit_cast<util::RegisterBlock<uint64_t>>(value);
         }
       }();
-      bits.copy_to(buf, util::stdx::vector_aligned);
+      bits.copy_to(buf);
       for (std::size_t i = 0; i < W; ++i) {
         if (lane_mask & (1ULL << i)) {
           op_->write_lane64(*wf_, lane_base + static_cast<uint32_t>(i), buf[i]);
@@ -671,7 +551,8 @@ public:
       return value & (dword_mask | (dword_mask << 32));
     }
 
-    template <typename T> [[nodiscard]] util::native<T> load_native(uint32_t lane_base) const {
+    template <typename T>
+    [[nodiscard]] util::RegisterBlock<T> load_native(uint32_t lane_base) const {
       static_assert(sizeof(T) == sizeof(uint64_t), "load_native expects 64-bit lanes");
       assert((storage_.lo || scalar_fallback_) && "OperandRead64View has no source");
       auto value = storage_.lo ? storage_.lo.template simd_load64<T>(storage_.hi, lane_base)
@@ -679,10 +560,10 @@ public:
       if (byte_mask_ == rocjitsu::ExecutionPlugin::kFullByteMask) {
         return value;
       }
-      auto bits = std::bit_cast<util::native<uint64_t>>(value);
+      auto bits = std::bit_cast<util::RegisterBlock<uint64_t>>(value);
       uint64_t dword_mask = RegisterAccess::byte_bit_mask(byte_mask_);
       bits &= util::broadcast64<uint64_t>(dword_mask | (dword_mask << 32));
-      return std::bit_cast<util::native<T>>(bits);
+      return std::bit_cast<util::RegisterBlock<T>>(bits);
     }
 
   private:
@@ -711,7 +592,8 @@ public:
 
     [[nodiscard]] bool has_storage() const { return static_cast<bool>(storage_.lo); }
 
-    template <typename T> [[nodiscard]] util::native<T> load_lo_native(uint32_t lane_base) const {
+    template <typename T>
+    [[nodiscard]] util::RegisterBlock<T> load_lo_native(uint32_t lane_base) const {
       static_assert(sizeof(T) == sizeof(uint32_t), "load_lo_native expects 32-bit lanes");
       assert((storage_.lo || scalar_fallback_) && "OperandReadPair32View has no source");
       auto value = storage_.lo ? storage_.lo.template simd_load<T>(lane_base)
@@ -719,12 +601,13 @@ public:
       if (byte_mask_ == rocjitsu::ExecutionPlugin::kFullByteMask) {
         return value;
       }
-      auto bits = std::bit_cast<util::native<uint32_t>>(value);
+      auto bits = std::bit_cast<util::RegisterBlock<uint32_t>>(value);
       bits &= util::broadcast<uint32_t>(RegisterAccess::byte_bit_mask(byte_mask_));
-      return std::bit_cast<util::native<T>>(bits);
+      return std::bit_cast<util::RegisterBlock<T>>(bits);
     }
 
-    template <typename T> [[nodiscard]] util::native<T> load_hi_native(uint32_t lane_base) const {
+    template <typename T>
+    [[nodiscard]] util::RegisterBlock<T> load_hi_native(uint32_t lane_base) const {
       static_assert(sizeof(T) == sizeof(uint32_t), "load_hi_native expects 32-bit lanes");
       assert((storage_.hi || scalar_fallback_) && "OperandReadPair32View has no source");
       auto value = storage_.hi ? storage_.hi.template simd_load<T>(lane_base)
@@ -732,9 +615,9 @@ public:
       if (byte_mask_ == rocjitsu::ExecutionPlugin::kFullByteMask) {
         return value;
       }
-      auto bits = std::bit_cast<util::native<uint32_t>>(value);
+      auto bits = std::bit_cast<util::RegisterBlock<uint32_t>>(value);
       bits &= util::broadcast<uint32_t>(RegisterAccess::byte_bit_mask(byte_mask_));
-      return std::bit_cast<util::native<T>>(bits);
+      return std::bit_cast<util::RegisterBlock<T>>(bits);
     }
 
   private:
@@ -766,14 +649,14 @@ public:
     [[nodiscard]] bool has_storage() const { return static_cast<bool>(storage_.lo); }
 
     template <typename T>
-    Result store_native_pair(uint32_t lane_base, util::native<T> lo, util::native<T> hi,
-                             uint64_t lane_mask) const {
+    Result store_native_pair(uint32_t lane_base, util::RegisterBlock<T> lo,
+                             util::RegisterBlock<T> hi, uint64_t lane_mask) const {
       static_assert(sizeof(T) == sizeof(uint32_t), "store_native_pair expects 32-bit lanes");
       assert(op_ && wf_ && "OperandWritePair32View is empty");
       if (wf_->instruction_execution_failed()) {
         return Result::failure();
       }
-      constexpr std::size_t W = util::native_width_v<T>;
+      constexpr std::size_t W = util::register_block_lanes_v<T>;
       FailureOr<uint64_t> checked_mask =
           RegisterAccess::checked_store_lane_mask(*wf_, permitted_write_lane_mask_, lane_base, W,
                                                   lane_mask, static_cast<bool>(storage_.lo));
@@ -789,8 +672,8 @@ public:
       if (denied_) {
         return Result::success();
       }
-      alignas(util::native<T>) uint32_t lo_buf[W];
-      alignas(util::native<T>) uint32_t hi_buf[W];
+      alignas(util::RegisterBlock<T>) uint32_t lo_buf[W];
+      alignas(util::RegisterBlock<T>) uint32_t hi_buf[W];
       util::blit_to_buffer<T>(lo_buf, lo);
       util::blit_to_buffer<T>(hi_buf, hi);
       for (std::size_t i = 0; i < W; ++i) {

@@ -501,39 +501,15 @@ void check_div_fmas_f64(uint64_t exec) {
   }
 }
 
-TEST(Vop3DivHelpersSimdCorrectness, DivFixupF32_FullExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-    return;
-  }
-  check_div_fixup_f32(/*exec=*/~0ULL);
-}
+TEST(Vop3DivHelpersSimdCorrectness, DivFixupF32_FullExec) { check_div_fixup_f32(/*exec=*/~0ULL); }
 TEST(Vop3DivHelpersSimdCorrectness, DivFixupF32_PartialExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-    return;
-  }
   check_div_fixup_f32(/*exec=*/0xA5A5'F0F0'1234'8001ULL);
 }
-TEST(Vop3DivHelpersSimdCorrectness, DivFixupF64_FullExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-    return;
-  }
-  check_div_fixup_f64(/*exec=*/~0ULL);
-}
+TEST(Vop3DivHelpersSimdCorrectness, DivFixupF64_FullExec) { check_div_fixup_f64(/*exec=*/~0ULL); }
 TEST(Vop3DivHelpersSimdCorrectness, DivFixupF64_PartialExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-    return;
-  }
   check_div_fixup_f64(/*exec=*/0xA5A5'F0F0'1234'8001ULL);
 }
 TEST(Vop3DivHelpersSimdCorrectness, DivFixupF32Family_Source2NaNPrecedence) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-    return;
-  }
   ForceScalarGuard gate_guard;
   constexpr uint32_t kS2Nan = 0x7FC54321u;
   for (const bool force_scalar : {true, false}) {
@@ -545,10 +521,6 @@ TEST(Vop3DivHelpersSimdCorrectness, DivFixupF32Family_Source2NaNPrecedence) {
   }
 }
 TEST(Vop3DivHelpersSimdCorrectness, DivFixupF16Family_OpSelHighHalves) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-    return;
-  }
   ForceScalarGuard gate_guard;
   struct Op {
     uint32_t opcode;
@@ -594,10 +566,6 @@ TEST(Vop3DivHelpersSimdCorrectness, DivFixupF16Family_OpSelHighHalves) {
   }
 }
 TEST(Vop3DivHelpersSimdCorrectness, DivFixupF64_Source2NaNPrecedence) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-    return;
-  }
   ForceScalarGuard gate_guard;
   constexpr uint64_t kS2Nan = 0x7FF8000000054321ULL;
   for (const bool force_scalar : {true, false}) {
@@ -608,32 +576,12 @@ TEST(Vop3DivHelpersSimdCorrectness, DivFixupF64_Source2NaNPrecedence) {
     }
   }
 }
-TEST(Vop3DivHelpersSimdCorrectness, DivFmasF32_FullExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-    return;
-  }
-  check_div_fmas_f32(/*exec=*/~0ULL);
-}
+TEST(Vop3DivHelpersSimdCorrectness, DivFmasF32_FullExec) { check_div_fmas_f32(/*exec=*/~0ULL); }
 TEST(Vop3DivHelpersSimdCorrectness, DivFmasF32_PartialExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-    return;
-  }
   check_div_fmas_f32(/*exec=*/0xA5A5'F0F0'1234'8001ULL);
 }
-TEST(Vop3DivHelpersSimdCorrectness, DivFmasF64_FullExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-    return;
-  }
-  check_div_fmas_f64(/*exec=*/~0ULL);
-}
+TEST(Vop3DivHelpersSimdCorrectness, DivFmasF64_FullExec) { check_div_fmas_f64(/*exec=*/~0ULL); }
 TEST(Vop3DivHelpersSimdCorrectness, DivFmasF64_PartialExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-    return;
-  }
   check_div_fmas_f64(/*exec=*/0xA5A5'F0F0'1234'8001ULL);
 }
 
