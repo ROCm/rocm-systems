@@ -226,7 +226,7 @@ TEST_P(FaultAtomicWrongAddress, DeltaAlignmentBoundsAndOverflowRejectWithoutMuta
   EXPECT_TRUE(test::atomic_output_matches(unaligned, 0, 4, shifted.value().image));
 }
 
-TEST_P(FaultAtomicWrongAddress, UnsupportedBufferAndDsRemainInAtomicOrdinalUnion) {
+TEST_P(FaultAtomicWrongAddress, BufferAndDsKeepTheirOriginalAtomicOrdinals) {
   const test::AtomicTargetCase &fixture = GetParam();
   const FaultMutationContext source(test::make_mixed_atomic_elf(fixture));
   FaultMutationError error;
@@ -246,15 +246,16 @@ TEST_P(FaultAtomicWrongAddress, UnsupportedBufferAndDsRemainInAtomicOrdinalUnion
     const FailureOr<AtomicSelection> selected = select_atomic_wrong_address(
         inventory.value(), {.exact = std::nullopt, .ordinal = ordinal}, error);
     ASSERT_TRUE(selected.succeeded()) << error.message;
-    EXPECT_EQ(selected.value().site().address_supported, ordinal == 2);
+    EXPECT_EQ(selected.value().site().address_supported, ordinal != 1);
     const FailureOr<AtomicResult> mutant =
         apply_atomic_wrong_address(source, selected.value(), 8, error);
-    if (ordinal < 2) {
+    if (ordinal == 1) {
       EXPECT_TRUE(mutant.failed());
       EXPECT_EQ(error.code, FaultMutationErrorCode::UnsupportedForm);
     } else {
       ASSERT_TRUE(mutant.succeeded()) << error.message;
-      EXPECT_TRUE(test::atomic_output_matches(source, 20, 8, mutant.value().image));
+      EXPECT_TRUE(test::atomic_output_matches(source, selected.value().site().offset, 8,
+                                              mutant.value().image));
     }
   }
   EXPECT_TRUE(
