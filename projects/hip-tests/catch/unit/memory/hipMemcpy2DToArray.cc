@@ -260,3 +260,94 @@ HIP_TEST_CASE(Unit_hipMemcpy2DToArray_Capture) {
                   memcpy_err);
   END_CAPTURE_SYNC(memcpy_err);
 }
+
+/*
+ * A copy between a hipMalloc buffer on device 1 and a hipArray on device 0, in
+ * either direction, must succeed without hipDeviceEnablePeerAccess: the runtime
+ * grants the buffer to its peers for the copy, as it does for linear copies.
+ */
+HIP_TEST_CASE(Unit_hipMemcpy2DToArray_PeerBufferFromOtherDevice) {
+  CHECK_IMAGE_SUPPORT
+
+  if (HipTest::getDeviceCount() < 2) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+  }
+  int can_access_peer = 0;
+  HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, 0, 1));
+  if (!can_access_peer) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+  }
+
+  // Ensure peer access 0->1 is off so a prior test cannot make this one pass.
+  HIP_CHECK(hipSetDevice(0));
+  { hipError_t e = hipDeviceDisablePeerAccess(1);
+    if (e != hipSuccess && e != hipErrorPeerAccessNotEnabled) HIP_CHECK(e);
+    static_cast<void>(hipGetLastError()); }
+  // Restore device 0 on scope exit (also fires if a REQUIRE inside a SECTION throws).
+  struct DevGuard { ~DevGuard() { static_cast<void>(hipSetDevice(0)); } } dg;
+
+  constexpr size_t kWidth = 16;   // elements
+  constexpr size_t kHeight = 16;
+  constexpr size_t kRowBytes = kWidth * sizeof(uint32_t);
+  constexpr size_t kTotal = kWidth * kHeight * sizeof(uint32_t);
+
+  // Allocate a 2D hipArray on device 0.
+  HIP_CHECK(hipSetDevice(0));
+  hipChannelFormatDesc channel_desc = hipCreateChannelDesc<uint32_t>();
+  hipArray_t arr0 = nullptr;
+  HIP_CHECK(hipMallocArray(&arr0, &channel_desc, kWidth, kHeight));
+
+  // Allocate a linear buffer on device 1 without enabling peer access.
+  HIP_CHECK(hipSetDevice(1));
+  LinearAllocGuard<uint32_t> dev1_alloc(LinearAllocs::hipMalloc, kTotal);
+  uint32_t* dev1_buf = dev1_alloc.ptr();
+
+  HIP_CHECK(hipSetDevice(0));
+
+  SECTION("GPU1 buffer -> GPU0 array (hipMemcpy2DToArray, no peer enable)") {
+    // Fill device-1 buffer with a known pattern from host, then copy it into
+    // the device-0 array across the peer link.
+    std::vector<uint32_t> pattern(kWidth * kHeight);
+    for (size_t i = 0; i < pattern.size(); ++i) pattern[i] = static_cast<uint32_t>(i + 1);
+    HIP_CHECK(hipSetDevice(1));
+    HIP_CHECK(hipMemcpy(dev1_buf, pattern.data(), kTotal, hipMemcpyHostToDevice));
+    HIP_CHECK(hipSetDevice(0));
+
+    HIP_CHECK(hipMemcpy2DToArray(arr0, 0, 0, dev1_buf, kRowBytes, kRowBytes, kHeight,
+                                 hipMemcpyDeviceToDevice));
+
+    // Read back from device-0 array to host to verify data arrived correctly.
+    std::vector<uint32_t> host(kWidth * kHeight, 0);
+    HIP_CHECK(hipMemcpy2DFromArray(host.data(), kRowBytes, arr0, 0, 0, kRowBytes, kHeight,
+                                   hipMemcpyDeviceToHost));
+    for (size_t i = 0; i < host.size(); ++i) {
+      INFO("element " << i);
+      REQUIRE(host[i] == pattern[i]);
+    }
+  }
+
+  SECTION("GPU0 array -> GPU1 buffer (hipMemcpy2DFromArray, no peer enable)") {
+    // Fill the device-0 array from host, then copy it out into the peer buffer.
+    std::vector<uint32_t> pattern(kWidth * kHeight);
+    for (size_t i = 0; i < pattern.size(); ++i)
+      pattern[i] = static_cast<uint32_t>(0xABC00000u + i);
+    HIP_CHECK(hipMemcpy2DToArray(arr0, 0, 0, pattern.data(), kRowBytes, kRowBytes, kHeight,
+                                 hipMemcpyHostToDevice));
+
+    HIP_CHECK(hipMemcpy2DFromArray(dev1_buf, kRowBytes, arr0, 0, 0, kRowBytes, kHeight,
+                                   hipMemcpyDeviceToDevice));
+
+    // Read back via device 1 to verify every element.
+    std::vector<uint32_t> host(kWidth * kHeight, 0);
+    HIP_CHECK(hipSetDevice(1));
+    HIP_CHECK(hipMemcpy(host.data(), dev1_buf, kTotal, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipSetDevice(0));
+    for (size_t i = 0; i < host.size(); ++i) {
+      INFO("element " << i);
+      REQUIRE(host[i] == pattern[i]);
+    }
+  }
+
+  HIP_CHECK(hipFreeArray(arr0));
+  HIP_CHECK(hipSetDevice(0));
+}

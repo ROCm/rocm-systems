@@ -42,6 +42,7 @@ behaviour
 }
 
 #include <hip_test_common.hh>
+#include <resource_guards.hh>
 #include <string>
 static constexpr auto NUM_W{16};
 static constexpr auto NUM_H{16};
@@ -431,6 +432,14 @@ HIP_TEST_CASE(Unit_hipPointerGetAttribute_DevicePointer_PeerAccess) {
     HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
   }
 
+  // Ensure peer access 0->1 is off so a prior test cannot make this one pass.
+  HIP_CHECK(hipSetDevice(0));
+  { hipError_t e = hipDeviceDisablePeerAccess(1);
+    if (e != hipSuccess && e != hipErrorPeerAccessNotEnabled) HIP_CHECK(e);
+    static_cast<void>(hipGetLastError()); }
+  // Restore device 0 on scope exit (also fires if a REQUIRE inside a SECTION throws).
+  struct DevGuard { ~DevGuard() { static_cast<void>(hipSetDevice(0)); } } dg;
+
   constexpr size_t kBytes = 4096;
 
   SECTION("no peer access: DEVICE_POINTER returns hipErrorInvalidValue") {
@@ -479,6 +488,13 @@ HIP_TEST_CASE(Unit_hipPointerGetAttribute_DevicePointer_PeerAccess) {
     // With peer access enabled at alloc time the allocation is granted immediately.
     HIP_CHECK(hipSetDevice(0));
     HIP_CHECK(hipDeviceEnablePeerAccess(1, 0));
+    // Guard disables peer access and restores device 0 even if a REQUIRE throws.
+    struct PeerGuard {
+      ~PeerGuard() {
+        static_cast<void>(hipSetDevice(0));
+        static_cast<void>(hipDeviceDisablePeerAccess(1));
+      }
+    } pg;
 
     HIP_CHECK(hipSetDevice(1));
     int* dev1_ptr = nullptr;
@@ -492,9 +508,132 @@ HIP_TEST_CASE(Unit_hipPointerGetAttribute_DevicePointer_PeerAccess) {
 
     HIP_CHECK(hipSetDevice(1));
     HIP_CHECK(hipFree(dev1_ptr));
-    HIP_CHECK(hipSetDevice(0));
-    HIP_CHECK(hipDeviceDisablePeerAccess(1));
   }
+
+  // Returns true when device 1 supports memory pools.
+  auto pools_supported_on_dev1 = []() -> bool {
+    int pool_support = 0;
+    HIP_CHECK(hipDeviceGetAttribute(&pool_support, hipDeviceAttributeMemoryPoolsSupported, 1));
+    return pool_support != 0;
+  };
+
+  SECTION("pool, no peer access: DEVICE_POINTER returns hipErrorInvalidValue") {
+    // Pool (hipMallocAsync) memory on device 1 must behave like hipMalloc memory:
+    // without a prior peer grant, querying DEVICE_POINTER from device 0 returns
+    // hipErrorInvalidValue.
+    if (!pools_supported_on_dev1()) {
+      HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
+    }
+    // Allocate from device 1's default pool on a device-1 stream.
+    HIP_CHECK(hipSetDevice(1));
+    StreamGuard sg(Streams::created);
+    int* pool_ptr = nullptr;
+    HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&pool_ptr), kBytes, sg.stream()));
+    HIP_CHECK(hipStreamSynchronize(sg.stream()));
+    // Guard that frees the pool allocation even if a REQUIRE throws.
+    struct PoolFreeGuard {
+      int** ptr;
+      hipStream_t stream;
+      ~PoolFreeGuard() {
+        if (*ptr) {
+          static_cast<void>(hipFreeAsync(*ptr, stream));
+          static_cast<void>(hipStreamSynchronize(stream));
+        }
+      }
+    } pfg{&pool_ptr, sg.stream()};
+
+    // Query from device 0: no peer access has been granted.
+    HIP_CHECK(hipSetDevice(0));
+    hipDeviceptr_t out = 0;
+    HIP_CHECK_ERROR(
+        hipPointerGetAttribute(&out, HIP_POINTER_ATTRIBUTE_DEVICE_POINTER,
+                               reinterpret_cast<hipDeviceptr_t>(pool_ptr)),
+        hipErrorInvalidValue);
+  }
+
+  SECTION("pool allocated after enabling peer access: DEVICE_POINTER returns hipSuccess") {
+    // Enable peer access from device 0 before the pool allocation; the pool
+    // pointer must be visible from device 0 immediately after hipMallocAsync.
+    if (!pools_supported_on_dev1()) {
+      HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
+    }
+    HIP_CHECK(hipSetDevice(0));
+    HIP_CHECK(hipDeviceEnablePeerAccess(1, 0));
+    // Guard disables peer access and restores device 0 even if a REQUIRE throws.
+    struct PeerGuard {
+      ~PeerGuard() {
+        static_cast<void>(hipSetDevice(0));
+        static_cast<void>(hipDeviceDisablePeerAccess(1));
+      }
+    } pg;
+
+    // Allocate from device 1's default pool on a device-1 stream.
+    HIP_CHECK(hipSetDevice(1));
+    StreamGuard sg(Streams::created);
+    int* pool_ptr = nullptr;
+    HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&pool_ptr), kBytes, sg.stream()));
+    HIP_CHECK(hipStreamSynchronize(sg.stream()));
+    // PoolFreeGuard after PeerGuard so it is destroyed first (C++ reverse-order destruction).
+    struct PoolFreeGuard {
+      int** ptr;
+      hipStream_t stream;
+      ~PoolFreeGuard() {
+        if (*ptr) {
+          static_cast<void>(hipFreeAsync(*ptr, stream));
+          static_cast<void>(hipStreamSynchronize(stream));
+        }
+      }
+    } pfg{&pool_ptr, sg.stream()};
+
+    // Query from device 0: peer access was enabled before the allocation.
+    HIP_CHECK(hipSetDevice(0));
+    hipDeviceptr_t out = 0;
+    HIP_CHECK(hipPointerGetAttribute(&out, HIP_POINTER_ATTRIBUTE_DEVICE_POINTER,
+                                     reinterpret_cast<hipDeviceptr_t>(pool_ptr)));
+    REQUIRE(out == reinterpret_cast<hipDeviceptr_t>(pool_ptr));
+  }
+
+  SECTION("pool allocated before enabling peer access: DEVICE_POINTER returns hipSuccess") {
+    // Pool pointer allocated before enabling peer access must still be reachable
+    // from device 0 once peer access is enabled.
+    if (!pools_supported_on_dev1()) {
+      HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
+    }
+    // Allocate from device 1's default pool before enabling peer access.
+    HIP_CHECK(hipSetDevice(1));
+    StreamGuard sg(Streams::created);
+    int* pool_ptr = nullptr;
+    HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&pool_ptr), kBytes, sg.stream()));
+    HIP_CHECK(hipStreamSynchronize(sg.stream()));
+
+    // Enable peer access from device 0, after the allocation is live.
+    HIP_CHECK(hipSetDevice(0));
+    HIP_CHECK(hipDeviceEnablePeerAccess(1, 0));
+    // Guard disables peer access and restores device 0 even if a REQUIRE throws.
+    struct PeerGuard {
+      ~PeerGuard() {
+        static_cast<void>(hipSetDevice(0));
+        static_cast<void>(hipDeviceDisablePeerAccess(1));
+      }
+    } pg;
+    // PoolFreeGuard after PeerGuard so it is destroyed first (C++ reverse-order destruction).
+    struct PoolFreeGuard {
+      int** ptr;
+      hipStream_t stream;
+      ~PoolFreeGuard() {
+        if (*ptr) {
+          static_cast<void>(hipFreeAsync(*ptr, stream));
+          static_cast<void>(hipStreamSynchronize(stream));
+        }
+      }
+    } pfg{&pool_ptr, sg.stream()};
+
+    hipDeviceptr_t out = 0;
+    HIP_CHECK(hipPointerGetAttribute(&out, HIP_POINTER_ATTRIBUTE_DEVICE_POINTER,
+                                     reinterpret_cast<hipDeviceptr_t>(pool_ptr)));
+    REQUIRE(out == reinterpret_cast<hipDeviceptr_t>(pool_ptr));
+  }
+
 }
 #endif
 

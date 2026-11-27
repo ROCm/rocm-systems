@@ -199,3 +199,80 @@ HIP_TEST_CASE(Unit_hipMemset3D_Capture) {
 
   HIP_CHECK(hipFree(devPitchedPtr.ptr));
 }
+
+/*
+ * hipMemset3D and hipMemset3DAsync on device 0 targeting a hipMalloc buffer
+ * on device 1 must succeed without hipDeviceEnablePeerAccess.  The buffer is
+ * represented with pitch == extent.width (no row padding, linear layout) so
+ * the runtime treats it as a contiguous fill.
+ */
+HIP_TEST_CASE(Unit_hipMemset3D_PeerBufferFromOtherDevice) {
+  if (HipTest::getDeviceCount() < 2) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+  }
+  int can_access_peer = 0;
+  HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, 0, 1));
+  if (!can_access_peer) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+  }
+
+  // Ensure peer access 0->1 is off so a prior test cannot make this one pass.
+  HIP_CHECK(hipSetDevice(0));
+  { hipError_t e = hipDeviceDisablePeerAccess(1);
+    if (e != hipSuccess && e != hipErrorPeerAccessNotEnabled) HIP_CHECK(e);
+    static_cast<void>(hipGetLastError()); }
+  // Restore device 0 on scope exit (also fires if a REQUIRE inside a SECTION throws).
+  struct DevGuard { ~DevGuard() { static_cast<void>(hipSetDevice(0)); } } dg;
+
+  // Sizes chosen so that pitch == width (no row padding).
+  constexpr size_t kWidth = 64;    // bytes per row
+  constexpr size_t kHeight = 4;
+  constexpr size_t kDepth = 2;
+  constexpr size_t kTotal = kWidth * kHeight * kDepth;
+
+  // Allocate a flat buffer on device 1 and represent it as a pitched pointer
+  // with pitch == width so hipMemset3D treats the whole allocation as linear.
+  HIP_CHECK(hipSetDevice(1));
+  uint8_t* dev1_ptr = nullptr;
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&dev1_ptr), kTotal));
+  hipPitchedPtr dev1_pitched = make_hipPitchedPtr(dev1_ptr, kWidth, kWidth, kHeight);
+  hipExtent extent = make_hipExtent(kWidth, kHeight, kDepth);
+
+  HIP_CHECK(hipSetDevice(0));
+
+  SECTION("hipMemset3D") {
+    // Synchronous 3D memset from device 0 into device-1 buffer.
+    HIP_CHECK(hipMemset3D(dev1_pitched, 0x7F, extent));
+
+    std::vector<uint8_t> host(kTotal, 0);
+    HIP_CHECK(hipSetDevice(1));
+    HIP_CHECK(hipMemcpy(host.data(), dev1_ptr, kTotal, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipSetDevice(0));
+    for (size_t i = 0; i < kTotal; ++i) {
+      INFO("byte " << i);
+      REQUIRE(host[i] == 0x7Fu);
+    }
+  }
+
+  SECTION("hipMemset3DAsync") {
+    // Asynchronous 3D memset from device 0 into device-1 buffer.
+    hipStream_t stream0 = nullptr;
+    HIP_CHECK(hipStreamCreate(&stream0));
+    HIP_CHECK(hipMemset3DAsync(dev1_pitched, 0x3C, extent, stream0));
+    HIP_CHECK(hipStreamSynchronize(stream0));
+
+    std::vector<uint8_t> host(kTotal, 0);
+    HIP_CHECK(hipSetDevice(1));
+    HIP_CHECK(hipMemcpy(host.data(), dev1_ptr, kTotal, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipSetDevice(0));
+    for (size_t i = 0; i < kTotal; ++i) {
+      INFO("byte " << i);
+      REQUIRE(host[i] == 0x3Cu);
+    }
+    HIP_CHECK(hipStreamDestroy(stream0));
+  }
+
+  HIP_CHECK(hipSetDevice(1));
+  HIP_CHECK(hipFree(dev1_ptr));
+  HIP_CHECK(hipSetDevice(0));
+}

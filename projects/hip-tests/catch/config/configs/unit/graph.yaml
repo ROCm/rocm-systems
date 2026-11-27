@@ -1228,6 +1228,9 @@ graph:
   Unit_hipGraphAddMemsetNode_hipMallocManaged:
     <<: *level_default
     tags: [node, managed_memory]
+  Unit_hipGraphAddMemsetNode_PeerBufferFromOtherDevice:
+    <<: *level_default
+    tags: [multigpu, node]
   Unit_hipGraphAddKernelNode_Negative:
     <<: *level_default
     tags: [node, P0]
