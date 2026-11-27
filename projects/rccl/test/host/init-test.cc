@@ -31,7 +31,7 @@
 
 #include "fakes/init_fakes.h"
 #include "fakes/amdsmi_fakes.h"                      // g_amdSmiFabricTelemetry{Acquire,Release}
-#include "fakes/sym_kernels_fakes.h"                 // g_symkFinalize, g_symkAgHierAvailable
+#include "fakes/sym_kernels_fakes.h"                 // g_symkFinalize, g_symkHierAvailable
 #include "fakes/rccl_wrap_fakes.h"                   // g_rcclScaleCollLl128BuffSize{Calls,Factor}
 #include "fakes/mgmt_task_enq_fakes.h"               // g_ncclMgmtTaskEnqueue
 #include "../common/LogCapture.hpp"                 // CaptureLog: assert on WARN/INFO text
@@ -11483,7 +11483,7 @@ TEST_F(InitMicrotest, InitTransportsRank_HierAllGatherSizingMismatch_FailsOnlyWh
     ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deft) {
       return std::string(env) == "SYM_CTAS" ? 7 : deft;
     });
-    ScopedHook available(g_symkAgHierAvailable, [=](ncclComm*) { return hierAvailable; });
+    ScopedHook available(g_symkHierAvailable, [=](ncclComm*) { return hierAvailable; });
     std::vector<PeerSpec> specs(4);
     for (auto& s : specs) s.mloPart = 1;
     const auto gathers = Tr_InstallGathers(c, specs, [&](int r, Tr_AllGatherInfo& row) {

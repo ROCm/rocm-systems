@@ -2529,7 +2529,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
 
   // The hierarchical AllGather pairs blocks across ranks by index and chunk, so ranks that size its grid or
   // chunks differently hang
-  if (ncclSymkAgHierAvailable(comm)) {
+  if (ncclSymkHierAvailable(comm)) {
     for (int r = 0; r < nranks; r++) {
       const auto& mine = allGather3Data[rank];
       const auto& peer = allGather3Data[r];

@@ -1100,7 +1100,7 @@ inline size_t rcclSymMinR2CapTab(const rcclArchThresholds* table, ncclFunc_t fun
 // Where the hierarchical LSA AllGather kernel runs, the table's hierarchical window replaces the
 // AllGather symk bounds in both eager and graph mode. RCCL_SYM_K_MIN_BYTES / RCCL_SYM_K_MAX_BYTES still win.
 inline bool rcclAgHierSymWindow(struct ncclComm* comm, const rcclArchThresholds* table) {
-  return table != nullptr && table->agHierSymMinR2 != 0 && ncclSymkAgHierGroups(comm) > 0;
+  return table != nullptr && table->agHierSymMinR2 != 0 && ncclSymkHierGroups(comm) > 0;
 }
 inline size_t rcclAgSymMaxR2Cap(struct ncclComm* comm, const rcclArchThresholds* table, bool graphMode) {
   if (rcclParamSymKMaxBytes() < 0 && rcclAgHierSymWindow(comm, table)) return table->agHierSymMaxR2;

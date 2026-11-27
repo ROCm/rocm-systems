@@ -74,6 +74,7 @@ static constexpr struct ncclAlgRegEntry algRegistry[] = {
   {"SYMK_LDMC",              ALGBIT(39), F_RS, -1, -1, ncclSymkKernelId_ReduceScatter_LDMC},
   {"SYMK_RailA2A_LsaLD",     ALGBIT(40), F_RS, -1, -1, ncclSymkKernelId_ReduceScatter_RailA2A_LsaLD},
   {"SYMK_RailA2A_LsaLDMC",   ALGBIT(41), F_RS, -1, -1, ncclSymkKernelId_ReduceScatter_RailA2A_LsaLDMC},
+  {"SYMK_HierLsaLDST",       ALGBIT(42), F_RS, -1, -1, ncclSymkKernelId_ReduceScatter_HierLsaLDST},
 };
 // clang-format on
 static constexpr int algRegistryCount = (int)(sizeof(algRegistry) / sizeof(algRegistry[0]));
