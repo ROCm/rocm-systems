@@ -198,6 +198,9 @@ _lib.hipMemcpyHtoD.argtypes = [c_void_p, c_void_p, c_size_t]
 _lib.hipMemcpyDtoH.restype = c_int
 _lib.hipMemcpyDtoH.argtypes = [c_void_p, c_void_p, c_size_t]
 
+_lib.hipMemset.restype = c_int
+_lib.hipMemset.argtypes = [c_void_p, c_int, c_size_t]
+
 _lib.hipSetDevice.restype = c_int
 _lib.hipSetDevice.argtypes = [c_int]
 
@@ -321,6 +324,13 @@ def hipMemcpyHtoD(dst: HIPDeviceMemory, src: POINTER, size: int) -> None:
 
 def hipMemcpyDtoH(dst: POINTER, src: HIPDeviceMemory, size: int) -> None:
     res = _lib.hipMemcpyDtoH(dst, src.ptr, size)
+
+    if res != 0:
+        raise HIPError(res)
+
+
+def hipMemset(dst: HIPDeviceMemory, value: int, size: int) -> None:
+    res = _lib.hipMemset(dst.ptr, value, size)
 
     if res != 0:
         raise HIPError(res)

@@ -163,6 +163,43 @@ def matrix_side_for_bodies(body_count: int, tile_dim: int) -> int:
     return ((side + tile_dim - 1) // tile_dim) * tile_dim
 
 
+def transpose_launch_geometry(
+    matrix_dim: int,
+    tile_dim: int,
+    max_grid_size: Tuple[int, int, int],
+    max_threads_per_block: int,
+) -> Tuple[Tuple[int, int, int], Tuple[int, int, int]]:
+    """Grid/block that covers every matrix element; rejects undersized launches."""
+    if matrix_dim < tile_dim or matrix_dim % tile_dim != 0:
+        raise ValueError(
+            f"matrix_dim={matrix_dim} must be a positive multiple of "
+            f"tile_dim={tile_dim}"
+        )
+    threads_per_block = tile_dim * tile_dim
+    if threads_per_block > max_threads_per_block:
+        raise RuntimeError(
+            f"transpose block {tile_dim}x{tile_dim}={threads_per_block} threads "
+            f"exceeds device maxThreadsPerBlock={max_threads_per_block}"
+        )
+    blocks_per_side = matrix_dim // tile_dim
+    grid = (blocks_per_side, blocks_per_side, 1)
+    block = (tile_dim, tile_dim, 1)
+    covered_elements = (blocks_per_side * tile_dim) * (blocks_per_side * tile_dim)
+    matrix_elements = matrix_dim * matrix_dim
+    if covered_elements != matrix_elements:
+        raise RuntimeError(
+            f"transpose launch covers {covered_elements} elements, "
+            f"matrix has {matrix_elements}"
+        )
+    if blocks_per_side > max_grid_size[0] or blocks_per_side > max_grid_size[1]:
+        raise RuntimeError(
+            f"transpose grid {grid} exceeds device maxGridSize="
+            f"({max_grid_size[0]}, {max_grid_size[1]}, {max_grid_size[2]}); "
+            f"reduce --matrix-dim"
+        )
+    return grid, block
+
+
 def _device_byte_offset(memory: hip.HIPDeviceMemory, float_offset: int) -> c_void_p:
     base = memory.ptr.value
     if base is None:
@@ -270,27 +307,57 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 1
 
     hip.hipSetDevice(args.device)
+    device_props = hip.hipGetDeviceProperties(args.device)
+    max_grid_size = (
+        int(device_props.maxGridSize[0]),
+        int(device_props.maxGridSize[1]),
+        int(device_props.maxGridSize[2]),
+    )
+    try:
+        transpose_grid, transpose_block = transpose_launch_geometry(
+            args.matrix_dim,
+            _TILE_DIM,
+            max_grid_size,
+            int(device_props.maxThreadsPerBlock),
+        )
+    except (ValueError, RuntimeError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    buffer_bytes = matrix_elements * 4
+    buffer_gib = (2 * buffer_bytes) / float(1024**3)
+    covered_elements = (
+        transpose_grid[0] * transpose_block[0] * transpose_grid[1] * transpose_block[1]
+    )
+    if covered_elements != matrix_elements:
+        print(
+            f"internal error: launch covers {covered_elements} of "
+            f"{matrix_elements} elements",
+            file=sys.stderr,
+        )
+        return 1
+
     program = HiprtcProgram(_KERNEL_SOURCE)
     transpose = program.get_kernel("transpose_lds")
     update_bodies = program.get_kernel("update_bodies")
 
-    byte_count = matrix_elements * 4
-    host_state = (c_float * matrix_elements)()
+    # Avoid a multi-GiB host staging buffer: zero the matrices on device, then
+    # upload only the SoA prefix used by nbody.
+    buffer_a = hip.hipMalloc(buffer_bytes)
+    buffer_b = hip.hipMalloc(buffer_bytes)
+    hip.hipMemset(buffer_a, 0, buffer_bytes)
+    hip.hipMemset(buffer_b, 0, buffer_bytes)
+    host_soa = (c_float * soa_floats)()
     rng = random.Random(0)
-    for index in range(matrix_elements):
-        host_state[index] = 2.0 * rng.random() - 1.0
-
-    buffer_a = hip.hipMalloc(byte_count)
-    buffer_b = hip.hipMalloc(byte_count)
-    hip.hipMemcpyHtoD(buffer_a, cast(host_state, POINTER(c_float)), byte_count)
-    hip.hipMemcpyHtoD(buffer_b, cast(host_state, POINTER(c_float)), byte_count)
+    for index in range(soa_floats):
+        host_soa[index] = 2.0 * rng.random() - 1.0
+    soa_bytes = soa_floats * 4
+    hip.hipMemcpyHtoD(buffer_a, cast(host_soa, POINTER(c_float)), soa_bytes)
+    hip.hipMemcpyHtoD(buffer_b, cast(host_soa, POINTER(c_float)), soa_bytes)
 
     src = buffer_a
     dst = buffer_b
     kinds = build_fibonacci_launch_kinds(args.iters)
-    blocks_per_side = args.matrix_dim // _TILE_DIM
-    transpose_grid = (blocks_per_side, blocks_per_side, 1)
-    transpose_block = (_TILE_DIM, _TILE_DIM, 1)
     nbody_grid = (
         (args.bodies + _NBODY_BLOCK - 1) // _NBODY_BLOCK,
         1,
@@ -327,7 +394,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     hip.hipDeviceSynchronize()
     print(
         f"fib_transpose_nbody: launches={len(kinds)} "
-        f"matrix={args.matrix_dim}x{args.matrix_dim} bodies={args.bodies} "
+        f"matrix={args.matrix_dim}x{args.matrix_dim} "
+        f"buffers={buffer_gib:.3f}GiB "
+        f"transpose_grid={transpose_grid[0]}x{transpose_grid[1]} "
+        f"transpose_block={transpose_block[0]}x{transpose_block[1]} "
+        f"cover_elems={covered_elements} bodies={args.bodies} "
         f"transpose={kinds.count('transpose')} nbody={kinds.count('nbody')}"
     )
     return 0

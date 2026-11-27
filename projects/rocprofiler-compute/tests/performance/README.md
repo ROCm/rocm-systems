@@ -13,6 +13,9 @@ Device buffers ping-pong: nbody input is transpose output; nbody output is
 the next transpose input. The transpose kernel follows the LDS tiling
 approach from
 [rocm-examples tiling_matrix_transpose](https://github.com/ROCm/rocm-examples/tree/amd-staging/Programming-Guide/Tutorials/Performance-Optimization/tiling_matrix_transpose).
+Default `--matrix-dim 32768` allocates two float buffers (~8 GiB) and launches
+a `2048x2048` grid of `16x16` blocks so every matrix element is covered; the
+app checks this against the device `maxGridSize` before running.
 
 Profile selects every top-level block for the live GPU arch except
 roofline (block `4` / `roof`), PC sampling, and membw — equivalent to a full
