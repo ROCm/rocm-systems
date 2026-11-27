@@ -348,13 +348,9 @@ Panel Config:
   metrics_description:
     Hit rate: The ratio of the number of vL1D cache line requests that hit in vL1D
       cache over the total number of cache line requests to the vL1D Cache RAM.
-    Bandwidth Utilization: The CU-facing vL1D lookup bandwidth from VMEM
-      instructions as a percent of peak. Each TCP_TOTAL_CACHE_ACCESSES counts as
-      64 bytes, matching the TCP to TD return path (64 bytes per cycle per CU).
-      The vL1D line is 128 bytes and fills from TCR at 128 bytes per cycle; that
-      path is not what this metric reports. Unaligned or poorly coalesced access
-      can raise the access count without a matching increase in duration, so this
-      percent can exceed 100.
+    Bandwidth Utilization: The percent of peak theoretical lookup bandwidth
+      between the CU and the vL1D cache from VMEM instructions. Each
+      TCP_TOTAL_CACHE_ACCESSES counts as 64 bytes.
     Utilization: Indicates how busy the vL1D Cache RAM was during the kernel execution.
       The number of cycles where the vL1D Cache RAM is actively processing any request
       divided by the number of cycles where the vL1D is active.
@@ -405,11 +401,8 @@ Panel Config:
       unit after coalescing per normalization unit.
     Atomic Req: The total number of incoming atomic requests from the address processing
       unit after coalescing per normalization unit.
-    Cache BW: The CU-facing vL1D lookup bandwidth from VMEM instructions. Each
-      TCP_TOTAL_CACHE_ACCESSES counts as 64 bytes, matching the TCP to TD return
-      path. The vL1D line is 128 bytes and fills from TCR at 128 bytes per cycle;
-      that path is not what this metric reports. Unaligned or poorly coalesced
-      access can raise the access count without a matching increase in duration.
+    Cache BW: The lookup bandwidth between the CU and the vL1D cache from VMEM
+      instructions. Each TCP_TOTAL_CACHE_ACCESSES counts as 64 bytes.
     Cache Hit Rate: The ratio of the number of vL1D cache line requests that hit in
       vL1D cache over the total number of cache line requests to the vL1D Cache RAM.
     Cache Accesses: The total number of cache line lookups in the vL1D.

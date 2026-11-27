@@ -144,12 +144,8 @@ Panel Config:
       if only a single value is requested in a cache line, the data movement will
       still be counted as a full cache line. The peak empirically measured bandwidth
       achievable on the specific accelerator is displayed alongside for comparison.
-    L1 Cache Bandwidth: The CU-facing vL1D lookup bandwidth from VMEM
-      instructions. Each TCP_TOTAL_CACHE_ACCESSES counts as 64 bytes, matching the
-      TCP to TD return path. The vL1D line is 128 bytes and fills from TCR at 128
-      bytes per cycle; that path is not what this metric reports. The peak
-      empirically measured bandwidth achievable on the specific accelerator is
-      displayed alongside for comparison.
+    L1 Cache Bandwidth: The lookup bandwidth between the CU and the vL1D cache
+      from VMEM instructions. Each TCP_TOTAL_CACHE_ACCESSES counts as 64 bytes.
     LDS Bandwidth: Indicates the maximum amount of bytes that could have been loaded
       from, stored to, or atomically updated in the LDS per unit time (see LDS Bandwidth
       example for more detail). The peak empirically measured LDS bandwidth achievable
