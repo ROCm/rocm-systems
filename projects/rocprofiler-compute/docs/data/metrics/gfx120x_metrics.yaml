@@ -110,7 +110,7 @@ Roofline Performance Rates:
     rst: Estimated matrix floating-point operations per second across all WMMA data types (FP16, BF16, FP8, and BF8), so the rate is not FP16-only.
     unit: GFLOP/s
   VALU FLOPs (F64):
-    rst: 64-bit floating-point operations per second on the VALU.
+    rst: Estimated 64-bit floating-point operations per second on the vector ALU. It can read above or below the true rate.
     unit: GFLOP/s
   GL0 Cache BW (TCP Cache):
     rst: Bandwidth requested from the GL0 vector cache (TCP Cache). It is an upper bound.

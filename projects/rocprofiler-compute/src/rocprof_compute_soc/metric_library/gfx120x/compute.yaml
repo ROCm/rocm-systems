@@ -124,7 +124,9 @@ compute.valu_flops_f64:
   name: VALU FLOPs (F64)
   formula: SUM($wave_size * SQ_INSTS_VALU_DP_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GFLOP/s
-  description: 64-bit floating-point operations per second on the VALU.
+  description: >-
+    Estimated 64-bit floating-point operations per second on the vector ALU. It can read
+    above or below the true rate.
   peak_empirical: $FP64Flops_empirical_peak
 compute.valu_inst_cycles:
   name: VALU Instruction Cycles

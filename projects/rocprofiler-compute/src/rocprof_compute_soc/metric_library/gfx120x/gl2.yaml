@@ -59,16 +59,15 @@ gl2.memory_rd_bw:
   unit: GB/s
   description: >-
     The number of bytes per second the L2 cache (GL2C) reads over the EA for requests
-    destined for VRAM. The counter counts 32-byte granules. Infinity Cache hits are
-    included, so this can exceed the VRAM bandwidth peak.
+    destined for VRAM. Infinity Cache hits are included, so this can exceed the VRAM
+    bandwidth peak.
 gl2.memory_wr_bw:
   name: Memory Write Bandwidth
   formula: 32 * SUM(GL2C_EA_WRREQ_DRAM_32B_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
     The number of bytes per second the L2 cache (GL2C) writes over the EA for requests
-    destined for VRAM. The counter counts 32-byte granules. Infinity Cache hits are
-    included.
+    destined for VRAM. Infinity Cache hits are included.
 gl2.misses:
   name: GL2 Cache Misses
   formula: SUM(GL2C_MISS_sum) / SUM($denom)
