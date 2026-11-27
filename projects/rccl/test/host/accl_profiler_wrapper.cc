@@ -50,6 +50,11 @@ extern "C" {
     return ctx->outputFile ? fileno(ctx->outputFile) : -1;
   }
   // Current tenancy of a proxy-op slot; a step pins this at start.
+  // Gives a live context the serial a new context would get: from the plugin's point of
+  // view it was freed and another created at the same address.
+  void test_acclRenewSerial(void* ctxv) {
+    ((struct acclCommContext*)ctxv)->serial = __atomic_add_fetch(&gCtxSerial, 1, __ATOMIC_RELAXED);
+  }
   unsigned long test_acclProxyOpGeneration(void* ctxv, int slot) {
     struct acclCommContext* ctx = (struct acclCommContext*)ctxv;
     if (slot < 0 || slot >= ACCL_PROXY_OP_POOL_SIZE) return 0;

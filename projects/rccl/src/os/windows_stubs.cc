@@ -294,6 +294,13 @@ ncclResult_t ncclProfilerStopCollApiEvent(void) {
   return ncclSuccess;
 }
 
+ncclResult_t ncclProfilerStartP2pCollApiEvent(struct ncclInfo* info, bool isGraphCaptured, bool* started) {
+  (void)info;
+  (void)isGraphCaptured;
+  *started = false;
+  return ncclSuccess;
+}
+
 ncclResult_t ncclProfilerStartKernelLaunchEvent(struct ncclKernelPlan* plan, cudaStream_t stream) {
   (void)plan;
   (void)stream;

@@ -930,11 +930,13 @@ static void profilerStampArgs(ncclProfilerEventStateArgs_t* args, uint32_t mode,
 // process-wide mask (including a RAS override). count>1 uses NCCL's own
 // ncclProfilerMultiContext. The process-wide mask is then only the union, so
 // each slot must be gated against its own mask, or the RAS override replacing
-// it, before remapping parent handles and delivering the event.
+// it, before remapping parent handles and delivering the event. A slot's mask
+// must have a bit of `gate`, normally profilerEventGate(type), and every bit of
+// `require`.
 static void profilerStartDispatch(void* ctx, struct ncclProfilerEventRef* out, ncclProfilerEventDescr_t* descr,
                                   const struct ncclProfilerEventRef* parent,
                                   const struct ncclProfilerEventRef* parentGroup, profilerTimestampKind timestampKind,
-                                  uint64_t tsGpu) {
+                                  uint64_t tsGpu, int gate, int require) {
   if (COMPILER_EXPECT(ncclProfiler == NULL, 1)) return;
   memset(out, 0, sizeof(*out));
   if (COMPILER_EXPECT(profilerPluginCount <= 1, 1)) {
@@ -945,13 +947,12 @@ static void profilerStartDispatch(void* ctx, struct ncclProfilerEventRef* out, n
   }
   if (ctx == NULL) return;
   struct ncclProfilerMultiContext* multi = (struct ncclProfilerMultiContext*)ctx;
-  int gate = profilerEventGate(descr->type);
   bool ras = COMPILER_ATOMIC_LOAD(&ncclProfilerRasOverrideActive, std::memory_order_acquire);
   int rasMask = ras ? COMPILER_ATOMIC_LOAD(&ncclProfilerRasOverrideMask, std::memory_order_relaxed) : 0;
   for (int slot = 0; slot < multi->count; slot++) {
     if (!multi->slots[slot].initialized) continue;
     int mask = ras ? rasMask : profilerPluginEffectiveMask(&profilerPlugins[slot]);
-    if (!(mask & gate)) continue;
+    if (!(mask & gate) || (mask & require) != require) continue;
     ncclProfilerEventDescr_t slotDescr = *descr;
     profilerStampDescr(&slotDescr, COMPILER_ATOMIC_LOAD(&profilerPlugins[slot].tsMode, std::memory_order_relaxed),
                        timestampKind, tsGpu);
@@ -962,19 +963,28 @@ static void profilerStartDispatch(void* ctx, struct ncclProfilerEventRef* out, n
 
 static void profilerStart(void* ctx, struct ncclProfilerEventRef* out, ncclProfilerEventDescr_t* descr,
                           const struct ncclProfilerEventRef* parent, const struct ncclProfilerEventRef* parentGroup) {
-  profilerStartDispatch(ctx, out, descr, parent, parentGroup, profilerTimestampHost, 0);
+  profilerStartDispatch(ctx, out, descr, parent, parentGroup, profilerTimestampHost, 0, profilerEventGate(descr->type),
+                        0);
+}
+
+// Like profilerStart, but admits the event only to plugins whose mask has every bit of `require`.
+static void profilerStartRequiring(void* ctx, struct ncclProfilerEventRef* out, ncclProfilerEventDescr_t* descr,
+                                   const struct ncclProfilerEventRef* parent, int require) {
+  profilerStartDispatch(ctx, out, descr, parent, nullptr, profilerTimestampHost, 0, require, require);
 }
 
 static void profilerStartNone(void* ctx, struct ncclProfilerEventRef* out, ncclProfilerEventDescr_t* descr,
                               const struct ncclProfilerEventRef* parent,
                               const struct ncclProfilerEventRef* parentGroup) {
-  profilerStartDispatch(ctx, out, descr, parent, parentGroup, profilerTimestampNone, 0);
+  profilerStartDispatch(ctx, out, descr, parent, parentGroup, profilerTimestampNone, 0, profilerEventGate(descr->type),
+                        0);
 }
 
 static void profilerStartGpu(void* ctx, struct ncclProfilerEventRef* out, ncclProfilerEventDescr_t* descr,
                              const struct ncclProfilerEventRef* parent, const struct ncclProfilerEventRef* parentGroup,
                              uint64_t tsGpu) {
-  profilerStartDispatch(ctx, out, descr, parent, parentGroup, profilerTimestampGpu, tsGpu);
+  profilerStartDispatch(ctx, out, descr, parent, parentGroup, profilerTimestampGpu, tsGpu,
+                        profilerEventGate(descr->type), 0);
 }
 
 static void profilerStopDispatch(struct ncclProfilerEventRef* event, profilerTimestampKind timestampKind,
@@ -1315,17 +1325,22 @@ ncclResult_t ncclProfilerStopP2pApiEvent() {
   return ncclSuccess;
 }
 
+static void profilerCollApiDescr(struct ncclInfo* info, bool isGraphCaptured, ncclProfilerEventDescr_t* eDescr) {
+  *eDescr = {};
+  eDescr->type = ncclProfileCollApi;
+  eDescr->rank = info->comm->rank;
+  eDescr->collApi.func = ncclFuncToString(info->coll);
+  eDescr->collApi.count = info->count;
+  eDescr->collApi.datatype = ncclDatatypeToString(info->datatype);
+  eDescr->collApi.stream = (void*)info->stream;
+  eDescr->collApi.root = info->root;
+  eDescr->collApi.graphCaptured = isGraphCaptured;
+  eDescr->collApi.userTag = info->collConfig.userProfilerTag;
+}
+
 ncclResult_t ncclProfilerStartCollApiEvent(struct ncclInfo* info, bool isGraphCaptured) {
-  ncclProfilerEventDescr_t eDescr = {0};
-  eDescr.type = ncclProfileCollApi;
-  eDescr.rank = info->comm->rank;
-  eDescr.collApi.func = ncclFuncToString(info->coll);
-  eDescr.collApi.count = info->count;
-  eDescr.collApi.datatype = ncclDatatypeToString(info->datatype);
-  eDescr.collApi.stream = (void*)info->stream;
-  eDescr.collApi.root = info->root;
-  eDescr.collApi.graphCaptured = isGraphCaptured;
-  eDescr.collApi.userTag = info->collConfig.userProfilerTag;
+  ncclProfilerEventDescr_t eDescr;
+  profilerCollApiDescr(info, isGraphCaptured, &eDescr);
   ncclProfilerApiState.eActivationMask = ncclProfilerCurrentEventMask();
   if (COMPILER_EXPECT(ncclProfiler != NULL, 0) &&
       (ncclProfilerApiState.eActivationMask & profilerEventGate(ncclProfileCollApi))) {
@@ -1343,6 +1358,25 @@ ncclResult_t ncclProfilerStartCollApiEvent(struct ncclInfo* info, bool isGraphCa
 
 ncclResult_t ncclProfilerStopCollApiEvent() {
   profilerStop(&ncclProfilerApiState.collApiEventHandle);
+  return ncclSuccess;
+}
+
+// This CollApi event gets no Coll child: its tasks report P2p events, whose P2pApi events start and
+// stop inside it. A plugin that sees CollApi only as the parent of Coll events (any mask with Coll
+// admits CollApi) would hold it, and the group around it, for a child that never comes. So it goes
+// only to plugins that subscribe to both CollApi and the P2pApi events nested in it.
+ncclResult_t ncclProfilerStartP2pCollApiEvent(struct ncclInfo* info, bool isGraphCaptured, bool* started) {
+  *started = false;
+  ncclProfilerApiState.eActivationMask = ncclProfilerCurrentEventMask();
+  if (COMPILER_EXPECT(ncclProfiler == NULL, 1) ||
+      (ncclProfilerApiState.eActivationMask & NCCL_PROFILER_P2P_COLL_API_MASK) != NCCL_PROFILER_P2P_COLL_API_MASK) {
+    return ncclSuccess;
+  }
+  ncclProfilerEventDescr_t eDescr;
+  profilerCollApiDescr(info, isGraphCaptured, &eDescr);
+  profilerStartRequiring(info->comm->profilerContext, &ncclProfilerApiState.collApiEventHandle, &eDescr,
+                         &ncclProfilerApiState.groupApiEventHandle, NCCL_PROFILER_P2P_COLL_API_MASK);
+  *started = true;
   return ncclSuccess;
 }
 

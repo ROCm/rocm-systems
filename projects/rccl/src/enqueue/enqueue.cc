@@ -4359,17 +4359,35 @@ static bool collConfigIsProfilerTagOnly(const ncclCollConfig_t* config, int comm
   return true;
 }
 
+// What a collective call does before its CollApi event: join the group, record the capturing graph,
+// and open the GroupApi event that the CollApi event hangs off.
+static ncclResult_t collApiPrologue(struct ncclComm* comm, struct ncclInfo* info, bool* isGraphCaptured) {
+  // Must be in thread local group before tasks can be alloc'd in `comm->memScoped`.
+  ncclGroupCommJoin(comm, ncclGroupTaskTypeCollective);
+  // Set capturing graph. Called here so that profiler can emit a group API event with this information
+  NCCLCHECK(ncclPlannerSetCapturingGraph(comm, info));
+  *isGraphCaptured = ncclCudaGraphValid(comm->planner.capturingGraph);
+  NCCLCHECK(ncclProfilerStartGroupApiEvent(info, *isGraphCaptured));
+  NCCLCHECK(ncclProfilerRecordGroupApiEventState(ncclProfilerGroupStartApiStop));
+  return ncclSuccess;
+}
+
+// Stops the call's CollApi event when the scope exits, error returns included. One left open would
+// be taken, by a plugin tracking the open CollApi event, as the parent of the thread's next Send/Recv.
+struct CollApiEventScope {
+  bool active = false;
+  ~CollApiEventScope() {
+    if (active) ncclProfilerStopCollApiEvent();
+  }
+};
+
 static ncclResult_t collTaskAppend(struct ncclComm* comm, struct ncclInfo* info, struct ncclDevRedOpFull opDev) {
   struct ncclKernelPlanner* planner = &comm->planner;
 
-  // Must be in thread local group before tasks can be alloc'd in `comm->memScoped`.
-  ncclGroupCommJoin(info->comm, ncclGroupTaskTypeCollective);
-  // Set capturing graph. Called here so that profiler can emit a group API event with this information
-  NCCLCHECK(ncclPlannerSetCapturingGraph(comm, info));
-  bool isGraphCaptured = ncclCudaGraphValid(planner->capturingGraph);
-  NCCLCHECK(ncclProfilerStartGroupApiEvent(info, isGraphCaptured));
-  NCCLCHECK(ncclProfilerRecordGroupApiEventState(ncclProfilerGroupStartApiStop));
+  bool isGraphCaptured;
+  NCCLCHECK(collApiPrologue(comm, info, &isGraphCaptured));
   NCCLCHECK(ncclProfilerStartCollApiEvent(info, isGraphCaptured));
+  CollApiEventScope collApiEvent{true};
 
   // Plain broadcasts (no user config) use the batched-broadcast (AllGatherV) optimization. A config
   // that sets only the observational profiler tag is schedule-neutral, so admit it too and carry the
@@ -4482,7 +4500,6 @@ static ncclResult_t collTaskAppend(struct ncclComm* comm, struct ncclInfo* info,
     planner->nTasksColl += 1;
     ncclTaskCollSorterInsert(&planner->collSorter, t, t->trafficBytes);
   }
-  ncclProfilerStopCollApiEvent();
   return ncclSuccess;
 }
 
@@ -4549,13 +4566,7 @@ static ncclResult_t ceCollTaskAppend(struct ncclComm* comm, struct ncclInfo* inf
     ncclGroupCommJoin(comm, ncclGroupTaskTypeSymRegister);
   }
 
-  // Must be in thread local group before tasks can be alloc'd in `comm->memScoped`.
-  ncclGroupCommJoin(info->comm, ncclGroupTaskTypeCollective);
-  // Set capturing graph. Called here so that profiler can emit a group API event with this information
-  NCCLCHECK(ncclPlannerSetCapturingGraph(comm, info));
-  isGraphCaptured = ncclCudaGraphValid(planner->capturingGraph);
-  NCCLCHECK(ncclProfilerStartGroupApiEvent(info, isGraphCaptured));
-  NCCLCHECK(ncclProfilerRecordGroupApiEventState(ncclProfilerGroupStartApiStop));
+  NCCLCHECK(collApiPrologue(comm, info, &isGraphCaptured));
   NCCLCHECK(ncclProfilerStartCollApiEvent(info, isGraphCaptured));
 
   t = ncclMemoryPoolAlloc<struct ncclTaskColl>(&comm->memPool_ncclTaskColl, &comm->memPermanent);
@@ -5007,6 +5018,22 @@ static void ncclRecordCollConfigLaunchCompletionEvent(struct ncclComm* comm) {
   comm->planner.nCollConfigLaunchCompletionEvents += 1;
 }
 
+// Collectives that taskAppend lowers to per-peer Send/Recv tasks. Each still reports one CollApi
+// event, and every P2pApi event started inside it belongs to that call: that nesting is the only
+// link a profiler gets from those tasks back to the collective. Direct ReduceScatter is left out
+// because its reduce phase is a regular collective that already reports the call.
+static bool p2pFanoutReportsCollApi(const struct ncclInfo* info) {
+  return info->coll == ncclFuncAlltoAll || (info->coll == ncclFuncAllGather && info->useDirect) ||
+         info->coll == ncclFuncGather || info->coll == ncclFuncScatter;
+}
+
+// scheduleP2pTasksToPlan drops an in-place send/recv-to-self pair when P2P batching is off. A
+// fan-out skips that pair up front instead, so every task it posts reaches a plan and reports its
+// P2p event; a profiler counting the call's tasks would otherwise wait on two that never come.
+static bool p2pFanoutSkipsSelf(struct ncclComm* comm, const void* selfSendBuff, const void* selfRecvBuff) {
+  return selfSendBuff == selfRecvBuff && rcclEffectiveP2pBatchEnable(comm) == 0;
+}
+
 // Converts `info` to a task and adds it to `comm->planner`. Single-rank collectives
 // execute immediately and do not need a task.
 static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
@@ -5255,6 +5282,16 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
           ncclGroupCommJoin(comm, ncclGroupTaskTypeCollective);
           comm->planner.p2pCollOpCount++;
         }
+        // Decide before the fan-out: p2pTaskAppend overwrites info->coll with Send/Recv. The
+        // symmetric AlltoAll goes through collTaskAppend, which reports its own CollApi event. The
+        // mask check skips the prologue when no plugin could take this CollApi event.
+        CollApiEventScope collApiEvent;
+        if (!useSymmetricAlltoAll && p2pFanoutReportsCollApi(info) &&
+            (ncclProfilerCurrentEventMask() & NCCL_PROFILER_P2P_COLL_API_MASK) == NCCL_PROFILER_P2P_COLL_API_MASK) {
+          bool isGraphCaptured;
+          NCCLCHECK(collApiPrologue(comm, info, &isGraphCaptured));
+          NCCLCHECK(ncclProfilerStartP2pCollApiEvent(info, isGraphCaptured, &collApiEvent.active));
+        }
         if (useSymmetricAlltoAll) {
           NCCLCHECK(collTaskAppend(comm, info, opDev));
         } else if (info->coll == ncclFuncAlltoAll) {
@@ -5269,7 +5306,11 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
           // In non-captured mode, UB requires local-valid registration on both
           // sides; graph-only registration visibility must not enable UB.
           allowUB = captured || (sendLocalValid && recvLocalValid);
+          size_t rankOffset = info->count * ncclTypeSize(info->datatype);
+          const bool skipSelf = p2pFanoutSkipsSelf(comm, (char*)info->sendbuff + comm->rank * rankOffset,
+                                                   (char*)info->recvbuff + comm->rank * rankOffset);
           for (int r = 0; r < comm->nRanks; r++) {
+            if (r == comm->rank && skipSelf) continue;
             NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncSend, collAPI,
                                     (void*)((char*)info->sendbuff + r * info->count * ncclTypeSize(info->datatype)),
                                     info->count, info->datatype, r, allowUB));
@@ -5283,7 +5324,10 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
                                 &recvReg));
           allowUB = captured || (sendReg != NULL && recvReg != NULL);
           size_t rankOffset = info->count * ncclTypeSize(info->datatype);
+          const bool skipSelf =
+            p2pFanoutSkipsSelf(comm, info->sendbuff, (char*)info->recvbuff + comm->rank * rankOffset);
           for (int r = 0; r < comm->nRanks; r++) {
+            if (r == comm->rank && skipSelf) continue;
             NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncSend, collAPI, (void*)info->sendbuff, info->count,
                                     info->datatype, r, allowUB));
             NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncRecv, collAPI, (void*)((char*)info->recvbuff + r * rankOffset),
@@ -5304,30 +5348,44 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
           }
         } else if (info->coll == ncclFuncGather) {
           size_t offset = 0;
+          size_t rankOffset = info->count * ncclTypeSize(info->datatype);
           allowUB = captured;
-          NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncSend, collAPI, (void*)info->sendbuff, info->count, info->datatype,
-                                  info->root, allowUB));
-          if (comm->rank == info->root) {
+          const bool isRoot = comm->rank == info->root;
+          const bool skipSelf =
+            isRoot && p2pFanoutSkipsSelf(comm, info->sendbuff, (char*)info->recvbuff + comm->rank * rankOffset);
+          if (!skipSelf) {
+            NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncSend, collAPI, (void*)info->sendbuff, info->count,
+                                    info->datatype, info->root, allowUB));
+          }
+          if (isRoot) {
             for (int r = 0; r < comm->nRanks; r++) {
               void* buff = (void*)((char*)info->recvbuff + offset);
+              offset += rankOffset;
+              if (r == comm->rank && skipSelf) continue;
               NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncRecv, collAPI, buff, info->count, info->datatype, r,
                                       allowUB));
-              offset += info->count * ncclTypeSize(info->datatype);
             }
           }
         } else if (info->coll == ncclFuncScatter) {
           size_t offset = 0;
+          size_t rankOffset = info->count * ncclTypeSize(info->datatype);
           allowUB = captured;
-          if (comm->rank == info->root) {
+          const bool isRoot = comm->rank == info->root;
+          const bool skipSelf =
+            isRoot && p2pFanoutSkipsSelf(comm, (char*)info->sendbuff + comm->rank * rankOffset, info->recvbuff);
+          if (isRoot) {
             for (int r = 0; r < comm->nRanks; r++) {
               void* buff = (void*)((char*)info->sendbuff + offset);
+              offset += rankOffset;
+              if (r == comm->rank && skipSelf) continue;
               NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncSend, collAPI, buff, info->count, info->datatype, r,
                                       allowUB));
-              offset += info->count * ncclTypeSize(info->datatype);
             }
           }
-          NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncRecv, collAPI, (void*)info->recvbuff, info->count, info->datatype,
-                                  info->root, allowUB));
+          if (!skipSelf) {
+            NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncRecv, collAPI, (void*)info->recvbuff, info->count,
+                                    info->datatype, info->root, allowUB));
+          }
         } else if (!allGatherDecided && ceAvailable && comm->symmetricSupport && info->coll == ncclFuncAllGather &&
                    info->count > ncclParamSymCeThreshold() && comm->minCompCap >= 100 &&
 #if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)

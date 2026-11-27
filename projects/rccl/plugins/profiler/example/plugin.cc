@@ -73,6 +73,11 @@ __hidden double gettime(void) {
 // deliver events concurrently.
 static __thread double ncclStampedTs;
 
+// This thread's CollApi event between its start and stop. API events start and stop on the
+// calling thread, and a P2pApi event starting inside one marks a collective RCCL runs as
+// Send/Recv tasks.
+static __thread struct collApi* openCollApi;
+
 static inline double eventTime(void) {
   return ncclStampedTs != 0.0 ? ncclStampedTs : gettime() - startTime;
 }
@@ -659,6 +664,7 @@ __hidden ncclResult_t exampleProfilerStartEvent(void* context, void** eHandle, n
     event->startTs = eventTime();
     *eHandle = event;
   } else if (eDescr->type == ncclProfileCollApi) {
+    openCollApi = NULL;
     if (eDescr->parentObj == NULL) return ncclSuccess;
     struct collApi* event;
     int collApiId = __atomic_fetch_add(&ctx->collApiPoolIndex, 1, __ATOMIC_RELAXED);
@@ -692,12 +698,15 @@ __hidden ncclResult_t exampleProfilerStartEvent(void* context, void** eHandle, n
     event->datatype = eDescr->collApi.datatype;
     event->root = eDescr->collApi.root;
     event->graphCaptured = eDescr->collApi.graphCaptured;
+    event->p2pTasks = false;
     struct groupApi* parent = (struct groupApi *) eDescr->parentObj;
     event->parent = parent;
     profilerQueueEnqueue(&parent->collApiEvents, event);
     __atomic_fetch_add(&parent->refCount, 1, __ATOMIC_RELAXED);
     *eHandle = event;
+    openCollApi = event;
   } else if (eDescr->type == ncclProfileP2pApi) {
+    if (openCollApi && openCollApi->ctx == ctx) openCollApi->p2pTasks = true;
     if (eDescr->parentObj == NULL) return ncclSuccess;
     struct p2pApi* event;
     int p2pApiId = __atomic_fetch_add(&ctx->p2pApiPoolIndex, 1, __ATOMIC_RELAXED);
@@ -1147,6 +1156,13 @@ __hidden ncclResult_t exampleProfilerStopEvent(void* eHandle) {
   } else if (type == ncclProfileCollApi) {
     struct collApi* event = (struct collApi*) eHandle;
     event->stopTs = eventTime();
+    if (openCollApi == event) openCollApi = NULL;
+    // Its tasks report P2p events, so release it now as its Coll child's completion otherwise
+    // would; it would hold its slot and its GroupApi forever.
+    if (event->p2pTasks) {
+      __atomic_fetch_add(&event->refCount, 1, __ATOMIC_RELAXED);
+      updateEvent(event);
+    }
     return ncclSuccess;
   } else if (type == ncclProfileP2pApi) {
     struct p2pApi* event = (struct p2pApi*) eHandle;

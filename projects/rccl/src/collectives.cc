@@ -181,9 +181,10 @@ NCCL_API(ncclResult_t, ncclAllGather, const void* sendbuff, void* recvbuff, size
 //
 // We deliberately keep this minimal:
 //   - No (rank + r) % nRanks rotation: all ranks visit peers in order 0..N-1.
-//   - No in-place self-peer skip: send/recv to self is always posted; the
-//     device kernel handles isCopy = (sendRank == self) as a local memcpy
-//     (see device/sendrecv.h).
+//   - Send/recv to self is posted, and the device kernel handles
+//     isCopy = (sendRank == self) as a local memcpy (see device/sendrecv.h).
+//     The one exception is an in-place pair with P2P batching off, which the
+//     scheduler would drop anyway; taskAppend skips that pair up front.
 //   - Posting is delegated to taskAppend() via a single ncclEnqueueCheck
 //     call. taskAppend() then loops once and calls p2pTaskAppend directly,
 //     the same way ncclAlltoAll does, avoiding the per-peer ncclSend/ncclRecv
@@ -499,7 +500,7 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
          sendcount, msgSize, comm, stream, rank, sendbuff, recvbuff);
     if (sendcount == 0) return ncclSuccess;
     // Mark the info so taskAppend posts this as A2A-style per-peer Send/Recv
-    // P2P tasks (no peer rotation, no in-place self skip).
+    // P2P tasks (no peer rotation).
     info.useDirect = true;
     return ncclEnqueueCheck(&info);
   case RCCL_CE_REGISTERED:

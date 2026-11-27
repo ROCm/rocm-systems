@@ -8,7 +8,8 @@ to all four key event types for full root-cause triage.
 ## Event Subscriptions
 
 ```
-ncclProfileColl | ncclProfileKernelCh | ncclProfileProxyOp | ncclProfileProxyStep
+ncclProfileColl | ncclProfileKernelCh | ncclProfileProxyOp | ncclProfileProxyStep |
+ncclProfileCollApi | ncclProfileP2pApi | ncclProfileP2p
 ```
 
 | Event Type | What it captures |
@@ -17,6 +18,33 @@ ncclProfileColl | ncclProfileKernelCh | ncclProfileProxyOp | ncclProfileProxySte
 | `ncclProfileKernelCh` | Per-channel GPU kernel timing (globaltimer) |
 | `ncclProfileProxyOp` | Proxy operation lifecycle (CPU-side) |
 | `ncclProfileProxyStep` | Network send/recv step state transitions |
+| `ncclProfileCollApi`, `ncclProfileP2pApi`, `ncclProfileP2p` | Collectives RCCL runs as per-peer Send/Recv tasks (see below) |
+
+### Collectives run as Send/Recv tasks
+
+RCCL runs AlltoAll, Gather, Scatter and Direct AllGather (small AllGathers on
+gfx942/gfx950, below `RCCL_DIRECT_ALLGATHER_THRESHOLD`) as one Send and one Recv
+task per peer. Those tasks report `P2p` events, not a `Coll` event. For a plugin
+that subscribes to `ncclProfileCollApi` and `ncclProfileP2pApi`, as this one
+does, RCCL brackets the tasks' `P2pApi` events with the call's `CollApi` event,
+and the plugin uses that nesting to tie each task back to the call. It writes one
+record per call per kernel launch, in the same format as any other collective,
+with these differences:
+
+- `coll_algo` is `"P2P"` and `coll_proto` is empty.
+- `coll_n_channels` is the number of distinct channels the call's tasks ran on, and
+  `coll_n_channels_reported` is 0.
+- Each `kernel_events` entry spans every task on that channel, from the earliest
+  start to the latest stop.
+- `coll_sn` numbers these launches per communicator, in launch order, so each
+  replay of a captured graph gets a new number. RCCL keeps no sequence number
+  for these calls, so this numbering is separate from other records'.
+
+A call whose tasks do not fit in one kernel plan, which is rare and only happens
+at large rank counts, produces one record per plan. A user's own
+`ncclSend`/`ncclRecv` is still not profiled. Direct ReduceScatter is not covered
+this way either: its reduce phase is a regular collective and already produces
+the record for the call.
 
 ## Output
 
@@ -70,12 +98,19 @@ The last line of every file is a summary, written on every clean finalize:
 {"summary": {"dropped_collectives": 0, "leaked_collectives": 0,
              "inflight_collectives": 0,
              "dropped_proxy_ops": 0, "dropped_proxy_steps": 0,
-             "overflow_proxy_ops": 0, "stale_proxy_steps": 0,
+             "stale_proxy_steps": 0,
              "outstanding_proxy_ops": 0, "outstanding_proxy_steps": 0,
              "write_error": false, "coll_pool_size": 256,
              "proxy_op_pool_size": 1024, "proxy_step_pool_size": 4096,
-             "max_proxy_ops_per_coll": 256, "complete": true}}
+             "coll_pool_high_water": 12, "proxy_op_pool_high_water": 40,
+             "proxy_step_pool_high_water": 96, "complete": true}}
 ```
+
+A proxy op occupies a pool slot only while it is in flight. At its stop its
+timings are added to its collective and the slot is released, so the op pool
+does not depend on how late the collective's kernel-channel events arrive. The
+`*_high_water` fields give the peak number of slots in use, which shows how
+close a clean run came to dropping.
 
 - `dropped_collectives` — never got a pool slot because the pool was full.
 - `leaked_collectives` — got a slot but never completed, because RCCL's teardown
@@ -84,8 +119,6 @@ The last line of every file is a summary, written on every clean finalize:
   the file, so that record may be missing from the output.
 - `dropped_proxy_ops` / `dropped_proxy_steps` — no free slot in the proxy op or
   proxy step pool; the affected records understate the proxy decomposition.
-- `overflow_proxy_ops` — the op completed, but its collective already held
-  `max_proxy_ops_per_coll` ops, so its timings were discarded.
 - `stale_proxy_steps` — the step stopped after its parent op's pool slot had
   been reissued, so its timings were dropped rather than charged to the new
   tenant.
@@ -99,7 +132,7 @@ The last line of every file is a summary, written on every clean finalize:
   output file is always closed at finalize, so no descriptor is held.
 - `write_error` — `ferror()` on the output file at finalize: the records on disk
   are truncated, and every counter above may still read 0.
-- `complete` — false if any of the nine counters is non-zero, or if
+- `complete` — false if any of the eight counters is non-zero, or if
   `write_error` is true. **A file with no summary line at all means the process
   did not reach finalize**, so its data is also suspect.
   `accl_report.py` warns on stderr in both cases; do not compare an incomplete run
@@ -201,7 +234,12 @@ The CI sweep uses five iterations and two initial warmups per size, with a
 1K–256M factor-two sweep, to bound profiler pool pressure. It still rejects any
 dropped/leaked records, incomplete summaries, missing ranks or requested sizes,
 and report failures. AllGather/ReduceScatter descriptor bytes are per-rank
-contributions, not rccl-tests' aggregate buffer bytes. A successful process exit
+contributions, not rccl-tests' aggregate buffer bytes. AllGather sizes at or
+below the Direct AllGather threshold (`nNodes * 2 MiB` of total buffer on gfx950,
+so 256 KiB per rank on 2 nodes) must be recorded with `coll_algo` `"P2P"` and
+larger ones must not, and no other collective may report `"P2P"`. That checks,
+end to end, that RCCL wraps Direct AllGather's Send/Recv tasks in the call's
+CollApi event. A successful process exit
 alone is not a passing output-validation run. Missing coverage remains a visible
 failure to hand off to profiler work, not a reason to duplicate fixes in the CI
 driver. Keep `manifest.json`, the reports, preflight log, and raw JSONL artifacts

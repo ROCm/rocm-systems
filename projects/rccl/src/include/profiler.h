@@ -109,6 +109,11 @@ ncclResult_t ncclProfilerStopP2pApiEvent();
 // Profiler Start/Stop wrappers for Collective API calls
 ncclResult_t ncclProfilerStartCollApiEvent(struct ncclInfo* info, bool isGraphCaptured);
 ncclResult_t ncclProfilerStopCollApiEvent();
+// CollApi event for a collective run as per-peer Send/Recv tasks, whose P2pApi events start and stop
+// inside it. Delivered only to plugins whose mask has every bit of NCCL_PROFILER_P2P_COLL_API_MASK;
+// *started says whether to stop it with ncclProfilerStopCollApiEvent.
+#define NCCL_PROFILER_P2P_COLL_API_MASK (ncclProfileCollApi | ncclProfileP2pApi)
+ncclResult_t ncclProfilerStartP2pCollApiEvent(struct ncclInfo* info, bool isGraphCaptured, bool* started);
 
 // Kernel Launch Start/Stop Event Wrappers
 ncclResult_t ncclProfilerStartKernelLaunchEvent(struct ncclKernelPlan* plan, cudaStream_t stream);
