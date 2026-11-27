@@ -235,7 +235,7 @@ TEST_F(UBR_MultiSegment, Symmetric_LsaGin)
     ASSERT_MPI_EQ(ncclSuccess, rcclGetCollImplInfo(getActiveCommunicator(), ncclFuncAllGather, sendCount,
                                                    getNcclDataType<T>(), ncclSum, sendSeg.vaBase, recvSeg.vaBase,
                                                    /*graphCapturing=*/0, &algo, &proto, &nCh));
-    EXPECT_EQ(RCCL_SYMMETRIC, algo) << "the windowed AllGather must take the symmetric (LSA+GIN) path";
+    EXPECT_TRUE(this->isSymmetricAlgo(algo)) << "algo " << algo << ": the windowed AllGather must take the symmetric (LSA+GIN) path";
 
     initSendBuffer<T>(sendSeg.vaBase, sendCount, rank);
 

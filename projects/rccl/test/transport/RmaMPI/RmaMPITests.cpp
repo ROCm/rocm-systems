@@ -8,6 +8,7 @@
 
 #ifdef RCCL_HAS_RMA_IB_PROXY
 
+#include "MPIHelpers.hpp"
 #include "RmaMPITestBase.hpp"
 
 #include <cstdint>
@@ -310,6 +311,7 @@ TEST_P(RmaMPITest, IFlushAfterIGet)
     void *mh = nullptr, *gh = nullptr;
     ASSERT_EQ(ncclSuccess, RegMr(buf, kSize, &mh, &gh));
 
+    bool flushOff = false;
     Barrier();
     if(worldRank_ == 0)
     {
@@ -324,11 +326,20 @@ TEST_P(RmaMPITest, IFlushAfterIGet)
         ASSERT_EQ(ncclSuccess,
                   rma_->iflush(rmaCtx_, /*context=*/0,
                                /*mhandle=*/mh, /*peerRank=*/1, &flushReq));
-        EXPECT_TRUE(PollUntilDone(flushReq));
+        // NCCL_GDR_FLUSH_DISABLE=1 (the MI455 configs: Meta RoCE has no loopback RDMA READ) leaves no flush to post.
+        flushOff = flushReq == nullptr && MPIHelpers::getEnvParam<int>("NCCL_GDR_FLUSH_DISABLE", 0) != 0;
+        if(!flushOff)
+        {
+            EXPECT_TRUE(PollUntilDone(flushReq));
+        }
 
         EXPECT_TRUE(VerifyBuf(buf, kSize, /*seed=*/0x71));
     }
     Barrier();
+    if(MPIHelpers::anyRankTrue(flushOff))
+    {
+        GTEST_SKIP() << "GDR flush is disabled; iflush built no flush WR";
+    }
 }
 
 TEST_P(RmaMPITest, MultipleInflightIPuts)

@@ -513,6 +513,50 @@ TEST_F(UBR_MultiSegment, DeepEP_HybridSingleNodeElasticRegistrationDisabled)
     runHybridWindowRegistration(/*singleNode=*/true, /*reject=*/true);
 }
 
+/**
+ * @brief Segment handle types (FABRIC under NCCL_MNNVL_ENABLE=1, POSIX fd otherwise).
+ *
+ * An allocation carries a single handle type and host VMM can only be a POSIX fd, so RCCL shares each segment with
+ * the type it was created with, whatever the communicator's ncclCuMemHandleType is. Each layout runs both through a
+ * symmetric window (LSA import and map per segment, checked by reading every peer's segments) and through
+ * ncclCommRegister (P2P IPC import per segment). Layouts with FABRIC segments skip where FABRIC export does not work.
+ */
+namespace
+{
+constexpr size_t kHandleTypeSegBytes = 4 * 1024 * 1024;
+// Smaller AllReduces take the CE or symmetric path and never reach P2P IPC registration (see Generic).
+constexpr size_t kHandleTypeIpcSegBytes = 32 * 1024 * 1024;
+}
+
+TEST_F(UBR_MultiSegment, HandleType_FabricDeviceWindow)
+{
+    runHandleTypeWindowCase(std::vector<RCCLTestHelpers::VmmSegSpec>(4, fabricSeg(kHandleTypeSegBytes)));
+}
+
+TEST_F(UBR_MultiSegment, HandleType_MixedDeviceWindow)
+{
+    runHandleTypeWindowCase({fabricSeg(kHandleTypeSegBytes), posixSeg(kHandleTypeSegBytes),
+                             fabricSeg(kHandleTypeSegBytes), posixSeg(kHandleTypeSegBytes)});
+}
+
+// DeepEP-style elastic window under MNNVL: FABRIC GPU segments followed by a POSIX-fd CPU segment.
+TEST_F(UBR_MultiSegment, HandleType_FabricDeviceHostWindow)
+{
+    runHandleTypeWindowCase({fabricSeg(kHandleTypeSegBytes), fabricSeg(kHandleTypeSegBytes),
+                             fabricSeg(kHandleTypeSegBytes), hostSeg(kHandleTypeSegBytes)});
+}
+
+TEST_F(UBR_MultiSegment, HandleType_FabricDeviceIpcRegistration)
+{
+    runHandleTypeIpcCase(std::vector<RCCLTestHelpers::VmmSegSpec>(4, fabricSeg(kHandleTypeIpcSegBytes)));
+}
+
+TEST_F(UBR_MultiSegment, HandleType_MixedDeviceIpcRegistration)
+{
+    runHandleTypeIpcCase({fabricSeg(kHandleTypeIpcSegBytes), posixSeg(kHandleTypeIpcSegBytes),
+                          fabricSeg(kHandleTypeIpcSegBytes), posixSeg(kHandleTypeIpcSegBytes)});
+}
+
  /**
   * @brief Elastic buffer registration gating: a host-backed symmetric window must be rejected when
   *        NCCL_ELASTIC_BUFFER_REGISTER=0.

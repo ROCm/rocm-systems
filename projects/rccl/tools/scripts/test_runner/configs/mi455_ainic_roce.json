@@ -7561,6 +7561,7 @@
       "timeout": 300,
       "description": "User buffer registration of multi-segment VMM buffers through the NET proxy onto IB-MSEG.",
       "env_variables": {
+        "NCCL_MNNVL_ENABLE": "0",
         "NCCL_MULTI_SEGMENT_REGISTER": "1",
         "NCCL_CUMEM_ENABLE": "1",
         "RCCL_FORCE_ENABLE_DMABUF": "1",
@@ -7593,6 +7594,7 @@
       "num_gpus": 2,
       "timeout": 300,
       "env_variables": {
+        "NCCL_MNNVL_ENABLE": "0",
         "NCCL_MULTI_SEGMENT_REGISTER": "1",
         "NCCL_CUMEM_ENABLE": "1",
         "RCCL_FORCE_ENABLE_DMABUF": "1",
@@ -7936,12 +7938,22 @@
         {
           "name": "UBR_MultiSegment_All_Core",
           "description": "Single-node UBR multi-segment tests except jobs that need a dedicated env or two nodes",
-          "test_filter": "UBR_MultiSegment.*-UBR_MultiSegment.Generic:UBR_MultiSegment.GenericGraph:UBR_MultiSegment.Generic_Reuse:UBR_MultiSegment.Symmetric_Lsa:UBR_MultiSegment.Symmetric_Lsa_AllGather:UBR_MultiSegment.Symmetric_Lsa_ReduceScatter:UBR_MultiSegment.Symmetric_Elastic_Lsa:UBR_MultiSegment.Symmetric_Elastic_Lsa_AllGather:UBR_MultiSegment.Symmetric_Elastic_Lsa_AlltoAll:UBR_MultiSegment.Symmetric_Elastic_Lsa_ReduceScatter:UBR_MultiSegment.CE_RecvOffset:UBR_MultiSegment.CE_RecvOffset_BeforeLegacyCorruptsResult:UBR_MultiSegment.Symmetric_Lsa_RecvRange*:UBR_MultiSegment.Symmetric_LsaGin:UBR_MultiSegment.Symmetric_Elastic_Gating:UBR_MultiSegment.DeepEP_Hybrid*:UBR_MultiSegment.NetProxyPartialFinalSegment:UBR_MultiSegment.DeepEP_ElasticWindowRegistration"
+          "test_filter": "UBR_MultiSegment.*-UBR_MultiSegment.Generic:UBR_MultiSegment.GenericGraph:UBR_MultiSegment.Generic_Reuse:UBR_MultiSegment.Symmetric_Lsa:UBR_MultiSegment.Symmetric_Lsa_AllGather:UBR_MultiSegment.Symmetric_Lsa_ReduceScatter:UBR_MultiSegment.Symmetric_Elastic_Lsa:UBR_MultiSegment.Symmetric_Elastic_Lsa_AllGather:UBR_MultiSegment.Symmetric_Elastic_Lsa_AlltoAll:UBR_MultiSegment.Symmetric_Elastic_Lsa_ReduceScatter:UBR_MultiSegment.CE_RecvOffset:UBR_MultiSegment.CE_RecvOffset_BeforeLegacyCorruptsResult:UBR_MultiSegment.Symmetric_Lsa_RecvRange*:UBR_MultiSegment.Symmetric_LsaGin:UBR_MultiSegment.Symmetric_Elastic_Gating:UBR_MultiSegment.DeepEP_Hybrid*:UBR_MultiSegment.NetProxyPartialFinalSegment:UBR_MultiSegment.DeepEP_ElasticWindowRegistration:UBR_MultiSegment.HandleType_*IpcRegistration"
         },
         {
           "name": "UBR_MultiSegment_Generic_Reuse",
           "description": "Register once, AllReduce twice - multi-segment registration reuse (IPC or NET)",
           "test_filter": "UBR_MultiSegment.Generic_Reuse",
+          "env_variables": {
+            "RCCL_CE_ALLREDUCE": "0",
+            "NCCL_ALGO": "Ring",
+            "NCCL_PROTO": "Simple"
+          }
+        },
+        {
+          "name": "UBR_MultiSegment_HandleType_IPC",
+          "description": "FABRIC and mixed FABRIC/POSIX segments through P2P IPC registration; Ring/Simple with CE off so the AllReduce reaches the IPC path",
+          "test_filter": "UBR_MultiSegment.HandleType_*IpcRegistration",
           "env_variables": {
             "RCCL_CE_ALLREDUCE": "0",
             "NCCL_ALGO": "Ring",
@@ -7959,15 +7971,20 @@
         {
           "name": "UBR_MultiSegment_Generic_IPC",
           "description": "Single-node 8-segment AllReduce. IPC cache must record numSegments 8 on every peer.",
-          "test_filter": "UBR_MultiSegment.Generic"
+          "test_filter": "UBR_MultiSegment.Generic",
+          "env_variables": {
+            "RCCL_DDA_ENABLE": "0"
+          }
         },
         {
           "name": "UBR_MultiSegment_Symmetric_Lsa",
-          "description": "Single-node symmetric AllReduce, AllGather, and ReduceScatter on GPU multi-segment windows",
+          "description": "Single-node symmetric AllReduce, AllGather, and ReduceScatter on GPU multi-segment windows. The gfx1250 tuning table caps the symmetric kernel (symMaxR2 is 0 for AllReduce and ReduceScatter), so RCCL_SYM_K_MIN_BYTES and RCCL_SYM_K_MAX_BYTES open the size window for the symmetric kernel these tests assert.",
           "test_filter": "UBR_MultiSegment.Symmetric_Lsa:UBR_MultiSegment.Symmetric_Lsa_AllGather:UBR_MultiSegment.Symmetric_Lsa_ReduceScatter",
           "env_variables": {
             "NCCL_DEBUG_SUBSYS": "REG,TUNING",
-            "RCCL_CE_ALLREDUCE": "0"
+            "RCCL_CE_ALLREDUCE": "0",
+            "RCCL_SYM_K_MIN_BYTES": "0",
+            "RCCL_SYM_K_MAX_BYTES": "1099511627776"
           }
         },
         {
@@ -7975,6 +7992,7 @@
           "description": "Single-node elastic AllReduce, AllGather, AlltoAll, and ReduceScatter on the normal algorithm",
           "test_filter": "UBR_MultiSegment.Symmetric_Elastic_Lsa:UBR_MultiSegment.Symmetric_Elastic_Lsa_AllGather:UBR_MultiSegment.Symmetric_Elastic_Lsa_AlltoAll:UBR_MultiSegment.Symmetric_Elastic_Lsa_ReduceScatter",
           "env_variables": {
+            "RCCL_DDA_ENABLE": "0",
             "NCCL_DEBUG_SUBSYS": "REG,TUNING"
           }
         }
@@ -7989,6 +8007,7 @@
       "num_gpus": 4,
       "timeout": 300,
       "env_variables": {
+        "NCCL_MNNVL_ENABLE": "0",
         "NCCL_MULTI_SEGMENT_REGISTER": "1",
         "RCCL_TEST_RMA_MSEG_REQUIRE": "1",
         "NCCL_DEBUG": "INFO",
@@ -8074,10 +8093,12 @@
         },
         {
           "name": "UBR_MultiSegment_Symmetric_LsaGin",
-          "description": "Cross-node AllGather over multi-segment symmetric windows exercising both the LSA (intra-node) and GIN (inter-node) legs; requires >=2 nodes and >=2 ranks per node",
+          "description": "Cross-node AllGather over multi-segment symmetric windows exercising both the LSA (intra-node) and GIN (inter-node) legs; requires >=2 nodes and >=2 ranks per node. RCCL_SYM_K_MIN_BYTES and RCCL_SYM_K_MAX_BYTES lift the gfx1250 symmetric-kernel size caps so the symmetric kernel these tests assert is selected.",
           "test_filter": "UBR_MultiSegment.Symmetric_LsaGin:UBR_MultiSegment.Symmetric_LsaGin_AllGather:UBR_MultiSegment.Symmetric_LsaGin_AllReduce",
           "env_variables": {
-            "NCCL_MULTI_SEGMENT_REGISTER": "1"
+            "NCCL_MULTI_SEGMENT_REGISTER": "1",
+            "RCCL_SYM_K_MIN_BYTES": "0",
+            "RCCL_SYM_K_MAX_BYTES": "1099511627776"
           }
         },
         {
@@ -8135,7 +8156,10 @@
         {
           "name": "UBR_MultiSegment_Hybrid_SingleNode_Collectives",
           "description": "Hybrid AllGather, AllReduce, and ReduceScatter on one node. Normal algorithm, imported CPU tail.",
-          "test_filter": "UBR_MultiSegment.DeepEP_HybridSingleNodeAllGather:UBR_MultiSegment.DeepEP_HybridSingleNodeAllReduce:UBR_MultiSegment.DeepEP_HybridSingleNodeReduceScatter"
+          "test_filter": "UBR_MultiSegment.DeepEP_HybridSingleNodeAllGather:UBR_MultiSegment.DeepEP_HybridSingleNodeAllReduce:UBR_MultiSegment.DeepEP_HybridSingleNodeReduceScatter",
+          "env_variables": {
+            "RCCL_DDA_ENABLE": "0"
+          }
         },
         {
           "name": "UBR_MultiSegment_Hybrid_SingleNode_Elastic_Gating",

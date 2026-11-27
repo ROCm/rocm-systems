@@ -418,6 +418,12 @@ protected:
         return MPIHelpers::getEnvParam<int>("RCCL_TEST_SYM_KERNEL_OPTIONAL", 0) != 0;
     }
 
+    // A query reports a Tensor Data Mover symmetric kernel as RCCL_SYMMETRIC_TDM.
+    static bool isSymmetricAlgo(int algo)
+    {
+        return algo == RCCL_SYMMETRIC || algo == RCCL_SYMMETRIC_TDM;
+    }
+
     // The library's own algorithm choice for the registered buffers.
     void expectSymmetricSelected(ncclFunc_t func, size_t count, void* sendBuf, void* recvBuf)
     {
@@ -425,7 +431,7 @@ protected:
         ASSERT_MPI_EQ(ncclSuccess, rcclGetCollImplInfo(getActiveCommunicator(), func, count, getNcclDataType<T>(),
                                                        ncclSum, sendBuf, recvBuf, /*graphCapturing=*/0, &algo,
                                                        &proto, &nCh));
-        ASSERT_MPI_EQ(RCCL_SYMMETRIC, algo);
+        ASSERT_MPI_TRUE(isSymmetricAlgo(algo));
     }
 
     void expectSchedulerPath(const char* collective, bool expectSymmetric)
@@ -1013,6 +1019,244 @@ protected:
             << "Expected [GPU] plus one imported CPU segment per local rank";
         EXPECT_TRUE(checker.hasSymSysmemHandleReuse())
             << "Expected explicit NCCL_SYM_REUSE_SYSMEM_HANDLES reuse marker";
+    }
+
+    // With NCCL_MNNVL_ENABLE=1 RCCL shares memory as FABRIC handles. An allocation carries one handle type and host
+    // VMM is POSIX fd only, so a window may hold FABRIC device, POSIX device and POSIX host segments side by side.
+    static RCCLTestHelpers::VmmSegSpec fabricSeg(size_t bytes)
+    {
+        return {bytes, hipMemLocationTypeDevice, 0, RCCLTestHelpers::kVmmFabricHandleType};
+    }
+    static RCCLTestHelpers::VmmSegSpec posixSeg(size_t bytes)
+    {
+        return {bytes, hipMemLocationTypeDevice, 0, hipMemHandleTypePosixFileDescriptor};
+    }
+    static RCCLTestHelpers::VmmSegSpec hostSeg(size_t bytes) { return {bytes, hipMemLocationTypeHost}; }
+
+    // Coordinated skip reason when some rank cannot build `specs`; empty when every rank can.
+    std::string handleTypeLayoutSkipReason(int dev, const std::vector<RCCLTestHelpers::VmmSegSpec>& specs)
+    {
+        bool needFabric = false;
+        bool needHost   = false;
+        for (const auto& s : specs) {
+            needHost   = needHost || s.loc == hipMemLocationTypeHost;
+            needFabric = needFabric || (s.loc != hipMemLocationTypeHost && s.handleType == RCCLTestHelpers::kVmmFabricHandleType);
+        }
+        if (needFabric) {
+            // RCCL shares memory as FABRIC only under MNNVL, which gfx942 and gfx950 do not have.
+            const char* mnnvl = std::getenv("NCCL_MNNVL_ENABLE");
+            const bool mnnvlOn = mnnvl != nullptr && std::atoi(mnnvl) == 1;
+            const std::string why = mpiCoordinatedSkipReason(
+                !mnnvlOn || !RCCLTestHelpers::FabricVmmExportSupported(dev),
+                "FABRIC segments need NCCL_MNNVL_ENABLE=1 on an MNNVL device that can export FABRIC VMM handles");
+            if (!why.empty()) return why;
+        }
+        if (needHost) {
+#if NCCL_CUMEM_HOST_GATE
+            if (!isElasticBufferRegisterEnabled()) return "Host segments require NCCL_ELASTIC_BUFFER_REGISTER=1";
+#else
+            return "Host VMM is outside this build's support window";
+#endif
+        }
+        return {};
+    }
+
+    // Uniform `specs` only (buf.segmentSize != 0). Any HIP failure leaves buf.totalSize at 0.
+    void createSegmentedBuffer(int dev, const std::vector<RCCLTestHelpers::VmmSegSpec>& specs,
+                               MultiSegmentBuffer& buf)
+    {
+        buf = MultiSegmentBuffer{};
+        RCCLTestHelpers::MultiSegmentVmmBuffer range;
+        if (!RCCLTestHelpers::AllocSegmentedVmm(dev, specs, &range)) {
+            (void)hipGetLastError();
+            return;
+        }
+        adoptVmmRange(range, buf);
+    }
+
+    static uint32_t handleTypePattern(int lsaRank, int segment)
+    {
+        return (static_cast<uint32_t>(lsaRank + 1) << 16) | static_cast<uint32_t>(segment);
+    }
+
+    // Window over FABRIC / POSIX segments: registration must cover every segment and each peer's slot must map that
+    // peer's pages segment by segment (a host segment reused under NCCL_SYM_REUSE_SYSMEM_HANDLES=1 maps this rank's
+    // own pages instead). Then an AllReduce from the first half into the second must be correct.
+    void runHandleTypeWindowCase(const std::vector<RCCLTestHelpers::VmmSegSpec>& specs)
+    {
+        if (!validateTestPrerequisites(
+                /*min_processes=*/2, /*max_processes=*/kNoProcessLimit,
+                /*require_power_of_two=*/kNoPowerOfTwoRequired,
+                /*min_nodes=*/1, /*max_nodes=*/1)) {
+            GTEST_SKIP() << "Requires 2+ ranks on a single node";
+            return;
+        }
+        ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+        ASSERT_TRUE(isCuMemEnabled()) << "NCCL_CUMEM_ENABLE must be set to 1";
+        ASSERT_TRUE(isWinEnabled()) << "NCCL_WIN_ENABLE must not be set to 0";
+
+        int dev = 0;
+        ASSERT_MPI_EQ(hipSuccess, hipGetDevice(&dev));
+        {
+            const std::string why = handleTypeLayoutSkipReason(dev, specs);
+            if (!why.empty()) {
+                GTEST_SKIP() << why;
+                return;
+            }
+        }
+        MultiSegmentBuffer buf;
+        createSegmentedBuffer(dev, specs, buf);
+        auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
+        {
+            const std::string why = skipUnlessAllRanksAllocated(buf.totalSize != 0 && buf.segmentSize != 0,
+                "VMM allocation with the requested handle types failed");
+            if (!why.empty()) {
+                GTEST_SKIP() << why;
+                return;
+            }
+        }
+        const int numSegments = static_cast<int>(specs.size());
+        bool hasHost = false;
+        for (const auto& s : specs) hasHost = hasHost || s.loc == hipMemLocationTypeHost;
+
+        MPI_Comm localComm = MPI_COMM_NULL;
+        ASSERT_MPI_EQ(MPI_SUCCESS, MPI_Comm_split_type(MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL,
+                                                       &localComm));
+        int localRank = 0;
+        int localSize = 0;
+        MPI_Comm_rank(localComm, &localRank);
+        MPI_Comm_size(localComm, &localSize);
+        ASSERT_MPI_EQ(MPI_SUCCESS, MPI_Comm_free(&localComm));
+
+        const size_t words = buf.segmentSize / sizeof(uint32_t);
+        std::vector<uint32_t> fill(words);
+        for (int s = 0; s < numSegments; ++s) {
+            std::fill(fill.begin(), fill.end(), handleTypePattern(localRank, s));
+            ASSERT_MPI_EQ(hipSuccess, hipMemcpy(reinterpret_cast<char*>(buf.vaBase) + s * buf.segmentSize,
+                                                fill.data(), buf.segmentSize, hipMemcpyHostToDevice));
+        }
+        ASSERT_MPI_EQ(hipSuccess, hipDeviceSynchronize());
+
+        ncclWindow_t win = nullptr;
+        ASSERT_MPI_EQ(ncclSuccess, ncclCommWindowRegister(getActiveCommunicator(), buf.vaBase, buf.totalSize, &win,
+                                                          NCCL_WIN_COLL_SYMMETRIC));
+        auto winCleanup = makeScopeGuard([&]() {
+            if (win) HIP_EXPECT(ncclCommWindowDeregister(getActiveCommunicator(), win));
+        });
+        ASSERT_MPI_NE(win, nullptr);
+        ASSERT_MPI_HELPER(expectWindowSegments(buf.vaBase, numSegments, hasHost));
+        ASSERT_MPI_EQ(getActiveCommunicator()->devrState.lsaTeamSize, localSize);
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        int mismatches = 0;
+        for (int peer = 0; peer < localSize; ++peer) {
+            for (int s = 0; s < numSegments; ++s) {
+                void* peerSegment = nullptr;
+                ASSERT_MPI_EQ(ncclSuccess, ncclGetLsaDevicePointer(win, s * buf.segmentSize, peer, &peerSegment));
+                ASSERT_MPI_NE(peerSegment, nullptr);
+                const bool reused = specs[s].loc == hipMemLocationTypeHost && isSymSysmemHandleReuseEnabled();
+                const uint32_t want = handleTypePattern(reused ? localRank : peer, s);
+                uint32_t got[2] = {0, 0};
+                ASSERT_MPI_EQ(hipSuccess, hipMemcpy(&got[0], peerSegment, sizeof(uint32_t), hipMemcpyDeviceToHost));
+                ASSERT_MPI_EQ(hipSuccess, hipMemcpy(&got[1], static_cast<char*>(peerSegment) + buf.segmentSize -
+                                                             sizeof(uint32_t),
+                                                    sizeof(uint32_t), hipMemcpyDeviceToHost));
+                if (got[0] != want || got[1] != want) {
+                    ++mismatches;
+                    ADD_FAILURE() << "rank " << localRank << " peer " << peer << " segment " << s << ": read 0x"
+                                  << std::hex << got[0] << "/0x" << got[1] << ", want 0x" << want << std::dec;
+                }
+            }
+        }
+        ASSERT_MPI_EQ(mismatches, 0);
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        int rank = 0;
+        int nRanks = 0;
+        ncclCommUserRank(getActiveCommunicator(), &rank);
+        ncclCommCount(getActiveCommunicator(), &nRanks);
+        const size_t halfSize = buf.totalSize / 2;
+        void* sendBuf = buf.vaBase;
+        void* recvBuf = reinterpret_cast<char*>(buf.vaBase) + halfSize;
+        const size_t count = halfSize / sizeof(T);
+        initSendBuffer<T>(sendBuf, count, rank);
+        ASSERT_MPI_EQ(ncclSuccess, ncclAllReduce(sendBuf, recvBuf, count, getNcclDataType<T>(), ncclSum,
+                                                 getActiveCommunicator(), getActiveStream()));
+        ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+        ASSERT_MPI_TRUE(verifyAllReduceResult<T>(recvBuf, count, nRanks));
+    }
+
+    // ncclCommRegister over FABRIC / POSIX device segments: single-node P2P IPC registration must export each
+    // segment with its own type and record every segment on every peer.
+    void runHandleTypeIpcCase(const std::vector<RCCLTestHelpers::VmmSegSpec>& specs)
+    {
+        if (!validateTestPrerequisites(
+                /*min_processes=*/2, /*max_processes=*/kNoProcessLimit,
+                /*require_power_of_two=*/kNoPowerOfTwoRequired,
+                /*min_nodes=*/1, /*max_nodes=*/1)) {
+            GTEST_SKIP() << "Requires 2+ ranks on a single node";
+            return;
+        }
+        ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+        ASSERT_TRUE(isUBREnabled()) << "NCCL_LOCAL_REGISTER must be set to 1";
+        ASSERT_TRUE(isCuMemEnabled()) << "NCCL_CUMEM_ENABLE must be set to 1";
+        ASSERT_TRUE(isMultiSegmentRegisterEnabled()) << "NCCL_MULTI_SEGMENT_REGISTER must be set to 1";
+
+        int dev = 0;
+        ASSERT_MPI_EQ(hipSuccess, hipGetDevice(&dev));
+        {
+            const std::string why = handleTypeLayoutSkipReason(dev, specs);
+            if (!why.empty()) {
+                GTEST_SKIP() << why;
+                return;
+            }
+        }
+        MultiSegmentBuffer buf;
+        createSegmentedBuffer(dev, specs, buf);
+        auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
+        {
+            const std::string why = skipUnlessAllRanksAllocated(buf.totalSize != 0,
+                "VMM allocation with the requested handle types failed");
+            if (!why.empty()) {
+                GTEST_SKIP() << why;
+                return;
+            }
+        }
+
+        void* regHandle = nullptr;
+        ASSERT_MPI_EQ(ncclSuccess, ncclCommRegister(getActiveCommunicator(), buf.vaBase, buf.totalSize, &regHandle));
+        auto regCleanup = makeScopeGuard([&]() {
+            if (regHandle) HIP_EXPECT(ncclCommDeregister(getActiveCommunicator(), regHandle));
+        });
+        ASSERT_MPI_NE(regHandle, nullptr);
+
+        int rank = 0;
+        int nRanks = 0;
+        ncclCommUserRank(getActiveCommunicator(), &rank);
+        ncclCommCount(getActiveCommunicator(), &nRanks);
+        const size_t halfSize = buf.totalSize / 2;
+        void* sendBuf = buf.vaBase;
+        void* recvBuf = reinterpret_cast<char*>(buf.vaBase) + halfSize;
+        const size_t count = halfSize / sizeof(T);
+        initSendBuffer<T>(sendBuf, count, rank);
+        ASSERT_MPI_EQ(ncclSuccess, ncclAllReduce(sendBuf, recvBuf, count, getNcclDataType<T>(), ncclSum,
+                                                 getActiveCommunicator(), getActiveStream()));
+        ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+        ASSERT_MPI_TRUE(verifyAllReduceResult<T>(recvBuf, count, nRanks));
+
+        struct ncclReg* reg = nullptr;
+        ncclRegFind(reinterpret_cast<struct ncclComm*>(getActiveCommunicator()), buf.vaBase, buf.totalSize, &reg);
+        ASSERT_MPI_NE(reg, nullptr);
+        ASSERT_NE(reg->state & IPC_REG_COMPLETE, 0u) << "Single-node AllReduce did not complete IPC registration";
+        ASSERT_NE(reg->ipcInfos, nullptr);
+        int ipcPeers = 0;
+        for (int i = 0; i < reg->ipcInfosSize; ++i) {
+            if (reg->ipcInfos[i] == nullptr) continue;
+            ++ipcPeers;
+            EXPECT_EQ(reg->ipcInfos[i]->impInfo.numSegments, static_cast<int>(specs.size()))
+                << "IPC registration did not import every segment for peer index " << i;
+        }
+        ASSERT_GT(ipcPeers, 0) << "IPC registration recorded no peer";
     }
 
     // GPU window is the control. Hierarchical CE implements AllGather and AlltoAll only.

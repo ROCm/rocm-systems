@@ -207,12 +207,22 @@
         {
           "name": "UBR_MultiSegment_All_Core",
           "description": "Single-node UBR multi-segment tests except jobs that need a dedicated env or two nodes",
-          "test_filter": "UBR_MultiSegment.*-UBR_MultiSegment.Generic:UBR_MultiSegment.GenericGraph:UBR_MultiSegment.Generic_Reuse:UBR_MultiSegment.Symmetric_Lsa:UBR_MultiSegment.Symmetric_Lsa_AllGather:UBR_MultiSegment.Symmetric_Lsa_ReduceScatter:UBR_MultiSegment.Symmetric_Elastic_Lsa:UBR_MultiSegment.Symmetric_Elastic_Lsa_AllGather:UBR_MultiSegment.Symmetric_Elastic_Lsa_AlltoAll:UBR_MultiSegment.Symmetric_Elastic_Lsa_ReduceScatter:UBR_MultiSegment.CE_RecvOffset:UBR_MultiSegment.CE_RecvOffset_BeforeLegacyCorruptsResult:UBR_MultiSegment.Symmetric_Lsa_RecvRange*:UBR_MultiSegment.Symmetric_LsaGin:UBR_MultiSegment.Symmetric_Elastic_Gating:UBR_MultiSegment.DeepEP_Hybrid*:UBR_MultiSegment.NetProxyPartialFinalSegment:UBR_MultiSegment.DeepEP_ElasticWindowRegistration"
+          "test_filter": "UBR_MultiSegment.*-UBR_MultiSegment.Generic:UBR_MultiSegment.GenericGraph:UBR_MultiSegment.Generic_Reuse:UBR_MultiSegment.Symmetric_Lsa:UBR_MultiSegment.Symmetric_Lsa_AllGather:UBR_MultiSegment.Symmetric_Lsa_ReduceScatter:UBR_MultiSegment.Symmetric_Elastic_Lsa:UBR_MultiSegment.Symmetric_Elastic_Lsa_AllGather:UBR_MultiSegment.Symmetric_Elastic_Lsa_AlltoAll:UBR_MultiSegment.Symmetric_Elastic_Lsa_ReduceScatter:UBR_MultiSegment.CE_RecvOffset:UBR_MultiSegment.CE_RecvOffset_BeforeLegacyCorruptsResult:UBR_MultiSegment.Symmetric_Lsa_RecvRange*:UBR_MultiSegment.Symmetric_LsaGin:UBR_MultiSegment.Symmetric_Elastic_Gating:UBR_MultiSegment.DeepEP_Hybrid*:UBR_MultiSegment.NetProxyPartialFinalSegment:UBR_MultiSegment.DeepEP_ElasticWindowRegistration:UBR_MultiSegment.HandleType_*IpcRegistration"
         },
         {
           "name": "UBR_MultiSegment_Generic_Reuse",
           "description": "Register once, AllReduce twice - multi-segment registration reuse (IPC or NET)",
           "test_filter": "UBR_MultiSegment.Generic_Reuse",
+          "env_variables": {
+            "RCCL_CE_ALLREDUCE": "0",
+            "NCCL_ALGO": "Ring",
+            "NCCL_PROTO": "Simple"
+          }
+        },
+        {
+          "name": "UBR_MultiSegment_HandleType_IPC",
+          "description": "FABRIC and mixed FABRIC/POSIX segments through P2P IPC registration; Ring/Simple with CE off so the AllReduce reaches the IPC path",
+          "test_filter": "UBR_MultiSegment.HandleType_*IpcRegistration",
           "env_variables": {
             "RCCL_CE_ALLREDUCE": "0",
             "NCCL_ALGO": "Ring",

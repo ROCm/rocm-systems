@@ -345,6 +345,13 @@ TEST_F(NetIbMPITest, RegisterGpuMemory) {
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
 
+    // regMr takes a GPU VA only with peermem; a DMA-BUF-only NIC (bng_re) is covered by the DMA-BUF tests.
+    ncclNetProperties_t props;
+    ASSERT_EQ(GetDeviceProperties(0, &props), ncclSuccess);
+    if (!(props.ptrSupport & NCCL_PTR_CUDA)) {
+        GTEST_SKIP() << "GDR via peermem not supported on this NIC, skipping GPU regMr test";
+    }
+
     const int rank = MPIEnvironment::world_rank;
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);

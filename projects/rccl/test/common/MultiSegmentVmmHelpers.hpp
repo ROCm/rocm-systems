@@ -53,7 +53,7 @@ inline void ReleaseMappedVmm(hipDeviceptr_t base, size_t totalSize,
     if (base != 0 && totalSize != 0) (void)hipMemAddressFree(base, totalSize);
 }
 
-// 0 in MakeVmmProp means "the default type for the segment's location".
+// 0 in a VmmSegSpec / MakeVmmProp means "the default type for the segment's location".
 constexpr hipMemAllocationHandleType kVmmDefaultHandleType = static_cast<hipMemAllocationHandleType>(0);
 
 #ifdef HIP_FABRIC_API
@@ -160,8 +160,9 @@ struct MultiSegmentVmmBuffer
 struct VmmSegSpec
 {
     size_t                          bytes;
-    hipMemLocationType              loc    = hipMemLocationTypeDevice;
-    hipMemGenericAllocationHandle_t handle = 0;
+    hipMemLocationType              loc        = hipMemLocationTypeDevice;
+    hipMemGenericAllocationHandle_t handle     = 0;
+    hipMemAllocationHandleType      handleType = kVmmDefaultHandleType;  // device segments only
 };
 
 // The AllocSegmentedVmm step that failed, for callers that report it.
@@ -199,15 +200,15 @@ inline bool AllocSegmentedVmm(int dev, const std::vector<VmmSegSpec>& specs, Mul
     if (out == nullptr || specs.empty()) return fail(VmmSegStep::Setup, -1, hipErrorInvalidValue);
     *out = MultiSegmentVmmBuffer{};
 
-    auto propOf = [dev](hipMemLocationType loc) {
-        const bool host = loc == hipMemLocationTypeHost;
-        return MakeVmmProp(loc, host ? 0 : dev, /*gpuDirectRdma=*/!host);
+    auto propOf = [dev](const VmmSegSpec& spec) {
+        const bool host = spec.loc == hipMemLocationTypeHost;
+        return MakeVmmProp(spec.loc, host ? 0 : dev, /*gpuDirectRdma=*/!host, spec.handleType);
     };
     size_t granularity = 0;
     bool anyHost = false;
     for (const VmmSegSpec& spec : specs)
     {
-        const hipMemAllocationProp prop = propOf(spec.loc);
+        const hipMemAllocationProp prop = propOf(spec);
         size_t g = 0;
         const hipError_t err = hipMemGetAllocationGranularity(&g, &prop, hipMemAllocationGranularityMinimum);
         if (err != hipSuccess || g == 0) return fail(VmmSegStep::Setup, -1, err);
@@ -246,7 +247,7 @@ inline bool AllocSegmentedVmm(int dev, const std::vector<VmmSegSpec>& specs, Mul
     size_t off = 0;
     for (int s = 0; s < nSegments; ++s)
     {
-        const hipMemAllocationProp prop = propOf(specs[s].loc);
+        const hipMemAllocationProp prop = propOf(specs[s]);
         hipMemGenericAllocationHandle_t h = specs[s].handle;
         hipError_t err = h != 0 ? hipSuccess : hipMemCreate(&h, segSizes[s], &prop, 0);
         if (err != hipSuccess) return fail(VmmSegStep::Create, s, err);

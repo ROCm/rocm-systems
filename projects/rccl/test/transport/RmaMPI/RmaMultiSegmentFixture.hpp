@@ -386,14 +386,16 @@ protected:
     }
 
     // Rank 1 flushes mh toward rank 0. True when GDR flush is off and no flush WR was built, which fails under
-    // RCCL_TEST_RMA_MSEG_REQUIRE=1.
+    // RCCL_TEST_RMA_MSEG_REQUIRE=1 unless the job turns the flush off itself with NCCL_GDR_FLUSH_DISABLE=1 (the MI455
+    // configs do: Meta RoCE has no loopback RDMA READ).
     bool Rank1Flush(void* mh)
     {
         if (worldRank_ != 1) return false;
         void* freq = nullptr;
         EXPECT_EQ(ncclSuccess, rma_->iflush(rmaCtx_, 0, mh, /*peerRank=*/0, &freq)) << "iflush post failed";
         const bool off = freq == nullptr;
-        if (off) prereq_.FailIfRequired("iflush returned no request");
+        if (off && MPIHelpers::getEnvParam<int>("NCCL_GDR_FLUSH_DISABLE", 0) == 0)
+            prereq_.FailIfRequired("iflush returned no request");
         if (!off) EXPECT_TRUE(PollUntilDone(freq)) << "flush did not complete";
         return off;
     }
