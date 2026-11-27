@@ -537,6 +537,15 @@ public:
                     builder.BuildWriteConfigRegPacket(cmd_buffer, select_addr, value);
                 }
             }
+            // gfx12 SQC/SP: the odd SQ_PERFCOUNTER SELECT (stored in select1_addr) drives the
+            // upper 16-bit lane of the 32-bit PMC counter and is only programmed by 16-bit SPM.
+            // Clear it so a previous SPM session cannot leave the lane pair split in 16-bit
+            // mode, which would make the PMC counter wrap at 16 bits.
+            if constexpr(Primitives::GFXIP_LEVEL >= 11)
+            {
+                if((block_info->attr & CounterBlockSqAttr) && reg_info.select1_addr.offset != 0)
+                    builder.BuildWriteConfigRegPacket(cmd_buffer, reg_info.select1_addr, 0);
+            }
             if(block_info->attr & CounterBlockSdmaAttr)
             {
                 const auto sdma_index = counter_des.block_des.index;
