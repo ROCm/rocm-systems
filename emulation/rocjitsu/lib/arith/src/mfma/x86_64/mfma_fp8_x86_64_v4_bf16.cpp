@@ -10,10 +10,12 @@ namespace rocjitsu::arith {
 
 // Every finite FP8/BF8 product (FNUZ and OCP) is an integer multiple of at least 2^-34, so
 // nonzero products cannot cancel a normal FP32 accumulator into a subnormal. Only subnormal C
-// requires fallback to the general x86-64-v4 FMA backend.
+// requires Compatibility fallback to the general x86-64-v4 FMA backend.
+// Loose accepts native accumulator flushing.
 template <int M, int K, bool Bf8A, bool Bf8B, bool Fnuz>
 bool mfma_fp8_x86_64_v4_bf16(uint64_t controls, uint32_t *const *d, const uint32_t *const *a,
-                             const uint32_t *const *b, const uint32_t *const *c) {
+                             const uint32_t *const *b, const uint32_t *const *c,
+                             bool preserve_compatibility) {
   constexpr int per_lane = K / (64 / M);
   constexpr int regs = per_lane / 4;
   constexpr int pair_planes = per_lane / 2;
@@ -33,72 +35,74 @@ bool mfma_fp8_x86_64_v4_bf16(uint64_t controls, uint32_t *const *d, const uint32
       _mm512_store_si512(right[2 * reg + 1] + lane, _mm512_rol_epi32(b1, 16));
     }
   }
-  return mfma_reduce_bf16_pairs<M, K, 1>(controls, d, left, right, c, false);
+  return mfma_reduce_bf16_pairs<M, K, 1>(controls, d, left, right, c,
+                                         preserve_compatibility ? RJ_ARITH_SEMANTICS_COMPATIBILITY
+                                                                : RJ_ARITH_SEMANTICS_LOOSE);
 }
 
 template bool mfma_fp8_x86_64_v4_bf16<16, 32, false, false, true>(uint64_t, uint32_t *const *,
                                                                   const uint32_t *const *,
                                                                   const uint32_t *const *,
-                                                                  const uint32_t *const *);
+                                                                  const uint32_t *const *, bool);
 template bool mfma_fp8_x86_64_v4_bf16<16, 32, false, false, false>(uint64_t, uint32_t *const *,
                                                                    const uint32_t *const *,
                                                                    const uint32_t *const *,
-                                                                   const uint32_t *const *);
+                                                                   const uint32_t *const *, bool);
 template bool mfma_fp8_x86_64_v4_bf16<16, 32, false, true, true>(uint64_t, uint32_t *const *,
                                                                  const uint32_t *const *,
                                                                  const uint32_t *const *,
-                                                                 const uint32_t *const *);
+                                                                 const uint32_t *const *, bool);
 template bool mfma_fp8_x86_64_v4_bf16<16, 32, false, true, false>(uint64_t, uint32_t *const *,
                                                                   const uint32_t *const *,
                                                                   const uint32_t *const *,
-                                                                  const uint32_t *const *);
+                                                                  const uint32_t *const *, bool);
 template bool mfma_fp8_x86_64_v4_bf16<16, 32, true, false, true>(uint64_t, uint32_t *const *,
                                                                  const uint32_t *const *,
                                                                  const uint32_t *const *,
-                                                                 const uint32_t *const *);
+                                                                 const uint32_t *const *, bool);
 template bool mfma_fp8_x86_64_v4_bf16<16, 32, true, false, false>(uint64_t, uint32_t *const *,
                                                                   const uint32_t *const *,
                                                                   const uint32_t *const *,
-                                                                  const uint32_t *const *);
+                                                                  const uint32_t *const *, bool);
 template bool mfma_fp8_x86_64_v4_bf16<16, 32, true, true, true>(uint64_t, uint32_t *const *,
                                                                 const uint32_t *const *,
                                                                 const uint32_t *const *,
-                                                                const uint32_t *const *);
+                                                                const uint32_t *const *, bool);
 template bool mfma_fp8_x86_64_v4_bf16<16, 32, true, true, false>(uint64_t, uint32_t *const *,
                                                                  const uint32_t *const *,
                                                                  const uint32_t *const *,
-                                                                 const uint32_t *const *);
+                                                                 const uint32_t *const *, bool);
 template bool mfma_fp8_x86_64_v4_bf16<32, 16, false, false, true>(uint64_t, uint32_t *const *,
                                                                   const uint32_t *const *,
                                                                   const uint32_t *const *,
-                                                                  const uint32_t *const *);
+                                                                  const uint32_t *const *, bool);
 template bool mfma_fp8_x86_64_v4_bf16<32, 16, false, false, false>(uint64_t, uint32_t *const *,
                                                                    const uint32_t *const *,
                                                                    const uint32_t *const *,
-                                                                   const uint32_t *const *);
+                                                                   const uint32_t *const *, bool);
 template bool mfma_fp8_x86_64_v4_bf16<32, 16, false, true, true>(uint64_t, uint32_t *const *,
                                                                  const uint32_t *const *,
                                                                  const uint32_t *const *,
-                                                                 const uint32_t *const *);
+                                                                 const uint32_t *const *, bool);
 template bool mfma_fp8_x86_64_v4_bf16<32, 16, false, true, false>(uint64_t, uint32_t *const *,
                                                                   const uint32_t *const *,
                                                                   const uint32_t *const *,
-                                                                  const uint32_t *const *);
+                                                                  const uint32_t *const *, bool);
 template bool mfma_fp8_x86_64_v4_bf16<32, 16, true, false, true>(uint64_t, uint32_t *const *,
                                                                  const uint32_t *const *,
                                                                  const uint32_t *const *,
-                                                                 const uint32_t *const *);
+                                                                 const uint32_t *const *, bool);
 template bool mfma_fp8_x86_64_v4_bf16<32, 16, true, false, false>(uint64_t, uint32_t *const *,
                                                                   const uint32_t *const *,
                                                                   const uint32_t *const *,
-                                                                  const uint32_t *const *);
+                                                                  const uint32_t *const *, bool);
 template bool mfma_fp8_x86_64_v4_bf16<32, 16, true, true, true>(uint64_t, uint32_t *const *,
                                                                 const uint32_t *const *,
                                                                 const uint32_t *const *,
-                                                                const uint32_t *const *);
+                                                                const uint32_t *const *, bool);
 template bool mfma_fp8_x86_64_v4_bf16<32, 16, true, true, false>(uint64_t, uint32_t *const *,
                                                                  const uint32_t *const *,
                                                                  const uint32_t *const *,
-                                                                 const uint32_t *const *);
+                                                                 const uint32_t *const *, bool);
 
 } // namespace rocjitsu::arith

@@ -94,6 +94,34 @@ uint64_t step_fma64_gfx950(uint64_t a, uint64_t b, uint64_t c) {
   return bit_cast<uint64_t>(__builtin_fma(as_double(a), as_double(b), as_double(c)));
 }
 
+// Stage absolute-value modifiers before reusing native Loose reduction and CPU dispatch.
+// All sources are captured before D writes, including overlapping register tuples.
+template <int M, int Batch>
+[[gnu::noinline]] int evaluate_loose_abs(uint64_t flags, uint64_t controls, uint32_t *const *d,
+                                         const uint32_t *const *a, const uint32_t *const *b,
+                                         const uint32_t *const *c) {
+  constexpr int Outputs = 2 * M * M * Batch / 64;
+  uint32_t left[2][64], right[2][64], initial[Outputs][64];
+  const auto stage = [](const uint32_t *const *source, uint32_t(*target)[64], int registers,
+                        bool absolute) {
+    for (int reg = 0; reg < registers; ++reg) {
+      const uint32_t mask = absolute && (reg & 1) ? 0x7fffffffU : UINT32_MAX;
+      for (int lane = 0; lane < 64; ++lane) {
+        target[reg][lane] = source[reg][lane] & mask;
+      }
+    }
+  };
+  stage(a, left, 2, controls & 8);
+  stage(b, right, 2, controls & 16);
+  stage(c, initial, Outputs, controls & 32);
+  const uint32_t *pa[] = {left[0], left[1]}, *pb[] = {right[0], right[1]};
+  const uint32_t *pc[Outputs];
+  for (int reg = 0; reg < Outputs; ++reg) {
+    pc[reg] = initial[reg];
+  }
+  return evaluate<M, Batch>(flags, controls & 7, d, pa, pb, pc);
+}
+
 template <int M, int Batch>
 int evaluate_gfx950(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32_t *const *a,
                     const uint32_t *const *b, const uint32_t *const *c) {
@@ -109,6 +137,9 @@ int evaluate_gfx950(uint64_t flags, uint64_t controls, uint32_t *const *d, const
   const uint64_t neg = controls & 7ULL;
   const uint64_t abs_mask = (controls >> 3) & 7ULL;
   const bool qualified = neg == 0 && abs_mask <= 4;
+  if ((flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_LOOSE && abs_mask) {
+    return evaluate_loose_abs<M, Batch>(flags, controls, d, a, b, c);
+  }
   if (!qualified &&
       (flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
     return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;

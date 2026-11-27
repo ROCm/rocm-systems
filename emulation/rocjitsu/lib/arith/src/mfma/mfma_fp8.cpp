@@ -30,6 +30,8 @@ template <int M, int K, bool Bf8A, bool Bf8B, bool Fnuz>
 int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32_t *const *a,
              const uint32_t *const *b, const uint32_t *const *c) {
   using namespace rocjitsu::arith;
+  [[maybe_unused]] const bool preserve_compatibility =
+      (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY;
   flags = resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
   if (int error = validate(flags, controls & ~0x3ffULL,
                            kMatrixIgnoredFpFlags | RJ_ARITH_FP_DX10_CLAMP_OFF)) {
@@ -64,7 +66,8 @@ int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32
   }
 #if defined(RJ_ARITH_HAVE_X86_64_V4_BF16)
   if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_ZEN4) &&
-      mfma_fp8_x86_64_v4_bf16<M, K, Bf8A, Bf8B, Fnuz>(controls, d, a, b, c)) {
+      mfma_fp8_x86_64_v4_bf16<M, K, Bf8A, Bf8B, Fnuz>(controls, d, a, b, c,
+                                                      preserve_compatibility)) {
     return RJ_ARITH_SUCCESS;
   }
 #endif

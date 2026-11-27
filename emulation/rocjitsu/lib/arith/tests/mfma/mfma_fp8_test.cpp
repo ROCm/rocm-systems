@@ -242,7 +242,7 @@ TEST(MfmaFp8, ExhaustiveByteDecodeAndSubnormalCFallback) {
         }
       }
     }
-    // Verify subnormal C is preserved bit-for-bit when A and B are zero (vdpbf16ps fallback).
+    // Compatibility preserves subnormal C; Loose also permits native BF16 flushing.
     std::array<std::array<uint32_t, 64>, 2> z_buf{};
     std::array<std::array<uint32_t, 64>, 4> c_buf{};
     for (int r = 0; r < 4; ++r) {
@@ -252,12 +252,18 @@ TEST(MfmaFp8, ExhaustiveByteDecodeAndSubnormalCFallback) {
     }
     const uint32_t *z_ptrs[] = {z_buf[0].data(), z_buf[1].data()};
     const uint32_t *c_ptrs[] = {c_buf[0].data(), c_buf[1].data(), c_buf[2].data(), c_buf[3].data()};
-    for (uint64_t cpu : supported_cpu_levels()) {
-      std::array<std::array<uint32_t, 64>, 4> out{};
-      uint32_t *d_ptrs[] = {out[0].data(), out[1].data(), out[2].data(), out[3].data()};
-      ASSERT_EQ(v.entry(cpu | RJ_ARITH_SEMANTICS_LOOSE, 0, d_ptrs, z_ptrs, z_ptrs, c_ptrs),
-                RJ_ARITH_SUCCESS);
-      EXPECT_EQ(out, c_buf);
+    for (uint64_t semantics : {RJ_ARITH_SEMANTICS_COMPATIBILITY, RJ_ARITH_SEMANTICS_LOOSE}) {
+      for (uint64_t cpu : supported_cpu_levels()) {
+        std::array<std::array<uint32_t, 64>, 4> out{};
+        uint32_t *d_ptrs[] = {out[0].data(), out[1].data(), out[2].data(), out[3].data()};
+        ASSERT_EQ(v.entry(cpu | semantics, 0, d_ptrs, z_ptrs, z_ptrs, c_ptrs), RJ_ARITH_SUCCESS);
+        for (int reg = 0; reg < 4; ++reg) {
+          for (int lane = 0; lane < 64; ++lane) {
+            expect_f32(out[reg][lane], std::bit_cast<float>(c_buf[reg][lane]), semantics,
+                       /*atol=*/1e-37f, /*rtol=*/1e-5f);
+          }
+        }
+      }
     }
   }
 }

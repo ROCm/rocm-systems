@@ -66,8 +66,8 @@ template <int M, int K, int Batch, bool Bf16, MfmaF32Model Model = MfmaF32Model:
 void mfma_half_x86_64_v4(uint64_t instruction_flags, uint64_t flags, uint32_t *const *d,
                          const uint32_t *const *a, const uint32_t *const *b,
                          const uint32_t *const *c);
-template <int M, int K, int Batch>
-bool mfma_half_x86_64_v4_bf16(uint64_t instruction_flags, bool clamp_overflow, uint32_t *const *d,
+template <int M, int K, int Batch, int ABlockLanes = 0>
+bool mfma_half_x86_64_v4_bf16(uint64_t instruction_flags, uint64_t flags, uint32_t *const *d,
                               const uint32_t *const *a, const uint32_t *const *b,
                               const uint32_t *const *c);
 template <int M, int K, int Batch, bool Xf32 = false, MfmaF32Model Model = MfmaF32Model::Default>
@@ -86,7 +86,8 @@ void mfma_fp8_x86_64_v4(uint64_t controls, uint32_t *const *d, const uint32_t *c
                         const uint32_t *const *b, const uint32_t *const *c);
 template <int M, int K, bool Bf8A, bool Bf8B, bool Fnuz>
 bool mfma_fp8_x86_64_v4_bf16(uint64_t controls, uint32_t *const *d, const uint32_t *const *a,
-                             const uint32_t *const *b, const uint32_t *const *c);
+                             const uint32_t *const *b, const uint32_t *const *c,
+                             bool preserve_compatibility);
 template <int M, int K>
 void mfma_mixed_x86_64_v3(uint64_t controls, uint32_t *const *d, const uint32_t *const *a,
                           const uint32_t *const *b, const uint32_t *const *c);
@@ -95,7 +96,8 @@ void mfma_mixed_x86_64_v4(uint64_t controls, uint32_t *const *d, const uint32_t 
                           const uint32_t *const *b, const uint32_t *const *c);
 template <int M, int K>
 bool mfma_mixed_x86_64_v4_bf16(uint64_t controls, uint32_t *const *d, const uint32_t *const *a,
-                               const uint32_t *const *b, const uint32_t *const *c);
+                               const uint32_t *const *b, const uint32_t *const *c,
+                               bool preserve_compatibility);
 template <int M, int K>
 bool mfma_mixed_avx512vnni(uint64_t controls, uint32_t *const *d, const uint32_t *const *a,
                            const uint32_t *const *b, const uint32_t *const *c);
@@ -118,7 +120,8 @@ bool mfma_scaled_avx512vnni(uint64_t controls, uint32_t *const *d, const uint32_
                             const uint32_t *scale_a, const uint32_t *scale_b, bool clamp_overflow);
 template <int M, int K, int Bits, bool BfA, bool BfB, bool Fnuz>
 void smfmac_float_x86_64_v3(uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
-                            const uint32_t *const *index, bool clamp_overflow);
+                            const uint32_t *const *index, bool clamp_overflow,
+                            bool preserve_compatibility);
 template <int M, int K, int Bits, bool BfA, bool BfB, bool Fnuz>
 void smfmac_float_x86_64_v4(uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
                             const uint32_t *const *index, bool clamp_overflow);

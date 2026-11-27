@@ -373,7 +373,7 @@ int evaluate_gfx950(uint64_t flags, uint64_t controls, uint32_t *const *d, const
   if ((flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
     return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
   }
-  const uint64_t loose_flags = flags & ~RJ_ARITH_FP16_OVFL;
+  [[maybe_unused]] const uint64_t loose_flags = flags & ~RJ_ARITH_FP16_OVFL;
   const uint64_t loose_controls = controls & ~0x7fULL;
   uint32_t perm_a[64];
   const uint32_t *perm_a_ptr = a[0];

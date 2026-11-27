@@ -58,9 +58,6 @@ bool mfma_scaled_fp4(uint64_t controls, uint32_t *const *d, const uint32_t *cons
   if ((controls & 0x3f) != formats) {
     return false;
   }
-  if ((_mm_getcsr() & _MM_ROUND_MASK) == _MM_ROUND_DOWN) {
-    return false; // Exact cancellation can produce negative zero in this rounding mode.
-  }
   static_assert(M == 16 || M == 32);
   constexpr int blocks = 64 / M;
   constexpr int registers = M * M / 64;

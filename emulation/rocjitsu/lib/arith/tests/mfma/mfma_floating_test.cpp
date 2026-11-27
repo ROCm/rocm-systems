@@ -179,7 +179,12 @@ TEST(MfmaFloating, OlderFusedCancellation) {
         ASSERT_EQ(test.entry(cpu | semantics, 0, d, a, b, c), RJ_ARITH_SUCCESS);
         for (const auto &reg : result) {
           for (uint32_t value : reg) {
-            EXPECT_EQ(value, expected) << "cpu=" << cpu << " bf16=" << test.bf16;
+            if (test.bf16 && semantics == RJ_ARITH_SEMANTICS_LOOSE) {
+              // Native BF16 may overflow a product before accumulator cancellation.
+              EXPECT_TRUE(value == expected || value == 0x7f800000U);
+            } else {
+              EXPECT_EQ(value, expected) << "cpu=" << cpu << " bf16=" << test.bf16;
+            }
           }
         }
       }
@@ -313,8 +318,8 @@ TEST(MfmaHalf, Gfx950BatchedBf16ClampsSelectedFiniteOperands) {
 }
 
 TEST(MfmaHalf, Bf16SpecialValuesAndFallbacks) {
-  // Exercise Zen4 vdpbf16ps guard fallbacks (subnormal C, subnormal/extreme BF16 exponents,
-  // signed zero, NaN/Inf, and FP16_OVFL clamping) against independent expected values.
+  // Compatibility preserves fallback results; Loose permits native BF16 flushing
+  // and signed-zero selection, while still honoring overflow saturation.
   struct Case {
     uint16_t a, b;
     uint32_t c;
@@ -363,30 +368,31 @@ TEST(MfmaHalf, Bf16SpecialValuesAndFallbacks) {
         b_ptrs[i] = b_buf[i].data();
       }
       const float expected_f = std::bit_cast<float>(tc.expected_bits);
-      for (uint64_t cpu : supported_cpu_levels()) {
-        for (bool in_place : {false, true}) {
-          std::array<std::array<uint32_t, 64>, OutputRegs> c_buf, d_buf{};
-          for (std::array<uint32_t, 64> &r : c_buf) {
-            r.fill(tc.c);
-          }
-          std::array<const uint32_t *, OutputRegs> c_ptrs;
-          std::array<uint32_t *, OutputRegs> d_ptrs;
-          for (int i = 0; i < OutputRegs; ++i) {
-            c_ptrs[i] = c_buf[i].data();
-            d_ptrs[i] = in_place ? c_buf[i].data() : d_buf[i].data();
-          }
-          const uint64_t flags =
-              cpu | RJ_ARITH_SEMANTICS_LOOSE | (tc.clamp ? RJ_ARITH_FP16_OVFL : 0);
-          ASSERT_EQ(entry(flags, 0, d_ptrs.data(), a_ptrs.data(), b_ptrs.data(), c_ptrs.data()),
-                    RJ_ARITH_SUCCESS);
-          const std::array<std::array<uint32_t, 64>, OutputRegs> &got = in_place ? c_buf : d_buf;
-          for (int r = 0; r < OutputRegs; ++r) {
-            for (int lane = 0; lane < 64; ++lane) {
-              if (tc.exact_bits) {
-                EXPECT_EQ(got[r][lane], tc.expected_bits);
-              } else {
-                expect_f32(got[r][lane], expected_f, RJ_ARITH_SEMANTICS_LOOSE, /*atol=*/1e-5f,
-                           /*rtol=*/1e-5f);
+      for (uint64_t semantics : {RJ_ARITH_SEMANTICS_COMPATIBILITY, RJ_ARITH_SEMANTICS_LOOSE}) {
+        for (uint64_t cpu : supported_cpu_levels()) {
+          for (bool in_place : {false, true}) {
+            std::array<std::array<uint32_t, 64>, OutputRegs> c_buf, d_buf{};
+            for (std::array<uint32_t, 64> &r : c_buf) {
+              r.fill(tc.c);
+            }
+            std::array<const uint32_t *, OutputRegs> c_ptrs;
+            std::array<uint32_t *, OutputRegs> d_ptrs;
+            for (int i = 0; i < OutputRegs; ++i) {
+              c_ptrs[i] = c_buf[i].data();
+              d_ptrs[i] = in_place ? c_buf[i].data() : d_buf[i].data();
+            }
+            const uint64_t flags = cpu | semantics | (tc.clamp ? RJ_ARITH_FP16_OVFL : 0);
+            ASSERT_EQ(entry(flags, 0, d_ptrs.data(), a_ptrs.data(), b_ptrs.data(), c_ptrs.data()),
+                      RJ_ARITH_SUCCESS);
+            const std::array<std::array<uint32_t, 64>, OutputRegs> &got = in_place ? c_buf : d_buf;
+            for (int r = 0; r < OutputRegs; ++r) {
+              for (int lane = 0; lane < 64; ++lane) {
+                if (tc.exact_bits && semantics == RJ_ARITH_SEMANTICS_COMPATIBILITY) {
+                  EXPECT_EQ(got[r][lane], tc.expected_bits);
+                } else {
+                  expect_f32(got[r][lane], expected_f, RJ_ARITH_SEMANTICS_LOOSE, /*atol=*/1e-36f,
+                             /*rtol=*/1e-5f);
+                }
               }
             }
           }
@@ -816,7 +822,12 @@ TEST(MfmaHalf, OlderFixedDenormalPolicies) {
             ASSERT_EQ(status, RJ_ARITH_SUCCESS);
             for (const auto &reg : output) {
               for (uint32_t word : reg) {
-                EXPECT_EQ(word, gfx90a ? 0U : test.preserved);
+                if (test.bf16 && !gfx90a && semantics != RJ_ARITH_SEMANTICS_COMPATIBILITY) {
+                  // Loose/fallback may use native BF16 input and accumulator flushing.
+                  EXPECT_TRUE(word == 0 || word == test.preserved);
+                } else {
+                  EXPECT_EQ(word, gfx90a ? 0U : test.preserved);
+                }
               }
             }
           }

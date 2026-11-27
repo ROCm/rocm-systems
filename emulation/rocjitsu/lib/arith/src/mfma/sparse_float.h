@@ -131,7 +131,8 @@ void sparse_float_row(const float *values, const float (*right)[Columns], const 
 // Preserve the inherited q/slot reduction order and stage all results before stores.
 template <int M, int K, int Bits, bool BfA, bool BfB, bool Fnuz>
 void smfmac_float_kernel(uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
-                         const uint32_t *const *index, bool clamp_overflow) {
+                         const uint32_t *const *index, bool clamp_overflow,
+                         [[maybe_unused]] bool preserve_compatibility = true) {
   constexpr bool wide = M * K * Bits == 16384;
   constexpr auto layout = Bits == 16 ? (wide ? SmfmacLayout::Cdna4F16 : SmfmacLayout::Cdna3F16)
                                      : (wide ? SmfmacLayout::Cdna4Fp8 : SmfmacLayout::Cdna3Fp8);
@@ -159,7 +160,12 @@ void smfmac_float_kernel(uint32_t *const *d, const uint32_t *const *a, const uin
       auto out = mfma_output<M, 1>(row, col, 0);
       result[row][col] = as_float(d[out.reg][out.lane]);
     }
+#if defined(__AVX512F__)
+    // V4's cheap payload repair beats a runtime policy branch; share its fixed path.
     sparse_float_row<M, K / 2>(values, right, selected, result[row]);
+#else
+    sparse_float_row<M, K / 2>(values, right, selected, result[row], preserve_compatibility);
+#endif
     if (clamp_overflow) {
       for (int col = 0; col < M; ++col) {
         auto out = mfma_output<M, 1>(row, col, 0);

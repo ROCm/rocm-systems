@@ -51,12 +51,12 @@ template <int PerWord> __m512 mfma_lane_values(const float *source, int index) {
 }
 
 // Reduce four independent 4x4 matrices per vector, in guest K order.
-template <int K, int PerWord>
+template <int K, int PerWord, int ABlockLanes = 0>
 void mfma_reduce_batch4(uint64_t controls, float (*result)[64], const float *left,
                         const float *right) {
   for (int lane = 0; lane < 64; lane += 16) {
-    int first_a = mfma_a_lane(lane, controls), first_b = mfma_b_lane(lane, controls);
-    auto groups = mfma_batch4_groups(lane, first_a, controls);
+    int first_a = mfma_a_lane(lane, controls, ABlockLanes), first_b = mfma_b_lane(lane, controls);
+    auto groups = mfma_batch4_groups(lane, first_a, controls, ABlockLanes);
     __m512 acc[4];
     for (int row = 0; row < 4; ++row) {
       acc[row] = _mm512_load_ps(result[row] + lane);
@@ -80,19 +80,20 @@ void mfma_reduce_batch4(uint64_t controls, float (*result)[64], const float *lef
 
 // A changes lane within its broadcast block. B preserves the low four lane
 // bits, so each group of 16 columns is one load (two for interleaved halves).
-template <int M, int K, int Batch, int PerWord>
+template <int M, int K, int Batch, int PerWord, int ABlockLanes = 0>
 void mfma_reduce_columns(uint64_t controls, float (*result)[64], const float *left,
                          const float *right) {
   int cbsz = int(controls & 7);
-  int row_mask = cbsz && cbsz <= 4 ? (64 >> cbsz) - 1 : 63;
+  // gfx90a broadcasts whole matrix blocks; row offsets remain within that block.
+  int row_mask = !ABlockLanes && cbsz && cbsz <= 4 ? (64 >> cbsz) - 1 : 63;
   for (int batch = 0; batch < Batch; ++batch) {
     const float *rows[K];
     __m512 columns[K][M / 16];
     for (int k = 0; k < K; ++k) {
       int i = mfma_input_index<M, K, Batch, PerWord>(0, k, batch);
-      rows[k] = left + mfma_permute_input<PerWord>(i, controls, true);
+      rows[k] = left + mfma_permute_input<PerWord, ABlockLanes>(i, controls, true);
       for (int part = 0; part < M / 16; ++part) {
-        int j = mfma_permute_input<PerWord>(i + 16 * part * PerWord, controls, false);
+        int j = mfma_permute_input<PerWord, ABlockLanes>(i + 16 * part * PerWord, controls, false);
         columns[k][part] = mfma_lane_values<PerWord>(right, j);
       }
     }
@@ -162,10 +163,12 @@ void mfma_reduce_simd(uint64_t controls, uint32_t *const *d, const float *left, 
     }
   }
 #if defined(RJ_ARITH_TARGET_X86_64_V4)
-  if constexpr (ABlockLanes == 0 && M == 4 && Batch == 16 && (PerWord == 1 || PerWord == 2)) {
-    mfma_reduce_batch4<K, PerWord>(controls, result, left, right);
-  } else if constexpr (ABlockLanes == 0 && M >= 16 && (PerWord == 1 || PerWord == 2)) {
-    mfma_reduce_columns<M, K, Batch, PerWord>(controls, result, left, right);
+  if constexpr (M == 4 && Batch == 16 && (PerWord == 1 || PerWord == 2)) {
+    mfma_reduce_batch4<K, PerWord, ABlockLanes>(controls, result, left, right);
+  } else if constexpr (M >= 16 && (PerWord == 1 || PerWord == 2) &&
+                       (ABlockLanes == 0 || Batch == 1 || PerWord == 2)) {
+    // Small-K batched gfx90a FP32 does not amortize column staging; keep its general loop.
+    mfma_reduce_columns<M, K, Batch, PerWord, ABlockLanes>(controls, result, left, right);
   } else
 #endif
     for (int batch = 0; batch < Batch; ++batch) {

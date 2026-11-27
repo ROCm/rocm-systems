@@ -39,17 +39,22 @@ template <int Registers> inline bool mfma_c_has_subnormal(const uint32_t *const 
 }
 
 // Reduce M=4, Batch=16 (4x4x4_16b) using vdpbf16ps in 16 ZMM accumulators.
-template <int K>
+template <int K, int ABlockLanes>
 bool mfma_reduce_bf16_batch4(uint64_t controls, uint32_t *const *d, const uint32_t (*left)[64],
                              const uint32_t (*right)[64], const uint32_t *const *c,
-                             bool clamp_overflow) {
+                             uint64_t flags) {
+  const bool clamp_overflow = (flags & RJ_ARITH_FP16_OVFL) != 0;
+  const bool preserve_compatibility =
+      (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY;
   constexpr int pair_planes = K / 2;
   __m512 acc[4][4];
   __mmask16 subnormal = 0;
   for (int g = 0; g < 4; ++g) {
     for (int row = 0; row < 4; ++row) {
       const __m512i bits = _mm512_loadu_si512(c[row] + 16 * g);
-      subnormal |= mfma_f32_subnormal_mask(bits);
+      if (preserve_compatibility) {
+        subnormal |= mfma_f32_subnormal_mask(bits);
+      }
       acc[g][row] = _mm512_castsi512_ps(bits);
     }
   }
@@ -61,9 +66,9 @@ bool mfma_reduce_bf16_batch4(uint64_t controls, uint32_t *const *d, const uint32
   const __m512i off3 = _mm512_set1_epi32(3);
   for (int g = 0; g < 4; ++g) {
     const int lane = 16 * g;
-    const int first_a = mfma_a_lane(lane, controls);
+    const int first_a = mfma_a_lane(lane, controls, ABlockLanes);
     const int first_b = mfma_b_lane(lane, controls);
-    const __m512i groups = mfma_batch4_groups(lane, first_a, controls);
+    const __m512i groups = mfma_batch4_groups(lane, first_a, controls, ABlockLanes);
     const __m512i idx1 = _mm512_add_epi32(groups, off1);
     const __m512i idx2 = _mm512_add_epi32(groups, off2);
     const __m512i idx3 = _mm512_add_epi32(groups, off3);
@@ -105,17 +110,21 @@ bool mfma_reduce_bf16_batch4(uint64_t controls, uint32_t *const *d, const uint32
 }
 
 // Reduce M=16, Batch=1 directly in 16 ZMM accumulators using vdpbf16ps.
-template <int K>
+template <int K, int ABlockLanes>
 bool mfma_reduce_bf16_16x16(uint64_t controls, uint32_t *const *d, const uint32_t (*left)[64],
-                            const uint32_t (*right)[64], const uint32_t *const *c,
-                            bool clamp_overflow) {
+                            const uint32_t (*right)[64], const uint32_t *const *c, uint64_t flags) {
+  const bool clamp_overflow = (flags & RJ_ARITH_FP16_OVFL) != 0;
+  const bool preserve_compatibility =
+      (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY;
   constexpr int pair_planes = K / 8;
   __m512 acc[16];
   __mmask16 subnormal = 0;
   RJ_ARITH_UNROLL(16)
   for (int row = 0; row < 16; ++row) {
     const __m512i bits = _mm512_loadu_si512(c[row % 4] + (row / 4) * 16);
-    subnormal |= mfma_f32_subnormal_mask(bits);
+    if (preserve_compatibility) {
+      subnormal |= mfma_f32_subnormal_mask(bits);
+    }
     acc[row] = _mm512_castsi512_ps(bits);
   }
   if (__builtin_expect(subnormal != 0, 0)) {
@@ -137,10 +146,11 @@ bool mfma_reduce_bf16_16x16(uint64_t controls, uint32_t *const *d, const uint32_
     }
   } else {
     const int cbsz = int(controls & 7);
-    const int row_mask = cbsz && cbsz <= 4 ? (64 >> cbsz) - 1 : 63;
+    // Block broadcasts preserve each row within the selected matrix block.
+    const int row_mask = ABlockLanes == 0 && cbsz && cbsz <= 4 ? (64 >> cbsz) - 1 : 63;
     for (int g = 0; g < 4; ++g) {
       const int base = g * 16;
-      const int a_base = mfma_a_lane(base, controls);
+      const int a_base = mfma_a_lane(base, controls, ABlockLanes);
       const int b_base = mfma_b_lane(base, controls);
       for (int p = 0; p < pair_planes; ++p) {
         const uint32_t *a_ptr = left[p] + a_base;
@@ -175,23 +185,26 @@ bool mfma_reduce_bf16_16x16(uint64_t controls, uint32_t *const *d, const uint32_
 }
 
 // Reduce general M>=16 shapes (32x32xK, 32x32x4_2b, 16x16x4_4b) with 8/16-row vdpbf16ps blocking.
-template <int M, int K, int Batch>
+template <int M, int K, int Batch, int ABlockLanes>
 bool mfma_reduce_bf16_tiled(uint64_t controls, uint32_t *const *d, const uint32_t (*left)[64],
-                            const uint32_t (*right)[64], const uint32_t *const *c,
-                            bool clamp_overflow) {
+                            const uint32_t (*right)[64], const uint32_t *const *c, uint64_t flags) {
+  const bool clamp_overflow = (flags & RJ_ARITH_FP16_OVFL) != 0;
+  const bool preserve_compatibility =
+      (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY;
   constexpr int registers = M * M * Batch / 64;
   constexpr int per_lane = K / (64 / (M * Batch));
   constexpr int pair_planes = per_lane / 2;
   constexpr int groups = 64 / (M * Batch);
   constexpr int row_tile = M == 16 ? 16 : 8;
   constexpr int col_vecs = M / 16;
-  if (__builtin_expect(mfma_c_has_subnormal<registers>(c), 0)) {
+  if (preserve_compatibility && __builtin_expect(mfma_c_has_subnormal<registers>(c), 0)) {
     return false;
   }
   const bool direct = !clamp_overflow && mfma_direct_store_safe<registers>(d, c);
   alignas(64) float result[registers][64];
   const int cbsz = int(controls & 7);
-  const int row_mask = cbsz && cbsz <= 4 ? (64 >> cbsz) - 1 : 63;
+  // Block broadcasts preserve each row within the selected matrix block.
+  const int row_mask = ABlockLanes == 0 && cbsz && cbsz <= 4 ? (64 >> cbsz) - 1 : 63;
   const __m512i abs_mask = _mm512_set1_epi32(0x7fffffff);
   const __m512i inf_bits = _mm512_set1_epi32(0x7f800000);
   __mmask16 any_inf = 0;
@@ -229,7 +242,7 @@ bool mfma_reduce_bf16_tiled(uint64_t controls, uint32_t *const *d, const uint32_
       } else {
         for (int g = 0; g < groups; ++g) {
           const int base = batch * M + g * M * Batch;
-          const int a_base = mfma_a_lane(base, controls);
+          const int a_base = mfma_a_lane(base, controls, ABlockLanes);
           int b_base[col_vecs];
           for (int p = 0; p < col_vecs; ++p) {
             b_base[p] = mfma_b_lane(base + 16 * p, controls);
@@ -290,16 +303,15 @@ bool mfma_reduce_bf16_tiled(uint64_t controls, uint32_t *const *d, const uint32_
 }
 
 // Dispatch BF16 pair-dot MFMA reduction; returns false (with d untouched) if fallback is needed.
-template <int M, int K, int Batch>
+template <int M, int K, int Batch, int ABlockLanes = 0>
 bool mfma_reduce_bf16_pairs(uint64_t controls, uint32_t *const *d, const uint32_t (*left)[64],
-                            const uint32_t (*right)[64], const uint32_t *const *c,
-                            bool clamp_overflow = false) {
+                            const uint32_t (*right)[64], const uint32_t *const *c, uint64_t flags) {
   if constexpr (M == 4 && Batch == 16) {
-    return mfma_reduce_bf16_batch4<K>(controls, d, left, right, c, clamp_overflow);
+    return mfma_reduce_bf16_batch4<K, ABlockLanes>(controls, d, left, right, c, flags);
   } else if constexpr (M == 16 && Batch == 1) {
-    return mfma_reduce_bf16_16x16<K>(controls, d, left, right, c, clamp_overflow);
+    return mfma_reduce_bf16_16x16<K, ABlockLanes>(controls, d, left, right, c, flags);
   } else {
-    return mfma_reduce_bf16_tiled<M, K, Batch>(controls, d, left, right, c, clamp_overflow);
+    return mfma_reduce_bf16_tiled<M, K, Batch, ABlockLanes>(controls, d, left, right, c, flags);
   }
 }
 
