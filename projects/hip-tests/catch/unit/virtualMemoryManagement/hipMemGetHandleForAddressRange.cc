@@ -1304,4 +1304,12 @@ HIP_TEST_CASE(Unit_hipMemGetHandleForAddressRange_AmdDmaBufOffset_Negative) {
   HIP_CHECK_ERROR(hipPointerGetAttribute(&offset, HIP_POINTER_ATTRIBUTE_AMD_DMABUF_OFFSET,
                                          reinterpret_cast<hipDeviceptr_t>(host.data())),
                   hipErrorInvalidValue);
+
+  // The bulk query always succeeds and reports the default value, 0
+  uint64_t bulk_offset = ~0ull;
+  hipPointer_attribute attr = HIP_POINTER_ATTRIBUTE_AMD_DMABUF_OFFSET;
+  void* data[] = {&bulk_offset};
+  HIP_CHECK(hipDrvPointerGetAttributes(1, &attr, data,
+                                       reinterpret_cast<hipDeviceptr_t>(host.data())));
+  REQUIRE(bulk_offset == 0);
 }

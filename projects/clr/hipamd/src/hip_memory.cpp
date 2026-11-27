@@ -4573,6 +4573,8 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
       break;
     }
     case HIP_POINTER_ATTRIBUTE_AMD_DMABUF_OFFSET: {
+      // hipDrvPointerGetAttributes ignores the status: a failed query reads 0
+      *reinterpret_cast<uint64_t*>(data) = 0;
       if (memObj == nullptr) {
         return hipErrorInvalidValue;
       }

@@ -736,7 +736,8 @@ typedef enum hipPointer_attribute {
   HIP_POINTER_ATTRIBUTE_AMD_DMABUF_OFFSET =
       0x1000  ///< AMD only: uint64_t byte offset of the pointer inside the dma-buf that
               ///< hipMemGetHandleForAddressRange exports for it. Pass it as the offset when
-              ///< importing the fd (e.g. ibv_reg_dmabuf_mr)
+              ///< importing the fd (e.g. ibv_reg_dmabuf_mr). The offset doesn't depend on
+              ///< the size or flags of that export.
 } hipPointer_attribute;
 
 // doxygen end DriverTypes
