@@ -8,12 +8,10 @@
 
 namespace rocjitsu::arith {
 
-// All finite FP8 products are integer multiples of 2^-32.
-// A nonzero product cannot cancel a normal FP32 accumulator into a subnormal:
-// the spacing near that product is at least 2^-56. A subnormal input C,
-// however, would be flushed by DPBF16. Let the general FMA path handle it.
+// Decode every FP8 value into BF16 and reduce with native pair-dot arithmetic.
+// Native accumulator flushing is permitted in Loose.
 template <bool Bf8A, bool Bf8B>
-bool fp8_wmma_x86_64_v4_bf16(uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+void fp8_wmma_x86_64_v4_bf16(uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
                              const uint32_t *const *c) {
   // Pre-decode A and B into 512B K-pair stack buffers BEFORE loading C so
   // (a) the 4-ZMM LUT is completely dead before acc[16] goes live (zero spills)
@@ -60,35 +58,26 @@ bool fp8_wmma_x86_64_v4_bf16(uint32_t *const *d, const uint32_t *const *a, const
   }
 
   __m512 acc[16];
-  const __m512i abs_mask = _mm512_set1_epi32(INT32_MAX);
-  const __m512i neg_one = _mm512_set1_epi32(-1);
-  __m512i min_mag = neg_one;
   RJ_ARITH_UNROLL(16)
   for (int row = 0; row < 16; ++row) {
     const __m512i bits = _mm512_loadu_si512(c[row % 8] + 16 * (row / 8));
     acc[row] = _mm512_castsi512_ps(bits);
-    const __m512i mag = _mm512_and_si512(bits, abs_mask);
-    min_mag = _mm512_min_epu32(min_mag, _mm512_add_epi32(mag, neg_one));
-  }
-  if (_mm512_cmplt_epu32_mask(min_mag, _mm512_set1_epi32(0x007fffff))) {
-    return false;
   }
 
-  wmma_bf16_pairs<false, false>(acc, left, right);
+  wmma_bf16_pairs(acc, left, right);
   wmma_store_acc<true, 32, false, false, false>(acc, 0, d);
-  return true;
 }
 
-template bool fp8_wmma_x86_64_v4_bf16<false, false>(uint32_t *const *, const uint32_t *const *,
+template void fp8_wmma_x86_64_v4_bf16<false, false>(uint32_t *const *, const uint32_t *const *,
                                                     const uint32_t *const *,
                                                     const uint32_t *const *);
-template bool fp8_wmma_x86_64_v4_bf16<false, true>(uint32_t *const *, const uint32_t *const *,
+template void fp8_wmma_x86_64_v4_bf16<false, true>(uint32_t *const *, const uint32_t *const *,
                                                    const uint32_t *const *,
                                                    const uint32_t *const *);
-template bool fp8_wmma_x86_64_v4_bf16<true, false>(uint32_t *const *, const uint32_t *const *,
+template void fp8_wmma_x86_64_v4_bf16<true, false>(uint32_t *const *, const uint32_t *const *,
                                                    const uint32_t *const *,
                                                    const uint32_t *const *);
-template bool fp8_wmma_x86_64_v4_bf16<true, true>(uint32_t *const *, const uint32_t *const *,
+template void fp8_wmma_x86_64_v4_bf16<true, true>(uint32_t *const *, const uint32_t *const *,
                                                   const uint32_t *const *, const uint32_t *const *);
 
 } // namespace rocjitsu::arith

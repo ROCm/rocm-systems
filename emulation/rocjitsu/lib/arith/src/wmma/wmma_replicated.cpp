@@ -62,16 +62,13 @@ template <bool Bf16, int Lanes, bool Packed>
                 Bf16 ? rocjitsu::arith::bf16_to_float(x) : rocjitsu::arith::f16_to_float(x),
                 Bf16 ? rocjitsu::arith::bf16_to_float(y) : rocjitsu::arith::f16_to_float(y), loose);
           }
-          if constexpr (Packed) {
-            // RDNA3 narrows after every two products, RDNA4 after four.
-            acc = Bf16 ? rocjitsu::arith::as_bits(loose) >> 16
-                       : rocjitsu::arith::float_to_f16(loose, flags & RJ_ARITH_FP16_OVFL);
-            loose =
-                rocjitsu::arith::as_float(rocjitsu::arith::packed16::widen<Bf16>(uint16_t(acc)));
-          }
         }
       }
       if constexpr (Packed) {
+        if (!rocjitsu::arith::is_exact(flags)) {
+          acc = Bf16 ? rocjitsu::arith::as_bits(loose) >> 16
+                     : rocjitsu::arith::float_to_f16(loose, flags & RJ_ARITH_FP16_OVFL);
+        }
         result[reg][lane] = (d[reg][lane] & ~(0xffffU << shift)) | (acc << shift);
       } else {
         result[reg][lane] =
@@ -102,9 +99,10 @@ int wmma(uint64_t flags, uint64_t instruction_flags, uint32_t *const *d, const u
 #if defined(RJ_ARITH_HAVE_X86_64_V4_BF16)
   if constexpr (Bf16) {
     if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_ZEN4) &&
-        !rocjitsu::arith::is_exact(flags) &&
-        rocjitsu::arith::wmma_x86_64_v4_bf16<Lanes, true, Packed>(uint32_t(instruction_flags), d, a,
-                                                                  b, c)) {
+        !rocjitsu::arith::is_exact(flags)) {
+      rocjitsu::arith::wmma_x86_64_v4_bf16<Lanes, true, Packed>(uint32_t(instruction_flags), d, a,
+                                                                b, c);
+
       return RJ_ARITH_SUCCESS;
     }
   }

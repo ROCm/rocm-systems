@@ -50,6 +50,23 @@ void expect_matrix_invalid_flags(Call call, const Registers<RegistersCount, Lane
       supported_modifiers);
 }
 
+// Independent mathematical reference for bounded half-input matrices. Loose may
+// omit intermediate narrowing; compare its final result at destination precision.
+// Sparse A is compressed and selected[row][k] names the dense B coordinate.
+template <bool Bf16, int K>
+float loose_half_matrix_element(const uint32_t (&a)[16][16], const uint32_t (&b)[K][16],
+                                const uint32_t (&c)[16][16], int row, int col,
+                                const int *selected = nullptr) {
+  auto decode = [](uint32_t bits) {
+    return Bf16 ? bf16_value(uint16_t(bits)) : f16_value(uint16_t(bits));
+  };
+  double sum = decode(c[row][col]);
+  for (int k = 0; k < 16; ++k) {
+    sum += double(decode(a[row][k])) * decode(b[selected ? selected[k] : k][col]);
+  }
+  return float(sum);
+}
+
 // Guest controls advertised as ignored must preserve the default result. Invalid
 // controls must preserve all storage and be rejected before operand access.
 template <bool Floating, bool Gfx11, bool Fp16Output = false, typename Call, int RegistersCount,
@@ -396,7 +413,7 @@ template <int K> void make_sparse_indices(std::minstd_rand &random, int (&select
   }
 }
 
-// Saturate each packed FP16 accumulation stage, without saturating input infinities.
+// Exact saturates each FP16 stage; Loose saturates once, preserving input infinities.
 template <int WaveSize, typename Call> void expect_sparse_half_overflow(Call call) {
   for (uint64_t cpu : supported_cpu_levels()) {
     for (uint64_t semantics :
@@ -423,7 +440,10 @@ template <int WaveSize, typename Call> void expect_sparse_half_overflow(Call cal
           ASSERT_EQ(call(cpu | semantics | (saturate ? RJ_ARITH_FP16_OVFL : 0), 0, r.v + 24, r.v,
                          r.v + 8, r.v + 16),
                     RJ_ARITH_SUCCESS);
-          uint32_t expected = saturate && !infinity ? 0x7bdf7bdfU : 0x7c007c00U;
+          uint32_t expected =
+              saturate && !infinity
+                  ? (semantics == RJ_ARITH_SEMANTICS_LOOSE ? 0x7bff7bffU : 0x7bdf7bdfU)
+                  : 0x7c007c00U;
           for (int reg = 24; reg < 24 + 128 / WaveSize; ++reg) {
             for (int lane = 0; lane < WaveSize; ++lane) {
               EXPECT_EQ(r.v[reg][lane], expected);
@@ -528,13 +548,14 @@ void expect_wmma_fp8_subnormals(Call call) {
         RJ_ARITH_SUCCESS);
     EXPECT_EQ(wmma_gfx12_acc<Lanes>(order.v + 12, 0, 0), 0U);
 
-    // A zero product must preserve the smallest negative subnormal C, even
-    // in the last lane and with C and D aliased.
+    // Native BF16 may flush the tiniest C. Both outcomes are permitted in
+    // Loose, including in the last lane and with C and D aliased.
     wmma_gfx12_acc<Lanes>(order.v + 4, 15, 15) = 0x80000001U;
     ASSERT_EQ(
         call(cpu | RJ_ARITH_SEMANTICS_LOOSE, 0, order.v + 4, order.v, order.v + 2, order.v + 4),
         RJ_ARITH_SUCCESS);
-    EXPECT_EQ(wmma_gfx12_acc<Lanes>(order.v + 4, 15, 15), 0x80000001U);
+    auto tiny = wmma_gfx12_acc<Lanes>(order.v + 4, 15, 15);
+    EXPECT_TRUE(tiny == 0x80000001U || (tiny & 0x7fffffffU) == 0);
   }
 }
 
@@ -724,7 +745,7 @@ template <int Lanes, typename Call> void expect_bf16_tiny_accumulator(Call call)
 }
 
 // A subnormal BF16 factor times a large factor produces a normal FP32 result.
-// Loose must decline native BF16 arithmetic that would flush the factor to zero.
+// Native BF16 may flush it; ordinary FMA may retain the normal result in Loose.
 template <int Lanes, bool Gfx11, typename Call> void expect_bf16_loose_subnormal(Call call) {
   constexpr int factors = Gfx11 ? 8 : 4;
   for (uint64_t cpu : supported_cpu_levels()) {
@@ -747,7 +768,7 @@ template <int Lanes, bool Gfx11, typename Call> void expect_bf16_loose_subnormal
       for (int col = 0; col < 16; ++col) {
         uint32_t actual = Gfx11 ? wmma_gfx11_acc<Lanes>(r.v + 24, row, col)
                                 : wmma_gfx12_acc<Lanes>(r.v + 24, row, col);
-        expect_f32(actual, 0x1p-6f, RJ_ARITH_SEMANTICS_LOOSE, /*atol=*/1e-5, /*rtol=*/1e-5);
+        EXPECT_TRUE(actual == std::bit_cast<uint32_t>(0x1p-6f) || actual == 0U);
       }
     }
   }

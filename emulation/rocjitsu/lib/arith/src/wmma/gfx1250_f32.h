@@ -11,11 +11,13 @@
 
 namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE {
 // Compute the complete result before publishing any destination, permitting operand overlap.
-inline void wmma_gfx1250_f32_kernel(uint64_t controls, uint32_t *const *d, const uint32_t *const *a,
+inline void wmma_gfx1250_f32_kernel([[maybe_unused]] uint64_t flags, uint64_t controls,
+                                    uint32_t *const *d, const uint32_t *const *a,
                                     const uint32_t *const *b, const uint32_t *const *c) {
 #if defined(__AVX2__)
   // The multiplicands can compete for NaN priority only when both contain nonfinite values.
-  if (gfx1250_f32_all_finite(a) || gfx1250_f32_all_finite(b)) {
+  if ((flags & RJ_ARITH_SEMANTICS_MASK) != RJ_ARITH_SEMANTICS_COMPATIBILITY ||
+      gfx1250_f32_all_finite(a) || gfx1250_f32_all_finite(b)) {
     return gfx1250_f32_direct(controls, d, a, b, c);
   }
 #endif

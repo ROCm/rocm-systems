@@ -66,16 +66,6 @@ template <bool Saturate> [[gnu::always_inline]] inline __m128i wmma_narrow_f16_v
   return half;
 }
 
-// Round an intermediate DOT2/DOT4 accumulator stage to packed BF16 or FP16 precision.
-template <bool Bf16, bool Saturate>
-[[gnu::always_inline]] inline __m256 wmma_round_stage_v3(__m256 x) {
-  if constexpr (Bf16) {
-    return _mm256_and_ps(x, _mm256_castsi256_ps(_mm256_set1_epi32(int(0xffff0000U))));
-  } else {
-    return _mm256_cvtph_ps(wmma_narrow_f16_v3<Saturate>(x));
-  }
-}
-
 // Pack two adjacent FP32 rows into gfx12 interleaved 16-bit halfwords (even low, odd high).
 template <bool Bf16, bool Saturate>
 [[gnu::always_inline]] inline __m256i wmma_pack_half_pair_v3(__m256 even, __m256 odd) {

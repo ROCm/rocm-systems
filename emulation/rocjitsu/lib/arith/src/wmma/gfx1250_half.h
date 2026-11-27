@@ -58,7 +58,7 @@ inline float gfx1250_repair_nan(float value, const float *left, const float *rig
   return matrix_nan_fma(dot, 1.0f, initial);
 }
 
-// Pack once with RNE in Loose; Compatibility retains legacy BF16 truncation.
+// Pack once: FP16 rounds to nearest-even; BF16 truncates in both semantics.
 // Every source read, including NaN repair, must precede this publication step.
 template <Wmma1250Form Form>
 inline void gfx1250_write_result(uint64_t flags, uint32_t *const *d, const float result[16][16],
@@ -80,12 +80,9 @@ inline void gfx1250_write_result(uint64_t flags, uint32_t *const *d, const float
             }
             return value;
           } else {
-            if (compatibility) {
-              return uint16_t(as_bits(x) >> 16);
-            }
-            uint16_t value = float_to_bf16(x);
-            // Saturate both accumulation overflow and BF16 rounding overflow.
-            if ((flags & RJ_ARITH_FP16_OVFL) && (value & 0x7fffU) == 0x7f80U) {
+            // Loose permits truncation, avoiding a stricter conversion than Compatibility.
+            uint16_t value = uint16_t(as_bits(x) >> 16);
+            if (!compatibility && (flags & RJ_ARITH_FP16_OVFL) && (value & 0x7fffU) == 0x7f80U) {
               value = uint16_t((value & 0x8000U) | 0x7f7fU);
             }
             return value;

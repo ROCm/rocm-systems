@@ -75,17 +75,15 @@ int swmmac(uint64_t flags, uint32_t mode, uint32_t *const *d, const uint32_t *co
     return RJ_ARITH_SUCCESS;
   }
 #if defined(RJ_ARITH_HAVE_X86_64_V4_BF16)
-  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_ZEN4) &&
-      rocjitsu::arith::swmmac_fp8_x86_64_v4_bf16<Bf8A, Bf8B, WaveSize>(mode, dest, a, b, index)) {
+  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_ZEN4)) {
+    rocjitsu::arith::swmmac_fp8_x86_64_v4_bf16<Bf8A, Bf8B, WaveSize>(mode, dest, a, b, index);
+
     return RJ_ARITH_SUCCESS;
   }
 #endif
-#if defined(RJ_ARITH_HAVE_X86_64_V4)
-  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
-    rocjitsu::arith::swmmac8_x86_64_v4<Bf8A, Bf8B, WaveSize>(mode, dest, a, b, index);
-    return RJ_ARITH_SUCCESS;
-  }
-#endif
+  // The wider FMA kernel was slower than AVX2; only native BF16 earns an
+  // additional specialization for this family.
+
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
   if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
     rocjitsu::arith::swmmac8_x86_64_v3<Bf8A, Bf8B, WaveSize>(mode, dest, a, b, index);

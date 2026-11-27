@@ -36,31 +36,15 @@ template <bool Bf8> inline __m512i wmma_fp8_bf16_pairs(__m512i words, int half) 
   return _mm512_rol_epi32(encoded, 16);
 }
 
-// DPBF16 flushes a nonzero subnormal input accumulator even with DAZ disabled.
-inline __mmask16 wmma_f32_subnormal(__m512i bits) {
-  __m512i magnitude = _mm512_and_si512(bits, _mm512_set1_epi32(INT32_MAX));
-  return _mm512_cmplt_epu32_mask(_mm512_sub_epi32(magnitude, _mm512_set1_epi32(1)),
-                                 _mm512_set1_epi32(0x7fffff));
-}
-
 } // namespace
 
 template <bool Bf8A, bool Bf8B, int Wave>
-bool swmmac_fp8_x86_64_v4_bf16(uint32_t mode, uint32_t *const *d, const uint32_t *const *a,
+void swmmac_fp8_x86_64_v4_bf16(uint32_t mode, uint32_t *const *d, const uint32_t *const *a,
                                const uint32_t *const *b, const uint32_t *const *index) {
-  // DPBF16 always uses round-to-nearest. The FMA path follows host controls.
-  if ((_mm_getcsr() & _MM_ROUND_MASK) != _MM_ROUND_NEAREST) {
-    return false;
-  }
   __m512 acc[16];
-  __mmask16 subnormal = 0;
   for (int row = 0; row < 16; ++row) {
     auto bits = _mm512_loadu_si512(d[row % 8] + 16 * (row / 8));
     acc[row] = _mm512_castsi512_ps(bits);
-    subnormal |= wmma_f32_subnormal(bits);
-  }
-  if (subnormal) {
-    return false;
   }
 
   alignas(64) uint32_t left[8][16], selected[8][16], right[8][6 * 16];
@@ -103,38 +87,37 @@ bool swmmac_fp8_x86_64_v4_bf16(uint32_t mode, uint32_t *const *d, const uint32_t
       _mm512_storeu_si512(d[reg] + 16 * group, _mm512_castps_si512(acc[reg + 8 * group]));
     }
   }
-  return true;
 }
 
-template bool swmmac_fp8_x86_64_v4_bf16<false, false, 32>(uint32_t, uint32_t *const *,
+template void swmmac_fp8_x86_64_v4_bf16<false, false, 32>(uint32_t, uint32_t *const *,
                                                           const uint32_t *const *,
                                                           const uint32_t *const *,
                                                           const uint32_t *const *);
-template bool swmmac_fp8_x86_64_v4_bf16<false, false, 64>(uint32_t, uint32_t *const *,
+template void swmmac_fp8_x86_64_v4_bf16<false, false, 64>(uint32_t, uint32_t *const *,
                                                           const uint32_t *const *,
                                                           const uint32_t *const *,
                                                           const uint32_t *const *);
-template bool swmmac_fp8_x86_64_v4_bf16<false, true, 32>(uint32_t, uint32_t *const *,
+template void swmmac_fp8_x86_64_v4_bf16<false, true, 32>(uint32_t, uint32_t *const *,
                                                          const uint32_t *const *,
                                                          const uint32_t *const *,
                                                          const uint32_t *const *);
-template bool swmmac_fp8_x86_64_v4_bf16<false, true, 64>(uint32_t, uint32_t *const *,
+template void swmmac_fp8_x86_64_v4_bf16<false, true, 64>(uint32_t, uint32_t *const *,
                                                          const uint32_t *const *,
                                                          const uint32_t *const *,
                                                          const uint32_t *const *);
-template bool swmmac_fp8_x86_64_v4_bf16<true, false, 32>(uint32_t, uint32_t *const *,
+template void swmmac_fp8_x86_64_v4_bf16<true, false, 32>(uint32_t, uint32_t *const *,
                                                          const uint32_t *const *,
                                                          const uint32_t *const *,
                                                          const uint32_t *const *);
-template bool swmmac_fp8_x86_64_v4_bf16<true, false, 64>(uint32_t, uint32_t *const *,
+template void swmmac_fp8_x86_64_v4_bf16<true, false, 64>(uint32_t, uint32_t *const *,
                                                          const uint32_t *const *,
                                                          const uint32_t *const *,
                                                          const uint32_t *const *);
-template bool swmmac_fp8_x86_64_v4_bf16<true, true, 32>(uint32_t, uint32_t *const *,
+template void swmmac_fp8_x86_64_v4_bf16<true, true, 32>(uint32_t, uint32_t *const *,
                                                         const uint32_t *const *,
                                                         const uint32_t *const *,
                                                         const uint32_t *const *);
-template bool swmmac_fp8_x86_64_v4_bf16<true, true, 64>(uint32_t, uint32_t *const *,
+template void swmmac_fp8_x86_64_v4_bf16<true, true, 64>(uint32_t, uint32_t *const *,
                                                         const uint32_t *const *,
                                                         const uint32_t *const *,
                                                         const uint32_t *const *);

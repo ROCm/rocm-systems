@@ -130,20 +130,22 @@ void wmma_gfx1250_half_kernel(uint64_t flags, uint64_t controls, uint32_t *const
     }
   }
   if constexpr (Form == Wmma1250Form::Bf16F32) {
-    __mmask16 any_nan = 0;
-    RJ_ARITH_UNROLL(16)
-    for (int row = 0; row < 16; ++row) {
-      any_nan |= _mm512_cmp_ps_mask(acc[row], acc[row], _CMP_UNORD_Q);
-    }
-    if (any_nan) [[unlikely]] {
-      alignas(64) float result[16][16];
+    if ((flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY) {
+      __mmask16 any_nan = 0;
       RJ_ARITH_UNROLL(16)
       for (int row = 0; row < 16; ++row) {
-        _mm512_store_ps(result[row], acc[row]);
+        any_nan |= _mm512_cmp_ps_mask(acc[row], acc[row], _CMP_UNORD_Q);
       }
-      gfx1250_repair_bf16f32_nans(left, right, c, controls, result);
-      gfx1250_store_results<Form>(flags, d, result);
-      return;
+      if (any_nan) [[unlikely]] {
+        alignas(64) float result[16][16];
+        RJ_ARITH_UNROLL(16)
+        for (int row = 0; row < 16; ++row) {
+          _mm512_store_ps(result[row], acc[row]);
+        }
+        gfx1250_repair_bf16f32_nans(left, right, c, controls, result);
+        gfx1250_store_results<Form>(flags, d, result);
+        return;
+      }
     }
   }
   gfx1250_store_acc_zmm<Form>(flags, d, acc);
@@ -152,15 +154,17 @@ void wmma_gfx1250_half_kernel(uint64_t flags, uint64_t controls, uint32_t *const
   gfx1250_load_accumulators<Form>(c, controls, result);
   gfx1250_reduce_interleaved<32, DotFirst>(left, right, result);
   if constexpr (Form == Wmma1250Form::Bf16F32) {
-    __m256 any_nan = _mm256_setzero_ps();
-    for (int row = 0; row < 16; ++row) {
-      __m256 lo = _mm256_load_ps(result[row]);
-      __m256 hi = _mm256_load_ps(result[row] + 8);
-      any_nan = _mm256_or_ps(any_nan, _mm256_or_ps(_mm256_cmp_ps(lo, lo, _CMP_UNORD_Q),
-                                                   _mm256_cmp_ps(hi, hi, _CMP_UNORD_Q)));
-    }
-    if (_mm256_movemask_ps(any_nan)) [[unlikely]] {
-      gfx1250_repair_bf16f32_nans(left, right, c, controls, result);
+    if ((flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY) {
+      __m256 any_nan = _mm256_setzero_ps();
+      for (int row = 0; row < 16; ++row) {
+        __m256 lo = _mm256_load_ps(result[row]);
+        __m256 hi = _mm256_load_ps(result[row] + 8);
+        any_nan = _mm256_or_ps(any_nan, _mm256_or_ps(_mm256_cmp_ps(lo, lo, _CMP_UNORD_Q),
+                                                     _mm256_cmp_ps(hi, hi, _CMP_UNORD_Q)));
+      }
+      if (_mm256_movemask_ps(any_nan)) [[unlikely]] {
+        gfx1250_repair_bf16f32_nans(left, right, c, controls, result);
+      }
     }
   }
   gfx1250_store_results<Form>(flags, d, result);

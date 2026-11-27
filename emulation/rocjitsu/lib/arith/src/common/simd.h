@@ -311,18 +311,16 @@ void fma_exact_x86_64_v4(uint64_t flags, uint32_t exec_mask, uint32_t instructio
 
 #if defined(RJ_ARITH_HAVE_X86_64_V4_BF16)
 
-// Try loose gfx12 FP8/BF8 pair dots. A subnormal C declines the operation
-// with D unchanged. Requires Zen 4 dispatch and validated instruction controls.
+// Compute Loose gfx12 FP8/BF8 pair dots, including native accumulator flushing.
+// Requires Zen 4 dispatch and validated instruction controls.
 template <bool Bf8A, bool Bf8B>
-bool fp8_wmma_x86_64_v4_bf16(uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+void fp8_wmma_x86_64_v4_bf16(uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
                              const uint32_t *const *c);
 
-// Accumulate loose BF16 WMMA using native DPBF16 when inputs are eligible.
-// May decline without writes for screened input ranges. Native DPBF16 can
-// flush subnormal partial sums, even before a normal result; loose semantics
-// permit this difference.
+// Accumulate Loose BF16 WMMA using native DPBF16 rounding and flushing.
+// All input encodings are accepted; D may alias inputs.
 template <int Lanes, bool Rdna3, bool Packed>
-bool wmma_x86_64_v4_bf16(uint32_t instruction_flags, uint32_t *const *d, const uint32_t *const *a,
+void wmma_x86_64_v4_bf16(uint32_t instruction_flags, uint32_t *const *d, const uint32_t *const *a,
                          const uint32_t *const *b, const uint32_t *const *c);
 
 #endif

@@ -79,7 +79,6 @@ template <bool Bf16, int WaveSize, bool Packed>
       } else {
         float acc = rocjitsu::arith::as_float(
             Packed ? rocjitsu::arith::packed16::widen<Bf16>(uint16_t(c_bits)) : c_bits);
-        uint32_t packed = 0;
         for (int step = 0; step < 16; ++step) {
           int k = Packed && WaveSize == 32 ? rocjitsu::arith::wmma_gfx12_w32_k(step) : step;
           uint16_t left = read_bits(a, row, k, 0), right = read_bits(b, col, k, 1);
@@ -88,17 +87,11 @@ template <bool Bf16, int WaveSize, bool Packed>
           float y =
               Bf16 ? rocjitsu::arith::bf16_to_float(right) : rocjitsu::arith::f16_to_float(right);
           acc = __builtin_fmaf(x, y, acc);
-          if constexpr (Packed) {
-            // Packed accumulators lose precision at every DOT4 boundary, even in loose mode.
-            if ((step + 1) % 4 == 0) {
-              packed = Bf16 ? rocjitsu::arith::as_bits(acc) >> 16
-                            : rocjitsu::arith::float_to_f16(acc, flags & RJ_ARITH_FP16_OVFL);
-              acc = rocjitsu::arith::as_float(
-                  rocjitsu::arith::packed16::widen<Bf16>(uint16_t(packed)));
-            }
-          }
         }
+
         if constexpr (Packed) {
+          uint32_t packed = Bf16 ? rocjitsu::arith::as_bits(acc) >> 16
+                                 : rocjitsu::arith::float_to_f16(acc, flags & RJ_ARITH_FP16_OVFL);
           result[reg / 2][lane] |= packed << (16 * (reg % 2));
         } else {
           result[reg][lane] = rocjitsu::arith::as_bits(acc);
@@ -130,9 +123,10 @@ int wmma(uint64_t flags, uint64_t instruction_flags, uint32_t *const *d, const u
 #if defined(RJ_ARITH_HAVE_X86_64_V4_BF16)
   if constexpr (Bf16) {
     if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_ZEN4) &&
-        !rocjitsu::arith::is_exact(flags) &&
-        rocjitsu::arith::wmma_x86_64_v4_bf16<WaveSize, false, Packed>(uint32_t(instruction_flags),
-                                                                      d, a, b, c)) {
+        !rocjitsu::arith::is_exact(flags)) {
+      rocjitsu::arith::wmma_x86_64_v4_bf16<WaveSize, false, Packed>(uint32_t(instruction_flags), d,
+                                                                    a, b, c);
+
       return RJ_ARITH_SUCCESS;
     }
   }

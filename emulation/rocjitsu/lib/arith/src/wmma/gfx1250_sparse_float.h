@@ -71,7 +71,9 @@ void swmmac1250_float_kernel(uint64_t flags, uint32_t *const *d, const uint32_t 
         result[row][col] = as_float(d[row % 8][lane]);
       }
     }
-    sparse_float_row<16, K / 2>(values, right, selected, result[row]);
+    sparse_float_row<16, K / 2>(values, right, selected, result[row],
+                                (flags & RJ_ARITH_SEMANTICS_MASK) ==
+                                    RJ_ARITH_SEMANTICS_COMPATIBILITY);
   }
   for (int reg = 0; reg < (Form == 0 ? 8 : 4); ++reg) {
     for (int lane = 0; lane < 32; ++lane) {

@@ -6,9 +6,11 @@
 #include <stdint.h>
 
 namespace rocjitsu::arith {
-void wmma_gfx1250_f32_x86_64_v3(uint64_t controls, uint32_t *const *d, const uint32_t *const *a,
+void wmma_gfx1250_f32_x86_64_v3([[maybe_unused]] uint64_t flags, uint64_t controls,
+                                uint32_t *const *d, const uint32_t *const *a,
                                 const uint32_t *const *b, const uint32_t *const *c);
-void wmma_gfx1250_f32_x86_64_v4(uint64_t controls, uint32_t *const *d, const uint32_t *const *a,
+void wmma_gfx1250_f32_x86_64_v4([[maybe_unused]] uint64_t flags, uint64_t controls,
+                                uint32_t *const *d, const uint32_t *const *a,
                                 const uint32_t *const *b, const uint32_t *const *c);
 
 // Operand/result formats, including the mixed FP32-accumulator BF16-result form.
@@ -57,7 +59,7 @@ void wmma_gfx1250_fp4_avx512vnni(uint64_t controls, uint32_t *const *d, const ui
                                  const uint32_t *const *scale_a = nullptr,
                                  const uint32_t *const *scale_b = nullptr);
 template <int Block>
-void wmma_gfx1250_mixed_x86_64_v4_bf16(uint64_t controls, uint32_t *const *d,
+void wmma_gfx1250_mixed_x86_64_v4_bf16(uint64_t flags, uint64_t controls, uint32_t *const *d,
                                        const uint32_t *const *a, const uint32_t *const *b,
                                        const uint32_t *const *c,
                                        const uint32_t *const *scale_a = nullptr,

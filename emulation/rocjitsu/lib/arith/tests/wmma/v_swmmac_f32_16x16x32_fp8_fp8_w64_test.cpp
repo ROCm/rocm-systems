@@ -151,9 +151,9 @@ TEST(SwmmacF32FP8FP8K32W64, Arithmetic) {
                                                 cpu_levels);
 }
 
-// The earliest product must round before the next product, including in the last
-// lane of the last output VGPR. A subnormal tied accumulator must survive zero factors.
-TEST(SwmmacF32FP8FP8K32W64, LoosePairOrderAndSubnormalAccumulator) {
+// Check pair ordering in the last output lane. Loose permits native BF16 to
+// flush a subnormal tied accumulator.
+TEST(SwmmacF32FP8FP8K32W64, LoosePairOrderAndTinyAccumulator) {
   for (uint64_t cpu : rocjitsu::arith::test::supported_cpu_levels()) {
     for (bool subnormal : {false, true}) {
       SCOPED_TRACE(::testing::Message() << cpu << '/' << subnormal);
@@ -172,7 +172,11 @@ TEST(SwmmacF32FP8FP8K32W64, LoosePairOrderAndSubnormalAccumulator) {
       ASSERT_EQ(rj_arith_v_swmmac_f32_16x16x32_fp8_fp8_w64(
                     cpu | RJ_ARITH_SEMANTICS_LOOSE, 0, regs.v + 3, regs.v, regs.v + 1, regs.v + 7),
                 RJ_ARITH_SUCCESS);
-      EXPECT_EQ(regs.v[6][63], subnormal ? 1u : 0x4b7fffffu);
+      if (subnormal) {
+        EXPECT_TRUE(regs.v[6][63] == 0U || regs.v[6][63] == 1U);
+      } else {
+        EXPECT_EQ(regs.v[6][63], 0x4b7fffffu);
+      }
     }
   }
 }

@@ -23,29 +23,21 @@ namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE::sparse_x86 {
 
 #if defined(RJ_ARITH_TARGET_X86_64_V4)
 
-template <bool Bf16, bool Packed, bool Saturate>
-[[gnu::always_inline]] inline void
-swmmac_fma_ck_v4(__m512 (&acc)[16], const float (&left)[16][16], const float (&right)[32][16],
-                 const uint32_t (&selected)[16][16], int ck, __m512i b_flip, __m512i bf16_mask,
-                 bool round_here) {
+// Add one compressed K product to every row, selecting dense B after decoding.
+[[gnu::always_inline]] inline void swmmac_fma_ck_v4(__m512 (&acc)[16], const float (&left)[16][16],
+                                                    const float (&right)[32][16],
+                                                    const uint32_t (&selected)[16][16], int ck,
+                                                    __m512i b_flip) {
   RJ_ARITH_UNROLL(16)
   for (int row = 0; row < 16; ++row) {
     const __m512 bv =
         _mm512_castsi512_ps(_mm512_xor_si512(_mm512_load_si512(right[selected[ck][row]]), b_flip));
     __m512 sum = _mm512_fmadd_ps(_mm512_set1_ps(left[ck][row]), bv, acc[row]);
-    if constexpr (Packed) {
-      if (round_here) {
-        if constexpr (Bf16) {
-          sum = _mm512_castsi512_ps(_mm512_and_si512(_mm512_castps_si512(sum), bf16_mask));
-        } else {
-          sum = _mm512_cvt_roundph_ps(wmma_narrow_f16<Saturate>(sum), _MM_FROUND_NO_EXC);
-        }
-      }
-    }
     acc[row] = sum;
   }
 }
 
+// Decode inputs before any D writes and retain FP32 accumulators until final packing.
 template <bool Bf16, int Wave, bool Packed, bool Saturate>
 [[gnu::noinline]] inline void compute_half_v4(uint32_t mode, uint32_t *const *d,
                                               const uint32_t *const *a, const uint32_t *const *b,
@@ -110,42 +102,10 @@ template <bool Bf16, int Wave, bool Packed, bool Saturate>
 
   const __m512i b_flip_lo = _mm512_set1_epi32(((mode & RJ_ARITH_WMMA_NEG_LO_B)) ? INT32_MIN : 0);
   const __m512i b_flip_hi = _mm512_set1_epi32(((mode & RJ_ARITH_WMMA_NEG_HI_B)) ? INT32_MIN : 0);
-  const __m512i bf16_mask = _mm512_set1_epi32(int(0xffff0000U));
-
-  if constexpr (!Packed) {
-#if defined(__clang__)
-#pragma clang loop unroll(disable)
-#endif
-    for (int pair = 0; pair < 8; ++pair) {
-      swmmac_fma_ck_v4<Bf16, false, false>(acc, left, right, selected, 2 * pair, b_flip_lo,
-                                           bf16_mask, false);
-      swmmac_fma_ck_v4<Bf16, false, false>(acc, left, right, selected, 2 * pair + 1, b_flip_hi,
-                                           bf16_mask, false);
-    }
-  } else {
-    // Peel the final stage (no rounding after stage 3).
-#if defined(__clang__)
-#pragma clang loop unroll(disable)
-#endif
-    for (int stage = 0; stage < 3; ++stage) {
-      const int ck = 4 * stage;
-      swmmac_fma_ck_v4<Bf16, true, Saturate>(acc, left, right, selected, ck, b_flip_lo, bf16_mask,
-                                             false);
-      swmmac_fma_ck_v4<Bf16, true, Saturate>(acc, left, right, selected, ck + 1, b_flip_hi,
-                                             bf16_mask, false);
-      swmmac_fma_ck_v4<Bf16, true, Saturate>(acc, left, right, selected, ck + 2, b_flip_lo,
-                                             bf16_mask, false);
-      swmmac_fma_ck_v4<Bf16, true, Saturate>(acc, left, right, selected, ck + 3, b_flip_hi,
-                                             bf16_mask, true);
-    }
-    swmmac_fma_ck_v4<Bf16, true, Saturate>(acc, left, right, selected, 12, b_flip_lo, bf16_mask,
-                                           false);
-    swmmac_fma_ck_v4<Bf16, true, Saturate>(acc, left, right, selected, 13, b_flip_hi, bf16_mask,
-                                           false);
-    swmmac_fma_ck_v4<Bf16, true, Saturate>(acc, left, right, selected, 14, b_flip_lo, bf16_mask,
-                                           false);
-    swmmac_fma_ck_v4<Bf16, true, Saturate>(acc, left, right, selected, 15, b_flip_hi, bf16_mask,
-                                           false);
+  RJ_ARITH_UNROLL(1)
+  for (int pair = 0; pair < 8; ++pair) {
+    swmmac_fma_ck_v4(acc, left, right, selected, 2 * pair, b_flip_lo);
+    swmmac_fma_ck_v4(acc, left, right, selected, 2 * pair + 1, b_flip_hi);
   }
 
   // All inputs and tied D were read before any stores. Commit directly in order.
@@ -177,17 +137,6 @@ template <bool Bf16, int Wave, bool Packed, bool Saturate>
 }
 
 #else
-
-// Exception-free software FP16 widen for dense B elements on AVX2 so unused
-// signaling NaNs in B never raise FE_INVALID.
-[[gnu::always_inline]] inline __m256 widen_f16_safe_v3(U32 x) {
-  const U32 m = x & 0x7fffu;
-  const U32 sign = (x & 0x8000u) << 16;
-  const U32 tiny = bit_cast<U32>(__builtin_convertvector(m & 1023u, F32) * 0x1p-24f);
-  const U32 normal = (m << 13) + (112u << 23);
-  const U32 special = (m << 13) | 0x7f800000u;
-  return bit_cast<__m256>(sign | (m < 1024u ? tiny : m >= 0x7c00u ? special : normal));
-}
 
 template <bool Bf8>
 [[gnu::always_inline]] inline void store_fp8_word_v3(__m256i w, float *dst0, float *dst1,
@@ -282,16 +231,10 @@ template <int Bits, bool BfA, bool BfB, int Wave, bool Packed, bool Saturate>
       for (int col = 0; col < 16; col += 8) {
         const __m256i w =
             _mm256_loadu_si256(reinterpret_cast<const __m256i *>(b[bf.reg] + bf.lane + col));
-        if constexpr (BfB) {
-          __m256 even, odd;
-          wmma_widen_half_pair_v3<true>(w, even, odd);
-          _mm256_store_ps(right[k] + col, even);
-          _mm256_store_ps(right[k + 1] + col, odd);
-        } else {
-          const U32 wu = bit_cast<U32>(w);
-          _mm256_store_ps(right[k] + col, widen_f16_safe_v3(wu));
-          _mm256_store_ps(right[k + 1] + col, widen_f16_safe_v3(wu >> 16));
-        }
+        __m256 even, odd;
+        wmma_widen_half_pair_v3<BfB>(w, even, odd);
+        _mm256_store_ps(right[k] + col, even);
+        _mm256_store_ps(right[k + 1] + col, odd);
       }
     }
   }
@@ -360,45 +303,10 @@ template <int Bits, bool BfA, bool BfB, int Wave, bool Packed, bool Saturate>
         high[r] = _mm256_fmadd_ps(x, bh, high[r]);
       }
     };
-    auto fma_round_ck = [&](int ck, __m256 b_flip) {
-      RJ_ARITH_UNROLL(4)
-      for (int r = 0; r < Rows; ++r) {
-        const __m256 x = _mm256_broadcast_ss(&left[ck][tile + r]);
-        const int k = int(selected[ck][tile + r]);
-        __m256 bl = _mm256_load_ps(right[k]);
-        __m256 bh = _mm256_load_ps(right[k] + 8);
-        if constexpr (Bits == 16) {
-          bl = _mm256_xor_ps(bl, b_flip);
-          bh = _mm256_xor_ps(bh, b_flip);
-        }
-        low[r] = wmma_round_stage_v3<BfA, Saturate>(_mm256_fmadd_ps(x, bl, low[r]));
-        high[r] = wmma_round_stage_v3<BfA, Saturate>(_mm256_fmadd_ps(x, bh, high[r]));
-      }
-    };
-
-    if constexpr (!Packed) {
-#if defined(__clang__)
-#pragma clang loop unroll(disable)
-#endif
-      for (int pair = 0; pair < 8; ++pair) {
-        fma_ck(2 * pair, b_flip_lo);
-        fma_ck(2 * pair + 1, b_flip_hi);
-      }
-    } else {
-#if defined(__clang__)
-#pragma clang loop unroll(disable)
-#endif
-      for (int stage = 0; stage < 3; ++stage) {
-        const int ck = 4 * stage;
-        fma_ck(ck, b_flip_lo);
-        fma_ck(ck + 1, b_flip_hi);
-        fma_ck(ck + 2, b_flip_lo);
-        fma_round_ck(ck + 3, b_flip_hi);
-      }
-      fma_ck(12, b_flip_lo);
-      fma_ck(13, b_flip_hi);
-      fma_ck(14, b_flip_lo);
-      fma_ck(15, b_flip_hi);
+    RJ_ARITH_UNROLL(1)
+    for (int pair = 0; pair < 8; ++pair) {
+      fma_ck(2 * pair, b_flip_lo);
+      fma_ck(2 * pair + 1, b_flip_hi);
     }
 
     if constexpr (Packed) {

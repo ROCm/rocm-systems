@@ -130,9 +130,11 @@ TEST(WmmaF16F16W32Gfx12, Arithmetic) {
                 EXPECT_EQ(std::bit_cast<uint32_t>(value),
                           std::bit_cast<uint32_t>(golden[row][col]));
               } else {
-                rocjitsu::arith::test::expect_f32(std::bit_cast<uint32_t>(value), golden[row][col],
-                                                  semantics,
-                                                  /*atol=*/1e-5, /*rtol=*/5e-4);
+                float reference =
+                    rocjitsu::arith::test::loose_half_matrix_element<false>(a, b, c, row, col);
+                rocjitsu::arith::test::expect_f32(std::bit_cast<uint32_t>(value), reference,
+                                                  semantics, /*atol=*/2e-5,
+                                                  /*rtol=*/0.001);
               }
             }
           }

@@ -4,6 +4,7 @@
 // Sparse matrix API policy, SIMD parity and aliasing; decoded tests cover physical layout
 // independently.
 #include "common/cpu.h"
+#include "common/floating_point.h"
 #include "common/registers.h"
 #include "common/semantics.h"
 #include "rj_arith/detail/rj_arith_common.h"
@@ -66,7 +67,27 @@ template <int Bits, int Form> void arithmetic(Entry entry) {
             EXPECT_EQ(actual, input);
           } else {
             ASSERT_EQ(status, RJ_ARITH_SUCCESS);
-            EXPECT_EQ(actual, expected);
+            for (int reg = 0; reg < Count; ++reg) {
+              for (int lane = 0; lane < 32; ++lane) {
+                if (semantics == RJ_ARITH_SEMANTICS_COMPATIBILITY || reg < aliasing_offset ||
+                    reg >= aliasing_offset + D) {
+                  EXPECT_EQ(actual[reg][lane], expected[reg][lane]);
+                } else if constexpr (Form == 0) {
+                  expect_f32(actual[reg][lane], std::bit_cast<float>(expected[reg][lane]),
+                             RJ_ARITH_SEMANTICS_LOOSE, /*atol=*/1e-5, /*rtol=*/1e-5);
+                } else {
+                  for (int shift : {0, 16}) {
+                    auto decode = [](uint16_t bits) {
+                      return Form == 1 ? f16_value(bits) : bf16_value(bits);
+                    };
+                    expect_f32(
+                        std::bit_cast<uint32_t>(decode(uint16_t(actual[reg][lane] >> shift))),
+                        decode(uint16_t(expected[reg][lane] >> shift)), RJ_ARITH_SEMANTICS_LOOSE,
+                        /*atol=*/1e-5, /*rtol=*/Form == 1 ? 0.001 : 0.008);
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -114,6 +135,18 @@ TEST(SwmmacGfx1250Float, swmmac_f32_16x16x128_bf8_bf8_w32) {
 TEST(SwmmacGfx1250Float, swmmac_f16_16x16x128_bf8_bf8_w32) {
   arithmetic<8, 1>(rj_arith_v_swmmac_f16_16x16x128_bf8_bf8_w32);
 }
+// Compatibility fixes NaN payloads; Loose only promises a NaN classification.
+void expect_nan_word(uint32_t actual, uint32_t expected, uint64_t semantics, bool packed = false) {
+  if (semantics == RJ_ARITH_SEMANTICS_COMPATIBILITY) {
+    EXPECT_EQ(actual, expected);
+  } else {
+    EXPECT_TRUE(std::isnan(packed ? bf16_value(uint16_t(actual)) : std::bit_cast<float>(actual)));
+    if (packed) {
+      EXPECT_TRUE(std::isnan(bf16_value(uint16_t(actual >> 16))));
+    }
+  }
+}
+
 TEST(SwmmacGfx1250Float, SelectedNanPriorityAndPackedPayload) {
   constexpr int A = 0, B = 8, Index = 24, D = 25;
   Registers<D + 8, 32> initial;
@@ -144,25 +177,25 @@ TEST(SwmmacGfx1250Float, SelectedNanPriorityAndPackedPayload) {
       ASSERT_EQ(rj_arith_v_swmmac_f32_16x16x64_bf16_w32(cpu | semantics, 0, full.v + D, full.v + A,
                                                         full.v + B, full.v + Index),
                 RJ_ARITH_SUCCESS);
-      EXPECT_EQ(full.v[D][0], 0xffd10000U);
-      EXPECT_EQ(full.v[D + 1][0], 0xffe20000U);
-      EXPECT_EQ(full.v[D + 2][0], 0x7fc05701U);
-      EXPECT_EQ(full.v[D + 3][0], 0xffe20000U);
-      EXPECT_EQ(full.v[D + 4][1], 0xffc00000U);
+      expect_nan_word(full.v[D][0], 0xffd10000U, semantics);
+      expect_nan_word(full.v[D + 1][0], 0xffe20000U, semantics);
+      expect_nan_word(full.v[D + 2][0], 0x7fc05701U, semantics);
+      expect_nan_word(full.v[D + 3][0], 0xffe20000U, semantics);
+      expect_nan_word(full.v[D + 4][1], 0xffc00000U, semantics);
 
       auto packed = initial;
       ASSERT_EQ(rj_arith_v_swmmac_bf16f32_16x16x64_bf16_w32(
                     cpu | semantics, 0, packed.v + D, packed.v + A, packed.v + B, packed.v + Index),
                 RJ_ARITH_SUCCESS);
-      EXPECT_EQ(packed.v[D][0], 0xffe2ffd1U);
-      EXPECT_EQ(packed.v[D + 1][0], 0xffe27fc1U);
-      EXPECT_EQ(packed.v[D + 2][1] & 0xffffU, 0xffc0U);
+      expect_nan_word(packed.v[D][0], 0xffe2ffd1U, semantics, true);
+      expect_nan_word(packed.v[D + 1][0], 0xffe27fc1U, semantics, true);
+      expect_nan_word((packed.v[D + 2][1] & 0xffffU) << 16, 0xffc00000U, semantics);
       EXPECT_EQ(packed.v[D + 2][2] >> 16, 0x3f80U);
       EXPECT_EQ(packed.v[D + 3][2] & 0xffffU, 0x3f82U);
     }
   }
 }
-TEST(SwmmacGfx1250Float, Bf8NaNsRetainOnlyTheirSign) {
+TEST(SwmmacGfx1250Float, Bf8NanConversion) {
   constexpr int A = 0, B = 8, Index = 24, D = 26;
   Registers<D + 8, 32> initial;
   for (auto *reg : initial.v) {
@@ -174,13 +207,14 @@ TEST(SwmmacGfx1250Float, Bf8NaNsRetainOnlyTheirSign) {
   initial.v[B + 15][16] = 0x7f000000U;
   initial.v[Index + 1][17] = 0xc0000000U;
   for (uint64_t cpu : supported_cpu_levels()) {
-    auto wave = initial;
-    ASSERT_EQ(rj_arith_v_swmmac_f32_16x16x128_bf8_bf8_w32(cpu | RJ_ARITH_SEMANTICS_LOOSE, 0,
-                                                          wave.v + D, wave.v + A, wave.v + B,
-                                                          wave.v + Index),
-              RJ_ARITH_SUCCESS);
-    EXPECT_EQ(wave.v[D][0], 0xffc00000U);
-    EXPECT_EQ(wave.v[D + 1][0], 0x7fc00000U);
+    for (uint64_t semantics : {RJ_ARITH_SEMANTICS_COMPATIBILITY, RJ_ARITH_SEMANTICS_LOOSE}) {
+      auto wave = initial;
+      ASSERT_EQ(rj_arith_v_swmmac_f32_16x16x128_bf8_bf8_w32(cpu | semantics, 0, wave.v + D,
+                                                            wave.v + A, wave.v + B, wave.v + Index),
+                RJ_ARITH_SUCCESS);
+      expect_nan_word(wave.v[D][0], 0xffc00000U, semantics);
+      expect_nan_word(wave.v[D + 1][0], 0x7fc00000U, semantics);
+    }
   }
 }
 } // namespace

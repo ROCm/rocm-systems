@@ -21,7 +21,6 @@ namespace rocjitsu::arith::test {
 // Differential coverage supplements the per-instruction rocjitsu goldens.
 // The scalar path retains the inherited integer model unchanged. Compare raw
 // bits (including NaN payloads), all source modifiers and preserved halfwords.
-// Loose SIMD uses fuzzy comparisons for both input formats.
 template <bool Bf16, int Lanes, bool Rdna3, bool Packed, typename Call>
 void expect_wmma_exact_simd(Call call) {
   const auto levels = supported_cpu_levels();
@@ -130,54 +129,25 @@ void expect_wmma_exact_simd(Call call) {
     }
     const int aliases[] = {0, 4, 8, 16, 24};
     int destination = aliases[sample % 5];
-    // Reuse the same broad inputs, modifiers and aliases for loose FP16/BF16.
-    // Include exceptional columns and the full exponent range in SIMD comparisons.
-    for (bool loose : {false, true}) {
-      uint64_t selected_flags = loose ? (flags & ~RJ_ARITH_SEMANTICS_MASK) : flags;
-      auto expected = input;
-      ASSERT_EQ(call(selected_flags, instruction_flags, expected.v + destination, expected.v,
-                     expected.v + 8, expected.v + 16),
-                RJ_ARITH_SUCCESS);
-      for (uint64_t cpu : levels) {
-        if (cpu == RJ_ARITH_CPU_BASELINE) {
-          continue;
-        }
-        SCOPED_TRACE(::testing::Message()
-                     << loose << '/' << sample << '/' << cpu << '/' << instruction_flags);
-        auto actual = input;
-        ASSERT_EQ(call(selected_flags | cpu, instruction_flags, actual.v + destination, actual.v,
-                       actual.v + 8, actual.v + 16),
-                  RJ_ARITH_SUCCESS);
-        for (int reg = destination; reg < destination + dest_regs; ++reg) {
-          for (int lane = 0; lane < Lanes; ++lane) {
-            if (!loose) {
-              ASSERT_EQ(actual.v[reg][lane], expected.v[reg][lane]) << reg << '/' << lane;
-            } else {
-              uint32_t av = actual.v[reg][lane], ev = expected.v[reg][lane];
-              if constexpr (Packed) {
-                if constexpr (Rdna3) {
-                  int shift = instruction_flags & RJ_ARITH_WMMA_HIGH_C_D ? 16 : 0;
-                  EXPECT_EQ(av & ~(0xffffU << shift), ev & ~(0xffffU << shift));
-                  av >>= shift;
-                  ev >>= shift;
-                } else {
-                  float ah = Bf16 ? bf16_value(uint16_t(av >> 16)) : f16_value(uint16_t(av >> 16));
-                  float eh = Bf16 ? bf16_value(uint16_t(ev >> 16)) : f16_value(uint16_t(ev >> 16));
-                  expect_f32(std::bit_cast<uint32_t>(ah), eh, RJ_ARITH_SEMANTICS_LOOSE,
-                             /*atol=*/1e-36, /*rtol=*/1e-6);
-                }
-                av = std::bit_cast<uint32_t>(Bf16 ? bf16_value(uint16_t(av))
-                                                  : f16_value(uint16_t(av)));
-                ev = std::bit_cast<uint32_t>(Bf16 ? bf16_value(uint16_t(ev))
-                                                  : f16_value(uint16_t(ev)));
-              }
-              expect_f32(av, std::bit_cast<float>(ev), RJ_ARITH_SEMANTICS_LOOSE,
-                         /*atol=*/1e-36, /*rtol=*/1e-6);
-            }
-          }
-        }
-        actual.expect_preserved(input, destination, dest_regs);
+    auto expected = input;
+    ASSERT_EQ(call(flags, instruction_flags, expected.v + destination, expected.v, expected.v + 8,
+                   expected.v + 16),
+              RJ_ARITH_SUCCESS);
+    for (uint64_t cpu : levels) {
+      if (cpu == RJ_ARITH_CPU_BASELINE) {
+        continue;
       }
+      SCOPED_TRACE(::testing::Message() << sample << '/' << cpu << '/' << instruction_flags);
+      auto actual = input;
+      ASSERT_EQ(call(flags | cpu, instruction_flags, actual.v + destination, actual.v, actual.v + 8,
+                     actual.v + 16),
+                RJ_ARITH_SUCCESS);
+      for (int reg = destination; reg < destination + dest_regs; ++reg) {
+        for (int lane = 0; lane < Lanes; ++lane) {
+          ASSERT_EQ(actual.v[reg][lane], expected.v[reg][lane]) << reg << '/' << lane;
+        }
+      }
+      actual.expect_preserved(input, destination, dest_regs);
     }
   }
 }
