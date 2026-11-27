@@ -85,6 +85,8 @@ env:
   # and PyTorch wheels".
   ROCM_VENV: "/opt/rocm-venv"
   WHEEL_INDEX_URL: "https://nightly.repo.amd.com/rocm/whl-next/"
+  JAX_VERSION: "0.11.2"
+  JAX_MIN_PYTHON: "3.12"
 
 jobs:
   ci_config:
@@ -285,9 +287,9 @@ jobs:
           "${ROCM_VENV}/bin/pip" install \
             --extra-index-url "${WHEEL_INDEX_URL}" \
             --timeout 600 \
-            "jax==0.11.2; python_version >= '3.12'" \
-            "jax-rocm10-plugin==0.11.2+rocm${rocm_version}; python_version >= '3.12'" \
-            "jax-rocm10-pjrt==0.11.2+rocm${rocm_version}; python_version >= '3.12'"
+            "jax==${JAX_VERSION}; python_version >= '${JAX_MIN_PYTHON}'" \
+            "jax-rocm10-plugin==${JAX_VERSION}+rocm${rocm_version}; python_version >= '${JAX_MIN_PYTHON}'" \
+            "jax-rocm10-pjrt==${JAX_VERSION}+rocm${rocm_version}; python_version >= '${JAX_MIN_PYTHON}'"
 
           "${ROCM_VENV}/bin/rocm-sdk" init
 
