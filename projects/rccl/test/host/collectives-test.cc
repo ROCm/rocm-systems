@@ -588,6 +588,7 @@ struct SharedHooks {
   ADDON_OP_HOOK(reduceScatterDdaIpc, "ncclReduceScatterDdaIpc")
   ADDON_ROOT_HOOK(broadcastDdaFabricLL, "ncclBroadcastDdaFabricLL")
   ADDON_ROOT_HOOK(broadcastDdaFabricLL128, "ncclBroadcastDdaFabricLL128")
+  ADDON_ROOT_HOOK(broadcastDdaIpc, "ncclBroadcastDdaIpc")
 };
 #undef ADDON_HOOK
 #undef ADDON_ROOT_HOOK
@@ -1360,12 +1361,13 @@ TEST_F(CollectivesMicrotest, AllGather_CheckModeDivertsAddonsButKeepsDirect) {
 
 TEST_F(CollectivesMicrotest, Broadcast_DdaArmsLaunchAsAddons) {
   ExpectAddonArms({{RCCL_DDA_FABRIC_LL, "ncclBroadcastDdaFabricLL"},
-                   {RCCL_DDA_FABRIC_LL128, "ncclBroadcastDdaFabricLL128"}},
+                   {RCCL_DDA_FABRIC_LL128, "ncclBroadcastDdaFabricLL128"},
+                   {RCCL_DDA_IPC, "ncclBroadcastDdaIpc"}},
                   [&] { return Broadcast(); }, ncclNumOps, "Broadcast");
 }
 
 TEST_F(CollectivesMicrotest, Broadcast_DdaLaunchReceivesRoot) {
-  for (int algo : {RCCL_DDA_FABRIC_LL, RCCL_DDA_FABRIC_LL128}) {
+  for (int algo : {RCCL_DDA_FABRIC_LL, RCCL_DDA_FABRIC_LL128, RCCL_DDA_IPC}) {
     SCOPED_TRACE(algo);
     Decide(algo);
     fake.addons.clear();

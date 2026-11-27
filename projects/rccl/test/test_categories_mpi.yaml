@@ -612,11 +612,12 @@ test_categories:
       - "RCCL_DDA_A2A_PUSH=0"
   # Broadcast DDA is opt-in and its caps are cached per process; the suite sizes its cases against these values.
   standard_env_dda_bc:
-    description: "DDA fabric Broadcast one-shot data checks (LL, LL128, and switches between them). The LL cases also run over the IPC scratch on 8-rank single-node gfx942/gfx950."
+    description: "DDA fabric Broadcast one-shot data checks (LL, LL128, and switches between them). The LL cases and the two-phase IPC kernel also run over the IPC scratch on 8-rank single-node gfx942/gfx950."
     test_patterns:
       - "DdaMPI_BroadcastLL.*"
       - "DdaMPI_BroadcastLL128.*"
       - "DdaMPI_BroadcastTransition.*"
+      - "DdaMPI_BroadcastIpc2Phase.*"
       - "AbortDdaMPITest.IncompleteCollective_DdaBroadcastLl"
       - "AbortDdaMPITest.IncompleteCollective_DdaBroadcastLl128"
     exclude_windows: *mpi_exclude_windows
@@ -625,6 +626,8 @@ test_categories:
       - "RCCL_DDA_BC=1"
       - "RCCL_DDA_LL_THRESHOLD=262144"
       - "RCCL_DDA_LL128_THRESHOLD=4194304"
+      - "RCCL_DDA_BC_IPC_MIN_BYTES=262272"
+      - "RCCL_DDA_BC_IPC_MAX_BYTES=8388608"
   standard_env_dda_bc_ll128:
     description: "DDA fabric Broadcast two-shot LL128 data checks: nonzero root, in-place, partial last chunk, back-to-back with fan-out=1."
     test_patterns:

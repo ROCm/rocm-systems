@@ -10,7 +10,8 @@
  *
  * DdaIpcMPI_IndexData: every rank sends rank- and index-dependent data, so each element and each slice of the result
  * is distinct. A per-rank constant fill sums to the same value everywhere and hides a kernel that reads or writes the
- * wrong offset. On gfx950 and gfx942 it also checks the DDA Broadcast LL one-shot over the IPC scratch.
+ * wrong offset. On gfx950 and gfx942 it also checks DDA Broadcast over the IPC scratch: the LL one-shot, and the
+ * two-phase kernel where its window starts.
  *
  * DdaIpcMPI_CommLifecycle: DDA IPC must come up on a communicator created after another one is destroyed. It needs
  * cuMem, and NCCL_CUMEM_ENABLE is cached at the first read, so run this suite in its own process.
@@ -37,7 +38,9 @@
 #include "MPITestBase.hpp"
 #include "ResourceGuards.hpp"
 #include "TestChecks.hpp"
+#include "algorithms/dda/broadcast/dda_broadcast.h"
 #include "comm.h"
+#include "rccl_arch_thresholds.h"
 #include "rccl_common.h"
 
 using namespace RCCLTestGuards;
@@ -252,9 +255,32 @@ protected:
     return rcclDdaLLThreshold(getActiveCommunicator(), ncclFuncBroadcast);
   }
 
+  // The tier a Broadcast of `bytes` takes: two-phase inside its window on whole granules that fit the scratch, else LL
+  // to its cap, else a native algorithm (-1). The window comes from production, so an env override moves it too.
+  int bcExpectedAlgo(size_t bytes) {
+    const ncclComm* comm = getActiveCommunicator();
+    size_t lo = 0;
+    size_t hi = 0;
+    rcclDdaBcIpcWindow(comm, &lo, &hi);
+    if (rcclWindowFits(bytes, lo, hi) && bytes % kDdaBcIpcGranuleBytes == 0 && bytes <= comm->ddaScratchBytes) {
+      return static_cast<int>(RCCL_DDA_IPC);
+    }
+    return bytes <= bcDdaLLMaxBytes() ? static_cast<int>(RCCL_DDA_FABRIC_LL) : -1;
+  }
+
+  // The largest Broadcast only DDA LL takes: the LL cap, or just below the two-phase window when that starts lower.
+  size_t bcLLOnlyMaxBytes() {
+    size_t lo = 0;
+    size_t hi = 0;
+    rcclDdaBcIpcWindow(getActiveCommunicator(), &lo, &hi);
+    return hi != 0 && lo >= kDdaBcIpcGranuleBytes ? std::min(bcDdaLLMaxBytes(), lo - kDdaBcIpcGranuleBytes)
+                                                  : bcDdaLLMaxBytes();
+  }
+
   // Broadcasts count fp32 from root, out of place: the root sends inputValue(root, j), every rank checks it all.
-  // Epoch cell 0 must take the next LL flag exactly when DDA LL runs. rootLast: the non-roots launch first and the
-  // root only after an MPI barrier and its stream drains, so the non-roots poll before any root packet lands.
+  // Epoch cell 0 must take the next LL flag exactly when DDA LL runs (two-phase leaves it). rootLast: the non-roots
+  // launch first and the root only after an MPI barrier and its stream drains, so the non-roots poll before any root
+  // packet lands.
   void runBroadcast(size_t count, int root, bool rootLast = false) {
     const size_t bytes = count * sizeof(float);
     void* sendBuf = nullptr;
@@ -267,9 +293,9 @@ protected:
     ASSERT_MPI_EQ(hipSuccess, fillInput<float>(sendBuf, count, ncclFloat32, root));
 
     const std::string tag = "Broadcast count=" + std::to_string(count) + " root=" + std::to_string(root);
-    const bool dda = bytes <= bcDdaLLMaxBytes();
-    expectAlgo(ncclFuncBroadcast, count, ncclFloat32, sendBuf, recvBuf, dda ? static_cast<int>(RCCL_DDA_FABRIC_LL) : -1,
-               tag);
+    const int algo = bcExpectedAlgo(bytes);
+    const bool dda = algo == static_cast<int>(RCCL_DDA_FABRIC_LL);
+    expectAlgo(ncclFuncBroadcast, count, ncclFloat32, sendBuf, recvBuf, algo, tag);
     if (HasFailure() || IsSkipped()) {
       return;
     }
@@ -309,7 +335,7 @@ protected:
   void skipUnlessBcDdaIpc() {
     const ncclComm* comm = getActiveCommunicator();
     const std::string skip =
-      mpiCoordinatedSkipReason(!bcDdaIpcExpected(comm), "DDA Broadcast LL over IPC needs gfx950/gfx942, no reroute");
+      mpiCoordinatedSkipReason(!bcDdaIpcExpected(comm), "DDA Broadcast over IPC needs gfx950/gfx942, no reroute");
     if (!skip.empty()) {
       GTEST_SKIP() << skip;
     }
@@ -354,14 +380,16 @@ TEST_F(DdaIpcMPI_IndexData, ReduceScatter) {
 }
 
 // DDA Broadcast LL one-shot: a root column per peer with 1, 2, 4 and 8 chunk rows (16 B to 16 KiB), uneven chunks, the
-// table's cap; two roots. Just above the cap the ring runs.
+// largest LL-only size; two roots. At the LL cap two-phase runs where its window starts there, and the ring above it.
 TEST_F(DdaIpcMPI_IndexData, BroadcastLL) {
   skipUnlessBcDdaIpc();
   if (IsSkipped()) {
     return;
   }
+  const size_t llOnlyCount = bcLLOnlyMaxBytes() / sizeof(float);
   const size_t capCount = bcDdaLLMaxBytes() / sizeof(float);
-  for (size_t count : {size_t{4}, size_t{1024}, size_t{2048}, size_t{4096}, size_t{4100}, capCount, capCount + 4}) {
+  for (size_t count :
+       {size_t{4}, size_t{1024}, size_t{2048}, size_t{4096}, size_t{4100}, llOnlyCount, capCount, capCount + 4}) {
     for (int root : {0, 5}) {
       runBroadcast(count, root);
       if (HasFailure() || IsSkipped()) {

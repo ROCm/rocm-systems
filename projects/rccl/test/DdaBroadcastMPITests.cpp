@@ -7,7 +7,7 @@
 /**
  * @file DdaBroadcastMPITests.cpp
  * @brief MPI end-to-end data tests for the DDA fabric Broadcast one-shot kernels (LL, LL128). The LL cases also run
- *        over the IPC scratch of a single-node 8-rank comm on gfx942 and gfx950.
+ *        over the IPC scratch of a single-node 8-rank comm on gfx942 and gfx950, as does the two-phase IPC kernel.
  *
  * Every call carries a payload derived from (root, call sequence, element), so a
  * stale bank or a missed handshake cannot pass. Every rank checks its whole
@@ -21,12 +21,14 @@
  *
  * Run (example):
  *   RCCL_DDA_BC=1 RCCL_DDA_LL_THRESHOLD=262144 RCCL_DDA_LL128_THRESHOLD=4194304 \
+ *   RCCL_DDA_BC_IPC_MIN_BYTES=262272 RCCL_DDA_BC_IPC_MAX_BYTES=8388608 \
  *     mpirun -np 8 ./rccl-UnitTestsMPI --gtest_filter='DdaMPI_Broadcast*'
  */
 
 #ifdef MPI_TESTS_ENABLED
 
 #include "DdaFabricMPITestFixture.hpp"
+#include "algorithms/dda/broadcast/dda_broadcast.h"
 #include "param.h"
 #include "rccl_common.h"
 
@@ -54,6 +56,9 @@ namespace {
 
 constexpr size_t kLLCap = 256 * 1024;
 constexpr size_t kLL128Cap = 4 * 1024 * 1024;
+// Two-phase IPC window: it runs ahead of LL, so it starts one granule above the LL cap to keep the LL cases on LL.
+constexpr size_t kBcIpcMin = kLLCap + kDdaBcIpcGranuleBytes;
+constexpr size_t kBcIpcMax = 8 * 1024 * 1024;
 // Guard bytes on each side of a payload; a multiple of 16 so the offset alone sets alignment.
 constexpr size_t kGuard = 64;
 constexpr uint8_t kGuardByte = 0xA5;
@@ -66,8 +71,8 @@ constexpr auto kLateRootDelay = std::chrono::milliseconds(200);
 // 514 packets over 256 threads: three chunks, the last one partial.
 constexpr size_t kLLMultiChunk = 4112;
 
-// (send, recv) byte offsets. The LL launcher takes kAligned=false below 4-byte alignment;
-// 4 and 8 keep the aligned path on buffers that are not 16-byte aligned.
+// (send, recv) byte offsets. The LL launcher takes kAligned=false below 4-byte alignment; 4 and 8 keep its aligned path
+// on buffers that are not 16-byte aligned. The two-phase launcher takes its unaligned variants for all of them.
 constexpr std::pair<size_t, size_t> kLLOffsets[] = {{4, 4}, {8, 8}, {4, 8}, {1, 1}, {2, 6}, {3, 0}, {0, 5}};
 
 // gfx1250 LL128 slice payload: 15 × 8-byte words per lane in a warp-32 group → 1920 B.
@@ -132,6 +137,7 @@ protected:
   std::vector<std::unique_ptr<MPIHelpers::MpiEnvGuard>> envGuards_;
   int rank_{};
   int nRanks_{};
+  bool overIpc_{};
   // Process-wide, so no two calls in a run share a payload.
   static inline uint32_t seq_{};
 
@@ -139,7 +145,9 @@ protected:
   virtual std::vector<std::pair<const char*, std::string>> ddaEnv() const {
     return {{"RCCL_DDA_BC", "1"},
             {"RCCL_DDA_LL_THRESHOLD", std::to_string(kLLCap)},
-            {"RCCL_DDA_LL128_THRESHOLD", std::to_string(kLL128Cap)}};
+            {"RCCL_DDA_LL128_THRESHOLD", std::to_string(kLL128Cap)},
+            {"RCCL_DDA_BC_IPC_MIN_BYTES", std::to_string(kBcIpcMin)},
+            {"RCCL_DDA_BC_IPC_MAX_BYTES", std::to_string(kBcIpcMax)}};
   }
 
   // Why the cached settings are not the ones the sizes assume, or empty.
@@ -150,12 +158,28 @@ protected:
     if (rcclDdaLL128Threshold(comm, ncclFuncBroadcast) != kLL128Cap) {
       return "Broadcast LL128 cap is not RCCL_DDA_LL128_THRESHOLD";
     }
+    size_t ipcMin = 0;
+    size_t ipcMax = 0;
+    rcclDdaBcIpcWindow(comm, &ipcMin, &ipcMax);
+    if (overIpc_ && (ipcMin != kBcIpcMin || ipcMax != kBcIpcMax)) {
+      return "the two-phase window is not RCCL_DDA_BC_IPC_MIN_BYTES / RCCL_DDA_BC_IPC_MAX_BYTES";
+    }
     return {};
   }
 
   // True where the suite's cases also run over the IPC scratch on gfx942/gfx950; the default is gfx1250 fabric only.
   virtual bool runsOverIpc() const {
     return false;
+  }
+
+  // True where the suite runs over the IPC scratch only, so it skips on gfx1250 fabric.
+  virtual bool requiresIpc() const {
+    return false;
+  }
+
+  // True where every case over IPC runs DDA LL, so the suite skips without the LL epoch cells.
+  virtual bool needsLLEpochCells() const {
+    return true;
   }
 
   void SetUp() override {
@@ -166,6 +190,10 @@ protected:
     if (!validateTestPrerequisites(kMinProcessesForMPI)) GTEST_SKIP() << "Need at least 2 MPI ranks";
     // Decided on every rank together, so all ranks take the same coordinated skip below.
     const bool ipc = runsOverIpc() && MPIHelpers::allRanksTrue(DdaMPITestHelpers::isDdaIpcArchDevice());
+    overIpc_ = ipc;
+    if (requiresIpc() && !ipc) {
+      GTEST_SKIP() << "This suite runs over DDA IPC only (single-node 8-rank gfx942/gfx950)";
+    }
     if (!ipc) {
       DDA_FABRIC_SKIP_OR_FAIL(archSkipReason("DDA fabric Broadcast requires gfx1250"));
     }
@@ -177,9 +205,10 @@ protected:
     const ncclComm* comm = getActiveCommunicator();
     if (ipc) {
       // DDA IPC comes up only on exactly 8 ranks on one node with P2P between every pair.
-      const bool ipcDown = comm->ddaIpcMemHandler == nullptr || comm->ddaLLEpochDev == nullptr;
-      DDA_FABRIC_SKIP_OR_FAIL(mpiCoordinatedSkipReason(ipcDown, "DDA IPC or its LL epoch cells did not initialize "
-                                                                "(needs 8 ranks on one node), so Broadcast cannot take DDA"));
+      const bool ipcDown =
+        comm->ddaIpcMemHandler == nullptr || (needsLLEpochCells() && comm->ddaLLEpochDev == nullptr);
+      DDA_FABRIC_SKIP_OR_FAIL(mpiCoordinatedSkipReason(ipcDown, "DDA IPC or the LL epoch cells its LL cases need did "
+                                                                "not initialize (needs 8 ranks on one node)"));
     } else {
       DDA_FABRIC_SKIP_OR_FAIL(mpiCoordinatedSkipReason(comm->ddaFabricBarrierState == nullptr,
                                                        "DDA fabric did not initialize (MNNVL off or ranks span "
@@ -451,6 +480,59 @@ TEST_F(DdaMPI_BroadcastLL, UnalignedBuffers) {
 TEST_F(DdaMPI_BroadcastLL, BackToBackNoSync) {
   const size_t sizes[7] = {16, kLLMultiChunk, 64 * 1024, kLLCap, 1024, kLLMultiChunk, 16};
   backToBackRounds(sizes, RCCL_DDA_FABRIC_LL);
+}
+
+// ---- DDA IPC two-phase Broadcast (scatter + all-gather), window kBcIpcMin-kBcIpcMax ----
+
+// Whole granules (1/8 slices of whole 16 B units) inside the window; 1 MiB + 1152 B leaves a partial grid.
+constexpr size_t kBcIpcOdd = 1024 * 1024 + 1152;
+constexpr size_t kBcIpcMid = 2 * 1024 * 1024;
+
+class DdaMPI_BroadcastIpc2Phase : public DdaMPI_BroadcastLL {
+ protected:
+  bool requiresIpc() const override {
+    return true;
+  }
+  bool needsLLEpochCells() const override {
+    return false;
+  }
+};
+
+// Every root, separate buffers, so the root's local copy is checked too.
+TEST_F(DdaMPI_BroadcastIpc2Phase, AllRootsOutOfPlace) {
+  allRoots({kBcIpcMin, kBcIpcOdd, kBcIpcMid, kBcIpcMax}, false, RCCL_DDA_IPC);
+}
+
+// Every root, sendbuff == recvbuff.
+TEST_F(DdaMPI_BroadcastIpc2Phase, AllRootsInPlace) {
+  allRoots({kBcIpcMin, kBcIpcOdd, kBcIpcMid, kBcIpcMax}, true, RCCL_DDA_IPC);
+}
+
+// Back-to-back launches on one comm, root rotating: each reuses the scratch the previous one read.
+TEST_F(DdaMPI_BroadcastIpc2Phase, RepeatedLaunches) {
+  repeated(kBcIpcOdd, 9, RCCL_DDA_IPC);
+}
+
+// User buffers off 16-byte alignment take the unaligned variant on that rank only.
+TEST_F(DdaMPI_BroadcastIpc2Phase, UnalignedBuffers) {
+  unaligned({kBcIpcMin, kBcIpcOdd}, kLLOffsets, std::size(kLLOffsets), RCCL_DDA_IPC);
+}
+
+// Seven two-phase launches with no sync between them: a rank runs ahead into scratch its peers may still read.
+TEST_F(DdaMPI_BroadcastIpc2Phase, BackToBackNoSync) {
+  const size_t sizes[7] = {kBcIpcMin, kBcIpcOdd, kBcIpcMax, kBcIpcMid, kBcIpcOdd, kBcIpcMin, kBcIpcMax};
+  backToBackRounds(sizes, RCCL_DDA_IPC);
+}
+
+// Two-phase and LL interleaved with no sync between launches, with the hand-off from the LL cap to the window.
+TEST_F(DdaMPI_BroadcastIpc2Phase, BackToBackNoSyncWithLL) {
+  DDA_FABRIC_SKIP_OR_FAIL(mpiCoordinatedSkipReason(getActiveCommunicator()->ddaLLEpochDev == nullptr,
+                                                   "the LL epoch cells did not initialize, so LL cannot run"));
+  const std::pair<size_t, int> steps[7] = {{16, RCCL_DDA_FABRIC_LL},        {kBcIpcOdd, RCCL_DDA_IPC},
+                                           {64 * 1024, RCCL_DDA_FABRIC_LL}, {kBcIpcMax, RCCL_DDA_IPC},
+                                           {kLLCap, RCCL_DDA_FABRIC_LL},    {kBcIpcMin, RCCL_DDA_IPC},
+                                           {16, RCCL_DDA_FABRIC_LL}};
+  backToBackRounds(steps);
 }
 
 // ---- DDA fabric Broadcast LL128 one-shot ----

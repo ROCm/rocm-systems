@@ -10974,32 +10974,146 @@ TEST(WrapMicrotestIsolated, SelectBroadcast_IpcHandler_PicksLLAndNeverChecksLL12
   });
 }
 
-// The gfx950 and gfx942 tables turn DDA Broadcast LL on over the IPC scratch up to 256 KiB; RCCL_DDA_BC=0 turns it off.
-TEST(WrapMicrotestIsolated, SelectBroadcast_Gfx950AndGfx942TablesRunIpcLLTo256KiB) {
-  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_Gfx950AndGfx942TablesRunIpcLLTo256KiB", []() {
-    ScopedHook ll(g_broadcastDdaFabricLLEligible, [](ncclComm*, size_t, ncclDataType_t) { return true; });
+namespace {
+// An 8-rank IPC comm on the real gfx950 or gfx942 table.
+ncclComm* MakeIpcBroadcastComm(const char* arch) {
+  ncclComm* comm = MakeBroadcastComm(arch);
+  comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds(arch, RCCL_TUNING_PARTITION_SPX);
+  comm->ddaIpcMemHandler = reinterpret_cast<ncclIpcMemHandler*>(0x1);
+  return comm;
+}
+
+// RCCL_DDA_BC and the tier caps unset, and the two-phase window edges (-1 leaves one unset).
+auto Bc2PhaseParams(int64_t ipcMin, int64_t ipcMax, int64_t vmmMax = -1) {
+  const auto base = BroadcastDdaParams(-1, -1, /*ddaEnable=*/1, /*ddaBc=*/-1, vmmMax);
+  return [=](const char* env, int64_t def) -> int64_t {
+    if (std::strcmp(env, "RCCL_DDA_BC_IPC_MIN_BYTES") == 0) {
+      return ipcMin;
+    }
+    if (std::strcmp(env, "RCCL_DDA_BC_IPC_MAX_BYTES") == 0) {
+      return ipcMax;
+    }
+    return base(env, def);
+  };
+}
+
+int BroadcastAlgo(ncclComm* comm, size_t bytes) {
+  rcclCollDecision d = PoisonedDecision();
+  EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, bytes, ncclInt8, 0, false, &d));
+  return d.algo;
+}
+
+// LL takes any size, two-phase whole granules, as the production checks do inside their caps.
+struct Bc2PhaseHooks {
+  HookOf<decltype(g_broadcastDdaFabricLLEligible)> ll{g_broadcastDdaFabricLLEligible,
+                                                       [](ncclComm*, size_t, ncclDataType_t) { return true; }};
+  HookOf<decltype(g_broadcastDdaIpcEligible)> ipc{
+    g_broadcastDdaIpcEligible, [](ncclComm*, size_t n, ncclDataType_t) { return n % kDdaBcIpcGranuleBytes == 0; }};
+};
+
+constexpr int kAlgoBcIpc = (int)rcclAddonAlgos_t::RCCL_DDA_IPC;
+constexpr int kAlgoBcLL = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL;
+}  // namespace
+
+// The gfx950 and gfx942 tables run DDA Broadcast LL over the IPC scratch below 256 KiB and two-phase from there, as
+// their windows start at the LL cap; RCCL_DDA_BC=0 turns both off.
+TEST(WrapMicrotestIsolated, SelectBroadcast_Gfx950AndGfx942TablesHandIpcLLToTwoPhaseAt256KiB) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_Gfx950AndGfx942TablesHandIpcLLToTwoPhaseAt256KiB", []() {
+    Bc2PhaseHooks hooks;
     const size_t kCap = 256 * kKiB;
     for (const char* arch : {"gfx950", "gfx942"}) {
       SCOPED_TRACE(arch);
-      // -1 leaves RCCL_DDA_LL_THRESHOLD, RCCL_DDA_LL128_THRESHOLD and RCCL_DDA_BC unset.
-      g_loadParam = BroadcastDdaParams(-1, -1, /*ddaEnable=*/1, /*ddaBc=*/-1);
-      ncclComm* comm = MakeBroadcastComm(arch);
-      comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds(arch, RCCL_TUNING_PARTITION_SPX);
-      comm->ddaIpcMemHandler = reinterpret_cast<ncclIpcMemHandler*>(0x1);
-      rcclCollDecision d = PoisonedDecision();
-      EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, kCap, ncclInt8, 0, false, &d));
-      EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, d.algo);
-      d = PoisonedDecision();
-      EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, kCap + 16, ncclInt8, 0, false, &d));
-      EXPECT_EQ(NCCL_ALGO_RING, d.algo);
+      g_loadParam = Bc2PhaseParams(-1, -1);
+      ncclComm* comm = MakeIpcBroadcastComm(arch);
+      EXPECT_EQ(kAlgoBcLL, BroadcastAlgo(comm, kCap - kDdaBcIpcGranuleBytes));
+      EXPECT_EQ(kAlgoBcIpc, BroadcastAlgo(comm, kCap));
+      EXPECT_EQ(NCCL_ALGO_RING, BroadcastAlgo(comm, kCap + 16));
 
       g_loadParam = BroadcastDdaParams(-1, -1, /*ddaEnable=*/1, /*ddaBc=*/0);
-      d = PoisonedDecision();
-      EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, 2048, ncclInt8, 0, false, &d));
-      EXPECT_EQ(NCCL_ALGO_RING, d.algo);
+      EXPECT_EQ(NCCL_ALGO_RING, BroadcastAlgo(comm, 2048));
       comm->ddaIpcMemHandler = nullptr;
       DeleteCommWithArch(comm);
     }
+  });
+}
+
+// gfx950: two-phase to 8 MiB, the ring above; gfx942 to 4 MiB. The 256 KiB hand-off from LL is pinned above.
+TEST(WrapMicrotestIsolated, SelectBroadcast_Gfx950TableRunsTwoPhaseInItsWindow) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_Gfx950TableRunsTwoPhaseInItsWindow", []() {
+    g_loadParam = Bc2PhaseParams(-1, -1);
+    Bc2PhaseHooks hooks;
+    ncclComm* comm = MakeIpcBroadcastComm("gfx950");
+    const std::pair<size_t, int> cases[] = {
+      {kMiB + 1152, kAlgoBcIpc}, {8 * kMiB, kAlgoBcIpc}, {8 * kMiB + kDdaBcIpcGranuleBytes, NCCL_ALGO_RING}};
+    for (const auto& [bytes, algo] : cases) {
+      EXPECT_EQ(algo, BroadcastAlgo(comm, bytes)) << bytes;
+    }
+    rcclCollDecision d = PoisonedDecision();
+    EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, kMiB, ncclInt8, 0, false, &d));
+    EXPECT_EQ(NCCL_PROTO_SIMPLE, d.protocol);
+    EXPECT_EQ(153u, d.nMaxChannels);  // ncclBroadcastDdaIpcBlocks
+    EXPECT_EQ(8 * kMiB, rcclDdaEntryThreshold(comm, ncclFuncBroadcast));
+
+    // The window alone turns Broadcast DDA on with RCCL_DDA_BC unset.
+    rcclArchThresholds table = *comm->archThresholds;
+    table.ddaLLMax[ncclFuncBroadcast] = 0;
+    comm->archThresholds = &table;
+    EXPECT_EQ(kAlgoBcIpc, BroadcastAlgo(comm, kMiB));
+
+    // Never on a fabric comm, where it is not even asked.
+    comm->ddaFabricMemHandler = reinterpret_cast<ncclFabricMemHandler*>(0x1);
+    const int asked = hooks.ipc.calls;
+    EXPECT_EQ(NCCL_ALGO_RING, BroadcastAlgo(comm, kMiB));
+    EXPECT_EQ(asked, hooks.ipc.calls);
+    comm->ddaFabricMemHandler = nullptr;
+    comm->ddaIpcMemHandler = nullptr;
+    DeleteCommWithArch(comm);
+
+    ncclComm* gfx942 = MakeIpcBroadcastComm("gfx942");
+    EXPECT_EQ(kAlgoBcIpc, BroadcastAlgo(gfx942, 4 * kMiB));
+    EXPECT_EQ(NCCL_ALGO_RING, BroadcastAlgo(gfx942, 4 * kMiB + kDdaBcIpcGranuleBytes));
+    gfx942->ddaIpcMemHandler = nullptr;
+    DeleteCommWithArch(gfx942);
+  });
+}
+
+// Each RCCL_DDA_BC_IPC_* edge replaces the table's; MAX 0, MIN > MAX or RCCL_DDA_THRESHOLD=0 (or < -1) turns it off.
+TEST(WrapMicrotestIsolated, SelectBroadcast_TwoPhaseWindowEnvOverrides) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_TwoPhaseWindowEnvOverrides", []() {
+    Bc2PhaseHooks hooks;
+    ncclComm* comm = MakeIpcBroadcastComm("gfx950");
+    g_loadParam = Bc2PhaseParams(128 * kKiB, 512 * kKiB);
+    EXPECT_EQ(kAlgoBcIpc, BroadcastAlgo(comm, 128 * kKiB));
+    EXPECT_EQ(NCCL_ALGO_RING, BroadcastAlgo(comm, kMiB));
+    size_t lo = 0;
+    size_t hi = 0;
+    rcclDdaBcIpcWindow(comm, &lo, &hi);
+    EXPECT_EQ(128 * kKiB, lo);
+    EXPECT_EQ(512 * kKiB, hi);
+
+    // A negative MIN other than -1 is 0.
+    g_loadParam = Bc2PhaseParams(-5, -1);
+    EXPECT_EQ(kAlgoBcIpc, BroadcastAlgo(comm, kDdaBcIpcGranuleBytes));
+    for (const auto& params : {Bc2PhaseParams(-1, 0), Bc2PhaseParams(2 * kMiB, kMiB), Bc2PhaseParams(-1, -1, 0)}) {
+      g_loadParam = params;
+      EXPECT_EQ(NCCL_ALGO_RING, BroadcastAlgo(comm, kMiB));
+      EXPECT_EQ(kAlgoBcLL, BroadcastAlgo(comm, 256 * kKiB));
+    }
+    // RCCL_DDA_THRESHOLD below -1 reads as 0, as it does for the VMM tier.
+    g_loadParam = [base = Bc2PhaseParams(-1, -1)](const char* env, int64_t def) -> int64_t {
+      return std::strcmp(env, "RCCL_DDA_THRESHOLD") == 0 ? -5 : base(env, def);
+    };
+    EXPECT_EQ(NCCL_ALGO_RING, BroadcastAlgo(comm, kMiB));
+    comm->ddaIpcMemHandler = nullptr;
+    DeleteCommWithArch(comm);
+
+    // One edge set keeps the table's other edge.
+    ncclComm* gfx942 = MakeIpcBroadcastComm("gfx942");
+    g_loadParam = Bc2PhaseParams(-1, 8 * kMiB);
+    EXPECT_EQ(kAlgoBcLL, BroadcastAlgo(gfx942, 128 * kKiB));
+    EXPECT_EQ(kAlgoBcIpc, BroadcastAlgo(gfx942, 8 * kMiB));
+    gfx942->ddaIpcMemHandler = nullptr;
+    DeleteCommWithArch(gfx942);
   });
 }
 
