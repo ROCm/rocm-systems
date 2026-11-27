@@ -7,21 +7,28 @@ page.
 """
 
 import argparse
-import json
 import math
-import re
 from pathlib import Path
 from typing import Dict, List, Tuple
 
+import common
 import plotly.graph_objects as go
 import pytest
 
 import roofline.roofline_html as roofline_html
 from roofline.roofline_frame import FRAME_X_MIN, canonical_frame
-from roofline.roofline_hover import truncate_kernel_name, wrap_hover_name
-from roofline.roofline_html import RooflineViewModel, build_interactive_document
+from roofline.roofline_hover import wrap_hover_name
+from roofline.roofline_html import (
+    MODEL_ID,
+    RooflineViewModel,
+    build_interactive_document,
+)
 from roofline.roofline_main import Roofline, _default_precisions
-from utils.html_report.report_shell import DARK_THEME_CLASS, read_asset
+from utils.html_report.report_shell import (
+    DARK_THEME_CLASS,
+    read_asset,
+    truncate_kernel_name,
+)
 
 _ASSETS = Path(roofline_html.__file__).parent / "assets"
 
@@ -75,17 +82,6 @@ def layout_bounds(figure: go.Figure) -> List[List[float]]:
         [10**bound for bound in figure.layout.xaxis.range],
         [10**bound for bound in figure.layout.yaxis.range],
     ]
-
-
-def embedded_model(document: str) -> dict:
-    """Parse the JSON model from a standalone roofline document."""
-    match = re.search(
-        r'<script id="roofline-model" type="application/json">(.*?)</script>',
-        document,
-        re.DOTALL,
-    )
-    assert match is not None
-    return json.loads(match.group(1))
 
 
 def interactive_document(roofline, ai_data: dict) -> Tuple[go.Figure, str]:
@@ -320,19 +316,6 @@ def test_kernel_hover_given_a_name_under_the_length_cap__wraps_it_whole() -> Non
     assert lines.replace("<br>", "") == name
 
 
-def test_truncate_kernel_name_caps_pathologically_long_names() -> None:
-    """A pathologically long demangled name is capped at 200 characters, ending
-    in an ellipsis, so it can't blow up the tooltip. Names within the cap are
-    untouched."""
-    name = "Cijk_Alik_Bljk_" + "SB_MT256x256x16_MI32x32x2x1_" * 40
-
-    truncated = truncate_kernel_name(name)
-
-    assert len(truncated) == 200
-    assert truncated == name[:197] + "..."
-    assert truncate_kernel_name("short_name") == "short_name"
-
-
 def test_kernel_hover_truncates_names_beyond_two_hundred_characters() -> None:
     """The kernel trace hover wraps the truncated name, not the raw one, so a
     pathologically long demangled name can't blow up the tooltip."""
@@ -518,7 +501,7 @@ def test_combined_document_embeds_the_plotly_frame(benchmarked_roofline) -> None
         {"ai_hbm": [[0.5], [2000.0]], "kernelNames": ["slow"]},
     )
 
-    embedded_frame = embedded_model(document)["frame"]
+    embedded_frame = common.embedded_model(document, MODEL_ID)["frame"]
     layout_frame = layout_bounds(figure)
     assert embedded_frame["x"] == pytest.approx(layout_frame[0])
     assert embedded_frame["y"] == pytest.approx(layout_frame[1])
@@ -571,7 +554,8 @@ def test_kernel_sets_ship_identical_embedded_frames(benchmarked_roofline) -> Non
     )
 
     assert (
-        embedded_model(slow_document)["frame"] == embedded_model(fast_document)["frame"]
+        common.embedded_model(slow_document, MODEL_ID)["frame"]
+        == common.embedded_model(fast_document, MODEL_ID)["frame"]
     )
 
 
@@ -733,21 +717,6 @@ def test_construct_plotly_figures_defaults_to_every_supported_datatype(
     trace_names = {trace.name for trace in flops_figure.data}
     assert "Peak MFMA-BF16" in trace_names
     assert "Peak VALU-FP64" in trace_names
-
-
-def test_the_controller_looks_up_controls_the_page_renders() -> None:
-    """Every control the controller reaches for by id has to be one the document
-    renders. Nothing would report the two drifting apart: the control would
-    simply stop working."""
-    controller = (_ASSETS / "roofline_plot.js").read_text(encoding="utf-8")
-    page_template = read_asset(_ASSETS, "roofline_plot.html")
-
-    looked_up = set(re.findall(r'getElementById\("([^"]+)"\)', controller))
-    assert looked_up, "expected the controller to find its controls by id"
-    for element_id in sorted(looked_up):
-        assert f'id="{element_id}"' in page_template, (
-            f"the controller looks up #{element_id}, which the page never renders"
-        )
 
 
 def test_browser_exposes_fixed_reset_fit_and_offplot_controls() -> None:

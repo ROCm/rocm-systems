@@ -4,6 +4,7 @@
   "use strict";
 
   var model = window.HtmlReport.readModel("roofline-model");
+  var clamp = window.HtmlReport.clamp;
   if (!model) {
     return;
   }
@@ -12,7 +13,9 @@
   var ALL_PEAKS_VALUE = model.allPeaksValue;
   var LIMITING_PEAK_VALUE = model.limitingPeakValue;
   var ROOF_EXTREME_MAX_AI = model.roofExtremeMaxAi;
-  var KERNEL_NAME_FONT_FAMILY = model.kernelNameFontFamily;
+  var KERNEL_NAME_FONT_FAMILY = getComputedStyle(document.documentElement)
+    .getPropertyValue("--report-kernel-font")
+    .trim();
 
   // ---- Own presentation ---------------------------------------------------
   var ALL_PEAKS_LABEL = "All peaks";
@@ -185,10 +188,6 @@
       return (kernels[b].pctRuntime || 0) - (kernels[a].pctRuntime || 0);
     });
     return order;
-  }
-
-  function clamp(value, minimum, maximum) {
-    return Math.min(Math.max(value, minimum), maximum);
   }
 
   function setRoofRowState(item, selected, dimmed) {
@@ -1452,9 +1451,6 @@
       mode: "multi",
       decorateRow: function (row, item) {
         var kernel = kernels[item.key];
-        row.querySelector(".report-panel-name").classList.add(
-          "roofline-kernel-name"
-        );
         if (kernelHasRuntime(kernel)) {
           row.querySelector(".report-panel-action").appendChild(
             buildRuntimePct(kernel)
@@ -1709,10 +1705,6 @@
   }
 
   function init() {
-    document.documentElement.style.setProperty(
-      "--report-kernel-font",
-      KERNEL_NAME_FONT_FAMILY
-    );
     buildPeakOptions();
     buildPrecisionOptions();
     buildKernelPanel();

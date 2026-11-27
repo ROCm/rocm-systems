@@ -167,7 +167,7 @@ class cli_analysis(OmniAnalyze_Base):
                             "Skipping roofline charting: "
                             f"gpu arch {gpu_arch} not in soc {soc}",
                         )
-                    if is_roofline_valid:
+                    elif is_roofline_valid:
                         soc_obj = soc[gpu_arch]
 
                         roof_obj = Roofline(
@@ -177,7 +177,6 @@ class cli_analysis(OmniAnalyze_Base):
                                 "workload_dir": workload_path,
                                 "device_id": 0,
                                 "gpu_arch": gpu_arch,
-                                "kernel_filter": bool(args.gpu_kernel),
                                 "iteration_multiplexing": self._profiling_config.get(
                                     "iteration_multiplexing"
                                 ),
