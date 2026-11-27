@@ -1,0 +1,39 @@
+view: Workgroup Manager (SPI)
+alias: spi
+tables:
+- title: Workgroup manager utilizations
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: spi.accelerator_util
+  - metric: spi.scheduler_pipe_util
+  - metric: spi.workgroup_manager_util
+  - metric: compute.se_util
+  - metric: compute.cu_util
+  - metric: spi.dispatched_workgroups
+  - metric: spi.dispatched_wavefronts
+  - metric: spi.vgpr_writes
+  - metric: spi.sgpr_writes
+- title: Workgroup Manager - Resource Allocation
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: spi.not_scheduled_rate_workgroup_manager
+  - metric: spi.not_scheduled_rate_scheduler_pipe
+  - metric: spi.scheduler_pipe_stall_rate
+  - metric: spi.scratch_stall_rate
+  - metric: spi.insufficient_simd_waveslots
+  - metric: spi.insufficient_simd_vgprs
+  - metric: spi.insufficient_simd_sgprs
+  - metric: spi.insufficient_cu_lds
+  - metric: spi.insufficient_cu_barriers
+  - metric: spi.reached_cu_workgroup_limit
+  - metric: spi.reached_cu_wavefront_limit

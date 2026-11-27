@@ -1,0 +1,14 @@
+view: Roofline
+alias: roof
+tables:
+- title: Roofline Performance Rates
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+    peak: Peak (Empirical)
+  metrics:
+  - metric: vl1d.l2_bw
+    label: L2 Cache Bandwidth
+  - metric: vl1d.cache_bw
+  - metric: lds.theoretical_bw

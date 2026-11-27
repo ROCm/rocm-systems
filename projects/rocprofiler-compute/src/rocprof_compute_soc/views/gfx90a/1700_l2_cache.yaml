@@ -1,0 +1,144 @@
+view: L2 Cache
+alias: l2
+tables:
+- title: L2 Speed-of-Light
+  header:
+    metric: Metric
+    value: Avg
+    unit: Unit
+  metrics:
+  - metric: l2.util
+    label: Utilization
+  - metric: l2.peak_bw
+    label: Peak Bandwidth
+  - metric: l2.hit_rate
+    label: Hit Rate
+  - metric: fabric.rd_bw
+  - metric: fabric.wr_atomic_bw
+  - metric: fabric.hbm_peak_bw
+- title: L2-Fabric interface metrics
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: fabric.rd_bw
+    label: Read Bandwidth
+  - metric: fabric.hbm_rd_traffic
+  - metric: fabric.remote_rd_traffic
+    label: Remote Read Traffic
+  - metric: fabric.uncached_rd_traffic
+    label: Uncached Read Traffic
+  - metric: fabric.wr_atomic_bw_norm
+    label: Write and Atomic Bytes
+  - metric: fabric.hbm_wr_atomic_traffic
+  - metric: fabric.remote_wr_atomic_traffic
+    label: Remote Write and Atomic Traffic
+  - metric: fabric.atomic_traffic
+    label: Atomic Traffic
+  - metric: fabric.uncached_wr_atomic_traffic
+    label: Uncached Write and Atomic Traffic
+  - metric: fabric.rd_lat
+    label: Read Latency
+  - metric: fabric.wr_lat
+    label: Write and Atomic Latency
+  - metric: fabric.atomic_lat
+    label: Atomic Latency
+- title: L2 Cache Accesses
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: l2.bw
+    label: Bandwidth
+  - metric: l2.req
+    label: Req
+  - metric: l2.rd_req
+    label: Read Req
+  - metric: l2.wr_req
+    label: Write Req
+  - metric: l2.atomic_req
+    label: Atomic Req
+  - metric: l2.streaming_req
+    label: Streaming Req
+  - metric: l2.probe_req
+    label: Probe Req
+  - metric: l2.hit_rate
+  - metric: l2.hits
+    label: Hits
+  - metric: l2.misses
+    label: Misses
+  - metric: l2.writeback
+    label: Writeback
+  - metric: l2.writeback_internal
+    label: Writeback (Internal)
+  - metric: l2.writeback_vl1d_req
+    label: Writeback (vL1D Req)
+  - metric: l2.evict_internal
+    label: Evict (Internal)
+  - metric: l2.evict_vl1d_req
+    label: Evict (vL1D Req)
+  - metric: l2.nc_req
+    label: NC Req
+  - metric: l2.uc_req
+    label: UC Req
+  - metric: l2.cc_req
+    label: CC Req
+  - metric: l2.rw_req
+    label: RW Req
+- title: L2 Cache Stalls
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics: []
+- title: L2 - Fabric Interface stalls
+  header:
+    metric: Metric
+    type: Type
+    transaction: Transaction
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: fabric.wr_credit_starvation
+    label: Write - Credit Starvation
+    values:
+      type: Credit Starvation
+      transaction: Write
+- title: L2 - Fabric interface detailed metrics
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: fabric.rd_32b
+    label: Read (32B)
+  - metric: fabric.rd_64b
+    label: Read (64B)
+  - metric: fabric.rd_uncached
+    label: Read (Uncached)
+  - metric: fabric.hbm_rd
+  - metric: fabric.remote_rd
+    label: Remote Read
+  - metric: fabric.wr_atomic_32b
+    label: Write and Atomic (32B)
+  - metric: fabric.wr_atomic_uncached
+    label: Write and Atomic (Uncached)
+  - metric: fabric.wr_atomic_64b
+    label: Write and Atomic (64B)
+  - metric: fabric.hbm_wr_atomic
+  - metric: fabric.remote_wr_atomic
+    label: Remote Write and Atomic
+  - metric: fabric.atomic
+    label: Atomic

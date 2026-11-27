@@ -1,0 +1,103 @@
+view: Compute Units - Instruction Mix
+alias: cu_ins
+tables:
+- title: Overall Instruction Mix
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: compute.inst_mix_valu
+    label: VALU
+  - metric: compute.inst_mix_vmem
+    label: VMEM
+  - metric: lds.insts
+    label: LDS
+  - metric: compute.inst_mix_mfma
+    label: MFMA
+  - metric: compute.inst_mix_salu
+    label: SALU
+  - metric: compute.inst_mix_smem
+    label: SMEM
+  - metric: compute.inst_mix_branch
+    label: Branch
+- title: VALU Arithmetic Instruction Mix
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: compute.inst_mix_int32
+    label: INT32
+  - metric: compute.inst_mix_int64
+    label: INT64
+  - metric: compute.inst_mix_f16_add
+    label: F16-ADD
+  - metric: compute.inst_mix_f16_mul
+    label: F16-MUL
+  - metric: compute.inst_mix_f16_fma
+    label: F16-FMA
+  - metric: compute.inst_mix_f16_trans
+    label: F16-Trans
+  - metric: compute.inst_mix_f32_add
+    label: F32-ADD
+  - metric: compute.inst_mix_f32_mul
+    label: F32-MUL
+  - metric: compute.inst_mix_f32_fma
+    label: F32-FMA
+  - metric: compute.inst_mix_f32_trans
+    label: F32-Trans
+  - metric: compute.inst_mix_f64_add
+    label: F64-ADD
+  - metric: compute.inst_mix_f64_mul
+    label: F64-MUL
+  - metric: compute.inst_mix_f64_fma
+    label: F64-FMA
+  - metric: compute.inst_mix_f64_trans
+    label: F64-Trans
+  - metric: compute.inst_mix_conversion
+    label: Conversion
+- title: VMEM Instruction Mix
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: ta.global_insts
+  - metric: ta.global_rd_insts
+  - metric: ta.global_wr_insts
+  - metric: ta.global_atomic_insts
+  - metric: ta.buffer_insts
+    label: Buffer Instructions
+  - metric: ta.buffer_rd_insts
+    label: Buffer Read
+  - metric: ta.buffer_wr_insts
+    label: Buffer Write
+  - metric: ta.buffer_atomic_insts
+    label: Buffer Atomic
+- title: MFMA Arithmetic Instruction Mix
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: compute.inst_mix_mfma_i8
+    label: MFMA-I8
+  - metric: compute.inst_mix_mfma_f8
+    label: MFMA-F8
+  - metric: compute.inst_mix_mfma_f16
+    label: MFMA-F16
+  - metric: compute.inst_mix_mfma_bf16
+    label: MFMA-BF16
+  - metric: compute.inst_mix_mfma_f32
+    label: MFMA-F32
+  - metric: compute.inst_mix_mfma_f64
+    label: MFMA-F64

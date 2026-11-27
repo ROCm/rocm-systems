@@ -1,0 +1,23 @@
+view: Graphics Register Bus Manager (GRBM)
+alias: grbm
+tables:
+- title: GPU Utilization
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: grbm.gpu_busy
+  - metric: grbm.cp_util
+  - metric: grbm.gl2c_busy
+- title: Shader Engine Utilization
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: grbm.ta_busy

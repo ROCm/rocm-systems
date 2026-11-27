@@ -1,0 +1,187 @@
+view: GL0 Cache and LDS
+alias: gl0
+tables:
+- title: WGP Cache Utilization (LDS + GL0)
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl0.util
+    label: Utilization
+- title: Cache Requests
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl0.total_req
+    label: Total Requests
+  - metric: gl0.total_req_rd
+    label: Total Requests - Read
+  - metric: gl0.total_req_wr
+    label: Total Requests - Write
+  - metric: gl0.req_stall_rate
+    label: Request Stall Rate
+  - metric: gl0.req_lat
+    label: Request Latency
+  - metric: gl0.total_gl0_sectors
+  - metric: gl0.rd_sectors
+  - metric: gl0.wr_sectors
+- title: Cache Lookup
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl0.hit_rate
+    label: Cache Lookup Hit Rate
+  - metric: gl0.sector_lookup_hit_rate
+    label: Cache Sector Lookup Hit Rate
+  - metric: gl0.capacity_stall_rate
+    label: Cache Capacity Stall Rate
+  - metric: gl0.total_conflict_stall_rate
+    label: Cache Total Conflict Stall Rate
+  - metric: gl0.lat_fifo_stall_rate
+    label: Latency FIFO Stall Rate
+  - metric: gl0.gl1_memory_req_fifo_stall_rate
+  - metric: gl0.return_queue_pending_stall_rate
+    label: Return Queue Pending Stall Rate
+  - metric: gl0.wr_stall_rate_gl1_rd_return
+    label: Cache Write Stall Rate - GL1 Read Return
+  - metric: gl0.set_conflict_stall_rate_cache_rd
+    label: Set Conflict Stall Rate - Cache Read
+  - metric: gl0.set_conflict_stall_rate_cache_wr
+    label: Set Conflict Stall Rate - Cache Write
+  - metric: gl0.set_conflict_stall_rate_atomics
+    label: Set Conflict Stall Rate - Atomics
+  - metric: gl0.ram_bank_conflict_stall_rate_rd
+    label: Cache RAM Bank Conflict Stall Rate - Read
+  - metric: gl0.ram_bank_conflict_stall_rate_wr
+    label: Cache RAM Bank Conflict Stall Rate - Write
+  - metric: gl0.segment_conflict_stall_rate_cache
+    label: Segment Conflict Stall Rate - Cache
+- title: LDS Accesses
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: lds.util
+  - metric: lds.util_load
+  - metric: lds.util_store
+  - metric: lds.util_atomics
+  - metric: lds.bank_conflict_stall_rate
+  - metric: lds.bank_conflict_stall_rate_rd
+  - metric: lds.bank_conflict_stall_rate_wr
+  - metric: lds.bank_conflict_stall_rate_atomic
+  - metric: lds.address_conflict_stall_rate
+  - metric: lds.segment_conflict_stall_rate_lds
+  - metric: lds.stall_rate
+- title: Set-Slot Dynamics
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl0.slot_replacement_rate
+    label: Slot Replacement Rate
+  - metric: gl0.slot_hit_rate
+    label: Slot Hit Rate
+  - metric: gl0.set_conflict_stall_same_port
+    label: Set Conflict Stall - Same Port
+  - metric: gl0.slot_replacement_stall_same_port
+    label: Slot Replacement Stall - Same Port
+  - metric: gl0.slot_replacement_stall_cross_port
+    label: Slot Replacement Stall - Cross Port
+- title: GL0-GL1 Interface - Requests and Bandwidth
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl0.gl1_rd_req
+  - metric: gl0.gl1_rd_bw
+  - metric: gl0.gl1_wr_req
+  - metric: gl0.gl1_wr_bw
+  - metric: gl0.gl1_atomic_req_with_return
+  - metric: gl0.gl1_atomic_req_without_return
+  - metric: gl0.gl1_cluster_req
+  - metric: gl0.gl1_prefetch_req_cu_scope
+  - metric: gl0.gl1_prefetch_req_gl2_scope
+- title: GL0-GL1 Interface - Latency
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl0.gl1_rd_lat
+  - metric: gl0.gl1_wr_lat
+  - metric: gl0.gl1_cluster_req_lat
+- title: GL0-GL1 Interface - Stalls
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl0.gl1_req_stall
+  - metric: gl0.ram_rd_stall_by_gl1_wr
+  - metric: gl0.wr_stall_rate_gl1_rd_return
+- title: GL0-UTCL0 Interface
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl0.utcl0_req
+  - metric: gl0.utcl0_thrash_stall_rate
+- title: UTCL0-UTCL1 Interface
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl0.utcl0_utcl1_req
+  - metric: gl0.utcl0_utcl1_req_internal_retry
+  - metric: gl0.utcl0_utcl1_returns
+  - metric: gl0.utcl0_utcl1_returns_permission_fault
+  - metric: gl0.utcl0_utcl1_returns_xnack_retry
+  - metric: gl0.utcl0_utcl1_returns_partial_resident_fault
+  - metric: gl0.utcl0_utcl1_returns_no_retry_fault
+  - metric: gl0.utcl1_req_lat
+  - metric: gl0.utcl1_req_stall
+- title: UTCL0 Lookup
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl0.utcl0_lookup_hit_rate
+  - metric: gl0.utcl0_lookup_hit_on_miss_rate
+  - metric: gl0.utcl0_lookup_lat
+  - metric: gl0.utcl0_lfifo_full_stall
+  - metric: gl0.utcl0_max_inflight_stall
+  - metric: gl0.utcl0_miss_fifo_stall
+  - metric: gl0.utcl0_lfifo_not_present_stall

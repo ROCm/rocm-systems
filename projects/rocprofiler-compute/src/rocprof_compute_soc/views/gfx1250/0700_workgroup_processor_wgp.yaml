@@ -1,0 +1,243 @@
+view: Workgroup Processor (WGP)
+alias: wgp
+tables:
+- title: Utilization
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: wgp.util
+  - metric: wgp.wall_clock
+  - metric: wgp.active_wgps
+- title: Wavefront Launch Stats
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: dispatch.grid_size
+  - metric: dispatch.workgroup_size
+  - metric: dispatch.vgprs
+  - metric: dispatch.agprs
+  - metric: dispatch.sgprs
+  - metric: dispatch.lds_allocation
+  - metric: dispatch.scratch_allocation
+- title: Wavefront Dispatch
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: wave.dispatched_wavefronts
+    label: Dispatched Wavefronts
+  - metric: wave.dispatched_threads
+- title: Wavefront Life
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: wave.life
+- title: Wavefront Instruction Mix
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: compute.total_insts
+  - metric: compute.insts_internal
+  - metric: compute.insts_valu
+  - metric: compute.insts_salu
+  - metric: compute.insts_smem
+  - metric: compute.insts_transcendental
+  - metric: compute.insts_double_precision
+  - metric: compute.insts_vmem
+  - metric: compute.insts_lds
+- title: VMEM Instruction Mix
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: compute.insts_vmem_flat
+  - metric: compute.insts_global_scratch
+  - metric: compute.insts_flat_load
+  - metric: compute.insts_flat_store
+  - metric: compute.insts_buffer_load
+  - metric: compute.insts_buffer_store
+  - metric: compute.insts_global_scratch_load
+  - metric: compute.insts_global_scratch_store
+  - metric: compute.insts_global_scratch_atomics
+  - metric: compute.insts_vmem_atomic_return
+  - metric: compute.insts_vmem_atomic_non_return
+  - metric: compute.insts_multicast_load
+  - metric: compute.insts_async_load
+  - metric: compute.insts_async_store
+  - metric: compute.insts_tdm
+- title: LDS Instruction Mix
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: compute.total_lds_insts
+  - metric: compute.insts_lds_load
+  - metric: compute.insts_lds_store
+  - metric: compute.insts_lds_atomic_return
+  - metric: compute.insts_lds_atomic_non_return
+  - metric: compute.insts_lds_other
+- title: VALU Instruction Mix
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: compute.insts_valu
+    label: Total VALU Instructions
+  - metric: compute.insts_transcendental
+    label: VALU Instructions - Trans
+  - metric: compute.insts_double_precision
+    label: VALU Instructions - Double Precision
+  - metric: compute.valu_insts_cmacc
+  - metric: compute.valu_insts_smacc
+  - metric: compute.valu_insts_xdl
+  - metric: compute.valu_insts_wmma
+- title: VALU FLOPs and IOPs Counting
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: compute.valu_integer_operations
+  - metric: compute.valu_fp_operations_fp16
+  - metric: compute.valu_fp_operations_fp16_trans
+  - metric: compute.valu_fp_operations_fp32
+  - metric: compute.valu_fp_operations_fp32_trans
+  - metric: compute.valu_fp_operations_fp64
+  - metric: compute.valu_fp_operations_fp64_trans
+- title: WMMA Instruction FLOPs and IOPs Counting
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: compute.wmma_fp_operations_fp32
+  - metric: compute.wmma_fp_operations_fp64
+  - metric: compute.wmma_fp_operations_fp16
+  - metric: compute.wmma_fp_operations_bf16
+  - metric: compute.wmma_fp_operations_fp8
+  - metric: compute.wmma_fp_operations_fp6
+  - metric: compute.wmma_fp_operations_fp4
+  - metric: compute.wmma_fp_operations_fp6fp4
+  - metric: compute.wmma_int_operations_int8
+  - metric: compute.wmma_int_operations_int4
+- title: Instruction Issue Stalls
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: compute.tdm_issue_stall_rate
+- title: Compute Pipeline Utilization
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: compute.pipeline_util_cmacc
+  - metric: compute.pipeline_util_smacc
+  - metric: compute.pipeline_util_double_precision
+  - metric: compute.pipeline_util_xdl
+- title: WGP Latencies
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: lds.access_lat
+- title: WGP-TXA Interface
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: wgp.gl0_req_bus_util
+  - metric: wgp.gl0_lds_req_bus_util
+  - metric: wgp.gl0_vmem_req_bus_util
+  - metric: wgp.gl0_vmem_rd_req_bus_util
+  - metric: wgp.gl0_vmem_wr_req_bus_util
+  - metric: wgp.bus_util_row0
+    label: Bus Utilization - Row0
+  - metric: wgp.bus_stall_rate_row0
+    label: Bus Stall Rate - Row0
+  - metric: wgp.bus_util_row1
+    label: Bus Utilization - Row1
+  - metric: wgp.bus_stall_rate_row1
+    label: Bus Stall Rate - Row1
+- title: WGP-TXD Interface
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: wgp.txd_data_bus_util
+- title: Instruction Cache
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: l1i.hit_rate_excl_dup
+- title: Scalar Data Cache
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: sl1d.hits_per_req
+  - metric: sl1d.load_bw_norm
+- title: SQC-GL1 Interface
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: sl1d.interface_stall_rate
+    label: Interface Stall Rate

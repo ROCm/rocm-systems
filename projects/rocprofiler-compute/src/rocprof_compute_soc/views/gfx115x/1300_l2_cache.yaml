@@ -1,0 +1,43 @@
+view: GL2 Cache (L2)
+alias: gl2
+tables:
+- title: GL2 Cache Performance
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl2.hit_rate
+  - metric: gl2.hits
+  - metric: gl2.misses
+- title: GL2 Cache Request Statistics
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl2.total_req
+    label: Total Requests
+  - metric: gl2.rd_req
+    label: Read Requests
+  - metric: gl2.wr_req
+    label: Write Requests
+  - metric: gl2.atomic_req
+    label: Atomic Requests
+  - metric: gl2.ea_rd_req_dram
+  - metric: gl2.ea_wr_req_dram
+- title: GL2 Cache Bandwidth
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: l2.bw
+    label: GL2 Cache Read Bandwidth
+  - metric: gl2.wr_bw

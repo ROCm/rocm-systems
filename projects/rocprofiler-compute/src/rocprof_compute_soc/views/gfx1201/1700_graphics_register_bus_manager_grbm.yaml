@@ -1,0 +1,12 @@
+view: Graphics Register Bus Manager (GRBM)
+alias: grbm
+tables:
+- title: GRBM Metrics
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: grbm.gpu_busy

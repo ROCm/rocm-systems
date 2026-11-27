@@ -214,6 +214,11 @@ class MetricLibrary:
             for field in COUNTER_EXPRESSION_FIELDS
             if self.metrics[metric_id].get(field) is not None
         ]
-        formulas = {name: entry["formula"] for name, entry in self.collectables.items()}
-        counters, _ = extract_counters_and_variables("\n".join(expressions), formulas)
+        counters, _ = extract_counters_and_variables(
+            "\n".join(expressions), self.collectable_formulas()
+        )
         return counters
+
+    def collectable_formulas(self) -> Dict[str, str]:
+        """Return the formula of each collectable, by name."""
+        return {name: entry["formula"] for name, entry in self.collectables.items()}
