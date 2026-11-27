@@ -46,6 +46,17 @@ protected:
 
     }
 
+    // The workflow and batch tests below drive a single sender/receiver pair
+    // (rank 0 and its peer), so any other process count deadlocks in the transfer or
+    // in the collective communicator teardown. Ring-based tests (P2pWithMemcpyTest,
+    // P2pRegistrationBasicBuffersTest, the P2pIpcBufferRegistration family) stay valid
+    // at every process count. GTEST_SKIP must run in the test body itself: called
+    // from a helper it only records the skip part and the body keeps executing.
+    bool runningWithExactlyTwoProcesses() const
+    {
+        return config.world_size == 2;
+    }
+
     // Helper: Allocate P2P-specific resources
     void setupP2PBuffers()
     {
@@ -823,6 +834,11 @@ public:
 
 TEST_F(P2pMPITest, P2pWorkflow)
 {
+    if(!runningWithExactlyTwoProcesses())
+    {
+        GTEST_SKIP() << "P2pWorkflow requires exactly 2 processes, got " << config.world_size;
+    }
+
     ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI,
                                           kNoProcessLimit,
                                           kRequirePowerOfTwo,
@@ -1732,6 +1748,12 @@ TEST_F(P2pMPITest, IpcGraphRegisterBufferTest)
 // (comm->nNodes <= 1), so the channel-base mapping matches pre-7.14 behaviour.
 TEST_F(P2pMPITest, P2pBatchAutoDisableOnSingleNode)
 {
+    if(!runningWithExactlyTwoProcesses())
+    {
+        GTEST_SKIP() << "P2pBatchAutoDisableOnSingleNode requires exactly 2 processes, got "
+                     << config.world_size;
+    }
+
     if(getenv("RCCL_P2P_BATCH_ENABLE"))
     {
         GTEST_SKIP() << "RCCL_P2P_BATCH_ENABLE is explicitly set — "
