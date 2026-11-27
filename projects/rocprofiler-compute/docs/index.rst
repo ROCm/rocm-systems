@@ -113,6 +113,8 @@ in practice.
 
       * :doc:`reference/faq`
 
+      * :doc:`reference/gfx1100_counter_reference`
+
 This project is proudly open source. For more details on how to contribute,
 refer to
 `Contributing to ROCm <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.

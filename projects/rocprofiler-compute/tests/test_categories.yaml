@@ -86,12 +86,14 @@ test_categories:
       - test_tty
       - test-rocprofiler-compute-tool
       - test_soc_base
+      - test_sdk_config
       - test-pc-sampling-collector
       - test-compression
       - test-csv
       - test-torch-trace-collector
       - test-torch-trace-collector-before-install
     therock_ci_exclude:
+      - test_sdk_config
       - test_profile_live_attach_detach
       - test_metric_validation
       - test_counter_grouping_inspector
@@ -104,6 +106,7 @@ test_categories:
       - test_schema_visualizer
       - test_validate_metric_library
     rocprofiler_compute_ci_exclude:
+      - test_sdk_config
       - test_profile_live_attach_detach
       - test_counter_grouping_inspector
       - test_format_yaml
@@ -222,6 +225,7 @@ test_categories:
       - test_tty
       - test-rocprofiler-compute-tool
       - test_soc_base
+      - test_sdk_config
       - test-pc-sampling-collector
       - test-compression
       - test-csv
@@ -234,6 +238,7 @@ test_categories:
       - test_profile_live_attach_detach
       - test_metric_validation
     therock_ci_exclude:
+      - test_sdk_config
       - test_profile_live_attach_detach
       - test_metric_validation
       - test_counter_grouping_inspector
@@ -246,6 +251,7 @@ test_categories:
       - test_schema_visualizer
       - test_validate_metric_library
     rocprofiler_compute_ci_exclude:
+      - test_sdk_config
       - test_profile_live_attach_detach
       - test_counter_grouping_inspector
       - test_format_yaml
@@ -372,6 +378,7 @@ test_categories:
       - test_tty
       - test-rocprofiler-compute-tool
       - test_soc_base
+      - test_sdk_config
       - test-pc-sampling-collector
       - test-compression
       - test-csv
@@ -384,6 +391,7 @@ test_categories:
       - test_profile_live_attach_detach
       - test_metric_validation
     therock_ci_exclude:
+      - test_sdk_config
       - test_profile_live_attach_detach
       - test_metric_validation
       - test_counter_grouping_inspector
@@ -396,6 +404,7 @@ test_categories:
       - test_schema_visualizer
       - test_validate_metric_library
     rocprofiler_compute_ci_exclude:
+      - test_sdk_config
       - test_profile_live_attach_detach
       - test_counter_grouping_inspector
       - test_format_yaml
@@ -522,6 +531,7 @@ test_categories:
       - test_tty
       - test-rocprofiler-compute-tool
       - test_soc_base
+      - test_sdk_config
       - test-pc-sampling-collector
       - test-compression
       - test-csv
@@ -534,6 +544,7 @@ test_categories:
       - test_profile_live_attach_detach
       - test_metric_validation
     therock_ci_exclude:
+      - test_sdk_config
       - test_profile_live_attach_detach
       - test_metric_validation
       - test_counter_grouping_inspector
@@ -546,6 +557,7 @@ test_categories:
       - test_schema_visualizer
       - test_validate_metric_library
     rocprofiler_compute_ci_exclude:
+      - test_sdk_config
       - test_profile_live_attach_detach
       - test_counter_grouping_inspector
       - test_format_yaml
