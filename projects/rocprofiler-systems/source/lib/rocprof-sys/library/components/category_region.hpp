@@ -155,12 +155,21 @@ struct real_region_policy
 template <typename Policy = real_region_policy>
 struct category_region
 {
+    // Frames a thread still had open when it exited. They are handed to the registry so
+    // the finalization flush can still emit them
+    struct orphaned_entries
+    {
+        std::thread::id                                       owner_tid = {};
+        std::map<entry_key, std::vector<pending_cache_entry>> entries   = {};
+    };
+
     // Global directory of every thread's category_region instance, so finalization can
     // drain threads other than the caller. Never destroyed so the thread-local handles
     // that deregister at process exit can never touch a freed registry
     struct registry_t
     {
         std::vector<category_region*> instances = {};
+        std::vector<orphaned_entries> orphaned  = {};
         std::mutex                    mutex;
 
         static registry_t& instance()
@@ -189,6 +198,15 @@ struct category_region
         {
             auto&                       registry = registry_t::instance();
             std::lock_guard<std::mutex> lock{ registry.mutex };
+            // A thread's thread-local destructors can run before the process-wide
+            // finalization, for example when main() ends with a tail call and is
+            // finalized from a thread-local destructor. Once this thread leaves the
+            // registry the flush can no longer see its open frames, such as the
+            // program-entry frame of main(), so hand them over first
+            if(auto orphan = self->take_pending_entries(); !orphan.entries.empty())
+            {
+                registry.orphaned.push_back(std::move(orphan));
+            }
             std::erase(registry.instances, self);
         }
 
@@ -525,6 +543,15 @@ struct category_region
                 instance->flush_pending_incomplete(end_ts);
             }
         }
+
+        // Frames of threads that already exited
+        const typename Policy::region_sink_type     sink{};
+        const typename Policy::thread_metadata_type thread_meta{};
+        for(const auto& orphan : registry.orphaned)
+        {
+            emit_incomplete(sink, thread_meta, orphan.owner_tid, orphan.entries, end_ts);
+        }
+        registry.orphaned.clear();
     }
 
 private:
@@ -536,28 +563,51 @@ private:
                            args_str.c_str());
     }
 
-    // Emits this thread's outstanding frames with the "[incomplete]" suffix. May run from
-    // a different (finalizing) thread, so it resolves the owner from the std::thread::id
-    // captured in cache_start() (not the current thread) and guards the map with mutex_
-    void flush_pending_incomplete(timestamp_t end_ts)
+    // Moves this thread's outstanding frames out, leaving the map empty. Used when the
+    // owning thread exits, so guards the map with mutex_
+    orphaned_entries take_pending_entries()
+    {
+        std::lock_guard<std::mutex> lock{ mutex_ };
+        auto orphan = orphaned_entries{ owner_tid_, std::move(map_name_to_args) };
+        map_name_to_args.clear();
+        return orphan;
+    }
+
+    // Emits outstanding frames with the "[incomplete]" suffix, except the program-entry
+    // frame (named after the executable), which is open by design. Resolves the owner
+    // from the std::thread::id captured in cache_start() (not the current thread), so
+    // it can run on a different (finalizing) thread
+    static void emit_incomplete(
+        const typename Policy::region_sink_type&                     sink,
+        const typename Policy::thread_metadata_type&                 thread_meta,
+        std::thread::id                                              owner_tid,
+        const std::map<entry_key, std::vector<pending_cache_entry>>& entries,
+        timestamp_t                                                  end_ts)
     {
         static constexpr std::string_view incomplete_suffix{ "incomplete" };
         const auto&                       exe_name = rocprofsys::config::get_exe_name();
 
-        std::lock_guard<std::mutex> lock{ mutex_ };
-        const std::uint64_t         thread_id = thread_meta_.resolve_thread(owner_tid_);
+        const std::uint64_t thread_id = thread_meta.resolve_thread(owner_tid);
 
-        for(const auto& [key, entry_stack] : map_name_to_args)
+        for(const auto& [key, entry_stack] : entries)
         {
             const auto name = (key.name == exe_name)
                                   ? key.name
                                   : fmt::format("{} [{}]", key.name, incomplete_suffix);
             for(const auto& entry : entry_stack)
             {
-                cache_region(thread_id, name, entry.start_ts, end_ts, key.category,
-                             entry.args);
+                sink.store_region(thread_id, name.c_str(), entry.start_ts, end_ts,
+                                  key.category.c_str(), entry.args.c_str());
             }
         }
+    }
+
+    // Emits this thread's outstanding frames. May run from a different (finalizing)
+    // thread, so it guards the map with mutex_
+    void flush_pending_incomplete(timestamp_t end_ts)
+    {
+        std::lock_guard<std::mutex> lock{ mutex_ };
+        emit_incomplete(sink_, thread_meta_, owner_tid_, map_name_to_args, end_ts);
         map_name_to_args.clear();
     }
 

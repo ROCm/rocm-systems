@@ -81,7 +81,10 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   GPU buffer callbacks no longer throw `Trying to use buffered storage while it is not running`
   and abort the process. In runtime instrumentation, the finalizer that pops the `main` region
   no longer touches the destroyed thread-local region cache when it runs at process exit, which
-  could crash with a segmentation fault after the tracing session was finalized.
+  could crash with a segmentation fault after the tracing session was finalized. A thread
+  that exits with regions still open now hands them to the region registry, so the finalization
+  flush still writes them. Before, the `main` region was missing from runtime-instrumented traces
+  of a `main` that ends with a tail call.
 
 ## ROCm Systems Profiler 1.10.0 for ROCm 10.2 (unreleased)
 

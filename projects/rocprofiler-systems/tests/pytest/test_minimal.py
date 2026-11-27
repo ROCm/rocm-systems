@@ -514,7 +514,10 @@ class TestMinimal(RocprofsysTest):
                 result,
                 subtest_name="Perfetto Workload Validation",
                 categories=["host"],
-                pass_regex=[r"run_workload\s+\|\s+1\s+\|"],
+                pass_regex=[
+                    r"run_workload\s+\|\s+1\s+\|",
+                    rf"{target}(\.inst)?\s+\|\s+1\s+\|",
+                ],
             )
 
     SLEEP_ITERATIONS = 60
