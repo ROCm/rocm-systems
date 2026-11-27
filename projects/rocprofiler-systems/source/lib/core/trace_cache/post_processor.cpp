@@ -8,6 +8,7 @@
 #include "core/perfetto/engine.hpp"
 #include "core/thread_list/internal_thread_list.hpp"
 #include "core/trace_cache/cacheable.hpp"
+#include "core/trace_cache/cpu_snap_decoder.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/perfetto_processor.hpp"
 #include "core/trace_cache/rocpd_processor.hpp"
@@ -86,18 +87,17 @@ configure_processors(
     std::optional<std::reference_wrapper<track_registry>>               _tracks)
 {
     data::processor_storage_t storage;
+    auto const cpu_snap_skipped_module_prefixes = get_cpu_snap_skipped_module_prefixes();
     if(_formats.is_rocpd_enabled())
     {
         storage.rocpd_processor = std::make_shared<rocpd_processor_t>(
-            _config->_metadata_registry, _config->_agent_manager, _config->_pid,
-            _config->_ppid);
+            *_config, cpu_snap_skipped_module_prefixes);
         _coordinator->add_handler(storage.rocpd_processor);
     }
     if(_formats.is_perfetto_enabled() && _engine.has_value() && _tracks.has_value())
     {
         storage.perfetto_processor = std::make_shared<perfetto_processor_t>(
-            _config->_metadata_registry, _config->_agent_manager, _config->_pid,
-            _config->_ppid, _tracks->get());
+            *_config, _tracks->get(), cpu_snap_skipped_module_prefixes);
         _coordinator->add_handler(storage.perfetto_processor);
     }
 

@@ -11,6 +11,8 @@
 #include "core/demangler.hpp"
 #include "core/node_info.hpp"
 #include "core/output/output_summary.hpp"
+#include "core/trace_cache/cpu_snap_decoder.hpp"
+#include "core/trace_cache/data_types.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/rocpd_helpers.hpp"
 #include "core/trace_cache/sample_type.hpp"
@@ -324,6 +326,38 @@ rocpd_processor_t::handle(const backtrace_region_sample& bts)
     env.track_name = bts.track_name;
 
     m_writer->insert_region_data(region, env);
+}
+
+void
+rocpd_processor_t::handle(const cpu_snap_sample& sample)
+{
+    m_cpu_snap_decoder.feed(sample);
+}
+
+void
+rocpd_processor_t::handle_cpu_snap_slice(const backtrace_region_sample& slice)
+{
+    auto const known_thread = m_cpu_snap_track_registered.find(slice.thread_id);
+    if(known_thread == m_cpu_snap_track_registered.end())
+    {
+        ++m_cpu_snap_dropped_slices_count;
+        m_cpu_snap_dropped_threads_tids.insert(slice.thread_id);
+        return;
+    }
+
+    auto& track_registered = known_thread->second;
+    if(!track_registered)
+    {
+        profiler_hub::writer_types::track_info_t track_info;
+        track_info.name       = slice.track_name;
+        track_info.node_id    = node_info::get_instance().id;
+        track_info.process_id = m_metadata->get_process_info().pid;
+        track_info.thread_id  = slice.thread_id;
+        m_writer->register_track_info(track_info);
+        track_registered = true;
+    }
+
+    handle(slice);
 }
 
 void
@@ -1070,17 +1104,22 @@ rocpd_processor_t::handle(const kfd_sample& kfd)
     }
 }
 
-rocpd_processor_t::rocpd_processor_t(const std::shared_ptr<metadata_registry>& md,
-                                     const std::shared_ptr<agent_manager>&     agent_mngr,
-                                     pid_t pid, pid_t ppid)
+rocpd_processor_t::rocpd_processor_t(
+    const data::processor_config_t& processor_config,
+    std::vector<std::string>        cpu_snap_skipped_module_prefixes)
 : sample_processor_interface()
-, m_metadata(md)
-, m_agent_manager(agent_mngr)
-, m_pid(pid)
-, m_db_output_path(generate_db_output_path(pid))
+, m_metadata(processor_config._metadata_registry)
+, m_agent_manager(processor_config._agent_manager)
+, m_pid(processor_config._pid)
+, m_db_output_path(generate_db_output_path(processor_config._pid))
+, m_cpu_snap_decoder(
+      [this](const backtrace_region_sample& slice) { handle_cpu_snap_slice(slice); },
+      std::move(cpu_snap_skipped_module_prefixes), m_metadata->get_sampling_resumes())
 {
     auto const n_info = node_info::get_instance();
-    auto const uuid   = common::md5sum{ n_info.id, pid, ppid }.hexdigest();
+    auto const uuid =
+        common::md5sum{ n_info.id, processor_config._pid, processor_config._ppid }
+            .hexdigest();
 
     // Remove any existing database file so the writer starts from a clean
     // in-memory state. This handles multiple rocprofsys_init/finalize cycles
@@ -1145,6 +1184,9 @@ void
 rocpd_processor_t::finalize_processing()
 {
     LOG_DEBUG("Finalizing rocpd processor");
+    // Losses in the recording, not in the database: report them before the flush, whose
+    // failure returns early.
+    m_cpu_snap_decoder.report_losses();
     try
     {
         m_writer->flush_in_memory_data_to_disk();
@@ -1170,15 +1212,20 @@ rocpd_processor_t::finalize_processing()
                                       m_unregistered_pmcs_already_warned.end() };
         std::ranges::sort(counters);
 
-        LOG_WARNING("Rocpd processor finalized with {} PMC event(s) dropped across {} "
-                    "unregistered counter(s); {} is incomplete. Counters: {}",
+        LOG_WARNING("{} PMC event(s) of {} unregistered counter(s) left out of {}. "
+                    "Counters: {}",
                     m_dropped_pmc_events_count, counters.size(), m_db_output_path,
                     fmt::join(counters, ", "));
     }
-    else
+
+    if(m_cpu_snap_dropped_slices_count > 0)
     {
-        LOG_INFO("Rocpd processor finalized successfully");
+        LOG_WARNING("{}: {} slice(s) of {} unregistered thread(s) left out of {}",
+                    k_cpu_snap_display_name, m_cpu_snap_dropped_slices_count,
+                    m_cpu_snap_dropped_threads_tids.size(), m_db_output_path);
     }
+
+    LOG_INFO("Rocpd processor finalized successfully");
 }
 
 void
@@ -1275,6 +1322,7 @@ rocpd_processor_t::post_process_metadata()
         thread_info.node_id           = n_info.id;
         thread_info.process_id        = process_info.pid;
         m_writer->register_thread_info(thread_info);
+        m_cpu_snap_track_registered.emplace(t_info.thread_id, false);
     }
 
     // Register tracks

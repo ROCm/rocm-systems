@@ -7,6 +7,7 @@
 #include "core/common_types.hpp"
 #include "core/config.hpp"
 #include "core/node_info.hpp"
+#include "core/trace_cache/data_types.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/rocpd_processor.hpp"
 #include "core/trace_cache/sample_type.hpp"
@@ -1020,7 +1021,10 @@ protected:
         const int pid  = static_cast<int>(k_pid);
         const int ppid = static_cast<int>(k_ppid);
         {
-            rocpd_processor_t processor{ metadata, mgr, pid, ppid };
+            const rocprofsys::trace_cache::data::processor_config_t processor_config{
+                pid, ppid, metadata, mgr
+            };
+            rocpd_processor_t processor{ processor_config, {} };
             processor.prepare_for_processing();
             if(on_processor)
             {
@@ -1298,8 +1302,10 @@ TEST_F(rocpd_write_read_test_interface, nic_pmc_info_invalid_target_arch_rejecte
     agent nic = nic_agent();
     mgr->insert_agent(nic);
 
-    rocpd_processor_t processor{ metadata, mgr, static_cast<int>(k_pid),
-                                 static_cast<int>(k_ppid) };
+    const rocprofsys::trace_cache::data::processor_config_t processor_config{
+        static_cast<int>(k_pid), static_cast<int>(k_ppid), metadata, mgr
+    };
+    rocpd_processor_t processor{ processor_config, {} };
 
     EXPECT_THROW(processor.prepare_for_processing(), std::invalid_argument);
     EXPECT_TRUE(find_rocpd_database_in_directory(out_dir).empty())

@@ -4,6 +4,8 @@
 #pragma once
 #include "agent_manager.hpp"
 #include "core/node_info.hpp"
+#include "core/trace_cache/cpu_snap_decoder.hpp"
+#include "core/trace_cache/data_types.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_processor_interface.hpp"
 
@@ -15,10 +17,13 @@
 #include <profiler-hub/cpp/writer_types.hpp>
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <sys/types.h>
+#include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 namespace rocprofsys::trace_cache
 {
@@ -26,9 +31,12 @@ namespace rocprofsys::trace_cache
 class rocpd_processor_t : public sample_processor_interface
 {
 public:
-    rocpd_processor_t(const std::shared_ptr<metadata_registry>& metadata,
-                      const std::shared_ptr<agent_manager>& agent_mngr, pid_t pid,
-                      pid_t ppid);
+    /**
+     * @param processor_config                 The process whose cache file this reads.
+     * @param cpu_snap_skipped_module_prefixes Passed to the cpu-snap decoder.
+     */
+    rocpd_processor_t(const data::processor_config_t& processor_config,
+                      std::vector<std::string>        cpu_snap_skipped_module_prefixes);
 
     void prepare_for_processing() override;
     void finalize_processing() override;
@@ -47,10 +55,15 @@ public:
     void handle(const gpu_perf_counter_sample& sample) override;
     void handle(const hipfile_pmc_sample& sample) override;
     void handle(const kfd_sample& sample) override;
-    void handle(const cpu_snap_sample&) override {}
+    void handle(const cpu_snap_sample& sample) override;
 
 private:
     void post_process_metadata();
+
+    // Writes one slice of the experimental call-stack sampler on its thread's track. A
+    // slice of a thread missing from the metadata is dropped and counted: profiler-hub
+    // throws for an unregistered thread, which would lose the whole process file.
+    void handle_cpu_snap_slice(const backtrace_region_sample& slice);
 
     /**
      * Try to insert a PMC event into the writer.
@@ -78,6 +91,14 @@ private:
     // PMC keys that have already been warned about
     std::unordered_set<std::string> m_unregistered_pmcs_already_warned;
     std::size_t                     m_dropped_pmc_events_count = 0;
+
+    // Declared after m_metadata, which its constructor reads.
+    cpu_snap_decoder m_cpu_snap_decoder;
+    // Threads registered from the metadata, by tid; true once the thread's cpu-snap
+    // track is registered too.
+    std::unordered_map<std::uint64_t, bool> m_cpu_snap_track_registered;
+    std::unordered_set<std::uint64_t>       m_cpu_snap_dropped_threads_tids;
+    std::size_t                             m_cpu_snap_dropped_slices_count = 0;
 };
 
 }  // namespace rocprofsys::trace_cache

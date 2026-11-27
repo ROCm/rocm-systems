@@ -14,6 +14,7 @@
 #include "core/perfetto/counter_track.hpp"
 #include "core/perfetto/emitter.hpp"
 #include "core/perfetto/engine.hpp"
+#include "core/trace_cache/data_types.hpp"
 #include "core/track_registry.hpp"
 #include "core/utility.hpp"
 #include "library/pmc/collectors/hipfile/sample.hpp"
@@ -508,18 +509,17 @@ emit_grouped_event(bool group_by_queue, QueueCategory queue_cat,
 }  // namespace
 
 perfetto_processor_t::perfetto_processor_t(
-    const std::shared_ptr<metadata_registry>& metadata,
-    const std::shared_ptr<agent_manager>& agent_mngr, pid_t pid,
-    [[maybe_unused]] pid_t ppid, rocprofsys::track_registry& tracks)
+    const data::processor_config_t& processor_config, rocprofsys::track_registry& tracks,
+    std::vector<std::string> cpu_snap_skipped_module_prefixes)
 : sample_processor_interface()
-, m_metadata(*metadata)
-, m_process_id(pid)
-, m_agent_manager(*agent_mngr)
+, m_metadata(*processor_config._metadata_registry)
+, m_process_id(processor_config._pid)
+, m_agent_manager(*processor_config._agent_manager)
 , m_use_annotations(config::get_perfetto_annotations())
 , m_default_group_by_queue(config::get_group_by_queue())
 , m_tracks(tracks)
 , m_cpu_snap_decoder([this](const backtrace_region_sample& sample) { handle(sample); },
-                     get_cpu_snap_skipped_module_prefixes(),
+                     std::move(cpu_snap_skipped_module_prefixes),
                      m_metadata.get_sampling_resumes())
 {
     for(const auto& agent_ptr : m_agent_manager.get_agents())

@@ -7,6 +7,7 @@
 #include "config.hpp"
 #include "core/perfetto/fwd.hpp"
 #include "core/trace_cache/cpu_snap_decoder.hpp"
+#include "core/trace_cache/data_types.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_processor_interface.hpp"
 #include "core/trace_cache/sample_type.hpp"
@@ -19,7 +20,9 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace rocprofsys
 {
@@ -38,9 +41,14 @@ struct pmc_track_info
 class perfetto_processor_t : public sample_processor_interface
 {
 public:
-    perfetto_processor_t(const std::shared_ptr<metadata_registry>& metadata,
-                         const std::shared_ptr<agent_manager>& agent_mngr, pid_t pid,
-                         pid_t ppid, rocprofsys::track_registry& tracks);
+    /**
+     * @param processor_config                 The process whose cache file this reads.
+     * @param tracks                           Perfetto tracks shared by all processes.
+     * @param cpu_snap_skipped_module_prefixes Passed to the cpu-snap decoder.
+     */
+    perfetto_processor_t(const data::processor_config_t& processor_config,
+                         rocprofsys::track_registry&     tracks,
+                         std::vector<std::string> cpu_snap_skipped_module_prefixes);
 
     void prepare_for_processing() override;
     // Cached-mode drain runs at cache_manager scope (engine.stop()); per-pid
