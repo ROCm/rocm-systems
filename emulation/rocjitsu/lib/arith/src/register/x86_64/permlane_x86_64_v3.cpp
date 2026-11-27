@@ -14,10 +14,11 @@
 namespace rocjitsu::arith {
 // Exchange adjacent rows with independent destination masks. Load each pair
 // before storing so the two operands may refer to the same VGPR.
-void swap_rows_x86_64_v3(int lanes, int stride, uint64_t exec_mask, uint32_t *d, uint32_t *a) {
-  for (int base = 0; base + stride < lanes; base += 2 * stride) {
-    for (int i = 0; i < stride; i += 8) {
-      int low = base + i, high = low + stride;
+template <int Lanes, int Stride>
+void swap_rows_x86_64_v3(uint64_t exec_mask, uint32_t *d, uint32_t *a) {
+  for (int base = 0; base + Stride < Lanes; base += 2 * Stride) {
+    for (int i = 0; i < Stride; i += 8) {
+      int low = base + i, high = low + Stride;
       auto old_a = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(a + low));
       auto old_d = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(d + high));
       auto shifts = _mm256_setr_epi32(31, 30, 29, 28, 27, 26, 25, 24);
@@ -28,6 +29,10 @@ void swap_rows_x86_64_v3(int lanes, int stride, uint64_t exec_mask, uint32_t *d,
     }
   }
 }
+
+template void swap_rows_x86_64_v3<32, 16>(uint64_t, uint32_t *, uint32_t *);
+template void swap_rows_x86_64_v3<64, 16>(uint64_t, uint32_t *, uint32_t *);
+template void swap_rows_x86_64_v3<64, 32>(uint64_t, uint32_t *, uint32_t *);
 
 // Route within normalized groups, retaining the original lane at invalid boundaries.
 // Stage the complete wave before publishing aliases.

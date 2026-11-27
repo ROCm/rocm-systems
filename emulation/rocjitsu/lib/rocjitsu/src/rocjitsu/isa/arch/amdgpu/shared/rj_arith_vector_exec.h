@@ -9,6 +9,7 @@
 #include "rj_arith/detail/rj_arith_graphics.h"
 #include "rj_arith/detail/rj_arith_integer.h"
 #include "rj_arith/detail/rj_arith_register.h"
+#include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_resolve.h"
@@ -20,6 +21,7 @@
 
 #include <array>
 #include <bit>
+#include <cassert>
 #include <cstdint>
 #include <optional>
 
@@ -1101,6 +1103,69 @@ inline void execute_ternary32(Wavefront &wave, Ternary32Function wave32, Ternary
                    ? wave32(flags, uint32_t(write_mask), modifiers, d, &a.data, &b.data, &c.data)
                    : wave64(flags, write_mask, modifiers, d, &a.data, &b.data, &c.data);
       });
+}
+
+// For a VOP3 literal, the decoder replaces the selector field with the appended
+// word in the control operand. On a 32-lane wave, borrow VGPR storage for the
+// unmodified register form. Every other form takes the logical path.
+[[gnu::always_inline]] inline bool try_rdna3_wave32_perm_b32_literal(Wavefront &wave,
+                                                                     const Operand &destination,
+                                                                     const Operand &source_a,
+                                                                     const Operand &source_b,
+                                                                     const Operand &control) {
+  assert(wave.wf_size() == 32);
+  if (wave.gpr_idx_en() || wave.cu().observes_register_access() ||
+      wave.instruction_execution_failed() || destination.delegate() || source_a.delegate() ||
+      source_b.delegate() || control.delegate()) {
+    return false;
+  }
+  // EXEC_LO selects the lanes of a 32-lane wave.
+  const uint64_t exec = static_cast<uint32_t>(wave.exec_raw());
+  if (!exec) {
+    return true;
+  }
+  const auto dest = destination.decoded_vgpr();
+  const auto a = source_a.decoded_vgpr(), b = source_b.decoded_vgpr();
+  const auto bank = wave.vgpr_bank(false);
+  if (!dest || !a || !b || !bank.contains(dest->index) || !bank.contains(a->index) ||
+      !bank.contains(b->index)) {
+    return false;
+  }
+  RegisterAccess registers(wave);
+  const auto base = wave.vgpr_alloc().base;
+  const auto *lhs = registers.try_bulk_read_vgpr(base + a->index);
+  const auto *rhs = registers.try_bulk_read_vgpr(base + b->index);
+  if (!lhs || !rhs) {
+    return false;
+  }
+  const auto flags = wave.cu().arithmetic_flags();
+  const auto selector = static_cast<uint32_t>(control.encoding_value());
+  const auto status = registers.try_masked_bulk_write_vgprs<1>(
+      base + dest->index, exec, [=](uint32_t *const *d, uint64_t mask) {
+        return rj_arith_v_perm_b32_uniform_w32(flags, uint32_t(mask), d[0], lhs, rhs, selector);
+      });
+  if (!status) {
+    return false;
+  }
+  if (*status != RJ_ARITH_SUCCESS) {
+    wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+  }
+  return true;
+}
+
+// RDNA3 routes a VOP3 V_PERM_B32 with an appended literal selector here when the wave
+// has 32 lanes. Keeping this handler out of line leaves the handler for every other
+// selector and for Wave64 as it was, apart from the two comparisons that select this one.
+RJ_NOINLINE inline void execute_rdna3_wave32_perm_b32_literal(Wavefront &wave, uint64_t modifiers,
+                                                              const Operand &destination,
+                                                              const Operand &source_a,
+                                                              const Operand &source_b,
+                                                              const Operand &control) {
+  if (!try_rdna3_wave32_perm_b32_literal(wave, destination, source_a, source_b, control)) {
+    execute_ternary32(wave, rj_arith_v_perm_b32_w32, rj_arith_v_perm_b32_w64,
+                      wave.cu().arithmetic_flags(), modifiers, destination, source_a, source_b,
+                      control);
+  }
 }
 
 // The decoded CDNA4 VGPR indices can be used directly when there is no indexing,

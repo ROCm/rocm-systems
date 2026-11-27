@@ -4809,6 +4809,113 @@ TEST(ArithBridgeTest, CubeDppReadsOnlyWritingLanes) {
   EXPECT_EQ(fixture.recorder->writes[0].lanes, 0xfff0u);
 }
 
+TEST(ArithBridgeTest, Rdna3PermuteLiteralPreservesAliasedInputsAndMaskedLanes) {
+  BridgeFixture fixture(IsaFamily::Rdna3, 32);
+  ASSERT_NE(fixture.wave, nullptr);
+  fixture.cu->set_plugin_group(nullptr);
+  for (uint32_t selector : {0x05040100u, 0x07060302u}) {
+    for (uint8_t dst : {0, 1, 2}) {
+      const auto op = rdna3::build_vop3(rdna3::kVPermB32Vop3,
+                                        {.vdst = dst, .src0 = 256, .src1 = 257, .src2 = 255});
+      const std::array words{op[0], op[1], selector};
+      auto inst = fixture.decoder->decode_window(words);
+      ASSERT_TRUE(inst.succeeded());
+      for (uint32_t exec : {UINT32_MAX, 0x5555aaaau, 0u}) {
+        for (uint32_t write_mask : {UINT32_MAX, 0xf00ff00fu}) {
+          fixture.wave->set_exec(exec);
+          fixture.wave->set_vgpr_write_mask(write_mask);
+          for (uint32_t lane = 0; lane < 32; ++lane) {
+            fixture.cu->write_vgpr(fixture.base(), lane, 0xabc01234u + lane * 0x10001u);
+            fixture.cu->write_vgpr(fixture.base() + 1, lane, 0x98765432u - lane * 0x10001u);
+            fixture.cu->write_vgpr(fixture.base() + 2, lane, 0xdeadbeefu);
+          }
+          ASSERT_TRUE(
+              fixture.cu->execute_instruction(inst.value().get(), *fixture.wave).succeeded());
+          for (uint32_t lane = 0; lane < 32; ++lane) {
+            const uint32_t a = 0xabc01234u + lane * 0x10001u, b = 0x98765432u - lane * 0x10001u;
+            const uint32_t original = dst == 0 ? a : dst == 1 ? b : 0xdeadbeefu;
+            const uint32_t packed =
+                selector == 0x05040100u ? (a << 16) | (b & 0xffffu) : (a & 0xffff0000u) | (b >> 16);
+            EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + dst, lane),
+                      ((exec & write_mask) >> lane) & 1 ? packed : original);
+          }
+        }
+      }
+    }
+  }
+}
+
+// A Wave32 appended literal has its own RDNA3 handler. Observed execution, the modifier
+// form and selectors other than the half packs leave its register path, and Wave64 never
+// enters it. Each must still select bytes and report its register accesses.
+TEST(ArithBridgeTest, Rdna3PermuteLiteralLogicalFormsSelectBytesAndNotifyObservers) {
+  const auto select = [](uint32_t a, uint32_t b, uint32_t selector) {
+    const uint64_t data = (uint64_t{a} << 32) | b;
+    uint32_t result = 0;
+    for (int i = 0; i < 4; ++i) {
+      const uint32_t byte = (selector >> (8 * i)) & 0xff;
+      uint32_t value = byte == 12 ? 0 : 0xff;
+      if (byte < 8) {
+        value = (data >> (8 * byte)) & 0xff;
+      } else if (byte < 12) {
+        value = 0xff * ((data >> (15 + 16 * (byte - 8))) & 1);
+      }
+      result |= value << (8 * i);
+    }
+    return result;
+  };
+  for (uint32_t lanes : {32u, 64u}) {
+    for (bool observed : {false, true}) {
+      BridgeFixture fixture(IsaFamily::Rdna3, lanes);
+      ASSERT_NE(fixture.wave, nullptr);
+      if (!observed) {
+        fixture.cu->set_plugin_group(nullptr);
+      }
+      const uint64_t exec = lanes == 32 ? 0x9555aaa3ULL : 0x800000019555aaa3ULL;
+      fixture.wave->set_exec(exec);
+      for (uint32_t selector : {0x05040100u, 0x07060302u, 0x0c0a0306u, 0x0f080700u}) {
+        for (uint8_t clamp : {0, 1}) {
+          SCOPED_TRACE(::testing::Message() << lanes << ":" << observed << ":" << std::hex
+                                            << selector << ":" << int(clamp));
+          const auto op =
+              rdna3::build_vop3(rdna3::kVPermB32Vop3,
+                                {.vdst = 2, .clamp = clamp, .src0 = 256, .src1 = 257, .src2 = 255});
+          const std::array words{op[0], op[1], selector};
+          auto inst = fixture.decoder->decode_window(words);
+          ASSERT_TRUE(inst.succeeded());
+          for (uint32_t lane = 0; lane < lanes; ++lane) {
+            fixture.cu->write_vgpr(fixture.base(), lane, 0xabc01234u + lane * 0x10801u);
+            fixture.cu->write_vgpr(fixture.base() + 1, lane, 0x98765432u - lane * 0x10801u);
+            fixture.cu->write_vgpr(fixture.base() + 2, lane, 0xdeadbeefu);
+          }
+          if (observed) {
+            fixture.recorder->reads.clear();
+            fixture.recorder->writes.clear();
+          }
+          ASSERT_TRUE(
+              fixture.cu->execute_instruction(inst.value().get(), *fixture.wave).succeeded());
+          // Reading the result back below is itself observed.
+          if (observed) {
+            ASSERT_EQ(fixture.recorder->writes.size(), 1u);
+            EXPECT_EQ(fixture.recorder->writes[0].reg, fixture.base() + 2);
+            EXPECT_EQ(fixture.recorder->writes[0].lanes, exec);
+            ASSERT_EQ(fixture.recorder->reads.size(), 2u);
+            EXPECT_EQ(fixture.recorder->reads[0].reg, fixture.base());
+            EXPECT_EQ(fixture.recorder->reads[1].reg, fixture.base() + 1);
+            EXPECT_EQ(fixture.recorder->reads[0].lanes, exec);
+            EXPECT_EQ(fixture.recorder->reads[1].lanes, exec);
+          }
+          for (uint32_t lane = 0; lane < lanes; ++lane) {
+            const uint32_t a = 0xabc01234u + lane * 0x10801u, b = 0x98765432u - lane * 0x10801u;
+            EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 2, lane),
+                      (exec >> lane) & 1 ? select(a, b, selector) : 0xdeadbeefu);
+          }
+        }
+      }
+    }
+  }
+}
+
 TEST(ArithBridgeTest, Cdna4PermuteHonorsSelectorAliasingAndWriteMask) {
   BridgeFixture fixture(IsaFamily::Cdna4, 64);
   ASSERT_NE(fixture.wave, nullptr);

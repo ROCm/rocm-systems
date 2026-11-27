@@ -11,11 +11,12 @@
 
 namespace rocjitsu::arith {
 
-// Pack the low or the high 16-bit halves of A and B for all 64 lanes. Each block is loaded
+// Pack the low or the high 16-bit halves of A and B for all lanes. Each block is loaded
 // before it is stored, so D may be A or B.
+template <int Lanes>
 void perm_pack_halves_x86_64_v3(uint32_t *d, const uint32_t *a, const uint32_t *b,
                                 bool high_halves) {
-  for (int lane = 0; lane < 64; lane += 8) {
+  for (int lane = 0; lane < Lanes; lane += 8) {
     auto x = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(a + lane));
     auto y = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(b + lane));
     // The odd 16-bit words of each lane come from A, the even ones from B.
@@ -24,6 +25,9 @@ void perm_pack_halves_x86_64_v3(uint32_t *d, const uint32_t *a, const uint32_t *
     _mm256_storeu_si256(reinterpret_cast<__m256i *>(d + lane), result);
   }
 }
+
+template void perm_pack_halves_x86_64_v3<32>(uint32_t *, const uint32_t *, const uint32_t *, bool);
+template void perm_pack_halves_x86_64_v3<64>(uint32_t *, const uint32_t *, const uint32_t *, bool);
 
 // Extract, insert, or align bitfields. Preserve destination lanes outside exec_mask.
 // Requires the named CPU features and validated instruction controls.
