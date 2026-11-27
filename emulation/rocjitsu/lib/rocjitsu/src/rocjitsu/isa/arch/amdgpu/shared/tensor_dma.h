@@ -869,21 +869,25 @@ inline size_t try_coalesced_transfer(TensorDmaState &state, Wavefront &wf) {
     return 0;
   }
   const size_t size = state.desc.elem_size;
+  const size_t max_bytes =
+      std::min<size_t>(kCopyBufferBytes, kPageBytes - (first.global_address & (kPageBytes - 1)));
+  const auto elements = std::span(state.elements).subspan(state.next_element);
+  size_t bytes_in_run = size;
   size_t count = 1;
-  while (state.next_element + count < state.elements.size() &&
-         (count + 1) * size <= kCopyBufferBytes &&
-         (count + 1) * size <= kPageBytes - (first.global_address & (kPageBytes - 1))) {
-    const auto &next = state.elements[state.next_element + count];
-    if (!next.in_bounds || next.global_address != first.global_address + count * size ||
-        next.lds_address != first.lds_address + count * size) {
+  // Loads stage bytes in tile order. copy_tensor_lds applies LDS padding and
+  // clipping when committing the completed transfer.
+  for (; count < elements.size() && bytes_in_run + size <= max_bytes;
+       ++count, bytes_in_run += size) {
+    const auto &next = elements[count];
+    if (!next.in_bounds || next.global_address != first.global_address + bytes_in_run ||
+        (state.store_from_lds && next.lds_address != first.lds_address + bytes_in_run)) {
       break;
     }
-    ++count;
   }
   if (count == 1) {
     return 0;
   }
-  auto bytes = std::span(state.payload).subspan(state.next_element * size, count * size);
+  auto bytes = std::span(state.payload).subspan(state.next_element * size, bytes_in_run);
   bool copied;
   if (state.access) {
     copied = state.store_from_lds
