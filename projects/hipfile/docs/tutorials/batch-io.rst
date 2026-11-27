@@ -83,9 +83,11 @@ requests that is refilled as completions arrive.
 
       hipfile_err = hipFileBatchIOSetUp(&batch_handle, batch_capacity);
 
-   ``batch_capacity`` is the maximum number of requests that can be in flight on
-   this handle at one time. The same handle is reused for the read phase and the
-   write phase. Each phase drains completely before the next one starts.
+   ``batch_capacity`` is the maximum number of requests that can be queued
+   on this handle at one time. Request completion statuses must be retrieved
+   before additional requests can be queued. The same handle is reused for
+   the read phase and the write phase. Each phase drains completely before
+   the next one starts.
 
 #. **Describe a request**
 
@@ -138,9 +140,10 @@ requests that is refilled as completions arrive.
 
    ``min_nr`` is the minimum number of events to wait for. ``nr`` is an in/out
    parameter that carries the event array capacity in and the number of events
-   returned out. A ``nullptr`` timeout blocks until at least ``min_nr`` events are
-   available. Passing ``min_nr`` of ``1`` returns as soon as any request finishes,
-   which is what lets the example refill the window promptly.
+   returned out. A ``nullptr`` timeout blocks until at least ``min_nr``
+   events are available or all events are ready, if less than ``min_nr``
+   events are queued. Passing ``min_nr`` of ``1`` returns as soon as any
+   request finishes, which is what lets the example refill the window promptly.
 
 #. **Check each event and refill the window**
 
