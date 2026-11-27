@@ -17,6 +17,9 @@ same pool in the same unit.
 Unit_hipOccupancy_Positive_ZeroLdsMatchesThreadLimit - Validate that a kernel which uses no LDS is
 limited only by maxThreadsPerMultiProcessor, i.e. that the occupancy is reported per the same
 multiprocessor that multiProcessorCount counts.
+Unit_hipOccupancy_Positive_LdsAbovePerBlockLimitIsZero - Validate that a block whose static plus
+dynamic LDS exceeds sharedMemPerBlock gets an occupancy of 0 and no suggested block size, also on
+targets where the per multiprocessor pool (a WGP) is larger than the per block limit.
 
 Note: the LDS allocation granularity is not exposed through hipDeviceProp_t, so these tests avoid
 depending on it. They verify that the occupancy API and the device properties stay consistent with
@@ -33,6 +36,17 @@ static __global__ void dynLdsKernel(unsigned int* out) {
   extern __shared__ unsigned int smem[];
   if (threadIdx.x == UINT_MAX) {  // never taken; keeps smem live
     out[0] = smem[0];
+  }
+}
+
+static __global__ void staticDynLdsKernel(unsigned int* out) {
+  __shared__ unsigned int st[2];
+  extern __shared__ unsigned int smem[];
+  st[threadIdx.x & 1] = threadIdx.x;
+  smem[threadIdx.x] = threadIdx.x;
+  __syncthreads();
+  if (threadIdx.x == 0) {
+    out[blockIdx.x] = st[1] + smem[blockDim.x - 1];
   }
 }
 
@@ -120,4 +134,53 @@ HIP_TEST_CASE(Unit_hipOccupancy_Positive_ZeroLdsMatchesThreadLimit) {
   // proportionally fewer blocks here.
   INFO("blockSize = " << blockSize << ", numBlocks = " << numBlocks);
   REQUIRE((numBlocks * blockSize) == devProp.maxThreadsPerMultiProcessor);
+}
+
+HIP_TEST_CASE(Unit_hipOccupancy_Positive_LdsAbovePerBlockLimitIsZero) {
+  hipDeviceProp_t devProp;
+  HIP_CHECK(hipGetDeviceProperties(&devProp, 0));
+
+  hipFuncAttributes attr;
+  HIP_CHECK(hipFuncGetAttributes(&attr, reinterpret_cast<const void*>(staticDynLdsKernel)));
+  const size_t staticLds = attr.sharedSizeBytes;
+  REQUIRE(staticLds > 0);
+  REQUIRE(staticLds < devProp.sharedMemPerBlock);
+
+  const int blockSize = devProp.warpSize * 2;
+  const size_t maxDynLds = devProp.sharedMemPerBlock - staticLds;
+
+  // The largest block that fits the per block limit is resident.
+  int numBlocks = 0;
+  HIP_CHECK(hipOccupancyMaxActiveBlocksPerMultiprocessor(
+      &numBlocks, reinterpret_cast<const void*>(staticDynLdsKernel), blockSize, maxDynLds));
+  REQUIRE(numBlocks >= 1);
+
+  int gridSize = 0;
+  int suggestedBlockSize = 0;
+  HIP_CHECK(hipOccupancyMaxPotentialBlockSize(&gridSize, &suggestedBlockSize, staticDynLdsKernel,
+                                              maxDynLds, 0));
+  REQUIRE(gridSize > 0);
+  REQUIRE(suggestedBlockSize > 0);
+
+  // Anything above it cannot be launched, so it cannot be resident either, even if it would fit
+  // the per multiprocessor pool (sharedMemPerMultiprocessor, 2x sharedMemPerBlock on a WGP).
+  for (const size_t dynLds : {maxDynLds + 1, maxDynLds + 8, devProp.sharedMemPerBlock,
+                              devProp.sharedMemPerMultiprocessor - staticLds}) {
+    if (dynLds <= maxDynLds) {
+      continue;
+    }
+    INFO("static LDS = " << staticLds << ", dynamic LDS = " << dynLds);
+
+    numBlocks = -1;
+    HIP_CHECK(hipOccupancyMaxActiveBlocksPerMultiprocessor(
+        &numBlocks, reinterpret_cast<const void*>(staticDynLdsKernel), blockSize, dynLds));
+    REQUIRE(numBlocks == 0);
+
+    gridSize = -1;
+    suggestedBlockSize = -1;
+    HIP_CHECK(hipOccupancyMaxPotentialBlockSize(&gridSize, &suggestedBlockSize,
+                                                staticDynLdsKernel, dynLds, 0));
+    REQUIRE(gridSize == 0);
+    REQUIRE(suggestedBlockSize == 0);
+  }
 }

@@ -26,7 +26,12 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
   const auto* kernel = hip::asKernel(func);
 
   const auto* wrkGrpInfo = kernel->getDeviceKernel(device)->workGroupInfo();
-  const int maxWorkGroupSize = static_cast<int>(device.info().maxWorkGroupSize_);
+  // A block can't be larger than the kernel's maximum workgroup size (__launch_bounds__), which
+  // the launch enforces and HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK reports.
+  int maxWorkGroupSize = static_cast<int>(device.info().maxWorkGroupSize_);
+  if (wrkGrpInfo->size_ != 0) {
+    maxWorkGroupSize = std::min(maxWorkGroupSize, static_cast<int>(wrkGrpInfo->size_));
+  }
 
   if (!bCalcPotentialBlkSz) {
     if (inputBlockSize <= 0) {
@@ -106,6 +111,15 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
   // the aligned size rather than for the exact number of bytes requested.
   const size_t lds_granularity = device.isa().ldsAlignment();
   const size_t requested_lds = wrkGrpInfo->usedLDSSize_ + dynamicSMemSize;
+  // One workgroup can't allocate more than the per-workgroup LDS limit, even when the WGP pool
+  // above is larger. Such a block can't be launched, so none is resident. localMemSizePerCU_ is
+  // the per-workgroup limit: hipDeviceProp_t::sharedMemPerBlock reports it (hip_device.cpp).
+  if (requested_lds > device.info().localMemSizePerCU_) {
+    *maxBlocksPerCU = 0;
+    *numBlocksPerGrid = 0;
+    *bestBlockSize = 0;
+    return hipSuccess;
+  }
   const size_t total_used_lds = lds_granularity != 0
       ? ((requested_lds + lds_granularity - 1) / lds_granularity) * lds_granularity
       : requested_lds;
@@ -128,10 +142,14 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
         ? (*maxBlocksPerCU / 2) : (*maxBlocksPerCU * 2);
   }
 
-  // Return optimal block size: min of ALU limit and requested size
-  *bestBlockSize = std::min(alu_limited_threads, aligned_input_size);
-  // Calculate blocks per CU for full occupancy
-  const int bestBlocksPerCU = alu_limited_threads / (*bestBlockSize);
+  // Return optimal block size: min of ALU limit and requested size. For a suggestion the size
+  // isn't aligned up: a block can't exceed the caller's limit or the kernel's maximum even when
+  // those aren't wavefront multiples (CUDA's search uses MIN(limit, aligned size) the same way).
+  *bestBlockSize = std::min(alu_limited_threads,
+                            bCalcPotentialBlkSz ? inputBlockSize : aligned_input_size);
+  // Calculate blocks per CU for full occupancy. The hardware still allocates whole wavefronts.
+  const int bestBlocksPerCU =
+      alu_limited_threads / amd::alignUp(*bestBlockSize, wrkGrpInfo->wavefrontSize_);
   const uint32_t maxCUs = (wrkGrpInfo->isWGPMode_ != device.settings().enableWgpMode_)
       ? (wrkGrpInfo->isWGPMode_
           ? device.info().maxComputeUnits_ / 2
