@@ -277,6 +277,7 @@ CAUSAL_BACKEND_CASES = [
 ]
 
 
+@pytest.mark.build_only
 @pytest.mark.timeout(180)
 @pytest.mark.class_name("causal-open-failure")
 class TestCausalOpenFailure(RocprofsysTest):
