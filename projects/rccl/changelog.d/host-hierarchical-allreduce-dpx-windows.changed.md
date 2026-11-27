@@ -1,1 +1,0 @@
-* `RCCL_HOST_HIER_ALLREDUCE`: the default (`-1`) window on two hosts with eight ranks per host (DPX) is now 2 to 16 MiB and 64 to 128 MiB (was above 1 MiB to 2 MiB, 8 to 16 MiB and 64 to 128 MiB). From 2 to 16 MiB it runs the fused kernel or the three collectives, whichever was faster at each size.

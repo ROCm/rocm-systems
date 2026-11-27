@@ -536,9 +536,9 @@ collected in the following table.
           by ``ncclCommSplit`` do not), used on buffers outside registered
           windows with eight ranks per host on the DPX tuning table, for
           ``ncclSum`` on ``ncclFloat32``, ``ncclFloat16``, ``ncclBfloat16``,
-          ``ncclFloat8e4m3`` and ``ncclFloat8e5m2``, at these message sizes: 2
-          to 16 MiB and 64 to 128 MiB on two hosts, 2 to 256 MiB on four hosts
-          and 2 to 512 MiB on eight hosts. Auto mode is DPX only and is not
+          ``ncclFloat8e4m3`` and ``ncclFloat8e5m2``, at these message sizes:
+          above 1 MiB to 16 MiB and 64 to 128 MiB on two hosts, 2 to 256 MiB
+          on four hosts and 2 to 512 MiB on eight hosts. Auto mode is DPX only and is not
           used with other layouts.
         | ``0``: Disabled.
         | ``1``: Enabled for every eligible AllReduce.

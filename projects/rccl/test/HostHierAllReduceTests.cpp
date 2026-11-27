@@ -238,8 +238,8 @@ TEST(HostHierLayout, ChildrenListsTheChildCommsThatExist)
 TEST(HostHierAllReduce, AutoWindowEdges)
 {
     EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(2, 8, kMiB));
-    EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(2, 8, 2 * kMiB - 1));
-    EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(2, 8, 2 * kMiB));
+    EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(2, 8, kMiB + 1));
+    EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(2, 8, 4 * kMiB));
     EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(2, 8, 16 * kMiB));
     EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(2, 8, 16 * kMiB + 1));
     EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(2, 8, 32 * kMiB));
@@ -320,7 +320,7 @@ TEST(HostHierAllReduce, EligibilityPerMode_Isolated)
                 return rcclHostHierAllReduceEligible(mock.get(), count, type, op, registered);
             };
             EXPECT_TRUE(eligible(blockHosts(2, 8), floats(2 * kMiB)));
-            EXPECT_FALSE(eligible(blockHosts(2, 8), floats(2 * kMiB) - 8)) << "below the window";
+            EXPECT_FALSE(eligible(blockHosts(2, 8), floats(kMiB))) << "below the window";
             EXPECT_TRUE(eligible(blockHosts(2, 8), floats(128 * kMiB)));
             EXPECT_FALSE(eligible(blockHosts(2, 8), floats(256 * kMiB))) << "two hosts, above the window";
             EXPECT_FALSE(eligible(blockHosts(2, 8), floats(1024 * kMiB))) << "above the window";
@@ -339,7 +339,7 @@ TEST(HostHierAllReduce, EligibilityPerMode_Isolated)
             EXPECT_FALSE(eligible(blockHosts(4, 8), floats(16 * kMiB), ncclFloat32, ncclMax)) << "fp32 max, DPX";
             EXPECT_TRUE(eligible(blockHosts(2, 8), kMiB, ncclBfloat16)) << "bf16, 2 MiB";
             EXPECT_TRUE(eligible(blockHosts(2, 8), 64 * kMiB, ncclFloat16)) << "fp16, 128 MiB";
-            EXPECT_FALSE(eligible(blockHosts(2, 8), kMiB - 8, ncclBfloat16)) << "bf16 below the window";
+            EXPECT_FALSE(eligible(blockHosts(2, 8), kMiB / 2, ncclBfloat16)) << "bf16 below the window";
             EXPECT_TRUE(eligible(blockHosts(4, 8), 8 * kMiB, ncclBfloat16)) << "bf16 on four hosts";
             EXPECT_TRUE(eligible(blockHosts(8, 8), 8 * kMiB, ncclFloat8e4m3)) << "fp8 sum on eight hosts";
             EXPECT_FALSE(eligible(blockHosts(2, 8), 8 * kMiB, ncclInt32)) << "int32 sum, DPX";
