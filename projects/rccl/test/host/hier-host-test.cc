@@ -320,6 +320,37 @@ TEST_F(HostHierEnsureTest, TwoRankChildrenGetFabricInit) {
   rcclHostHierTeardown(hc.get());
 }
 
+// The selector calls rcclHostHierEnsure before the launch selects the comm's device, and the child fabric init maps its
+// scratch for the current device. The caller's device comes back on success and on failure.
+TEST_F(HostHierEnsureTest, ChildFabricInitRunsOnTheCommDeviceThenRestoresTheCaller) {
+  for (ncclResult_t initResult : {ncclSuccess, ncclSystemError}) {
+    HierComm hc;
+    hc.comm.cudaDev = 3;
+    Children children;
+    children.ranks = 2;
+    Votes votes;
+    int splits = 0;
+    std::vector<int> initDevices;
+    ScopedHook split(g_ncclCommSplit, SplitHook(&children, &splits, /*failOnCall=*/-1));
+    ScopedHook vote(g_bootstrapAllGather, VoteHook(&votes));
+    ScopedHook fabricPath(g_ncclDdaUseFabricPath, [](ncclComm*) { return true; });
+    ScopedHook fabricInit(g_ncclDdaFabricCommInit, [&initDevices, initResult](ncclComm*) {
+      int dev = -1;
+      g_hipGetDevice(&dev);
+      initDevices.push_back(dev);
+      return initResult;
+    });
+    g_hipSetDevice(5);
+    EXPECT_EQ(initResult, rcclHostHierEnsure(hc.get()));
+    const std::vector<int> expected(initResult == ncclSuccess ? 2 : 1, 3);
+    EXPECT_EQ(expected, initDevices);
+    int dev = -1;
+    g_hipGetDevice(&dev);
+    EXPECT_EQ(5, dev);
+    rcclHostHierTeardown(hc.get());
+  }
+}
+
 // The splits run blocking and unshared: a child sharing the parent's resources shares its abort flag, which the
 // failure path would set. The parent's settings come back on success and on failure.
 TEST_F(HostHierEnsureTest, SplitsRunBlockingAndUnsharedThenRestoreTheParent) {

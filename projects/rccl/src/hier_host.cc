@@ -199,6 +199,9 @@ ncclResult_t rcclHostHierEnsure(struct ncclComm* comm) {
   const struct rcclHostLayout* layout = rcclHostHierGetLayout(comm);
   if (layout == nullptr) return ncclInvalidUsage;
   struct rcclHostHier* h = comm->hostHier;
+  // The selector calls this before the launch selects comm->cudaDev, and ncclCommSplit returns on the caller's device,
+  // but the child fabric init maps its scratch for the current device only.
+  int savedDev = -1;
 
   // A non-blocking split can return before the child exists, so split synchronously. Children sharing the parent's
   // resources would share its abort flag, and aborting them after a failed setup would abort the parent.
@@ -216,10 +219,13 @@ ncclResult_t rcclHostHierEnsure(struct ncclComm* comm) {
     if (h->inter != nullptr) h->inter->hostHierState = rcclHostHierOff;
     if (!allRanksReady(comm, &res)) goto fail;
   }
-  res = initChildFabric(h->intra);
+  res = cudaGetDevice(&savedDev) == cudaSuccess && cudaSetDevice(comm->cudaDev) == cudaSuccess ? ncclSuccess
+                                                                                               : ncclUnhandledCudaError;
+  if (res == ncclSuccess) res = initChildFabric(h->intra);
   if (!allRanksReady(comm, &res)) goto fail;
   res = initChildFabric(h->inter);
   if (!allRanksReady(comm, &res)) goto fail;
+  (void)cudaSetDevice(savedDev);
 
   comm->config.blocking = parentBlocking;
   comm->config.splitShare = parentSplitShare;
@@ -230,6 +236,7 @@ ncclResult_t rcclHostHierEnsure(struct ncclComm* comm) {
   return ncclSuccess;
 
 fail:
+  if (savedDev != -1) (void)cudaSetDevice(savedDev);
   comm->config.blocking = parentBlocking;
   comm->config.splitShare = parentSplitShare;
   // A failed split can leave the parent's bootstrap mid-exchange, so never retry.
