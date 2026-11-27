@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 /// @file mfma_register_paths_test.cpp
-/// @brief Wave64 MFMA register-snapshot paths against the forced-scalar reference.
+/// @brief Wave64 MFMA layouts, aliases and chunk boundaries against scalar execution.
 
 #include "mfma_f64_test_dispatch.h"
 #include "mfma_f8_test_dispatch.h"
@@ -94,25 +94,8 @@ void expect_matches_scalar(
   expect_bit_exact(label, Mode::RandomInt, fixture, reseed, run, destination, shape.d_regs);
 }
 
-// Every wave64 shape that the generated MFMA executors route through exec_f32_mixed,
-// integer and FP64 rj-arith paths and that has at most 16 result registers.
-TEST(MfmaRegisterPathsTest, RoutedShapesFitTheSnapshotPath) {
-  SKIP_IF_NO_SIMD();
-  struct Mfma {
-    uint32_t m, n, k, batch, bits;
-  };
-  for (const Mfma s : {Mfma{16, 16, 64, 1, 8}, Mfma{32, 32, 32, 1, 8}, Mfma{32, 32, 16, 1, 8},
-                       Mfma{16, 16, 32, 1, 8}, Mfma{16, 16, 16, 1, 8}, Mfma{32, 32, 8, 1, 8},
-                       Mfma{16, 16, 4, 4, 8}, Mfma{4, 4, 4, 16, 8}}) {
-    EXPECT_TRUE(amdgpu::mfma_snapshot_shape_fits<int32_t>(s.m, s.n, s.k, s.batch, 8, 8))
-        << s.m << "x" << s.n << "x" << s.k << "x" << s.batch;
-  }
-  // 32 result registers exceed the snapshot; this shape keeps the generic path.
-  EXPECT_FALSE(amdgpu::mfma_snapshot_shape_fits<int32_t>(32, 32, 4, 2, 8, 8));
-}
-
-// The snapshot path copies and publishes whole registers, so its layout predicates may only
-// accept shapes whose elements use every lane of exactly the registers the snapshot copies.
+// Dense-layout predicates accept only shapes whose elements fill every reported
+// register; register-observation and alias fixtures depend on that bound.
 TEST(MfmaRegisterPathsTest, LayoutPredicatesAcceptOnlyDenseLayouts) {
   constexpr uint32_t kDims[] = {1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64};
   constexpr uint32_t kBatches[] = {1, 2, 3, 4, 8, 16, 32, 64};
@@ -185,7 +168,6 @@ TEST(MfmaRegisterPathsTest, LayoutPredicatesAcceptOnlyDenseLayouts) {
 // An operand or destination that runs past the end of the wave's VGPR allocation reads zero
 // from, and skips writes to, only the registers outside it.
 TEST(MfmaRegisterPathsTest, OperandsCrossingTheAllocationEndMatchScalar) {
-  SKIP_IF_NO_SIMD();
   ForceScalarGuard guard;
   ExactFixture fx(rocjitsu::IsaFamily::Cdna4, WF_SIZE);
   ASSERT_NE(fx.wf, nullptr);
@@ -220,7 +202,6 @@ TEST(MfmaRegisterPathsTest, OperandsCrossingTheAllocationEndMatchScalar) {
 // Integer accumulation wraps. On a host with eight int32 lanes the four-column shape also runs
 // the matmul's scalar tail.
 TEST(MfmaRegisterPathsTest, I8AccumulationWrapsOnBothPaths) {
-  SKIP_IF_NO_SIMD();
   ForceScalarGuard guard;
   for (bool force_scalar : {true, false}) {
     SCOPED_TRACE(force_scalar);
@@ -244,7 +225,6 @@ TEST(MfmaRegisterPathsTest, I8AccumulationWrapsOnBothPaths) {
 }
 
 TEST(MfmaRegisterPathsTest, F64MatchesScalarForSeparateAndOverlappingDestinations) {
-  SKIP_IF_NO_SIMD();
   struct Mfma {
     uint32_t m, n, k, batch, d_regs;
   };
@@ -272,7 +252,6 @@ TEST(MfmaRegisterPathsTest, F64MatchesScalarForSeparateAndOverlappingDestination
 }
 
 TEST(MfmaRegisterPathsTest, I8MatchesScalarForBothShapesAndLanePermutations) {
-  SKIP_IF_NO_SIMD();
   struct Mfma {
     uint32_t m, n, k, d_regs;
   };
@@ -303,7 +282,6 @@ TEST(MfmaRegisterPathsTest, I8MatchesScalarForBothShapesAndLanePermutations) {
 }
 
 TEST(MfmaRegisterPathsTest, F8F6F4SelectedFormatsMatchScalar) {
-  SKIP_IF_NO_SIMD();
   // cbsz and blgp select the A and B formats: FP8, BF8, FP6, BF6, FP4.
   constexpr Fmt kFormats[] = {Fmt::FP8, Fmt::BF8, Fmt::RAW6, Fmt::RAW6, Fmt::RAW4};
   constexpr uint32_t kBits[] = {8, 8, 6, 6, 4};
@@ -344,7 +322,6 @@ TEST(MfmaRegisterPathsTest, F8F6F4SelectedFormatsMatchScalar) {
 }
 
 TEST(MfmaRegisterPathsTest, Bf16FourByFourMatchesScalarWithLanePermutations) {
-  SKIP_IF_NO_SIMD();
   struct Permutation {
     uint32_t cbsz, abid, blgp;
   };
@@ -369,7 +346,6 @@ TEST(MfmaRegisterPathsTest, Bf16FourByFourMatchesScalarWithLanePermutations) {
 }
 
 TEST(MfmaRegisterPathsTest, I8SingleRegisterShapesMatchScalarWithLanePermutations) {
-  SKIP_IF_NO_SIMD();
   struct Case {
     uint32_t m, n, k, batch, d_regs, cbsz, abid, blgp;
   };

@@ -1470,6 +1470,18 @@ Values accepted
 
 Before 2.4.2, the default value is 0 for all platforms. Since 2.4.2, the default value is 1 for NVLink-based platforms and 0 otherwise.
 
+.. _env_NCCL_NET_GDR_MLOPART:
+
+NCCL_NET_GDR_MLOPART
+--------------------
+The ``NCCL_NET_GDR_MLOPART`` variable controls whether GPU Direct RDMA is used for MLO partitions (MLOPart, such as CPX or DPX partitions of a physical GPU). A partition reaches the NIC over the physical device's DMA path, so GPU Direct RDMA is as available to a partition as it is to the whole GPU.
+
+Setting it to 0 opts MLO partitions out of GPU Direct RDMA. The exception is partition 0 on PCI function 0, which keeps GPU Direct RDMA. GPUs that are not partitioned are not affected by this setting.
+
+Values accepted
+^^^^^^^^^^^^^^^
+0 or 1. Default value is 1 (enabled).
+
 NCCL_GDRCOPY_ENABLE
 -------------------
 The ``NCCL_GDRCOPY_ENABLE`` variable enables GDRCopy support for CPU-accessible CUDA memory used by NCCL internal control structures.

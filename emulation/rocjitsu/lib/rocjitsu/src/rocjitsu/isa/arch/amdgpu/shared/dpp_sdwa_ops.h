@@ -1,25 +1,14 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-/// @file dpp_sdwa_ops.h
-/// @brief DPP (Data-Parallel Primitives) and SDWA (Sub-Dword Access) helpers.
-///
-/// @details DPP permutes the field-bearing vector source of supported
-/// VOP1/VOP2/VOP3/VOP3P/VOPC forms before execution. Source validity and
-/// BOUND_CTRL govern source-derived writes, while row/bank masks independently
-/// filter destination commits; suppressed compare-result bits are zeroed.
-///
-/// SDWA selects sub-dword portions of source operands and merges results
-/// into sub-dword positions of the destination. Available on GFX9 (CDNA)
-/// and RDNA1/2; removed in RDNA3+.
+// DPP source permutation and SDWA sub-dword selection and destination placement.
+// Staging preserves source aliasing, observers and architectural write masks.
+// Numerical rounding and output modifiers are owned by rj-arith.
 
 #ifndef ROCJITSU_ISA_ARCH_AMDGPU_SHARED_DPP_SDWA_OPS_H_
 #define ROCJITSU_ISA_ARCH_AMDGPU_SHARED_DPP_SDWA_OPS_H_
 
-#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/output_modifier.h"
-#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -642,15 +631,6 @@ inline void apply_dpp8(const Operand &source, uint32_t lane_sel, uint32_t fi,
 
 namespace sdwa {
 
-/// @brief Select the SDWA OMOD eligibility and F32 scaling policy.
-/// @details Selects the denormal mode used for OMOD eligibility, shared with VOP3.
-/// For F32, FLUSH_NEAREST uses apply_omod_f32 under the producer's nearest-rounding
-/// environment; MODE uses scale_f32 with guest rounding. For F16, MODE expects the
-/// producer helper to have scaled already. ROUNDED marks an F16 result rounded
-/// without OMOD; the store scales it with output_modifier.h. ARITHMETIC uses
-/// that ordering on GFX10 and retains producer scaling on CDNA.
-enum class OutputPolicy : uint8_t { MODE, FLUSH_NEAREST, ROUNDED, ARITHMETIC };
-
 /// @brief Return the architectural source bytes selected by an SDWA selector.
 inline uint8_t sdwa_src_byte_mask(uint32_t sel) {
   if (sel <= BYTE_3) {
@@ -804,207 +784,11 @@ inline uint8_t sdwa_dst_byte_mask(uint32_t dst_sel, uint32_t dst_unused) {
   return sdwa_src_byte_mask(dst_sel);
 }
 
-/// @brief Clamp the numerical result before destination selection and merging.
+/// @brief Store one result with SDWA destination selection and preservation.
 ///
-/// Raw IEEE bits make the operation independent of host denormal and rounding
-/// modes, and preserve NaN payloads unless DX10_CLAMP requests positive zero.
-template <ResultFormat Format> inline uint32_t clamp_result(uint32_t result, const Wavefront &wf) {
-  if constexpr (Format == ResultFormat::NONE) {
-    return result;
-  } else if constexpr (Format == ResultFormat::PK_F16) {
-    const uint32_t low = clamp_result<ResultFormat::F16>(result & 0xFFFFu, wf);
-    const uint32_t high = clamp_result<ResultFormat::F16>(result >> 16, wf);
-    return low | (high << 16);
-  } else {
-    static_assert(Format == ResultFormat::F16 || Format == ResultFormat::F32);
-    constexpr uint32_t kSign = Format == ResultFormat::F16 ? 0x8000u : 0x80000000u;
-    constexpr uint32_t kInfinity = Format == ResultFormat::F16 ? 0x7C00u : 0x7F800000u;
-    constexpr uint32_t kOne = Format == ResultFormat::F16 ? 0x3C00u : 0x3F800000u;
-    const uint32_t magnitude = result & (kSign - 1);
-    if (magnitude > kInfinity) {
-      return wf.dx10_clamp() ? 0u : result;
-    }
-    if (result & kSign) {
-      return 0u;
-    }
-    return magnitude > kOne ? kOne : result;
-  }
-}
-
-/// @brief Return the enabled output modifier for the SDWA result format.
-template <ResultFormat Format, OutputPolicy Policy = OutputPolicy::MODE, typename Inst>
-inline uint32_t output_modifier(const Inst &inst, const Wavefront &wf) {
-  static_assert(Policy == OutputPolicy::MODE || Format == ResultFormat::F32);
-  if constexpr (Format != ResultFormat::NONE && requires {
-                  inst.sdwa_omod_;
-                  inst.inst_.src0;
-                }) {
-    if (inst.inst_.src0 != SRC_SDWA) {
-      return 0;
-    }
-    const uint32_t denorm_mode = (Format == ResultFormat::F16 || Format == ResultFormat::PK_F16)
-                                     ? wf.fp_denorm_mode_f16_f64()
-                                     : wf.fp_denorm_mode_f32();
-    if constexpr (Format == ResultFormat::F16 || Format == ResultFormat::PK_F16) {
-      return fp_mode::effective_f16_omod(wf.cu().arch(), denorm_mode, wf.ieee_mode(),
-                                         Format == ResultFormat::PK_F16, inst.sdwa_omod_);
-    }
-    return fp_mode::effective_omod(wf.cu().arch(),
-                                   Policy == OutputPolicy::FLUSH_NEAREST ? 0u : denorm_mode,
-                                   wf.ieee_mode(), inst.sdwa_omod_);
-  }
-  return 0;
-}
-
-/// @brief Apply SDWA scaling before narrowing a semantic F16 result.
-/// @details Keeps the emulator's current order for unmigrated producers; no
-/// SDWA captures cover them (see output_modifier.h).
-template <typename Inst>
-inline uint16_t round_f16_result(const Inst &inst, const Wavefront &wf, float value,
-                                 bool fp16_ovfl) {
-  const uint32_t omod = output_modifier<ResultFormat::F16>(inst, wf);
-  if (omod == 0) {
-    return util::f32_to_f16_mode(value, fp16_ovfl);
-  }
-  return fp_mode::finalize_omod_f16(pseudo_scalar::round_f16_result(value,
-                                                                    wf.fp_round_mode_f16_f64(),
-                                                                    omod, false, fp16_ovfl, false),
-                                    omod);
-}
-
-/// @brief Apply SDWA scaling to an already rounded half transcendental result.
-/// @details Keeps the emulator's current order for unmigrated producers; no
-/// SDWA captures cover TRANS (see output_modifier.h).
-template <typename Inst>
-inline uint16_t finish_rounded_f16(const Inst &inst, const Wavefront &wf, float value,
-                                   bool fp16_ovfl) {
-  return util::f32_to_f16(
-      fp_mode::apply_omod_f16(value, output_modifier<ResultFormat::F16>(inst, wf), fp16_ovfl));
-}
-
-/// GFX10 SDWA ADD/MUL captures scale a rounded half, as VOP3 does.
-inline bool arithmetic_scales_rounded_half(const Wavefront &wf) {
-  return wf.cu().arch() == rocjitsu::IsaFamily::Rdna1 ||
-         wf.cu().arch() == rocjitsu::IsaFamily::Rdna2;
-}
-
-/// Round the arithmetic result, deferring GFX10 SDWA scaling to destination placement.
-template <typename Inst>
-inline uint16_t finish_arithmetic_f16(const Inst &inst, const Wavefront &wf, double value,
-                                      uint32_t round_mode, uint32_t denorm_mode, bool fp16_ovfl) {
-  const auto omod =
-      arithmetic_scales_rounded_half(wf) ? 0u : output_modifier<ResultFormat::F16>(inst, wf);
-  return fp_mode::finish_arithmetic_f16(value, round_mode, denorm_mode, fp16_ovfl, omod);
-}
-
-/// @brief Scale F32 bits with explicit rounding and OMOD output finalization.
-/// @details Powers of two only change the exponent, except at the format limits.
-/// Integer arithmetic keeps rounding and denormal handling independent of the host.
-inline uint32_t scale_f32(uint32_t value, uint32_t omod, uint32_t round_mode) {
-  if (omod == 0) {
-    return value;
-  }
-  const uint32_t sign = value & 0x80000000u;
-  int exponent = static_cast<int>((value >> 23) & 0xffu);
-  uint32_t significand = value & 0x007fffffu;
-  if (exponent == 255) {
-    return significand == 0 ? value : value | 0x00400000u;
-  }
-  if (exponent == 0) {
-    if (significand == 0) {
-      return 0;
-    }
-    exponent = 1;
-    while ((significand & 0x00800000u) == 0) {
-      significand <<= 1;
-      --exponent;
-    }
-  } else {
-    significand |= 0x00800000u;
-  }
-  exponent += omod == 3 ? -1 : static_cast<int>(omod);
-  if (exponent >= 255) {
-    const bool infinity =
-        round_mode == 0 || (round_mode == 1 && sign == 0) || (round_mode == 2 && sign != 0);
-    return sign | (infinity ? 0x7f800000u : 0x7f7fffffu);
-  }
-  if (exponent <= 0) {
-    const uint32_t shift = static_cast<uint32_t>(1 - exponent);
-    const uint32_t discarded = significand & ((1u << shift) - 1u);
-    uint32_t rounded = significand >> shift;
-    const uint32_t halfway = 1u << (shift - 1);
-    const bool increment =
-        round_mode == 0
-            ? discarded > halfway || (discarded == halfway && (rounded & 1u))
-            : discarded != 0 && ((round_mode == 1 && sign == 0) || (round_mode == 2 && sign != 0));
-    rounded += static_cast<uint32_t>(increment);
-    // Round first: a value just below minimum normal may round up to it.
-    return rounded == 0x00800000u ? sign | rounded : 0;
-  }
-  return sign | (static_cast<uint32_t>(exponent) << 23) | (significand & 0x007fffffu);
-}
-
-/// @brief Scale a floating-point SDWA result before destination placement.
-template <ResultFormat Format, OutputPolicy Policy = OutputPolicy::MODE, typename Inst>
-inline uint32_t scale_result(const Inst &inst, const Wavefront &wf, uint32_t value) {
-  constexpr bool half_policy =
-      Policy == OutputPolicy::ROUNDED || Policy == OutputPolicy::ARITHMETIC;
-  static_assert(!half_policy || Format == ResultFormat::F16);
-  constexpr OutputPolicy kOmodPolicy = half_policy ? OutputPolicy::MODE : Policy;
-  const uint32_t omod = output_modifier<Format, kOmodPolicy>(inst, wf);
-  if (omod == 0) {
-    return value;
-  }
-  if constexpr (half_policy) {
-    if constexpr (Policy == OutputPolicy::ARITHMETIC) {
-      if (!arithmetic_scales_rounded_half(wf)) {
-        return value; // finish_arithmetic_f16 already applied and finalized OMOD.
-      }
-    }
-    // The producer rounded without OMOD; scale the half as VOP3 does.
-    output_modifier::Policy policy;
-    policy.omod = omod;
-    policy.round_mode = wf.fp_round_mode_f16_f64();
-    policy.fp16_ovfl = wf.fp16_ovfl();
-    return output_modifier::scale<fp_format::F16>(value, policy);
-  } else if constexpr (Format == ResultFormat::F16) {
-    // The producer has already applied F16 scaling; finalize its encoded result.
-    return fp_mode::finalize_omod_f16(static_cast<uint16_t>(value), omod);
-  } else if constexpr (Format == ResultFormat::PK_F16) {
-    const uint32_t low = fp_mode::finalize_omod_f16(static_cast<uint16_t>(value), omod);
-    const uint32_t high = fp_mode::finalize_omod_f16(static_cast<uint16_t>(value >> 16), omod);
-    return low | (high << 16);
-  } else if constexpr (Format == ResultFormat::F32) {
-    if constexpr (Policy == OutputPolicy::FLUSH_NEAREST) {
-      // The generated LOG/EXP body protects the complete instruction with
-      // nearest rounding. Reuse its VOP3 finalizer, including NaN passthrough.
-      return std::bit_cast<uint32_t>(fp_mode::apply_omod_f32(std::bit_cast<float>(value), omod, 0));
-    }
-    return scale_f32(value, omod, wf.fp_round_mode_f32());
-  }
-  return value;
-}
-
-/// @brief Whether a generated SIMD path can store its result without a
-/// destination transform.
-template <typename Inst> inline bool supports_direct_simd_store(const Inst &inst) {
-  if constexpr (requires {
-                  inst.inst_.src0;
-                  inst.sdwa_dst_sel_;
-                  inst.sdwa_clamp_;
-                  inst.sdwa_omod_;
-                }) {
-    return inst.inst_.src0 != amdgpu::SRC_SDWA ||
-           (inst.sdwa_dst_sel_ == DWORD && !inst.sdwa_clamp_ && !inst.sdwa_omod_);
-  }
-  return true;
-}
-
-/// @brief Store one semantic result with destination modifiers applied.
-///
-/// Scaling and clamp use the semantic result width before destination placement.
+/// The arithmetic entry point has already applied numerical output controls.
 /// Preserved destination bytes are neither clamped nor reported as architectural writes.
-template <ResultFormat Format, OutputPolicy Policy = OutputPolicy::MODE, typename Inst, typename Op>
+template <typename Inst, typename Op>
 inline void write_lane(Inst &inst, amdgpu::Wavefront &wf, const Op &op, uint32_t lane,
                        uint32_t value) {
   if constexpr (requires {
@@ -1016,10 +800,6 @@ inline void write_lane(Inst &inst, amdgpu::Wavefront &wf, const Op &op, uint32_t
                 }) {
     if (inst.inst_.src0 == amdgpu::SRC_SDWA && op.is_vgpr() &&
         inst.dst_operand(0) == static_cast<const Operand *>(&op)) {
-      value = scale_result<Format, Policy>(inst, wf, value);
-      if (inst.sdwa_clamp_) {
-        value = clamp_result<Format>(value, wf);
-      }
       const uint8_t byte_mask = sdwa_dst_byte_mask(inst.sdwa_dst_sel_, inst.sdwa_dst_unused_);
       const uint32_t placed = sdwa_dst_merge(value, 0, inst.sdwa_dst_sel_, inst.sdwa_dst_unused_);
       amdgpu::RegisterAccess(wf).write_lane_masked(op, lane, placed, byte_mask);
@@ -1027,14 +807,6 @@ inline void write_lane(Inst &inst, amdgpu::Wavefront &wf, const Op &op, uint32_t
     }
   }
   amdgpu::RegisterAccess(wf).write_lane(op, lane, value);
-}
-
-template <ResultFormat Format, typename Inst, typename Op>
-inline void write_lane64(Inst &inst, amdgpu::Wavefront &wf, const Op &op, uint32_t lane,
-                         uint64_t value) {
-  (void)Format;
-  (void)inst;
-  amdgpu::RegisterAccess(wf).write_lane64(op, lane, value);
 }
 
 } // namespace sdwa

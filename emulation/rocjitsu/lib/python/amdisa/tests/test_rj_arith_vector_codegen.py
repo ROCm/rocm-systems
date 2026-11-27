@@ -882,6 +882,98 @@ def test_gfx942_half_multiply_forwards_sdwa_clamp():
     assert 'rj_arith_v_mul_lo_u16_w64_gfx942' in body
 
 
+@pytest.mark.parametrize('arch', ['cdna1', 'cdna2', 'cdna3', 'cdna4'])
+def test_accumulator_transfers_keep_bank_resolution_in_operands(arch):
+    names = ['V_ACCVGPR_READ', 'V_ACCVGPR_WRITE']
+    if arch != 'cdna1':
+        names.append('V_ACCVGPR_MOV_B32')
+    for name in names:
+        body = gen_vector32(context(arch, name, ['d'], ['a'], True))
+        assert body == '  amdgpu::arith::execute_move32(*this, wf, d, a);'
+        assert gen_vector32(context('rdna3', name, ['d'], ['a'], True)) is None
+    if arch in ('cdna1', 'cdna2'):
+        assert (
+            gen_vector32(context(arch, 'V_AND_B32', ['d'], ['a', 'b'], False))
+            is not None
+        )
+
+
+def test_gfx1150_half_conditional_keeps_selected_half_controls():
+    body = gen_vector32(
+        context('rdna3_5', 'V_CNDMASK_B16', ['d'], ['a', 'b', 'mask'], True)
+    )
+    assert 'execute_conditional<true>' in body
+    assert 'RJ_ARITH_ALU_HIGH_A' in body and 'RJ_ARITH_ALU_HIGH_D' in body
+    assert 'read_wave_mask_scalar(mask, wf)' in body
+    assert (
+        gen_vector32(
+            context('rdna3_5', 'V_CNDMASK_B32', ['d'], ['a', 'b', 'mask'], True)
+        )
+        is not None
+    )
+
+
+@pytest.mark.parametrize('arch', ['cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5'])
+@pytest.mark.parametrize('vop3', [False, True])
+def test_older_word_routing_reuses_apis_without_enabling_neighboring_arithmetic(
+    arch, vop3
+):
+    move = gen_vector32(context(arch, 'V_MOV_B32', ['d'], ['a'], vop3))
+    sources = ['a', 'b', 'mask'] if vop3 else ['a', 'b']
+    select = gen_vector32(context(arch, 'V_CNDMASK_B32', ['d'], sources, vop3))
+    assert ('rj_arith_v_mov_b32_w64,' if vop3 else 'execute_move32') in move
+    sign_controls = vop3 and arch.startswith('rdna')
+    assert ('inst_.abs' in move) == sign_controls
+    assert ('inst_.neg' in move) == sign_controls
+    assert 'rj_arith_v_cndmask_b32_w32,' in select
+    assert 'rj_arith_v_cndmask_b32_w64,' in select
+    assert ('read_wave_mask_scalar(mask, wf)' in select) == vop3
+    assert ('inst_.abs' in select) == vop3
+    assert gen_vector32(context(arch, 'V_AND_B32', ['d'], ['a', 'b'], vop3)) is not None
+
+
+@pytest.mark.parametrize(
+    'name',
+    [
+        'V_MIN3_I16',
+        'V_MIN3_U16',
+        'V_MAX3_I16',
+        'V_MAX3_U16',
+        'V_MED3_I16',
+        'V_MED3_U16',
+    ],
+)
+def test_gfx1030_native_half_selection_keeps_opsel(name):
+    from amdisa.codegen.execute.rj_arith_vector import gen_integer16
+
+    ctx = context('rdna2', name, ['d'], ['a', 'b', 'c'], is_vop3=True)
+    ctx.uses_vop3_half_selectors = True
+    body = gen_integer16(ctx)
+    assert 'RJ_ARITH_ALU_HIGH_D' in body
+    assert all(f'RJ_ARITH_ALU_HIGH_{letter}' in body for letter in 'ABC')
+    assert 'execute_integer16<3>' in body
+
+
+@pytest.mark.parametrize('name', ['V_ADD_NC_U16', 'V_SUB_NC_U16', 'V_MUL_LO_U16'])
+def test_gfx1030_native_binary_uses_decoder_half_policy(name):
+    from amdisa.codegen.execute.rj_arith_vector import gen_integer16
+
+    ctx = context('rdna2', name, ['d'], ['a', 'b'], is_vop3=True)
+    ctx.uses_vop3_half_selectors = True
+    body = gen_integer16(ctx)
+    assert all(f'RJ_ARITH_ALU_HIGH_{letter}' in body for letter in 'ABD')
+    assert 'execute_integer16<2>' in body
+
+
+@pytest.mark.parametrize('arch', ['cdna1', 'cdna2'])
+def test_native_half_metadata_keeps_cdna_word_valued_result(arch):
+    from amdisa.codegen.execute.rj_arith_vector import gen_integer16
+
+    ctx = context(arch, 'V_ADD_U16', ['d'], ['a', 'b'], is_vop3=True)
+    ctx.uses_vop3_half_selectors = True
+    assert 'execute_integer16<2, true>' in gen_integer16(ctx)
+
+
 @pytest.mark.parametrize('arch', ['cdna1', 'cdna2', 'rdna2', 'rdna3_5'])
 def test_older_integer_dot_routes_preserve_modifiers(arch):
     from amdisa.codegen.execute.rj_arith_vector import gen_integer_dot
@@ -954,48 +1046,6 @@ def test_older_integer_dot_generated_methods_have_no_legacy_route(arch):
     assert count > 0
 
 
-@pytest.mark.parametrize(
-    'name',
-    [
-        'V_MIN3_I16',
-        'V_MIN3_U16',
-        'V_MAX3_I16',
-        'V_MAX3_U16',
-        'V_MED3_I16',
-        'V_MED3_U16',
-    ],
-)
-def test_gfx1030_native_half_selection_keeps_opsel(name):
-    from amdisa.codegen.execute.rj_arith_vector import gen_integer16
-
-    ctx = context('rdna2', name, ['d'], ['a', 'b', 'c'], is_vop3=True)
-    ctx.uses_vop3_half_selectors = True
-    body = gen_integer16(ctx)
-    assert 'RJ_ARITH_ALU_HIGH_D' in body
-    assert all(f'RJ_ARITH_ALU_HIGH_{letter}' in body for letter in 'ABC')
-    assert 'execute_integer16<3>' in body
-
-
-@pytest.mark.parametrize('name', ['V_ADD_NC_U16', 'V_SUB_NC_U16', 'V_MUL_LO_U16'])
-def test_gfx1030_native_binary_uses_decoder_half_policy(name):
-    from amdisa.codegen.execute.rj_arith_vector import gen_integer16
-
-    ctx = context('rdna2', name, ['d'], ['a', 'b'], is_vop3=True)
-    ctx.uses_vop3_half_selectors = True
-    body = gen_integer16(ctx)
-    assert all(f'RJ_ARITH_ALU_HIGH_{letter}' in body for letter in 'ABD')
-    assert 'execute_integer16<2>' in body
-
-
-@pytest.mark.parametrize('arch', ['cdna1', 'cdna2'])
-def test_native_half_metadata_keeps_cdna_word_valued_result(arch):
-    from amdisa.codegen.execute.rj_arith_vector import gen_integer16
-
-    ctx = context(arch, 'V_ADD_U16', ['d'], ['a', 'b'], is_vop3=True)
-    ctx.uses_vop3_half_selectors = True
-    assert 'execute_integer16<2, true>' in gen_integer16(ctx)
-
-
 @pytest.mark.parametrize('arch', ['cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5'])
 def test_older_saturation_retains_word_or_selected_half_policy(arch):
     for vop3 in (False, True):
@@ -1005,58 +1055,8 @@ def test_older_saturation_retains_word_or_selected_half_policy(arch):
         assert ('execute_saturating_pack_sdwa' in body) == (legacy and not vop3)
         assert ('vop3_opsel' in body) == (vop3 and arch not in ('rdna1', 'rdna2'))
         assert ('word_destination' in body) == (not legacy and not vop3)
-    # Word-integer routing is already supplied by develop.
+    # The independent word-integer migration remains separate.
     assert (
         gen_vector32(context(arch, 'V_ADD_NC_U32', ['dst'], ['a', 'b'], True))
         is not None
     )
-
-
-def test_gfx1150_half_conditional_keeps_selected_half_controls():
-    body = gen_vector32(
-        context('rdna3_5', 'V_CNDMASK_B16', ['d'], ['a', 'b', 'mask'], True)
-    )
-    assert 'execute_conditional<true>' in body
-    assert 'RJ_ARITH_ALU_HIGH_A' in body and 'RJ_ARITH_ALU_HIGH_D' in body
-    assert 'read_wave_mask_scalar(mask, wf)' in body
-    assert (
-        gen_vector32(
-            context('rdna3_5', 'V_CNDMASK_B32', ['d'], ['a', 'b', 'mask'], True)
-        )
-        is not None
-    )
-
-
-@pytest.mark.parametrize('arch', ['cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5'])
-@pytest.mark.parametrize('vop3', [False, True])
-def test_older_word_routing_reuses_apis_without_enabling_neighboring_arithmetic(
-    arch, vop3
-):
-    move = gen_vector32(context(arch, 'V_MOV_B32', ['d'], ['a'], vop3))
-    sources = ['a', 'b', 'mask'] if vop3 else ['a', 'b']
-    select = gen_vector32(context(arch, 'V_CNDMASK_B32', ['d'], sources, vop3))
-    assert ('rj_arith_v_mov_b32_w64,' if vop3 else 'execute_move32') in move
-    sign_controls = vop3 and arch.startswith('rdna')
-    assert ('inst_.abs' in move) == sign_controls
-    assert ('inst_.neg' in move) == sign_controls
-    assert 'rj_arith_v_cndmask_b32_w32,' in select
-    assert 'rj_arith_v_cndmask_b32_w64,' in select
-    assert ('read_wave_mask_scalar(mask, wf)' in select) == vop3
-    assert ('inst_.abs' in select) == vop3
-    assert gen_vector32(context(arch, 'V_AND_B32', ['d'], ['a', 'b'], vop3)) is not None
-
-
-@pytest.mark.parametrize('arch', ['cdna1', 'cdna2', 'cdna3', 'cdna4'])
-def test_accumulator_transfers_keep_bank_resolution_in_operands(arch):
-    names = ['V_ACCVGPR_READ', 'V_ACCVGPR_WRITE']
-    if arch != 'cdna1':
-        names.append('V_ACCVGPR_MOV_B32')
-    for name in names:
-        body = gen_vector32(context(arch, name, ['d'], ['a'], True))
-        assert body == '  amdgpu::arith::execute_move32(*this, wf, d, a);'
-        assert gen_vector32(context('rdna3', name, ['d'], ['a'], True)) is None
-    if arch in ('cdna1', 'cdna2'):
-        assert (
-            gen_vector32(context(arch, 'V_AND_B32', ['d'], ['a', 'b'], False))
-            is not None
-        )

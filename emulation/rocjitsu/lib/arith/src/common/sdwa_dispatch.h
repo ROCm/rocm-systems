@@ -39,6 +39,24 @@ inline uint64_t sdwa_fixed_round_flags(uint64_t flags, uint64_t mode) {
   return mode & RJ_ARITH_ALU_SDWA ? flags & ~RJ_ARITH_FP_ROUND_MASK : flags;
 }
 
+// Finalize an already-scaled half result using the inherited SDWA encoding rules.
+// The arithmetic call validates all other controls before any output is finalized.
+template <typename Mask, typename Call>
+inline int with_sdwa_half_finalization(uint64_t flags, Mask exec_mask, uint64_t mode,
+                                       uint32_t *const *d, Call evaluate) {
+  if (!(mode & RJ_ARITH_ALU_SDWA)) {
+    return evaluate(mode);
+  }
+  if (mode >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  const int error = evaluate(mode & ~uint64_t(RJ_ARITH_ALU_SDWA));
+  if (!error && exec_mask) {
+    finalize_sdwa_half_wave(flags, exec_mask, int(sizeof(Mask) * 8), uint32_t(mode), d[0]);
+  }
+  return error;
+}
+
 // Defer legacy SDWA output controls until a validated arithmetic call succeeds.
 // The core still owns qualification, operand modifiers, guest arithmetic and FP status.
 template <SdwaOutput Output, typename Mask, typename Call>

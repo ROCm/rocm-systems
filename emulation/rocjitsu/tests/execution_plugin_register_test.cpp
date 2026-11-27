@@ -22,7 +22,6 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/simd_path_test_hooks.h"
 #include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/arithmetic_policy.h"
 #include "rocjitsu/vm/amdgpu/hwreg.h"
@@ -1439,9 +1438,6 @@ TEST(ExecutionPluginTest, True16InstructionsReportSelectedSourceAndDestinationHa
 }
 
 TEST(ExecutionPluginTest, Rdna2F16TernaryPreservesDestinationWithoutObservingAnExtraRead) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-  }
   ForceScalarOverride force_simd(false);
   Wave32PluginFixture f(rocjitsu::IsaFamily::Rdna2);
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
@@ -2604,47 +2600,6 @@ TEST(ExecutionPluginTest, SgprBlockOwnersTrackPhysicalAllocationAndSlotReuseAcro
   }
 }
 
-TEST(ExecutionPluginTest, VopdIntegerSimdRejectsUnsupportedWaveAndModifiers) {
-  ForceScalarOverride execution_mode(false);
-  ScopedIsaExecutionBackend execution_backend_scope{&cdna5::execution_backend()};
-  cdna5::Operand operand(32, cdna5::OperandType::OPR_VGPR, 0);
-  struct Slot {
-    uint16_t op = 8;
-    Operand *dst;
-    Operand *src0;
-    Operand *src1;
-    uint8_t neg = 0;
-    bool has_src2_operand = false;
-    bool src2_is_imm = false;
-  } slot{8, &operand, &operand, &operand};
-  const auto try_pair = [](Wavefront &wf, const Slot &x, const Slot &y) {
-    return try_execute_vopd_integer_pair_simd<8, 16, 17>(wf, x, y);
-  };
-
-  PluginFixture wave64;
-  ASSERT_NO_FATAL_FAILURE(wave64.initialize(/*num_wf_slots=*/1));
-  auto *wide = wave64.cu()->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/32);
-  ASSERT_NE(wide, nullptr);
-  ASSERT_EQ(wide->wf_size(), 64u);
-  wide->set_exec(0);
-  EXPECT_FALSE(try_pair(*wide, slot, slot));
-
-  Wave32PluginFixture wave32;
-  ASSERT_FALSE(::testing::Test::HasFatalFailure());
-  auto *wf = wave32.cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/32);
-  ASSERT_NE(wf, nullptr);
-  wf->set_exec(0);
-  EXPECT_EQ(try_pair(*wf, slot, slot), util::has_stdx_simd);
-  for (uint32_t modifier = 0; modifier < 3; ++modifier) {
-    Slot unsupported = slot;
-    unsupported.neg = modifier == 0 ? 1 : 0;
-    unsupported.has_src2_operand = modifier == 1;
-    unsupported.src2_is_imm = modifier == 2;
-    EXPECT_FALSE(try_pair(*wf, unsupported, slot));
-    EXPECT_FALSE(try_pair(*wf, slot, unsupported));
-  }
-}
-
 TEST(ExecutionPluginTest, VopdIntegerPairsPreserveMasksAliasesAndObservation) {
   constexpr uint32_t kMov = 8;
   constexpr uint32_t kAdd = 16;
@@ -3024,13 +2979,7 @@ TEST(ExecutionPluginTest, F32ModeArithmeticObserversSeeCallerRounding) {
 #endif
         plugin->read_roundings.clear();
         plugin->read_mxcsrs.clear();
-        bool succeeded = false;
-        {
-          amdgpu::ScopedSimdFastPathTracker tracker;
-          succeeded = f.cu->execute_instruction(inst.get(), *wf).succeeded();
-          // rj-arith does not use the legacy SIMD tracker.
-          EXPECT_TRUE(tracker.no_tracked_path_executed());
-        }
+        const bool succeeded = f.cu->execute_instruction(inst.get(), *wf).succeeded();
 #if RJ_HOST_ARCH_X86
         const uint32_t after_mxcsr = _mm_getcsr();
         _mm_setcsr(saved_mxcsr);
@@ -3084,9 +3033,6 @@ TEST(ExecutionPluginTest, VopdArithmeticObserversSeeCallerFpState) {
        {{8, 1u}, {9, 0x3ff00000u}, {10, 0x3f800001u}}},
   };
   for (const Case &test : cases) {
-    const bool uses_arith = test.arch == rocjitsu::IsaFamily::Rdna3 ||
-                            test.arch == rocjitsu::IsaFamily::Rdna4 ||
-                            test.arch == rocjitsu::IsaFamily::Cdna5;
     const uint32_t observed_bits = ~uint32_t(_MM_EXCEPT_MASK);
     for (bool force_scalar : {false, true}) {
       SCOPED_TRACE(
@@ -3124,21 +3070,16 @@ TEST(ExecutionPluginTest, VopdArithmeticObserversSeeCallerFpState) {
         observer->read_mxcsrs.clear();
         {
           // Restore the original host environment even after a fatal assertion.
-          fp_mode::ScopedEnvironment environment(0);
+          fp_mode::detail::ScopedFenv environment(0);
           _mm_setcsr((_mm_getcsr() & ~_MM_EXCEPT_MASK) | _MM_EXCEPT_UNDERFLOW);
           const uint32_t host_mxcsr = _mm_getcsr();
-          ScopedSimdFastPathTracker tracker;
+
           const bool succeeded =
               fixture.cu->execute_instruction(instruction.get(), *wave).succeeded();
           const uint32_t restored_mxcsr = _mm_getcsr();
           ASSERT_TRUE(succeeded);
           EXPECT_EQ(restored_mxcsr & observed_bits, host_mxcsr & observed_bits);
           EXPECT_NE(restored_mxcsr & _MM_EXCEPT_UNDERFLOW, 0u);
-          if (uses_arith || force_scalar || !util::has_stdx_simd) {
-            EXPECT_TRUE(tracker.no_tracked_path_executed());
-          } else {
-            EXPECT_TRUE(tracker.only_tracked_path_executed(SimdFastPath::VOPD));
-          }
           std::set<uint32_t> expected_reads;
           for (const auto &[reg, bits] : test.sources) {
             expected_reads.insert(base + reg);
