@@ -594,6 +594,12 @@ graph:
   Unit_hipGraphExecUpdate_CapturedMemcpyAndKernel:
     <<: *level_default
     tags: [exec]
+  Unit_hipGraphExecUpdate_CapturedSiblingOrder:
+    <<: *level_default
+    tags: [exec]
+  Unit_hipGraphExecUpdate_MultiThreadRecapture:
+    <<: *level_default
+    tags: [exec]
   Unit_hipGraphExecEventRecordNodeSetEvent_Functional:
     <<: *level_default
     tags: [exec]
@@ -714,6 +720,9 @@ graph:
     <<: *level_default
     tags: [capture]
   Unit_hipStreamBeginCapture_Positive_Multithreaded:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamBeginCapture_MultiThread_SharedGraph:
     <<: *level_default
     tags: [capture]
   Unit_hipStreamBeginCapture_Positive_Multiplestrms:
