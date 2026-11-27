@@ -124,6 +124,8 @@ RCCL_PARAM(DdaBc, "DDA_BC", kDdaThresholdUnset);
 RCCL_PARAM(DdaBcAllowIpc, "DDA_BC_ALLOW_IPC", 0);
 // Single-node Broadcast Ring LL ceiling in total bytes: -1 = arch table, 0 = tuning model, > 0 = this ceiling.
 RCCL_PARAM(BcSingleNodeRingLLMaxBytes, "BC_SINGLE_NODE_RING_LL_MAX_BYTES", -1);
+// Single-node Broadcast Ring LL128 ceiling in total bytes: -1 = arch table, 0 = tuning model, > 0 = this ceiling.
+RCCL_PARAM(BcSingleNodeRingLL128MaxBytes, "BC_SINGLE_NODE_RING_LL128_MAX_BYTES", -1);
 // When set, bypass the per-arch tuning table entirely and use base-commit
 // env-var defaults for all thresholds (DDA, CE, symMaxR2).  Useful for
 // isolating arch-table effects without rebuilding.
@@ -250,8 +252,30 @@ static double rcclHalfPow(int x, unsigned int halves) {
   return v;
 }
 
-// Largest single-node rank count the Broadcast Ring LL ceilings were measured at (SPX nodes, one rank per GPU).
-static constexpr int kBcSingleNodeRingLLMaxRanks = 8;
+// Largest single-node rank count the Broadcast Ring LL and LL128 ceilings were measured at (SPX, one rank per GPU).
+static constexpr int kBcSingleNodeRingMaxRanks = 8;
+
+// The LL and LL128 ceilings' shared rule, in total bytes; 0 = tuning model. Contract on rcclBcSingleNodeRingLLMaxBytes.
+static size_t rcclBcSingleNodeRingCeiling(const struct ncclComm* comm, int64_t env, size_t base, unsigned int chHalves,
+                                          int rankTerm, unsigned int rankHalves, size_t cap) {
+  if (comm->nRanks < 2) {
+    return 0;
+  }
+  if (env >= 0) {
+    return (size_t)env;
+  }
+  if (comm->nRanks > kBcSingleNodeRingMaxRanks || comm->hasMloPart) {
+    return 0;
+  }
+  if (base == 0 || cap == 0) {
+    return 0;
+  }
+  const double formula = (double)base * rcclHalfPow(comm->nChannels, chHalves) * rcclHalfPow(rankTerm, rankHalves);
+  if (formula >= (double)cap) {
+    return cap;
+  }
+  return (size_t)formula;
+}
 
 // Single-node Broadcast Ring LL ceiling in total bytes (rcclArchThresholds::bcSingleNodeRingLL*); 0 = tuning model.
 // min(base x nChannels^(p / 2) x (nRanks - 1)^(q / 2), cap). It reads only comm->nRanks, comm->nChannels and
@@ -264,26 +288,35 @@ static constexpr int kBcSingleNodeRingLLMaxRanks = 8;
 // total-byte Broadcast ceilings (not gfx1250 DPX), partitioned or past 8 ranks too.
 static size_t rcclBcSingleNodeRingLLMaxBytes(const struct ncclComm* comm) {
   const rcclArchThresholds* t = rcclRingTreeTable(comm, /*rankScaled=*/false);
-  if (t == nullptr || comm->nRanks < 2) {
+  if (t == nullptr) {
     return 0;
   }
-  const int64_t env = rcclParamBcSingleNodeRingLLMaxBytes();
-  if (env >= 0) {
-    return (size_t)env;
-  }
-  if (comm->nRanks > kBcSingleNodeRingLLMaxRanks || comm->hasMloPart) {
+  return rcclBcSingleNodeRingCeiling(comm, rcclParamBcSingleNodeRingLLMaxBytes(), t->bcSingleNodeRingLLBaseBytes,
+                                     t->bcSingleNodeRingLLChannelPowHalves, comm->nRanks - 1,
+                                     t->bcSingleNodeRingLLHopPowHalves, t->bcSingleNodeRingLLCapBytes);
+}
+
+// Single-node Broadcast Ring LL128 ceiling (rcclArchThresholds::bcSingleNodeRingLL128*), as the LL ceiling above.
+static size_t rcclBcSingleNodeRingLL128MaxBytes(const struct ncclComm* comm) {
+  const rcclArchThresholds* t = rcclRingTreeTable(comm, /*rankScaled=*/false);
+  if (t == nullptr) {
     return 0;
   }
-  if (t->bcSingleNodeRingLLBaseBytes == 0 || t->bcSingleNodeRingLLCapBytes == 0) {
-    return 0;
+  return rcclBcSingleNodeRingCeiling(comm, rcclParamBcSingleNodeRingLL128MaxBytes(), t->bcSingleNodeRingLL128BaseBytes,
+                                     t->bcSingleNodeRingLL128ChannelPowHalves, comm->nRanks - 2,
+                                     t->bcSingleNodeRingLL128RelayPowHalves, t->bcSingleNodeRingLL128CapBytes);
+}
+
+bool rcclLL128EnabledByDefault(const struct ncclComm* comm, ncclFunc_t func, int algo,
+                               const struct ncclTopoGraph* graph, bool archOk) {
+  if (graph->typeInter > PATH_PXB || graph->typeIntra > PATH_NVL || !archOk) {
+    return false;
   }
-  const double formula = (double)t->bcSingleNodeRingLLBaseBytes *
-                         rcclHalfPow(comm->nChannels, t->bcSingleNodeRingLLChannelPowHalves) *
-                         rcclHalfPow(comm->nRanks - 1, t->bcSingleNodeRingLLHopPowHalves);
-  if (formula >= (double)t->bcSingleNodeRingLLCapBytes) {
-    return t->bcSingleNodeRingLLCapBytes;
+  if (comm->topo->ll128Enabled) {
+    return true;
   }
-  return (size_t)formula;
+  // Offered where the topology model leaves LL128 off, so rcclUpdateCollectiveProtocol can pick it in the window.
+  return func == ncclFuncBroadcast && algo == NCCL_ALGO_RING && rcclBcSingleNodeRingLL128MaxBytes(comm) > 0;
 }
 
 // ReduceScatter Ring LL128 ceiling per rank for 2- and 4-byte types.
@@ -452,17 +485,26 @@ void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, s
     }
   }
 
-  // Single-node Broadcast: Ring Simple becomes Ring LL up to the ceiling. LL128 stays, a tuner match never gets here,
-  // and a per-call mask that leaves Ring LL out of the cost table keeps Simple. NCCL_PROTO still wins.
+  // Single-node Broadcast: Ring Simple becomes Ring LL up to its ceiling, then Ring LL128 in its window. LL and LL128
+  // picks stay, a tuner match never gets here, and each switch needs its cell in the cost table. NCCL_PROTO still wins.
   // It differs from the gfx1250 DPX block at the top on purpose: DPX ceilings hold at any node count and set the
   // protocol outright, so they run first and return; this rule only upgrades the model's final Ring Simple pick on one
   // node. The DPX block not checking the cost-table mask predates this rule and is left as is here.
   if (!userProtocolInput && info->func == ncclFuncBroadcast && info->algorithm == NCCL_ALGO_RING &&
-      info->protocol == NCCL_PROTO_SIMPLE && (table == nullptr || table[NCCL_ALGO_RING][NCCL_PROTO_LL] >= 0.0)) {
+      info->protocol == NCCL_PROTO_SIMPLE) {
     const size_t llMax = rcclBcSingleNodeRingLLMaxBytes(comm);
-    if (nBytes > 0 && nBytes <= llMax) {
+    if ((table == nullptr || table[NCCL_ALGO_RING][NCCL_PROTO_LL] >= 0.0) && nBytes > 0 && nBytes <= llMax) {
       info->protocol = NCCL_PROTO_LL;
     }
+#if defined(ENABLE_LL128)
+    // Above the LL ceiling, Ring LL128 up to its ceiling, from Simple's full grid on so it launches the same blocks.
+    const size_t simpleFullGrid = (size_t)comm->nChannels * comm->maxThreads[NCCL_ALGO_RING][NCCL_PROTO_SIMPLE] *
+                                  comm->threadThresholds[NCCL_ALGO_RING][NCCL_PROTO_SIMPLE];
+    if ((table == nullptr || table[NCCL_ALGO_RING][NCCL_PROTO_LL128] >= 0.0) && nBytes > llMax &&
+        nBytes >= simpleFullGrid && nBytes <= rcclBcSingleNodeRingLL128MaxBytes(comm)) {
+      info->protocol = NCCL_PROTO_LL128;
+    }
+#endif
   }
 }
 

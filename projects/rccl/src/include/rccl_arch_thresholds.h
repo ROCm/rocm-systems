@@ -243,6 +243,12 @@ struct rcclArchThresholds {
   unsigned int bcSingleNodeRingLLChannelPowHalves;
   unsigned int bcSingleNodeRingLLHopPowHalves;
   size_t bcSingleNodeRingLLCapBytes;
+
+  // Broadcast Ring LL128 ceiling as the LL one: min(base x nChannels^(p / 2) x (nRanks - 2)^(r / 2), cap); 0 = model.
+  size_t bcSingleNodeRingLL128BaseBytes;
+  unsigned int bcSingleNodeRingLL128ChannelPowHalves;
+  unsigned int bcSingleNodeRingLL128RelayPowHalves;
+  size_t bcSingleNodeRingLL128CapBytes;
 };
 
 // Compute-partition mode a gfx1250 comm is tuned for (RCCL_TUNING_PARTITION_MODE). It picks

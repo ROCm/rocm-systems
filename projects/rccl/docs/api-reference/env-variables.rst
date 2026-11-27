@@ -1826,6 +1826,36 @@ threshold table introduced for gfx1250.
         | ``0``: Keep the tuning model's protocol.
         | ``N``: Use Ring LL up to ``N`` bytes.
 
+    * - | ``RCCL_BC_SINGLE_NODE_RING_LL128_MAX_BYTES``
+        | Ceiling, in total message bytes, up to which single-node
+          ``ncclBroadcast`` switches from Ring Simple to Ring LL128 above the
+          Ring LL ceiling (``RCCL_BC_SINGLE_NODE_RING_LL_MAX_BYTES``). Only a
+          Ring Simple choice changes, and only from the size at which Ring
+          Simple already runs on every ring channel, so LL128 never launches
+          more blocks than Simple. By default the ceiling follows the
+          per-architecture table: on gfx942 it is 896 KiB (the 8-rank Ring
+          Simple full grid) x the square root of the ring channel count x
+          (ranks - 2), at most 64 MiB, so a 2-rank communicator keeps Simple;
+          gfx950 and gfx1250 keep the tuning model. The table covers 2 to 8
+          ranks, one per unpartitioned GPU, as for the LL ceiling; a
+          communicator of more than 8 ranks, and most communicators with ranks
+          on partitioned GPUs, keep the tuning model. A value above ``0`` sets
+          the ceiling on those communicators too.
+          Applies to single-node communicators with an architecture table
+          that has no total-byte Broadcast ceilings, which is gfx950, gfx942
+          and gfx1250 SPX; gfx1250 DPX uses its own Broadcast ceilings.
+          Wherever the ceiling is above ``0``, on a node with every GPU pair on
+          XGMI, the tuning model offers Ring LL128 for Broadcast at every size,
+          even if the topology model leaves LL128 off: a tuner plugin, a per-call algorithm selection that names
+          Ring LL128, and ``RCCL_OVERRIDE_PROTO=LL128`` can then pick it
+          outside the window. The window itself is ignored on multi-node
+          communicators, when ``NCCL_PROTO`` is set, when a tuner plugin
+          matches the call, and when a per-call algorithm selection leaves out
+          Ring LL128.
+      - | ``-1``: Use the per-architecture table (default).
+        | ``0``: Keep the tuning model's protocol.
+        | ``N``: Use Ring LL128 up to ``N`` bytes.
+
     * - | ``RCCL_CE_ALLREDUCE``
         | Enables the Copy Engine (CE) registered-window AllReduce path. When ``-1`` (auto),
           CE AllReduce is on by default for gfx1250 communicators that meet all

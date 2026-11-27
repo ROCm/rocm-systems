@@ -300,6 +300,10 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   .bcSingleNodeRingLLChannelPowHalves = 0,
   .bcSingleNodeRingLLHopPowHalves = 0,
   .bcSingleNodeRingLLCapBytes = 0,
+  .bcSingleNodeRingLL128BaseBytes = 0,
+  .bcSingleNodeRingLL128ChannelPowHalves = 0,
+  .bcSingleNodeRingLL128RelayPowHalves = 0,
+  .bcSingleNodeRingLL128CapBytes = 0,
 };
 
 // gfx1250 in DPX mode (each GPU split into two partitions), picked by
@@ -560,6 +564,10 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
   .bcSingleNodeRingLLChannelPowHalves = 0,
   .bcSingleNodeRingLLHopPowHalves = 0,
   .bcSingleNodeRingLLCapBytes = 0,
+  .bcSingleNodeRingLL128BaseBytes = 0,
+  .bcSingleNodeRingLL128ChannelPowHalves = 0,
+  .bcSingleNodeRingLL128RelayPowHalves = 0,
+  .bcSingleNodeRingLL128CapBytes = 0,
 };
 
 // gfx950: DDA-IPC cap is 64 MiB for AG, 128 MiB for AR/RS and 4 MiB for AlltoAll. No fabric LL/LL128.
@@ -720,6 +728,11 @@ static const rcclArchThresholds rcclArchThresholds_gfx950 = {
   .bcSingleNodeRingLLChannelPowHalves = 2,
   .bcSingleNodeRingLLHopPowHalves = 4,
   .bcSingleNodeRingLLCapBytes = 16ULL*1024*1024,
+  // Zero: unmeasured, keep the tuning model.
+  .bcSingleNodeRingLL128BaseBytes = 0,
+  .bcSingleNodeRingLL128ChannelPowHalves = 0,
+  .bcSingleNodeRingLL128RelayPowHalves = 0,
+  .bcSingleNodeRingLL128CapBytes = 0,
 };
 
 // gfx942: DDA-IPC cap is 8 MiB for AR/AG/RS and 4 MiB for AlltoAll. No fabric LL/LL128.
@@ -880,6 +893,11 @@ static const rcclArchThresholds rcclArchThresholds_gfx942 = {
   .bcSingleNodeRingLLChannelPowHalves = 3,
   .bcSingleNodeRingLLHopPowHalves = 3,
   .bcSingleNodeRingLLCapBytes = 5ULL*1024*1024,
+  // Base = the 8-rank Simple full grid (56 ch x 256 threads x 64); the 64 MiB cap guards channel counts never measured.
+  .bcSingleNodeRingLL128BaseBytes = 56ULL*256*64,
+  .bcSingleNodeRingLL128ChannelPowHalves = 1,
+  .bcSingleNodeRingLL128RelayPowHalves = 2,
+  .bcSingleNodeRingLL128CapBytes = 64ULL*1024*1024,
 };
 
 bool rcclWindowFits(size_t totalBytes, size_t minBytes, size_t maxBytes) {

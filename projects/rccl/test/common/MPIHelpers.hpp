@@ -384,6 +384,13 @@ inline T getEnvParam(const char* name, T ncclDefault)
  *  caller knows the in-test override is active.  The original value is always restored
  *  on destruction regardless of test outcome.
  */
+// True once an MpiEnvGuard set NCCL_PROTO in this process; RCCL caches whether it is set at its first collective.
+inline bool& mpiNcclProtoWasSet()
+{
+    static bool set = false;
+    return set;
+}
+
 struct MpiEnvGuard
 {
     const char* name;
@@ -392,6 +399,10 @@ struct MpiEnvGuard
 
     MpiEnvGuard(const char* n, const char* v) : name(n)
     {
+        if(std::string(n) == "NCCL_PROTO")
+        {
+            mpiNcclProtoWasSet() = true;
+        }
         const char* prev = std::getenv(n);
         had              = (prev != nullptr);
         if(had)

@@ -44,6 +44,7 @@
 #include <cstdint>
 #include <cstring>
 #include <functional>
+#include <memory>
 #include <string>
 #include <utility>
 
@@ -9048,13 +9049,23 @@ rcclArchThresholds MakeBcLLCeilingTable() {
   return t;
 }
 
+// Ring Simple's threads and thread threshold on these comms; its full grid is nChannels x both.
+constexpr int kBcSimpleThreads = 256;
+constexpr int kBcSimpleThreadThreshold = 64;
+
 ncclComm* MakeBcLLCeilingComm(const rcclArchThresholds* table, int nRanks, int nChannels,
                               const char* arch = "gfx950") {
   ncclComm* comm = MakeCommWithArch(arch);
   comm->archThresholds = table;
   comm->nRanks = nRanks;
   comm->nChannels = nChannels;
+  comm->maxThreads[NCCL_ALGO_RING][NCCL_PROTO_SIMPLE] = kBcSimpleThreads;
+  comm->threadThresholds[NCCL_ALGO_RING][NCCL_PROTO_SIMPLE] = kBcSimpleThreadThreshold;
   return comm;
+}
+
+constexpr size_t BcSimpleFullGrid(int nChannels) {
+  return static_cast<size_t>(nChannels) * kBcSimpleThreads * kBcSimpleThreadThreshold;
 }
 
 size_t BcLLFormula(int nRanks, int nChannels) {
@@ -9385,31 +9396,55 @@ TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_SingleNodeBroadcastLLCeilin
 }
 
 namespace {
-// The real tables' ceiling at each single-node rank count, with the ring channel count measured on that shape.
+// The real tables' LL and LL128 ceilings at each single-node rank count, with the ring channel count of that shape.
 struct BcLLRealShape {
   int nRanks;
   int nChannels;
   size_t ceiling;
+  size_t ll128Ceiling;
 };
 
-// gfx950: 4 KiB x nChannels x (nRanks - 1)^2, at most 16 MiB (8 ranks: 22478848 B formula).
+// gfx950: 4 KiB x nChannels x (nRanks - 1)^2, at most 16 MiB (8 ranks: 22478848 B formula). No LL128 window.
 constexpr BcLLRealShape kBcLLGfx950Shapes[] = {
-    {2, 32, 128 * kKiB}, {3, 16, 256 * kKiB}, {4, 48, 1728 * kKiB}, {5, 8, 512 * kKiB},
-    {6, 8, 800 * kKiB},  {7, 8, 1152 * kKiB}, {8, 112, 16 * kMiB},
+    {2, 32, 128 * kKiB, 0}, {3, 16, 256 * kKiB, 0}, {4, 48, 1728 * kKiB, 0}, {5, 8, 512 * kKiB, 0},
+    {6, 8, 800 * kKiB, 0},  {7, 8, 1152 * kKiB, 0}, {8, 112, 16 * kMiB, 0},
 };
-// gfx942: 768 B x (nChannels x (nRanks - 1))^1.5, at most 5 MiB (8 ranks: 5960604.70 B formula).
+// gfx942: LL 768 B x (nChannels x (nRanks - 1))^1.5, at most 5 MiB; LL128 896 KiB x nChannels^0.5 x (nRanks - 2).
 constexpr BcLLRealShape kBcLLGfx942Shapes[] = {
-    {2, 32, 139022}, {3, 8, 49152}, {4, 24, 469202}, {5, 4, 49152}, {6, 4, 68692}, {7, 4, 90297}, {8, 56, 5 * kMiB},
+    {2, 32, 139022, 0},     {3, 8, 49152, 2595093}, {4, 24, 469202, 8989666},   {5, 4, 49152, 5505024},
+    {6, 4, 68692, 7340032}, {7, 4, 90297, 9175040}, {8, 56, 5 * kMiB, 41195827},
 };
+constexpr size_t kBcLLGfx942Np8 = std::size(kBcLLGfx942Shapes) - 1;
+static_assert(kBcLLGfx942Shapes[kBcLLGfx942Np8].nRanks == 8, "the last gfx942 shape is 8 ranks");
+constexpr size_t kBcLL128Gfx942Np8Ceiling = kBcLLGfx942Shapes[kBcLLGfx942Np8].ll128Ceiling;
+
+// The LL boundary alone: a cost table without Ring LL128 keeps gfx942's LL128 window (above the LL ceiling) out.
+struct NoRingLL128CostTable : CostTable {
+  NoRingLL128CostTable() {
+    t[NCCL_ALGO_RING][NCCL_PROTO_LL128] = NCCL_ALGO_PROTO_IGNORE;
+  }
+};
+
+// The masked cost table where the shape has an LL128 window, and none where it does not.
+auto LL128MaskFor(const BcLLRealShape& sh, NoRingLL128CostTable& cost) -> float (*)[NCCL_NUM_PROTOCOLS] {
+  return sh.ll128Ceiling > 0 ? cost.t : nullptr;
+}
+
+// The first size of the shape's LL128 window: above the LL ceiling and at Simple's full grid.
+size_t BcLL128Start(const BcLLRealShape& sh) {
+  return std::max(sh.ceiling + 1, BcSimpleFullGrid(sh.nChannels));
+}
 
 template <size_t N>
 void ExpectBcLLRealCeilings(const char* arch, const rcclArchThresholds* table, const BcLLRealShape (&shapes)[N]) {
+  NoRingLL128CostTable cost;
   for (const BcLLRealShape& sh : shapes) {
     SCOPED_TRACE(testing::Message() << arch << ", " << sh.nRanks << " ranks, " << sh.nChannels << " channels");
     ncclComm* comm = MakeBcLLCeilingComm(table, sh.nRanks, sh.nChannels, arch);
-    EXPECT_EQ(NCCL_PROTO_LL, ProtocolOf(comm, ncclFuncBroadcast, 1, NCCL_PROTO_SIMPLE));
-    EXPECT_EQ(NCCL_PROTO_LL, ProtocolOf(comm, ncclFuncBroadcast, sh.ceiling, NCCL_PROTO_SIMPLE));
-    EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, sh.ceiling + 1, NCCL_PROTO_SIMPLE));
+    const auto mask = LL128MaskFor(sh, cost);
+    EXPECT_EQ(NCCL_PROTO_LL, ProtocolOf(comm, ncclFuncBroadcast, 1, NCCL_PROTO_SIMPLE, mask));
+    EXPECT_EQ(NCCL_PROTO_LL, ProtocolOf(comm, ncclFuncBroadcast, sh.ceiling, NCCL_PROTO_SIMPLE, mask));
+    EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, sh.ceiling + 1, NCCL_PROTO_SIMPLE, mask));
     DeleteCommWithArch(comm);
   }
 }
@@ -9419,15 +9454,22 @@ template <size_t N>
 void ExpectBcLLIgnoresRankIndex(const char* arch, const BcLLRealShape (&shapes)[N]) {
   const rcclArchThresholds* table = real_arch_thresholds::rcclGetArchThresholds(arch, RCCL_TUNING_PARTITION_SPX);
   ASSERT_NE(nullptr, table) << arch;
+  NoRingLL128CostTable cost;
   for (const BcLLRealShape& sh : shapes) {
     ncclComm* comm = MakeBcLLCeilingComm(table, sh.nRanks, sh.nChannels, arch);
+    const auto mask = LL128MaskFor(sh, cost);
     for (int r = 0; r < sh.nRanks; ++r) {
       comm->rank = r;
       comm->localRank = r;
       comm->cudaDev = sh.nRanks - 1 - r;
       SCOPED_TRACE(testing::Message() << arch << ", " << sh.nRanks << " ranks, rank " << r);
-      EXPECT_EQ(NCCL_PROTO_LL, ProtocolOf(comm, ncclFuncBroadcast, sh.ceiling, NCCL_PROTO_SIMPLE));
-      EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, sh.ceiling + 1, NCCL_PROTO_SIMPLE));
+      EXPECT_EQ(NCCL_PROTO_LL, ProtocolOf(comm, ncclFuncBroadcast, sh.ceiling, NCCL_PROTO_SIMPLE, mask));
+      EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, sh.ceiling + 1, NCCL_PROTO_SIMPLE, mask));
+      if (sh.ll128Ceiling > 0) {
+        EXPECT_EQ(NCCL_PROTO_LL128, ProtocolOf(comm, ncclFuncBroadcast, BcLL128Start(sh), NCCL_PROTO_SIMPLE));
+        EXPECT_EQ(NCCL_PROTO_LL128, ProtocolOf(comm, ncclFuncBroadcast, sh.ll128Ceiling, NCCL_PROTO_SIMPLE));
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, sh.ll128Ceiling + 1, NCCL_PROTO_SIMPLE));
+      }
     }
     DeleteCommWithArch(comm);
   }
@@ -9477,6 +9519,274 @@ TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_SingleNodeBroadcastLLCeilin
         SetMicroEnvAbsent("NCCL_PROTO");
         ExpectBcLLIgnoresRankIndex("gfx950", kBcLLGfx950Shapes);
         ExpectBcLLIgnoresRankIndex("gfx942", kBcLLGfx942Shapes);
+      });
+}
+
+namespace {
+// gfx942's single-node Broadcast Ring LL128 table: base = the 8-rank Simple full grid, cap 64 MiB.
+constexpr size_t kBcLL128Base = BcSimpleFullGrid(56);
+constexpr size_t kBcLL128Cap = 64 * kMiB;
+
+const rcclArchThresholds* Gfx942Table() {
+  return real_arch_thresholds::rcclGetArchThresholds("gfx942", RCCL_TUNING_PARTITION_SPX);
+}
+
+// topo->ll128Enabled stays false, as on most single-node MI300X comms, whose topology model leaves LL128 off.
+ncclComm* MakeBcLL128Comm(int nRanks, int nChannels) {
+  return MakeBcLLCeilingComm(Gfx942Table(), nRanks, nChannels, "gfx942");
+}
+
+// A graph whose path types sit at the LL128 limits: PXB between nodes, NVL (XGMI) within a node.
+std::unique_ptr<ncclTopoGraph> MakeLL128LimitGraph() {
+  auto graph = std::make_unique<ncclTopoGraph>();
+  graph->typeInter = PATH_PXB;
+  graph->typeIntra = PATH_NVL;
+  return graph;
+}
+
+// The default LL128 offer; with no graph, one at the LL128 path limits.
+bool LL128Offered(const ncclComm* comm, ncclFunc_t func = ncclFuncBroadcast, int algo = NCCL_ALGO_RING,
+                  const ncclTopoGraph* graph = nullptr, bool archOk = true) {
+  std::unique_ptr<ncclTopoGraph> limit;
+  if (graph == nullptr) {
+    limit = MakeLL128LimitGraph();
+    graph = limit.get();
+  }
+  return rcclLL128EnabledByDefault(comm, func, algo, graph, archOk);
+}
+}  // namespace
+
+// ncclTopoTuneModel's LL128 offer: with ll128Enabled off, only single-node Ring Broadcast inside the window gets it.
+TEST(WrapMicrotestIsolated, LL128EnabledByDefault_OffersOnlySingleNodeRingBroadcastInTheWindow) {
+  RUN_ISOLATED_TEST(
+      "Wrap_LL128EnabledByDefault_OffersOnlySingleNodeRingBroadcastInTheWindow",
+      []() {
+        ncclComm* comm = MakeBcLL128Comm(8, 56);
+        std::unique_ptr<ncclTopoGraph> graph = MakeLL128LimitGraph();
+        auto offered = [&](ncclFunc_t func, int algo) { return LL128Offered(comm, func, algo, graph.get()); };
+        EXPECT_TRUE(offered(ncclFuncBroadcast, NCCL_ALGO_RING));
+        for (const ncclFunc_t func : {ncclFuncAllReduce, ncclFuncAllGather, ncclFuncReduceScatter, ncclFuncReduce}) {
+          EXPECT_FALSE(offered(func, NCCL_ALGO_RING)) << ncclFuncToString(func);
+        }
+        EXPECT_FALSE(offered(ncclFuncBroadcast, NCCL_ALGO_TREE));
+        EXPECT_FALSE(LL128Offered(comm, ncclFuncBroadcast, NCCL_ALGO_RING, graph.get(), /*archOk=*/false)) << "arch";
+        graph->typeIntra = PATH_NVL + 1;
+        EXPECT_FALSE(offered(ncclFuncBroadcast, NCCL_ALGO_RING)) << "intra-node path past NVL";
+        graph->typeIntra = PATH_NVL;
+        graph->typeInter = PATH_PXB + 1;
+        EXPECT_FALSE(offered(ncclFuncBroadcast, NCCL_ALGO_RING)) << "inter-node path past PXB";
+        graph->typeInter = PATH_PXB;
+        comm->nNodes = 2;
+        EXPECT_FALSE(offered(ncclFuncBroadcast, NCCL_ALGO_RING)) << "2 nodes x 4 ranks";
+        comm->nNodes = 1;
+        comm->nRanks = 2;
+        comm->nChannels = 32;
+        EXPECT_FALSE(offered(ncclFuncBroadcast, NCCL_ALGO_RING)) << "2 ranks: no relay";
+        comm->topo->ll128Enabled = true;
+        EXPECT_TRUE(offered(ncclFuncAllReduce, NCCL_ALGO_RING)) << "ll128Enabled";
+        EXPECT_TRUE(offered(ncclFuncBroadcast, NCCL_ALGO_TREE)) << "ll128Enabled";
+        EXPECT_FALSE(LL128Offered(comm, ncclFuncAllReduce, NCCL_ALGO_RING, graph.get(), /*archOk=*/false))
+            << "ll128Enabled, arch";
+        graph->typeIntra = PATH_NVL + 1;
+        EXPECT_FALSE(offered(ncclFuncAllReduce, NCCL_ALGO_RING)) << "ll128Enabled, intra-node path past NVL";
+        DeleteCommWithArch(comm);
+      });
+}
+
+// gfx942: Ring Simple becomes Ring LL128 from the window start to the LL128 ceiling; LL and LL128 picks stay.
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_SingleNodeBroadcastLL128WindowRealTable) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveProtocol_SingleNodeBroadcastLL128WindowRealTable",
+      []() {
+        SetMicroEnvAbsent("NCCL_PROTO");
+        const rcclArchThresholds* gfx942 = Gfx942Table();
+        ASSERT_NE(nullptr, gfx942);
+        EXPECT_EQ(kBcLL128Base, gfx942->bcSingleNodeRingLL128BaseBytes);
+        EXPECT_EQ(1u, gfx942->bcSingleNodeRingLL128ChannelPowHalves);
+        EXPECT_EQ(2u, gfx942->bcSingleNodeRingLL128RelayPowHalves);
+        EXPECT_EQ(kBcLL128Cap, gfx942->bcSingleNodeRingLL128CapBytes);
+        for (const BcLLRealShape& sh : kBcLLGfx942Shapes) {
+          SCOPED_TRACE(testing::Message() << sh.nRanks << " ranks, " << sh.nChannels << " channels");
+          ncclComm* comm = MakeBcLL128Comm(sh.nRanks, sh.nChannels);
+          EXPECT_EQ(NCCL_PROTO_LL, ProtocolOf(comm, ncclFuncBroadcast, sh.ceiling, NCCL_PROTO_SIMPLE));
+          if (sh.ll128Ceiling == 0) {
+            for (const size_t n : {sh.ceiling + 1, kMiB, 64 * kMiB}) {
+              EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, n, NCCL_PROTO_SIMPLE)) << n;
+            }
+            EXPECT_FALSE(LL128Offered(comm));
+          } else {
+            const size_t start = BcLL128Start(sh);
+            ASSERT_LT(start, sh.ll128Ceiling);
+            EXPECT_TRUE(LL128Offered(comm));
+            EXPECT_EQ(start - 1 <= sh.ceiling ? NCCL_PROTO_LL : NCCL_PROTO_SIMPLE,
+                      ProtocolOf(comm, ncclFuncBroadcast, start - 1, NCCL_PROTO_SIMPLE))
+                << "below the window";
+            EXPECT_EQ(NCCL_PROTO_LL128, ProtocolOf(comm, ncclFuncBroadcast, start, NCCL_PROTO_SIMPLE));
+            EXPECT_EQ(NCCL_PROTO_LL128, ProtocolOf(comm, ncclFuncBroadcast, sh.ll128Ceiling, NCCL_PROTO_SIMPLE));
+            EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, sh.ll128Ceiling + 1, NCCL_PROTO_SIMPLE));
+            EXPECT_EQ(NCCL_PROTO_LL, ProtocolOf(comm, ncclFuncBroadcast, sh.ll128Ceiling, NCCL_PROTO_LL));
+            EXPECT_EQ(NCCL_PROTO_LL128, ProtocolOf(comm, ncclFuncBroadcast, sh.ll128Ceiling + 1, NCCL_PROTO_LL128));
+            EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncAllReduce, sh.ll128Ceiling, NCCL_PROTO_SIMPLE));
+            EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncReduce, sh.ll128Ceiling, NCCL_PROTO_SIMPLE));
+          }
+          DeleteCommWithArch(comm);
+        }
+      });
+}
+
+// 3 ranks / 8 channels: the LL ceiling (48 KiB) is below Simple's full grid (128 KiB), where the window starts.
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_SingleNodeBroadcastLL128StartsAtSimpleFullGrid) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveProtocol_SingleNodeBroadcastLL128StartsAtSimpleFullGrid",
+      []() {
+        SetMicroEnvAbsent("NCCL_PROTO");
+        ncclComm* comm = MakeBcLL128Comm(3, 8);
+        const size_t full = BcSimpleFullGrid(8);
+        ASSERT_EQ(128 * kKiB, full);
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, 64 * kKiB, NCCL_PROTO_SIMPLE));
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, full - 1, NCCL_PROTO_SIMPLE));
+        EXPECT_EQ(NCCL_PROTO_LL128, ProtocolOf(comm, ncclFuncBroadcast, full, NCCL_PROTO_SIMPLE));
+        comm->threadThresholds[NCCL_ALGO_RING][NCCL_PROTO_SIMPLE] = 2 * kBcSimpleThreadThreshold;
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, 2 * full - 1, NCCL_PROTO_SIMPLE));
+        EXPECT_EQ(NCCL_PROTO_LL128, ProtocolOf(comm, ncclFuncBroadcast, 2 * full, NCCL_PROTO_SIMPLE));
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The ceiling's shape, base x nChannels^0.5 x relays (nRanks - 2), and the cap at a high channel count.
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_SingleNodeBroadcastLL128CeilingShapeAndCap) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveProtocol_SingleNodeBroadcastLL128CeilingShapeAndCap",
+      []() {
+        SetMicroEnvAbsent("NCCL_PROTO");
+        const struct {
+          int nRanks;
+          int nChannels;
+          size_t ceiling;
+        } cases[] = {
+            {4, 16, kBcLL128Base * 4 * 2},
+            {6, 64, kBcLL128Base * 8 * 4},
+            {8, 100, kBcLL128Base * 10 * 6},
+            {8, 256, kBcLL128Cap},  // base x 16 x 6 is above the cap
+        };
+        for (const auto& c : cases) {
+          SCOPED_TRACE(testing::Message() << c.nRanks << " ranks, " << c.nChannels << " channels");
+          ncclComm* comm = MakeBcLL128Comm(c.nRanks, c.nChannels);
+          EXPECT_EQ(NCCL_PROTO_LL128, ProtocolOf(comm, ncclFuncBroadcast, c.ceiling, NCCL_PROTO_SIMPLE));
+          EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, c.ceiling + 1, NCCL_PROTO_SIMPLE));
+          DeleteCommWithArch(comm);
+        }
+      });
+}
+
+// Out of scope, the model's Ring Simple stays: masked cells, partitioned, past 8 ranks, multi-node, other tables.
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_SingleNodeBroadcastLL128Scope) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveProtocol_SingleNodeBroadcastLL128Scope",
+      []() {
+        SetMicroEnvAbsent("NCCL_PROTO");
+        const size_t n = 16 * kMiB;
+        ncclComm* comm = MakeBcLL128Comm(8, 56);
+        EXPECT_EQ(NCCL_PROTO_LL128, ProtocolOf(comm, ncclFuncBroadcast, n, NCCL_PROTO_SIMPLE)) << "in scope";
+        CostTable cost;
+        EXPECT_EQ(NCCL_PROTO_LL128, ProtocolOf(comm, ncclFuncBroadcast, n, NCCL_PROTO_SIMPLE, cost.t));
+        NoRingLL128CostTable noLL128;
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, n, NCCL_PROTO_SIMPLE, noLL128.t))
+            << "no Ring LL128 in the cost table";
+        CostTable noLL;
+        noLL.t[NCCL_ALGO_RING][NCCL_PROTO_LL] = NCCL_ALGO_PROTO_IGNORE;
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, 2 * kMiB, NCCL_PROTO_SIMPLE, noLL.t))
+            << "Ring LL masked: at or below the LL ceiling, LL128 stays out";
+        EXPECT_EQ(NCCL_PROTO_LL128, ProtocolOf(comm, ncclFuncBroadcast, n, NCCL_PROTO_SIMPLE, noLL.t));
+        comm->hasMloPart = true;
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, n, NCCL_PROTO_SIMPLE)) << "partitioned";
+        EXPECT_FALSE(LL128Offered(comm)) << "partitioned";
+        comm->hasMloPart = false;
+        for (const int nRanks : {9, 16}) {
+          comm->nRanks = nRanks;
+          EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, n, NCCL_PROTO_SIMPLE)) << nRanks << " ranks";
+          EXPECT_FALSE(LL128Offered(comm)) << nRanks << " ranks";
+        }
+        comm->nRanks = 8;
+        comm->nNodes = 2;
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, n, NCCL_PROTO_SIMPLE)) << "2 nodes x 4 ranks";
+        EXPECT_FALSE(LL128Offered(comm)) << "2 nodes x 4 ranks";
+        DeleteCommWithArch(comm);
+
+        comm = MakeBcLLCeilingComm(nullptr, 8, 56, "gfx942");  // the arch-table fake returns no table
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, n, NCCL_PROTO_SIMPLE)) << "no table";
+        EXPECT_FALSE(LL128Offered(comm)) << "no table";
+        DeleteCommWithArch(comm);
+
+        const struct {
+          const char* arch;
+          rcclTuningPartition mode;
+        } others[] = {{"gfx950", RCCL_TUNING_PARTITION_SPX},
+                      {"gfx1250", RCCL_TUNING_PARTITION_SPX},
+                      {"gfx1250", RCCL_TUNING_PARTITION_DPX}};
+        for (const auto& o : others) {
+          const rcclArchThresholds* t = real_arch_thresholds::rcclGetArchThresholds(o.arch, o.mode);
+          ASSERT_NE(nullptr, t) << o.arch;
+          EXPECT_EQ(0u, t->bcSingleNodeRingLL128BaseBytes) << o.arch << " " << o.mode;
+          EXPECT_EQ(0u, t->bcSingleNodeRingLL128CapBytes) << o.arch << " " << o.mode;
+        }
+        const rcclArchThresholds* gfx950 =
+            real_arch_thresholds::rcclGetArchThresholds("gfx950", RCCL_TUNING_PARTITION_SPX);
+        comm = MakeBcLLCeilingComm(gfx950, 8, 112, "gfx950");
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, 32 * kMiB, NCCL_PROTO_SIMPLE)) << "gfx950";
+        EXPECT_FALSE(LL128Offered(comm)) << "gfx950";
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_SingleNodeBroadcastLL128HonorsUserProto) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveProtocol_SingleNodeBroadcastLL128HonorsUserProto",
+      []() {
+        SetMicroEnv("NCCL_PROTO", "SIMPLE");
+        ncclComm* comm = MakeBcLL128Comm(8, 56);
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, 16 * kMiB, NCCL_PROTO_SIMPLE));
+        DeleteCommWithArch(comm);
+      });
+}
+
+// RCCL_BC_SINGLE_NODE_RING_LL128_MAX_BYTES: -1 = table, 0 = model, > 0 = ceiling (2 and 16 ranks too), still one node.
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_SingleNodeBroadcastLL128EnvOverride) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveProtocol_SingleNodeBroadcastLL128EnvOverride",
+      []() {
+        SetMicroEnvAbsent("NCCL_PROTO");
+        ncclComm* comm = MakeBcLL128Comm(8, 56);
+        {
+          ScopedHook loadParam(g_loadParam, ForceParam("RCCL_BC_SINGLE_NODE_RING_LL128_MAX_BYTES", int64_t(-1)));
+          EXPECT_EQ(NCCL_PROTO_LL128, ProtocolOf(comm, ncclFuncBroadcast, kBcLL128Gfx942Np8Ceiling, NCCL_PROTO_SIMPLE));
+          EXPECT_EQ(NCCL_PROTO_SIMPLE,
+                    ProtocolOf(comm, ncclFuncBroadcast, kBcLL128Gfx942Np8Ceiling + 1, NCCL_PROTO_SIMPLE));
+        }
+        {
+          ScopedHook loadParam(g_loadParam, ForceParam("RCCL_BC_SINGLE_NODE_RING_LL128_MAX_BYTES", int64_t(0)));
+          EXPECT_FALSE(LL128Offered(comm)) << "0 keeps the model";
+          EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, 16 * kMiB, NCCL_PROTO_SIMPLE));
+          EXPECT_EQ(NCCL_PROTO_LL, ProtocolOf(comm, ncclFuncBroadcast, kMiB, NCCL_PROTO_SIMPLE)) << "LL rule stays";
+        }
+        {
+          ScopedHook loadParam(g_loadParam,
+                               ForceParam("RCCL_BC_SINGLE_NODE_RING_LL128_MAX_BYTES", int64_t(128 * kMiB)));
+          EXPECT_EQ(NCCL_PROTO_LL128, ProtocolOf(comm, ncclFuncBroadcast, 128 * kMiB, NCCL_PROTO_SIMPLE));
+          EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, 128 * kMiB + 1, NCCL_PROTO_SIMPLE));
+          EXPECT_EQ(NCCL_PROTO_LL, ProtocolOf(comm, ncclFuncBroadcast, 5 * kMiB, NCCL_PROTO_SIMPLE)) << "LL ceiling";
+          comm->nRanks = 16;
+          EXPECT_EQ(NCCL_PROTO_LL128, ProtocolOf(comm, ncclFuncBroadcast, 64 * kMiB, NCCL_PROTO_SIMPLE)) << "16 ranks";
+          comm->nRanks = 2;
+          comm->nChannels = 32;
+          EXPECT_EQ(NCCL_PROTO_LL128, ProtocolOf(comm, ncclFuncBroadcast, 64 * kMiB, NCCL_PROTO_SIMPLE)) << "2 ranks";
+          EXPECT_TRUE(LL128Offered(comm)) << "2 ranks, env";
+          EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, BcSimpleFullGrid(32) - 1, NCCL_PROTO_SIMPLE))
+              << "below Simple's full grid";
+          comm->nNodes = 2;
+          EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, 64 * kMiB, NCCL_PROTO_SIMPLE)) << "2 nodes";
+        }
+        DeleteCommWithArch(comm);
       });
 }
 

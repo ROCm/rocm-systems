@@ -280,6 +280,14 @@ test_categories:
       - "RCCL_DIRECT_REDUCE_SCATTER_DISABLE=1"
       - "RCCL_SYM_K_MAX_BYTES=0"
       - "RCCL_TDM_LL128_ENABLE=0"
+  quick_env_bc_ll128_window:
+    description: "Single-node gfx942 Broadcast with no NCCL_PROTO: the tuning model offers Ring LL128 and a size in the Broadcast LL128 window selects it, with right data. NCCL_PROTO is cached for the process lifetime, so this runs in its own process. It is a manual check: it skips off gfx942, on more than one node, outside 3 to 8 ranks, without all-pairs XGMI and where the topology model already enables LL128; DDA is off so Ring runs Broadcast."
+    test_patterns:
+      - "BroadcastLl128WindowMPITest.*"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_quick_labels
+    env_variables:
+      - "RCCL_DDA_ENABLE=0"
   quick_env_shm_simple_step_barrier:
     description: "Ring Simple AllReduce, ReduceScatter, AllGather, Broadcast and Reduce over SHM, checked element by element as in quick_env_p2p_ll_step_barrier. Default SHM has no connFifo, so on gfx1250 Simple runs the LDS-only start-of-step barrier, checked here over host memory; NET and SHM with CUDA memcpy keep the full barrier. NCCL_P2P_DISABLE and the switches above Ring are cached for the process lifetime, so they are set before launch."
     test_patterns:
