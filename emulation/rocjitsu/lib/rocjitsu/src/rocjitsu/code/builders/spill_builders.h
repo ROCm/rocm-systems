@@ -9,8 +9,7 @@
 /// lane bridge, off-mode scratch store/load, and the store- and load-completion
 /// waits (RDNA4 splits store and load counters, so both are needed). All use
 /// off-mode addressing (lds/sve left 0), so the caller passes only a within-lane
-/// byte offset from SpillManager. Allocation and scalar encoding helpers may
-/// still throw.
+/// byte offset from SpillManager.
 
 #pragma once
 

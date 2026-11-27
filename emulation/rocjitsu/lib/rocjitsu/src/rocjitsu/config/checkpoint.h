@@ -36,7 +36,6 @@ namespace config {
 /// @param async_helper_threads Original helper request; -1 selects the table.
 /// Zero preserves disabled-helper behavior for existing save callers.
 /// @returns Failure for unrepresentable state or open/write/flush/close errors.
-/// Allocation and library exceptions may still propagate to the caller.
 /// Serialization failures leave the output file untouched; I/O failures may leave
 /// a partial file.
 util::Result save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
@@ -58,8 +57,7 @@ util::Result save_checkpoint(const std::string &path, const SoC &soc, uint64_t t
 /// @param emit_error Receives one diagnostic for a returned failure.
 /// @returns LoadedConfig with restored state, or failure for checkpoint I/O errors,
 /// invalid format, configuration, execution-thread metadata, or wavefront state.
-/// Failed restores discard the partially reconstructed state. Allocation and
-/// library exceptions may still propagate to the caller.
+/// Failed restores discard the partially reconstructed state.
 util::FailureOr<LoadedConfig> restore_checkpoint(const std::string &path,
                                                  util::DiagnosticEmitter emit_error);
 

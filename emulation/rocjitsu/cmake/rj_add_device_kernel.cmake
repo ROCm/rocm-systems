@@ -34,7 +34,8 @@ function(rj_add_device_kernel name offload_arch)
         OUTPUT ${out}
         COMMAND
             ${AMDCXX} -x hip --offload-arch=${offload_arch}
-            --rocm-path=${ROCM_PATH} -fPIC -c -O2 -o ${out} ${src}
+            --rocm-path=${ROCM_PATH} -fno-exceptions -fPIC -c -O2 -o ${out}
+            ${src}
         DEPENDS ${src} ${AMDCXX}
         COMMENT "Compiling device kernel: ${output_name} (${offload_arch})"
     )

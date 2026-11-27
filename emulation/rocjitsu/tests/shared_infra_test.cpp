@@ -337,7 +337,7 @@ TEST(RdnaWaitcntTest, Rdna3NamedSopkWaitcntsSetFineGrainedTargets) {
     const std::array<rdna3::MachineInst, 2> words = {0xBC000000u, 0x00000000u};
     rdna3::SWaitcntVscntSopk inst(words.data());
 
-    EXPECT_NO_THROW(inst.execute_impl(*wf));
+    inst.execute_impl(*wf);
     EXPECT_EQ(wf->wait_target().vscnt, 0);
     EXPECT_EQ(wf->state(), amdgpu::WfState::WAITCNT);
   }
@@ -349,7 +349,7 @@ TEST(RdnaWaitcntTest, Rdna3NamedSopkWaitcntsSetFineGrainedTargets) {
     const std::array<rdna3::MachineInst, 2> words = {0xBC800000u, 0x00000000u};
     rdna3::SWaitcntVmcntSopk inst(words.data());
 
-    EXPECT_NO_THROW(inst.execute_impl(*wf));
+    inst.execute_impl(*wf);
     EXPECT_EQ(wf->wait_target().vmcnt, 0);
     EXPECT_EQ(wf->state(), amdgpu::WfState::WAITCNT);
   }
@@ -361,7 +361,7 @@ TEST(RdnaWaitcntTest, Rdna3NamedSopkWaitcntsSetFineGrainedTargets) {
     const std::array<rdna3::MachineInst, 2> words = {0xBD000000u, 0x00000000u};
     rdna3::SWaitcntExpcntSopk inst(words.data());
 
-    EXPECT_NO_THROW(inst.execute_impl(*wf));
+    inst.execute_impl(*wf);
     EXPECT_EQ(wf->wait_target().expcnt, 0);
     EXPECT_EQ(wf->state(), amdgpu::WfState::WAITCNT);
   }
@@ -373,7 +373,7 @@ TEST(RdnaWaitcntTest, Rdna3NamedSopkWaitcntsSetFineGrainedTargets) {
     const std::array<rdna3::MachineInst, 2> words = {0xBD800000u, 0x00000000u};
     rdna3::SWaitcntLgkmcntSopk inst(words.data());
 
-    EXPECT_NO_THROW(inst.execute_impl(*wf));
+    inst.execute_impl(*wf);
     EXPECT_EQ(wf->wait_target().lgkmcnt, 0);
     EXPECT_EQ(wf->state(), amdgpu::WfState::WAITCNT);
   }
@@ -5630,7 +5630,7 @@ void cdna4_unsupported_sdwa_decode_halts_wave() {
     mem.write32(index * sizeof(uint32_t), words[index]);
   }
 
-  EXPECT_NO_THROW(static_cast<void>(cu->step()));
+  static_cast<void>(cu->step());
   EXPECT_TRUE(wf->is_halted());
 }
 

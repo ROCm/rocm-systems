@@ -85,15 +85,15 @@ protected:
         manifest.original_text_bytes = text_.sh_size;
         manifest.prepared_text_bytes = text_.sh_size;
         manifest.entry = entry.binding;
-        manifest.sites = {{.analysis = AnalysisKind::LdsRaceDetection,
-                           .access = AccessKind::Write,
-                           .width = 4,
-                           .original_offset = kernel.entry_text_offset + 52,
-                           .original_size = 8,
-                           .prepared_guest_offset = kernel.entry_text_offset + 52,
-                           .prepared_guest_size = 8,
-                           .probe_offset = kernel.entry_text_offset + 28,
-                           .probe_size = 4}};
+        manifest.sites.push_back({.analysis = AnalysisKind::LdsRaceDetection,
+                                  .access = AccessKind::Write,
+                                  .width = 4,
+                                  .original_offset = kernel.entry_text_offset + 52,
+                                  .original_size = 8,
+                                  .prepared_guest_offset = kernel.entry_text_offset + 52,
+                                  .prepared_guest_size = 8,
+                                  .probe_offset = kernel.entry_text_offset + 28,
+                                  .probe_size = 4});
         entry.selected = std::move(manifest);
       } else {
         uint64_t end = text_.sh_size;
@@ -102,9 +102,9 @@ protected:
             end = std::min(end, other.entry_text_offset);
           }
         }
-        entry.native_code = {{.original_offset = kernel.entry_text_offset,
-                              .prepared_offset = kernel.entry_text_offset,
-                              .bytes = end - kernel.entry_text_offset}};
+        entry.native_code.push_back({.original_offset = kernel.entry_text_offset,
+                                     .prepared_offset = kernel.entry_text_offset,
+                                     .bytes = end - kernel.entry_text_offset});
       }
       facts_.entries.push_back(std::move(entry));
     }

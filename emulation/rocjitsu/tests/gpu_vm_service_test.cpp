@@ -33,7 +33,6 @@
 #include <mutex>
 #include <optional>
 #include <span>
-#include <stdexcept>
 #include <thread>
 #include <vector>
 
@@ -681,12 +680,10 @@ private:
         ++state_->destruction_calls;
         shared_->condition.notify_all();
       }
-      try {
-        std::lock_guard lock(shared_->mutex);
-        if (shared_->destruction_observer) {
-          shared_->destruction_observer();
-        }
-      } catch (...) {
+
+      std::lock_guard lock(shared_->mutex);
+      if (shared_->destruction_observer) {
+        shared_->destruction_observer();
       }
     }
 
@@ -1969,7 +1966,7 @@ TEST(GpuVmService, FaultReporterSerializesDistinctSnapshotsAndGenerations) {
   }
 }
 
-TEST(GpuVmService, FaultReporterAllowsNestedFaultsAndReleasesAfterException) {
+TEST(GpuVmService, FaultReporterAllowsNestedFaultsAndReleasesAfterReturn) {
   GpuVm vm;
   auto backing = std::make_shared<ByteAddressSpace>(0x11);
   AddressSpaceHandle handle;
@@ -1981,17 +1978,14 @@ TEST(GpuVmService, FaultReporterAllowsNestedFaultsAndReleasesAfterException) {
       ASSERT_TRUE(nested);
       EXPECT_EQ(nested->probe(4097, 1, VmAccessKind::Read), VmAccessOutcome::Faulted);
     }
-    if (address == 4098) {
-      throw std::runtime_error("fault reporter");
-    }
   });
   auto access = vm.snapshot(handle);
   ASSERT_TRUE(access);
   EXPECT_EQ(access->probe(4096, 1, VmAccessKind::Read), VmAccessOutcome::Faulted);
   EXPECT_EQ(calls, 2u);
-  EXPECT_THROW((void)access->probe(4098, 1, VmAccessKind::Read), std::runtime_error);
+  EXPECT_EQ(access->probe(4098, 1, VmAccessKind::Read), VmAccessOutcome::Faulted);
   EXPECT_EQ(calls, 3u);
-  // A different thread must be able to enter after the throwing callback.
+  // A different thread must be able to enter after the callback returns.
   std::jthread reader(
       [&] { EXPECT_EQ(access->probe(4097, 1, VmAccessKind::Read), VmAccessOutcome::Faulted); });
   reader.join();

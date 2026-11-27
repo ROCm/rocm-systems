@@ -15,7 +15,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <dlfcn.h>
-#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <future>
