@@ -176,39 +176,104 @@ inline void execute_swap(Wavefront &wave, uint64_t flags, const Operand &destina
   }
 }
 
+// The physical register that both reads and writes of a plain 32-bit VGPR
+// swap operand use while GPR indexing is off. CDNA5 selects the bank with the
+// operand role's MODE MSBs. CDNA4 reads v0 for a register outside the ordinary
+// bank, so that operand has no single register.
+inline std::optional<uint32_t> permlane_swap_vgpr(const Wavefront &wave, const Operand &operand) {
+  const auto reg = operand.decoded_vgpr();
+  if (!reg || operand.delegate() || operand.size_bits() != 32) {
+    return std::nullopt;
+  }
+  uint32_t index = reg->index;
+  switch (wave.cu().arch()) {
+  case rocjitsu::IsaFamily::Cdna5:
+    index += wave.vgpr_msb_for_role(operand.vgpr_msb_role()) << 8;
+    break;
+  case rocjitsu::IsaFamily::Cdna4:
+    if (!wave.vgpr_bank(false).contains(index)) {
+      return std::nullopt;
+    }
+    break;
+  default:
+    return std::nullopt;
+  }
+  return wave.vgpr_alloc().base + index;
+}
+
 // Exchange adjacent rows without requiring the source lane to be active.
 // Read both operands before publishing either output; observation masks cover
 // the opposite row consumed by each active destination.
 template <int Stride>
-inline void execute_permlane_swap(Wavefront &wave, uint64_t flags, const Operand &destination,
-                                  const Operand &source) {
-  if (wave.wf_size() <= Stride) {
-    return;
-  }
-  uint64_t exec_mask = wave.exec() & wave.vgpr_write_mask();
+inline void execute_active_permlane_swap(Wavefront &wave, uint64_t flags,
+                                         const Operand &destination, const Operand &source,
+                                         uint64_t exec_mask) {
   uint64_t low_rows = Stride == 16 ? 0x0000ffff0000ffffULL : 0x00000000ffffffffULL;
   uint64_t a_write = exec_mask & low_rows, d_write = exec_mask & ~low_rows;
-  if (!exec_mask) {
-    return;
-  }
   RegisterAccess registers(wave);
+  // The kernel reads both rows before either store, even if A and D alias.
+  const auto swap_rows = [&](uint32_t *const *d, uint32_t *const *a) {
+    if constexpr (Stride == 16) {
+      return wave.wf_size() == 32
+                 ? rj_arith_v_permlane16_swap_b32_w32(flags, uint32_t(exec_mask), 0, d, a)
+                 : rj_arith_v_permlane16_swap_b32_w64(flags, exec_mask, 0, d, a);
+    } else {
+      return rj_arith_v_permlane32_swap_b32_w64(flags, exec_mask, 0, d, a);
+    }
+  };
+  // Plain VGPR operands swap in their own storage without operand views. The
+  // bulk writer declines observed or unowned registers, so no access event is due.
+  if (!wave.gpr_idx_en() && !wave.instruction_execution_failed()) {
+    const auto d_reg = permlane_swap_vgpr(wave, destination);
+    const auto a_reg = permlane_swap_vgpr(wave, source);
+    const auto in_place =
+        d_reg && a_reg
+            ? registers.try_masked_bulk_write_vgprs<1>(
+                  *d_reg, d_write,
+                  [&](uint32_t *const *d, uint64_t) {
+                    return registers.try_masked_bulk_write_vgprs<1>(
+                        *a_reg, a_write, [&](uint32_t *const *a, uint64_t) -> std::optional<int> {
+                          return swap_rows(d, a);
+                        });
+                  })
+            : std::nullopt;
+    if (in_place) {
+      if (*in_place != RJ_ARITH_SUCCESS) {
+        wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+      }
+      return;
+    }
+  }
   VectorInput32 old_a(registers, wave, source, d_write >> Stride);
   VectorInput32 old_d(registers, wave, destination, a_write << Stride);
   if (wave.instruction_execution_failed()) {
+    return;
+  }
+  // In-place execution requires each consumed input to match its writable storage.
+  const auto direct = registers.try_bulk_write_operand(
+      destination, d_write, [&](uint32_t *const *d, uint64_t) -> std::optional<int> {
+        if (a_write && old_d.data != d[0]) {
+          return std::nullopt;
+        }
+        return registers.try_bulk_write_operand(
+            source, a_write, [&](uint32_t *const *a, uint64_t) -> std::optional<int> {
+              if (d_write && old_a.data != a[0]) {
+                return std::nullopt;
+              }
+              return swap_rows(d, a);
+            });
+      });
+  if (direct) {
+    if (*direct != RJ_ARITH_SUCCESS) {
+      wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+    }
     return;
   }
   std::array<uint32_t, 64> a_values, d_values;
   std::copy_n(old_a.data, wave.wf_size(), a_values.data());
   std::copy_n(old_d.data, wave.wf_size(), d_values.data());
   uint32_t *a = a_values.data(), *d = d_values.data();
-  int status;
-  if constexpr (Stride == 16) {
-    status = wave.wf_size() == 32
-                 ? rj_arith_v_permlane16_swap_b32_w32(flags, uint32_t(exec_mask), 0, &d, &a)
-                 : rj_arith_v_permlane16_swap_b32_w64(flags, exec_mask, 0, &d, &a);
-  } else {
-    status = rj_arith_v_permlane32_swap_b32_w64(flags, exec_mask, 0, &d, &a);
-  }
+  const int status = swap_rows(&d, &a);
   if (status != RJ_ARITH_SUCCESS) {
     wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
     return;
@@ -220,6 +285,20 @@ inline void execute_permlane_swap(Wavefront &wave, uint64_t flags, const Operand
     if ((d_write >> lane) & 1) {
       registers.write_lane(destination, lane, d_values[lane]);
     }
+  }
+}
+
+template <int Stride>
+inline void execute_permlane_swap(Wavefront &wave, uint64_t flags, const Operand &destination,
+                                  const Operand &source) {
+  const uint64_t raw_exec = wave.exec_raw();
+  if (!raw_exec) {
+    return;
+  }
+  // The write mask excludes lanes beyond the wave width, including Wave32 EXEC_HI.
+  const uint64_t exec_mask = raw_exec & wave.vgpr_write_mask();
+  if (exec_mask && wave.wf_size() > Stride) {
+    execute_active_permlane_swap<Stride>(wave, flags, destination, source, exec_mask);
   }
 }
 
