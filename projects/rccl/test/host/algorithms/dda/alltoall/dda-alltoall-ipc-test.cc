@@ -32,6 +32,9 @@ const hipStream_t kStream = reinterpret_cast<hipStream_t>(0x88);
 const hipEvent_t kStopEvent = reinterpret_cast<hipEvent_t>(0x77);
 // One 512-thread block of 16 B loads covers 8 KiB per peer; below that the kernel stages the copy itself.
 constexpr size_t kSingleBlockFloats = 8192 / 4;
+// AICOMRCCL-2873: 4 MiB total is the in-kernel cap (8 ranks of fp32). One uint4 past it is host pre-copy.
+constexpr size_t kInKernelMaxFloats = (4u << 20) / (8 * sizeof(float));
+constexpr size_t kHostPreCopyFloats = kInKernelMaxFloats + 4;
 
 template <bool kStagingCopyInKernel>
 const void* Kernel() {
@@ -158,14 +161,33 @@ TEST_F(DdaAlltoallIpcMicrotest, Launch_SingleBlockPayloadStagesInsideTheKernel) 
   EXPECT_TRUE(copies_.empty());
 }
 
-TEST_F(DdaAlltoallIpcMicrotest, Launch_LargerPayloadIsStagedIntoScratchBeforeTheKernel) {
+TEST_F(DdaAlltoallIpcMicrotest, Launch_EightKiBPerPeerIsOneBlockAndCopiesInKernel) {
   ASSERT_EQ(Run(kSingleBlockFloats), ncclSuccess);
+  ASSERT_EQ(g_ddaLaunches.size(), 1u);
+  EXPECT_EQ(g_ddaLaunches[0].kernel, Kernel<true>());
+  EXPECT_EQ(g_ddaLaunches[0].grid.x, 1u);
+  EXPECT_TRUE(copies_.empty());
+}
+
+// AICOMRCCL-2873 reg 2: multi-block sizes in the 64K–4M band must not host-MemcpyAsync before the
+// fused stop-event kernel.
+TEST_F(DdaAlltoallIpcMicrotest, Launch_MultiBlockAt4MiBCopiesInKernel) {
+  ASSERT_EQ(Run(kInKernelMaxFloats), ncclSuccess);
+  ASSERT_EQ(g_ddaLaunches.size(), 1u);
+  EXPECT_EQ(g_ddaLaunches[0].grid.x, 24u);
+  EXPECT_TRUE(copies_.empty());
+  EXPECT_EQ(g_ddaLaunches[0].stopEvent, kStopEvent);
+  EXPECT_EQ(comm().addonStopEvent, nullptr);
+}
+
+TEST_F(DdaAlltoallIpcMicrotest, Launch_Above4MiBIsStagedIntoScratchBeforeTheKernel) {
+  ASSERT_EQ(Run(kHostPreCopyFloats), ncclSuccess);
   ASSERT_EQ(g_ddaLaunches.size(), 1u);
   EXPECT_EQ(g_ddaLaunches[0].kernel, Kernel<false>());
   ASSERT_EQ(copies_.size(), 1u);
   EXPECT_EQ(copies_[0].dst, comm().ddaScratch);
   EXPECT_EQ(copies_[0].src, kSendbuff);
-  EXPECT_EQ(copies_[0].bytes, 8 * kSingleBlockFloats * 4);
+  EXPECT_EQ(copies_[0].bytes, 8 * kHostPreCopyFloats * sizeof(float));
   EXPECT_EQ(copies_[0].kind, hipMemcpyDeviceToDevice);
   EXPECT_EQ(copies_[0].stream, kStream);
   EXPECT_EQ(copies_[0].launchesBefore, 0u);
@@ -173,7 +195,7 @@ TEST_F(DdaAlltoallIpcMicrotest, Launch_LargerPayloadIsStagedIntoScratchBeforeThe
 
 TEST_F(DdaAlltoallIpcMicrotest, Launch_StagingCopyErrorIsReportedWithoutLaunching) {
   g_hipMemcpyAsync = [](void*, const void*, size_t, hipMemcpyKind, hipStream_t) { return hipErrorInvalidValue; };
-  EXPECT_EQ(Run(kSingleBlockFloats), ncclUnhandledCudaError);
+  EXPECT_EQ(Run(kHostPreCopyFloats), ncclUnhandledCudaError);
   EXPECT_TRUE(g_ddaLaunches.empty());
 }
 
