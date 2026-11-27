@@ -1072,7 +1072,10 @@ int IPCSocketRead(IPCSocket conn, void* buf, size_t len) {
 }
 
 int IPCSocketWrite(IPCSocket conn, const void* buf, size_t len) {
-  return static_cast<int>(write(IPCSockToFd(conn), buf, len));
+  // MSG_NOSIGNAL: when the exporter rejects this peer and closes the connection
+  // before reading the request, a bare write() would raise SIGPIPE and kill the
+  // importing process. send() reports EPIPE instead, so the attach fails cleanly.
+  return static_cast<int>(send(IPCSockToFd(conn), buf, len, MSG_NOSIGNAL));
 }
 
 int IPCSendHandle(IPCSocket conn, intptr_t handle) {
