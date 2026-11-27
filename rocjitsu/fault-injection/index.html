@@ -202,7 +202,7 @@
     <div class="md-source__repository md-source__repository--active">
       ROCm/rocm-systems
       <ul class="md-source__facts">
-        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 573 · build snapshot" aria-label="Stars: 573">573</li>
+        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 574 · build snapshot" aria-label="Stars: 574">574</li>
         <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 516 · build snapshot" aria-label="Forks: 516">516</li>
       </ul>
     </div>
@@ -255,7 +255,7 @@
     <div class="md-source__repository md-source__repository--active">
       ROCm/rocm-systems
       <ul class="md-source__facts">
-        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 573 · build snapshot" aria-label="Stars: 573">573</li>
+        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 574 · build snapshot" aria-label="Stars: 574">574</li>
         <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 516 · build snapshot" aria-label="Forks: 516">516</li>
       </ul>
     </div>
@@ -1885,8 +1885,8 @@ See <a href="../isa-target-providers/">ISA target providers</a> and the
 </tr>
 <tr>
 <td>Atomic wrong address (<code>AtomicWrongAddress</code>)</td>
-<td>Lists all owned atomic sites before recipe admission. Mutates the signed24 byte offset of twelve-byte FLAT/GLOBAL atomics on gfx1200/gfx1201 wave32/wave64 and gfx1250/gfx1251 wave32, preserving the operation's alignment. Unsupported forms retain their ordinals and fail on apply.</td>
-<td><a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/atomic_wrong_address.h">Atomic API</a>, <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/patch/fault_injection/atomic_wrong_address_test.cpp">library tests</a>, <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/patch/fault_injection/atomic_cli_test.cpp">CLI tests</a></td>
+<td>Lists all owned atomic sites before recipe admission. Mutates the signed24 byte offset of twelve-byte FLAT/GLOBAL/BUFFER atomics on gfx1200/gfx1201 wave32/wave64 and gfx1250/gfx1251 wave32, preserving the operation's alignment. Unsupported forms retain their ordinals and fail on apply.</td>
+<td><a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/atomic_wrong_address.h">Atomic API</a>, <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/patch/fault_injection/atomic_wrong_address_test.cpp">library tests</a>, <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/patch/fault_injection/atomic_buffer_test.cpp">Buffer tests</a>, <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/patch/fault_injection/atomic_cli_test.cpp">CLI tests</a></td>
 </tr>
 <tr>
 <td>Exact and logical-ordinal selection</td>
@@ -1947,8 +1947,10 @@ ordinals include unsupported atomic forms. A delta must be positive, at most
 natural alignment: eight bytes for 64-bit atomics, four for 32-bit and packed
 16-bit-pair atomics. Compare-and-swap uses the memory element's width, not the
 combined compare/replacement payload width. The resulting offset must fit the
-signed24 field. These checks preserve an already aligned runtime address; the
-caller remains responsible for the original address's alignment and both
+signed24 field. Modern Buffer atomics require a nonnegative original immediate;
+negative source offsets remain selectable but reject mutation. These checks
+preserve an already aligned runtime address; the caller remains responsible
+for the original address's alignment and both
 addresses' validity. CDNA5 <code>scale_offset</code> does not change the immediate's byte
 units. Mutation changes only the immediate and preserves operands, return/CAS
 behavior, modifiers, waits and the guest continuation. Successful discovery
