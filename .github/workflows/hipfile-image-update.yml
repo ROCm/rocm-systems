@@ -27,13 +27,17 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}
   cancel-in-progress: true
 
+# Read-only by default. packages: write only in update_AIS_CI_image, the job
+# that pushes images.
 permissions:
   contents: read
-  packages: write
 
 jobs:
 
   update_AIS_CI_image:
+    permissions:
+      contents: read
+      packages: write
     env:
       AIS_CI_IMAGE_NAME: ais_ci_${{ matrix.supported_platforms }}
       AIS_INPUT_PLATFORM: ${{ matrix.supported_platforms }}
