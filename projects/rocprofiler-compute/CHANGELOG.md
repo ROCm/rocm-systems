@@ -30,6 +30,12 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Resolved issues
 
+* Fixed `vL1D Cache BW` and related L1 bandwidth metrics on MI300 and MI350
+  (gfx942, gfx950). Each `TCP_TOTAL_CACHE_ACCESSES` now counts as 64 bytes, and
+  the peak is 64 B/clk per CU, matching the TCP to TD path. Reported GB/s is
+  about half of the previous value. Percent of peak can still exceed 100 on
+  unaligned access.
+
 * Fixed kernel points missing from the gfx1250 roofline plot.
 
 * Fixed Uncached Read Traffic (17.2.3) going above 100% on gfx908, gfx90a, gfx942 and gfx950.
