@@ -415,6 +415,89 @@ HIP_TEST_CASE(Unit_hipPointerGetAttribute_ipc_capable) {
 
 }
 
+/*
+ * HIP_POINTER_ATTRIBUTE_DEVICE_POINTER on another device's memory returns hipErrorInvalidValue
+ * until that memory is granted peer access: by a peer copy, or by peer access enabled before
+ * the allocation.
+ */
+#if HT_AMD
+HIP_TEST_CASE(Unit_hipPointerGetAttribute_DevicePointer_PeerAccess) {
+  if (HipTest::getDeviceCount() < 2) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+  }
+  int can_access_peer = 0;
+  HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, 0, 1));
+  if (!can_access_peer) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+  }
+
+  constexpr size_t kBytes = 4096;
+
+  SECTION("no peer access: DEVICE_POINTER returns hipErrorInvalidValue") {
+    // Allocate on device 1, query from device 0 without any prior grant.
+    HIP_CHECK(hipSetDevice(1));
+    int* dev1_ptr = nullptr;
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&dev1_ptr), kBytes));
+
+    HIP_CHECK(hipSetDevice(0));
+    hipDeviceptr_t out = 0;
+    HIP_CHECK_ERROR(
+        hipPointerGetAttribute(&out, HIP_POINTER_ATTRIBUTE_DEVICE_POINTER,
+                               reinterpret_cast<hipDeviceptr_t>(dev1_ptr)),
+        hipErrorInvalidValue);
+
+    HIP_CHECK(hipSetDevice(1));
+    HIP_CHECK(hipFree(dev1_ptr));
+  }
+
+  SECTION("after granting copy: DEVICE_POINTER returns hipSuccess") {
+    // Allocate source on device 0 and destination on device 1.
+    HIP_CHECK(hipSetDevice(0));
+    int* dev0_buf = nullptr;
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&dev0_buf), kBytes));
+
+    HIP_CHECK(hipSetDevice(1));
+    int* dev1_buf = nullptr;
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&dev1_buf), kBytes));
+
+    // A device-to-device copy from device 0 into device-1 memory grants peer access.
+    HIP_CHECK(hipMemcpy(dev1_buf, dev0_buf, kBytes, hipMemcpyDeviceToDevice));
+
+    HIP_CHECK(hipSetDevice(0));
+    hipDeviceptr_t out = 0;
+    HIP_CHECK(hipPointerGetAttribute(&out, HIP_POINTER_ATTRIBUTE_DEVICE_POINTER,
+                                     reinterpret_cast<hipDeviceptr_t>(dev1_buf)));
+    REQUIRE(out == reinterpret_cast<hipDeviceptr_t>(dev1_buf));
+
+    HIP_CHECK(hipSetDevice(0));
+    HIP_CHECK(hipFree(dev0_buf));
+    HIP_CHECK(hipSetDevice(1));
+    HIP_CHECK(hipFree(dev1_buf));
+  }
+
+  SECTION("peer access enabled before alloc: DEVICE_POINTER returns hipSuccess") {
+    // With peer access enabled at alloc time the allocation is granted immediately.
+    HIP_CHECK(hipSetDevice(0));
+    HIP_CHECK(hipDeviceEnablePeerAccess(1, 0));
+
+    HIP_CHECK(hipSetDevice(1));
+    int* dev1_ptr = nullptr;
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&dev1_ptr), kBytes));
+
+    HIP_CHECK(hipSetDevice(0));
+    hipDeviceptr_t out = 0;
+    HIP_CHECK(hipPointerGetAttribute(&out, HIP_POINTER_ATTRIBUTE_DEVICE_POINTER,
+                                     reinterpret_cast<hipDeviceptr_t>(dev1_ptr)));
+    REQUIRE(out == reinterpret_cast<hipDeviceptr_t>(dev1_ptr));
+
+    HIP_CHECK(hipSetDevice(1));
+    HIP_CHECK(hipFree(dev1_ptr));
+    HIP_CHECK(hipSetDevice(0));
+    HIP_CHECK(hipDeviceDisablePeerAccess(1));
+  }
+}
+#endif
+
 #if HT_AMD
 /* HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE on hipArray allocations (2D/3D). */
 HIP_TEST_CASE(Unit_hipPointerGetAttribute_ipc_capable_Array) {

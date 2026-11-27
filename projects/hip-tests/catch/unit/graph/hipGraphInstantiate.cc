@@ -36,6 +36,9 @@ Negative -
 #include <hip_test_checkers.hh>
 #include <hip_test_kernels.hh>
 
+#include <thread>
+#include <vector>
+
 #define NUM_OF_INSTANCES 10
 /* Test verifies hipGraphInstantiate API Negative scenarios.
  */
@@ -280,4 +283,154 @@ HIP_TEST_CASE(Unit_hipGraphInstantiate_functionalScenarios) {
   HipTest::freeArrays<int>(inputVec_d, outputVec_d, nullptr, inputVec_h, outputVec_h, nullptr,
                            false);
   HIP_CHECK(hipGraphDestroy(graph));
+}
+
+static __global__ void AddOne(int* data) { atomicAdd(data, 1); }
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Several threads build and instantiate graphs with kernel, memset and memcpy nodes at the
+ *    same time, then launch them. Every instantiation must succeed and every launch must run its
+ *    kernel: the runtime turns the nodes into packets for all these graphs concurrently.
+ * Test source
+ * ------------------------
+ *  - unit/graph/hipGraphInstantiate.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.14
+ */
+HIP_TEST_CASE(Unit_hipGraphInstantiate_ConcurrentThreads) {
+  constexpr int kThreads = 8;
+  constexpr int kIterations = 20;
+  std::vector<int*> counters(kThreads, nullptr);
+  for (auto& counter : counters) {
+    HIP_CHECK(hipMalloc(&counter, 2 * sizeof(int)));
+  }
+
+  auto worker = [&](int t) {
+    hipStream_t stream;
+    HIP_CHECK_THREAD(hipStreamCreate(&stream));
+    for (int i = 0; i < kIterations; ++i) {
+      hipGraph_t graph;
+      HIP_CHECK_THREAD(hipGraphCreate(&graph, 0));
+      hipMemsetParams memset_params{};
+      memset_params.dst = counters[t];
+      memset_params.value = 0;
+      memset_params.elementSize = sizeof(int);
+      memset_params.width = 2;
+      memset_params.height = 1;
+      hipGraphNode_t memset_node;
+      HIP_CHECK_THREAD(
+          hipGraphAddMemsetNode(&memset_node, graph, nullptr, 0, &memset_params));
+      int* counter = counters[t];
+      void* args[] = {&counter};
+      hipKernelNodeParams kernel_params{};
+      kernel_params.func = reinterpret_cast<void*>(AddOne);
+      kernel_params.gridDim = dim3(1);
+      kernel_params.blockDim = dim3(1);
+      kernel_params.kernelParams = args;
+      hipGraphNode_t kernel_node;
+      HIP_CHECK_THREAD(
+          hipGraphAddKernelNode(&kernel_node, graph, &memset_node, 1, &kernel_params));
+      hipGraphNode_t copy_node;
+      HIP_CHECK_THREAD(hipGraphAddMemcpyNode1D(&copy_node, graph, &kernel_node, 1, counter + 1,
+                                               counter, sizeof(int), hipMemcpyDeviceToDevice));
+      hipGraphExec_t graph_exec;
+      HIP_CHECK_THREAD(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+      HIP_CHECK_THREAD(hipGraphLaunch(graph_exec, stream));
+      HIP_CHECK_THREAD(hipStreamSynchronize(stream));
+      int result[2] = {};
+      HIP_CHECK_THREAD(hipMemcpy(result, counter, sizeof(result), hipMemcpyDeviceToHost));
+      REQUIRE_THREAD(result[0] == 1);
+      REQUIRE_THREAD(result[1] == 1);
+      HIP_CHECK_THREAD(hipGraphExecDestroy(graph_exec));
+      HIP_CHECK_THREAD(hipGraphDestroy(graph));
+    }
+    HIP_CHECK_THREAD(hipStreamDestroy(stream));
+  };
+
+  std::vector<std::thread> threads;
+  for (int t = 0; t < kThreads; ++t) {
+    threads.emplace_back(worker, t);
+  }
+  for (auto& thread : threads) {
+    thread.join();
+  }
+  HIP_CHECK_THREAD_FINALIZE();
+
+  for (auto* counter : counters) {
+    HIP_CHECK(hipFree(counter));
+  }
+}
+
+static __global__ void StoreValue(int* out, int value) { *out = value; }
+
+/**
+ * Test Description
+ * ------------------------
+ *  - A graph's kernel node keeps its own kernel arguments: instantiate a graph that stores a
+ *    value, then launch many kernels and instantiate many other graphs with other arguments,
+ *    then launch the first graph and check it stored its own value.
+ * Test source
+ * ------------------------
+ *  - unit/graph/hipGraphInstantiate.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.14
+ */
+HIP_TEST_CASE(Unit_hipGraphInstantiate_KernelArgsOutliveStreamWork) {
+  constexpr int kGraphValue = 1234;
+  constexpr int kStreamLaunches = 20000;
+  constexpr int kOtherGraphs = 20000;
+  int* out = nullptr;
+  int* scratch = nullptr;
+  HIP_CHECK(hipMalloc(&out, sizeof(int)));
+  HIP_CHECK(hipMalloc(&scratch, sizeof(int)));
+  HIP_CHECK(hipMemset(out, 0, sizeof(int)));
+
+  hipGraph_t graph;
+  HIP_CHECK(hipGraphCreate(&graph, 0));
+  int value = kGraphValue;
+  void* args[] = {&out, &value};
+  hipKernelNodeParams params{};
+  params.func = reinterpret_cast<void*>(StoreValue);
+  params.gridDim = dim3(1);
+  params.blockDim = dim3(1);
+  params.kernelParams = args;
+  hipGraphNode_t node;
+  HIP_CHECK(hipGraphAddKernelNode(&node, graph, nullptr, 0, &params));
+  hipGraphExec_t graph_exec;
+  HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+
+  // Enough kernel arguments to reuse every slot the runtime could have taken them from
+  for (int i = 0; i < kStreamLaunches; ++i) {
+    hipLaunchKernelGGL(StoreValue, dim3(1), dim3(1), 0, 0, scratch, i);
+  }
+  for (int i = 0; i < kOtherGraphs; ++i) {
+    hipGraph_t other_graph;
+    HIP_CHECK(hipGraphCreate(&other_graph, 0));
+    int other_value = i;
+    void* other_args[] = {&scratch, &other_value};
+    hipKernelNodeParams other_params = params;
+    other_params.kernelParams = other_args;
+    hipGraphNode_t other_node;
+    HIP_CHECK(hipGraphAddKernelNode(&other_node, other_graph, nullptr, 0, &other_params));
+    hipGraphExec_t other_exec;
+    HIP_CHECK(hipGraphInstantiate(&other_exec, other_graph, nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphExecDestroy(other_exec));
+    HIP_CHECK(hipGraphDestroy(other_graph));
+  }
+  HIP_CHECK(hipDeviceSynchronize());
+
+  HIP_CHECK(hipGraphLaunch(graph_exec, 0));
+  HIP_CHECK(hipStreamSynchronize(0));
+  int result = 0;
+  HIP_CHECK(hipMemcpy(&result, out, sizeof(int), hipMemcpyDeviceToHost));
+  REQUIRE(result == kGraphValue);
+
+  HIP_CHECK(hipGraphExecDestroy(graph_exec));
+  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipFree(scratch));
+  HIP_CHECK(hipFree(out));
 }

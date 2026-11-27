@@ -9,6 +9,9 @@ if(UNIX AND BUILD_SHARED_LIBS)
       hipGetProcAddress.cc
       hipGetProcAddressCompilerOption.cc
       lateManagedVariable.cc)
+  if(HIP_PLATFORM MATCHES "amd")
+    set(TEST_SRC ${TEST_SRC} hipDispatchTableReentry.cc)
+  endif()
 
   hip_add_exe_to_target(NAME dynamicLoading
                       TEST_SRC ${TEST_SRC}
@@ -82,4 +85,23 @@ if(UNIX AND BUILD_SHARED_LIBS)
   # Wire artifacts to the consuming exe so `make dynamicLoading` builds them.
   add_dependencies(dynamicLoading bit_extract_kernel_code libLateManagedVariable_so
                    libLazyLoad_so vecadd_cc)
+
+  if(HIP_PLATFORM MATCHES "amd")
+    # Fake profiler library loaded through rocprofiler-register, and the process that loads it
+    add_library(dispatchTableReentryTool SHARED EXCLUDE_FROM_ALL dispatchTableReentryTool.cc)
+    set_source_files_properties(dispatchTableReentryTool.cc PROPERTIES
+                                LANGUAGE ${GPGPU_LANGUAGE})
+    target_link_libraries(dispatchTableReentryTool ${GPGPU_LINKER_LIBRARIES})
+    # Next to the test executable, where the test looks for it
+    set_target_properties(dispatchTableReentryTool PROPERTIES
+                          LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+    add_executable(hipDispatchTableReentry_exe EXCLUDE_FROM_ALL hipDispatchTableReentry_exe.cc)
+    set_source_files_properties(hipDispatchTableReentry_exe.cc PROPERTIES
+                                LANGUAGE ${GPGPU_LANGUAGE})
+    target_link_libraries(hipDispatchTableReentry_exe ${GPGPU_LINKER_LIBRARIES} ${CMAKE_DL_LIBS})
+    add_dependencies(dynamicLoading dispatchTableReentryTool hipDispatchTableReentry_exe)
+    set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipDispatchTableReentry_exe)
+    set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
+                 ${CMAKE_CURRENT_BINARY_DIR}/libdispatchTableReentryTool.so)
+  endif()
 endif()

@@ -15,6 +15,7 @@ printf:
   Unit_Buffered_Printf_Flags: *level_default
   Unit_Buffered_Printf_Specifier: *level_default
   Unit_Host_Printf: *level_default
+  Unit_Host_Printf_ConcurrentStreamTeardown: *level_default
   Unit_NonHost_Printf_basic: *level_default
   Unit_NonHost_Printf_Positive_DuplicateFormatStringMetadata: *level_default
   Unit_NonHost_Printf_loop: *level_default

@@ -50,6 +50,9 @@ if(HIP_PLATFORM MATCHES "amd")
   if(WIN32)
     set(TEST_SRC ${TEST_SRC} hipStreamKilledWorkerThread.cc)
   endif()
+  if(UNIX)
+    set(TEST_SRC ${TEST_SRC} hipStreamCUMaskTeardown.cc)
+  endif()
 else()
   set(TEST_SRC
       ${TEST_SRC}
@@ -73,6 +76,15 @@ set_source_files_properties(hipStreamLegacy_exe.cc PROPERTIES LANGUAGE ${GPGPU_L
 
 add_dependencies(StreamTest hipStreamLegacy_exe)
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipStreamLegacy_exe)
+
+if(UNIX AND HIP_PLATFORM MATCHES "amd")
+  add_executable(hipStreamCUMaskTeardown_exe EXCLUDE_FROM_ALL hipStreamCUMaskTeardown_exe.cc)
+  set_source_files_properties(hipStreamCUMaskTeardown_exe.cc PROPERTIES
+                              LANGUAGE ${GPGPU_LANGUAGE})
+  target_link_libraries(hipStreamCUMaskTeardown_exe ${GPGPU_LINKER_LIBRARIES})
+  add_dependencies(StreamTest hipStreamCUMaskTeardown_exe)
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipStreamCUMaskTeardown_exe)
+endif()
 
 if(WIN32 AND HIP_PLATFORM MATCHES "amd")
   add_executable(hipStreamKilledWorkerThread_exe EXCLUDE_FROM_ALL

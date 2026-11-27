@@ -181,6 +181,47 @@ HIP_TEST_CASE(Unit_hipLaunchKernelExC_NegetiveTsts) {
   }
   HIP_CHECK(hipFree(d_output));
 }
+#if HT_AMD
+/**
+ * Test Description
+ * ------------------------
+ *  - hipLaunchKernelExC rejects a cluster the device can't place with hipErrorInvalidClusterSize:
+ *    -# a cluster larger than the device's maximum cluster size (1 without cluster support)
+ *    -# a cluster whose dimensions multiply past 32 bits
+ * Test source
+ * ------------------------
+ *    - catch/unit/kernel/hipLaunchKernelEx.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 7.14
+ */
+HIP_TEST_CASE(Unit_hipLaunchKernelExC_Negative_ClusterSize) {
+  int* d_output = nullptr;
+  HIP_CHECK(hipMalloc(&d_output, sizeof(int)));
+  int totalThreads = 1;
+  void* kernelArgs[] = {&d_output, &totalThreads};
+
+  hipLaunchAttribute attr{};
+  attr.id = hipLaunchAttributeClusterDimension;
+  hipLaunchConfig_t config{};
+  config.blockDim = dim3{64, 1, 1};
+  config.attrs = &attr;
+  config.numAttrs = 1;
+
+  SECTION("Larger than the device maximum") {
+    attr.val.clusterDim = {1024, 1, 1};
+    config.gridDim = dim3{1024, 1, 1};
+  }
+  SECTION("Product overflows 32 bits") {
+    attr.val.clusterDim = {65536, 65536, 2};
+    config.gridDim = dim3{65536, 65536, 2};
+  }
+  HIP_CHECK_ERROR(hipLaunchKernelExC(&config, reinterpret_cast<void*>(normalKernel), kernelArgs),
+                  hipErrorInvalidClusterSize);
+  HIP_CHECK(hipFree(d_output));
+}
+#endif
+
 /**
  * Test Description
  * ------------------------
