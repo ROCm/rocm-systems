@@ -27,6 +27,9 @@
 
 namespace {
 std::vector<ncclComm_t> g_aborted;
+// The comm whose children ncclCommAbort checks, and how many children it still listed at each abort.
+ncclComm* g_abortParent = nullptr;
+std::vector<int> g_childrenListedAtAbort;
 // The three stages of rcclHostHierAllReduce, and the parent votes and scratch calls some tests log alongside them.
 std::vector<std::string> g_log;
 }  // namespace
@@ -34,6 +37,10 @@ std::vector<std::string> g_log;
 // The externals of hier_host.cc that no shared fake covers.
 ncclResult_t ncclCommAbort(ncclComm_t comm) {
   g_aborted.push_back(comm);
+  if (g_abortParent != nullptr) {
+    ncclComm_t listed[2];
+    g_childrenListedAtAbort.push_back(rcclHostHierChildren(g_abortParent, listed));
+  }
   return ncclSuccess;
 }
 ncclResult_t ncclReduceScatter(const void*, void*, size_t, ncclDataType_t, ncclRedOp_t, ncclComm_t, hipStream_t) {
@@ -136,6 +143,8 @@ class HostHierEnsureTest : public ::testing::Test {
   }
   void TearDown() override {
     g_aborted.clear();
+    g_abortParent = nullptr;
+    g_childrenListedAtAbort.clear();
     g_log.clear();
     ResetHipFakes();
   }
@@ -214,6 +223,22 @@ TEST_F(HostHierEnsureTest, PeerFailingInterSplitAbortsBothChildren) {
   EXPECT_EQ(2, splits);
   EXPECT_EQ(2, votes.calls);
   EXPECT_EQ(2u, g_aborted.size());
+  rcclHostHierTeardown(hc.get());
+}
+
+// A revoke on another thread sets the children's abort flags through rcclHostHierChildren, so a failed setup must
+// unlink each child before it releases it.
+TEST_F(HostHierEnsureTest, FailedSetupUnlinksTheChildrenBeforeAbortingThem) {
+  HierComm hc;
+  Children children;
+  Votes votes{{-1, /*vote 1*/ 3}};
+  int splits = 0;
+  ScopedHook split(g_ncclCommSplit, SplitHook(&children, &splits, /*failOnCall=*/-1));
+  ScopedHook vote(g_bootstrapAllGather, VoteHook(&votes));
+  g_abortParent = hc.get();
+  EXPECT_EQ(ncclRemoteError, rcclHostHierEnsure(hc.get()));
+  ASSERT_EQ(2u, g_aborted.size());
+  EXPECT_EQ(std::vector<int>({0, 0}), g_childrenListedAtAbort);
   rcclHostHierTeardown(hc.get());
 }
 

@@ -244,10 +244,15 @@ fail:
   comm->config.splitShare = parentSplitShare;
   // A failed split can leave the parent's bootstrap mid-exchange, so never retry.
   comm->hostHierState = rcclHostHierFailed;
-  (void)releaseChild(h->inter, /*abort=*/true);
-  (void)releaseChild(h->intra, /*abort=*/true);
-  h->inter = nullptr;
-  h->intra = nullptr;
+  {
+    // A revoke on another thread reaches the children through rcclHostHierChildren, so unlink them before the release.
+    const ncclComm_t inter = h->inter;
+    const ncclComm_t intra = h->intra;
+    COMPILER_ATOMIC_STORE(&h->inter, static_cast<ncclComm_t>(nullptr), std::memory_order_release);
+    COMPILER_ATOMIC_STORE(&h->intra, static_cast<ncclComm_t>(nullptr), std::memory_order_release);
+    (void)releaseChild(inter, /*abort=*/true);
+    (void)releaseChild(intra, /*abort=*/true);
+  }
   ATTN("Host-hierarchical comms: setup failed on rank %d (%s), using the default path", comm->rank,
        ncclGetErrorString(res));
   return res;
@@ -255,7 +260,7 @@ fail:
 
 ncclResult_t rcclHostHierTeardown(struct ncclComm* comm) {
   struct rcclHostHier* h = comm->hostHier;
-  comm->hostHier = nullptr;
+  COMPILER_ATOMIC_STORE(&comm->hostHier, static_cast<struct rcclHostHier*>(nullptr), std::memory_order_release);
   comm->hostHierState = rcclHostHierOff;
   if (h == nullptr) return ncclSuccess;
   // A revoke clears abortFlag again but leaves revokedFlag set, and a peer can be gone either way.
@@ -275,11 +280,15 @@ exit:
 }
 
 int rcclHostHierChildren(const struct ncclComm* comm, ncclComm_t children[2]) {
-  const struct rcclHostHier* h = comm != nullptr ? comm->hostHier : nullptr;
+  if (comm == nullptr) return 0;
+  // Runs from setCommAbortFlags, possibly on another thread than the one building or releasing the children.
+  struct rcclHostHier* h = COMPILER_ATOMIC_LOAD(&comm->hostHier, std::memory_order_acquire);
   if (h == nullptr) return 0;
   int n = 0;
-  if (h->intra != nullptr) children[n++] = h->intra;
-  if (h->inter != nullptr) children[n++] = h->inter;
+  const ncclComm_t intra = COMPILER_ATOMIC_LOAD(&h->intra, std::memory_order_acquire);
+  const ncclComm_t inter = COMPILER_ATOMIC_LOAD(&h->inter, std::memory_order_acquire);
+  if (intra != nullptr) children[n++] = intra;
+  if (inter != nullptr) children[n++] = inter;
   return n;
 }
 
