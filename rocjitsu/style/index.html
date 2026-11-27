@@ -1086,6 +1086,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#register-transport-and-arithmetic-simd" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Register transport and arithmetic SIMD
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#error-handling" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1807,6 +1818,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#register-transport-and-arithmetic-simd" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Register transport and arithmetic SIMD
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#error-handling" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1994,6 +2016,15 @@ consistency over cleverness.</p>
   diagnostics that must survive a log-groups-OFF build, plus an
   async-signal-safe <code>::write</code> backtrace path).</li>
 </ul>
+<h2 id="register-transport-and-arithmetic-simd">Register transport and arithmetic SIMD<a class="headerlink" href="#register-transport-and-arithmetic-simd" title="Permanent link">&para;</a></h2>
+<p>Raw register transport uses backend-owned blocks in <code>util/simd.h</code>. Do not use
+<code>std::experimental::simd</code> or add numerical operations to that transport API.
+Use explicit AVX2/AVX-512 intrinsics when enabled by the compiler, with scalar
+fallbacks otherwise. Derive lane counts from the block type. VM objects share
+the configured CPU baseline; transport blocks must not cross compilation-target
+boundaries. Backend namespaces keep feature-dependent types and helpers distinct.
+Arithmetic SIMD backends use explicit ISA intrinsics and names that identify
+their CPU feature level, as described in the rj-arith design.</p>
 <h2 id="error-handling">Error Handling<a class="headerlink" href="#error-handling" title="Permanent link">&para;</a></h2>
 <ul>
 <li>Expected failures such as a rejected instruction encoding return <code>Result</code> or
