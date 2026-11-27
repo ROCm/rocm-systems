@@ -721,7 +721,7 @@ that contains both ``roofline.csv`` and application performance counters
 
    On gfx1201 (Navi 48, for example the Radeon RX 9070), the roofline plots the
    ``VRAM``, ``L0``, and ``LDS`` bandwidth roofs. ``VRAM`` is the measured
-   device-memory bandwidth (CSV column ``VRAMBw``). Navi 48 has no HBM. On the
+   device-memory bandwidth (CSV column ``VRAMBw``). RDNA architectures do not have HBM. On the
    Radeon RX 9070 and RX 9070 XT, the 256-bit, 20 Gbps VRAM interface peaks at
    640 GB/s at the default performance level. The measured roof is lower under
    ``STABLE_STD``.

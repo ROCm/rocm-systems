@@ -9,7 +9,7 @@ GL0 (TCP Vector Cache)
 =========================
 
 **GL0** is the vector L0 cache immediately in front of GL1. Hardware counters keep the ``TCP_*`` prefix.
-On gfx1201, Navi 48 has one GL0 instance per CU (64 on the full die, 56 on the Radeon RX 9070), each 32 KB with a 128-byte cache line. Each WGP also has a 128 KB LDS.
+On gfx1201, Navi 48 has one GL0 instance per CU, each 32 KB with a 128-byte cache line. The CU count depends on the board. Each WGP also has a 128 KB LDS.
 
 For GL1 panels and the GL1 Cache Memory Chart table, see :doc:`gl1-cache`.
 The handoff toward GL2 cache is under :doc:`gl2-cache`.

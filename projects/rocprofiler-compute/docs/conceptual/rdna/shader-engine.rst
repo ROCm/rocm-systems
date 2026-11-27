@@ -11,7 +11,7 @@ Shader engine
 On RDNA3.5 and RDNA4, shader engines (SEs) partition the programmable graphics and compute array into repeating slices.
 Within each SE, the Workgroup Manager (SPI) accepts dispatched kernels and schedules waves onto Workgroup Processors (WGPs).
 Each WGP pairs two Compute Units (CUs) that share execution resources and execute the scheduled waves.
-Navi 48 (gfx1201) has four SEs. The full die (Radeon RX 9070 XT) has 64 CUs, and the Radeon RX 9070 has 56. Each of its WGPs shares a 128 KB Local Data Share (LDS).
+Navi 48 (gfx1201) has four SEs, and the number of CUs depends on the board. Each of its WGPs shares a 128 KB Local Data Share (LDS).
 GL0 is the vector L0 cache. On gfx1201, GL1 is a write-combining buffer.
 
 Follow the nested sections under Shader engine in the navigation. Each metric table has an RDNA3.5 tab and an RDNA4 tab:

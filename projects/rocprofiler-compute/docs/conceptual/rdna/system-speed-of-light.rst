@@ -157,8 +157,8 @@ Scaling and clocks
 ------------------
 
 ``$cu_per_gpu`` is the total CU count of the installed GPU, not the WGP count.
-The full Navi 48 die (Radeon RX 9070 XT) has 64 CUs in 32 WGPs. The Radeon RX 9070
-has 56 CUs. HIP reports WGPs as multiprocessors. Peak FLOPs scale with CUs.
+The CU count depends on the board. HIP reports WGPs as multiprocessors. Peak FLOPs
+scale with CUs.
 ``$max_sclk`` is the shader clock in MHz from profiler system specs.
 
 Bandwidth and cache metrics
@@ -189,11 +189,14 @@ The roofline metrics subtract WMMA by design, as an estimate described in
 :ref:`rdna4-roofline`.
 
 ``Wavefront Occupancy`` and WGP ``Wave Life`` use ``SQ_WAVE_CYCLES``, which follows
-the number of live waves. ROCm Compute Profiler 3.11 (ROCm 10.3) used
-``SQG_WAVE_CYCLES``, which did not track the true wave count on the Radeon RX 9070.
-``Wavefront Occupancy`` is still an estimate. The occupancy peak is not validated,
+the number of live waves. ``Wavefront Occupancy`` is still an estimate. The occupancy peak is not validated,
 and measured wave counts can exceed the application launch geometry. Do not infer
 exact resident-wave counts, shader cycles, or occupancy limits from these values.
+
+.. note::
+
+   ROCm Compute Profiler 3.11 (ROCm 10.3) used ``SQG_WAVE_CYCLES``, which did not
+   track the true wave count on the Radeon RX 9070.
 
 WGP ``SQ_INST_CYCLES_VALU`` counts the cycles needed to execute VALU operations.
 It is not elapsed GPU time, a FLOP count, or a utilization percentage.

@@ -4,13 +4,13 @@
 
 .. _rdna-gcea:
 
-========================
-Efficiency Arbiter (EA)
-========================
+=========================================
+Graphics Core Efficiency Arbiter (GCEA)
+=========================================
 
-The Efficiency Arbiter (EA), also called GCEA, is the stage where traffic leaves the on-chip cache hierarchy after GL2.
+Graphics Core Efficiency Arbiter (GCEA) names the stage where traffic leaves the on-chip cache hierarchy after GL2.
 On gfx115x, the published tables are the DRAM read and write interfaces, the system arbiter (SARB), and the return path toward system memory.
-On gfx1201, EA sends requests toward the Infinity Cache (MALL) and VRAM.
+On gfx1201, GCEA sends requests toward the Infinity Cache (MALL) and VRAM.
 Use these panels when analyzing bandwidth limits or memory-controller behavior after GL2.
 
 The sections below list the metric tables for both generations. Select the architecture tab on each table.
@@ -37,7 +37,7 @@ DRAM read interface
    .. tab-item:: RDNA4 (gfx1201)
       :sync: gfx1201
 
-      gfx1201 has no Efficiency Arbiter panel. Its L2-to-memory traffic is in the Memory Chart table below.
+      gfx1201 has no GCEA panel. Its L2-to-memory traffic is in the Memory Chart table below.
 
 DRAM write interface
 --------------------
@@ -55,7 +55,7 @@ DRAM write interface
    .. tab-item:: RDNA4 (gfx1201)
       :sync: gfx1201
 
-      gfx1201 has no Efficiency Arbiter panel. Its L2-to-memory traffic is in the Memory Chart table below.
+      gfx1201 has no GCEA panel. Its L2-to-memory traffic is in the Memory Chart table below.
 
 System arbiter (SARB)
 ---------------------
@@ -73,7 +73,7 @@ System arbiter (SARB)
    .. tab-item:: RDNA4 (gfx1201)
       :sync: gfx1201
 
-      gfx1201 has no Efficiency Arbiter panel. Its L2-to-memory traffic is in the Memory Chart table below.
+      gfx1201 has no GCEA panel. Its L2-to-memory traffic is in the Memory Chart table below.
 
 Return interface
 ----------------
@@ -91,7 +91,7 @@ Return interface
    .. tab-item:: RDNA4 (gfx1201)
       :sync: gfx1201
 
-      gfx1201 has no Efficiency Arbiter panel. Its L2-to-memory traffic is in the Memory Chart table below.
+      gfx1201 has no GCEA panel. Its L2-to-memory traffic is in the Memory Chart table below.
 
 Memory chart: GCEA to system memory
 ===================================
@@ -126,9 +126,9 @@ peak does not by itself indicate an invalid counter.
 Memory chart - Infinity Cache and VRAM
 --------------------------------------
 
+gfx115x does not publish an Infinity Cache or VRAM table. Device memory on these
+APUs is system memory, in the table above.
+
 On gfx1201, the Memory Chart draws Infinity Cache and VRAM boxes without metrics,
 because no counter measures them. Do not infer the Infinity Cache hit rate or the
 VRAM bandwidth from the memory-destined traffic in the table above.
-
-gfx115x does not publish an Infinity Cache or VRAM table. Device memory on these
-APUs is system memory, in the table above.

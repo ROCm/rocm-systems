@@ -11,7 +11,7 @@ Workgroup processor (WGP)
 Within each shader engine, Workgroup Processors (WGPs) pair two Compute Units (CUs) that share resources and execute dispatched waves after the Workgroup Manager (SPI) hands off work.
 On RDNA3.5 architecture-based GPUs/APUs, compute kernels are typically tracked with wave32-oriented waves; the gfx115x WGP panels cover occupancy, dispatch, instruction mix, and local caches at that WGP/CU-pair granularity.
 
-The sections below list WGP metric descriptions for RDNA3.5 (gfx115x) and RDNA4 (gfx1201). Select the architecture tab on each table. The full Navi 48 die (Radeon RX 9070 XT) has 32 WGPs and 64 CUs. The Radeon RX 9070 has 56 CUs. RDNA4 runs matrix operations as WMMA instructions and has no MFMA instructions.
+The sections below list WGP metric descriptions for RDNA3.5 (gfx115x) and RDNA4 (gfx1201). Select the architecture tab on each table. The CU count depends on the board. RDNA4 runs matrix operations as WMMA instructions and has no MFMA instructions.
 
 .. Note::
    The CDNA architecture-based AMD Instinct GPUs use a different execution hierarchy and panel grouping.

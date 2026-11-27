@@ -9,10 +9,10 @@ AMD RDNA architecture (RDNA3-RDNA4)
 ***********************************
 
 ROCm Compute Profiler makes available an extensive list of metrics to better understand the
-achieved application performance on AMD RDNA™ GPUs including:
+achieved application performance on AMD RDNA architectures including:
 
 * RDNA3.5 architecture based APUs: AMD Ryzen AI Max / Ryzen AI Max+ (gfx115x)
-* RDNA4 architecture based GPUs: Navi 48 (gfx1201) boards, for example the AMD Radeon RX 9070, RX 9070 XT and Radeon AI PRO R9700
+* RDNA4 architecture based GPUs: AMD Radeon RX 9070 series / Radeon AI PRO R9600 series / Radeon AI PRO R9700 series (Navi 48 / gfx1201)
 
 Navi 44 (gfx1200) is not supported. For gfx1201 profiling
 prerequisites, see :ref:`profiling power-gating requirements <profile-rdna-power-gating>`.
@@ -43,19 +43,19 @@ The table provides key details for the RDNA architectures covered by these chapt
      - RDNA4
    * - Products
      - AMD Ryzen AI Max / Ryzen AI Max+ (gfx115x)
-     - Navi 48 (gfx1201) boards, for example the AMD Radeon RX 9070, RX 9070 XT and Radeon AI PRO R9700
+     - AMD Radeon RX 9070 series / Radeon AI PRO R9600 series / Radeon AI PRO R9700 series (Navi 48 / gfx1201)
    * - Chip packaging
      - APU with shared system memory
      - Discrete GPU with dedicated VRAM
    * - Device memory in the tool
      - System memory through GCEA
-     - VRAM. The Infinity Cache (MALL) has no counters and no roofline roof
+     - VRAM
    * - Compute organization
      - Each WGP pairs two CUs. Wave32 is the primary mode, and wave64 is supported
-     - The full Navi 48 die (Radeon RX 9070 XT) has 4 shader engines, 64 CUs, and 32 WGPs. The Radeon RX 9070 has 56 CUs. Wave32 is the primary mode, and wave64 is supported
+     - Navi 48 has 4 shader engines, and each WGP pairs two CUs. The CU count depends on the board. Wave32 is the primary mode, and wave64 is supported
    * - Matrix operations
-     - WMMA. This profiler has limited WMMA support on gfx115x
-     - WMMA, including FP8, BF8, FP16, and BF16. RDNA4 has no MFMA
+     - This profiler has limited WMMA support on gfx115x
+     - WMMA support, including FP8, BF8, FP16, and BF16.
 
 To best use profiling data, it's important to understand the role of various
 hardware blocks. Refer to the following top-level block diagram for each architecture.
@@ -107,7 +107,7 @@ Each metric table has a tab for each generation.
 
 * :doc:`gl2-cache`: The L2 cache.
 
-* :doc:`gcea`: The Efficiency Arbiter, where traffic leaves the cache hierarchy.
+* :doc:`gcea`: The Graphics Core Efficiency Arbiter (GCEA), where traffic leaves the cache hierarchy.
 
 * :doc:`command-processor`: The command processor.
 
@@ -117,7 +117,7 @@ Each metric table has a tab for each generation.
 
 .. note::
 
-   * The System Speed-of-Light, WGP, GL0, GL1, GL2, SPI, and GRBM chapters have gfx1201 tables.
-   * The roofline is in the WGP chapter. The Memory Chart tables are in the WGP, GL0, GL2, and Efficiency Arbiter chapters.
-   * The Command Processor chapter says that gfx1201 has no CPC panel.
+   * The :doc:`system-speed-of-light`, :doc:`wgp`, :doc:`gl0-cache`, :doc:`gl1-cache`, :doc:`gl2-cache`, :doc:`spi`, and :doc:`grbm` chapters have gfx1201 tables.
+   * The roofline is in the :doc:`wgp` chapter. The Memory Chart tables are in the :doc:`wgp`, :doc:`gl0-cache`, :doc:`gl2-cache`, and :doc:`gcea` chapters.
+   * The :doc:`command-processor` chapter says that gfx1201 has no CPC panel. Some panels are missing because the profiler has no public counters for them, not because the hardware lacks that block.
    * ROCm Compute Profiler currently has limited support for WMMA on gfx115x.
