@@ -1,0 +1,558 @@
+"""Tests for the A/B baseline: the previous scheduled build and the two-overlay pair.
+
+Run from projects/rccl/ci/scripts:  python3 -m unittest discover -s tests
+"""
+
+import contextlib
+import io
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import unittest
+import urllib.error
+from pathlib import Path
+from unittest import mock
+
+sys.path.insert(0, os.fspath(Path(__file__).resolve().parent.parent))
+import test_madengine as tm
+
+try:
+    import yaml
+except ImportError:  # pragma: no cover
+    yaml = None
+
+ENV = {"GITHUB_RUN_ID": "500", "GITHUB_EVENT_NAME": "schedule", "GITHUB_SHA": "abc",
+       "GITHUB_REPOSITORY": "ROCm/rocm-systems", "GITHUB_TOKEN": "t"}
+
+
+def run(build: int, created_at: str) -> dict:
+    return {"id": build, "created_at": created_at}
+
+
+# Newest first, as the API returns them; 2026-11-07 is a Saturday.
+RUNS = [
+    run(500, "2026-11-09T06:34:37Z"),  # Mon: the candidate itself
+    run(400, "2026-11-08T06:24:24Z"),  # Sun
+    run(300, "2026-11-07T06:23:27Z"),  # Sat
+    run(200, "2026-11-06T06:27:28Z"),  # Fri
+    run(100, "2026-10-31T06:23:34Z"),  # Sat
+]
+
+
+class FakeGitHub:
+    """The two Actions API calls previous_scheduled_build() makes."""
+
+    def __init__(self, runs=RUNS, candidate_created="2026-11-09T06:34:37Z"):
+        self.runs, self.candidate_created, self.paths = runs, candidate_created, []
+
+    def __call__(self, path: str, env: dict) -> dict:
+        self.paths.append(path)
+        if path.startswith("/actions/runs/"):
+            return {"event": "schedule", "head_sha": "abc",
+                    "created_at": self.candidate_created}
+        return {"workflow_runs": self.runs}
+
+
+class PreviousScheduledBuild(unittest.TestCase):
+    def previous(self, schedule: str, missing=(), github=None) -> str | None:
+        github = github or FakeGitHub()
+        with mock.patch.object(tm, "_github_json", github), \
+             mock.patch.object(tm, "rccl_artifact_exists",
+                               side_effect=lambda build, *_: build not in missing):
+            return tm.previous_scheduled_build("500", schedule, "gfx950", env=ENV)
+
+    def test_nightly_is_the_previous_scheduled_build(self):
+        self.assertEqual(self.previous("nightly"), "400")
+
+    def test_weekly_is_the_previous_saturday(self):
+        self.assertEqual(self.previous("weekly"), "300")
+
+    def test_a_build_without_rccl_in_the_bucket_is_skipped(self):
+        self.assertEqual(self.previous("nightly", missing={"400"}), "300")
+        self.assertEqual(self.previous("weekly", missing={"300"}), "100")
+
+    def test_nothing_older(self):
+        self.assertIsNone(self.previous("weekly", missing={"300", "100"}))
+
+    def test_an_unknown_candidate_time_fails(self):
+        with self.assertRaisesRegex(RuntimeError, "could not tell when"):
+            self.previous("nightly", github=FakeGitHub(candidate_created=""))
+
+    def test_only_older_scheduled_develop_runs_are_listed(self):
+        github = FakeGitHub()
+        self.previous("nightly", github=github)
+        listing = github.paths[-1]
+        self.assertTrue(listing.startswith(f"/actions/workflows/{tm.CI_WORKFLOW}/runs?"))
+        for part in ("event=schedule", "branch=develop", "created=%3C2026-11-09T06%3A34%3A37Z"):
+            self.assertIn(part, listing)
+
+    def test_only_a_missing_object_means_absent(self):
+        for code, absent in ((404, True), (403, True), (503, False)):
+            error = urllib.error.HTTPError("u", code, "x", {}, None)
+            with self.subTest(code=code), \
+                 mock.patch.object(tm.urllib.request, "urlopen", side_effect=error):
+                if absent:
+                    self.assertFalse(tm.rccl_artifact_exists("1", "gfx950", "ROCm/x"))
+                else:
+                    with self.assertRaises(urllib.error.HTTPError):
+                        tm.rccl_artifact_exists("1", "gfx950", "ROCm/x")
+
+    def test_a_bucket_error_fails_instead_of_stepping_back(self):
+        error = urllib.error.HTTPError("u", 503, "Slow Down", {}, None)
+        with mock.patch.object(tm, "_github_json", FakeGitHub()), \
+             mock.patch.object(tm.urllib.request, "urlopen", side_effect=error), \
+             self.assertRaisesRegex(RuntimeError, "could not look up"):
+            tm.resolve_baseline("llama-3.1-70b-training", "gfx950",
+                                env={**ENV, "ARTIFACT_RUN_ID": "500"})
+
+    def test_the_bucket_key_is_the_gpu_targets_runtime(self):
+        self.assertEqual(
+            tm.rccl_artifact_url("300", "gfx950", "ROCm/rocm-systems"),
+            "https://therock-ci-artifacts-external.s3.amazonaws.com/"
+            "ROCm-rocm-systems/300-linux/rccl_lib_gfx950.tar.zst")
+
+
+class ResolveBaseline(unittest.TestCase):
+    def resolve(self, workload="llama-3.1-70b-training", **env) -> str:
+        return tm.resolve_baseline(workload, "gfx950", env={**ENV, **env})
+
+    def test_the_dispatchers_build_wins(self):
+        with mock.patch.object(tm, "previous_scheduled_build") as previous:
+            self.assertEqual(self.resolve(BASELINE_ARTIFACT_RUN_ID=" 7 "), "7")
+        previous.assert_not_called()
+
+    def test_a_dispatched_build_must_be_a_run_id(self):
+        with self.assertRaisesRegex(RuntimeError, "must be a run ID"):
+            self.resolve(BASELINE_ARTIFACT_RUN_ID="7; true")
+
+    def test_the_workloads_schedule_picks_the_build(self):
+        with mock.patch.object(tm, "previous_scheduled_build", return_value="300") as previous:
+            self.assertEqual(self.resolve("deepseek-r1-sglang-disagg", ARTIFACT_RUN_ID="500"),
+                             "300")
+        self.assertEqual(previous.call_args[0][:3], ("500", "weekly", "gfx950"))
+
+    def test_no_build_fails(self):
+        with mock.patch.object(tm, "previous_scheduled_build", return_value=None), \
+             self.assertRaisesRegex(RuntimeError, "baseline_artifact_run_id"):
+            self.resolve()
+
+    def test_an_unreachable_api_fails(self):
+        error = urllib.error.URLError("down")
+        for candidate, message in (("500", "could not tell when"), ("", "could not look up")):
+            with self.subTest(candidate=candidate), \
+                 mock.patch.object(tm, "_github_json", side_effect=error), \
+                 self.assertRaisesRegex(RuntimeError, message):
+                self.resolve(ARTIFACT_RUN_ID=candidate)
+
+
+class BaselineSource(unittest.TestCase):
+    def test_a_run_id_or_nothing_is_no_published_build(self):
+        for chosen in ("", "7", "7; true"):
+            with self.subTest(chosen=chosen):
+                self.assertEqual(tm.baseline_source({"BASELINE_ARTIFACT_RUN_ID": chosen}), "")
+
+    def test_a_spec_is_one(self):
+        self.assertEqual(tm.baseline_source({"BASELINE_ARTIFACT_RUN_ID": " release:10.1.0 "}),
+                         "release:10.1.0")
+
+    def test_a_bad_spec_fails(self):
+        for chosen in ("tag:1", "release:10.1.0;true", "url:https://example.com/x.whl"):
+            with self.subTest(chosen=chosen), self.assertRaises(RuntimeError):
+                tm.baseline_source({"BASELINE_ARTIFACT_RUN_ID": chosen})
+
+
+class ArtifactBuild(unittest.TestCase):
+    def test_a_run_knows_its_own_build_without_the_api(self):
+        error = urllib.error.HTTPError("u", 403, "Forbidden", {}, None)
+        with mock.patch.object(tm.urllib.request, "urlopen", side_effect=error):
+            self.assertEqual(tm.artifact_build("500", env=ENV),
+                             {"event": "schedule", "sha": "abc", "created_at": ""})
+
+    def test_another_build_is_looked_up(self):
+        body = io.BytesIO(json.dumps({"event": "schedule", "head_sha": "def",
+                                      "created_at": "2026-11-07T06:23:27Z"}).encode())
+        with mock.patch.object(tm.urllib.request, "urlopen", return_value=body) as urlopen:
+            self.assertEqual(tm.artifact_build("9", env=ENV),
+                             {"event": "schedule", "sha": "def",
+                              "created_at": "2026-11-07T06:23:27Z"})
+        request = urlopen.call_args[0][0]
+        self.assertEqual(request.full_url,
+                         "https://api.github.com/repos/ROCm/rocm-systems/actions/runs/9")
+        self.assertEqual(request.get_header("Authorization"), "Bearer t")
+
+    def test_a_failed_lookup_leaves_it_unknown(self):
+        error = urllib.error.HTTPError("u", 404, "Not Found", {}, None)
+        with mock.patch.object(tm.urllib.request, "urlopen", side_effect=error):
+            self.assertEqual(tm.artifact_build("9", env=ENV),
+                             {"event": "", "sha": "", "created_at": ""})
+
+    def test_a_published_build_is_not_looked_up(self):
+        with mock.patch.object(tm.urllib.request, "urlopen") as urlopen:
+            self.assertEqual(tm.artifact_build("release:10.1.0", env=ENV),
+                             {"event": "", "sha": "", "created_at": ""})
+        urlopen.assert_not_called()
+
+
+def comparison(precision: str, base: float | None, cand: float | None) -> dict:
+    rows = {phase: {"metric_value": v, "status": "pass"} if v else None
+            for phase, v in ((tm.BASELINE, base), (tm.CANDIDATE, cand))}
+    return {"precision": precision, **rows, "ratio": cand / base if base and cand else None}
+
+
+class ScoreComparisons(unittest.TestCase):
+    def test_a_regression_fails(self):
+        msgs, failed = tm.score_comparisons([comparison("BF16", 100.0, 90.0)], "training")
+        self.assertTrue(failed)
+        self.assertIn("REGRESSION DETECTED", msgs[0])
+
+    def test_report_only_keeps_the_regression_but_does_not_fail(self):
+        msgs, failed = tm.score_comparisons(
+            [comparison("BF16", 100.0, 90.0), comparison("FP8", 100.0, 101.0)],
+            "training", report_only=True,
+        )
+        self.assertFalse(failed)
+        self.assertIn("[BF16] REGRESSION DETECTED", msgs[0])
+        self.assertIn("[FP8] No regression", msgs[1])
+
+    def test_report_only_still_fails_a_missing_side(self):
+        _, failed = tm.score_comparisons([comparison("BF16", 100.0, None)], "training",
+                                         report_only=True)
+        self.assertTrue(failed)
+        _, failed = tm.score_comparisons([], "training", report_only=True)
+        self.assertTrue(failed)
+
+
+class SummaryReport(unittest.TestCase):
+    def report(self, **kwargs):
+        return tm.generate_summary_report(
+            "llama-3.1-70b-training", "2N/16GPU", 0, "[BF16] No regression", "c", "ruby",
+            **kwargs,
+        )
+
+    def test_names_a_ci_build_and_a_published_one(self):
+        text = self.report(builds={tm.CANDIDATE: "42768456967", tm.BASELINE: "release:10.1.0"})
+        self.assertIn("(release:10.1.0)", text)
+        self.assertIn("(CI build 42768456967)", text)
+
+    def test_report_only_says_so(self):
+        self.assertIn("Status:     PASSED (report only", self.report(report_only=True))
+        self.assertIn("Status:     PASSED\n", self.report())
+
+
+class StageBothPhases(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        self.work = self.root / "work"
+        self.work.mkdir()
+        self.libs = {}
+        for phase in (tm.BASELINE, tm.CANDIDATE):
+            lib = self.root / phase / "lib" / "librccl.so"
+            lib.parent.mkdir(parents=True)
+            lib.write_bytes(f"librccl {phase}".encode())
+            self.libs[phase] = lib
+        patcher = mock.patch.dict(os.environ, {"GITHUB_RUN_ID": "42"})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        os.environ.pop("RCCL_COMMIT_HASH", None)
+
+    def stage(self, phase: str, family: str = "megatron", primus_dir=None) -> str:
+        return tm.stage_rccl_overlay(
+            self.libs[phase], "rocm/base:tag", "gfx950", self.work,
+            family=family, primus_dir=primus_dir,
+            from_ref="rocm/base@sha256:abc", phase=phase,
+        )
+
+    def check_pair(self, family: str = "megatron", primus_dir=None) -> Path:
+        tags = {phase: self.stage(phase, family, primus_dir)
+                for phase in (tm.BASELINE, tm.CANDIDATE)}
+        self.assertNotEqual(tags[tm.BASELINE], tags[tm.CANDIDATE])
+        ctx = self.work / tm.OVERLAY_CTX
+        for phase, tag in tags.items():
+            self.assertIn(f"-run42-{phase}-", tag)
+            dockerfile = (ctx / tm.OVERLAY_DOCKERFILES[phase]).read_text()
+            self.assertRegex(dockerfile, r"(?m)^FROM rocm/base@sha256:abc$")
+            self.assertIn(f"COPY {tm.OVERLAY_LIBS[phase]}/ /tmp/rccl_ci/", dockerfile)
+            other = tm.OVERLAY_LIBS[tm.CANDIDATE if phase == tm.BASELINE else tm.BASELINE]
+            self.assertNotIn(f"COPY {other}/", dockerfile)
+            staged = ctx / tm.OVERLAY_LIBS[phase] / "librccl.so"
+            self.assertEqual(staged.read_bytes(), self.libs[phase].read_bytes())
+        return ctx
+
+    def test_megatron(self):
+        self.check_pair()
+
+    def test_another_build_under_the_same_run_gets_another_tag(self):
+        # Saturday's nightly and weekly jobs share GITHUB_RUN_ID, not their baseline.
+        friday = self.stage(tm.BASELINE)
+        self.libs[tm.BASELINE].write_bytes(b"librccl of the previous Saturday")
+        self.assertNotEqual(self.stage(tm.BASELINE), friday)
+
+    def test_megatron_kpack(self):
+        for phase, lib in self.libs.items():
+            (lib.parent / "rccl_gfx950.kpack").write_bytes(f"kpack {phase}".encode())
+        with mock.patch.object(tm, "_rccl_uses_kpack", return_value=True):
+            ctx = self.check_pair()
+        for phase, lib in self.libs.items():
+            staged = ctx / tm.OVERLAY_LIBS[phase] / ".kpack" / "rccl_gfx950.kpack"
+            self.assertEqual(staged.read_bytes(), f"kpack {phase}".encode())
+
+    def test_kpack_references_without_a_kpack_fail(self):
+        with mock.patch.object(tm, "_rccl_uses_kpack", return_value=True), \
+             self.assertRaisesRegex(RuntimeError, "loads its GPU kernels from a .kpack"):
+            self.stage(tm.CANDIDATE)
+
+    def test_maxtext(self):
+        primus = self.root / "Primus"
+        primus.mkdir()
+        (primus / "primus-cli").write_text("#!/bin/bash\n")
+        self.check_pair("maxtext", primus_dir=primus)
+
+    def test_sglang_disagg(self):
+        mad = self.work / "MAD" / tm.SGLANG_MAD_DOCKERFILE
+        mad.parent.mkdir(parents=True)
+        mad.write_text("ARG BASE_DOCKER=rocm/base:tag\nFROM $BASE_DOCKER\nRUN echo payload\n")
+        self.check_pair("sglang-disagg")
+
+
+class MainPhaseLibraries(unittest.TestCase):
+    """main() hands each phase its own build's library, not the other's."""
+
+    class Stop(Exception):
+        pass
+
+    GOOD = {tm.BASELINE: "2.30.4-HEAD:aaaaaaa", tm.CANDIDATE: "2.30.4-HEAD:bbbbbbb"}
+
+    def run_main(self, versions: dict[str, str]) -> None:
+        """main() up to the first phase dir; leaves self.staged and self.install."""
+        self.staged = {}
+
+        def stage(lib, *args, phase, **kwargs):
+            self.staged[phase] = lib
+            return f"image-{phase}"
+
+        argv = ["test_madengine.py", "--workload", "llama-3.1-70b-training",
+                "--cluster", "ruby", "--artifact-dir", "/cand",
+                "--baseline-artifact-dir", "/base", "--work-dir", "/nonexistent"]
+        dirs = {"/base": tm.BASELINE, "/cand": tm.CANDIDATE}
+
+        def fingerprint(lib):
+            return {"md5": "", "version": versions[dirs[str(lib.parent)]], "size": 0}
+
+        # Builds the API could be asked about, were main() to ask.
+        env = {"GITHUB_REPOSITORY": "ROCm/rocm-systems",
+               "ARTIFACT_RUN_ID": "500", "BASELINE_ARTIFACT_RUN_ID": "300"}
+        with mock.patch.object(sys, "argv", argv), \
+             mock.patch.dict(os.environ, env), \
+             mock.patch.object(tm, "find_rccl_library",
+                               side_effect=lambda d: Path(d) / "librccl.so"), \
+             mock.patch.object(tm, "get_rccl_fingerprint", side_effect=fingerprint), \
+             mock.patch.object(tm, "_github_json",
+                               side_effect=AssertionError("the run step has no token")), \
+             mock.patch.object(tm, "install_madengine") as self.install, \
+             mock.patch.object(tm, "check_mad_knobs"), \
+             mock.patch.object(tm, "resolve_base_digest", return_value="b@sha256:1"), \
+             mock.patch.object(tm, "stage_rccl_overlay", side_effect=stage), \
+             mock.patch.object(tm, "prepare_phase_dir", side_effect=self.Stop):
+            tm.main()
+
+    def test_baseline_gets_the_baseline_build(self):
+        with self.assertRaises(self.Stop):
+            self.run_main(self.GOOD)
+        self.assertEqual(self.staged, {tm.BASELINE: Path("/base/librccl.so"),
+                                       tm.CANDIDATE: Path("/cand/librccl.so")})
+
+    def test_a_library_without_a_version_fails_before_anything_runs(self):
+        for empty in (tm.BASELINE, tm.CANDIDATE):
+            with self.subTest(empty=empty), self.assertRaises(SystemExit) as cm:
+                self.run_main({**self.GOOD, empty: ""})
+            self.assertEqual(cm.exception.code, 1)
+            self.install.assert_not_called()
+            self.assertEqual(self.staged, {})
+
+
+class FailBeforeRun(unittest.TestCase):
+    """A run that stops before its phases still sends its report."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.summary = Path(tmp.name) / "summary.md"
+        self.senders = {}
+        for name in ("send_email_report", "send_teams_webhook"):
+            patcher = mock.patch.object(tm, name)
+            self.senders[name] = patcher.start()
+            self.addCleanup(patcher.stop)
+        patcher = mock.patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": str(self.summary),
+                                               "ARTIFACT_RUN_ID": "500"})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def main(self, *argv: str, **patches) -> str:
+        """main() with *patches* over test_madengine; returns its stdout."""
+        argv = ["test_madengine.py", "--workload", "llama-3.1-70b-training",
+                "--cluster", "ruby", "--notify-email", "ci@example.com",
+                "--teams-webhook", "https://hook.example.com", *argv]
+        out = io.StringIO()
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(mock.patch.object(sys, "argv", argv))
+            stack.enter_context(mock.patch("sys.stdout", out))
+            for name, new in patches.items():
+                stack.enter_context(mock.patch.object(tm, name, new))
+            with self.assertRaises(SystemExit) as cm:
+                tm.main()
+        self.assertEqual(cm.exception.code, 1)
+        return out.getvalue()
+
+    def assert_reported(self, reason: str) -> None:
+        for name, sender in self.senders.items():
+            sender.assert_called_once()
+            report, _, status = sender.call_args.args
+            self.assertEqual(status, "FAILED", name)
+            self.assertIn(reason, report, name)
+        self.assertIn(reason, self.summary.read_text())
+
+    def run_main(self, **patches) -> None:
+        good = {"md5": "", "version": "2.30.4-HEAD:aaaaaaa", "size": 0}
+        defaults = {
+            "find_rccl_library": lambda d: Path(d) / "librccl.so",
+            "get_rccl_fingerprint": mock.Mock(return_value=good),
+            "install_madengine": mock.Mock(),
+            "check_mad_knobs": mock.Mock(),
+            "resolve_base_digest": mock.Mock(return_value="b@sha256:1"),
+        }
+        self.main("--artifact-dir", "/cand", "--baseline-artifact-dir", "/base",
+                  "--work-dir", "/nonexistent", **{**defaults, **patches})
+
+    def test_no_baseline(self):
+        stdout = self.main("--resolve-baseline", resolve_baseline=mock.Mock(
+            side_effect=RuntimeError("no nightly CI build before 500")))
+        self.assertEqual(stdout, "")
+        self.assert_reported("No A/B baseline: no nightly CI build before 500")
+
+    def test_an_unreadable_version(self):
+        self.run_main(get_rccl_fingerprint=mock.Mock(
+            return_value={"md5": "", "version": "", "size": 0}))
+        self.assert_reported("Could not read the RCCL version of the baseline and "
+                             "candidate library")
+
+    def test_a_published_baseline_is_named(self):
+        with mock.patch.dict(os.environ, {"BASELINE_ARTIFACT_RUN_ID": "",
+                                          "BASELINE_RCCL_SOURCE": "release:10.1.0"}):
+            self.run_main(get_rccl_fingerprint=mock.Mock(
+                return_value={"md5": "", "version": "", "size": 0}))
+        self.assert_reported("RCCL unknown (release:10.1.0)")
+
+    def test_an_unpinned_base_image(self):
+        self.run_main(resolve_base_digest=mock.Mock(
+            side_effect=RuntimeError("the registry gave no digest for rocm/primus")))
+        self.assert_reported("Cannot pin the A/B base image: the registry gave no digest")
+
+    def test_an_image_that_cannot_be_staged(self):
+        self.run_main(stage_rccl_overlay=mock.Mock(
+            side_effect=RuntimeError("loads its GPU kernels from a .kpack")))
+        self.assert_reported("Cannot stage the A/B images: loads its GPU kernels")
+
+
+class ResolveBaselineCli(unittest.TestCase):
+    def resolve(self, chosen: str) -> subprocess.CompletedProcess:
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}
+        env["BASELINE_ARTIFACT_RUN_ID"] = chosen
+        return subprocess.run(
+            [sys.executable, str(Path(tm.__file__)), "--resolve-baseline",
+             "--workload", "llama-3.1-70b-training", "--cluster", "ruby"],
+            env=env, capture_output=True, text=True,
+        )
+
+    # Without GITHUB_REPOSITORY, the event and commit lookups find nothing.
+    NOT_LOOKED_UP = ("artifact_event=\nartifact_sha=\n"
+                     "baseline_artifact_event=\nbaseline_artifact_sha=\n")
+
+    def test_stdout_carries_only_the_output_lines(self):
+        self.assertEqual(self.resolve("7").stdout,
+                         "artifact_run_id=7\nrccl_source=\n" + self.NOT_LOOKED_UP)
+
+    def test_a_published_build_is_passed_on_not_looked_up(self):
+        self.assertEqual(self.resolve("release:10.1.0").stdout,
+                         "artifact_run_id=\nrccl_source=release:10.1.0\n" + self.NOT_LOOKED_UP)
+
+    def test_a_spec_cannot_add_an_output(self):
+        out = self.resolve("release:10.1.0\nartifact_run_id=1")
+        self.assertEqual((out.returncode, out.stdout), (1, ""))
+
+    def test_both_builds_are_looked_up_for_the_run_step(self):
+        sources = {"500": {"event": "schedule", "sha": "c" * 40, "created_at": ""},
+                   "300": {"event": "schedule", "sha": "b" * 40, "created_at": ""}}
+        argv = ["test_madengine.py", "--resolve-baseline",
+                "--workload", "llama-3.1-70b-training", "--cluster", "ruby"]
+        env = {"ARTIFACT_RUN_ID": "500", "BASELINE_ARTIFACT_RUN_ID": "300"}
+        out = io.StringIO()
+        with mock.patch.object(sys, "argv", argv), \
+             mock.patch.dict(os.environ, env), \
+             mock.patch.object(tm, "artifact_build", side_effect=sources.get), \
+             mock.patch("sys.stdout", out), \
+             self.assertRaises(SystemExit):
+            tm.main()
+        self.assertEqual(out.getvalue().splitlines(), [
+            "artifact_run_id=300", "rccl_source=",
+            "artifact_event=schedule", f"artifact_sha={'c' * 40}",
+            "baseline_artifact_event=schedule", f"baseline_artifact_sha={'b' * 40}",
+        ])
+
+
+@unittest.skipIf(yaml is None, "PyYAML not installed")
+class Workflow(unittest.TestCase):
+    def setUp(self):
+        path = (Path(__file__).resolve().parents[5] / ".github" / "workflows"
+                / "therock-rccl-test-madengine.yml")
+        self.workflow = yaml.safe_load(path.read_text())
+
+    def test_the_baseline_build_is_optional_on_both_triggers(self):
+        for trigger in ("workflow_call", "workflow_dispatch"):
+            inputs = self.workflow[True][trigger]["inputs"]
+            self.assertEqual(inputs["baseline_artifact_run_id"].get("default"), "", trigger)
+            self.assertFalse(inputs["baseline_artifact_run_id"].get("required", False))
+
+    def test_the_resolved_build_is_fetched_and_tested(self):
+        steps = {s["name"]: s for s in self.workflow["jobs"]["test_madengine"]["steps"]}
+        names = list(steps)
+        resolve = steps["Resolve the A/B baseline build"]
+        self.assertIn("--resolve-baseline", resolve["run"])
+        self.assertLess(names.index("Resolve the A/B baseline build"),
+                        names.index("Run MADEngine workload"))
+        resolved = "${{ steps.baseline.outputs.artifact_run_id }}"
+        fetch = steps["Fetch baseline RCCL artifacts"]
+        self.assertEqual(fetch["env"]["BASELINE_ARTIFACT_RUN_ID"], resolved)
+        self.assertIn('--output-dir="${BASELINE_ARTIFACTS_DIR}"', fetch["run"])
+        run = steps["Run MADEngine workload"]
+        self.assertEqual(run["env"]["BASELINE_ARTIFACT_RUN_ID"], resolved)
+        self.assertIn('--baseline-artifact-dir "${BASELINE_ARTIFACTS_DIR}"', run["run"])
+
+    def test_the_baseline_step_can_report_its_failure(self):
+        steps = {s["name"]: s for s in self.workflow["jobs"]["test_madengine"]["steps"]}
+        resolve = steps["Resolve the A/B baseline build"]
+        self.assertEqual(resolve["env"]["NOTIFY_EMAIL"], "${{ inputs.notify_email }}")
+        self.assertEqual(resolve["env"]["TEAMS_WEBHOOK"], "${{ inputs.teams_webhook }}")
+        self.assertIn('"${NOTIFY_ARGS[@]}"', resolve["run"])
+
+    def test_only_the_baseline_step_gets_the_token_for_the_lookups(self):
+        steps = {s["name"]: s for s in self.workflow["jobs"]["test_madengine"]["steps"]}
+        self.assertIn("GITHUB_TOKEN", steps["Resolve the A/B baseline build"]["env"])
+        run = steps["Run MADEngine workload"]["env"]
+        self.assertNotIn("GITHUB_TOKEN", run)
+        for name in ("ARTIFACT_EVENT", "ARTIFACT_SHA",
+                     "BASELINE_ARTIFACT_EVENT", "BASELINE_ARTIFACT_SHA"):
+            self.assertEqual(run[name], f"${{{{ steps.baseline.outputs.{name.lower()} }}}}")
+
+    def test_no_run_block_expands_an_expression(self):
+        # An expression is pasted into the script before bash parses it; an
+        # env var reaches bash as data.
+        for step in self.workflow["jobs"]["test_madengine"]["steps"]:
+            self.assertNotIn("${{", step.get("run", ""), step["name"])
+
+
+if __name__ == "__main__":
+    unittest.main()

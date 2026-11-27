@@ -41,6 +41,23 @@ _hash := \#
 HIP_MAJOR = $(shell sed -n 's/$(_hash)define HIP_VERSION_MAJOR[[:space:]]*//p' $(ROCM_PATH)/include/hip/hip_version.h 2>/dev/null)
 HIP_MINOR = $(shell sed -n 's/$(_hash)define HIP_VERSION_MINOR[[:space:]]*//p' $(ROCM_PATH)/include/hip/hip_version.h 2>/dev/null)
 
+# Set to 1 to build only for the GPU arch(s) detected on this machine.
+# Makefile equivalent of the CMake BUILD_LOCAL_GPU_TARGET_ONLY option.
+LOCAL_GPU_ONLY ?= 0
+ROCM_AGENT_ENUMERATOR ?= $(ROCM_PATH)/bin/rocm_agent_enumerator
+
+ifeq ($(LOCAL_GPU_ONLY), 1)
+  ifndef GPU_TARGETS
+    LOCAL_GPU_TARGETS := $(shell $(ROCM_AGENT_ENUMERATOR) 2>/dev/null | grep -v '^gfx000$$' | sort -u)
+    ifeq ($(LOCAL_GPU_TARGETS),)
+      $(warning Unable to determine local GPU targets. Falling back to default GPUs.)
+    else
+      $(info Building only for local GPU target: $(LOCAL_GPU_TARGETS))
+      GPU_TARGETS := $(LOCAL_GPU_TARGETS)
+    endif
+  endif
+endif
+
 # Better define GPU_TARGETS in your environment to the minimal set
 # of archs to reduce compile time.
 # Currently, supports gfx906,gfx908,gfx90a,gfx942,gfx950,gfx1030,gfx1100,gfx1101,gfx1102,gfx1151,gfx1200,gfx1201,gfx1250
@@ -195,13 +212,13 @@ os.%:
 
 .PRECIOUS: ${DST_DIR}/%.o
 
-${DST_DIR}/%.o: ${HIPIFY_DIR}/%.cu.cpp ${HIPIFY_DIR}/common.h ${HIPIFY_DIR}/util.h ${HIPIFY_DIR}/collector.h ${HIPIFY_DIR}/rccl_vector_types.h ${HIPIFY_DIR}/multimem_ops.h ${HIPIFY_DIR}/rccl_float8.h ${HIPIFY_DIR}/verifiable.h $(TEST_VERIFIABLE_HDRS) $(GIT_VERSION_FILE)
+${DST_DIR}/%.o: ${HIPIFY_DIR}/%.cu.cpp ${HIPIFY_DIR}/common.h ${HIPIFY_DIR}/util.h ${HIPIFY_DIR}/collector.h ${HIPIFY_DIR}/rccl_vector_types.h ${HIPIFY_DIR}/multimem_ops.h ${HIPIFY_DIR}/rccl_float8.h ${HIPIFY_DIR}/verifiable.h ${HIPIFY_DIR}/alltoall_hier_policy.h ${HIPIFY_DIR}/gin_sdma_allgather_policy.h ${HIPIFY_DIR}/gin_sdma_allgather_reqs.h ${HIPIFY_DIR}/gin_sdma_broadcast_policy.h ${HIPIFY_DIR}/gin_sdma_devtime.h ${HIPIFY_DIR}/gin_sdma_devtime_host.h ${HIPIFY_DIR}/gin_resource_sharing.h ${HIPIFY_DIR}/nccl1_compat.h ${HIPIFY_DIR}/rccl_compat.h $(TEST_VERIFIABLE_HDRS) $(GIT_VERSION_FILE)
 	@printf "Compiling  %-35s > %s\n" $< $@
 	@mkdir -p ${DST_DIR}
 	echo "$(HIPCC) $(HIPCUFLAGS) -I. -c -o $@ $<"
 	$(HIPCC) $(HIPCUFLAGS) -I. -I${HIPIFY_DIR} -c -o $@ $<
 
-${DST_DIR}/%$(NAME_SUFFIX).o: ${HIPIFY_DIR}/%.cu.cpp ${HIPIFY_DIR}/common.h ${HIPIFY_DIR}/util.h ${HIPIFY_DIR}/collector.h ${HIPIFY_DIR}/rccl_vector_types.h ${HIPIFY_DIR}/multimem_ops.h ${HIPIFY_DIR}/rccl_float8.h ${HIPIFY_DIR}/verifiable.h $(TEST_VERIFIABLE_HDRS) $(GIT_VERSION_FILE)
+${DST_DIR}/%$(NAME_SUFFIX).o: ${HIPIFY_DIR}/%.cu.cpp ${HIPIFY_DIR}/common.h ${HIPIFY_DIR}/util.h ${HIPIFY_DIR}/collector.h ${HIPIFY_DIR}/rccl_vector_types.h ${HIPIFY_DIR}/multimem_ops.h ${HIPIFY_DIR}/rccl_float8.h ${HIPIFY_DIR}/verifiable.h ${HIPIFY_DIR}/alltoall_hier_policy.h ${HIPIFY_DIR}/gin_sdma_allgather_policy.h ${HIPIFY_DIR}/gin_sdma_allgather_reqs.h ${HIPIFY_DIR}/gin_sdma_broadcast_policy.h ${HIPIFY_DIR}/gin_sdma_devtime.h ${HIPIFY_DIR}/gin_sdma_devtime_host.h ${HIPIFY_DIR}/gin_resource_sharing.h ${HIPIFY_DIR}/nccl1_compat.h ${HIPIFY_DIR}/rccl_compat.h $(TEST_VERIFIABLE_HDRS) $(GIT_VERSION_FILE)
 	@printf "Compiling  %-35s > %s\n" $< $@
 	@mkdir -p ${DST_DIR}
 	echo "$(HIPCC) $(HIPCUFLAGS) -I. -c -o $@ $<"

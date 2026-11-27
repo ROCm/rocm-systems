@@ -425,16 +425,22 @@ ncclResult_t ncclStreamAdvanceToStream(cudaStream_t s, cudaStream_t source) {
 }
 
 ncclResult_t ncclStreamAdvanceToEvent(struct ncclCudaGraph g, cudaStream_t s, cudaEvent_t e) {
+  ncclResult_t ret = ncclSuccess;
+  cudaStream_t tmp = nullptr;
   if (g.graphId == ULLONG_MAX) {
     CUDACHECK(cudaStreamWaitEvent(s, e, 0));
   } else {
-    cudaStream_t tmp;
     CUDACHECK(cudaStreamCreateWithFlags(&tmp, cudaStreamNonBlocking));
-    CUDACHECK(cudaStreamWaitEvent(tmp, e, 0));
-    NCCLCHECK(ncclStreamAdvanceToStream(s, tmp));
-    CUDACHECK(cudaStreamDestroy(tmp));
+    // From here on, every failure must destroy the temporary stream.
+    CUDACHECKGOTO(cudaStreamWaitEvent(tmp, e, 0), ret, fail);
+    NCCLCHECKGOTO(ncclStreamAdvanceToStream(s, tmp), ret, fail);
   }
-  return ncclSuccess;
+  if (tmp) CUDACHECK(cudaStreamDestroy(tmp));
+exit:
+  return ret;
+fail:
+  if (tmp) (void)cudaStreamDestroy(tmp);
+  goto exit;
 }
 
 ncclResult_t ncclStrongStreamSynchronize(struct ncclStrongStream* ss) {

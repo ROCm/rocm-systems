@@ -29,8 +29,10 @@
 
 using rocshmem::agreeSdmaStatus;
 using rocshmem::applyForcedFailure;
+using rocshmem::initialSdmaStatus;
 using rocshmem::parseForcedFailureLocalRank;
 using rocshmem::SdmaDecision;
+using rocshmem::kSdmaBadChannels;
 using rocshmem::kSdmaConnectFailed;
 using rocshmem::kSdmaDisabledByEnv;
 using rocshmem::kSdmaReady;
@@ -91,6 +93,41 @@ TEST(SdmaAgreement, UnknownStatusCountsAsFailedConnect) {
   const auto a = agree({kSdmaReady, 7, kSdmaReady, -1});
   EXPECT_EQ(a.decision, SdmaDecision::kFallbackConnectFailed);
   EXPECT_EQ(a.ranks, "1,3");
+}
+
+TEST(SdmaAgreement, BadChannelsOnOneRankAbortsEveryRank) {
+  // A rank that aborted alone would leave its peers waiting in the exchange.
+  const auto a = agree({kSdmaReady, kSdmaReady, kSdmaBadChannels, kSdmaReady});
+  EXPECT_EQ(a.decision, SdmaDecision::kAbortBadChannels);
+  EXPECT_EQ(a.ranks, "2");
+}
+
+TEST(SdmaAgreement, BadChannelsOutranksEveryOtherStatus) {
+  const auto a =
+      agree({kSdmaConnectFailed, kSdmaBadChannels, kSdmaDisabledByEnv, kSdmaBadChannels});
+  EXPECT_EQ(a.decision, SdmaDecision::kAbortBadChannels);
+  EXPECT_EQ(a.ranks, "1,3");
+  EXPECT_EQ(agree({kSdmaDisabledByEnv, kSdmaBadChannels}).decision,
+            SdmaDecision::kAbortBadChannels);
+}
+
+TEST(SdmaAgreement, InitialStatusAcceptsOneToEightChannels) {
+  EXPECT_EQ(initialSdmaStatus(true, 1), kSdmaReady);
+  EXPECT_EQ(initialSdmaStatus(true, 8), kSdmaReady);
+  EXPECT_EQ(initialSdmaStatus(false, 1), kSdmaDisabledByEnv);
+  EXPECT_EQ(initialSdmaStatus(false, 8), kSdmaDisabledByEnv);
+}
+
+TEST(SdmaAgreement, InitialStatusReportsBadChannelsEvenWithSdmaOff) {
+  EXPECT_EQ(initialSdmaStatus(true, 0), kSdmaBadChannels);
+  EXPECT_EQ(initialSdmaStatus(true, 9), kSdmaBadChannels);
+  EXPECT_EQ(initialSdmaStatus(false, 0), kSdmaBadChannels);
+  EXPECT_EQ(initialSdmaStatus(false, 9), kSdmaBadChannels);
+  EXPECT_EQ(initialSdmaStatus(true, -1), kSdmaBadChannels);
+}
+
+TEST(SdmaAgreement, ForcedFailureLeavesBadChannelsAlone) {
+  EXPECT_EQ(applyForcedFailure(kSdmaBadChannels, 1, 1), kSdmaBadChannels);
 }
 
 TEST(SdmaAgreement, ParsesForcedFailureLocalRank) {

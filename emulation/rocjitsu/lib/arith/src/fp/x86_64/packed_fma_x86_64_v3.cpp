@@ -5,7 +5,9 @@
 // CPU-specific arithmetic stays here; public entry points select this backend.
 
 #include "common/packed_alu.h"
+#include "common/sdwa_output.h"
 #include "common/x86_64/half_x86_64_v3.h"
+#include "conversion/x86_64/lanes.h"
 #include "fp/packed_fma.h"
 #include "fp/x86_64/half_fma_x86_64_v3.h"
 #include "rj_arith/detail/rj_arith_fp.h"
@@ -28,8 +30,9 @@ __m256i compute_half(__m256i a, __m256i b, __m256i c, uint64_t flags, uint32_t m
     y = flush_denorm_f16(y);
     z = flush_denorm_f16(z);
   }
-  return half_fma_value(x, y, z, flags & RJ_ARITH_FP16_OVFL, mode & RJ_ARITH_ALU_CLAMP,
-                        flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS);
+  return half_fma_value(x, y, z, flags & RJ_ARITH_FP16_OVFL, mode,
+                        flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS,
+                        flags & RJ_ARITH_FP_DX10_CLAMP_OFF);
 }
 
 } // namespace
@@ -39,9 +42,10 @@ __m256i compute_half(__m256i a, __m256i b, __m256i c, uint64_t flags, uint32_t m
 template <bool Accumulate>
 void packed_fma_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *d,
                           const uint32_t *a, const uint32_t *b, const uint32_t *c) {
+  const auto output = sdwa_output_policy(flags, mode);
   uint32_t low_mode, high_mode;
   if constexpr (Accumulate) {
-    low_mode = 0;
+    low_mode = mode & ~RJ_ARITH_ALU_SDWA;
     high_mode = low_mode | RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_B | RJ_ARITH_ALU_HIGH_C;
   } else {
     low_mode = packed_half_instruction_flags(mode, false);
@@ -54,6 +58,11 @@ void packed_fma_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t mode, uin
     auto low = compute_half(va, vb, vc, flags, low_mode);
     auto high = compute_half(va, vb, vc, flags, high_mode);
     auto result = _mm256_or_si256(low, _mm256_slli_epi32(high, 16));
+    if constexpr (Accumulate) {
+      if (mode & RJ_ARITH_ALU_SDWA) {
+        result = sdwa_finalize_packed_f16(conversion_simd::Lanes<32>(result), output).bits;
+      }
+    }
     auto lane_exec_mask = _mm256_sllv_epi32(_mm256_set1_epi32(int(exec_mask >> lane)),
                                             _mm256_setr_epi32(31, 30, 29, 28, 27, 26, 25, 24));
     _mm256_maskstore_epi32(reinterpret_cast<int *>(d + lane), lane_exec_mask, result);

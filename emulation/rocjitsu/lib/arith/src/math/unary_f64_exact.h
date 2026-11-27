@@ -9,7 +9,7 @@
 
 #include "fp/fp64.h"
 #include "math/trans_f64_model.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 
 #include <stdint.h>
 

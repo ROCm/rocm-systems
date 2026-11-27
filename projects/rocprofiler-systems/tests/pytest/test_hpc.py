@@ -28,7 +28,7 @@ def hpc_openmp_environment() -> dict[str, str]:
         "ROCPROFSYS_PROFILE": "ON",
         "ROCPROFSYS_TIME_OUTPUT": "OFF",
         "ROCPROFSYS_USE_OMPT": "ON",
-        "ROCPROFSYS_TIMEMORY_COMPONENTS": "wall_clock,trip_count,peak_rss",
+        "ROCPROFSYS_TIMEMORY_COMPONENTS": "trip_count,peak_rss",
         "OMP_PROC_BIND": "spread",
         "OMP_PLACES": "threads",
         "OMP_NUM_THREADS": "2",
@@ -43,7 +43,7 @@ def hpc_hip_environment() -> dict[str, str]:
         "ROCPROFSYS_TRACE": "ON",
         "ROCPROFSYS_PROFILE": "ON",
         "ROCPROFSYS_TIME_OUTPUT": "OFF",
-        "ROCPROFSYS_TIMEMORY_COMPONENTS": "wall_clock,trip_count,peak_rss",
+        "ROCPROFSYS_TIMEMORY_COMPONENTS": "trip_count,peak_rss",
         "ROCPROFSYS_COUT_OUTPUT": "ON",
     }
 

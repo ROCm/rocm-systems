@@ -86,7 +86,7 @@ static_assert(AQL_PACKET_SIZE == 64, "KFD AQL queue assumes the standard 64-byte
 
 template <typename PredicateT, typename DiagnosticT>
 void
-wait_with_diagnostics(PredicateT&& pending, DiagnosticT&& diagnostic)
+wait_with_diagnostics(PredicateT&& pending, DiagnosticT&& diagnostic, bool spin = false)
 {
     constexpr auto interval        = std::chrono::seconds{30};
     auto           next_diagnostic = std::chrono::steady_clock::now() + interval;
@@ -98,6 +98,7 @@ wait_with_diagnostics(PredicateT&& pending, DiagnosticT&& diagnostic)
             diagnostic();
             next_diagnostic = now + interval;
         }
+        if(spin) continue;
         std::this_thread::sleep_for(std::chrono::microseconds(1));
         std::this_thread::yield();
     }
@@ -219,6 +220,23 @@ uint64_t
 load_acquire(const volatile uint64_t* ptr)
 {
     return __atomic_load_n(ptr, __ATOMIC_ACQUIRE);
+}
+
+// KFD destroys a queue only after its read pointer catches the write pointer.
+// Give a copy that already retired its fence a moment to get there, and let the
+// caller skip DESTROY_QUEUE when the engine is still fetching.
+bool
+read_pointer_caught_up(const volatile uint64_t*  rptr,
+                       uint64_t                  posted,
+                       std::chrono::milliseconds budget)
+{
+    const auto deadline = std::chrono::steady_clock::now() + budget;
+    while(rptr != nullptr && load_acquire(rptr) < posted)
+    {
+        if(std::chrono::steady_clock::now() >= deadline) return false;
+        std::this_thread::sleep_for(std::chrono::microseconds(50));
+    }
+    return true;
 }
 
 void
@@ -718,7 +736,7 @@ kfd_signal_t::reset(int64_t value)
 }
 
 void
-kfd_signal_t::wait() const
+kfd_signal_t::wait(bool spin) const
 {
     ROCP_TRACE << "Waiting for KFD signal";
     auto t0 = std::chrono::system_clock::now();
@@ -728,7 +746,8 @@ kfd_signal_t::wait() const
             ROCP_INFO << "Still waiting in kfd_signal_t::wait (30-second diagnostic): gpu_id="
                       << _memory->gpu_id() << ", signal=" << _signal
                       << ", value=" << load_signal_value(_signal);
-        });
+        },
+        spin);
 
     std::atomic_thread_fence(std::memory_order_acq_rel);
     auto t1 = std::chrono::system_clock::now();
@@ -866,6 +885,10 @@ struct direct_queue_t
         memory->deallocate(ring);
     }
 
+    // Drop the queue without DESTROY_QUEUE. Used when the engine is still
+    // fetching: the ioctl waits out KFD's preemption timeout and hangs the GPU.
+    void abandon() { created = false; }
+
     bool close()
     {
         if(!created) return true;
@@ -983,6 +1006,13 @@ bool
 kfd_aql_queue_t::close()
 {
     auto lock = std::unique_lock{_impl->mutex};
+    if(!read_pointer_caught_up(_impl->queue.rptr, _impl->write_index, std::chrono::seconds{8}))
+    {
+        ROCP_WARNING << "Leaving KFD AQL queue undestroyed: the read pointer has not "
+                        "reached the write pointer. DESTROY_QUEUE would time out and hang the GPU.";
+        _impl->queue.abandon();
+        return false;
+    }
     return _impl->queue.close();
 }
 
@@ -1035,6 +1065,15 @@ struct sdma_queue_t
     bool close()
     {
         auto lock = std::unique_lock{mutex};
+        if(!read_pointer_caught_up(queue.rptr, write_index, std::chrono::seconds{8}))
+        {
+            ROCP_WARNING << "Leaving KFD SDMA queue undestroyed: read pointer "
+                         << (queue.rptr != nullptr ? load_acquire(queue.rptr) : 0)
+                         << " has not reached write pointer " << write_index
+                         << ". DESTROY_QUEUE would time out and hang the GPU.";
+            queue.abandon();
+            return false;
+        }
         return queue.close();
     }
 
@@ -1046,16 +1085,20 @@ struct sdma_queue_t
             const size_t padding = queue.ring_size - offset;
             queue.wait_for_space(write_index + padding);
             std::memset(static_cast<char*>(queue.ring) + offset, 0, padding);
+            // Leave the NOP tail unpublished. Doorbelling it now lets the engine
+            // wrap and re-execute the previous packets at offset 0 before this
+            // command is written, which retires the fence while the copy is
+            // still running. Queue destroy then times out and hangs the GPU.
             write_index += padding;
-            store_release(queue.wptr, write_index);
-            *queue.doorbell = write_index;
-            offset          = 0;
+            offset = 0;
         }
         queue.wait_for_space(write_index + bytes);
         std::memcpy(static_cast<char*>(queue.ring) + offset, data, bytes);
         write_index += bytes;
         store_release(queue.wptr, write_index);
-        *queue.doorbell = write_index;
+        // Release-store the doorbell so the ring writes and the write pointer
+        // are visible before the engine is woken.
+        __atomic_store_n(const_cast<uint64_t*>(queue.doorbell), write_index, __ATOMIC_RELEASE);
     }
 
     bool copy(void* dst, const void* src, size_t size)
@@ -1082,7 +1125,19 @@ struct sdma_queue_t
         builder.append_fence(const_cast<int64_t*>(&completion->abi()->value), 0, fence_header);
         completion->reset();
         publish(builder.data(), builder.size_bytes());
-        completion->wait();
+        // Copies are short and bounded: spin so the next copy can be enqueued right away.
+        // TODO: Enqueue copies asynchronously (a fence per copy) so the engine never idles between
+        // copies and the producer does not wait on them.
+        completion->wait(/*spin=*/true);
+        // The fence can retire while the engine is still fetching this submission
+        // (a wrapped ring re-executes the previous fence). Destroying the queue
+        // then times out. Wait until the read pointer catches this write.
+        if(!read_pointer_caught_up(queue.rptr, write_index, std::chrono::seconds{8}))
+        {
+            ROCP_ERROR << "SDMA copy fence retired before the read pointer caught the write "
+                          "pointer";
+            return false;
+        }
         return true;
     }
 

@@ -42,19 +42,19 @@
             "validation_queries": [
                 {
                     "requires": "xgmi",
-                    "comparison": "greater_than",
-                    "description": "Check for amd-smi xgmi link speed samples",
-                    "error_message": "Less than expected number of captured amd-smi xgmi link speed samples!",
-                    "expected_result": 100,
-                    "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name = 'device_xgmi_link_speed'"
+                    "comparison": "equals",
+                    "description": "Check that each GPU has valid amd-smi xgmi link speed samples",
+                    "error_message": "Missing valid amd-smi xgmi link speed samples for one or more GPU agents!",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM rocpd_info_agent agent WHERE agent.type = 'GPU' AND NOT EXISTS (SELECT 1 FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.agent_id = agent.id AND info.name = 'device_xgmi_link_speed' AND event.value > 0)"
                 },
                 {
                     "requires": "xgmi",
-                    "comparison": "greater_than",
-                    "description": "Check for amd-smi xgmi link width samples",
-                    "error_message": "Less than expected number of captured amd-smi xgmi link width samples!",
-                    "expected_result": 100,
-                    "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name = 'device_xgmi_link_width'"
+                    "comparison": "equals",
+                    "description": "Check that each GPU has valid amd-smi xgmi link width samples",
+                    "error_message": "Missing valid amd-smi xgmi link width samples for one or more GPU agents!",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM rocpd_info_agent agent WHERE agent.type = 'GPU' AND NOT EXISTS (SELECT 1 FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.agent_id = agent.id AND info.name = 'device_xgmi_link_width' AND event.value > 0)"
                 },
                 {
                     "requires": "xgmi",
@@ -90,19 +90,19 @@
                 },
                 {
                     "requires": "pcie",
-                    "comparison": "greater_than",
-                    "description": "Check for amd-smi pcie link speed samples",
-                    "error_message": "Less than expected number of captured amd-smi pcie link speed samples!",
-                    "expected_result": 100,
-                    "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name = 'device_pcie_link_speed'"
+                    "comparison": "equals",
+                    "description": "Check that each GPU has valid amd-smi pcie link speed samples",
+                    "error_message": "Missing valid amd-smi pcie link speed samples for one or more GPU agents!",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM rocpd_info_agent agent WHERE agent.type = 'GPU' AND NOT EXISTS (SELECT 1 FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.agent_id = agent.id AND info.name = 'device_pcie_link_speed' AND event.value > 0)"
                 },
                 {
                     "requires": "pcie",
-                    "comparison": "greater_than",
-                    "description": "Check for amd-smi pcie link width samples",
-                    "error_message": "Less than expected number of captured amd-smi pcie link width samples!",
-                    "expected_result": 100,
-                    "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name = 'device_pcie_link_width'"
+                    "comparison": "equals",
+                    "description": "Check that each GPU has valid amd-smi pcie link width samples",
+                    "error_message": "Missing valid amd-smi pcie link width samples for one or more GPU agents!",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM rocpd_info_agent agent WHERE agent.type = 'GPU' AND NOT EXISTS (SELECT 1 FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.agent_id = agent.id AND info.name = 'device_pcie_link_width' AND event.value > 0)"
                 }
             ]
         }

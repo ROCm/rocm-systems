@@ -1,0 +1,40 @@
+cp.cpc_adc_pipe0_busy_dispatching_workgroups:
+  name: CPC ADC Pipe0 Busy Dispatching Workgroups
+  formula: 100 * SUM(CPC_DISPATCH_ACTIVE_EN0_sum) / SUM(CPC_CPC_STAT_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percent of CPC-busy cycles Asynchronous Dispatch Controller pipe 0 is issuing
+    workgroups to SPI.
+cp.cpc_adc_pipe1_busy_dispatching_workgroups:
+  name: CPC ADC Pipe1 Busy Dispatching Workgroups
+  formula: 100 * SUM(CPC_DISPATCH_ACTIVE_EN1_sum) / SUM(CPC_CPC_STAT_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percent of CPC-busy cycles Asynchronous Dispatch Controller pipe 1 is issuing
+    workgroups to SPI.
+cp.cpc_adc_pipe2_busy_dispatching_workgroups:
+  name: CPC ADC Pipe2 Busy Dispatching Workgroups
+  formula: 100 * SUM(CPC_DISPATCH_ACTIVE_EN2_sum) / SUM(CPC_CPC_STAT_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percent of CPC-busy cycles Asynchronous Dispatch Controller pipe 2 is issuing
+    workgroups to SPI.
+cp.cpc_adc_pipe3_busy_dispatching_workgroups:
+  name: CPC ADC Pipe3 Busy Dispatching Workgroups
+  formula: 100 * SUM(CPC_DISPATCH_ACTIVE_EN3_sum) / SUM(CPC_CPC_STAT_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percent of CPC-busy cycles Asynchronous Dispatch Controller pipe 3 is issuing
+    workgroups to SPI.
+cp.cpc_micro_engine_busy_dispatching_workgroups:
+  name: CPC Micro-Engine Busy Dispatching Workgroups
+  formula: 100 * SUM(CPC_ME1_DC0_SPI_BUSY_sum) / SUM(CPC_CPC_STAT_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percent of CPC-busy cycles the micro-engine is sending dispatch commands to SPI.
+cp.cpc_util:
+  name: CPC Utilization
+  formula: 100 * SUM(CPC_CPC_STAT_BUSY_sum) / SUM(CPC_ALWAYS_COUNT_sum)
+  unit: Percent
+  description: >-
+    Percentage of GPU-active cycles the CPC is processing compute dispatch packets.

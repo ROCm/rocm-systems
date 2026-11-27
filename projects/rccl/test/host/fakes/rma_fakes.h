@@ -74,6 +74,13 @@ extern std::function<ncclResult_t(hipStream_t /*stream*/, unsigned int /*numOps*
 extern std::function<bool(struct ncclComm*)> g_rmaInitialized;
 #endif
 
+// ncclRmaProxyWorldToPeer (src/rma/rma_proxy.cc): default is the identity mapping, the real answer for a
+// single rail (comm->rmaBaseStride == 1). Absent where the target compiles the real rma_proxy.cc.
+#ifndef RCCL_RMA_FAKES_OMIT_ncclRmaProxyWorldToPeer
+extern std::function<ncclResult_t(const struct ncclRmaProxyCtx* /*ctx*/, int /*worldRank*/, int* /*peer*/)>
+    g_rmaProxyWorldToPeer;
+#endif
+
 // Restore every hook in this file to its default. Call from fixture TearDown().
 void ResetRmaFakes();
 

@@ -236,9 +236,6 @@ static void divisionErrorHandler(int sig, siginfo_t* info, void* ptr) {
   ::abort();
 }
 
-typedef int (*pthread_setaffinity_fn)(pthread_t, size_t, const cpu_set_t*);
-static pthread_setaffinity_fn pthread_setaffinity_fptr;
-
 static void init() __attribute__((constructor(101)));
 static void init() { Os::init(); }
 static cpu_set_t nativeMask_;
@@ -272,7 +269,6 @@ bool Os::init() {
   processorCount_ = ::sysconf(_SC_NPROCESSORS_CONF);
 
   pthread_getaffinity_np(pthread_self(), sizeof(cpu_set_t), &nativeMask_);
-  pthread_setaffinity_fptr = (pthread_setaffinity_fn)dlsym(RTLD_NEXT, "pthread_setaffinity_np");
 
   return Thread::init();
 }
@@ -759,6 +755,30 @@ bool Os::hasMovdir64b() {
   }();
   return supported;
 }
+
+bool Os::hasClflushopt() {
+  // CPUID leaf 7, sub-leaf 0: EBX bit 23 = CLFLUSHOPT.
+  static const bool supported = [] {
+    int regs[4];
+#ifdef _LP64
+    __asm__ __volatile__(
+        "movq %%rbx, %%rsi;"
+        "cpuid;"
+        "xchgq %%rbx, %%rsi;"
+        : "=a"(regs[0]), "=S"(regs[1]), "=c"(regs[2]), "=d"(regs[3])
+        : "a"(7), "c"(0));
+#else
+    __asm__ __volatile__(
+        "movl %%ebx, %%esi;"
+        "cpuid;"
+        "xchgl %%ebx, %%esi;"
+        : "=a"(regs[0]), "=S"(regs[1]), "=c"(regs[2]), "=d"(regs[3])
+        : "a"(7), "c"(0));
+#endif
+    return static_cast<bool>((regs[1] >> 23) & 1);
+  }();
+  return supported;
+}
 #endif  // ATI_ARCH_X86
 
 uint64_t Os::offsetToEpochNanos() {
@@ -1151,8 +1171,8 @@ bool NumaNode::GetAffinity() {
   auto iter = affinity->begin();
   // To parse from the end (little-endian layout)
   for (int i = line.size(); i > 0; i -= kHexsPerUInt64) {
-    uint32_t start = (i >= kHexsPerUInt64) ? i - kHexsPerUInt64 : 0;
-    uint32_t len = (i >= kHexsPerUInt64) ? kHexsPerUInt64 : i;
+    uint32_t start = (i >= static_cast<int>(kHexsPerUInt64)) ? i - kHexsPerUInt64 : 0;
+    uint32_t len = (i >= static_cast<int>(kHexsPerUInt64)) ? kHexsPerUInt64 : i;
 
     const std::string chunk = line.substr(start, len);
     const uint64_t value = std::stoul(chunk, nullptr, 16);

@@ -26,6 +26,8 @@ VInterpP10F32Vinterp::VInterpP10F32Vinterp(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= EMBEDDED_MEMORY_WAIT;
+  set_amdgpu_operation(amdgpu::Operation::V_INTERP_P10_F32);
+  flags_ |= INTERPOLATION;
 }
 
 namespace detail {
@@ -33,8 +35,9 @@ DecodeResult decodeVInterpP10F32Vinterp(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Vinterp::validate_encoding(
       "v_interp_p10_f32", reinterpret_cast<const Vinterp::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VInterpP10F32Vinterp>(opcode);
 }
 } // namespace detail
@@ -53,6 +56,8 @@ VInterpP2F32Vinterp::VInterpP2F32Vinterp(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= EMBEDDED_MEMORY_WAIT;
+  set_amdgpu_operation(amdgpu::Operation::V_INTERP_P2_F32);
+  flags_ |= INTERPOLATION;
 }
 
 namespace detail {
@@ -60,8 +65,9 @@ DecodeResult decodeVInterpP2F32Vinterp(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Vinterp::validate_encoding(
       "v_interp_p2_f32", reinterpret_cast<const Vinterp::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VInterpP2F32Vinterp>(opcode);
 }
 } // namespace detail
@@ -82,6 +88,8 @@ VInterpP10F16F32Vinterp::VInterpP10F16F32Vinterp(const MachineInst *inst)
   src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   src2.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 2));
   flags_ |= EMBEDDED_MEMORY_WAIT;
+  set_amdgpu_operation(amdgpu::Operation::V_INTERP_P10_F16_F32);
+  flags_ |= INTERPOLATION;
 }
 
 namespace detail {
@@ -89,8 +97,9 @@ DecodeResult decodeVInterpP10F16F32Vinterp(const MachineInst *opcode,
                                            const DecodeErrorEmitter &emit_error) {
   Result validation = Vinterp::validate_encoding(
       "v_interp_p10_f16_f32", reinterpret_cast<const Vinterp::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VInterpP10F16F32Vinterp>(opcode);
 }
 } // namespace detail
@@ -111,6 +120,8 @@ VInterpP2F16F32Vinterp::VInterpP2F16F32Vinterp(const MachineInst *inst)
   src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   vdst.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 3));
   flags_ |= EMBEDDED_MEMORY_WAIT;
+  set_amdgpu_operation(amdgpu::Operation::V_INTERP_P2_F16_F32);
+  flags_ |= INTERPOLATION;
 }
 
 namespace detail {
@@ -118,16 +129,18 @@ DecodeResult decodeVInterpP2F16F32Vinterp(const MachineInst *opcode,
                                           const DecodeErrorEmitter &emit_error) {
   Result validation = Vinterp::validate_encoding(
       "v_interp_p2_f16_f32", reinterpret_cast<const Vinterp::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VInterpP2F16F32Vinterp>(opcode);
 }
 } // namespace detail
 
 void VInterpP2F16F32Vinterp::implicit_uses(RegisterSet &uses) const {
   Vinterp::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
+  if (auto r = vdst.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 VInterpP10RtzF16F32Vinterp::VInterpP10RtzF16F32Vinterp(const MachineInst *inst)
@@ -146,6 +159,8 @@ VInterpP10RtzF16F32Vinterp::VInterpP10RtzF16F32Vinterp(const MachineInst *inst)
   src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   src2.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 2));
   flags_ |= EMBEDDED_MEMORY_WAIT;
+  set_amdgpu_operation(amdgpu::Operation::V_INTERP_P10_RTZ_F16_F32);
+  flags_ |= INTERPOLATION;
 }
 
 namespace detail {
@@ -154,8 +169,9 @@ DecodeResult decodeVInterpP10RtzF16F32Vinterp(const MachineInst *opcode,
   Result validation =
       Vinterp::validate_encoding("v_interp_p10_rtz_f16_f32",
                                  reinterpret_cast<const Vinterp::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VInterpP10RtzF16F32Vinterp>(opcode);
 }
 } // namespace detail
@@ -176,6 +192,8 @@ VInterpP2RtzF16F32Vinterp::VInterpP2RtzF16F32Vinterp(const MachineInst *inst)
   src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   vdst.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 3));
   flags_ |= EMBEDDED_MEMORY_WAIT;
+  set_amdgpu_operation(amdgpu::Operation::V_INTERP_P2_RTZ_F16_F32);
+  flags_ |= INTERPOLATION;
 }
 
 namespace detail {
@@ -183,16 +201,18 @@ DecodeResult decodeVInterpP2RtzF16F32Vinterp(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vinterp::validate_encoding(
       "v_interp_p2_rtz_f16_f32", reinterpret_cast<const Vinterp::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VInterpP2RtzF16F32Vinterp>(opcode);
 }
 } // namespace detail
 
 void VInterpP2RtzF16F32Vinterp::implicit_uses(RegisterSet &uses) const {
   Vinterp::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
+  if (auto r = vdst.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 } // namespace rdna4

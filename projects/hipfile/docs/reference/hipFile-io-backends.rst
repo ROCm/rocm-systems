@@ -40,6 +40,7 @@ The fallback backend uses POSIX ``pread`` and ``pwrite`` system calls combined w
 I/O fails when both backends reject the request, or when a fastpath runtime error isn't eligible for automatic fallback retry. Fastpath rejects a request when:
 
 - ``HIPFILE_FORCE_COMPAT_MODE`` is ``true``, which disables the fastpath entirely.
+- An earlier fastpath request in the process failed with ``ENOTTY``, which disables the fastpath for the rest of the process.
 - The HIP runtime doesn't expose ``hipAmdFileRead()`` or ``hipAmdFileWrite()``.
 - The file doesn't have an ``O_DIRECT`` file descriptor. hipFile tries to open one at registration, but if the file or file system doesn't support ``O_DIRECT``, fastpath can't service any requests for that file.
 - The file isn't a regular file or block device.
@@ -47,5 +48,5 @@ I/O fails when both backends reject the request, or when a fastpath runtime erro
 - The buffer isn't ``hipMemoryTypeDevice``. Both fastpath and fallback require device memory. Non-device buffers cause both backends to reject the request.
 - The file offset or I/O size isn't aligned to the file system's offset alignment, or the device buffer address isn't aligned to the memory alignment. These two alignment values can differ depending on what the kernel reports through ``statx()``.
 
-When the fastpath accepts a request but encounters a runtime error, only ``ENODEV`` and ``EREMOTEIO`` trigger an automatic retry on the fallback backend. All other errors, including ``EINVAL``, ``EBADF``, and ``EIO``, cause the I/O to fail immediately. Setting ``HIPFILE_ALLOW_COMPAT_MODE`` to ``false`` disables the fallback backend entirely, which also prevents automatic retry.
+When the fastpath accepts a request but encounters a runtime error, only ``ENODEV``, ``EREMOTEIO``, and ``ENOTTY`` trigger an automatic retry on the fallback backend. ``ENOTTY`` means the amdgpu kernel driver doesn't support AIS (for example, the inbox Linux driver). All other errors, including ``EINVAL``, ``EBADF``, and ``EIO``, cause the I/O to fail immediately. Setting ``HIPFILE_ALLOW_COMPAT_MODE`` to ``false`` disables the fallback backend entirely, which also prevents automatic retry.
 

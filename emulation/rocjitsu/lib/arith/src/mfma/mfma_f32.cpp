@@ -4,12 +4,37 @@
 // FP32 and XF32 MFMA use the shared floating-point reduction.
 #include "common/internal.h"
 #include "mfma/backends.h"
+#include "mfma/gfx942_exact.h"
 #include "mfma/reduction.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
+#include "rj_arith/detail/rj_arith_mfma.h"
 
 namespace {
+// Keep the scalar stack buffer out of the SIMD dispatch prologue.
+template <int M, int K, int Batch, bool Xf32, rocjitsu::arith::MfmaF32Model Model>
+[[gnu::noinline]] void evaluate_scalar(uint64_t controls, uint64_t flags, bool clamp_overflow,
+                                       uint32_t *const *d, const uint32_t *const *a,
+                                       const uint32_t *const *b, const uint32_t *const *c) {
+  using namespace rocjitsu::arith;
+  constexpr uint32_t input_mask = Xf32 ? kMfmaXf32InputMask : UINT32_MAX;
+  float left[M * K * Batch], right[M * K * Batch];
+  for (int i = 0; i < M * K * Batch; ++i) {
+    left[i] = as_float(a[i / 64][i % 64] & input_mask);
+    right[i] = as_float(b[i / 64][i % 64] & input_mask);
+    if constexpr (Model == MfmaF32Model::Gfx90a) {
+      if (flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS) {
+        left[i] = mfma_flush_f32(left[i]);
+        right[i] = mfma_flush_f32(right[i]);
+      }
+    }
+  }
+  mfma_reduce_scalar<M, K, Batch, 1, false, Model>(controls, d, left, right, c, clamp_overflow,
+                                                   flags);
+}
+
 // Validate the approximate model and evaluate a full matrix; errors do not touch operands.
-template <int M, int K, int Batch, bool Xf32 = false>
+template <int M, int K, int Batch, bool Xf32 = false, bool Gfx942 = false,
+          rocjitsu::arith::MfmaF32Model Model = rocjitsu::arith::MfmaF32Model::Default>
 int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32_t *const *a,
              const uint32_t *const *b, const uint32_t *const *c) {
   using namespace rocjitsu::arith;
@@ -18,29 +43,45 @@ int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32
                            kMatrixIgnoredFpFlags | RJ_ARITH_FP_DX10_CLAMP_OFF)) {
     return error;
   }
+  // Only the captured gfx942 XF32 forms with default source controls are qualified.
+  // Compatibility retains the existing fast approximate implementation.
+  if constexpr (Gfx942) {
+    if (is_exact(flags) && !controls) {
+      const bool no_inf_nan = (flags & RJ_ARITH_FP16_OVFL) != 0;
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+      if (!no_inf_nan && cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+        mfma_gfx942_exact_x86_64_v4<MfmaGfx942Format::Xf32, M, K, Batch>(d, a, b, c);
+        return RJ_ARITH_SUCCESS;
+      }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+      if (!no_inf_nan && cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+        mfma_gfx942_exact_x86_64_v3<MfmaGfx942Format::Xf32, M, K, Batch>(d, a, b, c);
+        return RJ_ARITH_SUCCESS;
+      }
+#endif
+      mfma_gfx942_exact(MfmaGfx942Format::Xf32, M, K, Batch, no_inf_nan, d, a, b, c);
+      return RJ_ARITH_SUCCESS;
+    }
+  }
   if ((flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
     return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
   }
-  const bool clamp_overflow = !Xf32 && (flags & RJ_ARITH_FP16_OVFL);
+  const bool clamp_overflow =
+      Model == MfmaF32Model::Default && !Xf32 && (flags & RJ_ARITH_FP16_OVFL);
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
   if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
-    mfma_f32_x86_64_v4<M, K, Batch, Xf32>(controls, clamp_overflow, d, a, b, c);
+    mfma_f32_x86_64_v4<M, K, Batch, Xf32, Model>(controls, flags, d, a, b, c);
     return RJ_ARITH_SUCCESS;
   }
 #endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
   if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
-    mfma_f32_x86_64_v3<M, K, Batch, Xf32>(controls, clamp_overflow, d, a, b, c);
+    mfma_f32_x86_64_v3<M, K, Batch, Xf32, Model>(controls, flags, d, a, b, c);
     return RJ_ARITH_SUCCESS;
   }
 #endif
-  constexpr uint32_t input_mask = Xf32 ? kMfmaXf32InputMask : UINT32_MAX;
-  float left[M * K * Batch], right[M * K * Batch];
-  for (int i = 0; i < M * K * Batch; ++i) {
-    left[i] = as_float(a[i / 64][i % 64] & input_mask);
-    right[i] = as_float(b[i / 64][i % 64] & input_mask);
-  }
-  mfma_reduce_scalar<M, K, Batch, 1>(controls, d, left, right, c, clamp_overflow);
+  evaluate_scalar<M, K, Batch, Xf32, Model>(controls, flags, clamp_overflow, d, a, b, c);
   return RJ_ARITH_SUCCESS;
 }
 } // namespace
@@ -49,13 +90,13 @@ int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32
 int rj_arith_v_mfma_f32_16x16x8_xf32_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
                                          const uint32_t *const *a, const uint32_t *const *b,
                                          const uint32_t *const *c) {
-  return evaluate<16, 8, 1, true>(flags, controls, d, a, b, c);
+  return evaluate<16, 8, 1, true, true>(flags, controls, d, a, b, c);
 }
 // Evaluate 32x32x4 XF32 MFMA.
 int rj_arith_v_mfma_f32_32x32x4_xf32_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
                                          const uint32_t *const *a, const uint32_t *const *b,
                                          const uint32_t *const *c) {
-  return evaluate<32, 4, 1, true>(flags, controls, d, a, b, c);
+  return evaluate<32, 4, 1, true, true>(flags, controls, d, a, b, c);
 }
 
 // Evaluate 2 independent 32x32x1 FP32 matrices.
@@ -91,4 +132,106 @@ int rj_arith_v_mfma_f32_16x16x4_f32_w64(uint64_t flags, uint64_t controls, uint3
                                         const uint32_t *const *a, const uint32_t *const *b,
                                         const uint32_t *const *c) {
   return evaluate<16, 4, 1>(flags, controls, d, a, b, c);
+}
+
+// Evaluate the gfx950 form using the existing approximate model.
+int rj_arith_v_mfma_f32_16x16x8_xf32_w64_gfx950(uint64_t flags, uint64_t controls,
+                                                uint32_t *const *d, const uint32_t *const *a,
+                                                const uint32_t *const *b,
+                                                const uint32_t *const *c) {
+  return evaluate<16, 8, 1, true>(flags, controls, d, a, b, c);
+}
+
+// Evaluate the gfx950 form using the existing approximate model.
+int rj_arith_v_mfma_f32_32x32x4_xf32_w64_gfx950(uint64_t flags, uint64_t controls,
+                                                uint32_t *const *d, const uint32_t *const *a,
+                                                const uint32_t *const *b,
+                                                const uint32_t *const *c) {
+  return evaluate<32, 4, 1, true>(flags, controls, d, a, b, c);
+}
+
+// Retain gfx908's input/output denormal and A broadcast policy.
+int rj_arith_v_mfma_f32_32x32x1_2b_f32_w64_gfx908(uint64_t flags, uint64_t controls,
+                                                  uint32_t *const *d, const uint32_t *const *a,
+                                                  const uint32_t *const *b,
+                                                  const uint32_t *const *c) {
+  return evaluate<32, 1, 2, false, false, rocjitsu::arith::MfmaF32Model::Gfx908>(flags, controls, d,
+                                                                                 a, b, c);
+}
+
+// Retain gfx908's input/output denormal and A broadcast policy.
+int rj_arith_v_mfma_f32_16x16x1_4b_f32_w64_gfx908(uint64_t flags, uint64_t controls,
+                                                  uint32_t *const *d, const uint32_t *const *a,
+                                                  const uint32_t *const *b,
+                                                  const uint32_t *const *c) {
+  return evaluate<16, 1, 4, false, false, rocjitsu::arith::MfmaF32Model::Gfx908>(flags, controls, d,
+                                                                                 a, b, c);
+}
+
+// Retain gfx908's input/output denormal and A broadcast policy.
+int rj_arith_v_mfma_f32_4x4x1_16b_f32_w64_gfx908(uint64_t flags, uint64_t controls,
+                                                 uint32_t *const *d, const uint32_t *const *a,
+                                                 const uint32_t *const *b,
+                                                 const uint32_t *const *c) {
+  return evaluate<4, 1, 16, false, false, rocjitsu::arith::MfmaF32Model::Gfx908>(flags, controls, d,
+                                                                                 a, b, c);
+}
+
+// Retain gfx908's input/output denormal and A broadcast policy.
+int rj_arith_v_mfma_f32_32x32x2_f32_w64_gfx908(uint64_t flags, uint64_t controls,
+                                               uint32_t *const *d, const uint32_t *const *a,
+                                               const uint32_t *const *b, const uint32_t *const *c) {
+  return evaluate<32, 2, 1, false, false, rocjitsu::arith::MfmaF32Model::Gfx908>(flags, controls, d,
+                                                                                 a, b, c);
+}
+
+// Retain gfx908's input/output denormal and A broadcast policy.
+int rj_arith_v_mfma_f32_16x16x4_f32_w64_gfx908(uint64_t flags, uint64_t controls,
+                                               uint32_t *const *d, const uint32_t *const *a,
+                                               const uint32_t *const *b, const uint32_t *const *c) {
+  return evaluate<16, 4, 1, false, false, rocjitsu::arith::MfmaF32Model::Gfx908>(flags, controls, d,
+                                                                                 a, b, c);
+}
+
+// Retain gfx90a's input/output denormal and A broadcast policy.
+int rj_arith_v_mfma_f32_32x32x1_2b_f32_w64_gfx90a(uint64_t flags, uint64_t controls,
+                                                  uint32_t *const *d, const uint32_t *const *a,
+                                                  const uint32_t *const *b,
+                                                  const uint32_t *const *c) {
+  return evaluate<32, 1, 2, false, false, rocjitsu::arith::MfmaF32Model::Gfx90a>(flags, controls, d,
+                                                                                 a, b, c);
+}
+
+// Retain gfx90a's input/output denormal and A broadcast policy.
+int rj_arith_v_mfma_f32_16x16x1_4b_f32_w64_gfx90a(uint64_t flags, uint64_t controls,
+                                                  uint32_t *const *d, const uint32_t *const *a,
+                                                  const uint32_t *const *b,
+                                                  const uint32_t *const *c) {
+  return evaluate<16, 1, 4, false, false, rocjitsu::arith::MfmaF32Model::Gfx90a>(flags, controls, d,
+                                                                                 a, b, c);
+}
+
+// Retain gfx90a's input/output denormal and A broadcast policy.
+int rj_arith_v_mfma_f32_4x4x1_16b_f32_w64_gfx90a(uint64_t flags, uint64_t controls,
+                                                 uint32_t *const *d, const uint32_t *const *a,
+                                                 const uint32_t *const *b,
+                                                 const uint32_t *const *c) {
+  return evaluate<4, 1, 16, false, false, rocjitsu::arith::MfmaF32Model::Gfx90a>(flags, controls, d,
+                                                                                 a, b, c);
+}
+
+// Retain gfx90a's input/output denormal and A broadcast policy.
+int rj_arith_v_mfma_f32_32x32x2_f32_w64_gfx90a(uint64_t flags, uint64_t controls,
+                                               uint32_t *const *d, const uint32_t *const *a,
+                                               const uint32_t *const *b, const uint32_t *const *c) {
+  return evaluate<32, 2, 1, false, false, rocjitsu::arith::MfmaF32Model::Gfx90a>(flags, controls, d,
+                                                                                 a, b, c);
+}
+
+// Retain gfx90a's input/output denormal and A broadcast policy.
+int rj_arith_v_mfma_f32_16x16x4_f32_w64_gfx90a(uint64_t flags, uint64_t controls,
+                                               uint32_t *const *d, const uint32_t *const *a,
+                                               const uint32_t *const *b, const uint32_t *const *c) {
+  return evaluate<16, 4, 1, false, false, rocjitsu::arith::MfmaF32Model::Gfx90a>(flags, controls, d,
+                                                                                 a, b, c);
 }

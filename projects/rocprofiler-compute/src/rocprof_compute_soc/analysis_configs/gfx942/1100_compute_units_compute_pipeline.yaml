@@ -14,7 +14,7 @@ Panel Config:
         pct_of_peak: Percent of Peak
       metric:
         VALU FLOPs:
-          value: 64 * SUM(SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + SQ_INSTS_VALU_TRANS_F16 + 2 * SQ_INSTS_VALU_FMA_F16 + SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + SQ_INSTS_VALU_TRANS_F32 + 2 * SQ_INSTS_VALU_FMA_F32 + SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + SQ_INSTS_VALU_TRANS_F64 + 2 * SQ_INSTS_VALU_FMA_F64) / SUM(End_Timestamp - Start_Timestamp)
+          value: $valu_f16_flop_rate + $valu_f32_flop_rate + $valu_f64_flop_rate
           unit: GFLOPs
           peak: $max_sclk * $cu_per_gpu * 64 * 2 / 1000
           pct_of_peak: true
@@ -64,9 +64,9 @@ Panel Config:
           max: MAX(SQ_INSTS / SQ_BUSY_CU_CYCLES)
           unit: Instructions per Cycle
         IPC (Issued):
-          avg: SUM(SQ_INSTS_VALU + SQ_INSTS_VMEM + SQ_INSTS_SALU + SQ_INSTS_SMEM + SQ_INSTS_BRANCH + SQ_INSTS_SENDMSG + SQ_INSTS_VSKIPPED + SQ_INSTS_LDS) / SUM(SQ_ACTIVE_INST_ANY)
-          min: MIN((SQ_INSTS_VALU + SQ_INSTS_VMEM + SQ_INSTS_SALU + SQ_INSTS_SMEM + SQ_INSTS_BRANCH + SQ_INSTS_SENDMSG + SQ_INSTS_VSKIPPED + SQ_INSTS_LDS) / SQ_ACTIVE_INST_ANY)
-          max: MAX((SQ_INSTS_VALU + SQ_INSTS_VMEM + SQ_INSTS_SALU + SQ_INSTS_SMEM + SQ_INSTS_BRANCH + SQ_INSTS_SENDMSG + SQ_INSTS_VSKIPPED + SQ_INSTS_LDS) / SQ_ACTIVE_INST_ANY)
+          avg: $ipc_valu_vmem_salu_smem + $ipc_branch_sendmsg_vskipped_lds
+          min: MIN($ipc_valu_vmem_salu_smem_per_dispatch + $ipc_branch_sendmsg_vskipped_lds_per_dispatch)
+          max: MAX($ipc_valu_vmem_salu_smem_per_dispatch + $ipc_branch_sendmsg_vskipped_lds_per_dispatch)
           unit: Instructions per Cycle
         SALU Utilization:
           avg: 100 * SUM(SQ_ACTIVE_INST_SCA) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
@@ -124,9 +124,9 @@ Panel Config:
         unit: Unit
       metric:
         FLOPs (Total):
-          avg: SUM(64 * (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + SQ_INSTS_VALU_TRANS_F16 + SQ_INSTS_VALU_FMA_F16 * 2) + 512 * SQ_INSTS_VALU_MFMA_MOPS_F8 + 512 * SQ_INSTS_VALU_MFMA_MOPS_F16 + 512 * SQ_INSTS_VALU_MFMA_MOPS_BF16 + 64 * (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + SQ_INSTS_VALU_TRANS_F32 + SQ_INSTS_VALU_FMA_F32 * 2) + 512 * SQ_INSTS_VALU_MFMA_MOPS_F32 + 64 * (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + SQ_INSTS_VALU_TRANS_F64 + SQ_INSTS_VALU_FMA_F64 * 2) + 512 * SQ_INSTS_VALU_MFMA_MOPS_F64) / SUM($denom)
-          min: MIN((64 * (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + SQ_INSTS_VALU_TRANS_F16 + SQ_INSTS_VALU_FMA_F16 * 2) + 512 * SQ_INSTS_VALU_MFMA_MOPS_F8 + 512 * SQ_INSTS_VALU_MFMA_MOPS_F16 + 512 * SQ_INSTS_VALU_MFMA_MOPS_BF16 + 64 * (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + SQ_INSTS_VALU_TRANS_F32 + SQ_INSTS_VALU_FMA_F32 * 2) + 512 * SQ_INSTS_VALU_MFMA_MOPS_F32 + 64 * (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + SQ_INSTS_VALU_TRANS_F64 + SQ_INSTS_VALU_FMA_F64 * 2) + 512 * SQ_INSTS_VALU_MFMA_MOPS_F64) / $denom)
-          max: MAX((64 * (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + SQ_INSTS_VALU_TRANS_F16 + SQ_INSTS_VALU_FMA_F16 * 2) + 512 * SQ_INSTS_VALU_MFMA_MOPS_F8 + 512 * SQ_INSTS_VALU_MFMA_MOPS_F16 + 512 * SQ_INSTS_VALU_MFMA_MOPS_BF16 + 64 * (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + SQ_INSTS_VALU_TRANS_F32 + SQ_INSTS_VALU_FMA_F32 * 2) + 512 * SQ_INSTS_VALU_MFMA_MOPS_F32 + 64 * (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + SQ_INSTS_VALU_TRANS_F64 + SQ_INSTS_VALU_FMA_F64 * 2) + 512 * SQ_INSTS_VALU_MFMA_MOPS_F64) / $denom)
+          avg: SUM($valu_f16_flops + $valu_f32_flops + $valu_f64_flops + $mfma_f16_flops + $mfma_bf16_flops + $mfma_f32_flops + $mfma_f64_flops + $mfma_f8_flops) / SUM($denom)
+          min: MIN(($valu_f16_flops + $valu_f32_flops + $valu_f64_flops + $mfma_f16_flops + $mfma_bf16_flops + $mfma_f32_flops + $mfma_f64_flops + $mfma_f8_flops) / $denom)
+          max: MAX(($valu_f16_flops + $valu_f32_flops + $valu_f64_flops + $mfma_f16_flops + $mfma_bf16_flops + $mfma_f32_flops + $mfma_f64_flops + $mfma_f8_flops) / $denom)
           unit: (FLOPs + $normUnit)
         IOPs (Total):
           avg: SUM(64 * (SQ_INSTS_VALU_INT32 + SQ_INSTS_VALU_INT64) + SQ_INSTS_VALU_MFMA_MOPS_I8 * 512) / SUM($denom)

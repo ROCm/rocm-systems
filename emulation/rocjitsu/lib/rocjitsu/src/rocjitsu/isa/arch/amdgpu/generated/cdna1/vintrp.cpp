@@ -27,6 +27,8 @@ VInterpP1F32Vintrp::VInterpP1F32Vintrp(const MachineInst *inst)
   num_dst_ = 1;
   m0.apply_fieldless_caps(false, false, false);
   flags_ |= EMBEDDED_MEMORY_WAIT;
+  set_amdgpu_operation(amdgpu::Operation::V_INTERP_P1_F32);
+  flags_ |= INTERPOLATION;
 }
 
 namespace detail {
@@ -34,8 +36,9 @@ DecodeResult decodeVInterpP1F32Vintrp(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Vintrp::validate_encoding(
       "v_interp_p1_f32", reinterpret_cast<const Vintrp::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VInterpP1F32Vintrp>(opcode);
 }
 } // namespace detail
@@ -55,6 +58,8 @@ VInterpP2F32Vintrp::VInterpP2F32Vintrp(const MachineInst *inst)
   num_dst_ = 1;
   m0.apply_fieldless_caps(false, false, false);
   flags_ |= EMBEDDED_MEMORY_WAIT;
+  set_amdgpu_operation(amdgpu::Operation::V_INTERP_P2_F32);
+  flags_ |= INTERPOLATION;
 }
 
 namespace detail {
@@ -62,8 +67,9 @@ DecodeResult decodeVInterpP2F32Vintrp(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Vintrp::validate_encoding(
       "v_interp_p2_f32", reinterpret_cast<const Vintrp::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VInterpP2F32Vintrp>(opcode);
 }
 } // namespace detail
@@ -83,6 +89,8 @@ VInterpMovF32Vintrp::VInterpMovF32Vintrp(const MachineInst *inst)
   num_dst_ = 1;
   m0.apply_fieldless_caps(false, false, false);
   flags_ |= EMBEDDED_MEMORY_WAIT;
+  set_amdgpu_operation(amdgpu::Operation::V_INTERP_MOV_F32);
+  flags_ |= INTERPOLATION;
 }
 
 namespace detail {
@@ -90,8 +98,9 @@ DecodeResult decodeVInterpMovF32Vintrp(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Vintrp::validate_encoding(
       "v_interp_mov_f32", reinterpret_cast<const Vintrp::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<VInterpMovF32Vintrp>(opcode);
 }
 } // namespace detail

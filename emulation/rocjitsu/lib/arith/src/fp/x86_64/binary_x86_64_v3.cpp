@@ -91,8 +91,11 @@ void run(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_
     if constexpr (Op == Binary::Maximum) {
       value = minmax<true, true>(x, y);
     }
-    if constexpr (Op == Binary::MinLegacy || Op == Binary::MaxLegacy) {
-      value = minmax_rdna3<Op == Binary::MaxLegacy>(x, y, flags & RJ_ARITH_FP_IEEE_MODE);
+    if constexpr (Op == Binary::MinLegacyCdna || Op == Binary::MaxLegacyCdna ||
+                  Op == Binary::MinLegacy || Op == Binary::MaxLegacy) {
+      value = minmax_legacy < Op == Binary::MaxLegacy || Op == Binary::MaxLegacyCdna,
+      Op != Binary::MinLegacyCdna &&
+          Op != Binary::MaxLegacyCdna > (x, y, flags & RJ_ARITH_FP_IEEE_MODE);
     }
     if (instruction_flags & RJ_ARITH_ALU_OMOD_HALF) {
       value =
@@ -132,6 +135,10 @@ void binary_x86_64_v3(Binary op, uint64_t flags, uint32_t exec_mask, uint32_t in
     return run<Binary::Mul>(flags, exec_mask, instruction_flags, d, a, b);
   case Binary::MulDx9Zero:
     return run<Binary::MulDx9Zero>(flags, exec_mask, instruction_flags, d, a, b);
+  case Binary::MinLegacyCdna:
+    return run<Binary::MinLegacyCdna>(flags, exec_mask, instruction_flags, d, a, b);
+  case Binary::MaxLegacyCdna:
+    return run<Binary::MaxLegacyCdna>(flags, exec_mask, instruction_flags, d, a, b);
   case Binary::MinLegacy:
     return run<Binary::MinLegacy>(flags, exec_mask, instruction_flags, d, a, b);
   case Binary::MaxLegacy:

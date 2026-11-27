@@ -24,7 +24,8 @@ mod graph;
 pub mod host;
 pub mod platform;
 pub use gpu::{
-    GpuInfo, GpuQueueCapabilities, GpuScratchEncoding, GpuSdmaDialect, GpuTargetProfile,
+    GpuCopyTransport, GpuInfo, GpuQueueCapabilities, GpuScratchEncoding, GpuSdmaDialect,
+    GpuTargetProfile, GpuUserQueueCapabilities,
 };
 pub use graph::{
     AttachmentKind, CpuNodeInfo, EndpointAttachment, MemoryBank, MemoryBankKind, MemoryLocation,
@@ -195,6 +196,10 @@ impl MemoryLinkInfo {
 /// a CPU, NPU, or another kind of accelerator.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
+#[allow(
+    clippy::large_enum_variant,
+    reason = "passive endpoint facts remain copyable without separate allocation"
+)]
 pub enum EndpointKind {
     /// A host processor endpoint.
     Cpu,
@@ -259,7 +264,6 @@ impl Endpoint {
         if let (EndpointKind::Gpu { info: expected }, EndpointKind::Gpu { info: actual }) =
             (&mut expected.kind, &other.kind)
         {
-            expected.drm_asic_family_id = actual.drm_asic_family_id;
             expected.counter_frequency_hz = actual.counter_frequency_hz;
         }
         expected == *other

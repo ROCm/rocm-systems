@@ -169,19 +169,26 @@ static int IbCastRelaxedOrderingCapable(void) {
 
 static bool ncclMlx5dvDmaBufCapable(ibv_context* context) {
   ncclResult_t res;
-  int dev_fail = 0;
+  int ibvErrno = 0;
+  int mlxErrno = 0;
 
   struct ibv_pd* pd;
   NCCLCHECKGOTO(wrap_ibv_alloc_pd(&pd, context), res, failure);
-  // Test kernel DMA-BUF support with a dummy call (fd=-1)
+  // Sample the ibv probe before the mlx5 call overwrites errno. A missing
+  // mlx5dv_reg_dmabuf_mr is ENOSYS and means not data-direct. Kernel DMA-BUF
+  // support is ibvErrno. On libibverbs 39 the ibv dummy call sets EBADF itself,
+  // so this mlx errno does not reach IbCastDmaBufSupport().
   (void)wrap_direct_ibv_reg_dmabuf_mr(pd, 0ULL /*offset*/, 0ULL /*len*/, 0ULL /*iova*/, -1 /*fd*/, 0 /*flags*/);
-  dev_fail |= (errno == EOPNOTSUPP) || (errno == EPROTONOSUPPORT);
+  ibvErrno = errno;
   (void)wrap_direct_mlx5dv_reg_dmabuf_mr(pd, 0ULL /*offset*/, 0ULL /*len*/, 0ULL /*iova*/, -1 /*fd*/, 0 /*flags*/,
                                          0 /* mlx5 flags*/);
-  dev_fail |= (errno == EOPNOTSUPP) || (errno == EPROTONOSUPPORT);
+  mlxErrno = errno;
   NCCLCHECKGOTO(wrap_ibv_dealloc_pd(pd), res, failure);
-  // stop the search and goto failure
-  if (dev_fail) goto failure;
+  errno = ibvErrno;
+  if (ibvErrno == EOPNOTSUPP || ibvErrno == EPROTONOSUPPORT) return false;
+  // Symbol absent: not a data-direct device. Kernel DMA-BUF support is ibvErrno.
+  if (mlxErrno == ENOSYS) return false;
+  if (mlxErrno == EOPNOTSUPP || mlxErrno == EPROTONOSUPPORT) return false;
   return true;
 failure:
   return false;
@@ -623,10 +630,6 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
                  IbCastDevs[IbCastNDevs].oooRqSize,
                  IbCastAinicRoce ? IbCastDevs[IbCastNDevs].capsProvider.ionic.udmaCount : 0u);
 
-            IbCastAsyncThread = std::thread(IbCastAsyncThreadMain, IbCastDevs + IbCastNDevs);
-            ncclSetThreadName(IbCastAsyncThread.native_handle(), "NCCL IbAsync %2d", IbCastNDevs);
-            IbCastAsyncThread.detach();
-
             IbCastNDevs++;
             nPorts++;
           }
@@ -637,9 +640,10 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
         }
       }
 
-      if (devices && (ncclSuccess != wrap_ibv_free_device_list(devices))) {
-        ret = ncclInternalError;
-        goto fail;
+      if (devices) {
+        // wrap_ibv_free_device_list never fails; clear devices so the fail path cannot free it twice
+        wrap_ibv_free_device_list(devices);
+        devices = NULL;
       }
     }
     if (IbCastNDevs == 0) {
@@ -658,6 +662,12 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
     }
     // sort devices to ensure a consistent order across nodes
     if (ncclParamIbCastDevicePciOrder()) qsort(IbCastDevs, IbCastNDevs, sizeof(struct ncclIbDev), IbCastCompareDevs);
+    // Start the async-event threads only once IbCastDevs[] has its final, stable device order.
+    for (int d = 0; d < IbCastNDevs; d++) {
+      IbCastAsyncThread = std::thread(IbCastAsyncThreadMain, IbCastDevs + d);
+      ncclSetThreadName(IbCastAsyncThread.native_handle(), "NCCL IbAsync %2d", d);
+      IbCastAsyncThread.detach();
+    }
     // Once sorted, get the realPort ID, the plane index, and create the virtual devices.
     // Doing it after sorting ensures that devices will have consistent realPort IDs and plane indexes accross ranks.
     char line[2048] = "";
@@ -787,9 +797,7 @@ exit:
   if (ret == ncclSuccess) IbCastInitMaxPostSendBytes();
   return ret;
 fail:
-  if (devices && (ncclSuccess != wrap_ibv_free_device_list(devices))) {
-    WARN("NET/IB : Unable to free device list");
-  }
+  if (devices) wrap_ibv_free_device_list(devices);
   goto exit;
 }
 

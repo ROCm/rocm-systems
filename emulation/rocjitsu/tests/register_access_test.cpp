@@ -11,6 +11,7 @@
 /// observation lives in execution_plugin_test.cpp.
 
 #include "decode_test_util.h"
+#include "rocjitsu/isa/isa_family.h"
 #ifdef __linux__
 #include <dlfcn.h>
 #include <filesystem>
@@ -18,6 +19,7 @@
 
 #include "compute_unit_test_util.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna3/sgpr_layout.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/builders.h"
@@ -186,13 +188,14 @@ struct Fixture {
   RecordingPlugin *plugin = nullptr;
   Wavefront *wf = nullptr;
 
-  explicit Fixture(rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4,
+  explicit Fixture(rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Cdna4,
                    uint32_t requested_sgprs = kSgprsPerWave, uint32_t wavefront_slots = 1,
                    uint32_t vgprs_per_wave = kVgprsPerWave, uint32_t wave_size = 0,
                    uint32_t requested_vgprs = 0)
-      : execution_backend_scope(arch == ROCJITSU_CODE_ARCH_CDNA5   ? &cdna5::execution_backend()
-                                : arch == ROCJITSU_CODE_ARCH_RDNA4 ? &rdna4::execution_backend()
-                                                                   : &cdna4::execution_backend()) {
+      : execution_backend_scope(arch == rocjitsu::IsaFamily::Cdna5 ? &cdna5::execution_backend()
+                                : arch == rocjitsu::IsaFamily::Rdna4
+                                    ? &rdna4::execution_backend()
+                                    : &cdna4::execution_backend()) {
     ComputeUnitCore::Config cfg{};
     cfg.arch = arch;
     cfg.num_wf_slots = wavefront_slots;
@@ -200,8 +203,9 @@ struct Fixture {
     cfg.vgprs_per_wf = vgprs_per_wave;
     cfg.lds_size_kb = 64;
     rocjitsu::test::initialize_compute_unit(cu, "register_access_cu", cfg, &gpu_mem, &l2);
-    if (!cu)
+    if (!cu) {
       return;
+    }
 
     plugin_group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
     auto recorder = std::make_unique<RecordingPlugin>();
@@ -277,8 +281,8 @@ void check_derived_operand_rejections(Fixture &fx, const IsaExecutionBackend &ba
 
 TEST(RegisterAccessTest, RelativeScalarReadsPreserveTrapTemporaryIdentity) {
   for (const auto &[arch, movrels] :
-       {std::pair{ROCJITSU_CODE_ARCH_CDNA3, 42u}, std::pair{ROCJITSU_CODE_ARCH_CDNA4, 42u},
-        std::pair{ROCJITSU_CODE_ARCH_RDNA3, 64u}, std::pair{ROCJITSU_CODE_ARCH_RDNA3_5, 64u}}) {
+       {std::pair{rocjitsu::IsaFamily::Cdna3, 42u}, std::pair{rocjitsu::IsaFamily::Cdna4, 42u},
+        std::pair{rocjitsu::IsaFamily::Rdna3, 64u}, std::pair{rocjitsu::IsaFamily::Rdna3_5, 64u}}) {
     Fixture fx(arch);
     ASSERT_NE(fx.wf, nullptr);
     auto decoder = Decoder::create(arch);
@@ -313,10 +317,10 @@ TEST(RegisterAccessTest, RelativeScalarReadsPreserveTrapTemporaryIdentity) {
 
 TEST(RegisterAccessTest, Cdna3SgprTailSharesVccAndFlatScratchStorage) {
   for (unsigned requested : {8u, 16u, 24u}) {
-    Fixture fx(ROCJITSU_CODE_ARCH_CDNA3, requested);
+    Fixture fx(rocjitsu::IsaFamily::Cdna3, requested);
     ASSERT_NE(fx.wf, nullptr);
     ScopedIsaExecutionBackend backend(&cdna3::execution_backend());
-    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+    auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna3);
     ASSERT_NE(decoder, nullptr);
     const unsigned vcc = requested <= 16 ? 14 : 30;
     const unsigned scratch = vcc - 4;
@@ -441,8 +445,9 @@ TEST(RegisterAccessTest, ExecutionCallbackRejectsLateMissingBackendDelegateBefor
       Operand descriptor(32, 1);
       Operand *delegate = descriptor_only ? &descriptor : &*missing;
       cdna4::Operand intermediate(32, cdna4::OperandType::OPR_VGPR, 1);
-      for (uint32_t lane = 0; lane < 64; ++lane)
+      for (uint32_t lane = 0; lane < 64; ++lane) {
         fx.cu->write_vgpr(fx.vgpr_base(), lane, 0xA5A5A5A5u);
+      }
       {
         ScopedOperandDelegate inner(intermediate, delegate);
         ScopedOperandDelegate outer(*operand, &intermediate);
@@ -451,8 +456,9 @@ TEST(RegisterAccessTest, ExecutionCallbackRejectsLateMissingBackendDelegateBefor
                   InstructionExecutionError::MissingExecutionBackend);
         EXPECT_TRUE(fx.plugin->reads.empty());
         EXPECT_TRUE(fx.plugin->writes.empty());
-        for (uint32_t lane = 0; lane < 64; ++lane)
+        for (uint32_t lane = 0; lane < 64; ++lane) {
           EXPECT_EQ(fx.cu->read_vgpr(fx.vgpr_base(), lane), 0xA5A5A5A5u);
+        }
       }
       EXPECT_EQ(operand->delegate(), nullptr);
       EXPECT_EQ(intermediate.delegate(), nullptr);
@@ -492,8 +498,9 @@ TEST(RegisterAccessTest, ModuleBindingRejectsMissingBackendBeforeEffects) {
     ScopedIsaExecutionBackend model_scope(nullptr);
     missing.emplace(32, cdna4::OperandType::OPR_VGPR, 1);
   }
-  for (uint32_t lane = 0; lane < 64; ++lane)
+  for (uint32_t lane = 0; lane < 64; ++lane) {
     fx.cu->write_vgpr(fx.vgpr_base(), lane, 0xA5A5A5A5u);
+  }
   struct Context {
     Instruction *instruction;
     Wavefront *wave;
@@ -509,8 +516,9 @@ TEST(RegisterAccessTest, ModuleBindingRejectsMissingBackendBeforeEffects) {
             InstructionExecutionError::MissingExecutionBackend);
   EXPECT_TRUE(fx.plugin->reads.empty());
   EXPECT_TRUE(fx.plugin->writes.empty());
-  for (uint32_t lane = 0; lane < 64; ++lane)
+  for (uint32_t lane = 0; lane < 64; ++lane) {
     EXPECT_EQ(fx.cu->read_vgpr(fx.vgpr_base(), lane), 0xA5A5A5A5u);
+  }
   EXPECT_EQ(instruction->src_operand(0)->delegate(), nullptr);
   EXPECT_FALSE(ScopedOperandDelegate::active());
   EXPECT_EQ(dlclose(module), 0);
@@ -636,6 +644,105 @@ TEST(RegisterAccessTest, SdwaStageSourceAppliesModifiersInSemanticFloatWidth) {
   EXPECT_EQ(RegisterAccess(*fx.wf).read_operand(*storage, 1).lane(0), 0x4000u);
 }
 
+TEST(RegisterAccessTest, UnobservedScalarReadReturnsStorageWithoutObservation) {
+  Fixture fx;
+  ASSERT_NE(fx.wf, nullptr);
+  fx.cu->write_sgpr(fx.sgpr_base() + 5, 0x1234'5678u);
+  fx.wf->set_ttmp(2, 0x9ABC'DEF0u);
+  fx.wf->set_vcc_raw(0x0BAD'F00D'0000'0001ull);
+
+  const RegisterAccess regs(*fx.wf);
+  const ScalarRegisterRange sgprs{ScalarRegisterStorage::SGPR, /*index=*/4, /*width=*/2};
+  const ScalarRegisterRange ttmp{ScalarRegisterStorage::TTMP, /*index=*/2, /*width=*/1};
+  const ScalarRegisterRange vcc{ScalarRegisterStorage::VCC, /*index=*/0, /*width=*/2};
+  EXPECT_EQ(regs.read_scalar_unobserved(sgprs, /*offset=*/1),
+            std::optional<uint32_t>{0x1234'5678u});
+  EXPECT_EQ(regs.read_scalar_unobserved(ttmp), std::optional<uint32_t>{0x9ABC'DEF0u});
+  EXPECT_EQ(regs.read_scalar_unobserved(vcc, /*offset=*/1), std::optional<uint32_t>{0x0BAD'F00Du});
+  EXPECT_EQ(regs.read_scalar_unobserved(ttmp, /*offset=*/1), std::nullopt);
+
+  EXPECT_TRUE(fx.plugin->sgpr_reads.empty());
+  EXPECT_TRUE(fx.plugin->scalar_reads.empty());
+}
+
+// VCC and FLAT_SCRATCH read the same through the unobserved path as through
+// the wave's accessors, whether they alias physical SGPRs (CDNA3, when inside
+// the wave's SGPR block) or are wave state (CDNA5, or past the block). M0 and
+// EXEC read from the wave.
+TEST(RegisterAccessTest, UnobservedScalarReadMatchesWaveScalarState) {
+  struct Case {
+    rocjitsu::IsaFamily arch;
+    uint32_t requested_sgprs;
+    bool vcc_backed;
+    bool scratch_backed;
+  };
+  // CDNA3 places VCC at alias_end - 2 and FLAT_SCRATCH at alias_end - 6. With
+  // 104 requested SGPRs, alias_end is 108, so VCC (s106) is past the 104-SGPR
+  // block and FLAT_SCRATCH (s102) is inside it.
+  for (const Case test : {Case{rocjitsu::IsaFamily::Cdna3, 32, true, true},
+                          Case{rocjitsu::IsaFamily::Cdna3, kSgprsPerWave, false, true},
+                          Case{rocjitsu::IsaFamily::Cdna5, kSgprsPerWave, false, false}}) {
+    SCOPED_TRACE(test.arch);
+    SCOPED_TRACE(test.requested_sgprs);
+    Fixture fx(test.arch, test.requested_sgprs);
+    ASSERT_NE(fx.wf, nullptr);
+    constexpr uint64_t kVcc = 0x0BAD'F00D'1234'5678ull;
+    constexpr uint64_t kScratch = 0x0000'7FFF'9ABC'DEF0ull;
+    fx.wf->set_vcc_raw(kVcc);
+    fx.wf->set_scratch_base(kScratch);
+    fx.wf->set_m0(0x5555'AAAAu);
+    ASSERT_EQ(fx.wf->vcc(), kVcc);
+    ASSERT_EQ(fx.wf->scratch_base(), kScratch);
+    if (test.arch == rocjitsu::IsaFamily::Cdna3) {
+      const uint32_t end = cdna3::sgpr_alias_end(test.requested_sgprs);
+      EXPECT_EQ(fx.cu->read_sgpr_storage(fx.sgpr_base() + cdna3::vcc_base(end)) == 0x1234'5678u,
+                test.vcc_backed);
+      EXPECT_EQ(fx.cu->read_sgpr_storage(fx.sgpr_base() + cdna3::flat_scratch_base(end)) ==
+                    0x9ABC'DEF0u,
+                test.scratch_backed);
+    }
+
+    const RegisterAccess regs(*fx.wf);
+    const ScalarRegisterRange vcc{ScalarRegisterStorage::VCC, /*index=*/0, /*width=*/2};
+    const ScalarRegisterRange scratch{ScalarRegisterStorage::FLAT_SCRATCH, /*index=*/0,
+                                      /*width=*/2};
+    const ScalarRegisterRange m0{ScalarRegisterStorage::M0, /*index=*/0, /*width=*/1};
+    const ScalarRegisterRange exec{ScalarRegisterStorage::EXEC, /*index=*/0, /*width=*/2};
+    EXPECT_EQ(regs.read_scalar_unobserved(vcc), std::optional<uint32_t>{0x1234'5678u});
+    EXPECT_EQ(regs.read_scalar_unobserved(vcc, /*offset=*/1),
+              std::optional<uint32_t>{0x0BAD'F00Du});
+    EXPECT_EQ(regs.read_scalar_unobserved(scratch), std::optional<uint32_t>{0x9ABC'DEF0u});
+    EXPECT_EQ(regs.read_scalar_unobserved(scratch, /*offset=*/1),
+              std::optional<uint32_t>{0x0000'7FFFu});
+    EXPECT_EQ(regs.read_scalar_unobserved(m0), std::optional<uint32_t>{0x5555'AAAAu});
+    EXPECT_EQ(regs.read_scalar_unobserved(exec),
+              std::optional<uint32_t>{static_cast<uint32_t>(fx.wf->exec_raw())});
+    EXPECT_EQ(regs.read_scalar_unobserved(exec, /*offset=*/1),
+              std::optional<uint32_t>{static_cast<uint32_t>(fx.wf->exec_raw() >> 32)});
+    EXPECT_TRUE(fx.plugin->sgpr_reads.empty());
+    EXPECT_TRUE(fx.plugin->scalar_reads.empty());
+  }
+}
+
+// An SGPR range the wave does not own is not read, as an unowned write is
+// dropped by write_scalar_unobserved(), even when the neighbouring wave holds a
+// nonzero value there.
+TEST(RegisterAccessTest, UnobservedScalarReadRejectsUnownedSgprs) {
+  Fixture fx(rocjitsu::IsaFamily::Cdna4, kSgprsPerWave, /*wavefront_slots=*/2);
+  ASSERT_NE(fx.wf, nullptr);
+  auto *adjacent_wave = fx.cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0, kSgprsPerWave, kVgprsPerWave);
+  ASSERT_NE(adjacent_wave, nullptr);
+  constexpr uint32_t kAdjacentSentinel = 0x1234'5678u;
+  fx.cu->write_sgpr(adjacent_wave->sgpr_alloc().base, kAdjacentSentinel);
+
+  const RegisterAccess regs(*fx.wf);
+  const auto offset = static_cast<uint16_t>(adjacent_wave->sgpr_alloc().base - fx.sgpr_base());
+  const ScalarRegisterRange neighbour{ScalarRegisterStorage::SGPR, offset, /*width=*/1};
+  EXPECT_EQ(fx.cu->read_sgpr_storage(adjacent_wave->sgpr_alloc().base), kAdjacentSentinel);
+  EXPECT_EQ(regs.read_scalar_unobserved(neighbour), std::nullopt);
+  EXPECT_TRUE(fx.plugin->sgpr_reads.empty());
+}
+
 TEST(RegisterAccessTest, ReadRegionObservesAllRegistersAndReturnsLaneSpans) {
   Fixture fx;
   ASSERT_NE(fx.wf, nullptr);
@@ -706,7 +813,7 @@ TEST(RegisterAccessTest, ReadRegionCopiesDwordsToLaneMajorStorage) {
 #pragma GCC diagnostic ignored "-Wstringop-overflow"
 #endif
 TEST(RegisterAccessTest, ReadRegionRejectsInvalidLaneMajorCopyBounds) {
-  Fixture fx(ROCJITSU_CODE_ARCH_CDNA4, kSgprsPerWave, /*wavefront_slots=*/1, kVgprsPerWave,
+  Fixture fx(rocjitsu::IsaFamily::Cdna4, kSgprsPerWave, /*wavefront_slots=*/1, kVgprsPerWave,
              /*wave_size=*/32);
   ASSERT_NE(fx.wf, nullptr);
   ASSERT_EQ(fx.wf->wf_size(), 32u);
@@ -736,7 +843,7 @@ TEST(RegisterAccessTest, ReadRegionRejectsInvalidLaneMajorCopyBounds) {
 #endif
 
 TEST(RegisterAccessTest, ReadRegionTraversesAndCopiesLogicalRegisterRange) {
-  for (const auto arch : {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+  for (const auto arch : {rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Cdna5}) {
     Fixture fx(arch);
     ASSERT_NE(fx.wf, nullptr);
     SCOPED_TRACE(arch);
@@ -790,8 +897,9 @@ TEST(RegisterAccessTest, WriteRegionObservesWritesAndHonorsLaneMask) {
   Fixture fx;
   ASSERT_NE(fx.wf, nullptr);
   uint32_t base = fx.vgpr_base();
-  for (uint32_t lane = 0; lane < fx.wf->wf_size(); ++lane)
+  for (uint32_t lane = 0; lane < fx.wf->wf_size(); ++lane) {
     fx.cu->write_vgpr(base + 7, lane, 0xAAAA0000u | lane);
+  }
 
   RegisterAccess regs(*fx.cu);
   auto region = regs.write_vgpr_region(base + 7, /*reg_count=*/1, /*lane_mask=*/0x5);
@@ -829,24 +937,26 @@ TEST(RegisterAccessTest, WriteRegionStoresOnlyObservedBytes) {
 
 TEST(RegisterAccessTest, WriteRegionSetLanesMatchesScalarWritesAndObservesEachRegisterOnce) {
   for (uint32_t wave_size : {32u, 64u}) {
-    Fixture fx(ROCJITSU_CODE_ARCH_RDNA4, kSgprsPerWave, 1, kVgprsPerWave, wave_size);
+    Fixture fx(rocjitsu::IsaFamily::Rdna4, kSgprsPerWave, 1, kVgprsPerWave, wave_size);
     ASSERT_NE(fx.wf, nullptr);
     const uint64_t full_mask = util::mask<uint64_t>(static_cast<int>(wave_size));
     const uint32_t bulk_base = fx.vgpr_base() + 31;
     const uint32_t scalar_base = fx.vgpr_base() + 63;
     std::vector<uint32_t> values(wave_size);
-    for (uint32_t lane = 0; lane < wave_size; ++lane)
+    for (uint32_t lane = 0; lane < wave_size; ++lane) {
       values[lane] = 0x12345600u + lane;
+    }
 
     RegisterAccess regs(*fx.wf);
     for (uint64_t mask : {uint64_t{0}, full_mask, full_mask & uint64_t{0xaaaaaaaaaaaaaaaa},
                           uint64_t{1} << (wave_size - 1)}) {
       for (uint8_t byte_mask = 0; byte_mask < 16; ++byte_mask) {
-        for (uint32_t reg = 0; reg < 2; ++reg)
+        for (uint32_t reg = 0; reg < 2; ++reg) {
           for (uint32_t lane = 0; lane < wave_size; ++lane) {
             fx.cu->write_vgpr(bulk_base + reg, lane, 0xAABBCC00u + lane);
             fx.cu->write_vgpr(scalar_base + reg, lane, 0xAABBCC00u + lane);
           }
+        }
         fx.plugin->writes.clear();
         auto bulk = regs.write_vgpr_region(bulk_base, 2, mask, byte_mask);
         bulk.set_lanes(0, values);
@@ -859,19 +969,20 @@ TEST(RegisterAccessTest, WriteRegionSetLanesMatchesScalarWritesAndObservesEachRe
         EXPECT_TRUE(fx.plugin->reads.empty());
 
         auto scalar = regs.write_vgpr_region(scalar_base, 2, mask, byte_mask);
-        for (uint32_t reg = 0; reg < 2; ++reg)
+        for (uint32_t reg = 0; reg < 2; ++reg) {
           for (uint32_t lane = 0; lane < wave_size; ++lane) {
             scalar.set_lane(reg, lane, values[lane]);
             EXPECT_EQ(fx.cu->read_vgpr_storage(bulk_base + reg, lane),
                       fx.cu->read_vgpr_storage(scalar_base + reg, lane));
           }
+        }
       }
     }
   }
 }
 
 TEST(RegisterAccessTest, WriteRegionSetLanesSnapshotsOverlappingInput) {
-  Fixture fx(ROCJITSU_CODE_ARCH_RDNA4);
+  Fixture fx(rocjitsu::IsaFamily::Rdna4);
   ASSERT_NE(fx.wf, nullptr);
   ASSERT_EQ(fx.wf->wf_size(), 32u);
   const uint32_t reg = fx.vgpr_base() + 7;
@@ -905,9 +1016,10 @@ TEST(RegisterAccessTest, WriteRegionSetLanesSnapshotsOverlappingInput) {
         for (uint32_t lane = 0; lane < 64; ++lane) {
           EXPECT_EQ(fx.cu->read_vgpr_storage(reg - 1, lane), seed(static_cast<int32_t>(lane) - 64));
           uint32_t expected = seed(static_cast<int32_t>(lane));
-          if (lane < 32 && (mask & (uint64_t{1} << lane)))
+          if (lane < 32 && (mask & (uint64_t{1} << lane))) {
             expected =
                 (expected & ~bit_mask) | (seed(static_cast<int32_t>(lane) + offset) & bit_mask);
+          }
           EXPECT_EQ(fx.cu->read_vgpr_storage(reg, lane), expected);
         }
       }
@@ -916,7 +1028,7 @@ TEST(RegisterAccessTest, WriteRegionSetLanesSnapshotsOverlappingInput) {
 }
 
 TEST(RegisterAccessTest, WriteRegionSetLanesRespectsDeniedOwnership) {
-  Fixture fx(ROCJITSU_CODE_ARCH_CDNA4, kSgprsPerWave, 2);
+  Fixture fx(rocjitsu::IsaFamily::Cdna4, kSgprsPerWave, 2);
   ASSERT_NE(fx.wf, nullptr);
   auto *other = fx.cu->dispatch_wf(1, 0, kSgprsPerWave, kVgprsPerWave);
   ASSERT_NE(other, nullptr);
@@ -931,31 +1043,6 @@ TEST(RegisterAccessTest, WriteRegionSetLanesRespectsDeniedOwnership) {
   EXPECT_EQ(fx.cu->read_vgpr_storage(boundary, 0), 0x1234u);
   EXPECT_EQ(fx.cu->read_vgpr_storage(boundary + 1, 0), 0x5678u);
   EXPECT_TRUE(fx.plugin->writes.empty());
-}
-
-TEST(RegisterAccessTest, WriteRegionSetLanesRejectsWrongSpanSize) {
-  for (uint32_t wave_size : {32u, 64u}) {
-    Fixture fx(ROCJITSU_CODE_ARCH_RDNA4, kSgprsPerWave, 1, kVgprsPerWave, wave_size);
-    ASSERT_NE(fx.wf, nullptr);
-    const uint32_t reg = fx.vgpr_base() + 5;
-    const uint64_t full_mask = util::mask<uint64_t>(static_cast<int>(wave_size));
-    const std::vector<uint32_t> values(wave_size + 1, 0x12345678u);
-    RegisterAccess regs(*fx.wf);
-    // The full-mask path copies whole registers; the masked path writes lane by lane.
-    for (uint64_t mask : {full_mask, full_mask & uint64_t{0xaaaaaaaaaaaaaaaa}}) {
-      for (uint8_t byte_mask : {uint8_t{0xF}, uint8_t{0x5}}) {
-        for (size_t size : {size_t{wave_size} - 1, size_t{wave_size} + 1}) {
-          for (uint32_t lane = 0; lane < 64; ++lane)
-            fx.cu->write_vgpr(reg, lane, 0xAABB0000u + lane);
-          auto writes = regs.write_vgpr_region(reg, 1, mask, byte_mask);
-          EXPECT_THROW(writes.set_lanes(0, std::span<const uint32_t>(values.data(), size)),
-                       std::invalid_argument);
-          for (uint32_t lane = 0; lane < 64; ++lane)
-            EXPECT_EQ(fx.cu->read_vgpr_storage(reg, lane), 0xAABB0000u + lane);
-        }
-      }
-    }
-  }
 }
 
 TEST(RegisterAccessTest, ReadWriteRegionObservesThenAllowsWrites) {
@@ -1090,26 +1177,26 @@ TEST(ScalarOperandSelectorsTest, Classifies64BitRegisterSources) {
 }
 
 TEST(ScalarOperandSelectorsTest, SelectsM0AndNullLayoutByArchitecture) {
-  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+  for (rocjitsu::IsaFamily arch : {rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4}) {
     EXPECT_EQ(scalar_m0_selector(arch), kLegacyM0Selector);
     EXPECT_FALSE(scalar_selector_is_null(arch, kLegacyM0Selector));
     EXPECT_FALSE(scalar_selector_is_null(arch, kGfx10NullSelector));
   }
 
-  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
+  for (rocjitsu::IsaFamily arch : {rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2}) {
     EXPECT_EQ(scalar_m0_selector(arch), kLegacyM0Selector);
     EXPECT_TRUE(scalar_selector_is_null(arch, kGfx10NullSelector));
   }
 
-  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
-                              ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+  for (rocjitsu::IsaFamily arch : {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
+                                   rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5}) {
     EXPECT_EQ(scalar_m0_selector(arch), kModernM0Selector);
     EXPECT_TRUE(scalar_selector_is_null(arch, kModernNullSelector));
   }
 }
 
 TEST(ScalarOperandSelectorsTest, RejectsRangesThatCrossArchitecturalRegisterFiles) {
-  Fixture fx(ROCJITSU_CODE_ARCH_CDNA4);
+  Fixture fx(rocjitsu::IsaFamily::Cdna4);
   ASSERT_NE(fx.wf, nullptr);
   fx.wf->set_in_trap_handler(true); // Exercise the privileged TTMP storage and its range bounds.
 
@@ -1130,7 +1217,7 @@ TEST(ScalarOperandSelectorsTest, RejectsRangesThatCrossArchitecturalRegisterFile
 }
 
 TEST(ScalarOperandSelectorsTest, ResolvesSpecialScalarStorageByArchitecture) {
-  Fixture cdna4_fx(ROCJITSU_CODE_ARCH_CDNA4);
+  Fixture cdna4_fx(rocjitsu::IsaFamily::Cdna4);
   ASSERT_NE(cdna4_fx.wf, nullptr);
   cdna4_fx.wf->set_scratch_base(0x2222222211111111ull);
   cdna4_fx.wf->set_vcc_raw(0x4444444433333333ull);
@@ -1140,7 +1227,7 @@ TEST(ScalarOperandSelectorsTest, ResolvesSpecialScalarStorageByArchitecture) {
   EXPECT_EQ(read_scalar_selector64(*cdna4_fx.wf, kVccSelectorFirst), 0x4444444433333333ull);
   EXPECT_EQ(read_scalar_selector(*cdna4_fx.wf, kLegacyM0Selector), 0x55555555u);
 
-  Fixture rdna4_fx(ROCJITSU_CODE_ARCH_RDNA4, kSgprsPerWave, 1, kVgprsPerWave, 32);
+  Fixture rdna4_fx(rocjitsu::IsaFamily::Rdna4, kSgprsPerWave, 1, kVgprsPerWave, 32);
   ASSERT_NE(rdna4_fx.wf, nullptr);
   auto null_range =
       resolve_scalar_register_range(*rdna4_fx.wf, kModernNullSelector, kTtmpRegisterCount);
@@ -1151,7 +1238,7 @@ TEST(ScalarOperandSelectorsTest, ResolvesSpecialScalarStorageByArchitecture) {
 
 TEST(RegisterAccessTest, ScalarSelectedLaneReadRejectsAnotherWaveBlock) {
   constexpr uint32_t kSmallVgprBlock = 16;
-  Fixture fx(ROCJITSU_CODE_ARCH_RDNA4, kSgprsPerWave, /*wavefront_slots=*/2, kSmallVgprBlock,
+  Fixture fx(rocjitsu::IsaFamily::Rdna4, kSgprsPerWave, /*wavefront_slots=*/2, kSmallVgprBlock,
              /*wave_size=*/32);
   ASSERT_NE(fx.wf, nullptr);
   auto *adjacent_wave =
@@ -1213,7 +1300,7 @@ TEST(RegisterAccessTest, LanePair32PreservesRegisterPairsAndSplatsSingleWords) {
 }
 
 TEST(RegisterAccessTest, LanePair32ReadsGfx1250FlatScratchBase) {
-  Fixture fx(ROCJITSU_CODE_ARCH_CDNA5);
+  Fixture fx(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(fx.wf, nullptr);
 
   constexpr uint64_t kScratchBase = 0x7777777766666666ull;
@@ -1228,7 +1315,7 @@ TEST(RegisterAccessTest, LanePair32ReadsGfx1250FlatScratchBase) {
 }
 
 TEST(RegisterAccessTest, ReplicatedScalarPairObservesOnlyOneScalarWord) {
-  Fixture fx(ROCJITSU_CODE_ARCH_CDNA5);
+  Fixture fx(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(fx.wf, nullptr);
   RegisterAccess regs(*fx.wf);
   fx.cu->write_sgpr(fx.sgpr_base() + 8, 0x11223344u);
@@ -1275,7 +1362,7 @@ TEST(RegisterAccessTest, CuBoundSgprWritesCannotBypassObservation) {
 }
 
 TEST(RegisterAccessTest, Sgpr64AccessDoesNotCrossPhysicalBlockBoundary) {
-  Fixture fx(ROCJITSU_CODE_ARCH_CDNA4, kSgprsPerWave, /*wavefront_slots=*/2);
+  Fixture fx(rocjitsu::IsaFamily::Cdna4, kSgprsPerWave, /*wavefront_slots=*/2);
   ASSERT_NE(fx.wf, nullptr);
   auto *adjacent_wave = fx.cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0, kSgprsPerWave, kVgprsPerWave);
   ASSERT_NE(adjacent_wave, nullptr);
@@ -1300,7 +1387,7 @@ TEST(RegisterAccessTest, Sgpr64AccessDoesNotCrossPhysicalBlockBoundary) {
 }
 
 TEST(RegisterAccessTest, SgprReadRegionRejectsWholeRangeBeforeCallbacks) {
-  Fixture fx(ROCJITSU_CODE_ARCH_CDNA4, kSgprsPerWave, /*wavefront_slots=*/2);
+  Fixture fx(rocjitsu::IsaFamily::Cdna4, kSgprsPerWave, /*wavefront_slots=*/2);
   ASSERT_NE(fx.wf, nullptr);
   auto *adjacent_wave = fx.cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0, kSgprsPerWave, kVgprsPerWave);
   ASSERT_NE(adjacent_wave, nullptr);
@@ -1351,7 +1438,7 @@ TEST(RegisterAccessTest, Scalar64OperandAndExplicitMaskWritesAreAtomic) {
 
 TEST(RegisterAccessTest, Gfx10NullDiscardsCarryDestinations) {
   // CLR's gfx1030 pitched-copy kernel uses V_MAD_U64_U32 with SDST=NULL.
-  for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
+  for (const auto arch : {rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2}) {
     Fixture fx(arch);
     ASSERT_NE(fx.wf, nullptr);
     fx.wf->set_exec_raw(0x123456789abcdef0ull);
@@ -1368,7 +1455,7 @@ TEST(RegisterAccessTest, Gfx10NullDiscardsCarryDestinations) {
 }
 
 TEST(RegisterAccessTest, Gfx10TtmpWritesCheckPrivilegeAtIssue) {
-  Fixture fx(ROCJITSU_CODE_ARCH_RDNA2);
+  Fixture fx(rocjitsu::IsaFamily::Rdna2);
   ASSERT_NE(fx.wf, nullptr);
   constexpr auto selector = kTtmpSelectorFirst;
   fx.wf->set_ttmp(0, 0x12345678);
@@ -1434,7 +1521,7 @@ TEST(RegisterAccessTest, IssuedScalarReturningAtomicChecksTtmpWritePermission) {
 
   for (bool privileged : {false, true}) {
     SCOPED_TRACE(privileged);
-    Fixture fx(ROCJITSU_CODE_ARCH_CDNA2);
+    Fixture fx(rocjitsu::IsaFamily::Cdna2);
     ASSERT_NE(fx.wf, nullptr);
     ASSERT_TRUE(fx.plugin_group->add(std::make_unique<ChangePrivilege>()));
     fx.cu->set_plugin_group(fx.plugin_group);
@@ -1472,7 +1559,7 @@ TEST(RegisterAccessTest, ScalarLoadWaitsFollowTtmpWritePrivilege) {
     SCOPED_TRACE(testing::Message()
                  << "consumer opcode " << *consumer.begin() << ", load privileged "
                  << load_privileged << ", consumer privileged " << consumer_privileged);
-    Fixture fx(ROCJITSU_CODE_ARCH_RDNA2, kSgprsPerWave, 1, 16, 64);
+    Fixture fx(rocjitsu::IsaFamily::Rdna2, kSgprsPerWave, 1, 16, 64);
     ASSERT_NE(fx.wf, nullptr);
     fx.l2.set_backing_memory(&fx.gpu_mem);
     fx.wf->pc = code;
@@ -1535,7 +1622,8 @@ TEST(RegisterAccessTest, CdnaMemoryRequiresTheWholeReturningDestination) {
   constexpr uint64_t code = 0x1000;
   constexpr uint64_t data = 0x4000;
   constexpr uint32_t sentinel = 0xcafecafe;
-  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+  for (auto arch :
+       {rocjitsu::IsaFamily::Cdna2, rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4}) {
     SCOPED_TRACE(arch);
     for (bool acc : {false, true}) {
       SCOPED_TRACE(acc);
@@ -1552,13 +1640,15 @@ TEST(RegisterAccessTest, CdnaMemoryRequiresTheWholeReturningDestination) {
           fx.wf->debug_write_sgpr(5, 0);
           fx.cu->write_vgpr(fx.vgpr_base(), 0, 0);
           fx.cu->write_vgpr(fx.vgpr_base() + (acc ? amdgpu::ACC_VGPR_OFFSET : 0) + 1, 0, 1);
-          for (uint32_t i = 0; i < 4; ++i)
+          for (uint32_t i = 0; i < 4; ++i) {
             fx.gpu_mem.write32(data + 4 * i, 5 + i);
+          }
           const uint32_t dst = atomic ? (in_range ? 7 : 8) : (in_range ? 4 : 6);
           const uint32_t words = atomic ? 1 : 4;
           const uint32_t result = dst + (acc ? amdgpu::ACC_VGPR_OFFSET : 0);
-          for (uint32_t i = 0; i < words; ++i)
+          for (uint32_t i = 0; i < words; ++i) {
             fx.cu->write_vgpr(fx.vgpr_base() + result + i, 0, sentinel);
+          }
           // global_load_dwordx4 or global_atomic_add (glc), followed by s_waitcnt vmcnt(0).
           fx.gpu_mem.write32(code, atomic ? 0xdd098000 : 0xdc5c8000);
           fx.gpu_mem.write32(code + 4,
@@ -1566,9 +1656,10 @@ TEST(RegisterAccessTest, CdnaMemoryRequiresTheWholeReturningDestination) {
           fx.gpu_mem.write32(code + 8, 0xbf8c0f70);
           ASSERT_TRUE(fx.cu->step());
           ASSERT_TRUE(fx.cu->step());
-          for (uint32_t i = 0; i < words; ++i)
+          for (uint32_t i = 0; i < words; ++i) {
             EXPECT_EQ(fx.cu->read_vgpr_storage(fx.vgpr_base() + result + i, 0),
                       in_range ? 5 + i : sentinel);
+          }
           fx.cu->l1_vector().flush_all();
           fx.l2.flush_all();
           EXPECT_EQ(fx.gpu_mem.read32(data), atomic && in_range ? 6u : 5u);
@@ -1579,17 +1670,19 @@ TEST(RegisterAccessTest, CdnaMemoryRequiresTheWholeReturningDestination) {
 }
 
 TEST(RegisterAccessTest, CdnaValuAllocationRedirectsSourcesAndSuppressesEveryResult) {
-  for (const auto arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
-                          ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+  for (const auto arch : {rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2,
+                          rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4}) {
     SCOPED_TRACE(arch);
     for (bool split : {false, true}) {
-      if (split && arch == ROCJITSU_CODE_ARCH_CDNA1)
+      if (split && arch == rocjitsu::IsaFamily::Cdna1) {
         continue;
+      }
       SCOPED_TRACE(split);
       Fixture fx(arch, kSgprsPerWave, 1, 64, 64, split ? 16 : 8);
       ASSERT_NE(fx.wf, nullptr);
-      if (split)
+      if (split) {
         fx.wf->set_accum_vgpr_base(8);
+      }
       constexpr uint64_t code = 0x1000;
       fx.wf->pc = code;
       fx.wf->set_exec(1);
@@ -1609,10 +1702,56 @@ TEST(RegisterAccessTest, CdnaValuAllocationRedirectsSourcesAndSuppressesEveryRes
   }
 }
 
+// The VALU discard decision follows the ordinary VGPR bank for every destination register,
+// including a two-word result that crosses the end of the allocation, a destination moved by
+// GPR indexing, and an allocation split by an accumulator bank.
+TEST(RegisterAccessTest, CdnaValuDiscardFollowsTheBankForEveryDestinationRegister) {
+  constexpr uint32_t kOrdinaryVgprs = 8;
+  for (const auto arch :
+       {rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4}) {
+    SCOPED_TRACE(arch);
+    auto decoder = Decoder::create(arch);
+    ASSERT_NE(decoder, nullptr);
+    for (bool split : {false, true}) {
+      if (split && arch == rocjitsu::IsaFamily::Cdna1) {
+        continue;
+      }
+      SCOPED_TRACE(split);
+      Fixture fx(arch, kSgprsPerWave, 1, 64, 64, split ? 2 * kOrdinaryVgprs : kOrdinaryVgprs);
+      ASSERT_NE(fx.wf, nullptr);
+      if (split) {
+        fx.wf->set_accum_vgpr_base(kOrdinaryVgprs);
+      }
+      for (uint32_t index : {0u, 3u}) {
+        SCOPED_TRACE(index);
+        // M0[15:12] bit 3 applies the M0[7:0] index to the destination.
+        fx.wf->set_mode_raw(index ? Wavefront::GPR_IDX_EN_BIT : 0u);
+        fx.wf->set_m0(index | (0x8u << 12));
+        ASSERT_EQ(fx.wf->gpr_idx_en(), index != 0);
+        for (uint32_t reg = 0; reg < 256; ++reg) {
+          SCOPED_TRACE(reg);
+          const uint32_t mov[] = {0x7e000300u | (reg << 17), 0}; // v_mov_b32 vREG, v0
+          auto one_word = decoder->decode(mov);
+          ASSERT_TRUE(one_word.succeeded());
+          ASSERT_EQ(std::string_view(one_word.value()->mnemonic()), "v_mov_b32_e32");
+          EXPECT_EQ(fx.wf->discards_valu_result(*one_word.value()),
+                    reg + index + 1 > kOrdinaryVgprs);
+          const uint32_t add[] = {0xd2800000u | reg, 0x00020100u}; // v_add_f64 vREG, v0, v0
+          auto two_words = decoder->decode(add);
+          ASSERT_TRUE(two_words.succeeded());
+          ASSERT_EQ(std::string_view(two_words.value()->mnemonic()), "v_add_f64");
+          EXPECT_EQ(fx.wf->discards_valu_result(*two_words.value()),
+                    reg + index + 2 > kOrdinaryVgprs);
+        }
+      }
+    }
+  }
+}
+
 TEST(RegisterAccessTest, OutOfRangeScalarWritesDoNotAcquirePendingDestinations) {
   constexpr uint64_t code = 0x1000, data = 0x4000;
-  for (const auto arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
-                          ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+  for (const auto arch : {rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2,
+                          rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4}) {
     SCOPED_TRACE(arch);
     for (unsigned count : {16u, 24u, 104u}) {
       for (unsigned dst : {9u, 26u, 40u}) {
@@ -1632,8 +1771,9 @@ TEST(RegisterAccessTest, OutOfRangeScalarWritesDoNotAcquirePendingDestinations) 
             fx.gpu_mem.write32(data, 17);
             fx.gpu_mem.write32(code, 0xc0020002u | (dst << 6)); // s_load_dword sdst, s[4:5], 0
             fx.gpu_mem.write32(code + 4, 0);
-            if (waited)
+            if (waited) {
               fx.gpu_mem.write32(code + 8, 0xbf8cc07f); // s_waitcnt lgkmcnt(0)
+            }
             const unsigned encoded_dst = indexed ? dst - 1 : dst;
             const uint32_t mov = indexed ? 0xbe802c07u : 0xbe800007u;
             fx.gpu_mem.write32(code + (waited ? 12 : 8), mov | (encoded_dst << 16));
@@ -1673,7 +1813,7 @@ TEST(RegisterAccessTest, UnallocatedScalarSourceWaitsForSgprZero) {
       for (bool wait : {false, true}) {
         SCOPED_TRACE(testing::Message() << "sgprs=" << count << ", wait=" << wait
                                         << ", opcode=" << opcode << ", load word=" << load_word);
-        Fixture fx(ROCJITSU_CODE_ARCH_CDNA2, count);
+        Fixture fx(rocjitsu::IsaFamily::Cdna2, count);
         ASSERT_NE(fx.wf, nullptr);
         fx.l2.set_backing_memory(&fx.gpu_mem);
         fx.wf->pc = code;
@@ -1692,12 +1832,14 @@ TEST(RegisterAccessTest, UnallocatedScalarSourceWaitsForSgprZero) {
         fx.gpu_mem.write32(data, loaded);
         fx.gpu_mem.write32(code, 0xc0020002 | (load_word << 6)); // s_load_dword s0 or s1, s[4:5], 0
         fx.gpu_mem.write32(code + 4, 0);
-        if (wait)
+        if (wait) {
           fx.gpu_mem.write32(code + 8, 0xbf8cc07f); // s_waitcnt lgkmcnt(0)
+        }
         const auto consumer = code + (wait ? 12 : 8);
         fx.gpu_mem.write32(consumer, opcode);
-        if (mask)
+        if (mask) {
           fx.gpu_mem.write32(consumer + 4, 0x00a20b04);
+        }
         ASSERT_TRUE(fx.cu->step());
         if (wait) {
           ASSERT_TRUE(fx.cu->step());
@@ -1734,7 +1876,7 @@ TEST(RegisterAccessTest, Gfx942WaitsTrackNamedAndBackingScalarRegisters) {
                             {14, 12}}) {
     for (bool wait : {false, true}) {
       SCOPED_TRACE(testing::Message() << "load=" << load << ", read=" << read << ", wait=" << wait);
-      Fixture fx(ROCJITSU_CODE_ARCH_CDNA3, 16);
+      Fixture fx(rocjitsu::IsaFamily::Cdna3, 16);
       ASSERT_NE(fx.wf, nullptr);
       fx.l2.set_backing_memory(&fx.gpu_mem);
       fx.wf->pc = code;
@@ -1744,8 +1886,9 @@ TEST(RegisterAccessTest, Gfx942WaitsTrackNamedAndBackingScalarRegisters) {
       fx.gpu_mem.write32(data, loaded);
       fx.gpu_mem.write32(code, 0xc0020002 | (load << 6)); // s_load_dword SDATA, s[4:5], 0
       fx.gpu_mem.write32(code + 4, 0);
-      if (wait)
-        fx.gpu_mem.write32(code + 8, 0xbf8cc07f);                    // s_waitcnt lgkmcnt(0)
+      if (wait) {
+        fx.gpu_mem.write32(code + 8, 0xbf8cc07f); // s_waitcnt lgkmcnt(0)
+      }
       fx.gpu_mem.write32(code + (wait ? 12 : 8), 0xbe860000 | read); // s_mov_b32 s6, SSRC0
       ASSERT_TRUE(fx.cu->step());
       if (wait) {
@@ -1760,7 +1903,7 @@ TEST(RegisterAccessTest, Gfx942WaitsTrackNamedAndBackingScalarRegisters) {
 
 TEST(RegisterAccessTest, DeferredScalarLoadChecksTtmpDependenciesAtIssuePrivilege) {
   for (auto arch :
-       {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5}) {
+       {rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5}) {
     Fixture fx(arch);
     ASSERT_NE(fx.wf, nullptr);
     auto &wave = *fx.wf;
@@ -1772,7 +1915,7 @@ TEST(RegisterAccessTest, DeferredScalarLoadChecksTtmpDependenciesAtIssuePrivileg
     fx.gpu_mem.write32(address, payload);
     // S_LOAD_DWORD / S_LOAD_B32 ttmp2, ttmp[0:1], 0.
     const auto words =
-        arch == ROCJITSU_CODE_ARCH_CDNA4
+        arch == rocjitsu::IsaFamily::Cdna4
             ? cdna4::build_smem(cdna4::kSLoadDwordSmem, {.sbase = 54, .sdata = 110})
             : rdna3::build_smem(rdna3::kSLoadB32Smem, {.sbase = 54, .sdata = 110, .soffset = 124});
     unsigned hazards = 0;
@@ -1817,7 +1960,7 @@ TEST(RegisterAccessTest, DeferredScalarLoadChecksTtmpDependenciesAtIssuePrivileg
 }
 
 TEST(RegisterAccessTest, Vgpr64AccessRequiresOneOwnerForCompleteRange) {
-  Fixture fx(ROCJITSU_CODE_ARCH_CDNA4, kSgprsPerWave, /*wavefront_slots=*/2);
+  Fixture fx(rocjitsu::IsaFamily::Cdna4, kSgprsPerWave, /*wavefront_slots=*/2);
   ASSERT_NE(fx.wf, nullptr);
   auto *adjacent_wave = fx.cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0, kSgprsPerWave, kVgprsPerWave);
   ASSERT_NE(adjacent_wave, nullptr);
@@ -1846,7 +1989,7 @@ TEST(RegisterAccessTest, Vgpr64AccessRequiresOneOwnerForCompleteRange) {
 
 TEST(RegisterAccessTest, D16XyzStoreRequiresOneOwnerForBothVgprs) {
   constexpr uint32_t vgprs = 32;
-  Fixture fx(ROCJITSU_CODE_ARCH_RDNA4, kSgprsPerWave, /*wavefront_slots=*/2, vgprs);
+  Fixture fx(rocjitsu::IsaFamily::Rdna4, kSgprsPerWave, /*wavefront_slots=*/2, vgprs);
   ASSERT_NE(fx.wf, nullptr);
   auto *neighbor = fx.cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0, kSgprsPerWave, vgprs);
   ASSERT_NE(neighbor, nullptr);
@@ -1860,7 +2003,7 @@ TEST(RegisterAccessTest, D16XyzStoreRequiresOneOwnerForBothVgprs) {
   fx.cu->write_vgpr(fx.vgpr_base() + 31, 0, 0x00440033);
   fx.cu->write_vgpr(neighbor->vgpr_alloc().base, 0, 0x00660055);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Rdna4);
   ASSERT_NE(decoder, nullptr);
   auto store = [&](uint8_t vdata, std::array<uint8_t, 3> xyz) {
     const auto words = rdna4::build_vbuffer(
@@ -1873,8 +2016,9 @@ TEST(RegisterAccessTest, D16XyzStoreRequiresOneOwnerForBothVgprs) {
     ASSERT_NE(state, nullptr);
     ASSERT_EQ(state->lane_mask, 1u);
     ASSERT_GE(state->store_data.size(), xyz.size());
-    for (size_t i = 0; i < xyz.size(); ++i)
+    for (size_t i = 0; i < xyz.size(); ++i) {
       EXPECT_EQ(state->store_data[i], xyz[i]);
+    }
   };
 
   store(30, {0x11, 0x22, 0x33});
@@ -1890,7 +2034,7 @@ TEST(RegisterAccessTest, D16XyzStoreRequiresOneOwnerForBothVgprs) {
 }
 
 TEST(RegisterAccessTest, DeniedMultiRegisterReadRegionReturnsBoundedZeros) {
-  Fixture fx(ROCJITSU_CODE_ARCH_CDNA4, kSgprsPerWave, /*wavefront_slots=*/2);
+  Fixture fx(rocjitsu::IsaFamily::Cdna4, kSgprsPerWave, /*wavefront_slots=*/2);
   ASSERT_NE(fx.wf, nullptr);
   auto *adjacent_wave = fx.cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0, kSgprsPerWave, kVgprsPerWave);
   ASSERT_NE(adjacent_wave, nullptr);
@@ -1901,16 +2045,18 @@ TEST(RegisterAccessTest, DeniedMultiRegisterReadRegionReturnsBoundedZeros) {
 
   std::vector<uint32_t> copied(2 * fx.wf->wf_size(), 0xA5A5A5A5u);
   ASSERT_TRUE((region.copy_to(copied)).succeeded());
-  for (uint32_t value : copied)
+  for (uint32_t value : copied) {
     EXPECT_EQ(value, 0u);
+  }
 
   uint32_t visited = 0;
   ASSERT_TRUE(region
                   .for_each([&](std::span<const uint32_t> lanes) {
                     ++visited;
                     ASSERT_EQ(lanes.size(), fx.wf->wf_size());
-                    for (uint32_t value : lanes)
+                    for (uint32_t value : lanes) {
                       EXPECT_EQ(value, 0u);
+                    }
                   })
                   .succeeded());
   EXPECT_EQ(visited, 2u);
@@ -1949,7 +2095,7 @@ TEST(RegisterAccessTest, ZeroLaneMaskDoesNotMeanOwnershipDenial) {
 
 TEST(RegisterAccessTest, ExplicitWaveSgprAccessUsesReservedPhysicalBlock) {
   constexpr uint32_t kRequestedSgprs = 40;
-  Fixture fx(ROCJITSU_CODE_ARCH_CDNA4, kRequestedSgprs);
+  Fixture fx(rocjitsu::IsaFamily::Cdna4, kRequestedSgprs);
   ASSERT_NE(fx.wf, nullptr);
 
   const uint32_t compiler_temporary = fx.sgpr_base() + kRequestedSgprs;
@@ -1978,7 +2124,7 @@ TEST(RegisterAccessTest, ExplicitWaveSgprAccessUsesReservedPhysicalBlock) {
 }
 
 TEST(RegisterAccessTest, ReleasedWaveCannotOwnReallocatedRegisterBlock) {
-  Fixture fx(ROCJITSU_CODE_ARCH_CDNA4, kSgprsPerWave, /*wavefront_slots=*/2);
+  Fixture fx(rocjitsu::IsaFamily::Cdna4, kSgprsPerWave, /*wavefront_slots=*/2);
   ASSERT_NE(fx.wf, nullptr);
   auto *released_wave = fx.cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0, kSgprsPerWave, kVgprsPerWave);
   ASSERT_NE(released_wave, nullptr);
@@ -2008,7 +2154,7 @@ TEST(RegisterAccessTest, ReleasedWaveCannotOwnReallocatedRegisterBlock) {
 
 TEST(RegisterAccessTest, FreeWavefrontClearsPhysicalOwnerMaps) {
   constexpr uint32_t kRequestedSgprs = 40;
-  Fixture fx(ROCJITSU_CODE_ARCH_CDNA4, kRequestedSgprs);
+  Fixture fx(rocjitsu::IsaFamily::Cdna4, kRequestedSgprs);
   ASSERT_NE(fx.wf, nullptr);
 
   const uint32_t sgpr = fx.sgpr_base() + kRequestedSgprs;
@@ -2037,8 +2183,9 @@ TEST(RegisterAccessTest, PublicOperandChunkReadObservesReadWindow) {
   ASSERT_NE(fx.wf, nullptr);
   uint32_t base = fx.vgpr_base();
   constexpr uint32_t logical_vgpr = 13;
-  for (uint32_t lane = 0; lane < fx.wf->wf_size(); ++lane)
+  for (uint32_t lane = 0; lane < fx.wf->wf_size(); ++lane) {
     fx.cu->write_vgpr(base + logical_vgpr, lane, 0xCAFE0000u | lane);
+  }
 
   cdna4::Operand src(32, cdna4::OperandType::OPR_SRC_VGPR, 256 + logical_vgpr);
   uint32_t out[3] = {};
@@ -2148,7 +2295,7 @@ TEST(RegisterAccessTest, ScopedVgprWriteMaskIntersectsAndRestoresNestedScopes) {
 }
 
 TEST(RegisterAccessTest, Wave32VgprWriteMaskRejectsNonExecutionLanes) {
-  Fixture fx(ROCJITSU_CODE_ARCH_RDNA4);
+  Fixture fx(rocjitsu::IsaFamily::Rdna4);
   ASSERT_NE(fx.wf, nullptr);
   ASSERT_EQ(fx.wf->wf_size(), 32u);
 
@@ -2165,7 +2312,7 @@ TEST(RegisterAccessTest, Wave32VgprWriteMaskRejectsNonExecutionLanes) {
 }
 
 TEST(RegisterAccessTest, Wave64DispatchExpandsVgprWriteMaskToArchitecturalWidth) {
-  Fixture fx(ROCJITSU_CODE_ARCH_RDNA4, kSgprsPerWave, /*wavefront_slots=*/1, kVgprsPerWave,
+  Fixture fx(rocjitsu::IsaFamily::Rdna4, kSgprsPerWave, /*wavefront_slots=*/1, kVgprsPerWave,
              /*wave_size=*/64);
   ASSERT_NE(fx.wf, nullptr);
   ASSERT_EQ(fx.wf->wf_size(), 64u);
@@ -2201,8 +2348,9 @@ TEST(RegisterAccessTest, WriteViewsCannotOutliveTheirAcquiredWriteMask) {
     };
     auto expect_captured_notifications = [&](size_t first_write) {
       ASSERT_GT(fx.plugin->writes.size(), first_write);
-      for (size_t i = first_write; i < fx.plugin->writes.size(); ++i)
+      for (size_t i = first_write; i < fx.plugin->writes.size(); ++i) {
         EXPECT_EQ(fx.plugin->writes[i].lane_mask, acquired_lanes);
+      }
     };
 
     cdna4::Operand dst32(32, cdna4::OperandType::OPR_VGPR, 30);
@@ -2290,8 +2438,9 @@ TEST(RegisterAccessTest, WriteViewsCannotOutliveTheirAcquiredWriteMask) {
     first_write = fx.plugin->writes.size();
     auto readwrite64 = acquire([&] { return regs.readwrite_operand64(acc64, requested_lanes); });
     ASSERT_GT(fx.plugin->reads.size(), first_read64);
-    for (size_t i = first_read64; i < fx.plugin->reads.size(); ++i)
+    for (size_t i = first_read64; i < fx.plugin->reads.size(); ++i) {
       EXPECT_EQ(fx.plugin->reads[i].lane_mask, requested_lanes);
+    }
     expect_captured_notifications(first_write);
     store_under_later_mask([&] {
       ASSERT_TRUE(
@@ -2313,7 +2462,7 @@ TEST(RegisterAccessTest, WriteViewsCannotOutliveTheirAcquiredWriteMask) {
 // or bytes 2-3. Reading or preserving the other half inside the 32-bit
 // register file must neither expose its value nor create another callback.
 TEST(RegisterAccessTest, Packed16ReadsAndWritesObserveSelectedByteHalves) {
-  Fixture fx(ROCJITSU_CODE_ARCH_RDNA4, kSgprsPerWave, 1, 8);
+  Fixture fx(rocjitsu::IsaFamily::Rdna4, kSgprsPerWave, 1, 8);
   ASSERT_NE(fx.wf, nullptr);
   uint32_t reg = fx.vgpr_base() + 5;
   constexpr uint32_t lane = 3;
@@ -2350,13 +2499,112 @@ TEST(RegisterAccessTest, Packed16ReadsAndWritesObserveSelectedByteHalves) {
   EXPECT_EQ(fx.cu->read_vgpr(reg, lane), 0x33441122u);
 }
 
+TEST(RegisterAccessTest, DppRowShiftRightStagesRowsAndObservesSelectedSources) {
+  for (unsigned width : {32u, 64u}) {
+    Fixture fx(IsaFamily::Rdna4, kSgprsPerWave, 1, 8, width);
+    ASSERT_NE(fx.wf, nullptr);
+    fx.wf->set_exec(~uint64_t{0});
+    const uint32_t reg = fx.vgpr_base() + 1;
+    for (uint32_t lane = 0; lane < width; ++lane) {
+      fx.cu->write_vgpr(reg, lane, lane + 1);
+    }
+    rdna4::Operand source(32, rdna4::OperandType::OPR_VGPR, 1);
+    RegisterAccess regs(*fx.wf);
+    for (unsigned shift = 1; shift < dpp::ROW_SIZE; ++shift) {
+      const auto plan =
+          dpp::make_dpp_plan(width, dpp::ROW_SHR1 + shift - 1, 15, 15, 1, 0, fx.wf->exec(), false);
+      const uint64_t destinations = 0x9d86b4f0ac375e61ULL;
+      uint64_t expected_reads = 0;
+      fx.plugin->reads.clear();
+      std::optional<StagedOperand> staged;
+      dpp::apply_dpp(source, plan, destinations, staged, *fx.wf);
+      ASSERT_TRUE(staged.has_value());
+      for (unsigned lane = 0; lane < width; ++lane) {
+        if (!(destinations & (uint64_t{1} << lane))) {
+          continue;
+        }
+        const bool in_bounds = lane % dpp::ROW_SIZE >= shift;
+        EXPECT_EQ(regs.read_lane(*staged, lane), in_bounds ? lane - shift + 1 : 0);
+        if (in_bounds) {
+          expected_reads |= uint64_t{1} << (lane - shift);
+        }
+      }
+      ASSERT_EQ(fx.plugin->reads.size(), 1u);
+      EXPECT_EQ(fx.plugin->reads.front().physical_reg, reg);
+      EXPECT_EQ(fx.plugin->reads.front().lane_mask, expected_reads);
+      EXPECT_EQ(fx.plugin->reads.front().byte_mask, ExecutionPlugin::kFullByteMask);
+    }
+  }
+}
+
+TEST(RegisterAccessTest, DppFullWaveControlsStageSelectedSourcesAndObserveThem) {
+  // In-range permutations take the unconditional copy; the shifts keep out-of-bounds lanes.
+  const uint32_t controls[] = {0x1b,
+                               0x4e,
+                               0xb1,
+                               dpp::ROW_MIRROR,
+                               dpp::ROW_HALF_MIRROR,
+                               dpp::ROW_BCAST15,
+                               dpp::ROW_BCAST31,
+                               dpp::ROW_ROR1 + 2,
+                               dpp::WF_ROL1,
+                               dpp::ROW_SHL1 + 4,
+                               dpp::ROW_SHR1 + 2};
+  for (unsigned width : {32u, 64u}) {
+    Fixture fx(IsaFamily::Rdna4, kSgprsPerWave, 1, 8, width);
+    ASSERT_NE(fx.wf, nullptr);
+    fx.wf->set_exec(~uint64_t{0});
+    const uint32_t reg = fx.vgpr_base() + 1;
+    for (uint32_t lane = 0; lane < width; ++lane) {
+      fx.cu->write_vgpr(reg, lane, 0xa5000000u + lane);
+    }
+    rdna4::Operand source(32, rdna4::OperandType::OPR_VGPR, 1);
+    RegisterAccess regs(*fx.wf);
+    for (uint32_t control : controls) {
+      for (bool bound : {false, true}) {
+        // Generated bodies request every active lane; observers may request fewer.
+        for (uint64_t destinations : {fx.wf->exec(), uint64_t{0x9d86b4f0ac375e61}}) {
+          SCOPED_TRACE(testing::Message()
+                       << "width=" << width << " control=" << control << " bound=" << bound
+                       << " destinations=" << destinations);
+          const auto plan =
+              dpp::make_dpp_plan(width, control, 10, 15, bound, 0, fx.wf->exec(), false);
+          uint64_t expected_reads = 0;
+          fx.plugin->reads.clear();
+          std::optional<StagedOperand> staged;
+          dpp::apply_dpp(source, plan, destinations, staged, *fx.wf);
+          ASSERT_TRUE(staged.has_value());
+          for (unsigned lane = 0; lane < width; ++lane) {
+            const uint64_t lane_bit = uint64_t{1} << lane;
+            if (!(destinations & lane_bit)) {
+              continue;
+            }
+            if (plan.physical_read_dest_mask & lane_bit) {
+              EXPECT_EQ(regs.read_lane(*staged, lane), 0xa5000000u + plan.source_lanes[lane])
+                  << "lane=" << lane;
+              expected_reads |= uint64_t{1} << plan.source_lanes[lane];
+            } else if (plan.zero_source_mask & lane_bit) {
+              EXPECT_EQ(regs.read_lane(*staged, lane), 0u) << "lane=" << lane;
+            }
+          }
+          ASSERT_EQ(fx.plugin->reads.size(), 1u);
+          EXPECT_EQ(fx.plugin->reads.front().physical_reg, reg);
+          EXPECT_EQ(fx.plugin->reads.front().lane_mask, expected_reads);
+          EXPECT_EQ(fx.plugin->reads.front().byte_mask, ExecutionPlugin::kFullByteMask);
+        }
+      }
+    }
+  }
+}
+
 TEST(RegisterAccessTest, Packed16DppObservesSelectedPhysicalLanesAndHalves) {
-  Fixture fx(ROCJITSU_CODE_ARCH_RDNA4, kSgprsPerWave, 1, 8);
+  Fixture fx(rocjitsu::IsaFamily::Rdna4, kSgprsPerWave, 1, 8);
   ASSERT_NE(fx.wf, nullptr);
   fx.wf->set_exec(0b0101);
   const uint32_t base = fx.vgpr_base();
-  for (uint32_t lane = 0; lane < 4; ++lane)
+  for (uint32_t lane = 0; lane < 4; ++lane) {
     fx.cu->write_vgpr(base + 1, lane, ((0xc000u + lane) << 16) | 0x1234u);
+  }
   rdna4::Operand source(16, rdna4::OperandType::OPR_VGPR, 129, true);
   RegisterAccess regs(*fx.wf);
   std::optional<StagedOperand> staged;
@@ -2396,7 +2644,7 @@ TEST(RegisterAccessTest, Packed16DppObservesSelectedPhysicalLanesAndHalves) {
 }
 
 TEST(RegisterAccessTest, Packed16DppObservesBroadcastSourcesOnceAndSkipsSuppressedReads) {
-  Fixture fx(ROCJITSU_CODE_ARCH_RDNA4, kSgprsPerWave, 1, 8);
+  Fixture fx(rocjitsu::IsaFamily::Rdna4, kSgprsPerWave, 1, 8);
   ASSERT_NE(fx.wf, nullptr);
   fx.wf->set_exec(0xf);
   const uint32_t reg = fx.vgpr_base() + 1;
@@ -2409,8 +2657,9 @@ TEST(RegisterAccessTest, Packed16DppObservesBroadcastSourcesOnceAndSkipsSuppress
       dpp::make_dpp_plan(fx.wf->wf_size(), 0xff, 0xf, 0xf, false, true, fx.wf->exec(), true);
   dpp::apply_dpp(source, broadcast, fx.wf->exec(), staged, *fx.wf);
   ASSERT_TRUE(staged.has_value());
-  for (uint32_t lane = 0; lane < 4; ++lane)
+  for (uint32_t lane = 0; lane < 4; ++lane) {
     EXPECT_EQ(regs.read_lane(*staged, lane), 0xc200u);
+  }
   ASSERT_EQ(fx.plugin->reads.size(), 1u);
   EXPECT_EQ(fx.plugin->reads[0].physical_reg, reg);
   EXPECT_EQ(fx.plugin->reads[0].lane_mask, 1u << 3);
@@ -2440,7 +2689,7 @@ TEST(RegisterAccessTest, Packed16DppObservesBroadcastSourcesOnceAndSkipsSuppress
 }
 
 TEST(RegisterAccessTest, Packed16PhysicalMappingIncludesSourceAndDestinationMsb) {
-  Fixture fx(ROCJITSU_CODE_ARCH_CDNA5, kSgprsPerWave, 1, 1024);
+  Fixture fx(rocjitsu::IsaFamily::Cdna5, kSgprsPerWave, 1, 1024);
   ASSERT_NE(fx.wf, nullptr);
   fx.wf->set_exec(1);
   fx.wf->set_vgpr_msb_mode(1 | (2 << 2) | (3 << 6));
@@ -2658,14 +2907,15 @@ TEST(RegisterAccessTest, OperandWriteViewsRejectUnobservedLanes) {
     EXPECT_EQ(fx.wf->instruction_execution_error(),
               InstructionExecutionError::InvalidRegisterAccess);
 
-    for (uint32_t reg : {18u, 20u, 21u, 22u, 23u, 24u, 26u, 27u})
+    for (uint32_t reg : {18u, 20u, 21u, 22u, 23u, 24u, 26u, 27u}) {
       EXPECT_EQ(fx.cu->read_vgpr(base + reg, lane_base + 1), 0u);
+    }
     EXPECT_EQ(fx.plugin->writes.size(), 8u);
   }
 }
 
 TEST(RegisterAccessTest, OperandReadViewFallbackUsesLaneSemantics) {
-  Fixture fx(ROCJITSU_CODE_ARCH_RDNA4);
+  Fixture fx(rocjitsu::IsaFamily::Rdna4);
   ASSERT_NE(fx.wf, nullptr);
 
   rdna4::Operand inline_one(16, rdna4::OperandType::OPR_SRC, 242);
@@ -2738,12 +2988,13 @@ TEST(RegisterAccessTest, PartialByteRawRegionOperationsRejectBeforeSideEffects) 
 }
 
 TEST(RegisterAccessTest, OversizedRawRegionCopyRejectsBeforeSideEffects) {
-  Fixture fx(ROCJITSU_CODE_ARCH_CDNA4, kSgprsPerWave, /*wavefront_slots=*/1, kVgprsPerWave,
+  Fixture fx(rocjitsu::IsaFamily::Cdna4, kSgprsPerWave, /*wavefront_slots=*/1, kVgprsPerWave,
              /*wave_size=*/64);
   ASSERT_NE(fx.wf, nullptr);
   ASSERT_EQ(fx.wf->wf_size(), 64u);
-  for (uint32_t lane = 0; lane < fx.wf->wf_size(); ++lane)
+  for (uint32_t lane = 0; lane < fx.wf->wf_size(); ++lane) {
     fx.cu->write_vgpr(fx.vgpr_base(), lane, 0x12340000u + lane);
+  }
   auto region = RegisterAccess(*fx.wf).read_vgpr_region(
       fx.vgpr_base(), /*reg_count=*/1, /*lane_mask=*/~uint64_t{0}, ExecutionPlugin::kFullByteMask);
   ASSERT_TRUE(region.valid());
@@ -2761,7 +3012,7 @@ TEST(RegisterAccessTest, OversizedRawRegionCopyRejectsBeforeSideEffects) {
 }
 
 TEST(RegisterAccessTest, TypedScalarAccessPreservesObservationAndReadDelegates) {
-  Fixture fx(ROCJITSU_CODE_ARCH_CDNA4, kSgprsPerWave, 1, /*vgprs_per_wave=*/4);
+  Fixture fx(rocjitsu::IsaFamily::Cdna4, kSgprsPerWave, 1, /*vgprs_per_wave=*/4);
   ASSERT_NE(fx.wf, nullptr);
   fx.wf->set_exec(1);
   fx.cu->write_sgpr(fx.sgpr_base(), 41);
@@ -2821,7 +3072,7 @@ TEST(RegisterAccessTest, ScalarBackedPartialByteStoresRejectBeforeObservation) {
 }
 
 TEST(RegisterAccessTest, OperandStoreRejectsInvalidWindowBeforeShiftingLaneMask) {
-  Fixture fx(ROCJITSU_CODE_ARCH_CDNA4, kSgprsPerWave, /*wavefront_slots=*/1, kVgprsPerWave,
+  Fixture fx(rocjitsu::IsaFamily::Cdna4, kSgprsPerWave, /*wavefront_slots=*/1, kVgprsPerWave,
              /*wave_size=*/32);
   ASSERT_NE(fx.wf, nullptr);
   cdna4::Operand dst(32, cdna4::OperandType::OPR_VGPR, 4);
@@ -2854,7 +3105,7 @@ TEST(RegisterAccessTest, ConstPhysicalReadWriteAcquisitionRejectsBeforeObservati
 }
 
 TEST(RegisterAccessTest, RejectedReadRegionsReportIssuingWaveAtInstructionBoundary) {
-  Fixture fx(ROCJITSU_CODE_ARCH_CDNA4, kSgprsPerWave, /*wavefront_slots=*/2);
+  Fixture fx(rocjitsu::IsaFamily::Cdna4, kSgprsPerWave, /*wavefront_slots=*/2);
   ASSERT_NE(fx.wf, nullptr);
   Wavefront *neighbor = fx.cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0, kSgprsPerWave, kVgprsPerWave);
   ASSERT_NE(neighbor, nullptr);
@@ -2882,8 +3133,9 @@ TEST(RegisterAccessTest, RejectedReadRegionsReportIssuingWaveAtInstructionBounda
                         auto region = regs.read_vgpr_region(self.source_base, self.snapshot ? 2 : 1,
                                                             1, self.snapshot ? 0xF : 0b0011);
                         if (self.snapshot) {
-                          if (region.copy_dwords_lane_major(self.bytes, 1).failed())
+                          if (region.copy_dwords_lane_major(self.bytes, 1).failed()) {
                             return;
+                          }
                         } else if (region.lanes().failed()) {
                           return;
                         }
@@ -2923,7 +3175,7 @@ TEST(RegisterAccessTest, RejectedReadRegionsReportIssuingWaveAtInstructionBounda
 }
 
 TEST(RegisterAccessTest, PhysicalWriteStatusAtInstructionBoundary) {
-  Fixture fx(ROCJITSU_CODE_ARCH_CDNA4, kSgprsPerWave, /*wavefront_slots=*/2);
+  Fixture fx(rocjitsu::IsaFamily::Cdna4, kSgprsPerWave, /*wavefront_slots=*/2);
   ASSERT_NE(fx.wf, nullptr);
   Wavefront *neighbor = fx.cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0, kSgprsPerWave, kVgprsPerWave);
   ASSERT_NE(neighbor, nullptr);
@@ -3007,7 +3259,7 @@ TEST(RegisterAccessTest, PhysicalWriteStatusAtInstructionBoundary) {
 TEST(RegisterAccessTest, DecodedSgprDestinationOutsideStorageBlockIsIgnored) {
   // This artificial 104-SGPR RDNA4 block is smaller than the 106 normal SGPRs
   // specified by RDNA4 ISA section 3.3.1.1, so s104 is valid on hardware.
-  Fixture fx(ROCJITSU_CODE_ARCH_RDNA4, kSgprsPerWave, /*wavefront_slots=*/2, kVgprsPerWave,
+  Fixture fx(rocjitsu::IsaFamily::Rdna4, kSgprsPerWave, /*wavefront_slots=*/2, kVgprsPerWave,
              /*wave_size=*/32);
   ASSERT_NE(fx.wf, nullptr);
   Wavefront *neighbor = fx.cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0, kSgprsPerWave, kVgprsPerWave);
@@ -3015,7 +3267,7 @@ TEST(RegisterAccessTest, DecodedSgprDestinationOutsideStorageBlockIsIgnored) {
   ASSERT_EQ(neighbor->sgpr_alloc().base, fx.sgpr_base() + 104);
   const uint32_t neighbor_base = neighbor->sgpr_alloc().base;
   fx.cu->write_sgpr(neighbor_base, 0xAABBCCDDu);
-  std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  std::unique_ptr<Decoder> decoder = Decoder::create(rocjitsu::IsaFamily::Rdna4);
   ASSERT_NE(decoder, nullptr);
   constexpr std::array<uint32_t, 2> encoding{0xBEE80081u, 0}; // s_mov_b32 s104, 1
   std::unique_ptr<Instruction> instruction(decode_valid(*decoder, encoding.data()));
@@ -3045,9 +3297,10 @@ TEST(RegisterAccessTest, OperandStorePreservesPendingErrorAndRecoversNextInstruc
                 auto &wf = *static_cast<Wavefront *>(ctx);
                 cdna4::Operand dst(32, cdna4::OperandType::OPR_VGPR, 4);
                 RegisterAccess::OperandWriteView write = RegisterAccess(wf).write_operand(dst, 1);
-                if (self.report_error_)
+                if (self.report_error_) {
                   wf.report_instruction_execution_error(
                       InstructionExecutionError::UnsupportedOperandValue, "original operand error");
+                }
                 self.failed =
                     write.store_native<uint32_t>(0, util::native<uint32_t>(0x55667788u), 1)
                         .failed();

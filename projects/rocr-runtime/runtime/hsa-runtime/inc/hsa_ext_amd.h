@@ -91,13 +91,18 @@
  * - 1.36 - hsa_amd_signal_batch_create, hsa_amd_signal_batch_destroy,
  *          HSA_AMD_MEMORY_POOL_INFO_SIGNAL_CAPABLE,
  *          HSA_AMD_AGENT_INFO_PCIE_STORES_NEED_FLUSH, HSA_AMD_AGENT_INFO_HOST_ATOMICS_SUPPORTED,
- *          HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED,
+ *          HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED (removed in 1.39, never released),
  *          hsa_amd_signal_set_hints, hsa_amd_signal_get_hints (inline)
  * - 1.37 - hsa_amd_memory_async_batch_copy: HSA_AMD_MEMORY_COPY_OP_RECT
  * - 1.38 - hsa_amd_pointer_info: HSA_EXT_POINTER_TYPE_SVM
+ * - 1.39 - hsa_amd_agent_aql_properties_t: HSA_AMD_AQL_PROPERTY_SIGNAL_HINTS, which replaces
+ *          HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED. 1.36-1.38 were never in a release
+ *          (development and BKC snapshots only), so the 1.36 query is removed without a
+ *          deprecation period.
+ * - 1.40 - hsa_amd_agent_info_t: HSA_AMD_AGENT_INFO_MAX_BROADCAST_DESTINATIONS
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 38
+#define HSA_AMD_INTERFACE_VERSION_MINOR 40
 
 #ifdef __cplusplus
 extern "C" {
@@ -883,6 +888,9 @@ typedef enum hsa_amd_agent_info_s {
   HSA_AMD_AGENT_INFO_ASIC_FAMILY_ID = 0xA107,
   /**
    * Queries for the Packet Processor(CP Firmware) ucode version of an agent.
+   * The value is the full 16-bit microcode version reported by the driver. It
+   * can exceed 10 bits on some targets (for example gfx9 parts that set bit 15),
+   * so do not mask it to 10 bits.
    * The type of this attribute is uint32_t.
    */
   HSA_AMD_AGENT_INFO_UCODE_VERSION = 0xA108,
@@ -933,7 +941,11 @@ typedef enum hsa_amd_agent_info_s {
   /**
    * Bit-mask indicating AQL Extensions supported by this agent. An AQL extension is set if the flag
    * bit is set at that position. User may use the hsa_flag_isset64 macro to verify whether a flag
-   * is set. The type of this attribute is uint8_t[8].
+   * is set. The position of an extension is the value of its ::hsa_amd_agent_aql_properties_t
+   * enumerator, a bit index, not a mask.
+   * Some extensions are reported by the CP firmware: the first query on a GPU agent submits one
+   * barrier packet to an internal queue and waits for it to complete.
+   * The type of this attribute is uint8_t[8].
    */
   HSA_AMD_AGENT_INFO_AQL_EXTENSIONS = 0xA115,
   /**
@@ -1055,13 +1067,34 @@ typedef enum hsa_amd_agent_info_s {
    * The type of this attribute is bool.
    */
   HSA_AMD_AGENT_INFO_HOST_ATOMICS_SUPPORTED = 0xA128,
+  /* 0xA129 is not reused: it was HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED,
+     replaced by ::HSA_AMD_AQL_PROPERTY_SIGNAL_HINTS. */
   /**
-   * Whether the agent's CP firmware consumes completion signal handle hints
-   * (::hsa_amd_signal_set_hints). Hints may be put in the completion_signal
-   * of an AQL packet only on an agent that reports true. GPU agents only.
-   * The type of this attribute is bool.
+   * Maximum number of destinations accepted in a single
+   * ::HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST operation submitted to this
+   * agent. Zero if the agent is configured such that it cannot service a
+   * broadcast at all. A GPU agent reporting zero rejects the operation with
+   * ::HSA_STATUS_ERROR_INVALID_ARGUMENT; a CPU agent always reports zero and
+   * rejects it earlier, with ::HSA_STATUS_ERROR_INVALID_AGENT, because a
+   * broadcast requires a GPU source agent.
+   *
+   * This is a ceiling on the destination count, not a guarantee that any
+   * particular copy succeeds: it describes how the agent is configured, not
+   * whether the DMA resources a given copy needs are available at the moment
+   * it is submitted. A broadcast within the reported ceiling can still be
+   * rejected if the agent's DMA engines cannot be brought up.
+   *
+   * A broadcast is carried by the agent's DMA engines, either by a dedicated
+   * multicast packet or by per-destination fan-out. Which of the two services
+   * a given copy depends on the transfer size and on how many destinations
+   * the packet can describe, and is not observable here - a request larger
+   * than one routing can take is served by the other rather than rejected.
+   * The reported count therefore holds at every transfer size, and is the
+   * limit of ::hsa_amd_memory_copy_op_t::num_entries itself on any agent able
+   * to service a broadcast at all.
+   * The type of this attribute is uint32_t.
    */
-  HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED = 0xA129,
+  HSA_AMD_AGENT_INFO_MAX_BROADCAST_DESTINATIONS = 0xA12A
 } hsa_amd_agent_info_t;
 
 /**
@@ -1073,6 +1106,12 @@ typedef enum hsa_amd_agent_memory_properties_s {
 
 /**
  * @brief Agent AQL info properties attributes
+ *
+ * Each enumerator's value is the index of its bit in
+ * ::HSA_AMD_AGENT_INFO_AQL_EXTENSIONS, not a mask: test it with
+ * hsa_flag_isset64(value, HSA_AMD_AQL_PROPERTY_*), which is how the runtime
+ * sets it (HSA_AMD_AQL_PROPERTY_SIGNAL_HINTS, 2, is bit 2 of the array).
+ * value[0] & HSA_AMD_AQL_PROPERTY_* tests another bit.
  */
 typedef enum hsa_amd_agent_aql_properties_s {
   /**
@@ -1080,6 +1119,13 @@ typedef enum hsa_amd_agent_aql_properties_s {
    * with CP firmware that reports AMD_QUEUE_CAPS_CP_EXT_KERNEL_DISPATCH.
    */
   HSA_AMD_AQL_PROPERTY_EXT_DISPATCH = (1 << 0),
+  /**
+   * The agent's CP firmware consumes completion signal handle hints
+   * (::hsa_amd_signal_set_hints). Hints may be put in the completion_signal
+   * of an AQL packet only on an agent that reports this extension. GPU agents
+   * only.
+   */
+  HSA_AMD_AQL_PROPERTY_SIGNAL_HINTS = (1 << 1),
 } hsa_amd_agent_aql_properties_t;
 
 /**
@@ -2204,9 +2250,9 @@ typedef struct hsa_amd_signal_batch_s {
  *
  * @param[in] pool Memory pool providing the signal memory: one that reports
  * ::HSA_AMD_MEMORY_POOL_INFO_SIGNAL_CAPABLE. That is a fine-grained system
- * memory pool, or a pool of a GPU whose memory is host visible (large BAR):
- * the extended-scope fine-grained (uncached) pool on gfx94x and gfx95x, or the
- * coarse-grained pool on gfx125x. Device memory is made accessible to the host
+ * memory pool, or the pool of a GPU whose memory is host visible (large BAR)
+ * in which every queue's command processor sees each signal completion. Device
+ * memory is made accessible to the host
  * and to @p consumers, or to every GPU if @p num_consumers is 0. When the GPU
  * reports ::HSA_AMD_AGENT_INFO_PCIE_STORES_NEED_FLUSH, the hsa_signal_* APIs
  * flush every host store they make, and a caller writing a member's value
@@ -2266,8 +2312,8 @@ hsa_status_t HSA_API hsa_amd_signal_batch_destroy(hsa_amd_signal_batch_t batch);
  * @brief Return @p signal with its handle hints replaced by @p hints.
  *
  * @p hints combines ::amd_signal_hint_t values; 0 returns the plain handle.
- * Use hints only on an agent that reports
- * ::HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED: its CP firmware consumes every
+ * Use hints only on an agent that reports ::HSA_AMD_AQL_PROPERTY_SIGNAL_HINTS
+ * in ::HSA_AMD_AGENT_INFO_AQL_EXTENSIONS: its CP firmware consumes every
  * defined hint, while firmware without support takes the hinted handle as the
  * signal address. Bits outside
  * ::AMD_SIGNAL_HINT_MASK are dropped. A hinted handle is only for the
@@ -5316,6 +5362,13 @@ typedef enum {
    * this queue. Unsupported queue types return HSA_STATUS_ERROR_INVALID_ARGUMENT.
    */
   HSA_AMD_QUEUE_INFO_WRITE_POINTER,
+  /*
+   * Bytes the KMD writes into the end of every submitted span on a Windows
+   * native SDMA user queue (gfx12+ with HWS). A producer that does not leave
+   * them free has its own last packet overwritten. Unsupported queue types
+   * return HSA_STATUS_ERROR_INVALID_ARGUMENT. The type is uint32_t.
+   */
+  HSA_AMD_QUEUE_INFO_SUBMISSION_TAIL_BYTES,
 } hsa_queue_info_attribute_t;
 
 hsa_status_t hsa_amd_queue_get_info(hsa_queue_t* queue, hsa_queue_info_attribute_t attribute,

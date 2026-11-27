@@ -9,6 +9,7 @@
 #![allow(unsafe_code)]
 
 use super::{madvise, page_size};
+use crate::memory::constraints::fits_address_bounds;
 use crate::os::ProcessIdentity;
 use crate::os::linux::invalid_data;
 use crate::os::native_error;
@@ -150,15 +151,11 @@ impl Reservation {
     ) -> io::Result<Self> {
         let process = ProcessIdentity::capture()?;
         let page = page_size()?;
-        if size == 0 || size % page != 0 || !alignment.is_power_of_two() || alignment < page {
+        if !super::valid_host_layout(size, alignment, page) {
             return Err(io::Error::from(io::ErrorKind::InvalidInput));
         }
         if address != 0
-            && address % alignment == 0
-            && address as u64 >= bounds.0
-            && address
-                .checked_add(size - 1)
-                .is_some_and(|last| last as u64 <= bounds.1)
+            && fits_address_bounds(address as u64, size as u64, alignment as u64, bounds)
         {
             // SAFETY: MAP_FIXED_NOREPLACE either acquires this exact free range
             // or fails without replacing an existing mapping.
@@ -220,7 +217,7 @@ impl Reservation {
     ) -> io::Result<Self> {
         let process = ProcessIdentity::capture()?;
         let page = page_size()?;
-        if size == 0 || size % page != 0 || !alignment.is_power_of_two() || alignment < page {
+        if !super::valid_host_layout(size, alignment, page) {
             return Err(io::Error::from(io::ErrorKind::InvalidInput));
         }
         let length = size
@@ -253,8 +250,7 @@ impl Reservation {
                 "mmap alignment overflows the host address width",
             ));
         };
-        let last = address.checked_add(size - 1);
-        if (address as u64) < bounds.0 || last.is_none_or(|last| last as u64 > bounds.1) {
+        if !fits_address_bounds(address as u64, size as u64, alignment as u64, bounds) {
             // SAFETY: The complete mapping is still owned by this call.
             let _ = unsafe { munmap(mapped, length) };
             return Err(io::Error::from(io::ErrorKind::OutOfMemory));
@@ -306,7 +302,7 @@ impl Reservation {
         process: ProcessIdentity,
     ) -> io::Result<Self> {
         let page = page_size()?;
-        if size == 0 || size % page != 0 || !alignment.is_power_of_two() || alignment < page {
+        if !super::valid_host_layout(size, alignment, page) {
             return Err(io::Error::from(io::ErrorKind::InvalidInput));
         }
         let length = size
@@ -346,8 +342,7 @@ impl Reservation {
             ));
         };
         reservation.address = address;
-        let last = address.checked_add(size - 1);
-        if (address as u64) < bounds.0 || last.is_none_or(|last| last as u64 > bounds.1) {
+        if !fits_address_bounds(address as u64, size as u64, alignment as u64, bounds) {
             return Err(io::Error::from(io::ErrorKind::OutOfMemory));
         }
         Ok(reservation)

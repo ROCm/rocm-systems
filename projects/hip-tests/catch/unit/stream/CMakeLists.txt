@@ -10,6 +10,7 @@ set(TEST_SRC
     hipStreamGetPriority.cc
     hipMultiStream.cc
     hipStreamAddCallback.cc
+    hipStreamCompletionSignals.cc
     hipStreamCreateWithFlags.cc
     hipStreamCreateWithPriority.cc
     hipStreamDestroy.cc

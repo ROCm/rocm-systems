@@ -33,6 +33,7 @@ It exercises:
 |--------|----------------|
 | (wheel artifact) | `cmake --build --target nccl4py` produced a `.whl` |
 | `test_rocm_extensions.py` | RCCL-only wrappers (`all_reduce_with_bias`, `all_to_all_v`) fail controlled |
+| `test_comm_properties_facade.py` | NCCL 2.31 communicator properties, config fields and GIN enum values reach the low-level structs (stand-in library) |
 | `test_shim_surface.py` | HIP `cuda.core` shim (optional; self-skips without visible GPUs) |
 | `test_group_window.py` | `register_window()` inside `nccl.core.group()` returns a handle (2 GPUs; self-skips on fewer) |
 

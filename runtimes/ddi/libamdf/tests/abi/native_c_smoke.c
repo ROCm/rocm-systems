@@ -9,6 +9,9 @@
 #include <string.h>
 #include <amdf/amdf.h>
 #include <amdf/gpu.h>
+#ifdef _WIN32
+#include <malloc.h>
+#endif
 
 #define CHECK(condition) do { \
   if (!(condition)) { \
@@ -36,13 +39,21 @@ static void *AMDF_CALL tracked_allocate(void *user_data, uint64_t byte_length,
   const size_t length = (size_t)byte_length;
   if (length > SIZE_MAX - (alignment - 1))
     return NULL;
+#ifdef _WIN32
+  return _aligned_malloc(length, alignment);
+#else
   return aligned_alloc(alignment, (length + alignment - 1) & ~(alignment - 1));
+#endif
 }
 
 static void AMDF_CALL tracked_free(void *user_data, void *allocation) {
   struct allocation_counts *counts = (struct allocation_counts *)user_data;
   ++counts->frees;
+#ifdef _WIN32
+  _aligned_free(allocation);
+#else
   free(allocation);
+#endif
 }
 
 static int check_short_final_reservation(const amdf_api_t *api,

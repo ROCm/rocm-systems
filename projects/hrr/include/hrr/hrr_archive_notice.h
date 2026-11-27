@@ -23,27 +23,35 @@ inline constexpr char kHrrArchiveNoticeLines[] =
 HIP Record & Replay capture archive: confidential, read before sharing
 
 This archive is a record of a process's GPU work. It can contain:
-- host memory the process copied to or from the GPU or registered with HIP:
-  model weights, prompts, inputs and outputs, passwords, keys and session
-  tokens, and any personal, customer or third-party data among them;
-- compiled GPU code (code objects, fat binaries, linker inputs) and kernel
-  names, which can disclose proprietary software;
-- kernel arguments, strings passed to HIP such as file paths, device names and
-  process ids.
-HRR does not record user names, host names, the command line or environment
-variables, but any of them can be inside the recorded memory. HRR does not
-encrypt, redact or anonymise anything. File permissions protect the archive
-only on the machine that wrote it.
+- host buffers copied to or from the device, and host memory registered with
+  hipHostRegister: model weights, prompts, inputs and outputs, passwords, keys
+  and session tokens, and any personal, customer or third-party data among
+  them;
+- code objects, fat binary bundles and linker input buffers (the
+  application's GPU binary code) and kernel names, which can disclose
+  proprietary software;
+- kernel argument bytes, other structures passed into HIP calls, and strings
+  passed to HIP such as file paths, device names and process ids.
+HRR does not intentionally collect user names, host names, command-line
+arguments or environment variables as dedicated metadata. However, these
+values may still appear in captured memory or other recorded content. HRR does
+not encrypt, redact or anonymise anything. File permissions protect the
+archive only on the machine that wrote it.
 
 Treat this archive like the most sensitive code and data the process handled.
-- Do not post it publicly: no public issues (GitHub issues are public), no
-  public storage links, no CI artefacts.
-- Share it only with recipients authorised to receive that code and data,
-  through a private channel and on terms agreed in advance, such as a
+- Do not post it publicly: not to public repositories, public issues (GitHub
+  issues are public), public storage, or CI artefacts readable beyond the
+  authorised recipients. Store it only in approved systems with appropriate
+  access controls and encryption.
+- Share it only with recipients specifically authorised to receive that code
+  and data, through an approved secure transfer mechanism, encrypted in
+  transit and at rest, and on terms agreed in advance, such as a
   non-disclosure agreement, plus a data processing agreement if it holds
   personal data.
 - Before sending, check which calls and kernels it holds with hrr-playback
-  --info, and encrypt it for the recipient.
+  --info, and encrypt it for the recipient. If they need a key or passphrase
+  to decrypt it, send that separately, through another approved secure
+  channel.
 - Delete copies you no longer need. If an archive leaks, change every
   password, key and token the process may have held.
 
@@ -55,6 +63,10 @@ rules when it crosses borders.
 
 Replay runs the recorded GPU code on your GPU, with your user's rights: replay
 an archive only if you trust whoever produced it.
+
+What HRR is responsible for, and what it leaves to you, is listed under Scope
+in projects/hrr/PRIVACY.md of the ROCm source:
+https://github.com/ROCm/rocm-systems/blob/develop/projects/hrr/PRIVACY.md
 
 HRR is provided "as is", without warranty of any kind, as stated in its
 licence. You, not AMD, are responsible for the content of archives you create

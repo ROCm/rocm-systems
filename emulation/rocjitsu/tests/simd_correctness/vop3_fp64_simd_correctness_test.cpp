@@ -6,7 +6,7 @@
 /// binary (add/mul/max/min) and unary (ceil/floor/trunc/rndne/sqrt) ops on
 /// CDNA4. Reads src0/src1 as native<double> via split lo/hi VGPR pairs, applies
 /// per-source abs/neg and result omod/clamp in the f64 domain (the new
-/// apply_vop3_*_mod_f64 helpers), then op. Bit-exact for finite/Inf on the
+/// source/destination modifiers), then op. Bit-exact for finite/Inf on the
 /// add/mul/cvt/sqrt ops; the min/max ops accept the standard ±0 / NaN payload
 /// divergences. Each (case, mods, rot) runs TWICE in the same process -- once
 /// forcing the scalar body, once the SIMD fast path, with identical inputs/EXEC
@@ -18,6 +18,7 @@
 
 #include "compute_unit_test_util.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -108,15 +109,16 @@ struct Fixture {
 
   Fixture() : gpu_mem("vop3_fp64_mem"), l2("vop3_fp64_l2") {
     amdgpu::ComputeUnitCore::Config cfg{};
-    cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+    cfg.arch = rocjitsu::IsaFamily::Cdna4;
     cfg.num_wf_slots = 1;
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
     rocjitsu::test::initialize_compute_unit(cu, "cu_vop3_fp64", cfg, &gpu_mem, &l2);
-    if (!cu)
+    if (!cu) {
       return;
-    decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    }
+    decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
   }
 
@@ -144,8 +146,9 @@ struct Fixture {
     EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     std::array<uint64_t, WF_SIZE> out{};
     uint32_t vb = wf->vgpr_alloc().base;
-    for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+    for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       out[lane] = read64(vb + kDstVgpr, lane);
+    }
     return out;
   }
 };
@@ -165,8 +168,9 @@ void check_case(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32
   auto run_mode = [&](bool force_scalar, uint32_t rot) -> std::array<uint64_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
-    if (::testing::Test::HasFatalFailure())
+    if (::testing::Test::HasFatalFailure()) {
       return {};
+    }
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[4] = {0u, 0u, 0u, 0u};
@@ -195,15 +199,19 @@ void check_case(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32
         if (c.kind == Kind::BinMinMax) {
           uint64_t a = kF64[lane % kF64.size()];
           uint64_t b = kF64[(lane + rot) % kF64.size()];
-          if (is_f64_nan(a) || is_f64_nan(b))
+          if (is_f64_nan(a) || is_f64_nan(b)) {
             skip = true; // accepted NaN-payload divergence
-          if (is_f64_zero(a) && is_f64_zero(b))
+          }
+          if (is_f64_zero(a) && is_f64_zero(b)) {
             skip = true; // accepted ±0-tie divergence
+          }
         }
-        if (is_f64_nan(scalar_out[lane]) || is_f64_nan(simd_out[lane]))
+        if (is_f64_nan(scalar_out[lane]) || is_f64_nan(simd_out[lane])) {
           skip = true; // NaN result: payload may differ
-        if (skip)
+        }
+        if (skip) {
           continue;
+        }
         EXPECT_EQ(scalar_out[lane], simd_out[lane])
             << c.name << " a" << abs << "n" << neg << "o" << omod << "c" << clamp << "r" << rot
             << " lane " << lane << ": SIMD path diverged from scalar body";
@@ -222,11 +230,15 @@ void check_case(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32
 void check_all_mods(const Case &c, uint64_t exec) {
   const uint32_t abs_max = (c.kind == Kind::Una) ? 2u : 4u;
   const uint32_t neg_max = (c.kind == Kind::Una) ? 2u : 4u;
-  for (uint32_t abs = 0; abs < abs_max; ++abs)
-    for (uint32_t neg = 0; neg < neg_max; ++neg)
-      for (uint32_t omod = 0; omod < 4; ++omod)
-        for (uint32_t clamp = 0; clamp < 2; ++clamp)
+  for (uint32_t abs = 0; abs < abs_max; ++abs) {
+    for (uint32_t neg = 0; neg < neg_max; ++neg) {
+      for (uint32_t omod = 0; omod < 4; ++omod) {
+        for (uint32_t clamp = 0; clamp < 2; ++clamp) {
           check_case(c, abs, neg, omod, clamp, exec);
+        }
+      }
+    }
+  }
 }
 
 TEST(Vop3Fp64SimdCorrectness, FullExec) {
@@ -234,8 +246,9 @@ TEST(Vop3Fp64SimdCorrectness, FullExec) {
     GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
     return;
   }
-  for (const auto &c : kCases)
+  for (const auto &c : kCases) {
     check_all_mods(c, /*exec=*/~0ULL);
+  }
 }
 
 TEST(Vop3Fp64SimdCorrectness, PartialExec) {
@@ -243,8 +256,9 @@ TEST(Vop3Fp64SimdCorrectness, PartialExec) {
     GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
     return;
   }
-  for (const auto &c : kCases)
+  for (const auto &c : kCases) {
     check_case(c, /*abs=*/0, /*neg=*/0, /*omod=*/0, /*clamp=*/0, /*exec=*/0xA5A5'F0F0'1234'8001ULL);
+  }
 }
 
 TEST(Vop3Fp64SimdCorrectness, OmodHonorsOutputDenormAndIeeeMode) {

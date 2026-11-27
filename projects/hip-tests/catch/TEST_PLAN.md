@@ -13,8 +13,8 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 
 | Tier | Cases | Tagged | Missing `@asserts` |
 |---|---:|---:|---:|
-| `contract` | 635 | 635 | 0 |
-| **total** | **635** | **635** | **0** |
+| `contract` | 655 | 655 | 0 |
+| **total** | **655** | **655** | **0** |
 
 ## Tier: `contract`
 
@@ -135,7 +135,7 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_Copy3D_HipMemcpy3D_Default_HostDeviceRoundTripsExtent` | hipMemcpy3D | a full-extent H2D then D2H 3D copy round-trips all bytes unchanged |
 | `Contract_Copy3D_HipMemcpy3D_Default_SingleSliceRoundTripsBytes` | hipMemcpy3D | a single-slice (depth=1) H2D then D2H 3D copy round-trips that slice's bytes |
 
-### `device` (11 cases)
+### `device` (21 cases)
 
 | Case | API | Asserts |
 |---|---|---|
@@ -144,6 +144,16 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_Device_HipDeviceFlushGPUDirectRDMAWrites_ToAllDevices_AcceptedOrUnsupported` | hipDeviceFlushGPUDirectRDMAWrites | a flush to all-devices scope is accepted or reports unsupported |
 | `Contract_Device_HipDeviceFlushGPUDirectRDMAWrites_ToOwner_AcceptedOrUnsupported` | hipDeviceFlushGPUDirectRDMAWrites | a flush to owner scope is accepted or reports unsupported |
 | `Contract_Device_HipDeviceGetAttribute_WarpSize_MatchesProperties` | hipDeviceGetAttribute | hipDeviceAttributeWarpSize matches the warp size from hipGetDeviceProperties |
+| `Contract_Device_HipDeviceGetExecAffinitySupport_CuCountType_IsAlwaysSupported` | hipDeviceGetExecAffinitySupport | CU-count affinity is supported on every AMD device |
+| `Contract_Device_HipDeviceGetExecAffinitySupport_CuCountType_ReportsBooleanFlag` | hipDeviceGetExecAffinitySupport | a CU-count query reports a boolean flag or unsupported |
+| `Contract_Device_HipDeviceGetExecAffinitySupport_CuGranularityType_ReportsBooleanFlag` | hipDeviceGetExecAffinitySupport | a CU-granularity query reports a boolean flag or unsupported |
+| `Contract_Device_HipDeviceGetExecAffinitySupport_MaskGranularity_IsExactlyOneType` | hipDeviceGetExecAffinitySupport | exactly one masking granularity is supported |
+| `Contract_Device_HipDeviceGetExecAffinitySupport_NegativeDevice_IsRejected` | hipDeviceGetExecAffinitySupport | a negative device ordinal is rejected as an invalid device |
+| `Contract_Device_HipDeviceGetExecAffinitySupport_NullOutPointer_IsRejected` | hipDeviceGetExecAffinitySupport | a null out-pointer is rejected as an invalid argument |
+| `Contract_Device_HipDeviceGetExecAffinitySupport_OutOfRangeDevice_IsRejected` | hipDeviceGetExecAffinitySupport | an out-of-range device is rejected as an invalid device |
+| `Contract_Device_HipDeviceGetExecAffinitySupport_OutOfRangeType_IsRejected` | hipDeviceGetExecAffinitySupport | an out-of-range type is rejected as an invalid argument |
+| `Contract_Device_HipDeviceGetExecAffinitySupport_SentinelType_IsRejected` | hipDeviceGetExecAffinitySupport | the type sentinel is rejected as an invalid argument |
+| `Contract_Device_HipDeviceGetExecAffinitySupport_WgpGranularityType_ReportsBooleanFlag` | hipDeviceGetExecAffinitySupport | a WGP-granularity query reports a boolean flag or unsupported |
 | `Contract_Device_HipGetDeviceProperties_GetProperties_SucceedsForCurrentDevice` | hipGetDeviceProperties | succeeds in populating properties for the current device |
 | `Contract_Device_HipGetDeviceProperties_MultiProcessorCount_IsPositive` | hipGetDeviceProperties | reported multiprocessor count is positive |
 | `Contract_Device_HipGetDeviceProperties_Name_IsNonEmpty` | hipGetDeviceProperties | the device name string is non-empty |
@@ -206,7 +216,7 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_DeviceTextureQuery_HipDeviceGetTexture1DLinearMaxWidth_ReturnsPositiveWidth_ForFloatChannel` | hipDeviceGetTexture1DLinearMaxWidth | a float-channel descriptor yields a positive max 1D linear texture width |
 | `Contract_DeviceTextureQuery_HipDeviceGetTexture1DLinearMaxWidth_ZeroSizedDescriptor_IsRejected` | hipDeviceGetTexture1DLinearMaxWidth | rejects an all-zero (no channel bits) descriptor with a non-success error |
 
-### `driver_array` (6 cases)
+### `driver_array` (7 cases)
 
 | Case | API | Asserts |
 |---|---|---|
@@ -216,6 +226,7 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_DriverArray_HipArrayCreate_InvalidArgs_AreRejected` | hipArrayCreate | rejects a null array-out pointer or null descriptor with a non-success error |
 | `Contract_DriverArray_HipArrayGetDescriptor_Default_RoundTripsDimsAndFormat` | hipArrayGetDescriptor | reads back the width, height, format, and channel count the array was created with |
 | `Contract_DriverArray_HipArrayGetDescriptor_InvalidArgs_AreRejected` | hipArrayGetDescriptor | rejects a null descriptor-out pointer or null array handle with a non-success error |
+| `Contract_DriverArray_HipArrayGetPlane_InvalidArgs_AreRejected` | hipArrayGetPlane | rejects a null plane-out pointer or null array handle with a non-success error |
 
 ### `driver_copy3d` (5 cases)
 
@@ -474,6 +485,19 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_GraphHost_HipGraphAddHostNode_Default_InvokesCallbackOnLaunch` | hipGraphAddHostNode | a host node's callback runs exactly once when the instantiated graph is launched |
 | `Contract_GraphHost_HipGraphHostNodeGetParams_Default_RoundTripsFnAndUserData` | hipGraphHostNodeGetParams | retrieved host-node params round-trip the callback fn and userData pointers |
 | `Contract_GraphHost_HipGraphNodeGetType_NodeType_ReportsHost` | hipGraphNodeGetType | a node added via hipGraphAddHostNode reports type hipGraphNodeTypeHost |
+
+### `graph_id` (8 cases)
+
+| Case | API | Asserts |
+|---|---|---|
+| `Contract_GraphId_HipGraphExecGetId_NullArguments_ReturnInvalidValue` | hipGraphExecGetId | returns hipErrorInvalidValue when either argument is null |
+| `Contract_GraphId_HipGraphExecGetId_SameExecSameId_OtherExecOtherId` | hipGraphExecGetId | repeated calls return the same ID and different executable graphs have different IDs |
+| `Contract_GraphId_HipGraphGetId_NullArguments_ReturnInvalidValue` | hipGraphGetId | returns hipErrorInvalidValue when either argument is null |
+| `Contract_GraphId_HipGraphGetId_SameGraphSameId_OtherGraphOtherId` | hipGraphGetId | repeated calls return the same ID and different graphs have different IDs |
+| `Contract_GraphId_HipGraphNodeGetLocalId_NullArguments_ReturnInvalidValue` | hipGraphNodeGetLocalId | returns hipErrorInvalidValue when either argument is null |
+| `Contract_GraphId_HipGraphNodeGetLocalId_SameNodeSameId_OtherNodeOtherId` | hipGraphNodeGetLocalId | repeated calls return the same ID and different nodes have different IDs |
+| `Contract_GraphId_HipGraphNodeGetToolsId_NullArguments_ReturnInvalidValue` | hipGraphNodeGetToolsId | returns hipErrorInvalidValue when either argument is null |
+| `Contract_GraphId_HipGraphNodeGetToolsId_SameNodeSameId_OtherNodeOtherId` | hipGraphNodeGetToolsId | repeated calls return the same ID and different nodes have different IDs |
 
 ### `graph_instantiate_params` (2 cases)
 
@@ -837,10 +861,11 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_MemLocationPool_HipMemGetMemPool_Default_ReturnsPoolForDeviceLocation` | hipMemGetMemPool | a location-based pool query returns a non-null pool for a valid device location |
 | `Contract_MemLocationPool_HipMemSetMemPool_Default_RoundTripsThroughGetMemPool` | hipMemSetMemPool | a pool set for a location round-trips through a subsequent hipMemGetMemPool query |
 
-### `mem_map_array` (2 cases)
+### `mem_map_array` (3 cases)
 
 | Case | API | Asserts |
 |---|---|---|
+| `Contract_MemMapArray_HipArrayGetSparseProperties_InvalidArgs_AreRejected` | hipArrayGetSparseProperties | rejects a null properties-out pointer, a null array handle, or a non-sparse array with a non-success status |
 | `Contract_MemMapArray_HipMemMapArrayAsync_NullMapList_IsRejected` | hipMemMapArrayAsync | rejects a null map-info list with a non-success status |
 | `Contract_MemMapArray_HipMemMapArrayAsync_ZeroCount_IsRejected` | hipMemMapArrayAsync | rejects a zero operation count with a non-success status |
 

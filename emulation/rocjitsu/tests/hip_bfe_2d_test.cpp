@@ -40,8 +40,9 @@ TEST(BfeRegressionTest, ThreadIdxY) {
   std::vector<int> h(N);
   HIP_ASSERT(hipMemcpy(h.data(), d_out, N * sizeof(int), hipMemcpyDeviceToHost));
 
-  for (int i = 0; i < N; ++i)
+  for (int i = 0; i < N; ++i) {
     EXPECT_EQ(h[i], i);
+  }
 
   (void)hipFree(d_out);
 }

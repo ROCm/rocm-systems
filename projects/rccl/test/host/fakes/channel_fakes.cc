@@ -6,6 +6,8 @@
 
 #include "channel_fakes.h"
 
+#include <algorithm>
+
 #include "channel.h"
 #include "fail_loud.h"
 #include "signature-drift.h"
@@ -31,6 +33,54 @@ ncclResult_t initCollnetChannel(struct ncclComm* comm, int channelId, struct ncc
 }
 
 ncclResult_t freeChannel(struct ncclChannel*, int, int, int, struct ncclComm*) { return ncclSuccess; }
+
+// NCCL 2.32.6 moved the collective channel-layout arithmetic from enqueue.cc into src/channel.cc. It is pure and
+// the enqueue planner's results depend on it, so the REAL bodies are compiled here, not copies. The rest of
+// channel.cc (initChannel & co.) is faked above, so the file is #included inside an anonymous namespace: every
+// definition gets internal linkage, clang emits only those the forwarders below reference, and the stateful
+// functions never reach the linker. channel.cc's own #includes are pulled in first so their guards keep them out of
+// the namespace.
+#include "hip/hip_runtime.h"
+#include "gdrwrap.h"
+#include "param.h"
+#include "transport.h"
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunused-function"
+#pragma clang diagnostic ignored "-Wunused-variable"
+#pragma clang diagnostic ignored "-Wunneeded-internal-declaration"
+// Renamed too: a call such as initChannel(comm, ...) would otherwise also find the global fake by ADL.
+#define initChannel unusedRealInitChannel
+#define initNvlsChannel unusedRealInitNvlsChannel
+#define initCollnetChannel unusedRealInitCollnetChannel
+#define freeChannel unusedRealFreeChannel
+namespace channel_cc {
+namespace {
+#include CHANNEL_CC_PATH
+}  // namespace
+}  // namespace channel_cc
+#undef initChannel
+#undef initNvlsChannel
+#undef initCollnetChannel
+#undef freeChannel
+#pragma clang diagnostic pop
+
+int ncclClampChannels(int nChannels, int minChannels, int maxChannels) {
+  return channel_cc::ncclClampChannels(nChannels, minChannels, maxChannels);
+}
+
+int ncclFuncTrafficPerByte(ncclFunc_t func, int nRanks) { return channel_cc::ncclFuncTrafficPerByte(func, nRanks); }
+
+size_t ncclCollTrafficPerChannel(size_t trafficBytes, int nChannels) {
+  return channel_cc::ncclCollTrafficPerChannel(trafficBytes, nChannels);
+}
+
+struct ncclCollChannelLayout ncclComputeCollChannelLayout(size_t count, size_t elementSize, int trafficPerByte,
+                                                          size_t trafficPerChannel, size_t currentTraffic,
+                                                          int channelId, int maxChannels) {
+  return channel_cc::ncclComputeCollChannelLayout(count, elementSize, trafficPerByte, trafficPerChannel,
+                                                  currentTraffic, channelId, maxChannels);
+}
 
 int64_t rcclParamPxnOptQpUsage() { FailLoudUnfaked("channel_fakes", "rcclParamPxnOptQpUsage"); }
 

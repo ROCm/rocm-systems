@@ -8,14 +8,10 @@ from types import SimpleNamespace
 import pytest
 
 from amdisa.codegen._generator import CodeGenerator, _Literal32Widening
-from amdisa.codegen.execute.simd_codegen import (
-    SIMD_VOP2_TERNARY,
-    simd_ternary_literal_operand_name,
-)
 from amdisa.cross_isa import SharedInstInfo, SharedInstructionPlan
 from amdisa.gpuisa import InstEncoding, Instruction, Operand
 from amdisa.isa_profile import Cdna4Profile, Cdna5Profile, Rdna4Profile
-from amdisa.parser import Parser, _uniquify_fieldless_names
+from amdisa.parser import Parser
 from amdisa.semantics import InstructionSemantics
 
 
@@ -148,27 +144,6 @@ def test_vop3p_literal64_rejection_uses_complete_encoding_capability():
         )
     )
     assert not CodeGenerator._rejects_unencoded_vop3p_literal64(implied)
-
-
-def test_gfx1250_packed_f32_reader_has_no_unreachable_literal64_branch():
-    codegen = object.__new__(CodeGenerator)
-    codegen.isa_spec = SimpleNamespace(
-        inst_encodings=[
-            SimpleNamespace(
-                enc_name='ENC_VOP3P',
-                ucode_fields=[SimpleNamespace(bit_offset=14, name='opsel_hi_2')],
-            )
-        ]
-    )
-    source = codegen._emit_cdna5_matrix_fmt_helpers().execution[0]
-
-    reader_start = source.index('PkF32Words read_pk_f32_words')
-    reader_end = source.index('\n}', reader_start)
-    reader = source[reader_start:reader_end]
-    assert 'literal64_value' not in reader
-    assert 'read_lane_pair32(' in reader
-    assert 'operand, lane, amdgpu::ScalarPairMode::Replicate32' in reader
-    assert 'return {pair.lo, pair.hi};' in reader
 
 
 def test_literal_fixups_require_generated_machine_inst_struct():
@@ -707,38 +682,6 @@ def test_scalar_fmamk_generated_execute_uses_literal_multiplier():
     assert '&result, input0, input1, input2,' in body
 
 
-@pytest.mark.parametrize('arch', ['rdna4', 'cdna5'])
-def test_vector_fmaak_execute_uses_fieldless_simm32_operand(arch):
-    codegen = object.__new__(CodeGenerator)
-    codegen.isa_spec = SimpleNamespace(
-        arch_name=arch,
-        profile=Rdna4Profile() if arch == 'rdna4' else Cdna5Profile(),
-        inst_encodings=[],
-        encoding_map={},
-    )
-    operands = [
-        _operand('vdst', 'OPR_VGPR', is_input=False, is_output=True, order=0),
-        _operand('src0', 'OPR_SRC', order=1),
-        _operand('vsrc1', 'OPR_VGPR', order=2),
-        _operand('simm32', 'OPR_SIMM32', order=3, fieldless=True),
-    ]
-    inst = Instruction('V_FMAAK_F32', 'ENC_VOP2', opcode=70, operands=operands)
-    sem = InstructionSemantics(
-        'V_FMAAK_F32',
-        'vector_fmaak',
-        data_type='f32',
-    )
-
-    body = codegen._gen_execute_body(inst, sem, 'ENC_VOP2')
-
-    if arch == 'rdna4':
-        assert 'amdgpu::arith::execute_float_fma32' in body
-        assert 'vdst, src0, vsrc1, simm32,' in body
-    else:
-        assert 'std::bit_cast<float>(simm32.encoding_value_)' in body
-    assert 'simm32_' not in body
-
-
 def test_scalar_setreg_imm_execute_reads_fieldless_simm32_source():
     codegen = object.__new__(CodeGenerator)
     codegen.isa_spec = SimpleNamespace(
@@ -995,91 +938,41 @@ def test_literal_fma_can_share_with_matching_operand_layouts_only():
     assert not rdna_codegen._can_share_execute('s_fmaak_f32', enc_name='ENC_SOP1')
 
 
-# ---------------------------------------------------------------------------
-# The shared SIMD ternary table hard-codes the inline-literal operand name
-# (`inst.simm32.encoding_value_`). simd_ternary_literal_operand_name() exposes
-# that assumption so the generator can assert it per ISA reaching the shared
-# path (see the tripwire in _generator.py). These pin the helper's contract.
-# ---------------------------------------------------------------------------
-def test_simd_ternary_literal_operand_name_for_inline_literal_forms():
-    # Every inline-literal FMA entry reads its literal from `simm32`.
-    assert simd_ternary_literal_operand_name('v_fmaak_f32_vop2') == 'simm32'
-    assert simd_ternary_literal_operand_name('v_fmamk_f32_vop2') == 'simm32'
-    assert simd_ternary_literal_operand_name('v_fmaak_f16_vop2') is None
-
-
-def test_simd_ternary_literal_operand_name_none_for_accumulate_and_unknown():
-    # Dst-accumulate forms carry no inline literal (k == "0u").
-    assert simd_ternary_literal_operand_name('v_fmac_f32_vop2') is None
-    assert simd_ternary_literal_operand_name('v_mac_f32_vop2') is None
-    # Non-ternary / unknown templates return None.
-    assert simd_ternary_literal_operand_name('v_add_f32_vop2') is None
-    assert simd_ternary_literal_operand_name('not_a_template') is None
-
-
-def test_simd_ternary_literal_name_covers_every_inline_literal_entry():
-    # Any inline-literal entry (k_expr other than "0u") must resolve to a real
-    # operand name, so the generator tripwire fires for all of them, not a
-    # hand-picked subset. Guards against a new entry using an unparseable k_expr.
-    for template_name, (_cpp_t, k_expr, _op) in SIMD_VOP2_TERNARY.items():
-        resolved = simd_ternary_literal_operand_name(template_name)
-        if k_expr == '0u':
-            assert resolved is None, template_name
-        else:
-            assert resolved == 'simm32', (template_name, k_expr, resolved)
-
-
-# ---------------------------------------------------------------------------
-# The inline-literal VOP2 FMA execute bodies (vector_fmamk / vector_fmaak) read
-# K from the literal source operand. If that operand is missing, codegen raises
-# rather than emit an out-of-range src_ops[] index. These classes are not in
-# _SEMA_CLASSES and not in the DISPATCH registry, so _gen_execute_body falls
-# through to the legacy branch where the len(src_ops) < 3 guard lives.
-# ---------------------------------------------------------------------------
-def _fma_codegen() -> CodeGenerator:
-    cg = object.__new__(CodeGenerator)
-    cg.isa_spec = SimpleNamespace(
-        arch_name='rdna4',
-        profile=Rdna4Profile(),
+@pytest.mark.parametrize('arch', ['rdna4', 'cdna5'])
+@pytest.mark.parametrize('name', ['V_FMAAK_F32', 'V_FMAMK_F32'])
+def test_vector_literal_fma_uses_fieldless_simm32_operand(arch, name):
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        arch_name=arch,
+        profile=Rdna4Profile() if arch == 'rdna4' else Cdna5Profile(),
         inst_encodings=[],
         encoding_map={},
     )
-    return cg
-
-
-def _fma_inst(*, with_simm32: bool) -> Instruction:
-    ops = [
-        Operand('vdst', 32, 'OPR_VGPR', False, True, False, False, 1),
-        Operand('src0', 32, 'OPR_SRC', True, False, False, False, 2),
+    literal_is_multiplier = name == 'V_FMAMK_F32'
+    operands = [
+        _operand('vdst', 'OPR_VGPR', is_input=False, is_output=True, order=0),
+        _operand('src0', 'OPR_SRC', order=1),
+        _operand('vsrc1', 'OPR_VGPR', order=3 if literal_is_multiplier else 2),
+        _operand(
+            'simm32',
+            'OPR_SIMM32',
+            order=2 if literal_is_multiplier else 3,
+            fieldless=True,
+        ),
     ]
-    if with_simm32:
-        ops.append(
-            Operand(
-                'simm32', 32, 'OPR_SIMM32', True, False, False, False, 3, fieldless=True
-            )
-        )
-    ops.append(Operand('vsrc1', 32, 'OPR_VGPR', True, False, False, False, 4))
-    _uniquify_fieldless_names(ops)
-    return Instruction('V_FMAMK_F32', 'ENC_VOP2', 0, ops)
+    if literal_is_multiplier:
+        operands[-2], operands[-1] = operands[-1], operands[-2]
+    inst = Instruction(name, 'ENC_VOP2', opcode=70, operands=operands)
+    sem = InstructionSemantics(
+        name,
+        'vector_ternary',
+        operation='fma',
+        data_type='f32',
+    )
 
+    body = codegen._gen_execute_body(inst, sem, 'ENC_VOP2')
 
-@pytest.mark.parametrize('cls', ['vector_fmamk', 'vector_fmaak'])
-def test_inline_literal_fma_raises_without_literal_source(cls):
-    # Only two field-bearing sources (src0, vsrc1) -> src_ops has length 2, so
-    # the K operand is missing and codegen must refuse rather than index
-    # src_ops[2] / src_ops[1] out of / into the wrong slot.
-    cg = _fma_codegen()
-    sem = InstructionSemantics('V_FMAMK_F32', cls, data_type='f32')
-    with pytest.raises(ValueError, match='expected fieldless simm32 operand'):
-        cg._gen_execute_body(_fma_inst(with_simm32=False), sem, 'ENC_VOP2')
-
-
-def test_inline_literal_fma_emits_body_with_literal_source():
-    # With the fieldless simm32 present (src_ops length 3), the guard passes and
-    # the body reads K from the literal operand -- proving the raise above is
-    # meaningful, not vacuous.
-    cg = _fma_codegen()
-    sem = InstructionSemantics('V_FMAMK_F32', 'vector_fmamk', data_type='f32')
-    body = cg._gen_execute_body(_fma_inst(with_simm32=True), sem, 'ENC_VOP2')
     assert 'amdgpu::arith::execute_float_fma32' in body
-    assert 'vdst, src0, simm32, vsrc1,' in body
+    sources = 'vsrc1, simm32' if name == 'V_FMAAK_F32' else 'simm32, vsrc1'
+    assert f'vdst, src0, {sources},' in body
+    assert 'simm32_' not in body

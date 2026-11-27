@@ -7,6 +7,8 @@
 // ProfilerPluginClose: a profiler plugin that exposes no usable interface must be
 // unloaded when ncclProfilerPluginInit() rejects it (src/plugin/profiler.cc, fail:
 // path), not left mapped for the lifetime of the process.
+//
+// DebugAttn: RCCL logs the stub's rejection at ATTN, because NCCL_PROFILER_PLUGIN asked for it by name.
 
 #include <gtest/gtest.h>
 #include <rccl/rccl.h>
@@ -18,11 +20,17 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
+#include <sstream>
 #include <string>
 
 #include "common/ProcessIsolatedTestRunner.hpp"
 
 namespace RcclUnitTesting {
+
+// Re-reads NCCL_DEBUG* on the next log line. Exported from src/debug.cc.
+extern "C" void ncclResetDebugInitInternal();
+
 namespace {
 
 // MAX_STR_LEN in src/plugin/plugin_open.cc: NCCL_PROFILER_PLUGIN is copied into a
@@ -59,23 +67,76 @@ bool fileHasContent(const std::string& path) {
   return f.peek() != std::ifstream::traits_type::eof();
 }
 
-// The stub is built and installed beside the test binary, so it is always one step
-// away from wherever this executable is running from -- build tree or install.
+// In the build tree the stub sits beside the test binary; in an install it is in
+// the library directory. Check both so the test runs from either layout.
 std::string stubPluginPath() {
   std::error_code ec;
   std::filesystem::path exe = std::filesystem::read_symlink("/proc/self/exe", ec);
   if (ec) return "";
-  return (exe.parent_path() / RCCL_TEST_PROFILER_STUB_NAME).string();
+  const std::filesystem::path dir = exe.parent_path();
+  const std::filesystem::path candidates[] = {
+    dir / RCCL_TEST_PROFILER_STUB_NAME,                                           // build tree
+    dir.parent_path() / RCCL_TEST_INSTALL_LIBDIR / RCCL_TEST_PROFILER_STUB_NAME,  // install tree
+  };
+  for (const std::filesystem::path& candidate : candidates) {
+    std::error_code exists_ec;
+    if (std::filesystem::exists(candidate, exists_ec)) return candidate.string();
+  }
+  return "";
 }
 
-// Returns the reason this host cannot run the test, or "" when it can.
-// GTEST_SKIP() must be issued by the caller: it expands to a bare return and
-// would otherwise only leave this helper, letting the test body run on.
-std::string gpuSkipReason() {
-  int deviceCount = 0;
-  if (hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount < 1)
-    return "requires at least one GPU";
+// Call before RUN_ISOLATED_TEST: a GTEST_SKIP inside the isolated child is scored as a pass.
+std::string stubSkipReason() {
+  const std::string stubPath = stubPluginPath();
+  if (stubPath.size() >= kPluginPathLimit) {
+    return "stub path exceeds the " + std::to_string(kPluginPathLimit) + " byte plugin path limit: " + stubPath;
+  }
   return "";
+}
+
+// Brings a 1-rank comm up and down with the stub requested and returns in @p log what RCCL wrote.
+void logStubRejection(const char* debug, const char* debugLevels, std::string* log) {
+  ASSERT_EQ(hipSetDevice(0), hipSuccess);
+  const std::string stubPath = stubPluginPath();
+  ASSERT_FALSE(stubPath.empty()) << "could not resolve the test binary's own directory";
+  ASSERT_EQ(access(stubPath.c_str(), R_OK), 0) << "stub profiler plugin missing: " << stubPath;
+  ScopedTempFile logFile("/tmp/rccl_debug_attn_XXXXXX");
+  ASSERT_TRUE(logFile.valid()) << "could not create the debug log file";
+
+  // An inherited setting could add levels or filter out the INIT subsystem.
+  for (const char* var : {"NCCL_DEBUG_LEVELS", "NCCL_DEBUG_SUBSYS", "NCCL_WARN_ENABLE_DEBUG_INFO"}) {
+    ASSERT_EQ(unsetenv(var), 0);
+  }
+  if (debugLevels) {
+    ASSERT_EQ(setenv("NCCL_DEBUG_LEVELS", debugLevels, 1), 0);
+  }
+  ASSERT_EQ(setenv("NCCL_DEBUG", debug, 1), 0);
+  ASSERT_EQ(setenv("NCCL_DEBUG_FILE", logFile.path().c_str(), 1), 0);
+  ASSERT_EQ(setenv("NCCL_PROFILER_PLUGIN", stubPath.c_str(), 1), 0);
+  ncclResetDebugInitInternal();
+
+  ncclUniqueId id;
+  ASSERT_EQ(ncclGetUniqueId(&id), ncclSuccess);
+  ncclComm_t comm = nullptr;
+  ASSERT_EQ(ncclCommInitRank(&comm, 1, id, 0), ncclSuccess);
+  ASSERT_EQ(ncclCommDestroy(comm), ncclSuccess);
+
+  // RCCL line-buffers NCCL_DEBUG_FILE, so every line it logged is on disk.
+  std::ifstream f(logFile.path());
+  log->assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
+}
+
+// True if @p log has the line RCCL writes when it rejects the stub, and that line
+// contains @p tag.
+bool loggedRejection(const std::string& log, const std::string& tag) {
+  std::istringstream lines(log);
+  for (std::string line; std::getline(lines, line);) {
+    if (line.find("External profiler plugin") != std::string::npos &&
+        line.find("is unsupported") != std::string::npos && line.find(tag) != std::string::npos) {
+      return true;
+    }
+  }
+  return false;
 }
 
 } // namespace
@@ -83,17 +144,17 @@ std::string gpuSkipReason() {
 // Isolated because the outcome of the plugin probe is latched in a process global:
 // once a plugin has been rejected, later communicators skip the load entirely.
 TEST(ProfilerPluginClose, UnusablePluginIsUnloaded) {
+  if (auto reason = stubSkipReason(); !reason.empty()) GTEST_SKIP() << reason;
   RUN_ISOLATED_TEST("ProfilerPluginClose.UnusablePluginIsUnloaded", []() {
-    if (auto reason = gpuSkipReason(); !reason.empty()) GTEST_SKIP() << reason;
     ASSERT_EQ(hipSetDevice(0), hipSuccess);
 
     const std::string stubPath = stubPluginPath();
-    ASSERT_FALSE(stubPath.empty()) << "could not resolve the test binary's own directory";
+    ASSERT_FALSE(stubPath.empty())
+        << "stub profiler plugin not found beside the test binary or in ../"
+           RCCL_TEST_INSTALL_LIBDIR " "
+           "(or /proc/self/exe could not be resolved)";
     ASSERT_EQ(access(stubPath.c_str(), R_OK), 0)
         << "stub profiler plugin missing: " << stubPath;
-    if (stubPath.size() >= kPluginPathLimit)
-      GTEST_SKIP() << "stub path exceeds the " << kPluginPathLimit
-                   << " byte plugin path limit and would never be loaded: " << stubPath;
 
     ScopedTempFile loadMarker("/tmp/rccl_profiler_stub_load_XXXXXX");
     ASSERT_TRUE(loadMarker.valid()) << "could not create the plugin load marker";
@@ -118,6 +179,43 @@ TEST(ProfilerPluginClose, UnusablePluginIsUnloaded) {
     if (handle != nullptr) dlclose(handle);
     EXPECT_EQ(handle, nullptr)
         << "profiler plugin " << stubPath << " is still mapped after comm create/destroy";
+  });
+}
+
+// NCCL_DEBUG=ATTN shows ATTN messages on top of WARN, but not INFO. Releases before
+// NCCL 2.32 do not recognize the value and log nothing.
+TEST(DebugAttn, RejectedProfilerPluginLoggedAtAttn) {
+  if (auto reason = stubSkipReason(); !reason.empty()) GTEST_SKIP() << reason;
+  RUN_ISOLATED_TEST("DebugAttn.RejectedProfilerPluginLoggedAtAttn", []() {
+    std::string log;
+    logStubRejection("ATTN", nullptr, &log);
+    if (::testing::Test::HasFatalFailure()) return;
+    EXPECT_TRUE(loggedRejection(log, "NCCL ATTN")) << "NCCL_DEBUG=ATTN log:\n" << log;
+    EXPECT_EQ(log.find("NCCL INFO"), std::string::npos) << "NCCL_DEBUG=ATTN enabled INFO:\n" << log;
+  });
+}
+
+// NCCL_DEBUG_LEVELS adds single levels to NCCL_DEBUG, here ATTN to a WARN baseline.
+TEST(DebugAttn, DebugLevelsAddsAttnToWarn) {
+  if (auto reason = stubSkipReason(); !reason.empty()) GTEST_SKIP() << reason;
+  RUN_ISOLATED_TEST("DebugAttn.DebugLevelsAddsAttnToWarn", []() {
+    std::string log;
+    logStubRejection("WARN", "ATTN", &log);
+    if (::testing::Test::HasFatalFailure()) return;
+    EXPECT_TRUE(loggedRejection(log, "NCCL ATTN")) << "NCCL_DEBUG=WARN NCCL_DEBUG_LEVELS=ATTN log:\n" << log;
+  });
+}
+
+// Control: INFO always shows the rejection, so a failure above is about the level.
+TEST(DebugAttn, RejectedProfilerPluginLoggedAtInfo) {
+  if (auto reason = stubSkipReason(); !reason.empty()) GTEST_SKIP() << reason;
+  RUN_ISOLATED_TEST("DebugAttn.RejectedProfilerPluginLoggedAtInfo", []() {
+    std::string log;
+    logStubRejection("INFO", nullptr, &log);
+    if (::testing::Test::HasFatalFailure()) return;
+    EXPECT_TRUE(loggedRejection(log, "")) << "NCCL_DEBUG=INFO log:\n" << log;
+    // Pins the prefix that RejectedProfilerPluginLoggedAtAttn expects to be absent.
+    EXPECT_NE(log.find("NCCL INFO"), std::string::npos) << "NCCL_DEBUG=INFO logged no INFO line:\n" << log;
   });
 }
 

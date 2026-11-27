@@ -142,19 +142,29 @@ __device__ void rocshmem_query_thread(int *provided) {
 #endif
 }
 
-__device__ size_t rocshmem_query_tdm_lds_bytes() {
-#if ROCSHMEM_TDM_ENABLED
-  return tdm::lds_bytes_for_tile(constmem.tdm_tile_bytes);
+__device__ size_t rocshmem_query_lds_stage_bytes() {
+#if ROCSHMEM_LDS_STAGE_ENABLED
+  return lds_stage::lds_bytes_for_tile(constmem.lds_stage_tile_bytes);
 #else
   return 0;
 #endif
 }
 
-__device__ void rocshmem_set_tdm_lds([[maybe_unused]] void *lds,
-                                     [[maybe_unused]] size_t lds_bytes) {
-#if ROCSHMEM_TDM_ENABLED
-  tdm::set_lds(lds, lds_bytes);
+// Deprecated: Use rocshmem_query_lds_stage_bytes() instead
+__device__ size_t rocshmem_query_tdm_lds_bytes() {
+  return rocshmem_query_lds_stage_bytes();
+}
+
+__device__ void rocshmem_set_lds_stage([[maybe_unused]] void *lds,
+                                       [[maybe_unused]] size_t lds_bytes) {
+#if ROCSHMEM_LDS_STAGE_ENABLED
+  lds_stage::set_lds(lds, lds_bytes);
 #endif
+}
+
+// Deprecated: Use rocshmem_set_lds_stage() instead
+__device__ void rocshmem_set_tdm_lds(void *lds, size_t lds_bytes) {
+  rocshmem_set_lds_stage(lds, lds_bytes);
 }
 
 __device__ void rocshmem_wg_finalize() {}
@@ -1322,8 +1332,8 @@ __device__ __forceinline__ void direct_destroy_ctx(rocshmem_ctx_t *ctx) {
 
 __device__ int rocshmem_wg_ctx_create(long options, rocshmem_ctx_t *ctx) {
   LOGD_API("device::wg_ctx_create (options=%ld)", options);
-#if ROCSHMEM_TDM_ENABLED
-  tdm::set_lds(nullptr, 0);
+#if ROCSHMEM_LDS_STAGE_ENABLED
+  lds_stage::set_lds(nullptr, 0);
 #endif
   bool result{true};
   if (get_flat_block_id() == 0) {
@@ -1842,9 +1852,9 @@ __global__ ATTR_NO_INLINE void rocshmem_alltoallmem_kernel(rocshmem_team_t team,
                                                            const void *source,
                                                            size_t size) {
   // rocSHMEM owns this launch (see alltoallmem_on_stream in host.cpp), so it
-  // can safely claim the kernel's whole dynamic LDS for the TDM fast path
+  // can safely claim the kernel's whole dynamic LDS for the LDS-staged copy fast path
   extern __shared__ uint8_t lds[];
-  rocshmem_set_tdm_lds(lds, rocshmem_query_tdm_lds_bytes());
+  rocshmem_set_lds_stage(lds, rocshmem_query_lds_stage_bytes());
   rocshmem_ctx_alltoall_wg<char>(ROCSHMEM_CTX_DEFAULT, team, (char *) dest,
                                  (const char *) source, (int) size);
 }
@@ -1887,9 +1897,9 @@ __global__ ATTR_NO_INLINE void rocshmem_broadcastmem_kernel(
     rocshmem_team_t team, void *dest, const void *source, size_t nelems,
     int pe_root) {
   // rocSHMEM owns this launch (see broadcastmem_on_stream in host.cpp), so it
-  // can safely claim the kernel's whole dynamic LDS for the TDM fast path --
+  // can safely claim the kernel's whole dynamic LDS for the LDS-staged copy fast path --
   extern __shared__ uint8_t lds[];
-  rocshmem_set_tdm_lds(lds, rocshmem_query_tdm_lds_bytes());
+  rocshmem_set_lds_stage(lds, rocshmem_query_lds_stage_bytes());
   rocshmem_broadcast_wg<char>(ROCSHMEM_CTX_DEFAULT, team, (char *) dest, (const char *) source,
                               (int) nelems, pe_root);
 }
@@ -1899,10 +1909,10 @@ __global__ ATTR_NO_INLINE void rocshmem_getmem_kernel(void *dest,
                                                       size_t nelems, int pe) {
   // rocSHMEM owns this launch (see putmem_on_stream/getmem_on_stream in
   // host.cpp), so it can safely claim the kernel's whole dynamic LDS for the
-  // TDM fast path -- this is the same opt-in rocshmem_set_tdm_lds() API any
+  // LDS-staged copy fast path -- this is the same opt-in rocshmem_set_lds_stage() API any
   // user kernel would call, just wired up internally here.
   extern __shared__ uint8_t lds[];
-  rocshmem_set_tdm_lds(lds, rocshmem_query_tdm_lds_bytes());
+  rocshmem_set_lds_stage(lds, rocshmem_query_lds_stage_bytes());
   // Use work-group collective getmem with default context
   rocshmem_getmem_wg(dest, source, nelems, pe);
 }
@@ -1911,7 +1921,7 @@ __global__ ATTR_NO_INLINE void rocshmem_putmem_kernel(void *dest,
                                                       const void *source,
                                                       size_t nelems, int pe) {
   extern __shared__ uint8_t lds[];
-  rocshmem_set_tdm_lds(lds, rocshmem_query_tdm_lds_bytes());
+  rocshmem_set_lds_stage(lds, rocshmem_query_lds_stage_bytes());
   // Use work-group collective putmem with default context
   rocshmem_putmem_wg(dest, source, nelems, pe);
 }
@@ -1920,7 +1930,7 @@ __global__ ATTR_NO_INLINE void rocshmem_putmem_signal_kernel(
     void *dest, const void *source, size_t nelems, uint64_t *sig_addr,
     uint64_t signal, int sig_op, int pe) {
   extern __shared__ uint8_t lds[];
-  rocshmem_set_tdm_lds(lds, rocshmem_query_tdm_lds_bytes());
+  rocshmem_set_lds_stage(lds, rocshmem_query_lds_stage_bytes());
   // Use work-group collective putmem_signal with default context
   rocshmem_putmem_signal_wg(dest, source, nelems, sig_addr, signal, sig_op, pe);
 }

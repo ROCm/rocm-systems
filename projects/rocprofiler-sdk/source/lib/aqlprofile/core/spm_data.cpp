@@ -48,6 +48,9 @@ string_format(const std::string& format, Args... args)
 #define DEBUG_SPM   0
 #define SUPPORT_XCC 1
 
+// spm_v2.cpp defines different types with these names.
+namespace
+{
 struct spm_set_dest_buffer_args
 {
     hsa_agent_t agent;
@@ -77,6 +80,7 @@ struct spm_state_t : public spm_set_dest_buffer_args
     hsa_ven_amd_aqlprofile_data_callback_t  callback;
     void*                                   data;
 };
+}  // namespace
 
 #if DEBUG_SPM >= 2
 static int data_ready_check[2] = {};

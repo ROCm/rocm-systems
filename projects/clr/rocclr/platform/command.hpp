@@ -28,6 +28,7 @@
 #include <algorithm>
 #include <atomic>
 #include <functional>
+#include <utility>
 #include <vector>
 
 namespace amd {
@@ -104,6 +105,11 @@ class Event : public RuntimeObject {
                                             //!< 2 - system scope, 1 - device scope,
                                             //!< 0 - ignore, -1 - invalid
   std::vector<void*> dep_hw_events_;  //!< Dependent HW events associated with SW event
+  //! HW events that GPU waits of this command read, held until the command completes
+  std::vector<void*> pinned_hw_events_;
+
+  //! Releases pinned_hw_events_
+  void releasePinnedHwEvents();
  protected:
   static const EventWaitList nullWaitList;
   const Device* device_;  //!< Device, this event associated with
@@ -237,6 +243,14 @@ class Event : public RuntimeObject {
   //! Returns HW event, associated with the current command
   void* HwEvent() const { return hw_event_; }
 
+  //! Holds a HW event that a GPU wait of this command reads until the command completes, which
+  //! follows the wait. Takes over one reference. Called while the command is submitted, before it
+  //! can complete
+  void PinHwEvent(void* hw_event) { pinned_hw_events_.push_back(hw_event); }
+
+  //! Hands the pinned HW events and their references to the caller
+  std::vector<void*> TakePinnedHwEvents() { return std::exchange(pinned_hw_events_, {}); }
+
   //! Returns notify even associated with the current command
   Event* NotifyEvent() const { return notify_event_; }
 
@@ -356,7 +370,6 @@ class Command : public Event {
 
   bool packetCapturing_ = false;       //!< Flag to enable/disable graph gpu packet capture
   GraphPacketCaptureContext* graphCapture_ = nullptr;  //!< Capture context, owned by the graph node
-  address kernArgOffset_ = nullptr;  //!< KernelArg buffer to used when graph capturing is enabled
  protected:
   bool cpu_wait_ = false;  //!< If true, then the command was issued for CPU/GPU sync
 
@@ -1106,8 +1119,8 @@ class BatchMemoryOperationCommand : public Command {
                               size_t paramSize)
       : Command(queue, cmdType, eventWaitList),
         count_(count),
-        paramArray_(paramArray),
         flags_(flags),
+        paramArray_(paramArray),
         paramSize_(paramSize) {
     // Sanity check
     assert(((cmdType == ROCCLR_COMMAND_BATCH_STREAM)) && "Invalid batch memory operation");
@@ -1124,7 +1137,7 @@ class BatchMemoryOperationCommand : public Command {
 
  private:
   uint32_t count_;          // !< The number of operations in the array.
-  uint32_t flags_;          // !< Reserved for future expansion. Must be 0.
+  [[maybe_unused]] uint32_t flags_;  // !< Reserved for future expansion. Must be 0.
   const void* paramArray_;  // !< Pointer to the array of individual operations
   size_t paramSize_;        // !< size in bytes of the param array passed
 };
@@ -1777,7 +1790,7 @@ class Marker : public Command {
   bool isMarkerCommand() const override { return true; }
 
   //! The actual command implementation.
-  virtual void submit(device::VirtualDevice& device) { device.submitMarker(*this); }
+  void submit(device::VirtualDevice& device) override { device.submitMarker(*this); }
 };
 
 class AccumulateCommand : public Command {
@@ -2356,8 +2369,8 @@ class SvmPrefetchAsyncCommand : public Command {
         dev_ptr_(dev_ptr),
         count_(count),
         cpu_access_(cpu_access),
-        dev_(dev),
-        numa_id_(numa_id) {}
+        numa_id_(numa_id),
+        dev_(dev) {}
 
   virtual void submit(device::VirtualDevice& device) { device.submitSvmPrefetchAsync(*this); }
 

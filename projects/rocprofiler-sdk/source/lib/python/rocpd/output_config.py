@@ -50,6 +50,17 @@ def _generate_attribute_docs(data):
     return "\n\t- ".join(properties)
 
 
+class _DeprecatedOutputPath(argparse.Action):
+    """Handles the deprecated --output-path: warn, then store like --output-directory."""
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        print(
+            "\nDeprecated: --output-path is deprecated in rocpd. Use --output-directory instead\n",
+            file=sys.stderr,
+        )
+        setattr(namespace, self.dest, values)
+
+
 class output_config(libpyrocpd.output_config):
     __doc__ = f"""Output configuration
 
@@ -133,9 +144,20 @@ def add_args(parser):
     )
     io_options.add_argument(
         "-d",
-        "--output-path",
+        "--output-directory",
+        metavar="OUTPUT_DIRECTORY",
+        dest="output_path",
         help="Sets the output path where the output files will be saved (default path: `./rocpd-output-data`)",
         default=os.environ.get("ROCPD_OUTPUT_PATH", "./rocpd-output-data"),
+        type=str,
+        required=False,
+    )
+    io_options.add_argument(
+        "--output-path",
+        dest="output_path",
+        action=_DeprecatedOutputPath,
+        help=argparse.SUPPRESS,
+        default=argparse.SUPPRESS,  # keeps the --output-directory / ROCPD_OUTPUT_PATH default intact
         type=str,
         required=False,
     )

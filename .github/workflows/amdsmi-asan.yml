@@ -1,13 +1,15 @@
 # ---------------------------------------------------------------------------
-# AMD-SMI ASAN CI.
+# AMD-SMI sanitizer CI (ASAN and UBSan).
 #
 # Builds AMD-SMI with AddressSanitizer (ASAN, including LeakSanitizer) and
-# runs its tests, so memory errors fail CI. AMD-SMI has no GPU kernels, so
-# host ASAN covers all of it.
+# runs its tests, so memory errors fail CI, and builds it again with
+# UndefinedBehaviorSanitizer (UBSan) to report undefined behavior. AMD-SMI has
+# no GPU kernels, so host sanitizers cover all of it.
 #
 #   unit: hardware-free unit tests on a GitHub-hosted runner.
-#   gpu:  full test suite plus amd-smi CLI sweeps for memory errors and for
-#         leaks on a self-hosted GPU runner.
+#   gpu:  full test suite on a self-hosted GPU runner, under ASAN (plus
+#         amd-smi CLI sweeps for memory errors and for leaks) and under UBSan.
+#         The UBSan leg does not gate until AMDSMI_SANITIZE_GATING is 'true'.
 #
 # Both jobs build with GCC in the same pinned image, so findings reproduce
 # locally with `docker run` on it.
@@ -120,7 +122,7 @@ jobs:
           retention-days: 7
 
   gpu:
-    name: ASAN GPU tests
+    name: ${{ matrix.name }}
     # Privileged self-hosted runner: never auto-run untrusted fork-PR code on
     # it. Mirrors the guard in amdsmi-build.yml.
     if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
@@ -128,14 +130,28 @@ jobs:
       - self-hosted
       - ${{ vars.RUNNER_TYPE }}
     timeout-minutes: 45
+    # The UBSan leg is not gating until repo variable AMDSMI_SANITIZE_GATING is
+    # 'true'. The ASAN leg always gates.
+    continue-on-error: ${{ matrix.sanitizer == 'undefined' && vars.AMDSMI_SANITIZE_GATING != 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - sanitizer: address
+            name: ASAN GPU tests
+          - sanitizer: undefined
+            name: UBSan GPU tests
     container:
-      image: ubuntu:24.04@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3 # noble, 2026-09-11
+      image: ${{ vars.ASAN_DOCKER_IMAGE || 'ubuntu:24.04@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3' }} # noble, 2026-09-11
       options: --rm --privileged --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -u root
     env:
-      # Skip the tests that change GPU settings: an ASAN abort mid-test would
+      # Skip the tests that change GPU settings: a sanitizer abort mid-test would
       # leave them changed on this shared runner. amdsmi-build.yml runs them.
       AMDSMI_NON_PRIVILEGED: 1
       AMDSMI_PREFIX: /opt/amdsmi-asan
+      SANITIZER: ${{ matrix.sanitizer }}
+      # Only the UBSan leg reads this. The first report ends the whole amdsmitst run.
+      UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
 
     steps:
       # The official image ships no git, which actions/checkout needs to clone
@@ -162,12 +178,22 @@ jobs:
             build-essential cmake ninja-build pkg-config python3 \
             libdrm-dev libnl-3-dev libnl-genl-3-dev libmnl-dev libgtest-dev
 
+      # AMD-SMI has a CMake option for ASAN only, so the UBSan leg passes the
+      # flags directly.
       - name: Configure
         run: |
           set -euo pipefail
+          if [ "$SANITIZER" = address ]; then
+            san_args=(-DADDRESS_SANITIZER=ON)
+          else
+            san_flags="-fsanitize=undefined -fno-omit-frame-pointer"
+            san_args=(-DCMAKE_C_FLAGS="$san_flags" -DCMAKE_CXX_FLAGS="$san_flags" \
+              -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=undefined" \
+              -DCMAKE_SHARED_LINKER_FLAGS="-fsanitize=undefined")
+          fi
           cmake -S "$GITHUB_WORKSPACE/projects/amdsmi" -B "$BUILD_DIR" -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug \
-            -DADDRESS_SANITIZER=ON \
+            "${san_args[@]}" \
             -DBUILD_TESTS=ON \
             -DBUILD_CUID=ON \
             -DENABLE_ESMI_LIB=ON
@@ -183,7 +209,24 @@ jobs:
           cmake --install "$BUILD_DIR" --prefix "$AMDSMI_PREFIX"
           echo "$AMDSMI_PREFIX/bin" >> "$GITHUB_PATH"
 
-      - name: Run full test suite under ASAN
+      # A build that lost the UBSan flags would run the suite with no sanitizer
+      # and pass, so check that the installed library calls the UBSan runtime.
+      # Not piped into grep -q: under pipefail nm would fail when grep closes
+      # the pipe early.
+      - name: Check that UBSan is active
+        if: ${{ !cancelled() && matrix.sanitizer == 'undefined' && steps.install.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RESULTS_DIR"
+          lib="$(find -L "$AMDSMI_PREFIX" -name 'libamd_smi.so*' -type f -print -quit)"
+          [ -n "$lib" ] || { echo "::error::libamd_smi.so not found under $AMDSMI_PREFIX"; exit 1; }
+          nm -D --undefined-only "$lib" > "$RESULTS_DIR/ubsan_symbols.txt"
+          grep -qF __ubsan_handle_ "$RESULTS_DIR/ubsan_symbols.txt" || {
+            echo "::error::libamd_smi.so has no UBSan runtime calls: the build is not instrumented"
+            exit 1
+          }
+
+      - name: Run full test suite under ${{ matrix.sanitizer == 'address' && 'ASAN' || 'UBSan' }}
         run: |
           set -euo pipefail
           mkdir -p "$RESULTS_DIR"
@@ -202,7 +245,7 @@ jobs:
       # sees overflows of ctypes buffers. The interpreter leaks, so no LSan
       # here; the "Check amd-smi CLI for leaks" step covers leaks.
       - name: Run amd-smi CLI under ASAN
-        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        if: ${{ !cancelled() && matrix.sanitizer == 'address' && steps.install.outcome == 'success' }}
         run: |
           set -euo pipefail
           mkdir -p "$RESULTS_DIR/cli"
@@ -237,7 +280,7 @@ jobs:
       # preload, so ASAN loads with the library and sees only its C++
       # allocations. Run the CLI that way, so such a leak fails here too.
       - name: Check amd-smi CLI for leaks
-        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        if: ${{ !cancelled() && matrix.sanitizer == 'address' && steps.install.outcome == 'success' }}
         run: |
           set -euo pipefail
           mkdir -p "$RESULTS_DIR/cli-leaks"
@@ -278,7 +321,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: amdsmi-asan-gpu-results
+          name: amdsmi-asan-gpu-results${{ matrix.sanitizer == 'undefined' && '-ubsan' || '' }}
           path: ${{ env.RESULTS_DIR }}
           if-no-files-found: warn
           retention-days: 7

@@ -132,10 +132,11 @@ inline void AtomicSetPacketHeader(uint16_t header, uint16_t setup,
 uint64_t WriteBarrierAndToQueue(hsa_queue_t* queue, hsa_signal_t dependency,
                                 hsa_signal_t completion_signal);
 
-/// Returns the agent's global memory pool with
-/// HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_EXTENDED_SCOPE_FINE_GRAINED, or a pool
-/// with handle 0 if it has none.
-hsa_amd_memory_pool_t FindExtendedFineGrainedPool(hsa_agent_t agent);
+/// Returns the agent's memory pool that hsa_amd_signal_batch_create accepts
+/// (HSA_AMD_MEMORY_POOL_INFO_SIGNAL_CAPABLE), or a pool with handle 0 if it has
+/// none. Which pool that is depends on the GPU: extended-scope fine-grained on
+/// gfx94x/gfx95x, coarse-grained on gfx12+.
+hsa_amd_memory_pool_t FindSignalCapablePool(hsa_agent_t agent);
 
 /// @brief This function returns the Host Address for a code object given its device address
 /// @param[in] device device address

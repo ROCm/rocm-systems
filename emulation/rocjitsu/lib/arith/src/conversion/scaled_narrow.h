@@ -1,0 +1,50 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+// Source layouts and ISA-specific backends for scaled narrow-float conversion.
+#pragma once
+
+#include <stdint.h>
+
+namespace rocjitsu::arith {
+enum class ScaledNarrowSource { F32, F16, Bf16 };
+enum class ScaledNarrowDestination { Fp8, Bf8, Fp4, Fp6, Bf6 };
+
+// Active FP32 significand mask corresponding to the source format's precision.
+[[maybe_unused]] static constexpr uint32_t scaled_sig_mask(ScaledNarrowSource source) {
+  return source == ScaledNarrowSource::F32   ? 0xffffffffU
+         : source == ScaledNarrowSource::F16 ? 0xffffe000U
+                                             : 0xffff0000U;
+}
+
+// Scale and narrow a validated wave on the named ISA. Keep inactive lanes and
+// unselected destination bits unchanged; on scale exponent 255, active lanes
+// write canonical NaN for FP8/BF8 or signed max for FP4/FP6/BF6.
+// upper_a supplies the second FP32 source for FP4 stochastic rounding; all
+// other forms ignore it. shift selects the destination byte or halfword.
+template <ScaledNarrowDestination Dst, bool Stochastic>
+void scaled_narrow_x86_64_v3(int lanes, uint64_t exec_mask, ScaledNarrowSource source,
+                             bool saturate, bool flush_input, int shift, uint32_t *d,
+                             const uint32_t *a, const uint32_t *b, const uint32_t *scale,
+                             const uint32_t *upper_a);
+template <ScaledNarrowDestination Dst, bool Stochastic>
+void scaled_narrow_x86_64_v4(int lanes, uint64_t exec_mask, ScaledNarrowSource source,
+                             bool saturate, bool flush_input, int shift, uint32_t *d,
+                             const uint32_t *a, const uint32_t *b, const uint32_t *scale,
+                             const uint32_t *upper_a);
+// FP32 NaN used when the CDNA5 E8M0 scale byte is 0xff.
+inline constexpr uint32_t kE8M0ScaleNaNBits = 0x7fc00000U;
+
+// Narrow 32 gfx950 or 8/16 gfx1250 elements, preserving inactive lanes; on
+// scale exponent 255, active gfx950 lanes saturate each element to signed max.
+template <ScaledNarrowDestination Dst, bool Stochastic, bool Gfx1250 = false>
+void wide_scaled_narrow_x86_64_v3(int lanes, uint64_t exec_mask, ScaledNarrowSource source,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, const uint32_t *scale, bool saturate,
+                                  bool flush_input);
+template <ScaledNarrowDestination Dst, bool Stochastic, bool Gfx1250 = false>
+void wide_scaled_narrow_x86_64_v4(int lanes, uint64_t exec_mask, ScaledNarrowSource source,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, const uint32_t *scale, bool saturate,
+                                  bool flush_input);
+} // namespace rocjitsu::arith

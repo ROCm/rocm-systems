@@ -11,6 +11,11 @@ if(BUILD_TESTS)
   option(RCCL_HAS_RMA_IB_PROXY "Build the IB Proxy RMA transport-level tests" ON)
   option(ENABLE_HOST_API_TESTS "Build the host-API tests" ON)
 
+  # Same __hip_atomic_* poison as the rccl target; set before any test target is defined.
+  if(RCCL_POISON_HIP_ATOMICS)
+    add_compile_options(--include=${PROJECT_SOURCE_DIR}/src/include/poison_hip_atomics.h)
+  endif()
+
 
   message("Building rccl unit tests (Installed in /test/rccl-UnitTests)")
   if(ENABLE_MPI_TESTS)
@@ -294,6 +299,7 @@ if(BUILD_TESTS)
     GraphCaptureStreamOrderingTests.cpp
     GroupCallTests.cpp
     NonBlockingTests.cpp
+    RasClientHelpersTests.cpp
     RasDiagnosticsTests.cpp
     RasJsonTests.cpp
     ReduceScatterTests.cpp
@@ -301,24 +307,30 @@ if(BUILD_TESTS)
     RegisterTests.cpp
     ScatterTests.cpp
     TeamTopologyTests.cpp
+    UniqueIdHexTests.cpp
     P2pChannelScalingTests.cpp
     PipeUtilsTests.cpp
     VersionGateTests.cpp
+    HipProbeTests.cpp
     SendRecvTests.cpp
     SendRecvSingleRankTests.cpp
     StandaloneTests.cpp
     SymmetricInPlaceSliceTests.cpp
     DdaIpcTests.cpp
-    # Also in rccl-UnitTestsFixtures; built here without DWORDX4_INTRINSICS_FORCE_OFF, so it runs the b128 re-read.
+    # Also in rccl-UnitTestsFixtures; built here without DWORDX4_INTRINSICS_FORCE_OFF, so they run the b128 paths.
     device/DdaReduceScatterFabricLLTests.cpp
     device/DdaAllReduceFabricLLTests.cpp
+    device/DdaAllReduceFabricLL128PeerParTests.cpp
     NetPluginReloadTests.cpp
     GinPluginInitFailTests.cpp
     plugin/net_reload_plugin.cpp
     ProfilerPluginCloseTests.cpp
+    InspectorRingDropTests.cpp
     ProfilerApiEventRankTests.cpp
     TunerPluginConstantsTests.cpp
     CpuAffinityTests.cpp
+    ProxyProtocolTests.cpp
+    TopoCpuArchTests.cpp
     TeardownStressTests.cpp
     _RecorderTests.cpp
     IbvSymbolsEnvTests.cpp
@@ -368,7 +380,7 @@ if(BUILD_TESTS)
   target_link_options(rccl-UnitTests PRIVATE
     "LINKER:--export-dynamic-symbol=ncclNetPlugin_v12"
     "LINKER:--export-dynamic-symbol=ncclGinPlugin_v13"
-    "LINKER:--export-dynamic-symbol=ncclTunerPlugin_v6"
+    "LINKER:--export-dynamic-symbol=ncclTunerPlugin_v7"
     "LINKER:--export-dynamic-symbol=ncclProfiler_v7")
 
   # AICOMRCCL-2183: RcclMockFuncs.hpp's empty ncclDebugLog, needed to link the Release-only
@@ -384,16 +396,24 @@ if(BUILD_TESTS)
   add_library(rccl-test-profiler-stub SHARED plugin/profiler_stub_plugin.cpp)
   add_dependencies(rccl-UnitTests rccl-test-profiler-stub)
   target_compile_definitions(rccl-UnitTests PRIVATE
-    RCCL_TEST_PROFILER_STUB_NAME="$<TARGET_FILE_NAME:rccl-test-profiler-stub>")
+    RCCL_TEST_PROFILER_STUB_NAME="$<TARGET_FILE_NAME:rccl-test-profiler-stub>"
+    RCCL_TEST_INSTALL_LIBDIR="${CMAKE_INSTALL_LIBDIR}")
 
   # The test suite also runs from an install: TheRock CI executes the packaged
   # rccl-UnitTests with no build tree present, so the stub has to ship with it.
-  # Deliberately not rocm_install(): that sends libraries to the library directory and
-  # adds them to the package export set, while this stub has to ship beside the test
-  # binaries that rocm_install() puts in CMAKE_INSTALL_BINDIR.
+  # It installs to the library directory like any other shared object. Deliberately
+  # not rocm_install(), which would additionally add it to the package export set.
   install(TARGETS rccl-test-profiler-stub
-    LIBRARY DESTINATION ${CMAKE_INSTALL_BINDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     COMPONENT tests)
+
+  # InspectorRingDropTests loads the in-tree Inspector plugin; it skips when there is none.
+  # Scoped to that file so the path does not rebuild the rest of rccl-UnitTests.
+  if(TARGET rccl-profiler-inspector)
+    add_dependencies(rccl-UnitTests rccl-profiler-inspector)
+    set_source_files_properties(InspectorRingDropTests.cpp PROPERTIES COMPILE_DEFINITIONS
+      "RCCL_INSPECTOR_PLUGIN_SO=\"$<TARGET_FILE:rccl-profiler-inspector>\"")
+  endif()
 
   # rccl-UnitTestsFixtures: Tests that only use header-only internal dependencies
   # (inline, static, constexpr, template functions) and can run in both Release and Debug.
@@ -421,8 +441,11 @@ if(BUILD_TESTS)
       device/DdaReduceScatterFabricLLTests.cpp
       device/DdaAllReduceFabricLLTests.cpp
       device/DdaAllReduceFabricLL128TwoShotTests.cpp
+      device/DdaAllReduceFabricLL128PeerParTests.cpp
       device/DdaVecElementAddTests.cpp
       device/DdaLL128PollWireTests.cpp
+      device/DdaLL128ArchGeometryTests.cpp
+      device/DdaReduceScatterFabricLL128PeerParTests.cpp
       device/TestTDM.cpp
       device/TestTdmCopy.cpp
       device/TestTdmReduceCopy.cpp
@@ -432,6 +455,7 @@ if(BUILD_TESTS)
       device/GinBackendMaskDispatch_test.cpp
       device/HierarchicalShuffleTests.cpp
       device/NcclUtilityDeviceTests.cpp
+      device/SymkWorldPointerGetterTests.cpp
       device/ChannelMaskMapTests.cpp
       device/CoopApplicationBuildTests.cpp
       DeviceApiTests.cpp
@@ -494,9 +518,10 @@ if(BUILD_TESTS)
     set_source_files_properties(device/RcclEpTests.cpp PROPERTIES
       INCLUDE_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR}/../src/algorithms/rccl_ep)
 
-    # device/TestTdmReduceCopy.cpp drives reduceCopy through common_kernel.h, whose common.h
-    # includes the generated device_table.h.
-    set_source_files_properties(device/TestTdmReduceCopy.cpp PROPERTIES
+    # device/TestTdmReduceCopy.cpp and device/SymkWorldPointerGetterTests.cpp drive
+    # common_kernel.h (directly or via symk.cuh), whose common.h includes the generated
+    # device_table.h.
+    set_source_files_properties(device/TestTdmReduceCopy.cpp device/SymkWorldPointerGetterTests.cpp PROPERTIES
       INCLUDE_DIRECTORIES ${PROJECT_BINARY_DIR}/hipify/gensrc)
 
   if(ENABLE_ROCSHMEM_GIN)
@@ -826,12 +851,14 @@ if(BUILD_TESTS)
       CeAllReduceEligibilityTests.cpp
       CeReduceScatterEligibilityTests.cpp
       CeAlltoAllvEligibilityTests.cpp
+      GinAllGatherEligibilityTests.cpp
       GinAlltoAllEligibilityTests.cpp
       GinAllReduceEligibilityTests.cpp
       EnqueueTests.cpp
       LL128RegVariantKernel_test.cpp
       IpcsocketTests.cpp
       TopoEnvPolicyTests.cpp
+      P2pCeChannelCap_test.cpp
       P2pMaxNchannelsTests.cpp
       TopoNicFusionTests.cpp
       NetSocketTests.cpp
@@ -1095,6 +1122,7 @@ if(BUILD_TESTS)
       transport/P2pMPITests.cpp
       transport/NetMPITests.cpp
       transport/NetLl128MPITests.cpp
+      transport/LlStepBarrierMPITests.cpp
       transport/ShmMPITests.cpp
       transport/NetIbMPI/GeneralTests.cpp
       transport/NetIbMPI/GdrFlushTests.cpp
@@ -1151,6 +1179,7 @@ if(BUILD_TESTS)
       DdaIpcIndexDataMPITests.cpp
       DdaFp8MPITests.cpp
       DdaAlltoAllInPlaceMPITests.cpp
+      DdaAlltoAllLLBankMPITests.cpp
       SymmetricAbortCheckModeMPITests.cpp
     )
 
@@ -1494,9 +1523,9 @@ if(BUILD_TESTS)
     RENAME "CTestTestfile.cmake"
   )
 
-  # Host-only micro-test binaries (rccl-UnitTestsMicro). The host/ CMakeLists
+  # Host-only micro-test binaries (rccl-UnitTestsMicro*). The host/ CMakeLists
   # is dual-mode: under BUILD_TESTS it builds only the in-RCCL-build micro-test
-  # target and returns; invoked standalone it builds rccl-HostUnitTests too.
+  # targets and returns; invoked standalone it builds rccl-HostUnitTests too.
   add_subdirectory(host)
 
   # Those headers are installed by the rocSHMEM sub-build, and targets that do

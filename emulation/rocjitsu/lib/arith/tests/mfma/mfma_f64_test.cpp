@@ -4,7 +4,8 @@
 // FP64 MFMA layout, sign controls, approximate arithmetic and whole-wave aliasing.
 #include "common/cpu.h"
 #include "common/semantics.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
+#include "rj_arith/detail/rj_arith_mfma.h"
 #include <array>
 #include <bit>
 #include <cmath>

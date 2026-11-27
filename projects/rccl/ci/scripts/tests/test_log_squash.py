@@ -66,6 +66,18 @@ class SquashLogSpam(unittest.TestCase):
         self.assertEqual(sorted(p.name for p in self.logs.iterdir() if p.is_file()),
                          ["madengine-x_node_1.out"])
 
+    def test_a_squashed_log_keeps_its_mode(self):
+        log = self.logs / "madengine-x_node_0.out"
+        log.write_bytes(SPAM * 3)
+        log.chmod(0o640)
+        umask = os.umask(0o022)
+        try:
+            tm.squash_log_spam(self.run_dir)
+        finally:
+            os.umask(umask)
+        self.assertEqual(log.read_bytes().count(SPAM), 1)
+        self.assertEqual(log.stat().st_mode & 0o777, 0o640)
+
     def test_missing_slurm_output(self):
         self.assertEqual(tm.squash_log_spam(self.run_dir / "nope"), 0)
 

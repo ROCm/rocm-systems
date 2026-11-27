@@ -24,12 +24,58 @@ current backend topology; endpoint records can become stale. Separate sessions
 have independent driver identities. Sessions using
 `DriverContextLifetime::Process` reuse the native primary KFD context.
 
+`driver::linux_kfd::KfdConfiguration` owns the XNACK request and debugger
+registration options. Frontends assemble one complete value and pass it to
+`Session::configure`, which accepts a `DriverConfiguration` value, selects the
+installed driver by configuration type, and checks exclusive registry and
+driver ownership. The private `ConfigurableDriver` trait uses an associated
+configuration type to replace the driver's complete pending configuration
+before GPU activation. Each backend owns its options and validation, so
+KFD-specific data and native behavior remain in `linux_kfd`.
+Debugger registration descriptors preserve the frontend's unsafe obligation
+to keep the native record valid for the process lifetime.
+
+Activation applies required or preferred settings under the native context
+lock. `GpuDevice::xnack_enabled()` queries the effective mode through private
+provider dispatch; GPUs sharing a native KFD context share this mode. An absent
+option makes no native request, so it does not clear settings in an already
+active shared context.
+
 `DriverContextLifetime::Process` permits a process-owned driver context to
 survive session shutdown; `DriverContextLifetime::Session` requires the context
-and its bindings to be released with the session. `Session::destroy` requires
-other session clones, devices, and driver-backed resources to be released
-first. Failed native cleanup retains its owners for retry or safe process
-teardown. See the [safety guide](docs/safety.md) for these ownership rules.
+and its bindings to be released with the session.
+
+`Session::state` observes one shared `Open`, `Retiring`, or `Closed` lifecycle.
+`begin_retirement` closes admission across every session clone and derived
+device or resource handle. Already admitted transactions can finish, including
+nested core calls and publication of their resource owners. Cleanup and
+completion operations remain available. Native calls run outside lifecycle
+locks; published raw queue producer pointers still require the frontend to
+stop producers before destruction.
+
+`try_close` returns `RetirementOutcome::Busy` while clones, driver-backed
+resources, notification leases, or admitted operations remain. A busy open
+session stays open. Once retiring, it admits no new transactions; native
+cleanup failures return `Failed` and preserve the unfinished driver owners
+for retry. `Closed` means this session's obligations are discharged, even if
+another session or the backend's process owner retains the native context.
+`SessionRetirement::try_close` preserves this same state after a frontend has
+removed its public handle. `destroy` and `try_destroy` retain the older
+`Result` interface. See the [safety guide](docs/safety.md) for ownership rules.
+
+The private `HsaSession` and `AmdfSession` frontend owners each compose their
+own native `Session`. They share its implementation and related native
+services while retaining independent public ownership and lifecycle policy.
+`memory::storage::RetainOnDrop` supplies explicit retention for both frontends
+and `SessionRetirement`; it releases no owner until the caller authorizes it.
+
+HSA begins core retirement after its tool preparation, callbacks, and unload
+have finished. It then releases frontend resources and GPU owners before
+attempting core closure. Its HSA initialization reference count and session generation identity
+remain frontend policy; native retirement outcomes determine whether another
+generation may start. Configuration and native activation constraints remain
+per driver, so activating one backend does not freeze another backend's
+configuration.
 
 The current backend is Linux KFD/DRM on x86-64 and AArch64. It discovers GPU
 endpoints; rocddi has no CPU or NPU device backend yet. Host-only memory works
@@ -65,8 +111,9 @@ that operation. `memory::host` owns host allocations and reservations.
 - `session.rs` coordinates driver instances and their context lifetime;
   `topology/` holds passive endpoint and host topology, while `host/` groups
   the live profiling clock and cache recipes.
-- `driver.rs` defines private backend contracts; `driver/linux_kfd/` implements
-  the current GPU backend.
+- `driver.rs` defines configuration routing and private backend contracts;
+  `driver/linux_kfd/` implements the current GPU backend and owns its native
+  configuration types.
 - `device/` owns activated devices, events, GPU queues, copies, and profiling.
 - The Linux GPU event service owns KFD's first signal-page transaction across
   AMDF and HSA. Direct native queue owners retain frontend-supplied signal and

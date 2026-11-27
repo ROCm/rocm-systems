@@ -28,6 +28,9 @@ class TileNDRMATester : public Tester {
   // Both 3D and 4D tiles have the same total element count.
   static constexpr int TILE_ELEMS = 512;
 
+  // Strided layouts pad two dimensions to twice their packed stride.
+  static constexpr int SLOT_ELEMS_STRIDED = 4 * TILE_ELEMS;
+
   explicit TileNDRMATester(TesterArguments args);
   ~TileNDRMATester() override;
 
@@ -40,6 +43,7 @@ class TileNDRMATester : public Tester {
   float* dest_buf{nullptr};
   float* source{nullptr};      // points into source_buf or dest_buf
   float* dest{nullptr};        // points into source_buf or dest_buf
+  size_t num_elements{0};      // elements per symmetric allocation
 };
 
 #endif  // TILE_ND_RMA_TESTER_HPP

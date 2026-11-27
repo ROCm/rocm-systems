@@ -377,7 +377,7 @@ hipError_t hipMemRangeGetAttributes(void** data, size_t* data_sizes,
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  for (int i = 0; i < num_attributes; i++) {
+  for (size_t i = 0; i < num_attributes; i++) {
     if (!data[i]) {
       HIP_RETURN(hipErrorInvalidValue);
     }
@@ -547,19 +547,8 @@ hipError_t ihipMemPrefetchAsync(const void* dev_ptr, size_t count, hipMemLocatio
       return hipErrorNotSupported;
     }
   }
-  hip::Stream* hip_stream = nullptr;
-  // Pick the specified stream or Null one from the provided target device
-  if (cpuAccess == true) {
-    hip_stream = (stream == nullptr || stream == hipStreamLegacy)
-                     ? hip::getCurrentDevice()->NullStream()
-                     : hip::getStream(stream);
-  } else {
-    dev = g_devices[targetDevice]->devices()[0];
-    hip_stream = (stream == nullptr || stream == hipStreamLegacy)
-                     ? g_devices[targetDevice]->NullStream()
-                     : hip::getStream(stream);
-  }
 
+  hip::Stream* hip_stream = hip::getStream(stream);
   if (hip_stream == nullptr) {
     return hipErrorInvalidValue;
   }

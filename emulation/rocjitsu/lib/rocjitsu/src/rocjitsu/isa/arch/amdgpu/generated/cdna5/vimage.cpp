@@ -26,6 +26,9 @@ TensorLoadToLdsVimage::TensorLoadToLdsVimage(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 0;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::TENSOR_LOAD_TO_LDS);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Tensor, amdgpu::MemoryKind::Load);
+  flags_ |= MEMORY_TO_LDS;
 }
 
 namespace detail {
@@ -33,8 +36,9 @@ DecodeResult decodeTensorLoadToLdsVimage(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vimage::validate_encoding(
       "tensor_load_to_lds", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<TensorLoadToLdsVimage>(opcode);
 }
 } // namespace detail
@@ -53,6 +57,9 @@ TensorStoreFromLdsVimage::TensorStoreFromLdsVimage(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 0;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::TENSOR_STORE_FROM_LDS);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Tensor, amdgpu::MemoryKind::Store);
+  flags_ |= MEMORY_FROM_LDS;
 }
 
 namespace detail {
@@ -60,8 +67,9 @@ DecodeResult decodeTensorStoreFromLdsVimage(const MachineInst *opcode,
                                             const DecodeErrorEmitter &emit_error) {
   Result validation = Vimage::validate_encoding(
       "tensor_store_from_lds", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<TensorStoreFromLdsVimage>(opcode);
 }
 } // namespace detail

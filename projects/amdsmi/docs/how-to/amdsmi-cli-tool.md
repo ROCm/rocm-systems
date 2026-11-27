@@ -45,7 +45,7 @@ When run with `--help`, it reports the available subcommands:
 ~$ amd-smi --help
 usage: amd-smi [-h] [--rocm-smi]  ...
 
-AMD System Management Interface | Version: 27.2.0 | ROCm version: 10.2.0 | Platform: Linux Baremetal
+AMD System Management Interface | Version: 27.3.0 | ROCm version: 10.3.0 | Platform: Linux Baremetal
 
 options:
   -h, --help          show this help message and exit
@@ -81,7 +81,7 @@ amd-smi --rocm-smi
 ```
 
 ```{note}
-For command-specific help, use `amd-smi [command] --help` for see more detailed
+For command-specific help, use `amd-smi [command] --help` to see more detailed
 usage information. See [Commands](#cmds).
 
 For more detailed version information, use `amd-smi version`.
@@ -90,7 +90,17 @@ To display GPU information in the legacy ROCm-SMI format, use `amd-smi --rocm-sm
 See [ROCm-SMI compatibility mode](#cli-ex-rocm-smi).
 ```
 
-Environment variables:
+### Selecting devices
+
+`--gpu`, `--cpu`, `--core`, and `--nic` accept space-separated or repeated
+selections without duplicates, preserving first-selected order (`--gpu 2 --gpu all`
+reports GPU 2 first). Comma-separated lists such as `--gpu=0,1` aren't supported.
+Repeating an option adds devices rather than narrowing an earlier selection, so
+`--gpu all --gpu 0` selects every GPU, including for `set` and `reset`.
+In `amd-smi set`, one value applies to every selected device; run separate commands
+for different values.
+
+### Environment variables
 
 You can set one or more variables in front of any `amd-smi` invocation. For example:
 
@@ -114,28 +124,25 @@ details for usage.
 (cmd-list)=
 ### amd-smi list
 
-Lists GPU information, including identifier kind and CUID provenance.
+Lists GPU information, including the CUID and its provenance.
+
+`--gpu 2 --gpu all` keeps GPU 2 first; `--gpu 2 all` uses device enumeration order.
 
 #### CUID identity and compatibility
 
-The `uuid` field (human-readable/JSON) and `gpu_uuid` column (CSV) are
-**CUID-first compatibility aliases**: the derived CUID when available,
-otherwise the legacy GPU UUID, otherwise `N/A`. The fields below follow all
-existing list fields, including those selected by `--enumeration`; new
-consumers should use `identifier_kind` and `cuid`.
+The `uuid` field (human-readable/JSON) and `gpu_uuid` column (CSV) report the
+legacy GPU UUID, or `N/A`; they never contain a CUID. The CUID fields below
+follow all existing list fields, including those selected by `--enumeration`.
 
 Field | Meaning
 ---|---
-`identifier_kind` | `cuid`, `legacy_uuid`, or `unknown`; identifies the value in the compatibility alias
-`cuid` | Derived CUID, or `N/A`; never contains a legacy UUID
-`source` | `DRIVER`, `LIBRARY`, or `UNKNOWN`, from the CUID API
-`auxiliary` | Boolean `true`/`false` in JSON, `True`/`False` in CSV, or the string `unknown`; unknown is not false
+`cuid` | The CUID, or `N/A`; never contains a legacy UUID
+`source` | `LIBRARY` (every CUID in this release), `DRIVER`, or `UNKNOWN`, from the CUID API
+`temporary` | Whether the CUID is temporary: node-local, and changed by a new machine-id, a move to another slot or a compute-mode change, so not for an asset database. Boolean `true`/`false` in JSON, `True`/`False` in CSV, or the string `unknown`; unknown is not false. Every CUID in this release is temporary
 `cuid_metadata_status` | `available`, `partial`, `unsupported` (the library predates the call), `not_supported` (no CUID for this handle; the other CUID fields read `N/A`), `invalid_value`, or `amdsmi_error_<numeric status>`; preserves metadata failures even when an identifier remains available
 
-If the CUID info API fails, the CUID-only API is tried before the legacy UUID
-API, so a metadata failure alone does not turn a readable CUID into a legacy UUID.
-
-`list` never reports the primary CUID.
+If the CUID info API fails, the CUID-only API is tried, so a metadata failure
+alone does not hide a readable CUID.
 
 ```{note}
 `amd-smi list -e` is useful for mapping physical-to-logical GPU IDs.
@@ -151,7 +158,7 @@ usage: amd-smi list [-h] [--json | --csv] [--file FILE] [--loglevel LEVEL]
                     [-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...]]
 
 Lists all detected devices on the system.
-Lists the BDF, UUID, KFD_ID, NODE_ID, and Partition ID for each GPU and/or CPUs.
+Lists the BDF, UUID, KFD_ID, NODE_ID, Partition ID and CUID for each GPU and/or CPUs.
 In virtualization environments, it can also list VFs associated to each
 GPU with some basic information for each VF.
 
@@ -161,11 +168,11 @@ List Arguments:
                                Includes CARD, RENDER, HSA_ID, HIP_ID, HIP_UUID, and OAM_ID.
 
 Device Arguments:
-  -g, --gpu GPU [GPU ...]  Select a GPU ID, BDF, or UUID from the possible choices:
-                           ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                           ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                           ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                           ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+  -g, --gpu GPU [GPU ...]  Select a GPU ID, BDF, UUID or CUID from the possible choices:
+                           ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                           ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                           ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                           ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
                              all | Selects all devices
   -U, --cpu CPU [CPU ...]     Select a CPU ID from the possible choices:
                               ID: 0
@@ -191,11 +198,19 @@ Command Modifiers:
 Gets static information about the specified GPU. See the [sample
 output](#cli-ex-static) for `amd-smi static`.
 
-`amd-smi static --cuid` adds a per-GPU `cuid` block with `derived_cuid`,
-`primary_cuid`, `component_type`, `auxiliary`, `source`, `identifier_kind`
-and `cuid_metadata_status`, with the semantics
-described under [`amd-smi list`](#cmd-list). It does not fall back to a legacy
-UUID. `primary_cuid` is `N/A (not requested)` unless `--cuid-primary` is given.
+`amd-smi static --cuid` adds a per-GPU `cuid` block with `cuid`,
+`component_type`, `source`, `temporary` and `cuid_metadata_status`.
+`component_type` is `GPU`, `UNKNOWN` when the CUID metadata could not be
+read, or `N/A` when there is no CUID; the other fields have the semantics
+described under [`amd-smi list`](#cmd-list). It does not fall back to a
+legacy UUID.
+
+Every temporary CUID needs a machine-id. Without a valid `/etc/machine-id` (or
+`/var/lib/dbus/machine-id` when `/etc/machine-id` does not exist), every CUID
+field reads `N/A` with `cuid_metadata_status` `not_supported`, and
+`amd-smi node --cuid` lists no components. A container with its own machine-id
+gets its own CUIDs; bind-mount the host's `/etc/machine-id` read-only to get
+the host's.
 
 On a GPU in SPX the handle reports the whole GPU's CUID. In DPX and above,
 on a partition-capable GPU such as an MI300-series GPU, each GPU handle is a
@@ -209,7 +224,8 @@ For every component on the node, not only GPUs, use
 ```shell-session
 ~$ amd-smi static --help
 usage: amd-smi static [-h] [-a] [-b] [-I] [-d] [-v] [-c] [-B] [-R] [-r] [-C [CLOCK ...]]
-                      [-Y] [-y] [-p] [-m] [-A] [-l] [-P] [-x] [-o] [-u] [-s] [-i] [-g GPU [GPU ...]
+                      [-Y] [-p] [-m] [-A] [-l] [-P] [-x] [-o] [-u]
+                      [-S] [-s] [-i] [-g GPU [GPU ...]
                       | -U CPU [CPU ...]] [--json | --csv] [--file FILE] [--overwrite]
                       [--append] [--loglevel LEVEL]
 
@@ -221,21 +237,16 @@ Static Arguments:
   -a, --asic               All asic information
   -b, --bus                All bus information
   -I, --ifwi               All video bios/IFWI information (if available)
-  -d, --driver             Displays driver version
+  -d, --driver             Displays driver version and package
   -v, --vram               All vram information
   -c, --cache              All cache information
   -B, --board              All board information
   -R, --process-isolation  The process isolation status
   -r, --ras                Displays RAS features information;
                                 Sudo may be required for some features
-  -Y, --cuid               Component Unified ID: the derived CUID, its component type, whether it is a
-                           temporary (auxiliary) identifier, and which layer answered.
+  -Y, --cuid               Component Unified ID: the CUID, its component type, which layer answered,
+                           and whether it is temporary.
                            Not part of the default `amd-smi static` output; ask for it.
-                           The primary CUID is not shown by default either: its payload embeds the raw
-                           serial number. Add --cuid-primary, as root, to include it.
-  -y, --cuid-primary       Include the primary CUID in the CUID output, implying --cuid. Requires
-                           privilege, and prints a value that embeds the device serial number. Do not
-                           paste it into a bug report.
   -C, --clock [CLOCK ...]  Show one or more valid clock frequency levels. Available options:
                                 SYS, DF, DCEF, SOC, MEM, VCLK0, VCLK1, DCLK0, DCLK1, ALL
   -p, --partition          Partition information:
@@ -253,17 +264,19 @@ Static Arguments:
   -x, --xgmi-plpd          The available XGMI per-link power down policy
   -o, --profile            Display current and available power profiles
   -u, --numa               All numa node information
+  -S, --power-stabilization
+                                Power Stabilization status (HAWK dummy-compute insertion and Ramp Management)
 
 CPU Arguments:
   -s, --smu                All SMU FW information
   -i, --interface-ver      Displays hsmp interface version
 
 Device Arguments:
-  -g, --gpu GPU [GPU ...]  Select a GPU ID, BDF, or UUID from the possible choices:
-                           ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                           ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                           ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                           ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+  -g, --gpu GPU [GPU ...]  Select a GPU ID, BDF, UUID or CUID from the possible choices:
+                           ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                           ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                           ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                           ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
                              all | Selects all devices
   -U, --cpu CPU [CPU ...]  Select a CPU ID from the possible choices:
                            ID: 0
@@ -299,11 +312,11 @@ Firmware Arguments:
   -f, --ucode-list, --fw-list  All FW list information
 
 Device Arguments:
-  -g, --gpu GPU [GPU ...]      Select a GPU ID, BDF, or UUID from the possible choices:
-                               ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                               ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                               ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                               ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+  -g, --gpu GPU [GPU ...]      Select a GPU ID, BDF, UUID or CUID from the possible choices:
+                               ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                               ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                               ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                               ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
                                  all | Selects all devices
   -U, --cpu CPU [CPU ...]     Select a CPU ID from the possible choices:
                               ID: 0
@@ -343,11 +356,11 @@ Bad Pages Arguments:
   -u, --un-res             Displays unreservable pages
 
 Device Arguments:
-  -g, --gpu GPU [GPU ...]  Select a GPU ID, BDF, or UUID from the possible choices:
-                           ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                           ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                           ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                           ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+  -g, --gpu GPU [GPU ...]  Select a GPU ID, BDF, UUID or CUID from the possible choices:
+                           ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                           ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                           ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                           ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
                              all | Selects all devices
   -U, --cpu CPU [CPU ...]     Select a CPU ID from the possible choices:
                               ID: 0
@@ -466,11 +479,11 @@ CPU Core Arguments:
   --core-eff-floor-limit                    Get effective floor limit frequency for the selected core (MHz)
 
 Device Arguments:
-  -g, --gpu GPU [GPU ...]      Select a GPU ID, BDF, or UUID from the possible choices:
-                               ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                               ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                               ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                               ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+  -g, --gpu GPU [GPU ...]      Select a GPU ID, BDF, UUID or CUID from the possible choices:
+                               ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                               ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                               ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                               ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
                                  all | Selects all devices
   -U, --cpu CPU [CPU ...]     Select a CPU ID from the possible choices:
                               ID: 0
@@ -582,11 +595,11 @@ Watch Arguments:
   -i, --iterations ITERATIONS  The total number of ITERATIONS to repeat the command
 
 Device Arguments:
-  -g, --gpu GPU [GPU ...]      Select a GPU ID, BDF, or UUID from the possible choices:
-                               ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                               ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                               ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                               ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+  -g, --gpu GPU [GPU ...]      Select a GPU ID, BDF, UUID or CUID from the possible choices:
+                               ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                               ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                               ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                               ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
                                  all | Selects all devices
   -U, --cpu CPU [CPU ...]      Select a CPU ID from the possible choices:
                                ID: 0
@@ -622,11 +635,11 @@ Event Arguments:
   -h, --help                  show this help message and exit
 
 Device Arguments:
-  -g, --gpu GPU [GPU ...]     Select a GPU ID, BDF, or UUID from the possible choices:
-                              ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                              ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                              ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                              ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+  -g, --gpu GPU [GPU ...]     Select a GPU ID, BDF, UUID or CUID from the possible choices:
+                              ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                              ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                              ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                              ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
                                 all | Selects all devices
   -U, --cpu CPU [CPU ...]     Select a CPU ID from the possible choices:
                               ID: 0
@@ -673,11 +686,11 @@ Topology arguments:
   -z, --bi-dir             Display P2P bi-directional link capability between nodes
 
 Device Arguments:
-  -g, --gpu GPU [GPU ...]     Select a GPU ID, BDF, or UUID from the possible choices:
-                              ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                              ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                              ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                              ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+  -g, --gpu GPU [GPU ...]     Select a GPU ID, BDF, UUID or CUID from the possible choices:
+                              ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                              ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                              ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                              ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
                                 all | Selects all devices
   -U, --cpu CPU [CPU ...]     Select a CPU ID from the possible choices:
                               ID: 0
@@ -768,8 +781,10 @@ Set Arguments:
                                               Set one of the following the accelerator TYPE or profile INDEX:
                                                 N/A.
                                                 Use `sudo amd-smi partition --accelerator` to find acceptable values.
-  -M, --memory-partition PARTITION            Set one of the following the memory partition modes:
+  -M, --memory-partition PARTITION            Set one of the following memory partition modes:
                                                 NPS1, NPS2, NPS4, NPS8
+                                                The mode applies at the next driver reload.
+                                                Setting the current mode cancels a pending change.
   -a, --compute-partition-mem-alloc-mode MODE Set compute partition memory allocation mode (requires sudo):
                                                 CAPPING - each XCP is capped to an even share of partition memory
                                                 ALL     - each XCP may use the full partition memory
@@ -803,6 +818,18 @@ Set Arguments:
   -n, --node-power-limit WATTS                Set the node-level (NPM) power limit in watts.
                                                 This is a node-wide setting, not per-GPU.
                                                 Max node power limit: 6000 W
+  -s, --power-stabilization-configure KEY=VALUE [KEY=VALUE ...] | @PATH
+                                                Configure Power Stabilization (HAWK dummy-compute insertion and Ramp Management).
+                                                Accepts one or more space/comma-separated KEY=VALUE pairs (enable, power_floor,
+                                                delay, insertion_priority, ramp_enable, ramp_max_ramp_up_rate,
+                                                ramp_max_ramp_down_rate, ramp_min_time_at_power_floor, ramp_stop_delay), or a
+                                                single @<path> argument pointing to a JSON file matching the
+                                                `static --power-stabilization --json` output.
+                                                enable/ramp_enable accept on/off/true/false/1/0; insertion_priority accepts a
+                                                name (OPPORTUNISTIC, GUARANTEED, DYNAMIC) or its integer value; the rest,
+                                                including ramp_max_ramp_up_rate/ramp_max_ramp_down_rate, are integers.
+                                                Example: enable=on power_floor=70 insertion_priority=GUARANTEED ramp_max_ramp_up_rate=5
+                                                Each key is applied in order; processing stops at the first failure.
 
 CPU Arguments:
   --cpu-pwr-limit PWR_LIMIT                                      Set power limit for the given socket. Input parameter is power limit value.
@@ -835,11 +862,11 @@ CPU Core Arguments:
   --core-boost-limit BOOST_LIMIT                                 Sets the boost limit for the given core. Input parameter is core BOOST_LIMIT value
 
 Device Arguments:
-  -g, --gpu GPU [GPU ...]                      Select a GPU ID, BDF, or UUID from the possible choices:
-                                               ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                                               ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                                               ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                                               ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+  -g, --gpu GPU [GPU ...]                      Select a GPU ID, BDF, UUID or CUID from the possible choices:
+                                               ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                                               ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                                               ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                                               ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
                                                  all | Selects all devices
   -U, --cpu CPU [CPU ...]                                        Select a CPU ID from the possible choices:
                                                                  ID: 0
@@ -865,6 +892,9 @@ Command Modifiers:
 Reset options for specified devices.
 
 ```{warning}
+
+* Repeated GPU options combine: `amd-smi reset --gpureset -g all -g 0`
+  resets every GPU, not just GPU 0. Remove `-g all` to target only GPU 0.
 
 * On systems with XGMI/Infinity Fabric (for example, AMD Instinct MI Series), resetting one
   GPU resets all GPUs in the same XGMI hive. Use `amd-smi xgmi` or `amd-smi topology` to find the XGMI link connected GPUs or check `/sys/class/drm/card*/device/xgmi_info/xgmi_hive_id` to identify GPUs having the same hive id, before issuing a reset.
@@ -904,11 +934,11 @@ Reset Arguments:
   -l, --clean-local-data   Clean up local data in LDS/GPRs on a per partition basis
 
 Device Arguments:
-  -g, --gpu GPU [GPU ...]     Select a GPU ID, BDF, or UUID from the possible choices:
-                              ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                              ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                              ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                              ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+  -g, --gpu GPU [GPU ...]     Select a GPU ID, BDF, UUID or CUID from the possible choices:
+                              ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                              ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                              ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                              ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
                                 all | Selects all devices
   -U, --cpu CPU [CPU ...]     Select a CPU ID from the possible choices:
                               ID: 0
@@ -966,11 +996,11 @@ Watch Arguments:
   -i, --iterations ITERATIONS  The total number of ITERATIONS to repeat the command
 
 Device Arguments:
-  -g, --gpu GPU [GPU ...]      Select a GPU ID, BDF, or UUID from the possible choices:
-                               ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                               ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                               ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                               ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+  -g, --gpu GPU [GPU ...]      Select a GPU ID, BDF, UUID or CUID from the possible choices:
+                               ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                               ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                               ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                               ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
                                  all | Selects all devices
   -U, --cpu CPU [CPU ...]      Select a CPU ID from the possible choices:
                                ID: 0
@@ -1009,11 +1039,11 @@ XGMI arguments:
   -l, --link-status        XGMI Link Status information
 
 Device Arguments:
-  -g, --gpu GPU [GPU ...]     Select a GPU ID, BDF, or UUID from the possible choices:
-                              ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                              ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                              ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                              ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+  -g, --gpu GPU [GPU ...]     Select a GPU ID, BDF, UUID or CUID from the possible choices:
+                              ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                              ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                              ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                              ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
                                 all | Selects all devices
   -U, --cpu CPU [CPU ...]     Select a CPU ID from the possible choices:
                               ID: 0
@@ -1053,11 +1083,11 @@ Partition arguments:
   -a, --accelerator        display accelerator partition information
 
 Device Arguments:
-  -g, --gpu GPU [GPU ...]  Select a GPU ID, BDF, or UUID from the possible choices:
-                           ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                           ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                           ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                           ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+  -g, --gpu GPU [GPU ...]  Select a GPU ID, BDF, UUID or CUID from the possible choices:
+                           ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                           ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                           ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                           ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
                              all | Selects all devices
 
 Command Modifiers:
@@ -1100,11 +1130,11 @@ AFID Arguments:
   --cper-file CPER_FILE               Full path of a retrieved CPER record file to generate the AFID
 
 Device Arguments:
-  -g, --gpu GPU [GPU ...]     Select a GPU ID, BDF, or UUID from the possible choices:
-                              ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                              ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                              ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                              ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+  -g, --gpu GPU [GPU ...]     Select a GPU ID, BDF, UUID or CUID from the possible choices:
+                              ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                              ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                              ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                              ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
                                 all | Selects all devices
   -U, --cpu CPU [CPU ...]     Select a CPU ID from the possible choices:
                               ID: 0
@@ -1148,11 +1178,11 @@ Fabric arguments:
   -T, --telemetry          Display fabric telemetry data (counters per category, instance, and item)
 
 Device Arguments:
-  -g, --gpu GPU [GPU ...]  Select a GPU ID, BDF, or UUID from the possible choices:
-                           ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                           ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                           ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                           ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+  -g, --gpu GPU [GPU ...]  Select a GPU ID, BDF, UUID or CUID from the possible choices:
+                           ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                           ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                           ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                           ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
                              all | Selects all devices
 
 Command Modifiers:
@@ -1173,7 +1203,7 @@ information except CUIDs will be displayed.
 
 ```shell-session
 ~$ amd-smi node --help
-usage: amd-smi node [-h] [-p] [-b] [-G] [-T] [-Y] [-y] [--json | --csv] [--file FILE]
+usage: amd-smi node [-h] [-p] [-b] [-G] [-T] [-Y] [--json | --csv] [--file FILE]
                      [--loglevel LEVEL]
 
 Node arguments:
@@ -1184,7 +1214,6 @@ Node arguments:
   -T, --tray                    Displays compute tray type and accelerator count
   -Y, --cuid                    Lists the CUID of every component on the node: the platform, CPU
                                 packages, GPUs, NPUs and NICs. Every CUID is temporary.
-  -y, --cuid-primary            Include each component's primary CUID, implying --cuid. Requires root.
 
 Command Modifiers:
   --json                        Displays output in JSON format (human readable by default).
@@ -1232,45 +1261,45 @@ requested mode if it is absent from this set, distinct from
 `AMDSMI_STATUS_NOT_SUPPORTED`'s "NPM is disabled on this node" message.
 
 `amd-smi node --cuid` lists every component that has a CUID, whether or not
-amd-smi manages it: the platform, each CPU package, each AMD GPU, each NPU,
-and each NIC function. Components are named by type and position (`CPU 0`, `GPU 1`);
+amd-smi manages it: the platform, each CPU package, each AMD GPU, each AMD
+NPU, and each network PCI function, with or without a network interface. Components are named by type and position (`CPU 0`, `GPU 1`);
 `GPU n` here counts CUID components, not amd-smi GPU indexes, so match on
-`bdf`. Each has `derived_cuid`, `primary_cuid`, `source`, `auxiliary`, `bdf`
-and `device_path`. Every CUID is temporary (`AUXILIARY: True`), and each GPU
-partition in DPX and above is listed beside its GPU. A NIC's UnitID is its
-PCI function number, so two functions of one card have distinct CUIDs even
-where they report one serial number. `--csv` gives one row per component.
+`bdf`. Each has `cuid`, `component_type`, `source`, `temporary`, `bdf` and
+`device_path`. Every CUID is temporary (`TEMPORARY: True`), and each GPU
+partition in DPX and above is listed beside its GPU. Each NIC function has its
+own CUID; its UnitID is its PCI function number. `--csv` gives one row per
+component.
 
 ```shell-session
-~$ sudo amd-smi node --cuid
+~$ amd-smi node --cuid
 NODE:
     CUID:
         PLATFORM:
-            DERIVED_CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
-            PRIMARY_CUID: N/A (not requested)
+            CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+            COMPONENT_TYPE: PLATFORM
             SOURCE: LIBRARY
-            AUXILIARY: True
+            TEMPORARY: True
             BDF: N/A
             DEVICE_PATH: N/A
         CPU 0:
-            DERIVED_CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
-            PRIMARY_CUID: N/A (not requested)
+            CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+            COMPONENT_TYPE: CPU
             SOURCE: LIBRARY
-            AUXILIARY: True
+            TEMPORARY: True
             BDF: N/A
             DEVICE_PATH: /sys/devices/system/cpu/cpu0
         GPU 0:
-            DERIVED_CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
-            PRIMARY_CUID: N/A (not requested)
+            CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+            COMPONENT_TYPE: GPU
             SOURCE: LIBRARY
-            AUXILIARY: True
+            TEMPORARY: True
             BDF: 0000:03:00.0
             DEVICE_PATH: /sys/class/drm/renderD129
         NIC 0:
-            DERIVED_CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
-            PRIMARY_CUID: N/A (not requested)
+            CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+            COMPONENT_TYPE: NIC
             SOURCE: LIBRARY
-            AUXILIARY: True
+            TEMPORARY: True
             BDF: 0000:69:00.0
             DEVICE_PATH: /sys/class/net/eno1
 ```
@@ -1291,9 +1320,10 @@ information, GPU status, and running processes.
 ```bash
 ~$ amd-smi
 +------------------------------------------------------------------------------+
-| AMD-SMI            27.2.0                                                    |
-| amdgpu Version:    6.19.4                                                    |
-| ROCm Version:      10.2.0                                                    |
+| AMD-SMI            27.3.0                                                    |
+| amdgpu Version:    6.19.14.31400000-2370381                                  |
+| amdgpu Package:    amdgpu-dkms                                               |
+| ROCm Version:      10.3.0                                                    |
 | Platform:          Linux Baremetal                                           |
 |-------------------------------------+----------------------------------------|
 | BDF                        GPU-Name | Mem-Uti   Temp   UEC       Power-Usage |
@@ -1321,8 +1351,9 @@ information, GPU status, and running processes.
 
 The default output includes the following sections:
 
-- **Version header**: AMD-SMI version, amdgpu driver version, ROCm version,
-  and platform information.
+- **Version header**: AMD-SMI version, amdgpu driver version with its package
+  build, the installed driver package that matches the driver, ROCm version, and
+  platform information. See [About the amdgpu version](#cli-amdgpu-version).
 - **GPU table** (first row per GPU): BDF address, GPU market name, OAM ID,
   memory utilization, hotspot temperature, uncorrectable ECC error count, and
   current/maximum power usage.
@@ -1405,6 +1436,46 @@ do. JSON output represents an empty section as an empty object. CSV drops the se
 columns when no device in the run reports it, and fills them with `N/A` when only some
 do.
 
+(cli-amdgpu-version)=
+### About the amdgpu version
+
+`amd-smi`, `amd-smi version`, and `amd-smi static --driver` report the amdgpu
+driver version as `<module version>-<build>`, for example
+`6.19.14.31400000-2370381`.
+
+| Part | Example | Source |
+|---|---|---|
+| Module version | `6.19.14.31400000` | `/sys/module/amdgpu/version`: the base kernel version of the amdgpu source (`6.19.14`), then the amdgpu release |
+| Build | `2370381` | The `amdgpu-dkms` package installed for the running kernel, or else its `amdgpu-kmod` RPM |
+
+The build is added only when the package has the same base kernel version as
+the loaded driver. The match is by version: amd-smi does not check that the
+driver was installed from that package. A driver with a module version and no
+such package shows its module version alone. A driver without a module version,
+such as the amdgpu driver included in the kernel, shows `N/A` in
+`amd-smi version` and `amd-smi static --driver`, and the `amd-smi` header shows
+the OS kernel version in its place. An `amdgpu-kmod` driver has a three-part
+module version, so its version reads like `6.16.13-2412345`.
+
+The build is read from the installed package. After a package upgrade it is the
+build of the loaded driver only once the driver has been reloaded, for example
+by a restart.
+
+The package the build was read from is reported next to the version:
+
+| Command | Human-readable | JSON keys |
+|---|---|---|
+| `amd-smi` | `amdgpu Package: amdgpu-dkms` | With `amd-smi default --json`: `driver_full_version`, `driver_package` in `version_info`, `amdgpu version` |
+| `amd-smi version` | `amdgpu package: amdgpu-dkms` | `amdgpu_version`, `amdgpu_package` |
+| `amd-smi static --driver` | `PACKAGE: amdgpu-dkms` | `version`, `package` in `driver` |
+
+Human-readable output leaves the package out when there is none. The JSON and
+CSV output of `amd-smi version` and `amd-smi static --driver` always carry the
+key and report `N/A`. A container usually cannot see the host's DKMS tree or
+RPM database, so there the version has no build and the package is `N/A`. The
+same is shown with a `libamd_smi.so` that predates
+`amdsmi_get_gpu_driver_info_v2()`, also when a matching package is installed.
+
 (cli-ex-static)=
 ### Example output from amd-smi static
 
@@ -1467,8 +1538,9 @@ GPU: 0
         PTL_FORMAT: N/A
     DRIVER:
         NAME: amdgpu
-        VERSION: 6.19.4
+        VERSION: 6.19.14.31400000-2370381
         OS_KERNEL_VERSION: 5.15.0-generic
+        PACKAGE: amdgpu-dkms
     BOARD:
         MODEL_NUMBER: N/A
         PRODUCT_SERIAL: N/A
@@ -1965,7 +2037,8 @@ KEY=VALUE ...`, restoring every writable profile with staged fields found in
 a JSON file for the current GPU in one call. The file must be shaped like
 `amd-smi static --ampp --json`'s output: a top-level `"gpu_data"` list of
 per-GPU objects, each identified by an integer `"gpu"` index and containing
-an `"ampp"."profiles"` list.
+an `"ampp"."profiles"` list. The path must be a regular file (not a symlink,
+so not `/dev/stdin`) no larger than 1 MiB.
 
 ```shell-session
 ~$ sudo amd-smi static --ampp --json --file profiles.json
@@ -1990,3 +2063,108 @@ the remaining profiles.
 - `--ampp-configure` may only target a slot listed in
   `app_modes/config/writable_slot_mask`; use `amd-smi static --ampp` first to
   find writable profiles and their field names.
+
+## Power Stabilization: HAWK insertion and Ramp Management
+
+`amd-smi static --power-stabilization` / `amd-smi set
+--power-stabilization-configure KEY=VALUE ...` let users inspect and
+configure Power Stabilization -- HAWK dummy-compute insertion plus Ramp
+Management -- settings exposed by the driver under the kernel UAPI sysfs
+tree `/sys/class/drm/<device>/device/power_stabilization/` (not libdrm).
+
+```shell-session
+~$ amd-smi static --gpu 0 --power-stabilization
+GPU: 0
+    POWER_STABILIZATION:
+        HOST_CONTROL_ENABLED: False
+        ENABLED: True
+        POWER_FLOOR: 20 %
+        DELAY: 50 ms
+        INSERTION_PRIORITY: GUARANTEED
+        RAMP_ENABLED: True
+        RAMP_MAX_RAMP_UP_RATE: 10 %PL/sec
+        RAMP_MAX_RAMP_DOWN_RATE: 15 %PL/sec
+        RAMP_MIN_TIME_AT_POWER_FLOOR: 5 sec
+        RAMP_STOP_DELAY: 2 sec
+```
+
+```shell-session
+~$ sudo amd-smi set --gpu 0 --power-stabilization-configure enable=1,power_floor=25
+```
+
+`--power-stabilization-configure` also accepts `@<path>` in place of `KEY=VALUE
+...`, restoring every settable field from an `amd-smi static
+--power-stabilization --json`-shaped file's entry for the current GPU in one
+call. As with `--ampp-configure @<path>`, the file must be a regular file (not
+a symlink, so not `/dev/stdin`) no larger than 1 MiB:
+
+```shell-session
+~$ sudo amd-smi static --gpu 0 --power-stabilization --json --file ps.json
+~$ sudo amd-smi set --gpu 0 --power-stabilization-configure @ps.json
+```
+
+KEY | Accepted values
+---|---
+`enable` | `0`/`1`, `on`/`off`, `true`/`false`
+`power_floor` | Integer, % of power limit (0-100)
+`delay` | Integer, milliseconds
+`insertion_priority` | `OPPORTUNISTIC`, `GUARANTEED`, `DYNAMIC` (by name), or the integer value
+`ramp_enable` | `0`/`1`, `on`/`off`, `true`/`false`
+`ramp_max_ramp_up_rate` | Integer, %PL/sec (100 disables ramp-up management)
+`ramp_max_ramp_down_rate` | Integer, %PL/sec (100 disables ramp-down management)
+`ramp_min_time_at_power_floor` | Integer, seconds
+`ramp_stop_delay` | Integer, seconds
+
+`host_control` is read-only and has no settable KEY; it is not one of the
+nine keys above.
+
+Parameters are applied one at a time, in the order given, and the driver
+performs no rollback: a failure on any `KEY=VALUE` pair stops the whole
+`--power-stabilization-configure` call immediately, leaving parameters
+applied before the failure in place and parameters after it untouched.
+
+`host_control` is handled asymmetrically between the two forms: the inline
+`KEY=VALUE` form rejects a `host_control=...` token outright (it is
+read-only), while the `@<path>` replay form -- built to round-trip a `static
+--json` dump, which always includes `host_control_enabled` -- silently skips
+that one field instead of failing the whole file.
+
+The `@<path>` form also emits an extra summary line the inline form does not,
+for example `Applied 9/9 parameters from 'ps.json'`, so an automated caller
+can tell a partial restore from a complete one without counting the
+per-field lines itself.
+
+### NPM coordination
+
+When NPM (Node-level Power Management) coordination is active on a node,
+every Power Stabilization / Ramp Management parameter becomes node-wide
+rather than per-GPU. `amd-smi set --power-stabilization-configure` still
+takes a plain `--gpu N` -- writing against a non-primary GPU is not
+rejected, since the caller may want the value to take effect once NPM is no
+longer active for that GPU. Instead, the CLI prints a note alongside the
+normal per-field result: an informational note when `--gpu` already targets
+the node's primary GPU (OAM ID 0), or a warning naming the equivalent
+primary-GPU command otherwise.
+
+```shell-session
+~$ sudo amd-smi set --gpu 0 --power-stabilization-configure power_floor=25
+GPU: 0
+POWER_STABILIZATION_CONFIGURE: [INFO] NPM is enabled; this setting applies node-wide, not just to this GPU.
+POWER_STABILIZATION_CONFIGURE: power_floor=25: success
+```
+
+```shell-session
+~$ sudo amd-smi set --gpu 5 --power-stabilization-configure power_floor=25
+GPU: 5
+POWER_STABILIZATION_CONFIGURE: [WARNING] power_stabilization is node-wide while NPM is enabled; this write only reflects this GPU's own node state. To configure the node, use its primary GPU instead: 'amd-smi set --gpu 0 --power-stabilization-configure power_floor=25'
+POWER_STABILIZATION_CONFIGURE: power_floor=25: success
+```
+
+The primary GPU is resolved once at CLI startup from whichever device first
+yields a node handle, the same assumption `--node-power-limit`/
+`--node-balancing-mode` make.
+
+### Prerequisites
+
+- Bare-metal Linux only; not available on multi-VF devices.
+- `amd-smi set --power-stabilization-configure` requires root/`CAP_SYS_ADMIN`.

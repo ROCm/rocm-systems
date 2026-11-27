@@ -9,6 +9,7 @@
 // raise INT_DIV0, while CLAMP suppresses a new cause (not an existing flag).
 
 #include "math/rcp_iflag.h"
+#include "common/sdwa_dispatch.h"
 #include "common/validation.h"
 #include "math/unary_exact.h"
 #include "math/x86_64/rcp_exact.h"
@@ -21,7 +22,7 @@ namespace {
 
 // Compute reciprocal and optional guest causes for the selected lanes. Reject invalid controls
 // before changing outputs.
-template <bool Rdna3>
+template <bool Rdna3, bool Cdna = false>
 int rcp_iflag(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d,
               const uint32_t *const *a, uint32_t *excp_flag_user) {
   if ((mode >> 32) &&
@@ -37,9 +38,10 @@ int rcp_iflag(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const
     return error;
   }
   if constexpr (Rdna3) {
-    // RDNA3 OMOD is disabled with preserved output denormals or IEEE mode.
-    // The reciprocal's forced flushing does not change that guest-mode test.
-    if (!(flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) || (flags & RJ_ARITH_FP_IEEE_MODE)) {
+    // gfx1100 applies OMOD with output denormals kept; CDNA retains the
+    // output-flush gate. IEEE mode disables OMOD on both families.
+    if ((flags & RJ_ARITH_FP_IEEE_MODE) ||
+        (Cdna && !(flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS))) {
       mode &= ~uint64_t(RJ_ARITH_ALU_OMOD_MASK);
     }
   }
@@ -54,29 +56,30 @@ int rcp_iflag(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const
     } else {
       exec_mask = rocjitsu::arith::dpp16_source(flags, exec_mask, mode, permuted, a[0]);
     }
-    return rcp_iflag<Rdna3>(flags, exec_mask, uint32_t(mode), d, &source, excp_flag_user);
+    return rcp_iflag<Rdna3, Cdna>(flags, exec_mask, uint32_t(mode), d, &source, excp_flag_user);
   }
   const uint32_t prior_exceptions = rocjitsu::arith::reports_fp_status(flags) ? *excp_flag_user : 0;
   if (rocjitsu::arith::is_exact(flags)) {
     // Snapshot the existing INT_DIV0 cause before D can overwrite an input.
     uint32_t generated = 0;
-    if (rocjitsu::arith::reports_fp_status(flags) && (Rdna3 || !(mode & RJ_ARITH_ALU_CLAMP))) {
+    if (rocjitsu::arith::reports_fp_status(flags) &&
+        (Rdna3 || Cdna || !(mode & RJ_ARITH_ALU_CLAMP))) {
       uint32_t zeros = 0;
 
-      // RDNA3 inherits rocjitsu's classify_rcp_iflag_f32_exceptions:
+      // RDNA3 and CDNA retain the inherited input-zero classifier:
       // signed zero raises INT_DIV0 regardless of CLAMP. RDNA4 instead uses
       // the captured flushed-subnormal and CLAMP-suppression policy.
       for (int lane = 0; lane < 32; ++lane) {
-        zeros |= uint32_t(!(a[0][lane] & (Rdna3 ? 0x7fffffffU : 0x7f800000U))) << lane;
+        zeros |= uint32_t(!(a[0][lane] & (Rdna3 || Cdna ? 0x7fffffffU : 0x7f800000U))) << lane;
       }
       generated = zeros & exec_mask ? RJ_ARITH_EXCEPTION_INT_DIV0 : 0;
     }
-    // gfx11 quiets NaNs only with IEEE set; gfx12 always quiets. OMOD gating is already applied.
+    // CDNA/gfx12 always quiet NaNs; gfx11 quiets only with IEEE set. OMOD is already applied.
     // Reuse the same integer reciprocal model without reapplying that gating.
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
     if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
       rocjitsu::arith::rcp_exact_x86_64_v4(flags, exec_mask, uint32_t(mode), d[0], a[0],
-                                           !Rdna3 || (flags & RJ_ARITH_FP_IEEE_MODE));
+                                           !Rdna3 || Cdna || (flags & RJ_ARITH_FP_IEEE_MODE));
       if (rocjitsu::arith::reports_fp_status(flags)) {
         *excp_flag_user = prior_exceptions | generated;
       }
@@ -86,7 +89,7 @@ int rcp_iflag(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
     if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
       rocjitsu::arith::rcp_exact_x86_64_v3(flags, exec_mask, uint32_t(mode), d[0], a[0],
-                                           !Rdna3 || (flags & RJ_ARITH_FP_IEEE_MODE));
+                                           !Rdna3 || Cdna || (flags & RJ_ARITH_FP_IEEE_MODE));
       if (rocjitsu::arith::reports_fp_status(flags)) {
         *excp_flag_user = prior_exceptions | generated;
       }
@@ -96,7 +99,7 @@ int rcp_iflag(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const
     uint32_t result[32];
     for (int lane = 0; lane < 32; ++lane) {
       result[lane] = rocjitsu::arith::unary_exact_value<rocjitsu::arith::Unary::Rcp>(
-          flags, uint32_t(mode), a[0][lane], Rdna3);
+          flags, uint32_t(mode), a[0][lane], Rdna3 && !Cdna);
     }
     for (int lane = 0; lane < 32; ++lane) {
       if ((exec_mask >> lane) & 1) {
@@ -167,11 +170,11 @@ int rcp_iflag(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const
 
 // Compute reciprocal and optional guest causes for Wave64. Reject invalid controls before
 // changing outputs.
-template <bool Rdna3>
+template <bool Rdna3, bool Cdna = false>
 int rcp_iflag_wave64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *d,
                      const uint32_t *const *a, uint32_t *excp_flag_user) {
   // Validate before either Wave64 half can modify outputs, even when EXEC is empty.
-  if (int error = rcp_iflag<Rdna3>(flags, 0, mode, nullptr, nullptr, excp_flag_user)) {
+  if (int error = rcp_iflag<Rdna3, Cdna>(flags, 0, mode, nullptr, nullptr, excp_flag_user)) {
     return error;
   }
   if (!exec_mask) {
@@ -195,7 +198,7 @@ int rcp_iflag_wave64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t
     }
     uint32_t *dest = d[0] + half * 32;
     const uint32_t *source = a[0] + half * 32;
-    if (int error = rcp_iflag<Rdna3>(
+    if (int error = rcp_iflag<Rdna3, Cdna>(
             flags, uint32_t(exec_mask >> (half * 32)), half_instruction_flags, &dest, &source,
             rocjitsu::arith::reports_fp_status(flags) ? &exceptions : nullptr)) {
       return error;
@@ -205,6 +208,27 @@ int rcp_iflag_wave64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t
     *excp_flag_user = exceptions;
   }
   return RJ_ARITH_SUCCESS;
+}
+
+// Preserve the legacy CDNA model without claiming empirical validation on CDNA hardware.
+// Strict modes fail before accessing operands or status; Compatibility accumulates causes.
+template <bool Gfx1250, typename Mask>
+int cdna_rcp_iflag(uint64_t flags, Mask exec_mask, uint64_t mode, uint32_t *const *d,
+                   const uint32_t *const *a, uint32_t *state) {
+  const uint64_t semantics = flags & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+  }
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if constexpr (sizeof(Mask) == sizeof(uint64_t)) {
+    return rcp_iflag_wave64<!Gfx1250, true>(flags, exec_mask, mode, d, a, state);
+  } else {
+    return rcp_iflag<!Gfx1250, true>(flags, exec_mask, mode, d, a, state);
+  }
 }
 
 } // namespace
@@ -257,4 +281,33 @@ int rj_arith_v_rcp_iflag_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint6
     return error;
   }
   return rcp_iflag_wave64<false>(flags, exec_mask, mode, d, a, excp_flag_user);
+}
+
+// Evaluate the inherited CDNA reciprocal and signed-zero status policy for active lanes.
+int rj_arith_v_rcp_iflag_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                        uint32_t *const *d, const uint32_t *const *a,
+                                        uint32_t *state) {
+  const uint64_t core_flags = mode & RJ_ARITH_ALU_SDWA ? flags & ~RJ_ARITH_FP_ROUND_MASK : flags;
+  return rocjitsu::arith::with_sdwa_output<rocjitsu::arith::SdwaOutput::F32Mode>(
+      flags, exec_mask, mode, d, [&](uint64_t core_mode) {
+        return cdna_rcp_iflag<false>(core_flags, exec_mask, core_mode, d, a, state);
+      });
+}
+
+// Evaluate the inherited CDNA reciprocal and signed-zero status policy for active lanes.
+int rj_arith_v_rcp_iflag_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                        uint32_t *const *d, const uint32_t *const *a,
+                                        uint32_t *state) {
+  const uint64_t core_flags = mode & RJ_ARITH_ALU_SDWA ? flags & ~RJ_ARITH_FP_ROUND_MASK : flags;
+  return rocjitsu::arith::with_sdwa_output<rocjitsu::arith::SdwaOutput::F32Mode>(
+      flags, exec_mask, mode, d, [&](uint64_t core_mode) {
+        return cdna_rcp_iflag<false>(core_flags, exec_mask, core_mode, d, a, state);
+      });
+}
+
+// Evaluate the inherited CDNA reciprocal and signed-zero status policy for active lanes.
+int rj_arith_v_rcp_iflag_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                         uint32_t *const *d, const uint32_t *const *a,
+                                         uint32_t *state) {
+  return cdna_rcp_iflag<true>(flags, exec_mask, mode, d, a, state);
 }

@@ -148,6 +148,12 @@ HIP_PUBLIC_API hipError_t hipArrayGetDescriptor(HIP_ARRAY_DESCRIPTOR* pArrayDesc
   return hip::GetHipDispatchTable()->hipArrayGetDescriptor_fn(pArrayDescriptor, array);
   CATCH;
 }
+HIP_PUBLIC_API hipError_t hipArrayGetPlane(hipArray_t* pPlaneArray, hipArray_t hArray,
+                                           unsigned int planeIdx) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipArrayGetPlane_fn(pPlaneArray, hArray, planeIdx);
+  CATCH;
+}
 HIP_PUBLIC_API hipError_t hipArrayGetInfo(hipChannelFormatDesc* desc, hipExtent* extent, unsigned int* flags,
                            hipArray_t array) {
   TRY;
@@ -356,6 +362,12 @@ HIP_PUBLIC_API hipError_t hipDeviceGetCacheConfig(hipFuncCache_t* cacheConfig) {
 HIP_PUBLIC_API hipError_t hipDeviceGetDefaultMemPool(hipMemPool_t* mem_pool, int device) {
   TRY;
   return hip::GetHipDispatchTable()->hipDeviceGetDefaultMemPool_fn(mem_pool, device);
+  CATCH;
+}
+HIP_PUBLIC_API hipError_t hipDeviceGetExecAffinitySupport(int* pi, hipExecAffinityType type,
+                                                          hipDevice_t dev) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipDeviceGetExecAffinitySupport_fn(pi, type, dev);
   CATCH;
 }
 HIP_PUBLIC_API hipError_t hipDeviceGetGraphMemAttribute(int device, hipGraphMemAttributeType attr, void* value) {
@@ -3287,6 +3299,13 @@ HIP_PUBLIC_API hipError_t hipMipmappedArrayGetMemoryRequirements(hipArrayMemoryR
                                                                                mipmap, device);
   CATCH;
 }
+HIP_PUBLIC_API hipError_t hipArrayGetMemoryRequirements(hipArrayMemoryRequirements* memoryRequirements,
+                                                        hipArray_t array, hipDevice_t device) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipArrayGetMemoryRequirements_fn(memoryRequirements, array,
+                                                                      device);
+  CATCH;
+}
 HIP_PUBLIC_API hipError_t hipKernelSetAttribute(hipFunction_attribute attrib, int value, hipKernel_t kernel, hipDevice_t dev) {
   TRY;
   return hip::GetHipDispatchTable()->hipKernelSetAttribute_fn(attrib, value, kernel, dev);
@@ -3413,5 +3432,31 @@ hipError_t hipDeviceFlushGPUDirectRDMAWrites(hipFlushGPUDirectRDMAWritesTarget t
 hipError_t hipKernelSetCacheConfig(hipKernel_t kernel, hipFuncCache_t config, hipDevice_t dev) {
   TRY;
   return hip::GetHipDispatchTable()->hipKernelSetCacheConfig_fn(kernel, config, dev);
+  CATCH;
+}
+HIP_PUBLIC_API hipError_t hipArrayGetSparseProperties(hipArraySparseProperties* sparseProperties,
+                                                      hipArray_t array) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipArrayGetSparseProperties_fn(sparseProperties, array);
+  CATCH;
+}
+HIP_PUBLIC_API hipError_t hipGraphNodeGetLocalId(hipGraphNode_t node, unsigned int* nodeId) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipGraphNodeGetLocalId_fn(node, nodeId);
+  CATCH;
+}
+HIP_PUBLIC_API hipError_t hipGraphNodeGetToolsId(hipGraphNode_t node, unsigned long long* toolsId) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipGraphNodeGetToolsId_fn(node, toolsId);
+  CATCH;
+}
+HIP_PUBLIC_API hipError_t hipGraphGetId(hipGraph_t graph, unsigned int* graphId) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipGraphGetId_fn(graph, graphId);
+  CATCH;
+}
+HIP_PUBLIC_API hipError_t hipGraphExecGetId(hipGraphExec_t graphExec, unsigned int* graphId) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipGraphExecGetId_fn(graphExec, graphId);
   CATCH;
 }

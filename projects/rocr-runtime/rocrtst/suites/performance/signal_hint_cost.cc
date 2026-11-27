@@ -65,13 +65,12 @@ void SignalHintCost::SetUp(void) {
   if (test_skipped_) return;
 
   ASSERT_EQ(rocrtst::SetDefaultAgents(this), HSA_STATUS_SUCCESS);
-  bool hints_supported = false;
+  uint8_t aql_extensions[8] = {};
   ASSERT_EQ(hsa_agent_get_info(*gpu_device1(),
-                               static_cast<hsa_agent_info_t>(
-                                   HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED),
-                               &hints_supported),
+                               static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_AQL_EXTENSIONS),
+                               aql_extensions),
             HSA_STATUS_SUCCESS);
-  if (!hints_supported) {
+  if (!hsa_flag_isset64(aql_extensions, HSA_AMD_AQL_PROPERTY_SIGNAL_HINTS)) {
     markAsSkip();
     std::cout << "Test not applicable as the GPU's CP does not support signal hints. Skipping."
               << std::endl;
@@ -83,7 +82,7 @@ void SignalHintCost::SetUp(void) {
                          static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_TIMESTAMP_FREQUENCY),
                          &gpu_timestamp_frequency_),
       HSA_STATUS_SUCCESS);
-  device_signal_pool_ = rocrtst::FindExtendedFineGrainedPool(*gpu_device1());
+  device_signal_pool_ = rocrtst::FindSignalCapablePool(*gpu_device1());
   // A profiling queue, like the ones HIP creates, so TS_OFF has timestamps to remove
   ASSERT_EQ(rocrtst::CreateQueue(*gpu_device1(), &queue_, kQueueSize), HSA_STATUS_SUCCESS);
   ASSERT_EQ(hsa_amd_profiling_set_profiler_enabled(queue_, 1), HSA_STATUS_SUCCESS);

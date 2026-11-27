@@ -837,6 +837,9 @@ bool ParseCpuID(cpuid_t* cpuinfo) {
       cpuinfo->mwaitx = !!((ecx >> 29) & 0x1);
     }
   }
+  if ((max_eax >= 7) && __get_cpuid_count(7, 0, &eax, &ebx, &ecx, &edx)) {
+    cpuinfo->clflushopt = !!((ebx >> 23) & 0x1);
+  }
   return true;
 #else
   return false;

@@ -3,8 +3,16 @@
 
 #pragma once
 
-#include "rj_arith/rj_arith.h"
+// Generated vector handlers pass entry points from these operation families.
+#include "rj_arith/detail/rj_arith_conversion.h"
+#include "rj_arith/detail/rj_arith_dot.h"
+#include "rj_arith/detail/rj_arith_graphics.h"
+#include "rj_arith/detail/rj_arith_integer.h"
+#include "rj_arith/detail/rj_arith_register.h"
+#include "rocjitsu/base/rj_compiler.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_resolve.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
@@ -13,10 +21,49 @@
 
 #include <array>
 #include <bit>
+#include <cassert>
 #include <cstdint>
 #include <optional>
 
 namespace rocjitsu::amdgpu::arith {
+
+// CDNA5 V_MOV_B16 e32 encodes each VGPR half in selector bit 7. Let rj-arith
+// select the halves directly so the two physical registers need resolving only
+// once. The ordinary operand path handles staged DPP sources and observation.
+inline bool try_move_packed_vgpr_half(Wavefront &wave, const Operand &destination,
+                                      const Operand &source) {
+  if (source.encoding_value() < 256 || source.encoding_value() > 511 || source.delegate() ||
+      wave.cu().observes_register_access() || wave.instruction_execution_failed() || !wave.exec()) {
+    return false;
+  }
+  RegisterAccess registers(wave);
+  const auto input = registers.read_operand_region(source, wave.exec());
+  const auto output = registers.destination_register(destination);
+  if (!input || !output) {
+    return false;
+  }
+  auto lanes = input->lanes();
+  if (lanes.failed()) {
+    return false;
+  }
+  const uint32_t *values = lanes.value().data();
+  const uint64_t halves = ((source.encoding_value() & 128) ? RJ_ARITH_ALU_HIGH_A : 0u) |
+                          ((destination.encoding_value() & 128) ? RJ_ARITH_ALU_HIGH_D : 0u);
+  const auto flags = wave.cu().arithmetic_flags();
+  const uint32_t base = wave.vgpr_alloc().base + output->index;
+  auto status = registers.try_bulk_write_vgprs<1>(base, 1, [&](uint32_t *const *d) {
+    return wave.wf_size() == 32
+               ? rj_arith_v_mov_b16_w32(flags, uint32_t(wave.exec()), halves, d, &values)
+               : rj_arith_v_mov_b16_w64(flags, wave.exec(), halves, d, &values);
+  });
+  if (!status) {
+    return false;
+  }
+  if (*status != RJ_ARITH_SUCCESS) {
+    wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+  }
+  return true;
+}
 
 // A normal VGPR uses observed storage directly. Uniform, subword or delegated
 // operands use scratch storage; their existing implementation owns routing.
@@ -24,7 +71,8 @@ class VectorInput32 {
 public:
   VectorInput32(RegisterAccess &registers, Wavefront &wave, const Operand &operand,
                 uint64_t exec_mask, uint8_t byte_mask = 0xF) {
-    // A uniform fallback would otherwise read its SGPR even with no consuming lanes.
+    // A uniform fallback would otherwise read its SGPR even with no consuming
+    // lanes.
     if (!exec_mask) {
       values_.fill(0);
       data = values_.data();
@@ -34,7 +82,8 @@ public:
       if (auto region = registers.read_operand_region(operand, exec_mask)) {
         auto lanes = region->lanes(0);
         if (lanes.succeeded()) {
-          // The span refers to CU storage (or a static zero buffer), not the view.
+          // The span refers to CU storage (or a static zero buffer), not the
+          // view.
           data = lanes.value().data();
         } else {
           values_.fill(0);
@@ -45,14 +94,13 @@ public:
     }
     if (operand.simd_capable()) {
       auto view = registers.read_operand(operand, exec_mask, byte_mask);
-      for (uint32_t lane = 0; lane < wave.wf_size(); lane += util::native_width_v<uint32_t>)
+      for (uint32_t lane = 0; lane < wave.wf_size(); lane += util::native_width_v<uint32_t>) {
         view.load_native<uint32_t>(lane).copy_to(values_.data() + lane,
                                                  util::stdx::element_aligned);
+      }
     } else {
       values_.fill(0);
-      for (uint32_t lane = 0; lane < wave.wf_size(); ++lane)
-        if (exec_mask & (uint64_t{1} << lane))
-          values_[lane] = registers.read_lane(operand, lane);
+      registers.read_active_lanes(operand, exec_mask, values_.data());
     }
     data = values_.data();
   }
@@ -63,15 +111,28 @@ public:
   void apply_packed_integer_signs(uint32_t lanes, unsigned index, uint32_t negations,
                                   uint64_t &modifiers) {
     const uint32_t signs = (negations >> index) & 0x00010001u;
-    if (!signs)
+    if (!signs) {
       return;
+    }
     const uint64_t low_high = RJ_ARITH_PK_LO_A_HIGH << index;
     const uint64_t high_low = RJ_ARITH_PK_HI_A_LOW << index;
-    for (unsigned lane = 0; lane < lanes; ++lane)
+    for (unsigned lane = 0; lane < lanes; ++lane) {
       values_[lane] = select_packed_halves(data[lane], (modifiers & low_high) != 0,
                                            (modifiers & high_low) == 0, 0, signs);
+    }
     data = values_.data();
     modifiers &= ~(low_high | high_low);
+  }
+
+  // CDNA ALIGN selects the count byte before the shared arithmetic call.
+  void select_byte(uint32_t lanes, unsigned byte) {
+    if (!byte) {
+      return;
+    }
+    for (uint32_t lane = 0; lane < lanes; ++lane) {
+      values_[lane] = data[lane] >> (8 * byte);
+    }
+    data = values_.data();
   }
 
   const uint32_t *data;
@@ -84,7 +145,8 @@ private:
 class VectorInput64 {
 public:
   VectorInput64(RegisterAccess &registers, Wavefront &wave, const Operand &operand,
-                uint64_t exec_mask) {
+                uint64_t exec_mask, bool packed_words = false,
+                ScalarPairMode scalar_mode = ScalarPairMode::Preserve) {
     if (!exec_mask) {
       values_[0].fill(0);
       values_[1].fill(0);
@@ -104,6 +166,32 @@ public:
       }
       return;
     }
+    if (packed_words) {
+      // Packed inline constants replicate their FP32 bits, rather than widening
+      // to a numeric 64-bit value. Delegated operands retain pair32 routing.
+      // A physical SGPR has the same value for every active lane. Preserve
+      // individual reads for delegates and register observers.
+      const auto reg = operand.to_register_ref();
+      if (operand.const_value() || (!operand.delegate() && !wave.cu().observes_register_access() &&
+                                    reg && reg->cls == RegClass::SGPR)) {
+        const auto value =
+            registers.read_lane_pair32(operand, std::countr_zero(exec_mask), scalar_mode);
+        values_[0].fill(value.lo);
+        values_[1].fill(value.hi);
+      } else {
+        values_[0].fill(0);
+        values_[1].fill(0);
+        for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
+          if ((exec_mask >> lane) & 1) {
+            const auto value = registers.read_lane_pair32(operand, lane, scalar_mode);
+            values_[0][lane] = value.lo;
+            values_[1][lane] = value.hi;
+          }
+        }
+      }
+      data = {values_[0].data(), values_[1].data()};
+      return;
+    }
     // A numeric 64-bit operand widens its scalar constant once; the packed
     // pair32 accessor instead repeats a 32-bit inline constant in both words.
     if (operand.const_value()) {
@@ -114,7 +202,8 @@ public:
       return;
     }
     if (operand.simd_capable()) {
-      // Numeric scalar sources (including SCC) are widened, not replicated pairs.
+      // Numeric scalar sources (including SCC) are widened, not replicated
+      // pairs.
       auto view = registers.read_operand64(operand, exec_mask);
       for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
         const uint64_t value = view.lane(lane);
@@ -125,8 +214,9 @@ public:
       values_[0].fill(0);
       values_[1].fill(0);
       for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
-        if (!(exec_mask & (uint64_t{1} << lane)))
+        if (!(exec_mask & (uint64_t{1} << lane))) {
           continue;
+        }
         const uint64_t value = registers.read_lane64(operand, lane);
         values_[0][lane] = uint32_t(value);
         values_[1][lane] = uint32_t(value >> 32);
@@ -152,13 +242,15 @@ public:
                    uint8_t source_bytes = 0xF)
       : source_(registers, wave, operand, exec_mask, narrow ? 0xF : source_bytes) {
     data = source_.data;
-    if (!narrow && !replicate)
+    if (!narrow && !replicate) {
       return;
+    }
     for (unsigned lane = 0; lane < wave.wf_size(); ++lane) {
       uint32_t value = source_.data[lane];
-      if (narrow)
+      if (narrow) {
         value = bf16 ? util::f32_to_bf16(std::bit_cast<float>(value))
                      : util::f32_to_f16(std::bit_cast<float>(value));
+      }
       values_[lane] = replicate ? (value & 0xffffu) * 0x10001u : value;
     }
     data = values_.data();
@@ -171,23 +263,36 @@ private:
   std::array<uint32_t, 64> values_;
 };
 
-// Direct stores are safe without observers: rj-arith preserves storage on rejection.
-// Other destinations stage the result before acquiring an observed write view.
-// Returns true on success, or reports an instruction error and returns false.
+// Direct stores are safe without observers: rj-arith preserves storage on
+// rejection. Other destinations stage the result before acquiring an observed
+// write view. preserve_destination is for APIs that may leave selected bytes
+// unchanged and also preserve unselected bytes. Such APIs can safely use direct
+// full-word stores; observed calls initialize scratch from the selected
+// architectural bytes. Returns true on success, or reports an instruction error
+// and returns false.
 template <typename Invoke>
 inline bool write_vector32_result(Wavefront &wave, RegisterAccess &registers,
                                   const Operand &destination, uint64_t exec_mask, Invoke invoke,
-                                  bool allow_direct = true, uint8_t byte_mask = 0xF) {
-  if (wave.instruction_execution_failed())
+                                  bool allow_direct = true, uint8_t byte_mask = 0xF,
+                                  bool preserve_destination = false) {
+  if (wave.instruction_execution_failed()) {
     return false;
-  if (allow_direct && byte_mask == 0xF) {
+  }
+  if (allow_direct && (byte_mask == 0xF || preserve_destination)) {
     if (auto status = registers.try_bulk_write_operand(destination, exec_mask, invoke)) {
-      if (*status != RJ_ARITH_SUCCESS)
+      if (*status != RJ_ARITH_SUCCESS) {
         wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+      }
       return *status == RJ_ARITH_SUCCESS;
     }
   }
   std::array<uint32_t, 64> result{};
+  if (preserve_destination) {
+    VectorInput32 old(registers, wave, destination, exec_mask, byte_mask);
+    for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
+      result[lane] = old.data[lane];
+    }
+  }
   uint32_t *d = result.data();
   const int status = invoke(&d, exec_mask);
   if (status != RJ_ARITH_SUCCESS) {
@@ -196,81 +301,123 @@ inline bool write_vector32_result(Wavefront &wave, RegisterAccess &registers,
   }
   if (destination.simd_capable()) {
     auto output = registers.write_operand(destination, exec_mask, byte_mask);
-    for (uint32_t lane = 0; lane < wave.wf_size(); lane += util::native_width_v<uint32_t>)
+    for (uint32_t lane = 0; lane < wave.wf_size(); lane += util::native_width_v<uint32_t>) {
       if (output.store_native(lane, util::load<uint32_t>(result.data() + lane), exec_mask >> lane)
-              .failed())
+              .failed()) {
         return false;
+      }
+    }
   } else {
-    for (uint32_t lane = 0; lane < wave.wf_size(); ++lane)
-      if (exec_mask & (uint64_t{1} << lane))
+    for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
+      if (exec_mask & (uint64_t{1} << lane)) {
         registers.write_lane(destination, lane, result[lane]);
+      }
+    }
   }
   return !wave.instruction_execution_failed();
 }
 
 // Select raw words or halves using a wave-wide condition mask. Acquire both
 // sources before writes, and preserve the unused destination half for B16.
-template <bool Half, typename Wave32, typename Wave64>
-inline void execute_conditional(Wavefront &wave, Wave32 wave32, Wave64 wave64, uint64_t flags,
-                                uint64_t modifiers, const Operand &destination, const Operand &lhs,
-                                const Operand &rhs, uint64_t condition) {
+template <bool Half, typename Inst, typename Wave32, typename Wave64>
+inline void execute_conditional(Inst &inst, Wavefront &wave, Wave32 wave32, Wave64 wave64,
+                                uint64_t flags, uint64_t modifiers, const Operand &destination,
+                                const Operand &lhs, const Operand &rhs, uint64_t condition) {
   // DPP filters destinations, not ordinary source reads on active lanes.
   const uint64_t exec_mask = wave.exec() & (wave.wf_size() == 32 ? 0xffffffffULL : ~0ULL);
-  if (!exec_mask)
+  if (!exec_mask) {
     return;
+  }
   RegisterAccess registers(wave);
   VectorInput32 a(registers, wave, lhs, exec_mask & ~condition,
                   Half ? (modifiers & RJ_ARITH_ALU_HIGH_A ? 0xc : 0x3) : 0xf);
   VectorInput32 b(registers, wave, rhs, exec_mask & condition,
                   Half ? (modifiers & RJ_ARITH_ALU_HIGH_B ? 0xc : 0x3) : 0xf);
-  write_vector32_result(
-      wave, registers, destination, exec_mask & wave.vgpr_write_mask(),
-      [&](uint32_t *const *d, uint64_t write_mask) {
-        return wave.wf_size() == 32
-                   ? wave32(flags, uint32_t(write_mask), modifiers, d, &a.data, &b.data,
-                            uint32_t(condition))
-                   : wave64(flags, write_mask, modifiers, d, &a.data, &b.data, condition);
-      },
-      /*allow_direct=*/!Half, Half ? (modifiers & RJ_ARITH_ALU_HIGH_D ? 0xc : 0x3) : 0xf);
+  auto invoke = [&](uint32_t *const *d, uint64_t write_mask) {
+    return wave.wf_size() == 32
+               ? wave32(flags, uint32_t(write_mask), modifiers, d, &a.data, &b.data,
+                        uint32_t(condition))
+               : wave64(flags, write_mask, modifiers, d, &a.data, &b.data, condition);
+  };
+  if constexpr (requires { inst.sdwa_dst_sel_; }) {
+    if (inst.inst_.src0 == SRC_SDWA) {
+      uint32_t result[64]{};
+      uint32_t *d = result;
+      if (invoke(&d, exec_mask) != RJ_ARITH_SUCCESS) {
+        wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+        return;
+      }
+      if (!wave.instruction_execution_failed()) {
+        for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
+          if ((exec_mask >> lane) & 1) {
+            sdwa::write_lane(inst, wave, destination, lane, result[lane]);
+          }
+        }
+      }
+      return;
+    }
+  }
+  write_vector32_result(wave, registers, destination, exec_mask & wave.vgpr_write_mask(), invoke,
+                        /*allow_direct=*/!Half,
+                        Half ? (modifiers & RJ_ARITH_ALU_HIGH_D ? 0xc : 0x3) : 0xf);
 }
 
 // Consume the selected input halves and commit only the selected destination
 // half. VOP1's packed operands instead supply/accept a resolved low-half value.
 // SourceCount determines whether source_b and source_c must be provided.
-template <unsigned SourceCount, typename Wave32, typename Wave64>
+// FullSources observes whole input words for narrowing operations such as byte
+// packing. CDNA low-half destinations additionally clear the upper half when
+// ZeroHigh is true.
+template <unsigned SourceCount, bool ZeroHigh = false, bool FullSources = false, typename Wave32,
+          typename Wave64>
 inline void execute_integer16(Wavefront &wave, Wave32 wave32, Wave64 wave64, uint64_t flags,
                               uint64_t modifiers, const Operand &destination,
                               const Operand &source_a, const Operand *source_b = nullptr,
                               const Operand *source_c = nullptr) {
   static_assert(SourceCount >= 1 && SourceCount <= 3);
   const uint64_t exec_mask = wave.exec() & (wave.wf_size() == 32 ? 0xffffffffULL : ~0ULL);
-  if (!exec_mask)
+  if (!exec_mask) {
     return;
+  }
   RegisterAccess registers(wave);
   VectorInput32 a(registers, wave, source_a, exec_mask,
-                  modifiers & RJ_ARITH_ALU_HIGH_A ? 0xC : 0x3);
+                  FullSources                       ? 0xF
+                  : modifiers & RJ_ARITH_ALU_HIGH_A ? 0xC
+                                                    : 0x3);
   std::optional<VectorInput32> b, c;
-  if constexpr (SourceCount >= 2)
-    b.emplace(registers, wave, *source_b, exec_mask, modifiers & RJ_ARITH_ALU_HIGH_B ? 0xC : 0x3);
-  if constexpr (SourceCount == 3)
-    c.emplace(registers, wave, *source_c, exec_mask, modifiers & RJ_ARITH_ALU_HIGH_C ? 0xC : 0x3);
+  if constexpr (SourceCount >= 2) {
+    b.emplace(registers, wave, *source_b, exec_mask,
+              FullSources                       ? 0xF
+              : modifiers & RJ_ARITH_ALU_HIGH_B ? 0xC
+                                                : 0x3);
+  }
+  if constexpr (SourceCount == 3) {
+    c.emplace(registers, wave, *source_c, exec_mask,
+              FullSources                       ? 0xF
+              : modifiers & RJ_ARITH_ALU_HIGH_C ? 0xC
+                                                : 0x3);
+  }
   write_vector32_result(
       wave, registers, destination, exec_mask,
       [&](uint32_t *const *d, uint64_t write_mask) {
-        if constexpr (SourceCount == 1)
+        if constexpr (SourceCount == 1) {
           return wave.wf_size() == 32 ? wave32(flags, uint32_t(write_mask), modifiers, d, &a.data)
                                       : wave64(flags, write_mask, modifiers, d, &a.data);
-        else if constexpr (SourceCount == 2)
+        } else if constexpr (SourceCount == 2) {
           return wave.wf_size() == 32
                      ? wave32(flags, uint32_t(write_mask), modifiers, d, &a.data, &b->data)
                      : wave64(flags, write_mask, modifiers, d, &a.data, &b->data);
-        else
+        } else {
           return wave.wf_size() == 32
                      ? wave32(flags, uint32_t(write_mask), modifiers, d, &a.data, &b->data,
                               &c->data)
                      : wave64(flags, write_mask, modifiers, d, &a.data, &b->data, &c->data);
+        }
       },
-      /*allow_direct=*/false, modifiers & RJ_ARITH_ALU_HIGH_D ? 0xC : 0x3);
+      /*allow_direct=*/false,
+      modifiers & RJ_ARITH_ALU_HIGH_D ? 0xC
+      : ZeroHigh                      ? 0xF
+                                      : 0x3);
 }
 
 // A two-word result uses one logical 64-bit write, preserving observation and
@@ -279,12 +426,14 @@ template <typename Invoke>
 inline bool write_vector64_result(Wavefront &wave, RegisterAccess &registers,
                                   const Operand &destination, uint64_t exec_mask, Invoke invoke,
                                   bool allow_direct = true) {
-  if (wave.instruction_execution_failed())
+  if (wave.instruction_execution_failed()) {
     return false;
+  }
   if (allow_direct) {
     if (auto status = registers.try_bulk_write_operand<2>(destination, exec_mask, invoke)) {
-      if (*status != RJ_ARITH_SUCCESS)
+      if (*status != RJ_ARITH_SUCCESS) {
         wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+      }
       return *status == RJ_ARITH_SUCCESS;
     }
   }
@@ -296,19 +445,99 @@ inline bool write_vector64_result(Wavefront &wave, RegisterAccess &registers,
   }
   if (destination.simd_capable()) {
     auto output = registers.write_operand_pair32(destination, exec_mask);
-    for (uint32_t lane = 0; lane < wave.wf_size(); lane += util::native_width_v<uint32_t>)
+    for (uint32_t lane = 0; lane < wave.wf_size(); lane += util::native_width_v<uint32_t>) {
       if (output
               .store_native_pair(lane, util::load<uint32_t>(result[0].data() + lane),
                                  util::load<uint32_t>(result[1].data() + lane), exec_mask >> lane)
-              .failed())
+              .failed()) {
         return false;
+      }
+    }
   } else {
-    for (uint32_t lane = 0; lane < wave.wf_size(); ++lane)
-      if (exec_mask & (uint64_t{1} << lane))
+    for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
+      if (exec_mask & (uint64_t{1} << lane)) {
         registers.write_lane64(destination, lane,
                                result[0][lane] | (uint64_t(result[1][lane]) << 32));
+      }
+    }
   }
   return !wave.instruction_execution_failed();
+}
+// Copy numeric register pairs; preserve scalar widening and delegated DPP
+// sources. Packed MOV selects full words from two pairs, not replicated inline
+// constants.
+template <bool Packed>
+inline void execute_pair_move(Wavefront &wave, uint64_t modifiers, const Operand &destination,
+                              const Operand &first, const Operand *second) {
+  if (!wave.exec()) {
+    return;
+  }
+  RegisterAccess registers(wave);
+  VectorInput64 a(registers, wave, first, wave.exec());
+  std::optional<VectorInput64> b;
+  if constexpr (Packed) {
+    b.emplace(registers, wave, *second, wave.exec());
+  }
+  const uint64_t flags = wave.cu().arithmetic_flags();
+  write_vector64_result(
+      wave, registers, destination, wave.exec() & wave.vgpr_write_mask(),
+      [&](uint32_t *const *d, uint64_t exec_mask) {
+        if constexpr (Packed) {
+          return wave.wf_size() == 32
+                     ? rj_arith_v_pk_mov_b32_w32(flags, uint32_t(exec_mask), modifiers, d,
+                                                 a.data.data(), b->data.data())
+                     : rj_arith_v_pk_mov_b32_w64(flags, exec_mask, modifiers, d, a.data.data(),
+                                                 b->data.data());
+        } else {
+          return wave.wf_size() == 32
+                     ? rj_arith_v_mov_b64_w32(flags, uint32_t(exec_mask), modifiers, d,
+                                              a.data.data())
+                     : rj_arith_v_mov_b64_w64(flags, exec_mask, modifiers, d, a.data.data());
+        }
+      });
+}
+
+// Read two wide operands before publishing the resulting VGPR pair.
+template <typename Wave32, typename Wave64>
+inline void execute_binary64(Wavefront &wave, Wave32 wave32, Wave64 wave64, uint64_t flags,
+                             uint64_t modifiers, const Operand &destination,
+                             const Operand &source_a, const Operand &source_b) {
+  const uint64_t exec_mask = wave.exec() & (wave.wf_size() == 32 ? 0xffffffffULL : ~0ULL);
+  if (!exec_mask) {
+    return;
+  }
+  RegisterAccess registers(wave);
+  VectorInput64 a(registers, wave, source_a, exec_mask);
+  VectorInput64 b(registers, wave, source_b, exec_mask);
+  write_vector64_result(
+      wave, registers, destination, exec_mask, [&](uint32_t *const *d, uint64_t write_mask) {
+        return wave.wf_size() == 32
+                   ? wave32(flags, uint32_t(write_mask), modifiers, d, a.data.data(), b.data.data())
+                   : wave64(flags, write_mask, modifiers, d, a.data.data(), b.data.data());
+      });
+}
+
+// Read wide A/C and a narrow count before publishing a wide shift-add result.
+template <typename Wave32, typename Wave64>
+inline void execute_shift_add64(Wavefront &wave, Wave32 wave32, Wave64 wave64, uint64_t flags,
+                                uint64_t modifiers, const Operand &destination,
+                                const Operand &source_a, const Operand &source_b,
+                                const Operand &source_c) {
+  const uint64_t exec_mask = wave.exec() & (wave.wf_size() == 32 ? 0xffffffffULL : ~0ULL);
+  if (!exec_mask) {
+    return;
+  }
+  RegisterAccess registers(wave);
+  VectorInput64 a(registers, wave, source_a, exec_mask);
+  VectorInput32 b(registers, wave, source_b, exec_mask);
+  VectorInput64 c(registers, wave, source_c, exec_mask);
+  write_vector64_result(
+      wave, registers, destination, exec_mask, [&](uint32_t *const *d, uint64_t write_mask) {
+        return wave.wf_size() == 32
+                   ? wave32(flags, uint32_t(write_mask), modifiers, d, a.data.data(), &b.data,
+                            c.data.data())
+                   : wave64(flags, write_mask, modifiers, d, a.data.data(), &b.data, c.data.data());
+      });
 }
 
 // Read the 32-bit count and both value words before committing an aliased pair.
@@ -317,8 +546,9 @@ inline void execute_shift64(Wavefront &wave, Wave32 wave32, Wave64 wave64, uint6
                             uint64_t modifiers, const Operand &destination, const Operand &source_a,
                             const Operand &source_b) {
   const uint64_t exec_mask = wave.exec() & (wave.wf_size() == 32 ? 0xffffffffULL : ~0ULL);
-  if (!exec_mask)
+  if (!exec_mask) {
     return;
+  }
   RegisterAccess registers(wave);
   VectorInput32 a(registers, wave, source_a, exec_mask);
   VectorInput64 b(registers, wave, source_b, exec_mask);
@@ -358,8 +588,9 @@ inline void execute_mad64(Wavefront &wave, Wave32 wave32, Wave64 wave64, uint64_
   const bool success = write_vector64_result(
       wave, registers, destination, exec_mask,
       [&](uint32_t *const *d, uint64_t) {
-        if (wave.wf_size() == 64)
+        if (wave.wf_size() == 64) {
           return wave64(flags, exec_mask, modifiers, d, &carry, &a.data, &b.data, c.data.data());
+        }
         uint32_t carry32 = 0;
         const int status = wave32(flags, uint32_t(exec_mask), modifiers, d, &carry32, &a.data,
                                   &b.data, c.data.data());
@@ -367,43 +598,133 @@ inline void execute_mad64(Wavefront &wave, Wave32 wave32, Wave64 wave64, uint64_
         return status;
       },
       (exec_mask & ~wave.vgpr_write_mask()) == 0);
-  if (success)
+  if (success) {
     commit(carry);
+  }
 }
 
-// Carry and vector results use the DPP destination mask; source observations use EXEC.
-template <bool WithCarry, typename Wave32, typename Wave64, typename Commit>
+// Non-carry MAD observes two narrow factors and a wide accumulator; only VGPR
+// writes are published.
+template <typename Wave32, typename Wave64>
+inline void execute_mad64_nc(Wavefront &wave, Wave32 wave32, Wave64 wave64, uint64_t flags,
+                             uint64_t modifiers, const Operand &destination,
+                             const Operand &source_a, const Operand &source_b,
+                             const Operand &source_c) {
+  const uint64_t exec_mask = wave.exec() & (wave.wf_size() == 32 ? 0xffffffffULL : ~0ULL);
+  RegisterAccess registers(wave);
+  VectorInput32 a(registers, wave, source_a, exec_mask), b(registers, wave, source_b, exec_mask);
+  VectorInput64 c(registers, wave, source_c, exec_mask);
+  write_vector64_result(
+      wave, registers, destination, exec_mask, [&](uint32_t *const *d, uint64_t write_mask) {
+        return wave.wf_size() == 32
+                   ? wave32(flags, uint32_t(write_mask), modifiers, d, &a.data, &b.data,
+                            c.data.data())
+                   : wave64(flags, write_mask, modifiers, d, &a.data, &b.data, c.data.data());
+      });
+}
+
+// gfx11/gfx12 mask carry with the vector destination. Legacy CDNA carry uses
+// EXEC; the decoder separately preserves source-suppressed bits. Sources use
+// EXEC.
+template <bool WithCarry, bool MaskCarry = true, typename Wave32, typename Wave64, typename Commit>
 inline void execute_carry32(Wavefront &wave, Wave32 wave32, Wave64 wave64, uint64_t flags,
                             uint64_t modifiers, const Operand &destination, const Operand &source_a,
                             const Operand &source_b, uint64_t input_carry, Commit commit) {
-  const uint64_t exec_mask =
-      wave.exec() & wave.vgpr_write_mask() & (wave.wf_size() == 32 ? 0xffffffffULL : ~0ULL);
+  const uint64_t exec_mask = wave.exec() & (MaskCarry ? wave.vgpr_write_mask() : ~0ULL) &
+                             (wave.wf_size() == 32 ? 0xffffffffULL : ~0ULL);
   RegisterAccess registers(wave);
   VectorInput32 a(registers, wave, source_a, wave.exec()),
       b(registers, wave, source_b, wave.exec());
   uint64_t carry = 0;
   const bool success = write_vector32_result(
-      wave, registers, destination, exec_mask,
+      wave, registers, destination, exec_mask & wave.vgpr_write_mask(),
       [&](uint32_t *const *d, uint64_t) {
         if (wave.wf_size() == 32) {
           uint32_t carry32 = 0;
           int status;
-          if constexpr (WithCarry)
+          if constexpr (WithCarry) {
             status = wave32(flags, uint32_t(exec_mask), modifiers, d, &carry32, &a.data, &b.data,
                             uint32_t(input_carry));
-          else
+          } else {
             status = wave32(flags, uint32_t(exec_mask), modifiers, d, &carry32, &a.data, &b.data);
+          }
           carry = carry32;
           return status;
         }
-        if constexpr (WithCarry)
+        if constexpr (WithCarry) {
           return wave64(flags, exec_mask, modifiers, d, &carry, &a.data, &b.data, input_carry);
-        else
+        } else {
           return wave64(flags, exec_mask, modifiers, d, &carry, &a.data, &b.data);
+        }
       },
       (exec_mask & ~wave.vgpr_write_mask()) == 0);
-  if (success)
+  if (success) {
     commit(carry);
+  }
+}
+
+// Compute SDWA carry arithmetic on EXEC, then place the VGPR result and commit
+// VCC separately.
+template <bool WithCarry, typename Inst, typename Wave32, typename Wave64, typename Commit>
+inline void execute_sdwa_carry32(Inst &inst, Wavefront &wave, Wave32 wave32, Wave64 wave64,
+                                 uint64_t flags, uint64_t modifiers, const Operand &destination,
+                                 const Operand &source_a, const Operand &source_b,
+                                 uint64_t input_carry, Commit commit) {
+  const uint64_t exec_mask = wave.exec();
+  RegisterAccess registers(wave);
+  VectorInput32 a(registers, wave, source_a, exec_mask), b(registers, wave, source_b, exec_mask);
+  uint32_t result[64]{};
+  uint32_t *d = result;
+  uint64_t carry = 0;
+  int status;
+  if (wave.wf_size() == 32) {
+    uint32_t carry32 = 0;
+    if constexpr (WithCarry) {
+      status = wave32(flags, uint32_t(exec_mask), modifiers, &d, &carry32, &a.data, &b.data,
+                      uint32_t(input_carry));
+    } else {
+      status = wave32(flags, uint32_t(exec_mask), modifiers, &d, &carry32, &a.data, &b.data);
+    }
+    carry = carry32;
+  } else if constexpr (WithCarry) {
+    status = wave64(flags, exec_mask, modifiers, &d, &carry, &a.data, &b.data, input_carry);
+  } else {
+    status = wave64(flags, exec_mask, modifiers, &d, &carry, &a.data, &b.data);
+  }
+  if (status != RJ_ARITH_SUCCESS) {
+    wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+  }
+  if (!wave.instruction_execution_failed()) {
+    const uint64_t write_mask = exec_mask & wave.vgpr_write_mask();
+    if (write_mask) {
+      if (destination.is_vgpr() && destination.simd_capable() &&
+          inst.dst_operand(0) == &destination) {
+        // Resolve one write view for all lanes; selected-byte merging has no FP controls.
+        const auto selection = inst.sdwa_dst_sel_;
+        const auto unused = inst.sdwa_dst_unused_;
+        if (selection != sdwa::DWORD) {
+          for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
+            result[lane] = sdwa::sdwa_dst_merge(result[lane], 0, selection, unused);
+          }
+        }
+        auto output = registers.write_operand(destination, write_mask,
+                                              sdwa::sdwa_dst_byte_mask(selection, unused));
+        for (uint32_t lane = 0; lane < wave.wf_size(); lane += util::native_width_v<uint32_t>) {
+          if (output.store_native(lane, util::load<uint32_t>(result + lane), write_mask >> lane)
+                  .failed()) {
+            return;
+          }
+        }
+      } else {
+        for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
+          if ((write_mask >> lane) & 1) {
+            sdwa::write_lane(inst, wave, destination, lane, result[lane]);
+          }
+        }
+      }
+    }
+    commit(carry);
+  }
 }
 
 using Binary32Function = int (*)(uint64_t, uint32_t, uint64_t, uint32_t *const *,
@@ -431,8 +752,9 @@ inline void execute_qsad(Wavefront &wave, Ternary32Function wave32, Ternary64Fun
                          const Operand &source_a, const Operand &source_b,
                          const DecodedOperand &source_c, bool packed) {
   const uint64_t exec_mask = wave.exec() & wave.vgpr_write_mask();
-  if (!exec_mask)
+  if (!exec_mask) {
     return;
+  }
   RegisterAccess registers(wave);
   VectorInput64 a(registers, wave, source_a, exec_mask);
   VectorInput32 b(registers, wave, source_b, exec_mask);
@@ -443,6 +765,15 @@ inline void execute_qsad(Wavefront &wave, Ternary32Function wave32, Ternary64Fun
     packed_c.emplace(registers, wave, source_c, exec_mask);
     c[0] = packed_c->data[0];
     c[1] = packed_c->data[1];
+  } else if (auto region = registers.read_operand_region(source_c, exec_mask, 4)) {
+    // Bulk reads are admitted only when the logical words resolve contiguously.
+    for (unsigned reg = 0; reg < 4; ++reg) {
+      auto lanes = region->lanes(reg);
+      if (lanes.failed()) {
+        return;
+      }
+      c[reg] = lanes.value().data();
+    }
   } else {
     auto word = source_c;
     word.size_bits_ = 32;
@@ -452,8 +783,9 @@ inline void execute_qsad(Wavefront &wave, Ternary32Function wave32, Ternary64Fun
       c[reg] = words_c[reg]->data;
     }
   }
-  if (wave.instruction_execution_failed())
+  if (wave.instruction_execution_failed()) {
     return;
+  }
   const auto invoke = [&](uint32_t *const *d, uint64_t write_mask) {
     return wave.wf_size() == 32
                ? wave32(flags, uint32_t(write_mask), modifiers, d, a.data.data(), &b.data, c.data())
@@ -464,8 +796,9 @@ inline void execute_qsad(Wavefront &wave, Ternary32Function wave32, Ternary64Fun
     return;
   }
   if (auto status = registers.try_bulk_write_operand<4>(destination, exec_mask, invoke)) {
-    if (*status != RJ_ARITH_SUCCESS)
+    if (*status != RJ_ARITH_SUCCESS) {
       wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+    }
     return;
   }
   auto word = destination;
@@ -480,31 +813,108 @@ inline void execute_qsad(Wavefront &wave, Ternary32Function wave32, Ternary64Fun
     word.encoding_value_ = destination.encoding_value_ + reg;
     if (word.simd_capable()) {
       auto output = registers.write_operand(word, exec_mask);
-      for (uint32_t lane = 0; lane < wave.wf_size(); lane += util::native_width_v<uint32_t>)
+      for (uint32_t lane = 0; lane < wave.wf_size(); lane += util::native_width_v<uint32_t>) {
         if (output
                 .store_native(lane, util::load<uint32_t>(result[reg].data() + lane),
                               exec_mask >> lane)
-                .failed())
+                .failed()) {
           return;
+        }
+      }
     } else {
-      for (uint32_t lane = 0; lane < wave.wf_size(); ++lane)
-        if ((exec_mask >> lane) & 1)
+      for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
+        if ((exec_mask >> lane) & 1) {
           registers.write_lane(word, lane, result[reg][lane]);
+        }
+      }
     }
   }
 }
 
-// rj-arith preserves aliased source values. Direct stores and staged write views
-// both honor EXEC and the decoder's DPP write mask.
+// Handle integer SDWA destination placement after arithmetic. Ordinary
+// encodings return false so their direct-storage path remains unchanged.
+template <typename Inst, typename Wave32, typename Wave64, typename... Sources>
+inline bool try_execute_sdwa_integer32(Inst &inst, Wavefront &wave, Wave32 wave32, Wave64 wave64,
+                                       uint64_t flags, uint64_t modifiers,
+                                       const Operand &destination, const Sources &...sources) {
+  if constexpr (requires { inst.sdwa_dst_sel_; }) {
+    if (inst.inst_.src0 == SRC_SDWA) {
+      const uint64_t exec_mask = wave.exec() & wave.vgpr_write_mask();
+      if (!exec_mask) {
+        return true;
+      }
+      RegisterAccess registers(wave);
+      VectorInput32 inputs[] = {VectorInput32(registers, wave, sources, exec_mask)...};
+      uint32_t result[64]{};
+      uint32_t *d = result;
+      int status;
+      if constexpr (sizeof...(Sources) == 1) {
+        status = wave.wf_size() == 32
+                     ? wave32(flags, uint32_t(exec_mask), modifiers, &d, &inputs[0].data)
+                     : wave64(flags, exec_mask, modifiers, &d, &inputs[0].data);
+      } else {
+        static_assert(sizeof...(Sources) == 2);
+        status = wave.wf_size() == 32
+                     ? wave32(flags, uint32_t(exec_mask), modifiers, &d, &inputs[0].data,
+                              &inputs[1].data)
+                     : wave64(flags, exec_mask, modifiers, &d, &inputs[0].data, &inputs[1].data);
+      }
+      if (status != RJ_ARITH_SUCCESS) {
+        wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+      }
+      if (!wave.instruction_execution_failed()) {
+        if constexpr (requires {
+                        inst.sdwa_dst_unused_;
+                        inst.dst_operand(0);
+                      }) {
+          if (destination.is_vgpr() && destination.simd_capable() &&
+              inst.dst_operand(0) == &destination) {
+            // Place selected bytes in scratch, then resolve and observe the destination once.
+            // NONE has no FP scaling/clamping; PRESERVE is handled by the write view's byte mask.
+            const auto selection = inst.sdwa_dst_sel_;
+            const auto unused = inst.sdwa_dst_unused_;
+            if (selection != sdwa::DWORD) {
+              for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
+                result[lane] = sdwa::sdwa_dst_merge(result[lane], 0, selection, unused);
+              }
+            }
+            auto output = registers.write_operand(destination, exec_mask,
+                                                  sdwa::sdwa_dst_byte_mask(selection, unused));
+            for (uint32_t lane = 0; lane < wave.wf_size(); lane += util::native_width_v<uint32_t>) {
+              if (output.store_native(lane, util::load<uint32_t>(result + lane), exec_mask >> lane)
+                      .failed()) {
+                return true;
+              }
+            }
+            return true;
+          }
+        }
+        for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
+          if ((exec_mask >> lane) & 1) {
+            sdwa::write_lane(inst, wave, destination, lane, result[lane]);
+          }
+        }
+      }
+      return true;
+    }
+  }
+  return false;
+}
+
+// rj-arith preserves aliased source values. Direct stores and staged write
+// views both honor EXEC and the decoder's DPP write mask.
 inline void execute_binary32(Wavefront &wave, Binary32Function wave32, Binary64Function wave64,
                              uint64_t flags, uint64_t modifiers, const Operand &destination,
                              const Operand &source_a, const Operand &source_b,
-                             uint8_t destination_bytes = 0xF, uint32_t packed_negations = 0) {
+                             uint8_t destination_bytes = 0xF, uint32_t packed_negations = 0,
+                             uint8_t source_a_bytes = 0xF, bool preserve_destination = false) {
   const uint64_t exec_mask = wave.exec() & (wave.wf_size() == 32 ? 0xffffffffULL : ~0ULL);
-  if (!exec_mask)
+  if (!exec_mask) {
     return;
+  }
   RegisterAccess registers(wave);
-  VectorInput32 a(registers, wave, source_a, exec_mask), b(registers, wave, source_b, exec_mask);
+  VectorInput32 a(registers, wave, source_a, exec_mask, source_a_bytes),
+      b(registers, wave, source_b, exec_mask);
   if (packed_negations) {
     a.apply_packed_integer_signs(wave.wf_size(), 0, packed_negations, modifiers);
     b.apply_packed_integer_signs(wave.wf_size(), 1, packed_negations, modifiers);
@@ -516,7 +926,8 @@ inline void execute_binary32(Wavefront &wave, Binary32Function wave32, Binary64F
                    ? wave32(flags, uint32_t(write_mask), modifiers, d, &a.data, &b.data)
                    : wave64(flags, write_mask, modifiers, d, &a.data, &b.data);
       },
-      /*allow_direct=*/destination_bytes == 0xF, destination_bytes);
+      /*allow_direct=*/destination_bytes == 0xF || preserve_destination, destination_bytes,
+      preserve_destination);
 }
 
 // Read the routed source before committing any destination lanes.
@@ -525,8 +936,9 @@ inline void execute_unary32(Wavefront &wave, Unary32Function wave32, Unary64Func
                             const Operand &source, uint8_t source_bytes = 0xF,
                             uint8_t destination_bytes = 0xF) {
   const uint64_t exec_mask = wave.exec() & (wave.wf_size() == 32 ? 0xffffffffULL : ~0ULL);
-  if (!exec_mask)
+  if (!exec_mask) {
     return;
+  }
   RegisterAccess registers(wave);
   VectorInput32 a(registers, wave, source, exec_mask, source_bytes);
   write_vector32_result(
@@ -538,14 +950,121 @@ inline void execute_unary32(Wavefront &wave, Unary32Function wave32, Unary64Func
       /*allow_direct=*/destination_bytes == 0xF, destination_bytes);
 }
 
+// Pack a staged SDWA source before applying integer destination placement.
+// All source lanes are captured before any potentially aliased destination
+// write.
+template <typename Inst>
+inline void execute_saturating_pack_sdwa(Inst &inst, Wavefront &wave, Unary32Function wave32,
+                                         Unary64Function wave64, const Operand &destination,
+                                         const Operand &source) {
+  if (!wave.exec()) {
+    return;
+  }
+  const uint64_t exec_mask = wave.exec() & wave.vgpr_write_mask();
+  RegisterAccess registers(wave);
+  VectorInput32 a(registers, wave, source, wave.exec());
+  if (wave.instruction_execution_failed()) {
+    return;
+  }
+  uint32_t result[64]{};
+  uint32_t *d = result;
+  uint64_t flags = wave.cu().arithmetic_flags();
+  const int error = wave.wf_size() == 32 ? wave32(flags, uint32_t(exec_mask), 0, &d, &a.data)
+                                         : wave64(flags, exec_mask, 0, &d, &a.data);
+  if (error != RJ_ARITH_SUCCESS) {
+    wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
+    if (exec_mask & (1ULL << lane)) {
+      sdwa::write_lane(inst, wave, destination, lane, result[lane]);
+    }
+  }
+}
+
+// Copy a routed word, retaining SDWA destination placement without FP
+// interpretation.
+template <typename Inst>
+inline void execute_move32(Inst &inst, Wavefront &wave, const Operand &destination,
+                           const Operand &source) {
+  if constexpr (requires { inst.sdwa_dst_sel_; }) {
+    if (inst.inst_.src0 == amdgpu::SRC_SDWA) {
+      const uint64_t exec_mask = wave.exec() & wave.vgpr_write_mask();
+      if (!exec_mask) {
+        return;
+      }
+      RegisterAccess registers(wave);
+      VectorInput32 input(registers, wave, source, exec_mask);
+      if (wave.instruction_execution_failed()) {
+        return;
+      }
+      std::array<uint32_t, 64> result{};
+      uint32_t *d = result.data();
+      const auto flags = wave.cu().arithmetic_flags();
+      const int status =
+          wave.wf_size() == 32
+              ? rj_arith_v_mov_b32_w32(flags, uint32_t(exec_mask), 0, &d, &input.data)
+              : rj_arith_v_mov_b32_w64(flags, exec_mask, 0, &d, &input.data);
+      if (status != RJ_ARITH_SUCCESS) {
+        wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+        return;
+      }
+      for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
+        if (exec_mask & (uint64_t{1} << lane)) {
+          sdwa::write_lane(inst, wave, destination, lane, result[lane]);
+        }
+      }
+      return;
+    }
+  }
+  execute_unary32(wave, rj_arith_v_mov_b32_w32, rj_arith_v_mov_b32_w64,
+                  wave.cu().arithmetic_flags(), 0, destination, source);
+}
+
+// CDNA screen partition is Wave64-only. SDWA commits selected bytes through the
+// decoder; ordinary operands retain the direct bulk-write path.
+template <typename Inst>
+inline void execute_screen_partition(Inst &inst, Wavefront &wave, const Operand &destination,
+                                     const Operand &source) {
+  if constexpr (requires { inst.sdwa_dst_sel_; }) {
+    if (inst.inst_.src0 == SRC_SDWA) {
+      uint64_t exec_mask = wave.exec();
+      if (!exec_mask) {
+        return;
+      }
+      RegisterAccess registers(wave);
+      VectorInput32 a(registers, wave, source, exec_mask);
+      if (wave.instruction_execution_failed()) {
+        return;
+      }
+      uint32_t result[64] = {};
+      uint32_t *d = result;
+      if (rj_arith_v_screen_partition_4se_b32_w64(wave.cu().arithmetic_flags(), exec_mask, 0, &d,
+                                                  &a.data) != RJ_ARITH_SUCCESS) {
+        wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+        return;
+      }
+      for (uint32_t lane = 0; lane < 64; ++lane) {
+        if ((exec_mask >> lane) & 1) {
+          sdwa::write_lane(inst, wave, destination, lane, result[lane]);
+        }
+      }
+      return;
+    }
+  }
+  execute_unary32(wave, nullptr, rj_arith_v_screen_partition_4se_b32_w64,
+                  wave.cu().arithmetic_flags(), 0, destination, source);
+}
+
 // Convert selected source bytes into two full VGPR results, reading the source
 // before either destination word is committed.
 inline void execute_widen32_to_pair(Wavefront &wave, Unary32Function wave32, Unary64Function wave64,
                                     uint64_t flags, uint64_t modifiers, const Operand &destination,
                                     const Operand &source, uint8_t source_bytes) {
   const uint64_t exec_mask = wave.exec() & (wave.wf_size() == 32 ? 0xffffffffULL : ~0ULL);
-  if (!exec_mask)
+  if (!exec_mask) {
     return;
+  }
   RegisterAccess registers(wave);
   VectorInput32 a(registers, wave, source, exec_mask, source_bytes);
   write_vector64_result(
@@ -562,11 +1081,12 @@ inline void execute_ternary32(Wavefront &wave, Ternary32Function wave32, Ternary
                               const Operand &source_a, const Operand &source_b,
                               const Operand &source_c, uint8_t a_bytes = 0xF, uint8_t b_bytes = 0xF,
                               uint64_t source_exec_mask = ~uint64_t{0},
-                              uint32_t packed_negations = 0) {
+                              uint32_t packed_negations = 0, unsigned count_byte = 0) {
   const uint64_t exec_mask = wave.exec() & wave.vgpr_write_mask();
   source_exec_mask &= wave.exec();
-  if (!source_exec_mask)
+  if (!source_exec_mask) {
     return;
+  }
   RegisterAccess registers(wave);
   VectorInput32 a(registers, wave, source_a, source_exec_mask, a_bytes),
       b(registers, wave, source_b, source_exec_mask, b_bytes),
@@ -576,12 +1096,146 @@ inline void execute_ternary32(Wavefront &wave, Ternary32Function wave32, Ternary
     b.apply_packed_integer_signs(wave.wf_size(), 1, packed_negations, modifiers);
     c.apply_packed_integer_signs(wave.wf_size(), 2, packed_negations, modifiers);
   }
+  c.select_byte(wave.wf_size(), count_byte);
   write_vector32_result(
       wave, registers, destination, exec_mask, [&](uint32_t *const *d, uint64_t write_mask) {
         return wave.wf_size() == 32
                    ? wave32(flags, uint32_t(write_mask), modifiers, d, &a.data, &b.data, &c.data)
                    : wave64(flags, write_mask, modifiers, d, &a.data, &b.data, &c.data);
       });
+}
+
+// For a VOP3 literal, the decoder replaces the selector field with the appended
+// word in the control operand. On a 32-lane wave, borrow VGPR storage for the
+// unmodified register form. Every other form takes the logical path.
+[[gnu::always_inline]] inline bool try_rdna3_wave32_perm_b32_literal(Wavefront &wave,
+                                                                     const Operand &destination,
+                                                                     const Operand &source_a,
+                                                                     const Operand &source_b,
+                                                                     const Operand &control) {
+  assert(wave.wf_size() == 32);
+  if (wave.gpr_idx_en() || wave.cu().observes_register_access() ||
+      wave.instruction_execution_failed() || destination.delegate() || source_a.delegate() ||
+      source_b.delegate() || control.delegate()) {
+    return false;
+  }
+  // EXEC_LO selects the lanes of a 32-lane wave.
+  const uint64_t exec = static_cast<uint32_t>(wave.exec_raw());
+  if (!exec) {
+    return true;
+  }
+  const auto dest = destination.decoded_vgpr();
+  const auto a = source_a.decoded_vgpr(), b = source_b.decoded_vgpr();
+  const auto bank = wave.vgpr_bank(false);
+  if (!dest || !a || !b || !bank.contains(dest->index) || !bank.contains(a->index) ||
+      !bank.contains(b->index)) {
+    return false;
+  }
+  RegisterAccess registers(wave);
+  const auto base = wave.vgpr_alloc().base;
+  const auto *lhs = registers.try_bulk_read_vgpr(base + a->index);
+  const auto *rhs = registers.try_bulk_read_vgpr(base + b->index);
+  if (!lhs || !rhs) {
+    return false;
+  }
+  const auto flags = wave.cu().arithmetic_flags();
+  const auto selector = static_cast<uint32_t>(control.encoding_value());
+  const auto status = registers.try_masked_bulk_write_vgprs<1>(
+      base + dest->index, exec, [=](uint32_t *const *d, uint64_t mask) {
+        return rj_arith_v_perm_b32_uniform_w32(flags, uint32_t(mask), d[0], lhs, rhs, selector);
+      });
+  if (!status) {
+    return false;
+  }
+  if (*status != RJ_ARITH_SUCCESS) {
+    wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+  }
+  return true;
+}
+
+// RDNA3 routes a VOP3 V_PERM_B32 with an appended literal selector here when the wave
+// has 32 lanes. Keeping this handler out of line leaves the handler for every other
+// selector and for Wave64 as it was, apart from the two comparisons that select this one.
+RJ_NOINLINE inline void execute_rdna3_wave32_perm_b32_literal(Wavefront &wave, uint64_t modifiers,
+                                                              const Operand &destination,
+                                                              const Operand &source_a,
+                                                              const Operand &source_b,
+                                                              const Operand &control) {
+  if (!try_rdna3_wave32_perm_b32_literal(wave, destination, source_a, source_b, control)) {
+    execute_ternary32(wave, rj_arith_v_perm_b32_w32, rj_arith_v_perm_b32_w64,
+                      wave.cu().arithmetic_flags(), modifiers, destination, source_a, source_b,
+                      control);
+  }
+}
+
+// The decoded CDNA4 VGPR indices can be used directly when there is no indexing,
+// allocation remapping or operand delegation. A scalar selector needs just one read.
+template <typename OperandT>
+inline bool try_cdna4_perm_b32(Wavefront &wave, const OperandT &destination,
+                               const OperandT &source_a, const OperandT &source_b,
+                               const OperandT &control) {
+  if (wave.wf_size() != 64 || wave.gpr_idx_en() || wave.cu().observes_register_access() ||
+      wave.instruction_execution_failed() || destination.delegate() || source_a.delegate() ||
+      source_b.delegate() || control.delegate()) {
+    return false;
+  }
+  const auto bank = wave.vgpr_bank(false);
+  const auto dest = destination.decoded_vgpr();
+  if (!dest || !bank.contains(dest->index)) {
+    return false;
+  }
+  RegisterAccess registers(wave);
+  const uint32_t base = wave.vgpr_alloc().base;
+  const uint64_t exec = wave.exec();
+  // The guard above excluded register observers, so no read event is due and the
+  // lanes can be borrowed without building a read region.
+  auto read_vgpr = [&](uint32_t index) __attribute__((always_inline))->const uint32_t * {
+    return bank.contains(index) ? registers.try_bulk_read_vgpr(base + index) : nullptr;
+  };
+  // The three CDNA4 VOP3 sources are full-width words. Every non-VGPR source
+  // in these selector classes is uniform, including inline constants. They are
+  // field-bearing selectors without literals, so one below FLAT_SCRATCH names an
+  // SGPR word, which GFX9 redirects to s0 when it is not allocated.
+  auto read_uniform = [&](const OperandT &operand) __attribute__((always_inline))->uint32_t {
+    const auto selector = static_cast<uint32_t>(operand.encoding_value());
+    if (selector < kFlatScratchSelectorFirst) {
+      const uint32_t reg = scalar_gpr_out_of_range(wave, selector, 1) ? 0u : selector;
+      if (const auto word = registers.try_bulk_read_sgpr(wave.sgpr_alloc().base + reg)) {
+        return *word;
+      }
+    }
+    return registers.read_scalar(operand);
+  };
+  auto broadcast_scalar = [&](const OperandT &operand, std::array<uint32_t, 64> &broadcast) {
+    broadcast.fill(read_uniform(operand));
+    return static_cast<const uint32_t *>(broadcast.data());
+  };
+  std::array<uint32_t, 64> broadcast_a, broadcast_b;
+  const auto reg_a = source_a.decoded_vgpr(), reg_b = source_b.decoded_vgpr();
+  const uint32_t *a = reg_a ? read_vgpr(reg_a->index) : broadcast_scalar(source_a, broadcast_a);
+  const uint32_t *b = reg_b ? read_vgpr(reg_b->index) : broadcast_scalar(source_b, broadcast_b);
+  const auto selector_reg = control.decoded_vgpr();
+  const uint32_t *c = selector_reg ? read_vgpr(selector_reg->index) : nullptr;
+  if (!a || !b || (selector_reg && !c)) {
+    return false;
+  }
+  const uint32_t selector = selector_reg ? 0 : read_uniform(control);
+  if (wave.instruction_execution_failed()) {
+    return true;
+  }
+  const auto flags = wave.cu().arithmetic_flags();
+  const auto status = registers.try_masked_bulk_write_vgprs<1>(
+      base + dest->index, exec, [&](uint32_t *const *d, uint64_t mask) {
+        return c ? rj_arith_v_perm_b32_w64(flags, mask, 0, d, &a, &b, &c)
+                 : rj_arith_v_perm_b32_uniform_w64(flags, mask, d[0], a, b, selector);
+      });
+  if (!status) {
+    return false;
+  }
+  if (*status != RJ_ARITH_SUCCESS) {
+    wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+  }
+  return true;
 }
 
 } // namespace rocjitsu::amdgpu::arith

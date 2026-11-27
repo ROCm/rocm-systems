@@ -36,7 +36,6 @@ set(SRC_LIST
     "${SRC_DIR}/amd_smi_lib_loader.cc"
     "${SRC_DIR}/amd_smi_socket.cc"
     "${SRC_DIR}/amd_smi_system.cc"
-    "${SRC_DIR}/amd_smi_test_overrides.cc"
     "${SRC_DIR}/amd_smi_ualoe.cc"
     "${SRC_DIR}/amd_smi_utils.cc"
     "${SRC_DIR}/amd_smi_uuid.cc"
@@ -378,7 +377,8 @@ if(BUILD_BOTH_LIBS OR BUILD_SHARED_LIBS)
         "        *;\n"
         "};\n"
     )
-    target_link_options(${AMD_SMI} PRIVATE "LINKER:--version-script=${VERSION_SCRIPT}")
+    # Keep calls to our own exports inside this copy when another libamd_smi is loaded.
+    target_link_options(${AMD_SMI} PRIVATE "LINKER:--version-script=${VERSION_SCRIPT}" "LINKER:-Bsymbolic-functions")
     set_property(TARGET ${AMD_SMI} APPEND PROPERTY LINK_DEPENDS "${VERSION_SCRIPT}")
 endif()
 

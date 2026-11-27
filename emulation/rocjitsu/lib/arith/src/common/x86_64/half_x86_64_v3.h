@@ -68,12 +68,27 @@ __m256 half_input(__m256i words, int shift, uint32_t instruction_flags) {
 
 // Narrow to FP16 with optional finite-overflow saturation. PreserveNan leaves
 // the selection operation in control of NaN quieting.
-template <bool PreserveNan = false> __m256i half_narrow(__m256 value, bool saturate) {
+template <bool PreserveNan = false>
+__m256i half_narrow(__m256 value, bool saturate, unsigned rounding = 0) {
   auto bits = _mm256_castps_si256(value);
   auto magnitude = _mm256_and_si256(bits, _mm256_set1_epi32(INT32_MAX));
 
-  auto result =
-      _mm256_cvtepu16_epi32(_mm256_cvtps_ph(value, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
+  __m128i half;
+  switch (rounding) {
+  case 1:
+    half = _mm256_cvtps_ph(value, _MM_FROUND_TO_POS_INF | _MM_FROUND_NO_EXC);
+    break;
+  case 2:
+    half = _mm256_cvtps_ph(value, _MM_FROUND_TO_NEG_INF | _MM_FROUND_NO_EXC);
+    break;
+  case 3:
+    half = _mm256_cvtps_ph(value, _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
+    break;
+  default:
+    half = _mm256_cvtps_ph(value, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
+    break;
+  }
+  auto result = _mm256_cvtepu16_epi32(half);
   if (saturate) {
     auto finite = _mm256_cmpgt_epi32(_mm256_set1_epi32(0x7f800000), magnitude);
     auto infinity = _mm256_cmpeq_epi32(_mm256_and_si256(result, _mm256_set1_epi32(0x7fff)),

@@ -20,9 +20,6 @@ void
 block_samples();
 
 void
-unblock_samples();
-
-void
 block_backtrace_samples();
 
 void

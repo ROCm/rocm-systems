@@ -6,7 +6,7 @@
 //! This module assigns no runtime handles and does not activate a device.
 
 use super::{
-    CpuApicId, CpuCache, CpuCacheKind, CpuInfo, CpuSet, HostCaches, HostDomain,
+    CpuApicId, CpuCache, CpuCacheKind, CpuId, CpuInfo, CpuSet, HostCaches, HostDomain,
     HostTopologyGraphSnapshot,
 };
 use crate::topology::{CacheAssociations, CacheInfo};
@@ -40,7 +40,7 @@ fn parse_cpu_info(contents: &str) -> Option<CpuInfo> {
         }
     }
     Some(CpuInfo {
-        name: name?,
+        name,
         compute_units: u32::try_from(compute_units)
             .ok()
             .filter(|count| *count != 0)?,
@@ -64,7 +64,7 @@ fn parse_cpu_apic_ids(contents: &str) -> Vec<CpuApicId> {
                 }
             }
             Some(CpuApicId {
-                logical_cpu: logical_cpu?,
+                logical_cpu: CpuId::linux(logical_cpu?),
                 apic_id: apic_id?,
             })
         })
@@ -94,7 +94,12 @@ fn parse_cpu_set(contents: &str) -> Option<CpuSet> {
         }
         ranges.push((first, last));
     }
-    Some(CpuSet { ranges })
+    Some(CpuSet {
+        ranges: ranges
+            .into_iter()
+            .map(|(a, b)| (u64::from(a), u64::from(b)))
+            .collect(),
+    })
 }
 
 fn parse_node_cpu_set(contents: &str) -> Option<CpuSet> {
@@ -186,7 +191,7 @@ fn discover_caches(root: &Path) -> HostCaches {
                 continue;
             };
             records.push(CpuCache {
-                cpu,
+                cpu: CpuId::linux(cpu),
                 shared_cpus,
                 info: CacheInfo {
                     associations: CacheAssociations::CPU,
@@ -353,9 +358,9 @@ mod tests {
     #[test]
     fn cpu_sets_reject_malformed_ranges_without_expanding_them() {
         let set = parse_cpu_set("0-3,8,10-12\n").unwrap();
-        assert_eq!(set.first(), Some(0));
-        assert!(set.contains(11));
-        assert!(!set.contains(9));
+        assert_eq!(set.first(), Some(CpuId::linux(0)));
+        assert!(set.contains(CpuId::linux(11)));
+        assert!(!set.contains(CpuId::linux(9)));
         assert!(set.intersects(&parse_cpu_set("9-10").unwrap()));
         assert!(!set.intersects(&parse_cpu_set("4-7").unwrap()));
         for malformed in ["", "2-1", "0-3,3-4", "3,2", "1-", "0-4294967296"] {
@@ -368,11 +373,17 @@ mod tests {
         assert_eq!(
             parse_cpu_info("processor : 0\nmodel name : AMD Example CPU\nprocessor : 1\n"),
             Some(CpuInfo {
-                name: "AMD Example CPU".to_owned(),
+                name: Some("AMD Example CPU".to_owned()),
                 compute_units: 2,
             })
         );
-        assert_eq!(parse_cpu_info("processor : 0\n"), None);
+        assert_eq!(
+            parse_cpu_info("processor : 0\n"),
+            Some(CpuInfo {
+                name: None,
+                compute_units: 1
+            })
+        );
         assert_eq!(parse_cpu_info("model name : AMD Example CPU\n"), None);
         assert_eq!(
             parse_memory_bytes("MemTotal: 263219812 kB\n"),
@@ -391,7 +402,7 @@ mod tests {
         fixture.write("node/node0/cpulist", "0\n");
         fixture.write("node/node1/cpulist", "1\n");
         let snapshot = fixture.graph_snapshot();
-        assert_eq!(snapshot.logical_cpu_for_apic_id(2), Some(1));
+        assert_eq!(snapshot.logical_cpu_for_apic_id(2), Some(CpuId::linux(1)));
         assert_eq!(
             snapshot
                 .domain_for_apic_id(2)
@@ -426,9 +437,15 @@ mod tests {
         assert_eq!(snapshot.cpu.as_ref().unwrap().compute_units, 2);
         assert_eq!(snapshot.domains.len(), 2);
         assert_eq!(snapshot.domain(0).unwrap().caches.records.len(), 2);
-        assert_eq!(snapshot.domain(0).unwrap().caches.records[0].cpu, 0);
+        assert_eq!(
+            snapshot.domain(0).unwrap().caches.records[0].cpu,
+            CpuId::linux(0)
+        );
         assert_eq!(snapshot.domain(2).unwrap().caches.records.len(), 1);
-        assert_eq!(snapshot.domain(2).unwrap().caches.records[0].cpu, 4);
+        assert_eq!(
+            snapshot.domain(2).unwrap().caches.records[0].cpu,
+            CpuId::linux(4)
+        );
         assert!(
             snapshot
                 .domain(2)
@@ -436,11 +453,14 @@ mod tests {
                 .cpus
                 .as_ref()
                 .unwrap()
-                .contains(5)
+                .contains(CpuId::linux(5))
         );
         assert!(snapshot.domains_complete);
         assert_eq!(snapshot.caches.records.len(), 3);
-        assert_eq!(snapshot.caches.records[0].first_shared_cpu(), Some(0));
+        assert_eq!(
+            snapshot.caches.records[0].first_shared_cpu(),
+            Some(CpuId::linux(0))
+        );
         assert_eq!(snapshot.caches.records[0].info.line_size_bytes, Some(64));
         assert_eq!(
             snapshot.caches.records[0].info.associations,

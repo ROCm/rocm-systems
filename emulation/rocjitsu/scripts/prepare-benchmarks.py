@@ -7,6 +7,7 @@ import argparse
 import ast
 import hashlib
 import io
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -46,6 +47,27 @@ class Preparation:
             'rocjitsu-benchmark-' + attempt.replace(':', '-')
         )
         require(self.root == expected, 'Refusing unowned benchmark directory')
+        protected = [self.root]
+        for key in (
+            'ROCJITSU_SOURCE_DIR',
+            'WORKFLOW_SOURCE_DIR',
+            'CORPUS_SOURCE_DIR',
+            'TENSILE_SOURCE',
+            'NANOBIND_SOURCE',
+            'FULL_TENSILE_SOURCE',
+            'LLAMA_SOURCE',
+        ):
+            if key not in self.env:
+                continue  # Legacy preparation does not require the RDNA sources.
+            source = Path(self.env[key])
+            require(
+                source.is_absolute()
+                and not any(p.is_symlink() for p in (source, *source.parents))
+                and not source.resolve().is_relative_to(self.root.resolve())
+                and not self.root.resolve().is_relative_to(source.resolve()),
+                'Benchmark source must remain external to owned scratch without symlinks',
+            )
+            protected.append(source)
         require(
             not any(path.is_symlink() for path in (self.root, *self.root.parents)),
             'Owned path contains a symlink',
@@ -65,17 +87,70 @@ class Preparation:
         self.cwd = self.root / 'cwd'
         self.python = self.root / 'venv/bin/python'
         self.artifacts = self.root / 'tensile-artifacts'
+        package_cache = self.root / 'cache'
+        if 'ROCJITSU_PACKAGE_CACHE' in self.env:
+            package_cache = Path(self.env['ROCJITSU_PACKAGE_CACHE'])
+            require(
+                package_cache.is_absolute()
+                and package_cache.is_dir()
+                and not any(
+                    p.is_symlink() for p in (package_cache, *package_cache.parents)
+                )
+                and package_cache.stat().st_uid == os.getuid()
+                and all(
+                    not package_cache.resolve().is_relative_to(p.resolve())
+                    and not p.resolve().is_relative_to(package_cache.resolve())
+                    for p in protected
+                ),
+                'Package cache must be an owned external directory without symlinks, separate from scratch and sources',
+            )
+        self.uv = self.env.get('UV_EXECUTABLE')
+        for key in list(self.env):
+            if key.startswith('PIP_') or (
+                key.startswith('UV_') and key != 'UV_CACHE_DIR'
+            ):
+                self.env.pop(key)
+        # setup-uv owns the workflow cache path; standalone callers get a default.
+        self.env.setdefault('UV_CACHE_DIR', str(package_cache / 'uv'))
+        uv_cache = Path(self.env['UV_CACHE_DIR'])
+        require(
+            uv_cache.is_absolute()
+            and uv_cache.resolve().is_relative_to(package_cache.resolve()),
+            'UV_CACHE_DIR must remain within the package cache',
+        )
+        self.env['UV_PYTHON_DOWNLOADS'] = 'never'
+        # CMake initializes launchers from these variables for every fresh build,
+        # including scikit-build's ROCISA wheel. The pinned llama builder opts out.
+        for key in list(self.env):
+            if key.startswith('CCACHE_') or key in (
+                'CMAKE_C_COMPILER_LAUNCHER',
+                'CMAKE_CXX_COMPILER_LAUNCHER',
+                'CMAKE_HIP_COMPILER_LAUNCHER',
+            ):
+                self.env.pop(key)
+        base_dir = os.path.commonpath([str(p.resolve()) for p in protected])
+        if base_dir == '/':
+            base_dir = str(self.root.parent)
+        self.env.update(
+            CCACHE_DIR=str(package_cache / 'ccache'),
+            CCACHE_BASEDIR=base_dir,
+            CCACHE_CONFIGPATH=str(self.root / 'reports/ccache.conf'),
+            CCACHE_STATSLOG=str(self.logs / 'ccache-stats.log'),
+            CMAKE_C_COMPILER_LAUNCHER='ccache',
+            CMAKE_CXX_COMPILER_LAUNCHER='ccache',
+        )
         for key, directory in {
             'HOME': 'home',
             'TMPDIR': 'tmp',
             'XDG_CACHE_HOME': 'cache',
-            'PIP_CACHE_DIR': 'cache/pip',
             'TENSILE_HELPER_CACHE_DIR': 'cache/tensile',
             'TRITON_CACHE_DIR': 'cache/triton',
             'JOBLIB_TEMP_FOLDER': 'tmp/joblib',
         }.items():
             self.env[key] = str(self.root / directory)
         for directory in [
+            Path(self.env['UV_CACHE_DIR']),
+            Path(self.env['CCACHE_DIR']),
             self.logs,
             self.cwd,
             self.root / 'reports',
@@ -85,7 +160,6 @@ class Preparation:
                     'HOME',
                     'TMPDIR',
                     'XDG_CACHE_HOME',
-                    'PIP_CACHE_DIR',
                     'TENSILE_HELPER_CACHE_DIR',
                     'TRITON_CACHE_DIR',
                     'JOBLIB_TEMP_FOLDER',
@@ -98,14 +172,13 @@ class Preparation:
             )
             directory.mkdir(parents=True, exist_ok=True)
             require(not directory.is_symlink(), 'Attempt directory contains a symlink')
+        Path(self.env['CCACHE_CONFIGPATH']).write_text(
+            'compiler_check = content\nmax_size = 5G\n'
+        )
         for key in (
             'LD_PRELOAD',
             'PYTHONPATH',
             'PYTHONHOME',
-            'PIP_INDEX_URL',
-            'PIP_EXTRA_INDEX_URL',
-            'PIP_FIND_LINKS',
-            'PIP_TRUSTED_HOST',
             'RJ_CONFIG',
             'HSA_MODEL_LIB',
             'HSA_MODEL_TOPOLOGY',
@@ -117,9 +190,6 @@ class Preparation:
             PYTHONDONTWRITEBYTECODE='1',
             PYTHONNOUSERSITE='1',
             ROCISA_BACKEND='native',
-            PIP_CONFIG_FILE=os.devnull,
-            PIP_NO_INPUT='1',
-            PIP_DISABLE_PIP_VERSION_CHECK='1',
             HSA_ENABLE_SDMA_COPY_SIZE_OVERRIDE='0',
         )
         self.phase = None
@@ -132,6 +202,7 @@ class Preparation:
             'Refusing to replay a preparation phase',
         )
         self.phase, self.started = phase, time.monotonic()
+        self.env['CCACHE_STATSLOG'] = str(self.logs / f'{phase}-ccache-stats.log')
         if phase == 'rocjitsu':
             deps = json.loads((self.root / 'phase-dependencies.json').read_text())
             require(deps['success'], 'Dependencies did not complete')
@@ -215,12 +286,22 @@ class Preparation:
         return output.read_text(errors='replace').strip() if capture else ''
 
     def sources(self):
-        for name, path, revision in [
+        sources = [
             ('tensile', self.env['TENSILE_SOURCE'], self.env['TENSILE_SHA']),
             ('nanobind', self.env['NANOBIND_SOURCE'], self.env['NANOBIND_SHA']),
             ('corpus', self.env['CORPUS_SOURCE_DIR'], self.env['CORPUS_SHA']),
             ('rocjitsu', self.env['ROCJITSU_SOURCE_DIR'], self.env['BENCHMARK_SHA']),
-        ]:
+        ]
+        for prefix in ('FULL_TENSILE', 'LLAMA'):
+            if prefix + '_SOURCE' in self.env or prefix + '_SHA' in self.env:
+                sources.append(
+                    (
+                        prefix.lower().replace('_', '-'),
+                        self.env[prefix + '_SOURCE'],
+                        self.env[prefix + '_SHA'],
+                    )
+                )
+        for name, path, revision in sources:
             require(
                 re.fullmatch(r'[a-f0-9]{40}', revision),
                 'Expected exact immutable source pin',
@@ -240,6 +321,7 @@ class Preparation:
                         '--porcelain',
                         '--untracked-files=all',
                         '--ignore-submodules=none',
+                        *(['--ignored'] if name in ('full-tensile', 'llama') else []),
                     ],
                     True,
                 ),
@@ -297,23 +379,92 @@ class Preparation:
         )
         return expected
 
+    def install(self, label, requirements, index, constrained=True):
+        require(
+            self.uv and Path(self.uv).is_absolute(),
+            'UV_EXECUTABLE must be the absolute setup-uv executable path',
+        )
+        self.run(
+            label,
+            [
+                self.uv,
+                '--no-config',
+                'pip',
+                'install',
+                '--verbose',
+                '--python',
+                self.python,
+                '--index-url',
+                index,
+                '--compile-bytecode',
+                '--link-mode=copy',
+                *(
+                    ['--constraint', self.root / 'benchmark-constraints.txt']
+                    if constrained
+                    else []
+                ),
+                *requirements,
+            ],
+        )
+        installed = json.loads(
+            self.run(
+                label + '-inspect',
+                [
+                    self.python,
+                    '-B',
+                    '-c',
+                    '\n'.join(
+                        [
+                            'import importlib.metadata as m,json',
+                            'installed=[]',
+                            'for d in m.distributions():',
+                            ' direct=d.read_text("direct_url.json")',
+                            ' installed.append({"metadata":{"name":d.metadata["Name"],"version":d.version,"requires_dist":d.requires or []},"installer":(d.read_text("INSTALLER") or "").strip() or None,"direct_url":json.loads(direct) if direct else None})',
+                            'print(json.dumps({"installed":installed}))',
+                        ]
+                    ),
+                ],
+                True,
+            )
+        )['installed']
+        compact = [
+            {
+                'name': item['metadata']['name'],
+                'version': item['metadata']['version'],
+                'requires_dist': item['metadata'].get('requires_dist', []),
+                'installer': item.get('installer'),
+                'direct_url': item.get('direct_url'),
+            }
+            for item in installed
+        ]
+        (self.root / 'reports' / (label + '-inventory.json')).write_text(
+            json.dumps(compact, indent=2) + '\n'
+        )
+
     def dependencies(self):
         self.sources()
         require(not (self.root / 'venv').exists(), 'Refusing to reuse an old venv')
-        self.run('venv', [sys.executable, '-m', 'venv', self.root / 'venv'])
-        self.run('packages-before', [self.python, '-m', 'pip', 'list', '--format=json'])
         self.run(
-            'benchmark-requirements',
+            'venv',
+            [self.uv, '--no-config', 'venv', '--python', '3.12', self.root / 'venv'],
+        )
+        self.run(
+            'packages-before',
             [
-                self.python,
-                '-m',
+                self.uv,
+                '--no-config',
                 'pip',
-                'install',
-                '--report',
-                self.root / 'reports/benchmark-resolution.json',
-                '-r',
-                Path(self.env['CORPUS_SOURCE_DIR']) / 'benchmarks/requirements.txt',
+                'list',
+                '--python',
+                self.python,
+                '--format=json',
             ],
+        )
+        self.install(
+            'benchmark-requirements',
+            ['-r', Path(self.env['CORPUS_SOURCE_DIR']) / 'benchmarks/requirements.txt'],
+            'https://rocm.nightlies.amd.com/whl-multi-arch/',
+            constrained=False,
         )
         expected = self.pins()
         constraint = self.root / 'benchmark-constraints.txt'
@@ -321,46 +472,31 @@ class Preparation:
             ''.join(f'{name}=={version}\n' for name, version in expected.items())
         )
         tensile = Path(self.env['TENSILE_SOURCE']) / 'projects/hipblaslt/tensilelite'
-        self.run(
+        self.install(
             'tensile-requirements',
-            [
-                self.python,
-                '-m',
-                'pip',
-                'install',
-                '--index-url',
-                'https://pypi.org/simple',
-                '--constraint',
-                constraint,
-                '--report',
-                self.root / 'reports/tensile-resolution.json',
-                '-r',
-                tensile / 'requirements.txt',
-            ],
+            ['-r', tensile / 'requirements.txt'],
+            'https://pypi.org/simple',
         )
         build_requires = tomllib.loads((tensile / 'rocisa/pyproject.toml').read_text())[
             'build-system'
         ]['requires']
-        self.run(
-            'wheel-requirements',
-            [
-                self.python,
-                '-m',
-                'pip',
-                'install',
-                '--index-url',
-                'https://pypi.org/simple',
-                '--constraint',
-                constraint,
-                '--report',
-                self.root / 'reports/build-resolution.json',
-                *build_requires,
-            ],
-        )
+        self.install('wheel-requirements', build_requires, 'https://pypi.org/simple')
         self.pins()
-        self.run('pip-check', [self.python, '-m', 'pip', 'check'])
         self.run(
-            'packages-resolved', [self.python, '-m', 'pip', 'list', '--format=json']
+            'packages-check',
+            [self.uv, '--no-config', 'pip', 'check', '--python', self.python],
+        )
+        self.run(
+            'packages-resolved',
+            [
+                self.uv,
+                '--no-config',
+                'pip',
+                'list',
+                '--python',
+                self.python,
+                '--format=json',
+            ],
         )
         (self.root / 'reports/indexes.json').write_text(
             json.dumps(
@@ -481,6 +617,7 @@ class Preparation:
         ]
 
     def preflight(self):
+        self.run('ccache-version', ['ccache', '--version'])
         for relative in (
             'lib/cmake/hip/hip-config.cmake',
             'share/rocmcmakebuildtools/cmake/ROCmCMakeBuildToolsConfig.cmake',
@@ -530,7 +667,20 @@ class Preparation:
             ],
         )
 
-    def native(self):
+    def require_phase(self, phase):
+        require(
+            json.loads((self.root / f'phase-{phase}.json').read_text())['success'],
+            f'{phase} preparation did not complete',
+        )
+
+    def fresh_outputs(self, *paths):
+        for path in paths:
+            require(
+                not path.exists() and not path.is_symlink(),
+                'Refusing stale preparation output',
+            )
+
+    def rocisa(self):
         require(
             json.loads((self.root / 'phase-rocjitsu.json').read_text())['success'],
             'Rocjitsu setup did not complete',
@@ -539,7 +689,6 @@ class Preparation:
         self.sdk_environment()
         self.pins()
         sdk = self.env['ROCM_PATH']
-        flags = self.cmake_flags()
         nanobind_dir = self.run(
             'nanobind-dir', [self.python, '-m', 'nanobind', '--cmake_dir'], True
         )
@@ -553,15 +702,18 @@ class Preparation:
         self.run(
             'wheel',
             [
+                self.uv,
+                '--no-config',
+                'build',
+                '--wheel',
+                '--python',
                 self.python,
-                '-m',
-                'pip',
-                'wheel',
                 '--no-index',
-                '--no-deps',
                 '--no-build-isolation',
-                '--wheel-dir',
+                '--no-create-gitignore',
+                '--out-dir',
                 wheelhouse,
+                '--config-settings=build.tool-args=-j16',
                 f'--config-settings=build-dir={self.root / "rocisa-build"}',
                 f'--config-settings=cmake.define.ROCM_PATH={sdk}',
                 f'--config-settings=cmake.define.CMAKE_PREFIX_PATH={sdk}',
@@ -601,17 +753,23 @@ class Preparation:
             + '\n'
         )
         self.sources()
+        receipt = self.root / 'reports/rocisa-wheel-requirements.txt'
+        receipt.write_text(wheel.as_uri() + ' --hash=sha256:' + sha256(wheel) + '\n')
         self.run(
             'install-exact-wheel',
             [
-                self.python,
-                '-m',
+                self.uv,
+                '--no-config',
                 'pip',
                 'install',
+                '--python',
+                self.python,
                 '--no-index',
                 '--no-deps',
-                '--no-compile',
-                wheel,
+                '--require-hashes',
+                '--link-mode=copy',
+                '-r',
+                receipt,
             ],
         )
         code = '\n'.join(
@@ -623,13 +781,12 @@ class Preparation:
                 'direct=json.loads(importlib.metadata.distribution("rocisa").read_text("direct_url.json"))',
                 'assert not direct.get("dir_info",{}).get("editable",False)',
                 'assert direct["url"]==pathlib.Path(sys.argv[3]).as_uri()',
-                'archive=direct["archive_info"]; assert archive.get("hashes",{}).get("sha256")==sys.argv[4] or archive.get("hash")=="sha256="+sys.argv[4]',
                 'maps=pathlib.Path("/proc/self/maps").read_text(); assert "/opt/rocm" not in maps',
                 'libraries=[]',
                 'for line in maps.splitlines():',
                 ' if "libstinkytofu.so" in line:',
                 '  path=pathlib.Path(line.split(maxsplit=5)[-1].replace(chr(92)+"040"," ")); assert path.resolve().is_relative_to(root)',
-                '  assert hashlib.sha256(path.read_bytes()).hexdigest() in json.loads(sys.argv[5]); libraries.append(str(path))',
+                '  assert hashlib.sha256(path.read_bytes()).hexdigest() in json.loads(sys.argv[4]); libraries.append(str(path))',
                 'assert libraries, "No wheel-local stinkytofu mapping"',
                 'print(json.dumps({"rocisa":str(p),"extension":str(e),"libraries":libraries,"maps":maps}))',
             ]
@@ -644,11 +801,23 @@ class Preparation:
                 self.root / 'venv',
                 extension_sha,
                 wheel,
-                sha256(wheel),
                 json.dumps(library_hashes),
             ],
         )
-        self.run('pip-check', [self.python, '-m', 'pip', 'check'])
+        self.run(
+            'packages-check',
+            [self.uv, '--no-config', 'pip', 'check', '--python', self.python],
+        )
+        self.pins()
+        self.sources()
+
+    def tensilelite_build(self):
+        self.require_phase('rocisa')
+        self.sources()
+        self.sdk_environment()
+        self.pins()
+        flags = self.cmake_flags()
+        self.fresh_outputs(self.root / 'tensile-native')
         require(
             (
                 Path(self.env['NANOBIND_SOURCE'])
@@ -692,17 +861,28 @@ class Preparation:
             'host-tests', [self.root / 'tensile-native/tensile_candidate_host_tests']
         )
         self.binary_inventory(
-            'tensile-build',
+            'tensilelite-build',
             [
                 'tensile-native/tensile_candidate',
                 'tensile-native/tensile_candidate_host_tests',
             ],
         )
         self.pins()
-        self.run('packages-after', [self.python, '-m', 'pip', 'list', '--format=json'])
+        self.run(
+            'packages-after',
+            [
+                self.uv,
+                '--no-config',
+                'pip',
+                'list',
+                '--python',
+                self.python,
+                '--format=json',
+            ],
+        )
         self.sources()
 
-    def inventory(self):
+    def recipe(self):
         require(self.manifest, 'Manifest is required for inventory')
         relative = Path(self.manifest)
         require(
@@ -719,7 +899,102 @@ class Preparation:
             and manifest.is_file(),
             'Manifest must be a contained regular file without symlinks',
         )
-        recipe = tomllib.loads(manifest.read_text())
+        return tomllib.loads(manifest.read_text())
+
+    def full_tensile_provider(self):
+        corpus = Path(self.env['CORPUS_SOURCE_DIR'])
+        path = corpus / 'corpus/benchmarks/full_tensile/prepare.py'
+        require(
+            path.is_file()
+            and not any(p.is_symlink() for p in (path, *path.parents))
+            and path.resolve().is_relative_to(corpus.resolve()),
+            'Full Tensile provider must be a contained regular file',
+        )
+        spec = importlib.util.spec_from_file_location('full_tensile_preparation', path)
+        assert spec and spec.loader
+        module = importlib.util.module_from_spec(spec)
+        # Do not let importlib write __pycache__ into the preserved corpus.
+        exec(compile(path.read_bytes(), str(path), 'exec'), module.__dict__)
+        return module
+
+    def rdna_inventory(self):
+        recipe = self.recipe()
+        provider = self.full_tensile_provider()
+        selected = {}
+        for case in recipe['cases']:
+            if case['workload'] != 'full_tensile':
+                continue
+            require(case['targets'], 'Full Tensile selection needs targets')
+            for target in case['targets']:
+                variant = provider.validate_parameters(case['params'], target)
+                selected[target, variant] = dict(
+                    target=target, variant=variant, parameters=case['params']
+                )
+        return list(selected.values())
+
+    def validate_rdna_artifacts(self, selected):
+        artifacts = self.root / 'full-tensile-artifacts'
+        require(
+            artifacts.is_dir() and not artifacts.is_symlink(),
+            'Full Tensile artifact root missing or symbolic',
+        )
+        expected_cells = {(item['target'], item['variant']) for item in selected}
+        actual_cells = set()
+        for target in artifacts.iterdir():
+            require(
+                target.is_dir() and not target.is_symlink(), 'Invalid artifact target'
+            )
+            for variant in target.iterdir():
+                require(
+                    variant.is_dir() and not variant.is_symlink(),
+                    'Invalid artifact variant',
+                )
+                actual_cells.add((target.name, variant.name))
+        require(actual_cells == expected_cells, 'Full Tensile cell inventory mismatch')
+        generator = (
+            Path(self.env['CORPUS_SOURCE_DIR'])
+            / 'corpus/benchmarks/full_tensile/prepare.py'
+        )
+        for item in selected:
+            output = artifacts / item['target'] / item['variant']
+            metadata_path = output / 'artifacts.json'
+            require(
+                self.diagnostic_file(metadata_path),
+                'Invalid full Tensile metadata path',
+            )
+            metadata = json.loads(metadata_path.read_text())
+            expected = dict(
+                source_revision=self.env['FULL_TENSILE_SHA'],
+                target=item['target'],
+                parameters=item['parameters'],
+                generator_cpu_threads=1,
+                generator_sha256=sha256(generator),
+            )
+            require(
+                all(metadata.get(k) == v for k, v in expected.items()),
+                'Full Tensile artifact provenance mismatch',
+            )
+            files = metadata.get('files')
+            objects = {
+                p.name for p in output.iterdir() if p.suffix in ('.co', '.hsaco')
+            }
+            require(
+                isinstance(files, dict)
+                and objects
+                and set(files) == objects | {'TensileLibrary.dat', 'selection.yaml'},
+                'Full Tensile artifact file inventory mismatch',
+            )
+            for name, digest in files.items():
+                path = output / name
+                require(
+                    Path(name).name == name
+                    and self.diagnostic_file(path)
+                    and sha256(path) == digest,
+                    'Full Tensile artifact hash/path mismatch',
+                )
+
+    def inventory(self):
+        recipe = self.recipe()
         candidates_file = (
             Path(self.env['CORPUS_SOURCE_DIR'])
             / 'corpus/benchmarks/tensile_candidates/prepare.py'
@@ -841,11 +1116,8 @@ class Preparation:
                 'Generator CpuThreads must remain four',
             )
 
-    def generate(self):
-        require(
-            json.loads((self.root / 'phase-native.json').read_text())['success'],
-            'Native preparation did not complete',
-        )
+    def tensilelite_generate(self):
+        self.require_phase('tensilelite-build')
         self.sources()
         self.sdk_environment()
         selected = self.inventory()
@@ -883,6 +1155,201 @@ class Preparation:
                 f'TENSILE_CANDIDATE_ARTIFACTS={self.artifacts}\nTENSILE_CANDIDATE_RUNNER={self.env["TENSILE_CANDIDATE_RUNNER"]}\n'
             )
 
+    def validate_llama_build(self):
+        build = self.root / 'llama-hip'
+        binary = build / 'llama_bounded_ops'
+        receipt_path = build / 'benchmark-build.json'
+        require(
+            self.diagnostic_file(binary) and self.diagnostic_file(receipt_path),
+            'Invalid llama binary/receipt path',
+        )
+        receipt = json.loads(receipt_path.read_text())
+        expected = dict(
+            schema='rocjitsu.benchmark.llama-build.v1',
+            source_pin=self.env['LLAMA_SHA'],
+            source=self.env['LLAMA_SOURCE'],
+            backend='hip',
+            targets=['gfx1100', 'gfx1201'],
+            adapter_sha256=sha256(
+                Path(self.env['CORPUS_SOURCE_DIR'])
+                / 'corpus/benchmarks/llama/runner.cpp'
+            ),
+        )
+        require(
+            all(receipt.get(k) == v for k, v in expected.items()),
+            'Llama build receipt provenance mismatch',
+        )
+
+    def provider_setup(self, prerequisite, *outputs):
+        self.require_phase(prerequisite)
+        for prefix in ('FULL_TENSILE', 'LLAMA'):
+            require(
+                self.env.get(prefix + '_SOURCE') and self.env.get(prefix + '_SHA'),
+                'RDNA preparation requires separate pinned source roots',
+            )
+        self.sources()
+        selected = self.rdna_inventory()  # Validate all fixed shapes before any build.
+        workloads = {case['workload'] for case in self.recipe()['cases']}
+        self.sdk_environment()
+        self.pins()
+        provider = Path(self.env['CORPUS_SOURCE_DIR']) / 'corpus/benchmarks'
+        self.fresh_outputs(*outputs)
+        return selected, workloads, provider
+
+    def provider_complete(self, exports=None):
+        self.pins()
+        self.run(
+            'provider-packages-check',
+            [self.uv, '--no-config', 'pip', 'check', '--python', self.python],
+        )
+        self.sources()
+        if exports:
+            with Path(self.env['GITHUB_ENV']).open('a') as output:
+                for key, value in exports.items():
+                    require(
+                        '\n' not in value and '\r' not in value,
+                        'Invalid environment value',
+                    )
+                    output.write(f'{key}={value}\n')
+
+    def tensile_build(self):
+        full_build = self.root / 'full-tensile-native'
+        selected, _, provider = self.provider_setup('tensilelite-generate', full_build)
+        if selected:
+            self.install(
+                'full-tensile-requirements',
+                [
+                    '-r',
+                    Path(self.env['FULL_TENSILE_SOURCE'])
+                    / 'shared/tensile/requirements.txt',
+                ],
+                'https://pypi.org/simple',
+            )
+            self.run(
+                'full-tensile-configure',
+                [
+                    'cmake',
+                    '-S',
+                    provider / 'full_tensile',
+                    '-B',
+                    full_build,
+                    '-G',
+                    'Ninja',
+                    '-DCMAKE_BUILD_TYPE=Release',
+                    f'-DTENSILE_SOURCE={self.env["FULL_TENSILE_SOURCE"]}',
+                    f'-DCMAKE_PREFIX_PATH={self.env["ROCM_PATH"]}',
+                    f'-DCMAKE_CXX_COMPILER={self.env["ROCM_PATH"]}/bin/amdclang++',
+                ],
+            )
+            self.run(
+                'full-tensile-build',
+                [
+                    'cmake',
+                    '--build',
+                    full_build,
+                    '--target',
+                    'full_tensile_runner',
+                    '--parallel',
+                    '16',
+                ],
+            )
+            binary = full_build / 'full_tensile_runner'
+            require(self.diagnostic_file(binary), 'Invalid full Tensile runner path')
+            self.binary_inventory(
+                'full-tensile-build', ['full-tensile-native/full_tensile_runner']
+            )
+        self.provider_complete()
+
+    def tensile_generate(self):
+        full_artifacts = self.root / 'full-tensile-artifacts'
+        selected, _, provider = self.provider_setup('tensile-build', full_artifacts)
+        exports = {}
+        if selected:
+            for item in selected:
+                self.run(
+                    'full-tensile-generate-' + item['target'] + '-' + item['variant'],
+                    [
+                        self.python,
+                        '-B',
+                        provider / 'full_tensile/prepare.py',
+                        '--source-root',
+                        self.env['FULL_TENSILE_SOURCE'],
+                        '--sdk-root',
+                        self.env['ROCM_PATH'],
+                        '--output',
+                        full_artifacts,
+                        '--target',
+                        item['target'],
+                        '--variant',
+                        item['variant'],
+                    ],
+                    env_overrides={'HCC_AMDGPU_TARGET': item['target']},
+                )
+            self.validate_rdna_artifacts(selected)
+            binary = self.root / 'full-tensile-native/full_tensile_runner'
+            require(self.diagnostic_file(binary), 'Invalid full Tensile runner path')
+            exports.update(
+                FULL_TENSILE_ARTIFACTS=str(full_artifacts),
+                FULL_TENSILE_RUNNER=str(binary),
+            )
+        self.provider_complete(exports)
+
+    def llama_build(self):
+        llama_build = self.root / 'llama-hip'
+        _, workloads, provider = self.provider_setup('tensile-generate', llama_build)
+        exports = {}
+        if any(name.startswith('llama_') for name in workloads):
+            self.run(
+                'llama-prepare',
+                [
+                    self.python,
+                    '-B',
+                    provider / 'llama/prepare.py',
+                    '--source',
+                    self.env['LLAMA_SOURCE'],
+                    '--build',
+                    llama_build,
+                    '--backend',
+                    'hip',
+                    '--rocm-path',
+                    self.env['ROCM_PATH'],
+                ],
+            )
+            self.validate_llama_build()
+            exports['ROCJITSU_LLAMA_BINARY'] = str(llama_build / 'llama_bounded_ops')
+        self.provider_complete(exports)
+
+    def gluon_verify(self):
+        selected, workloads, provider = self.provider_setup(
+            'llama-build',
+            self.root / 'reports/gluon-source.json',
+            self.root / 'reports/providers-ready.json',
+        )
+        if any(name.startswith('gluon_') for name in workloads):
+            self.run(
+                'gluon-prepare',
+                [
+                    self.python,
+                    '-B',
+                    provider / 'gluon/prepare.py',
+                    '--upstream',
+                    '--output',
+                    self.root / 'reports/gluon-source.json',
+                ],
+            )
+        self.provider_complete()
+        (self.root / 'reports/providers-ready.json').write_text(
+            json.dumps(
+                dict(
+                    manifest=self.manifest,
+                    full_tensile=selected,
+                    workloads=sorted(workloads),
+                ),
+                indent=2,
+            )
+            + '\n'
+        )
+
     def diagnostic_file(self, path):
         return (
             self.root in path.parents
@@ -892,6 +1359,17 @@ class Preparation:
         )
 
     def diagnostics(self):
+        for stats in sorted(self.logs.glob('*ccache-stats.log')):
+            if not self.diagnostic_file(stats):
+                continue
+            try:
+                self.run(
+                    'ccache-summary-' + stats.stem,
+                    ['ccache', '--show-log-stats', '--verbose'],
+                    env_overrides={'CCACHE_STATSLOG': str(stats)},
+                )
+            except (ValueError, OSError) as error:
+                (self.root / 'reports/ccache-summary-error.txt').write_text(str(error))
         try:
             self.sources()
         except (ValueError, OSError) as error:
@@ -909,6 +1387,11 @@ class Preparation:
                 'build/CMakeCache.txt',
                 'rocisa-build/CMakeCache.txt',
                 'tensile-native/CMakeCache.txt',
+                'full-tensile-native/CMakeCache.txt',
+                'llama-hip/CMakeCache.txt',
+                'llama-hip/configure.log',
+                'llama-hip/build.log',
+                'llama-hip/benchmark-build.json',
                 'dependency-preflight/build/CMakeCache.txt',
             )
         )
@@ -925,7 +1408,50 @@ class Preparation:
                             'generation-command.json',
                         )
                     )
-        files = sorted({path for path in files if self.diagnostic_file(path)})
+        full_artifacts = self.root / 'full-tensile-artifacts'
+        if full_artifacts.is_dir() and not full_artifacts.is_symlink():
+            for target in full_artifacts.iterdir():
+                if target.is_dir() and not target.is_symlink():
+                    for variant in target.iterdir():
+                        if variant.is_dir() and not variant.is_symlink():
+                            files.extend(
+                                variant / name
+                                for name in ('artifacts.json', 'selection.yaml')
+                            )
+        files = {path for path in files if self.diagnostic_file(path)}
+        commands = self.root / 'commands.jsonl'
+        failed_logs = set()
+        if commands in files:
+            with commands.open(errors='replace') as stream:
+                for line in stream:
+                    try:
+                        command = json.loads(line)
+                    except json.JSONDecodeError:
+                        # An interrupted write must not prevent diagnostic collection.
+                        continue
+                    if (
+                        isinstance(command, dict)
+                        and isinstance(command.get('log'), str)
+                        and (
+                            command.get('exit_code') != 0 or command.get('interrupted')
+                        )
+                    ):
+                        failed_logs.add(Path(command['log']))
+
+        def priority(path):
+            if path == commands or (
+                path.parent == self.root and path.name.startswith('phase-')
+            ):
+                return 0
+            if path in failed_logs:
+                return 1
+            if path.parent == self.root / 'reports':
+                return 2
+            return 3
+
+        # Reserve space for failure evidence before bulk logs/build artifacts.
+        # The same cap still applies if prioritized evidence itself exceeds it.
+        files = sorted(files, key=lambda path: (priority(path), path))
         summary = []
         # Exclusive creation refuses existing files, dangling links and links to
         # external files without ever truncating their targets.
@@ -969,16 +1495,33 @@ def main():
         choices=(
             'dependencies',
             'rocjitsu',
-            'native',
-            'generate',
+            'rocisa',
+            'tensilelite-build',
+            'tensilelite-generate',
+            'tensile-build',
+            'tensile-generate',
+            'llama-build',
+            'gluon-verify',
             'diagnostics',
             'cleanup',
         ),
     )
-    parser.add_argument('--manifest', help='Corpus-relative TOML recipe for generate')
+    parser.add_argument(
+        '--manifest', help='Corpus-relative TOML recipe for provider inventory'
+    )
     args = parser.parse_args()
-    if args.phase == 'generate' and not args.manifest:
-        parser.error('--manifest is required for generate')
+    if (
+        args.phase
+        in (
+            'tensilelite-generate',
+            'tensile-build',
+            'tensile-generate',
+            'llama-build',
+            'gluon-verify',
+        )
+        and not args.manifest
+    ):
+        parser.error('--manifest is required for ' + args.phase)
     ctx = None
 
     # Actions may deliver SIGTERM to this helper rather than its separate child
@@ -995,7 +1538,7 @@ def main():
             return
         ctx.start(args.phase)
         try:
-            getattr(ctx, args.phase)()
+            getattr(ctx, args.phase.replace('-', '_'))()
         except BaseException:
             ctx.finish(False)
             raise

@@ -5,12 +5,17 @@
 
 import gzip
 import os
+import shutil
+from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 import pandas as pd
 import pytest
 
 import utils.utils_profile as utils_profile
+
+FAKE_ARCH = "gfx_fake"
 
 # Long-form rocpd counter CSV header used by the run_prof tests.
 COUNTER_CSV_HEADER = (
@@ -46,6 +51,86 @@ OUTDATED_FIRMWARE_TAIL = [
 # =============================================================================
 
 
+def make_container_target(tmp_path, monkeypatch):
+    """Create a fake /proc/42 for a process in a container. Return its root."""
+    procfs_root = tmp_path / "proc"
+    target_root = procfs_root / "42" / "root"
+    (target_root / "tmp").mkdir(parents=True)
+    monkeypatch.setattr(utils_profile, "PROCFS_ROOT", procfs_root)
+    return target_root
+
+
+def make_shared_root_target(tmp_path, monkeypatch):
+    """Create a fake /proc/42 for a process with the same root directory as ours."""
+    procfs_root = tmp_path / "proc"
+    (procfs_root / "42").mkdir(parents=True)
+    (procfs_root / "42" / "root").symlink_to("/")
+    monkeypatch.setattr(utils_profile, "PROCFS_ROOT", procfs_root)
+
+
+def write_target_maps(lines):
+    """Write /proc/42/maps under the patched PROCFS_ROOT."""
+    maps_path = utils_profile.PROCFS_ROOT / "42" / "maps"
+    maps_path.write_text("".join(f"{line}\n" for line in lines), encoding="utf-8")
+
+
+def make_fake_attach_library(target_root, attach_status=0, on_detach=None):
+    """Return a fake librocprofiler-sdk-rocattach.so and what it saw.
+
+    On detach, it writes results.db to ROCPROF_OUTPUT_PATH inside target_root.
+    Then it calls on_detach with the local path of that folder.
+    """
+    seen = {}
+
+    def rocattach_attach(pid):
+        return attach_status
+
+    def rocattach_detach(pid):
+        seen["output_path"] = os.environ["ROCPROF_OUTPUT_PATH"]
+        local_output = target_root / seen["output_path"].lstrip("/")
+        (local_output / "results.db").write_text("rows", encoding="utf-8")
+        if on_detach is not None:
+            on_detach(local_output)
+        return 0
+
+    library = SimpleNamespace(
+        rocattach_attach=rocattach_attach, rocattach_detach=rocattach_detach
+    )
+    return library, seen
+
+
+def run_attach(monkeypatch, attach_library, output_dir):
+    """Run perform_attach_detach on process 42 with a fake attach library."""
+    monkeypatch.setattr(utils_profile.ctypes, "CDLL", lambda _name: attach_library)
+    monkeypatch.setattr(utils_profile, "console_log", lambda *a, **k: None)
+    utils_profile.perform_attach_detach(
+        {"ROCPROF_OUTPUT_PATH": str(output_dir), "ROCPROF_ATTACH_DURATION": "0"},
+        {"ROCPROF_ATTACH_LIBRARY": "librocattach.so", "ROCPROF_ATTACH_PID": 42},
+    )
+
+
+def run_prof_attached_to_container(tmp_path, monkeypatch, fake_attach):
+    """Run run_prof in attach mode on process 42 with fake_attach as the attach."""
+    fname = tmp_path / "pmc_perf_test.yaml"
+    fname.write_text("jobs:\n  - pmc:\n    - SQ_WAVES\n")
+    workload_dir = str(tmp_path / "workload")
+    profiler_options = {
+        "ROCPROF_ATTACH_PID": 42,
+        "ROCPROF_OUTPUT_PATH": workload_dir,
+        "ROCPROF_COUNTER_COLLECTION": "1",
+    }
+    monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofiler-sdk")
+    monkeypatch.setattr("utils.utils_profile.parse_pmc_perf", lambda f: ["SQ_WAVES"])
+    monkeypatch.setattr("utils.utils_profile.perform_attach_detach", fake_attach)
+    monkeypatch.setattr(
+        "utils.utils_profile.rocpd_data.convert_dbs_to_csv", lambda *a, **k: None
+    )
+    monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils_profile.console_warning", lambda *a, **k: None)
+    utils_profile.run_prof(str(fname), profiler_options, workload_dir, FAKE_ARCH)
+
+
 def test_run_prof_success_rocprofiler_sdk(tmp_path, monkeypatch):
     """run_prof (rocprofiler-sdk backend) pops APP_CMD out of the options and
     runs it with the profiler-built environment, into which the resolved
@@ -79,7 +164,7 @@ def test_run_prof_success_rocprofiler_sdk(tmp_path, monkeypatch):
     monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_warning", lambda *a, **k: None)
 
-    utils_profile.run_prof(str(fname), profiler_options, workload_dir)
+    utils_profile.run_prof(str(fname), profiler_options, workload_dir, FAKE_ARCH)
 
     assert captured["app_cmd"] == ["./test_app"]
     assert "APP_CMD" not in captured["env"]
@@ -122,6 +207,7 @@ def test_rocprofiler_sdk_env_log_excludes_user_env(tmp_path, monkeypatch):
             "ROCPROF_COUNTER_COLLECTION": "1",
         },
         workload_dir,
+        FAKE_ARCH,
     )
 
     assert sum("env vars" in m for m in logs) >= 1
@@ -171,7 +257,7 @@ def test_run_prof_rocpd_skips_pid_without_native_csv(tmp_path, monkeypatch):
     monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_warning", lambda *a, **k: None)
 
-    utils_profile.run_prof(str(fname), options, str(workload_dir))
+    utils_profile.run_prof(str(fname), options, str(workload_dir), FAKE_ARCH)
 
     assert update_calls == []
     assert any("No native counter CSV for pid 12345" in m for m in debug_msgs)
@@ -228,6 +314,7 @@ def test_run_prof_zero_kernels_writes_no_results_csv(
         str(fname),
         {"APP_CMD": ["./test_app"], "ROCPROF_COUNTER_COLLECTION": "1"},
         str(workload_dir),
+        FAKE_ARCH,
     )
 
     assert any("No GPU kernel data collected" in m for m in warnings)
@@ -257,6 +344,7 @@ def test_run_prof_relabels_dispatch_and_kernel_ids(tmp_path, monkeypatch):
         str(fname),
         {"APP_CMD": ["./test_app"], "ROCPROF_COUNTER_COLLECTION": "1"},
         str(workload_dir),
+        FAKE_ARCH,
     )
 
     results_csv = workload_dir / "results_pmc_perf_test.csv.gz"
@@ -281,7 +369,7 @@ def test_run_prof_with_yaml_config(tmp_path, monkeypatch):
 
     captured_config = {}
 
-    def fake_metrics_path(sdk_config):
+    def fake_metrics_path(sdk_config, arch, parent_dir):
         captured_config["sdk_config"] = sdk_config
         return str(tmp_path / "metrics_path")
 
@@ -300,7 +388,7 @@ def test_run_prof_with_yaml_config(tmp_path, monkeypatch):
     monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_warning", lambda *a, **k: None)
 
-    utils_profile.run_prof(str(fname), ["--arg"], workload_dir)
+    utils_profile.run_prof(str(fname), ["--arg"], workload_dir, FAKE_ARCH)
 
     merged_counters = captured_config["sdk_config"]["rocprofiler-sdk"]["counters"]
     assert "TCC_HIT" in merged_counters
@@ -349,7 +437,7 @@ def test_run_prof_failure_subprocess(
     monkeypatch.setattr("utils.utils_profile.console_error", mock_console_error)
 
     with pytest.raises(RuntimeError, match="console_error called"):
-        utils_profile.run_prof(str(fname), profiler_options, workload_dir)
+        utils_profile.run_prof(str(fname), profiler_options, workload_dir, FAKE_ARCH)
 
     messages = [msg for msg, *_ in errors]
     assert utils_profile._DUPLICATE_ROCM_MESSAGE not in messages
@@ -411,7 +499,7 @@ def test_run_prof_failure_prints_diagnostic_message(
     monkeypatch.setattr("utils.utils_profile.console_error", mock_console_error)
 
     with pytest.raises(RuntimeError, match="console_error called"):
-        utils_profile.run_prof(str(fname), profiler_options, workload_dir)
+        utils_profile.run_prof(str(fname), profiler_options, workload_dir, FAKE_ARCH)
 
     # The raw failure output stays visible; the diagnosis follows it.
     assert (abort_line, False, 1) in errors
@@ -451,6 +539,7 @@ def test_run_prof_success_ignores_outdated_firmware_warning(tmp_path, monkeypatc
             "ROCPROF_COUNTER_COLLECTION": "1",
         },
         workload_dir,
+        FAKE_ARCH,
     )
 
     assert errors == []
@@ -475,7 +564,7 @@ def test_run_prof_rocprofv3_builds_command_and_env(tmp_path, monkeypatch):
     monkeypatch.setattr("utils.utils_profile.capture_subprocess_output", fake_capture)
     monkeypatch.setattr(
         "utils.utils_profile.create_temp_rocprofiler_metrics_path",
-        lambda sdk_config: str(tmp_path / "metrics_path"),
+        lambda sdk_config, arch, parent_dir: str(tmp_path / "metrics_path"),
     )
     monkeypatch.setattr(
         "utils.utils_profile.rocpd_data.convert_dbs_to_csv", lambda *a, **k: None
@@ -484,7 +573,7 @@ def test_run_prof_rocprofv3_builds_command_and_env(tmp_path, monkeypatch):
     monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_warning", lambda *a, **k: None)
 
-    utils_profile.run_prof(str(fname), ["--arg"], workload_dir)
+    utils_profile.run_prof(str(fname), ["--arg"], workload_dir, FAKE_ARCH)
 
     assert captured["cmd"] == [
         "rocprofv3",
@@ -1057,3 +1146,144 @@ def test_keep_native_artifacts_keeps_the_agents_file(tmp_path):
 
     assert (tmp_path / "agents_pmc_perf_0_1234.csv.gz").is_file()
     assert not (source_dir / "1234_agents.csv.gz").exists()
+
+
+def test_run_prof_live_attach_writes_counter_definitions_to_target_tmp(
+    tmp_path, monkeypatch
+):
+    """In attach mode, run_prof writes the counter definitions to the /tmp of the
+    target."""
+    target_root = make_container_target(tmp_path, monkeypatch)
+    seen = {}
+
+    def fake_attach(new_env, options):
+        seen["metrics_path"] = new_env["ROCPROFILER_METRICS_PATH"]
+        local_metrics_path = target_root / seen["metrics_path"].lstrip("/")
+        seen["config_written"] = (local_metrics_path / "config.yaml").is_file()
+
+    run_prof_attached_to_container(tmp_path, monkeypatch, fake_attach)
+
+    assert seen["metrics_path"].startswith("/tmp/rocprof_compute_sdk_config_")
+    assert seen["config_written"]
+    assert list((target_root / "tmp").iterdir()) == []
+
+
+def test_run_prof_deletes_counter_definitions_when_attach_fails(tmp_path, monkeypatch):
+    target_root = make_container_target(tmp_path, monkeypatch)
+
+    def failing_attach(new_env, options):
+        raise SystemExit(1)
+
+    with pytest.raises(SystemExit):
+        run_prof_attached_to_container(tmp_path, monkeypatch, failing_attach)
+
+    assert list((target_root / "tmp").iterdir()) == []
+
+
+def test_perform_attach_detach_copies_output_from_container(tmp_path, monkeypatch):
+    """Copy the output of a process in a container back from its /tmp."""
+    target_root = make_container_target(tmp_path, monkeypatch)
+    output_dir = tmp_path / "workload"
+    output_dir.mkdir()
+    attach_library, seen = make_fake_attach_library(target_root)
+
+    run_attach(monkeypatch, attach_library, output_dir)
+
+    assert seen["output_path"].startswith("/tmp/rocprof_compute_attach_42_")
+    assert (output_dir / "results.db").read_text(encoding="utf-8") == "rows"
+    assert list((target_root / "tmp").iterdir()) == []
+
+
+def test_perform_attach_detach_deletes_container_folder_when_attach_fails(
+    tmp_path, monkeypatch
+):
+    target_root = make_container_target(tmp_path, monkeypatch)
+    output_dir = tmp_path / "workload"
+    output_dir.mkdir()
+    attach_library, _seen = make_fake_attach_library(target_root, attach_status=1)
+
+    with pytest.raises(SystemExit):
+        run_attach(monkeypatch, attach_library, output_dir)
+
+    assert list((target_root / "tmp").iterdir()) == []
+    assert list(output_dir.iterdir()) == []
+
+
+def test_perform_attach_detach_errors_when_process_exits_before_copy(
+    tmp_path, monkeypatch
+):
+    target_root = make_container_target(tmp_path, monkeypatch)
+    output_dir = tmp_path / "workload"
+    output_dir.mkdir()
+    attach_library, _seen = make_fake_attach_library(
+        target_root, on_detach=shutil.rmtree
+    )
+
+    with pytest.raises(SystemExit):
+        run_attach(monkeypatch, attach_library, output_dir)
+
+    assert list(output_dir.iterdir()) == []
+
+
+def test_perform_attach_detach_writes_output_directly_for_shared_root(
+    tmp_path, monkeypatch
+):
+    make_shared_root_target(tmp_path, monkeypatch)
+    output_dir = tmp_path / "workload"
+    output_dir.mkdir()
+    attach_library, seen = make_fake_attach_library(Path("/"))
+
+    run_attach(monkeypatch, attach_library, output_dir)
+
+    assert seen["output_path"] == str(output_dir)
+    assert (output_dir / "results.db").is_file()
+
+
+def test_find_attach_tool_library_uses_target_rocm(tmp_path, monkeypatch):
+    """Use the tool library next to the attach library that the process maps."""
+    target_root = make_container_target(tmp_path, monkeypatch)
+    write_target_maps([
+        "7f00-7f10 r-xp 00000000 08:01 1 "
+        "/opt/old/lib/librocprofiler-sdk-attach.so.1 (deleted)",
+        "7f10-7f20 r-xp 00000000 08:01 2 /usr/lib/libc.so.6",
+        "7f20-7f30 r-xp 00000000 08:01 3 "
+        "/opt/rocm-9/lib/librocprofiler-sdk-attach.so.1",
+    ])
+    for rocm_dir in ("opt/old/lib", "opt/rocm-9/lib"):
+        tool_dir = target_root / rocm_dir / "rocprofiler-sdk"
+        tool_dir.mkdir(parents=True)
+        (tool_dir / "librocprofiler-sdk-tool.so.1").touch()
+
+    assert utils_profile.find_attach_tool_library(42) == (
+        "/opt/rocm-9/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so.1"
+    )
+
+
+def test_find_attach_tool_library_none_without_mapped_attach_library(
+    tmp_path, monkeypatch
+):
+    make_container_target(tmp_path, monkeypatch)
+    write_target_maps(["7f10-7f20 r-xp 00000000 08:01 2 /usr/lib/libc.so.6"])
+
+    assert utils_profile.find_attach_tool_library(42) is None
+
+
+def test_find_attach_tool_library_none_when_target_rocm_lacks_tool(
+    tmp_path, monkeypatch
+):
+    target_root = make_container_target(tmp_path, monkeypatch)
+    write_target_maps([
+        "7f20-7f30 r-xp 00000000 08:01 3 /opt/rocm-9/lib/librocprofiler-sdk-attach.so.1"
+    ])
+    (target_root / "opt/rocm-9/lib").mkdir(parents=True)
+
+    assert utils_profile.find_attach_tool_library(42) is None
+
+
+def test_find_attach_tool_library_errors_when_maps_are_unreadable(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(utils_profile, "PROCFS_ROOT", tmp_path / "proc")
+
+    with pytest.raises(SystemExit):
+        utils_profile.find_attach_tool_library(42)

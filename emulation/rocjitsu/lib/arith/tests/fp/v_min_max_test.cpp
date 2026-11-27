@@ -5,12 +5,16 @@
 
 #include "common/cpu.h"
 #include "common/registers.h"
+#include "common/semantics.h"
+#include "common/wave.h"
 #include "fp/reference.h"
 #include "fp/selection_test.h"
+#include "rj_arith/detail/rj_arith_common.h"
 #include "rj_arith/detail/rj_arith_fp.h"
 
 #include <gtest/gtest.h>
 #include <iterator>
+#include <stdint.h>
 
 // Check FP selection results with NaNs, modifiers, EXEC masks, and aliases.
 TEST(FpMinF16W32, Arithmetic) {
@@ -234,8 +238,9 @@ TEST(FpSelection, ExactDirectedBits) {
         Registers<6, 32> r;
         write_fp(r.v, 0, c.width, c.a);
         write_fp(r.v + 2, 0, c.width, c.b);
+        uint32_t status = 0;
         ASSERT_EQ(c.call(cpu | semantics | c.flags, 1, c.instruction_flags, r.v + 4, r.v, r.v + 2,
-                         nullptr),
+                         &status),
                   RJ_ARITH_SUCCESS);
         EXPECT_EQ(read_fp(r.v + 4, 0, c.width), c.expected);
       }
@@ -339,13 +344,14 @@ TEST(FpSelection, NativeNanSelection) {
             write_fp(r.v, lane, family.width, a);
             write_fp(r.v + 2, lane, family.width, values[lane % value_count]);
           }
-          ASSERT_EQ(call(semantics, 0xffffffffU, 0, r.v + 4, r.v, r.v + 2, nullptr),
+          uint32_t status = 0;
+          ASSERT_EQ(call(semantics, 0xffffffffU, 0, r.v + 4, r.v, r.v + 2, &status),
                     RJ_ARITH_SUCCESS);
           for (uint64_t cpu : levels) {
             if (cpu == RJ_ARITH_CPU_BASELINE) {
               continue;
             }
-            ASSERT_EQ(call(cpu | semantics, 0xffffffffU, 0, r.v + 6, r.v, r.v + 2, nullptr),
+            ASSERT_EQ(call(cpu | semantics, 0xffffffffU, 0, r.v + 6, r.v, r.v + 2, &status),
                       RJ_ARITH_SUCCESS);
             for (int lane = 0; lane < 32; ++lane) {
               EXPECT_EQ(read_fp(r.v + 6, lane, family.width), read_fp(r.v + 4, lane, family.width))
@@ -354,6 +360,160 @@ TEST(FpSelection, NativeNanSelection) {
           }
         }
       }
+    }
+  }
+}
+
+namespace {
+// Check literal SDWA scaling results, destination overlap and masked selected-half stores.
+template <int Bits, int Lanes, typename Call> void check_sdwa(Call call, bool maximum) {
+  using namespace rocjitsu::arith::test;
+  using Mask = WaveMask<Lanes>;
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (uint64_t semantics : semantics_modes()) {
+      for (int aliasing_offset : {0, 1, 2}) {
+        Registers<3, Lanes> input;
+        for (int lane = 0; lane < Lanes; ++lane) {
+          input.v[0][lane] = Bits == 16 ? 0x3e003e00U : 0x3fc00000U;
+          input.v[1][lane] = Bits == 16 ? 0x41004100U : 0x40200000U;
+        }
+        Registers<3, Lanes> actual = input;
+        const uint64_t flags = cpu | semantics | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
+        const uint64_t mode =
+            RJ_ARITH_ALU_SDWA | RJ_ARITH_ALU_OMOD_2 |
+            (Bits == 16 ? RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_B | RJ_ARITH_ALU_HIGH_D : 0U);
+        const Mask exec_mask = Mask(1) | (Mask(1) << (Lanes - 1));
+        uint32_t status = 0x100;
+        const int result = call(flags, exec_mask, mode, actual.v + aliasing_offset, actual.v,
+                                actual.v + 1, &status);
+        EXPECT_EQ(status, 0x100U);
+        if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+          EXPECT_EQ(result, RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS);
+          actual.expect_preserved(input, 0, 0);
+          continue;
+        }
+        ASSERT_EQ(result, 0);
+        const uint32_t expected =
+            Bits == 16 ? (maximum ? 0x4500U : 0x4200U) : (maximum ? 0x40a00000U : 0x40400000U);
+        for (int lane = 0; lane < Lanes; ++lane) {
+          const uint32_t before = input.v[aliasing_offset][lane];
+          const uint32_t output = Bits == 16 ? (expected << 16) | (before & 0xffffU) : expected;
+          EXPECT_EQ(actual.v[aliasing_offset][lane], (exec_mask >> lane) & 1U ? output : before);
+        }
+        actual.expect_preserved(input, aliasing_offset, 1);
+        EXPECT_EQ(call(flags, Mask(0), mode, nullptr, nullptr, nullptr, nullptr), 0);
+        EXPECT_EQ(call(flags, Mask(0), mode | RJ_ARITH_DPP16, nullptr, nullptr, nullptr, nullptr),
+                  RJ_ARITH_ERROR_INVALID_FLAGS);
+      }
+    }
+  }
+}
+} // namespace
+
+// All legacy two-input precisions and wave widths share the same SDWA output stage.
+TEST(FpLegacySelection, SdwaOutput) {
+  using Call32 = decltype(&rj_arith_v_min_f16_w32);
+  using Call64 = decltype(&rj_arith_v_min_f16_w64);
+  struct Case {
+    Call32 f16_wave32;
+    Call64 f16_wave64;
+    Call32 f32_wave32;
+    Call64 f32_wave64;
+    bool maximum;
+  };
+  const Case cases[] = {
+      {rj_arith_v_min_f16_w32, rj_arith_v_min_f16_w64, rj_arith_v_min_f32_w32,
+       rj_arith_v_min_f32_w64, false},
+      {rj_arith_v_max_f16_w32, rj_arith_v_max_f16_w64, rj_arith_v_max_f32_w32,
+       rj_arith_v_max_f32_w64, true},
+      {rj_arith_v_min_f16_w32_gfx942, rj_arith_v_min_f16_w64_gfx942, rj_arith_v_min_f32_w32_gfx942,
+       rj_arith_v_min_f32_w64_gfx942, false},
+      {rj_arith_v_max_f16_w32_gfx942, rj_arith_v_max_f16_w64_gfx942, rj_arith_v_max_f32_w32_gfx942,
+       rj_arith_v_max_f32_w64_gfx942, true},
+  };
+  for (const Case &sample : cases) {
+    check_sdwa<16, 32>(sample.f16_wave32, sample.maximum);
+    check_sdwa<16, 64>(sample.f16_wave64, sample.maximum);
+    check_sdwa<32, 32>(sample.f32_wave32, sample.maximum);
+    check_sdwa<32, 64>(sample.f32_wave64, sample.maximum);
+  }
+}
+
+// Selected inherited SDWA rounding witnesses exercise the public API on every CPU path.
+TEST(FpLegacySelection, SdwaRounding) {
+  using namespace rocjitsu::arith::test;
+  struct Case {
+    uint32_t input, omod, expected[4];
+  };
+  constexpr Case cases[] = {
+      {0x7f7fffffU, 1, {0x7f800000U, 0x7f800000U, 0x7f7fffffU, 0x7f7fffffU}},
+      {0xff7fffffU, 2, {0xff800000U, 0xff7fffffU, 0xff800000U, 0xff7fffffU}},
+      {0x00ffffffU, 3, {0x00800000U, 0x00800000U, 0, 0}},
+      {0x80ffffffU, 3, {0x80800000U, 0, 0x80800000U, 0}},
+      {0x00800000U, 3, {0, 0, 0, 0}},
+      {0x00400000U, 1, {0x00800000U, 0x00800000U, 0x00800000U, 0x00800000U}},
+      {1, 3, {0, 0, 0, 0}},
+      {0x80000000U, 1, {0, 0, 0, 0}},
+      {0xff800000U, 3, {0xff800000U, 0xff800000U, 0xff800000U, 0xff800000U}},
+      {0x7f812345U, 1, {0x7fc12345U, 0x7fc12345U, 0x7fc12345U, 0x7fc12345U}},
+      {0x3f800001U, 0, {0x3f800001U, 0x3f800001U, 0x3f800001U, 0x3f800001U}},
+  };
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (const Case &sample : cases) {
+      for (int rounding = 0; rounding < 4; ++rounding) {
+        SCOPED_TRACE(::testing::Message() << cpu << '/' << sample.input << '/' << rounding);
+        Registers<1, 32> data;
+        for (int lane = 0; lane < 32; ++lane) {
+          data.v[0][lane] = sample.input;
+        }
+        uint32_t state = 0x80000000U;
+        const uint64_t flags = cpu | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS |
+                               RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS | (uint64_t(rounding) << 24);
+        const uint64_t mode = RJ_ARITH_ALU_SDWA | (uint64_t(sample.omod) << 6);
+        const uint32_t *source = data.v[0];
+        ASSERT_EQ(
+            rj_arith_v_min_f32_w32(flags, 0xaaaaaaaaU, mode, data.v, &source, &source, &state),
+            RJ_ARITH_SUCCESS);
+        EXPECT_EQ(state, 0x80000000U);
+        for (int lane = 0; lane < 32; ++lane) {
+          EXPECT_EQ(data.v[0][lane], lane & 1 ? sample.expected[rounding] : sample.input);
+        }
+      }
+    }
+  }
+}
+
+// Selected output-stage literals retain tiny-value and modifier-order boundaries.
+TEST(FpMinMax, OutputBoundaries) {
+  using namespace rocjitsu::arith::test;
+  const struct {
+    decltype(&rj_arith_v_min_num_f32_w32) call;
+    int width;
+    uint64_t a, b, expected;
+    uint32_t modifiers;
+  } cases[] = {
+      {rj_arith_v_max_num_f16_w32, 16, 1, 0, 0, RJ_ARITH_ALU_OMOD_2},
+      {rj_arith_v_max_num_f32_w32, 32, 0x80000000, 0x80000000, 0, RJ_ARITH_ALU_OMOD_2},
+      {rj_arith_v_max_num_f16_w32, 16, 0x8400, 0xbc00, 0x8000, RJ_ARITH_ALU_OMOD_HALF},
+      {rj_arith_v_max_num_f32_w32, 32, 0x80800000, 0xbf800000, 0x80000000, RJ_ARITH_ALU_OMOD_HALF},
+      {rj_arith_v_max_num_f64_w32, 64, 0x8010000000000000ULL, 0xbff0000000000000ULL,
+       0x8000000000000000ULL, RJ_ARITH_ALU_OMOD_HALF},
+      // ABS -> selection -> scaling -> clamp. Clamping before scaling would give 1.5.
+      {rj_arith_v_min_num_f16_w32, 16, 0xba00, 0x4000, 0x3c00,
+       RJ_ARITH_ALU_ABS_A | RJ_ARITH_ALU_OMOD_2 | RJ_ARITH_ALU_CLAMP},
+  };
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (const auto &sample : cases) {
+      Registers<6, 32> r;
+      write_fp(r.v, 0, sample.width, sample.a);
+      write_fp(r.v + 2, 0, sample.width, sample.b);
+      uint32_t status = 0x1234;
+      ASSERT_EQ(sample.call(cpu | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS, 1,
+                            sample.modifiers, r.v + 4, r.v, r.v + 2, &status),
+                RJ_ARITH_SUCCESS);
+      EXPECT_EQ(read_fp(r.v + 4, 0, sample.width), sample.expected)
+          << "width=" << sample.width << " cpu=" << cpu;
+      EXPECT_EQ(status, 0x1234U);
     }
   }
 }

@@ -21,6 +21,10 @@ template <Wmma1250Form Form>
 void wmma_gfx1250_half_x86_64_v4(uint64_t flags, uint64_t controls, uint32_t *const *d,
                                  const uint32_t *const *a, const uint32_t *const *b,
                                  const uint32_t *const *c);
+template <Wmma1250Form Form>
+void wmma_gfx1250_half_x86_64_v4_bf16(uint64_t flags, uint64_t controls, uint32_t *const *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      const uint32_t *const *c);
 template <int K, bool Bf8A, bool Bf8B, bool Packed>
 void wmma_gfx1250_fp8_x86_64_v3(uint64_t flags, uint64_t controls, uint32_t *const *d,
                                 const uint32_t *const *a, const uint32_t *const *b,
@@ -29,6 +33,10 @@ template <int K, bool Bf8A, bool Bf8B, bool Packed>
 void wmma_gfx1250_fp8_x86_64_v4(uint64_t flags, uint64_t controls, uint32_t *const *d,
                                 const uint32_t *const *a, const uint32_t *const *b,
                                 const uint32_t *const *c);
+template <int K, bool Bf8A, bool Bf8B, bool Packed>
+void wmma_gfx1250_fp8_x86_64_v4_bf16(uint64_t flags, uint64_t controls, uint32_t *const *d,
+                                     const uint32_t *const *a, const uint32_t *const *b,
+                                     const uint32_t *const *c);
 template <int M>
 void wmma_gfx1250_mixed_x86_64_v3(uint64_t controls, uint32_t *const *d, const uint32_t *const *a,
                                   const uint32_t *const *b, const uint32_t *const *c);
@@ -43,4 +51,21 @@ template <int M, int Block>
 void wmma_gfx1250_scaled_x86_64_v4(uint64_t controls, uint32_t *const *d, const uint32_t *const *a,
                                    const uint32_t *const *b, const uint32_t *const *c,
                                    const uint32_t *const *scale_a, const uint32_t *const *scale_b);
+template <int M, int Block>
+void wmma_gfx1250_fp4_avx512vnni(uint64_t controls, uint32_t *const *d, const uint32_t *const *a,
+                                 const uint32_t *const *b, const uint32_t *const *c,
+                                 const uint32_t *const *scale_a = nullptr,
+                                 const uint32_t *const *scale_b = nullptr);
+template <int Block>
+void wmma_gfx1250_mixed_x86_64_v4_bf16(uint64_t controls, uint32_t *const *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       const uint32_t *const *c,
+                                       const uint32_t *const *scale_a = nullptr,
+                                       const uint32_t *const *scale_b = nullptr);
+template <int Bits, bool BfA, bool BfB, int Form>
+void swmmac_float_x86_64_v3(uint64_t flags, uint32_t *const *d, const uint32_t *const *a,
+                            const uint32_t *const *b, const uint32_t *const *index);
+template <int Bits, bool BfA, bool BfB, int Form>
+void swmmac_float_x86_64_v4(uint64_t flags, uint32_t *const *d, const uint32_t *const *a,
+                            const uint32_t *const *b, const uint32_t *const *index);
 } // namespace rocjitsu::arith

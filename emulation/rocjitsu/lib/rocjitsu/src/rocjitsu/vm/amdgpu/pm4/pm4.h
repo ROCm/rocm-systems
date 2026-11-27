@@ -6,6 +6,7 @@
 /// @file
 /// @brief PM4 packets, shader registers and submission lifetime state.
 
+#include "rocjitsu/vm/amdgpu/pm4/pm4_data_transfer.h"
 #include "util/diagnostic.h"
 #include "util/result.h"
 
@@ -16,6 +17,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <vector>
 
 namespace rocjitsu::amdgpu {
@@ -84,8 +86,9 @@ enum class Pm4Opcode : uint32_t {
 class Pm4ScratchPool : public std::enable_shared_from_this<Pm4ScratchPool> {
 public:
   explicit Pm4ScratchPool(uint32_t slots) {
-    for (uint32_t i = slots; i; --i)
+    for (uint32_t i = slots; i; --i) {
       free_.push_back(i - 1);
+    }
   }
   bool available(uint32_t count) {
     std::lock_guard lock(mutex_);
@@ -127,6 +130,8 @@ struct Pm4IndirectBuffer {
   /// Nonzero only for a root ring frame; nested IBs always use linear addresses.
   uint64_t ring_base = 0;
   uint32_t ring_bytes = 0;
+  /// DRM asks the kernel to reset this ring's compute wave IDs before this IB.
+  bool reset_gds_wave_id = false;
 };
 
 /// @brief Shared launch/wave failure status; wake the CP to cancel the owning queue.
@@ -135,8 +140,9 @@ struct Pm4FailureState {
   std::function<void()> wake;
   void fail() {
     failed.store(true, std::memory_order_release);
-    if (wake)
+    if (wake) {
       wake();
+    }
   }
 };
 
@@ -147,6 +153,8 @@ struct Pm4Submission {
   bool graphics_engine = false;
   bool allow_dispatch = true; ///< AQL vendor IBs disable this to reject shader launches.
   std::deque<Pm4IndirectBuffer> buffers;
+  /// Admitted data packet; its owned effect must finish before another packet.
+  std::optional<Pm4DataTransfer> data_transfer;
   uint32_t indirect_expansions = 0;
   static constexpr uint32_t kMaxIndirectDepth = 64;
   static constexpr uint32_t kMaxIndirectExpansions = 4096;

@@ -216,12 +216,26 @@ void TestEvtNotifReadWrite::Run(void) {
                   << std::dec << ")" << std::endl;
       }
     }
-    EXPECT_EQ(ret, AMDSMI_STATUS_SUCCESS)
-        << "gpu " << dv_ind << ": amdsmi_get_gpu_kfd_info() failed, so the events' node cannot be "
-        << "checked";
-    EXPECT_NE(kfd_info.kfd_id, UINT64_MAX) << "gpu " << dv_ind << ": kfd_id is not supported";
-    const bool known = ret == AMDSMI_STATUS_SUCCESS && kfd_info.kfd_id != UINT64_MAX;
-    kfd_ids[processor_handles_[dv_ind]] = known ? kfd_info.kfd_id : kUnknownKfdId;
+    if (ret != AMDSMI_STATUS_SUCCESS) {
+      // check if environment is WSL by looking for /dev/dxg; expect UNSUPPORTED in this case
+      struct stat dxg_st{};
+      if (stat("/dev/dxg", &dxg_st) == 0) {
+        ASSERT_EQ(ret, AMDSMI_STATUS_NOT_SUPPORTED)
+            << "gpu " << dv_ind << ": KFD info should not be present in WSL environment.";
+      } else {
+        ADD_FAILURE() << "gpu " << dv_ind << ": amdsmi_get_gpu_kfd_info() failed with " << ret
+                      << ", so the events' node cannot be checked";
+        kfd_ids[processor_handles_[dv_ind]] = kUnknownKfdId;
+      }
+    } else {
+      EXPECT_EQ(ret, AMDSMI_STATUS_SUCCESS)
+          << "gpu " << dv_ind
+          << ": amdsmi_get_gpu_kfd_info() failed, so the events' node cannot be "
+          << "checked";
+      EXPECT_NE(kfd_info.kfd_id, UINT64_MAX) << "gpu " << dv_ind << ": kfd_id is not supported";
+      const bool known = ret == AMDSMI_STATUS_SUCCESS && kfd_info.kfd_id != UINT64_MAX;
+      kfd_ids[processor_handles_[dv_ind]] = known ? kfd_info.kfd_id : kUnknownKfdId;
+    }
   }
 
   for (dv_ind = 0; dv_ind < num_monitor_devs(); ++dv_ind) {

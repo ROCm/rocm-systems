@@ -198,6 +198,15 @@ TEST_F(DdaBroadcastFabricLLMicrotest, Eligible_NeedsScratchPeersAndEpoch) {
   }
 }
 
+TEST_F(DdaBroadcastFabricLLMicrotest, Eligible_NeedsFabricOrIpcHandler) {
+  mock_.setFabricResourcesPresent(true);
+  comm().ddaFabricMemHandler = nullptr;
+  EXPECT_FALSE(Eligible(16));
+  comm().ddaIpcMemHandler = reinterpret_cast<ncclIpcMemHandler*>(0x1);
+  EXPECT_TRUE(Eligible(16));
+  comm().ddaIpcMemHandler = nullptr;
+}
+
 TEST_F(DdaBroadcastFabricLLMicrotest, Eligible_RanksFromTwoTo144) {
   comm().nRanks = 1;
   EXPECT_FALSE(Eligible(16));

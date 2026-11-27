@@ -35,7 +35,7 @@ TEST_F(RmaEngineTestFixture, PostWriteThenPollCompletes) {
   uint64_t wr_id = rma_.post_write(
       lane, reinterpret_cast<uintptr_t>(h + 0), rma_.lkey_for(h + 0),
       rma_.remote_va(1, h + 2048), rma_.rkey(1), static_cast<uint32_t>(n),
-      /*inl=*/false, next_wr_id_++);
+      next_wr_id_++);
   ASSERT_NE(wr_id, 0u) << "post_write failed";
 
   struct ibv_wc wc = WaitForOneCompletion();

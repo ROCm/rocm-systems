@@ -19,7 +19,7 @@
 #include <cstdlib>
 #include <string>
 
-// ROCM-27985: the post-H2D-restore drain (hrr_sync_after_replayed_h2d) must
+// The post-H2D-restore drain (hrr_sync_after_replayed_h2d) must
 // be skipped while a stream graph is being captured, because a device/stream
 // synchronize is illegal mid-capture (HIP 900/901). Lock that guard down: a
 // regression that dropped it would break HRR graph replay.
@@ -30,7 +30,7 @@ HRR_TEST_CASE(Unit_HRR_Playback_ReplayedH2DDrainGraphGuard) {
   REQUIRE_FALSE(hrr_replayed_h2d_needs_drain(true));
 }
 
-// ROCM-27985: hipMalloc is host-synchronous, so the zero-init injected after a
+// hipMalloc is host-synchronous, so the zero-init injected after a
 // host-synchronous replay allocation must be drained before the handler
 // returns. Without that edge the null-stream zero-init races every later
 // replayed event on a hipStreamNonBlocking stream and can overwrite a restored
@@ -51,7 +51,7 @@ HRR_TEST_CASE(Unit_HRR_Playback_ZeroInitDrainGuard) {
 // all. Tie it to HRR_VERSION rather than to a literal, so a future format bump
 // cannot leave the tool reporting a version it no longer reads.
 HRR_TEST_CASE(Unit_HRR_Playback_VersionOption) {
-  hrr::test::SpawnProc proc(HRR_PLAYBACK_EXE, /*capture_stdout=*/true);
+  hrr::test::SpawnProc proc(hrr_playback_bin(), /*capture_stdout=*/true);
   set_proc_search_path(proc);
 
   REQUIRE(proc.run("--version") == 0);
@@ -101,7 +101,7 @@ HRR_TEST_CASE(Unit_HRR_Playback_PlacementHeldRanges) {
 
 // The range placement maps for an allocation is checked: a size that wraps
 // 2^64, or rounding that does, is refused rather than turned into a small range
-// inside a held one (AIRUNTIME-3069).
+// inside a held one.
 HRR_TEST_CASE(Unit_HRR_Playback_PlacementRangeChecked) {
   const uint64_t G = 1ull << 21, B = 0x7f0000000000ull;
   uint64_t b = 0, e = 0;

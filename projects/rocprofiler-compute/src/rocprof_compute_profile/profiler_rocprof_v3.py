@@ -3,10 +3,11 @@
 
 import argparse
 import shlex
+from typing import List
 
 from rocprof_compute_profile.profiler_base import RocProfCompute_Base
 from rocprof_compute_soc.soc_base import OmniSoC_Base
-from utils.logger import console_log, demarcate
+from utils.logger import demarcate
 from utils.utils_common import PROFILE_OUTPUT_FORMAT
 from utils.utils_profile import pc_sampling_unit
 
@@ -20,19 +21,19 @@ class rocprof_v3_profiler(RocProfCompute_Base):
     ) -> None:
         super().__init__(profiling_args, profiler_mode, soc)
 
-    def _live_attach_options(self) -> list[str]:
+    def _live_attach_options(self) -> List[str]:
         args = self.get_args()
-        options = ["--pid", args.attach_pid, "--attach-sync-output"]
+        options = ["--pid", str(args.attach_pid), "--attach-sync-output"]
         if args.attach_duration_msec:
             options += ["--attach-duration-msec", args.attach_duration_msec]
         return options
 
-    def _app_cmd_options(self) -> list[str]:
+    def _app_cmd_options(self) -> List[str]:
         return ["--", *shlex.split(self.get_args().remaining)]
 
-    def get_profiler_options(self) -> list[str]:
+    def get_profiler_options(self) -> List[str]:
         args = self.get_args()
-        if getattr(self, "_selected_frameworks", set()):
+        if args.trace_ml_api is not None:
             trace_option = "--marker-trace"
         else:
             trace_option = "--kernel-trace"
@@ -74,7 +75,7 @@ class rocprof_v3_profiler(RocProfCompute_Base):
             profiling_options += self._app_cmd_options()
         return profiling_options
 
-    def get_pc_sampling_profiler_options(self) -> list[str]:
+    def get_pc_sampling_profiler_options(self) -> List[str]:
         args = self.get_args()
         method = args.pc_sampling_method
 
@@ -113,9 +114,6 @@ class rocprof_v3_profiler(RocProfCompute_Base):
     @demarcate
     def run_profiling(self, version: str, prog: str) -> None:
         """Run profiling."""
-        if self.get_args().roof_only:
-            console_log("roofline", "Profiling roofline counters only.")
-
         # Log profiling options and setup filtering
         super().run_profiling(version, prog)
 

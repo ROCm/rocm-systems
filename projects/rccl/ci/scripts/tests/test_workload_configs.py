@@ -55,9 +55,11 @@ def madengine_legs() -> list[dict]:
 class WorkflowsMatchConfigs(unittest.TestCase):
 
     def test_dispatch_choices_are_the_configs(self):
-        callee = load_workflow("therock-rccl-test-madengine.yml")
-        options = callee[True]["workflow_dispatch"]["inputs"]["workload"]["options"]
-        self.assertEqual(sorted(options), sorted(tm.WORKLOAD_CONFIGS))
+        for name in ("therock-rccl-test-madengine.yml", "therock-rccl-madengine-history.yml"):
+            workload = load_workflow(name)[True]["workflow_dispatch"]["inputs"]["workload"]
+            with self.subTest(workflow=name):
+                self.assertEqual(sorted(workload["options"]), sorted(tm.WORKLOAD_CONFIGS))
+                self.assertIn(workload["default"], workload["options"])
 
     def test_scheduled_workloads_exist(self):
         legs = madengine_legs()
@@ -70,6 +72,16 @@ class WorkflowsMatchConfigs(unittest.TestCase):
             required = tm.WORKLOAD_CONFIGS[leg["workload"]].get("required_nodes")
             if required is not None:
                 self.assertEqual(int(leg["nodes"]), required, leg)
+
+    def test_schedule_matches_the_job_that_runs_it(self):
+        jobs = load_workflow("therock-rccl-ci-linux.yml")["jobs"]
+        nightly = jobs["therock-test-madengine"]["with"]["workload"]
+        weekly = [e["workload"] for e in
+                  jobs["therock-test-madengine-weekly"]["strategy"]["matrix"]["include"]]
+        self.assertEqual(tm.WORKLOAD_CONFIGS[nightly]["schedule"], "nightly")
+        for workload in weekly:
+            self.assertEqual(tm.WORKLOAD_CONFIGS[workload]["schedule"], "weekly", workload)
+        self.assertEqual(sorted([nightly, *weekly]), sorted(tm.WORKLOAD_CONFIGS))
 
     def test_job_budget_covers_time_limit(self):
         for leg in madengine_legs():
@@ -135,6 +147,16 @@ class CheckMadKnobs(unittest.TestCase):
         empty = self.work_dir(None)
         tm.check_mad_knobs(empty, tm.WORKLOAD_CONFIGS["llama-3.1-70b-training"])
         tm.check_mad_knobs(empty, tm.WORKLOAD_CONFIGS["llama-3.1-405b-maxtext"])
+
+
+class SglangLauncherKnobs(unittest.TestCase):
+
+    def test_barrier_timeout_uses_the_launcher_name(self):
+        # sglang_disagg_mori_io_ep.sh reads BARRIER_TIMEOUT_SECONDS; any other
+        # name leaves its 3600 s default in place.
+        env = tm.WORKLOAD_CONFIGS["deepseek-r1-sglang-disagg"]["env_vars"]
+        self.assertEqual(env.get("BARRIER_TIMEOUT_SECONDS"), "1800")
+        self.assertNotIn("BARRIER_TIMEOUT_S", env)
 
 
 class IgnoredMadKnobs(unittest.TestCase):

@@ -7,6 +7,7 @@
 #include "integer/bitfield.h"
 #include "common/bits.h"
 #include "common/validation.h"
+#include "common/wave_alignment.h"
 #include "register/dpp.h"
 #include "rj_arith/detail/rj_arith_integer.h"
 
@@ -24,7 +25,7 @@ template <rocjitsu::arith::Bitfield Op> uint32_t evaluate(uint32_t a, uint32_t b
       return (a >> offset) & field_mask;
     }
 
-    // rocjitsu's simd_bfe_i32 sign-extends A before extracting: fields
+    // The inherited model sign-extends A before extracting: fields
     // crossing bit 31 include copies of A's sign bit.
     uint32_t sign = 0u - (a >> 31);
     uint32_t field = (((a ^ sign) >> offset) ^ sign) & field_mask;
@@ -102,14 +103,17 @@ int bitfield(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const 
       cp = high_counts;
     }
   }
+  [[maybe_unused]] const auto level = rocjitsu::arith::wave_cpu_level(
+      flags, Op == rocjitsu::arith::Bitfield::Permute || Op == rocjitsu::arith::Bitfield::Reverse ||
+                 Op == rocjitsu::arith::Bitfield::Mask || rocjitsu::arith::aligned_for_512(a[0]));
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
-  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+  if (level >= RJ_ARITH_CPU_X86_64_V4) {
     rocjitsu::arith::bitfield_x86_64_v4<Op>(exec_mask, d[0], a[0], bp, cp);
     return RJ_ARITH_SUCCESS;
   }
 #endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
-  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+  if (level >= RJ_ARITH_CPU_X86_64_V3) {
     rocjitsu::arith::bitfield_x86_64_v3<Op>(exec_mask, d[0], a[0], bp, cp);
     return RJ_ARITH_SUCCESS;
   }
@@ -173,6 +177,58 @@ int bitfield_wave64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t 
     }
   }
   return RJ_ARITH_SUCCESS;
+}
+
+// Use shifts and masks to pack the low or high BF16 halves of two full VGPRs.
+template <int Lanes, typename Mask>
+int perm_b32_uniform(uint64_t flags, Mask exec_mask, uint32_t *d, const uint32_t *a,
+                     const uint32_t *b, uint32_t selector) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate(flags, 0)) {
+    return error;
+  }
+  if (!exec_mask) {
+    return RJ_ARITH_SUCCESS;
+  }
+  const bool high_halves = selector == 0x07060302u;
+  if (exec_mask == ~Mask{0} && (high_halves || selector == 0x05040100u)) {
+    [[maybe_unused]] const auto level = rocjitsu::arith::wave_cpu_level(
+        flags, rocjitsu::arith::aligned_for_512(a, b) && rocjitsu::arith::aligned_for_512(d));
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+    if (level >= RJ_ARITH_CPU_X86_64_V4) {
+      rocjitsu::arith::perm_pack_halves_x86_64_v4<Lanes>(d, a, b, high_halves);
+      return RJ_ARITH_SUCCESS;
+    }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+    if (level >= RJ_ARITH_CPU_X86_64_V3) {
+      rocjitsu::arith::perm_pack_halves_x86_64_v3<Lanes>(d, a, b, high_halves);
+      return RJ_ARITH_SUCCESS;
+    }
+#endif
+    if (high_halves) {
+      for (int lane = 0; lane < Lanes; ++lane) {
+        d[lane] = (a[lane] & 0xffff0000u) | (b[lane] >> 16);
+      }
+    } else {
+      for (int lane = 0; lane < Lanes; ++lane) {
+        d[lane] = (a[lane] << 16) | (b[lane] & 0xffffu);
+      }
+    }
+    return RJ_ARITH_SUCCESS;
+  }
+  uint32_t control[Lanes];
+  for (auto &word : control) {
+    word = selector;
+  }
+  const uint32_t *uniform = control;
+  if constexpr (Lanes == 32) {
+    return bitfield<rocjitsu::arith::Bitfield::Permute>(flags, exec_mask, 0, &d, &a, &b, &uniform);
+  } else {
+    return bitfield_wave64<rocjitsu::arith::Bitfield::Permute>(flags, exec_mask, 0, &d, &a, &b,
+                                                               &uniform);
+  }
 }
 
 } // namespace
@@ -381,6 +437,16 @@ int rj_arith_v_alignbyte_b32_w64(uint64_t flags, uint64_t exec_mask, uint64_t in
   }
   return bitfield_wave64<rocjitsu::arith::Bitfield::AlignByte>(flags, exec_mask, instruction_flags,
                                                                d, a, b, c);
+}
+
+int rj_arith_v_perm_b32_uniform_w32(uint64_t flags, uint32_t exec_mask, uint32_t *d,
+                                    const uint32_t *a, const uint32_t *b, uint32_t selector) {
+  return perm_b32_uniform<32>(flags, exec_mask, d, a, b, selector);
+}
+
+int rj_arith_v_perm_b32_uniform_w64(uint64_t flags, uint64_t exec_mask, uint32_t *d,
+                                    const uint32_t *a, const uint32_t *b, uint32_t selector) {
+  return perm_b32_uniform<64>(flags, exec_mask, d, a, b, selector);
 }
 
 // Permute source bytes for selected lanes.

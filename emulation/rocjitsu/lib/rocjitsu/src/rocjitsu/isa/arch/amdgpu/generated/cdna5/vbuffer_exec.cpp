@@ -6,6 +6,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/cdna5/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vbuffer.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/dot_packed16.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
@@ -26,7 +27,8 @@ namespace rocjitsu {
 namespace cdna5 {
 
 void BufferLoadU8Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -41,7 +43,8 @@ void BufferLoadU8Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferLoadI8Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -57,7 +60,8 @@ void BufferLoadI8Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferLoadU16Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -72,7 +76,8 @@ void BufferLoadU16Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferLoadI16Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -88,7 +93,8 @@ void BufferLoadI16Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferLoadB32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -103,7 +109,8 @@ void BufferLoadB32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferLoadB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -118,7 +125,8 @@ void BufferLoadB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferLoadB96Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -133,7 +141,8 @@ void BufferLoadB96Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferLoadB128Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -148,7 +157,8 @@ void BufferLoadB128Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferStoreB8Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->elem_size = 1;
   d->num_elems = 1;
   d->is_load = false;
@@ -163,8 +173,9 @@ void BufferStoreB8Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
   d->store_data.resize(wf.wf_size() * 1);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane, 0x1);
     d->store_data[lane * 1 + 0] = static_cast<uint8_t>(val0);
   }
@@ -172,7 +183,8 @@ void BufferStoreB8Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferStoreB16Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->elem_size = 2;
   d->num_elems = 1;
   d->is_load = false;
@@ -187,8 +199,9 @@ void BufferStoreB16Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
   d->store_data.resize(wf.wf_size() * 2);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane, 0x3);
     std::memcpy(&d->store_data[lane * 2 + 0], &val0, 2);
   }
@@ -196,7 +209,8 @@ void BufferStoreB16Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferStoreB32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = false;
@@ -210,9 +224,18 @@ void BufferStoreB32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
   d->store_data.resize(wf.wf_size() * 4);
+  if (!cu.observes_register_access() && wf.vgpr_alloc().contains(data_base, 1)) {
+    auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 1, exec);
+    if (data.copy_dwords_lane_major(d->store_data, exec).failed()) {
+      return;
+    }
+    set_data(std::move(d));
+    return;
+  }
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
@@ -220,7 +243,8 @@ void BufferStoreB32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferStoreB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->elem_size = 4;
   d->num_elems = 2;
   d->is_load = false;
@@ -234,9 +258,18 @@ void BufferStoreB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
   d->store_data.resize(wf.wf_size() * 8);
+  if (!cu.observes_register_access() && wf.vgpr_alloc().contains(data_base, 2)) {
+    auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 2, exec);
+    if (data.copy_dwords_lane_major(d->store_data, exec).failed()) {
+      return;
+    }
+    set_data(std::move(d));
+    return;
+  }
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -246,7 +279,8 @@ void BufferStoreB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferStoreB96Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->elem_size = 4;
   d->num_elems = 3;
   d->is_load = false;
@@ -260,9 +294,18 @@ void BufferStoreB96Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
   d->store_data.resize(wf.wf_size() * 12);
+  if (!cu.observes_register_access() && wf.vgpr_alloc().contains(data_base, 3)) {
+    auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 3, exec);
+    if (data.copy_dwords_lane_major(d->store_data, exec).failed()) {
+      return;
+    }
+    set_data(std::move(d));
+    return;
+  }
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 12 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -274,7 +317,8 @@ void BufferStoreB96Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferStoreB128Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->elem_size = 4;
   d->num_elems = 4;
   d->is_load = false;
@@ -288,9 +332,18 @@ void BufferStoreB128Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
   d->store_data.resize(wf.wf_size() * 16);
+  if (!cu.observes_register_access() && wf.vgpr_alloc().contains(data_base, 4)) {
+    auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 4, exec);
+    if (data.copy_dwords_lane_major(d->store_data, exec).failed()) {
+      return;
+    }
+    set_data(std::move(d));
+    return;
+  }
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 16 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -304,7 +357,8 @@ void BufferStoreB128Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferLoadD16U8Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -320,7 +374,8 @@ void BufferLoadD16U8Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferLoadD16I8Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -337,7 +392,8 @@ void BufferLoadD16I8Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferLoadD16B16Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -353,7 +409,8 @@ void BufferLoadD16B16Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferLoadD16HiU8Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -369,7 +426,8 @@ void BufferLoadD16HiU8Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferLoadD16HiI8Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -386,7 +444,8 @@ void BufferLoadD16HiI8Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferLoadD16HiB16Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -402,7 +461,8 @@ void BufferLoadD16HiB16Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferStoreD16HiB8Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->elem_size = 1;
   d->num_elems = 1;
   d->is_load = false;
@@ -417,8 +477,9 @@ void BufferStoreD16HiB8Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
   d->store_data.resize(wf.wf_size() * 1);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane, 0x4);
     val0 >>= 16;
     d->store_data[lane * 1 + 0] = static_cast<uint8_t>(val0);
@@ -427,7 +488,8 @@ void BufferStoreD16HiB8Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferStoreD16HiB16Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->elem_size = 2;
   d->num_elems = 1;
   d->is_load = false;
@@ -442,8 +504,9 @@ void BufferStoreD16HiB16Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
   d->store_data.resize(wf.wf_size() * 2);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane, 0xc);
     val0 >>= 16;
     std::memcpy(&d->store_data[lane * 2 + 0], &val0, 2);
@@ -452,7 +515,8 @@ void BufferStoreD16HiB16Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferAtomicSwapB32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -473,8 +537,9 @@ void BufferAtomicSwapB32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
@@ -482,7 +547,8 @@ void BufferAtomicSwapB32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferAtomicCmpswapB32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -503,8 +569,9 @@ void BufferAtomicCmpswapB32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -514,7 +581,8 @@ void BufferAtomicCmpswapB32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferAtomicAddU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -535,8 +603,9 @@ void BufferAtomicAddU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
@@ -544,7 +613,8 @@ void BufferAtomicAddU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferAtomicSubU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -565,8 +635,9 @@ void BufferAtomicSubU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
@@ -574,7 +645,8 @@ void BufferAtomicSubU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferAtomicSubClampU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -595,8 +667,9 @@ void BufferAtomicSubClampU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
@@ -604,7 +677,8 @@ void BufferAtomicSubClampU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferAtomicMinI32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -625,8 +699,9 @@ void BufferAtomicMinI32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
@@ -634,7 +709,8 @@ void BufferAtomicMinI32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferAtomicMinU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -655,8 +731,9 @@ void BufferAtomicMinU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
@@ -664,7 +741,8 @@ void BufferAtomicMinU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferAtomicMaxI32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -685,8 +763,9 @@ void BufferAtomicMaxI32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
@@ -694,7 +773,8 @@ void BufferAtomicMaxI32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferAtomicMaxU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -715,8 +795,9 @@ void BufferAtomicMaxU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
@@ -724,7 +805,8 @@ void BufferAtomicMaxU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferAtomicAndB32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -745,8 +827,9 @@ void BufferAtomicAndB32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
@@ -754,7 +837,8 @@ void BufferAtomicAndB32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferAtomicOrB32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -775,8 +859,9 @@ void BufferAtomicOrB32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
@@ -784,7 +869,8 @@ void BufferAtomicOrB32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferAtomicXorB32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -805,8 +891,9 @@ void BufferAtomicXorB32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
@@ -814,7 +901,8 @@ void BufferAtomicXorB32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferAtomicIncU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -835,8 +923,9 @@ void BufferAtomicIncU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
@@ -844,7 +933,8 @@ void BufferAtomicIncU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferAtomicDecU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -865,8 +955,9 @@ void BufferAtomicDecU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
@@ -874,7 +965,8 @@ void BufferAtomicDecU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferAtomicSwapB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -895,8 +987,9 @@ void BufferAtomicSwapB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -906,7 +999,8 @@ void BufferAtomicSwapB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferAtomicCmpswapB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -927,8 +1021,9 @@ void BufferAtomicCmpswapB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
   d->store_data.resize(wf.wf_size() * 16);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 16 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -942,7 +1037,8 @@ void BufferAtomicCmpswapB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferAtomicAddU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -963,8 +1059,9 @@ void BufferAtomicAddU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -974,7 +1071,8 @@ void BufferAtomicAddU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferAtomicSubU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -995,8 +1093,9 @@ void BufferAtomicSubU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -1006,7 +1105,8 @@ void BufferAtomicSubU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferAtomicMinI64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -1027,8 +1127,9 @@ void BufferAtomicMinI64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -1038,7 +1139,8 @@ void BufferAtomicMinI64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferAtomicMinU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -1059,8 +1161,9 @@ void BufferAtomicMinU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -1070,7 +1173,8 @@ void BufferAtomicMinU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferAtomicMaxI64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -1091,8 +1195,9 @@ void BufferAtomicMaxI64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -1102,7 +1207,8 @@ void BufferAtomicMaxI64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferAtomicMaxU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -1123,8 +1229,9 @@ void BufferAtomicMaxU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -1134,7 +1241,8 @@ void BufferAtomicMaxU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferAtomicAndB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -1155,8 +1263,9 @@ void BufferAtomicAndB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -1166,7 +1275,8 @@ void BufferAtomicAndB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferAtomicOrB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -1187,8 +1297,9 @@ void BufferAtomicOrB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -1198,7 +1309,8 @@ void BufferAtomicOrB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferAtomicXorB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -1219,8 +1331,9 @@ void BufferAtomicXorB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -1230,7 +1343,8 @@ void BufferAtomicXorB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferAtomicIncU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -1251,8 +1365,9 @@ void BufferAtomicIncU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -1262,7 +1377,8 @@ void BufferAtomicIncU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferAtomicDecU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -1283,8 +1399,9 @@ void BufferAtomicDecU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -1294,7 +1411,8 @@ void BufferAtomicDecU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferAtomicCondSubU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -1315,8 +1433,9 @@ void BufferAtomicCondSubU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
@@ -1324,7 +1443,8 @@ void BufferAtomicCondSubU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferAtomicMinNumF32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -1348,8 +1468,9 @@ void BufferAtomicMinNumF32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
@@ -1357,7 +1478,8 @@ void BufferAtomicMinNumF32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferAtomicMaxNumF32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -1381,8 +1503,9 @@ void BufferAtomicMaxNumF32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
@@ -1390,7 +1513,8 @@ void BufferAtomicMaxNumF32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferAtomicAddF64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -1414,8 +1538,9 @@ void BufferAtomicAddF64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -1425,7 +1550,8 @@ void BufferAtomicAddF64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferAtomicAddF32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -1449,8 +1575,9 @@ void BufferAtomicAddF32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
@@ -1458,7 +1585,8 @@ void BufferAtomicAddF32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferAtomicPkAddF16Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -1479,8 +1607,9 @@ void BufferAtomicPkAddF16Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
@@ -1488,7 +1617,8 @@ void BufferAtomicPkAddF16Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferAtomicPkAddBf16Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -1509,8 +1639,9 @@ void BufferAtomicPkAddBf16Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
@@ -1518,7 +1649,8 @@ void BufferAtomicPkAddBf16Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferAtomicMinNumF64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -1542,8 +1674,9 @@ void BufferAtomicMinNumF64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
@@ -1553,7 +1686,8 @@ void BufferAtomicMinNumF64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferAtomicMaxNumF64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -1577,8 +1711,9 @@ void BufferAtomicMaxNumF64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);

@@ -4,7 +4,9 @@
 // gfx1250 FP16/BF16 WMMA validation, baseline reduction and CPU dispatch.
 #include "common/float_formats.h"
 #include "common/internal.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
+#include "rj_arith/detail/rj_arith_wmma.h"
+#include "wmma/flags.h"
 #include "wmma/gfx1250_backends.h"
 #include "wmma/gfx1250_half.h"
 
@@ -43,6 +45,14 @@ int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32
       c = inline_c;
     }
   }
+#if defined(RJ_ARITH_HAVE_X86_64_V4_BF16)
+  if constexpr (Bf16) {
+    if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_ZEN4)) {
+      wmma_gfx1250_half_x86_64_v4_bf16<Form>(packing_flags, controls, d, a, b, c);
+      return RJ_ARITH_SUCCESS;
+    }
+  }
+#endif
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
   if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
     wmma_gfx1250_half_x86_64_v4<Form>(packing_flags, controls, d, a, b, c);

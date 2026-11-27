@@ -5,7 +5,8 @@
 #include "common/cpu.h"
 #include "common/floating_point.h"
 #include "common/semantics.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
+#include "rj_arith/detail/rj_arith_mfma.h"
 #include <array>
 #include <bit>
 #include <cmath>
@@ -96,6 +97,13 @@ template <int M, bool Bf8A, bool Bf8B, bool Fnuz> void arithmetic(Entry entry) {
     }
     for (uint64_t cpu : levels) {
       for (uint64_t semantics : semantics_modes()) {
+        // gfx942's qualified exact cases have captured expectations in gfx942_exact_test.
+        if constexpr (Fnuz) {
+          if (!controls && semantics != RJ_ARITH_SEMANTICS_LOOSE &&
+              semantics != RJ_ARITH_SEMANTICS_COMPATIBILITY) {
+            continue;
+          }
+        }
         for (int aliasing_offset : {0, 2, 4, 4 + Outputs}) {
           auto storage = input;
           const uint32_t *a[2], *b[2], *c[Outputs];
@@ -176,5 +184,81 @@ TEST(MfmaFp8, mfma_f32_32x32x16_bf8_bf8_w64) {
 }
 TEST(MfmaFp8, mfma_f32_32x32x16_bf8_bf8_w64_gfx950) {
   arithmetic<32, true, true, false>(rj_arith_v_mfma_f32_32x32x16_bf8_bf8_w64_gfx950);
+}
+
+TEST(MfmaFp8, ExhaustiveByteDecodeAndSubnormalCFallback) {
+  // Verify every 8-bit code in [0, 255] across OCP/FNUZ FP8/BF8 against the independent
+  // decoder, and verify subnormal-C preservation on all supported CPU levels.
+  struct Variant {
+    Entry entry;
+    bool bf8, fnuz;
+  };
+  const Variant variants[] = {
+      {rj_arith_v_mfma_f32_16x16x32_fp8_fp8_w64, false, true},
+      {rj_arith_v_mfma_f32_16x16x32_bf8_bf8_w64, true, true},
+      {rj_arith_v_mfma_f32_16x16x32_fp8_fp8_w64_gfx950, false, false},
+      {rj_arith_v_mfma_f32_16x16x32_bf8_bf8_w64_gfx950, true, false},
+  };
+  for (const Variant v : variants) {
+    const uint8_t one_code = v.bf8 ? (v.fnuz ? 0x40 : 0x3c) : (v.fnuz ? 0x40 : 0x38);
+    // Test 4 sweeps of 64 codes each so every 8-bit code is checked against decode().
+    for (int sweep = 0; sweep < 4; ++sweep) {
+      std::array<std::array<uint32_t, 64>, 2> a_buf{}, b_buf{};
+      for (int lane = 0; lane < 64; ++lane) {
+        const uint8_t code = uint8_t(sweep * 64 + lane);
+        // Only byte 0 of reg 0 (k = 0, 8, 16, 24) is populated; remaining bytes are 0.
+        a_buf[0][lane] = uint32_t(code);
+        b_buf[0][lane] = uint32_t(one_code);
+      }
+      // Compute independent expected matrix: row r sums the 4 groups g in 0..3 at lane g*16+r.
+      float expected[4][64]{};
+      for (int row = 0; row < 16; ++row) {
+        float sum = 0.0f;
+        for (int g = 0; g < 4; ++g) {
+          const uint8_t code = uint8_t(sweep * 64 + g * 16 + row);
+          sum = std::fma(decode(code, v.bf8, v.fnuz), 1.0f, sum);
+        }
+        const int reg = row % 4;
+        const int base_lane = (row / 4) * 16;
+        for (int col = 0; col < 16; ++col) {
+          expected[reg][base_lane + col] = sum;
+        }
+      }
+      std::array<std::array<uint32_t, 64>, 4> zero_c{};
+      const uint32_t *a_ptrs[] = {a_buf[0].data(), a_buf[1].data()};
+      const uint32_t *b_ptrs[] = {b_buf[0].data(), b_buf[1].data()};
+      const uint32_t *c_ptrs[] = {zero_c[0].data(), zero_c[1].data(), zero_c[2].data(),
+                                  zero_c[3].data()};
+      for (uint64_t cpu : supported_cpu_levels()) {
+        std::array<std::array<uint32_t, 64>, 4> out{};
+        uint32_t *d_ptrs[] = {out[0].data(), out[1].data(), out[2].data(), out[3].data()};
+        ASSERT_EQ(v.entry(cpu | RJ_ARITH_SEMANTICS_LOOSE, 0, d_ptrs, a_ptrs, b_ptrs, c_ptrs),
+                  RJ_ARITH_SUCCESS);
+        for (int r = 0; r < 4; ++r) {
+          for (int lane = 0; lane < 64; ++lane) {
+            expect_f32(out[r][lane], expected[r][lane], RJ_ARITH_SEMANTICS_LOOSE, /*atol=*/1e-5,
+                       /*rtol=*/1e-5);
+          }
+        }
+      }
+    }
+    // Verify subnormal C is preserved bit-for-bit when A and B are zero (vdpbf16ps fallback).
+    std::array<std::array<uint32_t, 64>, 2> z_buf{};
+    std::array<std::array<uint32_t, 64>, 4> c_buf{};
+    for (int r = 0; r < 4; ++r) {
+      for (int lane = 0; lane < 64; ++lane) {
+        c_buf[r][lane] = (lane & 1) ? 0x80000001u : 0x00000001u;
+      }
+    }
+    const uint32_t *z_ptrs[] = {z_buf[0].data(), z_buf[1].data()};
+    const uint32_t *c_ptrs[] = {c_buf[0].data(), c_buf[1].data(), c_buf[2].data(), c_buf[3].data()};
+    for (uint64_t cpu : supported_cpu_levels()) {
+      std::array<std::array<uint32_t, 64>, 4> out{};
+      uint32_t *d_ptrs[] = {out[0].data(), out[1].data(), out[2].data(), out[3].data()};
+      ASSERT_EQ(v.entry(cpu | RJ_ARITH_SEMANTICS_LOOSE, 0, d_ptrs, z_ptrs, z_ptrs, c_ptrs),
+                RJ_ARITH_SUCCESS);
+      EXPECT_EQ(out, c_buf);
+    }
+  }
 }
 } // namespace

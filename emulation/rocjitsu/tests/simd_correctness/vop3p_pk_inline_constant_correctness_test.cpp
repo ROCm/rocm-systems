@@ -19,6 +19,7 @@
 /// exercise their separate inline handling on RDNA3 and RDNA4.
 
 #include "compute_unit_test_util.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -75,7 +76,7 @@ struct Fixture {
   std::unique_ptr<Decoder> decoder;
   amdgpu::Wavefront *wf = nullptr;
 
-  explicit Fixture(rj_code_arch_t arch)
+  explicit Fixture(rocjitsu::IsaFamily arch)
       : gpu_mem("vop3p_pk_inline_const_mem"), l2("vop3p_pk_inline_const_l2") {
     amdgpu::ComputeUnitCore::Config cfg{};
     cfg.arch = arch;
@@ -84,8 +85,9 @@ struct Fixture {
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
     rocjitsu::test::initialize_compute_unit(cu, "cu_vop3p_pk_inline_const", cfg, &gpu_mem, &l2);
-    if (!cu)
+    if (!cu) {
       return;
+    }
     decoder = Decoder::create(arch);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
   }
@@ -104,13 +106,15 @@ struct Fixture {
     wf->set_exec(kExec);
     DecodeResult decoded = decoder->decode(words);
     EXPECT_TRUE(decoded.succeeded()) << "decode failed";
-    if (decoded.failed())
+    if (decoded.failed()) {
       return {};
+    }
     std::unique_ptr<Instruction> inst = std::move(decoded).value();
     EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
     std::array<uint32_t, WF_SIZE> out{};
-    for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+    for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       out[lane] = cu->read_vgpr(vb + kDstVgpr, lane);
+    }
     return out;
   }
 };
@@ -125,10 +129,11 @@ struct ForceScalarGuard {
 void expect_all_active(const std::array<uint32_t, WF_SIZE> &out, uint32_t want, const char *label) {
   for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
     const bool active = (kExec >> lane) & 1u;
-    if (active)
+    if (active) {
       EXPECT_EQ(out[lane], want) << label << ": lane " << lane;
-    else
+    } else {
       EXPECT_EQ(out[lane], DST_SENTINEL) << label << ": clobbered inactive lane " << lane;
+    }
   }
 }
 
@@ -140,7 +145,7 @@ TEST(Vop3pPkInlineConstantCorrectness, AddF16InlineOneReachesBothHalves) {
   const auto words =
       rdna4::build_vop3p(rdna4::kVPkAddF16Vop3p,
                          {.vdst = kDstVgpr, .src0 = 256, .src1 = kInlineOneFloat, .opsel_hi = 1});
-  Fixture fx(ROCJITSU_CODE_ARCH_RDNA4);
+  Fixture fx(rocjitsu::IsaFamily::Rdna4);
   ASSERT_NE(fx.cu, nullptr);
   ASSERT_NE(fx.wf, nullptr);
   const auto out = fx.run(words.data(), 0x3C003C00u);
@@ -153,7 +158,7 @@ TEST(Vop3pPkInlineConstantCorrectness, AddBf16InlineOneReachesBothHalves) {
   const std::array<uint32_t, 2> words = cdna5::build_vop3p(
       cdna5::kVPkAddBf16Vop3p,
       {.vdst = kDstVgpr, .opsel = 2, .src0 = 256, .src1 = kInlineOneFloat, .opsel_hi = 3});
-  Fixture fx(ROCJITSU_CODE_ARCH_CDNA5);
+  Fixture fx(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(fx.wf, nullptr);
   const std::array<uint32_t, WF_SIZE> out = fx.run(words.data(), 0x3F803F80u);
   expect_all_active(out, 0x40004000u, "v_pk_add_bf16 v4, v0, 1.0 op_sel:[0,1]");
@@ -164,7 +169,7 @@ TEST(Vop3pPkInlineConstantCorrectness, FmaBf16InlineHalfSelectionForEachSource) 
   ForceScalarGuard guard;
   for (bool force_scalar : {false, true}) {
     util::set_force_scalar_for_testing(force_scalar);
-    Fixture fx(ROCJITSU_CODE_ARCH_CDNA5);
+    Fixture fx(rocjitsu::IsaFamily::Cdna5);
     ASSERT_NE(fx.wf, nullptr);
     for (uint32_t source = 0; source < 3; ++source) {
       for (uint8_t low_select : {0, 1}) {
@@ -214,7 +219,7 @@ TEST(Vop3pPkInlineConstantCorrectness, Bf16BinaryInlineHalfSelection) {
   }};
   for (bool force_scalar : {false, true}) {
     util::set_force_scalar_for_testing(force_scalar);
-    Fixture fx(ROCJITSU_CODE_ARCH_CDNA5);
+    Fixture fx(rocjitsu::IsaFamily::Cdna5);
     ASSERT_NE(fx.wf, nullptr);
     for (const Case &test : cases) {
       for (uint32_t source = 0; source < 2; ++source) {
@@ -243,7 +248,7 @@ TEST(Vop3pPkInlineConstantCorrectness, Bf16BinaryInlineHalfSelection) {
 }
 
 TEST(Vop3pPkInlineConstantCorrectness, FmaBf16RegisterAndLiteralPreserveBothHalves) {
-  Fixture fx(ROCJITSU_CODE_ARCH_CDNA5);
+  Fixture fx(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(fx.wf, nullptr);
   for (uint8_t select : {0, 1}) {
     for (uint16_t source : {uint16_t{258}, kLiteral}) {
@@ -274,7 +279,7 @@ TEST(Vop3pPkInlineConstantCorrectness, AddF16InlineOneOnSixteenBitSourceOperand)
   const auto words =
       cdna2::build_vop3p(cdna2::kVPkAddF16Vop3p,
                          {.vdst = kDstVgpr, .src0 = 256, .src1 = kInlineOneFloat, .op_sel_hi = 1});
-  Fixture fx(ROCJITSU_CODE_ARCH_CDNA2);
+  Fixture fx(rocjitsu::IsaFamily::Cdna2);
   ASSERT_NE(fx.cu, nullptr);
   ASSERT_NE(fx.wf, nullptr);
   const auto out = fx.run(words.data(), 0x3C003C00u);
@@ -282,7 +287,7 @@ TEST(Vop3pPkInlineConstantCorrectness, AddF16InlineOneOnSixteenBitSourceOperand)
 }
 
 // v_dot2_f16_f16 is VOP3, not VOP3P, but src0/src1 are still 32-bit operands
-// consumed as packed v2 halves -- only src2 goes through read_vop3_true16_src,
+// consumed as packed v2 halves -- only src2 goes through the selected source half,
 // which is already 16-bit -- so it needs the same narrowing.
 //
 // v_dot2_f16_f16 v4, v0, 1.0, 0 with v0 = {1.0h, 0} is 1.0*1.0 + 0*0 + 0 = 1.0h.
@@ -293,7 +298,7 @@ TEST(Vop3pPkInlineConstantCorrectness, Dot2F16F16InlineOneNarrowsPackedHalves) {
   const auto words = rdna4::build_vop3(
       rdna4::kVDot2F16F16Vop3,
       {.vdst = kDstVgpr, .src0 = 256, .src1 = kInlineOneFloat, .src2 = kInlineZero});
-  Fixture fx(ROCJITSU_CODE_ARCH_RDNA4);
+  Fixture fx(rocjitsu::IsaFamily::Rdna4);
   ASSERT_NE(fx.cu, nullptr);
   ASSERT_NE(fx.wf, nullptr);
   const auto out = fx.run(words.data(), 0x00003C00u);
@@ -314,7 +319,7 @@ TEST(Vop3pPkInlineConstantCorrectness, AddF16LiteralValuedLikeInlineConstantIsVe
   const auto base = rdna4::build_vop3p(
       rdna4::kVPkAddF16Vop3p, {.vdst = kDstVgpr, .src0 = 256, .src1 = kLiteral, .opsel_hi = 1});
   const std::array words{base[0], base[1], uint32_t{kInlineOneFloat}};
-  Fixture fx(ROCJITSU_CODE_ARCH_RDNA4);
+  Fixture fx(rocjitsu::IsaFamily::Rdna4);
   ASSERT_NE(fx.cu, nullptr);
   ASSERT_NE(fx.wf, nullptr);
   // The literal is a half subnormal; preserve inputs for this source-decoding test.
@@ -329,7 +334,7 @@ TEST(Vop3pPkInlineConstantCorrectness, AddI16InlineIntegerConstantIsUnchanged) {
   const auto words =
       rdna4::build_vop3p(rdna4::kVPkAddI16Vop3p,
                          {.vdst = kDstVgpr, .src0 = 256, .src1 = kInlineOneInt, .opsel_hi = 1});
-  Fixture fx(ROCJITSU_CODE_ARCH_RDNA4);
+  Fixture fx(rocjitsu::IsaFamily::Rdna4);
   ASSERT_NE(fx.cu, nullptr);
   ASSERT_NE(fx.wf, nullptr);
   const auto out = fx.run(words.data(), 0x00050005u);
@@ -360,9 +365,10 @@ TEST(Vop3pPkInlineConstantCorrectness, AddF16InlineOneDefaultPackingAgreesWithSc
 
   const auto run_mode = [&](bool force_scalar) -> std::array<uint32_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
-    Fixture fx(ROCJITSU_CODE_ARCH_CDNA4);
-    if (::testing::Test::HasFatalFailure())
+    Fixture fx(rocjitsu::IsaFamily::Cdna4);
+    if (::testing::Test::HasFatalFailure()) {
       return {};
+    }
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     return fx.run(words.data(), 0x3C003C00u);
@@ -374,11 +380,12 @@ TEST(Vop3pPkInlineConstantCorrectness, AddF16InlineOneDefaultPackingAgreesWithSc
     const bool active = (kExec >> lane) & 1u;
     EXPECT_EQ(scalar_out[lane], simd_out[lane])
         << "op_sel_hi:[1,1]: SIMD path diverged from scalar body at lane " << lane;
-    if (active)
+    if (active) {
       EXPECT_EQ(scalar_out[lane], 0x3C004000u)
           << "op_sel_hi:[1,1]: inline 1.0 did not land in the low half only, at lane " << lane;
-    else
+    } else {
       EXPECT_EQ(scalar_out[lane], DST_SENTINEL) << "clobbered inactive lane " << lane;
+    }
   }
 }
 
@@ -391,7 +398,7 @@ TEST(Vop3pPkInlineConstantCorrectness, AddF16InlineInv2PiRoundsToNearestEven) {
   const auto words =
       rdna4::build_vop3p(rdna4::kVPkAddF16Vop3p,
                          {.vdst = kDstVgpr, .src0 = 256, .src1 = kInlineInv2Pi, .opsel_hi = 1});
-  Fixture fx(ROCJITSU_CODE_ARCH_RDNA4);
+  Fixture fx(rocjitsu::IsaFamily::Rdna4);
   ASSERT_NE(fx.cu, nullptr);
   ASSERT_NE(fx.wf, nullptr);
   const auto out = fx.run(words.data(), 0x00000000u);
@@ -405,7 +412,7 @@ TEST(Vop3pPkInlineConstantCorrectness, FmaF16InlineOneOnSrc2ReachesBothHalves) {
   const auto words = rdna4::build_vop3p(
       rdna4::kVPkFmaF16Vop3p,
       {.vdst = kDstVgpr, .src0 = 256, .src1 = 256, .src2 = kInlineOneFloat, .opsel_hi = 3});
-  Fixture fx(ROCJITSU_CODE_ARCH_RDNA4);
+  Fixture fx(rocjitsu::IsaFamily::Rdna4);
   ASSERT_NE(fx.cu, nullptr);
   ASSERT_NE(fx.wf, nullptr);
   const auto out = fx.run(words.data(), 0x40004000u);
@@ -421,7 +428,7 @@ TEST(Vop3pPkInlineConstantCorrectness, Dot2F32F16InlineOneNarrowsOnLocalBody) {
   const auto words = rdna4::build_vop3p(
       rdna4::kVDot2F32F16Vop3p,
       {.vdst = kDstVgpr, .src0 = 256, .src1 = kInlineOneFloat, .src2 = kInlineZero, .opsel_hi = 3});
-  Fixture fx(ROCJITSU_CODE_ARCH_RDNA4);
+  Fixture fx(rocjitsu::IsaFamily::Rdna4);
   ASSERT_NE(fx.cu, nullptr);
   ASSERT_NE(fx.wf, nullptr);
   const auto out = fx.run(words.data(), 0x00003C00u);
@@ -445,9 +452,10 @@ TEST(Vop3pPkInlineConstantCorrectness, Dot2F32Bf16InlineOneNarrowsAndSimdAgrees)
 
   const auto run_mode = [&](bool force_scalar) -> std::array<uint32_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
-    Fixture fx(ROCJITSU_CODE_ARCH_RDNA3);
-    if (::testing::Test::HasFatalFailure())
+    Fixture fx(rocjitsu::IsaFamily::Rdna3);
+    if (::testing::Test::HasFatalFailure()) {
       return {};
+    }
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     EXPECT_EQ(fx.wf->wf_size(), WF_SIZE) << "fixture assumes wave32";
@@ -460,10 +468,11 @@ TEST(Vop3pPkInlineConstantCorrectness, Dot2F32Bf16InlineOneNarrowsAndSimdAgrees)
     EXPECT_EQ(scalar_out[lane], simd_out[lane])
         << "v_dot2_f32_bf16: SIMD path diverged from scalar body at lane " << lane;
     const bool active = (kExec >> lane) & 1u;
-    if (active)
+    if (active) {
       EXPECT_EQ(scalar_out[lane], 0x3F800000u) << "v_dot2_f32_bf16 v4, v0, 1.0, 0: lane " << lane;
-    else
+    } else {
       EXPECT_EQ(scalar_out[lane], DST_SENTINEL) << "clobbered inactive lane " << lane;
+    }
   }
 }
 

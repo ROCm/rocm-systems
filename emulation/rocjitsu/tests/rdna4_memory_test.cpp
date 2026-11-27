@@ -6,6 +6,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/memory_wait_scoreboard.h"
 
@@ -19,12 +20,12 @@ protected:
   GpuMemory memory_{"memory"};
   L2Cache l2_{"l2"};
   std::unique_ptr<ComputeUnitCore> cu_;
-  std::unique_ptr<Decoder> decoder_ = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  std::unique_ptr<Decoder> decoder_ = Decoder::create(rocjitsu::IsaFamily::Rdna4);
   Wavefront *wf_ = nullptr;
   void SetUp() override {
     l2_.set_backing_memory(&memory_);
     ComputeUnitCore::Config cfg{};
-    cfg.arch = ROCJITSU_CODE_ARCH_RDNA4;
+    cfg.arch = rocjitsu::IsaFamily::Rdna4;
     cfg.num_wf_slots = 1;
     cfg.sgprs_per_wf = 106;
     cfg.vgprs_per_wf = 64;
@@ -42,8 +43,9 @@ protected:
                        /*override_launch=*/true);
   }
   void TearDown() override {
-    if (wf_)
+    if (wf_) {
       wf_->halt();
+    }
   }
   void write_vector(unsigned reg, uint32_t word, unsigned lane = 0) {
     cu_->write_vgpr(wf_->vgpr_alloc().base + reg, lane, word);
@@ -57,9 +59,98 @@ protected:
     auto inst = std::move(decoded).value();
     ASSERT_TRUE(cu_->execute_instruction(inst.get(), *wf_).succeeded()) << inst->mnemonic();
     ASSERT_NE(inst->data(), nullptr);
-    EXPECT_EQ(test::ComputeUnitTestAccess::route_memory_inst(*cu_, inst.release(), *wf_), expected);
+    EXPECT_EQ(test::ComputeUnitTestAccess::route_memory_inst(*cu_, std::move(inst), *wf_),
+              expected);
   }
 };
+
+TEST_F(Rdna4MemoryTest, DenseDsDwordsRespectInteriorLaneAddressesAndAllocationEnd) {
+  // ds_store_b32 v1, v2 and ds_load_b32 v4, v1.
+  constexpr std::array store{0xd8340000u, 0x00000201u, 0u};
+  constexpr std::array load{0xd8d80000u, 0x04000001u, 0u};
+  wf_->set_exec(UINT32_MAX);
+  wf_->set_lds_size(32 * sizeof(uint32_t));
+  for (unsigned lane = 0; lane < 32; ++lane) {
+    write_vector(1, lane * 4, lane);
+    write_vector(2, 100 + lane, lane);
+  }
+  issue(store);
+  issue(load);
+  for (unsigned lane = 0; lane < 32; ++lane) {
+    EXPECT_EQ(wf_->lds().read32(lane * 4), 100u + lane);
+    EXPECT_EQ(read_vector(4, lane), 100u + lane);
+  }
+
+  // Keep both endpoints contiguous. An interior alias must still use lane
+  // store order, and a lane just beyond the wave allocation must read zero.
+  write_vector(1, 5 * 4, 6);
+  write_vector(1, 32 * 4, 17);
+  wf_->lds().write32(32 * 4, 999);
+  issue(store);
+  issue(load);
+  EXPECT_EQ(read_vector(4, 5), 106u);
+  EXPECT_EQ(read_vector(4, 6), 106u);
+  EXPECT_EQ(read_vector(4, 17), 0u);
+  EXPECT_EQ(wf_->lds().read32(32 * 4), 999u);
+}
+
+TEST_F(Rdna4MemoryTest, DsRunsRespectExecHolesAndStoreOrderAcrossRuns) {
+  constexpr std::array store{0xd8340000u, 0x00000201u, 0u};
+  constexpr std::array load{0xd8d80000u, 0x04000001u, 0u};
+  // Lanes 1..8 and 16..31 each access an ascending run. Lane 14 aliases
+  // an earlier lane and a later run aliases lane 0. The last store wins.
+  const uint32_t exec = 0xffff41ff;
+  wf_->set_exec(exec);
+  wf_->set_lds_size(256);
+  for (unsigned lane = 0; lane < 32; ++lane) {
+    const unsigned address = lane == 0    ? 128
+                             : lane == 14 ? 16
+                             : lane < 16  ? lane * 4
+                                          : 128 + (lane - 16) * 4;
+    write_vector(1, address, lane);
+    write_vector(2, 100 + lane, lane);
+    write_vector(4, 0xabcd, lane);
+  }
+  issue(store);
+  issue(load);
+  for (unsigned lane = 0; lane < 32; ++lane) {
+    const uint32_t expected = !(exec & (1u << lane)) ? 0xabcdu
+                              : lane == 0            ? 116u
+                              : lane == 4            ? 114u
+                                                     : 100u + lane;
+    EXPECT_EQ(read_vector(4, lane), expected) << lane;
+  }
+  EXPECT_EQ(wf_->lds().read32(16), 114u);
+  EXPECT_EQ(wf_->lds().read32(128), 116u);
+}
+
+TEST_F(Rdna4MemoryTest, UpperWave64DsRunEndsAtPartialDword) {
+  constexpr std::array store{0xd8340000u, 0x00000201u, 0u};
+  constexpr std::array load{0xd8d80000u, 0x04000001u, 0u};
+  wf_->halt();
+  wf_ = cu_->dispatch_wf(0, 0, 106, 32, 64);
+  ASSERT_NE(wf_, nullptr);
+  wf_->set_exec(UINT64_MAX << 48);
+  wf_->set_lds_size(254);
+  for (unsigned lane = 0; lane < 64; ++lane) {
+    wf_->lds().write32(lane * 4, 0x11223344u);
+    write_vector(1, lane * 4, lane);
+    write_vector(2, 0x55667700u + lane, lane);
+    write_vector(4, 0xaabbccddu, lane);
+  }
+  issue(store);
+  issue(load);
+  for (unsigned lane = 0; lane < 48; ++lane) {
+    EXPECT_EQ(wf_->lds().read32(lane * 4), 0x11223344u);
+    EXPECT_EQ(read_vector(4, lane), 0xaabbccddu);
+  }
+  for (unsigned lane = 48; lane < 63; ++lane) {
+    EXPECT_EQ(read_vector(4, lane), 0x55667700u + lane);
+  }
+  // gfx12 stores retain individual bytes. Loads require a whole dword.
+  EXPECT_EQ(wf_->lds().read32(63 * 4), 0x1122773fu);
+  EXPECT_EQ(read_vector(4, 63), 0u);
+}
 
 TEST_F(Rdna4MemoryTest, OrderedAddMatchesIdUpdatesTwoWordsAndReturnsOldPair) {
   // gfx1201 global_atomic_ordered_add_b64 v[0:1], v[2:3], v[4:5], off th:TH_ATOMIC_RETURN
@@ -188,7 +279,7 @@ TEST_F(Rdna4MemoryTest, DirectRouteSuppressesUnallocatedAtomicBeforeLdsUpdate) {
   inst->execute(*inst, wf_);
   ASSERT_NE(inst->data(), nullptr);
   ASSERT_EQ(inst->data_as<VectorMemState>()->lane_mask, 1u);
-  EXPECT_EQ(test::ComputeUnitTestAccess::route_memory_inst(*cu_, inst.release(), *wf_),
+  EXPECT_EQ(test::ComputeUnitTestAccess::route_memory_inst(*cu_, std::move(inst), *wf_),
             VmAccessOutcome::Complete);
   EXPECT_EQ(wf_->lds().read32(8), 41u);
   EXPECT_EQ(wf_->exec(), 1u);
@@ -244,8 +335,9 @@ TEST_F(Rdna4MemoryTest, TransposeReadsOnlyItsAddressLanesAndWritesTheWholeWave) 
         ASSERT_TRUE(cu_->execute_instruction(inst.value().get(), *wf_).succeeded());
         const auto reads = vgpr_read_events(*seen);
         ASSERT_EQ(reads.size(), scalar_base ? 1u : 2u);
-        for (const auto &read : reads)
+        for (const auto &read : reads) {
           EXPECT_EQ(read.lane_mask, address_lanes);
+        }
         ASSERT_NE(inst.value()->data(), nullptr);
         EXPECT_EQ(inst.value()->data_as<VectorMemState>()->lane_mask, live);
         for (unsigned lane : {0u, wave_size - 1}) {
@@ -270,8 +362,9 @@ TEST_F(Rdna4MemoryTest, GlobalTransposeAllocatesOnlyTheReturnedWaveWords) {
     wf_ = cu_->dispatch_wf(0, pc, 106, 32, wave_size);
     ASSERT_NE(wf_, nullptr);
     wf_->set_exec(wave_size == 64 ? UINT64_MAX : UINT32_MAX);
-    for (unsigned word = 0; word < 256; ++word)
+    for (unsigned word = 0; word < 256; ++word) {
       memory_.write32(0x20000 + word * 4, word + 1);
+    }
     for (unsigned lane = 0; lane < wave_size; ++lane) {
       write_vector(2, 0x20000 + 16 * lane, lane);
       write_vector(3, 0, lane);
@@ -281,8 +374,9 @@ TEST_F(Rdna4MemoryTest, GlobalTransposeAllocatesOnlyTheReturnedWaveWords) {
       for (unsigned overflow : {0u, 1u}) {
         SCOPED_TRACE(testing::Message() << wave_size << ' ' << width << ' ' << overflow);
         const unsigned dst = 32 - output_words + overflow;
-        for (unsigned reg = dst; reg < dst + width; ++reg)
+        for (unsigned reg = dst; reg < dst + width; ++reg) {
           write_vector(reg, sentinel);
+        }
         const std::array<uint32_t, 3> words{op, dst, 2u};
         auto decoded = decoder_->decode(words.data());
         ASSERT_TRUE(decoded.succeeded());

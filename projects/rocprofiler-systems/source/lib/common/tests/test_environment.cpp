@@ -6,6 +6,8 @@
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include <limits>
+#include <string>
 #include <unordered_map>
 
 using namespace rocprofsys::common;
@@ -524,6 +526,17 @@ TEST_F(FakeEnvGetEnvTest, FloatTrailingGarbageReturnsDefault)
 {
     fake_env::setenv("FOO", "1.5abc", 1);
     EXPECT_NEAR(fake_environment::get_env("FOO", 9.9), 9.9, 1e-9);
+}
+
+TEST_F(FakeEnvGetEnvTest, FloatOutOfFloatRangeReturnsDefault)
+{
+    constexpr auto k_max_float = std::numeric_limits<float>::max();
+
+    fake_env::setenv("FOO", std::to_string(k_max_float).c_str(), 1);
+    EXPECT_EQ(fake_environment::get_env("FOO", 7.0f), k_max_float);
+
+    fake_env::setenv("FOO", "1e300", 1);
+    EXPECT_EQ(fake_environment::get_env("FOO", 7.0f), 7.0f);
 }
 
 // ── Integral branch gaps ──────────────────────────────────────────────────────

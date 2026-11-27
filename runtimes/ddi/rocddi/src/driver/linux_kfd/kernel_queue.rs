@@ -480,17 +480,17 @@ impl Drop for KfdKernelQueue {
 
 #[cfg(test)]
 mod tests {
-    use super::super::{memory, sys, sysfs, uapi};
+    use super::super::{connection, memory, sysfs, uapi};
     use super::*;
     use std::fs::File;
     use std::sync::Arc;
 
     #[allow(clippy::unwrap_used)]
     fn scripted_vm() -> Shared<DeviceVm> {
-        let kfd = Shared::new(sys::Kfd::with_hook(
+        let kfd = Shared::new(connection::Kfd::with_hook(
             File::open("/dev/null").unwrap(),
             Arc::new(|call| {
-                if let sys::Call::Wait(args, _) = call {
+                if let connection::Call::Wait(args, _) = call {
                     args.result = uapi::WAIT_TIMEOUT;
                 }
                 Ok(())
@@ -498,6 +498,8 @@ mod tests {
         ))
         .unwrap();
         let node = sysfs::KfdNode {
+            debug: sysfs::KfdDebugProperties::default(),
+            host_atomics: false,
             node: 1,
             gpu_id: 42,
             render_minor: Some(128),
@@ -620,7 +622,11 @@ mod tests {
                     })
                     .unwrap();
                 assert_eq!(
-                    queue.refresh_status().unwrap_err().native_error_code(),
+                    queue
+                        .refresh_status()
+                        .unwrap_err()
+                        .native_status()
+                        .and_then(crate::NativeStatus::errno_code),
                     Some(errno::EIO)
                 );
                 assert_eq!(queue.status().retired_submission, 0);
@@ -755,7 +761,12 @@ mod tests {
                 let error = KfdKernelQueue::create(vm.clone(), KernelQueueFormat::Pm4)
                     .err()
                     .unwrap();
-                assert_eq!(error.native_error_code(), Some(errno::EFAULT));
+                assert_eq!(
+                    error
+                        .native_status()
+                        .and_then(crate::NativeStatus::errno_code),
+                    Some(errno::EFAULT)
+                );
             },
         );
         drm::with_script(
@@ -771,7 +782,12 @@ mod tests {
                 let error = KfdKernelQueue::create(vm.clone(), KernelQueueFormat::Pm4)
                     .err()
                     .unwrap();
-                assert_eq!(error.native_error_code(), Some(errno::EBUSY));
+                assert_eq!(
+                    error
+                        .native_status()
+                        .and_then(crate::NativeStatus::errno_code),
+                    Some(errno::EBUSY)
+                );
                 // Drop retries the ordinary EBUSY rollback through the owner.
             },
         );

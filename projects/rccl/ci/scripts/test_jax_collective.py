@@ -4,7 +4,7 @@
 This script handles:
   1. Discovering the CI-built librccl.so in the artifact directory
   2. Prepending its directory to LD_LIBRARY_PATH so JAX loads it
-  3. Cloning the matching JAX test sources (sparse checkout)
+  3. Checking out JAX tests/ at the commit the installed jax was built from
   4. Running pytest on pmap_test.py and shard_map_test.py
 
 Usage from GitHub Actions:
@@ -17,12 +17,14 @@ Usage from GitHub Actions:
 import argparse
 import logging
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 from rccl_ci_utils import (
+    SetupFailureReport,
     find_rccl_library,
     parse_junit_xml,
     send_email_report,
@@ -36,7 +38,7 @@ from rccl_ci_utils import (
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
 
-JAX_REPO = "https://github.com/ROCm/jax.git"
+JAX_REPO = "https://github.com/jax-ml/jax.git"
 
 SMOKE_TEST_FILES = [
     "tests/pmap_test.py",
@@ -67,6 +69,10 @@ XLA_ENV = {
         "--xla_gpu_enable_cublaslt=false"
     ),
 }
+
+REPORT_SUBJECT = "RCCL JAX Collective Test"
+
+setup_report = SetupFailureReport(REPORT_SUBJECT)
 
 
 def find_lib_dirs(artifact_dir: Path) -> list[Path]:
@@ -133,52 +139,67 @@ def setup_xla_environment() -> None:
         log.info("Set %s=%s", key, value)
 
 
-def clone_jax_test_sources(jax_src: Path) -> None:
-    """Sparse-clone ROCm/jax to get test sources matching the installed version.
-
-    Tries to find a tag matching the installed JAX version (e.g. jax-v0.5.3).
-    Falls back to the default branch HEAD for nightly/dev builds.
-    """
-    if jax_src.exists() and (jax_src / "tests" / "pmap_test.py").exists():
-        log.info("JAX test sources already present at %s, skipping clone", jax_src)
-        return
-
-    import jax
-    jax_version = jax.__version__
-    base_version = jax_version.split(".dev")[0].split("+")[0]
-    git_ref = f"jax-v{base_version}"
-    log.info("JAX version: %s, trying tag: %s", jax_version, git_ref)
-
+def checked_out_commit(jax_src: Path) -> str:
+    """Return the commit checked out in jax_src, or "" if there is none."""
     result = subprocess.run(
-        ["git", "ls-remote", "--tags", JAX_REPO, git_ref],
+        ["git", "-C", str(jax_src), "rev-parse", "HEAD"],
         capture_output=True, text=True,
     )
-    if not result.stdout.strip():
-        log.info("Tag %s not found, using default branch HEAD", git_ref)
-        git_ref = None
+    return result.stdout.strip() if result.returncode == 0 else ""
 
-    clone_cmd = [
-        "git", "clone",
-        "--depth=1",
-        "--filter=blob:none",
-        "--sparse",
-        JAX_REPO,
-        str(jax_src),
-    ]
-    if git_ref:
-        clone_cmd.insert(-1, f"--branch={git_ref}")
 
-    log.info("Cloning ROCm/jax (ref=%s, sparse) into %s", git_ref or "HEAD", jax_src)
-    subprocess.run(clone_cmd, check=True)
-    subprocess.run(
-        ["git", "sparse-checkout", "set", "tests/", "build/", "jax/"],
-        cwd=jax_src,
-        check=True,
-    )
+def clone_jax_test_sources(jax_src: Path) -> None:
+    """Sparse-check-out tests/ at the commit the installed jax was built from.
+
+    jax records its source commit in jax.version._git_hash; for PyPI releases
+    that is the commit of the jax-v<version> tag. Only tests/ is checked out:
+    pytest runs from the clone root, which puts it on sys.path, so a
+    checked-out jax/ package would shadow the installed jax wheel.
+    """
+    import jax
+
+    commit = getattr(jax.version, "_git_hash", "")
+    log.info("JAX version: %s, git hash: %s", jax.__version__, commit)
+    if not re.fullmatch(r"[0-9a-f]{40}", commit or ""):
+        log.error("jax.version._git_hash is not a commit SHA; "
+                  "cannot match test sources to the installed jax")
+        sys.exit(1)
+
+    if (jax_src / "jax").exists():
+        log.error(
+            "%s contains a jax/ source tree that would shadow the installed "
+            "jax; remove it and rerun", jax_src,
+        )
+        sys.exit(1)
+
+    if (jax_src / ".git").exists():
+        existing = checked_out_commit(jax_src)
+        if existing != commit:
+            log.error(
+                "%s holds JAX test sources at %s, but the installed jax was "
+                "built from %s; remove it and rerun",
+                jax_src, existing or "no commit", commit,
+            )
+            sys.exit(1)
+        log.info("JAX test sources at %s already present in %s", commit, jax_src)
+    elif jax_src.exists() and any(jax_src.iterdir()):
+        log.error("%s exists and is not a git checkout; remove it and rerun", jax_src)
+        sys.exit(1)
+    else:
+        log.info("Fetching JAX test sources at %s (sparse) into %s", commit, jax_src)
+        jax_src.mkdir(parents=True, exist_ok=True)
+        for cmd in (
+            ["git", "init", "-q"],
+            ["git", "remote", "add", "origin", JAX_REPO],
+            ["git", "sparse-checkout", "set", "tests/"],
+            ["git", "fetch", "--depth=1", "--filter=blob:none", "origin", commit],
+            ["git", "checkout", "-q", "FETCH_HEAD"],
+        ):
+            subprocess.run(cmd, cwd=jax_src, check=True)
 
     test_file = jax_src / "tests" / "pmap_test.py"
     if not test_file.exists():
-        log.error("pmap_test.py not found after clone")
+        log.error("pmap_test.py not found in %s", jax_src)
         sys.exit(1)
     log.info("JAX test sources ready: %s", jax_src)
 
@@ -233,6 +254,7 @@ def run_tests(jax_src: Path, results_log: Path) -> tuple[int, dict]:
             text=True,
             bufsize=1,
         )
+        setup_report.tests_started()
         for line in proc.stdout:
             sys.stdout.write(line)
             sys.stdout.flush()
@@ -373,8 +395,10 @@ def main() -> None:
     )
 
     args = parser.parse_args()
+    setup_report.notify(args.notify_email, args.notify_webhook)
 
     # Step 1: Discover RCCL library and all lib dirs in artifacts
+    setup_report.step("Discover RCCL library")
     rccl_lib = find_rccl_library(args.artifact_dir)
     rccl_lib_dir = rccl_lib.parent
     lib_dirs = find_lib_dirs(args.artifact_dir)
@@ -385,21 +409,27 @@ def main() -> None:
         return
 
     # Step 2: Set up library paths and verify override
+    setup_report.step("Set up library paths")
     populate_rocm_lib_dir(lib_dirs)
     setup_ld_library_path(lib_dirs)
     verify_rccl_override(rccl_lib_dir)
 
     # Step 2b: Configure kpack device code loading for TheRock-built RCCL
+    setup_report.step("Install CI-built kpack device code")
     setup_kpack_device_code(args.artifact_dir)
 
     # Step 3: Set XLA environment variables
+    setup_report.step("Set XLA environment")
     setup_xla_environment()
 
     # Step 4: Clone JAX test sources
+    setup_report.step("Clone JAX test sources")
     clone_jax_test_sources(args.jax_src)
 
     # Step 5: Print environment info and run tests
+    setup_report.step("Check JAX devices")
     print_environment_info()
+    setup_report.step("Start pytest")
     exit_code, summary = run_tests(args.jax_src, args.results_log)
 
     # Step 6: Generate and distribute summary report
@@ -414,13 +444,13 @@ def main() -> None:
     status = "PASSED" if exit_code == 0 else "FAILED"
     if args.notify_email:
         send_email_report(report, args.notify_email, status,
-                          subject_prefix="RCCL JAX Collective Test")
+                          subject_prefix=REPORT_SUBJECT)
     if args.notify_webhook:
         send_teams_webhook(report, args.notify_webhook, status,
-                           subject_prefix="RCCL JAX Collective Test")
+                           subject_prefix=REPORT_SUBJECT)
 
     sys.exit(exit_code)
 
 
 if __name__ == "__main__":
-    main()
+    setup_report.run(main)

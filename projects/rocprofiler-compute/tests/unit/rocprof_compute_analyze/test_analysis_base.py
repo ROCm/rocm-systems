@@ -4,10 +4,10 @@
 """Unit tests for src/rocprof_compute_analyze/analysis_base.py."""
 
 import argparse
-import functools
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import common
 import pandas as pd
@@ -24,12 +24,6 @@ PRE_PROCESSING_ARGS = {
     "gpu_id": None,
     "gpu_dispatch_id": None,
 }
-
-
-def record_error_and_exit(errors, *args, **kwargs):
-    """Record a console_error call, then exit like the real one."""
-    errors.append(args)
-    raise SystemExit(1)
 
 
 def test_sanitize_rejects_paths_sharing_a_workload_name(tmp_path, monkeypatch) -> None:
@@ -121,7 +115,7 @@ def test_pre_processing_stdout_creates_no_file(tmp_path, monkeypatch) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("specs_correction", [None, "num_xcd:4"])
+@pytest.mark.parametrize("specs_correction", [None, ["num_xcd:4"]])
 def test_initalize_runs_corrects_specs_only_when_asked(
     tmp_path, monkeypatch, specs_correction
 ) -> None:
@@ -143,7 +137,6 @@ def test_initalize_runs_corrects_specs_only_when_asked(
             normal_unit="per_kernel",
             list_stats=False,
             filter_metrics=None,
-            config_dir=str(tmp_path),
             gpu_kernel=None,
         ),
         {},
@@ -183,62 +176,24 @@ def test_membw_analysis_collected_without_config_attribute() -> None:
     assert inst.membw_analysis_collected() is False
 
 
-@pytest.mark.parametrize(
-    "flag_kwargs, expected_trace",
-    [
-        pytest.param(
-            {
-                "list_torch_operators": True,
-                "list_triton_operators": False,
-                "torch_operator": None,
-                "triton_operator": None,
-            },
-            "--torch-trace",
-            id="list_torch",
-        ),
-        pytest.param(
-            {
-                "list_torch_operators": False,
-                "list_triton_operators": True,
-                "torch_operator": None,
-                "triton_operator": None,
-            },
-            "--triton-trace",
-            id="list_triton",
-        ),
-        pytest.param(
-            {
-                "list_torch_operators": False,
-                "list_triton_operators": False,
-                "torch_operator": None,
-                "triton_operator": ["*matmul*"],
-            },
-            "--triton-trace",
-            id="triton_operator",
-        ),
-    ],
-)
-def test_sanitize_errors_when_operator_flag_without_trace(
-    tmp_path, monkeypatch, flag_kwargs, expected_trace
+def test_sanitize_errors_when_workload_profiled_with_kernel_multiplexing(
+    tmp_path, monkeypatch
 ):
     workload = tmp_path / "app" / "MI300"
     workload.mkdir(parents=True)
     (workload / "profiling_config.yaml").write_text(
-        "torch_trace: false\ntriton_trace: false\nml_api_trace: false\n",
-        encoding="utf-8",
+        "iteration_multiplexing: kernel\n", encoding="utf-8"
     )
-    errors = []
-    monkeypatch.setattr(
-        f"{MODULE}.console_error", functools.partial(record_error_and_exit, errors)
-    )
+    mock_error = common.patch_console(
+        monkeypatch, MODULE, "error", error=Mock(side_effect=SystemExit(1))
+    )["error"]
     with pytest.raises(SystemExit):
         OmniAnalyze_Base(
-            argparse.Namespace(
-                tui=False,
-                path=[[str(workload)]],
-                **flag_kwargs,
-            ),
-            {},
+            argparse.Namespace(tui=False, path=[[str(workload)]]), {}
         ).sanitize()
-    assert "was not profiled" in errors[-1][1]
-    assert expected_trace in errors[-1][1]
+    assert mock_error.call_args.args == (
+        "analysis",
+        'This workload was profiled with "--iteration-multiplexing kernel", '
+        "which is no longer supported. "
+        'Profile it again with "--iteration-multiplexing".',
+    )

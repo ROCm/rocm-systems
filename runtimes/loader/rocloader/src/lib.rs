@@ -3,21 +3,29 @@
 
 //! AMD HSA code-object loading and executable ownership.
 //!
-//! The ELF parser remains independent in `rocelf`. This crate interprets AMD
-//! HSA code objects, builds device-resident images through `rocddi`, and owns
+//! A private, safe ELF module supplies checked byte operations. This crate
+//! interprets AMD HSA code objects, builds device images through `rocddi`, and owns
 //! executable state. Frontends supply device selection, opaque handle IDs,
 //! source URIs, and their public ABI translations.
 
 mod code_object;
+mod elf;
 mod executable;
-mod image;
+mod loaded_image;
+mod target;
+
+#[cfg(test)]
+mod test_support;
 
 pub use code_object::{
-    CodeObject, Symbol, SymbolKind, SymbolLinkage, SymbolTableOrder, Target, VariableAllocation,
-    VariableSegment,
+    CodeObject, CodeObjectContract, FloatRoundingMode, Profile, Symbol, SymbolKind, SymbolLinkage,
+    SymbolTableOrder, Target, VariableAllocation, VariableSegment, supports_target,
 };
 pub use executable::{Definition, Executable, LoadedObject, Scope};
-pub use image::{LoadedImage, LoadedSegment, load_image, loaded_segments};
+pub use loaded_image::{
+    ImagePublication, LoadedImage, LoadedSegment, load_image, load_image_at_address,
+    load_image_with_peers,
+};
 
 /// Failure while parsing, loading, or changing an executable.
 #[derive(Debug)]
@@ -42,13 +50,15 @@ pub enum Error {
     ProgramAlreadyLoaded,
     /// An executable already contains the same symbol in the same scope.
     AlreadyDefined,
+    /// A publication is in progress or its native retirement is uncertain.
+    Busy,
 }
 
-impl From<rocelf::Error> for Error {
-    fn from(error: rocelf::Error) -> Self {
+impl From<elf::Error> for Error {
+    fn from(error: elf::Error) -> Self {
         match error {
-            rocelf::Error::InvalidObject => Self::InvalidObject,
-            rocelf::Error::UndefinedSymbol => Self::UndefinedSymbol,
+            elf::Error::InvalidObject => Self::InvalidObject,
+            elf::Error::UndefinedSymbol => Self::UndefinedSymbol,
         }
     }
 }

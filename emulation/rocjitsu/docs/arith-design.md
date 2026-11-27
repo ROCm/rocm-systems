@@ -1,13 +1,13 @@
-# Rocjitsu Arithmetic Library design
+# rocjitsu Arithmetic Library design
 
-This document describes the Rocjitsu Arithmetic Library (`rj-arith`), located in
+This document describes the rocjitsu Arithmetic Library (`rj-arith`), located in
 [`lib/arith/`](../lib/arith/). It implements GPU arithmetic on a CPU. Its interface follows GPU
 instructions and register layouts; its implementation uses portable C++ and
 CPU-specific SIMD arithmetic.
 
 ## Scope and contract
 
-GETREG/SETREG hardware-register access stays in Rocjitsu’s VM. Its register mapping,
+GETREG/SETREG hardware-register access stays in rocjitsu’s VM. Its register mapping,
 privilege checks, topology, and execution side effects are outside this arithmetic library.
 
 The library is a collection of C entry points mapping one-to-one to GPU instructions.
@@ -28,7 +28,8 @@ arithmetic may raise sticky exception flags.
 
 The library assumes the CPU's default floating-point environment: nearest-even
 rounding, denormal flushing disabled, and exceptions masked. Results are not
-guaranteed to be correct under a nondefault environment.
+guaranteed to be correct under a nondefault environment. The rest of rocjitsu makes
+the same assumption.
 
 The caller explicitly selects the CPU feature level through each entry point's
 `flags` argument, enabling internal SIMD paths such as AVX-512. Instruction calls
@@ -51,7 +52,7 @@ has none. Where no builtin distinguishes different instruction contracts,
 architecture suffixes disambiguate them. Scalar instructions omit wave width.
 
 The C interface constrains the API to a narrow, hermetic surface rather than
-making Rocjitsu a C project. Typed `constexpr` constants work in both languages.
+making rocjitsu a C project. Typed `constexpr` constants work in both languages.
 C++17 header checks always run; C23 checks run only when a compiler probe succeeds.
 Skipping C checks on older toolchains is intentional, including current CI.
 The project itself does not require C23.
@@ -148,18 +149,41 @@ loose arithmetic.
 ### Compatibility mode
 
 Mode 7 is a temporary, instruction-specific policy outside the ordered modes.
-Each entry point selects the arithmetic and FP status policy matching Rocjitsu's
+Each entry point selects the arithmetic and FP status policy matching rocjitsu's
 previous behavior. This can retain instruction-specific details beyond the
 other modes, such as rounding FP16 results before applying OMOD.
-FP32 MUL selects numeric-only exact semantics in every configuration. Its
-integration retains Rocjitsu's existing exception classifier for Compatibility;
-explicit mode 3 uses the library's qualified reporting domain instead.
+FP32 MUL retains rocjitsu's inherited numerical model for Compatibility and reports
+one hardware-fitted exception classifier in every guest mode, shared with explicit
+mode 3 inside its separately qualified reporting domain; gfx1250 MUL keeps the
+inherited range-only classifier because the shared rule has no capture there. Gfx12
+binary arithmetic and selection likewise own their inherited Compatibility causes in
+the library. Their status storage must be valid when these policies report. Gfx1250
+selection has a separate entry-point suffix because its inherited Compatibility
+policy does not report causes.
+
+Overflow and underflow causes for scalar arithmetic and conversions, FP32 MUL and
+FP16 FMA share one rule fitted to gfx1201 captures: the significand is rounded with the
+guest rounding mode and an unbounded exponent, and the result overflows or is tiny by
+that rounding, not by its stored encoding. A product stored as the minimum normal still
+raises UNDERFLOW when the unbounded rounding stays below it.
+
+Gfx12 scalar FP Compatibility computes the inherited numerical result and FP
+status inside the library; the VM commits the destination and raises guest traps.
+For arithmetic and conversion, this inherited reporting does not qualify explicit
+mode 3, which continues to reject unsupported status. Compatibility requires
+valid status storage for these operations, as specified by their declarations.
 Compatibility may retain demonstrated hardware-fidelity improvements over the
 previous interpreter; instruction contracts document such exceptions.
-On RDNA4 the simulator also records invalid inputs to FP32 binary arithmetic
+On RDNA4 the library also records invalid inputs to FP32 binary arithmetic
 and min/max, overflow of FP32 add/subtract before OMOD, and signaling
-floating-point compares on NaN. Dual FP32 arithmetic slots share the wave’s
-exception flags. Explicit numeric-only modes suppress these additional flags.
+floating-point compares on NaN. The comparison library owns the inherited
+Compatibility reporting gate: a nonfinite selected operand enables signaling
+causes across the wave, including denormal pairs in the other Wave64 half.
+The simulator only commits the comparison mask and causes.
+Dual FP32 arithmetic slots share the wave's exception flags. Gfx12 dual MUL
+owns its inherited FMA-style Compatibility classifier inside the library,
+including guest rounding and denormal controls; its VM adapter commits only
+results and causes. Explicit numeric-only modes suppress these additional flags.
 Rocjitsu's [`arithmetic.semantics`](configuration.md#cpu-arithmetic-policy)
 setting maps directly to these modes and defaults to compatibility. Its string
 values are the lowercase constant names without `RJ_ARITH_SEMANTICS_`.
@@ -207,7 +231,7 @@ implement the same instruction contracts. This small duplication keeps those
 hardware-specific policies under the arithmetic library's ownership.
 
 
-Exact arithmetic follows validated Rocjitsu models or simple ISA-defined behavior.
+Exact arithmetic follows validated rocjitsu models or simple ISA-defined behavior.
 Sources and evidence stay beside the code and tests; optimizing a model does not
 establish that it matches hardware.
 
@@ -215,6 +239,61 @@ SIMD and scalar paths implement the same contract. Scalar fallbacks handle value
 outside a fast path without unnecessarily discarding SIMD work for other lanes.
 Reporting and non-reporting modes share arithmetic, with FP status calculations
 performed only when requested. EXEC masks generally control stores, not computation.
+
+### When a speedup justifies more code
+
+An extra code path must earn its size and complexity through speedup. The same
+trade-off applies within a path, for example when unrolling a loop.
+
+#### CPU paths
+
+`RJ_ARITH_CPU_*` paths implement equivalent behavior. Always keep
+`RJ_ARITH_CPU_BASELINE` as a simple reference for even the oldest supported
+CPUs. Its speed is secondary, and it never needs extra complexity for speed.
+
+Benchmark each additional path against the implementation dispatch would select
+without it, on the same host with the same inputs and requested semantics. If
+a Zen 4 host would fall back to V3 for that entry point, compare against V3.
+
+Run `rj_arith_benchmark > results.csv` to obtain the measurements. The CSV's
+`Speedup` column compares against scalar, not against the path being replaced.
+For a V4 path that otherwise falls back to V3, divide V3 `ns/wave` by V4
+`ns/wave`, matching the instruction, requested semantics, variant and input kind.
+A V4 speedup above 1.2x against scalar does not establish a 1.2x gain over V3.
+
+Use these thresholds as guidelines. Raise borderline cases and exceptions for
+discussion.
+
+- **Dense WMMA/MFMA and other typically performance-critical instructions.**
+  Unless a different threshold applies, generally omit paths below 1.1x speedup,
+  discuss 1.1x through 1.2x, and keep paths above 1.2x.
+- **Sparse WMMA/MFMA.** Less frequent use raises the discussion range to
+  1.2x–1.4x. For both dense and sparse WMMA/MFMA, the thresholds apply across
+  element types and tile shapes.
+- **Other instructions.** Adjust the threshold to the instruction's importance
+  in real workloads. For rarely performance-critical operations such as sine
+  and cosine, use at least 2x.
+
+`RJ_ARITH_CPU_X86_64_V3` is the effective baseline for many older CPUs. With
+no feature level between V3 and baseline x86-64, V3 should readily clear the
+usual thresholds.
+
+`RJ_ARITH_CPU_X86_64_V4` plays a narrower role between V3 and
+`RJ_ARITH_CPU_X86_64_ZEN4`. Use V4 when it lets older CPUs run the same
+AVX-512 code. Require Zen 4 features when they help. Keeping both paths for
+the same instruction and semantics should be rare and warrants discussion.
+
+#### Semantics paths
+
+A stricter implementation already satisfies the looser semantics contract, so a
+separate looser path must justify its cost with a speedup. Benchmark the same
+request with and without the looser path, applying the same instruction-specific
+thresholds used for CPU paths. Share common arithmetic when both paths earn
+their place.
+
+To isolate the gain from looser semantics, compare reasonably optimized paths
+at the same CPU feature level. If dispatch falls back to a different level,
+the measured gain includes both CPU specialization and the change in semantics.
 
 ## Testing
 

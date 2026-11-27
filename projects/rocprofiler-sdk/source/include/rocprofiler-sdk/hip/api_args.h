@@ -3711,6 +3711,62 @@ typedef union rocprofiler_hip_api_args_t
         hipStream_t                stream;
     } hipMemcpy3DWithAttributesAsync;
 #endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 41
+    struct
+    {
+        hipArraySparseProperties* sparseProperties;
+        hipArray_t                array;
+    } hipArrayGetSparseProperties;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 42
+    struct
+    {
+        hipGraphNode_t node;
+        unsigned int*  nodeId;
+    } hipGraphNodeGetLocalId;
+
+    struct
+    {
+        hipGraphNode_t      node;
+        unsigned long long* toolsId;
+    } hipGraphNodeGetToolsId;
+
+    struct
+    {
+        hipGraph_t    graph;
+        unsigned int* graphId;
+    } hipGraphGetId;
+
+    struct
+    {
+        hipGraphExec_t graphExec;
+        unsigned int*  graphId;
+    } hipGraphExecGetId;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 43
+    struct
+    {
+        int*                pi;
+        hipExecAffinityType type;
+        hipDevice_t         dev;
+    } hipDeviceGetExecAffinitySupport;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 44
+    struct
+    {
+        hipArray_t*  pPlaneArray;
+        hipArray_t   hArray;
+        unsigned int planeIdx;
+    } hipArrayGetPlane;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 45
+    struct
+    {
+        hipArrayMemoryRequirements* memoryRequirements;
+        hipArray_t                  array;
+        hipDevice_t                 device;
+    } hipArrayGetMemoryRequirements;
+#endif
 } rocprofiler_hip_api_args_t;
 
 ROCPROFILER_EXTERN_C_FINI

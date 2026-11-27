@@ -9,7 +9,9 @@
 #include "common/packed16.h"
 #include "dot/dot.h"
 #include "rj_arith/detail/rj_arith_wmma.h"
+#include "wmma/flags.h"
 #include "wmma/sparse_layout.h"
+#include "wmma/swmmac_exact16.h"
 #include "wmma/swmmac_float_impl.h"
 
 #include <stdint.h>
@@ -24,93 +26,69 @@ namespace {
   return rocjitsu::arith::as_float(rocjitsu::arith::as_bits(value) & 0xffff0000U);
 }
 
-// Accumulate a sparse FP16/BF16 tile into D with resolved semantics.
-// Requires valid increasing 2:4 metadata pairs; inputs may overlap D.
-// Validation errors leave D unchanged.
+// Exact scalar gfx12 FP16/BF16 SWMMAC fallback; out-of-line so SIMD dispatchers
+// avoid stack-frame setup on the hot path.
 template <bool Bf16, int WaveSize, bool Packed>
-int swmmac(uint64_t flags, uint32_t mode, uint32_t *const *d, const uint32_t *const *a,
-           const uint32_t *const *b, const uint32_t *const *index) {
-  const uint32_t known =
-      rocjitsu::arith::kWmmaInstructionFlags | rocjitsu::arith::SwmmacIndex<16, 32, WaveSize>::mask;
-  if (int error =
-          rocjitsu::arith::validate(flags, mode & ~known, rocjitsu::arith::kMatrixIgnoredFpFlags)) {
-    return error;
-  }
-  // The shared kernels store 32-lane register sections. Packed Wave64
-  // uses two physical VGPRs; FP32 Wave64 uses four.
-  uint32_t *dest[Packed ? 4 : 8];
-  for (int reg = 0; reg < (Packed ? 4 : 8); ++reg) {
-    constexpr int count = Packed ? 2 : 4;
-    dest[reg] = WaveSize == 64 ? d[reg % count] + 32 * (reg / count) : d[reg];
-  }
-  // Inherited rocjitsu sparse model: four DOT4 steps in compressed K order,
-  // narrowing packed accumulators at each step. B negation follows compressed
-  // pair position, irrespective of the selected dense element's parity.
-  if (rocjitsu::arith::is_exact(flags)) {
-    uint32_t result[Packed ? 4 : 8][32] = {};
-    int key = rocjitsu::arith::SwmmacIndex<16, 32, WaveSize>::shift(mode);
-    for (int row = 0; row < 16; ++row) {
-      for (int col = 0; col < 16; ++col) {
-        int reg = row % 8, lane = col + 16 * (row / 8);
-        uint32_t acc = Packed ? uint16_t(dest[reg / 2][lane] >> (16 * (reg % 2))) : dest[reg][lane];
-        // Borrowed gfx1201 sparse model: apply ABS before NEG to tied C.
-        if (mode & RJ_ARITH_WMMA_ABS_C) {
-          acc &= Packed ? 0x7fffU : 0x7fffffffU;
-        }
-        if (mode & RJ_ARITH_WMMA_NEG_C) {
-          acc ^= Packed ? 0x8000U : 0x80000000U;
-        }
-        for (int stage = 0; stage < 4; ++stage) {
-          uint16_t left[4], right[4];
-          for (int i = 0; i < 4; ++i) {
-            int ck = 4 * stage + i, slot = ck % 2;
-            left[i] = uint16_t(rocjitsu::arith::swmmac_a_field<16, WaveSize>(row, ck).read(a));
-            if (mode & (slot ? RJ_ARITH_WMMA_NEG_HI_A : RJ_ARITH_WMMA_NEG_LO_A)) {
-              left[i] ^= 0x8000;
-            }
-            int k = rocjitsu::arith::swmmac_selected_k<16, WaveSize>(index, row, ck, key);
-            right[i] = uint16_t(rocjitsu::arith::swmmac_b_bits<16, WaveSize>(b, col, k));
-            if (mode & (slot ? RJ_ARITH_WMMA_NEG_HI_B : RJ_ARITH_WMMA_NEG_LO_B)) {
-              right[i] ^= 0x8000;
-            }
+[[gnu::noinline]] void swmmac16_exact_scalar(uint64_t flags, uint32_t mode, uint32_t *const *dest,
+                                             const uint32_t *const *a, const uint32_t *const *b,
+                                             const uint32_t *const *index) {
+  uint32_t result[Packed ? 4 : 8][32] = {};
+  int key = rocjitsu::arith::SwmmacIndex<16, 32, WaveSize>::shift(mode);
+  for (int row = 0; row < 16; ++row) {
+    for (int col = 0; col < 16; ++col) {
+      int reg = row % 8, lane = col + 16 * (row / 8);
+      uint32_t acc = Packed ? uint16_t(dest[reg / 2][lane] >> (16 * (reg % 2))) : dest[reg][lane];
+      // Borrowed gfx1201 sparse model: apply ABS before NEG to tied C.
+      if (mode & RJ_ARITH_WMMA_ABS_C) {
+        acc &= Packed ? 0x7fffU : 0x7fffffffU;
+      }
+      if (mode & RJ_ARITH_WMMA_NEG_C) {
+        acc ^= Packed ? 0x8000U : 0x80000000U;
+      }
+      for (int stage = 0; stage < 4; ++stage) {
+        uint16_t left[4], right[4];
+        for (int i = 0; i < 4; ++i) {
+          int ck = 4 * stage + i, slot = ck % 2;
+          left[i] = uint16_t(rocjitsu::arith::swmmac_a_field<16, WaveSize>(row, ck).read(a));
+          if (mode & (slot ? RJ_ARITH_WMMA_NEG_HI_A : RJ_ARITH_WMMA_NEG_LO_A)) {
+            left[i] ^= 0x8000;
           }
-          if constexpr (Packed) {
-            acc = rocjitsu::arith::packed16::widen<Bf16>(uint16_t(acc));
+          int k = rocjitsu::arith::swmmac_selected_k<16, WaveSize>(index, row, ck, key);
+          right[i] = uint16_t(rocjitsu::arith::swmmac_b_bits<16, WaveSize>(b, col, k));
+          if (mode & (slot ? RJ_ARITH_WMMA_NEG_HI_B : RJ_ARITH_WMMA_NEG_LO_B)) {
+            right[i] ^= 0x8000;
           }
-          acc = rocjitsu::arith::gfx12_dot_bits<Bf16, 4, Packed>(left, right, acc,
-                                                                 flags & RJ_ARITH_FP16_OVFL);
         }
         if constexpr (Packed) {
-          result[reg / 2][lane] |= acc << (16 * (reg % 2));
-        } else {
-          result[reg][lane] = acc;
+          acc = rocjitsu::arith::packed16::widen<Bf16>(uint16_t(acc));
         }
+        acc = rocjitsu::arith::gfx12_dot_bits<Bf16, 4, Packed>(left, right, acc,
+                                                               flags & RJ_ARITH_FP16_OVFL);
+      }
+      if constexpr (Packed) {
+        result[reg / 2][lane] |= acc << (16 * (reg % 2));
+      } else {
+        result[reg][lane] = acc;
       }
     }
-    // Read all input and tied C/D values before any potentially aliasing stores.
-    for (int reg = 0; reg < (Packed ? 4 : 8); ++reg) {
-      for (int lane = 0; lane < 32; ++lane) {
-        dest[reg][lane] = result[reg][lane];
-      }
-    }
-    return RJ_ARITH_SUCCESS;
   }
-  // Decode once for loose scalar/SIMD accumulation; snapshot tied D as C.
+  // Read all input and tied C/D values before any potentially aliasing stores.
+  for (int reg = 0; reg < (Packed ? 4 : 8); ++reg) {
+    for (int lane = 0; lane < 32; ++lane) {
+      dest[reg][lane] = result[reg][lane];
+    }
+  }
+}
+
+// Loose scalar gfx12 FP16/BF16 SWMMAC fallback; out-of-line so SIMD dispatchers
+// avoid 5 KB stack frames on the hot path.
+template <bool Bf16, int WaveSize, bool Packed>
+[[gnu::noinline]] void swmmac16_loose_scalar(uint32_t mode, bool saturate, uint32_t *const *dest,
+                                             const uint32_t *const *a, const uint32_t *const *b,
+                                             const uint32_t *const *index) {
+  // Decode the inputs for scalar accumulation; snapshot tied D as C.
   rocjitsu::arith::SwmmacFloatInputs input;
   rocjitsu::arith::swmmac16_prepare<Bf16, WaveSize, Packed>(input, mode, dest, a, b, index);
-  bool saturate = (flags & RJ_ARITH_FP16_OVFL) != 0;
-#if defined(RJ_ARITH_HAVE_X86_64_V4)
-  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
-    rocjitsu::arith::swmmac_float_x86_64_v4<Bf16, Packed>(mode, dest, input, saturate);
-    return RJ_ARITH_SUCCESS;
-  }
-#endif
-#if defined(RJ_ARITH_HAVE_X86_64_V3)
-  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
-    rocjitsu::arith::swmmac_float_x86_64_v3<Bf16, Packed>(mode, dest, input, saturate);
-    return RJ_ARITH_SUCCESS;
-  }
-#endif
   if constexpr (Packed) {
     for (int row = 0; row < 16; ++row) {
       for (int col = 0; col < 16; ++col) {
@@ -145,6 +123,62 @@ int swmmac(uint64_t flags, uint32_t mode, uint32_t *const *d, const uint32_t *co
       dest[reg][lane] = result[reg][lane];
     }
   }
+}
+
+// Accumulate a sparse FP16/BF16 tile into D with resolved semantics.
+// Requires valid increasing 2:4 metadata pairs; inputs may overlap D.
+// Validation errors leave D unchanged.
+template <bool Bf16, int WaveSize, bool Packed>
+int swmmac(uint64_t flags, uint32_t mode, uint32_t *const *d, const uint32_t *const *a,
+           const uint32_t *const *b, const uint32_t *const *index) {
+  const uint32_t known =
+      rocjitsu::arith::kWmmaInstructionFlags | rocjitsu::arith::SwmmacIndex<16, 32, WaveSize>::mask;
+  if (int error =
+          rocjitsu::arith::validate(flags, mode & ~known, rocjitsu::arith::kMatrixIgnoredFpFlags)) {
+    return error;
+  }
+  // The shared kernels store 32-lane register sections. Packed Wave64
+  // uses two physical VGPRs; FP32 Wave64 uses four.
+  uint32_t *dest[Packed ? 4 : 8];
+  for (int reg = 0; reg < (Packed ? 4 : 8); ++reg) {
+    constexpr int count = Packed ? 2 : 4;
+    dest[reg] = WaveSize == 64 ? d[reg % count] + 32 * (reg / count) : d[reg];
+  }
+  // Inherited rocjitsu sparse model: four DOT4 steps in compressed K order,
+  // narrowing packed accumulators at each step. B negation follows compressed
+  // pair position, irrespective of the selected dense element's parity.
+  if (rocjitsu::arith::is_exact(flags)) {
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+    if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+      rocjitsu::arith::swmmac_exact16_x86_64_v4<Bf16, WaveSize, Packed>(
+          mode, (flags & RJ_ARITH_FP16_OVFL) != 0, dest, a, b, index);
+      return RJ_ARITH_SUCCESS;
+    }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+    if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+      rocjitsu::arith::swmmac_exact16_x86_64_v3<Bf16, WaveSize, Packed>(
+          mode, (flags & RJ_ARITH_FP16_OVFL) != 0, dest, a, b, index);
+      return RJ_ARITH_SUCCESS;
+    }
+#endif
+    swmmac16_exact_scalar<Bf16, WaveSize, Packed>(flags, mode, dest, a, b, index);
+    return RJ_ARITH_SUCCESS;
+  }
+  bool saturate = (flags & RJ_ARITH_FP16_OVFL) != 0;
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+    rocjitsu::arith::swmmac16_x86_64_v4<Bf16, WaveSize, Packed>(mode, dest, a, b, index, saturate);
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+    rocjitsu::arith::swmmac16_x86_64_v3<Bf16, WaveSize, Packed>(mode, dest, a, b, index, saturate);
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
+  swmmac16_loose_scalar<Bf16, WaveSize, Packed>(mode, saturate, dest, a, b, index);
   return RJ_ARITH_SUCCESS;
 }
 

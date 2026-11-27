@@ -44,8 +44,6 @@
 #include <cassert>
 #include <chrono>
 #include <thread>
-#include <condition_variable>
-#include <mutex>
 #include <cstring>
 #include <optional>
 #include <regex>
@@ -126,6 +124,7 @@ namespace core {
 bool g_use_interrupt_wait;
 bool g_use_mwaitx;
 bool g_use_yielding_poll;
+bool g_use_clflushopt;
 Runtime* Runtime::runtime_singleton_ = NULL;
 
 hsa_status_t Runtime::Acquire() {
@@ -1140,8 +1139,10 @@ hsa_status_t Runtime::VMemoryPtrInfo(const void* ptr, hsa_amd_pointer_info_t* in
         ptr) {
       /* Allocation found */
       info->type = HSA_EXT_POINTER_TYPE_HSA_VMEM;
-      info->agentBaseAddress = const_cast<void*>(ptr);
-      info->hostBaseAddress = const_cast<void*>(ptr);
+      // Report the mapping the pointer lies in, as for other allocations: callers pair the base
+      // with sizeInBytes, so an interior pointer must not be reported as the base.
+      info->agentBaseAddress = const_cast<void*>(mappedHandleIt->first);
+      info->hostBaseAddress = const_cast<void*>(mappedHandleIt->first);
       info->sizeInBytes = mappedHandleIt->second.size;
       info->registered = true;
 
@@ -2096,111 +2097,6 @@ hsa_status_t Runtime::IPCDetach(void* ptr) {
   return HSA_STATUS_SUCCESS;
 }
 
-namespace {
-// Nap ceiling (microseconds) for polling while interrupts are available: used by
-// the poll sentinel, and by AsyncEventsLoop when the sentinel thread cannot start.
-constexpr int kInterruptPollNapCeilingUs = 200;
-
-// Watches async signals that have no KFD event (IPC signals, DefaultSignals,
-// or interrupt signals created after the KFD events ran out) while the
-// async-events thread sleeps in the KFD wait on the interrupt-backed signals.
-// When one of them meets its condition it notifies the wake signal, the same
-// way SetAsyncSignalHandler() does, and the async-events thread then rescans
-// and runs the handler as usual. The entries are only read while armed; the
-// async-events thread disarms under the lock before it touches the list again.
-class PollSentinel {
- public:
-  struct Entry {
-    hsa_signal_t signal;
-    hsa_signal_condition_t cond;
-    hsa_signal_value_t value;
-  };
-
-  explicit PollSentinel(hsa_signal_t wake) : wake_(wake) {}
-
-  ~PollSentinel() {
-    {
-      std::lock_guard<std::mutex> lock(mutex_);
-      exit_ = true;
-    }
-    cv_.notify_one();
-    if (thread_.joinable()) thread_.join();
-  }
-
-  // False if the sentinel thread could not be started; the caller then polls.
-  bool Usable() const { return !failed_; }
-
-  bool Arm(std::vector<Entry>& entries) {
-    if (entries.empty()) return true;
-    if (!thread_.joinable()) {
-      try {
-        thread_ = std::thread([this] { Loop(); });
-      } catch (...) {
-        failed_ = true;
-        return false;
-      }
-    }
-    {
-      std::lock_guard<std::mutex> lock(mutex_);
-      entries_.swap(entries);
-      armed_ = true;
-      ++generation_;
-    }
-    cv_.notify_one();
-    return true;
-  }
-
-  void Disarm() {
-    {
-      std::lock_guard<std::mutex> lock(mutex_);
-      armed_ = false;
-    }
-    cv_.notify_one();
-  }
-
- private:
-  void Loop() {
-    std::unique_lock<std::mutex> lock(mutex_);
-    while (!exit_) {
-      cv_.wait(lock, [this] { return exit_ || armed_; });
-      // Each arming starts the nap at the floor again; the nap waits on the
-      // condition variable so Arm/Disarm cut it short.
-      uint64_t gen = generation_;
-      int nap_us = kPollNapFloorUs;
-      while (armed_ && !exit_) {
-        if (generation_ != gen) {
-          gen = generation_;
-          nap_us = kPollNapFloorUs;
-        }
-        // Held across the scan on purpose: after Disarm() returns, AsyncEventsLoop may
-        // Release() these signals, and Arm() swaps entries_ under the same lock.
-        for (const auto& e : entries_) {
-          if (CheckSignalCondition(hsa_signal_handle(e.signal)->LoadRelaxed(), e.cond, e.value)) {
-            armed_ = false;
-            hsa_signal_handle(wake_)->StoreReleaseAndNotify(1);
-            break;
-          }
-        }
-        if (!armed_) break;
-        cv_.wait_for(lock, std::chrono::microseconds(nap_us),
-                     [this, gen] { return exit_ || !armed_ || generation_ != gen; });
-        nap_us = NextPollNapUs(nap_us, kInterruptPollNapCeilingUs);
-      }
-    }
-  }
-
-  hsa_signal_t wake_;
-  std::mutex mutex_;
-  std::condition_variable cv_;
-  std::vector<Entry> entries_;
-  uint64_t generation_ = 0;
-  bool armed_ = false;
-  bool exit_ = false;
-  bool failed_ = false;
-  std::thread thread_;
-};
-}  // namespace
-
 void Runtime::AsyncEventsLoop(void* _eventsInfo) {
   AsyncEventsInfo* eventsInfo = reinterpret_cast<AsyncEventsInfo*>(_eventsInfo);
 
@@ -2212,10 +2108,6 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
   auto& event_age_map = eventsInfo->events.age_by_event_;
   uint32_t unique_evts = 0;
   auto hsa_signals = reinterpret_cast<hsa_signal_handle*>(&async_events_.signal_[0]);
-  // Signals of the current batch that have no KFD event.
-  std::vector<size_t> poll_only;
-  std::vector<PollSentinel::Entry> sentinel_entries;
-  PollSentinel sentinel(async_events_control_.wake);
 
   auto processEvent = [&](size_t index, hsa_signal_value_t value, bool wait_any) {
     // No error or timeout occured, process the handlers
@@ -2237,9 +2129,9 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
   // Prepares a list of events for a wait inside KFD
   auto PrepareInterrupt = [&](size_t idx) {
     HsaEvent* hsa_event = hsa_signals[idx]->EopEvent();
-    // A signal without a KFD event stays out of the KFD wait list; the caller
-    // collects it in poll_only.
+    // If any signal doesn't have an interrupt, then switch to polling
     if (hsa_event == nullptr) {
+      unique_evts = 0;
       return false;
     } else {
       if (hsa_events.size() <= unique_evts) {
@@ -2334,7 +2226,6 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
         }
         bool interrupt_wait = false;
         unique_evts = 0;
-        poll_only.clear();
 
         // Check remaining signals before sleeping.
         for (size_t i = index; i < async_events_.Size(); i++) {
@@ -2356,20 +2247,15 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
           // If the current signal isn't complete and polling is disabled, then prepare KFD wait for
           // an interrupt
           if (!finish && !polling) {
-            if (!PrepareInterrupt(i)) poll_only.push_back(i);
+            interrupt_wait = PrepareInterrupt(i);
+            // If the interrupt was disabled, then force polling
+            if (!interrupt_wait) {
+              polling = true;
+              finish = false;
+            }
           } else if (unique_evts > 0) {
             unique_evts = 0;
-          }
-        }
-        // Wait in KFD on the interrupt-backed signals while the poll sentinel
-        // watches the others. If the sentinel thread could not be started, poll
-        // all of them instead.
-        if (!finish && !polling) {
-          if (unique_evts > 0 && (poll_only.empty() || sentinel.Usable())) {
-            interrupt_wait = true;
-          } else if (unique_evts > 0 || !poll_only.empty()) {
-            polling = true;
-            unique_evts = 0;
+            interrupt_wait = false;
           }
         }
         // If nothing was complete and an interrupt wait was requested, then call KFD
@@ -2412,16 +2298,7 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
             }
 
             if (!finish) {
-              sentinel_entries.clear();
-              for (size_t p : poll_only)
-                sentinel_entries.push_back(
-                    {async_events_.signal_[p], async_events_.cond_[p], async_events_.value_[p]});
-              // If the sentinel cannot start, skip the KFD wait; the next pass
-              // sees Usable() == false and polls.
-              if (sentinel.Arm(sentinel_entries)) {
-                WaitForInterrupt();
-                sentinel.Disarm();
-              }
+              WaitForInterrupt();
             }
 
             for (size_t e = 0; e < async_events_.Size(); e++) {
@@ -2430,10 +2307,10 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
             }
             break;
           }
-        } else if (polling && !finish) {
-          // No interrupt-backed event is available for the pending signals --
-          // on the WSL/dxg thunk that is every signal, since it implements no
-          // KFD events at all.
+        } else if (polling && !finish && !g_use_interrupt_wait) {
+          // No interrupt-backed event is available for at least one pending
+          // signal (PrepareInterrupt forced polling) -- on the WSL/dxg thunk
+          // that is every signal, since it implements no KFD events at all.
           // Without a sleep this loop monopolizes a CPU core re-scanning the
           // signal values for the whole lifetime of the async-events thread,
           // idle or not; the two async-events threads cost ~2 cores in every
@@ -2444,12 +2321,9 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
           // observation latency while a long-lived idle wait costs almost no
           // CPU. The nap is re-initialized at the outer-loop boundary (see
           // poll_nap_us above), so the escalation only compounds within a
-          // single idle wait batch. With interrupts available this branch is only
-          // reached when the poll sentinel thread could not be started, and the
-          // nap is capped at kInterruptPollNapCeilingUs instead of spinning.
+          // single idle wait batch.
           os::uSleep(poll_nap_us);
-          poll_nap_us = NextPollNapUs(
-              poll_nap_us, g_use_interrupt_wait ? kInterruptPollNapCeilingUs : kPollNapCeilingUs);
+          poll_nap_us = NextPollNapUs(poll_nap_us, kPollNapCeilingUs);
         }
       }
     }
@@ -2948,6 +2822,7 @@ Runtime::Runtime()
   g_use_interrupt_wait = true;
   g_use_mwaitx = true;
   g_use_yielding_poll = false;
+  g_use_clflushopt = false;
   ::_amdgpu_r_debug = {11, nullptr, reinterpret_cast<uintptr_t>(&_loader_debug_state),
                        r_debug::RT_CONSISTENT, 0};
   log_file = stderr;
@@ -2967,6 +2842,16 @@ hsa_status_t Runtime::Load() {
 
   flag_.Refresh();
 
+  if (flag_.device_mem_no_host_access()) {
+    log_warning_n(1,
+                  "HSA_DEVICE_MEM_NO_HOST_ACCESS is set: CPU access to GPU device memory will "
+                  "fault\n");
+    if (rocr::Flag::IsEnvVarTruthy("HSA_USE_UDMABUF"))
+      log_warning_n(1,
+                    "HSA_USE_UDMABUF is ignored for device-local memory when "
+                    "HSA_DEVICE_MEM_NO_HOST_ACCESS is set\n");
+  }
+
   thunkLoader_ = new ThunkLoader();
   thunkLoader_->LoadThunkApiTable();
 
@@ -2983,6 +2868,7 @@ hsa_status_t Runtime::Load() {
   g_use_interrupt_wait = flag_.enable_interrupt();
   g_use_mwaitx = flag_.check_mwaitx(cpuinfo.mwaitx);
   g_use_yielding_poll = flag_.enable_yielding_poll();
+  g_use_clflushopt = cpuinfo.clflushopt;
 
   if (!AMD::Load()) {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
@@ -4912,8 +4798,7 @@ Runtime::MemoryHandle::MemoryHandle(const MemoryRegion* region, uint64_t flags_u
       imported(false),
       is_fabric_handle(false),
       alloc_flag(alloc_flag),
-      drm_owner(nullptr),
-      import_info_queried(false) {
+      drm_owner(nullptr) {
   assert(driver_handle.handle != 0);
 }
 
@@ -4925,8 +4810,23 @@ Runtime::MemoryHandle::MemoryHandle(int dmabuf_fd)
       imported(true),
       is_fabric_handle(false),
       alloc_flag(MemoryRegion::AllocateNoFlags),
-      drm_owner(nullptr),
-      import_info_queried(false) {}
+      drm_owner(nullptr) {
+  /* Caller holds memory_lock_. Ask each agent driver in turn and take the first
+   * that recognizes the fd. AgentDriver(KFD) is not used because it throws when
+   * no KFD driver is present. alloc_flag stays AllocateNoFlags: the dmabuf carries
+   * no memory-type metadata. */
+  if (driver_handle.dmabuf_fd < 0) return;
+
+  core::Runtime* runtime = core::Runtime::runtime_singleton_;
+  core::DmaBufInfo info = {};
+  for (auto& driver : runtime->AgentDrivers()) {
+    if (driver->QueryDmaBufInfo(driver_handle.dmabuf_fd, &info) == HSA_STATUS_SUCCESS) {
+      region = runtime->ResolveImportedRegion(info);
+      driver_handle.size = info.size;
+      return;
+    }
+  }
+}
 
 Runtime::MemoryHandle::MemoryHandle(hsa_fabric_handle_t fabric_handle)
     : region(nullptr),
@@ -4936,8 +4836,7 @@ Runtime::MemoryHandle::MemoryHandle(hsa_fabric_handle_t fabric_handle)
       imported(true),
       is_fabric_handle(true),
       alloc_flag(MemoryRegion::AllocateNoFlags),
-      drm_owner(nullptr),
-      import_info_queried(false) {}
+      drm_owner(nullptr) {}
 
 Runtime::MemoryHandle::~MemoryHandle() {
   if (driver_handle.handle != 0) {
@@ -5201,30 +5100,6 @@ const core::MemoryRegion* Runtime::ResolveImportedRegion(const core::DmaBufInfo&
   return system_regions_fine_[0].get();
 }
 
-/* Recover an imported handle's placement and size from its dmabuf and cache it in
- * the handle's own fields. Ask each agent driver in turn and take the first that
- * recognizes the fd; AgentDriver(KFD) is not used because it throws when no KFD
- * driver is present. A buffer the driver cannot describe is marked queried so the
- * ioctl is not repeated. Caller must hold memory_lock_. */
-void Runtime::EnsureImportInfo(MemoryHandle* memoryHandle) {
-  if (!memoryHandle->imported || memoryHandle->import_info_queried) return;
-  memoryHandle->import_info_queried = true;
-
-  if (memoryHandle->driver_handle.dmabuf_fd < 0) return;
-
-  core::DmaBufInfo info = {};
-  for (auto& driver : AgentDrivers()) {
-    if (driver->QueryDmaBufInfo(memoryHandle->driver_handle.dmabuf_fd, &info) ==
-        HSA_STATUS_SUCCESS) {
-      memoryHandle->region = ResolveImportedRegion(info);
-      memoryHandle->driver_handle.size = info.size;
-      /* alloc_flag stays AllocateNoFlags: the dmabuf carries no memory-type
-       * metadata, and the exporter may legitimately have used MEMORY_TYPE_NONE. */
-      return;
-    }
-  }
-}
-
 hsa_status_t Runtime::VMemoryImportShareableHandle(int dmabuf_fd,
                                                    hsa_amd_vmem_alloc_handle_t* memoryOnlyHandle) {
   /* The per-GPU import of this dmabuf is deferred until hsa_amd_vmem_set_access is called, but the
@@ -5234,8 +5109,8 @@ hsa_status_t Runtime::VMemoryImportShareableHandle(int dmabuf_fd,
   int owned_fd = os::DmaBufDup(dmabuf_fd);
   if (owned_fd < 0) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
-  /* Placement is not recovered here: importers that never query it should not pay
-   * for an ioctl. EnsureImportInfo does it on the first query that needs it. */
+  /* memory_lock_ is held across construction. The dmabuf constructor queries the
+   * fd for its owning region, which requires that lock. */
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
   auto memoryHandle = std::make_unique<MemoryHandle>(owned_fd);
   *memoryOnlyHandle = MemoryHandle::Convert(memoryHandle.get());
@@ -5306,8 +5181,6 @@ hsa_status_t Runtime::VMemoryGetAllocPropertiesFromHandle(hsa_amd_vmem_alloc_han
   MemoryHandle* memoryHandle = FindMemoryHandle(MemoryHandle::Convert(allocHandle));
   if (memoryHandle == nullptr) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
 
-  EnsureImportInfo(memoryHandle);
-
   const MemoryRegion* region = memoryHandle->region;
   *mem_region = region;
   *type = (region != nullptr && (memoryHandle->alloc_flag & core::MemoryRegion::AllocatePinned))
@@ -5337,7 +5210,6 @@ hsa_status_t Runtime::VMemoryGetHandleInfo(hsa_amd_vmem_alloc_handle_t allocHand
   MemoryHandle* memoryHandle = FindMemoryHandle(MemoryHandle::Convert(allocHandle));
   if (memoryHandle == nullptr) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
 
-  EnsureImportInfo(memoryHandle);
   const MemoryRegion* region = memoryHandle->region;
 
   /* An unresolved import has no agent to report, and succeeding would hand back a

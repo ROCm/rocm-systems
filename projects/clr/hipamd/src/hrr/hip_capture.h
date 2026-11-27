@@ -21,7 +21,7 @@
 
 namespace hrr_cap {
 
-// 128-bit hash (FNV-1a variant) — return type of write_blob / write_code_object
+// 128-bit content hash — return type of write_blob / write_code_object.
 struct Hash128 {
   uint64_t lo;
   uint64_t hi;

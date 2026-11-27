@@ -445,3 +445,27 @@ int rj_arith_s_brev_b64(uint64_t flags, uint64_t instruction_flags, uint64_t *d,
   *d = result;
   return RJ_ARITH_SUCCESS;
 }
+
+// Combine a with the complement of b; SCC is result != 0.
+int rj_arith_s_andn2_b32(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
+                         uint32_t b, uint32_t *scc) {
+  return rj_arith_s_and_not1_b32(flags, instruction_flags, d, a, b, scc);
+}
+
+// Combine a with the complement of b; SCC is result != 0.
+int rj_arith_s_orn2_b32(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
+                        uint32_t b, uint32_t *scc) {
+  return rj_arith_s_or_not1_b32(flags, instruction_flags, d, a, b, scc);
+}
+
+// Combine a with the complement of b; SCC is result != 0.
+int rj_arith_s_andn2_b64(uint64_t flags, uint64_t instruction_flags, uint64_t *d, uint64_t a,
+                         uint64_t b, uint32_t *scc) {
+  return rj_arith_s_and_not1_b64(flags, instruction_flags, d, a, b, scc);
+}
+
+// Combine a with the complement of b; SCC is result != 0.
+int rj_arith_s_orn2_b64(uint64_t flags, uint64_t instruction_flags, uint64_t *d, uint64_t a,
+                        uint64_t b, uint32_t *scc) {
+  return rj_arith_s_or_not1_b64(flags, instruction_flags, d, a, b, scc);
+}

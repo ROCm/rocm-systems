@@ -6,6 +6,8 @@
 //! Command bytes remain in caller-owned device memory. This owner carries only
 //! the native submission context and its bounded progress state; packet
 //! encoding, public handles, and submission policy belong to the frontend.
+//! Retirement closes admission for new submissions; completion queries,
+//! waits, and native destruction remain available for accepted work.
 
 use crate::device::gpu::GpuDevice;
 use crate::driver::{self, Driver, KernelQueueResource};
@@ -57,21 +59,19 @@ pub(crate) struct DriverKernelQueue<D: Driver, Q: KernelQueueResource> {
     /// Native submission owner retained until retirement and destruction.
     inner: Owned<Q>,
     /// Keeps the exact creating driver alive through queue cleanup.
-    _driver: Shared<D>,
+    driver: Shared<D>,
 }
 
 impl<D: Driver, Q: KernelQueueResource> DriverKernelQueue<D, Q> {
     pub(crate) fn new(driver: Shared<D>, inner: Owned<Q>) -> Self {
-        Self {
-            inner,
-            _driver: driver,
-        }
+        Self { inner, driver }
     }
 
     /// # Safety
     /// Command storage remains reachable until native retirement is proved.
     #[allow(unsafe_code)]
     pub(crate) unsafe fn submit(&self, command: KernelCommand) -> Result<u64, Error> {
+        let _operation = self.driver.admission().enter()?;
         // SAFETY: The caller retains the command through retirement.
         unsafe { self.inner.submit(command) }
     }
@@ -204,5 +204,84 @@ impl GpuDevice<'_> {
             inner: self.driver.create_kernel_queue(format)?,
             format,
         })
+    }
+}
+
+#[cfg(test)]
+#[allow(unsafe_code, clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use crate::driver::test_driver::TestDriver;
+    use crate::session::DriverContextLifetime;
+    use crate::topology::EndpointKind;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+
+    struct NativeQueue {
+        submissions: Arc<AtomicU64>,
+        destroyed: Arc<AtomicBool>,
+    }
+
+    impl KernelQueueResource for NativeQueue {
+        unsafe fn submit(&self, _: KernelCommand) -> Result<u64, Error> {
+            Ok(self.submissions.fetch_add(1, Ordering::Relaxed) + 1)
+        }
+
+        fn status(&self) -> KernelQueueStatus {
+            KernelQueueStatus {
+                retired_submission: self.submissions.load(Ordering::Relaxed),
+                terminal: None,
+            }
+        }
+
+        fn refresh_status(&self) -> Result<KernelQueueStatus, Error> {
+            Ok(self.status())
+        }
+
+        fn wait(&self, _: u64, _: u64, _: u64) -> Result<KernelQueueWait, Error> {
+            Ok(KernelQueueWait::Retired)
+        }
+
+        fn destroy(&mut self) -> Result<(), Error> {
+            self.destroyed.store(true, Ordering::Relaxed);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn retirement_blocks_submission_but_preserves_completion_and_destroy() {
+        let driver = Shared::new(TestDriver::new(
+            [1; 16],
+            EndpointKind::Npu,
+            DriverContextLifetime::Session,
+        ))
+        .unwrap();
+        let submissions = Arc::new(AtomicU64::new(0));
+        let destroyed = Arc::new(AtomicBool::new(false));
+        let mut queue = DriverKernelQueue::new(
+            driver.clone(),
+            Owned::new(NativeQueue {
+                submissions: submissions.clone(),
+                destroyed: destroyed.clone(),
+            })
+            .unwrap(),
+        );
+        let command = KernelCommand {
+            device_address: 0x1000,
+            byte_length: 4,
+        };
+        // SAFETY: The fake records submissions without accessing command bytes.
+        assert_eq!(unsafe { queue.submit(command) }.unwrap(), 1);
+        driver.admission().begin_retirement().unwrap();
+        // SAFETY: The fake has no native device-memory consumer.
+        assert_eq!(
+            unsafe { queue.submit(command) }.unwrap_err().kind(),
+            ErrorKind::Unsupported
+        );
+        assert_eq!(submissions.load(Ordering::Relaxed), 1);
+        assert_eq!(queue.refresh_status().unwrap().retired_submission, 1);
+        assert_eq!(queue.wait(1, 1, 1).unwrap(), KernelQueueWait::Retired);
+        queue.destroy().unwrap();
+        assert!(destroyed.load(Ordering::Relaxed));
     }
 }

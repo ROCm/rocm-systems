@@ -57,6 +57,7 @@
 #include "suites/functional/memory_atomics.h"
 #include "suites/functional/memory_allocation.h"
 #include "suites/functional/memory_fragment.h"
+#include "suites/functional/device_mem_no_host_access.h"
 #include "suites/functional/memory_fill.h"
 #include "suites/functional/deallocation_notifier.h"
 #include "suites/functional/virtual_memory.h"
@@ -213,6 +214,14 @@ TEST(rocrtstFunc, MemoryAllocateContiguousTest) {
   if (!RunCustomTestProlog(&ma)) return;
   ma.MemoryAllocateContiguousTest();
   RunCustomTestEpilog(&ma);
+}
+
+TEST(rocrtstFunc, MemoryFill_Long_Dependency_Copy) {
+  MemoryFill mf;
+
+  if (!RunCustomTestProlog(&mf)) return;
+  mf.LongDependencyCopyTest();
+  RunCustomTestEpilog(&mf);
 }
 
 TEST(rocrtstFunc, MemoryFillTest) {
@@ -703,6 +712,20 @@ TEST(rocrtstFunc, Memory_Fragment_Coherence_Test) {
     RunCustomTestEpilog(&mf);
 }
 
+TEST(rocrtstFunc, Device_Mem_No_Host_Access_Default_Test) {
+    DeviceMemNoHostAccess dm(false);
+    if (!RunCustomTestProlog(&dm)) return;
+    dm.CpuAccessTest();
+    RunCustomTestEpilog(&dm);
+}
+
+TEST(rocrtstFunc, Device_Mem_No_Host_Access_Enabled_Test) {
+    DeviceMemNoHostAccess dm(true);
+    if (!RunCustomTestProlog(&dm)) return;
+    dm.CpuAccessTest();
+    RunCustomTestEpilog(&dm);
+}
+
 TEST(rocrtstFunc, DISABLED_DebugBasicTests) {
     DebugBasicTest mt;
     if (!RunCustomTestProlog(&mt)) return;
@@ -798,6 +821,7 @@ TEST(rocrtstFunc, AgentPropertiesTests) {
     if (!RunCustomTestProlog(&propTest)) return;
     propTest.QueryAgentUUID();
     propTest.QueryAgentClockCounters();
+    propTest.QueryGpuShaderEngineTopology();
     RunCustomTestEpilog(&propTest);
 }
 

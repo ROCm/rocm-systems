@@ -55,6 +55,7 @@ hipError_t hipArrayDestroy(hipArray_t array);
 hipError_t hipArrayGetDescriptor(HIP_ARRAY_DESCRIPTOR* pArrayDescriptor, hipArray_t array);
 hipError_t hipArrayGetInfo(hipChannelFormatDesc* desc, hipExtent* extent, unsigned int* flags,
                            hipArray_t array);
+hipError_t hipArrayGetPlane(hipArray_t* pPlaneArray, hipArray_t hArray, unsigned int planeIdx);
 hipError_t hipBindTexture(size_t* offset, const textureReference* tex, const void* devPtr,
                           const hipChannelFormatDesc* desc, size_t size);
 hipError_t hipBindTexture2D(size_t* offset, const textureReference* tex, const void* devPtr,
@@ -112,6 +113,7 @@ hipError_t hipDeviceGetSharedMemConfig(hipSharedMemConfig* pConfig);
 hipError_t hipDeviceGetStreamPriorityRange(int* leastPriority, int* greatestPriority);
 hipError_t hipDeviceGetTexture1DLinearMaxWidth(size_t* maxWidthInElements,
                                                const hipChannelFormatDesc* fmtDesc, int device);
+hipError_t hipDeviceGetExecAffinitySupport(int* pi, hipExecAffinityType type, hipDevice_t dev);
 hipError_t hipDeviceGetUuid(hipUUID* uuid, hipDevice_t device);
 hipError_t hipDeviceGraphMemTrim(int device);
 hipError_t hipDevicePrimaryCtxGetState(hipDevice_t dev, unsigned int* flags, int* active);
@@ -959,6 +961,14 @@ hipError_t hipDeviceFlushGPUDirectRDMAWrites(hipFlushGPUDirectRDMAWritesTarget t
 hipError_t hipKernelSetAttributeForDevice(hipKernel_t kernel, hipFuncAttribute attr, int value,
                                           int device);
 hipError_t hipKernelSetCacheConfig(hipKernel_t kernel, hipFuncCache_t config, hipDevice_t dev);
+hipError_t hipArrayGetSparseProperties(hipArraySparseProperties* sparseProperties,
+                                       hipArray_t array);
+hipError_t hipGraphNodeGetLocalId(hipGraphNode_t node, unsigned int* nodeId);
+hipError_t hipGraphNodeGetToolsId(hipGraphNode_t node, unsigned long long* toolsId);
+hipError_t hipGraphGetId(hipGraph_t graph, unsigned int* graphId);
+hipError_t hipGraphExecGetId(hipGraphExec_t graphExec, unsigned int* graphId);
+hipError_t hipArrayGetMemoryRequirements(hipArrayMemoryRequirements* memoryRequirements,
+                                         hipArray_t array, hipDevice_t device);
 }  // namespace hip
 
 namespace hip {
@@ -991,6 +1001,7 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipArrayDestroy_fn = hip::hipArrayDestroy;
   ptrDispatchTable->hipArrayGetDescriptor_fn = hip::hipArrayGetDescriptor;
   ptrDispatchTable->hipArrayGetInfo_fn = hip::hipArrayGetInfo;
+  ptrDispatchTable->hipArrayGetPlane_fn = hip::hipArrayGetPlane;
   ptrDispatchTable->hipBindTexture_fn = hip::hipBindTexture;
   ptrDispatchTable->hipBindTexture2D_fn = hip::hipBindTexture2D;
   ptrDispatchTable->hipBindTextureToArray_fn = hip::hipBindTextureToArray;
@@ -1136,6 +1147,7 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipGraphExecEventRecordNodeSetEvent_fn =
       hip::hipGraphExecEventRecordNodeSetEvent;
   ptrDispatchTable->hipGraphExecEventWaitNodeSetEvent_fn = hip::hipGraphExecEventWaitNodeSetEvent;
+  ptrDispatchTable->hipGraphExecGetId_fn = hip::hipGraphExecGetId;
   ptrDispatchTable->hipGraphExecHostNodeSetParams_fn = hip::hipGraphExecHostNodeSetParams;
   ptrDispatchTable->hipGraphExecKernelNodeSetParams_fn = hip::hipGraphExecKernelNodeSetParams;
   ptrDispatchTable->hipGraphExecMemcpyNodeSetParams_fn = hip::hipGraphExecMemcpyNodeSetParams;
@@ -1147,6 +1159,7 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipGraphExecMemsetNodeSetParams_fn = hip::hipGraphExecMemsetNodeSetParams;
   ptrDispatchTable->hipGraphExecUpdate_fn = hip::hipGraphExecUpdate;
   ptrDispatchTable->hipGraphGetEdges_fn = hip::hipGraphGetEdges;
+  ptrDispatchTable->hipGraphGetId_fn = hip::hipGraphGetId;
   ptrDispatchTable->hipGraphGetNodes_fn = hip::hipGraphGetNodes;
   ptrDispatchTable->hipGraphGetRootNodes_fn = hip::hipGraphGetRootNodes;
   ptrDispatchTable->hipGraphHostNodeGetParams_fn = hip::hipGraphHostNodeGetParams;
@@ -1175,6 +1188,8 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipGraphNodeGetDependencies_fn = hip::hipGraphNodeGetDependencies;
   ptrDispatchTable->hipGraphNodeGetDependentNodes_fn = hip::hipGraphNodeGetDependentNodes;
   ptrDispatchTable->hipGraphNodeGetEnabled_fn = hip::hipGraphNodeGetEnabled;
+  ptrDispatchTable->hipGraphNodeGetLocalId_fn = hip::hipGraphNodeGetLocalId;
+  ptrDispatchTable->hipGraphNodeGetToolsId_fn = hip::hipGraphNodeGetToolsId;
   ptrDispatchTable->hipGraphNodeGetType_fn = hip::hipGraphNodeGetType;
   ptrDispatchTable->hipGraphNodeSetEnabled_fn = hip::hipGraphNodeSetEnabled;
   ptrDispatchTable->hipGraphReleaseUserObject_fn = hip::hipGraphReleaseUserObject;
@@ -1312,6 +1327,8 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipMipmappedArrayDestroy_fn = hip::hipMipmappedArrayDestroy;
   ptrDispatchTable->hipMipmappedArrayGetMemoryRequirements_fn =
      hip::hipMipmappedArrayGetMemoryRequirements;
+  ptrDispatchTable->hipArrayGetSparseProperties_fn = hip::hipArrayGetSparseProperties;
+  ptrDispatchTable->hipArrayGetMemoryRequirements_fn = hip::hipArrayGetMemoryRequirements;
   ptrDispatchTable->hipMipmappedArrayGetLevel_fn = hip::hipMipmappedArrayGetLevel;
   ptrDispatchTable->hipModuleGetFunction_fn = hip::hipModuleGetFunction;
   ptrDispatchTable->hipModuleGetFunctionCount_fn = hip::hipModuleGetFunctionCount;
@@ -1569,6 +1586,7 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipInitDevice_fn = hip::hipInitDevice;
   ptrDispatchTable->hipModuleEnumerateFunctions_fn = hip::hipModuleEnumerateFunctions;
   ptrDispatchTable->hipDeviceFlushGPUDirectRDMAWrites_fn = hip::hipDeviceFlushGPUDirectRDMAWrites;
+  ptrDispatchTable->hipDeviceGetExecAffinitySupport_fn = hip::hipDeviceGetExecAffinitySupport;
 }
 
 #if HIP_ROCPROFILER_REGISTER > 0
@@ -1580,10 +1598,6 @@ template <typename Tp> struct dispatch_table_info;
     static constexpr auto version = HIP_ROCP_REG_VERSION;                                          \
     static constexpr auto import_func = &ROCPROFILER_REGISTER_IMPORT_FUNC(NAME);                   \
   };
-
-constexpr auto ComputeTableSize(size_t num_funcs) {
-  return (num_funcs * sizeof(void*)) + sizeof(uint64_t);
-}
 
 HIP_DEFINE_DISPATCH_TABLE_INFO(HipDispatchTable, hip)
 HIP_DEFINE_DISPATCH_TABLE_INFO(HipCompilerDispatchTable, hip_compiler)
@@ -1638,7 +1652,7 @@ std::atomic<bool> hip_tools_dispatch_registered{false};
 // This preloading occurs before verifying if the table has been initialized.
 // Since the table is typically already initialized, this adds unnecessary overhead to the critical
 // path.
-#if defined(__GNUC__) || defined(__clang__)
+#if defined(__GNUC__) && !defined(__clang__)
 #define NO_VECTORIZE __attribute__((optimize("no-tree-vectorize")))
 #else
 #define NO_VECTORIZE
@@ -2326,6 +2340,19 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipExtMemcpyBatchAsync_fn, 549);
 // HIP_RUNTIME_API_TABLE_STEP_VERSION == 40
 HIP_ENFORCE_ABI(HipDispatchTable, hipMemcpyWithAttributesAsync_fn, 550);
 HIP_ENFORCE_ABI(HipDispatchTable, hipMemcpy3DWithAttributesAsync_fn, 551);
+// HIP_RUNTIME_API_TABLE_STEP_VERSION == 41
+HIP_ENFORCE_ABI(HipDispatchTable, hipArrayGetSparseProperties_fn, 552);
+// HIP_RUNTIME_API_TABLE_STEP_VERSION == 42
+HIP_ENFORCE_ABI(HipDispatchTable, hipGraphNodeGetLocalId_fn, 553);
+HIP_ENFORCE_ABI(HipDispatchTable, hipGraphNodeGetToolsId_fn, 554);
+HIP_ENFORCE_ABI(HipDispatchTable, hipGraphGetId_fn, 555);
+HIP_ENFORCE_ABI(HipDispatchTable, hipGraphExecGetId_fn, 556);
+// HIP_RUNTIME_API_TABLE_STEP_VERSION == 43
+HIP_ENFORCE_ABI(HipDispatchTable, hipDeviceGetExecAffinitySupport_fn, 557);
+// HIP_RUNTIME_API_TABLE_STEP_VERSION == 44
+HIP_ENFORCE_ABI(HipDispatchTable, hipArrayGetPlane_fn, 558);
+// HIP_RUNTIME_API_TABLE_STEP_VERSION == 45
+HIP_ENFORCE_ABI(HipDispatchTable, hipArrayGetMemoryRequirements_fn, 559);
 
 // if HIP_ENFORCE_ABI entries are added for each new function pointer in the table, the number below
 // will be +1 of the number in the last HIP_ENFORCE_ABI line. E.g.:
@@ -2333,9 +2360,9 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipMemcpy3DWithAttributesAsync_fn, 551);
 //  HIP_ENFORCE_ABI(<table>, <functor>, 8)
 //
 //  HIP_ENFORCE_ABI_VERSIONING(<table>, 9) <- 8 + 1 = 9
-HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 552)
+HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 560)
 
-static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 40,
+static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 45,
               "If you get this error, add new HIP_ENFORCE_ABI(...) code for the new function "
               "pointers and then update this check so it is true");
 #endif

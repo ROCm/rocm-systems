@@ -116,6 +116,8 @@ extern int64_t g_rcclParamHierarchicalReduceScatter;
 extern int64_t g_rcclParamCeAllReduce;
 extern int64_t g_rcclParamCeReduceScatter;
 extern int64_t g_rcclParamCeArStagingBytes;
+// rcclCeArNonRegCap, which ncclCeInit and taskAppend call. Fails loud until a test installs it.
+extern std::function<size_t(const struct ncclComm*)> g_rcclCeArNonRegCap;
 
 // checkHsaEnvSetting's HSA_* scratch validation (rccl_wrap.cc). g_lastHsaScratchEnv records the
 // hsaScratchEnv argument, which is the only proof the check read the environment at all.
@@ -143,6 +145,10 @@ extern std::function<size_t(const struct ncclComm*, ncclFunc_t)> g_rcclDdaEntryT
 extern std::function<ncclResult_t(int, const char**)> g_rcclGetAlgoName;
 extern std::function<bool(struct ncclComm*, size_t&)> g_rcclUseAllGatherDirect;
 extern std::function<bool(struct ncclComm*, size_t&)> g_rcclUseReduceScatterDirect;
+// ncclPrepareTasks calls this on every group. The default still aborts, so a
+// test that reaches it by accident stays loud; a test that means to can install
+// a no-op.
+extern std::function<void(struct ncclComm*)> g_rcclSetCeAllReduceFastPath;
 // RCCL_PARAM(DdaEnable, "DDA_ENABLE", 1).
 extern int64_t g_rcclParamDdaEnable;
 

@@ -28,6 +28,7 @@
 #include "execution_profile.hpp"
 #include "graph_stack.hpp"
 #include "helper.hpp"
+#include "kernel_dispatch_record.hpp"
 #include "kernel_iteration_filter.hpp"
 #include "stream_stack.hpp"
 
@@ -362,6 +363,19 @@ auto  att_device_trace_id =
     std::atomic<rocprofiler_dispatch_id_t>{std::numeric_limits<uint64_t>::max()};
 std::mutex att_shader_data;
 
+auto&
+att_dispatch_kernel_iterations()
+{
+    static auto value = common::Synchronized<kernel_iteration_t, true>{};
+    return value;
+}
+
+void
+reset_att_dispatch_kernel_iterations()
+{
+    att_dispatch_kernel_iterations().wlock([](auto& iterations) { iterations.clear(); });
+}
+
 thread_local auto thread_dispatch_rename      = as_pointer<kernel_rename_stack_t>();
 thread_local auto thread_dispatch_rename_dtor = common::scope_destructor{[]() {
     delete thread_dispatch_rename;
@@ -379,8 +393,13 @@ auto pause_resume_contexts = context_id_set_t{};
 // small, so this is lossless and preserves the thread id the record still carries.
 thread_local auto tl_current_replay_pass = std::optional<uint64_t>{};
 
-// Memoizes is_targeted_kernel() for the duration of one replay loop; see the comment there.
-thread_local auto tl_replay_dispatch_targeted = std::optional<bool>{};
+// Memoizes is_targeted_kernel() for one dispatch under kernel replay; see the comment there.
+struct replay_dispatch_targeted_t
+{
+    rocprofiler_dispatch_id_t dispatch_id = 0;
+    bool                      targeted    = false;
+};
+thread_local auto tl_replay_dispatch_targeted = std::optional<replay_dispatch_targeted_t>{};
 
 // Stores stream ids, graph attribution, and kernel region ids for the
 // kernel-rename, hip-stream-display, and hip-graph-display services.
@@ -409,6 +428,7 @@ add_kernel_target(uint64_t _kern_id, const std::unordered_set<size_t>& range)
 
 bool
 is_targeted_kernel(uint64_t                                        _kern_id,
+                   rocprofiler_dispatch_id_t                       _dispatch_id,
                    common::Synchronized<kernel_iteration_t, true>& _kernel_iteration)
 {
     // The iteration filter is stateful: every consultation advances the kernel's iteration count,
@@ -418,14 +438,16 @@ is_targeted_kernel(uint64_t                                        _kern_id,
     // every pass past the end of the range -- the counter groups behind those passes are then never
     // configured and their data is silently dropped.
     //
-    // The answer therefore belongs to the dispatch, not the pass. Pass 0 consults the filter, which
-    // advances the count by the one launch that actually happened, and the rest of that dispatch's
-    // passes reuse it. Memoizing here rather than in a caller keeps the "consulted once per logical
-    // dispatch" invariant with the state it protects, so every caller gets it. Passes run
-    // synchronously and in order on the enqueuing thread, and tl_replay_dispatch_targeted is reset
-    // when each replay loop begins, so the cached answer cannot outlive its dispatch.
-    if(tl_current_replay_pass.value_or(0) > 0 && tl_replay_dispatch_targeted.has_value())
-        return *tl_replay_dispatch_targeted;
+    // The answer therefore belongs to the dispatch, not the pass. Under kernel replay the first
+    // consultation is the pass-count callback during CONFIG, which decides whether the dispatch is
+    // replayed at all; it advances the count by the one launch that actually happened, and every
+    // later question about the same dispatch -- its passes, or the single run of a dispatch that is
+    // not replayed -- reuses the answer. Memoizing here rather than in a caller keeps the
+    // "consulted once per logical dispatch" invariant with the state it protects, so every caller
+    // gets it. The answer is keyed by dispatch id because graph and multi-packet dispatches skip
+    // CONFIG, so nothing resets the memo before them.
+    if(tl_replay_dispatch_targeted && tl_replay_dispatch_targeted->dispatch_id == _dispatch_id)
+        return tl_replay_dispatch_targeted->targeted;
 
     // hold target_kernels around kernel_iteration so the range stays valid; both
     // are only locked here / in add_kernel_target(), so the nesting is safe
@@ -443,7 +465,8 @@ is_targeted_kernel(uint64_t                                        _kern_id,
         },
         _kern_id);
 
-    if(tl_current_replay_pass.has_value()) tl_replay_dispatch_targeted = _is_target;
+    if(tool::get_config().kernel_replay)
+        tl_replay_dispatch_targeted = replay_dispatch_targeted_t{_dispatch_id, _is_target};
     return _is_target;
 }
 
@@ -1108,7 +1131,8 @@ code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
             if(tool::get_config().pc_sampling_host_trap ||
                tool::get_config().pc_sampling_stochastic)
             {
-                CHECK_NOTNULL(tool_metadata)->add_decoder(obj_data);
+                CHECK_NOTNULL(tool_metadata)
+                    ->add_decoder(obj_data, tool::get_config().rocpd_output);
             }
 
             if(obj_data->storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_MEMORY &&
@@ -1286,9 +1310,10 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
                     header->payload);
 
                 auto attr = get_ext_attribution(record);
+                auto data = tool::copy_kernel_dispatch_record(record);
                 tool::write_ring_buffer(
                     tool::tool_buffer_tracing_kernel_dispatch_ext_record_t{
-                        *record, attr.stream_id, attr.graph_exec_id, attr.graph_node_id},
+                        data, attr.stream_id, attr.graph_exec_id, attr.graph_node_id},
                     domain_type::KERNEL_DISPATCH);
             }
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_HSA_CORE_API ||
@@ -1964,10 +1989,9 @@ att_dispatch_callback(rocprofiler_agent_id_t /* agent_id  */,
                       void* /*userdata_config*/,
                       rocprofiler_user_data_t* userdata_shader)
 {
-    static auto kernel_iteration = common::Synchronized<kernel_iteration_t, true>{};
-    userdata_shader->value       = dispatch_id;
+    userdata_shader->value = dispatch_id;
 
-    if(is_targeted_kernel(kernel_id, kernel_iteration))
+    if(is_targeted_kernel(kernel_id, dispatch_id, att_dispatch_kernel_iterations()))
         return ROCPROFILER_THREAD_TRACE_CONTROL_START_AND_STOP;
     return ROCPROFILER_THREAD_TRACE_CONTROL_NONE;
 }
@@ -1998,7 +2022,7 @@ att_dispatch_consecutive_kernel_callback(rocprofiler_callback_tracing_record_t r
 
     if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
     {
-        const auto is_target = is_targeted_kernel(kernel_id, kernel_iteration);
+        const auto is_target = is_targeted_kernel(kernel_id, dispatch_id, kernel_iteration);
         // Return if kernel is not targeted and we are not profiling currently
         if(!is_target && !isprofiling.load()) return;
 
@@ -2056,18 +2080,26 @@ att_dispatch_consecutive_kernel_callback(rocprofiler_callback_tracing_record_t r
         dispatch_id);
 }
 
+// Launch counts behind the counter-collection kernel filters. Kernel replay asks the same filters
+// whether a dispatch is replayed at all, so both count the same launches.
+auto&
+counter_kernel_iteration()
+{
+    static auto value = common::Synchronized<kernel_iteration_t, true>{};
+    return value;
+}
+
 void
 counter_dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
                           rocprofiler_counter_config_id_t*             config,
                           rocprofiler_user_data_t*                     user_data,
                           void* /*callback_data_args*/)
 {
-    static auto kernel_iteration = common::Synchronized<kernel_iteration_t, true>{};
-
     auto kernel_id = dispatch_data.dispatch_info.kernel_id;
     auto agent_id  = dispatch_data.dispatch_info.agent_id;
 
-    if(!is_targeted_kernel(kernel_id, kernel_iteration))
+    if(!is_targeted_kernel(
+           kernel_id, dispatch_data.dispatch_info.dispatch_id, counter_kernel_iteration()))
     {
         return;
     }
@@ -2267,7 +2299,9 @@ spm_dispatch_callback(const rocprofiler_spm_dispatch_counting_service_data_t* di
 {
     static auto kernel_iteration = common::Synchronized<kernel_iteration_t, true>{};
 
-    if(!is_targeted_kernel(dispatch_data->dispatch_info.kernel_id, kernel_iteration))
+    if(!is_targeted_kernel(dispatch_data->dispatch_info.kernel_id,
+                           dispatch_data->dispatch_info.dispatch_id,
+                           kernel_iteration))
     {
         return;
     }
@@ -2578,11 +2612,23 @@ configure_pc_sampling_on_all_agents(uint64_t                        buffer_size,
 // the same per-agent profile list counter_dispatch_callback -> get_replay_profile indexes -- so
 // that pass i maps to group i with no wrap/skip on agents with a different or partial group set
 // (the global --pmc group count can differ per agent). Returning 1 (a single group, or none)
-// disables replay.
+// disables replay, as for dispatches made while counter collection is paused or that the kernel
+// filters do not select: those run once, without counters.
 uint64_t
 kernel_replay_pass_count_callback(rocprofiler_kernel_dispatch_info_t dispatch_info,
                                   rocprofiler_user_data_t /*user_data*/)
 {
+    // While counter collection is paused (--selected-regions, roctxProfilerPause), a dispatch
+    // collects nothing and, as without replay, does not count toward the kernel filters.
+    if(int active = 0; rocprofiler_context_is_active(counter_collection_ctx, &active) !=
+                           ROCPROFILER_STATUS_SUCCESS ||
+                       active == 0)
+        return 1;
+
+    if(!is_targeted_kernel(
+           dispatch_info.kernel_id, dispatch_info.dispatch_id, counter_kernel_iteration()))
+        return 1;
+
     auto&      agent_profiles = get_agent_profiles();
     const auto profiles       = agent_profiles.profiles.find(dispatch_info.agent_id);
     const auto n =
@@ -2604,10 +2650,10 @@ kernel_replay_callback(rocprofiler_callback_tracing_record_t record,
     if(record.operation == ROCPROFILER_KERNEL_REPLAY_CONFIG &&
        record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
     {
-        // Tell the SDK how many passes to run for this dispatch (= counter groups for its agent).
+        // Tell the SDK how many passes to run for this dispatch (= counter groups for its agent,
+        // or 1 when counter collection is paused or the kernel filters do not select it).
         payload->replay_pass_count = kernel_replay_pass_count_callback;
-        // A new replay loop begins here, so the previous dispatch's iteration-filter decision must
-        // not carry into it; pass 0 below will record a fresh one.
+        // A new dispatch is configured here; the pass-count callback records its filter decision.
         tl_replay_dispatch_targeted.reset();
     }
     else if(record.operation == ROCPROFILER_KERNEL_REPLAY_PASS)
@@ -2907,6 +2953,7 @@ tool_attach(rocprofiler_client_detach_t /*detach_func*/,
               << " (parent PID: " << parent_pid << ")";
     // NOLINTNEXTLINE(readability-suspicious-call-argument): parent_pid is correctly the _ppid arg
     tool_metadata->set_process_id(instrumented_pid, parent_pid);
+    tool_metadata->process_end_ns = 0;
 
     for(uint64_t i = 0; i < context_ids_length; ++i)
     {
@@ -4395,7 +4442,9 @@ generate_output(cleanup_mode _cleanup_mode, bool skip_output = false)
                           hip_graph_output.get_generator(),
                           rocshmem_output.get_generator(),
                           hipfile_output.get_generator(),
-                          hip_event_output.get_generator());
+                          hip_event_output.get_generator(),
+                          pc_sampling_host_trap_output.get_generator(),
+                          pc_sampling_stochastic_output.get_generator());
     }
 
     if(tool::get_config().otf2_output && outdata.num_output > 0 &&
@@ -4520,6 +4569,11 @@ tool_detach(void* /*tool_data*/)
             });
         });
     }
+
+    // Kernel registrations and contexts outlive an attachment. Clear dispatch ATT iteration
+    // selection only after this session's contexts have stopped; tool_init starts the first
+    // context before tool_attach runs, while other target threads can continue dispatching.
+    if(tool::get_config().advanced_thread_trace) reset_att_dispatch_kernel_iterations();
 }
 
 void
@@ -5278,10 +5332,9 @@ rocprofv3_main(int argc, char** argv, char** envp)
     if(!get_sigaction_function())
         get_sigaction_function() = (sigaction_func_t) dlsym(RTLD_NEXT, "sigaction");
 
-    // fork+exec and spawn children re-init through the normal init path. Plain fork children
-    // re-init worker state via the pthread_atfork handler below. GPU use in a forked child is
-    // illegal (runtime not fork-safe) so it usually dies first, but host-side data like roctx
-    // markers still flushes if reached (covered by a test).
+    // fork+exec and spawn children re-init through the normal init path. Profiling after fork
+    // without exec is unsupported. The pthread_atfork handler below resets the signal worker as
+    // a best-effort safeguard; it does not make inherited profiler or runtime state fork-safe.
     {
         auto& sw   = get_signal_worker();
         sw.eventfd = eventfd(0, EFD_CLOEXEC);
@@ -5337,5 +5390,72 @@ rocprofv3_main(int argc, char** argv, char** envp)
 
     ROCP_INFO << "rocprofv3 finished. exit code: " << ret;
     return ret;
+}
+
+ompt_start_tool_result_t*
+ompt_start_tool(unsigned int omp_version, const char* runtime_version) ROCPROFILER_PUBLIC_API;
+
+namespace
+{
+// The OpenMP runtime binds the first ompt_start_tool it finds and does not consider any other
+// library already loaded, so declining the role means invoking the next implementation here.
+// Returning null only sends the runtime on to its own OMP_TOOL_LIBRARIES search.
+ompt_start_tool_result_t*
+start_next_ompt_tool(unsigned int omp_version, const char* runtime_version)
+{
+    using ompt_start_tool_t = ompt_start_tool_result_t* (*) (unsigned int, const char*);
+
+    auto* _next = reinterpret_cast<ompt_start_tool_t>(::dlsym(RTLD_NEXT, "ompt_start_tool"));
+    if(_next == nullptr || _next == reinterpret_cast<ompt_start_tool_t>(&ompt_start_tool))
+        return nullptr;
+
+    ROCP_INFO << "rocprofv3 is handing the OMPT tool role to the next ompt_start_tool";
+    return _next(omp_version, runtime_version);
+}
+}  // namespace
+
+ompt_start_tool_result_t*
+ompt_start_tool(unsigned int omp_version, const char* runtime_version)
+{
+    initialize_logging();
+
+    ROCP_INFO << fmt::format(
+        "ompt_start_tool(omp_version={}, runtime_version=\"{}\") was invoked in rocprofv3 tool",
+        omp_version,
+        runtime_version);
+
+    // Take the OMPT tool role only when this invocation collects OMPT, so that a user's own OMPT
+    // tool can have it while rocprofv3 continues tracing everything else. Exactly one OMPT tool
+    // wins, and which one follows from the command line rather than from a separate control.
+    if(!tool::get_config().ompt_trace)
+    {
+        ROCP_INFO << "rocprofv3 is not collecting OMPT; deferring the OMPT tool role";
+        return start_next_ompt_tool(omp_version, runtime_version);
+    }
+
+    // The OpenMP runtime discovers tools while holding its initialization lock. Configuring
+    // rocprofiler-sdk here loads client tool libraries, and their constructors can call back into
+    // the OpenMP runtime and re-enter that lock on the same thread. A status of 0 is "not
+    // started" and -1 is "in progress"; both defer instead of configuring.
+    if(int _status = 0;
+       rocprofiler_is_initialized(&_status) != ROCPROFILER_STATUS_SUCCESS || _status <= 0)
+    {
+        ROCP_WARNING << "rocprofv3 is not collecting OMPT because the OpenMP runtime initialized "
+                        "before rocprofiler-sdk, and is handing the OMPT tool role to the next "
+                        "tool. Initialize rocprofiler-sdk before the first OpenMP call to collect "
+                        "OMPT with rocprofv3.";
+        return start_next_ompt_tool(omp_version, runtime_version);
+    }
+
+    initialize_rocprofv3();
+
+    // rocprofiler-sdk returns null when no registered client subscribes to OMPT. Chain that
+    // decline like the two above rather than passing the null on to the runtime.
+    if(auto* _result = rocprofiler_ompt_start_tool(omp_version, runtime_version);
+       _result != nullptr)
+        return _result;
+
+    ROCP_INFO << "rocprofiler-sdk declined the OMPT tool role; deferring it";
+    return start_next_ompt_tool(omp_version, runtime_version);
 }
 }

@@ -17,8 +17,9 @@ constexpr bool is_arithmetic(Binary op) {
 
 // Identify binary selections, independently of arithmetic's supported operation set.
 constexpr bool is_selection(Binary op) {
-  return op == Binary::MinLegacy || op == Binary::MaxLegacy || op == Binary::MinNum ||
-         op == Binary::MaxNum || op == Binary::Minimum || op == Binary::Maximum;
+  return op == Binary::MinLegacyCdna || op == Binary::MaxLegacyCdna || op == Binary::MinLegacy ||
+         op == Binary::MaxLegacy || op == Binary::MinNum || op == Binary::MaxNum ||
+         op == Binary::Minimum || op == Binary::Maximum;
 }
 
 } // namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE

@@ -45,8 +45,6 @@ namespace rocshmem {
  * @param[in] source Source address. Must be an address on the symmetric heap.
  * @param[in] nelems Size of the transfer in number of elements.
  * @param[in] pe     PE of the remote process.
- *
- * @return void.
  */
 __device__ ATTR_NO_INLINE void rocshmem_ctx_float_put(
     rocshmem_ctx_t ctx, float *dest, const float *source,
@@ -209,8 +207,6 @@ __host__ void rocshmem_ulonglong_put(unsigned long long *dest,
  * @param[in] source Source address. Must be an address on the symmetric heap.
  * @param[in] nelems Size of the transfer in bytes.
  * @param[in] pe     PE of the remote process.
- *
- * @return void.
  */
 __device__ ATTR_NO_INLINE void rocshmem_ctx_putmem(rocshmem_ctx_t ctx,
                                                     void *dest,
@@ -233,8 +229,6 @@ __device__ ATTR_NO_INLINE void rocshmem_putmem(void *dest, const void *source,
  * @param[in] source Source address. Must be an address on the symmetric heap.
  * @param[in] nelems Size of the transfer in number of elements.
  * @param[in] pe     PE of the remote process.
- *
- * @return void.
  */
 __host__ void rocshmem_ctx_putmem(rocshmem_ctx_t ctx, void *dest,
                                    const void *source, size_t nelems, int pe);
@@ -259,8 +253,6 @@ __host__ void rocshmem_putmem(void *dest, const void *source, size_t nelems,
  *                   heap.
  * @param[in] value  Value to write to dest at \p pe.
  * @param[in] pe     PE of the remote process.
- *
- * @return void.
  */
 __device__ ATTR_NO_INLINE void rocshmem_ctx_float_p(
     rocshmem_ctx_t ctx, float *dest, float value,
@@ -428,8 +420,6 @@ __device__ ATTR_NO_INLINE void rocshmem_int64_p(
  * @param[in] source  Source address. Must be an address on the symmetric heap.
  * @param[in] nelems  Size of the transfer in bytes.
  * @param[in] pe      PE of the remote process.
- *
- * @return void.
  */
 __device__ ATTR_NO_INLINE void rocshmem_ctx_float_get(
     rocshmem_ctx_t ctx, float *dest, const float *source,
@@ -591,8 +581,6 @@ __host__ void rocshmem_ulonglong_get(unsigned long long *dest,
  * @param[in] source  Source address. Must be an address on the symmetric heap.
  * @param[in] nelems  Size of the transfer in bytes.
  * @param[in] pe      PE of the remote process.
- *
- * @return void.
  */
 __device__ ATTR_NO_INLINE void rocshmem_ctx_getmem(rocshmem_ctx_t ctx,
                                                     void *dest,
@@ -619,8 +607,6 @@ __device__ ATTR_NO_INLINE void rocshmem_getmem(void *dest, const void *source,
  * @param[in] source  Source address. Must be an address on the symmetric heap.
  * @param[in] nelems  Size of the transfer in bytes.
  * @param[in] pe      PE of the remote process.
- *
- * @return void.
  */
 __host__ void rocshmem_ctx_getmem(rocshmem_ctx_t ctx, void *dest,
                                    const void *source, size_t nelems, int pe);
@@ -783,8 +769,6 @@ __host__ unsigned long long rocshmem_ulonglong_g(
  * @param[in] source  Source address. Must be an address on the symmetric heap.
  * @param[in] nelems  Size of the transfer in bytes.
  * @param[in] pe      PE of the remote process.
- *
- * @return void.
  */
 __device__ ATTR_NO_INLINE void rocshmem_ctx_float_put_nbi(
     rocshmem_ctx_t ctx, float *dest, const float *source,
@@ -948,8 +932,6 @@ __host__ void rocshmem_ulonglong_put_nbi(
  * @param[in] source  Source address. Must be an address on the symmetric heap.
  * @param[in] nelems  Size of the transfer in bytes.
  * @param[in] pe      PE of the remote process.
- *
- * @return void.
  */
 __device__ ATTR_NO_INLINE void rocshmem_ctx_putmem_nbi(rocshmem_ctx_t ctx,
                                                         void *dest,
@@ -973,8 +955,6 @@ __device__ ATTR_NO_INLINE void rocshmem_putmem_nbi(void *dest,
  * @param[in] source  Source address. Must be an address on the symmetric heap.
  * @param[in] nelems  Size of the transfer in bytes.
  * @param[in] pe      PE of the remote process.
- *
- * @return void.
  */
 __host__ void rocshmem_ctx_putmem_nbi(rocshmem_ctx_t ctx, void *dest,
                                        const void *source, size_t nelems,
@@ -1003,8 +983,6 @@ __host__ void rocshmem_putmem_nbi(void *dest, const void *source,
  * @param[in] source  Source address. Must be an address on the symmetric heap.
  * @param[in] nelems  Size of the transfer in bytes.
  * @param[in] pe      PE of the remote process.
- *
- * @return void.
  */
 __device__ ATTR_NO_INLINE void rocshmem_ctx_float_get_nbi(
     rocshmem_ctx_t ctx, float *dest, const float *source,
@@ -1168,8 +1146,6 @@ __host__ void rocshmem_ulonglong_get_nbi(unsigned long long *dest,
  * @param[in] source  Source address. Must be an address on the symmetric heap.
  * @param[in] nelems  Size of the transfer in bytes.
  * @param[in] pe      PE of the remote process.
- *
- * @return void.
  */
 __device__ ATTR_NO_INLINE void rocshmem_ctx_getmem_nbi(rocshmem_ctx_t ctx,
                                                         void *dest,
@@ -1199,8 +1175,6 @@ __device__ ATTR_NO_INLINE void rocshmem_getmem_nbi(void *dest,
  * @param[in] source  Source address. Must be an address on the symmetric heap.
  * @param[in] nelems  Size of the transfer in bytes.
  * @param[in] pe      PE of the remote process.
- *
- * @return void.
  */
 __host__ void rocshmem_ctx_getmem_nbi(rocshmem_ctx_t ctx, void *dest,
                                        const void *source, size_t nelems,
@@ -1218,8 +1192,6 @@ __host__ void rocshmem_getmem_nbi(void *dest, const void *source,
  * @param[in] source  Source address. Must be an address on the symmetric heap.
  * @param[in] nelems  Size of the transfer in bytes.
  * @param[in] pe      PE of the remote process.
- *
- * @return void
  */
 __global__ ATTR_NO_INLINE void rocshmem_getmem_kernel(void *dest,
                                                       const void *source,
@@ -1234,8 +1206,6 @@ __global__ ATTR_NO_INLINE void rocshmem_getmem_kernel(void *dest,
  * @param[in] source  Source address. Must be an address on the symmetric heap.
  * @param[in] nelems  Size of the transfer in bytes.
  * @param[in] pe      PE of the remote process.
- *
- * @return void
  */
 __global__ ATTR_NO_INLINE void rocshmem_putmem_kernel(void *dest,
                                                       const void *source,
@@ -1244,8 +1214,6 @@ __global__ ATTR_NO_INLINE void rocshmem_putmem_kernel(void *dest,
 /**
  * @brief kernel for performing a quiet operation.
  * Caller enqueues the kernel on given stream
- *
- * @return void
  */
 __global__ ATTR_NO_INLINE void rocshmem_quiet_kernel();
 

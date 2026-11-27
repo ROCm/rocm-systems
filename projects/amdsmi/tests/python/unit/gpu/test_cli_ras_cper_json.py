@@ -221,6 +221,9 @@ class TestCliRasCperJson(unittest.TestCase):
         cls.helpers_cls = amdsmi_helpers.AMDSMIHelpers
         cls.logger_cls = amdsmi_logger.AMDSMILogger
         cls.ras_module = _load_ras_module()
+        import amdsmi_cli_exceptions
+
+        cls._AmdSmiDriverNotLoadedException = amdsmi_cli_exceptions.AmdSmiDriverNotLoadedException
 
     def setUp(self):
         self._handles = [_FakeHandle(10), _FakeHandle(20)]
@@ -538,3 +541,42 @@ class TestCliRasCperJson(unittest.TestCase):
                     commands.ras(_build_ras_args(self._handles, follow=True))
         finally:
             self.ras_module.time.sleep = original_sleep
+
+    def test_no_devices_cper_raises_driver_not_loaded(self):
+        """ras --cper with an empty device list raises AmdSmiDriverNotLoadedException (exit 206).
+
+        Simulates amdgpu not loaded: device_handles is empty and args.gpu is None
+        (no --gpu flag passed on the CLI).
+        """
+        commands = self._make_commands()
+        commands.device_handles = []
+        args = _build_ras_args([], gpu=None)
+
+        with self.assertRaises(self._AmdSmiDriverNotLoadedException) as ctx:
+            commands.ras(args)
+
+        self.assertEqual(ctx.exception.value, 206)
+
+    def test_missing_gpu_attr_cper_raises_driver_not_loaded(self):
+        """ras --cper with no gpu attribute on args raises AmdSmiDriverNotLoadedException.
+
+        This was the original crash: args had no .gpu attribute, causing TypeError.
+        The hasattr guard now routes it to the driver-not-loaded exception.
+        """
+        commands = self._make_commands()
+        commands.device_handles = []
+        args = argparse.Namespace(
+            cper=True,
+            afid=False,
+            severity=["fatal"],
+            folder=None,
+            file_limit=None,
+            cper_file=None,
+            follow=False,
+        )
+        self.assertFalse(hasattr(args, "gpu"))
+
+        with self.assertRaises(self._AmdSmiDriverNotLoadedException) as ctx:
+            commands.ras(args)
+
+        self.assertEqual(ctx.exception.value, 206)

@@ -69,7 +69,7 @@ class GinRocshmemGdaPluginTest : public ::testing::Test {
     char handle[NCCL_NET_HANDLE_MAXSIZE] = {};
     ASSERT_EQ(plugin_.listen(ictx_, 0, handle, &listen), ncclSuccess);
     std::vector<void*> handles(static_cast<size_t>(nranks), handle);
-    ASSERT_EQ(plugin_.connect(ictx_, handles.data(), nranks, rank, listen, &coll_), ncclSuccess);
+    ASSERT_EQ(plugin_.connect(ictx_, handles.data(), nranks, rank, listen, &coll_, nullptr), ncclSuccess);
     ASSERT_EQ(plugin_.closeListen(listen), ncclSuccess);
   }
 
@@ -78,6 +78,18 @@ class GinRocshmemGdaPluginTest : public ::testing::Test {
     return CopyToHost(static_cast<const ncclGinRocshmemGdaGPUContext*>(devHandle->handle), n);
   }
 };
+
+// GIN v15 barrierOptions: GDA keeps NCCL's default one-signal-per-rank barrier.
+// The default is 0, so the field starts at the other valid value to catch a plugin
+// that never sets it. Needs no GPU, unlike GinRocshmemGdaPluginTest.
+TEST(GinRocshmemGdaPluginPropertiesTest, GinProperties_ReportDefaultBarrier) {
+  ncclGinProperties_t props{};
+  props.barrierOptions = NCCL_GIN_BARRIER_SIGNAL_EFFICIENT;
+  ASSERT_EQ(ncclGinRocshmemGdaPlugin.getGinProperties(&props), ncclSuccess);
+  EXPECT_TRUE(props.supportsStrongSignals);
+  EXPECT_TRUE(props.supportsVASignals);
+  EXPECT_EQ(props.barrierOptions, NCCL_GIN_BARRIER_DEFAULT);
+}
 
 // AICOMRCCL-3418: GDA stays off unless NCCL_GIN_TYPE=6, or NCCL_GIN_TYPE is unset
 // and RCCL_GIN_TYPE_LIST lists 6.

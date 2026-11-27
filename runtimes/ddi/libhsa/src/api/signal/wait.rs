@@ -6,17 +6,18 @@
 use std::sync::atomic::{Ordering, fence};
 
 use crate::ffi::*;
-use crate::runtime::{boundary, initialized_mut, lock};
+use crate::lifecycle::{initialized_mut, lock};
 use crate::signal::wait::{
     prepare_multi_wait, signal_group_wait_any, signal_wait, signal_wait_all_open,
-    signal_wait_any_open, signal_wait_inputs,
+    signal_wait_inputs,
 };
+use crate::status::boundary;
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_signal_wait_scacquire")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Waits for one signal with the HSA SC-acquire completion contract.
 pub unsafe extern "C" fn hsa_signal_wait_scacquire(
     signal: HsaSignal,
@@ -39,10 +40,10 @@ pub unsafe extern "C" fn hsa_signal_wait_scacquire(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_signal_wait_relaxed")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Waits for one signal without acquire synchronization.
 pub unsafe extern "C" fn hsa_signal_wait_relaxed(
     signal: HsaSignal,
@@ -65,10 +66,10 @@ pub unsafe extern "C" fn hsa_signal_wait_relaxed(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_signal_wait_acquire")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Uses the deprecated acquire spelling for a single-signal wait.
 pub unsafe extern "C" fn hsa_signal_wait_acquire(
     signal: HsaSignal,
@@ -91,10 +92,10 @@ pub unsafe extern "C" fn hsa_signal_wait_acquire(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_signal_group_create")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Creates a group that retains the listed signals for waits.
 pub unsafe extern "C" fn hsa_signal_group_create(
     signal_count: u32,
@@ -131,7 +132,10 @@ pub unsafe extern "C" fn hsa_signal_group_create(
             // SAFETY: The caller supplies consumer_count readable handles.
             let consumers =
                 unsafe { std::slice::from_raw_parts(consumers, consumer_count as usize) };
-            if consumers.iter().any(|agent| !runtime.is_agent(*agent)) {
+            if consumers
+                .iter()
+                .any(|agent| !runtime.agents.is_agent(*agent))
+            {
                 return INVALID_AGENT;
             }
         }
@@ -152,10 +156,10 @@ pub unsafe extern "C" fn hsa_signal_group_create(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_signal_group_destroy")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Releases a signal group and its retained signal references.
 pub extern "C" fn hsa_signal_group_destroy(group: HsaSignalGroup) -> Status {
     boundary(|| {
@@ -176,10 +180,10 @@ pub extern "C" fn hsa_signal_group_destroy(group: HsaSignalGroup) -> Status {
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_signal_group_wait_any_relaxed")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Returns when any group member satisfies its condition, without acquire.
 pub unsafe extern "C" fn hsa_signal_group_wait_any_relaxed(
     group: HsaSignalGroup,
@@ -205,10 +209,10 @@ pub unsafe extern "C" fn hsa_signal_group_wait_any_relaxed(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_signal_group_wait_any_scacquire")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Returns when any group member satisfies its SC-acquire condition.
 pub unsafe extern "C" fn hsa_signal_group_wait_any_scacquire(
     group: HsaSignalGroup,
@@ -238,10 +242,10 @@ pub unsafe extern "C" fn hsa_signal_group_wait_any_scacquire(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_signal_wait_any")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Returns the first satisfied signal and its original input index.
 pub unsafe extern "C" fn hsa_amd_signal_wait_any(
     signal_count: u32,
@@ -252,7 +256,7 @@ pub unsafe extern "C" fn hsa_amd_signal_wait_any(
     wait_state_hint: u32,
     satisfying_value: *mut SignalValue,
 ) -> u32 {
-    let Some(_call) = crate::runtime::enter_public_raw_handle() else {
+    let Some(_call) = crate::admission::enter_public_raw_handle() else {
         return u32::MAX;
     };
     let mut guard = match lock() {
@@ -267,32 +271,26 @@ pub unsafe extern "C" fn hsa_amd_signal_wait_any(
     else {
         return u32::MAX;
     };
-    // SAFETY: The registry lock protects validation and retention; the returned
-    // registration stays alive until this wait returns.
-    let registration = match unsafe { prepare_multi_wait(runtime, &inputs.signals) } {
-        Some(registration) => registration,
-        None => return u32::MAX,
+    // SAFETY: The registry lock covers validation and signal retention.
+    let Some(prepared) = (unsafe { inputs.prepare(runtime) }) else {
+        return u32::MAX;
     };
     drop(guard);
-    // SAFETY: The caller supplied optional writable output storage.
-    unsafe {
-        signal_wait_any_open(
-            &registration.entries,
-            &inputs.conditions,
-            &inputs.values,
-            timeout_hint,
-            wait_state_hint,
-            satisfying_value,
-            &registration.stop,
-        )
+    let Some(satisfied) = prepared.wait_any(timeout_hint, wait_state_hint) else {
+        return u32::MAX;
+    };
+    if !satisfying_value.is_null() {
+        // SAFETY: The caller supplies optional writable output storage.
+        unsafe { satisfying_value.write(satisfied.value) };
     }
+    satisfied.index
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_signal_wait_all")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Waits until every signal condition holds or the timeout expires.
 pub unsafe extern "C" fn hsa_amd_signal_wait_all(
     signal_count: u32,
@@ -303,7 +301,7 @@ pub unsafe extern "C" fn hsa_amd_signal_wait_all(
     wait_state_hint: u32,
     satisfying_values: *mut SignalValue,
 ) -> u32 {
-    let Some(_call) = crate::runtime::enter_public_raw_handle() else {
+    let Some(_call) = crate::admission::enter_public_raw_handle() else {
         return u32::MAX;
     };
     let mut guard = match lock() {

@@ -24,7 +24,8 @@ enum class Conversion64 {
 };
 
 // Check wide conversions and split-word destination aliases for the supplied entry point.
-template <int Lanes, int InputWords, int OutputWords, bool Gfx12, typename Call>
+// Exact is false for entry points that stay loose-only until their captures are reviewed.
+template <int Lanes, int InputWords, int OutputWords, bool Gfx12, bool Exact = true, typename Call>
 void check_float64(Call call, Conversion64 operation) {
   int op = int(operation);
   auto input = conversion_inputs<Lanes>(InputWords == 2 ? 64 : 32);
@@ -91,9 +92,10 @@ void check_float64(Call call, Conversion64 operation) {
           conversion_float(actual, expected, OutputWords * 32);
         }
       },
-      modifiers, false,
+      modifiers, Exact,
       RJ_ARITH_FP_IEEE_MODE | RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
-          RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS);
+          RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS,
+      /*separately_tested_modifiers=*/0, /*status_free=*/false);
 }
 
 } // namespace
@@ -259,4 +261,308 @@ TEST(ConversionRounding, GuestModes) {
       }
     }
   }
+}
+
+// gfx1201 captures: guest rounding of FP64 overflow, quieted widening NaN payloads, NaNs and
+// negative inputs to zero, saturation, and exact unsigned widening.
+TEST(ConversionFloat64Gfx12, ExactMatchesHardware) {
+  expect_captured_conversion<1, 1>(rj_arith_v_cvt_f32_f64_w32_gfx12, 0, 0x7fefffffffffffffULL, 0, 0,
+                                   0, 0x7f800000);
+  expect_captured_conversion<1, 1>(rj_arith_v_cvt_f32_f64_w32_gfx12, RJ_ARITH_FP_ROUND_ZERO,
+                                   0x7fefffffffffffffULL, 0, 0, 0, 0x7f7fffff);
+  expect_captured_conversion<1, 2>(rj_arith_v_cvt_f64_f32_w32_gfx12, 0, 0x7f800001, 0, 0, 0,
+                                   0x7ff8000020000000ULL);
+  expect_captured_conversion<1, 1>(rj_arith_v_cvt_i32_f64_w32_gfx12, 0, 0x7ff8000000000000ULL, 0, 0,
+                                   0, 0);
+  expect_captured_conversion<1, 1>(rj_arith_v_cvt_u32_f64_w32_gfx12, 0, 0xbff0000000000000ULL, 0, 0,
+                                   0, 0);
+  expect_captured_conversion<1, 1>(rj_arith_v_cvt_u32_f64_w32_gfx12, 0, 0x41f0000000000000ULL, 0, 0,
+                                   0, 0xffffffff);
+  expect_captured_conversion<1, 2>(rj_arith_v_cvt_f64_u32_w32_gfx12, 0, 0xffffffff, 0, 0, 0,
+                                   0x41efffffffe00000ULL);
+}
+
+// gfx1250 inherits the gfx12 model but stays loose-only pending gfx1250 captures.
+TEST(ConversionCvtF32F64W32Gfx1250, Arithmetic) {
+  check_float64<32, 2, 1, true, false>(rj_arith_v_cvt_f32_f64_w32_gfx1250,
+                                       Conversion64::DoubleToFloat);
+}
+
+// gfx1250 inherits the gfx12 model but stays loose-only pending gfx1250 captures.
+TEST(ConversionCvtF32F64W64Gfx1250, Arithmetic) {
+  check_float64<64, 2, 1, true, false>(rj_arith_v_cvt_f32_f64_w64_gfx1250,
+                                       Conversion64::DoubleToFloat);
+}
+
+// gfx1250 inherits the gfx12 model but stays loose-only pending gfx1250 captures.
+TEST(ConversionCvtF64F32W32Gfx1250, Arithmetic) {
+  check_float64<32, 1, 2, true, false>(rj_arith_v_cvt_f64_f32_w32_gfx1250,
+                                       Conversion64::FloatToDouble);
+}
+
+// gfx1250 inherits the gfx12 model but stays loose-only pending gfx1250 captures.
+TEST(ConversionCvtF64F32W64Gfx1250, Arithmetic) {
+  check_float64<64, 1, 2, true, false>(rj_arith_v_cvt_f64_f32_w64_gfx1250,
+                                       Conversion64::FloatToDouble);
+}
+
+// gfx1250 inherits the gfx12 model but stays loose-only pending gfx1250 captures.
+TEST(ConversionCvtF64I32W32Gfx1250, Arithmetic) {
+  check_float64<32, 1, 2, true, false>(rj_arith_v_cvt_f64_i32_w32_gfx1250,
+                                       Conversion64::SignedToDouble);
+}
+
+// gfx1250 inherits the gfx12 model but stays loose-only pending gfx1250 captures.
+TEST(ConversionCvtF64I32W64Gfx1250, Arithmetic) {
+  check_float64<64, 1, 2, true, false>(rj_arith_v_cvt_f64_i32_w64_gfx1250,
+                                       Conversion64::SignedToDouble);
+}
+
+// gfx1250 inherits the gfx12 model but stays loose-only pending gfx1250 captures.
+TEST(ConversionCvtF64U32W32Gfx1250, Arithmetic) {
+  check_float64<32, 1, 2, true, false>(rj_arith_v_cvt_f64_u32_w32_gfx1250,
+                                       Conversion64::UnsignedToDouble);
+}
+
+// gfx1250 inherits the gfx12 model but stays loose-only pending gfx1250 captures.
+TEST(ConversionCvtF64U32W64Gfx1250, Arithmetic) {
+  check_float64<64, 1, 2, true, false>(rj_arith_v_cvt_f64_u32_w64_gfx1250,
+                                       Conversion64::UnsignedToDouble);
+}
+
+// gfx1250 inherits the gfx12 model but stays loose-only pending gfx1250 captures.
+TEST(ConversionCvtI32F64W32Gfx1250, Arithmetic) {
+  check_float64<32, 2, 1, true, false>(rj_arith_v_cvt_i32_f64_w32_gfx1250,
+                                       Conversion64::DoubleToSigned);
+}
+
+// gfx1250 inherits the gfx12 model but stays loose-only pending gfx1250 captures.
+TEST(ConversionCvtI32F64W64Gfx1250, Arithmetic) {
+  check_float64<64, 2, 1, true, false>(rj_arith_v_cvt_i32_f64_w64_gfx1250,
+                                       Conversion64::DoubleToSigned);
+}
+
+// gfx1250 inherits the gfx12 model but stays loose-only pending gfx1250 captures.
+TEST(ConversionCvtU32F64W32Gfx1250, Arithmetic) {
+  check_float64<32, 2, 1, true, false>(rj_arith_v_cvt_u32_f64_w32_gfx1250,
+                                       Conversion64::DoubleToUnsigned);
+}
+
+// gfx1250 inherits the gfx12 model but stays loose-only pending gfx1250 captures.
+TEST(ConversionCvtU32F64W64Gfx1250, Arithmetic) {
+  check_float64<64, 2, 1, true, false>(rj_arith_v_cvt_u32_f64_w64_gfx1250,
+                                       Conversion64::DoubleToUnsigned);
+}
+
+// gfx942 shares the RDNA3 model and matches MI300X captures.
+TEST(ConversionCvtF32F64W32Gfx942, Arithmetic) {
+  check_float64<32, 2, 1, false, true>(rj_arith_v_cvt_f32_f64_w32_gfx942,
+                                       Conversion64::DoubleToFloat);
+}
+
+TEST(ConversionCvtF32F64W64Gfx942, Arithmetic) {
+  check_float64<64, 2, 1, false, true>(rj_arith_v_cvt_f32_f64_w64_gfx942,
+                                       Conversion64::DoubleToFloat);
+}
+
+TEST(ConversionCvtF64F32W32Gfx942, Arithmetic) {
+  check_float64<32, 1, 2, false, true>(rj_arith_v_cvt_f64_f32_w32_gfx942,
+                                       Conversion64::FloatToDouble);
+}
+
+TEST(ConversionCvtF64F32W64Gfx942, Arithmetic) {
+  check_float64<64, 1, 2, false, true>(rj_arith_v_cvt_f64_f32_w64_gfx942,
+                                       Conversion64::FloatToDouble);
+}
+
+TEST(ConversionCvtF64I32W32Gfx942, Arithmetic) {
+  check_float64<32, 1, 2, false, true>(rj_arith_v_cvt_f64_i32_w32_gfx942,
+                                       Conversion64::SignedToDouble);
+}
+
+TEST(ConversionCvtF64I32W64Gfx942, Arithmetic) {
+  check_float64<64, 1, 2, false, true>(rj_arith_v_cvt_f64_i32_w64_gfx942,
+                                       Conversion64::SignedToDouble);
+}
+
+TEST(ConversionCvtF64U32W32Gfx942, Arithmetic) {
+  check_float64<32, 1, 2, false, true>(rj_arith_v_cvt_f64_u32_w32_gfx942,
+                                       Conversion64::UnsignedToDouble);
+}
+
+TEST(ConversionCvtF64U32W64Gfx942, Arithmetic) {
+  check_float64<64, 1, 2, false, true>(rj_arith_v_cvt_f64_u32_w64_gfx942,
+                                       Conversion64::UnsignedToDouble);
+}
+
+TEST(ConversionCvtI32F64W32Gfx942, Arithmetic) {
+  check_float64<32, 2, 1, false, true>(rj_arith_v_cvt_i32_f64_w32_gfx942,
+                                       Conversion64::DoubleToSigned);
+}
+
+TEST(ConversionCvtI32F64W64Gfx942, Arithmetic) {
+  check_float64<64, 2, 1, false, true>(rj_arith_v_cvt_i32_f64_w64_gfx942,
+                                       Conversion64::DoubleToSigned);
+}
+
+TEST(ConversionCvtU32F64W32Gfx942, Arithmetic) {
+  check_float64<32, 2, 1, false, true>(rj_arith_v_cvt_u32_f64_w32_gfx942,
+                                       Conversion64::DoubleToUnsigned);
+}
+
+TEST(ConversionCvtU32F64W64Gfx942, Arithmetic) {
+  check_float64<64, 2, 1, false, true>(rj_arith_v_cvt_u32_f64_w64_gfx942,
+                                       Conversion64::DoubleToUnsigned);
+}
+
+// gfx950 shares the RDNA3/gfx942 model and matches MI350X captures.
+TEST(ConversionCvtF32F64W32Gfx950, Arithmetic) {
+  check_float64<32, 2, 1, false, true>(rj_arith_v_cvt_f32_f64_w32_gfx950,
+                                       Conversion64::DoubleToFloat);
+}
+
+TEST(ConversionCvtF32F64W64Gfx950, Arithmetic) {
+  check_float64<64, 2, 1, false, true>(rj_arith_v_cvt_f32_f64_w64_gfx950,
+                                       Conversion64::DoubleToFloat);
+}
+
+TEST(ConversionCvtF64F32W32Gfx950, Arithmetic) {
+  check_float64<32, 1, 2, false, true>(rj_arith_v_cvt_f64_f32_w32_gfx950,
+                                       Conversion64::FloatToDouble);
+}
+
+TEST(ConversionCvtF64F32W64Gfx950, Arithmetic) {
+  check_float64<64, 1, 2, false, true>(rj_arith_v_cvt_f64_f32_w64_gfx950,
+                                       Conversion64::FloatToDouble);
+}
+
+TEST(ConversionCvtF64I32W32Gfx950, Arithmetic) {
+  check_float64<32, 1, 2, false, true>(rj_arith_v_cvt_f64_i32_w32_gfx950,
+                                       Conversion64::SignedToDouble);
+}
+
+TEST(ConversionCvtF64I32W64Gfx950, Arithmetic) {
+  check_float64<64, 1, 2, false, true>(rj_arith_v_cvt_f64_i32_w64_gfx950,
+                                       Conversion64::SignedToDouble);
+}
+
+TEST(ConversionCvtF64U32W32Gfx950, Arithmetic) {
+  check_float64<32, 1, 2, false, true>(rj_arith_v_cvt_f64_u32_w32_gfx950,
+                                       Conversion64::UnsignedToDouble);
+}
+
+TEST(ConversionCvtF64U32W64Gfx950, Arithmetic) {
+  check_float64<64, 1, 2, false, true>(rj_arith_v_cvt_f64_u32_w64_gfx950,
+                                       Conversion64::UnsignedToDouble);
+}
+
+TEST(ConversionCvtI32F64W32Gfx950, Arithmetic) {
+  check_float64<32, 2, 1, false, true>(rj_arith_v_cvt_i32_f64_w32_gfx950,
+                                       Conversion64::DoubleToSigned);
+}
+
+TEST(ConversionCvtI32F64W64Gfx950, Arithmetic) {
+  check_float64<64, 2, 1, false, true>(rj_arith_v_cvt_i32_f64_w64_gfx950,
+                                       Conversion64::DoubleToSigned);
+}
+
+TEST(ConversionCvtU32F64W32Gfx950, Arithmetic) {
+  check_float64<32, 2, 1, false, true>(rj_arith_v_cvt_u32_f64_w32_gfx950,
+                                       Conversion64::DoubleToUnsigned);
+}
+
+TEST(ConversionCvtU32F64W64Gfx950, Arithmetic) {
+  check_float64<64, 2, 1, false, true>(rj_arith_v_cvt_u32_f64_w64_gfx950,
+                                       Conversion64::DoubleToUnsigned);
+}
+
+// gfx10/gfx115x/gfx908/gfx90a share the RDNA3 numeric model via loose-only _gfx10 wrappers.
+TEST(ConversionCvtF32F64W32Gfx10, Arithmetic) {
+  check_float64<32, 2, 1, false, false>(rj_arith_v_cvt_f32_f64_w32_gfx10,
+                                        Conversion64::DoubleToFloat);
+}
+
+TEST(ConversionCvtF32F64W64Gfx10, Arithmetic) {
+  check_float64<64, 2, 1, false, false>(rj_arith_v_cvt_f32_f64_w64_gfx10,
+                                        Conversion64::DoubleToFloat);
+}
+
+TEST(ConversionCvtF64F32W32Gfx10, Arithmetic) {
+  check_float64<32, 1, 2, false, false>(rj_arith_v_cvt_f64_f32_w32_gfx10,
+                                        Conversion64::FloatToDouble);
+}
+
+TEST(ConversionCvtF64F32W64Gfx10, Arithmetic) {
+  check_float64<64, 1, 2, false, false>(rj_arith_v_cvt_f64_f32_w64_gfx10,
+                                        Conversion64::FloatToDouble);
+}
+
+TEST(ConversionCvtF64I32W32Gfx10, Arithmetic) {
+  check_float64<32, 1, 2, false, false>(rj_arith_v_cvt_f64_i32_w32_gfx10,
+                                        Conversion64::SignedToDouble);
+}
+
+TEST(ConversionCvtF64I32W64Gfx10, Arithmetic) {
+  check_float64<64, 1, 2, false, false>(rj_arith_v_cvt_f64_i32_w64_gfx10,
+                                        Conversion64::SignedToDouble);
+}
+
+TEST(ConversionCvtF64U32W32Gfx10, Arithmetic) {
+  check_float64<32, 1, 2, false, false>(rj_arith_v_cvt_f64_u32_w32_gfx10,
+                                        Conversion64::UnsignedToDouble);
+}
+
+TEST(ConversionCvtF64U32W64Gfx10, Arithmetic) {
+  check_float64<64, 1, 2, false, false>(rj_arith_v_cvt_f64_u32_w64_gfx10,
+                                        Conversion64::UnsignedToDouble);
+}
+
+TEST(ConversionCvtI32F64W32Gfx10, Arithmetic) {
+  check_float64<32, 2, 1, false, false>(rj_arith_v_cvt_i32_f64_w32_gfx10,
+                                        Conversion64::DoubleToSigned);
+}
+
+TEST(ConversionCvtI32F64W64Gfx10, Arithmetic) {
+  check_float64<64, 2, 1, false, false>(rj_arith_v_cvt_i32_f64_w64_gfx10,
+                                        Conversion64::DoubleToSigned);
+}
+
+TEST(ConversionCvtU32F64W32Gfx10, Arithmetic) {
+  check_float64<32, 2, 1, false, false>(rj_arith_v_cvt_u32_f64_w32_gfx10,
+                                        Conversion64::DoubleToUnsigned);
+}
+
+TEST(ConversionCvtU32F64W64Gfx10, Arithmetic) {
+  check_float64<64, 2, 1, false, false>(rj_arith_v_cvt_u32_f64_w64_gfx10,
+                                        Conversion64::DoubleToUnsigned);
+}
+
+// gfx1100 (W7900, mkm2) lanes: hw1100-noieee (2026-09-25, MODE.IEEE clear) for 0x1f0/0x100,
+// hw2-gfx1100 (2026-10-06) for IEEE set (0x3f0) and the Track C hw1100-wide corpus (2026-11-18)
+// for round toward +inf (0x1f5) and -inf (0x1fa). Widening a signaling NaN keeps it signaling
+// with IEEE clear and quiets it with IEEE set; narrowing the largest double stays finite toward
+// the opposite sign; mul:2 applies with output denormals flushed; unsigned results map negative
+// and NaN inputs to zero.
+TEST(ConversionFloat64Gfx11, ExactMatchesHardware) {
+  rocjitsu::arith::test::expect_captured_conversion_gfx11<1, 2, 32>(
+      rj_arith_v_cvt_f64_f32_w32, 0x1f0, 0, 0x7f800001, 0, 0, 0, 0x7ff0000020000000ULL);
+  rocjitsu::arith::test::expect_captured_conversion_gfx11<1, 2, 32>(
+      rj_arith_v_cvt_f64_f32_w32, 0x3f0, 0, 0x7f800001, 0, 0, 0, 0x7ff8000020000000ULL);
+  rocjitsu::arith::test::expect_captured_conversion_gfx11<1, 2, 32>(
+      rj_arith_v_cvt_f64_f32_w32, 0x1f5, 0, 0x00800000, 0, 0, 0, 0x3810000000000000ULL);
+  rocjitsu::arith::test::expect_captured_conversion_gfx11<1, 1, 32>(
+      rj_arith_v_cvt_f32_f64_w32, 0x1f5, 0, 0xffefffffffffffffULL, 0, 0, 0, 0xff7fffffU);
+  rocjitsu::arith::test::expect_captured_conversion_gfx11<1, 1, 32>(
+      rj_arith_v_cvt_f32_f64_w32, 0x1fa, 0, 0x7fefffffffffffffULL, 0, 0, 0, 0x7f7fffffU);
+  rocjitsu::arith::test::expect_captured_conversion_gfx11<1, 1, 32>(
+      rj_arith_v_cvt_f32_f64_w32, 0x100, RJ_ARITH_ALU_OMOD_2, 0x3ff0000000000000ULL, 0, 0, 0,
+      0x40000000U);
+  rocjitsu::arith::test::expect_captured_conversion_gfx11<1, 2, 64>(
+      rj_arith_v_cvt_f64_i32_w32, 0x1f0, 0, 0xffffffff, 0, 0, 0, 0xbff0000000000000ULL);
+  rocjitsu::arith::test::expect_captured_conversion_gfx11<1, 1, 64>(
+      rj_arith_v_cvt_u32_f64_w32, 0x1f0, 0, 0x8000000000000000ULL, 0, 0, 0, 0);
+  rocjitsu::arith::test::expect_captured_conversion_gfx11<1, 1, 64>(
+      rj_arith_v_cvt_u32_f64_w32, 0x1f0, 0, 0x800fffffffffffffULL, 0, 0, 0, 0);
+  rocjitsu::arith::test::expect_captured_conversion_gfx11<1, 1, 64>(
+      rj_arith_v_cvt_u32_f64_w32, 0x1f0, 0, 0xbff0000000000000ULL, 0, 0, 0, 0);
 }

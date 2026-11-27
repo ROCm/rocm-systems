@@ -17,21 +17,28 @@ namespace cdna1 {
 
 namespace {
 template <typename MimgMachineInst>
+bool mimg_has_status(const MimgMachineInst *inst, bool sampler) {
+  // A dropped fetch with DMASK=0 cannot produce TFE status. LWE
+  // can still return status for samplers. Both share one DWORD.
+  bool status = false;
+  if constexpr (requires { inst->tfe; }) {
+    status = inst->tfe && inst->dmask;
+  }
+  if constexpr (requires { inst->lwe; }) {
+    status = status || (sampler && inst->lwe);
+  }
+  return status;
+}
+template <typename MimgMachineInst>
 uint32_t mimg_vdata_bits(const MimgMachineInst *inst, bool gather4, bool d16_allowed,
                          bool status_allowed, bool sampler) {
   uint32_t words = gather4 ? 4u : std::max(1, std::popcount(uint32_t{inst->dmask}));
-  if (d16_allowed && inst->d16)
+  if (d16_allowed && inst->d16) {
     words = (words + 1) / 2;
-  // A dropped fetch with DMASK=0 cannot produce TFE status. LWE
-  // can still return status for sampler operations. Both flags
-  // share one status word; stores do not consume that word.
-  bool status = false;
-  if constexpr (requires { inst->tfe; })
-    status = status_allowed && inst->tfe && inst->dmask;
-  if constexpr (requires { inst->lwe; })
-    status = status || (status_allowed && sampler && inst->lwe);
-  if (status)
+  }
+  if (status_allowed && mimg_has_status(inst, sampler)) {
     ++words;
+  }
   return words * 32;
 }
 } // namespace
@@ -52,29 +59,35 @@ ImageLoadMimg::ImageLoadMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_LOAD);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Load);
 }
 
 void ImageLoadMimg::implicit_uses(RegisterSet &uses) const {
   Mimg::implicit_uses(uses);
   const auto registers = amdgpu::contiguous_image_address_registers(inst_.vaddr);
   const uint32_t count = (inst_.a16 ? 2u : 3u);
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
   implicit_preservation_uses(uses);
 }
 
 bool ImageLoadMimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
-  const uint32_t components = std::popcount(uint32_t{inst_.dmask});
-  if (inst_.d16 && (components & 1u))
+  const uint32_t components = amdgpu::image_result_components(inst_.dmask, false);
+  if (inst_.d16 && (components & 1u)) {
     if (auto r = vdata.to_register_ref()) {
       const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
       const auto registers = amdgpu::contiguous_image_address_registers(inst_.vaddr);
       const uint32_t count = (inst_.a16 ? 2u : 3u);
-      for (uint32_t index = 0; index < count; ++index)
-        if (registers[index] == preserved.index)
+      for (uint32_t index = 0; index < count; ++index) {
+        if (registers[index] == preserved.index) {
           return true;
+        }
+      }
       preservation_uses.expand(preserved);
     }
+  }
   return true;
 }
 
@@ -86,8 +99,9 @@ namespace detail {
 DecodeResult decodeImageLoadMimg(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_load", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageLoadMimg>(opcode);
 }
 } // namespace detail
@@ -109,29 +123,35 @@ ImageLoadMipMimg::ImageLoadMipMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_LOAD_MIP);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Load);
 }
 
 void ImageLoadMipMimg::implicit_uses(RegisterSet &uses) const {
   Mimg::implicit_uses(uses);
   const auto registers = amdgpu::contiguous_image_address_registers(inst_.vaddr);
   const uint32_t count = (0u + (inst_.a16 ? (3u + 1u + 1) / 2 : 3u + 1u));
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
   implicit_preservation_uses(uses);
 }
 
 bool ImageLoadMipMimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
-  const uint32_t components = std::popcount(uint32_t{inst_.dmask});
-  if (inst_.d16 && (components & 1u))
+  const uint32_t components = amdgpu::image_result_components(inst_.dmask, false);
+  if (inst_.d16 && (components & 1u)) {
     if (auto r = vdata.to_register_ref()) {
       const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
       const auto registers = amdgpu::contiguous_image_address_registers(inst_.vaddr);
       const uint32_t count = (0u + (inst_.a16 ? (3u + 1u + 1) / 2 : 3u + 1u));
-      for (uint32_t index = 0; index < count; ++index)
-        if (registers[index] == preserved.index)
+      for (uint32_t index = 0; index < count; ++index) {
+        if (registers[index] == preserved.index) {
           return true;
+        }
+      }
       preservation_uses.expand(preserved);
     }
+  }
   return true;
 }
 
@@ -144,8 +164,9 @@ DecodeResult decodeImageLoadMipMimg(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_load_mip", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageLoadMipMimg>(opcode);
 }
 } // namespace detail
@@ -163,6 +184,8 @@ ImageLoadPckMimg::ImageLoadPckMimg(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_LOAD_PCK);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -170,8 +193,9 @@ DecodeResult decodeImageLoadPckMimg(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_load_pck", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageLoadPckMimg>(opcode);
 }
 } // namespace detail
@@ -189,6 +213,8 @@ ImageLoadPckSgnMimg::ImageLoadPckSgnMimg(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_LOAD_PCK_SGN);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -196,8 +222,9 @@ DecodeResult decodeImageLoadPckSgnMimg(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_load_pck_sgn", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageLoadPckSgnMimg>(opcode);
 }
 } // namespace detail
@@ -215,6 +242,8 @@ ImageLoadMipPckMimg::ImageLoadMipPckMimg(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_LOAD_MIP_PCK);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -222,8 +251,9 @@ DecodeResult decodeImageLoadMipPckMimg(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_load_mip_pck", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageLoadMipPckMimg>(opcode);
 }
 } // namespace detail
@@ -241,6 +271,8 @@ ImageLoadMipPckSgnMimg::ImageLoadMipPckSgnMimg(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_LOAD_MIP_PCK_SGN);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -248,8 +280,9 @@ DecodeResult decodeImageLoadMipPckSgnMimg(const MachineInst *opcode,
                                           const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_load_mip_pck_sgn", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageLoadMipPckSgnMimg>(opcode);
 }
 } // namespace detail
@@ -270,14 +303,17 @@ ImageStoreMimg::ImageStoreMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_STORE);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Store);
 }
 
 void ImageStoreMimg::implicit_uses(RegisterSet &uses) const {
   Mimg::implicit_uses(uses);
   const auto registers = amdgpu::contiguous_image_address_registers(inst_.vaddr);
   const uint32_t count = (inst_.a16 ? 2u : 3u);
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
 }
 
 bool ImageStoreMimg::tracks_explicit_source(uint8_t operand_index) const {
@@ -288,8 +324,9 @@ namespace detail {
 DecodeResult decodeImageStoreMimg(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_store", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageStoreMimg>(opcode);
 }
 } // namespace detail
@@ -311,14 +348,17 @@ ImageStoreMipMimg::ImageStoreMipMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_STORE_MIP);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Store);
 }
 
 void ImageStoreMipMimg::implicit_uses(RegisterSet &uses) const {
   Mimg::implicit_uses(uses);
   const auto registers = amdgpu::contiguous_image_address_registers(inst_.vaddr);
   const uint32_t count = (0u + (inst_.a16 ? (3u + 1u + 1) / 2 : 3u + 1u));
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
 }
 
 bool ImageStoreMipMimg::tracks_explicit_source(uint8_t operand_index) const {
@@ -330,8 +370,9 @@ DecodeResult decodeImageStoreMipMimg(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_store_mip", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageStoreMipMimg>(opcode);
 }
 } // namespace detail
@@ -349,6 +390,8 @@ ImageStorePckMimg::ImageStorePckMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 0;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_STORE_PCK);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -356,8 +399,9 @@ DecodeResult decodeImageStorePckMimg(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_store_pck", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageStorePckMimg>(opcode);
 }
 } // namespace detail
@@ -375,6 +419,8 @@ ImageStoreMipPckMimg::ImageStoreMipPckMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 0;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_STORE_MIP_PCK);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -382,8 +428,9 @@ DecodeResult decodeImageStoreMipPckMimg(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_store_mip_pck", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageStoreMipPckMimg>(opcode);
 }
 } // namespace detail
@@ -401,6 +448,8 @@ ImageGetResinfoMimg::ImageGetResinfoMimg(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GET_RESINFO);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Other);
 }
 
 namespace detail {
@@ -408,8 +457,9 @@ DecodeResult decodeImageGetResinfoMimg(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_get_resinfo", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageGetResinfoMimg>(opcode);
 }
 } // namespace detail
@@ -433,11 +483,14 @@ ImageAtomicSwapMimg::ImageAtomicSwapMimg(const MachineInst *inst)
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
   num_dst_ = 1;
-  if ((inst_.glc != 0))
+  if ((inst_.glc != 0)) {
     dst_operands_[num_dst_++] = &vdata_return;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_SWAP);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -445,8 +498,9 @@ DecodeResult decodeImageAtomicSwapMimg(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_atomic_swap", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageAtomicSwapMimg>(opcode);
 }
 } // namespace detail
@@ -470,11 +524,14 @@ ImageAtomicCmpswapMimg::ImageAtomicCmpswapMimg(const MachineInst *inst)
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
   num_dst_ = 1;
-  if ((inst_.glc != 0))
+  if ((inst_.glc != 0)) {
     dst_operands_[num_dst_++] = &vdata_return;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_CMPSWAP);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -482,8 +539,9 @@ DecodeResult decodeImageAtomicCmpswapMimg(const MachineInst *opcode,
                                           const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_atomic_cmpswap", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageAtomicCmpswapMimg>(opcode);
 }
 } // namespace detail
@@ -507,11 +565,14 @@ ImageAtomicAddMimg::ImageAtomicAddMimg(const MachineInst *inst)
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
   num_dst_ = 1;
-  if ((inst_.glc != 0))
+  if ((inst_.glc != 0)) {
     dst_operands_[num_dst_++] = &vdata_return;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_ADD);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -519,8 +580,9 @@ DecodeResult decodeImageAtomicAddMimg(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_atomic_add", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageAtomicAddMimg>(opcode);
 }
 } // namespace detail
@@ -544,11 +606,14 @@ ImageAtomicSubMimg::ImageAtomicSubMimg(const MachineInst *inst)
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
   num_dst_ = 1;
-  if ((inst_.glc != 0))
+  if ((inst_.glc != 0)) {
     dst_operands_[num_dst_++] = &vdata_return;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_SUB);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -556,8 +621,9 @@ DecodeResult decodeImageAtomicSubMimg(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_atomic_sub", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageAtomicSubMimg>(opcode);
 }
 } // namespace detail
@@ -581,11 +647,14 @@ ImageAtomicSminMimg::ImageAtomicSminMimg(const MachineInst *inst)
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
   num_dst_ = 1;
-  if ((inst_.glc != 0))
+  if ((inst_.glc != 0)) {
     dst_operands_[num_dst_++] = &vdata_return;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_SMIN);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -593,8 +662,9 @@ DecodeResult decodeImageAtomicSminMimg(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_atomic_smin", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageAtomicSminMimg>(opcode);
 }
 } // namespace detail
@@ -618,11 +688,14 @@ ImageAtomicUminMimg::ImageAtomicUminMimg(const MachineInst *inst)
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
   num_dst_ = 1;
-  if ((inst_.glc != 0))
+  if ((inst_.glc != 0)) {
     dst_operands_[num_dst_++] = &vdata_return;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_UMIN);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -630,8 +703,9 @@ DecodeResult decodeImageAtomicUminMimg(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_atomic_umin", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageAtomicUminMimg>(opcode);
 }
 } // namespace detail
@@ -655,11 +729,14 @@ ImageAtomicSmaxMimg::ImageAtomicSmaxMimg(const MachineInst *inst)
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
   num_dst_ = 1;
-  if ((inst_.glc != 0))
+  if ((inst_.glc != 0)) {
     dst_operands_[num_dst_++] = &vdata_return;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_SMAX);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -667,8 +744,9 @@ DecodeResult decodeImageAtomicSmaxMimg(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_atomic_smax", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageAtomicSmaxMimg>(opcode);
 }
 } // namespace detail
@@ -692,11 +770,14 @@ ImageAtomicUmaxMimg::ImageAtomicUmaxMimg(const MachineInst *inst)
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
   num_dst_ = 1;
-  if ((inst_.glc != 0))
+  if ((inst_.glc != 0)) {
     dst_operands_[num_dst_++] = &vdata_return;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_UMAX);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -704,8 +785,9 @@ DecodeResult decodeImageAtomicUmaxMimg(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_atomic_umax", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageAtomicUmaxMimg>(opcode);
 }
 } // namespace detail
@@ -729,11 +811,14 @@ ImageAtomicAndMimg::ImageAtomicAndMimg(const MachineInst *inst)
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
   num_dst_ = 1;
-  if ((inst_.glc != 0))
+  if ((inst_.glc != 0)) {
     dst_operands_[num_dst_++] = &vdata_return;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_AND);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -741,8 +826,9 @@ DecodeResult decodeImageAtomicAndMimg(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_atomic_and", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageAtomicAndMimg>(opcode);
 }
 } // namespace detail
@@ -766,11 +852,14 @@ ImageAtomicOrMimg::ImageAtomicOrMimg(const MachineInst *inst)
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
   num_dst_ = 1;
-  if ((inst_.glc != 0))
+  if ((inst_.glc != 0)) {
     dst_operands_[num_dst_++] = &vdata_return;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_OR);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -778,8 +867,9 @@ DecodeResult decodeImageAtomicOrMimg(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_atomic_or", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageAtomicOrMimg>(opcode);
 }
 } // namespace detail
@@ -803,11 +893,14 @@ ImageAtomicXorMimg::ImageAtomicXorMimg(const MachineInst *inst)
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
   num_dst_ = 1;
-  if ((inst_.glc != 0))
+  if ((inst_.glc != 0)) {
     dst_operands_[num_dst_++] = &vdata_return;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_XOR);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -815,8 +908,9 @@ DecodeResult decodeImageAtomicXorMimg(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_atomic_xor", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageAtomicXorMimg>(opcode);
 }
 } // namespace detail
@@ -840,11 +934,14 @@ ImageAtomicIncMimg::ImageAtomicIncMimg(const MachineInst *inst)
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
   num_dst_ = 1;
-  if ((inst_.glc != 0))
+  if ((inst_.glc != 0)) {
     dst_operands_[num_dst_++] = &vdata_return;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_INC);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -852,8 +949,9 @@ DecodeResult decodeImageAtomicIncMimg(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_atomic_inc", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageAtomicIncMimg>(opcode);
 }
 } // namespace detail
@@ -877,11 +975,14 @@ ImageAtomicDecMimg::ImageAtomicDecMimg(const MachineInst *inst)
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
   num_dst_ = 1;
-  if ((inst_.glc != 0))
+  if ((inst_.glc != 0)) {
     dst_operands_[num_dst_++] = &vdata_return;
+  }
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_DEC);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -889,8 +990,9 @@ DecodeResult decodeImageAtomicDecMimg(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_atomic_dec", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageAtomicDecMimg>(opcode);
 }
 } // namespace detail
@@ -913,29 +1015,35 @@ ImageSampleMimg::ImageSampleMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleMimg::implicit_uses(RegisterSet &uses) const {
   Mimg::implicit_uses(uses);
   const auto registers = amdgpu::contiguous_image_address_registers(inst_.vaddr);
   const uint32_t count = (inst_.a16 ? 2u : 3u);
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
   implicit_preservation_uses(uses);
 }
 
 bool ImageSampleMimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
-  const uint32_t components = std::popcount(uint32_t{inst_.dmask});
-  if (inst_.d16 && (components & 1u))
+  const uint32_t components = amdgpu::image_result_components(inst_.dmask, false);
+  if (inst_.d16 && (components & 1u)) {
     if (auto r = vdata.to_register_ref()) {
       const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
       const auto registers = amdgpu::contiguous_image_address_registers(inst_.vaddr);
       const uint32_t count = (inst_.a16 ? 2u : 3u);
-      for (uint32_t index = 0; index < count; ++index)
-        if (registers[index] == preserved.index)
+      for (uint32_t index = 0; index < count; ++index) {
+        if (registers[index] == preserved.index) {
           return true;
+        }
+      }
       preservation_uses.expand(preserved);
     }
+  }
   return true;
 }
 
@@ -948,8 +1056,9 @@ DecodeResult decodeImageSampleMimg(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_sample", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleMimg>(opcode);
 }
 } // namespace detail
@@ -969,6 +1078,8 @@ ImageSampleClMimg::ImageSampleClMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_CL);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -976,8 +1087,9 @@ DecodeResult decodeImageSampleClMimg(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_sample_cl", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleClMimg>(opcode);
 }
 } // namespace detail
@@ -1001,29 +1113,35 @@ ImageSampleDMimg::ImageSampleDMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_D);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleDMimg::implicit_uses(RegisterSet &uses) const {
   Mimg::implicit_uses(uses);
   const auto registers = amdgpu::contiguous_image_address_registers(inst_.vaddr);
   const uint32_t count = ((inst_.a16 ? 4u : 6u) + (inst_.a16 ? (3u + 0u + 1) / 2 : 3u + 0u));
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
   implicit_preservation_uses(uses);
 }
 
 bool ImageSampleDMimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
-  const uint32_t components = std::popcount(uint32_t{inst_.dmask});
-  if (inst_.d16 && (components & 1u))
+  const uint32_t components = amdgpu::image_result_components(inst_.dmask, false);
+  if (inst_.d16 && (components & 1u)) {
     if (auto r = vdata.to_register_ref()) {
       const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
       const auto registers = amdgpu::contiguous_image_address_registers(inst_.vaddr);
       const uint32_t count = ((inst_.a16 ? 4u : 6u) + (inst_.a16 ? (3u + 0u + 1) / 2 : 3u + 0u));
-      for (uint32_t index = 0; index < count; ++index)
-        if (registers[index] == preserved.index)
+      for (uint32_t index = 0; index < count; ++index) {
+        if (registers[index] == preserved.index) {
           return true;
+        }
+      }
       preservation_uses.expand(preserved);
     }
+  }
   return true;
 }
 
@@ -1036,8 +1154,9 @@ DecodeResult decodeImageSampleDMimg(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_sample_d", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleDMimg>(opcode);
 }
 } // namespace detail
@@ -1057,6 +1176,8 @@ ImageSampleDClMimg::ImageSampleDClMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_D_CL);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1064,8 +1185,9 @@ DecodeResult decodeImageSampleDClMimg(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_sample_d_cl", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleDClMimg>(opcode);
 }
 } // namespace detail
@@ -1089,29 +1211,35 @@ ImageSampleLMimg::ImageSampleLMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_L);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleLMimg::implicit_uses(RegisterSet &uses) const {
   Mimg::implicit_uses(uses);
   const auto registers = amdgpu::contiguous_image_address_registers(inst_.vaddr);
   const uint32_t count = (0u + (inst_.a16 ? (3u + 1u + 1) / 2 : 3u + 1u));
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
   implicit_preservation_uses(uses);
 }
 
 bool ImageSampleLMimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
-  const uint32_t components = std::popcount(uint32_t{inst_.dmask});
-  if (inst_.d16 && (components & 1u))
+  const uint32_t components = amdgpu::image_result_components(inst_.dmask, false);
+  if (inst_.d16 && (components & 1u)) {
     if (auto r = vdata.to_register_ref()) {
       const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
       const auto registers = amdgpu::contiguous_image_address_registers(inst_.vaddr);
       const uint32_t count = (0u + (inst_.a16 ? (3u + 1u + 1) / 2 : 3u + 1u));
-      for (uint32_t index = 0; index < count; ++index)
-        if (registers[index] == preserved.index)
+      for (uint32_t index = 0; index < count; ++index) {
+        if (registers[index] == preserved.index) {
           return true;
+        }
+      }
       preservation_uses.expand(preserved);
     }
+  }
   return true;
 }
 
@@ -1124,8 +1252,9 @@ DecodeResult decodeImageSampleLMimg(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_sample_l", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleLMimg>(opcode);
 }
 } // namespace detail
@@ -1145,6 +1274,8 @@ ImageSampleBMimg::ImageSampleBMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_B);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1152,8 +1283,9 @@ DecodeResult decodeImageSampleBMimg(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_sample_b", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleBMimg>(opcode);
 }
 } // namespace detail
@@ -1173,6 +1305,8 @@ ImageSampleBClMimg::ImageSampleBClMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_B_CL);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1180,8 +1314,9 @@ DecodeResult decodeImageSampleBClMimg(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_sample_b_cl", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleBClMimg>(opcode);
 }
 } // namespace detail
@@ -1204,29 +1339,35 @@ ImageSampleLzMimg::ImageSampleLzMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_LZ);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleLzMimg::implicit_uses(RegisterSet &uses) const {
   Mimg::implicit_uses(uses);
   const auto registers = amdgpu::contiguous_image_address_registers(inst_.vaddr);
   const uint32_t count = (inst_.a16 ? 2u : 3u);
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
   implicit_preservation_uses(uses);
 }
 
 bool ImageSampleLzMimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
-  const uint32_t components = std::popcount(uint32_t{inst_.dmask});
-  if (inst_.d16 && (components & 1u))
+  const uint32_t components = amdgpu::image_result_components(inst_.dmask, false);
+  if (inst_.d16 && (components & 1u)) {
     if (auto r = vdata.to_register_ref()) {
       const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
       const auto registers = amdgpu::contiguous_image_address_registers(inst_.vaddr);
       const uint32_t count = (inst_.a16 ? 2u : 3u);
-      for (uint32_t index = 0; index < count; ++index)
-        if (registers[index] == preserved.index)
+      for (uint32_t index = 0; index < count; ++index) {
+        if (registers[index] == preserved.index) {
           return true;
+        }
+      }
       preservation_uses.expand(preserved);
     }
+  }
   return true;
 }
 
@@ -1239,8 +1380,9 @@ DecodeResult decodeImageSampleLzMimg(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_sample_lz", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleLzMimg>(opcode);
 }
 } // namespace detail
@@ -1260,6 +1402,8 @@ ImageSampleCMimg::ImageSampleCMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1267,8 +1411,9 @@ DecodeResult decodeImageSampleCMimg(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_sample_c", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleCMimg>(opcode);
 }
 } // namespace detail
@@ -1288,6 +1433,8 @@ ImageSampleCClMimg::ImageSampleCClMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_CL);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1295,8 +1442,9 @@ DecodeResult decodeImageSampleCClMimg(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_sample_c_cl", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleCClMimg>(opcode);
 }
 } // namespace detail
@@ -1316,6 +1464,8 @@ ImageSampleCDMimg::ImageSampleCDMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_D);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1323,8 +1473,9 @@ DecodeResult decodeImageSampleCDMimg(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_sample_c_d", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleCDMimg>(opcode);
 }
 } // namespace detail
@@ -1344,6 +1495,8 @@ ImageSampleCDClMimg::ImageSampleCDClMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_D_CL);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1351,8 +1504,9 @@ DecodeResult decodeImageSampleCDClMimg(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_sample_c_d_cl", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleCDClMimg>(opcode);
 }
 } // namespace detail
@@ -1372,6 +1526,8 @@ ImageSampleCLMimg::ImageSampleCLMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_L);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1379,8 +1535,9 @@ DecodeResult decodeImageSampleCLMimg(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_sample_c_l", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleCLMimg>(opcode);
 }
 } // namespace detail
@@ -1400,6 +1557,8 @@ ImageSampleCBMimg::ImageSampleCBMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_B);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1407,8 +1566,9 @@ DecodeResult decodeImageSampleCBMimg(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_sample_c_b", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleCBMimg>(opcode);
 }
 } // namespace detail
@@ -1428,6 +1588,8 @@ ImageSampleCBClMimg::ImageSampleCBClMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_B_CL);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1435,8 +1597,9 @@ DecodeResult decodeImageSampleCBClMimg(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_sample_c_b_cl", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleCBClMimg>(opcode);
 }
 } // namespace detail
@@ -1456,6 +1619,8 @@ ImageSampleCLzMimg::ImageSampleCLzMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_LZ);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1463,8 +1628,9 @@ DecodeResult decodeImageSampleCLzMimg(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_sample_c_lz", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleCLzMimg>(opcode);
 }
 } // namespace detail
@@ -1484,6 +1650,8 @@ ImageSampleOMimg::ImageSampleOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1491,8 +1659,9 @@ DecodeResult decodeImageSampleOMimg(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_sample_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleOMimg>(opcode);
 }
 } // namespace detail
@@ -1512,6 +1681,8 @@ ImageSampleClOMimg::ImageSampleClOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_CL_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1519,8 +1690,9 @@ DecodeResult decodeImageSampleClOMimg(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_sample_cl_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleClOMimg>(opcode);
 }
 } // namespace detail
@@ -1540,6 +1712,8 @@ ImageSampleDOMimg::ImageSampleDOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_D_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1547,8 +1721,9 @@ DecodeResult decodeImageSampleDOMimg(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_sample_d_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleDOMimg>(opcode);
 }
 } // namespace detail
@@ -1568,6 +1743,8 @@ ImageSampleDClOMimg::ImageSampleDClOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_D_CL_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1575,8 +1752,9 @@ DecodeResult decodeImageSampleDClOMimg(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_sample_d_cl_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleDClOMimg>(opcode);
 }
 } // namespace detail
@@ -1596,6 +1774,8 @@ ImageSampleLOMimg::ImageSampleLOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_L_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1603,8 +1783,9 @@ DecodeResult decodeImageSampleLOMimg(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_sample_l_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleLOMimg>(opcode);
 }
 } // namespace detail
@@ -1624,6 +1805,8 @@ ImageSampleBOMimg::ImageSampleBOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_B_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1631,8 +1814,9 @@ DecodeResult decodeImageSampleBOMimg(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_sample_b_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleBOMimg>(opcode);
 }
 } // namespace detail
@@ -1652,6 +1836,8 @@ ImageSampleBClOMimg::ImageSampleBClOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_B_CL_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1659,8 +1845,9 @@ DecodeResult decodeImageSampleBClOMimg(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_sample_b_cl_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleBClOMimg>(opcode);
 }
 } // namespace detail
@@ -1680,6 +1867,8 @@ ImageSampleLzOMimg::ImageSampleLzOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_LZ_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1687,8 +1876,9 @@ DecodeResult decodeImageSampleLzOMimg(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_sample_lz_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleLzOMimg>(opcode);
 }
 } // namespace detail
@@ -1708,6 +1898,8 @@ ImageSampleCOMimg::ImageSampleCOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1715,8 +1907,9 @@ DecodeResult decodeImageSampleCOMimg(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_sample_c_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleCOMimg>(opcode);
 }
 } // namespace detail
@@ -1736,6 +1929,8 @@ ImageSampleCClOMimg::ImageSampleCClOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_CL_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1743,8 +1938,9 @@ DecodeResult decodeImageSampleCClOMimg(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_sample_c_cl_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleCClOMimg>(opcode);
 }
 } // namespace detail
@@ -1764,6 +1960,8 @@ ImageSampleCDOMimg::ImageSampleCDOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_D_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1771,8 +1969,9 @@ DecodeResult decodeImageSampleCDOMimg(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_sample_c_d_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleCDOMimg>(opcode);
 }
 } // namespace detail
@@ -1792,6 +1991,8 @@ ImageSampleCDClOMimg::ImageSampleCDClOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_D_CL_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1799,8 +2000,9 @@ DecodeResult decodeImageSampleCDClOMimg(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_sample_c_d_cl_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleCDClOMimg>(opcode);
 }
 } // namespace detail
@@ -1820,6 +2022,8 @@ ImageSampleCLOMimg::ImageSampleCLOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_L_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1827,8 +2031,9 @@ DecodeResult decodeImageSampleCLOMimg(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_sample_c_l_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleCLOMimg>(opcode);
 }
 } // namespace detail
@@ -1848,6 +2053,8 @@ ImageSampleCBOMimg::ImageSampleCBOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_B_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1855,8 +2062,9 @@ DecodeResult decodeImageSampleCBOMimg(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_sample_c_b_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleCBOMimg>(opcode);
 }
 } // namespace detail
@@ -1876,6 +2084,8 @@ ImageSampleCBClOMimg::ImageSampleCBClOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_B_CL_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1883,8 +2093,9 @@ DecodeResult decodeImageSampleCBClOMimg(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_sample_c_b_cl_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleCBClOMimg>(opcode);
 }
 } // namespace detail
@@ -1904,6 +2115,8 @@ ImageSampleCLzOMimg::ImageSampleCLzOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_LZ_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1911,8 +2124,9 @@ DecodeResult decodeImageSampleCLzOMimg(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_sample_c_lz_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleCLzOMimg>(opcode);
 }
 } // namespace detail
@@ -1932,6 +2146,8 @@ ImageGather4Mimg::ImageGather4Mimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1939,8 +2155,9 @@ DecodeResult decodeImageGather4Mimg(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_gather4", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageGather4Mimg>(opcode);
 }
 } // namespace detail
@@ -1960,6 +2177,8 @@ ImageGather4ClMimg::ImageGather4ClMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_CL);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1967,8 +2186,9 @@ DecodeResult decodeImageGather4ClMimg(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_gather4_cl", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageGather4ClMimg>(opcode);
 }
 } // namespace detail
@@ -1988,6 +2208,8 @@ ImageGather4hMimg::ImageGather4hMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4H);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1995,8 +2217,9 @@ DecodeResult decodeImageGather4hMimg(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_gather4h", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageGather4hMimg>(opcode);
 }
 } // namespace detail
@@ -2016,6 +2239,8 @@ ImageGather4LMimg::ImageGather4LMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_L);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -2023,8 +2248,9 @@ DecodeResult decodeImageGather4LMimg(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_gather4_l", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageGather4LMimg>(opcode);
 }
 } // namespace detail
@@ -2044,6 +2270,8 @@ ImageGather4BMimg::ImageGather4BMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_B);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -2051,8 +2279,9 @@ DecodeResult decodeImageGather4BMimg(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_gather4_b", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageGather4BMimg>(opcode);
 }
 } // namespace detail
@@ -2072,6 +2301,8 @@ ImageGather4BClMimg::ImageGather4BClMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_B_CL);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -2079,8 +2310,9 @@ DecodeResult decodeImageGather4BClMimg(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_gather4_b_cl", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageGather4BClMimg>(opcode);
 }
 } // namespace detail
@@ -2103,14 +2335,17 @@ ImageGather4LzMimg::ImageGather4LzMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_LZ);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageGather4LzMimg::implicit_uses(RegisterSet &uses) const {
   Mimg::implicit_uses(uses);
   const auto registers = amdgpu::contiguous_image_address_registers(inst_.vaddr);
   const uint32_t count = (inst_.a16 ? 2u : 3u);
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
 }
 
 bool ImageGather4LzMimg::tracks_explicit_source(uint8_t operand_index) const {
@@ -2122,8 +2357,9 @@ DecodeResult decodeImageGather4LzMimg(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_gather4_lz", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageGather4LzMimg>(opcode);
 }
 } // namespace detail
@@ -2143,6 +2379,8 @@ ImageGather4CMimg::ImageGather4CMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_C);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -2150,8 +2388,9 @@ DecodeResult decodeImageGather4CMimg(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_gather4_c", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageGather4CMimg>(opcode);
 }
 } // namespace detail
@@ -2171,6 +2410,8 @@ ImageGather4CClMimg::ImageGather4CClMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_C_CL);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -2178,8 +2419,9 @@ DecodeResult decodeImageGather4CClMimg(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_gather4_c_cl", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageGather4CClMimg>(opcode);
 }
 } // namespace detail
@@ -2199,6 +2441,8 @@ ImageGather4hPckMimg::ImageGather4hPckMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4H_PCK);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -2206,8 +2450,9 @@ DecodeResult decodeImageGather4hPckMimg(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_gather4h_pck", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageGather4hPckMimg>(opcode);
 }
 } // namespace detail
@@ -2227,6 +2472,8 @@ ImageGather8hPckMimg::ImageGather8hPckMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER8H_PCK);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -2234,8 +2481,9 @@ DecodeResult decodeImageGather8hPckMimg(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_gather8h_pck", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageGather8hPckMimg>(opcode);
 }
 } // namespace detail
@@ -2255,6 +2503,8 @@ ImageGather4CLMimg::ImageGather4CLMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_C_L);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -2262,8 +2512,9 @@ DecodeResult decodeImageGather4CLMimg(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_gather4_c_l", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageGather4CLMimg>(opcode);
 }
 } // namespace detail
@@ -2283,6 +2534,8 @@ ImageGather4CBMimg::ImageGather4CBMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_C_B);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -2290,8 +2543,9 @@ DecodeResult decodeImageGather4CBMimg(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_gather4_c_b", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageGather4CBMimg>(opcode);
 }
 } // namespace detail
@@ -2311,6 +2565,8 @@ ImageGather4CBClMimg::ImageGather4CBClMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_C_B_CL);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -2318,8 +2574,9 @@ DecodeResult decodeImageGather4CBClMimg(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_gather4_c_b_cl", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageGather4CBClMimg>(opcode);
 }
 } // namespace detail
@@ -2339,6 +2596,8 @@ ImageGather4CLzMimg::ImageGather4CLzMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_C_LZ);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -2346,8 +2605,9 @@ DecodeResult decodeImageGather4CLzMimg(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_gather4_c_lz", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageGather4CLzMimg>(opcode);
 }
 } // namespace detail
@@ -2367,6 +2627,8 @@ ImageGather4OMimg::ImageGather4OMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -2374,8 +2636,9 @@ DecodeResult decodeImageGather4OMimg(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_gather4_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageGather4OMimg>(opcode);
 }
 } // namespace detail
@@ -2395,6 +2658,8 @@ ImageGather4ClOMimg::ImageGather4ClOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_CL_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -2402,8 +2667,9 @@ DecodeResult decodeImageGather4ClOMimg(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_gather4_cl_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageGather4ClOMimg>(opcode);
 }
 } // namespace detail
@@ -2423,6 +2689,8 @@ ImageGather4LOMimg::ImageGather4LOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_L_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -2430,8 +2698,9 @@ DecodeResult decodeImageGather4LOMimg(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_gather4_l_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageGather4LOMimg>(opcode);
 }
 } // namespace detail
@@ -2451,6 +2720,8 @@ ImageGather4BOMimg::ImageGather4BOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_B_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -2458,8 +2729,9 @@ DecodeResult decodeImageGather4BOMimg(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_gather4_b_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageGather4BOMimg>(opcode);
 }
 } // namespace detail
@@ -2479,6 +2751,8 @@ ImageGather4BClOMimg::ImageGather4BClOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_B_CL_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -2486,8 +2760,9 @@ DecodeResult decodeImageGather4BClOMimg(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_gather4_b_cl_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageGather4BClOMimg>(opcode);
 }
 } // namespace detail
@@ -2507,6 +2782,8 @@ ImageGather4LzOMimg::ImageGather4LzOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_LZ_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -2514,8 +2791,9 @@ DecodeResult decodeImageGather4LzOMimg(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_gather4_lz_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageGather4LzOMimg>(opcode);
 }
 } // namespace detail
@@ -2535,6 +2813,8 @@ ImageGather4COMimg::ImageGather4COMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_C_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -2542,8 +2822,9 @@ DecodeResult decodeImageGather4COMimg(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_gather4_c_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageGather4COMimg>(opcode);
 }
 } // namespace detail
@@ -2563,6 +2844,8 @@ ImageGather4CClOMimg::ImageGather4CClOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_C_CL_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -2570,8 +2853,9 @@ DecodeResult decodeImageGather4CClOMimg(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_gather4_c_cl_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageGather4CClOMimg>(opcode);
 }
 } // namespace detail
@@ -2591,6 +2875,8 @@ ImageGather4CLOMimg::ImageGather4CLOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_C_L_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -2598,8 +2884,9 @@ DecodeResult decodeImageGather4CLOMimg(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_gather4_c_l_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageGather4CLOMimg>(opcode);
 }
 } // namespace detail
@@ -2619,6 +2906,8 @@ ImageGather4CBOMimg::ImageGather4CBOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_C_B_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -2626,8 +2915,9 @@ DecodeResult decodeImageGather4CBOMimg(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_gather4_c_b_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageGather4CBOMimg>(opcode);
 }
 } // namespace detail
@@ -2647,6 +2937,8 @@ ImageGather4CBClOMimg::ImageGather4CBClOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_C_B_CL_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -2654,8 +2946,9 @@ DecodeResult decodeImageGather4CBClOMimg(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_gather4_c_b_cl_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageGather4CBClOMimg>(opcode);
 }
 } // namespace detail
@@ -2675,6 +2968,8 @@ ImageGather4CLzOMimg::ImageGather4CLzOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_C_LZ_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -2682,8 +2977,9 @@ DecodeResult decodeImageGather4CLzOMimg(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_gather4_c_lz_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageGather4CLzOMimg>(opcode);
 }
 } // namespace detail
@@ -2703,6 +2999,8 @@ ImageGetLodMimg::ImageGetLodMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GET_LOD);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Other);
 }
 
 namespace detail {
@@ -2710,8 +3008,9 @@ DecodeResult decodeImageGetLodMimg(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_get_lod", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageGetLodMimg>(opcode);
 }
 } // namespace detail
@@ -2731,6 +3030,8 @@ ImageSampleCdMimg::ImageSampleCdMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_CD);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -2738,8 +3039,9 @@ DecodeResult decodeImageSampleCdMimg(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_sample_cd", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleCdMimg>(opcode);
 }
 } // namespace detail
@@ -2759,6 +3061,8 @@ ImageSampleCdClMimg::ImageSampleCdClMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_CD_CL);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -2766,8 +3070,9 @@ DecodeResult decodeImageSampleCdClMimg(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_sample_cd_cl", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleCdClMimg>(opcode);
 }
 } // namespace detail
@@ -2787,6 +3092,8 @@ ImageSampleCCdMimg::ImageSampleCCdMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_CD);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -2794,8 +3101,9 @@ DecodeResult decodeImageSampleCCdMimg(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_sample_c_cd", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleCCdMimg>(opcode);
 }
 } // namespace detail
@@ -2815,6 +3123,8 @@ ImageSampleCCdClMimg::ImageSampleCCdClMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_CD_CL);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -2822,8 +3132,9 @@ DecodeResult decodeImageSampleCCdClMimg(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_sample_c_cd_cl", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleCCdClMimg>(opcode);
 }
 } // namespace detail
@@ -2843,6 +3154,8 @@ ImageSampleCdOMimg::ImageSampleCdOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_CD_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -2850,8 +3163,9 @@ DecodeResult decodeImageSampleCdOMimg(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_sample_cd_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleCdOMimg>(opcode);
 }
 } // namespace detail
@@ -2871,6 +3185,8 @@ ImageSampleCdClOMimg::ImageSampleCdClOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_CD_CL_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -2878,8 +3194,9 @@ DecodeResult decodeImageSampleCdClOMimg(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_sample_cd_cl_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleCdClOMimg>(opcode);
 }
 } // namespace detail
@@ -2899,6 +3216,8 @@ ImageSampleCCdOMimg::ImageSampleCCdOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_CD_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -2906,8 +3225,9 @@ DecodeResult decodeImageSampleCCdOMimg(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_sample_c_cd_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleCCdOMimg>(opcode);
 }
 } // namespace detail
@@ -2927,6 +3247,8 @@ ImageSampleCCdClOMimg::ImageSampleCCdClOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_CD_CL_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -2934,8 +3256,9 @@ DecodeResult decodeImageSampleCCdClOMimg(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Mimg::validate_encoding(
       "image_sample_c_cd_cl_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageSampleCCdClOMimg>(opcode);
 }
 } // namespace detail

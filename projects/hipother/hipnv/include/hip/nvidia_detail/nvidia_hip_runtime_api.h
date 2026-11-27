@@ -30,6 +30,7 @@
 #define CUDA_12030 12030
 #define CUDA_12080 12080
 #define CUDA_13000 13000
+#define CUDA_13010 13010
 
 #ifdef __cplusplus
 extern "C" {
@@ -532,6 +533,8 @@ typedef struct cudaFuncAttributes hipFuncAttributes;
 typedef struct cudaLaunchParams hipLaunchParams;
 typedef CUDA_LAUNCH_PARAMS hipFunctionLaunchParams;
 typedef cudaArrayMemoryRequirements hipArrayMemoryRequirements;
+typedef struct cudaArraySparseProperties hipArraySparseProperties;
+#define hipArraySparsePropertiesSingleMipTail cudaArraySparsePropertiesSingleMipTail
 #define hipFunction_attribute CUfunction_attribute
 #define hipPointer_attribute CUpointer_attribute
 
@@ -2638,6 +2641,15 @@ inline static hipError_t hipMipmappedArrayGetMemoryRequirements(
   return hipCUDAErrorTohipError(
       cudaMipmappedArrayGetMemoryRequirements(memoryRequirements, mipmap, device));
 }
+inline static hipError_t hipArrayGetMemoryRequirements(
+    hipArrayMemoryRequirements* memoryRequirements, hipArray_t array, hipDevice_t device) {
+  return hipCUDAErrorTohipError(cudaArrayGetMemoryRequirements(memoryRequirements, array, device));
+}
+
+inline static hipError_t hipArrayGetSparseProperties(hipArraySparseProperties* sparseProperties,
+                                                     hipArray_t array) {
+  return hipCUDAErrorTohipError(cudaArrayGetSparseProperties(sparseProperties, array));
+}
 
 __HIP_DEPRECATED inline static hipError_t hipMemcpyToArray(hipArray_t dst, size_t wOffset,
                                                            size_t hOffset, const void* src,
@@ -3882,6 +3894,39 @@ inline static hipError_t hipDeviceGetLuid(char* luid, unsigned int* deviceNodeMa
 }
 #endif
 
+inline static hipError_t hipDeviceGetExecAffinitySupport(int* pi, hipExecAffinityType type,
+                                                         hipDevice_t dev) {
+#if CUDA_VERSION >= CUDA_11040
+  if (pi == NULL) {
+    return hipErrorInvalidValue;
+  }
+  int ccMajor = 0;
+  CUresult devStatus =
+      cuDeviceGetAttribute(&ccMajor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, dev);
+  if (devStatus != CUDA_SUCCESS) {
+    return hipCUResultTohipError(devStatus);
+  }
+  switch (type) {
+    case hipExecAffinityTypeCUCount:
+      return hipCUResultTohipError(
+          cuDeviceGetExecAffinitySupport(pi, CU_EXEC_AFFINITY_TYPE_SM_COUNT, dev));
+    case hipExtExecAffinityTypeGranularityCU:
+    case hipExtExecAffinityTypeGranularityWGP:
+      // CU-masking granularity is AMD-only; no NVIDIA device reports it.
+      *pi = 0;
+      return hipSuccess;
+    default:
+      return hipErrorInvalidValue;
+  }
+#else
+  // cuDeviceGetExecAffinitySupport and CUexecAffinityType were introduced in CUDA 11.4.
+  (void)pi;
+  (void)type;
+  (void)dev;
+  return hipErrorNotSupported;
+#endif
+}
+
 inline static hipError_t hipDeviceGetP2PAttribute(int* value, hipDeviceP2PAttr attr, int srcDevice,
                                                   int dstDevice) {
   return hipCUDAErrorTohipError(cudaDeviceGetP2PAttribute(value, attr, srcDevice, dstDevice));
@@ -4777,6 +4822,13 @@ inline static hipError_t hipArray3DGetDescriptor(HIP_ARRAY3D_DESCRIPTOR* pArrayD
   return hipCUResultTohipError(cuArray3DGetDescriptor(pArrayDescriptor, (CUarray)array));
 }
 
+#if CUDA_VERSION >= CUDA_11020
+inline static hipError_t hipArrayGetPlane(hipArray_t* pPlaneArray, hipArray_t hArray,
+                                          unsigned int planeIdx) {
+  return hipCUResultTohipError(cuArrayGetPlane((CUarray*)pPlaneArray, (CUarray)hArray, planeIdx));
+}
+#endif
+
 inline static hipError_t hipStreamBeginCapture(hipStream_t stream, hipStreamCaptureMode mode) {
   return hipCUDAErrorTohipError(cudaStreamBeginCapture(stream, mode));
 }
@@ -5142,6 +5194,38 @@ inline static hipError_t hipGraphNodeGetDependentNodes(hipGraphNode_t node,
 
 inline static hipError_t hipGraphNodeGetType(hipGraphNode_t node, hipGraphNodeType* pType) {
   return hipCUDAErrorTohipError(cudaGraphNodeGetType(node, pType));
+}
+
+inline static hipError_t hipGraphNodeGetLocalId(hipGraphNode_t node, unsigned int* nodeId) {
+#if CUDA_VERSION >= CUDA_13010
+  return hipCUDAErrorTohipError(cudaGraphNodeGetLocalId(node, nodeId));
+#else
+  return hipErrorNotSupported;
+#endif  // CUDA_VERSION >= CUDA_13010
+}
+
+inline static hipError_t hipGraphNodeGetToolsId(hipGraphNode_t node, unsigned long long* toolsId) {
+#if CUDA_VERSION >= CUDA_13010
+  return hipCUDAErrorTohipError(cudaGraphNodeGetToolsId(node, toolsId));
+#else
+  return hipErrorNotSupported;
+#endif  // CUDA_VERSION >= CUDA_13010
+}
+
+inline static hipError_t hipGraphGetId(hipGraph_t graph, unsigned int* graphId) {
+#if CUDA_VERSION >= CUDA_13010
+  return hipCUDAErrorTohipError(cudaGraphGetId(graph, graphId));
+#else
+  return hipErrorNotSupported;
+#endif  // CUDA_VERSION >= CUDA_13010
+}
+
+inline static hipError_t hipGraphExecGetId(hipGraphExec_t graphExec, unsigned int* graphId) {
+#if CUDA_VERSION >= CUDA_13010
+  return hipCUDAErrorTohipError(cudaGraphExecGetId(graphExec, graphId));
+#else
+  return hipErrorNotSupported;
+#endif  // CUDA_VERSION >= CUDA_13010
 }
 
 inline static hipError_t hipGraphDestroyNode(hipGraphNode_t node) {

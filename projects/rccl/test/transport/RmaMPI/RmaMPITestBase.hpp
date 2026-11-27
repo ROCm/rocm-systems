@@ -357,7 +357,7 @@ protected:
         // 6. connect (N-way collective)
         r = rma_->connect(pluginCtx_, handlePtrs.data(),
                           worldSize_, worldRank_,
-                          listenComm_, &collComm_);
+                          listenComm_, &collComm_, /*abortFlag=*/nullptr);
         if(r != ncclSuccess)
         {
             ADD_FAILURE() << "rma->connect failed: " << r;
@@ -367,10 +367,14 @@ protected:
         // 7. createContext — number of contexts driven by the parameter.
         // The RMA v14 config is host-only: no signal/counter pools or device
         // handle (those belong to the device-initiated GIN v14 surface).
+        // Fully connected: the v17 peerArray lists every rank (was rankStride = 1).
+        std::vector<int> peers(worldSize_);
+        for(int i = 0; i < worldSize_; ++i) peers[i] = i;
         ncclRmaConfig_t cfg = {};
-        cfg.nContexts    = GetNumContexts();
-        cfg.trafficClass = -1;
-        cfg.rankStride   = 1;  // fully connected; 0 is accepted as 1 in the proxy
+        cfg.nContexts      = GetNumContexts();
+        cfg.trafficClass   = -1;
+        cfg.peerArray      = peers.data();
+        cfg.peerArrayCount = worldSize_;
 
         r = rma_->createContext(collComm_, &cfg, &rmaCtx_);
         if(r != ncclSuccess)

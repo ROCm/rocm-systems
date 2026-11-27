@@ -25,8 +25,6 @@ class track_registry;
 
 namespace trace_cache
 {
-using char_vec_t = std::vector<char>;
-
 struct pmc_track_info
 {
     const char*                        default_units;

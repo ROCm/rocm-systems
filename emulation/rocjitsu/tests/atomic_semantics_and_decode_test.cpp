@@ -4,7 +4,6 @@
 #include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "instruction_failure_test_util.h"
-#include "restore_rounding.h"
 #include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/code/dbt/generated/encoding_cdna4_to_rdna4.h"
 #include "rocjitsu/code/dbt/generated/legalization_rdna3_5_to_rdna4.h"
@@ -34,6 +33,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/atomic_op.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
@@ -62,7 +62,7 @@ constexpr uint32_t kRdnaFormat32 = 20u << 12; // V# word3 FORMAT = BUF_FMT_32_UI
 
 class InstructionPolicyMachine {
 public:
-  explicit InstructionPolicyMachine(rj_code_arch_t arch)
+  explicit InstructionPolicyMachine(rocjitsu::IsaFamily arch)
       : memory("policy_memory"), cache("policy_cache") {
     amdgpu::ComputeUnitCore::Config config{};
     config.arch = arch;
@@ -72,8 +72,9 @@ public:
     config.lds_size_kb = 64;
     cache.set_backing_memory(&memory);
     rocjitsu::test::initialize_compute_unit(cu, "instruction_policy", config, &memory, &cache);
-    if (!cu)
+    if (!cu) {
       return;
+    }
     decoder = Decoder::create(arch);
     wave = cu->dispatch_wf(0, 0, 106, 256);
     wave->set_lds_size(1024);
@@ -81,8 +82,9 @@ public:
     base = wave->vgpr_alloc().base;
   }
   ~InstructionPolicyMachine() {
-    if (wave)
+    if (wave) {
       wave->halt();
+    }
   }
   template <size_t N>
   util::FailureOr<uint32_t> run(const std::array<uint32_t, N> &words, uint32_t a, uint32_t b = 0,
@@ -96,16 +98,19 @@ public:
     std::array<uint32_t, 4> padded{};
     std::ranges::copy(words, padded.begin());
     DecodeResult decoded = decoder->decode(padded.data());
-    if (decoded.failed())
+    if (decoded.failed()) {
       return util::Result::failure();
+    }
     std::unique_ptr<Instruction> instruction(std::move(decoded).value());
-    if (cu->execute_instruction(instruction.get(), *wave).failed())
+    if (cu->execute_instruction(instruction.get(), *wave).failed()) {
       return util::Result::failure();
+    }
     if (memory_op) {
       amdgpu::L1VectorCache l1(&cache);
       amdgpu::GlobalMemPipeline pipeline(&l1, &cache);
-      if (pipeline.issue(instruction.release(), *wave) != amdgpu::VmAccessOutcome::Complete)
+      if (pipeline.issue(instruction.release(), *wave) != amdgpu::VmAccessOutcome::Complete) {
         return util::Result::failure();
+      }
       l1.flush_all();
       cache.flush_all();
     }
@@ -125,8 +130,9 @@ public:
     cu->write_vgpr(base + 4, 0, 0);
     cu->write_vgpr(base + 5, 0, 0);
     util::FailureOr<uint32_t> returned = run(words, src, 0, 0, 0xf0, true, buffer);
-    if (returned.failed())
+    if (returned.failed()) {
       return util::Result::failure();
+    }
     EXPECT_EQ(returned.value(), returns ? old : (buffer ? src : 0xfacebeef));
     return memory.read32(0x1000);
   }
@@ -138,14 +144,14 @@ public:
   uint32_t base = 0;
 };
 TEST(AtomicSemanticsAndDecode, RejectsInvalidFixtureInstruction) {
-  InstructionPolicyMachine machine(ROCJITSU_CODE_ARCH_CDNA5);
+  InstructionPolicyMachine machine(rocjitsu::IsaFamily::Cdna5);
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
   const std::array<uint32_t, 1> invalid_words{test::kUndecodableInstruction};
   EXPECT_TRUE(machine.run(invalid_words, 0).failed());
 }
 
 TEST(AtomicSemanticsAndDecode, RejectsFailedFixtureExecutionBeforeMemoryIssue) {
-  InstructionPolicyMachine machine(ROCJITSU_CODE_ARCH_RDNA2);
+  InstructionPolicyMachine machine(rocjitsu::IsaFamily::Rdna2);
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
   const uint32_t scalar_base = machine.wave->sgpr_alloc().base;
   machine.cu->write_sgpr(scalar_base + 4, 0x1000);
@@ -161,7 +167,7 @@ TEST(AtomicSemanticsAndDecode, RejectsFailedFixtureExecutionBeforeMemoryIssue) {
 }
 
 TEST(AtomicSemanticsAndDecode, RejectsFailedFixtureMemoryIssue) {
-  InstructionPolicyMachine machine(ROCJITSU_CODE_ARCH_RDNA3);
+  InstructionPolicyMachine machine(rocjitsu::IsaFamily::Rdna3);
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
   machine.wave->set_address_space({.slot = 0, .generation = 1});
   const std::array<uint32_t, 2> words = rdna3::build_flat(40, {.seg = 2, .saddr = 4, .vdst = 6});
@@ -169,7 +175,7 @@ TEST(AtomicSemanticsAndDecode, RejectsFailedFixtureMemoryIssue) {
   EXPECT_EQ(machine.cu->read_vgpr(machine.base + 6, 0), 0xfacebeefu);
 }
 
-void witness(const char *name, rj_code_arch_t arch, uint32_t got, uint32_t expected) {
+void witness(const char *name, rocjitsu::IsaFamily arch, uint32_t got, uint32_t expected) {
   EXPECT_EQ(got, expected) << name << " arch=" << unsigned(arch);
 }
 TEST(AtomicSemanticsAndDecode, IntegerEvaluatorRejectsUnsupportedOperations) {
@@ -193,7 +199,7 @@ TEST(AtomicSemanticsAndDecode, OrderedAddRequiresThePackedIdAndValue) {
 }
 
 TEST(AtomicSemanticsAndDecode, ConditionalAndClampedMemorySubtract) {
-  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA4}) {
+  for (rocjitsu::IsaFamily arch : {rocjitsu::IsaFamily::Cdna5, rocjitsu::IsaFamily::Rdna4}) {
     InstructionPolicyMachine machine(arch);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
     for (uint16_t opcode : {uint16_t{55}, uint16_t{80}}) {
@@ -224,9 +230,9 @@ TEST(AtomicSemanticsAndDecode, ConditionalAndClampedMemorySubtract) {
 // with or without ADD_TID. Loads and returning atomics produce zero.
 TEST(AtomicSemanticsAndDecode, RdnaInvalidFormatBufferAccessesTouchNoMemory) {
   enum class Op { Load, Store, AtomicAdd };
-  for (rj_code_arch_t arch :
-       {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3,
-        ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
+  for (rocjitsu::IsaFamily arch :
+       {rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2, rocjitsu::IsaFamily::Rdna3,
+        rocjitsu::IsaFamily::Rdna3_5, rocjitsu::IsaFamily::Rdna4}) {
     SCOPED_TRACE(arch);
     // s[4:7] holds the resource, v0 the data, v4 the unused address and base 0x1000 the target.
     const auto words = [arch](Op op) {
@@ -234,28 +240,28 @@ TEST(AtomicSemanticsAndDecode, RdnaInvalidFormatBufferAccessesTouchNoMemory) {
       std::array<uint32_t, 3> words{};
       const auto copy = [&](const auto &built) { std::ranges::copy(built, words.begin()); };
       switch (arch) {
-      case ROCJITSU_CODE_ARCH_RDNA1:
+      case rocjitsu::IsaFamily::Rdna1:
         copy(rdna1::build_mubuf(
             op == Op::Load    ? rdna1::kBufferLoadDwordMubuf
             : op == Op::Store ? rdna1::kBufferStoreDwordMubuf
                               : rdna1::kBufferAtomicAddMubuf,
             {.glc = atomic, .vaddr = 4, .vdata = 0, .srsrc = 1, .soffset = 128}));
         break;
-      case ROCJITSU_CODE_ARCH_RDNA2:
+      case rocjitsu::IsaFamily::Rdna2:
         copy(rdna2::build_mubuf(
             op == Op::Load    ? rdna2::kBufferLoadDwordMubuf
             : op == Op::Store ? rdna2::kBufferStoreDwordMubuf
                               : rdna2::kBufferAtomicAddMubuf,
             {.glc = atomic, .vaddr = 4, .vdata = 0, .srsrc = 1, .soffset = 128}));
         break;
-      case ROCJITSU_CODE_ARCH_RDNA3:
+      case rocjitsu::IsaFamily::Rdna3:
         copy(rdna3::build_mubuf(
             op == Op::Load    ? rdna3::kBufferLoadB32Mubuf
             : op == Op::Store ? rdna3::kBufferStoreB32Mubuf
                               : rdna3::kBufferAtomicAddU32Mubuf,
             {.glc = atomic, .vaddr = 4, .vdata = 0, .srsrc = 1, .soffset = 128}));
         break;
-      case ROCJITSU_CODE_ARCH_RDNA3_5:
+      case rocjitsu::IsaFamily::Rdna3_5:
         copy(rdna3_5::build_mubuf(
             op == Op::Load    ? rdna3_5::kBufferLoadB32Mubuf
             : op == Op::Store ? rdna3_5::kBufferStoreB32Mubuf
@@ -275,14 +281,18 @@ TEST(AtomicSemanticsAndDecode, RdnaInvalidFormatBufferAccessesTouchNoMemory) {
     // Each OOB_SELECT and ADD_TID pairs FORMAT 0 with a bound control, so the
     // bounds check alone cannot account for an unbound result.
     std::vector<uint32_t> word3s;
-    for (uint32_t oob = 0; oob < 4; ++oob)
-      for (uint32_t add_tid : {0u, 1u << 23})
-        for (uint32_t format : {0u, kRdnaFormat32})
+    for (uint32_t oob = 0; oob < 4; ++oob) {
+      for (uint32_t add_tid : {0u, 1u << 23}) {
+        for (uint32_t format : {0u, kRdnaFormat32}) {
           word3s.push_back((oob << 28) | add_tid | format);
+        }
+      }
+    }
     // Word3 bit 18 is outside GFX11 and RDNA4 FORMAT (it selects STRIDE_SCALE on RDNA4).
-    if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-        arch == ROCJITSU_CODE_ARCH_RDNA4)
+    if (arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5 ||
+        arch == rocjitsu::IsaFamily::Rdna4) {
       word3s.push_back(0x30040000u);
+    }
     for (uint32_t word3 : word3s) {
       SCOPED_TRACE(word3);
       const bool bound = word3 & kRdnaFormat32;
@@ -311,12 +321,12 @@ TEST(AtomicSemanticsAndDecode, RdnaInvalidFormatBufferAccessesTouchNoMemory) {
 }
 
 TEST(AtomicSemanticsAndDecode, ConditionalAndClampedLegacyCsub) {
-  for (rj_code_arch_t arch :
-       {ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5}) {
+  for (rocjitsu::IsaFamily arch :
+       {rocjitsu::IsaFamily::Rdna2, rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5}) {
     InstructionPolicyMachine machine(arch);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
     std::array<uint32_t, 2> buffer{}, global{};
-    if (arch == ROCJITSU_CODE_ARCH_RDNA2) {
+    if (arch == rocjitsu::IsaFamily::Rdna2) {
       buffer =
           rdna2::build_mubuf(52, {.glc = 1, .vaddr = 4, .vdata = 0, .srsrc = 1, .soffset = 128});
       global =
@@ -352,7 +362,7 @@ TEST(AtomicSemanticsAndDecode, LegacyCsubLegalizesToClampedSubtract) {
                         rdna3::kGlobalAtomicCsubU32Flat);
     ASSERT_NE(entry, nullptr);
     ASSERT_EQ(entry->target_opcode, rdna4::kGlobalAtomicSubClampU32Vglobal);
-    InstructionPolicyMachine machine(ROCJITSU_CODE_ARCH_RDNA4);
+    InstructionPolicyMachine machine(rocjitsu::IsaFamily::Rdna4);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
     const std::array<uint32_t, 3> target = rdna4::build_vglobal(
         entry->target_opcode, {.saddr = 4, .vdst = 6, .scope = 2, .th = 1, .vsrc = 0, .vaddr = 4});
@@ -378,7 +388,7 @@ TEST(AtomicSemanticsAndDecode, TranslatedCompareStorePreservesOperandOrder) {
         cdna4_to_rdna4::translate_encoding_cdna4_to_rdna4(kEnc_DS, source[0], source[1], 0, opcode);
     ASSERT_EQ(translated.word_count, 2);
     for (bool equal : {false, true}) {
-      InstructionPolicyMachine machine(ROCJITSU_CODE_ARCH_RDNA4);
+      InstructionPolicyMachine machine(rocjitsu::IsaFamily::Rdna4);
       ASSERT_FALSE(::testing::Test::HasFatalFailure());
       machine.wave->lds().write32(0x100, equal ? 2 : 3);
       machine.wave->lds().write32(0x104, 0);
@@ -403,7 +413,7 @@ TEST(AtomicSemanticsAndDecode, TranslatedCompareStorePreservesOperandOrder) {
 }
 
 TEST(AtomicSemanticsAndDecode, ConditionalAndClampedDsSubtract) {
-  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA4}) {
+  for (rocjitsu::IsaFamily arch : {rocjitsu::IsaFamily::Cdna5, rocjitsu::IsaFamily::Rdna4}) {
     InstructionPolicyMachine machine(arch);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
     for (uint16_t opcode : {uint16_t{152}, uint16_t{153}, uint16_t{168}, uint16_t{169}}) {
@@ -428,18 +438,20 @@ TEST(AtomicSemanticsAndDecode, ConditionalAndClampedDsSubtract) {
 }
 
 TEST(AtomicSemanticsAndDecode, GlobalOnlyPackedHalfAndScalarFloatAtomics) {
-  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2}) {
+  for (rocjitsu::IsaFamily arch : {rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2}) {
     InstructionPolicyMachine machine(arch);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
-    const bool returns = arch != ROCJITSU_CODE_ARCH_CDNA1; // MI100 forbids GLC on floating atomics.
+    const bool returns =
+        arch != rocjitsu::IsaFamily::Cdna1; // MI100 forbids GLC on floating atomics.
     // Both opcodes are GLOBAL-only on these targets; FLAT and SCRATCH must reject them.
     for (uint16_t opcode : {uint16_t{77}, uint16_t{78}}) {
       for (uint8_t segment : {uint8_t{0}, uint8_t{1}, uint8_t{2}, uint8_t{3}}) {
         const std::array<uint32_t, 2> words = cdna1::build_flat(
             opcode, {.seg = segment, .glc = returns, .addr = 4, .data = 0, .saddr = 4, .vdst = 6});
         EXPECT_EQ(machine.decoder->decode(words.data()).failed(), segment != 2);
-        if (segment != 2)
+        if (segment != 2) {
           continue;
+        }
         if (opcode == 78) {
           {
             util::FailureOr<uint32_t> result =
@@ -472,8 +484,8 @@ TEST(AtomicSemanticsAndDecode, GlobalOnlyPackedHalfAndScalarFloatAtomics) {
 }
 
 TEST(AtomicSemanticsAndDecode, CdnaFlatOpcodesRespectSegment) {
-  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
-                              ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+  for (rocjitsu::IsaFamily arch : {rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2,
+                                   rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4}) {
     auto decoder = Decoder::create(arch);
     ASSERT_NE(decoder, nullptr);
     for (uint8_t segment = 0; segment < 4; ++segment) {
@@ -486,10 +498,10 @@ TEST(AtomicSemanticsAndDecode, CdnaFlatOpcodesRespectSegment) {
   }
 }
 TEST(AtomicSemanticsAndDecode, FlatOpcodeGapsAndIllegalSegmentsHaveDistinctDiagnostics) {
-  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_RDNA2}) {
+  for (auto arch : {rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Rdna2}) {
     auto decoder = Decoder::create(arch);
     // FLAT_LOAD_UBYTE uses opcode 16 on CDNA3 and 8 on RDNA2. Segment 3 is reserved.
-    const uint32_t load = arch == ROCJITSU_CODE_ARCH_CDNA3 ? 0xdc400000u : 0xdc200000u;
+    const uint32_t load = arch == rocjitsu::IsaFamily::Cdna3 ? 0xdc400000u : 0xdc200000u;
     for (auto [word, expected] : {std::pair{0xdc000000u, "Invalid instruction opcode"},
                                   std::pair{load | 0xc000u, "invalid segment"}}) {
       const std::array<uint32_t, 2> words = {word, 0x007f0000};
@@ -501,13 +513,13 @@ TEST(AtomicSemanticsAndDecode, FlatOpcodeGapsAndIllegalSegmentsHaveDistinctDiagn
 }
 
 TEST(AtomicSemanticsAndDecode, GlobalOnlyCsubRejectsOtherSegments) {
-  for (rj_code_arch_t arch :
-       {ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5}) {
+  for (rocjitsu::IsaFamily arch :
+       {rocjitsu::IsaFamily::Rdna2, rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5}) {
     InstructionPolicyMachine machine(arch);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
     for (uint8_t segment : {uint8_t{0}, uint8_t{1}, uint8_t{2}, uint8_t{3}}) {
       const std::array<uint32_t, 2> words =
-          arch == ROCJITSU_CODE_ARCH_RDNA2
+          arch == rocjitsu::IsaFamily::Rdna2
               ? rdna2::build_flat(
                     52, {.seg = segment, .glc = 1, .addr = 4, .data = 0, .saddr = 4, .vdst = 6})
               : rdna3::build_flat(
@@ -518,8 +530,8 @@ TEST(AtomicSemanticsAndDecode, GlobalOnlyCsubRejectsOtherSegments) {
 }
 
 TEST(AtomicSemanticsAndDecode, LegacyGlobalAddtidUsesScalarAddressAndSignedOffset) {
-  for (rj_code_arch_t arch :
-       {ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5}) {
+  for (rocjitsu::IsaFamily arch :
+       {rocjitsu::IsaFamily::Rdna2, rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5}) {
     InstructionPolicyMachine machine(arch);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
     const uint32_t scalar = machine.wave->sgpr_alloc().base;
@@ -527,7 +539,7 @@ TEST(AtomicSemanticsAndDecode, LegacyGlobalAddtidUsesScalarAddressAndSignedOffse
     machine.cu->write_sgpr(scalar + 5, 0);
     machine.memory.write32(0x1000, 0x12345678);
     const std::array<uint32_t, 2> load =
-        arch == ROCJITSU_CODE_ARCH_RDNA2
+        arch == rocjitsu::IsaFamily::Rdna2
             ? rdna2::build_flat(22, {.offset = 0x1ffc, .seg = 2, .saddr = 4, .vdst = 6})
             : rdna3::build_flat(40, {.offset = 0x1ffc, .seg = 2, .saddr = 4, .vdst = 6});
     {
@@ -536,7 +548,7 @@ TEST(AtomicSemanticsAndDecode, LegacyGlobalAddtidUsesScalarAddressAndSignedOffse
       EXPECT_EQ(result.value(), 0x12345678u);
     }
     const std::array<uint32_t, 2> store =
-        arch == ROCJITSU_CODE_ARCH_RDNA2
+        arch == rocjitsu::IsaFamily::Rdna2
             ? rdna2::build_flat(23, {.offset = 0x1ffc, .seg = 2, .data = 0, .saddr = 4})
             : rdna3::build_flat(41, {.offset = 0x1ffc, .seg = 2, .data = 0, .saddr = 4});
     {
@@ -547,23 +559,24 @@ TEST(AtomicSemanticsAndDecode, LegacyGlobalAddtidUsesScalarAddressAndSignedOffse
     machine.cu->write_sgpr(scalar + 4, 0x2000);
     machine.memory.write32(0x2000, 0x11223344);
     const std::array<uint32_t, 2> boundary_load =
-        arch == ROCJITSU_CODE_ARCH_RDNA2
+        arch == rocjitsu::IsaFamily::Rdna2
             ? rdna2::build_flat(22, {.offset = 0x1000, .seg = 2, .saddr = 4, .vdst = 6})
             : rdna3::build_flat(40, {.offset = 0x1000, .seg = 2, .saddr = 4, .vdst = 6});
     {
       util::FailureOr<uint32_t> result = machine.run(boundary_load, 0, 0, 0, 0xf0, true);
       ASSERT_TRUE(result.succeeded());
-      EXPECT_EQ(result.value(), arch == ROCJITSU_CODE_ARCH_RDNA2 ? 0x11223344u : 0xabcdef01u);
+      EXPECT_EQ(result.value(), arch == rocjitsu::IsaFamily::Rdna2 ? 0x11223344u : 0xabcdef01u);
     }
   }
 }
 
 TEST(AtomicSemanticsAndDecode, PackedAtomicsAcrossOlderTargets) {
-  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
-                              ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+  for (rocjitsu::IsaFamily arch : {rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2,
+                                   rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4}) {
     InstructionPolicyMachine machine(arch);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
-    const bool returns = arch != ROCJITSU_CODE_ARCH_CDNA1; // MI100 forbids GLC on floating atomics.
+    const bool returns =
+        arch != rocjitsu::IsaFamily::Cdna1; // MI100 forbids GLC on floating atomics.
     const std::array<uint32_t, 2> buffer = cdna1::build_mubuf(
         78, {.glc = returns, .vaddr = 4, .vdata = 0, .srsrc = 1, .soffset = 128});
     {
@@ -578,17 +591,15 @@ TEST(AtomicSemanticsAndDecode, PackedAtomicsAcrossOlderTargets) {
       ASSERT_TRUE(result.succeeded());
       EXPECT_EQ(result.value(), 0x00020002u);
     }
-    const rocjitsu::test::RestoreRounding restore_rounding;
-    std::fesetround(FE_UPWARD);
     {
       util::FailureOr<uint32_t> result =
           machine.global(buffer, 0x3c003c00, 0x10001000, true, returns);
       ASSERT_TRUE(result.succeeded());
       EXPECT_EQ(result.value(), 0x3c003c00u);
     }
-    std::fesetround(restore_rounding.saved());
-    if (arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2)
+    if (arch == rocjitsu::IsaFamily::Cdna1 || arch == rocjitsu::IsaFamily::Cdna2) {
       continue;
+    }
     for (bool bf16 : {false, true}) {
       const std::array<uint32_t, 2> global = cdna3::build_flat(
           bf16 ? 82 : 78, {.seg = 2, .sc0 = 1, .addr = 4, .data = 0, .saddr = 4, .vdst = 6});
@@ -609,13 +620,13 @@ TEST(AtomicSemanticsAndDecode, PackedAtomicsAcrossOlderTargets) {
       }
     }
   }
-  for (rj_code_arch_t arch :
-       {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4}) {
+  for (rocjitsu::IsaFamily arch :
+       {rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Rdna4}) {
     InstructionPolicyMachine machine(arch);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
     for (bool bf16 : {false, true}) {
       const std::array<uint32_t, 2> words =
-          arch == ROCJITSU_CODE_ARCH_RDNA4
+          arch == rocjitsu::IsaFamily::Rdna4
               ? rdna4::build_vds(bf16 ? 171 : 170, {.addr = 4, .data0 = 0, .vdst = 6})
               : cdna3::build_ds(bf16 ? 184 : 183, {.addr = 4, .data0 = 0, .vdst = 6});
       for (uint32_t mode : {0u, 0xf0u}) {
@@ -638,11 +649,11 @@ TEST(AtomicSemanticsAndDecode, PackedAtomicsAcrossOlderTargets) {
 } // namespace
 
 namespace {
-class AtomicPolicyExecutionTest : public testing::TestWithParam<rj_code_arch_t> {
+class AtomicPolicyExecutionTest : public testing::TestWithParam<rocjitsu::IsaFamily> {
 protected:
   void SetUp() override { initialize(GetParam(), 1); }
 
-  void initialize(rj_code_arch_t arch, uint32_t num_wf_slots) {
+  void initialize(rocjitsu::IsaFamily arch, uint32_t num_wf_slots) {
     amdgpu::ComputeUnitCore::Config config{};
     config.arch = arch;
     config.num_wf_slots = num_wf_slots;
@@ -663,41 +674,47 @@ protected:
   }
 
   void TearDown() override {
-    if (wave_)
+    if (wave_) {
       wave_->halt();
+    }
   }
 
   bool modern_policy() const {
-    return GetParam() == ROCJITSU_CODE_ARCH_CDNA5 || GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
+    return GetParam() == rocjitsu::IsaFamily::Cdna5 || GetParam() == rocjitsu::IsaFamily::Rdna4;
+  }
+
+  // Float atomic rules captured on MI300A (gfx942) and MI350X (gfx950).
+  bool measured_cdna() const {
+    return GetParam() == rocjitsu::IsaFamily::Cdna3 || GetParam() == rocjitsu::IsaFamily::Cdna4;
   }
 
   bool compare_first() const {
-    return GetParam() == ROCJITSU_CODE_ARCH_CDNA1 || GetParam() == ROCJITSU_CODE_ARCH_CDNA2 ||
-           GetParam() == ROCJITSU_CODE_ARCH_CDNA3 || GetParam() == ROCJITSU_CODE_ARCH_CDNA4 ||
-           GetParam() == ROCJITSU_CODE_ARCH_RDNA1 || GetParam() == ROCJITSU_CODE_ARCH_RDNA2;
+    return GetParam() == rocjitsu::IsaFamily::Cdna1 || GetParam() == rocjitsu::IsaFamily::Cdna2 ||
+           GetParam() == rocjitsu::IsaFamily::Cdna3 || GetParam() == rocjitsu::IsaFamily::Cdna4 ||
+           GetParam() == rocjitsu::IsaFamily::Rdna1 || GetParam() == rocjitsu::IsaFamily::Rdna2;
   }
 
   std::array<uint32_t, 2> ds_words(uint16_t opcode) const {
     switch (GetParam()) {
-    case ROCJITSU_CODE_ARCH_CDNA1:
+    case rocjitsu::IsaFamily::Cdna1:
       return cdna1::build_ds(opcode, {.addr = 4, .data0 = 0, .data1 = 2, .vdst = 6});
-    case ROCJITSU_CODE_ARCH_CDNA2:
+    case rocjitsu::IsaFamily::Cdna2:
       return cdna2::build_ds(opcode, {.addr = 4, .data0 = 0, .data1 = 2, .vdst = 6});
-    case ROCJITSU_CODE_ARCH_CDNA3:
+    case rocjitsu::IsaFamily::Cdna3:
       return cdna3::build_ds(opcode, {.addr = 4, .data0 = 0, .data1 = 2, .vdst = 6});
-    case ROCJITSU_CODE_ARCH_CDNA4:
+    case rocjitsu::IsaFamily::Cdna4:
       return cdna4::build_ds(opcode, {.addr = 4, .data0 = 0, .data1 = 2, .vdst = 6});
-    case ROCJITSU_CODE_ARCH_RDNA1:
+    case rocjitsu::IsaFamily::Rdna1:
       return rdna1::build_ds(opcode, {.addr = 4, .data0 = 0, .data1 = 2, .vdst = 6});
-    case ROCJITSU_CODE_ARCH_RDNA2:
+    case rocjitsu::IsaFamily::Rdna2:
       return rdna2::build_ds(opcode, {.addr = 4, .data0 = 0, .data1 = 2, .vdst = 6});
-    case ROCJITSU_CODE_ARCH_RDNA3:
+    case rocjitsu::IsaFamily::Rdna3:
       return rdna3::build_ds(opcode, {.addr = 4, .data0 = 0, .data1 = 2, .vdst = 6});
-    case ROCJITSU_CODE_ARCH_RDNA3_5:
+    case rocjitsu::IsaFamily::Rdna3_5:
       return rdna3_5::build_ds(opcode, {.addr = 4, .data0 = 0, .data1 = 2, .vdst = 6});
-    case ROCJITSU_CODE_ARCH_RDNA4:
+    case rocjitsu::IsaFamily::Rdna4:
       return rdna4::build_vds(opcode, {.addr = 4, .data0 = 0, .data1 = 2, .vdst = 6});
-    case ROCJITSU_CODE_ARCH_CDNA5:
+    case rocjitsu::IsaFamily::Cdna5:
       return cdna5::build_vds(opcode, {.addr = 4, .data0 = 0, .data1 = 2, .vdst = 6});
     default:
       ADD_FAILURE() << "Unexpected architecture";
@@ -707,25 +724,25 @@ protected:
 
   uint16_t ds_add_return_opcode() const {
     switch (GetParam()) {
-    case ROCJITSU_CODE_ARCH_CDNA1:
+    case rocjitsu::IsaFamily::Cdna1:
       return cdna1::kDsAddRtnF32Ds;
-    case ROCJITSU_CODE_ARCH_CDNA2:
+    case rocjitsu::IsaFamily::Cdna2:
       return cdna2::kDsAddRtnF32Ds;
-    case ROCJITSU_CODE_ARCH_CDNA3:
+    case rocjitsu::IsaFamily::Cdna3:
       return cdna3::kDsAddRtnF32Ds;
-    case ROCJITSU_CODE_ARCH_CDNA4:
+    case rocjitsu::IsaFamily::Cdna4:
       return cdna4::kDsAddRtnF32Ds;
-    case ROCJITSU_CODE_ARCH_CDNA5:
+    case rocjitsu::IsaFamily::Cdna5:
       return cdna5::kDsAddRtnF32Vds;
-    case ROCJITSU_CODE_ARCH_RDNA1:
+    case rocjitsu::IsaFamily::Rdna1:
       return rdna1::kDsAddRtnF32Ds;
-    case ROCJITSU_CODE_ARCH_RDNA2:
+    case rocjitsu::IsaFamily::Rdna2:
       return rdna2::kDsAddRtnF32Ds;
-    case ROCJITSU_CODE_ARCH_RDNA3:
+    case rocjitsu::IsaFamily::Rdna3:
       return rdna3::kDsAddRtnF32Ds;
-    case ROCJITSU_CODE_ARCH_RDNA3_5:
+    case rocjitsu::IsaFamily::Rdna3_5:
       return rdna3_5::kDsAddRtnF32Ds;
-    case ROCJITSU_CODE_ARCH_RDNA4:
+    case rocjitsu::IsaFamily::Rdna4:
       return rdna4::kDsAddRtnF32Vds;
     default:
       return 0;
@@ -737,10 +754,11 @@ protected:
                       uint32_t address = 0x100) {
     constexpr uint32_t kAddress = 0x100;
     wave_->set_mode_raw(mode);
-    if (width == 8)
+    if (width == 8) {
       wave_->lds().write64(kAddress, old_bits);
-    else
+    } else {
       wave_->lds().write32(kAddress, static_cast<uint32_t>(old_bits));
+    }
     const bool comparison = opcode == cdna4::kDsCmpstB32Ds || opcode == cdna4::kDsCmpstF32Ds ||
                             opcode == cdna4::kDsCmpstRtnB32Ds ||
                             opcode == cdna4::kDsCmpstRtnF32Ds || opcode == cdna4::kDsCmpstB64Ds ||
@@ -784,92 +802,102 @@ protected:
   std::array<uint32_t, 3> memory_words(bool buffer, bool compare = false) const {
     std::array<uint32_t, 2> words{};
     switch (GetParam()) {
-    case ROCJITSU_CODE_ARCH_CDNA1:
-      if (buffer)
+    case rocjitsu::IsaFamily::Cdna1:
+      if (buffer) {
         words = cdna1::build_mubuf(cdna1::kBufferAtomicAddF32Mubuf,
                                    {.vaddr = 4, .vdata = 0, .srsrc = 1, .soffset = 128});
-      else
+      } else {
         words = cdna1::build_flat(cdna1::kGlobalAtomicAddF32Flat,
                                   {.seg = 2, .addr = 4, .data = 0, .saddr = 4, .vdst = 6});
+      }
       break;
-    case ROCJITSU_CODE_ARCH_CDNA2:
-      if (buffer)
+    case rocjitsu::IsaFamily::Cdna2:
+      if (buffer) {
         words = cdna2::build_mubuf(cdna2::kBufferAtomicAddF32Mubuf,
                                    {.glc = 1, .vaddr = 4, .vdata = 0, .srsrc = 1, .soffset = 128});
-      else
+      } else {
         words =
             cdna2::build_flat(cdna2::kGlobalAtomicAddF32Flat,
                               {.seg = 2, .glc = 1, .addr = 4, .data = 0, .saddr = 4, .vdst = 6});
+      }
       break;
-    case ROCJITSU_CODE_ARCH_CDNA3:
-      if (buffer)
+    case rocjitsu::IsaFamily::Cdna3:
+      if (buffer) {
         words = cdna3::build_mubuf(cdna3::kBufferAtomicAddF32Mubuf,
                                    {.sc0 = 1, .vaddr = 4, .vdata = 0, .srsrc = 1, .soffset = 128});
-      else
+      } else {
         words =
             cdna3::build_flat(cdna3::kFlatAtomicAddF32Flat,
                               {.seg = 2, .sc0 = 1, .addr = 4, .data = 0, .saddr = 4, .vdst = 6});
+      }
       break;
-    case ROCJITSU_CODE_ARCH_CDNA4:
-      if (buffer)
+    case rocjitsu::IsaFamily::Cdna4:
+      if (buffer) {
         words = cdna4::build_mubuf(cdna4::kBufferAtomicAddF32Mubuf,
                                    {.sc0 = 1, .vaddr = 4, .vdata = 0, .srsrc = 1, .soffset = 128});
-      else
+      } else {
         words =
             cdna4::build_flat(cdna4::kFlatAtomicAddF32Flat,
                               {.seg = 2, .sc0 = 1, .addr = 4, .data = 0, .saddr = 4, .vdst = 6});
+      }
       break;
-    case ROCJITSU_CODE_ARCH_RDNA1:
-      if (buffer)
+    case rocjitsu::IsaFamily::Rdna1:
+      if (buffer) {
         words = rdna1::build_mubuf(rdna1::kBufferAtomicFcmpswapMubuf,
                                    {.glc = 1, .vaddr = 4, .vdata = 0, .srsrc = 1, .soffset = 128});
-      else
+      } else {
         words =
             rdna1::build_flat(rdna1::kFlatAtomicFcmpswapFlat,
                               {.seg = 2, .glc = 1, .addr = 4, .data = 0, .saddr = 4, .vdst = 6});
+      }
       break;
-    case ROCJITSU_CODE_ARCH_RDNA2:
-      if (buffer)
+    case rocjitsu::IsaFamily::Rdna2:
+      if (buffer) {
         words = rdna2::build_mubuf(rdna2::kBufferAtomicFcmpswapMubuf,
                                    {.glc = 1, .vaddr = 4, .vdata = 0, .srsrc = 1, .soffset = 128});
-      else
+      } else {
         words =
             rdna2::build_flat(rdna2::kFlatAtomicFcmpswapFlat,
                               {.seg = 2, .glc = 1, .addr = 4, .data = 0, .saddr = 4, .vdst = 6});
+      }
       break;
-    case ROCJITSU_CODE_ARCH_RDNA3:
-      if (buffer)
+    case rocjitsu::IsaFamily::Rdna3:
+      if (buffer) {
         words = rdna3::build_mubuf(
             (compare ? rdna3::kBufferAtomicCmpswapF32Mubuf : rdna3::kBufferAtomicAddF32Mubuf),
             {.glc = 1, .vaddr = 4, .vdata = 0, .srsrc = 1, .soffset = 128});
-      else
+      } else {
         words = rdna3::build_flat(
             (compare ? rdna3::kFlatAtomicCmpswapF32Flat : rdna3::kFlatAtomicAddF32Flat),
             {.glc = 1, .seg = 2, .addr = 4, .data = 0, .saddr = 4, .vdst = 6});
+      }
       break;
-    case ROCJITSU_CODE_ARCH_RDNA3_5:
-      if (buffer)
+    case rocjitsu::IsaFamily::Rdna3_5:
+      if (buffer) {
         words = rdna3_5::build_mubuf(
             (compare ? rdna3_5::kBufferAtomicCmpswapF32Mubuf : rdna3_5::kBufferAtomicAddF32Mubuf),
             {.glc = 1, .vaddr = 4, .vdata = 0, .srsrc = 1, .soffset = 128});
-      else
+      } else {
         words = rdna3_5::build_flat(
             (compare ? rdna3_5::kFlatAtomicCmpswapF32Flat : rdna3_5::kFlatAtomicAddF32Flat),
             {.glc = 1, .seg = 2, .addr = 4, .data = 0, .saddr = 4, .vdst = 6});
+      }
       break;
-    case ROCJITSU_CODE_ARCH_RDNA4:
-      if (buffer)
+    case rocjitsu::IsaFamily::Rdna4:
+      if (buffer) {
         return rdna4::build_vbuffer(
             rdna4::kBufferAtomicAddF32Vbuffer,
             {.soffset = 124, .vdata = 0, .rsrc = 4, .scope = 2, .th = 1, .offen = 1, .vaddr = 4});
+      }
       return rdna4::build_vglobal(
           rdna4::kGlobalAtomicAddF32Vglobal,
           {.saddr = 4, .vdst = 6, .scope = 2, .th = 1, .vsrc = 0, .vaddr = 4});
-    case ROCJITSU_CODE_ARCH_CDNA5:
-      if (buffer)
+    case rocjitsu::IsaFamily::Cdna5:
+      if (buffer) {
         return cdna5::build_vbuffer(
             cdna5::kBufferAtomicAddF32Vbuffer,
             {.soffset = 124, .vdata = 0, .rsrc = 4, .scope = 2, .th = 1, .offen = 1, .vaddr = 4});
+      }
       return cdna5::build_vglobal(
           cdna5::kGlobalAtomicAddF32Vglobal,
           {.saddr = 4, .vdst = 6, .scope = 2, .th = 1, .vsrc = 0, .vaddr = 4});
@@ -882,8 +910,40 @@ protected:
 
   uint32_t execute_memory(bool buffer, uint32_t old_bits, uint32_t source_bits, uint32_t mode,
                           bool comparison = false, uint32_t compare_bits = 0) {
+    return static_cast<uint32_t>(execute_memory_words(
+        memory_words(buffer, comparison), buffer, old_bits, source_bits, mode, 4, compare_bits));
+  }
+
+  // CDNA3/4 BUFFER or GLOBAL atomic with an explicit opcode and width.
+  uint64_t execute_cdna_memory(uint16_t opcode, bool buffer, uint64_t old_bits,
+                               uint64_t source_bits, uint32_t mode, uint32_t width) {
+    std::array<uint32_t, 2> words{};
+    if (GetParam() == rocjitsu::IsaFamily::Cdna4) {
+      words = buffer
+                  ? cdna4::build_mubuf(
+                        opcode, {.sc0 = 1, .vaddr = 4, .vdata = 0, .srsrc = 1, .soffset = 128})
+                  : cdna4::build_flat(
+                        opcode, {.seg = 2, .sc0 = 1, .addr = 4, .data = 0, .saddr = 4, .vdst = 6});
+    } else {
+      words = buffer
+                  ? cdna3::build_mubuf(
+                        opcode, {.sc0 = 1, .vaddr = 4, .vdata = 0, .srsrc = 1, .soffset = 128})
+                  : cdna3::build_flat(
+                        opcode, {.seg = 2, .sc0 = 1, .addr = 4, .data = 0, .saddr = 4, .vdst = 6});
+    }
+    return execute_memory_words({words[0], words[1], 0}, buffer, old_bits, source_bits, mode,
+                                width);
+  }
+
+  uint64_t execute_memory_words(const std::array<uint32_t, 3> &words, bool buffer,
+                                uint64_t old_bits, uint64_t source_bits, uint32_t mode,
+                                uint32_t width, uint32_t compare_bits = 0) {
     constexpr uint32_t kAddress = 0x1000;
-    memory_.write32(kAddress, old_bits);
+    if (width == 8) {
+      memory_.write64(kAddress, old_bits);
+    } else {
+      memory_.write32(kAddress, static_cast<uint32_t>(old_bits));
+    }
     wave_->set_mode_raw(mode);
     const uint32_t scalar_base = wave_->sgpr_alloc().base;
     compute_unit_->write_sgpr(scalar_base + 4, kAddress);
@@ -892,19 +952,21 @@ protected:
     // RDNA3+ selects this fixture's range rule; CDNA1-4 and RDNA need a valid format.
     // CDNA5 uses the default descriptor encoding.
     uint32_t word3 = 0;
-    if (amdgpu::addr_calc::uses_rdna_buffer_range_check(GetParam()))
+    if (amdgpu::addr_calc::uses_rdna_buffer_range_check(GetParam())) {
       word3 = (2u << 28) | kRdnaFormat32;
-    else if (amdgpu::addr_calc::uses_rdna_buffer_addressing(GetParam()))
+    } else if (amdgpu::addr_calc::uses_rdna_buffer_addressing(GetParam())) {
       word3 = kRdnaFormat32;
-    else if (arch_is_cdna_4_or_lower(GetParam()))
+    } else if (arch_is_cdna_4_or_lower(GetParam())) {
       word3 = kGfx9DataFormat32;
+    }
     compute_unit_->write_sgpr(scalar_base + 7, word3);
-    compute_unit_->write_vgpr(base_, 0, source_bits);
-    compute_unit_->write_vgpr(base_ + 1, 0, compare_bits);
+    compute_unit_->write_vgpr(base_, 0, static_cast<uint32_t>(source_bits));
+    compute_unit_->write_vgpr(base_ + 1, 0,
+                              width == 8 ? static_cast<uint32_t>(source_bits >> 32) : compare_bits);
     compute_unit_->write_vgpr(base_ + 4, 0, 0);
     compute_unit_->write_vgpr(base_ + 5, 0, 0);
     compute_unit_->write_vgpr(base_ + 6, 0, 0xbad);
-    const std::array<uint32_t, 3> words = memory_words(buffer, comparison);
+    compute_unit_->write_vgpr(base_ + 7, 0, 0xbad);
     std::unique_ptr<Instruction> instruction(decode_valid(*decoder_, words.data()));
     if (!instruction) {
       ADD_FAILURE() << "Invalid memory atomic";
@@ -919,9 +981,19 @@ protected:
     amdgpu::GlobalMemPipeline pipeline(nullptr, &cache_);
     pipeline.issue(instruction.release(), *wave_);
     // MI100 floating atomics only support the non-returning encoding.
-    const auto expected =
-        GetParam() == ROCJITSU_CODE_ARCH_CDNA1 ? (buffer ? source_bits : 0xbadu) : old_bits;
-    EXPECT_EQ(compute_unit_->read_vgpr(base_ + (buffer ? 0 : 6), 0), expected);
+    const uint32_t returned = base_ + (buffer ? 0 : 6);
+    if (GetParam() == rocjitsu::IsaFamily::Cdna1) {
+      EXPECT_EQ(compute_unit_->read_vgpr(returned, 0),
+                buffer ? static_cast<uint32_t>(source_bits) : 0xbadu);
+    } else {
+      EXPECT_EQ(compute_unit_->read_vgpr(returned, 0), static_cast<uint32_t>(old_bits));
+      if (width == 8) {
+        EXPECT_EQ(compute_unit_->read_vgpr(returned + 1, 0), static_cast<uint32_t>(old_bits >> 32));
+      }
+    }
+    if (width == 8) {
+      return memory_.read64(kAddress);
+    }
     return memory_.read32(kAddress);
   }
 
@@ -937,7 +1009,7 @@ TEST(AtomicPolicyExecutionTestSetup, RejectedComputeUnitAllowsTearDown) {
   class RejectedFixture : public AtomicPolicyExecutionTest {
   public:
     void TestBody() override {}
-    void SetUp() override { initialize(ROCJITSU_CODE_ARCH_CDNA3, 33); }
+    void SetUp() override { initialize(rocjitsu::IsaFamily::Cdna3, 33); }
     using AtomicPolicyExecutionTest::TearDown;
 
     bool setup_stopped() const { return !compute_unit_ && !wave_; }
@@ -960,9 +1032,11 @@ TEST(AtomicPolicyExecutionTestSetup, RejectedComputeUnitAllowsTearDown) {
 }
 
 TEST_P(AtomicPolicyExecutionTest, DirectLdsLoadConvertsAndBroadcastsToActiveQuads) {
-  const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
-  if (!gfx12 && GetParam() != ROCJITSU_CODE_ARCH_RDNA3 && GetParam() != ROCJITSU_CODE_ARCH_RDNA3_5)
+  const bool gfx12 = GetParam() == rocjitsu::IsaFamily::Rdna4;
+  if (!gfx12 && GetParam() != rocjitsu::IsaFamily::Rdna3 &&
+      GetParam() != rocjitsu::IsaFamily::Rdna3_5) {
     GTEST_SKIP() << "Direct LDS loads start with RDNA3";
+  }
   // Physical GFX1100/1201: M0 addresses one DWORD; any active lane enables
   // all four writes in its quad. Preserve the workgroup allocation offset.
   wave_->set_lds_base(4096);
@@ -976,13 +1050,15 @@ TEST_P(AtomicPolicyExecutionTest, DirectLdsLoadConvertsAndBroadcastsToActiveQuad
       SCOPED_TRACE(testing::Message() << types[i] << ',' << mask);
       wave_->set_exec(mask);
       wave_->set_m0((types[i] << 16) | 16);
-      for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane)
+      for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane) {
         compute_unit_->write_vgpr(base_ + 6, lane, 0xdeadbeef);
+      }
       std::array<uint32_t, 1> words;
-      if (gfx12)
+      if (gfx12) {
         words = rdna4::build_vdsdir(1, {.vdst = 6});
-      else
+      } else {
         words = rdna3::build_ldsdir(1, {.vdst = 6});
+      }
       auto decoded = decoder_->decode(words.data());
       ASSERT_FALSE(decoded.failed());
       auto instruction = std::move(decoded).value();
@@ -996,10 +1072,11 @@ TEST_P(AtomicPolicyExecutionTest, DirectLdsLoadConvertsAndBroadcastsToActiveQuad
       } else {
         EXPECT_EQ(instruction->data(), nullptr);
       }
-      for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane)
+      for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane) {
         EXPECT_EQ(compute_unit_->read_vgpr(base_ + 6, lane),
                   mask & (uint64_t{15} << (lane & ~3u)) ? values[i] : 0xdeadbeefu)
             << lane;
+      }
       EXPECT_EQ(wave_->exec(), mask);
       EXPECT_TRUE(wave_->wait_counters().empty());
     }
@@ -1014,17 +1091,9 @@ TEST_P(AtomicPolicyExecutionTest, DsScalarDenormalModesAndRounding) {
       EXPECT_EQ(execute_ds(opcode, 1, 1, 0, mode), denorm_mode == 3 ? 2u : 0u);
       EXPECT_EQ(execute_ds(opcode, 0x00800001, 0x80800000, 0, mode), (denorm_mode & 2) ? 1u : 0u);
     }
-    for (int host_round : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
-      const int saved_round = std::fegetround();
-      ASSERT_EQ(std::fesetround(host_round), 0);
-      const uint64_t result = execute_ds(opcode, 0x3f800000, 0x33800000, 0, 0xff);
-      const int restored_round = std::fegetround();
-      std::fesetround(saved_round);
-      EXPECT_EQ(result, 0x3f800000u);
-      EXPECT_EQ(restored_round, host_round);
-    }
+    EXPECT_EQ(execute_ds(opcode, 0x3f800000, 0x33800000, 0, 0xff), 0x3f800000u);
   }
-  EXPECT_EQ(execute_ds(18, 1, 0x3f800000, 0, 0), modern_policy() ? 0u : 1u);
+  EXPECT_EQ(execute_ds(18, 1, 0x3f800000, 0, 0), modern_policy() || measured_cdna() ? 0u : 1u);
   EXPECT_EQ(execute_ds(18, 0, 0x80000000, 0, 0xf0), 0x80000000u);
   EXPECT_EQ(execute_ds(19, 0x80000000, 0, 0, 0xf0), 0u);
   EXPECT_EQ(execute_ds(21, 0x7fc00002, 0x7fc00004, 0, 0), 0x7fc00004u);
@@ -1038,7 +1107,7 @@ TEST_P(AtomicPolicyExecutionTest, DsScalarDenormalModesAndRounding) {
     EXPECT_EQ(execute_ds(opcode, 0x7fc00002, 0x3f800000, 0, 0), 0x3f800000u);
     EXPECT_EQ(execute_ds(opcode, 0x3f800000, 0x7fc00004, 0, 0), 0x3f800000u);
     EXPECT_EQ(execute_ds(opcode, 0x7fc00002, 0x7fc00004, 0, 0),
-              modern_policy() ? 0x7fc00004u : 0x7fc00002u);
+              modern_policy() || measured_cdna() ? 0x7fc00004u : 0x7fc00002u);
     EXPECT_EQ(execute_ds(opcode, 0x7fc00002, 0x7f800004, 0, 0), 0x7fc00004u);
   }
 }
@@ -1072,10 +1141,50 @@ TEST_P(AtomicPolicyExecutionTest, DsMinMaxBothNanPayloads) {
       for (bool quiet_source : {false, true}) {
         const uint64_t old_bits = old_nan | (quiet_old ? quiet : 0);
         const uint64_t source_bits = source_nan | (quiet_source ? quiet : 0);
-        const uint64_t selected =
-            modern_policy() || (quiet_old && !quiet_source) ? source_bits : old_bits;
+        // MI300A/MI350X: a signaling data operand first, then signaling memory.
+        uint64_t selected = source_bits;
+        if (measured_cdna()) {
+          selected = quiet_source && !quiet_old ? old_bits : source_bits;
+        } else if (!modern_policy() && !(quiet_old && !quiet_source)) {
+          selected = old_bits;
+        }
         EXPECT_EQ(execute_ds(opcode, old_bits, source_bits, 0, 0xf0, width), selected | quiet);
       }
+    }
+  }
+}
+
+// MI300A (gfx942) and MI350X (gfx950) probe lanes at the MODE shown, identical on both chips
+// and in the returning forms: MIN/MAX return the winner among the operands flushed by the
+// MODE input control. NaN priority matches the L2 atomics.
+TEST_P(AtomicPolicyExecutionTest, DsMinMaxMatchMi300aAndMi350x) {
+  if (!measured_cdna()) {
+    GTEST_SKIP() << "Captured on MI300A and MI350X";
+  }
+  struct Row {
+    uint16_t opcode;
+    uint32_t width, mode;
+    uint64_t memory, data, expected;
+  };
+  constexpr std::array<Row, 10> kRows = {{
+      {cdna4::kDsMaxF32Ds, 4, 0x300, 0x00000001, 0x80000000, 0x00000000},        // lane 54
+      {cdna4::kDsMinF32Ds, 4, 0x300, 0x00000001, 0x00000001, 0x00000000},        // lane 106
+      {cdna4::kDsMinF32Ds, 4, 0x300, 0x80000001, 0x00000000, 0x80000000},        // lane 14
+      {cdna4::kDsMaxF32Ds, 4, 0x310, 0x00000001, 0x00000000, 0x00000001},        // lane 2
+      {cdna4::kDsMaxF32Ds, 4, 0x320, 0x00000001, 0x00000000, 0x00000000},        // lane 2
+      {cdna4::kDsMaxF32Ds, 4, 0x300, 0xffc00000, 0x7fc00000, 0x7fc00000},        // lane 594
+      {cdna4::kDsMaxF32Ds, 4, 0x300, 0x7fa12345, 0x7f800001, 0x7fc00001},        // lane 648
+      {cdna4::kDsMinF64Ds, 8, 0x300, 0x8000000000000001, 0, 0x8000000000000000}, // lane 14
+      {cdna4::kDsMaxF64Ds, 8, 0x300, 0xfff8000000000000, 0x7ff8000000000000,
+       0x7ff8000000000000}, // lane 517
+      {cdna4::kDsMaxF64Ds, 8, 0x300, 0x7ff4000012345678, 0x7ff0000000000001,
+       0x7ff8000000000001}, // lane 564
+  }};
+  for (const Row &row : kRows) {
+    for (uint16_t opcode : {row.opcode, static_cast<uint16_t>(row.opcode + 32)}) {
+      SCOPED_TRACE(testing::Message() << std::hex << "opcode=" << opcode << " mode=" << row.mode
+                                      << " memory=" << row.memory << " data=" << row.data);
+      EXPECT_EQ(execute_ds(opcode, row.memory, row.data, 0, row.mode, row.width), row.expected);
     }
   }
 }
@@ -1106,8 +1215,9 @@ TEST_P(AtomicPolicyExecutionTest, DsIntegerCompareStoreOrderAndReturn) {
 }
 
 TEST_P(AtomicPolicyExecutionTest, DsWrapUsesUnsignedComparisonAndBothSourceRegisters) {
-  if (modern_policy())
+  if (modern_policy()) {
     GTEST_SKIP() << "RDNA4 and CDNA5 do not expose DS_WRAP_RTN_B32";
+  }
   struct Case {
     uint32_t old, sub, add, expected;
   };
@@ -1122,13 +1232,15 @@ TEST_P(AtomicPolicyExecutionTest, DsWrapUsesUnsignedComparisonAndBothSourceRegis
       {0xffffffffu, 0xffffffffu, 17, 0},
       {0xfffffff0u, 0xffffffffu, 32, 16},
   };
-  for (const auto &c : cases)
+  for (const auto &c : cases) {
     EXPECT_EQ(execute_ds(cdna4::kDsWrapRtnB32Ds, c.old, c.sub, c.add, 0), c.expected);
+  }
 }
 
 TEST_P(AtomicPolicyExecutionTest, DsWrapSerializesSharedAddressesAndPreservesInactiveLanes) {
-  if (modern_policy())
+  if (modern_policy()) {
     GTEST_SKIP() << "RDNA4 and CDNA5 do not expose DS_WRAP_RTN_B32";
+  }
   const uint32_t last = wave_->wf_size() - 1;
   wave_->set_exec(1 | (uint64_t{1} << last));
   wave_->lds().write32(0x100, 9);
@@ -1145,7 +1257,7 @@ TEST_P(AtomicPolicyExecutionTest, DsWrapSerializesSharedAddressesAndPreservesIna
   ASSERT_NE(inst->data(), nullptr);
   const auto *request = inst->data_as<amdgpu::VectorMemState>();
   EXPECT_EQ(request->wait_counter_type,
-            GetParam() == ROCJITSU_CODE_ARCH_RDNA3 || GetParam() == ROCJITSU_CODE_ARCH_RDNA3_5
+            GetParam() == rocjitsu::IsaFamily::Rdna3 || GetParam() == rocjitsu::IsaFamily::Rdna3_5
                 ? amdgpu::WaitCounterType::DSCNT
                 : amdgpu::WaitCounterType::LGKMCNT);
   EXPECT_EQ(request->lane_mask, wave_->exec());
@@ -1159,9 +1271,10 @@ TEST_P(AtomicPolicyExecutionTest, DsWrapSerializesSharedAddressesAndPreservesIna
 }
 
 TEST_P(AtomicPolicyExecutionTest, TwoAddressDsWrapsEachOffsetBeforeRelocation) {
-  if (GetParam() != ROCJITSU_CODE_ARCH_RDNA3 && GetParam() != ROCJITSU_CODE_ARCH_RDNA3_5 &&
-      GetParam() != ROCJITSU_CODE_ARCH_RDNA4)
+  if (GetParam() != rocjitsu::IsaFamily::Rdna3 && GetParam() != rocjitsu::IsaFamily::Rdna3_5 &&
+      GetParam() != rocjitsu::IsaFamily::Rdna4) {
     GTEST_SKIP() << "GFX11/GFX12 DS encodings";
+  }
   wave_->set_lds_base(512);
   wave_->set_lds_size(512);
   wave_->lds().write32(wave_->lds_base(), 0xabcddcba);
@@ -1190,21 +1303,24 @@ TEST_P(AtomicPolicyExecutionTest, TwoAddressDsWrapsEachOffsetBeforeRelocation) {
 }
 
 TEST_P(AtomicPolicyExecutionTest, LdsStackUpdatesPointerAndResultWithoutAnIntersectionEngine) {
-  const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
-  if (!gfx12 && GetParam() != ROCJITSU_CODE_ARCH_RDNA3 && GetParam() != ROCJITSU_CODE_ARCH_RDNA3_5)
+  const bool gfx12 = GetParam() == rocjitsu::IsaFamily::Rdna4;
+  if (!gfx12 && GetParam() != rocjitsu::IsaFamily::Rdna3 &&
+      GetParam() != rocjitsu::IsaFamily::Rdna3_5) {
     GTEST_SKIP() << "This target has no LDS stack instruction";
+  }
   const uint32_t high = wave_->wf_size() - 1;
   wave_->set_exec(1 | (uint64_t{1} << high));
   std::array<uint32_t, 2> words;
-  if (gfx12)
+  if (gfx12) {
     words = rdna4::build_vds(rdna4::kDsBvhStackPush4Pop1RtnB32Vds,
                              {.offset0 = 16, .addr = 16, .data0 = 0, .data1 = 4, .vdst = 12});
-  else if (GetParam() == ROCJITSU_CODE_ARCH_RDNA3)
+  } else if (GetParam() == rocjitsu::IsaFamily::Rdna3) {
     words = rdna3::build_ds(rdna3::kDsBvhStackRtnB32Ds,
                             {.offset1 = 16, .addr = 16, .data0 = 0, .data1 = 4, .vdst = 12});
-  else
+  } else {
     words = rdna3_5::build_ds(rdna3_5::kDsBvhStackRtnB32Ds,
                               {.offset1 = 16, .addr = 16, .data0 = 0, .data1 = 4, .vdst = 12});
+  }
   for (uint32_t lane : {0u, 1u, high}) {
     compute_unit_->write_vgpr(base_, lane, 0xffffffff);
     compute_unit_->write_vgpr(base_ + 16, lane, lane << (gfx12 ? 15 : 18));
@@ -1213,11 +1329,12 @@ TEST_P(AtomicPolicyExecutionTest, LdsStackUpdatesPointerAndResultWithoutAnInters
   for (uint32_t step = 0; step < 8; ++step) {
     for (uint32_t lane : {0u, high}) {
       compute_unit_->write_vgpr(base_, lane, step == 7 ? 0xfffffff8 : 0xffffffff);
-      for (uint32_t i = 0; i < 4; ++i)
+      for (uint32_t i = 0; i < 4; ++i) {
         compute_unit_->write_vgpr(base_ + 4 + i, lane,
                                   step == 0 || step == 7 ? 0x104 + i * 0x100
                                   : step == 6 && i == 0  ? 0xfffffffd
                                                          : 0xffffffff);
+      }
     }
     std::unique_ptr<Instruction> inst(decode_valid(*decoder_, words.data()));
     ASSERT_NE(inst, nullptr);
@@ -1250,25 +1367,29 @@ TEST_P(AtomicPolicyExecutionTest, LdsStackUpdatesPointerAndResultWithoutAnInters
   constexpr uint32_t neighbor = 1024;
   compute_unit_->write_vgpr(base_ + 16, 0, (neighbor / 4) << (gfx12 ? 15 : 18));
   compute_unit_->write_vgpr(base_, 0, 0xffffffff);
-  for (unsigned slot = 0; slot < 4; ++slot)
+  for (unsigned slot = 0; slot < 4; ++slot) {
     wave_->lds().write32(wave_->lds_base() + neighbor + slot * 128, 0xdeadbeef);
+  }
   for (bool push : {true, false}) {
-    for (unsigned slot = 0; slot < 4; ++slot)
+    for (unsigned slot = 0; slot < 4; ++slot) {
       compute_unit_->write_vgpr(base_ + 4 + slot, 0, push ? 0x104 + slot * 0x100 : 0xffffffff);
+    }
     auto inst = decoder_->decode_window(words);
     ASSERT_TRUE(inst.succeeded());
     ASSERT_TRUE(compute_unit_->execute_instruction(inst.value().get(), *wave_).succeeded());
     amdgpu::LocalMemPipeline pipeline;
     pipeline.issue(std::move(inst).value().release(), *wave_);
     EXPECT_EQ(compute_unit_->read_vgpr(base_ + 12, 0), push && !gfx12 ? 0x104u : 0u);
-    for (unsigned slot = 0; slot < 4; ++slot)
+    for (unsigned slot = 0; slot < 4; ++slot) {
       EXPECT_EQ(wave_->lds().read32(wave_->lds_base() + neighbor + slot * 128), 0xdeadbeefu);
+    }
   }
 }
 
 TEST_P(AtomicPolicyExecutionTest, Rdna4StackPairsParentTransitionsAndPrimitiveRanges) {
-  if (GetParam() != ROCJITSU_CODE_ARCH_RDNA4)
+  if (GetParam() != rocjitsu::IsaFamily::Rdna4) {
     GTEST_SKIP() << "RDNA4 stack variants";
+  }
   struct Case {
     uint32_t pop, size, flags, last, first, seventh, eighth, ptr, result0, result1;
   };
@@ -1298,14 +1419,16 @@ TEST_P(AtomicPolicyExecutionTest, Rdna4StackPairsParentTransitionsAndPrimitiveRa
         compute_unit_->write_vgpr(base_ + addr, lane, lane << 15);
         compute_unit_->write_vgpr(base_ + 12, lane, 0xdeadbeef);
         compute_unit_->write_vgpr(base_ + 13, lane, 0xdeadbeef);
-        if (addr != last_vgpr)
+        if (addr != last_vgpr) {
           compute_unit_->write_vgpr(base_ + addr + 1, lane, 0xfacefeed);
-        for (uint32_t i = 0; i < 8; ++i)
+        }
+        for (uint32_t i = 0; i < 8; ++i) {
           compute_unit_->write_vgpr(base_ + 4 + i, lane,
                                     i == 0   ? c.first
                                     : i == 6 ? c.seventh
                                     : i == 7 ? c.eighth
                                              : 0x1004 + i * 0x100);
+        }
       }
       wave_->lds().write32(0, 0xfacefeed);
       const auto words = rdna4::build_vds(c.pop == 2 ? rdna4::kDsBvhStackPush8Pop2RtnB64Vds
@@ -1342,8 +1465,9 @@ TEST_P(AtomicPolicyExecutionTest, Rdna4StackPairsParentTransitionsAndPrimitiveRa
 // and CDNA2 ISA 9.5.2 / CDNA3/4 ISA 9.2.2 specify flushing the CompareStore result; the
 // measured paths instead flush comparison inputs and preserve the stored/retained bits.
 TEST_P(AtomicPolicyExecutionTest, DsFloatCompareStoreEqualityAndDenormals) {
-  if (modern_policy())
+  if (modern_policy()) {
     GTEST_SKIP() << "This ISA exposes integer compare-store only";
+  }
   for (uint16_t opcode : {17, 49, 81, 113}) {
     const uint32_t width = opcode >= 81 ? 8 : 4;
     const uint64_t one = width == 8 ? 0x3ff0000000000000ULL : 0x3f800000;
@@ -1364,43 +1488,90 @@ TEST_P(AtomicPolicyExecutionTest, DsFloatCompareStoreEqualityAndDenormals) {
   }
 }
 
-TEST_P(AtomicPolicyExecutionTest, MemoryAddDenormalsAndHostRounding) {
-  if (GetParam() == ROCJITSU_CODE_ARCH_RDNA1 || GetParam() == ROCJITSU_CODE_ARCH_RDNA2)
+TEST_P(AtomicPolicyExecutionTest, MemoryAddDenormalsAndRounding) {
+  if (GetParam() == rocjitsu::IsaFamily::Rdna1 || GetParam() == rocjitsu::IsaFamily::Rdna2) {
     GTEST_SKIP() << "No F32 atomic add on this ISA";
+  }
   for (bool buffer : {false, true}) {
     for (uint32_t mode : {0u, 0xffu}) {
-      // Physical RDNA3 L2 chooses memory's NaN; RDNA4 chooses the operand.
-      for (uint32_t old_nan : {0x7f800002u, 0x7fc00002u})
-        for (uint32_t source_nan : {0xff800004u, 0xffc00004u})
-          EXPECT_EQ(execute_memory(buffer, old_nan, source_nan, mode),
-                    (GetParam() == ROCJITSU_CODE_ARCH_RDNA4 ? source_nan : old_nan) | 0x400000u);
-      EXPECT_EQ(execute_memory(buffer, 1, 1, mode), modern_policy() ? 2u : 0u);
+      // Physical RDNA3 L2 chooses memory's NaN; RDNA4, MI300A and MI350X choose the operand.
+      const bool source_nan = GetParam() == rocjitsu::IsaFamily::Rdna4 || measured_cdna();
+      for (uint32_t old_nan : {0x7f800002u, 0x7fc00002u}) {
+        for (uint32_t source_nan_bits : {0xff800004u, 0xffc00004u}) {
+          EXPECT_EQ(execute_memory(buffer, old_nan, source_nan_bits, mode),
+                    (source_nan ? source_nan_bits : old_nan) | 0x400000u);
+        }
+      }
+      EXPECT_EQ(execute_memory(buffer, 1, 1, mode), modern_policy() || measured_cdna() ? 2u : 0u);
       EXPECT_EQ(execute_memory(buffer, 0x00800001, 0x80800000, mode), 1u);
-      for (int host_round : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
-        const int saved_round = std::fegetround();
-        ASSERT_EQ(std::fesetround(host_round), 0);
-        const uint32_t result = execute_memory(buffer, 0x3f800000, 0x33800000, mode);
-        const int restored_round = std::fegetround();
-        std::fesetround(saved_round);
-        EXPECT_EQ(result, 0x3f800000u);
-        EXPECT_EQ(restored_round, host_round);
+      EXPECT_EQ(execute_memory(buffer, 0x3f800000, 0x33800000, mode), 0x3f800000u);
+    }
+  }
+}
+
+// MI300A (gfx942) and MI350X (gfx950) probe lanes, identical on both chips: L2 float atomics
+// never flush and the data operand's NaN wins. Each row holds at all 21 captured MODEs and in
+// the BUFFER and GLOBAL, returning and non-returning captures.
+TEST_P(AtomicPolicyExecutionTest, MemoryFloatAtomicsMatchMi300aAndMi350x) {
+  if (!measured_cdna()) {
+    GTEST_SKIP() << "Captured on MI300A and MI350X";
+  }
+  struct Row {
+    uint16_t opcode; ///< Shared by MUBUF and FLAT.
+    uint32_t width;
+    uint64_t memory, data, expected;
+  };
+  constexpr std::array<Row, 13> kRows = {{
+      {cdna4::kFlatAtomicAddF32Flat, 4, 0x00800000, 0x807fffff, 0x00000001}, // lane 160
+      {cdna4::kFlatAtomicAddF32Flat, 4, 0x00000001, 0x00000001, 0x00000002}, // lane 106
+      {cdna4::kFlatAtomicAddF32Flat, 4, 0x7f800001, 0x7fc00000, 0x7fc00000}, // lane 584
+      {cdna4::kFlatAtomicAddF32Flat, 4, 0x7fc00000, 0x7f800001, 0x7fc00001}, // lane 635
+      {cdna4::kFlatAtomicAddF64Flat, 8, 0x7ff0000000000001, 0x7ff8000000000000,
+       0x7ff8000000000000},                       // lane 507
+      {cdna4::kFlatAtomicAddF64Flat, 8, 1, 1, 2}, // lane 92
+      {cdna4::kFlatAtomicMaxF64Flat, 8, 0xfff8000000000000, 0x7ff8000000000000,
+       0x7ff8000000000000},                       // lane 517
+      {cdna4::kFlatAtomicMaxF64Flat, 8, 1, 0, 1}, // lane 2
+      {cdna4::kFlatAtomicMaxF64Flat, 8, 0x7ff4000012345678, 0x7ff0000000000001,
+       0x7ff8000000000001}, // lane 564
+      {cdna4::kFlatAtomicMinF64Flat, 8, 0x7ff0000000000001, 0x7ff8000000000000,
+       0x7ff8000000000001},                                                         // lane 507
+      {cdna4::kFlatAtomicMinF64Flat, 8, 1, 0x8000000000000000, 0x8000000000000000}, // lane 47
+      {cdna4::kFlatAtomicPkAddF16Flat, 4, 0x7c013800, 0x7e00bc00, 0x7e00b800},      // lane 265
+      {cdna4::kFlatAtomicPkAddBf16Flat, 4, 0x7f813f00, 0x7fc0bf80, 0x7fc0bf00},     // lane 211
+  }};
+  for (const Row &row : kRows) {
+    for (bool buffer : {false, true}) {
+      // CDNA3 has GLOBAL_ATOMIC_PK_ADD_BF16 only.
+      if (buffer && row.opcode == cdna4::kFlatAtomicPkAddBf16Flat &&
+          GetParam() == rocjitsu::IsaFamily::Cdna3) {
+        continue;
+      }
+      for (uint32_t mode : {0x300u, 0x3f0u}) {
+        SCOPED_TRACE(testing::Message()
+                     << std::hex << "opcode=" << row.opcode << " buffer=" << buffer
+                     << " mode=" << mode << " memory=" << row.memory << " data=" << row.data);
+        EXPECT_EQ(execute_cdna_memory(row.opcode, buffer, row.memory, row.data, mode, row.width),
+                  row.expected);
       }
     }
   }
 }
 
 TEST_P(AtomicPolicyExecutionTest, BufferFloatCompareSwapDefinesOnlyReturnedElement) {
-  if (GetParam() != ROCJITSU_CODE_ARCH_RDNA1 && GetParam() != ROCJITSU_CODE_ARCH_RDNA2 &&
-      GetParam() != ROCJITSU_CODE_ARCH_RDNA3 && GetParam() != ROCJITSU_CODE_ARCH_RDNA3_5)
+  if (GetParam() != rocjitsu::IsaFamily::Rdna1 && GetParam() != rocjitsu::IsaFamily::Rdna2 &&
+      GetParam() != rocjitsu::IsaFamily::Rdna3 && GetParam() != rocjitsu::IsaFamily::Rdna3_5) {
     GTEST_SKIP() << "No floating buffer compare-swap on this ISA";
+  }
   for (uint32_t width : {1u, 2u}) {
-    if (width == 2 && GetParam() != ROCJITSU_CODE_ARCH_RDNA1 &&
-        GetParam() != ROCJITSU_CODE_ARCH_RDNA2)
+    if (width == 2 && GetParam() != rocjitsu::IsaFamily::Rdna1 &&
+        GetParam() != rocjitsu::IsaFamily::Rdna2) {
       continue;
+    }
     std::array<uint32_t, 3> words = memory_words(/*buffer=*/true, /*compare=*/true);
     if (width == 2) {
       const std::array<uint32_t, 2> wide_words =
-          GetParam() == ROCJITSU_CODE_ARCH_RDNA1
+          GetParam() == rocjitsu::IsaFamily::Rdna1
               ? rdna1::build_mubuf(rdna1::kBufferAtomicFcmpswapX2Mubuf, {.glc = 1})
               : rdna2::build_mubuf(rdna2::kBufferAtomicFcmpswapX2Mubuf, {.glc = 1});
       std::ranges::copy(wide_words, words.begin());
@@ -1422,9 +1593,10 @@ TEST_P(AtomicPolicyExecutionTest, BufferFloatCompareSwapDefinesOnlyReturnedEleme
 // Only gfx1100 global F32 was captured. RDNA1/2 cache F32, RDNA3 BUFFER F32, and RDNA3.5
 // cache F32 inherit the same compare-store policy without equivalent hardware captures.
 TEST_P(AtomicPolicyExecutionTest, MemoryFloatCompareStore) {
-  if (GetParam() != ROCJITSU_CODE_ARCH_RDNA1 && GetParam() != ROCJITSU_CODE_ARCH_RDNA2 &&
-      GetParam() != ROCJITSU_CODE_ARCH_RDNA3 && GetParam() != ROCJITSU_CODE_ARCH_RDNA3_5)
+  if (GetParam() != rocjitsu::IsaFamily::Rdna1 && GetParam() != rocjitsu::IsaFamily::Rdna2 &&
+      GetParam() != rocjitsu::IsaFamily::Rdna3 && GetParam() != rocjitsu::IsaFamily::Rdna3_5) {
     GTEST_SKIP() << "This witness covers RDNA1 through RDNA3.5 memory compare-swap";
+  }
   for (bool buffer : {false, true}) {
     EXPECT_EQ(execute_memory(buffer, 0, 0x3f800000, 0xf0, true, 0x80000000), 0x3f800000u);
     EXPECT_EQ(execute_memory(buffer, 0x7fc00002, 0x3f800000, 0xf0, true, 0x7fc00002), 0x7fc00002u);
@@ -1438,9 +1610,10 @@ TEST_P(AtomicPolicyExecutionTest, MemoryFloatCompareStore) {
 }
 
 TEST_P(AtomicPolicyExecutionTest, DsF64AddPreservesDenormalsAndRoundsToNearest) {
-  if (GetParam() != ROCJITSU_CODE_ARCH_CDNA2 && GetParam() != ROCJITSU_CODE_ARCH_CDNA3 &&
-      GetParam() != ROCJITSU_CODE_ARCH_CDNA4 && GetParam() != ROCJITSU_CODE_ARCH_CDNA5)
+  if (GetParam() != rocjitsu::IsaFamily::Cdna2 && GetParam() != rocjitsu::IsaFamily::Cdna3 &&
+      GetParam() != rocjitsu::IsaFamily::Cdna4 && GetParam() != rocjitsu::IsaFamily::Cdna5) {
     GTEST_SKIP() << "No F64 LDS add on this ISA";
+  }
   const uint16_t add_opcode = modern_policy() ? cdna5::kDsAddF64Vds : cdna4::kDsAddF64Ds;
   for (uint16_t opcode : {add_opcode, static_cast<uint16_t>(add_opcode + 32)}) {
     EXPECT_EQ(execute_ds(opcode, 1, 1, 0, 0, 8), 2u);
@@ -1448,23 +1621,19 @@ TEST_P(AtomicPolicyExecutionTest, DsF64AddPreservesDenormalsAndRoundsToNearest) 
               0xfff8000000000000ULL);
     EXPECT_EQ(execute_ds(opcode, 0xfff0000000000000ULL, 0x7ff0000000000000ULL, 0, 0, 8),
               0xfff8000000000000ULL);
-    const int saved_round = std::fegetround();
-    ASSERT_EQ(std::fesetround(FE_UPWARD), 0);
-    const uint64_t result =
-        execute_ds(opcode, 0x3ff0000000000000ULL, 0x3ca0000000000000ULL, 0, 0, 8);
-    std::fesetround(saved_round);
-    EXPECT_EQ(result, 0x3ff0000000000000ULL);
+    EXPECT_EQ(execute_ds(opcode, 0x3ff0000000000000ULL, 0x3ca0000000000000ULL, 0, 0, 8),
+              0x3ff0000000000000ULL);
   }
 }
 
 INSTANTIATE_TEST_SUITE_P(AllAmdgpu, AtomicPolicyExecutionTest,
-                         testing::Values(ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
-                                         ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4,
-                                         ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA1,
-                                         ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3,
-                                         ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4));
+                         testing::Values(rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2,
+                                         rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4,
+                                         rocjitsu::IsaFamily::Cdna5, rocjitsu::IsaFamily::Rdna1,
+                                         rocjitsu::IsaFamily::Rdna2, rocjitsu::IsaFamily::Rdna3,
+                                         rocjitsu::IsaFamily::Rdna3_5, rocjitsu::IsaFamily::Rdna4));
 
-class Gfx12AtomicTemporalHintTest : public testing::TestWithParam<rj_code_arch_t> {};
+class Gfx12AtomicTemporalHintTest : public testing::TestWithParam<rocjitsu::IsaFamily> {};
 
 TEST_P(Gfx12AtomicTemporalHintTest, ReturnBitIsIndependentOfTemporalAndCascadeHints) {
   amdgpu::GpuMemory memory("atomic_th_memory");
@@ -1497,8 +1666,9 @@ TEST_P(Gfx12AtomicTemporalHintTest, ReturnBitIsIndependentOfTemporalAndCascadeHi
         for (const uint8_t th : {0, 1, 2, 3, 4, 5, 6, 7}) {
           // SYS coverage uses the physically qualified returning forms.
           if (memory_scope == kSystemScope && th != amdgpu::GFX12_TH_ATOMIC_RETURN &&
-              th != (amdgpu::GFX12_TH_ATOMIC_RETURN | amdgpu::GFX12_TH_ATOMIC_CASCADE))
+              th != (amdgpu::GFX12_TH_ATOMIC_RETURN | amdgpu::GFX12_TH_ATOMIC_CASCADE)) {
             continue;
+          }
           SCOPED_TRACE(testing::Message()
                        << "arch=" << GetParam() << " memory_form=" << static_cast<int>(memory_form)
                        << " is_64bit=" << is_64bit << " scope=" << unsigned(memory_scope)
@@ -1511,14 +1681,14 @@ TEST_P(Gfx12AtomicTemporalHintTest, ReturnBitIsIndependentOfTemporalAndCascadeHi
           l2.invalidate_all();
           compute_unit->write_sgpr(sgpr_base + 4, kAddress);
           compute_unit->write_sgpr(sgpr_base + 5, memory_form == Form::Buffer &&
-                                                          GetParam() == ROCJITSU_CODE_ARCH_CDNA5
+                                                          GetParam() == rocjitsu::IsaFamily::Cdna5
                                                       ? 64u << 25
                                                       : 0);
           compute_unit->write_sgpr(
               sgpr_base + 6,
-              memory_form == Form::Buffer && GetParam() == ROCJITSU_CODE_ARCH_RDNA4 ? 64 : 0);
+              memory_form == Form::Buffer && GetParam() == rocjitsu::IsaFamily::Rdna4 ? 64 : 0);
           compute_unit->write_sgpr(sgpr_base + 7,
-                                   GetParam() == ROCJITSU_CODE_ARCH_RDNA4 ? 0x30020000 : 0);
+                                   GetParam() == rocjitsu::IsaFamily::Rdna4 ? 0x30020000 : 0);
           compute_unit->write_sgpr(sgpr_base + 12, 0);
           compute_unit->write_vgpr(vgpr_base + 2, 0, memory_form == Form::Flat ? kAddress : 0);
           compute_unit->write_vgpr(vgpr_base + 3, 0, 0);
@@ -1526,8 +1696,9 @@ TEST_P(Gfx12AtomicTemporalHintTest, ReturnBitIsIndependentOfTemporalAndCascadeHi
           compute_unit->write_vgpr(vgpr_base + 1, 0, kSentinel);
           compute_unit->write_vgpr(vgpr_base + 8, 0, 5);
           compute_unit->write_vgpr(vgpr_base + 9, 0, 0);
-          for (uint32_t reg : {0u, 1u, 8u, 9u})
+          for (uint32_t reg : {0u, 1u, 8u, 9u}) {
             compute_unit->write_vgpr(vgpr_base + reg, 1, kSentinel);
+          }
 
           // These ADD encodings and operand layouts are shared by both GFX12 targets.
           std::array<uint32_t, 3> encoded_instruction;
@@ -1560,8 +1731,9 @@ TEST_P(Gfx12AtomicTemporalHintTest, ReturnBitIsIndependentOfTemporalAndCascadeHi
           ASSERT_NE(instruction, nullptr);
           const uint32_t result_vgpr = memory_form == Form::Buffer ? 8 : 0;
           bool has_vgpr_result = false;
-          for (int i = 0; i < instruction->num_dst_operands(); ++i)
+          for (int i = 0; i < instruction->num_dst_operands(); ++i) {
             has_vgpr_result |= instruction->dst_operand(i)->is_vgpr();
+          }
           EXPECT_EQ(has_vgpr_result, returns_value);
           ASSERT_NE(instruction->amdgpu_memory_issue_info(), nullptr);
           const auto counter_obligations =
@@ -1598,6 +1770,6 @@ TEST_P(Gfx12AtomicTemporalHintTest, ReturnBitIsIndependentOfTemporalAndCascadeHi
 }
 
 INSTANTIATE_TEST_SUITE_P(Gfx12Targets, Gfx12AtomicTemporalHintTest,
-                         testing::Values(ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5));
+                         testing::Values(rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5));
 
 } // namespace

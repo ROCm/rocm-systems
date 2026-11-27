@@ -160,6 +160,24 @@ public:
   Operand sdata;
 };
 
+class SAtcProbeSmem : public Smem {
+public:
+  SAtcProbeSmem(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand sdata;
+  Operand sbase;
+  Operand soffset;
+};
+
+class SAtcProbeBufferSmem : public Smem {
+public:
+  SAtcProbeBufferSmem(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand sdata;
+  Operand sbase;
+  Operand soffset;
+};
+
 } // namespace rdna2
 } // namespace rocjitsu
 

@@ -99,7 +99,7 @@ _IEEE_MINMAX3 = (
 
 
 def _float_minmax(form: str, ty: SemaType, *sources: SemaNode) -> SemaNode:
-    """Create a min/max call for lowering to shared/minmax.h.
+    """Describe min/max selection as an opaque semantic call.
 
     Callers supply typed sources so enrichment can attach VOP3 ABS/NEG modifiers.
     """
@@ -430,7 +430,7 @@ class _ScalarUnary(_ScalarDeriver):
             }
             k = kind_map[op]
             if k == SemaNodeKind.CALL:
-                fn = 'std::ceil' if op == 'ceil' else 'util::rndne_scalar'
+                fn = 'std::ceil' if op == 'ceil' else 'std::nearbyint'
                 result = SemaNode(
                     SemaNodeKind.CALL,
                     ty=ty,
@@ -1518,8 +1518,8 @@ class _VectorCmp(_ScalarDeriver):
         src1 = _cast(_src(1), ty)
         op = sem.operation or ""
         if is_float_relation(sem.data_type, op):
-            # comparison.h evaluates float relations on the raw encodings. The
-            # typed casts stay so enrichment still attaches the VOP3 modifiers.
+            # Float relations describe raw-encoding predicates; typed casts
+            # let enrichment attach the VOP3 source modifiers.
             name = f'{FLOAT_COMPARE_CALL}{op}'
             cmp = SemaNode(
                 SemaNodeKind.CALL,
@@ -1545,9 +1545,8 @@ class _VectorCmp(_ScalarDeriver):
 
 @_register('vector_cmpx')
 class _VectorCmpx(_ScalarDeriver):
-    # TODO: This derive only writes EXEC, but GFX9 (CDNA) cmpx also writes
-    # VCC. Must add VCC[laneId] = cmp before the EXEC write, gated on ISA
-    # generation, before this class can be wired through _SEMA_CLASSES.
+    # This metadata describes EXEC only; CDNA CMPX also writes VCC.
+    # CPU execution handles both outputs independently through rj-arith.
     @staticmethod
     def derive(sem: InstructionSemantics) -> SemaBlock:
         ty = _dtype_to_sema(sem.data_type)
@@ -2121,6 +2120,24 @@ class _DsAtomic(_ScalarDeriver):
             'CalcDsAddr', _cast(_src(0), SemaType.U32), _id('OFFSET', SemaType.U32)
         )
         operand = _cast(_src(1), elem_ty)
+        if '_SRC2_' in sem.name.upper():
+            # MI100 11.3.3 selects the immediate or VGPR high bits as a
+            # signed 15-bit displacement in dwords for both 32- and 64-bit data.
+            raw = _cast(_src(0), SemaType.U32)
+            offset = _id('OFFSET', SemaType.U32)
+            indirect = SemaNode(SemaNodeKind.AND, children=(offset, _lit('0x8000')))
+            low = SemaNode(SemaNodeKind.AND, children=(raw, _lit('0x1ffff')))
+            high = SemaNode(SemaNodeKind.SHR, children=(raw, _lit('17')))
+            base = SemaNode(SemaNodeKind.TERNARY, children=(indirect, low, raw))
+            addr = _addr_call('CalcDsAddr', base, _lit('0'))
+            index = SemaNode(SemaNodeKind.TERNARY, children=(indirect, high, offset))
+            delta = SemaNode(
+                SemaNodeKind.SIGNEXT_FROM_BIT, children=(index, _lit('14'))
+            )
+            scaled = SemaNode(SemaNodeKind.MUL, children=(delta, _lit('4')))
+            operand = _mem_read(
+                SemaNode(SemaNodeKind.ADD, children=(_id('addr'), scaled)), elem_ty
+            )
         stmts = [
             _assign(_id('addr', SemaType.U32), addr),
             SemaNode(

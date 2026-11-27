@@ -122,3 +122,10 @@ int rj_arith_s_getpc_b64_gfx12(uint64_t flags, uint64_t instruction_flags, uint6
                                uint64_t pc) {
   return rj_arith_s_mov_b64(flags, instruction_flags, d, (pc + 4) & 0x0000ffffffffffffULL);
 }
+
+// Export the following instruction address, sign-extended from 57 bits on gfx1250.
+// Return errors before changing outputs.
+int rj_arith_s_get_pc_i64(uint64_t flags, uint64_t instruction_flags, uint64_t *d, uint64_t pc) {
+  const uint64_t next = (pc + 4) & 0x01ffffffffffffffULL;
+  return rj_arith_s_mov_b64(flags, instruction_flags, d, (next ^ (1ULL << 56)) - (1ULL << 56));
+}

@@ -4,12 +4,12 @@
 #include "library/sampling.hpp"
 #include "common/clocks.hpp"
 #include "common/env_vars.hpp"
+#include "common/spin_mutex.hpp"
 #include "common/units/power.hpp"
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
 #include "core/demangler.hpp"
-#include "core/locking.hpp"
 #include "core/node_info.hpp"
 #include "core/perf.hpp"
 #include "core/state.hpp"
@@ -22,6 +22,7 @@
 #include "library/components/callchain.hpp"
 #include "library/perf.hpp"
 #include "library/pmc/sampler.hpp"
+#include "library/process_sampler.hpp"
 #include "library/runtime.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
@@ -62,6 +63,7 @@
 #include <array>
 #include <atomic>
 #include <csignal>
+#include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <initializer_list>
@@ -129,13 +131,6 @@ namespace rocprofsys::sampling
 namespace
 {
 using sampler_allocator_t = sampler_t::allocator_t;
-
-template <typename Category>
-inline std::string
-get_category_track_name(std::uint64_t tid)
-{
-    return std::string(trait::name<Category>::value) + "_" + std::to_string(tid);
-}
 
 std::string
 generate_call_stack_json(const tim::unwind::processed_entry& stack_entry)
@@ -534,11 +529,11 @@ get_offload_file()
     return _v;
 }
 
-locking::atomic_mutex&
+spin_mutex&
 get_offload_mutex()
 {
-    static auto _v = locking::atomic_mutex{};
-    return _v;
+    static auto s_mutex = spin_mutex{};
+    return s_mutex;
 }
 
 using sampler_bundle_t = sampler_t::bundle_type;
@@ -558,9 +553,9 @@ offload_buffer(std::int64_t _seq, sampler_buffer_t&& _buf)
         std::exit(1);
     }
 
-    // use homemade atomic_mutex/atomic_lock since contention will be low
+    // use spin_mutex since contention will be low
     // and using pthread_lock might trigger our wrappers
-    auto const  _lk   = locking::atomic_lock{ get_offload_mutex() };
+    auto const  lock  = std::lock_guard{ get_offload_mutex() };
     auto const& _file = get_offload_file();
 
     if(!_file)
@@ -604,9 +599,9 @@ load_offload_buffer(std::int64_t _thread_idx)
         return _data;
     }
 
-    // use homemade atomic_mutex/atomic_lock since contention will be low
+    // use spin_mutex since contention will be low
     // and using pthread_lock might trigger our wrappers
-    auto const  _lk   = locking::atomic_lock{ get_offload_mutex() };
+    auto const  lock  = std::lock_guard{ get_offload_mutex() };
     auto const& _file = get_offload_file();
     if(!_file)
     {
@@ -793,12 +788,6 @@ configure(bool _setup, std::int64_t _tid)
             _pe.disabled                 = 1;
             _pe.inherit                  = 0;
 
-            // Hardware events are the default overflow source. Their sample times
-            // otherwise stay on perf's CLOCK_MONOTONIC, and parse_overflow_data()
-            // freezes the monotonic-to-timeline offset from the first sample.
-            _pe.use_clockid = 1;
-            _pe.clockid     = clocks::timeline::k_timeline_clock_id;
-
             auto _perf_open_error =
                 _perf_sampler->open(_pe, _info->index_data->system_value);
 
@@ -806,9 +795,17 @@ configure(bool _setup, std::int64_t _tid)
             {
                 LOG_CRITICAL("perf backend for overflow failed to activate: {}",
                              *_perf_open_error);
-                ::rocprofsys::state::process::set(
-                    ::rocprofsys::state::process::Finalized);
-                std::exit(1);
+                // Keep the state below Finalized so the exit hook still runs
+                // rocprofsys_finalize(). During startup nothing else joins the process
+                // sampler, so stop it here: a joinable thread destroyed in exit() calls
+                // std::terminate().
+                _perf_sampler.reset();
+                if(::rocprofsys::state::process::get() !=
+                   ::rocprofsys::state::process::Active)
+                {
+                    ::rocprofsys::process_sampler::sampler::shutdown();
+                }
+                std::exit(EXIT_FAILURE);
             }
 
             _perf_sampler->set_ready_signal(get_sampling_overflow_signal());

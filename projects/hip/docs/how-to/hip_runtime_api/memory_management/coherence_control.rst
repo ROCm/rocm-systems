@@ -1,6 +1,6 @@
 .. meta::
-  :description: HIP coherence control
-                ecosystem ROCm software.
+  :description: Choose between fine-grained and coarse-grained coherence for
+                host and device memory allocations in HIP.
   :keywords: AMD, ROCm, HIP, host memory
 
 .. _coherence_control:
@@ -86,6 +86,14 @@ following table:
       - ``hipHostMallocNonCoherent``
       -
       - Coarse-grained
+    * - ``hipHostRegister``
+      - ``hipHostRegisterDefault``
+      -
+      - Fine-grained
+    * - ``hipHostRegister``
+      - ``hipExtHostRegisterCoarseGrained`` :sup:`2`
+      -
+      - Coarse-grained
     * - ``hipExtMallocWithFlags``
       - ``hipDeviceMallocDefault``
       -
@@ -117,6 +125,19 @@ affected by the ``HIP_HOST_COHERENT`` environment variable, if the
 ``hipHostMallocMapped`` are unset. If neither these flags nor the
 ``HIP_HOST_COHERENT`` environment variable is set, or set as 0, the host memory
 allocation is coarse-grained.
+
+:sup:`2` Registering host memory as coarse-grained is supported on Linux and on
+supported Windows configurations.
+
+.. warning::
+
+  On AMD GPUs, ``hipHostRegisterReadOnly`` has the same value as
+  ``hipExtHostRegisterCoarseGrained`` and doesn't make the memory read-only
+  (``hostRegisterReadOnlySupported`` is ``0``). Passing
+  ``hipHostRegisterReadOnly`` to :cpp:func:`hipHostRegister` registers the
+  memory as coarse-grained instead. If your code passes
+  ``hipHostRegisterReadOnly``, account for coarse-grained coherence on the
+  registered memory.
 
 .. note::
 

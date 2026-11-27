@@ -3,8 +3,10 @@
 
 // Dense byte-input MFMA/WMMA staging and wrapping integer reductions in each ISA domain.
 #pragma once
+#include "common/compiler.h"
 #include "common/internal.h"
 #include "mfma/layout.h"
+#include "rj_arith/detail/rj_arith_wmma.h"
 #if defined(__AVX2__)
 #include <immintrin.h>
 #endif
@@ -35,7 +37,7 @@ void matrix_i8_decode(const uint32_t *const *p, uint32_t *out, bool is_signed) {
 }
 
 // Locate a decoded byte, respecting MFMA broadcasts or gfx1250 split-K layout.
-template <int M, int K, int Batch, bool Wmma>
+template <int M, int K, int Batch, bool Wmma, int ABlockLanes = 0>
 int matrix_i8_index(int index, int k, int batch, uint64_t controls, bool a) {
   if constexpr (Wmma) {
     int local = k / 32 * 16 + k % 16;
@@ -44,7 +46,7 @@ int matrix_i8_index(int index, int k, int batch, uint64_t controls, bool a) {
   } else {
     constexpr int per_lane = K / (64 / (M * Batch));
     int lane = batch * M + k / per_lane * M * Batch + index;
-    lane = a ? mfma_a_lane(lane, controls) : mfma_b_lane(lane, controls);
+    lane = a ? mfma_a_lane(lane, controls, ABlockLanes) : mfma_b_lane(lane, controls);
     int local = k % per_lane;
     return (local / 4 * 64 + lane) * 4 + local % 4;
   }
@@ -59,10 +61,62 @@ template <int M, int Batch, bool Wmma> MfmaWord matrix_i8_output(int row, int co
   }
 }
 
-// Reduce decoded byte matrices and apply optional signed saturation after adding C.
-template <int M, int K, int Batch, bool Wmma>
-void matrix_i8_kernel(uint64_t controls, bool clamp, uint32_t *const *d, const uint32_t *const *a,
-                      const uint32_t *const *b, const uint32_t *const *c) {
+// Compute one wrapping dot-product row from already selected, aligned columns.
+template <int M, int K>
+void matrix_i8_dot_row(const uint32_t *row, const uint32_t columns[K][M], uint32_t *result) {
+#if defined(__AVX512F__)
+  if constexpr (M >= 16) {
+    for (int col = 0; col < M; col += 16) {
+      auto acc = _mm512_setzero_si512();
+      RJ_ARITH_UNROLL(4)
+      for (int k = 0; k < K; ++k) {
+        acc = _mm512_add_epi32(acc, _mm512_mullo_epi32(_mm512_set1_epi32(row[k]),
+                                                       _mm512_load_si512(&columns[k][col])));
+      }
+      _mm512_store_si512(&result[col], acc);
+    }
+  } else
+#endif
+#if defined(__AVX2__)
+      if constexpr (M >= 8) {
+    for (int col = 0; col < M; col += 8) {
+      auto acc = _mm256_setzero_si256();
+      RJ_ARITH_UNROLL(4)
+      for (int k = 0; k < K; ++k) {
+        acc = _mm256_add_epi32(
+            acc, _mm256_mullo_epi32(
+                     _mm256_set1_epi32(row[k]),
+                     _mm256_load_si256(reinterpret_cast<const __m256i *>(&columns[k][col]))));
+      }
+      _mm256_store_si256(reinterpret_cast<__m256i *>(&result[col]), acc);
+    }
+  } else {
+    auto acc = _mm_setzero_si128();
+    RJ_ARITH_UNROLL(4)
+    for (int k = 0; k < K; ++k) {
+      acc = _mm_add_epi32(
+          acc, _mm_mullo_epi32(_mm_set1_epi32(row[k]),
+                               _mm_load_si128(reinterpret_cast<const __m128i *>(columns[k]))));
+    }
+    _mm_store_si128(reinterpret_cast<__m128i *>(result), acc);
+  }
+#else
+  for (int col = 0; col < M; ++col) {
+    uint32_t sum = 0;
+    for (int k = 0; k < K; ++k) {
+      sum += row[k] * columns[k][col];
+    }
+    result[col] = sum;
+  }
+#endif
+}
+
+// Reduce decoded byte matrices and apply optional signed saturation after adding C
+// (or after each 16-element K pass on gfx950).
+template <int M, int K, int Batch, bool Wmma, int ABlockLanes = 0>
+void matrix_i8_kernel(uint64_t controls, bool clamp, bool clamp_per_pass, uint32_t *const *d,
+                      const uint32_t *const *a, const uint32_t *const *b,
+                      const uint32_t *const *c) {
   constexpr int lanes = Wmma ? 32 : 64;
   alignas(64) uint32_t left[M * K * Batch], right[M * K * Batch];
   matrix_i8_decode<M * K * Batch, lanes>(a, left, !Wmma || (controls & RJ_ARITH_WMMA_SIGNED_A));
@@ -72,53 +126,34 @@ void matrix_i8_kernel(uint64_t controls, bool clamp, uint32_t *const *d, const u
     alignas(64) uint32_t rows[M][K], columns[K][M];
     for (int i = 0; i < M; ++i) {
       for (int k = 0; k < K; ++k) {
-        rows[i][k] = left[matrix_i8_index<M, K, Batch, Wmma>(i, k, batch, controls, true)];
-        columns[k][i] = right[matrix_i8_index<M, K, Batch, Wmma>(i, k, batch, controls, false)];
+        rows[i][k] =
+            left[matrix_i8_index<M, K, Batch, Wmma, ABlockLanes>(i, k, batch, controls, true)];
+        columns[k][i] =
+            right[matrix_i8_index<M, K, Batch, Wmma, ABlockLanes>(i, k, batch, controls, false)];
       }
     }
     for (int row = 0; row < M; ++row) {
-#if defined(__AVX512F__)
-      if constexpr (M >= 16) {
-        for (int col = 0; col < M; col += 16) {
-          auto acc = _mm512_setzero_si512();
-          for (int k = 0; k < K; ++k) {
-            acc = _mm512_add_epi32(acc, _mm512_mullo_epi32(_mm512_set1_epi32(rows[row][k]),
-                                                           _mm512_load_si512(&columns[k][col])));
+      if constexpr (!Wmma && K > 16) {
+        if (clamp && clamp_per_pass) {
+          alignas(64) uint32_t pass_sum[M];
+          for (int col = 0; col < M; ++col) {
+            auto out = matrix_i8_output<M, Batch, Wmma>(row, col, batch);
+            result[batch][row][col] = c[out.reg][out.lane];
           }
-          _mm512_store_si512(&result[batch][row][col], acc);
-        }
-      } else
-#endif
-#if defined(__AVX2__)
-          if constexpr (M >= 8) {
-        for (int col = 0; col < M; col += 8) {
-          auto acc = _mm256_setzero_si256();
-          for (int k = 0; k < K; ++k) {
-            acc = _mm256_add_epi32(
-                acc, _mm256_mullo_epi32(
-                         _mm256_set1_epi32(rows[row][k]),
-                         _mm256_load_si256(reinterpret_cast<const __m256i *>(&columns[k][col]))));
+          for (int pass = 0; pass < K / 16; ++pass) {
+            matrix_i8_dot_row<M, 16>(rows[row] + 16 * pass, columns + 16 * pass, pass_sum);
+            for (int col = 0; col < M; ++col) {
+              int64_t wide = int64_t(bit_cast<int32_t>(result[batch][row][col])) +
+                             bit_cast<int32_t>(pass_sum[col]);
+              result[batch][row][col] = wide > 0x7fffffffLL    ? 0x7fffffffU
+                                        : wide < -0x80000000LL ? 0x80000000U
+                                                               : uint32_t(wide);
+            }
           }
-          _mm256_store_si256(reinterpret_cast<__m256i *>(&result[batch][row][col]), acc);
+          continue;
         }
-      } else {
-        auto acc = _mm_setzero_si128();
-        for (int k = 0; k < K; ++k) {
-          acc = _mm_add_epi32(
-              acc, _mm_mullo_epi32(_mm_set1_epi32(rows[row][k]),
-                                   _mm_load_si128(reinterpret_cast<const __m128i *>(columns[k]))));
-        }
-        _mm_store_si128(reinterpret_cast<__m128i *>(result[batch][row]), acc);
       }
-#else
-      for (int col = 0; col < M; ++col) {
-        uint32_t sum = 0;
-        for (int k = 0; k < K; ++k) {
-          sum += rows[row][k] * columns[k][col];
-        }
-        result[batch][row][col] = sum;
-      }
-#endif
+      matrix_i8_dot_row<M, K>(rows[row], columns, result[batch][row]);
       for (int col = 0; col < M; ++col) {
         auto out = matrix_i8_output<M, Batch, Wmma>(row, col, batch);
         uint32_t sum = result[batch][row][col], initial = c[out.reg][out.lane];

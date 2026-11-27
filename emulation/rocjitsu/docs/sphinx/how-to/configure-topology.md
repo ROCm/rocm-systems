@@ -1,13 +1,13 @@
 ---
 myst:
     html_meta:
-        "description": "How to select, edit, and use a JSON configuration file to define a simulated GPU topology in rocJITsu, including multi-GPU setups and C API usage."
-        "keywords": "rocJITsu, ROCm, GPU topology, JSON configuration, simulation, rj_vm_create, multi-GPU, CDNA, RDNA"
+        "description": "How to select, edit, and use a JSON configuration file to define a simulated GPU topology in rocjitsu, including multi-GPU setups and C API usage."
+        "keywords": "rocjitsu, ROCm, GPU topology, JSON configuration, simulation, rj_vm_create, multi-GPU, CDNA, RDNA"
 ---
 
 # Configure a simulated GPU topology
 
-rocJITsu uses a declarative JSON configuration file to describe the simulated GPU hardware: the component hierarchy, link connectivity, simulation parameters, and device properties exposed through the emulated sysfs topology. This page explains how to choose a configuration, adjust its key fields, build a multi-GPU configuration, and create a virtual machine from C code.
+rocjitsu uses a declarative JSON configuration file to describe the simulated GPU hardware: the component hierarchy, link connectivity, simulation parameters, and device properties exposed through the emulated sysfs topology. This page explains how to choose a configuration, adjust its key fields, build a multi-GPU configuration, and create a virtual machine from C code.
 
 For a full description of the JSON schema and its FlatBuffers validation, see [JSON topology configuration](/conceptual/json-configuration.md).
 
@@ -25,13 +25,20 @@ Pre-built configurations ship in the `configs/` directory:
 | `gfx950_mi350x_kmd_2gpu.json` | Two CDNA4 GPUs (multi-GPU daemon mode) |
 | `gfx1250_mi455x.json` | Single CDNA5 GPU (standalone or PCI/VFIO simulation) |
 | `gfx1250_mi455x_kmd_4gpu.json` | Four CDNA5 GPUs (multi-GPU daemon mode) |
+| `gfx1250_mi455x_4gpu_scaleup.json` | Functional four-GPU fixture with explicit local fabric routes; peer discovery remains off |
+| `gfx1250_mi455x_kmd_2node_net.json` | Schematic two-node, one-GPU-per-node RCCL NET fixture |
+| `gfx1250_mi455x_kmd_4node_2gpu_if.json` | Four-node, two-GPU-per-node mixed P2P/NET fixture; see the [same-host RCCL gate](https://rocm.github.io/rocm-systems/rocjitsu/same-host-pod-rccl-gate/#run-this-gate) |
 | `gfx1100_w7900.json` | Single RDNA3 GPU (standalone simulation) |
 | `gfx1151.json` | Single RDNA3.5 GPU (standalone simulation) |
 | `gfx1201_r9700.json` | Single RDNA4 GPU (standalone simulation) |
 
 `gfx950_mi355x.json`, `gfx950_mi355x_kmd.json` and `gfx950_mi355x_kmd_2gpu.json` are deprecated copies of the `gfx950_mi350x*` configs. Despite their names, they describe an MI350X (PCI device ID `0x75a0`). They remain only so that existing callers keep working; use the `gfx950_mi350x*` names instead. The `gfx950_mi355x*` configs will later describe an MI355X (PCI device ID `0x75a3`); see [#14644](https://github.com/ROCm/rocm-systems/issues/14644).
 
-Standalone configs (without `_kmd` in the name) are intended for caller-driven simulation where you step or run the VM directly. KMD configs initialize the emulated kernel driver so that an unmodified HIP or HSA application can issue ioctls through the LD_PRELOAD interposer.
+The `_kmd` suffix identifies presets intended for KFD or daemon use. Select
+the VM mode explicitly: default mode is for caller-driven simulation, while
+local or daemon mode initializes the emulated driver for HIP or HSA ioctls.
+The explicit four-GPU scale-up schematic also supports local or daemon mode
+despite having no `_kmd` suffix.
 
 The gfx1250 standalone profile also supplies the compute-only PCI function used
 by the VFIO-user server. Follow
@@ -65,7 +72,7 @@ explicit stop request).
 
 ### `num_threads`
 
-The number of Simdojo engine partitions. rocJITsu assigns whole XCD subtrees to
+The number of Simdojo engine partitions. rocjitsu assigns whole XCD subtrees to
 these partitions and clamps the value to the aggregate XCD count. Set to `1` to
 keep all XCDs on one engine partition.
 
@@ -82,25 +89,25 @@ Clocked mode always uses a width of one.
 ### `async_helper_threads`
 
 Shared MMA helpers across the VM's CUs. Omission or -1 selects from the target
-table; zero disables helpers. Explicit values range from 0 to 128. The gfx950
-and gfx1250 single-GPU tables enable helpers within the shared thread budget;
-other shipped targets and multi-GPU defaults keep H=0. See
+table. Zero disables helpers. Explicit values range from 0 to 128. All current
+matrix handlers execute synchronously and all shipped presets use zero helpers. See
 [asynchronous MMA execution](../../async-instructions.md).
 
 ### Execution budget and preferred allocations
 
 `cpu_thread_budget` is a ceiling for engines, retained dispatch workers and shared MMA helpers:
 E + sum(D - 1) + H. Its default is process affinity and the target allocation
-table. Desktop/older CDNA presets stop at 24 engine/dispatch threads; gfx950
-adds eight helpers, while gfx1250 uses up to 40 engine/dispatch threads and
-eight helpers. A positive budget overrides affinity. The selector picks the largest fitting
+table. The single-GPU gfx942 and gfx950 presets use up to 48 execution threads,
+and gfx1250 uses up to 64. See the
+[preferred allocations](../../configuration.md#thread-accounting-and-preferred-allocations)
+for per-target granules. A positive budget overrides affinity. The selector picks the largest fitting
 entry in `thread_allocations`; it leaves unused budget between granules.
 Explicit E/D/H knobs take priority and may exceed the automatic budget. A config
 without a table uses serial defaults for unspecified knobs.
 
 Use `rocjitsu --config <path> --thread-budget-table` to show expected allocations
 without starting a VM. `rocjitsu --cpu-thread-budget N` replaces the JSON ceiling
-for that launch. Mirage embeds the native tables in its RocJITsu backend.
+for that launch. Mirage embeds the native tables in its rocjitsu backend.
 
 ### `exec_mode`
 
@@ -128,7 +135,7 @@ configuration used by the RCCL collective tests. To extend it:
 
 ## Create a VM from C code
 
-The rocJITsu C API provides file and string creators, each with a node-aware
+The rocjitsu C API provides file and string creators, each with a node-aware
 variant:
 
 -   `rj_vm_create` --- accepts a file path to a JSON config.
@@ -148,8 +155,8 @@ initialization depth:
 | Mode | Behavior |
 | --- | --- |
 | `RJ_VM_MODE_DEFAULT` | Standalone simulation. The caller drives execution through `rj_vm_step` or `rj_vm_run`. Topology and driver are not initialized. |
-| `RJ_VM_MODE_LOCAL` | Single-process serving via LD_PRELOAD interposer. The engine runs indefinitely, and the driver is opened so that a host runtime can issue ioctls. |
-| `RJ_VM_MODE_DAEMON` | Multi-process serving. Same as local mode, plus GPU allocations are backed by memfds for cross-process sharing. |
+| `RJ_VM_MODE_LOCAL` | Single-process serving through the C API or LD_PRELOAD interposer. Topology is generated, the driver is opened for in-process KFD commands, and the engine has no tick limit. Creation does not start execution: a C API host drives the engine through `rj_vm_step` or `rj_vm_run`. C API use does not require the interposer. |
+| `RJ_VM_MODE_DAEMON` | Multi-process serving. Same as local mode, plus GPU allocations have shareable backing handles (memfds or opaque tokens) for cross-process sharing. |
 
 ### Create from a file path
 

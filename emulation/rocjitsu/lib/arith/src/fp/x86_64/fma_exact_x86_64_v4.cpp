@@ -38,8 +38,10 @@ __m256 narrow_product_f32(__m512d p, unsigned instruction_flags) {
 // Adapted from rj_arith-x86-lab wider512; matches the inherited rocjitsu MUL model.
 // Combines exact FP64 products with embedded narrowing. Within this normal
 // domain, the exact-product comparison also yields inherited MUL exceptions.
+// DX9 zero lanes are exact +0 in the inherited model, whatever the other source holds.
 bool mul_exact_x86_64_v4(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags,
-                         uint32_t *d, const uint32_t *a, const uint32_t *b, uint32_t *state) {
+                         uint32_t *d, const uint32_t *a, const uint32_t *b, uint32_t *state,
+                         bool dx9_zero) {
   if (instruction_flags & RJ_ARITH_ALU_OMOD_HALF) {
     return false;
   }
@@ -48,6 +50,9 @@ bool mul_exact_x86_64_v4(uint64_t flags, uint32_t exec_mask, uint32_t instructio
   if (report && rounding) {
     return false;
   }
+  // Guest input flushing makes denormal sources DX9 zeros.
+  const auto zero_limit =
+      _mm256_set1_epi32(flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS ? 0x00800000 : 1);
 
   // Zero and product exponents [-126, 126] cannot underflow or overflow.
   __m256i out[4];
@@ -57,12 +62,17 @@ bool mul_exact_x86_64_v4(uint64_t flags, uint32_t exec_mask, uint32_t instructio
          bb = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(b + i));
     auto ma = _mm256_and_si256(aa, _mm256_set1_epi32(0x7fffffff)),
          mb = _mm256_and_si256(bb, _mm256_set1_epi32(0x7fffffff));
-    if (_mm256_cmplt_epu32_mask(_mm256_sub_epi32(ma, _mm256_set1_epi32(1)),
-                                _mm256_set1_epi32(0x007fffff)) ||
-        _mm256_cmpge_epu32_mask(ma, _mm256_set1_epi32(0x7f800000)) ||
-        _mm256_cmplt_epu32_mask(_mm256_sub_epi32(mb, _mm256_set1_epi32(1)),
-                                _mm256_set1_epi32(0x007fffff)) ||
-        _mm256_cmpge_epu32_mask(mb, _mm256_set1_epi32(0x7f800000))) {
+    __mmask8 zero = 0;
+    if (dx9_zero) {
+      zero = _mm256_cmplt_epu32_mask(ma, zero_limit) | _mm256_cmplt_epu32_mask(mb, zero_limit);
+    }
+    if ((_mm256_cmplt_epu32_mask(_mm256_sub_epi32(ma, _mm256_set1_epi32(1)),
+                                 _mm256_set1_epi32(0x007fffff)) |
+         _mm256_cmpge_epu32_mask(ma, _mm256_set1_epi32(0x7f800000)) |
+         _mm256_cmplt_epu32_mask(_mm256_sub_epi32(mb, _mm256_set1_epi32(1)),
+                                 _mm256_set1_epi32(0x007fffff)) |
+         _mm256_cmpge_epu32_mask(mb, _mm256_set1_epi32(0x7f800000))) &
+        ~zero) {
       return false;
     }
     if (instruction_flags & RJ_ARITH_ALU_ABS_A) {
@@ -82,13 +92,14 @@ bool mul_exact_x86_64_v4(uint64_t flags, uint32_t exec_mask, uint32_t instructio
                                  _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
     auto e =
         _mm512_and_si512(_mm512_srli_epi64(_mm512_castpd_si512(p), 52), _mm512_set1_epi64(2047));
-    if ((_mm512_cmplt_epi64_mask(e, _mm512_set1_epi64(897)) &
-         _mm512_cmp_pd_mask(p, _mm512_setzero_pd(), _CMP_NEQ_OQ)) ||
-        _mm512_cmpgt_epi64_mask(e, _mm512_set1_epi64(1149))) {
+    if (((_mm512_cmplt_epi64_mask(e, _mm512_set1_epi64(897)) &
+          _mm512_cmp_pd_mask(p, _mm512_setzero_pd(), _CMP_NEQ_OQ)) |
+         _mm512_cmpgt_epi64_mask(e, _mm512_set1_epi64(1149))) &
+        ~zero) {
       return false;
     }
     auto rounded = narrow_product_f32(p, rounding);
-    auto u = _mm256_castps_si256(rounded);
+    auto u = _mm256_mask_mov_epi32(_mm256_castps_si256(rounded), zero, _mm256_setzero_si256());
     if (report &&
         (_mm512_cmp_pd_mask(p, _mm512_cvtps_pd(rounded), _CMP_NEQ_OQ) & ((exec_mask >> i) & 255))) {
       causes |= RJ_ARITH_EXCEPTION_INEXACT;
@@ -118,10 +129,9 @@ namespace {
                                      bool dx9_zero) {
   uint32_t repaired[16];
   _mm512_storeu_si512(repaired, result);
-  for (int i = 0; i < 16; ++i) {
-    if ((bad >> i) & 1) {
-      repaired[i] = repair_fma_f32(a[i], b[i], c[i], flags, instruction_flags, rdna3, dx9_zero);
-    }
+  for (; bad; bad &= bad - 1) {
+    int i = __builtin_ctz(bad);
+    repaired[i] = repair_fma_f32(a[i], b[i], c[i], flags, instruction_flags, rdna3, dx9_zero);
   }
   return _mm512_loadu_si512(repaired);
 }
@@ -139,18 +149,43 @@ void fma_exact_x86_64_v4(uint64_t flags, uint32_t exec_mask, uint32_t instructio
   __m512i out[2];
   for (int k = 0; k < 2; ++k) {
     __mmask16 bad = 0;
-    __m512 aa = prepare_fma_input(_mm512_loadu_si512(a + 16 * k), flags, instruction_flags, 0, bad);
-    __m512 bb = prepare_fma_input(_mm512_loadu_si512(b + 16 * k), flags, instruction_flags, 1, bad);
-    __m512 cc = prepare_fma_input(_mm512_loadu_si512(c + 16 * k), flags, instruction_flags, 2, bad);
-    if (dx9_zero) {
-      const auto zero = _mm512_setzero_ps();
-      auto has_zero =
-          _mm512_cmp_ps_mask(aa, zero, _CMP_EQ_OQ) | _mm512_cmp_ps_mask(bb, zero, _CMP_EQ_OQ);
-      aa = _mm512_mask_mov_ps(aa, has_zero, zero);
-      bb = _mm512_mask_mov_ps(bb, has_zero, _mm512_set1_ps(1));
+    __m512 aa, bb, cc;
+    if (instruction_flags == 0 && !dx9_zero && !(flags & RJ_ARITH_FP_ROUND_MASK)) {
+      aa = _mm512_castsi512_ps(_mm512_loadu_si512(a + 16 * k));
+      bb = _mm512_castsi512_ps(_mm512_loadu_si512(b + 16 * k));
+      cc = _mm512_castsi512_ps(_mm512_loadu_si512(c + 16 * k));
+      // A finite result implies finite unmodified inputs. Subnormal input lanes
+      // need the guest's flush policy, irrespective of the host FP environment.
+      const auto subnormal = [](__m512 value) {
+        const auto mag =
+            _mm512_and_si512(_mm512_castps_si512(value), _mm512_set1_epi32(0x7fffffff));
+        return _mm512_cmplt_epu32_mask(_mm512_sub_epi32(mag, _mm512_set1_epi32(1)),
+                                       _mm512_set1_epi32(0x007fffff));
+      };
+      bad = subnormal(aa) | subnormal(bb) | subnormal(cc);
+      out[k] = fma_result(aa, bb, cc, 0, 0, bad);
+    } else {
+      aa = prepare_fma_input(_mm512_loadu_si512(a + 16 * k), flags, instruction_flags, 0, bad);
+      bb = prepare_fma_input(_mm512_loadu_si512(b + 16 * k), flags, instruction_flags, 1, bad);
+      cc = prepare_fma_input(_mm512_loadu_si512(c + 16 * k), flags, instruction_flags, 2, bad);
+      if (dx9_zero) {
+        const auto zero = _mm512_setzero_ps();
+        auto has_zero =
+            _mm512_cmp_ps_mask(aa, zero, _CMP_EQ_OQ) | _mm512_cmp_ps_mask(bb, zero, _CMP_EQ_OQ);
+        aa = _mm512_mask_mov_ps(aa, has_zero, zero);
+        bb = _mm512_mask_mov_ps(bb, has_zero, _mm512_set1_ps(1));
+      }
+      out[k] = fma_result(aa, bb, cc, flags, instruction_flags, bad);
     }
-    out[k] = fma_result(aa, bb, cc, flags, instruction_flags, bad);
     if (bad) {
+      bad &= __mmask16(exec_mask >> (16 * k));
+      if (!bad) {
+        continue;
+      }
+      out[k] = fma_nan_operands(out[k], aa, bb, cc, flags, instruction_flags, rdna3, bad);
+      if (!bad) {
+        continue;
+      }
       out[k] = repair_fma(out[k], bad, flags, instruction_flags, a + 16 * k, b + 16 * k, c + 16 * k,
                           rdna3, dx9_zero);
     }

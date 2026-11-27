@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include "rocjitsu/isa/isa_family.h"
 #include <algorithm>
 #include <cstdint>
 #include <span>
@@ -59,7 +60,7 @@ struct SemanticReplacement {
 /// both representations and supplies their final-stream audit contracts.
 class SemanticTranslator {
 public:
-  SemanticTranslator(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
+  SemanticTranslator(rocjitsu::IsaFamily guest_arch, rocjitsu::IsaFamily host_arch,
                      ProcessorRevision input_revision, ProcessorRevision output_revision);
 
   /// @brief Try to expand/lower an instruction via the expand rules table.
@@ -85,8 +86,9 @@ public:
   /// payload bits.
   [[nodiscard]] bool has_expand_rule(const Instruction &inst) const;
   [[nodiscard]] bool has_expand_rule(uint16_t encoding_id, uint16_t opcode) const {
-    if (!has_expand_rule_encoding(encoding_id))
+    if (!has_expand_rule_encoding(encoding_id)) {
       return false;
+    }
     return std::ranges::binary_search(expand_rule_keys_, packed_rule_key(encoding_id, opcode));
   }
 
@@ -145,7 +147,7 @@ private:
   std::vector<uint32_t> expand_rule_keys_;          ///< Packed keys parallel to expand_rules_.
   std::vector<uint64_t> expand_rule_encoding_bits_; ///< Cheap encoding prefilter for hot scans.
   bool instruction_rewrites_require_basic_block_ = false;
-  rj_code_arch_t host_arch_;
+  rocjitsu::IsaFamily host_arch_;
 };
 
 } // namespace rocjitsu

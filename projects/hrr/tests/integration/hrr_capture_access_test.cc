@@ -218,10 +218,6 @@ fs::path only_pid_dir(const fs::path& base) {
   return found.size() == 1 ? found.front() : fs::path{};
 }
 
-bool refused_active_marker(const std::string& output) {
-  return disabled_because(output, "cannot create ", "/active (");
-}
-
 // True if both directories hold the same entries and every file the same bytes.
 // A bool, for the reason given at file_holds.
 bool same_tree(const fs::path& a, const fs::path& b) {
@@ -373,8 +369,10 @@ void plant_marker_link(const char* path) {
       dir.compare(dir.size() - pid_dir.size(), pid_dir.size(), pid_dir) != 0)
     return;
   g_hrr_statvfs_hook = nullptr;
-  if (const char* victim = std::getenv("HRR_TEST_VICTIM"))
-    (void)::link(victim, (dir + "/active").c_str());
+  if (const char* victim = std::getenv("HRR_TEST_VICTIM")) {
+    const int linked = ::link(victim, (dir + "/active").c_str());
+    (void)linked;
+  }
 }
 }  // namespace
 

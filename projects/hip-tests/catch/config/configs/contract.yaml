@@ -123,6 +123,36 @@ contract:
   Contract_Device_HipGetDevice_CurrentOrdinal_IsWithinDeviceCount:
     <<: *level_0
     tags: [device, P0]
+  Contract_Device_HipDeviceGetExecAffinitySupport_CuCountType_ReportsBooleanFlag:
+    <<: *level_0
+    tags: [device, P0]
+  Contract_Device_HipDeviceGetExecAffinitySupport_CuGranularityType_ReportsBooleanFlag:
+    <<: *level_0
+    tags: [device, P0]
+  Contract_Device_HipDeviceGetExecAffinitySupport_WgpGranularityType_ReportsBooleanFlag:
+    <<: *level_0
+    tags: [device, P0]
+  Contract_Device_HipDeviceGetExecAffinitySupport_CuCountType_IsAlwaysSupported:
+    <<: *level_0
+    tags: [device, P0]
+  Contract_Device_HipDeviceGetExecAffinitySupport_MaskGranularity_IsExactlyOneType:
+    <<: *level_0
+    tags: [device, P0]
+  Contract_Device_HipDeviceGetExecAffinitySupport_NullOutPointer_IsRejected:
+    <<: *level_0
+    tags: [device, P0]
+  Contract_Device_HipDeviceGetExecAffinitySupport_SentinelType_IsRejected:
+    <<: *level_0
+    tags: [device, P0]
+  Contract_Device_HipDeviceGetExecAffinitySupport_OutOfRangeType_IsRejected:
+    <<: *level_0
+    tags: [device, P0]
+  Contract_Device_HipDeviceGetExecAffinitySupport_NegativeDevice_IsRejected:
+    <<: *level_0
+    tags: [device, P0]
+  Contract_Device_HipDeviceGetExecAffinitySupport_OutOfRangeDevice_IsRejected:
+    <<: *level_0
+    tags: [device, P0]
   Contract_DeviceIdentity_HipDeviceGetByPCIBusId_Default_RoundTripsWithGetPCIBusId:
     <<: *level_0
     tags: [device_identity, P0]
@@ -413,6 +443,9 @@ contract:
     tags: [memset, P0]
   Contract_MemsetAsync_HipMemsetAsync_DeviceBuffer_IsFilledAfterStreamSynchronize:
     <<: *level_0
+    disabled:
+      targets: [amd_wsl]
+      reason: "AIRUNTIME-3125 - test takes too long on WSL (~104s). Skipping for now."
     tags: [memset, P0]
   Contract_MemsetD8_HipMemsetD8_DeviceBuffer_IsFilledWithBytePattern:
     <<: *level_0
@@ -461,6 +494,9 @@ contract:
     tags: [driver_memset_2d, P0]
   Contract_DriverMemsetAsync2D3D_HipMemsetD2D16Async_FillsWordRows_VisibleAfterSync:
     <<: *level_0
+    disabled:
+      targets: [amd_wsl]
+      reason: "AIRUNTIME-3125 - test takes too long on WSL (~104s). Skipping for now."
     tags: [driver_memset_async_2d3d, P0]
   Contract_DriverMemsetAsync2D3D_HipMemsetD2D32Async_FillsDwordRows_VisibleAfterSync:
     <<: *level_0
@@ -698,6 +734,9 @@ contract:
     tags: [graph_kernel, P0]
   Contract_GraphEvent_HipGraphAddEventRecordNode_Default_RecordsEvent:
     <<: *level_0
+    disabled:
+      targets: [amd_wsl]
+      reason: "AIRUNTIME-3125 - test takes too long on WSL (~130s). Skipping for now."
     tags: [graph_event, P0]
   Contract_GraphEvent_HipGraphAddEventWaitNode_Default_WaitsForRecordedEvent:
     <<: *level_0
@@ -734,6 +773,9 @@ contract:
     tags: [graph_update, P0]
   Contract_GraphUpdate_HipGraphExecMemsetNodeSetParams_Default_UpdatesFillValue:
     <<: *level_0
+    disabled:
+      targets: [amd_wsl]
+      reason: "AIRUNTIME-3125 - test takes too long on WSL (~105s). Skipping for now."
     tags: [graph_update, P0]
   Contract_GraphUpdate_HipGraphExecMemcpyNodeSetParams1D_Default_UpdatesCopyDestination:
     <<: *level_0
@@ -749,6 +791,9 @@ contract:
     tags: [graph_update, P0]
   Contract_GraphUpdate_HipGraphExecChildGraphNodeSetParams_Default_UpdatesEmbeddedMemset:
     <<: *level_0
+    disabled:
+      targets: [amd_wsl]
+      reason: "AIRUNTIME-3125 - test takes too long on WSL (~104s). Skipping for now."
     tags: [graph_update, P0]
   Contract_GraphUpdate_HipGraphExecEventRecordNodeSetEvent_Default_UpdatesRecordedEvent:
     <<: *level_0
@@ -786,6 +831,30 @@ contract:
   Contract_GraphNodeTypes_HipGraphRemoveDependencies_Default_ClearsEdge:
     <<: *level_0
     tags: [graph_node_types, P0]
+  Contract_GraphId_HipGraphNodeGetLocalId_NullArguments_ReturnInvalidValue:
+    <<: *level_0
+    tags: [graph_id, P0]
+  Contract_GraphId_HipGraphNodeGetToolsId_NullArguments_ReturnInvalidValue:
+    <<: *level_0
+    tags: [graph_id, P0]
+  Contract_GraphId_HipGraphGetId_NullArguments_ReturnInvalidValue:
+    <<: *level_0
+    tags: [graph_id, P0]
+  Contract_GraphId_HipGraphExecGetId_NullArguments_ReturnInvalidValue:
+    <<: *level_0
+    tags: [graph_id, P0]
+  Contract_GraphId_HipGraphNodeGetLocalId_SameNodeSameId_OtherNodeOtherId:
+    <<: *level_0
+    tags: [graph_id, P0]
+  Contract_GraphId_HipGraphNodeGetToolsId_SameNodeSameId_OtherNodeOtherId:
+    <<: *level_0
+    tags: [graph_id, P0]
+  Contract_GraphId_HipGraphGetId_SameGraphSameId_OtherGraphOtherId:
+    <<: *level_0
+    tags: [graph_id, P0]
+  Contract_GraphId_HipGraphExecGetId_SameExecSameId_OtherExecOtherId:
+    <<: *level_0
+    tags: [graph_id, P0]
   Contract_GraphChild_HipGraphAddChildGraphNode_Default_ExecutesEmbeddedMemcpy:
     <<: *level_0
     tags: [graph_child, P0]
@@ -842,6 +911,9 @@ contract:
     tags: [graph_memcpy3d_node, P0]
   Contract_GraphMemcpy3DNode_HipGraphMemcpyNodeSetParams_Default_RetargetsSourceBeforeInstantiate:
     <<: *level_0
+    disabled:
+      targets: [amd_wsl]
+      reason: "AIRUNTIME-3125 - test takes too long on WSL (~104s). Skipping for now."
     tags: [graph_memcpy3d_node, P0]
   Contract_GraphMemcpy3DNode_HipGraphExecMemcpyNodeSetParams_ExecSetParams_RetargetsSourceAfterInstantiate:
     <<: *level_0
@@ -908,6 +980,9 @@ contract:
     tags: [graph_batch_mem_op, P0]
   Contract_GraphBatchMemOp_HipGraphBatchMemOpNodeSetParams_Default_UpdatesWriteValueBeforeInstantiate:
     <<: *level_0
+    disabled:
+      targets: [amd_wsl]
+      reason: "AIRUNTIME-3125 - test takes too long on WSL (~104s). Skipping for now."
     tags: [graph_batch_mem_op, P0]
   Contract_GraphBatchMemOp_HipGraphExecBatchMemOpNodeSetParams_ExecSetParams_UpdatesWriteValueAfterInstantiate:
     <<: *level_0
@@ -920,6 +995,9 @@ contract:
     tags: [driver_graph_node, P0]
   Contract_DriverGraphNode_HipDrvGraphExecMemcpyNodeSetParams_Default_RetargetsSourceAfterInstantiate:
     <<: *level_0
+    disabled:
+      targets: [amd_wsl]
+      reason: "AIRUNTIME-3125 - test takes too long on WSL (~104s). Skipping for now."
     tags: [driver_graph_node, P0]
   Contract_DriverGraphNode_HipDrvGraphAddMemsetNode_Default_LaunchesExpectedValue:
     <<: *level_0
@@ -932,6 +1010,9 @@ contract:
     tags: [graph_instantiate_params, P0]
   Contract_GraphInstantiateParams_HipGraphInstantiateWithParams_UploadStream_LaunchesUploadedGraph:
     <<: *level_0
+    disabled:
+      targets: [amd_wsl]
+      reason: "AIRUNTIME-3125 - test takes too long on WSL (~131s). Skipping for now."
     tags: [graph_instantiate_params, P0]
   Contract_GraphDebug_HipGraphDebugDotPrint_Default_WritesNonEmptyFile:
     <<: *level_0
@@ -968,6 +1049,9 @@ contract:
     tags: [graph_node_enabled, P0]
   Contract_GraphNodeEnabled_HipGraphNodeSetEnabled_DisabledNode_ActsAsEmpty:
     <<: *level_0
+    disabled:
+      targets: [amd_wsl]
+      reason: "AIRUNTIME-3125 - test takes too long on WSL (~104s). Skipping for now."
     tags: [graph_node_enabled, P0]
   Contract_GraphNodeAttributes_HipGraphKernelNodeSetAttribute_Cooperative_RoundTrips:
     <<: *level_0
@@ -1155,6 +1239,9 @@ contract:
   Contract_DriverArray_HipArrayGetDescriptor_InvalidArgs_AreRejected:
     <<: *level_0
     tags: [driver_array, image, P0]
+  Contract_DriverArray_HipArrayGetPlane_InvalidArgs_AreRejected:
+    <<: *level_0
+    tags: [driver_array, image, P0]
   Contract_DriverArray_HipArray3DCreate_Default_ReturnsUsableArray:
     <<: *level_0
     tags: [driver_array, image, P0]
@@ -1314,6 +1401,9 @@ contract:
   Contract_MemMapArray_HipMemMapArrayAsync_ZeroCount_IsRejected:
     <<: *level_0
     tags: [mem_map_array, P0]
+  Contract_MemMapArray_HipArrayGetSparseProperties_InvalidArgs_AreRejected:
+    <<: *level_0
+    tags: [mem_map_array, image, P0]
   Contract_Copy3D_HipMalloc3D_Default_ReturnsPitchedPtr:
     <<: *level_0
     tags: [copy3d, P0]

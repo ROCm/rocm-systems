@@ -27,17 +27,19 @@ SRC = src_candidate if os.path.isdir(src_candidate) else ROOT
 if SRC not in sys.path:
     sys.path.insert(0, SRC)
 
+SINGLE_PASS_SET = "launch_stats"
+
 SUPPORTED_ARCHS = {
     "gfx908": {"mi100": ["MI100"]},
     "gfx90a": {"mi200": ["MI210", "MI250", "MI250X"]},
-    "gfx940": {"mi300": ["MI300A_A0"]},
-    "gfx941": {"mi300": ["MI300X_A0"]},
     "gfx942": {"mi300": ["MI300A_A1", "MI300X_A1"]},
     "gfx950": {"mi350": ["MI350"]},
     "gfx1150": {"rdna35_point_1": ["RDNA35_POINT_1"]},
     "gfx1151": {"rdna35_halo": ["RDNA35_HALO"]},
     "gfx1152": {"rdna35_point_2": ["RDNA35_POINT_2"]},
     "gfx1153": {"rdna35_gorgon_point": ["RDNA35_GORGON_POINT"]},
+    "gfx1200": {"navi44_1": ["NAVI44_1"], "navi44_2": ["NAVI44_2"]},
+    "gfx1201": {"navi48_1": ["NAVI48_1"], "navi48_2": ["NAVI48_2"]},
     "gfx1250": {"gfx1250_series": ["gfx1250"]},
 }
 
@@ -47,7 +49,9 @@ def memory_chart_archs() -> list[str]:
     return sorted(
         path.name
         for path in config.analysis_configs_dir.iterdir()
-        if path.is_dir() and PanelConfigs.for_arch(path.name)
+        if path.is_dir()
+        and path.name.startswith("gfx")
+        and PanelConfigs.for_arch(path.name)
     )
 
 
@@ -57,11 +61,12 @@ def memory_chart_layout_data(arch: str) -> dict:
 
 
 def with_metric_change(data: dict, metric: str, **fields) -> dict:
-    """A copy of layout *data* with *fields* set on every item and arrow of *metric*."""
+    """A copy of layout *data* with *fields* set on every item and arrow whose
+    metric_id is *metric*."""
     data = copy.deepcopy(data)
     items = [item for block in data["blocks"] for item in block.get("content", [])]
     for entry in (*items, *data["arrows"]):
-        if entry["metric"] == metric:
+        if entry["metric_id"] == metric:
             entry.update(fields)
     return data
 

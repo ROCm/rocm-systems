@@ -23,9 +23,9 @@ void half_minmax3_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t mode, u
   constexpr bool FirstMaximum = Policy::first_maximum;
   constexpr bool SecondMaximum = Policy::second_maximum;
   constexpr bool PropagateNaN = Policy::propagate_nan;
-  constexpr bool Rdna3 = Policy::rdna3;
+  constexpr bool Legacy = Policy::legacy;
   constexpr bool Median = Policy::median;
-  constexpr bool preserve_nan_inputs = Rdna3 || PropagateNaN;
+  constexpr bool preserve_nan_inputs = Legacy || PropagateNaN;
 
   int a_shift = mode & RJ_ARITH_ALU_HIGH_A ? 16 : 0;
   int b_shift = mode & RJ_ARITH_ALU_HIGH_B ? 16 : 0;
@@ -55,9 +55,9 @@ void half_minmax3_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t mode, u
       z = flush(z);
     }
     __m256 value;
-    if constexpr (Rdna3) {
-      value = minmax3_rdna3<FirstMaximum, SecondMaximum, Median>(x, y, z,
-                                                                 flags & RJ_ARITH_FP_IEEE_MODE);
+    if constexpr (Legacy) {
+      value = minmax3_legacy<FirstMaximum, SecondMaximum, Median, !Policy::cdna>(
+          x, y, z, flags & RJ_ARITH_FP_IEEE_MODE);
     } else {
       value = minmax3_value<FirstMaximum, SecondMaximum, PropagateNaN, Median>(x, y, z);
     }
@@ -67,11 +67,11 @@ void half_minmax3_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t mode, u
     }
     if (mode & RJ_ARITH_ALU_CLAMP) {
       auto clamped = _mm256_min_ps(_mm256_max_ps(value, _mm256_setzero_ps()), _mm256_set1_ps(1));
-      value = Rdna3 && (flags & RJ_ARITH_FP_DX10_CLAMP_OFF)
+      value = Legacy && (flags & RJ_ARITH_FP_DX10_CLAMP_OFF)
                   ? _mm256_blendv_ps(clamped, value, _mm256_cmp_ps(value, value, _CMP_UNORD_Q))
                   : clamped;
     }
-    auto result = _mm256_sll_epi32(half_narrow<Rdna3>(value, flags & RJ_ARITH_FP16_OVFL),
+    auto result = _mm256_sll_epi32(half_narrow<Legacy>(value, flags & RJ_ARITH_FP16_OVFL),
                                    _mm_cvtsi32_si128(d_shift));
     auto old = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(d + lane));
     result = _mm256_or_si256(result, _mm256_and_si256(old, keep));
@@ -124,5 +124,15 @@ template void half_minmax3_x86_64_v3<Minmax3::MaxminLegacy>(uint64_t, uint32_t, 
 template void half_minmax3_x86_64_v3<Minmax3::MedianLegacy>(uint64_t, uint32_t, uint32_t,
                                                             uint32_t *, const uint32_t *,
                                                             const uint32_t *, const uint32_t *);
+
+template void half_minmax3_x86_64_v3<Minmax3::Min3Cdna>(uint64_t, uint32_t, uint32_t, uint32_t *,
+                                                        const uint32_t *, const uint32_t *,
+                                                        const uint32_t *);
+template void half_minmax3_x86_64_v3<Minmax3::Max3Cdna>(uint64_t, uint32_t, uint32_t, uint32_t *,
+                                                        const uint32_t *, const uint32_t *,
+                                                        const uint32_t *);
+template void half_minmax3_x86_64_v3<Minmax3::MedianCdna>(uint64_t, uint32_t, uint32_t, uint32_t *,
+                                                          const uint32_t *, const uint32_t *,
+                                                          const uint32_t *);
 
 } // namespace rocjitsu::arith

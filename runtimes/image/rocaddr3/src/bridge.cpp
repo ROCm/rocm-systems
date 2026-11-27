@@ -13,6 +13,7 @@
 
 struct RocAddr3Input {
   uint32_t family;
+  uint32_t chip_revision;
   uint32_t gb_addr_config;
   uint32_t bits_per_pixel;
   uint32_t width;
@@ -20,6 +21,8 @@ struct RocAddr3Input {
   uint32_t slices;
   uint32_t mip_levels;
   uint32_t resource_type;
+  uint32_t linear;
+  uint32_t pitch_in_elements;
 };
 
 struct RocAddr3Mip {
@@ -59,10 +62,23 @@ struct AddrOwner {
 };
 
 bool Create(const RocAddr3Input& request, AddrOwner& owner) {
+  // AddrLib asserts on unknown families and some invalid revisions. Reject
+  // those at this checked boundary before entering the vendor implementation.
+  switch (request.family) {
+    case 0x90: case 0x92: case 0x95: case 0x97:
+      if (request.chip_revision == 0 || request.chip_revision >= 255) return false;
+      break;
+    case 0x8d: case 0x8e: case 0x8f: case 0x91:
+    case 0x94: case 0x96: case 0x98: case 0x9a:
+      break;
+    default:
+      return false;
+  }
   rocr::ADDR_CREATE_INPUT create = {};
   create.size = sizeof(create);
   create.chipEngine = CIASICIDGFXENGINE_ARCTICISLAND;
   create.chipFamily = request.family;
+  create.chipRevision = request.chip_revision;
   create.callbacks.allocSysMem = Allocate;
   create.callbacks.freeSysMem = Free;
   create.createFlags.useTileIndex = 1;
@@ -76,11 +92,89 @@ bool Create(const RocAddr3Input& request, AddrOwner& owner) {
 
 bool ValidInput(const RocAddr3Input* request) {
   return request != nullptr && request->mip_levels != 0 &&
-         request->mip_levels <= 32 && request->width != 0 &&
+         request->mip_levels <= (request->family == 0x98 ? 32u : 16u) && request->width != 0 &&
          request->height != 0 && request->slices != 0 &&
          request->bits_per_pixel >= 8 && request->bits_per_pixel <= 128 &&
          (request->bits_per_pixel & (request->bits_per_pixel - 1)) == 0 &&
          request->resource_type <= ADDR_RSRC_TEX_3D;
+}
+
+bool ValidLinearPitch(const RocAddr3Input& request) {
+  // AddrLib ignores custom pitches for tiled or mipmapped surfaces.
+  if (request.linear == 0 || request.pitch_in_elements == 0 ||
+      request.mip_levels != 1) return true;
+
+  // Invalid custom pitches can reach assertions in AddrLib's final layout
+  // checks. Validate its row minimum and alignment before entering native code.
+  const uint64_t element_bytes = request.bits_per_pixel / 8;
+  const uint64_t row_bytes = request.pitch_in_elements * element_bytes;
+  const uint64_t row_alignment = request.family == 0x98 ? 128 : 256;
+  const uint64_t minimum_row_bytes =
+      ((request.width * element_bytes + row_alignment - 1) / row_alignment) *
+      row_alignment;
+  // AddrLib sizes GFX12 slices separately from their 128-byte-aligned rows.
+  return row_bytes >= minimum_row_bytes && row_bytes % row_alignment == 0;
+}
+
+// GFX9/10/11 share AddrLib2's public surface ABI. The selected family still
+// creates the exact hardware implementation in AddrCreate.
+bool ComputeLegacy(const RocAddr3Input& request, rocr::ADDR_HANDLE handle,
+                   RocAddr3Output& result) {
+  rocr::ADDR2_COMPUTE_SURFACE_INFO_INPUT surface = {};
+  surface.size = sizeof(surface);
+  surface.flags.texture = 1;
+  surface.flags.view3dAs2dArray = request.resource_type == ADDR_RSRC_TEX_3D;
+  surface.resourceType = static_cast<AddrResourceType>(request.resource_type);
+  surface.format = ADDR_FMT_INVALID;
+  surface.bpp = request.bits_per_pixel;
+  surface.width = request.width;
+  surface.height = request.height;
+  surface.numSlices = request.slices;
+  surface.numMipLevels = request.mip_levels;
+  surface.numSamples = 1;
+  surface.numFrags = 1;
+  surface.pitchInElement = request.pitch_in_elements;
+  if (request.linear != 0) {
+    surface.swizzleMode = ADDR_SW_LINEAR;
+  } else {
+    rocr::ADDR2_GET_PREFERRED_SURF_SETTING_INPUT input = {};
+    input.size = sizeof(input);
+    input.flags = surface.flags;
+    input.resourceType = surface.resourceType;
+    input.format = surface.format;
+    input.bpp = surface.bpp;
+    input.width = surface.width;
+    input.height = surface.height;
+    input.numSlices = surface.numSlices;
+    input.numMipLevels = surface.numMipLevels;
+    input.numSamples = surface.numSamples;
+    input.numFrags = surface.numFrags;
+    input.resourceLoction = ADDR_RSRC_LOC_UNDEF;
+    rocr::ADDR2_GET_PREFERRED_SURF_SETTING_OUTPUT preferred = {};
+    preferred.size = sizeof(preferred);
+    if (rocr::Addr2GetPreferredSurfaceSetting(handle, &input, &preferred) != ADDR_OK) return false;
+    surface.swizzleMode = preferred.swizzleMode;
+  }
+  std::array<rocr::ADDR2_MIP_INFO, 32> mips = {};
+  rocr::ADDR2_COMPUTE_SURFACE_INFO_OUTPUT output = {};
+  output.size = sizeof(output);
+  output.pMipInfo = mips.data();
+  if (rocr::Addr2ComputeSurfaceInfo(handle, &surface, &output) != ADDR_OK ||
+      output.surfSize == 0 || output.baseAlign == 0) return false;
+  RocAddr3Output value = {};
+  value.size = output.surfSize;
+  value.slice_size = output.sliceSize;
+  value.alignment = output.baseAlign;
+  value.pitch = output.pitch;
+  value.height = output.height;
+  value.swizzle_mode = surface.swizzleMode;
+  value.first_mip_in_tail = output.firstMipIdInTail;
+  for (uint32_t mip = 0; mip < request.mip_levels; ++mip) {
+    value.mips[mip] = {mips[mip].offset, mips[mip].pitch,
+                      mips[mip].height, mips[mip].depth};
+  }
+  result = value;
+  return true;
 }
 
 }  // namespace
@@ -90,9 +184,13 @@ extern "C" int rocaddr3_compute(const RocAddr3Input* request,
   if (!ValidInput(request) || result == nullptr) {
     return 0;
   }
+  if (!ValidLinearPitch(*request)) return 0;
   try {
     AddrOwner owner;
     if (!Create(*request, owner)) return 0;
+    if (request->family != 0x98) {
+      return ComputeLegacy(*request, owner.handle, *result) ? 1 : 0;
+    }
 
     rocr::ADDR3_COMPUTE_SURFACE_INFO_INPUT surface = {};
     surface.size = sizeof(surface);
@@ -108,6 +206,7 @@ extern "C" int rocaddr3_compute(const RocAddr3Input* request,
     surface.numSlices = request->slices;
     surface.numMipLevels = request->mip_levels;
     surface.numSamples = 1;
+    surface.pitchInElement = request->pitch_in_elements;
 
     rocr::ADDR3_GET_POSSIBLE_SWIZZLE_MODE_INPUT possible = {};
     possible.size = sizeof(possible);
@@ -128,12 +227,13 @@ extern "C" int rocaddr3_compute(const RocAddr3Input* request,
     }
     // ROCr excludes linear storage for native multidimensional and mipmapped
     // textures. Choose its last mode within a 2:1 size bound.
-    if (request->height > 1 || request->mip_levels > 1) {
+    if (request->linear == 0 && (request->height > 1 || request->mip_levels > 1)) {
       modes.validModes.swLinear = 0;
     }
     uint64_t smallest = std::numeric_limits<uint64_t>::max();
     int chosen = -1;
     for (int mode = ADDR3_LINEAR; mode < ADDR3_MAX_TYPE; ++mode) {
+      if (request->linear != 0 && mode != ADDR3_LINEAR) continue;
       if ((modes.validModes.value & (1u << mode)) == 0) continue;
       surface.swizzleMode = static_cast<Addr3SwizzleMode>(mode);
       rocr::ADDR3_COMPUTE_SURFACE_INFO_OUTPUT candidate = {};

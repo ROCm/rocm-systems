@@ -4,16 +4,26 @@
 // Dense and sparse matrix workload registration across CPU and semantics modes.
 
 #include "benchmark/workloads.h"
+#include "rj_arith/detail/rj_arith_wmma.h"
 
 namespace rocjitsu::arith::test {
 
 // Append WMMA workloads and their supported CPU/semantics variants.
 void add_wmma(std::vector<Benchmark> &cases) {
-  add(cases, "wmma", "v_wmma_i32_16x16x64_iu8_w32", [](Operands &r, uint64_t flags) {
-    return rj_arith_v_wmma_i32_16x16x64_iu8_w32(flags, 0, r.d, r.a, r.b, r.c);
-  });
+  add_flag_variant(
+      cases, "wmma", "v_wmma_f64_16x16x4_f64_w32",
+      [](Operands &r, uint64_t flags, uint64_t modifiers) {
+        return rj_arith_v_wmma_f64_16x16x4_f64_w32(flags, modifiers, r.d, r.a, r.b, r.c);
+      },
+      RJ_ARITH_WMMA_ABS_C | RJ_ARITH_WMMA_NEG_C, "abs/neg C");
   add(cases, "wmma", "v_wmma_f32_16x16x4_f32_w32", [](Operands &r, uint64_t flags) {
     return rj_arith_v_wmma_f32_16x16x4_f32_w32(flags, 0, r.d, r.a, r.b, r.c);
+  });
+  add(cases, "wmma", "v_swmmac_i32_16x16x128_iu8_w32", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_swmmac_i32_16x16x128_iu8_w32(flags, 0, r.d, r.a, r.b, r.index);
+  });
+  add(cases, "wmma", "v_wmma_i32_16x16x64_iu8_w32", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_wmma_i32_16x16x64_iu8_w32(flags, 0, r.d, r.a, r.b, r.c);
   });
   add(cases, "wmma", "v_wmma_f32_16x16x32_f16_w32", [](Operands &r, uint64_t flags) {
     return rj_arith_v_wmma_f32_16x16x32_f16_w32(flags, 0, r.d, r.a, r.b, r.c);
@@ -99,6 +109,45 @@ void add_wmma(std::vector<Benchmark> &cases) {
   add(cases, "wmma", "v_wmma_scale16_f32_32x16x128_f4_w32", [](Operands &r, uint64_t flags) {
     return rj_arith_v_wmma_scale16_f32_32x16x128_f4_w32(flags, 0, r.d, r.a, r.b, r.c, r.scale,
                                                         r.scale);
+  });
+  add(cases, "wmma", "v_swmmac_f32_16x16x64_f16_w32", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_swmmac_f32_16x16x64_f16_w32(flags, 0, r.d, r.a, r.b, r.index);
+  });
+  add(cases, "wmma", "v_swmmac_f32_16x16x64_bf16_w32", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_swmmac_f32_16x16x64_bf16_w32(flags, 0, r.d, r.a, r.b, r.index);
+  });
+  add(cases, "wmma", "v_swmmac_f16_16x16x64_f16_w32", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_swmmac_f16_16x16x64_f16_w32(flags, 0, r.d, r.a, r.b, r.index);
+  });
+  add(cases, "wmma", "v_swmmac_bf16_16x16x64_bf16_w32", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_swmmac_bf16_16x16x64_bf16_w32(flags, 0, r.d, r.a, r.b, r.index);
+  });
+  add(cases, "wmma", "v_swmmac_bf16f32_16x16x64_bf16_w32", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_swmmac_bf16f32_16x16x64_bf16_w32(flags, 0, r.d, r.a, r.b, r.index);
+  });
+  add(cases, "wmma", "v_swmmac_f32_16x16x128_fp8_fp8_w32", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_swmmac_f32_16x16x128_fp8_fp8_w32(flags, 0, r.d, r.a, r.b, r.index);
+  });
+  add(cases, "wmma", "v_swmmac_f16_16x16x128_fp8_fp8_w32", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_swmmac_f16_16x16x128_fp8_fp8_w32(flags, 0, r.d, r.a, r.b, r.index);
+  });
+  add(cases, "wmma", "v_swmmac_f32_16x16x128_fp8_bf8_w32", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_swmmac_f32_16x16x128_fp8_bf8_w32(flags, 0, r.d, r.a, r.b, r.index);
+  });
+  add(cases, "wmma", "v_swmmac_f16_16x16x128_fp8_bf8_w32", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_swmmac_f16_16x16x128_fp8_bf8_w32(flags, 0, r.d, r.a, r.b, r.index);
+  });
+  add(cases, "wmma", "v_swmmac_f32_16x16x128_bf8_fp8_w32", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_swmmac_f32_16x16x128_bf8_fp8_w32(flags, 0, r.d, r.a, r.b, r.index);
+  });
+  add(cases, "wmma", "v_swmmac_f16_16x16x128_bf8_fp8_w32", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_swmmac_f16_16x16x128_bf8_fp8_w32(flags, 0, r.d, r.a, r.b, r.index);
+  });
+  add(cases, "wmma", "v_swmmac_f32_16x16x128_bf8_bf8_w32", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_swmmac_f32_16x16x128_bf8_bf8_w32(flags, 0, r.d, r.a, r.b, r.index);
+  });
+  add(cases, "wmma", "v_swmmac_f16_16x16x128_bf8_bf8_w32", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_swmmac_f16_16x16x128_bf8_bf8_w32(flags, 0, r.d, r.a, r.b, r.index);
   });
 
   add_flag_variant(

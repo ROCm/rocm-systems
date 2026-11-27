@@ -30,6 +30,11 @@ class MetricsProveCompletion(unittest.TestCase):
         # A crashed MaxText run still leaves passing rows with metrics.
         self.assertFalse(tm.metrics_prove_completion("maxtext", results()))
 
+    def test_sglang_rows_never_prove_it(self):
+        # An iteration that failed after earlier ones finished leaves their
+        # points behind, passing and with metrics.
+        self.assertFalse(tm.metrics_prove_completion("sglang-disagg", results()))
+
     def test_a_phase_without_rows_does_not(self):
         self.assertFalse(tm.metrics_prove_completion("megatron", results(candidate=[])))
 

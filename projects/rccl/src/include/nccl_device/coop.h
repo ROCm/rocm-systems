@@ -57,7 +57,10 @@ static constexpr ncclCoopMask_t ncclCoopLaneWindow =
   ~ncclCoopMask_t(0) >> (8 * sizeof(ncclCoopMask_t) - WARP_SIZE);
 #endif
 
-#if NCCL_CHECK_CUDACC
+// Upstream moved ncclCoopAny into bindings/ir/src/coop.h (NVIDIA IR library).
+// RCCL's HIP bitcode is still built from bindings/ir/nccl_device_wrapper__impl.h,
+// which needs it here; keep it AMD-only so it cannot collide with the IR copy.
+#if NCCL_CHECK_CUDACC && defined(__HIP_PLATFORM_AMD__)
 struct ncclCoopAny {
   struct Storage {
     alignas(alignof(void*)) char space[16];

@@ -101,8 +101,6 @@ def generate_wait_until_api():
  * @param[in] ivars Pointer to memory on the symmetric heap to wait for.
  * @param[in] cmp Operation for the comparison.
  * @param[in] val Value to compare the memory at \\p ptr to.
- *
- * @return void
  */\n"""
     for type_, tname_ in types:
         expanded_code += wait_until_api(type_, tname_)

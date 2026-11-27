@@ -12,10 +12,18 @@
 
 namespace rocjitsu::amdgpu {
 
-// The fixed-point model uses 1/256 LOD units. A zero gradient selects -32
-// before the sampler applies its minimum LOD clamp.
+// The fixed-point model uses 1/256 LOD units. The isotropic footprint uses
+// -32 for zero gradients before sampler LOD clamping.
 inline constexpr int32_t kImageLodFractionScale = 256;
 inline constexpr int32_t kZeroGradientLodFixed = -32 * kImageLodFractionScale;
+// On gfx1100 and gfx1201 anisotropic LOD bottoms out at -64 before sampler bias.
+inline constexpr int32_t kMinimumAnisotropicLodFixed = -64 * kImageLodFractionScale;
+
+inline int32_t image_anisotropic_lod(int32_t major_lod, int32_t minor_lod,
+                                     uint32_t max_anisotropy) {
+  return std::max({kMinimumAnisotropicLodFixed, minor_lod,
+                   major_lod - std::countr_zero(max_anisotropy) * kImageLodFractionScale});
+}
 
 /// @brief Fixed-point sampler norm qualified on GFX11/12.
 /// @details Five projections replace a Euclidean norm. Intermediate norm carry
@@ -37,8 +45,9 @@ inline uint32_t image_polygon_norm(int32_t first_component, int32_t second_compo
 
 /// @brief Convert an aligned footprint norm to signed 1/256 LOD units.
 inline int32_t image_footprint_logarithm(uint32_t footprint_norm, int exponent) {
-  if (footprint_norm == 0)
+  if (footprint_norm == 0) {
     return kZeroGradientLodFixed;
+  }
   const uint32_t leading_bit = std::bit_width(footprint_norm) - 1;
   const uint32_t denominator = 1u << leading_bit;
   const uint32_t fraction = (footprint_norm - denominator) * 1024;
@@ -61,30 +70,35 @@ inline int32_t image_footprint_logarithm(uint32_t footprint_norm, int exponent) 
 /// nested XY/Z vector norms. GFX11/12 captures qualify the precision stages;
 /// older image architectures use the same model without physical qualification.
 inline double image_gradient_lod(std::array<double, 3> screen_dx, std::array<double, 3> screen_dy,
-                                 const std::array<uint32_t, 3> &extents, uint32_t dimensions) {
+                                 const std::array<uint32_t, 3> &extents, uint32_t dimensions,
+                                 uint32_t max_anisotropy = 0) {
   std::array<double, 6> gradients{screen_dx[0], screen_dx[1], screen_dx[2],
                                   screen_dy[0], screen_dy[1], screen_dy[2]};
   std::array<double, 3> largest_gradient{};
   for (uint32_t coordinate = 0; coordinate < dimensions; ++coordinate) {
     for (uint32_t gradient_index : {coordinate, coordinate + 3}) {
-      if (std::isnan(gradients[gradient_index]))
+      if (std::isnan(gradients[gradient_index])) {
         gradients[gradient_index] = 0;
-      else if (std::isinf(gradients[gradient_index]))
+      } else if (std::isinf(gradients[gradient_index])) {
         gradients[gradient_index] =
             std::copysign(double(std::numeric_limits<float>::max()), gradients[gradient_index]);
+      }
     }
     largest_gradient[coordinate] =
         std::max(std::abs(gradients[coordinate]), std::abs(gradients[coordinate + 3]));
   }
   if (std::all_of(largest_gradient.begin(), largest_gradient.end(),
-                  [](double magnitude) { return magnitude == 0; }))
-    return double(kZeroGradientLodFixed) / kImageLodFractionScale;
+                  [](double magnitude) { return magnitude == 0; })) {
+    return double(max_anisotropy ? kMinimumAnisotropicLodFixed : kZeroGradientLodFixed) /
+           kImageLodFractionScale;
+  }
   std::array<int, 3> exponents{};
   std::array<double, 6> scaled{};
   int exponent = std::numeric_limits<int>::min();
   for (uint32_t coordinate = 0; coordinate < dimensions; ++coordinate) {
-    if (largest_gradient[coordinate] == 0)
+    if (largest_gradient[coordinate] == 0) {
       continue;
+    }
     int coordinate_exponent;
     std::frexp(largest_gradient[coordinate], &coordinate_exponent);
     const int extent_exponent = std::bit_width(extents[coordinate]) - 1;
@@ -103,11 +117,13 @@ inline double image_gradient_lod(std::array<double, 3> screen_dx, std::array<dou
   }
   std::array<int32_t, 6> fixed{};
   for (uint32_t coordinate = 0; coordinate < dimensions; ++coordinate) {
-    if (largest_gradient[coordinate] == 0)
+    if (largest_gradient[coordinate] == 0) {
       continue;
-    for (uint32_t gradient_index : {coordinate, coordinate + 3})
+    }
+    for (uint32_t gradient_index : {coordinate, coordinate + 3}) {
       fixed[gradient_index] = static_cast<int32_t>(
           std::floor(std::ldexp(scaled[gradient_index], exponents[coordinate] - exponent) + 0.5));
+    }
   }
   uint32_t footprint_norm;
   if (dimensions == 3) {
@@ -117,6 +133,16 @@ inline double image_gradient_lod(std::array<double, 3> screen_dx, std::array<dou
     const uint32_t first_norm = image_polygon_norm(fixed[0] + fixed[4], fixed[1] - fixed[3]);
     const uint32_t second_norm = image_polygon_norm(fixed[0] - fixed[4], fixed[1] + fixed[3]);
     footprint_norm = (first_norm + second_norm) >> 1;
+    if (max_anisotropy) {
+      // Round the signed difference before taking its magnitude. Negative odd
+      // differences round down on the shift, increasing the minor-axis magnitude.
+      const uint32_t minor = std::abs((int32_t(first_norm) - int32_t(second_norm)) >> 1);
+      const int32_t major_lod = image_footprint_logarithm(footprint_norm, exponent);
+      const int32_t minor_lod =
+          minor ? image_footprint_logarithm(minor, exponent) : kMinimumAnisotropicLodFixed;
+      return double(image_anisotropic_lod(major_lod, minor_lod, max_anisotropy)) /
+             kImageLodFractionScale;
+    }
   }
   return image_footprint_logarithm(footprint_norm, exponent) / double(kImageLodFractionScale);
 }

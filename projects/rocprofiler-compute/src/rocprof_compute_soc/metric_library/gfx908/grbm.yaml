@@ -1,0 +1,5 @@
+grbm.gui_active_cycles:
+  name: Kernel Time (Cycles)
+  formula: AVG($GRBM_GUI_ACTIVE_PER_XCD)
+  unit: Cycles
+  description: The total duration of the executed kernel in cycles.

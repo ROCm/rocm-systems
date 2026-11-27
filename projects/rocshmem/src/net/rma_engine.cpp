@@ -22,17 +22,13 @@
 
 #include "net/rma_engine.hpp"
 
-#include <cstdio>
 #include <cstring>
 
+#include "log.hpp"
 #include "net/remote_region.hpp"
 
 namespace rocshmem {
 namespace net {
-
-namespace {
-constexpr uint32_t kInlineMax = 64;
-}  // namespace
 
 RmaEngine::RmaEngine(Ibv *ibv, IbCtrl *ctrl, MrRegistry *mr, LaneMap lm,
                      uintptr_t heap_base, std::vector<LocalMr> local_mrs)
@@ -60,13 +56,13 @@ uint32_t RmaEngine::lkey_for(const void *addr) const {
       return m.lkey;
     }
   }
-  fprintf(stderr, "[rocSHMEM] net: no MR for local addr %p\n", addr);
+  LOG_ERROR("net: no MR for local addr %p", addr);
   return 0;
 }
 
 uint64_t RmaEngine::post_write(int lane, uintptr_t laddr, uint32_t lkey,
                                uintptr_t raddr, uint32_t rk, uint32_t len,
-                               bool inl, uint64_t wr_id) {
+                               uint64_t wr_id) {
   struct ibv_sge sge;
   memset(&sge, 0, sizeof(sge));
   sge.addr = laddr;
@@ -80,7 +76,12 @@ uint64_t RmaEngine::post_write(int lane, uintptr_t laddr, uint32_t lkey,
   wr.num_sge = 1;
   wr.opcode = IBV_WR_RDMA_WRITE;
   wr.send_flags = IBV_SEND_SIGNALED;
-  if (inl && len <= kInlineMax) {
+  // Request inline whenever the payload fits the inline capacity the driver
+  // actually granted at QP-create time (vendor-specific, e.g. bnxt ~16B). This
+  // is the single source of truth for "can this be inlined" -- callers no longer
+  // pass a hint. Posting IBV_SEND_INLINE with len > the granted max_inline_data
+  // makes ibv_post_send fail with ENOMEM, so fall back to an SGE write above it.
+  if (len <= ctrl_->max_inline_data()) {
     wr.send_flags |= IBV_SEND_INLINE;
   }
   wr.wr.rdma.remote_addr = raddr;
@@ -89,7 +90,7 @@ uint64_t RmaEngine::post_write(int lane, uintptr_t laddr, uint32_t lkey,
   struct ibv_send_wr *bad = nullptr;
   int rc = ibv_->post_send(ctrl_->qp(lane), &wr, &bad);
   if (rc != 0) {
-    fprintf(stderr, "[rocSHMEM] net: post_write rc=%d (lane %d)\n", rc, lane);
+    LOG_ERROR("net: post_write rc=%d (lane %d)", rc, lane);
     return 0;
   }
   return wr_id;
@@ -117,7 +118,36 @@ uint64_t RmaEngine::post_read(int lane, uintptr_t laddr, uint32_t lkey,
   struct ibv_send_wr *bad = nullptr;
   int rc = ibv_->post_send(ctrl_->qp(lane), &wr, &bad);
   if (rc != 0) {
-    fprintf(stderr, "[rocSHMEM] net: post_read rc=%d (lane %d)\n", rc, lane);
+    LOG_ERROR("net: post_read rc=%d (lane %d)", rc, lane);
+    return 0;
+  }
+  return wr_id;
+}
+
+uint64_t RmaEngine::post_signal_set(int lane, uintptr_t raddr, uint32_t rk,
+                                    uint64_t value, uint64_t wr_id) {
+  // The immediate value is copied into the WQE at post time (IBV_SEND_INLINE),
+  // so &value (a parameter, live for this call) needs no registration.
+  struct ibv_sge sge;
+  memset(&sge, 0, sizeof(sge));
+  sge.addr = reinterpret_cast<uintptr_t>(&value);
+  sge.length = sizeof(value);
+  sge.lkey = 0;  // ignored for inline
+
+  struct ibv_send_wr wr;
+  memset(&wr, 0, sizeof(wr));
+  wr.wr_id = wr_id;
+  wr.sg_list = &sge;
+  wr.num_sge = 1;
+  wr.opcode = IBV_WR_RDMA_WRITE;
+  wr.send_flags = IBV_SEND_SIGNALED | IBV_SEND_INLINE;
+  wr.wr.rdma.remote_addr = raddr;
+  wr.wr.rdma.rkey = rk;
+
+  struct ibv_send_wr *bad = nullptr;
+  int rc = ibv_->post_send(ctrl_->qp(lane), &wr, &bad);
+  if (rc != 0) {
+    LOG_ERROR("net: post_signal_set rc=%d (lane %d)", rc, lane);
     return 0;
   }
   return wr_id;
@@ -148,7 +178,7 @@ uint64_t RmaEngine::post_atomic(int lane, int opcode, uintptr_t result,
   struct ibv_send_wr *bad = nullptr;
   int rc = ibv_->post_send(ctrl_->qp(lane), &wr, &bad);
   if (rc != 0) {
-    fprintf(stderr, "[rocSHMEM] net: post_atomic rc=%d (lane %d)\n", rc, lane);
+    LOG_ERROR("net: post_atomic rc=%d (lane %d)", rc, lane);
     return 0;
   }
   return wr_id;

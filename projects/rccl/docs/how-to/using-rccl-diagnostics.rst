@@ -58,9 +58,14 @@ Read the report
 The report is printed to standard output, not to ``NCCL_DEBUG_FILE``. Every
 line starts with ``<hostname>:<pid> NCCL DIAG``. The process that hosts rank 0
 of the communicator prints the header, the summary lines, and the
-``completed`` line. Failed edges are listed by the first rank on the node where they occur,
-and a few notices are printed by the rank they concern. Collect the standard
-output of all processes, not only of rank 0.
+``completed`` line.
+
+The details of failed edges and a few notices are not part of the report. They
+are ``NCCL INFO`` lines that start with ``P2P`` and are logged only with
+``NCCL_DEBUG=INFO`` and ``NCCL_DEBUG_SUBSYS=DIAG`` (or another subsystem list
+that includes ``DIAG``), to standard output or to ``NCCL_DEBUG_FILE``. Failed
+edges are logged by the first rank on the node where they occur, and notices by
+the rank they concern. Collect the output of all processes, not only of rank 0.
 
 A passing run on an 8-GPU AMD Instinct MI355X node, with one process per GPU,
 looks like this:
@@ -73,19 +78,25 @@ looks like this:
    node01:15 NCCL DIAG NCCL diagnostics completed in 40.0 ms across 8 ranks
 
 If some edges fail, the summary line reads
-``[INFO] p2p: only <passed>/<tested> GPU-to-GPU peer accesses passed verification``
-and the failed edges are listed on their own lines.
+``[INFO] p2p: only <passed>/<tested> GPU-to-GPU peer accesses passed verification``.
+Without ``DIAG`` logging, it is followed by
+``[INFO] p2p: for failure details, rerun with NCCL_DEBUG=INFO NCCL_DEBUG_SUBSYS=DIAG``;
+with it, each failed edge is logged on its own line.
 
 Result lines use two tags:
 
 * ``[OK]`` means that every tested edge passed, or, on the ``net bw:`` line,
   that the network bandwidth check passed or was skipped.
-* ``[INFO]`` marks both notices and problems. A notice, such as the
-  peer-access line described in `Single-process and multi-process jobs`_, is
-  expected on a healthy system. A problem means that at least one edge failed
-  or that a step of the check could not run, and the line identifies the
-  affected GPU pair. Use the message text and the summary line to tell them
-  apart: when every tested edge passed, the summary line is tagged ``[OK]``.
+* ``[INFO]`` marks a problem: at least one edge failed or a step of the check
+  could not run. When every tested edge passed, the summary line is tagged
+  ``[OK]``.
+
+  Two ``net bw:`` notices are the exception. They also use ``[INFO]`` but
+  describe the setup, not a failure, and are normal on CPX nodes or when
+  several GPUs share a NIC:
+
+  * ``multiple net devices per rank detected, only the first device is tested``
+  * ``net devices are shared across ranks, concurrent use can lower the bandwidth``
 
 Which GPU pairs are tested
 --------------------------
@@ -102,7 +113,7 @@ The P2P check does not test the network between nodes.
 
 Pairs that can only reach each other through an intermediate GPU are not
 tested and are not counted in the summary. With ``NCCL_DEBUG=INFO`` and
-``NCCL_DEBUG_SUBSYS=INIT``, each such edge is logged with ``reason=indirect``.
+``NCCL_DEBUG_SUBSYS=DIAG``, each such edge is logged with ``reason=indirect``.
 On AMD GPUs RCCL does not route P2P through an intermediate GPU, so no edge is
 left out for this reason.
 
@@ -121,17 +132,17 @@ When one process drives several GPUs, for example ``ncclCommInitAll`` or
 rccl-tests with ``-g 8``, the check needs peer access between the devices of
 that process. Without HIP virtual memory management (cuMem, see
 ``NCCL_CUMEM_ENABLE``), it enables context-wide peer access for its duration,
-and each rank that newly enables it prints a line similar to the following.
-This is expected and is not an error:
+and each rank that newly enables it logs a ``DIAG`` line similar to the
+following. This is expected and is not an error:
 
 .. code:: none
 
-   node01:4242 NCCL DIAG [INFO] p2p: temporarily enabled context-wide HIP peer access rank=3 cudaDev=3; avoid concurrent HIP use on this context until diagnostics completes
+   node01:4242:4242 [3] NCCL INFO P2P temporarily enabled context-wide HIP peer access rank=3 cudaDev=3; avoid concurrent HIP use on this context until diagnostics completes
 
 Do not issue HIP work on these devices from other threads while the
 communicator is being initialized.
 
-The line is not printed when peer access between the devices was already
+The line is not logged when peer access between the devices was already
 enabled. A missing line does not mean that the check did not run.
 
 .. note::
@@ -177,9 +188,10 @@ communicators.
 Troubleshoot failed edges
 =========================
 
-Each failed edge is reported on its own ``[INFO] p2p:`` line. The line starts
-with the kind of failure, followed by fields that identify the edge and a
-suggested next step. The table lists the kinds of failure.
+With ``NCCL_DEBUG=INFO NCCL_DEBUG_SUBSYS=DIAG``, each failed edge is logged on
+its own ``P2P`` line. The line starts with the kind of failure, followed by
+fields that identify the edge and a suggested next step. The table lists the
+kinds of failure.
 
 .. list-table::
    :header-rows: 1
@@ -213,7 +225,8 @@ suggested next step. The table lists the kinds of failure.
 
 The following lines report that the check itself failed, not a single edge.
 They carry a rank and an ``ncclResult_t`` code, or only the code, instead of
-edge fields:
+edge fields. The ``P2P`` lines are ``DIAG`` log lines; the others are report
+lines:
 
 .. list-table::
    :header-rows: 1
@@ -221,10 +234,10 @@ edge fields:
 
    * - Message
      - Meaning
-   * - ``p2p: setup failed on rank <r>``
+   * - ``P2P setup failed on rank <r>``
      - The check could not set up on that rank. No edge is tested, the report
        continues with ``p2p: check returned <n>``, and initialization fails.
-   * - ``p2p: resource cleanup failed rank=<r>``
+   * - ``P2P resource cleanup failed rank=<r>``
      - Temporary test resources may not have been released on that rank.
        Initialization does not fail because of it.
    * - ``transport detect returned <n>; aborting diagnostics``
@@ -294,16 +307,15 @@ For example, a failed edge between two GPUs connected by XGMI is reported as:
 
 .. code:: none
 
-   node01:4242 NCCL DIAG [INFO] p2p: destination buffer unavailable srcRank=0 srcCudaDev=0 srcNvmlDev=0 dstRank=1 dstCudaDev=1 dstNvmlDev=1 path=XGMI handle=LEGACY_CUDA_IPC reason=noDescriptor; inspect earlier allocation, export, or initialization errors on the destination rank, then check the XGMI link status and link type with 'amd-smi xgmi -l' and 'amd-smi topology -t'
+   node01:4242:4242 [0] NCCL INFO P2P destination buffer unavailable srcRank=0 srcCudaDev=0 srcNvmlDev=0 dstRank=1 dstCudaDev=1 dstNvmlDev=1 path=XGMI handle=LEGACY_CUDA_IPC reason=noDescriptor; inspect earlier allocation, export, or initialization errors on the destination rank, then check the XGMI link status and link type with 'amd-smi xgmi -l' and 'amd-smi topology -t'
 
-To see a record for every tested edge, including passing ones, add
-``NCCL_DEBUG=INFO NCCL_DEBUG_SUBSYS=INIT``. Each passing edge produces
-``Diagnostics P2P import``, ``write``, and ``read`` records with the same
-fields:
+The same ``DIAG`` logging also records every tested edge, including passing
+ones. Each passing edge produces ``P2P import``, ``write``, and ``read``
+records with the same fields:
 
 .. code:: none
 
-   NCCL INFO Diagnostics P2P write srcRank=6 srcCudaDev=6 srcNvmlDev=6 dstRank=5 dstCudaDev=5 dstNvmlDev=5 path=XGMI handle=LEGACY_CUDA_IPC topoRead=0
+   NCCL INFO P2P write srcRank=6 srcCudaDev=6 srcNvmlDev=6 dstRank=5 dstCudaDev=5 dstNvmlDev=5 path=XGMI handle=LEGACY_CUDA_IPC topoRead=0
 
 An edge that fails before the write phase has no ``write`` or ``read``
 record. For example, when the import fails, the ``import`` record shows

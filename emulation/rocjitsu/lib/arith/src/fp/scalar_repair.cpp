@@ -1,9 +1,10 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// Compile scalar FMA repairs once with the library's baseline CPU settings.
+// Compile scalar FMA and division repairs once with the library's baseline CPU settings.
 
 #include "fp/scalar_repair.h"
+#include "fp/div_scale_impl.h"
 #include "fp/fma_scalar.h"
 #include "fp/half_fma_scalar.h"
 #include "fp/mixed_fma_scalar.h"
@@ -46,6 +47,20 @@ namespace rocjitsu::arith {
 // Resolve exceptional decoded mixed operands without emitting scalar model code in SIMD objects.
 [[gnu::noinline]] uint16_t repair_mixed_special(uint32_t a, uint32_t b, uint32_t c) {
   return mixed_fma_special(a, b, c);
+}
+
+// Apply the scalar DIV_SCALE model to a lane whose scaled value leaves the normal range.
+[[gnu::noinline]] uint32_t repair_div_scale_f32(uint32_t a, uint32_t b, uint32_t c,
+                                                uint32_t instruction_flags, bool quiet_nan,
+                                                uint64_t flags) {
+  return division_scale<32>(a, b, c, instruction_flags, quiet_nan, flags).value;
+}
+
+// Apply the scalar DIV_SCALE model to a lane whose scaled value leaves the normal range.
+[[gnu::noinline]] uint64_t repair_div_scale_f64(uint64_t a, uint64_t b, uint64_t c,
+                                                uint32_t instruction_flags, bool quiet_nan,
+                                                uint64_t flags) {
+  return division_scale<64>(a, b, c, instruction_flags, quiet_nan, flags).value;
 }
 
 } // namespace rocjitsu::arith

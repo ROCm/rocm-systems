@@ -396,7 +396,11 @@ class ResultsEmitter:
             self.manifest["coverage"] = coverage
 
     def finalize_summary(self, summary):
-        self.manifest["summary"] = summary
+        # Remove the "partial" sentinel written by the incremental snapshots;
+        # its absence (or explicit False) signals that this run.json is final.
+        final_summary = dict(summary)
+        final_summary.pop("partial", None)
+        self.manifest["summary"] = final_summary
         self.manifest.setdefault(
             "finished_at", datetime.datetime.now(datetime.timezone.utc).isoformat()
         )
@@ -414,10 +418,13 @@ class ResultsEmitter:
             _atomic_write(os.path.join(run_dir, "run.json"),
                           json.dumps(self.manifest, indent=2, default=str))
 
-            with open(os.path.join(run_dir, "tests.jsonl"), "w", encoding="utf-8") as f:
-                for t in self.tests:
-                    slim = {k: v for k, v in t.items() if k != "perf_rows"}
-                    f.write(json.dumps(slim, default=str) + "\n")
+            # Always rewrite from self.tests: the incremental per-test file
+            # (_append_test_record) was written before add_test() set log_relpath.
+            _atomic_write(os.path.join(run_dir, "tests.jsonl"), "".join(
+                json.dumps({k: v for k, v in t.items() if k != "perf_rows"},
+                           default=str) + "\n"
+                for t in self.tests
+            ))
 
             with open(os.path.join(run_dir, "perf.jsonl"), "w", encoding="utf-8") as f:
                 for t in self.tests:

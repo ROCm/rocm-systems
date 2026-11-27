@@ -88,6 +88,7 @@ DEFINE_NCCL_PARAM(ncclParamDebugSubsys, uint64_t, NCCL_DEBUG_SUBSYS,
                     makeOption("PROFILE", NCCL_PROFILE,   "Profiling"),
                     makeOption("RAS", NCCL_RAS, "Reliability, availability, serviceability"),
                     makeOption("DESTROY", NCCL_DESTROY, "Communicator destroy, abort, revoke, and plugin unload/close operations"),
+                    makeOption("DIAG", NCCL_DIAG, "Detailed information from active and RAS diagnostics"),
                     makeOption("ALL", NCCL_ALL, "All categories")
                   ))), "Filter debug output by (comma-separated)");
 
@@ -240,6 +241,8 @@ static void ncclDebugInit() {
         mask = NCCL_VERBS;
       } else if (strcasecmp(subsys, "DESTROY") == 0) {
         mask = NCCL_DESTROY;
+      } else if (strcasecmp(subsys, "DIAG") == 0) {
+        mask = NCCL_DIAG;
       } else if (strcasecmp(subsys, "ALL") == 0) {
         mask = NCCL_ALL;
       }
@@ -433,7 +436,7 @@ static void ncclDebugInit() {
 #if defined(NCCL_OS_LINUX)
         setlinebuf(file); // disable block buffering
 #elif defined(NCCL_OS_WINDOWS)
-        setvbuf(file, NULL, _IOLBF, 0); // disable block buffering
+        setvbuf(file, NULL, _IONBF, 0); // disable buffering
 #endif
         ncclDebugFile = file;
       }

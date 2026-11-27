@@ -745,6 +745,24 @@ HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNT
 HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpyWithAttributesAsync, hipMemcpyWithAttributesAsync, hipMemcpyWithAttributesAsync_fn, dst, src, size, attr, stream);
 HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpy3DWithAttributesAsync, hipMemcpy3DWithAttributesAsync, hipMemcpy3DWithAttributesAsync_fn, op, flags, stream);
 #endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 41
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipArrayGetSparseProperties, hipArrayGetSparseProperties, hipArrayGetSparseProperties_fn, sparseProperties, array);
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 42
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipGraphNodeGetLocalId, hipGraphNodeGetLocalId, hipGraphNodeGetLocalId_fn, node, nodeId);
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipGraphNodeGetToolsId, hipGraphNodeGetToolsId, hipGraphNodeGetToolsId_fn, node, toolsId);
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipGraphGetId, hipGraphGetId, hipGraphGetId_fn, graph, graphId);
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipGraphExecGetId, hipGraphExecGetId, hipGraphExecGetId_fn, graphExec, graphId);
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 43
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipDeviceGetExecAffinitySupport, hipDeviceGetExecAffinitySupport, hipDeviceGetExecAffinitySupport_fn, pi, type, dev);
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 44
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipArrayGetPlane, hipArrayGetPlane, hipArrayGetPlane_fn, pPlaneArray, hArray, planeIdx);
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 45
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipArrayGetMemoryRequirements, hipArrayGetMemoryRequirements, hipArrayGetMemoryRequirements_fn, memoryRequirements, array, device);
+#endif
 // clang-format on
 
 #else

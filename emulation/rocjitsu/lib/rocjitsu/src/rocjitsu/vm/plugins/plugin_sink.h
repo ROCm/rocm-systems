@@ -54,6 +54,8 @@
 namespace rocjitsu {
 
 /// @brief Abstract base for plugin output destinations.
+/// @details Sink callbacks must not throw. Output is best effort; sink failures
+/// must not replace or suppress an execution failure.
 class PluginSink {
 public:
   virtual ~PluginSink() = default;
@@ -81,13 +83,15 @@ public:
 class FileSink : public PluginSink {
 public:
   explicit FileSink(const std::string &path) : file_(std::fopen(path.c_str(), "w")) {
-    if (!file_)
+    if (!file_) {
       util::Logger::warn("cannot open plugin sink '", path, "': ", std::strerror(errno));
+    }
   }
 
   ~FileSink() override {
-    if (file_)
+    if (file_) {
       std::fclose(file_);
+    }
   }
 
   FileSink(const FileSink &) = delete;

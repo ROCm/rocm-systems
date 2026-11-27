@@ -55,6 +55,11 @@ constexpr bool atomic_uses_two_sources(AtomicOp op) {
          op == AtomicOp::WRAP;
 }
 
+constexpr bool atomic_is_floating_point(AtomicOp op) {
+  return op == AtomicOp::FADD || op == AtomicOp::FMIN || op == AtomicOp::FMAX ||
+         op == AtomicOp::FCMPSWAP || op == AtomicOp::PK_ADD_F16 || op == AtomicOp::PK_ADD_BF16;
+}
+
 /// @brief Apply an integer atomic RMW operation (32-bit or 64-bit).
 /// @details Returns failure for operations outside the supported integer set.
 template <typename T>
@@ -69,8 +74,9 @@ util::FailureOr<T> apply_int_atomic(AtomicOp op, T old_val, T src_val, T cmp_val
     for (uint32_t shift = 0; shift < sizeof(T) * 8; shift += 32) {
       const T half_mask = T{0xffffffffu} << shift;
       const T store_mask = T{0x7fffffffu} << shift;
-      if ((src_val >> shift) & 0x80000000u)
+      if ((src_val >> shift) & 0x80000000u) {
         result = (result & ~half_mask) | (src_val & store_mask);
+      }
     }
     return result;
   }
@@ -81,8 +87,9 @@ util::FailureOr<T> apply_int_atomic(AtomicOp op, T old_val, T src_val, T cmp_val
   case AtomicOp::ORDERED_ADD: {
     if constexpr (sizeof(T) == sizeof(uint64_t)) {
       const auto id = static_cast<uint32_t>(old_val);
-      if (id != static_cast<uint32_t>(src_val))
+      if (id != static_cast<uint32_t>(src_val)) {
         return old_val;
+      }
       // The compute queue on gfx1201 uses the full 12-bit ordered wave ID.
       const uint32_t value =
           static_cast<uint32_t>(old_val >> 32) + static_cast<uint32_t>(src_val >> 32);

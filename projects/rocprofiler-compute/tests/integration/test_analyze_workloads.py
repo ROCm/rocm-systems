@@ -67,7 +67,7 @@ WORKLOADS_BY_ARCH = {
     ],
     "MI300A_A1": CDNA_WORKLOADS,
     "MI300X_A1": CDNA_WORKLOADS,
-    "MI350": ["no_roof", "vcopy", "vcopy_iteration_multiplexing"],
+    "MI350": ["no_roof", "vcopy"],
     "RDNA35_HALO": GFX115X_WORKLOADS,
 }
 

@@ -8,7 +8,7 @@ CLI analysis
 
 This section provides an overview of ROCm Compute Profiler's CLI analysis features.
 
-* :ref:`Derived metrics <cli-list-available-metrics>`: All of ROCm Compute Profiler's built-in metrics.
+* :ref:`Derived metrics <cli-list-metrics>`: All of ROCm Compute Profiler's built-in metrics.
 
 * :ref:`Baseline comparison <analysis-baseline-comparison>`: Compare multiple runs in a side-by-side manner.
 
@@ -45,7 +45,13 @@ There are three high-level GPU analysis views:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute analyze -p workloads/vcopy/MI200/ -b 2
+   $ rocprof-compute analyze -p workloads/vcopy/MI200/ --speed-of-light
+
+.. tip::
+
+   ``--speed-of-light``, ``--memory-chart`` and ``--roofline`` show only the System
+   Speed-of-Light, Memory Chart and Roofline panels, the same as ``-b 2``, ``-b 3``
+   and ``-b 4``.
 
 .. image:: ../../data/analyze/cli/system_speed_of_light.png
    :align: left
@@ -55,7 +61,7 @@ There are three high-level GPU analysis views:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute analyze -p workloads/vcopy/MI350/ -b 3
+   $ rocprof-compute analyze -p workloads/vcopy/MI350/ --memory-chart
 
 .. code-block:: text
 
@@ -137,13 +143,14 @@ You can also send the output to an editor, for example Visual Studio Code:
 The chart is colored only when it is printed straight to a terminal, so it is
 plain text in both of the preceding commands.
 
-To print the block as tables instead of the diagram, see :ref:`cli-view-table`.
+To print the block as tables instead of the diagram, use ``--debug-table-view``
+(see :ref:`cli-debug-options`).
 
 **Empirical hierarchical roofline:**
 
 .. code-block:: shell-session
 
-   $ rocprof-compute analyze -p workloads/rocflop/MI350/ -b 4
+   $ rocprof-compute analyze -p workloads/rocflop/MI350/ --roofline
 
    --------------------------------------------------------------------------------
    4. Roofline
@@ -212,65 +219,22 @@ Open the saved HTML file in a browser for the interactive roofline plot. See :re
    * Visualized memory chart is only supported in single run analysis. In multiple runs comparison mode, it is switched back to basic table view.
    * Visualized memory chart is drawn at a fixed width and needs a wide terminal. See :ref:`cli-memory-chart-viewing` if it wraps.
 
-.. _cli-list-available-metrics:
+.. _cli-list-metrics:
 
-2. Use ``--list-available-metrics`` to generate a list of available metrics for inspection.
+2. Use ``--list-metrics`` to list the blocks the workload profiled,
+   and add block IDs or aliases to list their metrics. See :ref:`list-metrics`.
 
    .. code-block:: shell-session
 
-      $ rocprof-compute analyze -p workloads/vcopy/MI200/ --list-available-metrics
-
-                                       __                                       _
-       _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
-      | '__/ _ \ / __| '_ \| '__/ _ \| |_ _____ / __/ _ \| '_ ` _ \| '_ \| | | | __/ _ \
-      | | | (_) | (__| |_) | | | (_) |  _|_____| (_| (_) | | | | | | |_) | |_| | ||  __/
-      |_|  \___/ \___| .__/|_|  \___/|_|        \___\___/|_| |_| |_| .__/ \__,_|\__\___|
-                     |_|                                           |_|
-
-      Analysis mode = cli
-      [analysis] deriving rocprofiler-compute metrics...
-      0 -> Top Stats
-      1 -> System Info
-      2 -> System Speed-of-Light
-              2.1 -> Speed-of-Light
-                      2.1.0 -> VALU FLOPs
-                      2.1.1 -> MFMA FLOPs (BF16)
-                      2.1.2 -> MFMA FLOPs (F16)
-                      2.1.3 -> MFMA FLOPs (F32)
-                      2.1.4 -> MFMA FLOPs (F64)
-                      2.1.5 -> MFMA IOPs (Int8)
-                      2.1.6 -> SALU Utilization
-                      2.1.7 -> VALU Utilization
-                      2.1.8 -> MFMA Utilization
-                      2.1.9 -> VMEM Utilization
-                      2.1.10 -> Branch Utilization
-                      2.1.11 -> VALU Active Threads
-                      2.1.12 -> IPC
-                      2.1.13 -> Wavefront Occupancy
-                      2.1.14 -> Theoretical LDS Bandwidth
-                      2.1.15 -> LDS Bank Conflicts/Access
-                      2.1.16 -> vL1D Cache Hit Rate
-                      2.1.17 -> vL1D Cache BW
-                      2.1.18 -> L2 Cache Hit Rate
-                      2.1.19 -> L2 Cache BW
-                      2.1.20 -> L2-Fabric Read BW
-                      2.1.21 -> L2-Fabric Write BW
-                      2.1.22 -> L2-Fabric Read Latency
-                      2.1.23 -> L2-Fabric Write Latency
-                      2.1.24 -> sL1D Cache Hit Rate
-                      2.1.25 -> sL1D Cache BW
-                      2.1.26 -> L1I Hit Rate
-                      2.1.27 -> L1I BW
-                      2.1.28 -> L1I Fetch Latency
-      ...
+      $ rocprof-compute analyze -p workloads/vcopy/MI200/ --list-metrics
+      $ rocprof-compute analyze -p workloads/vcopy/MI200/ --list-metrics sol
 
    On MI300 and MI350 series GPUs, block **1 (System Info)** also reports compute
    and memory partition modes. See :doc:`/conceptual/cdna/compute-memory-partition`
    for how those fields affect metric normalization.
 
 3. Choose your own customized subset of metrics with the ``-b`` (or ``--block``)
-   option. Or, build your own configuration following
-   `config_template <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-compute/src/rocprof_compute_soc/analysis_configs/panel_config_template.yaml>`_.
+   option.
    The following snippet shows how to generate a report containing only metric 2
    (:doc:`System Speed-of-Light </conceptual/cdna/system-speed-of-light>`).
 
@@ -480,34 +444,11 @@ More analysis options
    Combining it with ``--output-format csv`` or ``--output-format db`` exits with an error.
 
 
-**List metrics**
+**List metrics of selected blocks** (see :ref:`list-metrics`)
 
 .. code-block:: shell
 
-   $ rocprof-compute analyze -p workloads/vcopy/MI200/  --list-metrics gfx90a
-
-**List IP blocks**
-
-.. code-block:: shell
-
-   $ rocprof-compute analyze -p workloads/vcopy/MI200/  --list-blocks gfx90a
-
-
-**Show Description column which is excluded by default in cli output**
-
-.. code-block:: shell
-
-   $ rocprof-compute analyze -p workloads/vcopy/MI200/  --list-metrics gfx90a --include-cols Description
-
-.. _cli-view-table:
-
-**TTY output view (plain tables)**
-
-Use ``--view table`` to force plain tabular output for all sections and ignore ``cli_style`` from the analysis YAML (for example, memory charts and the per-kernel Roofline layout are shown as tables). Additional ``--view`` values may be added in future releases.
-
-.. code-block:: shell
-
-   $ rocprof-compute analyze -p workloads/vcopy/MI200/ -b 3 --view table
+   $ rocprof-compute analyze -p workloads/vcopy/MI200/  --list-metrics sol 12
 
 **Show System Speed-of-Light and CS_Busy blocks only**
 
@@ -667,7 +608,7 @@ Two-step workflow:
 .. code-block:: shell-session
 
    # Step 1: Profile to generate roofline.csv
-   $ rocprof-compute profile --name vcopy --roof-only -- tests/vcopy -n 1048576 -b 256
+   $ rocprof-compute profile --name vcopy --roofline -- tests/vcopy -n 1048576 -b 256
 
    # Step 2: Analyze to generate HTML roofline plots
    $ rocprof-compute analyze -p workloads/vcopy/MI300A_A1/ -b 4
@@ -737,6 +678,8 @@ format is ``stdout``.
 
 ``--list-stats`` is available only with ``stdout`` and ``txt`` output.
 
+``--list-operators`` and ``--operator`` are available only with ``stdout``.
+
 * ``stdout`` format:
    * Print analysis report to the terminal.
    * NOTE: This option will not generate any file or folder.
@@ -750,7 +693,7 @@ format is ``stdout``.
 * ``csv`` format:
    * Generate a folder named ``rocprof_compute_<uuid>`` in the current working directory.
    * This folder contains one CSV file per view defined in the :ref:`analysis database schema <analysis-database>`.
-   * For a PC-sampled workload it also holds each kernel's disassembly and source; see :ref:`pc-sampling-per-kernel-csv`.
+   * For a PC-sampled workload it also holds each kernel's disassembly and source, and the samples per source line; see :ref:`pc-sampling-per-kernel-csv` and :ref:`pc-sampling-per-source-line-csv`.
    * This is useful for further programmatic analysis of analysis reports.
    * NOTE: This option will disable output of analysis report to terminal.
 
@@ -836,13 +779,12 @@ PyTorch operator analysis
 .. warning::
 
    These options require ``--experimental``. After profiling with
-   ``--experimental --torch-trace`` (see :ref:`torch-operator-profiling`),
+   ``--experimental --trace-ml-api torch`` (see :ref:`torch-operator-profiling`),
    use ``rocprof-compute analyze ... --experimental`` with
-   ``--list-torch-operators`` or ``--torch-operator`` as needed.
+   ``--list-operators torch`` or ``--operator`` as needed.
 
-These options work only with the default ``--output-format stdout``. If you
-combine ``--list-torch-operators`` with ``--torch-operator``, rocprof-compute
-lists all operators and ignores the filter.
+If you pass both ``--list-operators`` and ``--operator``, rocprof-compute
+lists the operators and ignores ``--operator``.
 
 
 List all operators
@@ -852,7 +794,7 @@ Display all PyTorch operators captured during profiling:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute analyze --experimental --list-torch-operators --path ./workload
+   $ rocprof-compute analyze --experimental --list-operators torch --path ./workload
 
    ================================================================================
    PyTorch Operator Call Tree: ./workload
@@ -913,15 +855,19 @@ line ``Operator summary: (no operators with recorded dispatches)``.
 Filtering by Operator
 ---------------------
 
-``--torch-operator`` selects PyTorch operators with shell-style glob patterns.
-A pattern can match an operator's name or its full call path, such as
-``nn.Module.Net.forward/aten::addmm``. Matching is case-sensitive.
+``--operator`` selects operators with shell-style glob patterns. Matching is
+case-sensitive. A pattern can match an operator's name or its full call path,
+such as ``nn.Module.Net.forward/aten::addmm``.
+
+A prefix limits a pattern to one framework, as in ``torch:*relu*``. A pattern
+without a prefix uses the prefix before it. If no prefix comes before it, the
+pattern matches every traced framework and user ROCTx regions.
 
 * **Wildcard** — ``*relu*`` matches any operator whose name contains ``relu``.
 * **Call path** — ``*/aten::addmm`` matches ``aten::addmm`` when another
   operator calls it.
 * **Exact** — ``aten::addmm``
-* **Match all** — no arguments, ``all``, ``*``, or ``**``
+* **Match all** — no arguments, or ``**``
 
 rocprof-compute prints the call tree of the matching operators. The metric
 tables then cover only the kernels that those operators launched. To narrow
@@ -939,80 +885,82 @@ These options do not change the printed operator tree. Kernel IDs depend on
 
 .. code-block:: shell-session
 
-   # Wildcard match
-   $ rocprof-compute analyze --experimental --torch-operator "*relu*" --path ./workload
+   # Match PyTorch operators only
+   $ rocprof-compute analyze --experimental --operator 'torch:*relu*' --path ./workload
 
-   # Path match
-   $ rocprof-compute analyze --experimental --torch-operator "*/aten::addmm" --path ./workload
+   # Match a call path in every traced framework
+   $ rocprof-compute analyze --experimental --operator '*/aten::addmm' --path ./workload
 
-   # Match all operators (no arguments)
-   $ rocprof-compute analyze --experimental --torch-operator --path ./workload
+   # Match every operator (no arguments)
+   $ rocprof-compute analyze --experimental --operator --path ./workload
 
-**Filter multiple operators** (space or comma separated):
+**Filter multiple operators.** Here ``*relu*`` uses the ``torch:`` prefix
+before it:
 
 .. code-block:: shell-session
 
    $ rocprof-compute analyze --experimental \
-       --torch-operator "*relu*,*addmm*" --path ./workload
+       --operator 'torch:*conv*' '*relu*' 'triton:*matmul*' --path ./workload
+
+
+User ROCTx regions
+------------------
+
+Every ``--trace-ml-api`` run also records the ROCTx ranges that your
+application adds. The ``user`` prefix selects them.
+
+``--list-operators user`` lists each user ROCTx region with everything that
+ran inside it. ``--operator 'user:PATTERN'`` selects the regions whose name
+matches PATTERN. The result includes all operators and kernels inside each
+region. A framework pattern such as ``torch:*relu*`` keeps only that
+framework's operators below a match. Other patterns in the same command add
+more operators. They never remove anything from a selected region.
+
+.. code-block:: shell-session
+
+   $ rocprof-compute analyze --experimental --list-operators user torch --path ./workload
+
+   $ rocprof-compute analyze --experimental \
+       --operator 'user:*UserDefined*' --path ./workload
+
+   $ rocprof-compute analyze --experimental \
+       --operator 'user:*UserDefined*' 'torch:*relu*' --path ./workload
 
 
 Triton operator analysis
 ========================
 
-.. warning::
+After profiling with ``--experimental --trace-ml-api triton`` (see
+:ref:`triton-trace`), use ``--list-operators triton`` and
+``--operator 'triton:PATTERN'``, such as ``--operator 'triton:*rmsnorm_kernel*'``.
+They show only Triton kernels.
 
-   Triton operator analysis requires ``--experimental``. After profiling with
-   ``--experimental --triton-trace`` (see :ref:`triton-trace`), use
-   ``rocprof-compute analyze ... --experimental`` with
-   ``--list-triton-operators`` or ``--triton-operator`` as needed.
 
-Triton kernels are analyzed the same way as PyTorch operators.
-``--list-triton-operators`` and ``--triton-operator`` report only the kernels
-that Triton launched, even when the same run also captured PyTorch operators.
+.. _cli-debug-options:
 
-List all captured Triton kernels
----------------------------------
+Debug options
+=============
 
-Display all Triton kernels captured during profiling:
+Debug options help you troubleshoot ROCm Compute Profiler itself, rather than
+analyze your workload. They are hidden from the help output. To list them, run:
 
-.. code-block:: shell-session
+.. code-block:: shell
 
-   $ rocprof-compute analyze --experimental --list-triton-operators --path ./workload
+   $ rocprof-compute analyze --debug --help
 
-   ================================================================================
-   Triton Operator Call Tree: ./workload
-   Sorted by total GPU kernel duration.
-   ================================================================================
+To use a debug option, pass it on its own; ``--debug`` is not required:
 
-   triton.JITFunction.matmul_kernel triton_ffn.py:120 (calls: 1, dispatches: 2, total: 0.03 ms, dispatch_mean: 0.01 ms, dispatch_min: 4.40 us, dispatch_max: 0.02 ms)
-   └─ triton.CompiledKernel.matmul_kernel triton_ffn.py:120 (calls: 1, dispatches: 2, total: 0.03 ms, dispatch_mean: 0.01 ms, dispatch_min: 4.40 us, dispatch_max: 0.02 ms)
-      ├─ matmul_kernel (id 0) (dispatches: 1, total: 0.02 ms)
-      └─ __amd_rocclr_initHeap (id 7) (dispatches: 1, total: 4.40 us)
+.. code-block:: shell
 
-   ...
+   $ rocprof-compute analyze -p workloads/vcopy/MI200/ -b 3 --debug-table-view
 
-   Operator summary (Min/Max/Mean are per-dispatch over the subtree; sorted by Total):
-   ╒════════════════════════════════════════════════════════════════════════╤═════════╤══════════════╤═════════╤═══════════╤═════════════╤═════════╤═════════╤═════════╕
-   │ Operator                                                               │   Calls │   Dispatches │   Total │   % Total │   Mean/Call │    Mean │     Min │     Max │
-   ╞════════════════════════════════════════════════════════════════════════╪═════════╪══════════════╪═════════╪═══════════╪═════════════╪═════════╪═════════╪═════════╡
-   │ triton.JITFunction.matmul_kernel                                       │     9.0 │         10.0 │ 0.30 ms │     88.81 │     0.03 ms │ 0.03 ms │ 4.40 us │ 0.06 ms │
-   ├────────────────────────────────────────────────────────────────────────┼─────────┼──────────────┼─────────┼───────────┼─────────────┼─────────┼─────────┼─────────┤
-   │ triton.JITFunction.matmul_kernel/triton.CompiledKernel.matmul_kernel   │     9.0 │         10.0 │ 0.30 ms │     88.81 │     0.03 ms │ 0.03 ms │ 4.40 us │ 0.06 ms │
-   ├────────────────────────────────────────────────────────────────────────┼─────────┼──────────────┼─────────┼───────────┼─────────────┼─────────┼─────────┼─────────┤
-   │ ...                                                                    │         │              │         │           │             │         │         │         │
-   ╘════════════════════════════════════════════════════════════════════════╧═════════╧══════════════╧═════════╧═══════════╧═════════════╧═════════╧═════════╧═════════╛
+Analyze mode has these debug options:
 
-Filter the Triton kernels
--------------------------
+* ``--debug-metric-expression``: Print the counter data, and each metric's
+  expression and inputs.
 
-``--triton-operator`` uses the same patterns and options as
-``--torch-operator``; see :ref:`operator-filtering`.
+* ``--debug-table-view``: Print every block as plain tables, including blocks
+  that are normally drawn as a memory chart or a per-kernel roofline layout.
 
-.. code-block:: shell-session
-
-   # Wildcard match
-   $ rocprof-compute analyze --experimental --triton-operator "*rmsnorm_kernel*" --path ./workload
-
-   # Filter multiple kernels (space or comma separated)
-   $ rocprof-compute analyze --experimental \
-       --triton-operator "*matmul*,*rmsnorm_kernel*" --path ./workload
+* ``--debug-verify-deps``: Check that the Python dependencies of analyze mode are
+  installed, then exit. It doesn't need ``--path``.

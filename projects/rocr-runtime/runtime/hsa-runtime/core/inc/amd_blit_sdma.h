@@ -100,6 +100,14 @@ class BlitSdmaBase : public core::Blit {
   virtual bool PlatformAtomicSupport() const = 0;
   virtual bool IsGfx125Plus() const = 0;
 
+  /// @brief Largest destination count the multicast packet can describe.  Its
+  /// num_of_destination field is 10 bits holding (count - 1), so 1024 is the
+  /// most that encodes without truncating the field and corrupting the packet.
+  /// This is a property of the packet, not of the agent: a broadcast with more
+  /// destinations is routed to fan-out instead, so it does not lower what
+  /// HSA_AMD_AGENT_INFO_MAX_BROADCAST_DESTINATIONS reports.
+  static constexpr size_t kMaxMulticastDsts = 1u << 10;  // 1024
+
   /// @brief Maximum byte count a single linear copy packet can describe
   /// (the 30-bit count field, ~1 GiB).  Larger copies are split into multiple
   /// chunked packets; both the plain (BuildCopyCommand) and fused WaitSignal
@@ -111,13 +119,13 @@ class BlitSdmaBase : public core::Blit {
   /// @brief Single-doorbell WaitSignal copy for gfx125+ single copies.
   /// Emits GCR invalidate + dep polls + N WaitSignal copy packets +
   /// GCR writeback + mailbox/trap — all in one ring reservation.
-  /// When a dependency is present every copy packet waits on it. On the
-  /// unprofiled path every packet signals, so out_signal is
-  /// pre-incremented by num_copy_command - 1.
-  /// When profiling is enabled, start/end SDMA timestamp commands are emitted
-  /// around the copy packets (after dep polls and after copies respectively),
-  /// the packets carry no inline SIGNAL, and out_signal completes via an
-  /// atomic decrement after the end timestamp.
+  /// On the unprofiled path every copy packet waits on the first dependency
+  /// and signals, so out_signal is pre-incremented by num_copy_command - 1.
+  /// When profiling is enabled, every dependency is polled before the start
+  /// SDMA timestamp, the end timestamp follows the copy packets, the packets
+  /// carry no inline WAIT or SIGNAL, and out_signal completes after the end
+  /// timestamp via an atomic decrement, or a 64-bit fence write when platform
+  /// atomics are unavailable.
   virtual hsa_status_t SubmitLinearCopyBodyWaitSignal(
       void* dst, const void* src, size_t size,
       const std::vector<core::Signal*>& dep_signals,

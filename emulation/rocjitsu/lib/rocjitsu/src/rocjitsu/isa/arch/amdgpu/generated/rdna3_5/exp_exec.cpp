@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/exp.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/dot_packed16.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
@@ -18,7 +19,9 @@ namespace rocjitsu {
 namespace rdna3_5 {
 
 void ExpExp::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Export: no-op in compute simulation.
+  if (!wf.export_shader_data(amdgpu::ShaderExportOperands::decode(inst_))) {
+    wf.pc -= size_;
+  }
 }
 
 } // namespace rdna3_5

@@ -57,6 +57,11 @@ extern std::function<int64_t()> g_paramP2pDisable;
 
 extern std::function<bool(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t, const void*, void*, bool)>
     g_isSymmetricKernelRequested;
+#ifdef ENABLE_ROCSHMEM_GIN
+// Default false, so rcclSelectAllGather stays on the non-GIN branches unless a
+// test opts in. ncclAllGatherGinSdmaCtaCount reports 4 while this returns true.
+extern std::function<bool(ncclComm*, const void*, void*, size_t, ncclDataType_t)> g_allGatherGinSdmaEligible;
+#endif
 extern std::function<bool(const struct ncclComm*, size_t, ncclDataType_t, bool, bool)> g_allReduceShouldTakeDdaPath;
 
 extern std::function<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, int, int, int, ncclSimInfo_t*)>

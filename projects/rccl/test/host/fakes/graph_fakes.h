@@ -4,8 +4,8 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Fakes for everything src/graph/*.cc calls outside src/graph, for rccl-UnitTestsMicroTopo, which compiles the
-// real graph files. HIP and amd-smi come from hip_fakes.cc and amdsmi_fakes.cc (ResetGraphFakes() sets the
+// Fakes for everything src/graph/*.cc calls outside src/graph, for the graph/ binaries that compile the real
+// graph files. HIP and amd-smi come from hip_fakes.cc and amdsmi_fakes.cc (ResetGraphFakes() sets the
 // graph defaults on their hooks). The OS seams stay here because os_fakes.cc counts ncclOsCpuCount calls rather
 // than CPUs and reads no sysfs; logging stays here because nccl_fakes.cc's logger only prints, and these tests
 // assert on what the graph code logged.

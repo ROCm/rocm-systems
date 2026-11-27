@@ -233,8 +233,15 @@ TEST_F(DebugMicrotest, Subsys_EachNameSelectsItsBit) {
     {"NET", NCCL_NET},       {"GRAPH", NCCL_GRAPH},     {"TUNING", NCCL_TUNING}, {"ENV", NCCL_ENV},
     {"ALLOC", NCCL_ALLOC},   {"CALL", NCCL_CALL},       {"PROXY", NCCL_PROXY}, {"NVLS", NCCL_NVLS},
     {"BOOTSTRAP", NCCL_BOOTSTRAP}, {"REG", NCCL_REG},   {"PROFILE", NCCL_PROFILE}, {"RAS", NCCL_RAS},
-    {"VERBS", NCCL_VERBS},   {"DESTROY", NCCL_DESTROY}, {"ALL", (uint64_t)NCCL_ALL}};
+    {"VERBS", NCCL_VERBS},   {"DESTROY", NCCL_DESTROY}, {"DIAG", NCCL_DIAG},     {"ALL", (uint64_t)NCCL_ALL}};
   for (const auto& c : cases) EXPECT_EQ(SubsysFor(c.first), c.second) << c.first;
+}
+
+// NCCL_VERBS moved up a bit to make room for upstream's NCCL_DIAG; each name must still select only its own bit.
+TEST_F(DebugMicrotest, Subsys_DiagAndVerbsSelectDistinctBits) {
+  EXPECT_NE((uint64_t)NCCL_DIAG, (uint64_t)NCCL_VERBS);
+  EXPECT_EQ(SubsysFor("diag,VERBS"), (uint64_t)(NCCL_DIAG | NCCL_VERBS));
+  EXPECT_EQ(SubsysFor("^DIAG"), ~(uint64_t)NCCL_DIAG);
 }
 
 TEST_F(DebugMicrotest, Subsys_ListIsCaseInsensitiveAndSkipsUnknownNames) {

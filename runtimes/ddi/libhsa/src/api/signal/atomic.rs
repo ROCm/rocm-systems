@@ -3,51 +3,20 @@
 
 //! HSA signal value and atomic C entry points.
 
-use std::sync::atomic::{AtomicI64, Ordering, fence};
+use std::sync::atomic::{AtomicI64, Ordering};
 
 use crate::ffi::*;
-use crate::runtime::{boundary, lock};
+use crate::lifecycle::lock;
 use crate::signal::{
-    AmdSignal, batch_needs_flush, flush_device_store, flush_signal_store, host_store_kind,
-    signal_value_pointer, with_public_signal,
+    AmdSignal, batch_needs_flush, flush_device_store, signal_value_pointer, with_public_signal,
 };
-
-/// Stores a signal value according to the locally trusted host signal kind.
-///
-/// # Safety
-/// The caller must retain the signal and any queue owning its doorbell until
-/// this store completes.
-unsafe fn store_signal_value(signal: &AmdSignal, value: SignalValue, order: Ordering) {
-    let address = std::ptr::from_ref(signal) as usize;
-    let kind = host_store_kind(address, signal.kind.load(Ordering::Acquire));
-    match kind {
-        AMD_SIGNAL_KIND_DOORBELL => {
-            if order == Ordering::Release {
-                fence(Ordering::Release);
-            }
-            let address = signal.value.load(Ordering::Relaxed) as usize;
-            // SAFETY: The caller retains the locally owned queue and its MMIO
-            // mapping. Shared IPC signals are excluded by host_store_kind.
-            unsafe { rocddi::device::gpu::queue::ring_doorbell(address, value as u64) };
-        }
-        AMD_SIGNAL_KIND_LEGACY_DOORBELL => {
-            signal.value.store(value, order);
-            // SAFETY: The HSA caller retains the owning queue through this
-            // store, including its stable intercept owner.
-            unsafe { crate::queue_intercept::ring(signal.intercept_owner()) };
-        }
-        _ => {
-            signal.value.store(value, order);
-            flush_signal_store(signal);
-        }
-    }
-}
+use crate::status::boundary;
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_signal_load_relaxed")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Loads an HSA signal value with relaxed memory ordering.
 pub unsafe extern "C" fn hsa_signal_load_relaxed(signal: HsaSignal) -> SignalValue {
     // SAFETY: Callers must supply a live HSA signal handle.
@@ -56,10 +25,10 @@ pub unsafe extern "C" fn hsa_signal_load_relaxed(signal: HsaSignal) -> SignalVal
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_signal_load_scacquire")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Loads a signal value with the HSA SC-acquire contract.
 pub unsafe extern "C" fn hsa_signal_load_scacquire(signal: HsaSignal) -> SignalValue {
     // SAFETY: Callers must supply a live HSA signal handle.
@@ -68,10 +37,10 @@ pub unsafe extern "C" fn hsa_signal_load_scacquire(signal: HsaSignal) -> SignalV
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_signal_load_acquire")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Uses the deprecated acquire spelling for the SC-acquire load.
 pub unsafe extern "C" fn hsa_signal_load_acquire(signal: HsaSignal) -> SignalValue {
     // SAFETY: This deprecated entry point has the same contract as the
@@ -80,27 +49,21 @@ pub unsafe extern "C" fn hsa_signal_load_acquire(signal: HsaSignal) -> SignalVal
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_signal_store_relaxed")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Stores an HSA signal value with relaxed memory ordering.
 pub unsafe extern "C" fn hsa_signal_store_relaxed(signal: HsaSignal, value: SignalValue) {
-    // SAFETY: Callers must supply a live HSA signal handle.
-    let _ = unsafe {
-        with_public_signal(signal, |signal| {
-            // SAFETY: The public API requires the caller to retain this signal
-            // and its owning queue for the complete store.
-            store_signal_value(signal, value, Ordering::Relaxed);
-        })
-    };
+    // SAFETY: The caller retains the signal and any owning queue through the store.
+    let _ = unsafe { crate::signal::store(signal, value, Ordering::Relaxed) };
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_signal_silent_store_relaxed")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Uses the regular relaxed store path for polling-backed signals.
 pub unsafe extern "C" fn hsa_signal_silent_store_relaxed(signal: HsaSignal, value: SignalValue) {
     // SAFETY: Same operation is sufficient for polling-backed signals.
@@ -108,10 +71,10 @@ pub unsafe extern "C" fn hsa_signal_silent_store_relaxed(signal: HsaSignal, valu
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_signal_silent_store_screlease")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Uses the regular SC-release store path for polling-backed signals.
 pub unsafe extern "C" fn hsa_signal_silent_store_screlease(signal: HsaSignal, value: SignalValue) {
     // SAFETY: Same operation is sufficient for polling-backed signals.
@@ -119,60 +82,21 @@ pub unsafe extern "C" fn hsa_signal_silent_store_screlease(signal: HsaSignal, va
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_signal_store_screlease")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Stores a signal value with the HSA SC-release contract.
 pub unsafe extern "C" fn hsa_signal_store_screlease(signal: HsaSignal, value: SignalValue) {
-    // SAFETY: Callers must supply a live HSA signal handle.
-    let _ = unsafe {
-        with_public_signal(signal, |signal| {
-            // SAFETY: The public API requires the caller to retain this signal
-            // and its owning queue for the complete store.
-            store_signal_value(signal, value, Ordering::Release);
-        })
-    };
-}
-
-#[cfg(test)]
-#[allow(clippy::unwrap_used)]
-mod tests {
-    use super::*;
-    use crate::signal::{register_ipc_signal, unregister_ipc_signal};
-
-    #[test]
-    fn peer_modified_ipc_kind_cannot_ring_a_doorbell() {
-        let signal = AmdSignal::user(0);
-        let address = std::ptr::from_ref(&signal) as usize;
-        register_ipc_signal(address).unwrap();
-
-        // An imported peer may modify the shared kind and value at any time.
-        // The invalid MMIO address would fault if either store took the
-        // doorbell branch; the legacy kind would use an invalid owner.
-        signal
-            .kind
-            .store(AMD_SIGNAL_KIND_DOORBELL, Ordering::Release);
-        signal.value.store(1, Ordering::Release);
-        // SAFETY: This local signal is retained throughout both stores.
-        unsafe { store_signal_value(&signal, 27, Ordering::Relaxed) };
-        assert_eq!(signal.value.load(Ordering::Acquire), 27);
-
-        signal
-            .kind
-            .store(AMD_SIGNAL_KIND_LEGACY_DOORBELL, Ordering::Release);
-        // SAFETY: This local signal is retained throughout both stores.
-        unsafe { store_signal_value(&signal, 39, Ordering::Release) };
-        assert_eq!(signal.value.load(Ordering::Acquire), 39);
-        unregister_ipc_signal(address);
-    }
+    // SAFETY: The caller retains the signal and any owning queue through the store.
+    let _ = unsafe { crate::signal::store(signal, value, Ordering::Release) };
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_signal_store_release")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Uses the deprecated release spelling for the SC-release store.
 pub unsafe extern "C" fn hsa_signal_store_release(signal: HsaSignal, value: SignalValue) {
     // SAFETY: This deprecated entry point has the same contract as the
@@ -294,8 +218,8 @@ fn signal_xor(value: &AtomicI64, operand: SignalValue, order: Ordering) {
 macro_rules! signal_exchange_entry {
     ($name:ident, $order:expr) => {
         #[doc = concat!("Atomically exchanges an HSA signal through `", stringify!($name), "`.")]
-        #[cfg_attr(all(target_arch = "x86_64", not(test)), unsafe(export_name = concat!("__hsa_impl_", stringify!($name))))]
-        #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+        #[cfg_attr(all(hsa_tool_dispatch, not(test)), unsafe(export_name = concat!("__hsa_impl_", stringify!($name))))]
+        #[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
         pub unsafe extern "C" fn $name(signal: HsaSignal, value: SignalValue) -> SignalValue {
             // SAFETY: The public entry point preserves the HSA signal contract.
             unsafe { signal_exchange(signal, value, $order) }
@@ -307,8 +231,8 @@ macro_rules! signal_exchange_entry {
 macro_rules! signal_compare_exchange_entry {
     ($name:ident, $success:expr, $failure:expr) => {
         #[doc = concat!("Conditionally exchanges an HSA signal through `", stringify!($name), "`.")]
-        #[cfg_attr(all(target_arch = "x86_64", not(test)), unsafe(export_name = concat!("__hsa_impl_", stringify!($name))))]
-        #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+        #[cfg_attr(all(hsa_tool_dispatch, not(test)), unsafe(export_name = concat!("__hsa_impl_", stringify!($name))))]
+        #[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
         pub unsafe extern "C" fn $name(
             signal: HsaSignal,
             expected: SignalValue,
@@ -324,8 +248,8 @@ macro_rules! signal_compare_exchange_entry {
 macro_rules! signal_fetch_entry {
     ($name:ident, $order:expr, $operation:ident) => {
         #[doc = concat!("Applies an atomic signal update through `", stringify!($name), "`.")]
-        #[cfg_attr(all(target_arch = "x86_64", not(test)), unsafe(export_name = concat!("__hsa_impl_", stringify!($name))))]
-        #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+        #[cfg_attr(all(hsa_tool_dispatch, not(test)), unsafe(export_name = concat!("__hsa_impl_", stringify!($name))))]
+        #[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
         pub unsafe extern "C" fn $name(signal: HsaSignal, value: SignalValue) {
             // SAFETY: The public entry point preserves the HSA signal contract.
             unsafe { signal_fetch_update(signal, value, $order, $operation, signal_plain!($operation)) };
@@ -430,10 +354,10 @@ signal_fetch_entry!(hsa_signal_xor_screlease, Ordering::Release, signal_xor);
 signal_fetch_entry!(hsa_signal_xor_release, Ordering::Release, signal_xor);
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_signal_value_pointer")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Returns a stable host pointer to an eligible signal value.
 pub unsafe extern "C" fn hsa_amd_signal_value_pointer(
     signal: HsaSignal,
@@ -472,10 +396,10 @@ pub unsafe extern "C" fn hsa_amd_signal_value_pointer(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_signal_get_event_id")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Writes the native event ID of an interrupt-backed signal.
 pub unsafe extern "C" fn hsa_amd_signal_get_event_id(
     signal: HsaSignal,

@@ -6,6 +6,7 @@ set(DEVCOMM_SOURCES
     src/devcomm/devcomm_v22907.cc
     src/devcomm/devcomm_v23000.cc
     src/devcomm/devcomm_v23100.cc
+    src/devcomm/devcomm_v23204.cc
 )
 
 # The devcomm headers (devcomm_v22902.h) are included as "devcomm_v22902.h" by

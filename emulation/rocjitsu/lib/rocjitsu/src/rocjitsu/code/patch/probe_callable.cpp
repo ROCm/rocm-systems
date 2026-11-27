@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/patch/probe_callable.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/analysis/liveness.h"
 #include "rocjitsu/code/file_io.h"
 #include "rocjitsu/code/patch/error_report.h"
 #include "rocjitsu/code/patch/probe_symbol.h"
@@ -30,8 +32,9 @@ namespace {
 // probe_symbol.cpp; both want the shared ELF visitor noted there.
 template <typename T>
 [[nodiscard]] bool read_pod(std::span<const uint8_t> image, uint64_t offset, T *out) {
-  if (!detail::fits_in_bounds(offset, sizeof(T), image.size()))
+  if (!detail::fits_in_bounds(offset, sizeof(T), image.size())) {
     return false;
+  }
   std::memcpy(out, image.data() + offset, sizeof(T));
   return true;
 }
@@ -64,10 +67,12 @@ template <typename T>
     }
     const bool is_rela = shdr.sh_type == SHT_RELA;
     const bool is_rel = shdr.sh_type == SHT_REL;
-    if (!is_rela && !is_rel)
+    if (!is_rela && !is_rel) {
       continue;
-    if (shdr.sh_info != 0 && shdr.sh_info != sym.section_index)
+    }
+    if (shdr.sh_info != 0 && shdr.sh_info != sym.section_index) {
       continue;
+    }
 
     const uint64_t entsize = is_rela ? sizeof(Elf64_Rela) : sizeof(Elf64_Rel);
     if (shdr.sh_entsize != 0 && shdr.sh_entsize != entsize) {
@@ -107,8 +112,8 @@ template <typename T>
 
 [[nodiscard]] bool is_call(const Instruction &inst) { return (inst.flags() & INDIRECT_CALL) != 0; }
 // Quick check for explicit scratch access: FLAT scratch_* and SMEM s_scratch_*.
-[[nodiscard]] bool is_scratch_access(std::string_view m) {
-  return m.starts_with("scratch_") || m.starts_with("s_scratch_");
+[[nodiscard]] bool is_scratch_access(const Instruction &inst) {
+  return inst.amdgpu_memory_addressing() == amdgpu::MemoryAddressing::Scratch;
 }
 // RDNA4 image instructions (VIMAGE / VSAMPLE). Their decoders do not name every
 // register they access: no address VGPR is reported, vdata is four registers
@@ -116,16 +121,25 @@ template <typename T>
 // an atomic's data is reported only as written, and a tfe status register is not
 // reported. The live-in and clobber analyses would get those registers wrong, so
 // admitting these instructions is deferred until the decoder models the fields.
-[[nodiscard]] bool is_unmodeled_image_access(rj_code_arch_t arch, std::string_view m) {
-  return arch == ROCJITSU_CODE_ARCH_RDNA4 && m.starts_with("image_");
+[[nodiscard]] bool is_unmodeled_image_access(rocjitsu::IsaFamily arch, const Instruction &inst) {
+  return arch == rocjitsu::IsaFamily::Rdna4 &&
+         inst.amdgpu_memory_addressing() == amdgpu::MemoryAddressing::Image;
 }
 
 } // namespace
 
+bool may_require_cdna5_valu_spacing(const Instruction &inst) {
+  // MATRIX_REGISTER_ACCESSES describes lane semantics, not every matrix family.
+  // Scaled WMMA pairs need the same admission boundary despite lacking the flag.
+  return (inst.flags() & MATRIX_REGISTER_ACCESSES) != 0 || inst.is_transcendental() ||
+         inst.mnemonic().starts_with("v_wmma_") || inst.mnemonic().starts_with("v_swmmac_");
+}
+
 RegisterSet arg_registers(const ProbeAbi &abi) {
   RegisterSet regs;
-  if (!is_valid_probe_abi(abi) || abi.num_arg_vgprs == 0)
+  if (!is_valid_probe_abi(abi) || abi.num_arg_vgprs == 0) {
     return regs;
+  }
   // Guarded above rather than left to expand(), which floors a zero width at one
   // and would report v[arg_vgpr_base] for a probe passed no arguments at all.
   regs.expand(RegisterRef{RegClass::VGPR, abi.arg_vgpr_base, abi.num_arg_vgprs});
@@ -137,8 +151,9 @@ RegisterSet supplied_registers(const ProbeAbi &abi) {
   // Report nothing rather than guess: a live-in subtraction that excused a
   // register this ABI never committed to writing would excuse the probe reading
   // it cold.
-  if (!is_valid_probe_abi(abi))
+  if (!is_valid_probe_abi(abi)) {
     return regs;
+  }
   regs.expand(probe_link_pair(abi));
   regs |= arg_registers(abi);
   return regs;
@@ -146,7 +161,7 @@ RegisterSet supplied_registers(const ProbeAbi &abi) {
 
 std::optional<ProbeCallable> build_probe_callable(const AmdGpuCodeObject &probe_obj,
                                                   const ResolvedProbeSymbol &sym,
-                                                  rj_code_arch_t arch, uint8_t num_arg_dwords,
+                                                  rocjitsu::IsaFamily arch, uint8_t num_arg_dwords,
                                                   std::string *error_out) {
   // Screened before the body is read so an unsupported count is reported as
   // such, rather than as whatever the body scan trips over first.
@@ -193,8 +208,9 @@ std::optional<ProbeCallable> build_probe_callable(const AmdGpuCodeObject &probe_
     report(error_out, "malformed ELF: section header table out of range");
     return std::nullopt;
   }
-  if (!body_has_relocation(image, ehdr, sym, &has_reloc, error_out))
+  if (!body_has_relocation(image, ehdr, sym, &has_reloc, error_out)) {
     return std::nullopt;
+  }
   if (has_reloc) {
     report(error_out, "probe body has a relocation and is not self-contained");
     return std::nullopt;
@@ -209,7 +225,7 @@ std::optional<ProbeCallable> build_probe_callable(const AmdGpuCodeObject &probe_
   const rj_code_target_id_t target = probe_obj.target_id();
   if (target != ROCJITSU_CODE_TARGET_INVALID) {
     const IsaTargetDescriptor *descriptor = registry.find(target);
-    if (descriptor == nullptr || descriptor->architecture_id != arch) {
+    if (descriptor == nullptr || descriptor->family != arch) {
       report(error_out, "probe code-object target does not match the requested architecture");
       return std::nullopt;
     }
@@ -221,11 +237,12 @@ std::optional<ProbeCallable> build_probe_callable(const AmdGpuCodeObject &probe_
     return std::nullopt;
   }
 
-  // Use strings to hold info between iterations (currently deleting inst)
-  std::string_view last_mnemonic;
-  std::string last_src0_name;
-  bool last_has_src0 = false;
+  // Keep value metadata after each decoded instruction is destroyed.
+  amdgpu::Operation last_operation = amdgpu::Operation::Unknown;
+  std::optional<RegisterRef> last_source;
   const std::span<const uint32_t> body(words);
+  const std::span<const uint8_t> body_bytes(reinterpret_cast<const uint8_t *>(words.data()),
+                                            words.size() * sizeof(uint32_t));
   size_t w = 0;
   while (w < num_words) {
     util::StringDiagnostic decode_error;
@@ -243,34 +260,52 @@ std::optional<ProbeCallable> build_probe_callable(const AmdGpuCodeObject &probe_
     std::unique_ptr<Instruction> inst = std::move(decoded).value();
     const size_t inst_words = static_cast<size_t>(inst->size()) / sizeof(uint32_t);
     const std::string_view m = inst->mnemonic();
-    if (arch == ROCJITSU_CODE_ARCH_CDNA5 &&
-        (m.starts_with("s_setreg") || m.starts_with("s_set_vgpr_msb"))) {
+    // Memory waits do not prove these producers complete before guest restores.
+    // Until return-path spacing is analyzed, reject them throughout the body.
+    if (inst->is_mfma() ||
+        (arch == rocjitsu::IsaFamily::Cdna5 && may_require_cdna5_valu_spacing(*inst))) {
+      const std::string message = "probe body contains " + std::string(m) +
+                                  " with unproven register completion before restoration";
+      report(error_out, message.c_str());
+      return std::nullopt;
+    }
+    const amdgpu::Operation operation = inst->amdgpu_operation();
+    if (arch == rocjitsu::IsaFamily::Cdna5 && (operation == amdgpu::Operation::S_SETREG_B32 ||
+                                               operation == amdgpu::Operation::S_SETREG_IMM32_B32 ||
+                                               operation == amdgpu::Operation::S_SET_VGPR_MSB)) {
       report(error_out, "probe body may change the VGPR bank state required by its call ABI");
+      return std::nullopt;
+    }
+    // SGPR restores also use vector instructions through the spill bridge.
+    // Widening EXEC cannot make those instructions execute while VSKIP is set.
+    if (may_enable_vskip(*inst, body_bytes, arch, w * sizeof(uint32_t))) {
+      report(error_out, "probe body may enable VSKIP and suppress the call envelope's restores");
       return std::nullopt;
     }
     if (is_call(*inst)) {
       report(error_out, "probe body contains a call and is not self-contained");
       return std::nullopt;
     }
-    if (is_scratch_access(m)) {
+    if (is_scratch_access(*inst)) {
       report(error_out, "probe body accesses scratch / private segment");
       return std::nullopt;
     }
-    if (is_unmodeled_image_access(arch, m)) {
+    if (is_unmodeled_image_access(arch, *inst)) {
       report(error_out, "probe body has an RDNA4 image instruction, whose registers the decoder "
                         "does not fully model");
       return std::nullopt;
     }
-    last_mnemonic = m;
+    last_operation = operation;
     const Operand *src0 = inst->src_operand(0);
-    last_has_src0 = src0 != nullptr;
-    last_src0_name = last_has_src0 ? src0->name() : std::string();
+    last_source = src0 != nullptr ? src0->to_register_ref() : std::nullopt;
     w += inst_words;
   }
 
   // Must return through the s[30:31] link pair
-  if ((last_mnemonic != "s_setpc_b64" && last_mnemonic != "s_set_pc_i64") || !last_has_src0 ||
-      last_src0_name != "s[30:31]") {
+  if ((last_operation != amdgpu::Operation::S_SETPC_B64 &&
+       last_operation != amdgpu::Operation::S_SET_PC_I64) ||
+      !last_source || last_source->cls != RegClass::SGPR || last_source->index != 30 ||
+      last_source->width != 2) {
     report(error_out, "probe body does not return via s_setpc_b64 s[30:31]");
     return std::nullopt;
   }

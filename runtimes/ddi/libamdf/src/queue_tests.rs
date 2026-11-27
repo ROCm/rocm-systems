@@ -322,6 +322,7 @@ fn native_transport() -> queue::QueueTransport {
         doorbell_host_address: 0x3000,
         doorbell_device_address: Some(0x5000),
         doorbell_width: QueueAccessWidth::Bits64,
+        host_publication: rocddi::device::gpu::queue::HostQueuePublication::Ordered64BitMmio,
     }
 }
 

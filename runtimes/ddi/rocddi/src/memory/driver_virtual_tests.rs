@@ -27,6 +27,7 @@ impl AddressSpaceInfo for State {
 }
 
 struct FakeDriver {
+    admission: crate::session::SessionAdmission,
     drops: Arc<Mutex<Vec<&'static str>>>,
 }
 
@@ -86,6 +87,10 @@ impl Drop for Mapping {
 
 impl Driver for FakeDriver {
     type DeviceState = State;
+
+    fn admission(&self) -> &crate::session::SessionAdmission {
+        &self.admission
+    }
 
     fn driver_instance(&self) -> DriverInstanceId {
         DriverInstanceId::TEST
@@ -254,6 +259,11 @@ fn owners(
 fn fork_child_drops_unmapped_virtual_owners_without_callbacks() -> Result<(), Error> {
     let drops = Arc::new(Mutex::new(Vec::new()));
     let driver = Shared::new(FakeDriver {
+        admission: crate::session::SessionAdmission::new(
+            crate::os::ProcessIdentity::capture().map_err(|source| {
+                crate::os::native_error("test session process identity", source)
+            })?,
+        ),
         drops: drops.clone(),
     })?;
     let (address, memory) = owners(&driver)?;
@@ -286,6 +296,11 @@ fn fork_child_drops_unmapped_virtual_owners_without_callbacks() -> Result<(), Er
 fn fork_child_drops_virtual_owners_without_inherited_callbacks() -> Result<(), Error> {
     let drops = Arc::new(Mutex::new(Vec::new()));
     let driver = Shared::new(FakeDriver {
+        admission: crate::session::SessionAdmission::new(
+            crate::os::ProcessIdentity::capture().map_err(|source| {
+                crate::os::native_error("test session process identity", source)
+            })?,
+        ),
         drops: drops.clone(),
     })?;
     let (mut address, mut memory) = owners(&driver)?;
@@ -353,6 +368,11 @@ fn fork_child_drops_virtual_owners_without_inherited_callbacks() -> Result<(), E
 #[allow(unsafe_code, clippy::unwrap_used)]
 fn fork_child_rejects_virtual_mapping_before_inherited_interval_lock() -> Result<(), Error> {
     let driver = Shared::new(FakeDriver {
+        admission: crate::session::SessionAdmission::new(
+            crate::os::ProcessIdentity::capture().map_err(|source| {
+                crate::os::native_error("test session process identity", source)
+            })?,
+        ),
         drops: Arc::new(Mutex::new(Vec::new())),
     })?;
     let (mut address, memory) = owners(&driver)?;
@@ -383,6 +403,51 @@ fn fork_child_rejects_virtual_mapping_before_inherited_interval_lock() -> Result
 }
 
 #[test]
+fn retiring_virtual_memory_rejects_mapping_and_keeps_unmap_retryable() -> Result<(), Error> {
+    let driver = Shared::new(FakeDriver {
+        admission: crate::session::SessionAdmission::new(
+            crate::os::ProcessIdentity::capture().map_err(|source| {
+                crate::os::native_error("test session process identity", source)
+            })?,
+        ),
+        drops: Arc::new(Mutex::new(Vec::new())),
+    })?;
+    let (mut address, mut memory) = owners(&driver)?;
+    let base = address.info().address;
+    let mut host = memory.map_host(&address, base, 0, 0x1000, DeviceAccess::READ)?;
+    let request = VirtualMapRequest {
+        address: base,
+        offset: 0,
+        size: 0x1000,
+        permissions: DeviceAccess::READ,
+    };
+    let mut device = memory.map_device(&driver, &State(1), &address, request)?;
+    driver.admission.begin_retirement()?;
+    assert!(matches!(
+        memory.map_host(&address, base + 0x1000, 0, 0x1000, DeviceAccess::READ),
+        Err(error) if error.kind() == ErrorKind::Unsupported
+    ));
+    assert!(matches!(
+        memory.map_device(&driver, &State(2), &address, request),
+        Err(error) if error.kind() == ErrorKind::Unsupported
+    ));
+    assert!(matches!(
+        DriverVirtualAddress::reserve(&driver, (0x1000, u64::MAX), 0x1000, 0x1000, 0),
+        Err(error) if error.kind() == ErrorKind::Unsupported
+    ));
+    assert!(matches!(
+        host.set_permissions(DeviceAccess::WRITE),
+        Err(error) if error.kind() == ErrorKind::Unsupported
+    ));
+    assert_eq!(host.free().unwrap_err().kind(), ErrorKind::Driver);
+    host.free()?;
+    device.free()?;
+    memory.free()?;
+    address.free()?;
+    Ok(())
+}
+
+#[test]
 #[allow(
     clippy::too_many_lines,
     reason = "one fake-driver lifecycle covers occupancy, retry, and owner drop order"
@@ -390,10 +455,20 @@ fn fork_child_rejects_virtual_mapping_before_inherited_interval_lock() -> Result
 fn fake_driver_preserves_mapping_occupancy_and_cleanup_order() -> Result<(), Error> {
     let drops = Arc::new(Mutex::new(Vec::new()));
     let driver = Shared::new(FakeDriver {
+        admission: crate::session::SessionAdmission::new(
+            crate::os::ProcessIdentity::capture().map_err(|source| {
+                crate::os::native_error("test session process identity", source)
+            })?,
+        ),
         drops: drops.clone(),
     })?;
     let (mut address, mut memory) = owners(&driver)?;
     let other_driver = Shared::new(FakeDriver {
+        admission: crate::session::SessionAdmission::new(
+            crate::os::ProcessIdentity::capture().map_err(|source| {
+                crate::os::native_error("test session process identity", source)
+            })?,
+        ),
         drops: Arc::new(Mutex::new(Vec::new())),
     })?;
     let (_, foreign_memory) = owners(&other_driver)?;

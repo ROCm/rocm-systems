@@ -45,7 +45,11 @@ template <int Lanes, typename Call> void check_half_fma_directed_flush(Call call
 // scalar model, not the model's agreement with hardware.
 template <int Width, int Lanes, bool Packed = false, typename Call>
 void check_fma_simd(Call call, const std::vector<uint64_t> &instruction_flag_cases,
-                    bool check_register_input_flush = true) {
+                    bool check_register_input_flush = true,
+                    const std::vector<uint64_t> &semantics_cases = {
+                        RJ_ARITH_SEMANTICS_LOOSE,
+                        RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS,
+                        RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL}) {
   using Mask = std::conditional_t<Lanes == 32, uint32_t, uint64_t>;
   const auto cpus = supported_cpu_levels();
   if (check_register_input_flush) {
@@ -102,9 +106,7 @@ void check_fma_simd(Call call, const std::vector<uint64_t> &instruction_flag_cas
             RJ_ARITH_FP_FLUSH_INPUT_DENORMALS, RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS,
             RJ_ARITH_FP16_OVFL,
             RJ_ARITH_FP_FLUSH_INPUT_DENORMALS | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS}) {
-        for (uint64_t semantics :
-             {RJ_ARITH_SEMANTICS_LOOSE, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS,
-              RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL}) {
+        for (uint64_t semantics : semantics_cases) {
           int aliasing_offset = (sample % 4) * 2;
           Mask exec_mask = sample % 3 ? ~Mask(0) : Mask(0xaaaaaaaaaaaaaaaaULL);
           Registers<10, Lanes> expected = input;

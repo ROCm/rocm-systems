@@ -17,6 +17,7 @@ TEST(CompareCmpEqF16W32Gfx11, Arithmetic) {
 
 // Check FP predicate masks, modifiers, aliases, and FP-status policy.
 TEST(CompareCmpEqF16W32Gfx12, Arithmetic) {
+  rocjitsu::arith::test::check_compatibility_compare<16, 32>(rj_arith_v_cmp_eq_f16_w32_gfx12);
   rocjitsu::arith::test::check_float_compare<16, 32>(
       rj_arith_v_cmp_eq_f16_w32_gfx12, /*gfx12=*/true, [](double a, double b) { return a == b; });
 }
@@ -123,6 +124,7 @@ TEST(CompareCmpEqF32W32Gfx11, Arithmetic) {
 
 // Check FP predicate masks, modifiers, aliases, and FP-status policy.
 TEST(CompareCmpEqF32W32Gfx12, Arithmetic) {
+  rocjitsu::arith::test::check_compatibility_compare<32, 32>(rj_arith_v_cmp_eq_f32_w32_gfx12);
   rocjitsu::arith::test::check_float_compare<32, 32>(
       rj_arith_v_cmp_eq_f32_w32_gfx12, /*gfx12=*/true, [](double a, double b) { return a == b; });
 }
@@ -229,6 +231,7 @@ TEST(CompareCmpEqF64W32Gfx11, Arithmetic) {
 
 // Check FP predicate masks, modifiers, aliases, and FP-status policy.
 TEST(CompareCmpEqF64W32Gfx12, Arithmetic) {
+  rocjitsu::arith::test::check_compatibility_compare<64, 32>(rj_arith_v_cmp_eq_f64_w32_gfx12);
   rocjitsu::arith::test::check_float_compare<64, 32>(
       rj_arith_v_cmp_eq_f64_w32_gfx12, /*gfx12=*/true, [](double a, double b) { return a == b; });
 }
@@ -335,6 +338,7 @@ TEST(CompareCmpEqF16W64Gfx11, Arithmetic) {
 
 // Check FP predicate masks, modifiers, aliases, and FP-status policy.
 TEST(CompareCmpEqF16W64Gfx12, Arithmetic) {
+  rocjitsu::arith::test::check_compatibility_compare<16, 64>(rj_arith_v_cmp_eq_f16_w64_gfx12);
   rocjitsu::arith::test::check_float_compare<16, 64>(
       rj_arith_v_cmp_eq_f16_w64_gfx12, /*gfx12=*/true, [](double a, double b) { return a == b; });
 }
@@ -441,6 +445,7 @@ TEST(CompareCmpEqF32W64Gfx11, Arithmetic) {
 
 // Check FP predicate masks, modifiers, aliases, and FP-status policy.
 TEST(CompareCmpEqF32W64Gfx12, Arithmetic) {
+  rocjitsu::arith::test::check_compatibility_compare<32, 64>(rj_arith_v_cmp_eq_f32_w64_gfx12);
   rocjitsu::arith::test::check_float_compare<32, 64>(
       rj_arith_v_cmp_eq_f32_w64_gfx12, /*gfx12=*/true, [](double a, double b) { return a == b; });
 }
@@ -547,6 +552,7 @@ TEST(CompareCmpEqF64W64Gfx11, Arithmetic) {
 
 // Check FP predicate masks, modifiers, aliases, and FP-status policy.
 TEST(CompareCmpEqF64W64Gfx12, Arithmetic) {
+  rocjitsu::arith::test::check_compatibility_compare<64, 64>(rj_arith_v_cmp_eq_f64_w64_gfx12);
   rocjitsu::arith::test::check_float_compare<64, 64>(
       rj_arith_v_cmp_eq_f64_w64_gfx12, /*gfx12=*/true, [](double a, double b) { return a == b; });
 }
@@ -643,4 +649,21 @@ TEST(CompareCmpxNeqF64W64Gfx12, Arithmetic) {
   rocjitsu::arith::test::check_float_compare<64, 64>(rj_arith_v_cmpx_neq_f64_w64_gfx12,
                                                      /*gfx12=*/true,
                                                      [](double a, double b) { return !(a == b); });
+}
+
+// Infinity in B enables cross-half denormal reporting without introducing INVALID.
+TEST(CompareCmpEqF32W64Gfx12, CompatibilityInfinityEnablesStatus) {
+  for (uint64_t cpu : rocjitsu::arith::test::supported_cpu_levels()) {
+    rocjitsu::arith::test::Registers<4, 64> r{};
+    r.v[0][0] = 1;
+    r.v[2][63] = 0x7f800000U;
+    uint32_t status = 0x80000040U;
+    uint64_t result = ~0ULL;
+    ASSERT_EQ(rj_arith_v_cmp_eq_f32_w64_gfx12(cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY,
+                                              0x8000000000000001ULL, RJ_ARITH_ALU_CLAMP, &result,
+                                              r.v, r.v + 2, &status),
+              RJ_ARITH_SUCCESS);
+    EXPECT_EQ(result, 0U);
+    EXPECT_EQ(status, 0x80000040U | RJ_ARITH_EXCEPTION_INPUT_DENORM);
+  }
 }

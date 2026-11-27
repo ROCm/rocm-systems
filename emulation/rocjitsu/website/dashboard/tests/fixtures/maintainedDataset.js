@@ -35,7 +35,7 @@ export function createMaintainedPublication() {
       schema_version: 1, publication: { id, workflow_commit_sha: 'a'.repeat(40), tensile_commit_sha: 'b'.repeat(40),
       source: { branch: 'develop', message: `FICTIONAL develop measurement ${index}` },
       trigger: index === 21 ? 'manual' : 'auto', machine_label: index < 16 ? 'fictional-node-a' : 'fictional-node-b' },
-      execution_summary: fixtureSummary(catalogs[testCatalog].benchmark_suite, iso(index, 5), index === 21 ? '2026-10-05T10:00:00.000Z' : iso(index)),
+      execution_summary: fixtureSummary(catalogs[testCatalog].benchmark_suite, index === 21 ? '2026-10-05T10:00:00.000Z' : iso(index)),
       provenance: fixtureProvenance(sha(index + 1), iso(index, 4), index < 16 ? 'test-a' : 'test-b'),
       benchmark_results: CONFIGURATION_KEYS.filter((key) => !(index === 12 && key === 'gfx950/default')).flatMap((key, configIndex) => {
         const [target, policy] = key.split('/');
@@ -54,11 +54,10 @@ export function createMaintainedPublication() {
     run.publication.source = { branch: `fictional/optimization-${String(index + 1).padStart(2, '0')}`, message: `FICTIONAL branch ${index + 1}`,
       ...(index % 2 === 0 ? { base: { branch: 'develop', commit: canonical[20].provenance.rocjitsu.rocjitsu_commit_sha }, pull_request: { number: 1000 + index } } : {}),
     };
-    run.execution_summary.finished_at = `2026-10-05T11:${String(index).padStart(2, '0')}:00.000Z`;
+    run.execution_summary.timestamp = `2026-10-05T11:${String(index).padStart(2, '0')}:00.000Z`;
     run.publication.trigger = 'manual';
     run.publication.machine_label = 'fictional-branch-node';
     run.provenance = fixtureProvenance(sha(100 + index), '2026-10-05T09:00:00.000Z', 'test-branch');
-    run.execution_summary.timestamp = '2026-10-05T10:00:00.000Z';
     if (index === 1) run.benchmark_results = run.benchmark_results.filter(({ thread_policy }) => thread_policy === 'single');
     if (index === 2) Object.assign(run.benchmark_results[0], { status: 'failed', timing_results_s: [], error: 'Fictional branch failure' });
     for (const result of run.benchmark_results) {

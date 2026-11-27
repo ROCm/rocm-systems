@@ -25,25 +25,20 @@ template <rocjitsu::arith::Unary Op, bool Half>
 int run(uint64_t flags, uint32_t mode, uint32_t *d, uint32_t raw) {
   const uint32_t known =
       RJ_ARITH_ALU_ABS_A | RJ_ARITH_ALU_NEG_A | RJ_ARITH_ALU_OMOD_MASK | RJ_ARITH_ALU_CLAMP;
-  constexpr bool supports_exact = !Half || rocjitsu::arith::half_unary_rcp_rsq_sqrt<Op>;
   if (int error = rocjitsu::arith::validate(flags, mode & ~known,
                                             RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
                                                 RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS)) {
     return error;
   }
-  if (!(supports_exact) &&
-      (flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
-    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
-  }
-  if constexpr (supports_exact) {
-    if (rocjitsu::arith::is_exact(flags)) {
-      if constexpr (Half) {
-        *d = rocjitsu::arith::half_unary_exact_value<Op>(flags, mode, uint16_t(raw));
-      } else {
-        *d = rocjitsu::arith::unary_exact_value<Op>(flags, mode, raw, false);
-      }
-      return RJ_ARITH_SUCCESS;
+  // Every FP32 and FP16 form has a hardware model: the VALU EXP/LOG F16 model also matches the
+  // gfx1201 V_S_EXP_F16/V_S_LOG_F16 captures.
+  if (rocjitsu::arith::is_exact(flags)) {
+    if constexpr (Half) {
+      *d = rocjitsu::arith::half_unary_exact_value<Op>(flags, mode, uint16_t(raw));
+    } else {
+      *d = rocjitsu::arith::unary_exact_value<Op>(flags, mode, raw, false);
     }
+    return RJ_ARITH_SUCCESS;
   }
   constexpr uint32_t sign = Half ? 0x8000 : 0x80000000, mag = sign - 1,
                      inf = Half ? 0x7c00 : 0x7f800000;
@@ -132,6 +127,33 @@ int run(uint64_t flags, uint32_t mode, uint32_t *d, uint32_t raw) {
   return RJ_ARITH_SUCCESS;
 }
 
+// Preserve the inherited gfx1250 model without claiming hardware-validated exactness.
+// Strict semantics reject before outputs; fallback semantics use the ordinary Loose path.
+template <rocjitsu::arith::Unary Op, bool Half>
+int run_gfx1250(uint64_t flags, uint64_t mode, uint32_t *d, uint32_t raw) {
+  const bool compatibility = (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY;
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  const uint64_t known =
+      RJ_ARITH_ALU_ABS_A | RJ_ARITH_ALU_NEG_A | RJ_ARITH_ALU_OMOD_MASK | RJ_ARITH_ALU_CLAMP;
+  if (int error = rocjitsu::arith::validate(flags, mode & ~known,
+                                            RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
+                                                RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS)) {
+    return error;
+  }
+  if ((flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+  }
+  if (compatibility) {
+    if constexpr (Half) {
+      *d = rocjitsu::arith::half_unary_exact_value<Op>(flags, uint32_t(mode), uint16_t(raw));
+    } else {
+      *d = rocjitsu::arith::unary_exact_value<Op>(flags, uint32_t(mode), raw, false);
+    }
+    return RJ_ARITH_SUCCESS;
+  }
+  return run<Op, Half>(flags & ~RJ_ARITH_SEMANTICS_MASK, uint32_t(mode), d, raw);
+}
+
 } // namespace
 
 // Compute base-two exponentiation.
@@ -158,7 +180,8 @@ int rj_arith_v_s_exp_f32(uint64_t flags, uint64_t instruction_flags, uint32_t *d
 // require it.
 int rj_arith_v_s_exp_f16(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
                          [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -195,7 +218,8 @@ int rj_arith_v_s_log_f32(uint64_t flags, uint64_t instruction_flags, uint32_t *d
 // require it.
 int rj_arith_v_s_log_f16(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
                          [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -320,4 +344,64 @@ int rj_arith_v_s_sqrt_f16(uint64_t flags, uint64_t instruction_flags, uint32_t *
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
   return run<rocjitsu::arith::Unary::Sqrt, true>(flags, instruction_flags, d, a);
+}
+
+// Evaluate gfx1250 EXP with inherited Compatibility or Loose arithmetic.
+int rj_arith_v_s_exp_f16_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                 uint32_t a, [[maybe_unused]] uint32_t *excp_flag_user) {
+  return run_gfx1250<rocjitsu::arith::Unary::Exp, true>(flags, instruction_flags, d, a);
+}
+
+// Evaluate gfx1250 EXP with inherited Compatibility or Loose arithmetic.
+int rj_arith_v_s_exp_f32_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                 uint32_t a, [[maybe_unused]] uint32_t *excp_flag_user) {
+  return run_gfx1250<rocjitsu::arith::Unary::Exp, false>(flags, instruction_flags, d, a);
+}
+
+// Evaluate gfx1250 LOG with inherited Compatibility or Loose arithmetic.
+int rj_arith_v_s_log_f16_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                 uint32_t a, [[maybe_unused]] uint32_t *excp_flag_user) {
+  return run_gfx1250<rocjitsu::arith::Unary::Log, true>(flags, instruction_flags, d, a);
+}
+
+// Evaluate gfx1250 LOG with inherited Compatibility or Loose arithmetic.
+int rj_arith_v_s_log_f32_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                 uint32_t a, [[maybe_unused]] uint32_t *excp_flag_user) {
+  return run_gfx1250<rocjitsu::arith::Unary::Log, false>(flags, instruction_flags, d, a);
+}
+
+// Evaluate gfx1250 RCP with inherited Compatibility or Loose arithmetic.
+int rj_arith_v_s_rcp_f16_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                 uint32_t a, [[maybe_unused]] uint32_t *excp_flag_user) {
+  return run_gfx1250<rocjitsu::arith::Unary::Rcp, true>(flags, instruction_flags, d, a);
+}
+
+// Evaluate gfx1250 RCP with inherited Compatibility or Loose arithmetic.
+int rj_arith_v_s_rcp_f32_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                 uint32_t a, [[maybe_unused]] uint32_t *excp_flag_user) {
+  return run_gfx1250<rocjitsu::arith::Unary::Rcp, false>(flags, instruction_flags, d, a);
+}
+
+// Evaluate gfx1250 RSQ with inherited Compatibility or Loose arithmetic.
+int rj_arith_v_s_rsq_f16_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                 uint32_t a, [[maybe_unused]] uint32_t *excp_flag_user) {
+  return run_gfx1250<rocjitsu::arith::Unary::Rsq, true>(flags, instruction_flags, d, a);
+}
+
+// Evaluate gfx1250 RSQ with inherited Compatibility or Loose arithmetic.
+int rj_arith_v_s_rsq_f32_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                 uint32_t a, [[maybe_unused]] uint32_t *excp_flag_user) {
+  return run_gfx1250<rocjitsu::arith::Unary::Rsq, false>(flags, instruction_flags, d, a);
+}
+
+// Evaluate gfx1250 SQRT with inherited Compatibility or Loose arithmetic.
+int rj_arith_v_s_sqrt_f16_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                  uint32_t a, [[maybe_unused]] uint32_t *excp_flag_user) {
+  return run_gfx1250<rocjitsu::arith::Unary::Sqrt, true>(flags, instruction_flags, d, a);
+}
+
+// Evaluate gfx1250 SQRT with inherited Compatibility or Loose arithmetic.
+int rj_arith_v_s_sqrt_f32_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                  uint32_t a, [[maybe_unused]] uint32_t *excp_flag_user) {
+  return run_gfx1250<rocjitsu::arith::Unary::Sqrt, false>(flags, instruction_flags, d, a);
 }
