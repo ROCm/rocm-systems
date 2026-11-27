@@ -3,6 +3,8 @@
 
 """Unit tests for the shared ML API marker wire format."""
 
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 
@@ -13,7 +15,9 @@ from ml_api_tracing.marker_format import (
     decode_marker_name,
     encode_args,
     encode_marker_name,
+    format_args_blob,
     parse_marker_function,
+    render_dtype_shape,
     split_operator_args,
     stacked_marker_function_cell,
 )
@@ -24,6 +28,30 @@ NATIVE_ENCODED_MARKER = (
     "aten::add%2F%25:n/a|seqNr=7|tid=11|ftid=13|ltid=17|scope=FUNCTION"
     "|args=(value=%25%7C%3B%0D%0A)|torch"
 )
+
+
+class FakeDType:
+    def __init__(self, name):
+        self._name = name
+
+    def __str__(self):
+        return self._name
+
+
+class RaisingShape:
+    dtype = "float32"
+
+    @property
+    def shape(self):
+        raise RuntimeError("shape unavailable")
+
+
+class RaisingDtype:
+    shape = (2, 3)
+
+    @property
+    def dtype(self):
+        raise ValueError("dtype unavailable")
 
 
 def test_encode_marker_name_wrap_chars():
@@ -282,3 +310,47 @@ def test_stacked_marker_function_cell_checks_only_legacy_first_token(
     function_value, expected
 ):
     assert stacked_marker_function_cell(function_value) == expected
+
+
+@pytest.mark.parametrize("dtype_name", ["torch.float32", "float32"])
+def test_render_dtype_shape_formats_dtype_and_two_dims(dtype_name):
+    obj = SimpleNamespace(shape=(2, 4), dtype=FakeDType(dtype_name))
+    assert render_dtype_shape(obj) == "float32[2x4]"
+
+
+def test_render_dtype_shape_joins_three_dims():
+    obj = SimpleNamespace(shape=(2, 3, 4), dtype=FakeDType("torch.float32"))
+    assert render_dtype_shape(obj) == "float32[2x3x4]"
+
+
+@pytest.mark.parametrize(
+    "obj",
+    [
+        SimpleNamespace(dtype="float32"),
+        SimpleNamespace(shape=(2, 4)),
+        RaisingShape(),
+        RaisingDtype(),
+    ],
+)
+def test_render_dtype_shape_returns_none_without_readable_metadata(obj):
+    assert render_dtype_shape(obj) is None
+
+
+def test_format_args_blob_empty_is_n_a():
+    assert format_args_blob([]) == "n/a"
+
+
+def test_format_args_blob_joins_two_parts():
+    assert (
+        format_args_blob(["float32[2x4]", "bias=float32[2x4]"])
+        == "(float32[2x4], bias=float32[2x4])"
+    )
+
+
+def test_format_args_blob_caps_then_encodes_pipe_and_percent():
+    blob = format_args_blob(["|" * 400 + "%" * 200])
+    assert blob.startswith("(")
+    assert blob.endswith("...)")
+    assert blob.count("%7C") == 400
+    assert "%25" in blob
+    assert "|" not in blob

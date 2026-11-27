@@ -137,29 +137,6 @@ def recorded_ranges(monkeypatch):
     assert active == []
 
 
-def test_format_wrap_args_renders_tensors_and_skips_non_tensors():
-    tensor = fake_tensor()
-    rendered = torch_backend.format_wrap_args(
-        (tensor, "skip"), {"bias": tensor, "flag": True}
-    )
-    assert rendered == "(float32[2x4], bias=float32[2x4])"
-    assert torch_backend.format_wrap_args((), {}) == "n/a"
-
-
-@pytest.mark.parametrize(
-    ("delimiter", "encoded"),
-    [
-        pytest.param("|", "%7C", id="pipe"),
-        pytest.param(";", "%3B", id="semicolon"),
-        pytest.param("%", "%25", id="percent"),
-    ],
-)
-def test_format_wrap_args_caps_raw_text_before_encoding(delimiter, encoded):
-    rendered = torch_backend.format_wrap_args((), {delimiter * 512: fake_tensor()})
-
-    assert rendered == "(" + encoded * 511 + "...)"
-
-
 def test_dispatcher_marker_name_for_aten_packet():
     packet = SimpleNamespace(_qualified_op_name="aten::addmm")
     func = SimpleNamespace(overloadpacket=packet)
@@ -406,6 +383,28 @@ def test_uninitialized_buffer_keeps_persistent_on_to(monkeypatch):
     assert moved.persistent is False
 
 
+def test_format_wrap_args_renders_tensors_and_skips_non_tensors():
+    tensor = fake_tensor()
+    rendered = torch_backend.format_wrap_args(
+        (tensor, "skip"), {"bias": tensor, "flag": True}
+    )
+    assert rendered == "(float32[2x4], bias=float32[2x4])"
+    assert torch_backend.format_wrap_args((), {}) == "n/a"
+
+
+@pytest.mark.parametrize(
+    ("delimiter", "encoded"),
+    [
+        pytest.param("|", "%7C", id="pipe"),
+        pytest.param(";", "%3B", id="semicolon"),
+        pytest.param("%", "%25", id="percent"),
+    ],
+)
+def test_format_wrap_args_caps_raw_text_before_encoding(delimiter, encoded):
+    rendered = torch_backend.format_wrap_args((), {delimiter * 512: fake_tensor()})
+    assert rendered == "(" + encoded * 511 + "...)"
+
+
 @pytest.mark.parametrize(
     ("value", "argument_kind"),
     [
@@ -416,7 +415,6 @@ def test_uninitialized_buffer_keeps_persistent_on_to(monkeypatch):
 def test_format_wrap_args_omits_unreadable_metadata(value, argument_kind):
     args = (value,) if argument_kind == "positional" else ()
     kwargs = {"tensor": value} if argument_kind == "keyword" else {}
-
     assert torch_backend.format_wrap_args(args, kwargs) == "n/a"
 
 

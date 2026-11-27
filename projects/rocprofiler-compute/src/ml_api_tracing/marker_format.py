@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from ml_api_tracing.constants import KNOWN_ML_API_BACKENDS, USER_REGION_BACKEND
 
 _MAX_ARGS_LEN = 512
+MAX_TENSOR_ARGUMENT_ITEMS = 32
 _STACKED_MARKER_WIRE = re.compile(r":#\d+@")
 
 
@@ -60,6 +61,28 @@ def cap_args(blob: str, max_len: int = _MAX_ARGS_LEN) -> str:
     balanced = blob.startswith("(") and blob.endswith(")")
     truncated = blob[:max_len]
     return truncated + ("...)" if balanced else "...")
+
+
+def format_args_blob(parts: List[str]) -> str:
+    """Join argument parts into a capped, encoded (a, b) marker blob,
+    or n/a if empty."""
+    if not parts:
+        return "n/a"
+    return encode_args(cap_args("(" + ", ".join(parts) + ")"))
+
+
+def render_dtype_shape(obj: object) -> Optional[str]:
+    """Return dtype[dims] for an object with shape and dtype, else None."""
+    try:
+        shape = getattr(obj, "shape", None)
+        dtype = getattr(obj, "dtype", None)
+        if shape is None or dtype is None:
+            return None
+        dims = "x".join(str(int(d)) for d in shape)
+        dt = str(dtype).replace("torch.", "")
+        return f"{dt}[{dims}]"
+    except Exception:
+        return None
 
 
 def decode_marker_name(name: str) -> str:

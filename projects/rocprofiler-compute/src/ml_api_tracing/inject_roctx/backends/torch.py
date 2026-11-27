@@ -25,11 +25,14 @@ from ml_api_tracing.inject_roctx.backends.torch_wraps import (
     EXTRA_STRUCTURAL_WRAPS,
     TENSOR_METHOD_WRAPS,
 )
-from ml_api_tracing.marker_format import cap_args, encode_args
+from ml_api_tracing.marker_format import (
+    MAX_TENSOR_ARGUMENT_ITEMS,
+    format_args_blob,
+    render_dtype_shape,
+)
 from utils.logger import console_log, console_warning
 
 _BACKEND_NAME = "torch"
-_MAX_TENSOR_ARGUMENT_ITEMS = 32
 
 
 _thread_local = threading.local()
@@ -100,29 +103,26 @@ DEEP_TENSOR_METHOD_WRAPS_ENV = "ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS"
 
 
 def format_wrap_args(args: Tuple[object, ...], kwargs: Dict[str, object]) -> str:
-    """Render readable tensor arguments and omit those with unreadable metadata.
+    """Render wrap args with readable shape and dtype as a marker blob.
 
-    Return 'n/a' when no tensor arguments can be rendered. Cap the raw text
-    before encoding marker delimiters.
+    Skip other objects. Return n/a when none remain.
     """
     items: List[str] = []
     for value in args:
-        if len(items) >= _MAX_TENSOR_ARGUMENT_ITEMS:
+        if len(items) >= MAX_TENSOR_ARGUMENT_ITEMS:
             break
-        rendered = _render_tensor(value)
+        rendered = render_dtype_shape(value)
         if rendered is None:
             continue
         items.append(rendered)
     for name, value in kwargs.items():
-        if len(items) >= _MAX_TENSOR_ARGUMENT_ITEMS:
+        if len(items) >= MAX_TENSOR_ARGUMENT_ITEMS:
             break
-        rendered = _render_tensor(value)
+        rendered = render_dtype_shape(value)
         if rendered is None:
             continue
         items.append(f"{name}={rendered}")
-    if not items:
-        return "n/a"
-    return encode_args(cap_args("(" + ", ".join(items) + ")"))
+    return format_args_blob(items)
 
 
 # Structural wrappers for entry points the ATen dispatcher does not record.
@@ -877,19 +877,6 @@ def inject_roctx_into_model() -> None:
         console_warning("ml api trace", f"Could not patch nn.Module.__call__: {exc}")
     if did_wrap:
         console_log("ml api trace", "Wrapped nn.Module forward() with ROCTX markers\n")
-
-
-def _render_tensor(obj: object) -> Optional[str]:
-    try:
-        shape = getattr(obj, "shape", None)
-        dtype = getattr(obj, "dtype", None)
-        if shape is None or dtype is None:
-            return None
-        dims = "x".join(str(int(d)) for d in shape)
-        dt = str(dtype).replace("torch.", "")
-        return f"{dt}[{dims}]"
-    except Exception:
-        return None
 
 
 def _marker_only_init_wrapper(name: str, backend: str = "") -> Callable[..., Any]:
