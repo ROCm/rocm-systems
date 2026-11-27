@@ -87,8 +87,9 @@ inline std::string legacy_atomic_mnemonic(const LegacyAtomicTargetCase &target,
 }
 
 // Literal opcode/operand/cache fixtures, independent of generated builders and
-// production displacement helpers. CDNA GLOBAL enables SVE and uses s[4:5];
-// FLAT uses its null scalar selector. MUBUF uses s[8:11], s7 and v[4:5].
+// production displacement helpers. CDNA GLOBAL clears SVE and uses s[4:5];
+// FLAT clears its unused SADDR field, matching LLVM-emitted encodings. MUBUF uses s[8:11], s7 and
+// v[4:5].
 inline std::array<uint32_t, 2> legacy_atomic_words(const LegacyAtomicTargetCase &target,
                                                    LegacyAtomicForm form, int32_t byte_offset = 4,
                                                    bool returning = true) {
@@ -97,7 +98,7 @@ inline std::array<uint32_t, 2> legacy_atomic_words(const LegacyAtomicTargetCase 
   const bool global = legacy_atomic_global(form);
   const bool compare = legacy_atomic_compare(form);
   const uint32_t word0 = buffer   ? (compare ? 0xe106f000u : 0xe10af000u)
-                         : global ? (compare ? 0xdf07a000u : 0xdf0ba000u)
+                         : global ? (compare ? 0xdf078000u : 0xdf0b8000u)
                                   : (compare ? 0xdf070000u : 0xdf0b0000u);
   const uint32_t return_mask = buffer ? 0x4000u : 0x10000u;
   const uint32_t mask = global ? 0x1fffu : 0xfffu;
@@ -105,7 +106,7 @@ inline std::array<uint32_t, 2> legacy_atomic_words(const LegacyAtomicTargetCase 
               (static_cast<uint32_t>(byte_offset) & mask),
           buffer   ? 0x07020204u
           : global ? 0x06040204u
-                   : 0x067f0204u};
+                   : 0x06000204u};
 }
 
 inline std::vector<uint8_t> make_legacy_atomic_sequence_elf(const LegacyAtomicTargetCase &target,
