@@ -2713,6 +2713,30 @@ TEST_F(InitMicrotest, CommFree_AfterCommAlloc_ReturnsSuccessAndFrees) {
   EXPECT_EQ(1, abortRef);
 }
 
+// rcclHostHierTeardown destroys host-hierarchical AllReduce's child comms, or aborts them, so commFree must hand it
+// every comm.
+TEST_F(InitMicrotest, CommFree_CallsHostHierTeardownOnce) {
+  InstallCommAllocSuccess();
+  ncclComm* comm = nullptr;
+  ASSERT_EQ(ncclSuccess, ncclCalloc(&comm, 1));
+  ASSERT_EQ(ncclSuccess, commAlloc(comm, /*parent=*/nullptr, /*ndev=*/8, /*rank=*/0));
+  uint32_t abortFlag = 0;
+  int abortRef = 2;  // >1 so commFree skips the abortFlag free-branch
+  comm->abortFlag = &abortFlag;
+  comm->abortFlagRefCount = &abortRef;
+  const ncclComm* const freed = comm;
+  const ncclComm* tornDown = nullptr;
+  ScopedHook teardown(g_hostHierTeardown, [&](ncclComm* c) {
+    tornDown = c;
+    c->hostHier = nullptr;
+    return ncclSuccess;
+  });
+
+  EXPECT_EQ(ncclSuccess, commFree(comm));  // frees comm; do not touch it afterwards
+  EXPECT_EQ(1, teardown.calls);
+  EXPECT_EQ(freed, tornDown);
+}
+
 // See the comment at the ncclProfilerThreadDestroy call site in src/init.cc.
 TEST_F(InitMicrotest, CommFree_StopsProfilerThreadBeforeFreeingTheBuffersItPolls) {
   InstallCommAllocSuccess();
