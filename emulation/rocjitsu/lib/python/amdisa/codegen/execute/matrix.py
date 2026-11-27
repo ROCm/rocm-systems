@@ -585,7 +585,7 @@ def gen_mfma(ctx: ExecuteContext) -> str:
         )
         L.append(f'  amdgpu::arith::exec_dense_fp_matrix<8, {M*M//64}, 64>(')
         L.append(
-            f'      wf, rj_arith_v_mfma_f32_{M}x{N}x{K}_f8f6f4_w64, cu.arithmetic_flags(), controls, dst, {src0_base_expr}, {src1_base_expr}, s2,'
+            f'      wf, rj_arith_v_mfma_f32_{M}x{N}x{K}_f8f6f4_w64, cu.arithmetic_flags() | (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0), controls, dst, {src0_base_expr}, {src1_base_expr}, s2,'
         )
         L.append(
             f'      !{s2}.decoded_vgpr() ? std::optional<uint32_t>(const_acc) : std::nullopt,'

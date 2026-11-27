@@ -20298,6 +20298,79 @@ TEST(ArithBridgeTest, OlderFp32FmaMadQualification) {
     }
   }
 }
+
+// Decoded CDNA4 MXFP unscaled & block-scaled MFMA execution in BitExactEmpirical,
+// including guest MODE.FP16_OVFL forwarding on both unscaled and scaled forms.
+TEST(ArithBridgeTest, Cdna4MxfpMfmaExactAndFp16Ovfl) {
+  for (bool ovfl : {false, true}) {
+    const uint32_t mode = ovfl ? (1U << 23) : 0U; // MODE.FP16_OVFL is bit 23 on GFX9.
+
+    // 1) Decoded unscaled v_mfma_f32_16x16x128_f8f6f4 (FP4 x FP8, MI350X-captured row 0 col 3):
+    //    ovfl=0 -> 0xffc00000u, ovfl=1 -> 0x41340000u (11.25f).
+    {
+      ArithmeticPolicy policy{};
+      policy.semantics = ArithmeticSemantics::BitExactEmpirical;
+      BridgeFixture fixture(rocjitsu::IsaFamily::Cdna4, 64, policy);
+      ASSERT_NE(fixture.wave, nullptr);
+      fixture.wave->set_mode_raw(mode);
+      constexpr uint32_t kAFp4[16] = {0x7f800000u, 0x3f801fffu, 0x7f800001u, 0x3f800000u,
+                                      0xff7fe000u, 0x7f801fffu, 0x7f800001u, 0x00000001u,
+                                      0xff7fe000u, 0x7f800001u, 0xff7fe000u, 0x7f800000u,
+                                      0x7f800001u, 0x7f800001u, 0x80000000u, 0x7f802000u};
+      constexpr uint32_t kBFp8[32] = {
+          0xbf802000u, 0x00000001u, 0x3f801000u, 0x80000000u, 0x7f7fe000u, 0x3f801000u, 0xff7fe000u,
+          0x3f801fffu, 0x7fc04000u, 0x3f801000u, 0xff800000u, 0x7f801fffu, 0xff7fe000u, 0x7f7fe000u,
+          0x3f801fffu, 0x00000001u, 0x3f801fffu, 0x3f800000u, 0x7f802000u, 0x00000000u, 0x00000001u,
+          0x7f801fffu, 0x3f800000u, 0x3f801fffu, 0x7f801fffu, 0x7f800000u, 0xff7fe000u, 0x7f7fe000u,
+          0xbf802000u, 0x3f800000u, 0x00000001u, 0x3f800000u};
+      for (int g = 0; g < 4; ++g) {
+        for (int r = 0; r < 4; ++r) {
+          fixture.cu->write_vgpr(fixture.base() + r, g * 16 + 0, kAFp4[g * 4 + r]);
+        }
+        for (int r = 0; r < 8; ++r) {
+          fixture.cu->write_vgpr(fixture.base() + 8 + r, g * 16 + 3, kBFp8[g * 8 + r]);
+        }
+      }
+      fixture.cu->write_vgpr(fixture.base() + 16, 3, 0x7f7fffffu);
+      const auto words = cdna4::build_vop3p_mfma(
+          cdna4::kVMfmaF3216x16x128F8f6f4Vop3pMfma,
+          {.vdst = 20, .cbsz = 4, .src0 = 256, .src1 = 264, .src2 = 272, .blgp = 0});
+      auto inst = fixture.decoder->decode_window(words);
+      ASSERT_TRUE(inst.succeeded());
+      ASSERT_TRUE(fixture.cu->execute_instruction(inst.value().get(), *fixture.wave).succeeded());
+      EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 20, 3), ovfl ? 0x41340000u : 0xffc00000u);
+    }
+
+    // 2) Decoded block-scaled v_mfma_scale_f32_16x16x128_f8f6f4 (FP4 x FP4):
+    //    row 0 col 0 overflows finite sum at scale 0xfe*0x7f -> +Inf (ovfl=0) / +MAX_FLOAT
+    //    (ovfl=1), and row 0 col 1 with C=qNaN (0x7ffffff0) -> 0xffc00000u (ovfl=0) / +0.0
+    //    (ovfl=1).
+    {
+      ArithmeticPolicy policy{};
+      policy.semantics = ArithmeticSemantics::BitExactEmpirical;
+      BridgeFixture fixture(rocjitsu::IsaFamily::Cdna4, 64, policy);
+      ASSERT_NE(fixture.wave, nullptr);
+      fixture.wave->set_mode_raw(mode);
+      for (int r = 0; r < 4; ++r) {
+        fixture.cu->write_vgpr(fixture.base() + r, 0, 0x77777777u);      // FP4 +6.0
+        fixture.cu->write_vgpr(fixture.base() + 16 + r, 0, 0x77777777u); // FP4 +6.0
+      }
+      fixture.cu->write_vgpr(fixture.base() + 32, 0, 0x7f7fffffu);
+      fixture.cu->write_vgpr(fixture.base() + 32, 1, 0x7ffffff0u);
+      for (int lane = 0; lane < 64; ++lane) {
+        fixture.cu->write_vgpr(fixture.base() + 96, lane, 0xfeu);
+        fixture.cu->write_vgpr(fixture.base() + 97, lane, 0x7fu);
+      }
+      constexpr std::array<uint32_t, 4> scale_words = {0xD3AC0000u, 0x0002C360u, 0xD3AD0C40u,
+                                                       0x84822100u};
+      auto inst = fixture.decoder->decode_window(scale_words);
+      ASSERT_TRUE(inst.succeeded());
+      ASSERT_TRUE(fixture.cu->execute_instruction(inst.value().get(), *fixture.wave).succeeded());
+      EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 64, 0), ovfl ? 0x7f7fffffu : 0x7f800000u);
+      EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 64, 1), ovfl ? 0x00000000u : 0xffc00000u);
+    }
+  }
+}
 } // namespace
 
 } // namespace rocjitsu::amdgpu
