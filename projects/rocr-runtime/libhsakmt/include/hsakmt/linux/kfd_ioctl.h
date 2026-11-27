@@ -1062,6 +1062,11 @@ struct kfd_ioctl_alloc_memory_of_gpu_args {
 	__u32 flags;
 };
 
+/* Upgrade an already registered userptr BO from read-only to read/write. */
+struct kfd_ioctl_upgrade_userptr_writable_args {
+	__u64 handle;		/* to KFD */
+};
+
 /* Free memory allocated with kfd_ioctl_alloc_memory_of_gpu
  *
  * @handle: memory handle returned by alloc
@@ -1826,8 +1831,11 @@ struct kfd_ioctl_create_process_args {
 #define AMDKFD_IOC_CREATE_PROCESS		\
 		AMDKFD_IOWR(0x27, struct kfd_ioctl_create_process_args)
 
+#define AMDKFD_IOC_UPGRADE_USERPTR_WRITABLE	\
+		AMDKFD_IOW(0x29, struct kfd_ioctl_upgrade_userptr_writable_args)
+
 #define AMDKFD_COMMAND_START		0x01
-#define AMDKFD_COMMAND_END		0x28
+#define AMDKFD_COMMAND_END		0x2A
 
 /* non-upstream ioctls */
 #define AMDKFD_IOC_IPC_IMPORT_HANDLE                                    \
