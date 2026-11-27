@@ -1033,6 +1033,14 @@ rocprofsys_init_hidden(const char* _mode, bool _is_binary_rewrite, const char* _
         }
         if(state::process::get() == state::process::Active)
         {
+            // The instrumenter passes an empty name, so no region has this name and
+            // there is nothing to pop. When main() ends with a tail call, this runs from
+            // a thread-local destructor, after the thread's region cache is destroyed.
+            if(_argv0_c && *_argv0_c == '\0')
+            {
+                LOG_DEBUG("Skipping rocprofsys_pop_trace: no program name was provided");
+                return;
+            }
             auto _name = _argv0_c ? std::string{ _argv0_c } : config::get_exe_name();
             // if main hasn't been popped yet, pop it
             LOG_DEBUG("Running rocprofsys_pop_trace({})...", _name);

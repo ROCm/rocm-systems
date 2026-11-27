@@ -419,6 +419,104 @@ class TestMinimal(RocprofsysTest):
             rules_files=pthreads_rules,
         )
 
+    @pytest.mark.parametrize("mode", ["binary_rewrite", "runtime_instrument"])
+    @pytest.mark.parametrize(
+        "target, run_args, has_tail_call, has_other_exit, check_perfetto",
+        [
+            # main() only ends with a jmp to another function in the executable.
+            pytest.param("minimal-tail-call-main", [], True, False, True, id="tail-call"),
+            # main() only ends with a jmp through the PLT into a shared library.
+            pytest.param(
+                "minimal-tail-call-main-shared", [], True, False, False, id="shared"
+            ),
+            # main() only ends with a call to exit(), which is not a tail call.
+            pytest.param("minimal-exit-in-main", [], False, True, True, id="exit"),
+            # main() has a tail call, a ret and a call to exit(). Each run takes a
+            # different path, so each kind of exit point is the one executed once.
+            pytest.param("minimal-mixed-main-end", [], True, True, True, id="mixed-ret"),
+            pytest.param(
+                "minimal-mixed-main-end",
+                ["tail"],
+                True,
+                True,
+                True,
+                id="mixed-tail-call",
+            ),
+            pytest.param(
+                "minimal-mixed-main-end",
+                ["exit", "now"],
+                True,
+                True,
+                True,
+                id="mixed-exit",
+            ),
+        ],
+    )
+    def test_main_end(
+        self,
+        rocprof_config,
+        mode,
+        target,
+        run_args,
+        has_tail_call,
+        has_other_exit,
+        check_perfetto,
+    ):
+        """
+        A tail call at the end of main() is reported as an exit point, but main()
+        has not finished there. Finalizing at that jmp ended the session before the
+        workload ran, so the tail calls must be skipped. Every other exit point, such
+        as a ret or a call to exit(), is a real end of main() and must be kept. When
+        no exit point is left, the profiler falls back to a finalize callback on the
+        objects. Whichever way main() ends, the session is finalized after the
+        workload.
+        """
+        instrument_args = ["--min-instructions", "0", "-v", "1"]
+        skipped_tail_call = r"Skipping exit point at .* is a tail call"
+        kept_exit_points = r"Adding main exit snippets"
+        fallback = r"Main has no exit point besides tail calls"
+
+        instrument_pass_regex = []
+        instrument_fail_regex = []
+        for expected, pattern in (
+            (has_tail_call, skipped_tail_call),
+            (has_other_exit, kept_exit_points),
+            (not has_other_exit, fallback),
+        ):
+            (instrument_pass_regex if expected else instrument_fail_regex).append(pattern)
+
+        result = self.run_test(
+            mode,
+            target,
+            run_args=run_args,
+            env={
+                "ROCPROFSYS_LOG_LEVEL": "info",
+                # The rewritten executable is written to the output directory, away
+                # from the shared library it loads from the examples directory.
+                "LD_LIBRARY_PATH": ":".join(
+                    [str(rocprof_config.rocprofsys_examples_dir), self.library_path]
+                ),
+            },
+            binary_rewrite_args=instrument_args,
+            runtime_instrument_args=instrument_args,
+        )
+        self.assert_regex(
+            result,
+            pass_regex=[*instrument_pass_regex, r"workload end.*Finalizing rocprof-sys"],
+            fail_regex=[
+                *instrument_fail_regex,
+                r"Finalizing rocprof-sys.*workload begin",
+            ],
+        )
+
+        if check_perfetto:
+            self.assert_perfetto(
+                result,
+                subtest_name="Perfetto Workload Validation",
+                categories=["host"],
+                pass_regex=[r"run_workload\s+\|\s+1\s+\|"],
+            )
+
     SLEEP_ITERATIONS = 60
 
     def _run_sleep_interrupts(self, env_overrides: dict[str, str]):

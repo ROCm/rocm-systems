@@ -1117,6 +1117,43 @@ filter_modules(std::vector<module_t*> const* app_modules)
     return _result;
 }
 
+std::vector<point_t*>
+filter_tail_call_points(std::vector<point_t*> const* exit_points)
+{
+    auto kept_points = std::vector<point_t*>{};
+    if(!exit_points)
+    {
+        return kept_points;
+    }
+
+    for(auto* point : *exit_points)
+    {
+        if(!point)
+        {
+            continue;
+        }
+
+        // getInsnAtPoint() is only valid for instruction points, not for function exit
+        // points. Dyninst places an exit point at the last instruction of its block.
+        auto  insns = std::vector<instruction_t>{};
+        auto* block = point->getBlock();
+        if(block && block->getInstructions(insns))
+        {
+            auto category = insns.back().getCategory();
+            if(category == Dyninst::InstructionAPI::c_BranchInsn)
+            {
+                verbprintf(1, "Skipping exit point at %p: %s is a tail call\n",
+                           point->getAddress(), std::to_string(category).c_str());
+                continue;
+            }
+        }
+
+        kept_points.emplace_back(point);
+    }
+
+    return kept_points;
+}
+
 //======================================================================================//
 //
 //  Fetches procedures/modules from the given modules/objects. Assumes modules have
