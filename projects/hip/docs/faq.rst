@@ -34,8 +34,8 @@ and :ref:`rocm-install-on-windows:supported-skus-win`.
 What libraries does HIP provide?
 --------------------------------
 
-HIP provides key math and AI libraries. See :doc:`rocm:reference/api-libraries`
-for the full list.
+HIP provides key math and AI libraries. See
+:doc:`ROCm Core SDK components <rocm:components/core>` for the full list.
 
 What CUDA features can be ported to HIP?
 -----------------------------------------------
