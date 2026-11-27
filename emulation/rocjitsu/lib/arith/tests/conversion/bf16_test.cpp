@@ -16,9 +16,19 @@ using namespace rocjitsu::arith::test;
 
 // Quantize the discarded low word independently of the production packed addition.
 // Special encodings and the SR subnormal convention are inherited from util/data_types.h.
-uint32_t narrow_reference(uint32_t raw, uint32_t seed, bool sr, bool saturate) {
+uint32_t narrow_reference(uint32_t raw, uint32_t seed, bool sr, bool saturate, bool gfx950 = false,
+                          bool flush_in = false) {
+  if (gfx950 && flush_in && (raw & 0x7f800000U) == 0) {
+    raw &= 0x80000000U;
+  }
   uint32_t top = raw >> 16, tail = raw & 0xffff, magnitude = raw & 0x7fffffff;
   if (magnitude >= 0x7f800000) {
+    if (gfx950) {
+      if (magnitude > 0x7f800000) {
+        return top | 0x0040U;
+      }
+      return sr && saturate ? (top & 0x8000U) | 0x7f7fU : top;
+    }
     if (sr && magnitude > 0x7f800000) {
       return top | 0x7fff;
     }
@@ -35,8 +45,55 @@ uint32_t narrow_reference(uint32_t raw, uint32_t seed, bool sr, bool saturate) {
   return saturate && (top & 0x7fff) == 0x7f80 ? (top & 0x8000) | 0x7f7f : top;
 }
 
-// Exercise one inherited BF16 instruction using shared deterministic operands.
-template <int Lanes, int Op, typename Call> void check(Call call) {
+uint32_t widen_gfx950_reference(uint32_t raw, uint64_t flags, uint32_t mode) {
+  uint32_t effective = conversion_effective_mode(flags, mode, false);
+  uint32_t x = (raw >> (effective & RJ_ARITH_ALU_HIGH_A ? 16 : 0)) << 16;
+  if (effective & RJ_ARITH_ALU_ABS_A) {
+    x &= 0x7fffffffU;
+  }
+  if (effective & RJ_ARITH_ALU_NEG_A) {
+    x ^= 0x80000000U;
+  }
+  if ((flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS) && (x & 0x7f800000U) == 0) {
+    x &= 0x80000000U;
+  }
+  uint32_t mag = x & 0x7fffffffU;
+  if (mag > 0x7f800000U) {
+    if ((effective & RJ_ARITH_ALU_CLAMP) && !(flags & RJ_ARITH_FP_DX10_CLAMP_OFF)) {
+      return 0U;
+    }
+    return x | 0x00400000U;
+  }
+  unsigned omod = (effective >> 6) & 3U;
+  if (omod && mag < 0x7f800000U) {
+    unsigned exp = mag >> 23;
+    if (exp == 0) {
+      x = 0U;
+    } else if (omod == 3) {
+      x = exp == 1 ? (x & 0x80000000U) : (x - 0x00800000U);
+    } else if (exp + omod >= 255) {
+      unsigned rnd = unsigned((flags >> 24) & 3U);
+      bool inf = rnd == 0 || rnd == ((x >> 31) ? 2U : 1U);
+      x = (x & 0x80000000U) | (inf ? 0x7f800000U : 0x7f7fffffU);
+    } else {
+      x += omod << 23;
+    }
+  }
+  if (effective & RJ_ARITH_ALU_CLAMP) {
+    if ((x & 0x80000000U) || (x & 0x7fffffffU) == 0) {
+      x = 0U;
+    } else if ((x & 0x7fffffffU) > 0x3f800000U) {
+      x = 0x3f800000U;
+    }
+  }
+  if ((flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) && (x & 0x7f800000U) == 0) {
+    x &= 0x80000000U;
+  }
+  return x;
+}
+
+// Exercise one BF16 instruction using shared deterministic operands.
+template <int Lanes, int Op, bool Gfx950 = false, typename Call> void check(Call call) {
   auto input = conversion_inputs<Lanes>(32);
   const uint32_t edges[] = {0x00000001U, 0x80000001U, 0x007fffffU, 0x807fffffU,
                             0x3f808000U, 0x3f818000U, 0x7f7fffffU, 0xff7fffffU,
@@ -57,6 +114,12 @@ template <int Lanes, int Op, typename Call> void check(Call call) {
                   (Op == 0   ? RJ_ARITH_ALU_HIGH_A
                    : Op == 2 ? RJ_ARITH_ALU_HIGH_D
                              : 0);
+  uint64_t guest_flags =
+      Gfx950 ? (Op == 0 ? RJ_ARITH_FP_FLUSH_INPUT_DENORMALS | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS |
+                              RJ_ARITH_FP_IEEE_MODE | RJ_ARITH_FP_DX10_CLAMP_OFF |
+                              RJ_ARITH_FP_ROUND_MASK
+                        : RJ_ARITH_FP_FLUSH_INPUT_DENORMALS)
+             : 0;
   check_conversion<Lanes,
                    Op == 0   ? 1
                    : Op == 3 ? 3
@@ -65,6 +128,9 @@ template <int Lanes, int Op, typename Call> void check(Call call) {
       call, input,
       [](uint64_t a, uint32_t b, uint32_t c, uint32_t old, uint64_t flags, uint32_t mode) {
         if constexpr (Op == 0) {
+          if constexpr (Gfx950) {
+            return widen_gfx950_reference(uint32_t(a), flags, mode);
+          }
           return uint32_t(a >> (mode & RJ_ARITH_ALU_HIGH_A ? 16 : 0)) << 16;
         }
         if constexpr (Op == 1 || Op == 2) {
@@ -84,15 +150,19 @@ template <int Lanes, int Op, typename Call> void check(Call call) {
           }
         }
         bool saturate = flags & RJ_ARITH_FP16_OVFL;
+        bool flush_in = flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
         if constexpr (Op == 2) {
           int shift = mode & RJ_ARITH_ALU_HIGH_D ? 16 : 0;
           return (old & ~(0xffffU << shift)) |
-                 (narrow_reference(uint32_t(a), b, true, saturate) << shift);
+                 (narrow_reference(uint32_t(a), b, true, saturate, Gfx950, flush_in) << shift);
         }
-        return narrow_reference(uint32_t(a), Op == 3 ? c << 16 : 0, Op == 3, saturate) |
-               (narrow_reference(b, Op == 3 ? c & 0xffff0000U : 0, Op == 3, saturate) << 16);
+        return narrow_reference(uint32_t(a), Op == 3 ? c << 16 : 0, Op == 3, saturate, Gfx950,
+                                flush_in) |
+               (narrow_reference(b, Op == 3 ? c & 0xffff0000U : 0, Op == 3, saturate, Gfx950,
+                                 flush_in)
+                << 16);
       },
-      conversion_bits, mode, true, 0, Op == 0 ? RJ_ARITH_CVT_SDWA : 0);
+      conversion_bits, mode, true, guest_flags, Op == 0 ? RJ_ARITH_CVT_SDWA : 0);
 }
 } // namespace
 
@@ -143,4 +213,28 @@ TEST(ConversionBf16WidenW64, SdwaOutput) {
       }
     }
   }
+}
+
+TEST(ConversionBf16WidenW32Gfx950, Arithmetic) {
+  check<32, 0, true>(rj_arith_v_cvt_f32_bf16_w32_gfx950);
+}
+
+TEST(ConversionBf16WidenW64Gfx950, Arithmetic) {
+  check<64, 0, true>(rj_arith_v_cvt_f32_bf16_w64_gfx950);
+}
+
+TEST(ConversionBf16PackW32Gfx950, Arithmetic) {
+  check<32, 1, true>(rj_arith_v_cvt_pk_bf16_f32_w32_gfx950);
+}
+
+TEST(ConversionBf16PackW64Gfx950, Arithmetic) {
+  check<64, 1, true>(rj_arith_v_cvt_pk_bf16_f32_w64_gfx950);
+}
+
+TEST(ConversionBf16StochasticW32Gfx950, Arithmetic) {
+  check<32, 2, true>(rj_arith_v_cvt_sr_bf16_f32_w32_gfx950);
+}
+
+TEST(ConversionBf16StochasticW64Gfx950, Arithmetic) {
+  check<64, 2, true>(rj_arith_v_cvt_sr_bf16_f32_w64_gfx950);
 }

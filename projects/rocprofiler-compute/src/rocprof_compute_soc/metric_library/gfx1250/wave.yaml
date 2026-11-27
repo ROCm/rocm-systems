@@ -15,7 +15,7 @@ wave.life:
   description: Average wavefront lifetime in cycles.
 wave.occupancy:
   name: Wavefront Occupancy
-  formula: SUM(SQG_WAVE_CYCLES_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+  formula: SUM(SQG_WAVE_CYCLES_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
   unit: Wavefronts
   description: Average number of wavefronts in flight on GPU.
   peak: $max_waves_per_cu * $cu_per_gpu

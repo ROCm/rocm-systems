@@ -172,14 +172,22 @@ TEST(ConversionPackB32F16W64Gfx942, Arithmetic) {
   check_pack<64, false, true>(rj_arith_v_pack_b32_f16_w64_gfx942);
 }
 
-// gfx950 inherits the RDNA3/gfx942 packing model but stays loose-only until gfx950 captures are
-// reviewed.
+// gfx950 shares the RDNA3/gfx942 packing model and matches MI350X captures.
 TEST(ConversionPackB32F16W32Gfx950, Arithmetic) {
-  check_pack<32, false, false>(rj_arith_v_pack_b32_f16_w32_gfx950);
+  check_pack<32, false, true>(rj_arith_v_pack_b32_f16_w32_gfx950);
 }
 
 TEST(ConversionPackB32F16W64Gfx950, Arithmetic) {
-  check_pack<64, false, false>(rj_arith_v_pack_b32_f16_w64_gfx950);
+  check_pack<64, false, true>(rj_arith_v_pack_b32_f16_w64_gfx950);
+}
+
+// gfx10/gfx115x/gfx908/gfx90a share the RDNA3 packing model via loose-only _gfx10 wrappers.
+TEST(ConversionPackB32F16W32Gfx10, Arithmetic) {
+  check_pack<32, false, false>(rj_arith_v_pack_b32_f16_w32_gfx10);
+}
+
+TEST(ConversionPackB32F16W64Gfx10, Arithmetic) {
+  check_pack<64, false, false>(rj_arith_v_pack_b32_f16_w64_gfx10);
 }
 
 // gfx1250 inherits the gfx12 packing model, including its NaN quieting, but stays loose-only

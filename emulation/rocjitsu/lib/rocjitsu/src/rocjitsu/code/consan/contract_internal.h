@@ -8,6 +8,11 @@
 
 namespace rocjitsu::consan::wire {
 
+constexpr uint64_t kFlatExclusionWireBytes = 20;
+constexpr uint64_t flat_exclusion_table_bytes(uint64_t count) {
+  return count == 0 ? 0 : 4 + count * kFlatExclusionWireBytes;
+}
+
 void encode_identity(Encoder &encoder, const ImageIdentity &identity);
 bool decode_identity(Decoder &decoder, ImageIdentity &identity);
 void encode_entry(Encoder &encoder, const EntryFacts &entry);

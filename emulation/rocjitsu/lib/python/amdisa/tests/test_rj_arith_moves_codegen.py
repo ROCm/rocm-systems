@@ -106,7 +106,7 @@ def test_all_move_and_selection_encodings_route_to_rj_arith(arch):
     assert count == 20  # Six scalar methods, eight MOV and six CNDMASK methods.
 
 
-@pytest.mark.parametrize('arch', ['cdna3', 'cdna4'])
+@pytest.mark.parametrize('arch', ['cdna1', 'cdna2', 'cdna3', 'cdna4'])
 def test_accumulator_moves_reuse_raw_word_copy(arch):
     from amdisa.codegen.execute.rj_arith_vector import ACCUMULATOR_MOVES
 
@@ -114,5 +114,3 @@ def test_accumulator_moves_reuse_raw_word_copy(arch):
         body = gen_vector32(context(arch, name, ['acc_dst'], ['acc_src'], is_vop3=True))
         assert 'execute_move32(*this, wf, acc_dst, acc_src)' in body
         assert 'inst_.' not in body
-        assert gen_vector32(context('cdna2', name, ['d'], ['a'])) is None
-        assert gen_vector32(context('cdna2', name, ['d'], ['a'])) is None

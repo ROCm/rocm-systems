@@ -7,7 +7,22 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Added
 
+* Added LDS arithmetic intensity points to the gfx1250 roofline.
+
+* Added GPU metrics, the Memory Chart and the roofline for gfx1200.
+  * gfx1200 support is experimental and requires the `--experimental` option.
+
 ### Changed
+
+* Analyze mode accepts numpy versions from 1.26.4 to 2.5.x. It previously required exactly 1.26.4, or 2.5.2 on Python 3.13 and newer.
+
+* The analyze option `--decimal` is now the debug option `--debug-table-decimal`, which sets the decimals of the analyze tables.
+
+* The Memory Chart now uses the same metric names as the metric tables.
+  * Scratch Allocation is in bytes per work-item, and LDS Allocation is in bytes, as in the Wavefront panel.
+  * Counts show what they count, such as instr or req.
+  * Only percentages use the Util, Hit and Stall colors, and each shows a bar.
+  * The Compute Unit box shows AGPRs on GPUs that have them.
 
 ### Removed
 
@@ -15,11 +30,19 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Resolved issues
 
+* Fixed kernel points missing from the gfx1250 roofline plot.
+
 * Fixed Uncached Read Traffic (17.2.3) going above 100% on gfx908, gfx90a, gfx942 and gfx950.
 
 * Fixed MI200 profiling collecting the L2-Fabric write counters twice under two names, which took one extra profiling pass.
 
 * Fixed gfx1201 Wavefront Occupancy, Memory Chart occupancy and Wavefront Life reading far above the real wave count.
+
+* Fixed the peak of the `L2 Cache BW` metric in the `System Speed-of-Light` panel on MI200 (gfx90a). The peak was half the intended value, so the metric could exceed its peak.
+
+* Fixed Memory Chart values that did not match the same metrics in the analyze tables.
+
+* Fixed Wavefront Occupancy in the System Speed-of-Light panel on gfx1250, which counted wavefronts per CU but compared them with the peak of all CUs.
 
 ### Upcoming changes
 

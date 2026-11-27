@@ -13,9 +13,9 @@ from consan_runtime_e2e import Driver, HardwareUnavailable, parse_target_argumen
 
 
 class RuntimeIntegration(unittest.TestCase):
-    def test_atomic_geometry_uses_two_full_waves(self):
+    def test_atomic_and_group_flat_geometry_uses_two_full_waves(self):
         for wave in (32, 64):
-            for case in ('atomic_u32_count', 'atomic_u32_read'):
+            for case in ('atomic_u32_count', 'atomic_u32_read', 'flat_load_overlap'):
                 with self.subTest(wave=wave, case=case):
                     argv = ['--case', case, '--wave-size', str(wave)]
                     for extra in ([], ['--threads', str(2 * wave)]):

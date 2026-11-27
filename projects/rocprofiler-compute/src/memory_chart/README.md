@@ -6,7 +6,9 @@ the chart, where each block goes, which metric each block and arrow shows, and h
 draw them. The analysis supplies the values.
 
 Other tools that draw the chart, such as ROCm Optiq, read the same format from the
-analysis database.
+analysis database. The analysis stores each value unrounded: [`units.py`](units.py) sets how
+many decimals the terminal chart shows for each unit, and other renderers choose their
+own.
 
 ## Example
 
@@ -22,7 +24,7 @@ has no comments; the comments here only explain the fields.
   "blocks": [
     {"id": "cu", "title": "Compute Units", "column": 0, "row": 0, "order": 0,
      "style": "list", "content": [
-      {"metric_id": "3.1.0", "title": "vGPRs", "category": "util", "bar": false}
+      {"metric_id": "3.1.0", "title": "Wavefront Occupancy", "category": "util", "bar": true}
     ]},
     {"id": "l2", "title": "L2", "column": 1, "row": 0, "order": 0,
      "style": "panel", "content": [
@@ -49,22 +51,22 @@ has no comments; the comments here only explain the fields.
 The terminal chart looks roughly like this sketch. The ids and values are made up.
 
 ```text
-                                                       ╭────────────╮
-                                                       │ xGMI       │   row -1
-                                                       ╰────────────╯
-                                                          ||  Read BW  1.0 GB/s
-|------------------------ GPU -------------------------|- Fabric -|
+                                                                 ╭────────────╮
+                                                                 │ xGMI       │   row -1
+                                                                 ╰────────────╯
+                                                                    ||  Read BW  1.0 GB/s
+|----------------------------- GPU ------------------------------|- Fabric -|
 
-╭─ Compute Units ─╮            ╭──── L2 ────╮          ╭─ Fabric ─╮
-│ vGPRs 12.5      │Read : 100  │ Hit 42.0%  │Read BW   │          │   row 0
-│                 │<---------- │ ████░░░░░░ │1.0 GB/s  │          │
-│                 │            │            │<-------- │          │
-╰─────────────────╯            ╰────────────╯          ╰──────────╯
+╭────── Compute Units ──────╮            ╭──── L2 ────╮          ╭─ Fabric ─╮
+│ Wavefront Occupancy 42.0% │Read:100 req│ Hit 42.0%  │Read BW   │          │   row 0
+│ ████░░░░░░                │<---------- │ ████░░░░░░ │1.0 GB/s  │          │
+│                           │            │            │<-------- │          │
+╰───────────────────────────╯            ╰────────────╯          ╰──────────╯
 
-                                                          ||  Read BW  1.0 GB/s
-                                                       ╭────────────╮
-                                                       │ PCIe       │   row 1
-                                                       ╰────────────╯
+                                                                    ||  Read BW  1.0 GB/s
+                                                                 ╭────────────╮
+                                                                 │ PCIe       │   row 1
+                                                                 ╰────────────╯
 ```
 
 ## Fields
@@ -107,7 +109,7 @@ All fields are required.
 | `metric_id` | Id of the metric in panel 3 of the analysis config, such as `3.1.24`. |
 | `title` | Label shown before the value. |
 | `category` | Kind of metric. It sets the color; see [Categories](#categories). |
-| `bar` | `true` draws a bar under the value. Use it only for percentages, and never in a `list` block. |
+| `bar` | `true` draws a bar under the value. Use it only for percentages. |
 
 ### Arrows
 
@@ -128,7 +130,7 @@ All fields are required.
 |---|---|---|
 | `read`, `write`, `atomic` | arrows and metrics | Read, write, or atomic traffic. |
 | `neutral` | arrows and metrics | Anything else, such as mixed traffic. |
-| `util`, `hit`, `stall` | metrics | Utilization, hit rate, or stall rate. |
+| `util`, `hit`, `stall` | metrics | Utilization, hit rate, or stall rate; for percentages only. |
 | `bw` | metrics | Bandwidth shown inside a block. |
 
 ## Rules
@@ -150,7 +152,8 @@ stores it with each layout in the analysis database. It follows semantic version
 Bump it in the same change that changes the format:
 
 - MAJOR: a field is renamed or removed, or its meaning changes.
-- MINOR: an optional field is added.
+- MINOR: an optional field is added, or a field is allowed in more places (1.1.0:
+  `bar` in `list` blocks).
 - PATCH: a fix that changes no field.
 
 ## Adding an architecture

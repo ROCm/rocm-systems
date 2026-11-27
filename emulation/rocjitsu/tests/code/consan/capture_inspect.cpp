@@ -42,6 +42,10 @@ int main(int argc, char **argv) {
       std::cout << "{\"id\":" << site.id << ",\"access\":" << uint32_t(site.access)
                 << ",\"width\":" << site.width << ",\"original_offset\":" << site.original_offset
                 << ",\"guest_offset\":" << site.prepared_guest_offset;
+      if (site.origin == AccessOrigin::GroupFlat) {
+        std::cout << ",\"origin\":\"group_flat\",\"confidence\":\""
+                  << (site.assumption == FlatAssumption::None ? "exact" : "conservative") << '"';
+      }
       if (is_dual(site.lds_ranges.shape)) {
         std::cout << ",\"range_offsets\":[" << site.lds_ranges.byte_offset(0, site.width) << ','
                   << site.lds_ranges.byte_offset(1, site.width) << ']';

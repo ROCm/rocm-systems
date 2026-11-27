@@ -332,6 +332,7 @@ class RocProfCompute_Base:
             fnames=str_fnames,
             profiler_options=options,
             workload_dir=args.output_directory,
+            arch=self._soc.get_arch(),
             ml_api_trace_enabled=args.trace_ml_api is not None,
             retain_rocpd_output=args.retain_rocpd_output,
         )

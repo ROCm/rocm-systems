@@ -5,6 +5,7 @@
 // Owns validation and dispatch for RDNA VOPDXY, which has no arithmetic modifiers.
 
 #include "common/validation.h"
+#include "fp/compatibility_fma_status.h"
 #include "rj_arith/detail/rj_arith_dot.h"
 #include "rj_arith/detail/rj_arith_dual.h"
 #include "rj_arith/detail/rj_arith_fp.h"
@@ -149,16 +150,39 @@ int rj_arith_v_dual_mul_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *const *d,
                                       const uint32_t *const *a, const uint32_t *const *b,
                                       uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+  using namespace rocjitsu::arith;
+  const bool compatibility = (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY;
+  flags = resolve_compatibility(flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = validate_semantics(flags)) {
     return error;
   }
   if (instruction_flags) {
     int error = rj_arith_v_mul_f32_w32_gfx12(flags, 0, 0, d, a, b, excp_flag_user);
     return error ? error : RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return rj_arith_v_mul_f32_w32_gfx12(flags, exec_mask, 0, d, a, b, excp_flag_user);
+  if (!compatibility || !exec_mask) {
+    return rj_arith_v_mul_f32_w32_gfx12(flags, exec_mask, 0, d, a, b, excp_flag_user);
+  }
+  // Stage results so aliases cannot destroy inputs needed by the inherited classifier.
+  uint32_t results[32];
+  uint32_t *output = results;
+  if (int error = rj_arith_v_mul_f32_w32_gfx12(flags, exec_mask, 0, &output, a, b, nullptr)) {
+    return error;
+  }
+  uint32_t causes = 0;
+  for (int lane = 0; lane < 32; ++lane) {
+    if (exec_mask & (1U << lane)) {
+      const uint32_t zero = (a[0][lane] ^ b[0][lane]) & 0x80000000U;
+      causes |= compatibility_fma_causes<false>(flags, a[0][lane], b[0][lane], zero, results[lane]);
+    }
+  }
+  for (int lane = 0; lane < 32; ++lane) {
+    if (exec_mask & (1U << lane)) {
+      d[0][lane] = results[lane];
+    }
+  }
+  *excp_flag_user |= causes;
+  return RJ_ARITH_SUCCESS;
 }
 
 // Add the operands for selected lanes.

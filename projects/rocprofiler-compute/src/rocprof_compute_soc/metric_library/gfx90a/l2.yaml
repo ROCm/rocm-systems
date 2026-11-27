@@ -8,5 +8,6 @@ l2.ai:
     and the L1 cache.
 l2.bw:
   formula: 128 * SUM(TCC_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
+  peak: $max_sclk / 1000 * 128 * TO_INT($total_l2_chan)
 l2.peak_bw:
   formula: 100 * 128 * SUM(TCC_REQ_sum) / SUM(End_Timestamp - Start_Timestamp) / ($max_sclk / 1000 * 128 * TO_INT($total_l2_chan))

@@ -53,9 +53,8 @@ jobs:
       rocm_version: ${{ inputs.rocm_version }}
       # python/tests/main.py is an end-to-end hardware exercise of the bindings, and
       # is platform/compiler/standard independent, so run it once on an AIS
-      # runner for a single representative leg rather than fanning it out. This
-      # is the same ubuntu-10.2.0 leg codeql/sanitizers/clang_tidy target.
-      run_hardware_test: ${{ inputs.platform == 'ubuntu' && inputs.cxx_compiler == 'amdclang++' && inputs.cxx_standard == 20 && inputs.rocm_version == '10.2.0' }}
+      # runner for a single representative leg rather than fanning it out.
+      run_hardware_test: ${{ inputs.platform == 'ubuntu' && inputs.cxx_compiler == 'amdclang++' && inputs.cxx_standard == 20 && inputs.rocm_version == 'nightly' }}
 
   # The system tests run on the self-hosted AIS runners, so they only run on
   # the production amdclang++ C++20 legs. The clang++, g++, and C++23 legs

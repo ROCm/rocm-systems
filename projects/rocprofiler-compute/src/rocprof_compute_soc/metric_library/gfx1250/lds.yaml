@@ -7,7 +7,17 @@ lds.address_conflict_stall_rate:
   name: LDS Address Conflict Stall Rate
   formula: 100 * SUM(TX_VMW_LDS_ADDR_CONFLICT_sum) / SUM(TX_VMW_VMW_BUSY_sum)
   unit: Percent
-  description: Percentage of VMW-busy cycles stalled due to an LDS address conflict.
+  description: >-
+    Percentage of VMW-busy cycles stalled due to an LDS address conflict.
+lds.ai:
+  name: LDS Arithmetic Intensity
+  formula: SUM($sp_flops + $wmma_flops) / SUM($lds_bytes)
+  unit: FLOPs/Byte
+  description: >-
+    Arithmetic Intensity relative to the Local Data Share (LDS). Higher values indicate
+    more compute per byte of LDS traffic, suggesting effective reuse of shared data
+    within a workgroup. Lower values suggest memory-bound behavior limited by LDS
+    bandwidth or bank-conflict pressure.
 lds.bank_conflict_stall_rate:
   name: LDS Bank Conflict Stall Rate
   formula: 100 * SUM(TX_VMW_LDS_BANK_CONFLICT_sum) / SUM(TX_VMW_VMW_BUSY_sum)

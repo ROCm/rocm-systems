@@ -5,6 +5,11 @@
 /// @brief Execution plugin race detection and diagnostic output tests.
 
 #include "execution_plugin_test_util.h"
+#include "mfma_f32_test_dispatch.h"
+#include "mfma_f64_test_dispatch.h"
+#include "mfma_f8_test_dispatch.h"
+#include "mfma_half_test_dispatch.h"
+#include "mfma_integer_test_dispatch.h"
 #include "rocjitsu/isa/isa_family.h"
 
 #include "mma_test_util.h"
@@ -13212,7 +13217,14 @@ TEST(RaceDetectorPluginTest, NamedLgkmcntWaitRetiresSplitScalarEvent) {
   EXPECT_EQ(sink.str().find("RACE "), std::string::npos);
 }
 
-TEST(ExecutionPluginTest, MfmaReadObservationReportsRace) {
+TEST(ExecutionPluginTest, MfmaFastPathReadHookReportsRace) {
+
+  struct ForceScalarGuard {
+    bool old = util::force_scalar();
+    ~ForceScalarGuard() { util::set_force_scalar_for_testing(old); }
+  } force_scalar_guard;
+  util::set_force_scalar_for_testing(false);
+
   PluginFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
@@ -13232,71 +13244,23 @@ TEST(ExecutionPluginTest, MfmaReadObservationReportsRace) {
                                                /*physical_sgpr_count=*/104, waves);
 
   const uint32_t vb = wf->vgpr_alloc().base;
-  constexpr uint32_t S0 = 0;
+  constexpr uint32_t S0 = 0, S1 = 16, ACC = 32, DST = 48;
+  for (uint32_t reg = 0; reg < 64; ++reg) {
+    for (uint32_t lane = 0; lane < 64; ++lane) {
+      cu->write_vgpr(vb + reg, lane, 0x3c003c00u);
+    }
+  }
 
   race_plugin->registerOutstandingLoad(S0, /*exec_mask=*/1u);
-  amdgpu::observe_mfma_input_reads(*cu, vb + S0, /*dim=*/16, /*K=*/32, /*B=*/1,
-                                   /*data_bits=*/16, wf->wf_size());
+  rocjitsu::test::execute_mfma_half_shape<false, 16, 16, 32>(
+      *cu, vb + DST, vb + S0, vb + S1, vb + ACC, amdgpu::ACC_FROM_VGPR, /*cbsz=*/0, /*abid=*/0,
+      /*blgp=*/0);
 
   ASSERT_FALSE(race_plugin->violations.empty());
   const auto &violation = race_plugin->violations.front();
   EXPECT_EQ(violation.space, RaceViolation::Space::VGPR);
   EXPECT_EQ(violation.index, static_cast<int>(S0));
   EXPECT_EQ(violation.lane, 0);
-}
-
-TEST(ExecutionPluginTest, MfmaFastPathReadHookReportsRace) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "stdx SIMD is unavailable";
-  } else {
-    constexpr uint32_t width = static_cast<uint32_t>(util::native<float>::size());
-    if (!amdgpu::mma_f32_native_width_supported(16, width)) {
-      GTEST_SKIP() << "f16 MFMA shape is not divisible by the native SIMD width";
-    }
-
-    struct ForceScalarGuard {
-      bool old = util::force_scalar();
-      ~ForceScalarGuard() { util::set_force_scalar_for_testing(old); }
-    } force_scalar_guard;
-    util::set_force_scalar_for_testing(false);
-
-    PluginFixture f;
-    ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
-    f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
-    auto plugin = std::make_unique<MfmaRacePlugin>();
-    auto *race_plugin = plugin.get();
-    f.plugin_group_->add(std::move(plugin));
-    f.soc->set_plugin_group(f.plugin_group_);
-    f.plugin_group_->onInit();
-
-    auto *cu = f.cu();
-    auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
-    ASSERT_NE(wf, nullptr);
-    ASSERT_EQ(wf->wf_size(), 64u);
-    std::array<amdgpu::Wavefront *, 1> waves{wf};
-    f.plugin_group_->onAmdgpuWorkgroupDispatched(/*dispatch_id=*/1, /*wg_id=*/0,
-                                                 /*physical_vgpr_count=*/256,
-                                                 /*physical_sgpr_count=*/104, waves);
-
-    const uint32_t vb = wf->vgpr_alloc().base;
-    constexpr uint32_t S0 = 0, S1 = 16, ACC = 32, DST = 48;
-    for (uint32_t reg = 0; reg < 64; ++reg) {
-      for (uint32_t lane = 0; lane < 64; ++lane) {
-        cu->write_vgpr(vb + reg, lane, 0x3c003c00u);
-      }
-    }
-
-    race_plugin->registerOutstandingLoad(S0, /*exec_mask=*/1u);
-    amdgpu::exec_f32_mfma_f16_spec<16, 16, 32>(*cu, vb + DST, vb + S0, vb + S1, vb + ACC,
-                                               amdgpu::ACC_FROM_VGPR, /*cbsz=*/0, /*abid=*/0,
-                                               /*blgp=*/0);
-
-    ASSERT_FALSE(race_plugin->violations.empty());
-    const auto &violation = race_plugin->violations.front();
-    EXPECT_EQ(violation.space, RaceViolation::Space::VGPR);
-    EXPECT_EQ(violation.index, static_cast<int>(S0));
-    EXPECT_EQ(violation.lane, 0);
-  }
 }
 
 namespace mfma_race {
@@ -13347,23 +13311,22 @@ TEST(ExecutionPluginTest, MfmaSnapshotsReportRacesOnEveryOperandRegister) {
   const Case cases[] = {
       {"f64 16x16x4", 2, 2, 8,
        [](ComputeUnitCore &cu, uint32_t vb, uint32_t acc) {
-         exec_f64(cu, 16, 16, 4, 1, vb + D, vb + A, vb + B, vb + C, acc);
+         rocjitsu::test::execute_mfma_f64_shape(cu, 16, 16, 4, 1, vb + D, vb + A, vb + B, vb + C,
+                                                acc);
        }},
       {"i8 16x16x64", 4, 4, 4,
        [](ComputeUnitCore &cu, uint32_t vb, uint32_t acc) {
-         exec_i32_i8(cu, 16, 16, 64, 1, vb + D, vb + A, vb + B, vb + C, acc);
+         rocjitsu::test::execute_mfma_i8(cu, 16, 16, 64, 1, vb + D, vb + A, vb + B, vb + C, acc);
        }},
       {"fp8 x fp4 16x16x128", 8, 4, 4,
        [](ComputeUnitCore &cu, uint32_t vb, uint32_t acc) {
-         dispatch_matrix_fmt_pair(0, 4, [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {
-           exec_f32_mixed<16, 16, 128, 1>(cu, a_bits, b_bits, vb + D, vb + A, vb + B, vb + C, ea,
-                                          eb, acc);
-         });
+         rocjitsu::test::execute_mfma_mixed_shape<16>(cu, vb + D, vb + A, vb + B, vb + C, acc, 0,
+                                                      4);
        }},
       {"f32 4x4x1x16", 1, 1, 4,
        [](ComputeUnitCore &cu, uint32_t vb, uint32_t acc) {
-         exec_f32<4, 4, 1, 16>(cu, 32, vb + D, vb + A, vb + B, vb + C, extract_f32, extract_f32,
-                               acc);
+         rocjitsu::test::execute_mfma_f32_shape<4, 4, 1, 16>(cu, vb + D, vb + A, vb + B, vb + C,
+                                                             acc, 0, 0, 0);
        }},
   };
   for (const Case &test : cases) {
@@ -13391,8 +13354,9 @@ TEST(ExecutionPluginTest, MfmaSnapshotsReportRacesOnlyOnBroadcastLanes) {
   } guard;
   // cbsz=2 broadcasts A's 16-lane block abid=1 (lanes 16-31); blgp=4 broadcasts B lanes 0-15.
   const mfma_race::Run run = [](ComputeUnitCore &cu, uint32_t vb, uint32_t acc) {
-    exec_i32_i8(cu, 4, 4, 4, 16, vb + D, vb + A, vb + B, vb + C, acc, /*cbsz=*/2, /*abid=*/1,
-                /*blgp=*/4);
+    rocjitsu::test::execute_mfma_i8(cu, 4, 4, 4, 16, vb + D, vb + A, vb + B, vb + C, acc,
+                                    /*cbsz=*/2, /*abid=*/1,
+                                    /*blgp=*/4);
   };
   for (bool force_scalar : {false, true}) {
     SCOPED_TRACE(testing::Message() << "force_scalar=" << force_scalar);

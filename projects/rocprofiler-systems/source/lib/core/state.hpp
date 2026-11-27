@@ -24,7 +24,6 @@ enum class process_lifecycle : std::uint16_t
     init,
     active,
     finalized,
-    disabled,
 };
 
 enum class thread_lifecycle : std::uint16_t
@@ -78,7 +77,6 @@ struct fmt::formatter<rocprofsys::state::process_lifecycle>
             case rocprofsys::state::process_lifecycle::pre_init: str = "PreInit"; break;
             case rocprofsys::state::process_lifecycle::init: str = "Init"; break;
             case rocprofsys::state::process_lifecycle::active: str = "Active"; break;
-            case rocprofsys::state::process_lifecycle::disabled: str = "Disabled"; break;
             case rocprofsys::state::process_lifecycle::finalized:
                 str = "Finalized";
                 break;
@@ -157,7 +155,6 @@ public:
     static constexpr State Init      = State::init;
     static constexpr State Active    = State::active;
     static constexpr State Finalized = State::finalized;
-    static constexpr State Disabled  = State::disabled;
 
     process()                          = delete;
     process(const process&)            = delete;
@@ -173,14 +170,18 @@ public:
 
     [[gnu::cold]] static State set(State state_to_set)
     {
-        auto last_state = get();
-        if(state_to_set < last_state)
+        auto last_state = storage().load(std::memory_order_acquire);
+        do
         {
-            throw std::runtime_error(
-                fmt::format("State is being assigned to a lesser value :: {} -> {}",
-                            last_state, state_to_set));
-        }
-        storage().store(state_to_set, std::memory_order_relaxed);
+            if(state_to_set < last_state)
+            {
+                throw std::runtime_error(
+                    fmt::format("State is being assigned to a lesser value :: {} -> {}",
+                                last_state, state_to_set));
+            }
+        } while(!storage().compare_exchange_weak(last_state, state_to_set,
+                                                 std::memory_order_acq_rel,
+                                                 std::memory_order_acquire));
         LOG_DEBUG("Setting state :: {} -> {}", last_state, state_to_set);
         return last_state;
     }
@@ -236,7 +237,10 @@ public:
         {
             return get();
         }
-        return history().emplace_back(set(state_to_push));
+        auto const prior_state = get();
+        history().emplace_back(prior_state);
+        set(state_to_push);
+        return prior_state;
     }
 
     [[gnu::hot]] static State pop()

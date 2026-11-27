@@ -1,0 +1,321 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+// Decoded FRACT bindings: guest controls, source routing, overlap and masked stores.
+// Numerical expectations are tested independently in lib/arith.
+
+#include "decode_test_util.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna1/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna1/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna1/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna1/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/opcodes.h"
+#include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/execution_backend.h"
+#include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
+#include "rocjitsu/isa/target_registry.h"
+#include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/l2_cache.h"
+#include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "unary_binding.h"
+#include "util/simd_test_hooks.h"
+
+#include <array>
+#include <bit>
+#include <cmath>
+#include <gtest/gtest.h>
+#include <memory>
+#include <random>
+
+namespace rocjitsu::amdgpu {
+namespace {
+
+// Restore test-only dispatch overrides even when an assertion exits early.
+struct ScalarGuard {
+  bool saved = util::force_scalar();
+  ~ScalarGuard() { util::set_force_scalar_for_testing(saved); }
+};
+
+// Check decoded bindings against independently tested scalar FRACT entry points.
+// Guest controls are assembled here rather than using the VM's flag translator.
+uint64_t reference(uint64_t bits, bool wide, const Wavefront &wave, unsigned omod, bool clamp,
+                   bool sdwa) {
+  const auto arch = wave.cu().arch();
+  const bool modern = arch == rocjitsu::IsaFamily::Cdna5;
+  const bool cdna = arch == rocjitsu::IsaFamily::Cdna3 || arch == rocjitsu::IsaFamily::Cdna4;
+  const unsigned denorm = wide ? wave.fp_denorm_mode_f16_f64() : wave.fp_denorm_mode_f32();
+  const unsigned rounding = wide ? wave.fp_round_mode_f16_f64() : wave.fp_round_mode_f32();
+  uint64_t flags = RJ_ARITH_SEMANTICS_COMPATIBILITY | (uint64_t(rounding) << 24);
+  flags |= (denorm & 1) ? 0 : RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
+  flags |= (denorm & 2) ? 0 : RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
+  flags |= wave.ieee_mode() ? RJ_ARITH_FP_IEEE_MODE : 0;
+  flags |= !modern && !wave.dx10_clamp() ? RJ_ARITH_FP_DX10_CLAMP_OFF : 0;
+  const auto call = wide     ? modern ? rj_arith_v_fract_f64_w32_gfx12
+                               : cdna ? rj_arith_v_fract_f64_w32_gfx942
+                                      : rj_arith_v_fract_f64_w32_gfx908
+                    : modern ? rj_arith_v_fract_f32_w32_gfx12
+                    : cdna   ? rj_arith_v_fract_f32_w32_gfx942
+                             : rj_arith_v_fract_f32_w32_gfx908;
+  const uint64_t modifiers = uint64_t(omod) * RJ_ARITH_ALU_OMOD_2 |
+                             (clamp ? RJ_ARITH_ALU_CLAMP : 0) | (sdwa ? RJ_ARITH_ALU_SDWA : 0);
+  return rocjitsu::test::evaluate_unary32(call, flags, modifiers, bits);
+}
+
+// Check inherited fractional parts, directed rounding, output controls and routed operand forms.
+TEST(FractionalPart, Bindings) {
+  ScalarGuard guard;
+  struct Family {
+    rocjitsu::IsaFamily arch;
+    const IsaExecutionBackend *backend;
+    std::array<uint16_t, 2> vop1, vop3;
+  };
+  const Family families[] = {
+      {rocjitsu::IsaFamily::Cdna1,
+       &cdna1::execution_backend(),
+       {cdna1::kVFractF32Vop1, cdna1::kVFractF64Vop1},
+       {cdna1::kVFractF32Vop3, cdna1::kVFractF64Vop3}},
+      {rocjitsu::IsaFamily::Cdna2,
+       &cdna2::execution_backend(),
+       {cdna2::kVFractF32Vop1, cdna2::kVFractF64Vop1},
+       {cdna2::kVFractF32Vop3, cdna2::kVFractF64Vop3}},
+      {rocjitsu::IsaFamily::Cdna3,
+       &cdna3::execution_backend(),
+       {cdna3::kVFractF32Vop1, cdna3::kVFractF64Vop1},
+       {cdna3::kVFractF32Vop3, cdna3::kVFractF64Vop3}},
+      {rocjitsu::IsaFamily::Cdna4,
+       &cdna4::execution_backend(),
+       {cdna4::kVFractF32Vop1, cdna4::kVFractF64Vop1},
+       {cdna4::kVFractF32Vop3, cdna4::kVFractF64Vop3}},
+      {rocjitsu::IsaFamily::Cdna5,
+       &cdna5::execution_backend(),
+       {cdna5::kVFractF32Vop1, cdna5::kVFractF64Vop1},
+       {cdna5::kVFractF32Vop3, cdna5::kVFractF64Vop3}},
+      {rocjitsu::IsaFamily::Rdna1,
+       &rdna1::execution_backend(),
+       {rdna1::kVFractF32Vop1, rdna1::kVFractF64Vop1},
+       {rdna1::kVFractF32Vop3, rdna1::kVFractF64Vop3}},
+      {rocjitsu::IsaFamily::Rdna2,
+       &rdna2::execution_backend(),
+       {rdna2::kVFractF32Vop1, rdna2::kVFractF64Vop1},
+       {rdna2::kVFractF32Vop3, rdna2::kVFractF64Vop3}},
+      {rocjitsu::IsaFamily::Rdna3_5,
+       &rdna3_5::execution_backend(),
+       {rdna3_5::kVFractF32Vop1, rdna3_5::kVFractF64Vop1},
+       {rdna3_5::kVFractF32Vop3, rdna3_5::kVFractF64Vop3}},
+  };
+  enum class Form { Vop1, Vop3, Scalar, Sdwa, Dpp, SuppressedDpp, Vop3Dpp, SuppressedVop3Dpp };
+  struct Scenario {
+    Form form = Form::Vop3;
+    uint32_t mode = 0;
+    int modifiers = 0;
+  };
+  const Scenario scenarios[] = {
+      {Form::Vop1},
+      {Form::Vop1, 0xf0},
+      {},
+      {.mode = 0xff},
+      {.mode = 0xf5},
+      {.mode = 0xfa},
+      {.mode = 0x200},
+      {.mode = 0xf0, .modifiers = 1},
+      {.mode = 0x200, .modifiers = 2},
+      {Form::Scalar},
+      {Form::Sdwa, 0xf0},
+      {Form::Dpp, 0xf0},
+      {Form::SuppressedDpp, 0xf0},
+      {Form::Vop3Dpp, 0xf0},
+      {Form::SuppressedVop3Dpp, 0xf0},
+  };
+  constexpr uint32_t special32[] = {
+      0,           0x80000000U, 1,           0x80000001U, 0x007fffffU, 0x00800000U, 0x807fffffU,
+      0xbeffffffU, 0xbf000000U, 0xbf000001U, 0xbdcccccdU, 0xb3000001U, 0xb3800001U, 0x3f7fffffU,
+      0x3fc00000U, 0x7f7fffffU, 0x7f800000U, 0xff800000U, 0x7f812345U, 0xffc12345U};
+  constexpr uint64_t special64[] = {0,
+                                    0x8000000000000000ULL,
+                                    1,
+                                    0x8000000000000001ULL,
+                                    0x000fffffffffffffULL,
+                                    0x0010000000000000ULL,
+                                    0x800fffffffffffffULL,
+                                    0xbfdfffffffffffffULL,
+                                    0xbfe0000000000000ULL,
+                                    0xbfe0000000000001ULL,
+                                    0xbfb999999999999aULL,
+                                    0xbc90000000000001ULL,
+                                    0xbca0000000000001ULL,
+                                    0x3fefffffffffffffULL,
+                                    0x3ff8000000000000ULL,
+                                    0x7fefffffffffffffULL,
+                                    0x7ff0000000000000ULL,
+                                    0xfff0000000000000ULL,
+                                    0x7ff0123456789abcULL,
+                                    0xfff8abcdef012345ULL};
+  std::minstd_rand random;
+  const auto word = [&] {
+    const uint32_t high = uint32_t(random() >> 15);
+    return (high << 16) | uint32_t(random() >> 15);
+  };
+  std::array<uint64_t, 64> raw;
+  for (auto &bits : raw) {
+    const uint64_t high = word();
+    bits = (high << 32) | word();
+  }
+  for (const auto &family : families) {
+    ScopedIsaExecutionBackend backend(family.backend);
+    const bool cdna =
+        (family.arch <= rocjitsu::IsaFamily::Cdna4) || family.arch == rocjitsu::IsaFamily::Cdna5;
+    const bool cdna5_family = family.arch == rocjitsu::IsaFamily::Cdna5;
+    const bool gfx1150 = family.arch == rocjitsu::IsaFamily::Rdna3_5;
+    for (int lanes : {32, 64}) {
+      if ((cdna && !cdna5_family && lanes == 32) || (cdna5_family && lanes == 64)) {
+        continue;
+      }
+      for (bool scalar : {true, false}) {
+        util::set_force_scalar_for_testing(scalar);
+        for (auto semantics : {ArithmeticSemantics::Compatibility, ArithmeticSemantics::Loose}) {
+          ComputeUnitCore::Config config{};
+          config.arch = family.arch;
+          config.arithmetic = {semantics};
+          config.num_wf_slots = 1;
+          if (cdna5_family) {
+            config.target = ROCJITSU_CODE_TARGET_GFX1251;
+          }
+          config.sgprs_per_wf = 104;
+          config.vgprs_per_wf = 8;
+          config.lds_size_kb = 64;
+          GpuMemory memory("exponent_memory");
+          L2Cache cache("exponent_cache");
+          auto cu = ComputeUnitCore::create("exponent", config, &memory, &cache);
+          auto *wave = cu->dispatch_wf(0, 0, 104, 8, lanes);
+          ASSERT_NE(wave, nullptr);
+          auto decoder = Decoder::create(family.arch);
+          auto wide_decoder = cdna5_family ? Decoder::create(default_isa_target_registry(),
+                                                             ROCJITSU_CODE_TARGET_GFX1251)
+                                           : nullptr;
+          const auto base = wave->vgpr_alloc().base;
+          for (int width : {32, 64}) {
+            const bool wide = width == 64;
+            auto input = raw;
+            for (int lane = 0; lane < int(std::size(special32)); ++lane) {
+              input[lane] = wide ? special64[lane] : special32[lane];
+            }
+            for (const auto &sample : scenarios) {
+              const bool sdwa = sample.form == Form::Sdwa;
+              const bool vop3_dpp =
+                  sample.form == Form::Vop3Dpp || sample.form == Form::SuppressedVop3Dpp;
+              const bool dpp =
+                  sample.form == Form::Dpp || sample.form == Form::SuppressedDpp || vop3_dpp;
+              const bool suppressed =
+                  sample.form == Form::SuppressedDpp || sample.form == Form::SuppressedVop3Dpp;
+              const bool vop3 =
+                  sample.form == Form::Vop3 || sample.form == Form::Scalar || vop3_dpp;
+              if ((sdwa && (wide || cdna5_family || gfx1150)) || (dpp && wide && !cdna5_family) ||
+                  (vop3_dpp && !cdna5_family && !gfx1150)) {
+                continue;
+              }
+              for (int aliasing_offset : {0, 1, 3}) {
+                SCOPED_TRACE(::testing::Message()
+                             << family.arch << ':' << width << ':' << lanes << ':' << scalar << ':'
+                             << int(semantics) << ':' << int(sample.form) << ':' << sample.mode
+                             << ':' << aliasing_offset);
+                const uint64_t all = lanes == 64 ? ~0ULL : 0xffffffffULL;
+                const uint64_t exec_mask = all & 0x800000038000ffffULL;
+                wave->set_exec(dpp ? all : exec_mask);
+                wave->set_vgpr_write_mask(dpp ? exec_mask : all);
+                wave->set_mode_raw(sample.mode);
+                wave->set_trapsts(0x100);
+                cu->write_sgpr(wave->sgpr_alloc().base, wide ? 0 : 0x3fc00000);
+                cu->write_sgpr(wave->sgpr_alloc().base + 1, 0x3ff80000);
+                for (int lane = 0; lane < lanes; ++lane) {
+                  for (int reg = 0; reg < 8; ++reg) {
+                    cu->write_vgpr(base + reg, lane, 0xdeadbeef);
+                  }
+                  cu->write_vgpr(base, lane, uint32_t(input[lane]));
+                  cu->write_vgpr(base + 1, lane, uint32_t(input[lane] >> 32));
+                }
+                const uint32_t source = sample.form == Form::Scalar ? 0 : 256;
+                std::array<uint32_t, 3> words =
+                    vop3 ? std::array<uint32_t, 3>{(cdna && !cdna5_family ? 0xd0000000U
+                                                                          : 0xd4000000U) |
+                                                       (uint32_t(family.vop3[wide]) << 16) |
+                                                       uint32_t(aliasing_offset) |
+                                                       (sample.modifiers == 2 ? 0x8100U : 0),
+                                                   source |
+                                                       (sample.modifiers
+                                                            ? (sample.modifiers == 2 ? 0x38000000U
+                                                                                     : 0x18000000U)
+                                                            : 0)}
+                         : std::array<uint32_t, 3>{0x7e000000U | (uint32_t(aliasing_offset) << 17) |
+                                                       (uint32_t(family.vop1[wide]) << 9) | source,
+                                                   0};
+                if (sdwa) {
+                  // DWORD input and WORD_1 output, preserving the other destination bytes.
+                  words[0] = (words[0] & ~0x1ffU) | 249;
+                  words[1] = 0x00061500;
+                } else if (dpp) {
+                  words[vop3 ? 1 : 0] = (words[vop3 ? 1 : 0] & ~0x1ffU) | 250;
+                  words[vop3 ? 2 : 1] =
+                      (suppressed ? 0x0f000000U : 0xff000000U) | (wide ? 0x15100U : 0xb100U);
+                }
+                if (dpp && wide) {
+                  EXPECT_TRUE(decode_fails(*decoder, words.data()));
+                }
+                std::unique_ptr<Instruction> instruction(
+                    decode_valid(dpp && wide ? *wide_decoder : *decoder, words.data()));
+                ASSERT_NE(instruction, nullptr);
+                ASSERT_TRUE(cu->execute_instruction(instruction.get(), *wave).succeeded());
+                EXPECT_EQ(wave->trapsts(), 0x100U);
+                for (int lane = 0; lane < lanes; ++lane) {
+                  uint64_t expected = 0;
+                  for (int word = 0; word < (wide ? 2 : 1); ++word) {
+                    const int reg = aliasing_offset + word;
+                    const uint32_t old = reg < 2 ? uint32_t(input[lane] >> (reg * 32)) : 0xdeadbeef;
+                    expected |= uint64_t(old) << (word * 32);
+                  }
+                  if ((exec_mask >> lane & 1) && !suppressed) {
+                    const int source_lane = dpp ? (wide ? (lane & ~15) + 1 : lane ^ 1) : lane;
+                    uint64_t bits = sample.form == Form::Scalar
+                                        ? (wide ? 0x3ff8000000000000ULL : 0x3fc00000ULL)
+                                        : input[source_lane];
+                    if (!wide) {
+                      bits = uint32_t(bits);
+                    }
+                    if (sample.modifiers == 2) {
+                      bits &= wide ? 0x7fffffffffffffffULL : 0x7fffffffULL;
+                      bits ^= wide ? 0x8000000000000000ULL : 0x80000000ULL;
+                    }
+                    const auto value = reference(bits, wide, *wave, sample.modifiers ? 3 : 0,
+                                                 sample.modifiers == 2, sdwa);
+                    expected = sdwa ? (expected & 0xffff) | (uint32_t(value) << 16) : value;
+                  }
+                  for (int word = 0; word < (wide ? 2 : 1); ++word) {
+                    EXPECT_EQ(cu->read_vgpr(base + aliasing_offset + word, lane),
+                              uint32_t(expected >> (word * 32)))
+                        << "lane=" << lane << " word=" << word;
+                  }
+                }
+              }
+            }
+          }
+          wave->halt();
+        }
+      }
+    }
+  }
+}
+
+} // namespace
+} // namespace rocjitsu::amdgpu

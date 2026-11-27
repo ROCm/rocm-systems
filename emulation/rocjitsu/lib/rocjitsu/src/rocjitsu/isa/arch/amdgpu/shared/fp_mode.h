@@ -9,7 +9,6 @@
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/denormal.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/denormal_value.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/division.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/input_denormal.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/minmax.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/output_denormal.h"
@@ -457,125 +456,6 @@ using ScopedEnvironment = detail::ScopedFenv;
 
 enum class PackedF32Op { ADD, MUL, FMA };
 
-enum class PackedBinaryOp { ADD, MUL, MIN, MAX, MINIMUM, MAXIMUM };
-
-/// @brief Packed F16 selection on scalar or SIMD encodings, followed by CLAMP.
-/// @details Selection applies input flushing only. gfx1100 and gfx1201 preserve
-/// selected denormals even when MODE disables output denormals.
-template <bool Minimum, typename V>
-inline V packed_minmax_f16(V a_bits, V b_bits, uint32_t denorm_mode, bool clamp,
-                           bool clamp_nan_to_zero, rocjitsu::IsaFamily arch, bool ieee_mode) {
-  const auto input_policy = input_denormal::Policy::make(denorm_mode);
-  V result;
-  if (arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5) {
-    using Selection = std::conditional_t<Minimum, minmax::MinNum, minmax::MaxNum>;
-    result = minmax::evaluate<fp_format::F16, Selection>(input_policy, a_bits, b_bits);
-  } else {
-    using Selection = std::conditional_t<Minimum, minmax::LegacyMin, minmax::LegacyMax>;
-    result = minmax::LegacyOperation<fp_format::F16, Selection>{
-        input_policy, legacy_minmax_policy(arch, ieee_mode)}(a_bits, b_bits);
-  }
-  return output_modifier::apply<fp_format::F16>(
-      result, {.clamp = clamp, .clamp_nan_to_zero = clamp_nan_to_zero});
-}
-
-/// @brief Packed F16 binary arithmetic uses the FP16/64 MODE controls.
-inline uint16_t packed_binary_f16(PackedBinaryOp operation, uint16_t a_bits, uint16_t b_bits,
-                                  uint32_t round_mode, uint32_t denorm_mode, bool clamp,
-                                  bool fp16_ovfl, bool clamp_nan_to_zero, rocjitsu::IsaFamily arch,
-                                  bool ieee_mode) {
-  if (operation == PackedBinaryOp::MIN) {
-    return packed_minmax_f16<true>(uint32_t(a_bits), uint32_t(b_bits), denorm_mode, clamp,
-                                   clamp_nan_to_zero, arch, ieee_mode);
-  }
-  if (operation == PackedBinaryOp::MAX) {
-    return packed_minmax_f16<false>(uint32_t(a_bits), uint32_t(b_bits), denorm_mode, clamp,
-                                    clamp_nan_to_zero, arch, ieee_mode);
-  }
-  a_bits = detail::flush_input_f16(a_bits, denorm_mode);
-  b_bits = detail::flush_input_f16(b_bits, denorm_mode);
-  const bool a_nan = (a_bits & 0x7fffu) > 0x7c00u;
-  const bool b_nan = (b_bits & 0x7fffu) > 0x7c00u;
-  const bool arithmetic = operation == PackedBinaryOp::ADD || operation == PackedBinaryOp::MUL;
-  if (arithmetic && (a_nan || b_nan)) {
-    const uint16_t selected = a_nan ? a_bits : b_bits;
-    return clamp && clamp_nan_to_zero ? 0 : selected | (quiets_nan(arch, ieee_mode) ? 0x0200u : 0u);
-  }
-  const double first = util::f16_to_f32(a_bits);
-  const double second = util::f16_to_f32(b_bits);
-  double value = std::numeric_limits<double>::quiet_NaN();
-  switch (operation) {
-  case PackedBinaryOp::ADD:
-    value = first + second;
-    // Exact cancellation follows the destination's directed rounding mode.
-    if (value == 0.0 && std::signbit(first) != std::signbit(second)) {
-      value = round_mode == 2 ? -0.0 : 0.0;
-    }
-    break;
-  case PackedBinaryOp::MUL:
-    value = first * second;
-    break;
-  case PackedBinaryOp::MIN:
-  case PackedBinaryOp::MAX:
-  case PackedBinaryOp::MINIMUM:
-  case PackedBinaryOp::MAXIMUM: {
-    const bool minimum = operation == PackedBinaryOp::MIN || operation == PackedBinaryOp::MINIMUM;
-    const bool propagate_nan =
-        operation == PackedBinaryOp::MINIMUM || operation == PackedBinaryOp::MAXIMUM;
-    if (propagate_nan && (std::isnan(first) || std::isnan(second))) {
-      value = std::numeric_limits<double>::quiet_NaN();
-    } else if (first == second) {
-      value =
-          minimum ? (std::signbit(first) ? first : second) : (std::signbit(first) ? second : first);
-    } else {
-      value = minimum ? std::fmin(first, second) : std::fmax(first, second);
-    }
-    break;
-  }
-  }
-  uint16_t result =
-      pseudo_scalar::round_f16_result(value, round_mode, 0, clamp, fp16_ovfl, clamp_nan_to_zero);
-  if (!(denorm_mode & 2u) && (result & 0x7c00u) == 0) {
-    result &= 0x8000u;
-  }
-  return result;
-}
-
-/// @brief Select three packed F16 operands, applying output controls only to the final result.
-inline uint16_t packed_select3_f16(PackedBinaryOp operation, uint16_t first, uint16_t second,
-                                   uint16_t third, uint32_t denorm_mode, bool clamp,
-                                   bool clamp_nan_to_zero, rocjitsu::IsaFamily arch,
-                                   bool ieee_mode) {
-  const uint16_t pair = packed_binary_f16(operation, first, second, 0, denorm_mode | 2u, false,
-                                          false, false, arch, ieee_mode);
-  return packed_binary_f16(operation, pair, third, 0, denorm_mode, clamp, false, clamp_nan_to_zero,
-                           arch, ieee_mode);
-}
-
-/// @brief Packed BF16 numeric min/max preserve denormals and order signed zeros explicitly.
-inline uint16_t packed_select_bf16(float first, float second, bool minimum) {
-  const float selected = first == second
-                             ? (minimum ? (std::signbit(first) ? first : second)
-                                        : (std::signbit(first) ? second : first))
-                             : (minimum ? std::fmin(first, second) : std::fmax(first, second));
-  return util::f32_to_bf16_rne(selected);
-}
-
-/// @brief Packed BF16 CLAMP is applied after the fixed-RNE operation.
-inline uint16_t clamp_bf16(uint16_t value, bool clamp, bool clamp_nan_to_zero) {
-  if (!clamp) {
-    return value;
-  }
-  const uint16_t magnitude = value & 0x7fffu;
-  if (magnitude > 0x7f80u) {
-    return clamp_nan_to_zero ? 0 : value;
-  }
-  if (value & 0x8000u) {
-    return 0;
-  }
-  return value > 0x3f80u ? 0x3f80u : value;
-}
-
 /// @brief F32 FMA with architectural NaN selection in the active FP environment.
 inline float fma_f32(float a, float b, float c, rocjitsu::IsaFamily arch, bool ieee_mode,
                      uint32_t denorm_mode, bool force_output_flush = false) {
@@ -678,28 +558,6 @@ inline uint32_t packed_f32(float first, float second, float third, PackedF32Op o
     }
   }
   return std::bit_cast<uint32_t>((denorm_mode & 2u) ? result : flush(result));
-}
-
-/// @brief Packed BF16 math always rounds once to nearest-even and preserves denormals.
-inline uint16_t packed_fma_bf16(float a, float b, float c, bool fp16_ovfl) {
-  uint16_t result = fma_f32_to_bf16(a, b, c, 0, false, false);
-  // FP16_OVFL clamps finite-input results that round to BF16 infinity;
-  // infinities supplied as operands retain their normal arithmetic behavior.
-  if (fp16_ovfl && (result & 0x7fffu) == 0x7f80u && std::isfinite(a) && std::isfinite(b) &&
-      std::isfinite(c)) {
-    result = static_cast<uint16_t>((result & 0x8000u) | 0x7f7fu);
-  }
-  return result;
-}
-
-inline uint16_t packed_add_bf16(float a, float b, bool fp16_ovfl) {
-  return packed_fma_bf16(a, 1.0f, b, fp16_ovfl);
-}
-
-inline uint16_t packed_mul_bf16(float a, float b, bool fp16_ovfl) {
-  // An addend with the product's sign preserves a negative zero product.
-  const float zero = std::signbit(a) != std::signbit(b) ? -0.0f : 0.0f;
-  return packed_fma_bf16(a, b, zero, fp16_ovfl);
 }
 
 enum class ScalarAtomicOp { FADD, FMIN, FMAX, FCMPSWAP };
@@ -1171,61 +1029,6 @@ inline uint64_t fma_f64(uint64_t src0, uint64_t src1, uint64_t src2, uint32_t ro
                                                        output_denormal::Policy::make(denorm_mode));
 }
 
-/// @brief Binary F64 operations implemented by the shared MODE-aware helper.
-enum class BinaryF64Op { Add, Multiply, MaximumNumber, MinimumNumber };
-
-/// @brief Execute a binary F64 operation under MODE.FP_ROUND and MODE.FP_DENORM.
-/// @details MaximumNumber and MinimumNumber return the numeric operand for a
-/// one-NaN input and explicitly select +0/-0 for signed-zero ties respectively.
-inline uint64_t binary_f64(uint64_t src0, uint64_t src1, BinaryF64Op operation, uint32_t round_mode,
-                           uint32_t denorm_mode) {
-  const auto input = input_denormal::Policy::make(denorm_mode);
-  src0 = input_denormal::flush_input<fp_format::F64>(src0, input);
-  src1 = input_denormal::flush_input<fp_format::F64>(src1, input);
-
-  uint64_t result;
-  {
-    detail::ScopedFenv environment(round_mode);
-    const double lhs = std::bit_cast<double>(src0);
-    const double rhs = std::bit_cast<double>(src1);
-    const double value = [&] {
-      switch (operation) {
-      // evaluate_arithmetic keeps these inside the guest rounding environment.
-      case BinaryF64Op::Add:
-        return detail::evaluate_arithmetic<Arithmetic::ADD>(lhs, rhs, 0.0);
-      case BinaryF64Op::Multiply:
-        return detail::evaluate_arithmetic<Arithmetic::MUL>(lhs, rhs, 0.0);
-      case BinaryF64Op::MaximumNumber:
-        if (std::isnan(lhs)) {
-          return std::isnan(rhs) ? std::numeric_limits<double>::quiet_NaN() : rhs;
-        }
-        if (std::isnan(rhs)) {
-          return lhs;
-        }
-        if ((src0 & 0x7fffffffffffffffULL) == 0 && (src1 & 0x7fffffffffffffffULL) == 0) {
-          return std::bit_cast<double>((src0 & src1) & 0x8000000000000000ULL);
-        }
-        return std::fmax(lhs, rhs);
-      case BinaryF64Op::MinimumNumber:
-        if (std::isnan(lhs)) {
-          return std::isnan(rhs) ? std::numeric_limits<double>::quiet_NaN() : rhs;
-        }
-        if (std::isnan(rhs)) {
-          return lhs;
-        }
-        if ((src0 & 0x7fffffffffffffffULL) == 0 && (src1 & 0x7fffffffffffffffULL) == 0) {
-          return std::bit_cast<double>((src0 | src1) & 0x8000000000000000ULL);
-        }
-        return std::fmin(lhs, rhs);
-      }
-      return std::numeric_limits<double>::quiet_NaN();
-    }();
-    result = std::bit_cast<uint64_t>(value);
-  }
-  return output_denormal::flush_output<fp_format::F64>(result,
-                                                       output_denormal::Policy::make(denorm_mode));
-}
-
 /// @brief Apply F64 OMOD/CLAMP under the architectural rounding mode.
 /// @details A nonzero OMOD flushes a denormal result and converts either signed zero to +0.
 /// With OMOD and CLAMP disabled, no floating-point work is needed, so the original bits are
@@ -1267,15 +1070,6 @@ inline uint64_t scale_u53_f64_rtz(uint64_t significand, int exponent) {
 } // namespace rocjitsu::amdgpu::fp_mode
 
 namespace rocjitsu::amdgpu {
-
-/// @brief Preserve the FIXUP NaN payload when narrowing its promoted result.
-inline uint16_t narrow_div_fixup_f16(float value, bool fp16_ovfl) {
-  const uint32_t bits = std::bit_cast<uint32_t>(value);
-  if ((bits & 0x7fffffffu) > 0x7f800000u) {
-    return static_cast<uint16_t>(((bits >> 16) & 0x8000u) | 0x7c00u | ((bits >> 13) & 0x3ffu));
-  }
-  return util::f32_to_f16_mode(value, fp16_ovfl);
-}
 
 /// Convert the F32 source of a scaled narrowing instruction before applying its E8M0 scale.
 /// A preserved F32 subnormal is normal in double, even if the host flushes F32 operands.

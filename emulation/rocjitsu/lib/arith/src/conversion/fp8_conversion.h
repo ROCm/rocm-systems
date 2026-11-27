@@ -11,7 +11,7 @@
 namespace rocjitsu::arith {
 
 // Encoding and NaN policy inherited from each target conversion instruction.
-enum class Fp8WidenPolicy { Gfx12, Gfx942, Gfx950, Gfx1250, E5M3 };
+enum class Fp8WidenPolicy { Gfx12, Gfx942, Gfx950, OcpSignedNan, Gfx1250, E5M3 };
 
 // Widen FP8/BF8 factors to the selected FP32/FP16 destination format. Preserve destination lanes
 // outside exec_mask. Half selects FP16 output; single-half writes preserve the other destination

@@ -326,7 +326,8 @@ TEST(rocprofiler_lib, agent)
             // HSA lib doesn't set family ID for CPU-only but we do
             EXPECT_EQ(agent->family_id, hsa_agent->family_id) << msg;
         }
-        EXPECT_EQ(agent->fw_version.ui32.uCode, hsa_agent->ucode_version) << msg;
+        // HSA reports the full 16-bit compute microcode version, the agent keeps the low 10 bits.
+        EXPECT_EQ(agent->fw_version.ui32.uCode, hsa_agent->ucode_version & 0x3ffu) << msg;
         EXPECT_EQ(agent->sdma_fw_version.uCodeSDMA, hsa_agent->sdma_ucode_version) << msg;
 
         if(hsa_agent->shader_engs > 0)

@@ -23,6 +23,9 @@ implementation.
 The HIP runtime API backends are summarized in the following figure:
 
 .. figure:: ../data/how-to/hip_runtime_api/runtimes.svg
+   :alt: The HIP runtime API on top of CLR, which uses the ROCr runtime or
+         PAL on the AMD platform
+
 Here are the various HIP Runtime API high level functions:
 
 * :doc:`./hip_runtime_api/initialization`

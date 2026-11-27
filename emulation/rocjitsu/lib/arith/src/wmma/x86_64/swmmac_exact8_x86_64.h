@@ -11,11 +11,14 @@ namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE::sparse_exact8 {
 
 using namespace wmma_dot8;
 
+constexpr int Slices = 16 / Columns;
+
 struct FactorTable {
   ScalarFactor values[256];
 };
 
-// Decode each A byte once into signed Q12 units and their binary grid.
+// Decode each A byte once into Q12 units and their binary grid.
+// On AVX2, units are stored zero-extended from signed int16_t for VPMADDWD.
 template <bool Bf8>
 inline constexpr auto factors = [] {
   FactorTable table{};
@@ -24,8 +27,13 @@ inline constexpr auto factors = [] {
     int units = value.nan()   ? Nan
                 : value.inf() ? Infinity
                               : int(value.significand()) << (12 - Encoding<Bf8>::fraction_bits);
-    table.values[bits] = {value.negative() ? -units : units,
-                          units ? value.alignment_exponent() - 12 : Empty};
+    int signed_units = value.negative() ? -units : units;
+#if defined(RJ_ARITH_TARGET_X86_64_V4)
+    int32_t stored_units = signed_units;
+#else
+    int32_t stored_units = int32_t(uint16_t(int16_t(signed_units)));
+#endif
+    table.values[bits] = {stored_units, units ? value.alignment_exponent() - 12 : Empty};
   }
   return table;
 }();
@@ -33,14 +41,16 @@ inline constexpr auto factors = [] {
 struct Input {
   ScalarFactor a[16][16];
   uint8_t k[16][16];
-  Factor b[32][16 / Columns];
-  bool special_a[16][2];
-  bool special_b;
+  Factor b[Slices][32];
+  uint32_t special_a[2];
+  uint32_t special_b[Slices];
 };
 
 template <bool Bf8, int Wave>
 inline void prepare_left(Input &in, const uint32_t *const *a, const uint32_t *const *index,
                          int key) {
+  in.special_a[0] = 0;
+  in.special_a[1] = 0;
   for (int row = 0; row < 16; ++row) {
     for (int stage = 0; stage < 2; ++stage) {
       bool any_special = false;
@@ -59,22 +69,30 @@ inline void prepare_left(Input &in, const uint32_t *const *a, const uint32_t *co
           in.k[row][ck] = uint8_t(4 * (ck / 2) + ((selectors >> (2 * slot)) & 3));
         }
       }
-      in.special_a[row][stage] = any_special;
+      if (any_special) {
+        in.special_a[stage] |= 1u << row;
+      }
     }
   }
 }
 
+// Decode all 32 dense B K-positions, loading each packed 4-byte word vector once.
 template <bool Bf8, int Wave> inline void prepare_right(Input &in, const uint32_t *const *b) {
-  Vec largest = constant<Vec>(0);
-  for (int k = 0; k < 32; ++k) {
-    for (int col = 0; col < 16; col += Columns) {
+  for (int slice = 0; slice < Slices; ++slice) {
+    int col = slice * Columns;
+    Vec largest = constant<Vec>(0);
+    for (int k = 0; k < 32; k += 4) {
       auto field = swmmac_b_field<8, Wave>(col, k);
-      Vec packed = load<Vec>(b[field.reg] + field.lane);
-      Vec bits = bit_and(shift_right(packed, constant<Vec>(field.shift)), constant<Vec>(255));
-      in.b[k][col / Columns] = decode_factor<Bf8>(bits, largest);
+      Vec words = load<Vec>(b[field.reg] + field.lane);
+      Factor batch[4];
+      decode_word4<Bf8>(words, batch, largest);
+      RJ_ARITH_UNROLL(4)
+      for (int i = 0; i < 4; ++i) {
+        in.b[slice][k + i] = batch[i];
+      }
     }
+    in.special_b[slice] = special_mask_from_largest16<Bf8>(largest);
   }
-  in.special_b = lane_mask(greater(largest, constant<Vec>(FirstSpecial<Bf8> - 1))) != 0;
 }
 
 template <int Wave>
@@ -93,34 +111,48 @@ inline void prepare(Input &in, bool bf8_a, bool bf8_b, int key, const uint32_t *
 }
 
 // Form four products of broadcast A factors with the B columns selected by k.
-inline Group group4(const ScalarFactor *a, const uint8_t *k, const Factor (*b)[16 / Columns],
-                    int slice) {
+inline Group group4(const ScalarFactor *a, const uint8_t *k, const Factor *b) {
   Vec products[4], grids[4];
   RJ_ARITH_UNROLL(4)
   for (int i = 0; i < 4; ++i) {
-    const auto &factor = b[k[i]][slice];
-    products[i] = mul(constant<Vec>(a[i].units), factor.units);
+    const Factor &factor = b[k[i]];
+    products[i] = mul_units(a[i].units, factor.units);
     grids[i] = add(constant<Vec>(a[i].grid), factor.grid);
   }
   return align4(products, grids);
 }
 
-inline Vec exceptional(const ScalarFactor *a, const uint8_t *k, const Factor (*b)[16 / Columns],
-                       int slice, Vec acc, Vec result) {
+inline Vec exceptional(const ScalarFactor *a, const uint8_t *k, const Factor *b, Vec acc,
+                       Vec result) {
   Exceptions seen{constant<Vec>(0), constant<Vec>(0), constant<Vec>(0)};
   for (int i = 0; i < 8; ++i) {
-    classify(seen, constant<Vec>(a[i].units), b[k[i]][slice].units);
+    int32_t u = int32_t(int16_t(a[i].units));
+    classify(seen, constant<Vec>(u), b[k[i]].units);
   }
   return resolve(seen, acc, result);
 }
 
-inline Vec dot8(const ScalarFactor *a, const uint8_t *k, const Factor (*b)[16 / Columns], int slice,
-                Vec acc, bool check_special) {
-  Vec result = round_groups(group4(a, k, b, slice), group4(a + 4, k + 4, b, slice), acc);
-  if (check_special) [[unlikely]] {
-    result = exceptional(a, k, b, slice, acc, result);
+// Apply one DOT8 stage to all 16 rows of one output slice. Special checking is
+// hoisted outside the row loop so finite tiles execute branchlessly.
+template <bool CheckSpecial>
+inline void stage_rows(Result &result, const Input &in, int stage, int slice,
+                       const uint32_t *const *d, uint32_t special_rows) {
+  const int ck = 8 * stage;
+  const Factor *b = in.b[slice];
+  for (int row = 0; row < 16; ++row) {
+    int reg = row % 8, lane = 16 * (row / 8) + slice * Columns;
+    Vec &out = result[reg][lane / Columns];
+    Vec acc = stage ? out : load<Vec>(d[reg] + lane);
+    const ScalarFactor *arow = in.a[row] + ck;
+    const uint8_t *krow = in.k[row] + ck;
+    Vec next = round_groups(group4(arow, krow, b), group4(arow + 4, krow + 4, b), acc);
+    if constexpr (CheckSpecial) {
+      if ((special_rows >> row) & 1) {
+        next = exceptional(arow, krow, b, acc, next);
+      }
+    }
+    out = next;
   }
-  return result;
 }
 
 // Apply both DOT8 stages to a complete 16-by-16 output tile.
@@ -133,13 +165,13 @@ inline void run(bool bf8_a, bool bf8_b, bool wave64, int key, uint32_t *const *d
     prepare<32>(in, bf8_a, bf8_b, key, a, b, index);
   }
   Result result;
-  for (int ck = 0; ck < 16; ck += 8) {
-    for (int row = 0; row < 16; ++row) {
-      for (int slice = 0; slice < 16 / Columns; ++slice) {
-        int reg = row % 8, lane = 16 * (row / 8) + slice * Columns;
-        Vec acc = ck ? result[reg][lane / Columns] : load<Vec>(d[reg] + lane);
-        result[reg][lane / Columns] = dot8(in.a[row] + ck, in.k[row] + ck, in.b, slice, acc,
-                                           in.special_b || in.special_a[row][ck / 8]);
+  for (int slice = 0; slice < Slices; ++slice) {
+    for (int stage = 0; stage < 2; ++stage) {
+      uint32_t special_rows = in.special_b[slice] ? 0xffffu : in.special_a[stage];
+      if (special_rows) [[unlikely]] {
+        stage_rows<true>(result, in, stage, slice, d, special_rows);
+      } else {
+        stage_rows<false>(result, in, stage, slice, d, 0);
       }
     }
   }
