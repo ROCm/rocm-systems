@@ -42,6 +42,9 @@ class KFDMemoryTest :  public KFDBaseComponentTest {
     void AccessPPRMem(int gpuNode);
     void MemoryRegister(int gpuNode);
     void MemoryRegisterSamePtr(int gpuNode);
+    void MemoryRegisterReadOnly(int gpuNode);
+    void MemoryRegisterUserPtrUpgrade(int gpuNode);
+    void MemoryRegisterUserPtrUpgradeUnmapped(int gpuNode);
     void FlatScratchAccess(int gpuNode);
     void GetTileConfigTest(int gpuNode);
     void LargestSysBufferTest(int gpuNode);
