@@ -590,6 +590,7 @@ add_executable(
     sdma_ring_consumer_test.cpp
     cdna5_tensor_dma_test.cpp
     ds_address_encoded_fields_test.cpp
+    ds_offset_encoded_fields_test.cpp
     gfx1100_ds_address_test.cpp
     gfx1251_ds_address_test.cpp
     ds_memory_snapshot_test.cpp
@@ -624,6 +625,7 @@ add_executable(
     rdna4_dot_dpp_test.cpp
     rdna1_valu_test.cpp
     rdna4_memory_test.cpp
+    memory_displacement_encoded_fields_test.cpp
     rdna4_encoded_fields_test.cpp
     readlane_selector_test.cpp
     pc_extension_test.cpp
@@ -640,21 +642,16 @@ add_executable(
     scalar_buffer_test.cpp
     scalar_cache_policy_test.cpp
     scalar_cache_discard_test.cpp
-    transcendental_test.cpp
-    comparison_test.cpp
+    legacy_native_f32_test.cpp
+    legacy_special_f32_test.cpp
     gfx1150_compare_test.cpp
-    conversion_test.cpp
-    older_normalized_conversion_test.cpp
-    older_packing_test.cpp
     older_packed_conversion_test.cpp
     older_byte_conversion_test.cpp
+    older_normalized_conversion_test.cpp
+    older_packing_test.cpp
     denormal_test.cpp
-    floating_operation_test.cpp
     input_denormal_test.cpp
     legacy_minmax_test.cpp
-    minmax_test.cpp
-    output_denormal_test.cpp
-    output_modifier_test.cpp
     source_modifier_test.cpp
     amdgpu_elf_test_support.cpp
     amdgpu_elf_test_support_test.cpp
@@ -715,6 +712,7 @@ add_executable(
     gfx908_compare_test.cpp
     gfx10_compare_test.cpp
     vop3_conversion_modifiers_test.cpp
+    vop3_modifier_policy_test.cpp
     cube_instruction_test.cpp
     older_graphics_test.cpp
     division_test.cpp
@@ -723,6 +721,9 @@ add_executable(
     frexp_exponent_test.cpp
     frexp_mantissa_test.cpp
     integral_rounding_f32_test.cpp
+    gfx1150_dual_test.cpp
+    legacy_division_test.cpp
+    legacy_native_f64_test.cpp
     division_macro_test.cpp
     valu_floating_policy_test.cpp
     gfx11_dot2_test.cpp
@@ -786,7 +787,6 @@ add_executable(
     simd_correctness/vop1_cvt_f64_simd_correctness_test.cpp
     simd_correctness/vopc_simd_correctness_test.cpp
     simd_correctness/vopc_cmp_class_simd_correctness_test.cpp
-    simd_correctness/vop3_modifier_simd_test.cpp
     simd_correctness/vop3_binary_simd_correctness_test.cpp
     simd_correctness/vop3_unary_simd_correctness_test.cpp
     simd_correctness/vopc_vop3_int_simd_correctness_test.cpp
@@ -802,8 +802,6 @@ add_executable(
     simd_correctness/vop_alias_rdna_simd_correctness_test.cpp
     simd_correctness/vop3_shift64_simd_correctness_test.cpp
     simd_correctness/vop3_shift64_scalar_correctness_test.cpp
-    simd_correctness/vop3_fp16_unary_simd_correctness_test.cpp
-    simd_correctness/vop3_fp16_transcendental_simd_correctness_test.cpp
     simd_correctness/vop3_cndmask_pack_simd_correctness_test.cpp
     simd_correctness/vop3_div_helpers_simd_correctness_test.cpp
     simd_correctness/vop3_b16_rdna_simd_correctness_test.cpp
@@ -918,6 +916,8 @@ target_link_libraries(
         GTest::gmock
         GTest::gtest_main
 )
+# Allow the VM config tests to fail creation of the synthetic DRM directory.
+target_link_options(rocjitsu_tests PRIVATE "LINKER:--wrap=mkdtemp")
 target_include_directories(rocjitsu_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 rj_configure_target(rocjitsu_tests TEST)
 # GCC 14.3, GCC 15.2, and GCC 16.0.1 (20260322) emit a false-positive
@@ -3286,7 +3286,7 @@ set(_rj_interposer_syncobj_tests
     IndependentDrmOpensHaveSeparateNamespaces
     CreateSignaledSeedsOnlyTheInitialPoint
     WaitValidationMatchesDrm
-    OversizedBinaryWaitReturnsEnomem
+    OversizedBinaryWaitAllocationIsFatal
     DestroyRejectsInvalidInput
     TimelineWaitBlocksUntilSignalOrDeadline
     TimelineWaitReturnsEintrForSignal

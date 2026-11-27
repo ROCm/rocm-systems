@@ -44,6 +44,7 @@ set(rj_arith_x86_64_v3_sources
     wmma/x86_64/wmma_gfx1250_fp8_x86_64_v3.cpp
     wmma/x86_64/wmma_gfx1250_f32_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/mfma_half_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/gfx942_exact_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/common/x86_64/dense_f64_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/gfx1250_integer_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/matrix_i8_x86_64_v3.cpp
@@ -87,6 +88,7 @@ set(rj_arith_x86_64_v3_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/packed_f64_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/frexp_exp_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/half_mad_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/common/x86_64/sdwa_output_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/half_binary_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/half_exponent_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/half_fma_x86_64_v3.cpp
@@ -163,6 +165,7 @@ set(rj_arith_x86_64_v4_sources
     wmma/x86_64/wmma_gfx1250_fp8_x86_64_v4.cpp
     wmma/x86_64/wmma_gfx1250_f32_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/mfma_half_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/gfx942_exact_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/common/x86_64/dense_f64_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/gfx1250_integer_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/matrix_i8_x86_64_v4.cpp
@@ -208,6 +211,7 @@ set(rj_arith_x86_64_v4_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/fma_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/fma_exact_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/half_mad_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/common/x86_64/sdwa_output_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/half_fma_exact_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/half_ldexp_exact_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/half_binary_x86_64_v4.cpp
@@ -236,6 +240,8 @@ set(rj_arith_x86_64_v4_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/mad64_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/integer64_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/register/x86_64/cndmask_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/half_unary_loose_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/half_trig_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/half_unary_exact_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/rcp_exact_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/rcp_iflag_x86_64_v4.cpp
@@ -263,14 +269,22 @@ set(rj_arith_x86_64_v4_sources
 )
 
 set(rj_arith_x86_64_v4_bf16_sources
+    ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/mfma_fp8_x86_64_v4_bf16.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/mfma_half_x86_64_v4_bf16.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/mfma_mixed_x86_64_v4_bf16.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/fp8_wmma_x86_64_v4_bf16.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/swmmac_fp8_x86_64_v4_bf16.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/wmma_gfx1250_bf16_x86_64_v4_bf16.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/wmma_x86_64_v4_bf16.cpp
 )
 
 set(rj_arith_avx512vnni_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/gfx1250_integer_avx512vnni.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/matrix_i8_avx512vnni.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/sparse_matrix_i8_avx512vnni.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/mfma_mixed_avx512vnni.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/integer_wmma_avx512vnni.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/wmma_gfx1250_mixed_avx512vnni.cpp
 )
 
 # Keep source selection, compile flags and feature definitions together for each ISA.

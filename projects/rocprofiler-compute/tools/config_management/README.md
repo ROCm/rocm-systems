@@ -26,7 +26,7 @@ rocprofiler-compute/
 │       ├── gfx942/
 │       ├── gfx950/
 │       ├── gfx115x/                     # RDNA 3.5 shared analysis configs
-│       ├── gfx1201/                     # Navi48 RDNA4 analysis configs
+│       ├── gfx120x/                     # Navi 4 shared analysis configs
 │       ├── gfx1250/
 │       ├── gfx9_config_template.yaml    # CDNA (gfx9) panel contract
 │       ├── gfx11_config_template.yaml   # RDNA 3.5 (gfx115*) panel contract
@@ -182,7 +182,7 @@ Panel YAMLs (src/) → Per-Arch YAMLs (tools/) → Docs YAMLs (docs/) → Sphinx
 **Files:**
 ```bash
 tools/per_arch_metric_definitions/
-  ├── gfx{908,90a,940,941,942,950,115x,1201,1250}_metrics_description.yaml   # plain + rst + unit
+  ├── gfx{908,90a,942,950,115x,120x,1250}_metrics_description.yaml   # plain + rst + unit
 
 docs/data/metrics/
   └── <arch>_metrics.yaml                                  # per-arch rst + unit (generated)

@@ -26,6 +26,7 @@ on:
           - gfx94X
           - gfx90a
           - gfx1151
+          - gfx120X
       os-release:
         description: 'Ubuntu release to run'
         required: false
@@ -96,6 +97,7 @@ jobs:
       gfx950_runner: ${{ steps.runner.outputs.gfx950_runner }}
       gfx90a_runner: ${{ steps.runner.outputs.gfx90a_runner }}
       gfx1151_runner: ${{ steps.runner.outputs.gfx1151_runner }}
+      gfx120x_runner: ${{ steps.runner.outputs.gfx120x_runner }}
     steps:
       - name: Checkout workflow actions
         uses: actions/checkout@v6
@@ -129,6 +131,7 @@ jobs:
           GFX94X_RUNNER: ${{ needs.ci_config.outputs.gfx94x_runner }}
           GFX90A_RUNNER: ${{ needs.ci_config.outputs.gfx90a_runner }}
           GFX1151_RUNNER: ${{ needs.ci_config.outputs.gfx1151_runner }}
+          GFX120X_RUNNER: ${{ needs.ci_config.outputs.gfx120x_runner }}
           EVENT_NAME: ${{ github.event_name }}
           INPUT_MODE: ${{ inputs.mode }}
           INPUT_ARCH: ${{ inputs.arch }}
@@ -175,6 +178,7 @@ jobs:
             ["gfx94X"]="$GFX94X_RUNNER"
             ["gfx90a"]="$GFX90A_RUNNER"
             ["gfx1151"]="$GFX1151_RUNNER"
+            ["gfx120X"]="$GFX120X_RUNNER"
           )
           for arch in "${!RUNNER_MAP[@]}"; do
             runner="${RUNNER_MAP[$arch]}"
@@ -253,7 +257,7 @@ jobs:
       - name: Install nightly ROCm and PyTorch wheels
         shell: bash
         env:
-          GFX_TARGET: ${{ matrix.system.gfx-target }}
+          GFX_TARGETS: ${{ join(matrix.system.gfx-target, ' ') }}
         run: |
           set -e
           python3 -m venv "${ROCM_VENV}"
@@ -262,19 +266,26 @@ jobs:
           # cmake 3.21 misses Python 3.12 headers. Drop once the nightly image has this.
           "${ROCM_VENV}/bin/pip" install 'cmake==3.28.*'
 
+          device_extras=""
+          for target in ${GFX_TARGETS}; do
+            device_extras+=",device-${target}"
+          done
+
           # rocprof-compute is tested against PyTorch 2.14. The torch wheel pins
           # the ROCm build it was made against, which pins ROCm here too.
           # TheRock builds PyTorch for Python 3.11+ only, so Python 3.10 gets ROCm alone.
           "${ROCM_VENV}/bin/pip" install \
             --index-url "${WHEEL_INDEX_URL}" \
             --timeout 600 \
-            "torch[device-${GFX_TARGET}]==2.14.*; python_version >= '3.11'" \
-            "rocm[libraries,profiler,devel,device-${GFX_TARGET}]"
+            "torch[${device_extras#,}]==2.14.*; python_version >= '3.11'" \
+            "rocm[libraries,profiler,devel${device_extras}]"
 
           "${ROCM_VENV}/bin/rocm-sdk" init
 
-          # pip only warns on an unknown extra, so assert the device wheel landed.
-          "${ROCM_VENV}/bin/pip" show "rocm-sdk-device-${GFX_TARGET}" > /dev/null
+          # pip only warns on an unknown extra, so assert each device wheel landed.
+          for target in ${GFX_TARGETS}; do
+            "${ROCM_VENV}/bin/pip" show "rocm-sdk-device-${target}" > /dev/null
+          done
 
           # $GITHUB_ENV is a file; every later step in this job starts with these
           # set. A plain export would not outlive this step.

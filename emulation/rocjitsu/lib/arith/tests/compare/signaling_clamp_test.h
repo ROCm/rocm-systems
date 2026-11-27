@@ -28,6 +28,10 @@ void check_signaling_clamp_compare(Call call, Call numeric) {
     write_compare_operand(input.v, Lanes - 1, Bits,
                           compare_infinity<Bits>() | compare_quiet_bit<Bits>() | 1, half);
     write_compare_operand(input.v + 2, Lanes - 1, Bits, 0, half);
+    // Keep a B-only NaN active independently of the A-only NaN lane above.
+    write_compare_operand(input.v, 6, Bits, compare_class_value<Bits>(8), half);
+    write_compare_operand(input.v + 2, 6, Bits,
+                          compare_infinity<Bits>() | compare_quiet_bit<Bits>() | 1, half);
     write_compare_operand(input.v, 5, Bits, 1, half);
     // A preserved subnormal/finite pair must not add INPUT_DENORM.
     write_compare_operand(input.v + 2, 5, Bits, compare_class_value<Bits>(8), half);
@@ -47,8 +51,8 @@ void check_signaling_clamp_compare(Call call, Call numeric) {
       modifiers);
   for (uint64_t cpu : supported_cpu_levels()) {
     for (uint64_t semantics : semantics_modes()) {
-      for (int scenario = 0; scenario < 4; ++scenario) {
-        const Mask exec_masks[] = {~Mask(0), Mask(1) << (Lanes - 1), Mask(1) << 5, 0};
+      for (int scenario = 0; scenario < 5; ++scenario) {
+        const Mask exec_masks[] = {~Mask(0), Mask(1) << (Lanes - 1), Mask(1) << 5, Mask(1) << 6, 0};
         const Mask exec_mask = exec_masks[scenario];
         const uint64_t mode = scenario
                                   ? RJ_ARITH_ALU_CLAMP | RJ_ARITH_ALU_ABS_A | RJ_ARITH_ALU_NEG_B |

@@ -21,9 +21,14 @@ function(rj_arith_add_test target source)
 endfunction()
 
 rj_arith_add_test(rj_arith_gfx1250_binary_test fp/gfx1250_binary_test.cpp)
+rj_arith_add_test(rj_arith_inherited_math_goldens_test math/inherited_goldens_test.cpp)
+
+rj_arith_add_test(rj_arith_separately_rounded_mad_test fp/separately_rounded_mad_test.cpp)
+
+rj_arith_add_test(rj_arith_packed_f64_gfx1251_test fp/packed_f64_gfx1251_test.cpp)
+rj_arith_add_test(rj_arith_conversion_inherited_goldens_test conversion/inherited_goldens_test.cpp)
 
 rj_arith_add_test(rj_arith_packed_u64_gfx1251_test integer/packed_u64_gfx1251_test.cpp)
-rj_arith_add_test(rj_arith_packed_f64_gfx1251_test fp/packed_f64_gfx1251_test.cpp)
 rj_arith_add_test(rj_arith_sparse_matrix_i8_test mfma/sparse_matrix_i8_test.cpp)
 rj_arith_add_test(rj_arith_matrix_i8_test mfma/matrix_i8_test.cpp)
 rj_arith_add_test(rj_arith_mfma_f64_test mfma/mfma_f64_test.cpp)
@@ -34,6 +39,9 @@ rj_arith_add_test(rj_arith_wmma_gfx1251_f64_test wmma/gfx1251_f64_test.cpp)
 rj_arith_add_test(rj_arith_wmma_gfx1250_f32_test wmma/gfx1250_f32_test.cpp)
 rj_arith_add_test(rj_arith_wmma_gfx1250_fp8_test wmma/gfx1250_fp8_test.cpp)
 rj_arith_add_test(rj_arith_wmma_gfx1250_half_test wmma/gfx1250_half_test.cpp)
+
+rj_arith_add_test(rj_arith_gfx1150_fp32_test fp/gfx1150_fp32_test.cpp)
+rj_arith_add_test(rj_arith_gfx908_fp32_test fp/gfx908_fp32_test.cpp)
 
 # One explicit source, executable and arithmetic test per instruction.
 foreach(
@@ -242,7 +250,11 @@ foreach(
 endforeach()
 
 # VOPD wrappers retain the ordinary instructions' arithmetic and status contracts.
-foreach(family IN ITEMS alu fused dot gfx1250)
+foreach(
+    family
+    IN
+    ITEMS alu fused dot gfx1150 gfx1250
+)
     set(target "rj_arith_dual_${family}_test")
     rj_arith_add_test(${target} dual/${family}_test.cpp)
 endforeach()
@@ -296,6 +308,7 @@ foreach(
         float_equality
         float_gfx908
         float_native_gfx10
+        float_half_gfx10
         float_ordered
         float_gfx1150
         float_unordered

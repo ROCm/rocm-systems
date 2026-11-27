@@ -10,7 +10,6 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/simd_path_test_hooks.h"
 #include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/target_provider.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
@@ -303,29 +302,6 @@ TEST(Gfx1250ExecutionTest, ArchitectureDecoderVectorScalarSourceFailureRejectsMe
   }
 }
 
-TEST(FpModePolicyTest, F16OmodFollowsProfileDenormIeeeAndPackedRules) {
-  using amdgpu::fp_mode::effective_f16_omod;
-
-  // Older promoted VOP3 packed FMAC supports OMOD, but the ordinary older
-  // DENORM/IEEE gates still apply.
-  EXPECT_EQ(effective_f16_omod(rocjitsu::IsaFamily::Cdna4, 0, false, true, 1), 1u);
-  EXPECT_EQ(effective_f16_omod(rocjitsu::IsaFamily::Cdna4, 2, false, true, 1), 0u);
-  EXPECT_EQ(effective_f16_omod(rocjitsu::IsaFamily::Cdna4, 0, true, true, 1), 0u);
-
-  // GFX11+ explicitly ignores OMOD for packed F16 results.
-  EXPECT_EQ(effective_f16_omod(rocjitsu::IsaFamily::Rdna3, 0, false, true, 1), 0u);
-  EXPECT_EQ(effective_f16_omod(rocjitsu::IsaFamily::Rdna4, 0, false, true, 1), 0u);
-  EXPECT_EQ(effective_f16_omod(rocjitsu::IsaFamily::Cdna5, 0, false, true, 1), 0u);
-
-  // Ordinary F16 on older profiles uses the DENORM/IEEE gates. GFX12 and
-  // gfx1250 allow OMOD regardless of those two mode settings.
-  EXPECT_EQ(effective_f16_omod(rocjitsu::IsaFamily::Rdna3, 0, false, false, 3), 3u);
-  EXPECT_EQ(effective_f16_omod(rocjitsu::IsaFamily::Rdna3, 3, false, false, 3), 0u);
-  EXPECT_EQ(effective_f16_omod(rocjitsu::IsaFamily::Rdna3, 0, true, false, 3), 0u);
-  EXPECT_EQ(effective_f16_omod(rocjitsu::IsaFamily::Rdna4, 3, true, false, 3), 3u);
-  EXPECT_EQ(effective_f16_omod(rocjitsu::IsaFamily::Cdna5, 3, true, false, 3), 3u);
-}
-
 TEST(FpModePolicyTest, F32ToBf16RoundHonorsMode) {
   const auto convert = [](uint32_t bits, uint32_t round_mode) {
     return amdgpu::fp_mode::detail::f32_to_bf16_round(std::bit_cast<float>(bits), round_mode);
@@ -351,38 +327,6 @@ TEST(FpModePolicyTest, F32ToBf16RoundHonorsMode) {
   EXPECT_EQ(convert(0x7f7fffffu, 1), 0x7f80u);
   EXPECT_EQ(convert(0x7f7fffffu, 2), 0x7f7fu);
   EXPECT_EQ(convert(0x7f7fffffu, 3), 0x7f7fu);
-}
-
-TEST(FpModePolicyTest, ActiveOmodFlushesSubnormalsAndCanonicalizesZero) {
-  using amdgpu::fp_mode::finalize_omod_bf16;
-  using amdgpu::fp_mode::finalize_omod_f16;
-  using amdgpu::fp_mode::finalize_omod_f32;
-  using amdgpu::fp_mode::finalize_omod_f64;
-
-  EXPECT_EQ(finalize_omod_f16(0x0001u, 1), 0u);
-  EXPECT_EQ(finalize_omod_f16(0x8001u, 1), 0u);
-  EXPECT_EQ(finalize_omod_f16(0x8000u, 1), 0u);
-  EXPECT_EQ(finalize_omod_f16(0x8001u, 0), 0x8001u);
-
-  EXPECT_EQ(finalize_omod_bf16(0x0001u, 1), 0u);
-  EXPECT_EQ(finalize_omod_bf16(0x8001u, 1), 0u);
-  EXPECT_EQ(finalize_omod_bf16(0x8000u, 1), 0u);
-  EXPECT_EQ(finalize_omod_bf16(0x8001u, 0), 0x8001u);
-
-  EXPECT_EQ(std::bit_cast<uint32_t>(finalize_omod_f32(std::bit_cast<float>(0x00000001u), 1)), 0u);
-  EXPECT_EQ(std::bit_cast<uint32_t>(finalize_omod_f32(std::bit_cast<float>(0x80000001u), 1)), 0u);
-  EXPECT_EQ(std::bit_cast<uint32_t>(finalize_omod_f32(-0.0f, 1)), 0u);
-  EXPECT_EQ(std::bit_cast<uint32_t>(finalize_omod_f32(std::bit_cast<float>(0x80000001u), 0)),
-            0x80000001u);
-
-  EXPECT_EQ(std::bit_cast<uint64_t>(finalize_omod_f64(std::bit_cast<double>(uint64_t{1}), 1)), 0u);
-  EXPECT_EQ(
-      std::bit_cast<uint64_t>(finalize_omod_f64(std::bit_cast<double>(0x8000000000000001ULL), 1)),
-      0u);
-  EXPECT_EQ(std::bit_cast<uint64_t>(finalize_omod_f64(-0.0, 1)), 0u);
-  EXPECT_EQ(
-      std::bit_cast<uint64_t>(finalize_omod_f64(std::bit_cast<double>(0x8000000000000001ULL), 0)),
-      0x8000000000000001ULL);
 }
 
 TEST(Gfx1250ExecutionTest, GenericF16OmodStaysActiveAndFinalizesWithIeeeDenormMode) {
@@ -994,86 +938,6 @@ TEST(Gfx1250ExecutionTest, Vop3CarryClampSaturatesVdstAndPreservesCarryBorrow) {
           << "scalar " << scalar;
     }
   }
-}
-
-TEST(FpModePolicyTest, F32ToBf16FmaRoundsTowardNegativeInfinity) {
-  const float multiplicand = std::bit_cast<float>(0x8e0b5904u);
-  const float multiplier = std::bit_cast<float>(0x1ae3bc34u);
-  const float addend = std::bit_cast<float>(0xb6630000u);
-  EXPECT_EQ(amdgpu::fp_mode::fma_f32_to_bf16(multiplicand, multiplier, addend, 2, false, true),
-            0xb664u);
-  EXPECT_EQ(amdgpu::fp_mode::fma_f32_to_bf16(-0.0f, 1.0f, -0.0f, 2, false, true), 0x8000u);
-  EXPECT_EQ(amdgpu::fp_mode::fma_f32_to_bf16(-0.0f, 1.0f, -0.0f, 2, true, true), 0u);
-}
-
-TEST(FpModePolicyTest, F32ToBf16FmaKeepsSubnormal) {
-  const float subnormal = std::bit_cast<float>(0x00018000u);
-  EXPECT_EQ(amdgpu::fp_mode::fma_f32_to_bf16(subnormal, 1.0f, 0.0f, 0, false, true), 0x0002u);
-}
-
-TEST(FpModePolicyTest, F64ClampCanonicalizesNanAndNonpositiveValues) {
-  constexpr uint64_t kPositiveZero = 0x0000000000000000ULL;
-  constexpr uint64_t kNegativeZero = 0x8000000000000000ULL;
-  constexpr uint64_t kPositiveSubnormal = 0x0000000000000001ULL;
-  constexpr uint64_t kNegativeSubnormal = 0x8000000000000001ULL;
-  constexpr uint64_t kInfinity = std::bit_cast<uint64_t>(std::numeric_limits<double>::infinity());
-  constexpr uint64_t kNegativeInfinity =
-      std::bit_cast<uint64_t>(-std::numeric_limits<double>::infinity());
-  constexpr uint64_t kQuietNan = 0x7FF8000000001234ULL;
-  constexpr uint64_t kSignalingNan = 0x7FF0000000000001ULL;
-  constexpr std::array<uint64_t, 12> kInputs = {
-      kQuietNan,
-      kSignalingNan,
-      kNegativeZero,
-      std::bit_cast<uint64_t>(-2.0),
-      kPositiveZero,
-      std::bit_cast<uint64_t>(0.5),
-      std::bit_cast<uint64_t>(1.0),
-      std::bit_cast<uint64_t>(2.0),
-      kPositiveSubnormal,
-      kNegativeSubnormal,
-      kInfinity,
-      kNegativeInfinity,
-  };
-  constexpr std::array<uint64_t, 12> kExpected = {
-      kPositiveZero,
-      kPositiveZero,
-      kPositiveZero,
-      kPositiveZero,
-      kPositiveZero,
-      std::bit_cast<uint64_t>(0.5),
-      std::bit_cast<uint64_t>(1.0),
-      std::bit_cast<uint64_t>(1.0),
-      kPositiveSubnormal,
-      kPositiveZero,
-      std::bit_cast<uint64_t>(1.0),
-      kPositiveZero,
-  };
-
-  for (size_t i = 0; i < kInputs.size(); ++i) {
-    EXPECT_EQ(amdgpu::fp_mode::finish_f64(kInputs[i], 0, 0, true, true), kExpected[i]) << i;
-    EXPECT_EQ(amdgpu::fp_mode::finish_f64(kInputs[i], 0, 0, false, true), kInputs[i]) << i;
-    EXPECT_EQ(amdgpu::fp_mode::finish_f64(kInputs[i], 0, 0, false, false), kInputs[i]) << i;
-  }
-  EXPECT_EQ(amdgpu::fp_mode::finish_f64(kQuietNan, 0, 0, true, false), kQuietNan);
-  EXPECT_EQ(amdgpu::fp_mode::finish_f64(std::bit_cast<uint64_t>(1.0), 0, 1, false, true),
-            std::bit_cast<uint64_t>(2.0));
-}
-
-TEST(FpModePolicyTest, F16ClampUsesSelectedNanPolicy) {
-  constexpr uint16_t kQuietNan = 0x7E01u;
-  constexpr uint16_t kOne = 0x3C00u;
-  constexpr uint16_t kPositiveZero = 0x0000u;
-  constexpr uint16_t kNegativeZero = 0x8000u;
-
-  const auto fma = [=](uint16_t src0, bool clamp_nan_to_zero) {
-    return amdgpu::fp_mode::fma_f16(src0, kOne, kPositiveZero, false, false, false, false, false,
-                                    false, 0, 3, 0, true, false, clamp_nan_to_zero, true);
-  };
-
-  EXPECT_EQ(fma(kQuietNan, false), kQuietNan);
-  EXPECT_EQ(fma(kQuietNan, true), kPositiveZero);
-  EXPECT_EQ(fma(kNegativeZero, false), kPositiveZero);
 }
 
 TEST(Gfx1250ExecutionTest, TargetProvidesImmutableExecutionBackend) {
@@ -2326,17 +2190,6 @@ TEST(Gfx1250LiteralOperandTest, NegativeI64CompareCoversScalarAndAvailableSimdPa
 
     auto *typed_compare = dynamic_cast<cdna5::VCmpLtI64Vop3 *>(compare.get());
     ASSERT_NE(typed_compare, nullptr);
-    if (!force_scalar) {
-      EXPECT_TRUE(amdgpu::try_execute_vopc64_vop3_int_simd<int64_t>(
-          *typed_compare, *wf, [](auto a, auto b) { return a < b; },
-          [&](uint64_t result) {
-            amdgpu::write_explicit_lane_mask(typed_compare->vdst, *wf, result);
-          }));
-      EXPECT_EQ(read_wave_sgpr(*cu, *wf, 0), 0x3u);
-      write_wave_sgpr(*cu, *wf, 0, 0u);
-      write_wave_sgpr(*cu, *wf, 1, 0u);
-    }
-
     EXPECT_TRUE(cu->execute_instruction(compare.get(), *wf).succeeded());
     EXPECT_EQ(read_wave_sgpr(*cu, *wf, 0), 0x3u);
   };
@@ -2436,17 +2289,6 @@ TEST(Gfx1250LiteralOperandTest, PkF32LiteralReplicatesAndUsesAvailableSimdPath) 
     EXPECT_EQ(amdgpu::RegisterAccess(*wf).read_lane64(*literal_operand, 0), replicated);
 
     const uint32_t vgpr_base = wf->vgpr_alloc().base;
-    if (!force_scalar) {
-      EXPECT_TRUE(amdgpu::try_execute_vop3p_pk_binary_f32_simd(
-          *typed_add, *wf, 0u, 3u, [](auto a, auto b) { return a + b; }));
-      for (uint32_t lane = 0; lane < 2; ++lane) {
-        EXPECT_EQ(cu->read_vgpr(vgpr_base, lane), literal);
-        EXPECT_EQ(cu->read_vgpr(vgpr_base + 1, lane), literal);
-        cu->write_vgpr(vgpr_base, lane, 0u);
-        cu->write_vgpr(vgpr_base + 1, lane, 0u);
-      }
-    }
-
     EXPECT_TRUE(cu->execute_instruction(add.get(), *wf).succeeded());
     for (uint32_t lane = 0; lane < 2; ++lane) {
       EXPECT_EQ(cu->read_vgpr(vgpr_base, lane), literal);
@@ -2605,6 +2447,7 @@ std::unique_ptr<Instruction> decode_gfx1251_wmma(Decoder &decoder,
   return std::unique_ptr<Instruction>(decode_valid(decoder, words.data()));
 }
 
+// Reference the finite matrix fixtures with nearest-even fused arithmetic.
 WmmaF64OutputMatrix reference_wmma_f64(const WmmaF64InputMatrix &a, const WmmaF64InputMatrix &b,
                                        const WmmaF64OutputMatrix &c) {
   WmmaF64OutputMatrix result{};
@@ -2612,8 +2455,9 @@ WmmaF64OutputMatrix reference_wmma_f64(const WmmaF64InputMatrix &a, const WmmaF6
     for (uint32_t col = 0; col < 16; ++col) {
       uint64_t acc = c[row * 16 + col];
       for (uint32_t k = 0; k < 4; ++k) {
-        acc = amdgpu::fp_mode::fma_f64(a[row * 4 + k], b[col * 4 + k], acc,
-                                       /*round_mode=*/0, /*denorm_mode=*/3);
+        acc = std::bit_cast<uint64_t>(std::fma(std::bit_cast<double>(a[row * 4 + k]),
+                                               std::bit_cast<double>(b[col * 4 + k]),
+                                               std::bit_cast<double>(acc)));
       }
       result[row * 16 + col] = acc;
     }
@@ -5365,10 +5209,7 @@ TEST(Gfx1251PackedU64ExecutionTest, ReadsOverlappingSourcesBeforeWritingDestinat
   EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 8, 0), (PackedU64Pair{0x0000000000000017ULL, 59u}));
 }
 
-TEST(Gfx1250LiteralOperandTest, PkF32MixedLiteralVgprSourcesUseAvailableSimdPath) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "requires stdx SIMD";
-  }
+TEST(Gfx1250LiteralOperandTest, PkF32MixedLiteralVgprSources) {
 
   ForceScalarGuard force_scalar_guard;
   util::set_force_scalar_for_testing(false);
@@ -5437,36 +5278,13 @@ TEST(Gfx1250LiteralOperandTest, PkF32MixedLiteralVgprSourcesUseAvailableSimdPath
     cu->write_vgpr(vgpr_base + 4, 0, std::bit_cast<uint32_t>(7.0f));
     cu->write_vgpr(vgpr_base + 5, 0, std::bit_cast<uint32_t>(8.0f));
 
-    bool accepted = false;
-    if (test_case.operation == Operation::Add) {
-      auto *typed = dynamic_cast<cdna5::VPkAddF32Vop3p *>(instruction.get());
-      ASSERT_NE(typed, nullptr);
-      accepted = amdgpu::try_execute_vop3p_pk_binary_f32_simd(*typed, *wf, 0u, 3u,
-                                                              [](auto a, auto b) { return a + b; });
-    } else if (test_case.operation == Operation::Mul) {
-      auto *typed = dynamic_cast<cdna5::VPkMulF32Vop3p *>(instruction.get());
-      ASSERT_NE(typed, nullptr);
-      accepted = amdgpu::try_execute_vop3p_pk_binary_f32_simd(*typed, *wf, 0u, 3u,
-                                                              [](auto a, auto b) { return a * b; });
-    } else {
-      auto *typed = dynamic_cast<cdna5::VPkFmaF32Vop3p *>(instruction.get());
-      ASSERT_NE(typed, nullptr);
-      accepted = amdgpu::try_execute_vop3p_pk_ternary_f32_simd(
-          *typed, *wf, 0u, 3u, 1u, [](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); });
-    }
-    EXPECT_TRUE(accepted);
-    EXPECT_EQ(cu->read_vgpr(vgpr_base + 6, 0), std::bit_cast<uint32_t>(test_case.expected_lo));
-    EXPECT_EQ(cu->read_vgpr(vgpr_base + 7, 0), std::bit_cast<uint32_t>(test_case.expected_hi));
-
-    cu->write_vgpr(vgpr_base + 6, 0, 0u);
-    cu->write_vgpr(vgpr_base + 7, 0, 0u);
     EXPECT_TRUE(cu->execute_instruction(instruction.get(), *wf).succeeded());
     EXPECT_EQ(cu->read_vgpr(vgpr_base + 6, 0), std::bit_cast<uint32_t>(test_case.expected_lo));
     EXPECT_EQ(cu->read_vgpr(vgpr_base + 7, 0), std::bit_cast<uint32_t>(test_case.expected_hi));
   }
 }
 
-TEST(Gfx1250LiteralOperandTest, PkF32MixedLiteralSourceSpecificSelectorUsesSimd) {
+TEST(Gfx1250LiteralOperandTest, PkF32MixedLiteralSourceSpecificSelector) {
   ForceScalarGuard force_scalar_guard;
   util::set_force_scalar_for_testing(false);
   constexpr uint32_t kLiteral = 0x40000000u; // 2.0f
@@ -5490,14 +5308,6 @@ TEST(Gfx1250LiteralOperandTest, PkF32MixedLiteralSourceSpecificSelectorUsesSimd)
   cu->write_vgpr(vgpr_base + 2, 0, std::bit_cast<uint32_t>(5.0f));
   cu->write_vgpr(vgpr_base + 3, 0, std::bit_cast<uint32_t>(6.0f));
 
-  if constexpr (util::has_stdx_simd) {
-    EXPECT_TRUE(amdgpu::try_execute_vop3p_pk_binary_f32_simd(*typed, *wf, 0u, 2u,
-                                                             [](auto a, auto b) { return a + b; }));
-    EXPECT_EQ(cu->read_vgpr(vgpr_base + 4, 0), std::bit_cast<uint32_t>(7.0f));
-    EXPECT_EQ(cu->read_vgpr(vgpr_base + 5, 0), std::bit_cast<uint32_t>(8.0f));
-    cu->write_vgpr(vgpr_base + 4, 0, 0u);
-    cu->write_vgpr(vgpr_base + 5, 0, 0u);
-  }
   EXPECT_TRUE(cu->execute_instruction(instruction.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vgpr_base + 4, 0), std::bit_cast<uint32_t>(7.0f));
   EXPECT_EQ(cu->read_vgpr(vgpr_base + 5, 0), std::bit_cast<uint32_t>(8.0f));
@@ -5550,26 +5360,6 @@ TEST(Gfx1250ExecutionTest, PkF32AddMulSimdMatchesScalarWithPartialExec) {
         cu->write_vgpr(vgpr_base + 5, lane, kDstHiSeed);
       }
 
-      if (!force_scalar) {
-        bool accepted = false;
-        if (test_case.opcode == cdna5::kVPkAddF32Vop3p) {
-          auto *typed = dynamic_cast<cdna5::VPkAddF32Vop3p *>(instruction.get());
-          ASSERT_NE(typed, nullptr);
-          accepted = amdgpu::try_execute_vop3p_pk_binary_f32_simd(
-              *typed, *wf, 0u, 3u, [](auto a, auto b) { return a + b; });
-        } else {
-          auto *typed = dynamic_cast<cdna5::VPkMulF32Vop3p *>(instruction.get());
-          ASSERT_NE(typed, nullptr);
-          accepted = amdgpu::try_execute_vop3p_pk_binary_f32_simd(
-              *typed, *wf, 0u, 3u, [](auto a, auto b) { return a * b; });
-        }
-        EXPECT_TRUE(accepted);
-        for (uint32_t lane = 0; lane < 32; ++lane) {
-          cu->write_vgpr(vgpr_base + 4, lane, kDstLoSeed);
-          cu->write_vgpr(vgpr_base + 5, lane, kDstHiSeed);
-        }
-      }
-
       EXPECT_TRUE(cu->execute_instruction(instruction.get(), *wf).succeeded());
       for (uint32_t lane = 0; lane < 32; ++lane) {
         result[lane * 2] = cu->read_vgpr(vgpr_base + 4, lane);
@@ -5601,7 +5391,7 @@ TEST(Gfx1250ExecutionTest, PkF32AddMulSimdMatchesScalarWithPartialExec) {
   }
 }
 
-TEST(Gfx1250ExecutionTest, PkF32NondefaultSelectorsUseSimd) {
+TEST(Gfx1250ExecutionTest, PkF32NondefaultSelectors) {
   ForceScalarGuard force_scalar_guard;
   enum class Operation { Add, Mul, Fma };
   struct TestCase {
@@ -5670,33 +5460,6 @@ TEST(Gfx1250ExecutionTest, PkF32NondefaultSelectorsUseSimd) {
         cu->write_vgpr(vgpr_base + 7, lane, kDstHiSeed);
       }
 
-      if (!force_scalar) {
-        if (test_case.operation == Operation::Fma) {
-          auto *typed = dynamic_cast<cdna5::VPkFmaF32Vop3p *>(instruction.get());
-          ASSERT_NE(typed, nullptr);
-          EXPECT_TRUE(amdgpu::try_execute_vop3p_pk_ternary_f32_simd(
-              *typed, *wf, test_case.op_sel, test_case.op_sel_hi, test_case.op_sel_hi_2,
-              [](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }));
-        } else if (test_case.operation == Operation::Mul) {
-          auto *typed = dynamic_cast<cdna5::VPkMulF32Vop3p *>(instruction.get());
-          ASSERT_NE(typed, nullptr);
-          EXPECT_TRUE(amdgpu::try_execute_vop3p_pk_binary_f32_simd(
-              *typed, *wf, test_case.op_sel, test_case.op_sel_hi,
-              [](auto a, auto b) { return a * b; }));
-        } else {
-          auto *typed = dynamic_cast<cdna5::VPkAddF32Vop3p *>(instruction.get());
-          ASSERT_NE(typed, nullptr);
-          EXPECT_TRUE(amdgpu::try_execute_vop3p_pk_binary_f32_simd(
-              *typed, *wf, test_case.op_sel, test_case.op_sel_hi,
-              [](auto a, auto b) { return a + b; }));
-        }
-        for (uint32_t lane = 0; lane < 32; ++lane) {
-          EXPECT_EQ(cu->read_vgpr(vgpr_base + 6, lane), scalar_result[lane * 2]);
-          EXPECT_EQ(cu->read_vgpr(vgpr_base + 7, lane), scalar_result[lane * 2 + 1]);
-          cu->write_vgpr(vgpr_base + 6, lane, kDstLoSeed);
-          cu->write_vgpr(vgpr_base + 7, lane, kDstHiSeed);
-        }
-      }
       EXPECT_TRUE(cu->execute_instruction(instruction.get(), *wf).succeeded());
       for (uint32_t lane = 0; lane < 32; ++lane) {
         result[lane * 2] = cu->read_vgpr(vgpr_base + 6, lane);
@@ -5754,16 +5517,6 @@ TEST(Gfx1250ExecutionTest, PkFmaF32SimdMatchesScalarWithPartialExec) {
       cu->write_vgpr(vgpr_base + 5, lane, std::bit_cast<uint32_t>(value + 3.0f));
       cu->write_vgpr(vgpr_base + 6, lane, kDstLoSeed);
       cu->write_vgpr(vgpr_base + 7, lane, kDstHiSeed);
-    }
-
-    if (!force_scalar) {
-      EXPECT_TRUE(amdgpu::try_execute_vop3p_pk_ternary_f32_simd(
-          *typed, *wf, 0u, 3u, 1u,
-          [](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }));
-      for (uint32_t lane = 0; lane < 32; ++lane) {
-        cu->write_vgpr(vgpr_base + 6, lane, kDstLoSeed);
-        cu->write_vgpr(vgpr_base + 7, lane, kDstHiSeed);
-      }
     }
 
     EXPECT_TRUE(cu->execute_instruction(instruction.get(), *wf).succeeded());

@@ -587,7 +587,7 @@ TEST(VAddSimdBenchmark, Cdna4_VCmpEqF32_Vop3_Modifiers) {
 }
 
 // v_cmp_eq_f16_e64 vcc, v0, v1  (CDNA4 VOP3 opcode 34) — f16 widen-then-compare.
-// Pays the f16_to_f32_simd widen tax on both operands; no modifiers.
+// Includes FP16 operand decoding on both operands; no modifiers.
 TEST(VAddSimdBenchmark, Cdna4_VCmpEqF16_Vop3) {
   if constexpr (!util::has_stdx_simd) {
     GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";

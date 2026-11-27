@@ -347,7 +347,7 @@ inline void execute_conditional(Inst &inst, Wavefront &wave, Wave32 wave32, Wave
       if (!wave.instruction_execution_failed()) {
         for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
           if ((exec_mask >> lane) & 1) {
-            sdwa::write_lane<sdwa::ResultFormat::NONE>(inst, wave, destination, lane, result[lane]);
+            sdwa::write_lane(inst, wave, destination, lane, result[lane]);
           }
         }
       }
@@ -715,7 +715,7 @@ inline void execute_sdwa_carry32(Inst &inst, Wavefront &wave, Wave32 wave32, Wav
       } else {
         for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
           if ((write_mask >> lane) & 1) {
-            sdwa::write_lane<sdwa::ResultFormat::NONE>(inst, wave, destination, lane, result[lane]);
+            sdwa::write_lane(inst, wave, destination, lane, result[lane]);
           }
         }
       }
@@ -866,9 +866,8 @@ inline bool try_execute_sdwa_integer32(Inst &inst, Wavefront &wave, Wave32 wave3
                       }) {
           if (destination.is_vgpr() && destination.simd_capable() &&
               inst.dst_operand(0) == &destination) {
-            // Place selected bytes in scratch, then resolve and observe the
-            // destination once. NONE has no FP scaling/clamping; PRESERVE is
-            // handled by the write view's byte mask.
+            // Place selected bytes in scratch, then resolve and observe the destination once.
+            // NONE has no FP scaling/clamping; PRESERVE is handled by the write view's byte mask.
             const auto selection = inst.sdwa_dst_sel_;
             const auto unused = inst.sdwa_dst_unused_;
             if (selection != sdwa::DWORD) {
@@ -889,7 +888,7 @@ inline bool try_execute_sdwa_integer32(Inst &inst, Wavefront &wave, Wave32 wave3
         }
         for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
           if ((exec_mask >> lane) & 1) {
-            sdwa::write_lane<sdwa::ResultFormat::NONE>(inst, wave, destination, lane, result[lane]);
+            sdwa::write_lane(inst, wave, destination, lane, result[lane]);
           }
         }
       }
@@ -975,7 +974,7 @@ inline void execute_saturating_pack_sdwa(Inst &inst, Wavefront &wave, Unary32Fun
   }
   for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
     if (exec_mask & (1ULL << lane)) {
-      sdwa::write_lane<sdwa::ResultFormat::NONE>(inst, wave, destination, lane, result[lane]);
+      sdwa::write_lane(inst, wave, destination, lane, result[lane]);
     }
   }
 }
@@ -1009,7 +1008,7 @@ inline void execute_move32(Inst &inst, Wavefront &wave, const Operand &destinati
       }
       for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
         if (exec_mask & (uint64_t{1} << lane)) {
-          sdwa::write_lane<sdwa::ResultFormat::NONE>(inst, wave, destination, lane, result[lane]);
+          sdwa::write_lane(inst, wave, destination, lane, result[lane]);
         }
       }
       return;
@@ -1044,7 +1043,7 @@ inline void execute_screen_partition(Inst &inst, Wavefront &wave, const Operand 
       }
       for (uint32_t lane = 0; lane < 64; ++lane) {
         if ((exec_mask >> lane) & 1) {
-          sdwa::write_lane<sdwa::ResultFormat::NONE>(inst, wave, destination, lane, result[lane]);
+          sdwa::write_lane(inst, wave, destination, lane, result[lane]);
         }
       }
       return;

@@ -1066,12 +1066,15 @@ TEST(CheckedTextEdits, RejectsUnspecifiedCallerArchitectureAndEmptyBatch) {
   EXPECT_TRUE(test::source_image_matches(unsupported, unknown));
 }
 
-TEST(CheckedTextEdits, ClauseAndTwelveByteTrampolinePoliciesStaySeparate) {
+TEST(CheckedTextEdits, TwelveByteStoreCanBeObservedOutsideAClause) {
   const std::vector<uint8_t> image = make_mixed_width_kernel_elf();
   const AmdGpuCodeObject object(image.data(), image.size());
   Instrumentor instrumentor(object, kArch);
   instrumentor.add_point_by_offset(20, InstrumentationKind::BeforeInst);
-  EXPECT_TRUE(instrumentor.patch().elf_bytes.empty());
+  const InstrumentedCodeObject observed = instrumentor.patch();
+  ASSERT_TRUE(observed.errors.empty()) << observed.errors.front();
+  ASSERT_EQ(observed.sites.size(), 1u);
+  EXPECT_EQ(observed.sites.front().guest_size, 12u);
 
   // s_clause 0 followed by a complete global store. The transaction cannot
   // silently change the clause's instruction count or memory operation kinds.

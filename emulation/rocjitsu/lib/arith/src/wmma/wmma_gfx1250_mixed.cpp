@@ -33,6 +33,25 @@ int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32
   if ((flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
     return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
   }
+#if defined(RJ_ARITH_HAVE_AVX512VNNI) || defined(RJ_ARITH_HAVE_X86_64_V4_BF16)
+  if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_ZEN4)) {
+    const bool both_fp4 = M == 32 || ((controls & 0x3fULL) == ((4ULL << 3) | 4ULL));
+#if defined(RJ_ARITH_HAVE_AVX512VNNI)
+    if (both_fp4) {
+      wmma_gfx1250_fp4_avx512vnni<M, Block>(controls, d, a, b, c, scale_a, scale_b);
+      return RJ_ARITH_SUCCESS;
+    }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V4_BF16)
+    if constexpr (M == 16) {
+      if (!both_fp4) {
+        wmma_gfx1250_mixed_x86_64_v4_bf16<Block>(controls, d, a, b, c, scale_a, scale_b);
+        return RJ_ARITH_SUCCESS;
+      }
+    }
+#endif
+  }
+#endif
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
   if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
     if constexpr (Block != 0) {

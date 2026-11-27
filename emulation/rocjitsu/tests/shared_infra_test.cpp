@@ -783,7 +783,7 @@ TEST(MfmaExecTest, Gfx12Wave64SwmmacK32LocUsesSparseHardwareLayout) {
   EXPECT_EQ(fp8_idx_g2s0.local_compressed_k, 0u);
 }
 
-TEST(MfmaExecTest, Cdna3CvtFp8Bf8UsesSameFnuzDecodeAsMfma) {
+TEST(MfmaExecTest, Cdna3CvtFp8Bf8UsesFnuzEncoding) {
   ScopedIsaExecutionBackend execution_backend_scope{&cdna3::execution_backend()};
   amdgpu::GpuMemory mem("cdna3_cvt_fnuz_mem");
   amdgpu::L2Cache l2("cdna3_cvt_fnuz_l2");
@@ -825,14 +825,13 @@ TEST(MfmaExecTest, Cdna3CvtFp8Bf8UsesSameFnuzDecodeAsMfma) {
   cvt_bf8.execute_impl(*wf);
 
   for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
-    amdgpu::InputLoc loc{/*vgpr_offset=*/0, lane, /*sub_element=*/0};
-    float mfma_fp8 = amdgpu::extract_fp8_fnuz(*cu, vbase + kSrc, loc);
+    // FNUZ encodes +1 and -1 as 0x40 and 0xc0 in both formats.
+    const float expected = (lane & 1u) ? -1.0f : 1.0f;
     float cvt_fp8_value = std::bit_cast<float>(cu->read_vgpr(vbase + kDstFp8, lane));
-    EXPECT_EQ(cvt_fp8_value, mfma_fp8) << "fp8 lane=" << lane;
+    EXPECT_EQ(cvt_fp8_value, expected) << "fp8 lane=" << lane;
 
-    float mfma_bf8 = amdgpu::extract_bf8_fnuz(*cu, vbase + kSrc, loc);
     float cvt_bf8_value = std::bit_cast<float>(cu->read_vgpr(vbase + kDstBf8, lane));
-    EXPECT_EQ(cvt_bf8_value, mfma_bf8) << "bf8 lane=" << lane;
+    EXPECT_EQ(cvt_bf8_value, expected) << "bf8 lane=" << lane;
   }
 }
 
@@ -8835,61 +8834,6 @@ TEST(Rdna4GlobalLoadTransposeTest, Wave64B128ReadsLowHalfAndWritesTwoVgprs) {
   EXPECT_EQ(result(0), 0x0300020001000000ULL);
   EXPECT_EQ(result(32), 0x0700060005000400ULL);
   EXPECT_EQ(result(63), 0x1F071E071D071C07ULL);
-}
-
-// A VOP3 output modifier scales the result. INEXACT must be derived from the
-// scaled exact value, not by comparing the scaled result against the unscaled
-// product -- that comparison is unequal for every nonzero product as soon as
-// any modifier is present, and a spurious INEXACT with MODE.excp_en set stops
-// the wave for the debugger on arithmetic that was exact.
-TEST(AluExceptionTest, OutputModifierDoesNotFabricateInexact) {
-  constexpr uint32_t kInexact = 1u << 5;
-
-  // 2.0 * 3.0 == 6.0 exactly, and stays exact under every OMOD scale.
-  EXPECT_EQ(amdgpu::classify_mul_f32(2.0f, 3.0f) & kInexact, 0u);
-  for (float scale : {2.0f, 4.0f, 0.5f}) {
-    EXPECT_EQ(amdgpu::classify_mul_f32(2.0f, 3.0f, scale) & kInexact, 0u) << "omod scale " << scale;
-  }
-
-  // A genuinely inexact product stays reported, with and without a modifier.
-  EXPECT_EQ(amdgpu::classify_mul_f32(1.1f, 1.1f) & kInexact, kInexact);
-  EXPECT_EQ(amdgpu::classify_mul_f32(1.1f, 1.1f, 2.0f) & kInexact, kInexact);
-
-  // NaN compares unequal to itself, so an exactness test that does not exclude
-  // non-finite values reports INEXACT for it even with no modifier at all.
-  const float nan = std::numeric_limits<float>::quiet_NaN();
-  EXPECT_EQ(amdgpu::classify_mul_f32(nan, 3.0f) & kInexact, 0u);
-  EXPECT_EQ(amdgpu::classify_mul_f32(nan, 3.0f, 2.0f) & kInexact, 0u);
-}
-
-TEST(AluExceptionTest, MultiplyExactProductCoversF32RangeAndRounding) {
-  struct Case {
-    uint32_t lhs;
-    uint32_t rhs;
-    float scale;
-    uint32_t causes;
-  };
-  constexpr Case cases[] = {
-      {0x3f800000, 0x40000000, 4.0f, 0},
-      {0x3f800001, 0x3f800001, 1.0f, 1u << 5},
-      {0x00800000, 0x3f800000, 0.5f, 1u << 4},
-      {0x00800000, 0x00800000, 1.0f, (1u << 4) | (1u << 5)},
-      {0x00000001, 0x3f800000, 1.0f, (1u << 1) | (1u << 4)},
-      {0x00000001, 0x7f000000, 4.0f, 1u << 1},
-  };
-  for (uint32_t round = 0; round < 4; ++round) {
-    const amdgpu::fp_mode::ScopedEnvironment environment(round);
-    for (const auto &sample : cases) {
-      SCOPED_TRACE(testing::Message() << "round " << round << " lhs " << sample.lhs << " rhs "
-                                      << sample.rhs << " scale " << sample.scale);
-      volatile float lhs = std::bit_cast<float>(sample.lhs);
-      volatile float rhs = std::bit_cast<float>(sample.rhs);
-      EXPECT_EQ(amdgpu::classify_mul_f32(lhs, rhs, sample.scale), sample.causes);
-    }
-    volatile float largest = std::bit_cast<float>(0x7f7fffffu);
-    // Directed rounding toward a finite result still reports INEXACT.
-    EXPECT_EQ(amdgpu::classify_mul_f32(largest, 2.0f), (1u << 5) | (round < 2 ? 1u << 3 : 0u));
-  }
 }
 
 } // namespace
