@@ -30,7 +30,7 @@ ASSERT_HOOK_MATCHES_PROD(g_ncclLaunchOneRank, ncclLaunchOneRank);
 ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm*, struct ncclTaskColl*,
                                        struct ncclIntruQueue<struct ncclTaskColl,
                                                              &ncclTaskColl::next>*,
-                                       struct ncclTaskColl**) {
+                                       struct ncclTaskColl**, bool*) {
   FailLoudUnfaked("sched_stubs", "ncclMakeSymmetricTaskList");
 }
 ncclResult_t ncclSymmetricTaskScheduler(struct ncclComm*,

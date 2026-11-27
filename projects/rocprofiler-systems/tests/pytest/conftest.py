@@ -44,6 +44,7 @@ from rocprofsys import (
     SysRunRunner,
     TestResult,
     ValidationResult,
+    deny_perf_events_supported,
     detect_gpu,
     discover_build_config,
     environment,
@@ -2581,6 +2582,9 @@ def run_test(
         fail_on_not_found: If True, pytest.fail when binary not found (default: False = skip)
         fail_message: Custom failure message (default: "{runner_type} test failed: {output}")
         no_base_env: If true, don't use the base environment (default: False)
+        deny_perf_events: If true, perf_event_open() fails with EPERM for the launched
+                          processes (seccomp filter), regardless of the host's
+                          perf_event_paranoid. Skips if unsupported (default: False)
         **kwargs: Additional runner-specific arguments (see _FUNCTION_ALLOWED_KWARGS for valid kwargs)
 
     Returns:
@@ -2602,6 +2606,7 @@ def run_test(
         fail_on_not_found: bool = False,
         fail_message: str | None = None,
         no_base_env: bool = False,
+        deny_perf_events: bool = False,
         **kwargs,
     ) -> TestResult:
         filtered_kwargs = _filter_kwargs("run_test", runner_type, **kwargs)
@@ -2611,6 +2616,9 @@ def run_test(
                 f"num_procs={num_procs} was provided but no launcher was set. "
                 f"Pass launcher='<launcher_name>' alongside num_procs."
             )
+
+        if deny_perf_events and not deny_perf_events_supported():
+            pytest.skip("Cannot deny perf_event_open() with seccomp on this system")
 
         if runner_type == "causal" and "causal_mode" not in filtered_kwargs:
             pytest.exit("causal_mode is required for causal tests", returncode=1)
@@ -2672,6 +2680,7 @@ def run_test(
                 num_procs=num_procs,
                 working_directory=working_directory,
                 no_base_env=no_base_env,
+                deny_perf_events=deny_perf_events,
                 **filtered_kwargs,
             )
         except FileNotFoundError:

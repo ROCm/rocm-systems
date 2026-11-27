@@ -1,0 +1,1 @@
+* Fixed WarpSpeed channel adjustment for collectives other than AllReduce, AllGather and ReduceScatter on single-node 8-GPU gfx950. It now restores only counts halved during initialization, including when `NCCL_MAX_NRINGS`, `NCCL_MAX_NCHANNELS` or `NCCL_WORK_ARGS_BYTES` is set.

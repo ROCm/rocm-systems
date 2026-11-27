@@ -6,7 +6,6 @@
 #include "util/diagnostic.h"
 
 #include "util/distributed_shared_mutex.h"
-#include "util/except.h"
 
 #include <array>
 #include <atomic>
@@ -38,14 +37,6 @@ enum class VmAccessOutcome : uint8_t;
 enum class DeviceCacheOperation {
   WritebackInvalidate,
   Invalidate,
-};
-
-/// @brief A cache-maintenance refusal before the protected external effect.
-/// @details The caller may retry the same packet and continuation. Only throw
-/// this after proving that no packet effect or partial prepared write occurred.
-class CacheMaintenanceUnavailable final : public util::Exception {
-public:
-  explicit CacheMaintenanceUnavailable(std::string_view message) : util::Exception(message) {}
 };
 
 /// @brief One cache domain and the physical GPU that owns its dirty tags.
@@ -252,39 +243,36 @@ public:
   /// @details Acquires every domain and cache lock before publishing dirty
   /// state. All memory-side lines are written before any L2 dirty runs, even
   /// when the caches belong to different domains. This legacy overload rejects
-  /// dirty nonzero-VMID lines with CacheMaintenanceUnavailable before any
+  /// dirty nonzero-VMID lines with a Retry outcome before any
   /// backing write, allowing the prepared overload to retry a concurrent writer.
   /// Distinct domains claiming the same VMID-zero backing line also fail
   /// before writeback because their dirty-writer order is unknown.
   /// Domains must be non-null and distinct. Release the returned leases in
   /// reverse order after the access; each lease retains its domain until release.
-  [[nodiscard]] static std::vector<DeviceCacheMaintenanceLease>
+  [[nodiscard]] static util::FailureOr<CacheMaintenanceGroupResult>
   acquire_cache_maintenance_group(std::span<const std::shared_ptr<DeviceCacheCoherence>> domains,
-                                  DeviceCacheOperation operation);
+                                  DeviceCacheOperation operation,
+                                  util::DiagnosticEmitter emit_error = {});
   /// @brief Quiesce GPU-labelled domains with prepared nonzero-VMID writeback.
   /// @details Each dirty line is resolved without cache locks. The complete
   /// snapshot and canonical backing ownership are checked before all required
   /// VM gates are entered. Multiple writes require retained direct byte views;
   /// a generic fallible backing can supply only one write. Mixed VMID-zero and
   /// nonzero groups are refused; zero-VMID-only groups use the legacy path.
-  [[nodiscard]] static std::vector<DeviceCacheMaintenanceLease>
-  acquire_cache_maintenance_group(std::span<const DeviceCacheDomain> domains,
-                                  DeviceCacheOperation operation,
-                                  const PreparedWritebackResolver &resolve_writeback);
-  /// @brief Return expected prepared backing failures without throwing.
-  /// @details Retry returns no leases and emits no terminal diagnostic.
+  /// Retry returns no leases and emits no terminal diagnostic.
   /// Configuration errors and internal cache invariant failures emit terminal
   /// diagnostics.
   [[nodiscard]] static util::FailureOr<CacheMaintenanceGroupResult> acquire_cache_maintenance_group(
       std::span<const DeviceCacheDomain> domains, DeviceCacheOperation operation,
-      const PreparedWritebackResolver &resolve_writeback, util::DiagnosticEmitter emit_error);
+      const PreparedWritebackResolver &resolve_writeback, util::DiagnosticEmitter emit_error = {});
   /// @brief Publish dirty state and the data epoch before a CU atomic's first lane.
   /// @details The returned leases retain all cache locks and prepared grants
   /// through every lane. Release publishes only the instruction epoch, so one
   /// vector attempt has one data-cache invalidation boundary.
-  [[nodiscard]] static std::vector<DeviceCacheMaintenanceLease>
+  [[nodiscard]] static util::FailureOr<CacheMaintenanceGroupResult>
   acquire_prepared_atomic_boundary(std::span<const DeviceCacheDomain> domains,
-                                   const PreparedWritebackResolver &resolve_writeback);
+                                   const PreparedWritebackResolver &resolve_writeback,
+                                   util::DiagnosticEmitter emit_error = {});
   /// @brief Publish and invalidate only resident lines matching exact aliases.
   /// @details All dirty resident lines are resolved to prove that no
   /// unselected writer overlaps a selected canonical backing line. Selected
@@ -298,16 +286,17 @@ public:
   /// Each scoped lock pass uses a 100 ms host-time retry budget. Its
   /// deadline starts before coordinator acquisition; coordinator waiting can
   /// consume or exceed the budget. Expiry is checked after a contended L1 or
-  /// cache try-lock and throws CacheMaintenanceUnavailable before selected
+  /// cache try-lock and returns Retry before selected
   /// writeback; callers may retry or use full-domain maintenance.
   /// @note L1's synchronous L2 fill currently rejects deferred peer access.
   /// A future cacheable deferred L1 path must release the L1 mutex around the
   /// transfer and revalidate its fill before scoped maintenance can use it.
-  [[nodiscard]] static std::vector<DeviceCacheMaintenanceLease>
+  [[nodiscard]] static util::FailureOr<CacheMaintenanceGroupResult>
   acquire_scoped_alias_maintenance_group(std::span<const DeviceCacheDomain> domains,
                                          std::span<const DeviceCacheAliasScope> aliases,
                                          const PreparedWritebackResolver &resolve_writeback,
-                                         const CanonicalLineWitnessResolver &resolve_witness = {});
+                                         const CanonicalLineWitnessResolver &resolve_witness = {},
+                                         util::DiagnosticEmitter emit_error = {});
   /// @brief Successful scoped group acquisitions involving this domain.
   [[nodiscard]] uint64_t scoped_maintenance_success_count() const noexcept {
     return scoped_maintenance_success_count_.load(std::memory_order_relaxed);
@@ -373,12 +362,12 @@ public:
 private:
   friend class DeviceCacheCoherenceTestAccess;
   static constexpr std::chrono::milliseconds kScopedAdmissionRetryBudget{100};
-  [[nodiscard]] static std::vector<DeviceCacheMaintenanceLease>
+  [[nodiscard]] static util::FailureOr<CacheMaintenanceGroupResult>
   acquire_scoped_alias_maintenance_group_with_budget(
       std::span<const DeviceCacheDomain> domains, std::span<const DeviceCacheAliasScope> aliases,
       const PreparedWritebackResolver &resolve_writeback,
       const CanonicalLineWitnessResolver &resolve_witness,
-      std::chrono::milliseconds admission_retry_budget);
+      std::chrono::milliseconds admission_retry_budget, util::DiagnosticEmitter emit_error = {});
   friend class DeviceCacheMaintenanceLease;
   friend class L1ScalarCache;
   friend class L1VectorCache;

@@ -110,7 +110,7 @@ Panel Config:
         L2 Cache BW:
           value: 128 * SUM(TCC_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GB/s
-          peak: $max_sclk / 1000 * 64 * TO_INT($total_l2_chan)
+          peak: $max_sclk / 1000 * 128 * TO_INT($total_l2_chan)
           pct_of_peak: true
         L2-Fabric Read BW:
           value: SUM(TCC_EA_RDREQ_32B_sum * 32 + (TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum) * 64) / SUM(End_Timestamp - Start_Timestamp)

@@ -25,6 +25,7 @@
 
 #include <rocprofiler-sdk/buffer_tracing.h>
 #include <rocprofiler-sdk/callback_tracing.h>
+#include <rocprofiler-sdk/experimental/kernel_replay.h>
 #include <rocprofiler-sdk/experimental/thread_trace.h>
 #include <rocprofiler-sdk/external_correlation.h>
 #include <rocprofiler-sdk/fwd.h>
@@ -1230,6 +1231,9 @@ ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_RUNTIME_API_ID_hipDeviceGetExecAffinitySu
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 44
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_RUNTIME_API_ID_hipArrayGetPlane)
 #endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 45
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_RUNTIME_API_ID_hipArrayGetMemoryRequirements)
+#endif
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION == 0
 static_assert(ROCPROFILER_HIP_RUNTIME_API_ID_LAST == 442);
 #elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 1
@@ -1320,6 +1324,8 @@ static_assert(ROCPROFILER_HIP_RUNTIME_API_ID_LAST == 557);
 static_assert(ROCPROFILER_HIP_RUNTIME_API_ID_LAST == 558);
 #elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 44
 static_assert(ROCPROFILER_HIP_RUNTIME_API_ID_LAST == 559);
+#elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 45
+static_assert(ROCPROFILER_HIP_RUNTIME_API_ID_LAST == 560);
 #else
 #    if !defined(ROCPROFILER_UNSAFE_NO_VERSION_CHECK) &&                                           \
         (defined(ROCPROFILER_CI) && ROCPROFILER_CI > 0)
@@ -1742,6 +1748,11 @@ ROCPROFILER_ENUM_INFO(rocprofiler_kernel_replay_operation_t,
                       ROCPROFILER_KERNEL_REPLAY_LAST,
                       false,
                       is_operation);
+ROCPROFILER_ENUM_INFO(rocprofiler_kernel_replay_option_flag_t,
+                      ROCPROFILER_KERNEL_REPLAY_OPTION_NONE,
+                      ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_DISK + 1,
+                      true,
+                      not_operation);
 ROCPROFILER_ENUM_INFO(rocprofiler_hip_event_operation_t,
                       ROCPROFILER_HIP_EVENT_NONE,
                       ROCPROFILER_HIP_EVENT_LAST,
@@ -2105,6 +2116,12 @@ ROCPROFILER_ENUM_LABEL(ROCPROFILER_KERNEL_REPLAY_NONE);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_KERNEL_REPLAY_CONFIG);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_KERNEL_REPLAY_PASS);
 static_assert(ROCPROFILER_KERNEL_REPLAY_LAST == 3);
+
+// rocprofiler_kernel_replay_option_flag_t
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_DEVICE);
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_HOST_PINNED);
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_HOST_PAGEABLE);
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_DISK);
 
 // rocprofiler_hip_event_operation_t
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_EVENT_NONE);

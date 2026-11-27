@@ -77,14 +77,14 @@ System Speed-of-Light:
     unit: Bytes/s
 Memory chart - Workgroup Processors (WGPs):
   Wavefront Occupancy:
-    plain: Resident wavefronts per WGP, averaged over GPU-active cycles, as a percent of the maximum wavefronts per WGP.
-    rst: Resident :ref:`wavefronts <desc-wavefront>` per WGP, averaged over GPU-active cycles, as a percent of the maximum wavefronts per WGP.
+    plain: The time-averaged number of wavefronts resident on the accelerator, as a percent of the maximum number of wavefronts all of its WGPs can hold.
+    rst: The time-averaged number of :ref:`wavefronts <desc-wavefront>` resident on the accelerator, as a percent of the maximum number of wavefronts all of its WGPs can hold.
     unit: Percent
-  VGPR:
+  VGPRs:
     plain: 'The number of architected vector general-purpose registers allocated for the kernel. Note: this may not exactly match the number of VGPRs requested by the compiler due to allocation granularity.'
     rst: 'The number of architected vector general-purpose registers allocated for the kernel. Note: this may not exactly match the number of VGPRs requested by the compiler due to allocation granularity.'
     unit: Registers
-  SGPR:
+  SGPRs:
     plain: 'The number of scalar general-purpose registers allocated for the kernel. Note: this may not exactly match the number of SGPRs requested by the compiler due to allocation granularity.'
     rst: 'The number of scalar general-purpose registers allocated for the kernel. Note: this may not exactly match the number of SGPRs requested by the compiler due to allocation granularity.'
     unit: Registers
@@ -93,9 +93,9 @@ Memory chart - Workgroup Processors (WGPs):
     rst: 'The number of bytes of LDS memory (or, shared memory) allocated per :ref:`workgroup <desc-workgroup>`. Note: This may also be larger than what was requested at compile time due to both allocation granularity and dynamic per-dispatch LDS allocations.'
     unit: Bytes per Workgroup
   Scratch Allocation:
-    plain: 'The amount of scratch memory requested per wavefront, in KB: the scratch bytes requested per work-item multiplied by the wavefront size. Scratch memory is used for stack memory on the accelerator, as well as for register spills and restores.'
-    rst: 'The amount of scratch memory requested per :ref:`wavefront <desc-wavefront>`, in KB: the scratch bytes requested per :ref:`work-item <desc-work-item>` multiplied by the wavefront size. Scratch memory is used for stack memory on the accelerator, as well as for register spills and restores.'
-    unit: KB per Wave
+    plain: The number of bytes of scratch memory requested per work-item for this kernel. Scratch memory is used for stack memory on the accelerator, as well as for register spills and restores.
+    rst: The number of bytes of scratch memory requested per :ref:`work-item <desc-work-item>` for this kernel. Scratch memory is used for stack memory on the accelerator, as well as for register spills and restores.
+    unit: Bytes per Work-item
   Workgroups:
     plain: The number of workgroups in the launch divided by the number of WGPs.
     rst: The number of :ref:`workgroups <desc-workgroup>` in the launch divided by the number of WGPs.
@@ -132,10 +132,10 @@ Memory chart - TCP Cache (GL0 Vector Cache):
     rst: TCP write requests per normalization unit (TCP_REQ_WRITE_sum).
     unit: Requests per Normalization Unit
 Memory chart - LDS (Local Data Share):
-  LDS Req:
+  LDS Instructions:
     plain: Number of LDS instructions issued by the shader, including FLAT instructions that resolve to LDS. This counts instructions rather than data movement, so it does not distinguish reads from writes.
     rst: Number of LDS instructions issued by the shader, including FLAT instructions that resolve to LDS. This counts instructions rather than data movement, so it does not distinguish reads from writes.
-    unit: Requests per Normalization Unit
+    unit: Instructions per Normalization Unit
   LDS Utilization:
     plain: Percentage of the LDS cycle budget across all CUs spent servicing indexed (non-direct, non-interpolation) accesses, measured over GPU-active cycles. Because two CUs share a workgroup processor's LDS, a saturated LDS reads well below 100% on this architecture.
     rst: Percentage of the LDS cycle budget across all CUs spent servicing indexed (non-direct, non-interpolation) accesses, measured over GPU-active cycles. Because two CUs share a workgroup processor's LDS, a saturated LDS reads well below 100% on this architecture.

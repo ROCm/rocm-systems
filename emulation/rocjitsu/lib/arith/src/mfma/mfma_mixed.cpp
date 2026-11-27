@@ -4,15 +4,30 @@
 // Mixed FP8/FP6/FP4 MFMA validation and CPU dispatch for gfx950.
 #include "mfma/backends.h"
 #include "mfma/mixed.h"
+#include "mfma/mixed_exact.h"
 #include "rj_arith/detail/rj_arith_common.h"
 #include "rj_arith/detail/rj_arith_mfma.h"
 namespace {
+template <int M, int K, bool Scaled>
+[[gnu::noinline]] void evaluate_scalar(uint64_t controls, uint32_t *const *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       const uint32_t *const *c, const uint32_t *scale_a,
+                                       const uint32_t *scale_b, bool clamp_overflow) {
+  rocjitsu::arith::mfma_mixed_kernel<M, K, Scaled>(controls, d, a, b, c, scale_a, scale_b,
+                                                   clamp_overflow);
+}
+
 // Validate independent formats and semantics before reading operands.
 template <int M, int K, bool Scaled = false>
 int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32_t *const *a,
              const uint32_t *const *b, const uint32_t *const *c, const uint32_t *scale_a = nullptr,
              const uint32_t *scale_b = nullptr) {
   using namespace rocjitsu::arith;
+#if defined(RJ_ARITH_HAVE_AVX512VNNI)
+  // Unscaled integer-dot folds K products before adding C once, so reserve it for explicit Loose
+  // and preserve the legacy C-first fused accumulation and signed zero in Compatibility mode.
+  const bool explicit_loose = (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_LOOSE;
+#endif
   flags = resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
   if (int error = validate(flags, controls & ~(Scaled ? 0xfffULL : 0x3fULL),
                            kMatrixIgnoredFpFlags | RJ_ARITH_FP_DX10_CLAMP_OFF)) {
@@ -21,10 +36,37 @@ int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32
   if ((controls & 7) > 4 || (controls >> 3 & 7) > 4) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
+  constexpr uint64_t kScaleCModifiers = RJ_ARITH_MFMA_SCALE_NEG_C | RJ_ARITH_MFMA_SCALE_ABS_C;
+  if (is_exact(flags) && (!Scaled || !(controls & kScaleCModifiers))) {
+    mfma_mixed_exact<M, K, Scaled>(controls, (flags & RJ_ARITH_FP16_OVFL) != 0, d, a, b, c, scale_a,
+                                   scale_b);
+    return RJ_ARITH_SUCCESS;
+  }
   if ((flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
     return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
   }
   const bool clamp_overflow = Scaled && (flags & RJ_ARITH_FP16_OVFL);
+#if defined(RJ_ARITH_HAVE_AVX512VNNI)
+  if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_ZEN4)) {
+    if constexpr (Scaled) {
+      if (mfma_scaled_avx512vnni<M, K>(controls, d, a, b, c, scale_a, scale_b, clamp_overflow)) {
+        return RJ_ARITH_SUCCESS;
+      }
+    } else if (explicit_loose && mfma_mixed_avx512vnni<M, K>(controls, d, a, b, c)) {
+      return RJ_ARITH_SUCCESS;
+    }
+  }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V4_BF16)
+  if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_ZEN4)) {
+    if constexpr (Scaled) {
+      mfma_scaled_x86_64_v4_bf16<M, K>(controls, d, a, b, c, scale_a, scale_b, clamp_overflow);
+      return RJ_ARITH_SUCCESS;
+    } else if (mfma_mixed_x86_64_v4_bf16<M, K>(controls, d, a, b, c)) {
+      return RJ_ARITH_SUCCESS;
+    }
+  }
+#endif
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
   if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
     if constexpr (Scaled) {
@@ -45,7 +87,7 @@ int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32
     return RJ_ARITH_SUCCESS;
   }
 #endif
-  mfma_mixed_kernel<M, K, Scaled>(controls, d, a, b, c, scale_a, scale_b, clamp_overflow);
+  evaluate_scalar<M, K, Scaled>(controls, d, a, b, c, scale_a, scale_b, clamp_overflow);
   return RJ_ARITH_SUCCESS;
 }
 } // namespace

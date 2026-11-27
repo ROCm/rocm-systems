@@ -532,12 +532,28 @@ VmAccessOutcome L1ScalarCache::load(uint64_t addr, uint32_t num_dwords, uint32_t
           copied += chunk;
           continue;
         }
-        simdojo::CacheTag *resident = nullptr;
-        if (cache_.lookup(chunk_addr, &resident, vmid) &&
-            resident->admission_generation == chunk_admission.generation &&
-            resident->cache_identity == current_cache_identity(vmid) &&
-            CacheStore::bytes_valid(*resident, line_offset, chunk)) {
-          cache_.read_line(chunk_addr, buf + copied, line_offset, chunk, vmid);
+        const auto resident = cache_.lookup_with_data(chunk_addr, vmid);
+        if (resident.tag && resident.tag->admission_generation == chunk_admission.generation &&
+            resident.tag->cache_identity == current_cache_identity(vmid) &&
+            CacheStore::bytes_valid(*resident.tag, line_offset, chunk)) {
+          if (i == 0 && copied == 0 && num_dwords > 1 && admission.generation != 0 &&
+              (addr & (sizeof(uint32_t) - 1)) == 0 &&
+              num_dwords <= (CacheStore::LINE_SIZE - line_offset) / sizeof(uint32_t)) {
+            const uint32_t size = num_dwords * sizeof(uint32_t);
+            const uint64_t line_addr = CacheStore::line_address(addr);
+            const auto *grant = mtypes.local_grant(line_addr, CacheStore::LINE_SIZE);
+            // A single current grant covers all requested bytes, and the L1
+            // lock keeps this cache line resident for the whole copy.
+            if (grant && grant->identity() == resident.tag->cache_identity &&
+                grant->generation() == resident.tag->admission_generation &&
+                grant->generation() == admission.generation &&
+                CacheStore::bytes_valid(*resident.tag, line_offset, size) &&
+                grant->covers(line_addr, CacheStore::LINE_SIZE)) {
+              std::memcpy(dst, resident.data + line_offset, size);
+              return VmAccessOutcome::Complete;
+            }
+          }
+          std::memcpy(buf + copied, resident.data + line_offset, chunk);
         } else if (!l2_->can_fetch_range(CacheStore::line_address(chunk_addr),
                                          CacheStore::LINE_SIZE, vmid)) {
           const uint64_t cache_identity = current_cache_identity(vmid);

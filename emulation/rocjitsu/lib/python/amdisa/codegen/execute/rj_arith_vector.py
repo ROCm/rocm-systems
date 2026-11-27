@@ -144,6 +144,7 @@ WIDEN16_NAMES = {'V_CVT_I32_I16', 'V_CVT_U32_U16'}
 SATURATE_NAMES = {'V_SAT_PK_U8_I16', 'V_SAT_PK4_I4_I8', 'V_SAT_PK4_U4_U8'}
 # Accumulator operands resolve their register bank before reaching the API.
 ACCUMULATOR_MOVES = {'V_ACCVGPR_MOV_B32', 'V_ACCVGPR_READ', 'V_ACCVGPR_WRITE'}
+ACCUMULATOR_ARCHITECTURES = ('cdna1', 'cdna2', 'cdna3', 'cdna4')
 UNARY32 |= ACCUMULATOR_MOVES | {'V_SCREEN_PARTITION_4SE_B32'}
 
 CONDITIONAL_NAMES = {'V_CNDMASK_B32', 'V_CNDMASK_B16'}
@@ -199,7 +200,9 @@ def gen_vector32(ctx: ExecuteContext) -> str | None:
         arch in ('cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5')
         and mnemonic == 'V_SAT_PK_U8_I16'
     )
-    if mnemonic in WIDEN16_NAMES:
+    if mnemonic in ACCUMULATOR_MOVES:
+        architectures = ACCUMULATOR_ARCHITECTURES
+    elif mnemonic in WIDEN16_NAMES:
         architectures = HALF_INTEGER_ARCHITECTURES
     elif mnemonic == 'V_SCREEN_PARTITION_4SE_B32':
         architectures = SCREEN_PARTITION_ARCHITECTURES
@@ -222,7 +225,7 @@ def gen_vector32(ctx: ExecuteContext) -> str | None:
     if mnemonic in WIDEN16_NAMES and arch not in ('rdna3', 'rdna3_5', 'rdna4', 'cdna5'):
         return None
     if mnemonic in ACCUMULATOR_MOVES:
-        if arch not in ('cdna3', 'cdna4') or len(dst) != 1 or len(src) != 1:
+        if len(dst) != 1 or len(src) != 1:
             return None
         return f'  amdgpu::arith::execute_move32(*this, wf, {dst[0]}, {src[0]});'
     if mnemonic == 'V_MOV_B32' and not is_vop3 and len(dst) == len(src) == 1:
@@ -334,18 +337,33 @@ def gen_vector32(ctx: ExecuteContext) -> str | None:
             f'({modifiers}) | '
             '((amdgpu::vop3_opsel(inst_) & 4u) ? RJ_ARITH_ALU_HIGH_C : 0u)'
         )
-    sdwa = ''
+    fast_path = ''
     if (
         arch in ('cdna1', 'cdna2', 'cdna3', 'cdna4', 'rdna1', 'rdna2')
         and not is_vop3
         and count <= 2
     ):
-        sdwa = (
+        fast_path = (
             f'  if (amdgpu::arith::try_execute_sdwa_integer32(*this, wf, {wave_api(api, 32)}, {wave_api(api, 64)},\n'
             f'      wf.cu().arithmetic_flags(), 0, {dst[0]}, {", ".join(src)})) return;\n'
         )
+    elif arch == 'rdna3' and is_vop3 and mnemonic == 'V_PERM_B32':
+        # The encoding names the literal form. Its Wave32 handler stays out of line.
+        fast_path = (
+            '  if (inst_.src2 == 255 && wf.wf_size() == 32) {\n'
+            '    amdgpu::arith::execute_rdna3_wave32_perm_b32_literal(wf,\n'
+            f'        {modifiers}, {dst[0]}, {", ".join(src)});\n'
+            '    return;\n'
+            '  }\n'
+        )
+    elif arch == 'cdna4' and is_vop3 and mnemonic == 'V_PERM_B32':
+        fast_path = (
+            f'  if (!wf.exec() || amdgpu::arith::try_cdna4_perm_b32(wf, {dst[0]}, {", ".join(src)})) {{\n'
+            '    return;\n'
+            '  }\n'
+        )
     return (
-        sdwa
+        fast_path
         + f'  amdgpu::arith::execute_{kind}32(wf, {wave_api(api, 32)}, {wave_api(api, 64)},\n'
         '      wf.cu().arithmetic_flags(),\n'
         f'      {modifiers}, {dst[0]}, {", ".join(src)}{extra});'

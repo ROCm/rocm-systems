@@ -31,9 +31,9 @@ void dispatch_gfx1250_integer([[maybe_unused]] uint64_t flags, uint64_t controls
   }
 #endif
   if constexpr (Sparse) {
-    sparse_matrix_i8_kernel<16, 128, true>(controls, clamp, d, a, b, index);
+    sparse_matrix_i8_kernel<16, 128, true>(controls, clamp, false, d, a, b, index);
   } else {
-    matrix_i8_kernel<16, 64, 1, true>(controls, clamp, d, a, b, c);
+    matrix_i8_kernel<16, 64, 1, true>(controls, clamp, false, d, a, b, c);
   }
 }
 } // namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE

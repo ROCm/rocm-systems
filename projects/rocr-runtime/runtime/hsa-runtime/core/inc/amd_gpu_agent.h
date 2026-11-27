@@ -529,9 +529,11 @@ class GpuAgent : public GpuAgentInt {
       case 9:
         switch (supported_isas()[0]->GetMinorVersion()) {
           case 4:
-            return (properties_.EngineId.ui32.uCode >= GFX94X_MIN_CP_FW_VERSION_REQUIRED);
+            return (properties_.uCodeEngineVersions.uCodeCompute >=
+                    GFX94X_MIN_CP_FW_VERSION_REQUIRED);
           case 5:
-            return (properties_.EngineId.ui32.uCode >= GFX95X_MIN_CP_FW_VERSION_REQUIRED);
+            return (properties_.uCodeEngineVersions.uCodeCompute >=
+                    GFX95X_MIN_CP_FW_VERSION_REQUIRED);
           default:
             break;
         }
@@ -644,6 +646,19 @@ class GpuAgent : public GpuAgentInt {
   // @brief Update ::t1_ tick count.
   void SyncClocks();
 
+  // @brief True if a packet's raw start/end ticks are set and do not predate t0_,
+  // after removing any packet-clock epoch offset.
+  bool RawTsValid(uint64_t start, uint64_t end);
+
+  // @brief Return the packet-clock epoch offset, asking the driver to establish it
+  // from @p raw_tick if not yet latched.  Acquires t1_lock_.
+  int64_t ClockEpochOffset(uint64_t raw_tick);
+
+  // @brief Body of ClockEpochOffset; the caller must already hold t1_lock_.  Also
+  // called from the scalar TranslateTime path (which holds the lock) so scalar
+  // conversions establish the offset too.
+  int64_t ClockEpochOffsetLocked(uint64_t raw_tick);
+
   // @brief Binds the second-level trap handler to this node.
   void BindTrapHandler();
 
@@ -737,23 +752,25 @@ class GpuAgent : public GpuAgentInt {
   // @brief Mutex to protect access to ::t1_.
   std::mutex t1_lock_;
 
-  // @brief Mutex to protect access to blit objects.
-  std::mutex blit_lock_;
-
   // @brief Mutex to protect sdma gang submissions.
   std::mutex sdma_gang_lock_;
 
-  // @brief GPU tick on initialization.
+  // @brief GPU tick on initialization.  Set once at construction and never
+  // modified afterwards, so lock-free reads (e.g. in RawTsValid) are safe.
   HsaClockCounters t0_;
 
   HsaClockCounters t1_;
 
   double historical_clock_ratio_;
 
-  // @brief Offset (in GPU ticks) between AQL dispatch timestamp clock and
-  // D3DKMTQueryClockCalibration GPU clock.  Non-zero on Windows where the two
-  // GPU clock domains share frequency but differ in epoch.  Computed on first
-  // TranslateTime call; zero on Linux (clocks match).
+  // @brief Offset (in GPU ticks) between the packet timestamp clock and the
+  // GPUClockCounter from GetClockCounters.  Non-zero on Windows and WSL (DXG),
+  // where the two GPU clock domains share frequency but differ in epoch (AQL
+  // ahead of the calibration on Windows, behind it on WSL).  Detected from the
+  // first translated timestamp that proves a mismatch (on Linux builds, by
+  // Driver::GetTimestampEpochOffset); zero on native Linux / KFD (clocks match).
+  // Sign follows the mismatch direction: positive on Windows (AQL leads the
+  // calibration), negative on WSL/DXG (AQL lags it).
   int64_t gpu_clock_offset_;
 
   // @brief s_memrealtime nominal clock frequency
@@ -849,6 +866,14 @@ class GpuAgent : public GpuAgentInt {
   // @brief Releases scratch back to the driver.
   // caller must hold scratch_lock_.
   void ReleaseScratch(void* base, size_t size, bool large);
+
+  // Whether blit creation would place this agent's copies on an SDMA engine.
+  // Extracted from the blit-creation lambda so a capability query can answer
+  // the same question without instantiating a blit.
+  bool PrefersSdmaBlit() const;
+
+  // Destination ceiling reported by HSA_AMD_AGENT_INFO_MAX_BROADCAST_DESTINATIONS.
+  uint32_t MaxBroadcastDestinations() const;
 
   // Broadcast copy: copies op.src to each destination in op.dst_list.
   // Uses HW broadcast for transfers < 1 MB when supported; otherwise falls
@@ -947,12 +972,6 @@ class GpuAgent : public GpuAgentInt {
 
   // @brief Protects aql_queues_ from concurrent modification/iteration.
   mutable std::mutex aql_queues_lock_;
-
-  // Sets and Tracks pending SDMA status check or request counts
-  void SetCopyRequestRefCount(bool set);
-  void SetCopyStatusCheckRefCount(bool set);
-  std::atomic<int> pending_copy_req_ref_;
-  std::atomic<int> pending_copy_stat_check_ref_;
 
   // Tracks what SDMA blits have been used since initialization.
   std::atomic<uint32_t> sdma_blit_used_mask_;

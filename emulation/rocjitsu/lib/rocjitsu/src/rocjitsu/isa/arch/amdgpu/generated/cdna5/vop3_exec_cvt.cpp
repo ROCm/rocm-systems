@@ -7,6 +7,7 @@
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vop3.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/dot_packed16.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_cdna_unary_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_compare_exec.h"
@@ -17,7 +18,6 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_vector_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_wide_conversion_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
@@ -1069,6 +1069,16 @@ void VFrexpExpI32F64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  if (!wf.exec()) {
+    return;
+  }
+  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   const uint64_t modifiers =
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u);
   amdgpu::arith::execute_float_unary64(
@@ -1093,6 +1103,16 @@ RJ_NOINLINE void VFrexpExpI32F64Vop3::execute_modifier_impl(amdgpu::Wavefront &w
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   }
+  if (!wf.exec()) {
+    return;
+  }
+  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   const uint64_t modifiers =
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u);
   amdgpu::arith::execute_float_unary64(
@@ -1104,6 +1124,13 @@ RJ_NOINLINE void VFrexpExpI32F64Vop3::execute_modifier_impl(amdgpu::Wavefront &w
 void VFrexpMantF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == amdgpu::SRC_DPP) {
     execute_modifier_impl(wf);
+    return;
+  }
+  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
   const uint64_t modifiers =
@@ -1130,6 +1157,13 @@ RJ_NOINLINE void VFrexpMantF64Vop3::execute_modifier_impl(amdgpu::Wavefront &wf)
   if (inst_.src0 == amdgpu::SRC_DPP) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  }
+  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
   }
   const uint64_t modifiers =
       ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |
@@ -1923,8 +1957,8 @@ void VCvtF32Bf8Vop3::execute_impl(amdgpu::Wavefront &wf) {
   const unsigned byte = ((selector & 1) << 1) | ((selector & 2) >> 1);
   const uint64_t modifiers = (uint64_t(byte) << 16);
   const uint8_t source_bytes = uint8_t(1u << byte);
-  amdgpu::arith::execute_unary32(wf, rj_arith_v_cvt_f32_bf8_w32_gfx950,
-                                 rj_arith_v_cvt_f32_bf8_w64_gfx950, wf.cu().arithmetic_flags(),
+  amdgpu::arith::execute_unary32(wf, rj_arith_v_cvt_f32_bf8_w32_gfx1250,
+                                 rj_arith_v_cvt_f32_bf8_w64_gfx1250, wf.cu().arithmetic_flags(),
                                  modifiers, vdst, src0, source_bytes);
 }
 
@@ -1952,8 +1986,8 @@ RJ_NOINLINE void VCvtF32Bf8Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   const unsigned byte = ((selector & 1) << 1) | ((selector & 2) >> 1);
   const uint64_t modifiers = (uint64_t(byte) << 16);
   const uint8_t source_bytes = uint8_t(1u << byte);
-  amdgpu::arith::execute_unary32(wf, rj_arith_v_cvt_f32_bf8_w32_gfx950,
-                                 rj_arith_v_cvt_f32_bf8_w64_gfx950, wf.cu().arithmetic_flags(),
+  amdgpu::arith::execute_unary32(wf, rj_arith_v_cvt_f32_bf8_w32_gfx1250,
+                                 rj_arith_v_cvt_f32_bf8_w64_gfx1250, wf.cu().arithmetic_flags(),
                                  modifiers, vdst, src0, source_bytes);
   dpp_write_mask_scope_.restore();
 }
@@ -1963,7 +1997,7 @@ void VCvtPkF32Fp8Vop3::execute_impl(amdgpu::Wavefront &wf) {
   const uint64_t modifiers = (selector & 1) ? RJ_ARITH_ALU_HIGH_A : 0u;
   const uint8_t source_bytes = (selector & 1) ? 0xC : 0x3;
   amdgpu::arith::execute_widen32_to_pair(
-      wf, rj_arith_v_cvt_pk_f32_fp8_w32_gfx950, rj_arith_v_cvt_pk_f32_fp8_w64_gfx950,
+      wf, rj_arith_v_cvt_pk_f32_fp8_w32_gfx1250, rj_arith_v_cvt_pk_f32_fp8_w64_gfx1250,
       wf.cu().arithmetic_flags(), modifiers, vdst, src0, source_bytes);
 }
 
@@ -1972,7 +2006,7 @@ void VCvtPkF32Bf8Vop3::execute_impl(amdgpu::Wavefront &wf) {
   const uint64_t modifiers = (selector & 1) ? RJ_ARITH_ALU_HIGH_A : 0u;
   const uint8_t source_bytes = (selector & 1) ? 0xC : 0x3;
   amdgpu::arith::execute_widen32_to_pair(
-      wf, rj_arith_v_cvt_pk_f32_bf8_w32_gfx950, rj_arith_v_cvt_pk_f32_bf8_w64_gfx950,
+      wf, rj_arith_v_cvt_pk_f32_bf8_w32_gfx1250, rj_arith_v_cvt_pk_f32_bf8_w64_gfx1250,
       wf.cu().arithmetic_flags(), modifiers, vdst, src0, source_bytes);
 }
 

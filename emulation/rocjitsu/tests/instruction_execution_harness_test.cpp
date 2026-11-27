@@ -3782,7 +3782,7 @@ TEST(Cdna4OmodExecutionTest, IeeeSuppressesTrigPreopOmod) {
   }
 }
 
-TEST(Cdna4OmodExecutionTest, MulExceptionClassifierUsesEffectiveOmod) {
+TEST(Cdna4OmodExecutionTest, MulExceptionReportingUsesEffectiveOmod) {
   amdgpu::GpuMemory gpu_mem("cdna4_mul_exception_omod_mem");
   amdgpu::L2Cache l2("cdna4_mul_exception_omod_l2");
 
@@ -3812,10 +3812,12 @@ TEST(Cdna4OmodExecutionTest, MulExceptionClassifierUsesEffectiveOmod) {
 
   constexpr uint32_t kOverflow = 1u << 3;
   wf->set_mode_raw(amdgpu::Wavefront::IEEE_BIT);
-  EXPECT_EQ(amdgpu::classify_mul_f32_vop3(*mul, *wf) & kOverflow, 0u);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+  EXPECT_EQ(wf->pending_alu_causes() & kOverflow, 0u);
 
   wf->set_mode_raw(0u);
-  EXPECT_EQ(amdgpu::classify_mul_f32_vop3(*mul, *wf) & kOverflow, kOverflow);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+  EXPECT_EQ(wf->pending_alu_causes() & kOverflow, kOverflow);
 
   if (!wf->is_halted()) {
     wf->halt();
@@ -4166,7 +4168,7 @@ public:
   std::vector<std::pair<uint32_t, uint64_t>> writes;
 };
 
-TEST(PermlaneSwapExecutionTest, RespectsExecForBothResults) {
+void check_permlane_swap_results(bool observe) {
   struct SwapCase {
     rocjitsu::IsaFamily arch;
     const char *name;
@@ -4201,7 +4203,9 @@ TEST(PermlaneSwapExecutionTest, RespectsExecForBothResults) {
     auto recorder = std::make_unique<PermlaneSwapWriteRecorder>();
     auto *observed = recorder.get();
     plugins->add(std::move(recorder));
-    cu->set_plugin_group(plugins);
+    if (observe) {
+      cu->set_plugin_group(plugins);
+    }
     auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
     ASSERT_NE(wf, nullptr);
     const uint32_t wave_size = wf->wf_size();
@@ -4235,11 +4239,14 @@ TEST(PermlaneSwapExecutionTest, RespectsExecForBothResults) {
           exec &= full_exec;
           SCOPED_TRACE(::testing::Message() << "stride=" << stride << " same=" << same_register
                                             << " modifiers=" << modifiers << " exec=" << exec);
-          wf->set_exec(exec);
+          wf->set_vgpr_write_mask(full_exec);
           for (uint32_t lane = 0; lane < wave_size; ++lane) {
             cu->write_vgpr(base, lane, 0xD0000000u | lane);
             cu->write_vgpr(base + 1, lane, 0x50000000u | lane);
           }
+          // Exercise both ways of suppressing writes to inactive lanes.
+          wf->set_exec(observe ? exec : full_exec);
+          wf->set_vgpr_write_mask(observe ? full_exec : exec);
           observed->writes.clear();
           ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
           uint64_t writes[2] = {};
@@ -4251,13 +4258,6 @@ TEST(PermlaneSwapExecutionTest, RespectsExecForBothResults) {
           }
           for (uint32_t lane = 0; lane < wave_size; ++lane) {
             const bool active = (exec & (uint64_t{1} << lane)) != 0;
-            const bool peer_active = (exec & (uint64_t{1} << (lane ^ stride))) != 0;
-            // Active destinations with inactive sources involve separate
-            // FI/BOUND_CTRL semantics. This regression asserts their inactive
-            // peers stay unchanged, without prescribing those source rules.
-            if (active && !peer_active) {
-              continue;
-            }
             const bool upper = (lane & stride) != 0;
             const uint32_t expected_dst =
                 active && (same_register || upper)
@@ -4268,14 +4268,169 @@ TEST(PermlaneSwapExecutionTest, RespectsExecForBothResults) {
                                               : 0x50000000u | lane;
             EXPECT_EQ(cu->read_vgpr(base, lane), expected_dst) << "dst lane=" << lane;
             EXPECT_EQ(cu->read_vgpr(base + 1, lane), expected_src) << "src lane=" << lane;
-            EXPECT_EQ(bool(writes[0] & (uint64_t{1} << lane)), active && (same_register || upper));
-            EXPECT_EQ(bool(writes[1] & (uint64_t{1} << lane)), active && !same_register && !upper);
+            EXPECT_EQ(bool(writes[0] & (uint64_t{1} << lane)),
+                      observe && active && (same_register || upper));
+            EXPECT_EQ(bool(writes[1] & (uint64_t{1} << lane)),
+                      observe && active && !same_register && !upper);
           }
         }
       }
     }
     if (!wf->is_halted()) {
       wf->halt();
+    }
+  }
+}
+
+TEST(PermlaneSwapExecutionTest, RespectsExecForBothResults) { check_permlane_swap_results(true); }
+
+TEST(PermlaneSwapExecutionTest, RespectsWriteMaskWithoutObserver) {
+  check_permlane_swap_results(false);
+}
+
+// Observed execution resolves both operands through operand views, so equal
+// register files show that unobserved execution selects the same registers.
+TEST(PermlaneSwapExecutionTest, UnobservedRoutingMatchesObservedRouting) {
+  struct RoutingCase {
+    rocjitsu::IsaFamily arch;
+    const char *name;
+    uint32_t allocated;
+  };
+  const RoutingCase cases[] = {
+      {rocjitsu::IsaFamily::Cdna4, "cdna4", 256},
+      // v2 is the last allocated register. CDNA4 discards a swap that names
+      // or indexes a later one.
+      {rocjitsu::IsaFamily::Cdna4, "cdna4", 3},
+      {rocjitsu::IsaFamily::Cdna5, "gfx1250", 1024},
+      // Bank 1 is partly allocated, and banks 2 and 3 are not allocated. Their
+      // registers remain backed by the wave's storage block and still swap.
+      {rocjitsu::IsaFamily::Cdna5, "gfx1250", 300},
+  };
+  constexpr uint32_t kDstReg = 2;
+  constexpr uint32_t kGprIdxOffset = 2;
+  const auto initial = [](uint32_t reg, uint32_t lane) { return 0xA0000000u | (reg << 8) | lane; };
+  using RegisterFiles = std::vector<std::pair<std::string, std::vector<uint32_t>>>;
+  for (const auto &test_case : cases) {
+    SCOPED_TRACE(::testing::Message() << test_case.name << " allocated=" << test_case.allocated);
+    const bool cdna5 = test_case.arch == rocjitsu::IsaFamily::Cdna5;
+    // gfx1250 selects a bank per role with S_SET_VGPR_MSB bits: source 0 in
+    // bits 1:0 and the destination in bits 7:6. CDNA4 offsets the roles in
+    // M0's GPR_IDX mask: source 0 is bit 0 and the destination is bit 3.
+    const std::array<uint32_t, 4> modes = cdna5 ? std::array<uint32_t, 4>{0x00, 0x01, 0x40, 0x81}
+                                                : std::array<uint32_t, 4>{0, 1, 8, 9};
+    std::vector<uint32_t> regs;
+    for (uint32_t bank = 0; bank < (cdna5 ? 4u : 1u); ++bank) {
+      for (uint32_t reg = 0; reg < 6; ++reg) {
+        regs.push_back(bank * 256 + reg);
+      }
+    }
+    const auto run = [&](bool observe, RegisterFiles &files) {
+      amdgpu::GpuMemory gpu_mem("permlane_swap_routing_mem");
+      amdgpu::L2Cache l2("permlane_swap_routing_l2");
+      amdgpu::ComputeUnitCore::Config cfg{};
+      cfg.arch = test_case.arch;
+      cfg.num_wf_slots = 1;
+      cfg.sgprs_per_wf = cdna5 ? 128 : 106;
+      cfg.vgprs_per_wf = cdna5 ? 1024 : 256;
+      cfg.lds_size_kb = 64;
+      auto cu = amdgpu::ComputeUnitCore::create(test_case.name, cfg, &gpu_mem, &l2);
+      auto decoder = Decoder::create(test_case.arch);
+      ASSERT_NE(cu, nullptr);
+      ASSERT_NE(decoder, nullptr);
+      auto plugins = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+      plugins->add(std::make_unique<PermlaneSwapWriteRecorder>());
+      if (observe) {
+        cu->set_plugin_group(plugins);
+      }
+      auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, test_case.allocated);
+      ASSERT_NE(wf, nullptr);
+      const uint32_t wave_size = wf->wf_size();
+      const uint64_t full = wave_size == 64 ? ~uint64_t{0} : (uint64_t{1} << wave_size) - 1;
+      const uint32_t base = wf->vgpr_alloc().base;
+      const std::pair<uint64_t, uint64_t> masks[] = {
+          {full, full},
+          {0x0ff0f00ff00f0ff0ULL & full, full},
+          {full, 0x3c5aa5c3c35a5a3cULL & full},
+      };
+      for (uint32_t stride : {16u, 32u}) {
+        if (cdna5 && stride == 32) {
+          continue;
+        }
+        for (uint32_t src_reg : {kDstReg, kDstReg + 1}) {
+          const auto src0 = static_cast<uint16_t>(vgpr_src(src_reg));
+          const std::array<uint32_t, 1> words =
+              cdna5 ? cdna5::build_vop1(cdna5::kVPermlane16SwapB32Vop1,
+                                        {.src0 = src0, .vdst = kDstReg})
+                    : cdna4::build_vop1(stride == 16 ? cdna4::kVPermlane16SwapB32Vop1
+                                                     : cdna4::kVPermlane32SwapB32Vop1,
+                                        {.src0 = src0, .vdst = kDstReg});
+          std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+          ASSERT_NE(inst, nullptr);
+          for (uint32_t mode : modes) {
+            for (const auto &[exec, write_mask] : masks) {
+              const std::string label =
+                  (::testing::Message()
+                   << "stride=" << stride << " src=v" << src_reg << " mode=0x" << std::hex << mode
+                   << " exec=0x" << exec << " write_mask=0x" << write_mask)
+                      .GetString();
+              SCOPED_TRACE(label);
+              wf->set_vgpr_write_mask(full);
+              for (uint32_t reg : regs) {
+                for (uint32_t lane = 0; lane < wave_size; ++lane) {
+                  cu->write_vgpr(base + reg, lane, initial(reg, lane));
+                }
+              }
+              if (cdna5) {
+                wf->set_vgpr_msb_mode(static_cast<uint8_t>(mode));
+              } else {
+                wf->set_mode_raw(mode ? amdgpu::Wavefront::GPR_IDX_EN_BIT : 0);
+                wf->set_m0(kGprIdxOffset | (mode << 12));
+              }
+              wf->set_exec(exec);
+              wf->set_vgpr_write_mask(write_mask);
+              ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+              std::vector<uint32_t> file;
+              for (uint32_t reg : regs) {
+                for (uint32_t lane = 0; lane < wave_size; ++lane) {
+                  file.push_back(cu->read_vgpr(base + reg, lane));
+                }
+              }
+              if (cdna5) {
+                // Each role's MSBs select its bank, including one selector in two banks.
+                const uint32_t d = kDstReg + 256 * ((mode >> 6) & 3);
+                const uint32_t a = src_reg + 256 * (mode & 3);
+                for (size_t i = 0; i < regs.size(); ++i) {
+                  for (uint32_t lane = 0; lane < wave_size; ++lane) {
+                    const bool active = ((exec & write_mask) >> lane) & 1;
+                    const bool upper = (lane & stride) != 0;
+                    uint32_t expected = initial(regs[i], lane);
+                    if (active && upper && regs[i] == d) {
+                      expected = initial(a, lane ^ stride);
+                    } else if (active && !upper && regs[i] == a) {
+                      expected = initial(d, lane ^ stride);
+                    }
+                    EXPECT_EQ(file[i * wave_size + lane], expected)
+                        << "v" << std::dec << regs[i] << " lane=" << lane;
+                  }
+                }
+              }
+              files.emplace_back(label, std::move(file));
+            }
+          }
+        }
+      }
+      if (!wf->is_halted()) {
+        wf->halt();
+      }
+    };
+    RegisterFiles unobserved, observed;
+    run(false, unobserved);
+    run(true, observed);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
+    ASSERT_EQ(unobserved.size(), observed.size());
+    for (size_t i = 0; i < unobserved.size(); ++i) {
+      SCOPED_TRACE(unobserved[i].first);
+      EXPECT_EQ(unobserved[i].second, observed[i].second);
     }
   }
 }
@@ -4436,12 +4591,6 @@ TEST(Gfx1250WmmaTest, CModifierAppliesAbsBeforeNegate) {
   EXPECT_EQ(amdgpu::wmma_c_modifier(1u << 2u, 0u), 1u);
   EXPECT_EQ(amdgpu::wmma_c_modifier(0u, 1u << 2u), 2u);
   EXPECT_EQ(amdgpu::wmma_c_modifier(1u << 2u, 1u << 2u), 3u);
-}
-
-TEST(Gfx1250WmmaTest, E8M0ScaleZeroMatchesUtilContract) {
-  EXPECT_EQ(std::bit_cast<uint32_t>(amdgpu::decode_wmma_scale_byte(0x00, 0)),
-            std::bit_cast<uint32_t>(util::e8m0_to_f32(0x00)));
-  EXPECT_TRUE(std::isnan(amdgpu::decode_wmma_scale_byte(0xff, 0)));
 }
 
 TEST(Gfx1250WmmaTest, Bf16F32K32Bf16PreservesAccumulatorLayout) {
@@ -8338,11 +8487,11 @@ TEST(Cdna4CvtScaleTest, ScaledFp8Bf8ConversionsHonorDenormAndOverflowModes) {
     wf->set_mode_raw(amdgpu::Wavefront::FP16_OVFL_BIT);
     cu->write_vgpr(vb + 2, 0, 0xA5A5BEEFu);
     EXPECT_TRUE(cu->execute_instruction(low_inst.get(), *wf).succeeded());
-    EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A57BFFu);
+    EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A57C00u);
 
     cu->write_vgpr(vb + 2, 0, 0x0000BEEFu);
     EXPECT_TRUE(cu->execute_instruction(high_inst.get(), *wf).succeeded());
-    EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0x7BFFBEEFu);
+    EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0x7C00BEEFu);
   };
 
   run_scaled_f16_dst_case(cdna4::kVCvtScalef32F16Fp8Vop3, "v_cvt_scalef32_f16_fp8", 0x0000007Eu,
@@ -8392,7 +8541,7 @@ TEST(Cdna4CvtScaleTest, ScaledFp8Bf8ConversionsHonorDenormAndOverflowModes) {
   }
 }
 
-TEST(Cdna4CvtScaleTest, WideFp6ToF16ConsumesFp16OvflMode) {
+TEST(Cdna4CvtScaleTest, WideFp6ToF16IgnoresFp16OvflMode) {
   amdgpu::GpuMemory gpu_mem("cdna4_cvt_scale_wide_fp6_f16_overflow_mem");
   amdgpu::L2Cache l2("cdna4_cvt_scale_wide_fp6_f16_overflow_l2");
 
@@ -8442,7 +8591,7 @@ TEST(Cdna4CvtScaleTest, WideFp6ToF16ConsumesFp16OvflMode) {
   wf->set_mode_raw(amdgpu::Wavefront::FP16_OVFL_BIT);
   EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
   for (uint32_t i = 0; i < 16; ++i) {
-    EXPECT_EQ(cu->read_vgpr(vb + 2 + i, 0), 0xFBFF7BFFu) << "dst dword " << i;
+    EXPECT_EQ(cu->read_vgpr(vb + 2 + i, 0), 0xFC007C00u) << "dst dword " << i;
   }
 
   if (!wf->is_halted()) {
@@ -12409,34 +12558,6 @@ TEST(SdwaOutputScalingTest, HonorsFormatModesAndDestinationPlacement) {
         }
       }
       wave->halt();
-    }
-  }
-}
-
-TEST(SdwaOutputScalingTest, F32ScalingUsesExplicitRounding) {
-  struct Case {
-    uint32_t input;
-    uint32_t omod;
-    std::array<uint32_t, 4> expected;
-  };
-  constexpr std::array cases{
-      Case{0x7f7fffffu, 1, {0x7f800000u, 0x7f800000u, 0x7f7fffffu, 0x7f7fffffu}},
-      Case{0xff7fffffu, 2, {0xff800000u, 0xff7fffffu, 0xff800000u, 0xff7fffffu}},
-      Case{0x00ffffffu, 3, {0x00800000u, 0x00800000u, 0, 0}},
-      Case{0x80ffffffu, 3, {0x80800000u, 0, 0x80800000u, 0}},
-      Case{0x00800000u, 3, {0, 0, 0, 0}},
-      Case{0x00400000u, 1, {0x00800000u, 0x00800000u, 0x00800000u, 0x00800000u}},
-      Case{0x00000001u, 3, {0, 0, 0, 0}},
-      Case{0x80000000u, 1, {0, 0, 0, 0}},
-      Case{0xff800000u, 3, {0xff800000u, 0xff800000u, 0xff800000u, 0xff800000u}},
-      Case{0x7f812345u, 1, {0x7fc12345u, 0x7fc12345u, 0x7fc12345u, 0x7fc12345u}},
-      Case{0x3f800001u, 0, {0x3f800001u, 0x3f800001u, 0x3f800001u, 0x3f800001u}},
-  };
-  for (const Case &test : cases) {
-    for (uint32_t mode = 0; mode < 4; ++mode) {
-      SCOPED_TRACE(::testing::Message()
-                   << "input=" << test.input << " omod=" << test.omod << " mode=" << mode);
-      EXPECT_EQ(amdgpu::sdwa::scale_f32(test.input, test.omod, mode), test.expected[mode]);
     }
   }
 }

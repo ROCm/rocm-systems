@@ -50,7 +50,6 @@ UNIT_ALIASES = {
     "Instr/cycle": "Instructions per Cycle",
     "Waves/cycle": "Wavefronts per Cycle",
     "Cycles/wave": "Cycles per Wavefront",
-    "KB per Wave": "KB per Wavefront",
     "Wave": "Wavefronts",
     "Waves": "Wavefronts",
 }
@@ -72,7 +71,7 @@ CEILINGS_WITHOUT_METRIC = ("I8Ops", "I32Ops", "I64Ops", "MALLBw")
 ARCH_CEILINGS_WITHOUT_METRIC = {
     "gfx950": ("MFMAF4Flops", "MFMAF6Flops"),
     "gfx115x": ("FP16Flops", "BF16Flops"),
-    "gfx1201": ("FP16Flops", "WMMABF16Flops", "WMMAF8Flops"),
+    "gfx120x": ("FP16Flops", "WMMABF16Flops", "WMMAF8Flops"),
     "gfx1250": ("FP16Flops", "FP32Flops", "FP64Flops"),
 }
 # Ids that may share the formula of another id (id -> that id).

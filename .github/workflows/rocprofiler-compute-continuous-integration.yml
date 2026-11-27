@@ -26,6 +26,7 @@ on:
           - gfx94X
           - gfx90a
           - gfx1151
+          - gfx120X
       os-release:
         description: 'Ubuntu release to run'
         required: false
@@ -84,6 +85,8 @@ env:
   # and PyTorch wheels".
   ROCM_VENV: "/opt/rocm-venv"
   WHEEL_INDEX_URL: "https://nightly.repo.amd.com/rocm/whl-next/"
+  JAX_VERSION: "0.11.2"
+  JAX_MIN_PYTHON: "3.12"
 
 jobs:
   ci_config:
@@ -96,6 +99,7 @@ jobs:
       gfx950_runner: ${{ steps.runner.outputs.gfx950_runner }}
       gfx90a_runner: ${{ steps.runner.outputs.gfx90a_runner }}
       gfx1151_runner: ${{ steps.runner.outputs.gfx1151_runner }}
+      gfx120x_runner: ${{ steps.runner.outputs.gfx120x_runner }}
     steps:
       - name: Checkout workflow actions
         uses: actions/checkout@v6
@@ -129,6 +133,7 @@ jobs:
           GFX94X_RUNNER: ${{ needs.ci_config.outputs.gfx94x_runner }}
           GFX90A_RUNNER: ${{ needs.ci_config.outputs.gfx90a_runner }}
           GFX1151_RUNNER: ${{ needs.ci_config.outputs.gfx1151_runner }}
+          GFX120X_RUNNER: ${{ needs.ci_config.outputs.gfx120x_runner }}
           EVENT_NAME: ${{ github.event_name }}
           INPUT_MODE: ${{ inputs.mode }}
           INPUT_ARCH: ${{ inputs.arch }}
@@ -175,6 +180,7 @@ jobs:
             ["gfx94X"]="$GFX94X_RUNNER"
             ["gfx90a"]="$GFX90A_RUNNER"
             ["gfx1151"]="$GFX1151_RUNNER"
+            ["gfx120X"]="$GFX120X_RUNNER"
           )
           for arch in "${!RUNNER_MAP[@]}"; do
             runner="${RUNNER_MAP[$arch]}"
@@ -250,17 +256,19 @@ jobs:
           apt install -y pkg-config
           echo "✅ ROCm Dependencies Installed!"
 
-      - name: Install nightly ROCm and PyTorch wheels
+      - name: Install nightly ROCm and ML API wheels
         shell: bash
         env:
-          GFX_TARGET: ${{ matrix.system.gfx-target }}
+          GFX_TARGETS: ${{ join(matrix.system.gfx-target, ' ') }}
         run: |
           set -e
           python3 -m venv "${ROCM_VENV}"
           "${ROCM_VENV}/bin/pip" install --upgrade pip
 
-          # cmake 3.21 misses Python 3.12 headers. Drop once the nightly image has this.
-          "${ROCM_VENV}/bin/pip" install 'cmake==3.28.*'
+          device_extras=""
+          for target in ${GFX_TARGETS}; do
+            device_extras+=",device-${target}"
+          done
 
           # rocprof-compute is tested against PyTorch 2.14. The torch wheel pins
           # the ROCm build it was made against, which pins ROCm here too.
@@ -268,13 +276,27 @@ jobs:
           "${ROCM_VENV}/bin/pip" install \
             --index-url "${WHEEL_INDEX_URL}" \
             --timeout 600 \
-            "torch[device-${GFX_TARGET}]==2.14.*; python_version >= '3.11'" \
-            "rocm[libraries,profiler,devel,device-${GFX_TARGET}]"
+            "torch[${device_extras#,}]==2.14.*; python_version >= '3.11'" \
+            "rocm[libraries,profiler,devel${device_extras}]"
+
+          # TheRock builds JAX for Python 3.12+ only, so Ubuntu 24.04 jobs get JAX and
+          # Ubuntu 22.04 jobs (Python 3.10) do not, as with PyTorch. The ROCm plugin
+          # and PJRT come from TheRock and must match the ROCm build installed above.
+          # jax comes from PyPI. Keep all three on the same version.
+          rocm_version="$("${ROCM_VENV}/bin/python" -c 'from importlib.metadata import version; print(version("rocm"))')"
+          "${ROCM_VENV}/bin/pip" install \
+            --extra-index-url "${WHEEL_INDEX_URL}" \
+            --timeout 600 \
+            "jax==${JAX_VERSION}; python_version >= '${JAX_MIN_PYTHON}'" \
+            "jax-rocm10-plugin==${JAX_VERSION}+rocm${rocm_version}; python_version >= '${JAX_MIN_PYTHON}'" \
+            "jax-rocm10-pjrt==${JAX_VERSION}+rocm${rocm_version}; python_version >= '${JAX_MIN_PYTHON}'"
 
           "${ROCM_VENV}/bin/rocm-sdk" init
 
-          # pip only warns on an unknown extra, so assert the device wheel landed.
-          "${ROCM_VENV}/bin/pip" show "rocm-sdk-device-${GFX_TARGET}" > /dev/null
+          # pip only warns on an unknown extra, so assert each device wheel landed.
+          for target in ${GFX_TARGETS}; do
+            "${ROCM_VENV}/bin/pip" show "rocm-sdk-device-${target}" > /dev/null
+          done
 
           # $GITHUB_ENV is a file; every later step in this job starts with these
           # set. A plain export would not outlive this step.

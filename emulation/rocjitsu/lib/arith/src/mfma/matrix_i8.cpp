@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// gfx942/gfx950 signed-byte MFMA and gfx1250 mixed-signedness byte WMMA.
+// GFX9 signed-byte MFMA and gfx1250 mixed-signedness byte WMMA.
 #include "common/internal.h"
 #include "mfma/backends.h"
 #include "mfma/gfx1250_integer_dispatch.h"
@@ -11,7 +11,8 @@
 #include "rj_arith/detail/rj_arith_wmma.h"
 namespace {
 // Validate source controls and dispatch the exact integer reduction.
-template <int M, int K, int Batch, bool Wmma>
+template <int M, int K, int Batch, bool Wmma, int ABlockLanes = 0, bool AllowSaturation = true,
+          bool Gfx950 = false>
 int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32_t *const *a,
              const uint32_t *const *b, const uint32_t *const *c) {
   using namespace rocjitsu::arith;
@@ -22,24 +23,41 @@ int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32
                            kMatrixIgnoredFpFlags | RJ_ARITH_FP_DX10_CLAMP_OFF)) {
     return error;
   }
-  const bool clamp = Wmma ? (controls & RJ_ARITH_WMMA_CLAMP) : (flags & RJ_ARITH_FP16_OVFL);
+  const bool clamp =
+      AllowSaturation && (Wmma ? (controls & RJ_ARITH_WMMA_CLAMP) : (flags & RJ_ARITH_FP16_OVFL));
   if constexpr (Wmma) {
     dispatch_gfx1250_integer<false>(flags, controls, clamp, d, a, b, c, nullptr);
     return RJ_ARITH_SUCCESS;
   }
+  const uint64_t effective_controls = (Gfx950 && Batch == 1) ? 0 : controls;
+  const bool clamp_per_pass = Gfx950 && clamp && K > 16;
+#if defined(RJ_ARITH_HAVE_AVX512VNNI)
+  // K=4 forms have one B word per column. Their row-streaming x86-64-v4
+  // reduction is faster than a VNNI tile, so only single-batch forms use VNNI.
+  if constexpr (!Wmma && Batch == 1 && AllowSaturation) {
+    const bool use_zen4 = !clamp_per_pass && cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_ZEN4);
+    if (use_zen4) {
+      matrix_i8_avx512vnni<M, K, Batch>(effective_controls, clamp, d, a, b, c);
+      return RJ_ARITH_SUCCESS;
+    }
+  }
+#endif
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
   if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
-    matrix_i8_x86_64_v4<M, K, Batch, Wmma>(controls, clamp, d, a, b, c);
+    matrix_i8_x86_64_v4<M, K, Batch, Wmma, ABlockLanes>(effective_controls, clamp, clamp_per_pass,
+                                                        d, a, b, c);
     return RJ_ARITH_SUCCESS;
   }
 #endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
   if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
-    matrix_i8_x86_64_v3<M, K, Batch, Wmma>(controls, clamp, d, a, b, c);
+    matrix_i8_x86_64_v3<M, K, Batch, Wmma, ABlockLanes>(effective_controls, clamp, clamp_per_pass,
+                                                        d, a, b, c);
     return RJ_ARITH_SUCCESS;
   }
 #endif
-  matrix_i8_kernel<M, K, Batch, Wmma>(controls, clamp, d, a, b, c);
+  matrix_i8_kernel<M, K, Batch, Wmma, ABlockLanes>(effective_controls, clamp, clamp_per_pass, d, a,
+                                                   b, c);
   return RJ_ARITH_SUCCESS;
 }
 } // namespace
@@ -72,6 +90,13 @@ int rj_arith_v_mfma_i32_32x32x16_i8_w64(uint64_t flags, uint64_t controls, uint3
   return evaluate<32, 16, 1, false>(flags, controls, d, a, b, c);
 }
 
+// Multiply signed bytes with gfx950 single-batch control suppression.
+int rj_arith_v_mfma_i32_32x32x16_i8_w64_gfx950(uint64_t flags, uint64_t controls,
+                                               uint32_t *const *d, const uint32_t *const *a,
+                                               const uint32_t *const *b, const uint32_t *const *c) {
+  return evaluate<32, 16, 1, false, 0, true, true>(flags, controls, d, a, b, c);
+}
+
 // Multiply signed bytes with optional signed saturation.
 int rj_arith_v_mfma_i32_16x16x32_i8_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
                                         const uint32_t *const *a, const uint32_t *const *b,
@@ -79,18 +104,25 @@ int rj_arith_v_mfma_i32_16x16x32_i8_w64(uint64_t flags, uint64_t controls, uint3
   return evaluate<16, 32, 1, false>(flags, controls, d, a, b, c);
 }
 
+// Multiply signed bytes with gfx950 single-batch control suppression and per-pass saturation.
+int rj_arith_v_mfma_i32_16x16x32_i8_w64_gfx950(uint64_t flags, uint64_t controls,
+                                               uint32_t *const *d, const uint32_t *const *a,
+                                               const uint32_t *const *b, const uint32_t *const *c) {
+  return evaluate<16, 32, 1, false, 0, true, true>(flags, controls, d, a, b, c);
+}
+
 // Multiply signed bytes with optional signed saturation.
 int rj_arith_v_mfma_i32_16x16x64_i8_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
                                         const uint32_t *const *a, const uint32_t *const *b,
                                         const uint32_t *const *c) {
-  return evaluate<16, 64, 1, false>(flags, controls, d, a, b, c);
+  return evaluate<16, 64, 1, false, 0, true, true>(flags, controls, d, a, b, c);
 }
 
 // Multiply signed bytes with optional signed saturation.
 int rj_arith_v_mfma_i32_32x32x32_i8_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
                                         const uint32_t *const *a, const uint32_t *const *b,
                                         const uint32_t *const *c) {
-  return evaluate<32, 32, 1, false>(flags, controls, d, a, b, c);
+  return evaluate<32, 32, 1, false, 0, true, true>(flags, controls, d, a, b, c);
 }
 
 // Multiply independently signed/unsigned bytes, optionally saturating the final sum.
@@ -98,4 +130,80 @@ int rj_arith_v_wmma_i32_16x16x64_iu8_w32(uint64_t flags, uint64_t controls, uint
                                          const uint32_t *const *a, const uint32_t *const *b,
                                          const uint32_t *const *c) {
   return evaluate<16, 64, 1, true>(flags, controls, d, a, b, c);
+}
+
+// Preserve gfx908's wrapping sum and inherited A broadcast mapping.
+int rj_arith_v_mfma_i32_32x32x4_2b_i8_w64_gfx908(uint64_t flags, uint64_t controls,
+                                                 uint32_t *const *d, const uint32_t *const *a,
+                                                 const uint32_t *const *b,
+                                                 const uint32_t *const *c) {
+  return evaluate<32, 4, 2, false, 0, false>(flags, controls, d, a, b, c);
+}
+
+// Preserve gfx908's wrapping sum and inherited A broadcast mapping.
+int rj_arith_v_mfma_i32_16x16x4_4b_i8_w64_gfx908(uint64_t flags, uint64_t controls,
+                                                 uint32_t *const *d, const uint32_t *const *a,
+                                                 const uint32_t *const *b,
+                                                 const uint32_t *const *c) {
+  return evaluate<16, 4, 4, false, 0, false>(flags, controls, d, a, b, c);
+}
+
+// Preserve gfx908's wrapping sum and inherited A broadcast mapping.
+int rj_arith_v_mfma_i32_4x4x4_16b_i8_w64_gfx908(uint64_t flags, uint64_t controls,
+                                                uint32_t *const *d, const uint32_t *const *a,
+                                                const uint32_t *const *b,
+                                                const uint32_t *const *c) {
+  return evaluate<4, 4, 16, false, 0, false>(flags, controls, d, a, b, c);
+}
+
+// Preserve gfx908's wrapping sum and inherited A broadcast mapping.
+int rj_arith_v_mfma_i32_32x32x8_i8_w64_gfx908(uint64_t flags, uint64_t controls, uint32_t *const *d,
+                                              const uint32_t *const *a, const uint32_t *const *b,
+                                              const uint32_t *const *c) {
+  return evaluate<32, 8, 1, false, 0, false>(flags, controls, d, a, b, c);
+}
+
+// Preserve gfx908's wrapping sum and inherited A broadcast mapping.
+int rj_arith_v_mfma_i32_16x16x16_i8_w64_gfx908(uint64_t flags, uint64_t controls,
+                                               uint32_t *const *d, const uint32_t *const *a,
+                                               const uint32_t *const *b, const uint32_t *const *c) {
+  return evaluate<16, 16, 1, false, 0, false>(flags, controls, d, a, b, c);
+}
+
+// Preserve gfx90a's wrapping sum and inherited A broadcast mapping.
+int rj_arith_v_mfma_i32_32x32x4_2b_i8_w64_gfx90a(uint64_t flags, uint64_t controls,
+                                                 uint32_t *const *d, const uint32_t *const *a,
+                                                 const uint32_t *const *b,
+                                                 const uint32_t *const *c) {
+  return evaluate<32, 4, 2, false, 32, false>(flags, controls, d, a, b, c);
+}
+
+// Preserve gfx90a's wrapping sum and inherited A broadcast mapping.
+int rj_arith_v_mfma_i32_16x16x4_4b_i8_w64_gfx90a(uint64_t flags, uint64_t controls,
+                                                 uint32_t *const *d, const uint32_t *const *a,
+                                                 const uint32_t *const *b,
+                                                 const uint32_t *const *c) {
+  return evaluate<16, 4, 4, false, 16, false>(flags, controls, d, a, b, c);
+}
+
+// Preserve gfx90a's wrapping sum and inherited A broadcast mapping.
+int rj_arith_v_mfma_i32_4x4x4_16b_i8_w64_gfx90a(uint64_t flags, uint64_t controls,
+                                                uint32_t *const *d, const uint32_t *const *a,
+                                                const uint32_t *const *b,
+                                                const uint32_t *const *c) {
+  return evaluate<4, 4, 16, false, 4, false>(flags, controls, d, a, b, c);
+}
+
+// Preserve gfx90a's wrapping sum and inherited A broadcast mapping.
+int rj_arith_v_mfma_i32_32x32x8_i8_w64_gfx90a(uint64_t flags, uint64_t controls, uint32_t *const *d,
+                                              const uint32_t *const *a, const uint32_t *const *b,
+                                              const uint32_t *const *c) {
+  return evaluate<32, 8, 1, false, 32, false>(flags, controls, d, a, b, c);
+}
+
+// Preserve gfx90a's wrapping sum and inherited A broadcast mapping.
+int rj_arith_v_mfma_i32_16x16x16_i8_w64_gfx90a(uint64_t flags, uint64_t controls,
+                                               uint32_t *const *d, const uint32_t *const *a,
+                                               const uint32_t *const *b, const uint32_t *const *c) {
+  return evaluate<16, 16, 1, false, 16, false>(flags, controls, d, a, b, c);
 }

@@ -1,9 +1,9 @@
 # Fault injection
 
 The fault-injection library creates deliberately modified AMDGPU code objects
-for experiments with synchronization and LDS address failures. It runs offline
-on the host: callers supply an image, select a qualified operation, and receive a mutant
-image or a typed error. It neither initializes HSA nor dispatches GPU work.
+for experiments with synchronization, LDS and atomic address failures. It runs
+offline on the host: callers supply an image, select a qualified operation, and
+receive a mutant image or a typed error. It neither initializes HSA nor dispatches GPU work.
 
 The internal C++ library and `rj_code_mutate` CLI perform the same mutation.
 ConSan is an optional consumer of the output; both the library and CLI build
@@ -108,13 +108,14 @@ Generic mechanics and recipe semantics have separate responsibilities:
 | --- | --- | --- |
 | Complete barrier Drop | Implemented for the target/wave forms below. Removes one logical barrier: an ordered two-member signal/wait pair or one true full-barrier instruction. A half-pair is never a singleton. | [`StaticBarrier` / family policy](../lib/rocjitsu/src/rocjitsu/code/analysis/static_barriers.h), [qualification](../lib/rocjitsu/src/rocjitsu/code/analysis/static_barriers.cpp), [analysis regressions](../tests/analysis/static_barriers_test.cpp), [Drop regressions](../tests/patch/fault_injection/drop_barrier_test.cpp) |
 | LDS wrong address | Implements the exact scalar, two-address, subword, D16 and transpose matrices below on seven concrete targets and ten target/wave profiles. Replaces only the address VGPR with an explicitly supplied, distinct, allocated VGPR. Direct and shared execution owners must all satisfy allocation and bank requirements. | [LDS API](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/lds_wrong_address.h), [library tests](../tests/patch/fault_injection/lds_wrong_address_test.cpp), [CLI tests](../tests/patch/fault_injection/lds_cli_test.cpp) |
-| Exact and logical-ordinal selection | An exact kernel name chooses one inventory; an exact context-bound handle takes precedence over the zero-based logical ordinal. Invalid exact requests fail without fallback. Ordinal zero chooses the first barrier by first-member offset, or the first LDS instruction by source offset. There is no race ranking or legacy physical-index adapter. | [`DropBarrierSelector`](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/drop_barrier.h), [`select_drop_barrier`](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/drop_barrier.cpp), [`LdsSelector`](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/lds_wrong_address.h) and [`select_lds_wrong_address`](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/lds_wrong_address.cpp), [selection regressions](../tests/patch/fault_injection/drop_barrier_test.cpp) |
+| Atomic wrong address (`AtomicWrongAddress`) | Lists all owned atomic sites before recipe admission. Mutates the signed24 byte offset of twelve-byte FLAT/GLOBAL/BUFFER atomics on gfx1200/gfx1201 wave32/wave64 and gfx1250/gfx1251 wave32, preserving the operation's alignment. Unsupported forms retain their ordinals and fail on apply. | [Atomic API](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/atomic_wrong_address.h), [library tests](../tests/patch/fault_injection/atomic_wrong_address_test.cpp), [Buffer tests](../tests/patch/fault_injection/atomic_buffer_test.cpp), [CLI tests](../tests/patch/fault_injection/atomic_cli_test.cpp) |
+| Exact and logical-ordinal selection | An exact kernel name chooses one inventory; an exact context-bound handle takes precedence over the zero-based logical ordinal. Invalid exact requests fail without fallback. Ordinal zero chooses the first barrier by first-member offset, or the first LDS instruction or atomic site by source offset. Atomic ordinals include unsupported forms. There is no race ranking or legacy physical-index adapter. | [`DropBarrierSelector`](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/drop_barrier.h), [`select_drop_barrier`](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/drop_barrier.cpp), [`LdsSelector`](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/lds_wrong_address.h) and [`select_lds_wrong_address`](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/lds_wrong_address.cpp), [selection regressions](../tests/patch/fault_injection/drop_barrier_test.cpp) |
 | Multiple kernels in one text section | Discovery checks all entries before exposing one exact kernel's inventory. Drop requires independent sibling CFGs; LDS retains complete affected-owner facts for shared helpers. Unresolved or incomplete ownership is rejected. | [`FaultMutationContext`](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/fault_mutation_context.h), [ownership analysis](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/fault_mutation_context.cpp), [sibling preservation tests](../tests/patch/fault_injection/drop_barrier_test.cpp) |
 | Shared DBI instruction replacement | Consumed through `InstrumentationKind::ReplaceWithInst`. One transaction replaces complete source instructions through trampolines. Drop supplies one 4-byte NOP body for each qualified 4-byte barrier member. This does not widen observational trampoline-anchor admission. | [Instrumentor contract](../lib/rocjitsu/src/rocjitsu/code/patch/instrumentor.h), [DBI design](dbi-design.md), [transaction tests](../tests/patch/checked_text_edits_test.cpp), [replacement tests](../tests/patch/instrumentor_replacement_test.cpp) |
-| Offline CLI | Lists current-input sites and emits one complete Drop or one supported LDS address mutation using the same library. | [usage](#command-line-usage), [frontend](../tools/rj_code_mutate.cpp), [integration tests](../tests/patch/fault_injection/mutation_cli_test.cpp) |
+| Offline CLI | Lists current-input sites and emits one complete Drop, supported LDS address mutation, or supported atomic address mutation using the same library. | [usage](#command-line-usage), [frontend](../tools/rj_code_mutate.cpp), [integration tests](../tests/patch/fault_injection/mutation_cli_test.cpp) |
 | Persistent selection files and replay bundles | Not provided; no durable replay format is committed. | — |
 | Helper, indirect-flow and firmware-preload ownership | LDS can list sites reached through shared helpers, recovered calls and supported CDNA preload entry points when complete ownership is proved. Recovered calls may still prevent emission. Drop requires independent direct control flow; unresolved flow remains rejected. | [ownership tests](../tests/patch/fault_injection/lds_ownership_test.cpp) |
-| Other mutation recipes and composition | Planned. Barrier movement, other address/order/scope changes, grouped or destructive partial Drop, and multi-mutation composition are not implemented here. | — |
+| Other mutation recipes and composition | Planned. Barrier movement, ordinary address changes, order/scope changes, grouped or destructive partial Drop, and multi-mutation composition are not implemented here. | — |
 | Multiple text sections or dynamic occurrence selection | Unsupported. | — |
 
 A caller uses `discover_drop_barriers` with an exact kernel name to obtain an
@@ -127,6 +128,22 @@ members and `selection.owner()` retains pristine owner offsets. Rescan the
 emitted image for its section and descriptor file locations. Fresh CFG block
 boundaries can differ because of the added branches. FI does not expose a
 second generic edit plan, validator, or writer.
+
+Atomic callers use `discover_atomic_wrong_address`, `select_atomic_wrong_address`
+and `apply_atomic_wrong_address` with the same context lifetime rule. Inventory
+ordinals include unsupported atomic forms. A delta must be positive, at most
+`0x7fffff` bytes, and a multiple of four bytes and of the selected operation's
+natural alignment: eight bytes for 64-bit atomics, four for 32-bit and packed
+16-bit-pair atomics. Compare-and-swap uses the memory element's width, not the
+combined compare/replacement payload width. The resulting offset must fit the
+signed24 field. Modern Buffer atomics require a nonnegative original immediate;
+negative source offsets remain selectable but reject mutation. These checks
+preserve an already aligned runtime address; the caller remains responsible
+for the original address's alignment and both
+addresses' validity. CDNA5 `scale_offset` does not change the immediate's byte
+units. Mutation changes only the immediate and preserves operands, return/CAS
+behavior, modifiers, waits and the guest continuation. Successful discovery
+does not guarantee that the shared writer can emit an input's layout.
 
 ## Target coverage and qualification
 
@@ -476,6 +493,39 @@ To select an exact library handle instead, put a previously obtained
 an inventory from the same context and entry. Exact takes precedence over the
 ordinal; a foreign or expired handle fails without fallback.
 
+For atomics, list the exact kernel's complete inventory first:
+
+```bash
+emulation/rocjitsu/build/tools/rj_code_mutate \
+  --input original.hsaco --kernel my_kernel --kind AtomicWrongAddress --list
+```
+
+For example, a gfx1201 input containing an eight-byte `ds_consume` followed by
+a twelve-byte `global_atomic_add_u64` with an immediate offset of zero can
+produce the following abbreviated listing. All coordinates are relative to pristine `.text`:
+
+```text
+ordinal=0 exact=0 size=8 byte_offset=unknown address_supported=0 ... form=ds_consume ...
+ordinal=1 exact=8 size=12 byte_offset=0 address_supported=1 ... form=global_atomic_add_u64 ...
+```
+
+The DS atomic occupies ordinal zero even though this recipe cannot mutate it.
+Copy `exact=8` from the row with `address_supported=1` and supply an eight-byte
+delta to preserve the selected 64-bit atomic's natural alignment:
+
+```bash
+emulation/rocjitsu/build/tools/rj_code_mutate \
+  --input original.hsaco --kernel my_kernel --kind AtomicWrongAddress \
+  --exact 8 --address-delta 8 --output atomic-mutant.hsaco
+```
+
+The selected immediate changes from 0 to 8. `--address-delta 4` is rejected
+with `code=InvalidParameters` before output creation for this 64-bit operation;
+32-bit atomics accept a delta of four bytes. Selecting `--exact 0` fails with
+`code=UnsupportedForm`, including when `--ordinal 1` is also supplied. An exact
+selection never falls back to the ordinal. Adding a future DS address recipe
+will not renumber the global atomic.
+
 For a `gfx1250` Drop mutant that meets ConSan's native LDS admission, fresh
 preparation consumes `mutant.hsaco` as its new original image:
 
@@ -501,13 +551,17 @@ one member; a split pair has two. `LdsWrongAddress` listing lines contain
 `ordinal`, the instruction's `.text`-relative `exact` byte offset, its original
 `address_vgpr`, `address_bank`, target, form, `affected_owners`, and one
 `owner=name:entry_offset:descriptor_file_offset` field for every affected kernel.
+`AtomicWrongAddress` listing lines contain `ordinal`, `.text`-relative `exact`,
+instruction `size`, `byte_offset` (or `unknown`), `address_supported`, target,
+form and the same affected-owner fields. `address_supported=1` describes the
+instruction's recipe, not whether any particular delta is aligned or in range.
 The mutation summary reports that same source-coordinate owner set. These fields
 do not claim per-dispatch isolation. Coordinates describe only this input and exact entry;
 they are not reusable handles for another image or legacy physical indices.
 
-Drop emission redirects each selected member through a NOP trampoline. LDS
-emission redirects the selected instruction through a trampoline containing the
-replacement instruction. The mutant's text and ELF layout can grow, and
+Drop emission redirects each selected member through a NOP trampoline. LDS and
+atomic emission redirect the selected instruction through a trampoline containing
+the replacement instruction. The mutant's text and ELF layout can grow, and
 descriptor-relative entry fields can change. Reparse the output and list its
 sites again before selecting another mutation.
 
@@ -520,8 +574,9 @@ that cluster semantics are active.
 Use `--exact TEXT-OFFSET` to resolve that coordinate into a context-bound library
 selection. Exact takes precedence over `--ordinal`, including an out-of-range
 ordinal; invalid exact requests fail without fallback. Without either selector,
-ordinal zero selects the first complete barrier or supported LDS instruction in
-source order. Numbers accept unsigned decimal or `0x` hexadecimal.
+ordinal zero selects the first complete barrier, supported LDS instruction, or
+atomic site in source order. The first atomic can be unsupported. Numbers accept
+unsigned decimal or `0x` hexadecimal.
 `--target gfx1250`, if supplied, asserts the parsed identity and never selects a
 different decoder. Input ABI and wave admission are the library's shared DBI
 checks, without another CLI version gate.
@@ -562,13 +617,17 @@ prints returned library assumptions to stderr, prefixed by
 and the clustered dispatch requirement when applicable. Failure to write Drop
 assumptions returns status 3 before printing a success summary. LDS reports its
 replacement `address_vgpr`; its runtime preconditions are described above. The
+atomic summary reports `address_delta` in bytes and the affected-owner set. The
 CLI emits only the mutant file and does not load HSA or a capture plugin.
 Mutation success and the capability listing make no execution or detector
 qualification claim.
 
 The [Drop CLI tests](../tests/patch/fault_injection/mutation_cli_test.cpp) exercise
 all ten Drop rows above using the built executable. The [LDS CLI tests](../tests/patch/fault_injection/lds_cli_test.cpp)
-cover the bounded LDS profile. The [b96 library](../tests/patch/fault_injection/b96_lds_test.cpp), [b96 CLI](../tests/patch/fault_injection/b96_lds_cli_test.cpp), [scalar/two-address library](../tests/patch/fault_injection/scalar_two_lds_test.cpp), and [scalar/two-address CLI](../tests/patch/fault_injection/scalar_two_lds_cli_test.cpp) suites exercise the additional widths and forms, including RDNA4 wave32. These tests compare library and CLI bytes, decode
+cover the bounded LDS profile. The [atomic library](../tests/patch/fault_injection/atomic_wrong_address_test.cpp)
+and [atomic CLI](../tests/patch/fault_injection/atomic_cli_test.cpp) tests cover
+stable unsupported ordinals, source identities, aligned deltas and emitted
+instruction preservation on the six modern target/wave profiles. The [b96 library](../tests/patch/fault_injection/b96_lds_test.cpp), [b96 CLI](../tests/patch/fault_injection/b96_lds_cli_test.cpp), [scalar/two-address library](../tests/patch/fault_injection/scalar_two_lds_test.cpp), and [scalar/two-address CLI](../tests/patch/fault_injection/scalar_two_lds_cli_test.cpp) suites exercise the additional widths and forms, including RDNA4 wave32. These tests compare library and CLI bytes, decode
 selected instructions, reparse mutants and check preservation and rejection
 paths; the Drop tests also cover sibling kernels and I/O paths. The
 symbol-boundary test checks the actual executable for runtime and execution
@@ -576,7 +635,7 @@ provider dependencies. To run the focused suites:
 
 ```bash
 ctest --test-dir emulation/rocjitsu/build --show-only \
-  -R 'FaultMutationCli|FaultDropBarrier|FaultLds|CheckedTextEdits|B96Lds|ScalarTwoLds|CdnaLds'
+  -R 'FaultMutationCli|FaultDropBarrier|FaultLds|FaultAtomic|CheckedTextEdits|B96Lds|ScalarTwoLds|CdnaLds'
 ctest --test-dir emulation/rocjitsu/build --output-on-failure --no-tests=error \
-  -R 'FaultMutationCli|FaultDropBarrier|FaultLds|CheckedTextEdits|B96Lds|ScalarTwoLds|CdnaLds'
+  -R 'FaultMutationCli|FaultDropBarrier|FaultLds|FaultAtomic|CheckedTextEdits|B96Lds|ScalarTwoLds|CdnaLds'
 ```

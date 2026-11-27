@@ -29,6 +29,7 @@ areas edit different files.
 | `p2p-add-to-plan.inc` | `addP2pToPlan`: protocol selection, CE routing, LL thresholds |
 | `p2p-policy.inc` | `rcclP2pTaskParts`, `rcclP2pPolicyChannels`, `calcP2pChannelCount`, `rcclEffectiveP2pBatchEnable`, `rcclP2pBatchEligible` |
 | `p2p-schedule.inc` | `scheduleP2pTasksToPlan`: self pairs and per-round argument budgets |
+| `prepare-tasks.inc` | `ncclPrepareTasks`, including `rcclSimulateDirectAllGather` for `ncclGroupSimulateEnd` |
 | `proxy-ops.inc` | `geteActivationMask`, `gettaskEventHandle`, `addProxyOpIfNeeded` |
 | `redop.inc` | `hostToDevRedOp`, `ncclRedOpCreatePreMulSum_impl`, `ncclRedOpDestroy_impl` |
 | `task-append.inc` | `collTaskAppend`, `ceCollTaskAppend`, `rawTaskAppend`, `ncclCeInitJob`, `rmaTaskAppend`, `ncclPlannerSetCapturingGraph` |

@@ -5,6 +5,7 @@
 // strict-exactness claims. Compare to their inherited implementations across CPU paths.
 
 #include "common/cpu.h"
+#include "common/integer.h"
 #include "common/registers.h"
 #include "common/semantics.h"
 #include "rj_arith/detail/rj_arith_common.h"
@@ -24,7 +25,7 @@ template <int Lanes, typename Call> void check_inherited(Call call, Call referen
   Registers<2, Lanes> input;
   std::minstd_rand rng;
   for (int lane = 0; lane < Lanes; ++lane) {
-    input.v[0][lane] = (uint32_t(rng() >> 15) << 16) | uint32_t(rng() >> 15);
+    input.v[0][lane] = rocjitsu::arith::test::random_word(rng);
   }
   input.v[0][0] = 0xfc017c01U;
   input.v[0][1] = 0xfc007c00U;
@@ -113,4 +114,45 @@ TEST(CdnaHalfMath, Cos) {
   check_inherited<32>(rj_arith_v_cos_f16_w32_gfx942, rj_arith_v_cos_f16_w32);
   check_inherited<64>(rj_arith_v_cos_f16_w64_gfx942, rj_arith_v_cos_f16_w64);
   check_inherited<32>(rj_arith_v_cos_f16_w32_gfx1250, rj_arith_v_cos_f16_w32_gfx12);
+}
+
+// Check inherited SDWA tiny-output finalization, selected halves and zero-EXEC validation.
+TEST(CdnaHalfMath, SdwaOutput) {
+  using namespace rocjitsu::arith::test;
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (uint64_t semantics : {RJ_ARITH_SEMANTICS_COMPATIBILITY, RJ_ARITH_SEMANTICS_LOOSE,
+                               RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE}) {
+      for (bool sine : {false, true}) {
+        for (bool high : {false, true}) {
+          Registers<2, 64> data;
+          for (int lane = 0; lane < 64; ++lane) {
+            data.v[0][lane] = sine ? 0x80a380a3U : 0xf400f400U;
+            data.v[1][lane] = 0xbeefdeadU;
+          }
+          const uint64_t flags = cpu | semantics | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
+          const uint64_t mode =
+              RJ_ARITH_ALU_SDWA | RJ_ARITH_ALU_OMOD_HALF | (high ? RJ_ARITH_ALU_HIGH_D : 0U);
+          auto call = sine ? rj_arith_v_sin_f16_w64_gfx942 : rj_arith_v_rcp_f16_w64_gfx942;
+          // The high-half case also overlaps A and D.
+          const int aliasing_offset = high ? 0 : 1;
+          const uint32_t old = data.v[aliasing_offset][0];
+          uint32_t status = 0x12345678U;
+          ASSERT_EQ(
+              call(flags, 0x8000000000000001ULL, mode, data.v + aliasing_offset, data.v, &status),
+              0);
+          for (int lane = 0; lane < 64; ++lane) {
+            const uint32_t zeroed_half = old & (high ? 0x0000ffffU : 0xffff0000U);
+            EXPECT_EQ(data.v[aliasing_offset][lane], lane == 0 || lane == 63 ? zeroed_half : old);
+          }
+          EXPECT_EQ(status, 0x12345678U);
+          EXPECT_EQ(call(flags, 0, mode, nullptr, nullptr, nullptr), 0);
+          // The selector belongs to the legacy wrapper, not the newer architectures.
+          auto newer = sine ? rj_arith_v_sin_f16_w32_gfx1250 : rj_arith_v_rcp_f16_w32_gfx1250;
+          EXPECT_EQ(newer(flags, 0, mode, nullptr, nullptr, nullptr), RJ_ARITH_ERROR_INVALID_FLAGS);
+          EXPECT_EQ(call(flags, 0, mode | (1ULL << 32), nullptr, nullptr, nullptr),
+                    RJ_ARITH_ERROR_INVALID_FLAGS);
+        }
+      }
+    }
+  }
 }
