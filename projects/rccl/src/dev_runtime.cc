@@ -489,7 +489,28 @@ struct symLsaMessage {
   size_t segmentSize;
   // RCCL: 1 when this rank holds the creating POSIX fd for the segment.
   int hostExportable;
+  // RCCL: how this segment is shared; selects the memHandle (POSIX fd via proxy) or fabricHandle arm.
+  CUmemAllocationHandleType handleType;
 };
+
+// RCCL: an allocation carries a single handle type and host VMM cannot be exported as FABRIC, so with MNNVL a window
+// can hold FABRIC device segments next to POSIX-fd host segments. Share each segment with a type it was created with,
+// preferring the communicator's. Imported handles report their exporter's type.
+static CUmemAllocationHandleType symSegmentHandleType(const CUmemAllocationProp& prop) {
+  const unsigned types = static_cast<unsigned>(prop.requestedHandleTypes);
+  if (types & static_cast<unsigned>(ncclCuMemHandleType)) return ncclCuMemHandleType;
+  if (types & static_cast<unsigned>(CU_MEM_HANDLE_TYPE_FABRIC)) return CU_MEM_HANDLE_TYPE_FABRIC;
+  if (types & static_cast<unsigned>(CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR)) {
+    return CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
+  }
+  return ncclCuMemHandleType;
+}
+
+// RCCL: a POSIX fd only travels over the proxy's local socket, so a POSIX segment cannot reach another host.
+static bool symPeerSharesHost(struct ncclComm* comm, int lsaRank) {
+  const int peer = comm->devrState.lsaDomainRankList[lsaRank];
+  return comm->peerInfo[peer].hostHash == comm->peerInfo[comm->rank].hostHash;
+}
 
 static ncclResult_t symMemorySetAccessForVASegment(struct ncclComm* comm, symLsaMessage* message, CUdeviceptr addr) {
   CUmemAccessDesc accessDesc;
@@ -507,10 +528,11 @@ static ncclResult_t symMemoryExportSegmentHandle(struct ncclComm* comm, symLsaMe
   CUCHECKGOTO(cuMemGetAllocationPropertiesFromHandle(&prop, memHandle), ret, fail);
   msg->type = prop.location.type;
   msg->segmentSize = segmentSize;
-  if (ncclCuMemHandleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
+  msg->handleType = symSegmentHandleType(prop);
+  if (msg->handleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
     msg->memHandle = memHandle;
   } else {
-    CUCHECKGOTO(cuMemExportToShareableHandle(&msg->fabricHandle, memHandle, ncclCuMemHandleType, 0), ret, fail);
+    CUCHECKGOTO(cuMemExportToShareableHandle(&msg->fabricHandle, memHandle, msg->handleType, 0), ret, fail);
   }
 fail:
   return ret;
@@ -524,16 +546,22 @@ static ncclResult_t symMemoryImportAndMapSegmentHandle(struct ncclComm* comm, in
   if (reuseLocal) {
     impHandle = memHandle;
   } else {
-    if (ncclCuMemHandleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
+    if (msg->handleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
+      if (!symPeerSharesHost(comm, r)) {
+        WARN("Symmetric window: LSA rank %d shares a segment as a POSIX fd, which cannot cross hosts; allocate it "
+             "with CU_MEM_HANDLE_TYPE_FABRIC",
+             r);
+        ret = ncclInvalidUsage;
+        goto fail;
+      }
       ncclIpcFd fd = NCCL_INVALID_IPC_FD;
       NCCLCHECKGOTO(ncclProxyClientGetFdBlocking(comm, comm->devrState.lsaDomainRankList[r], msg, &fd), ret, fail);
       CUCHECKGOTO(cuMemImportFromShareableHandle(&impHandle, reinterpret_cast<void*>((uintptr_t)fd),
-                                                 ncclCuMemHandleType),
+                                                 CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR),
                   ret, fail);
       SYSCHECKGOTO(ncclIpcFdClose(fd), "close", ret, fail);
     } else {
-      CUCHECKGOTO(cuMemImportFromShareableHandle(&impHandle, (void*)&msg->fabricHandle, ncclCuMemHandleType), ret,
-                  fail);
+      CUCHECKGOTO(cuMemImportFromShareableHandle(&impHandle, (void*)&msg->fabricHandle, msg->handleType), ret, fail);
     }
   }
   CUCHECKGOTO(cuMemMap(addr, msg->segmentSize, 0, impHandle, 0), ret, fail);
@@ -592,7 +620,7 @@ static ncclResult_t symMemoryGetHostOwnerFd(struct ncclComm* comm, struct ncclDe
                                             int owner, symLsaMessage* ownerMsg) {
   struct ncclDevrState* devr = &comm->devrState;
   if (owner < 0 || owner == devr->lsaDomainSelf || segment >= mem->numSegments ||
-      ncclCuMemHandleType != CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
+      ownerMsg->handleType != CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR || !symPeerSharesHost(comm, owner)) {
     return ncclSuccess;
   }
   NCCLCHECK(symMemoryEnsureHostOwnerFds(mem));
@@ -669,10 +697,11 @@ static ncclResult_t symMemoryMapLsa(struct ncclComm* comm, struct ncclDevrMemory
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
       // RCCL: imported host handles fail this export. The creating rank's fd is what GIN can register.
       if (localHostFds != nullptr && ncclParamSymReuseSysmemHandles() && ncclSymIsHostSegment(msg->type) &&
-          ncclCuMemHandleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR &&
+          msg->handleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR &&
           mem->memHandles[segment] != 0) {
         int fd = -1;
-        CUresult st = cuMemExportToShareableHandle(&fd, mem->memHandles[segment], ncclCuMemHandleType, 0);
+        CUresult st =
+          cuMemExportToShareableHandle(&fd, mem->memHandles[segment], CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR, 0);
         if (st == CUDA_SUCCESS && fd >= 0) {
           msg->hostExportable = 1;
           localHostFds[segment] = fd;

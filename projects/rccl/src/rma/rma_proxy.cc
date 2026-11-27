@@ -29,6 +29,15 @@ NCCL_PARAM(RmaProxyQueueSize, "RMA_PROXY_QUEUE_SIZE", -1);
 // dmabuf export fails (INVALID_AGENT) on ROCm; opt in via NCCL_RMA_USE_DMABUF=1.
 RCCL_PARAM(RmaProxyUseDMABUF, "RMA_USE_DMABUF", 0);
 
+// [RCCL] Applies the RMA_USE_DMABUF=0 default only where peermem can take the buffer instead. A NIC
+// without peermem (bng_re) registers GPU memory only through DMA-BUF, so the stripped props
+// would leave regMrSym on a GPU VA, which fails with "Bad address".
+static void rcclRmaProxyStripDmaBuf(ncclNetProperties_t* props) {
+  if (rcclParamRmaProxyUseDMABUF() == 0 && (props->ptrSupport & NCCL_PTR_CUDA)) {
+    props->ptrSupport &= ~NCCL_PTR_DMABUF;
+  }
+}
+
 // world / rail-peer indexing conversion
 ncclResult_t ncclRmaProxyWorldToPeer(const struct ncclRmaProxyCtx* ctx, int worldRank, int* peer) {
   struct ncclComm* comm = ctx->comm;
@@ -175,9 +184,7 @@ static ncclResult_t ncclRmaProxyCtxAlloc(struct ncclComm* comm, ncclRma_t* rmaCo
   size_t signalsBufSize = signalSlots * sizeof(uint64_t);
   // [RCCL] Optionally strip DMA-BUF: signals may back onto memory whose dmabuf export fails on ROCm.
   ncclNetProperties_t props_tmp = rmaProxyCtx->props;
-  if (rcclParamRmaProxyUseDMABUF() == 0) {
-    props_tmp.ptrSupport &= ~NCCL_PTR_DMABUF;
-  }
+  rcclRmaProxyStripDmaBuf(&props_tmp);
 #if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
   NCCLCHECK(ncclCuMemAlloc((void**)&rmaProxyCtx->signalsDev, &rmaProxyCtx->signalsCumemhandle, CU_MEM_HANDLE_TYPE_NONE,
                            signalsBufSize, comm->memManager));
@@ -252,9 +259,7 @@ static ncclResult_t ncclRmaProxyCtxAllocGraph(struct ncclComm* comm, ncclRma_t* 
   // [RCCL] Strip DMA-BUF like ncclRmaProxyCtxAlloc: cpuAccessSignals may be
   // host memory (GDRCopy off), whose dmabuf export fails (INVALID_AGENT).
   ncclNetProperties_t props_tmp = rmaProxyCtx->props;
-  if (rcclParamRmaProxyUseDMABUF() == 0) {
-    props_tmp.ptrSupport &= ~NCCL_PTR_DMABUF;
-  }
+  rcclRmaProxyStripDmaBuf(&props_tmp);
   // Allocate the CPU-accessible signal for graph capture and then register the memory region with the RMA plugin.
   NCCLCHECK(allocMemCPUAccessible(&rmaProxyCtx->cpuAccessSignals, &rmaProxyCtx->cpuAccessSignalsDev, signalSlots, 0,
                                   &rmaProxyCtx->cpuAccessSignalsGdrHandle, comm->memManager));
@@ -448,9 +453,7 @@ static ncclResult_t rmaProxyRegister(struct ncclComm* comm, void* address, size_
       props_tmp.ptrSupport &= ~NCCL_PTR_DMABUF;
     }
 #else
-    if (rcclParamRmaProxyUseDMABUF() == 0) {
-      props_tmp.ptrSupport &= ~NCCL_PTR_DMABUF;
-    }
+    rcclRmaProxyStripDmaBuf(&props_tmp);
 #endif
     if (walkSegments) {
       NCCLCHECK(rcclRmaProxyRegMrSymSegments(rmaProxyState->ncclRma, rmaProxyState->rmaComms[n],

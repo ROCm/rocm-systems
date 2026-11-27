@@ -1011,6 +1011,7 @@ protected:
   ncclComm* comm = nullptr;
   symLsaMessage msg{};
   std::vector<int> lsaRankList;
+  std::vector<ncclPeerInfo> peers;
   hipMemAllocationHandleType savedHandleType = ncclCuMemHandleType;
 
   // reinterpret_cast is not a constant expression, so these are plain members.
@@ -1023,7 +1024,14 @@ protected:
     comm = commStorage.get();
     lsaRankList.assign({0, 1});
     comm->devrState.lsaDomainRankList = lsaRankList.data();
+    peers.assign(2, ncclPeerInfo{});  // same hostHash: both ranks on one host
+    comm->peerInfo = peers.data();
     msg.segmentSize = 4096;
+  }
+  // The importer follows the exporter's per-segment type in the message.
+  void UseHandleType(hipMemAllocationHandleType type) {
+    ncclCuMemHandleType = type;
+    msg.handleType = type;
   }
   void TearDown() override {
     comm->devrState.lsaDomainRankList = nullptr;  // borrowed from lsaRankList, not malloc'd
@@ -1055,7 +1063,7 @@ TEST_F(SymImportAndMapSegmentTest, ReuseLocal_MapsWithoutImportingOrReleasing) {
 // Branch: POSIX-FD import. The fd comes from the proxy and is closed after the
 // import, so the descriptor must be real for the SYSCHECK on close() to pass.
 TEST_F(SymImportAndMapSegmentTest, PosixFd_ImportsThenReleases) {
-  ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
+  UseHandleType(hipMemHandleTypePosixFileDescriptor);
   ScopedHook proxy(g_ncclProxyClientGetFdBlocking, [](ncclComm*, int, void*, int* fd) {
     *fd = open("/dev/null", O_RDONLY);
     return *fd < 0 ? ncclSystemError : ncclSuccess;
@@ -1067,10 +1075,23 @@ TEST_F(SymImportAndMapSegmentTest, PosixFd_ImportsThenReleases) {
   EXPECT_EQ(release.calls, 1);
 }
 
+// Branch: a POSIX fd only crosses the proxy's local socket, so a peer on another host is refused before any fetch.
+TEST_F(SymImportAndMapSegmentTest, PosixFdPeerOnAnotherHost_RefusedWithoutProxy) {
+  UseHandleType(hipMemHandleTypePosixFileDescriptor);
+  peers[1].hostHash = 1;
+  ScopedHook proxy(g_ncclProxyClientGetFdBlocking, [](ncclComm*, int, void*, int*) { return ncclSuccess; });
+  ScopedHook import(g_hipMemImportFromShareableHandle,
+                    [](hipMemGenericAllocationHandle_t*, void*, hipMemAllocationHandleType) { return hipSuccess; });
+
+  EXPECT_EQ(symMemoryImportAndMapSegmentHandle(comm, 1, kAddr, &msg, {}, /*reuseLocal=*/false), ncclInvalidUsage);
+  EXPECT_EQ(proxy.calls, 0);
+  EXPECT_EQ(import.calls, 0);
+}
+
 // Branch: any other handle type imports the fabric handle directly, with no
 // proxy round trip.
 TEST_F(SymImportAndMapSegmentTest, NonPosixHandle_ImportsWithoutProxy) {
-  ncclCuMemHandleType = kMemHandleTypeNonPosix;
+  UseHandleType(kMemHandleTypeNonPosix);
   ScopedHook proxy(g_ncclProxyClientGetFdBlocking,
                    [](ncclComm*, int, void*, int*) { return ncclSuccess; });
   ScopedHook import(g_hipMemImportFromShareableHandle,
@@ -1086,7 +1107,7 @@ TEST_F(SymImportAndMapSegmentTest, NonPosixHandle_ImportsWithoutProxy) {
 
 // Branch: the proxy cannot supply an fd, so the import never runs.
 TEST_F(SymImportAndMapSegmentTest, ProxyFdFails_ReturnsErrorWithoutImporting) {
-  ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
+  UseHandleType(hipMemHandleTypePosixFileDescriptor);
   ScopedHook proxy(g_ncclProxyClientGetFdBlocking,
                    [](ncclComm*, int, void*, int*) { return ncclSystemError; });
   ScopedHook import(g_hipMemImportFromShareableHandle,
@@ -1098,7 +1119,7 @@ TEST_F(SymImportAndMapSegmentTest, ProxyFdFails_ReturnsErrorWithoutImporting) {
 
 // Branch: the import itself fails.
 TEST_F(SymImportAndMapSegmentTest, ImportFails_ReturnsErrorWithoutMapping) {
-  ncclCuMemHandleType = kMemHandleTypeNonPosix;
+  UseHandleType(kMemHandleTypeNonPosix);
   ScopedHook import(g_hipMemImportFromShareableHandle,
                     [](hipMemGenericAllocationHandle_t*, void*, hipMemAllocationHandleType) {
                       return hipErrorInvalidValue;
@@ -1122,7 +1143,7 @@ TEST_F(SymImportAndMapSegmentTest, ImportFails_ReturnsErrorWithoutMapping) {
 // AICOMRCCL-2180 finding 14. Pinning the current state instead would lock the
 // leak in, so the test just cleans up after it.
 TEST_F(SymImportAndMapSegmentTest, PosixFdImportFails_ReturnsError) {
-  ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
+  UseHandleType(hipMemHandleTypePosixFileDescriptor);
   int handedOut = -1;
   ScopedHook proxy(g_ncclProxyClientGetFdBlocking, [&](ncclComm*, int, void*, int* fd) {
     handedOut = open("/dev/null", O_RDONLY);
@@ -1144,7 +1165,7 @@ TEST_F(SymImportAndMapSegmentTest, PosixFdImportFails_ReturnsError) {
 // Branch: the SYSCHECK on close(). A stale descriptor from the proxy fails with
 // EBADF, which the import path treats as fatal rather than ignoring.
 TEST_F(SymImportAndMapSegmentTest, CloseFdFails_ReturnsError) {
-  ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
+  UseHandleType(hipMemHandleTypePosixFileDescriptor);
   ScopedHook proxy(g_ncclProxyClientGetFdBlocking, [](ncclComm*, int, void*, int* fd) {
     if (fd) *fd = 999999;  // never a live descriptor in this process
     return ncclSuccess;
@@ -1177,7 +1198,7 @@ TEST_F(SymImportAndMapSegmentTest, SetAccessFails_ReturnsError) {
 
 // Branch: the release of an imported handle fails.
 TEST_F(SymImportAndMapSegmentTest, ReleaseFails_ReturnsError) {
-  ncclCuMemHandleType = kMemHandleTypeNonPosix;
+  UseHandleType(kMemHandleTypeNonPosix);
   ScopedHook release(g_hipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipErrorInvalidValue; });
 
   EXPECT_NE(symMemoryImportAndMapSegmentHandle(comm, 1, kAddr, &msg, {}, /*reuseLocal=*/false), ncclSuccess);
@@ -1412,6 +1433,7 @@ static std::function<ncclResult_t(void*, int*, int, int, void*, int)> PeerSegmen
     auto* msgs = static_cast<symLsaMessage*>(buf);
     for (const PeerSeg& seg : segs) {
       msgs[seg.index].type = seg.type;
+      msgs[seg.index].handleType = ncclCuMemHandleType;  // an exporter whose allocation has the comm type
       if (seg.hostExportable >= 0) msgs[seg.index].hostExportable = seg.hostExportable;
       msgs[seg.index].segmentSize = 4096;
     }
@@ -1432,12 +1454,15 @@ protected:
   std::vector<int> lsaNumSegments;
   std::vector<size_t> segmentSizes;
   std::vector<hipMemGenericAllocationHandle_t> memHandles;
+  std::vector<ncclPeerInfo> peers;
 
   void SetUp() override {
     DevRuntimeMicroTest::SetUp();
     commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
     comm = commStorage.get();
     comm->bootstrap = reinterpret_cast<void*>(0x1);  // opaque; bootstrap* are seams
+    peers.assign(16, ncclPeerInfo{});  // one host; covers the ranks SetTeam uses
+    comm->peerInfo = peers.data();
 
     ncclDevrState* devr = &comm->devrState;
     devr->lsaDomainSelf = 0;
