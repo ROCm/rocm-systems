@@ -5,7 +5,6 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vopd.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/vopd_flags.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_vopd_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"

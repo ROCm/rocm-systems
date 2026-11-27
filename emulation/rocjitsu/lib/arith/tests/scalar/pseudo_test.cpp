@@ -242,3 +242,61 @@ TEST(PseudoGfx1250, Arithmetic) {
   check_pseudo<true, true>(rj_arith_v_s_sqrt_f16_gfx1250, 4);
   check_pseudo<false, true>(rj_arith_v_s_sqrt_f32_gfx1250, 4);
 }
+
+// Selected literal boundaries from the retired VM pseudo-scalar helpers.
+// Both families inherit this arithmetic; gfx1250 does not advertise new empirical qualification.
+TEST(PseudoMath, InheritedBoundaries) {
+  using Call = decltype(&rj_arith_v_s_rcp_f32);
+  const Call calls[][2] = {{rj_arith_v_s_rcp_f32, rj_arith_v_s_rcp_f32_gfx1250},
+                           {rj_arith_v_s_rsq_f32, rj_arith_v_s_rsq_f32_gfx1250},
+                           {rj_arith_v_s_sqrt_f32, rj_arith_v_s_sqrt_f32_gfx1250},
+                           {rj_arith_v_s_log_f32, rj_arith_v_s_log_f32_gfx1250},
+                           {rj_arith_v_s_exp_f32, rj_arith_v_s_exp_f32_gfx1250}};
+  const struct {
+    int operation;
+    uint32_t input, expected, modifiers = 0;
+  } cases[] = {{0, 0xff7fffff, 0x80000000},
+               {0, 0xff7fffff, 0, RJ_ARITH_ALU_OMOD_2},
+               {0, 0x00800000, 0x7f800000, RJ_ARITH_ALU_OMOD_4},
+               {0, 0x00800000, 0x3f800000, RJ_ARITH_ALU_OMOD_4 | RJ_ARITH_ALU_CLAMP},
+               {1, 0x3d5389d4, 0x418ccf83, RJ_ARITH_ALU_OMOD_4},
+               {1, 0x40400000, 0x3e93cd3a, RJ_ARITH_ALU_OMOD_HALF},
+               {2, 0x80000001, 0x80000000},
+               {2, 0xbf800000, 0xffc00000},
+               {2, 0x7fa00001, 0x7fe00001},
+               {3, 0, 0xff800000},
+               {4, 0x7f800000, 0x7f800000},
+               {4, 0xff800000, 0}};
+  for (uint64_t cpu : rocjitsu::arith::test::supported_cpu_levels()) {
+    for (const auto &sample : cases) {
+      for (Call call : calls[sample.operation]) {
+        uint32_t result = 0xdeadbeef, status = 0;
+        ASSERT_EQ(call(cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY, sample.modifiers, &result,
+                       sample.input, &status),
+                  RJ_ARITH_SUCCESS);
+        EXPECT_EQ(result, sample.expected) << "operation=" << sample.operation;
+      }
+    }
+  }
+}
+
+// Preserve selected half-RSQ literals from the retired VM helper's modifier test.
+TEST(PseudoMath, InheritedHalfRsq) {
+  const uint16_t cases[][5] = {{0x0401, 0x57ff, 0x5bff, 0x5fff, 0x53ff},
+                               {0x7c02, 0x7e02, 0x7e02, 0x7e02, 0x7e02},
+                               {0xbc00, 0xfe00, 0xfe00, 0xfe00, 0xfe00},
+                               {0x7bff, 0x1c00, 0x2000, 0x2400, 0x1800}};
+  for (uint64_t cpu : rocjitsu::arith::test::supported_cpu_levels()) {
+    for (auto call : {rj_arith_v_s_rsq_f16, rj_arith_v_s_rsq_f16_gfx1250}) {
+      for (const auto &sample : cases) {
+        for (int omod = 0; omod < 4; ++omod) {
+          uint32_t result = 0, status = 0;
+          ASSERT_EQ(call(cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY, uint64_t(omod) << 6, &result,
+                         sample[0], &status),
+                    RJ_ARITH_SUCCESS);
+          EXPECT_EQ(result, sample[omod + 1]);
+        }
+      }
+    }
+  }
+}

@@ -7,6 +7,7 @@
 #include "rj_arith/detail/rj_arith_scalar.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/sopp.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/dot_packed16.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"

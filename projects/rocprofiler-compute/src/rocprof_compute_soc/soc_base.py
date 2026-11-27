@@ -426,7 +426,7 @@ class OmniSoC_Base:
         ) as filename:
             sdk_config = yaml.safe_load(filename)
         os.environ["ROCPROFILER_METRICS_PATH"] = create_temp_rocprofiler_metrics_path(
-            sdk_config
+            sdk_config, self.__arch
         )
 
         counters = rocprofv3_avail_interface.get_counters(

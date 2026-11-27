@@ -302,6 +302,11 @@ dispatches. An unresolved successor in a dynamic kernel excludes those sites
 throughout the code object. `KernelEntry` checks its own dispatch descriptor
 for static allocation because guest backedges bypass the entry stub.
 
+For one direct call into a uniquely sized local function with a single returning
+block, callable-state analysis propagates the caller's MODE and storage state to
+the callee. The return must preserve the saved PC. On gfx1250 the helper must
+also preserve VGPR banks, and liveness must establish zero banks at every probe.
+
 The callable-state analysis follows resolved branches in a leaf helper when
 every path leaves the state under analysis unchanged and returns through the
 original ordinary SGPR pair. A numeric pair in the allocated special-register
@@ -711,7 +716,7 @@ with this callable precondition, independently of its EXEC policy.
 and probe-body contracts. Patch preflight additionally checks physical register
 usage, allocation and spill requirements.
 
-Fail-closed, each with a distinct message: an unrecognized convention; gfx1250/CDNA5 without a proof that all `MODE.VGPR_MSB` roles are zero at each call site (the instrumentor derives this from the sole kernel entry and rejects guests with calls); relative (`v_movrel*`) or GPR-indexed (`MODE.GPR_IDX_EN`) VGPR access, which displaces an encoded index at runtime and so loses live-ins rather than inventing them; relative SGPR access (the `s_movrel*` family, which displaces its index through M0 the same way), rejected by a mnemonic scan rather than by liveness, which models no scalar equivalent; a probe object without exactly one `.text`, or a body outside it, since `BasicBlock::build()` decodes nothing else and restarts its offsets per section; a body ahead of its section; no decoder for the arch; an undecodable `.text`; and an entry offset that starts no decoded block.
+Fail-closed, each with a distinct message: an unrecognized convention; gfx1250/CDNA5 without a proof that all `MODE.VGPR_MSB` roles are zero at each call site (analysis starts at the sole kernel entry and can follow one validated direct call to a local helper that preserves the VGPR bank state); relative (`v_movrel*`) or GPR-indexed (`MODE.GPR_IDX_EN`) VGPR access, which displaces an encoded index at runtime and so loses live-ins rather than inventing them; relative SGPR access (the `s_movrel*` family, which displaces its index through M0 the same way), rejected by a mnemonic scan rather than by liveness, which models no scalar equivalent; a probe object without exactly one `.text`, or a body outside it, since `BasicBlock::build()` decodes nothing else and restarts its offsets per section; a body ahead of its section; no decoder for the arch; an undecodable `.text`; and an entry offset that starts no decoded block.
 
 ### SpillManager
 

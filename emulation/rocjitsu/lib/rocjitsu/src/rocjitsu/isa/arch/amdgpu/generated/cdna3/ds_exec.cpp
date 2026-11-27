@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna3/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/ds.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/dot_packed16.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx940_cache_flags.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx9_cache_flags.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_ds_exec.h"

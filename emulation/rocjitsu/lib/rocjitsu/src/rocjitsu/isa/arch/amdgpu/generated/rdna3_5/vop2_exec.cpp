@@ -7,12 +7,12 @@
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/vop2.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/dot_packed16.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_legacy_mul_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_vector_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
 #include "util/except.h"
@@ -1737,6 +1737,9 @@ RJ_NOINLINE void VLdexpF16Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
 }
 
 void VPkFmacF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
+  if (!wf.exec()) {
+    return;
+  }
   if (!wf.exec()) {
     return;
   }

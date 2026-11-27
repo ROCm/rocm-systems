@@ -123,7 +123,7 @@ inline uint32_t scale_omod_f32_bits(uint32_t bits, unsigned omod, unsigned round
   return bits + (omod << 23);
 }
 
-// FP32 scaling follows rocjitsu's fp_mode::apply_omod_f32. Tiny unscaled
+// Scale an already rounded FP32 result. Tiny unscaled
 // results become +0; halving a normal result below twice minimum normal gives
 // signed zero, independently of guest denormal mode.
 inline float scale_omod_f32(float value, uint32_t modifiers) {

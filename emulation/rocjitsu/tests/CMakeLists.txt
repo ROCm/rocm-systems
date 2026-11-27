@@ -642,23 +642,16 @@ add_executable(
     scalar_buffer_test.cpp
     scalar_cache_policy_test.cpp
     scalar_cache_discard_test.cpp
-    legacy_special_f32_test.cpp
     legacy_native_f32_test.cpp
-    transcendental_test.cpp
-    comparison_test.cpp
+    legacy_special_f32_test.cpp
     gfx1150_compare_test.cpp
-    conversion_test.cpp
-    older_normalized_conversion_test.cpp
-    older_packing_test.cpp
     older_packed_conversion_test.cpp
     older_byte_conversion_test.cpp
+    older_normalized_conversion_test.cpp
+    older_packing_test.cpp
     denormal_test.cpp
-    floating_operation_test.cpp
     input_denormal_test.cpp
     legacy_minmax_test.cpp
-    minmax_test.cpp
-    output_denormal_test.cpp
-    output_modifier_test.cpp
     source_modifier_test.cpp
     amdgpu_elf_test_support.cpp
     amdgpu_elf_test_support_test.cpp
@@ -719,6 +712,7 @@ add_executable(
     gfx908_compare_test.cpp
     gfx10_compare_test.cpp
     vop3_conversion_modifiers_test.cpp
+    vop3_modifier_policy_test.cpp
     cube_instruction_test.cpp
     older_graphics_test.cpp
     division_test.cpp
@@ -793,7 +787,6 @@ add_executable(
     simd_correctness/vop1_cvt_f64_simd_correctness_test.cpp
     simd_correctness/vopc_simd_correctness_test.cpp
     simd_correctness/vopc_cmp_class_simd_correctness_test.cpp
-    simd_correctness/vop3_modifier_simd_test.cpp
     simd_correctness/vop3_binary_simd_correctness_test.cpp
     simd_correctness/vop3_unary_simd_correctness_test.cpp
     simd_correctness/vopc_vop3_int_simd_correctness_test.cpp
@@ -809,8 +802,6 @@ add_executable(
     simd_correctness/vop_alias_rdna_simd_correctness_test.cpp
     simd_correctness/vop3_shift64_simd_correctness_test.cpp
     simd_correctness/vop3_shift64_scalar_correctness_test.cpp
-    simd_correctness/vop3_fp16_unary_simd_correctness_test.cpp
-    simd_correctness/vop3_fp16_transcendental_simd_correctness_test.cpp
     simd_correctness/vop3_cndmask_pack_simd_correctness_test.cpp
     simd_correctness/vop3_div_helpers_simd_correctness_test.cpp
     simd_correctness/vop3_b16_rdna_simd_correctness_test.cpp
@@ -1429,6 +1420,7 @@ add_executable(
     patch/fault_injection/b96_lds_test.cpp
     patch/fault_injection/scalar_two_lds_test.cpp
     patch/fault_injection/lds_wrong_address_test.cpp
+    patch/fault_injection/atomic_wrong_address_test.cpp
     patch/fault_injection/lds_ownership_test.cpp
     patch/fault_injection/lds_target_ownership_test.cpp
     patch/fault_injection/gfx1100_lds_test.cpp
@@ -1483,6 +1475,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         patch/fault_injection/b96_lds_cli_test.cpp
         patch/fault_injection/scalar_two_lds_cli_test.cpp
         patch/fault_injection/lds_cli_test.cpp
+        patch/fault_injection/atomic_cli_test.cpp
         patch/fault_injection/gfx1251_lds_cli_test.cpp
         patch/fault_injection/gfx1100_lds_cli_test.cpp
         patch/fault_injection/cdna_lds_cli_test.cpp
