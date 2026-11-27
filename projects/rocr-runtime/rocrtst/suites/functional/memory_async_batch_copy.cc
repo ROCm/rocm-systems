@@ -36,15 +36,22 @@ constexpr size_t kPage = 4096;
 
 // What the runtime is expected to accept on this system. The linear operation
 // types fall back to a shader blit when SDMA is off. Everything else needs SDMA.
+//
+// A capability that the runtime reports is read from the runtime rather than
+// predicted here, so that the expectation tracks whichever routing is actually
+// in place. Where no such attribute exists the flag records only what MUST
+// succeed; a type may still be serviceable when its flag is false, so a test
+// gates its skip on the attempt rather than on the flag.
 struct Ctx {
   hsa_agent_t cpu;
   hsa_agent_t gpu;
   hsa_amd_memory_pool_t cpu_pool;
   hsa_amd_memory_pool_t dev_pool;
-  bool sdma_ops;  // SDMA-only operation types are expected to work
-  bool rect;      // HSA_AMD_MEMORY_COPY_OP_RECT (gfx9 and newer)
-  bool swap;      // HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP
-  bool indirect;  // HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_* (gfx125+)
+  bool sdma_ops;   // SDMA-only operation types are expected to work
+  bool rect;       // HSA_AMD_MEMORY_COPY_OP_RECT (gfx9 and newer)
+  bool swap;       // HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP, native SDMA packet
+  bool indirect;   // HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_* (gfx125+)
+  bool broadcast;  // HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST, either routing
 };
 
 bool SdmaDisabledByEnv() {
@@ -96,8 +103,22 @@ Ctx MakeCtx(rocrtst::BaseRocR* test) {
   c.sdma_ops = !SdmaDisabledByEnv() && test->profile() == HSA_PROFILE_BASE;
   const bool gfx125plus = (major == 12 && minor >= 5);
   c.rect = c.sdma_ops && major >= 9;
-  c.swap = c.sdma_ops && ((major == 9 && minor >= 4) || gfx125plus);
   c.indirect = c.sdma_ops && gfx125plus;
+
+  // Only the native SDMA packet is predicted here. A target without it may
+  // still serve a swap from a shader blit, which this expectation cannot see,
+  // so SwapTest treats a false flag as "not required" rather than "absent".
+  c.swap = c.sdma_ops && ((major == 9 && minor >= 4) || gfx125plus);
+
+  // Broadcast is asked rather than predicted. The agent answers zero when
+  // nothing can service the operation and the API's own ceiling when something
+  // can, whichever routing supplies it, so this stays correct as the set of
+  // routings changes.
+  uint32_t max_bcast = 0;
+  c.broadcast = hsa_agent_get_info(c.gpu,
+                    static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_MAX_BROADCAST_DESTINATIONS),
+                    &max_bcast) == HSA_STATUS_SUCCESS &&
+                max_bcast > 0;
   return c;
 }
 
@@ -626,8 +647,8 @@ void MemoryAsyncBatchCopy::LinearPeerTest() {
 void MemoryAsyncBatchCopy::BroadcastTest() {
   Banner("broadcast");
   const Ctx c = MakeCtx(this);
-  if (!c.sdma_ops) {
-    NotSupported("broadcast needs SDMA (HSA_ENABLE_SDMA=0 or a full-profile agent)");
+  if (!c.broadcast) {
+    NotSupported("the agent reports no broadcast destinations");
     return;
   }
 
@@ -687,10 +708,13 @@ void MemoryAsyncBatchCopy::BroadcastTest() {
 void MemoryAsyncBatchCopy::SwapTest() {
   Banner("swap");
   const Ctx c = MakeCtx(this);
-  if (!c.sdma_ops) {
-    NotSupported("swap needs SDMA (HSA_ENABLE_SDMA=0 or a full-profile agent)");
-    return;
-  }
+  // No agent attribute reports whether a swap is serviceable, so the operation
+  // is attempted rather than skipped on a prediction. A target that cannot
+  // serve one rejects the submission and the test reports that it was not
+  // supported; c.swap marks only the targets on which a rejection is a defect.
+  // Attempting it is what lets a shader-blit routing be covered here at all,
+  // since such a routing is reached precisely when SDMA is unavailable.
+  bool swap_served = false;
 
   // Single swap.
   const size_t sizes[] = {64, 4096, 65536, 1 << 20};
@@ -726,6 +750,7 @@ void MemoryAsyncBatchCopy::SwapTest() {
       return;
     }
     ASSERT_TRUE(WaitDone(res, done, tag.c_str()));
+    swap_served = true;
 
     memset(h_out, 0, size);
     ASSERT_TRUE(Stage(res, h_out, c.cpu, dev_a, c.gpu, size));
@@ -734,7 +759,10 @@ void MemoryAsyncBatchCopy::SwapTest() {
     ASSERT_TRUE(Stage(res, h_out, c.cpu, dev_b, c.gpu, size));
     ASSERT_TRUE(SameBytes(h_out, h_a, size, tag + " second buffer"));
   }
-  if (!c.swap) return;
+  // Gated on what the single-entry form was observed to do, not on the
+  // prediction, so the multi-entry form is covered on any routing that served
+  // the simpler case.
+  if (!swap_served) return;
 
   // Several swaps in one op.
   {
@@ -777,8 +805,11 @@ void MemoryAsyncBatchCopy::SwapTest() {
   }
 
   // An address that is not aligned for the SDMA swap packet is rejected before
-  // anything is queued.
-  {
+  // anything is queued. The alignment requirement belongs to the packet, not to
+  // the operation, so this only holds where the native packet serves the swap.
+  // A shader blit addresses memory in 16-byte chunks plus a byte tail and the
+  // targets run with unaligned access enabled, so it accepts the same input.
+  if (c.swap) {
     Resources res;
     void* dev_a = AllocDev(res, c, 2 * kPage);
     void* dev_b = AllocDev(res, c, 2 * kPage);
@@ -1088,7 +1119,7 @@ void MemoryAsyncBatchCopy::MixedOpsTest() {
   memcpy(h_rect_dst, rect_poison.data(), RectJob::kDstBytes);
   ASSERT_TRUE(Stage(res, dev_rect_dst, c.gpu, h_rect_dst, c.cpu, RectJob::kDstBytes));
 
-  const bool with_bcast = c.sdma_ops;
+  const bool with_bcast = c.broadcast;
   const bool with_rect = c.rect;
   const uint32_t num_ops = 2 + (with_bcast ? 1 : 0) + (with_rect ? 1 : 0);
 
@@ -1146,7 +1177,7 @@ void MemoryAsyncBatchCopy::MixedOpsTest() {
                             "mixed: broadcast destination " + std::to_string(d)));
     }
   } else {
-    NotSupported("broadcast not part of this batch (needs SDMA)");
+    NotSupported("broadcast not part of this batch (the agent reports no destinations)");
   }
 
   if (with_rect) {
