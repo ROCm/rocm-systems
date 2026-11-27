@@ -556,7 +556,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
 static const rcclArchThresholds rcclArchThresholds_gfx950 = {
   // ddaLLMax: Broadcast LL one-shot over the IPC scratch; no fabric LL on gfx950.
   .ddaLLMax = {
-    256ULL*1024,          // [0] Broadcast      -- 8-rank IPC one-shot; Ring above it
+    256ULL*1024,          // [0] Broadcast      -- 8-rank IPC one-shot; ddaBcIpc*Bytes runs first
     0,                    // [1] Reduce          -- not used
     0,                    // [2] AllGather       -- no fabric LL
     0,                    // [3] ReduceScatter   -- no fabric LL
@@ -702,13 +702,16 @@ static const rcclArchThresholds rcclArchThresholds_gfx950 = {
   .forceCeScratch = true,
   .bcRingLLMaxBytes = 0,
   .bcRingLL128MaxBytes = 0,
+  // Two-phase IPC Broadcast beats IPC LL from 256 KiB and the ring to 8 MiB; the ring catches up at 16 MiB.
+  .ddaBcIpcMinBytes = 256ULL*1024,
+  .ddaBcIpcMaxBytes = 8ULL*1024*1024,
 };
 
 // gfx942: DDA-IPC cap is 8 MiB for AR/AG/RS and 4 MiB for AlltoAll. No fabric LL/LL128.
 static const rcclArchThresholds rcclArchThresholds_gfx942 = {
   // ddaLLMax: Broadcast LL one-shot over the IPC scratch; no fabric LL on gfx942.
   .ddaLLMax = {
-    256ULL*1024,          // [0] Broadcast      -- 8-rank IPC one-shot; Ring above it
+    256ULL*1024,          // [0] Broadcast      -- 8-rank IPC one-shot; ddaBcIpc*Bytes runs first
     0,                    // [1] Reduce          -- not used
     0,                    // [2] AllGather       -- no fabric LL
     0,                    // [3] ReduceScatter   -- no fabric LL
@@ -854,6 +857,9 @@ static const rcclArchThresholds rcclArchThresholds_gfx942 = {
   .forceCeScratch = true,
   .bcRingLLMaxBytes = 0,
   .bcRingLL128MaxBytes = 0,
+  // Two-phase IPC Broadcast beats IPC LL from 256 KiB and the ring to 4 MiB; at 8 MiB it only ties the ring.
+  .ddaBcIpcMinBytes = 256ULL*1024,
+  .ddaBcIpcMaxBytes = 4ULL*1024*1024,
 };
 
 bool rcclWindowFits(size_t totalBytes, size_t minBytes, size_t maxBytes) {

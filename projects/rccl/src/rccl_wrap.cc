@@ -119,6 +119,9 @@ RCCL_PARAM(DdaLL128, "DDA_LL128", kDdaThresholdUnset);
 RCCL_PARAM(DdaLL128Threshold, "DDA_LL128_THRESHOLD", kDdaThresholdUnset);
 // Broadcast DDA: unset follows the arch table (any Broadcast DDA tier), 0 off, >0 on.
 RCCL_PARAM(DdaBc, "DDA_BC", kDdaThresholdUnset);
+// Two-phase IPC Broadcast window edges: unset follows the table (ddaBcIpc{Min,Max}Bytes), else the value; MAX 0 off.
+RCCL_PARAM(DdaBcIpcMinBytes, "DDA_BC_IPC_MIN_BYTES", kDdaThresholdUnset);
+RCCL_PARAM(DdaBcIpcMaxBytes, "DDA_BC_IPC_MAX_BYTES", kDdaThresholdUnset);
 // When set, bypass the per-arch tuning table entirely and use base-commit
 // env-var defaults for all thresholds (DDA, CE, symMaxR2).  Useful for
 // isolating arch-table effects without rebuilding.
@@ -1446,6 +1449,22 @@ size_t rcclDdaVmmThreshold(const ncclComm* comm, ncclFunc_t func) {
   return rcclDdaVmmThresholdTab(extAlgoArchTable(comm), func, comm != nullptr ? comm->nRanks : 0);
 }
 
+// Two-phase IPC Broadcast window: each edge from its RCCL_DDA_BC_IPC_*_BYTES override, else the table (0 with none).
+// RCCL_DDA_THRESHOLD=0 turns it off, as it does every DDA Simple tier (read the same way, so a negative is 0 too).
+inline void rcclDdaBcIpcWindowTab(const rcclArchThresholds* table, size_t* minBytes, size_t* maxBytes) {
+  *minBytes = table != nullptr ? table->ddaBcIpcMinBytes : 0;
+  *maxBytes = table != nullptr ? table->ddaBcIpcMaxBytes : 0;
+  ddaThresholdFromEnv(rcclParamDdaBcIpcMinBytes(), minBytes);
+  ddaThresholdFromEnv(rcclParamDdaBcIpcMaxBytes(), maxBytes);
+  size_t simpleCap = 0;
+  if (ddaThresholdFromEnv(rcclParamDdaThreshold(), &simpleCap) && simpleCap == 0) {
+    *maxBytes = 0;
+  }
+}
+void rcclDdaBcIpcWindow(const ncclComm* comm, size_t* minBytes, size_t* maxBytes) {
+  rcclDdaBcIpcWindowTab(extAlgoArchTable(comm), minBytes, maxBytes);
+}
+
 // AllReduce DDA VMM ahead of the LL tier (see rcclArchThresholds::ddaArVmmFirst*).
 // Measured on unregistered buffers only; registered ones keep the tier order and
 // the R2 cap. Env thresholds turn it off so RCCL_DDA_*_THRESHOLD keep their meaning.
@@ -1548,11 +1567,18 @@ size_t rcclDdaFabricRsLL128PeerMaxBytes(const ncclComm* comm) {
 // ddaVmmMaxGraph is also folded in: it is 0 for all collectives except AR
 // (256 MiB on gfx1250), so it only widens the gate for graph-mode AR calls
 // and is a no-op for all other collectives.
+// Broadcast also folds in the top of the two-phase IPC window, which has no ddaVmmMax slot of its own.
 inline size_t rcclDdaEntryThresholdTab(const rcclArchThresholds* table, ncclFunc_t func, int nRanks) {
   size_t cap = rcclDdaVmmThresholdTab(table, func, nRanks);
   cap = std::max(cap, rcclDdaLLThresholdTab(table, func, nRanks));
   cap = std::max(cap, rcclDdaLL128ThresholdTab(table, func, nRanks));
   if (table != nullptr)    cap = std::max(cap, funcThresholdFromTable(table->ddaVmmMaxGraph, func));
+  if (func == ncclFuncBroadcast) {
+    size_t ipcMin = 0;
+    size_t ipcMax = 0;
+    rcclDdaBcIpcWindowTab(table, &ipcMin, &ipcMax);
+    cap = std::max(cap, ipcMax);
+  }
   return cap;
 }
 size_t rcclDdaEntryThreshold(const ncclComm* comm, ncclFunc_t func) {
@@ -2632,14 +2658,15 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
   return rcclRingFallback(comm, sendbuff, recvbuff, ncclFuncAllGather, sendcount, datatype, query, decision);
 }
 
-// Broadcast DDA gate: RCCL_DDA_BC when set, else whether the table has a Broadcast LL/LL128 tier,
+// Broadcast DDA gate: RCCL_DDA_BC when set, else whether the table has a Broadcast LL/LL128 tier or two-phase window,
 // so a global DDA threshold set for another collective does not turn Broadcast on.
 static bool rcclDdaBcEnabled(const rcclArchThresholds* table, int nRanks) {
   const int64_t param = rcclParamDdaBc();
   if (param != kDdaThresholdUnset) return param > 0;
   return table != nullptr &&
          (ddaTierCapFromTable(table, table->ddaLLMax, table->ddaLLMaxPerRank, ncclFuncBroadcast, nRanks) != 0 ||
-          ddaTierCapFromTable(table, table->ddaLL128Max, table->ddaLL128MaxPerRank, ncclFuncBroadcast, nRanks) != 0);
+          ddaTierCapFromTable(table, table->ddaLL128Max, table->ddaLL128MaxPerRank, ncclFuncBroadcast, nRanks) != 0 ||
+          table->ddaBcIpcMaxBytes != 0);
 }
 
 ncclResult_t rcclSelectBroadcast(struct ncclComm* comm, size_t count, ncclDataType_t datatype, int root, bool query,
@@ -2659,10 +2686,20 @@ ncclResult_t rcclSelectBroadcast(struct ncclComm* comm, size_t count, ncclDataTy
   if (!rcclDdaBcEnabled(archTable, comm->nRanks)) return ncclSuccess;
   const size_t entryMax = rcclDdaEntryThresholdTab(archTable, ncclFuncBroadcast, comm->nRanks);
   if (!rcclDdaEnabled(comm, bytes, entryMax, query, "BC")) return ncclSuccess;
-  // Gate on the DDA handler, not on the arch. IPC runs LL only, in the scratch region kept free of Simple staging.
+  // Gate on the DDA handler, not on the arch. Over IPC two-phase runs first inside its window; LL, in the scratch
+  // region kept free of Simple staging, keeps the sizes two-phase declines up to its cap.
   const bool fabric = comm->ddaFabricMemHandler != nullptr;
   if (!fabric && comm->ddaIpcMemHandler == nullptr) {
     return ncclSuccess;
+  }
+  size_t ipcMin = 0;
+  size_t ipcMax = 0;
+  rcclDdaBcIpcWindowTab(archTable, &ipcMin, &ipcMax);
+  if (!fabric && rcclWindowFits(bytes, ipcMin, ipcMax) && ncclBroadcastDdaIpcEligible(comm, count, datatype)) {
+    decision->algo = RCCL_DDA_IPC;
+    decision->protocol = NCCL_PROTO_SIMPLE;
+    decision->nMaxChannels = ncclBroadcastDdaIpcBlocks(comm, count, datatype);
+    return rcclSelectDone("BC", query, decision);
   }
 
   const size_t llMax = rcclDdaLLThresholdTab(archTable, ncclFuncBroadcast, comm->nRanks);

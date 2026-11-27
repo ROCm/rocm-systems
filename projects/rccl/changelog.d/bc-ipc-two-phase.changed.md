@@ -1,0 +1,1 @@
+* gfx950 and gfx942 single-node 8-rank `ncclBroadcast` takes the two-phase DDA IPC kernel from 256 KiB to 8 MiB (gfx950) or 4 MiB (gfx942) when the size is a multiple of 128 bytes; other sizes keep the DDA LL one-shot up to 256 KiB and the ring above it. `RCCL_DDA_BC=0` turns DDA Broadcast off as before, and `RCCL_DDA_THRESHOLD=0` now also turns off this kernel.

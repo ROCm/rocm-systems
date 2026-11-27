@@ -33,7 +33,7 @@ bool rcclWindowFits(size_t totalBytes, size_t minBytes, size_t maxBytes);
 
 struct rcclArchThresholds {
   // DDA tier upper bounds, per collective.  gfx1250 uses fabric LL/LL128/VMM;
-  // gfx942/gfx950 use ddaVmmMax as the DDA-IPC cap (LL128 unused; LL only for Broadcast).
+  // gfx942/gfx950 use ddaVmmMax as the DDA-IPC cap (LL128 unused; Broadcast runs LL and the ddaBcIpc*Bytes window).
   // All arrays are indexed by ncclFunc_t; 0 disables that tier for that coll.
   // All collectives compare total message bytes against the table values.
   size_t ddaLLMax[RCCL_DDA_FUNC_COUNT];     // DDA LL tier:    0 .. ddaLLMax[func]
@@ -226,6 +226,11 @@ struct rcclArchThresholds {
   // tuning model's per-rank ranges. gfx1250 DPX sets both; other tables leave them 0.
   size_t bcRingLLMaxBytes;
   size_t bcRingLL128MaxBytes;
+
+  // Two-phase IPC Broadcast (single node, 8 ranks), total bytes, inclusive window. It runs ahead of the IPC LL tier,
+  // so the two overlap and LL takes the sizes it declines. 0 max = off; a table that leaves these out gets 0.
+  size_t ddaBcIpcMinBytes;
+  size_t ddaBcIpcMaxBytes;
 };
 
 // Compute-partition mode a gfx1250 comm is tuned for (RCCL_TUNING_PARTITION_MODE). It picks

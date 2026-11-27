@@ -4093,6 +4093,18 @@
           "env_variables": {
             "NCCL_CUMEM_ENABLE": "1"
           }
+        },
+        {
+          "name": "DDA_BroadcastIpc2Phase_8Ranks",
+          "description": "DDA IPC two-phase Broadcast (scatter + all-gather) across its window, with roots, in-place, unaligned and back-to-back calls; the caps are cached per process",
+          "test_filter": "DdaMPI_BroadcastIpc2Phase.*",
+          "env_variables": {
+            "RCCL_DDA_BC": "1",
+            "RCCL_DDA_LL_THRESHOLD": "262144",
+            "RCCL_DDA_LL128_THRESHOLD": "4194304",
+            "RCCL_DDA_BC_IPC_MIN_BYTES": "262272",
+            "RCCL_DDA_BC_IPC_MAX_BYTES": "8388608"
+          }
         }
       ]
     },

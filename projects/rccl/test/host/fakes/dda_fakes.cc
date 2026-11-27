@@ -97,6 +97,8 @@ DEFINE_DDA_BROADCAST_ELIGIBLE(broadcastDdaFabricLLEligible, ncclBroadcastDdaFabr
 DEFINE_DDA_BROADCAST_ELIGIBLE(broadcastDdaFabricLL128Eligible, ncclBroadcastDdaFabricLL128Eligible)
 DEFINE_DDA_BLOCKS(broadcastDdaFabricLLBlocks, ncclBroadcastDdaFabricLLBlocks, 151)
 DEFINE_DDA_BLOCKS(broadcastDdaFabricLL128Blocks, ncclBroadcastDdaFabricLL128Blocks, 152)
+DEFINE_DDA_BROADCAST_ELIGIBLE(broadcastDdaIpcEligible, ncclBroadcastDdaIpcEligible)
+DEFINE_DDA_BLOCKS(broadcastDdaIpcBlocks, ncclBroadcastDdaIpcBlocks, 153)
 
 #define DEFINE_DDA_LAUNCH(hook, prod)                                                                     \
   DdaLaunchHook g_##hook = [](const void*, void*, size_t, ncclDataType_t, ncclComm*,                     \
@@ -154,6 +156,7 @@ DEFINE_DDA_REDUCE_LAUNCH(reduceScatterDdaFabricLL, ncclReduceScatterDdaFabricLL)
 DEFINE_DDA_REDUCE_LAUNCH(reduceScatterDdaFabricLL128, ncclReduceScatterDdaFabricLL128)
 DEFINE_DDA_ROOT_LAUNCH(broadcastDdaFabricLL, ncclBroadcastDdaFabricLL)
 DEFINE_DDA_ROOT_LAUNCH(broadcastDdaFabricLL128, ncclBroadcastDdaFabricLL128)
+DEFINE_DDA_ROOT_LAUNCH(broadcastDdaIpc, ncclBroadcastDdaIpc)
 
 #undef DEFINE_DDA_ROOT_LAUNCH
 #undef DEFINE_DDA_BROADCAST_ELIGIBLE

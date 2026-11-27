@@ -242,7 +242,7 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
     return ncclSuccess;
   }
   if (ready == 1) {
-    ATTN("LL epoch cells unavailable on a rank; DDA Broadcast disabled");
+    ATTN("LL epoch cells unavailable on a rank; DDA Broadcast LL disabled");
   }
 
   comm->ddaIpcMemHandler = handler;

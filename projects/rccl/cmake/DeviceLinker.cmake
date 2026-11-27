@@ -770,6 +770,7 @@ foreach(_proto _ll _ll128)
   dl_add_fat_object(dda_broadcast_fabric${_proto}
     ${_dda_dir}/broadcast/dda_broadcast_fabric${_proto}.cu.cpp SUPPRESS_WARNINGS)
 endforeach()
+dl_add_fat_object(dda_broadcast_ipc ${_dda_dir}/broadcast/dda_broadcast_ipc.cu.cpp)
 
 # ===========================================================================
 # Symmetric kernels: per-instantiation device TUs from gensrc/symmetric/.

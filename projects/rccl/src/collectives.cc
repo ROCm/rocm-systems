@@ -991,6 +991,12 @@ ncclResult_t ncclBroadcast_impl(const void* sendbuff, void* recvbuff, size_t cou
     return rcclAddonLaunch(info, [&] {
       return ncclBroadcastDdaFabricLL(sendbuff, recvbuff, count, datatype, root, comm, stream);
     });
+  case RCCL_DDA_IPC:
+    INFO(NCCL_COLL, "Broadcast: taking DDA IPC 2-phase path: nRanks=%d root=%d count=%zu datatype=%d bytes=%zu",
+         comm->nRanks, root, count, (int)datatype, count * ncclTypeSize(datatype));
+    return rcclAddonLaunch(info, [&] {
+      return ncclBroadcastDdaIpc(sendbuff, recvbuff, count, datatype, root, comm, stream);
+    });
   case RCCL_DDA_FABRIC_LL128:
     INFO(NCCL_COLL, "Broadcast: taking DDA LL128 path: nRanks=%d root=%d count=%zu datatype=%d bytes=%zu",
          comm->nRanks, root, count, (int)datatype, count * ncclTypeSize(datatype));

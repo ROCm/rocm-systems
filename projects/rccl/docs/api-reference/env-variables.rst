@@ -1634,7 +1634,8 @@ threshold table introduced for gfx1250.
           from the per-architecture table (``ddaVmmMax`` field). Set
           ``RCCL_IGNORE_ARCH_TABLE=0`` for the table to take effect.
       - | ``-1``: Resolved from the per-arch table at runtime (default).
-        | ``0``: Disable the DDA VMM tier for all collectives.
+        | ``0``: Disable the DDA VMM tier for all collectives, and the two-phase
+          IPC ``ncclBroadcast`` (see ``RCCL_DDA_BC_IPC_MAX_BYTES``).
         | ``N`` (bytes): Use ``N`` as the VMM tier ceiling for all collectives,
           overriding the table. Pre-table default: ``134217728`` (128 MiB).
 
@@ -1731,8 +1732,9 @@ threshold table introduced for gfx1250.
           single-node 8-rank IPC path. When ``-1`` (default), Broadcast follows
           the per-architecture table. On gfx1250 the table sets the DDA LL ceiling
           to 16 KiB and the DDA LL128 ceiling to 128 KiB on both SPX and DPX, and on
-          gfx950 and gfx942 the DDA LL ceiling to 256 KiB (the IPC path runs LL
-          only), so DDA Broadcast is on by default there; the other tables have no
+          gfx950 and gfx942 the DDA LL ceiling to 256 KiB and the two-phase IPC window
+          (``RCCL_DDA_BC_IPC_MIN_BYTES``) to 256 KiB-8 MiB on gfx950 and 256 KiB-4 MiB
+          on gfx942, so DDA Broadcast is on by default there; the other tables have no
           Broadcast DDA tier, so Broadcast keeps its previous path. The DDA LL and
           LL128 tier ceilings always apply, and ``RCCL_DDA_LL_THRESHOLD`` and
           ``RCCL_DDA_LL128_THRESHOLD`` apply to every collective: when set they
@@ -1745,6 +1747,29 @@ threshold table introduced for gfx1250.
         | ``0``: Disable DDA Broadcast.
         | ``1`` (or any positive value): Enable DDA Broadcast, subject to the tier
           ceilings and eligibility checks.
+
+    * - | ``RCCL_DDA_BC_IPC_MIN_BYTES``
+        | Smallest ``ncclBroadcast``, in total bytes, that takes the two-phase DDA
+          IPC kernel on a single-node 8-rank gfx950 or gfx942 communicator: the
+          root scatters eighths of the message and the ranks then gather them from
+          each other. It runs ahead of the DDA LL one-shot. A size it declines (not a
+          multiple of 128 bytes, or larger than the IPC scratch) takes DDA LL up to
+          the LL ceiling and the ring above it. When ``-1`` (default), resolved from
+          ``ddaBcIpcMinBytes`` in the arch table: 256 KiB on gfx950 and gfx942.
+          ``RCCL_DDA_BC`` still gates it. A ``MIN`` above ``MAX`` turns it off.
+      - | ``-1``: Resolved from the per-arch table at runtime (default).
+        | ``0``: Start the window at the smallest eligible size (128 bytes), ahead of DDA LL
+          even where DDA LL is faster.
+        | ``N`` (bytes): Use ``N`` as the lower edge of the window, overriding the table.
+
+    * - | ``RCCL_DDA_BC_IPC_MAX_BYTES``
+        | Largest ``ncclBroadcast``, in total bytes, that takes the two-phase DDA IPC
+          kernel (see ``RCCL_DDA_BC_IPC_MIN_BYTES``). When ``-1`` (default), resolved
+          from ``ddaBcIpcMaxBytes`` in the arch table: 8 MiB on gfx950, 4 MiB on gfx942
+          and off on gfx1250. ``RCCL_DDA_THRESHOLD=0`` also turns it off.
+      - | ``-1``: Resolved from the per-arch table at runtime (default).
+        | ``0``: Disable the two-phase DDA IPC Broadcast.
+        | ``N`` (bytes): Use ``N`` as the upper edge of the window, overriding the table.
     * - | ``RCCL_DDA_LL128_A2A_THREADS``
         | Threads per block for the gfx1250 DDA fabric LL128 ``ncclAlltoAll`` kernel.
           When ``0`` (default), resolved from ``ddaA2aLL128Threads`` in the arch
