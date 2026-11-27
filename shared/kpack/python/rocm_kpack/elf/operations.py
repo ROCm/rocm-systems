@@ -149,6 +149,15 @@ def map_section_to_load(
             # page_align_offset can return a value < non_alloc_split when
             # non_alloc_split is already past the desired residue — advance one page.
             insert_offset += page_size
+        # A bss-only PT_LOAD (p_filesz == 0) keeps its p_offset, so the new
+        # segment must not start at the same offset (NOBITS collision).
+        nobits_offsets = {
+            ph.p_offset
+            for _, ph in surgery.iter_load_segments()
+            if ph.p_filesz == 0
+        }
+        while insert_offset in nobits_offsets:
+            insert_offset += page_size
         padding = insert_offset - non_alloc_split
         section_data = surgery.get_section_content(section)
         # Splice: padding bytes + section content inserted at insert_offset.
