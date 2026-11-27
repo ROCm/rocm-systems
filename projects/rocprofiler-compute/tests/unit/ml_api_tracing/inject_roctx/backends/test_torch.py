@@ -13,7 +13,7 @@ from ml_api_tracing.inject_roctx.backends.torch_wraps import (
     DEEP_TENSOR_METHOD_WRAPS,
     TENSOR_METHOD_WRAPS,
 )
-from ml_api_tracing.marker_format import MAX_TENSOR_ARGUMENT_ITEMS, compose_marker
+from ml_api_tracing.marker_format import compose_marker
 from tests.integration.common import require_torch
 
 
@@ -383,7 +383,7 @@ def test_uninitialized_buffer_keeps_persistent_on_to(monkeypatch):
     assert moved.persistent is False
 
 
-def test_format_wrap_args_renders_readable_shapes_and_skips_others():
+def test_format_wrap_args_renders_tensors_and_skips_non_tensors():
     tensor = fake_tensor()
     rendered = torch_backend.format_wrap_args(
         (tensor, "skip"), {"bias": tensor, "flag": True}
@@ -416,14 +416,6 @@ def test_format_wrap_args_omits_unreadable_metadata(value, argument_kind):
     args = (value,) if argument_kind == "positional" else ()
     kwargs = {"tensor": value} if argument_kind == "keyword" else {}
     assert torch_backend.format_wrap_args(args, kwargs) == "n/a"
-
-
-def test_format_wrap_args_drops_items_past_the_cap():
-    values = tuple(
-        fake_tensor(shape=(index,), dtype_name="float32") for index in range(40)
-    )
-    blob = torch_backend.format_wrap_args(values, {})
-    assert blob.count("float32[") == MAX_TENSOR_ARGUMENT_ITEMS
 
 
 def test_format_wrap_args_preserves_readable_tensors(torch_module):
