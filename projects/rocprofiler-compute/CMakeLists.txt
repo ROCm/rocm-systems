@@ -1256,7 +1256,8 @@ endif()
 # -DENABLE_PERFORMANCE_TESTS=ON and run: ctest -L performance
 option(ENABLE_PERFORMANCE_TESTS "Register manual GPU performance tests" OFF)
 message(STATUS "Enable performance tests: ${ENABLE_PERFORMANCE_TESTS}")
-if(ENABLE_PERFORMANCE_TESTS)
+# Source-tree harness: needs tests/performance and src/, not an install layout.
+if(ENABLE_PERFORMANCE_TESTS AND NOT TEST_FROM_INSTALL)
     add_test(
         NAME test_perf_transpose_nbody
         COMMAND

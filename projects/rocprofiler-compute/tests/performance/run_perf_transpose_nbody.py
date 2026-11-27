@@ -8,6 +8,7 @@ two or more times to print a comparison table with deltas vs the first path.
 """
 
 import argparse
+import hashlib
 import os
 import re
 import shutil
@@ -19,12 +20,17 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+_TESTS_DIR = Path(__file__).resolve().parents[1]
 _APP_PATH = Path(__file__).resolve().parent / "fib_transpose_nbody_app.py"
 _DEFAULT_ROCPROF = _REPO_ROOT / "src" / "rocprof-compute"
 _WORKLOAD_NAME = "fib_transpose_nbody"
 _REPO_SRC = _REPO_ROOT / "src"
 if str(_REPO_SRC) not in sys.path:
     sys.path.insert(0, str(_REPO_SRC))
+if str(_TESTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_TESTS_DIR))
+
+import common  # noqa: E402
 
 from utils.utils_common import (  # noqa: E402
     PC_SAMPLING_BLOCK_IDS,
@@ -61,13 +67,17 @@ def resolve_rocprof_compute_command(path: Path) -> List[str]:
     return [str(resolved)]
 
 
-def label_for_path(path: Path) -> str:
+def label_for_path(path: Path, instance_index: int) -> str:
+    """Stable unique label: index, leaf name, and a short path digest."""
     resolved = path.expanduser().resolve()
     if resolved.is_file() and resolved.parent.name == "src":
-        return resolved.parents[1].name
-    if resolved.is_dir():
-        return resolved.name
-    return resolved.name
+        leaf = resolved.parents[1].name
+    elif resolved.is_dir():
+        leaf = resolved.name
+    else:
+        leaf = resolved.name
+    digest = hashlib.sha1(str(resolved).encode("utf-8")).hexdigest()[:8]
+    return f"{instance_index:02d}_{leaf}_{digest}"
 
 
 def find_workload_dir(search_root: Path) -> Path:
@@ -123,6 +133,7 @@ def run_timed(
 def run_instance(
     rocprof_path: Path,
     work_parent: Path,
+    instance_index: int,
     iters: int,
     bodies: int,
     matrix_dim: int,
@@ -130,15 +141,14 @@ def run_instance(
     experimental: bool,
     no_native_tool: bool,
 ) -> PhaseTiming:
-    label = label_for_path(rocprof_path)
+    label = label_for_path(rocprof_path, instance_index)
     instance_dir = work_parent / label
     instance_dir.mkdir(parents=True, exist_ok=True)
 
     rocprof_cmd = resolve_rocprof_compute_command(rocprof_path)
+    # Do not prepend this checkout's src onto PYTHONPATH: an installed
+    # entrypoint must load its own libexec modules, not this tree's.
     env = os.environ.copy()
-    repo_src = str(_REPO_ROOT / "src")
-    existing = env.get("PYTHONPATH", "")
-    env["PYTHONPATH"] = f"{repo_src}:{existing}" if existing else repo_src
 
     experimental_args = ["--experimental"] if experimental else []
     native_tool_args = ["--no-native-tool"] if no_native_tool else []
@@ -303,22 +313,25 @@ def _parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
 
 def main(argv: Optional[List[str]] = None) -> int:
     args = _parse_args(argv)
+    common.check_resource_allocation()
     paths = args.rocprof_compute or [_DEFAULT_ROCPROF]
-    work_parent = args.work_dir
     created_tmp = False
-    if work_parent is None:
+    if args.work_dir is None:
         work_parent = Path(f"/tmp/rocprof-compute-perf-{os.getpid()}")
         created_tmp = True
+    else:
+        work_parent = args.work_dir.expanduser().resolve()
     work_parent.mkdir(parents=True, exist_ok=True)
 
     timings = []  # type: List[PhaseTiming]
     try:
-        for path in paths:
+        for instance_index, path in enumerate(paths):
             print(f"=== running {path} ===", flush=True)
             timings.append(
                 run_instance(
                     path,
                     work_parent=work_parent,
+                    instance_index=instance_index,
                     iters=args.iters,
                     bodies=args.bodies,
                     matrix_dim=args.matrix_dim,

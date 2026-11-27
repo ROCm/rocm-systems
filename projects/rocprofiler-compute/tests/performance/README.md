@@ -29,7 +29,8 @@ ctest --test-dir build -L performance -V --output-on-failure
 ```
 
 `ENABLE_PERFORMANCE_TESTS` defaults to **OFF**, so ordinary CI `ctest` runs
-do not register or execute this test.
+do not register or execute this test. The harness is source-tree only and is
+not registered when `TEST_FROM_INSTALL=ON`.
 
 ### Driver CLI
 
