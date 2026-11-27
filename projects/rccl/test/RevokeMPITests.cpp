@@ -1106,6 +1106,16 @@ TEST_F(RevokeDdaIpcMPITest, IncompleteCollective_DdaIpcLLReduceScatterWide)
     runIncompleteDdaRevokeShrink(*this, {ncclFuncReduceScatter, 2048, kDdaLL, NCCL_PROTO_LL, {}});
 }
 
+// 4 KiB total opens the gfx942 AlltoAll IPC LL wide window: 8 blocks poll peer flags until revoked.
+TEST_F(RevokeDdaIpcMPITest, IncompleteCollective_DdaIpcLLAlltoAllWide)
+{
+    if(currentDeviceArch().find("gfx942") == std::string::npos)
+    {
+        GTEST_SKIP() << "The AlltoAll IPC LL window is gfx942 only";
+    }
+    runIncompleteDdaRevokeShrink(*this, {ncclFuncAlltoAll, 128, kDdaLL, NCCL_PROTO_LL, {}});
+}
+
 TEST_F(RevokeDdaIpcMPITest, IncompleteCollective_DdaIpcAlltoAll)
 {
     runIncompleteDdaRevokeShrink(*this, {ncclFuncAlltoAll, 1024, kDdaIpc, NCCL_PROTO_SIMPLE, {}});

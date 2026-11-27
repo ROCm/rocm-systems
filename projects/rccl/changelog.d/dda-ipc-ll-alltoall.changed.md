@@ -1,0 +1,1 @@
+* gfx942 single-node 8-rank `ncclAlltoAll` from 4 KiB to 8 KiB runs the DDA LL one-shot in the IPC LL region on 8 blocks, in place too, with no GPU barrier. `RCCL_DDA_IPC_LL_THRESHOLD`, or else `RCCL_DDA_LL_THRESHOLD`, lowers the top of that window and `0` turns it off; `RCCL_DDA_LL=0` also turns it off. `RCCL_DDA_THRESHOLD` and `RCCL_IGNORE_ARCH_TABLE=1` keep it.

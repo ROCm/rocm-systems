@@ -13261,6 +13261,68 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_IpcLLInItsWideWindow) {
   });
 }
 
+// The gfx942 AlltoAll IPC LL wide window: 8 blocks from 4 KiB to 8 KiB total, env-lowered; none on gfx950.
+TEST(WrapMicrotestIsolated, DdaIpcLLWideBlocks_Gfx942AlltoAllWindow) {
+  RUN_ISOLATED_TEST("Wrap_DdaIpcLLWideBlocks_Gfx942AlltoAllWindow", []() {
+    for (const char* arch : {"gfx942", "gfx950"}) {
+      SCOPED_TRACE(arch);
+      ncclComm* comm = MakeBroadcastComm(arch, /*ipc=*/true);
+      const uint32_t on = std::strcmp(arch, "gfx942") == 0 ? 8 : 0;
+      std::vector<uint32_t> blocks;
+      g_loadParam = IpcLLParams(-1);
+      for (size_t total : {4 * kKiB - 16, 4 * kKiB, 8 * kKiB, 8 * kKiB + 16}) {
+        blocks.push_back(rcclDdaIpcLLWideBlocks(comm, ncclFuncAlltoAll, total));
+      }
+      EXPECT_EQ(blocks, (std::vector<uint32_t>{0, on, on, 0}));
+      g_loadParam = IpcLLParams(6 * kKiB);
+      EXPECT_EQ(0u, rcclDdaIpcLLWideBlocks(comm, ncclFuncAlltoAll, 8 * kKiB)) << "env lowers the top";
+      g_loadParam = IpcLLParams(-1, -1, -1, /*vmmThreshold=*/0);
+      EXPECT_EQ(on != 0 ? 8 * kKiB : 0u, rcclDdaEntryThreshold(comm, ncclFuncAlltoAll)) << "entry gate";
+      DeleteCommWithArch(comm);
+    }
+  });
+}
+
+// AlltoAll on the IPC comm by total bytes: on gfx942 the LL one-shot in its 4-8 KiB window, in and out of place, and
+// IPC Simple around it; gfx950 has no window.
+TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx942IpcLLInItsWideWindow) {
+  RUN_ISOLATED_TEST("Wrap_SelectAlltoAll_Gfx942IpcLLInItsWideWindow", []() {
+    ScopedHook llEligible(g_allToAllDdaFabricLLEligible,
+                          [](ncclComm*, const void*, void*, size_t, ncclDataType_t) { return true; });
+    ScopedHook ipcEligible(g_allToAllDdaIpcEligible,
+                           [](ncclComm*, const void*, void*, size_t, ncclDataType_t) { return true; });
+    alignas(256) static char send[256];
+    alignas(256) static char recv[256];
+    constexpr int kLL = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL;
+    constexpr int kIpc = (int)rcclAddonAlgos_t::RCCL_DDA_IPC;
+    for (const char* arch : {"gfx942", "gfx950"}) {
+      SCOPED_TRACE(arch);
+      ncclComm* comm = MakeBroadcastComm(arch, /*ipc=*/true);
+      const auto select = [comm](size_t count, bool inPlace) {
+        rcclCollDecision d = PoisonedDecision();
+        EXPECT_EQ(ncclSuccess, rcclSelectAlltoAll(comm, send, inPlace ? static_cast<void*>(send) : recv, count,
+                                                  ncclFloat32, /*stream=*/nullptr, /*query=*/true,
+                                                  /*graphCapturingHint=*/false, &d));
+        return d;
+      };
+      const bool gfx942 = std::strcmp(arch, "gfx942") == 0;
+      g_loadParam = IpcLLParams(-1);
+      // count x 8 ranks x 4 B: 64 = 2 KiB, 128 = 4 KiB, 256 = 8 KiB, 260 = 8 KiB + 32 B.
+      for (bool inPlace : {false, true}) {
+        const rcclCollDecision d = select(128, inPlace);
+        EXPECT_EQ(gfx942 ? kLL : kIpc, d.algo) << "inPlace " << inPlace;
+        EXPECT_EQ(gfx942 ? 143u : 141u, d.nMaxChannels) << "inPlace " << inPlace;  // the LL or IPC Blocks fake
+        EXPECT_EQ(gfx942 ? kLL : kIpc, select(256, inPlace).algo) << "inPlace " << inPlace;
+        EXPECT_EQ(kIpc, select(64, inPlace).algo) << "inPlace " << inPlace;
+        EXPECT_EQ(kIpc, select(260, inPlace).algo) << "inPlace " << inPlace;
+      }
+      g_loadParam = IpcLLParams(0);
+      EXPECT_EQ(kIpc, select(128, false).algo) << "RCCL_DDA_IPC_LL_THRESHOLD=0";
+      DeleteCommWithArch(comm);
+    }
+  });
+}
+
 // ReduceScatter on the IPC comm, by total bytes: LL up to its cap, then Simple; the entry gate admits the IPC cap.
 TEST(WrapMicrotestIsolated, SelectReduceScatter_IpcLLWithinItsCapThenIpcSimple) {
   RUN_ISOLATED_TEST("Wrap_SelectReduceScatter_IpcLLWithinItsCapThenIpcSimple", []() {

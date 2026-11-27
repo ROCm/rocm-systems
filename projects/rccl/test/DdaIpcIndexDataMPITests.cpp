@@ -479,7 +479,7 @@ TEST_F(DdaIpcMPI_IndexData, LLIgnoresStaleSimpleScratch) {
 }
 
 // One DDA IPC LL call with its own buffers. count is the API count: AllReduce and Broadcast elements, ReduceScatter
-// recvcount, AllGather sendcount.
+// recvcount, AllGather sendcount, AlltoAll per-peer count.
 struct LLOp {
   LLOp(ncclFunc_t f, ncclDataType_t d, size_t n, bool ip = false, int r = 0, size_t off = 0)
     : func(f), dtype(d), count(n), inPlace(ip), root(r), offsetBytes(off) {}
@@ -515,11 +515,13 @@ protected:
   }
 
   size_t sendCount(const LLOp& op) const {
-    return op.func == ncclFuncReduceScatter ? op.count * static_cast<size_t>(nRanks_) : op.count;
+    const bool perPeer = op.func == ncclFuncReduceScatter || op.func == ncclFuncAlltoAll;
+    return perPeer ? op.count * static_cast<size_t>(nRanks_) : op.count;
   }
 
   size_t recvCount(const LLOp& op) const {
-    return op.func == ncclFuncAllGather ? op.count * static_cast<size_t>(nRanks_) : op.count;
+    const bool perPeer = op.func == ncclFuncAllGather || op.func == ncclFuncAlltoAll;
+    return perPeer ? op.count * static_cast<size_t>(nRanks_) : op.count;
   }
 
   // Element offset of this rank's shard: in place, ReduceScatter recvbuff = sendbuff + rank * recvcount and AllGather
@@ -541,6 +543,10 @@ protected:
     }
     if (op.func == ncclFuncAllGather) {
       return inputValue(op.dtype, static_cast<int>(i / op.count), i % op.count);
+    }
+    // AlltoAll: chunk p is what rank p sent this rank, from its send chunk rank_.
+    if (op.func == ncclFuncAlltoAll) {
+      return inputValue(op.dtype, static_cast<int>(i / op.count), static_cast<size_t>(rank_) * op.count + i % op.count);
     }
     return expectedSum(op.dtype, nRanks_, inPlaceShardOffset(op) + i);
   }
@@ -586,6 +592,7 @@ protected:
     const char* name = op.func == ncclFuncAllReduce     ? "AllReduce" :
                        op.func == ncclFuncReduceScatter ? "ReduceScatter" :
                        op.func == ncclFuncAllGather     ? "AllGather" :
+                       op.func == ncclFuncAlltoAll      ? "AlltoAll" :
                                                           "Broadcast";
     return std::string(name) + " count=" + std::to_string(op.count) + (op.dtype == ncclFloat32 ? " fp32" : " bf16") +
            (op.inPlace ? " in-place" : " out-of-place") + " offset=" + std::to_string(op.offsetBytes) +
@@ -602,6 +609,8 @@ protected:
       return ncclReduceScatter(op.sendBuf, op.recvBuf, op.count, op.dtype, ncclSum, comm, stream);
     case ncclFuncAllGather:
       return ncclAllGather(op.sendBuf, op.recvBuf, op.count, op.dtype, comm, stream);
+    case ncclFuncAlltoAll:
+      return ncclAlltoAll(op.sendBuf, op.recvBuf, op.count, op.dtype, comm, stream);
     default:
       return ncclBroadcast(op.sendBuf, op.recvBuf, op.count, op.dtype, op.root, comm, stream);
     }
@@ -773,6 +782,8 @@ struct WideWindow {
 // The gfx950 and gfx942 table windows: AllGather 8 KiB to 16 KiB per rank, ReduceScatter 8 KiB to 64 KiB shards.
 constexpr WideWindow kAgWindow{ncclFuncAllGather, 64u << 10, 128u << 10, 16, false};
 constexpr WideWindow kRsWindow{ncclFuncReduceScatter, 64u << 10, 512u << 10, 16, false};
+// gfx942 only: AlltoAll 512 B to 1 KiB chunks.
+constexpr WideWindow kA2aWindow{ncclFuncAlltoAll, 4u << 10, 8u << 10, 8, true};
 
 // fp32 API count of a call moving totalBytes over kDdaIpcRanks ranks (AllGather sendcount, ReduceScatter recvcount,
 // AlltoAll per-peer count).
@@ -893,9 +904,38 @@ TEST_F(DdaIpcMPI_WideLL, ReduceScatter) {
   runEach(ncclFuncReduceScatter, ncclBfloat16, {2 * lo, 16 * lo});
 }
 
+// AlltoAll (gfx942): LL at both window edges and IPC Simple just outside; a ragged chunk takes no LL.
+TEST_F(DdaIpcMPI_WideLL, AlltoAllTierFollowsTheWindow) {
+  requireWindow(kA2aWindow);
+  if (HasFailure() || IsSkipped()) {
+    return;
+  }
+  expectWindowEdges(kA2aWindow, kTierIpc, kTierIpc);
+}
+
+// AlltoAll chunks of 512 B to 1 KiB, in and out of place, fp32 and bf16 on 2-byte aligned buffers.
+TEST_F(DdaIpcMPI_WideLL, AlltoAll) {
+  requireWindow(kA2aWindow);
+  if (HasFailure() || IsSkipped()) {
+    return;
+  }
+  const size_t lo = fp32Count(kA2aWindow.minBytes);
+  if (!runEach(ncclFuncAlltoAll, ncclFloat32, {lo, lo * 3 / 2, 2 * lo})) {
+    return;
+  }
+  for (bool inPlace : {false, true}) {
+    std::vector<LLOp> ops;
+    ops.emplace_back(ncclFuncAlltoAll, ncclBfloat16, 2 * lo, inPlace, 0, /*offsetBytes=*/2);
+    ops.emplace_back(ncclFuncAlltoAll, ncclBfloat16, 4 * lo, inPlace);
+    if (!runLL(ops)) {
+      return;
+    }
+  }
+}
+
 // Back-to-back LL calls with no sync: AllGather at both edges, in place and on 2-byte aligned bf16 buffers, between the
-// AllReduce and ReduceScatter LL one-shots at their table caps and in the ReduceScatter window, so every tier shares the
-// epoch cells and both banks.
+// AllReduce and ReduceScatter LL one-shots at their table caps and in the ReduceScatter and AlltoAll windows, so every
+// tier shares the epoch cells and both banks.
 TEST_F(DdaIpcMPI_WideLL, InterleavedWithTheOtherLLTiers) {
   requireWindow(kAgWindow);
   if (HasFailure() || IsSkipped()) {
@@ -905,6 +945,7 @@ TEST_F(DdaIpcMPI_WideLL, InterleavedWithTheOtherLLTiers) {
   const bool others = !rcclCeAllReduceEnabled(comm) && rcclDdaLLThreshold(comm, ncclFuncAllReduce) >= (4u << 10) &&
                       rcclDdaLLThreshold(comm, ncclFuncReduceScatter) >= (32u << 10);
   const bool rsWide = rcclDdaIpcLLWideBlocks(comm, ncclFuncReduceScatter, kRsWindow.minBytes) > 0;
+  const bool a2aWide = rcclDdaIpcLLWideBlocks(comm, ncclFuncAlltoAll, kA2aWindow.minBytes) > 0;
   const size_t perRank = fp32Count(kAgWindow.minBytes);
   std::vector<LLOp> ops;
   for (int round = 0; round < 3; ++round) {
@@ -918,13 +959,16 @@ TEST_F(DdaIpcMPI_WideLL, InterleavedWithTheOtherLLTiers) {
       ops.emplace_back(ncclFuncReduceScatter, ncclBfloat16, 2 * fp32Count(kRsWindow.maxBytes), false, 0,
                        /*offsetBytes=*/2);
     }
+    if (a2aWide) {
+      ops.emplace_back(ncclFuncAlltoAll, ncclFloat32, fp32Count(kA2aWindow.minBytes) << (round & 1), round == 2);
+    }
     ops.emplace_back(ncclFuncAllGather, ncclBfloat16, 2 * perRank, round == 0, 0, /*offsetBytes=*/2);
   }
   runLL(ops);
 }
 
-// Captured AllGather and ReduceScatter window calls take their flags from the epoch cells at replay, with eager LL calls
-// flipping the bank.
+// Captured AllGather, ReduceScatter and AlltoAll window calls take their flags from the epoch cells at replay, with eager
+// LL calls flipping the bank.
 TEST_F(DdaIpcMPI_WideLL, GraphReplays) {
   requireWindow(kAgWindow);
   if (HasFailure() || IsSkipped()) {
@@ -936,6 +980,9 @@ TEST_F(DdaIpcMPI_WideLL, GraphReplays) {
   ops.emplace_back(ncclFuncAllGather, ncclFloat32, 2 * perRank, /*inPlace=*/true);
   if (rcclDdaIpcLLWideBlocks(getActiveCommunicator(), ncclFuncReduceScatter, kRsWindow.maxBytes) > 0) {
     ops.emplace_back(ncclFuncReduceScatter, ncclFloat32, fp32Count(kRsWindow.maxBytes), /*inPlace=*/true);
+  }
+  if (rcclDdaIpcLLWideBlocks(getActiveCommunicator(), ncclFuncAlltoAll, kA2aWindow.maxBytes) > 0) {
+    ops.emplace_back(ncclFuncAlltoAll, ncclFloat32, fp32Count(kA2aWindow.maxBytes), /*inPlace=*/true);
   }
   if (!prepareAll(ops, /*capturing=*/1)) {
     return;
