@@ -50,6 +50,7 @@ class KFDSVMRangeTest : public KFDBaseComponentTest,
     void MigratePolicyTest(int gpuNode);
     void MultiThreadMigrationTest(int gpuNode);
     void MigrateFileBackedRangeTest(int gpuNode);
+    void RegisterReadOnlyTest(int gpuNode);
     void HMMProfilingEvent(int gpuNode);
     void VramOvercommitTest(int gpuNode);
     void PrefaultPartialRangeTest(int gpuNode);
