@@ -145,6 +145,9 @@ class BlitSdmaBase : public core::Blit {
   /// engine group's body decrements; without them, one signal per group that
   /// the body fences to 0. out_signal is never polled because other ops of
   /// the same batch may share it.
+  /// Without platform atomics the final fence writes an absolute value, which
+  /// is only correct while this op is the last user of out_signal (as in the
+  /// other SDMA completion paths without platform atomics).
   /// @return HSA_STATUS_ERROR_INVALID_ARGUMENT if body_signals is empty.
   virtual hsa_status_t SubmitEpilogue(
       core::Signal& out_signal,
@@ -159,6 +162,10 @@ class BlitSdmaBase : public core::Blit {
   /// prologue (if needed) + body entries + epilogue into one ring reservation.
   /// Saves 1-2 doorbells vs separate Submit{Prologue,Bodies,Epilogue} calls when
   /// the coordinator engine also carries body entries.
+  /// @return HSA_STATUS_ERROR_INVALID_ARGUMENT without 64-bit platform atomics.
+  ///   The body packets signal with a 64-bit atomic sub, and the ops of a batch
+  ///   share out_signal, so a fence cannot complete it: it would overwrite the
+  ///   other ops' decrements.
   /// @param prologue_signal  If non-null, prologue logic fires this signal after
   ///   dep handling; other engines' bodies can poll on it.
   /// @param group_signal  Non-null exactly when FusedEpilogueRequired() is true.

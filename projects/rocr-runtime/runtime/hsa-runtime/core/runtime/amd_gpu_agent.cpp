@@ -1796,6 +1796,16 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
   if (requires_multi_packet) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   const bool fused = coordinator->IsGfx125Plus();
+
+  // gfx125+ fan-out completes the shared out_signal with 64-bit atomics only
+  // (see SubmitFusedCoordinator), so refuse it up front without them.
+  if (fused && !coordinator->PlatformAtomicSupport()) {
+    LogPrint(HSA_AMD_LOG_FLAG_SDMA,
+             "SDMA FanOut(%s): refused, gfx125+ fan-out needs 64-bit platform atomics",
+             op_name);
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
   const bool need_prologue = !fused || profiling_enabled();
 
   // Derive indirection flags from op for SubmitBodies.
@@ -1855,6 +1865,26 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
   }
   core::Signal& body_out = use_group_signal ? *body_signals_raw[0] : out_signal;
 
+  // Once a doorbell has rung, SDMA packets can still poll or decrement the
+  // signals created above, so an error return must not free them: the engine
+  // would touch memory that gets reused. A cleanup deferred to out_signal
+  // would never run either, as the failed op's own decrement never comes. The
+  // signals are leaked instead, a few bytes per failed op.
+  bool in_flight = false;
+  auto fail = [&](hsa_status_t err) {
+    if (!in_flight) return err;
+    // gfx125+ bodies already queued on other engines wait for the prologue
+    // signal, which the coordinator's prologue would have set. Set it so they
+    // drain instead of stalling their engines.
+    if (fused && prologue_signal) prologue_signal->StoreRelease(0);
+    LogPrint(HSA_AMD_LOG_FLAG_SDMA,
+             "SDMA FanOut: error %d after the first submission, leaking %zu signal(s)",
+             static_cast<int>(err), body_signal_ptrs.size() + (prologue_signal ? 1 : 0));
+    prologue_signal.release();
+    for (auto& bp : body_signal_ptrs) bp.release();
+    return err;
+  };
+
   hsa_status_t stat;
 
   if (fused) {
@@ -1899,7 +1929,8 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
       stat = engines[idxs[0]].blit->SubmitBodies(
           op, dst_list, src_list, size_list, idxs,
           ind_src, ind_dst, body_deps, body_out, nullptr, dst_size_list);
-      if (stat != HSA_STATUS_SUCCESS) return stat;
+      if (stat != HSA_STATUS_SUCCESS) return fail(stat);
+      in_flight = true;
     }
 
     // Coordinator: prologue + coord bodies + epilogue in one doorbell.
@@ -1918,7 +1949,7 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
         use_group_signal ? &body_out : nullptr,
         op, coord_dsts, coord_srcs, coord_sizes_a, coord_sizes_b,
         ind_src, ind_dst, body_deps);
-    if (stat != HSA_STATUS_SUCCESS) return stat;
+    if (stat != HSA_STATUS_SUCCESS) return fail(stat);
 
   } else {
     // === Classic path (gfx942 etc.): separate prologue/bodies/epilogue ===
@@ -1945,6 +1976,7 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
       stat = coordinator->SubmitPrologue(dep_signals, out_signal,
                                          *prologue_signal, fused);
       if (stat != HSA_STATUS_SUCCESS) return stat;
+      in_flight = true;
     }
 
     // Bodies: one SubmitBodies call per engine group
@@ -1961,7 +1993,8 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
       stat = engines[idxs[0]].blit->SubmitBodies(
           op, dst_list, src_list, size_list, idxs,
           ind_src, ind_dst, body_deps, body_out, body_sig, dst_size_list);
-      if (stat != HSA_STATUS_SUCCESS) return stat;
+      if (stat != HSA_STATUS_SUCCESS) return fail(stat);
+      in_flight = true;
       ++grp_idx;
     }
 
@@ -1972,7 +2005,7 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
              op_name, coord_idx, core::Signal::Convert(&out_signal).handle,
              body_signals_raw.size());
     stat = coordinator->SubmitEpilogue(out_signal, body_signals_raw);
-    if (stat != HSA_STATUS_SUCCESS) return stat;
+    if (stat != HSA_STATUS_SUCCESS) return fail(stat);
   }
 
   // --- Async cleanup: destroy prologue_signal and body_signals when done ---

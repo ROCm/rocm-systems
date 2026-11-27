@@ -1099,6 +1099,14 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitFusedCoordinator(
     bool indirect_src, bool indirect_dst,
     const std::vector<core::Signal*>& body_deps) {
 
+  // The ops of a batch share out_signal, so completing it takes an atomic
+  // decrement: the epilogue's, and the body packets' SIGNAL (a 64-bit atomic
+  // sub). A fence cannot stand in for them. It writes an absolute value, so it
+  // overwrites the decrements of the other ops in the batch and the signal
+  // never reaches 0. Without 64-bit platform atomics this path cannot complete
+  // a shared signal, so it is refused.
+  if (!platform_atomic_support_) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
   const size_t num_entries = dsts.size();
   const bool profiling_enabled = agent_->profiling_enabled();
   const bool need_prologue = prologue_signal != nullptr;
@@ -1113,8 +1121,6 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitFusedCoordinator(
   // decrement out_signal directly and the whole epilogue is dropped.
   const bool skip_epilogue = group_signal == nullptr;
   core::Signal& body_done = skip_epilogue ? out_signal : *group_signal;
-  const uint32_t completion_size =
-      platform_atomic_support_ ? atomic_command_size_ : fence_64b_command_size_;
 
   // --- Prologue size computation ---
   uint32_t prologue_size = 0;
@@ -1181,7 +1187,7 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitFusedCoordinator(
     if (useGCR) epilogue_size += gcr_command_size();
     if (profiling_enabled) epilogue_size += timestamp_command_size_;
 
-    epilogue_size += completion_size;
+    epilogue_size += atomic_command_size_;
 
     if (has_mailbox)
       epilogue_size += fence_command_size_ + trap_command_size_;
@@ -1325,15 +1331,10 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitFusedCoordinator(
       wrapped_index += timestamp_command_size_;
     }
 
-    if (platform_atomic_support_) {
-      BuildAtomicDecrementCommand(command_addr, out_signal.ValueLocation());
-    } else {
-      BuildFence64bCommand(command_addr, out_signal.ValueLocation(),
-                           static_cast<uint64_t>(out_signal.LoadRelaxed() - 1));
-    }
-    command_addr += completion_size;
+    BuildAtomicDecrementCommand(command_addr, out_signal.ValueLocation());
+    command_addr += atomic_command_size_;
     bytes_written_[wrapped_index] = post_bytes;
-    wrapped_index += completion_size;
+    wrapped_index += atomic_command_size_;
 
     if (has_mailbox) {
       BuildFenceCommand(command_addr,
