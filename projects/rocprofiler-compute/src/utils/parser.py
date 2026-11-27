@@ -18,7 +18,7 @@ from pc_sampling.pc_sampling_analysis import (
 )
 from utils import schema
 from utils.file_io import validate_kernel_filter_ids
-from utils.logger import console_error, console_warning, demarcate
+from utils.logger import console_debug, console_error, console_warning, demarcate
 from utils.metrics.evaluation_pipeline import eval_metric
 from utils.specs import MachineSpecs
 from utils.utils_analysis import pass_tables_on_rows
@@ -657,6 +657,8 @@ def evaluate_kernel_tables(
             kernel_pmc_df,
             debug=False,
             pass_tables=pass_tables_on_rows(workload.pass_tables, kernel_pmc_df),
+            # The workload's evaluation already warned about missing inputs
+            warn=console_debug,
         )
         evaluated[kernel_id] = KernelTables(name, kernel_dfs)
     return evaluated

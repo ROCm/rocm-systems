@@ -81,3 +81,33 @@ def test_analyze_names_the_page_like_roofline_and_writes_it_only_with_the_chart(
     finally:
         common.clean_output_dir(True, first)
         common.clean_output_dir(True, second)
+
+
+def test_each_kernel_view_is_the_chart_of_that_kernel(
+    binary_handler_analyze_rocprof_compute: Callable[[list], int],
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """Kernel i's view on the page shows what analyze -k i prints."""
+    workload_dir = integration_common.setup_workload_dir("tests/workloads/vcopy/MI350")
+    try:
+        # Give the second dispatch a kernel of its own, so the workload has two
+        for path in Path(workload_dir).glob("results_pmc_perf_*.csv*"):
+            table = pd.read_csv(path)
+            second = table["Dispatch_ID"] == sorted(set(table["Dispatch_ID"]))[1]
+            table.loc[second, "Kernel_Name"] += "_second"
+            table.to_csv(path, index=False)
+        analyze = binary_handler_analyze_rocprof_compute
+        assert analyze(["analyze", "-p", workload_dir]) == 0
+        kernels = embedded_model(Path(workload_dir) / "mem_chart_gpu-0.html")["views"][
+            "kernels"
+        ]
+        capsys.readouterr()
+
+        assert len(kernels) == 2
+        for index, kernel in enumerate(kernels):
+            assert analyze(["analyze", "-p", workload_dir, "-k", str(index)]) == 0
+            output = strip_ansi(capsys.readouterr().out)
+            for shown in kernel["view"]["values"].values():
+                assert shown["text"] in output
+    finally:
+        common.clean_output_dir(True, workload_dir)

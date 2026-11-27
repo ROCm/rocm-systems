@@ -5,7 +5,7 @@
 
 import warnings
 from collections import ChainMap
-from typing import Any, Dict, List, Set, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Union
 
 import numpy as np
 import pandas as pd
@@ -115,10 +115,16 @@ class MetricEvaluator:
         raw_pmc_df: pd.DataFrame,
         sys_vars: Dict[str, Any],
         empirical_peaks: Dict[str, Any],
+        warn: Optional[Callable[[str], None]] = None,
     ) -> None:
         self.raw_pmc_df = raw_pmc_df
         self.sys_vars = sys_vars
         self.empirical_peaks = empirical_peaks
+        # Reports an expression that fails to evaluate; None means console_warning
+        self.warn = warn
+
+    def _warn(self, message: str) -> None:
+        (self.warn or console_warning)(message)
 
     def eval_expression(self, expr: str) -> Union[str, float, int]:
         """Evaluate a single expression with proper local context."""
@@ -184,34 +190,34 @@ class MetricEvaluator:
 
         except (TypeError, NameError, KeyError) as exception:
             if "empirical_peak" in str(exception):
-                console_warning(
+                self._warn(
                     f"Missing empirical peak data: "
                     f"{type(exception).__name__}: {exception}."
                 )
                 return "N/A"
             else:
-                console_warning(
+                self._warn(
                     f"Failed to evaluate expression '{expr}': "
                     f"{type(exception).__name__}: {exception}."
                 )
                 return "N/A"
 
         except AttributeError as attribute_error:
-            console_warning(
+            self._warn(
                 f"Failed to evaluate expression '{expr}': "
                 f"{type(attribute_error).__name__}: {attribute_error}."
             )
             return "N/A"
 
         except pd.errors.IntCastingNaNError as exception:
-            console_warning(
+            self._warn(
                 f"Failed to evaluate expression '{expr}': "
                 f"{type(exception).__name__}: {exception}."
             )
             return "N/A"
 
         except ValueError as value_error:
-            console_warning(
+            self._warn(
                 f"Failed to evaluate expression '{expr}': "
                 f"{type(value_error).__name__}: {value_error}."
             )
