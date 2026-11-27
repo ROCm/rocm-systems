@@ -11,6 +11,7 @@
 
 #include "compute_unit_test_util.h"
 #include "execution_plugin_test_util.h"
+#include "float_format_reference.h"
 #include "mfma_f32_test_dispatch.h"
 #include "mfma_f64_test_dispatch.h"
 #include "mfma_f8_test_dispatch.h"

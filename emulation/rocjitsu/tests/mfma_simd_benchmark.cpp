@@ -6,6 +6,7 @@
 
 #include "compute_unit_test_util.h"
 #include "decode_test_util.h"
+#include "float_format_reference.h"
 #include "mfma_f32_test_dispatch.h"
 #include "mfma_f64_test_dispatch.h"
 #include "mfma_f8_test_dispatch.h"
@@ -22,7 +23,6 @@
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
-#include "util/data_types.h"
 #include "util/simd.h"
 #include "util/simd_test_hooks.h"
 

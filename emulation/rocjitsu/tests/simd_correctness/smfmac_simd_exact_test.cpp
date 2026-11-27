@@ -4,6 +4,7 @@
 /// @file smfmac_simd_exact_test.cpp
 /// @brief Decoded CDNA3/CDNA4 F32 SMFMAC SIMD-vs-scalar checks.
 
+#include "float_format_reference.h"
 #include "mma_exact_test_support.h"
 #include "rocjitsu/isa/isa_family.h"
 

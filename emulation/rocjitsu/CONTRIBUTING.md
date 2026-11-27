@@ -43,8 +43,9 @@ Before writing new infrastructure, check these existing libraries:
   See the Code style section for the two `stderr` carve-outs.
 - **Bit manipulation** — `util/bit.h` and `util/bitfield.h` cover
   masks, extraction, insertion, and typed bitfield access.
-- **Data types** — `util/data_types.h` provides FP16/BF16/FP8/BF8/FP4/FP6
-  conversions. Extend it rather than adding ad-hoc converters.
+- **Data types** — `util/data_types.h` provides FP16/BF16 storage conversions.
+  Instruction conversions belong in `lib/arith/`; independent test models for
+  FP8/BF8/FP4/FP6 belong in `tests/float_format_reference.h`.
 - **SIMD** — `util/simd.h` wraps `<experimental/simd>` with scalar
   fallback. Add new SIMD primitives here, not inline in ISA execute bodies.
 - **Intrusive list** — `util/intrusive_list.h` for linked data structures

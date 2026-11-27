@@ -104,8 +104,8 @@
 #include "rocjitsu/vm/plugins/execution_plugin.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 
+#include "float_format_reference.h"
 #include "unary_binding.h"
-#include "util/data_types.h"
 #include "util/simd.h"
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/builders.h"

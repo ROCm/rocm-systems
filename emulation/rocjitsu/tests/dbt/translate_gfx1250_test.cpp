@@ -8,6 +8,7 @@
 #include "../checked_instruction_test_util.h"
 #include "../elf_test_support.h"
 #include "decode_test_util.h"
+#include "float_format_reference.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
@@ -49,7 +50,6 @@
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
-#include "util/data_types.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/base/rj_compiler.h"
