@@ -25,7 +25,6 @@
 namespace {
 
 using nccl_dda_detail::DdaIpcBarrierState;
-using nccl_dda_detail::ddaMaxNBlocksForScratch;
 using nccl_dda_detail::kDdaNranks;
 
 template <typename T>
@@ -43,9 +42,8 @@ static ncclResult_t ncclReduceScatterDdaIpcTyped(const void* sendbuff, void* rec
     return ncclInvalidArgument;
   }
 
-  const int nBlocksMax = ddaMaxNBlocksForScratch();
   // For reduce-scatter, we use recvcount for grid calculation since each rank processes its portion
-  auto gridBlock = dda::common::getGridAndBlockDims(recvcount, sizeof(T), nBlocksMax);
+  auto gridBlock = nccl_dda_detail::ddaIpcSimpleGeom(recvcount, sizeof(T));
   const auto& grid = gridBlock.first;
   const auto& block = gridBlock.second;
 

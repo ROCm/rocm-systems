@@ -8,6 +8,7 @@
 #include "algorithms/dda/broadcast/dda_broadcast.h"
 
 #include "algorithms/dda/broadcast/broadcast_dda_fabric_ll.h"
+#include "algorithms/dda/dda_ll_region.h"
 #include "algorithms/dda/fabric/fabric_gpu_barrier.h" // dda::common::kDdaMaxNranks
 #include "checks.h"
 #include "comm.h"
@@ -30,7 +31,6 @@ RCCL_PARAM(DdaLLBcThreads, "DDA_LL_BC_THREADS", kDdaLLBcDefaultThreads);
 
 namespace {
 
-using dda::common::ddaBankSize;
 using dda::common::ddaLLBcSlotPkts;
 
 constexpr size_t kDdaLLBcMaxChunks = 8;
@@ -65,20 +65,6 @@ dim3 ddaLLBcGrid(const ncclComm* comm, bool isRoot, size_t bytes) {
   return dim3((unsigned)(chunks < budget ? chunks : budget));
 }
 
-// Where this comm's LL banks live: [base, base + 2 * bank) of every rank's scratch. Fabric uses the whole scratch;
-// IPC the region past ddaScratchBytes that ncclDdaIpcCommInit keeps free of Simple staging.
-struct DdaLLBcRegion {
-  size_t base;
-  size_t bank;
-};
-
-DdaLLBcRegion ddaLLBcRegion(const ncclComm* comm) {
-  if (comm->ddaFabricMemHandler == nullptr) {
-    return {comm->ddaScratchBytes, ddaBankSize(dda::common::kDdaIpcLLRegionBytes)};
-  }
-  return {0, ddaBankSize(comm->ddaScratchBytes)};
-}
-
 } // namespace
 
 size_t ncclBroadcastDdaBlockBudget(const ncclComm* comm) {
@@ -108,7 +94,7 @@ bool ncclBroadcastDdaFabricLLEligible(ncclComm* comm, size_t count, ncclDataType
   if (bytes > rcclDdaLLThreshold(comm, ncclFuncBroadcast)) {
     return false;
   }
-  if ((bytes >> 3) > ddaLLBcSlotPkts(ddaLLBcRegion(comm).bank, comm->nRanks)) {
+  if ((bytes >> 3) > ddaLLBcSlotPkts(nccl_dda_detail::ddaLLRegion(comm).bank, comm->nRanks)) {
     return false;
   }
   // Both the root and the non-root grid must fit the epoch cells.
@@ -135,8 +121,8 @@ ncclResult_t ncclBroadcastDdaFabricLL(const void* sendbuff, void* recvbuff, size
     reinterpret_cast<uintptr_t>(recvbuff) | (isRoot ? reinterpret_cast<uintptr_t>(sendbuff) : 0);
   const bool aligned = addrs % sizeof(uint32_t) == 0;
 
-  char* const* peers = reinterpret_cast<char* const*>(comm->ddaPeerPtrsDev);
-  const DdaLLBcRegion region = ddaLLBcRegion(comm);
+  const nccl_dda_detail::DdaLLRegion region = nccl_dda_detail::ddaLLRegion(comm);
+  char* const* peers = reinterpret_cast<char* const*>(region.peers);
   const dda::common::DdaKernelParams params{comm->abortFlagDev};
 
   INFO(NCCL_COLL, "DDA Broadcast LL: nRanks=%d root=%d bytes=%zu grid=%ux%u block=%u aligned=%d", comm->nRanks, root,
@@ -147,12 +133,12 @@ ncclResult_t ncclBroadcastDdaFabricLL(const void* sendbuff, void* recvbuff, size
     hipExtLaunchKernelGGL((dda::common::ddaBroadcastFabricLL<true>), grid, dim3(threads), 0, stream,
                           /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers, static_cast<char*>(recvbuff),
                           static_cast<const char*>(sendbuff), bytes, comm->rank, comm->nRanks, root,
-                          comm->ddaLLEpochDev, comm->ddaLLEpochLen, region.bank, region.base, params);
+                          comm->ddaLLEpochDev, comm->ddaLLEpochLen, region.bank, params);
   } else {
     hipExtLaunchKernelGGL((dda::common::ddaBroadcastFabricLL<false>), grid, dim3(threads), 0, stream,
                           /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers, static_cast<char*>(recvbuff),
                           static_cast<const char*>(sendbuff), bytes, comm->rank, comm->nRanks, root,
-                          comm->ddaLLEpochDev, comm->ddaLLEpochLen, region.bank, region.base, params);
+                          comm->ddaLLEpochDev, comm->ddaLLEpochLen, region.bank, params);
   }
   CUDACHECK(cudaGetLastError());
   return ncclSuccess;

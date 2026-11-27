@@ -225,6 +225,7 @@ set(SRC_FILES
   algorithms/dda/broadcast/dda_broadcast.h
   algorithms/dda/broadcast/broadcast_dda_fabric_ll128_twoshot.h
   algorithms/dda/dda_init_detail.h
+  algorithms/dda/dda_ll_region.h
   algorithms/dda/reduce_scatter/dda_reduce_scatter.h
   include/debug.h
   include/dev_runtime.h

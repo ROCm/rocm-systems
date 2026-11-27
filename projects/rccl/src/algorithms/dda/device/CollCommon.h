@@ -220,13 +220,15 @@ inline uint32_t divRoundUp(size_t a, size_t b) {
   return y;
 }
 
+// Block width of the DDA Simple kernels (getGridAndBlockDims).
+constexpr uint32_t kDdaSimpleThreads = 512;
+
 // True if per-rank data fits in one CUDA block (512 threads, 16-byte loads per thread).
 // Same threshold as getGridAndBlockDims(). DDA AlltoAll uses it to choose in-kernel
 // staging copy for small messages vs pre-kernel cudaMemcpyAsync for larger ones.
 inline bool ddaAlltoAllSingleBlockGrid(size_t count, int typeSize) {
-  constexpr uint32_t kThreadsPerBlock = 512;
   const uint32_t elementsPerThread = 16 / typeSize;
-  return count < elementsPerThread * kThreadsPerBlock;
+  return count < elementsPerThread * kDdaSimpleThreads;
 }
 
 // copyFromSrcToDest loads user buffers as uint4, so both pointers have to be
@@ -283,8 +285,6 @@ inline uint32_t ddaCapThreads(uint32_t threads, uint32_t capThreads) {
 }
 
 inline std::pair<dim3, dim3> getGridAndBlockDims(size_t count, int typeSize, size_t maxBlocks) {
-  constexpr uint32_t kThreadsPerBlock = 512;
-
   const uint32_t elementsPerThread = 16 / typeSize; // we do 16 Byte load in kernel
 
   const uint32_t elementsPerWarp = elementsPerThread * kDdaThreadGranule;
@@ -296,9 +296,9 @@ inline std::pair<dim3, dim3> getGridAndBlockDims(size_t count, int typeSize, siz
     blocks.x = 1;
   } else {
     auto warpsRequired = divRoundUp(count, elementsPerWarp);
-    blocks.x = calcBlockCount(divRoundUp(count, elementsPerThread), kThreadsPerBlock, maxBlocks);
+    blocks.x = calcBlockCount(divRoundUp(count, elementsPerThread), kDdaSimpleThreads, maxBlocks);
     auto warpsPerBlock = divRoundUp(warpsRequired, blocks.x);
-    auto threadsPerBlock = std::min<uint32_t>(kThreadsPerBlock, warpsPerBlock * kDdaThreadGranule);
+    auto threadsPerBlock = std::min<uint32_t>(kDdaSimpleThreads, warpsPerBlock * kDdaThreadGranule);
     threads.x = threadsPerBlock;
   }
 
@@ -316,8 +316,8 @@ constexpr size_t kDdaLLMaxBytes = (size_t)(32) * 1024 * 1024;
 // it, floored to 128B so LL128 lines in bank 1 stay 128B-aligned. Every LL/LL128
 // tier that derives its slot stride from the bank rather than a fixed constant
 // puts bank 1 at the same byte offset, which is what stops one tier landing on
-// flag words another is still polling. Exception: IPC Broadcast LL keeps its banks
-// in the kDdaIpcLLRegionBytes region past ddaScratchBytes, which no other tier uses.
+// flag words another is still polling. On IPC the LL tiers keep their banks in the
+// kDdaIpcLLRegionBytes region past ddaScratchBytes (nccl_dda_detail::ddaLLRegion).
 constexpr size_t ddaBankSize(size_t bytes) {
   return (bytes / 2) / 128 * 128;
 }

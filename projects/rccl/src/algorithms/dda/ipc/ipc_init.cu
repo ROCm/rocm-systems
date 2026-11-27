@@ -122,61 +122,40 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
     return ncclSuccess;
   }
 
-  void* peerDev = nullptr;
-  cudaError_t ce = cudaMalloc(&peerDev, kDdaNranks * sizeof(void*));
-  if (ce != cudaSuccess) {
-    delete handler;
-    freeDdaIpcScratch(comm, scratch, bytes);
-    WARN("ncclDdaIpcCommInit: cudaMalloc(peer table) failed (%s)", cudaGetErrorString(ce));
-    return ncclSuccess;
-  }
-
-  void* h_ptrs[kDdaNranks];
-  for (int i = 0; i < kDdaNranks; ++i) {
-    void* p = nullptr;
-    res = handler->getPeerDeviceMemPtr(i, &p);
-    if (res != ncclSuccess) {
-      CUDACHECKIGNORE(cudaFree(peerDev));
-      delete handler;
-      freeDdaIpcScratch(comm, scratch, bytes);
-      WARN("ncclDdaIpcCommInit: getPeerDeviceMemPtr failed");
-      return ncclSuccess;
+  auto cudaOk = [](cudaError_t err, const char* what) {
+    if (CUDACLEARERROR(err) != cudaSuccess) {
+      WARN("ncclDdaIpcCommInit: %s failed: %s", what, cudaGetErrorString(err));
+      return false;
     }
-    h_ptrs[i] = p;
-  }
+    return true;
+  };
 
-  ce = cudaMemcpy(peerDev, h_ptrs, kDdaNranks * sizeof(void*), cudaMemcpyHostToDevice);
-  if (ce != cudaSuccess) {
-    CUDACHECKIGNORE(cudaFree(peerDev));
-    delete handler;
-    freeDdaIpcScratch(comm, scratch, bytes);
-    WARN("ncclDdaIpcCommInit: cudaMemcpy(peer table) failed (%s)", cudaGetErrorString(ce));
-    return ncclSuccess;
+  // Device peer table: [0, kDdaNranks) scratch bases, [kDdaNranks, 2 * kDdaNranks) LL region bases (ddaLLRegion).
+  void* peerDev = nullptr;
+  void* h_ptrs[2 * kDdaNranks] = {};
+  // From here a local failure still joins the barrier exchange and the ready allgather, as its peers do.
+  bool tableOk = cudaOk(cudaMalloc(&peerDev, 2 * kDdaNranks * sizeof(void*)), "cudaMalloc(peer table)");
+  for (int i = 0; tableOk && i < kDdaNranks; ++i) {
+    if (handler->getPeerDeviceMemPtr(i, &h_ptrs[i]) != ncclSuccess) {
+      WARN("ncclDdaIpcCommInit: getPeerDeviceMemPtr failed");
+      tableOk = false;
+    } else {
+      h_ptrs[kDdaNranks + i] = static_cast<char*>(h_ptrs[i]) + (bytes - dda::common::kDdaIpcLLRegionBytes);
+    }
   }
-
-  if (ncclCalloc(&comm->ddaPeerPtrsHost, kDdaNranks) != ncclSuccess) {
-    CUDACHECKIGNORE(cudaFree(peerDev));
-    delete handler;
-    freeDdaIpcScratch(comm, scratch, bytes);
+  tableOk = tableOk && cudaOk(cudaMemcpy(peerDev, h_ptrs, 2 * kDdaNranks * sizeof(void*), cudaMemcpyHostToDevice),
+                              "cudaMemcpy(peer table)");
+  if (tableOk && ncclCalloc(&comm->ddaPeerPtrsHost, kDdaNranks) != ncclSuccess) {
     WARN("ncclDdaIpcCommInit: OOM allocating host peer table");
-    return ncclSuccess;
+    tableOk = false;
   }
-
-  cudaError_t ddaCe = cudaMemcpy(comm->ddaPeerPtrsHost, h_ptrs, kDdaNranks * sizeof(void*), cudaMemcpyHostToHost);
-  if (ddaCe != cudaSuccess) {
-    free(comm->ddaPeerPtrsHost);
-    comm->ddaPeerPtrsHost = nullptr;
-    CUDACHECKIGNORE(cudaFree(peerDev));
-    delete handler;
-    freeDdaIpcScratch(comm, scratch, bytes);
-    WARN("ncclDdaIpcCommInit: cudaMemcpy(host peer table) failed (%s)", cudaGetErrorString(ddaCe));
-    return ncclSuccess;
-  }
+  tableOk = tableOk && cudaOk(cudaMemcpy(comm->ddaPeerPtrsHost, h_ptrs, kDdaNranks * sizeof(void*),
+                                         cudaMemcpyHostToHost),
+                              "cudaMemcpy(host peer table)");
 
   const int nBlocksMax = ddaMaxNBlocksForScratch();
   auto barrierPair = dda::common::IpcGpuBarrier::mallocAndInit(kDdaNranks, nBlocksMax, comm->rank, comm->bootstrap,
                                                                dda::common::DdaKernelParams{comm->abortFlagDev});
-  // From here on every rank reaches the ready allgather below, so a local failure cannot leave peers on DDA.
   DdaIpcBarrierState* barrierState = nullptr;
   if (!barrierPair.first) {
     WARN("ncclDdaIpcCommInit: IpcGpuBarrier::mallocAndInit failed");
@@ -189,15 +168,9 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
 
   // Zero fills run on their own non-blocking stream and are synced before the ready gather, so they land before any
   // rank's first DDA kernel on any stream. Syncing the null stream would also consume the app's async errors.
-  auto cudaOk = [](cudaError_t err, const char* what) {
-    if (CUDACLEARERROR(err) != cudaSuccess) {
-      WARN("ncclDdaIpcCommInit: %s failed: %s", what, cudaGetErrorString(err));
-      return false;
-    }
-    return true;
-  };
   cudaStream_t zeroStream = nullptr;
-  bool zeroed = cudaOk(cudaStreamCreateWithFlags(&zeroStream, cudaStreamNonBlocking), "zero-fill stream create");
+  bool zeroed =
+    tableOk && cudaOk(cudaStreamCreateWithFlags(&zeroStream, cudaStreamNonBlocking), "zero-fill stream create");
   // Zeroed once, so an LL line never false-matches a first epoch (>= 1); the copy-based paths overwrite per op.
   zeroed = zeroed && cudaOk(cudaMemsetAsync(scratch, 0, bytes, zeroStream), "scratch memset");
   // LL epoch cells (DDA broadcast LL); optional, a failure only disables that tier. Zeroed cells make the first

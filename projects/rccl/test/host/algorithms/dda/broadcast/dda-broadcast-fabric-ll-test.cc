@@ -334,8 +334,8 @@ TEST_F(DdaBroadcastFabricLLMicrotest, Launch_PassesBuffersBytesRanksEpochAndBank
   EXPECT_EQ(comm().addonStopEvent, nullptr);
   EXPECT_EQ(launch.sharedMemBytes, 0u);
   EXPECT_EQ(launch.flags, 0u);
-  ASSERT_EQ(launch.args.size(), 12u);
-  EXPECT_EQ(launch.Arg<char* const*>(0), comm().ddaPeerPtrsDev);
+  ASSERT_EQ(launch.args.size(), 11u);
+  EXPECT_EQ(launch.Arg<char* const*>(0), comm().ddaPeerPtrsDev); // fabric banks start at the scratch bases
   EXPECT_EQ(launch.Arg<char*>(1), kRecvbuff);
   EXPECT_EQ(launch.Arg<const char*>(2), kSendbuff);
   EXPECT_EQ(launch.Arg<size_t>(3), 16u);
@@ -345,17 +345,17 @@ TEST_F(DdaBroadcastFabricLLMicrotest, Launch_PassesBuffersBytesRanksEpochAndBank
   EXPECT_EQ(launch.Arg<uint32_t*>(7), comm().ddaLLEpochDev);
   EXPECT_EQ(launch.Arg<int>(8), comm().ddaLLEpochLen);
   EXPECT_EQ(launch.Arg<size_t>(9), 2048u);
-  EXPECT_EQ(launch.Arg<size_t>(10), 0u); // fabric banks start at the scratch base
-  EXPECT_EQ(launch.Arg<dda::common::DdaKernelParams>(11).flag, comm().abortFlagDev);
+  EXPECT_EQ(launch.Arg<dda::common::DdaKernelParams>(10).flag, comm().abortFlagDev);
 }
 
-// IPC banks live in the region past ddaScratchBytes, sized by it and not by the Simple scratch.
+// IPC banks live in the LL region bases of the peer table (ddaLLRegion), sized by the region, not the Simple scratch.
 TEST_F(DdaBroadcastFabricLLMicrotest, Launch_IpcBanksSitInTheLLRegionPastSimpleScratch) {
   UseIpc();
   const DdaLaunch launch = RunOne(kOtherRoot, 16);
-  ASSERT_EQ(launch.args.size(), 12u);
+  ASSERT_EQ(launch.args.size(), 11u);
+  char* const* const table = static_cast<char* const*>(comm().ddaPeerPtrsDev);
+  EXPECT_EQ(launch.Arg<char* const*>(0), table + nccl_dda_detail::kDdaNranks);
   EXPECT_EQ(launch.Arg<size_t>(9), dda::common::kDdaIpcLLRegionBytes / 2);
-  EXPECT_EQ(launch.Arg<size_t>(10), kIpcSimpleBytes);
 }
 
 TEST_F(DdaBroadcastFabricLLMicrotest, Eligible_IpcPayloadMustFitTheLLRegionBank) {

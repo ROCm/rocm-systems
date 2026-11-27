@@ -8,6 +8,7 @@
 
 #include <gtest/gtest.h>
 
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
@@ -20,6 +21,7 @@
 #include "fakes/hip_fakes.h"
 
 #include "algorithms/dda/dda_init_detail.h"
+#include "algorithms/dda/dda_ll_region.h"
 #include "algorithms/dda/ipc/ipc_gpu_barrier.h"
 #include "algorithms/dda/ipc/ipc_init.h"
 #include "algorithms/dda/ipc/ipc_mem_handler.h"
@@ -29,9 +31,14 @@
 
 namespace {
 bool g_ipcBarrierFails = false;
+int g_ipcBarrierInits = 0;
+// Peer p's scratch base: this rank's own allocation, else a distinct address that init never dereferences.
+void* FakePeerBase(int peer) {
+  return reinterpret_cast<void*>((static_cast<uintptr_t>(peer) + 1) << 32);
+}
 }  // namespace
 
-// The real handler and barrier open HIP IPC handles; these hand back this rank's own pointers.
+// The real handler and barrier open HIP IPC handles; these hand back this rank's own pointer and fake peer bases.
 ncclIpcMemHandler::ncclIpcMemHandler(void* bootstrap, int rank, int nranks)
     : bootstrap_(bootstrap), rank_(rank), nranks_(nranks), memPtrs_(nranks, nullptr), exchanged_(false) {}
 ncclIpcMemHandler::~ncclIpcMemHandler() = default;
@@ -47,14 +54,15 @@ ncclResult_t ncclIpcMemHandler::exchangeMemPtrs() {
   exchanged_ = true;
   return ncclSuccess;
 }
-ncclResult_t ncclIpcMemHandler::getPeerDeviceMemPtr(int, void** outPeerPtr) const {
-  *outPeerPtr = memPtrs_[rank_];
+ncclResult_t ncclIpcMemHandler::getPeerDeviceMemPtr(int peer, void** outPeerPtr) const {
+  *outPeerPtr = peer == rank_ ? memPtrs_[rank_] : FakePeerBase(peer);
   return ncclSuccess;
 }
 
 namespace dda::common {
 std::pair<std::unique_ptr<IpcGpuBarrierResources>, IpcGpuBarrier> IpcGpuBarrier::mallocAndInit(int, int, int, void*,
                                                                                               DdaKernelParams) {
+  ++g_ipcBarrierInits;
   if (g_ipcBarrierFails) return {nullptr, IpcGpuBarrier{}};
   return {std::make_unique<IpcGpuBarrierResources>(), IpcGpuBarrier{}};
 }
@@ -69,6 +77,8 @@ void* const kBootstrap = reinterpret_cast<void*>(0xB007);
 char kGfx950[] = "gfx950";
 hipStream_t const kZeroStream = reinterpret_cast<hipStream_t>(0x5);
 
+// Device peer table: the scratch bases, then the LL region bases.
+constexpr size_t kPeerTableBytes = 2 * kNRanks * sizeof(void*);
 const size_t kEpochBytes =
     nccl_dda_detail::ddaLLEpochCount(kNRanks, nccl_dda_detail::ddaFabricMaxNBlocksForScratch(kCuCount, nullptr)) *
     sizeof(uint32_t);
@@ -77,13 +87,14 @@ class IpcInitMicrotest : public ::testing::Test {
  protected:
   void SetUp() override {
     g_ipcBarrierFails = false;
+    g_ipcBarrierInits = 0;
     g_hipDeviceCanAccessPeer = [](int* canAccess, int, int) {
       *canAccess = 1;
       return hipSuccess;
     };
     g_hipExtMallocWithFlags = [this](void** ptr, size_t size, unsigned) { return Alloc(ptr, size); };
     g_hipMalloc = [this](void** ptr, size_t size) {
-      if (size == kEpochBytes && failEpochAlloc_) {
+      if ((size == kEpochBytes && failEpochAlloc_) || (size == kPeerTableBytes && failPeerTableAlloc_)) {
         *ptr = nullptr;
         return hipErrorOutOfMemory;
       }
@@ -201,6 +212,7 @@ class IpcInitMicrotest : public ::testing::Test {
   };
 
   bool failEpochAlloc_ = false;
+  bool failPeerTableAlloc_ = false;
   bool failEpochFill_ = false;
   bool failScratchFill_ = false;
   hipError_t streamCreateResult_ = hipSuccess;
@@ -299,6 +311,46 @@ TEST_F(IpcInitMicrotest, CommInit_EpochFillFails_PublishesItAndDropsOnlyTheCells
 
   EXPECT_EQ(std::vector<int>{1}, published_);
   ExpectDdaWithoutEpochCells();
+}
+
+// The peer table holds each rank's LL region base after its scratch base; ddaLLRegion addresses them, region-sized.
+TEST_F(IpcInitMicrotest, CommInit_PeerTableAddsTheLLRegionBases) {
+  EXPECT_EQ(ncclSuccess, ncclDdaIpcCommInit(comm_.get()));
+
+  ASSERT_NE(nullptr, comm_->ddaPeerPtrsDev);
+  ASSERT_NE(nullptr, comm_->ddaPeerPtrsHost);
+  char* const* table = static_cast<char* const*>(comm_->ddaPeerPtrsDev);
+  for (int r = 0; r < kNRanks; ++r) {
+    // Distinct per-peer bases, so an entry built from another rank's base fails.
+    char* base = static_cast<char*>(r == kRank ? comm_->ddaScratch : FakePeerBase(r));
+    EXPECT_EQ(base, table[r]) << "rank " << r;
+    EXPECT_EQ(base, static_cast<char*>(comm_->ddaPeerPtrsHost[r])) << "rank " << r;
+    EXPECT_EQ(base + comm_->ddaScratchBytes, table[kNRanks + r]) << "rank " << r;
+  }
+  const nccl_dda_detail::DdaLLRegion region = nccl_dda_detail::ddaLLRegion(comm_.get());
+  EXPECT_EQ(static_cast<void**>(comm_->ddaPeerPtrsDev) + kNRanks, region.peers);
+  EXPECT_EQ(dda::common::ddaBankSize(dda::common::kDdaIpcLLRegionBytes), region.bank);
+}
+
+// The init fill zeroes the whole LL region, so no LL line left in reused memory can match a first flag.
+TEST_F(IpcInitMicrotest, CommInit_ZeroFillCoversTheLLRegion) {
+  EXPECT_EQ(ncclSuccess, ncclDdaIpcCommInit(comm_.get()));
+
+  ASSERT_NE(nullptr, comm_->ddaPeerPtrsDev);
+  const char* region = static_cast<char* const*>(comm_->ddaPeerPtrsDev)[kNRanks + kRank];
+  const std::vector<char> zeros(dda::common::kDdaIpcLLRegionBytes, 0);
+  EXPECT_EQ(0, std::memcmp(zeros.data(), region, zeros.size()));
+}
+
+// A failure after the pointer exchange still joins the barrier exchange and the ready gather, so no peer hangs.
+TEST_F(IpcInitMicrotest, CommInit_PeerTableAllocFails_StillJoinsTheCollectives) {
+  failPeerTableAlloc_ = true;
+
+  EXPECT_EQ(ncclSuccess, ncclDdaIpcCommInit(comm_.get()));
+
+  EXPECT_EQ(1, g_ipcBarrierInits);
+  EXPECT_EQ(std::vector<int>{0}, published_);
+  ExpectNoDda();
 }
 
 TEST_F(IpcInitMicrotest, CommInit_LocalEpochAllocFails_PublishesItAndDropsOnlyTheCells) {
