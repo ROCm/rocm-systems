@@ -25,14 +25,8 @@
 namespace {
 
 using nccl_dda_detail::DdaIpcBarrierState;
-using nccl_dda_detail::ddaMaxNBlocksForScratch;
+using nccl_dda_detail::ddaAllGatherIpcGeom;
 using nccl_dda_detail::kDdaNranks;
-
-// Single source of the launch geometry: grid/block for a byte payload. The
-// kernel is instantiated for int8_t, so `bytes` is the per-block element count.
-static inline std::pair<dim3, dim3> ddaAllGatherIpcGeom(size_t bytes) {
-  return dda::common::getGridAndBlockDims(bytes, 1, ddaMaxNBlocksForScratch());
-}
 
 template <typename T>
 static ncclResult_t ncclAllGatherDdaIpcTyped(const void* sendbuff, void* recvbuff, size_t sendcount, ncclComm* comm,

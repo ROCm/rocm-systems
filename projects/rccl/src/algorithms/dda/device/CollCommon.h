@@ -139,12 +139,31 @@ static inline __device__ uint4 vecElementAdd(const uint4& a, const uint4& b) {
   return res;
 }
 
-template <typename T>
+// One 16-byte unit. A side that may sit off 16-byte alignment goes through __builtin_memcpy, as
+// ddaLL128User{Load,Store}16B<false> do; an aligned side keeps the 16-byte access.
+template <bool kSrcAligned, bool kDstAligned>
+static inline __device__ void ddaCopy16B(const void* src, void* dst) {
+  uint4 v;
+  if constexpr (kSrcAligned) {
+    v = *reinterpret_cast<const uint4*>(src);
+  } else {
+    __builtin_memcpy(&v, src, sizeof(v));
+  }
+  if constexpr (kDstAligned) {
+    *reinterpret_cast<uint4*>(dst) = v;
+  } else {
+    __builtin_memcpy(dst, &v, sizeof(v));
+  }
+}
+
+// kSrcAligned / kDstAligned = false: that buffer may sit off 16-byte alignment (the DDA two-phase Broadcast's user
+// buffers). The 16-byte units still tile the range.
+template <typename T, bool kSrcAligned = true, bool kDstAligned = true>
 static inline __device__ void copyFromSrcToDest(const T* __restrict__ srcbuff, T* __restrict__ destbuff,
                                                 const size_t idxStart, const size_t idxEnd, const size_t idxStride) {
   static_assert(is_supported_type_v<T>, "dda: unsupported element type");
   for (size_t idx = idxStart; idx < idxEnd; idx += idxStride) {
-    *reinterpret_cast<uint4*>(&destbuff[idx]) = reinterpret_cast<const uint4*>(&srcbuff[idx])[0];
+    ddaCopy16B<kSrcAligned, kDstAligned>(&srcbuff[idx], &destbuff[idx]);
   }
 }
 
@@ -188,8 +207,8 @@ static inline __device__ void reduceScatter(T* const* __restrict__ ipcbuffs, T* 
 }
 
 // Unified all-gather helper for both the IPC and fabric paths. See reduceScatter
-// above for the NRANKS_CT / nRanksRuntime / unroll semantics.
-template <typename T, int NRANKS_CT>
+// above for the NRANKS_CT / nRanksRuntime / unroll semantics. kDstAligned as in copyFromSrcToDest.
+template <typename T, int NRANKS_CT, bool kDstAligned = true>
 static inline __device__ void allGather(T* const* __restrict__ ipcbuffs, T* __restrict__ destbuff, int selfRank,
                                         int nRanksRuntime, const size_t idxStart, const size_t idxEnd,
                                         const size_t idxStride, bool enable_offset) {
@@ -207,7 +226,7 @@ static inline __device__ void allGather(T* const* __restrict__ ipcbuffs, T* __re
       } else {
         srcIdx = idx;
       }
-      *reinterpret_cast<uint4*>(&destbuff[destIdx]) = reinterpret_cast<const uint4*>(&ipcbuffs[srcRank][srcIdx])[0];
+      ddaCopy16B<true, kDstAligned>(&ipcbuffs[srcRank][srcIdx], &destbuff[destIdx]);
     }
   }
 }
@@ -229,8 +248,8 @@ inline bool ddaAlltoAllSingleBlockGrid(size_t count, int typeSize) {
   return count < elementsPerThread * kThreadsPerBlock;
 }
 
-// copyFromSrcToDest loads user buffers as uint4, so both pointers have to be
-// 16-byte aligned. Shared by the IPC eligibility checks.
+// copyFromSrcToDest's default (aligned) form loads user buffers as uint4, so both
+// pointers have to be 16-byte aligned. Shared by the IPC eligibility checks.
 inline bool ddaUserBuffers16ByteAligned(const void* sendbuff, const void* recvbuff) {
   return (reinterpret_cast<uintptr_t>(sendbuff) % 16) == 0 &&
          (reinterpret_cast<uintptr_t>(recvbuff) % 16) == 0;

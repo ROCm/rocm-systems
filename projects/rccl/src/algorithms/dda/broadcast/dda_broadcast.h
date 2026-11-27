@@ -35,4 +35,12 @@ ncclResult_t ncclBroadcastDdaFabricLL(const void* sendbuff, void* recvbuff, size
 ncclResult_t ncclBroadcastDdaFabricLL128(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
                                          int root, ncclComm* comm, cudaStream_t stream);
 
+// Two-phase IPC Broadcast (single node, 8 ranks): root scatters 1/8 slices, then the DDA all-gather body runs.
+// Its sizes are whole units of 8 ranks x 16 B, so each slice is whole 16-byte units and the all-gather needs no tail.
+constexpr size_t kDdaBcIpcGranuleBytes = 128;
+bool ncclBroadcastDdaIpcEligible(ncclComm* comm, size_t count, ncclDataType_t datatype);
+uint32_t ncclBroadcastDdaIpcBlocks(ncclComm* comm, size_t count, ncclDataType_t datatype);
+ncclResult_t ncclBroadcastDdaIpc(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype, int root,
+                                 ncclComm* comm, cudaStream_t stream);
+
 #endif

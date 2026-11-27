@@ -16,6 +16,7 @@
 #include <cstdlib>
 #include <memory>
 #include <new>
+#include <utility>
 
 #define DDA_IPC_MAXBLOCKS 24
 #define DDA_IPC_BUFFER_SIZE 268435456
@@ -94,6 +95,12 @@ struct DdaFabricBarrierState {
 inline int ddaMaxNBlocksForScratch() {
   unsigned maxBlocks = DDA_IPC_MAXBLOCKS;
   return static_cast<int>(maxBlocks);
+}
+
+// Single source of the IPC all-gather launch geometry (AllGather, and the two-phase Broadcast at one slice per rank):
+// grid/block for a byte payload. The kernels are instantiated for int8_t, so `bytes` is the per-block element count.
+inline std::pair<dim3, dim3> ddaAllGatherIpcGeom(size_t bytes) {
+  return dda::common::getGridAndBlockDims(bytes, 1, ddaMaxNBlocksForScratch());
 }
 
 struct DdaFabricMaxBlocksOverride {

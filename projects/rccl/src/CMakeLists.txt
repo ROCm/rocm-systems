@@ -43,6 +43,7 @@ set(SRC_FILES
   algorithms/dda/alltoall/dda_alltoall_ipc.cu
   algorithms/dda/broadcast/dda_broadcast_fabric_ll.cu
   algorithms/dda/broadcast/dda_broadcast_fabric_ll128.cu
+  algorithms/dda/broadcast/dda_broadcast_ipc.cu
   algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric.cu
   algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric_ll.cu
   algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric_ll128.cu
@@ -180,6 +181,7 @@ set(SRC_FILES
   algorithms/dda/alltoall/alltoall_dda_fabric_ll128.h
   algorithms/dda/broadcast/broadcast_dda_fabric_ll.h
   algorithms/dda/broadcast/broadcast_dda_fabric_ll128.h
+  algorithms/dda/broadcast/broadcast_dda_ipc.h
   algorithms/dda/reduce_scatter/reduce_scatter_dda.h
   algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric.h
   algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric_ll.h
@@ -1083,6 +1085,7 @@ if(ENABLE_DEVICE_LINKER)
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_reduce_scatter_fabric_ll128\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_broadcast_fabric_ll\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_broadcast_fabric_ll128\\.cu\\.cpp$")
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_broadcast_ipc\\.cu\\.cpp$")
   # ce_reduce.cc is now pure host code (a dispatcher calling into the
   # per-instantiation launchers generated under gensrc/ce_reduce/, which are
   # excluded above by the "gensrc/.*\\.cpp$" filter and compiled separately
