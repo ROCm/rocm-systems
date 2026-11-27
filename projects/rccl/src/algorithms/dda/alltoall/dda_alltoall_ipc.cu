@@ -63,9 +63,13 @@ static ncclResult_t ncclAllToAllDdaIpcTyped(const void* sendbuff, void* recvbuff
 
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
   if (dda::common::ddaAlltoAllSingleBlockGrid(count, sizeof(T))) {
-    hipExtLaunchKernelGGL((dda::common::ddaAllToAllIpc<T, kDdaNranks, false, true>), grid, block, 0, stream,
-                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff), count,
-                          static_cast<const T*>(sendbuff), comm->rank, barrierHost);
+    // In-kernel staging of the whole send buffer: banked whenever it fits a bank.
+    bool banked = false;
+    T** buffs = nccl_dda_detail::ddaIpcStagingTable(barrierState, d_ipcbuffs, totalBytes, &banked);
+    hipExtLaunchKernelGGL((banked ? &dda::common::ddaAllToAllIpc<T, kDdaNranks, false, true, true>
+                                  : &dda::common::ddaAllToAllIpc<T, kDdaNranks, false, true>),
+                          grid, block, 0, stream, /*startEvent=*/nullptr, stopEvent, /*flags=*/0, buffs,
+                          static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, barrierHost);
   } else {
     CUDACHECK(cudaMemcpyAsync(comm->ddaScratch, sendbuff, totalBytes, cudaMemcpyDeviceToDevice, stream));
     hipExtLaunchKernelGGL((dda::common::ddaAllToAllIpc<T, kDdaNranks, false, false>), grid, block, 0, stream,

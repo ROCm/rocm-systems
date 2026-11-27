@@ -77,9 +77,14 @@ static ncclResult_t ncclAllReduceDdaIpcTyped(const void* sendbuff, void* recvbuf
                           /*startEvent=*/nullptr, stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff), count,
                           static_cast<const T*>(sendbuff), comm->rank, barrierHost, nullptr);
   } else {
-    hipExtLaunchKernelGGL((dda::common::ddaAllReduceFlatIpc<T, kDdaNranks, false>), grid, block, 0, stream,
-                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff), count,
-                          static_cast<const T*>(sendbuff), comm->rank, barrierHost, nullptr);
+    // The flat kernel stages its whole input in the kernel, so it is banked whenever the message fits a bank.
+    bool banked = false;
+    T** buffs = nccl_dda_detail::ddaIpcStagingTable(barrierState, d_ipcbuffs, sizeBytes, &banked);
+    hipExtLaunchKernelGGL((banked ? &dda::common::ddaAllReduceFlatIpc<T, kDdaNranks, false, true>
+                                  : &dda::common::ddaAllReduceFlatIpc<T, kDdaNranks, false>),
+                          grid, block, 0, stream, /*startEvent=*/nullptr, stopEvent, /*flags=*/0, buffs,
+                          static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, barrierHost,
+                          nullptr);
   }
 
   CUDACHECK(cudaGetLastError());

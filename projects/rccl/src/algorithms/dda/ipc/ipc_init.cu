@@ -14,6 +14,8 @@
 #include "algorithms/dda/dda_init_detail.h"
 #include "algorithms/dda/ipc/ipc_mem_handler.h"
 #include "bootstrap.h"
+#include "param.h"
+#include "rccl_arch_thresholds.h"
 
 #include <cuda_runtime.h>
 
@@ -23,6 +25,9 @@
 using nccl_dda_detail::DdaIpcBarrierState;
 using nccl_dda_detail::ddaMaxNBlocksForScratch;
 using nccl_dda_detail::kDdaNranks;
+
+// Banked DDA IPC scratch: unset (-1) follows the arch table (ddaIpcBankedScratch), 0 off, any other non-zero value on.
+RCCL_PARAM(DdaIpcBankedScratch, "DDA_IPC_BANKED_SCRATCH", -1);
 
 #define HIP_CALL(cmd) \
   do { \
@@ -130,20 +135,24 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
     return true;
   };
 
-  // Device peer table: [0, kDdaNranks) scratch bases, [kDdaNranks, 2 * kDdaNranks) LL region bases (ddaLLRegion).
+  // Device peer table, kDdaNranks entries each: scratch bases, LL region bases (ddaLLRegion), staging banks 0 and 1.
   void* peerDev = nullptr;
-  void* h_ptrs[2 * kDdaNranks] = {};
+  void* h_ptrs[nccl_dda_detail::kDdaIpcPeerTableEntries] = {};
   // From here a local failure still joins the barrier exchange and the ready allgather, as its peers do.
-  bool tableOk = cudaOk(cudaMalloc(&peerDev, 2 * kDdaNranks * sizeof(void*)), "cudaMalloc(peer table)");
+  bool tableOk = cudaOk(cudaMalloc(&peerDev, sizeof(h_ptrs)), "cudaMalloc(peer table)");
   for (int i = 0; tableOk && i < kDdaNranks; ++i) {
     if (handler->getPeerDeviceMemPtr(i, &h_ptrs[i]) != ncclSuccess) {
       WARN("ncclDdaIpcCommInit: getPeerDeviceMemPtr failed");
       tableOk = false;
     } else {
       h_ptrs[kDdaNranks + i] = static_cast<char*>(h_ptrs[i]) + (bytes - dda::common::kDdaIpcLLRegionBytes);
+      for (int bank = 0; bank < 2; ++bank) {
+        h_ptrs[nccl_dda_detail::kDdaIpcStagingBankPeerIndex + bank * kDdaNranks + i] =
+          static_cast<char*>(h_ptrs[i]) + nccl_dda_detail::ddaIpcStagingBankOffset(bytes, bank);
+      }
     }
   }
-  tableOk = tableOk && cudaOk(cudaMemcpy(peerDev, h_ptrs, 2 * kDdaNranks * sizeof(void*), cudaMemcpyHostToDevice),
+  tableOk = tableOk && cudaOk(cudaMemcpy(peerDev, h_ptrs, sizeof(h_ptrs), cudaMemcpyHostToDevice),
                               "cudaMemcpy(peer table)");
   if (tableOk && ncclCalloc(&comm->ddaPeerPtrsHost, kDdaNranks) != ncclSuccess) {
     WARN("ncclDdaIpcCommInit: OOM allocating host peer table");
@@ -190,14 +199,21 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
     epochDev = nullptr;
   }
 
+  const bool archBanked = comm->archThresholds != nullptr && comm->archThresholds->ddaIpcBankedScratch;
+  const bool wantBanked = nccl_dda_detail::ddaIpcBankedScratchWanted(rcclParamDdaIpcBankedScratch(), archBanked);
+
   // Rank-uniform outcome, else ranks pick different backends and hang. 0: no DDA IPC, 1: no LL epoch cells, 2: all.
   int ready = (barrierState == nullptr || !zeroed) ? 0 : (epochDev == nullptr ? 1 : 2);
+  bool banked = false;
   std::vector<int> allReady(kDdaNranks, 0);
-  allReady[comm->rank] = ready;
+  allReady[comm->rank] = nccl_dda_detail::ddaIpcReadyWord(ready, wantBanked);  // banks only if every rank wants them
   if (bootstrapAllGather(comm->bootstrap, allReady.data(), sizeof(int)) != ncclSuccess) {
     ready = 0;
   } else {
-    ready = *std::min_element(allReady.begin(), allReady.end());
+    nccl_dda_detail::ddaIpcAgreeReadyWords(allReady.data(), kDdaNranks, &ready, &banked);
+    if (wantBanked && !banked) {
+      WARN("ncclDdaIpcCommInit: a rank turned banked scratch off; DDA IPC runs without banked scratch");
+    }
   }
   if (ready < 2 && epochDev != nullptr) {
     CUDACHECKIGNORE(cudaFree(epochDev));
@@ -218,16 +234,21 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
     ATTN("LL epoch cells unavailable on a rank; DDA IPC LL tiers (Broadcast, AR/RS one-shots) disabled");
   }
 
+  barrierState->scratchAllocBytes = bytes;
+  void** const peerTable = static_cast<void**>(peerDev);
+  barrierState->stagingBankPeerPtrsDev = banked ? peerTable + nccl_dda_detail::kDdaIpcStagingBankPeerIndex : nullptr;
+  barrierState->stagingBankBytes = banked ? nccl_dda_detail::kDdaIpcStagingBankBytes : 0;
+
   comm->ddaIpcMemHandler = handler;
   comm->ddaScratch = scratch;
-  // The LL region above this stays free of Simple staging (dda::common::kDdaIpcLLRegionBytes).
-  comm->ddaScratchBytes = bytes - dda::common::kDdaIpcLLRegionBytes;
+  // Simple staging and CE copies stop below the staging banks and the LL region (ddaIpcPayloadBytes).
+  comm->ddaScratchBytes = nccl_dda_detail::ddaIpcPayloadBytes(bytes, banked);
   comm->ddaPeerPtrsDev = peerDev;
   comm->ddaIpcBarrierState = barrierState;
   comm->ddaLLEpochDev = epochDev;
   comm->ddaLLEpochLen = epochDev != nullptr ? (int)epochLen : 0;
-  INFO(NCCL_INIT, "ncclDdaIpcCommInit: scratch %zu bytes, IpcGpuBarrier nBlocks=%d, peer IPC table on device", bytes,
-       nBlocksMax);
+  INFO(NCCL_INIT, "ncclDdaIpcCommInit: scratch %zu bytes, IpcGpuBarrier nBlocks=%d banked=%d, peer table on device",
+       bytes, nBlocksMax, banked);
   return ncclSuccess;
 }
 
@@ -279,7 +300,11 @@ ncclResult_t ncclDdaIpcCommFini(ncclComm* comm) {
   ncclResult_t closeResult = ncclSuccess;
   NCCLCHECKIGNORE(ncclDdaIpcCommClosePeerMappings(comm), closeResult);
 
+  size_t scratchAllocBytes = comm->ddaScratchBytes + dda::common::kDdaIpcLLRegionBytes;
   if (comm->ddaIpcBarrierState != nullptr) {
+    if (comm->ddaIpcBarrierState->scratchAllocBytes != 0) {
+      scratchAllocBytes = comm->ddaIpcBarrierState->scratchAllocBytes;
+    }
     delete comm->ddaIpcBarrierState;
     comm->ddaIpcBarrierState = nullptr;
   }
@@ -294,7 +319,7 @@ ncclResult_t ncclDdaIpcCommFini(ncclComm* comm) {
     delete comm->ddaIpcMemHandler;
     comm->ddaIpcMemHandler = nullptr;
   }
-  freeDdaIpcScratch(comm, comm->ddaScratch, comm->ddaScratchBytes + dda::common::kDdaIpcLLRegionBytes);
+  freeDdaIpcScratch(comm, comm->ddaScratch, scratchAllocBytes);
   comm->ddaScratch = nullptr;
   comm->ddaScratchBytes = 0;
   return ncclSuccess;

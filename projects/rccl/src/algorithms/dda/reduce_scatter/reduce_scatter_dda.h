@@ -14,13 +14,17 @@
 
 namespace dda::common {
 
-template <typename T, int NRANKS, bool hasAcc, bool kCopyInKernel = false>
+// kBanked (kCopyInKernel only): stage in this call's staging bank, no trailing barrier; ipcbuffs then holds both
+// banks' peer pointers.
+template <typename T, int NRANKS, bool hasAcc, bool kCopyInKernel = false, bool kBanked = false>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
 #endif
   __global__ void ddaReduceScatterIpc(T* const* __restrict__ ipcbuffs, T* __restrict__ recvbuff, size_t count,
                                       const T* __restrict__ sendbuff, int selfRank, const IpcGpuBarrier barrier) {
+  static_assert(kCopyInKernel || !kBanked, "a copy before the launch cannot follow the device-side bank");
   bool barrierAborted = false; // sticky abort state, see IpcGpuBarrier::syncOnSameBlockIdx
+  T* const* bufs = barrier.stagingBuffers<kBanked>(ipcbuffs);
   constexpr auto countPerThread = sizeof(uint4) / sizeof(T);
   const auto gtIdx = blockDim.x * blockIdx.x + threadIdx.x;
 
@@ -35,17 +39,19 @@ __launch_bounds__(512)
 #pragma unroll NRANKS
     for (int s = 0; s < NRANKS; ++s) {
       const size_t off = static_cast<size_t>(s) * count;
-      copyFromSrcToDest<T>(sendbuff + off, ipcbuffs[selfRank] + off, idxStart, idxEnd, idxStride);
+      copyFromSrcToDest<T>(sendbuff + off, bufs[selfRank] + off, idxStart, idxEnd, idxStride);
     }
-    barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>(barrierAborted);
+    barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */, kBanked>(
+      barrierAborted);
   } else {
     // Host enqueued cudaMemcpyAsync into ddaScratch before launch.
     barrier.syncOnSameBlockIdx<false /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>(barrierAborted);
   }
 
-  reduceScatter<T, NRANKS, hasAcc>(ipcbuffs, recvbuff, nullptr, selfRank, NRANKS, idxStart, idxEnd, idxStride, 0);
+  reduceScatter<T, NRANKS, hasAcc>(bufs, recvbuff, nullptr, selfRank, NRANKS, idxStart, idxEnd, idxStride, 0);
 
-  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>(barrierAborted);
+  // Peers finish reading this rank's staging buffer before its next call reuses it; a banked call skips it.
+  barrier.syncAfterPeerReads<kBanked>(barrierAborted);
 }
 
 } // namespace dda::common

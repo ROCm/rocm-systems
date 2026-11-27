@@ -295,6 +295,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   // Zero: keep tuning_model_11's per-rank broadcast ranges.
   .bcRingLLMaxBytes = 0,
   .bcRingLL128MaxBytes = 0,
+  .ddaIpcBankedScratch = false,
 };
 
 // gfx1250 in DPX mode (each GPU split into two partitions), picked by
@@ -550,6 +551,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
   // Total message bytes at every node count. See rcclArchThresholds.
   .bcRingLLMaxBytes = 16ULL*1024,
   .bcRingLL128MaxBytes = 512ULL*1024*1024,
+  .ddaIpcBankedScratch = false,
 };
 
 // gfx950: DDA-IPC cap is 64 MiB for AG, 128 MiB for AR/RS and 4 MiB for AlltoAll. No fabric LL/LL128.
@@ -703,6 +705,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx950 = {
   .forceCeScratch = true,
   .bcRingLLMaxBytes = 0,
   .bcRingLL128MaxBytes = 0,
+  .ddaIpcBankedScratch = true,
 };
 
 // gfx942: DDA-IPC cap is 8 MiB for AR/AG/RS and 4 MiB for AlltoAll. No fabric LL/LL128.
@@ -856,6 +859,8 @@ static const rcclArchThresholds rcclArchThresholds_gfx942 = {
   .forceCeScratch = true,
   .bcRingLLMaxBytes = 0,
   .bcRingLL128MaxBytes = 0,
+  // Off until an A/B on gfx942; RCCL_DDA_IPC_BANKED_SCRATCH=1 turns it on.
+  .ddaIpcBankedScratch = false,
 };
 
 bool rcclWindowFits(size_t totalBytes, size_t minBytes, size_t maxBytes) {

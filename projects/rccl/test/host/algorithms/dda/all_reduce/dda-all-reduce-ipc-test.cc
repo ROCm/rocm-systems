@@ -12,6 +12,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <vector>
 
 #include "../common/DdaIpcTestHelpers.hpp"
@@ -21,6 +22,7 @@
 
 namespace {
 
+using dda::common::IpcGpuBarrier;
 using nccl_dda_detail::DdaIpcBarrierState;
 using nccl_dda_detail::kDdaNranks;
 using RcclUnitTesting::DdaIpcMockComm;
@@ -35,10 +37,32 @@ constexpr size_t kFp32CountCopiedBeforeTree = (8u << 20) / sizeof(float);
 void* const kSendbuff = reinterpret_cast<void*>(0x10);
 void* const kRecvbuff = reinterpret_cast<void*>(0x20);
 
-// Never destroyed: ~DdaIpcBarrierState would pull in IPC resource destructors this binary does not link.
+// Never destroyed: ~DdaIpcBarrierState pulls in IPC destructors this binary does not link. Filled to check the launch.
 DdaIpcBarrierState* BarrierState() {
-  static DdaIpcBarrierState* const state = new DdaIpcBarrierState();
+  static DdaIpcBarrierState* const state = [] {
+    auto* s = new DdaIpcBarrierState();
+    std::memset(static_cast<void*>(&s->barrierHost), 0xa5, sizeof(s->barrierHost));
+    return s;
+  }();
   return state;
+}
+
+void* const kStagingBankPeerPtrsDev = reinterpret_cast<void*>(0xBA0);
+
+// Banked scratch on, with a bank that holds exactly the flat/tree threshold. The bank table pointer is only compared.
+DdaIpcBarrierState* BankedBarrierState() {
+  static DdaIpcBarrierState* const state = [] {
+    auto* s = new DdaIpcBarrierState();
+    std::memset(static_cast<void*>(&s->barrierHost), 0x5b, sizeof(s->barrierHost));
+    s->stagingBankBytes = kFlatTreeThresholdBytes;
+    s->stagingBankPeerPtrsDev = kStagingBankPeerPtrsDev;
+    return s;
+  }();
+  return state;
+}
+
+bool SameBarrier(const IpcGpuBarrier& a, const IpcGpuBarrier& b) {
+  return std::memcmp(&a, &b, sizeof(IpcGpuBarrier)) == 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -173,6 +197,7 @@ struct Launch {
   hipStream_t stream;
   hipEvent_t stopEvent;
   size_t memcpysBefore;
+  IpcGpuBarrier barrier;
 };
 
 class DdaAllReduceIpcDispatchTest : public ::testing::Test {
@@ -188,7 +213,8 @@ class DdaAllReduceIpcDispatchTest : public ::testing::Test {
                                   hipEvent_t, hipEvent_t stopEvent, int) {
       launches_.push_back({kernel, grid.x, block.x, *static_cast<void**>(args[0]), *static_cast<size_t*>(args[2]),
                            *static_cast<const void**>(args[3]), *static_cast<void**>(args[1]),
-                           *static_cast<int*>(args[4]), stream, stopEvent, g_hipMemcpyAsyncArgs.size()});
+                           *static_cast<int*>(args[4]), stream, stopEvent, g_hipMemcpyAsyncArgs.size(),
+                           *static_cast<IpcGpuBarrier*>(args[5])});
       return hipSuccess;
     };
     mock_.comm.ddaIpcBarrierState = BarrierState();
@@ -209,6 +235,11 @@ class DdaAllReduceIpcDispatchTest : public ::testing::Test {
   template <typename T>
   static const void* Tree() {
     return reinterpret_cast<const void*>(&dda::common::ddaAllReduceTreeIpc<T, kDdaNranks, false>);
+  }
+
+  template <typename T>
+  static const void* BankedFlat() {
+    return reinterpret_cast<const void*>(&dda::common::ddaAllReduceFlatIpc<T, kDdaNranks, false, true>);
   }
 
   const hipEvent_t kStopEvent = reinterpret_cast<hipEvent_t>(0x77);
@@ -274,6 +305,7 @@ TEST_F(DdaAllReduceIpcDispatchTest, LaunchCarriesBuffersCountRankAndTakesStopEve
   EXPECT_EQ(kStream, launches_[0].stream);
   EXPECT_EQ(kStopEvent, launches_[0].stopEvent);
   EXPECT_EQ(nullptr, mock_.comm.addonStopEvent);
+  EXPECT_TRUE(SameBarrier(BarrierState()->barrierHost, launches_[0].barrier));
 }
 
 TEST_F(DdaAllReduceIpcDispatchTest, PayloadAtThresholdRunsFlatWithoutCopy) {
@@ -341,6 +373,43 @@ TEST_F(DdaAllReduceIpcDispatchTest, LaunchGeometryFollowsTheDispatchedElementSiz
 TEST_F(DdaAllReduceIpcDispatchTest, LaunchErrorIsReported) {
   g_hipGetLastError = []() { return hipErrorLaunchFailure; };
   EXPECT_EQ(ncclUnhandledCudaError, Run(16, ncclFloat32));
+}
+
+TEST_F(DdaAllReduceIpcDispatchTest, BankedScratchBanksTheFlatKernelOnTheBankTable) {
+  mock_.comm.ddaIpcBarrierState = BankedBarrierState();
+  ASSERT_EQ(ncclSuccess, Run(kFp32CountAtThreshold, ncclFloat32));
+  ASSERT_EQ(1u, launches_.size());
+  EXPECT_EQ(BankedFlat<float>(), launches_[0].kernel);
+  EXPECT_NE(Flat<float>(), launches_[0].kernel);
+  EXPECT_EQ(kStagingBankPeerPtrsDev, launches_[0].ipcbuffs);
+  EXPECT_EQ(0, g_hipMemcpyAsyncCalls);
+  EXPECT_TRUE(SameBarrier(BankedBarrierState()->barrierHost, launches_[0].barrier));
+}
+
+TEST_F(DdaAllReduceIpcDispatchTest, BankedScratchKeepsTheHostCopiedTreeOnTheScratchTable) {
+  mock_.comm.ddaIpcBarrierState = BankedBarrierState();
+  ASSERT_EQ(ncclSuccess, Run(kFp32CountCopiedBeforeTree, ncclFloat32));
+  ASSERT_EQ(1u, launches_.size());
+  EXPECT_EQ(Tree<float>(), launches_[0].kernel);
+  EXPECT_EQ(mock_.comm.ddaPeerPtrsDev, launches_[0].ipcbuffs);
+  ASSERT_EQ(1u, g_hipMemcpyAsyncArgs.size());
+  EXPECT_EQ(mock_.comm.ddaScratch, g_hipMemcpyAsyncArgs[0].dst);
+}
+
+TEST_F(DdaAllReduceIpcDispatchTest, BankedScratchFlatPayloadAboveABankRunsTheUnbankedKernel) {
+  mock_.comm.ddaIpcBarrierState = BankedBarrierState();
+  ASSERT_EQ(ncclSuccess, Run(kFp32CountAtThreshold + 4, ncclFloat32));
+  ASSERT_EQ(1u, launches_.size());
+  EXPECT_EQ(Flat<float>(), launches_[0].kernel);
+  EXPECT_EQ(mock_.comm.ddaPeerPtrsDev, launches_[0].ipcbuffs);
+}
+
+TEST_F(DdaAllReduceIpcDispatchTest, BankedScratchBanksTheFlatKernelOfTheDispatchedType) {
+  mock_.comm.ddaIpcBarrierState = BankedBarrierState();
+  ASSERT_EQ(ncclSuccess, Run(kFp16CountAtThreshold, ncclBfloat16));
+  ASSERT_EQ(1u, launches_.size());
+  EXPECT_EQ(BankedFlat<bf16>(), launches_[0].kernel);
+  EXPECT_EQ(kStagingBankPeerPtrsDev, launches_[0].ipcbuffs);
 }
 
 // ---------------------------------------------------------------------------

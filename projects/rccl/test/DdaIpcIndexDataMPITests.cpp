@@ -42,6 +42,7 @@
 #include "ResourceGuards.hpp"
 #include "TestChecks.hpp"
 #include "algorithms/dda/all_reduce/dda_all_reduce.h"
+#include "algorithms/dda/dda_init_detail.h"
 #include "algorithms/dda/reduce_scatter/dda_reduce_scatter.h"
 #include "comm.h"
 #include "rccl_common.h"
@@ -401,7 +402,7 @@ TEST_F(DdaIpcMPI_IndexData, LLIgnoresStaleSimpleScratch) {
   if (!ceSkip.empty()) {
     GTEST_SKIP() << ceSkip;
   }
-  // The flat AllReduce stages its whole send buffer at the scratch base. Sized off the flat/tree cutoff so a retune
+  // The flat AllReduce stages its whole send buffer in scratch. Sized off the flat/tree cutoff so a retune
   // of it keeps the flat kernel; it must cover bank 0 of the Broadcast: one 16 B token line per rank, then one 16 B
   // line per 8 B of data.
   constexpr size_t kArCount = kFlatTreeThresholdBytes * 3 / 4 / sizeof(float);
@@ -445,11 +446,21 @@ TEST_F(DdaIpcMPI_IndexData, LLIgnoresStaleSimpleScratch) {
     ASSERT_MPI_EQ(ncclSuccess, ncclAllReduce(arSend, arRecv, kArCount, ncclFloat32, ncclSum, getActiveCommunicator(),
                                              getActiveStream()));
     ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
-    // The poison must sit where a bank at the scratch base would be, or this test checks nothing.
-    std::vector<uint32_t> staged(kBank0Bytes / sizeof(uint32_t));
-    ASSERT_MPI_EQ(hipSuccess, hipMemcpy(staged.data(), comm->ddaScratch, kBank0Bytes, hipMemcpyDeviceToHost));
-    const size_t firstOff = std::find_if(staged.begin(), staged.end(), [=](uint32_t w) { return w != flag; }) -
-                            staged.begin();
+    // The poison must sit where the call staged it, or this test checks nothing: the scratch base or a staging bank.
+    const char* const base = static_cast<const char*>(comm->ddaScratch);
+    const nccl_dda_detail::DdaIpcBarrierState* state = comm->ddaIpcBarrierState;
+    std::vector<const char*> stagingBases{base};
+    if (state->stagingBankPeerPtrsDev != nullptr) {
+      stagingBases = {base + nccl_dda_detail::ddaIpcStagingBankOffset(state->scratchAllocBytes, 0),
+                      base + nccl_dda_detail::ddaIpcStagingBankOffset(state->scratchAllocBytes, 1)};
+    }
+    std::vector<uint32_t> staged(kArCount);  // every word the call staged
+    size_t firstOff = 0;
+    for (const char* stagingBase : stagingBases) {
+      ASSERT_MPI_EQ(hipSuccess, hipMemcpy(staged.data(), stagingBase, kArCount * sizeof(float), hipMemcpyDeviceToHost));
+      firstOff = std::max<size_t>(
+        firstOff, std::find_if(staged.begin(), staged.end(), [=](uint32_t w) { return w != flag; }) - staged.begin());
+    }
     const bool poisoned = firstOff == staged.size();
     EXPECT_TRUE(poisoned) << "Rank " << rank_ << ": " << tag << ": scratch word " << firstOff << " is not the flag";
     expectAllRanksOk(poisoned, tag + " poison");

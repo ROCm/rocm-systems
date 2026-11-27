@@ -14,7 +14,8 @@
 
 namespace dda::common {
 
-template <typename T, int NRANKS, bool hasAcc>
+// kBanked: stage in this call's staging bank, no trailing barrier; ipcbuffs then holds both banks' peer pointers.
+template <typename T, int NRANKS, bool hasAcc, bool kBanked = false>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
 #endif
@@ -22,6 +23,7 @@ __launch_bounds__(512)
                                       const T* __restrict__ sendbuff, int selfRank, const IpcGpuBarrier barrier,
                                       const T* __restrict__ acc) {
   bool barrierAborted = false; // sticky abort state, see IpcGpuBarrier::syncOnSameBlockIdx
+  T* const* bufs = barrier.stagingBuffers<kBanked>(ipcbuffs);
   constexpr auto countPerThread = sizeof(uint4) / sizeof(T);
   const auto gtIdx = blockDim.x * blockIdx.x + threadIdx.x;
 
@@ -29,14 +31,16 @@ __launch_bounds__(512)
   const auto idxEnd = count;
   const auto idxStride = gridDim.x * blockDim.x * countPerThread;
 
-  copyFromSrcToDest<T>(sendbuff, ipcbuffs[selfRank], idxStart, idxEnd, idxStride);
+  copyFromSrcToDest<T>(sendbuff, bufs[selfRank], idxStart, idxEnd, idxStride);
 
-  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>(barrierAborted);
+  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */, kBanked>(
+    barrierAborted);
 
   // pattern=2: full reduce into recvbuff (one-shot, not scatter)
-  reduceScatter<T, NRANKS, hasAcc>(ipcbuffs, recvbuff, acc, selfRank, NRANKS, idxStart, idxEnd, idxStride, 2);
+  reduceScatter<T, NRANKS, hasAcc>(bufs, recvbuff, acc, selfRank, NRANKS, idxStart, idxEnd, idxStride, 2);
 
-  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>(barrierAborted);
+  // Peers finish reading this rank's staging buffer before its next call reuses it; a banked call skips it.
+  barrier.syncAfterPeerReads<kBanked>(barrierAborted);
 }
 
 template <typename T, int NRANKS, bool hasAcc>

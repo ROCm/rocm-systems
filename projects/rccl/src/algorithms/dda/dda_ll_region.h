@@ -35,7 +35,7 @@ inline bool ddaLLRegionReady(const ncclComm* comm) {
 }
 
 // Rank r's LL lines: two banks of `bank` bytes from peers[r], bank = flag & 1. Fabric: the whole scratch; IPC: the
-// region past ddaScratchBytes.
+// region at its top.
 struct DdaLLRegion {
   void** peers;
   size_t bank;

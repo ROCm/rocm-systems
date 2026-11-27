@@ -55,6 +55,21 @@ constexpr int NRANKS = 8;
 
 } // namespace
 
+// Staging bank control words in a small zeroed buffer of the owning rank, never IPC-exported: call count, arrivals.
+constexpr int kIpcStagingBankCallWord = 0;
+constexpr int kIpcStagingBankArrivedWord = 1;
+constexpr size_t kIpcStagingBankCtlBytes = 64;
+static_assert(kIpcStagingBankCtlBytes >= (kIpcStagingBankArrivedWord + 1) * sizeof(uint32_t));
+
+__host__ __device__ constexpr int ipcStagingBankOfCall(uint32_t call) {
+  return static_cast<int>(call & 1u);
+}
+
+// The last block to reach a banked call's first barrier bumps the call counter; every block has read it by then.
+__host__ __device__ constexpr bool ipcStagingBankLastArrival(uint32_t arrivedBefore, uint32_t nBlocks) {
+  return arrivedBefore + 1 == nBlocks;
+}
+
 class DeviceMailbox {
 public:
   using FlagType = uint32_t;
@@ -94,6 +109,7 @@ class IpcGpuBarrier;
 struct IpcGpuBarrierResources {
   std::unique_ptr<ncclIpcMemHandler> ipcMemHandler;
   std::unique_ptr<DeviceBuffer> selfMailboxBuf;
+  std::unique_ptr<DeviceBuffer> stagingBankCtlBuf;
 };
 
 class IpcGpuBarrier {
@@ -116,7 +132,10 @@ public:
   // compiler copy the whole object (mailbox table included) to per-lane scratch at
   // every launch, because allMailboxes_ is indexed per lane. Keeping the barrier
   // const lets it be read straight from the kernarg segment.
-  template <bool hasPreviousMemAccess, bool hasSubsequentMemAccess>
+  //
+  // kStagingBankArrive (first barrier of a banked call): lane 0 counts the block in after every wave read the call
+  // counter; the last block bumps it.
+  template <bool hasPreviousMemAccess, bool hasSubsequentMemAccess, bool kStagingBankArrive = false>
   __device__ __forceinline__ void syncOnSameBlockIdx(bool& aborted) const {
     enum class MemFenceType {
       RELEASE_ACQUIRE,
@@ -125,6 +144,7 @@ public:
     };
 
     static_assert(hasPreviousMemAccess || hasSubsequentMemAccess);
+    static_assert(!kStagingBankArrive || hasPreviousMemAccess, "the arrival must follow every wave's counter read");
 
     constexpr MemFenceType fenceType =
       hasPreviousMemAccess && hasSubsequentMemAccess ?
@@ -134,6 +154,7 @@ public:
     if constexpr (hasPreviousMemAccess) {
       __syncthreads();
     }
+    uint32_t arrivedBefore = 0;
     if (threadIdx.x < NRANKS && !aborted) {
       auto peerRank = threadIdx.x;
       bool signaled = false;
@@ -141,6 +162,13 @@ public:
         signaled = allMailboxes_[peerRank].setFlagNoMemFence(selfRank_, blockIdx.x, params_);
       } else {
         signaled = allMailboxes_[peerRank].setFlagWithMemFence(selfRank_, blockIdx.x, params_);
+      }
+      if constexpr (kStagingBankArrive) {
+        if (peerRank == 0) {
+          // Relaxed: each used counter read fed a staging store before the barrier, so it returned before this arrival.
+          arrivedBefore = __scoped_atomic_fetch_add(stagingBankCtl_ + kIpcStagingBankArrivedWord, 1u, __ATOMIC_RELAXED,
+                                                    __MEMORY_SCOPE_DEVICE);
+        }
       }
 
       bool arrived = false;
@@ -153,8 +181,37 @@ public:
       }
       aborted = __any(!arrived);
     }
+    if constexpr (kStagingBankArrive) {
+      if (threadIdx.x == 0 && ipcStagingBankLastArrival(arrivedBefore, gridDim.x)) {
+        // RMWs keep an overlapping call's arrivals. Two banked kernels in flight on a comm break its banks for good.
+        FlagType* const ctl = stagingBankCtl_;
+        __scoped_atomic_fetch_sub(ctl + kIpcStagingBankArrivedWord, gridDim.x, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+        __scoped_atomic_fetch_add(ctl + kIpcStagingBankCallWord, 1u, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+      }
+    }
     if constexpr (hasSubsequentMemAccess) {
       __syncthreads();
+    }
+  }
+
+  // Banked: bufs holds staging bank 0's peer pointers, then bank 1's; the call counter picks this call's bank.
+  template <bool kBanked, typename T>
+  __device__ __forceinline__ T* const* stagingBuffers(T* const* bufs) const {
+    if constexpr (kBanked) {
+      const uint32_t call = __scoped_atomic_load_n(stagingBankCtl_ + kIpcStagingBankCallWord, __ATOMIC_RELAXED,
+                                                   __MEMORY_SCOPE_DEVICE);
+      return bufs + NRANKS * ipcStagingBankOfCall(call);
+    } else {
+      return bufs;
+    }
+  }
+
+  // Ends an in-kernel staged call. A banked call skips it: its bank is next written two banked calls later, past
+  // barrier 1 of the one between.
+  template <bool kBanked>
+  __device__ __forceinline__ void syncAfterPeerReads(bool& aborted) const {
+    if constexpr (!kBanked) {
+      syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>(aborted);
     }
   }
 
@@ -163,9 +220,10 @@ private:
   int selfRank_{-1};
   std::array<DeviceMailbox, NRANKS> allMailboxes_;
   DdaKernelParams params_{};
+  FlagType* stagingBankCtl_{nullptr};
 
   __host__ IpcGpuBarrier(int nRanks, int nBlocks, int selfRank, const std::array<DeviceMailbox, NRANKS>& allMailboxes,
-                         DdaKernelParams params);
+                         DdaKernelParams params, FlagType* stagingBankCtl);
 };
 
 } // namespace dda::common

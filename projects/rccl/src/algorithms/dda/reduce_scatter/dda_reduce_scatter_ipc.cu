@@ -60,9 +60,14 @@ static ncclResult_t ncclReduceScatterDdaIpcTyped(const void* sendbuff, void* rec
     CUDACHECK(cudaMemcpyAsync(comm->ddaScratch, sendbuff, totalCount * sizeof(T), cudaMemcpyDeviceToDevice, stream));
   }
   if (copyInKernel) {
-    hipExtLaunchKernelGGL((dda::common::ddaReduceScatterIpc<T, kDdaNranks, false, true>), grid, block, 0, stream,
-                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff),
-                          recvcount, static_cast<const T*>(sendbuff), comm->rank, barrierHost);
+    // In-kernel staging of every shard: banked whenever the whole input fits a bank.
+    bool banked = false;
+    T** buffs = nccl_dda_detail::ddaIpcStagingTable(barrierState, d_ipcbuffs, totalCount * sizeof(T), &banked);
+    hipExtLaunchKernelGGL((banked ? &dda::common::ddaReduceScatterIpc<T, kDdaNranks, false, true, true>
+                                  : &dda::common::ddaReduceScatterIpc<T, kDdaNranks, false, true>),
+                          grid, block, 0, stream, /*startEvent=*/nullptr, stopEvent, /*flags=*/0, buffs,
+                          static_cast<T*>(recvbuff), recvcount, static_cast<const T*>(sendbuff), comm->rank,
+                          barrierHost);
   } else {
     hipExtLaunchKernelGGL((dda::common::ddaReduceScatterIpc<T, kDdaNranks, false, false>), grid, block, 0, stream,
                           /*startEvent=*/nullptr, stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff),

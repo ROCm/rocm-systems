@@ -19,6 +19,8 @@
 #include "ScopedHook.h"
 #include "fakes/bootstrap_stubs.h"
 #include "fakes/hip_fakes.h"
+#include "fakes/nccl_fakes.h"
+#include "fakes/param_redirect.h"  // RCCL_DDA_IPC_BANKED_SCRATCH per test through g_loadParam
 
 #include "algorithms/dda/dda_init_detail.h"
 #include "algorithms/dda/dda_ll_region.h"
@@ -26,6 +28,7 @@
 #include "algorithms/dda/ipc/ipc_init.h"
 #include "algorithms/dda/ipc/ipc_mem_handler.h"
 #include "comm.h"
+#include "rccl_arch_thresholds.h"
 
 #include IPC_INIT_CC_PATH
 
@@ -72,20 +75,32 @@ namespace {
 
 constexpr int kNRanks = nccl_dda_detail::kDdaNranks;
 constexpr int kRank = 1;
-constexpr int kCuCount = 40;
+// MI350X. It also keeps the epoch cells a different size from the peer table: the fakes tell them apart by size.
+constexpr int kCuCount = 256;
 void* const kBootstrap = reinterpret_cast<void*>(0xB007);
 char kGfx950[] = "gfx950";
 hipStream_t const kZeroStream = reinterpret_cast<hipStream_t>(0x5);
 
-// Device peer table: the scratch bases, then the LL region bases.
-constexpr size_t kPeerTableBytes = 2 * kNRanks * sizeof(void*);
+// Device peer table: the scratch bases, the LL region bases, then the bank 0 and bank 1 bases.
+constexpr size_t kPeerTableBytes = 4 * kNRanks * sizeof(void*);
 const size_t kEpochBytes =
     nccl_dda_detail::ddaLLEpochCount(kNRanks, nccl_dda_detail::ddaFabricMaxNBlocksForScratch(kCuCount, nullptr)) *
     sizeof(uint32_t);
+constexpr size_t kMiB = 1 << 20;
+
+// Arch tables with banked scratch on and off; every other entry is unused here.
+rcclArchThresholds MakeArchTable(bool banked) {
+  rcclArchThresholds table{};
+  table.ddaIpcBankedScratch = banked;
+  return table;
+}
+const rcclArchThresholds kBankedArch = MakeArchTable(true);
+const rcclArchThresholds kUnbankedArch = MakeArchTable(false);
 
 class IpcInitMicrotest : public ::testing::Test {
  protected:
   void SetUp() override {
+    ASSERT_NE(kEpochBytes, kPeerTableBytes);
     g_ipcBarrierFails = false;
     g_ipcBarrierInits = 0;
     g_hipDeviceCanAccessPeer = [](int* canAccess, int, int) {
@@ -172,6 +187,7 @@ class IpcInitMicrotest : public ::testing::Test {
     EXPECT_EQ(created, streamDestroys_);
     EXPECT_TRUE(live_.empty()) << live_.size() << " device allocation(s) leaked";
     g_ipcBarrierFails = false;
+    g_loadParam = [](const char*, int64_t deftVal) { return deftVal; };
     ResetBootstrapStubs();
     ResetHipFakes();
   }
@@ -202,6 +218,33 @@ class IpcInitMicrotest : public ::testing::Test {
     EXPECT_EQ(0, comm_->ddaLLEpochLen);
   }
 
+  // Banked scratch is on and agreed. Top down: LL region at 248M, bank 1 at 240M, bank 0 at 232M, payload below.
+  void ExpectBankedLayout() const {
+    const DdaIpcBarrierState* state = comm_->ddaIpcBarrierState;
+    ASSERT_NE(nullptr, state);
+    EXPECT_EQ(232 * kMiB, comm_->ddaScratchBytes);
+    EXPECT_EQ(256 * kMiB, state->scratchAllocBytes);
+    EXPECT_EQ(8 * kMiB, state->stagingBankBytes);
+    void* const* table = static_cast<void* const*>(comm_->ddaPeerPtrsDev);
+    ASSERT_EQ(static_cast<const void*>(table + 2 * kNRanks), state->stagingBankPeerPtrsDev);
+    void* const* banks = static_cast<void* const*>(state->stagingBankPeerPtrsDev);
+    for (int r = 0; r < kNRanks; ++r) {
+      char* base = static_cast<char*>(r == kRank ? comm_->ddaScratch : FakePeerBase(r));
+      EXPECT_EQ(base + 232 * kMiB, banks[r]) << "bank 0, rank " << r;
+      EXPECT_EQ(base + 240 * kMiB, banks[kNRanks + r]) << "bank 1, rank " << r;
+      EXPECT_EQ(base + 248 * kMiB, table[kNRanks + r]) << "LL region, rank " << r;
+    }
+  }
+
+  // DDA IPC is on without banks: the payload reaches the LL region.
+  void ExpectUnbanked() const {
+    const DdaIpcBarrierState* state = comm_->ddaIpcBarrierState;
+    ASSERT_NE(nullptr, state);
+    EXPECT_EQ(nullptr, state->stagingBankPeerPtrsDev);
+    EXPECT_EQ(0u, state->stagingBankBytes);
+    EXPECT_EQ(248 * kMiB, comm_->ddaScratchBytes);
+  }
+
   enum class Step { Memset, Sync, Gather };
   struct InitStep {
     Step step;
@@ -220,7 +263,7 @@ class IpcInitMicrotest : public ::testing::Test {
   int streamDestroys_ = 0;
   hipError_t syncResult_ = hipSuccess;
   std::vector<InitStep> steps_;
-  int peerReady_ = -1;  // < 0: peers mirror this rank
+  int peerReady_ = -1;  // < 0: peers mirror this rank; else rank kRank + 1 publishes this ready word
   ncclResult_t gatherResult_ = ncclSuccess;
   std::vector<int> published_;
   std::vector<void*> epochAllocs_;
@@ -325,7 +368,7 @@ TEST_F(IpcInitMicrotest, CommInit_PeerTableAddsTheLLRegionBases) {
     char* base = static_cast<char*>(r == kRank ? comm_->ddaScratch : FakePeerBase(r));
     EXPECT_EQ(base, table[r]) << "rank " << r;
     EXPECT_EQ(base, static_cast<char*>(comm_->ddaPeerPtrsHost[r])) << "rank " << r;
-    EXPECT_EQ(base + comm_->ddaScratchBytes, table[kNRanks + r]) << "rank " << r;
+    EXPECT_EQ(base + (DDA_IPC_BUFFER_SIZE - dda::common::kDdaIpcLLRegionBytes), table[kNRanks + r]) << "rank " << r;
   }
   const nccl_dda_detail::DdaLLRegion region = nccl_dda_detail::ddaLLRegion(comm_.get());
   EXPECT_EQ(static_cast<void**>(comm_->ddaPeerPtrsDev) + kNRanks, region.peers);
@@ -401,6 +444,191 @@ TEST_F(IpcInitMicrotest, CommInit_ReadyGatherFails_SkipsDdaIpc) {
 
   ExpectNoDda();
   EXPECT_TRUE(live_.empty());
+}
+
+// Banked scratch: arch table, RCCL_DDA_IPC_BANKED_SCRATCH, rank-uniform agreement, single node only.
+
+TEST_F(IpcInitMicrotest, CommInit_ArchTableOn_PutsBothBanksBelowTheLLRegion) {
+  comm_->archThresholds = &kBankedArch;
+
+  EXPECT_EQ(ncclSuccess, ncclDdaIpcCommInit(comm_.get()));
+
+  EXPECT_EQ(std::vector<int>{nccl_dda_detail::ddaIpcReadyWord(2, true)}, published_);
+  ExpectBankedLayout();
+}
+
+TEST_F(IpcInitMicrotest, CommInit_ArchTableOff_KeepsThePayloadUpToTheLLRegion) {
+  comm_->archThresholds = &kUnbankedArch;
+
+  EXPECT_EQ(ncclSuccess, ncclDdaIpcCommInit(comm_.get()));
+
+  EXPECT_EQ(std::vector<int>{2}, published_);
+  ExpectUnbanked();
+}
+
+TEST_F(IpcInitMicrotest, CommInit_NoArchTable_KeepsThePayloadUpToTheLLRegion) {
+  EXPECT_EQ(ncclSuccess, ncclDdaIpcCommInit(comm_.get()));
+
+  EXPECT_EQ(std::vector<int>{2}, published_);
+  ExpectUnbanked();
+}
+
+TEST_F(IpcInitMicrotest, CommInit_EnvOff_OverridesTheArchTable) {
+  comm_->archThresholds = &kBankedArch;
+  g_loadParam = ParamOverride({{"RCCL_DDA_IPC_BANKED_SCRATCH", 0}});
+
+  EXPECT_EQ(ncclSuccess, ncclDdaIpcCommInit(comm_.get()));
+
+  EXPECT_EQ(std::vector<int>{2}, published_);
+  ExpectUnbanked();
+}
+
+// How an A/B turns it on where the table leaves it off (gfx942).
+TEST_F(IpcInitMicrotest, CommInit_EnvOn_OverridesTheArchTable) {
+  comm_->archThresholds = &kUnbankedArch;
+  g_loadParam = ParamOverride({{"RCCL_DDA_IPC_BANKED_SCRATCH", 1}});
+
+  EXPECT_EQ(ncclSuccess, ncclDdaIpcCommInit(comm_.get()));
+
+  EXPECT_EQ(std::vector<int>{nccl_dda_detail::ddaIpcReadyWord(2, true)}, published_);
+  ExpectBankedLayout();
+}
+
+// The rank-uniform part: this rank wants banks, a peer does not, so every rank runs unbanked.
+TEST_F(IpcInitMicrotest, CommInit_PeerWithoutBanks_RunsUnbanked) {
+  comm_->archThresholds = &kBankedArch;
+  peerReady_ = nccl_dda_detail::ddaIpcReadyWord(2, false);
+
+  EXPECT_EQ(ncclSuccess, ncclDdaIpcCommInit(comm_.get()));
+
+  EXPECT_EQ(std::vector<int>{nccl_dda_detail::ddaIpcReadyWord(2, true)}, published_);
+  ExpectUnbanked();
+}
+
+TEST_F(IpcInitMicrotest, CommInit_BankedWithFailedPeerBarrier_SkipsDdaIpc) {
+  comm_->archThresholds = &kBankedArch;
+  peerReady_ = nccl_dda_detail::ddaIpcReadyWord(0, true);
+
+  EXPECT_EQ(ncclSuccess, ncclDdaIpcCommInit(comm_.get()));
+
+  ExpectNoDda();
+  EXPECT_TRUE(live_.empty());
+}
+
+// Multi-node never sets up DDA IPC, so it has no staging banks even with the arch table and the env on.
+TEST_F(IpcInitMicrotest, CommInit_MultiNode_SkipsDdaIpcAndStagingBanks) {
+  comm_->archThresholds = &kBankedArch;
+  comm_->nNodes = 2;
+  g_loadParam = ParamOverride({{"RCCL_DDA_IPC_BANKED_SCRATCH", 1}});
+
+  EXPECT_EQ(ncclSuccess, ncclDdaIpcCommInit(comm_.get()));
+
+  EXPECT_TRUE(published_.empty());
+  EXPECT_TRUE(steps_.empty());
+  ExpectNoDda();
+}
+
+// Banking only lowers ddaScratchBytes; fini still untracks and frees the whole allocation.
+TEST_F(IpcInitMicrotest, CommFini_Banked_UntracksTheWholeScratch) {
+  comm_->archThresholds = &kBankedArch;
+  const uint64_t before = allocTracker[comm_->cudaDev].totalAllocSize;
+
+  ASSERT_EQ(ncclSuccess, ncclDdaIpcCommInit(comm_.get()));
+  ASSERT_EQ(232 * kMiB, comm_->ddaScratchBytes);
+  EXPECT_EQ(ncclSuccess, ncclDdaIpcCommFini(comm_.get()));
+
+  EXPECT_EQ(before, allocTracker[comm_->cudaDev].totalAllocSize);
+  EXPECT_TRUE(live_.empty());
+}
+
+// Pure helpers: staging bank parity and layout, call banking, ready-word agreement.
+
+TEST(DdaIpcBankedScratchMicrotest, BankAlternatesEveryCallIncludingAcrossTheWrap) {
+  for (uint32_t call : {0u, 1u, 2u, 0x7FFFFFFFu, 0xFFFFFFFEu, 0xFFFFFFFFu}) {
+    EXPECT_NE(dda::common::ipcStagingBankOfCall(call), dda::common::ipcStagingBankOfCall(call + 1)) << "call " << call;
+    EXPECT_EQ(dda::common::ipcStagingBankOfCall(call), dda::common::ipcStagingBankOfCall(call + 2)) << "call " << call;
+  }
+  EXPECT_EQ(0, dda::common::ipcStagingBankOfCall(0));
+}
+
+TEST(DdaIpcBankedScratchMicrotest, OnlyTheLastBlockToCountInBumpsTheCall) {
+  EXPECT_TRUE(dda::common::ipcStagingBankLastArrival(0, 1));
+  EXPECT_TRUE(dda::common::ipcStagingBankLastArrival(23, 24));
+  EXPECT_FALSE(dda::common::ipcStagingBankLastArrival(22, 24));
+  EXPECT_FALSE(dda::common::ipcStagingBankLastArrival(0, 24));
+}
+
+TEST(DdaIpcBankedScratchMicrotest, OnlyUnsetFollowsTheArchTableAndAnyOtherNonZeroIsOn) {
+  EXPECT_TRUE(nccl_dda_detail::ddaIpcBankedScratchWanted(-1, true));
+  EXPECT_FALSE(nccl_dda_detail::ddaIpcBankedScratchWanted(-1, false));
+  EXPECT_FALSE(nccl_dda_detail::ddaIpcBankedScratchWanted(0, true));
+  EXPECT_TRUE(nccl_dda_detail::ddaIpcBankedScratchWanted(1, false));
+  EXPECT_TRUE(nccl_dda_detail::ddaIpcBankedScratchWanted(2, false));
+  EXPECT_TRUE(nccl_dda_detail::ddaIpcBankedScratchWanted(-2, false));
+}
+
+// Spelled out: payload, bank 0, bank 1 and the LL region tile the 256 MiB allocation without overlap.
+TEST(DdaIpcBankedScratchMicrotest, PayloadBanksAndLLRegionTileTheScratch) {
+  const size_t scratch = 256 * kMiB;
+  EXPECT_EQ(248 * kMiB, nccl_dda_detail::ddaIpcPayloadBytes(scratch, false));
+  EXPECT_EQ(232 * kMiB, nccl_dda_detail::ddaIpcPayloadBytes(scratch, true));
+  EXPECT_EQ(232 * kMiB, nccl_dda_detail::ddaIpcStagingBankOffset(scratch, 0));
+  EXPECT_EQ(240 * kMiB, nccl_dda_detail::ddaIpcStagingBankOffset(scratch, 1));
+  EXPECT_EQ(scratch - dda::common::kDdaIpcLLRegionBytes,
+            nccl_dda_detail::ddaIpcStagingBankOffset(scratch, 1) + nccl_dda_detail::kDdaIpcStagingBankBytes);
+}
+
+// Spelled out from rccl_arch_thresholds.cc: gfx950 caps AR/RS 128M, AG 64M, A2A 4M; gfx942 caps all four at 8M or less.
+TEST(DdaIpcBankedScratchMicrotest, EveryDefaultCapFitsTheBankedLayout) {
+  void* table[2 * kNRanks] = {};
+  DdaIpcBarrierState state;
+  state.stagingBankBytes = nccl_dda_detail::kDdaIpcStagingBankBytes;
+  state.stagingBankPeerPtrsDev = table;
+  // Host-copy footprints (AR tree, RS and A2A host copy) stage the whole message below the banks.
+  EXPECT_LE(128 * kMiB, nccl_dda_detail::ddaIpcPayloadBytes(DDA_IPC_BUFFER_SIZE, true));
+  // In-kernel footprints: AR flat <= 256K, AG shard = total / 8, RS in-kernel < 8M, A2A in-kernel < 64K.
+  EXPECT_TRUE(nccl_dda_detail::ddaIpcCallBanked(&state, 256 * 1024));
+  EXPECT_TRUE(nccl_dda_detail::ddaIpcCallBanked(&state, 64 * kMiB / 8));
+  EXPECT_TRUE(nccl_dda_detail::ddaIpcCallBanked(&state, 8 * kMiB - 16));
+  EXPECT_TRUE(nccl_dda_detail::ddaIpcCallBanked(&state, 64 * 1024 - 16));
+}
+
+TEST(DdaIpcBankedScratchMicrotest, OnlyStagingThatFitsABankIsBanked) {
+  void* table[2 * kNRanks] = {};
+  DdaIpcBarrierState state;
+  state.stagingBankBytes = 8 * kMiB;
+  state.stagingBankPeerPtrsDev = table;
+  EXPECT_TRUE(nccl_dda_detail::ddaIpcCallBanked(&state, 8 * kMiB));
+  EXPECT_FALSE(nccl_dda_detail::ddaIpcCallBanked(&state, 8 * kMiB + 16));
+
+  state.stagingBankPeerPtrsDev = nullptr;
+  EXPECT_FALSE(nccl_dda_detail::ddaIpcCallBanked(&state, 16));
+  EXPECT_FALSE(nccl_dda_detail::ddaIpcCallBanked(nullptr, 16));
+}
+
+TEST(DdaIpcBankedScratchMicrotest, ReadyWordsAgreeOnTheLowestReadyAndBankOnlyIfAllRanksDo) {
+  std::vector<int> words(kNRanks, nccl_dda_detail::ddaIpcReadyWord(2, true));
+  int ready = -1;
+  bool banked = false;
+  nccl_dda_detail::ddaIpcAgreeReadyWords(words.data(), kNRanks, &ready, &banked);
+  EXPECT_EQ(2, ready);
+  EXPECT_TRUE(banked);
+
+  words[5] = nccl_dda_detail::ddaIpcReadyWord(1, true);
+  nccl_dda_detail::ddaIpcAgreeReadyWords(words.data(), kNRanks, &ready, &banked);
+  EXPECT_EQ(1, ready);
+  EXPECT_TRUE(banked);
+
+  words[0] = nccl_dda_detail::ddaIpcReadyWord(2, false);
+  nccl_dda_detail::ddaIpcAgreeReadyWords(words.data(), kNRanks, &ready, &banked);
+  EXPECT_EQ(1, ready);
+  EXPECT_FALSE(banked);
+}
+
+TEST(DdaIpcBankedScratchMicrotest, UnbankedReadyWordIsThePlainReadyLevel) {
+  for (int ready = 0; ready <= 2; ++ready) {
+    EXPECT_EQ(ready, nccl_dda_detail::ddaIpcReadyWord(ready, false));
+  }
 }
 
 }  // namespace

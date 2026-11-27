@@ -317,7 +317,7 @@ constexpr size_t kDdaLLMaxBytes = (size_t)(32) * 1024 * 1024;
 // tier that derives its slot stride from the bank rather than a fixed constant
 // puts bank 1 at the same byte offset, which is what stops one tier landing on
 // flag words another is still polling. On IPC the LL tiers keep their banks in the
-// kDdaIpcLLRegionBytes region past ddaScratchBytes (nccl_dda_detail::ddaLLRegion).
+// kDdaIpcLLRegionBytes region at the top of the scratch (nccl_dda_detail::ddaLLRegion).
 constexpr size_t ddaBankSize(size_t bytes) {
   return (bytes / 2) / 128 * 128;
 }
