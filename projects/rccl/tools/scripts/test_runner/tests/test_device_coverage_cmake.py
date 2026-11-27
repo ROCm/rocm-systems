@@ -13,6 +13,7 @@ DEVICE_COVERAGE_MODULE = RCCL_ROOT / "cmake" / "DeviceCoverage.cmake"
 # The amdgcn profile-runtime candidates probed by DeviceCoverage.cmake, in the
 # same priority order as RCCL_DEVICE_PROFILE_RUNTIME_RELPATHS.
 PRIMARY_RUNTIME_RELPATH = "lib/amdgcn-amd-amdhsa/libclang_rt.profile.a"
+AMDGPU_RUNTIME_RELPATH = "lib/amdgpu-amd-amdhsa/libclang_rt.profile.a"
 FALLBACK_RUNTIME_RELPATH = "lib/linux/libclang_rt.profile-amdgcn.a"
 
 
@@ -87,13 +88,19 @@ class DeviceCoverageCMakeTest(unittest.TestCase):
             )
             return runtime, result, argv
 
-    def test_probe_finds_selected_compiler_profile_runtime(self):
+    def run_device_probe(self, runtime_relpaths):
+        """Run the device probe against a fake compiler whose resource dir
+        holds an archive at each of runtime_relpaths.
+
+        Returns the resource dir, the "<runtime>\\n<reason>" result and argv.
+        """
         with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            resource_dir = root / "resource"
-            runtime = resource_dir / PRIMARY_RUNTIME_RELPATH
-            runtime.parent.mkdir(parents=True)
-            runtime.touch()
+            resource_dir = Path(temp_dir) / "resource"
+            resource_dir.mkdir()
+            for relpath in runtime_relpaths:
+                runtime = resource_dir / relpath
+                runtime.parent.mkdir(parents=True, exist_ok=True)
+                runtime.touch()
             compiler_body = (
                 'printf "%s\\n" "$@" >> "${ARGV_FILE:-/dev/null}"\n'
                 f"printf '%s\\n' '{resource_dir}'\n"
@@ -103,57 +110,50 @@ class DeviceCoverageCMakeTest(unittest.TestCase):
                 '"${COMPILER}" runtime reason)\n'
                 'file(WRITE "${RESULT_FILE}" "${runtime}\\n${reason}")\n'
             )
-            _probe_root, result, argv, _ = self._run_cmake_probe(
+            _root, result, argv, _ = self._run_cmake_probe(
                 compiler_body, probe_call
             )
+            return resource_dir, result, argv
 
-        self.assertEqual(result, f"{runtime}\n")
+    def test_probe_finds_selected_compiler_profile_runtime(self):
+        resource_dir, result, argv = self.run_device_probe(
+            [PRIMARY_RUNTIME_RELPATH]
+        )
+
+        self.assertEqual(result, f"{resource_dir / PRIMARY_RUNTIME_RELPATH}\n")
         self.assertIn("--target=amdgcn-amd-amdhsa", argv)
         self.assertIn("-fprofile-instr-generate", argv)
         self.assertIn("-fcoverage-mapping", argv)
         self.assertIn("-print-resource-dir", argv)
 
-    def test_probe_finds_linux_fallback_profile_runtime(self):
-        # Only the second candidate (lib/linux/...-amdgcn.a) exists, exercising
-        # the second loop iteration in rccl_find_device_profile_runtime.
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            resource_dir = root / "resource"
-            runtime = resource_dir / FALLBACK_RUNTIME_RELPATH
-            runtime.parent.mkdir(parents=True)
-            runtime.touch()
-            compiler_body = (
-                'printf "%s\\n" "$@" >> "${ARGV_FILE:-/dev/null}"\n'
-                f"printf '%s\\n' '{resource_dir}'\n"
-            )
-            probe_call = (
-                "rccl_find_device_profile_runtime("
-                '"${COMPILER}" runtime reason)\n'
-                'file(WRITE "${RESULT_FILE}" "${runtime}\\n${reason}")\n'
-            )
-            _probe_root, result, argv, _ = self._run_cmake_probe(
-                compiler_body, probe_call
-            )
+    def test_probe_finds_amdgpu_triple_profile_runtime(self):
+        # Newer ROCm compilers install the device runtime only under lib/amdgpu-amd-amdhsa/.
+        resource_dir, result, _argv = self.run_device_probe(
+            [AMDGPU_RUNTIME_RELPATH]
+        )
 
-        self.assertEqual(result, f"{runtime}\n")
+        self.assertEqual(result, f"{resource_dir / AMDGPU_RUNTIME_RELPATH}\n")
+
+    def test_probe_prefers_amdgcn_triple_when_both_exist(self):
+        # A toolchain that already resolved the amdgcn archive must keep it.
+        resource_dir, result, _argv = self.run_device_probe(
+            [AMDGPU_RUNTIME_RELPATH, PRIMARY_RUNTIME_RELPATH]
+        )
+
+        self.assertEqual(result, f"{resource_dir / PRIMARY_RUNTIME_RELPATH}\n")
+
+    def test_probe_finds_linux_fallback_profile_runtime(self):
+        # Only the last candidate (lib/linux/...-amdgcn.a) exists, exercising
+        # the final loop iteration in rccl_find_device_profile_runtime.
+        resource_dir, result, argv = self.run_device_probe(
+            [FALLBACK_RUNTIME_RELPATH]
+        )
+
+        self.assertEqual(result, f"{resource_dir / FALLBACK_RUNTIME_RELPATH}\n")
         self.assertIn("-print-resource-dir", argv)
 
     def test_probe_explains_missing_profile_runtime(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            resource_dir = Path(temp_dir) / "resource"
-            resource_dir.mkdir()
-            compiler_body = (
-                'printf "%s\\n" "$@" >> "${ARGV_FILE:-/dev/null}"\n'
-                f"printf '%s\\n' '{resource_dir}'\n"
-            )
-            probe_call = (
-                "rccl_find_device_profile_runtime("
-                '"${COMPILER}" runtime reason)\n'
-                'file(WRITE "${RESULT_FILE}" "${runtime}\\n${reason}")\n'
-            )
-            _root, result, _argv, _ = self._run_cmake_probe(
-                compiler_body, probe_call
-            )
+        _resource_dir, result, _argv = self.run_device_probe([])
 
         self.assertTrue(result.startswith("\nthe selected compiler"))
         self.assertIn("libclang_rt.profile.a", result)
@@ -175,46 +175,6 @@ class DeviceCoverageCMakeTest(unittest.TestCase):
         self.assertTrue(result.startswith("\nthe selected compiler"))
         self.assertIn("rejected device coverage flags", result)
         self.assertIn("-fcoverage-mapping", argv)
-
-    def _run_rdc_host_coverage_probe(self, compiler_body):
-        probe_call = (
-            "rccl_compiler_supports_rdc_host_coverage("
-            '"${COMPILER}" "${CMAKE_CURRENT_LIST_DIR}/rdc-probe" ok reason)\n'
-            'file(WRITE "${RESULT_FILE}" "${ok}\\n${reason}")\n'
-        )
-        return self._run_cmake_probe(
-            'printf "%s\\n" "$@" >> "${ARGV_FILE:-/dev/null}"\n' + compiler_body,
-            probe_call,
-        )
-
-    def test_rdc_host_coverage_probe_accepts_fixed_compiler(self):
-        cat_source = (
-            'for a in "$@"; do case "$a" in *.hip) '
-            'cat "$a" >> "${ARGV_FILE:-/dev/null}";; esac; done\n'
-        )
-        _root, result, argv, _ = self._run_rdc_host_coverage_probe(cat_source)
-
-        self.assertEqual(result, "TRUE\n")
-        flat_argv = argv.replace("\n", " ")
-        for flag in ("-fgpu-rdc", "--offload-host-only", "-fprofile-instr-generate"):
-            self.assertIn(flag, flat_argv)
-        self.assertIn("= rccl_probe_init();", argv)
-
-    def test_rdc_host_coverage_probe_reports_compiler_error(self):
-        error = "error: unknown special variable with appending linkage: llvm.global_ctors.1"
-        _root, result, _argv, _ = self._run_rdc_host_coverage_probe(
-            f"echo '{error}' >&2; exit 1\n"
-        )
-
-        self.assertEqual(result, f"FALSE\n{error}")
-
-    def test_rdc_host_coverage_probe_drops_the_final_period(self):
-        error = "error: unknown special variable\n1 error generated when compiling for host"
-        _root, result, _argv, _ = self._run_rdc_host_coverage_probe(
-            f"printf '%s.\\n' '{error}' >&2; exit 1\n"
-        )
-
-        self.assertEqual(result, f"FALSE\n{error}")
 
     def test_host_probe_finds_companion_rocm_profile_runtime(self):
         runtime, result, argv = self.run_host_probe(create_runtime=True)

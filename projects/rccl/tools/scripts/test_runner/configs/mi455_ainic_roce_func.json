@@ -3006,7 +3006,7 @@
         {
           "name": "ImplicitLaunchOrder_MultiCommunicatorChain",
           "description": "Test NCCL_LAUNCH_ORDER_IMPLICIT serialization across multiple communicators",
-          "test_filter": "ImplicitLaunchOrderMPITest.MultiCommunicatorChain"
+          "test_filter": "ImplicitLaunchOrderMPITest.MultiCommunicatorChain*"
         }
       ]
     },
@@ -5782,7 +5782,7 @@
         "NCCL_DEBUG_SUBSYS": "REG,INIT,TUNING",
         "NCCL_LOCAL_REGISTER": "1",
         "NCCL_LEGACY_CUDA_REGISTER": "1",
-        "NCCL_LAUNCH_ORDER_IMPLICIT": "1",
+        "RCCL_DDA_ENABLE": "0",
         "RCCL_DIRECT_ALLGATHER_THRESHOLD": "2147483648",
         "RCCL_MPI_LOG_ALL_RANKS": "1"
       },
@@ -5948,6 +5948,11 @@
           "name": "Symk_AllGatherHierLsaTmaStData",
           "description": "Forced AllGather_HierLsaTmaST with position-dependent data, including a per-rank size that makes each block push several chunks; own process so RCCL_SYM_K_MIN/MAX_BYTES are not read earlier; skips outside partition mode with two or more packages",
           "test_filter": "SymmetricKernelCorruptionTest.AllGatherHierLsaTmaST_PositionDependentData"
+        },
+        {
+          "name": "Symk_ReduceScatterHierLsaLDSTData",
+          "description": "Forced ReduceScatter_HierLsaLDST (sum, fp32 and bf16) with position-dependent data, in place and out of place, including per-rank sizes that make each block run several chunk rounds; own process so RCCL_SYM_K_MIN/MAX_BYTES are not read earlier; skips below four ranks or outside partition mode with two or more packages",
+          "test_filter": "SymmetricKernelCorruptionTest.ReduceScatterHierLsaLDST_PositionDependentData"
         }
       ]
     },

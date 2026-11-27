@@ -45,6 +45,14 @@ int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32
       c = inline_c;
     }
   }
+#if defined(RJ_ARITH_HAVE_X86_64_V4_BF16)
+  if constexpr (Bf16) {
+    if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_ZEN4)) {
+      wmma_gfx1250_half_x86_64_v4_bf16<Form>(packing_flags, controls, d, a, b, c);
+      return RJ_ARITH_SUCCESS;
+    }
+  }
+#endif
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
   if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
     wmma_gfx1250_half_x86_64_v4<Form>(packing_flags, controls, d, a, b, c);

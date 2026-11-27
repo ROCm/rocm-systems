@@ -7,6 +7,7 @@
 #include <array>
 #include <bit>
 #include <cstdint>
+#include <cstdlib>
 #include <optional>
 
 namespace rocjitsu::amdgpu {
@@ -27,7 +28,7 @@ consteval ImageAddressEquation make_image_equation(const uint32_t *masks, uint32
   for (uint32_t bit = 0; bit < bits; ++bit) {
     // All current equations select only the low twelve bits of either axis.
     if (masks[bit] & 0xf000f000u) {
-      throw "image equation exceeds coordinate table";
+      std::abort(); // An invalid equation must fail constant evaluation.
     }
     for (uint32_t axis = 0; axis < 2; ++axis) {
       for (uint32_t chunk = 0; chunk < 3; ++chunk) {

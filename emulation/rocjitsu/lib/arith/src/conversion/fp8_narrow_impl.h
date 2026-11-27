@@ -18,17 +18,20 @@ namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE {
 // CDNA policies retain the existing util models, including their tiny-value cutoff.
 template <bool Bf8, bool Stochastic>
 inline uint32_t narrow_fp8(uint32_t raw, uint32_t seed, bool saturate,
-                           Fp8NarrowPolicy policy = Fp8NarrowPolicy::Gfx12) {
+                           Fp8NarrowPolicy policy = Fp8NarrowPolicy::Gfx12,
+                           bool flush_out = false) {
   constexpr int fraction_bits = Bf8 ? 2 : 3;
   bool fnuz = policy == Fp8NarrowPolicy::Fnuz;
   bool unsigned_format = policy == Fp8NarrowPolicy::E5M3;
-  bool rdna = policy == Fp8NarrowPolicy::Gfx12;
+  bool rdna = policy == Fp8NarrowPolicy::Gfx12 || policy == Fp8NarrowPolicy::Gfx950;
   unsigned terminal = fnuz ? 128 : unsigned_format ? 255 : Bf8 ? 124 : 127;
   uint32_t magnitude = raw & 0x7fffffff;
   uint32_t sign = unsigned_format ? 0 : (raw >> 24) & 128;
   if (magnitude > 0x7f800000) {
     return fnuz ? 0x80 : unsigned_format ? 0xff : rdna ? (Bf8 ? 0xfe : 0xff) : sign | 0x7f;
   }
+  // On both gfx12 and MI350X (gfx950), PK and SR FP8/BF8 narrowing preserve
+  // signed infinities (0x7f/0xff FP8, 0x7c/0xfc BF8) even when FP16_OVFL=1.
   unsigned limit = terminal - (saturate && (!rdna || magnitude != 0x7f800000));
   int bias = unsigned_format ? 15 : (Bf8 ? 15 : 7) + int(fnuz);
   int exponent = int(magnitude >> 23) - 127 + bias;
@@ -43,7 +46,7 @@ inline uint32_t narrow_fp8(uint32_t raw, uint32_t seed, bool saturate,
     unsigned shift = 23 - fraction_bits + alignment;
     if constexpr (Stochastic) {
       if (rdna) {
-        // gfx12 truncates alignment bits before adding a fixed-width seed.
+        // gfx12/gfx950 truncate alignment bits before adding a fixed-width seed.
         significand = alignment < 32 ? significand >> alignment : 0;
         result = (significand + (seed >> (9 + fraction_bits))) >> (23 - fraction_bits);
       } else {
@@ -61,6 +64,15 @@ inline uint32_t narrow_fp8(uint32_t raw, uint32_t seed, bool saturate,
       result += unsigned(exponent - 1) << fraction_bits;
     }
     result = result < limit ? result : limit;
+    if (flush_out) {
+      if constexpr (Stochastic) {
+        if ((result >> fraction_bits) == 0) {
+          result = 0;
+        }
+      } else if (magnitude < (Bf8 ? 0x38700000U : 0x3c780000U)) {
+        result = 0;
+      }
+    }
   }
   if (fnuz) {
     if (result >= terminal) {

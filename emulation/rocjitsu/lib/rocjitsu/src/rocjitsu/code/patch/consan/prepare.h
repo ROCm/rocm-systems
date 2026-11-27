@@ -16,7 +16,8 @@ struct PreparedArtifact {
 /// @brief Prepare one exact original image without runtime allocations or handles.
 [[nodiscard]] FailureOr<PreparedArtifact> prepare(std::span<const uint8_t> original,
                                                   const TargetProfile &target,
-                                                  std::string_view entry, InputError &error);
+                                                  std::string_view entry, InputError &error,
+                                                  FlatPolicy flat_policy = FlatPolicy::Likely);
 
 struct PreparedImageArtifact {
   ImageFacts facts;
@@ -26,7 +27,8 @@ struct PreparedImageArtifact {
 /// @brief Prepare one coherent image with explicit selected entry names.
 [[nodiscard]] FailureOr<PreparedImageArtifact>
 prepare_image(std::span<const uint8_t> original, const TargetProfile &target,
-              std::span<const std::string_view> entries, InputError &error);
+              std::span<const std::string_view> entries, InputError &error,
+              FlatPolicy flat_policy = FlatPolicy::Likely);
 
 /// @brief Validate shared images/CFG/maps and analysis-specific preservation.
 /// @details Verify image identity, descriptor/note resources, branch boundaries,

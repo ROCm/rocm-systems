@@ -57,6 +57,7 @@
 #include "suites/functional/memory_atomics.h"
 #include "suites/functional/memory_allocation.h"
 #include "suites/functional/memory_fragment.h"
+#include "suites/functional/device_mem_no_host_access.h"
 #include "suites/functional/memory_fill.h"
 #include "suites/functional/deallocation_notifier.h"
 #include "suites/functional/virtual_memory.h"
@@ -709,6 +710,20 @@ TEST(rocrtstFunc, Memory_Fragment_Coherence_Test) {
     if (!RunCustomTestProlog(&mf)) return;
     mf.FragmentCoherenceTest();
     RunCustomTestEpilog(&mf);
+}
+
+TEST(rocrtstFunc, Device_Mem_No_Host_Access_Default_Test) {
+    DeviceMemNoHostAccess dm(false);
+    if (!RunCustomTestProlog(&dm)) return;
+    dm.CpuAccessTest();
+    RunCustomTestEpilog(&dm);
+}
+
+TEST(rocrtstFunc, Device_Mem_No_Host_Access_Enabled_Test) {
+    DeviceMemNoHostAccess dm(true);
+    if (!RunCustomTestProlog(&dm)) return;
+    dm.CpuAccessTest();
+    RunCustomTestEpilog(&dm);
 }
 
 TEST(rocrtstFunc, DISABLED_DebugBasicTests) {

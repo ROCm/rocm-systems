@@ -7,8 +7,12 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
+#include "rocjitsu/code/consan/encoding.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
+#include "rocjitsu/code/patch/consan/local_helper.h"
 #include "rocjitsu/code/patch/instrumentor.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -21,6 +25,7 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <limits>
@@ -30,6 +35,423 @@ namespace rocjitsu::consan {
 namespace {
 
 constexpr const TargetProfile &kTarget = kNativeLdsTargets[2];
+
+TEST(ConSanInput, GroupFlatNeedsAnUnclobberedApertureOnEveryIncomingPathAndActiveLane) {
+  const std::filesystem::path fixture =
+      test::target_fixture_path({"gfx950", 64}, "width-flat-load-overlap");
+  if (fixture.empty())
+    GTEST_SKIP() << "AMD assembler/linker fixtures unavailable";
+  const std::vector<uint8_t> image = test::read_fixture(fixture);
+  ASSERT_FALSE(image.empty());
+  const auto &target = *target_profile(950);
+  InputError error;
+  const auto baseline = build_input_program(image, target, "lds_producer_consumer", error);
+  ASSERT_TRUE(baseline.succeeded()) << error.message;
+  const size_t entry =
+      baseline.value().text_file_offset + baseline.value().kernel.entry_text_offset;
+  constexpr uint32_t shared = 0xbe8401eb;  // s_mov_b64 s[4:5], src_shared_base
+  constexpr uint32_t copy = 0x7e060205;    // v_mov_b32_e32 v3, s5
+  constexpr uint32_t clobber = 0x7e060280; // v_mov_b32_e32 v3, 0
+  constexpr uint32_t narrow = 0xbe88206a;  // s_and_saveexec_b64 s[8:9], vcc
+  constexpr uint32_t restore = 0xbefe0108; // s_mov_b64 exec, s[8:9]
+  constexpr uint32_t select = 0x85050705;  // s_cselect_b32 s5, s5, s7
+  const auto check = [&](std::initializer_list<uint32_t> setup, bool admitted,
+                         FlatAssumption premise = FlatAssumption::None) {
+    auto candidate = image;
+    std::vector<uint32_t> words(setup);
+    words.insert(words.end(), {0xdc500000, 0x02000002, 0xbf810000}); // FLAT load then endpgm
+    ASSERT_LE(entry + words.size() * 4, candidate.size());
+    std::memcpy(candidate.data() + entry, words.data(), words.size() * 4);
+    const auto input = build_input_program(candidate, target, "lds_producer_consumer", error);
+    ASSERT_EQ(input.succeeded(), admitted) << error.message;
+    if (admitted) {
+      ASSERT_EQ(input.value().accesses.size(), 1u);
+      EXPECT_EQ(input.value().accesses.front().origin, AccessOrigin::GroupFlat);
+      EXPECT_EQ(input.value().accesses.front().assumption, premise);
+      if (premise == FlatAssumption::SelectedSharedHigh) {
+        EXPECT_TRUE(build_input_program(candidate, target, "lds_producer_consumer", error, {},
+                                        FlatPolicy::Strict)
+                        .failed());
+        EXPECT_EQ(error.code, InputErrorCode::UnsupportedAccess);
+      }
+    } else {
+      EXPECT_EQ(error.code, InputErrorCode::UnsupportedAccess);
+    }
+  };
+  // An extended literal carries its numeric payload in the decoded operand.
+  // Even the two aperture selector values must behave like an unknown pointer.
+  constexpr uint32_t literal = 0xbe8401ff; // s_mov_b64 s[4:5], literal32
+  for (const uint32_t value : {235u, 237u, 239u}) {
+    SCOPED_TRACE(value);
+    const std::array<uint32_t, 10> words = {
+        shared,    copy,  0xdc500000, 0x02000002,             // observed shared load
+        literal,   value, copy,       0xdc500000, 0x02000002, // excluded load from the literal
+        0xbf810000};
+    auto candidate = image;
+    ASSERT_LE(entry + sizeof(words), candidate.size());
+    std::memcpy(candidate.data() + entry, words.data(), sizeof(words));
+    const auto result = prepare(candidate, target, "lds_producer_consumer", error);
+    ASSERT_TRUE(result.succeeded()) << error.message;
+    const auto &manifest = result.value().manifest;
+    ASSERT_EQ(manifest.sites.size(), 1u);
+    ASSERT_EQ(manifest.flat_exclusions.size(), 1u);
+    const auto &exclusion = manifest.flat_exclusions.front();
+    EXPECT_EQ(exclusion.original_offset, baseline.value().kernel.entry_text_offset + 28);
+    EXPECT_EQ(exclusion.reason, FlatExclusionReason::Unresolved);
+  }
+  check({shared, narrow, copy}, true);
+  check({shared, copy, narrow}, true);
+  check({shared, narrow, copy, restore}, false);
+  check({shared, copy, clobber}, false);
+  check({0xbe8401ed, copy}, false);                  // src_private_base, with the same low VGPR
+  check({0xbe840100, copy}, false);                  // kernarg (global) pointer
+  check({copy}, false);                              // no high-word definition
+  check({shared, copy, 0xbf840001, clobber}, false); // conditional branch bypasses the clobber
+  check({shared, 0xbe8601eb, select, copy}, true);   // both high words are shared
+  check({shared, select, copy}, true, FlatAssumption::SelectedSharedHigh);
+  constexpr uint32_t shared_or_zero = 0x85058005; // s_cselect_b32 s5, s5, 0
+  constexpr uint32_t zero_or_shared = 0x85050580; // s_cselect_b32 s5, 0, s5
+  check({shared, shared_or_zero, copy}, true, FlatAssumption::SelectedSharedHigh);
+  check({shared, zero_or_shared, copy}, true, FlatAssumption::SelectedSharedHigh);
+  check({shared_or_zero, copy}, false);             // no shared input
+  check({0xbe8401ed, shared_or_zero, copy}, false); // private high or zero
+  check({shared, 0x85058105, copy}, false);         // shared high or inline one
+  check({shared, 0x8505ff05, 0, copy}, false);      // shared high or extended literal zero
+  check({shared, 0x8505ff05, 128, copy}, false);    // payload matches the inline selector
+  check({select, copy}, false);                     // neither high word is known shared
+  check({shared, 0xbe8601ed, select, copy}, false); // known private alternative in s7
+  check({shared, 0xbe860100, select, copy}, false); // known kernarg high in s7
+  check({shared, select, narrow, copy, restore}, false);
+  check({shared, select, copy, clobber}, false);
+}
+
+TEST(ConSanInput, StrictRejectsConditionalOnlyImageAndRevalidatesTheSavedPolicy) {
+  const std::filesystem::path fixture =
+      test::target_fixture_path({"gfx950", 64}, "width-flat-load-likely");
+  if (fixture.empty())
+    GTEST_SKIP() << "AMD assembler/linker fixtures unavailable";
+  auto image = test::read_fixture(fixture);
+  const auto &target = *target_profile(950);
+  InputError error;
+  const auto mixed = build_input_program(image, target, "lds_producer_consumer", error);
+  ASSERT_TRUE(mixed.succeeded()) << error.message;
+  ASSERT_EQ(mixed.value().accesses.size(), 2u);
+  ASSERT_EQ(mixed.value().accesses[0].origin, AccessOrigin::Native);
+  const auto offset = mixed.value().text_file_offset + mixed.value().accesses[0].original_offset;
+  constexpr std::array<uint32_t, 2> nops = {0xbf800000, 0xbf800000};
+  ASSERT_LE(offset + sizeof(nops), image.size());
+  std::memcpy(image.data() + offset, nops.data(), sizeof(nops));
+  auto likely = prepare(image, target, "lds_producer_consumer", error);
+  ASSERT_TRUE(likely.succeeded()) << error.message;
+  ASSERT_EQ(likely.value().manifest.sites.size(), 1u);
+  EXPECT_EQ(likely.value().manifest.sites.front().assumption, FlatAssumption::SelectedSharedHigh);
+  likely.value().manifest.options = mvp_options_digest(FlatPolicy::Strict);
+  EXPECT_TRUE(validate_prepared(image, likely.value(), error).failed());
+  EXPECT_TRUE(prepare(image, target, "lds_producer_consumer", error, FlatPolicy::Strict).failed());
+  EXPECT_EQ(error.code, InputErrorCode::UnsupportedAccess);
+  EXPECT_NE(error.message.find("no observed LDS sites"), std::string::npos);
+}
+
+TEST(ConSanInput, ScalarFlatAppliesTheSitePolicyToTheAllocatedScalarPair) {
+  const std::filesystem::path fixture =
+      test::target_fixture_path({"gfx1250", 32}, "width-flat-load-backward");
+  if (fixture.empty())
+    GTEST_SKIP() << "AMD assembler/linker fixtures unavailable";
+  const std::vector<uint8_t> image = test::read_fixture(fixture);
+  const auto &target = *target_profile(1250);
+  InputError error;
+  const auto valid = build_input_program(image, target, "lds_producer_consumer", error);
+  ASSERT_TRUE(valid.succeeded()) << error.message;
+  const auto &program = valid.value();
+  ASSERT_EQ(program.accesses.size(), 2u);
+  const auto &flat = program.accesses.back();
+  EXPECT_EQ(flat.scalar_base, 4u);
+  EXPECT_TRUE(flat.scaled_vector_offset);
+  EXPECT_EQ(flat.immediate_bytes, -4);
+  const size_t anchor = program.text_file_offset + flat.original_offset;
+  for (const uint8_t selector : {3, 100, 124}) {
+    auto invalid = image;
+    // Odd and unallocated register pairs cannot form an ordinary base.
+    // A null SADDR cannot scale the unmodified VGPR-pair address.
+    invalid[anchor] = selector;
+    EXPECT_TRUE(build_input_program(invalid, target, "lds_producer_consumer", error).failed());
+  }
+  const size_t entry = program.text_file_offset + program.kernel.entry_text_offset;
+  const uint32_t shared_pair = 0xbe8401eb; // s_mov_b64 s[4:5], src_shared_base
+  auto global_image = image;
+  bool found = false;
+  for (size_t pos = entry; pos + 4 <= anchor; pos += 4) {
+    if (std::memcmp(image.data() + pos, &shared_pair, 4) == 0) {
+      global_image[pos] = 0; // s[0:1], the global kernarg pointer
+      found = true;
+      break;
+    }
+  }
+  ASSERT_TRUE(found);
+  const auto global = prepare(global_image, target, "lds_producer_consumer", error);
+  ASSERT_TRUE(global.succeeded()) << error.message;
+  ASSERT_EQ(global.value().manifest.sites.size(), 1u);
+  ASSERT_EQ(global.value().manifest.flat_exclusions.size(), 1u);
+  EXPECT_EQ(global.value().manifest.flat_exclusions.front().reason, FlatExclusionReason::NonGroup);
+
+  auto selected = image;
+  // Replace the final vector displacement setup with s_cselect_b32 s5, s5, s7.
+  // One arm retains the shared high word; the other has no aperture provenance.
+  const uint32_t select = 0x98050705;
+  std::memcpy(selected.data() + anchor - 4, &select, 4);
+  const auto likely = prepare(selected, target, "lds_producer_consumer", error);
+  ASSERT_TRUE(likely.succeeded()) << error.message;
+  ASSERT_EQ(likely.value().manifest.sites.size(), 2u);
+  EXPECT_EQ(likely.value().manifest.sites.back().assumption, FlatAssumption::SelectedSharedHigh);
+  const auto strict = prepare(selected, target, "lds_producer_consumer", error, FlatPolicy::Strict);
+  ASSERT_TRUE(strict.succeeded()) << error.message;
+  ASSERT_EQ(strict.value().manifest.sites.size(), 1u);
+  ASSERT_EQ(strict.value().manifest.flat_exclusions.size(), 1u);
+  EXPECT_EQ(strict.value().manifest.flat_exclusions.front().reason, FlatExclusionReason::Strict);
+}
+
+TEST(ConSanInput, IdenticalFlatOpcodesKeepTheirSharedAndNonGroupMappings) {
+  const std::filesystem::path fixture =
+      test::target_fixture_path({"gfx950", 64}, "width-flat-load-overlap");
+  if (fixture.empty())
+    GTEST_SKIP() << "AMD assembler/linker fixtures unavailable";
+  std::vector<uint8_t> image = test::read_fixture(fixture);
+  const auto &target = *target_profile(950);
+  InputError error;
+  const auto baseline = build_input_program(image, target, "lds_producer_consumer", error);
+  ASSERT_TRUE(baseline.succeeded()) << error.message;
+  const std::array<uint32_t, 10> words = {
+      0xbe8401ed, 0x85050105,                         // select private high s5 or kernarg high s1
+      0x7e060205, 0xdc500ffc, 0x02000002,             // non-group pointer, load +4092
+      0xbe8401eb, 0x7e060205, 0xdc500ffc, 0x02000002, // shared-base pointer, identical operation
+      0xbf810000};
+  const size_t entry =
+      baseline.value().text_file_offset + baseline.value().kernel.entry_text_offset;
+  ASSERT_LE(entry + sizeof(words), image.size());
+  std::memcpy(image.data() + entry, words.data(), sizeof(words));
+  const auto result = prepare(image, target, "lds_producer_consumer", error);
+  ASSERT_TRUE(result.succeeded()) << error.message;
+  ASSERT_EQ(result.value().manifest.sites.size(), 1u);
+  EXPECT_EQ(result.value().manifest.sites.front().origin, AccessOrigin::GroupFlat);
+  EXPECT_EQ(result.value().manifest.sites.front().original_offset,
+            baseline.value().kernel.entry_text_offset + 28);
+  ASSERT_EQ(result.value().manifest.flat_exclusions.size(), 1u);
+  EXPECT_EQ(result.value().manifest.flat_exclusions.front().reason, FlatExclusionReason::NonGroup);
+  EXPECT_TRUE(validate_prepared(image, result.value(), error).succeeded()) << error.message;
+}
+
+TEST(ConSanInput, GroupFlatChecksBothAddressWordsAndTheCompleteValueTuple) {
+  const std::unique_ptr<Decoder> decoder = Decoder::create(IsaFamily::Cdna4);
+  ASSERT_NE(decoder, nullptr);
+  const auto check = [&](uint16_t opcode, cdna4::FlatBuilderFields fields) {
+    const DecodeResult decoded = decoder->decode_window(cdna4::build_flat(opcode, fields));
+    ASSERT_TRUE(decoded.succeeded());
+    InputError error;
+    std::vector<NativeLdsAccess> sites;
+    EXPECT_TRUE(classify_lds_race_instruction(*decoded.value(), IsaFamily::Cdna4, 8, sites, error)
+                    .failed());
+    EXPECT_EQ(error.code, InputErrorCode::UnsupportedAccess);
+    EXPECT_EQ(error.message, "FLAT operands exceed allocation");
+    EXPECT_TRUE(sites.empty());
+  };
+  check(cdna4::kFlatLoadShortD16HiFlat, {.addr = 7, .vdst = 0});
+  check(cdna4::kFlatLoadShortD16Flat, {.addr = 0, .vdst = 8});
+  check(cdna4::kFlatStoreShortD16HiFlat, {.addr = 0, .data = 8});
+  check(cdna4::kFlatLoadDwordx2Flat, {.addr = 0, .vdst = 7});
+  check(cdna4::kFlatStoreDwordx2Flat, {.addr = 0, .data = 7});
+  check(cdna4::kFlatLoadDwordx4Flat, {.addr = 0, .vdst = 5});
+  check(cdna4::kFlatStoreDwordx4Flat, {.addr = 0, .data = 5});
+}
+
+TEST(ConSanInput, CallableProbeInsideLocalHelperInheritsTheCallersMode) {
+  for (const test::TargetMode mode : {test::TargetMode{"gfx950", 64}, {"gfx1250", 32}}) {
+    SCOPED_TRACE(mode.target);
+    const auto &profile = *target_profile(mode.target);
+    const std::filesystem::path fixture = test::target_fixture_path(mode, "width-flat-load-helper");
+    if (fixture.empty())
+      GTEST_SKIP() << "AMD assembler/linker fixtures unavailable";
+    auto image = test::read_fixture(fixture);
+    ASSERT_FALSE(image.empty());
+    InputError error;
+    const auto input = build_input_program(image, profile, "lds_producer_consumer", error);
+    ASSERT_TRUE(input.succeeded()) << error.message;
+    ASSERT_EQ(input.value().accesses.size(), 2u);
+    ASSERT_EQ(input.value().accesses.back().assumption, FlatAssumption::HelperLoadAt);
+    const uint64_t guest_pc = input.value().accesses.back().original_offset;
+    const auto ret = build_s_setpc_b64(30, profile.arch);
+    ASSERT_TRUE(ret.succeeded());
+    const auto body =
+        ::rocjitsu::test::make_amdgpu_probe_elf("observe", {ret.value()}, profile.elf_machine);
+    const AmdGpuCodeObject probe(body.data(), body.size());
+
+    // Replace the scalar-to-vector move in the caller with a mode change of
+    // the same size. The helper has no ordinary CFG predecessor to expose it.
+    const auto file = input.value().text_file_offset;
+    std::optional<uint64_t> move;
+    for (uint64_t offset = input.value().kernel.entry_text_offset; offset < guest_pc; offset += 4) {
+      if (wire::read_u32(image, file + offset) == 0x7e0a0204u) { // v_mov_b32_e32 v5, s4
+        ASSERT_FALSE(move);
+        move = file + offset;
+      }
+    }
+    ASSERT_TRUE(move);
+    for (const bool unsafe : {false, true}) {
+      if (unsafe)
+        wire::write_u32(image, *move,
+                        profile.arch == IsaFamily::Cdna4
+                            ? 0xbf110104u   // s_set_gpr_idx_on s4, gpr_idx(SRC0)
+                            : 0xbf860001u); // s_set_vgpr_msb 1
+      const AmdGpuCodeObject object(image.data(), image.size());
+      Instrumentor instrumentor(object, profile.arch);
+      instrumentor.add_point({.anchor_offset = guest_pc,
+                              .kind = InstrumentationKind::BeforeInst,
+                              .probe_obj = &probe,
+                              .probe_symbol = "observe",
+                              .probe_args = {}});
+      const auto sites = instrumentor.validate_points();
+      EXPECT_EQ(sites.errors.empty(), !unsafe)
+          << (sites.errors.empty() ? "" : sites.errors.front());
+    }
+  }
+}
+
+TEST(ConSanInput, DirectLocalHelperRequiresTheTerminalApiOperationAndMatchingReturn) {
+  const auto &profile = *target_profile("gfx950");
+  const test::TargetMode mode{"gfx950", 64};
+  for (std::string_view control : {"lookalike", "other", "width", "earlier", "wrong", "private",
+                                   "global", "alias", "badreturn", "clobber"}) {
+    SCOPED_TRACE(control);
+    const std::filesystem::path fixture =
+        test::target_fixture_path(mode, "width-flat-load-helper" + std::string(control));
+    if (fixture.empty())
+      GTEST_SKIP() << "AMD assembler/linker fixtures unavailable";
+    const auto image = test::read_fixture(fixture);
+    ASSERT_FALSE(image.empty());
+    InputError error;
+    if (control == "width") {
+      const AmdGpuCodeObject object(image.data(), image.size());
+      auto decoder = Decoder::create(default_isa_target_registry(), profile.public_id);
+      const std::array<uint64_t, 1> entries{0};
+      const auto blocks = BasicBlock::build_reachable(object, *decoder, profile.arch, entries);
+      ASSERT_TRUE(blocks.succeeded());
+      std::vector<BasicBlock *> scope;
+      for (auto &block : blocks.value())
+        scope.push_back(block.get());
+      const auto helper = qualify_local_helper(object, scope, mode.wave_size, error);
+      ASSERT_TRUE(helper.succeeded()) << error.message;
+      EXPECT_EQ(helper.value().api, AccessKind::Read);
+      EXPECT_EQ(helper.value().terminal_access, nullptr);
+    }
+    const auto artifact = prepare(image, profile, "lds_producer_consumer", error);
+    if (control == "alias" || control == "badreturn" || control == "clobber") {
+      EXPECT_TRUE(artifact.failed());
+      EXPECT_EQ(error.code, InputErrorCode::UnsupportedFlow) << error.message;
+      continue;
+    }
+    ASSERT_TRUE(artifact.succeeded()) << error.message;
+    ASSERT_TRUE(validate_prepared(image, artifact.value(), error).succeeded()) << error.message;
+    const auto &manifest = artifact.value().manifest;
+    ASSERT_EQ(manifest.flat_exclusions.size(), 1u);
+    EXPECT_EQ(manifest.flat_exclusions.front().assumption, FlatAssumption::None);
+    EXPECT_EQ(manifest.flat_exclusions.front().reason, control == "global" || control == "private"
+                                                           ? FlatExclusionReason::NonGroup
+                                                           : FlatExclusionReason::Unresolved);
+    if (control == "earlier") {
+      ASSERT_EQ(manifest.sites.size(), 2u);
+      EXPECT_EQ(manifest.sites.back().assumption, FlatAssumption::HelperLoadAt);
+      EXPECT_GT(manifest.sites.back().original_offset,
+                manifest.flat_exclusions.front().original_offset);
+    } else {
+      ASSERT_EQ(manifest.sites.size(), 1u);
+      EXPECT_EQ(manifest.sites.front().origin, AccessOrigin::Native);
+    }
+  }
+}
+
+TEST(ConSanInput, HelperStoreMustPrecedeItsLaterObservedCallerSiteInSourceOrder) {
+  constexpr test::TargetMode mode = {.target = "gfx950", .wave_size = 64};
+  const TargetProfile &profile = *target_profile(mode.target);
+  InputError error;
+  const std::filesystem::path fixture = test::target_fixture_path(mode, "width-flat-store-helper");
+  if (fixture.empty())
+    GTEST_SKIP() << "AMD assembler/linker fixtures unavailable";
+  const std::vector<uint8_t> placed_before = test::read_fixture(fixture);
+  ASSERT_FALSE(placed_before.empty());
+  const FailureOr<PreparedArtifact> accepted =
+      prepare(placed_before, profile, "lds_producer_consumer", error);
+  ASSERT_TRUE(accepted.succeeded()) << error.message;
+  ASSERT_EQ(accepted.value().manifest.sites.size(), 2u);
+  EXPECT_EQ(accepted.value().manifest.sites.front().assumption, FlatAssumption::HelperStoreAt);
+
+  const std::vector<uint8_t> placed_after =
+      test::read_fixture(test::target_fixture_path(mode, "width-flat-store-helper-after-caller"));
+  ASSERT_FALSE(placed_after.empty());
+  EXPECT_TRUE(prepare(placed_after, profile, "lds_producer_consumer", error).failed());
+  EXPECT_EQ(error.code, InputErrorCode::UnsupportedFlow);
+  EXPECT_EQ(error.message, "MVP requires increasing LDS access order along every CFG path");
+}
+
+TEST(ConSanInput, LocalHelperAndCallerBarrierMustFollowTheirSourcePcOrder) {
+  for (const test::TargetMode mode : {test::TargetMode{"gfx950", 64}, {"gfx1250", 32}}) {
+    SCOPED_TRACE(mode.target);
+    const TargetProfile &profile = *target_profile(mode.target);
+    for (const bool load : {true, false}) {
+      SCOPED_TRACE(load);
+      const std::filesystem::path fixture = test::target_fixture_path(
+          mode, load ? "width-flat-load-helperordered" : "width-flat-store-helperordered");
+      if (fixture.empty())
+        GTEST_SKIP() << "AMD assembler/linker fixtures unavailable";
+      InputError error;
+      const std::vector<uint8_t> ordered = test::read_fixture(fixture);
+      ASSERT_FALSE(ordered.empty());
+      const FailureOr<PreparedArtifact> accepted =
+          prepare(ordered, profile, "lds_producer_consumer", error);
+      ASSERT_TRUE(accepted.succeeded()) << error.message;
+      const Manifest &manifest = accepted.value().manifest;
+      ASSERT_EQ(manifest.barriers.size(), 1u);
+      ASSERT_EQ(manifest.sites.size(), 2u);
+      EXPECT_LT(manifest.sites.front().original_offset, manifest.barriers.front().original_wait);
+      EXPECT_LT(manifest.barriers.front().original_wait, manifest.sites.back().original_offset);
+      EXPECT_EQ(load ? manifest.sites.back().assumption : manifest.sites.front().assumption,
+                load ? FlatAssumption::HelperLoadAt : FlatAssumption::HelperStoreAt);
+
+      const std::vector<uint8_t> crossed = test::read_fixture(
+          test::target_fixture_path(mode, load ? "width-flat-load-helper-barrier-after-call"
+                                               : "width-flat-store-helper-barrier-before-call"));
+      ASSERT_FALSE(crossed.empty());
+      EXPECT_TRUE(prepare(crossed, profile, "lds_producer_consumer", error).failed());
+      EXPECT_EQ(error.code, InputErrorCode::UnsupportedFlow) << error.message;
+      EXPECT_EQ(error.message,
+                "observed LDS accesses and barrier completions must follow source PC order");
+    }
+  }
+}
+
+TEST(ConSanInput, AtomicAddRequiresQualifiedLdsFormAndAllocatedOperands) {
+  const auto decoder = Decoder::create(IsaFamily::Cdna4);
+  ASSERT_NE(decoder, nullptr);
+  const auto check = [&](uint16_t opcode, cdna4::DsBuilderFields fields, InputErrorCode expected) {
+    const DecodeResult decoded = decoder->decode_window(cdna4::build_ds(opcode, fields));
+    ASSERT_TRUE(decoded.succeeded());
+    std::vector<NativeLdsAccess> sites;
+    InputError error;
+    EXPECT_TRUE(classify_lds_race_instruction(*decoded.value(), IsaFamily::Cdna4, 8, sites, error)
+                    .failed());
+    EXPECT_EQ(error.code, expected);
+    EXPECT_TRUE(sites.empty());
+  };
+  check(cdna4::kDsAddU32Ds, {.gds = 1, .addr = 3, .data0 = 7},
+        InputErrorCode::UnsupportedSynchronization);
+  check(cdna4::kDsAddRtnU32Ds, {.addr = 3, .data0 = 7, .vdst = 2},
+        InputErrorCode::UnsupportedSynchronization);
+  check(cdna4::kDsAddU32Ds, {.acc = 1, .addr = 3, .data0 = 7}, InputErrorCode::UnsupportedAccess);
+  check(cdna4::kDsAddU32Ds, {.addr = 3, .data0 = 8}, InputErrorCode::UnsupportedAccess);
+  check(cdna4::kDsAddU64Ds, {.addr = 3, .data0 = 7}, InputErrorCode::UnsupportedAccess);
+  check(cdna4::kDsCmpstRtnB32Ds, {.addr = 3, .data0 = 7, .data1 = 8, .vdst = 3},
+        InputErrorCode::UnsupportedAccess);
+  check(cdna4::kDsCmpstRtnB32Ds, {.addr = 3, .data0 = 7, .data1 = 2, .vdst = 8},
+        InputErrorCode::UnsupportedAccess);
+}
 
 TEST(ConSanInput, Gfx1100UsesConcreteModelOnlyDecoder) {
   const IsaTargetRegistry &registry = default_isa_target_registry();
@@ -126,6 +548,19 @@ TEST(ConSanInputImage, QualifiesDistinctEntriesWithoutExtractingTheirImage) {
   EXPECT_EQ(first.value().accesses.size(), 2u);
   EXPECT_EQ(second.value().accesses.size(), 2u);
   EXPECT_NE(first.value().accesses[0].original_offset, second.value().accesses[0].original_offset);
+}
+
+TEST(ConSanInputImage, SelectingOneEntryDoesNotAdmitALocalHelperInAMultiKernelImage) {
+  std::ifstream file(CONSAN_MULTI_ENTRY_LOCAL_HELPER_FIXTURE, std::ios::binary);
+  const std::vector<uint8_t> image = {std::istreambuf_iterator<char>(file),
+                                      std::istreambuf_iterator<char>()};
+  const TargetProfile &target = *target_profile("gfx1250");
+  const std::array<std::string_view, 1> entries = {"mk_a"};
+  InputError error;
+  ASSERT_FALSE(image.empty());
+  EXPECT_TRUE(prepare_image(image, target, entries, error).failed());
+  EXPECT_EQ(error.code, InputErrorCode::UnsupportedFlow) << error.message;
+  EXPECT_EQ(error.message, "LDS helper calls require a single-kernel code object");
 }
 
 TEST(ConSanInputImage, SelectedFlowCannotEnterASiblingKernel) {
@@ -496,10 +931,14 @@ TEST_F(ConSanInputFixture, BarrierAndExcludedAccessCannotBecomeNoSyncFacts) {
   EXPECT_TRUE(inspect(load("barrier")).failed());
   EXPECT_EQ(error_.code, InputErrorCode::UnsupportedSynchronization);
   EXPECT_TRUE(error_.text_offset.has_value());
-  const std::vector<uint8_t> excluded =
-      test::read_fixture(test::target_fixture_path({"gfx1100", 32}, "width-excluded-b8"));
-  ASSERT_FALSE(excluded.empty());
-  EXPECT_TRUE(inspect(excluded).failed());
+  const FailureOr<InputProgram> ordinary = inspect(image_);
+  ASSERT_TRUE(ordinary.succeeded());
+  ASSERT_FALSE(ordinary.value().accesses.empty());
+  const size_t offset = text_offset_ + ordinary.value().accesses.front().original_offset;
+  const std::array<uint32_t, 2> gds = rdna3::build_ds(rdna3::kDsStoreB32Ds, {.gds = 1});
+  ASSERT_LE(offset + sizeof(gds), image_.size());
+  std::memcpy(image_.data() + offset, gds.data(), sizeof(gds));
+  EXPECT_TRUE(inspect(image_).failed());
   EXPECT_EQ(error_.code, InputErrorCode::UnsupportedAccess);
   EXPECT_TRUE(error_.text_offset.has_value());
 }

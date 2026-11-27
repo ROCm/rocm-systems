@@ -38,6 +38,12 @@ int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32
       c = inline_c;
     }
   }
+#if defined(RJ_ARITH_HAVE_X86_64_V4_BF16)
+  if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_ZEN4)) {
+    wmma_gfx1250_fp8_x86_64_v4_bf16<K, Bf8A, Bf8B, Packed>(flags, controls, d, a, b, c);
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
   if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
     wmma_gfx1250_fp8_x86_64_v4<K, Bf8A, Bf8B, Packed>(flags, controls, d, a, b, c);

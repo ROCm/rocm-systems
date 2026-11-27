@@ -5,9 +5,11 @@ set(RCCL_DEVICE_COVERAGE_PROBE_FLAGS
 
 # Relative paths (under the compiler resource dir) where the amdgcn LLVM profile
 # runtime may live, in priority order. Hoisted here so the search set lives in
-# one place instead of inline string literals in the lookup loop.
+# one place instead of inline string literals in the lookup loop. Newer ROCm
+# compilers install the per-target runtime under the amdgpu-amd-amdhsa triple.
 set(RCCL_DEVICE_PROFILE_RUNTIME_RELPATHS
     "lib/amdgcn-amd-amdhsa/libclang_rt.profile.a"
+    "lib/amdgpu-amd-amdhsa/libclang_rt.profile.a"
     "lib/linux/libclang_rt.profile-amdgcn.a")
 
 # Host ROCm profile runtime archive names, in priority order: the per-target
@@ -36,37 +38,6 @@ function(rccl_compiler_supports_device_coverage compiler output_supported output
     set(${output_reason}
       "the selected compiler '${compiler}' rejected device coverage flags: ${coverage_error}"
       PARENT_SCOPE)
-    return()
-  endif()
-
-  set(${output_supported} TRUE PARENT_SCOPE)
-  set(${output_reason} "" PARENT_SCOPE)
-endfunction()
-
-
-# Report whether <compiler> can compile the host half of an instrumented
-# -fgpu-rdc TU that has a dynamic initializer, as the device linker's mixed
-# TUs are under ENABLE_FULL_COVERAGE. Some clang 24 builds before ROCm 10.3
-# emit two llvm.global_ctors lists there (llvm/llvm-project#233655).
-# <work_dir> receives the probe source and object.
-function(rccl_compiler_supports_rdc_host_coverage compiler work_dir output_supported output_reason)
-  file(MAKE_DIRECTORY "${work_dir}")
-  file(WRITE "${work_dir}/rdc_host_coverage.hip"
-    "int rccl_probe_init();\nint rccl_probe_value = rccl_probe_init();\n")
-  execute_process(
-    COMMAND "${compiler}" -x hip --offload-new-driver -fgpu-rdc --offload-host-only
-            -nogpuinc -nogpulib -fprofile-instr-generate -fcoverage-mapping
-            -c "${work_dir}/rdc_host_coverage.hip" -o "${work_dir}/rdc_host_coverage.o"
-    OUTPUT_QUIET
-    ERROR_VARIABLE probe_error
-    ERROR_STRIP_TRAILING_WHITESPACE
-    RESULT_VARIABLE probe_result)
-
-  if(NOT probe_result EQUAL 0)
-    # Callers end the reason with their own period.
-    string(REGEX REPLACE "\\.$" "" probe_error "${probe_error}")
-    set(${output_supported} FALSE PARENT_SCOPE)
-    set(${output_reason} "${probe_error}" PARENT_SCOPE)
     return()
   endif()
 

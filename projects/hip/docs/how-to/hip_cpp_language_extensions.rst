@@ -186,7 +186,7 @@ be used in the kernel. The amount of registers that can be used at most is
 but it might also have other, architecture specific, restrictions.
 
 The available registers per Compute Unit are listed in
-:doc:`rocm:reference/gpu-arch-specs`. Beware that these values are per Compute
+:doc:`rocm:reference/gpu-specs`. Beware that these values are per Compute
 Unit, not per Execution Unit. On AMD GPUs a Compute Unit consists of 4 Execution
 Units, also known as SIMDs, each with their own register file. For more
 information see :doc:`../understand/hardware_implementation`.
@@ -907,6 +907,8 @@ The different shuffle functions behave as following:
   the current subgroup. If it tries to read values from later subgroups, the
   function returns the ``var`` of the calling thread.
 
+.. _warp_reduction_functions:
+
 Warp reduction functions
 -------------------------------------------------------------------------------------------------------------
 Arithmetic reduces:
@@ -921,8 +923,8 @@ Arithmetic reduces:
 
 * On Nvidia platform: ``int`` or ``unsigned int``
 
-* On AMD platform: ``int`` or ``unsigned int``; if the user defines the macro ``HIP_ENABLE_EXTRA_WARP_SYNC_TYPES``, then: ``unsigned long long``, ``long long``, ``half``/``float``/``double`` precision floating
-point types are also be supported.
+* On AMD platform: ``int`` or ``unsigned int``; if the user defines the macro ``HIP_ENABLE_EXTRA_WARP_SYNC_TYPES``, then: ``unsigned long long``, ``long long``, ``half``/``float``/``double`` precision
+  floating-point types are also supported.
 
 Returns the aggregated result of the arithmetic operation, where each of the participating threads
 (i.e. the ones mentioned on the mask) contribute ``var``.

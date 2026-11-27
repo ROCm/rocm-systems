@@ -962,7 +962,8 @@ TEST(FpFmaF64Gfx11, CapturedTininess) {
 TEST(FpFmaF64Cdna, ScaledMinimumNormal) {
   using namespace rocjitsu::arith::test;
   for (auto cpu : supported_cpu_levels()) {
-    for (auto call : {rj_arith_v_fma_f64_w32_gfx942, rj_arith_v_fma_f64_w32_gfx1250}) {
+    for (auto call : {rj_arith_v_fma_f64_w32_gfx942, rj_arith_v_fma_f64_w32_gfx950,
+                      rj_arith_v_fma_f64_w32_gfx1250}) {
       // Output flushing precedes OMOD, which also canonicalizes tiny scaled results.
       for (bool flush_core : {false, true}) {
         if (call != rj_arith_v_fma_f64_w32_gfx1250) {
@@ -995,6 +996,30 @@ TEST(FpFmaF64Cdna, ScaledMinimumNormal) {
                   RJ_ARITH_SUCCESS);
         EXPECT_EQ(r.v[6][0], 0U);
         EXPECT_EQ(r.v[7][0], rounding <= 1 ? 0x00100000U : 0U);
+      }
+    }
+  }
+}
+
+// Retain tiny-product and pre-packing flush witnesses from the retired VM helper tests.
+TEST(FpFmaF16, TinyProductAndOutputFlush) {
+  using namespace rocjitsu::arith::test;
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (uint64_t rounding :
+         {uint64_t(0), RJ_ARITH_FP_ROUND_UP, RJ_ARITH_FP_ROUND_DOWN, RJ_ARITH_FP_ROUND_ZERO}) {
+      Registers<4, 32> r{};
+      r.v[0][0] = r.v[1][0] = 1;
+      r.v[2][0] = 0x7bff;
+      const uint64_t flags = cpu | rounding | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS;
+      ASSERT_EQ(rj_arith_v_fma_f16_w32_gfx12(flags, 1, 0, r.v + 3, r.v, r.v + 1, r.v + 2, nullptr),
+                RJ_ARITH_SUCCESS);
+      EXPECT_EQ(uint16_t(r.v[3][0]), rounding == RJ_ARITH_FP_ROUND_UP ? 0x7c00U : 0x7bffU);
+      for (uint32_t sign : {0U, 0x8000U}) {
+        r.v[1][0] = r.v[2][0] = sign | 0x03ff;
+        ASSERT_EQ(rj_arith_v_fma_f16_w32_gfx12(flags | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS, 1, 0,
+                                               r.v + 3, r.v, r.v + 1, r.v + 2, nullptr),
+                  RJ_ARITH_SUCCESS);
+        EXPECT_EQ(uint16_t(r.v[3][0]), sign);
       }
     }
   }

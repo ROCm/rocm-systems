@@ -783,7 +783,7 @@ TEST(MfmaExecTest, Gfx12Wave64SwmmacK32LocUsesSparseHardwareLayout) {
   EXPECT_EQ(fp8_idx_g2s0.local_compressed_k, 0u);
 }
 
-TEST(MfmaExecTest, Cdna3CvtFp8Bf8UsesSameFnuzDecodeAsMfma) {
+TEST(MfmaExecTest, Cdna3CvtFp8Bf8UsesFnuzEncoding) {
   ScopedIsaExecutionBackend execution_backend_scope{&cdna3::execution_backend()};
   amdgpu::GpuMemory mem("cdna3_cvt_fnuz_mem");
   amdgpu::L2Cache l2("cdna3_cvt_fnuz_l2");
@@ -825,14 +825,13 @@ TEST(MfmaExecTest, Cdna3CvtFp8Bf8UsesSameFnuzDecodeAsMfma) {
   cvt_bf8.execute_impl(*wf);
 
   for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
-    amdgpu::InputLoc loc{/*vgpr_offset=*/0, lane, /*sub_element=*/0};
-    float mfma_fp8 = amdgpu::extract_fp8_fnuz(*cu, vbase + kSrc, loc);
+    // FNUZ encodes +1 and -1 as 0x40 and 0xc0 in both formats.
+    const float expected = (lane & 1u) ? -1.0f : 1.0f;
     float cvt_fp8_value = std::bit_cast<float>(cu->read_vgpr(vbase + kDstFp8, lane));
-    EXPECT_EQ(cvt_fp8_value, mfma_fp8) << "fp8 lane=" << lane;
+    EXPECT_EQ(cvt_fp8_value, expected) << "fp8 lane=" << lane;
 
-    float mfma_bf8 = amdgpu::extract_bf8_fnuz(*cu, vbase + kSrc, loc);
     float cvt_bf8_value = std::bit_cast<float>(cu->read_vgpr(vbase + kDstBf8, lane));
-    EXPECT_EQ(cvt_bf8_value, mfma_bf8) << "bf8 lane=" << lane;
+    EXPECT_EQ(cvt_bf8_value, expected) << "bf8 lane=" << lane;
   }
 }
 
@@ -1304,71 +1303,6 @@ TEST(MfmaExecTest, ResolveAccAccVgpr) {
       /*vb=*/100, /*dst=*/200, /*src2_ev=*/770, const_acc, [&]() -> uint32_t { return 99u; });
   EXPECT_EQ(const_acc, amdgpu::ACC_FROM_VGPR);
   EXPECT_EQ(result, 100u + amdgpu::ACC_VGPR_OFFSET + 2u);
-}
-
-TEST(MfmaExecTest, ScalarF32ReadsEachMatrixOperandOnce) {
-  constexpr uint32_t wf_size = 64;
-  constexpr uint32_t M = 16, N = 16, K = 4, B = 2;
-  constexpr uint32_t sgprs_per_wf = 106, vgprs_per_wf = 256;
-  constexpr uint32_t source_a = 0, source_b = 16, accumulator = 32, destination = 48;
-  constexpr uint32_t source_a_regs = (M * K * B + wf_size - 1) / wf_size;
-  constexpr uint32_t source_b_regs = (N * K * B + wf_size - 1) / wf_size;
-  constexpr uint32_t destination_regs = (M * N * B + wf_size - 1) / wf_size;
-
-  amdgpu::GpuMemory gpu_mem("mfma_scalar_snapshot_mem");
-  amdgpu::L2Cache l2("mfma_scalar_snapshot_l2");
-  amdgpu::ComputeUnitCore::Config config{};
-  config.arch = rocjitsu::IsaFamily::Cdna4;
-  config.num_wf_slots = 1;
-  config.sgprs_per_wf = sgprs_per_wf;
-  config.vgprs_per_wf = vgprs_per_wf;
-  config.lds_size_kb = 64;
-  auto cu = amdgpu::ComputeUnitCore::create("mfma_scalar_snapshot_cu", config, &gpu_mem, &l2);
-  ASSERT_NE(cu, nullptr);
-  auto *wf = cu->dispatch_wf(0, 0, sgprs_per_wf, vgprs_per_wf);
-  ASSERT_NE(wf, nullptr);
-  ASSERT_EQ(wf->wf_size(), wf_size);
-  const uint32_t vb = wf->vgpr_alloc().base;
-
-  for (uint32_t reg = 0; reg < source_a_regs; ++reg) {
-    for (uint32_t lane = 0; lane < wf_size; ++lane) {
-      cu->write_vgpr(vb + source_a + reg, lane, std::bit_cast<uint32_t>(1.0f));
-    }
-  }
-  for (uint32_t reg = 0; reg < source_b_regs; ++reg) {
-    for (uint32_t lane = 0; lane < wf_size; ++lane) {
-      cu->write_vgpr(vb + source_b + reg, lane, std::bit_cast<uint32_t>(2.0f));
-    }
-  }
-  for (uint32_t reg = 0; reg < destination_regs; ++reg) {
-    for (uint32_t lane = 0; lane < wf_size; ++lane) {
-      cu->write_vgpr(vb + accumulator + reg, lane, std::bit_cast<uint32_t>(3.0f));
-    }
-  }
-
-  size_t source_a_reads = 0;
-  size_t source_b_reads = 0;
-  auto extract_a = [&](auto &source_cu, uint32_t base, const amdgpu::InputLoc &loc) {
-    ++source_a_reads;
-    return amdgpu::extract_f32(source_cu, base, loc);
-  };
-  auto extract_b = [&](auto &source_cu, uint32_t base, const amdgpu::InputLoc &loc) {
-    ++source_b_reads;
-    return amdgpu::extract_f32(source_cu, base, loc);
-  };
-
-  ForceScalarGuard force_scalar(/*force_scalar=*/true);
-  amdgpu::exec_f32<M, N, K, B>(*cu, /*in_bits=*/32, vb + destination, vb + source_a, vb + source_b,
-                               vb + accumulator, extract_a, extract_b, amdgpu::ACC_FROM_VGPR,
-                               /*cbsz=*/1, /*abid=*/0, /*blgp=*/1);
-
-  EXPECT_EQ(source_a_reads, static_cast<size_t>(M) * K * B);
-  EXPECT_EQ(source_b_reads, static_cast<size_t>(N) * K * B);
-  for (uint32_t reg = 0; reg < destination_regs; ++reg) {
-    for (uint32_t lane = 0; lane < wf_size; ++lane) {
-      EXPECT_FLOAT_EQ(std::bit_cast<float>(cu->read_vgpr(vb + destination + reg, lane)), 11.0f);
-    }
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -8900,61 +8834,6 @@ TEST(Rdna4GlobalLoadTransposeTest, Wave64B128ReadsLowHalfAndWritesTwoVgprs) {
   EXPECT_EQ(result(0), 0x0300020001000000ULL);
   EXPECT_EQ(result(32), 0x0700060005000400ULL);
   EXPECT_EQ(result(63), 0x1F071E071D071C07ULL);
-}
-
-// A VOP3 output modifier scales the result. INEXACT must be derived from the
-// scaled exact value, not by comparing the scaled result against the unscaled
-// product -- that comparison is unequal for every nonzero product as soon as
-// any modifier is present, and a spurious INEXACT with MODE.excp_en set stops
-// the wave for the debugger on arithmetic that was exact.
-TEST(AluExceptionTest, OutputModifierDoesNotFabricateInexact) {
-  constexpr uint32_t kInexact = 1u << 5;
-
-  // 2.0 * 3.0 == 6.0 exactly, and stays exact under every OMOD scale.
-  EXPECT_EQ(amdgpu::classify_mul_f32(2.0f, 3.0f) & kInexact, 0u);
-  for (float scale : {2.0f, 4.0f, 0.5f}) {
-    EXPECT_EQ(amdgpu::classify_mul_f32(2.0f, 3.0f, scale) & kInexact, 0u) << "omod scale " << scale;
-  }
-
-  // A genuinely inexact product stays reported, with and without a modifier.
-  EXPECT_EQ(amdgpu::classify_mul_f32(1.1f, 1.1f) & kInexact, kInexact);
-  EXPECT_EQ(amdgpu::classify_mul_f32(1.1f, 1.1f, 2.0f) & kInexact, kInexact);
-
-  // NaN compares unequal to itself, so an exactness test that does not exclude
-  // non-finite values reports INEXACT for it even with no modifier at all.
-  const float nan = std::numeric_limits<float>::quiet_NaN();
-  EXPECT_EQ(amdgpu::classify_mul_f32(nan, 3.0f) & kInexact, 0u);
-  EXPECT_EQ(amdgpu::classify_mul_f32(nan, 3.0f, 2.0f) & kInexact, 0u);
-}
-
-TEST(AluExceptionTest, MultiplyExactProductCoversF32RangeAndRounding) {
-  struct Case {
-    uint32_t lhs;
-    uint32_t rhs;
-    float scale;
-    uint32_t causes;
-  };
-  constexpr Case cases[] = {
-      {0x3f800000, 0x40000000, 4.0f, 0},
-      {0x3f800001, 0x3f800001, 1.0f, 1u << 5},
-      {0x00800000, 0x3f800000, 0.5f, 1u << 4},
-      {0x00800000, 0x00800000, 1.0f, (1u << 4) | (1u << 5)},
-      {0x00000001, 0x3f800000, 1.0f, (1u << 1) | (1u << 4)},
-      {0x00000001, 0x7f000000, 4.0f, 1u << 1},
-  };
-  for (uint32_t round = 0; round < 4; ++round) {
-    const amdgpu::fp_mode::ScopedEnvironment environment(round);
-    for (const auto &sample : cases) {
-      SCOPED_TRACE(testing::Message() << "round " << round << " lhs " << sample.lhs << " rhs "
-                                      << sample.rhs << " scale " << sample.scale);
-      volatile float lhs = std::bit_cast<float>(sample.lhs);
-      volatile float rhs = std::bit_cast<float>(sample.rhs);
-      EXPECT_EQ(amdgpu::classify_mul_f32(lhs, rhs, sample.scale), sample.causes);
-    }
-    volatile float largest = std::bit_cast<float>(0x7f7fffffu);
-    // Directed rounding toward a finite result still reports INEXACT.
-    EXPECT_EQ(amdgpu::classify_mul_f32(largest, 2.0f), (1u << 5) | (round < 2 ? 1u << 3 : 0u));
-  }
 }
 
 } // namespace

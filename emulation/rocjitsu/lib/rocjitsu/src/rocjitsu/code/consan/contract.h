@@ -4,6 +4,7 @@
 #pragma once
 
 #include "rocjitsu/code/patch/kernarg_extension.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/ds2_addressing.h"
 #include "rocjitsu/result.h"
 #include "util/diagnostic.h"
 
@@ -30,10 +31,10 @@ inline constexpr std::array<uint8_t, 16> kProducerContract = {
 // Canonical hash input for the manifest's options identity. Changing any byte
 // changes the identity required by artifact and capture admission.
 inline constexpr std::string_view kMvpOptions =
-    "native-lds-widths=2,4,8,16;native-lds-epoch-workgroup-barriers;single-block-loop;"
+    "native-lds-widths=1,2,4,8,12,16;native-lds-epoch-workgroup-barriers;single-block-loop;"
     "loop-lane-bank=ctz-mod4;sync-"
     "quota=16;workgroup-id=entry-scalar;workgroups-1d=1..16;mask64;address-groups-per-"
-    "site=4;collision=on";
+    "site=4;collision=on;relaxed-lds-atomic=single-range-access;group-flat=";
 // Software record slots for distinct effective LDS address groups per wave/site.
 // Acyclic accesses fill sequential slots; lanes beyond four groups cause loss.
 // Repeated accesses instead claim immutable lane-based banks, where a collision
@@ -60,7 +61,30 @@ inline constexpr std::array<KernargExtensionPayloadLayout, 1> kContextPointerPay
 
 enum class AnalysisKind : uint32_t { Invalid = 0, LdsRaceDetection = 1 };
 enum class RecordKind : uint32_t { Access = 1 };
-enum class AccessKind : uint32_t { Read = 1, Write = 2 };
+// A GroupFlat site records the premise, if any, used to interpret the guest address.
+enum class FlatPolicy { Likely, Strict };
+enum class FlatAssumption : uint32_t { None, SelectedSharedHigh, HelperLoadAt, HelperStoreAt };
+constexpr std::string_view flat_assumption_text(FlatAssumption assumption) {
+  if (assumption == FlatAssumption::HelperLoadAt)
+    return "the terminal read uses the LDS pointer passed to "
+           "hip_moi::context::lds_load_at<unsigned>";
+  if (assumption == FlatAssumption::HelperStoreAt)
+    return "the terminal write uses the LDS pointer passed to "
+           "hip_moi::context::lds_store_at<unsigned>";
+  if (assumption == FlatAssumption::SelectedSharedHigh)
+    return "the selected pointer high word belongs to this workgroup's shared aperture";
+  return {};
+}
+enum class FlatExclusionReason : uint32_t { NonGroup = 1, Unresolved, Strict };
+struct FlatExclusion {
+  uint64_t original_offset = 0;
+  uint32_t original_size = 0;
+  FlatExclusionReason reason = FlatExclusionReason::Unresolved;
+  FlatAssumption assumption = FlatAssumption::None;
+  bool operator==(const FlatExclusion &) const = default;
+};
+enum class AccessOrigin : uint32_t { Native = 0, GroupFlat = 1 };
+enum class AccessKind : uint32_t { Read = 1, Write = 2, Atomic = 3 };
 enum class ScopeKind : uint32_t {
   NativeLdsNoSynchronization = 1,
   NativeLdsWorkgroupBarrier = 2,
@@ -127,8 +151,11 @@ inline constexpr uint32_t kRecordGuestMask = 32;
 inline constexpr uint32_t kRecordFlags = 40;
 inline constexpr uint32_t kRecordPhase = 44;
 inline constexpr uint32_t kRecordReservedBegin = 48;
+// Transpose records use the first two reserved words for the pre-instruction EXEC.
+inline constexpr uint32_t kRecordAnchorExec = kRecordReservedBegin;
 inline constexpr uint32_t kAccessCommitted = 0x43534143;
 inline constexpr uint32_t kExactGuestMask = 1;
+inline constexpr uint32_t kExactTransposeRequestMask = 4;
 } // namespace wire
 
 /// @brief Initial software budgets, checked before allocating untrusted extents.
@@ -157,6 +184,37 @@ public:
   bool operator==(const ImageIdentity &) const = default;
 };
 
+enum class LdsRangeShape : uint32_t {
+  Single = 0,
+  Dual = 1,
+  DualStride64 = 2,
+  Transpose4 = 3,
+  Transpose6 = 4,
+  Transpose8 = 5,
+  Transpose16 = 6
+};
+
+constexpr bool is_dual(LdsRangeShape shape) {
+  return shape == LdsRangeShape::Dual || shape == LdsRangeShape::DualStride64;
+}
+
+constexpr bool is_transpose(LdsRangeShape shape) {
+  return shape >= LdsRangeShape::Transpose4 && shape <= LdsRangeShape::Transpose16;
+}
+
+struct LdsRangeRecipe {
+  LdsRangeShape shape = LdsRangeShape::Single;
+  uint8_t offset0 = 0;
+  uint8_t offset1 = 0;
+
+  constexpr uint32_t byte_offset(unsigned ordinal, uint32_t width) const {
+    const amdgpu::Ds2Addressing addressing{.element_bytes = width,
+                                           .stride64 = shape == LdsRangeShape::DualStride64};
+    return addressing.byte_offset(ordinal == 0 ? offset0 : offset1);
+  }
+  bool operator==(const LdsRangeRecipe &) const = default;
+};
+
 /// @brief One physical native LDS instruction, owned by the sole entry.
 /// @details Offsets are .text-relative. A zero mapping size means missing,
 /// whereas offset zero is a valid location. Both checks share this reservation.
@@ -166,10 +224,12 @@ public:
   uint32_t owner_entry = 0;
   AnalysisKind analysis = AnalysisKind::Invalid;
   RecordKind record = RecordKind::Access;
-  uint32_t range_id = 0;
   AccessKind access = AccessKind::Read;
-  // Byte count: explicitly set to 2, 4, 8 or 16. Zero is unspecified/invalid.
+  // Byte width of each range. Zero is unspecified/invalid.
   uint32_t width = 0;
+  LdsRangeRecipe lds_ranges{};
+  AccessOrigin origin = AccessOrigin::Native;
+  FlatAssumption assumption = FlatAssumption::None;
   uint64_t original_offset = 0;
   uint32_t original_size = 0;
   uint64_t prepared_guest_offset = 0;
@@ -241,6 +301,7 @@ public:
   uint64_t prepared_text_bytes = 0;
   EntryFacts entry;
   std::vector<SiteFacts> sites;
+  std::vector<FlatExclusion> flat_exclusions;
   std::vector<BarrierFacts> barriers;
   bool operator==(const Manifest &) const = default;
 };
@@ -278,7 +339,8 @@ initialize_transport(const Manifest &manifest, const LaunchDimensions &dimension
                      uint64_t report_address, util::DiagnosticEmitter diagnostic = {});
 
 [[nodiscard]] Digest digest(std::span<const uint8_t> bytes);
-[[nodiscard]] Digest mvp_options_digest();
+[[nodiscard]] Digest mvp_options_digest(FlatPolicy policy = FlatPolicy::Likely);
+[[nodiscard]] std::optional<FlatPolicy> saved_flat_policy(const Digest &options);
 
 [[nodiscard]] Result validate_manifest(const Manifest &manifest,
                                        util::DiagnosticEmitter diagnostic = {},

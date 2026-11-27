@@ -634,8 +634,8 @@ static int test_nan_inf_saturation() {
   uint8_t nib0 = packed & 0xF;
   uint8_t nib1 = (packed >> 4) & 0xF;
   (void)hipFree(dO);
-  if (nib0 != 0) {
-    printf("  NaN->fp4: got %d, expected 0\n", nib0);
+  if (nib0 != 0x7) {
+    printf("  NaN->fp4: got %d, expected 7 (max)\n", nib0);
     return 1;
   }
   if (nib1 != 0x7) {

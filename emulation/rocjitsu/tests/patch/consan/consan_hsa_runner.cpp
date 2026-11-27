@@ -1,9 +1,12 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "group_flat_oracle.h"
+#include "native_d16_oracle.h"
 #include "rocjitsu/code/consan/target.h"
 #include "rocjitsu/hooks/consan/api.h"
 #include "rocjitsu/hooks/consan/testing.h"
+#include "transpose_oracle.h"
 
 #include <hsa/hsa.h>
 #include <hsa/hsa_ext_amd.h>
@@ -98,13 +101,18 @@ hsa_amd_memory_pool_t fine_pool(hsa_agent_t cpu) {
 
 int run(int argc, char **argv) {
   if (argc < 5) {
-    std::cerr << "Usage: consan_hsa_runner ORIGINAL ENTRY LAUNCHES MODE "
-                 "[--baseline] "
-                 "[--bad-geometry] [--profiling] [--reuse-signal] [--target GPU] [--wave-size N] "
-                 "[--threads N] [--test-statistics] [--batch-barrier-and|--batch-barrier-or] "
-                 "[--separate-barrier] [--high-lane] [--workgroups N] [--amd-signals]\n"
-                 "MODE: grouped, grouped_sync, defined, synchronized, mixed, wide_u16, wide_i16, "
-                 "wide_b64, wide_b128, observe\n";
+    std::cerr
+        << "Usage: consan_hsa_runner ORIGINAL ENTRY LAUNCHES MODE "
+           "[--baseline] "
+           "[--bad-geometry] [--profiling] [--reuse-signal] [--target GPU] [--wave-size N] "
+           "[--threads N] [--test-statistics] [--batch-barrier-and|--batch-barrier-or] "
+           "[--separate-barrier] [--high-lane] [--workgroups N] [--amd-signals]\n"
+           "MODE: grouped, grouped_sync, defined, synchronized, mixed, wide_u8, wide_i8, "
+           "wide_b8_peer, wide_d16_u8, wide_d16_i8, wide_d16_u16, wide_d16_peer, wide_u16, "
+           "wide_i16, "
+           "wide_b64, wide_b96, wide_b128, atomic_u32_count, atomic_u64_count, atomic_f32_count, "
+           "atomic_f64_count, atomic_cas_count, flat_half_values, flat_b64_values, "
+           "flat_b128_values, transpose_BITS_SCENARIO, observe\n";
     return 3;
   }
   uint32_t launches = 0;
@@ -114,16 +122,44 @@ int run(int argc, char **argv) {
     return 3;
   }
   const std::string_view mode(argv[4]);
-  const bool defined = mode == "defined";
+  uint32_t transpose_bits = 0;
+  std::string_view transpose_scenario;
+  if (mode.starts_with("transpose_")) {
+    const std::string_view suffix = mode.substr(10);
+    const char *end = suffix.data() + suffix.size();
+    const auto parsed_bits = std::from_chars(suffix.data(), end, transpose_bits);
+    if (parsed_bits.ec != std::errc{} || parsed_bits.ptr == end || *parsed_bits.ptr != '_' ||
+        (transpose_bits != 4 && transpose_bits != 6 && transpose_bits != 8 &&
+         transpose_bits != 16)) {
+      return 3;
+    }
+    transpose_scenario = {parsed_bits.ptr + 1, end};
+    if (transpose_scenario != "full" && transpose_scenario != "empty" &&
+        transpose_scenario != "partial" && transpose_scenario != "overlap" &&
+        transpose_scenario != "adjacent" && transpose_scenario != "short") {
+      return 3;
+    }
+  }
+  const uint32_t flat_width = mode == "flat_b64_values" ? 8 : mode == "flat_b128_values" ? 16 : 0;
+  const bool flat_half = mode == "flat_half_values";
+  const bool atomic_cas = mode == "atomic_cas_count";
+  const bool atomic_wide = mode == "atomic_u64_count" || mode == "atomic_f64_count";
+  const bool defined =
+      mode == "defined" || mode == "atomic_u32_count" || mode == "atomic_f32_count";
   const bool grouped = mode == "grouped" || mode == "grouped_sync";
   const bool group_barrier = mode == "grouped_sync";
   const bool mixed = mode == "mixed";
   const bool synchronized = mode == "synchronized" || mixed;
-  const uint32_t wide_width = mode == "wide_u16" || mode == "wide_i16" ? 2
-                              : mode == "wide_b64"                     ? 8
-                              : mode == "wide_b128"                    ? 16
-                                                                       : 0;
-  if (!defined && !synchronized && !grouped && wide_width == 0 && mode != "observe") {
+  const bool d16 = mode == "wide_d16_u8" || mode == "wide_d16_i8" || mode == "wide_d16_u16" ||
+                   mode == "wide_d16_peer";
+  const uint32_t wide_width = mode == "wide_u8" || mode == "wide_i8" || mode == "wide_b8_peer" ? 1
+                              : mode == "wide_u16" || mode == "wide_i16"                       ? 2
+                              : mode == "wide_b64"                                             ? 8
+                              : mode == "wide_b96"                                             ? 12
+                              : mode == "wide_b128"                                            ? 16
+                                                                                               : 0;
+  if (!flat_width && !flat_half && !atomic_wide && !atomic_cas && !defined && !synchronized &&
+      !grouped && wide_width == 0 && !d16 && !transpose_bits && mode != "observe") {
     return 3;
   }
   std::string_view target = "gfx1100";
@@ -175,7 +211,13 @@ int run(int argc, char **argv) {
     return 3;
   }
   const uint32_t wave_count = (threads + wave_size - 1) / wave_size;
-  const uint32_t output_words = std::max((wide_width ? 4u : 1u) * wave_count * workgroups, 2u);
+  const uint32_t output_words =
+      transpose_bits ? 4u * threads * workgroups
+      : flat_width   ? (2 * flat_width / 4) * wave_count * workgroups
+      : flat_half    ? 6u * wave_count * workgroups
+                     : std::max(((wide_width || d16 || atomic_cas) ? 4u : (atomic_wide ? 2u : 1u)) *
+                                    wave_count * workgroups,
+                                2u);
   const size_t output_bytes = output_words * sizeof(uint32_t);
   if (baseline && (bad_geometry || profiling || reuse_signal || test_statistics || barrier_type)) {
     return 3;
@@ -427,7 +469,41 @@ int run(int argc, char **argv) {
               << last_output[1] << '\n';
     if (defined) {
       for (uint32_t wave = 0; wave < wave_count; ++wave) {
-        if (last_output[wave] != input + wave) {
+        const uint32_t expected = mode == "atomic_f32_count"
+                                      ? 0x40200000u
+                                      : input + wave + (mode == "atomic_u32_count" ? 2u : 0u);
+        if (last_output[wave] != expected) {
+          result = 23;
+        }
+      }
+    }
+    if (flat_width || flat_half) {
+      for (uint32_t wave = 0; wave < wave_count; ++wave) {
+        const std::vector<uint32_t> expected =
+            flat_width ? rocjitsu::consan::test::flat_wide_output(flat_width, input, wave)
+                       : rocjitsu::consan::test::flat_half_output(target, wave);
+        for (size_t word = 0; word < expected.size(); ++word) {
+          const uint32_t observed = last_output[wave * expected.size() + word];
+          if (observed != expected[word]) {
+            std::cerr << "wave " << wave << " word " << word << " expected " << expected[word]
+                      << " observed " << observed << '\n';
+            result = 23;
+          }
+        }
+      }
+    }
+    if (atomic_cas) {
+      for (uint32_t wave = 0; wave < wave_count; ++wave) {
+        const std::array<uint32_t, 4> expected = {input, wave == 0 ? 0x2468u : input,
+                                                  1008 + 8 * wave, 0};
+        if (!std::equal(expected.begin(), expected.end(), last_output.begin() + 4 * wave))
+          result = 23;
+      }
+    }
+    if (atomic_wide) {
+      const uint32_t expected_high = mode == "atomic_f64_count" ? 0x40040000u : 4u;
+      for (uint32_t wave = 0; wave < wave_count; ++wave) {
+        if (last_output[2 * wave] != 0 || last_output[2 * wave + 1] != expected_high) {
           result = 23;
         }
       }
@@ -442,18 +518,42 @@ int run(int argc, char **argv) {
         }
       }
     }
-    if (wide_width) {
+    if (transpose_bits) {
+      // Partial EXEC on gfx950 is an undefined input used only for the simulator diagnosis.
+      if (target != "gfx950" || transpose_scenario != "partial") {
+        for (uint32_t thread = 0; thread < threads * workgroups; ++thread) {
+          const auto expected = rocjitsu::consan::test::transpose_output(
+              thread % wave_size, transpose_bits, target == "gfx950", transpose_scenario);
+          if (!std::equal(expected.begin(), expected.end(), last_output.begin() + 4 * thread)) {
+            result = 23;
+          }
+        }
+      }
+    } else if (wide_width || d16) {
       for (uint32_t wave = 0; wave < wave_count; ++wave) {
         std::array<uint32_t, 4> expected{input + wave, 0x01234567u, 0x76543210u, 0xa5a5a5a5u};
-        if (mode == "wide_i16") {
+        if (mode == "wide_d16_peer") {
+          expected = {input + wave, 0x89abcdefu, 0x13579bdfu, 0xfedcba98u};
+        } else if (d16) {
+          expected = rocjitsu::consan::test::d16_output(target, wave, mode == "wide_d16_u16",
+                                                        mode == "wide_d16_i8");
+        } else if (wide_width == 1) {
+          const uint32_t byte = (0x80u + input + wave) & 0xffu;
+          expected[0] = mode == "wide_i8" && (byte & 0x80) ? (0xffffff00u | byte) : byte;
+          if (mode != "wide_b8_peer") {
+            expected[1] = (byte << 24) | 0x00234567u;
+          }
+        } else if (mode == "wide_i16") {
           expected[0] += 0xffff8000u;
         } else if (wide_width == 2) {
           expected[0] += 0x8000u;
         } else {
           expected[1] = 0x89abcdefu;
         }
-        if (wide_width == 16) {
+        if (wide_width >= 12) {
           expected[2] = 0x13579bdfu;
+        }
+        if (wide_width == 16) {
           expected[3] = 0xfedcba98u;
         }
         if (high_lane && wave * wave_size + wave_size - 1 >= threads) {

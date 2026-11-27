@@ -8,7 +8,6 @@
 #include "fixtures/float_dot/gfx1100_cases.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/gfx11_dot2.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/isa_family.h"
@@ -30,6 +29,7 @@
 namespace {
 using namespace rocjitsu;
 
+// Restore host test state and the forced-scalar override.
 struct HostState {
   fenv_t environment;
   bool scalar = util::force_scalar();
@@ -80,20 +80,6 @@ public:
   amdgpu::Wavefront *wave = nullptr;
   uint32_t base;
 };
-
-TEST(Gfx11Dot2, HardwareBits) {
-  HostState restore;
-  for (bool bf16 : {false, true}) {
-    const auto cases = bf16 ? std::span<const Dot2HardwareCase>(kDot2BF16Cases)
-                            : std::span<const Dot2HardwareCase>(kDot2F16Cases);
-    for (const auto &c : cases) {
-      const uint32_t result =
-          bf16 ? amdgpu::gfx11_dot2_f32<true>(c.a, c.b, c.a >> 16, c.b >> 16, c.c)
-               : amdgpu::gfx11_dot2_f32<false>(c.a, c.b, c.a >> 16, c.b >> 16, c.c);
-      EXPECT_EQ(result, c.expected) << std::hex << c.a << ' ' << c.b << ' ' << c.c;
-    }
-  }
-}
 
 TEST(Gfx11Dot2, DecodedHardwareCasesAndInactiveLanes) {
   HostState restore;

@@ -94,7 +94,7 @@ std::atomic<uint32_t> completed_run_ctx_calls = 0;
 rocjitsu::test::ScopedTempDirectory make_runtime_directory(const char *prefix) {
   rocjitsu::test::ScopedTempDirectory directory;
   if (const auto initialized = initialize_runtime_directory(directory, prefix); !initialized) {
-    throw std::runtime_error(initialized.message());
+    ADD_FAILURE() << initialized.message();
   }
   return directory;
 }
@@ -357,7 +357,7 @@ public:
         owner_(owner_msix, owner_fd_offset, owner_64bit),
         requester_host_(runtime_.path() + "/requester.sock", requester_),
         owner_host_(runtime_.path() + "/owner.sock", owner_) {
-    if (!owner_.usable() || (seal_owner && !owner_.seal())) {
+    if (runtime_.path().empty() || !owner_.usable() || (seal_owner && !owner_.seal())) {
       return;
     }
     built_ = requester_host_.enable_target_grants(grants_, 0, requester_gpu_id, fabric) &&
@@ -432,7 +432,7 @@ public:
         requester_a_host_(runtime_.path() + "/requester-a.sock", requester_a_),
         requester_b_host_(runtime_.path() + "/requester-b.sock", requester_b_),
         owner_host_(runtime_.path() + "/owner.sock", owner_) {
-    if (!owner_.usable() || !owner_.seal()) {
+    if (runtime_.path().empty() || !owner_.usable() || !owner_.seal()) {
       return;
     }
     built_ = requester_a_host_.enable_target_grants(grants_, 0, 100) &&
@@ -869,8 +869,9 @@ TEST(VfioTargetGrants, StandardMapResolves64BitPeerBarAbove4GiB) {
 }
 
 TEST(VfioTargetGrants, StandardMapWithMissingFabricRouteLeavesPeerWindowUnreachable) {
-  rocjitsu::FabricEndpoint fabric(std::vector<rocjitsu::config::SystemPeerRoute>{});
-  MappedGrantPair pair(/*seal_owner=*/true, &fabric, 0, 202);
+  auto fabric = rocjitsu::FabricEndpoint::create(std::vector<rocjitsu::config::SystemPeerRoute>{});
+  ASSERT_NE(fabric, nullptr);
+  MappedGrantPair pair(/*seal_owner=*/true, fabric.get(), 0, 202);
   ASSERT_TRUE(pair.built());
   rocjitsu::test::VfioUserClient requester;
   rocjitsu::test::VfioUserClient owner;
@@ -1397,8 +1398,9 @@ TEST(VfioTargetGrants, Gfx12GartPeerReadWriteUsesFabricWithStockPageTableWalks) 
   constexpr uint64_t kPteFlags = (uint64_t{1} << 63) | 1 | 2 | 4 | 32 | 64;
   simdojo::SimulationEngine engine({.num_threads = 1});
   auto root = std::make_unique<simdojo::CompositeComponent>("root");
-  auto fabric = std::make_unique<rocjitsu::FabricEndpoint>(
+  auto fabric = rocjitsu::FabricEndpoint::create(
       std::vector<rocjitsu::config::SystemPeerRoute>{{"g0", "g1", 0, 202, {"e0", "switch", "e1"}}});
+  ASSERT_NE(fabric, nullptr);
   auto *endpoint = fabric.get();
   root->add_child(std::move(fabric));
   engine.topology().set_root(std::move(root));

@@ -112,13 +112,14 @@ public:
   explicit CanonicalLineFreshness(size_t capacity = kMaxEntries);
 
   /// Capture after maintenance and a successful backing read, before the VM
-  /// effect publishes completion. A busy lock or allocation failure disables
-  /// this read's optional fill without changing the committed read result.
+  /// effect publishes completion. A busy lock disables this read's optional
+  /// fill without changing the committed read result. Allocation failure is fatal.
   [[nodiscard]] std::optional<ReadStamp> try_capture_read(uint64_t backing_id, uint64_t offset,
                                                           size_t size) noexcept;
 
   /// Capture a successful backing read while retaining the effect's exclusive
   /// authority, so a concurrent writer cannot intervene before publication.
+  /// Allocation failure is fatal.
   [[nodiscard]] std::optional<ReadStamp> capture_read_under_writer(const WriterAuthority &writer,
                                                                    uint64_t backing_id,
                                                                    uint64_t offset,

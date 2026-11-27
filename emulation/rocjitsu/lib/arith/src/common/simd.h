@@ -18,11 +18,6 @@ namespace rocjitsu::arith {
 // Requires the named CPU features and validated instruction controls.
 void move_half_x86_64_v4(uint32_t exec_mask, uint32_t mode, uint32_t *d, const uint32_t *a);
 
-// Evaluate swap half for the caller-selected operation. Preserve destination lanes outside
-// exec_mask.
-// Requires the named CPU features and validated instruction controls.
-void swap_half_x86_64_v4(int lanes, uint64_t exec_mask, uint32_t mode, uint32_t *d, uint32_t *a);
-
 // Evaluate ds bpermute for the caller-selected operation. Preserve destination lanes outside
 // exec_mask.
 // Requires the named CPU features and validated instruction controls.
@@ -35,12 +30,9 @@ void ds_bpermute_x86_64_v4(int lanes, int group, uint64_t exec_mask, uint32_t *d
 // Requires the named CPU features and validated instruction controls.
 void ds_swizzle_x86_64_v4(int lanes, uint64_t exec_mask, uint32_t *d, const uint32_t *a,
                           uint16_t offset);
+
 #endif
 
-#if defined(RJ_ARITH_HAVE_X86_64_V3)
-// Exchange rows using the named CPU features and independently masked stores.
-void swap_rows_x86_64_v3(int lanes, int stride, uint64_t exec_mask, uint32_t *d, uint32_t *a);
-#endif
 // Exact packed INT4/INT8/INT16 dot with final wrapping or saturation.
 // Requires x86-64-v4 and validated controls; half selection is resolved by the caller.
 void integer_dot_x86_64_v4(int bits, bool unsigned_acc, uint32_t exec_mask,
@@ -66,11 +58,6 @@ void cdna_dot2_x86_64_v4(bool bf16, uint32_t exec_mask, uint32_t instruction_fla
 // Requires the named CPU features and validated instruction controls.
 void move_half_x86_64_v3(uint32_t exec_mask, uint32_t mode, uint32_t *d, const uint32_t *a);
 
-// Evaluate swap half for the caller-selected operation. Preserve destination lanes outside
-// exec_mask.
-// Requires the named CPU features and validated instruction controls.
-void swap_half_x86_64_v3(int lanes, uint64_t exec_mask, uint32_t mode, uint32_t *d, uint32_t *a);
-
 // Evaluate ds bpermute for the caller-selected operation. Preserve destination lanes outside
 // exec_mask.
 // Requires the named CPU features and validated instruction controls.
@@ -88,11 +75,6 @@ void ds_swizzle_x86_64_v3(int lanes, uint64_t exec_mask, uint32_t *d, const uint
 // Requires the named CPU features and validated instruction controls.
 void move_half_x86_64_v3(uint32_t exec_mask, uint32_t mode, uint32_t *d, const uint32_t *a);
 
-// Evaluate swap half for the caller-selected operation. Preserve destination lanes outside
-// exec_mask.
-// Requires the named CPU features and validated instruction controls.
-void swap_half_x86_64_v3(int lanes, uint64_t exec_mask, uint32_t mode, uint32_t *d, uint32_t *a);
-
 // Evaluate ds bpermute for the caller-selected operation. Preserve destination lanes outside
 // exec_mask.
 // Requires the named CPU features and validated instruction controls.
@@ -109,11 +91,6 @@ void ds_swizzle_x86_64_v3(int lanes, uint64_t exec_mask, uint32_t *d, const uint
 // exec_mask.
 // Requires the named CPU features and validated instruction controls.
 void move_half_x86_64_v3(uint32_t exec_mask, uint32_t mode, uint32_t *d, const uint32_t *a);
-
-// Evaluate swap half for the caller-selected operation. Preserve destination lanes outside
-// exec_mask.
-// Requires the named CPU features and validated instruction controls.
-void swap_half_x86_64_v3(int lanes, uint64_t exec_mask, uint32_t mode, uint32_t *d, uint32_t *a);
 
 // Evaluate ds bpermute for the caller-selected operation. Preserve destination lanes outside
 // exec_mask.
@@ -304,6 +281,20 @@ void fp8_wmma_x86_64_v4(uint32_t *const *d, const uint32_t *const *a, const uint
 void fp8_wmma_exact_x86_64_v4(bool bf8_a, bool bf8_b, uint32_t *const *d, const uint32_t *const *a,
                               const uint32_t *const *b, const uint32_t *const *c);
 
+// Exact integer WMMA in gfx12 Wave32 layout, with staged CLAMP. D may alias inputs.
+// Requires the named CPU features and validated instruction controls.
+template <int Bits, int K>
+void integer_wmma_x86_64_v4(uint32_t instruction_flags, uint32_t *const *d,
+                            const uint32_t *const *a, const uint32_t *const *b,
+                            const uint32_t *const *c);
+
+// Compute a gfx11 integer tile with independent sixteen-lane factor groups.
+// Requires validated modifiers. D may overlap any input.
+template <int Bits, int Lanes>
+void integer_wmma_replicated_x86_64_v4(uint32_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       const uint32_t *const *c);
+
 // Compute empirical bit-exact FP16/BF16 A*B+C for the selected gfx layout
 // and wave size. Requires validated instruction flags; D may alias inputs.
 template <bool Bf16, int Lanes, bool Rdna3, bool Packed>
@@ -351,6 +342,13 @@ template <int Bits, int K>
 void integer_wmma_avx512vnni(uint32_t instruction_flags, uint32_t *const *d,
                              const uint32_t *const *a, const uint32_t *const *b,
                              const uint32_t *const *c);
+
+// Exact integer WMMA in gfx11 replicated layout, with staged CLAMP. D may alias inputs.
+// Requires Zen4/VNNI support and validated instruction controls.
+template <int Bits, int Lanes>
+void integer_wmma_replicated_avx512vnni(uint32_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        const uint32_t *const *c);
 
 #endif
 

@@ -100,6 +100,7 @@ if(AMDCXX AND EXISTS "${ROCM_PATH}/lib/llvm/bin/ld.lld")
             CONSAN_MULTI_ENTRY_MIXED_FIXTURE="${_fixture_dir}/multi-entry-mixed.hsaco"
             CONSAN_MULTI_ENTRY_NATIVE_GLOBAL_FIXTURE="${_fixture_dir}/multi-entry-native-global.hsaco"
             CONSAN_MULTI_ENTRY_UNREACHABLE_PC_FIXTURE="${_fixture_dir}/multi-entry-unreachable-pc.hsaco"
+            CONSAN_MULTI_ENTRY_LOCAL_HELPER_FIXTURE="${_fixture_dir}/multi-entry-local-helper.hsaco"
     )
 else()
     message(
@@ -481,7 +482,66 @@ if(TARGET consan_hsa_runner)
                 )
             endforeach()
             if(RJ_BUILD_CONSAN_ANALYZER)
-                set(_width_cases wide_u16 wide_i16 wide_b64 wide_b128)
+                if(_gpu STREQUAL "gfx950" OR _gpu STREQUAL "gfx1250")
+                    foreach(_bits IN ITEMS 4 6 8 16)
+                        foreach(
+                            _scenario
+                            IN
+                            ITEMS full partial empty overlap adjacent short
+                        )
+                            if(
+                                _scenario STREQUAL "short"
+                                AND NOT _gpu STREQUAL "gfx1250"
+                            )
+                                continue()
+                            endif()
+                            if(
+                                _gpu STREQUAL "gfx950"
+                                AND _scenario STREQUAL "partial"
+                                AND _environment STREQUAL "Physical"
+                            )
+                                continue() # The gfx950 ISA defines only full and empty EXEC.
+                            endif()
+                            set(_launch_size ${_wave_size})
+                            if(
+                                _scenario STREQUAL "overlap"
+                                OR _scenario STREQUAL "adjacent"
+                            )
+                                set(_launch_size ${_threads})
+                            elseif(_scenario STREQUAL "short")
+                                set(_launch_size 4)
+                            endif()
+                            consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
+                                transpose_${_bits}_${_scenario} ${_launch_size} production analysis
+                            )
+                        endforeach()
+                    endforeach()
+                endif()
+                foreach(
+                    _fixture
+                    IN
+                    LISTS
+                        _atomic_cases_${_gpu}_${_wave_size}
+                        _flat_cases_${_gpu}_${_wave_size}
+                )
+                    string(REPLACE "-" "_" _case ${_fixture})
+                    consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
+                        ${_case} ${_threads} production analysis
+                    )
+                endforeach()
+                set(_width_cases
+                    wide_u8
+                    wide_i8_alias_high
+                    wide_d16_u8
+                    wide_d16_i8_high
+                    wide_d16_u16
+                    wide_u16
+                    wide_i16
+                    wide_b64
+                    wide_b96
+                    wide_b96_alias_high
+                    wide_b128
+                )
                 if(_gpu STREQUAL "gfx1250")
                     list(
                         APPEND _width_cases
@@ -500,6 +560,32 @@ if(TARGET consan_hsa_runner)
                 foreach(_width_case IN LISTS _width_cases)
                     consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
                         ${_width_case} ${_width_threads} production analysis
+                    )
+                endforeach()
+                foreach(_peer IN ITEMS overlap adjacent)
+                    consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
+                        wide_d16_${_peer} ${_threads} production analysis
+                    )
+                endforeach()
+                foreach(_bits IN ITEMS 32 64)
+                    foreach(_spacing IN ITEMS normal stride64)
+                        set(_dual wide_dual_b${_bits}_${_spacing})
+                        consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
+                            ${_dual}_values_high ${_width_threads} production analysis
+                        )
+                        foreach(_peer IN ITEMS overlap gap)
+                            consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
+                                ${_dual}_${_peer} ${_threads} production analysis
+                            )
+                        endforeach()
+                    endforeach()
+                endforeach()
+                foreach(_peer IN ITEMS overlap adjacent disjoint)
+                    consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
+                        wide_b8_${_peer} ${_threads} production analysis
+                    )
+                    consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
+                        wide_b96_${_peer} ${_threads} production analysis
                     )
                 endforeach()
                 foreach(_groups IN ITEMS 1 4 16)

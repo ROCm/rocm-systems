@@ -92,6 +92,26 @@ operations. This function performs several key tasks:
   Checks for errors in device selection and returns error if the specified
   device is not available or not capable of executing HIP operations.
 
+Initializing a GPU without selecting it
+--------------------------------------------------------------------------------
+
+:cpp:func:`hipInitDevice` initializes the runtime state for a device without
+making it the current device for the calling thread. On ROCm, the primary
+context of every device is created when the HIP runtime initializes, so
+:cpp:func:`hipInitDevice` validates the device, applies the requested flags,
+and creates the device's default stream.
+
+The function takes three arguments:
+
+- ``device``: the ID of the device to initialize.
+- ``deviceFlags``: scheduling flags, with the same values as
+  :cpp:func:`hipSetDeviceFlags`, for example ``hipDeviceScheduleAuto`` or
+  ``hipDeviceScheduleBlockingSync``.
+- ``flags``: ``hipInitDeviceFlagsAreValid`` to validate and apply
+  ``deviceFlags``, or ``0`` to skip them. With ``0``, the call still validates
+  the device and creates its default stream. Any other value returns
+  ``hipErrorInvalidValue``.
+
 Process creation (`fork()`/`exec()`)
 ================================================================================
 

@@ -311,6 +311,7 @@ def test_publication_steps_follow_responsibility_order():
         'Checkout repository for publication',
         'Checkout publication validation source',
         'Set up publication validation Python',
+        'Set up publication validation uv',
         'Install publication validation dependencies',
         'Fill publication metadata',
         'Validate publication candidate',
@@ -334,14 +335,17 @@ def test_publication_validation_uses_workflow_source_and_declared_dependencies()
         'ref': '${{ github.sha }}',
         'persist-credentials': False,
     }
-    assert workflow['env']['ROCJITSU_SOURCE_DIR'] == (
+    assert workflow['jobs']['publish']['env']['ROCJITSU_SOURCE_DIR'] == (
         '${{ github.workspace }}/rocm-systems/emulation/rocjitsu'
     )
     python = steps['Set up publication validation Python']
     assert python['uses'].startswith('actions/setup-python@')
     assert python['with']['python-version'] == '3.12'
+    uv = steps['Set up publication validation uv']
+    assert uv['uses'] == 'astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2'
+    assert uv['with'] == {'version': '0.12.21', 'enable-cache': False}
     assert steps['Install publication validation dependencies']['run'] == (
-        'python -m pip install -r '
+        'uv --no-config pip install --system --python "$(command -v python)" -r '
         '"${ROCJITSU_SOURCE_DIR}/website/dashboard/scripts/dashboard-data/requirements-test.txt"'
     )
     validation = steps['Validate publication candidate']
@@ -417,10 +421,10 @@ def test_benchmark_pin_and_unfiltered_execution():
     generation = next(
         s['run']
         for s in benchmark['steps']
-        if s['name'] == 'Generate pinned Tensile artifacts'
+        if s['name'] == 'Prepare benchmark providers'
     )
     assert (
-        'prepare-benchmarks.py" generate --manifest "${BENCHMARK_MANIFEST}"'
+        'prepare-benchmarks.py" tensilelite-generate --manifest "${BENCHMARK_MANIFEST}"'
         in generation
     )
     workflow_text = (WORKFLOWS / 'rocjitsu-benchmarks.yml').read_text()
@@ -640,8 +644,7 @@ def test_benchmark_and_tooling_checkouts_have_separate_owners():
     for name in (
         'Install benchmark dependencies',
         'Build rocjitsu',
-        'Prepare Tensile wheel and native adapter',
-        'Generate pinned Tensile artifacts',
+        'Prepare benchmark providers',
         'Collect preparation diagnostics',
         'Clean owned benchmark scratch',
     ):

@@ -2487,8 +2487,9 @@ TEST(Rcclwrap, AdjustChannels_Enabled_DividesByMultiplier)
 // -> divided then doubled (the "reduced CU usage" special case).
 TEST(Rcclwrap, AdjustChannels_Gfx950SingleNode8Ranks_NonMainColl_Doubles)
 {
-    // Relies on default RCCL_MAX_NCHANNELS (-2, i.e. < 0). Isolate so the cached
-    // ncclParamMaxNchannels() value is deterministic regardless of test ordering.
+    // Relies on NCCL_MAX_NCHANNELS, NCCL_MAX_NRINGS and NCCL_WORK_ARGS_BYTES at their
+    // defaults, so ncclMaxNchannels() == MAXCHANNELS. Isolate so the cached params are
+    // deterministic regardless of test ordering.
     RUN_ISOLATED_TEST_WITH_ENV(
         "AdjustChannels_Gfx950SingleNode8Ranks_NonMainColl_Doubles",
         []()
@@ -2536,6 +2537,59 @@ TEST(Rcclwrap, AdjustChannels_Gfx950SingleNode8Ranks_MainColl_NoDouble)
             CleanupMockComm(comm);
         },
         {}
+    );
+}
+
+// NCCL_MAX_NRINGS skips the gfx950 halving, so the doubling is skipped too: 64/4 = 16.
+TEST(Rcclwrap, AdjustChannels_Gfx950SingleNode8Ranks_MaxNringsSkipsDoubling)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AdjustChannels_Gfx950SingleNode8Ranks_MaxNringsSkipsDoubling",
+        []()
+        {
+            ncclComm_t            comm = nullptr;
+            auto                  topo = std::make_unique<ncclTopoSystem>();
+            struct ncclTopoNode   gpu;
+            CreateMockComm(comm, *topo, gpu, "gfx950", /*nRanks=*/8);
+            comm->nNodes                     = 1;
+            comm->topo->warpSpeedEnabled     = true;
+            comm->warpSpeedChannelMultiplier = 4;
+
+            ncclTaskColl info = {};
+            info.func         = ncclFuncBroadcast;
+
+            EXPECT_EQ(rcclWarpSpeedAdjustChannels(comm, &info, /*nc=*/64), 16);
+
+            CleanupMockComm(comm);
+        },
+        {{"NCCL_MAX_NRINGS", "16"}}
+    );
+}
+
+// NCCL_MAX_NCHANNELS=MAXCHANNELS leaves ncclMaxNchannels() at its default, so the
+// halving ran and the doubling must restore it: 32/4 = 8, *2 = 16.
+TEST(Rcclwrap, AdjustChannels_Gfx950SingleNode8Ranks_MaxNchannelsAtDefaultKeepsDoubling)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AdjustChannels_Gfx950SingleNode8Ranks_MaxNchannelsAtDefaultKeepsDoubling",
+        []()
+        {
+            ncclComm_t            comm = nullptr;
+            auto                  topo = std::make_unique<ncclTopoSystem>();
+            struct ncclTopoNode   gpu;
+            CreateMockComm(comm, *topo, gpu, "gfx950", /*nRanks=*/8);
+            comm->nNodes                     = 1;
+            comm->topo->warpSpeedEnabled     = true;
+            comm->warpSpeedChannelMultiplier = 4;
+
+            ncclTaskColl info = {};
+            info.func         = ncclFuncBroadcast;
+
+            EXPECT_EQ(rcclWarpSpeedAdjustChannels(comm, &info, /*nc=*/32), 16);
+
+            CleanupMockComm(comm);
+        },
+        {{"NCCL_MAX_NCHANNELS", std::to_string(MAXCHANNELS)}}
     );
 }
 
@@ -3093,7 +3147,8 @@ TEST(RcclDdaTierThresholds, Gfx1250_NoEnv_UsesArchTable)
 // The rank-scaled caps from the 8-64 rank H13 sweep (AICOMRCCL-1756): below 8 ranks
 // the totals stay in force, from 8 ranks each tier grows with the comm and is
 // clipped at 256 MiB. ReduceScatter LL keeps its 1 MiB total below 32 ranks, and from 32 ranks
-// ReduceScatter LL runs to 2 MiB and LL128 to 512 MiB.
+// ReduceScatter LL runs to 2 MiB and LL128 to 512 MiB. 32 ranks take the ddaLargeComm* AllReduce
+// caps: LL to 2 MiB and LL128 to 64 MiB.
 TEST(RcclDdaTierThresholds, Gfx1250_RankScaledCaps)
 {
     RUN_ISOLATED_TEST_WITH_ENV(
@@ -3115,7 +3170,8 @@ TEST(RcclDdaTierThresholds, Gfx1250_RankScaledCaps)
             for (int nRanks : {8, 16, 32, 64}) {
                 comm->nRanks = nRanks;
                 const size_t n = static_cast<size_t>(nRanks);
-                EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAllReduce), 1 * MiB) << nRanks; // not scaled
+                EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAllReduce), nRanks == 32 ? 2 * MiB : 1 * MiB)
+                    << nRanks; // not scaled, apart from the 32-rank cap
                 EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAllGather), n * 16 * KiB) << nRanks;
                 EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncReduceScatter), nRanks >= 32 ? 2 * MiB : 1 * MiB)
                     << nRanks;
@@ -3125,8 +3181,9 @@ TEST(RcclDdaTierThresholds, Gfx1250_RankScaledCaps)
                           nRanks >= 32 ? 512 * MiB : std::min(n * 32 * MiB, 256 * MiB))
                     << nRanks;
                 EXPECT_EQ(rcclDdaVmmThreshold(comm.get(), ncclFuncReduceScatter), n * 2 * MiB) << nRanks;
-                // Unscaled tiers keep their totals.
-                EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncAllReduce), 256 * MiB) << nRanks;
+                // Unscaled tiers keep their totals, apart from the 32-rank AllReduce LL128 cap.
+                EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncAllReduce), nRanks == 32 ? 64 * MiB : 256 * MiB)
+                    << nRanks;
                 EXPECT_EQ(rcclDdaVmmThreshold(comm.get(), ncclFuncAllReduce), 16 * MiB) << nRanks;
                 EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAlltoAll), 128 * KiB) << nRanks;
             }

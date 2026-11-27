@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: MIT
 
-// Integer model of gfx942 low-precision MFMA, adapted from PR #14809.
-// Xie et al., MICRO 2026 / MMA-Sim (MIT); the contribution's MI300X captures
-// qualify default CBSZ/ABID/BLGP only. This file is compiled for the baseline ISA.
+// Integer model of gfx942 low-precision MFMA and SMFMAC, adapted from PR #14809
+// (Xie et al., MICRO 2026 / MMA-Sim, MIT) and extended with MI300X captures of
+// sparse MFMA, batched CBSZ/ABID/BLGP broadcast controls, and MODE.FP16_OVFL.
+// This file is compiled for the baseline ISA.
 #include "mfma/gfx942_exact.h"
 #include "common/float_formats.h"
 #include "mfma/fp8_formats.h"
 #include "mfma/layout.h"
+#include "mfma/sparse_layout.h"
 
 namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE {
 namespace {
@@ -55,8 +57,7 @@ constexpr int32_t kProductAtLeastTwoShift = 21;
 
 // Return the staged source encoding after format truncation.
 // XF32 NaNs whose payload lies only in bits 12:0 (such as 0x7f800001) truncate
-// to +-Inf; that case was not in the MI300X capture corpus and is inferred from
-// the pre-reduction truncation rule.
+// to +-Inf before reduction, as captured on MI300X.
 inline uint32_t source_bits(float value, Cdna3MfmaSource source) {
   const uint32_t bits = bit_cast<uint32_t>(value);
   return source.ignores_low_13_bits ? bits & 0xFFFFE000u : bits;
@@ -174,8 +175,9 @@ inline bool add_accumulators(const int32_t *dot, const int32_t *dot_exponents,
     const uint64_t bits = (static_cast<uint64_t>(exponent + 126) << 23) + kept + round_up;
     const uint64_t bounded = minimum<uint64_t>(bits, kPositiveInfinity);
     const uint64_t signed_bits = bounded | (fixed < 0 ? uint64_t{0x80000000u} : uint64_t{0});
-    // Zero sums (including all -0 products with C = -0, captured on MI300X) return +0.
-    results[col] = magnitude != 0 ? static_cast<uint32_t>(signed_bits) : 0u;
+    // Zero results (including all -0 products with C = -0 and negative underflow to zero,
+    // captured on MI300X) return +0.
+    results[col] = (magnitude != 0 && bounded != 0) ? static_cast<uint32_t>(signed_bits) : 0u;
   }
   return inf_nan != 0;
 }
@@ -254,7 +256,7 @@ inline bool non_finite_result(const Cdna3MfmaArithmetic &arithmetic, const float
 // B B[k * N + col], staged as f32.
 // C C[row * N + col], read and written as f32 bits.
 inline void cdna3_mfma_matmul(const Cdna3MfmaArithmetic &arithmetic, int M, int N, int K,
-                              const float *A, const float *B, float *C) {
+                              const float *A, const float *B, float *C, bool no_inf_nan) {
   using namespace cdna3_mfma_detail;
   alignas(64) int32_t a_mantissas[kMaxSourceElements], a_exponents[kMaxSourceElements];
   alignas(64) int32_t b_mantissas[kMaxSourceElements], b_exponents[kMaxSourceElements];
@@ -299,7 +301,12 @@ inline void cdna3_mfma_matmul(const Cdna3MfmaArithmetic &arithmetic, int M, int 
         }
       }
       for (int col = 0; col < N; ++col) {
-        c_row[col] = bit_cast<float>(results[col]);
+        uint32_t bits = results[col];
+        if (no_inf_nan && (bits & kPositiveInfinity) == kPositiveInfinity) {
+          // MODE.FP16_OVFL flushes NaN to +0.0 and clamps +-Inf to +-MAX_FLOAT after each step.
+          bits = (bits & 0x007FFFFFu) != 0 ? 0u : bits - 1u;
+        }
+        c_row[col] = bit_cast<float>(bits);
       }
     }
   }
@@ -328,8 +335,8 @@ static float source_value(MfmaGfx942Format format, bool operand_b, const uint32_
 }
 
 // Evaluate the characterized model, staging every output before publishing any alias.
-void mfma_gfx942_exact(MfmaGfx942Format format, int m, int k, int batches, uint32_t *const *d,
-                       const uint32_t *const *a, const uint32_t *const *b,
+void mfma_gfx942_exact(MfmaGfx942Format format, int m, int k, int batches, bool no_inf_nan,
+                       uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
                        const uint32_t *const *c) {
   const auto arithmetic =
       format == MfmaGfx942Format::F16    ? kCdna3MfmaF16
@@ -364,7 +371,7 @@ void mfma_gfx942_exact(MfmaGfx942Format format, int m, int k, int batches, uint3
         accumulators[index * m + col] = as_float(c[location.reg][location.lane]);
       }
     }
-    cdna3_mfma_matmul(arithmetic, m, m, k, left, right, accumulators);
+    cdna3_mfma_matmul(arithmetic, m, m, k, left, right, accumulators, no_inf_nan);
     for (int row = 0; row < m; ++row) {
       for (int col = 0; col < m; ++col) {
         const auto location = output(row, col);
@@ -376,6 +383,96 @@ void mfma_gfx942_exact(MfmaGfx942Format format, int m, int k, int batches, uint3
     for (int lane = 0; lane < 64; ++lane) {
       d[reg][lane] = result[reg][lane];
     }
+  }
+}
+
+template <int M, int K, bool Half>
+static void smfmac_gfx942_exact_shape(MfmaGfx942Format format,
+                                      const Cdna3MfmaArithmetic &arithmetic, uint64_t controls,
+                                      bool no_inf_nan, uint32_t *const *d, const uint32_t *const *a,
+                                      const uint32_t *const *b, const uint32_t *const *index) {
+  constexpr auto layout = Half ? SmfmacLayout::Cdna3F16 : SmfmacLayout::Cdna3Fp8;
+  constexpr int per_word = Half ? 2 : 4;
+  constexpr int set_bits = M * K / 64;
+  constexpr int output_regs = M * M / 64;
+  const int shift = (controls & 3) == 0 ? set_bits * int((controls >> 3) & (32 / set_bits - 1)) : 0;
+  uint32_t selected_index[64];
+  for (int lane = 0; lane < 64; ++lane) {
+    selected_index[lane] = index[0][lane] >> shift;
+  }
+  float left[M * K / 2], raw_right[M * K], right[K][M];
+  for (int i = 0; i < M * K / 2; ++i) {
+    left[i] = source_value(format, false, a, i);
+  }
+  for (int i = 0; i < M * K; ++i) {
+    raw_right[i] = source_value(format, true, b, i);
+  }
+  for (int depth = 0; depth < K; ++depth) {
+    for (int col = 0; col < M; ++col) {
+      const auto loc = smfmac_dense_loc<layout, M>(depth, col);
+      right[depth][col] =
+          raw_right[(loc.element / per_word * 64 + loc.lane) * per_word + loc.element % per_word];
+    }
+  }
+  uint32_t result[output_regs][64];
+  for (int row = 0; row < M; ++row) {
+    float row_a[K / 2], row_b[(K / 2) * M], row_c[M];
+    for (int t = 0; t < K / 2; ++t) {
+      // 16x16x64 FP8/BF8 feeds the 16x16x32 dense pipeline in two lane-half steps:
+      // lanes 0..31 supply q = {0..3, 8..11} in step 0, and lanes 32..63 supply
+      // q = {4..7, 12..15} in step 1.
+      const int q_log = t / 2;
+      const int q =
+          (M == 16 && K == 64) ? ((q_log & 3) + ((q_log & 4) << 1) + ((q_log & 8) >> 1)) : q_log;
+      const int s = t % 2;
+      const auto loc = smfmac_sparse_loc<layout, M, K>(row, q, s);
+      row_a[t] = left[(loc.element / per_word * 64 + loc.lane) * per_word + loc.element % per_word];
+      const int sel = 4 * q + int((selected_index[loc.lane] >> (4 * loc.nibble + 2 * s)) & 3);
+      for (int col = 0; col < M; ++col) {
+        row_b[t * M + col] = right[sel][col];
+      }
+    }
+    for (int col = 0; col < M; ++col) {
+      const auto out = mfma_output<M, 1>(row, col, 0);
+      row_c[col] = as_float(d[out.reg][out.lane]);
+    }
+    cdna3_mfma_matmul(arithmetic, 1, M, K / 2, row_a, row_b, row_c, no_inf_nan);
+    for (int col = 0; col < M; ++col) {
+      const auto out = mfma_output<M, 1>(row, col, 0);
+      result[out.reg][out.lane] = as_bits(row_c[col]);
+    }
+  }
+  for (int reg = 0; reg < output_regs; ++reg) {
+    for (int lane = 0; lane < 64; ++lane) {
+      d[reg][lane] = result[reg][lane];
+    }
+  }
+}
+
+void smfmac_gfx942_exact(MfmaGfx942Format format, int m, uint64_t controls, bool no_inf_nan,
+                         uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+                         const uint32_t *const *index) {
+  const auto arithmetic =
+      format == MfmaGfx942Format::F16 ? kCdna3MfmaF16
+      : format == MfmaGfx942Format::Bf16
+          ? kCdna3MfmaBf16
+          : cdna3_mfma_f8(format == MfmaGfx942Format::Fp8Fp8 || format == MfmaGfx942Format::Fp8Bf8,
+                          format == MfmaGfx942Format::Fp8Fp8 || format == MfmaGfx942Format::Bf8Fp8);
+  const bool half = format == MfmaGfx942Format::F16 || format == MfmaGfx942Format::Bf16;
+  if (half) {
+    if (m == 16) {
+      smfmac_gfx942_exact_shape<16, 32, true>(format, arithmetic, controls, no_inf_nan, d, a, b,
+                                              index);
+    } else {
+      smfmac_gfx942_exact_shape<32, 16, true>(format, arithmetic, controls, no_inf_nan, d, a, b,
+                                              index);
+    }
+  } else if (m == 16) {
+    smfmac_gfx942_exact_shape<16, 64, false>(format, arithmetic, controls, no_inf_nan, d, a, b,
+                                             index);
+  } else {
+    smfmac_gfx942_exact_shape<32, 32, false>(format, arithmetic, controls, no_inf_nan, d, a, b,
+                                             index);
   }
 }
 } // namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE

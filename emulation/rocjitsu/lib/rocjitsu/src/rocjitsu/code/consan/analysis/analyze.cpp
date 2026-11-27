@@ -35,8 +35,23 @@ FailureOr<LdsRaceResult> analyze_capture(const Capture &capture, const AnalysisO
   result.original = capture.header.image.original;
   result.selection_profile = capture.header.image.selection_profile;
   for (const ImageEntryFacts &entry : capture.header.image.entries) {
-    result.entries.push_back(
-        {.key = entry.key, .name = entry.binding.name, .disposition = entry.disposition});
+    LdsRaceImageEntry row{
+        .key = entry.key, .name = entry.binding.name, .disposition = entry.disposition};
+    if (entry.selected) {
+      // Image qualification requires a common options profile across selected entries.
+      result.flat_policy = saved_flat_policy(entry.selected->options);
+      row.observed_sites = static_cast<uint32_t>(entry.selected->sites.size());
+      row.flat_exclusions = entry.selected->flat_exclusions;
+      for (const SiteFacts &site : entry.selected->sites) {
+        if (site.origin == AccessOrigin::GroupFlat) {
+          row.flat_sites.push_back(site);
+          result.has_group_flat = true;
+        }
+        result.has_dual_ranges |= is_dual(site.lds_ranges.shape);
+        result.has_transpose |= is_transpose(site.lds_ranges.shape);
+      }
+    }
+    result.entries.push_back(std::move(row));
   }
   if (result.entries.size() == 1) {
     result.entry = result.entries.front().name;
@@ -58,6 +73,10 @@ FailureOr<LdsRaceResult> analyze_capture(const Capture &capture, const AnalysisO
     generations[execution.storage_slot] = execution.storage_generation;
     LdsRaceExecutionResult analyzed =
         analyze_lds_race_execution(*manifest, execution, options.examples);
+    analyzed.coverage_complete &=
+        std::ranges::none_of(manifest->flat_exclusions, [](const FlatExclusion &site) {
+          return site.reason != FlatExclusionReason::NonGroup;
+        });
     analyzed.entry_key = execution.entry_key;
     analyzed.entry = manifest->entry.name;
     result.ordered_pairs += analyzed.ordered_pairs;
