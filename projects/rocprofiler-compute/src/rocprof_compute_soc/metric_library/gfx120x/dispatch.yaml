@@ -43,4 +43,4 @@ dispatch.workgroups_per_wgp:
   name: Workgroups per WGP
   formula: AVG(Grid_Size / Workgroup_Size) / ($cu_per_gpu / 2)
   unit: Workgroups per WGP
-  description: The number of workgroups in the launch divided by the number of WGPs.
+  description: Number of workgroups in the launch for each WGP.

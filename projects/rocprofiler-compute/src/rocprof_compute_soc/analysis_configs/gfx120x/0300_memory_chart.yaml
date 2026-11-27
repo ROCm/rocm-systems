@@ -190,4 +190,4 @@ Panel Config:
       for this kernel. Scratch memory is used for stack memory on the accelerator,
       as well as for register spills and restores.
     Workgroups: >-
-      The number of workgroups in the launch divided by the number of WGPs.
+      Number of workgroups in the launch for each WGP.
