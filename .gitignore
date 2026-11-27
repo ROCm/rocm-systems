@@ -24,3 +24,5 @@ build/
 .idea/
 .depend/
 depend
+
+CMakeUserPresets.json
