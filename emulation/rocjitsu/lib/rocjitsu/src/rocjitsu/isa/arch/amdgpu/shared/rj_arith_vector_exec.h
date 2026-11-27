@@ -9,8 +9,10 @@
 #include "rj_arith/detail/rj_arith_graphics.h"
 #include "rj_arith/detail/rj_arith_integer.h"
 #include "rj_arith/detail/rj_arith_register.h"
+#include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_resolve.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
@@ -19,6 +21,7 @@
 
 #include <array>
 #include <bit>
+#include <cassert>
 #include <cstdint>
 #include <optional>
 
@@ -347,7 +350,7 @@ inline void execute_conditional(Inst &inst, Wavefront &wave, Wave32 wave32, Wave
       if (!wave.instruction_execution_failed()) {
         for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
           if ((exec_mask >> lane) & 1) {
-            sdwa::write_lane<sdwa::ResultFormat::NONE>(inst, wave, destination, lane, result[lane]);
+            sdwa::write_lane(inst, wave, destination, lane, result[lane]);
           }
         }
       }
@@ -715,7 +718,7 @@ inline void execute_sdwa_carry32(Inst &inst, Wavefront &wave, Wave32 wave32, Wav
       } else {
         for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
           if ((write_mask >> lane) & 1) {
-            sdwa::write_lane<sdwa::ResultFormat::NONE>(inst, wave, destination, lane, result[lane]);
+            sdwa::write_lane(inst, wave, destination, lane, result[lane]);
           }
         }
       }
@@ -866,9 +869,8 @@ inline bool try_execute_sdwa_integer32(Inst &inst, Wavefront &wave, Wave32 wave3
                       }) {
           if (destination.is_vgpr() && destination.simd_capable() &&
               inst.dst_operand(0) == &destination) {
-            // Place selected bytes in scratch, then resolve and observe the
-            // destination once. NONE has no FP scaling/clamping; PRESERVE is
-            // handled by the write view's byte mask.
+            // Place selected bytes in scratch, then resolve and observe the destination once.
+            // NONE has no FP scaling/clamping; PRESERVE is handled by the write view's byte mask.
             const auto selection = inst.sdwa_dst_sel_;
             const auto unused = inst.sdwa_dst_unused_;
             if (selection != sdwa::DWORD) {
@@ -889,7 +891,7 @@ inline bool try_execute_sdwa_integer32(Inst &inst, Wavefront &wave, Wave32 wave3
         }
         for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
           if ((exec_mask >> lane) & 1) {
-            sdwa::write_lane<sdwa::ResultFormat::NONE>(inst, wave, destination, lane, result[lane]);
+            sdwa::write_lane(inst, wave, destination, lane, result[lane]);
           }
         }
       }
@@ -975,7 +977,7 @@ inline void execute_saturating_pack_sdwa(Inst &inst, Wavefront &wave, Unary32Fun
   }
   for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
     if (exec_mask & (1ULL << lane)) {
-      sdwa::write_lane<sdwa::ResultFormat::NONE>(inst, wave, destination, lane, result[lane]);
+      sdwa::write_lane(inst, wave, destination, lane, result[lane]);
     }
   }
 }
@@ -1009,7 +1011,7 @@ inline void execute_move32(Inst &inst, Wavefront &wave, const Operand &destinati
       }
       for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
         if (exec_mask & (uint64_t{1} << lane)) {
-          sdwa::write_lane<sdwa::ResultFormat::NONE>(inst, wave, destination, lane, result[lane]);
+          sdwa::write_lane(inst, wave, destination, lane, result[lane]);
         }
       }
       return;
@@ -1044,7 +1046,7 @@ inline void execute_screen_partition(Inst &inst, Wavefront &wave, const Operand 
       }
       for (uint32_t lane = 0; lane < 64; ++lane) {
         if ((exec_mask >> lane) & 1) {
-          sdwa::write_lane<sdwa::ResultFormat::NONE>(inst, wave, destination, lane, result[lane]);
+          sdwa::write_lane(inst, wave, destination, lane, result[lane]);
         }
       }
       return;
@@ -1101,6 +1103,139 @@ inline void execute_ternary32(Wavefront &wave, Ternary32Function wave32, Ternary
                    ? wave32(flags, uint32_t(write_mask), modifiers, d, &a.data, &b.data, &c.data)
                    : wave64(flags, write_mask, modifiers, d, &a.data, &b.data, &c.data);
       });
+}
+
+// For a VOP3 literal, the decoder replaces the selector field with the appended
+// word in the control operand. On a 32-lane wave, borrow VGPR storage for the
+// unmodified register form. Every other form takes the logical path.
+[[gnu::always_inline]] inline bool try_rdna3_wave32_perm_b32_literal(Wavefront &wave,
+                                                                     const Operand &destination,
+                                                                     const Operand &source_a,
+                                                                     const Operand &source_b,
+                                                                     const Operand &control) {
+  assert(wave.wf_size() == 32);
+  if (wave.gpr_idx_en() || wave.cu().observes_register_access() ||
+      wave.instruction_execution_failed() || destination.delegate() || source_a.delegate() ||
+      source_b.delegate() || control.delegate()) {
+    return false;
+  }
+  // EXEC_LO selects the lanes of a 32-lane wave.
+  const uint64_t exec = static_cast<uint32_t>(wave.exec_raw());
+  if (!exec) {
+    return true;
+  }
+  const auto dest = destination.decoded_vgpr();
+  const auto a = source_a.decoded_vgpr(), b = source_b.decoded_vgpr();
+  const auto bank = wave.vgpr_bank(false);
+  if (!dest || !a || !b || !bank.contains(dest->index) || !bank.contains(a->index) ||
+      !bank.contains(b->index)) {
+    return false;
+  }
+  RegisterAccess registers(wave);
+  const auto base = wave.vgpr_alloc().base;
+  const auto *lhs = registers.try_bulk_read_vgpr(base + a->index);
+  const auto *rhs = registers.try_bulk_read_vgpr(base + b->index);
+  if (!lhs || !rhs) {
+    return false;
+  }
+  const auto flags = wave.cu().arithmetic_flags();
+  const auto selector = static_cast<uint32_t>(control.encoding_value());
+  const auto status = registers.try_masked_bulk_write_vgprs<1>(
+      base + dest->index, exec, [=](uint32_t *const *d, uint64_t mask) {
+        return rj_arith_v_perm_b32_uniform_w32(flags, uint32_t(mask), d[0], lhs, rhs, selector);
+      });
+  if (!status) {
+    return false;
+  }
+  if (*status != RJ_ARITH_SUCCESS) {
+    wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+  }
+  return true;
+}
+
+// RDNA3 routes a VOP3 V_PERM_B32 with an appended literal selector here when the wave
+// has 32 lanes. Keeping this handler out of line leaves the handler for every other
+// selector and for Wave64 as it was, apart from the two comparisons that select this one.
+RJ_NOINLINE inline void execute_rdna3_wave32_perm_b32_literal(Wavefront &wave, uint64_t modifiers,
+                                                              const Operand &destination,
+                                                              const Operand &source_a,
+                                                              const Operand &source_b,
+                                                              const Operand &control) {
+  if (!try_rdna3_wave32_perm_b32_literal(wave, destination, source_a, source_b, control)) {
+    execute_ternary32(wave, rj_arith_v_perm_b32_w32, rj_arith_v_perm_b32_w64,
+                      wave.cu().arithmetic_flags(), modifiers, destination, source_a, source_b,
+                      control);
+  }
+}
+
+// The decoded CDNA4 VGPR indices can be used directly when there is no indexing,
+// allocation remapping or operand delegation. A scalar selector needs just one read.
+template <typename OperandT>
+inline bool try_cdna4_perm_b32(Wavefront &wave, const OperandT &destination,
+                               const OperandT &source_a, const OperandT &source_b,
+                               const OperandT &control) {
+  if (wave.wf_size() != 64 || wave.gpr_idx_en() || wave.cu().observes_register_access() ||
+      wave.instruction_execution_failed() || destination.delegate() || source_a.delegate() ||
+      source_b.delegate() || control.delegate()) {
+    return false;
+  }
+  const auto bank = wave.vgpr_bank(false);
+  const auto dest = destination.decoded_vgpr();
+  if (!dest || !bank.contains(dest->index)) {
+    return false;
+  }
+  RegisterAccess registers(wave);
+  const uint32_t base = wave.vgpr_alloc().base;
+  const uint64_t exec = wave.exec();
+  // The guard above excluded register observers, so no read event is due and the
+  // lanes can be borrowed without building a read region.
+  auto read_vgpr = [&](uint32_t index) __attribute__((always_inline))->const uint32_t * {
+    return bank.contains(index) ? registers.try_bulk_read_vgpr(base + index) : nullptr;
+  };
+  // The three CDNA4 VOP3 sources are full-width words. Every non-VGPR source
+  // in these selector classes is uniform, including inline constants. They are
+  // field-bearing selectors without literals, so one below FLAT_SCRATCH names an
+  // SGPR word, which GFX9 redirects to s0 when it is not allocated.
+  auto read_uniform = [&](const OperandT &operand) __attribute__((always_inline))->uint32_t {
+    const auto selector = static_cast<uint32_t>(operand.encoding_value());
+    if (selector < kFlatScratchSelectorFirst) {
+      const uint32_t reg = scalar_gpr_out_of_range(wave, selector, 1) ? 0u : selector;
+      if (const auto word = registers.try_bulk_read_sgpr(wave.sgpr_alloc().base + reg)) {
+        return *word;
+      }
+    }
+    return registers.read_scalar(operand);
+  };
+  auto broadcast_scalar = [&](const OperandT &operand, std::array<uint32_t, 64> &broadcast) {
+    broadcast.fill(read_uniform(operand));
+    return static_cast<const uint32_t *>(broadcast.data());
+  };
+  std::array<uint32_t, 64> broadcast_a, broadcast_b;
+  const auto reg_a = source_a.decoded_vgpr(), reg_b = source_b.decoded_vgpr();
+  const uint32_t *a = reg_a ? read_vgpr(reg_a->index) : broadcast_scalar(source_a, broadcast_a);
+  const uint32_t *b = reg_b ? read_vgpr(reg_b->index) : broadcast_scalar(source_b, broadcast_b);
+  const auto selector_reg = control.decoded_vgpr();
+  const uint32_t *c = selector_reg ? read_vgpr(selector_reg->index) : nullptr;
+  if (!a || !b || (selector_reg && !c)) {
+    return false;
+  }
+  const uint32_t selector = selector_reg ? 0 : read_uniform(control);
+  if (wave.instruction_execution_failed()) {
+    return true;
+  }
+  const auto flags = wave.cu().arithmetic_flags();
+  const auto status = registers.try_masked_bulk_write_vgprs<1>(
+      base + dest->index, exec, [&](uint32_t *const *d, uint64_t mask) {
+        return c ? rj_arith_v_perm_b32_w64(flags, mask, 0, d, &a, &b, &c)
+                 : rj_arith_v_perm_b32_uniform_w64(flags, mask, d[0], a, b, selector);
+      });
+  if (!status) {
+    return false;
+  }
+  if (*status != RJ_ARITH_SUCCESS) {
+    wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+  }
+  return true;
 }
 
 } // namespace rocjitsu::amdgpu::arith

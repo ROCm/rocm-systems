@@ -99,7 +99,7 @@ _IEEE_MINMAX3 = (
 
 
 def _float_minmax(form: str, ty: SemaType, *sources: SemaNode) -> SemaNode:
-    """Create a min/max call for lowering to shared/minmax.h.
+    """Describe min/max selection as an opaque semantic call.
 
     Callers supply typed sources so enrichment can attach VOP3 ABS/NEG modifiers.
     """
@@ -1518,8 +1518,8 @@ class _VectorCmp(_ScalarDeriver):
         src1 = _cast(_src(1), ty)
         op = sem.operation or ""
         if is_float_relation(sem.data_type, op):
-            # comparison.h evaluates float relations on the raw encodings. The
-            # typed casts stay so enrichment still attaches the VOP3 modifiers.
+            # Float relations describe raw-encoding predicates; typed casts
+            # let enrichment attach the VOP3 source modifiers.
             name = f'{FLOAT_COMPARE_CALL}{op}'
             cmp = SemaNode(
                 SemaNodeKind.CALL,
@@ -1545,9 +1545,8 @@ class _VectorCmp(_ScalarDeriver):
 
 @_register('vector_cmpx')
 class _VectorCmpx(_ScalarDeriver):
-    # TODO: This derive only writes EXEC, but GFX9 (CDNA) cmpx also writes
-    # VCC. Must add VCC[laneId] = cmp before the EXEC write, gated on ISA
-    # generation, before this class can be wired through _SEMA_CLASSES.
+    # This metadata describes EXEC only; CDNA CMPX also writes VCC.
+    # CPU execution handles both outputs independently through rj-arith.
     @staticmethod
     def derive(sem: InstructionSemantics) -> SemaBlock:
         ty = _dtype_to_sema(sem.data_type)

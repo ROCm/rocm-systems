@@ -3070,7 +3070,7 @@ TEST(ExecutionPluginTest, VopdArithmeticObserversSeeCallerFpState) {
         observer->read_mxcsrs.clear();
         {
           // Restore the original host environment even after a fatal assertion.
-          fp_mode::ScopedEnvironment environment(0);
+          fp_mode::detail::ScopedFenv environment(0);
           _mm_setcsr((_mm_getcsr() & ~_MM_EXCEPT_MASK) | _MM_EXCEPT_UNDERFLOW);
           const uint32_t host_mxcsr = _mm_getcsr();
 

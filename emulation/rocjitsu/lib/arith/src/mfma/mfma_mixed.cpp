@@ -4,6 +4,7 @@
 // Mixed FP8/FP6/FP4 MFMA validation and CPU dispatch for gfx950.
 #include "mfma/backends.h"
 #include "mfma/mixed.h"
+#include "mfma/mixed_exact.h"
 #include "rj_arith/detail/rj_arith_common.h"
 #include "rj_arith/detail/rj_arith_mfma.h"
 namespace {
@@ -34,6 +35,12 @@ int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32
   }
   if ((controls & 7) > 4 || (controls >> 3 & 7) > 4) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  constexpr uint64_t kScaleCModifiers = RJ_ARITH_MFMA_SCALE_NEG_C | RJ_ARITH_MFMA_SCALE_ABS_C;
+  if (is_exact(flags) && (!Scaled || !(controls & kScaleCModifiers))) {
+    mfma_mixed_exact<M, K, Scaled>(controls, (flags & RJ_ARITH_FP16_OVFL) != 0, d, a, b, c, scale_a,
+                                   scale_b);
+    return RJ_ARITH_SUCCESS;
   }
   if ((flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
     return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;

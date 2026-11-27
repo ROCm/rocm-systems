@@ -48,7 +48,7 @@
 #define HIP_API_TABLE_STEP_VERSION 0
 #define HIP_COMPILER_API_TABLE_STEP_VERSION 0
 #define HIP_TOOLS_API_TABLE_STEP_VERSION 1
-#define HIP_RUNTIME_API_TABLE_STEP_VERSION 44
+#define HIP_RUNTIME_API_TABLE_STEP_VERSION 45
 
 // HIP API interface
 // HIP compiler dispatch functions
@@ -1218,7 +1218,8 @@ typedef hipError_t (*t_hipGraphGetId)(hipGraph_t graph, unsigned int* graphId);
 typedef hipError_t (*t_hipGraphExecGetId)(hipGraphExec_t graphExec, unsigned int* graphId);
 typedef hipError_t (*t_hipDeviceGetExecAffinitySupport)(int* pi, hipExecAffinityType type,
                                                         hipDevice_t dev);
-
+typedef hipError_t (*t_hipArrayGetMemoryRequirements)(
+    hipArrayMemoryRequirements* memoryRequirements, hipArray_t array, hipDevice_t device);
 
 // HIP Compiler dispatch table
 struct HipCompilerDispatchTable {
@@ -1910,8 +1911,11 @@ struct HipDispatchTable {
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 44
   t_hipArrayGetPlane hipArrayGetPlane_fn;
 
-  // DO NOT EDIT ABOVE!
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 45
+  t_hipArrayGetMemoryRequirements hipArrayGetMemoryRequirements_fn;
+
+  // DO NOT EDIT ABOVE!
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 46
 
   // ******************************************************************************************* //
   //

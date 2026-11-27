@@ -337,18 +337,33 @@ def gen_vector32(ctx: ExecuteContext) -> str | None:
             f'({modifiers}) | '
             '((amdgpu::vop3_opsel(inst_) & 4u) ? RJ_ARITH_ALU_HIGH_C : 0u)'
         )
-    sdwa = ''
+    fast_path = ''
     if (
         arch in ('cdna1', 'cdna2', 'cdna3', 'cdna4', 'rdna1', 'rdna2')
         and not is_vop3
         and count <= 2
     ):
-        sdwa = (
+        fast_path = (
             f'  if (amdgpu::arith::try_execute_sdwa_integer32(*this, wf, {wave_api(api, 32)}, {wave_api(api, 64)},\n'
             f'      wf.cu().arithmetic_flags(), 0, {dst[0]}, {", ".join(src)})) return;\n'
         )
+    elif arch == 'rdna3' and is_vop3 and mnemonic == 'V_PERM_B32':
+        # The encoding names the literal form. Its Wave32 handler stays out of line.
+        fast_path = (
+            '  if (inst_.src2 == 255 && wf.wf_size() == 32) {\n'
+            '    amdgpu::arith::execute_rdna3_wave32_perm_b32_literal(wf,\n'
+            f'        {modifiers}, {dst[0]}, {", ".join(src)});\n'
+            '    return;\n'
+            '  }\n'
+        )
+    elif arch == 'cdna4' and is_vop3 and mnemonic == 'V_PERM_B32':
+        fast_path = (
+            f'  if (!wf.exec() || amdgpu::arith::try_cdna4_perm_b32(wf, {dst[0]}, {", ".join(src)})) {{\n'
+            '    return;\n'
+            '  }\n'
+        )
     return (
-        sdwa
+        fast_path
         + f'  amdgpu::arith::execute_{kind}32(wf, {wave_api(api, 32)}, {wave_api(api, 64)},\n'
         '      wf.cu().arithmetic_flags(),\n'
         f'      {modifiers}, {dst[0]}, {", ".join(src)}{extra});'

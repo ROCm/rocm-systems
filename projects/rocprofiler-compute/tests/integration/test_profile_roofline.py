@@ -101,8 +101,8 @@ def test_roofline_workload_dir_not_set_error():
         from roofline.roofline_main import Roofline
         from utils.specs import generate_machine_specs
 
-        args = SimpleNamespace()
-        mspec = generate_machine_specs(None, None)
+        args = SimpleNamespace(experimental=True)
+        mspec = generate_machine_specs(args, None)
 
         run_parameters = {
             "workload_dir": None,

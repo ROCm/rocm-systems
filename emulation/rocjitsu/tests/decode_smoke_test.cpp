@@ -33,6 +33,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
@@ -209,6 +210,40 @@ TEST(OperandLayoutTest, DecodedVectorIdentityCoversEverySelectorType) {
   check.operator()<cdna5::Operand>(cdna5::OperandType::OPR_WAIT_MEM_DS);
   check.operator()<rdna3::Operand>(rdna3::OperandType::OPR_WAITCNT_DEPCTR);
   check.operator()<rdna4::Operand>(rdna4::OperandType::OPR_WAITCNT);
+}
+
+// The VALU destination allocation check of GFX9 compute targets uses the decoded identity in
+// place of the register reference. They must name the same register and width for every
+// operand that has a width; a zero-width operand has no register reference.
+TEST(OperandLayoutTest, DecodedVectorIdentityMatchesRegisterRefAtEveryWidth) {
+  auto check = []<typename Op, typename Type>(Type last_type) {
+    for (int bits : {8, 16, 32, 48, 64, 96, 128}) {
+      for (int type = 0; type <= static_cast<int>(last_type); ++type) {
+        for (int selector = 0; selector < 1024; ++selector) {
+          Op operand(bits, static_cast<Type>(type), selector);
+          auto expected = operand.to_register_ref();
+          if (expected && expected->cls == RegClass::ACC_VGPR) {
+            expected->cls = RegClass::VGPR;
+            expected->index += 256;
+          }
+          if (expected && expected->cls != RegClass::VGPR) {
+            expected.reset();
+          }
+          ASSERT_EQ(operand.decoded_vgpr(), expected)
+              << "bits=" << bits << " type=" << type << " selector=" << selector;
+        }
+      }
+    }
+    for (int type = 0; type <= static_cast<int>(last_type); ++type) {
+      for (int selector = 0; selector < 1024; ++selector) {
+        Op zero_width(0, static_cast<Type>(type), selector);
+        ASSERT_FALSE(zero_width.to_register_ref()) << "type=" << type << " selector=" << selector;
+      }
+    }
+  };
+  check.operator()<cdna1::Operand>(cdna1::OperandType::OPR_WAITCNT);
+  check.operator()<cdna3::Operand>(cdna3::OperandType::OPR_WAITCNT);
+  check.operator()<cdna4::Operand>(cdna4::OperandType::OPR_WAITCNT);
 }
 
 struct DecodeCase {

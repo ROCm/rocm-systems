@@ -2009,6 +2009,19 @@ public:
     return read_sgpr_region(physical_reg, 2).qword();
   }
 
+  /// Read one SGPR word of the bound wave without a read event when no register
+  /// observer is installed. Like read_sgpr(), a register outside the wave's
+  /// storage block reads as zero.
+  /// @returns Nullopt when an observer is installed or no wave is bound; use
+  /// read_sgpr() instead.
+  [[nodiscard, gnu::always_inline]] std::optional<uint32_t>
+  try_bulk_read_sgpr(uint32_t physical_reg) const {
+    if (!wf_ || cu_->observes_register_access()) {
+      return std::nullopt;
+    }
+    return cu_->owns_sgpr_range(*wf_, physical_reg, 1) ? cu_->read_sgpr_storage(physical_reg) : 0u;
+  }
+
   Result write_sgpr(uint32_t physical_reg, uint32_t value) const {
     if (!mutable_wf_) {
       if (const Wavefront *owner = wf_ ? wf_ : sgpr_owner_for_range(physical_reg, 1)) {
@@ -2130,6 +2143,23 @@ public:
     return VgprWriteRegion(mutable_cu(), physical_base, reg_count, wave_size, lane_mask, byte_mask);
   }
 
+  /// Borrow one VGPR's lane storage from the bound wave without a read event when
+  /// no register observer is installed. Like read_vgpr_region().lanes(), a
+  /// register outside the wave's storage block reads as zero, and the pointer
+  /// follows the reg_data() rules.
+  /// @returns Null when an observer is installed or no wave is bound; acquire a
+  /// read region instead.
+  [[nodiscard, gnu::always_inline]] const uint32_t *
+  try_bulk_read_vgpr(uint32_t physical_reg) const {
+    if (!wf_ || cu_->observes_register_access()) {
+      return nullptr;
+    }
+    if (!cu_->owns_vgpr_range(*wf_, physical_reg, 1)) {
+      return VgprReadRegion::zero_lanes_.data();
+    }
+    return reinterpret_cast<const uint32_t *>(cu_->raw_vgpr_data(physical_reg));
+  }
+
   /// Execute a bulk writer directly on valid wave-owned storage when no register
   /// observer is installed. Otherwise return nullopt without invoking it.
   /// Partial wave write masks decline this fast path. The writer must leave storage unchanged
@@ -2167,13 +2197,22 @@ public:
     if (!base) {
       return std::nullopt;
     }
-    Wavefront &wf = mutable_wavefront();
-    auto pointers = bulk_write_pointers<Registers>(*base, Registers);
+    return try_masked_bulk_write_vgprs<Registers>(*base, lane_mask, write);
+  }
+
+  /// Physical-register counterpart for callers that already resolved the destination.
+  /// The writer must preserve inactive lanes and leave storage unchanged on error.
+  template <size_t Registers, typename Function>
+  [[nodiscard]] std::optional<int>
+  try_masked_bulk_write_vgprs(uint32_t physical_base, uint64_t lane_mask, Function &&write) const {
+    if (!mutable_wf_) {
+      return std::nullopt;
+    }
+    auto pointers = bulk_write_pointers<Registers>(physical_base, Registers);
     if (!pointers) {
       return std::nullopt;
     }
-    lane_mask &= wf.vgpr_write_mask() & (wf.wf_size() == 32 ? 0xffffffffULL : ~0ULL);
-    return write(pointers->data(), lane_mask);
+    return write(pointers->data(), lane_mask & mutable_wf_->vgpr_write_mask());
   }
 
   [[nodiscard]] VgprReadWriteRegion readwrite_vgpr_region(uint32_t physical_base,

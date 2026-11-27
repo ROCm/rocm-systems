@@ -4,6 +4,7 @@
 #include "rocjitsu/cli.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/file_io.h"
+#include "rocjitsu/code/patch/fault_injection/atomic_wrong_address.h"
 #include "rocjitsu/code/patch/fault_injection/drop_barrier.h"
 #include "rocjitsu/code/patch/fault_injection/lds_wrong_address.h"
 #include "rocjitsu/isa/target_registry.h"
@@ -36,7 +37,8 @@ constexpr std::string_view kMutationHelp =
     "\n"
     "List sites for the selected kind and exact kernel entry in this input.\n"
     "--exact is the .text-relative byte offset from --list, decimal or 0x hex:\n"
-    "the first member of a barrier, or the LDS instruction. Exact takes precedence\n"
+    "the first member of a barrier, or the LDS instruction. For atomic sites, it selects\n"
+    "the complete atomic instruction. Exact takes precedence\n"
     "over the zero-based --ordinal (default 0); invalid exact never falls back.\n"
     "Split pairs count as one barrier.\n"
     "--target only asserts the source identity; it cannot override the ELF.\n"
@@ -59,6 +61,20 @@ constexpr std::string_view kMutationHelp =
     "LDS output lists every affected owner when a helper is shared.\n"
     "Discovery can succeed while replacement growth or branch range prevents emission.\n"
     "The caller supplies its runtime value.\n"
+    "AtomicWrongAddress lists all owned atomic sites before form admission.\n"
+    "Mutation currently supports gfx1250/gfx1251 wave32 and gfx1200/gfx1201\n"
+    "wave32/wave64 flat/global/buffer forms; see --capabilities. It requires a positive\n"
+    "--address-delta, at most 8388607 bytes, divisible by four and preserving\n"
+    "the operation's natural alignment (8 bytes for 64-bit, 4 for 32-bit and\n"
+    "packed pairs; CAS uses the memory element width). The caller must supply\n"
+    "an aligned original address and valid source and mutant addresses. Only the\n"
+    "immediate offset changes; data, returning behavior, modifiers and waits remain.\n"
+    "An unsupported selected form fails without renumbering atomic ordinals.\n"
+    "CDNA5 and RDNA4 buffer atomics require a nonnegative original immediate offset.\n"
+    "32-bit DS atomics are also supported on gfx942/gfx950 wave64 and\n"
+    "gfx1100 wave32/wave64, as well as the modern targets above. DS mutation\n"
+    "increments only raw offset0 and requires an aligned result without carry.\n"
+    "For two-address exchange this retains the original element-offset policy.\n"
     "Output must be new; existing files, aliases and in-place mutation are refused.\n"
     "Host transformation only; no GPU execution or detector qualification.\n";
 
@@ -234,6 +250,11 @@ int run(int argc, char **argv) {
                     .aliases = {},
                     .description = "Encoded LDS address VGPR selector",
                     .value_placeholder = "N"});
+  auto address_delta_flag = std::make_shared<MutationFlag<uint64_t>>(
+      cli::FlagInfo{.name = "--address-delta",
+                    .aliases = {},
+                    .description = "Positive atomic byte delta preserving natural alignment",
+                    .value_placeholder = "N"});
   auto list_flag = std::make_shared<MutationFlag<bool>>(
       cli::FlagInfo{.name = "--list",
                     .aliases = {},
@@ -254,7 +275,7 @@ int run(int argc, char **argv) {
   if (command
           .add_flags("Mutation",
                      {input_flag, kernel_flag, output_flag, kind_flag, target_flag, exact_flag,
-                      ordinal_flag, address_vgpr_flag, list_flag},
+                      ordinal_flag, address_vgpr_flag, address_delta_flag, list_flag},
                      diagnostic)
           .failed() ||
       command.add_flags("Information", {capabilities_flag, help_flag}, diagnostic).failed()) {
@@ -289,6 +310,12 @@ int run(int argc, char **argv) {
       std::cout << "kind=LdsWrongAddress target=" << target->id << " wave=" << capability.wave_size
                 << " form=" << capability.form << " admission=proven-all-owners\n";
     }
+    for (const AtomicCapability &capability : atomic_wrong_address_capabilities()) {
+      const IsaTargetBinding *target = default_isa_target_registry().find_target(capability.target);
+      std::cout << "kind=AtomicWrongAddress target=" << target->id
+                << " wave=" << capability.wave_size << " form=" << capability.form
+                << " admission=proven-all-owners\n";
+    }
     return finish_stdout();
   }
   const std::string input = input_flag->value().value_or("");
@@ -310,6 +337,13 @@ int run(int argc, char **argv) {
     }
     address_vgpr = static_cast<uint32_t>(requested_address_vgpr);
   }
+  std::optional<uint32_t> address_delta = std::nullopt;
+  if (address_delta_flag->value()) {
+    const uint64_t requested_address_delta = *address_delta_flag->value();
+    if (requested_address_delta > UINT32_MAX)
+      return reject("invalid unsigned integer for --address-delta");
+    address_delta = static_cast<uint32_t>(requested_address_delta);
+  }
   const bool list = list_flag->value().value_or(false);
   if (input.empty() || kernel.empty() ||
       (list ? output_flag->value().has_value() || exact.has_value() ||
@@ -318,11 +352,14 @@ int run(int argc, char **argv) {
     std::cerr << cli::format_help(command) << kMutationHelp;
     return reject("require input, exact kernel, and either --list or --output");
   }
-  if (kind != "DropBarrier" && kind != "LdsWrongAddress") {
+  if (kind != "DropBarrier" && kind != "LdsWrongAddress" && kind != "AtomicWrongAddress") {
     return reject("unsupported mutation kind: " + kind);
   }
-  if ((kind == "DropBarrier" && address_vgpr) || (list && address_vgpr)) {
+  if ((kind != "LdsWrongAddress" && address_vgpr) || (list && address_vgpr)) {
     return reject("--address-vgpr applies only to LdsWrongAddress mutation");
+  }
+  if ((kind != "AtomicWrongAddress" && address_delta) || (list && address_delta)) {
+    return reject("--address-delta applies only to AtomicWrongAddress mutation");
   }
   const util::FailureOr<std::vector<char>> bytes =
       detail::read_file_bytes(input.c_str(), kMaxImageBytes);
@@ -332,6 +369,68 @@ int run(int argc, char **argv) {
   const FaultMutationContext context(
       std::span(reinterpret_cast<const uint8_t *>(bytes.value().data()), bytes.value().size()));
   FaultMutationError error;
+  if (kind == "AtomicWrongAddress") {
+    const FailureOr<AtomicInventory> inventory =
+        discover_atomic_wrong_address(context, kernel, error);
+    if (inventory.failed())
+      return reject(error, "discovery");
+    const IsaTargetBinding *target =
+        default_isa_target_registry().find_target(context.source().target_id());
+    if (!target_assertion.empty() && target_assertion != target->id)
+      return reject("target assertion does not match source ELF identity");
+    if (list) {
+      size_t index = 0;
+      for (const AtomicSite &site : inventory.value().sites()) {
+        std::cout << "ordinal=" << index++ << " exact=" << site.offset
+                  << " size=" << site.instruction_size << " byte_offset=";
+        if (site.byte_offset)
+          std::cout << *site.byte_offset;
+        else
+          std::cout << "unknown";
+        std::cout << " address_supported=" << site.address_supported << " target=" << target->id
+                  << " form=" << site.form << " affected_owners=" << site.affected_owners.size();
+        for (const FaultMutationOwner &owner : site.affected_owners)
+          std::cout << " owner=" << owner.entry << ':' << owner.entry_offset << ':'
+                    << owner.descriptor_file_offset;
+        std::cout << '\n';
+      }
+      return finish_stdout();
+    }
+    AtomicSelector selector = {.exact = std::nullopt, .ordinal = ordinal};
+    if (exact) {
+      const std::span<const AtomicSite> sites = inventory.value().sites();
+      const std::span<const AtomicSite>::iterator found =
+          std::ranges::find(sites, *exact, &AtomicSite::offset);
+      if (found == sites.end())
+        return reject({.code = FaultMutationErrorCode::InvalidParameters,
+                       .offset = *exact,
+                       .message = "no atomic site at the requested offset"},
+                      "selection", exact);
+      selector.ordinal = static_cast<size_t>(found - sites.begin());
+    }
+    const FailureOr<AtomicSelection> selection =
+        select_atomic_wrong_address(inventory.value(), selector, error);
+    if (selection.failed())
+      return reject(error, "selection");
+    const FailureOr<AtomicResult> mutant =
+        apply_atomic_wrong_address(context, selection.value(), address_delta, error);
+    if (mutant.failed())
+      return reject(error, "mutation");
+    if (!write_new_file(output.c_str(), mutant.value().image)) {
+      std::cerr << "rj_code_mutate: cannot create/write/close new output file\n";
+      return 3;
+    }
+    std::cout << "kind=AtomicWrongAddress target=" << target->id
+              << " exact=" << selection.value().site().offset << " address_delta=" << *address_delta
+              << " logical_mutations=" << mutant.value().logical_mutation_count
+              << " output_bytes=" << mutant.value().image.size()
+              << " affected_owners=" << selection.value().site().affected_owners.size();
+    for (const FaultMutationOwner &owner : selection.value().site().affected_owners)
+      std::cout << " owner=" << owner.entry << ':' << owner.entry_offset << ':'
+                << owner.descriptor_file_offset;
+    std::cout << '\n';
+    return finish_stdout();
+  }
   if (kind == "LdsWrongAddress") {
     const FailureOr<LdsInventory> inventory = discover_lds_wrong_address(context, kernel, error);
     if (inventory.failed()) {

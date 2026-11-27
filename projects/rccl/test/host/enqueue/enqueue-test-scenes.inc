@@ -104,6 +104,48 @@ void SetSingleGpuArch(ncclTopoSystem* topo, const char* gcn) {
 }  // namespace
 
 namespace {
+// topoGetAlgoInfo needs slightly more comm state than updateCollCostTable: it
+// reads archName for the arch-specific overrides and the maxThreads table when
+// it converts an algorithm choice into a warp count.
+struct AlgoInfoComm {
+  // Holds a CostComm for the comm/topo pair, the rank counts and the XGMI_ALL
+  // stamp; adds only what topoGetAlgoInfo needs beyond updateCollCostTable.
+  //
+  // NOT parameterised, deliberately, even though topoGetAlgoInfo reads nRanks and
+  // nNodes. CostComm hardcodes maxLocalRanks and localRanks to 8 regardless of
+  // nRanks (:1387-1392), so CostComm(64, 8) would describe 64 ranks over 8 nodes
+  // with 8 local ranks and one GPU node -- a comm that cannot exist. Exposing a
+  // pair of parameters that produce an incoherent fixture is worse than the fixed
+  // 8/1 here. Varying either one needs CostComm to derive the local counts first,
+  // and that changes what the existing CostComm tests cover (e.g. :1582).
+  CostComm base{8, 1};
+  AlgoInfoComm() {
+    ncclComm* comm = base.get();
+    comm->WarpSize = 32;
+    SetSingleGpuArch(&base.topo(), "gfx942");
+    for (int a = 0; a < NCCL_NUM_ALGORITHMS; ++a) {
+      for (int p = 0; p < NCCL_NUM_PROTOCOLS; ++p) {
+        comm->maxThreads[a][p] = 256;
+      }
+    }
+  }
+  ncclComm* get() { return base.get(); }
+};
+}  // namespace
+
+namespace {
+// ncclGroupSimulateEnd estimatedTime: scripts one (algo, proto) cell of the cost model.
+constexpr float kChosenModelUs = 25.0f;
+
+void ScriptCellTime(int algo, int proto, float chosen, float other) {
+  g_topoGetAlgoTime = [=](struct ncclComm*, int, int a, int p, size_t, int, float* time) {
+    if (time) *time = (a == algo && p == proto) ? chosen : other;
+    return ncclSuccess;
+  };
+}
+}  // namespace
+
+namespace {
 // One param setter for every enqueue test: three GetImplicitOrder tests used to
 // re-roll this same lambda with a different key, which risks the copies drifting
 // on the `deft` fallback.
