@@ -1097,6 +1097,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#host-floating-point-environment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Host floating-point environment
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#formatting" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1807,6 +1818,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#host-floating-point-environment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Host floating-point environment
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#formatting" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1984,6 +2006,16 @@ consistency over cleverness.</p>
 <li>Do not add <code>try</code>/<code>catch</code> except at a boundary that must translate an error
   (e.g. the C API layer). Assume code is not exception-safe unless documented.</li>
 </ul>
+<h2 id="host-floating-point-environment">Host floating-point environment<a class="headerlink" href="#host-floating-point-environment" title="Permanent link">&para;</a></h2>
+<p>Production rocjitsu code assumes the host's default floating-point environment:
+nearest-even rounding, denormals preserved, and exceptions masked. It never
+explicitly changes rounding, denormal controls, exception masks or sticky flags.
+Ordinary arithmetic may raise sticky flags. Guest MODE settings are implemented
+in arithmetic and result bits, not by changing the host environment.</p>
+<p>This contract applies to all CPU execution paths, including graphics and memory
+atomics, which remain outside rj-arith. Saving/restoring the environment around
+compliant code is unnecessary. Tests may change it to establish a reference or
+check the contract.</p>
 <h2 id="formatting">Formatting<a class="headerlink" href="#formatting" title="Permanent link">&para;</a></h2>
 <ul>
 <li>The repo uses pre-commit hooks : clang-format (C++), black (Python), and
