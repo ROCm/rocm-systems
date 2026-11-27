@@ -3998,6 +3998,15 @@ hipError_t hipEventSynchronize(hipEvent_t event);
  * recorded on one or both events (that is, hipEventQuery() would return #hipErrorNotReady on at
  * least one of the events), then #hipErrorNotReady is returned.
  *
+ * @note On the AMD ROCm backend, event timestamps are captured when the host
+ * runtime collects the completed command batch, not at the instant the GPU
+ * finishes. If the application defers the synchronization call until well
+ * after GPU work completes, the elapsed time can include the host-side delay
+ * between GPU completion and the synchronize call. This behavior is
+ * implementation-dependent and does not apply to all HIP backends. For
+ * accurate AMD GPU kernel timing, avoid unrelated host work between GPU
+ * completion and the synchronize call, or use rocprofv3 kernel traces.
+ *
  * @see hipEventCreate, hipEventCreateWithFlags, hipEventQuery, hipEventDestroy, hipEventRecord,
  * hipEventSynchronize
  */

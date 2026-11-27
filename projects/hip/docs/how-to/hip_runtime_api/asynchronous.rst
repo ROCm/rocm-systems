@@ -182,14 +182,17 @@ operation.
 
 .. note::
 
-   Event timestamps are captured when the runtime collects the completed command
-   batch, not at the instant the GPU finishes. If an application records events
-   and then defers synchronization until well after the work has completed, the
-   interval reported by :cpp:func:`hipEventElapsedTime` can include host-side
-   delay rather than GPU execution time alone. For accurate kernel timing, call
-   :cpp:func:`hipEventSynchronize` or :cpp:func:`hipStreamSynchronize` promptly
-   after the stop event is recorded, before the application proceeds to other
-   work. HIP does not guarantee timing accuracy for arbitrarily deferred
+   On the AMD ROCm backend, event timestamps are captured when the host
+   runtime collects the completed command batch, not at the instant the GPU
+   finishes. If an application defers the synchronization call until well
+   after the GPU work has completed, the interval reported by
+   :cpp:func:`hipEventElapsedTime` can include the host-side delay between
+   GPU completion and the synchronize call. This behavior is
+   implementation-dependent and does not apply to all HIP backends. For
+   accurate AMD GPU kernel timing, avoid unrelated host work between GPU
+   completion and the synchronize call, or use
+   `rocprofv3 <https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/>`_
+   kernel traces, which report GPU execution time independently of host
    synchronization.
 
 Programmatic dependent launch and synchronization
