@@ -63,3 +63,9 @@ Environment::device_stream_pool_size()
 {
     return Environment::get<size_t>(Environment::DEVICE_STREAM_POOL_SIZE);
 }
+
+optional<bool>
+Environment::force_blocking_async()
+{
+    return Environment::get<bool>(Environment::FORCE_BLOCKING_ASYNC);
+}

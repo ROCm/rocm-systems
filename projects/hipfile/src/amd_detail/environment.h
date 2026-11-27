@@ -105,5 +105,19 @@ public:
     static constexpr const char *const DEVICE_STREAM_POOL_SIZE{"HIPFILE_DEVICE_STREAM_POOL_SIZE"};
 
     static std::optional<size_t> device_stream_pool_size();
+
+    /// @brief Force asynchronous I/O onto the blocking host-function path
+    ///
+    /// If enabled (default), asynchronous I/O on every stream runs inside a
+    /// stream host function that waits for the transfer to finish.
+    /// If disabled, registered streams on devices that support stream wait
+    /// values gate the stream on a wait value instead.
+    static constexpr const char *const FORCE_BLOCKING_ASYNC{"HIPFILE_FORCE_BLOCKING_ASYNC"};
+
+    /// @brief Get the value of HIPFILE_FORCE_BLOCKING_ASYNC from the environment
+    /// @return An optional boolean value if HIPFILE_FORCE_BLOCKING_ASYNC was set,
+    /// nullopt if HIPFILE_FORCE_BLOCKING_ASYNC was unset or had a value other than
+    /// true or false.
+    static std::optional<bool> force_blocking_async();
 };
 }
