@@ -15,7 +15,7 @@ import sys
 import threading
 from functools import wraps
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from ml_api_tracing.inject_roctx import marker_ranges
 from ml_api_tracing.inject_roctx.backend_contract import register
@@ -25,7 +25,11 @@ from ml_api_tracing.inject_roctx.backends.torch_wraps import (
     EXTRA_STRUCTURAL_WRAPS,
     TENSOR_METHOD_WRAPS,
 )
-from ml_api_tracing.marker_format import format_wrap_args
+from ml_api_tracing.marker_format import (
+    _MAX_TENSOR_ARGUMENT_ITEMS,
+    format_args_blob,
+    render_dtype_shape,
+)
 from utils.logger import console_log, console_warning
 
 _BACKEND_NAME = "torch"
@@ -96,6 +100,29 @@ _LAUNCHER_TID_STRUCTURAL_WRAPS = frozenset({
 _TENSOR_METHODS_ALLOWING_UNINITIALIZED = frozenset(("to", "cpu", "cuda"))
 
 DEEP_TENSOR_METHOD_WRAPS_ENV = "ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS"
+
+
+def format_wrap_args(args: Tuple[object, ...], kwargs: Dict[str, object]) -> str:
+    """Render wrap args with readable shape and dtype as a marker blob.
+
+    Skip other objects. Return n/a when none remain.
+    """
+    items: List[str] = []
+    for value in args:
+        if len(items) >= _MAX_TENSOR_ARGUMENT_ITEMS:
+            break
+        rendered = render_dtype_shape(value)
+        if rendered is None:
+            continue
+        items.append(rendered)
+    for name, value in kwargs.items():
+        if len(items) >= _MAX_TENSOR_ARGUMENT_ITEMS:
+            break
+        rendered = render_dtype_shape(value)
+        if rendered is None:
+            continue
+        items.append(f"{name}={rendered}")
+    return format_args_blob(items)
 
 
 # Structural wrappers for entry points the ATen dispatcher does not record.

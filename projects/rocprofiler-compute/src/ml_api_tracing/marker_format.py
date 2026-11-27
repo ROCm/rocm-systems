@@ -85,29 +85,6 @@ def render_dtype_shape(obj: object) -> Optional[str]:
         return None
 
 
-def format_wrap_args(args: Tuple[object, ...], kwargs: Dict[str, object]) -> str:
-    """Render tensor args and kwargs as a marker args blob.
-
-    Skip objects without readable shape and dtype. Return n/a when none remain.
-    """
-    items: List[str] = []
-    for value in args:
-        if len(items) >= _MAX_TENSOR_ARGUMENT_ITEMS:
-            break
-        rendered = render_dtype_shape(value)
-        if rendered is None:
-            continue
-        items.append(rendered)
-    for name, value in kwargs.items():
-        if len(items) >= _MAX_TENSOR_ARGUMENT_ITEMS:
-            break
-        rendered = render_dtype_shape(value)
-        if rendered is None:
-            continue
-        items.append(f"{name}={rendered}")
-    return format_args_blob(items)
-
-
 def decode_marker_name(name: str) -> str:
     """Decode a percent-encoded marker segment ('%2F' -> '/', '%25' -> '%')."""
     return name.replace("%2F", "/").replace("%25", "%")
