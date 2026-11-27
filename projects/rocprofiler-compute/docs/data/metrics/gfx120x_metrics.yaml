@@ -54,17 +54,17 @@ Memory chart - GL0 Cache (Vector L0):
     rst: Percentage of GL0 cache requests serviced from cache without accessing GL1.
     unit: Percent
 Memory chart - LDS (Local Data Share):
-  LDS Req:
+  LDS Instructions:
     rst: Number of LDS instructions issued by the shader, including FLAT instructions that resolve to LDS. This counts instructions rather than data movement, so it does not distinguish reads from writes.
-    unit: Requests per Normalization Unit
+    unit: Instructions per Normalization Unit
   LDS Utilization:
     rst: Percentage of the LDS cycle budget across all CUs spent servicing indexed (non-direct, non-interpolation) accesses, measured over GPU-active cycles. Because two CUs share a workgroup processor's LDS, a saturated LDS reads well below 100% on this architecture.
     unit: Percent
   LDS Bank Conflict Rate:
-    rst: Percentage of LDS accesses that experienced bank conflicts. Conflicts occur when multiple work-items in a wavefront access different addresses in the same LDS bank. High conflict rates reduce effective LDS bandwidth. Restructuring data layouts can help.
+    rst: Percentage of indexed-access LDS cycles spent stalled on bank conflicts. Conflicts occur when multiple work-items in a wavefront access different addresses in the same LDS bank. High values mean lower effective LDS bandwidth. Restructuring data layouts can help.
     unit: Percent
   LDS Bandwidth:
-    rst: LDS byte-access rate from load, store, and atomic dword counters, using four bytes per dword.
+    rst: Bytes per second loaded, stored, and atomically updated in LDS.
     unit: Bytes/s
 Memory chart - GL2 Cache (L2):
   GL2 Hit Rate:
@@ -87,56 +87,56 @@ Memory chart - Workgroup Processors (WGPs):
   Wavefront Occupancy:
     rst: Resident :ref:`wavefronts <desc-wavefront>` per WGP, averaged over GPU-active cycles, as a percent of the maximum wavefronts per WGP.
     unit: Percent
-  VGPR:
+  VGPRs:
     rst: 'The number of architected vector general-purpose registers allocated for the kernel. Note: this may not exactly match the number of VGPRs requested by the compiler due to allocation granularity.'
     unit: Registers
-  SGPR:
+  SGPRs:
     rst: 'The number of scalar general-purpose registers allocated for the kernel. Note: this may not exactly match the number of SGPRs requested by the compiler due to allocation granularity.'
     unit: Registers
   LDS Allocation:
     rst: 'The number of bytes of LDS memory (or, shared memory) allocated per :ref:`workgroup <desc-workgroup>`. Note: This may also be larger than what was requested at compile time due to both allocation granularity and dynamic per-dispatch LDS allocations.'
     unit: Bytes per Workgroup
   Scratch Allocation:
-    rst: 'The amount of scratch memory requested per :ref:`wavefront <desc-wavefront>`, in KB: the scratch bytes requested per :ref:`work-item <desc-work-item>` multiplied by the wavefront size. Scratch memory is used for stack memory on the accelerator, as well as for register spills and restores.'
-    unit: KB per Wave
+    rst: The number of bytes of scratch memory requested per :ref:`work-item <desc-work-item>` for this kernel. Scratch memory is used for stack memory on the accelerator, as well as for register spills and restores.
+    unit: Bytes per Work-item
   Workgroups:
     rst: The number of :ref:`workgroups <desc-workgroup>` in the launch divided by the number of WGPs.
     unit: Workgroups per WGP
 Roofline Performance Rates:
   VALU FLOPs:
-    rst: VALU issues per second, excluding WMMA, at one FLOP per lane. gfx120x compute is wave32 by default, so that is 32 per instruction. SQ_INSTS_VALU counts every VALU issue, including integer, move, and convert, and an FMA counts as one issue while the FP32 roof counts it as two FLOPs. A pure FMA kernel therefore reads low. A tiled FP32 GEMM also issues address arithmetic, so this metric can read about twice the true FLOP count. SQ_WMMA_VALU_INSTS is per vec32, the same unit as SQ_INSTS_VALU for gfx120x compute.
+    rst: Estimated floating-point operations per second on the vector ALU, excluding WMMA. The estimate comes from instruction issues, so integer and conversion instructions are included and the value can read above or below the true rate.
     unit: GFLOP/s
   WMMA FLOPs (FP16):
-    rst: Matrix operations per second scored against the measured FP16 roof. The formula is 8192 * SQ_WMMA_VALU_INSTS. SQ_WMMA_VALU_INSTS counts every WMMA issue, and the counter does not separate FP16, BF16, FP8, and BF8, so the achieved rate is not FP16-only.
+    rst: Estimated WMMA floating-point operations per second. WMMA instructions of all data types (FP16, BF16, FP8, and BF8) are counted together, so the rate is not FP16-only.
     unit: GFLOP/s
   VALU FLOPs (F64):
     rst: 64-bit floating-point operations per second on the VALU.
     unit: GFLOP/s
   GL0 Cache BW (TCP Cache):
-    rst: Achieved bandwidth at the GL0 vector cache (TCP Cache). Counts 128 bytes per TCP_REQ cache-line request, an interim upper bound until the TCP_SECTORS counter is defined.
+    rst: Bandwidth requested from the GL0 vector cache (TCP Cache), counted in full cache lines, so it is an upper bound.
     unit: Bytes/s
   LDS BW:
     rst: Achieved bandwidth for Local Data Share memory operations.
     unit: Bytes/s
   L2 to Memory BW:
-    rst: Bandwidth of GL2C/EA read and write requests leaving L2 toward memory, compared with the measured VRAM bandwidth (VRAMBw column of roofline.csv). Counts 32-byte granules from GL2C_EA_RDREQ_DRAM_32B (PERF_SEL 0xa7) and GL2C_EA_WRREQ_DRAM_32B (PERF_SEL 0xa8). The unsized EA_RDREQ_DRAM and EA_WRREQ_DRAM counters (0xa5 and 0xa6) mix 32-byte through 128-byte requests, so a fixed 256 bytes per request would overstate them. It includes requests the Infinity Cache serves. The counters cannot separate them, so this can be higher than true VRAM traffic and can exceed the measured VRAM peak.
+    rst: Bandwidth of read and write requests leaving L2 toward memory. It includes requests the Infinity Cache serves, so it can exceed the true VRAM traffic and the measured VRAM peak.
     unit: Bytes/s
 Roofline Plot Points:
   AI L0:
-    rst: Arithmetic intensity relative to GL0 (TCP) requests, at 128 bytes per TCP_REQ as an upper bound on GL0 bytes. The FLOP numerator is the VALU FLOPs excluding the WMMA instructions already counted in SQ_INSTS_VALU, plus the WMMA FLOPs at 8192 per instruction.
+    rst: Floating-point operations per byte requested from the GL0 vector cache (TCP). Bytes are counted in full cache lines, which lowers this value.
     unit: FLOPs/Byte
   AI LDS:
-    rst: Arithmetic intensity relative to Local Data Share traffic. The FLOP numerator is the VALU FLOPs excluding the WMMA instructions already counted in SQ_INSTS_VALU, plus the WMMA FLOPs at 8192 per instruction.
+    rst: Arithmetic intensity relative to Local Data Share traffic.
     unit: FLOPs/Byte
   AI VRAM:
-    rst: Arithmetic intensity relative to GL2C/EA requests destined for VRAM. The plot marks the point at the VRAM level. The requests include those the Infinity Cache serves, and the counters cannot separate them, so this intensity can be lower than the true VRAM intensity. The FLOP numerator is the VALU FLOPs excluding the WMMA instructions already counted in SQ_INSTS_VALU, plus the WMMA FLOPs at 8192 per instruction.
+    rst: Floating-point operations per byte requested from L2 toward memory. Requests the Infinity Cache serves are included, so this can be lower than the true VRAM intensity.
     unit: FLOPs/Byte
   Performance (GFLOPs):
-    rst: Achieved VALU plus WMMA throughput of floating-point operations per second. The FLOP count is the VALU FLOPs excluding the WMMA instructions already counted in SQ_INSTS_VALU, plus the WMMA FLOPs at 8192 per instruction.
+    rst: Estimated floating-point operations per second on the vector ALU and WMMA combined.
     unit: GFLOP/s
 Wave Dispatch Statistics:
   Compute Wave Dispatches:
-    rst: Total wavefronts dispatched (SQ_WAVES_sum).
+    rst: Wavefronts dispatched, per normalization unit.
     unit: Count per Normalization Unit
   Wave Dispatch Rate:
     rst: Average wavefronts launched per busy cycle.
@@ -193,7 +193,7 @@ WGP VMEM Instruction Mix:
     unit: Count per Normalization Unit
 WGP Wavefront Instruction Mix:
   Instructions - Internal:
-    rst: Internal SQ instructions (SQ_INSTS_INTERNAL) per normalization unit. These represent bookkeeping or non-user-visible work issued by the SQ.
+    rst: Internal instructions issued by the sequencer (SQ), per normalization unit. This is bookkeeping work, not user code.
     unit: Count per Normalization Unit
   Instructions - LDS:
     rst: Number of Local Data Share instructions executed. LDS provides fast shared memory within a workgroup. High counts indicate active use of shared memory for inter-work-item communication.
@@ -205,7 +205,7 @@ WGP Wavefront Instruction Mix:
     rst: Number of scalar memory instructions executed. SMEM loads constant and uniform data through the scalar cache. High counts may indicate heavy use of constant buffers or kernel arguments.
     unit: Count per Normalization Unit
   Instructions - Transcendental:
-    rst: Transcendental VALU instructions (SQ_INSTS_VALU_TRANS) per normalization unit. These cover hardware approximations such as sin, cos, and log on the vector ALU.
+    rst: Transcendental VALU instructions per normalization unit. These cover hardware approximations such as sin, cos, and log on the vector ALU.
     unit: Count per Normalization Unit
   Instructions - VALU:
     rst: Number of Vector ALU instructions executed. VALU handles arithmetic and logic operations across all work-items in a wavefront. High VALU counts indicate compute-intensive kernels.
@@ -228,7 +228,7 @@ WGP VALU Instruction Mix:
     rst: Raw vector arithmetic instruction count. This includes integer and floating-point instructions and is not a FLOP count.
     unit: Instructions
   SQ_INST_CYCLES_VALU:
-    rst: Cycles needed to execute VALU operations, counting overlapping V_OP32_1 and V_OP32_T instructions separately.
+    rst: Cycles needed to execute VALU instructions, with overlapping instructions counted separately. This is not elapsed time.
     unit: Cycles
 WGP WMMA Instruction FLOPs and IOPs Counting:
   SQ_INST_CYCLES_VALU_WMMA:

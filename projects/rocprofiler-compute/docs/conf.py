@@ -102,12 +102,12 @@ for context_name, section_name in cdna_section_map.items():
 
 # Load per-arch RDNA metrics YAMLs
 rdna_metrics = {}
-for arch in ["gfx115x", "gfx1201"]:
+for arch in ["gfx115x", "gfx120x"]:
     with open(f"data/metrics/{arch}_metrics.yaml") as f:
         rdna_metrics[arch] = yaml.safe_load(f)
 
 gfx115x_metrics = rdna_metrics["gfx115x"]
-gfx1201_metrics = rdna_metrics["gfx1201"]
+gfx1201_metrics = rdna_metrics["gfx120x"]
 
 # RDNA gfx115x section mapping: jinja context id -> YAML section name
 rdna_gfx115x_section_map = {

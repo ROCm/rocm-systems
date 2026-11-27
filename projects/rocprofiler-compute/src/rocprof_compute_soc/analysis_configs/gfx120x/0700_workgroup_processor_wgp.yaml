@@ -284,8 +284,8 @@ Panel Config:
     Instructions - Flat Store: >-
       Issued flat-addressed store instructions, normalized by the chosen unit.
     Instructions - Internal: >-
-      Internal SQ instructions (SQ_INSTS_INTERNAL) per normalization unit. These
-      represent bookkeeping or non-user-visible work issued by the SQ.
+      Internal instructions issued by the sequencer (SQ), per normalization unit. This
+      is bookkeeping work, not user code.
     Instructions - LDS: >-
       Number of Local Data Share instructions executed. LDS provides fast shared memory
       within a workgroup. High counts indicate active use of shared memory for
@@ -305,9 +305,8 @@ Panel Config:
       Issued buffer stores, image stores, and atomics without a return value,
       normalized by the chosen unit.
     Instructions - Transcendental: >-
-      Transcendental VALU instructions (SQ_INSTS_VALU_TRANS) per normalization unit.
-      These cover hardware approximations such as sin, cos, and log on the vector
-      ALU.
+      Transcendental VALU instructions per normalization unit. These cover hardware
+      approximations such as sin, cos, and log on the vector ALU.
     Instructions - VALU: >-
       Number of Vector ALU instructions executed. VALU handles arithmetic and logic
       operations across all work-items in a wavefront. High VALU counts indicate
@@ -335,8 +334,8 @@ Panel Config:
       Raw vector arithmetic instruction count. This includes integer and
       floating-point instructions and is not a FLOP count.
     SQ_INST_CYCLES_VALU: >-
-      Cycles needed to execute VALU operations, counting overlapping V_OP32_1
-      and V_OP32_T instructions separately.
+      Cycles needed to execute VALU instructions, with overlapping instructions counted
+      separately. This is not elapsed time.
     SQ_INST_CYCLES_VALU_WMMA: >-
       Cycles of work sent for WMMA.
     SQ_WMMA_VALU_INSTS: >-

@@ -13,8 +13,8 @@ compute.insts_internal:
   formula: SUM(SQ_INSTS_INTERNAL_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
-    Number of internal SQ instructions issued: bookkeeping or other work that is not
-    visible to the user.
+    Internal instructions issued by the sequencer (SQ), per normalization unit. This is
+    bookkeeping work, not user code.
 compute.insts_lds:
   name: Instructions - LDS
   formula: SUM(SQ_INSTS_LDS_sum) / SUM($denom)
@@ -57,8 +57,8 @@ compute.insts_transcendental:
   formula: SUM(SQ_INSTS_VALU_TRANS_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
-    Number of transcendental VALU instructions issued. These are hardware approximations
-    such as sin, cos and log on the VALU.
+    Transcendental VALU instructions per normalization unit. These cover hardware
+    approximations such as sin, cos, and log on the vector ALU.
 compute.insts_valu:
   name: Instructions - VALU
   formula: SUM(SQ_INSTS_VALU_sum) / SUM($denom)
@@ -105,9 +105,7 @@ compute.total_flops:
   formula: SUM($wave_size * (SQ_INSTS_VALU_sum - SQ_WMMA_VALU_INSTS_sum) + 8192 * SQ_WMMA_VALU_INSTS_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9) / 1e9
   unit: GFLOP/s
   description: >-
-    Achieved VALU plus WMMA throughput of floating-point operations per second. The FLOP
-    count is the VALU FLOPs excluding the WMMA instructions already counted in
-    SQ_INSTS_VALU, plus the WMMA FLOPs at 8192 per instruction.
+    Estimated floating-point operations per second on the vector ALU and WMMA combined.
 compute.total_insts:
   name: Total Instructions
   formula: SUM(SQ_INSTS_ALL_sum) / SUM($denom)
@@ -119,10 +117,9 @@ compute.valu_flops:
   formula: SUM($wave_size * (SQ_INSTS_VALU_sum - SQ_WMMA_VALU_INSTS_sum)) / SUM(End_Timestamp - Start_Timestamp)
   unit: GFLOP/s
   description: >-
-    VALU instructions per second, excluding WMMA, at one FLOP per lane (32 in wave32).
-    Every VALU instruction counts, including integer, move and convert, and an FMA
-    counts once, so a pure FMA kernel reads low and a GEMM with address arithmetic can
-    read about twice its true FLOP rate.
+    Estimated floating-point operations per second on the vector ALU, excluding WMMA.
+    The estimate comes from instruction issues, so integer and conversion instructions
+    are included and the value can read above or below the true rate.
   peak_empirical: $FP32Flops_empirical_peak
 compute.valu_flops_f64:
   name: VALU FLOPs (F64)
@@ -135,8 +132,8 @@ compute.valu_inst_cycles:
   formula: SUM(SQ_INST_CYCLES_VALU_sum)
   unit: Cycles
   description: >-
-    Cycles needed to execute VALU operations, counting overlapping V_OP32_1 and V_OP32_T
-    instructions separately.
+    Cycles needed to execute VALU instructions, with overlapping instructions counted
+    separately. This is not elapsed time.
 compute.valu_insts:
   name: VALU Instructions
   formula: SUM(SQ_INSTS_VALU_sum)
@@ -163,7 +160,8 @@ compute.wmma_flops_f16_16x16x16:
   formula: 8192 * SUM(SQ_WMMA_VALU_INSTS_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GFLOP/s
   description: >-
-    The total number of FP16 WMMA floating-point operations executed per second.
+    Estimated WMMA floating-point operations per second. WMMA instructions of all data
+    types (FP16, BF16, FP8, and BF8) are counted together, so the rate is not FP16-only.
   peak: '$max_sclk * $cu_per_gpu * 1024 / 1000'
   peak_empirical: $WMMAF16Flops_empirical_peak
 compute.wmma_inst_cycles:

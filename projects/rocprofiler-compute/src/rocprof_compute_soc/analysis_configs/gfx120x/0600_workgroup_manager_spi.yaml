@@ -25,6 +25,6 @@ Panel Config:
           unit: Wavefronts per Cycle
   metrics_description:
     Compute Wave Dispatches: >-
-      Total wavefronts dispatched (SQ_WAVES_sum).
+      Wavefronts dispatched, per normalization unit.
     Wave Dispatch Rate: >-
       Average wavefronts launched per busy cycle.

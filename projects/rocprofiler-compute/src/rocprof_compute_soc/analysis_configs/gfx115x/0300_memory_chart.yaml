@@ -287,9 +287,10 @@ Panel Config:
       Because two CUs share a workgroup processor's LDS, a saturated LDS reads
       well below 100% on this architecture.
     LDS Bank Conflict Rate: >-
-      Percentage of LDS accesses that experienced bank conflicts. Conflicts occur when
-      multiple work-items in a wavefront access different addresses in the same LDS bank.
-      High conflict rates reduce effective LDS bandwidth. Restructuring data layouts can help.
+      Percentage of indexed-access LDS cycles spent stalled on bank conflicts. Conflicts
+      occur when multiple work-items in a wavefront access different addresses in the
+      same LDS bank. High values mean lower effective LDS bandwidth. Restructuring data
+      layouts can help.
     LDS Estimated Bandwidth: >-
       Estimated achieved bandwidth for Local Data Share operations. This reflects the
       effective throughput after accounting for bank conflicts. RDNA 3.5 provides 32 LDS

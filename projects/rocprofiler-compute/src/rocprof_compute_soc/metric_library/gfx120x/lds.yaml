@@ -3,18 +3,16 @@ lds.ai:
   formula: SUM($wave_size * (SQ_INSTS_VALU_sum - SQ_WMMA_VALU_INSTS_sum) + 8192 * SQ_WMMA_VALU_INSTS_sum) / SUM((SQC_LDS_IDX_ACTIVE_sum - SQC_LDS_BANK_CONFLICT_sum) * 4 * $lds_banks_per_cu)
   unit: FLOPs/Byte
   description: >-
-    Arithmetic intensity relative to Local Data Share traffic. The FLOP numerator is the
-    VALU FLOPs excluding the WMMA instructions already counted in SQ_INSTS_VALU, plus
-    the WMMA FLOPs at 8192 per instruction.
+    Arithmetic intensity relative to Local Data Share traffic.
 lds.bank_conflict_rate:
   name: LDS Bank Conflict Rate
   formula: 100 * SUM(SQC_LDS_BANK_CONFLICT_sum) / SUM(SQC_LDS_IDX_ACTIVE_sum)
   unit: Percent
   description: >-
-    Percentage of LDS accesses that experienced bank conflicts. Conflicts occur when
-    multiple work-items in a wavefront access different addresses in the same LDS bank.
-    High conflict rates reduce effective LDS bandwidth. Restructuring data layouts can
-    help.
+    Percentage of indexed-access LDS cycles spent stalled on bank conflicts. Conflicts
+    occur when multiple work-items in a wavefront access different addresses in the same
+    LDS bank. High values mean lower effective LDS bandwidth. Restructuring data layouts
+    can help.
 lds.bank_conflicts:
   name: LDS Bank Conflicts
   formula: AVG(SQC_LDS_BANK_CONFLICT_sum)
@@ -25,9 +23,7 @@ lds.bw:
   formula: 4 * SUM(SQC_LDS_LOAD_DWORDS_sum + SQC_LDS_STORE_DWORDS_sum + SQC_LDS_ATOMIC_DWORDS_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes per second loaded from, stored to, or atomically updated in the
-    LDS. The number of bytes is the number of dwords accessed by load, store, and atomic
-    instructions multiplied by four.
+    Bytes per second loaded, stored, and atomically updated in LDS.
 lds.theoretical_bw:
   name: Theoretical LDS Bandwidth
   formula: SUM((SQC_LDS_IDX_ACTIVE_sum - SQC_LDS_BANK_CONFLICT_sum) * 4 * $lds_banks_per_cu) / SUM(End_Timestamp - Start_Timestamp)
