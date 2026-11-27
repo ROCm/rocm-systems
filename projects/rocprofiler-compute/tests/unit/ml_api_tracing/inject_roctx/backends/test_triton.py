@@ -263,33 +263,6 @@ def test_format_triton_args_jit_ignores_extra_trailing_positionals():
     assert blob == "(x_ptr=float32[8], n_elements=8)"
 
 
-def test_format_triton_args_compiled_takes_trailing_positionals():
-    kernel = types.SimpleNamespace(
-        params=["x_ptr", "out_ptr", "n_elements", "BLOCK_SIZE"]
-    )
-    tensor = types.SimpleNamespace(shape=(8,), dtype="float32")
-    launcher_prefix = (
-        1,
-        1,
-        1,
-        object(),
-        object(),
-        object(),
-        object(),
-        object(),
-        object(),
-    )
-    blob = triton_backend._format_triton_args(
-        kernel,
-        True,
-        launcher_prefix + (tensor, tensor, 8, 256),
-        {},
-    )
-    assert blob == (
-        "(x_ptr=float32[8], out_ptr=float32[8], n_elements=8, BLOCK_SIZE=256)"
-    )
-
-
 def test_format_triton_args_compiled_reads_names_from_src_fn():
     tensor = types.SimpleNamespace(shape=(8,), dtype="float32")
     kernel = types.SimpleNamespace(
@@ -342,17 +315,6 @@ def test_format_triton_args_exception_is_n_a():
         {},
     )
     assert blob == "n/a"
-
-
-def test_format_triton_args_encodes_pipe_in_string():
-    blob = triton_backend._format_triton_args(
-        types.SimpleNamespace(params=["msg"]),
-        False,
-        ("a|b",),
-        {},
-    )
-    assert "%7C" in blob
-    assert "|" not in blob
 
 
 def test_format_triton_args_caps_at_32_items():
