@@ -3193,6 +3193,35 @@ TEST(WrapMicrotestIsolated, UseReduceScatterDirect_ThresholdAboveHardLimitIsClam
       });
 }
 
+// A negative threshold gives the device a direct limit of 0, so host selection must reject Direct RS too.
+TEST(WrapMicrotestIsolated, UseReduceScatterDirect_NegativeOneThresholdMatchesDeviceLimit) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseReduceScatterDirect_NegativeOneThresholdMatchesDeviceLimit",
+      []() {
+        g_loadParam = ForceParam("RCCL_DIRECT_REDUCE_SCATTER_THRESHOLD", int64_t(-1));
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nNodes = 8;
+        size_t msgSize = 1048576;
+        EXPECT_FALSE(rcclUseReduceScatterDirect(comm, msgSize))
+            << "threshold -1: the device limit is 0, so Direct RS must not be selected";
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, UseReduceScatterDirect_NegativeTwoThresholdMatchesDeviceLimit) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseReduceScatterDirect_NegativeTwoThresholdMatchesDeviceLimit",
+      []() {
+        g_loadParam = ForceParam("RCCL_DIRECT_REDUCE_SCATTER_THRESHOLD", int64_t(-2));
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nNodes = 8;
+        size_t msgSize = 1048576;
+        EXPECT_FALSE(rcclUseReduceScatterDirect(comm, msgSize))
+            << "threshold -2: the device limit is 0, so Direct RS must not be selected";
+        DeleteCommWithArch(comm);
+      });
+}
+
 // ===========================================================================
 // rcclUseHierarchicalReduceScatter -- rccl_wrap.cc:1361-1368. Unlike its
 // AllGather sibling, rcclParamHierarchicalReduceScatter's real default is 0

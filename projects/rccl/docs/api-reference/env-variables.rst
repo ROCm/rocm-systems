@@ -500,7 +500,7 @@ collected in the following table.
       - | Total bytes
         | Default: ``8388608`` (8 MiB). This is also a hard upper limit, so
           larger values are clamped to it and only lower values change
-          behavior.
+          behavior. A negative value disables the direct algorithm.
         | Leave unset or set to ``8388608`` to use the default.
 
     * - | ``RCCL_HIERARCHICAL_ALLGATHER_MIN_BYTES_PER_RANK``

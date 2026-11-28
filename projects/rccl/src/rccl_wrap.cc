@@ -3106,15 +3106,17 @@ bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize) {
     return false;
   }
 
-  size_t threshold = rcclParamDirectReduceScatterThreshold();
-  if (threshold != (size_t)-1) {
-    // Set threshold to 8MiB hard limit
-    // NOTE: If the DirectReduceScatterThreshold / hard-limit is increased, ensure TEMP_BUFF_SIZE (init.cc)
-    // is increased accordingly -> TEMP_BUFF_SIZE >= 2 * (max enabled msgSize) for headroom.
-    threshold = std::min(threshold, (size_t)8388608);
-  } else {
-    threshold = 8388608;
+  int64_t thresholdParam = rcclParamDirectReduceScatterThreshold();
+  // enqueue.cc gives the device a direct limit of 0 for a negative threshold, so the kernel would run its
+  // ring body on a plan built without proxy ops. Never select Direct then.
+  if (thresholdParam < 0) {
+    INFO(NCCL_INIT, "RCCL DIRECT REDUCE-SCATTER disabled: negative threshold %ld", (long)thresholdParam);
+    return false;
   }
+  // Set threshold to 8MiB hard limit
+  // NOTE: If the DirectReduceScatterThreshold / hard-limit is increased, ensure TEMP_BUFF_SIZE (init.cc)
+  // is increased accordingly -> TEMP_BUFF_SIZE >= 2 * (max enabled msgSize) for headroom.
+  size_t threshold = std::min((size_t)thresholdParam, (size_t)8388608);
   INFO(NCCL_INIT, "RCCL DIRECT REDUCE-SCATTER threshold set to: %zu", threshold);
 
   if (msgSize > threshold) return false;
