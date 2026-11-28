@@ -586,10 +586,16 @@ hsa_shut_down_refcnt_impl()
             // may survive. On timeout abandon+disable process-wide. No-op with the
             // feature off.
             ::rocprofiler::kfd::signal_less_fence_completions();
-            // The completion monitor's thread waits on signals owned by the runtime that
-            // hsa_shut_down_fn tears down below. Stop and join it here, while those
-            // signals are still valid.
-            ::rocprofiler::hsa::queue_interposition::stop_completion_monitor();
+            // The completion monitor's thread waits on signals owned by the runtime
+            // that hsa_shut_down_fn tears down below. Stop and join it here, while
+            // those signals are still valid — but only when finalization has not
+            // started. During or after finalization (fini_status != 0) the atexit
+            // path owns the monitor's static storage: queue_controller_fini stops
+            // the monitor, and destroy_static_objects destructs its shared_mutex.
+            // Calling wlock on that mutex from this thread races with the
+            // destruction and can SIGSEGV.
+            if(registration::get_fini_status() == 0)
+                ::rocprofiler::hsa::queue_interposition::stop_completion_monitor();
             async_copy_reset();
         }
         return get_core_table()->hsa_shut_down_fn();

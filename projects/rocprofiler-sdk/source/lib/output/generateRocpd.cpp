@@ -2611,7 +2611,10 @@ write_rocpd(
             {
                 const auto& info        = record.dispatch_data.dispatch_info;
                 auto        dispatch_id = info.dispatch_id;
-                auto        evt_id      = dispatch_evt_ids.at(dispatch_id);
+                // SPM can observe dispatches outside the kernel trace window; use
+                // a null event id (0) for those.
+                auto        evt_id =
+                    (dispatch_evt_ids.size() > dispatch_id) ? dispatch_evt_ids[dispatch_id] : 0UL;
 
                 auto track_id =
                     get_track_id(db, node_id, this_pid, record.thread_id, spm_name_id, "{}");
