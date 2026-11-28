@@ -1735,7 +1735,7 @@ threshold table introduced for gfx1250.
           call, and skips the barrier at its end. The other DDA IPC calls, and the
           copy-engine paths that use the DDA scratch, use the scratch below the
           banks. When ``-1`` (default), resolved from ``ddaIpcBankedScratch`` in the
-          arch table: on for gfx950, off for gfx942. If any rank has it off, no rank
+          arch table: on for gfx950 and gfx942. If any rank has it off, no rank
           uses it.
       - | ``-1``: Resolved from the per-arch table at runtime (default).
         | ``0``: Off.
