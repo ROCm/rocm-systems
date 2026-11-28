@@ -4,6 +4,7 @@
 // AVX-512 FP32 interpolation stages with source-lane selection.
 // CPU-specific arithmetic stays here; public entry points select this backend.
 
+#include "common/validation.h"
 #include "graphics/interp.h"
 #include "rj_arith/detail/rj_arith_graphics.h"
 
@@ -15,8 +16,9 @@ namespace rocjitsu::arith {
 // Evaluate an FP32 interpolation stage. Preserve destination lanes outside exec_mask.
 // Requires the named CPU features and validated instruction controls.
 template <bool P2>
-uint32_t interp32_x86_64_v4(uint32_t exec_mask, uint32_t mode, uint32_t *d, const uint32_t *a,
-                            const uint32_t *b, const uint32_t *c) {
+uint32_t interp32_x86_64_v4(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *d,
+                            const uint32_t *a, const uint32_t *b, const uint32_t *c) {
+  const bool exact = is_exact(flags);
   auto flip_a = _mm512_set1_epi32(mode & RJ_ARITH_ALU_NEG_A ? INT32_MIN : 0);
   auto flip_b = _mm512_set1_epi32(mode & RJ_ARITH_ALU_NEG_B ? INT32_MIN : 0);
   auto flip_c = _mm512_set1_epi32(mode & RJ_ARITH_ALU_NEG_C ? INT32_MIN : 0);
@@ -34,20 +36,25 @@ uint32_t interp32_x86_64_v4(uint32_t exec_mask, uint32_t mode, uint32_t *d, cons
       z = _mm512_permute_ps(z, _MM_SHUFFLE(0, 0, 0, 0));
     }
     auto value = _mm512_fmadd_ps(x, y, z);
-    if ((exec_mask >> lane) & _mm512_fpclass_ps_mask(value, 0x81)) {
+    if (exact && ((exec_mask >> lane) & _mm512_fpclass_ps_mask(value, 0x81))) {
       return exec_mask & (~uint32_t{0} << lane);
     }
     if (mode & RJ_ARITH_ALU_CLAMP) {
+      auto original = value;
       value = _mm512_min_ps(_mm512_max_ps(value, _mm512_setzero_ps()), _mm512_set1_ps(1));
+      if (flags & RJ_ARITH_FP_DX10_CLAMP_OFF) {
+        value = _mm512_mask_mov_ps(value, _mm512_cmp_ps_mask(original, original, _CMP_UNORD_Q),
+                                   original);
+      }
     }
     _mm512_mask_storeu_epi32(d + lane, __mmask16(exec_mask >> lane), _mm512_castps_si512(value));
   }
   return 0;
 }
 
-template uint32_t interp32_x86_64_v4<true>(uint32_t, uint32_t, uint32_t *, const uint32_t *,
-                                           const uint32_t *, const uint32_t *);
-template uint32_t interp32_x86_64_v4<false>(uint32_t, uint32_t, uint32_t *, const uint32_t *,
-                                            const uint32_t *, const uint32_t *);
+template uint32_t interp32_x86_64_v4<true>(uint64_t, uint32_t, uint32_t, uint32_t *,
+                                           const uint32_t *, const uint32_t *, const uint32_t *);
+template uint32_t interp32_x86_64_v4<false>(uint64_t, uint32_t, uint32_t, uint32_t *,
+                                            const uint32_t *, const uint32_t *, const uint32_t *);
 
 } // namespace rocjitsu::arith
