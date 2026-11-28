@@ -5127,6 +5127,7 @@ HSAKMT_STATUS hsakmt_fmm_register_memory(HsaKFDContext *ctx,
 {
 	manageable_aperture_t *aperture = NULL;
 	vm_object_t *object = NULL;
+	bool counted = false;
 	HSAKMT_STATUS ret;
 	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
 
@@ -5153,6 +5154,11 @@ HSAKMT_STATUS hsakmt_fmm_register_memory(HsaKFDContext *ctx,
 
 		if (ret != HSAKMT_STATUS_SUCCESS)
 			return ret;
+		/* This also covers the race where another thread created the
+		 * userptr first: the helper then returns that object with its
+		 * count already incremented on behalf of this call.
+		 */
+		counted = true;
 		if (gpu_id_array_size == 0)
 			return HSAKMT_STATUS_SUCCESS;
 		aperture = fmm_ctx->svm.dgpu_aperture;
@@ -5161,6 +5167,7 @@ HSAKMT_STATUS hsakmt_fmm_register_memory(HsaKFDContext *ctx,
 	} else if (object->userptr) {
 		/* Update an existing userptr */
 		++object->registration_count;
+		counted = true;
 	} else {
 		/* Not a userptr when we are expecting one */
 		pthread_mutex_unlock(&aperture->fmm_mutex);
@@ -5174,6 +5181,12 @@ HSAKMT_STATUS hsakmt_fmm_register_memory(HsaKFDContext *ctx,
 			|| memcmp(object->registered_device_id_array,
 					gpu_id_array, gpu_id_array_size)) {
 			pr_err("Cannot change nodes in a registered addr.\n");
+			/* This call registered nothing, so give back the
+			 * reference taken above. Keeping it would leave the
+			 * object alive after the matching deregister.
+			 */
+			if (counted)
+				--object->registration_count;
 			pthread_mutex_unlock(&aperture->fmm_mutex);
 			return HSAKMT_STATUS_MEMORY_ALREADY_REGISTERED;
 		} else {

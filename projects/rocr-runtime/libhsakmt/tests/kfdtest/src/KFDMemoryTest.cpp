@@ -561,6 +561,50 @@ TEST_F(KFDMemoryTest, MemoryRegisterSamePtr) {
     TEST_END
 }
 
+/* A registration that is rejected for naming different nodes must not count as
+ * a registration. If it does, the reference it took is never given back and the
+ * matching deregister leaves the userptr behind.
+ */
+TEST_F(KFDMemoryTest, MemoryRegisterConflictingNodesNoLeak) {
+    TEST_START(TESTPROFILE_RUNALL)
+
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        if (!hsakmt_is_dgpu()) {
+            LOG() << "Skipping test: requires dGPU." << std::endl;
+            return;
+        }
+        if (SVMAPISupported_GPU(gpuNode)) {
+            LOG() << "Skipping test: exercises the legacy userptr path only."
+                  << std::endl;
+            return;
+        }
+
+        static volatile HSAuint32 mem[4];
+        HSAuint32 nodes[1] = {static_cast<HSAuint32>(gpuNode)};
+
+        ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtRegisterMemoryToNodes, m_hsakmt_current_ctx,
+                                       const_cast<HSAuint32 *>(&mem[0]),
+                                       sizeof(HSAuint32) * 2, 1, nodes), gpuNode);
+
+        /* Names a different node list (none) than the one already registered,
+         * so this is rejected and registers nothing.
+         */
+        EXPECT_EQ_GPU(HSAKMT_STATUS_MEMORY_ALREADY_REGISTERED,
+                      HSAKMT_CALL(hsaKmtRegisterMemory, m_hsakmt_current_ctx,
+                                  const_cast<HSAuint32 *>(&mem[0]),
+                                  sizeof(HSAuint32) * 2), gpuNode);
+
+        /* One deregister therefore has to release the object completely. */
+        EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx,
+                                       const_cast<HSAuint32 *>(&mem[0])), gpuNode);
+        EXPECT_EQ_GPU(HSAKMT_STATUS_MEMORY_NOT_REGISTERED,
+                      HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx,
+                                  const_cast<HSAuint32 *>(&mem[0])), gpuNode);
+    }));
+
+    TEST_END
+}
+
 /* FlatScratchAccess
  * Since HsaMemoryBuffer has to be associated with a specific GPU node, this function in the current form
  * will not work for multiple GPU nodes. For now test only one default GPU node.
