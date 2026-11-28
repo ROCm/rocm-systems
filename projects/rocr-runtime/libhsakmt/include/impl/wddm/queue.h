@@ -51,6 +51,7 @@
 #include "impl/wddm/types.h"
 #include "impl/wddm/device.h"
 #include "impl/wddm/gpu_memory.h"
+#include "impl/wddm/scratch_retirement.h"
 #include "hsa-runtime/inc/hsa_ext_amd.h"
 #include "hsa-runtime/inc/amd_hsa_queue.h"
 #include "hsa-runtime/inc/amd_hsa_signal.h"
@@ -264,6 +265,8 @@ private:
   }
   void HandleError(hsa_status_t status);
   bool UpdateScratch(uint32_t private_segment_size, bool wave32);
+  void ReapRetiredScratch();
+  ScratchRetirement<GpuMemory> retired_scratch_;
 
   uint32_t UpdateIndexStride(uint32_t srd, bool wave32);
 
