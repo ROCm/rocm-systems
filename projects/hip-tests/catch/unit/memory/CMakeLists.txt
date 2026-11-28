@@ -85,7 +85,8 @@ set(TEST_SRC
     hipMemPoolExportPointer.cc
     hipMemPoolExportToShareableHandle.cc
     hipMemPoolImportFromShareableHandle.cc
-    hipMemPoolImportPointer.cc)
+    hipMemPoolImportPointer.cc
+    hipGetSymbolSizeAddress.cc)
 
 if(HIP_PLATFORM MATCHES "amd")
   set(TEST_SRC

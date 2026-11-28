@@ -104,17 +104,11 @@ executionControl:
     tags: [attributes, kernel, P1]
   Unit_hipFuncSetSharedMemConfig_Positive_Basic:
     <<: *level_default
-    unsupported:
-      targets: [amd_wsl]
-      reason: "AIRUNTIME-2744 - not built on amd_wsl: hipFuncSetSharedMemConfig tests are compiled only on non-AMD (NVIDIA) platforms per the HIP_PLATFORM gate in unit/executionControl/CMakeLists.txt."
     disabled:
       targets: [amd_windows]
       reason: "AIRUNTIME-2744 - intermittent segfault failure. Needs re-triage on amd_windows."
     tags: [attributes, kernel]
   Unit_hipFuncSetSharedMemConfig_Negative_Parameters:
-    <<: *level_default
-    tags: [attributes, kernel]
-  Unit_hipFuncSetSharedMemConfig_Negative_Not_Supported:
     <<: *level_default
     tags: [attributes, kernel]
   Unit_hipFuncSetAttribute_Positive_MaxDynamicSharedMemorySize:
