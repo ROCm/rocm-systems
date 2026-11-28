@@ -19,6 +19,9 @@ env:
   # regardless of arch count); extra gfx targets only recompile device code,
   # which the C/C++ extractor does not analyze.
   AIS_HIP_ARCHITECTURES: gfx942
+  # Where the analysis writes its SARIF files, relative to the workspace. Not
+  # ${{ runner.temp }}, which names the host's path in a container job.
+  AIS_CODEQL_SARIF_DIR: ../codeql-sarif
 
 on:
   workflow_call:
@@ -141,4 +144,21 @@ jobs:
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
         with:
+          category: "/hipfile/language:c-cpp"
+          # Write the results for the next step to filter, rather than
+          # uploading them here.
+          upload: never
+          output: ${{ env.AIS_CODEQL_SARIF_DIR }}
+
+      - name: Filter CodeQL results
+        # Drops the findings that GoogleTest's macros cause in the tests. The
+        # script lists them and says why.
+        shell: bash
+        run: |
+          python3 projects/hipfile/util/codeql-filter-sarif.py "${AIS_CODEQL_SARIF_DIR}"/*.sarif
+
+      - name: Upload CodeQL results
+        uses: github/codeql-action/upload-sarif@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
+        with:
+          sarif_file: ${{ env.AIS_CODEQL_SARIF_DIR }}
           category: "/hipfile/language:c-cpp"
