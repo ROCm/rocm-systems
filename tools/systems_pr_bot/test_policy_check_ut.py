@@ -71,8 +71,7 @@ def make_policy(**overrides: Any) -> pc.Policy:
         ],
         unit_test_exempt_paths=[],
         bump_bot_authors=["assistant-librarian", "systems-assistant", "dependabot"],
-        required_checks=["pre-commit"],
-        precommit_failure_comment=None,
+        required_checks=[],
     )
     defaults.update(overrides)
     return pc.Policy(**defaults)
@@ -510,7 +509,7 @@ class LoadPolicyTests(unittest.TestCase):
         if not policy_path.exists():
             self.skipTest("policy.yml not present next to tests")
         policy = pc.load_policy(policy_path)
-        self.assertIn("pre-commit", policy.required_checks)
+        self.assertEqual(policy.required_checks, [])
         # Title policy has been removed from policy.yml — the description
         # min-length is the meaningful text-length gate now.
         self.assertGreaterEqual(policy.description_min_length, 0)

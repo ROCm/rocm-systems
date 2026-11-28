@@ -61,7 +61,7 @@ CAN_MUTATE_PR = _env_flag("MUTATE_PR")
 # reference is missing from the PR description (detected in main() via
 # `jira_issue_failed`). The Unit Test and Forbidden Files checks are
 # WARNING-ONLY: they never block the workflow and never add the label. All
-# other failures (description length/checklist, pre-commit, …) do NOT add the
+# other failures (description length/checklist, …) do NOT add the
 # label either.
 
 # Fixed display order for rows in the results table (by check name). Any row
@@ -70,18 +70,11 @@ TABLE_ORDER = [
     "PR Description",
     "Forbidden Files",
     "Unit Test",
-    "pre-commit",
     "Draft PR",
     "Feature Flag",
     "Code Coverage",
     "therock-pr-bot",
 ]
-
-
-@dataclass(frozen=True)
-class FailureComment:
-    title: str
-    body: str
 
 
 @dataclass
@@ -109,7 +102,6 @@ class Policy:
     unit_test_exempt_paths: List[str]
     bump_bot_authors: List[str]
     required_checks: List[str]
-    precommit_failure_comment: Optional[FailureComment]
 
 
 def load_policy(policy_path: Path) -> Policy:
@@ -159,14 +151,6 @@ def load_policy(policy_path: Path) -> Policy:
 
     required_checks = [str(x) for x in (checks.get("required_check_runs", []) or [])]
 
-    fc = ((checks.get("failure_comments", {}) or {}).get("pre-commit")) or None
-    precommit_failure_comment = None
-    if isinstance(fc, dict) and "title" in fc and "body" in fc:
-        precommit_failure_comment = FailureComment(
-            title=str(fc["title"]),
-            body=str(fc["body"]),
-        )
-
     return Policy(
         description_min_length=description_min_length,
         description_issue_patterns=description_issue_patterns,
@@ -178,7 +162,6 @@ def load_policy(policy_path: Path) -> Policy:
         unit_test_exempt_paths=unit_test_exempt_paths,
         bump_bot_authors=bump_bot_authors,
         required_checks=required_checks,
-        precommit_failure_comment=precommit_failure_comment,
     )
 
 
@@ -709,10 +692,8 @@ def build_check_results(
 ) -> List[CheckResult]:
     """Turn required check-runs into table rows (so they appear in one table).
 
-    Required CI workflows (e.g. pre-commit, and any security workflow such as
-    CodeQL) are reported purely by their OWN check-run conclusion. This bot does
-    NOT query the Code Scanning Alerts API — that is owned by codeql.yml /
-    pre_commit_security.yml. To gate on such a workflow, add its check-run name
+    Required CI workflows (e.g. CodeQL) are reported purely by their OWN
+    check-run conclusion. To gate on such a workflow, add its check-run name
     to `checks.required_check_runs` in policy.yml.
     """
     ok = {"success", "neutral", "skipped"}
@@ -746,43 +727,6 @@ def build_check_results(
     if include_self:
         results.append(CheckResult("therock-pr-bot", "🤖", True, []))
     return results
-
-
-def maybe_comment_precommit_failure(
-    owner: str,
-    repo: str,
-    pr_number: int,
-    token: str,
-    policy: Policy,
-    check_runs: List[Dict[str, Any]],
-) -> None:
-    """Post the configured pre-commit failure help comment, if applicable.
-
-    Does nothing unless `policy.precommit_failure_comment` is set and the
-    `pre-commit` check-run concluded in a failed state.
-    """
-    if not policy.precommit_failure_comment:
-        return
-
-    precommit_run = None
-    for r in check_runs:
-        if r.get("name") == "pre-commit":
-            precommit_run = r
-            break
-    if not precommit_run:
-        return
-
-    conc = precommit_run.get("conclusion")
-    if conc not in ("failure", "cancelled", "timed_out", "action_required"):
-        return
-
-    marker = "<!-- therock-pr-bot-precommit-failed -->"
-    msg = (
-        f"{marker}\n"
-        f"### {policy.precommit_failure_comment.title}\n\n"
-        f"{policy.precommit_failure_comment.body}"
-    )
-    upsert_comment(owner, repo, pr_number, token, marker, msg)
 
 
 def add_label(owner: str, repo: str, pr_number: int, token: str, label: str) -> None:
@@ -887,8 +831,8 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     Reads PR context from the environment, runs every policy check, posts the
     combined results table, manages the `Not ready to Review` label, and waits
-    for required CI checks (e.g. pre-commit / CodeQL) to conclude. Returns 0
-    when everything passes and 1 on any policy or required-check failure.
+    for any required CI checks to conclude. Returns 0 when everything passes
+    and 1 on any policy or required-check failure.
     """
     parser = argparse.ArgumentParser(
         description="TheRock PR Bot policy check (pre-review gate)"
@@ -1073,7 +1017,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
 
     # Build the policy table; on failure we ALSO append the current
-    # pre-commit / CodeQL rows so the table is always complete.
+    # required-check rows (if any) so the table is always complete.
     # NOTE: warning-only rows (e.g. Unit Test) are excluded from the blocking
     # `errors` — they show a ⚠️ Warning but never fail the workflow.
     errors = [d for r in results for d in r.details if not r.warn]
@@ -1093,7 +1037,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
         # Add "Not ready to Review" ONLY when the JIRA/ISSUE ID reference is
         # missing from the description. All other failures (forbidden files,
-        # Unit Test, pre-commit) do NOT add the label.
+        # Unit Test) do NOT add the label.
         if jira_issue_failed:
             add_label(owner, repo, pr_number, token, NOT_READY_LABEL)  # type: ignore[arg-type]
         else:
@@ -1113,8 +1057,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         )
         upsert_comment(owner, repo, pr_number, token, fix_marker, fix_body)  # type: ignore[arg-type]
 
-        # --- Poll until pre-commit / CodeQL have a final conclusion so the
-        # table updates from ⏳ Pending to a real ✅ Pass or ❌ Fail. ---
+        # --- Poll until required CI checks (if any) have a final conclusion so
+        # the table updates from ⏳ Pending to a real ✅ Pass or ❌ Fail. ---
         ci_start = time.time()
         ok_set = {"success", "neutral", "skipped"}
         while True:
@@ -1152,8 +1096,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(f"- {e}")
         return 1
 
-    # No policy errors — show policy rows now; the required check rows
-    # (pre-commit / CodeQL) are appended during the polling loop below.
+    # No policy errors — show policy rows now; required check rows (if any)
+    # are appended during the polling loop below.
     upsert_comment(
         owner,
         repo,
@@ -1181,7 +1125,6 @@ def main(argv: Optional[List[str]] = None) -> int:
                 marker,
                 build_policy_table_comment(final_results, marker),
             )
-            maybe_comment_precommit_failure(owner, repo, pr_number, token, policy, runs)  # type: ignore[arg-type]
             print("❌ Required checks failing:")
             for f in failing:
                 print(f"- {f}")
