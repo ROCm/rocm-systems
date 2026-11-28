@@ -2846,9 +2846,10 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
           decision->algo = RCCL_DDA_FABRIC_VMM;
           return rcclSelectDone("RS", query, decision);
         }
-      } else if (rsIpcLLMax > 0 && totalBytes <= rsIpcLLMax &&
+      } else if (((rsIpcLLMax > 0 && totalBytes <= rsIpcLLMax) ||
+                  rcclDdaIpcLLWideBlocks(comm, ncclFuncReduceScatter, totalBytes) > 0) &&
                  ncclReduceScatterDdaFabricLLEligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
-        // Single-node IPC LL one-shot: no barrier, no staging copy.
+        // Single-node IPC LL one-shot up to its cap or in its table wide window: no barrier, no staging copy.
         decision->algo = RCCL_DDA_FABRIC_LL;
         decision->protocol = NCCL_PROTO_LL;
         decision->nMaxChannels = ncclReduceScatterDdaFabricLLBlocks(comm, recvcount, datatype);

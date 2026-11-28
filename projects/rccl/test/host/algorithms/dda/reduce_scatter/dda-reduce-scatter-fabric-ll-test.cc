@@ -339,6 +339,28 @@ TEST_F(DdaReduceScatterFabricLLMicrotest, Launch_IpcGridIsTheIpcKernelGrid) {
   EXPECT_EQ(RunOne((256u << 10) / 4).grid.x, 10u);
 }
 
+// IPC in a table wide window: a block per 512 packets of the shard up to the window's blocks instead of the IPC Simple
+// grid, still within the epoch cells; the window is asked for the gathered total, and the reporter agrees.
+TEST_F(DdaReduceScatterFabricLLMicrotest, Launch_IpcWideWindowSetsTheGrid) {
+  mock_.setIpcResourcesPresent();
+  size_t seenTotal = 0;
+  g_rcclDdaIpcLLWideBlocks = [&](const ncclComm*, ncclFunc_t func, size_t totalBytes) {
+    EXPECT_EQ(func, ncclFuncReduceScatter);
+    seenTotal = totalBytes;
+    return totalBytes >= (64u << 10) && totalBytes <= (512u << 10) ? 16u : 0u;
+  };
+  // {shard bytes, blocks}: 32 KiB total keeps the IPC Simple grid; 64 KiB to 512 KiB take 2, 4, 8 and 16.
+  const std::pair<size_t, unsigned> cases[] = {{4u << 10, 1}, {8u << 10, 2}, {16u << 10, 4}, {32u << 10, 8},
+                                               {64u << 10, 16}};
+  for (const auto& [shard, blocks] : cases) {
+    EXPECT_EQ(RunOne(shard / 4).grid.x, blocks) << "shard " << shard;
+    EXPECT_EQ(seenTotal, shard * 8) << "shard " << shard;
+    EXPECT_EQ(ncclReduceScatterDdaFabricLLBlocks(mock_.get(), shard / 4, ncclFloat32), blocks) << "shard " << shard;
+  }
+  comm().ddaLLEpochLen = 10;
+  EXPECT_EQ(RunOne((64u << 10) / 4).grid.x, 10u);
+}
+
 TEST_F(DdaReduceScatterFabricLLMicrotest, Launch_LaunchErrorIsReported) {
   g_hipGetLastError = [] { return hipErrorLaunchFailure; };
   for (int nRanks : {8, dda::common::kDdaLLRsSpreadMinRanks}) {

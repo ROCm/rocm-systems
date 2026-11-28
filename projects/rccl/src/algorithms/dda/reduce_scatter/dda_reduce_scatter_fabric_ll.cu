@@ -17,6 +17,7 @@
 #include "comm.h"
 #include "debug.h"
 #include "algorithms/dda/fabric/fabric_gpu_barrier.h" // dda::common::kDdaMaxNranks
+#include "rccl_common.h"
 
 #include <cuda_runtime.h>
 #include <hip/hip_ext.h>
@@ -35,11 +36,13 @@ struct DdaLLRsGeom {
 };
 
 // The grid ncclReduceScatterDdaFabricLLBlocks reports: a thread per packet of a shard, or of the message when spread.
-// IPC, never spread: ddaIpcLLBlocks.
+// IPC, never spread: ddaIpcLLBlocks, on the table's wide grid inside its window.
 static inline DdaLLRsGeom ddaReduceScatterFabricLLGeom(const ncclComm* comm, size_t shardBytes) {
   if (nccl_dda_detail::ddaLLOnIpc(comm)) {
     const unsigned threads = dda::common::kDdaSimpleThreads;
-    return {dim3(nccl_dda_detail::ddaIpcLLBlocks(comm, shardBytes, threads)), dim3(threads), false};
+    const uint32_t wide = rcclDdaIpcLLWideBlocks(comm, ncclFuncReduceScatter, shardBytes * (size_t)comm->nRanks);
+    return {dim3(nccl_dda_detail::ddaIpcLLBlocks(comm, shardBytes, threads, /*capBlocks=*/0, wide)), dim3(threads),
+            false};
   }
   const bool spread = comm->nRanks >= dda::common::kDdaLLRsSpreadMinRanks;
   const size_t nPk = shardBytes >> 3; // 8 payload bytes per packet

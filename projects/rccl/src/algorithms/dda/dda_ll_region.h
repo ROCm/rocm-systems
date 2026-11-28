@@ -49,12 +49,13 @@ inline DdaLLRegion ddaLLRegion(const ncclComm* comm) {
   return {peers, dda::common::ddaBankSize(comm->ddaScratchBytes)};
 }
 
-// Grid of an IPC LL launch over unitBytes, a thread per packet: within the IPC Simple grid for those bytes and the
-// epoch cells, and capBlocks when set.
-inline unsigned ddaIpcLLBlocks(const ncclComm* comm, size_t unitBytes, unsigned threads, uint32_t capBlocks = 0) {
-  const size_t simple = ddaIpcSimpleGeom(unitBytes, 1).first.x;
+// Grid of an IPC LL launch over unitBytes, a thread per packet: within the IPC Simple grid for those bytes, or
+// wideBlocks when set (a table wide window, rcclDdaIpcLLWideBlocks), and the epoch cells, and capBlocks when set.
+inline unsigned ddaIpcLLBlocks(const ncclComm* comm, size_t unitBytes, unsigned threads, uint32_t capBlocks = 0,
+                               uint32_t wideBlocks = 0) {
+  const size_t grid = wideBlocks > 0 ? wideBlocks : ddaIpcSimpleGeom(unitBytes, 1).first.x;
   const size_t cells = (size_t)std::max(comm->ddaLLEpochLen, 1);
-  const size_t budget = dda::common::ddaCapBlocks(std::min(simple, cells), capBlocks);
+  const size_t budget = dda::common::ddaCapBlocks(std::min(grid, cells), capBlocks);
   const size_t need = ((unitBytes >> 3) + threads - 1) / threads;
   return (unsigned)std::max<size_t>(std::min(need, budget), 1);
 }

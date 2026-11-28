@@ -1076,10 +1076,11 @@ TEST_F(RevokeDdaIpcMPITest, IncompleteCollective_DdaIpcAllGather)
     runIncompleteDdaRevokeShrink(*this, {ncclFuncAllGather, 1024, kDdaIpc, NCCL_PROTO_SIMPLE, {}});
 }
 
+// 48 KiB total sits between the ReduceScatter IPC LL cap and its wide window.
 TEST_F(RevokeDdaIpcMPITest, IncompleteCollective_DdaIpcReduceScatter)
 {
     runIncompleteDdaRevokeShrink(*this,
-                                 {ncclFuncReduceScatter, 2048, kDdaIpc, NCCL_PROTO_SIMPLE, {}});
+                                 {ncclFuncReduceScatter, 1536, kDdaIpc, NCCL_PROTO_SIMPLE, {}});
 }
 
 // At the table caps (AllReduce 4 KiB, ReduceScatter 32 KiB total) the IPC LL one-shots poll peer flags until revoked.
@@ -1097,6 +1098,12 @@ TEST_F(RevokeDdaIpcMPITest, IncompleteCollective_DdaIpcLLReduceScatter)
 TEST_F(RevokeDdaIpcMPITest, IncompleteCollective_DdaIpcLLAllGather)
 {
     runIncompleteDdaRevokeShrink(*this, {ncclFuncAllGather, 2048, kDdaLL, NCCL_PROTO_LL, {}});
+}
+
+// 64 KiB total opens the gfx950 and gfx942 ReduceScatter IPC LL wide window: 2 blocks poll peer flags until revoked.
+TEST_F(RevokeDdaIpcMPITest, IncompleteCollective_DdaIpcLLReduceScatterWide)
+{
+    runIncompleteDdaRevokeShrink(*this, {ncclFuncReduceScatter, 2048, kDdaLL, NCCL_PROTO_LL, {}});
 }
 
 TEST_F(RevokeDdaIpcMPITest, IncompleteCollective_DdaIpcAlltoAll)

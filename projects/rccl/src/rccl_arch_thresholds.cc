@@ -708,7 +708,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx950 = {
     {},                             // [0] Broadcast      -- not used
     {},                             // [1] Reduce          -- not used
     {64ULL*1024, 128ULL*1024, 16},  // [2] AllGather       -- 8 x 2 blocks; IPC Simple on 1 block below it
-    {},                             // [3] ReduceScatter   -- not used
+    {64ULL*1024, 512ULL*1024, 16},  // [3] ReduceScatter   -- 2-16 blocks; LL on the IPC grid to ddaLLMax below it
     {},                             // [4] AllReduce       -- not used
     {},                             // [5] SendRecv        -- not used
     {},                             // [6] Send            -- not used
@@ -873,7 +873,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx942 = {
     {},                             // [0] Broadcast      -- not used
     {},                             // [1] Reduce          -- not used
     {64ULL*1024, 128ULL*1024, 16},  // [2] AllGather       -- 8 x 2 blocks; IPC Simple on 1 block below it
-    {},                             // [3] ReduceScatter   -- not used
+    {64ULL*1024, 512ULL*1024, 16},  // [3] ReduceScatter   -- 2-16 blocks; LL on the IPC grid to ddaLLMax below it
     {},                             // [4] AllReduce       -- not used
     {},                             // [5] SendRecv        -- not used
     {},                             // [6] Send            -- not used
