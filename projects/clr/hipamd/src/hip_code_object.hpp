@@ -35,6 +35,10 @@ constexpr char kOffloadBundleCompressedMagicStr[] = "CCOB";
 static constexpr size_t kOffloadBundleCompressedMagicStrSize =
     sizeof(kOffloadBundleCompressedMagicStr);
 
+// llvm-offload-binary magic, 0x10FF10AD.
+constexpr unsigned char kOffloadBinaryMagic[] = {0x10, 0xFF, 0x10, 0xAD};
+static constexpr size_t kOffloadBinaryMagicSize = sizeof(kOffloadBinaryMagic);
+
 constexpr char kOffloadKindHip[] = "hip";
 constexpr char kOffloadKindHipv4[] = "hipv4";
 constexpr char kOffloadKindHcc[] = "hcc";

@@ -9,6 +9,7 @@
 #include "hip_global.hpp"
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <unordered_map>
 #include <mutex>
@@ -217,6 +218,35 @@ static bool IsCodeObjectElf(const void* image, size_t image_size) {
   return ehdr->e_machine == EM_AMDGPU && ehdr->e_ident[EI_OSABI] == ELFOSABI_AMDGPU_HSA;
 }
 
+static bool IsCodeObjectOffloadBinary(const void* image, size_t image_size) {
+  if (image_size < symbols::kOffloadBinaryMagicSize) {
+    return false;
+  }
+  return std::memcmp(image, symbols::kOffloadBinaryMagic, symbols::kOffloadBinaryMagicSize) == 0;
+}
+
+// How far the stored bytes extend. COMGR indexes the package after that.
+static size_t GetOffloadBinaryImageSize(const void* image, size_t image_bound) {
+  struct Header {
+    uint8_t magic[4];
+    uint32_t version;
+    uint64_t size;
+  };
+  static_assert(offsetof(Header, size) == 8);
+  static_assert(sizeof(Header) == 16);
+
+  if (image == nullptr || image_bound < sizeof(Header)) {
+    return 0;
+  }
+  Header header;
+  std::memcpy(&header, image, sizeof(header));
+  if (std::memcmp(header.magic, symbols::kOffloadBinaryMagic, sizeof(header.magic)) != 0 ||
+      header.version == 0 || header.size < sizeof(header) || header.size > image_bound) {
+    return 0;
+  }
+  return static_cast<size_t>(header.size);
+}
+
 static size_t GetUncompressedImageSize(const void* image, size_t image_bound) {
   if (image == nullptr) {
     return 0;
@@ -417,8 +447,15 @@ static bool PopulateCodeObjectMap(
 
     // There is no encoded total size for an uncompressed bundle. Limit COMGR's
     // header lookup to the readable image range.
-    const size_t header_size = std::min<size_t>(4096, image_bound);
-    if (auto comgr_status = amd::Comgr::set_data(data_object.get(), header_size,
+    size_t lookup_size = std::min<size_t>(4096, image_bound);
+    if (IsCodeObjectOffloadBinary(image, image_bound)) {
+      lookup_size = GetOffloadBinaryImageSize(image, image_bound);
+      if (lookup_size == 0) {
+        LogError("Invalid offload binary: failed to determine image size");
+        return false;
+      }
+    }
+    if (auto comgr_status = amd::Comgr::set_data(data_object.get(), lookup_size,
                                                  reinterpret_cast<const char*>(image));
         comgr_status != AMD_COMGR_STATUS_SUCCESS) {
       LogPrintfError("Setting data from file slice failed with status %d ", comgr_status);
@@ -509,14 +546,17 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
 
   const bool is_compressed = IsCodeObjectCompressed(image_, image_bound);
   const bool is_uncompressed = IsCodeObjectUncompressed(image_, image_bound);
+  const bool is_offload =
+      !is_compressed && !is_uncompressed && IsCodeObjectOffloadBinary(image_, image_bound);
   const bool is_elf =
-      !is_compressed && !is_uncompressed && IsCodeObjectElf(image_, image_bound);
+      !is_compressed && !is_uncompressed && !is_offload && IsCodeObjectElf(image_, image_bound);
   // Save the input during the initial/current-device load. Later non-current
   // device loads reuse this copy instead of the caller-owned buffer.
   const bool save_image_data = image_storage != nullptr;
 
-  if (!is_compressed && !is_uncompressed && !is_elf) {
-    LogError("The code object has invalid header: compressed, uncompressed or elf");
+  if (!is_compressed && !is_uncompressed && !is_offload && !is_elf) {
+    LogError(
+        "The code object has invalid header: compressed, uncompressed, offload binary, or elf");
     return hipErrorInvalidImage;
   }
 
@@ -548,6 +588,14 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
                      static_cast<unsigned long long>(kCompressedHeaderSize),
                      static_cast<unsigned long long>(image_bound));
       return hipErrorInvalidImage;
+    }
+  } else if (is_offload) {
+    if (save_image_data) {
+      image_size = GetOffloadBinaryImageSize(image_, image_bound);
+      if (image_size == 0) {
+        LogError("Invalid offload binary: failed to determine image size");
+        return hipErrorInvalidImage;
+      }
     }
   } else {
     if (save_image_data) {
@@ -601,7 +649,7 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
     // Track these to release later
     std::for_each(code_obj_map.begin(), code_obj_map.end(),
                   [&](const auto& info) { code_obj_allocations_.insert(info.second.first); });
-  } else {  // uncompressed code object
+  } else {  // uncompressed bundle, or an offload binary COMGR indexes in place
     if (!PopulateCodeObjectMap(image_, image_bound, unique_isa_names, code_obj_map)) {
       return hipErrorInvalidImage;
     }
