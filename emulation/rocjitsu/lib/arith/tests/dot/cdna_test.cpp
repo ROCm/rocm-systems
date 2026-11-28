@@ -126,3 +126,90 @@ TEST(Dot2CF32Bf16W32Gfx950, Arithmetic) {
 TEST(Dot2CF32Bf16W64Gfx950, Arithmetic) {
   check<64, true, true>(rj_arith_v_dot2c_f32_bf16_w64_gfx950);
 }
+
+TEST(Dot2F32F16Gfx950, ExactArithmeticAndContracts) {
+  auto check_gfx950 = []<int Lanes, bool Accumulate>(auto call) {
+    using Mask = WaveMask<Lanes>;
+    auto input = dot2_inputs<Lanes, false, false>();
+    input.v[0][0] = input.v[1][0] = 0x3c003c00U;
+    input.v[2][0] = input.v[3][0] = 0x4b800000U;
+    // Canonical -qNaN (0xffc00000) on payload NaN in A or C.
+    input.v[0][1] = 0x7e123c00U;
+    input.v[1][1] = 0x3c003c00U;
+    input.v[2][1] = input.v[3][1] = 0U;
+    // Physical MI350X preserves FP16 subnormal inputs under MODE.FP_DENORM=0 despite CDNA4 §6.4
+    // (0 / 32,768 diffs between wave2_3f default and rne_flush_all on both DOT2 and DOT2C):
+    // - lane 2: 2^-24 + 2^-24 = 2^-23 (0x34000000)
+    // - lane 3 (wave2_3f row 4): 0x00000001 * 0xd08fdee0 + 0x40880000 -> 0x4087ffc9 (vs 0x40880000
+    //   if flushed)
+    // - lane 4 (wave2_3f row 118): 0x00800000 * 0x47c6cc38 + 0x89a0cbcd -> 0x3878bffc (vs
+    //   0x89a0cbcd if flushed and 0x3878c000 in single IEEE / Loose)
+    input.v[0][2] = 0x00010001U;
+    input.v[1][2] = 0x3c003c00U;
+    input.v[2][2] = input.v[3][2] = 0U;
+    input.v[0][3] = 0x00000001U;
+    input.v[1][3] = 0xd08fdee0U;
+    input.v[2][3] = input.v[3][3] = 0x40880000U;
+    input.v[0][4] = 0x00800000U;
+    input.v[1][4] = 0x47c6cc38U;
+    input.v[2][4] = input.v[3][4] = 0x89a0cbcdU;
+    // Nearest-even normalization increment and 24-bit fixed-point C alignment:
+    // - lane 5 (wave2_3f row 169): 0x3c01fbff * 0x793e1591 + 0x42260000 -> 0x4727ba6c (rup=0,
+    //   single IEEE RNE, and Loose all give 0x4727ba6b)
+    // - lane 6 (wave2_3f row 87): 0x3c003c00 * 0x3e2b6a24 + 0x3e633cdc -> 0x45449c38 (single IEEE
+    //   RNE and Loose give 0x45449c39)
+    // - lane 7: A=B=0x00003c00, C=0x34400000 -> 0x3f800002 (rup=0 gives 0x3f800001)
+    // - lane 8: A=B=0x00003c00, C=0xa1800000 (-2^-60) -> 0x3f7fffff (single IEEE RNE and Loose give
+    //   0x3f800000)
+    input.v[0][5] = 0x3c01fbffU;
+    input.v[1][5] = 0x793e1591U;
+    input.v[2][5] = input.v[3][5] = 0x42260000U;
+    input.v[0][6] = 0x3c003c00U;
+    input.v[1][6] = 0x3e2b6a24U;
+    input.v[2][6] = input.v[3][6] = 0x3e633cdcU;
+    input.v[0][7] = input.v[1][7] = 0x00003c00U;
+    input.v[2][7] = input.v[3][7] = 0x34400000U;
+    input.v[0][8] = input.v[1][8] = 0x00003c00U;
+    input.v[2][8] = input.v[3][8] = 0xa1800000U;
+    for (uint64_t cpu : supported_cpu_levels()) {
+      for (uint64_t semantics : semantics_modes()) {
+        for (uint64_t mode : {uint64_t(0), uint64_t(RJ_ARITH_DOT_CLAMP), uint64_t(1) << 40}) {
+          auto regs = input;
+          uint32_t status = 0x55aaU;
+          const int expected_error = (mode & ~(Accumulate ? 0ULL : 0x7ffULL))
+                                         ? RJ_ARITH_ERROR_INVALID_FLAGS
+                                     : semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL
+                                         ? RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS
+                                         : RJ_ARITH_SUCCESS;
+          const uint64_t flags = cpu | semantics | RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
+                                 RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS | RJ_ARITH_FP_ROUND_MASK |
+                                 RJ_ARITH_FP16_OVFL;
+          ASSERT_EQ((invoke_dot<Accumulate, true>(call, flags, ~Mask(0), mode, regs.v + 3, regs.v,
+                                                  regs.v + 1, regs.v + 2, &status)),
+                    expected_error);
+          EXPECT_EQ(status, 0x55aaU);
+          if (expected_error) {
+            regs.expect_preserved(input, 0, 0);
+            continue;
+          }
+          EXPECT_EQ(regs.v[3][0], 0x4b800001U);
+          if (semantics != RJ_ARITH_SEMANTICS_LOOSE &&
+              semantics != RJ_ARITH_SEMANTICS_COMPATIBILITY) {
+            EXPECT_EQ(regs.v[3][1], 0xffc00000U);
+            EXPECT_EQ(regs.v[3][2], 0x34000000U);
+            EXPECT_EQ(regs.v[3][3], 0x4087ffc9U);
+            EXPECT_EQ(regs.v[3][4], 0x3878bffcU);
+            EXPECT_EQ(regs.v[3][5], 0x4727ba6cU);
+            EXPECT_EQ(regs.v[3][6], 0x45449c38U);
+            EXPECT_EQ(regs.v[3][7], 0x3f800002U);
+            EXPECT_EQ(regs.v[3][8], 0x3f7fffffU);
+          }
+        }
+      }
+    }
+  };
+  check_gfx950.template operator()<32, false>(rj_arith_v_dot2_f32_f16_w32_gfx950);
+  check_gfx950.template operator()<64, false>(rj_arith_v_dot2_f32_f16_w64_gfx950);
+  check_gfx950.template operator()<32, true>(rj_arith_v_dot2c_f32_f16_w32_gfx950);
+  check_gfx950.template operator()<64, true>(rj_arith_v_dot2c_f32_f16_w64_gfx950);
+}

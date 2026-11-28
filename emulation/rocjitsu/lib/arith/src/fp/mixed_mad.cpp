@@ -145,3 +145,94 @@ int rj_arith_v_mad_mixhi_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t in
                                  [[maybe_unused]] uint32_t *trapsts) {
   return run<rocjitsu::arith::MixedFma::High>(flags, exec_mask, instruction_flags, d, a, b, c);
 }
+
+namespace {
+
+template <typename MadCall, typename FmaCall, typename Mask>
+int run_gfx950(MadCall mad_call, FmaCall fma_call, uint64_t flags, Mask exec_mask,
+               uint64_t instruction_flags, uint32_t *const *d, const uint32_t *const *a,
+               const uint32_t *const *b, const uint32_t *const *c, uint32_t *trapsts) {
+  const uint64_t semantics = flags & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_COMPATIBILITY || semantics == RJ_ARITH_SEMANTICS_LOOSE) {
+    return mad_call(flags, exec_mask, instruction_flags, d, a, b, c, trapsts);
+  }
+  if (instruction_flags >> 32) {
+    if (int error = fma_call(flags, 0, uint32_t(instruction_flags), nullptr, nullptr, nullptr,
+                             nullptr, nullptr)) {
+      return error;
+    }
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  const bool flush_in = (flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS) != 0;
+  const bool flush_out = (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) != 0;
+  const uint64_t f16_policy = flags & RJ_ARITH_FP_INPUT_DENORMALS_F16_MASK;
+  const bool flush_in_f16 = f16_policy == RJ_ARITH_FP_FLUSH_INPUT_DENORMALS_F16      ? true
+                            : f16_policy == RJ_ARITH_FP_PRESERVE_INPUT_DENORMALS_F16 ? false
+                                                                                     : flush_in;
+  const bool unqualified_mode =
+      !(flags & RJ_ARITH_FP_IEEE_MODE) || flush_in != flush_out || flush_in_f16 != flush_in;
+  if (unqualified_mode) {
+    if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
+      if (int error =
+              fma_call(flags, 0, instruction_flags, nullptr, nullptr, nullptr, nullptr, nullptr)) {
+        return error;
+      }
+      return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+    }
+    if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE) {
+      const uint64_t loose_flags = (flags & ~RJ_ARITH_SEMANTICS_MASK) | RJ_ARITH_SEMANTICS_LOOSE;
+      return mad_call(loose_flags, exec_mask, instruction_flags, d, a, b, c, trapsts);
+    }
+  }
+  return fma_call(flags, exec_mask, instruction_flags, d, a, b, c, trapsts);
+}
+
+} // namespace
+
+int rj_arith_v_mad_mix_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      const uint32_t *const *c, uint32_t *trapsts) {
+  return run_gfx950(rj_arith_v_mad_mix_f32_w32, rj_arith_v_fma_mix_f32_w32, flags, exec_mask,
+                    instruction_flags, d, a, b, c, trapsts);
+}
+
+int rj_arith_v_mad_mix_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      const uint32_t *const *c, uint32_t *trapsts) {
+  return run_gfx950(rj_arith_v_mad_mix_f32_w64, rj_arith_v_fma_mix_f32_w64, flags, exec_mask,
+                    instruction_flags, d, a, b, c, trapsts);
+}
+
+int rj_arith_v_mad_mixlo_f16_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        const uint32_t *const *c, uint32_t *trapsts) {
+  return run_gfx950(rj_arith_v_mad_mixlo_f16_w32, rj_arith_v_fma_mixlo_f16_w32, flags, exec_mask,
+                    instruction_flags, d, a, b, c, trapsts);
+}
+
+int rj_arith_v_mad_mixlo_f16_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        const uint32_t *const *c, uint32_t *trapsts) {
+  return run_gfx950(rj_arith_v_mad_mixlo_f16_w64, rj_arith_v_fma_mixlo_f16_w64, flags, exec_mask,
+                    instruction_flags, d, a, b, c, trapsts);
+}
+
+int rj_arith_v_mad_mixhi_f16_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        const uint32_t *const *c, uint32_t *trapsts) {
+  return run_gfx950(rj_arith_v_mad_mixhi_f16_w32, rj_arith_v_fma_mixhi_f16_w32, flags, exec_mask,
+                    instruction_flags, d, a, b, c, trapsts);
+}
+
+int rj_arith_v_mad_mixhi_f16_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        const uint32_t *const *c, uint32_t *trapsts) {
+  return run_gfx950(rj_arith_v_mad_mixhi_f16_w64, rj_arith_v_fma_mixhi_f16_w64, flags, exec_mask,
+                    instruction_flags, d, a, b, c, trapsts);
+}
