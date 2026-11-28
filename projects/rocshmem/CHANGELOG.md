@@ -59,6 +59,8 @@
   pSync allocation, from `BARRIER_SYNC_SIZE + 1` to `2 * BARRIER_SYNC_SIZE + 1`, to back the
   double-buffered alltoall/fcollect thread-puts fast path. This changes the size of internal
   pSync buffers; rocSHMEM has no stable binary ABI, so this does not require a version bump.
+* The AMD Pensando IONIC GDA provider now requires
+  network driver and firmware support for CQ collapsing.
 
 ## rocSHMEM 3.8.0 for ROCm 10.2
 
@@ -87,9 +89,6 @@
 * Deprecated `rocshmem_signal_fetch_wg` and `rocshmem_signal_fetch_wave`.
   Use `rocshmem_signal_fetch` instead.
 
-### Changed
-* The AMD Pensando IONIC GDA provider now requires
-  network driver and firmware support for CQ collapsing.
 ## rocSHMEM 3.7.0 for ROCm 10.1
 
 ### Added
