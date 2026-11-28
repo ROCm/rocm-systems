@@ -1,10 +1,15 @@
 #include "json.h"
 #include <assert.h>
+#include <errno.h>
+#include <fcntl.h>
 #include <math.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 const char* jsonErrorString(jsonResult_t res) {
   switch (res) {
@@ -40,6 +45,54 @@ typedef struct jsonFileOutput {
   pthread_mutex_t mutex;
 } jsonFileOutput;
 
+static void jsonCloseKeepingErrno(int fd) {
+  int saved = errno;
+  close(fd);
+  errno = saved;
+}
+
+FILE* jsonOpenOutputFile(const char* outfile, bool append) {
+  int flags = O_WRONLY | O_CREAT | O_NOFOLLOW | O_NONBLOCK;
+  if (append) flags |= O_APPEND;
+  int fd = open(outfile, flags, 0644);
+  if (fd < 0) {
+    return NULL;
+  }
+
+  struct stat st;
+  if (fstat(fd, &st) != 0) {
+    jsonCloseKeepingErrno(fd);
+    return NULL;
+  }
+  if (!S_ISREG(st.st_mode) || st.st_nlink != 1 || st.st_uid != geteuid()) {
+    jsonCloseKeepingErrno(fd);
+    errno = EPERM;
+    return NULL;
+  }
+
+  if ((st.st_mode & (S_IWGRP | S_IWOTH)) != 0 &&
+      fchmod(fd, st.st_mode & ~(mode_t)(S_IWGRP | S_IWOTH)) != 0) {
+    jsonCloseKeepingErrno(fd);
+    return NULL;
+  }
+
+  if (!append && ftruncate(fd, 0) != 0) {
+    jsonCloseKeepingErrno(fd);
+    return NULL;
+  }
+  if (fcntl(fd, F_SETFL, flags & ~O_NONBLOCK & ~O_CREAT & ~O_NOFOLLOW) != 0) {
+    jsonCloseKeepingErrno(fd);
+    return NULL;
+  }
+
+  FILE* fp = fdopen(fd, append ? "a" : "w");
+  if (fp == NULL) {
+    jsonCloseKeepingErrno(fd);
+    return NULL;
+  }
+  return fp;
+}
+
 jsonResult_t jsonInitFileOutput(jsonFileOutput** jfo, const char* outfile) {
   jsonFileOutput* new_jfo = (jsonFileOutput*)malloc(sizeof(jsonFileOutput));
   if (new_jfo == NULL) {
@@ -53,7 +106,7 @@ jsonResult_t jsonInitFileOutput(jsonFileOutput** jfo, const char* outfile) {
   new_jfo->states = NULL;
   new_jfo->state_cap = 0;
   new_jfo->state_n = 0;
-  new_jfo->fp = fopen(outfile, "w");
+  new_jfo->fp = jsonOpenOutputFile(outfile, /*append=*/false);
   if (new_jfo->fp == NULL) {
     free(new_jfo);
     *jfo = 0;
