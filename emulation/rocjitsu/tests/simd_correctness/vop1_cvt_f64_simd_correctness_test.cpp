@@ -1,26 +1,9 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-/// @file vop1_cvt_f64_simd_correctness_test.cpp
-/// @brief Bit-identity check (SIMD fast path vs scalar body) for the six
-/// mixed-width f64<->32-bit VOP1 conversions on CDNA4: the f64-source forms
-/// (v_cvt_f32_f64, v_cvt_i32_f64, v_cvt_u32_f64) and the f64-dst forms
-/// (v_cvt_f64_f32, v_cvt_f64_i32, v_cvt_f64_u32). These bridge an 8-wide
-/// (native_width64) f64 chunk and the same number of 32-bit lanes, so they use
-/// dedicated cvt glue (read_simd64 / narrow32) rather than the equal-width unary
-/// path. Each case runs TWICE in the same process -- once forcing the scalar
-/// body, once the SIMD fast path, with identical inputs/EXEC -- and the
-/// destination word pairs are asserted equal with EXPECT_EQ
-/// (util::set_force_scalar_for_testing flips the gate in-process). In-process
-/// inactive lanes must stay preserved under full/partial EXEC.
-///
-/// The float-result conversions (v_cvt_f32_f64, v_cvt_f64_f32) are correctly
-/// rounded (vcvtpd2ps / vcvtps2pd), bit-exact for finite/Inf inputs; a NaN
-/// *result* may carry a different payload between packed and scalar (accepted),
-/// so those words are excluded from the comparison — NaN-ness of the result is
-/// deterministic from the inputs, so both runs skip the same words. The int
-/// conversions are exact (NaN->0 and the saturating clamp are deterministic),
-/// compared with no carve-out.
+// Compare decoded CDNA4 F64/32-bit conversions with automatic and forced-scalar
+// CPU selection. Check raw results and inactive destinations; floating-result
+// NaN payloads are allowed to differ between CPU paths.
 
 #include "compute_unit_test_util.h"
 #include "decode_test_util.h"
@@ -261,20 +244,12 @@ void check_case(const CvtCase &c, uint64_t exec) {
 }
 
 TEST(Vop1CvtF64SimdCorrectness, FullExecMask) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   for (const auto &c : kCases) {
     check_case(c, /*exec=*/~0ULL);
   }
 }
 
 TEST(Vop1CvtF64SimdCorrectness, PartialExecMask) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   // Pattern crossing the 8-wide chunk boundaries on a wave64.
   for (const auto &c : kCases) {
     check_case(c, /*exec=*/0xA5A5'F0F0'1234'8001ULL);

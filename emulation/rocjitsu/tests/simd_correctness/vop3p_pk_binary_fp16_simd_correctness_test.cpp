@@ -243,10 +243,6 @@ void check_case(const Case &c, uint64_t exec, uint32_t neg, uint32_t neg_hi) {
 }
 
 TEST(Vop3pPkBinaryFp16SimdCorrectness, FullExecAllModifiers) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   for (const auto &c : kCases) {
     for (uint32_t neg = 0; neg < 4; ++neg) {
       for (uint32_t neg_hi = 0; neg_hi < 4; ++neg_hi) {
@@ -257,10 +253,6 @@ TEST(Vop3pPkBinaryFp16SimdCorrectness, FullExecAllModifiers) {
 }
 
 TEST(Vop3pPkBinaryFp16SimdCorrectness, PartialExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   for (const auto &c : kCases) {
     check_case(c, /*exec=*/0xA5A5'F0F0'1234'8001ULL, /*neg=*/0, /*neg_hi=*/0);
   }

@@ -22,6 +22,7 @@
 #include "hip_test_aqllog_trace_region.hh"
 #include "hip_test_process.hh"
 
+#include <algorithm>
 #include <cctype>
 #include <cstdint>
 #include <cstdlib>
@@ -226,6 +227,54 @@ inline int DispatchBarrierBitForWorkgroup(const std::string& log, uint32_t size)
     return *packet->barrier;
   }
   return -1;
+}
+
+
+//! The value written immediately after |key|, up to the next ',', ']' or whitespace,
+//! or nullopt when |key| is absent or not followed by a value.
+inline std::optional<std::string> FieldToken(const std::string& line, const std::string& key) {
+  const size_t key_pos = line.find(key);
+  if (key_pos == std::string::npos) {
+    return std::nullopt;
+  }
+  const size_t start = key_pos + key.size();
+  const size_t end = line.find_first_of(", ]\t\n", start);
+  const std::string token = line.substr(start, end == std::string::npos ? end : end - start);
+  if (token.empty()) {
+    return std::nullopt;
+  }
+  return token;
+}
+
+//! True if |line| waits on |signal|: a barrier-value packet (signal=s), one of the five
+//! slots of a barrier-AND/OR packet (dep_signal=[s0, s1, s2, s3, s4]) or the dependency of
+//! an ext dispatch (dep_signal=s).
+inline bool WaitsOnSignal(const std::string& line, const std::string& signal) {
+  if (FieldToken(line, ", signal=") == signal) {
+    return true;
+  }
+  const std::string key = "dep_signal=";
+  const size_t key_pos = line.find(key);
+  if (key_pos == std::string::npos) {
+    return false;
+  }
+  size_t pos = key_pos + key.size();
+  if (pos >= line.size() || line[pos] != '[') {
+    return FieldToken(line, key) == signal;
+  }
+  const size_t end = line.find(']', pos);
+  while (pos < end) {
+    pos = line.find_first_not_of("[, ", pos);
+    if (pos == std::string::npos || pos >= end) {
+      break;
+    }
+    const size_t next = std::min(line.find_first_of(", ]", pos), end);
+    if (line.compare(pos, next - pos, signal) == 0) {
+      return true;
+    }
+    pos = next;
+  }
+  return false;
 }
 
 }  // namespace aqllog

@@ -24,6 +24,7 @@ from enum import Enum
 from pathlib import Path
 
 from .cache import resolve_username
+from .capabilities import make_deny_perf_events_hook
 from .config import RocprofsysConfig
 from .environment import TestEnvironment, TestEnvKind
 
@@ -188,6 +189,7 @@ class BaseRunner(ABC):
         working_directory: Path | None = None,
         no_base_env: bool = False,
         python_version: str | None = None,
+        deny_perf_events: bool = False,
     ):
         self.config = config
         self.target = target
@@ -206,6 +208,7 @@ class BaseRunner(ABC):
         self.num_procs = num_procs
         self.working_directory = working_directory or config.rocprofsys_build_dir
         self.python_version = python_version
+        self.deny_perf_events = deny_perf_events
         self.environment = TestEnvironment()
         self.environment.set_base_environment(
             config, TestEnvKind.NONE if no_base_env else test_type, python_version
@@ -323,6 +326,8 @@ class BaseRunner(ABC):
 
         start_time = time.time()
 
+        preexec_fn = make_deny_perf_events_hook() if self.deny_perf_events else None
+
         try:
             result = subprocess.run(
                 command,
@@ -332,6 +337,7 @@ class BaseRunner(ABC):
                 timeout=self.timeout,
                 env=self.env,
                 cwd=self.working_directory,
+                preexec_fn=preexec_fn,
                 check=False,
             )
             duration = time.time() - start_time

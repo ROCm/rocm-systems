@@ -479,10 +479,6 @@ void check_f32_all_mods(const Case &c, uint64_t exec) {
 }
 
 TEST(Vop3BinarySimdCorrectness, F32_AllModifiers_FullExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   for (const auto &c : kCases) {
     if (c.kind == Kind::F32) {
       check_f32_all_mods(c, /*exec=*/~0ULL);
@@ -491,10 +487,6 @@ TEST(Vop3BinarySimdCorrectness, F32_AllModifiers_FullExec) {
 }
 
 TEST(Vop3BinarySimdCorrectness, F32_AllModifiers_PartialExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   for (const auto &c : kCases) {
     if (c.kind == Kind::F32) {
       check_f32_all_mods(c, /*exec=*/0xA5A5'F0F0'1234'8001ULL);
@@ -536,10 +528,6 @@ TEST(Vop3BinarySimdCorrectness, F32OmodHonorsOutputDenormAndIeeeMode) {
 }
 
 TEST(Vop3BinarySimdCorrectness, Int_FullAndPartialExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   for (const auto &c : kCases) {
     if (c.kind != Kind::INT) {
       continue;
@@ -615,10 +603,6 @@ void check_f16_all_mods(const Case &c, uint64_t exec) {
 }
 
 TEST(Vop3BinarySimdCorrectness, F16_AllModifiers_FullExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   for (const auto &c : kCases) {
     if (c.kind == Kind::F16) {
       check_f16_all_mods(c, /*exec=*/~0ULL);
@@ -627,10 +611,6 @@ TEST(Vop3BinarySimdCorrectness, F16_AllModifiers_FullExec) {
 }
 
 TEST(Vop3BinarySimdCorrectness, F16_AllModifiers_PartialExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   for (const auto &c : kCases) {
     if (c.kind == Kind::F16) {
       check_f16_all_mods(c, /*exec=*/0xA5A5'F0F0'1234'8001ULL);

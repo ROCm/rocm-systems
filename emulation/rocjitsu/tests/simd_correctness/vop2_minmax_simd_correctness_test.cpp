@@ -207,20 +207,12 @@ void check_case(const MinMaxCase &c, uint64_t exec) {
 }
 
 TEST(Vop2MinMaxSimdCorrectness, FullExecMask) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   for (const auto &c : kCases) {
     check_case(c, /*exec=*/~0ULL);
   }
 }
 
 TEST(Vop2MinMaxSimdCorrectness, PartialExecMask) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   for (const auto &c : kCases) {
     check_case(c, /*exec=*/0xA5A5'F0F0'1234'8001ULL);
   }

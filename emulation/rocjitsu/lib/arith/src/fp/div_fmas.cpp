@@ -424,3 +424,83 @@ int rj_arith_v_div_fmas_f64_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
   return run<64, false, true>(flags, exec_mask, instruction_flags, d, a, b, c, condition,
                               fp_status);
 }
+
+namespace {
+
+// MI350X (gfx950) DIV_FMAS matches the shared integer model across VCC=0/1; validate controls
+// before rejecting mode 3 or uncaptured active OMOD in mode 2.
+template <int Width, int Lanes, typename Mask>
+int run_gfx950(uint64_t flags, Mask exec_mask, uint64_t instruction_flags, uint32_t *const *d,
+               const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c,
+               Mask condition, uint32_t *trapsts) {
+  const uint64_t semantics = flags & RJ_ARITH_SEMANTICS_MASK;
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  const uint64_t check_flags =
+      (flags & ~RJ_ARITH_SEMANTICS_MASK) | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS;
+  if (int error = run<Width, true>(check_flags, 0, uint32_t(instruction_flags), nullptr, nullptr,
+                                   nullptr, nullptr, 0, nullptr)) {
+    return error;
+  }
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  const bool active_omod = (instruction_flags & RJ_ARITH_ALU_OMOD_MASK) &&
+                           (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) &&
+                           !(flags & RJ_ARITH_FP_IEEE_MODE);
+  if (active_omod) {
+    if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
+      return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+    }
+    if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE) {
+      flags = (flags & ~RJ_ARITH_SEMANTICS_MASK) | RJ_ARITH_SEMANTICS_LOOSE;
+    }
+  }
+  if constexpr (Lanes == 32) {
+    return run<Width, true>(flags, exec_mask, uint32_t(instruction_flags), d, a, b, c, condition,
+                            trapsts);
+  } else {
+    return run_wave64<Width, true>(flags, exec_mask, uint32_t(instruction_flags), d, a, b, c,
+                                   condition, trapsts);
+  }
+}
+
+} // namespace
+
+int rj_arith_v_div_fmas_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       const uint32_t *const *c, uint32_t condition,
+                                       uint32_t *trapsts) {
+  return run_gfx950<32, 32>(flags, exec_mask, instruction_flags, d, a, b, c, condition, trapsts);
+}
+
+int rj_arith_v_div_fmas_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       const uint32_t *const *c, uint64_t condition,
+                                       uint32_t *trapsts) {
+  return run_gfx950<32, 64>(flags, exec_mask, instruction_flags, d, a, b, c, condition, trapsts);
+}
+
+int rj_arith_v_div_fmas_f64_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       const uint32_t *const *c, uint32_t condition,
+                                       uint32_t *trapsts) {
+  return run_gfx950<64, 32>(flags, exec_mask, instruction_flags, d, a, b, c, condition, trapsts);
+}
+
+int rj_arith_v_div_fmas_f64_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       const uint32_t *const *c, uint64_t condition,
+                                       uint32_t *trapsts) {
+  return run_gfx950<64, 64>(flags, exec_mask, instruction_flags, d, a, b, c, condition, trapsts);
+}

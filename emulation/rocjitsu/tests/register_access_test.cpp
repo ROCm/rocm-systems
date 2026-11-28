@@ -1328,13 +1328,13 @@ TEST(RegisterAccessTest, ReplicatedScalarPairObservesOnlyOneScalarWord) {
   ASSERT_EQ(fx.plugin->sgpr_reads.size(), 1u);
   EXPECT_EQ(fx.plugin->sgpr_reads[0], fx.sgpr_base() + 8);
 
-  if constexpr (util::has_stdx_simd) {
+  {
     fx.plugin->sgpr_reads.clear();
     const auto view = regs.read_operand_pair32(source, 1, ScalarPairMode::Replicate32,
                                                /*byte_mask=*/0b1100);
     const auto lo = view.load_lo_native<uint32_t>(0);
     const auto hi = view.load_hi_native<uint32_t>(0);
-    for (std::size_t lane = 0; lane < util::native_width_v<uint32_t>; ++lane) {
+    for (std::size_t lane = 0; lane < util::register_block_lanes_v<uint32_t>; ++lane) {
       EXPECT_EQ(lo[lane], 0x11220000u);
       EXPECT_EQ(hi[lane], 0x11220000u);
     }
@@ -2245,9 +2245,7 @@ TEST(RegisterAccessTest, ScopedVgprWriteMaskSuppressesScalarLaneCommits) {
 }
 
 TEST(RegisterAccessTest, ScopedVgprWriteMaskSuppressesNativeSimdCommits) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-  } else {
+  {
     Fixture fx;
     ASSERT_NE(fx.wf, nullptr);
     constexpr uint32_t logical_vgpr = 22;
@@ -2259,8 +2257,9 @@ TEST(RegisterAccessTest, ScopedVgprWriteMaskSuppressesNativeSimdCommits) {
     amdgpu::dpp::ScopedVgprWriteMask write_mask;
     write_mask.bind(*fx.wf, committed_lanes);
     auto view = RegisterAccess(*fx.wf).write_operand(dst, requested_lanes);
-    EXPECT_TRUE((view.store_native<uint32_t>(0, util::native<uint32_t>(0xD00Du), requested_lanes))
-                    .succeeded());
+    EXPECT_TRUE(
+        (view.store_native<uint32_t>(0, util::RegisterBlock<uint32_t>(0xD00Du), requested_lanes))
+            .succeeded());
 
     ASSERT_EQ(fx.plugin->writes.size(), 1u);
     EXPECT_EQ(fx.plugin->writes[0].lane_mask, committed_lanes);
@@ -2324,9 +2323,7 @@ TEST(RegisterAccessTest, Wave64DispatchExpandsVgprWriteMaskToArchitecturalWidth)
 }
 
 TEST(RegisterAccessTest, WriteViewsCannotOutliveTheirAcquiredWriteMask) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-  } else {
+  {
     Fixture fx;
     ASSERT_NE(fx.wf, nullptr);
     RegisterAccess regs(*fx.wf);
@@ -2358,16 +2355,16 @@ TEST(RegisterAccessTest, WriteViewsCannotOutliveTheirAcquiredWriteMask) {
     auto write32 = acquire([&] { return regs.write_operand(dst32, requested_lanes); });
     expect_captured_notifications(first_write);
     store_under_later_mask([&] {
-      EXPECT_TRUE((write32.store_narrow<uint32_t>(0, util::broadcast_narrow<uint32_t>(0x1111u),
-                                                  acquired_lanes))
-                      .succeeded());
+      EXPECT_TRUE(
+          (write32.store_native<uint32_t>(0, util::broadcast<uint32_t>(0x1111u), acquired_lanes))
+              .succeeded());
     });
     EXPECT_EQ(fx.cu->read_vgpr(base + 30, 0), 0x1111u);
     EXPECT_EQ(fx.cu->read_vgpr(base + 30, 2), 0u);
     fx.wf->clear_instruction_execution_error();
-    EXPECT_TRUE((write32.store_narrow<uint32_t>(0, util::broadcast_narrow<uint32_t>(0xAAAAu),
-                                                uint64_t{1} << 1))
-                    .failed());
+    EXPECT_TRUE(
+        (write32.store_native<uint32_t>(0, util::broadcast<uint32_t>(0xAAAAu), uint64_t{1} << 1))
+            .failed());
     EXPECT_EQ(fx.wf->instruction_execution_error(),
               InstructionExecutionError::InvalidRegisterAccess);
 
@@ -2376,16 +2373,16 @@ TEST(RegisterAccessTest, WriteViewsCannotOutliveTheirAcquiredWriteMask) {
     auto write64 = acquire([&] { return regs.write_operand64(dst64, requested_lanes); });
     expect_captured_notifications(first_write);
     store_under_later_mask([&] {
-      EXPECT_TRUE(
-          (write64.store_native<uint64_t>(0, util::native<uint64_t>(0x2222u), acquired_lanes))
-              .succeeded());
+      EXPECT_TRUE((write64.store_native<uint64_t>(0, util::RegisterBlock<uint64_t>(0x2222u),
+                                                  acquired_lanes))
+                      .succeeded());
     });
     EXPECT_EQ(fx.cu->read_vgpr(base + 32, 0), 0x2222u);
     EXPECT_EQ(fx.cu->read_vgpr(base + 32, 2), 0u);
     fx.wf->clear_instruction_execution_error();
-    EXPECT_TRUE(
-        (write64.store_native<uint64_t>(0, util::native<uint64_t>(0xBBBBu), uint64_t{1} << 1))
-            .failed());
+    EXPECT_TRUE((write64.store_native<uint64_t>(0, util::RegisterBlock<uint64_t>(0xBBBBu),
+                                                uint64_t{1} << 1))
+                    .failed());
     EXPECT_EQ(fx.wf->instruction_execution_error(),
               InstructionExecutionError::InvalidRegisterAccess);
 
@@ -2395,9 +2392,9 @@ TEST(RegisterAccessTest, WriteViewsCannotOutliveTheirAcquiredWriteMask) {
         acquire([&] { return regs.write_operand_pair32(dst_pair32, requested_lanes); });
     expect_captured_notifications(first_write);
     store_under_later_mask([&] {
-      EXPECT_TRUE((write_pair32.store_native_pair<uint32_t>(0, util::native<uint32_t>(0x3333u),
-                                                            util::native<uint32_t>(0x4444u),
-                                                            acquired_lanes))
+      EXPECT_TRUE((write_pair32.store_native_pair<uint32_t>(
+                       0, util::RegisterBlock<uint32_t>(0x3333u),
+                       util::RegisterBlock<uint32_t>(0x4444u), acquired_lanes))
                       .succeeded());
     });
     EXPECT_EQ(fx.cu->read_vgpr(base + 34, 0), 0x3333u);
@@ -2405,8 +2402,8 @@ TEST(RegisterAccessTest, WriteViewsCannotOutliveTheirAcquiredWriteMask) {
     EXPECT_EQ(fx.cu->read_vgpr(base + 34, 2), 0u);
     EXPECT_EQ(fx.cu->read_vgpr(base + 35, 2), 0u);
     fx.wf->clear_instruction_execution_error();
-    EXPECT_TRUE((write_pair32.store_native_pair<uint32_t>(0, util::native<uint32_t>(0xCCCCu),
-                                                          util::native<uint32_t>(0xDDDDu),
+    EXPECT_TRUE((write_pair32.store_native_pair<uint32_t>(0, util::RegisterBlock<uint32_t>(0xCCCCu),
+                                                          util::RegisterBlock<uint32_t>(0xDDDDu),
                                                           uint64_t{1} << 1))
                     .failed());
     EXPECT_EQ(fx.wf->instruction_execution_error(),
@@ -2420,16 +2417,16 @@ TEST(RegisterAccessTest, WriteViewsCannotOutliveTheirAcquiredWriteMask) {
     EXPECT_EQ(fx.plugin->reads.back().lane_mask, requested_lanes);
     expect_captured_notifications(first_write);
     store_under_later_mask([&] {
-      ASSERT_TRUE(
-          (readwrite32.store_native<uint32_t>(0, util::native<uint32_t>(0x5555u), acquired_lanes))
-              .succeeded());
+      ASSERT_TRUE((readwrite32.store_native<uint32_t>(0, util::RegisterBlock<uint32_t>(0x5555u),
+                                                      acquired_lanes))
+                      .succeeded());
     });
     EXPECT_EQ(fx.cu->read_vgpr(base + 36, 0), 0x5555u);
     EXPECT_EQ(fx.cu->read_vgpr(base + 36, 2), 0u);
     fx.wf->clear_instruction_execution_error();
-    EXPECT_TRUE(
-        (readwrite32.store_native<uint32_t>(0, util::native<uint32_t>(0xEEEEu), uint64_t{1} << 1))
-            .failed());
+    EXPECT_TRUE((readwrite32.store_native<uint32_t>(0, util::RegisterBlock<uint32_t>(0xEEEEu),
+                                                    uint64_t{1} << 1))
+                    .failed());
     EXPECT_EQ(fx.wf->instruction_execution_error(),
               InstructionExecutionError::InvalidRegisterAccess);
 
@@ -2443,16 +2440,16 @@ TEST(RegisterAccessTest, WriteViewsCannotOutliveTheirAcquiredWriteMask) {
     }
     expect_captured_notifications(first_write);
     store_under_later_mask([&] {
-      ASSERT_TRUE(
-          (readwrite64.store_native<uint64_t>(0, util::native<uint64_t>(0x6666u), acquired_lanes))
-              .succeeded());
+      ASSERT_TRUE((readwrite64.store_native<uint64_t>(0, util::RegisterBlock<uint64_t>(0x6666u),
+                                                      acquired_lanes))
+                      .succeeded());
     });
     EXPECT_EQ(fx.cu->read_vgpr(base + 38, 0), 0x6666u);
     EXPECT_EQ(fx.cu->read_vgpr(base + 38, 2), 0u);
     fx.wf->clear_instruction_execution_error();
-    EXPECT_TRUE(
-        (readwrite64.store_native<uint64_t>(0, util::native<uint64_t>(0xFFFFu), uint64_t{1} << 1))
-            .failed());
+    EXPECT_TRUE((readwrite64.store_native<uint64_t>(0, util::RegisterBlock<uint64_t>(0xFFFFu),
+                                                    uint64_t{1} << 1))
+                    .failed());
     EXPECT_EQ(fx.wf->instruction_execution_error(),
               InstructionExecutionError::InvalidRegisterAccess);
   }
@@ -2716,9 +2713,7 @@ TEST(RegisterAccessTest, Packed16PhysicalMappingIncludesSourceAndDestinationMsb)
 }
 
 TEST(RegisterAccessTest, OperandWrite64ViewObservesBothPhysicalRegisters) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-  } else {
+  {
     Fixture fx;
     ASSERT_NE(fx.wf, nullptr);
     constexpr uint32_t logical_vgpr = 16;
@@ -2729,10 +2724,10 @@ TEST(RegisterAccessTest, OperandWrite64ViewObservesBothPhysicalRegisters) {
     cdna4::Operand dst(64, cdna4::OperandType::OPR_VGPR, logical_vgpr);
     RegisterAccess regs(*fx.wf);
     auto view = regs.write_operand64(dst, lane_mask);
-    ASSERT_TRUE(
-        (view.store_native<uint64_t>(lane_base, util::native<uint64_t>(0x1122334455667788ull),
-                                     /*lane_mask=*/0b1011))
-            .succeeded());
+    ASSERT_TRUE((view.store_native<uint64_t>(lane_base,
+                                             util::RegisterBlock<uint64_t>(0x1122334455667788ull),
+                                             /*lane_mask=*/0b1011))
+                    .succeeded());
 
     ASSERT_EQ(fx.plugin->writes.size(), 2u);
     EXPECT_EQ(fx.plugin->writes[0].physical_reg, base + logical_vgpr);
@@ -2746,40 +2741,8 @@ TEST(RegisterAccessTest, OperandWrite64ViewObservesBothPhysicalRegisters) {
   }
 }
 
-TEST(RegisterAccessTest, OperandWriteViewStoreNarrowHonorsObservedLanes) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-  } else {
-    Fixture fx;
-    ASSERT_NE(fx.wf, nullptr);
-    constexpr uint32_t logical_vgpr = 19;
-    constexpr uint32_t lane_base = 8;
-    constexpr std::size_t width = util::native_width64;
-    constexpr uint64_t chunk_mask = uint64_t{1} | (uint64_t{1} << (width - 1));
-    constexpr uint64_t lane_mask = chunk_mask << lane_base;
-    const uint32_t base = fx.vgpr_base();
-
-    cdna4::Operand dst(32, cdna4::OperandType::OPR_VGPR, logical_vgpr);
-    RegisterAccess regs(*fx.wf);
-    auto view = regs.write_operand(dst, lane_mask);
-    EXPECT_TRUE((view.store_narrow<uint32_t>(lane_base, util::broadcast_narrow<uint32_t>(0xCAFEu),
-                                             chunk_mask))
-                    .succeeded());
-
-    ASSERT_EQ(fx.plugin->writes.size(), 1u);
-    EXPECT_EQ(fx.plugin->writes[0].physical_reg, base + logical_vgpr);
-    EXPECT_EQ(fx.plugin->writes[0].lane_mask, lane_mask);
-    for (std::size_t lane = 0; lane < width; ++lane) {
-      const uint32_t expected = (chunk_mask & (uint64_t{1} << lane)) ? 0xCAFEu : 0u;
-      EXPECT_EQ(fx.cu->read_vgpr(base + logical_vgpr, lane_base + lane), expected);
-    }
-  }
-}
-
 TEST(RegisterAccessTest, OperandWriteViewRejectsStoreWindowPastWaveEnd) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-  } else {
+  {
     Fixture fx;
     ASSERT_NE(fx.wf, nullptr);
     cdna4::Operand dst(32, cdna4::OperandType::OPR_VGPR, 20);
@@ -2787,8 +2750,8 @@ TEST(RegisterAccessTest, OperandWriteViewRejectsStoreWindowPastWaveEnd) {
     auto view = regs.write_operand(dst, ~uint64_t{0});
 
     fx.wf->clear_instruction_execution_error();
-    EXPECT_TRUE((view.store_narrow<uint32_t>(
-                     /*lane_base=*/63, util::broadcast_narrow<uint32_t>(0x1234u),
+    EXPECT_TRUE((view.store_native<uint32_t>(
+                     /*lane_base=*/63, util::broadcast<uint32_t>(0x1234u),
                      /*lane_mask=*/1))
                     .failed());
     EXPECT_EQ(fx.wf->instruction_execution_error(),
@@ -2797,9 +2760,7 @@ TEST(RegisterAccessTest, OperandWriteViewRejectsStoreWindowPastWaveEnd) {
 }
 
 TEST(RegisterAccessTest, OperandWriteViewsObserveActiveLanes) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-  } else {
+  {
     Fixture fx;
     ASSERT_NE(fx.wf, nullptr);
     uint32_t base = fx.vgpr_base();
@@ -2808,9 +2769,10 @@ TEST(RegisterAccessTest, OperandWriteViewsObserveActiveLanes) {
 
     RegisterAccess regs(*fx.wf);
     auto view = regs.write_operand(dst, /*lane_mask=*/0b1011u << 4);
-    EXPECT_TRUE((view.store_native<uint32_t>(/*lane_base=*/4, util::native<uint32_t>(0xABCDu),
-                                             /*lane_mask=*/0b1011))
-                    .succeeded());
+    EXPECT_TRUE(
+        (view.store_native<uint32_t>(/*lane_base=*/4, util::RegisterBlock<uint32_t>(0xABCDu),
+                                     /*lane_mask=*/0b1011))
+            .succeeded());
 
     ASSERT_EQ(fx.plugin->writes.size(), 1u);
     EXPECT_EQ(fx.plugin->writes[0].physical_reg, base + logical_vgpr);
@@ -2823,9 +2785,7 @@ TEST(RegisterAccessTest, OperandWriteViewsObserveActiveLanes) {
 }
 
 TEST(RegisterAccessTest, OperandWriteViewStoresOnlySelectedBytes) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-  } else {
+  {
     Fixture fx;
     ASSERT_NE(fx.wf, nullptr);
     constexpr uint32_t logical_vgpr = 18;
@@ -2837,7 +2797,7 @@ TEST(RegisterAccessTest, OperandWriteViewStoresOnlySelectedBytes) {
     RegisterAccess regs(*fx.wf);
     auto view = regs.write_operand(dst, /*lane_mask=*/1u << lane_base,
                                    /*byte_mask=*/0b0010);
-    EXPECT_TRUE((view.store_native<uint32_t>(lane_base, util::native<uint32_t>(0x11223344u),
+    EXPECT_TRUE((view.store_native<uint32_t>(lane_base, util::RegisterBlock<uint32_t>(0x11223344u),
                                              /*lane_mask=*/1))
                     .succeeded());
 
@@ -2850,9 +2810,7 @@ TEST(RegisterAccessTest, OperandWriteViewStoresOnlySelectedBytes) {
 }
 
 TEST(RegisterAccessTest, OperandWriteViewsRejectUnobservedLanes) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-  } else {
+  {
     Fixture fx;
     ASSERT_NE(fx.wf, nullptr);
     uint32_t base = fx.vgpr_base();
@@ -2864,7 +2822,7 @@ TEST(RegisterAccessTest, OperandWriteViewsRejectUnobservedLanes) {
     cdna4::Operand dst32(32, cdna4::OperandType::OPR_VGPR, 18);
     auto write32 = regs.write_operand(dst32, observed_lane_mask);
     fx.wf->clear_instruction_execution_error();
-    EXPECT_TRUE((write32.store_native<uint32_t>(lane_base, util::native<uint32_t>(0x1111u),
+    EXPECT_TRUE((write32.store_native<uint32_t>(lane_base, util::RegisterBlock<uint32_t>(0x1111u),
                                                 unobserved_chunk_mask))
                     .failed());
     EXPECT_EQ(fx.wf->instruction_execution_error(),
@@ -2873,7 +2831,7 @@ TEST(RegisterAccessTest, OperandWriteViewsRejectUnobservedLanes) {
     cdna4::Operand dst64(64, cdna4::OperandType::OPR_VGPR, 20);
     auto write64 = regs.write_operand64(dst64, observed_lane_mask);
     fx.wf->clear_instruction_execution_error();
-    EXPECT_TRUE((write64.store_native<uint64_t>(lane_base, util::native<uint64_t>(0x2222u),
+    EXPECT_TRUE((write64.store_native<uint64_t>(lane_base, util::RegisterBlock<uint64_t>(0x2222u),
                                                 unobserved_chunk_mask))
                     .failed());
     EXPECT_EQ(fx.wf->instruction_execution_error(),
@@ -2883,8 +2841,8 @@ TEST(RegisterAccessTest, OperandWriteViewsRejectUnobservedLanes) {
     auto write_pair32 = regs.write_operand_pair32(dst_pair32, observed_lane_mask);
     fx.wf->clear_instruction_execution_error();
     EXPECT_TRUE((write_pair32.store_native_pair<uint32_t>(
-                     lane_base, util::native<uint32_t>(0x3333u), util::native<uint32_t>(0x4444u),
-                     unobserved_chunk_mask))
+                     lane_base, util::RegisterBlock<uint32_t>(0x3333u),
+                     util::RegisterBlock<uint32_t>(0x4444u), unobserved_chunk_mask))
                     .failed());
     EXPECT_EQ(fx.wf->instruction_execution_error(),
               InstructionExecutionError::InvalidRegisterAccess);
@@ -2892,8 +2850,8 @@ TEST(RegisterAccessTest, OperandWriteViewsRejectUnobservedLanes) {
     cdna4::Operand acc32(32, cdna4::OperandType::OPR_VGPR, 24);
     auto readwrite32 = regs.readwrite_operand(acc32, observed_lane_mask);
     fx.wf->clear_instruction_execution_error();
-    EXPECT_TRUE((readwrite32.store_native<uint32_t>(lane_base, util::native<uint32_t>(0x5555u),
-                                                    unobserved_chunk_mask))
+    EXPECT_TRUE((readwrite32.store_native<uint32_t>(
+                     lane_base, util::RegisterBlock<uint32_t>(0x5555u), unobserved_chunk_mask))
                     .failed());
     EXPECT_EQ(fx.wf->instruction_execution_error(),
               InstructionExecutionError::InvalidRegisterAccess);
@@ -2901,8 +2859,8 @@ TEST(RegisterAccessTest, OperandWriteViewsRejectUnobservedLanes) {
     cdna4::Operand acc64(64, cdna4::OperandType::OPR_VGPR, 26);
     auto readwrite64 = regs.readwrite_operand64(acc64, observed_lane_mask);
     fx.wf->clear_instruction_execution_error();
-    EXPECT_TRUE((readwrite64.store_native<uint64_t>(lane_base, util::native<uint64_t>(0x6666u),
-                                                    unobserved_chunk_mask))
+    EXPECT_TRUE((readwrite64.store_native<uint64_t>(
+                     lane_base, util::RegisterBlock<uint64_t>(0x6666u), unobserved_chunk_mask))
                     .failed());
     EXPECT_EQ(fx.wf->instruction_execution_error(),
               InstructionExecutionError::InvalidRegisterAccess);
@@ -2931,9 +2889,7 @@ TEST(RegisterAccessTest, OperandReadViewFallbackUsesLaneSemantics) {
 }
 
 TEST(RegisterAccessTest, OperandReadViewsMaskUnobservedBytes) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-  } else {
+  {
     Fixture fx;
     ASSERT_NE(fx.wf, nullptr);
     constexpr uint32_t logical_vgpr = 21;
@@ -3061,9 +3017,8 @@ TEST(RegisterAccessTest, ScalarBackedPartialByteStoresRejectBeforeObservation) {
     EXPECT_TRUE(fx.plugin->sgpr_reads.empty());
     EXPECT_TRUE(fx.plugin->sgpr_writes.empty());
   };
-  expect_failure([&] { return write.store_native<uint32_t>(0, util::native<uint32_t>(1), 1); });
   expect_failure(
-      [&] { return write.store_narrow<uint32_t>(0, util::broadcast_narrow<uint32_t>(1), 1); });
+      [&] { return write.store_native<uint32_t>(0, util::RegisterBlock<uint32_t>(1), 1); });
   fx.wf->clear_instruction_execution_error();
   (void)regs.readwrite_operand(dst, 1, 0xF, 0b0011);
   EXPECT_EQ(fx.wf->instruction_execution_error(), InstructionExecutionError::InvalidRegisterAccess);
@@ -3080,7 +3035,8 @@ TEST(RegisterAccessTest, OperandStoreRejectsInvalidWindowBeforeShiftingLaneMask)
   const auto writes = fx.plugin->writes.size();
   for (uint32_t lane_base : {32u, 64u, UINT32_MAX}) {
     fx.wf->clear_instruction_execution_error();
-    EXPECT_TRUE(write.store_native<uint32_t>(lane_base, util::native<uint32_t>(1), 1).failed());
+    EXPECT_TRUE(
+        write.store_native<uint32_t>(lane_base, util::RegisterBlock<uint32_t>(1), 1).failed());
     EXPECT_EQ(fx.wf->instruction_execution_error(),
               InstructionExecutionError::InvalidRegisterAccess);
     EXPECT_EQ(fx.cu->read_vgpr(fx.vgpr_base() + 4, 0), 0u);
@@ -3302,7 +3258,7 @@ TEST(RegisterAccessTest, OperandStorePreservesPendingErrorAndRecoversNextInstruc
                       InstructionExecutionError::UnsupportedOperandValue, "original operand error");
                 }
                 self.failed =
-                    write.store_native<uint32_t>(0, util::native<uint32_t>(0x55667788u), 1)
+                    write.store_native<uint32_t>(0, util::RegisterBlock<uint32_t>(0x55667788u), 1)
                         .failed();
               }),
           report_error_(report_error) {}

@@ -5,6 +5,7 @@
  */
 
 #include <hip_test_common.hh>
+#include "printf_common.h"  // NOLINT
 
 #define KERNEL_ITERATIONS 15
 #define BLOCK_SIZE 2
@@ -96,7 +97,12 @@ HIP_TEST_CASE(Unit_NonHost_Printf_basic) {
 /**
  * Test Description
  * ------------------------
- * - Verify that buffered printf accepts duplicate metadata entries for the same format string.
+ * - Verify that buffered printf accepts duplicate metadata entries for the same format string:
+ *   both calls return 0 and both lines are printed. The runtime decodes the buffer after the
+ *   kernel, so a runtime that rejects the duplicate entry still returns 0 but prints nothing.
+ *   Linking this executable merges the two metadata entries, so this test doesn't reach the
+ *   duplicate-entry path; Unit_hipModuleLaunchKernel_Printf_DuplicateFormatString (ModuleTest)
+ *   does, with a device-only code object.
  * Test source
  * ------------------------
  * - catch/unit/printf/printfNonHost.cc
@@ -115,13 +121,17 @@ HIP_TEST_CASE(Unit_NonHost_Printf_Positive_DuplicateFormatStringMetadata) {
   int count[2] = {};
   HIP_CHECK(hipMalloc(&count_d, sizeof(count)));
 
+  CaptureStream captured(stdout);
   hipLaunchKernelGGL(kernel_printf_duplicate_format_string, dim3(1), dim3(1), 0, 0, count_d);
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipDeviceSynchronize());
+  auto captured_data = captured.getCapturedData();
+  std::string device_output = captured.gulp(captured_data);
   HIP_CHECK(hipMemcpy(count, count_d, sizeof(count), hipMemcpyDeviceToHost));
 
   REQUIRE(count[0] == 0);
   REQUIRE(count[1] == 0);
+  REQUIRE(device_output == "Duplicate format string: 1\nDuplicate format string: 2\n");
   HIP_CHECK(hipFree(count_d));
 }
 

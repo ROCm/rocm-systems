@@ -13,6 +13,7 @@
 
 #include "compute_unit_test_util.h"
 #include "decode_test_util.h"
+#include "float_format_reference.h"
 #include "mma_test_util.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/builders.h"
@@ -26,7 +27,6 @@
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
-#include "util/data_types.h"
 #include "util/simd.h"
 #include "util/simd_test_hooks.h"
 
@@ -342,10 +342,6 @@ void benchmark_case(const Shape &shape, size_t variant) {
 } // namespace
 
 TEST(SmfmacSimdBenchmark, DecodedF32Forms) {
-  SKIP_IF_NO_SIMD();
-  if (util::native<float>::size() != 16) {
-    GTEST_SKIP() << "SMFMAC AVX-512 paths require 16-lane native SIMD";
-  }
 
   for (const auto &shape : SHAPES) {
     const size_t variants = shape.fp8 ? 4 : 2;

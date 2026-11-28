@@ -1,5 +1,6 @@
 ---
 errorHandling:
+  Unit___hipOnError_CalledOnFailure: *level_default
   Unit_hipGetErrorName_Positive_Basic:
     <<: *level_default
     tags: [smoke, P0]

@@ -24,7 +24,8 @@ concurrent call reads or writes.
 Calls use no threading or synchronization primitives, allocate no dynamic memory,
 and make no system calls. They never explicitly change the CPU FP environment,
 including rounding modes, denormal flushing, or exception controls. Ordinary
-arithmetic may raise sticky exception flags.
+arithmetic may raise sticky exception flags. The same no-mutation contract applies
+to all rocjitsu production code; see [the host FP contract](style.md#host-floating-point-environment).
 
 The library assumes the CPU's default floating-point environment: nearest-even
 rounding, denormal flushing disabled, and exceptions masked. Results are not

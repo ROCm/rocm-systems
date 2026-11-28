@@ -233,10 +233,6 @@ void run_one(const char *label, uint32_t encoding_word, bool sanitize_finite) {
 
 // v_add_f32 v2, v0, v1  (CDNA4 VOP2 opcode 1)
 TEST(VAddSimdBenchmark, Cdna4_VAddF32_Vop2) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   // src0 = 256 (= v0 in VOP2 SRC encoding), vsrc1 = 1 (= v1), vdst = 2 (= v2).
   uint32_t enc = vop2_encode(/*opcode=*/1, /*vdst=*/2, /*vsrc1=*/1, /*src0=*/256);
   run_one("v_add_f32 v2, v0, v1", enc, /*sanitize_finite=*/true);
@@ -244,30 +240,18 @@ TEST(VAddSimdBenchmark, Cdna4_VAddF32_Vop2) {
 
 // v_add_u32 v2, v0, v1  (CDNA4 VOP2 opcode 52, no carry)
 TEST(VAddSimdBenchmark, Cdna4_VAddU32_Vop2) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   uint32_t enc = vop2_encode(/*opcode=*/52, /*vdst=*/2, /*vsrc1=*/1, /*src0=*/256);
   run_one("v_add_u32 v2, v0, v1", enc, /*sanitize_finite=*/false);
 }
 
 // v_add_u16 v2, v0, v1  (CDNA4 VOP2 opcode 38) — 16-bit integer, low-16 path.
 TEST(VAddSimdBenchmark, Cdna4_VAddU16_Vop2) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   uint32_t enc = vop2_encode(/*opcode=*/38, /*vdst=*/2, /*vsrc1=*/1, /*src0=*/256);
   run_one("v_add_u16 v2, v0, v1", enc, /*sanitize_finite=*/false);
 }
 
 // v_add_f16 v2, v0, v1  (CDNA4 VOP2 opcode 31) — f16 op via f32 intermediate.
 TEST(VAddSimdBenchmark, Cdna4_VAddF16_Vop2) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   uint32_t enc = vop2_encode(/*opcode=*/31, /*vdst=*/2, /*vsrc1=*/1, /*src0=*/256);
   run_one("v_add_f16 v2, v0, v1", enc, /*sanitize_finite=*/false);
 }
@@ -276,10 +260,6 @@ TEST(VAddSimdBenchmark, Cdna4_VAddF16_Vop2) {
 // SIMD path pays a per-chunk VCC pack/merge (and a scalar carry-in expand)
 // on top of the binary add, so this shows the carry-glue overhead vs v_add_u32.
 TEST(VAddSimdBenchmark, Cdna4_VAddCoU32_Vop2) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   uint32_t enc = vop2_encode(/*opcode=*/25, /*vdst=*/2, /*vsrc1=*/1, /*src0=*/256);
   run_one("v_add_co_u32 v2, v0, v1", enc, /*sanitize_finite=*/false);
 }
@@ -296,10 +276,6 @@ TEST(VAddSimdBenchmark, Cdna4_VAddCoU32_Vop2) {
 // (which does engage — see Vop2FmaSimdCorrectness). The literal form below has
 // no such loop-carried dependency and shows the representative speedup.
 TEST(VAddSimdBenchmark, Cdna4_VFmaakF32_Vop2) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   uint32_t enc = vop2_encode(/*opcode=*/24, /*vdst=*/2, /*vsrc1=*/1, /*src0=*/256);
   run_one("v_fmaak_f32 v2, v0, v1, 0", enc, /*sanitize_finite=*/true);
 }
@@ -307,10 +283,6 @@ TEST(VAddSimdBenchmark, Cdna4_VFmaakF32_Vop2) {
 // v_cndmask_b32 v2, v0, v1  (CDNA4 VOP2 opcode 0) — VCC-driven per-lane select.
 // VCC defaults to 0 here (all lanes pick src0); still drives the SIMD blend.
 TEST(VAddSimdBenchmark, Cdna4_VCndmaskB32_Vop2) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   uint32_t enc = vop2_encode(/*opcode=*/0, /*vdst=*/2, /*vsrc1=*/1, /*src0=*/256);
   run_one("v_cndmask_b32 v2, v0, v1", enc, /*sanitize_finite=*/false);
 }
@@ -318,10 +290,6 @@ TEST(VAddSimdBenchmark, Cdna4_VCndmaskB32_Vop2) {
 // v_mul_hi_u32_u24 v2, v0, v1  (CDNA4 VOP2 opcode 9) — 48-bit product, high 32
 // bits via the 64-bit-lane widening path. Shows the widening-mul overhead.
 TEST(VAddSimdBenchmark, Cdna4_VMulHiU32U24_Vop2) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   uint32_t enc = vop2_encode(/*opcode=*/9, /*vdst=*/2, /*vsrc1=*/1, /*src0=*/256);
   run_one("v_mul_hi_u32_u24 v2, v0, v1", enc, /*sanitize_finite=*/false);
 }
@@ -329,10 +297,6 @@ TEST(VAddSimdBenchmark, Cdna4_VMulHiU32U24_Vop2) {
 // v_max_f32 v2, v0, v1  (CDNA4 VOP2 opcode 11) — std::fmax; inputs sanitized to
 // finite normals for the bit-exact pre-check.
 TEST(VAddSimdBenchmark, Cdna4_VMaxF32_Vop2) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   uint32_t enc = vop2_encode(/*opcode=*/11, /*vdst=*/2, /*vsrc1=*/1, /*src0=*/256);
   run_one("v_max_f32 v2, v0, v1", enc, /*sanitize_finite=*/true);
 }
@@ -340,20 +304,12 @@ TEST(VAddSimdBenchmark, Cdna4_VMaxF32_Vop2) {
 // v_ldexp_f16 v2, v0, v1  (CDNA4 VOP2 opcode 51) — f16 ldexp; vsrc1 is the
 // signed exponent. Raw inputs (ldexp NaN handling is bit-exact).
 TEST(VAddSimdBenchmark, Cdna4_VLdexpF16_Vop2) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   uint32_t enc = vop2_encode(/*opcode=*/51, /*vdst=*/2, /*vsrc1=*/1, /*src0=*/256);
   run_one("v_ldexp_f16 v2, v0, v1", enc, /*sanitize_finite=*/false);
 }
 
 // v_ceil_f16 v2, v0  (CDNA4 VOP1 opcode 69) — f16 op via f32 intermediate.
 TEST(VAddSimdBenchmark, Cdna4_VCeilF16_Vop1) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   uint32_t enc = vop1_encode(/*opcode=*/69, /*vdst=*/2, /*src0=*/256);
   run_one("v_ceil_f16 v2, v0", enc, /*sanitize_finite=*/false);
 }
@@ -364,10 +320,6 @@ TEST(VAddSimdBenchmark, Cdna4_VCeilF16_Vop1) {
 // here, but the timing is what matters). f64 fmac is NOT benched: its dst-
 // accumulate loop-carried RAW serializes both modes into a ~1x artifact.
 TEST(VAddSimdBenchmark, Cdna4_VCmpLtF64_Vopc) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   // VOPC: [31:25]=0x3E, op[24:17], vsrc1[16:9], src0[8:0].
   uint32_t enc = (0x3Eu << 25) | (97u << 17) | (2u << 9) | 256u;
   run_one("v_cmp_lt_f64 v0:v1, v2:v3", enc, /*sanitize_finite=*/false);
@@ -378,21 +330,13 @@ TEST(VAddSimdBenchmark, Cdna4_VCmpLtF64_Vopc) {
 // the double domain). Exact for any input (NaN->0, saturating clamp), so the
 // strict bit-exact pre-check holds on raw random doubles.
 TEST(VAddSimdBenchmark, Cdna4_VCvtI32F64_Vop1) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   uint32_t enc = vop1_encode(/*opcode=*/3, /*vdst=*/2, /*src0=*/256);
   run_one("v_cvt_i32_f64 v2, v0:v1", enc, /*sanitize_finite=*/false);
 }
 
 // v_cvt_f64_i32 v2:v3, v0  (CDNA4 VOP1 opcode 4) — 32-bit i32 src -> f64 dst
-// (exact widening) via the b32->f64 cvt glue (narrow32 load, write_simd64).
+// (exact widening), reading one 32-bit VGPR and writing a 64-bit VGPR pair.
 TEST(VAddSimdBenchmark, Cdna4_VCvtF64I32_Vop1) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   uint32_t enc = vop1_encode(/*opcode=*/4, /*vdst=*/2, /*src0=*/256);
   run_one("v_cvt_f64_i32 v2:v3, v0", enc, /*sanitize_finite=*/false);
 }
@@ -401,21 +345,13 @@ TEST(VAddSimdBenchmark, Cdna4_VCvtF64I32_Vop1) {
 // result -> VCC. The class-decode functor over the 32-bit VOPC glue. v2 is
 // untouched, so run_one's correctness pre-check is a no-op; timing is the point.
 TEST(VAddSimdBenchmark, Cdna4_VCmpClassF32_Vopc) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   uint32_t enc = (0x3Eu << 25) | (16u << 17) | (1u << 9) | 256u;
   run_one("v_cmp_class_f32 v0, v1", enc, /*sanitize_finite=*/false);
 }
 
 // v_cmp_class_f64 (VOPC opcode 18): src0 = v0:v1 (f64), vsrc1 = v2 (32-bit mask);
-// result -> VCC. The mixed-width class glue (read_simd64 value + narrow32 mask).
+// result -> VCC. Reads a 64-bit value and a 32-bit classification mask.
 TEST(VAddSimdBenchmark, Cdna4_VCmpClassF64_Vopc) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   uint32_t enc = (0x3Eu << 25) | (18u << 17) | (2u << 9) | 256u;
   run_one("v_cmp_class_f64 v0:v1, v2", enc, /*sanitize_finite=*/false);
 }
@@ -424,10 +360,6 @@ TEST(VAddSimdBenchmark, Cdna4_VCmpClassF64_Vopc) {
 // modifiers (0 here), mask from src1=v1, result into the SGPR-pair dst (VCC).
 // Shows the VOP3 class glue cost vs the VOPC form. word0[31:26]=0x34.
 TEST(VAddSimdBenchmark, Cdna4_VCmpClassF32_Vop3) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   uint32_t w0 = (106u & 0xFF) | ((16u & 0x3FF) << 16) | (0x34u << 26); // vdst=VCC, op=16
   uint32_t w1 = 256u | (257u << 9);                                    // src0=v0, src1=v1
   run_words("v_cmp_class_f32_e64 v0, v1 -> vcc", w0, w1, /*sanitize_finite=*/false);
@@ -439,10 +371,6 @@ TEST(VAddSimdBenchmark, Cdna4_VCmpClassF32_Vop3) {
 // VOP3 f32 binary; should match the VOP2 v_add_f32 speedup (same functor, the
 // fp glue's modifier reads are zero-cost when all modifier fields are 0).
 TEST(VAddSimdBenchmark, Cdna4_VAddF32_Vop3) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   uint32_t w0, w1;
   vop3_bin_encode(257, /*vdst=*/2, /*src0=*/256, /*src1=*/257, 0, 0, 0, 0, w0, w1);
   run_words("v_add_f32_e64 v2, v0, v1", w0, w1, /*sanitize_finite=*/true);
@@ -452,10 +380,6 @@ TEST(VAddSimdBenchmark, Cdna4_VAddF32_Vop3) {
 // modifier kinds active. Shows the in-vector abs/neg/omod/clamp cost vs the
 // no-modifier form above. abs=src0, neg=src1, omod=1 (*2), clamp=1.
 TEST(VAddSimdBenchmark, Cdna4_VAddF32_Vop3_Modifiers) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   uint32_t w0, w1;
   vop3_bin_encode(257, /*vdst=*/2, /*src0=*/256, /*src1=*/257, /*abs=*/0x1, /*neg=*/0x2, /*omod=*/1,
                   /*clamp=*/1, w0, w1);
@@ -464,10 +388,6 @@ TEST(VAddSimdBenchmark, Cdna4_VAddF32_Vop3_Modifiers) {
 
 // v_mul_f32_e64 v2, v0, v1  (CDNA4 VOP3 opcode 261) — no modifiers.
 TEST(VAddSimdBenchmark, Cdna4_VMulF32_Vop3) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   uint32_t w0, w1;
   vop3_bin_encode(261, /*vdst=*/2, /*src0=*/256, /*src1=*/257, 0, 0, 0, 0, w0, w1);
   run_words("v_mul_f32_e64 v2, v0, v1", w0, w1, /*sanitize_finite=*/true);
@@ -475,10 +395,6 @@ TEST(VAddSimdBenchmark, Cdna4_VMulF32_Vop3) {
 
 // v_and_b32_e64 v2, v0, v1  (CDNA4 VOP3 opcode 275) — integer/bitwise, plain.
 TEST(VAddSimdBenchmark, Cdna4_VAndB32_Vop3) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   uint32_t w0, w1;
   vop3_bin_encode(275, /*vdst=*/2, /*src0=*/256, /*src1=*/257, 0, 0, 0, 0, w0, w1);
   run_words("v_and_b32_e64 v2, v0, v1", w0, w1, /*sanitize_finite=*/false);
@@ -486,10 +402,6 @@ TEST(VAddSimdBenchmark, Cdna4_VAndB32_Vop3) {
 
 // v_add_u32_e64 v2, v0, v1  (CDNA4 VOP3 opcode 308) — integer, plain.
 TEST(VAddSimdBenchmark, Cdna4_VAddU32_Vop3) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   uint32_t w0, w1;
   vop3_bin_encode(308, /*vdst=*/2, /*src0=*/256, /*src1=*/257, 0, 0, 0, 0, w0, w1);
   run_words("v_add_u32_e64 v2, v0, v1", w0, w1, /*sanitize_finite=*/false);
@@ -499,10 +411,6 @@ TEST(VAddSimdBenchmark, Cdna4_VAddU32_Vop3) {
 
 // v_floor_f32_e64 v2, v0  (CDNA4 VOP3 opcode 351) — f32 unary, no modifiers.
 TEST(VAddSimdBenchmark, Cdna4_VFloorF32_Vop3) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   uint32_t w0, w1;
   vop3_bin_encode(351, /*vdst=*/2, /*src0=*/256, /*src1=*/0, 0, 0, 0, 0, w0, w1);
   run_words("v_floor_f32_e64 v2, v0", w0, w1, /*sanitize_finite=*/true);
@@ -511,10 +419,6 @@ TEST(VAddSimdBenchmark, Cdna4_VFloorF32_Vop3) {
 // v_floor_f32_e64 v2, -|v0| *2 clamp  (opcode 351) — full modifier set, shows
 // the in-vector abs/neg/omod/clamp cost on the unary fp path.
 TEST(VAddSimdBenchmark, Cdna4_VFloorF32_Vop3_Modifiers) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   uint32_t w0, w1;
   vop3_bin_encode(351, /*vdst=*/2, /*src0=*/256, /*src1=*/0, /*abs=*/0x1, /*neg=*/0x1, /*omod=*/1,
                   /*clamp=*/1, w0, w1);
@@ -524,10 +428,6 @@ TEST(VAddSimdBenchmark, Cdna4_VFloorF32_Vop3_Modifiers) {
 // v_cvt_f32_i32_e64 v2, v0  (CDNA4 VOP3 opcode 325) — plain int->float cvt
 // (reuses the VOP1 unary path, no modifiers).
 TEST(VAddSimdBenchmark, Cdna4_VCvtF32I32_Vop3) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   uint32_t w0, w1;
   vop3_bin_encode(325, /*vdst=*/2, /*src0=*/256, /*src1=*/0, 0, 0, 0, 0, w0, w1);
   run_words("v_cvt_f32_i32_e64 v2, v0", w0, w1, /*sanitize_finite=*/false);
@@ -540,10 +440,6 @@ TEST(VAddSimdBenchmark, Cdna4_VCvtF32I32_Vop3) {
 
 // v_cmp_lt_i32_e64 vcc, v0, v1  (CDNA4 VOP3 opcode 193) — 32-bit-lane integer.
 TEST(VAddSimdBenchmark, Cdna4_VCmpLtI32_Vop3) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   uint32_t w0, w1;
   vop3_bin_encode(193, /*vdst=*/106, /*src0=*/256, /*src1=*/257, 0, 0, 0, 0, w0, w1);
   run_words("v_cmp_lt_i32_e64 vcc, v0, v1", w0, w1, /*sanitize_finite=*/false);
@@ -553,10 +449,6 @@ TEST(VAddSimdBenchmark, Cdna4_VCmpLtI32_Vop3) {
 // integer; exercises the split lo/hi VGPR-pair gather/scatter path (~half the
 // 32-bit speedup because 8-wide chunks + scalar lo/hi reads).
 TEST(VAddSimdBenchmark, Cdna4_VCmpLtI64_Vop3) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   uint32_t w0, w1;
   vop3_bin_encode(225, /*vdst=*/106, /*src0=*/256, /*src1=*/258, 0, 0, 0, 0, w0, w1);
   run_words("v_cmp_lt_i64_e64 vcc, v0:v1, v2:v3", w0, w1, /*sanitize_finite=*/false);
@@ -564,10 +456,6 @@ TEST(VAddSimdBenchmark, Cdna4_VCmpLtI64_Vop3) {
 
 // v_cmp_eq_f32_e64 vcc, v0, v1  (CDNA4 VOP3 opcode 66) — f32 with no modifiers.
 TEST(VAddSimdBenchmark, Cdna4_VCmpEqF32_Vop3) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   uint32_t w0, w1;
   vop3_bin_encode(66, /*vdst=*/106, /*src0=*/256, /*src1=*/257, 0, 0, 0, 0, w0, w1);
   run_words("v_cmp_eq_f32_e64 vcc, v0, v1", w0, w1, /*sanitize_finite=*/true);
@@ -576,10 +464,6 @@ TEST(VAddSimdBenchmark, Cdna4_VCmpEqF32_Vop3) {
 // v_cmp_eq_f32_e64 vcc, |v0|, -v1  (opcode 66) — both src abs/neg modifiers
 // set; shows the in-vector apply_vop3_src_mod_f32 cost vs the no-modifier form.
 TEST(VAddSimdBenchmark, Cdna4_VCmpEqF32_Vop3_Modifiers) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   uint32_t w0, w1;
   vop3_bin_encode(66, /*vdst=*/106, /*src0=*/256, /*src1=*/257, /*abs=*/0x1, /*neg=*/0x2, 0, 0, w0,
                   w1);
@@ -589,10 +473,6 @@ TEST(VAddSimdBenchmark, Cdna4_VCmpEqF32_Vop3_Modifiers) {
 // v_cmp_eq_f16_e64 vcc, v0, v1  (CDNA4 VOP3 opcode 34) — f16 widen-then-compare.
 // Includes FP16 operand decoding on both operands; no modifiers.
 TEST(VAddSimdBenchmark, Cdna4_VCmpEqF16_Vop3) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   uint32_t w0, w1;
   vop3_bin_encode(34, /*vdst=*/106, /*src0=*/256, /*src1=*/257, 0, 0, 0, 0, w0, w1);
   run_words("v_cmp_eq_f16_e64 vcc, v0, v1", w0, w1, /*sanitize_finite=*/false);
@@ -601,10 +481,6 @@ TEST(VAddSimdBenchmark, Cdna4_VCmpEqF16_Vop3) {
 // v_cmp_eq_f64_e64 vcc, v0:v1, v2:v3  (CDNA4 VOP3 opcode 98) — 64-bit-lane
 // f64, split lo/hi gather/scatter, no modifiers.
 TEST(VAddSimdBenchmark, Cdna4_VCmpEqF64_Vop3) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   uint32_t w0, w1;
   vop3_bin_encode(98, /*vdst=*/106, /*src0=*/256, /*src1=*/258, 0, 0, 0, 0, w0, w1);
   run_words("v_cmp_eq_f64_e64 vcc, v0:v1, v2:v3", w0, w1, /*sanitize_finite=*/false);
@@ -615,10 +491,6 @@ TEST(VAddSimdBenchmark, Cdna4_VCmpEqF64_Vop3) {
 // v_add3_u32 v2, v0, v1, v3  (CDNA4 VOP3 opcode 511) — plain element-wise
 // a + b + c on 32-bit lanes. src2 is wired through the ternary VOP3 glue.
 TEST(VAddSimdBenchmark, Cdna4_VAdd3U32_Vop3) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   // VOP3: word0 = vdst|op<<16|0x34<<26; word1 = src0|src1<<9|src2<<18.
   uint32_t w0 = (2u) | ((511u & 0x3FF) << 16) | (0x34u << 26);
   uint32_t w1 = 256u | (257u << 9) | (259u << 18); // src0=v0 src1=v1 src2=v3
@@ -629,10 +501,6 @@ TEST(VAddSimdBenchmark, Cdna4_VAdd3U32_Vop3) {
 // cvt. Routed through the existing SIMD_CVT_F64_TO_B32 glue via a _vop3->_vop1
 // fallback (the scalar body drops the abs/neg/omod/clamp modifier reads).
 TEST(VAddSimdBenchmark, Cdna4_VCvtI32F64_Vop3) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   uint32_t w0, w1;
   vop3_bin_encode(323, /*vdst=*/2, /*src0=*/256, /*src1=*/0, 0, 0, 0, 0, w0, w1);
   run_words("v_cvt_i32_f64_e64 v2, v0:v1", w0, w1, /*sanitize_finite=*/false);
@@ -640,22 +508,14 @@ TEST(VAddSimdBenchmark, Cdna4_VCvtI32F64_Vop3) {
 
 // v_add_f64_e64 v2:v3, v0:v1, v4:v5 (CDNA4 VOP3 opcode 640).
 TEST(VAddSimdBenchmark, Cdna4_VAddF64_Vop3) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   uint32_t w0, w1;
   vop3_bin_encode(640, /*vdst=*/2, /*src0=*/256, /*src1=*/260, 0, 0, 0, 0, w0, w1);
   run_words("v_add_f64_e64 v2:v3, v0:v1, v4:v5", w0, w1, /*sanitize_finite=*/false);
 }
 
-// v_ceil_f64_e64 v2:v3, v0:v1  (CDNA4 VOP3 opcode 344) — f64 unary; uses the
-// new try_execute_unary_vop3_fp64_simd glue (stdx::ceil on native<double>).
+// v_ceil_f64_e64 v2:v3, v0:v1 (CDNA4 VOP3 opcode 344) — FP64 unary arithmetic.
+// Numerical execution is dispatched through rj-arith.
 TEST(VAddSimdBenchmark, Cdna4_VCeilF64_Vop3) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   uint32_t w0, w1;
   vop3_bin_encode(344, /*vdst=*/2, /*src0=*/256, /*src1=*/0, 0, 0, 0, 0, w0, w1);
   run_words("v_ceil_f64_e64 v2:v3, v0:v1", w0, w1, /*sanitize_finite=*/false);
@@ -664,10 +524,6 @@ TEST(VAddSimdBenchmark, Cdna4_VCeilF64_Vop3) {
 // v_ceil_f16_e64 v2, v0  (CDNA4 VOP3 opcode 389) — f16 unary; widen-then-narrow
 // VOP3 glue. Pays the f16<->f32 round-trip on top of the rounding op.
 TEST(VAddSimdBenchmark, Cdna4_VCeilF16_Vop3) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   uint32_t w0, w1;
   vop3_bin_encode(389, /*vdst=*/2, /*src0=*/256, /*src1=*/0, 0, 0, 0, 0, w0, w1);
   run_words("v_ceil_f16_e64 v2, v0", w0, w1, /*sanitize_finite=*/false);
@@ -677,10 +533,6 @@ TEST(VAddSimdBenchmark, Cdna4_VCeilF16_Vop3) {
 // followed by a VCC-bit-gated ldexp(result, 32); no omod/clamp. Tests the
 // new try_execute_div_fmas_f32_simd glue and its VCC input-mask path.
 TEST(VAddSimdBenchmark, Cdna4_VDivFmasF32_Vop3) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   uint32_t w0 = (6u) | ((482u & 0x3FF) << 16) | (0x34u << 26);
   uint32_t w1 = 256u | (257u << 9) | (258u << 18); // src0=v0 src1=v1 src2=v2
   run_words("v_div_fmas_f32_e64 v6, v0, v1, v2", w0, w1, /*sanitize_finite=*/true);
@@ -690,10 +542,6 @@ TEST(VAddSimdBenchmark, Cdna4_VDivFmasF32_Vop3) {
 // the VCC-driven select; selector is an SGPR-pair operand (src2=VCC=106), so
 // the path is bit-identical to the VOP2 form. No modifiers applied by scalar.
 TEST(VAddSimdBenchmark, Cdna4_VCndmaskB32_Vop3) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   // VOP3 ternary encoding: word0 = vdst|op<<16|0x34<<26; word1 = src0|src1<<9|
   // src2<<18. src2=VCC=106. Selector pattern is set by seed_inputs (vcc init).
   uint32_t w0 = (2u) | ((256u & 0x3FF) << 16) | (0x34u << 26);
@@ -707,10 +555,6 @@ TEST(VAddSimdBenchmark, Cdna4_VCndmaskB32_Vop3) {
 // (input NaN bits preserved) in both scalar and SIMD paths, so the bit-exact
 // pre-check holds on raw random inputs (no `sanitize_finite` needed).
 TEST(VAddSimdBenchmark, Cdna4_VRcpF16_Vop3) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   uint32_t w0, w1;
   vop3_bin_encode(381, /*vdst=*/2, /*src0=*/256, /*src1=*/0, 0, 0, 0, 0, w0, w1);
   run_words("v_rcp_f16_e64 v2, v0", w0, w1, /*sanitize_finite=*/false);
@@ -720,10 +564,6 @@ TEST(VAddSimdBenchmark, Cdna4_VRcpF16_Vop3) {
 // the new try_execute_ternary_vop3_fp_simd glue. Encoded with src2=v2 (NOT
 // dst-accumulate; the v_fmac form is deferred to a separate slice).
 TEST(VAddSimdBenchmark, Cdna4_VFmaF32_Vop3) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   // VOP3 ternary: word0 vdst|op<<16|0x34<<26; word1 src0|src1<<9|src2<<18.
   uint32_t w0 = (6u) | ((459u & 0x3FF) << 16) | (0x34u << 26);
   uint32_t w1 = 256u | (257u << 9) | (258u << 18); // src0=v0 src1=v1 src2=v2
@@ -743,10 +583,6 @@ TEST(VAddSimdBenchmark, Cdna4_VFmaF32_Vop3) {
 // packed normalized u16 (two clamped/scaled lanes into one 32-bit dst). Inputs
 // sanitized to finite normals for the SIMD fast path.
 TEST(VAddSimdBenchmark, Cdna4_VCvtPknormU16F32_Vop3) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   uint32_t w0, w1;
   vop3_bin_encode(661, /*vdst=*/2, /*src0=*/256, /*src1=*/257, 0, 0, 0, 0, w0, w1);
   run_words("v_cvt_pknorm_u16_f32_e64 v2, v0, v1", w0, w1, /*sanitize_finite=*/true);
@@ -755,10 +591,6 @@ TEST(VAddSimdBenchmark, Cdna4_VCvtPknormU16F32_Vop3) {
 // v_cubema_f32_e64 v3, v0, v1, v2  (CDNA4 VOP3 opcode 455) — cubemap major-axis
 // ternary: 2*max(|x|,|y|,|z|). src0/src1/src2 = v0/v1/v2; finite-sanitized.
 TEST(VAddSimdBenchmark, Cdna4_VCubemaF32_Vop3) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   uint32_t w0, w1;
   vop3_tern_encode(455, /*vdst=*/3, /*src0=*/256, /*src1=*/257, /*src2=*/258, w0, w1);
   run_words("v_cubema_f32_e64 v3, v0, v1, v2", w0, w1, /*sanitize_finite=*/true);
@@ -771,10 +603,6 @@ TEST(VAddSimdBenchmark, Cdna4_VCubemaF32_Vop3) {
 // does engage; bit-equivalence is checked by Vop3pDotSimdCorrectness's "c"
 // forms). Reported for family coverage; read the speedup as a lower bound.
 TEST(VAddSimdBenchmark, Cdna4_VDot4cI32I8_Vop3) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   uint32_t w0, w1;
   vop3_bin_encode(313, /*vdst=*/2, /*src0=*/256, /*src1=*/257, 0, 0, 0, 0, w0, w1);
   run_words("v_dot4c_i32_i8_e64 v2, v0, v1 (acc)", w0, w1, /*sanitize_finite=*/false);
@@ -785,10 +613,6 @@ TEST(VAddSimdBenchmark, Cdna4_VDot4cI32I8_Vop3) {
 // the gap-family table has the f64 binary representative in one place.) src0 =
 // v0:v1, src1 = v4:v5, dst = v2:v3.
 TEST(VAddSimdBenchmark, Cdna4_VAddF64Pair_Vop3) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   uint32_t w0, w1;
   vop3_bin_encode(640, /*vdst=*/2, /*src0=*/256, /*src1=*/260, 0, 0, 0, 0, w0, w1);
   run_words("v_add_f64_e64 v2:v3, v0:v1, v4:v5", w0, w1, /*sanitize_finite=*/false);
@@ -799,10 +623,6 @@ TEST(VAddSimdBenchmark, Cdna4_VAddF64Pair_Vop3) {
 // op_sel_hi = 3 (required for the f32 pk fast path; non-default bails to
 // scalar). src0 = v0:v1, src1 = v4:v5, dst = v2:v3; finite-sanitized.
 TEST(VAddSimdBenchmark, Cdna4_VPkAddF32_Vop3p) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   uint32_t w0, w1;
   vop3p_encode(/*op=*/50, /*vdst=*/2, /*src0=*/256, /*src1=*/260, /*src2=*/0, /*op_sel=*/0,
                /*op_sel_hi=*/3, /*op_sel_hi_2=*/0, /*neg=*/0, /*neg_hi=*/0, /*clamp=*/0, w0, w1);
@@ -812,25 +632,7 @@ TEST(VAddSimdBenchmark, Cdna4_VPkAddF32_Vop3p) {
 // v_frexp_exp_i32_f32_e64 v2, v0  (CDNA4 VOP3 opcode 371) — f32 -> i32 frexp
 // exponent (unary). Raw finite inputs (the exponent extraction is bit-exact).
 TEST(VAddSimdBenchmark, Cdna4_VFrexpExpI32F32_Vop3) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   uint32_t w0, w1;
   vop3_bin_encode(371, /*vdst=*/2, /*src0=*/256, /*src1=*/0, 0, 0, 0, 0, w0, w1);
   run_words("v_frexp_exp_i32_f32_e64 v2, v0", w0, w1, /*sanitize_finite=*/true);
-}
-
-// Diagnostic: report whether the SIMD fast path is compiled in.
-TEST(VAddSimdBenchmark, SimdCompileTimeReport) {
-#if RJ_HOST_HAS_STDX_SIMD
-  using simd_u32 = std::experimental::native_simd<uint32_t>;
-  std::printf("\n  util::has_stdx_simd=true, native_simd<uint32_t>::size() = %zu\n",
-              simd_u32::size());
-  SUCCEED();
-#else
-  // Scalar fallback is documented as correct; missing <experimental/simd> is
-  // a host capability, not a defect.
-  GTEST_SKIP() << "util::has_stdx_simd=false — SIMD path disabled at compile time";
-#endif
 }

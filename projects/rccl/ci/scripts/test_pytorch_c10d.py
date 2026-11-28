@@ -5,7 +5,7 @@ This script handles:
   1. Discovering the CI-built librccl.so in the artifact directory
   2. Replacing PyTorch's pip-bundled librccl.so with the CI-built version
   3. Cloning the matching PyTorch test sources (sparse checkout)
-  4. Running pytest on test_c10d_nccl.py
+  4. Running pytest on the c10d tests that use the default NCCL backend
 
 Usage from GitHub Actions:
   python projects/rccl/ci/scripts/test_pytorch_c10d.py \
@@ -21,6 +21,7 @@ import os
 import subprocess
 import sys
 import tempfile
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -46,34 +47,152 @@ log = logging.getLogger(__name__)
 
 PYTORCH_REPO = "https://github.com/pytorch/pytorch.git"
 
+# OSS c10d tests that still reach RCCL via the default nccl backend
+# (AICOMRCCL-4001); "file::Class" runs one class.
+SMOKE_TARGETS = (
+    "test_c10d_nccl.py",
+    "test_c10d_ops_nccl.py",
+)
+ALL_TARGETS = SMOKE_TARGETS + (
+    # The rest of the file is CPU, fake process group or compile-only.
+    "test_c10d_functional_native.py::TestWithNCCL",
+    "test_c10d_spawn_nccl.py",
+    "test_c10d_object_collectives.py",
+)
+
+# Each must run under exactly this name; -k matches substrings, so more run.
 SMOKE_TESTS = [
-    "test_all_reduce_coalesced_nccl",
-    "test_all_reduce_coalesced_manager_nccl",
-    "test_allgather_base",
-    "test_all_gather_into_tensor_coalesced_manager_nccl",
-    "test_broadcast_coalesced_nccl",
-    "test_broadcast_subgroup",
-    "test_reduce_scatter_base_k",
-    "test_reduce_scatter_tensor_coalesced",
-    "test_non_blocking_p2p",
-    "test_send_recv_subgroup",
-    "test_nccl_barrier_device_ids",
-    "test_reduce_subgroup",
-    "test_scatter_subgroup",
-    "test_gather_subgroup",
-    "test_all_to_all_single",
+    # test_c10d_nccl.py
     "test_init_wo_backend_str",
-    "test_new_group",
-    "test_pass_nccl_options_high_priority_stream",
-    "test_set_process_group_desc",
-    "test_tensor_dtype_complex",
-    "test_batch_send_recv_subgroup",
-    "test_collectives",
+    "test_init_with_idx",
+    "test_set_nccl_pg_timeout_backend0",
+    # test_c10d_ops_nccl.py
+    "test_empty_tensors",
+    "test_broadcast_ops",
+    "test_allreduce_ops",
+    "test_reduce_ops",
+    "test_allgather_ops",
+    "test_allgather_base_ops",
+    "test_gather_ops",
+    "test_scatter_ops",
+    "test_reduce_scatter_ops",
+    "test_reduce_scatter_base_ops",
+    "test_all_gather_v",
+    "test_reduce_scatter_v",
+    "test_alltoall_ops_with_cudafree_race",
+    "test_barrier",
+    "test_send_recv",
+    "test_reduce_op_premul_sum",
 ]
+
+# Fewest tests that must run (pass or fail) per file, so a file upstream
+# empties or breaks fails the all scope.
+ALL_MIN_RAN = {
+    "test_c10d_nccl.py": 5,
+    "test_c10d_ops_nccl.py": 28,
+    "test_c10d_functional_native.py": 16,
+    "test_c10d_spawn_nccl.py": 9,
+    "test_c10d_object_collectives.py": 13,
+}
 
 REPORT_SUBJECT = "RCCL PyTorch c10d Test"
 
 setup_report = SetupFailureReport(REPORT_SUBJECT)
+
+
+def target_file(target: str) -> str:
+    """The file part of a pytest target: "f.py::Class" -> "f.py"."""
+    return target.split("::", 1)[0]
+
+
+def case_key(case: dict) -> str:
+    """"Class.test" for a JUnit testcase, without the module path."""
+    cls = case["classname"].rsplit(".", 1)[-1]
+    return f"{cls}.{case['name']}" if cls else case["name"]
+
+
+def is_known(case: dict, known_set: set[str]) -> bool:
+    """Known failures are keyed by bare name, or by Class.test where a name
+    occurs in more than one file."""
+    return case["name"] in known_set or case_key(case) in known_set
+
+
+def file_of(case: dict, files) -> str | None:
+    """Which of `files` a JUnit testcase came from.
+
+    Uses the testcase's file attribute (junit_family=xunit1), else the module
+    in its dotted classname, e.g. "test.distributed.test_c10d_ops_nccl.T".
+    """
+    path = case.get("file", "").replace("\\", "/")
+    if path:
+        return next((f for f in files if path == f or path.endswith("/" + f)), None)
+    dotted = f".{case['classname']}."
+    return next((f for f in files if f".{f.removesuffix('.py')}." in dotted), None)
+
+
+def ran(case: dict) -> bool:
+    return case["outcome"] in ("passed", "failed")
+
+
+def distinct_tests(cases: list[dict]) -> list[dict]:
+    """One testcase per test: pytest writes two for a test whose call fails
+    and whose teardown then errors."""
+    return list({(c.get("file", ""), c["classname"], c["name"]): c for c in cases}.values())
+
+
+def missing_smoke_tests(smoke_tests: list[str], cases: list[dict]) -> list[str]:
+    """Smoke tests with no testcase of exactly that name that ran; a skipped
+    test gives no coverage."""
+    ran_names = {c["name"] for c in cases if ran(c)}
+    return [t for t in smoke_tests if t not in ran_names]
+
+
+def short_files(min_ran: dict[str, int], cases: list[dict]) -> list[str]:
+    """Files in which fewer tests ran than their floor."""
+    counts = Counter(file_of(c, min_ran) for c in cases if ran(c))
+    return [f"{f}: {counts[f]} test(s) ran, expected at least {n}"
+            for f, n in min_ran.items() if counts[f] < n]
+
+
+def judge(test_scope: str, cases: list[dict], known_set: set[str],
+          returncode: int) -> dict:
+    """Turn the JUnit testcases of one run into a verdict."""
+    errors: list[str] = []
+    cases = distinct_tests(cases)
+    failed = [c for c in cases if c["outcome"] == "failed"]
+    known_failed = [case_key(c) for c in failed if is_known(c, known_set)]
+    unexpected_failed = [case_key(c) for c in failed if not is_known(c, known_set)]
+
+    if test_scope == "smoke":
+        missing = missing_smoke_tests(SMOKE_TESTS, cases)
+        if missing:
+            errors.append(f"{len(missing)} smoke test(s) did not run "
+                          f"(missing, renamed or skipped): {', '.join(missing)}")
+        smoke_ran = len(SMOKE_TESTS) - len(missing)
+    else:
+        errors.extend(short_files(ALL_MIN_RAN, cases))
+        smoke_ran = None
+    if unexpected_failed:
+        errors.append(f"{len(unexpected_failed)} unexpected failure(s)")
+
+    # pytest exits 1 for test failures; anything else (interrupted, internal
+    # or usage error, nothing collected) fails the run on its own.
+    if returncode not in (0, 1):
+        errors.append(f"pytest exited {returncode}")
+    elif returncode == 1 and not failed:
+        errors.append("pytest exited 1 but the JUnit XML records no failure")
+
+    passed = [c for c in cases if c["outcome"] == "passed"]
+    now_passing = sorted(k for k in known_set if any(is_known(c, {k}) for c in passed))
+    return {
+        "exit_code": 1 if errors else 0,
+        "errors": errors,
+        "known_failed": known_failed,
+        "unexpected_failed": unexpected_failed,
+        "now_passing": now_passing,
+        "smoke_ran": smoke_ran,
+        "ran_per_file": Counter(file_of(c, ALL_MIN_RAN) for c in cases if ran(c)),
+    }
 
 
 def find_rocm_lib_dir(artifact_dir: Path) -> Path | None:
@@ -102,7 +221,7 @@ def setup_ld_library_path(rccl_lib_dir: Path, rocm_lib_dir: Path | None) -> str:
     return new_path
 
 
-def clone_pytorch_test_sources(pytorch_src: Path) -> None:
+def clone_pytorch_test_sources(pytorch_src: Path, targets: tuple[str, ...]) -> None:
     """Sparse-check-out test/ at the commit the installed torch was built from.
 
     The date in a nightly version string is the ROCm build date, not the
@@ -130,11 +249,12 @@ def clone_pytorch_test_sources(pytorch_src: Path) -> None:
     ):
         subprocess.run(cmd, cwd=pytorch_src, check=True)
 
-    test_file = pytorch_src / "test" / "distributed" / "test_c10d_nccl.py"
-    if not test_file.exists():
-        log.error("test_c10d_nccl.py not found after clone")
+    dist_dir = pytorch_src / "test" / "distributed"
+    missing = [f for f in map(target_file, targets) if not (dist_dir / f).exists()]
+    if missing:
+        log.error("Test files not found after clone: %s", ", ".join(missing))
         sys.exit(1)
-    log.info("Test sources ready: %s", test_file)
+    log.info("Test sources ready: %d file(s) under %s", len(targets), dist_dir)
 
 
 def patch_missing_torch_modules() -> None:
@@ -156,6 +276,16 @@ def patch_missing_torch_modules() -> None:
 
 
 
+def nccl_backend_description() -> str:
+    """What the installed torch builds the default "nccl" backend from."""
+    from torch.distributed import distributed_c10d as c10d
+
+    aliased = getattr(c10d, "ProcessGroupNCCL", None) is getattr(c10d, "ProcessGroupNCCL2", object())
+    legacy = getattr(c10d, "_NCCL_LEGACY_AVAILABLE", None)
+    return (f"ProcessGroupNCCL is ProcessGroupNCCL2: {aliased}, "
+            f"_NCCL_LEGACY_AVAILABLE: {legacy}")
+
+
 def print_environment_info() -> None:
     """Print GPU and environment details for CI logs."""
     import torch
@@ -165,11 +295,12 @@ def print_environment_info() -> None:
     log.info("GPU count: %s", torch.cuda.device_count())
     for i in range(torch.cuda.device_count()):
         log.info("  GPU %d: %s", i, torch.cuda.get_device_name(i))
+    log.info("c10d NCCL backend: %s", nccl_backend_description())
     log.info("LD_LIBRARY_PATH: %s", os.environ.get("LD_LIBRARY_PATH", ""))
 
 
 def run_tests(pytorch_src: Path, results_log: Path, test_scope: str = "smoke") -> tuple[int, dict]:
-    """Run pytest on test_c10d_nccl.py and return (exit_code, summary_dict)."""
+    """Run pytest on the scope's targets and return (exit_code, summary_dict)."""
     miopen_cache = tempfile.mkdtemp(prefix="miopen_cache_")
     os.environ["MIOPEN_USER_DB_PATH"] = miopen_cache
 
@@ -179,10 +310,15 @@ def run_tests(pytorch_src: Path, results_log: Path, test_scope: str = "smoke") -
     junit_xml = results_log.parent / "pytorch_c10d_results.xml"
 
     if test_scope == "smoke":
+        targets = SMOKE_TARGETS
         k_expr = " or ".join(SMOKE_TESTS)
-        timeout = "60"
+        # --timeout must exceed MultiProcContinuousTest's wait for its workers, or
+        # a hung test's result is reported under the next test.
+        env["DISTRIBUTED_TESTS_DEFAULT_TIMEOUT"] = "120"
+        timeout = "300"
         log.info("Running smoke tests (%d tests)", len(SMOKE_TESTS))
     else:
+        targets = ALL_TARGETS
         k_expr = "not NCCLTraceTestDumpOnTimeout"
         timeout = "600"
         log.info("Running all tests (excluding NCCLTraceTestDumpOnTimeout)")
@@ -191,11 +327,19 @@ def run_tests(pytorch_src: Path, results_log: Path, test_scope: str = "smoke") -
         sys.executable,
         "-m",
         "pytest",
-        str(pytorch_src / "test" / "distributed" / "test_c10d_nccl.py"),
+        *(str(pytorch_src / "test" / "distributed" / t) for t in targets),
         "-v",
         f"--timeout={timeout}",
         "--tb=short",
         f"--junitxml={junit_xml}",
+        # Record each testcase's file, for the per-file floors.
+        "-o", "junit_family=xunit1",
+        # PyTorch's conftest otherwise leaves tests skipped at collection out
+        # of the report; it asks JUnit runs to turn the plugin off.
+        "-p", "no:prune_skips_plugin",
+        # test_c10d_nccl.py asserts at import that its five tests exist; if
+        # one is renamed, the other files must still run.
+        "--continue-on-collection-errors",
         "-k",
         k_expr,
     ]
@@ -221,45 +365,17 @@ def run_tests(pytorch_src: Path, results_log: Path, test_scope: str = "smoke") -
     log.info("Test exit code: %d", proc.returncode)
     log.info("Results written to: %s", results_log)
 
-    exit_code = proc.returncode
-    passed_tests = []
-    failed_tests = []
-    error_details = []
-    tests_run = 0
-    summary_line = ""
-
+    junit = {"passed": [], "cases": [], "error_details": []}
     if junit_xml.exists():
         log.info("Parsing JUnit XML: %s", junit_xml)
         junit = parse_junit_xml(junit_xml)
-        passed_tests = junit["passed"]
-        failed_tests = junit["failed"]
-        error_details = junit["error_details"]
-        tests_run = junit["tests_run"]
-
-        if error_details:
+        if junit["error_details"]:
             log.info("Failure/error details from JUnit XML:")
-            for detail in error_details:
+            for detail in junit["error_details"]:
                 log.info("  %s", detail)
     else:
-        log.warning("JUnit XML not found at %s, falling back to exit code only", junit_xml)
-
-    ALL_TESTS_MIN = 200
-    if test_scope == "smoke" and tests_run < len(SMOKE_TESTS):
-        log.error(
-            "Expected %d smoke tests but only %d were collected — "
-            "test names may have changed in the nightly",
-            len(SMOKE_TESTS),
-            tests_run,
-        )
-        exit_code = 1
-    elif test_scope == "all" and tests_run < ALL_TESTS_MIN:
-        log.error(
-            "Expected at least %d tests in 'all' scope but only %d were "
-            "collected — check -k expression or test discovery",
-            ALL_TESTS_MIN,
-            tests_run,
-        )
-        exit_code = 1
+        # No XML means no evidence any test ran; judge() fails the run.
+        log.error("JUnit XML not found at %s", junit_xml)
 
     known_failures_file = Path(__file__).parent / "known_failures.json"
     known_set: set[str] = set()
@@ -269,44 +385,51 @@ def run_tests(pytorch_src: Path, results_log: Path, test_scope: str = "smoke") -
         known_set = set(known_data.get("tests", {}).keys())
         log.info("Loaded %d known failures from %s", len(known_set), known_failures_file.name)
 
-    known_failed = [t for t in failed_tests if t in known_set]
-    unexpected_failed = [t for t in failed_tests if t not in known_set]
-
-    passed_names = {name for name, _ in passed_tests}
-    now_passing = sorted(known_set & passed_names)
-    if now_passing:
+    cases = junit["cases"]
+    verdict = judge(test_scope, cases, known_set, proc.returncode)
+    for err in verdict["errors"]:
+        log.error("%s", err)
+    if verdict["unexpected_failed"]:
+        log.error("Unexpected failures: %s", verdict["unexpected_failed"])
+    elif verdict["known_failed"] and verdict["exit_code"] == 0:
+        log.info("All %d failures are known — treating as PASSED", len(verdict["known_failed"]))
+    if verdict["now_passing"]:
         log.warning(
             "%d known failure(s) now PASSING — consider removing from "
-            "known_failures.json: %s", len(now_passing), now_passing,
+            "known_failures.json: %s", len(verdict["now_passing"]), verdict["now_passing"],
         )
 
-    if unexpected_failed:
-        log.error("Unexpected failures: %s", unexpected_failed)
-    elif failed_tests and not unexpected_failed and proc.returncode in (0, 1):
-        log.info("All %d failures are known — treating as PASSED", len(known_failed))
-        exit_code = 0
-
+    passed_tests = junit["passed"]
+    skipped = sum(1 for c in cases if c["outcome"] == "skipped")
     parts = []
     if passed_tests:
         parts.append(f"{len(passed_tests)} passed")
-    if unexpected_failed:
-        parts.append(f"{len(unexpected_failed)} unexpected failures")
-    if known_failed:
-        parts.append(f"{len(known_failed)} known failures")
-    summary_line = ", ".join(parts)
+    if verdict["unexpected_failed"]:
+        parts.append(f"{len(verdict['unexpected_failed'])} unexpected failures")
+    if verdict["known_failed"]:
+        parts.append(f"{len(verdict['known_failed'])} known failures")
+    if skipped:
+        parts.append(f"{skipped} skipped")
+    summary_line = ", ".join(parts) or "no tests ran"
 
+    smoke = test_scope == "smoke"
+    scope_files = [target_file(t) for t in targets]
     summary = {
-        "exit_code": exit_code,
+        "exit_code": verdict["exit_code"],
         "test_scope": test_scope,
         "passed": passed_tests,
-        "failed": failed_tests,
-        "known_failed": known_failed,
-        "unexpected_failed": unexpected_failed,
+        "known_failed": verdict["known_failed"],
+        "unexpected_failed": verdict["unexpected_failed"],
+        "errors": verdict["errors"],
         "summary_line": summary_line,
-        "tests_run": tests_run,
-        "expected_tests": len(SMOKE_TESTS) if test_scope == "smoke" else None,
+        # For smoke, how many of SMOKE_TESTS actually ran; the dashboard reads
+        # it from the "Collected:" line. Otherwise distinct testcases.
+        "tests_run": (verdict["smoke_ran"] if smoke
+                      else len({(c["classname"], c["name"]) for c in cases})),
+        "expected_tests": len(SMOKE_TESTS) if smoke else None,
+        "ran_per_file": {f: verdict["ran_per_file"][f] for f in scope_files},
     }
-    return exit_code, summary
+    return verdict["exit_code"], summary
 
 
 def generate_summary_report(summary: dict, rccl_lib: Path) -> str:
@@ -328,6 +451,7 @@ def generate_summary_report(summary: dict, rccl_lib: Path) -> str:
         f"PyTorch:    {torch.__version__}",
         f"RCCL:       {rccl_lib}",
         f"GPUs:       {torch.cuda.device_count()}x {torch.cuda.get_device_name(0) if torch.cuda.device_count() > 0 else 'N/A'}",
+        f"c10d NCCL:  {nccl_backend_description()}",
         f"",
         f"Results:    {summary['summary_line']}",
     ]
@@ -335,6 +459,18 @@ def generate_summary_report(summary: dict, rccl_lib: Path) -> str:
     if summary.get("expected_tests") is not None:
         lines.append(f"Collected:  {summary['tests_run']}/{summary['expected_tests']} expected smoke tests")
     lines.append("")
+
+    if summary.get("ran_per_file"):
+        lines.append("Tests run per file:")
+        for f, n in summary["ran_per_file"].items():
+            lines.append(f"  {n:4d}  {f}")
+        lines.append("")
+
+    if summary.get("errors"):
+        lines.append("Verdict errors:")
+        for err in summary["errors"]:
+            lines.append(f"  {err}")
+        lines.append("")
 
     unexpected = summary.get("unexpected_failed", [])
     known = summary.get("known_failed", [])
@@ -346,7 +482,9 @@ def generate_summary_report(summary: dict, rccl_lib: Path) -> str:
         lines.append("")
 
     if known:
-        lines.append(f"Known failures ({len(known)}) — excluded from verdict")
+        lines.append(f"Known failures ({len(known)}) — excluded from verdict:")
+        for name in known:
+            lines.append(f"  KNOWN {name}")
         lines.append("")
 
     if summary["passed"]:
@@ -388,7 +526,7 @@ def main() -> None:
         "--test-scope",
         choices=["smoke", "all"],
         default="smoke",
-        help="Run smoke tests (22 curated tests, ~3min) or all tests (default: smoke)",
+        help="Run the curated smoke tests or all tests (default: smoke)",
     )
     parser.add_argument(
         "--notify-email",
@@ -462,7 +600,8 @@ def main() -> None:
 
     # Step 5: Clone PyTorch test sources
     setup_report.step("Clone PyTorch test sources")
-    clone_pytorch_test_sources(args.pytorch_src)
+    clone_pytorch_test_sources(
+        args.pytorch_src, SMOKE_TARGETS if args.test_scope == "smoke" else ALL_TARGETS)
 
     # Step 6: Patch missing modules, print environment info, and run tests
     setup_report.step("Check PyTorch environment")

@@ -630,6 +630,9 @@ deviceLib:
   Unit_fp8x2_ocp_compare_host_device:
     <<: *level_default
     tags: [types]
+  Unit_fp8x2_ocp_saturates_each_half:
+    <<: *level_default
+    tags: [types]
   Unit_fp8x2_ocp_split_compare:
     <<: *level_default
     tags: [types]

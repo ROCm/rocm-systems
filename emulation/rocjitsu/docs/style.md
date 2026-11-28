@@ -146,6 +146,17 @@ Foo foo = static_cast<Foo>(bar); // OK but could use auto instead to avoid repet
   diagnostics that must survive a log-groups-OFF build, plus an
   async-signal-safe `::write` backtrace path).
 
+## Register transport and arithmetic SIMD
+
+Raw register transport uses backend-owned blocks in `util/simd.h`. Do not use
+`std::experimental::simd` or add numerical operations to that transport API.
+Use explicit AVX2/AVX-512 intrinsics when enabled by the compiler, with scalar
+fallbacks otherwise. Derive lane counts from the block type. VM objects share
+the configured CPU baseline; transport blocks must not cross compilation-target
+boundaries. Backend namespaces keep feature-dependent types and helpers distinct.
+Arithmetic SIMD backends use explicit ISA intrinsics and names that identify
+their CPU feature level, as described in the rj-arith design.
+
 ## Error Handling
 
 - Expected failures such as a rejected instruction encoding return `Result` or
@@ -157,6 +168,19 @@ Foo foo = static_cast<Foo>(bar); // OK but could use auto instead to avoid repet
   cache lookups).
 - Do not add `try`/`catch` except at a boundary that must translate an error
   (e.g. the C API layer). Assume code is not exception-safe unless documented.
+
+## Host floating-point environment
+
+Production rocjitsu code assumes the host's default floating-point environment:
+nearest-even rounding, denormals preserved, and exceptions masked. It never
+explicitly changes rounding, denormal controls, exception masks or sticky flags.
+Ordinary arithmetic may raise sticky flags. Guest MODE settings are implemented
+in arithmetic and result bits, not by changing the host environment.
+
+This contract applies to all CPU execution paths, including graphics and memory
+atomics, which remain outside rj-arith. Saving/restoring the environment around
+compliant code is unnecessary. Tests may change it to establish a reference or
+check the contract.
 
 ## Formatting
 

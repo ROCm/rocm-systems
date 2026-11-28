@@ -164,7 +164,8 @@ inline void execute_swap(Wavefront &wave, uint64_t flags, const Operand &destina
   }
   auto output_d = registers.write_operand(destination, exec_mask, bytes);
   auto output_a = registers.write_operand(source, exec_mask, bytes);
-  for (unsigned lane = 0; lane < wave.wf_size(); lane += util::native_width_v<uint32_t>) {
+  RJ_REGISTER_NO_UNROLL
+  for (unsigned lane = 0; lane < wave.wf_size(); lane += util::register_block_lanes_v<uint32_t>) {
     if (output_d.store_native(lane, util::load<uint32_t>(d_values.data() + lane), exec_mask >> lane)
             .failed()) {
       return;
@@ -496,7 +497,8 @@ inline void execute_packed_permutation(Wavefront &wave, Wave32 wave32, Wave64 wa
   for (int word = 0; word < Bits / 2; ++word) {
     output.encoding_value_ = destination.encoding_value_ + word;
     auto view = registers.write_operand(output, exec_mask);
-    for (unsigned lane = 0; lane < wave.wf_size(); lane += util::native_width_v<uint32_t>) {
+    RJ_REGISTER_NO_UNROLL
+    for (unsigned lane = 0; lane < wave.wf_size(); lane += util::register_block_lanes_v<uint32_t>) {
       if (view.store_native(lane, util::load<uint32_t>(d[word] + lane), exec_mask >> lane)
               .failed()) {
         return;

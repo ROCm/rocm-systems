@@ -49,10 +49,14 @@ CU_MASKING_BLACKLIST=\
 
 # The CheckZeroInitializationVram test is no longer expected to pass as KFD no longer
 # clears memory at allocation time.
+#
+# KFDUALinkTest.WriteExporterReadImporterLoopback requires the GPU to be configured in
+# UALink loopback mode, so it is only run explicitly.
 PERMANENT_BLACKLIST_ALL_ASICS=\
 "-${FILTER[pm]}:"\
 "RDMATest.GPUDirect:"\
-"KFDLocalMemoryTest.CheckZeroInitializationVram"
+"KFDLocalMemoryTest.CheckZeroInitializationVram:"\
+"KFDUALinkTest.WriteExporterReadImporterLoopback/*"
 
 # This is the temporary blacklist for all ASICs. This is to be used when a test is failing consistently
 # on every ASIC (Kaveri, Carrizo, Hawaii, Tonga, Fiji, Polaris10, Polaris11 and Vega10 .

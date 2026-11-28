@@ -132,7 +132,6 @@ template <Gfx10Interp Op, typename Inst> void execute_gfx10_interp(Inst &inst, W
           addend = half ? half_value(origin) : std::bit_cast<float>(origin);
         }
         if constexpr (Op == Gfx10Interp::P2F16) {
-          fp_mode::ScopedEnvironment environment(0);
           const bool flush = !(wf.fp_denorm_mode_f32() & 1u);
           uint16_t result = fp_mode::detail::fma_f32_to_f16_nearest_environment(
               slope_value, flush ? denormal::flush_value(coordinate_value) : coordinate_value,
@@ -145,9 +144,9 @@ template <Gfx10Interp Op, typename Inst> void execute_gfx10_interp(Inst &inst, W
           regs.write_lane_masked(inst.vdst, lane, uint32_t(result) << (high ? 16 : 0),
                                  high ? 12 : 3);
         } else {
-          const auto result = fp_mode::arithmetic<fp_mode::Arithmetic::FMA>(
-              slope_value, coordinate_value, addend, wf.fp_round_mode_f32(),
-              wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode());
+          const auto result =
+              fp_mode::fma_f32(slope_value, coordinate_value, addend, wf.fp_round_mode_f32(),
+                               wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode());
           regs.write_lane(inst.vdst, lane, finish(result));
         }
       }

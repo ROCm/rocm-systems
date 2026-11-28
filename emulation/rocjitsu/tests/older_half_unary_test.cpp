@@ -232,8 +232,8 @@ TEST(OlderHalfUnary, Bindings) {
       {Form::Dpp8, 0xf0, 0, false, true, false, false},
       {Form::SuppressedDpp, 0xf0, 0, false, false, false, false},
   };
-  // The three numerical contracts are older profiles, CDNA3/4, and gfx1250.
-  const rocjitsu::test::Unary32 calls[3][14] = {
+  // The four numerical contracts are older profiles, CDNA3, gfx1250, and CDNA4.
+  const rocjitsu::test::Unary32 calls[4][14] = {
       {rj_arith_v_trunc_f16_w32_gfx908, rj_arith_v_ceil_f16_w32_gfx908,
        rj_arith_v_rndne_f16_w32_gfx908, rj_arith_v_floor_f16_w32_gfx908,
        rj_arith_v_frexp_mant_f16_w32_gfx908, nullptr, rj_arith_v_rcp_f16_w32_gfx908,
@@ -253,6 +253,12 @@ TEST(OlderHalfUnary, Bindings) {
        rj_arith_v_exp_f16_w32_gfx1250, rj_arith_v_log_f16_w32_gfx1250,
        rj_arith_v_sin_f16_w32_gfx1250, rj_arith_v_cos_f16_w32_gfx1250,
        rj_arith_v_fract_f16_w32_gfx12},
+      {rj_arith_v_trunc_f16_w32_gfx942, rj_arith_v_ceil_f16_w32_gfx942,
+       rj_arith_v_rndne_f16_w32_gfx942, rj_arith_v_floor_f16_w32_gfx942,
+       rj_arith_v_frexp_mant_f16_w32_gfx942, nullptr, rj_arith_v_rcp_f16_w32_gfx950,
+       rj_arith_v_rsq_f16_w32_gfx950, rj_arith_v_sqrt_f16_w32_gfx950, rj_arith_v_exp_f16_w32_gfx950,
+       rj_arith_v_log_f16_w32_gfx950, rj_arith_v_sin_f16_w32_gfx950, rj_arith_v_cos_f16_w32_gfx950,
+       rj_arith_v_fract_f16_w32_gfx942},
   };
   for (const auto &family : families) {
     ScopedIsaExecutionBackend backend(family.backend);
@@ -384,11 +390,10 @@ TEST(OlderHalfUnary, Bindings) {
                                 family.arch == rocjitsu::IsaFamily::Cdna4)
                            ? RJ_ARITH_ALU_SDWA
                            : 0);
-                  const int profile = gfx1250 ? 2
-                                      : family.arch == rocjitsu::IsaFamily::Cdna3 ||
-                                              family.arch == rocjitsu::IsaFamily::Cdna4
-                                          ? 1
-                                          : 0;
+                  const int profile = family.arch == rocjitsu::IsaFamily::Cdna4   ? 3
+                                      : gfx1250                                   ? 2
+                                      : family.arch == rocjitsu::IsaFamily::Cdna3 ? 1
+                                                                                  : 0;
                   result = uint32_t(rocjitsu::test::evaluate_unary32(calls[profile][op], flags,
                                                                      modifiers, input));
                 }

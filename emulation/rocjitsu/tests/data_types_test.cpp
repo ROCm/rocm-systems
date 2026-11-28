@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "util/data_types.h"
+#include "float_format_reference.h"
 
 #include <gtest/gtest.h>
 
@@ -245,20 +245,6 @@ TEST(Fp8E4M3Fnuz, KeyValues) {
   EXPECT_EQ(util::fp8_e4m3_fnuz_to_f32(0x01), std::ldexp(1.0f, -10));
   EXPECT_EQ(util::fp8_e4m3_fnuz_to_f32(0x7F), 240.0f);
   EXPECT_TRUE(std::isnan(util::fp8_e4m3_fnuz_to_f32(0x80)));
-}
-
-TEST(Fp8E4M3Fnuz, BlockMatchesScalar) {
-  const uint8_t src[] = {0x00, 0x01, 0x40, 0x7F, 0x80, 0xC0};
-  float dst[std::size(src)] = {};
-  util::fp8_e4m3_fnuz_to_f32_block(src, dst, std::size(src));
-  for (size_t i = 0; i < std::size(src); ++i) {
-    float scalar = util::fp8_e4m3_fnuz_to_f32(src[i]);
-    if (std::isnan(scalar)) {
-      EXPECT_TRUE(std::isnan(dst[i])) << "i=" << i;
-    } else {
-      EXPECT_EQ(dst[i], scalar) << "i=" << i;
-    }
-  }
 }
 
 TEST(Fp8E4M3Fnuz, RneNarrow) {
@@ -532,20 +518,6 @@ TEST(Bf8E5M2Fnuz, KeyValues) {
   EXPECT_EQ(util::bf8_e5m2_fnuz_to_f32(0x01), std::ldexp(1.0f, -17));
   EXPECT_EQ(util::bf8_e5m2_fnuz_to_f32(0x7F), 57344.0f);
   EXPECT_TRUE(std::isnan(util::bf8_e5m2_fnuz_to_f32(0x80)));
-}
-
-TEST(Bf8E5M2Fnuz, BlockMatchesScalar) {
-  const uint8_t src[] = {0x00, 0x01, 0x40, 0x7F, 0x80, 0xC0};
-  float dst[std::size(src)] = {};
-  util::bf8_e5m2_fnuz_to_f32_block(src, dst, std::size(src));
-  for (size_t i = 0; i < std::size(src); ++i) {
-    float scalar = util::bf8_e5m2_fnuz_to_f32(src[i]);
-    if (std::isnan(scalar)) {
-      EXPECT_TRUE(std::isnan(dst[i])) << "i=" << i;
-    } else {
-      EXPECT_EQ(dst[i], scalar) << "i=" << i;
-    }
-  }
 }
 
 TEST(Bf8E5M2Fnuz, RneNarrow) {

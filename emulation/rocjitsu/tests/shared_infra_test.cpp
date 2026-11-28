@@ -113,9 +113,9 @@
 
 #include "legacy_gpu_memory_fixture.h"
 
+#include "float_format_reference.h"
 #include "simdojo/sim/simulation.h"
 #include "util/bit.h"
-#include "util/data_types.h"
 #include "util/except.h"
 #include "util/host_target.h"
 #include "util/simd.h"

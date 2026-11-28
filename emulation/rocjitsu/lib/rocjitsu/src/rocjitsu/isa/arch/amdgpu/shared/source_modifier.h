@@ -4,7 +4,7 @@
 #pragma once
 
 /// @file source_modifier.h
-/// @brief ABS/NEG on scalar or SIMD floating-point encodings.
+/// @brief ABS/NEG on scalar floating-point encodings.
 /// @details ABS clears the sign bit, then NEG flips it. The payload and
 /// exponent are unchanged; input flushing belongs to the operation.
 

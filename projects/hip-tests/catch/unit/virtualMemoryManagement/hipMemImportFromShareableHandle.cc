@@ -492,6 +492,33 @@ static void CheckImportedCopiesOverlap(const std::vector<ImportedAllocation>& so
 /**
  * Test Description
  * ------------------------
+ *    - The POSIX file descriptor passed to hipMemImportFromShareableHandle may be closed as soon
+ *      as the import returns: the imported handle stays mappable and the mapping reaches the
+ *      exported memory.
+ * Test source
+ * ------------------------
+ *    - unit/virtualMemoryManagement/hipMemImportFromShareableHandle.cc
+ * Test requirements
+ * ------------------------
+ *    - Host specific (LINUX)
+ *    - HIP_VERSION >= 7.14
+ */
+HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_FdClosedBeforeMap) {
+  checkVMMSupported(0);
+  const size_t size = GetOverlapCopySize(1);
+  // CreateImportedAllocation closes the descriptor right after the import, before hipMemMap.
+  const ImportedAllocation allocation = CreateImportedAllocation(0, 0, size);
+  HIP_CHECK(hipMemset(allocation.ptr, 0x5a, size));
+  HIP_CHECK(hipDeviceSynchronize());
+  std::vector<unsigned char> result(size);
+  HIP_CHECK(hipMemcpy(result.data(), allocation.ptr, size, hipMemcpyDeviceToHost));
+  REQUIRE(std::all_of(result.begin(), result.end(), [](unsigned char v) { return v == 0x5a; }));
+  ReleaseImportedAllocation(allocation, size);
+}
+
+/**
+ * Test Description
+ * ------------------------
  *    - Allocations created on device 0 and imported back on device 0. Device-0 copies from them,
  *      each into its own buffer on its own stream, must not serialize. Source and destination are
  *      both physically on device 0, so every copy is a blit copy.

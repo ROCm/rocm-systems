@@ -9,7 +9,7 @@
 /// output_denormal.h decide from MODE.FP_DENORM whether a source or a result
 /// is flushed; instructions that always flush call this directly.
 /// denormal_value.h adapts it to host floating values.
-/// Works on raw encodings in unsigned scalar or SIMD lanes, so host DAZ/FTZ
+/// Works on raw encodings in unsigned scalar lanes, so host DAZ/FTZ
 /// cannot change the result. F16 must be flushed before it is widened: an F16
 /// subnormal is normal when represented in F32.
 
