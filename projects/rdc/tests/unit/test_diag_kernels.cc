@@ -34,12 +34,14 @@ THE SOFTWARE.
 // kernel source tree is not reachable (for example a packaged test run) the
 // checks skip instead of failing.
 
+#include <dirent.h>
 #include <gtest/gtest.h>
 #include <sys/stat.h>
 
 #include <fstream>
 #include <iterator>
 #include <string>
+#include <vector>
 
 #ifndef RDC_KERNELS_HSACO_DIR
 #define RDC_KERNELS_HSACO_DIR ""
@@ -97,9 +99,10 @@ void ExpectKernelsForTarget(const std::string& gfx_name) {
 }
 
 // Assert every diagnostic kernel for gfx_name is a code object v4. The checks
-// fill in the kernel arguments of the v4 layout; a kernel of a later version
-// reads its work-group size from hidden arguments the checks never write, and
-// the System memory check then compares data its kernel never wrote.
+// are written for the v4 kernel argument layout; a later version expects a
+// larger layout with other hidden arguments. On gfx1250 the System memory
+// check then failed, and a build with assertions enabled stops on the kernel
+// argument size check.
 void ExpectCodeObjectV4(const std::string& gfx_name) {
   const std::string base = RDC_KERNELS_HSACO_DIR;
   if (!DirExists(base)) {
@@ -109,7 +112,7 @@ void ExpectCodeObjectV4(const std::string& gfx_name) {
   for (const char* kernel : kDiagKernels) {
     const std::string path = base + "/" + gfx_name + "/" + kernel;
     const std::string data = ReadFile(path);
-    ASSERT_GE(data.size(), 9U) << path;
+    ASSERT_GE(data.size(), 9U) << "missing or truncated diagnostic kernel: " << path;
     // e_ident[EI_OSABI] is ELFOSABI_AMDGPU_HSA (64) and e_ident[EI_ABIVERSION]
     // is ELFABIVERSION_AMDGPU_HSA_V4 (2).
     EXPECT_EQ(static_cast<unsigned char>(data[7]), 64U) << path;
@@ -129,5 +132,34 @@ TEST(DiagKernelPackaging, Gfx1250KernelsPresentAndTargeted) {
 // A previously shipped target, so a wholesale packaging break is also caught
 // and the checks are exercised against known-good assets.
 TEST(DiagKernelPackaging, Gfx942KernelsPresentAndTargeted) { ExpectKernelsForTarget("gfx942"); }
+
+// Every target's kernels must be code object v4, so a target added later cannot
+// ship the compiler's default version. gfx940 and gfx941 are left out: ROCm has
+// dropped them, so no current runtime loads their kernels and no current
+// compiler builds them.
+TEST(DiagKernelPackaging, AllTargetsUseCodeObjectV4) {
+  const std::string base = RDC_KERNELS_HSACO_DIR;
+  if (!DirExists(base)) {
+    GTEST_SKIP() << "kernel source tree not available at '" << base << "'";
+  }
+
+  std::vector<std::string> targets;
+  if (DIR* dir = opendir(base.c_str())) {
+    while (const dirent* entry = readdir(dir)) {
+      const std::string name = entry->d_name;
+      if (name.rfind("gfx", 0) == 0 && name != "gfx940" && name != "gfx941" &&
+          DirExists(base + "/" + name)) {
+        targets.push_back(name);
+      }
+    }
+    closedir(dir);
+  }
+  ASSERT_FALSE(targets.empty()) << "no gfx* kernel directories under " << base;
+
+  for (const std::string& target : targets) {
+    SCOPED_TRACE(target);
+    ExpectCodeObjectV4(target);
+  }
+}
 
 }  // namespace

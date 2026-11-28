@@ -565,8 +565,7 @@ jobs:
         for t in "${SANITIZE_PREFIX}"/share/rdc/rdctst_tests/rdc_*_tests; do
           name="$(basename "$t")"
           case "${name}" in
-            rdc_unit_tests) continue ;;         # needs a GPU
-            rdc_diag_kernel_tests) continue ;;  # has no install RPATH
+            rdc_unit_tests) continue ;;  # needs a GPU
           esac
           echo "::group::${name}"
           timeout -k 30 600 "$t" --gtest_output="xml:build/test-results-sanitize-${name}.xml" || failed=1
@@ -879,8 +878,7 @@ jobs:
         for t in "${CLANG_PREFIX}"/share/rdc/rdctst_tests/rdc_*_tests; do
           name="$(basename "$t")"
           case "${name}" in
-            rdc_unit_tests) continue ;;         # needs a GPU
-            rdc_diag_kernel_tests) continue ;;  # has no install RPATH
+            rdc_unit_tests) continue ;;  # needs a GPU
           esac
           echo "::group::${name}"
           timeout -k 30 "${limit}" "$t" --gtest_output="xml:build/test-results-clang-${name}.xml" || failed=1

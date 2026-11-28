@@ -78,6 +78,11 @@ target_compile_definitions(
     PRIVATE RDC_KERNELS_HSACO_DIR="${PROJECT_SOURCE_DIR}/rdc_libs/rdc_modules/kernels/hsaco"
 )
 target_link_libraries(rdc_diag_kernel_tests PRIVATE GTest::gtest_main pthread)
+# Installed with the other unit tests, which test_gtest_runner.py runs from the package.
+set_target_properties(
+    rdc_diag_kernel_tests
+    PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/../../../lib"
+)
 add_test(NAME rdc_diag_kernel_tests COMMAND rdc_diag_kernel_tests)
 
 # rdc_topology_tests: rdc_device_topology_get() against fake AMD SMI calls that
