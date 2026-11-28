@@ -1111,6 +1111,29 @@ void Runtime::MarkReservedAddressSvm(const void* ptr, size_t size) {
   }
 }
 
+bool Runtime::IsFirstReservedSvmRegistration(const void* ptr, size_t size) {
+  if (ptr == nullptr || size == 0) return false;
+
+  const uint8_t* start = reinterpret_cast<const uint8_t*>(ptr);
+  const uint8_t* end = start + size;
+
+  std::shared_lock<std::shared_mutex> lock(memory_lock_);
+  auto it = reserved_address_map_.upper_bound(ptr);
+  if (it != reserved_address_map_.begin()) --it;
+
+  bool saw_reservation = false;
+  for (; it != reserved_address_map_.end(); ++it) {
+    const uint8_t* range_start = reinterpret_cast<const uint8_t*>(it->first);
+    const uint8_t* range_end = range_start + it->second.size;
+    if (range_end <= start) continue;
+    if (range_start >= end) break;
+    // A reservation MarkReservedAddressSvm already marked has its granularity.
+    if (it->second.svm_attrib) return false;
+    saw_reservation = true;
+  }
+  return saw_reservation;
+}
+
 /* This should be called memory_lock_ held */
 Runtime::AddressHandle* Runtime::VMemoryFindReservedAddressHandle(const void* va) {
   auto reservedAddressIt = reserved_address_map_.upper_bound(va);
@@ -3693,6 +3716,19 @@ hsa_status_t Runtime::SetSvmAttrib(void* ptr, size_t size,
   uint8_t* base = AlignDown((uint8_t*)ptr, pageSize);
   uint8_t* end = AlignUp((uint8_t*)ptr + size, pageSize);
   size_t len = end - base;
+
+  // HSA_SVM_GRANULARITY is the default for the first SetSvmAttrib on an address
+  // CLR reserved with VMemoryAddressReserve. MarkReservedAddressSvm records that
+  // registration, so a later update does not replace a granularity already set.
+  // An explicit HSA_AMD_SVM_ATTRIB_MIGRATION_GRANULARITY in this request wins.
+  const bool request_sets_granularity =
+      (set_attribs & (1u << HSA_AMD_SVM_ATTRIB_MIGRATION_GRANULARITY)) != 0;
+  const int env_granularity = flag_.svm_granularity();
+  if (!request_sets_granularity && env_granularity >= 0 &&
+      IsFirstReservedSvmRegistration(base, len)) {
+    attribs.push_back(kmtPair(HSA_SVM_ATTR_GRANULARITY, static_cast<uint32_t>(env_granularity)));
+  }
+
   HSAKMT_STATUS error = HSAKMT_CALL(hsaKmtSVMSetAttr(base, len, attribs.size(), &attribs[0]));
   if (error != HSAKMT_STATUS_SUCCESS)
     throw AMD::hsa_exception(HSA_STATUS_ERROR, "hsaKmtSVMSetAttr failed.");
