@@ -32,7 +32,6 @@ The following environment variables affect the hipFile runtime.
      - | Controls whether fastpath is used with unsupported file systems.
        | ``true``: Fastpath is used with any file system without validation.
        | ``false``: Fastpath is only used with supported file systems. (default)
-       | Must be set to ``true`` when using NFSoRDMA on Linux
    * - ``HIPFILE_HOST``
      - | Controls whether file I/O with registered host-memory buffers is enabled.
        | Host memory regions must be registered prior to starting any transfers involving them.

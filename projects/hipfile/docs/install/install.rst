@@ -99,11 +99,8 @@ Where:
 
 .. note::
 
-   hipFile has experimental support for NVMeoF and NFSoRDMA on Linux.
+   ``amdgpu-dkms`` version 31.70 or later must be installed to use NVMeoF and NFSoRDMA.
 
-   ``amdgpu-dkms`` version 31.40 or later must be installed to use NVMeoF and NFSoRDMA.
-
-   NFSoRDMA requires ``HIPFILE_UNSUPPORTED_FILE_SYSTEMS=true``.
 
    See :doc:`/reference/hipFile-io-backends` for information on file type rules.
 

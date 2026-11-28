@@ -8,7 +8,7 @@ Setting up an NFSoRDMA share for use with hipFile
 
 The following prerequisites are required to use an RDMA-capable NFS server over RDMA or RoCE with hipFile:
 
-* ``amdgpu-dkms`` version 31.40 or later.
+* ``amdgpu-dkms`` version 31.70 or later.
 * An RDMA or RoCE fabric connecting the NFS server and client.
 * ``nfs-kernel-server`` installed on the server, with the ``svcrdma`` kernel
   module available.
@@ -91,7 +91,6 @@ Create a mount point and mount the share using RDMA:
    sudo mkdir /mnt/nfs
    sudo mount -o rdma,port=20049 <server_ip>:<export_path> /mnt/nfs
 
-Set ``HIPFILE_UNSUPPORTED_FILE_SYSTEMS=true`` before running hipFile I/O. 
 
 Verify that hipFile has access to the mounted share by copying a file using 
 `aiscp.cpp <https://github.com/ROCm/rocm-systems/blob/develop/projects/hipfile/examples/aiscp/aiscp.cpp>`_:
@@ -103,7 +102,7 @@ Verify that hipFile has access to the mounted share by copying a file using
    # Create a random input file
    dd if=/dev/urandom of=/mnt/nfs/"${USER}"/source bs=4K count=16
    # Copy file
-   HIPFILE_ALLOW_COMPAT_MODE=false HIPFILE_UNSUPPORTED_FILE_SYSTEMS=true ./aiscp /mnt/nfs/"${USER}"/source /mnt/nfs/"${USER}"/dest
+   HIPFILE_ALLOW_COMPAT_MODE=false ./aiscp /mnt/nfs/"${USER}"/source /mnt/nfs/"${USER}"/dest
    md5sum /mnt/nfs/"${USER}"/source /mnt/nfs/"${USER}"/dest
 
 Use the Linux ``umount`` command to unmount the share when it's no longer needed:

@@ -1,11 +1,12 @@
 # Changelog for hipFile
 
-## (Unreleased) hipFile 0.7.0 
+## (Unreleased) hipFile 0.7.0
 
 ### Added
 
 * Added a Host backend that enables file I/O using host memory. `hipFileBufRegister` now accepts host memory. Only `hipFileRead()` and `hipFileWrite()` accept a host buffer; `hipFileReadAsync()` and `hipFileWriteAsync()` return `hipFileAsyncNotSupported` for one.
-* MD and LVM software RAID arrays running pass-through personalities whose member devices are all local NVMe are now fastpath capable, and `ais-check` reports them as such.
+* The fastpath now accepts NFS mounts using `proto=rdma` or `proto=rdma6` by default. On these mounts, `ais-check` reports `yes*` when its direct I/O probe succeeds.
+* MD and LVM software RAID arrays running pass-through personalities whose member devices are all NVMe are now fastpath capable, and `ais-check` reports them as such.
 * Added the `HIPFILE_DEVICE_STREAM_POOL_SIZE` environment variable, which sets the number of streams in the per-GPU pool that fallback I/O uses for its device copies. The default is 4; setting it to 0 selects the default.
 * Added NIXL to the [Frameworks and applications using hipFile](https://rocm.docs.amd.com/projects/hipFile/en/latest/reference/hipFile-integrations.html#frameworks-and-applications-using-hipfile) documentation. NIXL AIS storage backend moves data directly between GPU memory and files on ROCm using `hipFileRead()` and `hipFileWrite()`.
 
@@ -144,7 +145,7 @@
 ### Removed
 
 * The rocFile library has been completely removed and the code is now a part of hipFile.
-* The hipify patch was removed. hipify with hipFile support can be obtained from the main HIPIFY repo at https://github.com/ROCm/HIPIFY. The `amd-develop` branch has hipFile support, but this has not been officially released yet.
+* The hipify patch was removed. hipify with hipFile support can be obtained from the main HIPIFY repo at <https://github.com/ROCm/HIPIFY>. The `amd-develop` branch has hipFile support, but this has not been officially released yet.
 * The `AIS_USE_INTEGER_SANITIZER` CMake option has been removed. Use the `AIS_USE_SANITIZERS` option instead.
 * Support for GNU sanitizers has been dropped in this release.
 
