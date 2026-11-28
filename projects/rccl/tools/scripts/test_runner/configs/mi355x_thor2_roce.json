@@ -1610,6 +1610,11 @@
           "name": "CollTraceUtils.getSizeMb",
           "description": "CollTrace utils get size MB",
           "test_filter": "CollTraceUtilsTest.getSizeMbTest"
+        },
+        {
+          "name": "IbTypedParam",
+          "description": "NCCL_IB_* connection settings are typed params: AUTO/-1 named values, out-of-range rejection, boolean spellings",
+          "test_filter": "IbTypedParam.*"
         }
       ]
     },

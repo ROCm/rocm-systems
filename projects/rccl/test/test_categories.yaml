@@ -128,6 +128,7 @@ test_categories:
       - "ProfilerApiEventRank.*"
       - "Diagnostics.*"
       - "HipProbe.*"
+      - "IbTypedParam.*"
     exclude_windows:
       - "*"
     labels:
