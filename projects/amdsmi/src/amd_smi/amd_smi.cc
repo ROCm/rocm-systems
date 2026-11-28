@@ -58,6 +58,8 @@
 #ifdef ENABLE_WSL_BACKEND
 #include "amd_smi/impl/amd_smi_wsl_device.h"
 #endif
+#include <cinttypes>
+
 #include "fwupd_carveout.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_kfd.h"
@@ -509,7 +511,7 @@ amdsmi_status_t amdsmi_get_processor_info(amdsmi_processor_handle processor_hand
       amd::smi::AMDSmiSystem::getInstance().handle_to_processor(processor_handle, &processor);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
 
-  snprintf(proc_id, sizeof(proc_id), "%d", processor->get_processor_index());
+  snprintf(proc_id, sizeof(proc_id), "%" PRIu32, processor->get_processor_index());
   snprintf(name, len, "%s", proc_id);
 
   return AMDSMI_STATUS_SUCCESS;
@@ -7398,6 +7400,17 @@ amdsmi_status_t amdsmi_get_cpu_affinity_with_scope(amdsmi_processor_handle proce
 }
 
 #ifdef ENABLE_ESMI_LIB
+static amdsmi_status_t validate_cpu_processor_handle(amdsmi_processor_handle processor_handle,
+                                                     amdsmi_processor_type_t expected_type) {
+  AMDSMI_CHECK_INIT();
+  amd::smi::AMDSmiProcessor* processor = nullptr;
+  amdsmi_status_t status =
+      amd::smi::AMDSmiSystem::getInstance().handle_to_processor(processor_handle, &processor);
+  if (status != AMDSMI_STATUS_SUCCESS) return status;
+  return processor->get_processor_type() == expected_type ? AMDSMI_STATUS_SUCCESS
+                                                          : AMDSMI_STATUS_NOT_SUPPORTED;
+}
+
 static amdsmi_status_t amdsmi_errno_to_esmi_status(amdsmi_status_t status) {
   for (auto& iter : amd::smi::esmi_status_map) {
     if (iter.first == static_cast<esmi_status_t>(status)) return iter.second;
@@ -7428,6 +7441,10 @@ amdsmi_status_t amdsmi_get_cpu_hsmp_proto_ver(amdsmi_processor_handle processor_
 
   if (processor_handle == nullptr) return AMDSMI_STATUS_INVAL;
 
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
+
   status = static_cast<amdsmi_status_t>(esmi_hsmp_proto_ver_get(&hsmp_proto_ver));
   if (status != AMDSMI_STATUS_SUCCESS) return amdsmi_errno_to_esmi_status(status);
 
@@ -7446,6 +7463,10 @@ amdsmi_status_t amdsmi_get_cpu_hsmp_driver_version(
 
   if (processor_handle == nullptr) return AMDSMI_STATUS_INVAL;
 
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
+
   status = static_cast<amdsmi_status_t>(esmi_hsmp_driver_version_get(&hsmp_driver_ver));
   if (status != AMDSMI_STATUS_SUCCESS) return amdsmi_errno_to_esmi_status(status);
 
@@ -7463,6 +7484,10 @@ amdsmi_status_t amdsmi_get_cpu_smu_fw_version(amdsmi_processor_handle processor_
   AMDSMI_CHECK_INIT();
 
   if (processor_handle == nullptr) return AMDSMI_STATUS_INVAL;
+
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
 
   status = static_cast<amdsmi_status_t>(esmi_smu_fw_version_get(&smu_fw));
   if (status != AMDSMI_STATUS_SUCCESS) return amdsmi_errno_to_esmi_status(status);
@@ -7483,6 +7508,10 @@ amdsmi_status_t amdsmi_get_cpu_core_energy(amdsmi_processor_handle processor_han
   AMDSMI_CHECK_INIT();
 
   if (processor_handle == nullptr) return AMDSMI_STATUS_INVAL;
+
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU_CORE);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
 
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
@@ -7507,6 +7536,10 @@ amdsmi_status_t amdsmi_get_cpu_socket_energy(amdsmi_processor_handle processor_h
 
   if (processor_handle == nullptr) return AMDSMI_STATUS_INVAL;
 
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
+
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
 
@@ -7530,6 +7563,10 @@ amdsmi_status_t amdsmi_get_cpu_prochot_status(amdsmi_processor_handle processor_
 
   if (processor_handle == nullptr) return AMDSMI_STATUS_INVAL;
 
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
+
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
 
@@ -7552,6 +7589,10 @@ amdsmi_status_t amdsmi_get_cpu_fclk_mclk(amdsmi_processor_handle processor_handl
   AMDSMI_CHECK_INIT();
 
   if (processor_handle == nullptr) return AMDSMI_STATUS_INVAL;
+
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
 
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
@@ -7577,6 +7618,10 @@ amdsmi_status_t amdsmi_get_cpu_cclk_limit(amdsmi_processor_handle processor_hand
 
   if (processor_handle == nullptr) return AMDSMI_STATUS_INVAL;
 
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
+
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
 
@@ -7599,6 +7644,10 @@ amdsmi_status_t amdsmi_get_cpu_socket_current_active_freq_limit(
   AMDSMI_CHECK_INIT();
 
   if (processor_handle == nullptr) return AMDSMI_STATUS_INVAL;
+
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
 
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
@@ -7625,6 +7674,10 @@ amdsmi_status_t amdsmi_get_cpu_socket_freq_range(amdsmi_processor_handle process
 
   if (processor_handle == nullptr) return AMDSMI_STATUS_INVAL;
 
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
+
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
 
@@ -7649,6 +7702,10 @@ amdsmi_status_t amdsmi_get_cpu_core_current_freq_limit(amdsmi_processor_handle p
 
   if (processor_handle == nullptr) return AMDSMI_STATUS_INVAL;
 
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU_CORE);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
+
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
 
@@ -7671,6 +7728,10 @@ amdsmi_status_t amdsmi_get_cpu_socket_power(amdsmi_processor_handle processor_ha
   AMDSMI_CHECK_INIT();
 
   if (processor_handle == nullptr || ppower == nullptr) return AMDSMI_STATUS_INVAL;
+
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
 
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
@@ -7695,6 +7756,10 @@ amdsmi_status_t amdsmi_get_cpu_socket_power_cap(amdsmi_processor_handle processo
 
   if (processor_handle == nullptr || pcap == nullptr) return AMDSMI_STATUS_INVAL;
 
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
+
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
 
@@ -7717,6 +7782,10 @@ amdsmi_status_t amdsmi_get_cpu_socket_power_cap_max(amdsmi_processor_handle proc
   AMDSMI_CHECK_INIT();
 
   if (processor_handle == nullptr || pmax == nullptr) return AMDSMI_STATUS_INVAL;
+
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
 
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
@@ -7741,6 +7810,10 @@ amdsmi_status_t amdsmi_get_cpu_pwr_svi_telemetry_all_rails(amdsmi_processor_hand
 
   if (processor_handle == nullptr) return AMDSMI_STATUS_INVAL;
 
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
+
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
 
@@ -7762,6 +7835,10 @@ amdsmi_status_t amdsmi_set_cpu_socket_power_cap(amdsmi_processor_handle processo
   AMDSMI_CHECK_INIT();
 
   if (processor_handle == nullptr) return AMDSMI_STATUS_INVAL;
+
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
 
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
@@ -7788,6 +7865,10 @@ amdsmi_status_t amdsmi_set_cpu_pwr_efficiency_mode(amdsmi_processor_handle proce
 
   if (processor_handle == nullptr || utilization == nullptr || ppt_limit == nullptr)
     return AMDSMI_STATUS_INVAL;
+
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
 
   pwreffmode_util = *utilization;
   pwreffmode_pptlimit = *ppt_limit;
@@ -7850,6 +7931,10 @@ amdsmi_status_t amdsmi_get_cpu_pwr_efficiency_mode(amdsmi_processor_handle proce
   if (power_efficiency_mode == nullptr || utilization == nullptr || ppt_limit == nullptr)
     return AMDSMI_STATUS_INVAL;
 
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
+
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
 
@@ -7875,6 +7960,10 @@ amdsmi_status_t amdsmi_get_cpu_core_boostlimit(amdsmi_processor_handle processor
 
   if (processor_handle == nullptr) return AMDSMI_STATUS_INVAL;
 
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU_CORE);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
+
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
 
@@ -7898,6 +7987,10 @@ amdsmi_status_t amdsmi_get_cpu_socket_c0_residency(amdsmi_processor_handle proce
 
   if (processor_handle == nullptr) return AMDSMI_STATUS_INVAL;
 
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
+
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
 
@@ -7920,6 +8013,10 @@ amdsmi_status_t amdsmi_set_cpu_core_boostlimit(amdsmi_processor_handle processor
 
   if (processor_handle == nullptr) return AMDSMI_STATUS_INVAL;
 
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU_CORE);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
+
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
 
@@ -7939,6 +8036,10 @@ amdsmi_status_t amdsmi_set_cpu_socket_boostlimit(amdsmi_processor_handle process
   AMDSMI_CHECK_INIT();
 
   if (processor_handle == nullptr) return AMDSMI_STATUS_INVAL;
+
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
 
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
@@ -7961,6 +8062,10 @@ amdsmi_status_t amdsmi_get_cpu_ddr_bw(amdsmi_processor_handle processor_handle,
   AMDSMI_CHECK_INIT();
 
   if (processor_handle == nullptr) return AMDSMI_STATUS_INVAL;
+
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
 
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
@@ -7987,6 +8092,10 @@ amdsmi_status_t amdsmi_get_cpu_socket_temperature(amdsmi_processor_handle proces
 
   if (processor_handle == nullptr) return AMDSMI_STATUS_INVAL;
 
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
+
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
 
@@ -8010,6 +8119,10 @@ amdsmi_status_t amdsmi_get_cpu_dimm_temp_range_and_refresh_rate(
   AMDSMI_CHECK_INIT();
 
   if (processor_handle == nullptr) return AMDSMI_STATUS_INVAL;
+
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
 
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
@@ -8038,6 +8151,10 @@ amdsmi_status_t amdsmi_get_cpu_dimm_power_consumption(amdsmi_processor_handle pr
 
   if (processor_handle == nullptr) return AMDSMI_STATUS_INVAL;
 
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
+
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
 
@@ -8065,6 +8182,10 @@ amdsmi_status_t amdsmi_get_cpu_dimm_thermal_sensor(amdsmi_processor_handle proce
 
   if (processor_handle == nullptr) return AMDSMI_STATUS_INVAL;
 
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
+
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
 
@@ -8090,6 +8211,10 @@ amdsmi_status_t amdsmi_set_cpu_xgmi_width(amdsmi_processor_handle processor_hand
 
   if (processor_handle == nullptr) return AMDSMI_STATUS_INVAL;
 
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
+
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
 
@@ -8111,6 +8236,10 @@ amdsmi_status_t amdsmi_set_cpu_gmi3_link_width_range(amdsmi_processor_handle pro
 
   if (processor_handle == nullptr) return AMDSMI_STATUS_INVAL;
 
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
+
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
 
@@ -8131,6 +8260,10 @@ amdsmi_status_t amdsmi_cpu_apb_enable(amdsmi_processor_handle processor_handle) 
 
   if (processor_handle == nullptr) return AMDSMI_STATUS_INVAL;
 
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
+
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
 
@@ -8149,6 +8282,10 @@ amdsmi_status_t amdsmi_cpu_apb_disable(amdsmi_processor_handle processor_handle,
   AMDSMI_CHECK_INIT();
 
   if (processor_handle == nullptr) return AMDSMI_STATUS_INVAL;
+
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
 
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
@@ -8169,6 +8306,10 @@ amdsmi_status_t amdsmi_set_cpu_socket_lclk_dpm_level(amdsmi_processor_handle pro
   AMDSMI_CHECK_INIT();
 
   if (processor_handle == nullptr) return AMDSMI_STATUS_INVAL;
+
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
 
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
@@ -8191,6 +8332,10 @@ amdsmi_status_t amdsmi_get_cpu_socket_lclk_dpm_level(amdsmi_processor_handle pro
   AMDSMI_CHECK_INIT();
 
   if (processor_handle == nullptr) return AMDSMI_STATUS_INVAL;
+
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
 
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
@@ -8216,6 +8361,10 @@ amdsmi_status_t amdsmi_set_cpu_pcie_link_rate(amdsmi_processor_handle processor_
 
   if (processor_handle == nullptr) return AMDSMI_STATUS_INVAL;
 
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
+
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
 
@@ -8237,6 +8386,10 @@ amdsmi_status_t amdsmi_set_cpu_df_pstate_range(amdsmi_processor_handle processor
   AMDSMI_CHECK_INIT();
 
   if (processor_handle == nullptr) return AMDSMI_STATUS_INVAL;
+
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
 
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
@@ -8260,6 +8413,10 @@ amdsmi_status_t amdsmi_get_cpu_current_io_bandwidth(amdsmi_processor_handle proc
   AMDSMI_CHECK_INIT();
 
   if (processor_handle == nullptr) return AMDSMI_STATUS_INVAL;
+
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
 
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
@@ -8288,6 +8445,10 @@ amdsmi_status_t amdsmi_get_cpu_current_xgmi_bw(amdsmi_processor_handle processor
 
   if (processor_handle == nullptr) return AMDSMI_STATUS_INVAL;
 
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
+
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
 
@@ -8313,6 +8474,10 @@ amdsmi_status_t amdsmi_get_hsmp_metrics_table_version(amdsmi_processor_handle pr
 
   if (processor_handle == nullptr) return AMDSMI_STATUS_INVAL;
 
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
+
   status = static_cast<amdsmi_status_t>(esmi_metrics_table_version_get(&metrics_tbl_ver));
   if (status != AMDSMI_STATUS_SUCCESS) return amdsmi_errno_to_esmi_status(status);
 
@@ -8330,6 +8495,10 @@ amdsmi_status_t amdsmi_get_hsmp_metrics_table(amdsmi_processor_handle processor_
   AMDSMI_CHECK_INIT();
 
   if (processor_handle == nullptr) return AMDSMI_STATUS_INVAL;
+
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
 
   if (sizeof(amdsmi_hsmp_metrics_table_t) != sizeof(struct hsmp_metric_table))
     return AMDSMI_STATUS_UNEXPECTED_SIZE;
@@ -8356,6 +8525,10 @@ amdsmi_status_t amdsmi_first_online_core_on_cpu_socket(amdsmi_processor_handle p
   AMDSMI_CHECK_INIT();
 
   if (processor_handle == nullptr) return AMDSMI_STATUS_INVAL;
+
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
 
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
@@ -8405,6 +8578,10 @@ amdsmi_status_t amdsmi_get_cpu_model_name(amdsmi_processor_handle processor_hand
   std::string model_name;
 
   if (processor_handle == nullptr) return AMDSMI_STATUS_INVAL;
+
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
 
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
@@ -8569,6 +8746,10 @@ amdsmi_status_t amdsmi_set_cpu_xgmi_pstate_range(amdsmi_processor_handle process
 
   if (processor_handle == nullptr) return AMDSMI_STATUS_INVAL;
 
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
+
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
 
@@ -8592,6 +8773,10 @@ amdsmi_status_t amdsmi_get_cpu_xgmi_pstate_range(amdsmi_processor_handle process
   if (processor_handle == nullptr || min_pstate == nullptr || max_pstate == nullptr)
     return AMDSMI_STATUS_INVAL;
 
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
+
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
 
@@ -8613,6 +8798,10 @@ amdsmi_status_t amdsmi_set_cpu_rail_isofreq_policy(amdsmi_processor_handle proce
   AMDSMI_CHECK_INIT();
 
   if (processor_handle == nullptr || rail_isofreq_policy == nullptr) return AMDSMI_STATUS_INVAL;
+
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
 
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
@@ -8636,6 +8825,10 @@ amdsmi_status_t amdsmi_get_cpu_rail_isofreq_policy(amdsmi_processor_handle proce
   AMDSMI_CHECK_INIT();
 
   if (processor_handle == nullptr || rail_isofreq_policy == nullptr) return AMDSMI_STATUS_INVAL;
+
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
 
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
@@ -8664,6 +8857,10 @@ amdsmi_status_t amdsmi_set_cpu_dfc_ctrl(amdsmi_processor_handle processor_handle
     return AMDSMI_STATUS_INVAL;
   }
 
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
+
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
 
@@ -8688,6 +8885,10 @@ amdsmi_status_t amdsmi_get_cpu_dfc_ctrl(amdsmi_processor_handle processor_handle
 
   if (processor_handle == nullptr || dfc_ctrl == nullptr) return AMDSMI_STATUS_INVAL;
 
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
+
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
 
@@ -8710,6 +8911,10 @@ amdsmi_status_t amdsmi_set_cpu_pc6_enable(amdsmi_processor_handle processor_hand
 
   if ((processor_handle == nullptr) || (enable > 1)) return AMDSMI_STATUS_INVAL;
 
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
+
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
 
@@ -8730,6 +8935,10 @@ amdsmi_status_t amdsmi_get_cpu_pc6_enable(amdsmi_processor_handle processor_hand
   AMDSMI_CHECK_INIT();
 
   if (processor_handle == nullptr || enabled == nullptr) return AMDSMI_STATUS_INVAL;
+
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
 
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
@@ -8753,6 +8962,10 @@ amdsmi_status_t amdsmi_set_cpu_cc6_enable(amdsmi_processor_handle processor_hand
 
   if ((processor_handle == nullptr) || (enable > 1)) return AMDSMI_STATUS_INVAL;
 
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
+
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
 
@@ -8773,6 +8986,10 @@ amdsmi_status_t amdsmi_get_cpu_cc6_enable(amdsmi_processor_handle processor_hand
   AMDSMI_CHECK_INIT();
 
   if (processor_handle == nullptr || enabled == nullptr) return AMDSMI_STATUS_INVAL;
+
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
 
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
@@ -8805,6 +9022,10 @@ amdsmi_status_t amdsmi_get_cpu_dimm_sb_reg(amdsmi_processor_handle processor_han
       (reg_offset > AMDSMI_MAX_SPD_REG_OFFSET) || (reg_space > AMDSMI_MAX_SPD_REG_SPACE)) {
     return AMDSMI_STATUS_INVAL;
   }
+
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
 
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
@@ -8846,6 +9067,10 @@ amdsmi_status_t amdsmi_set_cpu_dimm_sb_reg(amdsmi_processor_handle processor_han
   if (write_data > AMDSMI_MAX_SPD_WRITE_DATA)  // 8 bit
     return AMDSMI_STATUS_INVAL;
 
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
+
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
 
@@ -8874,6 +9099,10 @@ amdsmi_status_t amdsmi_get_cpu_core_ccd_power(amdsmi_processor_handle processor_
 
   if (processor_handle == nullptr || power == nullptr) return AMDSMI_STATUS_INVAL;
 
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU_CORE);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
+
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
 
@@ -8894,6 +9123,10 @@ amdsmi_status_t amdsmi_get_cpu_tdelta(amdsmi_processor_handle processor_handle, 
   AMDSMI_CHECK_INIT();
 
   if (processor_handle == nullptr || tdelta == nullptr) return AMDSMI_STATUS_INVAL;
+
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
 
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
@@ -8920,6 +9153,10 @@ amdsmi_status_t amdsmi_get_cpu_svi3_vr_controller_temp(amdsmi_processor_handle p
   if (processor_handle == nullptr || rail_selection == nullptr || rail_index == nullptr ||
       temp == nullptr)
     return AMDSMI_STATUS_INVAL;
+
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
 
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
@@ -8968,6 +9205,10 @@ amdsmi_status_t amdsmi_get_cpu_enabled_commands(amdsmi_processor_handle processo
       mask2 == nullptr)
     return AMDSMI_STATUS_INVAL;
 
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
+
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
 
@@ -8999,6 +9240,10 @@ amdsmi_status_t amdsmi_get_cpu_core_floor_freq_limit(amdsmi_processor_handle pro
 
   if (processor_handle == nullptr || floor_freq == nullptr) return AMDSMI_STATUS_INVAL;
 
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU_CORE);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
+
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
 
@@ -9023,6 +9268,10 @@ amdsmi_status_t amdsmi_get_cpu_floor_freq_limit(amdsmi_processor_handle processo
   AMDSMI_CHECK_INIT();
 
   if (processor_handle == nullptr || floor_freq == nullptr) return AMDSMI_STATUS_INVAL;
+
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
 
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
@@ -9049,6 +9298,10 @@ amdsmi_status_t amdsmi_get_cpu_core_eff_floor_freq_limit(amdsmi_processor_handle
 
   if (processor_handle == nullptr || eff_floor_freq == nullptr) return AMDSMI_STATUS_INVAL;
 
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU_CORE);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
+
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
 
@@ -9074,6 +9327,10 @@ amdsmi_status_t amdsmi_get_cpu_eff_floor_freq_limit(amdsmi_processor_handle proc
 
   if (processor_handle == nullptr || eff_floor_freq == nullptr) return AMDSMI_STATUS_INVAL;
 
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
+
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
 
@@ -9098,6 +9355,10 @@ amdsmi_status_t amdsmi_set_cpu_core_floor_freq_limit(amdsmi_processor_handle pro
 
   if (processor_handle == nullptr) return AMDSMI_STATUS_INVAL;
 
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU_CORE);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
+
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
 
@@ -9119,6 +9380,10 @@ amdsmi_status_t amdsmi_set_cpu_floor_freq_limit(amdsmi_processor_handle processo
   AMDSMI_CHECK_INIT();
 
   if (processor_handle == nullptr) return AMDSMI_STATUS_INVAL;
+
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
 
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
@@ -9142,6 +9407,10 @@ amdsmi_status_t amdsmi_set_cpu_core_msr_floor_freq_limit(amdsmi_processor_handle
   AMDSMI_CHECK_INIT();
 
   if (processor_handle == nullptr) return AMDSMI_STATUS_INVAL;
+
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU_CORE);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
 
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
@@ -9173,6 +9442,10 @@ amdsmi_status_t amdsmi_set_cpu_msr_floor_freq_limit(amdsmi_processor_handle proc
   AMDSMI_CHECK_INIT();
 
   if (processor_handle == nullptr) return AMDSMI_STATUS_INVAL;
+
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
 
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
@@ -9221,6 +9494,10 @@ amdsmi_status_t amdsmi_set_cpu_sdps_limit(amdsmi_processor_handle processor_hand
 
   if (processor_handle == nullptr) return AMDSMI_STATUS_INVAL;
 
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
+
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
 
@@ -9243,6 +9520,10 @@ amdsmi_status_t amdsmi_get_cpu_sdps_limit(amdsmi_processor_handle processor_hand
   AMDSMI_CHECK_INIT();
 
   if (processor_handle == nullptr || sdps_limit == nullptr) return AMDSMI_STATUS_INVAL;
+
+  amdsmi_status_t type_status =
+      validate_cpu_processor_handle(processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_CPU);
+  if (type_status != AMDSMI_STATUS_SUCCESS) return type_status;
 
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
