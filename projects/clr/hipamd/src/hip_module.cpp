@@ -431,6 +431,18 @@ hipError_t ihipLaunchKernel_validate(hipFunction_t f, const amd::LaunchParams& l
     if (err != hipSuccess) {
       return err;
     }
+    // num_blocks is the per-scheduling-unit occupancy for the actual block_size,
+    // already accounting for registers, LDS, and wave slots.  Use it directly
+    // with the CU count as the cooperative grid limit, since max_blocks_per_grid
+    // is computed for bestBlockSize which may differ from the launch block_size.
+    {
+      uint32_t cu_count = device->info().maxComputeUnits_;
+      if (cu_count == 0) cu_count = device->info().maxPhysicalComputeUnits_;
+      const int actual_max = num_blocks * static_cast<int>(cu_count);
+      if (actual_max >= 0) {
+        max_blocks_per_grid = std::min(max_blocks_per_grid, actual_max);
+      }
+    }
     if (((launch_params.global_.product()) / block_size) > unsigned(max_blocks_per_grid)) {
       return hipErrorCooperativeLaunchTooLarge;
     }
