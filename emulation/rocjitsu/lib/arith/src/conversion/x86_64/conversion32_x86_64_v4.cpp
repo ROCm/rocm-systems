@@ -4,6 +4,7 @@
 // SIMD conversion with guest rounding and denormal policies shared with scalar execution.
 #include "conversion/float_conversion.h"
 #include "conversion/x86_64/lanes.h"
+#include "conversion/x86_64/native.h"
 
 #include <immintrin.h>
 #include <stdint.h>
@@ -36,6 +37,9 @@ void conversion32_x86_64_v4(uint64_t flags, uint32_t exec_mask, uint32_t mode, u
             bits, _mm512_cmp_ps_mask(value, _mm512_set1_ps(0x1p32f), _CMP_GE_OQ),
             _mm512_set1_epi32(-1)));
       }
+    } else if constexpr (Op == Conversion32::SignedToFloat || Op == Conversion32::UnsignedToFloat) {
+      result =
+          conversion_simd::integer_to_float<Op == Conversion32::UnsignedToFloat>(raw, flags, mode);
     } else {
       result = conversion_detail::convert32<Op>(raw, flags, mode);
     }

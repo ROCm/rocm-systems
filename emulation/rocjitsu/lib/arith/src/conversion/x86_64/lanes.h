@@ -68,14 +68,23 @@ public:
 #endif
   }
 
-  // Write each 64-bit lane's low word to consecutive 32-bit destinations.
-  void store_words(uint32_t *destination) const {
+  // Pack each 64-bit lane's low word into a half-width intrinsic vector.
+  auto low_words() const {
     static_assert(Bits == 64);
 #if defined(__AVX512F__)
-    _mm256_storeu_si256(reinterpret_cast<__m256i *>(destination), _mm512_cvtepi64_epi32(bits));
+    return _mm512_cvtepi64_epi32(bits);
 #else
     auto packed = _mm256_permutevar8x32_epi32(bits, _mm256_setr_epi32(0, 2, 4, 6, 1, 3, 5, 7));
-    _mm_storeu_si128(reinterpret_cast<__m128i *>(destination), _mm256_castsi256_si128(packed));
+    return _mm256_castsi256_si128(packed);
+#endif
+  }
+
+  // Write each 64-bit lane's low word to consecutive 32-bit destinations.
+  void store_words(uint32_t *destination) const {
+#if defined(__AVX512F__)
+    _mm256_storeu_si256(reinterpret_cast<__m256i *>(destination), low_words());
+#else
+    _mm_storeu_si128(reinterpret_cast<__m128i *>(destination), low_words());
 #endif
   }
 
