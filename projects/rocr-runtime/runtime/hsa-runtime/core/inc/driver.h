@@ -79,6 +79,10 @@ struct DriverMemoryHandle {
   /// Whether FreeMemory unmaps it is driver-defined: an allocation may borrow a
   /// mapping owned by something else, in which case FreeMemory leaves it intact.
   void* vaddr{};
+  /// @brief True when @ref vaddr names a range that is mapped into the GPU's address
+  /// space. False for memory-only handles, where @ref vaddr is an opaque allocation
+  /// id i.e. IPC handles and unpinned host allocations.
+  bool va_mapped{false};
   int dmabuf_fd{-1};
   uint64_t mmap_offset{0};
   size_t size{0};

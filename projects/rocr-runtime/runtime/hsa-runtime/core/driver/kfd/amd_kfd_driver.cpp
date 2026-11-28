@@ -279,9 +279,10 @@ hsa_status_t KfdDriver::AllocateMemory(const core::MemoryRegion& mem_region,
   // mapped allocations, or the opaque memory-only handle for NoAddress
   // allocations. For KFD both are the allocation word reinterpreted as uint64_t.
   // Export-only fields stay at their defaults and are filled lazily on export.
-  auto populate_handle = [&]() {
+  auto populate_handle = [&](bool va_mapped = false) {
     handle->handle = reinterpret_cast<uint64_t>(mem);
     handle->vaddr = mem;
+    handle->va_mapped = va_mapped;
     handle->size = size;
     handle->owner = this;
     handle->owns_allocation = true;
@@ -382,7 +383,7 @@ hsa_status_t KfdDriver::AllocateMemory(const core::MemoryRegion& mem_region,
         return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
       }
 
-      populate_handle();
+      populate_handle(true);
       return HSA_STATUS_SUCCESS;
     }
   }
@@ -473,7 +474,7 @@ hsa_status_t KfdDriver::AllocateMemory(const core::MemoryRegion& mem_region,
     }
 
     memoryGuard.Dismiss();
-    populate_handle();
+    populate_handle(is_resident);
     return HSA_STATUS_SUCCESS;
   }
 

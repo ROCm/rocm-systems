@@ -349,9 +349,17 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
 }
 
 GpuAgent::~GpuAgent() {
+  // Stop submitting cache maintenance for the frees below
+  is_destroying_ = true;
+
   for (auto& blit : blits_) blit.reset();
 
   regions_.clear();
+
+  if (cache_maintenance_signal_.handle != 0) {
+    HSA::hsa_signal_destroy(cache_maintenance_signal_);
+    cache_maintenance_signal_.handle = 0;
+  }
 }
 
 void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_target,
@@ -3800,6 +3808,77 @@ void GpuAgent::InvalidateCodeCaches(void *ptr, size_t size) {
 
   // Submit the command to the utility queue and wait for it to complete.
   queues_[QueueUtility]->ExecutePM4(cache_inv, cache_inv_size_dw * sizeof(uint32_t));
+}
+
+void GpuAgent::WritebackInvalidateDataCaches(void* ptr, size_t size) {
+  // A queue that has faulted never retires another packet. Once that has been
+  // observed once, stop paying the timeout on every subsequent call.
+  if (cache_maintenance_wedged_.load(std::memory_order_relaxed)) return;
+
+  const uint32_t isa_major = supported_isas()[0]->GetMajorVersion();
+
+  uint32_t cache_wbinv[8] = {0};
+  uint32_t cache_wbinv_size_dw;
+
+  if (isa_major < 10) {
+    // TC_ACTION_ENA invalidates the GL2; TC_WB_ACTION_ENA writes dirty lines
+    // back first. The vector L1 is write-through, so no need to invalidate.
+    cache_wbinv[1] = PM4_ACQUIRE_MEM_DW1_COHER_CNTL(
+        PM4_ACQUIRE_MEM_COHER_CNTL_TC_ACTION_ENA |
+        PM4_ACQUIRE_MEM_COHER_CNTL_TC_WB_ACTION_ENA);
+
+    cache_wbinv_size_dw = 7;
+  } else {
+    // Invalidate the whole GL2 range if ptr is null
+    // Otherwise just the specified range
+    cache_wbinv[7] = PM4_ACQUIRE_MEM_DW7_GCR_CNTL(
+        PM4_ACQUIRE_MEM_GCR_CNTL_GL2_RANGE(
+            ptr ? PM4_ACQUIRE_MEM_GCR_CNTL_GL2_RANGE_RANGE
+                : PM4_ACQUIRE_MEM_GCR_CNTL_GL2_RANGE_ALL) |
+        PM4_ACQUIRE_MEM_GCR_CNTL_GL2_WB |
+        PM4_ACQUIRE_MEM_GCR_CNTL_GL2_INV);
+
+    cache_wbinv_size_dw = 8;
+  }
+
+  cache_wbinv[0] = PM4_HDR(PM4_HDR_IT_OPCODE_ACQUIRE_MEM, cache_wbinv_size_dw, isa_major);
+
+  if (ptr) {
+    size_t size_granule = (size + 0xFF) >> 8;
+    cache_wbinv[2] = PM4_ACQUIRE_MEM_DW2_COHER_SIZE(size_granule);
+    cache_wbinv[3] = PM4_ACQUIRE_MEM_DW3_COHER_SIZE_HI(size_granule >> 32);
+    cache_wbinv[4] = PM4_ACQUIRE_MEM_DW4_COHER_BASE((uint64_t)ptr);
+    cache_wbinv[5] = PM4_ACQUIRE_MEM_DW4_COHER_BASE_HI((uint64_t)ptr);
+  } else {
+    cache_wbinv[2] = PM4_ACQUIRE_MEM_DW2_COHER_SIZE(0xFFFFFFFF);
+    cache_wbinv[3] = PM4_ACQUIRE_MEM_DW3_COHER_SIZE_HI(0xFF);
+  }
+
+  // Submit the command to the utility queue and wait for it to complete.
+  //
+  // Wait on our own signal rather than letting ExecutePM4 do its own wait as it
+  // is unbounded and actively spins
+  std::lock_guard<std::mutex> lock(cache_maintenance_lock_);
+
+  if (cache_maintenance_signal_.handle == 0 &&
+      HSA::hsa_signal_create(1, 0, NULL, &cache_maintenance_signal_) != HSA_STATUS_SUCCESS) {
+    // Fall back to ExecutePM4's own wait if signal creation fails.
+    queues_[QueueUtility]->ExecutePM4(cache_wbinv, cache_wbinv_size_dw * sizeof(uint32_t));
+    return;
+  }
+
+  HSA::hsa_signal_store_relaxed(cache_maintenance_signal_, 1);
+
+  queues_[QueueUtility]->ExecutePM4(cache_wbinv, cache_wbinv_size_dw * sizeof(uint32_t),
+                                    HSA_FENCE_SCOPE_NONE, HSA_FENCE_SCOPE_NONE,
+                                    &cache_maintenance_signal_);
+
+  if (HSA::hsa_signal_wait_scacquire(cache_maintenance_signal_, HSA_SIGNAL_CONDITION_LT, 1,
+                                     kCacheMaintenanceTimeoutNs, HSA_WAIT_STATE_ACTIVE) >= 1) {
+    cache_maintenance_wedged_.store(true, std::memory_order_relaxed);
+    cache_maintenance_signal_.handle = 0;
+    debug_print("WritebackInvalidateDataCaches timed out; skipping further maintenance\n");
+  }
 }
 
 lazy_ptr<core::Blit>& GpuAgent::GetBlitObject(uint32_t engine_offset) {

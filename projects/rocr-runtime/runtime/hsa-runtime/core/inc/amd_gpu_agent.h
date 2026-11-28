@@ -378,6 +378,18 @@ class GpuAgent : public GpuAgentInt {
   // @brief Override from AMD::GpuAgentInt.
   void InvalidateCodeCaches(void* ptr, size_t size) override;
 
+  // @brief Write back and invalidate the GL2 data caches over a range.
+  //
+  // Unlike InvalidateCodeCaches, this writes dirty lines back before discarding
+  // them, so it is safe on ranges that may hold modified data.
+  //
+  // @param [in] ptr Base of the range, or nullptr to maintain the whole cache.
+  // @param [in] size Size of the range in bytes. Ignored when ptr is nullptr.
+  void WritebackInvalidateDataCaches(void* ptr, size_t size);
+
+  // @brief GpuAgent is in its destruction and has begun tearing this agent down.
+  bool is_destroying() const { return is_destroying_; }
+
   // @brief Override from AMD::GpuAgentInt.
   bool current_coherency_type(hsa_amd_coherency_type_t type) override;
 
@@ -679,6 +691,22 @@ class GpuAgent : public GpuAgentInt {
 
   // @brief Current coherency type.
   hsa_amd_coherency_type_t current_coherency_type_;
+
+  // @brief Set by ~GpuAgent before any member is torn down
+  bool is_destroying_ = false;
+
+  // @brief Latched once WritebackInvalidateDataCaches has timed out, which means
+  // the utility queue is no longer retiring packets.
+  std::atomic<bool> cache_maintenance_wedged_{false};
+
+  // @brief Completion signal for WritebackInvalidatieDataCaches, lazy construction.
+  // Zero is sentinal value indicating it has yet to be constructed.
+  hsa_signal_t cache_maintenance_signal_ = {0};
+  std::mutex cache_maintenance_lock_;
+
+  // @brief Timeout for cache invalidation when device memory is
+  // released. Much larger than the microseconds the packet needs.
+  static constexpr uint64_t kCacheMaintenanceTimeoutNs = 1000000000ull;
 
   // @brief Maximum number of queues that can be created.
   uint32_t max_queues_;
