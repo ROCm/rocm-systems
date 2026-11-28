@@ -13,15 +13,19 @@
 #include <chrono>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <map>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <sstream>
 #include <string>
+#include <type_traits>
 #include <vector>
 
+#include "amd_smi/impl/amd_smi_test_overrides.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_exception.h"
 #include "rocm_smi/rocm_smi_logger.h"
@@ -566,6 +570,7 @@ static const std::map<const char*, dev_depends_t> kDevFuncDependsMap = {
     {"rsmi_dev_xgmi_plpd_get", {{kDevXgmiPlpdFName}, {}}},
     {"rsmi_dev_process_isolation_set", {{kDevProcessIsolationFName}, {}}},
     {"rsmi_dev_process_isolation_get", {{kDevProcessIsolationFName}, {}}},
+    {"rsmi_dev_compute_partition_count_get", {{kDevProcessIsolationFName}, {}}},
     {"rsmi_dev_gpu_shader_clean", {{kDevShaderCleanFName}, {}}},
     {"rsmi_perf_determinism_mode_set", {{kDevPerfLevelFName, kDevPowerODVoltageFName}, {}}},
     {"rsmi_dev_overdrive_level_set", {{kDevOverDriveLevelFName}, {}}},
@@ -804,6 +809,36 @@ static const std::map<DevInfoTypes, std::string> kDevFallbackFile = {
     {kDevErrCntXGMIWAFL, "ras/aca_xgmi_wafl"},
 };
 
+// Attributes that amdgpu creates once per GPU, on its PCI device. The render node of a secondary
+// compute partition belongs to an amdgpu_xcp platform device, which has none of them.
+static const std::set<DevInfoTypes> kDevPartitionParentFiles = {
+    kDevComputePartition, kDevAvailableComputePartition, kDevSupportedXcpConfigs,
+    kDevMemoryPartition,  kDevAvailableMemoryPartition,  kDevProcessIsolation,
+};
+
+static thread_local bool t_partition_parent_files = false;
+
+ScopedPartitionParentFiles::ScopedPartitionParentFiles() : previous_(t_partition_parent_files) {
+  t_partition_parent_files = true;
+}
+
+ScopedPartitionParentFiles::~ScopedPartitionParentFiles() { t_partition_parent_files = previous_; }
+
+// The PCI device directory of a secondary compute partition, or "" for any other device. KFD
+// reports a partition at the address of its GPU, with the partition index in the function bits.
+static std::string partition_parent_dir(const std::string& path, uint64_t bdfid) {
+  std::error_code ec;
+  const auto device = std::filesystem::canonical(path + "/device", ec);
+  if (ec || device.filename().string().rfind("amdgpu_xcp", 0) != 0) {
+    return "";
+  }
+  std::string bdf;
+  if (getBDFWithDomain(bdfid & ~uint64_t{0x7}, bdf) != RSMI_STATUS_SUCCESS) {
+    return "";
+  }
+  return test_hooks::SysfsPciDevicesRoot() + "/" + bdf;
+}
+
 template <typename T>
 int Device::openSysfsFileStream(DevInfoTypes type, T* fs, const char* str) {
   auto sysfs_path = path_;
@@ -852,6 +887,14 @@ int Device::openSysfsFileStream(DevInfoTypes type, T* fs, const char* str) {
            << std::to_string(ret);
         LOG_ERROR(ss);
         return ret;
+      }
+    } else if (std::is_same_v<T, std::ifstream> && t_partition_parent_files &&
+               kDevPartitionParentFiles.count(type) != 0) {
+      const std::string parent = partition_parent_dir(path_, bdfid_);
+      if (!parent.empty()) {
+        sysfs_path = parent + "/" + kDevAttribNameMap.at(type);
+        DBG_FILE_ERROR(sysfs_path, str);
+        ret = isRegularFile(sysfs_path, &reg_file);
       }
     }
   }
@@ -1604,12 +1647,26 @@ void Device::fillSupportedFuncs(void) {
   std::string dev_rt = path_ + "/device";
   bool mand_depends_met;
   std::shared_ptr<VariantMap> supported_variants;
+  // A getter of a secondary compute partition can read these attributes from its GPU, but only
+  // inside a ScopedPartitionParentFiles; DeviceAPISupported() reports such a getter accordingly.
+  const std::string partition_parent = partition_parent_dir(path_, bdfid_);
+  const auto read_from_parent = [&partition_parent](const std::string& func, const char* file) {
+    const bool is_get = func.size() > 4 && func.compare(func.size() - 4, 4, "_get") == 0;
+    return is_get && !partition_parent.empty() &&
+           std::any_of(kDevPartitionParentFiles.begin(), kDevPartitionParentFiles.end(),
+                       [file](DevInfoTypes type) {
+                         return std::strcmp(kDevAttribNameMap.at(type), file) == 0;
+                       }) &&
+           FileExists((partition_parent + "/" + file).c_str());
+  };
+  bool from_parent;
 
   while (it != kDevFuncDependsMap.end()) {
     // First, see if all the mandatory dependencies are there
     std::vector<const char*>::const_iterator dep = it->second.mandatory_depends.begin();
 
     mand_depends_met = true;
+    from_parent = false;
     for (; dep != it->second.mandatory_depends.end(); dep++) {
       std::string dep_path = dev_rt + "/" + *dep;
       std::string debugfs_path;
@@ -1618,12 +1675,20 @@ void Device::fillSupportedFuncs(void) {
       debugfs_path += "/";
       debugfs_path += *dep;
       if (!FileExists(dep_path.c_str()) && !FileExists(debugfs_path.c_str())) {
-        mand_depends_met = false;
-        break;
+        if (!read_from_parent(it->first, *dep)) {
+          mand_depends_met = false;
+          break;
+        }
+        from_parent = true;
       }
     }
 
     if (!mand_depends_met) {
+      it++;
+      continue;
+    }
+    if (from_parent && it->second.variants.empty()) {
+      partition_parent_funcs_.insert(it->first);
       it++;
       continue;
     }
@@ -1678,7 +1743,7 @@ bool Device::DeviceAPISupported(std::string name, uint64_t variant, uint64_t sub
   func_it = supported_funcs_.find(name);
 
   if (func_it == supported_funcs_.end()) {
-    return false;
+    return t_partition_parent_files && partition_parent_funcs_.count(name) != 0;
   }
 
   if (variant != RSMI_DEFAULT_VARIANT) {

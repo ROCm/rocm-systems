@@ -4127,6 +4127,7 @@ amdsmi_status_t amdsmi_get_link_topology(amdsmi_processor_handle processor_handl
 amdsmi_status_t amdsmi_get_gpu_compute_partition(amdsmi_processor_handle processor_handle,
                                                  char* compute_partition, uint32_t len) {
   AMDSMI_CHECK_INIT();
+  const amd::smi::ScopedPartitionParentFiles gpu_files;
   std::ostringstream ss;
 
   auto status =
@@ -4196,6 +4197,7 @@ amdsmi_status_t amdsmi_set_gpu_accelerator_partition_mem_alloc_mode(
 amdsmi_status_t amdsmi_get_gpu_memory_partition(amdsmi_processor_handle processor_handle,
                                                 char* memory_partition, uint32_t len) {
   AMDSMI_CHECK_INIT();
+  const amd::smi::ScopedPartitionParentFiles gpu_files;
   amdsmi_status_t ret =
       rsmi_wrapper(rsmi_dev_memory_partition_get, processor_handle, 0, memory_partition, len);
   return ret;
@@ -4211,6 +4213,7 @@ amdsmi_status_t amdsmi_set_gpu_memory_partition(amdsmi_processor_handle processo
 amdsmi_status_t amdsmi_get_gpu_memory_partition_config(amdsmi_processor_handle processor_handle,
                                                        amdsmi_memory_partition_config_t* config) {
   AMDSMI_CHECK_INIT();
+  const amd::smi::ScopedPartitionParentFiles gpu_files;
   std::ostringstream ss;
   if (config == nullptr) {
     return AMDSMI_STATUS_INVAL;
@@ -4739,6 +4742,7 @@ amdsmi_status_t amdsmi_get_gpu_accelerator_partition_profile(
     uint32_t* partition_id) {
   std::ostringstream ss;
   AMDSMI_CHECK_INIT();
+  const amd::smi::ScopedPartitionParentFiles gpu_files;
   if (profile == nullptr || partition_id == nullptr) {
     return AMDSMI_STATUS_INVAL;
   }
@@ -4869,8 +4873,15 @@ amdsmi_status_t amdsmi_get_gpu_accelerator_partition_profile(
       // Note: # of XCDs is max # of partitions CPX supports
       uint16_t tmp_xcd_count = 0;
       amdsmi_status_t xcd_status = amdsmi_get_gpu_xcd_counter(processor_handle, &tmp_xcd_count);
+      uint32_t count = 0;
       if (xcd_status == AMDSMI_STATUS_SUCCESS) {
         profile->num_partitions = tmp_xcd_count;
+      } else if (rsmi_wrapper(rsmi_dev_compute_partition_count_get, processor_handle, 0, &count) ==
+                     AMDSMI_STATUS_SUCCESS &&
+                 count > 1) {
+        // Without gpu_metrics (always the case on a secondary partition), count the per-partition
+        // values in enforce_isolation. A single value is the unpartitioned format, not a CPX count.
+        profile->num_partitions = count;
       }
     }
   }
@@ -5461,6 +5472,7 @@ amdsmi_status_t amdsmi_get_xgmi_plpd(amdsmi_processor_handle processor_handle,
 amdsmi_status_t amdsmi_get_gpu_process_isolation(amdsmi_processor_handle processor_handle,
                                                  uint32_t* pisolate) {
   AMDSMI_CHECK_INIT();
+  const amd::smi::ScopedPartitionParentFiles gpu_files;
 
   return rsmi_wrapper(rsmi_dev_process_isolation_get, processor_handle, 0, pisolate);
 }

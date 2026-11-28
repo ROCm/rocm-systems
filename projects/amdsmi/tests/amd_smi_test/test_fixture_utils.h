@@ -28,6 +28,7 @@ class AMDSmiProcessor;
 namespace amd::smi::test_hooks {
 void SetSysfsDrmRoot(const std::string& root);
 void SetKfdNodesPathRoot(const std::string& root);
+void SetSysfsPciDevicesRoot(const std::string& root);
 void SetAppTmpDir(const std::string& dir);
 }  // namespace amd::smi::test_hooks
 

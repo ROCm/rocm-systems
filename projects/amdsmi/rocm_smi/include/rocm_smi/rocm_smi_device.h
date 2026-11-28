@@ -299,6 +299,8 @@ class Device {
   std::unordered_set<rsmi_event_group_t, evt::RSMIEventGrpHashFunction> supported_event_groups_;
   // std::map<std::string, uint64_t> kfdNodePropMap_;
   SupportedFuncMap supported_funcs_;
+  // Getters of a secondary compute partition supported only by reading the files of its GPU.
+  std::unordered_set<std::string> partition_parent_funcs_;
 
   int evt_notif_anon_fd_;
   FILE* evt_notif_anon_file_ptr_;
@@ -312,6 +314,20 @@ class Device {
 
   // New dynamic GPU metrics support
   bool m_is_dynamic_gpu_metrics_supported = false;
+};
+
+// While one is alive, a secondary compute partition reads the partition attributes of its GPU on
+// this thread. Only the amd_smi getters that report them create one, so a set, or any other read,
+// sees only the files of the partition itself.
+class ScopedPartitionParentFiles {
+ public:
+  ScopedPartitionParentFiles();
+  ~ScopedPartitionParentFiles();
+  ScopedPartitionParentFiles(const ScopedPartitionParentFiles&) = delete;
+  ScopedPartitionParentFiles& operator=(const ScopedPartitionParentFiles&) = delete;
+
+ private:
+  bool previous_;
 };
 
 }  // namespace amd::smi

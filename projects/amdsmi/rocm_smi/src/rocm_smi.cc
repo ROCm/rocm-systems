@@ -2173,6 +2173,26 @@ rsmi_status_t rsmi_dev_process_isolation_get(uint32_t dv_ind, uint32_t* pisolate
   return RSMI_STATUS_SUCCESS;
 }
 
+rsmi_status_t rsmi_dev_compute_partition_count_get(uint32_t dv_ind, uint32_t* count) {
+  CHK_SUPPORT_NAME_ONLY(count)
+  DEVICE_MUTEX
+
+  std::string str_val;
+  rsmi_status_t ret = get_dev_value_line(amd::smi::kDevProcessIsolation, dv_ind, &str_val);
+  if (ret != RSMI_STATUS_SUCCESS) {
+    return ret == RSMI_STATUS_FILE_ERROR ? RSMI_STATUS_NOT_SUPPORTED : ret;
+  }
+  std::stringstream iss(str_val);
+  int value;
+  uint32_t values = 0;
+  while (iss >> value) ++values;
+  if (values == 0 || !iss.eof()) {
+    return RSMI_STATUS_UNEXPECTED_DATA;
+  }
+  *count = values;
+  return RSMI_STATUS_SUCCESS;
+}
+
 rsmi_status_t rsmi_dev_process_isolation_set(uint32_t dv_ind, uint32_t pisolate) {
   TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << " | ======= start =======";

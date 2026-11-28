@@ -24,6 +24,10 @@ AMDSMI_TEST_HOOK const std::string& SysfsDrmRoot();
 // "/sys/class/kfd/kfd/topology/nodes"; a test sets it to a FakeSysfsTree root.
 AMDSMI_TEST_HOOK const std::string& KfdNodesPathRoot();
 
+// Root of the PCI device tree that a secondary compute partition's device-wide attributes are read
+// from. Defaults to "/sys/bus/pci/devices"; a test sets it to a FakeSysfsTree directory.
+AMDSMI_TEST_HOOK const std::string& SysfsPciDevicesRoot();
+
 // Directory where ROCm SMI keeps its persistent boot-state files (rocmsmi_boot_*). Defaults to
 // "/tmp", with no trailing "/". Real discovery writes them, so a test redirects them to keep from
 // leaving files that a later real run on the same host would read.

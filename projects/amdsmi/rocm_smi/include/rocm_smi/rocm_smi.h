@@ -4391,6 +4391,27 @@ rsmi_status_t rsmi_dev_xgmi_plpd_set(uint32_t dv_ind, uint32_t plpd_id);
 rsmi_status_t rsmi_dev_process_isolation_get(uint32_t dv_ind, uint32_t* pisolate);
 
 /**
+ * @brief Get the number of compute partitions of the GPU that a device is part of
+ *
+ * @details Counts the per-partition values that amdgpu lists in enforce_isolation, so a secondary
+ * partition can read the count without a gpu_metrics file of its own.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[in, out] count the number of compute partitions.
+ *  If this parameter is nullptr, this function will return
+ *  ::RSMI_STATUS_INVALID_ARGS if the function is supported with the provided
+ *  arguments and ::RSMI_STATUS_NOT_SUPPORTED if it is not supported with the
+ *  provided arguments.
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED enforce_isolation does not exist for the device
+ *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ *  @retval ::RSMI_STATUS_UNEXPECTED_DATA enforce_isolation is not a list of integers
+ */
+rsmi_status_t rsmi_dev_compute_partition_count_get(uint32_t dv_ind, uint32_t* count);
+
+/**
  * @brief Enable/disable the system Process Isolation
  *
  * @details Given a device index @p dv_ind and a process isolation @p pisolate,
