@@ -73,6 +73,7 @@ flowchart TB
 
   subgraph fmt ["Format reader"]
     registry["trace_formats registry"]
+    source["format_source<br/>rocpd_source or pytorch_source"]
     pool["connection_pool<br/>8 reader_t connections"]
     v2["rocpd_v2_reader"]
     v3["rocpd_v3_reader"]
@@ -120,9 +121,10 @@ flowchart TB
   ready --> place
   ready --> sfe
   ready --> pick
-  c_trim --> trimctx --> trimmer
+  c_trim --> trimctx --> registry
+  registry -->|"trim"| trimmer
 
-  readtrace --> pool
+  readtrace --> source
   readtrace -.->|"load or save"| cas
   readtrace -.->|"prepare, write or read"| tfs
   readtrace --> namedir
@@ -131,14 +133,16 @@ flowchart TB
 
   place -->|"timeline cache attached"| tfs
   place -->|"no cache folder"| ctr
-  ctr -->|"first read of track"| pool
-  sfe --> pool
+  ctr -->|"first read of track"| source
+  sfe --> source
   sfe -->|"nesting depth"| ctr
   ctr -->|"has_local_events"| tfs
-  pick --> pool
+  pick --> source
 
+  source --> pool
   pool --> v2 --> sql2
   pool --> v3 --> sql3
+  registry -->|"open"| source
   registry --> v2
   registry --> v3
   trimmer --> sql2
@@ -156,6 +160,7 @@ sequenceDiagram
   participant X as ph_ctx
   participant P as probe_file
   participant R as format registry
+  participant SRC as rocpd_source
   participant CP as connection_pool
   participant RD as reader rocpd_v2 or v3
   participant CA as catalog_aggregate_store
@@ -167,18 +172,21 @@ sequenceDiagram
   C->>X: accept_traces(paths), on the caller thread
   loop each path
     X->>P: probe_file
-    P->>S: header, sqlite_master, rocpd_metadata or rocpd_metadata_GUID
-    P-->>X: schema family and version
-    X->>R: find factory for trace_format_t
-    R-->>X: reader factory, or unsupported
+    P->>R: first entry that recognises the file
+    R->>S: header, sqlite_master, rocpd_metadata or rocpd_metadata_GUID
+    R-->>P: schema family and version
+    P-->>X: probe result
   end
   alt future passed
     C-->>O: PH_RESULT_SUCCESS, load continues on the thread pool
   end
   X->>X: read_trace
-  X->>CP: open_sources: one pool of 8 connections per source
+  X->>R: open_sources: open_format_source for each source
+  R->>SRC: the rocpd entry opens a rocpd_source
+  SRC->>CP: one pool of 8 connections
   CP->>R: create reader for each connection
-  X->>RD: populate_reader_catalog
+  X->>SRC: load_catalog (a Kineto source parses its file here instead, no SQLite)
+  SRC->>RD: populate_reader_catalog
   RD->>S: create topology indexes (written into the trace file)
   RD->>S: strings, nodes, processes, threads, agents (in order)
   RD->>CA: load catalog cache
@@ -186,7 +194,7 @@ sequenceDiagram
     CA-->>RD: tracks and aggregates
   else miss
     RD->>S: GROUP BY scans for tracks, queues, counters (in parallel)
-    X->>CA: save_catalog_aggregates (v2) or save_derived_tracks (v3)
+    SRC->>CA: save_catalog_aggregates (v2) or save_derived_tracks (v3)
   end
   X->>X: initialize_track_list: global_of_local, m_track_by_id
   X->>TF: prepare_track_store(cache folder)
@@ -207,6 +215,7 @@ sequenceDiagram
       RD->>S: track SELECT
     end
   end
+  X->>SRC: finish_load, once every track is loaded
   X->>X: attach_track_store, initialize_node_* lists
   X-->>O: future finished, or the call returns
 ```
@@ -221,7 +230,7 @@ sequenceDiagram
   participant X as ph_ctx
   participant CT as cached_track_reader
   participant TF as track_file_store
-  participant RD as reader
+  participant RD as format source and reader
   participant S as SQLite
 
   O->>C: ph_get_track_events(track id, window, future)
@@ -269,7 +278,7 @@ sequenceDiagram
   participant O as Optiq ReadFlowTraceInfo
   participant C as C API
   participant X as ph_ctx
-  participant RD as reader
+  participant RD as format source and reader
   participant S as SQLite
   participant CT as cached_track_reader
   participant TF as track_file_store
@@ -326,7 +335,7 @@ sequenceDiagram
   participant O as Optiq ReadExtEventInfo
   participant C as C API get_event_details
   participant X as ph_ctx
-  participant RD as reader
+  participant RD as format source and reader
   participant S as SQLite
 
   O->>C: ph_get_region_details, kernel_dispatch, memory_copy, memory_alloc
@@ -338,7 +347,7 @@ sequenceDiagram
     X->>RD: search each source
     X->>X: write track_id back into the event
   end
-  X->>RD: details on that source's connection
+  X->>RD: details from that source
   alt schema 2
     RD->>S: rocpd_api, rocpd_op, rocpd_api_ops, rocpd_kernelapi, rocpd_copyapi
   else schema 3
@@ -357,7 +366,7 @@ sequenceDiagram
   participant F as summary.bin
   participant C as C API
   participant X as ph_ctx
-  participant RD as reader
+  participant RD as format source and reader
   participant S as SQLite
 
   T->>T: IsNameDurationSummary(commands)
@@ -414,8 +423,10 @@ sequenceDiagram
 
   O->>C: ph_trim_trace(ctx, window, output path)
   C->>X: trim_trace
+  X->>X: sources of more than one format: return PH_RESULT_UNSUPPORTED_FILE
   X->>X: convert window to each source's clock
-  X->>TT: sources, schema, windows
+  X->>R: trim_in_format(schema, version, sources, windows)
+  R->>TT: the entry's trim, or PH_RESULT_UNSUPPORTED_FILE when it has none
   TT->>TT: reject output equal to an input, delete old output
   TT->>R: trim rules for the format
   TT->>S: read sqlite_master

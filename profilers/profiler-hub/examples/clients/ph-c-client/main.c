@@ -502,7 +502,9 @@ probe_result_name(ph_result_t result)
 static const char*
 trace_schema_name(ph_trace_schema_t schema)
 {
-    return schema == PH_TRACE_SCHEMA_ROCPD ? "rocpd" : "unknown";
+    if(schema == PH_TRACE_SCHEMA_ROCPD) return "rocpd";
+    if(schema == PH_TRACE_SCHEMA_PYTORCH_KINETO) return "pytorch_kineto";
+    return "unknown";
 }
 
 static int

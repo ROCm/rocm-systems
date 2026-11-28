@@ -61,6 +61,7 @@ extern "C"
     {
         PH_TRACE_SCHEMA_UNKNOWN,
         PH_TRACE_SCHEMA_ROCPD,
+        PH_TRACE_SCHEMA_PYTORCH_KINETO,
     } ph_trace_schema_t;
 
     /**

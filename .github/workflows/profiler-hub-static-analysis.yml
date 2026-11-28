@@ -72,7 +72,8 @@ jobs:
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
             -DPROFILER_HUB_BUILD_TESTS=OFF \
             -DPROFILER_HUB_BUILD_BENCHMARKS=OFF \
-            -DPROFILER_HUB_FETCH_DEPENDENCIES=ON
+            -DPROFILER_HUB_FETCH_DEPENDENCIES=ON \
+            -DPROFILER_HUB_ENABLE_PYTORCH_KINETO=ON
 
       - name: Build
         working-directory: profilers/profiler-hub

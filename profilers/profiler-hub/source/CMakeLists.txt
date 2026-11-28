@@ -11,6 +11,11 @@ set(profiler-hub_sources
     ${CMAKE_CURRENT_LIST_DIR}/histogram_grid.hpp
     ${CMAKE_CURRENT_LIST_DIR}/formats/trace_formats.cpp
     ${CMAKE_CURRENT_LIST_DIR}/formats/trace_formats.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/formats/rocpd/rocpd_probe.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/formats/rocpd/rocpd_probe.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/formats/rocpd/rocpd_source.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/formats/rocpd/rocpd_source.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/format_source.hpp
     ${CMAKE_CURRENT_LIST_DIR}/reader_catalog.cpp
     ${CMAKE_CURRENT_LIST_DIR}/reader_catalog.hpp
     ${CMAKE_CURRENT_LIST_DIR}/populate_reader_catalog.cpp
@@ -78,6 +83,27 @@ if(PROFILER_HUB_ENABLE_ROCPD_V2)
         ${CMAKE_CURRENT_LIST_DIR}/formats/rocpd_v2/rocpd_v2_catalog.cpp
         ${CMAKE_CURRENT_LIST_DIR}/formats/rocpd_v2/rocpd_v2_table_events.cpp
         ${CMAKE_CURRENT_LIST_DIR}/formats/rocpd_v2/rocpd_v2_trim_schema.cpp
+    )
+endif()
+
+if(PROFILER_HUB_ENABLE_PYTORCH_KINETO)
+    list(
+        APPEND profiler-hub_sources
+        ${CMAKE_CURRENT_LIST_DIR}/common/utility.hpp
+        ${CMAKE_CURRENT_LIST_DIR}/formats/pytorch/category_class.cpp
+        ${CMAKE_CURRENT_LIST_DIR}/formats/pytorch/category_class.hpp
+        ${CMAKE_CURRENT_LIST_DIR}/formats/pytorch/kineto_format.cpp
+        ${CMAKE_CURRENT_LIST_DIR}/formats/pytorch/kineto_format.hpp
+        ${CMAKE_CURRENT_LIST_DIR}/formats/pytorch/kineto_loader.cpp
+        ${CMAKE_CURRENT_LIST_DIR}/formats/pytorch/kineto_loader.hpp
+        ${CMAKE_CURRENT_LIST_DIR}/formats/pytorch/kineto_probe.cpp
+        ${CMAKE_CURRENT_LIST_DIR}/formats/pytorch/kineto_probe.hpp
+        ${CMAKE_CURRENT_LIST_DIR}/formats/pytorch/pytorch_catalog.cpp
+        ${CMAKE_CURRENT_LIST_DIR}/formats/pytorch/pytorch_catalog.hpp
+        ${CMAKE_CURRENT_LIST_DIR}/formats/pytorch/pytorch_source.cpp
+        ${CMAKE_CURRENT_LIST_DIR}/formats/pytorch/pytorch_source.hpp
+        ${CMAKE_CURRENT_LIST_DIR}/formats/pytorch/pytorch_store.cpp
+        ${CMAKE_CURRENT_LIST_DIR}/formats/pytorch/pytorch_store.hpp
     )
 endif()
 

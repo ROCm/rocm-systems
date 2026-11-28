@@ -31,12 +31,14 @@ flowchart TB
   end
 
   ctx["ph_ctx"]
+  source["format_source<br/>rocpd_source"]
   pool["connection pool"]
   impl["reader_t<br/>rocpd v2 or v3"]
   mem["cached_track_reader"]
   sql[("source SQLite")]
   catalog["catalog/<br/>PHC1 or PHD1"]
   tl["timeline/<br/>PHM1 PHE1 PHS1"]
+  entry["registry entry<br/>trim"]
   trimmer["trim_trace_files"]
   out[("trimmed SQLite")]
 
@@ -45,7 +47,7 @@ flowchart TB
   hash --> tl
   future -.-> ctx
   loaded --> ctx
-  ctx --> pool --> impl --> sql
+  ctx --> source --> pool --> impl --> sql
   impl --> catalog
   ctx --> tl
   ctx --> mem
@@ -56,7 +58,7 @@ flowchart TB
   sqlite_api --> impl
 
   trim --> ctx
-  ctx --> trimmer
+  ctx --> entry --> trimmer
   sql --> trimmer --> out
 ```
 
@@ -67,7 +69,7 @@ The reader is built in five layers. Each layer only calls the one below it.
 | C interface | `include/c/profiler_hub.h`, `include/c/profiler_hub_trim.h`, `source/profiler_hub_c_api.cpp` | Checks arguments, runs the call now or on a future, catches exceptions, and maps them to `ph_result_t`. |
 | Context | `source/ph_ctx.cpp`, `source/ph_ctx.hpp` | Owns the opened sources, the published track list, the global track ids, the caches, and every result buffer it hands out. |
 | Caches | `source/cached_track_reader.cpp`, `source/track_file_store.cpp`, `source/catalog_aggregate_store.cpp`, `source/cache_directory.cpp` | Keep timeline data and catalog aggregates in memory or on disk so a second read or a second open does not query SQLite again. |
-| Format reader | `source/reader.cpp`, `source/reader_impl.hpp`, `source/formats/trace_formats.cpp`, `source/formats/rocpd_v2/*`, `source/formats/rocpd_v3/*` | Turns a format-neutral request into SQL for one rocpd schema. |
+| Format reader | `source/format_source.hpp`, `source/reader.cpp`, `source/reader_impl.hpp`, `source/formats/trace_formats.cpp`, `source/formats/rocpd/*`, `source/formats/rocpd_v2/*`, `source/formats/rocpd_v3/*` | A registry entry opens one source per file. The source answers the context's requests; the rocpd source turns them into SQL for one rocpd schema. |
 | Storage | `source/common/connection_pool.cpp`, `source/storage_impl.cpp`, `source/data_storage/backends/*` | Opens SQLite connections and runs prepared statements. |
 
 ## 2. Core concepts
@@ -75,8 +77,10 @@ The reader is built in five layers. Each layer only calls the one below it.
 ### 2.1 Sources and global track ids
 
 A context opens one or more trace files. Each file, or each GUID inside a
-schema-3 file, becomes one **source**. Every source has its own connection
-pool, its own catalog, and its own `cached_track_reader`.
+schema-3 file, becomes one **source**, opened by its format's registry entry.
+Every source has its own catalog and its own `cached_track_reader`. A rocpd
+source also has its own connection pool. A Kineto source has no pool: it
+parses its file once into memory and serves the tracks from there.
 
 The visualizer expands a YAML project file into a path list
 (`HubYamlFiles` in Optiq). Profiler-hub only ever sees the list.
@@ -94,23 +98,47 @@ events are not published.
 
 ### 2.2 Format dispatch
 
-`ph_ctx_create*` probes each file first (`source/file_probe.cpp`):
+`ph_ctx_create*` probes each file first (`source/file_probe.cpp`). The probe
+checks that the file exists, is a regular file and is readable, then asks each
+entry of the format registry (`source/formats/trace_formats.cpp`), in order,
+whether the file is its own. The first entry that recognises it probes it. The
+rocpd entry recognises a file by the SQLite header and reads its metadata
+tables (`source/formats/rocpd/rocpd_probe.cpp`):
 
 - A table named `rocpd_metadata_<guid>` means schema 3. Every GUID must have
   major version 3 or later, and all versions must match.
 - Otherwise an unsuffixed `rocpd_metadata` table with major version 2 means
   schema 2, the legacy `.rpd` layout.
 
-The probed schema and version form a `trace_format_t`. The format registry in
-`source/formats/trace_formats.cpp` maps it to two factories: one builds the
-`reader_t::impl` subclass (`rocpd_v2_reader` or `rocpd_v3_reader`), and one
-builds the trim rules. A file is accepted only when the registry has an entry
-for it.
+The pytorch entry recognises a Kineto trace without SQLite
+(`source/formats/pytorch/kineto_probe.cpp`). It reads the first two bytes. For
+the gzip magic it inflates up to 64 KiB, otherwise it reads up to 64 KiB of text.
+After an optional UTF-8 BOM the text must start with `{` and name `traceEvents`
+and one of `schemaVersion`, `deviceProperties`, `distributedInfo`,
+`baseTimeNanoseconds` or `cpu_op`. Any read or inflate error means the file is
+not its own. Its probe reads the same text and reports success with the file's
+`schemaVersion` as the major version, or 0.0.0 when the text has no integer
+`schemaVersion`, and no GUIDs, so a file that starts like a Kineto trace but
+holds bad JSON fails later, at load. A SQLite file starts with `S`, so no file matches both entries.
+
+The probed schema and version form a `trace_format_t`. The entry for that
+schema says which versions this build reads and maps the version to two
+factories: one builds the `reader_t::impl` subclass (`rocpd_v2_reader` or
+`rocpd_v3_reader`), and one builds the trim rules. The entry also trims: its
+`trim` copies a context's files into one database, and is null for a format that
+cannot trim. The pytorch entry has no reader factory and no trim-rule factory,
+and its `trim` is null. A file is accepted only when its entry reads the probed
+version.
 
 The compile options `PROFILER_HUB_ENABLE_ROCPD_V2` and
-`PROFILER_HUB_ENABLE_ROCPD_V3` (both on by default) remove a format's sources
-and its registry entry. A file of a removed format probes as
+`PROFILER_HUB_ENABLE_ROCPD_V3` (both on by default) remove that version's reader
+and trim sources and make the rocpd entry stop reading it. The entry itself is
+always built. A file of a removed version probes as
 `PH_RESULT_UNSUPPORTED_FILE`.
+
+The compile option `PROFILER_HUB_ENABLE_PYTORCH_KINETO` (off by default) builds
+the pytorch entry and its sources and looks up zlib. With it off, the entry does
+not exist and a Kineto file probes as `PH_RESULT_UNSUPPORTED_FILE`.
 
 ### 2.3 Synchronous and asynchronous calls
 
@@ -198,13 +226,23 @@ second with a path list and no cache.
    status. One accepted source is created per GUID.
 2. **Load.** `ph_ctx::read_trace` runs on the calling thread, or on the
    context's thread pool when a future is passed:
-   1. `open_sources` builds, per source, a catalog, a connection pool of eight
-      `reader_t` connections, and a `cached_track_reader`.
-   2. `populate_reader_catalog` creates the topology indexes, reads strings,
+   1. `open_sources` opens each source through its registry entry. A rocpd
+      source builds a catalog and a connection pool of eight `reader_t`
+      connections. A Kineto source builds an empty catalog and reads no file.
+      The context adds a `cached_track_reader` per source and hands it to the
+      source with `attach_reader`.
+   2. Each source's `load_catalog` fills its catalog. For rocpd,
+      `populate_reader_catalog` creates the topology indexes, reads strings,
       nodes, processes, threads, and agents in order, then reads tracks,
       code objects and kernel symbols, streams, queues, and PMC info in
       parallel. If a catalog cache file matches, the grouped scans that build
-      tracks and aggregates are skipped.
+      tracks and aggregates are skipped. A Kineto source parses its file here,
+      serially, and polls the load's cancel check on each 1 MiB refill of the
+      input. It then fills the catalog and numbers the events: tracks run 0 to
+      N-1, host threads by (pid, tid) and then GPU streams by (device, stream),
+      then the memory tracks, and event ids are dense per event type from 1 in
+      track order. A Kineto file is parsed on every open, also when a catalog
+      cache folder is given.
    3. On a cache miss, `save_catalog_aggregates` (schema 2) or
       `save_derived_tracks` (schema 3) writes the catalog file.
    4. `initialize_track_list` publishes tracks and assigns global ids.
@@ -216,6 +254,11 @@ second with a path list and no cache.
       - Timeline cache being written: each track is read from SQLite once and
         written to `e<id>.bin` or `s<id>.bin`.
       - No cache folder: each track is read into the in-memory cache.
+
+      Then `finish_load` tells each source that every track is loaded. Neither
+      the rocpd source nor the Kineto source does anything there. The Kineto
+      source keeps its parsed events, and a table of which event ids belong to
+      which track, for the life of the context.
    7. `attach_track_store` connects the timeline cache to each source's
       `cached_track_reader`, and the node, agent, process, thread, stream,
       queue, and PMC lists are built for the C structs.
@@ -292,7 +335,7 @@ histogram in SQL.
 `ph_get_memory_copy_details`, and `ph_get_memory_alloc_details` share one
 path. The event's track is resolved from `event->track_id`, or by searching
 each source when that id is unknown, and written back into
-`event->track_id`. The details are then read on that source's connection.
+`event->track_id`. The details are then read through that source.
 
 | Detail | Schema 2 | Schema 3 |
 |---|---|---|
@@ -366,8 +409,12 @@ Trimming has its own header, `profiler_hub_trim.h`, and does not go through
 the reader. `ph_trim_trace` takes an open context so it knows the sources,
 their schema, and their time origins.
 
-1. `ph_ctx::trim_trace` converts the requested window to each source's clock,
-   using each source's earliest track start, and calls `trim_trace_files`.
+1. `ph_ctx::trim_trace` returns `PH_RESULT_UNSUPPORTED_FILE` when its sources
+   are not all one format. Otherwise it converts the requested window to each
+   source's clock, using each source's earliest track start, and asks the
+   registry to trim (`trim_in_format`). The registry calls the format's `trim`,
+   or returns `PH_RESULT_UNSUPPORTED_FILE` when the format has none. For rocpd
+   that is `trim_trace_files`, with the first source's version.
 2. `trim_trace_files` (`source/trace_trim.cpp`):
    1. Rejects an output that is one of the inputs, and removes any existing
       output file.

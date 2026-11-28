@@ -124,6 +124,8 @@ endfunction()
 set(PROFILER_HUB_COVERAGE_DIR ${CMAKE_BINARY_DIR}/coverage)
 file(MAKE_DIRECTORY ${PROFILER_HUB_COVERAGE_DIR})
 
+# source/formats/pytorch is left out of every report until its Kineto tests land.
+
 # ----------------------------------------------------------------------------------------#
 # Coverage targets using lcov
 # ----------------------------------------------------------------------------------------#
@@ -153,8 +155,8 @@ if(PROFILER_HUB_COVERAGE_USE_LCOV)
         COMMAND
             ${LCOV_PATH} --remove ${PROFILER_HUB_COVERAGE_DIR}/coverage.info
             '/usr/*' '${CMAKE_BINARY_DIR}/_deps/*' '${CMAKE_SOURCE_DIR}/tests/*'
-            --output-file ${PROFILER_HUB_COVERAGE_DIR}/coverage.info
-            --ignore-errors unused
+            '${CMAKE_SOURCE_DIR}/source/formats/pytorch/*' --output-file
+            ${PROFILER_HUB_COVERAGE_DIR}/coverage.info --ignore-errors unused
         # Generate HTML report
         COMMAND
             ${GENHTML_PATH} ${PROFILER_HUB_COVERAGE_DIR}/coverage.info
@@ -199,8 +201,8 @@ if(PROFILER_HUB_COVERAGE_USE_GCOVR)
             ${GCOVR_PATH} ${PROFILER_HUB_GCOVR_IGNORE_PARSE_ERRORS} --root
             ${CMAKE_SOURCE_DIR} --filter ${CMAKE_SOURCE_DIR}/source --filter
             ${CMAKE_SOURCE_DIR}/include --exclude ${CMAKE_SOURCE_DIR}/tests
-            --html-details ${PROFILER_HUB_COVERAGE_DIR}/html/index.html
-            --print-summary
+            --exclude ${CMAKE_SOURCE_DIR}/source/formats/pytorch --html-details
+            ${PROFILER_HUB_COVERAGE_DIR}/html/index.html --print-summary
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
         COMMENT "Generating code coverage report..."
     )
@@ -225,7 +227,8 @@ if(PROFILER_HUB_COVERAGE_USE_GCOVR)
             ${GCOVR_PATH} ${PROFILER_HUB_GCOVR_IGNORE_PARSE_ERRORS} --root
             ${CMAKE_SOURCE_DIR} --filter ${CMAKE_SOURCE_DIR}/source --filter
             ${CMAKE_SOURCE_DIR}/include --exclude ${CMAKE_SOURCE_DIR}/tests
-            --xml ${PROFILER_HUB_COVERAGE_DIR}/coverage.xml --print-summary
+            --exclude ${CMAKE_SOURCE_DIR}/source/formats/pytorch --xml
+            ${PROFILER_HUB_COVERAGE_DIR}/coverage.xml --print-summary
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
         COMMENT "Generating Cobertura XML coverage report..."
     )
@@ -252,7 +255,8 @@ if(PROFILER_HUB_COVERAGE_USE_LCOV AND GCOVR_PATH)
             ${GCOVR_PATH} ${PROFILER_HUB_GCOVR_IGNORE_PARSE_ERRORS} --root
             ${CMAKE_SOURCE_DIR} --filter ${CMAKE_SOURCE_DIR}/source --filter
             ${CMAKE_SOURCE_DIR}/include --exclude ${CMAKE_SOURCE_DIR}/tests
-            --xml ${PROFILER_HUB_COVERAGE_DIR}/coverage.xml --print-summary
+            --exclude ${CMAKE_SOURCE_DIR}/source/formats/pytorch --xml
+            ${PROFILER_HUB_COVERAGE_DIR}/coverage.xml --print-summary
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
         COMMENT "Generating Cobertura XML coverage report..."
     )

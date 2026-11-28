@@ -31,6 +31,7 @@ profiler-hub/
     formats/           format registry
       rocpd_v2/        legacy rocpd (.rpd, schema 2) reader and trim rules
       rocpd_v3/        rocpd schema 3 reader, histogram, tables, trim rules
+      pytorch/         PyTorch Kineto entry: recogniser, parser, in-memory source
     queries/           fluent SQL builders
     writers/           writer interfaces and schema-3 writers
   tests/
@@ -44,7 +45,7 @@ profiler-hub/
 
 | File | Role | Purpose |
 |---|---|---|
-| `CMakeLists.txt` | Build | Configures the C++20 project, the object library, the schema options, the per-format switches `PROFILER_HUB_ENABLE_ROCPD_V2` / `_V3`, and install rules. |
+| `CMakeLists.txt` | Build | Configures the C++20 project, the object library, the schema options, the per-format switches `PROFILER_HUB_ENABLE_ROCPD_V2` / `_V3` / `PROFILER_HUB_ENABLE_PYTORCH_KINETO`, and install rules. |
 
 ## include/c
 
@@ -73,7 +74,7 @@ profiler-hub/
 | File | Role | Purpose |
 |---|---|---|
 | `profiler_hub_c_api.cpp` | Shared | Every C function. Checks arguments, runs work now or on a future, catches exceptions, and calls `ph_ctx`. |
-| `ph_ctx.hpp`, `ph_ctx.cpp` | Reader | The opaque context. Loads one or more traces, builds the published track list and global ids, owns caches and result buffers, and serves every query. |
+| `ph_ctx.hpp`, `ph_ctx.cpp` | Reader | The opaque context. Opens each trace file through its format's registry entry, loads one or more traces, builds the published track list and global ids, owns caches and result buffers, and serves every query by asking each file's source. |
 | `ph_future.hpp`, `ph_future.cpp` | Shared | The opaque `ph_future`: progress, cancel, and completion for one operation. |
 | `pending_futures.hpp`, `pending_futures.cpp` | Reader | Futures that were submitted but not finished. Cancels them when the context is destroyed. |
 
@@ -82,10 +83,11 @@ profiler-hub/
 | File | Role | Purpose |
 |---|---|---|
 | `reader.cpp` | Reader | `reader_t` methods. Forwards each query to the format-specific implementation. Holds the catalog getters and default empty results. |
-| `reader_impl.hpp` | Reader | `reader_t::impl`, the abstract per-format backend: catalog build, timeline, details, correlation, tables, summaries, and histograms. |
+| `format_source.hpp` | Reader | `format_source`, one open trace file as the context sees it: the catalog and its loading, track reads, which track an event is on, per-event reads, table queries, summaries, and the histogram. A registry entry opens one per file. A read a format declines is checked first and throws if called anyway. |
+| `reader_impl.hpp` | Reader | `reader_t::impl`, the abstract per-connection read backend of the rocpd formats: catalog build, timeline, details, correlation, tables, summaries, and histograms. |
 | `reader_catalog.hpp`, `reader_catalog.cpp` | Reader | The shared in-memory catalog of strings, info rows, tracks, and lookup maps, and its schema-3 builders. |
 | `populate_reader_catalog.hpp`, `populate_reader_catalog.cpp` | Reader | Fills one catalog in parallel across the pool's connections. |
-| `file_probe.cpp`, `file_probe_failure.hpp` | Reader | Detects a rocpd SQLite file and reads its schema family and version without loading it. The exception carries a failed probe result. |
+| `file_probe.cpp`, `file_probe_failure.hpp` | Reader | Checks that the file exists, is a regular file and is readable, then asks each format registry entry in order whether the file is its own and returns that entry's probe result, without loading the file. The exception carries a failed probe result. |
 | `event_query.hpp`, `event_query.cpp` | Reader | The resolved table query (time window, tracks, string and kernel-symbol ids) and case-insensitive term matching. |
 | `event_partitions.hpp`, `event_partitions.cpp` | Reader | Splits an event id span into ranges for parallel reads and merges the results by start time. |
 | `depth_tracker.hpp` | Reader | Gives each event the lowest free nesting level as events are added in start order. |
@@ -93,8 +95,8 @@ profiler-hub/
 | `track_window.hpp` | Reader | Turns a C time window into a reader filter. |
 | `track_read_options.hpp` | Reader | Event-count threshold and part count for parallel whole-track reads. |
 | `track_row_reader.hpp` | Reader | Track reads on one leased connection, returned on destruction. |
-| `connection_source.hpp` | Reader | Interface that leases a `track_row_reader` from a connection. |
-| `pooled_connection_source.hpp`, `pooled_connection_source.cpp` | Reader | `connection_source` that borrows readers from a `connection_pool`. |
+| `connection_source.hpp` | Reader | Interface a source hands to `cached_track_reader` for whole-track reads; it leases a `track_row_reader`. |
+| `pooled_connection_source.hpp`, `pooled_connection_source.cpp` | Reader | The rocpd source's `connection_source`: it borrows readers from a `connection_pool`. |
 
 ## source: caches
 
@@ -109,7 +111,7 @@ profiler-hub/
 
 | File | Role | Purpose |
 |---|---|---|
-| `trace_trim.hpp`, `trace_trim.cpp` | Trim | Copies tables, views, and indexes into a new database, keeping only rows the trim rules allow. |
+| `trace_trim.hpp`, `trace_trim.cpp` | Trim | Copies tables, views, and indexes into a new database, keeping only rows the trim rules allow. The rocpd entry's `trim` calls it. |
 | `trim_schema.hpp` | Trim | Interface for per-table trim SQL and the copy-phase order. |
 
 ## source: storage and writer core
@@ -142,6 +144,7 @@ profiler-hub/
 | `traits.hpp` | Shared | Compile-time traits for optionals, maps, string literals, and SQLite bind types. |
 | `string_conversions.hpp` | Writer | Key and string helpers for writer entity validation. |
 | `types.hpp` | Writer | Owning copies of writer ids used inside the entity registry. |
+| `utility.hpp` | Shared | Steady-clock milliseconds and an `fclose` deleter. Built only with `PROFILER_HUB_ENABLE_PYTORCH_KINETO`. |
 
 ## source/data_storage
 
@@ -161,7 +164,14 @@ profiler-hub/
 
 | File | Role | Purpose |
 |---|---|---|
-| `trace_formats.hpp`, `trace_formats.cpp` | Shared | The format registry. Maps a probed schema and major version to a reader factory and a trim-rule factory. Entries are compiled in by the format switches. |
+| `trace_formats.hpp`, `trace_formats.cpp` | Shared | The format registry. One entry per format; an entry recognises its files, probes them, says which versions this build reads, and opens a source for a file, trims a context's files, and maps a version to a reader factory and a trim-rule factory. The rocpd entry is always built; the format switches remove a version's reader and trim sources. The pytorch entry is built only with `PROFILER_HUB_ENABLE_PYTORCH_KINETO` and has no reader factory or trim. |
+
+### source/formats/rocpd
+
+| File | Role | Purpose |
+|---|---|---|
+| `rocpd_probe.hpp`, `rocpd_probe.cpp` | Reader | Recognises a rocpd file by the SQLite header and probes its metadata tables for the schema version and GUIDs. |
+| `rocpd_source.hpp`, `rocpd_source.cpp` | Reader | The rocpd source. Owns the catalog, the pool of eight connections and the pooled connection source. Loads the catalog (the parallel fill, then the v2 aggregates or v3 derived tracks when the cache missed) and answers each read through one leased connection. |
 
 ### source/formats/rocpd_v2 (legacy .rpd)
 
@@ -181,6 +191,20 @@ profiler-hub/
 | `rocpd_v3_histogram.cpp` | Reader | SQL that buckets region, kernel, memory, and HIP durations. |
 | `rocpd_v3_table_events.cpp` | Reader | Paged table rows and the SQL name-duration summary. |
 | `rocpd_v3_trim_schema.cpp` | Trim | Trim rules by table prefix: intervals, samples, events, and child rows. |
+
+### source/formats/pytorch
+
+Built only with `PROFILER_HUB_ENABLE_PYTORCH_KINETO`. The `pytorch` registry entry in `trace_formats.cpp` recognises, probes and opens a source for these files.
+
+| File | Role | Purpose |
+|---|---|---|
+| `kineto_loader.hpp`, `kineto_loader.cpp` | Reader | Streams a plain or gzip Kineto JSON trace into a flat event list with its names, categories, thread and process names, each event's args as JSON text, the memory events, flow arrows, iteration markers and device entries, and the trace-wide members. Text-valued pids and tids get numbers from INT32_MAX down. An optional cancel check is polled on each 1 MiB refill. |
+| `category_class.hpp`, `category_class.cpp` | Reader | Maps a Kineto category name, including the older spellings, to device or host work, launch site, and event type; MTIA and CUDA sync categories also have a name that sets the type. |
+| `kineto_format.hpp`, `kineto_format.cpp` | Reader | Decides from the first 64 KiB of a trace's text whether it is a Kineto trace. |
+| `kineto_probe.hpp`, `kineto_probe.cpp` | Reader | The entry's recogniser (reads the first two bytes, inflates up to 64 KiB of a gzip file, applies the format check) and its probe, which reports success with the file's `schemaVersion` as the major version (0.0.0 when the text has none) and no GUIDs. |
+| `pytorch_store.hpp`, `pytorch_store.cpp` | Reader | Parses a file with the loader and groups the events into host-thread and GPU-stream tracks with their rows, sorted by start, and binds flow arrows to their events. Keeps the events and their args for the source. Fails on a trace with no usable event. |
+| `pytorch_catalog.hpp`, `pytorch_catalog.cpp` | Reader | Moves the store's strings into the shared catalog and builds its node, process, thread, agent, stream, stream-link and track entries. An agent is made for every device entry and every device an event names. |
+| `pytorch_source.hpp`, `pytorch_source.cpp` | Reader | `pytorch_source`, the `format_source` for a Kineto file: parses in `load_catalog`, serves tracks from memory through the connection-source interface, keeps the parsed events for the life of the context, answers `track_of` from a table of id runs and the histogram from the track reader. Answers details, call stacks, correlated events, the summary and the table queries from those events, and builds the memory tracks. |
 
 ## source/queries
 

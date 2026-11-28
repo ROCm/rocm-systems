@@ -1,12 +1,11 @@
 #pragma once
 
 #include "cached_track_reader.hpp"
-#include "common/connection_pool.hpp"
 #include "common/thread_pool.hpp"
 #include "event_query.hpp"
+#include "format_source.hpp"
 #include "histogram_grid.hpp"
 #include "pending_futures.hpp"
-#include "pooled_connection_source.hpp"
 #include "profiler-hub/c/profiler_hub_types.h"
 #include "profiler-hub/cpp/reader.hpp"
 #include "track_read_options.hpp"
@@ -86,7 +85,8 @@ struct ph_ctx
         uint64_t                                  after_id,
         uint64_t                                  last_id,
         ph_table_event*                           rows,
-        uint32_t                                  capacity);
+        uint32_t                                  capacity,
+        bool&                                     declined);
     [[nodiscard]] bool summarize_name_durations(
         const profiler_hub::resolved_event_query&           query,
         uint32_t                                            event_type,
@@ -95,7 +95,8 @@ struct ph_ctx
         const profiler_hub::resolved_event_query& query,
         uint32_t                                  event_type,
         uint64_t&                                 first_id,
-        uint64_t&                                 last_id);
+        uint64_t&                                 last_id,
+        bool&                                     declined);
 
     [[nodiscard]] ph_schema_version_t get_schema_version();
     [[nodiscard]] ph_track_list_t     get_track_list();
@@ -195,28 +196,27 @@ private:
 
     struct trace_source_t
     {
-        std::string                                             path;
-        std::string                                             uuid;
-        std::shared_ptr<profiler_hub::reader_catalog_t>         catalog;
-        std::unique_ptr<profiler_hub::common::connection_pool>  pool;
-        std::unique_ptr<profiler_hub::pooled_connection_source> connections;
-        std::unique_ptr<profiler_hub::cached_track_reader>      reader;
-        uint32_t                                                track_offset{};
-        uint32_t                                                track_count{};
-        std::unordered_map<uint32_t, uint32_t>                  global_of_local;
-        profiler_hub::reader_types::agent_info_list_t           agents;
-        std::vector<ph_agent_t>                                 c_agents;
-        profiler_hub::reader_types::process_info_list_t         processes;
-        std::vector<ph_process_t>                               c_processes;
-        profiler_hub::reader_types::thread_info_list_t          threads;
-        std::vector<ph_thread_t>                                c_threads;
-        profiler_hub::reader_types::stream_info_list_t          streams;
-        std::vector<ph_stream_t>                                c_streams;
-        profiler_hub::reader_types::queue_info_list_t           queues;
-        std::vector<ph_queue_t>                                 c_queues;
-        profiler_hub::reader_types::pmc_info_list_t             pmc_infos;
-        std::vector<ph_pmc_info_t>                              c_pmc_infos;
-        std::vector<ph_stream_hardware_link_t>                  c_stream_hardware_links;
+        std::string                                        path;
+        std::string                                        uuid;
+        std::shared_ptr<profiler_hub::reader_catalog_t>    catalog;
+        std::unique_ptr<profiler_hub::format_source>       source;
+        std::unique_ptr<profiler_hub::cached_track_reader> reader;
+        uint32_t                                           track_offset{};
+        uint32_t                                           track_count{};
+        std::unordered_map<uint32_t, uint32_t>             global_of_local;
+        profiler_hub::reader_types::agent_info_list_t      agents;
+        std::vector<ph_agent_t>                            c_agents;
+        profiler_hub::reader_types::process_info_list_t    processes;
+        std::vector<ph_process_t>                          c_processes;
+        profiler_hub::reader_types::thread_info_list_t     threads;
+        std::vector<ph_thread_t>                           c_threads;
+        profiler_hub::reader_types::stream_info_list_t     streams;
+        std::vector<ph_stream_t>                           c_streams;
+        profiler_hub::reader_types::queue_info_list_t      queues;
+        std::vector<ph_queue_t>                            c_queues;
+        profiler_hub::reader_types::pmc_info_list_t        pmc_infos;
+        std::vector<ph_pmc_info_t>                         c_pmc_infos;
+        std::vector<ph_stream_hardware_link_t>             c_stream_hardware_links;
         std::vector<std::shared_ptr<profiler_hub::reader_types::node_info_t>> nodes;
         ph_node_t                                                             node{};
     };
@@ -226,7 +226,6 @@ private:
         const std::vector<std::string>& trace_paths);
 
     static size_t default_thread_pool_size();
-    static size_t default_connection_count();
 
     [[nodiscard]] trace_source_t&       source_at(uint32_t index);
     [[nodiscard]] const trace_source_t& source_at(uint32_t index) const;
