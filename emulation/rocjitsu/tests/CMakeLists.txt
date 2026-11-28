@@ -625,6 +625,7 @@ add_executable(
     rdna4_dot_dpp_test.cpp
     rdna1_valu_test.cpp
     rdna4_memory_test.cpp
+    legacy_memory_displacement_encoded_fields_test.cpp
     memory_displacement_encoded_fields_test.cpp
     rdna4_encoded_fields_test.cpp
     readlane_selector_test.cpp
