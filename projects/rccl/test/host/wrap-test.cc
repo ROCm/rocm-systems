@@ -44,6 +44,7 @@
 #include <cstdint>
 #include <cstring>
 #include <functional>
+#include <set>
 #include <string>
 #include <utility>
 
@@ -3782,6 +3783,43 @@ TEST(WrapMicrotest, CommSetP2pShiftSize_BelowLog2UsesExactValue) {
   comm->p2pnChannels = 4; // countOneBits(3) == 2; shiftSize(1) < 2
   EXPECT_EQ(ncclSuccess, rcclCommSetP2pShiftSize(comm));
   EXPECT_EQ(1, comm->p2pChannelShiftSize);
+  DeleteCommWithArch(comm);
+}
+
+// Counts the distinct channels a peer's parts map to from base; each part needs its own.
+static size_t DistinctP2pChannels(const ncclComm* comm, int base) {
+  std::set<int> channels;
+  for (int part = 0; part < comm->p2pnChannelsPerPeer; part++) {
+    channels.insert(ncclP2pChannelForPart(comm->p2pnChannels, base, part, comm->p2pnChannelsPerPeer,
+                                          comm->nNodes, comm->p2pChannelShiftSize));
+  }
+  return channels.size();
+}
+
+TEST(WrapMicrotest, CommSetP2pShiftSize_TooFewChannelsPerShiftGivesEveryPartItsOwnChannel) {
+  ScopedHook loadParam(g_loadParam, ForceParam("RCCL_P2P_SHIFT_SIZE", int64_t(2)));
+  ncclComm* comm = MakeZeroedComm();
+  comm->p2pnChannels = 8;         // 8 >> 2 == 2 distinct channels per base...
+  comm->p2pnChannelsPerPeer = 4;  // ...for 4 parts
+  comm->nNodes = 3;               // the shift map is only used for nNodes > 2
+  EXPECT_EQ(ncclSuccess, rcclCommSetP2pShiftSize(comm));
+  for (int base = 0; base < comm->p2pnChannels; base++) {
+    EXPECT_EQ(4u, DistinctP2pChannels(comm, base)) << "base " << base << " shift " << comm->p2pChannelShiftSize;
+  }
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, CommSetP2pShiftSize_EnoughChannelsPerShiftKeepsExactValue) {
+  ScopedHook loadParam(g_loadParam, ForceParam("RCCL_P2P_SHIFT_SIZE", int64_t(1)));
+  ncclComm* comm = MakeZeroedComm();
+  comm->p2pnChannels = 8;         // 8 >> 1 == 4 distinct channels per base, one per part
+  comm->p2pnChannelsPerPeer = 4;
+  comm->nNodes = 3;
+  EXPECT_EQ(ncclSuccess, rcclCommSetP2pShiftSize(comm));
+  EXPECT_EQ(1, comm->p2pChannelShiftSize);
+  for (int base = 0; base < comm->p2pnChannels; base++) {
+    EXPECT_EQ(4u, DistinctP2pChannels(comm, base)) << "base " << base;
+  }
   DeleteCommWithArch(comm);
 }
 

@@ -1,0 +1,1 @@
+* Fixed `RCCL_P2P_SHIFT_SIZE` values that leave fewer channels than parts per peer (for example `2` with 8 P2P channels and 4 parts on 3 or more nodes). Parts shared a channel, so send/recv and AlltoAll could move stale data or hang. RCCL now falls back to the default channel mapping for such values.

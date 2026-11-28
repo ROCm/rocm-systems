@@ -3575,7 +3575,14 @@ ncclResult_t rcclCommSetP2pShiftSize(struct ncclComm* comm) {
   int shiftSize = rcclParamP2pChannelShiftSize();
 
   // Use bit-reversal for default/invalid shiftSize (device uses shiftSize==-1 for that path).
-  if (shiftSize >= nChannelsLog2) {
+  // A shift is only valid if it leaves a distinct channel for every part of a peer: the device
+  // recovers the part from the channel id, masked with (nP2pChannels >> shiftSize) - 1.
+  if (shiftSize < 0 || shiftSize >= nChannelsLog2 || (nP2pChannels >> shiftSize) < comm->p2pnChannelsPerPeer) {
+    // The device reads the shift only past 2 nodes (ncclP2pChannelForPart).
+    if (shiftSize >= 0 && shiftSize < nChannelsLog2 && comm->nNodes > 2) {
+      INFO(NCCL_INIT, "RCCL_P2P_SHIFT_SIZE=%d leaves %d channels for %d parts per peer; using bit reversal",
+           shiftSize, nP2pChannels >> shiftSize, comm->p2pnChannelsPerPeer);
+    }
     comm->p2pChannelShiftSize = -1;
   } else {
     comm->p2pChannelShiftSize = shiftSize;
