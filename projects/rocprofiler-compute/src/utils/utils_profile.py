@@ -18,6 +18,7 @@ from typing import Any, Dict, Generator, List, Optional, Tuple, Union, cast
 
 import config
 import utils.utils_profile_csv as csv_ops
+from ml_api_tracing.profiling.storage import save_ml_api_trace_inputs
 from utils import csv_compression, rocpd_data
 from utils.logger import (
     console_debug,
@@ -488,7 +489,9 @@ def run_prof(
     if ml_api_trace_enabled:
         # results_*.csv already holds the relabeled counters the ML API trace
         # path needs; copy it and the marker trace to the workload dir.
-        save_ml_api_trace_inputs(workload_dir, fbase, results_csv)
+        save_ml_api_trace_inputs(
+            workload_dir, fbase, results_csv, src_marker=marker_csv
+        )
     if retain_rocpd_output:
         for db_path in db_paths:
             pid = db_path.stem.split("_")[0]
@@ -539,35 +542,6 @@ def get_submodules(package_name: str) -> List[str]:
             submodules.append(pretty_name)
 
     return submodules
-
-
-@demarcate
-def save_ml_api_trace_inputs(
-    workload_dir: str,
-    fbase: str,
-    src_counter: Path,
-) -> None:
-    """Copy the counter and marker CSVs into the workload directory for analyze."""
-    src_dir = Path(workload_dir) / "out" / "pmc_1"
-    # Only one pair expected
-    src_marker = csv_compression.compressed_name(
-        src_dir / f"{fbase}_marker_api_trace.csv"
-    )
-    dst_counter = csv_compression.compressed_name(
-        Path(workload_dir) / f"ml_api_trace_{fbase}_counter_collection.csv"
-    )
-    dst_marker = csv_compression.compressed_name(
-        Path(workload_dir) / f"ml_api_trace_{fbase}_marker_api_trace.csv"
-    )
-    # These files are expected to exist.
-    shutil.copyfile(src_counter, dst_counter)
-    shutil.copyfile(src_marker, dst_marker)
-    console_log(
-        "ml api trace",
-        "Copied counter collection and marker trace files to the workload directory.",
-    )
-    console_log("Counter Collection: ", str(dst_counter))
-    console_log("Marker API Trace: ", str(dst_marker))
 
 
 @contextmanager

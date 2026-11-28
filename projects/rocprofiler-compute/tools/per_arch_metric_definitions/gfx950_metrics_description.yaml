@@ -133,25 +133,29 @@ System Speed-of-Light:
     unit: GFLOPs
 Memory chart:
   Wavefront Occupancy:
-    plain: Resident wavefronts per active CU, averaged over GPU-active cycles, as a percent of the maximum wavefronts per CU.
-    rst: Resident :ref:`wavefronts <desc-wavefront>` per active :doc:`CU <compute-unit>`, averaged over GPU-active cycles, as a percent of the maximum wavefronts per CU.
+    plain: The time-averaged number of wavefronts resident on the accelerator, as a percent of the maximum number of wavefronts all of its CUs can hold.
+    rst: The time-averaged number of :ref:`wavefronts <desc-wavefront>` resident on the accelerator, as a percent of the maximum number of wavefronts all of its :doc:`CUs <compute-unit>` can hold.
     unit: Percent
-  VGPR:
+  VGPRs:
     plain: 'The number of architected vector general-purpose registers allocated for the kernel, see VALU. Note: this may not exactly match the number of VGPRs requested by the compiler due to allocation granularity.'
     rst: 'The number of architected vector general-purpose registers allocated for the kernel, see :ref:`VALU <desc-valu>`. Note: this may not exactly match the number of VGPRs requested by the compiler due to allocation granularity.'
     unit: Registers
-  SGPR:
+  SGPRs:
     plain: 'The number of scalar general-purpose registers allocated for the kernel, see SALU. Note: this may not exactly match the number of SGPRs requested by the compiler due to allocation granularity.'
     rst: 'The number of scalar general-purpose registers allocated for the kernel, see :ref:`SALU <desc-salu>`. Note: this may not exactly match the number of SGPRs requested by the compiler due to allocation granularity.'
+    unit: Registers
+  AGPRs:
+    plain: 'The number of accumulation vector general-purpose registers allocated for the kernel, see AGPRs. Note: this may not exactly match the number of AGPRs requested by the compiler due to allocation granularity.'
+    rst: 'The number of accumulation vector general-purpose registers allocated for the kernel, see :ref:`AGPRs <desc-agprs>`. Note: this may not exactly match the number of AGPRs requested by the compiler due to allocation granularity.'
     unit: Registers
   LDS Allocation:
     plain: 'The number of bytes of LDS memory (or, shared memory) allocated per workgroup. Note: This may also be larger than what was requested at compile time due to both allocation granularity and dynamic per-dispatch LDS allocations.'
     rst: 'The number of bytes of :ref:`LDS <desc-lds>` memory (or, shared memory) allocated per :ref:`workgroup <desc-workgroup>`. Note: This may also be larger than what was requested at compile time due to both allocation granularity and dynamic per-dispatch LDS allocations.'
     unit: Bytes per Workgroup
   Scratch Allocation:
-    plain: 'The amount of scratch memory requested per wavefront, in KB: the scratch bytes requested per work-item multiplied by the wavefront size. Scratch memory is used for stack memory on the accelerator, as well as for register spills and restores.'
-    rst: 'The amount of scratch memory requested per :ref:`wavefront <desc-wavefront>`, in KB: the scratch bytes requested per :ref:`work-item <desc-work-item>` multiplied by the wavefront size. Scratch memory is used for stack memory on the accelerator, as well as for register spills and restores.'
-    unit: KB per Wave
+    plain: The number of bytes of scratch memory requested per work-item for this kernel. Scratch memory is used for stack memory on the accelerator, as well as for register spills and restores.
+    rst: The number of bytes of scratch memory requested per :ref:`work-item <desc-work-item>` for this kernel. Scratch memory is used for stack memory on the accelerator, as well as for register spills and restores.
+    unit: Bytes per Work-item
   Workgroups:
     plain: The number of workgroups in the launch divided by the number of active CUs.
     rst: The number of :ref:`workgroups <desc-workgroup>` in the launch divided by the number of active :doc:`CUs <compute-unit>`.
@@ -180,7 +184,7 @@ Memory chart:
     plain: The total number of buffer atomic instructions processed by the address processing unit, counted once per wavefront, per normalization unit.
     rst: The total number of buffer atomic instructions processed by the :ref:`address processing unit <desc-ta>`, counted once per :ref:`wavefront <desc-wavefront>`, per :ref:`normalization unit <normalization-units>`.
     unit: Instructions per Normalization Unit
-  LDS Req:
+  LDS Instructions:
     plain: The total number of LDS instructions (including, but not limited to, read/write/atomics and HIP's __shfl instructions) executed per normalization unit.
     rst: The total number of :ref:`LDS <desc-lds>` instructions (including, but not limited to, read/write/atomics and HIP's ``__shfl`` instructions) executed per :ref:`normalization unit <normalization-units>`.
     unit: Instructions per Normalization Unit
@@ -200,23 +204,23 @@ Memory chart:
     plain: The total number of LDS atomic instructions per normalization unit.
     rst: The total number of :ref:`LDS <desc-lds>` atomic instructions per :ref:`normalization unit <normalization-units>`.
     unit: Instructions per Normalization Unit
-  VL1 Hit:
+  vL1D Hit:
     plain: The percent of vL1D cache line requests that hit in the vL1D cache, over the total number of cache line requests to the vL1D Cache RAM. Calculated as 100 minus the percent of requests that were sent to the L2.
     rst: The percent of vL1D cache line requests that hit in the vL1D cache, over the total number of cache line requests to the :ref:`vL1D Cache RAM <desc-tc>`. Calculated as 100 minus the percent of requests that were sent to the :doc:`L2 <l2-cache>`.
     unit: Percent
-  VL1 Coalesce:
+  vL1D Coalesce:
     plain: Indicates how well memory instructions were coalesced by the address processing unit, ranging from uncoalesced (25%) to fully coalesced (100%). Calculated as the average number of thread-requests generated per instruction divided by the ideal number of thread-requests per instruction.
     rst: Indicates how well memory instructions were coalesced by the :ref:`address processing unit <desc-ta>`, ranging from uncoalesced (25%) to fully coalesced (100%). Calculated as the average number of :ref:`thread-requests <thread-requests>` generated per instruction divided by the ideal number of thread-requests per instruction.
     unit: Percent
-  VL1_L2 Read BW:
+  vL1D_L2 Read BW:
     plain: Bandwidth of read requests from the vL1D cache to the L2 cache per unit time.
     rst: Bandwidth of read requests from the vL1D cache to the :doc:`L2 <l2-cache>` cache per unit time.
     unit: Bytes/s
-  VL1_L2 Write BW:
+  vL1D_L2 Write BW:
     plain: Bandwidth of write requests from the vL1D cache to the L2 cache per unit time.
     rst: Bandwidth of write requests from the vL1D cache to the :doc:`L2 <l2-cache>` cache per unit time.
     unit: Bytes/s
-  VL1_L2 Atomic BW:
+  vL1D_L2 Atomic BW:
     plain: Bandwidth of atomic requests from the vL1D cache to the L2 cache per unit time.
     rst: Bandwidth of atomic requests from the vL1D cache to the :doc:`L2 <l2-cache>` cache per unit time.
     unit: Bytes/s
@@ -232,15 +236,15 @@ Memory chart:
     plain: Bandwidth of read requests from the sL1D cache to the L2 cache per unit time.
     rst: Bandwidth of read requests from the sL1D cache to the :doc:`L2 <l2-cache>` cache per unit time.
     unit: Bytes/s
-  IL1 Fetch:
+  L1I Fetch:
     plain: The total number of requests made to the L1I per normalization unit.
     rst: The total number of requests made to the :ref:`L1I <desc-l1i>` per :ref:`normalization unit <normalization-units>`.
     unit: Requests per Normalization Unit
-  IL1 Hit:
+  L1I Hit:
     plain: The percent of L1I requests that hit on a previously loaded cache line. Calculated as the ratio of the number of L1I requests that hit over the number of all L1I requests.
     rst: The percent of :ref:`L1I <desc-l1i>` requests that hit on a previously loaded cache line. Calculated as the ratio of the number of L1I requests that hit over the number of all L1I requests.
     unit: Percent
-  IL1_L2 Read BW:
+  L1I_L2 Read BW:
     plain: Bandwidth of read requests from the instruction L1 cache to the L2 cache per unit time.
     rst: Bandwidth of read requests from the instruction L1 cache to the :doc:`L2 <l2-cache>` cache per unit time.
     unit: Bytes/s
@@ -1363,8 +1367,8 @@ L2-Fabric interface metrics:
     rst: The percent of read requests generated by the L2 cache that are routed to any memory location other than the accelerator's local high-bandwidth memory (HBM) -- for example, the CPU's DRAM or a remote accelerator's HBM. This breakdown does not consider the *size* of the request (meaning that 32B and 64B requests are both counted as a single request), so this metric only *approximates* the percent of the L2-Fabric Read bandwidth directed to a remote location.
     unit: Percent
   Uncached Read Traffic:
-    plain: The percent of read requests generated by the L2 cache that are reading from an uncached memory allocation. Note, as described in the request flow section, a single 64B read request is typically counted as two uncached read requests. So, it is possible for the Uncached Read Traffic to reach up to 200% of the total number of read requests. This breakdown does not consider the size of the request (i.e., 32B and 64B requests are both counted as a single request), so this metric only approximates the percent of the L2-Fabric read bandwidth directed to an uncached memory location.
-    rst: The percent of read requests generated by the L2 cache that are reading from an :ref:`uncached memory allocation <memory-type>`. Note, as described in the :ref:`request flow <l2-request-flow>` section, a single 64B read request is typically counted as two uncached read requests. So, it is possible for the Uncached Read Traffic to reach up to 200% of the total number of read requests. This breakdown does not consider the *size* of the request (i.e., 32B and 64B requests are both counted as a single request), so this metric only *approximates* the percent of the L2-Fabric read bandwidth directed to an uncached memory location.
+    plain: Percentage of L2-Fabric read bytes that come from uncached memory allocations.
+    rst: Percentage of L2-Fabric read bytes that come from :ref:`uncached memory allocations <memory-type>`.
     unit: Percent
   Write and Atomic BW:
     plain: The total number of bytes written by the L2 over Infinity Fabric by write and atomic operations divided by total duration. Note that on current CDNA accelerators, such as the MI2XX, requests are only considered atomic by Infinity Fabric if they are targeted at non-write-cacheable memory, for example, fine-grained memory allocations or uncached memory allocations on the MI2XX.

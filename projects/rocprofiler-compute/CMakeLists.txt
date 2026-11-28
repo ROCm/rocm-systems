@@ -34,12 +34,6 @@ string(
     "${FULL_VERSION_STRING}"
 )
 
-# string(REGEX REPLACE "(${ROCPROFCOMPUTE_VERSION})(.*)" "\\2"
-# ROCPROFCOMPUTE_VERSION_TWEAK
-# "${FULL_VERSION_STRING}")
-# string(REGEX REPLACE "^\\." "" ROCPROFCOMPUTE_VERSION_TWEAK
-# "${ROCPROFCOMPUTE_VERSION_TWEAK}")
-
 project(
     rocprofiler-compute
     VERSION ${ROCPROFCOMPUTE_VERSION}
@@ -603,6 +597,96 @@ add_test(
         tests/unit/utils/test_rocprofv3_avail_interface.py ${WORKING_DIR_OPTION}
 )
 
+# ML API tracing unit tests
+
+add_test(
+    NAME test_ml_api_tracing_definitions
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest
+        --junitxml=tests/test_ml_api_tracing_definitions.xml ${COV_OPTION}
+        tests/unit/ml_api_tracing/analyze/test_definitions.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_ml_api_tracing_operator_patterns
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest
+        --junitxml=tests/test_ml_api_tracing_operator_patterns.xml ${COV_OPTION}
+        tests/unit/ml_api_tracing/analyze/test_operator_patterns.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_ml_api_tracing_trace_selection
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest
+        --junitxml=tests/test_ml_api_tracing_trace_selection.xml ${COV_OPTION}
+        tests/unit/ml_api_tracing/profiling/test_trace_selection.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_ml_api_tracing_marker_format
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest
+        --junitxml=tests/test_ml_api_tracing_marker_format.xml ${COV_OPTION}
+        tests/unit/ml_api_tracing/test_marker_format.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_ml_api_tracing_errors
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_ml_api_tracing_errors.xml
+        ${COV_OPTION} tests/unit/ml_api_tracing/analyze/test_errors.py
+        ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_ml_api_tracing_trace_csv
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest
+        --junitxml=tests/test_ml_api_tracing_trace_csv.xml ${COV_OPTION}
+        tests/unit/ml_api_tracing/analyze/test_trace_csv.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_ml_api_tracing_pass_matching
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest
+        --junitxml=tests/test_ml_api_tracing_pass_matching.xml ${COV_OPTION}
+        tests/unit/ml_api_tracing/analyze/test_pass_matching.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_ml_api_tracing_call_tree
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest
+        --junitxml=tests/test_ml_api_tracing_call_tree.xml ${COV_OPTION}
+        tests/unit/ml_api_tracing/analyze/test_call_tree.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_ml_api_tracing_output
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_ml_api_tracing_output.xml
+        ${COV_OPTION} tests/unit/ml_api_tracing/analyze/test_output.py
+        ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_ml_api_tracing_selection
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest
+        --junitxml=tests/test_ml_api_tracing_selection.xml ${COV_OPTION}
+        tests/unit/ml_api_tracing/analyze/test_selection.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_ml_api_tracing_orchestrator
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest
+        --junitxml=tests/test_ml_api_tracing_orchestrator.xml ${COV_OPTION}
+        tests/unit/ml_api_tracing/analyze/test_orchestrator.py ${WORKING_DIR_OPTION}
+)
+
 # Memory chart tests — no GPU required
 add_test(
     NAME test_memory_chart_loader
@@ -787,15 +871,75 @@ add_test(
         ${WORKING_DIR_OPTION}
 )
 
-# The metric library sync test imports tools/, which an install tree lacks.
+# Tests of tools/ scripts. An install tree has no tools/.
 if(NOT TEST_FROM_INSTALL)
+    add_test(
+        NAME test_counter_grouping_inspector
+        COMMAND
+            ${PYTHON_TEST_COMMAND} -m pytest
+            --junitxml=tests/test_counter_grouping_inspector.xml ${COV_OPTION}
+            tools/test_counter_grouping_inspector.py ${WORKING_DIR_OPTION}
+    )
+
+    add_test(
+        NAME test_format_yaml
+        COMMAND
+            ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_format_yaml.xml
+            ${COV_OPTION} tools/test_format_yaml.py ${WORKING_DIR_OPTION}
+    )
+
+    add_test(
+        NAME test_generate_metric_health_report
+        COMMAND
+            ${PYTHON_TEST_COMMAND} -m pytest
+            --junitxml=tests/test_generate_metric_health_report.xml ${COV_OPTION}
+            tools/test_generate_metric_health_report.py ${WORKING_DIR_OPTION}
+    )
+
+    add_test(
+        NAME test_instruction_pipeline_generator
+        COMMAND
+            ${PYTHON_TEST_COMMAND} -m pytest
+            --junitxml=tests/test_instruction_pipeline_generator.xml ${COV_OPTION}
+            tools/test_instruction_pipeline_generator.py ${WORKING_DIR_OPTION}
+    )
+
+    add_test(
+        NAME test_memory_chart_layout_format
+        COMMAND
+            ${PYTHON_TEST_COMMAND} -m pytest
+            --junitxml=tests/test_memory_chart_layout_format.xml ${COV_OPTION}
+            tools/test_memory_chart_layout_format.py ${WORKING_DIR_OPTION}
+    )
+
+    add_test(
+        NAME test_memory_chart_preview
+        COMMAND
+            ${PYTHON_TEST_COMMAND} -m pytest
+            --junitxml=tests/test_memory_chart_preview.xml ${COV_OPTION}
+            tools/test_memory_chart_preview.py ${WORKING_DIR_OPTION}
+    )
+
     add_test(
         NAME test_metric_library_sync
         COMMAND
             ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_metric_library_sync.xml
-            ${COV_OPTION}
-            tests/unit/rocprof_compute_soc/metric_library/test_metric_library_sync.py
-            ${WORKING_DIR_OPTION}
+            ${COV_OPTION} tools/test_metric_library_sync.py ${WORKING_DIR_OPTION}
+    )
+
+    add_test(
+        NAME test_schema_visualizer
+        COMMAND
+            ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_schema_visualizer.xml
+            ${COV_OPTION} tools/test_schema_visualizer.py ${WORKING_DIR_OPTION}
+    )
+
+    add_test(
+        NAME test_validate_metric_library
+        COMMAND
+            ${PYTHON_TEST_COMMAND} -m pytest
+            --junitxml=tests/test_validate_metric_library.xml ${COV_OPTION}
+            tools/test_validate_metric_library.py ${WORKING_DIR_OPTION}
     )
 endif()
 
@@ -949,27 +1093,55 @@ add_test(
 )
 
 add_test(
-    NAME test_inject_roctx_package
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_inject_roctx_package.xml
-        ${COV_OPTION} tests/unit/utils/inject_roctx/test_inject_roctx_package.py
-        ${WORKING_DIR_OPTION}
-)
-
-add_test(
-    NAME test_inject_roctx_torch_trace_collector
+    NAME test_ml_api_tracing_inject_roctx_installer
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest
-        --junitxml=tests/test_inject_roctx_torch_trace_collector.xml ${COV_OPTION}
-        tests/unit/utils/inject_roctx/_backends/test_torch_trace_collector.py
+        --junitxml=tests/test_ml_api_tracing_inject_roctx_installer.xml ${COV_OPTION}
+        tests/unit/ml_api_tracing/inject_roctx/test_installer.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_ml_api_tracing_inject_roctx_marker_ranges
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest
+        --junitxml=tests/test_ml_api_tracing_inject_roctx_marker_ranges.xml ${COV_OPTION}
+        tests/unit/ml_api_tracing/inject_roctx/test_marker_ranges.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_ml_api_tracing_inject_roctx_launch
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest
+        --junitxml=tests/test_ml_api_tracing_inject_roctx_launch.xml ${COV_OPTION}
+        tests/unit/ml_api_tracing/inject_roctx/test_launch.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_ml_api_tracing_inject_roctx_triton
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest
+        --junitxml=tests/test_ml_api_tracing_inject_roctx_triton.xml ${COV_OPTION}
+        tests/unit/ml_api_tracing/inject_roctx/backends/test_triton.py
         ${WORKING_DIR_OPTION}
 )
 
 add_test(
-    NAME test_inject_roctx_torch
+    NAME test_ml_api_tracing_inject_roctx_torch
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_inject_roctx_torch.xml
-        ${COV_OPTION} tests/unit/utils/inject_roctx/test_torch.py ${WORKING_DIR_OPTION}
+        ${PYTHON_TEST_COMMAND} -m pytest
+        --junitxml=tests/test_ml_api_tracing_inject_roctx_torch.xml ${COV_OPTION}
+        tests/unit/ml_api_tracing/inject_roctx/backends/test_torch.py
+        ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_ml_api_tracing_inject_roctx_torch_trace_collector
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest
+        --junitxml=tests/test_ml_api_tracing_inject_roctx_torch_trace_collector.xml
+        ${COV_OPTION}
+        tests/unit/ml_api_tracing/inject_roctx/backends/test_torch_trace_collector.py
+        ${WORKING_DIR_OPTION}
 )
 
 add_test(
@@ -1020,6 +1192,22 @@ add_test(
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_profiler_base.xml
         ${COV_OPTION} tests/unit/rocprof_compute_profile/test_profiler_base.py
         ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_ml_api_tracing_profiling_orchestrator
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest
+        --junitxml=tests/test_ml_api_tracing_profiling_orchestrator.xml ${COV_OPTION}
+        tests/unit/ml_api_tracing/profiling/test_orchestrator.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_ml_api_tracing_profiling_storage
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest
+        --junitxml=tests/test_ml_api_tracing_profiling_storage.xml ${COV_OPTION}
+        tests/unit/ml_api_tracing/profiling/test_storage.py ${WORKING_DIR_OPTION}
 )
 
 # -----------------------------------
@@ -1171,6 +1359,17 @@ if(${ENABLE_COVERAGE})
         test_mi_gpu_spec
         test_utils_common
         test_utils_analysis
+        test_ml_api_tracing_marker_format
+        test_ml_api_tracing_definitions
+        test_ml_api_tracing_operator_patterns
+        test_ml_api_tracing_trace_selection
+        test_ml_api_tracing_errors
+        test_ml_api_tracing_trace_csv
+        test_ml_api_tracing_pass_matching
+        test_ml_api_tracing_call_tree
+        test_ml_api_tracing_output
+        test_ml_api_tracing_selection
+        test_ml_api_tracing_orchestrator
         test_utils_profile
         test_common
         test_amdsmi_interface
@@ -1196,9 +1395,14 @@ if(${ENABLE_COVERAGE})
         test_profile_triton_trace
         test_profile_ml_api_trace
         test_torch_trace_coverage
-        test_inject_roctx_package
-        test_inject_roctx_torch
-        test_inject_roctx_torch_trace_collector
+        test_ml_api_tracing_inject_roctx_installer
+        test_ml_api_tracing_inject_roctx_marker_ranges
+        test_ml_api_tracing_inject_roctx_launch
+        test_ml_api_tracing_inject_roctx_triton
+        test_ml_api_tracing_inject_roctx_torch
+        test_ml_api_tracing_inject_roctx_torch_trace_collector
+        test_ml_api_tracing_profiling_orchestrator
+        test_ml_api_tracing_profiling_storage
         test_inject_roctx_torch_gpu
         test_analysis_db
         test_analysis_base
@@ -1335,6 +1539,12 @@ install(
 # src/membw_analysis
 install(
     DIRECTORY src/membw_analysis
+    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+    COMPONENT main
+    PATTERN "__pycache__" EXCLUDE
+)
+install(
+    DIRECTORY src/ml_api_tracing
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
     COMPONENT main
     PATTERN "__pycache__" EXCLUDE

@@ -24,7 +24,6 @@ Panel Config:
   - metric_table:
       id: 301
       title: "Instruction Cache"
-      cli_style: mem_chart
       header:
         metric: Metric
         value: Value
@@ -46,7 +45,6 @@ Panel Config:
   - metric_table:
       id: 302
       title: "Scalar Data Cache"
-      cli_style: mem_chart
       header:
         metric: Metric
         value: Value
@@ -68,7 +66,6 @@ Panel Config:
   - metric_table:
       id: 303
       title: "TCP Cache (GL0 Vector Cache)"
-      cli_style: mem_chart
       header:
         metric: Metric
         value: Value
@@ -94,15 +91,14 @@ Panel Config:
   - metric_table:
       id: 304
       title: "LDS (Local Data Share)"
-      cli_style: mem_chart
       header:
         metric: Metric
         value: Value
         unit: Unit
       metric:
-        LDS Req:
+        LDS Instructions:
           value: SUM(SQ_INSTS_LDS_sum) / SUM($denom)
-          unit: (Requests + $normUnit)
+          unit: (Instructions + $normUnit)
         LDS Utilization:
           value: 100 * SUM(SQC_LDS_IDX_ACTIVE_sum) / (SUM(GRBM_GUI_ACTIVE) * $cu_per_gpu)
           unit: Percent
@@ -119,7 +115,6 @@ Panel Config:
   - metric_table:
       id: 305
       title: "TCP-GL1 Interface"
-      cli_style: mem_chart
       header:
         metric: Metric
         value: Value
@@ -138,7 +133,6 @@ Panel Config:
   - metric_table:
       id: 306
       title: "GL1 Cache (L1)"
-      cli_style: mem_chart
       header:
         metric: Metric
         value: Value
@@ -160,7 +154,6 @@ Panel Config:
   - metric_table:
       id: 307
       title: "GL1-GL2 Interface"
-      cli_style: mem_chart
       header:
         metric: Metric
         value: Value
@@ -179,7 +172,6 @@ Panel Config:
   - metric_table:
       id: 308
       title: "GL2 Cache (L2)"
-      cli_style: mem_chart
       header:
         metric: Metric
         value: Value
@@ -204,7 +196,6 @@ Panel Config:
   - metric_table:
       id: 309
       title: "Graphics Core Efficiency Arbiter (GCEA) to System Memory"
-      cli_style: mem_chart
       header:
         metric: Metric
         value: Value
@@ -229,40 +220,39 @@ Panel Config:
   - metric_table:
       id: 310
       title: "Workgroup Processors (WGPs)"
-      cli_style: mem_chart
       header:
         metric: Metric
         value: Value
         unit: Unit
       metric:
         Wavefront Occupancy:
-          value: ROUND(100 * SUM(SQ_WAVE_CYCLES_sum) / SUM(SQ_BUSY_CYCLES_sum * 2 * $max_waves_per_cu), 1)
+          value: 100 * SUM(SQ_WAVE_CYCLES_sum) / SUM(SQ_BUSY_CYCLES_avr) / ($max_waves_per_cu * $cu_per_gpu)
           unit: Percent
-        VGPR:
-          value: ROUND(AVG(Arch_VGPR), 0)
+        VGPRs:
+          value: AVG(Arch_VGPR)
           unit: Registers
-        SGPR:
-          value: ROUND(AVG(SGPR), 0)
+        SGPRs:
+          value: AVG(SGPR)
           unit: Registers
         LDS Allocation:
-          value: ROUND(AVG(LDS_Per_Workgroup), 0)
+          value: AVG(LDS_Per_Workgroup)
           unit: Bytes per Workgroup
         Scratch Allocation:
-          value: ROUND(AVG(Scratch_Per_Workitem) * $wave_size / 1024, 3)
-          unit: KB per Wave
+          value: AVG(Scratch_Per_Workitem)
+          unit: Bytes per Work-item
         Workgroups:
-          value: ROUND(AVG(Grid_Size / Workgroup_Size) / ($cu_per_gpu / 2), 1)
+          value: AVG(Grid_Size / Workgroup_Size) / ($cu_per_gpu / 2)
           unit: Workgroups per WGP
 
   metrics_description:
     Wavefront Occupancy: >-
-      Resident wavefronts per WGP, averaged over GPU-active cycles, as a percent of the
-      maximum wavefronts per WGP.
-    VGPR: >-
+      The time-averaged number of wavefronts resident on the accelerator, as a percent
+      of the maximum number of wavefronts all of its WGPs can hold.
+    VGPRs: >-
       The number of architected vector general-purpose registers allocated
       for the kernel. Note: this may not exactly match the number of VGPRs
       requested by the compiler due to allocation granularity.
-    SGPR: >-
+    SGPRs: >-
       The number of scalar general-purpose registers allocated for the kernel.
       Note: this may not exactly match the number of SGPRs requested by
       the compiler due to allocation granularity.
@@ -270,10 +260,9 @@ Panel Config:
       The number of bytes of LDS memory (or, shared memory) allocated per workgroup. Note:
       This may also be larger than what was requested at compile time due to both allocation
       granularity and dynamic per-dispatch LDS allocations.
-    Scratch Allocation: >-
-      The amount of scratch memory requested per wavefront, in KB: the scratch bytes
-      requested per work-item multiplied by the wavefront size. Scratch memory is used for
-      stack memory on the accelerator, as well as for register spills and restores.
+    Scratch Allocation: The number of bytes of scratch memory requested per work-item
+      for this kernel. Scratch memory is used for stack memory on the accelerator,
+      as well as for register spills and restores.
     Workgroups: >-
       The number of workgroups in the launch divided by the number of WGPs.
     ICache Hit Rate: >-
@@ -288,7 +277,7 @@ Panel Config:
       Percentage of GL0 vector cache (TCP Cache) requests serviced from cache. TCP Cache is the
       first-level cache for vector memory operations. Higher hit rates reduce traffic
       to the GL1 cache and lower memory access latency for vector operations.
-    LDS Req: >-
+    LDS Instructions: >-
       Number of LDS instructions issued by the shader, including FLAT instructions that
       resolve to LDS. This counts instructions rather than data movement, so it does not
       distinguish reads from writes.

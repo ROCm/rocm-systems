@@ -43,10 +43,12 @@ SUPPORTED_DATATYPES: dict[str, dict[str, OpsSupport]] = {
 
 
 # Metric labels of the "Roofline Plot Points" table, mapped to PlotPoints fields.
-_METRIC_TO_AI_FIELD = {
+AI_METRIC_TO_FIELD = {
     "AI L0": "ai_l0",
+    "AI GL0": "ai_l0",
     "AI L1": "ai_l1",
     "AI L2": "ai_l2",
+    "AI GL2": "ai_l2",
     "AI HBM": "ai_hbm",
     "AI VRAM": "ai_vram",
     "AI LDS": "ai_lds",
@@ -343,8 +345,8 @@ def _extract_ai_metrics(calc_table: Optional[pd.DataFrame]) -> dict[str, float]:
     for _, row in calc_table.iterrows():
         metric = row.get("Metric", "")
         value = row.get("Value", 0)
-        if metric in _METRIC_TO_AI_FIELD:
-            metrics[_METRIC_TO_AI_FIELD[metric]] = sanitize_ai_value(value)
+        if metric in AI_METRIC_TO_FIELD:
+            metrics[AI_METRIC_TO_FIELD[metric]] = sanitize_ai_value(value)
         elif metric == "Performance (GFLOPs)":
             metrics["performance"] = sanitize_ai_value(value)
     return metrics

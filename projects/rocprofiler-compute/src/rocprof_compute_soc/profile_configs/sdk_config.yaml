@@ -2232,6 +2232,8 @@ rocprofiler-sdk:
       - gfx1151
       - gfx1152
       - gfx1153
+      - gfx1200
+      - gfx1201
       block: SQ
       event: 24
     - architectures:
@@ -3762,6 +3764,8 @@ rocprofiler-sdk:
       - gfx1151
       - gfx1152
       - gfx1153
+      - gfx1200
+      - gfx1201
       - gfx1250
       expression: reduce(SQ_WAVE_CYCLES,sum)
   - name: CPC_GUS_READ_REQUEST_SENT_sum
@@ -8184,7 +8188,6 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
-      - gfx908
       - gfx942
       block: TCC
       event: 36
@@ -8198,7 +8201,6 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
-      - gfx908
       - gfx942
       block: TCC
       event: 37
@@ -8212,7 +8214,6 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
-      - gfx908
       - gfx942
       - gfx950
       expression: reduce(TCC_EA0_ATOMIC_LEVEL,sum)
@@ -8222,7 +8223,6 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
-      - gfx908
       - gfx942
       - gfx950
       expression: reduce(TCC_EA0_ATOMIC,sum)
@@ -8231,7 +8231,6 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
-      - gfx908
       - gfx942
       block: TCC
       event: 38
@@ -8244,7 +8243,6 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
-      - gfx908
       - gfx942
       block: TCC
       event: 39
@@ -8257,7 +8255,6 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
-      - gfx908
       - gfx942
       - gfx950
       expression: reduce(TCC_EA0_RDREQ_32B,sum)
@@ -8266,7 +8263,6 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
-      - gfx908
       - gfx942
       block: TCC
       event: 102
@@ -8280,7 +8276,6 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
-      - gfx908
       - gfx942
       block: TCC
       event: 43
@@ -8294,7 +8289,6 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
-      - gfx908
       - gfx942
       - gfx950
       expression: reduce(TCC_EA0_RDREQ_DRAM_CREDIT_STALL,sum)
@@ -8303,7 +8297,6 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
-      - gfx908
       - gfx942
       - gfx950
       expression: reduce(TCC_EA0_RDREQ_DRAM,sum)
@@ -8313,7 +8306,6 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
-      - gfx908
       - gfx942
       block: TCC
       event: 42
@@ -8327,7 +8319,6 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
-      - gfx908
       - gfx942
       - gfx950
       expression: reduce(TCC_EA0_RDREQ_GMI_CREDIT_STALL,sum)
@@ -8337,7 +8328,6 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
-      - gfx908
       - gfx942
       block: TCC
       event: 41
@@ -8351,7 +8341,6 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
-      - gfx908
       - gfx942
       - gfx950
       expression: reduce(TCC_EA0_RDREQ_IO_CREDIT_STALL,sum)
@@ -8361,7 +8350,6 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
-      - gfx908
       - gfx942
       block: TCC
       event: 44
@@ -8375,7 +8363,6 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
-      - gfx908
       - gfx942
       - gfx950
       expression: reduce(TCC_EA0_RDREQ_LEVEL,sum)
@@ -8384,7 +8371,6 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
-      - gfx908
       - gfx942
       - gfx950
       expression: reduce(TCC_EA0_RDREQ,sum)
@@ -8393,7 +8379,6 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
-      - gfx908
       - gfx942
       block: TCC
       event: 40
@@ -8407,7 +8392,6 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
-      - gfx908
       - gfx942
       - gfx950
       expression: reduce(TCC_EA0_RD_UNCACHED_32B,sum)
@@ -8417,8 +8401,6 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
-      - gfx908
-      - gfx90a
       - gfx942
       block: TCC
       event: 26
@@ -8431,8 +8413,6 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
-      - gfx908
-      - gfx90a
       - gfx942
       block: TCC
       event: 27
@@ -8446,8 +8426,6 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
-      - gfx908
-      - gfx90a
       - gfx942
       - gfx950
       expression: reduce(TCC_EA0_WRREQ_64B,sum)
@@ -8456,7 +8434,6 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
-      - gfx908
       - gfx942
       block: TCC
       event: 103
@@ -8469,7 +8446,6 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
-      - gfx908
       - gfx942
       block: TCC
       event: 33
@@ -8483,7 +8459,6 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
-      - gfx908
       - gfx942
       - gfx950
       expression: reduce(TCC_EA0_WRREQ_DRAM_CREDIT_STALL,sum)
@@ -8492,7 +8467,6 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
-      - gfx908
       - gfx942
       - gfx950
       expression: reduce(TCC_EA0_WRREQ_DRAM,sum)
@@ -8501,7 +8475,6 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
-      - gfx908
       - gfx942
       block: TCC
       event: 32
@@ -8515,7 +8488,6 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
-      - gfx908
       - gfx942
       - gfx950
       expression: reduce(TCC_EA0_WRREQ_GMI_CREDIT_STALL,sum)
@@ -8524,7 +8496,6 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
-      - gfx908
       - gfx942
       block: TCC
       event: 31
@@ -8538,7 +8509,6 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
-      - gfx908
       - gfx942
       - gfx950
       expression: reduce(TCC_EA0_WRREQ_IO_CREDIT_STALL,sum)
@@ -8548,7 +8518,6 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
-      - gfx908
       - gfx942
       block: TCC
       event: 35
@@ -8562,7 +8531,6 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
-      - gfx908
       - gfx942
       - gfx950
       expression: reduce(TCC_EA0_WRREQ_LEVEL,sum)
@@ -8583,7 +8551,6 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
-      - gfx908
       - gfx942
       block: TCC
       event: 30
@@ -8596,7 +8563,6 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
-      - gfx908
       - gfx942
       - gfx950
       expression: reduce(TCC_EA0_WRREQ_STALL,sum)
@@ -8607,8 +8573,6 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
-      - gfx908
-      - gfx90a
       - gfx942
       - gfx950
       expression: reduce(TCC_EA0_WRREQ,sum)
@@ -8618,7 +8582,6 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
-      - gfx908
       - gfx942
       block: TCC
       event: 29
@@ -8633,7 +8596,6 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
-      - gfx908
       - gfx942
       - gfx950
       expression: reduce(TCC_EA0_WR_UNCACHED_32B,sum)
@@ -8642,6 +8604,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx90a
       block: TCC
       event: 36
@@ -8651,6 +8614,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx90a
       block: TCC
       event: 37
@@ -8660,6 +8624,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx90a
       expression: reduce(TCC_EA_ATOMIC_LEVEL,sum)
   - name: TCC_EA_ATOMIC_sum
@@ -8668,6 +8633,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx90a
       expression: reduce(TCC_EA_ATOMIC,sum)
   - name: TCC_EA_RDREQ
@@ -8701,6 +8667,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx90a
       block: TCC
       event: 102
@@ -8710,6 +8677,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx90a
       block: TCC
       event: 43
@@ -8719,6 +8687,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx90a
       expression: reduce(TCC_EA_RDREQ_DRAM_CREDIT_STALL,sum)
   - name: TCC_EA_RDREQ_DRAM_sum
@@ -8726,6 +8695,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx90a
       expression: reduce(TCC_EA_RDREQ_DRAM,sum)
   - name: TCC_EA_RDREQ_GMI_CREDIT_STALL
@@ -8734,6 +8704,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx90a
       block: TCC
       event: 42
@@ -8743,6 +8714,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx90a
       expression: reduce(TCC_EA_RDREQ_GMI_CREDIT_STALL,sum)
   - name: TCC_EA_RDREQ_IO_CREDIT_STALL
@@ -8751,6 +8723,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx90a
       block: TCC
       event: 41
@@ -8760,6 +8733,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx90a
       expression: reduce(TCC_EA_RDREQ_IO_CREDIT_STALL,sum)
   - name: TCC_EA_RDREQ_LEVEL
@@ -8768,6 +8742,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx90a
       block: TCC
       event: 44
@@ -8777,6 +8752,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx90a
       expression: reduce(TCC_EA_RDREQ_LEVEL,sum)
   - name: TCC_EA_RDREQ_sum
@@ -8792,6 +8768,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx90a
       block: TCC
       event: 40
@@ -8801,6 +8778,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx90a
       expression: reduce(TCC_EA_RD_UNCACHED_32B,sum)
   - name: TCC_EA_WRREQ
@@ -8836,6 +8814,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx90a
       block: TCC
       event: 103
@@ -8844,6 +8823,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx90a
       block: TCC
       event: 33
@@ -8853,6 +8833,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx90a
       expression: reduce(TCC_EA_WRREQ_DRAM_CREDIT_STALL,sum)
   - name: TCC_EA_WRREQ_DRAM_sum
@@ -8860,6 +8841,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx90a
       expression: reduce(TCC_EA_WRREQ_DRAM,sum)
   - name: TCC_EA_WRREQ_GMI_CREDIT_STALL
@@ -8867,6 +8849,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx90a
       block: TCC
       event: 32
@@ -8876,6 +8859,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx90a
       expression: reduce(TCC_EA_WRREQ_GMI_CREDIT_STALL,sum)
   - name: TCC_EA_WRREQ_IO_CREDIT_STALL
@@ -8883,6 +8867,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx90a
       block: TCC
       event: 31
@@ -8892,6 +8877,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx90a
       expression: reduce(TCC_EA_WRREQ_IO_CREDIT_STALL,sum)
   - name: TCC_EA_WRREQ_LEVEL
@@ -8900,6 +8886,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx90a
       block: TCC
       event: 35
@@ -8909,6 +8896,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx90a
       expression: reduce(TCC_EA_WRREQ_LEVEL,sum)
   - name: TCC_EA_WRREQ_STALL
@@ -8925,6 +8913,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx90a
       expression: reduce(TCC_EA_WRREQ_STALL,sum)
   - name: TCC_EA_WRREQ_sum
@@ -8941,6 +8930,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx90a
       block: TCC
       event: 29
@@ -8951,6 +8941,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx90a
       expression: reduce(TCC_EA_WR_UNCACHED_32B,sum)
   - name: TCC_HIT
@@ -15644,8 +15635,6 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
-      - gfx1200
-      - gfx1201
       - gfx1250
       block: SQG
       event: 16
@@ -21878,8 +21867,6 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
-      - gfx1200
-      - gfx1201
       - gfx1250
       expression: reduce(SQG_WAVE_CYCLES,sum)
   - name: SQG_MSG_sum

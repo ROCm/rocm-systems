@@ -3,7 +3,7 @@ compute.dual_issue_valu_util:
   formula: 100 * SUM(SQ_ACTIVE_INST_VALU2) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
   unit: Percent
   description: >-
-    Indicates what percent of the kernel's duration the VALU was busy executing dual-issued
+    Percentage of the kernel's duration the VALU was busy executing dual-issued
     instructions. Computed as the ratio of the total number of cycles spent by the
     scheduler co-issuing VALU instructions over the total CU cycles.
 compute.f6f4_ops:
@@ -12,12 +12,8 @@ compute.f6f4_ops:
   unit: (FLOPs + $normUnit)
   description: >-
     The total number of 4-bit and 6-bit floating-point operations executed on MFMA
-    units, per normalization unit. F6/F4 formats are supported in AMD Instinct MI350
-    series (gfx950) and later only.
-compute.f8_ops:
-  description: >-
-    The total number of 8-bit floating-point operations executed on MFMA units, per
-    normalization unit. F8 (FP8) uses either E4M3 or E5M2 format.
+    units. F6/F4 formats are supported in AMD Instinct MI350 series (gfx950) and later
+    only.
 compute.flops_per_norm:
   formula: SUM($valu_f16_flops + $valu_f32_flops + $valu_f64_flops + $mfma_f16_flops + $mfma_bf16_flops + $mfma_f32_flops + $mfma_f64_flops + $mfma_f8_flops + $mfma_f6f4_flops) / SUM($denom)
 compute.inst_mix_mfma_f6f4:
@@ -25,16 +21,16 @@ compute.inst_mix_mfma_f6f4:
   formula: SUM(SQ_INSTS_VALU_MFMA_F6F4) / SUM($denom)
   unit: (Instructions + $normUnit)
   description: >-
-    The total number of 4-bit and 6-bit floating point MFMA instructions issued per
-    normalization unit. This is supported in AMD Instinct MI350 series (gfx950) and
-    later only.
+    The total number of 4-bit and 6-bit floating point MFMA instructions issued. This is
+    supported in AMD Instinct MI350 series (gfx950) and later only.
 compute.l1_cache_vmem_stalled_by_l1_cache:
   name: L1 Cache - VMEM Stalled by L1 Cache
   formula: 100 * SUM(SQ_VMEM_TA_CMD_FIFO_FULL) / SUM(SQ_BUSY_CYCLES)
   unit: Percent
   description: >-
-    Measures backpressure from TCP to SQ. A high stall rate (>= 10%) indicates that
-    TCP stall is backpressured to SQ.
+    Percentage of SQ busy cycles the VMEM command FIFO to TA was full. This measures
+    backpressure from TCP to SQ. A high stall rate (>= 10%) indicates that TCP stall is
+    backpressured to SQ.
 compute.mfma_flops_bf16:
   peak: $max_sclk * $cu_per_gpu * 4096 / 1000
 compute.mfma_flops_f16:
@@ -47,21 +43,20 @@ compute.mfma_flops_f6f4:
   unit: GFLOP/s
   description: >-
     The total number of 4-bit and 6-bit floating-point operations executed on MFMA
-    units, per second. F6/F4 formats are supported in AMD Instinct MI350 series (gfx950)
+    units, per second. Note: this does not include any floating-point operations from
+    VALU instructions. F6/F4 formats are supported in AMD Instinct MI350 series (gfx950)
     and later only.
   peak: $max_sclk * $cu_per_gpu * 16834 / 1000
   peak_empirical: $MFMAF6F4Flops_empirical_peak
 compute.mfma_flops_f8:
-  description: >-
-    The total number of 8-bit floating point MFMA operations executed per second.
   peak: $max_sclk * $cu_per_gpu * 8192 / 1000
 compute.mfma_flops_mxf8:
   name: MFMA FLOPs (MXF8)
   formula: 512 * SUM(SQ_INSTS_VALU_MFMA_MOPS_F8) / SUM(End_Timestamp - Start_Timestamp)
   unit: GFLOP/s
   description: >-
-    The total number of 8-bit microscaling floating point MFMA operations executed
-    per second.
+    The total number of 8-bit microscaling floating point MFMA operations executed per
+    second.
   peak: $max_sclk * $cu_per_gpu * 8192 / 1000
   peak_empirical: $MFMAMXF8Flops_empirical_peak
 compute.mfma_iops_int8:
@@ -73,15 +68,7 @@ compute.valu_co_issue_efficiency:
   formula: 100 * SUM(SQ_ACTIVE_INST_VALU2) / SUM(SQ_ACTIVE_INST_VALU - SQ_ACTIVE_INST_VALU2)
   unit: Percent
   description: >-
-    The ratio of quad-cycles where two VALU instructions were co-issued (executed
-    simultaneously) to quad-cycles where only a single VALU instruction was issued.
-    Measures how efficiently the kernel leverages the MI350's ability to co-issue
-    VALU instructions. Unlike Dual-issue VALU Utilization which measures percentage
-    of total time, this metric can exceed 100% when dual-issue cycles outnumber single-issue
-    cycles.
-compute.vmem_ta_addr_stall:
-  description: ''
-compute.vmem_ta_cmd_stall:
-  description: ''
-compute.vmem_ta_data_stall:
-  description: ''
+    Percentage of quad-cycles where two VALU instructions were co-issued, relative to
+    quad-cycles where a single VALU instruction was issued. Unlike Dual-issue VALU
+    Utilization, a share of total time, it can exceed 100% when dual-issue cycles
+    outnumber single-issue cycles.

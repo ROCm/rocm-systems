@@ -10,11 +10,9 @@ l2.bw:
   formula: 64 * SUM(TCC_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes looked up in the L2 cache per unit time. The number of bytes
-    is calculated as the number of cache lines requested multiplied by the cache line
-    size. This value does not consider partial requests, so e.g., if only a single
-    value is requested in a cache line, the data movement will still be counted as
-    a full cache line.
+    The number of bytes per second looked up in the L2 cache. The number of bytes is the
+    number of cache lines requested times the cache line size; a partial request counts
+    as a full cache line.
   peak: $max_sclk / 1000 * 64 * TO_INT($total_l2_chan)
 l2.cc_req:
   name: L2 CC Requests
@@ -35,32 +33,32 @@ l2.chan_fabric_128b_rd_req_per_normunit:
   description: ''
 l2.chan_fabric_atomic:
   name: L2-Fabric Atomic Requests per Channel
-  formula: SUM(TO_INT(TCC_EA0_ATOMIC[::_1])) / SUM($denom)
+  formula: SUM(TO_INT(TCC_EA_ATOMIC[::_1])) / SUM($denom)
   unit: (Requests + $normUnit)
   description: ''
 l2.chan_fabric_atomic_lat_cycles:
   name: L2-Fabric Atomic Latency per Channel
-  formula: TCC_EA0_ATOMIC_LEVEL[::_1] / TCC_EA0_ATOMIC[::_1] if TCC_EA0_ATOMIC[::_1] != 0 else 0
+  formula: TCC_EA_ATOMIC_LEVEL[::_1] / TCC_EA_ATOMIC[::_1] if TCC_EA_ATOMIC[::_1] != 0 else 0
   unit: Cycles
   description: ''
 l2.chan_fabric_rd:
   name: L2-Fabric Read Requests per Channel
-  formula: SUM(TO_INT(TCC_EA0_RDREQ[::_1])) / SUM($denom)
+  formula: SUM(TO_INT(TCC_EA_RDREQ[::_1])) / SUM($denom)
   unit: (Requests + $normUnit)
   description: ''
 l2.chan_fabric_rd_lat_cycles:
   name: L2-Fabric Read Latency per Channel
-  formula: TCC_EA0_RDREQ_LEVEL[::_1] / TCC_EA0_RDREQ[::_1]
+  formula: TCC_EA_RDREQ_LEVEL[::_1] / TCC_EA_RDREQ[::_1]
   unit: Cycles
   description: ''
 l2.chan_fabric_wr_atomic:
   name: L2-Fabric Write and Atomic Requests per Channel
-  formula: SUM(TO_INT(TCC_EA0_WRREQ[::_1])) / SUM($denom)
+  formula: SUM(TO_INT(TCC_EA_WRREQ[::_1])) / SUM($denom)
   unit: (Requests + $normUnit)
   description: ''
 l2.chan_fabric_wr_atomic_lat_cycles:
   name: L2-Fabric Write and Atomic Latency per Channel
-  formula: TCC_EA0_WRREQ_LEVEL[::_1] / TCC_EA0_WRREQ[::_1]
+  formula: TCC_EA_WRREQ_LEVEL[::_1] / TCC_EA_WRREQ[::_1]
   unit: Cycles
   description: ''
 l2.chan_fabric_wr_starve:
@@ -93,75 +91,72 @@ l2.evict_internal:
   formula: SUM(TCC_NORMAL_EVICT_sum) / SUM($denom)
   unit: (Cachelines + $normUnit)
   description: >-
-    The total number of L2 cache lines evicted from the cache due to capacity limits,
-    per normalization unit.
+    The total number of L2 cache lines evicted from the cache due to capacity limits.
 l2.evict_vl1d_req:
   name: L2 Evictions (vL1D Requests)
   formula: SUM(TCC_ALL_TC_OP_INV_EVICT_sum) / SUM($denom)
   unit: (Cachelines + $normUnit)
   description: >-
     The total number of L2 cache lines evicted from the cache due to invalidation
-    requests initiated by the vL1D cache, per normalization unit.
+    requests initiated by the vL1D cache.
 l2.hit_rate:
   name: L2 Cache Hit Rate
   formula: 100 * SUM(TCC_HIT_sum) / SUM(TCC_HIT_sum + TCC_MISS_sum)
   unit: Percent
   description: >-
-    The ratio of the number of L2 cache line requests that hit in the L2 cache over
-    the total number of incoming cache line requests to the L2 cache.
+    Percentage of incoming cache line requests to the L2 cache that hit in the L2 cache.
+    A low rate (<50%) indicates that the workload exceeds the L2 cache capacity, leading
+    to high memory traffic.
   peak: 100
 l2.hits:
   name: L2 Hits
   formula: SUM(TCC_HIT_sum) / SUM($denom)
   unit: (Hits + $normUnit)
   description: >-
-    The total number of requests to the L2 from all clients that hit in the cache.
-    As noted in the Speed-of-Light section, this includes hit-on-miss requests.
+    The total number of requests to the L2 from all clients that hit in the cache. This
+    includes hit-on-miss requests.
 l2.misses:
   name: L2 Misses
   formula: SUM(TCC_MISS_sum) / SUM($denom)
   unit: (Misses + $normUnit)
   description: >-
     The total number of requests to the L2 from all clients that miss in the cache.
-    As noted in the Speed-of-Light section, these do not include hit-on-miss requests.
+    These do not include hit-on-miss requests.
 l2.nc_req:
   name: L2 NC Requests
   formula: SUM(TCC_NC_REQ_sum) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-
-    The total number of requests to the L2 to Not-hardware-Coherent (NC) memory allocations,
-    per normalization unit.
+    The total number of requests to the L2 to Not-hardware-Coherent (NC) memory
+    allocations.
 l2.peak_bw:
   name: L2 Peak Bandwidth
   formula: 100 * 64 * SUM(TCC_REQ_sum) / SUM(End_Timestamp - Start_Timestamp) / ($max_sclk / 1000 * 64 * TO_INT($total_l2_chan))
   unit: Percent
   description: >-
-    The number of bytes looked up in the L2 cache, as a percent of the peak theoretical
-    bandwidth achievable on the specific accelerator. The number of bytes is calculated
-    as the number of cache lines requested multiplied by the cache line size. This
-    value does not consider partial requests, so e.g., if only a single value is requested
-    in a cache line, the data movement will still be counted as a full cache line.
+    Percentage of the peak theoretical L2 cache bandwidth used by the bytes looked up in
+    the L2 cache. The number of bytes is the number of cache lines requested times the
+    cache line size; a partial request counts as a full cache line.
 l2.probe_req:
   name: L2 Probe Requests
   formula: SUM(TCC_PROBE_sum) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-
-    The number of coherence probe requests made to the L2 cache from outside the accelerator.
-    On an MI2XX, probe requests may be generated by, for example, writes to fine-grained
-    device memory or by writes to coarse-grained device memory.
+    The number of coherence probe requests made to the L2 cache from outside the
+    accelerator. On an MI2XX, probe requests may be generated by, for example, writes to
+    fine-grained device memory or by writes to coarse-grained device memory.
 l2.rd_req:
   name: L2 Read Requests
   formula: SUM(TCC_READ_sum) / SUM($denom)
   unit: (Requests + $normUnit)
-  description: >-
-    The total number of read requests to the L2 from all clients.
+  description: The total number of read requests to the L2 from all clients.
 l2.req:
   name: L2 Requests
   formula: SUM(TCC_REQ_sum) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-
     The total number of incoming requests to the L2 from all clients for all request
-    types, per normalization unit.
+    types.
 l2.rw_req:
   name: L2 RW Requests
   formula: SUM(TCC_RW_REQ_sum) / SUM($denom)
@@ -174,10 +169,9 @@ l2.streaming_req:
   formula: SUM(TCC_STREAMING_REQ_sum) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-
-    The total number of incoming requests to the L2 that are marked as streaming.
-    The exact meaning of this may differ depending on the targeted accelerator, however
-    on an MI2XX this corresponds to non-temporal load or stores. The L2 cache attempts
-    to evict streaming requests before normal requests when the L2 is at capacity.
+    The total number of incoming L2 requests marked as streaming; on MI2XX these are
+    non-temporal loads and stores. When the L2 is full, it evicts streaming requests
+    before normal ones.
 l2.uc_req:
   name: L2 UC Requests
   formula: SUM(TCC_UC_REQ_sum) / SUM($denom)
@@ -189,34 +183,33 @@ l2.util:
   formula: 100 * SUM(TCC_BUSY_sum) / SUM(TO_INT($total_l2_chan) * $GRBM_GUI_ACTIVE_PER_XCD)
   unit: Percent
   description: >-
-    The ratio of the number of cycles an L2 channel was active, summed over all L2
-    channels on the accelerator over the total L2 cycles.
+    Percentage of total L2 cycles an L2 channel was active, summed over all L2 channels
+    on the accelerator.
 l2.wr_req:
   name: L2 Write Requests
   formula: SUM(TCC_WRITE_sum) / SUM($denom)
   unit: (Requests + $normUnit)
-  description: >-
-    The total number of write requests to the L2 from all clients.
+  description: The total number of write requests to the L2 from all clients.
 l2.writeback:
   name: L2 Writebacks
   formula: SUM(TCC_WRITEBACK_sum) / SUM($denom)
   unit: (Cachelines + $normUnit)
   description: >-
-    The total number of L2 cache lines written back to memory for any reason. Write-backs
-    may occur due to user code (such as HIP kernel calls to _threadfence_system or
-    atomic built-ins) by the command processor's memory acquire/release fences, or
-    for other internal hardware reasons.
+    The total number of L2 cache lines written back to memory for any reason.
+    Write-backs may occur due to user code (such as HIP kernel calls to
+    _threadfence_system or atomic built-ins) by the command processor's memory
+    acquire/release fences, or for other internal hardware reasons.
 l2.writeback_internal:
   name: L2 Writebacks (Internal)
   formula: SUM(TCC_NORMAL_WRITEBACK_sum) / SUM($denom)
   unit: (Cachelines + $normUnit)
   description: >-
     The total number of L2 cache lines written back to memory for internal hardware
-    reasons, per normalization unit.
+    reasons.
 l2.writeback_vl1d_req:
   name: L2 Writebacks (vL1D Requests)
   formula: SUM(TCC_ALL_TC_OP_WB_WRITEBACK_sum) / SUM($denom)
   unit: (Cachelines + $normUnit)
   description: >-
     The total number of L2 cache lines written back to memory due to requests initiated
-    by the vL1D cache, per normalization unit.
+    by the vL1D cache.

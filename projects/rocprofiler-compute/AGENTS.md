@@ -21,6 +21,12 @@ or modifying any C++ or CMake code. It indexes one file per topic under
 `.ai/rules/cpp/`, covering the language version, performance, testability,
 callback boundaries, naming, comments, STL usage, and CMake.
 
+## Writing Style
+
+Read and follow **[`.ai/rules/writing-style.md`](.ai/rules/writing-style.md)** before
+writing documentation, code comments, docstrings, commit messages, pull request
+descriptions, or design documents. These rules cover sentence structure and word choice.
+
 ## Ruff
 
 All code in `src/` must pass Ruff checks. Read **[`.ai/rules/ruff.md`](.ai/rules/ruff.md)**
@@ -37,6 +43,12 @@ one, changing one, reviewing one, or answering questions about one.
 Scripts under `tools/` generate committed artifacts that must never be
 hand-edited. **[`CONTRIBUTING.md`](CONTRIBUTING.md)** says which change
 requires which script.
+
+Put tests for `tools/` scripts in `tools/test_*.py`. Register each module in
+`CMakeLists.txt` with its own `add_test` inside `if(NOT TEST_FROM_INSTALL)`,
+because the install tree has no `tools/`. Add its test name to each category
+in `tests/test_categories.yaml` and to every `*_exclude` list there, so CI skips
+it.
 
 ## Git Workflows
 

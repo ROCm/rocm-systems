@@ -32,29 +32,33 @@ class DisplayUnit:
 PLAIN = DisplayUnit("value")
 PERCENT = DisplayUnit("percent", "%")
 
+_BYTES = DisplayUnit("value", " B", 0)
+
 _DISPLAY_UNITS: dict[str, DisplayUnit] = {
     "Percent": PERCENT,
     "Bytes/s": DisplayUnit("bandwidth", " GB/s", 3, 1e-9),
-    "KB per Wave": DisplayUnit("value", " KB", 3),
-    "Bytes per Workgroup": DisplayUnit("value", " KB", 1, 1 / 1024),
+    "Bytes per Work-item": _BYTES,
+    "Bytes per Workgroup": _BYTES,
     "Cycles": DisplayUnit("value", " cycles"),
-    "Registers": DisplayUnit("value"),
+    "Registers": DisplayUnit("value", precision=0),
     "Workgroups per CU": DisplayUnit("value"),
     "Workgroups per WGP": DisplayUnit("value"),
 }
 
-# Per-normalization counts, e.g. "(Requests + $normUnit)"
-_COUNT_UNIT = re.compile(r"^\(\w+ \+ \$normUnit\)$")
-_COUNT = DisplayUnit("count")
+# Per-normalization counts, e.g. "(Requests + $normUnit)", shown with what they count
+_COUNT_UNIT = re.compile(r"^\((\w+) \+ \$normUnit\)$")
+_COUNT_SHORT = {"Instructions": "instr", "Requests": "req"}
 
 
 def display_unit(unit: Optional[str]) -> Optional[DisplayUnit]:
     """The display rule for *unit*, or None if it has none."""
     if unit in _DISPLAY_UNITS:
         return _DISPLAY_UNITS[unit]
-    if unit and _COUNT_UNIT.match(unit):
-        return _COUNT
-    return None
+    match = _COUNT_UNIT.match(unit) if unit else None
+    # A count unit without a label has no rule, so the unit tests name it
+    if match is None or match.group(1) not in _COUNT_SHORT:
+        return None
+    return DisplayUnit("count", " " + _COUNT_SHORT[match.group(1)])
 
 
 def panel_units(panel_config: dict[str, Any]) -> dict[str, str]:
@@ -88,5 +92,6 @@ def format_value(value: Union[int, float, str, None], unit: DisplayUnit) -> str:
     if number is None:
         return "N/A"
     if unit.kind == "count":
-        return str(round(number)) if abs(number) < 1000 else f"{number:.2e}"
+        shown = str(round(number)) if abs(number) < 1000 else f"{number:.2e}"
+        return shown + unit.suffix
     return f"{number * unit.scale:.{unit.precision}f}{unit.suffix}"

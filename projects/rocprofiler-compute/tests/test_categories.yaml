@@ -12,10 +12,29 @@ test_categories:
       - test_utils_counter_defs
       - test_metric_library_loader
       - test_metric_library_sync
+      - test_counter_grouping_inspector
+      - test_format_yaml
+      - test_generate_metric_health_report
+      - test_instruction_pipeline_generator
+      - test_memory_chart_layout_format
+      - test_memory_chart_preview
+      - test_schema_visualizer
+      - test_validate_metric_library
       - test_parser
       - test_argparser
       - test_utils_common
       - test_utils_analysis
+      - test_ml_api_tracing_marker_format
+      - test_ml_api_tracing_definitions
+      - test_ml_api_tracing_operator_patterns
+      - test_ml_api_tracing_trace_selection
+      - test_ml_api_tracing_errors
+      - test_ml_api_tracing_trace_csv
+      - test_ml_api_tracing_pass_matching
+      - test_ml_api_tracing_call_tree
+      - test_ml_api_tracing_output
+      - test_ml_api_tracing_selection
+      - test_ml_api_tracing_orchestrator
       - test_utils_profile
       - test_common
       - test_amdsmi_interface
@@ -44,9 +63,14 @@ test_categories:
       - test_file_io
       - test_utils_profile_csv
       - test_csv_compression
-      - test_inject_roctx_package
-      - test_inject_roctx_torch
-      - test_inject_roctx_torch_trace_collector
+      - test_ml_api_tracing_inject_roctx_installer
+      - test_ml_api_tracing_inject_roctx_marker_ranges
+      - test_ml_api_tracing_inject_roctx_launch
+      - test_ml_api_tracing_inject_roctx_triton
+      - test_ml_api_tracing_inject_roctx_torch
+      - test_ml_api_tracing_inject_roctx_torch_trace_collector
+      - test_ml_api_tracing_profiling_orchestrator
+      - test_ml_api_tracing_profiling_storage
       - test_conftest
       - test_memory_chart_loader
       - test_memory_chart_units
@@ -70,8 +94,26 @@ test_categories:
     therock_ci_exclude:
       - test_profile_live_attach_detach
       - test_metric_validation
+      - test_counter_grouping_inspector
+      - test_format_yaml
+      - test_generate_metric_health_report
+      - test_instruction_pipeline_generator
+      - test_memory_chart_layout_format
+      - test_memory_chart_preview
+      - test_metric_library_sync
+      - test_schema_visualizer
+      - test_validate_metric_library
     rocprofiler_compute_ci_exclude:
       - test_profile_live_attach_detach
+      - test_counter_grouping_inspector
+      - test_format_yaml
+      - test_generate_metric_health_report
+      - test_instruction_pipeline_generator
+      - test_memory_chart_layout_format
+      - test_memory_chart_preview
+      - test_metric_library_sync
+      - test_schema_visualizer
+      - test_validate_metric_library
     labels:
       - "quick"
       - "pre-commit"
@@ -96,6 +138,14 @@ test_categories:
       - test_utils_counter_defs
       - test_metric_library_loader
       - test_metric_library_sync
+      - test_counter_grouping_inspector
+      - test_format_yaml
+      - test_generate_metric_health_report
+      - test_instruction_pipeline_generator
+      - test_memory_chart_layout_format
+      - test_memory_chart_preview
+      - test_schema_visualizer
+      - test_validate_metric_library
       - test_parser
       - test_argparser
       - test_analyze_commands
@@ -106,6 +156,17 @@ test_categories:
       - test_mi_gpu_spec
       - test_utils_common
       - test_utils_analysis
+      - test_ml_api_tracing_marker_format
+      - test_ml_api_tracing_definitions
+      - test_ml_api_tracing_operator_patterns
+      - test_ml_api_tracing_trace_selection
+      - test_ml_api_tracing_errors
+      - test_ml_api_tracing_trace_csv
+      - test_ml_api_tracing_pass_matching
+      - test_ml_api_tracing_call_tree
+      - test_ml_api_tracing_output
+      - test_ml_api_tracing_selection
+      - test_ml_api_tracing_orchestrator
       - test_utils_profile
       - test_common
       - test_amdsmi_interface
@@ -134,9 +195,14 @@ test_categories:
       - test_file_io
       - test_utils_profile_csv
       - test_csv_compression
-      - test_inject_roctx_package
-      - test_inject_roctx_torch
-      - test_inject_roctx_torch_trace_collector
+      - test_ml_api_tracing_inject_roctx_installer
+      - test_ml_api_tracing_inject_roctx_marker_ranges
+      - test_ml_api_tracing_inject_roctx_launch
+      - test_ml_api_tracing_inject_roctx_triton
+      - test_ml_api_tracing_inject_roctx_torch
+      - test_ml_api_tracing_inject_roctx_torch_trace_collector
+      - test_ml_api_tracing_profiling_orchestrator
+      - test_ml_api_tracing_profiling_storage
       - test_inject_roctx_torch_gpu
       - test_profiler_base
       - test_rocprof_compute_base
@@ -170,8 +236,26 @@ test_categories:
     therock_ci_exclude:
       - test_profile_live_attach_detach
       - test_metric_validation
+      - test_counter_grouping_inspector
+      - test_format_yaml
+      - test_generate_metric_health_report
+      - test_instruction_pipeline_generator
+      - test_memory_chart_layout_format
+      - test_memory_chart_preview
+      - test_metric_library_sync
+      - test_schema_visualizer
+      - test_validate_metric_library
     rocprofiler_compute_ci_exclude:
       - test_profile_live_attach_detach
+      - test_counter_grouping_inspector
+      - test_format_yaml
+      - test_generate_metric_health_report
+      - test_instruction_pipeline_generator
+      - test_memory_chart_layout_format
+      - test_memory_chart_preview
+      - test_metric_library_sync
+      - test_schema_visualizer
+      - test_validate_metric_library
     labels:
       - "standard"
       - "pr"
@@ -204,6 +288,14 @@ test_categories:
       - test_utils_counter_defs
       - test_metric_library_loader
       - test_metric_library_sync
+      - test_counter_grouping_inspector
+      - test_format_yaml
+      - test_generate_metric_health_report
+      - test_instruction_pipeline_generator
+      - test_memory_chart_layout_format
+      - test_memory_chart_preview
+      - test_schema_visualizer
+      - test_validate_metric_library
       - test_parser
       - test_argparser
       - test_analyze_commands
@@ -214,6 +306,17 @@ test_categories:
       - test_mi_gpu_spec
       - test_utils_common
       - test_utils_analysis
+      - test_ml_api_tracing_marker_format
+      - test_ml_api_tracing_definitions
+      - test_ml_api_tracing_operator_patterns
+      - test_ml_api_tracing_trace_selection
+      - test_ml_api_tracing_errors
+      - test_ml_api_tracing_trace_csv
+      - test_ml_api_tracing_pass_matching
+      - test_ml_api_tracing_call_tree
+      - test_ml_api_tracing_output
+      - test_ml_api_tracing_selection
+      - test_ml_api_tracing_orchestrator
       - test_utils_profile
       - test_common
       - test_amdsmi_interface
@@ -242,9 +345,14 @@ test_categories:
       - test_file_io
       - test_utils_profile_csv
       - test_csv_compression
-      - test_inject_roctx_package
-      - test_inject_roctx_torch
-      - test_inject_roctx_torch_trace_collector
+      - test_ml_api_tracing_inject_roctx_installer
+      - test_ml_api_tracing_inject_roctx_marker_ranges
+      - test_ml_api_tracing_inject_roctx_launch
+      - test_ml_api_tracing_inject_roctx_triton
+      - test_ml_api_tracing_inject_roctx_torch
+      - test_ml_api_tracing_inject_roctx_torch_trace_collector
+      - test_ml_api_tracing_profiling_orchestrator
+      - test_ml_api_tracing_profiling_storage
       - test_inject_roctx_torch_gpu
       - test_profiler_base
       - test_rocprof_compute_base
@@ -278,8 +386,26 @@ test_categories:
     therock_ci_exclude:
       - test_profile_live_attach_detach
       - test_metric_validation
+      - test_counter_grouping_inspector
+      - test_format_yaml
+      - test_generate_metric_health_report
+      - test_instruction_pipeline_generator
+      - test_memory_chart_layout_format
+      - test_memory_chart_preview
+      - test_metric_library_sync
+      - test_schema_visualizer
+      - test_validate_metric_library
     rocprofiler_compute_ci_exclude:
       - test_profile_live_attach_detach
+      - test_counter_grouping_inspector
+      - test_format_yaml
+      - test_generate_metric_health_report
+      - test_instruction_pipeline_generator
+      - test_memory_chart_layout_format
+      - test_memory_chart_preview
+      - test_metric_library_sync
+      - test_schema_visualizer
+      - test_validate_metric_library
     labels:
       - "comprehensive"
       - "nightly"
@@ -312,6 +438,14 @@ test_categories:
       - test_utils_counter_defs
       - test_metric_library_loader
       - test_metric_library_sync
+      - test_counter_grouping_inspector
+      - test_format_yaml
+      - test_generate_metric_health_report
+      - test_instruction_pipeline_generator
+      - test_memory_chart_layout_format
+      - test_memory_chart_preview
+      - test_schema_visualizer
+      - test_validate_metric_library
       - test_parser
       - test_argparser
       - test_analyze_commands
@@ -322,6 +456,17 @@ test_categories:
       - test_mi_gpu_spec
       - test_utils_common
       - test_utils_analysis
+      - test_ml_api_tracing_marker_format
+      - test_ml_api_tracing_definitions
+      - test_ml_api_tracing_operator_patterns
+      - test_ml_api_tracing_trace_selection
+      - test_ml_api_tracing_errors
+      - test_ml_api_tracing_trace_csv
+      - test_ml_api_tracing_pass_matching
+      - test_ml_api_tracing_call_tree
+      - test_ml_api_tracing_output
+      - test_ml_api_tracing_selection
+      - test_ml_api_tracing_orchestrator
       - test_utils_profile
       - test_common
       - test_amdsmi_interface
@@ -350,9 +495,14 @@ test_categories:
       - test_file_io
       - test_utils_profile_csv
       - test_csv_compression
-      - test_inject_roctx_package
-      - test_inject_roctx_torch
-      - test_inject_roctx_torch_trace_collector
+      - test_ml_api_tracing_inject_roctx_installer
+      - test_ml_api_tracing_inject_roctx_marker_ranges
+      - test_ml_api_tracing_inject_roctx_launch
+      - test_ml_api_tracing_inject_roctx_triton
+      - test_ml_api_tracing_inject_roctx_torch
+      - test_ml_api_tracing_inject_roctx_torch_trace_collector
+      - test_ml_api_tracing_profiling_orchestrator
+      - test_ml_api_tracing_profiling_storage
       - test_inject_roctx_torch_gpu
       - test_profiler_base
       - test_rocprof_compute_base
@@ -386,8 +536,26 @@ test_categories:
     therock_ci_exclude:
       - test_profile_live_attach_detach
       - test_metric_validation
+      - test_counter_grouping_inspector
+      - test_format_yaml
+      - test_generate_metric_health_report
+      - test_instruction_pipeline_generator
+      - test_memory_chart_layout_format
+      - test_memory_chart_preview
+      - test_metric_library_sync
+      - test_schema_visualizer
+      - test_validate_metric_library
     rocprofiler_compute_ci_exclude:
       - test_profile_live_attach_detach
+      - test_counter_grouping_inspector
+      - test_format_yaml
+      - test_generate_metric_health_report
+      - test_instruction_pipeline_generator
+      - test_memory_chart_layout_format
+      - test_memory_chart_preview
+      - test_metric_library_sync
+      - test_schema_visualizer
+      - test_validate_metric_library
     labels:
       - "full"
       - "weekly"

@@ -66,57 +66,59 @@ There are three high-level GPU analysis views:
 .. code-block:: text
 
    3. Memory Chart (Normalization: per_kernel)
-                                                                                                                   ╭──────────────────────╮
-                                                                                                                   │ xGMI (to Peer GPU)   │
-                                                                                                                   ╰──────────────────────╯
-                                                                                                                      ||  Read BW    0.000 GB/s
-                                                                                                                      ||  Write BW   0.000 GB/s
-                                                                                                                      ||  Atomic BW  0.000 GB/s
-   |-------------------------------------------------- GPU (XCD) --------------------------------------------------|------------------------------------------ Fabric / Memory ------------------------------------------|
+                                                                                                                                             ╭────────────────────╮
+                                                                                                                                             │ xGMI (to Peer GPU) │
+                                                                                                                                             ╰────────────────────╯
+                                                                                                                                                ||  Read BW    0.000 GB/s
+                                                                                                                                                ||  Write BW   0.000 GB/s
+                                                                                                                                                ||  Atomic BW  0.000 GB/s
+   |--------------------------------------------------------------- GPU (XCD) ---------------------------------------------------------------|-------------------------------------------------- Fabric / Memory ---------------------------------------------------|
 
-   ╭── Compute Units ───╮Non-buffer Request╭─────── VL1D ───────╮Read BW      ╭──────── L2 ────────╮               ╭─── Data Fabric ────╮               ╭─────── MALL ───────╮╭─────── UMC ────────╮╭─────── HBM ────────╮
-   │ Wave Occ 75.1%     │Read   : 1.64e+04 │ Hit 62.0%          │1513.097 GB/s│ Hit 34.0%          │               │                    │               │                    ││                    ││ Read BW            │
-   │ vGPRs 4.0          │<---------------  │ ██████░░░░         │<----------- │ ███░░░░░░░         │               │                    │               │                    ││                    ││ 1513.882 GB/s      │
-   │ sGPRs 16.0         │Write  : 1.64e+04 │                    │             │                    │               │                    │               │                    ││                    ││                    │
-   │ Scratch/Wave       │--------------->  │ Coalesce 25.0%     │Write BW     │                    │               │                    │               │                    ││                    ││ Write BW           │
-   │ 0.000 KB           │Atomic :       0  │ ██░░░░░░░░         │1513.097 GB/s│                    │               │                    │               │                    ││                    ││ 1513.097 GB/s      │
-   │ LDS Alloc 0.0 KB   │<-------------->  │                    │-----------> │                    │               │                    │               │                    ││                    ││                    │
-   │ Workgroups/CU 62.1 │Buffer Request    │                    │             │                    │               │                    │               │                    ││                    ││ Atomic BW          │
-   │                    │Read   :       0  │                    │Atomic BW    │                    │               │                    │               │                    ││                    ││ 0.000 GB/s         │
-   │                    │<---------------  │                    │0.000 GB/s   │                    │               │                    │               │                    ││                    ││                    │
-   │                    │Write  :       0  │                    │<----------> │                    │               │                    │               │                    ││                    ││                    │
-   │                    │--------------->  │                    │             │                    │               │                    │               │                    ││                    ││                    │
-   │                    │Atomic :       0  │                    │             │                    │               │                    │               │                    ││                    ││                    │
-   │                    │<-------------->  │                    │             │                    │Read BW        │                    │Read BW        │                    ││                    ││                    │
-   │                    │                  │                    │             │                    │1513.882 GB/s  │                    │1513.882 GB/s  │                    ││                    ││                    │
-   │                    │                  ╰────────────────────╯             │                    │<-----------   │                    │<-----------   │                    ││                    ││                    │
-   │                    │Read   :       0  ╭─────── LDS ────────╮             │                    │               │                    │               │                    ││                    ││                    │
-   │                    │<---------------  │ Util 0.0%          │             │                    │Write/Atomic BW│                    │Write/Atomic BW│                    ││                    ││                    │
-   │                    │Write  :       0  │ ░░░░░░░░░░         │             │                    │1513.097 GB/s  │                    │1513.097 GB/s  │                    ││                    ││                    │
-   │                    │--------------->  │                    │             │                    │----------->   │                    │----------->   │                    ││                    ││                    │
-   │                    │Atomic :       0  │                    │             │                    │               │                    │               │                    ││                    ││                    │
-   │                    │<-------------->  │                    │             │                    │               │                    │               │                    ││                    ││                    │
-   │                    │Instr  :       0  │                    │             │                    │               │                    │               │                    ││                    ││                    │
-   │                    │<-------------->  │                    │             │                    │               │                    │               │                    ││                    ││                    │
-   │                    │                  │                    │             │                    │               │                    │               │                    ││                    ││                    │
-   │                    │                  ╰────────────────────╯             │                    │               │                    │               │                    ││                    ││                    │
-   │                    │SMEM              ╭─────── sL1D ───────╮Read BW      │                    │               │                    │               │                    ││                    ││                    │
-   │                    │Read   : 6.55e+04 │ Hit 93.0%          │1.674 GB/s   │                    │               │                    │               │                    ││                    ││                    │
-   │                    │<---------------  │ █████████░         │<----------- │                    │               │                    │               │                    ││                    ││                    │
-   │                    │                  ╰────────────────────╯             │                    │               │                    │               │                    ││                    ││                    │
-   │                    │ICACHE            ╭─────── L1I ────────╮Read BW      │                    │               │                    │               │                    ││                    ││                    │
-   │                    │Read   : 6.55e+04 │ Hit 93.0%          │6.696 GB/s   │                    │               │                    │               │                    ││                    ││                    │
-   │                    │<---------------  │ █████████░         │<----------- │                    │               │                    │               │                    ││                    ││                    │
-   ╰────────────────────╯                  ╰────────────────────╯             ╰────────────────────╯               ╰────────────────────╯               ╰────────────────────╯╰────────────────────╯╰────────────────────╯
+   ╭─────── Compute Units ────────╮                        ╭───────── vL1D ─────────╮              ╭────────── L2 ──────────╮                ╭───── Data Fabric ──────╮                ╭───────── MALL ─────────╮╭───────── UMC ──────────╮╭───────── HBM ──────────╮
+   │ Wavefront Occupancy 19.4%    │Non-buffer Request      │ Hit 62.5%              │Read BW       │ Hit 33.6%              │                │                        │                │                        ││                        ││ Read BW 1598.355 GB/s  │
+   │ █░░░░░░░░░                   │Read   : 1.64e+04 instr │ ██████░░░░             │1569.627 GB/s │ ███░░░░░░░             │                │                        │                │                        ││                        ││                        │
+   │ VGPRs 4                      │<---------------------- │                        │<------------ │                        │                │                        │                │                        ││                        ││ Write BW 1542.685 GB/s │
+   │ SGPRs 16                     │Write  : 1.64e+04 instr │ Coalesce 25.0%         │              │                        │                │                        │                │                        ││                        ││                        │
+   │ AGPRs 4                      │----------------------> │ ██░░░░░░░░             │Write BW      │                        │                │                        │                │                        ││                        ││ Atomic BW 0.000 GB/s   │
+   │ Scratch Allocation 0 B       │Atomic :        0 instr │                        │1513.097 GB/s │                        │                │                        │                │                        ││                        ││                        │
+   │ LDS Allocation 0 B           │<---------------------> │                        │------------> │                        │                │                        │                │                        ││                        ││                        │
+   │ Workgroups per CU 62.1       │Buffer Request          │                        │              │                        │                │                        │                │                        ││                        ││                        │
+   │                              │Read   :        0 instr │                        │Atomic BW     │                        │                │                        │                │                        ││                        ││                        │
+   │                              │<---------------------- │                        │0.000 GB/s    │                        │                │                        │                │                        ││                        ││                        │
+   │                              │Write  :        0 instr │                        │<-----------> │                        │                │                        │                │                        ││                        ││                        │
+   │                              │----------------------> │                        │              │                        │                │                        │                │                        ││                        ││                        │
+   │                              │Atomic :        0 instr │                        │              │                        │                │                        │                │                        ││                        ││                        │
+   │                              │<---------------------> │                        │              │                        │Read BW         │                        │Read BW         │                        ││                        ││                        │
+   │                              │                        ╰────────────────────────╯              │                        │1513.882 GB/s   │                        │1598.355 GB/s   │                        ││                        ││                        │
+   │                              │                        ╭───────── LDS ──────────╮              │                        │<-------------- │                        │<-------------- │                        ││                        ││                        │
+   │                              │Read   :        0 instr │ Util 0.0%              │              │                        │                │                        │                │                        ││                        ││                        │
+   │                              │<---------------------- │ ░░░░░░░░░░             │              │                        │Write/Atomic BW │                        │Write/Atomic BW │                        ││                        ││                        │
+   │                              │Write  :        0 instr │                        │              │                        │1513.097 GB/s   │                        │1513.097 GB/s   │                        ││                        ││                        │
+   │                              │----------------------> │                        │              │                        │--------------> │                        │--------------> │                        ││                        ││                        │
+   │                              │Atomic :        0 instr │                        │              │                        │                │                        │                │                        ││                        ││                        │
+   │                              │<---------------------> │                        │              │                        │                │                        │                │                        ││                        ││                        │
+   │                              │Instr  :        0 instr │                        │              │                        │                │                        │                │                        ││                        ││                        │
+   │                              │<---------------------> │                        │              │                        │                │                        │                │                        ││                        ││                        │
+   │                              │                        ╰────────────────────────╯              │                        │                │                        │                │                        ││                        ││                        │
+   │                              │                        ╭───────── sL1D ─────────╮              │                        │                │                        │                │                        ││                        ││                        │
+   │                              │SMEM                    │ Hit 93.1%              │Read BW       │                        │                │                        │                │                        ││                        ││                        │
+   │                              │Read   :   6.55e+04 req │ █████████░             │1.674 GB/s    │                        │                │                        │                │                        ││                        ││                        │
+   │                              │<---------------------- │                        │<------------ │                        │                │                        │                │                        ││                        ││                        │
+   │                              │                        ╰────────────────────────╯              │                        │                │                        │                │                        ││                        ││                        │
+   │                              │                        ╭───────── L1I ──────────╮              │                        │                │                        │                │                        ││                        ││                        │
+   │                              │ICACHE                  │ Hit 93.2%              │Read BW       │                        │                │                        │                │                        ││                        ││                        │
+   │                              │Read   :   6.55e+04 req │ █████████░             │6.696 GB/s    │                        │                │                        │                │                        ││                        ││                        │
+   │                              │<---------------------- │                        │<------------ │                        │                │                        │                │                        ││                        ││                        │
+   ╰──────────────────────────────╯                        ╰────────────────────────╯              ╰────────────────────────╯                ╰────────────────────────╯                ╰────────────────────────╯╰────────────────────────╯╰────────────────────────╯
 
-                                                                                                                      ||  Read BW    0.000 GB/s
-                                                                                                                      ||  Write BW   0.000 GB/s
-                                                                                                                      ||  Atomic BW  0.000 GB/s
-                                                                                                        ╭────────────────────────────────────────────╮
-                                                                                                        │ PCIe (to CPU or Non-xGMI connected GPU)    │
-                                                                                                        ╰────────────────────────────────────────────╯
+                                                                                                                                                ||  Read BW    0.000 GB/s
+                                                                                                                                                ||  Write BW   0.000 GB/s
+                                                                                                                                                ||  Atomic BW  0.000 GB/s
+                                                                                                                                             ╭─────────────────────────────────────────╮
+                                                                                                                                             │ PCIe (to CPU or Non-xGMI connected GPU) │
+                                                                                                                                             ╰─────────────────────────────────────────╯
 
-   Legend: <---- Read  ----> Write  <---> Atomic  █ Util  █ Hit%
+   Legend: <---- Read  ----> Write  <---> Atomic  █ Util %  █ Hit %
 
 .. _cli-memory-chart-viewing:
 
@@ -790,6 +792,10 @@ lists the operators and ignores ``--operator``.
 List all operators
 ---------------------
 
+``--list-operators`` accepts ``torch``, ``triton``, and ``user``, separated
+by spaces. For example, ``--list-operators torch user`` lists both groups.
+With no values, it lists every captured operator and user ROCTx region.
+
 Display all PyTorch operators captured during profiling:
 
 .. code-block:: shell-session
@@ -859,9 +865,11 @@ Filtering by Operator
 case-sensitive. A pattern can match an operator's name or its full call path,
 such as ``nn.Module.Net.forward/aten::addmm``.
 
-A prefix limits a pattern to one framework, as in ``torch:*relu*``. A pattern
-without a prefix uses the prefix before it. If no prefix comes before it, the
-pattern matches every traced framework and user ROCTx regions.
+Use ``torch:``, ``triton:``, or ``user:`` to limit a pattern to that group.
+A pattern without a prefix uses the most recent prefix. Before any prefix,
+the pattern matches every traced framework and user ROCTx regions.
+Separate patterns with spaces and quote them so the shell does not expand
+them. A comma is part of the pattern; it does not separate patterns.
 
 * **Wildcard** — ``*relu*`` matches any operator whose name contains ``relu``.
 * **Call path** — ``*/aten::addmm`` matches ``aten::addmm`` when another
@@ -958,6 +966,9 @@ Analyze mode has these debug options:
 
 * ``--debug-metric-expression``: Print the counter data, and each metric's
   expression and inputs.
+
+* ``--debug-table-decimal <digits>``: Print the analyze tables with ``<digits>``
+  decimals instead of 2. The memory chart sets the decimals of each unit itself.
 
 * ``--debug-table-view``: Print every block as plain tables, including blocks
   that are normally drawn as a memory chart or a per-kernel roofline layout.

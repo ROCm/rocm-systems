@@ -20,7 +20,6 @@ from utils import schema
 from utils.file_io import validate_kernel_filter_ids
 from utils.logger import console_error, console_warning, demarcate
 from utils.metrics.evaluation_pipeline import eval_metric
-from utils.pattern_matching import fnmatch_glob_matches
 from utils.specs import MachineSpecs
 from utils.utils_analysis import pass_tables_on_rows
 from utils.utils_common import (
@@ -34,7 +33,11 @@ from utils.utils_common import (
     metric_ids_by_name,
     normalize_filter_to_str_list,
 )
-from utils.utils_counter_defs import metric_expressions, metric_value_keys
+from utils.utils_counter_defs import (
+    is_simple_box_table,
+    metric_expressions,
+    metric_value_keys,
+)
 
 # ------------------------------------------------------------------------------
 # Internal global definitions
@@ -200,15 +203,12 @@ def _build_metric_table_df(
     """
     table_id = data_config["id"]
     table_data_source_idx = format_table_id(table_id)
-    is_simple_box = data_config.get("cli_style") == "simple_box"
+    is_simple_box = is_simple_box_table(data_config)
 
     headers: list[str] = ["Metric_ID", data_config["header"]["metric"]]
     value_keys = metric_value_keys(data_config)
     if is_simple_box:
         headers.extend(simple_box)
-        for key, tile in data_config["header"].items():
-            if key != "metric" and key != "expr":
-                headers.append(tile)
     else:
         for key, tile in data_config["header"].items():
             if key != "metric":
@@ -290,7 +290,7 @@ def apply_kernel_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.DataF
     )
 
     # Extract kernel names and mark selected kernels with "*"
-    # TODO: fix it for unaligned comparison
+    # Unaligned comparison is not handled.
     selected_kernels = []
     kernel_top_dataframe["Selected"] = ""
 
@@ -347,7 +347,7 @@ def apply_dispatch_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.Dat
 
 def _apply_gpu_filter(workload: schema.Workload) -> pd.DataFrame:
     """Apply the requested GPU IDs before other row filters."""
-    # TODO: error out properly if filters out of bound
+    # GPU IDs outside the collected range match no rows and raise no error.
     filtered_df = workload.raw_pmc
 
     if workload.filter_gpu_ids:
@@ -575,11 +575,6 @@ def load_non_mertrics_table(
             )
 
     workload.dfs.update(tmp)
-
-
-def torch_operator_pattern_matches(pattern: str, operator_name: str) -> bool:
-    """Return True if *pattern* glob-matches *operator_name* hierarchy path."""
-    return fnmatch_glob_matches(pattern, operator_name)
 
 
 @demarcate

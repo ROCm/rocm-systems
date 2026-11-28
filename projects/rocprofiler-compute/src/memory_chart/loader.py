@@ -17,7 +17,11 @@ from typing import Any, Dict, NoReturn, Optional, Tuple
 import config
 from membw_analysis.models import BOTTLENECK_LEVELS
 from utils.logger import console_warning
-from utils.utils_common import canonical_config_arch, load_panel_configs
+from utils.utils_common import (
+    MEMORY_CHART_PANEL_ID,
+    canonical_config_arch,
+    load_panel_configs,
+)
 
 LAYOUTS_DIR = config.rocprof_compute_home / "memory_chart" / "layouts"
 
@@ -39,7 +43,7 @@ class Keys:
 
 
 # Version of the layout format; README.md says when to bump it
-LAYOUT_VERSION = "1.0.0"
+LAYOUT_VERSION = "1.1.0"
 
 # Each Keys lists every key in file order, then the keys a file may leave out
 LAYOUT_KEYS = Keys(("archs", "description", "scope", "blocks", "arrows"))
@@ -175,21 +179,8 @@ class PanelConfigs:
         """The memory chart panel config of *arch*, or None if it has none."""
         if arch not in cls._by_arch:
             panels = load_panel_configs([str(config.analysis_configs_dir / arch)])
-            cls._by_arch[arch] = next(
-                (panel for panel in panels.values() if is_memory_chart_panel(panel)),
-                None,
-            )
+            cls._by_arch[arch] = panels.get(MEMORY_CHART_PANEL_ID)
         return cls._by_arch[arch]
-
-
-def is_memory_chart_panel(panel: dict[str, Any]) -> bool:
-    """True when every table of a panel config is drawn as the memory chart."""
-    sources = panel.get("data source") or []
-    return bool(sources) and all(
-        table.get("cli_style") == "mem_chart"
-        for source in sources
-        for table in source.values()
-    )
 
 
 def layout_files() -> list[Path]:
@@ -409,8 +400,6 @@ def _block(
     if children and {"content", "stall_level"} & set(raw):
         _fail(path, f"{block_id!r} has nested blocks, so its metrics go in them")
     items = tuple(_item(path, entry) for entry in raw.get("content", []))
-    if raw["style"] == "list" and any(item.bar for item in items):
-        _fail(path, f"{block_id!r} is a compact list, so its metrics have no bar")
     return LayoutBlock(
         id=block_id,
         title=raw["title"],

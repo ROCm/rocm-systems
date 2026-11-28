@@ -51,12 +51,20 @@ NESTED = {
 ABOVE = {"id": "outer", "title": "Outer", "column": 4, "row": -1, "style": "panel"}
 
 
+def panel_tables(arch):
+    """The memory chart table configs of an arch."""
+    return [
+        table
+        for source in PanelConfigs.for_arch(arch)["data source"]
+        for table in source.values()
+    ]
+
+
 def panel_metric_ids(arch):
     """Memory chart metric ids of an arch."""
     return {
         metric_id
-        for source in PanelConfigs.for_arch(arch)["data source"]
-        for table in source.values()
+        for table in panel_tables(arch)
         for metric_id in metric_ids_by_name(table).values()
     }
 
@@ -224,7 +232,6 @@ def test_block_list_order_does_not_matter(tmp_path):
         (with_blocks({**NESTED, "column": 2}), "the column of 'mall'"),
         (with_blocks({**NESTED, "parent": "inner"}), "nest inside each other"),
         (with_blocks({**NESTED, "parent": "vl1d", "column": 1}), "nested blocks"),
-        (with_metric_change("3.1.1", bar=True), "compact list"),
         (with_metric_change("3.1.28", category="x"), "category"),
         (with_metric_change("3.1.28", bar=1), "bar of '3.1.28'"),
         (with_metric_change("3.1.28", metric_id=None), "metric_id of None"),
@@ -268,7 +275,6 @@ def test_block_list_order_does_not_matter(tmp_path):
         "nested-block-in-another-column",
         "parent-cycle",
         "parent-has-metrics",
-        "bar-in-a-list",
         "metric-category",
         "bar-not-a-bool",
         "metric-id-not-a-string",

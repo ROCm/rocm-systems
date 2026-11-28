@@ -332,47 +332,115 @@ ruff format .
 Metric equations in YAML config files follow a canonical format. The canonical
 implementation is [`tools/format_yaml.py`](tools/format_yaml.py).
 
-**Scope.** Equation formatting applies to YAML files under:
+**Scope.** The formatter checks these YAML files under `src/rocprof_compute_soc/`:
 
-- `src/rocprof_compute_soc/analysis_configs/gfx*/*.yaml`
+- `analysis_configs/gfx*/*.yaml` (panel configs)
+- `metric_library/<arch>/*.yaml`, including `collectables.yaml`
+- `analysis_configs/collectables/<arch>_collectables.yaml` (panel collectables)
 
-Template files (`*_template.yaml`) and build artifacts are excluded. Only values
-under these keys are treated as equations: `value`, `avg`, `min`, `max`, `peak`.
+It skips template files (`*_template.yaml`) and build artifacts. In the panel configs
+and metric library files, the equations are the values of these keys: `value`, `avg`,
+`min`, `max`, `std dev`, `expr`, `peak`, `formula` and `peak_empirical`. Table headers
+use the same keys for column titles, so the formatter skips them. In the panel
+collectables files, every top-level value is an equation.
 
 **Rules.**
 
-- **Operator spacing** — all binary operators (`+`, `-`, `*`, `/`) have exactly
-  one space on each side: `SUM(x) / SUM(y)`.
-- **Constant factoring** — when an aggregation (`SUM`, `AVG`, `MIN`, `MAX`)
-  multiplies by a numeric constant, factor it out:
-  `128 * SUM(x)`, not `SUM(x * 128)`. Addition inside aggregations is left as-is.
-- **Minimal parentheses** — remove parentheses made redundant by operator
-  precedence (`a + b + c`, not `(a + b) + c`), but preserve those required for
-  correct evaluation (`a - (b - c)`, `(a + b) * c`).
-- **Unary negation** — negation of a compound expression keeps its parentheses:
-  `-(a + b)`, not `-a + b`.
-- **Literal values** — `N/A`, `None`, `null`, `true`, `false`, and
-  `Peak (Empirical)` are never parsed as equations and must be written exactly
-  as shown (the space before `(` in `Peak (Empirical)` is required).
+- Operator spacing: each binary operator (`+`, `-`, `*`, `/`) has one space on each
+  side, as in `SUM(x) / SUM(y)`.
+- Constant factoring: a number that multiplies the single argument of an aggregation
+  (`SUM`, `AVG`, `MIN`, `MAX`) moves out of the call, so `SUM(x * 128)` becomes
+  `128 * SUM(x)`. A sum or a quotient inside an aggregation stays as written.
+- Minimal parentheses: the formatter removes parentheses that operator precedence
+  makes redundant, so `(a + b) + c` becomes `a + b + c`. A right operand of the same
+  precedence keeps its parentheses, and so does an operand whose parentheses change
+  the order of evaluation. `a - (b - c)`, `a + (b + c)` and `(a + b) * c` stay as
+  written.
+- Unary minus: a minus sign before an operation keeps its parentheses, so `-(a + b)`
+  does not become `-a + b`.
+- Left as written: the formatter does not parse per-channel templates such as
+  `TCC_HIT[::_1]`. A cell without a value is written `None`.
 
-Equations with unsupported syntax (unknown characters, unmatched parentheses) are
-left unchanged; the formatter never corrupts an equation it cannot fully parse.
+The formatter reports each equation that it cannot parse, such as one with an
+unknown character, an unmatched parenthesis or a missing operand. The report gives
+the key of the equation and the parser message. The formatter leaves the equation
+unchanged, so fix it by hand.
 
 **Enforcement.** The `yaml-format-fix` pre-commit hook runs
 `tools/format_yaml.py --fix` on staged config files and auto-corrects equations
 in place. Re-stage the modified files and commit again.
 
 ```bash
+# Report equations that need formatting
+python tools/format_yaml.py --check src/rocprof_compute_soc/analysis_configs/gfx950/*.yaml
+
 # Show proposed changes
-python tools/format_yaml.py --diff src/rocprof_compute_soc/analysis_configs/gfx950/*.yaml
+python tools/format_yaml.py --diff src/rocprof_compute_soc/metric_library/gfx950/*.yaml
 
 # Auto-fix in place
-python tools/format_yaml.py --fix src/rocprof_compute_soc/analysis_configs/gfx950/*.yaml
+python tools/format_yaml.py --fix src/rocprof_compute_soc/analysis_configs/collectables/*.yaml
 ```
+
+`tools/test_format_yaml.py` tests the formatter.
 
 ## Documentation Changes
 
 For instructions on building and testing changes to files under the `docs/` folder, see the [ROCm documentation contributing guide](https://rocm.docs.amd.com/en/latest/contribute/contributing.html).
+
+## Writing Style
+
+These rules cover how sentences read in documentation, code comments, docstrings, commit messages, pull request descriptions, and design documents. They cover the language only, not what to write. Plain sentences make review faster.
+
+### Rules
+
+- Write short sentences. Give each sentence one idea.
+- Put the subject and the main verb first. Do not open a sentence with a long clause.
+- Add extra detail in a "which" clause or in a second sentence.
+- Use ordinary words. Avoid jargon such as "rolls up to".
+- Use the domain word when one exists, such as "aggregate" instead of "add up".
+- Say what happens, not how the code makes it happen.
+- Reuse the terms that the user docs already define. Define any new term the first time you use it.
+- Name the concrete thing, such as "per-kernel ISA CSV" or "source line". Do not write a bare "row", "line", "file", or "it" when the reader cannot tell which one you mean.
+- Call a metric a "metric", not a "row".
+- When classes with similar names exist in several modules, qualify each with its module, for example `analysis_orm.InstructionLine` and `pc_sampling_analysis.InstructionLineRecord`.
+- Write grammatical sentences, not fragments.
+- Do not stack nouns. Turn the stack into a sentence with a verb.
+- Do not end a relative clause with a preposition. Rewrite "the X that Y gave Z" as "X with Z" or "X without Z".
+- Keep the normal order of subject, verb, and object.
+- Put one point in each bullet, also inside note boxes in `.rst` files.
+- Join ideas with periods, commas, parentheses, or colons. Do not use em dashes or en dashes. Hyphens in compound words are fine.
+
+### Examples
+
+**Long clause before the verb**
+
+- Bad: "Where ROCm Compute Profiler runs, for example on the host when the process is in a container, use the ROCprofiler-SDK from the same ROCm release as ROCm Compute Profiler or a newer one."
+- Good: "ROCm Compute Profiler needs ROCprofiler-SDK from the same ROCm release, or a newer one."
+
+**How instead of what**
+
+- Bad: "`_` is left out of the safe set so a run of them collapses to the one replacing it."
+- Good: "Consecutive underscores are collapsed into one."
+
+**Relative clause ending in a preposition**
+
+- Bad: `Skip the rows that "?" frames are stored as.`
+- Good: `Skip "?" frames, which are stored without a line number.`
+
+**Relative clause with two objects**
+
+- Bad: "the instructions that the compiler gave no line number"
+- Good: "instructions without a source line number"
+
+**Inverted order**
+
+- Bad: "A source line's counts add up the instructions whose inline stack names it."
+- Good: "The counts of a source line are the sums over all instructions whose inline stack includes that source line."
+
+**Noun stack**
+
+- Bad: "RDNA 3.5 and RDNA 4 specs with GL1 count and GDDR channel fields."
+- Good: "Specs of RDNA 3.5 and RDNA 4 GPUs. They also hold the number of GL1 caches and of GDDR channels."
 
 ## Writing for Users
 
@@ -396,11 +464,15 @@ A metric whose counters do not fit one profiling pass is split into collectables
 
 ### Metric Library
 
-The metric library in `src/rocprof_compute_soc/metric_library/` defines each metric once per architecture. Until production reads the library, a metric change goes into both the panel YAMLs and the metric library. See the [metric library README](./src/rocprof_compute_soc/metric_library/README.md) for its layout, inheritance and checks.
+The metric library in `src/rocprof_compute_soc/metric_library/` defines each metric once per architecture. Until production reads the library, a metric change goes into both the panel YAMLs and the metric library. See the [metric library README](./src/rocprof_compute_soc/metric_library/README.md) for its layout, inheritance and checks, and its [description rules](./src/rocprof_compute_soc/metric_library/README.md#descriptions) before writing a metric description.
+
+`tools/test_metric_library_sync.py` checks that the metric library matches the panel YAMLs.
 
 ## Memory Chart Layouts
 
 The memory chart is drawn from one JSON layout per architecture family. To add or change a layout, see the [memory chart layouts README](./src/memory_chart/README.md).
+
+`tools/test_memory_chart_layout_format.py` and `tools/test_memory_chart_preview.py` test the layout formatter and the preview script.
 
 ## Analysis Database Schema Diagrams
 
@@ -418,9 +490,11 @@ the ORM metadata for the schema diagram, and materializes the views in a
 throwaway database to read back their real columns for the views diagram, so
 neither diagram can drift from the code. Do not edit the PNGs by hand.
 
+`tools/test_schema_visualizer.py` tests the diagram generator.
+
 ## Instruction Execution Pipeline Table
 
-[`src/rocprof_compute_soc/analysis_configs/instruction_pipelines.yaml`](src/rocprof_compute_soc/analysis_configs/instruction_pipelines.yaml)
+[`src/pc_sampling/instruction_pipelines.yaml`](src/pc_sampling/instruction_pipelines.yaml)
 is generated, not written by hand. Rerun the generator when a new GPU family
 needs support, or when an instruction shows up with an empty type in analyze,
 and commit the regenerated file as is:
@@ -432,6 +506,8 @@ and commit the regenerated file as is:
 This requires `llvm-tblgen` and `llvm-objdump` from ROCm (set `ROCM_PATH` if
 they are not under `/opt/rocm`) and network access. Do not edit the YAML by
 hand.
+
+`tools/test_instruction_pipeline_generator.py` tests the generator.
 
 ## Vendoring External Dependencies
 
@@ -475,13 +551,16 @@ These tests are automatically protected by guards in `tests/conftest.py` when te
 The guard intercepts ALL imports (direct, nested, dynamic) and fails tests immediately if
 non-stdlib packages are imported.
 
+Only integration tests use `ProfileModeImportGuard`. Unit tests don't check
+profile-mode imports.
+
 ### What's Allowed
 
 **Python standard library** (Python 3.8+):
 - `json`, `csv`, `sqlite3`, `subprocess`, `pathlib`, `logging`, `sys`, `os`, etc.
 
 **Project modules**:
-- `rocprof_compute`, `utils`, `vendored.*`, `roofline`, `config`, `argparser`
+- `rocprof_compute`, `utils`, `ml_api_tracing`, `vendored.*`, `roofline`, `config`, `argparser`
 
 **ROCm system libraries** (bundled with ROCm, not pip packages):
 - `amdsmi` - AMD System Management Interface
