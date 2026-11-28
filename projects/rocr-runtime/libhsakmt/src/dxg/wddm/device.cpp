@@ -323,8 +323,11 @@ hsa_status_t WDDMDevice::QueryNonLocalVramUsage(
 
 uint64_t WDDMDevice::VramTotal() {
   uint64_t total = LocalHeapSize();
-  if (!IsDgpu())
-    total += NonLocalHeapSize();
+  if (!IsDgpu()) {
+    // cap GART contribution to 4/5 (addressable + runtime headroom); validated on both ROCr Windows and WSL. dGPU unaffected (no GART spill).
+    const uint64_t gart = NonLocalHeapSize();
+    total += (gart / 5) * 4;
+  }
   return total;
 }
 
