@@ -117,9 +117,21 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
         return cluster_id;
     };
 
+    // The generator's sticky loss flag also controls which tokens it returns, so
+    // leave it alone. Markers stop decoding at every loss, including one that
+    // arrives while an earlier loss is still pending.
+    uint64_t marker_losses = generator.packetloss_count;
+    stitch.markerSetRegisters(csregister);
+
     while (generator.nextValid())
     {
+        if (stitch.records().status() != ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS) return;
         Token token = generator.next();
+        if (generator.packetloss_count != marker_losses)
+        {
+            marker_losses = generator.packetloss_count;
+            stitch.markerPacketLoss();
+        }
 
         switch (token.type)
         {
@@ -159,6 +171,7 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                 {
                     fields.spm_or_pl = 0;
                     generate_event(ROCPROF_TRACE_DECODER_EVENT_PACKET_LOSS);
+                    stitch.markerPacketLoss();
                     info.bPacketLost = true;
                 }
 
@@ -293,6 +306,7 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
 
                     if (isCtxSave)
                     {
+                        stitch.markerContextSave(start.SACU(), start.simd, start.wid);
                         auto it = running_waves.find(start.getGPULocation());
                         if (it != running_waves.end())
                         {
@@ -315,6 +329,7 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                     }
                     else if (isCtxResr)
                     {
+                        stitch.markerContextRestore(start.SACU(), start.simd, start.wid);
                         pcinfo_t addr{0, 0};
                         if (auto it = saved_waves.find(start.getGPULocation()); it != saved_waves.end())
                             addr = it->second.pc;
@@ -371,6 +386,7 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                     cluster_id,
                     current_dispatch_id.at_reg(start),
                 });
+                stitch.markerWaveStart(start.SACU(), start.simd, start.wid, wave_addr);
                 if (double_buffer && occupancy.size() >= MAX_ACCUM_RECORDS) send_occupancy();
 
                 if (bIsTarget)
@@ -439,6 +455,12 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                      0,
                      pipe.dispatch_id}
                 );
+                {
+                    pcinfo_t entry = pipe.pc;
+                    if (entry.code_object_id == 0 && entry.address != 0)
+                        entry = csregister.get_wave_start_delayed(entry.address);
+                    stitch.markerWaveEnd(end.SACU(), end.simd, end.wid, entry);
+                }
 
                 if (pipe.dispatch_id > 0)
                 {
@@ -713,6 +735,7 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
 
                 shaderdata.emplace_back(shader);
                 if (shaderdata.size() >= MAX_ACCUM_RECORDS) stitch.sendShaderdata(shaderdata);
+                stitch.processShaderdata(shader);
 
                 break;
             }
@@ -747,6 +770,8 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
     for (auto& slot : SIMD)
         for (auto& wave : slot) wave.lookbackpcs(csregister);
 
+    stitch.markerResolveAll(csregister);
+
     if (!occupancy.empty()) send_occupancy();
 
     info.realtime_frequency = csregister.realtime_frequency;
@@ -755,6 +780,7 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
 
     if (generator.realtime.size()) stitch.sendRealtime(generator.realtime);
     if (shaderdata.size()) stitch.sendShaderdata(shaderdata);
+    stitch.finishMarkers();
     if (other_simd.size()) stitch.sendOtherSimd(other_simd);
 
     info.globaltime = generator.get_time();

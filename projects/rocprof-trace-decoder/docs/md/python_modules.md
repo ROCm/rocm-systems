@@ -75,9 +75,11 @@ with Decoder() as decoder:
 ```
 
 Built-in disassembly requires a decoder shared library built with the COMGR or
-LLVM disassembly backend. Builds without that backend raise `DecoderError` with
-`DecoderStatus.ERROR_NOT_IMPLEMENTED` when code objects are loaded or parsed
-without a custom ISA provider.
+LLVM disassembly backend. Code-object metadata can be loaded without either
+backend. Parsing with `RecordType.WAVE` enabled requires a backend or a custom
+ISA provider; otherwise it raises `DecoderError` with
+`DecoderStatus.ERROR_NOT_IMPLEMENTED`. Marker parsing does not require an ISA
+provider.
 
 The package also defines `__version__`. The value is stored in `_version.py`,
 and the Python packaging metadata reads the same value through
@@ -102,8 +104,30 @@ Important dataclasses include:
 - `Occupancy`, `PerfEvent`, `ShaderData`, `Realtime`, `OtherSimdInstruction`,
   `Event`, and `Dispatch`: direct Python equivalents of the public decoder
   payloads.
+- `Marker`: a logical SQTT marker with its header in `shaderdata`, its `name`,
+  `source_location`, `marker_id`, `marker_kind` and `marker_flags`, and its raw
+  32-bit `payload` words. `code_object_id` reads `kernel_entry`. `name` is
+  `None` for markers the code object does not declare. Unknown future marker
+  kinds remain integers.
 - `TraceRecords`: the aggregate returned by `Decoder.parse*`, with one list per
   record type and a `batches` list preserving callback batch order.
+
+`shaderdata.time` is the marker timestamp, in the shader clock of the trace's
+shader engine. `payload_dropped` counts declared payload words that were lost;
+protocol consumers should skip blocks where it is nonzero. A marker with
+`MarkerFlags.INVALID` reports `payload_dropped` undecodable shaderdata words of
+its wave, starting at `shaderdata`; it is the wave's last marker, so close its
+open scopes there. Reset scope state at `MarkerFlags.NEW_WAVE` and preserve callback order
+within each reported wave slot. The hardware coordinates and this flag do not
+establish stable wave identity across context save and restore (CWSR). Keep
+records from separate traces in separate groups when building scope stacks.
+
+Payload words have no individual timestamps or source flags. Subscribe to
+`RecordType.SHADERDATA` for original arrival timestamps and per-token flags.
+
+The wrapper copies marker strings and payload values before the native callback
+returns. Returned Python records therefore remain valid after parsing or closing
+the decoder.
 
 This is the best module for users to import when they want type names for
 annotations or record inspection.
@@ -123,6 +147,8 @@ The main public class is `Decoder`. It manages a handle created with
 - `parse_file(path, isa=...)`, a convenience wrapper around `parse(...)`.
 - `parse_chunks(chunks, isa=...)`, for callers that intentionally decode each
   chunk as a separate trace buffer.
+- `set_record_enabled(record_type, enabled=True)`, to enable or disable one
+  record type. All types except `RecordType.MARKER` are enabled by default.
 - `load_code_object(data, load_id=..., load_addr=..., load_size=...)`, where
   `data` is code-object bytes or a path. `load_size` is the loaded memory range
   size and is intentionally distinct from the code-object byte length, which is
@@ -136,6 +162,32 @@ The main public class is `Decoder`. It manages a handle created with
 
 `Decoder` is the public Python handle object. Raw C handle values stay private;
 users keep per-handle state by keeping the `Decoder` instance alive.
+
+Every `parse*` method accepts `on_batch` and `collect`. By default, records are
+retained in the returned `TraceRecords`. Use `collect=False` to process converted
+batches without retaining the whole trace:
+
+```python
+from rocprof_trace_decoder import RecordType
+
+def consume(kind, batch):
+    if kind == RecordType.MARKER:
+        for marker in batch:
+            print(marker.name, marker.payload)
+
+decoder.set_record_enabled(RecordType.MARKER)
+decoder.parse(att_bytes, on_batch=consume, collect=False)
+```
+
+Configure the decoder's code-object metadata before this example, as in the
+loading example above. An ISA provider alone does not supply marker names.
+The callback receives ordinary Python objects and may retain selected records.
+Callback batch order can differ from timestamp order when code-object
+attribution is delayed.
+
+Use one `Decoder` instance per Python parsing thread. Configure filters, load or
+unload code objects, and close the decoder outside `on_batch`: the native handle
+remains locked for the duration of the parse call.
 
 For ATT tool usage, the high-level path normally passes a `CodeIndex` as the
 ISA provider. Users who explicitly want the decoder's built-in disassembly mode
