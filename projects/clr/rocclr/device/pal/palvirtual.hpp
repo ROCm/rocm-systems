@@ -25,6 +25,7 @@
 #include "amd_hsa_queue.h"
 
 #include <atomic>
+#include <mutex>
 
 /*! \addtogroup PAL PAL Resource Implementation
  *  @{
@@ -199,6 +200,9 @@ class VirtualGPU : public device::VirtualDevice {
 
    private:
     void DumpMemoryReferences() const;
+    //! Backs lock_ for an exclusive compute queue, which owns its PAL queue outright and so
+    //! has no recycle pool entry to take a shared lock from
+    std::recursive_mutex exclusive_lock_;
     VirtualGPU& gpu_;       //!< ROCCLR virtual GPU object
     Pal::IDevice* iDev_;    //!< PAL device
     uint cmdBufIdSlot_;     //!< Command buffer ID slot for submissions

@@ -225,6 +225,7 @@ VirtualGPU::Queue* VirtualGPU::Queue::Create(VirtualGPU& gpu, Pal::QueueType que
         return nullptr;
       }
       queue->info_ = info;
+      queue->lock_ = &queue->exclusive_lock_;
       queue->aql_mgmt_ = &info->aql_packet_mgmt_;
       // Exclusive compute path
       addrQ = reinterpret_cast<address>(&queue[1]);
@@ -267,6 +268,8 @@ VirtualGPU::Queue* VirtualGPU::Queue::Create(VirtualGPU& gpu, Pal::QueueType que
 }
 
 VirtualGPU::Queue::~Queue() {
+  // Only an exclusive compute queue carries its own info.
+  const bool pooled = (info_ == nullptr);
   amd::DestroyWithTrailing(reinterpret_cast<Device::QueueRecycleInfo*>(info_));
 
   if (nullptr != iQueue_) {
@@ -298,7 +301,7 @@ VirtualGPU::Queue::~Queue() {
 
   if (nullptr != iQueue_) {
     // Find if this queue was used in recycling
-    if (lock_ != nullptr) {
+    if (pooled) {
       // Release the queue if the counter is 0
       if (--gpu_.dev().QueuePool().find(iQueue_)->second->counter_ == 0) {
         iQueue_->Destroy();
@@ -2657,7 +2660,7 @@ void VirtualGPU::PostDeviceEnqueue(const amd::Kernel& kernel, const pal::Kernel&
   amd::DeviceQueue* defQueue = kernel.program().context().defDeviceQueue(dev());
 
   // Make sure exculsive access to the device queue
-  amd::ScopedLock(defQueue->lock());
+  amd::ScopedLock defQueueLock(defQueue->lock());
   Memory& schedParams = xferWrite().Acquire(sizeof(SchedulerParam));
 
   if (GPU_PRINT_CHILD_KERNEL != 0) {
