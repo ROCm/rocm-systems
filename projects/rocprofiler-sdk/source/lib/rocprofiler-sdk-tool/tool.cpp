@@ -133,6 +133,12 @@ extern void
 __gcov_dump(void);
 }
 #endif
+#if defined(ROCPROFILER_LLVM_COVERAGE) && ROCPROFILER_LLVM_COVERAGE > 0
+extern "C" {
+extern int
+__llvm_profile_dump(void);
+}
+#endif
 
 namespace common = ::rocprofiler::common;
 namespace tool   = ::rocprofiler::tool;
@@ -4626,6 +4632,9 @@ tool_fini(void* /*tool_data*/)
 
 #if defined(CODECOV) && CODECOV > 0
     __gcov_dump();
+#endif
+#if defined(ROCPROFILER_LLVM_COVERAGE) && ROCPROFILER_LLVM_COVERAGE > 0
+    (void) __llvm_profile_dump();
 #endif
 }
 

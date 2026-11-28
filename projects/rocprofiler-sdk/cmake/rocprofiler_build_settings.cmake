@@ -22,6 +22,20 @@ if(ROCPROFILER_BUILD_CODECOV)
     target_link_libraries(rocprofiler-sdk-build-flags INTERFACE gcov)
 endif()
 
+if(ROCPROFILER_BUILD_LLVM_COVERAGE)
+    rocprofiler_target_compile_options(
+        rocprofiler-sdk-build-flags FORCE
+        LANGUAGES C CXX
+        LINK_LANGUAGES C CXX
+        INTERFACE "-fprofile-instr-generate")
+    rocprofiler_target_compile_options(
+        rocprofiler-sdk-build-flags FORCE
+        LANGUAGES C CXX
+        INTERFACE "-fcoverage-mapping")
+    rocprofiler_target_compile_definitions(rocprofiler-sdk-build-flags
+                                           INTERFACE ROCPROFILER_LLVM_COVERAGE)
+endif()
+
 # ----------------------------------------------------------------------------------------#
 # dynamic linking and runtime libraries
 #

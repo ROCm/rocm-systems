@@ -45,6 +45,14 @@ rocprofiler_add_option(
     "Disable adjusting for clock skew b/t CPU and GPU timestamps" OFF ADVANCED)
 rocprofiler_add_option(ROCPROFILER_BUILD_CODECOV
                        "Enable building for code coverage analysis" OFF)
+rocprofiler_add_option(ROCPROFILER_BUILD_LLVM_COVERAGE
+                       "Enable building for LLVM code coverage" OFF)
+if(ROCPROFILER_BUILD_CODECOV AND ROCPROFILER_BUILD_LLVM_COVERAGE)
+    message(
+        FATAL_ERROR
+            "ROCPROFILER_BUILD_CODECOV and ROCPROFILER_BUILD_LLVM_COVERAGE are mutually exclusive"
+        )
+endif()
 rocprofiler_add_option(ROCPROFILER_BUILD_DOCS
                        "Enable build + install + packaging documentation" OFF)
 rocprofiler_add_option(
