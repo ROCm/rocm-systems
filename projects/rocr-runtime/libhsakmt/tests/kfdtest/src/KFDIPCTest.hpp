@@ -113,7 +113,6 @@ class KFDCMAArray {
 class KFDIPCTest :  public KFDBaseComponentTest {
  public:
     KFDIPCTest(void) : m_ChildPid(-1) {}
-    ~KFDIPCTest(void);
  protected:
     virtual void SetUp();
     virtual void TearDown();

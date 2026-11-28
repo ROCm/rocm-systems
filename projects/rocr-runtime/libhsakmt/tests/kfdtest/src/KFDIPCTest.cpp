@@ -51,15 +51,6 @@ void KFDIPCTest::TearDown() {
     ROUTINE_END
 }
 
-KFDIPCTest::~KFDIPCTest(void) {
-    /* exit() is necessary for the child process. Otherwise when the
-     * child process finishes, gtest assumes the test has finished and
-     * starts the next test while the parent is still active.
-     */
-    if (m_ChildPid == 0)
-        exit(::testing::UnitTest::GetInstance()->current_test_info()->result()->Failed());
-}
-
 /* Import shared Local Memory from parent process. Check for the pattern
  * filled in by the parent process. Then fill a new pattern.
  *
