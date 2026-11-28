@@ -1516,6 +1516,11 @@ if(BUILD_TESTS)
     endif()
   endif()
 
+  # rccl-tests installs this file next to CTestTestfile.cmake. The perf
+  # binaries are not gtest suites, so they are not in test_categories.yaml.
+  file(APPEND "${INSTALL_TEST_FILE}"
+    "include(\"\${CMAKE_CURRENT_LIST_DIR}/rccl_perf_tests.cmake\" OPTIONAL)\n")
+
   install(
     FILES "${INSTALL_TEST_FILE}"
     DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}"
