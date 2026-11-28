@@ -39,8 +39,8 @@ namespace rocprofiler
 namespace aql
 {
 using rocprofiler_profile_pkt_cb = std::function<void(hsa::rocprofiler_packet)>;
-// Query HSA_VEN_AMD_AQLPROFILE_INFO_BLOCK_ID from aqlprofile
-hsa_ven_amd_aqlprofile_id_query_t
+// Query AQLPROFILE_INFO_BLOCK_ID from aqlprofile
+aqlprofile_id_query_t
 get_query_info(rocprofiler_agent_id_t agent, const counters::Metric& metric);
 
 // Query HSA_VEN_AMD_AQLPROFILE_INFO_BLOCK_COUNTERS from aqlprofiler
