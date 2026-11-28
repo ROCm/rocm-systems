@@ -38,38 +38,45 @@ static inline bool load_co_from_file(const char *filename, std::vector<char> &co
 
 static inline void JitLink(hipModule_t *Module, hipFunction_t *Kernel, hipLinkState_t *LinkState,
              hipJitInputType input_type, bool from_file, const char *filename) {
+  const char* isaopts[] = {
+      "-mllvm",
+      "-inline-threshold=1",
+      "-mllvm",
+      "-inlinehint-threshold=1",
+#if defined(ENABLE_DEVICE_ADDRESS_SANITIZER)
+      "-fsanitize=address",
+#endif
+  };
+  std::vector<hipJitOption> jit_options = {hipJitOptionIRtoISAOptExt,
+                                           hipJitOptionIRtoISAOptCountExt};
+  size_t isaoptssize = sizeof(isaopts) / sizeof(isaopts[0]);
+  const void* lopts[] = {(void*)isaopts, (void*)(isaoptssize)};
 
-   const char* isaopts[] = {"-mllvm", "-inline-threshold=1", "-mllvm", "-inlinehint-threshold=1"};
-   std::vector<hipJitOption> jit_options = {hipJitOptionIRtoISAOptExt,
-                                               hipJitOptionIRtoISAOptCountExt};
-   size_t isaoptssize = 4;
-   const void* lopts[] = {(void*)isaopts, (void*)(isaoptssize)};
 
+  HIP_CHECK(hipLinkCreate(jit_options.size(), jit_options.data(), (void**)lopts, LinkState));
 
-   HIP_CHECK(hipLinkCreate(jit_options.size(), jit_options.data(), (void **)lopts, LinkState));
+  if (!from_file) {
+    std::vector<char> co_source;
+    REQUIRE(load_co_from_file(filename, co_source) == true);
+    HIP_CHECK(hipLinkAddData(*LinkState, input_type, (void*)co_source.data(), co_source.size(),
+                             "LinkSPIRV1", 0, nullptr, nullptr));
+  } else {
+    HIP_CHECK(hipLinkAddFile(*LinkState, input_type, filename, 0, nullptr, nullptr));
+  }
 
-   if (!from_file) {
-      std::vector<char> co_source;
-      REQUIRE(load_co_from_file(filename, co_source) == true);
-      HIP_CHECK(hipLinkAddData(*LinkState, input_type, (void*)co_source.data(), co_source.size(),
-                               "LinkSPIRV1", 0, nullptr, nullptr));
-   } else {
-      HIP_CHECK(hipLinkAddFile(*LinkState,input_type, filename, 0, nullptr, nullptr));
-   }
+  void* linkOut;
+  size_t linkSize = 0;
+  // Complete Linker Step
+  HIP_CHECK(hipLinkComplete(*LinkState, &linkOut, &linkSize));
 
-   void *linkOut;
-   size_t linkSize = 0;
-   // Complete Linker Step
-   HIP_CHECK(hipLinkComplete(*LinkState, &linkOut, &linkSize));
+  // Load codeobject into module
+  HIP_CHECK(hipModuleLoadData(Module, linkOut));
 
-   // Load codeobject into module
-   HIP_CHECK(hipModuleLoadData(Module, linkOut));
+  // Locate Kernel Entry Point
+  HIP_CHECK(hipModuleGetFunction(Kernel, *Module, "addKernel"));
 
-   // Locate Kernel Entry Point
-   HIP_CHECK(hipModuleGetFunction(Kernel, *Module, "addKernel"));
-
-   // Destroy Linker invocation
-   HIP_CHECK(hipLinkDestroy(*LinkState));
+  // Destroy Linker invocation
+  HIP_CHECK(hipLinkDestroy(*LinkState));
 
 }
 
