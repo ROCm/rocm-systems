@@ -207,6 +207,10 @@ release(bool, PAL_EMBED_KERNEL_MD, false,                                     \
 release(cstring, ROC_GLOBAL_CU_MASK, "",                                      \
         "Sets a global CU mask (entered as hex value) for all queues,"        \
         "Each active bit represents using one CU (e.g., 0xf enables only 4 CUs)") \
+release(cstring, HIP_DISPATCH_CU_MASK, "",                                    \
+        "Debug: per-dispatch CU enable DWORD (hex) applied to every kernel "  \
+        "launch. START[3:0], CNT[7:4], SE_EN[9:8], e.g. 0x120 = SE0, CUs 0-1. " \
+        "gfx1250 only")                                                       \
 release(size_t, PAL_PREPINNED_MEMORY_SIZE, 64,                                \
         "Size in KBytes of prepinned memory")                                 \
 release(bool, AMD_CPU_AFFINITY, false,                                         \
