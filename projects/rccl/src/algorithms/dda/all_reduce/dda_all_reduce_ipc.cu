@@ -87,21 +87,29 @@ static ncclResult_t ncclAllReduceDdaIpcTyped(const void* sendbuff, void* recvbuf
   T** d_ipcbuffs = reinterpret_cast<T**>(peerPtrsDev);
 
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
+  // Every kernel takes the same arguments; only the instantiation differs.
+  auto launch = [&](auto kernel) {
+    hipExtLaunchKernelGGL(kernel, grid, block, 0, stream, /*startEvent=*/nullptr, stopEvent, /*flags=*/0, d_ipcbuffs,
+                          static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, barrierHost,
+                          nullptr);
+  };
+  // kInPlace kernels read through recvbuff (see all_reduce_dda.h); the host-copied tree never reads sendbuff.
+  const bool inPlace = sendbuff == recvbuff;
   const bool treeCopyInKernel =
     treeOk && dda::common::ddaAllReduceTreeIpcStagesInKernel(sizeBytes, ddaAllReduceTreeIpcKernelCopyMaxBytes(comm));
   if (treeCopyInKernel) {
-    hipExtLaunchKernelGGL((dda::common::ddaAllReduceTreeIpc<T, kDdaNranks, false, true>), grid, block, 0, stream,
-                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff), count,
-                          static_cast<const T*>(sendbuff), comm->rank, barrierHost, nullptr);
+    if (inPlace) {
+      launch(dda::common::ddaAllReduceTreeIpc<T, kDdaNranks, false, true, true>);
+    } else {
+      launch(dda::common::ddaAllReduceTreeIpc<T, kDdaNranks, false, true>);
+    }
   } else if (treeOk) {
     CUDACHECK(cudaMemcpyAsync(comm->ddaScratch, sendbuff, count * sizeof(T), cudaMemcpyDeviceToDevice, stream));
-    hipExtLaunchKernelGGL((dda::common::ddaAllReduceTreeIpc<T, kDdaNranks, false>), grid, block, 0, stream,
-                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff), count,
-                          static_cast<const T*>(sendbuff), comm->rank, barrierHost, nullptr);
+    launch(dda::common::ddaAllReduceTreeIpc<T, kDdaNranks, false>);
+  } else if (inPlace) {
+    launch(dda::common::ddaAllReduceFlatIpc<T, kDdaNranks, false, true>);
   } else {
-    hipExtLaunchKernelGGL((dda::common::ddaAllReduceFlatIpc<T, kDdaNranks, false>), grid, block, 0, stream,
-                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff), count,
-                          static_cast<const T*>(sendbuff), comm->rank, barrierHost, nullptr);
+    launch(dda::common::ddaAllReduceFlatIpc<T, kDdaNranks, false>);
   }
 
   CUDACHECK(cudaGetLastError());
