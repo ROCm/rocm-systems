@@ -1958,6 +1958,10 @@ typedef enum hsa_amd_memory_pool_global_flag_s {
    * The application can use allocations in the memory pool to store kernel
    * arguments, and provide the values for the kernarg segment of
    * a kernel dispatch.
+   *
+   * A GPU agent's pool that reports this flag and no grain flag holds
+   * coarse-grained device memory set aside for kernel arguments. Allocations
+   * from it are executable. It is not a general purpose device pool.
    */
   HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT = 1,
   /**

@@ -129,6 +129,15 @@ class MemoryRegion : public core::MemoryRegion {
             (mem_props_.HeapType == HSA_HEAPTYPE_FRAME_BUFFER_PUBLIC));
   }
 
+  /// @brief The agent's general purpose device memory region, as opposed to the
+  /// fine-grained and kernarg views of the same memory. Use this instead of
+  /// testing IsLocalMemory() and fine_grain() directly: an agent publishes
+  /// several coarse-grained local regions and only one of them is the general
+  /// purpose one.
+  __forceinline bool IsGeneralCoarseLocal() const {
+    return IsLocalMemory() && !fine_grain() && !extended_scope_fine_grain() && !kernarg();
+  }
+
   /// @brief Whether hsa_amd_signal_batch_create may place signals here: host fine-grained
   /// memory, or device memory where every queue's CP sees a completion.
   bool SignalCapable() const;

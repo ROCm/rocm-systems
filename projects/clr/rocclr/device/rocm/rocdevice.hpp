@@ -898,6 +898,10 @@ class Device : public NullDevice {
   hsa_amd_memory_pool_t gpuvm_segment_;
   hsa_amd_memory_pool_t gpu_fine_grained_segment_;
   hsa_amd_memory_pool_t gpu_ext_fine_grained_segment_;
+  //! Device kernarg pool. Allocations from it are executable, as kernarg
+  //! buffers must be (SWDEV-543723), without asking for it per allocation,
+  //! which keeps them eligible for ROCr's suballocator.
+  hsa_amd_memory_pool_t gpu_kernarg_segment_;
   hsa_amd_memory_pool_t device_signal_pool_{0};  //!< Pool for signals in device memory, if any
   bool graph_device_signals_ = false;  //!< Graph signals live in device_signal_pool_
   bool queue_device_signals_ = false;  //!< Queue signals live in device_signal_pool_

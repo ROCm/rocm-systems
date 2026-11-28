@@ -627,6 +627,29 @@ void GpuAgent::InitRegionList() {
 
             regions_.push_back(std::make_shared<MemoryRegion>(true, false, false, false, user_visible, this,
                                                 mem_props[mem_idx]));
+
+            // Device kernarg memory. Allocations carry execute permission
+            // without the caller asking for it, so they stay eligible for the
+            // region's fragment allocator and small kernarg buffers no longer
+            // cost one buffer object each. Only host-visible VRAM is useful
+            // here since the CPU writes the arguments, and only on a discrete
+            // GPU: an APU's kernel arguments already live in system memory.
+            //
+            // This is a third view of the same coarse-grained memory. Its pool
+            // reports HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT and no grain
+            // flag, so callers that pick a device pool by grain, including HIP
+            // runtimes that predate this pool, never select it. It is not
+            // published through hsa_agent_iterate_regions at all (see
+            // IterateRegion), as hsa.h requires KERNARG regions to be fine
+            // grained. Inside ROCr, use MemoryRegion::IsGeneralCoarseLocal().
+            //
+            // HSA_AMD_REGION_INFO_HOST_ACCESSIBLE is false here as for all
+            // device memory; HSA_AMD_AGENT_MEMORY_POOL_INFO_ACCESS for the CPU
+            // agent says whether the host can write the arguments.
+            if (!is_apu_node && mem_props[mem_idx].HeapType == HSA_HEAPTYPE_FRAME_BUFFER_PUBLIC) {
+              regions_.push_back(std::make_shared<MemoryRegion>(false, true, false, false, true,
+                                                                this, mem_props[mem_idx]));
+            }
           }
           break;
         }
@@ -833,7 +856,23 @@ void GpuAgent::InitLibDrm() {
 hsa_status_t GpuAgent::IterateRegion(
     hsa_status_t (*callback)(hsa_region_t region, void* data),
     void* data) const {
-  return VisitRegion(true, callback, data);
+  // hsa.h requires a KERNARG region to be fine grained, so the coarse-grained
+  // device kernarg region is published only through the memory pool API.
+  struct Filter {
+    hsa_status_t (*callback)(hsa_region_t region, void* data);
+    void* data;
+  } filter = {callback, data};
+
+  return VisitRegion(
+      true,
+      [](hsa_region_t region, void* data) -> hsa_status_t {
+        const auto* filter = static_cast<const Filter*>(data);
+        const auto* amd_region =
+            static_cast<const AMD::MemoryRegion*>(core::MemoryRegion::Convert(region));
+        if (amd_region->kernarg() && amd_region->IsLocalMemory()) return HSA_STATUS_SUCCESS;
+        return filter->callback(region, filter->data);
+      },
+      &filter);
 }
 
 hsa_status_t GpuAgent::IterateCache(hsa_status_t (*callback)(hsa_cache_t cache, void* data),
@@ -3945,8 +3984,7 @@ void GpuAgent::InitAllocators() {
     if (amd_region->IsLocalMemory() && amd_region->fine_grain()) {
       finegrain_allocator_ = region_allocator;
       finegrain_deallocator_ = region_deallocator;
-    } else if (amd_region->IsLocalMemory() &&
-               !(amd_region->fine_grain() || amd_region->extended_scope_fine_grain())) {
+    } else if (amd_region->IsGeneralCoarseLocal()) {
       coarsegrain_allocator_ = region_allocator;
       coarsegrain_deallocator_ = region_deallocator;
     }

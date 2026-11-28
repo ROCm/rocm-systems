@@ -9,6 +9,7 @@
 #include <cstring>
 #include <iostream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "suites/functional/memory_fragment.h"
@@ -367,7 +368,8 @@ void MemoryFragment::FragmentZeroInitTest(void) {
 
 void MemoryFragment::FragmentCoherenceOnPool(
     const char* label, hsa_agent_t cpuAgent, hsa_agent_t gpuAgent,
-    hsa_amd_memory_pool_t under_test_pool, bool grant_cpu, int num_elements) {
+    hsa_amd_memory_pool_t under_test_pool, bool grant_cpu, int num_elements,
+    hsa_amd_memory_pool_t kernarg_pool) {
   hsa_status_t err;
 
   if (verbosity() > 0) {
@@ -382,10 +384,12 @@ void MemoryFragment::FragmentCoherenceOnPool(
                                            &global_pool);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
-  hsa_amd_memory_pool_t kernarg_pool;
-  err = hsa_amd_agent_iterate_memory_pools(cpuAgent, rocrtst::GetKernArgMemoryPool,
-                                           &kernarg_pool);
-  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+  const bool device_kernargs = kernarg_pool.handle != 0;
+  if (!device_kernargs) {
+    err =
+        hsa_amd_agent_iterate_memory_pools(cpuAgent, rocrtst::GetKernArgMemoryPool, &kernarg_pool);
+    ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+  }
 
   uint32_t queue_size = 0;
   err = hsa_agent_get_info(gpuAgent, HSA_AGENT_INFO_QUEUE_MAX_SIZE, &queue_size);
@@ -426,8 +430,18 @@ void MemoryFragment::FragmentCoherenceOnPool(
                                      reinterpret_cast<void**>(&oldValues));
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
+  set_kernel_file_name("atomicOperations_kernels.hsaco");
+  set_kernel_name("test_atomic_add");
+
+  err = rocrtst::LoadKernelFromObjFile(this, &gpuAgent);
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+
+  // The kernarg segment also holds hidden arguments after args_t, such as the
+  // global offsets. They must read as zero, and only system fragments come
+  // back zeroed, so size the buffer from the kernel and clear all of it.
+  const size_t kernarg_bytes = std::max<size_t>(kernarg_size(), sizeof(args_t));
   args* kernArguments = NULL;
-  err = hsa_amd_memory_pool_allocate(kernarg_pool, sizeof(args_t), 0,
+  err = hsa_amd_memory_pool_allocate(kernarg_pool, kernarg_bytes, 0,
                                      reinterpret_cast<void**>(&kernArguments));
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
@@ -445,17 +459,22 @@ void MemoryFragment::FragmentCoherenceOnPool(
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
   err = hsa_amd_agents_allow_access(1, &gpuAgent, NULL, kernArguments);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+  if (device_kernargs) {
+    err = hsa_amd_agents_allow_access(1, &cpuAgent, NULL, kernArguments);
+    ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+  }
 
+  memset(kernArguments, 0, kernarg_bytes);
   kernArguments->a = sysMemory;
   kernArguments->b = gpuScratch;
   kernArguments->c = oldValues;
   kernArguments->d = kValue;
-
-  set_kernel_file_name("atomicOperations_kernels.hsaco");
-  set_kernel_name("test_atomic_add");
-
-  err = rocrtst::LoadKernelFromObjFile(this, &gpuAgent);
-  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+  if (device_kernargs) {
+    // Reading back flushes the posted PCIe writes of the arguments ahead of
+    // the dispatch.
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);
+    ASSERT_EQ(*reinterpret_cast<volatile int*>(&kernArguments->d), kValue);
+  }
 
   err = rocrtst::InitializeAQLPacket(this, &aql());
   ASSERT_EQ(HSA_STATUS_SUCCESS, err);
@@ -580,5 +599,133 @@ void MemoryFragment::FragmentCoherenceTest(void) {
 
   for (unsigned int i = 0; i < gpus.size(); ++i) {
     FragmentCoherenceTest(cpus[0], gpus[i]);
+  }
+}
+
+// Find the device kernarg pool on a GPU agent. Discrete GPUs publish it; APUs
+// and older runtimes do not.
+static bool GetDeviceKernargPool(hsa_agent_t gpuAgent, hsa_amd_memory_pool_t* pool_out) {
+  hsa_amd_memory_pool_t pool = {};
+  hsa_status_t err = hsa_amd_agent_iterate_memory_pools(
+      gpuAgent,
+      [](hsa_amd_memory_pool_t p, void* data) -> hsa_status_t {
+        uint32_t flags = 0;
+        hsa_status_t err =
+            hsa_amd_memory_pool_get_info(p, HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS, &flags);
+        if (err != HSA_STATUS_SUCCESS) return err;
+        if (flags & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT) {
+          *static_cast<hsa_amd_memory_pool_t*>(data) = p;
+          return HSA_STATUS_INFO_BREAK;
+        }
+        return HSA_STATUS_SUCCESS;
+      },
+      &pool);
+  if (err != HSA_STATUS_INFO_BREAK) return false;
+  *pool_out = pool;
+  return true;
+}
+
+void MemoryFragment::FragmentDeviceKernargTest(void) {
+  if (FragmentAllocatorDisabled()) {
+    // The vendored gtest predates GTEST_SKIP(), so emit the conventional
+    // grep-able "[ SKIPPED ]" marker instead of recording a real skip.
+    std::cout << "[ SKIPPED ] HSA_DISABLE_FRAGMENT_ALLOCATOR=1; fragment "
+                 "sub-allocator disabled."
+              << std::endl;
+    return;
+  }
+
+  std::vector<hsa_agent_t> cpus;
+  ASSERT_EQ(hsa_iterate_agents(rocrtst::IterateCPUAgents, &cpus), HSA_STATUS_SUCCESS);
+  ASSERT_GT(cpus.size(), 0u);
+
+  std::vector<hsa_agent_t> gpus;
+  ASSERT_EQ(hsa_iterate_agents(rocrtst::IterateGPUAgents, &gpus), HSA_STATUS_SUCCESS);
+
+  for (unsigned int i = 0; i < gpus.size(); ++i) {
+    hsa_amd_memory_pool_t pool;
+    if (!GetDeviceKernargPool(gpus[i], &pool)) {
+      if (verbosity() > 0) {
+        std::cout << "  No device kernarg pool on GPU " << i << "; skipping." << std::endl;
+      }
+      continue;
+    }
+
+    // The pool reports no grain flag so that callers picking a device pool by
+    // grain never select it, and it is not published as a region because hsa.h
+    // requires KERNARG regions to be fine grained.
+    uint32_t flags = 0;
+    ASSERT_EQ(hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS, &flags),
+              HSA_STATUS_SUCCESS);
+    EXPECT_EQ(flags, static_cast<uint32_t>(HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT));
+    std::pair<uint64_t, bool> region_search = {pool.handle, false};
+    hsa_status_t err = hsa_agent_iterate_regions(
+        gpus[i],
+        [](hsa_region_t region, void* data) -> hsa_status_t {
+          auto* search = static_cast<std::pair<uint64_t, bool>*>(data);
+          if (region.handle == search->first) search->second = true;
+          return HSA_STATUS_SUCCESS;
+        },
+        &region_search);
+    ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+    EXPECT_FALSE(region_search.second)
+        << "Device kernarg pool is listed by hsa_agent_iterate_regions";
+
+    if (!PoolAccessibleByAgent(cpus[0], pool)) {
+      if (verbosity() > 0) {
+        std::cout << "  Device kernarg pool not host-accessible on GPU " << i
+                  << " (non-large-BAR); skipping." << std::endl;
+      }
+      continue;
+    }
+
+    // A dedicated buffer object costs at least one 2 MB block of device
+    // memory, so kCount small requests would charge kCount blocks without
+    // sub-allocation. Sub-allocated, they fit in one block, or two if an
+    // earlier user left a partly used one.
+    const int kCount = 32;
+    const size_t kSize = 4096;
+    uint64_t avail_before = 0, avail_after = 0;
+    ASSERT_EQ(hsa_agent_get_info(gpus[i], (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MEMORY_AVAIL,
+                                 &avail_before),
+              HSA_STATUS_SUCCESS);
+
+    std::vector<void*> ptrs(kCount, nullptr);
+    for (int n = 0; n < kCount; ++n) {
+      ASSERT_EQ(hsa_amd_memory_pool_allocate(pool, kSize, 0, &ptrs[n]), HSA_STATUS_SUCCESS);
+      ASSERT_EQ(hsa_amd_agents_allow_access(1, &cpus[0], NULL, ptrs[n]), HSA_STATUS_SUCCESS);
+
+      hsa_amd_pointer_info_t info = {};
+      info.size = sizeof(info);
+      ASSERT_EQ(hsa_amd_pointer_info(ptrs[n], &info, NULL, NULL, NULL), HSA_STATUS_SUCCESS);
+      EXPECT_NE(info.alloc_flags & HSA_AMD_POINTER_INFO_ALLOC_FLAG_EXECUTABLE, 0u)
+          << "Device kernarg allocation " << n << " is not executable";
+      // The pointer must report the same pool flag as the pool itself.
+      EXPECT_NE(info.global_flags & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT, 0u)
+          << "Device kernarg allocation " << n << " does not report KERNARG_INIT";
+    }
+
+    ASSERT_EQ(hsa_agent_get_info(gpus[i], (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MEMORY_AVAIL,
+                                 &avail_after),
+              HSA_STATUS_SUCCESS);
+    const uint64_t charged = avail_before > avail_after ? avail_before - avail_after : 0;
+    if (verbosity() > 0) {
+      std::cout << "  GPU " << i << ": " << kCount << " x " << kSize
+                << " B from the device kernarg pool charged " << charged / 1024
+                << " KB of device memory" << std::endl;
+    }
+    EXPECT_LE(charged, 2 * kFragmentBlockSize)
+        << kCount << " small device kernarg allocations were not sub-allocated";
+
+    for (void* p : ptrs) ASSERT_EQ(hsa_amd_memory_pool_free(p), HSA_STATUS_SUCCESS);
+
+    FragmentOverlapOnPool("device kernarg", pool, /*grant_cpu=*/true, cpus[0],
+                          /*light=*/true);
+
+    hsa_amd_memory_pool_t sys_pool;
+    if (GetFineGrainSystemPool(&sys_pool)) {
+      FragmentCoherenceOnPool("fine-grain system, device kernargs", cpus[0], gpus[i], sys_pool,
+                              /*grant_cpu=*/false, /*num_elements=*/256, pool);
+    }
   }
 }

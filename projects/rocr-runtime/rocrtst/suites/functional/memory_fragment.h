@@ -56,6 +56,11 @@ class MemoryFragment : public TestBase {
   // are coherent and visible to the CPU.
   void FragmentCoherenceTest(void);
 
+  // @Brief: Verify a GPU's device kernarg pool sub-allocates small requests
+  // from shared backing blocks, returns executable host-visible memory, and
+  // can supply the kernel arguments of a dispatch.
+  void FragmentDeviceKernargTest(void);
+
  private:
   void FragmentCoherenceTest(hsa_agent_t cpuAgent, hsa_agent_t gpuAgent);
 
@@ -69,10 +74,13 @@ class MemoryFragment : public TestBase {
   // is set (device memory), CPU access to the fragment is requested.
   // num_elements ints are allocated and updated by the GPU; a system buffer
   // above one fragment block is a dedicated allocation, not a fragment.
+  // Kernel arguments come from kernarg_pool when it is set, otherwise from the
+  // CPU agent's kernarg pool.
   void FragmentCoherenceOnPool(const char* label, hsa_agent_t cpuAgent,
                                hsa_agent_t gpuAgent,
                                hsa_amd_memory_pool_t under_test_pool,
-                               bool grant_cpu, int num_elements);
+                               bool grant_cpu, int num_elements,
+                               hsa_amd_memory_pool_t kernarg_pool = {0});
 };
 
 #endif  // ROCRTST_SUITES_FUNCTIONAL_MEMORY_FRAGMENT_H_

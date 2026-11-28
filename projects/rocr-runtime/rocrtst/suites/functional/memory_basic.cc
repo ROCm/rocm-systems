@@ -215,9 +215,16 @@ void MemoryTest::MaxSingleAllocationTest(hsa_agent_t ag,
       rocrtst::DumpMemoryPoolInfo(&pool_i, 2);
   }
 
+  // A GPU's extended-scope fine-grained and kernarg pools are further views of
+  // the VRAM its coarse-grained pool already covers, so searching them only
+  // repeats that search on the same memory.
+  const bool duplicate_vram_view =
+      (pool_i.global_flag & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_EXTENDED_SCOPE_FINE_GRAINED) ||
+      (ag_type == HSA_DEVICE_TYPE_GPU &&
+       (pool_i.global_flag & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT));
+
   if (!pool_i.alloc_allowed || pool_i.alloc_granule == 0 || pool_i.alloc_alignment == 0 ||
-      (pool_i.global_flag & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_EXTENDED_SCOPE_FINE_GRAINED)
-      ) {
+      duplicate_vram_view) {
     if (verbosity() > 0) {
       std::cout << "  Test not applicable. Skipping." << std::endl;
       std::cout << kSubTestSeparator << std::endl;

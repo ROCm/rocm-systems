@@ -102,6 +102,15 @@ MemoryRegion::MemoryRegion(bool fine_grain, bool kernarg, bool full_profile,
       mem_flag_.ui32.HostAccess = 0;
     mem_flag_.ui32.NonPaged = 1;
 
+    // Kernel argument buffers are mapped executable because the CP enforces
+    // execute permission on them on newer hardware (SWDEV-543723); CLR
+    // requests it for both host and device kernargs. KfdDriver::AllocateMemory
+    // suballocates only requests with no flag other than AllocateRestrict, so
+    // asking for AllocateExecutable per request gives each buffer its own
+    // 2 MiB buffer object. Carrying the permission on the region keeps kernarg
+    // requests on the fragment allocator, where they share 2 MiB blocks.
+    if (kernarg) mem_flag_.ui32.ExecuteAccess = 1;
+
     virtual_size_ = kGpuVmSize;
 
   } else if (IsSystem()) {
@@ -215,6 +224,16 @@ hsa_status_t MemoryRegion::GetInfo(hsa_region_info_t attribute,
         case HSA_HEAPTYPE_DEVICE_SVM:
         case HSA_HEAPTYPE_FRAME_BUFFER_PUBLIC:
         case HSA_HEAPTYPE_FRAME_BUFFER_PRIVATE: {
+          // The device kernarg region is coarse grained but reports no grain
+          // flag. hsa.h requires a KERNARG region to be fine grained, and
+          // callers that keep a coarse-grained pool as their device pool must
+          // not pick it up. Its memory pool reports only
+          // HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT.
+          if (kernarg() && IsLocalMemory()) {
+            *((uint32_t*)value) = 0;
+            break;
+          }
+
           uint32_t ret = 0;
 
           ret = fine_grain()                ? HSA_REGION_GLOBAL_FLAG_FINE_GRAINED
@@ -326,7 +345,7 @@ bool MemoryRegion::SignalCapable() const {
       const int32_t major = isa->GetMajorVersion();
       const int32_t minor = isa->GetMinorVersion();
       if ((major == 9) && ((minor == 4) || (minor == 5))) return extended_scope_fine_grain();
-      if (major >= 12) return !fine_grain() && !extended_scope_fine_grain();
+      if (major >= 12) return IsGeneralCoarseLocal();
       return false;
     }
     default:
@@ -337,8 +356,13 @@ bool MemoryRegion::SignalCapable() const {
 hsa_status_t MemoryRegion::GetPoolInfo(hsa_amd_memory_pool_info_t attribute,
                                        void* value) const {
   switch (attribute) {
+    case HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS: {
+      hsa_status_t status = GetInfo(HSA_REGION_INFO_GLOBAL_FLAGS, value);
+      if (status == HSA_STATUS_SUCCESS && kernarg())
+        *((uint32_t*)value) |= HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT;
+      return status;
+    }
     case HSA_AMD_MEMORY_POOL_INFO_SEGMENT:
-    case HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS:
     case HSA_AMD_MEMORY_POOL_INFO_SIZE:
     case HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_ALLOWED:
     case HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_GRANULE:

@@ -1165,14 +1165,17 @@ hsa_status_t Runtime::VMemoryPtrInfo(const void* ptr, hsa_amd_pointer_info_t* in
         info->global_flags = regionFlags.ui32.CoarseGrain
             ? HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED
             : HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_FINE_GRAINED;
-        info->global_flags |=
-            regionFlags.ui32.Uncached ? HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT : 0;
+        info->global_flags |= (regionFlags.ui32.Uncached || memRegion->kernarg())
+            ? HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT
+            : 0;
         info->global_flags |= regionFlags.ui32.ExtendedCoherent
             ? HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_EXTENDED_SCOPE_FINE_GRAINED
             : 0;
 
         if (regionFlags.ui32.ReadOnly)
           info->alloc_flags |= HSA_AMD_POINTER_INFO_ALLOC_FLAG_READONLY;
+        if (regionFlags.ui32.ExecuteAccess)
+          info->alloc_flags |= HSA_AMD_POINTER_INFO_ALLOC_FLAG_EXECUTABLE;
         if (regionFlags.ui32.HostAccess)
           info->alloc_flags |= HSA_AMD_POINTER_INFO_ALLOC_FLAG_HOST_ACCESS;
         if (regionFlags.ui32.AtomicAccessFull)
@@ -1377,8 +1380,14 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
     retInfo.global_flags = thunkInfo.MemFlags.ui32.CoarseGrain
         ? HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED
         : HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_FINE_GRAINED;
-    retInfo.global_flags |=
-        thunkInfo.MemFlags.ui32.Uncached ? HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT : 0;
+    // The device kernarg region is marked by the region, not by an Uncached thunk flag. Report it
+    // the same way the pool does, so a tool that skips KERNARG_INIT memory (e.g. rocprofiler's
+    // kernel replay snapshot) also skips these allocations.
+    const bool region_kernarg = record != nullptr && record->region != nullptr &&
+        static_cast<const AMD::MemoryRegion*>(record->region)->kernarg();
+    retInfo.global_flags |= (thunkInfo.MemFlags.ui32.Uncached || region_kernarg)
+        ? HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT
+        : 0;
     retInfo.global_flags |= thunkInfo.MemFlags.ui32.ExtendedCoherent
         ? HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_EXTENDED_SCOPE_FINE_GRAINED
         : 0;
@@ -5089,7 +5098,7 @@ const core::MemoryRegion* Runtime::ResolveImportedRegion(const core::DmaBufInfo&
     /* Device VMM allocations come from the coarse-grained local pool. */
     for (const auto& region : owner->regions()) {
       const auto* amd_region = static_cast<const AMD::MemoryRegion*>(region.get());
-      if (amd_region->IsLocalMemory() && !region->fine_grain()) return region.get();
+      if (amd_region->IsGeneralCoarseLocal()) return region.get();
     }
     return nullptr;
   }
