@@ -815,12 +815,20 @@ bool RocJpegStreamParser::ParseSOS() {
         jpeg_stream_parameters_.slice_parameter_buffer.components[i].dc_table_selector = ((table >> 4) & 0x0F);
         jpeg_stream_parameters_.slice_parameter_buffer.components[i].ac_table_selector = (table & 0x0F);
 
-        if ((table & 0xF) >= 4) {
-            ErrorLog(g_rocjpeg_logger,"invalid number of AC Huffman table!");
+        // ISO/IEC 10918-1 Table B.3: a baseline scan selects its DC and AC
+        // Huffman tables from destinations 0 and 1 only, the same two that
+        // ParseDHT accepts. Selectors 2 and 3 belong to the other coding
+        // processes, so here they name a table that cannot have been defined.
+        if ((table & 0xF) >= HUFFMAN_TABLES) {
+            ErrorLog(g_rocjpeg_logger, "Invalid JPEG: SOS component " + ROCJPEG_TOSTR(i) +
+                " selects AC Huffman table " + ROCJPEG_TOSTR(table & 0xF) +
+                ", but baseline JPEG allows only tables 0 and 1!");
             return false;
         }
-        if ((table >> 4) >= 4) {
-            ErrorLog(g_rocjpeg_logger,"invalid number of DC Huffman table!");
+        if ((table >> 4) >= HUFFMAN_TABLES) {
+            ErrorLog(g_rocjpeg_logger, "Invalid JPEG: SOS component " + ROCJPEG_TOSTR(i) +
+                " selects DC Huffman table " + ROCJPEG_TOSTR(table >> 4) +
+                ", but baseline JPEG allows only tables 0 and 1!");
             return false;
         }
         if (component_id != jpeg_stream_parameters_.picture_parameter_buffer.components[i].component_id) {
