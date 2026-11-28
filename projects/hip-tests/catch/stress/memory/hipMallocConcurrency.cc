@@ -30,8 +30,11 @@ Testcase Scenarios :
 #include <hip_test_checkers.hh>
 #include <hip_test_kernels.hh>
 
+#include <algorithm>
 #include <atomic>
+#include <iostream>
 #include <limits>
+#include <memory>
 #include <vector>
 
 
@@ -215,39 +218,65 @@ HIP_TEST_CASE(Stress_hipMalloc_LoopRegressionAllocFreeCycles) {
  * of time.
  */
 HIP_TEST_CASE(Stress_hipMalloc_AllocateAndPoolBuffers) {
-  size_t avail{0}, tot{0};
-  bool ret{false};
-  hipError_t err{};
-  std::vector<int*> ptrlist{};
+  using Allocation = std::unique_ptr<int, decltype(&hipFree)>;
+  std::vector<Allocation> ptrlist;
+  ptrlist.reserve(MaxAllocPoolIter);
   constexpr auto BuffSize = 10;
-  int devCnt{0}, *ptr{nullptr};
+  int devCnt = 0;
+  size_t successful_allocations = 0;
+  size_t peak_retained = 0;
+  size_t batches = 0;
+  size_t oom_recoveries = 0;
 
-  // Get GPU count
   HIP_CHECK(hipGetDeviceCount(&devCnt));
   REQUIRE(devCnt > 0);
 
-  // Allocate small chunks of memory million times
-  for (int i = 0; i < MaxAllocPoolIter; i++) {
-    if ((err = hipMalloc(&ptr, BuffSize)) != hipSuccess) {
-      HIP_CHECK(hipMemGetInfo(&avail, &tot));
-
-      INFO("Loop regression pool allocation failure. "
-           << "Total gpu memory " << tot / (1024.0 * 1024.0) << ", Free memory "
-           << avail / (1024.0 * 1024.0) << " iter " << i << " error " << hipGetErrorString(err));
-
-      REQUIRE(false);
+  auto release_pool = [&] {
+    hipError_t first_error = hipSuccess;
+    for (auto& allocation : ptrlist) {
+      const auto status = hipFree(allocation.release());
+      if (first_error == hipSuccess && status != hipSuccess) {
+        first_error = status;
+      }
     }
+    ptrlist.clear();
+    INFO("First free error: " << first_error);
+    REQUIRE(first_error == hipSuccess);
+    ++batches;
+  };
 
-    // Store pointers allocated to emulate memory pool of app
-    ptrlist.push_back(ptr);
+  // Retain allocations until the process reaches a resource limit. Draining
+  // then continuing preserves the total work without assuming a fixed number
+  // of simultaneous allocations fits every runtime and host configuration.
+  while (successful_allocations < static_cast<size_t>(MaxAllocPoolIter)) {
+    int* ptr = nullptr;
+    const auto status = hipMalloc(&ptr, BuffSize);
+    if (status != hipSuccess) {
+      INFO("Allocation " << successful_allocations << ", retained " << ptrlist.size());
+      REQUIRE(status == hipErrorOutOfMemory);
+      REQUIRE(hipGetLastError() == hipErrorOutOfMemory);
+      REQUIRE_FALSE(ptrlist.empty());
+      size_t avail = 0, total = 0;
+      HIP_CHECK(hipMemGetInfo(&avail, &total));
+      std::cout << "Draining retained pool after out of memory: " << ptrlist.size()
+                << " allocations, free " << avail << ", total " << total << " bytes" << std::endl;
+      // The failed allocation's output is undefined and is never retained.
+      release_pool();
+      ++oom_recoveries;
+      continue;
+    }
+    REQUIRE(ptr != nullptr);
+    ptrlist.emplace_back(ptr, &hipFree);
+    ++successful_allocations;
+    peak_retained = std::max(peak_retained, ptrlist.size());
   }
 
-  // Free ptrs at later point of time
-  for (auto& t : ptrlist) {
-    HIP_CHECK(hipFree(t));
-  }
-  ret = validateMemoryOnGPU(0);
-  REQUIRE(ret == true);
+  release_pool();
+  std::cout << "Completed " << successful_allocations << " allocations in " << batches
+            << " retained batches; peak retained " << peak_retained << ", OOM recoveries "
+            << oom_recoveries << '\n';
+  REQUIRE(hipGetLastError() == hipSuccess);
+  REQUIRE(validateMemoryOnGPU(0));
 }
 
 

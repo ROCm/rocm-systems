@@ -37,7 +37,7 @@ static __global__ void fillKernel(int* arr, int size, int value) {
 /**
  * In addOneKernel, all elements of the array are incremented by 1
  */
-static __global__ void addOneKernel(int* arr, int size) {
+static __global__ void addOneKernel(char* arr, int size) {
   int offset = blockDim.x * blockIdx.x + threadIdx.x;
   int stride = blockDim.x * gridDim.x;
   for (int i = offset; i < size; i += stride) {
