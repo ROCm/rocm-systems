@@ -15,6 +15,14 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 - **`rdc_health_get()` returns `RDC_ST_GROUP_NOT_FOUND` for a GPU group that does not exist**.
   - It returned `RDC_ST_OK` with no health watches, so `rdci health -f` showed every watch as Off and exited successfully, and `rdci health -c` failed asking for watches to be enabled. Both commands now fail with a message that the group does not exist.
 
+- `rdci diag` reports a check as skipped, instead of passed, when it or one GPU in it compared nothing (a group without GPUs, a group of one GPU for the topology check, a GPU whose sensors cannot be read, processes whose GPUs cannot be read); `rdc_diagnostic_run()`, and `rdc_test_case_run()` in embedded mode, also report a check whose module returned without writing a result as skipped.
+
+- `rdci diag`'s GPU parameters line gives one sentence per GPU (limits in range, or how many crossed), and its per-GPU lines state each crossed limit, for example `Edge temperature 105 is at or above its maximum 100.`
+
+- `rdci diag`'s compute process lines cover only the GPUs of the group, and leave out the process that runs the check (`rdcd`, or the program that embeds RDC), which can stay listed on a GPU after the ROCr diagnostics have used it.
+
+- `rdci diag` cuts a compute process, node topology or GPU parameters detail too long to show after a whole sentence, GPU pair or process ID and ends it with "(N more not shown)".
+
 - **`rdc_field_watch()` documents that a `max_keep_samples` or `max_keep_age` of 0 keeps no samples**.
   - The documentation said 0 meant no limit. To keep every sample, pass a large value, such as `UINT32_MAX`.
 
@@ -98,6 +106,18 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - `rdcd` no longer crashes during `rdci diag`, and later diagnostic runs and profiler fields keep working. Repeated `rdci diag` runs also no longer use up GPU memory in `rdcd`.
   - After the first `rdci diag`, `rdcd` keeps the ROCm runtime loaded until it stops, as it already does after the first profiler field read, so changing the GPU partition mode needs `rdcd` stopped. `rdci diag` requests now run one at a time.
+
+- The node topology diagnostic names the GPUs of each pair by index.
+
+- The GPU parameters diagnostic reports each GPU's messages under that GPU and compares the critical voltage limits.
+
+- The compute process diagnostic finds the GPUs of each process: it asked AMD SMI for them with a NULL list, which current AMD SMI versions reject, so it passed while processes ran; it also retries when processes start while it reads the list.
+
+- `rdcd` and `rdci` no longer need about 7 MB of stack per diagnostic run.
+
+- `rdci diag` no longer shows the results of an earlier run for a check that did not run.
+
+- `rdcd` no longer logs an error for each diagnostic run with a custom configuration.
 
 - `rdci diag` now runs the Compute Queue and System memory checks on AMD Instinct MI455X GPUs instead of skipping them.
 

@@ -26,6 +26,8 @@ THE SOFTWARE.
 #include <iomanip>
 #include <iostream>
 #include <map>
+#include <memory>
+#include <new>
 #include <string>
 
 #include "rdc/rdc.h"
@@ -53,6 +55,15 @@ int main(int, char**) {
   bool standalone = false;
   char hostIpAddress[] = {"127.0.0.1:50051"};
   char group_name[] = {"diag_group"};
+
+  // The results are about 7 MB and 521 KB: on the heap, not on the stack. Allocated before the
+  // first `goto cleanup`, which may not jump over their initialization.
+  std::unique_ptr<rdc_diag_response_t> response(new (std::nothrow) rdc_diag_response_t());
+  std::unique_ptr<rdc_diag_test_result_t> case_result(new (std::nothrow) rdc_diag_test_result_t());
+  if (response == nullptr || case_result == nullptr) {
+    std::cout << "Not enough memory for the diagnostic results\n";
+    return 1;
+  }
 
   // Select the embedded mode and standalone mode dynamically.
   std::cout << "Start rdci in: \n";
@@ -102,9 +113,8 @@ int main(int, char**) {
   }
 
   // (2) start to run short diagnostic.
-  rdc_diag_response_t response;
-  result =
-      rdc_diagnostic_run(rdc_handle, group_id, RDC_DIAG_LVL_SHORT, nullptr, 0, &response, nullptr);
+  result = rdc_diagnostic_run(rdc_handle, group_id, RDC_DIAG_LVL_SHORT, nullptr, 0, response.get(),
+                              nullptr);
 
   if (result != RDC_ST_OK) {
     std::cout << "Error run RDC_DIAG_LVL_SHORT diagnostic. Return: " << rdc_status_string(result);
@@ -112,16 +122,16 @@ int main(int, char**) {
   }
 
   // (3) Check diagnostic results
-  for (uint32_t i = 0; i < response.results_count; i++) {
-    const rdc_diag_test_result_t& test_result = response.diag_info[i];
+  for (uint32_t i = 0; i < response->results_count; i++) {
+    const rdc_diag_test_result_t& test_result = response->diag_info[i];
     std::cout << std::setw(22) << std::left << get_test_name(test_result.test_case) + ":"
               << rdc_diagnostic_result_string(test_result.status) << "\n";
   }
 
   // (4) diagnostic detail information
   std::cout << " =============== Diagnostic Details ==================\n";
-  for (uint32_t i = 0; i < response.results_count; i++) {
-    const rdc_diag_test_result_t& test_result = response.diag_info[i];
+  for (uint32_t i = 0; i < response->results_count; i++) {
+    const rdc_diag_test_result_t& test_result = response->diag_info[i];
     if (test_result.info[0] != '\0') {
       std::cout << std::setw(22) << std::left << get_test_name(test_result.test_case) + ":"
                 << test_result.info << "\n";
@@ -136,9 +146,8 @@ int main(int, char**) {
 
   // (5) run one test case
   std::cout << " ============== Run individual diagnostic test ===========\n";
-  rdc_diag_test_result_t test_result;
   result = rdc_test_case_run(rdc_handle, group_id, RDC_DIAG_COMPUTE_PROCESS, nullptr, 0,
-                             &test_result, nullptr);
+                             case_result.get(), nullptr);
 
   if (result != RDC_ST_OK) {
     std::cout << "Error run RDC_DIAG_COMPUTE_PROCESS diagnostic. Return: "
@@ -147,7 +156,7 @@ int main(int, char**) {
   }
 
   std::cout << std::setw(22) << std::left << get_test_name(RDC_DIAG_COMPUTE_PROCESS) + ":"
-            << test_result.info << "\n";
+            << case_result->info << "\n";
 
 // Cleanup consists of shutting down RDC.
 cleanup:

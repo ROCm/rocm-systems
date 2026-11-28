@@ -273,14 +273,14 @@ The diagnostic feature when run on a GPU group provides the following details:
 
     $ rdci diag -g <gpu_group>
 
-    No compute process:  Pass
-    Node topology check:  Pass
-    GPU parameters check:  Pass
-    Compute Queue ready:  Pass
-    System memory check:  Pass
-    =============== Diagnostic Details ==================
-    No compute process:  No processes running on any devices.
-    Node topology check:  No link detected.
-    GPU parameters check:  GPU 0 Critical Edge temperature in range.
-    Compute Queue ready:  Run binary search task on GPU 0 Pass.
-    System memory check:  Max Single Allocation Memory Test for GPU 0 Pass. CPUAccessToGPUMemoryTest for GPU 0 Pass. GPUAccessToCPUMemoryTest for GPU 0 Pass.
+    No compute process:       Pass
+    Node topology check:      Skip
+    GPU parameters check:     Pass
+    Compute Queue ready:      Pass
+    System memory check:      Pass
+     =============== Diagnostic Details ==================
+    No compute process:       No processes running on any devices.
+    Node topology check:      No pair of available GPUs to check.
+    GPU parameters check:     GPU 0: 6 limits in range.
+    Compute Queue ready:      Run binary search task on GPU 0 Pass.
+    System memory check:      Max Single Allocation Memory Test for GPU 0 Pass. CPUAccessToGPUMemoryTest for GPU 0 Pass. GPUAccessToCPUMemoryTest for GPU 0 Pass.
