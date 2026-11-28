@@ -4473,12 +4473,34 @@ hsa_status_t GpuAgent::PcSamplingCreateFromId(HsaPcSamplingTraceId ioctlId,
       return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
     pcs_data->xcc_data[xcc_id].done_sig1 = init_data->done_sig1;
 
-    // Set watermarks at 80% to trigger early flush before buffer fills.
+    // Set watermarks to trigger early flush before the buffer fills.
     // Trap handler signals when written samples reach watermark, allowing ROCR to copy
     // data while trap handler writes to the other buffer.
-    constexpr float kPCSamplingWatermarkFraction = 0.8f;
-    init_data->buf_watermark0 = kPCSamplingWatermarkFraction * init_data->buf_size;
-    init_data->buf_watermark1 = kPCSamplingWatermarkFraction * init_data->buf_size;
+    // The fraction scales with the sampling interval: short intervals refill the buffer
+    // quickly, so a high watermark minimizes swap overhead; long intervals flush earlier
+    // to bound sample staleness.
+    //
+    // The thresholds below are expressed in clock cycles, and session.interval() is a raw
+    // value whose unit is carried separately in session.units(). Comparing a microsecond
+    // or instruction-count interval against cycle thresholds would invert the intent (a
+    // 65536 us interval is very relaxed, not aggressive), so scale only for cycle-based
+    // sessions and keep the previous fixed default for every other unit.
+    constexpr float kPCSamplingDefaultWatermark = 0.8f;
+    constexpr size_t kPCSamplingAggressiveIntervalCycles = 65536;
+    constexpr size_t kPCSamplingModerateIntervalCycles = 262144;
+    float watermark_fraction = kPCSamplingDefaultWatermark;
+    if (session.units() == HSA_VEN_AMD_PCS_INTERVAL_UNITS_CLOCK_CYCLES) {
+      const size_t interval = session.interval();
+      if (interval <= kPCSamplingAggressiveIntervalCycles) {
+        watermark_fraction = 0.8f;
+      } else if (interval <= kPCSamplingModerateIntervalCycles) {
+        watermark_fraction = 0.7f;
+      } else {
+        watermark_fraction = 0.5f;
+      }
+    }
+    init_data->buf_watermark0 = watermark_fraction * init_data->buf_size;
+    init_data->buf_watermark1 = watermark_fraction * init_data->buf_size;
 
     // DMA copy init structure to device (required for non-large BAR systems)
     if (DmaCopy(pcs_data->xcc_data[xcc_id].device_data, init_data, sizeof(*init_data)) !=
