@@ -291,6 +291,8 @@ bool rcclCeArGraphSafe(struct ncclComm* comm);
 RCCL_PARAM_DECLARE(CeAllReduce);
 RCCL_PARAM_DECLARE(ForceCeAllReduce);
 RCCL_PARAM_DECLARE(CeReduceScatter);
+RCCL_PARAM_DECLARE(CeReducePerChunk);
+RCCL_PARAM_DECLARE(CeReducePerChunkSlots);
 // Is CE AllReduce enabled for this comm? RCCL_CE_ALLREDUCE wins when set;
 // otherwise CE AllReduce is on only for the arch it is tuned for (gfx1250) and
 // off elsewhere, independent of that arch table's ceNonRegMax/ceRegMax entries.

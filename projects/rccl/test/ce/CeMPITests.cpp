@@ -79,6 +79,54 @@ constexpr int kIntraBatchMaxRanks = 16;
 // element count a per-element term would exceed the range float represents
 // exactly, while the biased values stay well inside it.
 constexpr float kUpperHalfBias = 1048576.0f;
+
+// Reduce-test inputs v(r, i) = (r + 1) + (i % period). The periods are prime so
+// they never divide a chunk or slot size: the same offset in neighbouring chunks
+// holds a different value, and reading the wrong slot or writing the wrong output
+// offset changes the result. Float Sum stays an exact integer (<= 2036 at 8 ranks).
+// Back-to-back iterations pass i + iter, so every element changes between calls and
+// a reducer that runs early on a stale doorbell reads the previous call's bytes and
+// fails, without widening the value range.
+constexpr size_t kFloatValuePeriod = 251;
+
+// BF16 holds every integer up to 256 exactly. Pick the largest prime period whose
+// worst-case sum n(n+1)/2 + n(p-1) stays within that, so every partial sum is
+// exact. At 8 ranks this is 23: sums <= 212 and the average 4.5 + (i % 23) is exact.
+inline size_t ceBf16ValuePeriod(int nRanks)
+{
+    const long n     = nRanks;
+    const long limit = (256 - n * (n + 1) / 2) / n + 1;
+    for(long p = limit; p > 2; --p)
+    {
+        bool prime = true;
+        for(long d = 2; d * d <= p; ++d)
+            prime = prime && (p % d != 0);
+        if(prime)
+            return static_cast<size_t>(p);
+    }
+    return 2;
+}
+
+inline float ceRankIndexValueFloat(int rank, size_t i)
+{
+    return static_cast<float>(rank + 1) + static_cast<float>(i % kFloatValuePeriod);
+}
+
+inline float ceRankIndexSumFloat(int nRanks, size_t i)
+{
+    return static_cast<float>(nRanks * (nRanks + 1) / 2) +
+           static_cast<float>(nRanks) * static_cast<float>(i % kFloatValuePeriod);
+}
+
+inline float ceRankIndexValueBf16(int rank, size_t i, size_t period)
+{
+    return static_cast<float>(rank + 1) + static_cast<float>(i % period);
+}
+
+inline float ceRankIndexAvgBf16(int nRanks, size_t i, size_t period)
+{
+    return static_cast<float>(nRanks + 1) / 2.0f + static_cast<float>(i % period);
+}
 } // namespace CeMPITestConstants
 
 using namespace CeMPITestConstants;
@@ -922,8 +970,12 @@ protected:
         TEST_INFO("%s: chunk layout assertion — chunksPerShard=%zu", context, chunksPerShard);
     }
 
+    // exactChunksPerShard > 0 pins the chunk layout instead of bounding it from
+    // below. iterations > 1 runs back-to-back calls so a missed doorbell reset
+    // between calls fails the second one.
     void runAllReduce(int minRanks, size_t count, ncclRedOp_t op, const char* testId,
-                      size_t minChunksPerShard = 0)
+                      size_t minChunksPerShard = 0, size_t exactChunksPerShard = 0,
+                      int iterations = 1)
     {
         if(!validateTestPrerequisites(minRanks))
             GTEST_SKIP() << "Need >= " << minRanks << " MPI ranks";
@@ -941,7 +993,6 @@ protected:
         ASSERT_EQ(ncclSuccess, allocSymBuf(bytes, sendSym));
         ASSERT_EQ(ncclSuccess, allocSymBuf(bytes, recvSym));
 
-        fillRankScalar(sendSym.ptr, alignedCount, rank);
         int predictedAlgo = -1, proto = 0, nChannels = 0;
         ASSERT_EQ(ncclSuccess,
                   rcclGetCollImplInfo(getActiveCommunicator(), ncclFuncAllReduce, alignedCount, ncclFloat32, op,
@@ -954,21 +1005,38 @@ protected:
                                                           << " is not a CE AllReduce variant";
         }
 
-        ASSERT_EQ(ncclSuccess,
-                  ncclAllReduce(sendSym.ptr, recvSym.ptr, alignedCount, ncclFloat32, op,
-                                getActiveCommunicator(), getActiveStream()));
-        ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
-
-        const float expectedSum = static_cast<float>(nRanks * (nRanks + 1) / 2);
-        if(op == ncclSum)
+        for(int iter = 0; iter < iterations; ++iter)
         {
-            ASSERT_TRUE(verifyBufferData<float>(recvSym.ptr, alignedCount,
-                                                [expectedSum](size_t) { return expectedSum; }))
-                << "Rank " << rank << ": CE AllReduce Sum verification failed";
+            const size_t shift = static_cast<size_t>(iter);
+            ASSERT_EQ(hipSuccess,
+                      initializeBufferWithPattern<float>(sendSym.ptr, alignedCount, [rank, shift](size_t i) {
+                          return ceRankIndexValueFloat(rank, i + shift);
+                      }));
+            if(op == ncclSum)
+            {
+                ASSERT_EQ(hipSuccess, hipMemset(recvSym.ptr, 0xFF, bytes));
+            }
+            ASSERT_EQ(ncclSuccess,
+                      ncclAllReduce(sendSym.ptr, recvSym.ptr, alignedCount, ncclFloat32, op,
+                                    getActiveCommunicator(), getActiveStream()));
+            ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+            if(op == ncclSum)
+            {
+                ASSERT_TRUE(verifyBufferData<float>(recvSym.ptr, alignedCount, [nRanks, shift](size_t i) {
+                    return ceRankIndexSumFloat(nRanks, i + shift);
+                }))
+                    << "Rank " << rank << ": CE AllReduce Sum verification failed on iteration " << iter;
+            }
         }
 
         assertCEAllReducePathTaken(testId);
         assertCEAllReduceChunking(minChunksPerShard, testId);
+        if(isCeAllReduceExpected() && exactChunksPerShard > 0)
+        {
+            EXPECT_EQ(ceLogChunksPerShard(readAllLogs()), exactChunksPerShard)
+                << testId << ": expected exactly " << exactChunksPerShard << " chunks per shard";
+        }
     }
 
     // Max/Min on symmetric windows: symk does not request non-Sum, so after the first call CE 2-shot can take over from registered.
@@ -1111,6 +1179,265 @@ TEST_F(CeMPI_AllReduce, MaxOp128MiB)
 TEST_F(CeMPI_AllReduce, MinOp128MiB)
 {
     runCeOnlyAllReduce(ncclMin, "CeMPI_AllReduce/MinOp128MiB");
+}
+
+// CE-MPI-AR-09: Exactly two chunks per shard, the no-reuse path where the reduce
+// kernel leaves doorbells latched and the host clears them after the closing
+// barrier. With the 16 MiB staging pin a 24 MiB message is 1.5 slots per shard,
+// which is 2 chunks at 3+ ranks (2 ranks hit the 4 MiB chunk floor and get 3).
+// Two back-to-back calls so a missed doorbell reset fails the second.
+TEST_F(CeMPI_AllReduce, TwoChunkNoReuse24MiB)
+{
+    const size_t count = 24ull * 1024 * 1024 / sizeof(float);
+    runAllReduce(kMinRanks8, count, ncclSum, "CeMPI_AllReduce/TwoChunkNoReuse24MiB",
+                 /*minChunksPerShard=*/0, /*exactChunksPerShard=*/2, /*iterations=*/2);
+}
+
+// ===========================================================================
+// CeMPI_ReduceScatter – CE correctness with CTA_POLICY_ZERO, including
+// rank-varying in-place output alignment.
+// ===========================================================================
+
+class CeMPI_ReduceScatter : public CeMPITest
+{
+protected:
+    std::unique_ptr<MPIHelpers::MpiEnvGuard> ceReduceScatterGuard_;
+
+    void SetUp() override
+    {
+        CeMPITest::SetUp();
+        ceReduceScatterGuard_ =
+            std::make_unique<MPIHelpers::MpiEnvGuard>("RCCL_CE_REDUCESCATTER", "1");
+    }
+
+    void TearDown() override
+    {
+        ceReduceScatterGuard_.reset();
+        CeMPITest::TearDown();
+    }
+
+    bool isCeReduceScatterExpected() const
+    {
+        return isCeReduceScatterDispatchConfigured() && !isMultiNodeTest();
+    }
+
+    void assertCEPathTaken(const char* context, size_t recvcount, ncclDataType_t datatype,
+                           ncclRedOp_t op, const void* sendbuff, void* recvbuff)
+    {
+        const std::string log = readAllLogs();
+        if(isCeReduceScatterExpected())
+        {
+            EXPECT_TRUE(ceLogShowsReduceScatterPath(log))
+                << context << ": CE ReduceScatter log marker absent";
+            const size_t chunksPerShard = ceLogChunksPerShard(log);
+            const char* expectedReducer = ceExpectedReduceScatterReducer(chunksPerShard);
+            EXPECT_TRUE(ceLogShowsReduceScatterReducer(log, expectedReducer))
+                << context << ": expected reducer=" << expectedReducer
+                << " (chunksPerShard=" << chunksPerShard << ")";
+            int algo = 0, proto = 0, nChannels = 0;
+            ASSERT_EQ(ncclSuccess,
+                      rcclGetCollImplInfo(getActiveCommunicator(), ncclFuncReduceScatter, recvcount,
+                                          datatype, op, sendbuff, recvbuff, /*graphCapturing=*/0, &algo,
+                                          &proto, &nChannels))
+                << context << ": rcclGetCollImplInfo failed";
+            EXPECT_TRUE(algo == static_cast<int>(RCCL_CE_2SHOT) ||
+                        algo == static_cast<int>(RCCL_CE_REGISTERED))
+                << context << ": rcclGetCollImplInfo must report a CE algo when CE ran"
+                << " (algo=" << algo << ")";
+            const int maxBlocks =
+                MPIHelpers::getEnvParam<int>("RCCL_CE_REDUCE_MAX_BLOCKS", NCCL_CE_REDUCE_DEFAULT_BLOCKS);
+            EXPECT_LE(nChannels, maxBlocks)
+                << context << ": nChannels=" << nChannels << " exceeds RCCL_CE_REDUCE_MAX_BLOCKS="
+                << maxBlocks;
+        }
+        else
+        {
+            EXPECT_FALSE(ceLogShowsReduceScatterPath(log))
+                << context << ": CE ReduceScatter ran without its prerequisites";
+        }
+    }
+
+    void runReduceScatter(size_t recvcount, bool inPlace, const char* testId)
+    {
+        if(!validateTestPrerequisites(kMinRanks2))
+            GTEST_SKIP() << "Need >= " << kMinRanks2 << " MPI ranks";
+
+        ASSERT_EQ(ncclSuccess, createTestCommunicator());
+
+        int rank{}, nRanks{};
+        ncclCommUserRank(getActiveCommunicator(), &rank);
+        ncclCommCount(getActiveCommunicator(), &nRanks);
+
+        const size_t totalElem = recvcount * static_cast<size_t>(nRanks);
+        void* sendBuf = nullptr;
+        ASSERT_EQ(hipSuccess, hipMalloc(&sendBuf, totalElem * sizeof(float)));
+        RCCLTestGuards::DeviceBufferAutoGuard sendGuard(sendBuf);
+        ASSERT_EQ(hipSuccess,
+                  initializeBufferWithPattern<float>(sendBuf, totalElem,
+                                                     [rank](size_t i) { return ceRankIndexValueFloat(rank, i); }));
+
+        void* recvAllocation = nullptr;
+        float* recvBuf = nullptr;
+        if(inPlace)
+        {
+            recvBuf = static_cast<float*>(sendBuf) + static_cast<size_t>(rank) * recvcount;
+        }
+        else
+        {
+            ASSERT_EQ(hipSuccess, hipMalloc(&recvAllocation, recvcount * sizeof(float)));
+            recvBuf = static_cast<float*>(recvAllocation);
+        }
+        RCCLTestGuards::DeviceBufferAutoGuard recvGuard(recvAllocation);
+
+        ASSERT_EQ(ncclSuccess,
+                  ncclReduceScatter(sendBuf, recvBuf, recvcount, ncclFloat32, ncclSum,
+                                    getActiveCommunicator(), getActiveStream()));
+        ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+        // Output element j on this rank reduces input index rank * recvcount + j.
+        const size_t shardBase = static_cast<size_t>(rank) * recvcount;
+        ASSERT_TRUE(verifyBufferData<float>(recvBuf, recvcount, [nRanks, shardBase](size_t j) {
+            return ceRankIndexSumFloat(nRanks, shardBase + j);
+        }))
+            << "Rank " << rank << ": CE ReduceScatter Sum verification failed";
+        assertCEPathTaken(testId, recvcount, ncclFloat32, ncclSum, sendBuf, recvBuf);
+    }
+
+    // Primus GPT-OSS BF16 Avg ReduceScatter shapes. grouped wraps the call in
+    // ncclGroupStart/End; minChunksPerShard > 0 requires the multi-chunk path.
+    // iterations > 1 runs the collective back-to-back so a missing doorbell
+    // reset between calls is visible.
+    void runBfloat16Average(size_t recvcount, bool grouped, size_t minChunksPerShard,
+                            const char* testId, int iterations = 1,
+                            bool expectMaxBlocks = false)
+    {
+        if(!validateTestPrerequisites(kMinRanks8))
+            GTEST_SKIP() << "Need >= " << kMinRanks8 << " MPI ranks";
+
+        ASSERT_EQ(ncclSuccess, createTestCommunicator());
+
+        int rank{}, nRanks{};
+        ncclCommUserRank(getActiveCommunicator(), &rank);
+        ncclCommCount(getActiveCommunicator(), &nRanks);
+        const size_t totalElem = recvcount * static_cast<size_t>(nRanks);
+        const size_t period    = ceBf16ValuePeriod(nRanks);
+
+        hip_bfloat16* sendBuf = nullptr;
+        hip_bfloat16* recvBuf = nullptr;
+        ASSERT_EQ(hipSuccess, hipMalloc(&sendBuf, totalElem * sizeof(hip_bfloat16)));
+        ASSERT_EQ(hipSuccess, hipMalloc(&recvBuf, recvcount * sizeof(hip_bfloat16)));
+        RCCLTestGuards::DeviceBufferAutoGuard sendGuard(sendBuf);
+        RCCLTestGuards::DeviceBufferAutoGuard recvGuard(recvBuf);
+        const size_t shardBase = static_cast<size_t>(rank) * recvcount;
+        for(int iter = 0; iter < iterations; ++iter)
+        {
+            const size_t shift = static_cast<size_t>(iter);
+            ASSERT_EQ(hipSuccess, initializeBufferWithPattern<hip_bfloat16>(
+                                      sendBuf, totalElem, [rank, period, shift](size_t i) {
+                                          return hip_bfloat16(ceRankIndexValueBf16(rank, i + shift, period));
+                                      }));
+            const auto expected = [nRanks, shardBase, period, shift](size_t j) {
+                return hip_bfloat16(ceRankIndexAvgBf16(nRanks, shardBase + j + shift, period));
+            };
+            ASSERT_EQ(hipSuccess, hipMemset(recvBuf, 0xFF, recvcount * sizeof(hip_bfloat16)));
+            if(grouped)
+                ASSERT_EQ(ncclSuccess, ncclGroupStart());
+            ASSERT_EQ(ncclSuccess,
+                      ncclReduceScatter(sendBuf, recvBuf, recvcount, ncclBfloat16, ncclAvg,
+                                        getActiveCommunicator(), getActiveStream()));
+            if(grouped)
+                ASSERT_EQ(ncclSuccess, ncclGroupEnd());
+            ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+            ASSERT_TRUE(verifyBufferData<hip_bfloat16>(recvBuf, recvcount, expected))
+                << "Rank " << rank << ": CE ReduceScatter BF16 Avg verification failed"
+                << " on iteration " << iter;
+        }
+
+        assertCEPathTaken(testId, recvcount, ncclBfloat16, ncclAvg, sendBuf, recvBuf);
+        if(isCeReduceScatterExpected() && minChunksPerShard > 0)
+        {
+            EXPECT_GE(ceLogChunksPerShard(readAllLogs()), minChunksPerShard)
+                << testId << ": expected chunksPerShard >= " << minChunksPerShard;
+        }
+        if(isCeReduceScatterExpected() && expectMaxBlocks)
+        {
+            int algo = 0, proto = 0, nChannels = 0;
+            ASSERT_EQ(ncclSuccess,
+                      rcclGetCollImplInfo(getActiveCommunicator(), ncclFuncReduceScatter, recvcount,
+                                          ncclBfloat16, ncclAvg, sendBuf, recvBuf, /*graphCapturing=*/0,
+                                          &algo, &proto, &nChannels))
+                << testId << ": rcclGetCollImplInfo failed for max-blocks check";
+            const int maxBlocks =
+                MPIHelpers::getEnvParam<int>("RCCL_CE_REDUCE_MAX_BLOCKS", NCCL_CE_REDUCE_DEFAULT_BLOCKS);
+            EXPECT_EQ(nChannels, maxBlocks)
+                << testId << ": pipelined BF16 Avg should use the full RCCL_CE_REDUCE_MAX_BLOCKS cap";
+        }
+    }
+};
+
+TEST_F(CeMPI_ReduceScatter, OutOfPlace)
+{
+    runReduceScatter(kSmallCount, false, "CeMPI_ReduceScatter/OutOfPlace");
+}
+
+// recvcount=4097 floats makes recvbuff = sendbuff + rank*recvcount have a
+// different 16-byte alignment on adjacent ranks. All ranks must still select
+// CE, and the kernel must use scalar stores for the unaligned shards.
+TEST_F(CeMPI_ReduceScatter, InPlaceRankVaryingAlignment)
+{
+    runReduceScatter(4097, true, "CeMPI_ReduceScatter/InPlaceRankVaryingAlignment");
+}
+
+// Primus GPT-OSS uses BF16 Avg for gradient ReduceScatter. Validate CE's
+// sum-then-post-scale implementation through the public API on eight ranks.
+TEST_F(CeMPI_ReduceScatter, Bfloat16Average)
+{
+    runBfloat16Average(kSmallCount, /*grouped=*/false, /*minChunksPerShard=*/0,
+                       "CeMPI_ReduceScatter/Bfloat16Average");
+}
+
+// 4099 is not a multiple of the BF16 vector width (8), so the scalar CeReducePostOp
+// Avg tail runs in addition to the packed body.
+TEST_F(CeMPI_ReduceScatter, Bfloat16AverageScalarTail)
+{
+    runBfloat16Average(4099, /*grouped=*/false, /*minChunksPerShard=*/0,
+                       "CeMPI_ReduceScatter/Bfloat16AverageScalarTail");
+}
+
+// Primus batches gradient collectives between ncclGroupStart/End. Exercise the
+// queued CE dispatch path rather than only the eager public-API path above.
+TEST_F(CeMPI_ReduceScatter, GroupedBfloat16Average)
+{
+    runBfloat16Average(kSmallCount, /*grouped=*/true, /*minChunksPerShard=*/0,
+                       "CeMPI_ReduceScatter/GroupedBfloat16Average");
+}
+
+// GPT-OSS's gradient bucket is larger than a CE staging slot, so correctness
+// also depends on recycling staging slots while the copy-engine stream fills
+// later chunks. The default reducer uses two slots; the finite per-chunk mode
+// reserves more. Keep this comfortably smaller than the production 2.23 GiB
+// collective while still forcing three chunks per shard with the default
+// 256 MiB per-slot staging capacity on eight ranks.
+TEST_F(CeMPI_ReduceScatter, GroupedPipelinedBfloat16Average)
+{
+    constexpr size_t kShardBytes = 96ull * 1024 * 1024;
+    const size_t recvcount = kShardBytes / sizeof(hip_bfloat16);
+    runBfloat16Average(recvcount, /*grouped=*/true, /*minChunksPerShard=*/3,
+                       "CeMPI_ReduceScatter/GroupedPipelinedBfloat16Average",
+                       /*iterations=*/1, /*expectMaxBlocks=*/true);
+}
+
+// Shard just over one default staging slot on 8 ranks (256 MiB / 8 = 32 MiB) so
+// chunksPerShard == 2. That takes the kernel no-reuse branch (totalSteps <=
+// NCCL_CE_NUM_SLOTS). Run twice so a missing doorbell reset between calls fails.
+TEST_F(CeMPI_ReduceScatter, GroupedTwoChunkNoReuseBfloat16Average)
+{
+    constexpr size_t kShardBytes = 48ull * 1024 * 1024;
+    const size_t recvcount = kShardBytes / sizeof(hip_bfloat16);
+    runBfloat16Average(recvcount, /*grouped=*/true, /*minChunksPerShard=*/2,
+                       "CeMPI_ReduceScatter/GroupedTwoChunkNoReuseBfloat16Average",
+                       /*iterations=*/2);
 }
 
 // ===========================================================================

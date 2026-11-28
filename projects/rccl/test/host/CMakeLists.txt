@@ -81,6 +81,20 @@ rccl_assert_source_line("${_rccl_src_root}/graph/connect.cc"
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/init_fakes.cc"
   "int64_t ncclParamTreeCompact() { return g_loadParam(\"TREE_COMPACT\", 0); }"
   "the TreeCompact fake default")
+# Real RCCL_PARAM(CeReducePerChunk*, ...) lives in ce_coll.cc; init.cc only has the
+# RCCL_PARAM_DECLARE externs. MicroInit does not compile ce_coll.cc.
+rccl_assert_source_line("${_rccl_src_root}/ce_coll.cc"
+  "RCCL_PARAM(CeReducePerChunk, \"CE_REDUCE_PER_CHUNK\", 0)"
+  "fakes/init_fakes.cc: rcclParamCeReducePerChunk()")
+rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/init_fakes.cc"
+  "int64_t rcclParamCeReducePerChunk() { return g_loadParam(\"RCCL_CE_REDUCE_PER_CHUNK\", 0); }"
+  "the CeReducePerChunk fake default")
+rccl_assert_source_line("${_rccl_src_root}/ce_coll.cc"
+  "RCCL_PARAM(CeReducePerChunkSlots, \"CE_REDUCE_PER_CHUNK_SLOTS\", NCCL_CE_REDUCE_PER_CHUNK_SLOTS)"
+  "fakes/init_fakes.cc: rcclParamCeReducePerChunkSlots()")
+rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/init_fakes.cc"
+  "return g_loadParam(\"RCCL_CE_REDUCE_PER_CHUNK_SLOTS\", NCCL_CE_REDUCE_PER_CHUNK_SLOTS);"
+  "the CeReducePerChunkSlots fake default")
 rccl_assert_source_line("${_rccl_src_root}/transport/net_ib/connect.cc"
   "DEFINE_NCCL_PARAM(ncclParamIbQpsPerConn, int32_t, NCCL_IB_QPS_PER_CONNECTION, 1,"
   "fakes/transport_net_ib_fakes.cc: ncclParamIbQpsPerConn")
