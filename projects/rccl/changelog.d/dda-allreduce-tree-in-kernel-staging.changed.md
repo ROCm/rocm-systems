@@ -1,0 +1,1 @@
+* On gfx942 and gfx950, single-node 8-rank `ncclAllReduce` on the DDA IPC tree path (above 256 KiB, up to 4 MiB) now copies the send buffer into the DDA scratch inside the kernel instead of with a separate copy before the launch, so each call is a single kernel. Larger messages keep the copy before the launch.

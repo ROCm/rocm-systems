@@ -425,6 +425,8 @@ int rcclDdaFabricBcLL128Threads(const ncclComm* comm);
 int rcclDdaFabricRsLL128Threads(const ncclComm* comm);
 // Largest message the DDA LL128 ReduceScatter sends through its peer-parallel kernel, from the arch table, or 0.
 size_t rcclDdaFabricRsLL128PeerMaxBytes(const ncclComm* comm);
+// Largest DDA IPC AllReduce tree message whose kernel copies sendbuff into scratch, from the arch table, or 0.
+size_t rcclDdaIpcArTreeKernelCopyMaxBytes(const ncclComm* comm);
 
 // Cap for the DDA entry gate: the max of the LL, LL128 and VMM caps above,
 // skipping tiers turned off by RCCL_DDA_LL / RCCL_DDA_LL128. Pass this to

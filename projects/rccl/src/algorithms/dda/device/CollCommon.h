@@ -254,6 +254,12 @@ inline DdaRsIpcStaging ddaReduceScatterIpcStaging(size_t recvcount, int typeSize
   return DdaRsIpcStaging::HostPreCopy;
 }
 
+// True when the DDA IPC AllReduce tree kernel copies sendbuff itself.
+// 0 keeps every tree on the host copy.
+inline bool ddaAllReduceTreeIpcStagesInKernel(size_t bytes, size_t kernelCopyMaxBytes) {
+  return bytes <= kernelCopyMaxBytes;
+}
+
 constexpr uint32_t calcBlockCount(size_t numThreads, size_t threadsPerBlock, size_t maxBlocks) {
   const auto uNumThreads = static_cast<uint64_t>(numThreads);
   const auto uThreadsPerBlock = static_cast<uint64_t>(threadsPerBlock);

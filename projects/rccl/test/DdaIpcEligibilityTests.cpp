@@ -4,14 +4,15 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-#include "common/DdaAlltoAllTestHelpers.hpp"
-#include "common/DdaIpcTestHelpers.hpp"
+#include "gtest/gtest.h"
 
 #include "algorithms/dda/all_gather/dda_all_gather.h"
 #include "algorithms/dda/alltoall/dda_alltoall.h"
-#include "algorithms/dda/reduce_scatter/dda_reduce_scatter.h"
-#include "gtest/gtest.h"
 #include "algorithms/dda/dda_init_detail.h"
+#include "algorithms/dda/device/CollCommon.h"
+#include "algorithms/dda/reduce_scatter/dda_reduce_scatter.h"
+#include "common/DdaAlltoAllTestHelpers.hpp"
+#include "common/DdaIpcTestHelpers.hpp"
 
 namespace RcclUnitTesting
 {
@@ -222,6 +223,19 @@ TEST_F(DdaIpcEligibilityTest, ReduceScatter_StagingBoundaries)
     EXPECT_EQ(ddaReduceScatterIpcStaging(pastKernelCap, sizeof(float)), DdaRsIpcStaging::HostPreCopy);
     EXPECT_GT(pastKernelCap * sizeof(float), kDdaRsIpcKernelCopyMaxBytes);
     EXPECT_GT(atKernelCap * sizeof(float) * 8, 4u * 1024u * 1024u);
+}
+
+// The AllReduce tree stages in the kernel up to and including the cap; 0 keeps every tree on the host copy.
+TEST_F(DdaIpcEligibilityTest, AllReduce_TreeStagingCap)
+{
+    using dda::common::ddaAllReduceTreeIpcStagesInKernel;
+
+    constexpr size_t kTwoMiB = 2u << 20;
+    constexpr size_t kSmallestTree = (256u << 10) + 128;
+    EXPECT_FALSE(ddaAllReduceTreeIpcStagesInKernel(kSmallestTree, 0));
+    EXPECT_TRUE(ddaAllReduceTreeIpcStagesInKernel(kSmallestTree, kTwoMiB));
+    EXPECT_TRUE(ddaAllReduceTreeIpcStagesInKernel(kTwoMiB, kTwoMiB));
+    EXPECT_FALSE(ddaAllReduceTreeIpcStagesInKernel(kTwoMiB + 128, kTwoMiB));
 }
 
 TEST_F(DdaIpcEligibilityTest, ReduceScatter_InvalidDatatypeDispatch)

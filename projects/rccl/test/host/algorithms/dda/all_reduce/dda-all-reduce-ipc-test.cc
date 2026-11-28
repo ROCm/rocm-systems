@@ -4,9 +4,8 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Host-only microtests for src/algorithms/dda/all_reduce/dda_all_reduce_ipc.cu, #include-d via
-// DDA_ALL_REDUCE_IPC_CC_PATH: the eligibility gates, the datatype dispatch and the flat/tree kernel
-// selection.
+// Host-only microtests for dda_all_reduce_ipc.cu (DDA_ALL_REDUCE_IPC_CC_PATH): eligibility, dispatch, kernel choice
+// and where the tree copies its input.
 
 #include <gtest/gtest.h>
 
@@ -16,6 +15,9 @@
 
 #include "../common/DdaIpcTestHelpers.hpp"
 #include "fakes/hip_fakes.h"
+#include "fakes/nccl_fakes.h"
+#include "fakes/param_redirect.h"
+#include "rccl_arch_thresholds.h"
 
 #include DDA_ALL_REDUCE_IPC_CC_PATH
 
@@ -31,6 +33,10 @@ constexpr size_t kFp32CountAtThreshold = kFlatTreeThresholdBytes / sizeof(float)
 constexpr size_t kFp16CountAtThreshold = kFlatTreeThresholdBytes / sizeof(uint16_t);
 // 8 MiB fp32 tree payload, which the tree path copies into scratch before it launches.
 constexpr size_t kFp32CountCopiedBeforeTree = (8u << 20) / sizeof(float);
+// The kernel copy cap the staging tests set; fp32 counts at it and one 16-byte line per rank slice past it.
+constexpr size_t kTableCapBytes = 2u << 20;
+constexpr size_t kFp32CountAt2MiB = kTableCapBytes / sizeof(float);
+constexpr size_t kFp32CountPast2MiB = kFp32CountAt2MiB + 4 * kDdaNranks;
 
 void* const kSendbuff = reinterpret_cast<void*>(0x10);
 void* const kRecvbuff = reinterpret_cast<void*>(0x20);
@@ -195,10 +201,17 @@ class DdaAllReduceIpcDispatchTest : public ::testing::Test {
     mock_.comm.rank = 3;
     mock_.comm.addonStopEvent = kStopEvent;
   }
-  void TearDown() override { ResetHipFakes(); }
+  void TearDown() override {
+    ResetHipFakes();
+    ResetNcclFakes();
+  }
 
   ncclResult_t Run(size_t count, ncclDataType_t datatype) {
     return ncclAllReduceDdaIpc(kSendbuff, kRecvbuff, count, datatype, ncclSum, mock_.get(), kStream);
+  }
+
+  ncclResult_t RunInPlace(size_t count, ncclDataType_t datatype) {
+    return ncclAllReduceDdaIpc(kRecvbuff, kRecvbuff, count, datatype, ncclSum, mock_.get(), kStream);
   }
 
   template <typename T>
@@ -210,6 +223,29 @@ class DdaAllReduceIpcDispatchTest : public ::testing::Test {
   static const void* Tree() {
     return reinterpret_cast<const void*>(&dda::common::ddaAllReduceTreeIpc<T, kDdaNranks, false>);
   }
+
+  template <typename T>
+  static const void* StagedTree() {
+    return reinterpret_cast<const void*>(&dda::common::ddaAllReduceTreeIpc<T, kDdaNranks, false, true>);
+  }
+
+  template <typename T>
+  static const void* InPlaceFlat() {
+    return reinterpret_cast<const void*>(&dda::common::ddaAllReduceFlatIpc<T, kDdaNranks, false, true>);
+  }
+
+  template <typename T>
+  static const void* InPlaceStagedTree() {
+    return reinterpret_cast<const void*>(&dda::common::ddaAllReduceTreeIpc<T, kDdaNranks, false, true, true>);
+  }
+
+  // Points the comm at table_ with ddaArTreeKernelCopyMaxBytes = cap.
+  void SetTableCap(size_t cap) {
+    table_.ddaArTreeKernelCopyMaxBytes = cap;
+    mock_.comm.archThresholds = &table_;
+  }
+
+  rcclArchThresholds table_{};
 
   const hipEvent_t kStopEvent = reinterpret_cast<hipEvent_t>(0x77);
   const hipStream_t kStream = reinterpret_cast<hipStream_t>(0x88);
@@ -304,6 +340,122 @@ TEST_F(DdaAllReduceIpcDispatchTest, LargeTreePayloadIsCopiedToScratchBeforeLaunc
   ASSERT_EQ(1u, memcpyStreams_.size());
   EXPECT_EQ(kStream, memcpyStreams_[0]);
   EXPECT_EQ(kStream, launches_[0].stream);
+}
+
+// A zero table cap keeps every tree on the copy before the launch.
+TEST_F(DdaAllReduceIpcDispatchTest, TreeCopiesBeforeTheLaunchWithAZeroTableCap) {
+  SetTableCap(0);
+  ASSERT_EQ(ncclSuccess, Run(kFp32CountAtThreshold + 4 * kDdaNranks, ncclFloat32));
+  ASSERT_EQ(1u, launches_.size());
+  EXPECT_EQ(Tree<float>(), launches_[0].kernel);
+  EXPECT_EQ(1u, launches_[0].memcpysBefore);
+  EXPECT_EQ(1, g_hipMemcpyAsyncCalls);
+}
+
+// Up to the table cap the tree stages in the kernel: one launch, no copy, same grid as the host-copied tree.
+TEST_F(DdaAllReduceIpcDispatchTest, TreeAtOrBelowTheTableCapStagesInTheKernel) {
+  SetTableCap(kTableCapBytes);
+  for (size_t count : {kFp32CountAtThreshold + 4 * kDdaNranks, kFp32CountAt2MiB}) {
+    ASSERT_EQ(ncclSuccess, Run(count, ncclFloat32)) << "count " << count;
+  }
+  ASSERT_EQ(ncclSuccess, Run(2 * kFp32CountAt2MiB, ncclBfloat16));
+  ASSERT_EQ(ncclSuccess, Run(2 * kFp32CountAt2MiB, ncclFloat16));
+  ASSERT_EQ(4u, launches_.size());
+  for (const Launch& launch : launches_) {
+    EXPECT_EQ(0u, launch.memcpysBefore);
+  }
+  EXPECT_EQ(StagedTree<float>(), launches_[0].kernel);
+  EXPECT_EQ(StagedTree<float>(), launches_[1].kernel);
+  EXPECT_EQ(StagedTree<bf16>(), launches_[2].kernel);
+  EXPECT_EQ(StagedTree<half>(), launches_[3].kernel);
+  EXPECT_EQ(ncclAllReduceDdaIpcBlocks(nullptr, kFp32CountAt2MiB, ncclFloat32), launches_[1].gridX);
+  EXPECT_EQ(512u, launches_[1].blockX);
+  EXPECT_EQ(0, g_hipMemcpyAsyncCalls);
+}
+
+TEST_F(DdaAllReduceIpcDispatchTest, TreeAboveTheTableCapCopiesBeforeTheLaunch) {
+  SetTableCap(kTableCapBytes);
+  ASSERT_EQ(ncclSuccess, Run(kFp32CountPast2MiB, ncclFloat32));
+  ASSERT_EQ(1u, launches_.size());
+  EXPECT_EQ(Tree<float>(), launches_[0].kernel);
+  ASSERT_EQ(1u, g_hipMemcpyAsyncArgs.size());
+  EXPECT_EQ(1u, launches_[0].memcpysBefore);
+  EXPECT_EQ(kFp32CountPast2MiB * sizeof(float), g_hipMemcpyAsyncArgs[0].bytes);
+}
+
+// The cap never moves the flat/tree split: flat sizes keep the flat kernel, which always copies in the kernel.
+TEST_F(DdaAllReduceIpcDispatchTest, TableCapLeavesFlatSizesOnTheFlatKernel) {
+  SetTableCap(kTableCapBytes);
+  ASSERT_EQ(ncclSuccess, Run(kFp32CountAtThreshold, ncclFloat32));
+  ASSERT_EQ(ncclSuccess, Run(kFp32CountAtThreshold + 4, ncclFloat32));
+  ASSERT_EQ(2u, launches_.size());
+  EXPECT_EQ(Flat<float>(), launches_[0].kernel);
+  EXPECT_EQ(Flat<float>(), launches_[1].kernel);
+  EXPECT_EQ(0, g_hipMemcpyAsyncCalls);
+}
+
+// The env var replaces the table cap: 0 and other negatives (-2) disable, -1 reads the table, and no table is needed.
+TEST_F(DdaAllReduceIpcDispatchTest, KernelCopyMaxBytesEnvOverridesTheTableCap) {
+  constexpr const char* kEnv = "RCCL_DDA_AR_TREE_KERNEL_COPY_MAX_BYTES";
+  SetTableCap(kTableCapBytes);
+  g_loadParam = ParamOverride({{kEnv, 0}});
+  ASSERT_EQ(ncclSuccess, Run(kFp32CountAt2MiB, ncclFloat32));
+  g_loadParam = ParamOverride({{kEnv, -2}});
+  ASSERT_EQ(ncclSuccess, Run(kFp32CountAt2MiB, ncclFloat32));
+  g_loadParam = ParamOverride({{kEnv, 4 << 20}});
+  ASSERT_EQ(ncclSuccess, Run(kFp32CountPast2MiB, ncclFloat32));
+  ASSERT_EQ(ncclSuccess, Run(2 * kFp32CountAt2MiB + 4 * kDdaNranks, ncclFloat32));
+  g_loadParam = ParamOverride({{kEnv, -1}});
+  ASSERT_EQ(ncclSuccess, Run(kFp32CountAt2MiB, ncclFloat32));
+  mock_.comm.archThresholds = nullptr;
+  g_loadParam = ParamOverride({{kEnv, 4 << 20}});
+  ASSERT_EQ(ncclSuccess, Run(kFp32CountAt2MiB, ncclFloat32));
+  ASSERT_EQ(6u, launches_.size());
+  EXPECT_EQ(Tree<float>(), launches_[0].kernel);
+  EXPECT_EQ(Tree<float>(), launches_[1].kernel);
+  EXPECT_EQ(StagedTree<float>(), launches_[2].kernel);
+  EXPECT_EQ(Tree<float>(), launches_[3].kernel);
+  EXPECT_EQ(StagedTree<float>(), launches_[4].kernel);
+  EXPECT_EQ(StagedTree<float>(), launches_[5].kernel);
+  EXPECT_EQ(3, g_hipMemcpyAsyncCalls);
+}
+
+// sendbuff == recvbuff picks the kInPlace kernels, which read their input through recvbuff; distinct buffers do not.
+TEST_F(DdaAllReduceIpcDispatchTest, InPlaceFlatLaunchesTheInPlaceFlatKernel) {
+  ASSERT_NE(Flat<float>(), InPlaceFlat<float>());
+  ASSERT_EQ(ncclSuccess, RunInPlace(16, ncclFloat32));
+  ASSERT_EQ(ncclSuccess, Run(16, ncclFloat32));
+  ASSERT_EQ(ncclSuccess, RunInPlace(kFp16CountAtThreshold, ncclBfloat16));
+  ASSERT_EQ(3u, launches_.size());
+  EXPECT_EQ(InPlaceFlat<float>(), launches_[0].kernel);
+  EXPECT_EQ(kRecvbuff, launches_[0].sendbuff);
+  EXPECT_EQ(kRecvbuff, launches_[0].recvbuff);
+  EXPECT_EQ(Flat<float>(), launches_[1].kernel);
+  EXPECT_EQ(InPlaceFlat<bf16>(), launches_[2].kernel);
+}
+
+TEST_F(DdaAllReduceIpcDispatchTest, InPlaceTreeAtOrBelowTheTableCapLaunchesTheInPlaceStagedTree) {
+  ASSERT_NE(StagedTree<float>(), InPlaceStagedTree<float>());
+  SetTableCap(kTableCapBytes);
+  ASSERT_EQ(ncclSuccess, RunInPlace(kFp32CountAt2MiB, ncclFloat32));
+  ASSERT_EQ(ncclSuccess, Run(kFp32CountAt2MiB, ncclFloat32));
+  ASSERT_EQ(ncclSuccess, RunInPlace(2 * kFp32CountAt2MiB, ncclFloat16));
+  ASSERT_EQ(3u, launches_.size());
+  EXPECT_EQ(InPlaceStagedTree<float>(), launches_[0].kernel);
+  EXPECT_EQ(StagedTree<float>(), launches_[1].kernel);
+  EXPECT_EQ(InPlaceStagedTree<half>(), launches_[2].kernel);
+  EXPECT_EQ(0, g_hipMemcpyAsyncCalls);
+}
+
+// The host-copied tree never reads sendbuff, so in-place keeps the one tree kernel.
+TEST_F(DdaAllReduceIpcDispatchTest, InPlaceTreeAboveTheTableCapKeepsTheHostCopiedTree) {
+  SetTableCap(kTableCapBytes);
+  ASSERT_EQ(ncclSuccess, RunInPlace(kFp32CountPast2MiB, ncclFloat32));
+  ASSERT_EQ(1u, launches_.size());
+  EXPECT_EQ(Tree<float>(), launches_[0].kernel);
+  ASSERT_EQ(1u, g_hipMemcpyAsyncArgs.size());
+  EXPECT_EQ(kRecvbuff, g_hipMemcpyAsyncArgs[0].src);
+  EXPECT_EQ(1u, launches_[0].memcpysBefore);
 }
 
 TEST_F(DdaAllReduceIpcDispatchTest, ScratchCopyErrorIsReportedWithoutLaunching) {

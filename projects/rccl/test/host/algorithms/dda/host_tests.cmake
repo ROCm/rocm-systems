@@ -93,9 +93,7 @@ rccl_add_dda_micro_binary(rccl-UnitTestsMicroDdaAllReduceFabricLl128 all_reduce/
 
 rccl_add_dda_micro_binary(rccl-UnitTestsMicroDdaAllReduceIpc all_reduce/dda-all-reduce-ipc-test.cc
   KERNELS
-  SOURCES
-    fakes/hip_fakes.cc
-    fakes/nccl_fakes.cc)
+  SOURCES ${_MICRO_DDA_COLL_SOURCES})
 
 rccl_add_dda_micro_binary(rccl-UnitTestsMicroDdaAlltoallFabric alltoall/dda-alltoall-fabric-test.cc
   KERNELS

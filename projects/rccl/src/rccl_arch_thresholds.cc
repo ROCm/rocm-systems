@@ -295,6 +295,8 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   // Zero: keep tuning_model_11's per-rank broadcast ranges.
   .bcRingLLMaxBytes = 0,
   .bcRingLL128MaxBytes = 0,
+  // DDA IPC AllReduce does not run on gfx1250 (it takes the fabric path).
+  .ddaArTreeKernelCopyMaxBytes = 0,
 };
 
 // gfx1250 in DPX mode (each GPU split into two partitions), picked by
@@ -550,6 +552,8 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
   // Total message bytes at every node count. See rcclArchThresholds.
   .bcRingLLMaxBytes = 16ULL*1024,
   .bcRingLL128MaxBytes = 512ULL*1024*1024,
+  // DDA IPC AllReduce does not run on gfx1250 (it takes the fabric path).
+  .ddaArTreeKernelCopyMaxBytes = 0,
 };
 
 // gfx950: DDA-IPC cap is 64 MiB for AG, 128 MiB for AR/RS and 4 MiB for AlltoAll. No fabric LL/LL128.
@@ -702,6 +706,8 @@ static const rcclArchThresholds rcclArchThresholds_gfx950 = {
   .forceCeScratch = true,
   .bcRingLLMaxBytes = 0,
   .bcRingLL128MaxBytes = 0,
+  // DDA IPC tree AllReduce up to 4 MiB is one kernel: it copies its own input, no copy before the launch.
+  .ddaArTreeKernelCopyMaxBytes = 4ULL*1024*1024,
 };
 
 // gfx942: DDA-IPC cap is 8 MiB for AR/AG/RS and 4 MiB for AlltoAll. No fabric LL/LL128.
@@ -854,6 +860,8 @@ static const rcclArchThresholds rcclArchThresholds_gfx942 = {
   .forceCeScratch = true,
   .bcRingLLMaxBytes = 0,
   .bcRingLL128MaxBytes = 0,
+  // DDA IPC tree AllReduce up to 4 MiB is one kernel: it copies its own input, no copy before the launch.
+  .ddaArTreeKernelCopyMaxBytes = 4ULL*1024*1024,
 };
 
 bool rcclWindowFits(size_t totalBytes, size_t minBytes, size_t maxBytes) {
