@@ -52,6 +52,8 @@ static void ibGdrSupportInitOnce() {
 #endif
 }
 
+static constexpr int kIbCastGdrProbeMaxAttempts = 3;
+
 // Returns ncclSuccess if a peermem module is loaded, or a device-0 runtime probe confirms GPU registration works without one.
 ncclResult_t IbCastGdrSupport() {
   static std::once_flag once;
@@ -60,12 +62,19 @@ ncclResult_t IbCastGdrSupport() {
   // Don't probe past a deliberate safety override.
   if (IbCastGdrBlocklisted) return ncclSystemError;
 
-  static std::once_flag probeOnce;
-  static bool probeResult = false;
-  std::call_once(probeOnce, []() {
-    probeResult = ncclIbProbeGdrSupport(IbCastDevs[0].context, IbCastRelaxedOrderingEnabled) == 1;
-  });
-  return probeResult ? ncclSuccess : ncclSystemError;
+  // Cache a definitive 1/0. Retry a probe that couldn't run (-1) on later calls, up to a cap.
+  static std::mutex probeMutex;
+  static int probeResult = -1;
+  static int probeAttempts = 0;
+  std::lock_guard<std::mutex> lock(probeMutex);
+  if (probeResult == -1 && probeAttempts < kIbCastGdrProbeMaxAttempts) {
+    probeResult = ncclIbProbeGdrSupport(IbCastDevs[0].context, IbCastRelaxedOrderingEnabled);
+    if (++probeAttempts == kIbCastGdrProbeMaxAttempts && probeResult == -1) {
+      INFO(NCCL_INIT | NCCL_NET, "NET/IB: GDR probe could not run in %d attempts; treating GDR as unsupported",
+           kIbCastGdrProbeMaxAttempts);
+    }
+  }
+  return probeResult == 1 ? ncclSuccess : ncclSystemError;
 }
 
 static int IbCastPeerMemModuleLoaded = 0; // 1 = true, 0 = false
