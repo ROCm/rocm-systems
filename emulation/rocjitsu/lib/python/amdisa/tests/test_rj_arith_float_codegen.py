@@ -1612,8 +1612,9 @@ def test_cdna_mixed_mad_bridge(arch, name):
             op_sel_hi_2_expr='inst_.op_sel_hi_2',
         )
     )
-    assert f'rj_arith_{name.lower()}_w32' in body
-    assert f'rj_arith_{name.lower()}_w64' in body
+    suffix = '_gfx950' if arch == 'cdna4' else ''
+    assert f'rj_arith_{name.lower()}_w32{suffix},' in body
+    assert f'rj_arith_{name.lower()}_w64{suffix},' in body
     assert 'is_inline_float_src' in body
 
 
@@ -3014,7 +3015,7 @@ def test_host_model_float_dot_bindings(arch):
                 if arch != 'cdna4' and fmt == 'BF16':
                     assert body is None
                     continue
-                suffix = 'gfx942' if fmt == 'F16' else 'gfx950'
+                suffix = 'gfx950' if arch == 'cdna4' else 'gfx942'
                 assert f'rj_arith_v_dot2_f32_{fmt.lower()}_w64_{suffix},' in body
                 assert 'const unsigned replicate_sources = 0;' in body
                 if accumulate:
