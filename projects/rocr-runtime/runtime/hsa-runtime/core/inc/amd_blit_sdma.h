@@ -146,21 +146,41 @@ class BlitSdmaBase : public core::Blit {
       bool fused_bodies) = 0;
 
   /// @brief Unified epilogue: drain bodies, GCR writeback, end timestamp (if
-  /// profiling), final out_signal write to 0, mailbox + trap interrupt.
-  /// When platform atomics are available (body_signals empty): polls out_signal
-  /// for 1 (bodies decremented it from N+1 to 1).
-  /// When platform atomics are absent (body_signals non-empty): polls each
-  /// body_signal for 0 (bodies fenced them), then fences out_signal to 0.
+  /// profiling), final out_signal update, mailbox + trap interrupt.
+  /// Polls each body_signal for 0, then completes out_signal: an atomic
+  /// decrement with platform atomics, otherwise a fence to 0.
+  /// With platform atomics body_signals holds one group counter that every
+  /// engine group's body decrements; without them, one signal per group that
+  /// the body fences to 0. out_signal is never polled because other ops of
+  /// the same batch may share it.
+  /// Without platform atomics the final fence writes an absolute value, which
+  /// is only correct while this op is the last user of out_signal (as in the
+  /// other SDMA completion paths without platform atomics).
+  /// @return HSA_STATUS_ERROR_INVALID_ARGUMENT if body_signals is empty.
   virtual hsa_status_t SubmitEpilogue(
       core::Signal& out_signal,
-      const std::vector<core::Signal*>& body_signals = {}) = 0;
+      const std::vector<core::Signal*>& body_signals) = 0;
+
+  /// @brief Whether SubmitFusedCoordinator must emit an epilogue for
+  /// @p out_signal: a GCR writeback, a profiling end timestamp, or a
+  /// completion interrupt. The caller must then pass a group signal.
+  virtual bool FusedEpilogueRequired(const core::Signal& out_signal) const = 0;
 
   /// @brief Single-doorbell fused submission for the coordinator engine: packs
   /// prologue (if needed) + body entries + epilogue into one ring reservation.
   /// Saves 1-2 doorbells vs separate Submit{Prologue,Bodies,Epilogue} calls when
   /// the coordinator engine also carries body entries.
+  /// @return HSA_STATUS_ERROR_INVALID_ARGUMENT without 64-bit platform atomics.
+  ///   The body packets signal with a 64-bit atomic sub, and the ops of a batch
+  ///   share out_signal, so a fence cannot complete it: it would overwrite the
+  ///   other ops' decrements.
   /// @param prologue_signal  If non-null, prologue logic fires this signal after
   ///   dep handling; other engines' bodies can poll on it.
+  /// @param group_signal  Non-null exactly when FusedEpilogueRequired() is true.
+  ///   Preset to the number of engine groups; the final body packet of every
+  ///   group decrements it, and the epilogue polls it for 0 before decrementing
+  ///   out_signal once. When null there is no epilogue and the coordinator's
+  ///   final body packet decrements out_signal directly.
   /// @param body_deps  Dependencies for the body WaitSignal packets on this ring.
   ///   When prologue is on the same ring, these are satisfied in-order (the wait
   ///   resolves immediately), but are still encoded for packet correctness.
@@ -168,6 +188,7 @@ class BlitSdmaBase : public core::Blit {
       const std::vector<core::Signal*>& dep_signals,
       core::Signal& out_signal,
       core::Signal* prologue_signal,
+      core::Signal* group_signal,
       hsa_amd_memory_copy_op_type_t op,
       const std::vector<void*>& dsts,
       const std::vector<const void*>& srcs,
@@ -322,12 +343,15 @@ template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
 
   hsa_status_t SubmitEpilogue(
       core::Signal& out_signal,
-      const std::vector<core::Signal*>& body_signals = {}) override;
+      const std::vector<core::Signal*>& body_signals) override;
+
+  bool FusedEpilogueRequired(const core::Signal& out_signal) const override;
 
   hsa_status_t SubmitFusedCoordinator(
       const std::vector<core::Signal*>& dep_signals,
       core::Signal& out_signal,
       core::Signal* prologue_signal,
+      core::Signal* group_signal,
       hsa_amd_memory_copy_op_type_t op,
       const std::vector<void*>& dsts,
       const std::vector<const void*>& srcs,

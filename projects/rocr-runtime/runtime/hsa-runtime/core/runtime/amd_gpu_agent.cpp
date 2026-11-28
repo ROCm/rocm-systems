@@ -1748,6 +1748,16 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
   if (requires_multi_packet) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   const bool fused = coordinator->IsGfx125Plus();
+
+  // gfx125+ fan-out completes the shared out_signal with 64-bit atomics only
+  // (see SubmitFusedCoordinator), so refuse it up front without them.
+  if (fused && !coordinator->PlatformAtomicSupport()) {
+    LogPrint(HSA_AMD_LOG_FLAG_SDMA,
+             "SDMA FanOut(%s): refused, gfx125+ fan-out needs 64-bit platform atomics",
+             op_name);
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
   const bool need_prologue = !fused || profiling_enabled();
 
   // Derive indirection flags from op for SubmitBodies.
@@ -1792,13 +1802,50 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
   std::vector<core::unique_signal_ptr> body_signal_ptrs;
   std::vector<core::Signal*> body_signals_raw;
 
+  // Other ops of the same batch share out_signal, so an epilogue cannot poll
+  // it for a fixed value. When an epilogue runs, the final body packet of each
+  // engine group decrements a private group counter instead; the epilogue
+  // polls that counter to 0 and then decrements out_signal once.
+  const bool use_group_signal =
+      fused ? coordinator->FusedEpilogueRequired(out_signal) : !use_body_signals;
+  if (use_group_signal) {
+    body_signal_ptrs.emplace_back(
+        new core::DefaultSignal(static_cast<hsa_signal_value_t>(engine_groups.size())));
+    if (!body_signal_ptrs.back()->IsValid())
+      return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+    body_signals_raw.push_back(body_signal_ptrs.back().get());
+  }
+  core::Signal& body_out = use_group_signal ? *body_signals_raw[0] : out_signal;
+
+  // Once a doorbell has rung, SDMA packets can still poll or decrement the
+  // signals created above, so an error return must not free them: the engine
+  // would touch memory that gets reused. A cleanup deferred to out_signal
+  // would never run either, as the failed op's own decrement never comes. The
+  // signals are leaked instead, a few bytes per failed op.
+  bool in_flight = false;
+  auto fail = [&](hsa_status_t err) {
+    if (!in_flight) return err;
+    // gfx125+ bodies already queued on other engines wait for the prologue
+    // signal, which the coordinator's prologue would have set. Set it so they
+    // drain instead of stalling their engines.
+    if (fused && prologue_signal) prologue_signal->StoreRelease(0);
+    LogPrint(HSA_AMD_LOG_FLAG_SDMA,
+             "SDMA FanOut: error %d after the first submission, leaking %zu signal(s)",
+             static_cast<int>(err), body_signal_ptrs.size() + (prologue_signal ? 1 : 0));
+    prologue_signal.release();
+    for (auto& bp : body_signal_ptrs) bp.release();
+    return err;
+  };
+
   hsa_status_t stat;
 
   if (fused) {
     // === gfx125+ WaitSignal path (1 doorbell for coordinator) ===
 
-    // One final packet per engine group decrements out_signal.
-    out_signal.AddRelaxed(static_cast<uint32_t>(engine_groups.size()));
+    // Without an epilogue the final packet of each engine group decrements
+    // out_signal directly; together they make this op's single decrement.
+    if (!use_group_signal && engine_groups.size() > 1)
+      out_signal.AddRelaxed(static_cast<uint32_t>(engine_groups.size() - 1));
 
     // Gather coordinator group entries.
     std::vector<void*> coord_dsts;
@@ -1833,24 +1880,28 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
                core::Signal::Convert(&out_signal).handle);
       stat = engines[idxs[0]].blit->SubmitBodies(
           op, dst_list, src_list, size_list, idxs,
-          ind_src, ind_dst, body_deps, out_signal, nullptr, dst_size_list);
-      if (stat != HSA_STATUS_SUCCESS) return stat;
+          ind_src, ind_dst, body_deps, body_out, nullptr, dst_size_list);
+      if (stat != HSA_STATUS_SUCCESS) return fail(stat);
+      in_flight = true;
     }
 
     // Coordinator: prologue + coord bodies + epilogue in one doorbell.
     LogPrint(HSA_AMD_LOG_FLAG_SDMA,
              "SDMA FanOut(%s) Coordinator: engine %02u, coord_entries=%zu, "
-             "other_groups=%zu, completion_signal=0x%zx, prologue_signal=%p",
+             "other_groups=%zu, completion_signal=0x%zx, prologue_signal=%p, "
+             "group_signal=%p",
              op_name, coord_idx, coord_dsts.size(),
              engine_groups.size() - (engine_groups.count(coord_idx) ? 1 : 0),
              core::Signal::Convert(&out_signal).handle,
-             prologue_signal ? prologue_signal.get() : nullptr);
+             prologue_signal ? prologue_signal.get() : nullptr,
+             use_group_signal ? &body_out : nullptr);
     stat = coordinator->SubmitFusedCoordinator(
         dep_signals, out_signal,
         prologue_signal.get(),
+        use_group_signal ? &body_out : nullptr,
         op, coord_dsts, coord_srcs, coord_sizes_a, coord_sizes_b,
         ind_src, ind_dst, body_deps);
-    if (stat != HSA_STATUS_SUCCESS) return stat;
+    if (stat != HSA_STATUS_SUCCESS) return fail(stat);
 
   } else {
     // === Classic path (gfx942 etc.): separate prologue/bodies/epilogue ===
@@ -1864,8 +1915,6 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
           return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
         body_signals_raw.push_back(body_signal_ptrs.back().get());
       }
-    } else {
-      out_signal.AddRelaxed(static_cast<uint32_t>(engine_groups.size()));
     }
 
     // Prologue
@@ -1879,6 +1928,7 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
       stat = coordinator->SubmitPrologue(dep_signals, out_signal,
                                          *prologue_signal, fused);
       if (stat != HSA_STATUS_SUCCESS) return stat;
+      in_flight = true;
     }
 
     // Bodies: one SubmitBodies call per engine group
@@ -1894,8 +1944,9 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
                body_sig);
       stat = engines[idxs[0]].blit->SubmitBodies(
           op, dst_list, src_list, size_list, idxs,
-          ind_src, ind_dst, body_deps, out_signal, body_sig, dst_size_list);
-      if (stat != HSA_STATUS_SUCCESS) return stat;
+          ind_src, ind_dst, body_deps, body_out, body_sig, dst_size_list);
+      if (stat != HSA_STATUS_SUCCESS) return fail(stat);
+      in_flight = true;
       ++grp_idx;
     }
 
@@ -1906,7 +1957,7 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
              op_name, coord_idx, core::Signal::Convert(&out_signal).handle,
              body_signals_raw.size());
     stat = coordinator->SubmitEpilogue(out_signal, body_signals_raw);
-    if (stat != HSA_STATUS_SUCCESS) return stat;
+    if (stat != HSA_STATUS_SUCCESS) return fail(stat);
   }
 
   // --- Async cleanup: destroy prologue_signal and body_signals when done ---
