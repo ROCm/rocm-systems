@@ -51,68 +51,28 @@ class HipTestParameterListener : public Catch::EventListenerBase {
 // Register the listener - it will be automatically activated
 CATCH_REGISTER_LISTENER(HipTestParameterListener)
 
+// AMD only. The last-error reset targets the HIP runtime: hipGetLastError and
+// hipExtGetLastError only read a thread-local value and do not initialize it, so the
+// reset is safe even in a process that never used HIP, e.g. a fork-based multiprocess
+// parent. It is not enabled on NVIDIA, where hipGetLastError is cudaGetLastError and
+// could initialize CUDA in such a parent.
 #if HT_AMD
 extern "C" hipError_t hipExtGetLastError(void);
-#endif
-
-// The reset is gated by HIP runtime initialization only on Linux, to protect
-// fork-based multiprocess parents; HSA (AMD) and the CUDA driver exist there.
-#if HT_LINUX
-#if HT_AMD
-#include <hsa/hsa.h>
-#elif HT_NVIDIA
-#include <cuda.h>
-#else
-#error "Platform not recognized"
-#endif
-
-// Whether this process has initialized the HIP runtime, hence may hold a leaked
-// last error and can be reset without newly initializing a fork parent that
-// never used HIP. The underlying driver uses explicit initialization, so a call
-// made before it returns a "not initialized" status without initializing
-// anything -- a side-effect-free probe. AMD probes HSA, NVIDIA the CUDA driver.
-static bool hipRuntimeInitialized() {
-#if HT_AMD
-  uint16_t version = 0;
-  return hsa_system_get_info(HSA_SYSTEM_INFO_VERSION_MAJOR, &version) !=
-      HSA_STATUS_ERROR_NOT_INITIALIZED;
-#elif HT_NVIDIA
-  int count = 0;
-  return cuDeviceGetCount(&count) != CUDA_ERROR_NOT_INITIALIZED;
-#else
-#error "Platform not recognized"
-#endif
-}
-#endif  // HT_LINUX
 
 /**
  * @brief Clears the sticky thread-local HIP last error after each test case so
  * an error left unconsumed by one test cannot fail the next. Clears both the
- * standard (hipGetLastError) and, on AMD, the command (hipExtGetLastError)
- * states. On Linux it resets only once the HIP runtime is initialized, so it
- * never initializes HIP in a parent that never called it, e.g. a fork-based
- * multiprocess parent; such parents do not exist on other platforms, which
- * always reset. A leftover error is always reported on stderr;
- * HIP_TEST_STRICT_LAST_ERROR additionally fails the run.
+ * standard (hipGetLastError) and the command (hipExtGetLastError) states.
+ * A leftover error is always reported on stderr; HIP_TEST_STRICT_LAST_ERROR
+ * additionally fails the run.
  */
 class HipLastErrorResetListener : public Catch::EventListenerBase {
  public:
   using Catch::EventListenerBase::EventListenerBase;
 
   void testCaseEnded(Catch::TestCaseStats const& stats) override {
-#if HT_LINUX
-    if (!hipRuntimeInitialized()) {
-      return;
-    }
-#endif
     hipError_t leftover = hipGetLastError();
-#if HT_AMD
     hipError_t cmdLeftover = hipExtGetLastError();
-#elif HT_NVIDIA
-    hipError_t cmdLeftover = hipSuccess;
-#else
-#error "Platform not recognized"
-#endif
     bool leaked = false;
     if (leftover != hipSuccess) {
       report(stats.testInfo->name, "last error", leftover);
@@ -146,3 +106,4 @@ class HipLastErrorResetListener : public Catch::EventListenerBase {
 };
 
 CATCH_REGISTER_LISTENER(HipLastErrorResetListener)
+#endif  // HT_AMD

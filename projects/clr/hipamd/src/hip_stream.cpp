@@ -338,7 +338,10 @@ static hipError_t ihipStreamCreate(hipStream_t* stream, unsigned int flags,
 }
 
 // ================================================================================================
-StreamPerThread::StreamPerThread() : streams_(g_devices.size()) {}
+// @note: streams_ is left empty and sized lazily in Get(), which runs after runtime init.
+// The thread-local hip::tls can be constructed before (or while another thread runs)
+// hip::init, e.g. by hipGetLastError(), so the constructor must not read g_devices.
+StreamPerThread::StreamPerThread() = default;
 
 // ================================================================================================
 StreamPerThread::~StreamPerThread() {
@@ -357,7 +360,7 @@ StreamPerThread::~StreamPerThread() {
 // ================================================================================================
 hipStream_t StreamPerThread::Get() {
   const int currDev = hip::getCurrentDevice()->deviceId();
-  // Defensive re-init: streams_ may have been cleared by hipDeviceReset.
+  // Lazy sizing: streams_ starts empty and may also have been cleared by hipDeviceReset.
   if (streams_.empty()) {
     streams_.resize(g_devices.size());
   }

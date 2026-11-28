@@ -46,6 +46,10 @@ TEST_CASE("Unit_hipLastErrorReset_SeesCleanState", "[.]") {
 
 // Runs the pair above together, in declaration order, in a child process.
 HIP_TEST_CASE(Unit_hipLastErrorReset_Harness) {
+#if !HT_AMD
+  // The reset listener is only registered on AMD (hip_test_listener.cc).
+  HIP_SKIP_TEST("last-error reset listener is AMD-only.");
+#endif
   const std::string args =
       "Unit_hipLastErrorReset_LeaveError,Unit_hipLastErrorReset_SeesCleanState --order decl";
 
