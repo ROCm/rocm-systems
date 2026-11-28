@@ -20,6 +20,8 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
+#include <algorithm>
+#include <cstdint>
 #include <iostream>
 #include <fstream>
 #include <cstring>
@@ -53,7 +55,14 @@ typedef struct ReconfigDumpFileStruct_t {
     bool b_dump_frames_to_file;
     std::string output_file_name;
     void *md5_generator_handle;
+    uint32_t frames_left = UINT32_MAX;  // frames the callback may still output under a -f limit
 } ReconfigDumpFileStruct;
+
+// Frames still allowed under a -f limit of frame_limit (0 means no limit) after frames_done.
+static uint32_t FramesLeft(uint32_t frame_limit, uint32_t frames_done) {
+    if (frame_limit == 0) return UINT32_MAX;
+    return frames_done < frame_limit ? frame_limit - frames_done : 0;
+}
 
 
 // callback function to flush last frames and save it to file when reconfigure happens
@@ -70,9 +79,16 @@ int ReconfigureFlushCallback(void *p_viddec_obj, uint32_t flush_mode, void *p_us
 
     uint8_t *pframe = nullptr;
     int64_t pts;
+    ReconfigDumpFileStruct *p_dump_file_struct = static_cast<ReconfigDumpFileStruct *>(p_user_struct);
     while ((pframe = viddec->GetFrame(&pts))) {
+        // Every pending frame must be released before the reconfigure, but only those within the
+        // -f limit are output and counted.
+        if (p_dump_file_struct->frames_left == 0) {
+            viddec->ReleaseFrame(pts, true);
+            continue;
+        }
+        p_dump_file_struct->frames_left--;
         if (flush_mode != RECONFIG_FLUSH_MODE_NONE) {
-            ReconfigDumpFileStruct *p_dump_file_struct = static_cast<ReconfigDumpFileStruct *>(p_user_struct);
             if (flush_mode & ReconfigFlushMode::RECONFIG_FLUSH_MODE_DUMP_TO_FILE) {
                 if (p_dump_file_struct->b_dump_frames_to_file) {
                     viddec->SaveFrameToFile(p_dump_file_struct->output_file_name, pframe, surf_info);
@@ -273,6 +289,8 @@ int main(int argc, char **argv) {
         reconfig_params.p_reconfig_user_struct = &reconfig_user_struct;
 
         viddec.SetReconfigParams(&reconfig_params);
+        // Frames output so far, counting those the reconfigure flush callback output.
+        auto frames_done = [&]() { return static_cast<uint32_t>(n_frame + viddec.GetNumOfFlushedFrames()); };
 
         do {
             auto start_time = std::chrono::high_resolution_clock::now();
@@ -284,32 +302,36 @@ int main(int argc, char **argv) {
             if (n_video_bytes == 0) {
                 pkg_flags |= ROCDEC_PKT_ENDOFSTREAM;
             }
+            // A reconfigure inside DecodeFrame flushes frames through the callback; keep those within -f too.
+            reconfig_user_struct.frames_left = FramesLeft(num_decoded_frames, frames_done());
             n_frame_returned = viddec.DecodeFrame(pvideo, n_video_bytes, pkg_flags, pts, &decoded_pics);
 
             if (!n_frame && !viddec.GetOutputSurfaceInfo(&surf_info)) {
                 std::cerr << "Error: Failed to get Output Surface Info!" << std::endl;
                 break;
             }
-            for (int i = 0; i < n_frame_returned; i++) {
+            for (int i = 0; i < n_frame_returned && FramesLeft(num_decoded_frames, frames_done()) > 0; i++) {
                 pframe = viddec.GetFrame(&pts);
                 if (dump_output_frames && mem_type != OUT_SURFACE_MEM_NOT_MAPPED) {
                     viddec.SaveFrameToFile(output_file_path, pframe, surf_info);
                 }
                 // release frame
                 viddec.ReleaseFrame(pts);
+                n_frame++;
             }
             auto end_time = std::chrono::high_resolution_clock::now();
             auto time_per_decode = std::chrono::duration<double, std::milli>(end_time - start_time).count();
             total_dec_time += time_per_decode;
-            n_frame += n_frame_returned;
             n_pic_decoded += decoded_pics;
-            if (num_decoded_frames && num_decoded_frames <= static_cast<uint32_t>(n_frame)) {
+            if (FramesLeft(num_decoded_frames, frames_done()) == 0) {
                 break;
             }
 
         } while (n_video_bytes);
         
-        n_frame += viddec.GetNumOfFlushedFrames();
+        n_frame = static_cast<int>(frames_done());
+        // In -m 3 the decoder counts the pictures pending at a reconfigure itself, without the callback.
+        if (num_decoded_frames) n_frame = std::min(n_frame, static_cast<int>(num_decoded_frames));
         std::cout << "info: Total pictures decoded: " << n_pic_decoded << std::endl;
         std::cout << "info: Total frames output/displayed: " << n_frame << std::endl;
         if (n_frame == 0) {

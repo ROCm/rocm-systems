@@ -20,6 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
+#include <algorithm>
 #include <iostream>
 #include <fstream>
 #include <cstring>
@@ -319,6 +320,8 @@ int main(int argc, char **argv) {
         double total_dec_time = 0;
         bool first_frame = true;
         MD5Generator *md5_generator = nullptr;
+        // Frames output so far, counting those the reconfigure flush callback output.
+        auto frames_done = [&]() { return n_frame + static_cast<uint32_t>(viddec->GetNumOfFlushedFrames()); };
 
         // initialize reconfigure params: the following is configured to dump to output which is relevant for this sample
         reconfig_params.p_fn_reconfigure_flush = ReconfigureFlushCallback;
@@ -374,6 +377,8 @@ int main(int argc, char **argv) {
             if (n_video_bytes == 0) {
                 pkg_flags |= ROCDEC_PKT_ENDOFSTREAM;
             }
+            // A reconfigure inside DecodeFrame flushes frames through the callback; keep those within -f too.
+            reconfig_user_struct.frames_left = FramesLeft(num_decoded_frames, frames_done());
             n_frame_returned = viddec->DecodeFrame(pvideo, n_video_bytes, pkg_flags, pts, &decoded_pics);
 
             // get output surface info after the first decoded frame
@@ -381,7 +386,7 @@ int main(int argc, char **argv) {
                 std::cerr << "Error: Failed to get Output Surface Info!" << std::endl;
                 break;
             }
-            for (int i = 0; i < n_frame_returned && (!num_decoded_frames || n_frame < num_decoded_frames); i++) {
+            for (int i = 0; i < n_frame_returned && FramesLeft(num_decoded_frames, frames_done()) > 0; i++) {
                 pframe = viddec->GetFrame(&pts);
                 if (b_generate_md5 && pframe) {
                     md5_generator->UpdateMd5ForFrame(pframe, surf_info);
@@ -397,12 +402,14 @@ int main(int argc, char **argv) {
             auto time_per_decode = std::chrono::duration<double, std::milli>(end_time - start_time).count();
             total_dec_time += time_per_decode;
             n_pic_decoded += decoded_pics;
-            if (num_decoded_frames && num_decoded_frames <= n_frame) {
+            if (FramesLeft(num_decoded_frames, frames_done()) == 0) {
                 break;
             }
         } while (n_video_bytes);
         
-        n_frame += viddec->GetNumOfFlushedFrames();
+        n_frame = frames_done();
+        // In -m 3 the decoder counts the pictures pending at a reconfigure itself, without the callback.
+        if (num_decoded_frames) n_frame = std::min(n_frame, num_decoded_frames);
         std::cout << "info: Total pictures decoded: " << n_pic_decoded << std::endl;
         std::cout << "info: Total frames output/displayed: " << n_frame << std::endl;
         if (n_frame == 0) {
