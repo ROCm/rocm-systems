@@ -23,7 +23,7 @@ jobs:
     # Runs on the self-hosted AIS runner where the system tests run. The job is
     # only compile + unit tests today, but this runner is the controlled host
     # we intend to eventually run the full ASAN/TSAN CI on.
-    runs-on: [ubuntu-24.04]
+    runs-on: [ubuntu-26.04]
     strategy:
       fail-fast: false
       matrix:
@@ -42,15 +42,16 @@ jobs:
       - name: Compute container name
         run: |
           echo "AIS_CONTAINER_NAME=${AIS_PR_NUMBER:=${GITHUB_RUN_ID}}_${GITHUB_JOB}_${{ matrix.sanitizer.name }}" >> "${GITHUB_ENV}"
-      # NOTE: TSAN (and occasionally ASAN) can abort at startup with an
-      # "unexpected memory mapping" error on kernels configured with 32 mmap
-      # randomization bits. The fix is to lower the ASLR entropy on the runner
-      # *host* (e.g. `sysctl -w vm.mmap_rnd_bits=28`); vm.* sysctls are not
-      # namespaced, so the host value is what the container sees. We can't do
-      # that here because this self-hosted runner does not grant the workflow
-      # passwordless sudo, so the runner host must be configured out-of-band.
-      # If the sanitizer jobs start failing with mmap mapping errors, that host
-      # configuration is the first thing to check.
+      - name: Lower ASLR entropy for the sanitizers
+        # TSAN (and occasionally ASAN) aborts at startup with an "incompatible
+        # memory layout" error on kernels configured with 32 mmap randomization
+        # bits, and it can't fall back to disabling ASLR inside a container.
+        # The runner image sets vm.mmap_rnd_bits=28 in /etc/sysctl.conf
+        # (actions/runner-images#9491), but Ubuntu 26.04 no longer reads that
+        # file, so set it here. vm.* sysctls are not namespaced, so the
+        # container sees the host's value.
+        run: |
+          sudo sysctl -w vm.mmap_rnd_bits=28
       - name: Fetching code repository...
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

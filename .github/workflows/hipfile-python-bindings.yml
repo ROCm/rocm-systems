@@ -19,6 +19,9 @@ env:
       inputs.platform == 'suse' && 'zypper' ||
       inputs.platform == 'ubuntu' && 'apt'
     }}
+  # Python interpreter installed in the CI image. Ubuntu 26.04 ships 3.14; the
+  # other images install 3.12.
+  AIS_PYTHON: ${{ inputs.platform == 'ubuntu' && 'python3.14' || 'python3.12' }}
 
 on:
   workflow_call:
@@ -72,7 +75,7 @@ jobs:
     # The sdist build itself is platform-agnostic and happy on a GitHub-hosted
     # runner, so only the leg that also runs the hardware test claims one of the
     # scarce self-hosted AIS runners (shared with the AIS_system_tests jobs).
-    runs-on: ["${{ inputs.run_hardware_test && 'AIS' || 'ubuntu-24.04' }}"]
+    runs-on: ["${{ inputs.run_hardware_test && 'AIS' || 'ubuntu-26.04' }}"]
     outputs:
       hipfile_python_sdist_filename: ${{ steps.sdist-metadata.outputs.HIPFILE_PYTHON_SDIST_FILENAME }}
     steps:
@@ -170,9 +173,10 @@ jobs:
           docker exec \
             -t \
             -w /ais/rocm-systems/projects/hipfile \
+            -e AIS_PYTHON \
             "${AIS_CONTAINER_NAME}" \
             /bin/bash -c '
-              python3.12 -m venv .venv
+              "${AIS_PYTHON}" -m venv .venv
               .venv/bin/pip install --upgrade pip
               .venv/bin/pip install build pytest
             '

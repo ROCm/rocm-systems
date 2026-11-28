@@ -36,7 +36,7 @@ jobs:
   # Resolve runs on the runner (not the docker:28.5 container) because the
   # resolver needs curl/bash, which the Alpine-based docker image lacks.
   resolve_nightly:
-    runs-on: [ubuntu-24.04]
+    runs-on: [ubuntu-26.04]
     outputs:
       nightly_build: ${{ steps.nightly.outputs.nightly_build }}
       nightly_rocm_version: ${{ steps.nightly.outputs.nightly_rocm_version }}
@@ -70,7 +70,7 @@ jobs:
       AIS_CI_IMAGE_NAME: ais_ci_${{ matrix.supported_platforms }}
       AIS_NIGHTLY_BUILD: ${{ needs.resolve_nightly.outputs.nightly_build }}
       AIS_NIGHTLY_ROCM_VERSION: ${{ needs.resolve_nightly.outputs.nightly_rocm_version }}
-    runs-on: [ubuntu-24.04]
+    runs-on: [ubuntu-26.04]
     container: docker:28.5
     steps:
       - name: Fetching code repository...

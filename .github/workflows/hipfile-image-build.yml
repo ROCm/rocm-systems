@@ -54,7 +54,7 @@ jobs:
     permissions:
       contents: read
       packages: write
-    runs-on: [ubuntu-24.04]
+    runs-on: [ubuntu-26.04]
     container: docker:28.5
     steps:
       - name: Fetching code repository...

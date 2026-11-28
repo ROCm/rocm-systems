@@ -41,7 +41,7 @@ jobs:
     env:
       AIS_CI_IMAGE_NAME: ais_ci_${{ matrix.supported_platforms }}
       AIS_INPUT_PLATFORM: ${{ matrix.supported_platforms }}
-    runs-on: [ubuntu-24.04]
+    runs-on: [ubuntu-26.04]
     container: docker:28.5
     # NOTE: nightly is intentionally absent here. This job refreshes the static
     # latest-rocm<ver> images post-merge, but the nightly target moves daily, so
