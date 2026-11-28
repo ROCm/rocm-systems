@@ -61,6 +61,7 @@ struct packet_data_t
     rocprofiler_user_data_t user_data               = {.value = 0};
     pooled_signal_t*        pooled_signal           = nullptr;
     bool                    is_serialized           = false;
+    bool                    has_pc_sampling_ref     = false;
 };
 
 // Internal session information that is used by write interceptor

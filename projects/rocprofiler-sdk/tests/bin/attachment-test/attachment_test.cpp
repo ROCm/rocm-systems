@@ -24,6 +24,7 @@
 #include <rocprofiler-sdk-roctx/roctx.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <algorithm>
 #include <chrono>
 #include <csignal>
 #include <cstdlib>
@@ -80,6 +81,14 @@ simple_kernel(float* data, int size)
 void
 execute_kernels(const size_t tid, const size_t device_id)
 {
+    // Lifecycle tests can tighten the dispatch cadence without changing the default workload used
+    // by the other attachment fixtures.
+    const auto iteration_delay = std::chrono::milliseconds{[]() {
+        if(const auto* value = std::getenv("ROCPROFILER_ATTACH_TEST_DELAY_MSEC"))
+            return std::max(0, std::atoi(value));
+        return 50;
+    }()};
+
     // Set device
     HIP_ASSERT(hipSetDevice(device_id));
     // Workaround for MI325: ensure device ready before allocations
@@ -170,8 +179,7 @@ execute_kernels(const size_t tid, const size_t device_id)
             break;
         }
 
-        // Small delay between iterations
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        if(iteration_delay.count() > 0) std::this_thread::sleep_for(iteration_delay);
         iter++;
     }
 

@@ -979,9 +979,11 @@ WriteInterceptor(const void* packets,
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
             if(pc_sampling::is_pc_sample_service_configured(queue.get_agent().get_rocp_agent()->id))
             {
-                transformed_packets.emplace_back(
-                    pc_sampling::hsa::generate_marker_packet_for_kernel(
-                        corr_id, _packet_data.tracing_data.external_correlation_ids, dispatch_id));
+                auto marker = pc_sampling::hsa::generate_marker_packet_for_kernel(
+                    corr_id, _packet_data.tracing_data.external_correlation_ids, dispatch_id);
+                corr_id->add_ref_count();
+                _packet_data.has_pc_sampling_ref = true;
+                transformed_packets.emplace_back(std::move(marker));
             }
 #endif
 

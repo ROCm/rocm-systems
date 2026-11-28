@@ -94,7 +94,8 @@ public:
     : pcs_parser(parser)
     {}
 
-    /// Called by the `kernel_completion_callback` to mark the kernel matching @p cid completed.
+    /// Called once for each completed dispatch that acquired a PC-sampling correlation reference
+    /// when its marker was injected. The manager later releases exactly that reference.
     void cid_async_activity_completed(context::correlation_id* cid);
 
     /// a callback function for copying PC samples from ROCr's buffer to the SDK's buffer
