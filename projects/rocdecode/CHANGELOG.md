@@ -7,6 +7,7 @@ Full documentation for rocDecode is available at [https://rocm.docs.amd.com/proj
 ### Added
 
 * Reference MD5 digests of the planar YUV 4:2:0 decoded output for the AVC, HEVC, AV1 and VP9 test streams, installed to `share/rocdecode/md5`. The `video_decode-AVC`, `video_decode-HEVC`, `video_decode-AV1`, `video_decode-VP9` and `video_decodeMem-HEVC` CTests now pass them to the samples' `-md5_check` option, so a test fails when the decoded output doesn't match its reference.
+* The `videoDecodeAsync` sample, which decodes with separate producer and consumer threads using the rocDecode parser and decoder APIs directly. It compares copying each frame in the display callback with passing the decoded surface pointer to the consumer without a copy. The new `video_decodeAsync-*` CTests show that the no-copy approach is unsafe.
 * A `--mem_type` option for the `run_rocDecode_Conformance.py` and `run_rocDecodeSamples.py` test scripts, which passes the output surface memory type to the samples as `-m` so conformance and performance runs can cover the copied modes as well as the default.
 * A `--mem-type` option for `validate.sh` and matching `m0`, `m1` and `m2` arguments for the `/validate` skill, which run the conformance phase once per listed output surface memory type, so a copied-mode failure that passes the default run is reported.
 * Support for gfx1251

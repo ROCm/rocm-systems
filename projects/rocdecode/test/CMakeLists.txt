@@ -444,6 +444,94 @@ if(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)
       message("-- ${Yellow}${PROJECT_NAME} rocdecode-host NOT found. rocdecode tests requiring rocdecode-host excluded")
     endif()
   endif(rocdecode-host_FOUND AND NOT USING_THE_ROCK)
+
+  # 18 - videoDecodeAsync sync-copy HEVC
+  add_test(
+    NAME
+      video_decodeAsync-sync-copy-HEVC
+    COMMAND
+      "${CMAKE_CTEST_COMMAND}"
+            --build-and-test "${ROCM_PATH}/share/rocdecode/samples/videoDecodeAsync"
+                              "${CMAKE_CURRENT_BINARY_DIR}/videoDecodeAsync-sync-copy-HEVC"
+            --build-generator "${CMAKE_GENERATOR}"
+            --test-command "videodecodeasync"
+            -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-H265.mp4
+            -p sync-copy
+            -md5_check ${ROCM_PATH}/share/rocdecode/md5/AMD_driving_virtual_20-H265_yuv420.md5
+  )
+  set_test_env(video_decodeAsync-sync-copy-HEVC)
+  set_codec_skip(video_decodeAsync-sync-copy-HEVC)
+
+  # 19 - videoDecodeAsync sync-copy AVC
+  add_test(
+    NAME
+      video_decodeAsync-sync-copy-AVC
+    COMMAND
+      "${CMAKE_CTEST_COMMAND}"
+            --build-and-test "${ROCM_PATH}/share/rocdecode/samples/videoDecodeAsync"
+                              "${CMAKE_CURRENT_BINARY_DIR}/videoDecodeAsync-sync-copy-AVC"
+            --build-generator "${CMAKE_GENERATOR}"
+            --test-command "videodecodeasync"
+            -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-H264.mp4
+            -p sync-copy
+            -md5_check ${ROCM_PATH}/share/rocdecode/md5/AMD_driving_virtual_20-H264_yuv420.md5
+  )
+  set_test_env(video_decodeAsync-sync-copy-AVC)
+  set_codec_skip(video_decodeAsync-sync-copy-AVC)
+
+  # 20 - videoDecodeAsync sync-copy AV1
+  add_test(
+    NAME
+      video_decodeAsync-sync-copy-AV1
+    COMMAND
+      "${CMAKE_CTEST_COMMAND}"
+            --build-and-test "${ROCM_PATH}/share/rocdecode/samples/videoDecodeAsync"
+                              "${CMAKE_CURRENT_BINARY_DIR}/videoDecodeAsync-sync-copy-AV1"
+            --build-generator "${CMAKE_GENERATOR}"
+            --test-command "videodecodeasync"
+            -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-AV1.mp4
+            -p sync-copy
+            -md5_check ${ROCM_PATH}/share/rocdecode/md5/AMD_driving_virtual_20-AV1_yuv420.md5
+  )
+  set_test_env(video_decodeAsync-sync-copy-AV1)
+  set_codec_skip(video_decodeAsync-sync-copy-AV1)
+
+  # 21 - videoDecodeAsync sync-copy VP9
+  add_test(
+    NAME
+      video_decodeAsync-sync-copy-VP9
+    COMMAND
+      "${CMAKE_CTEST_COMMAND}"
+            --build-and-test "${ROCM_PATH}/share/rocdecode/samples/videoDecodeAsync"
+                              "${CMAKE_CURRENT_BINARY_DIR}/videoDecodeAsync-sync-copy-VP9"
+            --build-generator "${CMAKE_GENERATOR}"
+            --test-command "videodecodeasync"
+            -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-VP9.ivf
+            -p sync-copy
+            -md5_check ${ROCM_PATH}/share/rocdecode/md5/AMD_driving_virtual_20-VP9_yuv420.md5
+  )
+  set_test_env(video_decodeAsync-sync-copy-VP9)
+  set_codec_skip(video_decodeAsync-sync-copy-VP9)
+
+  # 22 - videoDecodeAsync no-copy control: the consumer reads each decode surface only after 8 more
+  # frames have been displayed, by which time the parser has reused it, so the MD5 must NOT match.
+  # This checks that the harness detects the decode-surface reuse that Map/Unmap is meant to prevent.
+  add_test(
+    NAME
+      video_decodeAsync-no-copy-control
+    COMMAND
+      "${CMAKE_CTEST_COMMAND}"
+            --build-and-test "${ROCM_PATH}/share/rocdecode/samples/videoDecodeAsync"
+                              "${CMAKE_CURRENT_BINARY_DIR}/videoDecodeAsync-no-copy-control"
+            --build-generator "${CMAKE_GENERATOR}"
+            --test-command "videodecodeasync"
+            -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-H265.mp4
+            -p no-copy -w lag:8 -dd 0
+            -md5_check ${ROCM_PATH}/share/rocdecode/md5/AMD_driving_virtual_20-H265_yuv420.md5
+            -expect_mismatch
+  )
+  set_test_env(video_decodeAsync-no-copy-control)
+  set_codec_skip(video_decodeAsync-no-copy-control)
 else()
   if(NOT FFMPEG_FOUND)
     message("-- ${Yellow}${PROJECT_NAME} FFmpeg NOT found. rocdecode tests requiring FFmpeg excluded")

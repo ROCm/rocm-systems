@@ -248,13 +248,15 @@ class VideoDemuxer {
          * \param video Set to a pointer to the extracted packet data.
          * \param video_size Set to the size, in bytes, of the extracted packet.
          * \param pts Optional; if non-null, set to the packet's presentation timestamp.
-         * \return \c true if a packet was extracted, \c false at end of stream or on error.
+         * \return \c true if a packet was extracted, \c false at end of stream or on error;
+         *         \ref DemuxFailed tells the two apart.
          */
         bool Demux(uint8_t **video, int *video_size, int64_t *pts = nullptr) {
             if (!av_fmt_input_ctx_) {
                 return false;
             }
             *video_size = 0;
+            demux_failed_ = false;
             if (packet_->data) {
                 av_packet_unref(packet_);
             }
@@ -263,6 +265,8 @@ class VideoDemuxer {
                 av_packet_unref(packet_);
             }
             if (ret < 0) {
+                demux_failed_ = ret != AVERROR_EOF;
+                if (demux_failed_) DemuxCriticalLog("av_read_frame failed!");
                 return false;
             }
             if (is_h264_ || is_hevc_) {
@@ -271,10 +275,12 @@ class VideoDemuxer {
                 }
                 if (av_bsf_send_packet(av_bsf_ctx_, packet_) != 0) {
                     DemuxCriticalLog("av_bsf_send_packet failed!");
+                    demux_failed_ = true;
                     return false;
                 }
                 if (av_bsf_receive_packet(av_bsf_ctx_, packet_filtered_) != 0) {
                     DemuxCriticalLog("av_bsf_receive_packet failed!");
+                    demux_failed_ = true;
                     return false;
                 }
                 *video = packet_filtered_->data;
@@ -295,6 +301,7 @@ class VideoDemuxer {
                         if (packet_->size < 3 ||
                             (size_t)ext_data_size > SIZE_MAX - (size_t)(packet_->size - 3)) {
                             DemuxCriticalLog("malformed first MPEG-4 packet!");
+                            demux_failed_ = true;
                             return false;
                         }
                         size_t payload = (size_t)packet_->size - 3;
@@ -302,6 +309,7 @@ class VideoDemuxer {
                         data_with_header_ = (uint8_t *)av_malloc(total);
                         if (!data_with_header_) {
                             DemuxCriticalLog("av_malloc failed!");
+                            demux_failed_ = true;
                             return false;
                         }
                         memcpy(data_with_header_, av_fmt_input_ctx_->streams[av_stream_]->codecpar->extradata, ext_data_size);
@@ -326,6 +334,11 @@ class VideoDemuxer {
             frame_count_++;
             return true;
         }
+        /**
+         * \brief Returns \c true if the last \ref Demux call stopped on an error rather than at the
+         *        end of the stream.
+         */
+        bool DemuxFailed() const { return demux_failed_; }
         /**
          * \brief Seeks to a frame identified by \p seek_ctx and demuxes it, instead of demuxing sequentially.
          *
@@ -678,7 +691,7 @@ class VideoDemuxer {
         AVPacket* packet_ = nullptr;
         AVPacket* packet_filtered_ = nullptr;
         AVBSFContext *av_bsf_ctx_ = nullptr;
-        AVCodecID av_video_codec_id_;
+        AVCodecID av_video_codec_id_ = AV_CODEC_ID_NONE;  // stays NONE if the constructor fails
         AVPixelFormat chroma_format_;
         double frame_rate_ = 0.0;
         double avg_frame_rate_ = 0.0;
@@ -699,6 +712,7 @@ class VideoDemuxer {
         uint32_t bit_rate_ = 0;
         // used for Seek Exact frame
         int64_t pkt_dts_ = 0;
+        bool demux_failed_ = false;
         int64_t pkt_duration_ = 0;
 };
 

@@ -66,6 +66,8 @@ HIP, libva, libdrm_amdgpu, pthreads. Optional: FFmpeg (>= 4.0.4) for samples, ex
 - `video_decodeRGB-HEVC` — decode + YUV-to-RGB color conversion
 - `video_decodeMem-HEVC` — memory chunk-based decode
 - `video_decodeRGB-Resize` — decode + RGB + resize
+- `video_decodeAsync-sync-copy-{HEVC,AVC,AV1,VP9}` — producer-consumer decode that copies each frame in the display callback (videoDecodeAsync sample)
+- `video_decodeAsync-no-copy-control` — videoDecodeAsync control run that passes surfaces on without copying and must detect the resulting corruption
 - `video_decode-Host-Backend` — FFmpeg software decode (not built under TheRock)
 
 **ASAN support:** The test CMakeLists auto-detects AddressSanitizer and sets `LD_PRELOAD` for `libclang_rt.asan` on each test.
@@ -100,7 +102,7 @@ Input (video file)
 - **`src/amd_detail/`** — rocprofiler API tracing/dispatch
 - **`src/commons.h`** — Singleton logger, exception class, RAII function-scope logging macros
 - **`utils/`** — High-level utility classes shared by samples (see below)
-- **`samples/`** — 10 sample applications demonstrating different decode scenarios
+- **`samples/`** — 12 sample applications demonstrating different decode scenarios
 - **`test/`** — CTest definitions, negative API tests, Python conformance/benchmark scripts
 
 ### Key Internal Classes

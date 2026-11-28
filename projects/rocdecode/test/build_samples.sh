@@ -74,7 +74,8 @@ export ROCM_PATH="$ROCM_PATH_EFF"
 
 for sample in rocdecDecode videoDecode videoDecodeBatch videoDecodeMem \
               videoDecodeMultiFiles videoDecodePerf videoDecodePicFiles \
-              videoDecodeRaw videoDecodeRGB videoToSequence videoDecodeCaps; do
+              videoDecodeRaw videoDecodeRGB videoToSequence videoDecodeCaps \
+              videoDecodeAsync; do
   echo "=== Building $sample ==="
   mkdir -p "$PROJECT_ROOT/samples/${sample}/build"
   cmake -S "$PROJECT_ROOT/samples/${sample}" -B "$PROJECT_ROOT/samples/${sample}/build" 2>&1 | tail -2
