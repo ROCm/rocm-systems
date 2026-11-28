@@ -43,6 +43,7 @@ template <int M, int K, int Batch, bool Bf16, bool Gfx942 = false,
 int mfma(uint64_t flags, uint64_t instruction_flags, uint32_t *const *d, const uint32_t *const *a,
          const uint32_t *const *b, const uint32_t *const *c) {
   using namespace rocjitsu::arith;
+  [[maybe_unused]] const uint64_t implementation_flags = flags;
   flags = resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
   if (int error = validate(flags, instruction_flags & ~0x3ffULL,
                            kMatrixIgnoredFpFlags | RJ_ARITH_FP_DX10_CLAMP_OFF)) {
@@ -85,9 +86,17 @@ int mfma(uint64_t flags, uint64_t instruction_flags, uint32_t *const *d, const u
     flags |= RJ_ARITH_FP_FLUSH_INPUT_DENORMALS | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
   }
 #if defined(RJ_ARITH_HAVE_X86_64_V4_BF16)
-  if constexpr (Model == MfmaF32Model::Default && Bf16 && (Batch == 1 || M == 4)) {
-    if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_ZEN4) &&
-        mfma_half_x86_64_v4_bf16<M, K, Batch>(instruction_flags, clamp_overflow, d, a, b, c)) {
+  if constexpr (Bf16 && (Batch == 1 || M == 4)) {
+    constexpr int ABlockLanes = Model == MfmaF32Model::Gfx90a ? M : 0;
+    const bool native_policy =
+        Model == MfmaF32Model::Default ||
+        (implementation_flags & RJ_ARITH_SEMANTICS_MASK) != RJ_ARITH_SEMANTICS_COMPATIBILITY;
+    if (native_policy && cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_ZEN4) &&
+        mfma_half_x86_64_v4_bf16<M, K, Batch, ABlockLanes>(
+            instruction_flags,
+            implementation_flags &
+                ~(Gfx942 || Model != MfmaF32Model::Default ? RJ_ARITH_FP16_OVFL : 0ULL),
+            d, a, b, c)) {
       return RJ_ARITH_SUCCESS;
     }
   }

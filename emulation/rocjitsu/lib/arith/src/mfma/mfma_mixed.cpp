@@ -23,6 +23,8 @@ int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32
              const uint32_t *const *b, const uint32_t *const *c, const uint32_t *scale_a = nullptr,
              const uint32_t *scale_b = nullptr) {
   using namespace rocjitsu::arith;
+  [[maybe_unused]] const bool preserve_compatibility =
+      (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY;
 #if defined(RJ_ARITH_HAVE_AVX512VNNI)
   // Unscaled integer-dot folds K products before adding C once, so reserve it for explicit Loose
   // and preserve the legacy C-first fused accumulation and signed zero in Compatibility mode.
@@ -62,7 +64,7 @@ int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32
     if constexpr (Scaled) {
       mfma_scaled_x86_64_v4_bf16<M, K>(controls, d, a, b, c, scale_a, scale_b, clamp_overflow);
       return RJ_ARITH_SUCCESS;
-    } else if (mfma_mixed_x86_64_v4_bf16<M, K>(controls, d, a, b, c)) {
+    } else if (mfma_mixed_x86_64_v4_bf16<M, K>(controls, d, a, b, c, preserve_compatibility)) {
       return RJ_ARITH_SUCCESS;
     }
   }

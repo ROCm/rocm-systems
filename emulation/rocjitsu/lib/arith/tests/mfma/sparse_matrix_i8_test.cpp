@@ -23,7 +23,9 @@ template <int M, int K, bool Wmma = false> void arithmetic(Entry entry) {
   std::minstd_rand random;
   for (auto &reg : input) {
     for (auto &word : reg) {
-      word = uint32_t(random() >> 15) << 16 | (random() >> 15);
+      const uint32_t high = uint32_t(random() >> 15);
+      const uint32_t low = uint32_t(random() >> 15);
+      word = (high << 16) | low;
     }
   }
   // Each metadata nibble selects an increasing pair; both register words vary.

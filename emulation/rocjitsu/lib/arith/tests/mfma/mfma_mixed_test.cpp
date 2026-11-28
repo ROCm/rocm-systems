@@ -397,7 +397,7 @@ TEST(MfmaMixed, SpecialValuesSubnormalCAndExtremeScales) {
   check_scaled.template operator()<4, 16, 4>(rj_arith_v_mfma_scale_f32_16x16x128_f8f6f4_w64);
   check_scaled.template operator()<16, 32, 2>(rj_arith_v_mfma_scale_f32_32x32x64_f8f6f4_w64);
 
-  // Also check unscaled subnormal-C preservation across all supported CPU levels.
+  // Compatibility preserves unscaled subnormal C; Loose may use native BF16 flushing.
   for (const auto &[fa, fb] : format_pairs) {
     const uint64_t controls = fa | (fb << RJ_ARITH_MATRIX_FORMAT_B_SHIFT);
     std::array<std::array<uint32_t, 64>, 8> zeros{};
@@ -412,14 +412,20 @@ TEST(MfmaMixed, SpecialValuesSubnormalCAndExtremeScales) {
       }
     }
     const uint32_t *c_ptrs[] = {c_buf[0].data(), c_buf[1].data(), c_buf[2].data(), c_buf[3].data()};
-    for (uint64_t cpu : supported_cpu_levels()) {
-      std::array<std::array<uint32_t, 64>, 4> out{};
-      uint32_t *d_ptrs[] = {out[0].data(), out[1].data(), out[2].data(), out[3].data()};
-      ASSERT_EQ(rj_arith_v_mfma_f32_16x16x128_f8f6f4_w64(cpu | RJ_ARITH_SEMANTICS_LOOSE, controls,
-                                                         d_ptrs, z_ptrs.data(), z_ptrs.data(),
-                                                         c_ptrs),
-                RJ_ARITH_SUCCESS);
-      EXPECT_EQ(out, c_buf);
+    for (uint64_t semantics : {RJ_ARITH_SEMANTICS_COMPATIBILITY, RJ_ARITH_SEMANTICS_LOOSE}) {
+      for (uint64_t cpu : supported_cpu_levels()) {
+        std::array<std::array<uint32_t, 64>, 4> out{};
+        uint32_t *d_ptrs[] = {out[0].data(), out[1].data(), out[2].data(), out[3].data()};
+        ASSERT_EQ(rj_arith_v_mfma_f32_16x16x128_f8f6f4_w64(cpu | semantics, controls, d_ptrs,
+                                                           z_ptrs.data(), z_ptrs.data(), c_ptrs),
+                  RJ_ARITH_SUCCESS);
+        for (int reg = 0; reg < 4; ++reg) {
+          for (int lane = 0; lane < 64; ++lane) {
+            expect_f32(out[reg][lane], std::bit_cast<float>(c_buf[reg][lane]), semantics,
+                       /*atol=*/1e-37f, /*rtol=*/1e-5f);
+          }
+        }
+      }
     }
   }
 }

@@ -7,13 +7,15 @@
 
 namespace rocjitsu::arith {
 
-// Stage packed BF16 sources while checking that all nonzero finite factors have biased
-// exponents in [96, 159] (no subnormal inputs, no product underflow/overflow).
+// Stage packed BF16 sources. Compatibility screens finite exponents outside [96, 159];
+// Loose accepts native pair-dot rounding, overflow and denormal flushing.
 // Returns false with d unchanged when inputs require the general x86-64-v4 FMA backend.
-template <int M, int K, int Batch>
-bool mfma_half_x86_64_v4_bf16(uint64_t controls, bool clamp_overflow, uint32_t *const *d,
+template <int M, int K, int Batch, int ABlockLanes>
+bool mfma_half_x86_64_v4_bf16(uint64_t controls, uint64_t flags, uint32_t *const *d,
                               const uint32_t *const *a, const uint32_t *const *b,
                               const uint32_t *const *c) {
+  const bool preserve_compatibility =
+      (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY;
   constexpr int per_lane = K / (64 / (M * Batch));
   constexpr int regs = per_lane / 2;
   alignas(64) uint32_t left[regs][64], right[regs][64];
@@ -31,8 +33,10 @@ bool mfma_half_x86_64_v4_bf16(uint64_t controls, bool clamp_overflow, uint32_t *
     for (int lane = 0; lane < 64; lane += 16) {
       const __m512i aw = _mm512_loadu_si512(a[reg] + lane);
       const __m512i bw = _mm512_loadu_si512(b[reg] + lane);
-      out_of_range =
-          _mm512_ternarylogic_epi32(out_of_range, check_range(aw), check_range(bw), 0xfe);
+      if (preserve_compatibility) {
+        out_of_range =
+            _mm512_ternarylogic_epi32(out_of_range, check_range(aw), check_range(bw), 0xfe);
+      }
       // vdpbf16ps consumes the high half first; swap halves to preserve guest K order.
       _mm512_store_si512(left[reg] + lane, _mm512_rol_epi32(aw, 16));
       _mm512_store_si512(right[reg] + lane, _mm512_rol_epi32(bw, 16));
@@ -42,23 +46,61 @@ bool mfma_half_x86_64_v4_bf16(uint64_t controls, bool clamp_overflow, uint32_t *
                        0)) {
     return false;
   }
-  return mfma_reduce_bf16_pairs<M, K, Batch>(controls, d, left, right, c, clamp_overflow);
+  return mfma_reduce_bf16_pairs<M, K, Batch, ABlockLanes>(controls, d, left, right, c, flags);
 }
 
-template bool mfma_half_x86_64_v4_bf16<4, 4, 16>(uint64_t, bool, uint32_t *const *,
+template bool mfma_half_x86_64_v4_bf16<4, 4, 16>(uint64_t, uint64_t, uint32_t *const *,
                                                  const uint32_t *const *, const uint32_t *const *,
                                                  const uint32_t *const *);
-template bool mfma_half_x86_64_v4_bf16<32, 8, 1>(uint64_t, bool, uint32_t *const *,
+template bool mfma_half_x86_64_v4_bf16<32, 8, 1>(uint64_t, uint64_t, uint32_t *const *,
                                                  const uint32_t *const *, const uint32_t *const *,
                                                  const uint32_t *const *);
-template bool mfma_half_x86_64_v4_bf16<16, 16, 1>(uint64_t, bool, uint32_t *const *,
+template bool mfma_half_x86_64_v4_bf16<16, 16, 1>(uint64_t, uint64_t, uint32_t *const *,
                                                   const uint32_t *const *, const uint32_t *const *,
                                                   const uint32_t *const *);
-template bool mfma_half_x86_64_v4_bf16<16, 32, 1>(uint64_t, bool, uint32_t *const *,
+template bool mfma_half_x86_64_v4_bf16<16, 32, 1>(uint64_t, uint64_t, uint32_t *const *,
                                                   const uint32_t *const *, const uint32_t *const *,
                                                   const uint32_t *const *);
-template bool mfma_half_x86_64_v4_bf16<32, 16, 1>(uint64_t, bool, uint32_t *const *,
+template bool mfma_half_x86_64_v4_bf16<32, 16, 1>(uint64_t, uint64_t, uint32_t *const *,
                                                   const uint32_t *const *, const uint32_t *const *,
                                                   const uint32_t *const *);
+
+// Older BF16 shapes reuse the same pair-dot arithmetic with their A-lane block width.
+template bool mfma_half_x86_64_v4_bf16<4, 2, 16, 0>(uint64_t, uint64_t, uint32_t *const *,
+                                                    const uint32_t *const *,
+                                                    const uint32_t *const *,
+                                                    const uint32_t *const *);
+template bool mfma_half_x86_64_v4_bf16<32, 4, 1, 0>(uint64_t, uint64_t, uint32_t *const *,
+                                                    const uint32_t *const *,
+                                                    const uint32_t *const *,
+                                                    const uint32_t *const *);
+template bool mfma_half_x86_64_v4_bf16<16, 8, 1, 0>(uint64_t, uint64_t, uint32_t *const *,
+                                                    const uint32_t *const *,
+                                                    const uint32_t *const *,
+                                                    const uint32_t *const *);
+template bool mfma_half_x86_64_v4_bf16<4, 2, 16, 4>(uint64_t, uint64_t, uint32_t *const *,
+                                                    const uint32_t *const *,
+                                                    const uint32_t *const *,
+                                                    const uint32_t *const *);
+template bool mfma_half_x86_64_v4_bf16<32, 4, 1, 32>(uint64_t, uint64_t, uint32_t *const *,
+                                                     const uint32_t *const *,
+                                                     const uint32_t *const *,
+                                                     const uint32_t *const *);
+template bool mfma_half_x86_64_v4_bf16<16, 8, 1, 16>(uint64_t, uint64_t, uint32_t *const *,
+                                                     const uint32_t *const *,
+                                                     const uint32_t *const *,
+                                                     const uint32_t *const *);
+template bool mfma_half_x86_64_v4_bf16<4, 4, 16, 4>(uint64_t, uint64_t, uint32_t *const *,
+                                                    const uint32_t *const *,
+                                                    const uint32_t *const *,
+                                                    const uint32_t *const *);
+template bool mfma_half_x86_64_v4_bf16<32, 8, 1, 32>(uint64_t, uint64_t, uint32_t *const *,
+                                                     const uint32_t *const *,
+                                                     const uint32_t *const *,
+                                                     const uint32_t *const *);
+template bool mfma_half_x86_64_v4_bf16<16, 16, 1, 16>(uint64_t, uint64_t, uint32_t *const *,
+                                                      const uint32_t *const *,
+                                                      const uint32_t *const *,
+                                                      const uint32_t *const *);
 
 } // namespace rocjitsu::arith

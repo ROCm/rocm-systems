@@ -118,14 +118,15 @@ void decode_mixed_bf16_dispatch(const uint32_t *const *input, int format,
 
 } // namespace
 
-// Unscaled mixed f8f6f4 MFMA via vdpbf16ps. Falls back to v4 only if C has a subnormal lane.
+// Unscaled mixed MFMA via vdpbf16ps; Compatibility preserves subnormal C through fallback.
 template <int M, int K>
 bool mfma_mixed_x86_64_v4_bf16(uint64_t controls, uint32_t *const *d, const uint32_t *const *a,
-                               const uint32_t *const *b, const uint32_t *const *c) {
+                               const uint32_t *const *b, const uint32_t *const *c,
+                               bool preserve_compatibility) {
   constexpr int registers = M * M / 64;
   constexpr int col_vecs = M / 16;
   constexpr int row_tile = M == 16 ? 16 : 8;
-  if (__builtin_expect(mfma_c_has_subnormal<registers>(c), 0)) {
+  if (preserve_compatibility && __builtin_expect(mfma_c_has_subnormal<registers>(c), 0)) {
     return false;
   }
   alignas(64) uint32_t left[K / 2][M], right[K / 2][M];
@@ -289,10 +290,10 @@ void mfma_scaled_x86_64_v4_bf16(uint64_t controls, uint32_t *const *d, const uin
 
 template bool mfma_mixed_x86_64_v4_bf16<16, 128>(uint64_t, uint32_t *const *,
                                                  const uint32_t *const *, const uint32_t *const *,
-                                                 const uint32_t *const *);
+                                                 const uint32_t *const *, bool);
 template bool mfma_mixed_x86_64_v4_bf16<32, 64>(uint64_t, uint32_t *const *,
                                                 const uint32_t *const *, const uint32_t *const *,
-                                                const uint32_t *const *);
+                                                const uint32_t *const *, bool);
 template void mfma_scaled_x86_64_v4_bf16<16, 128>(uint64_t, uint32_t *const *,
                                                   const uint32_t *const *, const uint32_t *const *,
                                                   const uint32_t *const *, const uint32_t *,

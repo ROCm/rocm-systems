@@ -23,7 +23,9 @@ template <int M, int Batch> void arithmetic(Entry entry) {
   std::minstd_rand random;
   for (int reg = 0; reg < 4 + 2 * Outputs; reg += 2) {
     for (int lane = 0; lane < 64; ++lane) {
-      uint64_t bits = (uint64_t(random() >> 5) << 26) | (random() >> 5);
+      const uint64_t high = uint64_t(random() >> 5);
+      const uint64_t low = uint64_t(random() >> 5);
+      uint64_t bits = (high << 26) | low;
       bits |= uint64_t(1020 + (random() >> 27) % 8) << 52;
       bits |= uint64_t(random() >> 30) << 63;
       input[reg][lane] = uint32_t(bits);
@@ -257,4 +259,35 @@ TEST(MfmaF64, Gfx950ExactControlsAndGuards) {
             RJ_ARITH_SUCCESS);
   EXPECT_EQ(uint64_t(d[0][0]) | (uint64_t(d[1][0]) << 32), 0x7ff8000000000055ULL);
 }
+
+TEST(MfmaF64, LooseAbsoluteSourcesAndAliasing) {
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (bool alias : {false, true}) {
+      for (uint64_t controls : {10ULL, 32ULL}) {
+        SCOPED_TRACE(testing::Message() << cpu << ":" << alias << ":" << controls);
+        uint32_t storage[20][64]{};
+        for (int reg = 1; reg < 12; reg += 2) {
+          std::fill_n(storage[reg], 64, 0xbff00000U); // A, B, C = -1.0.
+        }
+        const uint32_t *a[] = {storage[0], storage[1]}, *b[] = {storage[2], storage[3]};
+        const uint32_t *c[8];
+        uint32_t *d[8];
+        for (int reg = 0; reg < 8; ++reg) {
+          c[reg] = storage[4 + reg];
+          d[reg] = storage[(alias ? 0 : 12) + reg];
+        }
+        ASSERT_EQ(rj_arith_v_mfma_f64_16x16x4_f64_w64_gfx950(cpu | RJ_ARITH_SEMANTICS_LOOSE,
+                                                             controls, d, a, b, c),
+                  RJ_ARITH_SUCCESS);
+        // |A| * -B + C gives 3; A * B + |C| gives 5 after four products.
+        for (int reg = 0; reg < 8; ++reg) {
+          for (int lane = 0; lane < 64; ++lane) {
+            EXPECT_EQ(d[reg][lane], reg & 1 ? (controls == 10 ? 0x40080000U : 0x40140000U) : 0);
+          }
+        }
+      }
+    }
+  }
+}
+
 } // namespace
