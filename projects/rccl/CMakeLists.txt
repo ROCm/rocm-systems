@@ -423,8 +423,21 @@ if (rocm_version_matches)
         message(WARNING "SQTT instrumentation requires ROCm version >= 7.13. Current version: ${ROCM_VERSION_STRING}. Disabling SQTT_ENABLED.")
         set(SQTT_ENABLED OFF CACHE BOOL "Enable SQTT instrumentation" FORCE)
       else()
-        message(STATUS "SQTT instrumentation enabled (ROCm ${ROCM_VERSION_STRING})")
-        add_definitions("-DSQTT_ENABLED=1")
+        # The SQTT compiler pass and its marker header now ship inside LLVM itself
+        # (amd-sqtt-marker), not as a separate ROCm package. Prefer that location;
+        # SQTT_PASS_PLUGIN can be set on the command line to override both.
+        if(NOT DEFINED SQTT_PASS_PLUGIN OR SQTT_PASS_PLUGIN STREQUAL "")
+          set(SQTT_PASS_PLUGIN "${ROCM_PATH}/lib/llvm/lib/libsqtt-marker.so")
+        endif()
+        set(SQTT_MARKER_INCLUDE_DIR "${ROCM_PATH}/lib/llvm/include")
+        if(NOT EXISTS "${SQTT_PASS_PLUGIN}")
+          message(WARNING "SQTT instrumentation pass plugin not found at ${SQTT_PASS_PLUGIN}. "
+                           "Set -DSQTT_PASS_PLUGIN=/path/to/plugin.so or disable SQTT_ENABLED.")
+          set(SQTT_ENABLED OFF CACHE BOOL "Enable SQTT instrumentation" FORCE)
+        else()
+          message(STATUS "SQTT instrumentation enabled (ROCm ${ROCM_VERSION_STRING}, pass plugin: ${SQTT_PASS_PLUGIN})")
+          add_definitions("-DSQTT_ENABLED=1")
+        endif()
       endif()
     endif()
 

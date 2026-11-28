@@ -1572,9 +1572,12 @@ if(SQTT_ENABLED)
     OUTPUT_QUIET ERROR_QUIET
   )
 
-  target_compile_options(rccl PRIVATE "-fpass-plugin=/opt/rocm/lib/libsqttinstrumentpass.so")
+  # SQTT_PASS_PLUGIN and SQTT_MARKER_INCLUDE_DIR are resolved in the top-level
+  # CMakeLists.txt, which also disables SQTT_ENABLED if the plugin is missing.
+  target_compile_options(rccl PRIVATE "-fpass-plugin=${SQTT_PASS_PLUGIN}")
   target_compile_definitions(rccl PRIVATE SQTT_ENABLED=1)
-  message(STATUS "SQTT instrumentation pass plugin enabled for RCCL")
+  target_include_directories(rccl PRIVATE "${SQTT_MARKER_INCLUDE_DIR}")
+  message(STATUS "SQTT instrumentation pass plugin enabled for RCCL: ${SQTT_PASS_PLUGIN}")
 endif()
 
 ## Set RCCL compile and linker options for unit tests and code coverage
