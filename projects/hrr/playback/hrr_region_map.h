@@ -37,6 +37,7 @@
 #include <vector>
 
 #include "hrr/hrr_regions.h"
+#include "hrr_reader.h"  // VerifiedFiles
 
 struct PlaybackContext;
 
@@ -54,7 +55,14 @@ class RegionMap {
     // Load and merge every regions/*.hrrr under `archive_dir`. Returns the
     // number of records loaded; 0 (with streams()==0) is the ordinary case for
     // a capture that ran without an external producer.
-    size_t load(const std::string& archive_dir);
+    //
+    // With `verified` (the digests of a checked archive) every stream must be
+    // listed in it and hash to its digest as it is parsed, and every listed stream
+    // must still be there; else nothing is kept, refused() is true and 0 is
+    // returned. The regions are read after the archive check, so they are held to
+    // it where they are read.
+    size_t load(const std::string& archive_dir, const VerifiedFiles* verified = nullptr);
+    bool refused() const { return refused_; }
 
     bool   empty()   const { return records_.empty(); }
     size_t streams() const { return streams_; }
@@ -111,6 +119,7 @@ class RegionMap {
 
     std::vector<hrr_region_rec> records_;  // merged, stable-sorted by mono_ns
     size_t  streams_  = 0;
+    bool    refused_  = false;
     size_t  cursor_   = 0;
     int64_t last_ts_  = INT64_MIN;
 

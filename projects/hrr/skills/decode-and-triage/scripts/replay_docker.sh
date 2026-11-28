@@ -34,6 +34,9 @@ Environment:
   ROCR_LIB              Optional in-tree ROCR lib dir for overlay mode
   HRR_DOCKER_PLAYBACK   Path to hrr-playback inside image (default: auto-detect)
   HRR_DOCKER_EXTRA_LD   Extra LD_LIBRARY_PATH segment inside container
+  HIP_HRR_TRUSTED_KEY   Public key file (archive signing). Mounted read-only into the
+                        container and passed as --trusted-key, so the replay checks the
+                        signature; an unreadable key refuses the run
 EOF
 }
 
@@ -96,6 +99,23 @@ find_image_playback() {
     bash -lc 'for p in "$(command -v hrr-playback 2>/dev/null)" /opt/rocm/bin/hrr-playback; do [[ -n "$p" && -x "$p" ]] && { echo "$p"; exit 0; }; done; exit 1' \
     2>/dev/null | tail -1
 }
+
+# A trusted key asks for a signature check. The container does not see the host's
+# environment or filesystem, so the key is mounted read-only and named with
+# --trusted-key; replaying unchecked while a key is set would defeat it.
+KEY_MOUNTS=()
+KEY_ARGS=()
+if [[ -n "${HIP_HRR_TRUSTED_KEY+x}" ]]; then
+  KEY="$HIP_HRR_TRUSTED_KEY"
+  if [[ -z "$KEY" || ! -f "$KEY" || ! -r "$KEY" ]]; then
+    echo "error: HIP_HRR_TRUSTED_KEY is set but is not a readable file; refusing to replay unchecked: $(safe "$KEY")" >&2
+    exit 1
+  fi
+  KEY="$(readlink -f "$KEY")"
+  KEY_MOUNTS=(-v "$KEY:/run/hrr/trusted.pub:ro")
+  KEY_ARGS=(--trusted-key /run/hrr/trusted.pub)
+  echo "[replay_docker] signature check: --trusted-key $(safe "$KEY")" >&2
+fi
 
 ARCH_ROOT="$(dirname "$ARCHIVE")"
 PID_NAME="$(basename "$ARCHIVE")"
@@ -161,12 +181,12 @@ echo "[replay_docker] log=$(safe "$LOG")" >&2
 set +e
 docker_run run --rm \
   --device=/dev/kfd --device=/dev/dri \
-  "${MOUNTS[@]}" \
+  "${MOUNTS[@]}" ${KEY_MOUNTS[@]+"${KEY_MOUNTS[@]}"} \
   -e "HIP_VISIBLE_DEVICES=$GPU" \
   -e "LD_LIBRARY_PATH=$LD_INSIDE" \
   -e "HIP_HRR_REPLAY_PROGRESS_SECONDS=${HIP_HRR_REPLAY_PROGRESS_SECONDS:-30}" \
   "$IMAGE" \
-  "$PLAY_INSIDE" "/arch/$PID_NAME" \
+  "$PLAY_INSIDE" "/arch/$PID_NAME" ${KEY_ARGS[@]+"${KEY_ARGS[@]}"} \
   2>&1 | tee "$LOG" | python3 "$SCRIPT_DIR/archive_text.py"
 RC=${PIPESTATUS[0]}
 set -e

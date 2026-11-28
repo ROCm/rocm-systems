@@ -318,6 +318,65 @@ class ReplayOutputTests(unittest.TestCase):
         # The log the analyzer reads stays the replay's own bytes.
         self.assertEqual(len(forged(log)), 3)
 
+    def _run_docker_replay(self, tmp_path: Path, **extra_env: str):
+        """Run replay_docker.sh with a docker stand-in that records its arguments."""
+        archive = make_archive(tmp_path)
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        (bin_dir / "sudo").write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+        (bin_dir / "docker").write_text(
+            f"#!/bin/sh\nprintf '%s\\n' \"$@\" > '{tmp_path / 'docker.args'}'\n",
+            encoding="utf-8",
+        )
+        for name in ("sudo", "docker"):
+            (bin_dir / name).chmod(0o755)
+        env = dict(os.environ)
+        env.pop("HIP_HRR_TRUSTED_KEY", None)
+        env.update(
+            PATH=f"{bin_dir}{os.pathsep}{env.get('PATH', '')}",
+            HRR_DOCKER_IMAGE="img:1",
+            HRR_DOCKER_PLAYBACK="/opt/rocm/bin/hrr-playback",
+            HRR_DOCKER_MOUNT_CLR="0",
+            **extra_env,
+        )
+        proc = subprocess.run(
+            [str(REPLAY_DOCKER), "--archive", str(archive), "--log", str(tmp_path / "r.log")],
+            capture_output=True, text=True, env=env,
+        )
+        args_file = tmp_path / "docker.args"
+        args = args_file.read_text(encoding="utf-8").splitlines() if args_file.exists() else []
+        return proc, args
+
+    def test_docker_replay_checks_the_trusted_key(self) -> None:
+        """A key that is set reaches the container, read-only, and replay is told to use it."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            key = tmp_path / "trusted.pub"
+            key.write_text("00" * 32 + "\n", encoding="utf-8")
+            proc, args = self._run_docker_replay(tmp_path, HIP_HRR_TRUSTED_KEY=str(key))
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn(f"{key.resolve()}:/run/hrr/trusted.pub:ro", args)
+        self.assertEqual(args[-2:], ["--trusted-key", "/run/hrr/trusted.pub"])
+        # The path inside the container comes first: the replay's own arguments.
+        self.assertLess(args.index("/opt/rocm/bin/hrr-playback"), len(args) - 2)
+
+    def test_docker_replay_refuses_an_unreadable_trusted_key(self) -> None:
+        for value in ("", "missing.pub"):
+            with self.subTest(value=value), tempfile.TemporaryDirectory() as tmp:
+                tmp_path = Path(tmp)
+                proc, args = self._run_docker_replay(
+                    tmp_path, HIP_HRR_TRUSTED_KEY=str(tmp_path / value) if value else ""
+                )
+                self.assertNotEqual(proc.returncode, 0)
+                self.assertEqual(args, [], "docker must not run unchecked")
+                self.assertIn("HIP_HRR_TRUSTED_KEY", proc.stderr)
+
+    def test_docker_replay_without_a_key_passes_none(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            proc, args = self._run_docker_replay(Path(tmp))
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertNotIn("--trusted-key", args)
+
     def test_native_replay_output_is_marked_as_data(self) -> None:
         """run_native_replay pipes hrr-playback through the sanitizer.
 

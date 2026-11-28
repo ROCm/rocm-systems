@@ -130,6 +130,7 @@ User-facing capture, replay, and validation knobs. Implementation details can be
 |----------|---------|---------|
 | `HIP_HRR_CAPTURE_CONSENT` | *(unset)* | `yes` consents to capture, without the per-user consent file, for every process that inherits it; any other value, such as `no`, withholds consent for them even when the file says yes. Blank counts as unset |
 | `HIP_HRR_CAPTURE_OUTPUT` | *(unset)* | Enable capture; path to the `.hrr` archive directory. An empty or blank value leaves capture off. Ignored, with one line on stderr, when Linux starts the program in secure-execution mode (set-user-ID, set-group-ID, file capabilities or an LSM transition) |
+| `HIP_HRR_SIGNING_KEY` | *(unset)* | Path to a signing seed file (64 hex digits, mode 0600). When set, an archive finished by `flush()` (not a crash) gets `hrr.manifest` (SHA-256 of every file) and `hrr.sig` (Ed25519). Create a key with `hrr-playback --gen-signing-key SEED PUB`; replay checks it with `--trusted-key PUB`. See DESIGN.md, Archive signing |
 | `HIP_HRR_DEBUG_ARGS` | off | Dump every captured kernel arg to the log (debug / provenance). Only a Debug build of the HIP runtime (no `NDEBUG`) reads it; a release build ignores it. Either way capture says on stderr whether it reads it, whatever the log level |
 | `HIP_HRR_HOST_SNAPSHOTS` | on | Record the pinned host memory each kernel reads before the launch, including a graph launch, so replay can write it back. `HIP_HRR_HOST_SNAPSHOT_MAX_MB` (default `64`) caps the allocation size. `HIP_HRR_HOST_SNAPSHOT_CHUNK_KB` (default `64`) sets the chunk a launch stores when its bytes changed. `HIP_HRR_HOST_SNAPSHOT_HELPERS` sets how many threads capture starts to hash large allocations (default one per 8 CPUs, at most 7; `0` for none). The archive then holds that host memory (see DESIGN.md, Pinned Host Snapshots) |
 | `HIP_HRR_CAPTURE_MAX_MB` | 0 (no limit) | Largest size, in MiB, of each process's archive (`pid-<pid>/`), manifests aside. The write that would pass it is not made: capture stops with a `[HRR capture] Capture stopped` message on stderr, the archive is marked incomplete, and the application runs on. A process it forks afterwards still gets an archive of its own |
@@ -176,6 +177,19 @@ The archive is readable only by the user who captured it (capture creates the ou
 | `--guard-min-bytes N` / `--guard-max-bytes N` | Size window for `--guard-blocks` |
 | `--guard-budget-mb N` | Cap guarded memory per launch (default `4096`) |
 | `--guard-exact-align` | Reproduce each guarded pointer's offset within an allocation granule bit for bit, at the cost of a larger unguarded tail |
+
+### Sign an archive that leaves the machine
+
+```bash
+hrr-playback --gen-signing-key capture.seed capture.pub     # once, on the capturing site
+HIP_HRR_SIGNING_KEY=capture.seed HIP_HRR_CAPTURE_OUTPUT=./out.hrr ./my_hip_app
+hrr-playback ./out.hrr/pid-<pid> --trusted-key capture.pub  # on the replaying site
+```
+
+Keep `capture.seed` private; send `capture.pub` to the recipient by a channel they trust,
+separately from the archive. With `--trusted-key`, replay refuses an unsigned archive or one
+where any file changed, naming the file. Without it nothing is checked. DESIGN.md, "Archive
+signing", has the key model and what is not covered.
 
 ### Archive integers reach HIP only through translation
 
