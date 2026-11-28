@@ -10,6 +10,7 @@ import os
 import re
 import sys
 import subprocess
+import sysconfig
 from setuptools import Extension, setup
 from setuptools.command.build_ext import build_ext
 
@@ -62,9 +63,17 @@ def _package_version():
     return f"{BASE_VERSION}+{local}"
 
 
+# CPython 3.12+ builds use the stable ABI (limited API 3.12), so one
+# cp312-abi3 wheel covers every later CPython. nanobind supports it from 3.12
+# and not on free-threaded builds; those keep a version-specific wheel.
+STABLE_ABI = sys.version_info >= (3, 12) and not sysconfig.get_config_var(
+    "Py_GIL_DISABLED"
+)
+
+
 class CMakeExtension(Extension):
     def __init__(self, name, sourcedir=""):
-        super().__init__(name, sources=[])
+        super().__init__(name, sources=[], py_limited_api=STABLE_ABI)
         self.sourcedir = os.path.abspath(sourcedir)
 
 
@@ -85,6 +94,7 @@ class CMakeBuild(build_ext):
             f"-DCMAKE_LIBRARY_OUTPUT_DIRECTORY={extdir}",
             f"-DPYTHON_EXECUTABLE={sys.executable}",
             f"-DCMAKE_BUILD_TYPE={cfg}",
+            f"-DROCSHMEM4PY_STABLE_ABI={'ON' if STABLE_ABI else 'OFF'}",
         ]
         # Forward CMAKE_PREFIX_PATH as a cache variable, not just via the
         # environment. find_package searches the cache-variable CMAKE_PREFIX_PATH
@@ -129,4 +139,5 @@ setup(
     version=_package_version(),
     ext_modules=[CMakeExtension("_rocshmem4py", sourcedir=".")],
     cmdclass={"build_ext": CMakeBuild},
+    options={"bdist_wheel": {"py_limited_api": "cp312"}} if STABLE_ABI else {},
 )

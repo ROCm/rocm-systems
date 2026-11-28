@@ -91,6 +91,11 @@ export LD_LIBRARY_PATH=$CMAKE_PREFIX_PATH/lib:$ROCM_PATH/lib:$LD_LIBRARY_PATH
 
 > Note: this package is not published to PyPI yet; install from source only.
 
+Built with CPython 3.12 or newer, the extension uses the Python stable ABI, so
+the wheel is tagged `cp312-abi3` and installs on every later CPython. CPython
+3.11, and free-threaded builds, produce a wheel for that one version. A
+stable-ABI build needs CMake 3.26 or newer.
+
 ### Building against different rocSHMEM backend configurations
 
 The binding statically links `librocshmem.a`, so its build and runtime
