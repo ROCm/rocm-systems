@@ -1829,6 +1829,54 @@ TEST_F(TopoProcessNetMicrotest, ProcessNet_InconsistentRailIsInvalidUsage) {
   EXPECT_TRUE(Logged("Inconsistent rail/plane for net a0: existing 7/"));
 }
 
+// NCCL 2.32.6: a GUID from an injected topology file is stale; the plugin's GUID replaces it.
+TEST_F(TopoProcessNetMicrotest, ProcessNet_PluginGuidOverwritesInjectedGuid) {
+  Devs({"a0", "b0"});
+  ASSERT_EQ(ncclSuccess, xmlSetAttr(Net("a0"), "guid", "0xdead"));
+
+  ASSERT_EQ(ncclSuccess, Process());
+
+  EXPECT_EQ("0x11", Attr(Net("a0"), "guid"));
+}
+
+// NCCL 2.32.6: a generated plane is the net's index among its NIC's nets, and a sibling whose plane NCCL
+// generated (bit 16 set) still counts.
+TEST_F(TopoProcessNetMicrotest, ProcessNet_GeneratedSiblingPlanesCountTowardsThePlane) {
+  Devs({"a0", "a1"});
+  for (FakeNetDev& d : g_netDevs) d.port = 5;
+
+  ASSERT_EQ(ncclSuccess, Process());
+
+  EXPECT_EQ(std::to_string(NCCL_TOPO_UNDEF_BIT | 0), Attr(Net("a0"), "plane"));
+  EXPECT_EQ(std::to_string(NCCL_TOPO_UNDEF_BIT | 1), Attr(Net("a1"), "plane"));
+}
+
+// NCCL 2.32.6: rail/plane values NCCL generated are left out of a topology dump; plugin values stay.
+TEST_F(TopoProcessNetMicrotest, ProcessNet_DumpOmitsGeneratedRailAndPlane) {
+  Devs({"a0", "b0"});
+  g_netDevs[1].railId = 3;
+  g_netDevs[1].planeId = 4;
+  ASSERT_EQ(ncclSuccess, Process());
+  ASSERT_EQ(std::to_string(NCCL_TOPO_UNDEF_BIT | 0), Attr(Net("a0"), "rail"));
+
+  std::filesystem::path path =
+    std::filesystem::temp_directory_path() / ("rccl-topo-dump-" + std::to_string(getpid()) + ".xml");
+  ASSERT_EQ(ncclSuccess, ncclTopoDumpXmlToFile(path.c_str(), xml_.get()));
+  std::string dump;
+  if (FILE* f = fopen(path.c_str(), "r")) {
+    char buf[4096];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), f)) > 0) dump.append(buf, n);
+    fclose(f);
+  }
+  std::filesystem::remove(path);
+
+  EXPECT_NE(std::string::npos, dump.find("name=\"a0\"")) << dump;
+  EXPECT_EQ(std::string::npos, dump.find("rail=\"" + std::to_string(NCCL_TOPO_UNDEF_BIT))) << dump;
+  EXPECT_EQ(std::string::npos, dump.find("plane=\"" + std::to_string(NCCL_TOPO_UNDEF_BIT))) << dump;
+  EXPECT_NE(std::string::npos, dump.find("rail=\"3\" plane=\"4\"")) << dump;
+}
+
 TEST_F(TopoProcessNetMicrotest, ProcessNet_CollPluginMarksCollAndKeepsNetUnlessSet) {
   Devs({"a0", "b0"});
   info_.net = false;
