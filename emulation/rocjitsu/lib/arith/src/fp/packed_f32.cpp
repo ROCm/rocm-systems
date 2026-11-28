@@ -5,7 +5,9 @@
 // FP32 words; both results are staged before publishing potentially aliased outputs.
 
 #include "common/packed_alu.h"
+#include "common/simd.h"
 #include "common/validation.h"
+#include "fp/binary.h"
 #include "rj_arith/detail/rj_arith_common.h"
 #include "rj_arith/detail/rj_arith_fp.h"
 
@@ -14,6 +16,41 @@
 namespace {
 
 enum class Operation { Add, Mul, Fma };
+
+#if defined(RJ_ARITH_HAVE_X86_64_V3) || defined(RJ_ARITH_HAVE_X86_64_V4)
+// Execute a validated Loose result through the existing numeric kernel, avoiding nested
+// public validation and dispatch. Return false when no SIMD backend is available.
+template <Operation Op>
+bool try_loose_simd(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *d,
+                    const uint32_t *a, const uint32_t *b, const uint32_t *c) {
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+    if constexpr (Op == Operation::Fma) {
+      rocjitsu::arith::fma_x86_64_v4(flags, exec_mask, mode, d, a, b, c);
+    } else {
+      constexpr auto operation =
+          Op == Operation::Add ? rocjitsu::arith::Binary::Add : rocjitsu::arith::Binary::Mul;
+      rocjitsu::arith::binary_x86_64_v4(operation, flags, exec_mask, mode, d, a, b);
+    }
+    return true;
+  }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+    if constexpr (Op == Operation::Fma) {
+      rocjitsu::arith::fma_x86_64_v3(flags, exec_mask, mode, d, a, b, c);
+    } else {
+      constexpr auto operation =
+          Op == Operation::Add ? rocjitsu::arith::Binary::Add : rocjitsu::arith::Binary::Mul;
+      rocjitsu::arith::binary_x86_64_v3(operation, flags, exec_mask, mode, d, a, b);
+    }
+    return true;
+  }
+#endif
+  return false;
+}
+
+#endif
 
 // Evaluate both selected FP32 results without changing host FP controls. Compatibility
 // retains guest rounding and the inherited per-operation denormal/NaN policy.
@@ -66,12 +103,18 @@ int packed_arithmetic(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_
       const uint32_t *x[] = {a[selected & 1] + first};
       const uint32_t *y[] = {b[(selected >> 1) & 1] + first};
       int error;
-      if constexpr (Op == Operation::Fma) {
-        const uint32_t *z[] = {c[(selected >> 2) & 1] + first};
-        error = OldCdna ? rj_arith_v_fma_f32_w32(flags, block_exec_mask, arithmetic, out, x, y, z,
+      const uint32_t *z = Op == Operation::Fma ? c[(selected >> 2) & 1] + first : nullptr;
+#if defined(RJ_ARITH_HAVE_X86_64_V3) || defined(RJ_ARITH_HAVE_X86_64_V4)
+      if (!compatibility &&
+          try_loose_simd<Op>(flags, block_exec_mask, arithmetic, *out, *x, *y, z)) {
+        error = RJ_ARITH_SUCCESS;
+      } else
+#endif
+          if constexpr (Op == Operation::Fma) {
+        error = OldCdna ? rj_arith_v_fma_f32_w32(flags, block_exec_mask, arithmetic, out, x, y, &z,
                                                  nullptr)
                         : rj_arith_v_fma_f32_w32_gfx12(flags, block_exec_mask, arithmetic, out, x,
-                                                       y, z, nullptr);
+                                                       y, &z, nullptr);
       } else if constexpr (Op == Operation::Add) {
         error = OldCdna
                     ? rj_arith_v_add_f32_w32(flags, block_exec_mask, arithmetic, out, x, y, nullptr)

@@ -5,6 +5,7 @@
 #include "common/cpu.h"
 #include "common/semantics.h"
 #include "fp/fp64_impl.h"
+#include "fp/reference.h"
 #include "rj_arith/detail/rj_arith_common.h"
 #include "rj_arith/detail/rj_arith_fp.h"
 
@@ -41,8 +42,11 @@ template <int Lanes, bool Exact = false, typename Call> void check_variant(Call 
           continue;
         }
         ASSERT_EQ(result, RJ_ARITH_SUCCESS);
-        EXPECT_EQ(dv[0][Lanes - 1], rounding == 1 ? 1U : 0U);
-        EXPECT_EQ(dv[1][Lanes - 1], 0x3ff00000U);
+        // Loose may retain host nearest rounding; other modes retain the guest result.
+        rocjitsu::arith::test::expect_fp(
+            uint64_t(dv[0][Lanes - 1]) | (uint64_t(dv[1][Lanes - 1]) << 32),
+            0x3ff0000000000000ULL | (rounding == 1 ? 1U : 0U), 64, semantics,
+            /*atol=*/0, /*rtol=*/1e-15);
         EXPECT_EQ(status, 0x1234U);
         for (int lane = 0; lane < Lanes - 1; ++lane) {
           EXPECT_EQ(dv[0][lane], 0x12345678U);

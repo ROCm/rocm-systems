@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 // Packed BF16 arithmetic and numeric selection reuse FP32/mixed BF16 SIMD paths.
+#include "fp/packed_bf16.h"
 #include "common/packed_alu.h"
 #include "common/validation.h"
 #include "fp/binary.h"
@@ -23,6 +24,7 @@ uint32_t operand(uint32_t word, uint32_t mode) {
 template <Operation Op>
 int run(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d,
         const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c) {
+  const bool compatibility = (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY;
   flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
   constexpr uint32_t c_flags =
       RJ_ARITH_PK_NEG_LO_C | RJ_ARITH_PK_NEG_HI_C | RJ_ARITH_PK_LO_C_HIGH | RJ_ARITH_PK_HI_C_LOW;
@@ -52,6 +54,29 @@ int run(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d,
   }
 #endif
   const bool saturate = !selection && (flags & RJ_ARITH_FP16_OVFL);
+#if defined(RJ_ARITH_HAVE_X86_64_V3) || defined(RJ_ARITH_HAVE_X86_64_V4)
+  if constexpr (!selection) {
+    if (!compatibility) {
+      constexpr auto operation = Op == Operation::Add   ? rocjitsu::arith::PackedBf16::Add
+                                 : Op == Operation::Mul ? rocjitsu::arith::PackedBf16::Mul
+                                                        : rocjitsu::arith::PackedBf16::Fma;
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+      if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+        rocjitsu::arith::packed_bf16_x86_64_v4(operation, saturate, exec_mask, uint32_t(mode), d[0],
+                                               a[0], b[0], c ? c[0] : nullptr);
+        return RJ_ARITH_SUCCESS;
+      }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+      if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+        rocjitsu::arith::packed_bf16_x86_64_v3(operation, saturate, exec_mask, uint32_t(mode), d[0],
+                                               a[0], b[0], c ? c[0] : nullptr);
+        return RJ_ARITH_SUCCESS;
+      }
+#endif
+    }
+  }
+#endif
   flags &= ~(RJ_ARITH_FP_ROUND_MASK | RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
              RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS | RJ_ARITH_FP16_OVFL);
   uint32_t packed[32] = {};
@@ -83,7 +108,11 @@ int run(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d,
         result[lane] >>= 16;
       }
     } else {
-      error = rj_arith_v_fma_mixlo_bf16_w32(flags, exec_mask, 0, &pd, &pa, &pb, &pc, nullptr);
+      // Keep the composed operation's inherited compensated BF16 rounding in Compatibility.
+      const uint64_t numeric_flags =
+          compatibility ? flags | RJ_ARITH_SEMANTICS_COMPATIBILITY : flags;
+      error =
+          rj_arith_v_fma_mixlo_bf16_w32(numeric_flags, exec_mask, 0, &pd, &pa, &pb, &pc, nullptr);
     }
     if (error) {
       return error;

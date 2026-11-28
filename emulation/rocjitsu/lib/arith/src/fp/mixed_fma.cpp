@@ -51,11 +51,20 @@ int mixed_fma(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags, ui
   if (!exec_mask) {
     return RJ_ARITH_SUCCESS;
   }
+  // Loose uses host nearest rounding; strict and Compatibility retain guest ROUND.
+  if ((flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_LOOSE) {
+    flags &= ~RJ_ARITH_FP_ROUND_MASK;
+  }
   bool exact = rocjitsu::arith::is_exact(flags);
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
-  if (exact && rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
-    rocjitsu::arith::mixed_fma_exact_x86_64_v4(Dst, Rdna3, flags, exec_mask,
-                                               uint32_t(instruction_flags), d[0], a[0], b[0], c[0]);
+  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+    if (exact || (flags & RJ_ARITH_FP_ROUND_MASK)) {
+      rocjitsu::arith::mixed_fma_exact_x86_64_v4(
+          Dst, Rdna3, flags, exec_mask, uint32_t(instruction_flags), d[0], a[0], b[0], c[0]);
+    } else {
+      rocjitsu::arith::mixed_fma_loose_x86_64_v4(
+          Dst, Rdna3, flags, exec_mask, uint32_t(instruction_flags), d[0], a[0], b[0], c[0]);
+    }
     return RJ_ARITH_SUCCESS;
   }
 #endif
@@ -84,15 +93,14 @@ int mixed_fma(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags, ui
         rocjitsu::arith::mixed_fma_float_x86_64_v3(exec_mask, instruction_flags, d[0], a[0], b[0],
                                                    c[0]);
       }
-    } else if (flags & (RJ_ARITH_FP_FLUSH_INPUT_DENORMALS | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS |
-                        RJ_ARITH_FP_DX10_CLAMP_OFF | RJ_ARITH_FP_INPUT_DENORMALS_F16_MASK)) {
+    } else if (flags & RJ_ARITH_FP_ROUND_MASK) {
       rocjitsu::arith::mixed_fma_half_guest_x86_64_v3(Dst == rocjitsu::arith::MixedFma::High, flags,
                                                       exec_mask, instruction_flags, d[0], a[0],
                                                       b[0], c[0]);
     } else {
-      rocjitsu::arith::mixed_fma_half_x86_64_v3(Dst == rocjitsu::arith::MixedFma::High,
-                                                flags & RJ_ARITH_FP16_OVFL, exec_mask,
-                                                instruction_flags, d[0], a[0], b[0], c[0]);
+      rocjitsu::arith::mixed_fma_half_x86_64_v3(Dst == rocjitsu::arith::MixedFma::High, flags,
+                                                exec_mask, instruction_flags, d[0], a[0], b[0],
+                                                c[0]);
     }
     return RJ_ARITH_SUCCESS;
   }

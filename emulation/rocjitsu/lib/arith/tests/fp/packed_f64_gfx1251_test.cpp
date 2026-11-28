@@ -54,12 +54,19 @@ template <int Op> void arithmetic() {
     }
   }
   for (int reg : {0, 4, 8}) {
-    input.v[reg][0] = 0x1234U;
+    input.v[reg][0] = 0x1234U + reg;
     input.v[reg + 1][0] = 0x7ff80000U;
     input.v[reg][1] = 0;
     input.v[reg + 1][1] = 0x7ff00000U;
     input.v[reg][2] = 0;
     input.v[reg + 1][2] = reg ? 0 : 0x80000000U;
+  }
+  if constexpr (Op == 2) {
+    // The inherited FMA model prioritizes invalid 0*Inf over C's quiet NaN.
+    input.v[0][3] = input.v[1][3] = input.v[4][3] = 0;
+    input.v[5][3] = 0x7ff00000U;
+    input.v[8][3] = 0xabcdU;
+    input.v[9][3] = 0x7ff80000U;
   }
   const auto cpus = supported_cpu_levels();
   for (uint64_t mode : {0U, RJ_ARITH_PK_NEG_LO_A | RJ_ARITH_PK_NEG_HI_B, RJ_ARITH_PK_CLAMP,
@@ -138,6 +145,20 @@ template <int Op> void arithmetic() {
                                        : read(input, aliasing_offset + 2 * element, lane);
                 if (std::isnan(reference)) {
                   EXPECT_TRUE(std::isnan(value));
+                  if constexpr (Op < 3) {
+                    // Compatibility retains A's payload even when packed arithmetic calls
+                    // a public entry point whose Loose path permits native NaN selection.
+                    if (semantics == RJ_ARITH_SEMANTICS_COMPATIBILITY && mode == 0 &&
+                        (exec_mask & 1) && element == 0 && lane == 0) {
+                      EXPECT_EQ(std::bit_cast<uint64_t>(value), 0x7ff8000000001234ULL);
+                    }
+                  }
+                  if constexpr (Op == 2) {
+                    if (semantics == RJ_ARITH_SEMANTICS_COMPATIBILITY && mode == 0 &&
+                        (exec_mask & 8) && element == 0 && lane == 3) {
+                      EXPECT_EQ(std::bit_cast<uint64_t>(value), 0xfff8000000000000ULL);
+                    }
+                  }
                 } else if (std::isinf(reference)) {
                   EXPECT_EQ(value, reference);
                 } else if (reference == 0) {

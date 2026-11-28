@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 // FP32/FP64 scaling by powers of two with guest rounding and denormal policies.
-// Operation selectors and backend declarations shared by dispatch and SIMD code.
+// Backend declarations shared by dispatch and SIMD code.
 
 #pragma once
 
@@ -43,16 +43,10 @@ void ldexp_f64_store_x86_64_v3(uint32_t exec_mask, uint32_t *const *d,
 void ldexp_f64_store_x86_64_v4(uint32_t exec_mask, uint32_t *const *d,
                                const uint32_t result[2][32]);
 
-// Default denormal policy keeps the original SIMD kernels; guest variants
-// additionally implement explicit input/output flushing.
-void ldexp_x86_64_v3(bool fp64, uint32_t exec_mask, uint32_t instruction_flags, uint32_t *const *d,
-                     const uint32_t *const *a, const uint32_t *b);
-
-// Scale FP32/FP64 by powers of two. Preserve destination lanes outside exec_mask.
-// Requires the named CPU features and validated instruction controls.
-void ldexp_guest_x86_64_v3(bool fp64, uint64_t flags, uint32_t exec_mask,
-                           uint32_t instruction_flags, uint32_t *const *d, const uint32_t *const *a,
-                           const uint32_t *b);
+// Scale FP64 with nearest rounding and guest denormal/output controls. Normal scales and
+// nonfinite inputs use exponent-only SIMD; unusual ranges remain vectorized too.
+void ldexp_f64_loose_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a, const uint32_t *b);
 
 // Scale FP32/FP64 by powers of two. Preserve destination lanes outside exec_mask.
 // Requires the named CPU features and validated instruction controls.

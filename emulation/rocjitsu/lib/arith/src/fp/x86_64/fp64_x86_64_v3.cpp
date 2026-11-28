@@ -10,6 +10,7 @@
 #include "fp/fp64_round.h"
 #include "fp/x86_64/minmax_x86_64_v3.h"
 #include "math/x86_64/fract_x86_64_v3.h"
+#include "rj_arith/detail/rj_arith_common.h"
 #include "rj_arith/detail/rj_arith_fp.h"
 
 #include <immintrin.h>
@@ -279,10 +280,13 @@ void run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
          bool quiet_snan, bool cdna) {
   uint32_t result[2][32];
   // A NaN source or an invalid operation always yields a NaN. Such results are rare, so
-  // ADD/MUL/FMA re-evaluate with NaN priority only when the host produced one.
+  // Strict/Compatibility ADD/MUL/FMA repair priority only when the host produced NaNs;
+  // Loose keeps the native first pass.
   if (evaluate<Op, false, NativeMath>(flags, mode, a, b, c, result, quiet_snan, cdna)) {
     if constexpr (is_arithmetic(Op)) {
-      evaluate<Op, true, NativeMath>(flags, mode, a, b, c, result, quiet_snan, cdna);
+      if ((flags & RJ_ARITH_SEMANTICS_MASK) != RJ_ARITH_SEMANTICS_LOOSE) {
+        evaluate<Op, true, NativeMath>(flags, mode, a, b, c, result, quiet_snan, cdna);
+      }
     }
   }
   // Source halves can alias either output half, so delay all masked writes.

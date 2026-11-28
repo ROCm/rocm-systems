@@ -53,7 +53,7 @@ inline __m256i narrow_mixed_half(__m256 value, uint64_t flags) {
 }
 
 // Apply CLAMP and optional directed FP16 narrowing to the FP32 intermediate.
-// Nonfinite input lanes use baseline NaN handling, without a whole-vector fallback.
+// Compatibility repairs nonfinite input lanes; Loose keeps native NaN handling.
 inline __m256i mixed_mad_finish(MixedFma destination, uint64_t flags, uint32_t mode, __m256 value,
                                 __m256 x, __m256 y, __m256 z, const uint32_t *a, const uint32_t *b,
                                 const uint32_t *c) {
@@ -63,6 +63,9 @@ inline __m256i mixed_mad_finish(MixedFma destination, uint64_t flags, uint32_t m
   __m256i result = _mm256_castps_si256(value);
   if (destination != MixedFma::Float) {
     result = narrow_mixed_half(value, flags);
+  }
+  if ((flags & RJ_ARITH_SEMANTICS_MASK) != RJ_ARITH_SEMANTICS_COMPATIBILITY) {
+    return result;
   }
   const auto magnitude = _mm256_set1_epi32(INT32_MAX);
   auto largest =

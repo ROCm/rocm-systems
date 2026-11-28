@@ -20,7 +20,7 @@ extern "C" {
 // Guest rounding and input/output denormal controls are honored. IEEE is accepted but has
 // no arithmetic effect; CLAMP maps NaNs and negative zero to +0. FP16_OVFL is ignored.
 // MIN/MAX_NUM prefer a number over a NaN, canonicalize two NaNs, and choose -0/+0 for zero ties.
-// Compatibility preserves the inherited model through Loose. Mode 1 may fall back to Loose;
+// Compatibility preserves the inherited arithmetic and NaN policy. Mode 1 may fall back to Loose;
 // strict mode 2 is unsupported and mode 3 returns UNSUPPORTED_FP_STATUS. FP status is unused
 // in supported modes. Host FP controls must have their default values and are never changed.
 int rj_arith_v_pk_add_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
@@ -65,9 +65,11 @@ int rj_arith_v_mad_legacy_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t i
 // gfx1250 mixed BF16/FP32 FMA: one VGPR per operand, Wave32. MIX_BF16_A/B/C
 // select BF16 in the half selected by ALU_HIGH_A/B/C; other sources are FP32.
 // Supports source ABS/NEG and CLAMP. MIXLO/MIXHI preserve the other D half.
-// Loose, allow-Loose and Compatibility retain the inherited host-FMA model for
-// FP32 output, and compensated FP64 arithmetic with guest BF16 rounding for
-// BF16 output. Strict exact modes are unsupported; FP status is unchanged.
+// Compatibility retains host FMA for FP32 output and compensated FP64 arithmetic
+// with guest BF16 rounding for BF16 output. Loose and allow-Loose may instead
+// round through FP32 before nearest-even BF16 narrowing, ignoring guest ROUND.
+// Strict exact modes are unsupported;
+// FP status is unchanged.
 // Denormal, IEEE and FP16_OVFL controls are accepted and ignored. FP32 output
 // ignores guest rounding. CLAMP maps NaNs to zero.
 int rj_arith_v_fma_mix_f32_bf16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
@@ -110,8 +112,9 @@ int rj_arith_v_mul_dx9_zero_f32_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
                                             const uint32_t *const *a, const uint32_t *const *b,
                                             uint32_t *excp_flag_user);
 
-// Fused division post-scaling: compute A*B+C and apply a power-of-two scale
-// before the single guest rounding (RJ_ARITH_FP_ROUND_MASK). A set lane bit in condition (the
+// Fused division post-scaling: exact and Compatibility arithmetic scale A*B+C
+// before guest rounding (RJ_ARITH_FP_ROUND_MASK). Loose may round the FMA before
+// scaling, including intermediate overflow or underflow. A set bit in condition (the
 // implicit wave32 VCC input) selects +64/+128 when C's modified encoded exponent
 // exceeds its bias, and -64/-128 otherwise, for FP32/FP64 respectively.
 // Supports all source ABS/NEG, OMOD and CLAMP, loose and empirical exact semantics.
@@ -124,8 +127,8 @@ int rj_arith_v_mul_dx9_zero_f32_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
 // with output flushing or directed rounding. Loose semantics leave FP status unchanged.
 // Active OMOD rounds at normal precision before
 // flushing tiny results to +0, then applies the output scale and clamp.
-// RDNA3 accepts DX10_CLAMP_OFF to preserve NaNs under CLAMP. RDNA3 propagates
-// selected signaling NaNs with IEEE clear and quiets them with IEEE set.
+// RDNA3 accepts DX10_CLAMP_OFF to preserve NaNs under CLAMP. Exact/Compatibility
+// propagate selected signaling NaNs with IEEE clear and quiet them with IEEE set.
 // The _gfx12 variants retain their existing quieting behavior.
 // FP64 operands use low/high VGPR pairs, with D1 winning when D0/D1 alias.
 // Supports every EXEC mask and whole-register alias; zero effective EXEC permits
@@ -442,7 +445,7 @@ int rj_arith_v_div_fixup_f64_w64_gfx950(uint64_t flags, uint64_t exec_mask,
 // gfx11 additionally accepts DX10_CLAMP_OFF. FP16 accepts FP16_OVFL: finite overflow
 // saturates to the signed maximum finite value before and after OMOD; true infinities
 // are preserved. FP16_OVFL has no effect on FP32.
-// Compatibility selects mode 2 for FP16/FP32 FMA variants; FP64 uses Loose.
+// Compatibility selects mode 2 for these FP16/FP32 FMA variants.
 // gfx12 accepts IEEE_MODE without changing NaN quieting or OMOD gating.
 // gfx11 disables OMOD when IEEE_MODE is set or output denormals are preserved.
 
@@ -453,8 +456,8 @@ int rj_arith_v_div_fixup_f64_w64_gfx950(uint64_t flags, uint64_t exec_mask,
 // modifiers and RJ_ARITH_FP16_OVFL. Preserves the other D half and inactive lanes.
 // Arithmetic rounds to FP16 before OMOD; active OMOD flushes tiny arithmetic
 // results to +0 and newly tiny scaled results to signed zero. CLAMP is last.
-// Exact empirical semantics follow rocjitsu's guest-rounding model,
-// including NaN payload priority.
+// Exact and Compatibility follow rocjitsu's guest-rounding model and NaN
+// payload priority; Loose may use host nearest rounding regardless of guest ROUND.
 // FMA/FMAC/FMAMK/FMAAK without _gfx12 model RDNA3; _gfx12 variants model RDNA4.
 // Both accept guest rounding, input/output-denormal flushing and IEEE mode. RDNA3 gates
 // OMOD on flushed outputs and IEEE being clear, and its exact path preserves
@@ -663,12 +666,12 @@ int rj_arith_v_fmaak_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t 
 // Packed FP16 FMA (RDNA3 without _gfx12; RDNA4 with _gfx12): two independent fused results per
 // lane. All RJ_ARITH_PK_* flags below are supported. With no flags, corresponding input halves are
 // multiplied and added. Each result rounds to FP16; CLAMP applies last. Supports RJ_ARITH_FP16_OVFL
-// and empirical exact semantics with guest rounding, input/output flushing and IEEE mode. Directed
-// rounding uses the scalar integer-intermediate path. RDNA3 supports RJ_ARITH_FP_DX10_CLAMP_OFF;
-// that mode also uses the scalar path to preserve NaNs under CLAMP. RDNA3 preserves selected
-// signaling NaNs with IEEE mode off; RDNA4 quiets them. Both halves use the original inputs,
-// including when D aliases A/B/C. RDNA3 FP status reporting is unsupported;
-// RDNA4 reporting requires nearest-even rounding and preserved denormals.
+// and empirical exact semantics with guest rounding, input/output flushing and IEEE mode.
+// Loose may ignore guest ROUND; exact directed rounding uses the integer-intermediate path. RDNA3
+// supports RJ_ARITH_FP_DX10_CLAMP_OFF; that mode also uses the scalar path to preserve NaNs under
+// CLAMP. RDNA3 preserves selected signaling NaNs with IEEE mode off; RDNA4 quiets them. Both halves
+// use the original inputs, including when D aliases A/B/C. RDNA3 FP status reporting is
+// unsupported; RDNA4 reporting requires nearest-even rounding and preserved denormals.
 int rj_arith_v_pk_fma_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                               uint32_t *const *d, const uint32_t *const *a,
                               const uint32_t *const *b, const uint32_t *const *c,
@@ -1023,19 +1026,20 @@ int rj_arith_v_mul_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t in
                                  const uint32_t *const *b, uint32_t *excp_flag_user);
 
 // FP64 arithmetic: two VGPRs per operand, holding each lane's low/high words.
-// Supports ALU ABS/NEG on present sources, OMOD and CLAMP. One numeric model serves
-// Loose and bit-exact semantics: the gfx1201 and gfx1100 captures match it, so the
-// RDNA3 and _gfx12 entry points accept mode 2 and resolve Compatibility to mode 2.
+// Supports ALU ABS/NEG on present sources, OMOD and CLAMP. The exact arithmetic
+// matches gfx1201 and gfx1100 captures: RDNA3 and _gfx12 accept mode 2 and resolve
+// Compatibility to mode 2.
 // Mode 3 returns UNSUPPORTED_FP_STATUS. The _gfx10 FMA entry (RDNA2) is loose-only.
-// Guest RJ_ARITH_FP_ROUND_* controls finite arithmetic and output scaling
-// without changing host floating-point controls.
+// Exact and Compatibility honor guest RJ_ARITH_FP_ROUND_* for finite arithmetic
+// and output scaling without changing host controls. Loose may use host nearest rounding.
 // Host nearest-even rounding and enabled denormals are required. Whole VGPR
 // aliases may cross operand halves; sources are read before destination writes.
 // ADD/MUL/FMA use APIs without _gfx12 for RDNA3 and _gfx12 variants for RDNA4.
 // RDNA3 ignores OMOD when output denormals are preserved or RJ_ARITH_FP_IEEE_MODE is
 // set; RDNA4 applies it regardless. These three families accept guest input/output
-// denormal flushing, also in Wave64. NaN results take the first NaN source in
-// operand order, quieted; RDNA3 keeps signaling NaNs with IEEE clear.
+// denormal flushing, also in Wave64. Exact and Compatibility take NaNs in source
+// order, quieted; RDNA3 keeps signaling NaNs with IEEE clear. Loose may use native
+// NaN selection/quieting and invalid-product precedence, differing across CPU paths.
 // Output flushing and OMOD test tininess after rounding: a MUL or FMA result that
 // reaches minimum normal only through subnormal rounding is still flushed.
 // CLAMP maps NaNs to +0; RDNA3 preserves NaNs with RJ_ARITH_FP_DX10_CLAMP_OFF.
@@ -2283,7 +2287,8 @@ int rj_arith_v_fmaak_f64_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_
                                      uint32_t *const *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint64_t literal, uint32_t *state);
 
-// CDNA FP64 arithmetic retains inherited quieting. MUL uses exponent-step OMOD;
+// CDNA FP64 Compatibility retains inherited quieting; Loose may use native NaNs.
+// MUL uses exponent-step OMOD;
 // FMA/FMAC flush the rounded core, round OMOD, then canonicalize tiny scaled results.
 // gfx942 and gfx950 support empirical exact without FP status; gfx1250 remains Loose-only.
 int rj_arith_v_mul_f64_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,

@@ -37,7 +37,7 @@ enum class Fp64 {
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
 // Evaluate FP64 arithmetic. Preserve destination lanes outside exec_mask.
 // Requires the named CPU features and validated instruction controls. ADD/MUL/FMA select NaNs
-// in source order; NaN sources are quieted unless quiet_snan is clear.
+// in source order except in Loose; sources are quieted unless quiet_snan is clear.
 void fp64_x86_64_v3(Fp64 op, uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
                     const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c,
                     bool quiet_snan = true, bool native_math = false, bool cdna = false);

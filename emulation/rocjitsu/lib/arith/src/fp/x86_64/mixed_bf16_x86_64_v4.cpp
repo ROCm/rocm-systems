@@ -14,7 +14,8 @@ void rocjitsu::arith::mixed_bf16_x86_64_v4(MixedFma destination, uint64_t flags,
                                            const uint32_t *b, const uint32_t *c) {
   const bool clamp = mode & RJ_ARITH_ALU_CLAMP;
   const unsigned rounding = unsigned((flags & RJ_ARITH_FP_ROUND_MASK) >> 24);
-  if (destination == MixedFma::Float) {
+  const bool loose = (flags & RJ_ARITH_SEMANTICS_MASK) != RJ_ARITH_SEMANTICS_COMPATIBILITY;
+  if (loose || destination == MixedFma::Float) {
     auto input = [](const uint32_t *source, uint32_t mode) {
       auto bits = _mm512_loadu_si512(source);
       if (mode & RJ_ARITH_MIX_BF16_A) {
@@ -36,9 +37,11 @@ void rocjitsu::arith::mixed_bf16_x86_64_v4(MixedFma destination, uint64_t flags,
       if (clamp) {
         result = _mm512_min_ps(_mm512_max_ps(result, _mm512_setzero_ps()), _mm512_set1_ps(1));
       }
-      unsigned special = (_mm512_fpclass_ps_mask(x, 0x99) | _mm512_fpclass_ps_mask(y, 0x99) |
-                          _mm512_fpclass_ps_mask(z, 0x99)) &
-                         (exec_mask >> lane);
+      unsigned special = !loose
+                             ? (_mm512_fpclass_ps_mask(x, 0x99) | _mm512_fpclass_ps_mask(y, 0x99) |
+                                _mm512_fpclass_ps_mask(z, 0x99)) &
+                                   (exec_mask >> lane)
+                             : 0;
       if (special) {
         // A lone NaN with two finite operands has unambiguous hardware FMA payload.
         auto nx = _mm512_fpclass_ps_mask(x, 0x81), ny = _mm512_fpclass_ps_mask(y, 0x81),
@@ -59,7 +62,25 @@ void rocjitsu::arith::mixed_bf16_x86_64_v4(MixedFma destination, uint64_t flags,
         }
         result = _mm512_load_ps(out);
       }
-      _mm512_mask_storeu_ps(d + lane, __mmask16(exec_mask >> lane), result);
+      auto words = _mm512_castps_si512(result);
+      if (destination != MixedFma::Float) {
+        // Integer nearest-even narrowing avoids a BF16-only CPU specialization.
+        auto increment =
+            _mm512_add_epi32(_mm512_set1_epi32(0x7fff),
+                             _mm512_and_si512(_mm512_srli_epi32(words, 16), _mm512_set1_epi32(1)));
+        auto rounded = _mm512_srli_epi32(_mm512_add_epi32(words, increment), 16);
+        const auto nan = _mm512_cmpgt_epi32_mask(
+            _mm512_and_si512(words, _mm512_set1_epi32(INT32_MAX)), _mm512_set1_epi32(0x7f800000));
+        words = _mm512_mask_mov_epi32(
+            rounded, nan, _mm512_or_si512(_mm512_srli_epi32(words, 16), _mm512_set1_epi32(0x40)));
+        const bool high = destination == MixedFma::High;
+        if (high) {
+          words = _mm512_slli_epi32(words, 16);
+        }
+        words = _mm512_or_si512(words, _mm512_and_si512(_mm512_loadu_si512(d + lane),
+                                                        _mm512_set1_epi32(high ? 0xffff : -65536)));
+      }
+      _mm512_mask_storeu_epi32(d + lane, __mmask16(exec_mask >> lane), words);
     }
     return;
   }

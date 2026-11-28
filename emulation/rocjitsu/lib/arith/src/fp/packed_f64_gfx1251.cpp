@@ -49,6 +49,7 @@ int packed(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d
   constexpr uint64_t supported = RJ_ARITH_PK_NEG_LO_A | RJ_ARITH_PK_NEG_LO_B |
                                  RJ_ARITH_PK_NEG_HI_A | RJ_ARITH_PK_NEG_HI_B | RJ_ARITH_PK_CLAMP |
                                  (fma ? RJ_ARITH_PK_NEG_LO_C | RJ_ARITH_PK_NEG_HI_C : 0);
+  const bool compatibility = (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY;
   flags = resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
   if (int error =
           validate(flags, mode & ~supported,
@@ -67,6 +68,9 @@ int packed(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d
   }
   // The inherited model is not newly empirically qualified; mode1 uses its allowed Loose fallback.
   flags = (flags & ~RJ_ARITH_SEMANTICS_MASK) | RJ_ARITH_SEMANTICS_LOOSE;
+  // Preserve the composed arithmetic's inherited NaN policy in Compatibility.
+  const uint64_t numeric_flags =
+      compatibility ? (flags & ~RJ_ARITH_SEMANTICS_MASK) | RJ_ARITH_SEMANTICS_COMPATIBILITY : flags;
   uint32_t words[4][32];
   uint32_t *result[] = {words[0], words[1], words[2], words[3]};
   uint32_t ignored = 0;
@@ -78,20 +82,20 @@ int packed(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d
     // uninitialized inactive scratch. The public result is still strictly EXEC-masked.
     int status;
     if constexpr (Op == Fp64::Add) {
-      status = rj_arith_v_add_f64_w32_gfx12(flags, ~0U, modifiers, result + reg, a + reg, b + reg,
-                                            &ignored);
+      status = rj_arith_v_add_f64_w32_gfx12(numeric_flags, ~0U, modifiers, result + reg, a + reg,
+                                            b + reg, &ignored);
     } else if constexpr (Op == Fp64::Mul) {
-      status = rj_arith_v_mul_f64_w32_gfx1250(flags, ~0U, modifiers, result + reg, a + reg, b + reg,
-                                              &ignored);
+      status = rj_arith_v_mul_f64_w32_gfx1250(numeric_flags, ~0U, modifiers, result + reg, a + reg,
+                                              b + reg, &ignored);
     } else if constexpr (fma) {
-      status = rj_arith_v_fma_f64_w32_gfx1250(flags, ~0U, modifiers, result + reg, a + reg, b + reg,
-                                              c + reg, &ignored);
+      status = rj_arith_v_fma_f64_w32_gfx1250(numeric_flags, ~0U, modifiers, result + reg, a + reg,
+                                              b + reg, c + reg, &ignored);
     } else if constexpr (Op == Fp64::MinNum) {
-      status = rj_arith_v_min_num_f64_w32(flags, ~0U, modifiers, result + reg, a + reg, b + reg,
-                                          &ignored);
+      status = rj_arith_v_min_num_f64_w32(numeric_flags, ~0U, modifiers, result + reg, a + reg,
+                                          b + reg, &ignored);
     } else {
-      status = rj_arith_v_max_num_f64_w32(flags, ~0U, modifiers, result + reg, a + reg, b + reg,
-                                          &ignored);
+      status = rj_arith_v_max_num_f64_w32(numeric_flags, ~0U, modifiers, result + reg, a + reg,
+                                          b + reg, &ignored);
     }
     if (status != RJ_ARITH_SUCCESS) {
       return status;

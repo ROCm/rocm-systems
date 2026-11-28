@@ -9,6 +9,7 @@
 #include "common/validation.h"
 #include "fp/fma.h"
 #include "fp/half_fma_scalar.h"
+#include "fp/mixed_fma.h"
 #include "register/dpp.h"
 #include "rj_arith/detail/rj_arith_fp.h"
 
@@ -53,12 +54,27 @@ int run(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags, uint32_t
   if (exec_mask == 0) {
     return RJ_ARITH_SUCCESS;
   }
+  // Loose uses host nearest rounding; strict and Compatibility retain guest ROUND.
+  if ((flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_LOOSE) {
+    flags &= ~RJ_ARITH_FP_ROUND_MASK;
+  }
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
-  if ((rocjitsu::arith::is_exact(flags) || (flags & RJ_ARITH_FP_ROUND_MASK)) &&
-      rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+    const auto execute = [&](uint32_t mode, const uint32_t *x, const uint32_t *y,
+                             const uint32_t *z) {
+      if (rocjitsu::arith::is_exact(flags) || (flags & RJ_ARITH_FP_ROUND_MASK)) {
+        rocjitsu::arith::half_fma_exact_x86_64_v4(flags, exec_mask, mode, d[0], x, y, z,
+                                                  excp_flag_user, Rdna3);
+      } else {
+        const auto output = mode & RJ_ARITH_ALU_HIGH_D ? rocjitsu::arith::MixedFma::High
+                                                       : rocjitsu::arith::MixedFma::Low;
+        rocjitsu::arith::mixed_fma_loose_x86_64_v4(
+            output, Rdna3, flags, exec_mask,
+            mode | RJ_ARITH_MIX_F16_A | RJ_ARITH_MIX_F16_B | RJ_ARITH_MIX_F16_C, d[0], x, y, z);
+      }
+    };
     if constexpr (Operands == rocjitsu::arith::FmaOperands::Registers) {
-      rocjitsu::arith::half_fma_exact_x86_64_v4(flags, exec_mask, uint32_t(instruction_flags), d[0],
-                                                a[0], b[0], c[0], excp_flag_user, Rdna3);
+      execute(uint32_t(instruction_flags), a[0], b[0], c[0]);
       return RJ_ARITH_SUCCESS;
     } else {
       // Present the literal as an ordinary SIMD operand; FMAMK moves the original B selector to
@@ -73,9 +89,7 @@ int run(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags, uint32_t
         modifiers = (modifiers & ~RJ_ARITH_ALU_HIGH_B) |
                     ((modifiers & RJ_ARITH_ALU_HIGH_B) ? RJ_ARITH_ALU_HIGH_C : 0);
       }
-      rocjitsu::arith::half_fma_exact_x86_64_v4(flags, exec_mask, modifiers, d[0], a[0],
-                                                multiply ? broadcast : b[0],
-                                                multiply ? b[0] : broadcast, excp_flag_user, Rdna3);
+      execute(modifiers, a[0], multiply ? broadcast : b[0], multiply ? b[0] : broadcast);
       return RJ_ARITH_SUCCESS;
     }
   }

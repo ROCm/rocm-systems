@@ -1,21 +1,25 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// AVX-512 bit-exact mixed-precision FMA with per-lane scalar repair.
+// AVX-512 mixed-precision FMA with shared decoding and semantics-specific rounding.
+// Loose uses native FP32 FMA; exact arithmetic retains lane-local scalar repair.
 
 #include "common/compiler.h"
 #include "common/validation.h"
+#include "common/x86_64/alu_x86_64_v4.h"
 #include "fp/mixed_fma.h"
 #include "fp/mixed_fma_control.h"
 #include "fp/scalar_repair.h"
 #include "fp/x86_64/fma_exact_x86_64_v4.h"
+#include "fp/x86_64/loose_half_output_x86_64_v4.h"
 
 namespace rocjitsu::arith {
 
-// Implement the exact mixed-FMA contract in fp/mixed_fma.h with AVX-512.
-void mixed_fma_exact_x86_64_v4(MixedFma destination, bool rdna3, uint64_t flags, uint32_t exec_mask,
-                               uint32_t mode, uint32_t *d, const uint32_t *a, const uint32_t *b,
-                               const uint32_t *c) {
+// Apply validated mixed-FMA controls, preserving aliases and inactive destination storage.
+template <bool Exact>
+static void mixed_fma_x86_64_v4_impl(MixedFma destination, bool rdna3, uint64_t flags,
+                                     uint32_t exec_mask, uint32_t mode, uint32_t *d,
+                                     const uint32_t *a, const uint32_t *b, const uint32_t *c) {
   alignas(64) uint32_t result[32];
   const uint32_t *inputs[] = {a, b, c};
   const unsigned rounding = unsigned((flags & RJ_ARITH_FP_ROUND_MASK) >> 24);
@@ -49,7 +53,24 @@ void mixed_fma_exact_x86_64_v4(MixedFma destination, bool rdna3, uint64_t flags,
       values[operand] = prepare_fma_input(bits, input_flags, source_mode, 0, bad);
     }
     __m512i out;
-    if (destination == MixedFma::Float) {
+    if constexpr (!Exact) {
+      auto value = _mm512_fmadd_ps(values[0], values[1], values[2]);
+      if (destination == MixedFma::Float) {
+        if (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) {
+          value = flush_denorm_f32(value);
+        }
+        if (mode & RJ_ARITH_ALU_CLAMP) {
+          value = clamp_f32(value, flags & RJ_ARITH_FP_DX10_CLAMP_OFF);
+        }
+        out = _mm512_castps_si512(value);
+      } else {
+        auto half = loose_half_output(value, flags, mode);
+        const int shift = destination == MixedFma::High ? 16 : 0;
+        out = _mm512_or_si512(
+            _mm512_slli_epi32(half, shift),
+            _mm512_and_si512(_mm512_loadu_si512(d + lane), _mm512_set1_epi32(~(0xffffU << shift))));
+      }
+    } else if (destination == MixedFma::Float) {
       out = fma_result(values[0], values[1], values[2], flags, mode & RJ_ARITH_ALU_CLAMP, bad);
     } else {
       __m512 down, up;
@@ -83,26 +104,47 @@ void mixed_fma_exact_x86_64_v4(MixedFma destination, bool rdna3, uint64_t flags,
           _mm512_slli_epi32(half, shift),
           _mm512_and_si512(_mm512_loadu_si512(d + lane), _mm512_set1_epi32(~(0xffffU << shift))));
     }
-    // FP16 input conversion may have quieted a signaling NaN. Preserve the
-    // raw-source repair in that case; all-FP32 inputs retain their encodings.
-    if (bad && destination == MixedFma::Float &&
-        !(mode & (RJ_ARITH_MIX_F16_A | RJ_ARITH_MIX_F16_B | RJ_ARITH_MIX_F16_C))) {
-      out = fma_nan_operands(out, values[0], values[1], values[2], flags, mode, rdna3, bad);
-    }
-    _mm512_store_si512(result + lane, out);
-    bad &= __mmask16(exec_mask >> lane);
-    if (bad) {
-      for (; bad; bad &= bad - 1) {
-        int i = __builtin_ctz(bad);
-        result[lane + i] = repair_mixed_fma(destination, rdna3, flags, mode, a[lane + i],
-                                            b[lane + i], c[lane + i], d[lane + i]);
+    if constexpr (Exact) {
+      // FP16 input conversion may have quieted a signaling NaN. Preserve the
+      // raw-source repair in that case; all-FP32 inputs retain their encodings.
+      if (bad && destination == MixedFma::Float &&
+          !(mode & (RJ_ARITH_MIX_F16_A | RJ_ARITH_MIX_F16_B | RJ_ARITH_MIX_F16_C))) {
+        out = fma_nan_operands(out, values[0], values[1], values[2], flags, mode, rdna3, bad);
       }
+      _mm512_store_si512(result + lane, out);
+      bad &= __mmask16(exec_mask >> lane);
+      if (bad) {
+        for (; bad; bad &= bad - 1) {
+          int i = __builtin_ctz(bad);
+          result[lane + i] = repair_mixed_fma(destination, rdna3, flags, mode, a[lane + i],
+                                              b[lane + i], c[lane + i], d[lane + i]);
+        }
+      }
+    } else {
+      // One-VGPR outputs permit chunk-local publication for whole-register aliases.
+      _mm512_mask_storeu_epi32(d + lane, __mmask16(exec_mask >> lane), out);
     }
   }
-  for (int lane = 0; lane < 32; lane += 16) {
-    _mm512_mask_storeu_epi32(d + lane, __mmask16(exec_mask >> lane),
-                             _mm512_load_si512(result + lane));
+  if constexpr (Exact) {
+    for (int lane = 0; lane < 32; lane += 16) {
+      _mm512_mask_storeu_epi32(d + lane, __mmask16(exec_mask >> lane),
+                               _mm512_load_si512(result + lane));
+    }
   }
+}
+
+// Compute the guest-rounded result, repairing exceptional lanes when needed.
+void mixed_fma_exact_x86_64_v4(MixedFma destination, bool rdna3, uint64_t flags, uint32_t exec_mask,
+                               uint32_t mode, uint32_t *d, const uint32_t *a, const uint32_t *b,
+                               const uint32_t *c) {
+  mixed_fma_x86_64_v4_impl<true>(destination, rdna3, flags, exec_mask, mode, d, a, b, c);
+}
+
+// Compute a native FP32 FMA with the selected mixed-format destination policy.
+void mixed_fma_loose_x86_64_v4(MixedFma destination, bool rdna3, uint64_t flags, uint32_t exec_mask,
+                               uint32_t mode, uint32_t *d, const uint32_t *a, const uint32_t *b,
+                               const uint32_t *c) {
+  mixed_fma_x86_64_v4_impl<false>(destination, rdna3, flags, exec_mask, mode, d, a, b, c);
 }
 
 } // namespace rocjitsu::arith
