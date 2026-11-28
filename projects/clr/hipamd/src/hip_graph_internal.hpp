@@ -1160,6 +1160,9 @@ class GraphExecBase : public amd::ReferenceCountedObject, public Graph {
       }
     }
     parallel_streams_.clear();
+    if (lastLaunchDone_ != nullptr) {
+      lastLaunchDone_->release();
+    }
     std::scoped_lock lock(graphExecSetLock_);
     // Normally erased in hipGraphExecDestroy(), but child graph nodes use delete directly.
     graphExecSet_.erase(this);
@@ -1205,8 +1208,27 @@ class GraphExecBase : public amd::ReferenceCountedObject, public Graph {
   }
 
  protected:
+  //! Wait until the previous launch of this exec completed, on whichever stream it ran
+  void WaitForPreviousLaunch() {
+    if (lastLaunchDone_ != nullptr) {
+      lastLaunchDone_->awaitCompletion();
+      lastLaunchDone_->release();
+      lastLaunchDone_ = nullptr;
+    }
+  }
+  //! Keep the command whose completion ends this launch, for WaitForPreviousLaunch()
+  void SetLastLaunchDone(amd::Command* cmd) {
+    cmd->retain();
+    if (lastLaunchDone_ != nullptr) {
+      lastLaunchDone_->release();
+    }
+    lastLaunchDone_ = cmd;
+  }
+
   uint64_t flags_ = 0;
   bool repeatLaunch_ = false;
+  //! AutoFreeOnLaunch without direct dispatch: the command that ends the last launch
+  amd::Command* lastLaunchDone_ = nullptr;
   //! MemAlloc nodes of topoOrder_, in order. Filled by TopologicalOrder() at Init time.
   std::vector<GraphMemAllocNode*> memAllocNodes_;
   //! parallel streams per device
@@ -3616,10 +3638,12 @@ class GraphMemAllocNode final : public GraphNode {
       auto aligned_size = amd::alignUp(size_, dev_info.virtualMemAllocGranularityRecommended_);
       const bool relaunch = *mapped_ref_;
 
-      // On first launch remove stale VA reference; on re-launch sub_obj must persist
+      // On first launch replace a stale VA reference with the reservation; on re-launch sub_obj
+      // must persist. Without direct dispatch this runs on the worker thread, so the address
+      // stays registered until the mapping replaces it: other threads may look it up meanwhile.
       if (!relaunch) {
-        if (amd::MemObjMap::FindMemObj(va_->getSvmPtr())) {
-          amd::MemObjMap::RemoveMemObj(va_->getSvmPtr());
+        if (amd::MemObjMap::FindMemObj(va_->getSvmPtr()) != va_) {
+          amd::MemObjMap::ReplaceMemObj(va_->getSvmPtr(), va_);
         }
       }
 
@@ -3634,6 +3658,10 @@ class GraphMemAllocNode final : public GraphNode {
         // Report on the launching stream. Leave mapped_ref_ false so a later
         // launch retries allocation instead of treating this VA as mapped.
         static_cast<hip::Stream*>(queue())->SetAsyncError(hipErrorOutOfMemory);
+        if (!relaunch) {
+          // Nothing is mapped at the address, don't let lookups find it
+          amd::MemObjMap::RemoveMemObjIfEqual(va_->getSvmPtr(), va_);
+        }
         if (!AMD_DIRECT_DISPATCH) {
           WorkerThreadLock_.unlock();
         }
@@ -3664,6 +3692,9 @@ class GraphMemAllocNode final : public GraphNode {
                 *static_cast<amd::HostQueue*>(queue()), amd::Command::EventWaitList{},
                 va_->getSvmPtr(), sub_obj->getSize(), nullptr);
             device.submitVirtualMap(unmap_cmd);
+            // The unmap removed the address. Register the reservation again until the new
+            // mapping replaces it, so lookups on other threads don't miss it meanwhile.
+            amd::MemObjMap::ReplaceMemObj(va_->getSvmPtr(), va_);
           }
         }
         VirtualMapCommand::submit(device);

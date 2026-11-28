@@ -2030,6 +2030,12 @@ hipError_t GraphExecClassic::Run(hip::Stream* launch_stream) {
 
   if (flags_ & hipGraphInstantiateFlagAutoFreeOnLaunch) {
     if (firstNode != nullptr) {
+      if (!AMD_DIRECT_DISPATCH) {
+        // A worker thread may still execute the mem alloc and free nodes of the previous launch,
+        // on any stream. Let it finish before this thread releases the graph's memory and resets
+        // the node count.
+        WaitForPreviousLaunch();
+      }
       auto* parentGraph = firstNode->GetParentGraph();
       auto* pool = parentGraph->Device()->GetGraphMemoryPool();
       for (auto* node : memAllocNodes_) {
@@ -2107,6 +2113,9 @@ hipError_t GraphExecClassic::Run(hip::Stream* launch_stream) {
     return hipErrorInvalidHandle;
   }
   marker->enqueue();
+  if ((flags_ & hipGraphInstantiateFlagAutoFreeOnLaunch) && !AMD_DIRECT_DISPATCH) {
+    SetLastLaunchDone(marker);
+  }
   marker->release();
   return status;
 }
@@ -3731,6 +3740,12 @@ hipError_t GraphExecSegmented::Run(hip::Stream* launch_stream) {
 
   if (flags_ & hipGraphInstantiateFlagAutoFreeOnLaunch) {
     if (firstNode != nullptr) {
+      if (!AMD_DIRECT_DISPATCH) {
+        // A worker thread may still execute the mem alloc and free nodes of the previous launch,
+        // on any stream. Let it finish before this thread releases the graph's memory and resets
+        // the node count.
+        WaitForPreviousLaunch();
+      }
       auto* parentGraph = firstNode->GetParentGraph();
       auto* pool = parentGraph->Device()->GetGraphMemoryPool();
       for (auto* node : memAllocNodes_) {
@@ -3889,6 +3904,9 @@ hipError_t GraphExecSegmented::Run(hip::Stream* launch_stream) {
   // queue keeps the command alive until completion, when the callback fires.
   if (own_callback_cmd) {
     CallbackCommand->enqueue();
+  }
+  if ((flags_ & hipGraphInstantiateFlagAutoFreeOnLaunch) && !AMD_DIRECT_DISPATCH) {
+    SetLastLaunchDone(CallbackCommand);
   }
   CallbackCommand->release();
   return status;

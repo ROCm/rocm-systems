@@ -1551,6 +1551,12 @@ class MemObjMap : public AllStatic {
   //!< Remove an entry of mem object from the container
   static void RemoveMemObj(const void* k);
 
+  //!< Add the entry or replace the mem object of an existing one, in one step
+  static void ReplaceMemObj(const void* k, amd::Memory* v);
+
+  //!< Remove the entry if it holds the given mem object, in one step
+  static void RemoveMemObjIfEqual(const void* k, const amd::Memory* v);
+
   //!< Find the mem object based on the input pointer, outputs the offset
   static amd::Memory* FindMemObj(const void* k, size_t* offset = nullptr, Device* dev = nullptr);
   //!< Find any registered mem object whose range overlaps [ptr, ptr + size).

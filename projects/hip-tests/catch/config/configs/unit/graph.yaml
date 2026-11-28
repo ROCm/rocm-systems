@@ -2068,6 +2068,12 @@ graph:
   Unit_hipGraphAllocNodeMemReuse_CaptureEscapedUseAfterDestroy:
     <<: *level_default
     tags: [node]
+  Unit_hipGraphAllocNodeMemReuse_AutoFreeOnLaunch_CopyRightAfterLaunch:
+    <<: *level_default
+    tags: [node]
+  Unit_hipGraphAllocNodeMemReuse_AutoFreeOnLaunch_RelaunchBeforePreviousLaunchRuns:
+    <<: *level_default
+    tags: [node]
   Unit_hipGraph_SimpleGraphWithKernel_kernel_arg_prefetch:
     <<: *level_default
     tags: [exec]

@@ -9,8 +9,10 @@
 #include <hip_test_kernels.hh>
 #include <resource_guards.hh>
 #include <utils.hh>
-#include <thread>
+#include <algorithm>
 #include <atomic>
+#include <chrono>
+#include <thread>
 
 /**
  * @addtogroup hipGraphAllocNodeMemReuse hipGraphAllocNodeMemReuse
@@ -34,6 +36,8 @@ __global__ void verifyKernel(const float* buf, float expected, int64_t n, int* e
     atomicAdd(error, 1);
   }
 }
+
+__global__ void countKernel(int* counter) { atomicAdd(counter, 1); }
 
 // Busy-spin kernel: each thread loops `iters` times, reading/writing buf to
 // prevent the compiler from optimizing the loop away. Use a large iteration
@@ -1013,6 +1017,161 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_CaptureEscapedUseAfterDestroy) {
   HIP_CHECK(hipStreamSynchronize(stream));
   HIP_CHECK(hipDeviceGraphMemTrim(device));
   REQUIRE(queryGraphMem(device).usedCurrent == baseline);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Test to verify that the pointer of a captured hipMallocAsync stays valid for other calls while
+ *    the graph's mem alloc node runs. A graph with alloc -> memset -> fill kernel (no free node),
+ *    instantiated with hipGraphInstantiateFlagAutoFreeOnLaunch, is launched and a D2H copy from
+ *    the allocation is queued right after hipGraphLaunch returns, with no synchronization in
+ *    between. Both calls must succeed and the copy must read the kernel's values.
+ *  - Without direct dispatch (Windows) the alloc node runs on the runtime's worker thread and the
+ *    copy lands while it maps memory, so this fails there whenever the pointer is not registered
+ *    during the mapping. With direct dispatch the node runs inside hipGraphLaunch and it passes.
+ * Test source
+ * ------------------------
+ *  - /unit/graph/hipGraphAllocNodeMemReuse.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.18
+ */
+HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_AutoFreeOnLaunch_CopyRightAfterLaunch) {
+  const int device = 0;
+  HIP_CHECK(hipSetDevice(device));
+
+  StreamGuard stream_guard(Streams::created);
+  hipStream_t stream = stream_guard.stream();
+
+  constexpr size_t kAllocSize = 1024 * 1024;
+  constexpr size_t kCopySize = 4096;
+  constexpr int kIterations = 5;
+  int64_t numElems = static_cast<int64_t>(kAllocSize / sizeof(float));
+  int gridSize = static_cast<int>((numElems + kBlockSize - 1) / kBlockSize);
+
+  float* hostBuf = nullptr;
+  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&hostBuf), kCopySize, hipHostMallocDefault));
+
+  for (int i = 0; i < kIterations; ++i) {
+    const float fillValue = 1.0f + i;
+    HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+    float* dPtr = nullptr;
+    HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&dPtr), kAllocSize, stream));
+    HIP_CHECK(hipMemsetAsync(dPtr, 0, kAllocSize, stream));
+    fillKernel<<<gridSize, kBlockSize, 0, stream>>>(dPtr, fillValue, numElems);
+    hipGraph_t graph = nullptr;
+    HIP_CHECK(hipStreamEndCapture(stream, &graph));
+    hipGraphExec_t exec = nullptr;
+    HIP_CHECK(hipGraphInstantiateWithFlags(&exec, graph, hipGraphInstantiateFlagAutoFreeOnLaunch));
+
+    std::fill_n(hostBuf, kCopySize / sizeof(float), 0.0f);
+    HIP_CHECK(hipGraphLaunch(exec, stream));
+    HIP_CHECK(hipMemcpyAsync(hostBuf, dPtr, kCopySize, hipMemcpyDeviceToHost, stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+    for (size_t j = 0; j < kCopySize / sizeof(float); ++j) {
+      REQUIRE(hostBuf[j] == fillValue);
+    }
+
+    HIP_CHECK(hipFreeAsync(dPtr, stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipGraphExecDestroy(exec));
+    HIP_CHECK(hipGraphDestroy(graph));
+  }
+  HIP_CHECK(hipHostFree(hostBuf));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Test to verify that a graph instantiated with hipGraphInstantiateFlagAutoFreeOnLaunch can be
+ *    launched again before its previous launch has run. The launch stream first waits for an
+ *    event of another stream that is recorded behind a delay kernel, then the graph (alloc ->
+ *    fill kernel -> verify kernel -> count kernel, with or without a free node) is launched twice
+ *    back to back, the second time on the same stream or on a third stream that does not wait.
+ *    Both launches must succeed, run, and see the filled values.
+ *  - Without direct dispatch (Windows) the runtime's worker thread holds the first launch at the
+ *    event, so the second hipGraphLaunch runs while the first launch's alloc node is pending.
+ *    Without a free node, a runtime that releases the graph's memory and resets its allocation
+ *    count before that node has run fails the second launch with hipErrorInvalidValue. The
+ *    variant with a free node checks the same relaunch for a graph that frees its memory. The
+ *    relaunch on a third stream checks that the relaunch is ordered behind the previous launch of
+ *    the same exec, not only behind earlier work of its own stream.
+ * Test source
+ * ------------------------
+ *  - /unit/graph/hipGraphAllocNodeMemReuse.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.18
+ */
+HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_AutoFreeOnLaunch_RelaunchBeforePreviousLaunchRuns) {
+  const int device = 0;
+  HIP_CHECK(hipSetDevice(device));
+  const bool withFree = GENERATE(false, true);
+  const bool relaunchOnOtherStream = GENERATE(false, true);
+  INFO("free node in graph: " << withFree << ", relaunch on another stream: "
+                              << relaunchOnOtherStream);
+
+  StreamGuard stream_guard(Streams::created);
+  hipStream_t stream = stream_guard.stream();
+  StreamGuard other_guard(Streams::created);
+  hipStream_t other = other_guard.stream();
+  StreamGuard relaunch_guard(Streams::created);
+  hipStream_t relaunchStream = relaunchOnOtherStream ? relaunch_guard.stream() : stream;
+  hipEvent_t event = nullptr;
+  HIP_CHECK(hipEventCreateWithFlags(&event, hipEventDisableTiming));
+
+  constexpr size_t kAllocSize = 1024 * 1024;
+  int64_t numElems = static_cast<int64_t>(kAllocSize / sizeof(float));
+  int gridSize = static_cast<int>((numElems + kBlockSize - 1) / kBlockSize);
+  int* dErrors = nullptr;
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&dErrors), sizeof(int)));
+  HIP_CHECK(hipMemset(dErrors, 0, sizeof(int)));
+  int* dLaunches = nullptr;
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&dLaunches), sizeof(int)));
+  HIP_CHECK(hipMemset(dLaunches, 0, sizeof(int)));
+
+  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+  float* dPtr = nullptr;
+  HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&dPtr), kAllocSize, stream));
+  fillKernel<<<gridSize, kBlockSize, 0, stream>>>(dPtr, 7.0f, numElems);
+  verifyKernel<<<gridSize, kBlockSize, 0, stream>>>(dPtr, 7.0f, numElems, dErrors);
+  countKernel<<<1, 1, 0, stream>>>(dLaunches);
+  if (withFree) {
+    HIP_CHECK(hipFreeAsync(dPtr, stream));
+  }
+  hipGraph_t graph = nullptr;
+  HIP_CHECK(hipStreamEndCapture(stream, &graph));
+  hipGraphExec_t exec = nullptr;
+  HIP_CHECK(hipGraphInstantiateWithFlags(&exec, graph, hipGraphInstantiateFlagAutoFreeOnLaunch));
+
+  constexpr int kIterations = 3;
+  for (int i = 0; i < kIterations; ++i) {
+    LaunchDelayKernel(std::chrono::milliseconds(50), other);
+    HIP_CHECK(hipEventRecord(event, other));
+    HIP_CHECK(hipStreamWaitEvent(stream, event, 0));
+    HIP_CHECK(hipGraphLaunch(exec, stream));
+    HIP_CHECK(hipGraphLaunch(exec, relaunchStream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipStreamSynchronize(relaunchStream));
+  }
+
+  int errors = -1;
+  HIP_CHECK(hipMemcpy(&errors, dErrors, sizeof(int), hipMemcpyDeviceToHost));
+  REQUIRE(errors == 0);
+  int launches = 0;
+  HIP_CHECK(hipMemcpy(&launches, dLaunches, sizeof(int), hipMemcpyDeviceToHost));
+  REQUIRE(launches == 2 * kIterations);
+
+  if (!withFree) {
+    HIP_CHECK(hipFreeAsync(dPtr, stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+  }
+  HIP_CHECK(hipGraphExecDestroy(exec));
+  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipEventDestroy(event));
+  HIP_CHECK(hipFree(dErrors));
+  HIP_CHECK(hipFree(dLaunches));
 }
 
 /**
