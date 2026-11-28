@@ -633,6 +633,14 @@ TEST_F(SymKernelMaskTest, GenkOnlyCollectives_GenkDisabled_EntireMaskZeroed) {
   EXPECT_EQ(ncclSymkMask(comm_.get(), ncclFuncReduce, ncclDevSum, kTy, /*nElts=*/1024), 0u);
 }
 
+// RCCL never defines SYM_GENK (NCCL_BUILD_SYM_GENK, v2.32.6), so NCCL_SYM_GENK_ENABLE=1 is only a request: the
+// stub reports 0, which keeps the tuner's legacy-kernel re-check (tuning.cc) running for users who set it.
+TEST_F(SymKernelMicrotest, SymGenkEnable_RequestedWithoutSymGenkBuild_ReportsDisabled) {
+  ScopedHook loadParam(g_loadParam, ParamOverride({{"SYM_GENK_ENABLE", 1}}));
+  EXPECT_EQ(ncclParamSymGenkEnable(), 0);
+  EXPECT_EQ(ncclParamSymGenkEnable(), 0) << "the second call, after the one-time warning, must agree";
+}
+
 // The direct-NVLink (xGMI) gate moved from ncclSymkAvailable into the mask in v2.32.6; only Genk may survive it.
 TEST_F(SymKernelMaskTest, NotAllDirectNvlink_EveryNonGenkKernelCleared) {
   comm_->symmetricSupport = true;
