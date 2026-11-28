@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include <algorithm>
+
 #include <hip_test_common.hh>
 #include <hip_test_kernels.hh>
 
@@ -173,17 +175,40 @@ __global__ void kernelA(double* arrayA, size_t size) {
 }
 
 struct set_vector_args {
-  std::vector<double>& h_array;
+  double* h_array;
+  size_t size;
   double value;
 };
 
 static void set_vector(void* args) {
-  set_vector_args h_args{*(reinterpret_cast<set_vector_args*>(args))};
-  std::vector<double>& vec{h_args.h_array};
-  vec.assign(vec.size(), h_args.value);
+  const auto* h_args = reinterpret_cast<set_vector_args*>(args);
+  std::fill_n(h_args->h_array, h_args->size, h_args->value);
 }
 }  // namespace
 
+/**
+ * Test Description
+ * ------------------------
+ *    - Captures a host function that fills a host buffer, then H2D copy, kernel and D2H copy of
+ *      that buffer, launches the graph once and checks the result: the H2D copy must see what the
+ *      host function wrote, because it runs after it in stream order.
+ *
+ *      1. hipMallocAsync the device array.
+ *      2. Host function: fill the host array with 2.0.
+ *      3. H2D copy of the host array, kernelA doubles each element, D2H copy back.
+ *      4. hipFreeAsync; end capture, instantiate, launch, synchronize.
+ *      5. Every element must be 4.0.
+ *
+ *      The host array is pinned (hipHostMalloc), so the copy reads it when the copy runs on the
+ *      stream, after the host function. A pageable source is not guaranteed to be read after
+ *      earlier stream work: depending on size, device and settings, the runtime may copy it on
+ *      the CPU when the copy is issued, before the host function has filled it. CUDA does not
+ *      guarantee it either: with a pageable buffer this test fails on CUDA, with the first 2 MiB
+ *      coming back as 0 (ROCM-35063).
+ * Test source
+ * ------------------------
+ *    - unit/graph/hipLaunchHostFuncWithGraph.cc
+ */
 HIP_TEST_CASE(Unit_hipLaunchHostFunc_H2D_Kernel_D2H_Capture) {
   constexpr int numOfBlocks = 1024;
   constexpr int threadsPerBlock = 1024;
@@ -191,7 +216,10 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_H2D_Kernel_D2H_Capture) {
   constexpr double initValue = 2.0;
 
   double* d_arrayA = nullptr;
-  std::vector<double> h_array(arraySize);
+  // Pinned, so the H2D copy reads it in stream order (see the test description)
+  LinearAllocGuard<double> h_alloc(LinearAllocs::hipHostMalloc, arraySize * sizeof(double));
+  double* const h_array = h_alloc.host_ptr();
+  std::fill_n(h_array, arraySize, 0.0);
 
   // Guarded so the stream is destroyed during unwind if a check below throws.
   // Global-mode capture blocks allocation process-wide, so a leaked capture
@@ -207,11 +235,11 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_H2D_Kernel_D2H_Capture) {
                            captureStream));
 
   // Initialize host data via a host function in the stream
-  set_vector_args args{h_array, initValue};
+  set_vector_args args{h_array, arraySize, initValue};
   HIP_CHECK(hipLaunchHostFunc(captureStream, set_vector, &args));
 
   // HtoD copy
-  HIP_CHECK(hipMemcpyAsync(d_arrayA, h_array.data(), arraySize * sizeof(double),
+  HIP_CHECK(hipMemcpyAsync(d_arrayA, h_array, arraySize * sizeof(double),
                            hipMemcpyHostToDevice, captureStream));
 
   // KernelA only
@@ -219,7 +247,7 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_H2D_Kernel_D2H_Capture) {
   HIP_CHECK(hipGetLastError());
 
   // DtoH copy
-  HIP_CHECK(hipMemcpyAsync(h_array.data(), d_arrayA, arraySize * sizeof(double),
+  HIP_CHECK(hipMemcpyAsync(h_array, d_arrayA, arraySize * sizeof(double),
                            hipMemcpyDeviceToHost, captureStream));
 
   // Free device memory inside the graph
