@@ -22,18 +22,11 @@ if(HIP_PLATFORM MATCHES "amd")
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
 
-  set(OFFLOAD_ARCH_GENERIC_STR
-    --offload-arch=gfx9-generic
-    --offload-arch=gfx9-4-generic:sramecc+:xnack-
-    --offload-arch=gfx9-4-generic:sramecc-:xnack-
-    --offload-arch=gfx9-4-generic:sramecc+:xnack+
-    --offload-arch=gfx9-4-generic:sramecc-:xnack+
-    --offload-arch=gfx10-1-generic
-    --offload-arch=gfx10-3-generic
-    --offload-arch=gfx11-generic
-    --offload-arch=gfx11-7-generic
-    --offload-arch=gfx12-generic
-    --offload-arch=gfx12-5-generic)
+  include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/hip-tests-generic-targets.cmake")
+  hip_tests_get_generic_target_options(OFFLOAD_ARCH_GENERIC_STR GENERIC_TARGETS)
+  list(JOIN GENERIC_TARGETS "," _generic_target_ids)
+  # Pass the same image inventory to every consumer, including standalone tests.
+  add_compile_definitions(HIP_TESTS_GENERIC_TARGETS="${_generic_target_ids}")
 
   # ASAN is only supported on xnack+ offload archs; clang skips it on the other
   # generic targets and emits an -Woption-ignored warning. Suppress it under device
@@ -45,9 +38,9 @@ if(HIP_PLATFORM MATCHES "amd")
 
   set(DISABLE_GENERIC_TARGET_ONLY)
 
-  # Build hipSquareGenericTargetOnly to cover generic targets only
-  # Because default catch2 build will reference CMAKE_CXX_FLAGS that contains specific targets which will hijack generic
-  # target in hip-rt, we have to use custom build to contain generic targets only.
+  # Clear the architecture flags inherited from the common HIP build before
+  # adding generic targets, so an exact device target cannot mask generic
+  # code-object selection in these helper executables.
   if(BUILD_SHARED_LIBS) # Build hipGenericTargetOnly for shared libs only
     set(GENERIC_TARGET_ONLY_EXE hipSquareGenericTargetOnly)
     set(GENERIC_TARGET_ONLY_COMPRESSED_EXE hipSquareGenericTargetOnlyCompressed)
@@ -61,7 +54,9 @@ if(HIP_PLATFORM MATCHES "amd")
     add_executable(${GENERIC_TARGET_ONLY_EXE}
       hipSquareGenericTarget.cc
       $<TARGET_OBJECTS:Main_Object>)
-    target_compile_options(${GENERIC_TARGET_ONLY_EXE} PUBLIC -w ${OFFLOAD_ARCH_GENERIC_STR})
+    set_target_properties(${GENERIC_TARGET_ONLY_EXE} PROPERTIES HIP_ARCHITECTURES OFF)
+    target_compile_options(${GENERIC_TARGET_ONLY_EXE} PUBLIC
+      -w --no-offload-arch=all ${OFFLOAD_ARCH_GENERIC_STR})
     target_link_libraries(${GENERIC_TARGET_ONLY_EXE} hip::host hip::device)
     target_compile_definitions(${GENERIC_TARGET_ONLY_EXE} PRIVATE NO_GENERIC_TARGET_ONLY_TEST)
     if(NOT USE_PREBUILT_CATCH)
@@ -72,7 +67,9 @@ if(HIP_PLATFORM MATCHES "amd")
       hipSquareGenericTarget.cc
       $<TARGET_OBJECTS:Main_Object>)
     target_compile_definitions(${GENERIC_TARGET_ONLY_COMPRESSED_EXE} PRIVATE GENERIC_COMPRESSED NO_GENERIC_TARGET_ONLY_TEST)
-    target_compile_options(${GENERIC_TARGET_ONLY_COMPRESSED_EXE} PUBLIC --offload-compress -w ${OFFLOAD_ARCH_GENERIC_STR})
+    set_target_properties(${GENERIC_TARGET_ONLY_COMPRESSED_EXE} PROPERTIES HIP_ARCHITECTURES OFF)
+    target_compile_options(${GENERIC_TARGET_ONLY_COMPRESSED_EXE} PUBLIC
+      --offload-compress -w --no-offload-arch=all ${OFFLOAD_ARCH_GENERIC_STR})
     target_link_libraries(${GENERIC_TARGET_ONLY_COMPRESSED_EXE} hip::host hip::device)
     if(NOT USE_PREBUILT_CATCH)
       target_link_libraries(${GENERIC_TARGET_ONLY_COMPRESSED_EXE} Catch2::Catch2WithMain)

@@ -109,8 +109,7 @@ void loadKernelData(hipFunction_t kernel) {
 HIP_TEST_CASE(Unit_hipModuleLoadFatBinary_PosiiveTsts) {
   hipModule_t Module;
   SECTION("Compiled module with regular target in compressed fatbin") {
-    const auto loaded_module =
-        LoadModuleIntoBuffer("copyKernelCompressed.code");
+    const auto loaded_module = LoadModuleIntoBuffer("copyKernelCompressed.code");
     HIP_CHECK(hipModuleLoadFatBinary(&Module, loaded_module.data()));
     REQUIRE(Module != nullptr);
     hipFunction_t kernel = nullptr;
@@ -119,30 +118,32 @@ HIP_TEST_CASE(Unit_hipModuleLoadFatBinary_PosiiveTsts) {
     REQUIRE(kernel != nullptr);
     HIP_CHECK(hipModuleUnload(Module));
   }
-  if (isGenericTargetSupported()) {
-    SECTION("Compiled module with Generic target in regular fatbin") {
-      const auto loaded_module =
-          LoadModuleIntoBuffer("copyKernelGenericTarget.code");
-      HIP_CHECK(hipModuleLoadFatBinary(&Module, loaded_module.data()));
-      REQUIRE(Module != nullptr);
-      hipFunction_t kernel = nullptr;
-      HIP_CHECK(hipModuleGetFunction(&kernel, Module, "copy_ker"));
-      REQUIRE(kernel != nullptr);
-      loadKernelData(kernel);
-      HIP_CHECK(hipModuleUnload(Module));
+  SECTION("Compiled module with Generic target in regular fatbin") {
+    if (!isGenericTargetSupported(HIP_TESTS_GENERIC_TARGETS)) {
+      HIP_SKIP_TEST("No compatible generic image was built for this device.");
     }
+    const auto loaded_module = LoadModuleIntoBuffer("copyKernelGenericTarget.code");
+    HIP_CHECK(hipModuleLoadFatBinary(&Module, loaded_module.data()));
+    REQUIRE(Module != nullptr);
+    hipFunction_t kernel = nullptr;
+    HIP_CHECK(hipModuleGetFunction(&kernel, Module, "copy_ker"));
+    REQUIRE(kernel != nullptr);
+    loadKernelData(kernel);
+    HIP_CHECK(hipModuleUnload(Module));
+  }
 
-    SECTION("Compiled module with Generic target in compressed fatbin") {
-      const auto loaded_module =
-          LoadModuleIntoBuffer("copyKernelGenericTargetCompressed.code");
-      HIP_CHECK(hipModuleLoadFatBinary(&Module, loaded_module.data()));
-      REQUIRE(Module != nullptr);
-      hipFunction_t kernel = nullptr;
-      HIP_CHECK(hipModuleGetFunction(&kernel, Module, "copy_ker"));
-      REQUIRE(kernel != nullptr);
-      loadKernelData(kernel);
-      HIP_CHECK(hipModuleUnload(Module));
+  SECTION("Compiled module with Generic target in compressed fatbin") {
+    if (!isGenericTargetSupported(HIP_TESTS_GENERIC_TARGETS)) {
+      HIP_SKIP_TEST("No compatible generic image was built for this device.");
     }
+    const auto loaded_module = LoadModuleIntoBuffer("copyKernelGenericTargetCompressed.code");
+    HIP_CHECK(hipModuleLoadFatBinary(&Module, loaded_module.data()));
+    REQUIRE(Module != nullptr);
+    hipFunction_t kernel = nullptr;
+    HIP_CHECK(hipModuleGetFunction(&kernel, Module, "copy_ker"));
+    REQUIRE(kernel != nullptr);
+    loadKernelData(kernel);
+    HIP_CHECK(hipModuleUnload(Module));
   }
 }
 #endif

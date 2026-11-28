@@ -23,6 +23,17 @@ target_include_directories(HipTestLevelUnitTest PRIVATE ${CATCH_INCLUDE_BINARY_D
 add_dependencies(HipTestLevelUnitTest hip_tests_config)
 hip_add_host_test(HipTestLevelUnitTest)
 
+set(GENERIC_TARGET_TEST_SRC hip_test_generic_target_test.cc ../hip_test_features.cc)
+set_source_files_properties(${GENERIC_TARGET_TEST_SRC} PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
+add_executable(HipTestGenericTargetUnitTest EXCLUDE_FROM_ALL ${GENERIC_TARGET_TEST_SRC})
+target_link_libraries(HipTestGenericTargetUnitTest PRIVATE
+  Catch2::Catch2WithMain hip::host hip::device)
+hip_add_host_test(HipTestGenericTargetUnitTest)
+
+add_test(NAME HipTestGenericTargetProbe
+  COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_generic_target_probe.py)
+set_tests_properties(HipTestGenericTargetProbe PROPERTIES LABELS hosttest)
+
 set_source_files_properties(hip_test_level_abort_test.cc PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
 add_executable(HipTestLevelAbortTest EXCLUDE_FROM_ALL
                hip_test_level_abort_test.cc $<TARGET_OBJECTS:Main_Object>)

@@ -294,19 +294,10 @@ if(HIP_PLATFORM MATCHES "amd")
                   COMMENT "Compiling copyKernelCompressed.code")
   add_custom_target(copyKernelCompressed_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/copyKernelCompressed.code)
 
-  set(OFFLOAD_ARCH_GENERIC_STR
-  --offload-arch=gfx9-generic
-  --offload-arch=gfx9-4-generic:sramecc+:xnack-
-  --offload-arch=gfx9-4-generic:sramecc-:xnack-
-  --offload-arch=gfx9-4-generic:sramecc+:xnack+
-  --offload-arch=gfx9-4-generic:sramecc-:xnack+
-  --offload-arch=gfx10-1-generic
-  --offload-arch=gfx10-3-generic
-  --offload-arch=gfx11-generic
-  --offload-arch=gfx11-7-generic
-  --offload-arch=gfx12-generic
-  --offload-arch=gfx12-5-generic
-)
+  include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/hip-tests-generic-targets.cmake")
+  hip_tests_get_generic_target_options(OFFLOAD_ARCH_GENERIC_STR GENERIC_TARGETS)
+  list(JOIN GENERIC_TARGETS "," _generic_target_ids)
+  add_compile_definitions(HIP_TESTS_GENERIC_TARGETS="${_generic_target_ids}")
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/copyKernelGenericTarget.code
                   COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} -mcode-object-version=6 --cuda-device-only ${OFFLOAD_ARCH_GENERIC_STR}
                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/copyKernel.cc

@@ -27,8 +27,8 @@ HIP_TEST_CASE(Unit_test_generic_target_in_compressed_fatbin) {
 #else
 HIP_TEST_CASE(Unit_test_generic_target_in_regular_fatbin) {
 #endif
-  if (!isGenericTargetSupported()) {
-    HIP_SKIP_TEST("generic target is not supported on this device.");
+  if (!isGenericTargetSupported(HIP_TESTS_GENERIC_TARGETS)) {
+    HIP_SKIP_TEST("No compatible generic image was built for this device.");
   }
   float *A_d, *C_d;
   float *A_h, *C_h;
@@ -101,6 +101,9 @@ HIP_TEST_CASE(Unit_test_generic_target_only_in_regular_fatbin) {
 #endif
 #endif  // GENERIC_COMPRESSED
 
+  if (!isGenericTargetSupported(HIP_TESTS_GENERIC_TARGETS)) {
+    HIP_SKIP_TEST("No compatible generic image was built for this device.");
+  }
   printf("Run %s\n", cmd);
   int rc = std::system(cmd);
 #if HT_WIN

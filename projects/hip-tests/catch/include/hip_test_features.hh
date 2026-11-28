@@ -21,4 +21,6 @@ typedef enum CTFeatures {
 
 bool CheckIfFeatSupported(enum CTFeatures test_feat, std::string gcn_arch);
 bool getGenericTarget(const std::string& agentTarget, std::string& genericTarget);
-bool isGenericTargetSupported(char* gcnArchName = nullptr, int deviceId = 0);
+// builtTargets is the comma-separated inventory of generic images in the binary.
+bool isGenericTargetSupported(const std::string& builtTargets, const char* gcnArchName = nullptr,
+                              int deviceId = 0);
