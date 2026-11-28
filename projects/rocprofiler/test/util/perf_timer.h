@@ -37,7 +37,17 @@ THE SOFTWARE.
 #else
 #if defined(__GNUC__)
 #include <sys/time.h>
+#if defined(__x86_64__) || defined(__i386__)
 #include <x86intrin.h>
+#else
+#include <ctime>
+static inline uint64_t __rdtscp(unsigned int* aux) {
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC_RAW, &ts);
+  if (aux) *aux = 0;
+  return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
+}
+#endif
 #endif  // __GNUC__
 #endif  // _MSC_VER
 
