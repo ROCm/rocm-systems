@@ -6,6 +6,10 @@
 //! mapping would violate the kernel contract. Compute queues also retain EOP
 //! and context-save storage; the process/device VM retains its doorbell slice.
 
+mod compute_storage;
+
+use compute_storage::{ComputeStorage, compute_storage};
+
 use super::target::KfdTargetProfile;
 use crate::memory::storage::TryPush;
 use crate::memory::storage::{Owned, Shared};
@@ -593,21 +597,6 @@ impl Doorbells {
             .checked_add(within as u64)
             .ok_or_else(|| error(ErrorKind::Internal, "doorbell address overflow"))
     }
-}
-
-/// Computed context-save allocation requirements for a compute queue.
-#[derive(Clone, Copy)]
-struct ComputeStorage {
-    /// Native context-save extent per XCC.
-    context_size: u32,
-    /// Native control-stack extent.
-    control_stack_size: u32,
-    /// Additional debug state extent.
-    debug_size: u32,
-    /// Number of XCCs requiring context storage.
-    xcc_count: u32,
-    /// Total allocation extent after native alignment.
-    total_size: u64,
 }
 
 /// Fully validated native queue request used by the acquisition path.
@@ -1357,56 +1346,6 @@ fn initialize_aql_control(
     }
     put_aql_scratch(&mut bytes, aql.properties.target_profile, aql.scratch);
     storage.write_bytes(0, &bytes)
-}
-
-fn compute_storage(properties: sysfs::KfdQueueProperties) -> Result<ComputeStorage, Error> {
-    let xcc_count = properties.xcc_count;
-    let context_size = properties.context_size;
-    let control_stack_size = properties.control_stack_size;
-    if xcc_count == 0
-        || properties.compute_units == 0
-        || properties.compute_units % xcc_count != 0
-        || context_size == 0
-        || context_size % 4096 != 0
-        || control_stack_size < 40
-        || control_stack_size % 4096 != 0
-        || control_stack_size > context_size
-    {
-        return Err(error(
-            ErrorKind::Unsupported,
-            "KFD did not report usable queue context-save sizes",
-        ));
-    }
-    let debug_size = (properties.compute_units / xcc_count)
-        .checked_mul(properties.maximum_wave_count_per_compute_unit)
-        .and_then(|waves| waves.checked_mul(32))
-        .and_then(|bytes| bytes.checked_add(63))
-        .map(|bytes| bytes / 64 * 64)
-        .ok_or_else(|| error(ErrorKind::DriverContract, "KFD debugger storage overflows"))?;
-    let total_size = (u64::from(context_size) + u64::from(debug_size))
-        .checked_mul(u64::from(xcc_count))
-        .ok_or_else(|| error(ErrorKind::Unsupported, "KFD context-save extent overflows"))?;
-    let page =
-        os_memory::page_size().map_err(|source| native_error("queue page size", source))? as u64;
-    let total_size = total_size
-        .div_ceil(page)
-        .checked_mul(page)
-        .ok_or_else(|| error(ErrorKind::Unsupported, "KFD context-save extent overflows"))?;
-    // DebugOffset and DebugSize in the native header are u32. Check their
-    // complete multi-XCC extent before any buffer is acquired or initialized.
-    if total_size > u64::from(u32::MAX) {
-        return Err(error(
-            ErrorKind::Unsupported,
-            "KFD context-save extent exceeds its header fields",
-        ));
-    }
-    Ok(ComputeStorage {
-        context_size,
-        control_stack_size,
-        debug_size,
-        xcc_count,
-        total_size,
-    })
 }
 
 fn pm4_control(native: &sysfs::KfdNode) -> Option<Pm4Control> {

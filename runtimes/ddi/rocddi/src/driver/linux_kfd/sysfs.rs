@@ -102,7 +102,11 @@ pub(crate) struct KfdQueueProperties {
     pub xcc_count: u32,
     /// Shader engines per XCC.
     pub shader_engine_count_per_xcc: u32,
-    /// Native context-save allocation size.
+    /// SIMD arrays per shader engine reported by KFD.
+    pub simd_arrays_per_engine: u32,
+    /// Local data share extent per compute unit in bytes.
+    pub local_data_share_byte_length: u64,
+    /// Native context-save allocation size per XCC; zero when unavailable.
     pub context_size: u32,
     /// Native control-stack allocation size.
     pub control_stack_size: u32,
@@ -1174,6 +1178,8 @@ fn read_node(
         wavefront_size: wave_size,
         xcc_count: xcc,
         shader_engine_count_per_xcc: arrays / arrays_per_xcc,
+        simd_arrays_per_engine: arrays_per_engine,
+        local_data_share_byte_length: u64::from(lds) * 1024,
         context_size: context.unwrap_or(0),
         control_stack_size: stack.unwrap_or(0),
         sdma_engines: sdma.unwrap_or(0),
@@ -1700,6 +1706,172 @@ mod tests {
         assert_eq!(banks[1].capacity_bytes, 1_048_576);
         assert_eq!(banks[1].width_bits, Some(384));
         assert_eq!(banks[1].maximum_clock_mhz, Some(1400));
+    }
+
+    #[test]
+    fn context_size_metadata_rejects_partial_or_invalid_numeric_pairs() {
+        let fixture = Fixture::new();
+        let (root, drm) = fixture.roots();
+        let path = fixture.0.join("topology/nodes/1/properties");
+        let properties = std::fs::read_to_string(&path).unwrap();
+        for invalid in [
+            properties.replace("cwsr_size 65536\n", ""),
+            properties.replace("ctl_stack_size 4096\n", ""),
+            properties.replace("cwsr_size 65536", "cwsr_size invalid"),
+            properties.replace("ctl_stack_size 4096", "ctl_stack_size -1"),
+            properties.replace("cwsr_size 65536", "cwsr_size 4294967296"),
+            properties.replace("ctl_stack_size 4096", "ctl_stack_size 4294967296"),
+        ] {
+            std::fs::write(&path, invalid).unwrap();
+            assert_eq!(
+                enumerate(&root, &drm, &mut |_| Ok(()))
+                    .err()
+                    .unwrap()
+                    .kind(),
+                ErrorKind::InvalidData
+            );
+        }
+    }
+
+    #[test]
+    fn legacy_zero_context_sizes_do_not_block_other_gpu_discovery() {
+        for (target, device, simds, arrays) in [(70000, 0x130f, 32, 1), (70001, 0x67b0, 176, 4)] {
+            let fixture = Fixture::new();
+            let (root, drm) = fixture.roots();
+            let properties =
+                std::fs::read_to_string(fixture.0.join("topology/nodes/1/properties")).unwrap();
+            let legacy = properties
+                .replace(
+                    "gfx_target_version 120001",
+                    &format!("gfx_target_version {target}"),
+                )
+                .replace("device_id 30032", &format!("device_id {device}"))
+                .replace("simd_count 64", &format!("simd_count {simds}"))
+                .replace("simd_per_cu 2", "simd_per_cu 4")
+                .replace("max_waves_per_simd 16", "max_waves_per_simd 10")
+                .replace("wave_front_size 32", "wave_front_size 64")
+                .replace("array_count 4", &format!("array_count {arrays}"))
+                .replace("simd_arrays_per_engine 2", "simd_arrays_per_engine 1")
+                .replace("cwsr_size 65536", "cwsr_size 0")
+                .replace("ctl_stack_size 4096", "ctl_stack_size 0");
+            std::fs::write(fixture.0.join("topology/nodes/1/properties"), legacy).unwrap();
+            std::fs::write(
+                fixture.0.join("drm/renderD128/device/device"),
+                format!("0x{device:x}"),
+            )
+            .unwrap();
+            std::fs::create_dir_all(fixture.0.join("topology/nodes/2")).unwrap();
+            std::fs::write(fixture.0.join("topology/nodes/2/gpu_id"), "43\n").unwrap();
+            std::fs::write(fixture.0.join("topology/nodes/2/name"), "modern GPU\n").unwrap();
+            std::fs::write(
+                fixture.0.join("topology/nodes/2/properties"),
+                properties
+                    .replace("drm_render_minor 128", "drm_render_minor 129")
+                    .replace("location_id 256", "location_id 512")
+                    .replace("unique_id 123", "unique_id 124"),
+            )
+            .unwrap();
+            let modern_device = fixture.0.join("drm/renderD129/device");
+            std::fs::create_dir_all(&modern_device).unwrap();
+            for entry in std::fs::read_dir(fixture.0.join("drm/renderD128/device")).unwrap() {
+                let entry = entry.unwrap();
+                std::fs::copy(entry.path(), modern_device.join(entry.file_name())).unwrap();
+            }
+            std::fs::write(modern_device.join("device"), "0x7550").unwrap();
+            let mut endpoints = Vec::new();
+            enumerate(&root, &drm, &mut |endpoint| {
+                endpoints.push(endpoint);
+                Ok(())
+            })
+            .unwrap();
+            assert_eq!(endpoints.len(), 2);
+            let legacy = endpoints
+                .iter()
+                .find(|endpoint| endpoint.gpu().unwrap().gfx_major == 7)
+                .unwrap();
+            assert!(legacy.gpu().unwrap().queues.aql.is_none());
+            let modern = endpoints
+                .iter()
+                .find(|endpoint| endpoint.gpu().unwrap().gfx_major == 12)
+                .unwrap();
+            assert!(modern.gpu().unwrap().queues.aql.is_some());
+            let snapshot = topology_graph_snapshot(&root, &drm);
+            for ordinal in [1, 2] {
+                assert!(
+                    snapshot
+                        .nodes
+                        .iter()
+                        .any(|node| { node.native_id == NativeNodeId::LinuxKfd(ordinal) })
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn gfx942_context_size_pairs_follow_production_queue_qualification() -> Result<(), Error> {
+        let fixture = Fixture::new();
+        let (root, drm) = fixture.roots();
+        let path = fixture.0.join("topology/nodes/1/properties");
+        let properties = std::fs::read_to_string(&path)
+            .unwrap()
+            .replace("gfx_target_version 120001", "gfx_target_version 90402")
+            .replace("device_id 30032", "device_id 29857")
+            .replace("simd_count 64", "simd_count 1216")
+            .replace("simd_per_cu 2", "simd_per_cu 4")
+            .replace("max_waves_per_simd 16", "max_waves_per_simd 8")
+            .replace("wave_front_size 32", "wave_front_size 64")
+            .replace("array_count 4", "array_count 32")
+            .replace("simd_arrays_per_engine 2", "simd_arrays_per_engine 1")
+            .replace("num_xcc 1", "num_xcc 8");
+        std::fs::write(fixture.0.join("drm/renderD128/device/device"), "0x74a1").unwrap();
+        let mut derived = None;
+        for (metadata, aql) in [
+            (
+                properties.replace("cwsr_size 65536\nctl_stack_size 4096\n", ""),
+                true,
+            ),
+            (
+                properties
+                    .replace("cwsr_size 65536", "cwsr_size 0")
+                    .replace("ctl_stack_size 4096", "ctl_stack_size 0"),
+                true,
+            ),
+            (properties.replace("cwsr_size 65536", "cwsr_size 0"), false),
+            (
+                properties.replace("ctl_stack_size 4096", "ctl_stack_size 0"),
+                false,
+            ),
+        ] {
+            std::fs::write(&path, metadata).unwrap();
+            let mut endpoints = Vec::new();
+            enumerate(&root, &drm, &mut |endpoint| {
+                endpoints.push(endpoint);
+                Ok(())
+            })
+            .unwrap();
+            assert_eq!(endpoints.len(), 1);
+            let gpu = endpoints[0].gpu().unwrap();
+            assert_eq!(gpu.queues.aql.is_some(), aql);
+            assert_eq!(gpu.shader_array_count_per_engine, 1);
+            assert_eq!(gpu.local_data_share_byte_length, 65536);
+            if aql {
+                let crate::driver::EndpointSelector::LinuxKfd { native, .. } =
+                    &endpoints[0].selector
+                else {
+                    return Err(error(
+                        ErrorKind::InvalidData,
+                        "test fixture did not create a Linux selector",
+                    ));
+                };
+                assert_eq!(native.queues.context_size, 0);
+                assert_eq!(native.queues.control_stack_size, 0);
+                if let Some(queues) = derived {
+                    assert_eq!(native.queues, queues);
+                }
+                derived = Some(native.queues);
+            }
+        }
+        Ok(())
     }
 
     #[test]
