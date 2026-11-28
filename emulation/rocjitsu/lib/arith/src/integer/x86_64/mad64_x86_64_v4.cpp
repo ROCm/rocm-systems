@@ -5,7 +5,7 @@
 // CPU-specific arithmetic stays here; public entry points select this backend.
 
 #include "integer/mad64.h"
-#include "rj_arith/detail/rj_arith_integer.h"
+#include "rj_arith/detail/rj_arith_common.h"
 
 #include <immintrin.h>
 #include <stdint.h>
@@ -18,7 +18,7 @@ template <bool Signed>
 uint32_t mad64_x86_64_v4(uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
                          const uint32_t *const *a, const uint32_t *const *b,
                          const uint32_t *const *c) {
-  uint32_t staged[2][32], output_carry = 0;
+  uint32_t output_carry = 0;
   for (int lane = 0; lane < 32; lane += 8) {
     auto av =
         _mm512_cvtepu32_epi64(_mm256_loadu_si256(reinterpret_cast<const __m256i *>(a[0] + lane)));
@@ -55,17 +55,12 @@ uint32_t mad64_x86_64_v4(uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
         result = _mm512_mask_set1_epi64(result, carry, -1);
       }
     }
-    _mm256_storeu_si256(reinterpret_cast<__m256i *>(staged[0] + lane),
-                        _mm512_cvtepi64_epi32(result));
-    _mm256_storeu_si256(reinterpret_cast<__m256i *>(staged[1] + lane),
-                        _mm512_cvtepi64_epi32(_mm512_srli_epi64(result, 32)));
-  }
-  // Commit both halves only after all source reads, with D1 winning overlaps.
-  for (int reg = 0; reg < 2; ++reg) {
-    for (int lane = 0; lane < 32; lane += 16) {
-      auto result = _mm512_loadu_si512(reinterpret_cast<const __m512i *>(staged[reg] + lane));
-      _mm512_mask_storeu_epi32(d[reg] + lane, __mmask16(exec_mask >> lane), result);
-    }
+    // Both source words are consumed; whole-VGPR aliases cannot affect later lanes.
+    // D1 wins when destination registers coincide.
+    const __mmask8 active = __mmask8(exec_mask >> lane);
+    _mm256_mask_storeu_epi32(d[0] + lane, active, _mm512_cvtepi64_epi32(result));
+    _mm256_mask_storeu_epi32(d[1] + lane, active,
+                             _mm512_cvtepi64_epi32(_mm512_srli_epi64(result, 32)));
   }
   return output_carry & exec_mask;
 }

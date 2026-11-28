@@ -68,7 +68,8 @@ template <Op Operation, int Lanes, typename Call> void check(Call call) {
         auto exec_mask = exec_mask_for_case<Lanes>(scenario < 5 ? scenario : 3);
         uint64_t mode = scenario >= 5 ? RJ_ARITH_ALU_CLAMP : 0;
         SCOPED_TRACE(::testing::Message() << cpu << '/' << semantics << '/' << scenario);
-        for (int alias : {8, 0, 2, 4, -1}) {
+        // Offset 1 crosses source tuples; -1 makes both destinations coincide.
+        for (int alias : {8, 0, 1, 2, 4, -1}) {
           auto r = input, expected = input;
           int low = alias < 0 ? 0 : alias, high = alias < 0 ? 0 : alias + 1;
           for (int lane = 0; lane < Lanes; ++lane) {

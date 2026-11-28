@@ -34,7 +34,7 @@ void check_mad64(Call call, bool is_signed) {
     }
   };
   auto input = make_integer_inputs<Lanes>();
-  // Old suite's directed cases distinguish extended sign from signed overflow,
+  // Directed cases distinguish extended sign from signed overflow,
   // and positive/negative saturation. Remaining lanes retain pseudorandom data.
   const uint32_t a[] = {0, 0x80000000U, 0x80000000U, 1, UINT32_MAX};
   const uint32_t b[] = {0, 0x80000000U, 0x7fffffffU, 1, UINT32_MAX};
@@ -66,8 +66,9 @@ void check_mad64(Call call, bool is_signed) {
         Mask exec_mask = exec_mask_for_case<Lanes>(scenario < 5 ? scenario : scenario % 2 ? 0 : 3);
         SCOPED_TRACE(::testing::Message() << cpu << '/' << semantics << '/' << scenario);
         // Sources overlap D; carry overlaps A/D; finally D0 and D1 are the
-        // same register, where the high-word store must win. Carry is last.
-        for (int alias = 0; alias < 7; ++alias) {
+        // same register, where the high-word store must win. Offset 5 starts at C's
+        // high word. Carry is last.
+        for (int alias = 0; alias < 8; ++alias) {
           if constexpr (!WithCarry) {
             if (alias == 4 || alias == 5) {
               continue;
@@ -76,6 +77,7 @@ void check_mad64(Call call, bool is_signed) {
           int offset = alias == 1 || alias == 5 || alias == 6 ? 0
                        : alias == 2                           ? 2
                        : alias == 3                           ? 4
+                       : alias == 7                           ? 5
                                                               : 8;
           bool repeated = alias == 6;
           auto r = input, expected = input;
