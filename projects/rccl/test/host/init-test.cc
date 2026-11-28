@@ -10069,6 +10069,55 @@ TEST_F(InitMicrotest, CommGrow_LastRankIsBoundary_ReceivesHandle) {
   Rank_ReleaseComm(out, /*ownsAbortResources=*/true);
 }
 
+// NCCL 2.32.6 relaxed ncclCommGrow: existing ranks ignore the uniqueId argument, only new ranks use it.
+// A middle rank handed a stale or garbage id must still launch without a commId.
+TEST_F(InitMicrotest, CommGrow_MiddleRank_IgnoresCallerUniqueId) {
+  Grow_AllowHostAlloc();
+  Grow_ParentComm parent;
+  ScopedHook bcast(g_bcastGrowHandle, [&](struct ncclBootstrapHandle*, ncclComm*, bool) {
+    ADD_FAILURE() << "only ranks 0 and N-1 receive the grow handle";
+    return ncclSuccess;
+  });
+  Grow_LaunchSpy spy;
+  ncclComm_t out = nullptr;
+  const ncclUniqueId callerId = Grow_MakeUniqueId(0xA5);
+
+  ASSERT_EQ(ncclSuccess, Grow_RunExisting(parent.get(), kGrow_TargetRanks, &callerId, &out, nullptr));
+
+  ASSERT_EQ(1, spy.calls());
+  EXPECT_EQ(0, spy.rec().nId) << "an existing middle rank must not bootstrap from the caller's uniqueId";
+  EXPECT_FALSE(spy.rec().hasCommId);
+  Rank_ReleaseComm(out, /*ownsAbortResources=*/true);
+}
+
+// The lone rank of a one-rank parent gets the grow handle over bootstrap, not from the caller's uniqueId.
+TEST_F(InitMicrotest, CommGrow_SingleRankParent_UsesReceivedHandleNotCallerUniqueId) {
+  Grow_AllowHostAlloc();
+  Grow_ParentComm parent;
+  parent->nRanks = 1;
+  parent->rank = 0;
+  ncclBootstrapHandle sent{};
+  std::memset(&sent, 0x3C, sizeof(sent));
+  sent.magic = hashCombine(kGrow_ParentMagic, 1);
+  ScopedHook bcast(g_bcastGrowHandle, [&](struct ncclBootstrapHandle* h, ncclComm*, bool isRoot) {
+    EXPECT_FALSE(isRoot);
+    *h = sent;
+    return ncclSuccess;
+  });
+  Grow_LaunchSpy spy;
+  ncclComm_t out = nullptr;
+  const ncclUniqueId callerId = Grow_MakeUniqueId(0xA5);
+
+  ASSERT_EQ(ncclSuccess, Grow_RunExisting(parent.get(), /*nRanks=*/2, &callerId, &out, nullptr));
+
+  EXPECT_EQ(1, bcast.calls) << "a one-rank parent is its own boundary rank and must receive the handle";
+  ASSERT_EQ(1, spy.calls());
+  EXPECT_EQ(1, spy.rec().nId);
+  ASSERT_TRUE(spy.rec().hasCommId);
+  EXPECT_EQ(0, std::memcmp(&spy.rec().commId, &sent, sizeof(sent))) << "the caller's uniqueId must be ignored";
+  Rank_ReleaseComm(out, /*ownsAbortResources=*/true);
+}
+
 TEST_F(InitMicrotest, CommGrow_MiddleRank_SkipsHandleBroadcastAndLaunchesWithoutCommId) {
   Grow_AllowHostAlloc();
   Grow_ParentComm parent;
