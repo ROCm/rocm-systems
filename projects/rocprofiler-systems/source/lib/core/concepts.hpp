@@ -30,8 +30,14 @@ using construct_on_init = std::true_type;
 using tim::identity;    // NOLINT
 using tim::identity_t;  // NOLINT
 
+// Specialize to std::true_type for types whose unique_ptr_t must never delete the
+// pointee (see thread_deleter). Used for the process-wide thread_data singletons,
+// which are intentionally never destroyed. utility::generate allocates them on the
+// heap; they must NOT live in a thread_local buffer, because that buffer is freed
+// when the creating thread exits (e.g. a short-lived thread that initializes the
+// tool when attaching to a running process), leaving the singleton dangling.
 template <typename Tp>
-struct use_placement_new_when_generating_unique_ptr : std::false_type
+struct never_delete_unique_ptr : std::false_type
 {};
 
 template <typename Tp, typename... Args>
