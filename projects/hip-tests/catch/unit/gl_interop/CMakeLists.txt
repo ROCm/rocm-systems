@@ -125,6 +125,11 @@ hip_add_exe_to_target(NAME GLInteropTest
 # Link dependencies
 target_link_libraries(GLInteropTest OpenGL::GL GLUT::GLUT)
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  find_package(X11 REQUIRED)
+  target_link_libraries(GLInteropTest X11::X11)
+endif()
+
 if (OpenGL_EGL_FOUND)
   target_link_libraries(GLInteropTest OpenGL::EGL)
   target_compile_definitions(GLInteropTest PRIVATE USE_EGL)

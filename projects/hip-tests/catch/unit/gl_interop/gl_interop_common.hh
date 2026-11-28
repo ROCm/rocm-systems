@@ -23,6 +23,11 @@
 #endif
 
 #include <hip_test_common.hh>
+#include <cstdint>
+
+#ifdef __linux__
+#include <GL/glx.h>
+#endif
 
 class GLBufferObject {
  public:
@@ -77,44 +82,53 @@ public:
 // initialized exactly once per process. A per-TU flag caused glutInit() to run once per TU, which
 // on Windows raises "illegal glutInit() reinitialization attempt" and can hang the test.
 inline std::once_flag glut_init_flag;
-inline bool glut_init_failed = false;
+inline const char* glut_init_skip_reason = nullptr;
 // Single window/context shared by every test. 0 means "not created". Created once in init() and
 // kept alive for the whole process: freeglut accumulates native window handles across repeated
 // create/destroy, so opening/closing one window per test hangs the window manager (Windows+Linux).
 inline int glut_shared_window = 0;
-inline void GlutError(const char *fmt, va_list ap)
-{
-    // Print what error occurred
-    fprintf(stderr, "GlutError:");
-    vfprintf(stderr, fmt, ap);
-    fprintf(stderr, "\n");
-
-    glut_init_failed = true;
-}
 
 // Initialize freeglut exactly once per process. glutInit() must be called only once; calling it
 // again raises "illegal glutInit() reinitialization attempt" and can hang the test. ALL GL interop
 // test files must go through EnsureGlutInitialized() (including the context-switch tests in
 // hipGLContextSwitch.cc) so there is a single glutInit() for the whole process.
 inline void GlutInitOnce() {
+#ifdef __linux__
+  // freeglut treats display failures as fatal. Check the prerequisites before entering it;
+  // a returning error callback would let initialization continue with a null Display.
+  Display* display = XOpenDisplay(nullptr);
+  if (display == nullptr) {
+    glut_init_skip_reason = "GLUT requires an accessible X display";
+    return;
+  }
+  int error_base = 0;
+  int event_base = 0;
+  const bool has_glx = glXQueryExtension(display, &error_base, &event_base);
+  XCloseDisplay(display);
+  if (!has_glx) {
+    glut_init_skip_reason = "GLUT requires the GLX extension on the X display";
+    return;
+  }
+#endif
+
   static char proc_name[] = "";
   static std::array<char*, 2> glut_argv = {proc_name, nullptr};
   static int glut_argc = 1;
-  glutInitErrorFunc(&GlutError);
   glutInit(&glut_argc, glut_argv.data());
-  if (glut_init_failed) return;
   glutInitDisplayMode(GLUT_RGB | GLUT_DOUBLE | GLUT_DEPTH);
 }
 
-inline void EnsureGlutInitialized() { std::call_once(glut_init_flag, GlutInitOnce); }
+inline void EnsureGlutInitialized() {
+  std::call_once(glut_init_flag, GlutInitOnce);
+  if (glut_init_skip_reason != nullptr) {
+    HIP_SKIP_TEST(glut_init_skip_reason);
+  }
+}
 
 class GLUTContextScopeGuard : public IContextScopeGuard {
  public:
   GLUTContextScopeGuard() {
     EnsureGlutInitialized();
-    if (glut_init_failed) {
-      HIP_SKIP_TEST("GLUT Init Failed");
-    }
     // Reuse one persistent window/context for every test that uses this guard instead of creating
     // and destroying a window per test. freeglut accumulates native window handles across repeated
     // create/destroy, and opening hundreds of windows over a full run hangs the window manager
@@ -142,42 +156,24 @@ class GLUTContextScopeGuard : public IContextScopeGuard {
 #ifdef USE_EGL
 class EGLContextScopeGuard : public IContextScopeGuard {
  public:
-  EGLContextScopeGuard() {
-
-    // 1. Initialize EGL
-    PFNEGLQUERYDEVICESEXTPROC eglQueryDevicesEXT =
-        (PFNEGLQUERYDEVICESEXTPROC)eglGetProcAddress("eglQueryDevicesEXT");
-
-    eglQueryDevicesEXT(egl_devices_.max_size(), egl_devices_.data(), &num_devices_);
-
-    INFO("Detected " << num_devices_ << " devices");
-
-    PFNEGLGETPLATFORMDISPLAYEXTPROC eglGetPlatformDisplayEXT =
-        (PFNEGLGETPLATFORMDISPLAYEXTPROC)eglGetProcAddress("eglGetPlatformDisplayEXT");
-
-    egl_display_ = eglGetPlatformDisplayEXT(EGL_PLATFORM_DEVICE_EXT, egl_devices_.at(0), 0);
-
-    REQUIRE(eglInitialize(egl_display_, &major_, &minor_));
-
-    // 2. Select an appropriate configuration
-    REQUIRE(eglChooseConfig(egl_display_, kConfigAttribs, &egl_config_, 1, &num_configs_));
-
-    // 3. Create a surface
-    egl_surface_ = eglCreatePbufferSurface(egl_display_, egl_config_, kPbufferAttribs);
-
-    // 4. Bind the API
+  EGLContextScopeGuard() : resources_{AcquireDisplay()} {
     REQUIRE(eglBindAPI(EGL_OPENGL_API));
-
-    // 5. Create a context and make it current
-    egl_context_ = eglCreateContext(egl_display_, egl_config_, EGL_NO_CONTEXT, NULL);
-
-    REQUIRE(eglMakeCurrent(egl_display_, egl_surface_, egl_surface_, egl_context_));
+    resources_.surface = eglCreatePbufferSurface(resources_.display->handle,
+                                                 resources_.display->config, kPbufferAttribs);
+    REQUIRE(resources_.surface != EGL_NO_SURFACE);
+    resources_.context = eglCreateContext(resources_.display->handle, resources_.display->config,
+                                          EGL_NO_CONTEXT, nullptr);
+    REQUIRE(resources_.context != EGL_NO_CONTEXT);
+    makeCurrent();
   }
 
-  ~EGLContextScopeGuard() override {
-    // 6. Terminate EGL when finished
-    eglTerminate(egl_display_);
+  void makeCurrent() {
+    REQUIRE(eglBindAPI(EGL_OPENGL_API));
+    REQUIRE(eglMakeCurrent(resources_.display->handle, resources_.surface, resources_.surface,
+                           resources_.context));
   }
+
+  std::uintptr_t id() const { return reinterpret_cast<std::uintptr_t>(resources_.context); }
 
   EGLContextScopeGuard(const EGLContextScopeGuard&) = delete;
   EGLContextScopeGuard& operator=(const EGLContextScopeGuard&) = delete;
@@ -186,6 +182,66 @@ class EGLContextScopeGuard : public IContextScopeGuard {
   EGLContextScopeGuard& operator=(EGLContextScopeGuard&&) = delete;
 
  private:
+  struct DisplayState {
+    EGLDisplay handle = EGL_NO_DISPLAY;
+    EGLConfig config = nullptr;
+
+    ~DisplayState() {
+      if (handle != EGL_NO_DISPLAY) {
+        eglTerminate(handle);
+      }
+    }
+  };
+
+  struct Resources {
+    std::shared_ptr<DisplayState> display;
+    EGLSurface surface = EGL_NO_SURFACE;
+    EGLContext context = EGL_NO_CONTEXT;
+
+    ~Resources() {
+      if (context != EGL_NO_CONTEXT) {
+        if (eglGetCurrentContext() == context) {
+          eglMakeCurrent(display->handle, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+        }
+        eglDestroyContext(display->handle, context);
+      }
+      if (surface != EGL_NO_SURFACE) {
+        eglDestroySurface(display->handle, surface);
+      }
+    }
+  };
+
+  static std::shared_ptr<DisplayState> AcquireDisplay() {
+    // Catch runs these tests serially. All simultaneously live contexts share one display;
+    // terminating it when any one context is destroyed would invalidate the others.
+    static std::weak_ptr<DisplayState> shared_display;
+    if (auto display = shared_display.lock()) {
+      return display;
+    }
+
+    const auto query_devices =
+        reinterpret_cast<PFNEGLQUERYDEVICESEXTPROC>(eglGetProcAddress("eglQueryDevicesEXT"));
+    REQUIRE(query_devices != nullptr);
+    std::array<EGLDeviceEXT, 8> devices{};
+    EGLint device_count = 0;
+    REQUIRE(query_devices(devices.size(), devices.data(), &device_count));
+    REQUIRE(device_count > 0);
+
+    const auto get_display = reinterpret_cast<PFNEGLGETPLATFORMDISPLAYEXTPROC>(
+        eglGetProcAddress("eglGetPlatformDisplayEXT"));
+    REQUIRE(get_display != nullptr);
+    const EGLDisplay handle = get_display(EGL_PLATFORM_DEVICE_EXT, devices.front(), nullptr);
+    REQUIRE(handle != EGL_NO_DISPLAY);
+    auto display = std::make_shared<DisplayState>();
+    REQUIRE(eglInitialize(handle, nullptr, nullptr));
+    display->handle = handle;
+    EGLint config_count = 0;
+    REQUIRE(eglChooseConfig(handle, kConfigAttribs, &display->config, 1, &config_count));
+    REQUIRE(config_count == 1);
+    shared_display = display;
+    return display;
+  }
+
   // clang-format off
   static constexpr EGLint kConfigAttribs[] = {
       EGL_SURFACE_TYPE,
@@ -207,42 +263,44 @@ class EGLContextScopeGuard : public IContextScopeGuard {
       EGL_WIDTH, kPbufferWidth, EGL_HEIGHT, kPbufferHeight, EGL_NONE,
   };
 
-  std::array<EGLDeviceEXT, 8> egl_devices_;
-  EGLint num_devices_;
-  EGLDisplay egl_display_;
-  EGLint major_, minor_;
-  EGLint num_configs_;
-  EGLConfig egl_config_;
-  EGLSurface egl_surface_;
-  EGLContext egl_context_;
+  Resources resources_;
 };
 #endif
+
+enum class GLContextType { Glut, Egl };
+
+inline GLContextType GetGLContextType() {
+  const char* value = std::getenv("GL_CONTEXT_TYPE");
+  const std::string type = value == nullptr ? "" : value;
+  if (type.empty() || type == "GLUT") {
+    return GLContextType::Glut;
+  }
+#ifdef USE_EGL
+  if (type == "EGL") {
+    return GLContextType::Egl;
+  }
+#endif
+  INFO("Unsupported GL_CONTEXT_TYPE value '" << type << "'");
+  INFO("Supported values are ['GLUT'"
+#ifdef USE_EGL
+       << ", 'EGL'"
+#endif
+       << "]");
+  REQUIRE(false);
+  return GLContextType::Glut;
+}
 
 class GLContextScopeGuard {
  public:
   using GLContextScopeGuardPtr = std::unique_ptr<IContextScopeGuard>;
 
-  static constexpr char kEnvarName[] = "GL_CONTEXT_TYPE";
-
   GLContextScopeGuard() {
-
-    char* val = std::getenv(kEnvarName);
-    std::string val_str = val == NULL ? "" : val;
-
-    if (val_str.empty() || val_str == "GLUT") {
+    if (GetGLContextType() == GLContextType::Glut) {
       gl_context_ = std::make_unique<GLUTContextScopeGuard>();
 #ifdef USE_EGL
-    } else if (val_str == "EGL") {
+    } else {
       gl_context_ = std::make_unique<EGLContextScopeGuard>();
 #endif
-    } else {
-      INFO("Unsupported " << kEnvarName << " value '" << val_str << "'");
-      INFO("Supported values are ['GLUT'"
-#ifdef USE_EGL
-        << ", 'EGL'"
-#endif
-        << "]");
-      REQUIRE(false);
     }
 
 #ifdef USE_GLEW

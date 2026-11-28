@@ -247,7 +247,8 @@ hipError_t ihipCreateTextureObject(hipTextureObject_t* pTexObject, const hipReso
           return hipErrorInvalidValue;
         }
 
-        image = image->createView(*hip::getCurrentDevice()->asContext(), imageFormat, nullptr);
+        image = image->createView(*hip::getCurrentDevice()->asContext(), imageFormat, nullptr, 0,
+                                  CL_MEM_READ_ONLY);
         if (image == nullptr) {
           return hipErrorInvalidValue;
         }
@@ -289,8 +290,8 @@ hipError_t ihipCreateTextureObject(hipTextureObject_t* pTexObject, const hipReso
           return hipErrorInvalidValue;
         }
 
-        image = image->createView(*hip::getCurrentDevice()->asContext(), imageFormat, nullptr, 0, 0,
-                                  true);
+        image = image->createView(*hip::getCurrentDevice()->asContext(), imageFormat, nullptr, 0,
+                                  CL_MEM_READ_ONLY, true);
         if (image == nullptr) {
           return hipErrorInvalidValue;
         }
@@ -370,10 +371,21 @@ hipError_t ihipCreateTextureObject(hipTextureObject_t* pTexObject, const hipReso
     }
   }
 
+  if (image == nullptr) {
+    return hipErrorInvalidValue;
+  }
+
+  // Image views can defer device allocation. Check it before reading the SRD.
+  if (image->getDeviceMemory(*device) == nullptr) {
+    image->release();
+    return hipErrorOutOfMemory;
+  }
+
   void* texObjectBuffer = nullptr;
   hipError_t err =
       ihipMalloc(&texObjectBuffer, sizeof(__hip_texture), CL_MEM_SVM_FINE_GRAIN_BUFFER);
   if (texObjectBuffer == nullptr || err != hipSuccess) {
+    image->release();
     return hipErrorOutOfMemory;
   }
   *pTexObject = new (texObjectBuffer)

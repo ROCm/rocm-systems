@@ -62,7 +62,7 @@ Context::~Context() {
       it->unbindExternalDevice(d3dFlags, info_.hDev_, this, VALIDATE_ONLY);
     }
     if (info_.flags_ & GLDeviceKhr) {
-      uint glFlags = info_.flags_ & GLDeviceKhr;
+      uint glFlags = info_.flags_ & (GLDeviceKhr | EGLDeviceKhr);
       it->unbindExternalDevice(glFlags, info_.hDev_, info_.hCtx_, VALIDATE_ONLY);
     }
 
@@ -199,13 +199,21 @@ int Context::create(const intptr_t* properties) {
   int result = CL_SUCCESS;
 
   if (properties != NULL) {
-    properties_ = new cl_context_properties[info().propertiesSize_ / sizeof(cl_context_properties)];
-    if (properties_ == NULL) {
+    auto* newProperties =
+        new cl_context_properties[info().propertiesSize_ / sizeof(cl_context_properties)];
+    if (newProperties == NULL) {
       return CL_OUT_OF_HOST_MEMORY;
     }
-
-    ::memcpy(properties_, properties, info().propertiesSize_);
+    ::memcpy(newProperties, properties, info().propertiesSize_);
+    delete[] properties_;
+    properties_ = newProperties;
   }
+
+  if (glenv_ != nullptr && glenv_->isEGL() != ((info_.flags_ & EGLDeviceKhr) != 0)) {
+    delete glenv_;
+    glenv_ = nullptr;
+  }
+  const bool newGLEnvironment = glenv_ == nullptr;
 
   // if the context passed in is null, it's the GL interop case and we need to get the current
   // context
@@ -265,7 +273,7 @@ int Context::create(const intptr_t* properties) {
         }
       }
       if (info_.flags_ & GLDeviceKhr) {
-        uint glFlags = info_.flags_ & GLDeviceKhr;
+        uint glFlags = info_.flags_ & (GLDeviceKhr | EGLDeviceKhr);
         if (!it->bindExternalDevice(glFlags, info_.hDev_, info_.hCtx_, VALIDATE_ONLY)) {
           result = CL_INVALID_VALUE;
         }
@@ -276,6 +284,10 @@ int Context::create(const intptr_t* properties) {
   // Check if the device binding wasn't successful
   if (result != CL_SUCCESS) {
     if (info_.flags_ & GLDeviceKhr) {
+      if (newGLEnvironment) {
+        delete glenv_;
+        glenv_ = nullptr;
+      }
       result = CL_INVALID_GL_SHAREGROUP_REFERENCE_KHR;
     } else if (info_.flags_ & D3D10DeviceKhr) {
       // return CL_INVALID_VALUE; // FIXME_odintsov: CL_INVALID_D3D_INTEROP;
@@ -291,7 +303,7 @@ int Context::create(const intptr_t* properties) {
 #ifdef _WIN32
             "OpenGL32.dll"
 #else   //!_WIN32
-            "libGL.so.1"
+            (info_.flags_ & EGLDeviceKhr) ? "libEGL.so.1" : "libGL.so.1"
 #endif  //!_WIN32
         );
         if (!h || !(glenv_ = new GLFunctions(h, (info_.flags_ & Flags::EGLDeviceKhr) != 0))) {

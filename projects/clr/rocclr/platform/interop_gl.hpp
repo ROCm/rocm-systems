@@ -151,6 +151,7 @@ class ImageGL : public Image, public GLObject {
 };
 
 typedef EGLContext (*PFN_eglGetCurrentContext)();
+typedef EGLDisplay (*PFN_eglGetCurrentDisplay)();
 #ifdef _WIN32
 #define APICALL WINAPI
 #define GETPROCADDRESS GetProcAddress
@@ -235,6 +236,7 @@ class GLFunctions {
   EGLContext eglOriginalContext_;
   bool isEGL_;
   PFN_eglGetCurrentContext eglGetCurrentContext_;
+  PFN_eglGetCurrentDisplay eglGetCurrentDisplay_;
 
 #ifdef _WIN32
   HGLRC hOrigGLRC_;
@@ -281,6 +283,8 @@ class GLFunctions {
   ~GLFunctions();
 
   bool update(intptr_t hglrc);
+  void* currentContext() const;
+  void* currentDisplay() const;
   bool IsCurrentGlContext(const amd::Context::Info& info) const {
     if (isEGL_) {
       return ((info.hCtx_ != nullptr) && (eglGetCurrentContext_ != nullptr) &&
