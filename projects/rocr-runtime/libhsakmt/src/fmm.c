@@ -47,7 +47,7 @@
 
 #include <sys/ioctl.h>
 #include <sys/stat.h>
-#include "hsakmt/linux/udmabuf.h"
+#include "udmabuf.h"
 
 #ifndef MPOL_F_STATIC_NODES
 /* Bug in numaif.h, this should be defined in there. Definition copied
@@ -2543,7 +2543,7 @@ static void *fmm_map_to_cpu(void *mem, uint64_t size, bool host_access,
 		 * memory in the parent process and lead to out-of-memory
 		 * conditions.
 		 */
-		madvise(mem, size, MADV_DONTFORK);
+		hsakmt_madvise_dontfork(mem, size);
 
 	return ret;
 }
@@ -2906,6 +2906,12 @@ static void *fmm_allocate_host_cpu(HsaKFDContext *ctx, void *address, uint64_t M
  */
 static bool thread_has_explicit_mempolicy(void)
 {
+#if defined(__FreeBSD__)
+	/* FreeBSD has no per-thread mempolicy for numactl to set (its NUMA
+	 * placement is domainset(9) based), so there is nothing to defer to.
+	 */
+	return false;
+#else
 	int mode = MPOL_DEFAULT;
 
 	/* flags=0, addr=NULL => returns the calling thread's default policy. */
@@ -2914,6 +2920,7 @@ static bool thread_has_explicit_mempolicy(void)
 
 	mode &= ~(MPOL_F_STATIC_NODES | MPOL_F_RELATIVE_NODES);
 	return mode != MPOL_DEFAULT;
+#endif
 }
 
 static int bind_mem_to_numa(uint32_t numa_node_id, void *mem,
