@@ -26,6 +26,10 @@ static_assert(DDA_IPC_BUFFER_SIZE % 16 == 0 && dda::common::kDdaIpcLLRegionBytes
 
 #define DDA_FABRIC_MAXBLOCKS 256
 
+// Pipelined IPC Broadcast shape: half the ring's 112 channels at its sizes, two barrier mailbox slots per block.
+constexpr uint32_t kDdaBcIpcPipeBlocks = 56;
+constexpr uint32_t kDdaBcIpcPipeThreads = 512;
+
 namespace nccl_dda_detail {
 
 using dda::common::ddaLL128Slices;
@@ -91,6 +95,9 @@ struct DdaFabricBarrierState {
   std::unique_ptr<dda::common::FabricGpuBarrierResources> resources;
   dda::common::FabricGpuBarrier barrierHost;
 };
+
+// IPC barrier mailbox slots: two per pipelined IPC Broadcast block, above the DDA_IPC_MAXBLOCKS the other kernels use.
+constexpr int kDdaIpcBarrierSlots = 2 * static_cast<int>(kDdaBcIpcPipeBlocks);
 
 inline int ddaMaxNBlocksForScratch() {
   unsigned maxBlocks = DDA_IPC_MAXBLOCKS;

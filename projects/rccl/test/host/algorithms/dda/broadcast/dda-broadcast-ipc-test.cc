@@ -5,10 +5,12 @@
  ************************************************************************/
 
 // Host-only microtests for src/algorithms/dda/broadcast/dda_broadcast_ipc.cu: eligibility, the all-gather grid at one
-// slice, and the launch with its alignment variants.
+// slice, the launch with its alignment variants, and the pipelined kernel from rcclDdaBcIpcPipeMinBytes() up.
 
 #include <cstddef>
 #include <cstdint>
+#include <utility>
+#include <vector>
 
 #include <gtest/gtest.h>
 
@@ -63,6 +65,18 @@ class DdaBroadcastIpcMicrotest : public ::testing::Test {
 template <bool kSendAligned, bool kRecvAligned>
 const void* BcKernel() {
   return KernelPtr(&dda::common::ddaBroadcastIpc2Phase<int8_t, 8, kSendAligned, kRecvAligned>);
+}
+
+template <bool kSendAligned, bool kRecvAligned>
+const void* BcPipeKernel() {
+  return KernelPtr(&dda::common::ddaBroadcastIpcPipe<8, kSendAligned, kRecvAligned>);
+}
+
+// rcclDdaBcIpcPipeMinBytes() values: 0 keeps every size two-phase, 128 pipelines every eligible size.
+constexpr size_t kPipeOff = 0;
+constexpr size_t kPipeAll = 128;
+void SetPipeMinBytes(size_t minBytes) {
+  g_rcclDdaBcIpcPipeMinBytes = [minBytes](const ncclComm*) { return minBytes; };
 }
 
 TEST_F(DdaBroadcastIpcMicrotest, Eligible_WholeUnitsOfEightSlicesAnyDatatype) {
@@ -123,9 +137,12 @@ TEST_F(DdaBroadcastIpcMicrotest, Launch_SliceIsBytesNotElements) {
   EXPECT_EQ(g_ddaLaunches[0].Arg<size_t>(2), 128u);
 }
 
-TEST_F(DdaBroadcastIpcMicrotest, Launch_LaunchErrorIsReported) {
+TEST_F(DdaBroadcastIpcMicrotest, Launch_LaunchErrorIsReportedByBothKernels) {
   g_hipGetLastError = [] { return hipErrorLaunchFailure; };
-  EXPECT_EQ(BcRun(128, 0), ncclUnhandledCudaError);
+  for (size_t pipeMin : {kPipeOff, kPipeAll}) {
+    SetPipeMinBytes(pipeMin);
+    EXPECT_EQ(BcRun(128, 0), ncclUnhandledCudaError) << pipeMin;
+  }
 }
 
 TEST_F(DdaBroadcastIpcMicrotest, Launch_RejectsBadRootAndIneligibleSize) {
@@ -152,7 +169,7 @@ TEST_F(DdaBroadcastIpcMicrotest, Launch_PassesScratchBuffersSliceRankRootAndBarr
   EXPECT_TRUE(SameBarrier(launch.Arg<IpcGpuBarrier>(6), barrier_->barrierHost));
 }
 
-// sendbuff alignment counts on the root only; recvbuff alignment on every rank.
+// sendbuff alignment counts on the root only; recvbuff alignment on every rank. Same for both kernels.
 TEST_F(DdaBroadcastIpcMicrotest, Launch_VariantFollowsThisRanksBufferAlignment) {
   char* const odd = static_cast<char*>(kRecvbuff) + 4;
   const struct {
@@ -160,17 +177,85 @@ TEST_F(DdaBroadcastIpcMicrotest, Launch_VariantFollowsThisRanksBufferAlignment) 
     const void* send;
     void* recv;
     const void* kernel;
-  } cases[] = {{6, kSendbuff, kRecvbuff, BcKernel<true, true>()},
-               {6, odd, kRecvbuff, BcKernel<false, true>()},
-               {6, kSendbuff, odd, BcKernel<true, false>()},
-               {6, odd, odd, BcKernel<false, false>()},
-               {0, odd, kRecvbuff, BcKernel<true, true>()},
-               {0, kSendbuff, odd, BcKernel<true, false>()}};
-  for (const auto& c : cases) {
+    const void* pipeKernel;
+  } cases[] = {{6, kSendbuff, kRecvbuff, BcKernel<true, true>(), BcPipeKernel<true, true>()},
+               {6, odd, kRecvbuff, BcKernel<false, true>(), BcPipeKernel<false, true>()},
+               {6, kSendbuff, odd, BcKernel<true, false>(), BcPipeKernel<true, false>()},
+               {6, odd, odd, BcKernel<false, false>(), BcPipeKernel<false, false>()},
+               {0, odd, kRecvbuff, BcKernel<true, true>(), BcPipeKernel<true, true>()},
+               {0, kSendbuff, odd, BcKernel<true, false>(), BcPipeKernel<true, false>()}};
+  for (size_t pipeMin : {kPipeOff, kPipeAll}) {
+    SetPipeMinBytes(pipeMin);
+    for (const auto& c : cases) {
+      g_ddaLaunches.clear();
+      ASSERT_EQ(BcRun(128, c.root, c.send, c.recv), ncclSuccess);
+      ASSERT_EQ(g_ddaLaunches.size(), 1u);
+      EXPECT_EQ(g_ddaLaunches[0].kernel, pipeMin == kPipeOff ? c.kernel : c.pipeKernel)
+        << "pipeMin " << pipeMin << " root " << c.root << " send " << c.send << " recv " << c.recv;
+    }
+  }
+}
+
+// Pipelined kernel from the min bytes up, on its fixed grid; below it, and with the min at 0, the two-phase grid.
+TEST_F(DdaBroadcastIpcMicrotest, Pipe_FromMinBytesUpOnItsGrid) {
+  std::vector<const ncclComm*> asked;
+  g_rcclDdaBcIpcPipeMinBytes = [&asked](const ncclComm* c) {
+    asked.push_back(c);
+    return size_t{2} << 20;
+  };
+  EXPECT_EQ(ncclBroadcastDdaIpcBlocks(mock_.get(), (2 << 20) - 128, ncclInt8), 24u);
+  EXPECT_EQ(ncclBroadcastDdaIpcBlocks(mock_.get(), 2 << 20, ncclInt8), kDdaBcIpcPipeBlocks);
+  EXPECT_EQ(ncclBroadcastDdaIpcBlocks(mock_.get(), 512 << 10, ncclFloat32), kDdaBcIpcPipeBlocks);
+  ASSERT_FALSE(asked.empty());
+  EXPECT_EQ(asked.back(), mock_.get());
+
+  ASSERT_EQ(BcRun((2 << 20) - 128, 0), ncclSuccess);
+  ASSERT_EQ(BcRun(2 << 20, 0), ncclSuccess);
+  ASSERT_EQ(g_ddaLaunches.size(), 2u);
+  EXPECT_EQ(g_ddaLaunches[0].kernel, (BcKernel<true, true>()));
+  EXPECT_EQ(g_ddaLaunches[1].kernel, (BcPipeKernel<true, true>()));
+  EXPECT_EQ(g_ddaLaunches[1].grid.x, kDdaBcIpcPipeBlocks);
+  EXPECT_EQ(g_ddaLaunches[1].grid.y, 1u);
+  EXPECT_EQ(g_ddaLaunches[1].block.x, kDdaBcIpcPipeThreads);
+
+  SetPipeMinBytes(kPipeOff);
+  EXPECT_EQ(ncclBroadcastDdaIpcBlocks(mock_.get(), 64 << 20, ncclInt8), 24u);
+  g_ddaLaunches.clear();
+  ASSERT_EQ(BcRun(64 << 20, 0), ncclSuccess);
+  ASSERT_EQ(g_ddaLaunches.size(), 1u);
+  EXPECT_EQ(g_ddaLaunches[0].kernel, (BcKernel<true, true>()));
+}
+
+TEST_F(DdaBroadcastIpcMicrotest, Pipe_PassesScratchBuffersBytesSubSliceRankRootAndBarrier) {
+  SetPipeMinBytes(kPipeAll);
+  ASSERT_EQ(ncclBroadcastDdaIpc(kSendbuff, kRecvbuff, 1 << 20, ncclFloat32, 3, mock_.get(), kStream), ncclSuccess);
+  ASSERT_EQ(g_ddaLaunches.size(), 1u);
+  const DdaLaunch& launch = g_ddaLaunches[0];
+  EXPECT_EQ(launch.stream, kStream);
+  EXPECT_EQ(launch.startEvent, nullptr);
+  EXPECT_EQ(launch.stopEvent, kStopEvent);
+  ASSERT_EQ(launch.args.size(), 8u);
+  EXPECT_EQ(launch.Arg<int8_t**>(0), comm().ddaPeerPtrsDev);
+  EXPECT_EQ(launch.Arg<int8_t*>(1), kRecvbuff);
+  EXPECT_EQ(launch.Arg<size_t>(2), size_t{4} << 20);
+  EXPECT_EQ(launch.Arg<size_t>(3), size_t{384} << 10);
+  EXPECT_EQ(launch.Arg<const int8_t*>(4), kSendbuff);
+  EXPECT_EQ(launch.Arg<int>(5), 6);
+  EXPECT_EQ(launch.Arg<int>(6), 3);
+  EXPECT_TRUE(SameBarrier(launch.Arg<IpcGpuBarrier>(7), barrier_->barrierHost));
+}
+
+// An eighth of each of the 7 owners' shares per step, in [384 KiB, 1.25 MiB], rounded up to whole 8 KiB block sweeps.
+TEST_F(DdaBroadcastIpcMicrotest, Pipe_SubSliceIsAnEighthOfAnOwnersShareWithinBounds) {
+  SetPipeMinBytes(kPipeAll);
+  const std::pair<size_t, size_t> cases[] = {{128, 384 << 10},          {16 << 20, 384 << 10},
+                                             {32 << 20, 74 * (8 << 10)}, {64 << 20, 147 * (8 << 10)},
+                                             {128 << 20, 1280 << 10},    {240 << 20, 1280 << 10}};
+  for (const auto& [bytes, sub] : cases) {
     g_ddaLaunches.clear();
-    ASSERT_EQ(BcRun(128, c.root, c.send, c.recv), ncclSuccess);
+    ASSERT_EQ(BcRun(bytes, 0), ncclSuccess) << bytes;
     ASSERT_EQ(g_ddaLaunches.size(), 1u);
-    EXPECT_EQ(g_ddaLaunches[0].kernel, c.kernel) << "root " << c.root << " send " << c.send << " recv " << c.recv;
+    EXPECT_EQ(g_ddaLaunches[0].Arg<size_t>(3), sub) << bytes;
   }
 }
 

@@ -702,9 +702,11 @@ static const rcclArchThresholds rcclArchThresholds_gfx950 = {
   .forceCeScratch = true,
   .bcRingLLMaxBytes = 0,
   .bcRingLL128MaxBytes = 0,
-  // Two-phase IPC Broadcast beats IPC LL from 256 KiB and the ring to 8 MiB; the ring catches up at 16 MiB.
+  // Two-phase IPC Broadcast beats IPC LL from 256 KiB and the ring to 8 MiB; the pipelined kernel beats the ring to
+  // 64 MiB.
   .ddaBcIpcMinBytes = 256ULL*1024,
-  .ddaBcIpcMaxBytes = 8ULL*1024*1024,
+  .ddaBcIpcMaxBytes = 64ULL*1024*1024,
+  .ddaBcIpcPipeMinBytes = 8ULL*1024*1024 + 128,
 };
 
 // gfx942: DDA-IPC cap is 8 MiB for AR/AG/RS and 4 MiB for AlltoAll. No fabric LL/LL128.

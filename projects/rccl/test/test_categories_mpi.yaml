@@ -628,6 +628,20 @@ test_categories:
       - "RCCL_DDA_LL128_THRESHOLD=4194304"
       - "RCCL_DDA_BC_IPC_MIN_BYTES=262272"
       - "RCCL_DDA_BC_IPC_MAX_BYTES=8388608"
+      - "RCCL_DDA_BC_IPC_PIPE_MIN_BYTES=0"
+  standard_env_dda_bc_pipe:
+    description: "DDA IPC pipelined Broadcast data checks on 8-rank single-node gfx942/gfx950: roots, in-place, unaligned and back-to-back calls, mixed with two-phase and LL."
+    test_patterns:
+      - "DdaMPI_BroadcastIpcPipe.*"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_standard_labels
+    env_variables:
+      - "RCCL_DDA_BC=1"
+      - "RCCL_DDA_LL_THRESHOLD=262144"
+      - "RCCL_DDA_LL128_THRESHOLD=4194304"
+      - "RCCL_DDA_BC_IPC_MIN_BYTES=262272"
+      - "RCCL_DDA_BC_IPC_MAX_BYTES=67108864"
+      - "RCCL_DDA_BC_IPC_PIPE_MIN_BYTES=2097152"
   standard_env_dda_bc_ll128:
     description: "DDA fabric Broadcast two-shot LL128 data checks: nonzero root, in-place, partial last chunk, back-to-back with fan-out=1."
     test_patterns:
@@ -912,6 +926,7 @@ execution_settings:
     standard_env_dda_a2a_push_all_peer: 1200
     standard_env_dda_a2a_pull: 1200
     standard_env_dda_bc: 1200
+    standard_env_dda_bc_pipe: 1200
     standard_env_dda_bc_ll128: 1200
     standard_env_dda_bc_ll128_default_fanout: 1200
     standard_env_dda_ipc_cumem: 1200
