@@ -45,6 +45,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <vector>
 
@@ -813,17 +814,18 @@ TEST(kernel_replay_snapshot, planned_regions_materialize_into_gpu_and_pinned_are
 
 // A region larger than what is left of the GPU budget is cut on a tile boundary: the front stays on
 // the GPU and the rest goes to pinned host memory. Both restores put each piece back where it came
-// from. The runtime's own allocations are far smaller than the budget, so this buffer is the one
-// cut.
+// from. Regions are placed in address order, so the GPU budget leaves the buffer 8 MiB + 1000 bytes
+// after the regions below it, such as the device heap HIP allocates for kernels built without
+// optimization.
 TEST(kernel_replay_snapshot, region_over_the_gpu_budget_is_cut_into_pinned_host)
 {
     if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";
 
-    constexpr int    n     = static_cast<int>(N_ELEMS);
-    constexpr size_t bytes = N_ELEMS * sizeof(float);
-    constexpr auto   budgets =
-        msnp::storage_budgets_t{8U * 1024U * 1024U + 1000U, 512U * 1024U * 1024U};
-    constexpr size_t tile = 16U * 1024U;
+    constexpr int    n                    = static_cast<int>(N_ELEMS);
+    constexpr size_t bytes                = N_ELEMS * sizeof(float);
+    constexpr size_t gpu_bytes_for_buffer = 8U * 1024U * 1024U + 1000U;
+    constexpr size_t host_bytes           = 512U * 1024U * 1024U;
+    constexpr size_t tile                 = 16U * 1024U;
 
     float* buffer = nullptr;
     ASSERT_EQ(hipMalloc(&buffer, bytes), hipSuccess);
@@ -847,7 +849,19 @@ TEST(kernel_replay_snapshot, region_over_the_gpu_budget_is_cut_into_pinned_host)
     {
         SCOPED_TRACE(batched ? "captured through a batch callback" : "captured directly");
         launch_iota(buffer, 1.0f, n);
-        auto snapshot = msnp::snap(
+
+        // A snapshot that keeps everything in pinned memory lists the regions below the buffer.
+        auto below = size_t{0};
+        {
+            const auto probe = msnp::snap(*ctx, msnp::storage_budgets_t{0, host_bytes});
+            ASSERT_TRUE(probe.complete());
+            for(const auto& region : probe.regions)
+                if(std::less<>{}(region.live_address, static_cast<void*>(buffer)))
+                    below += region.size;
+        }
+
+        const auto budgets  = msnp::storage_budgets_t{below + gpu_bytes_for_buffer, host_bytes};
+        auto       snapshot = msnp::snap(
             *ctx, budgets, batched ? msnp::batch_copy_fn_t{copy_all} : msnp::batch_copy_fn_t{});
         ASSERT_TRUE(snapshot.complete());
 
