@@ -10,6 +10,13 @@ project(
 
 find_package(rocprofiler-sdk REQUIRED)
 
+# Convert the rocpd database to pftrace and otf2 via the rocpd python module
+find_package(Python3 REQUIRED)
+
+set(roctracer-roctx-rocpd-env
+    "PYTHONPATH=${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
+    )
+
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
@@ -38,6 +45,20 @@ rocprofiler_add_integration_execute_test(
     DISABLED "${TRANSPOSE_ROCTRACER_ROCTX_DISABLED}"
     FIXTURES_SETUP rocprofv3-test-roctracer-roctx-trace)
 
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-roctracer-roctx-trace-rocpd-convert
+    COMMAND
+        ${Python3_EXECUTABLE} -m rocpd convert -f pftrace otf2 -d
+        ${CMAKE_CURRENT_BINARY_DIR}/roctracer-roctx-trace -o out -i
+        ${CMAKE_CURRENT_BINARY_DIR}/roctracer-roctx-trace/out_results.db
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 120
+    LABELS "integration-tests"
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    ENVIRONMENT "${roctracer-roctx-rocpd-env}"
+    FIXTURES_REQUIRED rocprofv3-test-roctracer-roctx-trace
+    FIXTURES_SETUP rocprofv3-test-roctracer-roctx-trace-rocpd-convert)
+
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-roctracer-roctx-trace
     TEST_PATHS validate.py
@@ -52,4 +73,5 @@ rocprofiler_add_integration_validate_test(
     TIMEOUT 45
     LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-roctracer-roctx-trace
+                      rocprofv3-test-roctracer-roctx-trace-rocpd-convert
     DISABLED "${TRANSPOSE_ROCTRACER_ROCTX_DISABLED}")

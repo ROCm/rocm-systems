@@ -10,6 +10,13 @@ project(
 
 find_package(rocprofiler-sdk REQUIRED)
 
+# Convert the rocpd database to pftrace and otf2 via the rocpd python module
+find_package(Python3 REQUIRED)
+
+set(trace-hip-in-libraries-rocpd-env
+    "PYTHONPATH=${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
+    )
+
 string(REPLACE "LD_PRELOAD=" "" PRELOAD_ENV "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
 if(PRELOAD_ENV)
@@ -18,7 +25,7 @@ else()
     set(PRELOAD_ARGS)
 endif()
 
-foreach(_OUTPUT_FORMAT csv json pftrace otf2)
+foreach(_OUTPUT_FORMAT json csv rocpd)
     rocprofiler_add_integration_execute_test(
         rocprofv3-test-trace-hip-in-libraries-${_OUTPUT_FORMAT}
         COMMAND
@@ -33,6 +40,20 @@ foreach(_OUTPUT_FORMAT csv json pftrace otf2)
         PRELOAD "${PRELOAD_ENV}"
         FIXTURES_SETUP rocprofv3-test-trace-hip-in-libraries)
 endforeach()
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-trace-hip-in-libraries-rocpd-convert
+    COMMAND
+        ${Python3_EXECUTABLE} -m rocpd convert -f pftrace otf2 -d
+        ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace -o out -i
+        ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_results.db
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 120
+    LABELS "integration-tests"
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    ENVIRONMENT "${trace-hip-in-libraries-rocpd-env}"
+    FIXTURES_REQUIRED rocprofv3-test-trace-hip-in-libraries
+    FIXTURES_SETUP rocprofv3-test-trace-hip-in-libraries-rocpd-convert)
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-trace-hip-in-libraries
@@ -67,4 +88,5 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_results.otf2
     TIMEOUT 45
     LABELS "integration-tests"
-    FIXTURES_REQUIRED rocprofv3-test-trace-hip-in-libraries)
+    FIXTURES_REQUIRED rocprofv3-test-trace-hip-in-libraries
+                      rocprofv3-test-trace-hip-in-libraries-rocpd-convert)
