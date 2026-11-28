@@ -9029,8 +9029,9 @@ namespace real_arch_thresholds {
 #include "rccl_arch_thresholds.cc"
 }  // namespace real_arch_thresholds
 
-// The registered AllReduce re-route reads its bounds from the arch table: the gfx1250 SPX table re-routes, while the
-// DPX table, no table and RCCL_IGNORE_ARCH_TABLE=1 keep the choice symk's withdrawal leaves, with no grid cap.
+// The registered AllReduce re-route reads its bounds from the arch table: the gfx1250 SPX table re-routes in capture,
+// while eager SPX and DPX, whose CE-registered window ends below symMinR2, no table and RCCL_IGNORE_ARCH_TABLE=1 keep
+// the choice symk's withdrawal leaves, with no grid cap.
 TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredRerouteFollowsTheArchTable) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectAllReduce_RegisteredRerouteFollowsTheArchTable",
@@ -9054,24 +9055,235 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredRerouteFollowsTheArchTable
         RegisteredAr ar(8);
         ar.comm_->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
         ASSERT_NE(nullptr, ar.comm_->archThresholds);
-        rcclCollDecision d = ar.Select(8 * kMiB, /*capturing=*/false);
-        EXPECT_EQ(ll128, d.algo) << "SPX eager";
-        EXPECT_EQ(256u, d.ddaCap.threads);
-        d = ar.Select(16 * kMiB, /*capturing=*/true);
+        ar.ExpectUnchanged(8 * kMiB, false, NCCL_ALGO_RING, "SPX eager, above the CE-registered window");
+        rcclCollDecision d = ar.Select(16 * kMiB, /*capturing=*/true);
         EXPECT_EQ(ll128, d.algo) << "SPX capture";
         EXPECT_EQ(96u, d.ddaCap.blocks);
         ar.comm_->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
         ASSERT_NE(nullptr, ar.comm_->archThresholds);
-        ar.ExpectUnchanged(8 * kMiB, false, ceReg, "DPX eager");
+        ar.ExpectUnchanged(8 * kMiB, false, NCCL_ALGO_RING, "DPX eager, above the CE-registered window");
         ar.ExpectUnchanged(16 * kMiB, true, NCCL_ALGO_RING, "DPX capture");
         ar.comm_->archThresholds = nullptr;
         ar.ExpectUnchanged(8 * kMiB, false, ceReg, "no table, eager");
         ar.ExpectUnchanged(16 * kMiB, true, NCCL_ALGO_RING, "no table, capture");
         ar.comm_->archThresholds = &ar.table_;
-        EXPECT_EQ(ll128, ar.Select(8 * kMiB, false).algo) << "the fixture's table re-routes";
+        d = ar.Select(8 * kMiB, false);
+        EXPECT_EQ(ll128, d.algo) << "the fixture's table re-routes";
+        EXPECT_EQ(256u, d.ddaCap.threads);
         ignoreTable = 1;
         ar.ExpectUnchanged(8 * kMiB, false, ceReg, "RCCL_IGNORE_ARCH_TABLE=1, eager");
         ar.ExpectUnchanged(16 * kMiB, true, NCCL_ALGO_RING, "RCCL_IGNORE_ARCH_TABLE=1, capture");
+      });
+}
+
+// The gfx1250 tables set the eager AllReduce symk cap per rank in elements, so it grows with the comm and halves
+// for 2-byte types: DPX at 128K on every comm, SPX at 256K from 16 ranks, with smaller SPX comms keeping symMaxR2.
+// Both stop at 32M. Graph capture keeps symMaxR2Graph and RCCL_SYM_K_MAX_BYTES wins over both.
+TEST(WrapMicrotestIsolated, ArSymMaxR2Cap_Gfx1250ScalesWithRanks) {
+  RUN_ISOLATED_TEST(
+      "Wrap_ArSymMaxR2Cap_Gfx1250ScalesWithRanks",
+      []() {
+        int64_t symkMax = -1;
+        g_loadParam = [&symkMax](const char* env, int64_t def) -> int64_t {
+          return std::strcmp(env, "RCCL_SYM_K_MAX_BYTES") == 0 ? symkMax : def;
+        };
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        const rcclArchThresholds* dpx = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
+        const rcclArchThresholds* spx = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
+        ASSERT_NE(nullptr, dpx);
+        ASSERT_NE(nullptr, spx);
+        struct Cap { int nRanks; size_t fp32, bf16, fp8; };
+        const size_t spxTotal = spx->symMaxR2[ncclFuncAllReduce];
+        const struct {
+          const rcclArchThresholds* table;
+          const char* name;
+          std::vector<Cap> caps;
+        } tables[] = {{dpx,
+                       "DPX",
+                       {{8, 4 * kMiB, 2 * kMiB, 1 * kMiB},
+                        {16, 8 * kMiB, 4 * kMiB, 2 * kMiB},
+                        {32, 16 * kMiB, 8 * kMiB, 4 * kMiB},
+                        {64, 32 * kMiB, 16 * kMiB, 8 * kMiB},
+                        {128, 32 * kMiB, 32 * kMiB, 16 * kMiB}}},
+                      {spx,
+                       "SPX",
+                       {{8, spxTotal, spxTotal, spxTotal},
+                        {16, 16 * kMiB, 8 * kMiB, 4 * kMiB},
+                        {32, 32 * kMiB, 16 * kMiB, 8 * kMiB},
+                        {64, 32 * kMiB, 32 * kMiB, 16 * kMiB},
+                        {128, 32 * kMiB, 32 * kMiB, 32 * kMiB}}}};
+        for (const auto& t : tables) {
+          comm->archThresholds = t.table;
+          for (const auto& c : t.caps) {
+            comm->nRanks = c.nRanks;
+            EXPECT_EQ(c.fp32, rcclArSymMaxR2Cap(comm, /*graphMode=*/false, ncclFloat32)) << t.name << " " << c.nRanks;
+            EXPECT_EQ(c.bf16, rcclArSymMaxR2Cap(comm, /*graphMode=*/false, ncclBfloat16)) << t.name << " " << c.nRanks;
+            EXPECT_EQ(c.bf16, rcclArSymMaxR2Cap(comm, /*graphMode=*/false, ncclFloat16)) << t.name << " " << c.nRanks;
+            EXPECT_EQ(c.fp8, rcclArSymMaxR2Cap(comm, /*graphMode=*/false, ncclFloat8e4m3)) << t.name << " " << c.nRanks;
+            EXPECT_EQ(t.table->symMaxR2Graph[ncclFuncAllReduce],
+                      rcclArSymMaxR2Cap(comm, /*graphMode=*/true, ncclFloat32))
+                << t.name << " " << c.nRanks;
+          }
+          symkMax = 4 * kMiB;
+          EXPECT_EQ(4 * kMiB, rcclArSymMaxR2Cap(comm, /*graphMode=*/false, ncclFloat32))
+              << t.name << " RCCL_SYM_K_MAX_BYTES";
+          symkMax = -1;
+        }
+        comm->nRanks = 1;
+        DeleteCommWithArch(comm);
+      });
+}
+
+// gfx1250 DPX and SPX, registered eager sum AllReduce: symk from symMinR2 (8M) to the rank- and type-scaled cap
+// (DPX on every comm, SPX from 16 ranks), Ring above it, and never CE-registered or the DDA LL128 re-route. Comms
+// whose cap is below symMinR2 (2-8 ranks) take Ring from 8M. DPX capture keeps Ring; SPX capture re-routes to DDA (tested
+// with the re-route). Each size is a whole number of elements per rank.
+TEST(WrapMicrotestIsolated, SelectAllReduce_Gfx1250RegisteredSymkThenRing) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_Gfx1250RegisteredSymkThenRing",
+      []() {
+        const int symk = (int)rcclAddonAlgos_t::RCCL_SYMMETRIC;
+        struct Bf16 { int nRanks; size_t cap; };
+        const struct {
+          rcclTuningPartition partition;
+          const char* name;
+          std::vector<std::pair<int, size_t>> fp32Caps;
+          std::vector<Bf16> bf16Caps;
+          bool captureRing;
+        } tables[] = {{RCCL_TUNING_PARTITION_DPX,
+                       "DPX",
+                       {{16, 8 * kMiB}, {32, 16 * kMiB}, {64, 32 * kMiB}, {128, 32 * kMiB}},
+                       {{32, 8 * kMiB}, {64, 16 * kMiB}},
+                       true},
+                      {RCCL_TUNING_PARTITION_SPX,
+                       "SPX",
+                       {{16, 16 * kMiB}, {32, 32 * kMiB}, {64, 32 * kMiB}},
+                       {{16, 8 * kMiB}, {32, 16 * kMiB}},
+                       false}};
+        RegisteredAr ar(8);
+        for (const auto& t : tables) {
+          ar.comm_->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", t.partition);
+          ASSERT_NE(nullptr, ar.comm_->archThresholds);
+          for (const auto& c : t.fp32Caps) {
+            ar.SetRanks(c.first);
+            const std::string at = std::string(t.name) + " " + std::to_string(c.first) + " ranks, ";
+            const size_t step = sizeof(float) * (size_t)c.first;
+            ar.ExpectUnchanged(8 * kMiB, false, symk, (at + "symMinR2").c_str());
+            ar.ExpectUnchanged(c.second, false, symk, (at + "symk cap").c_str());
+            ar.ExpectUnchanged(c.second + step, false, NCCL_ALGO_RING, (at + "above the symk cap").c_str());
+            ar.ExpectUnchanged(256 * kMiB, false, NCCL_ALGO_RING, (at + "old CE-registered ceiling").c_str());
+            if (t.captureRing) ar.ExpectUnchanged(16 * kMiB, true, NCCL_ALGO_RING, (at + "capture").c_str());
+          }
+          for (const auto& c : t.bf16Caps) {
+            ar.SetRanks(c.nRanks);
+            EXPECT_EQ(symk, ar.Select(c.cap, false, true, ncclSum, ncclBfloat16).algo)
+                << t.name << " " << c.nRanks << " ranks, bf16 symk cap";
+            EXPECT_EQ(NCCL_ALGO_RING, ar.Select(2 * c.cap, false, true, ncclSum, ncclBfloat16).algo)
+                << t.name << " " << c.nRanks << " ranks, bf16 above the cap";
+          }
+          for (int nRanks : {2, 4, 8}) {
+            ar.SetRanks(nRanks);
+            const std::string at = std::string(t.name) + " " + std::to_string(nRanks) + " ranks, ";
+            ar.ExpectUnchanged(8 * kMiB, false, NCCL_ALGO_RING, (at + "cap below symMinR2").c_str());
+            ar.ExpectUnchanged(256 * kMiB, false, NCCL_ALGO_RING, (at + "old CE-registered ceiling").c_str());
+          }
+        }
+        ar.SetRanks(16);
+        ar.comm_->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
+        EXPECT_EQ(NCCL_ALGO_RING, ar.Select(8 * kMiB, false, true, ncclSum, ncclBfloat16).algo)
+            << "DPX 16 ranks, bf16 cap below symMinR2";
+      });
+}
+
+// gfx1250 DPX and SPX: the AllReduce CE-registered window ends at 4M, so only ops symk and DDA cannot take (max)
+// reach it, and Ring takes them above it. CTAPolicy=ZERO still takes CE at every size unless
+// RCCL_CE_AR_REG_MAX_MSG_BYTES=0.
+TEST(WrapMicrotestIsolated, SelectAllReduce_Gfx1250CeRegisteredWindowEndsAt4M) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_Gfx1250CeRegisteredWindowEndsAt4M",
+      []() {
+        int64_t ceArRegMax = -1;
+        g_loadParam = [&ceArRegMax](const char* env, int64_t def) -> int64_t {
+          return std::strcmp(env, "RCCL_CE_AR_REG_MAX_MSG_BYTES") == 0 ? ceArRegMax : def;
+        };
+        const int ceReg = (int)rcclAddonAlgos_t::RCCL_CE_REGISTERED;
+        RegisteredAr ar(16);
+        for (rcclTuningPartition partition : {RCCL_TUNING_PARTITION_DPX, RCCL_TUNING_PARTITION_SPX}) {
+          const char* name = partition == RCCL_TUNING_PARTITION_DPX ? "DPX" : "SPX";
+          ar.comm_->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", partition);
+          ASSERT_NE(nullptr, ar.comm_->archThresholds);
+          EXPECT_EQ(ceReg, ar.Select(4 * kMiB, /*capturing=*/false, true, ncclMax).algo) << name << " max, 4M";
+          EXPECT_EQ(NCCL_ALGO_RING, ar.Select(8 * kMiB, /*capturing=*/false, true, ncclMax).algo) << name << " max, 8M";
+          EXPECT_EQ(NCCL_ALGO_RING, ar.Select(256 * kMiB, /*capturing=*/false, true, ncclMax).algo)
+              << name << " max, 256M";
+          ar.comm_->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+          for (size_t bytes : {8 * kMiB, 64 * kMiB, 1024 * kMiB}) {
+            EXPECT_EQ(ceReg, ar.Select(bytes, /*capturing=*/false).algo) << name << " " << bytes;
+          }
+          ceArRegMax = 0;
+          EXPECT_NE(ceReg, ar.Select(64 * kMiB, /*capturing=*/false).algo) << name << " RCCL_CE_AR_REG_MAX_MSG_BYTES=0";
+          ceArRegMax = -1;
+          ar.comm_->config.CTAPolicy = NCCL_CTA_POLICY_DEFAULT;
+        }
+      });
+}
+
+// gfx1250 DPX and SPX, registered buffers: RCCL_FORCE_CE_ALLREDUCE=1 allows CE but does not widen the 4M
+// CE-registered window, so Ring keeps 8M and above; RCCL_CE_AR_REG_MAX_MSG_BYTES widens it.
+TEST(WrapMicrotestIsolated, SelectAllReduce_Gfx1250ForceCeAllReduceKeepsCeRegisteredWindow) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_Gfx1250ForceCeAllReduceKeepsCeRegisteredWindow",
+      []() {
+        int64_t forceCeAr = -1;
+        int64_t ceArRegMax = -1;
+        g_loadParam = [&forceCeAr, &ceArRegMax](const char* env, int64_t def) -> int64_t {
+          if (std::strcmp(env, "RCCL_FORCE_CE_ALLREDUCE") == 0) return forceCeAr;
+          if (std::strcmp(env, "RCCL_CE_AR_REG_MAX_MSG_BYTES") == 0) return ceArRegMax;
+          return def;
+        };
+        const int ceReg = (int)rcclAddonAlgos_t::RCCL_CE_REGISTERED;
+        RegisteredAr ar(16);
+        for (rcclTuningPartition partition : {RCCL_TUNING_PARTITION_DPX, RCCL_TUNING_PARTITION_SPX}) {
+          const char* name = partition == RCCL_TUNING_PARTITION_DPX ? "DPX" : "SPX";
+          ar.comm_->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", partition);
+          ASSERT_NE(nullptr, ar.comm_->archThresholds);
+          forceCeAr = 1;
+          EXPECT_EQ(ceReg, ar.Select(4 * kMiB, /*capturing=*/false, true, ncclMax).algo) << name << " force, 4M";
+          for (size_t bytes : {8 * kMiB, 256 * kMiB}) {
+            EXPECT_EQ(NCCL_ALGO_RING, ar.Select(bytes, /*capturing=*/false, true, ncclMax).algo)
+                << name << " force, " << bytes;
+          }
+          forceCeAr = -1;
+          ceArRegMax = 256 * kMiB;
+          for (size_t bytes : {8 * kMiB, 256 * kMiB}) {
+            EXPECT_EQ(ceReg, ar.Select(bytes, /*capturing=*/false, true, ncclMax).algo)
+                << name << " RCCL_CE_AR_REG_MAX_MSG_BYTES=256M, " << bytes;
+          }
+          EXPECT_EQ(NCCL_ALGO_RING, ar.Select(512 * kMiB, /*capturing=*/false, true, ncclMax).algo)
+              << name << " RCCL_CE_AR_REG_MAX_MSG_BYTES=256M, 512M";
+          ceArRegMax = -1;
+        }
+      });
+}
+
+// gfx1250 SPX keeps the AllGather CE-registered window to 32M, for types DDA cannot run; DPX closes it.
+TEST(WrapMicrotestIsolated, AllGatherCeRegisteredWindow_Gfx1250SpxTo32MDpxClosed) {
+  RUN_ISOLATED_TEST(
+      "Wrap_AllGatherCeRegisteredWindow_Gfx1250SpxTo32MDpxClosed",
+      []() {
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        for (rcclTuningPartition partition : {RCCL_TUNING_PARTITION_DPX, RCCL_TUNING_PARTITION_SPX}) {
+          const bool spx = partition == RCCL_TUNING_PARTITION_SPX;
+          comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", partition);
+          ASSERT_NE(nullptr, comm->archThresholds);
+          for (const std::pair<size_t, bool> c : {std::make_pair(2 * kMiB, spx), {32 * kMiB, spx},
+                                                  {32 * kMiB + 1, false}, {128 * kMiB, false},
+                                                  {8192 * kMiB, false}}) {
+            EXPECT_EQ(c.second, rcclAllGatherCeRegisteredWindow(comm, c.first, ncclSymSendRegRecvReg, false))
+                << (spx ? "SPX " : "DPX ") << c.first;
+          }
+        }
+        DeleteCommWithArch(comm);
       });
 }
 

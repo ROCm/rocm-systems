@@ -1394,6 +1394,13 @@ TEST_F(DdaMPI_AllReduceRegistered, EagerSumsWithinCeGrid)
     {
         GTEST_SKIP() << offSkip;
     }
+    const std::string windowSkip = mpiCoordinatedSkipReason(
+        rcclCeArRegMaxBytes(comm) < static_cast<size_t>(nRanks) * kMiB,
+        "the CE-registered window ends below 1 MiB shards, so there is no CE-registered call to re-route");
+    if(!windowSkip.empty())
+    {
+        GTEST_SKIP() << windowSkip;
+    }
     runRegistered(static_cast<size_t>(nRanks) * kMiB, /*capture=*/false,
                   "DdaMPI_AllReduceRegistered/EagerSumsWithinCeGrid");
 }

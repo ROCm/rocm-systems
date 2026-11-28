@@ -476,6 +476,8 @@ namespace RcclUnitTesting
       {
         setenv("RCCL_CE_ALLREDUCE", "1", 1);
         setenv("RCCL_FORCE_CE_ALLREDUCE", "1", 1);
+        // The arch table may end the registered CE window inside the sweep (gfx1250: 4M); open it over the sweep.
+        setenv("RCCL_CE_AR_REG_MAX_MSG_BYTES", std::to_string(hiBytes).c_str(), 1);
       }
 
       // Ground truth = the library's own selection log. COLL covers the addon

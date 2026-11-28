@@ -1100,6 +1100,19 @@ inline size_t rcclSymMaxR2CapTab(const rcclArchThresholds* table, ncclFunc_t fun
   return funcThresholdFromTable(caps, func);
 }
 
+// AllReduce R2 symk cap, per rcclArchThresholds::arSymMaxR2PerRankElems.
+inline size_t rcclArSymMaxR2CapTab(const rcclArchThresholds* table, bool graphMode, int nRanks,
+                                   ncclDataType_t datatype) {
+  const size_t cap = rcclSymMaxR2CapTab(table, ncclFuncAllReduce, graphMode);
+  if (rcclParamSymKMaxBytes() >= 0 || table == nullptr || graphMode || nRanks < 1 ||
+      nRanks < table->arSymMaxR2MinRanks) {
+    return cap;
+  }
+  size_t perRankCap = (size_t)nRanks * table->arSymMaxR2PerRankElems * ncclTypeSize(datatype);
+  if (table->arSymMaxR2MaxBytes != 0) perRankCap = std::min(perRankCap, table->arSymMaxR2MaxBytes);
+  return std::max(cap, perRankCap);
+}
+
 // R2 symmetric-kernel lower-bound per collective.  Below this size DDA is
 // faster than symk; symk is suppressed so DDA can win.  0 = no suppression.
 inline size_t rcclSymMinR2CapTab(const rcclArchThresholds* table, ncclFunc_t func) {
@@ -1365,6 +1378,12 @@ inline bool rcclDdaArRegEagerShardFitsTab(const rcclArchThresholds* table, int n
 }
 bool rcclDdaArRegEagerShardFits(const ncclComm* comm, size_t bytes) {
   return rcclDdaArRegEagerShardFitsTab(extAlgoArchTable(comm), comm != nullptr ? comm->nRanks : 0, bytes);
+}
+size_t rcclArSymMaxR2Cap(const ncclComm* comm, bool graphMode, ncclDataType_t datatype) {
+  return rcclArSymMaxR2CapTab(extAlgoArchTable(comm), graphMode, comm != nullptr ? comm->nRanks : 0, datatype);
+}
+size_t rcclCeArRegMaxBytes(const ncclComm* comm) {
+  return rcclCeRegMaxTab(extAlgoArchTable(comm), ncclFuncAllReduce);
 }
 
 // Elements per CE-registered reduce launch: ncclCeAllReduce's chunk for the staging size ncclCeInit resolves.
@@ -2071,7 +2090,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
     // recvRegistered is not needed here: isSymmetricKernelRequestedWin requires
     // both windows to carry NCCL_WIN_COLL_SYMMETRIC, so symkRequested=true already
     // implies recv is registered; when symkRequested=false suppression is moot.
-    const size_t symMaxR2 = rcclSymMaxR2CapTab(archTable, ncclFuncAllReduce, ceCapturing);
+    const size_t symMaxR2 = rcclArSymMaxR2CapTab(archTable, ceCapturing, comm->nRanks, datatype);
     const size_t symMinR2 = rcclSymMinR2CapTab(archTable, ncclFuncAllReduce);
     const bool symSuppressedByMax = msgBytes > symMaxR2;
     const bool symSuppressedByMin = symMinR2 > 0 && msgBytes < symMinR2;
