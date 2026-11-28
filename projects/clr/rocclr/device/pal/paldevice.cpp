@@ -29,6 +29,8 @@
 #ifdef _WIN32
 #include <d3d9.h>
 #include <d3d10_1.h>
+#include <winternl.h>
+#include <d3dkmthk.h>
 #include "CL/cl_d3d10.h"
 #include "CL/cl_d3d11.h"
 #include "CL/cl_dx9_media_sharing.h"
@@ -2033,6 +2035,43 @@ bool Device::unbindExternalDevice(uint flags, void* const pDevice[], void* pCont
   return true;
 }
 
+#if IS_WINDOWS
+// Local memory of the adapter that no process has resident, as the OS reports it for all processes
+// (Task Manager "Dedicated GPU memory"): CommitLimit - BytesResident over the memory segments,
+// without the aperture segments, which map system memory.
+static bool adapterFreeLocalMemory(const LUID& luid, Pal::gpusize* freeMemory) {
+  D3DKMT_QUERYSTATISTICS adapter = {};
+  adapter.Type = D3DKMT_QUERYSTATISTICS_ADAPTER;
+  adapter.AdapterLuid = luid;
+  if (!NT_SUCCESS(D3DKMTQueryStatistics(&adapter))) {
+    return false;
+  }
+
+  Pal::gpusize limit = 0;
+  Pal::gpusize resident = 0;
+  for (UINT i = 0; i < adapter.QueryResult.AdapterInformation.NbSegments; ++i) {
+    D3DKMT_QUERYSTATISTICS segment = {};
+    segment.Type = D3DKMT_QUERYSTATISTICS_SEGMENT;
+    segment.AdapterLuid = luid;
+    segment.QuerySegment.SegmentId = i;
+    if (!NT_SUCCESS(D3DKMTQueryStatistics(&segment))) {
+      return false;
+    }
+    const D3DKMT_QUERYSTATISTICS_SEGMENT_INFORMATION& info = segment.QueryResult.SegmentInformation;
+    if (!info.Aperture) {
+      limit += info.CommitLimit;
+      resident += info.BytesResident;
+    }
+  }
+  if (limit == 0) {
+    return false;
+  }
+
+  *freeMemory = (limit > resident) ? (limit - resident) : 0;
+  return true;
+}
+#endif
+
 bool Device::globalFreeMemory(size_t* freeMemory) const {
   constexpr uint32_t TotalFreeMemory = 0;
   constexpr uint32_t LargestFreeBlock = 1;
@@ -2092,6 +2131,20 @@ bool Device::globalFreeMemory(size_t* freeMemory) const {
       (total_alloced > info().globalMemSize_)
           ? 0
           : static_cast<size_t>((info().globalMemSize_ - total_alloced) / Ki);
+
+#if IS_WINDOWS
+  // The usage above covers this process only. Like the available memory KFD reports on Linux, also
+  // take memory other processes hold on the adapter into account. An APU mostly uses shared system
+  // memory, which these segments don't cover, so keep its value.
+  const LUID luid = {properties().osProperties.luidLowPart, properties().osProperties.luidHighPart};
+  Pal::gpusize adapter_free = 0;
+  if (!apu_system && adapterFreeLocalMemory(luid, &adapter_free)) {
+    // Cached allocations of the runtime are resident, but free for this process
+    adapter_free += cache_group_local;
+    freeMemory[TotalFreeMemory] =
+        std::min(freeMemory[TotalFreeMemory], static_cast<size_t>(adapter_free / Ki));
+  }
+#endif
 
   freeMemory[TotalFreeMemory] -=
       (freeMemory[TotalFreeMemory] > HIP_HIDDEN_FREE_MEM * Ki) ? HIP_HIDDEN_FREE_MEM * Ki : 0;
