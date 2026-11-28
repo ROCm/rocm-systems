@@ -1753,7 +1753,10 @@ void AqlQueue::ExecutePM4(uint32_t* cmd_data, size_t cmd_size_b, hsa_fence_scope
 
     if (!in_signal) {
       err = hsa_signal_create(1, 0, NULL, &local_signal);
-      assert(err == HSA_STATUS_SUCCESS);
+      if (err != HSA_STATUS_SUCCESS) {
+        assert(false && "hsa_signal_create failed in ExecutePM4");
+        throw AMD::hsa_exception(err, "Failed to create signal for PM4 execution.");
+      }
     }
 
     constexpr uint32_t AMD_AQL_FORMAT_PM4_IB = 0x1;
@@ -1797,13 +1800,16 @@ void AqlQueue::ExecutePM4(uint32_t* cmd_data, size_t cmd_size_b, hsa_fence_scope
 
     if (in_signal) hsa_signal_store_screlease(*in_signal, 0);
   } else if (!in_signal) {
-    // On gfx9 and newer, if in_signal is not provided, we block and wait for own signal
-    hsa_signal_value_t ret;
-    ret = hsa_signal_wait_scacquire(local_signal, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)-1,
-                                    HSA_WAIT_STATE_ACTIVE);
+    // On gfx9 and newer, if in_signal is not provided, we block and wait for own signal.
+    // Use do/while loop since hsa_signal_wait_scacquire may return spuriously.
+    // Break condition matches wait condition: HSA_SIGNAL_CONDITION_LT with compare value 1.
+    do {
+      hsa_signal_value_t ret = hsa_signal_wait_scacquire(
+          local_signal, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)-1, HSA_WAIT_STATE_ACTIVE);
+      if (ret < 1) break;
+    } while (true);
     err = hsa_signal_destroy(local_signal);
-    assert(ret == 0 && err == HSA_STATUS_SUCCESS);
-    (void)ret;
+    assert(err == HSA_STATUS_SUCCESS && "hsa_signal_destroy failed");
   }
   (void)err;
 }

@@ -44,6 +44,7 @@
 #define HSA_RUNTIME_PCS_RUNTIME_H
 
 #include <atomic>
+#include <chrono>
 #include <map>
 #include <mutex>
 
@@ -56,6 +57,12 @@
 
 namespace rocr {
 namespace pcs {
+
+// Stderr-only instrumentation for the PC sampling create/delivery path.
+// Gated by HSA_PCS_DEBUG=1; off by default so a normal run is unaffected.
+// Checked once and cached - the result never changes within a process
+// lifetime.
+bool PcsDebugEnabled();
 
 class PcsRuntime {
  public:
@@ -72,7 +79,8 @@ class PcsRuntime {
 
   class PcSamplingSession {
    public:
-    PcSamplingSession() : agent(NULL), thunkId_(0), active_(false){};
+    PcSamplingSession()
+        : agent(NULL), thunkId_(0), active_(false), valid_(false), sample_size_(0){};
     PcSamplingSession(core::Agent* agent, hsa_ven_amd_pcs_method_kind_t method,
                       hsa_ven_amd_pcs_units_t units, size_t interval, size_t latency,
                       size_t buffer_size, hsa_ven_amd_pcs_data_ready_callback_t data_ready_callback,
@@ -94,8 +102,27 @@ class PcsRuntime {
     void SetThunkId(HsaPcSamplingTraceId thunkId) { thunkId_ = thunkId; }
     HsaPcSamplingTraceId ThunkId() { return thunkId_; }
     bool isActive() { return active_; }
-    void start() { active_ = true; }
+    void start() {
+      active_ = true;
+      if (PcsDebugEnabled()) {
+        debug_start_time_ = std::chrono::steady_clock::now();
+        debug_total_delivered_.store(0, std::memory_order_relaxed);
+        debug_total_lost_.store(0, std::memory_order_relaxed);
+      }
+    }
     void stop() { active_ = false; }
+
+    // HSA_PCS_DEBUG accessors. Only meaningful when PcsDebugEnabled(); values
+    // are otherwise left zero-initialized and unused.
+    std::chrono::steady_clock::time_point debug_start_time() const { return debug_start_time_; }
+    size_t debug_total_delivered() const {
+      return debug_total_delivered_.load(std::memory_order_relaxed);
+    }
+    size_t debug_total_lost() const { return debug_total_lost_.load(std::memory_order_relaxed); }
+    void debug_add_delivered(size_t samples, size_t lost) {
+      debug_total_delivered_.fetch_add(samples, std::memory_order_relaxed);
+      debug_total_lost_.fetch_add(lost, std::memory_order_relaxed);
+    }
 
    private:
     HsaPcSamplingTraceId thunkId_;
@@ -103,6 +130,14 @@ class PcsRuntime {
     bool active_;  // Set to true when the session is started
     bool valid_;   // Whether configuration parameters are valid
     size_t sample_size_;
+
+    // HSA_PCS_DEBUG bookkeeping only - see PcsDebugEnabled(). The delivery
+    // path runs both on the consumer thread and on an application thread
+    // calling flush, so the counters are atomic to keep the instrumentation
+    // from introducing a data race of its own.
+    std::chrono::steady_clock::time_point debug_start_time_;
+    std::atomic<size_t> debug_total_delivered_{0};
+    std::atomic<size_t> debug_total_lost_{0};
 
     struct client_session_data_t {
       hsa_ven_amd_pcs_method_kind_t method;
