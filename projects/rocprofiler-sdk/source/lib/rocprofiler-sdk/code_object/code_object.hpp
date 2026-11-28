@@ -34,6 +34,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace rocprofiler
@@ -85,6 +86,28 @@ struct kernel_locator_t
 // it.
 std::optional<kernel_locator_t>
 locate_kernel(uint64_t kernel_object);
+
+// Layout of the AMDHSA kernel descriptor fields read for kernel symbol register counts.
+struct kernel_descriptor_t
+{
+    uint8_t  reserved0[16];
+    int64_t  kernel_code_entry_byte_offset = 0;
+    uint8_t  reserved1[20];
+    uint32_t compute_pgm_rsrc3      = 0;
+    uint32_t compute_pgm_rsrc1      = 0;
+    uint32_t compute_pgm_rsrc2      = 0;
+    uint16_t kernel_code_properties = 0;
+    uint8_t  reserved2[6];
+};
+
+// Architected VGPRs a kernel allocates on the agent named `name` (e.g. "gfx90a").
+uint32_t
+arch_vgpr_count(std::string_view name, kernel_descriptor_t kernel_code);
+
+// Accumulation VGPRs (AGPRs) a kernel allocates on the agent named `name`; 0 where the
+// architecture has none or is not supported.
+uint32_t
+accum_vgpr_count(std::string_view name, kernel_descriptor_t kernel_code);
 
 void
 iterate_loaded_code_objects(code_object_iterator_t&& func);

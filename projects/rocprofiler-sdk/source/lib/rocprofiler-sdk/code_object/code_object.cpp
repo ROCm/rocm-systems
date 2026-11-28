@@ -184,22 +184,11 @@ get_attach_table()
     return table;
 }
 
-struct kernel_descriptor_t
-{
-    uint8_t  reserved0[16];
-    int64_t  kernel_code_entry_byte_offset = 0;
-    uint8_t  reserved1[20];
-    uint32_t compute_pgm_rsrc3      = 0;
-    uint32_t compute_pgm_rsrc1      = 0;
-    uint32_t compute_pgm_rsrc2      = 0;
-    uint16_t kernel_code_properties = 0;
-    uint8_t  reserved2[6];
-};
-
 // AMD Compute Program Resource Register Three.
 enum amd_compute_gfx9_pgm_rsrc_three_t
 {
-    AMD_HSA_BITS_CREATE_ENUM_ENTRIES(AMD_COMPUTE_PGM_RSRC_THREE_ACCUM_OFFSET, 0, 5),
+    // ACCUM_OFFSET is COMPUTE_PGM_RSRC3[5:0] on gfx90a/gfx94x/gfx95x: 6 bits, values 0-63
+    AMD_HSA_BITS_CREATE_ENUM_ENTRIES(AMD_COMPUTE_PGM_RSRC_THREE_ACCUM_OFFSET, 0, 6),
     AMD_HSA_BITS_CREATE_ENUM_ENTRIES(AMD_COMPUTE_PGM_RSRC_THREE_TG_SPLIT, 16, 1)
 };
 
@@ -235,6 +224,7 @@ enum amd_kernel_code_property_t
     AMD_HSA_BITS_CREATE_ENUM_ENTRIES(AMD_KERNEL_CODE_PROPERTY_USES_DYNAMIC_STACK, 11, 1),
     AMD_HSA_BITS_CREATE_ENUM_ENTRIES(AMD_KERNEL_CODE_PROPERTY_RESERVED1, 12, 4),
 };
+}  // namespace
 
 uint32_t
 arch_vgpr_count(std::string_view name, kernel_descriptor_t kernel_code)
@@ -278,6 +268,8 @@ accum_vgpr_count(std::string_view name, kernel_descriptor_t kernel_code)
     return 0;
 }
 
+namespace
+{
 uint32_t
 sgpr_count(std::string_view name, kernel_descriptor_t kernel_code)
 {
