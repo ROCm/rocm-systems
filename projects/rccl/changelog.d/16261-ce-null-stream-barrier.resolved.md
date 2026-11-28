@@ -1,0 +1,1 @@
+* Fixed Copy Engine AllGather, AlltoAll and AllReduce on the legacy null stream issuing one more intra-batch barrier than on other streams when the batch count was even. Ranks mixing the null stream and created streams could hang.
