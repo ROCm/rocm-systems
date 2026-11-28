@@ -25,6 +25,22 @@ endif()
 
 set(RCCL_EP_GPU_TARGETS "gfx950" CACHE STRING
     "Semicolon-separated GPU architectures to compile for, e.g. gfx942;gfx950")
+
+# The kernels are wave64 throughout, so only gfx9 targets build correct code: a wave32 target compiles without a
+# diagnostic and computes wrong lane and wave indices. Drop any other target, and fail rather than build an empty
+# library.
+set(_rccl_ep_targets "")
+foreach(_t IN LISTS RCCL_EP_GPU_TARGETS)
+  if(_t MATCHES "^gfx9")
+    list(APPEND _rccl_ep_targets "${_t}")
+  else()
+    message(WARNING "rccl_ep: skipping GPU target ${_t}: the kernels are wave64 (gfx9 only)")
+  endif()
+endforeach()
+if(NOT _rccl_ep_targets)
+  message(FATAL_ERROR
+    "rccl_ep: no gfx9 target in RCCL_EP_GPU_TARGETS (${RCCL_EP_GPU_TARGETS}); the kernels are wave64")
+endif()
 set(RCCL_EP_RCCL_ROOT "" CACHE PATH
     "Root of an EP-capable RCCL install, holding include/ and lib/")
 
@@ -102,7 +118,7 @@ add_library(rccl_ep SHARED python/rccl_ep_capi.hip)
 # non-rdc object is self-contained, which is what lets dlopen load it into a
 # Python process at all.
 set_target_properties(rccl_ep PROPERTIES
-  HIP_ARCHITECTURES "${RCCL_EP_GPU_TARGETS}"
+  HIP_ARCHITECTURES "${_rccl_ep_targets}"
   POSITION_INDEPENDENT_CODE ON
   CXX_STANDARD 17
   CXX_STANDARD_REQUIRED ON)
@@ -127,6 +143,6 @@ install(TARGETS rccl_ep LIBRARY DESTINATION "python/rccl_ep")
 
 if(RCCL_EP_STANDALONE)
   message(STATUS "rccl_ep: build type    ${CMAKE_BUILD_TYPE}")
-  message(STATUS "rccl_ep: targets       ${RCCL_EP_GPU_TARGETS}")
+  message(STATUS "rccl_ep: targets       ${_rccl_ep_targets}")
   message(STATUS "rccl_ep: RCCL library  ${RCCL_EP_RCCL_LIBRARY}")
 endif()

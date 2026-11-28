@@ -1,0 +1,1 @@
+* `rccl_ep` dispatch no longer synchronizes the host between pushing tokens and compacting them, the routing plan scans each destination with a block of waves instead of one wave, and combine reduces a token's rows lane-parallel. Results are bit-identical; the EP window is 256 bytes smaller.
