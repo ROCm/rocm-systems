@@ -760,6 +760,19 @@ set_tests_properties(intercept_queue_logic_test PROPERTIES
   LABELS "quick;standard;pr;pre-commit"
   TIMEOUT 60)
 
+# Re-run the existing async copy test with SDMA disabled. That routes every copy
+# through the memory blit kernels in core/runtime/amd_blit_kernel.cpp, so this
+# covers the shaders GpuAgent::AssembleShader() assembles on whichever GPU the
+# suite runs on. It does not reach the image blit code objects selected by
+# BlitKernel::GetPatchedBlitObject() in image/blit_kernel.cpp - those are only
+# loaded by the image path, which a linear async copy never takes.
+add_test(NAME rocrtst_async_copy_blit_kernel
+  COMMAND ${ROCRTST} --gtest_filter=rocrtstPerf.Memory_Async_Copy)
+set_tests_properties(rocrtst_async_copy_blit_kernel PROPERTIES
+  ENVIRONMENT "HSA_ENABLE_SDMA=0"
+  LABELS "standard;pr"
+  TIMEOUT 600)
+
 #Build kernels
 add_custom_target(rocrtst_kernels ALL DEPENDS ${HSACO_TARG_LIST})
 
@@ -832,6 +845,8 @@ if(EXISTS "${TEST_CATEGORIES_CMAKE}" AND EXISTS "${TEST_CATEGORIES_YAML}")
         "\n"
         "add_test(intercept_queue_logic_test \"../intercept_queue_logic_test\")\n"
         "set_tests_properties(intercept_queue_logic_test PROPERTIES LABELS \"quick;standard;pr;pre-commit\" TIMEOUT 60)\n\n"
+        "add_test(rocrtst_async_copy_blit_kernel \"../${ROCRTST}\" \"--gtest_filter=rocrtstPerf.Memory_Async_Copy\")\n"
+        "set_tests_properties(rocrtst_async_copy_blit_kernel PROPERTIES ENVIRONMENT \"HSA_ENABLE_SDMA=0\" LABELS \"standard;pr\" TIMEOUT 600)\n\n"
     )
 
     install(
