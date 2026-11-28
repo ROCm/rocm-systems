@@ -16,6 +16,7 @@ import re
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 from typing import Any, Dict, List, Optional
 
 # Make `policy_check` importable regardless of the working directory.
@@ -497,6 +498,106 @@ class IntegrationBlobTests(unittest.TestCase):
         for key, errs in result.items():
             with self.subTest(check=key):
                 self.assertEqual(errs, [])
+
+
+# ----------------------------- duplicate check-runs --------------------------
+
+
+def make_run(name: str, conclusion: Optional[str]) -> Dict[str, Any]:
+    """Build a check-run payload; a `None` conclusion means still running."""
+    return {"name": name, "conclusion": conclusion}
+
+
+def both_orders(a: Dict[str, Any], b: Dict[str, Any]) -> List[List[Dict[str, Any]]]:
+    """Return two runs in both orders, since the API's order isn't defined."""
+    return [[a, b], [b, a]]
+
+
+class DuplicateCheckRunTests(unittest.TestCase):
+    """Several workflows can create a required check-run with the same name.
+
+    A passing run must not hide a failed or unfinished one, whatever order the
+    API returns them in.
+    """
+
+    def setUp(self) -> None:
+        self.policy = make_policy()
+
+    def _table_row(self, runs: List[Dict[str, Any]]) -> pc.CheckResult:
+        """Return the results-table row for the one required check."""
+        rows = pc.build_check_results(self.policy, runs)
+        self.assertEqual(len(rows), 1)
+        return rows[0]
+
+    def test_failure_beats_success(self) -> None:
+        """A failed duplicate makes the check fail."""
+        for runs in both_orders(
+            make_run("pre-commit", "success"), make_run("pre-commit", "failure")
+        ):
+            with self.subTest(runs=runs):
+                missing, failing, _ = pc.summarize_required_checks(self.policy, runs)
+                self.assertEqual(missing, [])
+                self.assertEqual(failing, ["pre-commit=failure"])
+                row = self._table_row(runs)
+                self.assertFalse(row.passed)
+                self.assertFalse(row.pending)
+
+    def test_running_beats_success(self) -> None:
+        """An unfinished duplicate keeps the check pending."""
+        for runs in both_orders(
+            make_run("pre-commit", "success"), make_run("pre-commit", None)
+        ):
+            with self.subTest(runs=runs):
+                missing, failing, conc = pc.summarize_required_checks(self.policy, runs)
+                self.assertEqual(missing, [])
+                self.assertEqual(failing, [])
+                self.assertEqual(conc["pre-commit"], "null")
+                row = self._table_row(runs)
+                self.assertFalse(row.passed)
+                self.assertTrue(row.pending)
+
+    def test_failure_beats_running(self) -> None:
+        """A failure is reported without waiting for the other duplicate."""
+        for runs in both_orders(
+            make_run("pre-commit", None), make_run("pre-commit", "cancelled")
+        ):
+            with self.subTest(runs=runs):
+                _, failing, _ = pc.summarize_required_checks(self.policy, runs)
+                self.assertEqual(failing, ["pre-commit=cancelled"])
+
+    def test_all_passing_duplicates_pass(self) -> None:
+        """Duplicates that all pass, in any passing state, pass."""
+        runs = [make_run("pre-commit", "success"), make_run("pre-commit", "skipped")]
+        missing, failing, _ = pc.summarize_required_checks(self.policy, runs)
+        self.assertEqual((missing, failing), ([], []))
+        row = self._table_row(runs)
+        self.assertTrue(row.passed)
+
+    def test_other_names_do_not_interfere(self) -> None:
+        """A failing run with another name doesn't fail a required check."""
+        runs = [make_run("pre-commit", "success"), make_run("lint", "failure")]
+        _, failing, _ = pc.summarize_required_checks(self.policy, runs)
+        self.assertEqual(failing, [])
+
+    def test_malformed_runs_are_ignored(self) -> None:
+        """Entries that aren't dicts, or have no string name, are skipped."""
+        good = make_run("pre-commit", "success")
+        runs: List[Any] = ["junk", {"conclusion": "failure"}, good]
+        self.assertEqual(pc.runs_by_name(runs), {"pre-commit": good})
+
+    def test_failure_comment_sees_failed_duplicate(self) -> None:
+        """The pre-commit help comment is posted if any duplicate failed."""
+        policy = make_policy(
+            precommit_failure_comment=pc.FailureComment(title="t", body="b")
+        )
+        for runs in both_orders(
+            make_run("pre-commit", "success"), make_run("pre-commit", "failure")
+        ):
+            with self.subTest(runs=runs), mock.patch.object(
+                pc, "upsert_comment"
+            ) as upsert:
+                pc.maybe_comment_precommit_failure("o", "r", 1, "tok", policy, runs)
+                upsert.assert_called_once()
 
 
 # ----------------------------- load_policy -----------------------------------
