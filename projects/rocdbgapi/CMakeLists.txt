@@ -322,6 +322,7 @@ option(BUILD_SHARED_LIBS "Build amd-dbgapi as a shared library" ON)
 # -DENABLE_TESTS=OFF -DENABLE_UNIT_TESTS=ON builds only the unit tier.
 option(ENABLE_TESTS "Build all rocdbgapi test suites" OFF)
 option(ENABLE_UNIT_TESTS "Build rocdbgapi unit tests" ${ENABLE_TESTS})
+option(ENABLE_FEATURE_TESTS "Build rocdbgapi feature tests" ${ENABLE_TESTS})
 
 if(ENABLE_ASSERTIONS)
     if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
@@ -702,15 +703,14 @@ install(
     COMPONENT dev
 )
 
-# Only one tier exists today, so this condition is just the unit tier's
-# option.  When a second tier is added, extend it to
-# ENABLE_UNIT_TESTS OR ENABLE_<TIER>_TESTS so that test/ is entered
-# whenever any tier is requested.
-if(ENABLE_UNIT_TESTS)
+# Skip the tests if no tier is required.
+if(ENABLE_UNIT_TESTS OR ENABLE_FEATURE_TESTS)
     enable_testing()
-    # Build the test-only seam target that exposes internal C++ classes
-    # to unit tests.
-    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/AmdDbgapiInternal.cmake)
+    if(ENABLE_UNIT_TESTS)
+        # Build the test-only seam target that exposes internal C++ classes
+        # to unit tests.  Feature tests link only the public library.
+        include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/AmdDbgapiInternal.cmake)
+    endif()
     add_subdirectory(test)
 endif()
 
