@@ -1,8 +1,8 @@
 # rccl_ep
 
-Intranode expert-parallel dispatch and combine for RCCL on AMD GPUs: the
-scale-up leg of an MoE all-to-all, where every peer is reachable by load and
-store.
+Expert-parallel dispatch and combine for RCCL on AMD GPUs: the all-to-all of an
+MoE layer. Within a node every peer is reached by load and store; across nodes
+peers are reached by RCCL send/recv (see Internode below).
 
 Dispatch is a push model: each rank writes tokens straight into its
 peers' symmetric memory, so a receiver reconstructs the required receive
@@ -15,8 +15,59 @@ Beyond plain dispatch and combine the module offers an output layout already
 grouped by expert, so an expert GEMM needs no permute; FP8; and cached replay,
 which reuses a routing plan with reproducible row assignment.
 
-Scale-up only. No scale-out path, no low-latency path. The path needs only
-load/store access to peer memory -- no GIN backend and no rocSHMEM.
+No low-latency path. The scale-up path needs only load/store access to peer
+memory -- no GIN backend and no rocSHMEM.
+
+### Internode
+
+The internode path is opt-in: a buffer whose group spans more than one node
+takes it only when every rank passes `allow_internode=True`, and is refused at
+construction otherwise; C callers opt in by creating the handle with
+`ep_create_nodes` (below). A single-node group stays on the scale-up path. Nodes
+are grouped as RCCL groups them (`NCCL_HOSTID`, else the host name); nodes must
+be equal in size and each node's ranks contiguous. Ranks on the same node keep
+the load/store path through a window registered on a per-node split of the
+communicator; a rank on another node is reached by RCCL `ncclSend` / `ncclRecv`,
+so any RCCL network transport works and no GPU-initiated RDMA is needed. Up to
+64 ranks, 16 per node and 16 nodes.
+
+The EP domain is flat, `get_logical_domain_size() == (1, num_ranks)`, with no
+per-node pre-reduction. Rows for a remote peer are staged in a local outbox laid
+out like the window and sent on the global communicator, so both paths share the
+dispatch and combine kernels. The outbox and inbox each take one window's worth
+of memory. Every uncached internode dispatch exchanges its counts on the host
+before the payload moves (one more host synchronization), since each receive is
+posted at its exact size.
+
+Why send/recv and not GIN: send/recv runs on every RCCL network transport,
+sockets included, in the default build, while GIN's GPU-initiated backend
+(rocSHMEM GDA) needs `ENABLE_ROCSHMEM_GIN`, off by default, and a GDA-capable
+NIC; send/recv also keeps this path small. Its cost is that count exchange: at 2
+nodes x 8 gfx950 GPUs (4096 tokens per rank, hidden 7168, 256 experts, top-8),
+an uncached bf16 dispatch took 0.16-0.22 ms longer than a cached one, which
+skips the plan and the count exchange, about 3% of a 6 ms dispatch; on one node,
+with no count exchange, that gap is 0.06 ms. Moving to GIN takes a two-level
+mode first (one copy per destination node, forwarded there over peer memory),
+then that inter-node leg over GIN, opt-in, with send/recv as the fallback: a
+window on the communicator of same-index ranks across nodes, and one-sided puts
+with signals in place of exact-size receives, so the payload no longer waits for
+counts on the host.
+
+In the C ABI, `ep_create_nodes(..., node_size)` creates a handle for
+`num_ranks / node_size` nodes, node n holding ranks
+`[n * node_size, (n + 1) * node_size)`, and `ep_create` is the same with
+`node_size = num_ranks`. After `ep_plan`, `ep_inter_counts` all-gathers the
+plan's send counts and returns this rank's send and receive counts, and
+`ep_inter_bind` binds them, with the plan's `send_list`, for the dispatch or
+combine that follows; an internode dispatch or combine with nothing bound fails.
+`ep_dispatch` also refuses a `send_list` or `num_tokens` other than the bound
+ones, and `ep_combine` a `num_tokens` other than the bound one. A dispatch whose
+send counts, or a count a same-node peer published, differ from the bound counts
+fails after its transfers, which all run at the bound counts, so no peer is left
+waiting: every plan needs its own `ep_inter_counts` and `ep_inter_bind` before
+it is dispatched. A binding stays until it is replaced or until `ep_configure`
+changes the shape, which drops it, so the Python layer keeps the counts on the
+handle and rebinds them before a cached dispatch and before each combine.
 
 ## Layout
 
@@ -76,6 +127,11 @@ is an optional override:
 | `HSA_NO_SCRATCH_RECLAIM=1` | Required by the kernels' scratch usage. |
 | `RCCL_EP_LIB` | Optional. Overrides the co-located `librccl_ep.so`; unnecessary after `cmake --install`, and unused when RCCL was built with `ENABLE_RCCL_EP_IN_LIBRCCL`. |
 
+`NCCL_WIN_ENABLE` must not be 0: the EP window is a symmetric window, and with
+symmetric windows disabled `ep_configure` fails at window registration. RCCL
+reads it once per process, at the first single-node communicator, which is
+usually torch's.
+
 `NCCL_DMABUF_ENABLE` is deliberately **not** set: torch's older RCCL is live in
 the same process and segfaults on it.
 
@@ -85,3 +141,22 @@ needs a cuMem-capable HIP that no published wheel provides, so all three must
 resolve to the system ROCm, with `/opt/rocm/llvm/lib` on the search path.
 Point all three at the system copies before importing torch and this package
 together; the process must end up with exactly one HIP runtime loaded.
+
+## Calling contract
+
+- Every C entry point checks its own arguments and returns -1 (or a null handle) with one
+  `[rccl_ep] <fn>: <reason>` line before it launches anything or changes any state; the
+  Python layer checks token, routing and bias inputs before it launches anything, raising
+  `ValueError` (`TypeError` for a bias that is not bf16).
+- Tokens are 2-D: dispatch takes `x` as `[num_tokens, hidden]`, bf16 or fp8 e4m3 with
+  scales `[num_tokens, ceil(hidden / 128)]` of any floating dtype, which the kernels take as
+  float32.
+- A top-k id of -1 or outside `[0, num_experts)` is ignored; an int64 id is clamped to
+  `[-1, num_experts]` before it is narrowed to int32, so none truncates onto a valid expert. An expert repeated within
+  one token's top-k is delivered in each of its slots by the plain and expanded layouts.
+- An internode transfer that fails part-way leaves the handle broken: it refuses every
+  call but `destroy()`, which then leaks the handle's device memory, window and
+  communicators, since a kernel may still be using them. The peers of that rank
+  can still block in their own `destroy()`.
+- The kernels are wave64: the CMake build compiles gfx9 targets only, and `ep_create`
+  fails on every rank of a group in which any rank's device is not wave64.

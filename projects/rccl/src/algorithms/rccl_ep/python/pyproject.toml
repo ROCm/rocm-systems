@@ -2,7 +2,7 @@
 name = "rccl_ep"
 version = "0.1.0"
 requires-python = ">=3.9"
-description = "rccl_ep: intranode expert-parallel dispatch and combine for RCCL on AMD GPUs (ctypes bindings)"
+description = "rccl_ep: intranode and internode expert-parallel dispatch and combine for RCCL on AMD GPUs (ctypes bindings)"
 # No `license` key: PEP 639 emits it as a machine-readable License-Expression,
 # and no single SPDX identifier fits RCCL's BSD-3-Clause variant with its MIT
 # portions. See LICENSE.txt.

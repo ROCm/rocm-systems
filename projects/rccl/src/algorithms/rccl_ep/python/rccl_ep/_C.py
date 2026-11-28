@@ -4,7 +4,7 @@
 # Supplies the `_C` module name in pure Python. The native code this package
 # needs is librccl_ep.so, loaded through ctypes in __init__.py, so there is no
 # compiled Python extension to import. This module declares the symbols a caller
-# may pull in at module scope; none are reached by the intranode path, and each
+# may pull in at module scope; none are reached by this package, and each
 # raises rather than returning a plausible value, so a caller that does need one
 # fails loudly.
 #
@@ -15,7 +15,7 @@ class EventHandle:
     """Placeholder for the CUDA event handle a compiled `_C` would export.
 
     Needed only because callers import the symbol eagerly at module scope, for
-    forward compatibility, even though nothing on the intranode path ever
+    forward compatibility, even though nothing in this package ever
     constructs one.
 
     The async surface is EventOverlap in __init__.py, backed by a real
@@ -24,7 +24,7 @@ class EventHandle:
 
     def __init__(self, *args, **kwargs):
         raise NotImplementedError(
-            "_C.EventHandle is not provided. The intranode "
+            "_C.EventHandle is not provided. The data "
             "path is synchronous and uses torch.cuda.Event via EventOverlap.")
 
     def current_stream_wait(self, *args, **kwargs):
@@ -34,7 +34,7 @@ class EventHandle:
 def _unavailable(name):
     def f(*args, **kwargs):
         raise NotImplementedError(
-            f"_C.{name} is not provided. The intranode path "
+            f"_C.{name} is not provided. rccl_ep "
             f"creates its own communicator from a broadcast unique id, so it "
             f"never needs to adopt PyTorch's.")
     return f

@@ -18,6 +18,11 @@
 namespace rccl_ep {
 
 constexpr int kMaxRanks = 16;   // intranode scale-up domain
+// Internode bounds: the whole EP group and its node count, each node at most kMaxRanks. No kernel
+// sizes an array by kMaxRanks; an internode handle runs the shared kernels with num_ranks up to
+// kMaxWorldRanks.
+constexpr int kMaxWorldRanks = 64;
+constexpr int kMaxNodes = 16;
 constexpr int kMaxTopk = 16;
 // Fixed width of one gcnArchName slot in the window's arch region.
 constexpr int kArchLen = 64;
@@ -54,16 +59,22 @@ struct EpConfig {
   }
 };
 
+// The rank owning expert `e`, or -1 for an id outside [0, num_experts), which every path ignores.
+__host__ __device__ inline int owner_of(const EpConfig& c, int e) {
+  return (e >= 0 && e < c.num_experts) ? e / c.experts_per_rank() : -1;
+}
+
 // Byte offsets of each region within a rank's symmetric window.
 //
 //   [ counts    ] num_ranks int32          how many tokens source s sent me
-//   [ flags     ] num_ranks uint32         per-source completion flag
 //   [ x         ] R * T * hidden  (bf16)   token payload, staged by source
+//   [ sf        ] R * T * hidden_sf float  fp8 scaling factors
 //   [ topk_idx  ] R * T * num_topk int32
 //   [ topk_w    ] R * T * num_topk float
 //   [ src_idx   ] R * T int32              src_token_global_idx
 //   [ y         ] R * T * num_topk * hidden  combine payload, staged by owner
 //   [ cw        ] R * T * num_topk float   combine top-k weights, by owner
+//   [ arch      ] R * kArchLen char        gcnArchName per rank
 //
 // where R = num_ranks, T = num_max_tokens_per_rank.
 //
@@ -72,7 +83,7 @@ struct EpConfig {
 // `y` is per (slot, topk), not per slot, because combine sums in strict topk
 // order; pre-reducing per rank reorders it and fails the bit-exact bar.
 struct EpWindowLayout {
-  size_t off_counts, off_flags, off_x, off_sf, off_topk_idx, off_topk_w, off_src_idx, off_y, off_cw, off_arch;
+  size_t off_counts, off_x, off_sf, off_topk_idx, off_topk_w, off_src_idx, off_y, off_cw, off_arch;
   size_t total_bytes;
 
   __host__ __device__ static EpWindowLayout make(const EpConfig& c, size_t elem_bytes) {
@@ -83,8 +94,6 @@ struct EpWindowLayout {
     size_t o = 0;
     l.off_counts = o;
     o = align_up(o + R * sizeof(int32_t));
-    l.off_flags = o;
-    o = align_up(o + R * sizeof(uint32_t));
     l.off_x = o;
     o = align_up(o + slots * c.hidden * elem_bytes);
     // FP8 scaling factors; always reserved so a layout can serve both dtypes.
