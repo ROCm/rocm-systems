@@ -421,6 +421,23 @@ TEST_F(EnqueueMicrotest, WarpSpeedPlanner_OppositeMixedOrderingStaysOrdinary) {
   scene.ExpectConservedInOrder(/*accepted=*/5);
 }
 
+TEST_F(EnqueueMicrotest, WarpSpeedPlanner_WarpSpeedCommCutsPlanAtModeChange) {
+  WarpSpeedScheduleScene scene({false, true, true},
+                               {NCCL_ALGO_RING, NCCL_ALGO_RING, NCCL_ALGO_RING},
+                               /*maxWorkBatches=*/3);
+  scene.bp.c()->warpSpeedChannelMultiplier = 4;
+  scene.topo->warpSpeedEnabled = true;
+
+  EXPECT_EQ(1, scene.ScheduleAndFinish());
+  scene.ExpectWarpSpeedMode(false);
+  scene.ExpectConservedInOrder(/*accepted=*/1);
+
+  scene.ResetPlan();
+  EXPECT_EQ(2, scene.ScheduleAndFinish());
+  scene.ExpectWarpSpeedMode(true);
+  scene.ExpectConservedInOrderFrom(/*consumed=*/1, /*accepted=*/2);
+}
+
 TEST_F(EnqueueMicrotest, WarpSpeedPlanner_TwoEligibleThenOrdinaryStayInOneOrdinaryPlan) {
   WarpSpeedScheduleScene scene({true, true, false},
                                {NCCL_ALGO_RING, NCCL_ALGO_RING, NCCL_ALGO_RING},

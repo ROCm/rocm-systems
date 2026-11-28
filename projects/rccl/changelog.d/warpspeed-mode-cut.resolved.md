@@ -1,0 +1,1 @@
+* Fixed WarpSpeed being turned off for a whole kernel plan when one collective in it does not use WarpSpeed, for example one below the WarpSpeed size threshold grouped with larger ones. On a WarpSpeed communicator the planner now ends a plan where the mode changes, so the WarpSpeed collectives are planned together and keep wave-per-channel.

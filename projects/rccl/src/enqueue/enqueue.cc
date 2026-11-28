@@ -954,6 +954,11 @@ static ncclResult_t scheduleCollTasksToPlan(struct ncclComm* comm, struct ncclKe
   };
 #ifdef ENABLE_WARP_SPEED
   bool capProven = false;
+  // A plan runs wave-per-channel only if every collective in it does, so on a WarpSpeed comm
+  // end the plan at the first task whose mode differs from the head's.
+  bool const wsModeCut = comm->warpSpeedChannelMultiplier > 1 && comm->topo->warpSpeedEnabled;
+  struct ncclTaskColl* const wsHead = ncclIntruQueueHead(&planner->collTaskQueue);
+  bool const wsHeadWave = wsHead != nullptr && wsHead->useWarpSpeed && wsHead->algorithm == NCCL_ALGO_RING;
 #endif
   do {
     size_t workBytes = 0;
@@ -971,6 +976,11 @@ static ncclResult_t scheduleCollTasksToPlan(struct ncclComm* comm, struct ncclKe
       // per-kind channel budget.
       bool taskAggIsolate = task->aggIsolate;
       if (taskAggIsolate && nPlanColls > 0) goto plan_full; // leave it to start a fresh plan
+#ifdef ENABLE_WARP_SPEED
+      if (wsModeCut && nPlanColls > 0 && (task->useWarpSpeed && task->algorithm == NCCL_ALGO_RING) != wsHeadWave) {
+        goto plan_full; // different mode: leave it to start the next plan
+      }
+#endif
       nPlanColls += 1;
       workBytes += workNode->size;
       accountTask(task);
