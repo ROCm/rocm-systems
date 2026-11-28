@@ -1873,12 +1873,76 @@ int RocJpegApiNegativeTests::TestStreamParseFuzz() {
     return EXIT_SUCCESS;
 }
 
+int RocJpegApiNegativeTests::TestCreateKeepsCurrentDevice() {
+    std::cout << "info: Executing current-device tests for the rocJpegCreate API" << std::endl;
+    int num_devices = 0;
+    if (hipGetDeviceCount(&num_devices) != hipSuccess || num_devices < 2) {
+        std::cout << "info: Skipping the current-device tests, which need at least two GPUs" << std::endl;
+        return EXIT_SUCCESS;
+    }
+    const int last_device = num_devices - 1;
+    // rocJpegCreate must leave the calling thread's current device unchanged whatever it returns: it succeeds with
+    // ROCJPEG_BACKEND_HARDWARE on a device that can decode, and fails with ROCJPEG_BACKEND_HYBRID, which is not
+    // implemented, or an invalid backend only after the handle's device has been set up. Each backend is tried with the
+    // handle on the last device from device 0, and with the handle on device 0 from the last device.
+    const struct {
+        RocJpegBackend backend;
+        const char *name;
+    } backends[] = {{ROCJPEG_BACKEND_HARDWARE, "ROCJPEG_BACKEND_HARDWARE"},
+                    {ROCJPEG_BACKEND_HYBRID, "ROCJPEG_BACKEND_HYBRID"},
+                    {static_cast<RocJpegBackend>(-1), "an invalid backend"}};
+    const struct {
+        int handle_device;
+        int caller_device;
+    } directions[] = {{last_device, 0}, {0, last_device}};
+    for (const auto &[handle_device, caller_device] : directions) {
+        for (const auto &[backend, backend_name] : backends) {
+            if (hipSetDevice(caller_device) != hipSuccess) {
+                std::cerr << "Failed to make device " << caller_device << " current" << std::endl;
+                return EXIT_FAILURE;
+            }
+            RocJpegHandle handle = nullptr;
+            RocJpegStatus rocjpeg_status = rocJpegCreate(backend, handle_device, &handle);
+            // rocJpegCreate returns the handle even if initializing it fails, so it is destroyed whatever the status.
+            std::unique_ptr<void, RocJpegHandleDeleter> handle_owner(handle);
+            int device_after = -1;
+            if (hipGetDevice(&device_after) != hipSuccess || device_after != caller_device) {
+                std::cerr << "rocJpegCreate with " << backend_name << " on device " << handle_device << " returned "
+                          << rocJpegGetErrorName(rocjpeg_status) << ": Expected the calling thread to stay on device "
+                          << caller_device << " but got device " << device_after << std::endl;
+                return EXIT_FAILURE;
+            }
+        }
+    }
+    // A new thread starts on device 0 without calling hipSetDevice, like an application thread that never selects a
+    // device, and must still be on device 0 after creating a handle on the last device.
+    RocJpegStatus thread_status = ROCJPEG_STATUS_EXECUTION_FAILED;
+    int thread_device_after = -1;
+    std::thread caller([&]() {
+        RocJpegHandle handle = nullptr;
+        thread_status = rocJpegCreate(ROCJPEG_BACKEND_HARDWARE, last_device, &handle);
+        std::unique_ptr<void, RocJpegHandleDeleter> handle_owner(handle);
+        if (hipGetDevice(&thread_device_after) != hipSuccess) {
+            thread_device_after = -1;
+        }
+    });
+    caller.join();
+    if (thread_device_after != 0) {
+        std::cerr << "rocJpegCreate on device " << last_device << " from a new thread returned "
+                  << rocJpegGetErrorName(thread_status) << ": Expected the thread to stay on device 0 but got device "
+                  << thread_device_after << std::endl;
+        return EXIT_FAILURE;
+    }
+    return EXIT_SUCCESS;
+}
+
 int RocJpegApiNegativeTests::CheckCrossDeviceDecode(int handle_device, int caller_device) {
     std::cout << "info: Decoding with a handle on device " << handle_device << " from threads on device " << caller_device << std::endl;
-    // Everything up to and including the reference decode is done with handle_device current and only checks that
-    // rocJPEG can decode on handle_device at all. A failure there skips this direction instead of failing the test,
-    // because on a GPU that rocJPEG cannot use, such as an integrated GPU it has no kernels for, the comparisons below
-    // would test nothing.
+    // Everything up to and including the reference decode, except creating the handles under test, is done with
+    // handle_device current and only checks that rocJPEG can decode on handle_device at all. A failure there skips this
+    // direction instead of failing the test, because on a GPU that rocJPEG cannot use, such as an integrated GPU it has
+    // no kernels for, the comparisons below would test nothing. Every rocJpegCreate, the reference handle's included,
+    // must still leave the calling thread's current device unchanged, whatever it returns, or the test fails.
     if (hipSetDevice(caller_device) != hipSuccess || hipSetDevice(handle_device) != hipSuccess) {
         std::cout << "info: Skipping, devices " << caller_device << " and " << handle_device << " cannot both be made current" << std::endl;
         return EXIT_SUCCESS;
@@ -1914,13 +1978,40 @@ int RocJpegApiNegativeTests::CheckCrossDeviceDecode(int handle_device, int calle
     std::unique_ptr<void, HipBufferDeleter> buffers[kNumOutputs];
     RocJpegImage outputs[kNumOutputs] = {};
     for (int k = 0; k < kNumOutputs; k++) {
+        // The reference handle is created with handle_device current, and the handles under test with caller_device
+        // current, which rocJpegCreate must leave current whatever it returns. Their decodes then match the reference
+        // only if rocJpegCreate set them up on handle_device all the same.
+        const int create_device = (k == 0) ? handle_device : caller_device;
+        if (hipSetDevice(create_device) != hipSuccess) {
+            std::cerr << "Failed to make device " << create_device << " current" << std::endl;
+            return EXIT_FAILURE;
+        }
         RocJpegHandle handle = nullptr;
         rocjpeg_status = rocJpegCreate(ROCJPEG_BACKEND_HARDWARE, handle_device, &handle);
         // rocJpegCreate returns the handle even if initializing it fails, so it is owned before the status is checked.
         handles[k].reset(handle);
+        int device_after = -1;
+        if (hipGetDevice(&device_after) != hipSuccess || device_after != create_device) {
+            std::cerr << "rocJpegCreate on device " << handle_device << " returned " << rocJpegGetErrorName(rocjpeg_status)
+                      << ": Expected the calling thread to stay on device " << create_device << " but got device "
+                      << device_after << std::endl;
+            return EXIT_FAILURE;
+        }
         if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
-            std::cout << "info: Skipping, rocJpegCreate on device " << handle_device << " returned " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
-            return EXIT_SUCCESS;
+            if (k == 0) {
+                std::cout << "info: Skipping, rocJpegCreate on device " << handle_device << " returned " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+                return EXIT_SUCCESS;
+            }
+            // The reference handle was created on handle_device, so failing to create one there with caller_device
+            // current is a regression, not a device rocJPEG cannot use.
+            std::cerr << "rocJpegCreate on device " << handle_device << " with device " << caller_device
+                      << " current: Expected ROCJPEG_STATUS_SUCCESS but got " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+            return EXIT_FAILURE;
+        }
+        // The output buffers are allocated on handle_device.
+        if (hipSetDevice(handle_device) != hipSuccess) {
+            std::cerr << "Failed to make device " << handle_device << " current" << std::endl;
+            return EXIT_FAILURE;
         }
         void *buffer = nullptr;
         if (hipMalloc(&buffer, output_size) != hipSuccess) {
@@ -2037,7 +2128,7 @@ int RocJpegApiNegativeTests::TestCrossDeviceDecode() {
 int RocJpegApiNegativeTests::RunTests() {
     if (TestInvalidStreamCreate() || TestInvalidStreamParse () || TestInvalidStreamDestroy() || TestInvalidCreate() || TestInvalidDestroy() ||
         TestInvalidGetImageInfo() || TestInvalidDecode() || TestInvalidDecodeBatched() || TestInvalidGetErrorName() ||
-        TestInvalidGetDecoderCaps() || TestStreamParseFuzz() || TestCrossDeviceDecode()) {
+        TestInvalidGetDecoderCaps() || TestStreamParseFuzz() || TestCreateKeepsCurrentDevice() || TestCrossDeviceDecode()) {
         std::cerr << "One or more negative tests failed." << std::endl;
         return EXIT_FAILURE;
     } else {

@@ -37,7 +37,7 @@ rocJPEG provides two functions, ``rocJpegDecode()`` and ``rocJpegDecodeBatched()
 
 ``rocJpegDecodeBatched()`` is suited for use on ASICs with multiple JPEG cores and is more efficient than multiple calls to ``rocJpegDecode()``. Choosing a batch size that is a multiple of available JPEG cores is recommended. 
 
-Memory has to be allocate to each channel of ``RocJpegImage``, including every channel of every ``RocJpegImage`` in the destination image array passed to ``rocJpegDecodeBatched()``. Use |hipmalloc|_ to allocate memory.
+Memory has to be allocated to each channel of ``RocJpegImage``, including every channel of every ``RocJpegImage`` in the destination image array passed to ``rocJpegDecodeBatched()``. Use |hipmalloc|_ to allocate memory on the GPU device that the handle was created on. ``rocJpegCreate()`` doesn't change the calling thread's current device, so make that device current first, for example with ``hipSetDevice()``.
 
 .. |hipmalloc| replace:: ``hipMalloc()``
 .. _hipmalloc: https://rocm.docs.amd.com/projects/HIP/en/latest/how-to/virtual_memory.html

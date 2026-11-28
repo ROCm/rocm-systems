@@ -54,6 +54,11 @@ THE SOFTWARE.
  * integrated GPU that rocJPEG has no kernels for, only the direction with the
  * handle on the discrete GPU tests anything, and that GPU may be the first or
  * the last device. A direction whose handle device cannot decode is skipped.
+ *
+ * TestCreateKeepsCurrentDevice, also skipped unless at least two GPUs are
+ * visible, checks that rocJpegCreate leaves the calling thread's current
+ * device unchanged, whether it succeeds or fails, in both directions and from
+ * a new thread that never selected a device.
  */
 class RocJpegApiNegativeTests {
     public:
@@ -72,6 +77,7 @@ class RocJpegApiNegativeTests {
         int TestInvalidGetErrorName();
         int TestInvalidGetDecoderCaps();
         int TestStreamParseFuzz();
+        int TestCreateKeepsCurrentDevice();
         int TestCrossDeviceDecode();
 
         /**
@@ -116,11 +122,18 @@ class RocJpegApiNegativeTests {
          * the reference is blank), the comparisons would test nothing, so this
          * direction is skipped instead.
          *
+         * The reference handle is created with handle_device current, and the
+         * other handles with caller_device current, so the comparisons also
+         * catch a handle that rocJpegCreate set up on caller_device instead of
+         * handle_device. Every rocJpegCreate must leave the current device
+         * unchanged, even in a direction that is then skipped.
+         *
          * @param handle_device The device the decoder handles are created on.
          * @param caller_device The current device of the threads that decode.
-         * @return EXIT_SUCCESS when every decode succeeds, matches the reference and
-         *         leaves its thread on caller_device, or when the direction is
-         *         skipped; EXIT_FAILURE otherwise.
+         * @return EXIT_SUCCESS when every rocJpegCreate leaves the current device
+         *         unchanged and either every decode succeeds, matches the
+         *         reference and leaves its thread on caller_device, or the
+         *         direction is skipped; EXIT_FAILURE otherwise.
          */
         int CheckCrossDeviceDecode(int handle_device, int caller_device);
 
