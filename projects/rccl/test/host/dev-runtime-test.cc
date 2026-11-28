@@ -1447,6 +1447,39 @@ TEST_F(SymMemoryMapLsaTest, AlreadyReserved_SkipsReservation) {
   EXPECT_EQ(comm->devrState.lsaFlatBase, existing);
 }
 
+// A GIN-only window skips the LSA exchange: nothing is exported, gathered or
+// awaited, and only our own slot is mapped, from the local handle.
+TEST_F(SymMemoryMapLsaTest, GinOnlyWindow_MapsOnlyOwnSlotWithoutExchange) {
+  mem.winFlags = NCCL_WIN_GIN_ONLY;
+  mem.bigOffset = 0x1000;
+  comm->devrState.lsaDomainSelf = 1;
+  comm->devrState.lsaFlatBase = reinterpret_cast<void*>(0x300000);
+  ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle,
+                   [](hipMemAllocationProp*, hipMemGenericAllocationHandle_t) { return hipSuccess; });
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather,
+                    [](void*, int*, int, int, void*, int) { return ncclSuccess; });
+  ScopedHook barrier(g_devrBootstrapIntraNodeBarrier, [](void*, int*, int, int, int) { return ncclSuccess; });
+  void* mappedAt = nullptr;
+  size_t mappedSize = 0;
+  hipMemGenericAllocationHandle_t mappedHandle = nullptr;
+  ScopedHook map(g_hipMemMap,
+                 [&](void* ptr, size_t size, size_t, hipMemGenericAllocationHandle_t handle, unsigned long long) {
+                   mappedAt = ptr;
+                   mappedSize = size;
+                   mappedHandle = handle;
+                   return hipSuccess;
+                 });
+
+  EXPECT_EQ(symMemoryMapLsa(comm, &mem), ncclSuccess);
+  EXPECT_EQ(props.calls, 0);
+  EXPECT_EQ(gather.calls, 0);
+  EXPECT_EQ(barrier.calls, 0);
+  EXPECT_EQ(map.calls, 1);
+  EXPECT_EQ(mappedAt, reinterpret_cast<void*>(0x300000 + comm->devrState.bigSize + mem.bigOffset));
+  EXPECT_EQ(mappedSize, segmentSizes[0]);
+  EXPECT_EQ(mappedHandle, memHandles[0]);
+}
+
 // The message array is sized from the widest rank, so a peer with more segments
 // than us still has room. Two ranks x 2 segments each = 4 messages.
 TEST_F(SymMemoryMapLsaTest, SizesMessagesFromWidestRank) {
@@ -2059,6 +2092,18 @@ TEST_F(SymMemoryRegisterGinTest, MultiSegmentDeviceWindow_RejectedBeforeRegister
 
   mem.winFlags = 0;
   mem.maxGlobalNumSegments = 1;
+  EXPECT_EQ(symMemoryRegisterGin(comm, &mem), ncclSuccess);
+  EXPECT_EQ(reg.calls, 1);
+}
+
+// A GIN-only window is still registered with GIN.
+TEST_F(SymMemoryRegisterGinTest, GinOnlyWindow_RegistersWithGin) {
+  ScopedHook reg(g_devrGinRegister,
+                 [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], uint32_t[], int, bool, int) {
+                   return ncclSuccess;
+                 });
+
+  mem.winFlags = NCCL_WIN_GIN_ONLY;
   EXPECT_EQ(symMemoryRegisterGin(comm, &mem), ncclSuccess);
   EXPECT_EQ(reg.calls, 1);
 }

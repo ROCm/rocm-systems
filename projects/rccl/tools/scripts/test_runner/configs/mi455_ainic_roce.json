@@ -2078,6 +2078,11 @@
           "test_filter": "Register.P2pIpcSegmentReuse"
         },
         {
+          "name": "Register.WindowRegisterGinOnly",
+          "description": "Verify NCCL_WIN_GIN_ONLY is rejected with NCCL_WIN_COLL_SYMMETRIC and a GIN-only window refuses LSA and peer pointer queries",
+          "test_filter": "Register.WindowRegisterGinOnly"
+        },
+        {
           "name": "SendRecv.SinglePairs",
           "description": "SendRecv single pairs",
           "test_filter": "SendRecv.SinglePairs"

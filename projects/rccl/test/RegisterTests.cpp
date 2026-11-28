@@ -29,6 +29,7 @@
 #undef NCCLCHECK
 #include "StandaloneUtils.hpp"
 #include "register.h"
+#include "nccl_device/host.h"  // ncclGetLsaDevicePointer, ncclGetPeerDevicePointer
 
 namespace RcclUnitTesting
 {
@@ -748,6 +749,56 @@ static void testWindowRegisterSingleRankNonSymTeardown() {
     NCCLCHECK(ncclCommDestroy(comm));
 }
 
+/**
+ * @brief NCCL_WIN_GIN_ONLY is rejected with NCCL_WIN_COLL_SYMMETRIC; a GIN-only window (or, for the
+ *        control, a second ordinary one) next to an ordinary window must refuse LSA and peer pointer queries.
+ */
+static void testWindowRegisterGinOnly(bool ginOnly) {
+    SKIP_IF_NO_GPU();
+
+    // Registering hangs on GPUs without VMM (see testWindowRegisterSingleRankNonSymTeardown).
+    if (!deviceSupportsCuMemVmm(0)) {
+        GTEST_SKIP() << "Window registration requires cuMem VMM support; skipping on this GPU.";
+        return;
+    }
+
+    HIPCALL(hipSetDevice(0));
+
+    ncclComm_t comm;
+    ASSERT_EQ(ncclSuccess, initSingleRankComm(&comm));
+
+    const size_t bufferSize = NCCL_WIN_REQUIRED_ALIGNMENT;
+    void* bufs[2] = {nullptr, nullptr};
+    ncclWindow_t wins[2] = {nullptr, nullptr};
+    for (void*& buf : bufs) {
+        ASSERT_EQ(ncclSuccess, ncclMemAlloc(&buf, bufferSize));
+    }
+
+    if (ginOnly) {
+        EXPECT_EQ(ncclInvalidArgument, ncclCommWindowRegister(comm, bufs[1], bufferSize, &wins[1],
+                                                              NCCL_WIN_COLL_SYMMETRIC | NCCL_WIN_GIN_ONLY));
+        ASSERT_EQ(nullptr, wins[1]);
+    }
+
+    ASSERT_EQ(ncclSuccess, ncclCommWindowRegister(comm, bufs[0], bufferSize, &wins[0], NCCL_WIN_COLL_SYMMETRIC));
+    ASSERT_EQ(ncclSuccess, ncclCommWindowRegister(comm, bufs[1], bufferSize, &wins[1],
+                                                  ginOnly ? NCCL_WIN_GIN_ONLY : NCCL_WIN_DEFAULT));
+    ASSERT_NE(nullptr, wins[0]);
+    ASSERT_NE(nullptr, wins[1]);
+
+    void* ptr = nullptr;
+    ASSERT_EQ(ncclSuccess, ncclGetLsaDevicePointer(wins[0], 0, /*lsaRank=*/0, &ptr));
+    const ncclResult_t expected = ginOnly ? ncclInvalidUsage : ncclSuccess;
+    EXPECT_EQ(expected, ncclGetLsaDevicePointer(wins[1], 0, /*lsaRank=*/0, &ptr));
+    EXPECT_EQ(expected, ncclGetPeerDevicePointer(wins[1], 0, /*peer=*/0, &ptr));
+
+    for (int i = 0; i < 2; i++) {
+        EXPECT_EQ(ncclSuccess, ncclCommWindowDeregister(comm, wins[i]));
+        NCCLCHECK(ncclMemFree(bufs[i]));
+    }
+    NCCLCHECK(ncclCommDestroy(comm));
+}
+
 //==============================================================================
 // Test configuration helpers
 //==============================================================================
@@ -831,6 +882,20 @@ TEST(Register, P2pIpcSegmentReuse)
     };
     RUN_ISOLATED_TESTS(config("P2pIpcSegmentReuse_MultiSegment", 2),
                        config("P2pIpcSegmentReuse_SingleSegment", 1));
+}
+
+/**
+ * @brief NCCL_WIN_GIN_ONLY is rejected with NCCL_WIN_COLL_SYMMETRIC and its windows refuse LSA and peer pointer
+ *        queries; the control registers without the flag
+ */
+TEST(Register, WindowRegisterGinOnly)
+{
+    auto config = [](const char* name, bool ginOnly) {
+        return ProcessIsolatedTestRunner::TestConfig(name, [ginOnly]() { testWindowRegisterGinOnly(ginOnly); })
+            .setVariable("NCCL_CUMEM_ENABLE", "1");
+    };
+    RUN_ISOLATED_TESTS(config("WindowRegisterGinOnly", true),
+                       config("WindowRegisterAllCapabilities", false));
 }
 
 } // namespace RcclUnitTesting
