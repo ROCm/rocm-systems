@@ -218,6 +218,7 @@
   X(SignalWaitUntil,                173)  \
   X(QpPutNbiPoll,                   174)  \
   X(SdmaPutNbiPoll,                 175)  \
+  X(SignalOpsOnStream,              176)  \
   X(TilePutRowMajorStartCoord,      177)  \
   X(TileGetRowMajorStartCoord,      178)  \
   X(TilePutWaveRowMajorStartCoord,  179)  \
@@ -236,21 +237,20 @@
   X(TileGetWave3D,                  192)  \
   X(TilePutWave4D,                  193)  \
   X(TileGetWave4D,                  194)  \
-  X(SignalOpsOnStream,              195)  \
-  X(TilePut3DStrided,               196)  \
-  X(TileGet3DStrided,               197)  \
-  X(TilePutWG3DStrided,             198)  \
-  X(TileGetWG3DStrided,             199)  \
-  X(TilePutWave3DStrided,           200)  \
-  X(TileGetWave3DStrided,           201)  \
-  X(TilePut4DStrided,               202)  \
-  X(TileGet4DStrided,               203)  \
-  X(TilePutWG4DStrided,             204)  \
-  X(TileGetWG4DStrided,             205)  \
-  X(TilePutWave4DStrided,           206)  \
-  X(TileGetWave4DStrided,           207)  \
-  X(HostPutmemSignal,               208)  \
-  X(HostPutmemSignalAdd,            209)
+  X(TilePut3DStrided,               195)  \
+  X(TileGet3DStrided,               196)  \
+  X(TilePutWG3DStrided,             197)  \
+  X(TileGetWG3DStrided,             198)  \
+  X(TilePutWave3DStrided,           199)  \
+  X(TileGetWave3DStrided,           200)  \
+  X(TilePut4DStrided,               201)  \
+  X(TileGet4DStrided,               202)  \
+  X(TilePutWG4DStrided,             203)  \
+  X(TileGetWG4DStrided,             204)  \
+  X(TilePutWave4DStrided,           205)  \
+  X(TileGetWave4DStrided,           206)  \
+  X(HostPutmemSignal,               207)  \
+  X(HostPutmemSignalAdd,            208)
 
 #define _ROCSHMEM_ENUM_ENTRY(name, val) name##TestType = val,
 enum TestType {
