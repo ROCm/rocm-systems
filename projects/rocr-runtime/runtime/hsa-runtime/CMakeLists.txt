@@ -126,6 +126,9 @@ endif()
 
 if (UNIX)
   pkg_check_modules(drm REQUIRED IMPORTED_TARGET libdrm)
+  # The runtime calls libdrm_amdgpu directly (core/runtime/thunk_loader.cpp):
+  # link it here instead of relying on the link interface of hsakmt.
+  pkg_check_modules(drm_amdgpu REQUIRED IMPORTED_TARGET libdrm_amdgpu)
 else()
   target_include_directories(${CORE_RUNTIME_TARGET} PRIVATE ${LIBELF_INCLUDE_DIR})
   if (${BUILD_SHARED_LIBS})
@@ -431,7 +434,7 @@ endif()
 # Link to hsakmt-staticdrm target for static library builds
 if( BUILD_SHARED_LIBS )
   if (UNIX)
-    target_link_libraries ( ${CORE_RUNTIME_TARGET} PRIVATE hsakmt::hsakmt PkgConfig::drm)
+    target_link_libraries ( ${CORE_RUNTIME_TARGET} PRIVATE hsakmt::hsakmt PkgConfig::drm PkgConfig::drm_amdgpu)
     if( BUILD_THUNK_VIRTIO )
       message(STATUS "Building with virtio support")
       target_link_libraries ( ${CORE_RUNTIME_TARGET} PRIVATE hsakmt_virtio)
