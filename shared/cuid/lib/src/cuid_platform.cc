@@ -25,13 +25,21 @@ amdcuid_status_t CuidPlatform::discover(std::vector<DevicePtr>& platforms) {
   return AMDCUID_STATUS_SUCCESS;
 }
 
+bool CuidPlatform::is_present_uuid(const uint8_t uuid[16]) {
+  // Only all-zero and all-ones are the "not set" sentinels firmware writes
+  // when it has no UUID; a UUID that merely contains 00 and FF octets is real.
+  bool all_zero = true;
+  bool all_ones = true;
+  for (int i = 0; i < 16; ++i) {
+    if (uuid[i] != 0x00) all_zero = false;
+    if (uuid[i] != 0xFF) all_ones = false;
+  }
+  return !all_zero && !all_ones;
+}
+
 bool CuidPlatform::get_system_uuid(uint8_t uuid[16]) {
   if (SmbiosUtil::get_system_uuid(uuid) != AMDCUID_STATUS_SUCCESS) return false;
-  // Reject the "not set" sentinels firmware writes when it has no UUID.
-  for (int i = 0; i < 16; ++i) {
-    if (uuid[i] != 0x00 && uuid[i] != 0xFF) return true;
-  }
-  return false;
+  return is_present_uuid(uuid);
 }
 
 amdcuid_status_t CuidPlatform::get_hardware_fingerprint(uint64_t& fingerprint) const {

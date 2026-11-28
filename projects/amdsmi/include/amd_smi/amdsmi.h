@@ -3896,8 +3896,8 @@ typedef struct {
   //! Component Type of the component, reported beside the CUID; not decoded
   //! from it.
   amdsmi_cuid_component_type_t component_type;
-  //! Which stage of the staged lookup answered. Always
-  //! ::AMDSMI_CUID_SOURCE_LIBRARY in this release.
+  //! Which stage of the staged lookup answered. ::AMDSMI_CUID_SOURCE_LIBRARY
+  //! in this release, or ::AMDSMI_CUID_SOURCE_UNKNOWN if the source query fails.
   amdsmi_cuid_source_t source;
   //! Non-zero for a temporary CUID, payload bit 117; always 1 in this
   //! release. amd-smi reports it as `temporary`. The identity was built
@@ -3925,7 +3925,10 @@ typedef struct {
  *  The handle is resolved through its render node. A GPU in SPX reports the
  *  whole GPU's CUID. In DPX and above each handle is a compute partition and
  *  reports that partition's own CUID, never the whole GPU's; a partition
- *  whose UnitID cannot be determined gets ::AMDSMI_STATUS_NOT_SUPPORTED.
+ *  whose UnitID cannot be determined gets ::AMDSMI_STATUS_NOT_SUPPORTED. A
+ *  handle with no render node is named by its BDF only when the GPU reports SPX
+ *  or has no compute-partition attribute; otherwise it may be a partition,
+ *  that BDF names the whole GPU, and the call fails the same way.
  *
  *  On failure @p info comes back cleared, never partly filled.
  *
@@ -3938,7 +3941,10 @@ typedef struct {
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success,
  *          ::AMDSMI_STATUS_NOT_SUPPORTED when built without CUID support, when
  *          no CUID exists for this device, or for a partition whose UnitID
- *          cannot be determined, non-zero on other failures
+ *          cannot be determined,
+ *          ::AMDSMI_STATUS_NO_PERM when this caller may not read a required field,
+ *          ::AMDSMI_STATUS_NO_DATA when the node has no usable machine ID,
+ *          without which no CUID can be formed, non-zero on other failures
  */
 amdsmi_status_t amdsmi_get_gpu_cuid_info(amdsmi_processor_handle processor_handle,
                                          amdsmi_cuid_info_t* info);
@@ -3973,14 +3979,31 @@ typedef struct {
  *
  *  The platform, each CPU package, each AMD GPU or GPU partition, each NPU,
  *  and each NIC function, ordered by component type, then BDF, then device
- *  path.
+ *  path, with the numbers in a path compared as numbers: cpu96 before cpu192.
  *  Unlike ::amdsmi_get_gpu_cuid_info this needs no processor handle, so it
- *  also covers components amd-smi does not manage.
+ *  also covers components amd-smi does not manage. The node is rediscovered on
+ *  every call, so a component added or removed since the last one is
+ *  reflected, also in a long-running process.
  *
  *  Every PCI function with a CUID is listed. A NIC's UnitID is its PCI
  *  function number, so the functions of one card have distinct CUIDs even
  *  where they report one serial number. Two components whose CUIDs coincide
- *  anyway are both left out, since such a CUID identifies neither.
+ *  anyway are both left out, since such a CUID identifies neither. A component
+ *  whose required metadata cannot be read after enumeration is also omitted. Success
+ *  describes the readable CUIDs, not proof that every physical device was read.
+ *  The temporary flag is required. A local failure reading a required field
+ *  omits that row, including permission, file, PCI and format errors. NO_DATA
+ *  (no machine ID) and INVAL fail the call instead, as does a short internal
+ *  property buffer (UNEXPECTED_SIZE). Type and source may be UNKNOWN; BDF and
+ *  path may be empty and vendor ID zero. For a temporary CUID, a failed
+ *  primary read also leaves that field empty without dropping the row.
+ *
+ *  On Linux/glibc the CUID gate coordinates ordinary, non-reentrant calls
+ *  across fork after initialization. Finish library loading and initialization
+ *  before starting concurrent calls or forking. Do not fork from inside a
+ *  guarded call or a signal handler interrupting it, or call these APIs in
+ *  atfork handlers. This is not an async-signal-safe API or a guarantee of
+ *  fairness or a time bound.
  *
  *  Every CUID is temporary (::amdsmi_cuid_info_t::auxiliary is set), so the
  *  primary CUIDs are empty.
@@ -3989,7 +4012,7 @@ typedef struct {
  *
  *  @param[in,out] count As input, the number of entries @p components can
  *                 hold. As output, the number of components on the node, even
- *                 when that is more than were written.
+ *                 when that is more than were written. Set to zero on inventory errors.
  *
  *  @param[out] components Array of @p count entries allocated by the caller,
  *              or nullptr to learn the count only.
@@ -3997,10 +4020,13 @@ typedef struct {
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, including
  *          with *@p count set to 0 when the node has no components,
  *          ::AMDSMI_STATUS_INVAL when @p count is null,
+ *          ::AMDSMI_STATUS_NO_DATA when the node has no usable machine ID,
+ *          which fails every component rather than leaving the list empty,
  *          ::AMDSMI_STATUS_INSUFFICIENT_SIZE when @p components is too small
  *          (the first N entries, N being the input *@p count, are written),
- *          ::AMDSMI_STATUS_NO_PERM when this caller may not read a
- *          component's auxiliary flag,
+ *          ::AMDSMI_STATUS_NO_PERM when handle enumeration itself is denied,
+ *          ::AMDSMI_STATUS_RETRY if three handle-enumeration attempts in this
+ *          native call could not keep up with a growing inventory,
  *          ::AMDSMI_STATUS_NOT_SUPPORTED when built without CUID support,
  *          non-zero on other failures
  */

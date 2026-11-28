@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #include <fcntl.h>
+#include <pthread.h>
+#include <semaphore.h>
 #include <sys/utsname.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -33,6 +35,7 @@
 
 #ifdef BUILD_CUID
 #include "amd_cuid.h"
+#include "cuid_inventory_policy.h"
 #endif
 
 #include "amd_smi/amdsmi.h"
@@ -245,6 +248,12 @@ static amdsmi_status_t get_ainic_device_from_handle(amdsmi_processor_handle proc
   return AMDSMI_STATUS_NOT_SUPPORTED;
 }
 
+#ifdef BUILD_CUID
+namespace {
+void initialize_cuid_gate();
+}
+#endif
+
 // Serializes init and shut_down so one thread at a time sets up or tears down the
 // system, and the reference count matches the calls.
 static std::mutex g_init_shut_down_mutex;
@@ -257,6 +266,9 @@ amdsmi_status_t amdsmi_init(uint64_t flags) {
   }
   amdsmi_status_t status = amd::smi::AMDSmiSystem::getInstance().init(flags);
   if (status == AMDSMI_STATUS_SUCCESS) {
+#ifdef BUILD_CUID
+    initialize_cuid_gate();
+#endif
     amd::smi::amdsmi_library_init_ref_acquire();
   }
   return status;
@@ -1344,10 +1356,12 @@ constexpr amdsmi_status_t cuid_status_to_amdsmi(amdcuid_status_t status) {
     case AMDCUID_STATUS_INVALID_ARGUMENT:
       return AMDSMI_STATUS_INVAL;
     case AMDCUID_STATUS_UNSUPPORTED:
-    // No serial, or no machine-id to key a temporary CUID with: this component
-    // has no CUID, which is what amdsmi_get_cuid_components() also concludes.
-    case AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND:
       return AMDSMI_STATUS_NOT_SUPPORTED;
+    // No usable machine-id to key a temporary CUID with. Every component fails
+    // alike and the operator can fix it, which "this hardware has no CUID" does
+    // not allow, so it must not share that status.
+    case AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND:
+      return AMDSMI_STATUS_NO_DATA;
     case AMDCUID_STATUS_INSUFFICIENT_SIZE:
       return AMDSMI_STATUS_INSUFFICIENT_SIZE;
     case AMDCUID_STATUS_FILE_ERROR:
@@ -1404,6 +1418,22 @@ std::string cuid_partition_node(amdsmi_processor_handle processor_handle) {
   return node;
 }
 
+// Whether the handle behind this BDF may be a partition rather than the whole
+// GPU, from the parent's own attribute: partition k is shown at the parent's BDF
+// with k as the function. Read only where the library cannot resolve the
+// handle's render node, which is the one place it has to be known: the library
+// names a partition by its node, and the BDF it falls back on names the whole
+// GPU. Only an explicit SPX says it is whole. A GPU that cannot be partitioned
+// has no such attribute, so a missing file says whole as well; a file that is
+// there and cannot be read or says anything else leaves the question open, and
+// an open question is not answered with the parent's CUID.
+bool cuid_gpu_may_be_partition(amdsmi_bdf_t bdf) {
+  bdf.function_number = 0;
+  const std::string path =
+      cuid_sysfs_root() + "/bus/pci/devices/" + stringify_bdf(bdf) + "/current_compute_partition";
+  return amdsmi_cuid_detail::may_be_partition(path);
+}
+
 // A GPU amd-smi has a handle for but the library cannot name has no CUID: it
 // is not a bad handle. Under WSL there is neither a render node nor a PCI
 // function in sysfs for the library to find.
@@ -1436,6 +1466,11 @@ amdsmi_status_t cuid_handle_for(amdsmi_processor_handle processor_handle,
   const amdsmi_status_t smi_status = amdsmi_get_gpu_device_bdf(processor_handle, &bdf);
   if (smi_status != AMDSMI_STATUS_SUCCESS) {
     return smi_status;
+  }
+  // The BDF names the whole GPU, and a partition is not that: a partition with
+  // no render node has no CUID, never its parent's.
+  if (cuid_gpu_may_be_partition(bdf)) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
   }
   const std::string bdf_str = stringify_bdf(bdf);
   return cuid_lookup_status(
@@ -1603,8 +1638,100 @@ amdsmi_status_t fill_cuid_component(const amdcuid_id_t& handle,
   return AMDSMI_STATUS_SUCCESS;
 }
 
+// Serialize multi-call CUID transactions. Unlike unlocking an inherited
+// mutex, sem_post is async-signal-safe and does not depend on thread identity.
+sem_t cuid_fork_gate, cuid_inventory_gate;
+// Set once, before amdsmi_init publishes the session. If prepare cannot
+// acquire a gate, the child cannot trust its inherited semaphore counts.
+bool cuid_gate_ready = false;
+thread_local bool fork_admitted = false, fork_drained = false;
+
+bool wait_gate(sem_t& gate) {
+  int rc;
+  do {
+    rc = sem_wait(&gate);
+  } while (rc == -1 && errno == EINTR);
+  return rc == 0;
+}
+
+void prepare_cuid_fork() {
+  fork_admitted = cuid_gate_ready && wait_gate(cuid_fork_gate);
+  fork_drained = fork_admitted && wait_gate(cuid_inventory_gate);
+}
+void finish_cuid_fork() {
+  if (fork_drained) sem_post(&cuid_inventory_gate);
+  if (fork_admitted) sem_post(&cuid_fork_gate);
+}
+void child_cuid_fork() {
+  if (!fork_drained) cuid_gate_ready = false;
+  finish_cuid_fork();
+}
+
+void initialize_cuid_gate() {
+  static std::once_flag once;
+  std::call_once(once, [] {
+    // libamdcuid initializes mgr (and registers its atfork handlers) in
+    // cuid.cc at load time. Enter that translation unit before registering
+    // ours, even with deferred dynamic initialization. Prepare runs in
+    // reverse registration order, so the outer SMI gate drains first.
+    amdcuid_get_library_version(nullptr, nullptr, nullptr);
+    if (sem_init(&cuid_fork_gate, 0, 1) != 0) return;
+    if (sem_init(&cuid_inventory_gate, 0, 1) == 0) {
+      if (pthread_atfork(prepare_cuid_fork, finish_cuid_fork, child_cuid_fork) == 0) {
+        cuid_gate_ready = true;
+        return;
+      }
+      sem_destroy(&cuid_inventory_gate);
+    }
+    sem_destroy(&cuid_fork_gate);
+  });
+}
+
+class CuidInventoryGuard {
+ public:
+  CuidInventoryGuard() {
+    if (!cuid_gate_ready || !wait_gate(cuid_fork_gate)) return;
+    sem_post(&cuid_fork_gate);
+    held_ = wait_gate(cuid_inventory_gate);
+  }
+  ~CuidInventoryGuard() {
+    if (held_) sem_post(&cuid_inventory_gate);
+  }
+  explicit operator bool() const { return held_; }
+  CuidInventoryGuard(const CuidInventoryGuard&) = delete;
+  CuidInventoryGuard& operator=(const CuidInventoryGuard&) = delete;
+
+ private:
+  bool held_ = false;
+};
+
 }  // namespace
 #endif  // BUILD_CUID
+
+// A component whose metadata cannot be read after the listing, such as a
+// partition whose compute mode changed in between, is left out and the rest
+// are listed. A status that is no one component's fails the whole call: no
+// machine-id fails every component alike, and a rejected argument or buffer
+// is this code's fault.
+amdsmi_status_t amdsmi_cuid_collect_components(
+    uint32_t total, const std::function<amdsmi_status_t(uint32_t, amdsmi_cuid_component_t*)>& fill,
+    std::vector<amdsmi_cuid_component_t>* found) {
+  found->clear();
+  found->reserve(total);
+  for (uint32_t i = 0; i < total; ++i) {
+    amdsmi_cuid_component_t component = {};
+    const amdsmi_status_t status = fill(i, &component);
+    if (status == AMDSMI_STATUS_SUCCESS) {
+      found->push_back(component);
+    } else if (status == AMDSMI_STATUS_NO_DATA || status == AMDSMI_STATUS_INVAL ||
+               status == AMDSMI_STATUS_INSUFFICIENT_SIZE) {
+      found->clear();
+      // This is the internal property buffer, not the caller's component array.
+      return status == AMDSMI_STATUS_INSUFFICIENT_SIZE ? AMDSMI_STATUS_UNEXPECTED_SIZE : status;
+    }
+  }
+  return AMDSMI_STATUS_SUCCESS;
+}
 
 // The CUID entry points below are defined unconditionally and gate only
 // their bodies on BUILD_CUID: the exported symbol set must not depend on
@@ -1623,6 +1750,10 @@ amdsmi_status_t amdsmi_get_gpu_cuid_info(amdsmi_processor_handle processor_handl
   info->source = AMDSMI_CUID_SOURCE_UNKNOWN;
 
 #ifdef BUILD_CUID
+  // A BDF lookup can itself rediscover the node on a miss. Use the same
+  // exclusive guard as the listing through the last property read.
+  const CuidInventoryGuard inventory_lock;
+  if (!inventory_lock) return AMDSMI_STATUS_API_FAILED;
   amdcuid_id_t handle = {};
   const amdsmi_status_t lookup = cuid_handle_for(processor_handle, handle);
   if (lookup != AMDSMI_STATUS_SUCCESS) {
@@ -1650,17 +1781,32 @@ amdsmi_status_t amdsmi_get_cuid_components(uint32_t* count, amdsmi_cuid_componen
   }
 
 #ifdef BUILD_CUID
+  const uint32_t capacity = components == nullptr ? 0 : *count;
+  *count = 0;
+
+  // The library discovers components once and keeps them, so a call that
+  // answers "what is on this node" has to rediscover first, or a hot-added
+  // function never shows and a removed one is listed for the life of the
+  // process.
+  const CuidInventoryGuard inventory_lock;
+  if (!inventory_lock) return AMDSMI_STATUS_API_FAILED;
+  // Its only failure is "found nothing", which the listing below reports.
+  (void)amdcuid_refresh();
+
   std::vector<amdcuid_id_t> handles;
   amdcuid_status_t cuid_status = AMDCUID_STATUS_INSUFFICIENT_SIZE;
   uint32_t total = 0;
-  while (cuid_status == AMDCUID_STATUS_INSUFFICIENT_SIZE) {
+  // One size query, one fill, and a retry if another library user refreshed
+  // a growing inventory. Never turn churn into an unbounded critical section.
+  for (int attempt = 0; attempt < 3 && cuid_status == AMDCUID_STATUS_INSUFFICIENT_SIZE; ++attempt) {
     handles.resize(total);
     cuid_status = amdcuid_get_all_handles(handles.data(), &total);
   }
-  // No component at all, or none with an identity (no GPU and no
-  // machine-id): an empty inventory, not a failure.
-  if (cuid_status == AMDCUID_STATUS_UNSUPPORTED || cuid_status == AMDCUID_STATUS_DEVICE_NOT_FOUND ||
-      cuid_status == AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND) {
+  if (cuid_status == AMDCUID_STATUS_INSUFFICIENT_SIZE) return AMDSMI_STATUS_RETRY;
+  // No component at all: an empty inventory, not a failure. A node with no
+  // usable machine-id is a failure, not an empty node: it has components and
+  // cannot name any of them.
+  if (cuid_status == AMDCUID_STATUS_UNSUPPORTED || cuid_status == AMDCUID_STATUS_DEVICE_NOT_FOUND) {
     total = 0;
   } else if (cuid_status != AMDCUID_STATUS_SUCCESS) {
     return cuid_status_to_amdsmi(cuid_status);
@@ -1668,23 +1814,27 @@ amdsmi_status_t amdsmi_get_cuid_components(uint32_t* count, amdsmi_cuid_componen
   handles.resize(total);
 
   const auto partition_bdfs = cuid_partition_bdfs();
-  std::vector<amdsmi_cuid_component_t> found(total);
-  for (uint32_t i = 0; i < total; ++i) {
-    const amdsmi_status_t status = fill_cuid_component(handles[i], partition_bdfs, &found[i]);
-    if (status != AMDSMI_STATUS_SUCCESS) {
-      return status;
-    }
+  std::vector<amdsmi_cuid_component_t> found;
+  const amdsmi_status_t status = amdsmi_cuid_collect_components(
+      total,
+      [&](uint32_t i, amdsmi_cuid_component_t* component) {
+        return fill_cuid_component(handles[i], partition_bdfs, component);
+      },
+      &found);
+  if (status != AMDSMI_STATUS_SUCCESS) {
+    return status;
   }
+  total = static_cast<uint32_t>(found.size());
   std::sort(found.begin(), found.end(),
             [](const amdsmi_cuid_component_t& a, const amdsmi_cuid_component_t& b) {
               if (a.info.component_type != b.info.component_type) {
                 return a.info.component_type < b.info.component_type;
               }
               const int bdf = strcmp(a.bdf, b.bdf);
-              return bdf != 0 ? bdf < 0 : strcmp(a.device_path, b.device_path) < 0;
+              return bdf != 0 ? bdf < 0
+                              : amdsmi_cuid_detail::path_compare(a.device_path, b.device_path) < 0;
             });
 
-  const uint32_t capacity = components == nullptr ? 0 : *count;
   const uint32_t written = std::min(capacity, total);
   if (written > 0) {
     memcpy(components, found.data(), written * sizeof(found[0]));

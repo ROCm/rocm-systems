@@ -3,11 +3,13 @@
 
 #include "src/cuid_device_manager.h"
 
+#include <pthread.h>
 #include <unistd.h>
 
 #include <algorithm>
 #include <cstdio>
 #include <iostream>
+#include <new>
 #include <set>
 
 #include "include/amd_cuid.h"
@@ -128,8 +130,40 @@ amdcuid_status_t CuidDeviceManager::shutdown() {
   return AMDCUID_STATUS_SUCCESS;
 }
 
+namespace {
+
+// Whether this thread took the operation mutex before its fork(). Two threads
+// may fork at once, and their handlers overlap. The prepare and parent
+// handlers run on the forking thread, and the child's one thread is a copy of
+// it, so each fork reads back only its own answer.
+thread_local bool forked_holding_lock = false;
+
+}  // namespace
+
 CuidDeviceManager& CuidDeviceManager::instance() {
   static CuidDeviceManager instance;
+  // A child forked while another thread is inside the library inherits the
+  // operation mutex locked by a thread it does not have, and the inventory
+  // perhaps half rewritten. fork() does not wait for that thread, which a
+  // busy caller could starve; where it was not inside, the child keeps the
+  // inventory. Either way the child's mutexes are made anew: a recursive mutex
+  // can be unlocked only by its owner, and the child's thread has another id.
+  static const int registered = pthread_atfork(
+      [] { forked_holding_lock = cuid_operation_mutex().try_lock(); },
+      [] {
+        if (forked_holding_lock) cuid_operation_mutex().unlock();
+      },
+      [] {
+        new (&cuid_operation_mutex()) std::recursive_mutex();
+        new (&instance.manager_mutex_) std::mutex();
+        if (forked_holding_lock) return;
+        // The old contents may be mid-update and are abandoned, not destroyed.
+        new (&instance.devices_) std::vector<DevicePtr>();
+        new (&instance.collisions_) std::set<cuid::DeviceRoute>();
+        new (&instance.cuid_index_) std::map<amdcuid_id_t, DevicePtr, CuidComparator>();
+        new (&instance.observations_) std::map<cuid::DeviceRoute, CuidDeviceEntry>();
+      });
+  (void)registered;
   return instance;
 }
 

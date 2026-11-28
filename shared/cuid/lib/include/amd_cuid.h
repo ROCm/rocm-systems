@@ -47,7 +47,23 @@ extern "C" {
 //! UnitID 0. The platform needs no SMBIOS. No query discloses a serial of a
 //! component with a temporary CUID. A malformed component is left out of the
 //! inventory, and a lookup returns why it failed.
-#define AMDCUID_LIB_VERSION_MINOR 2
+//!
+//! 2.3.0: a lookup answers only for a component discovery lists, re-running
+//! discovery on a miss, and accepts any spelling of a BDF; return codes
+//! follow this header (INVALID_ARGUMENT for an invalid type or a NULL key
+//! buffer, WRONG_DEVICE_TYPE for a BDF listed as another type). GPU
+//! partitions are found from the KFD topology on kernels without the xcp
+//! kobject, a GPU whose compute mode cannot be read stays whole when the
+//! driver or KFD says so, a CPX partition is counted from the parent's
+//! enforce_isolation when KFD hides a sibling, and every amdxdna NPU is
+//! found. A partition whose
+//! cuid_unit_id is malformed is INVALID_FORMAT, as a whole GPU's is, not
+//! UNSUPPORTED. A DerivedID never
+//! carries bit 117. A firmware UUID containing only some 00 or FF octets is
+//! adopted as the Platform CUID; only all-zero and all-ones are absent. The
+//! library is usable in a child after fork(), exports no SHA-256 symbols,
+//! links from C, and installs amdcuid.pc.
+#define AMDCUID_LIB_VERSION_MINOR 3
 
 //! Patch version should be updated for each bug fix or non-API change
 //!
@@ -122,12 +138,13 @@ const char* amdcuid_status_to_string(amdcuid_status_t status);
  * This structure holds the 16-byte CUID value in a UUIDv8 format used to
  * uniquely identify devices. The CUID will also function as the handle. Users
  * will use the CUID to query device information and the library will look up
- * the device internally using the given CUID/handle. Handles are created when
- * the library is initialized. Handles will be invalidated when devices are
- * removed or when the library is shutdown. If handles have been invalidated,
- * users must obtain new handles by re-initializing the library if making use of
- * all handles on the system, or by querying for a specific device using
- * amdcuid_get_handle_by_dev_path().
+ * the device internally using the given CUID/handle. The library has no
+ * initialization or shutdown call: it discovers components on first use. A
+ * handle is the component's CUID, so it stays valid for as long as that CUID
+ * does, and names nothing once the component is removed or its CUID changes
+ * (see AMDCUID_QUERY_TEMPORARY_CUID). After such a change, call
+ * amdcuid_refresh() and amdcuid_get_all_handles(), or look the component up
+ * again by path or BDF.
  */
 typedef struct {
   uint8_t bytes[16];
@@ -187,10 +204,12 @@ typedef enum {
 static inline int amdcuid_device_type_is_valid(amdcuid_device_type_t type) {
   /* Through unsigned so that a value outside the enumeration (a negative one,
      which the underlying type may be able to hold) fails rather than comparing
-     below AMDCUID_DEVICE_TYPE_RACK. */
-  const unsigned value = (unsigned)type;
-  return (value <= (unsigned)AMDCUID_DEVICE_TYPE_RACK) ||
-         (value == (unsigned)AMDCUID_DEVICE_TYPE_OTHER);
+     below AMDCUID_DEVICE_TYPE_RACK. Without a cast, which C++ consumers
+     building with -Wold-style-cast would be warned about. */
+  const unsigned value = type;
+  const unsigned rack = AMDCUID_DEVICE_TYPE_RACK;
+  const unsigned other = AMDCUID_DEVICE_TYPE_OTHER;
+  return value <= rack || value == other;
 }
 
 /**
@@ -206,9 +225,16 @@ static inline int amdcuid_device_type_is_valid(amdcuid_device_type_t type) {
  * required if the buffer is too small, and 0 on any other failure.
  *
  * @return AMDCUID_STATUS_SUCCESS on success,
- *         AMDCUID_STATUS_UNSUPPORTED if no supported devices are found,
+ *         AMDCUID_STATUS_INVALID_ARGUMENT if @p count is NULL,
+ *         AMDCUID_STATUS_INSUFFICIENT_SIZE if @p count is too small,
+ *         AMDCUID_STATUS_DEVICE_NOT_FOUND if discovery finds no component,
+ *         AMDCUID_STATUS_UNSUPPORTED if every component found shares its CUID
+ * with another,
  *         AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND if no component has a CUID
- * because the host has no usable machine-id
+ * because the host has no usable machine-id, or another status
+ * (AMDCUID_STATUS_INVALID_FORMAT, AMDCUID_STATUS_FILE_ERROR,
+ * AMDCUID_STATUS_PCI_ERROR, AMDCUID_STATUS_HMAC_ERROR, ...) that kept every
+ * component found from having a CUID
  */
 amdcuid_status_t amdcuid_get_all_handles(amdcuid_id_t* handles, uint32_t* count);
 
@@ -217,8 +243,10 @@ amdcuid_status_t amdcuid_get_all_handles(amdcuid_id_t* handles, uint32_t* count)
  * type.
  *
  * This function allows users to obtain the CUID handle for a specific device
- * by providing its device path and type. This is useful for obtaining a handle
- * for a specific device without needing to enumerate all devices.
+ * by providing its device path and type. Only a component that
+ * amdcuid_get_all_handles() lists has a handle: a component missing from the
+ * library's inventory is looked for by discovering again, and a path that
+ * names no listed component adds nothing to the inventory.
  *
  * @param[in] dev_path The device path of the target device.
  * @param[in] device_type The type of the device (see amdcuid_device_type_t).
@@ -226,12 +254,17 @@ amdcuid_status_t amdcuid_get_all_handles(amdcuid_id_t* handles, uint32_t* count)
  * device's handle.
  *
  * @return AMDCUID_STATUS_SUCCESS on success,
- *         AMDCUID_STATUS_INVALID_ARGUMENT if the provided arguments are
- * invalid, AMDCUID_STATUS_DEVICE_NOT_FOUND if the device could not be found at
- * the specified path AMDCUID_STATUS_UNSUPPORTED if the device type is not
- * supported, AMDCUID_STATUS_INVALID_FORMAT if another component has the same
- * CUID,
- * AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND if the host has no usable machine-id
+ *         AMDCUID_STATUS_INVALID_ARGUMENT if a pointer is NULL or
+ * @p device_type is not an assigned Component Type,
+ *         AMDCUID_STATUS_UNSUPPORTED if this library discovers no components
+ * of @p device_type (only PLATFORM, CPU, GPU, NIC and NPU are discovered),
+ *         AMDCUID_STATUS_DEVICE_NOT_FOUND if no component of that type that
+ * discovery lists is at the path,
+ *         the status that kept discovery from listing the component the path
+ * names (e.g. AMDCUID_STATUS_INVALID_FORMAT, AMDCUID_STATUS_PERMISSION_DENIED),
+ *         AMDCUID_STATUS_INVALID_FORMAT if another component has the same CUID,
+ *         AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND if the host has no usable
+ * machine-id
  */
 amdcuid_status_t amdcuid_get_handle_by_dev_path(const char* dev_path,
                                                 amdcuid_device_type_t device_type,
@@ -241,25 +274,34 @@ amdcuid_status_t amdcuid_get_handle_by_dev_path(const char* dev_path,
  * @brief Retrieve the CUID handle for a device based on its PCI BDF and type.
  *
  * This function allows users to obtain the CUID handle for a specific device
- * by providing its PCI Bus-Device-Function (BDF) identifier and type. This is
- * useful for obtaining a handle for a specific PCI device without needing to
- * enumerate all devices.
+ * by providing its PCI Bus-Device-Function (BDF) identifier and type. As with
+ * amdcuid_get_handle_by_dev_path(), only a component that
+ * amdcuid_get_all_handles() lists has a handle.
  *
  * @param[in] bdf The PCI address of the target device in the format
  * "segment:bus:device.function", with a segment of 4 to 8 hex digits
- * (e.g., "0000:03:00.0").
+ * (e.g., "0000:03:00.0"). Hex digits may be of either case and the segment
+ * may carry leading zeros: "0000:A6:00.0" and "00000000:a6:00.0" name the
+ * function "0000:a6:00.0".
  * @param[in] device_type The type of the device (see amdcuid_device_type_t).
  * @param[out] handle Pointer to an amdcuid_id_t that will be filled with the
  * device's handle.
  *
  * @return AMDCUID_STATUS_SUCCESS on success,
- *         AMDCUID_STATUS_INVALID_ARGUMENT if the provided arguments are
- * invalid, AMDCUID_STATUS_DEVICE_NOT_FOUND if the device could not be found
- * with the specified BDF AMDCUID_STATUS_UNSUPPORTED if the device type is not
- * supported, AMDCUID_STATUS_WRONG_DEVICE_TYPE if the device type is
- * inappropriate for BDF lookup (e.g., CPU or platform devices),
- * AMDCUID_STATUS_INVALID_FORMAT if another component has the same CUID,
- * AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND if the host has no usable machine-id
+ *         AMDCUID_STATUS_INVALID_ARGUMENT if a pointer is NULL, @p bdf is not
+ * a PCI address or @p device_type is not an assigned Component Type,
+ *         AMDCUID_STATUS_WRONG_DEVICE_TYPE if @p device_type has no PCI address
+ * (CPU, platform), or discovery lists the function as a component of another
+ * type,
+ *         AMDCUID_STATUS_UNSUPPORTED if this library discovers no components
+ * of @p device_type (only GPU, NIC and NPU have a BDF),
+ *         AMDCUID_STATUS_DEVICE_NOT_FOUND if discovery lists no component at
+ * that address,
+ *         the status that kept discovery from listing the function
+ * (e.g. AMDCUID_STATUS_INVALID_FORMAT, AMDCUID_STATUS_PERMISSION_DENIED),
+ *         AMDCUID_STATUS_INVALID_FORMAT if another component has the same CUID,
+ *         AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND if the host has no usable
+ * machine-id
  */
 amdcuid_status_t amdcuid_get_handle_by_bdf(const char* bdf, amdcuid_device_type_t device_type,
                                            amdcuid_id_t* handle);
@@ -282,12 +324,15 @@ amdcuid_status_t amdcuid_get_handle_by_bdf(const char* bdf, amdcuid_device_type_
  * device's handle.
  *
  * @return AMDCUID_STATUS_SUCCESS on success,
- *         AMDCUID_STATUS_INVALID_ARGUMENT if the provided arguments are
- * invalid, AMDCUID_STATUS_DEVICE_NOT_FOUND if the device could not be found for
- * the specified file descriptor AMDCUID_STATUS_UNSUPPORTED if the device type
- * is not supported, AMDCUID_STATUS_WRONG_DEVICE_TYPE if the device type is
- * inappropriate for file descriptor lookup,
- * AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND if the host has no usable machine-id
+ *         AMDCUID_STATUS_INVALID_ARGUMENT if @p fd is negative, @p handle is
+ * NULL or @p device_type is not an assigned Component Type,
+ *         AMDCUID_STATUS_WRONG_DEVICE_TYPE if @p device_type has no device
+ * node (CPU, platform, NIC),
+ *         AMDCUID_STATUS_UNSUPPORTED if this library discovers no components
+ * of @p device_type,
+ *         AMDCUID_STATUS_DEVICE_NOT_FOUND if @p fd is not a device node of a
+ * component discovery lists, and otherwise what
+ * amdcuid_get_handle_by_dev_path() returns for the node's sysfs path
  */
 amdcuid_status_t amdcuid_get_handle_by_fd(int fd, amdcuid_device_type_t device_type,
                                           amdcuid_id_t* handle);
@@ -300,9 +345,13 @@ amdcuid_status_t amdcuid_get_handle_by_fd(int fd, amdcuid_device_type_t device_t
  * and rebuild its in-memory index. This is useful if devices have been added
  * or removed.
  *
+ * On failure the inventory is left empty, and the next call discovers again.
+ *
  * @return AMDCUID_STATUS_SUCCESS on success,
- *         AMDCUID_STATUS_DEVICE_NOT_FOUND if no devices are found during
- * discovery
+ *         AMDCUID_STATUS_DEVICE_NOT_FOUND if discovery finds no component,
+ *         otherwise the status amdcuid_get_all_handles() names for the same
+ * failure (AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND,
+ * AMDCUID_STATUS_INVALID_FORMAT, AMDCUID_STATUS_HMAC_ERROR, ...)
  */
 amdcuid_status_t amdcuid_refresh(void);
 
@@ -414,8 +463,8 @@ amdcuid_status_t amdcuid_set_hash_key(const uint8_t key[32]);
  * @param[out] key Pointer to the buffer where the generated HMAC key will be
  * stored. This must be 32 bytes in length.
  * @return AMDCUID_STATUS_SUCCESS on success
+ *         AMDCUID_STATUS_INVALID_ARGUMENT if @p key is NULL,
  *         AMDCUID_STATUS_PERMISSION_DENIED if insufficient permissions,
- *         AMDCUID_STATUS_INVALID_ARGUMENT if the arguments are invalid,
  *         AMDCUID_STATUS_KEY_ERROR if there was an error generating the key.
  */
 amdcuid_status_t amdcuid_generate_hash_key(uint8_t key[32]);

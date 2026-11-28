@@ -26,9 +26,11 @@ class CuidPlatform : public CuidDevice {
   amdcuid_status_t get_temporary_input(CuidUtilities::AuxiliaryInput& input) const override;
 
   // The SMBIOS system UUID, if the firmware supplies a real one. Returns false
-  // when it is absent or an all-0x00 / all-0xFF sentinel. When present, it is
+  // when it is absent or the all-0x00 or all-0xFF sentinel. When present, it is
   // the Platform CUID, used verbatim rather than folded.
   static bool get_system_uuid(uint8_t uuid[16]);
+  // False only for the all-0x00 and all-0xFF sentinels.
+  static bool is_present_uuid(const uint8_t uuid[16]);
   static amdcuid_status_t discover(std::vector<DevicePtr>& platforms);
 
   // Virtual accessor overrides

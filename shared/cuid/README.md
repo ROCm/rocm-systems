@@ -28,7 +28,7 @@ Component Type uses these values: `0x0` Platform, `0x1` CPU, `0x2` GPU, `0x3` NI
 if (!amdcuid_device_type_is_valid(type)) { /* reserved, or not a Component Type at all */ }
 ```
 
-`amdcuid_device_type_is_valid()` is true for `0x0`–`0xA` and `0xF`, and false for the reserved `0xB`–`0xE`, for `AMDCUID_DEVICE_TYPE_NONE` (`0xFF`, deliberately outside what a 4-bit field can hold), and for anything else. The library version is 2.2.0 (`AMDCUID_LIB_VERSION_MAJOR`, `_MINOR`, `_PATCH`); code that loops over Component Types uses the helper.
+`amdcuid_device_type_is_valid()` is true for `0x0`–`0xA` and `0xF`, and false for the reserved `0xB`–`0xE`, for `AMDCUID_DEVICE_TYPE_NONE` (`0xFF`, deliberately outside what a 4-bit field can hold), and for anything else. The library version is 2.3.0 (`AMDCUID_LIB_VERSION_MAJOR`, `_MINOR`, `_PATCH`); code that loops over Component Types uses the helper.
 
 The payload is framed as an RFC 9562 UUIDv8. `U` is the UUID in printed octet order:
 
@@ -70,9 +70,9 @@ Partition `k` has UnitID `n*(n-1)/2 + 1 + k` (DPX 2–3, QPX 7–10, CPX on 8 XC
 29–36); the whole GPU keeps UnitID 0, and a GPU in SPX has no separate
 partition. The UnitID comes from the partition's `cuid_unit_id` where amdgpu
 publishes one, and otherwise from the KFD topology, so a stock kernel gives
-the same values. A partition whose UnitID cannot be determined, such as one
-in a container whose device cgroup hides some of the GPU's KFD nodes, has no
-CUID.
+the same values. A partition whose UnitID cannot be determined, such as a CPX
+partition on Linux before 6.12 in a container whose device cgroup hides some
+of the GPU's KFD nodes, has no CUID.
 
 Temporary CUIDs depend on the host's machine-id, so they are node-local.
 See [Temporary CUIDs](docs/conceptual/what_is_cuid.rst) for the construction
