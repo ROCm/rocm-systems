@@ -36,11 +36,14 @@
 #
 # ENABLE_TESTS
 #
-# Enable building the rocr-debug-agent tests. Default is ON.
+# Enable building the rocr-debug-agent tests: the integration tests, the unit
+# tests and the CI wrapper. Default is ON.
 #
 # The debug agent has a small set of validation tests that can be built
 # with a suitable HIP compiler. This is mostly for development, so it isn't
-# required to be built if users are only looking for the tool.
+# required to be built if users are only looking for the tool. The unit tests
+# are CPU-only GoogleTest tests, so building the tests also needs GoogleTest.
+# The HIP language is only enabled when ENABLE_TESTS is ON.
 #
 #
 # rocm-debug-agent has the following dependencies:
@@ -58,7 +61,7 @@ project(rocm-debug-agent VERSION 2.2.0 LANGUAGES CXX)
 
 include(GNUInstallDirs)
 
-# By default build the Debug Agent tests.
+# By default build both the integration and unit tests.
 option(ENABLE_TESTS "Enable building Debug Agent tests" ON)
 
 # Modules that are linked into both the rocm-debug-agent library and the unit
@@ -294,4 +297,6 @@ install(
 if(ENABLE_TESTS)
     enable_testing()
     add_subdirectory(test)
+    # The unit tests link rocm-debug-agent-core, which is defined above.
+    add_subdirectory(test/unit)
 endif()

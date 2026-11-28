@@ -6,6 +6,10 @@ Full documentation for the ROCR Debug Agent library is available at
 ## ROCR Debug Agent 2.2.2 for ROCm 10.3
 
 ### Changed
+- `ENABLE_TESTS` (default `ON`) now also builds the unit tests and installs the
+  CI wrapper, so a default configure needs GoogleTest.  Pass
+  `-DENABLE_TESTS=OFF` to build only the library.  The `test/` directory can
+  no longer be configured as a separate project.
 - Invalid or missing-argument command-line options now print a specific error
   message followed by the usage message, and exit with a non-zero status
   instead of aborting.  This changes the exit behavior from `SIGABRT` to a
