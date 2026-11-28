@@ -189,7 +189,13 @@ CONSAN_KERNEL:
 #ifdef HELPER_BARRIER_BEFORE_CALL
   flat_barrier
 #endif
+#ifdef FLAT_COLLIDING_WRITERS
+  // Keep both highest lanes for the store, then restore the single-lane peer and output.
+  v_and_b32 v7, -2, v12
+  v_cmp_eq_u32 MASK_VCC, (CONSAN_WAVE_SIZE-2), v7
+#else
   v_cmp_eq_u32 MASK_VCC, (CONSAN_WAVE_SIZE-1), v12
+#endif
   MASK_AND_SAVE MASK_SAVE, MASK_VCC
   v_cmp_eq_u32 MASK_VCC, 0, v6
   MASK_AND_SAVE MASK_PEER_SAVE, MASK_VCC
@@ -212,6 +218,10 @@ CONSAN_KERNEL:
   DS_STORE_B32 v4, v5
 #endif
   MASK_MOVE MASK_EXEC, MASK_PEER_SAVE
+#ifdef FLAT_COLLIDING_WRITERS
+  v_cmp_eq_u32 MASK_VCC, (CONSAN_WAVE_SIZE-1), v12
+  MASK_MOVE MASK_EXEC, MASK_VCC
+#endif
 #ifdef FLAT_ORDERED
   flat_barrier
 #endif

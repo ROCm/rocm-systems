@@ -174,52 +174,85 @@ struct ApertureWords {
   }
 };
 
-// A word in this set holds one value across the current EXEC lanes. The
-// original-entry whitelist excludes VGPR bank and indexing mode changes, so
-// encoded VGPR indices have their kernel-entry meaning throughout the scope.
-class BlockUniformWords {
+// Track bytes that hold one value across the current EXEC lanes. The
+// original-entry whitelist excludes VGPR bank and indexing mode changes.
+class BlockUniformBytes {
 public:
-  UniformStoreProof store_proof(const Instruction &store) const {
-    using Op = amdgpu::Operation;
-    switch (store.amdgpu_operation()) {
-    case Op::DS_STORE_B32:
-    case Op::DS_WRITE_B32:
-    case Op::DS_STORE_B64:
-    case Op::DS_WRITE_B64:
-    case Op::DS_STORE_B96:
-    case Op::DS_WRITE_B96:
-    case Op::DS_STORE_B128:
-    case Op::DS_WRITE_B128:
-      break;
-    default:
+  UniformStoreProof store_proof(const Instruction &store, const NativeLdsAccess &site) const {
+    if (site.origin != AccessOrigin::Native || site.kind != AccessKind::Write ||
+        site.lds_ranges.shape != LdsRangeShape::Single)
       return UniformStoreProof::None;
-    }
-    // The native classifier checked the exact DATA0 tuple width and allocation.
-    // contains() requires every word. The DS displacement is common to all lanes.
-    const std::optional<RegisterRef> address = store.src_operand(0)->decoded_vgpr();
-    const std::optional<RegisterRef> data = store.src_operand(1)->decoded_vgpr();
-    return address && data && words_.contains(*address) && words_.contains(*data)
+    // The native classifier checked the ADDR and DATA0 allocation and tuple
+    // widths. The decoder identifies the selected DATA0 bytes in each word.
+    const Operand &payload = *store.src_operand(1);
+    const RegisterRef address = *store.src_operand(0)->decoded_vgpr();
+    const RegisterRef data = *payload.decoded_vgpr();
+    const unsigned selected = payload.register_byte_mask();
+    return uniform_bytes(address) == 0xf && selected && (uniform_bytes(data) & selected) == selected
                ? UniformStoreProof::BlockLocalBroadcast
                : UniformStoreProof::None;
   }
 
   void transfer(const Instruction &inst, const InstDefUse &effects) {
     if (writes_execution_mask(inst) && !intersects_execution_mask(inst))
-      words_ = {};
-    words_ -= effects.defs;
-    if (effects.conditional_vgpr_def)
-      words_.erase(*effects.conditional_vgpr_def);
-    // The qualified four-byte VOP1 has no DPP, SDWA or literal extension.
-    if (inst.amdgpu_operation() != amdgpu::Operation::V_MOV_B32 || inst.size() != 4)
-      return;
-    const Operand &source = *inst.src_operand(0);
-    const std::optional<RegisterRef> reg = source.to_register_ref();
-    const std::optional<RegisterRef> dst = inst.dst_operand(0)->decoded_vgpr();
-    if (dst && (source.const_value() || (reg && reg->cls == RegClass::SGPR)))
-      words_.expand(*dst);
+      bytes_ = {};
+    const std::optional<RegisterRef> dst =
+        inst.num_dst_operands() ? inst.dst_operand(0)->decoded_vgpr() : std::nullopt;
+    // Read the old destination or an aliased shift source before killing defs.
+    const unsigned derived = dst ? defined_bytes(inst, *dst) : 0;
+    for (unsigned byte = 0; byte < bytes_.size(); ++byte) {
+      bytes_[byte] -= effects.defs;
+      if (effects.conditional_vgpr_def)
+        bytes_[byte].erase(*effects.conditional_vgpr_def);
+      if (derived & (1u << byte))
+        bytes_[byte].expand(*dst);
+    }
   }
 
 private:
+  unsigned uniform_bytes(RegisterRef reg) const {
+    unsigned mask = 0;
+    for (unsigned byte = 0; byte < bytes_.size(); ++byte) {
+      if (bytes_[byte].contains(reg))
+        mask |= 1u << byte;
+    }
+    return mask;
+  }
+
+  unsigned defined_bytes(const Instruction &inst, RegisterRef dst) const {
+    if (inst.has_d16_memory_data() &&
+        inst.amdgpu_memory_addressing() == amdgpu::MemoryAddressing::Lds &&
+        inst.amdgpu_memory_kind() == amdgpu::MemoryKind::Load && dst.width == 1) {
+      amdgpu::RegisterModifiers modifiers;
+      inst.amdgpu_register_modifiers(modifiers);
+      // The other half is preserved or cleared uniformly on SRAM-ECC targets.
+      // Neither case introduces variation into a previously uniform byte.
+      return uniform_bytes(dst) & ~modifiers.memory_result_bytes;
+    }
+    // Only plain four-byte vector operations have these lane and operand
+    // semantics; extended encodings can select other lanes or partial bytes.
+    if (inst.size() != 4 || dst.width != 1)
+      return 0;
+    using Op = amdgpu::Operation;
+    switch (inst.amdgpu_operation()) {
+    case Op::V_MOV_B32: {
+      const Operand &source = *inst.src_operand(0);
+      const std::optional<RegisterRef> reg = source.to_register_ref();
+      return source.const_value() || (reg && reg->cls == RegClass::SGPR) ? 0xf : 0;
+    }
+    case Op::V_LSHLREV_B32:
+    case Op::V_LSHRREV_B32: {
+      const std::optional<RegisterRef> source = inst.src_operand(1)->decoded_vgpr();
+      if (!source || source->width != 1 || inst.src_operand(0)->const_value() != 8)
+        return 0;
+      const unsigned input = uniform_bytes(*source);
+      return inst.amdgpu_operation() == Op::V_LSHLREV_B32 ? (input << 1) & 0xf : input >> 1;
+    }
+    default:
+      return 0;
+    }
+  }
+
   static bool intersects_execution_mask(const Instruction &inst) {
     using Op = amdgpu::Operation;
     const std::optional<RegisterRef> dst =
@@ -241,7 +274,7 @@ private:
     }
   }
 
-  RegisterSet words_;
+  std::array<RegisterSet, 4> bytes_;
 };
 
 struct FlatPointers {
@@ -325,7 +358,7 @@ Result collect_original_code(const std::vector<std::unique_ptr<BasicBlock>> &blo
       return reject(error, InputErrorCode::UnsupportedFlow, "original control flow is not closed",
                     block->start_offset());
     }
-    BlockUniformWords uniform; // No definitions flow across a branch, call, or backedge.
+    BlockUniformBytes uniform; // No definitions flow across a branch, call, or backedge.
     FlatPointers aperture;
     if (block->start_offset() == program.kernel.entry_text_offset &&
         block->predecessors().empty()) {
@@ -390,7 +423,8 @@ Result collect_original_code(const std::vector<std::unique_ptr<BasicBlock>> &blo
       }
       const InstDefUse effects(instruction, program.wave_size);
       if (program.accesses.size() != previous_accesses)
-        program.accesses.back().uniform_store_proof = uniform.store_proof(instruction);
+        program.accesses.back().uniform_store_proof =
+            uniform.store_proof(instruction, program.accesses.back());
       uniform.transfer(instruction, effects);
       aperture.transfer(instruction, effects, exec.before(instruction));
       used |= effects.uses;

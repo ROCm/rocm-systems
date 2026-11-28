@@ -332,8 +332,7 @@ Result validate_manifest(const Manifest &manifest, util::DiagnosticEmitter diagn
     if (site.uniform_store_proof != UniformStoreProof::None &&
         (site.uniform_store_proof != UniformStoreProof::BlockLocalBroadcast ||
          !uniform_store_profile(manifest.options) || site.origin != AccessOrigin::Native ||
-         site.access != AccessKind::Write || ranges.shape != LdsRangeShape::Single ||
-         (site.width != 4 && site.width != 8 && site.width != 12 && site.width != 16))) {
+         site.access != AccessKind::Write || ranges.shape != LdsRangeShape::Single)) {
       return diagnostic.emit() << "invalid uniform store proof for site";
     }
     const bool wide_flat = site.origin == AccessOrigin::GroupFlat &&

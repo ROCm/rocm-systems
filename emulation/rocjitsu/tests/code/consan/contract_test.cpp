@@ -1007,7 +1007,7 @@ TEST_F(ConSanContract, UniformStoreProofUsesPreviouslyZeroBitsOfItsOwnSite) {
     facts.target = target.id;
     for (uint32_t wave : {32u, 64u}) {
       facts.wave_size = wave;
-      for (uint32_t width : {4u, 8u, 12u, 16u}) {
+      for (uint32_t width : {1u, 2u, 4u, 8u, 12u, 16u}) {
         facts.sites[0].width = width;
         EXPECT_EQ(validate_manifest(facts).succeeded(), supports_wave(target, wave))
             << target.name << " wave" << wave << " width " << width;
@@ -1017,7 +1017,7 @@ TEST_F(ConSanContract, UniformStoreProofUsesPreviouslyZeroBitsOfItsOwnSite) {
   facts.target = 1250;
   facts.wave_size = 32;
   SiteFacts &site = facts.sites[0];
-  for (uint32_t width : {1u, 2u, 3u, 20u}) {
+  for (uint32_t width : {0u, 3u, 20u}) {
     site.width = width;
     EXPECT_TRUE(validate_manifest(facts).failed());
   }

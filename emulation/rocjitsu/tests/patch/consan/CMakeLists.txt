@@ -585,6 +585,9 @@ if(TARGET consan_hsa_runner)
                         endforeach()
                     endforeach()
                 endforeach()
+                consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
+                    wide_dual_b32_normal_collision ${_wave_size} production analysis
+                )
                 foreach(_peer IN ITEMS overlap adjacent disjoint)
                     consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
                         wide_b8_${_peer} ${_threads} production analysis

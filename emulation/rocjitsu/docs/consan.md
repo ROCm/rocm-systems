@@ -417,15 +417,41 @@ malformed-evidence integrity issues.
 
 By default, the analyzer reports every observed same-instruction store
 collision. To suppress collisions for an intentional same-value store, replay
-the same capture with `--suppress-uniform-store-collisions`. Prepare supports native
-single-range B32, B64, B96, and B128 stores on gfx942 and gfx950 wave64
-(`ds_write_*`), gfx1100 and gfx1201 wave32 or wave64, and gfx1250 wave32
-(`ds_store_*`). The address VGPR and every payload VGPR must come from a
-plain four-byte `v_mov_b32` broadcast of an SGPR or inline constant in the
-store's basic block. For B96 this requires all three payload words, and for
-B128 all four. Different words can come from different SGPRs. Each broadcast must cover all lanes active at the
-store, including active lanes 32–63 on wave64. A later register clobber,
-possible EXEC expansion, or missing proof keeps the collision reportable.
+the same capture with `--suppress-uniform-store-collisions`. Prepare can prove
+native single-range B8, B16, B32, B64, B96, and B128 stores on gfx942 and
+gfx950 wave64 (`ds_write_*`), gfx1100 and gfx1201 wave32 or wave64, and
+gfx1250 wave32 (`ds_store_*`). A plain four-byte `v_mov_b32` of an SGPR or
+inline constant establishes uniform bytes in a VGPR. The entire address and
+all bytes selected for the payload must be uniform in the store's active
+lanes. B96 and B128 require three and four complete payload words,
+respectively. Each word can come from a different broadcast.
+
+B8 and B16 select the low byte or halfword. Their `_d16_hi` variants select
+bits 23:16 or 31:16. A native D16 load invalidates its destination half. Bytes
+already uniform in the opposite half stay uniform under both the preservation
+and SRAM-ECC zeroing behaviors described above. A plain register shift
+(`v_lshlrev_b32` or `v_lshrrev_b32`) by inline 8 carries each previously
+proved byte to its new position. For example, a high-half load into a
+broadcast word followed by a right shift of eight leaves byte zero proved for
+a B8 store. Byte one comes from the loaded half and a B16 store still reports
+its collision. The proof tracks bytes derived from the broadcast within one
+basic block. A register clobber or possible EXEC expansion invalidates it,
+including expansion into lanes 32–63 on wave64.
+
+The proof assumes the original program orders register dependencies as required
+by the target ISA. For example, an asynchronous load into a VGPR must complete
+before a VALU broadcast overwrites that VGPR. A wait at the store occurs after
+both instructions. The [waitcheck reference](sphinx/reference/waitcheck.md)
+describes how to check the original code object for these hazards.
+
+Two-address B32/B64 stores, including stride-64 forms, keep their collision
+diagnostics for both range ordinals. Each range uses its own displacement and
+DATA0 or DATA1 payload, subject to the target's coincident-offset rule.
+Group-FLAT B16 (low/high), B32, B64, and B128 stores also keep their observed
+collisions. Shared-aperture proofs, selected-high or helper assumptions, and
+gfx1250 scalar-base addressing qualify the LDS range. Uniform-store suppression
+would additionally require the full effective address and selected payload
+for that form.
 Earlier captures without proofs keep their original findings under either policy.
 
 JSON records the effective option in `suppress_uniform_store_collisions` and
