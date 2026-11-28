@@ -90,9 +90,11 @@ bool Comgr::LoadLib() {
   constexpr size_t kRequiredMajor = 3;
   constexpr size_t kRequiredMinor = 2;
   if (major != kRequiredMajor || minor < kRequiredMinor) {
-    ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
+    // Always log: otherwise the only symptom is hipErrorNoDevice.
+    ClPrint(amd::LOG_NONE, amd::LOG_ALWAYS,
             "COMGR library version %zu.%zu is incompatible; "
-            "require %zu.%zu or newer (same major).",
+            "require %zu.%zu or newer (same major). Ensure the Comgr library from the same "
+            "ROCm installation as the runtime is loaded.",
             major, minor, kRequiredMajor, kRequiredMinor);
     return false;
   }
