@@ -44,6 +44,7 @@
 #include <cstddef>
 #include <cstring>
 #include <exception>
+#include <limits>
 #include <map>
 #include <memory>
 #include <new>
@@ -530,6 +531,14 @@ hsa_status_t hsa_amd_memory_async_copy_on_engine(void* dst, hsa_agent_t dst_agen
   CATCH;
 }
 
+// The entry count is bounded by the width of the field that carries it, so the
+// multi-entry types take num_entries over its whole range and no runtime ceiling
+// check is made. Widening the field reinstates the need for one, and fails here.
+static_assert(std::numeric_limits<decltype(hsa_amd_memory_copy_op_t::num_entries)>::max() ==
+                  HSA_AMD_MEMORY_COPY_OP_MAX_ENTRIES,
+              "num_entries no longer matches its documented maximum; restore a runtime bound "
+              "check on the multi-entry copy types");
+
 hsa_status_t hsa_amd_memory_async_batch_copy(const hsa_amd_memory_copy_op_t* copy_ops,
                                              uint32_t num_copy_ops,
                                              uint32_t num_dep_signals,
@@ -627,8 +636,7 @@ hsa_status_t hsa_amd_memory_async_batch_copy(const hsa_amd_memory_copy_op_t* cop
       if (op.num_entries > 0) {
         // Multi-linear: arrays of src/dst/size, one signal for all entries.
         if (op.src_list == nullptr || op.dst_list == nullptr ||
-            op.dst_agent_list == nullptr || op.size_list == nullptr ||
-            op.num_entries > 65536 || op.reserved0 != 0)
+            op.dst_agent_list == nullptr || op.size_list == nullptr || op.reserved0 != 0)
           return HSA_STATUS_ERROR_INVALID_ARGUMENT;
         for (uint32_t d = 0; d < op.num_entries; ++d) {
           IS_BAD_PTR(op.src_list[d]);
@@ -682,7 +690,7 @@ hsa_status_t hsa_amd_memory_async_batch_copy(const hsa_amd_memory_copy_op_t* cop
       break;
     case HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST:
       if (op.dst_list == nullptr || op.dst_agent_list == nullptr ||
-          op.num_entries == 0 || op.num_entries > 65536 || op.unused_size != 0)
+          op.num_entries == 0 || op.unused_size != 0)
         return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       for (uint32_t d = 0; d < op.num_entries; ++d) {
         IS_BAD_PTR(op.dst_list[d]);
@@ -693,8 +701,7 @@ hsa_status_t hsa_amd_memory_async_batch_copy(const hsa_amd_memory_copy_op_t* cop
     case HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP:
       if (op.num_entries > 0) {
         if (op.src_list == nullptr || op.dst_list == nullptr ||
-            op.dst_agent_list == nullptr || op.size_list == nullptr ||
-            op.num_entries > 65536 || op.reserved0 != 0)
+            op.dst_agent_list == nullptr || op.size_list == nullptr || op.reserved0 != 0)
           return HSA_STATUS_ERROR_INVALID_ARGUMENT;
         for (uint32_t d = 0; d < op.num_entries; ++d) {
           IS_BAD_PTR(op.src_list[d]);
