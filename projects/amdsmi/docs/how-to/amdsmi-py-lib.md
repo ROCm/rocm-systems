@@ -112,6 +112,16 @@ driver and make sure that any resources held by AMD SMI are released.
 Refer to the [Python library API reference](../reference/amdsmi-py-api.md).
 ```
 
+(py_version_match)=
+### Use the module that ships with the library
+
+Import the Python module from the same installation as `libamd_smi.so`.
+The current system-package loader checks the library version before using it.
+Older wrappers, including the community PyPI releases through 7.0.2, may
+instead fail at import with `AttributeError` when a required symbol is missing.
+See [Packaging and install paths](../packaging.md) for the loader search order
+and the module location for each installation method.
+
 (py_exceptions)=
 ## Exceptions
 
@@ -131,6 +141,18 @@ Exceptions that can be thrown by AMD SMI are:
        print("Unable to get processor handles, error: {} {}".format(str(e.get_error_code()), e.err_info))
    ```
 
+
+* `OSError`: raised by the first call into the library when `libamd_smi.so`
+  could not be loaded. `import amdsmi` still succeeds in that case, so code
+  that checks whether AMD SMI is usable should catch `OSError` as well as
+  `AmdSmiException`:
+
+   ```python
+   try:
+       amdsmi_init()
+   except (AmdSmiException, OSError) as e:
+       print("AMD SMI is not usable: {}".format(e))
+   ```
 
 * `AmdSmiParameterException`: Derives base `AmdSmiException` class and
   represents errors related to invalid parameters passed to functions. When this
