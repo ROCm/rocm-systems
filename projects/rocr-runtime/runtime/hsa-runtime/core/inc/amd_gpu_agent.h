@@ -737,6 +737,13 @@ class GpuAgent : public GpuAgentInt {
 
   lazy_ptr<core::Queue> queues_[QueueCount];
 
+  // @brief Blit kernel on queues_[QueuePCSampling], used for PC sampling setup copies.
+  // Teardown order is enforced by ReleaseResources(), which calls pcs_blit_->Destroy()
+  // before resetting queues_. The declaration order below is a second line of defence:
+  // members are destroyed in reverse declaration order, so declaring pcs_blit_ after
+  // queues_ tears it down first if ReleaseResources() was never reached.
+  lazy_ptr<core::Blit> pcs_blit_;
+
   // @brief The CP firmware's capabilities, read from the utility queue's caps once, on first
   // query.
   uint32_t CpFirmwareCaps() const;
