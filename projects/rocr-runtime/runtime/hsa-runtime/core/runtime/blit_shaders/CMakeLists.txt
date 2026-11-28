@@ -156,7 +156,7 @@ endfunction(generate_bytecodeStrm)
 
 
 # Build kernels for deviceodeCopyAligned
-build_kernels_for_devices("kCodeCopyAligned;kCodeCopyMisaligned;kCodeFill" "blit_copyAligned.s;blit_copyMisaligned.s;blit_fill.s")
+build_kernels_for_devices("kCodeCopyAligned;kCodeCopyMisaligned;kCodeFill;kCodeFillBytes" "blit_copyAligned.s;blit_copyMisaligned.s;blit_fill.s;blit_fillBytes.s")
 
 # Generate bytecode stream
 generate_bytecodeStrm("amd_blit_shaders_v2")

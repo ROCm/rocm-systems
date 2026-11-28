@@ -100,9 +100,10 @@
  *          (development and BKC snapshots only), so the 1.36 query is removed without a
  *          deprecation period.
  * - 1.40 - hsa_amd_agent_info_t: HSA_AMD_AGENT_INFO_MAX_BROADCAST_DESTINATIONS
+ * - 1.41 - hsa_amd_memory_fill_bytes
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 40
+#define HSA_AMD_INTERFACE_VERSION_MINOR 42
 
 #ifdef __cplusplus
 extern "C" {
@@ -3183,6 +3184,40 @@ hsa_status_t HSA_API hsa_amd_memory_unlock(void* host_ptr);
  */
 hsa_status_t HSA_API
     hsa_amd_memory_fill(void* ptr, uint32_t value, size_t count);
+
+/**
+ * @brief Fills the first @p size bytes of the block of memory pointed by
+ * @p ptr with the specified byte @p value. This is analogous to cudaMemset.
+ *
+ * @param[in] ptr Pointer to the block of memory to fill.
+ *
+ * @param[in] value Byte value to be set (only lower 8 bits are used).
+ *
+ * @param[in] size Number of bytes to be set to the value.
+ *
+ * @param[in] agent Agent whose DMA engines carry the fill. Pass an agent
+ * handle of 0 when the caller does not know which agent owns @p ptr; the
+ * runtime then resolves the owner from the pointer itself, which costs a
+ * pointer-info query per call. A caller that already holds the owning agent -
+ * which is the common case, since it allocated the memory - should pass it and
+ * skip that query.
+ *
+ * @retval HSA_STATUS_SUCCESS The function has been executed successfully.
+ *
+ * @retval HSA_STATUS_ERROR_NOT_INITIALIZED The HSA runtime has not been
+ * initialized.
+ *
+ * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT @p ptr is NULL.
+ *
+ * @retval HSA_STATUS_ERROR_INVALID_AGENT @p agent is neither 0 nor a valid
+ * agent handle.
+ *
+ * @retval HSA_STATUS_ERROR_INVALID_ALLOCATION if the given memory
+ * region was not allocated with HSA runtime APIs.
+ *
+ */
+hsa_status_t HSA_API hsa_amd_memory_fill_bytes(void* ptr, uint8_t value, size_t size,
+                                               hsa_agent_t agent);
 
 /**
  * @brief Maps an interop object into the HSA flat address space and establishes
