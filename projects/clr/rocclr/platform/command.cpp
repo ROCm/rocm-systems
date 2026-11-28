@@ -120,7 +120,7 @@ uint64_t Event::recordProfilingInfo(int32_t status, uint64_t timeStamp) {
 uint64_t epoch = 0;
 std::once_flag epoch_init;
 // ================================================================================================
-bool Event::setStatus(int32_t status, uint64_t timeStamp) {
+bool Event::setStatus(int32_t status, uint64_t timeStamp, bool deferRelease) {
   assert(status <= CL_QUEUED && "invalid status");
 
   int32_t currentStatus = this->status();
@@ -163,11 +163,17 @@ bool Event::setStatus(int32_t status, uint64_t timeStamp) {
   if (status <= CL_COMPLETE) {
     // Before we notify the waiters that this event reached the CL_COMPLETE
     // status, we release all the resources associated with this instance.
-    if (!IS_HIP) {
-      releaseResources();
+    if (!IS_HIP && deferRelease) {
+      // The command's packets, including its GPU waits, may still be queued, so its resources
+      // and pins are released by ReleaseDeferredResources() once the device completes it
+      deferResourceRelease_ = true;
+    } else {
+      if (!IS_HIP) {
+        releaseResources();
+      }
+      // The GPU passed the command's waits before it completed
+      releasePinnedHwEvents();
     }
-    // The GPU passed the command's waits before it completed
-    releasePinnedHwEvents();
 
     if (profilingInfo().enabled_) {
       amd::activity_prof::ReportActivity(command());
@@ -203,6 +209,7 @@ bool Event::resetStatus(int32_t status) {
     ClPrint(LOG_ERROR, LOG_CMD, "Failed to reset command status");
     return false;
   }
+  deferResourceRelease_ = false;
   notified_.clear();
   return true;
 }
