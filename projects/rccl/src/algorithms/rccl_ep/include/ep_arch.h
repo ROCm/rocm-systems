@@ -63,7 +63,7 @@ inline int check_uniform_arch(const EpConfig& cfg, int device, WindowView* d_vie
   hipError_t ce = hipMemcpy(d_mine, mine, kArchLen, hipMemcpyHostToDevice);
   if (ce != hipSuccess) {
     snprintf(err, err_len, "arch upload: %s", hipGetErrorString(ce));
-    hipFree(d_mine);
+    (void)hipFree(d_mine);
     return -1;
   }
 
@@ -71,7 +71,7 @@ inline int check_uniform_arch(const EpConfig& cfg, int device, WindowView* d_vie
   hipLaunchKernelGGL(k_ep_publish_arch, dim3(cfg.num_ranks), dim3(kArchLen), 0, 0, cfg, d_views, d_mine);
   hipLaunchKernelGGL(k_ep_lsa_barrier, dim3(kEpBarrierCtas), dim3(kWarpSize), 0, 0, devComm);
   hipError_t he = hipDeviceSynchronize();
-  hipFree(d_mine);
+  (void)hipFree(d_mine);
   if (he != hipSuccess) {
     snprintf(err, err_len, "arch exchange: %s", hipGetErrorString(he));
     return -1;
