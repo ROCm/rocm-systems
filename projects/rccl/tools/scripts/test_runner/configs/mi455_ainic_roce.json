@@ -6107,9 +6107,7 @@
     },
     "host_api_tests_base": {
       "extends": "net_ib_base",
-      "env_variables": {
-        "RCCL_RMA_USE_DMABUF": "1"
-      },
+      "env_variables": {},
       "tests": [
         {
           "name": "HostApi_WindowRegisterDeregister",
@@ -6751,8 +6749,7 @@
       "num_gpus": 1,
       "timeout": 180,
       "env_variables": {
-        "NCCL_CUMEM_ENABLE": "1",
-        "RCCL_RMA_USE_DMABUF": "1"
+        "NCCL_CUMEM_ENABLE": "1"
       },
       "tests": [
         {
@@ -6814,7 +6811,6 @@
         "NCCL_CUMEM_ENABLE": "1",
         "NCCL_WIN_ENABLE": "1",
         "NCCL_DMABUF_ENABLE": "1",
-        "RCCL_RMA_USE_DMABUF": "1",
         "RCCL_RMA_RELOAD_COUNTER_FILE": "private"
       },
       "description": "Validate the EXTERNAL one-sided RMA plugin loader/assign path. RCCL_RMA_RELOAD_COUNTER_FILE is a marker; the runner replaces it with a file in a 0700 directory under the workspace.",

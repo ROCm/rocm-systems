@@ -925,3 +925,28 @@ TEST_F(RocmwrapMicrotest, LibraryInit_RunsInitOnceAndReturnsItsResult) {
     },
     ::testing::ExitedWithCode(0), "");
 }
+
+struct GdrUseDmaBufCase {
+  std::string name;
+  bool peermemAvailable, dmabufAvailable, forceDmaBuf, cuMemEnabled, expectDmaBuf;
+};
+
+class RcclGdrUseDmaBufTest : public ::testing::TestWithParam<GdrUseDmaBufCase> {};
+
+TEST_P(RcclGdrUseDmaBufTest, MatchesExpectedDecision) {
+  const GdrUseDmaBufCase& c = GetParam();
+  EXPECT_EQ(c.expectDmaBuf,
+            rcclGdrUseDmaBuf(c.peermemAvailable, c.dmabufAvailable, c.forceDmaBuf, c.cuMemEnabled));
+}
+
+INSTANTIATE_TEST_SUITE_P(
+  Rocmwrap, RcclGdrUseDmaBufTest,
+  ::testing::Values(GdrUseDmaBufCase{"PeermemAndDmaBuf_PrefersPeermem", true, true, false, false, false},
+                    GdrUseDmaBufCase{"DmaBufOnly_UsesDmaBuf", false, true, false, false, true},
+                    GdrUseDmaBufCase{"PeermemOnly_UsesPeermem", true, false, false, false, false},
+                    GdrUseDmaBufCase{"Neither_UsesPeermemPath", false, false, false, false, false},
+                    GdrUseDmaBufCase{"ForceFlag_ForcesDmaBufDespitePeermem", true, true, true, false, true},
+                    GdrUseDmaBufCase{"CuMemEnabled_ForcesDmaBufDespitePeermem", true, true, false, true, true},
+                    GdrUseDmaBufCase{"ForceFlag_DmaBufUnavailableStaysFalse", true, false, true, false, false},
+                    GdrUseDmaBufCase{"CuMemEnabled_DmaBufUnavailableStaysFalse", true, false, false, true, false}),
+  [](const ::testing::TestParamInfo<GdrUseDmaBufCase>& info) { return info.param.name; });

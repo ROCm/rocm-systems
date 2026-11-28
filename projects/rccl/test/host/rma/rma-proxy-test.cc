@@ -51,6 +51,7 @@
 #include "fakes/hip_fakes.h"
 #include "fakes/nccl_fakes.h"
 #include "fakes/rma_fakes.h"
+#include "fakes/rocmwrap_fakes.h"
 
 // rma_proxy.cc declares params of its own. Route the generated bodies through
 // g_loadParam so they stay per-test controllable and the real ncclLoadParam is
@@ -108,10 +109,11 @@ gdr_t const kGdrEnabled = (gdr_t)0x12345678L;
 // from, not by what the test guessed.
 // ===========================================================================
 struct Registration {
-    void*    addr     = nullptr;
-    size_t   size     = 0;
-    int      type     = 0;
-    uint64_t mrFlags  = 0;
+    void*    addr      = nullptr;
+    size_t   size      = 0;
+    int      type      = 0;
+    uint64_t mrFlags   = 0;
+    bool     viaDmaBuf = false;
 };
 
 struct FakeRma {
@@ -135,7 +137,7 @@ struct FakeRma {
         return nullptr;
     }
 
-    ncclResult_t reg(void* data, size_t size, int type, uint64_t mrFlags, void** mhandle) {
+    ncclResult_t reg(void* data, size_t size, int type, uint64_t mrFlags, void** mhandle, bool viaDmaBuf = false) {
         ++regAttempts;
         if ((rejectAfterNReg >= 0 && regAttempts > rejectAfterNReg) ||
             (strictMemType && type == NCCL_PTR_CUDA && hostAddrs != nullptr &&
@@ -145,7 +147,7 @@ struct FakeRma {
             *mhandle = nullptr;
             return ncclInternalError;
         }
-        regs.push_back({data, size, type, mrFlags});
+        regs.push_back({data, size, type, mrFlags, viaDmaBuf});
         // Non-NULL and stable; production stores it but never dereferences it here.
         *mhandle = reinterpret_cast<void*>(regs.size());
         return ncclSuccess;
@@ -181,7 +183,7 @@ private:
     static ncclResult_t TrampRegMrSymDmaBuf(void* collComm, void* data, size_t size, int type,
                                             uint64_t /*offset*/, int /*fd*/, uint64_t mrFlags,
                                             void** mhandle) {
-        return Rma(collComm)->reg(data, size, type, mrFlags, mhandle);
+        return Rma(collComm)->reg(data, size, type, mrFlags, mhandle, /*viaDmaBuf=*/true);
     }
     static ncclResult_t TrampDeregMrSym(void* collComm, void* mhandle) {
         Rma(collComm)->deregs.push_back(mhandle);
@@ -230,9 +232,6 @@ protected:
 
         savedGdrCopy_ = ncclGdrCopy;
         ncclGdrCopy   = NULL;  // production default: GDRCopy off
-        // DMABUF_ENABLE=0 keeps ncclRmaProxyRegMrSym on its plain regMrSym arm: the
-        // DMA-BUF arm reaches hsa_amd_portable_export_dmabuf through a function
-        // pointer no host-only build can satisfy.
         g_loadParam = [](const char* env, int64_t deftVal) {
             return std::strcmp(env, "DMABUF_ENABLE") == 0 ? 0 : deftVal;
         };
@@ -279,9 +278,7 @@ protected:
         ncclMemoryStackConstruct(&comm_->memPermanent);
 
         // A capable NIC, so no registration below can be steered by a missing
-        // capability. The DMA-BUF bit is nonetheless never consulted here:
-        // ncclRmaProxyRegMrSym tests ncclParamDmaBufEnable() first, and the
-        // fixture pins that to 0 (see DMABUF_ENABLE above).
+        // capability. DMA-BUF stays off: comm_->dmaBufSupport is false here.
         props_.ptrSupport = NCCL_PTR_HOST | NCCL_PTR_CUDA | NCCL_PTR_DMABUF;
         // Drives maxInflightRequests and the circular-buffer queue size; 0
         // would leave production sanitizing down to a zero-length queue.
@@ -466,6 +463,86 @@ TEST_F(RmaProxyAllocGraphTest, ForceStrongOrderingPreservedOnBothGdrArms) {
         EXPECT_EQ(static_cast<uint64_t>(NCCL_NET_MR_FLAG_FORCE_SO), reg->mrFlags)
             << "gdr=" << (void*)gdr;
     }
+}
+
+// ---------------------------------------------------------------------------
+// ncclRmaProxyRegMrSym's peermem-vs-DMA-BUF choice, with DMA-BUF available.
+// ---------------------------------------------------------------------------
+class RmaProxyRegMrSymDmaBufTest : public RmaProxyAllocGraphTest {
+protected:
+    void SetUp() override {
+        RmaProxyAllocGraphTest::SetUp();
+        pfn_hsa_amd_portable_export_dmabuf = FakeExportDmaBuf;
+    }
+    void TearDown() override {
+        ResetRocmWrapFakes();
+        RmaProxyAllocGraphTest::TearDown();
+    }
+
+    ncclResult_t Register(int ptrSupport, bool dmaBufSupport, void* addr, size_t size, void** mhandle) {
+        ncclNetProperties_t props = props_;
+        props.ptrSupport = ptrSupport;
+        return ncclRmaProxyRegMrSym(&rma_, &rmaNet_.collH, props, addr, size, NCCL_PTR_CUDA, 0, mhandle,
+                                    dmaBufSupport);
+    }
+};
+
+TEST_F(RmaProxyRegMrSymDmaBufTest, PeermemAndDmaBufAvailable_CuMemOff_RegistersPlain) {
+    g_cuMemEnable = [] { return 0; };
+    char buf[8];
+    void* mhandle = nullptr;
+    ASSERT_EQ(ncclSuccess,
+             Register(NCCL_PTR_CUDA | NCCL_PTR_DMABUF, /*dmaBufSupport=*/true, buf, sizeof(buf), &mhandle));
+    const Registration* reg = rmaNet_.find(buf);
+    ASSERT_NE(nullptr, reg);
+    EXPECT_FALSE(reg->viaDmaBuf);
+}
+
+TEST_F(RmaProxyRegMrSymDmaBufTest, PeermemAndDmaBufAvailable_CuMemOn_RegistersDmaBuf) {
+    g_cuMemEnable = [] { return 1; };
+    char buf[8];
+    void* mhandle = nullptr;
+    ASSERT_EQ(ncclSuccess,
+             Register(NCCL_PTR_CUDA | NCCL_PTR_DMABUF, /*dmaBufSupport=*/true, buf, sizeof(buf), &mhandle));
+    const Registration* reg = rmaNet_.find(buf);
+    ASSERT_NE(nullptr, reg);
+    EXPECT_TRUE(reg->viaDmaBuf);
+}
+
+TEST_F(RmaProxyRegMrSymDmaBufTest, DmaBufOnlyProps_RegistersDmaBuf) {
+    g_cuMemEnable = [] { return 0; };
+    char buf[8];
+    void* mhandle = nullptr;
+    ASSERT_EQ(ncclSuccess, Register(NCCL_PTR_DMABUF, /*dmaBufSupport=*/true, buf, sizeof(buf), &mhandle));
+    const Registration* reg = rmaNet_.find(buf);
+    ASSERT_NE(nullptr, reg);
+    EXPECT_TRUE(reg->viaDmaBuf);
+}
+
+TEST_F(RmaProxyRegMrSymDmaBufTest, ForceFlag_RegistersDmaBufDespitePeermem) {
+    g_cuMemEnable = [] { return 0; };
+    g_loadParam = [](const char* env, int64_t deftVal) -> int64_t {
+        if (std::strcmp(env, "RCCL_FORCE_ENABLE_DMABUF") == 0) return 1;
+        return std::strcmp(env, "DMABUF_ENABLE") == 0 ? 0 : deftVal;
+    };
+    char buf[8];
+    void* mhandle = nullptr;
+    ASSERT_EQ(ncclSuccess,
+             Register(NCCL_PTR_CUDA | NCCL_PTR_DMABUF, /*dmaBufSupport=*/true, buf, sizeof(buf), &mhandle));
+    const Registration* reg = rmaNet_.find(buf);
+    ASSERT_NE(nullptr, reg);
+    EXPECT_TRUE(reg->viaDmaBuf);
+}
+
+TEST_F(RmaProxyRegMrSymDmaBufTest, DmaBufSupportFalse_RegistersPlainEvenWithCuMemOn) {
+    g_cuMemEnable = [] { return 1; };
+    char buf[8];
+    void* mhandle = nullptr;
+    ASSERT_EQ(ncclSuccess,
+             Register(NCCL_PTR_CUDA | NCCL_PTR_DMABUF, /*dmaBufSupport=*/false, buf, sizeof(buf), &mhandle));
+    const Registration* reg = rmaNet_.find(buf);
+    ASSERT_NE(nullptr, reg);
+    EXPECT_FALSE(reg->viaDmaBuf);
 }
 
 }  // namespace

@@ -1128,9 +1128,7 @@
     },
     "host_api_tests_base": {
       "extends": "net_ib_base",
-      "env_variables": {
-        "RCCL_RMA_USE_DMABUF": "1"
-      },
+      "env_variables": {},
       "tests": [
         {"name": "HostApi_WindowRegisterDeregister", "description": "Host API: window register/deregister", "test_filter": "HostApiTest.WindowRegisterDeregister"},
         {"name": "HostApi_SinglePutRank0ToRank1", "description": "Host API: single put rank0 to rank1", "test_filter": "HostApiTest.SinglePutRank0ToRank1"},
@@ -1184,8 +1182,7 @@
       "num_gpus": 1,
       "timeout": 180,
       "env_variables": {
-        "NCCL_CUMEM_ENABLE": "1",
-        "RCCL_RMA_USE_DMABUF": "1"
+        "NCCL_CUMEM_ENABLE": "1"
       },
       "tests": [
         {"name": "HostApi_GraphCaptureReplayPutWait_Proxy", "description": "Host API: two-node proxy graph capture and repeated replay", "test_filter": "HostApiTest.GraphCaptureReplayPutWait"}
@@ -1209,7 +1206,6 @@
       "timeout": 180,
       "env_variables": {
         "NCCL_CUMEM_ENABLE": "1",
-        "RCCL_RMA_USE_DMABUF": "1",
         "NCCL_RMA_DISABLE": "1"
       },
       "tests": [
@@ -1247,7 +1243,6 @@
         "NCCL_CUMEM_ENABLE": "1",
         "NCCL_WIN_ENABLE": "1",
         "NCCL_DMABUF_ENABLE": "1",
-        "RCCL_RMA_USE_DMABUF": "1",
         "RCCL_RMA_RELOAD_COUNTER_FILE": "/tmp/rccl_rma_reload_put_signal_counter.txt"
       },
       "description": "Validate the EXTERNAL one-sided RMA plugin loader/assign path",

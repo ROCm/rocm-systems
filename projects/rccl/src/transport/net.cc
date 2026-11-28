@@ -1142,11 +1142,8 @@ static ncclResult_t sendProxySetup(struct ncclProxyConnection* connection, struc
   bool peermemAvailable = (props.ptrSupport & NCCL_PTR_CUDA);
   bool dmabufAvailable = (props.ptrSupport & NCCL_PTR_DMABUF) && proxyState->dmaBufSupport;
   bool forceDmaBuf = rcclParamForceEnableDMABUF();
-  if (forceDmaBuf || ncclCuMemEnable()) {
-    resources->useDmaBuf = resources->useGdr && dmabufAvailable;
-  } else {
-    resources->useDmaBuf = resources->useGdr && !peermemAvailable && dmabufAvailable;
-  }
+  resources->useDmaBuf =
+    resources->useGdr && rcclGdrUseDmaBuf(peermemAvailable, dmabufAvailable, forceDmaBuf, ncclCuMemEnable());
   resources->maxRecvs = props.maxRecvs;
   resources->netDeviceVersion = props.netDeviceVersion;
   resources->netDeviceType = props.netDeviceType;
@@ -1199,11 +1196,8 @@ static ncclResult_t recvProxySetup(struct ncclProxyConnection* connection, struc
   bool peermemAvailable = (props.ptrSupport & NCCL_PTR_CUDA);
   bool dmabufAvailable = (props.ptrSupport & NCCL_PTR_DMABUF) && proxyState->dmaBufSupport;
   bool forceDmaBuf = rcclParamForceEnableDMABUF();
-  if (forceDmaBuf || ncclCuMemEnable()) {
-    resources->useDmaBuf = resources->useGdr && dmabufAvailable;
-  } else {
-    resources->useDmaBuf = resources->useGdr && !peermemAvailable && dmabufAvailable;
-  }
+  resources->useDmaBuf =
+    resources->useGdr && rcclGdrUseDmaBuf(peermemAvailable, dmabufAvailable, forceDmaBuf, ncclCuMemEnable());
   resources->maxRecvs = props.maxRecvs;
   resources->netDeviceVersion = props.netDeviceVersion;
   resources->netDeviceType = props.netDeviceType;

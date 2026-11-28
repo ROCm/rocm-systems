@@ -108,6 +108,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * `NCCL_IB_USE_INLINE` / `NCCL_IB_ECE_ENABLE` / `NCCL_IB_WARN_RAIL_LOCAL` / `NCCL_GDR_FLUSH_DISABLE` default literals changed from `0`/`1` to the equivalent `false`/`true`; behavior is unchanged.
 
 ### Removed
+* `RCCL_RMA_USE_DMABUF`. The RMA and GIN proxies now pick peermem or DMA-BUF the same way the network transport does (use `RCCL_FORCE_ENABLE_DMABUF=1` to force DMA-BUF).
 
 ### Resolved issues
 * Fixed `NCCL_CE_BATCH_CAPTURE_ENABLE=1` producing wrong results under HIP graph capture. `hipMemcpyBatchAsync` does not support graph capture, so Copy Engine copies recorded into a graph now always use per-copy `hipMemcpyAsync`, as with the variable unset, and RCCL logs once that it ignored the variable.
