@@ -8,6 +8,7 @@
 #include "rocjitsu/code/analysis/instruction_boundaries.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/kernel_scope.h"
+#include "rocjitsu/code/patch/fault_injection/atomic_legacy_fields.h"
 #include "rocjitsu/code/patch/fault_injection/fault_mutation_internal.h"
 #include "rocjitsu/code/patch/instrumentor.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/ds_offset_encoded_fields.h"
@@ -58,7 +59,7 @@ bool flat_like_atomic(std::string_view form) {
   return form.starts_with("flat_atomic") || form.starts_with("global_atomic");
 }
 
-uint32_t modern_atomic_alignment(amdgpu::Operation operation) {
+uint32_t atomic_alignment(amdgpu::Operation operation) {
   // Alignment follows the memory element, not CAS's two-element input or the
   // scalar type of a packed operation. Unknown operations have no recipe.
   switch (operation) {
@@ -122,6 +123,45 @@ uint32_t modern_atomic_alignment(amdgpu::Operation operation) {
   case amdgpu::Operation::BUFFER_ATOMIC_SUB_U32:
   case amdgpu::Operation::BUFFER_ATOMIC_SWAP_B32:
   case amdgpu::Operation::BUFFER_ATOMIC_XOR_B32:
+  case amdgpu::Operation::BUFFER_ATOMIC_ADD:
+  case amdgpu::Operation::BUFFER_ATOMIC_AND:
+  case amdgpu::Operation::BUFFER_ATOMIC_CMPSWAP:
+  case amdgpu::Operation::BUFFER_ATOMIC_DEC:
+  case amdgpu::Operation::BUFFER_ATOMIC_INC:
+  case amdgpu::Operation::BUFFER_ATOMIC_OR:
+  case amdgpu::Operation::BUFFER_ATOMIC_SMAX:
+  case amdgpu::Operation::BUFFER_ATOMIC_SMIN:
+  case amdgpu::Operation::BUFFER_ATOMIC_SUB:
+  case amdgpu::Operation::BUFFER_ATOMIC_SWAP:
+  case amdgpu::Operation::BUFFER_ATOMIC_UMAX:
+  case amdgpu::Operation::BUFFER_ATOMIC_UMIN:
+  case amdgpu::Operation::BUFFER_ATOMIC_XOR:
+  case amdgpu::Operation::FLAT_ATOMIC_ADD:
+  case amdgpu::Operation::FLAT_ATOMIC_AND:
+  case amdgpu::Operation::FLAT_ATOMIC_CMPSWAP:
+  case amdgpu::Operation::FLAT_ATOMIC_DEC:
+  case amdgpu::Operation::FLAT_ATOMIC_INC:
+  case amdgpu::Operation::FLAT_ATOMIC_OR:
+  case amdgpu::Operation::FLAT_ATOMIC_SMAX:
+  case amdgpu::Operation::FLAT_ATOMIC_SMIN:
+  case amdgpu::Operation::FLAT_ATOMIC_SUB:
+  case amdgpu::Operation::FLAT_ATOMIC_SWAP:
+  case amdgpu::Operation::FLAT_ATOMIC_UMAX:
+  case amdgpu::Operation::FLAT_ATOMIC_UMIN:
+  case amdgpu::Operation::FLAT_ATOMIC_XOR:
+  case amdgpu::Operation::GLOBAL_ATOMIC_ADD:
+  case amdgpu::Operation::GLOBAL_ATOMIC_AND:
+  case amdgpu::Operation::GLOBAL_ATOMIC_CMPSWAP:
+  case amdgpu::Operation::GLOBAL_ATOMIC_DEC:
+  case amdgpu::Operation::GLOBAL_ATOMIC_INC:
+  case amdgpu::Operation::GLOBAL_ATOMIC_OR:
+  case amdgpu::Operation::GLOBAL_ATOMIC_SMAX:
+  case amdgpu::Operation::GLOBAL_ATOMIC_SMIN:
+  case amdgpu::Operation::GLOBAL_ATOMIC_SUB:
+  case amdgpu::Operation::GLOBAL_ATOMIC_SWAP:
+  case amdgpu::Operation::GLOBAL_ATOMIC_UMAX:
+  case amdgpu::Operation::GLOBAL_ATOMIC_UMIN:
+  case amdgpu::Operation::GLOBAL_ATOMIC_XOR:
     return 4;
   case amdgpu::Operation::FLAT_ATOMIC_ADD_F64:
   case amdgpu::Operation::FLAT_ATOMIC_ADD_U64:
@@ -172,6 +212,51 @@ uint32_t modern_atomic_alignment(amdgpu::Operation operation) {
   case amdgpu::Operation::BUFFER_ATOMIC_SUB_U64:
   case amdgpu::Operation::BUFFER_ATOMIC_SWAP_B64:
   case amdgpu::Operation::BUFFER_ATOMIC_XOR_B64:
+  case amdgpu::Operation::BUFFER_ATOMIC_ADD_X2:
+  case amdgpu::Operation::BUFFER_ATOMIC_AND_X2:
+  case amdgpu::Operation::BUFFER_ATOMIC_CMPSWAP_X2:
+  case amdgpu::Operation::BUFFER_ATOMIC_DEC_X2:
+  case amdgpu::Operation::BUFFER_ATOMIC_INC_X2:
+  case amdgpu::Operation::BUFFER_ATOMIC_MAX_F64:
+  case amdgpu::Operation::BUFFER_ATOMIC_MIN_F64:
+  case amdgpu::Operation::BUFFER_ATOMIC_OR_X2:
+  case amdgpu::Operation::BUFFER_ATOMIC_SMAX_X2:
+  case amdgpu::Operation::BUFFER_ATOMIC_SMIN_X2:
+  case amdgpu::Operation::BUFFER_ATOMIC_SUB_X2:
+  case amdgpu::Operation::BUFFER_ATOMIC_SWAP_X2:
+  case amdgpu::Operation::BUFFER_ATOMIC_UMAX_X2:
+  case amdgpu::Operation::BUFFER_ATOMIC_UMIN_X2:
+  case amdgpu::Operation::BUFFER_ATOMIC_XOR_X2:
+  case amdgpu::Operation::FLAT_ATOMIC_ADD_X2:
+  case amdgpu::Operation::FLAT_ATOMIC_AND_X2:
+  case amdgpu::Operation::FLAT_ATOMIC_CMPSWAP_X2:
+  case amdgpu::Operation::FLAT_ATOMIC_DEC_X2:
+  case amdgpu::Operation::FLAT_ATOMIC_INC_X2:
+  case amdgpu::Operation::FLAT_ATOMIC_MAX_F64:
+  case amdgpu::Operation::FLAT_ATOMIC_MIN_F64:
+  case amdgpu::Operation::FLAT_ATOMIC_OR_X2:
+  case amdgpu::Operation::FLAT_ATOMIC_SMAX_X2:
+  case amdgpu::Operation::FLAT_ATOMIC_SMIN_X2:
+  case amdgpu::Operation::FLAT_ATOMIC_SUB_X2:
+  case amdgpu::Operation::FLAT_ATOMIC_SWAP_X2:
+  case amdgpu::Operation::FLAT_ATOMIC_UMAX_X2:
+  case amdgpu::Operation::FLAT_ATOMIC_UMIN_X2:
+  case amdgpu::Operation::FLAT_ATOMIC_XOR_X2:
+  case amdgpu::Operation::GLOBAL_ATOMIC_ADD_X2:
+  case amdgpu::Operation::GLOBAL_ATOMIC_AND_X2:
+  case amdgpu::Operation::GLOBAL_ATOMIC_CMPSWAP_X2:
+  case amdgpu::Operation::GLOBAL_ATOMIC_DEC_X2:
+  case amdgpu::Operation::GLOBAL_ATOMIC_INC_X2:
+  case amdgpu::Operation::GLOBAL_ATOMIC_MAX_F64:
+  case amdgpu::Operation::GLOBAL_ATOMIC_MIN_F64:
+  case amdgpu::Operation::GLOBAL_ATOMIC_OR_X2:
+  case amdgpu::Operation::GLOBAL_ATOMIC_SMAX_X2:
+  case amdgpu::Operation::GLOBAL_ATOMIC_SMIN_X2:
+  case amdgpu::Operation::GLOBAL_ATOMIC_SUB_X2:
+  case amdgpu::Operation::GLOBAL_ATOMIC_SWAP_X2:
+  case amdgpu::Operation::GLOBAL_ATOMIC_UMAX_X2:
+  case amdgpu::Operation::GLOBAL_ATOMIC_UMIN_X2:
+  case amdgpu::Operation::GLOBAL_ATOMIC_XOR_X2:
     return 8;
   default:
     return 0;
@@ -219,6 +304,8 @@ std::optional<int32_t> read_atomic_offset(rj_code_target_id_t target, std::strin
     const std::optional<uint32_t> offset = amdgpu::read_ds_offset0_field(target, words);
     return offset ? std::optional<int32_t>{static_cast<int32_t>(*offset)} : std::nullopt;
   }
+  if (words.size() == 2)
+    return fault_mutation_detail::read_legacy_atomic_byte_offset(target, form, words);
   return amdgpu::read_vmem_signed24_offset(target, words);
 }
 
@@ -227,6 +314,9 @@ bool admitted_atomic_form(rj_code_target_id_t target, std::string_view form, uin
   if (!offset)
     return false;
   if (size == 8 && ds_atomic32(form))
+    return true;
+  if (size == 8 && fault_mutation_detail::legacy_atomic_target(target) &&
+      (flat_like_atomic(form) || form.starts_with("buffer_atomic")))
     return true;
   return size == 12 && modern_atomic_target(target) && admitted_modern_atomic_form(form, offset);
 }
@@ -240,6 +330,13 @@ std::optional<std::vector<uint32_t>> replace_atomic_offset(rj_code_target_id_t t
       return std::nullopt;
     const std::optional<std::array<uint32_t, 2>> replacement =
         amdgpu::replace_ds_offset0_field(target, words, static_cast<uint32_t>(offset));
+    if (!replacement)
+      return std::nullopt;
+    return std::vector<uint32_t>(replacement->begin(), replacement->end());
+  }
+  if (words.size() == 2) {
+    const std::optional<std::array<uint32_t, 2>> replacement =
+        fault_mutation_detail::replace_legacy_atomic_byte_offset(target, form, words, offset);
     if (!replacement)
       return std::nullopt;
     return std::vector<uint32_t>(replacement->begin(), replacement->end());
@@ -275,7 +372,8 @@ std::vector<AtomicCapability> atomic_wrong_address_capabilities() {
                       target == ROCJITSU_CODE_TARGET_GFX1200 ||
                       target == ROCJITSU_CODE_TARGET_GFX1201;
     for (std::string_view form : {"flat_atomic", "global_atomic", "buffer_atomic", "ds_atomic"}) {
-      if (!modern_atomic_target(target) && form != "ds_atomic")
+      if (!modern_atomic_target(target) && !fault_mutation_detail::legacy_atomic_target(target) &&
+          form != "ds_atomic")
         continue;
       capabilities.push_back({.target = target, .wave_size = cdna5 ? 32u : 64u, .form = form});
       if (rdna)
@@ -413,7 +511,7 @@ FailureOr<AtomicInventory> discover_atomic_wrong_address(const FaultMutationCont
       const bool supported =
           admitted_atomic_form(target, instruction.mnemonic(), size, byte_offset) &&
           (ds_atomic32(instruction.mnemonic()) ||
-           modern_atomic_alignment(instruction.amdgpu_operation()) != 0) &&
+           atomic_alignment(instruction.amdgpu_operation()) != 0) &&
           boundary && boundary->size == size && !boundary->clause && !boundary->clause_member;
       record->source_bytes.emplace(offset, std::move(original));
       record->sites.push_back({.offset = offset,
@@ -520,7 +618,7 @@ FailureOr<AtomicResult> apply_atomic_wrong_address(const FaultMutationContext &c
                                  "stale atomic form or offset", offset);
   const uint32_t alignment = ds_atomic32(selection.site_.form)
                                  ? 4u
-                                 : modern_atomic_alignment(decoded.value()->amdgpu_operation());
+                                 : atomic_alignment(decoded.value()->amdgpu_operation());
   if (alignment == 0)
     return reject_fault_mutation(error, FaultMutationErrorCode::UnsupportedForm,
                                  "selected atomic operation has no alignment recipe", offset);
