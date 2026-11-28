@@ -519,7 +519,7 @@ static void printUsage(const char* prog) {
   printf("  --warmup <N>            Warmup iterations (default: 2)\n");
   printf("  --gpus-per-node <N>     GPUs per node (default: 8)\n");
   printf("  --algorithm <auto|ring|direct>  Legacy compatibility setting "
-         "(default: auto)\n");
+         "(default: $NCCL_RESHARD_ALGORITHM, else auto)\n");
   printf("  --api <window|default>             Public API to drive (default: "
          "default).\n");
   printf("                                  'default' uses ncclReshard with "
@@ -557,7 +557,7 @@ int main(int argc, char* argv[]) {
   bool validate = false;
   int validateIterations = 3;
   bool verbose = false;
-  const char* algorithm = "AUTO";
+  const char* algorithm = nullptr;
   const char* lbMode = "NODE_AWARE";
   ReshardApiMode apiMode = ReshardApiMode::Default;
   const char* copyAlgorithm = nullptr;
@@ -739,7 +739,8 @@ int main(int argc, char* argv[]) {
   // Configure reshard library via env vars
   // ========================================================================
   if (verbose) benchSetEnv("NCCL_RESHARD_LOG_LEVEL", "DEBUG");
-  benchSetEnv("NCCL_RESHARD_ALGORITHM", algorithm);
+  benchConfigureAlgorithm(algorithm);
+  algorithm = benchResolvedAlgorithm();
   benchSetEnv("NCCL_RESHARD_LB_MODE", lbMode);
   ncclM2nHandle_t m2nHandle = nullptr;
   NCCLCHECK(ncclM2nInit(&m2nHandle, NULL));

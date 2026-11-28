@@ -217,6 +217,16 @@ add_test(NAME basic_api_test_local
 add_test(NAME basic_api_pack_local
          COMMAND basic_api_test_local --api default --copy-algorithm pack
          WORKING_DIRECTORY "${NCCL_M2N_RUNTIME_DIR}")
+add_test(NAME basic_api_direct_local
+         COMMAND basic_api_test_local --algorithm direct --gtest_filter=-ThreadedDirectTest.*
+         WORKING_DIRECTORY "${NCCL_M2N_RUNTIME_DIR}")
+add_test(NAME basic_api_threaded_direct_local
+         COMMAND basic_api_test_local --algorithm direct --gtest_filter=ThreadedDirectTest.*
+         WORKING_DIRECTORY "${NCCL_M2N_RUNTIME_DIR}")
+add_test(NAME basic_api_threaded_pipe_local
+         COMMAND basic_api_test_local --copy-algorithm pipe --gtest_filter=ThreadedPipeTest.*
+         WORKING_DIRECTORY "${NCCL_M2N_RUNTIME_DIR}")
+set_tests_properties(basic_api_threaded_pipe_local PROPERTIES ENVIRONMENT NCCL_M2N_ENABLE_EXPERIMENTAL=1)
 # basic_api_test_mpi is launched under mpirun, not registered as a plain
 # ctest entry.
 

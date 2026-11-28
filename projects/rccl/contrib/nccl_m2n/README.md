@@ -456,7 +456,7 @@ Apply regardless of the selected copy algorithm.
 |---|---|
 | `NCCL_RESHARD_LOG_LEVEL`      | One of `NONE`, `WARN` (default), `INFO`, `DEBUG`, `TRACE`. |
 | `NCCL_RESHARD_COPY_ALGORITHM` | Copy transport for both entry points: `PACK` (default), `DIRECT`, or `PIPE` (beta). |
-| `NCCL_M2N_ENABLE_EXPERIMENTAL` | ROCm only. By default `ncclReshard` returns `ncclInvalidUsage` for configurations not validated on ROCm yet: `PIPE`, and a GIN backend other than the proxy (`NCCL_GIN_TYPE=2`). `1` runs them with a warning. `DIRECT` always runs, with a warning. |
+| `NCCL_M2N_ENABLE_EXPERIMENTAL` | ROCm only. By default `ncclReshard` returns `ncclInvalidUsage` for configurations not validated on ROCm yet: `PIPE`, and a GIN backend other than the proxy (`NCCL_GIN_TYPE=2`). `1` runs them with a warning. |
 | `NCCL_RESHARD_NUM_CTAS`       | Directly overrides the resolved CTA count; invalid values are ignored. |
 | `NCCL_RESHARD_DEVCOMM_CACHE_CAPACITY` | Maximum cached DevComms per process (default 64). A positive integer, captured at runtime initialization; host storage is allocated on first use and DevComms are created lazily. No runtime eviction or automatic growth. Exhaustion fails locally before new DevComm creation; abort the distributed job on error, increase the limit, and restart. No cross-rank admission collective is performed, so peers may otherwise remain waiting in setup. Does not change split-communicator or persistent-control limits. |
 

@@ -1052,19 +1052,27 @@ TEST_F(SymImportAndMapSegmentTest, ReuseLocal_MapsWithoutImportingOrReleasing) {
   EXPECT_EQ(mapped, kLocal);
 }
 
-// Branch: POSIX-FD import. The fd comes from the proxy and is closed after the
-// import, so the descriptor must be real for the SYSCHECK on close() to pass.
+// Branch: POSIX-FD import. The fd comes from the proxy and stays open until
+// set-access (ROCm 7.14 reads it there), so the descriptor must be real for
+// the SYSCHECK on close() to pass.
 TEST_F(SymImportAndMapSegmentTest, PosixFd_ImportsThenReleases) {
   ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
-  ScopedHook proxy(g_ncclProxyClientGetFdBlocking, [](ncclComm*, int, void*, int* fd) {
-    *fd = open("/dev/null", O_RDONLY);
+  int handedOut = -1;
+  ScopedHook proxy(g_ncclProxyClientGetFdBlocking, [&](ncclComm*, int, void*, int* fd) {
+    handedOut = *fd = open("/dev/null", O_RDONLY);
     return *fd < 0 ? ncclSystemError : ncclSuccess;
+  });
+  ScopedHook setAccess(g_hipMemSetAccess, [&](void*, size_t, const hipMemAccessDesc*, size_t) {
+    EXPECT_NE(fcntl(handedOut, F_GETFD), -1);
+    return hipSuccess;
   });
   ScopedHook release(g_hipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipSuccess; });
 
   EXPECT_EQ(symMemoryImportAndMapSegmentHandle(comm, 1, kAddr, &msg, {}, /*reuseLocal=*/false), ncclSuccess);
   EXPECT_EQ(proxy.calls, 1);
+  EXPECT_EQ(setAccess.calls, 1);
   EXPECT_EQ(release.calls, 1);
+  EXPECT_EQ(fcntl(handedOut, F_GETFD), -1);
 }
 
 // Branch: any other handle type imports the fabric handle directly, with no
@@ -1111,16 +1119,7 @@ TEST_F(SymImportAndMapSegmentTest, ImportFails_ReturnsErrorWithoutMapping) {
 }
 
 // Branch: import failure on the POSIX-FD path, which is a separate CUCHECKGOTO
-// from the fabric one above.
-//
-// The descriptor is owned by the test rather than by DefaultProxyClientGetFdBlocking
-// so the leak below is contained: symMemoryImportAndMapSegmentHandle's POSIX-FD
-// arm jumps to fail on import
-// failure, skipping the close(fd) at :362, so the fd is still open when this
-// returns -- one leaked descriptor per failed import. EXPECT_EQ(fcntl(fd,
-// F_GETFD), -1) is the assertion that belongs here and fails today; see
-// AICOMRCCL-2180 finding 14. Pinning the current state instead would lock the
-// leak in, so the test just cleans up after it.
+// from the fabric one above. The fail path closes the descriptor.
 TEST_F(SymImportAndMapSegmentTest, PosixFdImportFails_ReturnsError) {
   ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
   int handedOut = -1;
@@ -1138,7 +1137,7 @@ TEST_F(SymImportAndMapSegmentTest, PosixFdImportFails_ReturnsError) {
   EXPECT_EQ(import.calls, 1);
 
   ASSERT_GE(handedOut, 0);
-  if (fcntl(handedOut, F_GETFD) != -1) close(handedOut);  // no double close if the leak is ever fixed
+  EXPECT_EQ(fcntl(handedOut, F_GETFD), -1);
 }
 
 // Branch: the SYSCHECK on close(). A stale descriptor from the proxy fails with

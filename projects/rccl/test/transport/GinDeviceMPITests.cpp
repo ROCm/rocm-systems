@@ -9053,4 +9053,146 @@ TEST_F(GinMPIDeviceTests, Timeout_CApi) {
   runDeviceTimeout(DeviceTimeoutCase::CApi);
 }
 
+// Many CTAs x several lanes per wave posting to different peers' QPs: the mix that deadlocked rocSHMEM GDA.
+__global__ void multiCtaSameQpProducerKernel(ncclWindow_t srcWin, ncclWindow_t dstWin,
+                                             size_t slotBytes, int iters, int nPeerLanes,
+                                             int rank, int nRanks, struct ncclDevComm devComm) {
+  ncclGin gin{devComm, (int)(blockIdx.x % devComm.ginContextCount)};
+  const int lane = (int)threadIdx.x;
+  if (lane < nPeerLanes) {
+    const int peer = (rank + 1 + lane) % nRanks;
+    const size_t off = ((size_t)blockIdx.x * nPeerLanes + lane) * slotBytes;
+    for (int i = 0; i < iters; i++) {
+      gin.put(ncclTeamWorld(devComm), peer, dstWin, off, srcWin, off, slotBytes,
+              ncclGin_SignalInc{0});
+    }
+  }
+  gin.flush(ncclCoopCta());
+}
+
+__global__ void multiCtaSameQpConsumerKernel(const uint64_t* expectedPerCtx,
+                                             struct ncclDevComm devComm) {
+  ncclGin gin{devComm, (int)blockIdx.x};
+  gin.waitSignal(ncclCoopCta(), 0, expectedPerCtx[blockIdx.x]);
+}
+
+TEST_F(GinMPIDeviceTests, MultiCtaSameQpStress) {
+  for (auto check : {ginEnvDisabledReason, ginTypeReason, cuMemReason, intranetReason,
+                     anvilSingleNodeReason}) {
+    if (auto reason = check(); !reason.empty()) GTEST_SKIP() << reason;
+  }
+  if (!validateTestPrerequisites(/*min_processes=*/3, /*max_processes=*/64))
+    GTEST_SKIP() << "Requires 3..64 ranks (2 ranks give one lane per wave)";
+
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
+  ncclComm_t comm = getActiveCommunicator();
+  hipStream_t stream = getActiveStream();
+  int rank = -1, nRanks = -1;
+  ncclCommUserRank(comm, &rank);
+  ncclCommCount(comm, &nRanks);
+
+  constexpr size_t kSlotBytes = 256;
+  constexpr int kMaxCtas = 64;
+  constexpr int kPutsPerQp = 10000;
+  // RCCL_GIN_STRESS_LANES / _ITERS / _CTAS narrow a failure down (lanes per wave on
+  // different peers, put+signal per lane, comma-separated grid sizes).
+  auto envInt = [](const char* name, int dflt) {
+    const char* v = std::getenv(name);
+    return v && *v ? std::atoi(v) : dflt;
+  };
+  const int nPeerLanes = std::max(1, std::min(envInt("RCCL_GIN_STRESS_LANES", 8), std::min(nRanks - 1, 8)));
+  const int iters = std::max(1, envInt("RCCL_GIN_STRESS_ITERS", kPutsPerQp / nPeerLanes));
+  std::vector<int> ctaList = {8, 32, kMaxCtas};
+  if (const char* v = std::getenv("RCCL_GIN_STRESS_CTAS"); v && *v) {
+    ctaList.clear();
+    for (const char* q = v; *q;) {
+      ctaList.push_back(std::min(kMaxCtas, std::max(1, std::atoi(q))));
+      while (*q && *q != ',') q++;
+      if (*q == ',') q++;
+    }
+  }
+  const size_t bufBytes = (size_t)kMaxCtas * nPeerLanes * kSlotBytes;
+
+  void* dSrc = nullptr;
+  void* dDst = nullptr;
+  uint64_t* dExpected = nullptr;
+  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dSrc, bufBytes));
+  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dDst, bufBytes));
+  ASSERT_MPI_EQ(hipSuccess, hipMalloc(&dExpected, NCCL_GIN_MAX_CONTEXTS * sizeof(uint64_t)));
+  auto memCleanup = makeScopeGuard([&]() {
+    if (dSrc) (void)ncclMemFree(dSrc);
+    if (dDst) (void)ncclMemFree(dDst);
+    if (dExpected) (void)hipFree(dExpected);
+  });
+  ncclWindow_t srcWin = nullptr, dstWin = nullptr;
+  auto winCleanup = makeScopeGuard([&]() {
+    if (srcWin) (void)ncclCommWindowDeregister(comm, srcWin);
+    if (dstWin) (void)ncclCommWindowDeregister(comm, dstWin);
+  });
+  ASSERT_MPI_EQ(ncclSuccess,
+                ncclCommWindowRegister(comm, dSrc, bufBytes, &srcWin, NCCL_WIN_COLL_SYMMETRIC));
+  ASSERT_MPI_EQ(ncclSuccess,
+                ncclCommWindowRegister(comm, dDst, bufBytes, &dstWin, NCCL_WIN_COLL_SYMMETRIC));
+
+  ncclDevCommRequirements reqs = defaultGinReqs();
+  reqs.railGinBarrierCount = 1;
+  reqs.ginContextCount = 4;
+  reqs.ginSignalCount = 1;
+  ncclDevComm devComm{};
+  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
+  auto devCommCleanup = makeScopeGuard([&]() { (void)ncclDevCommDestroy(comm, &devComm); });
+  const int nCtx = std::max(1, (int)devComm.ginContextCount);
+
+  // Every slot carries its sender's rank so a misplaced or stale WQE shows up as a mismatch.
+  ASSERT_MPI_EQ(hipSuccess, hipMemset(dSrc, (rank * 31 + 7) & 0xff, bufBytes));
+  // Signals accumulate across rounds, so each round waits for the running total per context.
+  std::vector<uint64_t> total(NCCL_GIN_MAX_CONTEXTS, 0);
+  for (int nCta : ctaList) {
+    ASSERT_MPI_EQ(hipSuccess, hipMemset(dDst, 0, bufBytes));
+    for (int ctx = 0; ctx < nCtx; ctx++) {
+      const int ctas = nCta / nCtx + (ctx < nCta % nCtx ? 1 : 0);
+      total[ctx] += (uint64_t)ctas * iters * nPeerLanes;
+    }
+    ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dExpected, total.data(), NCCL_GIN_MAX_CONTEXTS * sizeof(uint64_t),
+                                        hipMemcpyHostToDevice));
+    MPI_Barrier(MPI_COMM_WORLD);
+    multiCtaSameQpProducerKernel<<<nCta, 64, 0, stream>>>(srcWin, dstWin, kSlotBytes, iters, nPeerLanes,
+                                                           rank, nRanks, devComm);
+    multiCtaSameQpConsumerKernel<<<nCtx, kGinKernelThreads, 0, stream>>>(dExpected, devComm);
+    const hipError_t st = syncStreamWithinTimeout(stream, /*seconds=*/60);
+    int timedOut = st == hipErrorNotReady ? 1 : 0, anyTimedOut = 0;
+    MPI_Allreduce(&timedOut, &anyTimedOut, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+    if (anyTimedOut) {
+      fprintf(stderr, "MultiCtaSameQpStress: %d CTAs x %d peer lanes x %d put+signal per QP timed out, aborting\n",
+              nCta, nPeerLanes, iters);
+      fflush(stderr);
+      MPI_Abort(MPI_COMM_WORLD, 1);
+      std::abort();
+    }
+    ASSERT_MPI_EQ(hipSuccess, st);
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    std::vector<uint8_t> host(bufBytes);
+    ASSERT_MPI_EQ(hipSuccess, hipMemcpy(host.data(), dDst, bufBytes, hipMemcpyDeviceToHost));
+    int mismatches = 0;
+    for (int cta = 0; cta < nCta; cta++) {
+      for (int lane = 0; lane < nPeerLanes; lane++) {
+        const int sender = ((rank - 1 - lane) % nRanks + nRanks) % nRanks;
+        const uint8_t want = static_cast<uint8_t>((sender * 31 + 7) & 0xff);
+        const size_t off = ((size_t)cta * nPeerLanes + lane) * kSlotBytes;
+        for (size_t i = 0; i < kSlotBytes; i++) {
+          if (host[off + i] != want && mismatches++ == 0) {
+            ADD_FAILURE() << nCta << " CTAs: cta " << cta << " lane " << lane << " byte " << i << " from rank "
+                          << sender << ": want " << (int)want << " got " << (int)host[off + i];
+          }
+        }
+      }
+    }
+    int anyMismatch = 0;
+    MPI_Allreduce(&mismatches, &anyMismatch, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+    ASSERT_EQ(0, anyMismatch) << nCta << " CTAs: payload mismatch on at least one rank";
+  }
+}
+
 #endif  // MPI_TESTS_ENABLED

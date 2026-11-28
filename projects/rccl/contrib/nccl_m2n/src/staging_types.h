@@ -387,13 +387,18 @@ struct StagingTransferDescriptor {
   int sourceIndexOnDest[MAX_TARGETS];
   int destNumRdmaSources[MAX_TARGETS];
   int rdmaSourceIndexOnDest[MAX_TARGETS];
+  /* PIPE puts the edge from source shard ss to dest shard ds on channel group
+   * color(ss, ds) % groups, where color is a proper edge coloring of the
+   * shard transfer graph that every rank computes identically.
+   * destSourceColor[t][k] is the color of the edge from the k-th source of
+   * target t's dest shard; sourceColor[j] is the color of the edge from source
+   * j into this rank's dest shard. */
+  uint8_t destSourceColor[MAX_TARGETS][MAX_SOURCES];
+  uint8_t sourceColor[MAX_SOURCES];
   /* targetIndexOnSource is the remote producer's full target slot for data
-   * placement; rdmaTargetIndexOnSource is its compact GIN ordinal.
-   * channelTargetIndexOnSource is the producer-side edge used for channel
-   * grouping; ring forwarding needs these to differ. */
+   * placement; rdmaTargetIndexOnSource is its compact GIN ordinal. */
   int targetIndexOnSource[MAX_SOURCES];
   int rdmaTargetIndexOnSource[MAX_SOURCES];
-  int channelTargetIndexOnSource[MAX_SOURCES];
   int sourceNumTargets[MAX_SOURCES];
   int sourceNumRdmaTargets[MAX_SOURCES];
   int sourceLsaHeadIndexOnProvider[MAX_SOURCES];

@@ -243,6 +243,10 @@ extern int64_t ncclParamDmaBufEnable();
 // Handle type used for cuMemCreate()
 extern CUmemAllocationHandleType ncclCuMemHandleType;
 
+// Exports a POSIX fd the caller owns and must close. Some ROCm 7.14 runtimes
+// return the same runtime-owned fd on every export, which must not be closed.
+ncclResult_t ncclCuMemExportPosixFd(int* fd, CUmemGenericAllocationHandle handle);
+
 ncclResult_t rocmLibraryInit(void);
 
 extern int ncclCudaDriverVersionCache;

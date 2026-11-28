@@ -60,6 +60,16 @@ NCCL_DEVICE_INLINE uint64_t quietTarget(ncclGinCtx ctx, int peer) {
   return peerQp(ctx, peer)->cq_target();
 }
 
+// Runs fn on one active lane at a time. A wave whose lanes post to different peers would
+// otherwise hold half-done posts on several QPs (reserved slot, SQ lock, publish turn) while
+// one lane waits on another QP; two such waves then wait on each other forever.
+template <typename Fn>
+NCCL_DEVICE_INLINE void forEachLaneSerially(Fn&& fn) {
+  for (uint64_t lanes = __builtin_amdgcn_read_exec(); lanes; lanes &= lanes - 1) {
+    if (__lane_id() == (unsigned)__builtin_ctzll(lanes)) fn();
+  }
+}
+
 // Polls instead of calling quiet(), which also waits for work posted after target and can't return on abort.
 // Each lane polls its own queue pair, since lanes with the same peer can hold different GIN contexts.
 template <bool HasTimeout>
@@ -94,7 +104,7 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
     bool hasSignal = signal.type != NCCL_GIN_SIGNAL_TYPE_NONE;
 
     coop.sync();
-    if (coop.thread_rank() == 0) {
+    if (coop.thread_rank() == 0) nccl::gin::rocshmem_gda::forEachLaneSerially([&]() {
       ncclGinRocshmemGdaGPUContext* rsCtx = nccl::gin::rocshmem_gda::detail::gdaGpuCtx(ctx);
       rocshmem::QueuePair* qp = loadConst(loadConst(&rsCtx->qps) + peer);
       rocshmem::ActiveWFInfo wf_info(peer, rocshmem::ThreadScope::thread);
@@ -136,7 +146,7 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
       if (hasCounter) {
         atomicAdd((unsigned long long*)&loadConst(&rsCtx->counters)[counterId], 1ULL);
       }
-    }
+    });
     coop.sync();
   }
 
@@ -174,7 +184,7 @@ struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
     bool hasSignal = signal.type != NCCL_GIN_SIGNAL_TYPE_NONE;
 
     coop.sync();
-    if (coop.thread_rank() == 0) {
+    if (coop.thread_rank() == 0) nccl::gin::rocshmem_gda::forEachLaneSerially([&]() {
       ncclGinRocshmemGdaGPUContext* rsCtx = nccl::gin::rocshmem_gda::detail::gdaGpuCtx(ctx);
       rocshmem::QueuePair* qp = loadConst(loadConst(&rsCtx->qps) + peer);
       rocshmem::ActiveWFInfo wf_info(peer, rocshmem::ThreadScope::thread);
@@ -206,7 +216,7 @@ struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
         auto target = nccl::gin::rocshmem_gda::detail::gdaSignalTarget(rsCtx, peer, signal);
         qp->atomic_add(target.raddr, target.rkey, signalOpArg, wf_info, PostOpt{RingDB<true>, ThreadSafe<threadSafe>});
       }
-    }
+    });
     coop.sync();
   }
 

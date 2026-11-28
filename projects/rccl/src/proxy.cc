@@ -1697,10 +1697,9 @@ static ncclResult_t proxyGetFd(struct ncclProxyState* proxyState, int rank, void
   uint64_t hash = (uint64_t)opId;
   INFO(NCCL_PROXY, "UDS proxyGetFd received handle 0x%" PRIxPTR " peer %d opId %lx", (uintptr_t)handle, rank, hash);
 
-  CUmemAllocationHandleType type = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
   ncclIpcFd fd = NCCL_INVALID_IPC_FD;
 
-  CUCHECK(cuMemExportToShareableHandle(&fd, handle, type, 0));
+  NCCLCHECK(ncclCuMemExportPosixFd(&fd, handle));
   // Send back the converted fd using UDS
   NCCLCHECKGOTO(ncclIpcSocketInit(&ipcSock, proxyState->tpRank, hash ^ 1, proxyState->abortFlag), ret, error);
   NCCLCHECKGOTO(ncclIpcSocketSendFd(&ipcSock, fd, rank, hash), ret, error);

@@ -226,7 +226,11 @@
         { "name": "Timeout_WaitCounter",    "description": "waitCounter with a timeout: before any put, met, and more completions than issued", "test_filter": "GinMPIDeviceTests.Timeout_WaitCounter" },
         { "name": "Timeout_Flush",          "description": "flush with a timeout: a 256 MiB put in flight times out on the owning thread, then drains and lands", "test_filter": "GinMPIDeviceTests.Timeout_Flush" },
         { "name": "Timeout_FlushAsyncWait", "description": "flushAsync + wait with a timeout, every lane waiting on its own request to the same peer", "test_filter": "GinMPIDeviceTests.Timeout_FlushAsyncWait" },
-        { "name": "Timeout_CApi",           "description": "C entry points ncclGinWaitSignalTimeout[VA], ncclGinWaitCounterTimeout, ncclGinFlushTimeout and ncclGinWaitTimeout", "test_filter": "GinMPIDeviceTests.Timeout_CApi" }
+        { "name": "Timeout_CApi",           "description": "C entry points ncclGinWaitSignalTimeout[VA], ncclGinWaitCounterTimeout, ncclGinFlushTimeout and ncclGinWaitTimeout", "test_filter": "GinMPIDeviceTests.Timeout_CApi" },
+        {
+          "name": "MultiCtaSameQpStress", "description": "8/32/64 CTAs, several lanes per wave posting put+signal to different peers (needs 3+ ranks)", "test_filter": "GinMPIDeviceTests.MultiCtaSameQpStress",
+          "num_ranks": 4, "num_gpus": 2
+        }
       ]
     },
     "gin_devmpi_gda": {
@@ -251,7 +255,8 @@
         { "name": "BarrierPools_NoCrossTalk",    "num_gpus": 4 },
         { "name": "AlltoallHybrid_Reference",    "num_gpus": 4 },
         { "name": "ReduceScatter_Symmetric",     "num_gpus": 4 },
-        { "name": "ReduceScatter_Symmetric_Avg", "num_gpus": 4 }
+        { "name": "ReduceScatter_Symmetric_Avg", "num_gpus": 4 },
+        { "name": "MultiCtaSameQpStress",        "num_gpus": 4 }
       ]
     },
     "gin_devmpi_mixed": {

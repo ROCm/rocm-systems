@@ -26,6 +26,7 @@
 
 #include <cstdio>
 #include <algorithm>
+#include <vector>
 #include <cstring>
 #include "nccl.h"
 
@@ -123,6 +124,123 @@ static ncclResult_t computeMaxShardEdgeBytes(int worldRank, const size_t srcDims
   return ncclSuccess;
 }
 
+/* PIPE derives a dest edge's channel group from the dest's first source shard
+ * and the edge's ordinal among the dest's sources, so the source shards that
+ * feed a dest shard must be one contiguous range. A source sharded on two
+ * mesh axes over different tensor dims breaks that. */
+static ncclResult_t validatePipeContiguousSources(int worldRank, const size_t srcDims[], const size_t srcStrides[],
+                                                  const ncclReshardShardLayout_t& srcShardLayout, int srcShardCount,
+                                                  const size_t dstDims[], const size_t dstStrides[],
+                                                  const ncclReshardShardLayout_t& dstShardLayout, int dstShardCount,
+                                                  int ndims) {
+  for (int ds = 0; ds < dstShardCount; ds++) {
+    int first = -1;
+    int last = -1;
+    int count = 0;
+    for (int ss = 0; ss < srcShardCount; ss++) {
+      ncclReshardTransferPlan plan;
+      NCCL_M2N_CHECK(computeTransferPlanChecked(srcDims, srcStrides, srcShardLayout, ss, dstDims, dstStrides,
+                                                dstShardLayout, ds, ndims, /*elementsPerChunk=*/1, &plan));
+      if (plan.totalInnerTransfers == 0) {
+        continue;
+      }
+      if (first < 0) {
+        first = ss;
+      }
+      last = ss;
+      count++;
+    }
+    NCCL_M2N_CHECK_ARG(count == 0 || last - first + 1 == count, worldRank,
+                       "validateStagingPlanLimits: PIPE needs the source shards of each destination shard to be "
+                       "contiguous; destination shard %d gets %d source shards spread over [%d,%d]. Use DIRECT or "
+                       "PACK, or shard the source on one tensor dimension",
+                       ds, count, first, last);
+  }
+  return ncclSuccess;
+}
+
+/* PIPE places the edge from source shard ss to dest shard ds on channel group
+ * color % groups. Color the bipartite shard transfer graph so that every
+ * shard's edges get distinct colors, using max-degree colors (always possible
+ * for a bipartite graph: when the first color free at ss is taken at ds,
+ * swap two colors along the alternating path from ds). Every rank walks the
+ * same geometry in the same order, so all ranks get the same colors.
+ * colors[ss * dstShardCount + ds] is the color, or -1 where no edge exists. */
+static ncclResult_t computePipeEdgeColors(int worldRank, const size_t srcDims[], const size_t srcStrides[],
+                                          const ncclReshardShardLayout_t& srcShardLayout, int srcShardCount,
+                                          const size_t dstDims[], const size_t dstStrides[],
+                                          const ncclReshardShardLayout_t& dstShardLayout, int dstShardCount,
+                                          int ndims, std::vector<int>* colors) {
+  const int S = srcShardCount;
+  const int D = dstShardCount;
+  colors->assign((size_t)S * (size_t)D, -1);
+  std::vector<char> edge((size_t)S * (size_t)D, 0);
+  std::vector<int> srcDegree(S, 0);
+  std::vector<int> dstDegree(D, 0);
+  for (int ss = 0; ss < S; ss++) {
+    for (int ds = 0; ds < D; ds++) {
+      ncclReshardTransferPlan plan;
+      NCCL_M2N_CHECK(computeTransferPlanChecked(srcDims, srcStrides, srcShardLayout, ss, dstDims, dstStrides,
+                                                dstShardLayout, ds, ndims, /*elementsPerChunk=*/1, &plan));
+      if (plan.totalInnerTransfers > 0) {
+        edge[(size_t)ss * D + ds] = 1;
+        srcDegree[ss]++;
+        dstDegree[ds]++;
+      }
+    }
+  }
+  int K = 1;
+  for (int d : srcDegree) K = std::max(K, d);
+  for (int d : dstDegree) K = std::max(K, d);
+  NCCL_M2N_CHECK_ARG(K <= UINT8_MAX, worldRank, "computePipeEdgeColors: max shard degree %d exceeds %d colors", K,
+                     UINT8_MAX);
+
+  /* srcEnd[ss * K + c] is the dest shard on ss's edge of color c, dstEnd the reverse; -1 if free. */
+  std::vector<int> srcEnd((size_t)S * K, -1);
+  std::vector<int> dstEnd((size_t)D * K, -1);
+  struct PathEdge {
+    int ss, ds, color;
+  };
+  std::vector<PathEdge> path;
+  for (int ss = 0; ss < S; ss++) {
+    for (int ds = 0; ds < D; ds++) {
+      if (!edge[(size_t)ss * D + ds]) continue;
+      int a = 0;
+      while (srcEnd[(size_t)ss * K + a] >= 0) a++;
+      int b = 0;
+      while (dstEnd[(size_t)ds * K + b] >= 0) b++;
+      if (dstEnd[(size_t)ds * K + a] >= 0) {
+        path.clear();
+        int node = ds;
+        bool atDst = true;
+        int c = a;
+        for (;;) {
+          const int other = atDst ? dstEnd[(size_t)node * K + c] : srcEnd[(size_t)node * K + c];
+          if (other < 0) break;
+          path.push_back(atDst ? PathEdge{other, node, c} : PathEdge{node, other, c});
+          node = other;
+          atDst = !atDst;
+          c = (c == a) ? b : a;
+        }
+        for (const PathEdge& e : path) {
+          srcEnd[(size_t)e.ss * K + e.color] = -1;
+          dstEnd[(size_t)e.ds * K + e.color] = -1;
+        }
+        for (const PathEdge& e : path) {
+          const int swapped = (e.color == a) ? b : a;
+          srcEnd[(size_t)e.ss * K + swapped] = e.ds;
+          dstEnd[(size_t)e.ds * K + swapped] = e.ss;
+          (*colors)[(size_t)e.ss * D + e.ds] = swapped;
+        }
+      }
+      srcEnd[(size_t)ss * K + a] = ds;
+      dstEnd[(size_t)ds * K + a] = ss;
+      (*colors)[(size_t)ss * D + ds] = a;
+    }
+  }
+  return ncclSuccess;
+}
+
 static int countOverlappingDstShards(const size_t srcDims[], const size_t srcStrides[], const ncclReshardShardLayout_t& srcShardLayout,
                                      int srcShardIdx, const size_t dstDims[], const size_t dstStrides[],
                                      const ncclReshardShardLayout_t& dstShardLayout, int dstShardCount, int ndims) {
@@ -151,6 +269,14 @@ static int countOverlappingSrcShards(const size_t srcDims[], const size_t srcStr
     }
   }
   return count;
+}
+
+static int stagingRingNodeStep(const ncclReshardRepLoadBalancer* lb) {
+  return (lb->strided && lb->numInjectionDomains > 0) ? lb->numInjectionDomains : 1;
+}
+
+static bool stagingNodeInRing(const ncclReshardRepLoadBalancer* lb, int node, int myNode) {
+  return (node - myNode) % stagingRingNodeStep(lb) == 0;
 }
 
 static ncclResult_t validateRankStagingCounts(
@@ -249,7 +375,7 @@ static ncclResult_t validateRankStagingCounts(
 
       int sourceRepSlots = firstNodeLocalReps > 0 ? firstNodeLocalReps : numLocalReps;
       int activeSourceSlots = sourceRepSlots;
-      for (int node = firstRepNodeDest; node >= 0 && node <= myNode; node++) {
+      for (int node = firstRepNodeDest; node >= 0 && node <= myNode; node += stagingRingNodeStep(lb)) {
         int nodeLocalReps = 0;
         for (int rep = targetRepStart; rep < targetRepEnd; rep++) {
           int repRank = getMeshRank(dstTensor, fullDstInfo, dstInfo.shardIdx, rep);
@@ -283,7 +409,8 @@ static ncclResult_t validateRankStagingCounts(
       bool hasRingNext = false;
       for (int rep = targetRepStart; rep < targetRepEnd; rep++) {
         int repRank = getMeshRank(dstTensor, fullDstInfo, dstInfo.shardIdx, rep);
-        if ((repRank - dstNodeAnchor) / gpusPerDomain > myNode) {
+        const int repNode = (repRank - dstNodeAnchor) / gpusPerDomain;
+        if (repNode > myNode && stagingNodeInRing(lb, repNode, myNode)) {
           hasRingNext = true;
           break;
         }
@@ -358,6 +485,11 @@ ncclResult_t validateStagingPlanLimits(int worldRank, const ncclDistTensor_t* sr
                                     fullDstInfo.shardLayout, srcTensor->ndims, srcDims, dstDims));
   NCCL_M2N_CHECK(computeStridesChecked(srcDims, srcTensor->ndims, srcStrides));
   NCCL_M2N_CHECK(computeStridesChecked(dstDims, dstTensor->ndims, dstStrides));
+  if (copyAlgo == RESHARD_COPY_ALGO_PIPE) {
+    NCCL_M2N_CHECK(validatePipeContiguousSources(worldRank, srcDims, srcStrides, fullSrcInfo.shardLayout,
+                                                 fullSrcInfo.shardCount, dstDims, dstStrides, fullDstInfo.shardLayout,
+                                                 fullDstInfo.shardCount, srcTensor->ndims));
+  }
 
   ncclReshardRepLoadBalancer lb = {};
   lb.srcRepCount = fullSrcInfo.repCount;
@@ -498,6 +630,14 @@ ncclResult_t buildStagingTransferDescriptor(
   }
 
   const size_t epc_dummy = 1;
+  std::vector<int> pipeEdgeColors;
+  if (reshardGetCopyAlgorithm() == RESHARD_COPY_ALGO_PIPE) {
+    NCCL_M2N_CHECK(computePipeEdgeColors(worldRank, srcDims, srcStrides, srcShardLayout, srcShardCount, dstDims,
+                                         dstStrides, dstShardLayout, dstShardCount, ndims, &pipeEdgeColors));
+  }
+  auto pipeEdgeColor = [&](int ss, int ds) -> uint8_t {
+    return pipeEdgeColors.empty() ? 0 : (uint8_t)pipeEdgeColors[(size_t)ss * dstShardCount + ds];
+  };
 
   /* ============================================================
    * 5. SOURCE SIDE: populate targets[] (hierarchical leader pick).
@@ -527,11 +667,15 @@ ncclResult_t buildStagingTransferDescriptor(
 
       int numSourcesToDstShard = 0;
       int myPosition = 0;
+      uint8_t dstSourceColors[MAX_SOURCES] = {};
       for (int ss = 0; ss < srcShardCount; ss++) {
         ncclReshardTransferPlan check;
         NCCL_M2N_CHECK(computeTransferPlanChecked(srcDims, srcStrides, srcShardLayout, ss, dstDims, dstStrides,
                                                   dstShardLayout, dstShard, ndims, epc_dummy, &check));
         if (check.totalInnerTransfers > 0) {
+          if (numSourcesToDstShard < MAX_SOURCES) {
+            dstSourceColors[numSourcesToDstShard] = pipeEdgeColor(ss, dstShard);
+          }
           if (ss < srcInfo.shardIdx) {
             myPosition++;
           }
@@ -575,6 +719,7 @@ ncclResult_t buildStagingTransferDescriptor(
 
       desc->destNumSources[ti] = numSourcesToDstShard;
       desc->sourceIndexOnDest[ti] = myPosition;
+      memcpy(desc->destSourceColor[ti], dstSourceColors, sizeof(dstSourceColors));
       desc->destNumRdmaSources[ti] = leaderSourceEnd - leaderSourceStart;
       desc->rdmaSourceIndexOnDest[ti] = myPosition - leaderSourceStart;
 
@@ -666,7 +811,7 @@ ncclResult_t buildStagingTransferDescriptor(
     int mySourceStart = 0, mySourceEnd = 0;
     int sourceRepSlots = firstNodeLocalReps > 0 ? firstNodeLocalReps : numLocalReps;
     int activeSourceSlots = sourceRepSlots;
-    for (int node = firstRepNodeDest; node >= 0 && node <= myNode; node++) {
+    for (int node = firstRepNodeDest; node >= 0 && node <= myNode; node += stagingRingNodeStep(&lb)) {
       int nodeLocalReps = 0;
       for (int rep = targetRepStart; rep < targetRepEnd; rep++) {
         int rr = getMeshRank(dstTensor, &fullDstInfo, dstInfo.shardIdx, rep);
@@ -746,7 +891,7 @@ ncclResult_t buildStagingTransferDescriptor(
     for (int rep = targetRepStart; rep < targetRepEnd; rep++) {
       int rr = getMeshRank(dstTensor, &fullDstInfo, dstInfo.shardIdx, rep);
       int rrNode = rankNode(rr);
-      if (rrNode < myNode && (ringPrevNode == -1 || rrNode > ringPrevNode)) {
+      if (rrNode < myNode && stagingNodeInRing(&lb, rrNode, myNode) && (ringPrevNode == -1 || rrNode > ringPrevNode)) {
         ringPrevNode = rrNode;
       }
     }
@@ -768,7 +913,7 @@ ncclResult_t buildStagingTransferDescriptor(
     for (int rep = targetRepStart; rep < targetRepEnd; rep++) {
       int rr = getMeshRank(dstTensor, &fullDstInfo, dstInfo.shardIdx, rep);
       int rrNode = rankNode(rr);
-      if (rrNode > myNode && (ringNextNode == -1 || rrNode < ringNextNode)) {
+      if (rrNode > myNode && stagingNodeInRing(&lb, rrNode, myNode) && (ringNextNode == -1 || rrNode < ringNextNode)) {
         ringNextNode = rrNode;
       }
     }
@@ -839,23 +984,6 @@ ncclResult_t buildStagingTransferDescriptor(
       }
     }
 
-    auto sourceTargetIndexForDstShard = [&](int ss, int targetDstShard) -> int {
-      int srcTargetCount = 0;
-      for (int ds = 0; ds < dstShardCount; ds++) {
-        ncclReshardTransferPlan dsPlan;
-        computeTransferPlan(srcDims, srcStrides, srcShardLayout, ss, dstDims, dstStrides, dstShardLayout, ds, ndims,
-                            epc_dummy, &dsPlan);
-        if (dsPlan.totalInnerTransfers == 0) {
-          continue;
-        }
-        if (ds == targetDstShard) {
-          return srcTargetCount;
-        }
-        srcTargetCount++;
-      }
-      return 0;
-    };
-
     /* Populate sources[] in shard order, classifying RDMA vs LSA. */
     desc->numSources = 0;
     for (int idx = 0; idx < numAllSources; idx++) {
@@ -881,6 +1009,7 @@ ncclResult_t buildStagingTransferDescriptor(
 
       int si = desc->numSources++;
       StagingPeerDescriptor* sd = &desc->sources[si];
+      desc->sourceColor[si] = pipeEdgeColor(ss, dstInfo.shardIdx);
 
       if (isMyRdma) {
         if (ringPrevRank != -1) {
@@ -918,7 +1047,6 @@ ncclResult_t buildStagingTransferDescriptor(
           int ringPrevLsaCount = ringPrevNumRdma * (ringPrevNumLocalReps - 1);
           desc->targetIndexOnSource[si] = ringPrevLsaCount + k;
           desc->rdmaTargetIndexOnSource[si] = k;
-          desc->channelTargetIndexOnSource[si] = sourceTargetIndexForDstShard(ss, dstInfo.shardIdx);
           desc->sourceNumTargets[si] = ringPrevNumRdma * ringPrevNumLocalReps;
           desc->sourceNumRdmaTargets[si] = ringPrevNumRdma;
         } else {
@@ -985,7 +1113,6 @@ ncclResult_t buildStagingTransferDescriptor(
           sourceNumTargetsCount = srcTargetCount;
           desc->targetIndexOnSource[si] = myTargetIdxOnSource;
           desc->rdmaTargetIndexOnSource[si] = myTargetIdxOnSource;
-          desc->channelTargetIndexOnSource[si] = desc->targetIndexOnSource[si];
           desc->sourceNumTargets[si] = sourceNumTargetsCount;
           desc->sourceNumRdmaTargets[si] = sourceNumTargetsCount;
         }
@@ -1057,8 +1184,6 @@ ncclResult_t buildStagingTransferDescriptor(
         }
 
         desc->targetIndexOnSource[si] = handlerTargetIdxOnSource;
-        desc->channelTargetIndexOnSource[si] =
-          (ringPrevRank != -1) ? sourceTargetIndexForDstShard(ss, dstInfo.shardIdx) : handlerTargetIdxOnSource;
         desc->sourceNumTargets[si] = providerNumRdma * std::max(0, numLocalReps - 1);
         desc->sourceLsaHeadIndexOnProvider[si] = lsaTargetIdxOnProvider;
       }
@@ -1112,6 +1237,9 @@ ncclResult_t buildStagingTransferDescriptor(
 
         desc->destNumSources[ti] = numAllSources;
         desc->sourceIndexOnDest[ti] = idx;
+        for (int k = 0; k < numAllSources; k++) {
+          desc->destSourceColor[ti][k] = pipeEdgeColor(allSourceShards[k], dstInfo.shardIdx);
+        }
 
         RESHARD_TRACE(worldRank,
                       "  DST lsa_target[%d]: repRank=%d "
@@ -1147,6 +1275,9 @@ ncclResult_t buildStagingTransferDescriptor(
 
         desc->destNumSources[ti] = numAllSources;
         desc->sourceIndexOnDest[ti] = idx;
+        for (int k = 0; k < numAllSources; k++) {
+          desc->destSourceColor[ti][k] = pipeEdgeColor(allSourceShards[k], dstInfo.shardIdx);
+        }
         desc->destNumRdmaSources[ti] = ringNextNumRdma;
         desc->rdmaSourceIndexOnDest[ti] = idx - ringNextSrcStart;
         NCCL_M2N_CHECK_ARG(
@@ -1361,7 +1492,6 @@ ncclResult_t buildStagingDirectTransferDescriptor(ncclComm_t globalComm, void* s
 
       desc->targetIndexOnSource[si] = overlappingBeforeMe * numTargetReps + (dstInfo.repIdx - targetRepStart);
       desc->rdmaTargetIndexOnSource[si] = desc->targetIndexOnSource[si];
-      desc->channelTargetIndexOnSource[si] = desc->targetIndexOnSource[si];
       desc->sourceNumTargets[si] = totalOverlapping * numTargetReps;
       desc->sourceNumRdmaTargets[si] = desc->sourceNumTargets[si];
     }

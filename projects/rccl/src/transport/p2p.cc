@@ -357,20 +357,19 @@ static ncclResult_t p2pImportShareableBuffer(struct ncclComm* comm, int peer, si
     CUCHECK(cuMemGetAllocationGranularity(&granularity, &prop, CU_MEM_ALLOC_GRANULARITY_MINIMUM));
     ALIGN_SIZE(size, granularity);
 
+    ncclResult_t ret = ncclSuccess;
+    // Some ROCm 7.14 runtimes read the imported fd only in cuMemSetAccess, so keep it open until then.
+    ncclIpcFd fd = NCCL_INVALID_IPC_FD;
+    CUmemAccessDesc accessDesc = {};
     // Import and map the remote memory descriptor to the local GPU
     if (type == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
       // UDS fd support
-      ncclIpcFd fd = NCCL_INVALID_IPC_FD;
       // Send cuMem handle to remote for conversion to an fd
       NCCLCHECK(ncclProxyClientGetFdBlocking(comm, peer, &cuDesc->data, &fd));
       INFO(NCCL_P2P, "UDS converted handle 0x%lx to fd %lld on remote peer %d", *(uint64_t*)&cuDesc->data,
            (long long)fd, peer);
       // For POSIX_FD, pass the fd value (not a pointer to fd) cast as void*
-      ncclResult_t ret = ncclSuccess;
       CUCHECKGOTO(cuMemImportFromShareableHandle(&handle, (void*)(uintptr_t)fd, type), ret, closeFd);
-    closeFd:
-      SYSCHECK(ncclIpcFdClose(fd), "close");
-      NCCLCHECK(ret);
     } else {
 #ifdef ENABLE_TRACE
       // Log handle bytes to verify correct data received cross-node
@@ -394,19 +393,21 @@ static ncclResult_t p2pImportShareableBuffer(struct ncclComm* comm, int peer, si
 #endif
       CUCHECK(cuMemImportFromShareableHandle(&handle, (void*)cuDesc, type));
     }
-    CUCHECK(cuMemAddressReserve(&dptr, size, /* alignment */ 0, /* addr */ 0, /* flags */ 0));
-    CUCHECK(cuMemMap(dptr, size, /* offset */ 0, handle, /* flags */ 0));
+    CUCHECKGOTO(cuMemAddressReserve(&dptr, size, /* alignment */ 0, /* addr */ 0, /* flags */ 0), ret, closeFd);
+    CUCHECKGOTO(cuMemMap(dptr, size, /* offset */ 0, handle, /* flags */ 0), ret, closeFd);
 
     TRACE(NCCL_P2P, "Imported shareable buffer size %zu handle %p dptr %p", size, (void*)(uintptr_t)handle,
           (void*)dptr);
 
     // Allow access by the local GPU
-    CUmemAccessDesc accessDesc = {};
     accessDesc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
     accessDesc.location.id = comm->cudaDev;
     accessDesc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
-    CUCHECK(cuMemSetAccess(dptr, size, &accessDesc, 1));
+    CUCHECKGOTO(cuMemSetAccess(dptr, size, &accessDesc, 1), ret, closeFd);
     TRACE(NCCL_P2P, "Set Access for %p size %zu on dev %d", (void*)dptr, size, accessDesc.location.id);
+  closeFd:
+    if (fd != NCCL_INVALID_IPC_FD) SYSCHECK(ncclIpcFdClose(fd), "close");
+    NCCLCHECK(ret);
 
     *devMemPtr = (void*)dptr;
     // Freed through ncclCudaFree / ncclCuMemFree, which subtract the mapped size.
@@ -1205,8 +1206,7 @@ ncclResult_t ipcHandleMultiSegmentRegistration(CUdeviceptr userBuff, size_t user
       memcpy(&ipcInfo->ipcDesc.memHandle, &segmentHandles[segment], sizeof(CUmemGenericAllocationHandle));
     } else {
       if (ncclCuMemHandleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
-        CUCHECKGOTO(cuMemExportToShareableHandle(&expFds[segment], segmentHandles[segment], ncclCuMemHandleType, 0),
-                    ret, fail);
+        NCCLCHECKGOTO(ncclCuMemExportPosixFd(&expFds[segment], segmentHandles[segment]), ret, fail);
       } else {
         CUCHECKGOTO(cuMemExportToShareableHandle(&ipcInfo->ipcDesc.cuDesc.handle, segmentHandles[segment],
                                                  ncclCuMemHandleType, 0),
@@ -1383,7 +1383,7 @@ static ncclResult_t ipcRegisterBuffer(ncclComm* comm, const void* userbuff, size
               } else {
                 if (ncclCuMemHandleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
                   ncclIpcFd expFd = NCCL_INVALID_IPC_FD;
-                  CUCHECKGOTO(cuMemExportToShareableHandle(&expFd, handle, ncclCuMemHandleType, 0), ret, fail);
+                  NCCLCHECKGOTO(ncclCuMemExportPosixFd(&expFd, handle), ret, fail);
                   NCCLCHECKGOTO(ncclProxyClientQueryFdBlocking(comm, proxyConn, expFd, &ipcInfo->impFd), ret, fail);
                   SYSCHECKGOTO(ncclIpcFdClose(expFd), "close", ret, fail);
                 } else {
@@ -1676,9 +1676,7 @@ static ncclResult_t p2pProxyRegister(struct ncclProxyConnection* connection, str
           CUCHECKGOTO(cuMemImportFromShareableHandle(&segmentHandles[segment],
                                                      (void*)(uintptr_t)ipcExpInfo[segment].impFd, ncclCuMemHandleType),
                       ret, fail);
-          // Must be set before the fd close below can jump to fail:, which releases only imported handles.
           imported[segment] = true;
-          SYSCHECKGOTO(ncclIpcFdClose(ipcExpInfo[segment].impFd), "close", ret, fail);
         } else {
           CUCHECKGOTO(cuMemImportFromShareableHandle(&segmentHandles[segment],
                                                      (void*)&ipcExpInfo[segment].ipcDesc.cuDesc, ncclCuMemHandleType),
@@ -1700,6 +1698,14 @@ static ncclResult_t p2pProxyRegister(struct ncclProxyConnection* connection, str
     accessDesc.location.id = proxyState->cudaDev;
     accessDesc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
     CUCHECKGOTO(cuMemSetAccess((CUdeviceptr)regAddr, totalSize, &accessDesc, 1), ret, fail);
+    // Some ROCm 7.14 runtimes read the imported fds only in cuMemSetAccess, so close them after it.
+    if (!connection->sameProcess && ncclCuMemHandleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
+      for (int segment = 0; segment < numSegments; segment++) {
+        ncclIpcFd fd = ipcExpInfo[segment].impFd;
+        ipcExpInfo[segment].impFd = NCCL_INVALID_IPC_FD;
+        SYSCHECKGOTO(ncclIpcFdClose(fd), "close", ret, fail);
+      }
+    }
     regAddrOffset = ipcExpInfo[0].offset;
     regAddr = (void*)((uintptr_t)regAddr + regAddrOffset);
 #endif
@@ -1746,6 +1752,11 @@ fail:
       }
       if (imported && imported[segment]) {
         CUCHECKIGNORE(cuMemRelease(segmentHandles[segment]));
+      }
+      if (!connection->sameProcess && ncclCuMemHandleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR &&
+          ipcExpInfo[segment].impFd != NCCL_INVALID_IPC_FD) {
+        (void)ncclIpcFdClose(ipcExpInfo[segment].impFd);
+        ipcExpInfo[segment].impFd = NCCL_INVALID_IPC_FD;
       }
       offset += ipcExpInfo[segment].size;
     }

@@ -519,16 +519,16 @@ static ncclResult_t symMemoryImportAndMapSegmentHandle(struct ncclComm* comm, in
                                                        bool reuseLocal) {
   ncclResult_t ret = ncclSuccess;
   CUmemGenericAllocationHandle impHandle;
+  // Some ROCm 7.14 runtimes read the imported fd only in cuMemSetAccess, so keep it open until then.
+  ncclIpcFd fd = NCCL_INVALID_IPC_FD;
   if (reuseLocal) {
     impHandle = memHandle;
   } else {
     if (ncclCuMemHandleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
-      ncclIpcFd fd = NCCL_INVALID_IPC_FD;
       NCCLCHECKGOTO(ncclProxyClientGetFdBlocking(comm, comm->devrState.lsaDomainRankList[r], msg, &fd), ret, fail);
       CUCHECKGOTO(cuMemImportFromShareableHandle(&impHandle, reinterpret_cast<void*>((uintptr_t)fd),
                                                  ncclCuMemHandleType),
                   ret, fail);
-      SYSCHECKGOTO(ncclIpcFdClose(fd), "close", ret, fail);
     } else {
       CUCHECKGOTO(cuMemImportFromShareableHandle(&impHandle, (void*)&msg->fabricHandle, ncclCuMemHandleType), ret,
                   fail);
@@ -540,6 +540,10 @@ static ncclResult_t symMemoryImportAndMapSegmentHandle(struct ncclComm* comm, in
     CUCHECKGOTO(cuMemRelease(impHandle), ret, fail);
   }
 fail:
+  if (fd != NCCL_INVALID_IPC_FD && ncclIpcFdClose(fd) != 0 && ret == ncclSuccess) {
+    WARN("Call to close failed: %s", strerror(errno));
+    ret = ncclSystemError;
+  }
   return ret;
 }
 

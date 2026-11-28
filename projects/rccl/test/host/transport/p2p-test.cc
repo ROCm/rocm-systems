@@ -146,6 +146,12 @@ static void ResetP2pFakes();
 #define hipMemRelease(handle) \
     g_hipMemRelease((handle))
 
+// rocmwrap.cc is not linked; export through the hookable fake above.
+ncclResult_t ncclCuMemExportPosixFd(int* fd, hipMemGenericAllocationHandle_t handle) {
+  CUCHECK(hipMemExportToShareableHandle(fd, handle, hipMemHandleTypePosixFileDescriptor, 0));
+  return ncclSuccess;
+}
+
 // hipPointerGetAttribute: HIP_VERSION >= 71260540 fresh-reg arm queries
 // legacy-IPC capability through this instead of ncclParamLegacyCudaRegister().
 #define hipPointerGetAttribute(data, attribute, ptr) \
@@ -5268,9 +5274,9 @@ TEST_F(P2pShareableBufferMicrotest,
     EXPECT_NE(r, ncclSuccess);
 }
 
-// cuMem POSIX_FD arm, closing the converted fd fails: the import succeeds but
-// the SYSCHECK(close(fd)) refuses because the converted handle is not a valid
-// fd, so the system error is propagated before mapping.
+// cuMem POSIX_FD arm, closing the converted fd fails: the fd stays open until
+// set-access, then the SYSCHECK(close(fd)) refuses because the converted handle
+// is not a valid fd, so the system error is propagated before tracking.
 TEST_F(P2pShareableBufferMicrotest,
        Import_CuMemPosixFdCloseFails_Propagates)
 {
@@ -5293,14 +5299,27 @@ TEST_F(P2pShareableBufferMicrotest,
     ScopedHook reserve(g_hipMemAddressReserve,
         [](void** p, std::size_t, std::size_t, void*,
            unsigned long long) -> hipError_t {
-            ADD_FAILURE() << "reserve must not run after close failure";
-            if (p) *p = nullptr;
+            if (p) *p = reinterpret_cast<void*>(0xE0000);
             return hipSuccess;
+        });
+    ScopedHook map(g_hipMemMap,
+        [](void*, std::size_t, std::size_t, hipMemGenericAllocationHandle_t,
+           unsigned long long) -> hipError_t { return hipSuccess; });
+    ScopedHook access(g_hipMemSetAccess,
+        [](void*, std::size_t, const hipMemAccessDesc*,
+           std::size_t) -> hipError_t { return hipSuccess; });
+    ScopedHook track(g_memTrackImportFromPeer,
+        [](struct ncclMemManager*, void*, size_t, hipMemGenericAllocationHandle_t,
+           hipMemAllocationHandleType, ncclMemType_t, int, int,
+           void*) -> ncclResult_t {
+            ADD_FAILURE() << "buffer must not be tracked after close failure";
+            return ncclSuccess;
         });
 
     auto r = CallImport();
 
     EXPECT_NE(r, ncclSuccess);
+    EXPECT_EQ(access.calls, 1);
 }
 
 // cuMem arm, address-reserve / map / set-access each fail in turn: the import

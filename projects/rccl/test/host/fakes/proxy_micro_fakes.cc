@@ -238,6 +238,10 @@ std::atomic<int> g_profSleeps;
 
 int ncclCuMemEnable() { return g_cuMemEnabled; }
 int ncclCuMemHostEnable() { return g_cuMemHostEnabled; }
+ncclResult_t ncclCuMemExportPosixFd(int* fd, hipMemGenericAllocationHandle_t handle) {
+  CUCHECK(hipMemExportToShareableHandle(fd, handle, hipMemHandleTypePosixFileDescriptor, 0));
+  return ncclSuccess;
+}
 void ncclSetThreadName(std::thread&, const char*, ...) { g_threadNames++; }
 
 bool ncclProfilerProxyDiagEnabled(void) { return g_proxyDiagEnabled; }

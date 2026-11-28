@@ -47,6 +47,8 @@
 #   MPI_HOME      - MPI install (benchmarks + MPI test); auto-detected via mpicc
 #   PREFIX        - Install prefix (default: /usr/local)
 #   DEBUG         - 1=-g, full=-g -O0
+#   NCCL_M2N_PIPE_SYNC_TIMEOUT_DEBUG - 1=trap on PIPE sync timeouts
+#   NCCL_M2N_PIPE_SYNC_TIMEOUT_CYCLES - timeout in wall_clock64() ticks (100 MHz; default 5 s)
 #   BUILDDIR      - Override build/ output directory
 
 # -- Project root = directory containing this Makefile -----------------------
@@ -164,6 +166,14 @@ ifeq ($(DEBUG),full)
 else ifeq ($(DEBUG),1)
     HIPFLAGS += -g
     $(info [DEBUG] Debug symbols enabled (-g))
+endif
+
+# Same switch as Makefile.common: trap on PIPE sync timeouts. Run `clean` when toggling it.
+ifdef NCCL_M2N_PIPE_SYNC_TIMEOUT_DEBUG
+    HIPFLAGS += -DSTAGING_PIPE_SYNC_TIMEOUT_DEBUG
+endif
+ifdef NCCL_M2N_PIPE_SYNC_TIMEOUT_CYCLES
+    HIPFLAGS += -DSTAGING_PIPE_SYNC_TIMEOUT_CYCLES=$(NCCL_M2N_PIPE_SYNC_TIMEOUT_CYCLES)
 endif
 
 # -- Linker flags ------------------------------------------------------------
@@ -398,4 +408,4 @@ help:
 	@echo ""
 	@echo "Required: NCCL_HOME (or RCCL_HOME) -> RCCL build/install dir with include/nccl_device.h + lib/librccl.so"
 	@echo "Optional: ROCM_PATH, RCCL_LIBDIR, OFFLOAD_ARCH (default gfx950), ROCM_VERSION,"
-	@echo "          GTEST_DIR, MPI_HOME, PREFIX, DEBUG, BUILDDIR"
+	@echo "          GTEST_DIR, MPI_HOME, PREFIX, DEBUG, NCCL_M2N_PIPE_SYNC_TIMEOUT_DEBUG[_CYCLES], BUILDDIR"

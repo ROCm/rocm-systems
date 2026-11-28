@@ -912,6 +912,8 @@ ncclResult_t ncclCommMemResume(struct ncclComm* comm) {
 
       CUmemGenericAllocationHandle newHandle;
       CUresult curet;
+      // Some ROCm 7.14 runtimes read the imported fd only in cuMemSetAccess, so keep it open until then.
+      ncclIpcFd fd = NCCL_INVALID_IPC_FD;
 
       if (matchedInfo->handleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
         // POSIX FD handles only work within the same node - check hostHash
@@ -926,7 +928,6 @@ ncclResult_t ncclCommMemResume(struct ncclComm* comm) {
 
         // For POSIX FD: We need to get the FD from the owner
         // Use proxy to convert cuMem handle to FD
-        ncclIpcFd fd = NCCL_INVALID_IPC_FD;
 
         // RCCL: use a local result so a successful conversion does not clobber
         // a prior partial-failure ret set earlier in the loop
@@ -944,7 +945,6 @@ ncclResult_t ncclCommMemResume(struct ncclComm* comm) {
 
         curet = CUPFN(cuMemImportFromShareableHandle(&newHandle, (void*)(uintptr_t)fd,
                                                      CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR));
-        ncclIpcFdClose(fd);
       } else if (matchedInfo->handleType == CU_MEM_HANDLE_TYPE_FABRIC) {
         // For FABRIC: Import directly using the fabric handle
         curet =
@@ -957,6 +957,7 @@ ncclResult_t ncclCommMemResume(struct ncclComm* comm) {
       }
 
       if (curet != CUDA_SUCCESS) {
+        if (fd != NCCL_INVALID_IPC_FD) ncclIpcFdClose(fd);
         ATTN("MemManager: cuMemImportFromShareableHandle failed for ptr=%p (curet=%d)", entry->ptr, curet);
         if (ret == ncclSuccess) ret = ncclUnhandledCudaError;
         entry = entry->next;
@@ -965,6 +966,7 @@ ncclResult_t ncclCommMemResume(struct ncclComm* comm) {
 
       // Re-map to the same virtual address and set access permissions
       ncclResult_t mapResult = ncclCuMemMapAndSetAccess(entry->ptr, entry->size, newHandle, comm->cudaDev);
+      if (fd != NCCL_INVALID_IPC_FD) ncclIpcFdClose(fd);
       if (mapResult != ncclSuccess) {
         CUCHECKIGNORE(cuMemRelease(newHandle));
         entry->handle = 0;

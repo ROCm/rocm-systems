@@ -2719,8 +2719,7 @@ extern "C" ncclResult_t ncclReshard(ncclM2nHandle_t handle, ncclComm_t comm, con
   ncclCommProperties commProps = NCCL_COMM_PROPERTIES_INITIALIZER;
   ncclResult_t propsResult = ncclSuccess;
   NCCL_M2N_CHECK(reshardMatchCommCudaDevice(comm, &currentCudaDev, &commProps, &propsResult));
-  NCCL_M2N_CHECK(reshardCheckValidatedConfig("ncclReshard", world_rank, copyAlgo, propsResult, &commProps,
-                                             propsResult == ncclSuccess ? commProps.cudaDev : currentCudaDev));
+  NCCL_M2N_CHECK(reshardCheckValidatedConfig("ncclReshard", world_rank, copyAlgo, propsResult, &commProps));
   NCCL_M2N_CHECK(reshardRejectGraphCapture("ncclReshard", stream));
 
   /* Stream pool for default-stream callers. */
@@ -3162,6 +3161,8 @@ extern "C" ncclResult_t ncclReshard(ncclM2nHandle_t handle, ncclComm_t comm, con
 
   if (copyAlgo == RESHARD_COPY_ALGO_DIRECT) {
     NCCL_M2N_CHECK(stagingEnsureDirectDevParams(staging, world_rank));
+    /* Pageable copy: blocks until the previous DIRECT kernel ends, which waits for other local ranks. */
+    M2nApiUnlock apiUnlock;
     NCCL_M2N_CUDACHECK(cudaMemcpyAsync(staging->devParams, directParams.get(), sizeof(*directParams),
                                        cudaMemcpyHostToDevice, workStream));
   }
@@ -3172,7 +3173,12 @@ extern "C" ncclResult_t ncclReshard(ncclM2nHandle_t handle, ncclComm_t comm, con
 
   ncclResult_t launchResult = ncclSuccess;
   auto launchPipe = [&](bool splitLaunch) -> ncclResult_t {
-    ncclResult_t result = stagingEnsurePipeDevicePlan(pipePlanEntry, stagingPipeSignature, workStream, world_rank);
+    ncclResult_t result;
+    {
+      /* Pageable plan upload on a cache miss: same wait as the DIRECT params copy above. */
+      M2nApiUnlock apiUnlock;
+      result = stagingEnsurePipeDevicePlan(pipePlanEntry, stagingPipeSignature, workStream, world_rank);
+    }
     if (result == ncclSuccess) {
       if (splitLaunch) {
         result = launchStagingReshardPipeSplit(pipeLaunchParams, &pipeCall, pipePlanEntry->devParams,
