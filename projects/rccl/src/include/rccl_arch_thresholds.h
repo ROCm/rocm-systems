@@ -226,6 +226,23 @@ struct rcclArchThresholds {
   // tuning model's per-rank ranges. gfx1250 DPX sets both; other tables leave them 0.
   size_t bcRingLLMaxBytes;
   size_t bcRingLL128MaxBytes;
+
+  // Single-node Broadcast Ring LL ceiling, in total bytes:
+  //   min(bcSingleNodeRingLLBaseBytes x nChannels^(p / 2) x (nRanks - 1)^(q / 2), bcSingleNodeRingLLCapBytes),
+  // p = bcSingleNodeRingLLChannelPowHalves, q = bcSingleNodeRingLLHopPowHalves, nChannels = comm->nChannels.
+  // The LL / Simple crossover grows with the ring's channel count and hop count, at a rate that differs per arch,
+  // up to a total size past which LL loses; the cap holds it there. Exponents are in halves (2 = linear,
+  // 3 = power 1.5, 4 = square, never negative) so the odd half is one sqrt, which IEEE rounds the same on every rank.
+  // When the protocol chosen so far is Ring Simple and 0 < nBytes <= the ceiling, the protocol becomes LL.
+  // Base or cap 0 = tuning model. Fitted on 2 to 8 ranks (SPX, one rank per GPU); more than 8 ranks or most
+  // partitioned comms (hasMloPart) keep the model.
+  // Tables with bcRingLL128MaxBytes != 0 (gfx1250 DPX) use those ceilings instead.
+  // RCCL_BC_SINGLE_NODE_RING_LL_MAX_BYTES > 0 replaces the computed ceiling on a single-node comm of at least 2 ranks
+  // whose table has no total-byte Broadcast ceilings (not gfx1250 DPX); 0 turns it off.
+  size_t bcSingleNodeRingLLBaseBytes;
+  unsigned int bcSingleNodeRingLLChannelPowHalves;
+  unsigned int bcSingleNodeRingLLHopPowHalves;
+  size_t bcSingleNodeRingLLCapBytes;
 };
 
 // Compute-partition mode a gfx1250 comm is tuned for (RCCL_TUNING_PARTITION_MODE). It picks

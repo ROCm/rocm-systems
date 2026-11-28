@@ -295,6 +295,11 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   // Zero: keep tuning_model_11's per-rank broadcast ranges.
   .bcRingLLMaxBytes = 0,
   .bcRingLL128MaxBytes = 0,
+  // Zero: unmeasured, keep the tuning model.
+  .bcSingleNodeRingLLBaseBytes = 0,
+  .bcSingleNodeRingLLChannelPowHalves = 0,
+  .bcSingleNodeRingLLHopPowHalves = 0,
+  .bcSingleNodeRingLLCapBytes = 0,
 };
 
 // gfx1250 in DPX mode (each GPU split into two partitions), picked by
@@ -550,6 +555,11 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
   // Total message bytes at every node count. See rcclArchThresholds.
   .bcRingLLMaxBytes = 16ULL*1024,
   .bcRingLL128MaxBytes = 512ULL*1024*1024,
+  // Unused: the total-byte ceilings above take precedence.
+  .bcSingleNodeRingLLBaseBytes = 0,
+  .bcSingleNodeRingLLChannelPowHalves = 0,
+  .bcSingleNodeRingLLHopPowHalves = 0,
+  .bcSingleNodeRingLLCapBytes = 0,
 };
 
 // gfx950: DDA-IPC cap is 64 MiB for AG, 128 MiB for AR/RS and 4 MiB for AlltoAll. No fabric LL/LL128.
@@ -702,6 +712,14 @@ static const rcclArchThresholds rcclArchThresholds_gfx950 = {
   .forceCeScratch = true,
   .bcRingLLMaxBytes = 0,
   .bcRingLL128MaxBytes = 0,
+  // 4 KiB x nChannels x (nRanks - 1)^2, up to 16 MiB total. Fit on 2- to 8-rank single-node SPX comms (one rank per
+  // GPU), each rank count at its default ring channel count; other channel counts are unmeasured. It follows the
+  // measured LL / Simple crossover at every rank count and past 16 MiB Simple wins. Accepted: at 7 ranks the
+  // ceiling keeps LL at 1152K, where Simple measured slightly faster.
+  .bcSingleNodeRingLLBaseBytes = 4096,
+  .bcSingleNodeRingLLChannelPowHalves = 2,
+  .bcSingleNodeRingLLHopPowHalves = 4,
+  .bcSingleNodeRingLLCapBytes = 16ULL*1024*1024,
 };
 
 // gfx942: DDA-IPC cap is 8 MiB for AR/AG/RS and 4 MiB for AlltoAll. No fabric LL/LL128.
@@ -854,6 +872,14 @@ static const rcclArchThresholds rcclArchThresholds_gfx942 = {
   .forceCeScratch = true,
   .bcRingLLMaxBytes = 0,
   .bcRingLL128MaxBytes = 0,
+  // 768 B x (nChannels x (nRanks - 1))^1.5, up to 5 MiB total. Fit on 2- to 8-rank single-node SPX comms (one rank
+  // per GPU), each rank count at its default ring channel count; other channel counts are unmeasured. It keeps every
+  // power-of-two size where LL wins at 2, 4 and 8 ranks and none where it loses; at 3 and 5 to 7 ranks it stays
+  // below the sizes where the model already picks LL. Past 5 MiB Simple wins.
+  .bcSingleNodeRingLLBaseBytes = 768,
+  .bcSingleNodeRingLLChannelPowHalves = 3,
+  .bcSingleNodeRingLLHopPowHalves = 3,
+  .bcSingleNodeRingLLCapBytes = 5ULL*1024*1024,
 };
 
 bool rcclWindowFits(size_t totalBytes, size_t minBytes, size_t maxBytes) {

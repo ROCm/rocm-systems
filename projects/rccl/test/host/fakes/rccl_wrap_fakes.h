@@ -17,6 +17,7 @@
 
 #include "nccl.h"
 #include "nccl_common.h"
+#include "nccl_tuner.h"  // NCCL_NUM_PROTOCOLS
 
 struct ncclComm;
 struct ncclReg;
@@ -42,6 +43,8 @@ extern int64_t g_rcclParamDirectReduceScatterThreshold;  // UNDRIVEN
 // Call counters for the no-op tuning hooks: a no-op that was never called and one
 // that was look identical without these, so a dropped call site would be silent.
 extern int g_rcclUpdateCollectiveProtocolCalls;
+// Address of the cost table the last rcclUpdateCollectiveProtocol call received.
+extern float (*g_rcclUpdateCollectiveProtocolTable)[NCCL_NUM_PROTOCOLS];
 extern int g_rcclUpdateCollectiveAlgorithmCalls;
 extern bool g_rcclUpdateCollectiveAlgorithmBeforeProtocol;
 extern int g_rcclUpdateRemoteFlushAlgoProtoCalls;

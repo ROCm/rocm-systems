@@ -3473,7 +3473,7 @@ static ncclResult_t topoGetAlgoInfo(struct ncclComm* comm, struct ncclTaskColl* 
   int remoteFlushChannels = 0;
   if (!isTunerMatchFound && info->algorithm != NCCL_ALGO_PAT) {
     rcclUpdateCollectiveAlgorithm(comm, nBytes, info, table);
-    rcclUpdateCollectiveProtocol(comm, nBytes, info);
+    rcclUpdateCollectiveProtocol(comm, nBytes, info, table);
     remoteFlushChannels = rcclUpdateRemoteFlushAlgoProto(comm, nBytes, info, table);
   }
   rcclSetPipelining(comm, nBytes, info);
