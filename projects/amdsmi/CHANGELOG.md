@@ -8,6 +8,75 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
+- **Added CPU read APIs for APB status, XGMI link width, and DF P-state range**, with corresponding Python APIs and `amd-smi metric` flags for AMD EPYC CPUs.
+
+- **Added Power Stabilization support (HAWK dummy-compute insertion and Ramp Management)**.  
+  - Query and configure GPU power stabilization and ramp management settings via `amd-smi static --power-stabilization` and `amd-smi set --power-stabilization-configure KEY=VALUE [...]` (or `@<path>` to a JSON file, subject to the same file restrictions as `--ampp-configure @<path>`), on supported bare-metal Linux platforms. When NPM (Node-level Power Management) coordination makes settings node-wide, a write against a non-primary GPU still applies but prints an informational/warning note naming the node's primary GPU.
+  - Like `--ampp`, `power_stabilization` is on by default (not opt-in): plain `amd-smi static`, `--all`, and `--json` all gain a `power_stabilization` key for every GPU, reporting "not supported" on platforms without the feature.
+
+### Changed
+
+- **`amdsmi_get_gpu_kfd_info()` now returns `AMDSMI_STATUS_NOT_SUPPORTED` on WSL**.
+  - WSL has no KFD, so the call previously returned success with placeholder values; it now reports the data as unsupported.
+
+- **Repeated `amd-smi` device selections now combine**.  
+  - Repeated `--gpu`, `--cpu`, `--core`, and `--nic` options combine without duplicates. `reset --gpureset -g all -g 0` now resets every GPU (previously GPU 0 only); `set -g 0 -C CPX -g 1 -C SPX` now applies SPX to GPUs 0 and 1 (previously GPU 1 only). Remove earlier device options to retain the previous target set.
+
+- **Hardened the `@<path>` file loader shared by `--ampp-configure` and `--power-stabilization-configure`**.  
+  - The loader now requires a regular file (rejecting symlinks, so not `/dev/stdin`), enforces a 1 MiB cap against bytes actually read, and guards against `UnicodeDecodeError`/`RecursionError`.
+
+### Resolved Issues
+
+- **Fixed `amd-smi reset --gpureset` resetting only the first GPU on UALink systems**.
+  - Each UALink GPU is now reset individually; GPUs in an XGMI hive are still reset once per hive.
+
+- **Fixed `amd-smi ras --cper` crashing with `TypeError` when no GPU devices are available**.
+  - When the `amdgpu` driver is not loaded, the command now exits with a clear driver-not-loaded message and exit code 206 instead of an unhandled exception.
+
+- **Fixed `amd-smi static --bus` reporting a PCIe link on GPUs that connect to the CPU over xGMI, such as MI450**.  
+  - `MAX_PCIE_WIDTH`, `MAX_PCIE_SPEED` and `PCIE_INTERFACE_VERSION` now show `N/A` instead of the emulated link's values, and `amdsmi_get_pcie_info()` returns the maximum value for these fields.
+
+- **Fixed `amd-smi` failures on non-x86 systems where the library is built without ESMI (EPYC CPU) support**.  
+  - `amd-smi` no longer tries to initialize CPU monitoring on such builds, and the Python CPU APIs now raise `AmdSmiLibraryException` with `AMDSMI_STATUS_NOT_SUPPORTED` instead of `AttributeError`. CPU affinity is reported again instead of N/A, and the Go shim builds without ESMI.
+- **Fixed `amdsmi_init()` printing `Exception caught: rsmi_init.` on systems without ROCm**.
+  - On a system without KFD (`/sys/class/kfd` missing), `amdsmi_init()` with `AMDSMI_INIT_AMD_GPUS` now returns `AMDSMI_STATUS_DRIVER_NOT_LOADED` without printing, instead of `AMDSMI_STATUS_NOT_INIT`. Libraries that use AMD SMI as an optional dependency, such as hwloc, no longer print to stderr on machines without AMD GPUs.
+  - Other initialization error handling is unchanged.
+
+- **Fixed `amd-smi set --ampp-configure=@<path>` lowercasing its file path**.  
+  - The `=` form of `--ampp-configure` incorrectly lowercased its `@<path>` value, breaking case-sensitive paths. It now preserves case, matching the space-separated form.
+
+- **Setting the current memory partition now cancels a pending memory partition change**.  
+  - Previously, amd-smi did not send this request to the driver, so the next driver reload still applied a different partition requested earlier. Older amdgpu drivers ignore the request because of a driver bug and still apply the partition requested earlier; update to an amdgpu driver that has the fix. If a read-only `/sys` (for example, in a container) refuses the request, amd-smi now reports an error instead of success.
+
+## amd_smi_lib for ROCm 10.2.0
+
+### Added
+
+- **Added unified `amdsmi_get_link_topology()` API on baremetal**.  
+  - Returns link weight, status, type, hop count, and framebuffer-sharing data.
+  - Matches the existing host interface; includes Python and Rust bindings.
+  - Exports `AmdSmiLinkStatus` in Python and `AmdsmiLinkStatusT` in Rust for status interpretation.
+  - Self pair (same GPU): `INTERNAL`, `ENABLED`, zero hops and weight, `fb_sharing=1`.
+  - Migration from component APIs on baremetal:
+    - `amdsmi_topo_get_link_type(gpu, gpu)` reports PCIe and 2 hops instead.
+    - `amdsmi_topo_get_link_weight(gpu, gpu)` reports twice the NUMA node weight (typically 40).
+
+- **Added IFoE fabric RAS CPER API**.
+  - `amdsmi_get_fabric_cper_entries()` — retrieve IFoE RAS CPER records from UALoE library
+  - CLI: `amd-smi ras --cper` now reports fabric link events alongside GPU errors (fabric-linkdown, fabric-linkup, fabric-fatal)
+
+- **Added AMPP (amdsmi power profile) API and CLI support**.
+  - `amdsmi_get_ampp_profiles`, `amdsmi_get_ampp_fields`, `amdsmi_activate_ampp_profile`, and `amdsmi_configure_ampp_profile` expose the driver's `app_modes/` sysfs tree of predefined power/performance recipes. Profiles, fields, and units are all dynamically enumerated at runtime — nothing is hardcoded, since the driver does not guarantee a fixed field set, profile count, or naming across SoC generations.
+  - `amd-smi static --ampp` displays the tree-wide `app_modes/profile_abi` version plus per-profile active/writable/configured state and per-field name/unit/value/min/max.
+  - `amd-smi set --ampp-activate <profile_name>` activates a profile.
+  - `amd-smi set --ampp-configure <profile_name> KEY=VALUE...` stages one or more fields on a writable profile and commits them.
+  - `amd-smi set --ampp-configure @<path>` restores every writable profile with staged fields from an `amd-smi static --ampp --json`-shaped file in one call.
+  - This is unrelated to the legacy `amdsmi_*_gpu_power_profile*` preset-mask API, which is unchanged.
+
+- **Added `AMDSMI_VRAM_TYPE_HBM4` to `amdsmi_vram_type_t`**.  
+  - Identifies HBM Generation 4 VRAM, reported by `amdsmi_get_gpu_vram_info()`.
+  - Also added the pre-existing `HBM3E` value to the Python `AmdSmiVramType` enum, which had been missing it.
+
 - **Added ``amd-smi metric --nic --rdma [idx]`` and the Python ``amdsmi_get_nic_rdma_port_statistics()``**.  
   - Prints the RDMA hardware counters of each RDMA port of an AI-NIC. The Python function returns a dictionary of counter name to value.
 

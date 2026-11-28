@@ -1362,7 +1362,7 @@ class Common:
                 else:
                     print(msg)
                 if isinstance(data, dict) or isinstance(data, list):
-                    print(json.dumps(data, sort_keys=False, indent=4), flush=True)
+                    print(json.dumps(data, sort_keys=False, indent=4, default=str), flush=True)
                 else:
                     print(data)
         return

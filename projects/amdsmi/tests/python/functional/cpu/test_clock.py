@@ -90,18 +90,6 @@ class TestCpuClock(unittest.TestCase):
             raise self.raise_exception
         return
 
-    # integration
-
-    def test_cpu_apb_disable(self):
-        self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(amdsmi_cpu_apb_disable=amdsmi.amdsmi_cpu_apb_disable, pstate=0)
-        return
-
-    def test_cpu_apb_enable(self):
-        self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(amdsmi_cpu_apb_enable=amdsmi.amdsmi_cpu_apb_enable)
-        return
-
     def test_get_cpu_cclk_limit(self):
         self.common.print_func_name("")
         self.common.Test_API_Per_GPU(amdsmi_get_cpu_cclk_limit=amdsmi.amdsmi_get_cpu_cclk_limit)
@@ -163,25 +151,6 @@ class TestCpuClock(unittest.TestCase):
         )
         return
 
-    def test_set_cpu_df_pstate_range(self):
-        self.common.print_func_name("")
-
-        if self.common.TODO_SKIP_NOT_COMPLETE:
-            msg = "\tSkipping test_set_cpu_df_pstate_range as it is not complete."
-            self.common.print(msg)
-            self.skipTest(msg)
-
-        # TODO max_pstate = 0, min_pstate = 0
-        max_pstate = 0
-        min_pstate = 0
-
-        self.common.Test_API_Per_GPU(
-            amdsmi_set_cpu_df_pstate_range=amdsmi.amdsmi_set_cpu_df_pstate_range,
-            max_pstate=max_pstate,
-            min_pstate=min_pstate,
-        )
-        return
-
     def test_set_cpu_gmi3_link_width_range(self):
         self.common.print_func_name("")
 
@@ -237,24 +206,5 @@ class TestCpuClock(unittest.TestCase):
             nbio_id=nbio_id,
             min_val=min_val,
             max_val=max_val,
-        )
-        return
-
-    def test_set_cpu_xgmi_width(self):
-        self.common.print_func_name("")
-
-        if self.common.TODO_SKIP_NOT_COMPLETE:
-            msg = "\tSkipping test_set_cpu_xgmi_width as it is not complete."
-            self.common.print(msg)
-            self.skipTest(msg)
-
-        # TODO min_width = 0, max_width = 0
-        min_width = 0
-        max_width = 0
-
-        self.common.Test_API_Per_GPU(
-            amdsmi_set_cpu_xgmi_width=amdsmi.amdsmi_set_cpu_xgmi_width,
-            min_width=min_width,
-            max_width=max_width,
         )
         return

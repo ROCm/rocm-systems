@@ -8101,6 +8101,48 @@ amdsmi_status_t amdsmi_set_cpu_xgmi_width(amdsmi_processor_handle processor_hand
   return AMDSMI_STATUS_SUCCESS;
 }
 
+namespace {
+// ESMI documents the read-back (get) APIs for APB status, DF P-state range and
+// XGMI link width as HSMP protocol version >= 7 only, but does not enforce it.
+// Older versions would issue an unsupported mailbox command and can leave the
+// out-params untouched while still reporting success.
+amdsmi_status_t check_hsmp_proto_ver_ge7() {
+  uint32_t hsmp_proto_ver = 0;
+  esmi_status_t ret = esmi_hsmp_proto_ver_get(&hsmp_proto_ver);
+  if (ret != ESMI_SUCCESS) return amd::smi::esmi_to_amdsmi_status(ret);
+  if (hsmp_proto_ver < 7) return AMDSMI_STATUS_NOT_SUPPORTED;
+  return AMDSMI_STATUS_SUCCESS;
+}
+}  // namespace
+
+amdsmi_status_t amdsmi_get_cpu_xgmi_width(amdsmi_processor_handle processor_handle, uint8_t* min,
+                                          uint8_t* max) {
+  amdsmi_status_t status;
+  uint8_t sock_ind;
+  char proc_id[SIZE];
+
+  AMDSMI_CHECK_INIT();
+
+  if (processor_handle == nullptr || min == nullptr || max == nullptr) return AMDSMI_STATUS_INVAL;
+
+  // esmi_xgmi_width_get is only defined for HSMP protocol version >= 7. Older
+  // versions would issue an unsupported mailbox command and can leave the
+  // out-params untouched while still reporting success.
+  status = check_hsmp_proto_ver_ge7();
+  if (status != AMDSMI_STATUS_SUCCESS) return status;
+
+  amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
+  if (r != AMDSMI_STATUS_SUCCESS) return r;
+
+  sock_ind = static_cast<uint8_t>(std::stoi(proc_id, NULL, 0));
+
+  status = static_cast<amdsmi_status_t>(esmi_xgmi_width_get(sock_ind, min, max));
+  if (status != AMDSMI_STATUS_SUCCESS)
+    return amd::smi::esmi_to_amdsmi_status(static_cast<esmi_status_t>(status));
+
+  return AMDSMI_STATUS_SUCCESS;
+}
+
 amdsmi_status_t amdsmi_set_cpu_gmi3_link_width_range(amdsmi_processor_handle processor_handle,
                                                      uint8_t min_link_width,
                                                      uint8_t max_link_width) {
@@ -8157,6 +8199,32 @@ amdsmi_status_t amdsmi_cpu_apb_disable(amdsmi_processor_handle processor_handle,
 
   status = static_cast<amdsmi_status_t>(esmi_apb_disable(sock_ind, pstate));
   if (status != AMDSMI_STATUS_SUCCESS) return amdsmi_errno_to_esmi_status(status);
+
+  return AMDSMI_STATUS_SUCCESS;
+}
+
+amdsmi_status_t amdsmi_get_cpu_apb_status(amdsmi_processor_handle processor_handle,
+                                          uint8_t* apb_status, uint8_t* pstate) {
+  amdsmi_status_t status;
+  uint8_t sock_ind;
+  char proc_id[SIZE];
+
+  AMDSMI_CHECK_INIT();
+
+  if (processor_handle == nullptr || apb_status == nullptr || pstate == nullptr)
+    return AMDSMI_STATUS_INVAL;
+
+  amdsmi_status_t proto = check_hsmp_proto_ver_ge7();
+  if (proto != AMDSMI_STATUS_SUCCESS) return proto;
+
+  amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
+  if (r != AMDSMI_STATUS_SUCCESS) return r;
+
+  sock_ind = static_cast<uint8_t>(std::stoi(proc_id, NULL, 0));
+
+  status = static_cast<amdsmi_status_t>(esmi_apb_status_get(sock_ind, apb_status, pstate));
+  if (status != AMDSMI_STATUS_SUCCESS)
+    return amd::smi::esmi_to_amdsmi_status(static_cast<esmi_status_t>(status));
 
   return AMDSMI_STATUS_SUCCESS;
 }
@@ -8245,6 +8313,32 @@ amdsmi_status_t amdsmi_set_cpu_df_pstate_range(amdsmi_processor_handle processor
 
   status = static_cast<amdsmi_status_t>(esmi_df_pstate_range_set(sock_ind, min_pstate, max_pstate));
   if (status != AMDSMI_STATUS_SUCCESS) return amdsmi_errno_to_esmi_status(status);
+
+  return AMDSMI_STATUS_SUCCESS;
+}
+
+amdsmi_status_t amdsmi_get_cpu_df_pstate_range(amdsmi_processor_handle processor_handle,
+                                               uint8_t* min_pstate, uint8_t* max_pstate) {
+  amdsmi_status_t status;
+  uint8_t sock_ind;
+  char proc_id[SIZE];
+
+  AMDSMI_CHECK_INIT();
+
+  if (processor_handle == nullptr || min_pstate == nullptr || max_pstate == nullptr)
+    return AMDSMI_STATUS_INVAL;
+
+  amdsmi_status_t proto = check_hsmp_proto_ver_ge7();
+  if (proto != AMDSMI_STATUS_SUCCESS) return proto;
+
+  amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
+  if (r != AMDSMI_STATUS_SUCCESS) return r;
+
+  sock_ind = static_cast<uint8_t>(std::stoi(proc_id, NULL, 0));
+
+  status = static_cast<amdsmi_status_t>(esmi_df_pstate_range_get(sock_ind, min_pstate, max_pstate));
+  if (status != AMDSMI_STATUS_SUCCESS)
+    return amd::smi::esmi_to_amdsmi_status(static_cast<esmi_status_t>(status));
 
   return AMDSMI_STATUS_SUCCESS;
 }

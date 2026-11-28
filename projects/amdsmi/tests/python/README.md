@@ -34,6 +34,7 @@ tests/python/
 ├── common/                 # shared runner + helpers (common.py, runcmd.py)
 ├── unit/                   # pure-logic tests
 │   ├── system/             #   test_bdf.py, test_check_res.py, NIC tests (test_*nic*.py)
+│   ├── cpu/                #   cli_metric_cpu_flags, cpu_getter_handle_validation
 │   └── gpu/                #   apu_metrics, ...
 ├── functional/             # hardware tests (require a live device + root)
 │   ├── gpu/  cpu/  ifoe/  system/
@@ -149,6 +150,7 @@ Notes:
 | :--- | :--- |
 | `AMDSMI_PATH` | Path to the `amd_smi` share dir; overrides `ROCM_HOME`/`ROCM_PATH`. |
 | `ROCM_HOME` | ROCm install root, used when `AMDSMI_PATH` is unset. |
+| `AMDSMI_TEST_ALLOW_HSMP_WRITES` | Set to `1` to run CPU tests that issue real HSMP writes (APB enable/disable, DF P-state range set, XGMI width set); skipped otherwise. |
 | `ROCM_PATH` | Fallback ROCm install root (default `/opt/rocm`). |
 | `NO_COLOR` | If set, disables ANSI colors in the summary (see <https://no-color.org/>). |
 
