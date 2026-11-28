@@ -1734,8 +1734,9 @@ auto with_config_json(const std::string &json, const std::string &schema_text,
                       util::DiagnosticEmitter emit_error, Callback callback) {
   return with_parsed_simulation_config_json(
       json, schema_text, emit_error, [&](const fb::SimulationConfig *config) {
-        if (config->system()) {
-          return with_parsed_simulation_config_json(json, schema_text, emit_error, callback, false);
+        if (config->system() &&
+            load_system_graph_from_string(json, schema_text, emit_error).failed()) {
+          return decltype(callback(config))(util::Result::failure());
         }
         if (config->arithmetic() &&
             validate_arithmetic_config_json(json, schema_text, emit_error).failed()) {

@@ -4,8 +4,11 @@
 #include "rocjitsu/config/system_graph.h"
 
 #include "rocjitsu/config/config_common.h"
+#include "rocjitsu/config/json_fields.h"
 
 #include "simulation_config_generated.h"
+
+#include "flatbuffers/idl.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -30,6 +33,27 @@ util::FailureOr<std::string> required_name(const flatbuffers::String *name, std:
 
 using LocalFabricAdjacency = std::vector<std::vector<size_t>>;
 constexpr size_t kNoEndpoint = std::numeric_limits<size_t>::max();
+
+util::Result validate_system_manifest_json(std::string_view json, const std::string &schema_text,
+                                           util::DiagnosticEmitter emit_error) {
+  auto manifest = json_top_level_field(json, "system", emit_error);
+  if (manifest.failed())
+    return util::Result::failure();
+  if (manifest.value().empty())
+    return util::Result::success();
+
+  flatbuffers::IDLOptions options;
+  options.force_defaults = true;
+  flatbuffers::Parser parser(options);
+  parser.opts.skip_unexpected_fields_in_json = false;
+  if (!parser.Parse(schema_text.c_str()))
+    return emit_error.emit() << "Failed to parse schema: " << parser.error_;
+  if (!parser.SetRootType("rocjitsu.fb.SystemManifestDef"))
+    return emit_error.emit() << "Failed to select system manifest schema root";
+  if (!parser.Parse(manifest.value().c_str()))
+    return emit_error.emit() << "Failed to parse JSON config: " << parser.error_;
+  return util::Result::success();
+}
 
 std::pair<size_t, size_t> edge_key(size_t a, size_t b) { return std::minmax(a, b); }
 
@@ -534,14 +558,11 @@ util::FailureOr<SystemGraph> load_system_graph_from_string(const std::string &js
   if (graph.failed() || !has_manifest) {
     return graph;
   }
-  // Preserve the legacy loader's forward-compatible unknown-field behavior,
+  // Preserve the legacy loader's forward-compatible top-level behavior,
   // but reject misspelled fields within an explicit system manifest.
-  return with_parsed_simulation_config_json(
-      json, schema_text, emit_error,
-      [emit_error](const fb::SimulationConfig *config) {
-        return system_graph_from_fb(config, emit_error);
-      },
-      false);
+  if (validate_system_manifest_json(json, schema_text, emit_error).failed())
+    return util::Result::failure();
+  return graph;
 }
 
 } // namespace rocjitsu::config

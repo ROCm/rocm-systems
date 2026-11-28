@@ -25,6 +25,7 @@
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/config/dbt_guest_config.h"
 #include "rocjitsu/config/effective_config.h"
+#include "rocjitsu/config/system_graph.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
 #include "rocjitsu/kmd/linux/host_mapping_lock.h"
 #include "rocjitsu/kmd/linux/rpc.h"
@@ -52,6 +53,7 @@
 #include <iterator>
 #include <optional>
 #include <poll.h>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -776,6 +778,33 @@ std::vector<char *> argv_pointers(std::vector<std::string> &args) {
   return pointers;
 }
 
+bool reject_hardware_dbt_overrides(const config::LaunchOverrides &overrides) {
+  if (overrides.empty())
+    return false;
+  if (overrides.exec_mode) {
+    std::cerr << "rocjitsu: --exec-mode cannot be combined with hardware-backed dbt_guest\n";
+    return true;
+  }
+  if (overrides.gpus_per_node) {
+    std::cerr << "rocjitsu: --gpus-per-node cannot be combined with hardware-backed dbt_guest\n";
+    return true;
+  }
+  if (!overrides.plugins.empty()) {
+    std::cerr << "rocjitsu: --plugin cannot be combined with hardware-backed dbt_guest\n";
+    return true;
+  }
+  if (overrides.cpu_thread_budget) {
+    std::cerr
+        << "rocjitsu: --cpu-thread-budget cannot be combined with hardware-backed dbt_guest\n";
+    return true;
+  }
+  if (overrides.wait_checking) {
+    std::cerr << "rocjitsu: --wait-checking cannot be combined with hardware-backed dbt_guest\n";
+    return true;
+  }
+  return false;
+}
+
 /// @brief Resolve automatic host selection once for every DBT runtime layer.
 bool resolve_host_gpu(rocjitsu::config::DbtGuestConfig *dbt_guest,
                       const std::vector<KfdGpuOrdinal> &topology,
@@ -842,6 +871,34 @@ dbt_execution_gpu_ordinals(const std::string &dbt_config_path,
   return rocjitsu::launcher::enumerate_kfd_gpus(gpus);
 }
 
+rocjitsu::FailureOr<uint32_t> selected_gpu_count_from_config(const std::string &config_path,
+                                                             util::DiagnosticEmitter emit_error) {
+  rocjitsu::FailureOr<std::string> json =
+      rocjitsu::config::read_config_file(config_path, emit_error);
+  if (json.failed())
+    return util::Result::failure();
+
+  rocjitsu::FailureOr<std::string> local_node =
+      rocjitsu::config::with_parsed_simulation_config_json(
+          json.value(), rocjitsu::kEmbeddedSchema, emit_error,
+          [](const auto *config) -> rocjitsu::FailureOr<std::string> {
+            return config->local_node() ? config->local_node()->str() : std::string{};
+          });
+  if (local_node.failed())
+    return util::Result::failure();
+
+  rocjitsu::FailureOr<rocjitsu::config::SystemGraph> graph =
+      rocjitsu::config::load_system_graph_from_string(json.value(), rocjitsu::kEmbeddedSchema,
+                                                      emit_error);
+  if (graph.failed())
+    return util::Result::failure();
+  rocjitsu::FailureOr<std::span<const rocjitsu::config::SystemGpuInstance>> gpus =
+      graph.value().local_gpus(emit_error, local_node.value());
+  if (gpus.failed())
+    return util::Result::failure();
+  return static_cast<uint32_t>(gpus.value().size());
+}
+
 void print_usage() {
   std::cerr
       << "Usage: rocjitsu [options] -- <app> [args...]\n"
@@ -855,6 +912,9 @@ void print_usage() {
          "  rocjitsu --profile "
       << kDefaultProfile
       << " -- ./app          Run with a bundled profile config\n"
+         "  rocjitsu --exec-mode clocked --thread-budget-table\n"
+         "                                               Inspect clocked launch planning\n"
+         "  rocjitsu --gpus-per-node 2 -- ./app         Set a legacy config GPU count\n"
          "  rocjitsu --daemon --config foo.json -- ./app Daemon mode (fork daemon + launch app)\n"
          "  rocjitsu --daemon --config foo.json          Daemon-only (run server)\n"
          "  rocjitsu --attach default -- ./app           Attach to a running daemon\n"
@@ -871,6 +931,14 @@ void print_usage() {
       << " outside attach mode.\n"
          "  --node <id>      Select one local node from a system manifest. Not available\n"
          "                    with --attach or dbt_guest mode.\n"
+         "  --exec-mode <mode>\n"
+         "                    Override the top-level config exec_mode: functional or clocked.\n"
+         "  --plugin <name>   Require an execution plugin for this launch. If the\n"
+         "                    config has no entry for it, built-in defaults are used.\n"
+         "                    Repeatable.\n"
+         "  --gpus-per-node <n>\n"
+         "                    Set vm.gpu.num_gpus for legacy configs. With a system\n"
+         "                    manifest, the selected node must already have this count.\n"
          "  --daemon         Run a daemon, optionally launching an application.\n"
          "  --attach <id_or_path>\n"
          "                    Attach to an existing daemon target: default, an ID under\n"
@@ -1028,6 +1096,21 @@ int main(int argc, char *argv[]) {
   const bool thread_budget_table = flags.thread_budget_table->value();
 
   config::LaunchOverrides overrides;
+  if (!flags.exec_mode->value().empty()) {
+    if (flags.exec_mode->value() != "functional" && flags.exec_mode->value() != "clocked") {
+      std::cerr << "rocjitsu: --exec-mode requires functional or clocked\n";
+      return 1;
+    }
+    overrides.exec_mode = flags.exec_mode->value();
+  }
+  overrides.plugins = flags.plugin->values();
+  if (flags.gpus_per_node->value()) {
+    if (*flags.gpus_per_node->value() == 0) {
+      std::cerr << "rocjitsu: --gpus-per-node requires a positive integer\n";
+      return 1;
+    }
+    overrides.gpus_per_node = flags.gpus_per_node->value();
+  }
   for (std::string_view assignment : flags.option->values())
     if (!apply_config_option(assignment, overrides))
       return 1;
@@ -1114,6 +1197,22 @@ int main(int argc, char *argv[]) {
 
   // Attaching joins a daemon that already built its machine from its own config,
   // so these overrides cannot change it.
+  if (overrides.exec_mode && attach_mode) {
+    std::cerr << "rocjitsu: --exec-mode cannot be combined with --attach\n";
+    return 1;
+  }
+  if (overrides.gpus_per_node && attach_mode) {
+    std::cerr << "rocjitsu: --gpus-per-node cannot be combined with --attach\n";
+    return 1;
+  }
+  if (!overrides.plugins.empty() && attach_mode) {
+    std::cerr << "rocjitsu: --plugin cannot be combined with --attach\n";
+    return 1;
+  }
+  if (!overrides.plugins.empty() && !vfio_sockets.empty()) {
+    std::cerr << "rocjitsu: --plugin cannot be combined with --vfio-socket\n";
+    return 1;
+  }
   if (overrides.cpu_thread_budget && attach_mode) {
     std::cerr << "rocjitsu: --cpu-thread-budget cannot be combined with --attach\n";
     return 1;
@@ -1298,6 +1397,10 @@ int main(int argc, char *argv[]) {
     std::cerr << "rocjitsu: --node cannot be combined with dbt_guest mode\n";
     return 1;
   }
+  if (dbt_guest_mode &&
+      dbt_guest_config.host.backend == rocjitsu::config::DbtExecutionBackend::Hardware &&
+      reject_hardware_dbt_overrides(overrides))
+    return 1;
   // A dbt_guest simulator_config is resolved relative to the config naming it, and
   // it, not this config, is what the host VM is built from. Moving overrides onto
   // a copy would therefore both break that path and miss the config they must reach.
@@ -1306,6 +1409,21 @@ int main(int argc, char *argv[]) {
     std::cerr << std::format("rocjitsu: --cpu-thread-budget cannot be combined with a dbt_guest "
                              "simulator_config; set cpu_thread_budget in {} instead\n",
                              dbt_guest_config.host.simulator_config_path);
+    return 1;
+  }
+  if (dbt_guest_mode && overrides.exec_mode &&
+      !dbt_guest_config.host.simulator_config_path.empty()) {
+    std::cerr << "rocjitsu: --exec-mode cannot be combined with a dbt_guest simulator_config\n";
+    return 1;
+  }
+  if (dbt_guest_mode && overrides.gpus_per_node &&
+      !dbt_guest_config.host.simulator_config_path.empty()) {
+    std::cerr << "rocjitsu: --gpus-per-node cannot be combined with a dbt_guest simulator_config\n";
+    return 1;
+  }
+  if (dbt_guest_mode && !overrides.plugins.empty() &&
+      !dbt_guest_config.host.simulator_config_path.empty()) {
+    std::cerr << "rocjitsu: --plugin cannot be combined with a dbt_guest simulator_config\n";
     return 1;
   }
   if (dbt_guest_mode && overrides.wait_checking &&
@@ -1318,6 +1436,24 @@ int main(int argc, char *argv[]) {
 
   if (!write_config_for_this_launch())
     return 1;
+
+  if (!dbt_guest_mode && !overrides.plugins.empty() && !abs_config.empty()) {
+    rocjitsu::FailureOr<uint32_t> selected_gpu_count =
+        selected_gpu_count_from_config(abs_config, launch_config_diagnostic.emitter());
+    if (selected_gpu_count.failed()) {
+      std::cerr << std::format("rocjitsu: failed to parse config: {}\n",
+                               launch_config_diagnostic.message());
+      cleanup_runtime_files(invocation_runtime_dir);
+      return 1;
+    }
+    if (selected_gpu_count.value() > 1) {
+      std::cerr << std::format("rocjitsu: --plugin currently supports only one selected GPU; "
+                               "selected node has {} GPUs\n",
+                               selected_gpu_count.value());
+      cleanup_runtime_files(invocation_runtime_dir);
+      return 1;
+    }
+  }
 
   if (!dbt_guest_mode && !abs_config.empty()) {
     try {

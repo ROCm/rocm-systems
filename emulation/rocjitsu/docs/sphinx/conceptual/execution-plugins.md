@@ -2,7 +2,7 @@
 myst:
     html_meta:
         "description": "Execution plugin system in rocjitsu, covering the ExecutionPlugin interface, multi-plugin dispatch, sink configuration, and built-in plugins for race detection and kernel logging."
-        "keywords": "rocjitsu, ROCm, execution plugins, race detection, kernel logging, sink system, RJ_RACE, RJ_LOG, RJ_SINKS, RJ_SINK_DIR"
+        "keywords": "rocjitsu, ROCm, execution plugins, race detection, kernel logging, sink system, plugins, sinks"
 ---
 # Execution plugin system
 
@@ -79,24 +79,22 @@ Three sink types are available:
 |-----------|----------|
 | `stderr` | Writes to standard error (the default). |
 | `stdout` | Writes to standard output. |
-| `file` | Writes to a per-plugin log file inside a specified directory. Each plugin writes to `<RJ_SINK_DIR>/<plugin_name>.log`. |
+| `file` | Writes to a per-plugin log file inside a specified directory. Each plugin writes to `<dir>/<plugin_name>.log`. |
 
-The `RJ_SINKS` environment variable accepts a comma-separated list so
-that multiple sinks can be active at the same time. For example,
-`stderr,file` sends output both to the terminal and to a log file.
+Configure sinks in the rocjitsu JSON config with the `sinks` object. For example,
+`{ "sinks": { "types": ["stderr", "file"], "dir": "/tmp/output" } }` sends
+output both to the terminal and to per-plugin log files.
 
-## Environment variables
+## Enabling plugins
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `RJ_RACE` | unset | Set to `1` to load the race detection plugin. |
-| `RJ_LOG` | unset | Set to `1` to load the kernel logging plugin. |
-| `RJ_SINKS` | `stderr` | Comma-separated list of sink types: `stderr`, `stdout`, `file`. |
-| `RJ_SINK_DIR` | *(none)* | Directory for file sinks. Required when `file` appears in `RJ_SINKS`. |
+Use `--plugin <name>` for launch-time plugin selection, or list plugins in the
+JSON config when they need custom settings. `--plugin` is repeatable and requires
+that each named plugin load successfully for that launch:
 
-
-For a full reference of all rocjitsu environment variables, see
-[Environment variable reference](../reference/environment-variables.md).
+``` bash
+rocjitsu --plugin race -- ./my_app
+rocjitsu --profile mi350x --plugin logging -- ./my_app
+```
 
 ## Built-in plugins
 
@@ -122,11 +120,14 @@ The detector identifies three categories of hazard:
 Detection operates at byte granularity: D16 (half-register) loads flag
 races only on the affected bytes, and LDS races are tracked per byte.
 
-Enable the race detector and direct output to files:
+Enable the race detector and direct output to files by selecting the plugin and configuring a file sink:
+
+``` json
+{ "plugins": { "race": {} }, "sinks": { "types": ["file"], "dir": "/tmp/output" } }
+```
 
 ``` bash
-RJ_RACE=1 RJ_SINKS=file RJ_SINK_DIR=/tmp/output \
-  rocjitsu --config configs/gfx950_mi350x_kmd.json -- ./my_app
+rocjitsu --config configs/gfx950_mi350x_kmd.json -- ./my_app
 # Race reports are written to /tmp/output/race.log
 ```
 
@@ -147,7 +148,7 @@ MMA (matrix multiply-accumulate) instruction usage:
 The plugin name for file sinks is `logging`.
 
 ``` bash
-RJ_LOG=1 rocjitsu --config configs/gfx950_mi350x_kmd.json -- ./my_app
+rocjitsu --plugin logging -- ./my_app
 ```
 
 ## Usage examples
@@ -155,21 +156,27 @@ RJ_LOG=1 rocjitsu --config configs/gfx950_mi350x_kmd.json -- ./my_app
 Interactive use with default stderr output:
 
 ``` bash
-RJ_RACE=1 rocjitsu --config configs/gfx950_mi350x_kmd.json -- ./my_app
+rocjitsu --plugin race -- ./my_app
 ```
 
 Save race reports to files for CI or scripted workflows:
 
+``` json
+{ "plugins": { "race": {} }, "sinks": { "types": ["file"], "dir": "/tmp/output" } }
+```
+
 ``` bash
-RJ_RACE=1 RJ_SINKS=file RJ_SINK_DIR=/tmp/output \
-  rocjitsu --config configs/gfx950_mi350x_kmd.json -- ./my_app
+rocjitsu --config configs/gfx950_mi350x_kmd.json -- ./my_app
 ```
 
 Send output to both stderr and a file simultaneously:
 
+``` json
+{ "plugins": { "race": {} }, "sinks": { "types": ["stderr", "file"], "dir": "/tmp/output" } }
+```
+
 ``` bash
-RJ_RACE=1 RJ_SINKS=stderr,file RJ_SINK_DIR=/tmp/output \
-  rocjitsu --config configs/gfx950_mi350x_kmd.json -- ./my_app
+rocjitsu --config configs/gfx950_mi350x_kmd.json -- ./my_app
 ```
 
 ## Related pages
