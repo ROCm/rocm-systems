@@ -1,0 +1,173 @@
+/*************************************************************************
+ * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * See LICENSE.txt for license information
+ ************************************************************************/
+
+// Host-only microtests for the OpenSSL 3 TLS handshake in src/misc/crypt.cc: with a PSK set, the client
+// completes a handshake only with a peer holding that key.
+
+#include <gtest/gtest.h>
+
+#include <dlfcn.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <sys/socket.h>
+#include <unistd.h>
+
+#include <memory>
+
+#if !defined(NCCL_TLS_BACKEND_OPENSSL3)
+#error "crypt-openssl3-test.cc needs NCCL_TLS_BACKEND_OPENSSL3 (configure with TLS_BACKEND=OPENSSL3)"
+#endif
+
+#include CRYPT_CC_PATH
+
+#include "ScopedHook.h"
+#include "fakes/socket_fakes.h"
+
+int64_t ncclParamPollTimeOut() { return 0; }
+ncclOsLibraryHandle ncclOsDlopen(const char* name) { return dlopen(name, RTLD_NOW | RTLD_LOCAL); }
+void* ncclOsDlsym(ncclOsLibraryHandle handle, const char* symbol) { return dlsym(handle, symbol); }
+void ncclOsDlclose(ncclOsLibraryHandle handle) { if (handle) dlclose(handle); }
+const char* ncclOsDlerror() { const char* err = dlerror(); return err ? err : ""; }
+void ncclOsPollSocket(ncclSocketDescriptor, int) {}
+ncclResult_t ncclOsSocketProgressOpt(int op, struct ncclSocket* sock, void* ptr, int size, int* offset, int,
+                                     int* closed) {
+  char* data = (char*)ptr + *offset;
+  ssize_t n = op == NCCL_SOCKET_RECV ? recv(sock->socketDescriptor, data, size - *offset, MSG_DONTWAIT)
+                                     : send(sock->socketDescriptor, data, size - *offset, MSG_DONTWAIT | MSG_NOSIGNAL);
+  *closed = (n == 0 && op == NCCL_SOCKET_RECV) || (n < 0 && (errno == EPIPE || errno == ECONNRESET));
+  if (n > 0) *offset += n;
+  bool retry = n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR);
+  return n >= 0 || *closed || retry ? ncclSuccess : ncclRemoteError;
+}
+
+namespace {
+
+constexpr int kMaxSteps = 1000;  // a step only moves bytes already queued in the socketpair
+
+void initSocket(struct ncclSocket* sock, int fd) {
+  sock->socketDescriptor = fd;
+  sock->asyncFlag = 1;
+  sock->magic = NCCL_SOCKET_MAGIC;
+  sock->type = ncclSocketTypeBootstrap;
+}
+
+class CryptPskHandshakeTest : public ::testing::Test {
+ protected:
+  int fds_[2] = {-1, -1};  // [0] the NCCL client, [1] its peer
+  struct ncclSocket client_ = {};
+  void* libssl_ = nullptr;
+  HookOf<decltype(g_ncclSocketToString)> socketToString_{
+      g_ncclSocketToString, [](const union ncclSocketAddress*, char* buf, size_t bufLen, int) {
+        snprintf(buf, bufLen, "peer");
+        return static_cast<const char*>(buf);
+      }};
+
+  void SetUp() override {
+    libssl_ = dlopen("libssl.so.3", RTLD_NOW | RTLD_LOCAL);
+    ASSERT_NE(nullptr, libssl_) << "TLS_BACKEND=OPENSSL3 but libssl.so.3 is not loadable: " << dlerror();
+    ncclEncryptionConfig_t config = NCCL_ENCRYPTION_CONFIG_INITIALIZER;
+    config.mode = NCCL_ENCRYPTION_MODE_PSK;
+    config.psk = "crypt-test pre-shared key, at least 32 bytes long";
+    ASSERT_EQ(ncclSuccess, ncclSetEncryption(&config));
+    ASSERT_EQ(0, socketpair(AF_UNIX, SOCK_STREAM, 0, fds_));
+    initSocket(&client_, fds_[0]);
+    ASSERT_EQ(ncclSuccess, ncclCryptStartConnect(&client_));
+    ASSERT_NE(nullptr, client_.crypto) << "a PSK is set, so the connection must be encrypted";
+  }
+
+  void TearDown() override {
+    ncclCryptFree(client_.crypto);
+    for (int fd : fds_) {
+      if (fd >= 0) close(fd);
+    }
+    ncclSetEncryption(nullptr);
+    if (libssl_ != nullptr) dlclose(libssl_);
+  }
+};
+
+// Both ends hold the PSK: the handshake completes and the server accepts the hello.
+TEST_F(CryptPskHandshakeTest, PskPeersConnect) {
+  struct ncclSocket server = {};
+  initSocket(&server, fds_[1]);
+  enum ncclCryptHelloVerdict verdict = NCCL_CRYPT_HELLO_VERDICT_AGAIN;
+  ncclResult_t clientRes = ncclInProgress, serverRes = ncclInProgress;
+  for (int i = 0; i < kMaxSteps && (clientRes == ncclInProgress || serverRes == ncclInProgress); i++) {
+    if (clientRes == ncclInProgress) clientRes = ncclCryptConnectHello(&client_);
+    if (serverRes == ncclInProgress) serverRes = ncclCryptAcceptHello(&server, &verdict);
+  }
+  ncclCryptFree(server.crypto);
+  EXPECT_EQ(ncclSuccess, clientRes);
+  EXPECT_EQ(ncclSuccess, serverRes);
+  EXPECT_EQ(NCCL_CRYPT_HELLO_VERDICT_READY, verdict);
+}
+
+struct ImpostorOutcome {
+  ncclResult_t clientRes = ncclInProgress;
+  bool impostorHandshakeDone = false;
+  int leaked = 0;
+};
+
+// The impostor is a server without the PSK that offers a self-signed certificate instead.
+class CryptImpostorTest : public CryptPskHandshakeTest {
+ protected:
+  void ConnectToImpostor(bool clientSkipsVerification, ImpostorOutcome* out) {
+#define CRYPT_TEST_SYMBOLS(X) \
+  X(EVP_PKEY_Q_keygen) X(EVP_PKEY_free) X(EVP_sha256) X(X509_new) X(X509_free) X(X509_get_serialNumber) \
+  X(ASN1_INTEGER_set) X(X509_getm_notBefore) X(X509_getm_notAfter) X(X509_gmtime_adj) X(X509_set_pubkey) \
+  X(X509_sign) X(TLS_server_method) X(SSL_CTX_new) X(SSL_CTX_free) X(SSL_CTX_use_certificate) \
+  X(SSL_CTX_use_PrivateKey) X(SSL_new) X(SSL_free) X(SSL_set_fd) X(SSL_accept) X(SSL_read) X(SSL_set_verify)
+#define CRYPT_TEST_LOAD(name) \
+  auto name = (decltype(&::name))dlsym(libssl_, #name); \
+  ASSERT_TRUE(name != nullptr) << #name;
+    CRYPT_TEST_SYMBOLS(CRYPT_TEST_LOAD)
+#undef CRYPT_TEST_LOAD
+#undef CRYPT_TEST_SYMBOLS
+    if (clientSkipsVerification) SSL_set_verify(client_.crypto->ssl, SSL_VERIFY_NONE, nullptr);
+    std::unique_ptr<EVP_PKEY, decltype(EVP_PKEY_free)> key(EVP_PKEY_Q_keygen(nullptr, nullptr, "EC", "P-256"),
+                                                          EVP_PKEY_free);
+    std::unique_ptr<X509, decltype(X509_free)> cert(X509_new(), X509_free);
+    std::unique_ptr<SSL_CTX, decltype(SSL_CTX_free)> ctx(SSL_CTX_new(TLS_server_method()), SSL_CTX_free);
+    ASSERT_TRUE(key && cert && ctx);
+    // Without validity times the certificate does not parse and no client would accept it.
+    ASN1_INTEGER_set(X509_get_serialNumber(cert.get()), 1);
+    X509_gmtime_adj(X509_getm_notBefore(cert.get()), 0);
+    X509_gmtime_adj(X509_getm_notAfter(cert.get()), 3600);
+    ASSERT_EQ(1, X509_set_pubkey(cert.get(), key.get()));
+    ASSERT_GT(X509_sign(cert.get(), key.get(), EVP_sha256()), 0);
+    ASSERT_EQ(1, SSL_CTX_use_certificate(ctx.get(), cert.get()));
+    ASSERT_EQ(1, SSL_CTX_use_PrivateKey(ctx.get(), key.get()));
+    std::unique_ptr<SSL, decltype(SSL_free)> impostor(SSL_new(ctx.get()), SSL_free);
+    ASSERT_TRUE(impostor);
+    ASSERT_EQ(0, fcntl(fds_[1], F_SETFL, O_NONBLOCK));
+    ASSERT_EQ(1, SSL_set_fd(impostor.get(), fds_[1]));
+
+    for (int i = 0; i < kMaxSteps && !out->impostorHandshakeDone; i++) {
+      if (out->clientRes == ncclInProgress) out->clientRes = ncclCryptConnectHello(&client_);
+      out->impostorHandshakeDone = SSL_accept(impostor.get()) == 1;
+    }
+    char hello[NCCL_SOCKET_PLAIN_HELLO_BYTES];
+    out->leaked = SSL_read(impostor.get(), hello, sizeof(hello));
+  }
+};
+
+// The client context's SSL_VERIFY_PEER refuses the impostor's certificate mid-handshake.
+TEST_F(CryptImpostorTest, ClientRejectsServerWithoutPsk) {
+  ImpostorOutcome out;
+  ASSERT_NO_FATAL_FAILURE(ConnectToImpostor(false, &out));
+  EXPECT_EQ(ncclRemoteError, out.clientRes) << "the client completed a TLS handshake that did not use the PSK";
+  EXPECT_FALSE(out.impostorHandshakeDone) << "the client accepted the impostor's certificate";
+  EXPECT_LE(out.leaked, 0) << "a server without the PSK decrypted the client's socket hello";
+}
+
+// Even when certificate verification is off, a completed handshake that did not use the PSK is refused.
+TEST_F(CryptImpostorTest, ClientRejectsNonPskHandshakeWithoutVerification) {
+  ImpostorOutcome out;
+  ASSERT_NO_FATAL_FAILURE(ConnectToImpostor(true, &out));
+  EXPECT_EQ(ncclRemoteError, out.clientRes) << "the client completed a TLS handshake that did not use the PSK";
+  EXPECT_LE(out.leaked, 0) << "a server without the PSK decrypted the client's socket hello";
+}
+
+}  // namespace
