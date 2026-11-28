@@ -4,6 +4,7 @@
 // gfx1250 BF16 math checks inherited FP32 behavior, truncation, modifiers and storage.
 
 #include "common/cpu.h"
+#include "common/floating_point.h"
 #include "rj_arith/detail/rj_arith_common.h"
 #include "rj_arith/detail/rj_arith_math.h"
 #include <array>
@@ -93,7 +94,16 @@ void check(Call call, Call reference) {
                                       ? (before[lane] & (high ? 0xffffU : 0xffff0000U)) |
                                             (uint32_t(half) << (high ? 16 : 0))
                                       : before[lane];
-              EXPECT_EQ(d[0][lane], expected) << "lane " << lane;
+              if (semantics != RJ_ARITH_SEMANTICS_COMPATIBILITY && (exec_mask & (1U << lane))) {
+                const int shift = high ? 16 : 0;
+                expect_f32(((d[0][lane] >> shift) & 0xffffU) << 16,
+                           std::bit_cast<float>(uint32_t(half) << 16), RJ_ARITH_SEMANTICS_LOOSE,
+                           /*atol=*/2e-38, /*rtol=*/1e-2);
+                EXPECT_EQ(d[0][lane] & (high ? 0xffffU : 0xffff0000U),
+                          before[lane] & (high ? 0xffffU : 0xffff0000U));
+              } else {
+                EXPECT_EQ(d[0][lane], expected) << "lane " << lane;
+              }
             }
           }
         }

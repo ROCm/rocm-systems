@@ -41,6 +41,17 @@ inline uint32_t frexp_mant_f32_bits(uint32_t bits, bool flush_input) {
 
 // Return the selected loose unary math result for one value or vector of values.
 template <Unary Op> inline float unary_value(float value) {
+  if constexpr (Op == Unary::Sqrt || Op == Unary::Rsq || Op == Unary::Log) {
+    // GPU arithmetic needs a NaN result, not libm's slow domain-error/errno path.
+    if (value < 0) {
+      return as_float(0xffc00000U);
+    }
+    if constexpr (Op == Unary::Log) {
+      if (value == 0) {
+        return as_float(0xff800000U);
+      }
+    }
+  }
   if constexpr (Op == Unary::FrexpMant) {
     return as_float(frexp_mant_f32_bits(as_bits(value), false));
   }

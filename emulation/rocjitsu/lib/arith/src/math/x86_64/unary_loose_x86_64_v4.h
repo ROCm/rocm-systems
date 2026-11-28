@@ -1,19 +1,21 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// AVX-512 forms of the existing AVX2 Loose EXP2/LOG2 polynomials.
-// Inputs are widened halves: finite nonzero values are normal FP32 numbers.
+// AVX-512 native reciprocal/roots and shared Loose EXP2/LOG2 polynomials.
+// LOG inputs are normal FP32 numbers, widened halves, zeros or special values.
 #pragma once
 
 #include "common/isa.h"
+#include "math/unary.h"
 #include <immintrin.h>
 #include <stdint.h>
 
 namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE {
 
-// Approximate EXP2 for widened halves, retaining infinities and NaN classification.
-inline __m512 half_exp2_loose(__m512 input) {
-  auto x = _mm512_min_ps(_mm512_max_ps(input, _mm512_set1_ps(-64)), _mm512_set1_ps(64));
+// Approximate EXP2, retaining infinities/NaNs and the destination's useful exponent range.
+template <bool Half> inline __m512 exp2_loose(__m512 input) {
+  auto x = _mm512_min_ps(_mm512_max_ps(input, _mm512_set1_ps(Half ? -64 : -126)),
+                         _mm512_set1_ps(Half ? 64 : 128));
   auto exponent = _mm512_roundscale_ps(x, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
   auto r = _mm512_sub_ps(x, exponent);
   // Same reduced Taylor polynomial and evaluation order as the AVX2 path.
@@ -25,9 +27,21 @@ inline __m512 half_exp2_loose(__m512 input) {
   p = _mm512_fmadd_ps(p, r, _mm512_set1_ps(0.2402265069591007f));
   p = _mm512_fmadd_ps(p, r, _mm512_set1_ps(0.6931471805599453f));
   p = _mm512_fmadd_ps(p, r, _mm512_set1_ps(1));
+  if constexpr (!Half) {
+    // Keep the power-of-two scale finite at exponent 128, as in the AVX2 polynomial.
+    const auto high = _mm512_cmp_ps_mask(exponent, _mm512_set1_ps(127), _CMP_GT_OQ);
+    exponent = _mm512_min_ps(exponent, _mm512_set1_ps(127));
+    p = _mm512_mask_add_ps(p, high, p, p);
+  }
   auto scale = _mm512_castsi512_ps(_mm512_slli_epi32(
       _mm512_add_epi32(_mm512_cvttps_epi32(exponent), _mm512_set1_epi32(127)), 23));
   auto result = _mm512_mul_ps(p, scale);
+  if constexpr (!Half) {
+    result = _mm512_mask_mov_ps(result, _mm512_cmp_ps_mask(input, _mm512_set1_ps(-126), _CMP_LT_OQ),
+                                _mm512_setzero_ps());
+    result = _mm512_mask_mov_ps(result, _mm512_cmp_ps_mask(input, _mm512_set1_ps(128), _CMP_GE_OQ),
+                                _mm512_castsi512_ps(_mm512_set1_epi32(0x7f800000)));
+  }
   auto infinity = _mm512_castsi512_ps(_mm512_set1_epi32(0x7f800000));
   auto negative_infinity = _mm512_castsi512_ps(_mm512_set1_epi32(0xff800000U));
   result = _mm512_mask_mov_ps(result, _mm512_cmp_ps_mask(input, negative_infinity, _CMP_EQ_OQ),
@@ -37,8 +51,8 @@ inline __m512 half_exp2_loose(__m512 input) {
   return _mm512_mask_mov_ps(result, special, input);
 }
 
-// Approximate LOG2 for widened halves; zero gives -Inf and negative inputs NaN.
-inline __m512 half_log2_loose(__m512 input) {
+// Approximate LOG2 for normal FP32 inputs; zero gives -Inf and negative inputs NaN.
+inline __m512 log2_loose(__m512 input) {
   auto bits = _mm512_castps_si512(input);
   auto magnitude = _mm512_and_si512(bits, _mm512_set1_epi32(INT32_MAX));
   auto exponent = _mm512_sub_epi32(_mm512_srli_epi32(magnitude, 23), _mm512_set1_epi32(127));
@@ -64,6 +78,22 @@ inline __m512 half_log2_loose(__m512 input) {
   result = _mm512_mask_mov_ps(result, invalid, _mm512_castsi512_ps(_mm512_set1_epi32(0x7fc00000)));
   return _mm512_mask_mov_ps(result, _mm512_cmpeq_epi32_mask(magnitude, _mm512_setzero_si512()),
                             _mm512_castsi512_ps(_mm512_set1_epi32(0xff800000U)));
+}
+
+// Evaluate native FP32 math; the caller handles fixed denormal and destination policies.
+template <Unary Op> inline __m512 unary_loose_value(__m512 input) {
+  if constexpr (Op == Unary::Rcp) {
+    return _mm512_div_ps(_mm512_set1_ps(1), input);
+  } else if constexpr (Op == Unary::Sqrt) {
+    return _mm512_sqrt_ps(input);
+  } else if constexpr (Op == Unary::Rsq) {
+    return _mm512_div_ps(_mm512_set1_ps(1), _mm512_sqrt_ps(input));
+  } else if constexpr (Op == Unary::Exp) {
+    return exp2_loose<false>(input);
+  } else {
+    static_assert(Op == Unary::Log);
+    return log2_loose(input);
+  }
 }
 
 } // namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE

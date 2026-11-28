@@ -11,6 +11,7 @@
 #include "math/rcp_iflag.h"
 #include "common/sdwa_dispatch.h"
 #include "common/validation.h"
+#include "math/unary.h"
 #include "math/unary_exact.h"
 #include "math/x86_64/rcp_exact.h"
 #include "register/dpp.h"
@@ -75,9 +76,11 @@ int rcp_iflag(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const
       }
       generated = zeros & exec_mask ? RJ_ARITH_EXCEPTION_INT_DIV0 : 0;
     }
+#if defined(RJ_ARITH_HAVE_X86_64_V3) || defined(RJ_ARITH_HAVE_X86_64_V4)
     // gfx942/gfx12 always quiet NaNs; gfx11 and gfx950 quiet only with IEEE set. OMOD is already
     // applied. Reuse the same integer reciprocal model without reapplying that gating.
     const bool quiet_snan = !Rdna3 || (Cdna && !Gfx950) || (flags & RJ_ARITH_FP_IEEE_MODE);
+#endif
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
     if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
       rocjitsu::arith::rcp_exact_x86_64_v4(flags, exec_mask, uint32_t(mode), d[0], a[0],
@@ -115,7 +118,8 @@ int rcp_iflag(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const
   }
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
   if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
-    rocjitsu::arith::rcp_iflag_x86_64_v4(flags, exec_mask, mode, d[0], a[0]);
+    rocjitsu::arith::unary_loose_x86_64_v4<rocjitsu::arith::Unary::Rcp>(flags, exec_mask, mode,
+                                                                        d[0], a[0]);
     return RJ_ARITH_SUCCESS;
   }
 #endif

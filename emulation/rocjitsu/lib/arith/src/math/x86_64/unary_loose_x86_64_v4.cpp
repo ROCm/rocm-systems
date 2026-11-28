@@ -1,22 +1,23 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// AVX-512 loose reciprocal with fixed denormal flushing and output modifiers.
+// AVX-512 Loose reciprocal, roots and EXP/LOG with shared modifiers and publication.
 // CPU-specific arithmetic stays here; public entry points select this backend.
 
-#include "math/rcp_iflag.h"
-#include "rj_arith/detail/rj_arith_math.h"
+#include "math/x86_64/unary_loose_x86_64_v4.h"
+#include "math/unary.h"
+#include "rj_arith/detail/rj_arith_common.h"
 
 #include <immintrin.h>
 #include <stdint.h>
 
 namespace rocjitsu::arith {
 
-// Loose reciprocal with fixed input/output denormal flushing and no FP status.
-// Preserve inactive lanes and support D/A aliasing.
-// Requires the named CPU features and validated instruction controls.
-void rcp_iflag_x86_64_v4(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *d,
-                         const uint32_t *a) {
+// Apply native math with fixed denormal flushing and validated source/output modifiers.
+// Preserve inactive lanes and D/A aliases; produce no FP status.
+template <Unary Op>
+void unary_loose_x86_64_v4(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *d,
+                           const uint32_t *a) {
   auto exponent = _mm512_set1_epi32(0x7f800000), sign = _mm512_set1_epi32(int(0x80000000u)),
        zero = _mm512_setzero_si512();
   auto keep = _mm512_set1_epi32(mode & RJ_ARITH_ALU_ABS_A ? 0x7fffffff : -1),
@@ -28,7 +29,8 @@ void rcp_iflag_x86_64_v4(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint
     auto tiny = _mm512_cmpeq_epi32_mask(_mm512_and_si512(raw, exponent), zero);
     raw = _mm512_xor_si512(_mm512_and_si512(raw, keep), flip);
     raw = _mm512_mask_blend_epi32(tiny, raw, _mm512_and_si512(raw, sign));
-    auto value = _mm512_div_ps(_mm512_set1_ps(1), _mm512_castsi512_ps(raw));
+    auto input = _mm512_castsi512_ps(raw);
+    auto value = unary_loose_value<Op>(input);
     auto bits = _mm512_castps_si512(value);
     bits = _mm512_mask_blend_epi32(_mm512_cmpeq_epi32_mask(_mm512_and_si512(bits, exponent), zero),
                                    bits, _mm512_and_si512(bits, sign));
@@ -55,5 +57,16 @@ void rcp_iflag_x86_64_v4(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint
     _mm512_mask_storeu_epi32(d + lane, __mmask16(exec_mask >> lane), bits);
   }
 }
+
+template void unary_loose_x86_64_v4<Unary::Rcp>(uint64_t, uint32_t, uint32_t, uint32_t *,
+                                                const uint32_t *);
+template void unary_loose_x86_64_v4<Unary::Rsq>(uint64_t, uint32_t, uint32_t, uint32_t *,
+                                                const uint32_t *);
+template void unary_loose_x86_64_v4<Unary::Sqrt>(uint64_t, uint32_t, uint32_t, uint32_t *,
+                                                 const uint32_t *);
+template void unary_loose_x86_64_v4<Unary::Exp>(uint64_t, uint32_t, uint32_t, uint32_t *,
+                                                const uint32_t *);
+template void unary_loose_x86_64_v4<Unary::Log>(uint64_t, uint32_t, uint32_t, uint32_t *,
+                                                const uint32_t *);
 
 } // namespace rocjitsu::arith

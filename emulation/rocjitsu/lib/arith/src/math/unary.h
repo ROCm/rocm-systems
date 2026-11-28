@@ -32,6 +32,12 @@ void round_exact_x86_64_v3(Unary op, uint32_t exec_mask, uint32_t mode, uint32_t
 #endif
 
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
+// Native RCP/RSQ/SQRT and EXP/LOG polynomials with fixed denormal flushing and modifiers.
+// Requires validated controls and x86-64-v4; preserve aliases/inactive lanes, no FP status.
+template <Unary Op>
+void unary_loose_x86_64_v4(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *d,
+                           const uint32_t *a);
+
 // Exact FP32 TRUNC/CEIL/FLOOR/RNDNE, including signed zero and NaN policy.
 // Preserve inactive lanes and D/A aliases. Requires x86-64-v4 and valid controls.
 void round_exact_x86_64_v4(Unary op, uint32_t exec_mask, uint32_t mode, uint32_t *d,

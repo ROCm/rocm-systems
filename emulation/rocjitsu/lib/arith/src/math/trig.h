@@ -17,7 +17,13 @@ void sin_exact_x86_64_v4(uint32_t *d, const uint32_t *a, unsigned denorm, bool q
 
 // Evaluate FP32 sine/cosine. Preserve destination lanes outside exec_mask.
 // Requires the named CPU features and validated instruction controls.
-void trig_x86_64_v3(bool cosine, uint32_t exec_mask, uint32_t mode, uint32_t *d, const uint32_t *a);
+void trig_x86_64_v3(bool cosine, uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *d,
+                    const uint32_t *a);
+
+// Native FP32 sine/cosine with guest denormal/NaN/output policy at AVX-512 width.
+// Requires validated controls and v4; preserve aliases and inactive destination lanes.
+void trig_loose_x86_64_v4(bool cosine, uint64_t flags, uint32_t exec_mask, uint32_t mode,
+                          uint32_t *d, const uint32_t *a);
 
 // Evaluate FP32 sine/cosine. Preserve destination lanes outside exec_mask.
 // Requires the named CPU features and validated instruction controls.

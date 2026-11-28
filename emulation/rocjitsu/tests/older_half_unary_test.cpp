@@ -374,9 +374,11 @@ TEST(OlderHalfUnary, Bindings) {
                   result = uint16_t(exponent);
                 } else {
                   const unsigned denorm = wave->fp_denorm_mode_f16_f64();
-                  // Native half math ignores guest rounding; rounding/decomposition does not.
+                  // Compare the same semantics: Loose may ignore directed intermediate
+                  // rounding. Native half math also ignores guest ROUND in Compatibility.
                   uint64_t flags =
-                      RJ_ARITH_SEMANTICS_COMPATIBILITY |
+                      (semantics == ArithmeticSemantics::Loose ? RJ_ARITH_SEMANTICS_LOOSE
+                                                               : RJ_ARITH_SEMANTICS_COMPATIBILITY) |
                       (op >= 6 && op <= 12 ? 0 : uint64_t(wave->fp_round_mode_f16_f64()) << 24);
                   flags |= (denorm & 1) ? 0 : RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
                   flags |= (denorm & 2) ? 0 : RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;

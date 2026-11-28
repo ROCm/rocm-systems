@@ -69,47 +69,6 @@ uint32_t output(uint32_t bits, uint32_t mode, bool preserve_nan) {
   return bits;
 }
 
-// Compute loose results with guest denormal and NaN policies, consuming all
-// inputs before writing any destination.
-#if defined(RJ_ARITH_HAVE_X86_64_V3)
-// Evaluate loose sine/cosine with guest denormal controls and output modifiers; preserve
-// inactive lanes.
-template <bool Rdna3, bool Cosine>
-[[gnu::noinline]] void loose_policy(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *d,
-                                    const uint32_t *a) {
-  uint32_t input[32], result[32];
-  for (int lane = 0; lane < 32; ++lane) {
-    uint32_t bits = a[lane];
-    if (mode & RJ_ARITH_ALU_ABS_A) {
-      bits &= 0x7fffffff;
-    }
-    if (mode & RJ_ARITH_ALU_NEG_A) {
-      bits ^= 0x80000000;
-    }
-    if ((flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS) && (bits & 0x7fffffff) < 0x800000) {
-      bits &= 0x80000000;
-    }
-    input[lane] = bits;
-  }
-  rocjitsu::arith::trig_x86_64_v3(Cosine, UINT32_MAX, 0, result, input);
-  for (int lane = 0; lane < 32; ++lane) {
-    uint32_t bits = result[lane];
-    if constexpr (Rdna3) {
-      if ((input[lane] & 0x7fffffff) > 0x7f800000) {
-        bits = input[lane] | (flags & RJ_ARITH_FP_IEEE_MODE ? 0x400000 : 0);
-      }
-    }
-    if ((flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) && (bits & 0x7fffffff) < 0x800000) {
-      bits &= 0x80000000;
-    }
-    if ((exec_mask >> lane) & 1) {
-      d[lane] = output<Rdna3, Cosine>(bits, mode, flags & RJ_ARITH_FP_DX10_CLAMP_OFF);
-    }
-  }
-}
-
-#endif
-
 // Evaluate an unmodified wave in linear lane order. A whole-register alias
 // is safe because each output depends only on the corresponding input.
 template <bool Cosine>
@@ -169,15 +128,19 @@ int trig(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d,
   if (!exec_mask) {
     return RJ_ARITH_SUCCESS;
   }
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+  if (!rocjitsu::arith::is_exact(flags) &&
+      rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+    rocjitsu::arith::trig_loose_x86_64_v4(Cosine, flags | (Rdna3 ? 0 : RJ_ARITH_FP_IEEE_MODE),
+                                          exec_mask, uint32_t(mode), d[0], a[0]);
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
-  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3) &&
-      !rocjitsu::arith::is_exact(flags)) {
-    if (Rdna3 ||
-        (flags & (RJ_ARITH_FP_FLUSH_INPUT_DENORMALS | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS))) {
-      loose_policy<Rdna3, Cosine>(flags, exec_mask, mode, d[0], a[0]);
-    } else {
-      rocjitsu::arith::trig_x86_64_v3(Cosine, exec_mask, mode, d[0], a[0]);
-    }
+  if (!rocjitsu::arith::is_exact(flags) &&
+      rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+    rocjitsu::arith::trig_x86_64_v3(Cosine, flags | (Rdna3 ? 0 : RJ_ARITH_FP_IEEE_MODE), exec_mask,
+                                    uint32_t(mode), d[0], a[0]);
     return RJ_ARITH_SUCCESS;
   }
 #endif

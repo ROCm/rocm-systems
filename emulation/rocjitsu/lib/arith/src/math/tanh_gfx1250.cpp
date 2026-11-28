@@ -44,6 +44,19 @@ int run(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d,
   if (!exec_mask) {
     return RJ_ARITH_SUCCESS;
   }
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+  if (!compatibility && cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+    tanh_loose_x86_64_v4<Half>(exec_mask, uint32_t(mode), d[0], a[0]);
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+  if (!compatibility && cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+    tanh_loose_x86_64_v3<Half>(exec_mask, uint32_t(mode), d[0], a[0]);
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
+  (void)compatibility;
   uint32_t result[32]{};
   for (int lane = 0; lane < 32; ++lane) {
     if (!(exec_mask & (1U << lane))) {
@@ -61,25 +74,11 @@ int run(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d,
     }
     result[lane] = bits;
   }
-  bool vectorized = false;
-#if defined(RJ_ARITH_HAVE_X86_64_V4)
-  if (!compatibility && cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
-    tanh_loose_x86_64_v4(result, result);
-    vectorized = true;
-  }
-#endif
-#if defined(RJ_ARITH_HAVE_X86_64_V3)
-  if (!compatibility && !vectorized && cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
-    tanh_loose_x86_64_v3(result, result);
-    vectorized = true;
-  }
-#endif
-  (void)compatibility;
   for (int lane = 0; lane < 32; ++lane) {
     if (!(exec_mask & (1U << lane))) {
       continue;
     }
-    uint32_t bits = vectorized ? result[lane] : tanh_bits(result[lane]);
+    uint32_t bits = tanh_bits(result[lane]);
     if constexpr (Half) {
       // Legacy VOP3 narrows to nearest before scaling the architectural half.
       bits = float_to_f16(as_float(bits), flags & RJ_ARITH_FP16_OVFL);
