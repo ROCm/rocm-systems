@@ -118,6 +118,7 @@ test_categories:
       - "GinPluginInitFail.*"
       - "TunerPluginConstants.*"
       - "CpuAffinity.*"
+      - "TransportEncryption.*"
       - "DdaReduceScatterFabricLL.*"
       - "DdaReduceScatterFabricSpreadLL.*"
       - "DdaAllReduceFabricLL.*"
