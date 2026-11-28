@@ -651,6 +651,7 @@ struct doubly_linked_entry_t : private not_copyable_t
     m_next->m_prev = this;
     m_prev->m_next = this;
     rhs.m_next = rhs.m_prev = nullptr;
+    return *this;
   }
 
   doubly_linked_entry_t () = default;
@@ -754,6 +755,7 @@ public:
         m_head.m_prev->m_next = &m_head;
         m_element_count = rhs.m_element_count;
       }
+    return *this;
   }
 
   size_t size () const { return m_element_count; }
