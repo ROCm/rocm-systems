@@ -26,6 +26,7 @@
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/kfd/resource.hpp"
+#include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <atomic>
 #include <cstring>
@@ -98,7 +99,7 @@ att_signal_t::att_signal_t(const std::shared_ptr<kfd_memory_pool_t>& kfd_memory)
 
 att_signal_t::~att_signal_t()
 {
-    if(_kfd_signal || _hsa_signal.handle == 0) return;
+    if(_kfd_signal || _hsa_signal.handle == 0 || registration::get_fini_status() > 0) return;
     wait();
     auto status = CHECK_NOTNULL(hsa::get_core_table())->hsa_signal_destroy_fn(_hsa_signal);
     ROCP_CI_LOG_IF(WARNING, status != HSA_STATUS_SUCCESS)
@@ -153,17 +154,19 @@ att_queue_ptr_t
 make_att_queue(rocprofiler_agent_id_t             agent_id,
                size_t                             buffer_size,
                size_t                             num_buffers,
-               std::shared_ptr<kfd_memory_pool_t> kfd_memory)
+               std::shared_ptr<kfd_memory_pool_t> kfd_memory,
+               size_t                             max_copy_size)
 {
-    auto  result      = std::make_unique<att_queue_t>();
-    auto& queue       = *result;
-    queue.agent_id    = agent_id;
-    queue.buffer_size = buffer_size;
-    queue.kfd_memory  = std::move(kfd_memory);
+    const size_t copy_size = max_copy_size > 0 ? max_copy_size : buffer_size;
+
+    auto  result     = std::make_unique<att_queue_t>();
+    auto& queue      = *result;
+    queue.agent_id   = agent_id;
+    queue.kfd_memory = std::move(kfd_memory);
 
     if(queue.kfd_memory)
     {
-        queue.kfd_copy_queue = kfd_copy_queue_t::create(queue.kfd_memory, buffer_size);
+        queue.kfd_copy_queue = kfd_copy_queue_t::create(queue.kfd_memory, copy_size);
         if(!queue.kfd_copy_queue) return nullptr;
         queue.submit_fn = kfd_submit;
         queue.cpu_buffers.resize(num_buffers, nullptr);
@@ -210,25 +213,39 @@ make_att_queue(rocprofiler_agent_id_t             agent_id,
 att_queue_t::~att_queue_t()
 {
     copy_signal.reset();
+    att_queue_close(*this);
+    if(kfd_copy_queue) kfd_copy_queue->close();
     if(kfd_memory)
     {
-        if(kfd_copy_queue) kfd_copy_queue->close();
         for(auto* memory : cpu_buffers)
             kfd_memory->deallocate(memory);
     }
-    else
+    else if(registration::get_fini_status() <= 0)
     {
-        auto* core   = CHECK_NOTNULL(hsa::get_core_table());
-        auto* ext    = CHECK_NOTNULL(hsa::get_amd_ext_table());
-        auto  status = hsa_queue ? core->hsa_queue_destroy_fn(hsa_queue) : HSA_STATUS_SUCCESS;
-        ROCP_CI_LOG_IF(WARNING, status != HSA_STATUS_SUCCESS)
-            << "Failed to destroy thread trace queue";
+        auto* ext = CHECK_NOTNULL(hsa::get_amd_ext_table());
         for(auto* memory : cpu_buffers)
         {
-            status = ext->hsa_amd_memory_pool_free_fn(memory);
+            auto status = ext->hsa_amd_memory_pool_free_fn(memory);
             ROCP_CI_LOG_IF(WARNING, status != HSA_STATUS_SUCCESS)
                 << "Failed to free thread trace memory";
         }
+    }
+}
+
+void
+att_queue_close(att_queue_t& queue)
+{
+    hsa_queue_t* retired = nullptr;
+    {
+        auto lock       = std::unique_lock{queue.submit_mutex};
+        queue.submit_fn = nullptr;
+        retired         = std::exchange(queue.hsa_queue, nullptr);
+    }
+    if(retired && registration::get_fini_status() <= 0)
+    {
+        auto status = CHECK_NOTNULL(hsa::get_core_table())->hsa_queue_destroy_fn(retired);
+        ROCP_CI_LOG_IF(WARNING, status != HSA_STATUS_SUCCESS)
+            << "Failed to destroy thread trace queue";
     }
 }
 

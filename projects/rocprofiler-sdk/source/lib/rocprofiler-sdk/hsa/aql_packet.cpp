@@ -24,9 +24,11 @@
 #include "lib/common/logging.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/kfd/resource.hpp"
+#include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/spm/decode.hpp"
 #include "lib/rocprofiler-sdk/spm/interface.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/dl.hpp"
+#include "lib/rocprofiler-sdk/thread_trace/shared_trace_resources.hpp"
 
 #include <fmt/format.h>
 #include <cstddef>
@@ -155,43 +157,52 @@ TraceMemoryPool::Alloc(void** ptr, size_t size, desc_t flags, void* data)
     if(!data) return HSA_STATUS_ERROR;
     auto& pool = *reinterpret_cast<TraceMemoryPool*>(data);
 
+    if(!flags.host_access)
+    {
+        // Device (SQTT output) buffer: borrowed from the per-agent resource handle,
+        // which owns the backing allocation for both the KFD and ROCr backends.
+        *ptr = pool.allocate_output(size);
+        return (*ptr != nullptr) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+    }
+
     if(pool.kfd_memory)
     {
-        *ptr = pool.kfd_memory->allocate(
-            size,
-            flags.host_access ? kfd::kfd_memory_kind_t::host : kfd::kfd_memory_kind_t::device);
+        *ptr = pool.kfd_memory->allocate(size, kfd::kfd_memory_kind_t::host);
         return (*ptr || size == 0) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_OUT_OF_RESOURCES;
     }
 
     if(!pool.allocate_fn || !pool.free_fn || !pool.allow_access_fn) return HSA_STATUS_ERROR;
 
-    auto status = HSA_STATUS_ERROR;
-    if(flags.host_access)
-    {
-        status = pool.allocate_fn(pool.cpu_pool_, size, hsa_amd_memory_pool_executable_flag, ptr);
-        if(status == HSA_STATUS_SUCCESS)
-            status = pool.allow_access_fn(1, &pool.gpu_agent, nullptr, *ptr);
-    }
-    else
-    {
-        status = pool.allocate_fn(
-            pool.gpu_pool_, size + 0x2000, hsa_amd_memory_pool_executable_flag, ptr);
-        // NOLINTNEXTLINE(performance-no-int-to-ptr)
-        *ptr = reinterpret_cast<void*>((reinterpret_cast<uintptr_t>(*ptr) + 0xFFF) & ~0xFFFul);
-    }
+    auto status = pool.allocate_fn(pool.cpu_pool_, size, hsa_amd_memory_pool_executable_flag, ptr);
+    if(status == HSA_STATUS_SUCCESS)
+        status = pool.allow_access_fn(1, &pool.gpu_agent, nullptr, *ptr);
     return status;
 }
 
 void
 TraceMemoryPool::Free(void* ptr, void* data)
 {
+    if(ptr == nullptr) return;
+
     assert(data);
     auto& pool = *reinterpret_cast<TraceMemoryPool*>(data);
 
+    // Output buffers are borrowed from the retained per-agent resource handle.
+    // AQLProfile still invokes this callback for them, so skip the per-packet free.
+    if(pool.resources && pool.resources->owns_output_buffer(ptr)) return;
+
     if(pool.kfd_memory)
         pool.kfd_memory->deallocate(ptr);
-    else if(pool.free_fn)
+    else if(pool.free_fn && registration::get_fini_status() <= 0)
         pool.free_fn(ptr);
+}
+
+void*
+TraceMemoryPool::allocate_output(size_t requested_size)
+{
+    auto* resources_ptr = CHECK_NOTNULL(resources.get());
+    auto  allocator     = thread_trace::rocr_output_allocator_t{gpu_pool_, allocate_fn, free_fn};
+    return resources_ptr->acquire_output_buffer(allocator, output_buffer_index++, requested_size);
 }
 
 hsa_status_t

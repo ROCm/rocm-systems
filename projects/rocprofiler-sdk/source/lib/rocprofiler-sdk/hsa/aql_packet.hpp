@@ -25,6 +25,7 @@
 #include "lib/aqlprofile/aqlprofile.hpp"
 #include "lib/common/container/small_vector.hpp"
 #include "lib/common/synchronized.hpp"
+#include "lib/rocprofiler-sdk/thread_trace/shared_trace_resources.hpp"
 
 #include <rocprofiler-sdk/experimental/spm.h>
 #include <rocprofiler-sdk/hsa.h>
@@ -35,6 +36,8 @@
 
 #include <atomic>
 #include <cstddef>
+#include <cstdint>
+#include <memory>
 #include <optional>
 
 namespace rocprofiler
@@ -197,15 +200,23 @@ struct TraceMemoryPool
     decltype(hsa_amd_memory_pool_free)*     free_fn{};
     decltype(hsa_memory_copy)*              api_copy_fn{};
 
-    std::shared_ptr<kfd::kfd_memory_pool_t> kfd_memory{};
-    std::shared_ptr<kfd::kfd_copy_queue_t>  kfd_copy_queue{};
+    std::shared_ptr<kfd::kfd_memory_pool_t>   kfd_memory{};
+    std::shared_ptr<kfd::kfd_copy_queue_t>    kfd_copy_queue{};
+    thread_trace::agent_trace_resources_ptr_t resources{};
 
     aqlprofile_handle_t handle{};
     ~TraceMemoryPool() { aqlprofile_att_delete_packets(this->handle); };
 
+    void* allocate_output(size_t requested_size);
+
     static hsa_status_t Alloc(void** ptr, size_t size, desc_t flags, void* data);
     static void         Free(void* ptr, void* data);
     static hsa_status_t Copy(void* dst, const void* src, size_t size, void* data);
+
+private:
+    // Packet-local cursor: every context's AQLProfile allocation sequence restarts
+    // at slot zero, mapping slot i onto the same per-agent shared output allocation.
+    uint32_t output_buffer_index{0};
 };
 
 class CodeobjMarkerAQLPacket : public AQLPacket
@@ -255,6 +266,10 @@ public:
     rocprofiler_agent_id_t GetAgent() const { return tracepool->agent_id; }
     uint64_t               GetOwner() const { return owner; }
     void                   SetOwner(uint64_t value) { owner = value; }
+    void                   SetDispatchSlot(thread_trace::dispatch_slot_guard_t guard)
+    {
+        dispatch_slot = std::move(guard);
+    }
 
     void populate_before() override
     {
@@ -277,6 +292,7 @@ protected:
     uint64_t                             owner = 0;
 
     std::unordered_map<code_object_id_t, std::shared_ptr<CodeobjMarkerAQLPacket>> loaded_codeobj;
+    thread_trace::dispatch_slot_guard_t                                           dispatch_slot{};
 };
 
 struct sqtt_buffer_status_t

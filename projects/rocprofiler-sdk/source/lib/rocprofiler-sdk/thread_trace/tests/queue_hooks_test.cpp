@@ -31,6 +31,7 @@
 #include "lib/rocprofiler-sdk/hsa/queue_hooks/client_ids.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/core.hpp"
+#include "lib/rocprofiler-sdk/thread_trace/tests/shared_resources.hpp"
 
 #include <rocprofiler-sdk/experimental/thread_trace.h>
 #include <rocprofiler-sdk/rocprofiler.h>
@@ -75,6 +76,7 @@ test_init()
     if(!_initialized)
     {
         _initialized = true;
+        thread_trace::test::register_resource_cleanup();
 
         HsaApiTable table;
         table.amd_ext_ = &get_ext_table();
@@ -293,6 +295,95 @@ TEST(ThreadTraceQueueHooks, CompletionRoutingStaysWithTheProducingTracer)
     registration::set_init_status(1);
     registration::finalize();
     context::pop_client(1);
+}
+
+// Starting a device ATT context on the same agent while a stopped dispatch context still has
+// a traced kernel in flight must return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT until the
+// in-flight packet retires.
+TEST(ThreadTraceQueueHooks, DeviceStartConflictsWhileDispatchInFlight)
+{
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    auto&                  agents    = hsa::get_queue_controller()->get_supported_agents();
+    const hsa::AgentCache* att_agent = nullptr;
+    for(const auto& [_, agent] : agents)
+    {
+        if(!agent.get_rocp_agent()) continue;
+        if(!agent.get_rocp_agent()->runtime_visibility.hsa) continue;
+        att_agent = &agent;
+        break;
+    }
+    if(!att_agent) GTEST_SKIP() << "no ATT-capable GPU agent available";
+    const auto agent_id = att_agent->get_rocp_agent()->id;
+
+    registration::init_logging();
+    registration::set_init_status(-1);
+
+    auto dispatch_ctx = rocprofiler_context_id_t{0};
+    ASSERT_EQ(rocprofiler_create_context(&dispatch_ctx), ROCPROFILER_STATUS_SUCCESS);
+    rocprofiler_thread_trace_parameter_t dispatch_params[] = {
+        {ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFER_SIZE, {0x1000000}},
+        {ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE,
+         {ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_HSA}}};
+    auto dispatch_cb = [](rocprofiler_agent_id_t,
+                          rocprofiler_queue_id_t,
+                          rocprofiler_async_correlation_id_t,
+                          rocprofiler_kernel_id_t,
+                          rocprofiler_dispatch_id_t,
+                          void*,
+                          rocprofiler_user_data_t*) {
+        return ROCPROFILER_THREAD_TRACE_CONTROL_START_AND_STOP;
+    };
+    auto shader_cb = [](rocprofiler_thread_trace_shader_data_t, rocprofiler_user_data_t) {};
+    ASSERT_EQ(rocprofiler_configure_dispatch_thread_trace_service(
+                  dispatch_ctx, agent_id, dispatch_params, 2, dispatch_cb, shader_cb, nullptr),
+              ROCPROFILER_STATUS_SUCCESS);
+
+    auto device_ctx = rocprofiler_context_id_t{0};
+    ASSERT_EQ(rocprofiler_create_context(&device_ctx), ROCPROFILER_STATUS_SUCCESS);
+    rocprofiler_thread_trace_parameter_t device_params[] = {
+        {ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFER_SIZE, {0x1000000}},
+        {ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE,
+         {ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_HSA}}};
+    ASSERT_EQ(rocprofiler_configure_device_thread_trace_service(
+                  device_ctx, agent_id, device_params, 2, shader_cb, {}),
+              ROCPROFILER_STATUS_SUCCESS);
+
+    auto* dispatch_ctx_p = context::get_mutable_registered_context(dispatch_ctx);
+    auto* device_ctx_p   = context::get_mutable_registered_context(device_ctx);
+    dispatch_ctx_p->dispatch_thread_trace->resource_init();
+    device_ctx_p->device_thread_trace->resource_init();
+    thread_trace::start_active_contexts();
+
+    ASSERT_EQ(rocprofiler_start_context(dispatch_ctx), ROCPROFILER_STATUS_SUCCESS);
+
+    hsa::HookTestFakeQueue  queue(*att_agent, rocprofiler_queue_id_t{.handle = 1003});
+    hsa::rocprofiler_packet pkt{};
+    context::correlation_id corr_id{};
+    corr_id.internal          = 1003;
+    auto            user_data = rocprofiler_user_data_t{.value = 1003};
+    hsa::inst_pkt_t inst_pkt{};
+    bool            is_serialized = false;
+    thread_trace::kernel_dispatch_phase_enter_hook(
+        queue, pkt, 1, 1, &user_data, {}, &corr_id, inst_pkt, is_serialized);
+    ASSERT_FALSE(inst_pkt.empty());
+
+    ASSERT_EQ(rocprofiler_stop_context(dispatch_ctx), ROCPROFILER_STATUS_SUCCESS);
+
+    EXPECT_EQ(rocprofiler_start_context(device_ctx), ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT);
+
+    auto sess =
+        std::make_shared<hsa::queue_info_session_t>(hsa::queue_info_session_t{.queue = queue});
+    auto packet_data = hsa::packet_data_t{.user_data = user_data};
+    thread_trace::kernel_dispatch_phase_exit_hook(queue, pkt, sess, packet_data, inst_pkt, {});
+    inst_pkt.clear();
+
+    EXPECT_EQ(rocprofiler_start_context(device_ctx), ROCPROFILER_STATUS_SUCCESS);
+    EXPECT_EQ(rocprofiler_stop_context(device_ctx), ROCPROFILER_STATUS_SUCCESS);
+
+    device_ctx_p->device_thread_trace->resource_deinit();
+    dispatch_ctx_p->dispatch_thread_trace->resource_deinit();
 }
 
 // resource_deinit() clears the agent map while a dispatch can still be in flight. Its completion

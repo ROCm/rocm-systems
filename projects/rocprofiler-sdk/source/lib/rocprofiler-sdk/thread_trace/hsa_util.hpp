@@ -73,7 +73,6 @@ struct att_queue_t
     hsa_queue_t*                       hsa_queue{nullptr};
     std::vector<void*>                 cpu_buffers{};
     rocprofiler_agent_id_t             agent_id{};
-    size_t                             buffer_size{0};
     hsa_agent_t                        hsa_agent{};
     hsa_agent_t                        near_cpu{};
 
@@ -92,6 +91,9 @@ make_signal(const att_queue_t& queue);
 
 bool
 att_queue_enabled(const att_queue_t& queue);
+
+void
+att_queue_close(att_queue_t& queue);
 
 signal_ptr_t
 att_queue_submit(const att_queue_t& queue, hsa_ext_amd_aql_pm4_packet_t* packet, bool wait);
@@ -131,8 +133,9 @@ using att_queue_ptr_t = std::unique_ptr<att_queue_t>;
 att_queue_ptr_t
 make_att_queue(rocprofiler_agent_id_t             agent_id,
                size_t                             buffer_size,
-               size_t                             num_buffers = 0,
-               std::shared_ptr<kfd_memory_pool_t> kfd_memory  = {});
+               size_t                             num_buffers,
+               std::shared_ptr<kfd_memory_pool_t> kfd_memory,
+               size_t                             max_copy_size);
 
 }  // namespace thread_trace
 }  // namespace rocprofiler

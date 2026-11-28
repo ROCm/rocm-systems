@@ -29,6 +29,7 @@
 #include "lib/rocprofiler-sdk/hsa/queue_info_session.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/code_object.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/hsa_util.hpp"
+#include "lib/rocprofiler-sdk/thread_trace/shared_trace_resources.hpp"
 
 #include <rocprofiler-sdk/experimental/thread_trace.h>
 #include <rocprofiler-sdk/intercept_table.h>
@@ -102,7 +103,7 @@ class ThreadTracerAgent
     using code_object_id_t = uint64_t;
 
 public:
-    /// Owns the lifetime of an ATT queue for a single GPU agent.
+    /// Owns context-specific ATT packets and retains the agent's shared resources.
     ThreadTracerAgent(thread_trace_parameter_pack _params, rocprofiler_agent_id_t);
     virtual ~ThreadTracerAgent();
 
@@ -137,8 +138,9 @@ private:
     /// Acquire a copy of the control packet, with optional increment to active_traces
     std::unique_ptr<hsa::TraceControlAQLPacket> get_control(bool bStart = false);
 
-    uint32_t        num_shader_engines = 0;
-    att_queue_ptr_t queue{};
+    uint32_t num_shader_engines = 0;
+    // Retained by every packet/worker that uses the shared queue or output slots.
+    agent_trace_resources_ptr_t resources = {};
 
     std::atomic<int> active_traces{0};
     std::mutex       trace_resources_mut{};
@@ -170,11 +172,7 @@ public:
     bool collects_on(rocprofiler_agent_id_t agent_id) const;
     bool intersects(const DispatchThreadTracer& rhs) const;
 
-    void add_agent(rocprofiler_agent_id_t agent, thread_trace_parameter_pack pack)
-    {
-        auto lk       = std::unique_lock{agents_map_mut};
-        params[agent] = std::move(pack);
-    }
+    rocprofiler_status_t add_agent(rocprofiler_agent_id_t agent, thread_trace_parameter_pack pack);
 
     hsa::write_packet_t pre_kernel_call(const hsa::Queue&              queue,
                                         uint64_t                       kernel_id,
@@ -213,17 +211,18 @@ public:
     ~DeviceThreadTracer() = default;
 
     /// Initializes shared resources needed by device-wide tracing.
-    void start_context();
-    void stop_context();
-    void resource_init();
-    void resource_deinit();
+    rocprofiler_status_t try_claim_agents();
+    void                 release_claimed_agents();
+    rocprofiler_status_t start_context();
+    void                 stop_context();
+    void                 resource_init();
+    void                 resource_deinit();
 
-    void add_agent(rocprofiler_agent_id_t id, thread_trace_parameter_pack _params)
-    {
-        std::unique_lock<std::mutex> lk(agent_mut);
-        params[id] = std::move(_params);
-    }
-    bool has_agent(rocprofiler_agent_id_t id)
+    bool intersects(const DispatchThreadTracer& rhs) const;
+    bool intersects(const DeviceThreadTracer& rhs) const;
+
+    rocprofiler_status_t add_agent(rocprofiler_agent_id_t id, thread_trace_parameter_pack pack);
+    bool                 has_agent(rocprofiler_agent_id_t id)
     {
         std::unique_lock<std::mutex> lk(agent_mut);
         return params.find(id) != params.end();
@@ -239,11 +238,14 @@ public:
     const auto& get_agents() const { return agents; }
 
 private:
+    rocprofiler_status_t try_claim_agents_locked();
+
     std::map<rocprofiler_agent_id_t, std::unique_ptr<ThreadTracerAgent>> agents{};
     std::map<rocprofiler_agent_id_t, thread_trace_parameter_pack>        params{};
 
-    std::mutex                        agent_mut;
+    mutable std::mutex                agent_mut;
     std::shared_ptr<std::atomic<int>> worker_flag{nullptr};
+    std::vector<device_trace_guard_t> device_guards{};
 };
 
 /// Install the thread trace service for newly created contexts (builds per-agent

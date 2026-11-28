@@ -500,6 +500,27 @@ validate_context(const context* cfg)
     return (cfg) ? ROCPROFILER_STATUS_SUCCESS : ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
 }
 
+namespace
+{
+bool
+att_intersects(const context& lhs, const context& rhs)
+{
+    if(lhs.dispatch_thread_trace && rhs.dispatch_thread_trace &&
+       lhs.dispatch_thread_trace->intersects(*rhs.dispatch_thread_trace))
+        return true;
+    if(lhs.device_thread_trace && rhs.dispatch_thread_trace &&
+       lhs.device_thread_trace->intersects(*rhs.dispatch_thread_trace))
+        return true;
+    if(lhs.dispatch_thread_trace && rhs.device_thread_trace &&
+       rhs.device_thread_trace->intersects(*lhs.dispatch_thread_trace))
+        return true;
+    if(lhs.device_thread_trace && rhs.device_thread_trace &&
+       lhs.device_thread_trace->intersects(*rhs.device_thread_trace))
+        return true;
+    return false;
+}
+}  // namespace
+
 rocprofiler_status_t
 start_context(rocprofiler_context_id_t context_id)
 {
@@ -561,12 +582,9 @@ start_context(rocprofiler_context_id_t context_id)
                 // sets of GPU agents. A context with no agent restriction claims every agent.
                 return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
             }
-            else if(cfg->dispatch_thread_trace && itr->dispatch_thread_trace &&
-                    cfg->dispatch_thread_trace->intersects(*itr->dispatch_thread_trace))
+            else if(att_intersects(*cfg, *itr))
             {
-                // Two dispatch ATT contexts can run concurrently as long as they target disjoint
-                // sets of GPU agents. Overlapping agent sets would cross-talk in
-                // post_kernel_call.
+                // Active ATT contexts must target disjoint GPU agents.
                 return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
             }
         }
@@ -615,6 +633,16 @@ start_context(rocprofiler_context_id_t context_id)
     };
     auto _pending_guard = common::scope_destructor{[&_release_pending]() { _release_pending(); }};
 
+    if(cfg->device_thread_trace)
+    {
+        auto att_status = cfg->device_thread_trace->try_claim_agents();
+        if(att_status != ROCPROFILER_STATUS_SUCCESS)
+        {
+            get_num_active_contexts().fetch_sub(1, std::memory_order_release);
+            return att_status;
+        }
+    }
+
     rocprofiler::hsa::queue_interposition::notify_queue_interposition_consumer_context_started(cfg);
 
     // atomic swap the pointer into the "active" array used internally
@@ -623,6 +651,7 @@ start_context(rocprofiler_context_id_t context_id)
 
     if(!success)
     {
+        if(cfg->device_thread_trace) cfg->device_thread_trace->release_claimed_agents();
         rocprofiler::hsa::queue_interposition::notify_queue_interposition_consumer_context_stopped(
             cfg);
         get_num_active_contexts().fetch_sub(1, std::memory_order_release);
@@ -638,9 +667,23 @@ start_context(rocprofiler_context_id_t context_id)
                               ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH))
         rocprofiler::kfd::arm_dispatch_log_sessions();
 
+    if(cfg->device_thread_trace)
+    {
+        auto att_status = cfg->device_thread_trace->start_context();
+        if(att_status != ROCPROFILER_STATUS_SUCCESS)
+        {
+            cfg->device_thread_trace->release_claimed_agents();
+            if(active_contexts.at(idx).compare_exchange_strong(cfg, nullptr))
+            {
+                get_num_active_contexts().fetch_sub(1, std::memory_order_release);
+                rocprofiler::hsa::queue_interposition::
+                    notify_queue_interposition_consumer_context_stopped(cfg);
+            }
+            return att_status;
+        }
+    }
     if(cfg->dispatch_counter_collection) rocprofiler::counters::start_context(cfg);
     if(cfg->dispatch_spm) status = rocprofiler::spm::start_context(cfg);
-    if(cfg->device_thread_trace) cfg->device_thread_trace->start_context();
     if(cfg->dispatch_thread_trace) cfg->dispatch_thread_trace->start_context();
 
     // Released before the services below: start_agent_ctx() calls the tool's profile callback
