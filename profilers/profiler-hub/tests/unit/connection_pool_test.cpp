@@ -47,6 +47,11 @@ protected:
     std::string m_db_path;
 };
 
+TEST_F(connection_pool_test, a_pool_without_connections_is_rejected)
+{
+    EXPECT_THROW(std::ignore = make_pool(0), std::invalid_argument);
+}
+
 TEST_F(connection_pool_test, try_acquire_returns_nothing_when_every_connection_is_leased)
 {
     const auto pool = make_pool(2);

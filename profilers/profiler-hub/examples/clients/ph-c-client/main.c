@@ -532,14 +532,24 @@ main(int argc, char** argv)
     {
         if(argc < 3)
         {
-            fprintf(stderr, "usage: %s --probe DATABASE [DATABASE ...]\n", argv[0]);
+            fprintf(stderr, "usage: %s --probe TRACE [TRACE ...]\n", argv[0]);
             return 2;
         }
         return probe_files(argc - 2, argv + 2);
     }
 
-    const char* trace_path = argc > 1 ? argv[1] : "/home/amd/test_dbs/rocpd-3930708-0.db";
-    ph_ctx_t    ctx        = NULL;
+    if(argc < 2)
+    {
+        fprintf(stderr,
+                "usage: %s TRACE\n"
+                "       %s --probe TRACE [TRACE ...]\n",
+                argv[0],
+                argv[0]);
+        return 2;
+    }
+
+    const char* trace_path  = argv[1];
+    ph_ctx_t    ctx         = NULL;
     ph_future_t load_future = NULL;
     ph_future_create(on_load_progress, on_load_finished, &load_future);
     TIME_CALL("ph_ctx_create (async)", ph_ctx_create(&ctx, trace_path, load_future));

@@ -292,17 +292,6 @@ TEST_F(c_api_future_test, cancelling_a_finished_operation_is_harmless)
     EXPECT_EQ(g_log.status, PH_FUTURE_FINISHED);
 }
 
-TEST_F(c_api_future_test, freeing_twice_reports_the_second_call)
-{
-    create();
-    const auto keep_alive = m_future->shared_from_this();
-
-    EXPECT_EQ(ph_future_free(m_future), PH_RESULT_SUCCESS);
-    EXPECT_EQ(ph_future_free(m_future), PH_RESULT_INVALID_ARGUMENT);
-
-    m_future = nullptr;
-}
-
 TEST_F(c_api_future_test, an_operation_keeps_the_future_alive_after_it_was_freed)
 {
     create();

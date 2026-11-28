@@ -154,7 +154,9 @@ private:
         std::vector<ph_histogram_bucket_t> buckets;
     };
 
-    [[nodiscard]] uint32_t             intern_id(std::string_view text);
+    [[nodiscard]] uint32_t intern_id(std::string_view text);
+    /** intern_id() without taking m_string_mutex. The caller must hold it. */
+    [[nodiscard]] uint32_t             intern_id_locked(std::string_view text);
     [[nodiscard]] const track_entry_t* find_global(uint32_t global_id) const;
     [[nodiscard]] const track_entry_t* find_local(uint32_t source_index,
                                                   uint32_t local_id) const;

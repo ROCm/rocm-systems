@@ -312,7 +312,10 @@ trim_trace_files(const std::vector<trim_source_t>& inputs,
     const std::unique_ptr<trim_schema_t> trim_schema = make_trim_schema(schema, version);
     if(trim_schema == nullptr) return PH_RESULT_UNSUPPORTED_FILE;
 
-    std::filesystem::remove(output_path, error);
+    // A failed or killed trim must not leave a partial trace at output_path or
+    // remove the file already there.
+    const std::string partial_path = output_path + ".partial";
+    std::filesystem::remove(partial_path, error);
     if(error) return PH_RESULT_INVALID_FILE;
 
     // sqlite3_open_v2 creates a missing file, but not a missing parent directory.
@@ -390,7 +393,7 @@ trim_trace_files(const std::vector<trim_source_t>& inputs,
             }
         }
 
-        sqlite_connection_t destination{ output_path, false };
+        sqlite_connection_t destination{ partial_path, false };
         destination.execute("PRAGMA foreign_keys = OFF");
         report(future, 0.05, "Creating trimmed database");
 
@@ -491,10 +494,18 @@ trim_trace_files(const std::vector<trim_source_t>& inputs,
         }
     } catch(const std::exception& err)
     {
-        std::filesystem::remove(output_path, error);
+        std::filesystem::remove(partial_path, error);
         if(cancelled(future)) return PH_RESULT_CANCELLED;
         LOG_ERROR("Trace trim failed: {}", err.what());
         return PH_RESULT_INTERNAL_ERROR;
+    }
+
+    std::filesystem::rename(partial_path, output_path, error);
+    if(error)
+    {
+        LOG_ERROR("Trace trim could not replace {}: {}", output_path, error.message());
+        std::filesystem::remove(partial_path, error);
+        return PH_RESULT_INVALID_FILE;
     }
     report(future, 1.0, "Trace trimmed");
     return PH_RESULT_SUCCESS;

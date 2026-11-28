@@ -5,6 +5,7 @@
 
 #include "debug.hpp"
 
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -45,6 +46,12 @@ connection_pool::connection_pool(std::string_view file_path,
                                  std::string_view                                uuid,
                                  const profiler_hub::reader_types::trace_format_t& format)
 {
+    // With no connection, acquire() would wait forever.
+    if(num_connections == 0)
+    {
+        throw std::invalid_argument("connection_pool requires at least one connection");
+    }
+
     m_connections.reserve(num_connections);
     for(size_t i = 0; i < num_connections; ++i)
     {

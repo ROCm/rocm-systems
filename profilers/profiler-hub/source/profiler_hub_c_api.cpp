@@ -209,7 +209,14 @@ ph_ctx_create_files_cached(ph_ctx_t*          ctx,
         }
         else if(future->try_attach())
         {
-            created->load_async(future->shared_from_this());
+            try
+            {
+                created->load_async(future->shared_from_this());
+            } catch(...)
+            {
+                future->finish(PH_FUTURE_ERROR, PH_RESULT_CONTEXT_ALLOCATION_FAILED);
+                return PH_RESULT_CONTEXT_ALLOCATION_FAILED;
+            }
         }
         else
         {
@@ -1226,7 +1233,11 @@ ph_trim_trace(ph_ctx_t    ctx,
     {
         return PH_RESULT_INVALID_ARGUMENT;
     }
-    return run_operation(ctx, future, [=]() -> ph_result_t {
-        return ctx->trim_trace(start_ts, end_ts, output_path, future);
-    });
+    return run_operation(
+        ctx,
+        future,
+        [ctx, start_ts, end_ts, path = std::string{ output_path }, future]()
+            -> ph_result_t {
+            return ctx->trim_trace(start_ts, end_ts, path.c_str(), future);
+        });
 }

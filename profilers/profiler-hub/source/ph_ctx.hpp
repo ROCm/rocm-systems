@@ -307,8 +307,7 @@ private:
     std::deque<std::unique_ptr<copy_detail_hold>>   m_copy_details;
     std::deque<std::unique_ptr<alloc_detail_hold>>  m_alloc_details;
 
-    profiler_hub::pending_futures     m_operations;
-    profiler_hub::common::thread_pool m_thread_pool{ default_thread_pool_size() };
+    profiler_hub::pending_futures m_operations;
 
     std::mutex              m_state_mutex;
     std::condition_variable m_state_cv;
@@ -316,4 +315,8 @@ private:
 
     std::optional<profiler_hub::common::thread_pool::task_handle> m_load_task;
     std::shared_ptr<ph_future>                                    m_load_future;
+
+    // Must stay the last member. Its destructor joins tasks that still use the
+    // members above, so it has to run before any of them is destroyed.
+    profiler_hub::common::thread_pool m_thread_pool{ default_thread_pool_size() };
 };

@@ -574,13 +574,22 @@ track_file_store::open(const std::string&              cache_root,
 const char*
 track_file_store::intern(std::string_view text)
 {
-    return m_strings[intern_id(text)].c_str();
+    // Another thread's emplace_back can reallocate the deque's block map, so
+    // the element lookup must happen under the same lock.
+    const std::lock_guard<std::mutex> lock{ m_string_mutex };
+    return m_strings[intern_id_locked(text)].c_str();
 }
 
 uint32_t
 track_file_store::intern_id(std::string_view text)
 {
     const std::lock_guard<std::mutex> lock{ m_string_mutex };
+    return intern_id_locked(text);
+}
+
+uint32_t
+track_file_store::intern_id_locked(std::string_view text)
+{
     if(m_ready || !m_writing)
     {
         throw std::logic_error{ "track cache strings are frozen" };

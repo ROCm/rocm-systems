@@ -76,13 +76,13 @@ ph_future::wait()
 ph_result_t
 ph_future::cancel()
 {
-    std::vector<std::pair<void (*)(void*) noexcept, void*>> running;
-    {
-        const std::scoped_lock lock{ m_mutex };
-        m_stop.request_stop();
-        running = m_sql;
-    }
-    for(const auto& [interrupt, arg] : running)
+    // Interrupt under m_mutex so a query cannot unbind between the copy and the
+    // call, which would interrupt another operation's query on that connection
+    // or a closed one. The callbacks only call sqlite3_interrupt, which does
+    // not block or re-enter the future.
+    const std::scoped_lock lock{ m_mutex };
+    m_stop.request_stop();
+    for(const auto& [interrupt, arg] : m_sql)
     {
         if(interrupt != nullptr)
         {

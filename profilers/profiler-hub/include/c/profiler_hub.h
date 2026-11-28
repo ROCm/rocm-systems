@@ -585,10 +585,13 @@ extern "C"
     ph_result_t ph_future_result(ph_future_t future, ph_result_t* result);
 
     /**
-     * @brief Releases @p future.
+     * @brief Releases @p future. Call it exactly once for each future created
+     *        by ph_future_create(). Calling it again on the same handle, or
+     *        using the handle afterwards, is undefined behavior: once the
+     *        operation has ended, the first call may already have freed it.
      * @param future Future to release.
      * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_ARGUMENT if
-     *         @p future is null or was already released.
+     *         @p future is null.
      * @note Does not wait for the operation. A running operation keeps the
      *       future alive until its on_finished callback has returned.
      */
@@ -627,8 +630,11 @@ extern "C"
      * @param query Query from ph_event_query_create().
      * @param event_type ph_event_type_t value. A type the query does not list
      *        yields a successful empty page.
-     * @param after_id Return rows whose id is greater than this. Pass 0 to
-     *        start. Pass the last returned id to continue.
+     * @param after_id Pass 0 to start at the first row, including a row whose
+     *        id is 0 (the profiler-hub writer numbers rows from 0). Any other
+     *        value returns rows whose id is greater than it, so pass the last
+     *        returned id to continue. A page that ends on id 0 cannot be
+     *        continued with after_id 0, so use a capacity of at least 2.
      * @param last_id Return rows whose id is not greater than this. Pass
      *        UINT64_MAX for no upper bound. Ranges from
      *        ph_event_query_id_span() let several threads read one table.

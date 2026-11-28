@@ -28,6 +28,7 @@ namespace profiler_hub::common
 class connection_pool
 {
 public:
+    /** @throws std::invalid_argument if @p num_connections is zero. */
     connection_pool(std::string_view                                  file_path,
                     size_t                                            num_connections,
                     std::shared_ptr<profiler_hub::reader_catalog_t>   catalog,

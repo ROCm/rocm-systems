@@ -252,6 +252,19 @@ downstream consumer of the library.
   which can legitimately differ from the trace's schema version. It now
   returns the library version only (see `get_writer_schema_version()` for the
   schema the writer creates).
+- `ph_event_query_read()` no longer skips the row with id 0. The writer
+  numbers rows from 0 in each table, so `after_id` 0 now means "start at the
+  first row". Any other `after_id` still returns rows with a greater id. A page
+  that ends on id 0 cannot be continued with `after_id` 0, so use a capacity of
+  at least 2 when paging. The same applies to `read_table_events()` in the C++
+  reader.
+- `ph_trim_trace` writes the output to `<output_path>.partial` and renames it to
+  `output_path` only after the trim succeeds. A failed or cancelled trim no
+  longer leaves a partial file at the output path, and a stale `.partial` file
+  from an earlier run is removed first.
+- `ph_trim_trace` keeps `rocpd_graph_launch`, `rocpd_gpu_pc_sample` and
+  `rocpd_blob_event` rows inside the requested window, so trimmed RocPD v3
+  traces keep their graph launches, GPU PC samples and blob events.
 
 ### Deprecated
 
