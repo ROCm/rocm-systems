@@ -22,6 +22,19 @@
 namespace hip {
 hipError_t ihipFree(void* ptr);
 
+namespace {
+hipError_t writeManagedVarPointer(amd::Memory& pointer_symbol, void* managed_allocation,
+                                  const std::string& name, int device_id) {
+  const amd::Device& device = *g_devices.at(device_id)->devices()[0];
+  if (!device.writeDeviceGlobal(pointer_symbol, 0, pointer_symbol.getSize(), &managed_allocation)) {
+    LogPrintfError("Failed to write the device pointer of managed var %s on device %d",
+                   name.c_str(), device_id);
+    return hipErrorRuntimeMemory;
+  }
+  return hipSuccess;
+}
+}  // namespace
+
 hipError_t DynCO::loadCodeObject(const char* fname, const void* image, bool init_global_vars,
                                  std::vector<char>* image_storage) {
   std::scoped_lock lock(dclock_);
@@ -47,8 +60,57 @@ hipError_t DynCO::loadCodeObject(const char* fname, const void* image, bool init
   return hipSuccess;
 }
 
+hipError_t DynCO::bindManagedVarsFrom(DynCO& primary) {
+  std::vector<std::pair<Var*, void*>> managed_vars;
+  {
+    std::scoped_lock lock(primary.dclock_);
+    for (const auto& [_, primary_var] : primary.vars_) {
+      if (primary_var->GetVarKind() == Var::DVK_Managed) {
+        managed_vars.emplace_back(primary_var, primary_var->GetManagedVarPtr());
+      }
+    }
+  }
+  if (managed_vars.empty()) {
+    return hipSuccess;
+  }
+
+  managed_var_primary_ = &primary;
+  for (const auto& [primary_var, managed_allocation] : managed_vars) {
+    amd::Memory* pointer_symbol = nullptr;
+    {
+      std::scoped_lock lock(primary.dclock_);
+      IHIP_RETURN_ONFAIL(primary_var->GetDeviceVar(&pointer_symbol, device_id_, module_));
+    }
+    if (pointer_symbol == nullptr) {
+      LogPrintfError("Managed var %s has no device symbol on device %d",
+                     primary_var->GetName().c_str(), device_id_);
+      return hipErrorInvalidSymbol;
+    }
+
+    IHIP_RETURN_ONFAIL(writeManagedVarPointer(*pointer_symbol, managed_allocation,
+                                              primary_var->GetName(), device_id_));
+  }
+  return hipSuccess;
+}
+
+void DynCO::releaseManagedVarViews() {
+  if (managed_var_primary_ == nullptr) {
+    return;
+  }
+
+  std::scoped_lock lock(managed_var_primary_->dclock_);
+  for (const auto& [_, primary_var] : managed_var_primary_->vars_) {
+    if (primary_var->GetVarKind() == Var::DVK_Managed) {
+      primary_var->releaseDeviceVar(device_id_);
+    }
+  }
+  managed_var_primary_ = nullptr;
+}
+
 // Dynamic Code Object
 DynCO::~DynCO() {
+  // Release primary Var views of this module before destroying their backing storage.
+  releaseManagedVarViews();
   std::scoped_lock lock(dclock_);
 
   for (auto& elem : vars_) {
@@ -178,33 +240,33 @@ hipError_t DynCO::enumerateFunctions(hipFunction_t* functions, unsigned int numF
 
 hipError_t DynCO::initDynManagedVars(const std::string& managedVar) {
   std::scoped_lock lock(dclock_);
-  amd::Memory* mem = nullptr;
-  void* pointer = nullptr;
+  amd::Memory* initializer = nullptr;
+  void* managed_allocation = nullptr;
   hipError_t status = hipSuccess;
-  // To get size of the managed variable
-  status = GetDeviceVar(&mem, managedVar + ".managed");
+  // The ".managed" symbol holds the variable's initial bytes and full size.
+  status = GetDeviceVar(&initializer, managedVar + ".managed");
   if (status != hipSuccess) {
     ClPrint(amd::LOG_ERROR, amd::LOG_API, "Status %d, failed to get .managed device variable:%s",
             status, managedVar.c_str());
     return status;
   }
   // Allocate managed memory for these symbols
-  status = ihipMallocManaged(&pointer, mem->getSize(), 0, /*use_host_ptr=*/false,
-                             ManagedMemOwner::kModuleVariable);
+  status = ihipMallocManaged(&managed_allocation, initializer->getSize(), 0,
+                             /*use_host_ptr=*/false, ManagedMemOwner::kModuleVariable);
   guarantee(status == hipSuccess, "Status %d, failed to allocate managed memory", status);
 
   // update as manager variable and set managed memory pointer and size
   auto it = vars_.find(managedVar);
-  it->second->SetManagedVarInfo(pointer, mem->getSize());
+  it->second->SetManagedVarInfo(managed_allocation, initializer->getSize());
 
   // copy initial value to the managed variable to the managed memory allocated
   hip::Stream* stream = hip::getNullStream();
   if (stream != nullptr) {
-    status = ihipMemcpy(pointer, reinterpret_cast<address>(memDevPtr(mem)), mem->getSize(),
-                        hipMemcpyDeviceToDevice, *stream);
+    status = ihipMemcpy(managed_allocation, reinterpret_cast<address>(memDevPtr(initializer)),
+                        initializer->getSize(), hipMemcpyDeviceToDevice, *stream);
     if (status != hipSuccess) {
-      ClPrint(amd::LOG_ERROR, amd::LOG_API, "Status %d, failed to copy device ptr:%s", status,
-              managedVar.c_str());
+      ClPrint(amd::LOG_ERROR, amd::LOG_API, "Status %d, failed to copy managed initializer:%s",
+              status, managedVar.c_str());
       return status;
     }
   } else {
@@ -212,22 +274,15 @@ hipError_t DynCO::initDynManagedVars(const std::string& managedVar) {
     return hipErrorInvalidResourceHandle;
   }
 
-  // Get device ptr to initialize with managed memory pointer
-  status = GetDeviceVar(&mem, managedVar);
+  // The managed variable's device symbol stores the address of the managed allocation.
+  amd::Memory* pointer_symbol = nullptr;
+  status = GetDeviceVar(&pointer_symbol, managedVar);
   if (status != hipSuccess) {
     ClPrint(amd::LOG_ERROR, amd::LOG_API, "Status %d, failed to get managed device variable:%s",
             status, managedVar.c_str());
     return status;
   }
-  // copy managed memory pointer to the managed device variable
-  status = ihipMemcpy(reinterpret_cast<address>(memDevPtr(mem)), &pointer, mem->getSize(),
-                      hipMemcpyHostToDevice, *stream);
-  if (status != hipSuccess) {
-    ClPrint(amd::LOG_ERROR, amd::LOG_API, "Status %d, failed to copy device ptr:%s", status,
-            managedVar.c_str());
-    return status;
-  }
-  return status;
+  return writeManagedVarPointer(*pointer_symbol, managed_allocation, managedVar, device_id_);
 }
 
 hipError_t DynCO::populateDynGlobalVars() {
@@ -699,7 +754,6 @@ hipError_t StatCO::InitManagedVarDevicePtr(int deviceId) {
     return hipSuccess;
   }
 
-  amd::Device& device = *g_devices.at(deviceId)->devices()[0];
   for (auto& vecIter : managedVars_) {
     for (auto& var : vecIter.second) {
       // Variables registered at or before this point already have their pointer on this
@@ -714,19 +768,17 @@ hipError_t StatCO::InitManagedVarDevicePtr(int deviceId) {
         IHIP_RETURN_ONFAIL(DigestFatBinary(module_to_hostModule_[module], *module));
       }
 
-      amd::Memory* mem = nullptr;
-      IHIP_RETURN_ONFAIL(var->GetStatDeviceVar(&mem, deviceId));
-      if (mem == nullptr) {
+      amd::Memory* pointer_symbol = nullptr;
+      IHIP_RETURN_ONFAIL(var->GetStatDeviceVar(&pointer_symbol, deviceId));
+      if (pointer_symbol == nullptr) {
         LogPrintfError("Managed var %s has no device symbol on device %d", var->GetName().c_str(),
                        deviceId);
         return hipErrorInvalidSymbol;
       }
 
-      if (!device.writeDeviceGlobal(*mem, 0, mem->getSize(), var->GetManagedVarPtr())) {
-        LogPrintfError("Failed to write the device pointer of managed var %s on device %d",
-                       var->GetName().c_str(), deviceId);
-        return hipErrorRuntimeMemory;
-      }
+      void* managed_allocation = *static_cast<void**>(var->GetManagedVarPtr());
+      IHIP_RETURN_ONFAIL(
+          writeManagedVarPointer(*pointer_symbol, managed_allocation, var->GetName(), deviceId));
     }
   }
 

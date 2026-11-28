@@ -69,6 +69,7 @@ class Var {
   hipError_t GetDeviceVar(amd::Memory** mem, int deviceId, hipModule_t hmod);
   hipError_t GetStatDeviceVar(amd::Memory** mem, int deviceId);
   hipError_t GetDeviceVarPtr(amd::Memory** mem, int deviceId);
+  void releaseDeviceVar(int deviceId);
 
   hipError_t EnsureManagedVarIsMapped();
 

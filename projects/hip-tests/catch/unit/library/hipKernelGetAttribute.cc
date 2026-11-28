@@ -112,6 +112,17 @@ HIP_TEST_CASE(Unit_hipKernelGetAttribute_Negative_Parameters) {
         hipErrorInvalidHandle);
   }
 
-  HIP_CHECK(hipLibraryUnload(library));
+  SECTION("stale kernel") {
+    HIP_CHECK(hipLibraryUnload(library));
+    library = nullptr;
+    HIP_CHECK_ERROR(
+        hipKernelGetAttribute(&pi, HIP_FUNC_ATTRIBUTE_BINARY_VERSION, kernel, device_id),
+        hipErrorInvalidHandle);
+  }
+
+  if (library != nullptr) {
+    HIP_CHECK(hipLibraryUnload(library));
+  }
   HIP_CHECK(hipStreamDestroy(stream));
+  (void)hipGetLastError();
 }
