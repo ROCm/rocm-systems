@@ -3375,6 +3375,11 @@
           "test_filter": "RevokeDdaIpcMPITest.IncompleteCollective_DdaIpcLLReduceScatterWide"
         },
         {
+          "name": "IncompleteCollective_DdaIpcLLAlltoAllWide",
+          "description": "Rank 7 skips a 4 KiB DDA IPC LL one-shot AlltoAll so ranks 0-6 poll peer flags; asserts DDA LL via rcclGetCollImplInfo; revoke must unblock stream sync then shrink",
+          "test_filter": "RevokeDdaIpcMPITest.IncompleteCollective_DdaIpcLLAlltoAllWide"
+        },
+        {
           "name": "ShrinkAbort_DisablesDdaOnParent",
           "description": "NCCL_SHRINK_ABORT on an 8-rank DDA-IPC parent: the parent stops selecting DDA and the 7-rank child AllReduce succeeds",
           "test_filter": "RevokeDdaIpcMPITest.ShrinkAbort_DisablesDdaOnParent"

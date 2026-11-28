@@ -9,13 +9,6 @@
 
 #include "algorithms/dda/alltoall/dda_alltoall.h"
 
-#include "algorithms/dda/alltoall/alltoall_dda_fabric_ll.h"
-#include "checks.h"
-#include "comm.h"
-#include "algorithms/dda/dda_init_detail.h" // nccl_dda_detail::kDdaLLAgMaxBlocksPerPeer
-#include "debug.h"
-#include "algorithms/dda/fabric/fabric_gpu_barrier.h" // dda::common::kDdaMaxNranks
-
 #include <cuda_runtime.h>
 #include <hip/hip_ext.h>
 
@@ -24,9 +17,17 @@
 #include <cstdint>
 #include <utility>
 
+#include "algorithms/dda/alltoall/alltoall_dda_fabric_ll.h"
+#include "algorithms/dda/dda_init_detail.h" // nccl_dda_detail::kDdaLLAgMaxBlocksPerPeer
+#include "algorithms/dda/dda_ll_region.h"
+#include "algorithms/dda/fabric/fabric_gpu_barrier.h" // dda::common::kDdaMaxNranks
+#include "checks.h"
+#include "comm.h"
+#include "debug.h"
+#include "rccl_common.h"
+
 namespace {
 
-using dda::common::ddaBankSize;
 using dda::common::ddaLLBlocksPerPeer;
 using dda::common::ddaLLPeerSlotPkts;
 using dda::common::kDdaLLMaxBytes;
@@ -34,7 +35,14 @@ using nccl_dda_detail::kDdaLLAgMaxBlocksPerPeer;
 
 // Single source of the launch geometry: grid.x = peer (nRanks), grid.y = the
 // per-peer packet split; 256 threads/block, so 256 pkts/block is one packet per thread.
+// IPC: kDdaSimpleThreads-wide blocks, rows within the wide window's blocks (nccl_dda_detail::ddaIpcLLPeerRows).
 static inline std::pair<dim3, dim3> ddaAllToAllFabricLLGeom(ncclComm* comm, size_t perChunkBytes) {
+  if (nccl_dda_detail::ddaLLOnIpc(comm)) {
+    const unsigned threads = dda::common::kDdaSimpleThreads;
+    const uint32_t wide = rcclDdaIpcLLWideBlocks(comm, ncclFuncAlltoAll, perChunkBytes * (size_t)comm->nRanks);
+    const unsigned rows = nccl_dda_detail::ddaIpcLLPeerRows(comm, perChunkBytes, threads, wide);
+    return std::make_pair(dim3((unsigned)comm->nRanks, rows), dim3(threads));
+  }
   const unsigned threads = 256;
   // A gather block polls a slot written by a peer block of another index, so the whole grid must be
   // co-resident: blocks per peer are capped at the comm-wide CU budget's share. A peer always keeps
@@ -58,13 +66,16 @@ static ncclResult_t ncclAllToAllDdaFabricLLTyped(
   const dim3 block = gridBlock.second;
   const int blocksPerPeer = (int)grid.y;
 
-  T** peers = reinterpret_cast<T**>(comm->ddaPeerPtrsDev);
+  // The LL region of either handler, under the epoch cells every LL tier shares.
+  const nccl_dda_detail::DdaLLRegion region = nccl_dda_detail::ddaLLRegion(comm);
+  T** peers = reinterpret_cast<T**>(region.peers);
   uint32_t* epochDev = comm->ddaLLEpochDev;
   const int epochLen = comm->ddaLLEpochLen;
-  const size_t bankSize = ddaBankSize(comm->ddaScratchBytes);
+  const size_t bankSize = region.bank;
 
-  INFO(NCCL_COLL, "DDA fabric AllToAll LL: nRanks=%d perChunkBytes=%zu grid=%ux%u block=%u (block-per-peer, bpp=%d)",
-       nRanks, perChunkBytes, grid.x, grid.y, block.x, blocksPerPeer);
+  INFO(NCCL_COLL, "DDA fabric AllToAll LL%s: nRanks=%d perChunkBytes=%zu grid=%ux%u block=%u (block-per-peer, bpp=%d)",
+       nccl_dda_detail::ddaLLOnIpc(comm) ? " (IPC)" : "", nRanks, perChunkBytes, grid.x, grid.y, block.x,
+       blocksPerPeer);
 
   const dda::common::DdaKernelParams params{comm->abortFlagDev};
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
@@ -100,7 +111,8 @@ bool ncclAllToAllDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, void*
   if (comm == nullptr || comm->bootstrap == nullptr) {
     return false;
   }
-  if (comm->ddaFabricMemHandler == nullptr || comm->ddaScratch == nullptr || comm->ddaPeerPtrsDev == nullptr) {
+  // The fabric or the IPC LL region. Nothing below reads the buffers or checks in place, so every rank decides alike.
+  if (!nccl_dda_detail::ddaLLRegionReady(comm)) {
     return false;
   }
   if (count == 0) {
@@ -122,8 +134,13 @@ bool ncclAllToAllDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, void*
   if (perChunkBytes * 2 > kDdaLLMaxBytes) {
     return false;
   }
+  // IPC: only in the wide window, the sizes its grid is set for.
+  if (nccl_dda_detail::ddaLLOnIpc(comm) &&
+      rcclDdaIpcLLWideBlocks(comm, ncclFuncAlltoAll, perChunkBytes * (size_t)comm->nRanks) == 0) {
+    return false;
+  }
   // One packet carries 8B of payload, so each peer's chunk has to fit the slot the bank gives it.
-  if ((perChunkBytes >> 3) > ddaLLPeerSlotPkts(ddaBankSize(comm->ddaScratchBytes), comm->nRanks)) {
+  if ((perChunkBytes >> 3) > ddaLLPeerSlotPkts(nccl_dda_detail::ddaLLRegion(comm).bank, comm->nRanks)) {
     return false;
   }
 

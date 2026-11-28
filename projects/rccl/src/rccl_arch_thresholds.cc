@@ -878,7 +878,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx942 = {
     {},                             // [5] SendRecv        -- not used
     {},                             // [6] Send            -- not used
     {},                             // [7] Recv            -- not used
-    {},                             // [8] AlltoAll        -- not used
+    {4ULL*1024, 8ULL*1024, 8},      // [8] AlltoAll        -- 8 x 1 blocks; IPC Simple on 1 block around it
   },
 };
 

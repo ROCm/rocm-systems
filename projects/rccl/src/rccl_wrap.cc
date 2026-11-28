@@ -3068,6 +3068,14 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
         decision->nMaxChannels = ncclAllToAllDdaFabricBlocks(comm, count, datatype);
         return rcclSelectDone("A2A", query, decision);
       }
+    } else if (rcclDdaIpcLLWideBlocks(comm, ncclFuncAlltoAll, totalBytes) > 0 &&
+               ncclAllToAllDdaFabricLLEligible(comm, sendbuff, recvbuff, count, datatype)) {
+      // Single-node IPC LL one-shot in its wide window, in place too (also checked by the eligibility, which owns the
+      // grid): no barrier, no staging copy.
+      decision->algo = RCCL_DDA_FABRIC_LL;
+      decision->protocol = NCCL_PROTO_LL;
+      decision->nMaxChannels = ncclAllToAllDdaFabricLLBlocks(comm, count, datatype);
+      return rcclSelectDone("A2A", query, decision);
     } else if (a2aDdaMax != 0 && totalBytes <= a2aDdaMax &&
                ncclAllToAllDdaIpcEligible(comm, sendbuff, recvbuff, count, datatype)) {
       decision->algo = RCCL_DDA_IPC;

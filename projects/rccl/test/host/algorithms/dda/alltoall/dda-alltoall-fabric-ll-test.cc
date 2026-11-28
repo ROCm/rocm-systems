@@ -223,6 +223,76 @@ TEST_F(DdaAlltoallFabricLLMicrotest, Blocks_SizedOnBytesNotElements) {
   EXPECT_EQ(ncclAllToAllDdaFabricLLBlocks(mock_.get(), 1024, ncclFloat32), 16u);
 }
 
+// IPC: the 8-rank single-node LL region with its epoch cells and the table's wide window for the total, in place too;
+// the chunk fits a 4 MiB bank's 256 KiB peer slot whatever the Simple scratch holds.
+TEST_F(DdaAlltoallFabricLLMicrotest, Eligible_IpcNeedsTheLLRegionAndTheWideWindow) {
+  mock_.setIpcResourcesPresent();
+  size_t seenTotal = 0;
+  g_rcclDdaIpcLLWideBlocks = [&](const ncclComm*, ncclFunc_t func, size_t totalBytes) {
+    EXPECT_EQ(func, ncclFuncAlltoAll);
+    seenTotal = totalBytes;
+    return totalBytes >= (4u << 10) ? 8u : 0u;
+  };
+  EXPECT_TRUE(Eligible(128));
+  EXPECT_EQ(seenTotal, 4u << 10);
+  EXPECT_FALSE(Eligible(124)) << "below the window";
+  comm().ddaScratchBytes = 4096;
+  EXPECT_TRUE(Eligible((256u << 10) / 4));
+  EXPECT_FALSE(Eligible((256u << 10) / 4 + 4)) << "past the 256 KiB peer slot";
+  EXPECT_TRUE(ncclAllToAllDdaFabricLLEligible(mock_.get(), kSendbuff, kSendbuff, 128, ncclFloat32)) << "in place";
+  for (int missing = 0; missing < 5; ++missing) {
+    mock_.setIpcResourcesPresent();
+    comm().ddaLLEpochDev = missing == 0 ? nullptr : comm().ddaLLEpochDev;
+    comm().nRanks = missing == 1 ? 4 : comm().nRanks;
+    comm().nNodes = missing == 2 ? 2 : comm().nNodes;
+    comm().ddaIpcMemHandler = missing == 3 ? nullptr : comm().ddaIpcMemHandler;
+    comm().ddaLLEpochLen = missing == 4 ? 0 : comm().ddaLLEpochLen;
+    EXPECT_FALSE(Eligible(128)) << "missing " << missing;
+  }
+}
+
+// IPC launch: the LL region's peers and bank, a 512-thread block column per peer, rows within the window's blocks.
+TEST_F(DdaAlltoallFabricLLMicrotest, Launch_IpcPassesTheLLRegionAndAColumnPerPeer) {
+  mock_.setIpcResourcesPresent();
+  uint32_t budget = 8;
+  size_t seenTotal = 0;
+  g_rcclDdaIpcLLWideBlocks = [&](const ncclComm*, ncclFunc_t func, size_t totalBytes) {
+    EXPECT_EQ(func, ncclFuncAlltoAll);
+    seenTotal = totalBytes;
+    return budget;
+  };
+  g_ddaLaunches.clear();
+  ASSERT_EQ(Run(128), ncclSuccess);
+  ASSERT_EQ(g_ddaLaunches.size(), 1u);
+  const DdaLaunch& launch = g_ddaLaunches[0];
+  EXPECT_EQ(launch.kernel, Kernel<8>());
+  EXPECT_EQ(launch.block.x, 512u);
+  EXPECT_EQ(launch.grid.x, 8u);
+  EXPECT_EQ(launch.grid.y, 1u);
+  ASSERT_EQ(launch.args.size(), 10u);
+  EXPECT_EQ(launch.Arg<int8_t**>(0), mock_.ipcLLPeers<int8_t>());
+  EXPECT_EQ(launch.Arg<size_t>(3), 512u);
+  EXPECT_EQ(launch.Arg<uint32_t*>(6), comm().ddaLLEpochDev);
+  EXPECT_EQ(launch.Arg<size_t>(8), dda::common::kDdaIpcLLRegionBytes / 2);
+  EXPECT_EQ(seenTotal, 4u << 10);
+  // {budget, chunk bytes, rows}: rows for the chunk within the budget per peer and kDdaLLAgMaxBlocksPerPeer.
+  struct Case {
+    uint32_t budget;
+    size_t chunk;
+    unsigned rows;
+  };
+  const Case cases[] = {{8, 1u << 10, 1}, {16, 8u << 10, 2}, {1024, 32u << 10, 8}, {0, 8u << 10, 1}};
+  for (const Case& c : cases) {
+    budget = c.budget;
+    g_ddaLaunches.clear();
+    ASSERT_EQ(Run(c.chunk / 4), ncclSuccess);
+    EXPECT_EQ(seenTotal, c.chunk * 8) << "chunk " << c.chunk;
+    EXPECT_EQ(g_ddaLaunches.at(0).grid.x, 8u) << "chunk " << c.chunk;
+    EXPECT_EQ(g_ddaLaunches.at(0).grid.y, c.rows) << "budget " << c.budget << " chunk " << c.chunk;
+    EXPECT_EQ(ncclAllToAllDdaFabricLLBlocks(mock_.get(), c.chunk / 4, ncclFloat32), 8 * c.rows);
+  }
+}
+
 TEST_F(DdaAlltoallFabricLLMicrotest, Launch_LaunchErrorIsReported) {
   g_hipGetLastError = [] { return hipErrorLaunchFailure; };
   EXPECT_EQ(Run(4), ncclUnhandledCudaError);
