@@ -21,6 +21,10 @@
 #include <assert.h>
 #include <string.h>
 #include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <mutex>
 #include <new>
 #include <set>
 
@@ -366,12 +370,98 @@ class HostcallListener {
   void terminate();
   bool initSignal(const amd::Device& dev);
   bool initDevice(const amd::Device& dev);
+
+  /** \brief A kernel that can make hostcalls is being dispatched.
+   *
+   *  Ends the nap of a polling listener (see waitDoorbell()), so the kernel's first hostcall
+   *  does not wait for it. Costs two atomic accesses when the listener is not napping.
+   */
+  void notifyDispatch();
+
+ private:
+  /** \brief Wait until the doorbell differs from \p value or \p timeout passes.
+   *
+   *  A doorbell without an interrupt event (ROCr without interrupt signals, e.g. on WSL) would
+   *  spin for the whole timeout, and the listener waits in a loop for the rest of the process.
+   *  Poll it instead: keep polling for a short while after activity, so the several calls of one
+   *  printf are served at once, then sleep between polls, doubling the nap while nothing arrives.
+   *  A dispatch of a kernel that can make hostcalls ends the nap and counts as activity.
+   *  Returns \p value when nothing changed; the caller loops.
+   */
+  uint64_t waitDoorbell(uint64_t value, uint64_t timeout);
+
+  uint32_t poll_nap_us_ = 0;
+  std::chrono::steady_clock::time_point last_activity_{};
+  std::chrono::microseconds poll_spin_{0};  //!< Spin window after last_activity_
+  std::atomic<bool> dispatched_{false};  //!< Set by notifyDispatch(), cleared by the listener
+  std::atomic<bool> napping_{false};     //!< The listener sleeps on nap_cv_
+  std::mutex nap_lock_;
+  std::condition_variable nap_cv_;
 };
 
 HostcallListener* hostcallListener = nullptr;
 extern amd::Monitor listenerLock;
 
 static bool listenerTerminating = false;
+// Polling a doorbell without interrupt event: keep polling (yielding) for kPollSpin after the
+// last hostcall, so the several calls of one printf are served at once, or for kDispatchSpin after
+// the dispatch of a kernel that can make hostcalls, which wakes the listener (the kernel may start
+// a few hundred us later). Then nap kPollNapFloorUs between polls until kPollHot after the
+// activity, then double the nap up to kPollNapCeilUs, so an idle listener costs almost nothing.
+constexpr static auto kPollSpin = std::chrono::microseconds(200);
+constexpr static auto kDispatchSpin = std::chrono::microseconds(1000);
+constexpr static auto kPollHot = std::chrono::microseconds(2000);
+constexpr static uint32_t kPollNapFloorUs = 50;
+constexpr static uint32_t kPollNapCeilUs = 2000;
+
+uint64_t HostcallListener::waitDoorbell(uint64_t value, uint64_t timeout) {
+  if (!doorbell_->IsPollOnly()) {
+    return doorbell_->Wait(value, device::Signal::Condition::Ne, timeout);
+  }
+  const uint64_t new_value = doorbell_->Load();
+  const auto now = std::chrono::steady_clock::now();
+  if (new_value != value) {
+    // Pairs with the device's release of the doorbell, like the acquire in Wait()
+    std::atomic_thread_fence(std::memory_order_acquire);
+    last_activity_ = now;
+    poll_spin_ = kPollSpin;
+    poll_nap_us_ = 0;
+  } else if (dispatched_.load(std::memory_order_relaxed) && dispatched_.exchange(false)) {
+    last_activity_ = now;
+    poll_spin_ = kDispatchSpin;
+    poll_nap_us_ = 0;
+  } else if (now - last_activity_ < poll_spin_) {
+    amd::Os::yield();
+  } else {
+    poll_nap_us_ = (now - last_activity_ < kPollHot)
+        ? kPollNapFloorUs
+        : std::min(std::max(poll_nap_us_ * 2, kPollNapFloorUs), kPollNapCeilUs);
+    std::unique_lock<std::mutex> lock(nap_lock_);
+    // napping_ and dispatched_ are seq_cst here and in notifyDispatch(): either it sees napping_
+    // and notifies under nap_lock_, or the predicate sees dispatched_, so no wakeup is lost.
+    napping_ = true;
+    nap_cv_.wait_for(lock, std::chrono::microseconds(poll_nap_us_),
+                     [this] { return dispatched_.load(); });
+    napping_ = false;
+  }
+  return new_value;
+}
+
+void HostcallListener::notifyDispatch() {
+  dispatched_ = true;
+  if (napping_) {
+    { std::lock_guard<std::mutex> lock(nap_lock_); }
+    nap_cv_.notify_one();
+  }
+}
+
+void notifyHostcallDispatch() {
+  // The caller's queue has a hostcall buffer registered with the listener, so the listener exists
+  // and is not replaced meanwhile: it is created and deleted only while no buffer is registered.
+  if (hostcallListener != nullptr) {
+    hostcallListener->notifyDispatch();
+  }
+}
 #ifdef USE_NEW_HOSTCALL_IMPL
 constexpr static uint32_t kYieldSpins = 128;
 constexpr static uint64_t kSignalTimeoutFloor = K * K;
@@ -421,6 +511,7 @@ void HostcallListener::consumePackets() {
     }
 
     if (result != ProcessResult::kIdleFull) {
+      last_activity_ = std::chrono::steady_clock::now();
       timeout = kSignalTimeoutFloor;
       if (++yield_spins >= kYieldSpins) {
         yield_spins = 0;
@@ -430,8 +521,7 @@ void HostcallListener::consumePackets() {
     }
 
     yield_spins = 0;
-    uint64_t new_value =
-        doorbell_->Wait(signal_value, device::Signal::Condition::Ne, timeout);
+    uint64_t new_value = waitDoorbell(signal_value, timeout);
     if (new_value != signal_value) {
       signal_value = new_value;
       timeout = kSignalTimeoutFloor;
@@ -454,7 +544,7 @@ void HostcallListener::consumePackets() {
         kHostThreadActive.state = Init::State::kExit;
         return;
       }
-      uint64_t new_value = doorbell_->Wait(signal_value, device::Signal::Condition::Ne, timeout);
+      uint64_t new_value = waitDoorbell(signal_value, timeout);
       if (new_value != signal_value) {
         signal_value = new_value;
         // Reduce the timeout for quicker processing
@@ -478,6 +568,8 @@ void HostcallListener::consumePackets() {
         ii->processPackets(messages_);
       }
     }
+    // Start the poll spin window after the work, not when the doorbell changed
+    last_activity_ = std::chrono::steady_clock::now();
   }
 
   return;
@@ -488,6 +580,8 @@ void HostcallListener::terminate() {
   if (thread_.state() >= Thread::FINISHED || amd::Os::isThreadAlive(thread_)) {
     kHostThreadActive.state = Init::State::kExit;
     doorbell_->Reset(SIGNAL_DONE);
+    // End a nap of a polling listener, so it sees SIGNAL_DONE now
+    notifyDispatch();
 
     // FIXME_lmoriche: fix termination handshake
     while (thread_.state() < Thread::FINISHED) {

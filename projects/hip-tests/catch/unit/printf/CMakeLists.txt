@@ -26,7 +26,8 @@ if(UNIX)
     hipPrintfManyWaves.cc
     hipPrintfWidthPrecision.cc
     hipPrintfBasic.cc
-    hipPrintfAltForms.cc)
+    hipPrintfAltForms.cc
+    hipPrintfListenerIdle.cc)
 endif()
 
 if(HIP_PLATFORM MATCHES "amd")
@@ -77,5 +78,12 @@ if(UNIX AND HIP_PLATFORM MATCHES "amd")
   set_source_files_properties(hostcallStackSize_exe.cc PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
   set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hostcallStackSize_exe)
   add_dependencies(build_tests hostcallStackSize_exe)
+  # Sets HSA_ENABLE_INTERRUPT=0 before its first HIP call, so it needs a process of its own.
+  # Its printf must go through the hostcall listener, whatever the compiler's default kind.
+  add_executable(hipPrintfListenerIdle_exe EXCLUDE_FROM_ALL hipPrintfListenerIdle_exe.cc)
+  set_source_files_properties(hipPrintfListenerIdle_exe.cc PROPERTIES LANGUAGE ${GPGPU_LANGUAGE}
+                              COMPILE_OPTIONS "-mprintf-kind=hostcall")
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipPrintfListenerIdle_exe)
+  add_dependencies(build_tests hipPrintfListenerIdle_exe)
 endif()
 

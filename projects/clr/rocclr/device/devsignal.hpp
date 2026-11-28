@@ -55,6 +55,10 @@ class Signal {
 
   // Return the handle to the underlying amd_signal_t object
   virtual void* getHandle() { return nullptr; }
+
+  // True if a wait on this signal can only poll: it has no interrupt event to sleep on, so a
+  // Blocked wait spins for its whole timeout (ROCr without interrupt signals, e.g. on WSL)
+  virtual bool IsPollOnly() const { return false; }
 };
 
 };  // namespace amd::device

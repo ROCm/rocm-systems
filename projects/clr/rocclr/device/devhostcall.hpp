@@ -78,6 +78,11 @@ bool enableHostcalls(const amd::Device& dev, void* buffer, uint32_t numPackets);
 #endif  // USE_NEW_HOSTCALL_IMPL
 void disableHostcalls(void* buffer);
 
+/** \brief A kernel that can make hostcalls is being dispatched on a queue whose hostcall buffer
+ *  is registered with the listener; wakes a listener that naps between polls of its doorbell.
+ */
+void notifyHostcallDispatch();
+
 enum SignalValue { SIGNAL_DONE = 0, SIGNAL_INIT = 1 };
 
 /** \brief Packet payload
