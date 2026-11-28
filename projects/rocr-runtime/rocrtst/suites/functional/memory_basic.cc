@@ -386,6 +386,10 @@ void MemoryTest::MaxSingleAllocationTest(void) {
   }
 }
 
+// Latched per test by the caller below, so an unreadable counter is reported
+// once rather than once for every agent pool.
+static bool vram_skip_reported = false;
+
 void MemoryTest::MemAvailableTest(hsa_agent_t ag, hsa_amd_memory_pool_t pool) {
   hsa_status_t err;
   void *memPtr1, *memPtr2;
@@ -439,8 +443,21 @@ void MemoryTest::MemAvailableTest(hsa_agent_t ag, hsa_amd_memory_pool_t pool) {
                             &ag_avail_memory_before);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
-  // Try to allocate half
-  uint64_t allocate_sz1 = (pool_sz / 2) * gran_sz;
+  // MEMORY_AVAIL is device-wide, so it is only sound to size an allocation from
+  // it. What this process was charged is judged on KFD's per-process counter.
+  uint64_t vram_before = 0;
+  const bool vram_accounted = rocrtst::GetProcessVramUsage(ag, &vram_before);
+  // Report the drop rather than passing silently with nothing asserted, once
+  // per test: this runs per pool, and one skip per pool inflates the summary.
+  if (!vram_accounted && !vram_skip_reported) {
+    vram_skip_reported = true;
+    rocrtst::SkipCurrentTest("KFD per-process VRAM counter not readable");
+  }
+
+  // Try to allocate half of what is available. aggregate_alloc_max is static
+  // capacity, so sizing from it alone can ask for more memory than exists.
+  uint64_t avail_sz = std::min<uint64_t>(pool_sz, ag_avail_memory_before / gran_sz);
+  uint64_t allocate_sz1 = (avail_sz / 2) * gran_sz;
 #ifdef ROCRTST_ASAN
   // ASAN's intercepted allocator cannot handle huge allocations.  Cap each
   // allocation to kMaxTestAllocAsan.
@@ -448,8 +465,23 @@ void MemoryTest::MemAvailableTest(hsa_agent_t ag, hsa_amd_memory_pool_t pool) {
     allocate_sz1 = (rocrtst::kMaxTestAllocAsan / gran_sz) * gran_sz;
 #endif
 
+  // A zero-byte request is rejected as an invalid argument, and a small pool
+  // reaches this on an idle machine, so skip rather than fail.
+  if (allocate_sz1 == 0) {
+    rocrtst::SkipCurrentTest(
+        "no allocation can be sized: availability or pool capacity is below "
+        "two allocation granules");
+    return;
+  }
+
   err = hsa_amd_memory_pool_allocate(pool, allocate_sz1, 0, &memPtr1);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+
+  // The checks below are fatal assertions, so without this guard a failure
+  // part way through holds half the device's free memory for the whole run.
+  MAKE_NAMED_SCOPE_GUARD(memPtr1Guard, [&]() {
+    EXPECT_SUCCESS(hsa_amd_memory_pool_free(memPtr1)) << "Cleanup of memPtr1 failed";
+  });
 
   hsa_amd_pointer_info_t info = {};
   info.size = sizeof(info);
@@ -497,14 +529,20 @@ void MemoryTest::MemAvailableTest(hsa_agent_t ag, hsa_amd_memory_pool_t pool) {
                             &ag_avail_memory_after);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
-  // Memory available after could be smaller because of fragmentation
-  ASSERT_GE(ag_avail_memory_before - allocate_sz1, ag_avail_memory_after);
+  // The charge covers at least what was asked for; ROCr may back it with more.
+  uint64_t vram_after_alloc1 = 0;
+  if (vram_accounted) {
+    ASSERT_TRUE(rocrtst::GetProcessVramUsage(ag, &vram_after_alloc1));
+    ASSERT_GE(vram_after_alloc1, vram_before + allocate_sz1);
+  }
 
-  // Try to allocate 30%/80% of remaining
+  // Try to allocate 30%/80% of remaining, in granule units like the first
+  // allocation. The previous form cancelled gran_sz out and never rounded.
+  uint64_t avail_sz2 = std::min<uint64_t>(pool_sz, ag_avail_memory_after / gran_sz);
   if (pool_i.aggregate_alloc_max <= 536870912)
-    allocate_sz2 = (0.3 * ag_avail_memory_after * gran_sz) / gran_sz;
+    allocate_sz2 = (avail_sz2 * 3 / 10) * gran_sz;
   else
-    allocate_sz2 = (0.8 * ag_avail_memory_after * gran_sz) / gran_sz;
+    allocate_sz2 = (avail_sz2 * 8 / 10) * gran_sz;
 #ifdef ROCRTST_ASAN
   // ASAN's intercepted allocator cannot handle huge allocations.  Cap each
   // allocation to kMaxTestAllocAsan.
@@ -512,20 +550,30 @@ void MemoryTest::MemAvailableTest(hsa_agent_t ag, hsa_amd_memory_pool_t pool) {
     allocate_sz2 = (rocrtst::kMaxTestAllocAsan / gran_sz) * gran_sz;
 #endif
 
-
-  err = hsa_amd_memory_pool_allocate(pool, allocate_sz2, 0, &memPtr2);
-  if (err != HSA_STATUS_SUCCESS) {
-    hsa_status_t free_err = hsa_amd_memory_pool_free(memPtr1);
-    EXPECT_EQ(free_err, HSA_STATUS_SUCCESS) << "Cleanup of memPtr1 failed";
+  // Same zero-size case as the first allocation; memPtr1's guard frees it.
+  if (allocate_sz2 == 0) {
+    rocrtst::SkipCurrentTest(
+        "no second allocation can be sized from the remaining availability");
+    return;
   }
+
+  // memPtr1 is released by its scope guard if this allocation fails.
+  err = hsa_amd_memory_pool_allocate(pool, allocate_sz2, 0, &memPtr2);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+
+  MAKE_NAMED_SCOPE_GUARD(memPtr2Guard, [&]() {
+    EXPECT_SUCCESS(hsa_amd_memory_pool_free(memPtr2)) << "Cleanup of memPtr2 failed";
+  });
 
   err = hsa_agent_get_info(ag, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MEMORY_AVAIL,
                             &ag_avail_memory_after);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
-  ASSERT_GE(ag_avail_memory_before - (allocate_sz1 + allocate_sz2),
-                            ag_avail_memory_after);
+  if (vram_accounted) {
+    uint64_t vram_after_alloc2 = 0;
+    ASSERT_TRUE(rocrtst::GetProcessVramUsage(ag, &vram_after_alloc2));
+    ASSERT_GE(vram_after_alloc2, vram_after_alloc1 + allocate_sz2);
+  }
 
   if (verbosity() > 0) {
     std::cout << "  Available memory before: " << ag_avail_memory_before << std::endl;
@@ -534,10 +582,14 @@ void MemoryTest::MemAvailableTest(hsa_agent_t ag, hsa_amd_memory_pool_t pool) {
     std::cout << "   Available memory after: " << ag_avail_memory_after << std::endl;
   }
 
+  // Dismiss each guard as soon as its free has been attempted, whatever the
+  // status: the memory must not be handed to hsa_amd_memory_pool_free twice.
   err = hsa_amd_memory_pool_free(memPtr1);
+  memPtr1Guard.Dismiss();
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
   err = hsa_amd_memory_pool_free(memPtr2);
+  memPtr2Guard.Dismiss();
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
   DrainAsanQuarantine();
@@ -546,7 +598,16 @@ void MemoryTest::MemAvailableTest(hsa_agent_t ag, hsa_amd_memory_pool_t pool) {
                             &ag_avail_memory_after);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
-  ASSERT_EQ(ag_avail_memory_before, ag_avail_memory_after);
+  // Everything this test allocated is released, so every byte KFD charged it
+  // must have been refunded. Exact: the charge and the refund are the same
+  // page-aligned figure, and no other process can move this counter.
+  if (vram_accounted) {
+    uint64_t vram_end = 0;
+    ASSERT_TRUE(rocrtst::GetProcessVramUsage(ag, &vram_end));
+    ASSERT_EQ(vram_end, vram_before)
+        << "VRAM charged to this process before the test " << vram_before
+        << ", after releasing everything " << vram_end << ".";
+  }
 
   if (verbosity() > 0) {
     std::cout << "     Available memory end: " << ag_avail_memory_after << std::endl;
@@ -560,6 +621,7 @@ void MemoryTest::MemAvailableTest(void) {
 
   PrintMemorySubtestHeader("Memory Available Allocation in Memory Pools");
 
+  vram_skip_reported = false;
   err = rocrtst::GetAgentPools(&agent_pools);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 

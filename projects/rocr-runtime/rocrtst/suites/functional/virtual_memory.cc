@@ -1309,6 +1309,10 @@ void VirtMemoryTestBasic::GPUAccessToGPUMemoryTest(void) {
   }
 }
 
+// Latched per test by the caller below, so an unreadable counter is reported
+// once rather than once for every agent pool.
+static bool vram_skip_reported = false;
+
 void VirtMemoryTestBasic::MemoryAccountingTest(hsa_agent_t agent, hsa_amd_memory_pool_t pool) {
   if (verbosity() > 0) {
     PrintAgentNameAndType(agent);
@@ -1340,32 +1344,84 @@ void VirtMemoryTestBasic::MemoryAccountingTest(hsa_agent_t agent, hsa_amd_memory
   size_t granule_size = pool_i.alloc_rec_granule;
   size_t allocation_size = 10 * granule_size;
 
+  // Queried at each step to check the attribute answers, not compared across
+  // steps: it is device-wide, so no comparison of two readings is sound.
   size_t amount_begin = 0, amount_current = 0;
   void* reserved_addr = nullptr;
   hsa_amd_vmem_alloc_handle_t mem_handle;
 
   ASSERT_SUCCESS(hsa_agent_get_info(agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MEMORY_AVAIL, &amount_begin));
+
+  // MEMORY_AVAIL is device-wide, so any other process on this GPU moves it.
+  // The charge against this process is judged on KFD's per-process counter.
+  uint64_t vram_before = 0;
+  const bool vram_accounted = rocrtst::GetProcessVramUsage(agent, &vram_before);
+  // Report the drop rather than passing silently with nothing asserted, once
+  // per test: this runs per pool, and one skip per pool inflates the summary.
+  if (!vram_accounted && !vram_skip_reported) {
+    vram_skip_reported = true;
+    rocrtst::SkipCurrentTest("KFD per-process VRAM counter not readable");
+  }
+
   ASSERT_SUCCESS(hsa_amd_vmem_address_reserve(&reserved_addr, allocation_size, 0, 0));
+
+  // The checks below are fatal assertions, so without these guards a failure
+  // part way through leaks. They destruct in order: unmap, release, free.
+  MAKE_NAMED_SCOPE_GUARD(addrGuard,
+                         [&]() { EXPECT_SUCCESS(hsa_amd_vmem_address_free(reserved_addr, allocation_size)); });
 
   hsa_amd_pointer_info_t ptr_info = {};
   ptr_info.size = sizeof(ptr_info);
   ASSERT_SUCCESS(hsa_amd_pointer_info(reserved_addr, &ptr_info, nullptr, nullptr, nullptr));
   ASSERT_SUCCESS(hsa_amd_vmem_handle_create(pool, allocation_size, MEMORY_TYPE_NONE, 0, &mem_handle));
 
+  MAKE_NAMED_SCOPE_GUARD(handleGuard, [&]() { EXPECT_SUCCESS(hsa_amd_vmem_handle_release(mem_handle)); });
+
   ASSERT_SUCCESS(hsa_agent_get_info(agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MEMORY_AVAIL, &amount_current));
-  ASSERT_NEAR(amount_begin - amount_current, allocation_size, 4096);
+  // The handle commits the whole reserved size through one KFD allocation, so
+  // the charge is exactly it. Address reserve above takes no VRAM.
+  if (vram_accounted) {
+    uint64_t vram_after_create = 0;
+    ASSERT_TRUE(rocrtst::GetProcessVramUsage(agent, &vram_after_create));
+    ASSERT_EQ(vram_after_create - vram_before, allocation_size)
+        << "VRAM charged to this process before handle create " << vram_before
+        << ", after " << vram_after_create << ", requested " << allocation_size << ".";
+  }
 
   ASSERT_SUCCESS(hsa_amd_vmem_map(reserved_addr, allocation_size, 0, mem_handle, 0));
+
+  MAKE_NAMED_SCOPE_GUARD(mapGuard,
+                         [&]() { EXPECT_SUCCESS(hsa_amd_vmem_unmap(reserved_addr, allocation_size)); });
 
   hsa_amd_memory_access_desc_t access_desc = {HSA_ACCESS_PERMISSION_RW, agent};
   ASSERT_SUCCESS(hsa_amd_vmem_set_access(reserved_addr, allocation_size, &access_desc, 1));
 
-  ASSERT_SUCCESS(hsa_amd_vmem_unmap(reserved_addr, allocation_size));
-  ASSERT_SUCCESS(hsa_amd_vmem_handle_release(mem_handle));
-  ASSERT_SUCCESS(hsa_amd_vmem_address_free(reserved_addr, allocation_size));
+  // Dismiss each guard as soon as its release has been attempted, whatever the
+  // status: none of these may be given back twice.
+  err = hsa_amd_vmem_unmap(reserved_addr, allocation_size);
+  mapGuard.Dismiss();
+  ASSERT_SUCCESS(err);
+
+  err = hsa_amd_vmem_handle_release(mem_handle);
+  handleGuard.Dismiss();
+  ASSERT_SUCCESS(err);
+
+  err = hsa_amd_vmem_address_free(reserved_addr, allocation_size);
+  addrGuard.Dismiss();
+  ASSERT_SUCCESS(err);
 
   ASSERT_SUCCESS(hsa_agent_get_info(agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MEMORY_AVAIL, &amount_current));
-  ASSERT_EQ(amount_begin, amount_current);
+
+  // The handle is released, so KFD must have refunded the whole charge. Exact:
+  // it refunds the same page-aligned figure it charged, and no other process
+  // can move this counter.
+  if (vram_accounted) {
+    uint64_t vram_end = 0;
+    ASSERT_TRUE(rocrtst::GetProcessVramUsage(agent, &vram_end));
+    ASSERT_EQ(vram_end, vram_before)
+        << "VRAM charged to this process before the test " << vram_before
+        << ", after releasing everything " << vram_end << ".";
+  }
 }
 
 void VirtMemoryTestBasic::MemoryAccountingTest(void) {
@@ -1376,6 +1432,7 @@ void VirtMemoryTestBasic::MemoryAccountingTest(void) {
     PrintMemorySubtestHeader("Memory Accounting Test");
   }
 
+  vram_skip_reported = false;
   err = rocrtst::GetAgentPools(&agent_pools);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 

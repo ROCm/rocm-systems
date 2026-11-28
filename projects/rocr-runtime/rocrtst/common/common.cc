@@ -51,7 +51,10 @@
 #include "gtest/gtest.h"
 #include <assert.h>
 #include <fcntl.h>
+#include <stdlib.h>
+#include <sys/stat.h>
 #include <unistd.h>
+#include <fstream>
 #include <sstream>
 #include <string>
 #include <memory>
@@ -137,6 +140,42 @@ bool SkipCurrentTest(const char* reason) {
 
   SkippedTestTracker::getInstance().recordSkip(test_name, reason);
   std::cout << "[ SKIPPED ] " << test_name << " : " << reason << "\n";
+  return true;
+}
+
+bool GetProcessVramUsage(hsa_agent_t agent, uint64_t* usage) {
+  if (usage == nullptr) return false;
+
+  // On an APU this diverts allocation to a dmabuf import, which KFD never
+  // charges to the counter, so report it unreadable rather than assert on it.
+  const char* udmabuf = getenv("HSA_USE_UDMABUF");
+  if (udmabuf != nullptr && atoi(udmabuf) != 0) return false;
+
+  // DRIVER_UID is the KFD gpu_id, which is what names the counter file.
+  uint32_t gpu_id = 0;
+  if (hsa_agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DRIVER_UID),
+                         &gpu_id) != HSA_STATUS_SUCCESS) {
+    return false;
+  }
+
+  const std::string proc_dir =
+      "/sys/class/kfd/kfd/proc/" + std::to_string(static_cast<int>(getpid()));
+  struct stat st;
+  // KFD names the node with the init-namespace pid, so in a PID namespace this
+  // either misses or, worse, names another process. Missing is the usual case
+  // and is reported as not readable, never as a zero charge.
+  if (stat(proc_dir.c_str(), &st) != 0) return false;
+
+  // KFD creates one of these per permitted GPU when the process first opens
+  // /dev/kfd, so an absent file means this agent is not one of them, not that
+  // nothing has been charged yet.
+  std::ifstream file(proc_dir + "/vram_" + std::to_string(gpu_id));
+  if (!file.is_open()) return false;
+
+  uint64_t value = 0;
+  if (!(file >> value)) return false;
+
+  *usage = value;
   return true;
 }
 

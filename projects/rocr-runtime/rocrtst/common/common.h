@@ -319,5 +319,10 @@ hsa_status_t GetAgentPools(
 static constexpr size_t kMaxTestAllocAsan = 512ULL * 1024 * 1024;  // 512 MB
 #endif
 
+/// This process's own VRAM charge on |agent| in bytes, from KFD's per-process
+/// counter, which no other process can move. Returns false with |usage|
+/// untouched when unreadable: skip the check, never assume a zero charge.
+bool GetProcessVramUsage(hsa_agent_t agent, uint64_t* usage);
+
 }  // namespace rocrtst
 #endif  // ROCRTST_COMMON_COMMON_H_
