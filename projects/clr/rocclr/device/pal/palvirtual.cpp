@@ -3594,6 +3594,7 @@ bool VirtualGPU::allocConstantBuffers() {
 }
 
 void VirtualGPU::profilingBegin(amd::Command& command) {
+  profileTs_ = nullptr;
   // Is profiling enabled?
   if (command.profilingInfo().enabled_) {
     // Allocate a timestamp object from the cache
