@@ -1,9 +1,10 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// Sparse floating matrix validation and dispatch, with MI300X exact mode for gfx942 forms.
+// Sparse floating matrix validation and dispatch, with MI300X/MI350X exact modes.
 #include "mfma/backends.h"
 #include "mfma/gfx942_exact.h"
+#include "mfma/gfx950_exact.h"
 #include "mfma/sparse_float.h"
 #include "rj_arith/detail/rj_arith_common.h"
 #include "rj_arith/detail/rj_arith_mfma.h"
@@ -18,8 +19,8 @@ int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32
                            kMatrixIgnoredFpFlags | RJ_ARITH_FP_DX10_CLAMP_OFF)) {
     return error;
   }
-  // All 12 captured gfx942 forms support exact modes for both FP16_OVFL=0 and 1.
-  // Compatibility retains the existing fast approximate implementation.
+  // gfx942 compact forms and gfx950 compact/wide forms are qualified across all CBSZ/ABID
+  // metadata selectors and both FP16_OVFL states. Compatibility retains the approximate path.
   if constexpr (Gfx942) {
     if (is_exact(flags)) {
       constexpr MfmaGfx942Format format =
@@ -42,6 +43,13 @@ int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32
       smfmac_gfx942_exact(format, M, controls, no_inf_nan, d, a, b, index);
       return RJ_ARITH_SUCCESS;
     }
+  } else if (is_exact(flags)) {
+    constexpr auto format =
+        Bits == 16 ? (BfA ? MfmaGfx950Format::Bf16 : MfmaGfx950Format::F16)
+                   : (BfA ? (BfB ? MfmaGfx950Format::Bf8Bf8 : MfmaGfx950Format::Bf8Fp8)
+                          : (BfB ? MfmaGfx950Format::Fp8Bf8 : MfmaGfx950Format::Fp8Fp8));
+    smfmac_gfx950_exact(format, M, K, controls, (flags & RJ_ARITH_FP16_OVFL) != 0, d, a, b, index);
+    return RJ_ARITH_SUCCESS;
   }
   if ((flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
     return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
@@ -85,7 +93,6 @@ int rj_arith_v_smfmac_f32_16x16x32_f16_w64(uint64_t flags, uint64_t controls, ui
   return evaluate<16, 32, 16, false, false, false, true>(flags, controls, d, a, b, index);
 }
 
-// Evaluate the gfx950 form using the existing approximate model.
 int rj_arith_v_smfmac_f32_16x16x32_f16_w64_gfx950(uint64_t flags, uint64_t controls,
                                                   uint32_t *const *d, const uint32_t *const *a,
                                                   const uint32_t *const *b,
@@ -100,7 +107,6 @@ int rj_arith_v_smfmac_f32_16x16x32_bf16_w64(uint64_t flags, uint64_t controls, u
   return evaluate<16, 32, 16, true, true, false, true>(flags, controls, d, a, b, index);
 }
 
-// Evaluate the gfx950 form using the existing approximate model.
 int rj_arith_v_smfmac_f32_16x16x32_bf16_w64_gfx950(uint64_t flags, uint64_t controls,
                                                    uint32_t *const *d, const uint32_t *const *a,
                                                    const uint32_t *const *b,
@@ -115,7 +121,6 @@ int rj_arith_v_smfmac_f32_32x32x16_f16_w64(uint64_t flags, uint64_t controls, ui
   return evaluate<32, 16, 16, false, false, false, true>(flags, controls, d, a, b, index);
 }
 
-// Evaluate the gfx950 form using the existing approximate model.
 int rj_arith_v_smfmac_f32_32x32x16_f16_w64_gfx950(uint64_t flags, uint64_t controls,
                                                   uint32_t *const *d, const uint32_t *const *a,
                                                   const uint32_t *const *b,
@@ -130,7 +135,6 @@ int rj_arith_v_smfmac_f32_32x32x16_bf16_w64(uint64_t flags, uint64_t controls, u
   return evaluate<32, 16, 16, true, true, false, true>(flags, controls, d, a, b, index);
 }
 
-// Evaluate the gfx950 form using the existing approximate model.
 int rj_arith_v_smfmac_f32_32x32x16_bf16_w64_gfx950(uint64_t flags, uint64_t controls,
                                                    uint32_t *const *d, const uint32_t *const *a,
                                                    const uint32_t *const *b,

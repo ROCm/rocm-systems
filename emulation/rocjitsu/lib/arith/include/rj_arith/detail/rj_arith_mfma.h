@@ -347,17 +347,19 @@ int rj_arith_v_mfma_i32_32x32x32_i8_w64(uint64_t flags, uint64_t controls, uint3
 // M*K*batch/128 VGPRs each, C and D use M*M*batch/64; each pointer addresses 64 words.
 // CBSZ 0..4 broadcasts A blocks; reserved 5..7 retain identity, and ABID wraps
 // within the chosen block count. BLGP 0..7 selects the legacy B lane permutation.
-// For gfx950 BF16 instructions, set RJ_ARITH_FP16_OVFL to saturate finite FP32
-// overflow. Infinities from source operands are preserved.
+// In Loose and Compatibility on gfx950 BF16 instructions, RJ_ARITH_FP16_OVFL
+// saturates finite FP32 overflow while preserving infinities from source operands;
 // gfx942 approximate arithmetic ignores FP16_OVFL, preserving its legacy policy.
 // Compatibility and Loose retain approximate arithmetic. On gfx942, the five
 // original FP16/BF16 shapes and both XF32 shapes with zero CBSZ/ABID/BLGP
-// support exact modes for both FP16_OVFL=0 and FP16_OVFL=1 (which flushes NaN
-// to +0.0 and clamps +-Inf to +-MAX_FLOAT after each internal K-step);
-// exact-allow-Loose falls back when source controls are non-zero.
-// The wider gfx950-only forms and the _gfx950 variants remain approximate;
-// strict requests return UNSUPPORTED_SEMANTICS. All inputs are consumed before D is stored
-// in register order. Aliasing is supported; errors leave D unchanged.
+// support exact modes for both FP16_OVFL=0 and FP16_OVFL=1 (flushing NaN to +0.0
+// and clamping +-Inf to +-MAX_FLOAT after each internal K-step). On gfx950, all
+// fourteen FP16/BF16 shapes (the ten _gfx950 variants plus 16x16x32 and 32x32x16)
+// support exact modes with zero CBSZ/ABID/BLGP for both FP16_OVFL=0 and
+// FP16_OVFL=1 (flushing NaN to +0.0 and clamping +-Inf, including source
+// infinities, to +-MAX_FLOAT after each pass); _gfx950 XF32 remains approximate.
+// Exact-allow-Loose falls back outside qualified controls. All inputs are consumed
+// before D is stored in register order. Aliasing is supported; errors leave D unchanged.
 int rj_arith_v_mfma_f32_32x32x4_2b_f16_w64(uint64_t flags, uint64_t instruction_flags,
                                            uint32_t *const *d, const uint32_t *const *a,
                                            const uint32_t *const *b, const uint32_t *const *c);
@@ -430,8 +432,10 @@ int rj_arith_v_mfma_f32_32x32x4_xf32_w64(uint64_t flags, uint64_t instruction_fl
 // FP8/BF8 MFMA: A/B two packed VGPRs, C/D four for 16x16 or sixteen for 32x32.
 // Unsuffixed forms use gfx942 FNUZ (bias 8/16, sole NaN 0x80); gfx950 forms use
 // OCP E4M3FN/E5M2 (bias 7/15). The suffix distinguishes different arithmetic
-// behind the same ISA mnemonic. gfx942 exact-mode qualification follows the
-// half-input contract above; gfx950 strict modes remain unsupported.
+// behind the same ISA mnemonic. Both targets support exact modes with zero
+// CBSZ/ABID/BLGP across both FP16_OVFL states (flushing NaN to +0.0 and clamping
+// +-Inf to +-MAX_FLOAT after each pass; gfx950 uses two 13-bit-aligned 8-product
+// chunks per 16-product pass).
 // Source controls, whole-wave participation, aliasing and error rules above apply.
 int rj_arith_v_mfma_f32_16x16x32_fp8_fp8_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
                                              const uint32_t *const *a, const uint32_t *const *b,
@@ -550,13 +554,14 @@ int rj_arith_v_mfma_scale_f32_32x32x64_f8f6f4_w64(uint64_t flags, uint64_t contr
 // first set is used; wide FP8/BF8 forms consume all 32 bits and ignore ABID.
 // Compatibility preserves the legacy fused reduction and NaN priority.
 // The 12 compact gfx942 forms (unsuffixed 16x16x32/32x32x16 F16/BF16 and
-// 16x16x64/32x32x32 FNUZ FP8/BF8) support empirical bit-exact modes for both
-// RJ_ARITH_FP16_OVFL=0 and 1. Wide and *_gfx950 forms remain loose-only.
-// FP status is untouched.
+// 16x16x64/32x32x32 FNUZ FP8/BF8) and all 24 gfx950 forms (compact _gfx950 and
+// wide unsuffixed F16/BF16 and OCP FP8/BF8) support empirical bit-exact modes
+// across all CBSZ/ABID selectors and both RJ_ARITH_FP16_OVFL states.
+// BitExactEmpiricalAllowLoose falls back outside that qualification. FP status is untouched.
 // FP8 unsuffixed compact forms use gfx942 FNUZ; gfx950 forms use OCP encodings.
-// RJ_ARITH_FP16_OVFL saturates finite-input overflow on gfx950, and applies
-// MI300X per-step no-Inf/NaN clamping in gfx942 exact modes while approximate
-// gfx942 paths continue to ignore it.
+// Under RJ_ARITH_FP16_OVFL, exact modes on both targets flush NaN to +0.0 and clamp
+// +-Inf (including source infinities) to +-MAX_FLOAT after each pass; Loose and
+// Compatibility saturate finite-input overflow on gfx950 and ignore it on gfx942.
 int rj_arith_v_smfmac_f32_16x16x32_f16_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
                                            const uint32_t *const *a, const uint32_t *const *b,
                                            const uint32_t *const *index);
@@ -694,8 +699,10 @@ int rj_arith_v_smfmac_f32_32x32x64_bf8_bf8_w64(uint64_t flags, uint64_t controls
                                                const uint32_t *const *b,
                                                const uint32_t *const *index);
 
-// gfx950 variants of the shared half/XF32 mnemonics retain approximate arithmetic.
-// They do not inherit gfx942's empirical qualification.
+// gfx950 variants of the shared half/XF32 mnemonics retain approximate arithmetic
+// in Compatibility and Loose. The ten half-input _gfx950 forms support MI350X
+// exact modes with zero CBSZ/ABID/BLGP across both FP16_OVFL states; the two
+// XF32 _gfx950 forms remain loose-only.
 int rj_arith_v_mfma_f32_16x16x16_bf16_w64_gfx950(uint64_t flags, uint64_t instruction_flags,
                                                  uint32_t *const *d, const uint32_t *const *a,
                                                  const uint32_t *const *b,

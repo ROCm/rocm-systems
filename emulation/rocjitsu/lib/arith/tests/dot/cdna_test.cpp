@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// CDNA vector dots retain host FP32 pair-sum arithmetic, modifiers and aliasing.
-// The reference is the inherited expression, not a new hardware-exact model.
+// CDNA vector dots: Compatibility and Loose retain host FP32 pair-sum arithmetic, while gfx950
+// BF16 exact modes use the MI350X-calibrated 2-product integer model.
 
 #include "common/floating_point.h"
 #include "dot/helpers.h"
@@ -33,10 +33,13 @@ template <int Lanes, bool Bf16, bool Accumulate, typename Call> void check(Call 
             uint32_t status = 0x123U;
             const int expected_error =
                 (mode & ~(Accumulate ? 0ULL : 0x7ffULL)) ? RJ_ARITH_ERROR_INVALID_FLAGS
-                : semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
-                        semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL
-                    ? RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS
-                    : RJ_ARITH_SUCCESS;
+                : Bf16 ? (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL
+                              ? RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS
+                              : RJ_ARITH_SUCCESS)
+                       : (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+                                  semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL
+                              ? RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS
+                              : RJ_ARITH_SUCCESS);
             const uint64_t flags = cpu | semantics | RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
                                    RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS | RJ_ARITH_FP_ROUND_MASK |
                                    RJ_ARITH_FP16_OVFL;
@@ -212,4 +215,60 @@ TEST(Dot2F32F16Gfx950, ExactArithmeticAndContracts) {
   check_gfx950.template operator()<64, false>(rj_arith_v_dot2_f32_f16_w64_gfx950);
   check_gfx950.template operator()<32, true>(rj_arith_v_dot2c_f32_f16_w32_gfx950);
   check_gfx950.template operator()<64, true>(rj_arith_v_dot2c_f32_f16_w64_gfx950);
+}
+
+TEST(Dot2F32Bf16Gfx950Exact, MatchesCapturedMi350xCasesAndIgnoresFp16Ovfl) {
+  struct CapturedCase {
+    uint32_t a, b, c;
+    uint64_t mode;
+    uint32_t expected;
+  };
+  // Captured on AMD Instinct MI350X (gfx950), including 1-ULP rounding differences from host
+  // FP32 (low + high) + c, all-negative-zero -> +0.0, canonical 0xffc00000 NaNs, and ignored
+  // CLAMP / FP16_OVFL.
+  constexpr CapturedCase kCases[] = {
+      {0xe19e5e1eu, 0x58a755c7u, 0xa500a602u, 0, 0xface1c54u},
+      {0xdaa56525u, 0x0bb90b7bu, 0x89f7a640u, 0, 0x3121c6f8u},
+      {0xccb37333u, 0xaad839acu, 0xe5e68ad8u, 0, 0x6d708632u},
+      {0x00008000u, 0x80000001u, 0x80000000u, 0, 0x00000000u},
+      {0xee915111u, 0xaead4c8au, 0x40310a47u,
+       RJ_ARITH_DOT_NEG_LO_A | RJ_ARITH_DOT_NEG_HI_B | RJ_ARITH_DOT_CLAMP, 0xde7e5100u},
+      {0xee915111u, 0xaead4c8au, 0x40310a47u,
+       RJ_ARITH_DOT_NEG_LO_A | RJ_ARITH_DOT_NEG_LO_B | RJ_ARITH_DOT_NEG_C | RJ_ARITH_DOT_NEG_HI_B |
+           RJ_ARITH_DOT_ABS_C,
+       0x5d695bfeu},
+      {0x00008000u, 0x7f800005u, 0x80000001u, 0, 0xffc00000u},
+      // BF16 2^64 * 2^64 = 2^128 product counts as +Inf even with C = -2^127 and FP16_OVFL set.
+      {0x00005f80u, 0x00005f80u, 0xff000000u, RJ_ARITH_DOT_CLAMP, 0x7f800000u},
+  };
+  for (const auto &tc : kCases) {
+    for (uint64_t cpu : supported_cpu_levels()) {
+      for (uint64_t sem : {RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE,
+                           RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS}) {
+        for (uint64_t ovfl : {uint64_t{0}, RJ_ARITH_FP16_OVFL}) {
+          std::array<uint32_t, 64> av{}, bv{}, cv{}, dv{};
+          av.fill(tc.a);
+          bv.fill(tc.b);
+          cv.fill(tc.c);
+          dv.fill(0xdeadbeefu);
+          const uint32_t *ap[] = {av.data()}, *bp[] = {bv.data()}, *cp[] = {cv.data()};
+          uint32_t *dp[] = {dv.data()};
+          uint32_t status = 0x55aau;
+          ASSERT_EQ(rj_arith_v_dot2_f32_bf16_w64_gfx950(cpu | sem | ovfl, ~uint64_t{0}, tc.mode, dp,
+                                                        ap, bp, cp, &status),
+                    RJ_ARITH_SUCCESS);
+          EXPECT_EQ(status, 0x55aau);
+          EXPECT_EQ(dv[0], tc.expected);
+          EXPECT_EQ(dv[63], tc.expected);
+          if (tc.mode == 0) {
+            dv.fill(tc.c);
+            ASSERT_EQ(rj_arith_v_dot2c_f32_bf16_w64_gfx950(cpu | sem | ovfl, ~uint64_t{0}, 0, dp,
+                                                           ap, bp, &status),
+                      RJ_ARITH_SUCCESS);
+            EXPECT_EQ(dv[0], tc.expected);
+          }
+        }
+      }
+    }
+  }
 }

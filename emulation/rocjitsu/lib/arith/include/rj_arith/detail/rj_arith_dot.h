@@ -318,9 +318,11 @@ int rj_arith_v_dot4_u32_u8_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
                                        const uint32_t *const *a, const uint32_t *const *b,
                                        const uint32_t *const *c);
 // CDNA FP16/BF16 DOT2 uses one packed A/B VGPR and one FP32 C/D VGPR.
-// Compatibility inherits host FP32 pair-sum-then-C arithmetic; Loose may differ
-// from GPU rounding. Strict exact modes are unsupported. Guest FP modes and CLAMP
-// are ignored. DOT2C accumulates into old D and requires instruction_flags == 0.
+// Compatibility and Loose inherit host FP32 pair-sum-then-C SIMD arithmetic.
+// On gfx942 FP16, strict exact modes are unsupported. On gfx950 BF16, exact modes
+// without FP-status reporting use the MI350X-calibrated 2-product integer model
+// (mode 3 returns UNSUPPORTED_FP_STATUS). Guest FP modes and CLAMP are ignored.
+// DOT2C accumulates into old D and requires instruction_flags == 0.
 // FP status is unchanged. Wave32/64 preserve inactive lanes and allow D/input aliasing.
 int rj_arith_v_dot2_f32_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask,
                                        uint64_t instruction_flags, uint32_t *const *d,

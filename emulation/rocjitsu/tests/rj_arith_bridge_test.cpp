@@ -12763,7 +12763,7 @@ TEST(ArithBridgeTest, CdnaFloatingMfmaUsesLibraryPolicyAndAccumulatorBank) {
         auto instruction = decoder->decode_window(words);
         ASSERT_TRUE(instruction.succeeded());
         const bool unsupported = semantics == ArithmeticSemantics::BitExactEmpiricalNoFpStatus &&
-                                 !(test.fp8 && !cdna4) && !(test.fp32 && cdna4);
+                                 !test.fp8 && !(test.fp32 && cdna4);
         recorder->writes.clear();
         EXPECT_EQ(cu->execute_instruction(instruction.value().get(), *wave).succeeded(),
                   !unsupported);
@@ -20075,18 +20075,10 @@ TEST(ArithBridgeTest, Gfx942SmfmacExactUsesGroupedRoundingAndIsolatesGfx950) {
                       {.vdst = 16, .abid = 2, .acc_cd = 0, .src0 = 256, .src1 = 260, .src2 = 268});
       auto decoded = fixture.decoder->decode_window(words);
       ASSERT_TRUE(decoded.succeeded());
-      const bool rejected =
-          cdna4 && (semantics == ArithmeticSemantics::BitExactEmpiricalNoFpStatus ||
-                    semantics == ArithmeticSemantics::BitExactEmpirical);
       fixture.recorder->writes.clear();
-      EXPECT_EQ(fixture.cu->execute_instruction(decoded.value().get(), *fixture.wave).succeeded(),
-                !rejected);
-      if (rejected) {
-        EXPECT_TRUE(fixture.recorder->writes.empty());
-        EXPECT_EQ(fixture.cu->read_vgpr(base + 16, 0), 0x80000000U);
-        continue;
-      }
-      const bool approximate = cdna4 || semantics == ArithmeticSemantics::Compatibility ||
+      ASSERT_TRUE(
+          fixture.cu->execute_instruction(decoded.value().get(), *fixture.wave).succeeded());
+      const bool approximate = semantics == ArithmeticSemantics::Compatibility ||
                                semantics == ArithmeticSemantics::Loose;
       EXPECT_EQ(fixture.cu->read_vgpr(base + 16, 0), approximate ? 0x3f7fffffU : 0x3f800000U);
     }
@@ -20939,6 +20931,99 @@ TEST(ArithBridgeTest, Cdna4F32F64MfmaDot2F16AndMadMixExact) {
                       .succeeded());
       EXPECT_EQ(allow_loose_fixture.cu->read_vgpr(allow_loose_fixture.base() + 3, 0), 0x00400000U);
     }
+  }
+}
+
+TEST(ArithBridgeTest, Cdna4Dot2MfmaAndSmfmacExactAndFp16Ovfl) {
+  // 1. CDNA4 V_DOT2_F32_BF16 and V_DOT2C_F32_BF16 keep Loose SIMD in Compatibility/Loose, use the
+  // MI350X 2-product integer model in AllowLoose/NoFpStatus, ignore MODE.FP16_OVFL, and reject
+  // mode 3.
+  for (auto semantics :
+       {ArithmeticSemantics::Loose, ArithmeticSemantics::Compatibility,
+        ArithmeticSemantics::BitExactEmpiricalAllowLoose,
+        ArithmeticSemantics::BitExactEmpiricalNoFpStatus, ArithmeticSemantics::BitExactEmpirical}) {
+    for (bool ovfl : {false, true}) {
+      BridgeFixture f(rocjitsu::IsaFamily::Cdna4, 64, {semantics});
+      ASSERT_NE(f.wave, nullptr);
+      f.wave->set_exec(1ULL);
+      f.wave->set_mode_raw(ovfl ? Wavefront::FP16_OVFL_BIT : 0U);
+      f.wave->set_trapsts(0x20U);
+      f.cu->write_vgpr(f.base() + 0, 0, 0xe19e5e1eU);
+      f.cu->write_vgpr(f.base() + 1, 0, 0x58a755c7U);
+      f.cu->write_vgpr(f.base() + 2, 0, 0xa500a602U);
+      f.cu->write_vgpr(f.base() + 3, 0, 0xdeadbeefU);
+      const auto words = cdna4::build_vop3p(
+          cdna4::kVDot2F32Bf16Vop3p,
+          {.vdst = 3, .clamp = 1, .src0 = 256, .src1 = 257, .src2 = 258, .op_sel_hi = 3});
+      auto inst = f.decoder->decode_window(words);
+      ASSERT_TRUE(inst.succeeded());
+      const bool rejected = semantics == ArithmeticSemantics::BitExactEmpirical;
+      EXPECT_EQ(f.cu->execute_instruction(inst.value().get(), *f.wave).succeeded(), !rejected);
+      EXPECT_EQ(f.wave->trapsts(), 0x20U);
+      const bool approximate = semantics == ArithmeticSemantics::Loose ||
+                               semantics == ArithmeticSemantics::Compatibility;
+      const uint32_t expected = rejected ? 0xdeadbeefU : approximate ? 0xface1c53U : 0xface1c54U;
+      EXPECT_EQ(f.cu->read_vgpr(f.base() + 3, 0), expected);
+    }
+  }
+
+  // 2. CDNA4 dense OCP FP8 and F16 MFMA forward MODE.FP16_OVFL to exact mode and gate non-zero
+  // CBSZ/ABID/BLGP, while F32 MFMA ignores MODE.FP16_OVFL.
+  for (bool ovfl : {false, true}) {
+    BridgeFixture f(rocjitsu::IsaFamily::Cdna4, 64, {ArithmeticSemantics::BitExactEmpirical}, 32);
+    ASSERT_NE(f.wave, nullptr);
+    f.wave->set_mode_raw(ovfl ? Wavefront::FP16_OVFL_BIT : 0U);
+    const auto base = f.base();
+    for (uint32_t r = 0; r < 16; ++r) {
+      for (uint32_t l = 0; l < 64; ++l) {
+        f.cu->write_vgpr(base + r, l, 0U);
+      }
+    }
+    // 16x16x32 OCP FP8: pass 0 (k=0, lane 0) has NaN 0x7f * 1.0; pass 1 (k=16, lane 32) has
+    // 1.0 * 1.0 = 1.0.
+    f.cu->write_vgpr(base + 0, 0, 0x0000007fU);
+    f.cu->write_vgpr(base + 0, 32, 0x00000038U);
+    f.cu->write_vgpr(base + 2, 0, 0x00000038U);
+    f.cu->write_vgpr(base + 2, 32, 0x00000038U);
+    auto fp8_words = cdna4::build_vop3p_mfma(cdna4::kVMfmaF3216x16x32Fp8Fp8Vop3pMfma,
+                                             {.vdst = 8, .src0 = 256, .src1 = 258, .src2 = 128});
+    auto fp8_inst = f.decoder->decode_window(fp8_words);
+    ASSERT_TRUE(fp8_inst.succeeded());
+    ASSERT_TRUE(f.cu->execute_instruction(fp8_inst.value().get(), *f.wave).succeeded());
+    EXPECT_EQ(f.cu->read_vgpr(base + 8, 0), ovfl ? 0x3f800000U : 0xffc00000U);
+
+    // 16x16x16 F16 _gfx950: pass 0 (k=0) has +Inf 0x7c00 * 1.0 -> +Inf (ovfl=0) or 0x7f7fffff
+    // (ovfl=1).
+    f.cu->write_vgpr(base + 0, 0, 0x00007c00U);
+    f.cu->write_vgpr(base + 0, 32, 0U);
+    f.cu->write_vgpr(base + 2, 0, 0x00003c00U);
+    f.cu->write_vgpr(base + 2, 32, 0U);
+    auto f16_words = cdna4::build_vop3p_mfma(cdna4::kVMfmaF3216x16x16F16Vop3pMfma,
+                                             {.vdst = 8, .src0 = 256, .src1 = 258, .src2 = 128});
+    auto f16_inst = f.decoder->decode_window(f16_words);
+    ASSERT_TRUE(f16_inst.succeeded());
+    ASSERT_TRUE(f.cu->execute_instruction(f16_inst.value().get(), *f.wave).succeeded());
+    EXPECT_EQ(f.cu->read_vgpr(base + 8, 0), ovfl ? 0x7f7fffffU : 0x7f800000U);
+
+    // Non-zero CBSZ on F16 MFMA remains unqualified in strict mode.
+    f.wave->clear_instruction_execution_error();
+    auto cbsz_words =
+        cdna4::build_vop3p_mfma(cdna4::kVMfmaF3216x16x16F16Vop3pMfma,
+                                {.vdst = 8, .cbsz = 1, .src0 = 256, .src1 = 258, .src2 = 128});
+    auto cbsz_inst = f.decoder->decode_window(cbsz_words);
+    ASSERT_TRUE(cbsz_inst.succeeded());
+    EXPECT_FALSE(f.cu->execute_instruction(cbsz_inst.value().get(), *f.wave).succeeded());
+
+    // F32 MFMA ignores MODE.FP16_OVFL (+Inf * 1.0 stays +Inf in both states).
+    f.wave->clear_instruction_execution_error();
+    f.cu->write_vgpr(base + 0, 0, 0x7f800000U);
+    f.cu->write_vgpr(base + 2, 0, 0x3f800000U);
+    auto f32_words = cdna4::build_vop3p_mfma(cdna4::kVMfmaF3216x16x4F32Vop3pMfma,
+                                             {.vdst = 8, .src0 = 256, .src1 = 258, .src2 = 128});
+    auto f32_inst = f.decoder->decode_window(f32_words);
+    ASSERT_TRUE(f32_inst.succeeded());
+    ASSERT_TRUE(f.cu->execute_instruction(f32_inst.value().get(), *f.wave).succeeded());
+    EXPECT_EQ(f.cu->read_vgpr(base + 8, 0), 0x7f800000U);
   }
 }
 } // namespace

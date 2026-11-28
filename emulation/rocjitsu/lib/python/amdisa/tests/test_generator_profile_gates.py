@@ -10065,7 +10065,7 @@ def test_half_mfma_migration_retains_bank_resolution(arch, format, shape):
     )
     assert 'amdgpu::arith::exec_dense_fp_matrix<' in body
     assert ('wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL' in body) == (
-        arch == 'cdna3' or arch == 'cdna4' and format == 'BF16'
+        arch in ('cdna3', 'cdna4')
     )
     assert 'inst_.acc_cd' in body
     assert f'{arch}::resolve_acc' in body
@@ -10114,7 +10114,7 @@ def test_fp8_mfma_library_dispatch_distinguishes_fnuz_and_ocp(arch, formats, m, 
     assert f'rj_arith_{name.lower()}_w64{suffix},' in body
     assert f'exec_dense_fp_matrix<2, {m * m // 64}, 64>' in body
     assert 'inst_.acc_cd' in body
-    assert ('wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL' in body) == (arch == 'cdna3')
+    assert 'wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL' in body
 
 
 @pytest.mark.parametrize('arch', ['cdna3', 'cdna4'])
