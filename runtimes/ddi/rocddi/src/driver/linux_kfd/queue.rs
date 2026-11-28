@@ -1359,6 +1359,37 @@ fn initialize_aql_control(
     storage.write_bytes(0, &bytes)
 }
 
+// KFD validates reported CWSR backing against its saved-wave debugger extent.
+// Discovery already divided array_count by simd_arrays_per_engine and XCCs
+// to obtain shader_engine_count_per_xcc; retain that single kernel division.
+fn gfx9_saved_waves(
+    properties: sysfs::KfdQueueProperties,
+    compute_units_per_xcc: u32,
+) -> Result<u32, Error> {
+    if properties.shader_engine_count_per_xcc == 0 {
+        return Err(error(
+            ErrorKind::Unsupported,
+            "missing GFX9 save-wave geometry",
+        ));
+    }
+    let overflow = || {
+        error(
+            ErrorKind::DriverContract,
+            "GFX9 context-save sizing overflows",
+        )
+    };
+    let wave_limit = properties
+        .shader_engine_count_per_xcc
+        .checked_mul(properties.xcc_count)
+        .and_then(|engines| engines.checked_mul(512))
+        .filter(|limit| *limit != 0)
+        .ok_or_else(overflow)?;
+    Ok(compute_units_per_xcc
+        .checked_mul(40)
+        .ok_or_else(overflow)?
+        .min(wave_limit))
+}
+
 fn compute_storage(properties: sysfs::KfdQueueProperties) -> Result<ComputeStorage, Error> {
     let xcc_count = properties.xcc_count;
     let context_size = properties.context_size;
@@ -1377,9 +1408,16 @@ fn compute_storage(properties: sysfs::KfdQueueProperties) -> Result<ComputeStora
             "KFD did not report usable queue context-save sizes",
         ));
     }
-    let debug_size = (properties.compute_units / xcc_count)
-        .checked_mul(properties.maximum_wave_count_per_compute_unit)
-        .and_then(|waves| waves.checked_mul(32))
+    let compute_units_per_xcc = properties.compute_units / xcc_count;
+    let saved_waves = if properties.target_profile == GpuTargetProfile::Gfx9 {
+        gfx9_saved_waves(properties, compute_units_per_xcc)?
+    } else {
+        compute_units_per_xcc
+            .checked_mul(properties.maximum_wave_count_per_compute_unit)
+            .ok_or_else(|| error(ErrorKind::DriverContract, "KFD wave count overflows"))?
+    };
+    let debug_size = saved_waves
+        .checked_mul(32)
         .and_then(|bytes| bytes.checked_add(63))
         .map(|bytes| bytes / 64 * 64)
         .ok_or_else(|| error(ErrorKind::DriverContract, "KFD debugger storage overflows"))?;

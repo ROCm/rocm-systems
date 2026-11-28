@@ -23,6 +23,9 @@ use std::io;
 use std::os::unix::fs::FileExt;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+#[path = "queue_context.rs"]
+mod queue_context;
+
 static FILE_ID: AtomicUsize = AtomicUsize::new(0);
 
 #[test]
