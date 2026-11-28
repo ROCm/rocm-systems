@@ -6,7 +6,6 @@
 
 import re
 
-
 html_theme = "rocm_docs_theme"
 html_theme_options = {
     "flavor": "rocm",
@@ -22,8 +21,10 @@ external_toc_path = "./sphinx/_toc.yml"
 
 external_projects_current_project = "rocr_debug_agent"
 
-with open('../CMakeLists.txt', encoding='utf-8') as f:
-    match = re.search(r'project\(rocm-debug-agent VERSION\s+\"?([0-9.]+)[^0-9.]+', f.read())
+with open("../CMakeLists.txt", encoding="utf-8") as f:
+    match = re.search(
+        r"project\(rocm-debug-agent VERSION\s+\"?([0-9.]+)[^0-9.]+", f.read()
+    )
     if not match:
         raise ValueError("VERSION not found!")
     version_number = match[1]
@@ -33,6 +34,4 @@ release = version_number
 html_title = f"ROCR Debug Agent {version} Documentation"
 project = "rocr_debug_agent"
 author = "Advanced Micro Devices, Inc."
-copyright = (
-    "Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved."
-)
+copyright = "Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved."

@@ -6,6 +6,7 @@ import socket
 import sys
 import tempfile
 import unittest.mock
+
 # The nosec markers below are safe only while these calls run fixed commands
 # (./rocm-debug-agent-test, readelf) without a shell or outside input.
 from subprocess import (
@@ -118,7 +119,9 @@ def check_errors(check_list, out_str, err_str):
     for i, check_str in enumerate(check_list, start=1):
         if not (check_str.search(err_str)):
             all_strings_found = False
-            _log.info("Pattern %d/%d NOT found: %s", i, len(check_list), check_str.pattern)
+            _log.info(
+                "Pattern %d/%d NOT found: %s", i, len(check_list), check_str.pattern
+            )
 
     return all_strings_found
 
@@ -172,9 +175,7 @@ else:
     print(f"Diagnostic log: {log_path}")
 
     # pre test to check if librocm-debug-agent.so.2 can be found
-    out_str, err_str, success = run_and_communicate(
-        test_name="0: default", args="0"
-    )
+    out_str, err_str, success = run_and_communicate(test_name="0: default", args="0")
 
     if success and filter_warnings(err_str):
         print(err_str)
@@ -229,7 +230,9 @@ def test_snapshot_code_object(*, name, args, **_):
         found_error = True
 
     if found_error:
-        logger().info("Snapshot code object test failed: code_object error or missing disassembly")
+        logger().info(
+            "Snapshot code object test failed: code_object error or missing disassembly"
+        )
 
     return not found_error
 
@@ -250,15 +253,13 @@ def _has_symbol_with_readelf(path: str, symbol: str) -> bool:
         )  # nosec B603 B607
         out = res.stdout.decode(errors="ignore")
         return symbol in out
-    except (CalledProcessError):
+    except CalledProcessError:
         return False
 
 
 def test_save_code_objects(*, name, args, **_):
     if not shutil.which("readelf"):
-        logger().info(
-            "Tool readelf not found, skipping %s", name
-        )
+        logger().info("Tool readelf not found, skipping %s", name)
         unsupported_tests.add(test_save_code_objects)
         return True
 
@@ -272,14 +273,10 @@ def test_save_code_objects(*, name, args, **_):
         try:
             code_objects = os.listdir(tmpdir)
         except FileNotFoundError as e:
-            raise FileNotFoundError(
-                f"Temporary directory not found: {tmpdir}"
-            ) from e
+            raise FileNotFoundError(f"Temporary directory not found: {tmpdir}") from e
 
         if len(code_objects) == 0:
-            logger().info(
-                "No code object found in %s", tmpdir
-            )
+            logger().info("No code object found in %s", tmpdir)
             return False
 
         # Filter to files that contain the target symbol in their
@@ -298,15 +295,14 @@ def test_save_code_objects(*, name, args, **_):
         _log = logger()
         if len(with_symbol) != 2:
             _log.info(
-                "Expected exactly 2 code objects containing symbol"
-                " '%s', found %d", symbol_to_find, len(with_symbol)
+                "Expected exactly 2 code objects containing symbol '%s', found %d",
+                symbol_to_find,
+                len(with_symbol),
             )
-            _log.info(
-                "All saved files:\n\t%s", "\n\t".join(code_objects)
-            )
+            _log.info("All saved files:\n\t%s", "\n\t".join(code_objects))
             _log.info(
                 "Files with symbol:\n\t%s",
-                "\n\t".join(os.path.basename(p) for p in with_symbol)
+                "\n\t".join(os.path.basename(p) for p in with_symbol),
             )
             return False
 
@@ -532,7 +528,9 @@ def test_sigquit(*, args, patterns=(), **_):
                 os.kill(p.pid, signal.SIGQUIT)
 
             if kernel_started:
-                if s.lstrip().startswith("Disassembly for function sigquit_kern(int*):"):
+                if s.lstrip().startswith(
+                    "Disassembly for function sigquit_kern(int*):"
+                ):
                     wave_seen = True
                     reader.extend_timeout(LOOP_TIMEOUT)
 
@@ -549,14 +547,10 @@ def test_sigquit(*, args, patterns=(), **_):
     try:
         output, err = p.communicate(timeout=3)
     except TimeoutExpired:
-        logger().info(
-            "Timeout reached during final communicate."
-        )
+        logger().info("Timeout reached during final communicate.")
         output, err = b"", b""
     except Exception:
-        logger().info(
-            "Unexpected exception during final communicate."
-        )
+        logger().info("Unexpected exception during final communicate.")
         output, err = b"", b""
 
     out_str = "".join(consumed_out) + output.decode("utf-8")
@@ -573,8 +567,7 @@ def test_sigquit(*, args, patterns=(), **_):
             _log.info("Timeout reached. Exiting. Failing test.")
         else:
             _log.info(
-                "Loop timed out without receiving expected message. "
-                "Failing test."
+                "Loop timed out without receiving expected message. Failing test."
             )
         log_program_output(out_str, err_str)
         return False
@@ -696,7 +689,9 @@ def test_preload_save_code_objects(*, name, args, **_):
             )
 
         saved = [os.path.join(tmpdir, f) for f in os.listdir(tmpdir)]
-        if not any(_has_symbol_with_readelf(p, "vector_add_assert_trap") for p in saved):
+        if not any(
+            _has_symbol_with_readelf(p, "vector_add_assert_trap") for p in saved
+        ):
             logger().info(
                 "No saved code object defines vector_add_assert_trap; saved:\n\t%s",
                 "\n\t".join(os.path.basename(p) for p in saved) or "(none)",
@@ -803,22 +798,22 @@ def test_sigquit_resumes(*, name, args, patterns=(), **_):
 
 TEST_DEFINITIONS = [
     {
-        'name': 'test_baseline',
-        'description': 'Fault-free run produces no diagnostic output',
-        'args': '0',
-        'function': test_baseline,
+        "name": "test_baseline",
+        "description": "Fault-free run produces no diagnostic output",
+        "args": "0",
+        "function": test_baseline,
     },
     {
-        'name': 'test_assert_trap',
-        'description': 'Assert trap dumps faulting wave with registers and disassembly',
-        'args': '1',
-        'patterns': ASSERT_TRAP_PATTERNS,
+        "name": "test_assert_trap",
+        "description": "Assert trap dumps faulting wave with registers and disassembly",
+        "args": "1",
+        "patterns": ASSERT_TRAP_PATTERNS,
     },
     {
-        'name': 'test_memory_violation',
-        'description': 'Memory violation dumps faulting wave with registers and disassembly',
-        'args': '2',
-        'patterns': [
+        "name": "test_memory_violation",
+        "description": "Memory violation dumps faulting wave with registers and disassembly",
+        "args": "2",
+        "patterns": [
             r"\(stopped, reason: MEMORY_VIOLATION\)",
             r"exec: (ffffffff)?ffffffff",
             r"s0:",
@@ -828,29 +823,29 @@ TEST_DEFINITIONS = [
         ],
     },
     {
-        'name': 'test_snapshot_code_object',
-        'description': 'Code object captured at load time is still readable on exception',
-        'args': '3',
-        'function': test_snapshot_code_object,
+        "name": "test_snapshot_code_object",
+        "description": "Code object captured at load time is still readable on exception",
+        "args": "3",
+        "function": test_snapshot_code_object,
     },
     {
-        'name': 'test_save_code_objects',
-        'description': '--save-code-objects writes complete, identical copies to disk',
-        'args': '4',
-        'function': test_save_code_objects,
+        "name": "test_save_code_objects",
+        "description": "--save-code-objects writes complete, identical copies to disk",
+        "args": "4",
+        "function": test_save_code_objects,
     },
     {
-        'name': 'test_save_code_objects_dir_tokens',
-        'description': '--save-code-objects expands %-format tokens in the directory path',
-        'args': '4',
-        'function': test_save_code_objects_dir_tokens,
+        "name": "test_save_code_objects_dir_tokens",
+        "description": "--save-code-objects expands %-format tokens in the directory path",
+        "args": "4",
+        "function": test_save_code_objects_dir_tokens,
     },
     {
-        'name': 'test_output_redirection',
-        'description': '-o redirects the wave dump to a file instead of stderr',
-        'args': '1',
-        'function': test_output_redirection,
-        'patterns': [
+        "name": "test_output_redirection",
+        "description": "-o redirects the wave dump to a file instead of stderr",
+        "args": "1",
+        "function": test_output_redirection,
+        "patterns": [
             r"s0:",
             r"v0:",
             r"0x0000: 22222222 11111111",
@@ -858,11 +853,11 @@ TEST_DEFINITIONS = [
         ],
     },
     {
-        'name': 'test_output_filename_tokens',
-        'description': '-o expands %-format tokens (%e %p %t %u %g %%) in the filename',
-        'args': '1',
-        'function': test_output_filename_tokens,
-        'patterns': [
+        "name": "test_output_filename_tokens",
+        "description": "-o expands %-format tokens (%e %p %t %u %g %%) in the filename",
+        "args": "1",
+        "function": test_output_filename_tokens,
+        "patterns": [
             r"s0:",
             r"v0:",
             r"0x0000: 22222222 11111111",
@@ -870,30 +865,30 @@ TEST_DEFINITIONS = [
         ],
     },
     {
-        'name': 'test_help',
-        'description': '-h prints the usage banner and exits',
-        'args': '0',
-        'options': '-h',
-        'timeout': 10,
-        'patterns': [
+        "name": "test_help",
+        "description": "-h prints the usage banner and exits",
+        "args": "0",
+        "options": "-h",
+        "timeout": 10,
+        "patterns": [
             r"ROCdebug-agent usage",
         ],
     },
     {
-        'name': 'test_log_level',
-        'description': '-l info enables rocm-dbgapi diagnostic logging',
-        'args': '1',
-        'options': '-l info',
-        'patterns': [
+        "name": "test_log_level",
+        "description": "-l info enables rocm-dbgapi diagnostic logging",
+        "args": "1",
+        "options": "-l info",
+        "patterns": [
             r"rocm-dbgapi",
         ],
     },
     {
-        'name': 'test_all_waves',
-        'description': '--all dumps every active wave, not only the faulting one',
-        'args': '5',
-        'options': '--all',
-        'patterns': [
+        "name": "test_all_waves",
+        "description": "--all dumps every active wave, not only the faulting one",
+        "args": "5",
+        "options": "--all",
+        "patterns": [
             r"wave_1",
             r"wave_2",
             r"wave_3",
@@ -905,64 +900,64 @@ TEST_DEFINITIONS = [
         ],
     },
     {
-        'name': 'test_sigquit',
-        'description': 'SIGQUIT during a running kernel triggers a wave dump',
-        'args': '6',
-        'function': test_sigquit,
-        'patterns': [
+        "name": "test_sigquit",
+        "description": "SIGQUIT during a running kernel triggers a wave dump",
+        "args": "6",
+        "function": test_sigquit,
+        "patterns": [
             r"s0:",
             r"v0:",
             r"Disassembly for function sigquit_kern\(int\*\)",
         ],
     },
     {
-        'name': 'test_preload_dump',
-        'description': 'Agent preloaded without HSA_TOOLS_LIB dumps a faulting wave',
-        'args': '1',
-        'patterns': ASSERT_TRAP_PATTERNS,
-        'function': test_preload_dump,
+        "name": "test_preload_dump",
+        "description": "Agent preloaded without HSA_TOOLS_LIB dumps a faulting wave",
+        "args": "1",
+        "patterns": ASSERT_TRAP_PATTERNS,
+        "function": test_preload_dump,
     },
     {
-        'name': 'test_preload_save_code_objects',
-        'description': '-c with the agent preloaded saves code objects when waves are printed',
-        'args': '1',
-        'function': test_preload_save_code_objects,
+        "name": "test_preload_save_code_objects",
+        "description": "-c with the agent preloaded saves code objects when waves are printed",
+        "args": "1",
+        "function": test_preload_save_code_objects,
     },
     {
-        'name': 'test_sigquit_resumes',
-        'description': 'SIGQUIT dump names the kernel and the program then finishes',
-        'args': '8',
-        'function': test_sigquit_resumes,
-        'patterns': [
+        "name": "test_sigquit_resumes",
+        "description": "SIGQUIT dump names the kernel and the program then finishes",
+        "args": "8",
+        "function": test_sigquit_resumes,
+        "patterns": [
             r"<sigquit_resume_kern\(int\*, int const\*\)>",
             r"Disassembly for function sigquit_resume_kern\(int\*, int const\*\)",
         ],
     },
     {
-        'name': 'test_debug_info',
-        'description': 'Disassembly shows source lines only when debug info is present',
-        'args': '1',
-        'function': test_debug_info_comparison,
+        "name": "test_debug_info",
+        "description": "Disassembly shows source lines only when debug info is present",
+        "args": "1",
+        "function": test_debug_info_comparison,
         # Patterns target source lines emitted near the trap PC of
         # vector_add_assert_trap.cpp (lines 53 and 55); line 52 is
         # outside the disassembly's source-line window.
-        'patterns': [
+        "patterns": [
             r"c\[gid\] = a\[gid\] \+ b\[gid\] \+ \(lds_check\[0\] >> 32\);",
             r"__builtin_trap \(\);",
         ],
     },
     {
-        'name': 'test_eager_vs_lazy',
-        'description': '-c saves code objects eagerly; default lazy mode saves none without an event',
-        'args': '4',
-        'function': test_eager_code_object_save,
+        "name": "test_eager_vs_lazy",
+        "description": "-c saves code objects eagerly; default lazy mode saves none without an event",
+        "args": "4",
+        "function": test_eager_code_object_save,
     },
     {
-        'name': 'test_lazy_loading_and_eager_incompatible',
-        'description': '--load-all-code-objects and --lazy are rejected together (either order)',
-        'args': '4',
-        'function': test_lazy_loading_and_eager_incompatible,
-        'patterns': [
+        "name": "test_lazy_loading_and_eager_incompatible",
+        "description": "--load-all-code-objects and --lazy are rejected together (either order)",
+        "args": "4",
+        "function": test_lazy_loading_and_eager_incompatible,
+        "patterns": [
             r'"--load-all-code-objects" and "--lazy" are mutually exclusive',
         ],
     },
@@ -986,17 +981,17 @@ def run_test(test_def):
     in their signature exactly which fields they consume.  Otherwise fall
     back to generic pattern matching against stderr.
     """
-    if 'function' in test_def:
-        handler_kwargs = {k: v for k, v in test_def.items() if k != 'function'}
-        return test_def['function'](**handler_kwargs)
+    if "function" in test_def:
+        handler_kwargs = {k: v for k, v in test_def.items() if k != "function"}
+        return test_def["function"](**handler_kwargs)
 
     # Generic path: run binary with args/options, check stderr patterns.
-    check_list = [re.compile(s) for s in test_def.get('patterns', [])]
+    check_list = [re.compile(s) for s in test_def.get("patterns", [])]
     out_str, err_str, success = run_and_communicate(
-        test_name=test_def['name'],
-        args=test_def['args'],
-        debug_agent_options=test_def.get('options', ''),
-        timeout=test_def.get('timeout', DEFAULT_TIMEOUT),
+        test_name=test_def["name"],
+        args=test_def["args"],
+        debug_agent_options=test_def.get("options", ""),
+        timeout=test_def.get("timeout", DEFAULT_TIMEOUT),
     )
     if not success:
         return False
@@ -1029,14 +1024,14 @@ for deferred_loading in (None, "1", "0"):
         abort = False
         _log = logger()
         for test_def in TEST_DEFINITIONS:
-            name = test_def['name']
-            desc = test_def['description']
+            name = test_def["name"]
+            desc = test_def["description"]
             label = f"{name}: {desc} [{mode_label}]"
 
             log_test_header(label)
             result = run_test(test_def)
 
-            func = test_def.get('function')
+            func = test_def.get("function")
             if func and func in unsupported_tests:
                 verdict = f"UNSUPPORTED: {label}"
                 print(verdict)
@@ -1055,7 +1050,7 @@ for deferred_loading in (None, "1", "0"):
                 failed_tests.append(verdict)
                 test_success = False
 
-                if test_def.get('abort_on_fail', False):
+                if test_def.get("abort_on_fail", False):
                     msg = (
                         f"\n*** abort_on_fail set for {name} — "
                         "aborting remaining tests ***\n"

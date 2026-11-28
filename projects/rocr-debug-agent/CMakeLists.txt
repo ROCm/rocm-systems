@@ -197,7 +197,8 @@ target_include_directories(
 # runtime: it works with any runtime that registers its r_debug with the driver (ROCr, CLR/CRUX).
 target_include_directories(
     rocm-debug-agent
-    PRIVATE $<TARGET_PROPERTY:hsa-runtime64::hsa-runtime64,INTERFACE_INCLUDE_DIRECTORIES>
+    PRIVATE
+        $<TARGET_PROPERTY:hsa-runtime64::hsa-runtime64,INTERFACE_INCLUDE_DIRECTORIES>
 )
 
 target_link_libraries(
