@@ -55,6 +55,14 @@
       - None
       - ``1:0-8``
 
+    * - | ``HSA_ENABLE_IPC_CROSS_USER``
+        | Linux only. Set in the **exporting** process. Controls whether it serves IPC memory (``hsa_amd_ipc_memory_create`` / ``hsa_amd_ipc_memory_attach``) to processes running as a different user.
+        | By default only processes with the same effective user ID as the exporter are served. When another user attempts to attach, the exporter prints ``IPC export: rejected a dma-buf request from a process running as a different user`` (once per process) and the importing process's ``hsa_amd_ipc_memory_attach`` fails with ``HSA_STATUS_ERROR_INVALID_ARGUMENT``.
+        | Enable only when buffers are intentionally shared across users in a trusted environment, for example a root launcher with a non-root worker.
+      - ``0``
+      - | 0: Serve only processes with the exporter's user ID.
+        | 1: Serve processes of any user.
+
     * - | ``HSA_ENABLE_SDMA``
         | Enables the use of direct memory access (DMA) engines in all copy directions (Host-to-Device, Device-to-Host, Device-to-Device), when using any of the following APIs:
         | ``hsa_memory_copy``,

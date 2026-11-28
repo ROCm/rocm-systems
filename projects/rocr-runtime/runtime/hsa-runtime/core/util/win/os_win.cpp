@@ -694,6 +694,14 @@ intptr_t IPCRecvHandle(IPCSocket conn) {
   return handleVal;
 }
 
+bool IsIPCSocketPeerSameUser(IPCSocket conn) {
+  // The Windows IPC server uses a named pipe created with the default security
+  // descriptor, which only grants access to the same user and the system, so
+  // the abstract-socket cross-user exposure addressed on Linux does not apply.
+  (void)conn;
+  return true;
+}
+
 void CloseIPCSocket(IPCSocket sock) {
   if (sock != INVALID_SOCKET_VALUE) {
     auto* info = reinterpret_cast<IPCPipeInfo*>(sock);

@@ -1521,6 +1521,32 @@ void Runtime::AsyncIPCSockServerConnLoop(void*) {
     os::IPCSocket conn = os::AcceptIPCConnection(ipc_sock_server_fd_);
     if (conn == os::INVALID_SOCKET_VALUE) continue;
     MAKE_SCOPE_GUARD([&]() { os::CloseIPCSocket(conn); });
+
+    // Authorize the peer before serving any exported buffer. The server socket
+    // lives in an abstract namespace that ignores filesystem permissions, so
+    // IPC sharing is restricted to processes of the same user; a connection
+    // from another user is dropped without disclosing a dma-buf descriptor.
+    // HSA_ENABLE_IPC_CROSS_USER=1 opts out for deployments that intentionally
+    // share buffers across users within a trusted namespace.
+    if (!runtime_singleton_->flag().enable_ipc_cross_user() &&
+        !os::IsIPCSocketPeerSameUser(conn)) {
+      // Report only the first rejection so a peer probing for exported
+      // addresses cannot flood the exporter's stderr.
+      static std::once_flag rejected_peer_logged;
+      std::call_once(rejected_peer_logged, []() {
+        fprintf(stderr,
+                "IPC export: rejected a dma-buf request from a process running as a different "
+                "user. Set HSA_ENABLE_IPC_CROSS_USER=1 in the exporting process to allow "
+                "cross-user IPC.\n");
+      });
+      continue;
+    }
+
+    // Bound blocking reads so a peer cannot park the server thread (which also
+    // serializes exporter frees through ipc_sock_server_lock_) indefinitely by
+    // connecting and never sending or acknowledging.
+    os::SetIPCSocketRecvTimeout(conn, std::chrono::seconds(10));
+
     if (os::IPCSocketRead(conn, buf, sizeof(buf)) == -1) continue;
 
     uint64_t conn_handle = strtoull(buf, NULL, 10);
@@ -1546,9 +1572,9 @@ void Runtime::AsyncIPCSockServerConnLoop(void*) {
       int err = HSAKMT_CALL(hsaKmtExportDMABufHandle(ptr, len, &dmabuf_fd, &fragOffset));
       if (err != HSAKMT_STATUS_SUCCESS) continue;
       err = os::IPCSendHandle(conn, dmabuf_fd);
-      if (err == -1) break;
+      if (err == -1) continue;
       err = os::IPCSocketRead(conn, buf, sizeof(buf));
-      if (err == -1) break;
+      if (err == -1) continue;
     }
   }
 
@@ -1764,7 +1790,12 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle, un
   if (dmabuf_fd_handle == IPC_SOCK_SERVER_CONN_CLOSE_HANDLE) return 0;
 
   int dmabuf_fd = static_cast<int>(os::IPCRecvHandle(socket_fd));
-  if (dmabuf_fd == -1) return -1;
+  if (dmabuf_fd == -1) {
+    fprintf(stderr,
+            "IPC Client Import: the exporting process did not send a dma-buf descriptor. If it "
+            "runs as a different user, it must set HSA_ENABLE_IPC_CROSS_USER=1.\n");
+    return -1;
+  }
   MAKE_SCOPE_GUARD([&]() { os::DmaBufClose(&dmabuf_fd); });
 
   HsaGraphicsResourceInfo info{};

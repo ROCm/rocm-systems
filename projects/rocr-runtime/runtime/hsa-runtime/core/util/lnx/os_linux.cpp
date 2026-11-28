@@ -1072,7 +1072,10 @@ int IPCSocketRead(IPCSocket conn, void* buf, size_t len) {
 }
 
 int IPCSocketWrite(IPCSocket conn, const void* buf, size_t len) {
-  return static_cast<int>(write(IPCSockToFd(conn), buf, len));
+  // MSG_NOSIGNAL: when the exporter rejects this peer and closes the connection
+  // before reading the request, a bare write() would raise SIGPIPE and kill the
+  // importing process. send() reports EPIPE instead, so the attach fails cleanly.
+  return static_cast<int>(send(IPCSockToFd(conn), buf, len, MSG_NOSIGNAL));
 }
 
 int IPCSendHandle(IPCSocket conn, intptr_t handle) {
@@ -1098,7 +1101,9 @@ int IPCSendHandle(IPCSocket conn, intptr_t handle) {
 
   msg.msg_controllen = CMSG_SPACE(sizeof(int));
 
-  return (sendmsg(IPCSockToFd(conn), &msg, 0) < 0) ? -1 : 0;
+  // MSG_NOSIGNAL: a peer that disconnects mid-send must not raise SIGPIPE, whose
+  // default action would terminate the exporting process.
+  return (sendmsg(IPCSockToFd(conn), &msg, MSG_NOSIGNAL) < 0) ? -1 : 0;
 }
 
 intptr_t IPCRecvHandle(IPCSocket conn) {
@@ -1113,16 +1118,28 @@ intptr_t IPCRecvHandle(IPCSocket conn) {
   msg.msg_controllen = sizeof(c_buffer);
 
   ssize_t rcv = recvmsg(IPCSockToFd(conn), &msg, MSG_WAITALL);
-  if (rcv < 0) return -1;
-
-  while (!rcv)
-    rcv = recvmsg(IPCSockToFd(conn), &msg, MSG_WAITALL);
+  // 0 is end-of-stream: the exporter closed the connection without sending a
+  // descriptor (for example because it rejected this peer). Retrying would spin
+  // forever, so report the failure.
+  if (rcv <= 0) return -1;
 
   struct cmsghdr* cmsg = CMSG_FIRSTHDR(&msg);
   if (!cmsg) return -1;
   int fd;
   memcpy(&fd, CMSG_DATA(cmsg), sizeof(fd));
   return fd;
+}
+
+bool IsIPCSocketPeerSameUser(IPCSocket conn) {
+  // SO_PEERCRED reports the connecting peer's credentials as seen in this
+  // process' user namespace, so a peer with a different (or unmapped) uid is
+  // rejected. Fail closed if the credentials cannot be read.
+  struct ucred cred;
+  socklen_t cred_len = sizeof(cred);
+  if (getsockopt(IPCSockToFd(conn), SOL_SOCKET, SO_PEERCRED, &cred, &cred_len) != 0 ||
+      cred_len != sizeof(cred))
+    return false;
+  return cred.uid == geteuid();
 }
 
 void CloseIPCSocket(IPCSocket sock) {
