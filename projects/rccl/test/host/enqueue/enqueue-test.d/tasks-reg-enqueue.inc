@@ -574,6 +574,16 @@ TEST_F(EnqueueMicrotest, WarpSpeedPlanner_LaunchGridUsesStoredPlanMode) {
 }
 #endif
 
+TEST_F(EnqueueMicrotest, LaunchPrepare_CollNeverFits_ReturnsErrorInsteadOfSpinning) {
+  WarpSpeedScheduleScene scene({false}, {NCCL_ALGO_RING}, /*maxWorkBatches=*/1);
+  scene.bp.c()->workArgsBytes = sizeof(struct ncclDevKernelArgs);  // no room for a work batch
+  ncclResult_t rc = ncclSuccess;
+  const std::string log = RcclUnitTesting::CaptureLog([&] { rc = ncclLaunchPrepare(scene.bp.c()); });
+  EXPECT_EQ(ncclInvalidUsage, rc);
+  EXPECT_TRUE(RcclUnitTesting::LogHas(log, "does not fit an empty kernel plan")) << log;
+  EXPECT_EQ(1, scene.RemainingTaskCount());
+}
+
 TEST_F(EnqueueMicrotest, WarpSpeedPlanner_MacroOffCoalescesOrdinary58Tasks) {
 #ifdef ENABLE_WARP_SPEED
   GTEST_SKIP() << "Macro-off coverage runs in rccl-UnitTestsMicroEnqueue";
