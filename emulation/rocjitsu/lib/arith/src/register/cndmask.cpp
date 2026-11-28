@@ -88,6 +88,24 @@ int run_wave64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *cons
     return RJ_ARITH_SUCCESS;
   }
 
+  // Without DPP, share one SIMD call and its modifier setup across the whole wave.
+  if (!(mode >> 32)) {
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+    if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+      rocjitsu::arith::cndmask_x86_64_v4<Half, 64>(exec_mask, uint32_t(mode), d[0], a[0], b[0],
+                                                   condition);
+      return RJ_ARITH_SUCCESS;
+    }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+    if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+      rocjitsu::arith::cndmask_x86_64_v3<Half, 64>(exec_mask, uint32_t(mode), d[0], a[0], b[0],
+                                                   condition);
+      return RJ_ARITH_SUCCESS;
+    }
+#endif
+  }
+
   // DPP stays within 16-lane rows, so whole-VGPR aliases are safe across halves.
   for (int half = 0; half < 2; ++half) {
     uint64_t half_instruction_flags = mode;

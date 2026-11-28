@@ -5,6 +5,7 @@
 // CPU-specific arithmetic stays here; public entry points select this backend.
 
 #include "common/compiler.h"
+#include "common/exec_mask.h"
 #include "register/cndmask.h"
 #include "rj_arith/detail/rj_arith_register.h"
 
@@ -15,9 +16,9 @@ namespace rocjitsu::arith {
 
 // Select between two sources by lane condition. Preserve destination lanes outside exec_mask.
 // Requires the named CPU features and validated instruction controls.
-template <bool Half>
-void cndmask_x86_64_v3(uint32_t exec_mask, uint32_t mode, uint32_t *d, const uint32_t *a,
-                       const uint32_t *b, uint32_t condition) {
+template <bool Half, int Lanes>
+void cndmask_x86_64_v3(ExecMask<Lanes> exec_mask, uint32_t mode, uint32_t *d, const uint32_t *a,
+                       const uint32_t *b, ExecMask<Lanes> condition) {
   const uint32_t sign = Half ? 0x8000 : 0x80000000;
   const unsigned sa = Half && (mode & RJ_ARITH_ALU_HIGH_A) ? 16 : 0;
   const unsigned sb = Half && (mode & RJ_ARITH_ALU_HIGH_B) ? 16 : 0;
@@ -26,8 +27,8 @@ void cndmask_x86_64_v3(uint32_t exec_mask, uint32_t mode, uint32_t *d, const uin
   auto clear_b = _mm256_set1_epi32(int(mode & RJ_ARITH_ALU_ABS_B ? ~sign : UINT32_MAX));
   auto flip_a = _mm256_set1_epi32(int(mode & RJ_ARITH_ALU_NEG_A ? sign : 0));
   auto flip_b = _mm256_set1_epi32(int(mode & RJ_ARITH_ALU_NEG_B ? sign : 0));
-  RJ_ARITH_UNROLL(4)
-  for (int lane = 0; lane < 32; lane += 8) {
+  RJ_ARITH_UNROLL(8)
+  for (int lane = 0; lane < Lanes; lane += 8) {
     auto x = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(a + lane));
     auto y = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(b + lane));
     if constexpr (Half) {
@@ -52,9 +53,13 @@ void cndmask_x86_64_v3(uint32_t exec_mask, uint32_t mode, uint32_t *d, const uin
   }
 }
 
-template void cndmask_x86_64_v3<true>(uint32_t, uint32_t, uint32_t *, const uint32_t *,
-                                      const uint32_t *, uint32_t);
-template void cndmask_x86_64_v3<false>(uint32_t, uint32_t, uint32_t *, const uint32_t *,
-                                       const uint32_t *, uint32_t);
+template void cndmask_x86_64_v3<true, 32>(uint32_t, uint32_t, uint32_t *, const uint32_t *,
+                                          const uint32_t *, uint32_t);
+template void cndmask_x86_64_v3<false, 32>(uint32_t, uint32_t, uint32_t *, const uint32_t *,
+                                           const uint32_t *, uint32_t);
+template void cndmask_x86_64_v3<true, 64>(uint64_t, uint32_t, uint32_t *, const uint32_t *,
+                                          const uint32_t *, uint64_t);
+template void cndmask_x86_64_v3<false, 64>(uint64_t, uint32_t, uint32_t *, const uint32_t *,
+                                           const uint32_t *, uint64_t);
 
 } // namespace rocjitsu::arith
