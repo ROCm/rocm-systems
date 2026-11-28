@@ -5,6 +5,7 @@
 # Common Tests - Test independent of all platforms
 set(TEST_SRC
     hipMalloc.cc
+    hipMemMixedAllocation.cc
     memcpy.cc
     hipMemcpyMThreadMSize.cc
     hipMallocManagedStress.cc

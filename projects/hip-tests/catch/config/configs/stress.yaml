@@ -1,5 +1,6 @@
 ---
 stress:
+  Stress_hipMemMixedAllocation_Recovery: *level_stress
   Stress_deviceAllocation_malloc_Even: *level_stress
   Stress_deviceAllocation_malloc_Odd: *level_stress
   Stress_deviceAllocation_new_Even: *level_stress
