@@ -77,14 +77,29 @@ class InterruptSignal : private LocalSignal, public Signal {
 
     HsaEvent* alloc();
     void free(HsaEvent* evt);
+
+    /// @brief Reserve the shared overflow event when @p enable is true.
+    /// Called once from Runtime::Load(), after KFD is open and the KFD version
+    /// is known, and before any application signal is created, so the event is
+    /// taken while KFD signal event slots are still free.
+    void ReserveOverflow(bool enable);
+
+    /// @brief Event shared by every signal created after the KFD signal event
+    /// slots ran out, or nullptr when sharing is off (HSA_ENABLE_SHARED_OVERFLOW_EVENT=0,
+    /// or a KFD without event age). Reserved by ReserveOverflow(); never
+    /// returned to the pool.
+    HsaEvent* overflow() const { return overflow_.get(); }
+
     void clear() {
       events_.clear();
+      overflow_.reset();
       allEventsAllocated = false;
     }
 
    private:
     HybridMutex lock_;
     std::vector<unique_event_ptr> events_;
+    unique_event_ptr overflow_;
     bool allEventsAllocated;
   };
 

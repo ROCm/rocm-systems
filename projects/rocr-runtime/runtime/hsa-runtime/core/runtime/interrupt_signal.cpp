@@ -47,6 +47,20 @@
 namespace rocr {
 namespace core {
 
+void InterruptSignal::EventPool::ReserveOverflow(bool enable) {
+  std::lock_guard<HybridMutex> lock(lock_);
+  // Reserve one event while slots are still free. A signal created after KFD
+  // runs out of signal events (KFD_SIGNAL_EVENT_LIMIT per process) shares it
+  // instead of getting no event, so its async handler and its waiters keep
+  // sleeping in KFD. Without it, such a signal forces the async-events thread
+  // to poll the whole batch, and every waiter on it to spin.
+  // Sharing needs event age: each waiter passes the age it last saw, so a
+  // notification meant for another signal on the same event only costs a
+  // re-check of the value and is never consumed from under another waiter.
+  if (enable && overflow_ == nullptr)
+    overflow_.reset(InterruptSignal::CreateEvent(HSA_EVENTTYPE_SIGNAL, false));
+}
+
 HsaEvent* InterruptSignal::EventPool::alloc() {
   std::lock_guard<HybridMutex> lock(lock_);
   if (events_.empty()) {
@@ -112,6 +126,11 @@ void InterruptSignal::AttachEvent(HsaEvent* use_event) {
   } else {
     event_ = Runtime::runtime_singleton_->GetEventPool()->alloc();
     free_event_ = true;
+    if (event_ == nullptr) {
+      // Out of KFD signal events: share the reserved overflow event, if any.
+      event_ = Runtime::runtime_singleton_->GetEventPool()->overflow();
+      free_event_ = false;
+    }
   }
 
   if (event_ != nullptr) {

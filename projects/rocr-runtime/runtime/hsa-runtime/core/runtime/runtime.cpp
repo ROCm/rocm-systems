@@ -2117,8 +2117,11 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
     if (!keep) {
       // Drop the removed event's cached age so a future event reusing the same
       // HsaEvent* address does not inherit a stale baseline.
+      // The shared overflow event stays in use by other signals, so keep its age.
       HsaEvent* removed_event = hsa_signal_handle(async_events_.signal_[index])->EopEvent();
-      if (removed_event != nullptr) event_age_map.erase(removed_event);
+      if (removed_event != nullptr &&
+          removed_event != runtime_singleton_->GetEventPool()->overflow())
+        event_age_map.erase(removed_event);
       hsa_signal_handle(async_events_.signal_[index])->Release();
       async_events_.CopyIndex(index, async_events_.Size() - 1);
       async_events_.PopBack();
@@ -2873,6 +2876,12 @@ hsa_status_t Runtime::Load() {
   if (!AMD::Load()) {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
+
+  // Reserve the event that signals created after the KFD signal events run out
+  // share (see InterruptSignal::EventPool::ReserveOverflow()). AMD::Load() has
+  // opened KFD and settled whether interrupts are used.
+  EventPool.ReserveOverflow(g_use_interrupt_wait && flag_.enable_shared_overflow_event() &&
+                            KfdVersion().supports_event_age);
 
   asyncSignals_.reset(new AsyncEventsInfo(false));
   asyncExceptions_.reset(new AsyncEventsInfo(g_use_interrupt_wait));

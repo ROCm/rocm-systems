@@ -89,6 +89,7 @@
 #include "suites/functional/signal_concurrent.h"
 #include "suites/functional/signal_allocation_validation.h"
 #include "suites/functional/signal_wait_multi.h"
+#include "suites/functional/signal_event_exhaustion.h"
 #include "suites/functional/signal_yielding_poll.h"
 #include "suites/functional/metadata_prefetch.h"
 #include "suites/functional/aql_barrier_bit.h"
@@ -347,6 +348,34 @@ TEST(rocrtstFunc, Signal_Busy_Wait_Default_Keeps_Spinning) {
   if (!RunCustomTestProlog(&syp)) return;
   syp.TestDefaultKeepsSpinning();
   RunCustomTestEpilog(&syp);
+}
+
+TEST(rocrtstFunc, Signal_Event_Exhaustion_Async_Handler_Latency) {
+  SignalEventExhaustionTest see;
+  if (!RunCustomTestProlog(&see)) return;
+  see.TestAsyncHandlerLatency();
+  RunCustomTestEpilog(&see);
+}
+
+TEST(rocrtstFunc, Signal_Event_Exhaustion_Async_Handler_Idle_Cpu) {
+  SignalEventExhaustionTest see;
+  if (!RunCustomTestProlog(&see)) return;
+  see.TestAsyncHandlerIdleCpu();
+  RunCustomTestEpilog(&see);
+}
+
+TEST(rocrtstFunc, Signal_Event_Exhaustion_Blocked_Waiters) {
+  SignalEventExhaustionTest see;
+  if (!RunCustomTestProlog(&see)) return;
+  see.TestBlockedWaiters();
+  RunCustomTestEpilog(&see);
+}
+
+TEST(rocrtstFunc, Signal_Event_Exhaustion_Gpu_Completion) {
+  SignalEventExhaustionTest see;
+  if (!RunCustomTestProlog(&see)) return;
+  see.TestGpuCompletion();
+  RunCustomTestEpilog(&see);
 }
 
 /* Temporary: Disable CU Masking until it is fixed */
