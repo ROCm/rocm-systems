@@ -294,20 +294,58 @@ jobs:
             export ROCM_SYSTEM_REF="${IN_ROCM_SYSTEM_REF}"
           fi
 
-          # coco exits 0 after a build failure: unbuilt stacks' tests are marked
-          # SKIPPED and only non-passing tests set the exit status. The log is the
-          # only signal (AICOMRCCL-2375); drop once coco reports it.
-          assert_built() {
-            local log="$1"
+          # Escape text for a multi-line workflow-command message.
+          escape_msg() {
+            local text="$1"
+            text="${text//'%'/'%25'}"
+            text="${text//$'\r'/'%0D'}"
+            text="${text//$'\n'/'%0A'}"
+            printf '%s' "${text}"
+          }
+
+          # Report one pass as a single ::error annotation. Return 1 if it failed.
+          # A pass failed if coco exited non-zero, the log is missing or empty,
+          # or the log has a build or fetch failure line. The log check is
+          # needed because coco exits 0 after a build-only failure
+          # (AICOMRCCL-2375).
+          # Arguments: title, log file, coco exit status, optional note.
+          report_pass() {
+            local title="$1" log="$2" status="$3" note="${4:-}"
+            local max_lines=20 lines="" count=0 msg
+            local pattern='Stack .+ build failed:|Fetch failed for shared software '
+            if [[ -s "${log}" ]]; then
+              lines=$(grep -E "${pattern}" "${log}" || true)
+              if [[ -n "${lines}" ]]; then
+                count=$(printf '%s\n' "${lines}" | wc -l)
+              fi
+            fi
+            if [[ "${status}" -eq 0 && -s "${log}" && "${count}" -eq 0 ]]; then
+              echo "${title}: no build or fetch failures in $(basename "${log}")."
+              return 0
+            fi
+            msg="${title} failed."
+            if [[ "${status}" -ne 0 ]]; then
+              msg+=$'\n'"coco exited with status ${status}."
+            fi
             if [[ ! -s "${log}" ]]; then
-              echo "::error::${log} is missing or empty; cannot confirm the build succeeded."
-              return 1
+              msg+=$'\n'"${log} is missing or empty. Cannot confirm the build succeeded."
             fi
-            if grep -nE 'Stack .+ build failed:|Fetch failed for shared software ' "${log}"; then
-              echo "::error::coco logged a build or fetch failure but exited 0. Failing the job on the log instead."
-              return 1
+            if [[ "${count}" -gt 0 ]]; then
+              msg+=$'\n'"$(printf '%s\n' "${lines}" | head -n "${max_lines}")"
+              if [[ "${count}" -gt "${max_lines}" ]]; then
+                msg+=$'\n'"... and $((count - max_lines)) more in the console log."
+              fi
             fi
-            echo "No build or fetch failures in $(basename "${log}")."
+            if [[ -n "${note}" ]]; then
+              msg+=$'\n'"${note}"
+            fi
+            # A property value also treats ':' and ',' as delimiters.
+            local title_prop
+            title_prop=$(escape_msg "${title}")
+            title_prop="${title_prop//:/%3A}"
+            title_prop="${title_prop//,/%2C}"
+            echo "::error title=${title_prop}::$(escape_msg "${msg}")"
+            return 1
           }
 
           # The build job and the smoke job it feeds can declare different baselines.
@@ -322,15 +360,18 @@ jobs:
           # Backgrounded so the trap can pass a cancel on to coco.
           run_coco() {
             "${COCO_VENV}/bin/coco" "$@" &
-            local pid=$!
+            local pid=$! status=0
             trap 'kill -TERM "${pid}" 2>/dev/null; wait "${pid}" || true; exit 130' INT TERM
-            wait "${pid}"
+            wait "${pid}" || status=$?
             trap - INT TERM
+            return "${status}"
           }
 
+          # Arguments: pass label, coco job, console log, note for a failed pass,
+          # then extra coco arguments. A failed pass returns 1 after its annotation.
           coco_pr() {
-            local job="$1" log="$2"
-            shift 2
+            local label="$1" job="$2" log="$3" note="$4" status=0
+            shift 4
             echo "==> coco pr --job ${job} -o ${COCO_OUTPUT} $* ${COCO_ARGS}"
             run_coco pr \
               --job "${job}" \
@@ -341,8 +382,8 @@ jobs:
               --trigger-kind "${TRIGGER_KIND}" \
               -o "${COCO_OUTPUT}" \
               "$@" \
-              ${COCO_ARGS} > "${log}" 2>&1
-            assert_built "${log}"
+              ${COCO_ARGS} > "${log}" 2>&1 || status=$?
+            report_pass "${label} (${job})" "${log}" "${status}" "${note}"
           }
 
           if [[ "${MODE}" == 'pr' ]]; then
@@ -356,18 +397,31 @@ jobs:
             fi
             # Superset first, into the same -o tree the test pass reads its
             # stacks back out of.
+            # Read each baseline before its pass. Inside a command's arguments, a
+            # failed config load would leave --baseline-stack empty and not stop.
             if [[ -n "${BUILD_JOB}" ]]; then
-              coco_pr "${BUILD_JOB}" "${BUILD_LOG}" --build-only \
-                --baseline-stack "$(job_baseline "${BUILD_JOB}")"
+              build_baseline=$(job_baseline "${BUILD_JOB}") || {
+                echo "::error title=PR build pass (${BUILD_JOB})::Cannot read comparison.baseline from job ${BUILD_JOB}."
+                exit 1
+              }
+              coco_pr 'PR build pass' "${BUILD_JOB}" "${BUILD_LOG}" \
+                "The PR smoke pass (${JOB}) did not run because the build pass failed." \
+                --build-only --baseline-stack "${build_baseline}"
             fi
-            coco_pr "${JOB}" "${LOG_FILE}" --baseline-stack "$(job_baseline "${JOB}")"
+            smoke_baseline=$(job_baseline "${JOB}") || {
+              echo "::error title=PR smoke pass (${JOB})::Cannot read comparison.baseline from job ${JOB}."
+              exit 1
+            }
+            coco_pr 'PR smoke pass' "${JOB}" "${LOG_FILE}" '' \
+              --baseline-stack "${smoke_baseline}"
           elif [[ "${MODE}" == 'run' ]]; then
             echo "==> coco run --job ${JOB} --trigger-kind ${TRIGGER_KIND} ${COCO_ARGS}"
+            run_status=0
             run_coco run \
               --job "${JOB}" \
               --trigger-kind "${TRIGGER_KIND}" \
-              ${COCO_ARGS} > "${LOG_FILE}" 2>&1
-            assert_built "${LOG_FILE}"
+              ${COCO_ARGS} > "${LOG_FILE}" 2>&1 || run_status=$?
+            report_pass "coco run (${JOB})" "${LOG_FILE}" "${run_status}"
           else
             echo "::error::mode must be run or pr, got: ${MODE}"
             exit 1
