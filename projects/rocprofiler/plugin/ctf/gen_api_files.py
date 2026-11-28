@@ -20,6 +20,8 @@
 # IN THE SOFTWARE.
 ################################################################################
 
+import ast
+import operator
 import os
 import os.path
 import sys
@@ -255,27 +257,111 @@ def _make_sure(cond, error_msg):
         sys.exit(1)
 
 
-def _enumerator_effective_val(enum_val):
+# Evaluates the C integer constant expression `expr` (for example
+# `(1 << 0) | (1 << 1)`) and returns its value, or `None` if `expr` uses
+# anything but integer literals, previously known enumerators (`known`),
+# parentheses, and the operators `+ - * / % << >> & | ^ ~`.
+def _eval_c_int_expr(expr, known):
+    # Remove C integer literal suffixes (`1U`, `0x10ull`, ...).
+    expr = re.sub(r"\b(0[xX][0-9a-fA-F]+|\d+)[uUlL]+\b", r"\1", expr)
+
+    try:
+        tree = ast.parse(expr.strip(), mode="eval")
+    except SyntaxError:
+        return None
+
+    bin_ops = {
+        ast.Add: operator.add,
+        ast.Sub: operator.sub,
+        ast.Mult: operator.mul,
+        ast.FloorDiv: operator.floordiv,
+        ast.Mod: operator.mod,
+        ast.LShift: operator.lshift,
+        ast.RShift: operator.rshift,
+        ast.BitAnd: operator.and_,
+        ast.BitOr: operator.or_,
+        ast.BitXor: operator.xor,
+    }
+
+    unary_ops = {
+        ast.UAdd: operator.pos,
+        ast.USub: operator.neg,
+        ast.Invert: operator.invert,
+    }
+
+    def ev(node):
+        if isinstance(node, ast.Expression):
+            return ev(node.body)
+
+        if isinstance(node, ast.Constant):
+            if type(node.value) is int:
+                return node.value
+
+            raise ValueError
+
+        if isinstance(node, ast.Name):
+            if node.id in known:
+                return known[node.id]
+
+            raise ValueError
+
+        if isinstance(node, ast.UnaryOp) and type(node.op) in unary_ops:
+            return unary_ops[type(node.op)](ev(node.operand))
+
+        if isinstance(node, ast.BinOp):
+            op = node.op
+
+            # C `/` on integers truncates toward zero.
+            if isinstance(op, ast.Div):
+                lhs, rhs = ev(node.left), ev(node.right)
+                q = abs(lhs) // abs(rhs)
+                return q if (lhs < 0) == (rhs < 0) else -q
+
+            if type(op) in bin_ops:
+                return bin_ops[type(op)](ev(node.left), ev(node.right))
+
+        raise ValueError
+
+    try:
+        return ev(tree)
+    except (ValueError, ZeroDivisionError, OverflowError):
+        return None
+
+
+# `known` maps the names of the enumerators already resolved in the same
+# enumeration to their values.
+def _enumerator_effective_val(enum_val, known=None):
+    if known is None:
+        known = {}
+
     # Try the value, but this value may be a string (an
-    # enumerator/definition).
+    # enumerator/definition or a C integer constant expression such as
+    # `( 1 << 0 ) | ( 1 << 1 )`).
     val = enum_val.get("value")
 
     if type(val) is int:
         return val
 
-    # Try the raw value.
-    val = enum_val.get("raw_value")
+    # Try the raw value, then the value string.
+    for val in (enum_val.get("raw_value"), val):
+        if val is None:
+            continue
 
-    if val is not None:
         if type(val) is int:
-            # Raw value is already an integer.
+            # Value is already an integer.
             return val
-        else:
-            # Try to parse the raw value string as an integer.
-            try:
-                return int(val, 0)
-            except:
-                pass
+
+        # Try to parse the value string as an integer.
+        try:
+            return int(val, 0)
+        except (TypeError, ValueError):
+            pass
+
+        # Try to evaluate the value string as a C integer expression.
+        res = _eval_c_int_expr(str(val), known)
+
+        if res is not None:
+            return res
 
     _make_sure(False, f'Cannot get the integral value of enumerator `{enum_val["name"]}`')
 
@@ -291,10 +377,10 @@ def _number_ft_from_c_type(cpp_header, c_type):
         for enum_info in cpp_header.enums:
             if m.group(1) == enum_info.get("name"):
                 # Fill enumeration field type mappings.
-                mappings = {
-                    str(v["name"]): _enumerator_effective_val(v)
-                    for v in enum_info["values"]
-                }
+                mappings = {}
+
+                for v in enum_info["values"]:
+                    mappings[str(v["name"])] = _enumerator_effective_val(v, mappings)
 
                 if len(mappings) == 0:
                     return _SIntFt(64)
