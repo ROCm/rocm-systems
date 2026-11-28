@@ -323,6 +323,40 @@ TEST_F(EnqueueMicrotest, WarpSpeedPlanner_ThreeEligibleThenOrdinaryEmitSeparateP
   EXPECT_EQ(0, scene.RemainingTaskCount());
 }
 
+TEST_F(EnqueueMicrotest, WarpSpeedPlanner_GroupedCollectivesGetWorkgroupWindows) {
+  WarpSpeedScheduleScene scene({true, true, true}, {NCCL_ALGO_RING, NCCL_ALGO_RING, NCCL_ALGO_RING},
+                               /*maxWorkBatches=*/314, /*historicalMultistream=*/true);
+  ncclComm* comm = scene.bp.c();
+  comm->nChannels = 224;
+  comm->warpSpeedChannelMultiplier = 4;
+  size_t const bytes[] = {6553600, 9175040, 17530880};
+  for (int i = 0; i < 3; ++i) {
+    ncclTaskColl& task = scene.tasks[i];
+    task.func = ncclFuncAllGather;
+    task.count = bytes[i] / sizeof(float);
+    task.nMaxChannels = 224;
+    task.maxCTAs = MAXCHANNELS;
+    task.trafficBytes = bytes[i] * ncclFuncTrafficPerByte(task.func, comm->nRanks);
+  }
+
+  EXPECT_EQ(3, scene.ScheduleAndFinish());
+  scene.ExpectWarpSpeedMode(true);
+
+  // Disjoint ranges, each starting on a workgroup boundary right after the previous one's pad.
+  int end = 0;
+  for (ncclTaskColl const& task : scene.tasks) {
+    EXPECT_EQ(end, task.channelLo);
+    EXPECT_GE(task.channelHi, task.channelLo);
+    end = (task.channelHi / 4 + 1) * 4;
+  }
+  EXPECT_EQ(224, end);
+  // Hole-free mask over the padded ranges, one work batch per masked channel.
+  for (int c = 0; c < MAXCHANNELS; ++c) {
+    EXPECT_EQ(c < end, ((scene.bp.p()->channelMask.masks[c / 64] >> (c % 64)) & 1) != 0) << c;
+  }
+  EXPECT_EQ(end, scene.bp.p()->nWorkBatches);
+}
+
 TEST_F(EnqueueMicrotest, WarpSpeedPlanner_HistoricalOrdinaryMultistreamStillEmitsThreePlusOne) {
   WarpSpeedScheduleScene scene({false, false, false, false},
                                {NCCL_ALGO_RING, NCCL_ALGO_RING, NCCL_ALGO_RING, NCCL_ALGO_RING},

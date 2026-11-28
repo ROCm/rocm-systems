@@ -1022,6 +1022,23 @@ static ncclResult_t scheduleCollTasksToPlan(struct ncclComm* comm, struct ncclKe
   plan->warpSpeedPlan =
     rcclWarpSpeedSupported(comm, plan, ncclIntruQueueHead(&planner->collTaskQueue), planCollCount);
   bool const warpSpeedPlan = plan->warpSpeedPlan;
+
+  // Several collectives in a WarpSpeed plan: give each its own window of whole workgroups, sized by
+  // traffic. A workgroup loads only its lead channel's batch chain and each wave runs a work only
+  // inside [channelLo, channelHi], so one work batch per channel is enough.
+  int const wsMult = comm->warpSpeedChannelMultiplier;
+  int wsBlocks = 0; // workgroups shared out between the collectives, 0 if windows do not apply
+  int wsWinLo = 0; // first channel of the next window, a multiple of wsMult
+  if (warpSpeedPlan && planCollCount > 1 && wsMult > 1) {
+    wsBlocks = nChannels[0] / wsMult;
+    struct ncclTaskColl* t = ncclIntruQueueHead(&planner->collTaskQueue);
+    for (int i = 0; i < planCollCount; i++, t = t->next) {
+      // The kernel groups nWarps waves per workgroup; windows are aligned on wsMult.
+      if (t->isCollnet || t->isNvls || t->nWarps != wsMult) wsBlocks = 0;
+    }
+    if (wsBlocks < planCollCount) wsBlocks = 0;
+  }
+  bool const wsWindows = wsBlocks != 0;
 #endif
 
   while (nPlanColls != 0 && !ncclIntruQueueEmpty(&planner->collTaskQueue)) {
@@ -1031,6 +1048,7 @@ static ncclResult_t scheduleCollTasksToPlan(struct ncclComm* comm, struct ncclKe
     size_t elementSize = ncclTypeSize(task->datatype);
 
     int kind = 2 * task->isCollnet + task->isNvls;
+    int chanLimit = nMaxChannels[kind]; // one past the last channel this collective may use
 #ifdef ENABLE_WARP_SPEED
     // WarpSpeed loads one batch chain from the lead channel per physical block.
     // Multi-collective plans must reuse the same channel range so every channel
@@ -1038,7 +1056,7 @@ static ncclResult_t scheduleCollTasksToPlan(struct ncclComm* comm, struct ncclKe
     // Pack each coll from its own trafficBytes across the full channel set. The
     // plan-wide trafficBytes[kind] sum would keep each coll on nChannels/K even
     // after resetting channelId to 0 (Argus/Alex on ROCM-29990 / PR 10799).
-    bool const warpSpeedReuseChannels = warpSpeedPlan && planCollCount > 1;
+    bool const warpSpeedReuseChannels = warpSpeedPlan && planCollCount > 1 && !wsWindows;
     if (warpSpeedReuseChannels) {
       int const nPackChannels = nMaxChannels[kind] > 0 ? nMaxChannels[kind] : 1;
       size_t const taskTraffic = std::max(MinTrafficPerChannel, task->trafficBytes);
@@ -1062,6 +1080,18 @@ static ncclResult_t scheduleCollTasksToPlan(struct ncclComm* comm, struct ncclKe
       channelId = 0;
       currentTraffic = 0;
     }
+#ifdef ENABLE_WARP_SPEED
+    if (wsWindows) {
+      // One workgroup each, the rest in proportion to traffic. The last collective takes what is left.
+      size_t const taskTraffic = std::max(MinTrafficPerChannel, task->trafficBytes);
+      int const winBlocks = 1 + (int)((size_t)(wsBlocks - planCollCount) * taskTraffic / trafficBytes[kind]);
+      chanLimit = nPlanColls == 1 ? wsBlocks * wsMult : wsWinLo + winBlocks * wsMult;
+      channelId = wsWinLo;
+      currentTraffic = 0;
+      trafficPerChannel =
+        std::max<size_t>(MinTrafficPerChannel, ncclCollTrafficPerChannel(taskTraffic, chanLimit - wsWinLo));
+    }
+#endif
 
     if (task->isCollnet) {
       int nChannels = task->nMaxChannels;
@@ -1104,7 +1134,7 @@ static ncclResult_t scheduleCollTasksToPlan(struct ncclComm* comm, struct ncclKe
       int trafficPerByte = ncclFuncTrafficPerByte(task->func, comm->nRanks);
       if (task->protocol == NCCL_PROTO_LL) trafficPerByte *= 4;
       struct ncclCollChannelLayout layout = ncclComputeCollChannelLayout(
-        task->count, elementSize, trafficPerByte, trafficPerChannel, currentTraffic, channelId, nMaxChannels[kind]);
+        task->count, elementSize, trafficPerByte, trafficPerChannel, currentTraffic, channelId, chanLimit);
       channelId += layout.channelOffset;
       int elementsPerCell = layout.elementsPerCell;
       size_t trafficPerElement = elementSize * trafficPerByte;
@@ -1119,7 +1149,11 @@ static ncclResult_t scheduleCollTasksToPlan(struct ncclComm* comm, struct ncclKe
       task->nChannels = (uint16_t)nChannels;
 
       // Ensure room for worst case of one new batch per channel
-      if (!ncclTestBudget(budget, plan->nWorkBatches + nChannels, plan->workBytes + workNode->size)) {
+      int nBatches = nChannels;
+#ifdef ENABLE_WARP_SPEED
+      if (wsWindows) nBatches = divUp(nChannels, wsMult) * wsMult; // pad channels get a batch too
+#endif
+      if (!ncclTestBudget(budget, plan->nWorkBatches + nBatches, plan->workBytes + workNode->size)) {
         return ncclSuccess;
       }
 
@@ -1175,7 +1209,7 @@ static ncclResult_t scheduleCollTasksToPlan(struct ncclComm* comm, struct ncclKe
         currentTraffic += layout.cellsLo * elementsPerCell * trafficPerElement;
       }
 
-      if (currentTraffic >= trafficPerChannel && channelId + 1 != nMaxChannels[kind]) {
+      if (currentTraffic >= trafficPerChannel && channelId + 1 != chanLimit) {
         channelId += 1;
         currentTraffic = 0;
       }
@@ -1248,6 +1282,19 @@ static ncclResult_t scheduleCollTasksToPlan(struct ncclComm* comm, struct ncclKe
       int relativeIdx = c % 64;
       plan->channelMask.masks[maskIdx] |= (1ull << relativeIdx);
     }
+#ifdef ENABLE_WARP_SPEED
+    if (wsWindows) {
+      // Pad to a whole workgroup so the next collective starts on a workgroup boundary. A pad channel
+      // needs a mask bit and a batch to keep the mask and batchZero dense; its wave is outside
+      // [channelLo, channelHi] and runs nothing.
+      int const collEnd = (int)devWork->channelLo + (int)task->nChannels;
+      wsWinLo = divUp(collEnd, wsMult) * wsMult;
+      for (int c = collEnd; c < wsWinLo; c++) {
+        addWorkBatchToPlan(comm, plan, c, workNode->workType, task->devFuncId, task->func, plan->workBytes);
+        plan->channelMask.masks[c / 64] |= (1ull << (c % 64));
+      }
+    }
+#endif
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
     plan->threadPerBlock = rcclPlanThreadsPerBlock(comm, task->nWarps);
 #else
@@ -1276,6 +1323,10 @@ static ncclResult_t scheduleCollTasksToPlan(struct ncclComm* comm, struct ncclKe
         int phys = task->nMaxChannels / task->nWarps;
         chLo = 0;
         chHi = phys > 0 ? phys - 1 : 0;
+        if (wsWindows) { // the workgroups of this collective's window
+          chLo = devWork->channelLo / task->nWarps;
+          chHi = devWork->channelHi / task->nWarps;
+        }
         algoStr = "RING*";
       }
 #endif
