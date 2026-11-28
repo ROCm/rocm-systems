@@ -1,0 +1,16 @@
+[package]
+name = "remapper-ffi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "C ABI for the workgroup remapper (libremapper.so)"
+
+[lib]
+name = "remapper"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+anyhow.workspace = true
+log.workspace = true
+remapper-runtime.workspace = true

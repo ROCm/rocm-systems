@@ -76,6 +76,10 @@
 - changed-files:
   - any-glob-to-any-file: 'projects/rocprofiler-register/**/*'
 
+"project: remapper":
+- changed-files:
+  - any-glob-to-any-file: 'projects/remapper/**/*'
+
 "project: rocprofiler-sdk":
 - changed-files:
   - any-glob-to-any-file: 'projects/rocprofiler-sdk/**/*'
