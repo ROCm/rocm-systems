@@ -71,13 +71,19 @@ get_ids();
 void
 async_copy_init(hsa_api_table_t* _orig, uint64_t _tbl_instance);
 
-void
-async_copy_sync();
+// Drain outstanding memory copy completion callbacks. Returns the number still undelivered
+// when the wait expires
+uint64_t
+async_copy_sync(const uint64_t timeout_ns = 0);
 
 void
 async_copy_fini();
 
 void
 async_copy_reset();
+
+// Peek at number of outstanding records
+uint64_t
+async_copy_peek_count();
 }  // namespace hsa
 }  // namespace rocprofiler

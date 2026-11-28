@@ -24,6 +24,12 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 **API:**
 
 - Added `pipe_id` to the kernel dispatch completion records, `rocprofiler_callback_tracing_kernel_dispatch_data_t` and `rocprofiler_buffer_tracing_kernel_dispatch_record_t`: the hardware pipe the kernel ran on (the pipe its completion was reported on), counted from 0. It is reported for dispatches that complete through KFD dispatch-log signal-less completion (`ROCPROFILER_KFD_DISPATCH_LOG_SIGNAL_LESS=1`), and is `ROCPROFILER_KERNEL_DISPATCH_PIPE_ID_NONE` (-1) otherwise, including on every `ROCPROFILER_KERNEL_DISPATCH_ENQUEUE` callback.
+- `rocprofiler_synchronize_context` (experimental) waits until records have been written for
+    already-submitted GPU operations and then flushes the context's buffers, so it replaces a
+    following `rocprofiler_flush_buffer` rather than preceding it, unless
+    `ROCPROFILER_SYNCHRONIZE_CONTEXT_NOFLUSH` is set. Expensive: call it once before reading a
+    buffer, not per dispatch.
+- New status code `ROCPROFILER_STATUS_ERROR_TIMEOUT`.
 
 **rocprofv3 (CLI):**
 

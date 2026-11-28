@@ -167,27 +167,9 @@ flush(rocprofiler_buffer_id_t buffer_id, bool wait)
 
     if(wait) task_group->wait();
 
-    auto idx = buff->buffer_idx++;
-    idx %= buff->buffers.size();
-
-    ROCP_INFO << fmt::format("executing buffer flush [id={}, index={}]...", buffer_id.handle, idx);
-
-    // buffer is currently being flushed or destroyed
-    if(buff->syncer.at(idx).test_and_set())
-    {
-        ROCP_INFO << fmt::format(
-            "waiting for buffer flush to complete [id={}, index={}]...", buffer_id.handle, idx);
-        if(!wait) return ROCPROFILER_STATUS_ERROR_BUFFER_BUSY;
-        while(buff->syncer.at(idx).test_and_set())
-        {
-            ROCP_TRACE << fmt::format(
-                "waiting for buffer flush to complete [id={}, index={}]...", buffer_id.handle, idx);
-            std::this_thread::yield();
-            std::this_thread::sleep_for(buff->sync_wait_usec);
-        }
-    }
-
-    auto _task = [buffer_id, idx, offset]() {
+    // Deliver one internal buffer's records to the tool callback and release its claim. Always
+    // runs on the buffer's callback thread.
+    auto _task = [buffer_id, offset](size_t idx) {
         ROCP_ERROR_IF(registration::get_fini_status() > 0)
             << "executing buffer (" << buffer_id.handle << ") flush task finalization!";
 
@@ -266,10 +248,50 @@ flush(rocprofiler_buffer_id_t buffer_id, bool wait)
         buff_v->syncer.at(idx).clear();
     };
 
-    task_group->exec(std::move(_task));
-    if(wait)
+    // A watermark flush drains the one internal buffer it rotates producers away from. A waiting
+    // flush drains every internal buffer, one at a time: the rotating index alone would let
+    // concurrent flushers each drain a buffer that does not hold their own caller's records.
+    const auto _size = buff->buffers.size();
+    const auto _beg  = wait ? size_t{0} : size_t{buff->buffer_idx++ % _size};
+    const auto _end  = wait ? _size : _beg + 1;
+
+    for(auto idx = _beg; idx < _end; ++idx)
     {
-        task_group->join();
+        // Move producers off the buffer about to be drained. Only one internal buffer is claimed
+        // at a time, so they always have another one to write into during the tool callback.
+        if(wait)
+        {
+            auto _cur = buff->buffer_idx.load();
+            while(_cur % _size == idx && !buff->buffer_idx.compare_exchange_weak(_cur, _cur + 1))
+            {}
+        }
+
+        ROCP_INFO << fmt::format(
+            "executing buffer flush [id={}, index={}]...", buffer_id.handle, idx);
+
+        // The claim is taken on the calling thread, never inside a task: the claim may be held by
+        // a flush whose task is still queued, and a task waiting on it would occupy the worker
+        // that task needs.
+        if(buff->syncer.at(idx).test_and_set())
+        {
+            ROCP_INFO << fmt::format(
+                "waiting for buffer flush to complete [id={}, index={}]...", buffer_id.handle, idx);
+            if(!wait) return ROCPROFILER_STATUS_ERROR_BUFFER_BUSY;
+            while(buff->syncer.at(idx).test_and_set())
+            {
+                ROCP_TRACE << fmt::format(
+                    "waiting for buffer flush to complete [id={}, index={}]...",
+                    buffer_id.handle,
+                    idx);
+                std::this_thread::yield();
+                std::this_thread::sleep_for(buff->sync_wait_usec);
+            }
+        }
+
+        task_group->exec([_task, idx]() { _task(idx); });
+
+        // Joined per internal buffer so that its claim is released before the next one is taken.
+        if(wait) task_group->join();
     }
 
     return ROCPROFILER_STATUS_SUCCESS;

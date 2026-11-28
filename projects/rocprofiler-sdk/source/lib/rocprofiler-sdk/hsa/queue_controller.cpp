@@ -1136,21 +1136,38 @@ queue_controller_init(HsaApiTable* table)
     if(enable_queue_intercept()) queue_init();
 }
 
-bool
-queue_controller_sync()
+uint64_t
+queue_controller_sync(const uint64_t timeout_ns)
 {
     // sync the queue interceptor
-    queue_interposition::interposition_sync();
+    auto outstanding_records = queue_interposition::interposition_sync(timeout_ns);
 
-    bool _drained = true;
     if(get_queue_controller())
     {
         // Every queue is synced even after one times out, so a slow queue cannot hide the state of
         // the ones behind it.
         get_queue_controller()->iterate_queues(
-            [&_drained](const Queue* _queue) { _drained = _queue->sync() && _drained; });
+            [&outstanding_records, timeout_ns](const Queue* _queue) {
+                outstanding_records += _queue->sync(timeout_ns);
+            });
     }
-    return _drained;
+    return outstanding_records;
+}
+
+// Enumerates the same sources as queue_controller_sync: a peek omitting the completion batches
+// reports zero while a drain on the same state would still block.
+uint64_t
+queue_controller_peek_active_async_packets()
+{
+    auto outstanding_records = queue_interposition::interposition_peek_inflight();
+
+    if(get_queue_controller())
+    {
+        get_queue_controller()->iterate_queues([&outstanding_records](const Queue* _queue) {
+            outstanding_records += _queue->active_async_packets();
+        });
+    }
+    return outstanding_records;
 }
 
 void

@@ -161,11 +161,11 @@ replay_wait_or_fatal(TryDrainFn&& try_drain_once, std::string_view what)
 // teardown use (warn once and proceed), a replay pass must NOT proceed while a handler is still
 // running: PASS-EXIT, the tool's continue-decision, restore(), and the next submit would race the
 // handler that is still emitting records, releasing signals, and dropping correlation-id refs.
-// Each sync() call blocks up to one slice and reports whether the queue drained.
+// Each sync() call blocks up to one slice and returns the kernels still active
 void
 replay_drain_or_fatal(const Queue& queue)
 {
-    replay_wait_or_fatal([&]() { return queue.sync(); },
+    replay_wait_or_fatal([&]() { return queue.sync() == 0; },
                          "this queue's async completion handler(s)");
 }
 
@@ -1874,21 +1874,18 @@ Queue::destroy_signal(pooled_signal_t* signal)
     }
 }
 
-bool
-Queue::sync() const
+uint64_t
+Queue::sync(const uint64_t timeout_ns) const
 {
-    if(_active_kernels == null_hsa_signal) return true;
-
-    const auto _value =
-        _core_api.hsa_signal_wait_relaxed_fn(_active_kernels,
-                                             HSA_SIGNAL_CONDITION_EQ,
-                                             0,
-                                             std::chrono::nanoseconds{drain_slice}.count(),
-                                             HSA_WAIT_STATE_BLOCKED);
+    if(_active_kernels == null_hsa_signal) return 0;
+    auto       timeout = timeout_ns == 0 ? std::chrono::nanoseconds{drain_slice}.count()
+                                         : std::chrono::nanoseconds{timeout_ns}.count();
+    const auto _value  = _core_api.hsa_signal_wait_relaxed_fn(
+        _active_kernels, HSA_SIGNAL_CONDITION_EQ, 0, timeout, HSA_WAIT_STATE_BLOCKED);
 
     ROCP_WARNING_IF(_value != 0) << fmt::format(
         "Timeout while waiting for queue sync: {} kernels still active", _value);
-    return _value == 0;
+    return _value >= 0 ? static_cast<uint64_t>(_value) : 0;
 }
 
 void

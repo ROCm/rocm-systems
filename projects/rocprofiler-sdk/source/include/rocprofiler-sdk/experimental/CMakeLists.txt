@@ -3,7 +3,7 @@
 #
 
 set(ROCPROFILER_EXPERIMENTAL_HEADER_FILES counters.h kernel_replay.h registration.h
-                                          thread_trace.h spm.h)
+                                          synchronize_contexts.h thread_trace.h spm.h)
 
 install(
     FILES ${ROCPROFILER_EXPERIMENTAL_HEADER_FILES}

@@ -249,6 +249,21 @@ callback_thread_stop()
         callback_thread_get().exit();
 }
 
+uint64_t
+callback_thread_drain(const uint64_t timeout_ns)
+{
+    // Deliberately not holding callback_thread_mut: the consumer synchronizes the drain
+    // internally, and the wait is open-ended, so taking it would stall a concurrent context
+    // stop for the whole wait.
+    return callback_thread_get().drain(timeout_ns);
+}
+
+uint64_t
+callback_thread_peek()
+{
+    return callback_thread_get().peek_pending_records();
+}
+
 /**
  * Callback called by HSA interceptor when the kernel has completed processing.
  * Hands the work off to the dedicated consumer thread so that the HSA async
