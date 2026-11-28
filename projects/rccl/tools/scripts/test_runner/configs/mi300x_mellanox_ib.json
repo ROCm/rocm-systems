@@ -1426,7 +1426,8 @@
         {"name": "CollImplInfo.AllGatherSymkNotReportedWhenCuMemDisabled", "description": "With cuMem disabled, rcclSymKGetInfo falls back to the real AllGather backend and never claims SYM", "test_filter": "CollImplInfo.AllGatherSymkNotReportedWhenCuMemDisabled"},
         {"name": "CollImplInfo.ReduceScatterMatchesDispatchLog", "description": "rcclGetCollImplInfo reports the ReduceScatter algo/proto/channels the dispatch log recorded, at every size", "test_filter": "CollImplInfo.ReduceScatterMatchesDispatchLog"},
         {"name": "CollImplInfo.ReduceScatterSymmetricMatchesDispatchLog", "description": "Same for ReduceScatter with buffers registered as symmetric windows (-R 2 path)", "test_filter": "CollImplInfo.ReduceScatterSymmetricMatchesDispatchLog"},
-        {"name": "CollImplInfo.ReduceScatterSymkNotReportedWhenCuMemDisabled", "description": "With cuMem disabled, rcclSymKGetInfo falls back to the real ReduceScatter backend and never claims SYM", "test_filter": "CollImplInfo.ReduceScatterSymkNotReportedWhenCuMemDisabled"}
+        {"name": "CollImplInfo.ReduceScatterSymkNotReportedWhenCuMemDisabled", "description": "With cuMem disabled, rcclSymKGetInfo falls back to the real ReduceScatter backend and never claims SYM", "test_filter": "CollImplInfo.ReduceScatterSymkNotReportedWhenCuMemDisabled"},
+        {"name": "ProfilerNetPluginEvents.NetPluginMaskStartsNoProxyEvents", "description": "Verify a NetPlugin-only profiler mask starts no ProxyOp/ProxyStep events (NCCL 2.32.6 decoupling)", "test_filter": "ProfilerNetPluginEvents.NetPluginMaskStartsNoProxyEvents"}
       ]
     },
     "collimplinfo_symmetric_cumem": {

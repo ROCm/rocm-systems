@@ -1610,6 +1610,11 @@
           "name": "CollTraceUtils.getSizeMb",
           "description": "CollTrace utils get size MB",
           "test_filter": "CollTraceUtilsTest.getSizeMbTest"
+        },
+        {
+          "name": "ProfilerNetPluginEvents.NetPluginMaskStartsNoProxyEvents",
+          "description": "Verify a NetPlugin-only profiler mask starts no ProxyOp/ProxyStep events (NCCL 2.32.6 decoupling)",
+          "test_filter": "ProfilerNetPluginEvents.NetPluginMaskStartsNoProxyEvents"
         }
       ]
     },

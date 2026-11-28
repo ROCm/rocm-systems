@@ -2306,6 +2306,11 @@
           "name": "CollImplInfo.ReduceScatterSymkNotReportedWhenCuMemDisabled",
           "description": "With cuMem disabled, rcclSymKGetInfo falls back to the real ReduceScatter backend and never claims SYM",
           "test_filter": "CollImplInfo.ReduceScatterSymkNotReportedWhenCuMemDisabled"
+        },
+        {
+          "name": "ProfilerNetPluginEvents.NetPluginMaskStartsNoProxyEvents",
+          "description": "Verify a NetPlugin-only profiler mask starts no ProxyOp/ProxyStep events (NCCL 2.32.6 decoupling)",
+          "test_filter": "ProfilerNetPluginEvents.NetPluginMaskStartsNoProxyEvents"
         }
       ]
     },
