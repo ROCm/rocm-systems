@@ -4471,7 +4471,7 @@ void VirtualGPU::submitSvmPrefetchAsync(amd::SvmPrefetchAsyncCommand& cmd) {
 
     if ((status != HSA_STATUS_SUCCESS)) {
       Barriers().ResetCurrentSignal();
-      LogError("hsa_amd_svm_prefetch_async failed");
+      LogPrintfError("hsa_amd_svm_prefetch_async failed: 0x%x", static_cast<unsigned int>(status));
       cmd.setStatus(CL_INVALID_OPERATION);
     }
 
