@@ -18,6 +18,9 @@ rtc:
   Unit_hiprtc_functional:
     <<: *level_default
     tags: [compile]
+  Unit_hiprtc_name_not_a_file_name:
+    <<: *level_default
+    tags: [compile]
   Unit_hipStreamCaptureRtc:
     <<: *level_default
     tags: [integration]
@@ -65,6 +68,9 @@ rtc:
     tags: [link]
   Unit_RTC_LinkerAPI:
     level: [*level_0, *level_default]
+    tags: [link]
+  Unit_RTC_LinkerAPI_NamesNotFileNames:
+    <<: *level_default
     tags: [link]
   Unit_RTC_LinkAddFile_Negative:
     <<: *level_default
