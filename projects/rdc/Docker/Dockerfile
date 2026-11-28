@@ -7,7 +7,7 @@ FROM amdsmi-image
 # deprecated "apt-key add" (which would trust the key for every repository).
 # Update the checksum if AMD rotates the key
 # (fingerprint CA8B B472 7A47 B4D0 9B4E  E896 9386 B48A 1A69 3C5C).
-RUN apt-get update && apt-get install -y wget gnupg2 ca-certificates && \
+RUN apt-get update && apt-get install -y --no-install-recommends wget gnupg2 ca-certificates && \
     install -d -m 0755 /etc/apt/keyrings && \
     wget -qO /tmp/rocm.gpg.key https://repo.radeon.com/rocm/rocm.gpg.key && \
     echo '2de99e2354646a90d9903e2a669fc4e36b02c1bbff7075c481e12d7edab2c88b  /tmp/rocm.gpg.key' | sha256sum -c - && \
@@ -19,7 +19,7 @@ RUN apt-get update && apt-get install -y wget gnupg2 ca-certificates && \
 
 # Install ROCm runtime and dependencies
 RUN apt-get update && \
-    apt-get install -y \
+    apt-get install -y --no-install-recommends \
     rocm-smi-lib \
     cmake \
     make \
@@ -116,3 +116,7 @@ RUN echo "ALL ALL=(ALL) NOPASSWD: /opt/rocm/bin/rdcd" >> /etc/sudoers
 
 # Set the entry point to run the rdcd command
 ENTRYPOINT ["sudo", "/opt/rocm/bin/rdcd", "-u"]
+
+# Build/development image that runs as root by design.
+# trivy:ignore:DS-0002
+USER root
