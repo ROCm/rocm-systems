@@ -24,6 +24,9 @@ jobs:
     # only compile + unit tests today, but this runner is the controlled host
     # we intend to eventually run the full ASAN/TSAN CI on.
     runs-on: [ubuntu-24.04]
+    env:
+      AIS_SANITIZER_NAME: ${{ matrix.sanitizer.name }}
+      AIS_SANITIZER_CMAKE_FLAG: ${{ matrix.sanitizer.cmake_flag }}
     strategy:
       fail-fast: false
       matrix:
@@ -41,7 +44,7 @@ jobs:
           echo "AIS_PR_NUMBER=${GITHUB_REF//[^0-9]/}" >> "${GITHUB_ENV}"
       - name: Compute container name
         run: |
-          echo "AIS_CONTAINER_NAME=${AIS_PR_NUMBER:=${GITHUB_RUN_ID}}_${GITHUB_JOB}_${{ matrix.sanitizer.name }}" >> "${GITHUB_ENV}"
+          echo "AIS_CONTAINER_NAME=${AIS_PR_NUMBER:=${GITHUB_RUN_ID}}_${GITHUB_JOB}_${AIS_SANITIZER_NAME}" >> "${GITHUB_ENV}"
       # NOTE: TSAN (and occasionally ASAN) can abort at startup with an
       # "unexpected memory mapping" error on kernels configured with 32 mmap
       # randomization bits. The fix is to lower the ASLR entropy on the runner
@@ -89,6 +92,8 @@ jobs:
         # The sanitizers are clang-only, so the compiler is fixed to amdclang++.
         run: |
           docker exec \
+            -e "_AIS_HIP_ARCHITECTURES=${AIS_HIP_ARCHITECTURES}" \
+            -e "_AIS_SANITIZER_CMAKE_FLAG=${AIS_SANITIZER_CMAKE_FLAG}" \
             -t \
             -w /ais/build/hipfile \
             "${AIS_CONTAINER_NAME}" \
@@ -96,9 +101,9 @@ jobs:
               cmake \
                 -DCMAKE_BUILD_TYPE=Debug \
                 -DCMAKE_CXX_COMPILER=amdclang++ \
-                -DCMAKE_HIP_ARCHITECTURES="${{ env.AIS_HIP_ARCHITECTURES }}" \
+                -DCMAKE_HIP_ARCHITECTURES="${_AIS_HIP_ARCHITECTURES}" \
                 -DCMAKE_HIP_PLATFORM=amd \
-                ${{ matrix.sanitizer.cmake_flag }} \
+                "${_AIS_SANITIZER_CMAKE_FLAG}" \
                 ../../rocm-systems/projects/hipfile
             '
       - name: Build hipFile with ${{ matrix.sanitizer.name }}

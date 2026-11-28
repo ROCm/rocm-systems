@@ -107,7 +107,7 @@ jobs:
             -B /tmp/build \
             -DCMAKE_BUILD_TYPE=Debug \
             -DCMAKE_CXX_COMPILER=amdclang++ \
-            -DCMAKE_HIP_ARCHITECTURES="${{ env.AIS_HIP_ARCHITECTURES }}" \
+            -DCMAKE_HIP_ARCHITECTURES="${AIS_HIP_ARCHITECTURES}" \
             -DCMAKE_HIP_PLATFORM=amd \
             projects/hipfile
           cmake --build /tmp/build --parallel "$(nproc)"

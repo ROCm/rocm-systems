@@ -41,6 +41,7 @@ jobs:
     env:
       AIS_CI_IMAGE_NAME: ais_ci_${{ matrix.supported_platforms }}
       AIS_INPUT_PLATFORM: ${{ matrix.supported_platforms }}
+      AIS_ROCM_VERSION: ${{ matrix.rocm_versions }}
     runs-on: [ubuntu-24.04]
     container: docker:28.5
     # NOTE: nightly is intentionally absent here. This job refreshes the static
@@ -74,7 +75,7 @@ jobs:
       - name: Set target AIS CI Image
         id: ci-image
         run: |
-          AIS_CI_IMAGE="${AIS_DOCKER_REGISTRY}/${AIS_CI_IMAGE_NAME}:latest-rocm${{ matrix.rocm_versions }}"
+          AIS_CI_IMAGE="${AIS_DOCKER_REGISTRY}/${AIS_CI_IMAGE_NAME}:latest-rocm${AIS_ROCM_VERSION}"
           echo "AIS_CI_IMAGE=$(printf '%s' "${AIS_CI_IMAGE}" | tr '[:upper:]' '[:lower:]')" >> "${GITHUB_OUTPUT}"
 
       - name: Set Docker Cache Instruction
@@ -84,12 +85,18 @@ jobs:
         # for 'null'.
         # See: https://docs.github.com/en/actions/reference/workflows-and-actions/expressions
         # for how null gets converted when compared to non-null, and converted into a string.
+        #
+        # The job runs in the Alpine-based docker image, which has no bash, so
+        # this and the build step below must be POSIX sh.
+        env:
+          AIS_PULL_FROM_CACHE: ${{ format('{0}', inputs.pull_from_cache) == '' || inputs.pull_from_cache }}
+          AIS_CI_IMAGE: ${{ steps.ci-image.outputs.AIS_CI_IMAGE }}
         run: |
-          echo "CACHE_FROM_CMD=${{
-            ( format('{0}', inputs.pull_from_cache) == '' || inputs.pull_from_cache ) &&
-            format('--cache-from=type=registry,ref=\"{0}-cache\"', steps.ci-image.outputs.AIS_CI_IMAGE) ||
-            ''
-          }}" >> "${GITHUB_OUTPUT}"
+          if [ "${AIS_PULL_FROM_CACHE}" = "true" ]; then
+            echo "CACHE_FROM_CMD=--cache-from=type=registry,ref=${AIS_CI_IMAGE}-cache" >> "${GITHUB_OUTPUT}"
+          else
+            echo "CACHE_FROM_CMD=" >> "${GITHUB_OUTPUT}"
+          fi
 
       - name: Setup Docker Builder
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
@@ -99,14 +106,19 @@ jobs:
           cache-binary: false # True uses the GHA Cache Backend
 
       - name: Build & Push latest base image for AIS CI
+        # CACHE_FROM_CMD may be empty, so ${VAR:+"${VAR}"} expands to nothing
+        # in that case and to a single argument otherwise.
+        env:
+          AIS_CI_IMAGE: ${{ steps.ci-image.outputs.AIS_CI_IMAGE }}
+          AIS_CACHE_FROM_CMD: ${{ steps.use-cache.outputs.CACHE_FROM_CMD }}
         run: |
           docker buildx build \
             -f "${GITHUB_WORKSPACE}/projects/hipfile/util/docker/DOCKERFILE.${AIS_CI_IMAGE_NAME}" \
             --target base \
             --provenance=false \
-            --build-arg ROCM_VERSION=${{ matrix.rocm_versions }} \
-            --cache-to=type=registry,ref="${{ steps.ci-image.outputs.AIS_CI_IMAGE }}-cache" \
-            ${{ steps.use-cache.outputs.CACHE_FROM_CMD }} \
+            --build-arg ROCM_VERSION="${AIS_ROCM_VERSION}" \
+            --cache-to=type=registry,ref="${AIS_CI_IMAGE}-cache" \
+            ${AIS_CACHE_FROM_CMD:+"${AIS_CACHE_FROM_CMD}"} \
             --push \
-            -t "${{ steps.ci-image.outputs.AIS_CI_IMAGE }}" \
+            -t "${AIS_CI_IMAGE}" \
             "${GITHUB_WORKSPACE}/projects/hipfile/util/docker"

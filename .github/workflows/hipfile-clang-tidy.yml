@@ -121,12 +121,13 @@ jobs:
             -t \
             -w /ais/build/hipfile \
             -e AIS_CLANG_TIDY_VERSION \
+            -e AIS_HIP_ARCHITECTURES \
             "${AIS_CONTAINER_NAME}" \
             /bin/bash -c '
               cmake \
                 -DCMAKE_BUILD_TYPE=Debug \
                 -DCMAKE_CXX_COMPILER=amdclang++ \
-                -DCMAKE_HIP_ARCHITECTURES="${{ env.AIS_HIP_ARCHITECTURES }}" \
+                -DCMAKE_HIP_ARCHITECTURES="${AIS_HIP_ARCHITECTURES}" \
                 -DCMAKE_HIP_PLATFORM=amd \
                 -DHIPFILE_USE_CLANG_TIDY=ON \
                 -DHIPFILE_CLANG_TIDY_EXECUTABLE="clang-tidy-${AIS_CLANG_TIDY_VERSION}" \
