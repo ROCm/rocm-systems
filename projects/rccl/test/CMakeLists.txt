@@ -53,8 +53,9 @@ if(BUILD_TESTS)
             "${PROJECT_SOURCE_DIR}/test/test_makefile_depflags.py"
   )
 
-  # The kernel-count leak guards and the __hip_atomic_* poison probe
-  # (src/include/test_poison_hip_atomics.py) are intentionally NOT registered as
+  # The kernel-count leak guards, the __hip_atomic_* poison probe
+  # (src/include/test_poison_hip_atomics.py) and the LL peer-pointer ISA guard
+  # (test/test_symk_peer_pointer_isa.py) are intentionally NOT registered as
   # ctest cases here: nothing in RCCL CI runs `ctest`, so an add_test() would
   # never gate. They run in CI via the CPU-only host-test pipeline instead --
   # see test/host/run_host_tests.sh (the `guards` phase, folded into `run`).
