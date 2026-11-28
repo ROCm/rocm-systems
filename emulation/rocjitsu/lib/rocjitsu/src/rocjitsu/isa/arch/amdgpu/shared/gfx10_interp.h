@@ -3,16 +3,14 @@
 
 #pragma once
 
-#include "rocjitsu/isa/arch/amdgpu/shared/denormal_value.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/source_modifier.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/lds.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+
+#include "rj_arith/rj_arith.h"
 
 #include <bit>
 #include <cstdint>
@@ -21,6 +19,7 @@ namespace rocjitsu::amdgpu {
 
 enum class Gfx10Interp { Mov, P1, P2, P1LL, P1LV, P2F16 };
 
+// Fetch LDS coefficients and stage operands before delegating arithmetic to rj-arith.
 // M0's primitive mask assigns each quad to one primitive. Attributes contain
 // one 12-dword block per primitive, with interleaved P0/P10 then the four P20s.
 template <Gfx10Interp Op, typename Inst> void execute_gfx10_interp(Inst &inst, Wavefront &wf) {
@@ -51,35 +50,55 @@ template <Gfx10Interp Op, typename Inst> void execute_gfx10_interp(Inst &inst, W
       return inst.vsrc;
     }
   }();
-  unsigned omod = 0;
-  bool clamp = false;
+  uint64_t mode = half && half_shift ? RJ_ARITH_ALU_HIGH_A : 0;
   if constexpr (extended) {
-    clamp = inst.inst_.clamp;
-    omod = fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(), wf.ieee_mode(),
-                                   inst.inst_.omod);
+    if (inst.inst_.clamp) {
+      mode |= RJ_ARITH_ALU_CLAMP;
+    }
+    mode |= uint64_t(inst.inst_.omod) << 6;
+    if (inst.inst_.abs & 2) {
+      mode |= RJ_ARITH_ALU_ABS_B;
+    }
+    if (inst.inst_.abs & 4) {
+      mode |= RJ_ARITH_ALU_ABS_C;
+    }
+    if (inst.inst_.neg & 2) {
+      mode |= RJ_ARITH_ALU_NEG_B;
+    }
+    if (inst.inst_.neg & 4) {
+      mode |= RJ_ARITH_ALU_NEG_C;
+    }
+    if constexpr (Op == Gfx10Interp::P2F16) {
+      if (vop3_opsel(inst.inst_) & 8u) {
+        mode |= RJ_ARITH_ALU_HIGH_D;
+      }
+    }
   }
+  uint64_t flags = wf.cu().arithmetic_flags();
+  constexpr bool half_output = Op == Gfx10Interp::P2F16;
+  if (half_output && wf.fp16_ovfl()) {
+    flags |= RJ_ARITH_FP16_OVFL;
+  }
+  flags |= uint64_t(half_output ? wf.fp_round_mode_f16_f64() : wf.fp_round_mode_f32()) << 24;
+  if (!(wf.fp_denorm_mode_f32() & 1)) {
+    flags |= RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
+  }
+  if (!((half_output ? wf.fp_denorm_mode_f16_f64() : wf.fp_denorm_mode_f32()) & 2)) {
+    flags |= RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
+  }
+  flags |= (wf.fp_denorm_mode_f16_f64() & 1) ? RJ_ARITH_FP_PRESERVE_INPUT_DENORMALS_F16
+                                             : RJ_ARITH_FP_FLUSH_INPUT_DENORMALS_F16;
+  if (wf.ieee_mode()) {
+    flags |= RJ_ARITH_FP_IEEE_MODE;
+  }
+  if (!wf.dx10_clamp()) {
+    flags |= RJ_ARITH_FP_DX10_CLAMP_OFF;
+  }
+  alignas(64) uint32_t coefficients[64]{}, coordinates[64]{}, addends[64]{}, result[64]{};
   RegisterAccess regs(wf);
   const unsigned quads = wf.wf_size() / 4;
   const uint32_t starts = (m0 >> 16) & ((1u << (quads - 1)) - 1);
   const unsigned primitives = 1 + std::popcount(starts);
-  auto half_value = [&](uint32_t value) {
-    return util::f16_to_f32(fp_mode::detail::flush_input_f16(uint16_t(value >> half_shift),
-                                                             wf.fp_denorm_mode_f16_f64()));
-  };
-  auto modify = [&](float value, unsigned index) {
-    if constexpr (extended) {
-      return source_modifier::apply_to_float(value, index, inst.inst_.abs, inst.inst_.neg);
-    } else {
-      return value;
-    }
-  };
-  auto finish = [&](float value) {
-    if (omod) {
-      value = fp_mode::apply_omod_f32(value, omod, wf.fp_round_mode_f32());
-    }
-    return std::bit_cast<uint32_t>(clamp ? clamp_floating_result(value, wf) : value);
-  };
-
   for (unsigned quad = 0; quad < quads; ++quad) {
     const uint64_t mask = (wf.exec() >> (4 * quad)) & 15;
     if (!mask) {
@@ -115,41 +134,82 @@ template <Gfx10Interp Op, typename Inst> void execute_gfx10_interp(Inst &inst, W
         continue;
       }
       const unsigned lane = quad * 4 + lane_in_quad;
-      if constexpr (Op == Gfx10Interp::Mov) {
-        regs.write_lane(inst.vdst, lane, finish(std::bit_cast<float>(slope)));
-      } else {
-        const float slope_value = half ? half_value(slope) : std::bit_cast<float>(slope);
-        const float coordinate_value =
-            modify(std::bit_cast<float>(regs.read_lane(coordinate, lane)), 1);
-        float addend;
-        if constexpr (Op == Gfx10Interp::P1LV) {
-          addend = modify(half_value(regs.read_lane(inst.src2, lane)), 2);
-        } else if constexpr (Op == Gfx10Interp::P2F16) {
-          addend = modify(std::bit_cast<float>(regs.read_lane(inst.src2, lane)), 2);
+      coefficients[lane] = slope;
+      if constexpr (Op != Gfx10Interp::Mov) {
+        coordinates[lane] = regs.read_lane(coordinate, lane);
+        if constexpr (Op == Gfx10Interp::P1LV || Op == Gfx10Interp::P2F16) {
+          addends[lane] = regs.read_lane(inst.src2, lane);
         } else if constexpr (Op == Gfx10Interp::P2) {
-          addend = std::bit_cast<float>(regs.read_lane(inst.vdst, lane));
+          addends[lane] = regs.read_lane(inst.vdst, lane);
         } else {
-          addend = half ? half_value(origin) : std::bit_cast<float>(origin);
-        }
-        if constexpr (Op == Gfx10Interp::P2F16) {
-          const bool flush = !(wf.fp_denorm_mode_f32() & 1u);
-          uint16_t result = fp_mode::detail::fma_f32_to_f16_nearest_environment(
-              slope_value, flush ? denormal::flush_value(coordinate_value) : coordinate_value,
-              flush ? denormal::flush_value(addend) : addend, wf.fp_round_mode_f16_f64(), clamp,
-              wf.fp16_ovfl(), floating_clamp_nan_to_zero(wf));
-          if (!(wf.fp_denorm_mode_f16_f64() & 2u) && (result & 0x7c00u) == 0) {
-            result &= 0x8000u;
-          }
-          const bool high = vop3_opsel(inst.inst_) & 8u;
-          regs.write_lane_masked(inst.vdst, lane, uint32_t(result) << (high ? 16 : 0),
-                                 high ? 12 : 3);
-        } else {
-          const auto result =
-              fp_mode::fma_f32(slope_value, coordinate_value, addend, wf.fp_round_mode_f32(),
-                               wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode());
-          regs.write_lane(inst.vdst, lane, finish(result));
+          addends[lane] = origin;
         }
       }
+    }
+  }
+  const uint32_t *a = coefficients, *b = coordinates, *c = addends;
+  uint32_t *d = result;
+  const auto invoke = [&]<int Lanes>() {
+    if constexpr (Op == Gfx10Interp::Mov) {
+      if constexpr (Lanes == 32) {
+        return rj_arith_v_interp_mov_f32_w32_gfx10(flags, uint32_t(wf.exec()), mode, &d, &a, &b,
+                                                   &c);
+      } else {
+        return rj_arith_v_interp_mov_f32_w64_gfx10(flags, wf.exec(), mode, &d, &a, &b, &c);
+      }
+    }
+    if constexpr (Op == Gfx10Interp::P1) {
+      if constexpr (Lanes == 32) {
+        return rj_arith_v_interp_p1_f32_w32_gfx10(flags, uint32_t(wf.exec()), mode, &d, &a, &b, &c);
+      } else {
+        return rj_arith_v_interp_p1_f32_w64_gfx10(flags, wf.exec(), mode, &d, &a, &b, &c);
+      }
+    }
+    if constexpr (Op == Gfx10Interp::P2) {
+      if constexpr (Lanes == 32) {
+        return rj_arith_v_interp_p2_f32_w32_gfx10(flags, uint32_t(wf.exec()), mode, &d, &a, &b, &c);
+      } else {
+        return rj_arith_v_interp_p2_f32_w64_gfx10(flags, wf.exec(), mode, &d, &a, &b, &c);
+      }
+    }
+    if constexpr (Op == Gfx10Interp::P1LL) {
+      if constexpr (Lanes == 32) {
+        return rj_arith_v_interp_p1ll_f16_w32_gfx10(flags, uint32_t(wf.exec()), mode, &d, &a, &b,
+                                                    &c);
+      } else {
+        return rj_arith_v_interp_p1ll_f16_w64_gfx10(flags, wf.exec(), mode, &d, &a, &b, &c);
+      }
+    }
+    if constexpr (Op == Gfx10Interp::P1LV) {
+      if constexpr (Lanes == 32) {
+        return rj_arith_v_interp_p1lv_f16_w32_gfx10(flags, uint32_t(wf.exec()), mode, &d, &a, &b,
+                                                    &c);
+      } else {
+        return rj_arith_v_interp_p1lv_f16_w64_gfx10(flags, wf.exec(), mode, &d, &a, &b, &c);
+      }
+    }
+    if constexpr (Op == Gfx10Interp::P2F16) {
+      if constexpr (Lanes == 32) {
+        return rj_arith_v_interp_p2_f16_w32_gfx10(flags, uint32_t(wf.exec()), mode, &d, &a, &b, &c);
+      } else {
+        return rj_arith_v_interp_p2_f16_w64_gfx10(flags, wf.exec(), mode, &d, &a, &b, &c);
+      }
+    }
+  };
+  const int status =
+      wf.wf_size() == 32 ? invoke.template operator()<32>() : invoke.template operator()<64>();
+  if (status != RJ_ARITH_SUCCESS) {
+    wf.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  for (unsigned lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!((wf.exec() >> lane) & 1)) {
+      continue;
+    }
+    if constexpr (half_output) {
+      regs.write_lane_masked(inst.vdst, lane, result[lane], mode & RJ_ARITH_ALU_HIGH_D ? 12 : 3);
+    } else {
+      regs.write_lane(inst.vdst, lane, result[lane]);
     }
   }
 }

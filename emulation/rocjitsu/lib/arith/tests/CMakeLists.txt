@@ -371,3 +371,5 @@ foreach(
     set(target "rj_arith_scalar_${family}_test")
     rj_arith_add_test(${target} scalar/${family}_test.cpp)
 endforeach()
+
+rj_arith_add_test(rj_arith_interp_gfx10_test graphics/interp_gfx10_test.cpp)

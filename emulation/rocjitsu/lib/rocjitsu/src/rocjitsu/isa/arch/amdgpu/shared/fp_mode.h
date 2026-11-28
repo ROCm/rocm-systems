@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// MODE-aware arithmetic for memory atomics and gfx10 interpolation.
+// MODE-aware arithmetic for memory atomics.
 // Host FP controls remain unchanged; guest rounding is explicit.
 // Migrated VALU arithmetic is implemented by rj-arith.
 #pragma once
@@ -9,10 +9,6 @@
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/denormal.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/denormal_value.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/fp_rounding.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/input_denormal.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/output_modifier.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h"
 #include "rocjitsu/isa/isa_family.h"
 #include "util/data_types.h"
 #include <bit>
@@ -194,103 +190,6 @@ template <bool Bf16>
                                                             bool source_nan_first = false) {
   return bf16 ? detail::add_packed_16<true>(old_val, src_val, denorm_mode, source_nan_first)
               : detail::add_packed_16<false>(old_val, src_val, denorm_mode, source_nan_first);
-}
-
-// gfx10 interpolation still uses these MODE-aware arithmetic stages.
-
-namespace detail {
-/// @brief Flush a raw F16 source under MODE input-denormal control.
-inline uint16_t flush_input_f16(uint16_t value, uint32_t denorm_mode) {
-  return static_cast<uint16_t>(input_denormal::flush_input<fp_format::F16>(
-      uint32_t{value}, input_denormal::Policy::make(denorm_mode)));
-}
-} // namespace detail
-
-/// @brief Whether floating operations with exception support quiet signaling NaNs.
-inline bool quiets_nan(rocjitsu::IsaFamily arch, bool ieee_mode) {
-  return arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5 || ieee_mode;
-}
-
-/// @brief Return the OMOD value supported by an ordinary floating-point result.
-inline uint32_t effective_omod(rocjitsu::IsaFamily arch, uint32_t denorm_mode, bool ieee_mode,
-                               uint32_t omod) {
-  if (omod == 0) {
-    return 0;
-  }
-  if (arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5) {
-    return omod;
-  }
-  return (denorm_mode & 2u) == 0 && !ieee_mode ? omod : 0;
-}
-
-namespace detail {
-/// Round an F32-source FMA directly to F16 in a clean nearest environment.
-inline uint16_t fma_f32_to_f16_nearest_environment(float a, float b, float c, uint32_t round_mode,
-                                                   bool clamp, bool fp16_ovfl,
-                                                   bool clamp_nan_to_zero) {
-  double value;
-  if (std::isfinite(a) && std::isfinite(b) && std::isfinite(c)) {
-    const auto exact = add_exact(double(a) * double(b), double(c));
-    value = detail::round_to_odd(exact);
-    if (exact.value == 0 && exact.error == 0) {
-      // Finite F32 products are exact, normal F64 values or signed zero.
-      // Matching signed zeros keep their sign; cancellation and opposite
-      // signed zeros are negative only when rounding toward negative infinity.
-      const uint32_t product_sign = (std::bit_cast<uint32_t>(a) ^ std::bit_cast<uint32_t>(b)) >> 31;
-      const uint32_t addend_bits = std::bit_cast<uint32_t>(c);
-      const bool matching_zeros =
-          (addend_bits & 0x7fffffffu) == 0 && product_sign == (addend_bits >> 31);
-      const bool negative = matching_zeros ? product_sign != 0 : (round_mode & 3u) == 2u;
-      value = std::bit_cast<double>(uint64_t{negative} << 63);
-    }
-  } else {
-    const uint32_t a_abs = std::bit_cast<uint32_t>(a) & 0x7fffffffu;
-    const uint32_t b_abs = std::bit_cast<uint32_t>(b) & 0x7fffffffu;
-    // The invalid product wins even when the addend supplies a NaN payload.
-    const bool invalid_product =
-        (a_abs == 0 && b_abs == 0x7f800000u) || (b_abs == 0 && a_abs == 0x7f800000u);
-    value = invalid_product ? std::bit_cast<double>(uint64_t{0xfff8000000000000})
-                            : std::fma(double(a), double(b), double(c));
-  }
-  return pseudo_scalar::round_f16_result(value, round_mode, clamp, fp16_ovfl, clamp_nan_to_zero);
-}
-} // namespace detail
-
-// Apply interpolation's input flushing, NaN policy and guest rounding without
-// changing host controls. Finite arithmetic uses FP64 with a retained residual.
-inline float fma_f32(float a, float b, float c, uint32_t round_mode, uint32_t denorm_mode,
-                     rocjitsu::IsaFamily arch, bool ieee_mode) {
-  auto input_bits = [denorm_mode](float value) {
-    const uint32_t bits = std::bit_cast<uint32_t>(value);
-    return !(denorm_mode & 1u) && (bits & 0x7f800000u) == 0 ? bits & 0x80000000u : bits;
-  };
-  const uint32_t a_bits = input_bits(a), b_bits = input_bits(b), c_bits = input_bits(c);
-  const uint32_t a_abs = a_bits & 0x7fffffffu, b_abs = b_bits & 0x7fffffffu;
-  if ((a_abs == 0 && b_abs == 0x7f800000u) || (b_abs == 0 && a_abs == 0x7f800000u)) {
-    return std::bit_cast<float>(0xffc00000u);
-  }
-  for (const uint32_t bits : {a_bits, b_bits, c_bits}) {
-    if ((bits & 0x7fffffffu) > 0x7f800000u) {
-      return std::bit_cast<float>(bits | (quiets_nan(arch, ieee_mode) ? 0x00400000u : 0u));
-    }
-  }
-  a = std::bit_cast<float>(a_bits);
-  b = std::bit_cast<float>(b_bits);
-  c = std::bit_cast<float>(c_bits);
-  if (std::isfinite(a) && std::isfinite(b) && std::isfinite(c)) {
-    return detail::fma_finite_f32(a, b, c, round_mode & 3u, !(denorm_mode & 2u));
-  }
-  const float result = std::fma(a, b, c);
-  return std::isnan(result) ? std::bit_cast<float>(0xffc00000u) : result;
-}
-
-/// @brief Scale an F32 result by OMOD through the shared raw-bit stage.
-/// @details Zeros and tiny results become +0 before scaling; a normal result that
-/// becomes tiny when halved keeps its sign as a zero. Overflow rounds by
-/// `round_mode` (MODE.FP_ROUND); TRANS callers pass nearest-even.
-inline float apply_omod_f32(float value, uint32_t omod, uint32_t round_mode) {
-  return std::bit_cast<float>(
-      output_modifier::scale_f32(std::bit_cast<uint32_t>(value), omod, round_mode));
 }
 
 } // namespace rocjitsu::amdgpu::fp_mode

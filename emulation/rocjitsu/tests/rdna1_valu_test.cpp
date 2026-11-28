@@ -207,4 +207,17 @@ TEST_F(Rdna1ValuTest, HalfInterpolationSelectsHighCoefficientsAndPreservesDestin
   EXPECT_EQ(get(5), 0x4400beefu);                           // (2 * -2 + 8) = 4
 }
 
+TEST_F(Rdna1ValuTest, HalfInterpolationHonorsOverflowSaturation) {
+  wf->set_m0(0);
+  cu->lds().write32(wf->lds_base() + 32, 0x7bff); // P20.x = largest finite FP16.
+  set(2, std::bit_cast<uint32_t>(2.f));
+  set(3, 0);
+  for (bool saturate : {false, true}) {
+    wf->set_mode_raw(0xf0 | (uint32_t(saturate) << 23));
+    set(5, 0xbeef0000);
+    ASSERT_NO_FATAL_FAILURE(execute(0xd75a0005, 0x040e0400)); // P2, dst.low
+    EXPECT_EQ(get(5), saturate ? 0xbeef7bffu : 0xbeef7c00u);
+  }
+}
+
 } // namespace
