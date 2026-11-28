@@ -23,7 +23,11 @@ CPU_SMOKE_TESTS = (
     "tests/test_comm_properties_facade.py",
 )
 
-GPU_SMOKE_TESTS = ("tests/test_shim_surface.py", "tests/test_group_window.py")
+GPU_SMOKE_TESTS = (
+    "tests/test_shim_surface.py",
+    "tests/test_group_window.py",
+    "tests/test_comm_config.py",
+)
 
 
 @pytest.mark.nccl4py
