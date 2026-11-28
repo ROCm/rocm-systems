@@ -53,9 +53,9 @@ struct TileView {
 };
 
 // Layout classification for 2D tiles (element strides).
-__device__ __forceinline__ TileLayout tile_classify_2d(
-    size_t src_stride0, size_t src_stride1, size_t dst_stride0,
-    size_t dst_stride1, size_t extent0, size_t extent1) {
+__device__ __forceinline__ TileLayout tile_classify_2d(size_t src_stride0, size_t src_stride1,
+                                                       size_t dst_stride0, size_t dst_stride1,
+                                                       size_t extent0, size_t extent1) {
   const bool row_contig = (src_stride1 == 1 && dst_stride1 == 1);
   const bool col_contig = (src_stride0 == 1 && dst_stride0 == 1);
   if (row_contig && src_stride0 == extent1 && dst_stride0 == extent1) {
@@ -75,9 +75,8 @@ __device__ __forceinline__ TileLayout tile_classify_2d(
 
 __device__ __forceinline__ TileLayout tile_classify(const TileView& view) {
   if (view.ndim == 2) {
-    return tile_classify_2d(view.src_s[0], view.src_s[1],
-                            view.dst_s[0], view.dst_s[1],
-                            view.ext[0],   view.ext[1]);
+    return tile_classify_2d(view.src_s[0], view.src_s[1], view.dst_s[0], view.dst_s[1], view.ext[0],
+                            view.ext[1]);
   }
   if (view.ndim == 1 && view.src_s[0] == 1 && view.dst_s[0] == 1) {
     return TileLayout::Contiguous;
@@ -85,8 +84,7 @@ __device__ __forceinline__ TileLayout tile_classify(const TileView& view) {
   if (view.ndim > 2) {
     // For ndim > 2: contiguous when the innermost dimension is packed and
     // each outer dimension's stride equals the product of inner extents.
-    bool contiguous = (view.src_s[view.ndim - 1] == 1 &&
-                       view.dst_s[view.ndim - 1] == 1);
+    bool contiguous = (view.src_s[view.ndim - 1] == 1 && view.dst_s[view.ndim - 1] == 1);
     if (contiguous) {
       size_t inner = view.ext[view.ndim - 1];
       for (int d = view.ndim - 2; d >= 0; d--) {
@@ -103,14 +101,13 @@ __device__ __forceinline__ TileLayout tile_classify(const TileView& view) {
 }
 
 __device__ __forceinline__ TileView tile_make_view(
-    void* dst_data, const void* src_data, const size_t* dst_strides,
-    const size_t* src_strides, const size_t* start_coord,
-    const size_t* boundary, int ndim, size_t element_size) {
+    void* dst_data, const void* src_data, const size_t* dst_strides, const size_t* src_strides,
+    const size_t* start_coord, const size_t* boundary, int ndim, size_t element_size) {
   TileView view{};
-  view.src_base = static_cast<char*>(const_cast<void*>(src_data));
-  view.dst_base = static_cast<char*>(dst_data);
+  view.src_base     = static_cast<char*>(const_cast<void*>(src_data));
+  view.dst_base     = static_cast<char*>(dst_data);
   view.element_size = element_size;
-  view.ndim = ndim;
+  view.ndim         = ndim;
 
   size_t src_offset = 0;
   size_t dst_offset = 0;
@@ -121,8 +118,8 @@ __device__ __forceinline__ TileView tile_make_view(
       view.src_s[d] = src_strides[d];
       view.dst_s[d] = dst_strides[d];
       view.ext[d]   = boundary[d] - start_coord[d];
-      src_offset   += start_coord[d] * src_strides[d];
-      dst_offset   += start_coord[d] * dst_strides[d];
+      src_offset += start_coord[d] * src_strides[d];
+      dst_offset += start_coord[d] * dst_strides[d];
     }
   }
   view.src_base += src_offset * element_size;

@@ -36,125 +36,120 @@ namespace rocshmem {
 
 // Helper class to build PCIe paths from vector of components
 class PCIeTreeTestHelper {
-public:
+ public:
   // Insert path to tree from vector of path components
   static void InsertPCIePathToTree(std::vector<std::string> const& pathComponents,
-                                   std::string const& description,
-                                   PCIeNode& root) {
+                                   std::string const& description, PCIeNode& root) {
     // Build path by concatenating: /sys/bus/pci/devices/<component>/<component>/...
     // But we just need the last component as the address
-    if (pathComponents.empty()) return;
+    if (pathComponents.empty())
+      return;
 
     // For the test tree, we build it step by step
     PCIeNode* currNode = &root;
     for (auto const& component : pathComponents) {
-      auto it = (currNode->children.insert(PCIeNode(component))).first;
+      auto it  = (currNode->children.insert(PCIeNode(component))).first;
       currNode = const_cast<PCIeNode*>(&(*it));
     }
     currNode->description = description;
   }
 };
 
-class TopologyTestFixture : public ::testing::Test
-{
-  protected:
-    void SetUp() override {
-      // Initialize HIP runtime
-      hipError_t err = hipGetDeviceCount(&num_gpus_);
-      if (err != hipSuccess) {
-        num_gpus_ = 0;
-      }
+class TopologyTestFixture : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    // Initialize HIP runtime
+    hipError_t err = hipGetDeviceCount(&num_gpus_);
+    if (err != hipSuccess) {
+      num_gpus_ = 0;
     }
+  }
 
-    void TearDown() override {
-      // Cleanup if needed
-    }
+  void TearDown() override {
+    // Cleanup if needed
+  }
 
-    int num_gpus_ = 0;
+  int num_gpus_ = 0;
 };
 
-class DeviceTypeTestFixture : public ::testing::Test
-{
-  protected:
-    void SetUp() override {}
-    void TearDown() override {}
+class DeviceTypeTestFixture : public ::testing::Test {
+ protected:
+  void SetUp() override {}
+  void TearDown() override {}
 };
 
 // Test fixture for PCIe tree testing with theoretical topology
-class PCIeTreeTestFixture : public ::testing::Test
-{
-  protected:
-    PCIeNode root_;
-    std::vector<std::string> gpu_addresses_;
-    std::vector<std::string> nic_addresses_;
+class PCIeTreeTestFixture : public ::testing::Test {
+ protected:
+  PCIeNode root_;
+  std::vector<std::string> gpu_addresses_;
+  std::vector<std::string> nic_addresses_;
 
-    void SetUp() override {
-      // Create a theoretical PCIe tree with 4 GPUs and 4 NICs
-      // Topology:
-      //   Root (root)
-      //     ├── CPU Socket 0 (0000:00:01.0)
-      //     │   ├── PCIe Switch 0 (0000:01:00.0)
-      //     │   │   ├── GPU 0 (0000:02:00.0)
-      //     │   │   └── NIC 0 (0000:03:00.0)
-      //     │   └── PCIe Switch 1 (0000:04:00.0)
-      //     │       ├── GPU 1 (0000:05:00.0)
-      //     │       └── NIC 1 (0000:06:00.0)
-      //     └── CPU Socket 1 (0000:40:00.0)
-      //         ├── PCIe Switch 2 (0000:41:00.0)
-      //         │   ├── GPU 2 (0000:42:00.0)
-      //         │   └── NIC 2 (0000:43:00.0)
-      //         └── PCIe Switch 3 (0000:44:00.0)
-      //             ├── GPU 3 (0000:45:00.0)
-      //             └── NIC 3 (0000:46:00.0)
+  void SetUp() override {
+    // Create a theoretical PCIe tree with 4 GPUs and 4 NICs
+    // Topology:
+    //   Root (root)
+    //     ├── CPU Socket 0 (0000:00:01.0)
+    //     │   ├── PCIe Switch 0 (0000:01:00.0)
+    //     │   │   ├── GPU 0 (0000:02:00.0)
+    //     │   │   └── NIC 0 (0000:03:00.0)
+    //     │   └── PCIe Switch 1 (0000:04:00.0)
+    //     │       ├── GPU 1 (0000:05:00.0)
+    //     │       └── NIC 1 (0000:06:00.0)
+    //     └── CPU Socket 1 (0000:40:00.0)
+    //         ├── PCIe Switch 2 (0000:41:00.0)
+    //         │   ├── GPU 2 (0000:42:00.0)
+    //         │   └── NIC 2 (0000:43:00.0)
+    //         └── PCIe Switch 3 (0000:44:00.0)
+    //             ├── GPU 3 (0000:45:00.0)
+    //             └── NIC 3 (0000:46:00.0)
 
-      // Define GPU and NIC addresses first
-      gpu_addresses_ = {
+    // Define GPU and NIC addresses first
+    gpu_addresses_ = {
         "0000:02:00.0",  // GPU 0
         "0000:05:00.0",  // GPU 1
         "0000:42:00.0",  // GPU 2
         "0000:45:00.0"   // GPU 3
-      };
+    };
 
-      nic_addresses_ = {
+    nic_addresses_ = {
         "0000:03:00.0",  // NIC 0
         "0000:06:00.0",  // NIC 1
         "0000:43:00.0",  // NIC 2
         "0000:46:00.0"   // NIC 3
-      };
+    };
 
-      // Define the PCIe paths for each device
-      // Each GPU/NIC pair shares the same switch
-      std::vector<std::vector<std::string>> gpu_paths = {
+    // Define the PCIe paths for each device
+    // Each GPU/NIC pair shares the same switch
+    std::vector<std::vector<std::string>> gpu_paths = {
         {"0000:00:01.0", "0000:01:00.0", gpu_addresses_[0]},  // GPU 0
         {"0000:00:01.0", "0000:04:00.0", gpu_addresses_[1]},  // GPU 1
         {"0000:40:00.0", "0000:41:00.0", gpu_addresses_[2]},  // GPU 2
         {"0000:40:00.0", "0000:44:00.0", gpu_addresses_[3]}   // GPU 3
-      };
+    };
 
-      std::vector<std::vector<std::string>> nic_paths = {
+    std::vector<std::vector<std::string>> nic_paths = {
         {"0000:00:01.0", "0000:01:00.0", nic_addresses_[0]},  // NIC 0
         {"0000:00:01.0", "0000:04:00.0", nic_addresses_[1]},  // NIC 1
         {"0000:40:00.0", "0000:41:00.0", nic_addresses_[2]},  // NIC 2
         {"0000:40:00.0", "0000:44:00.0", nic_addresses_[3]}   // NIC 3
-      };
+    };
 
-      // Build the PCIe tree
-      root_ = PCIeNode("root", "PCIe Root Complex");
+    // Build the PCIe tree
+    root_ = PCIeNode("root", "PCIe Root Complex");
 
-      // Insert GPUs into tree
-      for (size_t i = 0; i < gpu_addresses_.size(); i++) {
-        PCIeTreeTestHelper::InsertPCIePathToTree(
-          gpu_paths[i], "GPU " + std::to_string(i), root_);
-      }
-
-      // Insert NICs into tree
-      for (size_t i = 0; i < nic_addresses_.size(); i++) {
-        PCIeTreeTestHelper::InsertPCIePathToTree(
-          nic_paths[i], "NIC " + std::to_string(i), root_);
-      }
+    // Insert GPUs into tree
+    for (size_t i = 0; i < gpu_addresses_.size(); i++) {
+      PCIeTreeTestHelper::InsertPCIePathToTree(gpu_paths[i], "GPU " + std::to_string(i), root_);
     }
+
+    // Insert NICs into tree
+    for (size_t i = 0; i < nic_addresses_.size(); i++) {
+      PCIeTreeTestHelper::InsertPCIePathToTree(nic_paths[i], "NIC " + std::to_string(i), root_);
+    }
+  }
 };
 
-} // namespace rocshmem
+}  // namespace rocshmem
 
-#endif // ROCSHMEM_TOPOLOGY_GTEST_HPP
+#endif  // ROCSHMEM_TOPOLOGY_GTEST_HPP

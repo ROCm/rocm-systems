@@ -33,8 +33,7 @@
 /******************************************************************************
  * HOST TESTER CLASS METHODS
  *****************************************************************************/
-TeamAlltoallmemOnStreamTester::TeamAlltoallmemOnStreamTester(TesterArguments args)
-    : Tester(args) {
+TeamAlltoallmemOnStreamTester::TeamAlltoallmemOnStreamTester(TesterArguments args) : Tester(args) {
   my_pe = rocshmem_team_my_pe(ROCSHMEM_TEAM_WORLD);
   n_pes = rocshmem_team_n_pes(ROCSHMEM_TEAM_WORLD);
 
@@ -47,11 +46,11 @@ TeamAlltoallmemOnStreamTester::TeamAlltoallmemOnStreamTester(TesterArguments arg
   }
 
   int num_bytes_wg = args.max_msg_size * n_pes;
-  int total_bytes = num_bytes_wg * num_teams;
-  buf_size = total_bytes;
+  int total_bytes  = num_bytes_wg * num_teams;
+  buf_size         = total_bytes;
 
-  source_buf = static_cast<char *>(alloc_test_buffer(buf_size, args.local_buf_type));
-  dest_buf = static_cast<char *>(alloc_test_buffer(buf_size));
+  source_buf = static_cast<char*>(alloc_test_buffer(buf_size, args.local_buf_type));
+  dest_buf   = static_cast<char*>(alloc_test_buffer(buf_size));
 
   team_world_dup.resize(num_teams);
 
@@ -96,24 +95,26 @@ void TeamAlltoallmemOnStreamTester::postLaunchKernel() {
   }
 
   // Get elapsed time for each work group from HIP events
-  for (uint32_t wg_id = 0; wg_id < static_cast<uint32_t>(num_teams) && wg_id < static_cast<uint32_t>(num_timers); wg_id++) {
+  for (uint32_t wg_id = 0;
+       wg_id < static_cast<uint32_t>(num_teams) && wg_id < static_cast<uint32_t>(num_timers);
+       wg_id++) {
     float elapsed_time_ms = 0.0f;
-    CHECK_HIP(hipEventElapsedTime(&elapsed_time_ms, start_events_timed[wg_id],
-                                  stop_events_timed[wg_id]));
+    CHECK_HIP(
+        hipEventElapsedTime(&elapsed_time_ms, start_events_timed[wg_id], stop_events_timed[wg_id]));
 
     // Convert milliseconds to GPU cycles
     // wall_clk_rate is in kHz, so: cycles = ms * wall_clk_rate
-    long long int elapsed_cycles = static_cast<long long int>(
-        elapsed_time_ms * static_cast<float>(wall_clk_rate));
+    long long int elapsed_cycles =
+        static_cast<long long int>(elapsed_time_ms * static_cast<float>(wall_clk_rate));
 
     start_time[wg_id] = 0;
-    end_time[wg_id] = elapsed_cycles;
+    end_time[wg_id]   = elapsed_cycles;
   }
 
   // Fill remaining timers with zero if num_timers > num_teams
   for (uint32_t i = num_teams; i < static_cast<uint32_t>(num_timers); i++) {
     start_time[i] = 0;
-    end_time[i] = 0;
+    end_time[i]   = 0;
   }
 
   for (int team_i = 0; team_i < num_teams; team_i++) {
@@ -132,7 +133,7 @@ void TeamAlltoallmemOnStreamTester::resetBuffers(size_t size) {
       // Each block in source buffer is filled with (my_pe * n_pes + pe)
       // This makes it easy to verify correctness
       int value = my_pe * n_pes + pe;
-      idx = (wg_id * n_pes + pe) * size;
+      idx       = (wg_id * n_pes + pe) * size;
       std::memset(source_buf + idx, value, size);
     }
   }
@@ -142,16 +143,15 @@ void TeamAlltoallmemOnStreamTester::resetBuffers(size_t size) {
 }
 
 void TeamAlltoallmemOnStreamTester::launchKernel([[maybe_unused]] dim3 gridSize,
-                                                 [[maybe_unused]] dim3 blockSize,
-                                                 int loop,
+                                                 [[maybe_unused]] dim3 blockSize, int loop,
                                                  size_t size) {
   // Execute warmup iterations (skip)
   for (int i = 0; i < args.skip; i++) {
     for (int wg_id = 0; wg_id < num_teams; wg_id++) {
-      char *wg_source = source_buf + wg_id * n_pes * size;
-      char *wg_dest = dest_buf + wg_id * n_pes * size;
-      rocshmem_alltoallmem_on_stream(team_world_dup[wg_id], wg_dest,
-                                     wg_source, size, streams[wg_id]);
+      char* wg_source = source_buf + wg_id * n_pes * size;
+      char* wg_dest   = dest_buf + wg_id * n_pes * size;
+      rocshmem_alltoallmem_on_stream(team_world_dup[wg_id], wg_dest, wg_source, size,
+                                     streams[wg_id]);
     }
   }
 
@@ -166,10 +166,10 @@ void TeamAlltoallmemOnStreamTester::launchKernel([[maybe_unused]] dim3 gridSize,
         CHECK_HIP(hipEventRecord(start_events_timed[wg_id], streams[wg_id]));
       }
 
-      char *wg_source = source_buf + wg_id * n_pes * size;
-      char *wg_dest = dest_buf + wg_id * n_pes * size;
-      rocshmem_alltoallmem_on_stream(team_world_dup[wg_id], wg_dest,
-                                     wg_source, size, streams[wg_id]);
+      char* wg_source = source_buf + wg_id * n_pes * size;
+      char* wg_dest   = dest_buf + wg_id * n_pes * size;
+      rocshmem_alltoallmem_on_stream(team_world_dup[wg_id], wg_dest, wg_source, size,
+                                     streams[wg_id]);
 
       // Record stop event for this work group on last iteration
       if (i == loop - 1) {
@@ -178,7 +178,7 @@ void TeamAlltoallmemOnStreamTester::launchKernel([[maybe_unused]] dim3 gridSize,
     }
   }
 
-  num_msgs = (loop + args.skip) * num_teams;
+  num_msgs       = (loop + args.skip) * num_teams;
   num_timed_msgs = loop * num_teams;
 }
 
@@ -192,21 +192,18 @@ void TeamAlltoallmemOnStreamTester::verifyResults(size_t size) {
   for (int wg_id = 0; wg_id < num_teams; wg_id++) {
     for (int j = 0; j < n_pes; j++) {
       int expected_value = j * n_pes + my_pe;
-      idx = (wg_id * n_pes + j) * size;
+      idx                = (wg_id * n_pes + j) * size;
 
       for (size_t k = 0; k < size; k++) {
         if (static_cast<unsigned char>(dest_buf[idx + k]) !=
             static_cast<unsigned char>(expected_value)) {
-          std::cerr << "PE " << my_pe << ": Verification failed for WG "
-                    << wg_id << ", block from PE " << j << " at byte " << k
-                    << std::endl;
+          std::cerr << "PE " << my_pe << ": Verification failed for WG " << wg_id
+                    << ", block from PE " << j << " at byte " << k << std::endl;
           std::cerr << "Expected value: " << expected_value
-                    << ", Got: " << static_cast<int>(dest_buf[idx + k])
-                    << std::endl;
+                    << ", Got: " << static_cast<int>(dest_buf[idx + k]) << std::endl;
           rocshmem_global_exit(1);
         }
       }
     }
   }
 }
-

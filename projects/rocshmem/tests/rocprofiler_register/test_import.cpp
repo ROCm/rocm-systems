@@ -20,14 +20,15 @@
 // No GPUs, MPI, or rocshmem_init() required.
 
 #include <rocprofiler-register/rocprofiler-register.h>
-#include <rocshmem/rocshmem_config.h>   // ROCSHMEM_VENDOR_*_VERSION, ROCSHMEM_VERSION
-                                         // also defines ROCSHMEM_ROCPROFILER_REGISTER
+#include <rocshmem/rocshmem_config.h>  // ROCSHMEM_VENDOR_*_VERSION, ROCSHMEM_VERSION
+                                       // also defines ROCSHMEM_ROCPROFILER_REGISTER
 
 // Compile-time guard: if ROCSHMEM_ROCPROFILER_REGISTER is absent from
 // rocshmem_config.h the root cause is a missing #cmakedefine or a missing
 // set(ROCSHMEM_ROCPROFILER_REGISTER 1) in CMakeLists.txt.
 #if !defined(ROCSHMEM_ROCPROFILER_REGISTER)
-#    error "ROCSHMEM_ROCPROFILER_REGISTER not defined in rocshmem_config.h. "\
+#error \
+    "ROCSHMEM_ROCPROFILER_REGISTER not defined in rocshmem_config.h. "\
            "Restore set(ROCSHMEM_ROCPROFILER_REGISTER 1) in CMakeLists.txt "\
            "and ensure #cmakedefine ROCSHMEM_ROCPROFILER_REGISTER is in "\
            "cmake/rocshmem_config.h.in"
@@ -42,37 +43,32 @@
 // rocprofiler_register_import_rocshmem.
 extern "C" uint32_t ROCPROFILER_REGISTER_IMPORT_FUNC(rocshmem)(void);
 
-int main()
-{
-    uint32_t version = ROCPROFILER_REGISTER_IMPORT_FUNC(rocshmem)();
+int main() {
+  uint32_t version = ROCPROFILER_REGISTER_IMPORT_FUNC(rocshmem)();
 
-    // The version must be non-zero.
-    if(version == 0)
-    {
-        fprintf(stderr,
-                "FAIL: rocprofiler_register_import_rocshmem() returned 0\n"
-                "      Likely cause: ROCSHMEM_ROCPROFILER_REGISTER was not defined "
-                "at compile time.\n");
-        return EXIT_FAILURE;
-    }
+  // The version must be non-zero.
+  if (version == 0) {
+    fprintf(stderr,
+            "FAIL: rocprofiler_register_import_rocshmem() returned 0\n"
+            "      Likely cause: ROCSHMEM_ROCPROFILER_REGISTER was not defined "
+            "at compile time.\n");
+    return EXIT_FAILURE;
+  }
 
-    // The version must match what was compiled into the rocshmem headers.
-    // ROCPROFILER_REGISTER_COMPUTE_VERSION_3 = 10000*MAJOR + 100*MINOR + PATCH
-    uint32_t expected = ROCPROFILER_REGISTER_COMPUTE_VERSION_3(
-        ROCSHMEM_VENDOR_MAJOR_VERSION,
-        ROCSHMEM_VENDOR_MINOR_VERSION,
-        ROCSHMEM_VENDOR_PATCH_VERSION);
+  // The version must match what was compiled into the rocshmem headers.
+  // ROCPROFILER_REGISTER_COMPUTE_VERSION_3 = 10000*MAJOR + 100*MINOR + PATCH
+  uint32_t expected = ROCPROFILER_REGISTER_COMPUTE_VERSION_3(
+      ROCSHMEM_VENDOR_MAJOR_VERSION, ROCSHMEM_VENDOR_MINOR_VERSION, ROCSHMEM_VENDOR_PATCH_VERSION);
 
-    if(version != expected)
-    {
-        fprintf(stderr,
-                "FAIL: rocprofiler_register_import_rocshmem() returned %u, "
-                "expected %u (rocshmem %s)\n",
-                version, expected, ROCSHMEM_VERSION);
-        return EXIT_FAILURE;
-    }
+  if (version != expected) {
+    fprintf(stderr,
+            "FAIL: rocprofiler_register_import_rocshmem() returned %u, "
+            "expected %u (rocshmem %s)\n",
+            version, expected, ROCSHMEM_VERSION);
+    return EXIT_FAILURE;
+  }
 
-    printf("PASS: rocprofiler_register_import_rocshmem() = %u  (rocshmem %s)\n",
-           version, ROCSHMEM_VERSION);
-    return EXIT_SUCCESS;
+  printf("PASS: rocprofiler_register_import_rocshmem() = %u  (rocshmem %s)\n", version,
+         ROCSHMEM_VERSION);
+  return EXIT_SUCCESS;
 }

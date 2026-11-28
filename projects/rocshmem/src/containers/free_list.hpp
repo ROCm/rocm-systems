@@ -46,7 +46,7 @@ class FreeList {
   friend class FreeListProxy;
 
   using MutexProxyType = ABQLBlockMutexProxy;
-  using MutexType = ABQLBlockMutex;
+  using MutexType      = ABQLBlockMutex;
 
   struct Node {
     TYPE data;
@@ -227,7 +227,7 @@ class FreeList {
    */
   __device__ void deallocate_node(Node* node) {
     // append the node to the head of the linked list
-    node->next = deallocated_nodes_;
+    node->next         = deallocated_nodes_;
     deallocated_nodes_ = node;
   };
 
@@ -260,13 +260,12 @@ class FreeList {
 template <typename TYPE>
 class FreeListProxy {
   using FreeListT = FreeList<TYPE>;
-  using ProxyT = DeviceProxy<FreeListT>;
+  using ProxyT    = DeviceProxy<FreeListT>;
 
  public:
   __host__ __device__ FreeListT* get() { return proxy_.get(); }
 
-  explicit FreeListProxy(const MemoryAllocator& alloc = HIPAllocator(),
-                         size_t num_elems = 1)
+  explicit FreeListProxy(const MemoryAllocator& alloc = HIPAllocator(), size_t num_elems = 1)
       : allocator_{alloc}, proxy_{num_elems, allocator_} {
     new (proxy_.get()) FreeListT(allocator_);
   }

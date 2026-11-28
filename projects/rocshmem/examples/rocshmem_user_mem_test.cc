@@ -60,7 +60,7 @@
 
 using namespace rocshmem;
 
-__global__ void user_mem_test(int *source, int *dest, size_t nelem, rocshmem_team_t team) {
+__global__ void user_mem_test(int* source, int* dest, size_t nelem, rocshmem_team_t team) {
   __shared__ rocshmem_ctx_t ctx;
   int64_t ctx_type = 0;
 
@@ -74,23 +74,21 @@ __global__ void user_mem_test(int *source, int *dest, size_t nelem, rocshmem_tea
   rocshmem_wg_ctx_destroy(&ctx);
 }
 
-static void init_sendbuf (int *source, int nelem, int my_pe, int npes)
-{
+static void init_sendbuf(int* source, int nelem, int my_pe, int npes) {
   for (int pe = 0; pe < npes; pe++) {
     for (int i = 0; i < nelem; i++) {
-      int idx = (pe * nelem) + i;
+      int idx     = (pe * nelem) + i;
       source[idx] = my_pe + pe;
     }
   }
 }
 
-static bool check_recvbuf(int *dest, int nelem, int my_pe, int npes)
-{
-  bool res=true;
+static bool check_recvbuf(int* dest, int nelem, int my_pe, int npes) {
+  bool res = true;
 
-  for(int pe = 0; pe < npes; pe++) {
-    for(int i = 0; i < nelem; i++) {
-      int idx = (pe * nelem) + i;
+  for (int pe = 0; pe < npes; pe++) {
+    for (int i = 0; i < nelem; i++) {
+      int idx    = (pe * nelem) + i;
       int result = my_pe + pe;
       if (dest[idx] != result) {
         res = false;
@@ -106,8 +104,7 @@ static bool check_recvbuf(int *dest, int nelem, int my_pe, int npes)
 
 #define MAX_ELEM 256
 
-int main (int argc, char **argv)
-{
+int main(int argc, char** argv) {
   int nelem = MAX_ELEM;
 
   if (argc > 1) {
@@ -119,9 +116,9 @@ int main (int argc, char **argv)
   rocshmem_init();
 
   int my_pe = rocshmem_my_pe();
-  int npes =  rocshmem_n_pes();
+  int npes  = rocshmem_n_pes();
 
-  int *source;
+  int* source;
   size_t buffer_size = nelem * sizeof(int) * npes;
 
   CHECK_HIP(hipMalloc(&source, buffer_size));
@@ -133,13 +130,11 @@ int main (int argc, char **argv)
     rocshmem_global_exit(1);
   }
 
-  int *dest = (int *)rocshmem_malloc(nelem * npes * sizeof(int));
+  int* dest = (int*)rocshmem_malloc(nelem * npes * sizeof(int));
 
   if (NULL == dest) {
     std::cout << "Error allocating memory from symmetric heap" << std::endl;
-    std::cout << " dest: " << dest
-              << ", size: " << sizeof(int) * nelem * npes
-              << std::endl;
+    std::cout << " dest: " << dest << ", size: " << sizeof(int) * nelem * npes << std::endl;
     rocshmem_global_exit(1);
   }
 
@@ -150,14 +145,13 @@ int main (int argc, char **argv)
 
   rocshmem_team_t team_reduce_world_dup;
   team_reduce_world_dup = ROCSHMEM_TEAM_INVALID;
-  rocshmem_team_split_strided(ROCSHMEM_TEAM_WORLD, 0, 1, npes, nullptr, 0,
-                              &team_reduce_world_dup);
+  rocshmem_team_split_strided(ROCSHMEM_TEAM_WORLD, 0, 1, npes, nullptr, 0, &team_reduce_world_dup);
 
   CHECK_HIP(hipDeviceSynchronize());
 
-  int threadsPerBlock=256;
-  user_mem_test<<<dim3(1), dim3(threadsPerBlock), 0, 0>>>(source, dest,
-                                                          nelem, team_reduce_world_dup);
+  int threadsPerBlock = 256;
+  user_mem_test<<<dim3(1), dim3(threadsPerBlock), 0, 0>>>(source, dest, nelem,
+                                                          team_reduce_world_dup);
   CHECK_HIP(hipDeviceSynchronize());
 
   bool pass = check_recvbuf(dest, nelem, my_pe, npes);

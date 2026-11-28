@@ -43,45 +43,44 @@ __host__ void AtomicWFQueue<TYPE>::deallocate_queue() {
     allocator_.deallocate((void*)queue_);
     queue_ = nullptr;
   }
-  size_ = 0;
+  size_      = 0;
   curr_size_ = 0;
-  head_ = 0;
-  tail_ = 0;
+  head_      = 0;
+  tail_      = 0;
 }
 
 template <typename TYPE>
 AtomicWFQueue<TYPE>::AtomicWFQueue(const MemoryAllocator& allocator)
-    : allocator_{allocator}, head_{0}, tail_{0}, size_{0}, curr_size_{0},
-      dequeue_mutex_{allocator}, enqueue_mutex_{allocator} {}
+    : allocator_{allocator},
+      head_{0},
+      tail_{0},
+      size_{0},
+      curr_size_{0},
+      dequeue_mutex_{allocator},
+      enqueue_mutex_{allocator} {}
 
 template <typename TYPE>
-__host__ void AtomicWFQueue<TYPE>::allocate_queue(
-  unsigned int size) {
-
-  size_ = size;
-  head_ = 0;
-  tail_ = 0;
+__host__ void AtomicWFQueue<TYPE>::allocate_queue(unsigned int size) {
+  size_      = size;
+  head_      = 0;
+  tail_      = 0;
   curr_size_ = 0;
-  allocator_.allocate(reinterpret_cast<void**>(&queue_),
-                      sizeof(TYPE) * size_);
+  allocator_.allocate(reinterpret_cast<void**>(&queue_), sizeof(TYPE) * size_);
 }
 
 template <typename TYPE>
 __host__ void AtomicWFQueue<TYPE>::push(const TYPE& val) {
   if (curr_size_ < size_) {
     queue_[tail_] = val;
-    tail_ = (tail_ + 1) % size_;
+    tail_         = (tail_ + 1) % size_;
     curr_size_++;
-  }
-  else {
-    std::cerr << "AtomicWfQueue is full: " << curr_size_
-              << " elements" << std::endl;
+  } else {
+    std::cerr << "AtomicWfQueue is full: " << curr_size_ << " elements" << std::endl;
   }
 }
 
 template <typename TYPE>
-__device__ unsigned int
-AtomicWFQueue<TYPE>::active_logical_lane_id() {
+__device__ unsigned int AtomicWFQueue<TYPE>::active_logical_lane_id() {
   uint64_t ballot{__ballot(1)};
   uint64_t my_physical_lane_id{__lane_id()};
   uint64_t all_ones_mask = -1;
@@ -93,9 +92,7 @@ AtomicWFQueue<TYPE>::active_logical_lane_id() {
 }
 
 template <typename TYPE>
-__device__ TYPE AtomicWFQueue<TYPE>::broadcast_lds(
-  bool lowest_active, TYPE value) {
-
+__device__ TYPE AtomicWFQueue<TYPE>::broadcast_lds(bool lowest_active, TYPE value) {
   /**
    * Shared array to broadcast data within each wavefront
    * Max threads per block = 1024, wavefront size = 64 (in most GPUs)
@@ -103,7 +100,7 @@ __device__ TYPE AtomicWFQueue<TYPE>::broadcast_lds(
    */
   constexpr size_t SIZE = 1024 / WF_SIZE;
   __shared__ TYPE value_per_warp[SIZE];
-  auto wavefront_id {get_flat_block_id() / WF_SIZE};
+  auto wavefront_id{get_flat_block_id() / WF_SIZE};
   if (lowest_active) {
     value_per_warp[wavefront_id] = value;
     __threadfence_block();
@@ -113,8 +110,8 @@ __device__ TYPE AtomicWFQueue<TYPE>::broadcast_lds(
 
 template <typename TYPE>
 __device__ void AtomicWFQueue<TYPE>::enqueue(const TYPE& val) {
-  unsigned int my_active_lane_id {active_logical_lane_id()};
-  bool is_lowest_active_lane {my_active_lane_id == 0};
+  unsigned int my_active_lane_id{active_logical_lane_id()};
+  bool is_lowest_active_lane{my_active_lane_id == 0};
   if (is_lowest_active_lane) {
     /**
      * Prevents multiple wavefronts from simultaneously entering the enqueue
@@ -138,9 +135,9 @@ __device__ void AtomicWFQueue<TYPE>::enqueue(const TYPE& val) {
 
 template <typename TYPE>
 __device__ TYPE AtomicWFQueue<TYPE>::dequeue() {
-  TYPE ret_val {TYPE()};
-  unsigned int my_active_lane_id {active_logical_lane_id()};
-  bool is_lowest_active_lane {my_active_lane_id == 0};
+  TYPE ret_val{TYPE()};
+  unsigned int my_active_lane_id{active_logical_lane_id()};
+  bool is_lowest_active_lane{my_active_lane_id == 0};
   if (is_lowest_active_lane) {
     /**
      * Prevents multiple wavefronts from simultaneously entering the dequeue
@@ -149,7 +146,8 @@ __device__ TYPE AtomicWFQueue<TYPE>::dequeue() {
     TicketLockGuard<MutexType> guard(*dequeue_mutex_.get());
 
     // queue is empty, wait until data is available
-    while (is_empty()) {}
+    while (is_empty()) {
+    }
 
     int next_head = (head_ + 1) % size_;
 

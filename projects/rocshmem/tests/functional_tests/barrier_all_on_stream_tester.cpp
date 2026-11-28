@@ -33,13 +33,12 @@
 /******************************************************************************
  * HOST TESTER CLASS METHODS
  *****************************************************************************/
-BarrierAllOnStreamTester::BarrierAllOnStreamTester(TesterArguments args,
-                                                   CollectiveOnStreamOp op)
+BarrierAllOnStreamTester::BarrierAllOnStreamTester(TesterArguments args, CollectiveOnStreamOp op)
     : Tester(args), collective_op(op) {
   my_pe = rocshmem_my_pe();
   n_pes = rocshmem_n_pes();
 
-  char *value{nullptr};
+  char* value{nullptr};
   if ((value = getenv("ROCSHMEM_TEST_NUM_STREAMS"))) {
     num_streams = atoi(value);
   } else {
@@ -92,34 +91,34 @@ void BarrierAllOnStreamTester::postLaunchKernel() {
   }
 
   // Get elapsed time for each stream from HIP events
-  for (uint32_t stream_id = 0; stream_id < static_cast<uint32_t>(num_streams) && stream_id < static_cast<uint32_t>(num_timers);
+  for (uint32_t stream_id = 0; stream_id < static_cast<uint32_t>(num_streams) &&
+                               stream_id < static_cast<uint32_t>(num_timers);
        stream_id++) {
     float elapsed_time_ms = 0.0f;
-    CHECK_HIP(hipEventElapsedTime(&elapsed_time_ms,
-                                  start_events_timed[stream_id],
+    CHECK_HIP(hipEventElapsedTime(&elapsed_time_ms, start_events_timed[stream_id],
                                   stop_events_timed[stream_id]));
 
     // Convert milliseconds to GPU cycles
     // wall_clk_rate is in kHz, so: cycles = ms * wall_clk_rate
     long long int elapsed_cycles =
-        static_cast<long long int>(elapsed_time_ms *
-                                   static_cast<float>(wall_clk_rate));
+        static_cast<long long int>(elapsed_time_ms * static_cast<float>(wall_clk_rate));
 
     start_time[stream_id] = 0;
-    end_time[stream_id] = elapsed_cycles;
+    end_time[stream_id]   = elapsed_cycles;
   }
 
   // Fill remaining timers with zero if num_timers > num_streams
   for (uint32_t i = num_streams; i < static_cast<uint32_t>(num_timers); i++) {
     start_time[i] = 0;
-    end_time[i] = 0;
+    end_time[i]   = 0;
   }
 }
 
 void BarrierAllOnStreamTester::resetBuffers([[maybe_unused]] size_t size) {}
 
-void BarrierAllOnStreamTester::launchKernel([[maybe_unused]] dim3 gridSize, [[maybe_unused]] dim3 blockSize,
-                                            int loop, [[maybe_unused]] size_t size) {
+void BarrierAllOnStreamTester::launchKernel([[maybe_unused]] dim3 gridSize,
+                                            [[maybe_unused]] dim3 blockSize, int loop,
+                                            [[maybe_unused]] size_t size) {
   // Execute warmup iterations (skip)
   for (int i = 0; i < args.skip; i++) {
     for (int stream_id = 0; stream_id < num_streams; stream_id++) {
@@ -135,8 +134,7 @@ void BarrierAllOnStreamTester::launchKernel([[maybe_unused]] dim3 gridSize, [[ma
     for (int stream_id = 0; stream_id < num_streams; stream_id++) {
       // Record start event for this stream on first iteration
       if (i == 0) {
-        CHECK_HIP(hipEventRecord(start_events_timed[stream_id],
-                                 streams[stream_id]));
+        CHECK_HIP(hipEventRecord(start_events_timed[stream_id], streams[stream_id]));
       }
 
       if (collective_op == BARRIER_ALL_OP) {
@@ -147,13 +145,12 @@ void BarrierAllOnStreamTester::launchKernel([[maybe_unused]] dim3 gridSize, [[ma
 
       // Record stop event for this stream on last iteration
       if (i == loop - 1) {
-        CHECK_HIP(hipEventRecord(stop_events_timed[stream_id],
-                                 streams[stream_id]));
+        CHECK_HIP(hipEventRecord(stop_events_timed[stream_id], streams[stream_id]));
       }
     }
   }
 
-  num_msgs = (loop + args.skip) * num_streams;
+  num_msgs       = (loop + args.skip) * num_streams;
   num_timed_msgs = loop * num_streams;
 }
 

@@ -22,7 +22,6 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
-
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
 #include "context_gda_host.hpp"
 #include "backend_type.hpp"
@@ -32,34 +31,28 @@
 
 namespace rocshmem {
 
-__host__ GDAHostContext::GDAHostContext(Backend *backend,
-                                        [[maybe_unused]] int64_t options)
+__host__ GDAHostContext::GDAHostContext(Backend* backend, [[maybe_unused]] int64_t options)
     : Context(backend) {
-  GDABackend *b{static_cast<GDABackend *>(backend)};
+  GDABackend* b{static_cast<GDABackend*>(backend)};
 
   host_interface = b->host_interface;
 
   context_window_info = host_interface->acquire_window_context();
 
-  int *pes_with_ipc_avail = new int[backend->ipcImpl.shm_size];
-  char** ipc_bases = new char*[b->ipcImpl.shm_size];
+  int* pes_with_ipc_avail = new int[backend->ipcImpl.shm_size];
+  char** ipc_bases        = new char*[b->ipcImpl.shm_size];
   if (backend->ipcImpl.pes_with_ipc_avail != nullptr) {
-    CHECK_HIP(hipMemcpy(pes_with_ipc_avail,
-                  backend->ipcImpl.pes_with_ipc_avail,
-                  backend->ipcImpl.shm_size * sizeof(int),
-                  hipMemcpyDeviceToHost));
-    CHECK_HIP(hipMemcpy(ipc_bases,
-                  backend->ipcImpl.ipc_bases,
-                  backend->ipcImpl.shm_size * sizeof(char *),
-                  hipMemcpyDeviceToHost));
+    CHECK_HIP(hipMemcpy(pes_with_ipc_avail, backend->ipcImpl.pes_with_ipc_avail,
+                        backend->ipcImpl.shm_size * sizeof(int), hipMemcpyDeviceToHost));
+    CHECK_HIP(hipMemcpy(ipc_bases, backend->ipcImpl.ipc_bases,
+                        backend->ipcImpl.shm_size * sizeof(char*), hipMemcpyDeviceToHost));
   }
   ipcImpl_.pes_with_ipc_avail = pes_with_ipc_avail;
-  ipcImpl_.ipc_bases = ipc_bases;
-  ipcImpl_.shm_size = backend->ipcImpl.shm_size;
-  ipcImpl_.shm_rank = backend->ipcImpl.shm_rank;
-  ipcImpl_.ipc_first_pe = backend->ipcImpl.ipc_first_pe;
-  ipcImpl_.ipc_stride = backend->ipcImpl.ipc_stride;
-
+  ipcImpl_.ipc_bases          = ipc_bases;
+  ipcImpl_.shm_size           = backend->ipcImpl.shm_size;
+  ipcImpl_.shm_rank           = backend->ipcImpl.shm_rank;
+  ipcImpl_.ipc_first_pe       = backend->ipcImpl.ipc_first_pe;
+  ipcImpl_.ipc_stride         = backend->ipcImpl.ipc_stride;
 }
 
 __host__ GDAHostContext::~GDAHostContext() {
@@ -69,42 +62,35 @@ __host__ GDAHostContext::~GDAHostContext() {
   host_interface->release_window_context(context_window_info);
 }
 
-__host__ void GDAHostContext::putmem_nbi(void *dest, const void *source,
-                                         size_t nelems, int pe) {
+__host__ void GDAHostContext::putmem_nbi(void* dest, const void* source, size_t nelems, int pe) {
   host_interface->putmem_nbi(dest, source, nelems, pe, context_window_info);
 }
 
-__host__ void GDAHostContext::getmem_nbi(void *dest, const void *source,
-                                         size_t nelems, int pe) {
+__host__ void GDAHostContext::getmem_nbi(void* dest, const void* source, size_t nelems, int pe) {
   host_interface->getmem_nbi(dest, source, nelems, pe, context_window_info);
 }
 
-__host__ void GDAHostContext::putmem(void *dest, const void *source,
-                                     size_t nelems, int pe) {
+__host__ void GDAHostContext::putmem(void* dest, const void* source, size_t nelems, int pe) {
   host_interface->putmem(dest, source, nelems, pe, context_window_info);
 }
 
-__host__ void GDAHostContext::getmem(void *dest, const void *source,
-                                     size_t nelems, int pe) {
+__host__ void GDAHostContext::getmem(void* dest, const void* source, size_t nelems, int pe) {
   host_interface->getmem(dest, source, nelems, pe, context_window_info);
 }
 
-__host__ void GDAHostContext::putmem_signal(void *dest, const void *source,
-                                            size_t nelems, uint64_t *sig_addr,
-                                            uint64_t signal, int sig_op,
+__host__ void GDAHostContext::putmem_signal(void* dest, const void* source, size_t nelems,
+                                            uint64_t* sig_addr, uint64_t signal, int sig_op,
                                             int pe) {
-  host_interface->putmem_signal(dest, source, nelems, sig_addr, signal, sig_op,
-                                pe, context_window_info);
+  host_interface->putmem_signal(dest, source, nelems, sig_addr, signal, sig_op, pe,
+                                context_window_info);
 }
 
-__host__ uint64_t GDAHostContext::signal_fetch(const uint64_t *sig_addr) {
+__host__ uint64_t GDAHostContext::signal_fetch(const uint64_t* sig_addr) {
   return host_interface->signal_fetch(sig_addr, context_window_info);
 }
 
-__host__ void GDAHostContext::signal_wait_until(uint64_t *sig_addr, int cmp,
-                                                uint64_t cmp_value) {
-  host_interface->signal_wait_until(sig_addr, cmp, cmp_value,
-                                    context_window_info);
+__host__ void GDAHostContext::signal_wait_until(uint64_t* sig_addr, int cmp, uint64_t cmp_value) {
+  host_interface->signal_wait_until(sig_addr, cmp, cmp_value, context_window_info);
 }
 
 __host__ void GDAHostContext::fence() {
@@ -115,13 +101,13 @@ __host__ void GDAHostContext::quiet() {
   host_interface->quiet(context_window_info);
 }
 
-__host__ void *GDAHostContext::shmem_ptr(const void *dest, int pe) {
-  void *ret = nullptr;
+__host__ void* GDAHostContext::shmem_ptr(const void* dest, int pe) {
+  void* ret = nullptr;
   int local_pe{-1};
   if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {
-    void *dst = const_cast<void *>(dest);
-    uint64_t L_offset = reinterpret_cast<char *>(dst) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank];
-    ret = ipcImpl_.ipc_bases[local_pe] + L_offset;
+    void* dst         = const_cast<void*>(dest);
+    uint64_t L_offset = reinterpret_cast<char*>(dst) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank];
+    ret               = ipcImpl_.ipc_bases[local_pe] + L_offset;
   }
   return ret;
 }
@@ -146,8 +132,7 @@ __host__ void GDAHostContext::barrier_all_on_stream(hipStream_t stream) {
   host_interface->barrier_all_on_stream(stream);
 }
 
-__host__ void GDAHostContext::barrier_on_stream(rocshmem_team_t team,
-                                                hipStream_t stream) {
+__host__ void GDAHostContext::barrier_on_stream(rocshmem_team_t team, hipStream_t stream) {
   host_interface->barrier_on_stream(team, stream);
 }
 
@@ -160,64 +145,52 @@ __host__ void GDAHostContext::sync_all_on_stream(hipStream_t stream) {
   host_interface->sync_all_on_stream(stream);
 }
 
-__host__ void GDAHostContext::sync_on_stream(rocshmem_team_t team,
-                                             hipStream_t stream) {
+__host__ void GDAHostContext::sync_on_stream(rocshmem_team_t team, hipStream_t stream) {
   host_interface->sync_on_stream(team, stream);
 }
 
-__host__ void GDAHostContext::alltoallmem_on_stream(rocshmem_team_t team,
-                                                    void *dest,
-                                                    const void *source,
-                                                    size_t nelems,
+__host__ void GDAHostContext::alltoallmem_on_stream(rocshmem_team_t team, void* dest,
+                                                    const void* source, size_t nelems,
                                                     hipStream_t stream) {
   host_interface->alltoallmem_on_stream(team, dest, source, nelems, stream);
 }
 
-__host__ void GDAHostContext::broadcastmem_on_stream(rocshmem_team_t team,
-                                                     void *dest,
-                                                     const void *source,
-                                                     size_t nelems, int pe_root,
+__host__ void GDAHostContext::broadcastmem_on_stream(rocshmem_team_t team, void* dest,
+                                                     const void* source, size_t nelems, int pe_root,
                                                      hipStream_t stream) {
-  host_interface->broadcastmem_on_stream(team, dest, source, nelems, pe_root,
-                                         stream);
+  host_interface->broadcastmem_on_stream(team, dest, source, nelems, pe_root, stream);
 }
 
-__host__ void GDAHostContext::getmem_on_stream(void *dest, const void *source,
-                                               size_t nelems, int pe,
-                                               hipStream_t stream) {
+__host__ void GDAHostContext::getmem_on_stream(void* dest, const void* source, size_t nelems,
+                                               int pe, hipStream_t stream) {
   host_interface->getmem_on_stream(dest, source, nelems, pe, stream);
 }
 
-__host__ void GDAHostContext::putmem_on_stream(void *dest, const void *source,
-                                               size_t nelems, int pe,
-                                               hipStream_t stream) {
+__host__ void GDAHostContext::putmem_on_stream(void* dest, const void* source, size_t nelems,
+                                               int pe, hipStream_t stream) {
   LOG_TRACE("GDA backend: putmem_on_stream (pe=%d, size=%zu)", pe, nelems);
   host_interface->putmem_on_stream(dest, source, nelems, pe, stream);
 }
 
-__host__ void GDAHostContext::putmem_signal_on_stream(
-    void *dest, const void *source, size_t nelems, uint64_t *sig_addr,
-    uint64_t signal, int sig_op, int pe, hipStream_t stream) {
-  host_interface->putmem_signal_on_stream(dest, source, nelems, sig_addr,
-                                          signal, sig_op, pe, stream);
+__host__ void GDAHostContext::putmem_signal_on_stream(void* dest, const void* source, size_t nelems,
+                                                      uint64_t* sig_addr, uint64_t signal,
+                                                      int sig_op, int pe, hipStream_t stream) {
+  host_interface->putmem_signal_on_stream(dest, source, nelems, sig_addr, signal, sig_op, pe,
+                                          stream);
 }
 
-__host__ void GDAHostContext::signal_add_on_stream(uint64_t *sig_addr,
-                                                   uint64_t signal, int pe,
+__host__ void GDAHostContext::signal_add_on_stream(uint64_t* sig_addr, uint64_t signal, int pe,
                                                    hipStream_t stream) {
   host_interface->signal_add_on_stream(sig_addr, signal, pe, stream);
 }
 
-__host__ void GDAHostContext::signal_set_on_stream(uint64_t *sig_addr,
-                                                   uint64_t signal, int pe,
+__host__ void GDAHostContext::signal_set_on_stream(uint64_t* sig_addr, uint64_t signal, int pe,
                                                    hipStream_t stream) {
   host_interface->signal_set_on_stream(sig_addr, signal, pe, stream);
 }
 
-__host__ void GDAHostContext::signal_wait_until_on_stream(uint64_t *sig_addr,
-                                                          int cmp,
-                                                          uint64_t cmp_value,
-                                                          hipStream_t stream) {
+__host__ void GDAHostContext::signal_wait_until_on_stream(uint64_t* sig_addr, int cmp,
+                                                          uint64_t cmp_value, hipStream_t stream) {
   host_interface->signal_wait_until_on_stream(sig_addr, cmp, cmp_value, stream);
 }
 

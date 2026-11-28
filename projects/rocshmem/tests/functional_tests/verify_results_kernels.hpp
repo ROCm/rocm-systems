@@ -27,33 +27,33 @@
 
 namespace rocshmem {
 
-[[maybe_unused]] static __global__ void verify_results_kernel_char(
-    char *dest, size_t size, size_t stride,
-    size_t concurrency, int loop, int skip, int batch,
-    bool *verification_error) {
-
-  int start_slot = (batch - (skip % batch)) % batch;
+[[maybe_unused]] static __global__ void verify_results_kernel_char(char* dest, size_t size,
+                                                                   size_t stride,
+                                                                   size_t concurrency, int loop,
+                                                                   int skip, int batch,
+                                                                   bool* verification_error) {
+  int start_slot   = (batch - (skip % batch)) % batch;
   int verify_iters = min(batch, loop + skip);
 
-  size_t idx = get_flat_id();
+  size_t idx           = get_flat_id();
   size_t check_per_buf = size * verify_iters;
-  size_t total = check_per_buf * concurrency;
+  size_t total         = check_per_buf * concurrency;
 
   if (idx >= total) {
     return;
   }
 
-  size_t b = idx / check_per_buf;
+  size_t b     = idx / check_per_buf;
   size_t local = idx % check_per_buf;
-  size_t iter = local / size;
-  size_t i = local % size;
-  size_t slot = (start_slot + iter) % batch;
+  size_t iter  = local / size;
+  size_t i     = local % size;
+  size_t slot  = (start_slot + iter) % batch;
 
   if (dest[b * stride + slot * size + i] != 'a') {
     *verification_error = true;
   }
 }
 
-}
+}  // namespace rocshmem
 
 #endif /* _VERIFY_RESULTS_KERNELS_HPP_ */

@@ -36,10 +36,10 @@
 
 namespace rocshmem {
 
-#define MAX_IFS 16
-#define MAX_IF_NAME_SIZE 16
-#define SLEEP_INT 1000  // connection retry sleep interval in usec
-#define SOCKET_NAME_MAXLEN (NI_MAXHOST + NI_MAXSERV)
+#define MAX_IFS               16
+#define MAX_IF_NAME_SIZE      16
+#define SLEEP_INT             1000  // connection retry sleep interval in usec
+#define SOCKET_NAME_MAXLEN    (NI_MAXHOST + NI_MAXSERV)
 #define ROCSHMEM_SOCKET_MAGIC 0x564ab9f2fc4b9d6cULL
 
 /* Common socket address storage structure for IPv4/IPv6 */
@@ -50,39 +50,41 @@ union SocketAddress {
 };
 
 enum SocketState {
-  SocketStateNone = 0,
-  SocketStateInitialized = 1,
-  SocketStateAccepting = 2,
-  SocketStateAccepted = 3,
-  SocketStateConnecting = 4,
+  SocketStateNone           = 0,
+  SocketStateInitialized    = 1,
+  SocketStateAccepting      = 2,
+  SocketStateAccepted       = 3,
+  SocketStateConnecting     = 4,
   SocketStateConnectPolling = 5,
-  SocketStateConnected = 6,
-  SocketStateBound = 7,
-  SocketStateReady = 8,
-  SocketStateClosed = 9,
-  SocketStateError = 10,
-  SocketStateNum = 11
+  SocketStateConnected      = 6,
+  SocketStateBound          = 7,
+  SocketStateReady          = 8,
+  SocketStateClosed         = 9,
+  SocketStateError          = 10,
+  SocketStateNum            = 11
 };
 
 enum SocketType {
-  SocketTypeUnknown = 0,
+  SocketTypeUnknown   = 0,
   SocketTypeBootstrap = 1,
-  SocketTypeProxy = 2,
+  SocketTypeProxy     = 2,
   SocketTypeNetSocket = 3,
-  SocketTypeNetIb = 4
+  SocketTypeNetIb     = 4
 };
 
-const char* SocketToString(union SocketAddress* addr, char* buf, size_t bufLen, const int numericHostForm = 1);
+const char* SocketToString(union SocketAddress* addr, char* buf, size_t bufLen,
+                           const int numericHostForm = 1);
 void SocketGetAddrFromString(union SocketAddress* ua, const char* ip_port_pair);
-int FindInterfaceMatchSubnet(char* ifNames, union SocketAddress* localAddrs, union SocketAddress* remoteAddr,
-                             int ifNameMaxSize, int maxIfs);
+int FindInterfaceMatchSubnet(char* ifNames, union SocketAddress* localAddrs,
+                             union SocketAddress* remoteAddr, int ifNameMaxSize, int maxIfs);
 int FindInterfaces(char* ifNames, union SocketAddress* ifAddrs, int ifNameMaxSize, int maxIfs,
                    const char* inputIfName = nullptr);
 
 class Socket {
  public:
   Socket(const SocketAddress* addr = nullptr, uint64_t magic = ROCSHMEM_SOCKET_MAGIC,
-         enum SocketType type = SocketTypeUnknown, volatile uint32_t* abortFlag = nullptr, int asyncFlag = 0);
+         enum SocketType type = SocketTypeUnknown, volatile uint32_t* abortFlag = nullptr,
+         int asyncFlag = 0);
   ~Socket();
 
   void bind();

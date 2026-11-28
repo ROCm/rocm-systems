@@ -32,8 +32,8 @@ namespace rocshmem {
 class IPCTeam : public Team {
  public:
   IPCTeam(Backend* handle, const TeamInfo& team_info_wrt_parent,
-            const TeamInfo& team_info_wrt_world, int num_pes, int my_pe,
-            MPI_Comm team_comm, int pool_index);
+          const TeamInfo& team_info_wrt_world, int num_pes, int my_pe, MPI_Comm team_comm,
+          int pool_index);
 
   virtual ~IPCTeam();
 
@@ -46,7 +46,7 @@ class IPCTeam : public Team {
 
   int pool_index_{-1};
   uint64_t alltoall_sequence_number = 0;
-  uint64_t bcast_sequence_number = 0;
+  uint64_t bcast_sequence_number    = 0;
 };
 
 }  // namespace rocshmem

@@ -30,15 +30,15 @@ namespace rocshmem {
  */
 template <typename Provider>
 class QueuePairInterface {
-/**
- * @name Provider-Defined Members
- *
- * Members that are defined based on specializations of QueuePairTraits<Provider>.
- * Each Provider must supply their own definitions.
- *
- * @{
- */
-public:
+  /**
+   * @name Provider-Defined Members
+   *
+   * Members that are defined based on specializations of QueuePairTraits<Provider>.
+   * Each Provider must supply their own definitions.
+   *
+   * @{
+   */
+ public:
   /**
    * @brief Type alias for QueuePairTraits<Provider>.
    */
@@ -55,56 +55,50 @@ public:
    * of each Provider subclass.
    */
   using OpCode = typename Traits::OpCode;
-/**@}*/
+  /**@}*/
 
-
-
-/**
- * @name Member Types
- *
- * @{
- */
-public:
+  /**
+   * @name Member Types
+   *
+   * @{
+   */
+ public:
   /**
    * @brief Helper alias for defining post_wqe_amo and post_wqe_amo_single in subclasses
    */
   template <AMOFetchType Fetch>
   using amo_ret_t = std::conditional_t<Fetch == AMOFetchType::Blocking, uint64_t, void>;
-/**@}*/
+  /**@}*/
 
-
-
-/**
- * @name Internal
- *
- * @{
- */
-protected:
+  /**
+   * @name Internal
+   *
+   * @{
+   */
+ protected:
   /*
    * @brief Provider is a friend of QueuePairInterface<Provider>.
    */
   friend Provider;
 
-  __host__  QueuePairInterface() = default;
+  __host__ QueuePairInterface()   = default;
   __device__ QueuePairInterface() = delete;
 
-private:
+ private:
   __device__ Provider& provider() {
     static_assert(std::is_trivially_destructible_v<Provider>,
                   "QueuePair providers should have a trivial destructor: "
                   "memory is managed externally by QueuePairHost.");
     return static_cast<Provider&>(*this);
   }
-/**@}*/
+  /**@}*/
 
-
-
-/**
- * @name Remote Memory Access (RMA)
- *
- * @{
- */
-public:
+  /**
+   * @name Remote Memory Access (RMA)
+   *
+   * @{
+   */
+ public:
   /**
    * @brief Create and enqueue a non-blocking put work queue entry (WQE).
    *
@@ -121,19 +115,18 @@ public:
    * @tparam PostOptions Options to use when posting these WQEs.
    */
   template <typename... PostOptions>
-  __device__ void put_nbi(uintptr_t dest, uint32_t dest_rkey,
-                          uintptr_t source, uint32_t source_lkey, size_t nelems,
-                          const ActiveWFInfo& wf_info,
+  __device__ void put_nbi(uintptr_t dest, uint32_t dest_rkey, uintptr_t source,
+                          uint32_t source_lkey, size_t nelems, const ActiveWFInfo& wf_info,
                           PostOpt<PostOptions...> post_options = {}) {
-    provider().template post_wqe_rma<OpCode::RDMA_WRITE>(
-        source, source_lkey, dest, dest_rkey, nelems, wf_info, post_options);
+    provider().template post_wqe_rma<OpCode::RDMA_WRITE>(source, source_lkey, dest, dest_rkey,
+                                                         nelems, wf_info, post_options);
   }
   template <typename... PostOptions>
-  __device__ void put_nbi_single(uintptr_t dest, uint32_t dest_rkey,
-                                 uintptr_t source, uint32_t source_lkey, size_t nelems,
+  __device__ void put_nbi_single(uintptr_t dest, uint32_t dest_rkey, uintptr_t source,
+                                 uint32_t source_lkey, size_t nelems,
                                  PostOpt<PostOptions...> post_options = {}) {
-    provider().template post_wqe_rma_single<OpCode::RDMA_WRITE>(
-        source, source_lkey, dest, dest_rkey, nelems, post_options);
+    provider().template post_wqe_rma_single<OpCode::RDMA_WRITE>(source, source_lkey, dest,
+                                                                dest_rkey, nelems, post_options);
   }
 
   /**
@@ -152,30 +145,27 @@ public:
    * @tparam PostOptions Options to use when posting these WQEs.
    */
   template <typename... PostOptions>
-  __device__ void get_nbi(uintptr_t dest, uint32_t dest_lkey,
-                          uintptr_t source, uint32_t source_rkey, size_t nelems,
-                          const ActiveWFInfo& wf_info,
+  __device__ void get_nbi(uintptr_t dest, uint32_t dest_lkey, uintptr_t source,
+                          uint32_t source_rkey, size_t nelems, const ActiveWFInfo& wf_info,
                           PostOpt<PostOptions...> post_options = {}) {
-    provider().template post_wqe_rma<OpCode::RDMA_READ>(
-        dest, dest_lkey, source, source_rkey, nelems, wf_info, post_options);
+    provider().template post_wqe_rma<OpCode::RDMA_READ>(dest, dest_lkey, source, source_rkey,
+                                                        nelems, wf_info, post_options);
   }
   template <typename... PostOptions>
-  __device__ void get_nbi_single(uintptr_t dest, uint32_t dest_lkey,
-                                 uintptr_t source, uint32_t source_rkey, size_t nelems,
+  __device__ void get_nbi_single(uintptr_t dest, uint32_t dest_lkey, uintptr_t source,
+                                 uint32_t source_rkey, size_t nelems,
                                  PostOpt<PostOptions...> post_options = {}) {
-    provider().template post_wqe_rma_single<OpCode::RDMA_READ>(
-        dest, dest_lkey, source, source_rkey, nelems, post_options);
+    provider().template post_wqe_rma_single<OpCode::RDMA_READ>(dest, dest_lkey, source, source_rkey,
+                                                               nelems, post_options);
   }
-/**@}*/
+  /**@}*/
 
-
-
-/**
- * @name Atomic Memory Operations (AMO)
- *
- * @{
- */
-public:
+  /**
+   * @name Atomic Memory Operations (AMO)
+   *
+   * @{
+   */
+ public:
   /**
    * @brief Create and enqueue a blocking atomic fetch-and-add work queue entry (WQE).
    *
@@ -205,7 +195,7 @@ public:
         dest, dest_rkey, value, 0, post_options);
   }
 
-#if 0 // NON-BLOCKING AMOs NOT YET IMPLEMENTED
+#if 0  // NON-BLOCKING AMOs NOT YET IMPLEMENTED
   /**
    * @brief Create and enqueue a non-blocking atomic fetch-and-add work queue entry (WQE).
    *
@@ -284,22 +274,21 @@ public:
    * @return An atomic value.
    */
   template <typename... PostOptions>
-  __device__ uint64_t atomic_compare_swap(uintptr_t dest, uint32_t dest_rkey,
-                                          uint64_t cond, uint64_t value,
-                                          const ActiveWFInfo& wf_info,
+  __device__ uint64_t atomic_compare_swap(uintptr_t dest, uint32_t dest_rkey, uint64_t cond,
+                                          uint64_t value, const ActiveWFInfo& wf_info,
                                           PostOpt<PostOptions...> post_options = {}) {
     return provider().template post_wqe_amo<OpCode::ATOMIC_CS, AMOFetchType::Blocking>(
         dest, dest_rkey, value, cond, wf_info, post_options);
   }
   template <typename... PostOptions>
-  __device__ uint64_t atomic_compare_swap_single(uintptr_t dest, uint32_t dest_rkey,
-                                                 uint64_t cond, uint64_t value,
+  __device__ uint64_t atomic_compare_swap_single(uintptr_t dest, uint32_t dest_rkey, uint64_t cond,
+                                                 uint64_t value,
                                                  PostOpt<PostOptions...> post_options = {}) {
     return provider().template post_wqe_amo_single<OpCode::ATOMIC_CS, AMOFetchType::Blocking>(
         dest, dest_rkey, value, cond, post_options);
   }
 
-#if 0 // NON-BLOCKING AMOs NOT YET IMPLEMENTED
+#if 0  // NON-BLOCKING AMOs NOT YET IMPLEMENTED
   /**
    * @brief Create and enqueue a non-blocking atomic compare-and-swap work queue entry (WQE).
    *
@@ -336,16 +325,14 @@ public:
         fetch, fetch_lkey, dest, dest_rkey, value, cond, post_options);
   }
 #endif
-/**@}*/
+  /**@}*/
 
-
-
-/**
- * @name Completion and Ordering.
- *
- * @{
- */
-public:
+  /**
+   * @name Completion and Ordering.
+   *
+   * @{
+   */
+ public:
   /**
    * @brief Empty all completions from the completion queue.
    *
@@ -356,7 +343,7 @@ public:
       provider().quiet_single();
     }
   }
-/**@}*/
+  /**@}*/
 };
 
 }  // namespace rocshmem

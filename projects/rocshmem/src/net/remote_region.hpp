@@ -56,7 +56,7 @@ struct RemoteRegion {
  * @param local_heap_base This PE's symmetric-heap base VA.
  * @return The corresponding VA in the peer's symmetric heap.
  */
-inline uintptr_t remote_addr(const RemoteRegion &region, uintptr_t local_va,
+inline uintptr_t remote_addr(const RemoteRegion& region, uintptr_t local_va,
                              uintptr_t local_heap_base) {
   return region.remote_base + (local_va - local_heap_base);
 }

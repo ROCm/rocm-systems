@@ -34,16 +34,15 @@
 
 namespace rocshmem {
 
-class HeapMemoryTestFixture : public ::testing::Test
-{
-  protected:
-    /**
-     * @brief a heap memory object
-     */
-    HIPAllocator alloc_{};
-    HeapMemoryType heap_mem_{alloc_};
+class HeapMemoryTestFixture : public ::testing::Test {
+ protected:
+  /**
+   * @brief a heap memory object
+   */
+  HIPAllocator alloc_{};
+  HeapMemoryType heap_mem_{alloc_};
 };
 
-} // namespace rocshmem
+}  // namespace rocshmem
 
-#endif // ROCSHMEM_HEAP_MEMORY_GTEST_HPP
+#endif  // ROCSHMEM_HEAP_MEMORY_GTEST_HPP

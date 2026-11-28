@@ -38,7 +38,7 @@ MrRegistry::~MrRegistry() {
   if (!ibv_) {
     return;
   }
-  auto close_dmabuf_fd = [this](struct ibv_mr *mr) {
+  auto close_dmabuf_fd = [this](struct ibv_mr* mr) {
     auto it = dmabuf_fds_.find(mr);
     if (it != dmabuf_fds_.end()) {
       if (it->second >= 0) {
@@ -47,7 +47,7 @@ MrRegistry::~MrRegistry() {
       dmabuf_fds_.erase(it);
     }
   };
-  for (auto *mr : local_mrs_) {
+  for (auto* mr : local_mrs_) {
     if (mr) {
       ibv_->dereg_mr(mr);
       close_dmabuf_fd(mr);
@@ -61,15 +61,14 @@ MrRegistry::~MrRegistry() {
   }
 }
 
-struct ibv_mr *MrRegistry::reg_region(Ibv *ibv, struct ibv_pd *pd, void *addr,
-                                      size_t len, bool is_device,
-                                      const DmabufFn &dmabuf, int access) {
+struct ibv_mr* MrRegistry::reg_region(Ibv* ibv, struct ibv_pd* pd, void* addr, size_t len,
+                                      bool is_device, const DmabufFn& dmabuf, int access) {
   if (is_device && dmabuf) {
-    int fd = -1;
+    int fd          = -1;
     uint64_t offset = 0;
     if (dmabuf(addr, len, &fd, &offset)) {
-      struct ibv_mr *mr = ibv->reg_dmabuf_mr(
-          pd, offset, len, reinterpret_cast<uint64_t>(addr), fd, access);
+      struct ibv_mr* mr =
+          ibv->reg_dmabuf_mr(pd, offset, len, reinterpret_cast<uint64_t>(addr), fd, access);
       if (mr) {
         // Take ownership of the dma-buf fd; it is closed when the MR is
         // deregistered (see the destructor).
@@ -86,12 +85,11 @@ struct ibv_mr *MrRegistry::reg_region(Ibv *ibv, struct ibv_pd *pd, void *addr,
   return ibv->reg_mr(pd, addr, len, access);
 }
 
-bool MrRegistry::register_heap(Ibv *ibv, struct ibv_pd *pd, void *base,
-                               size_t size, bool is_device,
-                               const DmabufFn &dmabuf) {
-  ibv_ = ibv;
+bool MrRegistry::register_heap(Ibv* ibv, struct ibv_pd* pd, void* base, size_t size, bool is_device,
+                               const DmabufFn& dmabuf) {
+  ibv_        = ibv;
   local_base_ = reinterpret_cast<uintptr_t>(base);
-  heap_mr_ = reg_region(ibv, pd, base, size, is_device, dmabuf, kHeapAccess);
+  heap_mr_    = reg_region(ibv, pd, base, size, is_device, dmabuf, kHeapAccess);
   if (!heap_mr_) {
     LOG_ERROR("verbs: heap MR registration failed");
     return false;
@@ -101,32 +99,28 @@ bool MrRegistry::register_heap(Ibv *ibv, struct ibv_pd *pd, void *base,
   return true;
 }
 
-bool MrRegistry::exchange_heap(int num_pes, int my_pe,
-                               const AllgatherFn &allgather) {
+bool MrRegistry::exchange_heap(int num_pes, int my_pe, const AllgatherFn& allgather) {
   struct HeapKey {
     uintptr_t base;
     uint64_t rkey;
   };
   HeapKey mine{local_base_, heap_rkey_};
-  std::vector<HeapKey> all =
-      allgather_value<HeapKey>(mine, num_pes, my_pe, allgather);
+  std::vector<HeapKey> all = allgather_value<HeapKey>(mine, num_pes, my_pe, allgather);
 
   remote_.assign(static_cast<size_t>(num_pes), RemoteRegion{});
   for (int pe = 0; pe < num_pes; pe++) {
     remote_[pe].remote_base = all[pe].base;
-    remote_[pe].key = all[pe].rkey;
+    remote_[pe].key         = all[pe].rkey;
   }
   return true;
 }
 
-uint32_t MrRegistry::register_local(Ibv *ibv, struct ibv_pd *pd, void *addr,
-                                    size_t len, bool is_device,
-                                    const DmabufFn &dmabuf) {
+uint32_t MrRegistry::register_local(Ibv* ibv, struct ibv_pd* pd, void* addr, size_t len,
+                                    bool is_device, const DmabufFn& dmabuf) {
   ibv_ = ibv;
   // Local return buffers only need LOCAL_WRITE (RDMA_READ / fetching-AMO land
   // here), but registering with the full access set is harmless and uniform.
-  struct ibv_mr *mr =
-      reg_region(ibv, pd, addr, len, is_device, dmabuf, kHeapAccess);
+  struct ibv_mr* mr = reg_region(ibv, pd, addr, len, is_device, dmabuf, kHeapAccess);
   if (!mr) {
     LOG_ERROR("verbs: local buffer MR registration failed");
     return 0;

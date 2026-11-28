@@ -39,15 +39,14 @@
 
 namespace rocshmem {
 
-#define NET_CHECK(cmd) do {                                \
-  if (cmd != MPI_SUCCESS) {                                \
-    LOG_ERROR_ABORT("Unrecoverable error: MPI Failure");   \
-  }                                                        \
-} while(0)
+#define NET_CHECK(cmd)                                     \
+  do {                                                     \
+    if (cmd != MPI_SUCCESS) {                              \
+      LOG_ERROR_ABORT("Unrecoverable error: MPI Failure"); \
+    }                                                      \
+  } while (0)
 
-MPITransport::MPITransport(MPI_Comm comm, Queue* q)
-  : Transport{}, queue{q} {
-
+MPITransport::MPITransport(MPI_Comm comm, Queue* q) : Transport{}, queue{q} {
   assert(comm != MPI_COMM_NULL);
 
   NET_CHECK(mpilib_ftable_.Comm_dup(comm, &ro_net_comm_world));
@@ -61,7 +60,7 @@ MPITransport::~MPITransport() {
 }
 
 void MPITransport::threadProgressEngine() {
-  auto *bp{backend_proxy->get()};
+  auto* bp{backend_proxy->get()};
 
   transport_up = true;
   while (!(bp->worker_thread_exit)) {
@@ -71,14 +70,15 @@ void MPITransport::threadProgressEngine() {
   transport_up = false;
 }
 
-void MPITransport::insertRequest(const queue_element_t *element, int queue_id) {
+void MPITransport::insertRequest(const queue_element_t* element, int queue_id) {
   std::unique_lock<std::mutex> mlock(queue_mutex);
   q.push(*element);
   q_wgid.push(queue_id);
 }
 
 void MPITransport::submitRequestsToMPI() {
-  if (q.empty()) return;
+  if (q.empty())
+    return;
 
   std::unique_lock<std::mutex> mlock(queue_mutex);
   queue_element_t next_element{q.front()};
@@ -88,166 +88,145 @@ void MPITransport::submitRequestsToMPI() {
   mlock.unlock();
 
   switch (next_element.type) {
-    case RO_NET_PUT:
-      putMem(next_element.dst, next_element.src, next_element.ol1.size,
-             next_element.PE, next_element.ro_net_win_id, queue_idx,
-             next_element.status, true);
-      LOG_TRACE("proxy::mpi Submitted PUT dst %p src %p size %lu pe %d win_id %d",
-              next_element.dst, next_element.src, next_element.ol1.size,
-              next_element.PE, next_element.ro_net_win_id);
-      break;
-    case RO_NET_P: {
+  case RO_NET_PUT:
+    putMem(next_element.dst, next_element.src, next_element.ol1.size, next_element.PE,
+           next_element.ro_net_win_id, queue_idx, next_element.status, true);
+    LOG_TRACE("proxy::mpi Submitted PUT dst %p src %p size %lu pe %d win_id %d", next_element.dst,
+              next_element.src, next_element.ol1.size, next_element.PE, next_element.ro_net_win_id);
+    break;
+  case RO_NET_P:
+    {
       // No equivalent inline OP for MPI.
       // Allocate a temp buffer for value.
       // TODO(bpotter) this is a memory leak - fix it
-      void *source_buffer{malloc(next_element.ol1.size)};
+      void* source_buffer{malloc(next_element.ol1.size)};
 
       ::memcpy(source_buffer, &next_element.src, next_element.ol1.size);
 
-      putMem(next_element.dst, source_buffer, next_element.ol1.size,
-             next_element.PE, next_element.ro_net_win_id, queue_idx,
-             next_element.status, true, true);
-      LOG_TRACE("proxy::mpi Submitted P dst %p value %p pe %d", next_element.dst,
-              next_element.src, next_element.PE);
+      putMem(next_element.dst, source_buffer, next_element.ol1.size, next_element.PE,
+             next_element.ro_net_win_id, queue_idx, next_element.status, true, true);
+      LOG_TRACE("proxy::mpi Submitted P dst %p value %p pe %d", next_element.dst, next_element.src,
+                next_element.PE);
       break;
     }
-    case RO_NET_GET:
-      getMem(next_element.dst, next_element.src, next_element.ol1.size,
-             next_element.PE, next_element.ro_net_win_id, queue_idx,
-             next_element.status, true);
-      LOG_TRACE("proxy::mpi Submitted GET dst %p src %p size %lu pe %d", next_element.dst,
+  case RO_NET_GET:
+    getMem(next_element.dst, next_element.src, next_element.ol1.size, next_element.PE,
+           next_element.ro_net_win_id, queue_idx, next_element.status, true);
+    LOG_TRACE("proxy::mpi Submitted GET dst %p src %p size %lu pe %d", next_element.dst,
               next_element.src, next_element.ol1.size, next_element.PE);
-      break;
-    case RO_NET_PUT_NBI:
-      putMem(next_element.dst, next_element.src, next_element.ol1.size,
-             next_element.PE, next_element.ro_net_win_id, queue_idx,
-             next_element.status, false);
-      LOG_TRACE("proxy::mpi Submitted PUT NBI dst %p src %p size %lu pe %d",
-              next_element.dst, next_element.src, next_element.ol1.size,
-              next_element.PE);
-      break;
-    case RO_NET_GET_NBI:
-      getMem(next_element.dst, next_element.src, next_element.ol1.size,
-             next_element.PE, next_element.ro_net_win_id, queue_idx,
-             next_element.status, false);
-      LOG_TRACE("proxy::mpi Submitted GET NBI dst %p src %p size %lu pe %d",
-              next_element.dst, next_element.src, next_element.ol1.size,
-              next_element.PE);
-      break;
-    case RO_NET_AMO_FOP:
-      amoFOP(next_element.dst, next_element.src,
-             const_cast<unsigned long long *>(&next_element.ol1.atomic_value),
-             next_element.PE, next_element.ro_net_win_id, queue_idx,
-             next_element.status, true,
-             static_cast<ROCSHMEM_OP>(next_element.op),
-             static_cast<ro_net_types>(next_element.datatype));
-      LOG_TRACE("proxy::mpi Submitted AMO dst %p src %p Val %llu pe %d", next_element.dst,
+    break;
+  case RO_NET_PUT_NBI:
+    putMem(next_element.dst, next_element.src, next_element.ol1.size, next_element.PE,
+           next_element.ro_net_win_id, queue_idx, next_element.status, false);
+    LOG_TRACE("proxy::mpi Submitted PUT NBI dst %p src %p size %lu pe %d", next_element.dst,
+              next_element.src, next_element.ol1.size, next_element.PE);
+    break;
+  case RO_NET_GET_NBI:
+    getMem(next_element.dst, next_element.src, next_element.ol1.size, next_element.PE,
+           next_element.ro_net_win_id, queue_idx, next_element.status, false);
+    LOG_TRACE("proxy::mpi Submitted GET NBI dst %p src %p size %lu pe %d", next_element.dst,
+              next_element.src, next_element.ol1.size, next_element.PE);
+    break;
+  case RO_NET_AMO_FOP:
+    amoFOP(next_element.dst, next_element.src,
+           const_cast<unsigned long long*>(&next_element.ol1.atomic_value), next_element.PE,
+           next_element.ro_net_win_id, queue_idx, next_element.status, true,
+           static_cast<ROCSHMEM_OP>(next_element.op),
+           static_cast<ro_net_types>(next_element.datatype));
+    LOG_TRACE("proxy::mpi Submitted AMO dst %p src %p Val %llu pe %d", next_element.dst,
               next_element.src, next_element.ol1.atomic_value, next_element.PE);
-      break;
-    case RO_NET_AMO_FCAS:
-      amoFCAS(next_element.dst, next_element.src,
-              const_cast<unsigned long long *>(&next_element.ol1.atomic_value),
-              next_element.PE, next_element.ro_net_win_id, queue_idx,
-              next_element.status, true,
-              const_cast<void **>(&next_element.ol2.pWrk),
-              static_cast<ro_net_types>(next_element.datatype));
-      LOG_TRACE("proxy::mpi Submitted F_CSWAP dst %p src %p Val %llu pe %d cond %ld",
-              next_element.dst, next_element.src, next_element.ol1.atomic_value,
-              next_element.PE,
+    break;
+  case RO_NET_AMO_FCAS:
+    amoFCAS(next_element.dst, next_element.src,
+            const_cast<unsigned long long*>(&next_element.ol1.atomic_value), next_element.PE,
+            next_element.ro_net_win_id, queue_idx, next_element.status, true,
+            const_cast<void**>(&next_element.ol2.pWrk),
+            static_cast<ro_net_types>(next_element.datatype));
+    LOG_TRACE("proxy::mpi Submitted F_CSWAP dst %p src %p Val %llu pe %d cond %ld",
+              next_element.dst, next_element.src, next_element.ol1.atomic_value, next_element.PE,
               reinterpret_cast<int64_t>(next_element.ol2.pWrk));
-      break;
-    case RO_NET_TEAM_REDUCE_SCATTER:
-      team_reduce_scatter(next_element.dst, next_element.src,
-                          next_element.ol1.size,
-                          next_element.ro_net_win_id, queue_idx,
-                          (MPI_Comm)next_element.team_comm,
-                          static_cast<ROCSHMEM_OP>(next_element.op),
-                          static_cast<ro_net_types>(next_element.datatype),
-                          next_element.status, true);
-      LOG_TRACE("proxy::mpi Submitted TEAM_REDUCE_SCATTER dst %p src %p nreduce %lu team %zd",
+    break;
+  case RO_NET_TEAM_REDUCE_SCATTER:
+    team_reduce_scatter(
+        next_element.dst, next_element.src, next_element.ol1.size, next_element.ro_net_win_id,
+        queue_idx, (MPI_Comm)next_element.team_comm, static_cast<ROCSHMEM_OP>(next_element.op),
+        static_cast<ro_net_types>(next_element.datatype), next_element.status, true);
+    LOG_TRACE("proxy::mpi Submitted TEAM_REDUCE_SCATTER dst %p src %p nreduce %lu team %zd",
               next_element.dst, next_element.src, next_element.ol1.size,
               (intptr_t)next_element.team_comm);
-      break;
-    case RO_NET_TEAM_REDUCE:
-      team_reduction(next_element.dst, next_element.src, next_element.ol1.size,
-                     next_element.ro_net_win_id, queue_idx,
-                     (MPI_Comm)next_element.team_comm,
-                     static_cast<ROCSHMEM_OP>(next_element.op),
-                     static_cast<ro_net_types>(next_element.datatype),
-                     next_element.status, true);
-      LOG_TRACE("proxy::mpi Submitted FLOAT_SUM_TEAM_REDUCE dst %p src %p size %lu team %zd",
+    break;
+  case RO_NET_TEAM_REDUCE:
+    team_reduction(next_element.dst, next_element.src, next_element.ol1.size,
+                   next_element.ro_net_win_id, queue_idx, (MPI_Comm)next_element.team_comm,
+                   static_cast<ROCSHMEM_OP>(next_element.op),
+                   static_cast<ro_net_types>(next_element.datatype), next_element.status, true);
+    LOG_TRACE("proxy::mpi Submitted FLOAT_SUM_TEAM_REDUCE dst %p src %p size %lu team %zd",
               next_element.dst, next_element.src, next_element.ol1.size,
               (intptr_t)next_element.team_comm);
-      break;
-    case RO_NET_TEAM_BROADCAST:
-      team_broadcast(next_element.dst, next_element.src, next_element.ol1.size,
-                     next_element.ro_net_win_id, queue_idx,
-                     (MPI_Comm)next_element.team_comm, next_element.PE_root,
-                     static_cast<ro_net_types>(next_element.datatype),
-                     next_element.status, true);
-      LOG_TRACE(
-          "proxy::mpi Submitted TEAM_BROADCAST dst %p src %p size %lu "
-          "team %zd, PE_root %d",
-          next_element.dst, next_element.src, next_element.ol1.size,
-          (intptr_t)next_element.team_comm, next_element.PE_root);
-      break;
-    case RO_NET_ALLTOALL:
-      alltoall(next_element.dst, next_element.src, next_element.ol1.size,
-               next_element.ro_net_win_id, queue_idx, (MPI_Comm)next_element.team_comm,
-               next_element.ol2.pWrk,
-               static_cast<ro_net_types>(next_element.datatype),
-               next_element.status, true);
-      LOG_TRACE("proxy::mpi Submitted ALLTOALL  dst %p src %p size %lu team %zd",
-              next_element.dst, next_element.src, next_element.ol1.size,
-              (intptr_t)next_element.team_comm);
-      break;
-    case RO_NET_FCOLLECT:
-      fcollect(next_element.dst, next_element.src, next_element.ol1.size,
-               next_element.ro_net_win_id, queue_idx, (MPI_Comm)next_element.team_comm,
-               next_element.ol2.pWrk,
-               static_cast<ro_net_types>(next_element.datatype),
-               next_element.status, true);
-      LOG_TRACE("proxy::mpi Submitted FCOLLECT  dst %p src %p size %lu team %zd",
-              next_element.dst, next_element.src, next_element.ol1.size,
-              (intptr_t)next_element.team_comm);
-      break;
-    case RO_NET_BARRIER:
-      barrier(queue_idx, next_element.status, true,
-              next_element.team_comm == ((intptr_t) NULL) ? ro_net_comm_world : (MPI_Comm)next_element.team_comm,
-              true);
-      LOG_TRACE("proxy::mpi Submitted Barrier_all");
-      break;
-    case RO_NET_SYNC:
-      barrier(queue_idx, next_element.status, true,
-              next_element.team_comm == ((intptr_t) NULL) ? ro_net_comm_world : (MPI_Comm)next_element.team_comm,
-              false);
-      LOG_TRACE("proxy::mpi Submitted Sync");
-      break;
-    case RO_NET_FENCE:
-    case RO_NET_QUIET:
-      quiet(queue_idx, next_element.status);
-      LOG_TRACE("proxy::mpi Submitted FENCE/QUIET");
-      break;
-    case RO_NET_FINALIZE:
-      quiet(queue_idx, next_element.status);
-      LOG_TRACE("proxy::mpi Submitted Finalize");
-      break;
-    default:
-      LOG_ERROR_ABORT("Invalid GPU Packet received");
-      break;
+    break;
+  case RO_NET_TEAM_BROADCAST:
+    team_broadcast(next_element.dst, next_element.src, next_element.ol1.size,
+                   next_element.ro_net_win_id, queue_idx, (MPI_Comm)next_element.team_comm,
+                   next_element.PE_root, static_cast<ro_net_types>(next_element.datatype),
+                   next_element.status, true);
+    LOG_TRACE(
+        "proxy::mpi Submitted TEAM_BROADCAST dst %p src %p size %lu "
+        "team %zd, PE_root %d",
+        next_element.dst, next_element.src, next_element.ol1.size, (intptr_t)next_element.team_comm,
+        next_element.PE_root);
+    break;
+  case RO_NET_ALLTOALL:
+    alltoall(next_element.dst, next_element.src, next_element.ol1.size, next_element.ro_net_win_id,
+             queue_idx, (MPI_Comm)next_element.team_comm, next_element.ol2.pWrk,
+             static_cast<ro_net_types>(next_element.datatype), next_element.status, true);
+    LOG_TRACE("proxy::mpi Submitted ALLTOALL  dst %p src %p size %lu team %zd", next_element.dst,
+              next_element.src, next_element.ol1.size, (intptr_t)next_element.team_comm);
+    break;
+  case RO_NET_FCOLLECT:
+    fcollect(next_element.dst, next_element.src, next_element.ol1.size, next_element.ro_net_win_id,
+             queue_idx, (MPI_Comm)next_element.team_comm, next_element.ol2.pWrk,
+             static_cast<ro_net_types>(next_element.datatype), next_element.status, true);
+    LOG_TRACE("proxy::mpi Submitted FCOLLECT  dst %p src %p size %lu team %zd", next_element.dst,
+              next_element.src, next_element.ol1.size, (intptr_t)next_element.team_comm);
+    break;
+  case RO_NET_BARRIER:
+    barrier(queue_idx, next_element.status, true,
+            next_element.team_comm == ((intptr_t)NULL) ? ro_net_comm_world
+                                                       : (MPI_Comm)next_element.team_comm,
+            true);
+    LOG_TRACE("proxy::mpi Submitted Barrier_all");
+    break;
+  case RO_NET_SYNC:
+    barrier(queue_idx, next_element.status, true,
+            next_element.team_comm == ((intptr_t)NULL) ? ro_net_comm_world
+                                                       : (MPI_Comm)next_element.team_comm,
+            false);
+    LOG_TRACE("proxy::mpi Submitted Sync");
+    break;
+  case RO_NET_FENCE:
+  case RO_NET_QUIET:
+    quiet(queue_idx, next_element.status);
+    LOG_TRACE("proxy::mpi Submitted FENCE/QUIET");
+    break;
+  case RO_NET_FINALIZE:
+    quiet(queue_idx, next_element.status);
+    LOG_TRACE("proxy::mpi Submitted Finalize");
+    break;
+  default:
+    LOG_ERROR_ABORT("Invalid GPU Packet received");
+    break;
   }
 }
 
-void MPITransport::initTransport(int num_queues, BackendProxy *proxy) {
-  waiting_quiet.resize(num_queues, std::vector<volatile char *>());
+void MPITransport::initTransport(int num_queues, BackendProxy* proxy) {
+  waiting_quiet.resize(num_queues, std::vector<volatile char*>());
   outstanding.resize(num_queues, 0);
   transport_up = false;
 
   backend_proxy = proxy;
-  auto *bp{backend_proxy->get()};
+  auto* bp{backend_proxy->get()};
 
-  host_interface =
-      new HostInterface(bp->hdp_policy, ro_net_comm_world, bp->heap_ptr);
+  host_interface  = new HostInterface(bp->hdp_policy, ro_net_comm_world, bp->heap_ptr);
   progress_thread = std::thread(&MPITransport::threadProgressEngine, this);
   while (!transport_up) {
   }
@@ -258,22 +237,21 @@ void MPITransport::finalizeTransport() {
   delete host_interface;
 }
 
-rocshmem_team_t get_external_team(ROTeam *team) {
+rocshmem_team_t get_external_team(ROTeam* team) {
   return reinterpret_cast<rocshmem_team_t>(team);
 }
 
-void MPITransport::createNewTeam(ROBackend *backend, [[maybe_unused]] Team *parent_team,
-                                   const TeamInfo& team_info_wrt_parent,
-                                   const TeamInfo& team_info_wrt_world,
-                                   int num_pes, int my_pe_in_new_team,
-                                   MPI_Comm new_team_comm,
-                                   rocshmem_team_t *new_team) {
-  ROTeam *new_team_obj{nullptr};
+void MPITransport::createNewTeam(ROBackend* backend, [[maybe_unused]] Team* parent_team,
+                                 const TeamInfo& team_info_wrt_parent,
+                                 const TeamInfo& team_info_wrt_world, int num_pes,
+                                 int my_pe_in_new_team, MPI_Comm new_team_comm,
+                                 rocshmem_team_t* new_team) {
+  ROTeam* new_team_obj{nullptr};
 
   CHECK_HIP(hipMalloc(&new_team_obj, sizeof(ROTeam)));
 
-  new (new_team_obj) ROTeam(backend, team_info_wrt_parent, team_info_wrt_world,
-                            num_pes, my_pe_in_new_team, new_team_comm);
+  new (new_team_obj) ROTeam(backend, team_info_wrt_parent, team_info_wrt_world, num_pes,
+                            my_pe_in_new_team, new_team_comm);
 
   *new_team = get_external_team(new_team_obj);
 }
@@ -282,8 +260,8 @@ void MPITransport::global_exit(int status) {
   mpilib_ftable_.Abort(ro_net_comm_world, status);
 }
 
-void MPITransport::barrier(int contextId, volatile char *status, bool blocking,
-                           MPI_Comm team, bool do_quiet) {
+void MPITransport::barrier(int contextId, volatile char* status, bool blocking, MPI_Comm team,
+                           bool do_quiet) {
   MPI_Request request{};
   NET_CHECK(mpilib_ftable_.Ibarrier(team, &request));
 
@@ -300,60 +278,59 @@ void MPITransport::barrier(int contextId, volatile char *status, bool blocking,
 
 MPI_Op MPITransport::get_mpi_op(ROCSHMEM_OP op) {
   switch (op) {
-    case ROCSHMEM_SUM:
-      return MPI_SUM;
-    case ROCSHMEM_MAX:
-      return MPI_MAX;
-    case ROCSHMEM_MIN:
-      return MPI_MIN;
-    case ROCSHMEM_PROD:
-      return MPI_PROD;
-    case ROCSHMEM_AND:
-      return MPI_BAND;
-    case ROCSHMEM_OR:
-      return MPI_BOR;
-    case ROCSHMEM_XOR:
-      return MPI_BXOR;
-    case ROCSHMEM_REPLACE:
-      return MPI_REPLACE;
-    default:
-      LOG_ERROR_ABORT("proxy::mpi\tUnknown rocSHMEM op MPI conversion %d", op);
+  case ROCSHMEM_SUM:
+    return MPI_SUM;
+  case ROCSHMEM_MAX:
+    return MPI_MAX;
+  case ROCSHMEM_MIN:
+    return MPI_MIN;
+  case ROCSHMEM_PROD:
+    return MPI_PROD;
+  case ROCSHMEM_AND:
+    return MPI_BAND;
+  case ROCSHMEM_OR:
+    return MPI_BOR;
+  case ROCSHMEM_XOR:
+    return MPI_BXOR;
+  case ROCSHMEM_REPLACE:
+    return MPI_REPLACE;
+  default:
+    LOG_ERROR_ABORT("proxy::mpi\tUnknown rocSHMEM op MPI conversion %d", op);
   }
 }
 
 static MPI_Datatype convertType(ro_net_types type) {
   switch (type) {
-    case RO_NET_FLOAT:
-      return MPI_FLOAT;
-    case RO_NET_DOUBLE:
-      return MPI_DOUBLE;
-    case RO_NET_INT:
-      return MPI_INT;
-    case RO_NET_LONG:
-      return MPI_LONG;
-    case RO_NET_UNSIGNED_LONG:
-      return MPI_UNSIGNED_LONG;
-    case RO_NET_LONG_LONG:
-      return MPI_LONG_LONG;
-    case RO_NET_SHORT:
-      return MPI_SHORT;
-    case RO_NET_LONG_DOUBLE:
-      return MPI_LONG_DOUBLE;
-    case RO_NET_CHAR:
-      return MPI_CHAR;
-    case RO_NET_SIGNED_CHAR:
-      return MPI_SIGNED_CHAR;
-    case RO_NET_UNSIGNED_CHAR:
-      return MPI_UNSIGNED_CHAR;
-    default:
-      LOG_ERROR_ABORT("proxy::mpi\tUnknown rocSHMEM type MPI conversion %d", type);
+  case RO_NET_FLOAT:
+    return MPI_FLOAT;
+  case RO_NET_DOUBLE:
+    return MPI_DOUBLE;
+  case RO_NET_INT:
+    return MPI_INT;
+  case RO_NET_LONG:
+    return MPI_LONG;
+  case RO_NET_UNSIGNED_LONG:
+    return MPI_UNSIGNED_LONG;
+  case RO_NET_LONG_LONG:
+    return MPI_LONG_LONG;
+  case RO_NET_SHORT:
+    return MPI_SHORT;
+  case RO_NET_LONG_DOUBLE:
+    return MPI_LONG_DOUBLE;
+  case RO_NET_CHAR:
+    return MPI_CHAR;
+  case RO_NET_SIGNED_CHAR:
+    return MPI_SIGNED_CHAR;
+  case RO_NET_UNSIGNED_CHAR:
+    return MPI_UNSIGNED_CHAR;
+  default:
+    LOG_ERROR_ABORT("proxy::mpi\tUnknown rocSHMEM type MPI conversion %d", type);
   }
 }
 
-void MPITransport::team_reduction(void *dst, void *src, int size, [[maybe_unused]] int win_id,
-                                  int contextId, MPI_Comm team, ROCSHMEM_OP op,
-                                  ro_net_types type, volatile char* status,
-                                  bool blocking) {
+void MPITransport::team_reduction(void* dst, void* src, int size, [[maybe_unused]] int win_id,
+                                  int contextId, MPI_Comm team, ROCSHMEM_OP op, ro_net_types type,
+                                  volatile char* status, bool blocking) {
   MPI_Request request{};
 
   MPI_Op mpi_op{get_mpi_op(op)};
@@ -361,8 +338,7 @@ void MPITransport::team_reduction(void *dst, void *src, int size, [[maybe_unused
   MPI_Comm comm{team};
 
   if (dst == src) {
-    NET_CHECK(mpilib_ftable_.Iallreduce(MPI_IN_PLACE, dst, size, mpi_type, mpi_op, comm,
-                             &request));
+    NET_CHECK(mpilib_ftable_.Iallreduce(MPI_IN_PLACE, dst, size, mpi_type, mpi_op, comm, &request));
   } else {
     NET_CHECK(mpilib_ftable_.Iallreduce(src, dst, size, mpi_type, mpi_op, comm, &request));
   }
@@ -372,29 +348,27 @@ void MPITransport::team_reduction(void *dst, void *src, int size, [[maybe_unused
   outstanding[contextId]++;
 }
 
-void MPITransport::team_reduce_scatter(void *dst, void *src, int nreduce,
-                                       [[maybe_unused]] int win_id,
-                                       int contextId, MPI_Comm team,
-                                       ROCSHMEM_OP op, ro_net_types type,
-                                       volatile char *status, bool blocking) {
+void MPITransport::team_reduce_scatter(void* dst, void* src, int nreduce,
+                                       [[maybe_unused]] int win_id, int contextId, MPI_Comm team,
+                                       ROCSHMEM_OP op, ro_net_types type, volatile char* status,
+                                       bool blocking) {
   MPI_Request request{};
 
   MPI_Op mpi_op{get_mpi_op(op)};
   MPI_Datatype mpi_type{convertType(type)};
   MPI_Comm comm{team};
 
-  NET_CHECK(mpilib_ftable_.Ireduce_scatter_block(
-      src, dst, nreduce, mpi_type, mpi_op, comm, &request));
+  NET_CHECK(
+      mpilib_ftable_.Ireduce_scatter_block(src, dst, nreduce, mpi_type, mpi_op, comm, &request));
 
   requests.push_back({request, {status, contextId, blocking}});
   outstanding[contextId]++;
 }
 
-void MPITransport::team_broadcast(void *dst, void *src, int size, int win_id,
-                                  int contextId, MPI_Comm team, int root,
-                                  ro_net_types type, volatile char *status,
+void MPITransport::team_broadcast(void* dst, void* src, int size, int win_id, int contextId,
+                                  MPI_Comm team, int root, ro_net_types type, volatile char* status,
                                   [[maybe_unused]] bool blocking) {
-  auto *bp{backend_proxy->get()};
+  auto* bp{backend_proxy->get()};
 
   MPI_Comm comm{team};
   int rank{}, pe_size{};
@@ -408,16 +382,19 @@ void MPITransport::team_broadcast(void *dst, void *src, int size, int win_id,
   std::vector<int> ranks(pe_size);
   std::vector<int> world_ranks(pe_size);
 
-  for (int i = 0; i < pe_size; i++) ranks[i] = i;
+  for (int i = 0; i < pe_size; i++)
+    ranks[i] = i;
 
-  NET_CHECK(mpilib_ftable_.Group_translate_ranks(grp, pe_size, ranks.data(), world_grp, world_ranks.data()));
+  NET_CHECK(mpilib_ftable_.Group_translate_ranks(grp, pe_size, ranks.data(), world_grp,
+                                                 world_ranks.data()));
 
   MPI_Datatype mpi_type{convertType(type)};
   MPI_Request req;
 
-  NET_CHECK(mpilib_ftable_.Rget(reinterpret_cast<char *>(dst), size, mpi_type, world_ranks[root],
-                      bp->heap_window_info[win_id]->get_offset(reinterpret_cast<char *>(src)),
-                      size, mpi_type, bp->heap_window_info[win_id]->get_win(), &req));
+  NET_CHECK(
+      mpilib_ftable_.Rget(reinterpret_cast<char*>(dst), size, mpi_type, world_ranks[root],
+                          bp->heap_window_info[win_id]->get_offset(reinterpret_cast<char*>(src)),
+                          size, mpi_type, bp->heap_window_info[win_id]->get_win(), &req));
 
   requests.push_back({req, {nullptr, contextId, false}});
   outstanding[contextId]++;
@@ -427,11 +404,10 @@ void MPITransport::team_broadcast(void *dst, void *src, int size, int win_id,
   quiet(contextId, status);
 }
 
-void MPITransport::alltoall(void *dst, void *src, int size, int win_id,
-                            int contextId, MPI_Comm team, [[maybe_unused]] void *ata_buffptr,
-                            ro_net_types type, volatile char *status,
-                            [[maybe_unused]] bool blocking) {
-  auto *bp{backend_proxy->get()};
+void MPITransport::alltoall(void* dst, void* src, int size, int win_id, int contextId,
+                            MPI_Comm team, [[maybe_unused]] void* ata_buffptr, ro_net_types type,
+                            volatile char* status, [[maybe_unused]] bool blocking) {
+  auto* bp{backend_proxy->get()};
 
   MPI_Comm comm{team};
   int rank{}, pe_size{};
@@ -444,9 +420,11 @@ void MPITransport::alltoall(void *dst, void *src, int size, int win_id,
 
   std::vector<int> ranks(pe_size);
   std::vector<int> world_ranks(pe_size);
-  for (int i = 0; i < pe_size; i++) ranks[i] = i;
+  for (int i = 0; i < pe_size; i++)
+    ranks[i] = i;
 
-  NET_CHECK(mpilib_ftable_.Group_translate_ranks(grp, pe_size, ranks.data(), world_grp, world_ranks.data()));
+  NET_CHECK(mpilib_ftable_.Group_translate_ranks(grp, pe_size, ranks.data(), world_grp,
+                                                 world_ranks.data()));
 
   MPI_Datatype mpi_type{convertType(type)};
   int type_size{};
@@ -458,14 +436,13 @@ void MPITransport::alltoall(void *dst, void *src, int size, int win_id,
 
   std::vector<MPI_Request> pe_req(pe_size);
   for (int i = 0; i < pe_size; ++i) {
-    int target = (rank + i) % pe_size;
+    int target     = (rank + i) % pe_size;
     int src_offset = target * type_size * size;
     int dst_offset = rank * type_size * size;
-    NET_CHECK(mpilib_ftable_.Rput(reinterpret_cast<char *>(src) + src_offset, size,
-                       mpi_type, world_ranks[target],
-                       bp->heap_window_info[win_id]->get_offset(reinterpret_cast<char *>(dst) + dst_offset),
-                       size, mpi_type, bp->heap_window_info[win_id]->get_win(),
-                       &pe_req[i]));
+    NET_CHECK(mpilib_ftable_.Rput(
+        reinterpret_cast<char*>(src) + src_offset, size, mpi_type, world_ranks[target],
+        bp->heap_window_info[win_id]->get_offset(reinterpret_cast<char*>(dst) + dst_offset), size,
+        mpi_type, bp->heap_window_info[win_id]->get_win(), &pe_req[i]));
     requests.push_back({pe_req[i], {nullptr, contextId, false}});
     outstanding[contextId]++;
   }
@@ -474,11 +451,10 @@ void MPITransport::alltoall(void *dst, void *src, int size, int win_id,
   quiet(contextId, status);
 }
 
-void MPITransport::fcollect(void *dst, void *src, int size, int win_id,
-                            int contextId, MPI_Comm team, [[maybe_unused]] void *ata_buffptr,
-                            ro_net_types type, volatile char *status,
-                            [[maybe_unused]] bool blocking) {
-  auto *bp{backend_proxy->get()};
+void MPITransport::fcollect(void* dst, void* src, int size, int win_id, int contextId,
+                            MPI_Comm team, [[maybe_unused]] void* ata_buffptr, ro_net_types type,
+                            volatile char* status, [[maybe_unused]] bool blocking) {
+  auto* bp{backend_proxy->get()};
 
   MPI_Comm comm{team};
   int rank{}, pe_size{};
@@ -492,9 +468,11 @@ void MPITransport::fcollect(void *dst, void *src, int size, int win_id,
   std::vector<int> ranks(pe_size);
   std::vector<int> world_ranks(pe_size);
 
-  for (int i = 0; i < pe_size; i++) ranks[i] = i;
+  for (int i = 0; i < pe_size; i++)
+    ranks[i] = i;
 
-  NET_CHECK(mpilib_ftable_.Group_translate_ranks(grp, pe_size, ranks.data(), world_grp, world_ranks.data()));
+  NET_CHECK(mpilib_ftable_.Group_translate_ranks(grp, pe_size, ranks.data(), world_grp,
+                                                 world_ranks.data()));
 
   MPI_Datatype mpi_type{convertType(type)};
   int type_size{};
@@ -508,9 +486,10 @@ void MPITransport::fcollect(void *dst, void *src, int size, int win_id,
   for (int i = 0; i < pe_size; ++i) {
     int target = (rank + i) % pe_size;
     int offset = rank * type_size * size;
-    NET_CHECK(mpilib_ftable_.Rput(reinterpret_cast<char *>(src), size, mpi_type, world_ranks[target],
-                       bp->heap_window_info[win_id]->get_offset(reinterpret_cast<char *>(dst) + offset),
-                       size, mpi_type, bp->heap_window_info[win_id]->get_win(), &pe_req[i]));
+    NET_CHECK(mpilib_ftable_.Rput(
+        reinterpret_cast<char*>(src), size, mpi_type, world_ranks[target],
+        bp->heap_window_info[win_id]->get_offset(reinterpret_cast<char*>(dst) + offset), size,
+        mpi_type, bp->heap_window_info[win_id]->get_win(), &pe_req[i]));
 
     requests.push_back({pe_req[i], {nullptr, contextId, false}});
     outstanding[contextId]++;
@@ -520,17 +499,16 @@ void MPITransport::fcollect(void *dst, void *src, int size, int win_id,
   quiet(contextId, status);
 }
 
-void MPITransport::putMem(void *dst, void *src, int size, int pe, int win_id,
-                          int contextId, volatile char *status, bool blocking,
-                          [[maybe_unused]] bool inline_data) {
+void MPITransport::putMem(void* dst, void* src, int size, int pe, int win_id, int contextId,
+                          volatile char* status, bool blocking, [[maybe_unused]] bool inline_data) {
   queue->flush_hdp();
 
-  auto *bp{backend_proxy->get()};
+  auto* bp{backend_proxy->get()};
   MPI_Request request{};
 
-  NET_CHECK(mpilib_ftable_.Rput(
-      src, size, MPI_CHAR, pe, bp->heap_window_info[win_id]->get_offset(dst),
-      size, MPI_CHAR, bp->heap_window_info[win_id]->get_win(), &request));
+  NET_CHECK(mpilib_ftable_.Rput(src, size, MPI_CHAR, pe,
+                                bp->heap_window_info[win_id]->get_offset(dst), size, MPI_CHAR,
+                                bp->heap_window_info[win_id]->get_win(), &request));
 
   // Since MPI makes puts as complete as soon as the local buffer is free,
   // we need a flush to satisfy quiet.  Put it here as a hack for now even
@@ -542,17 +520,16 @@ void MPITransport::putMem(void *dst, void *src, int size, int pe, int win_id,
   outstanding[contextId]++;
 }
 
-void MPITransport::amoFOP(void *dst, void *src, void *val, int pe, int win_id,
-                          [[maybe_unused]] int contextId, volatile char *status, [[maybe_unused]] bool blocking,
-                          ROCSHMEM_OP op, ro_net_types type) {
+void MPITransport::amoFOP(void* dst, void* src, void* val, int pe, int win_id,
+                          [[maybe_unused]] int contextId, volatile char* status,
+                          [[maybe_unused]] bool blocking, ROCSHMEM_OP op, ro_net_types type) {
   queue->flush_hdp();
 
-  auto *bp{backend_proxy->get()};
+  auto* bp{backend_proxy->get()};
   MPI_Datatype mpi_type{convertType(type)};
-  NET_CHECK(mpilib_ftable_.Fetch_and_op(reinterpret_cast<void *>(val), src, mpi_type, pe,
-                             bp->heap_window_info[win_id]->get_offset(dst),
-                             get_mpi_op(op),
-                             bp->heap_window_info[win_id]->get_win()));
+  NET_CHECK(mpilib_ftable_.Fetch_and_op(reinterpret_cast<void*>(val), src, mpi_type, pe,
+                                        bp->heap_window_info[win_id]->get_offset(dst),
+                                        get_mpi_op(op), bp->heap_window_info[win_id]->get_win()));
 
   // Since MPI makes puts as complete as soon as the local buffer is free,
   // we need a flush to satisfy quiet.  Put it here as a hack for now even
@@ -564,17 +541,16 @@ void MPITransport::amoFOP(void *dst, void *src, void *val, int pe, int win_id,
   queue->sfence_flush_hdp();
 }
 
-void MPITransport::amoFCAS(void *dst, void *src, void *val, int pe,
-                           int win_id, [[maybe_unused]] int contextId, volatile char *status,
-                           [[maybe_unused]] bool blocking, void *cond, ro_net_types type) {
+void MPITransport::amoFCAS(void* dst, void* src, void* val, int pe, int win_id,
+                           [[maybe_unused]] int contextId, volatile char* status,
+                           [[maybe_unused]] bool blocking, void* cond, ro_net_types type) {
   queue->flush_hdp();
 
-  auto *bp{backend_proxy->get()};
+  auto* bp{backend_proxy->get()};
   MPI_Datatype mpi_type{convertType(type)};
-  NET_CHECK(mpilib_ftable_.Compare_and_swap((const void *)val, (const void *)cond, src,
-                                 mpi_type, pe,
-                                 bp->heap_window_info[win_id]->get_offset(dst),
-                                 bp->heap_window_info[win_id]->get_win()));
+  NET_CHECK(mpilib_ftable_.Compare_and_swap((const void*)val, (const void*)cond, src, mpi_type, pe,
+                                            bp->heap_window_info[win_id]->get_offset(dst),
+                                            bp->heap_window_info[win_id]->get_win()));
 
   // Since MPI makes puts as complete as soon as the local buffer is free,
   // we need a flush to satisfy quiet.  Put it here as a hack for now even
@@ -586,16 +562,15 @@ void MPITransport::amoFCAS(void *dst, void *src, void *val, int pe,
   queue->sfence_flush_hdp();
 }
 
-void MPITransport::getMem(void *dst, void *src, int size, int pe, int win_id,
-                          int contextId, volatile char *status,
-                          bool blocking) {
+void MPITransport::getMem(void* dst, void* src, int size, int pe, int win_id, int contextId,
+                          volatile char* status, bool blocking) {
   outstanding[contextId]++;
 
-  auto *bp{backend_proxy->get()};
+  auto* bp{backend_proxy->get()};
   MPI_Request request{};
-  NET_CHECK(mpilib_ftable_.Rget(
-      dst, size, MPI_CHAR, pe, bp->heap_window_info[win_id]->get_offset(src),
-      size, MPI_CHAR, bp->heap_window_info[win_id]->get_win(), &request));
+  NET_CHECK(mpilib_ftable_.Rget(dst, size, MPI_CHAR, pe,
+                                bp->heap_window_info[win_id]->get_offset(src), size, MPI_CHAR,
+                                bp->heap_window_info[win_id]->get_win(), &request));
 
   requests.push_back({request, {status, contextId, blocking}});
 }
@@ -621,19 +596,18 @@ void MPITransport::progress() {
   } else {
     LOG_TRACE("proxy::mpi Testing all outstanding requests (%zu)", requests.size());
 
-    int incount = (requests.size() < testsome_indices.size())
-                      ? requests.size()
-                      : testsome_indices.size();
+    int incount =
+        (requests.size() < testsome_indices.size()) ? requests.size() : testsome_indices.size();
     int outcount{};
 
-    auto uptr_req_arr {raw_requests()};
+    auto uptr_req_arr{raw_requests()};
     NET_CHECK(mpilib_ftable_.Testsome(incount, uptr_req_arr.get(), &outcount,
-                           testsome_indices.data(), MPI_STATUSES_IGNORE));
+                                      testsome_indices.data(), MPI_STATUSES_IGNORE));
 
     for (int i{0}; i < outcount; i++) {
       int index{testsome_indices[i]};
       int contextId{requests[index].properties.contextId};
-      volatile char *status{requests[index].properties.status};
+      volatile char* status{requests[index].properties.status};
 
       if (contextId != -1) {
         outstanding[contextId]--;
@@ -659,7 +633,7 @@ void MPITransport::progress() {
       if (!outstanding[contextId] && !waiting_quiet[contextId].empty()) {
         for (const auto status : waiting_quiet[contextId]) {
           LOG_TRACE("proxy::mpi Finished Quiet for contextId %d at status addr %p", contextId,
-                  status);
+                    status);
           queue->notify(status);
         }
 
@@ -669,8 +643,7 @@ void MPITransport::progress() {
       }
     }
 
-    sort(testsome_indices.data(), testsome_indices.data() + outcount,
-         std::greater<int>());
+    sort(testsome_indices.data(), testsome_indices.data() + outcount, std::greater<int>());
     for (int i{0}; i < outcount; i++) {
       int index{testsome_indices[i]};
       requests.erase(requests.begin() + index);
@@ -678,16 +651,18 @@ void MPITransport::progress() {
   }
 }
 
-void MPITransport::quiet(int contextId, volatile char *status) {
+void MPITransport::quiet(int contextId, volatile char* status) {
   if (!outstanding[contextId]) {
-    LOG_TRACE("proxy::mpi Finished Quiet immediately for contextId %d at status addr %p",
-            contextId, status);
+    LOG_TRACE("proxy::mpi Finished Quiet immediately for contextId %d at status addr %p", contextId,
+              status);
     queue->notify(status);
   } else {
     waiting_quiet[contextId].emplace_back(status);
   }
 }
 
-int MPITransport::numOutstandingRequests() { return requests.size() + q.size(); }
+int MPITransport::numOutstandingRequests() {
+  return requests.size() + q.size();
+}
 
 }  // namespace rocshmem

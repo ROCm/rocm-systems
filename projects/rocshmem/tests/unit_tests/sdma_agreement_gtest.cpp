@@ -30,12 +30,12 @@
 using rocshmem::agreeSdmaStatus;
 using rocshmem::applyForcedFailure;
 using rocshmem::initialSdmaStatus;
-using rocshmem::parseForcedFailureLocalRank;
-using rocshmem::SdmaDecision;
 using rocshmem::kSdmaBadChannels;
 using rocshmem::kSdmaConnectFailed;
 using rocshmem::kSdmaDisabledByEnv;
 using rocshmem::kSdmaReady;
+using rocshmem::parseForcedFailureLocalRank;
+using rocshmem::SdmaDecision;
 
 namespace {
 
@@ -151,7 +151,8 @@ TEST(SdmaAgreement, ForcedFailureOnlyTurnsTheNamedReadyRankFailed) {
 
 TEST(SdmaAgreement, ForcedFailureFallsBackEveryRank) {
   std::vector<int> statuses;
-  for (int rank = 0; rank < 4; ++rank) statuses.push_back(applyForcedFailure(kSdmaReady, rank, 2));
+  for (int rank = 0; rank < 4; ++rank)
+    statuses.push_back(applyForcedFailure(kSdmaReady, rank, 2));
   const auto a = agree(statuses);
   EXPECT_EQ(a.decision, SdmaDecision::kFallbackConnectFailed);
   EXPECT_EQ(a.ranks, "2");

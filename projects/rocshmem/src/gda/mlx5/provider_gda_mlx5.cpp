@@ -38,19 +38,19 @@
 
 namespace rocshmem {
 
-using create_cq_in    = uint8_t[DEVX_ST_SZ_BYTES(create_cq_in)   ];
-using create_cq_out   = uint8_t[DEVX_ST_SZ_BYTES(create_cq_out)  ];
-using create_qp_in    = uint8_t[DEVX_ST_SZ_BYTES(create_qp_in)   ];
-using create_qp_out   = uint8_t[DEVX_ST_SZ_BYTES(create_qp_out)  ];
-using rst2init_qp_in  = uint8_t[DEVX_ST_SZ_BYTES(rst2init_qp_in) ];
+using create_cq_in    = uint8_t[DEVX_ST_SZ_BYTES(create_cq_in)];
+using create_cq_out   = uint8_t[DEVX_ST_SZ_BYTES(create_cq_out)];
+using create_qp_in    = uint8_t[DEVX_ST_SZ_BYTES(create_qp_in)];
+using create_qp_out   = uint8_t[DEVX_ST_SZ_BYTES(create_qp_out)];
+using rst2init_qp_in  = uint8_t[DEVX_ST_SZ_BYTES(rst2init_qp_in)];
 using rst2init_qp_out = uint8_t[DEVX_ST_SZ_BYTES(rst2init_qp_out)];
-using init2rtr_qp_in  = uint8_t[DEVX_ST_SZ_BYTES(init2rtr_qp_in) ];
+using init2rtr_qp_in  = uint8_t[DEVX_ST_SZ_BYTES(init2rtr_qp_in)];
 using init2rtr_qp_out = uint8_t[DEVX_ST_SZ_BYTES(init2rtr_qp_out)];
-using rtr2rts_qp_in   = uint8_t[DEVX_ST_SZ_BYTES(rtr2rts_qp_in)  ];
-using rtr2rts_qp_out  = uint8_t[DEVX_ST_SZ_BYTES(rtr2rts_qp_out) ];
+using rtr2rts_qp_in   = uint8_t[DEVX_ST_SZ_BYTES(rtr2rts_qp_in)];
+using rtr2rts_qp_out  = uint8_t[DEVX_ST_SZ_BYTES(rtr2rts_qp_out)];
 
 static int mlx5_create_cq(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp& qp);
-static int mlx5_create_qp(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp& qp, struct ibv_pd *pd);
+static int mlx5_create_qp(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp& qp, struct ibv_pd* pd);
 
 static int mlx5_modify_qp_reset2init(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp& qp,
                                      struct ibv_qp_attr* attr, int attr_mask);
@@ -67,13 +67,9 @@ struct hipGDAHostAllocator {
     return dev_ptr;
   }
 
-  static void free(void* ptr) {
-    CHECK_HIP(hipFree(ptr));
-  }
+  static void free(void* ptr) { CHECK_HIP(hipFree(ptr)); }
 
-  static void* memset(void* dest, int ch, size_t count) {
-    return std::memset(dest, ch, count);
-  }
+  static void* memset(void* dest, int ch, size_t count) { return std::memset(dest, ch, count); }
 };
 
 struct hipGDAUncachedAllocator {
@@ -84,9 +80,7 @@ struct hipGDAUncachedAllocator {
     return dev_ptr;
   }
 
-  static void free(void* ptr) {
-    CHECK_HIP(hipFree(ptr));
-  }
+  static void free(void* ptr) { CHECK_HIP(hipFree(ptr)); }
 
   static void* memset(void* dest, int ch, size_t count) {
     CHECK_HIP(hipMemset(dest, ch, count));
@@ -130,11 +124,11 @@ static constexpr inline auto mlx5_align_page(const T& value) {
 }
 
 struct mlx5_qp_umem_alloc_info {
-  size_t   umem_size;
-  size_t   wq_size;
-  size_t   cq_offset;
-  size_t   qp_dbrec_offset;
-  size_t   cq_dbrec_offset;
+  size_t umem_size;
+  size_t wq_size;
+  size_t cq_offset;
+  size_t qp_dbrec_offset;
+  size_t cq_dbrec_offset;
   uint16_t sq_depth;
 
   // WQ always at beginning of umem allocation
@@ -144,14 +138,20 @@ struct mlx5_qp_umem_alloc_info {
   static constexpr size_t cq_depth = 1;
 
   // align CQ and doorbell records to cache line size
-  static constexpr size_t cq_size       = mlx5_align_amdgpu_cache_line(sizeof(mlx5_cqe64) * cq_depth);
+  static constexpr size_t cq_size = mlx5_align_amdgpu_cache_line(sizeof(mlx5_cqe64) * cq_depth);
   static constexpr size_t qp_dbrec_size = mlx5_align_amdgpu_cache_line(MLX5_DOORBELL_RECORD_SIZE);
   static constexpr size_t cq_dbrec_size = mlx5_align_amdgpu_cache_line(MLX5_DOORBELL_RECORD_SIZE);
 
   mlx5_qp_umem_alloc_info(uint16_t sq_depth_requested)
-    : umem_size{0}, wq_size{0}, cq_offset{0}, qp_dbrec_offset{0}, cq_dbrec_offset{0}, sq_depth{0} {
+      : umem_size{0},
+        wq_size{0},
+        cq_offset{0},
+        qp_dbrec_offset{0},
+        cq_dbrec_offset{0},
+        sq_depth{0} {
     // round work queue size up to power of 2 WQEBB, then align to cache line size
-    size_t wq_size_initial = mlx5_align_amdgpu_cache_line(bit_ceil(sq_depth_requested) * MLX5_SEND_WQE_BB);
+    size_t wq_size_initial =
+        mlx5_align_amdgpu_cache_line(bit_ceil(sq_depth_requested) * MLX5_SEND_WQE_BB);
     // round up to page size
     umem_size = mlx5_align_page(wq_size_initial + cq_size + qp_dbrec_size + cq_dbrec_size);
     // round back down to a power of 2
@@ -183,23 +183,23 @@ struct mlx5_qp_umem_alloc_info {
   }
 };
 
-static inline mlx5dv_devx_umem* mlx5_umem_reg(const mlx5dv_funcs_t& mlx5dv,
-                                              struct ibv_context *ctx, void* addr, size_t size) {
-  int dmabuf_fd = -1;
+static inline mlx5dv_devx_umem* mlx5_umem_reg(const mlx5dv_funcs_t& mlx5dv, struct ibv_context* ctx,
+                                              void* addr, size_t size) {
+  int dmabuf_fd          = -1;
   uint64_t dmabuf_offset = std::numeric_limits<uint64_t>::max();
 
   mlx5dv_devx_umem_in umem_in = {};
 
-  umem_in.addr = addr;
-  umem_in.size = size;
-  umem_in.access = IBV_ACCESS_LOCAL_WRITE;
+  umem_in.addr        = addr;
+  umem_in.size        = size;
+  umem_in.access      = IBV_ACCESS_LOCAL_WRITE;
   umem_in.pgsz_bitmap = std::numeric_limits<uint64_t>::max() & ~(MLX5_ADAPTER_PAGE_SIZE - 1);
 
   // to use dmabuf_fd, set comp_mask = MLX5DV_UMEM_MASK_DMABUF
   if (ibv.is_dmabuf_supported() && is_device_ptr(addr)) {
     CHECK_HSA(hsa_amd_portable_export_dmabuf(addr, size, &dmabuf_fd, &dmabuf_offset));
     // man 3 mlx5dv_devx_umem_reg_ex: 'addr is interpreted as the starting offset of the dmabuf'
-    umem_in.addr = reinterpret_cast<void*>(dmabuf_offset);
+    umem_in.addr      = reinterpret_cast<void*>(dmabuf_offset);
     umem_in.comp_mask = MLX5DV_UMEM_MASK_DMABUF;
     umem_in.dmabuf_fd = dmabuf_fd;
   }
@@ -215,12 +215,12 @@ static inline mlx5dv_devx_umem* mlx5_umem_reg(const mlx5dv_funcs_t& mlx5dv,
   return umem;
 }
 
-static inline uint32_t mlx5_pdn(const mlx5dv_funcs_t& mlx5dv, struct ibv_pd *pd) {
+static inline uint32_t mlx5_pdn(const mlx5dv_funcs_t& mlx5dv, struct ibv_pd* pd) {
   mlx5dv_pd mlx5_pd;
   mlx5dv_obj obj = {};
-  obj.pd.in = pd;
-  obj.pd.out = &mlx5_pd;
-  int err = mlx5dv.init_obj(&obj, MLX5DV_OBJ_PD);
+  obj.pd.in      = pd;
+  obj.pd.out     = &mlx5_pd;
+  int err        = mlx5dv.init_obj(&obj, MLX5DV_OBJ_PD);
   CHECK_ZERO(err, "mlx5dv_init_obj (PD)");
   return mlx5_pd.pdn;
 }
@@ -294,17 +294,16 @@ static inline uint32_t mlx5_calc_flow_label(uint32_t local_qpn, uint32_t remote_
   return static_cast<uint32_t>(v & IB_GRH_FLOWLABEL_MASK);
 }
 
-static inline void mlx5_query_rmac(const mlx5dv_funcs_t& mlx5dv,
-                                   struct ibv_pd* pd, struct ibv_ah_attr* attr,
-                                   uint8_t rmac[ETHERNET_LL_SIZE]) {
+static inline void mlx5_query_rmac(const mlx5dv_funcs_t& mlx5dv, struct ibv_pd* pd,
+                                   struct ibv_ah_attr* attr, uint8_t rmac[ETHERNET_LL_SIZE]) {
   struct ibv_ah* ah = ibv.create_ah(pd, attr);
   CHECK_NNULL(ah, "ibv_create_ah");
 
   mlx5dv_ah mlx5_ah;
   mlx5dv_obj obj = {};
-  obj.ah.in = ah;
-  obj.ah.out = &mlx5_ah;
-  int err = mlx5dv.init_obj(&obj, MLX5DV_OBJ_AH);
+  obj.ah.in      = ah;
+  obj.ah.out     = &mlx5_ah;
+  int err        = mlx5dv.init_obj(&obj, MLX5DV_OBJ_AH);
   CHECK_ZERO(err, "mlx5dv_init_obj (AH)");
 
   memcpy(rmac, &mlx5_ah.av->rmac, sizeof(uint8_t[ETHERNET_LL_SIZE]));
@@ -313,10 +312,10 @@ static inline void mlx5_query_rmac(const mlx5dv_funcs_t& mlx5dv,
   CHECK_ZERO(err, "ibv_destroy_ah");
 }
 
-int mlx5dv_funcs_t::create_qp(mlx5_devx_qp& qp, struct ibv_context *ctx,
-                              struct ibv_pd* pd, uint16_t sq_depth) {
+int mlx5dv_funcs_t::create_qp(mlx5_devx_qp& qp, struct ibv_context* ctx, struct ibv_pd* pd,
+                              uint16_t sq_depth) {
   const mlx5dv_funcs_t& mlx5dv = *this;
-  int err = 0;
+  int err                      = 0;
 
   qp.ctx = ctx;
   qp.pd  = pd;
@@ -343,7 +342,7 @@ int mlx5dv_funcs_t::create_qp(mlx5_devx_qp& qp, struct ibv_context *ctx,
    * MLX5DV_UAR_ALLOC_TYPE_NC_DEDICATED dynamically allocates a UAR page, but these are limited
    * using MLX5DV_UAR_ALLOC_TYPE_NC_DEDICATED requires rdma-core v45 or later (released March 2023)
    * see https://github.com/linux-rdma/rdma-core/commit/bf550b9fa83374cfed51330760a583d82a7600f4 */
-  errno = 0;
+  errno  = 0;
   qp.uar = mlx5dv.devx_alloc_uar(qp.ctx, MLX5DV_UAR_ALLOC_TYPE_NC_DEDICATED);
 
   /* It is recommended that the user upgrade their network stack.
@@ -370,7 +369,7 @@ int mlx5dv_funcs_t::create_qp(mlx5_devx_qp& qp, struct ibv_context *ctx,
   return err;
 }
 
-int mlx5dv_funcs_t::modify_qp(mlx5_devx_qp& qp, struct ibv_qp_attr *attr, int attr_mask,
+int mlx5dv_funcs_t::modify_qp(mlx5_devx_qp& qp, struct ibv_qp_attr* attr, int attr_mask,
                               uint32_t gid_type) {
   const mlx5dv_funcs_t& mlx5dv = *this;
 
@@ -402,7 +401,7 @@ int mlx5dv_funcs_t::modify_qp(mlx5_devx_qp& qp, struct ibv_qp_attr *attr, int at
 
 int mlx5dv_funcs_t::destroy_qp(mlx5_devx_qp& qp) {
   const mlx5dv_funcs_t& mlx5dv = *this;
-  int err = 0;
+  int err                      = 0;
 
   err = mlx5dv.devx_obj_destroy(qp.devx_qp_obj);
   CHECK_ZERO(err, "mlx5dv_devx_obj_destroy (QP)");
@@ -440,7 +439,7 @@ int mlx5dv_funcs_t::destroy_qp(mlx5_devx_qp& qp) {
 static int mlx5_create_cq(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp& qp) {
   int err = 0;
 
-  create_cq_in  in  = {0};
+  create_cq_in in   = {0};
   create_cq_out out = {0};
 
   void* cqc = DEVX_ADDR_OF(create_cq_in, in, cq_context);
@@ -454,30 +453,30 @@ static int mlx5_create_cq(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp& qp) {
 
   // get EQN, we don't use it but it needs to be set when creating the CQ
   uint32_t eqn = 0;
-  err = mlx5dv.devx_query_eqn(qp.ctx, /* vector */ 0, &eqn);
+  err          = mlx5dv.devx_query_eqn(qp.ctx, /* vector */ 0, &eqn);
   CHECK_ZERO(err, "mlx5dv_devx_query_eqn");
 
-  DEVX_SET(cqc, cqc, cqe_sz,               MLX5_CQC_CQE_SZ_64_BYTES);
+  DEVX_SET(cqc, cqc, cqe_sz, MLX5_CQC_CQE_SZ_64_BYTES);
   // set CQE collapsing so all CQEs are written to first CQ entry
-  DEVX_SET(cqc, cqc, cc,                   true);
+  DEVX_SET(cqc, cqc, cc, true);
   // set overrun ignore so that we don't need to ring the CQ doorbell
-  DEVX_SET(cqc, cqc, oi,                   true);
-  DEVX_SET(cqc, cqc, log_cq_size,          bit_log2(qp.cq_depth));
+  DEVX_SET(cqc, cqc, oi, true);
+  DEVX_SET(cqc, cqc, log_cq_size, bit_log2(qp.cq_depth));
   // we don't ring the CQ doorbell anyway
-  DEVX_SET(cqc, cqc, uar_page,             qp.uar->page_id);
+  DEVX_SET(cqc, cqc, uar_page, qp.uar->page_id);
   DEVX_SET(cqc, cqc, c_eqn_or_ext_element, eqn);
   // TODO: check system page size instead of assuming 4 KiB
-  DEVX_SET(cqc, cqc, log_page_size,        MLX5_ADAPTER_PAGE_SHIFT - MLX5_ADAPTER_PAGE_SHIFT);
+  DEVX_SET(cqc, cqc, log_page_size, MLX5_ADAPTER_PAGE_SHIFT - MLX5_ADAPTER_PAGE_SHIFT);
 
   // set dbrec umem attributes, dbr_addr is offset into umem when umem_valid
-  DEVX_SET  (cqc, cqc, dbr_umem_valid, true);
-  DEVX_SET  (cqc, cqc, dbr_umem_id,    qp.umem->umem_id);
-  DEVX_SET64(cqc, cqc, dbr_addr,       qp.cq_dbrec_offset());
+  DEVX_SET(cqc, cqc, dbr_umem_valid, true);
+  DEVX_SET(cqc, cqc, dbr_umem_id, qp.umem->umem_id);
+  DEVX_SET64(cqc, cqc, dbr_addr, qp.cq_dbrec_offset());
 
   // set CQ umem attributes, CQ is after WQ in the umem buffer
   DEVX_SET64(create_cq_in, in, cq_umem_offset, qp.cq_offset());
-  DEVX_SET(  create_cq_in, in, cq_umem_id,     qp.umem->umem_id);
-  DEVX_SET(  create_cq_in, in, cq_umem_valid,  true);
+  DEVX_SET(create_cq_in, in, cq_umem_id, qp.umem->umem_id);
+  DEVX_SET(create_cq_in, in, cq_umem_valid, true);
 
   // create CQ
   qp.devx_cq_obj = mlx5dv.devx_obj_create(qp.ctx, in, sizeof(in), out, sizeof(out));
@@ -488,37 +487,37 @@ static int mlx5_create_cq(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp& qp) {
   return err;
 }
 
-static int mlx5_create_qp(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp& qp, struct ibv_pd *pd) {
-  create_qp_in  in  = {0};
+static int mlx5_create_qp(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp& qp, struct ibv_pd* pd) {
+  create_qp_in in   = {0};
   create_qp_out out = {0};
 
   void* qpc = DEVX_ADDR_OF(create_qp_in, in, qpc);
 
   DEVX_SET(create_qp_in, in, opcode, MLX5_CMD_OP_CREATE_QP);
 
-  DEVX_SET(qpc, qpc, st,            MLX5_QPC_ST_RC);
-  DEVX_SET(qpc, qpc, pm_state,      MLX5_QPC_PM_STATE_MIGRATED);
-  DEVX_SET(qpc, qpc, pd,            mlx5_pdn(mlx5dv, pd));
-  DEVX_SET(qpc, qpc, log_sq_size,   bit_log2(qp.sq_depth));
-  DEVX_SET(qpc, qpc, uar_page,      qp.uar->page_id);
+  DEVX_SET(qpc, qpc, st, MLX5_QPC_ST_RC);
+  DEVX_SET(qpc, qpc, pm_state, MLX5_QPC_PM_STATE_MIGRATED);
+  DEVX_SET(qpc, qpc, pd, mlx5_pdn(mlx5dv, pd));
+  DEVX_SET(qpc, qpc, log_sq_size, bit_log2(qp.sq_depth));
+  DEVX_SET(qpc, qpc, uar_page, qp.uar->page_id);
   // TODO: check system page size instead of assuming 4 KiB
   DEVX_SET(qpc, qpc, log_page_size, MLX5_ADAPTER_PAGE_SHIFT - MLX5_ADAPTER_PAGE_SHIFT);
-  DEVX_SET(qpc, qpc, cqn_snd,       qp.cqn);
-  DEVX_SET(qpc, qpc, rq_type,       MLX5_QPC_RQ_TYPE_ZERO_LEN_RQ);
+  DEVX_SET(qpc, qpc, cqn_snd, qp.cqn);
+  DEVX_SET(qpc, qpc, rq_type, MLX5_QPC_RQ_TYPE_ZERO_LEN_RQ);
 
   // disable scatter CQE to requester, responder
   DEVX_SET(qpc, qpc, cs_req, MLX5_QPC_CS_REQ_DISABLE);
   DEVX_SET(qpc, qpc, cs_res, MLX5_QPC_CS_RES_DISABLE);
 
   // set dbrec umem attributes, dbr_addr is offset into umem when umem_valid
-  DEVX_SET64(qpc, qpc, dbr_addr,       qp.qp_dbrec_offset());
-  DEVX_SET  (qpc, qpc, dbr_umem_valid, true);
-  DEVX_SET  (qpc, qpc, dbr_umem_id,    qp.umem->umem_id);
+  DEVX_SET64(qpc, qpc, dbr_addr, qp.qp_dbrec_offset());
+  DEVX_SET(qpc, qpc, dbr_umem_valid, true);
+  DEVX_SET(qpc, qpc, dbr_umem_id, qp.umem->umem_id);
 
   // set WQ umem attributes, SQ is at the start of the umem buffer
   DEVX_SET64(create_qp_in, in, wq_umem_offset, qp.wq_offset());
-  DEVX_SET(  create_qp_in, in, wq_umem_id,     qp.umem->umem_id);
-  DEVX_SET(  create_qp_in, in, wq_umem_valid,  true);
+  DEVX_SET(create_qp_in, in, wq_umem_id, qp.umem->umem_id);
+  DEVX_SET(create_qp_in, in, wq_umem_valid, true);
 
   // create QP
   qp.devx_qp_obj = mlx5dv.devx_obj_create(qp.ctx, in, sizeof(in), out, sizeof(out));
@@ -533,31 +532,31 @@ static int mlx5_modify_qp_reset2init(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp&
                                      struct ibv_qp_attr* attr, [[maybe_unused]] int attr_mask) {
 #if !defined(NDEBUG)
   // man 3 ibv_modify_qp
-  constexpr int required_attr_mask = IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT |
-                                     IBV_QP_ACCESS_FLAGS;
+  constexpr int required_attr_mask =
+      IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_ACCESS_FLAGS;
   constexpr unsigned int access_flags = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ |
                                         IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_ATOMIC;
   assert((attr_mask & required_attr_mask) == required_attr_mask && "missing required attr");
   assert((attr->qp_access_flags & access_flags) == access_flags && "missing access flags");
 #endif /* !NDEBUG */
 
-  rst2init_qp_in  in  = {0};
+  rst2init_qp_in in   = {0};
   rst2init_qp_out out = {0};
 
-  void* qpc          = DEVX_ADDR_OF(rst2init_qp_in, in,  qpc);
-  void* primary_addr = DEVX_ADDR_OF(qpc,            qpc, primary_address_path);
+  void* qpc          = DEVX_ADDR_OF(rst2init_qp_in, in, qpc);
+  void* primary_addr = DEVX_ADDR_OF(qpc, qpc, primary_address_path);
 
   DEVX_SET(rst2init_qp_in, in, opcode, MLX5_CMD_OP_RST2INIT_QP);
-  DEVX_SET(rst2init_qp_in, in, qpn,    qp.qpn);
+  DEVX_SET(rst2init_qp_in, in, qpn, qp.qpn);
 
-  DEVX_SET(qpc, qpc, pm_state,    MLX5_QPC_PM_STATE_MIGRATED);
+  DEVX_SET(qpc, qpc, pm_state, MLX5_QPC_PM_STATE_MIGRATED);
   DEVX_SET(qpc, qpc, atomic_mode, MLX5_QPC_ATOMIC_MODE_UP_TO_8B);
-  DEVX_SET(qpc, qpc, rre,         true); // IBV_ACCESS_REMOTE_READ
-  DEVX_SET(qpc, qpc, rwe,         true); // IBV_ACCESS_REMOTE_WRITE
-  DEVX_SET(qpc, qpc, rae,         true); // IBV_ACCESS_REMOTE_ATOMIC
+  DEVX_SET(qpc, qpc, rre, true);  // IBV_ACCESS_REMOTE_READ
+  DEVX_SET(qpc, qpc, rwe, true);  // IBV_ACCESS_REMOTE_WRITE
+  DEVX_SET(qpc, qpc, rae, true);  // IBV_ACCESS_REMOTE_ATOMIC
 
   DEVX_SET(ads, primary_addr, vhca_port_num, attr->port_num);
-  DEVX_SET(ads, primary_addr, pkey_index,    attr->pkey_index);
+  DEVX_SET(ads, primary_addr, pkey_index, attr->pkey_index);
 
   return mlx5dv.devx_obj_modify(qp.devx_qp_obj, in, sizeof(in), out, sizeof(out));
 }
@@ -574,7 +573,7 @@ static int mlx5_modify_qp_init2rtr(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp& q
   assert(attr->max_dest_rd_atomic > 0 && "ibv_qp_attr::max_dest_rd_atomic is 0");
 #endif /* !NDEBUG */
 
-  init2rtr_qp_in  in  = {0};
+  init2rtr_qp_in in   = {0};
   init2rtr_qp_out out = {0};
 
   void* qpc          = DEVX_ADDR_OF(init2rtr_qp_in, in, qpc);
@@ -583,21 +582,21 @@ static int mlx5_modify_qp_init2rtr(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp& q
   void* rmac         = DEVX_ADDR_OF(ads, primary_addr, rmac_47_32);
 
   DEVX_SET(init2rtr_qp_in, in, opcode, MLX5_CMD_OP_INIT2RTR_QP);
-  DEVX_SET(init2rtr_qp_in, in, qpn,    qp.qpn);
+  DEVX_SET(init2rtr_qp_in, in, qpn, qp.qpn);
 
-  DEVX_SET(qpc, qpc, mtu,          mlx5_mtu(attr->path_mtu));
-  DEVX_SET(qpc, qpc, log_msg_max,  MLX5_QPC_LOG_MSG_SZ_MAX);
-  DEVX_SET(qpc, qpc, remote_qpn,   attr->dest_qp_num);
-  DEVX_SET(qpc, qpc, log_rra_max,  bit_log2(attr->max_dest_rd_atomic));
-  DEVX_SET(qpc, qpc, min_rnr_nak,  attr->min_rnr_timer);
+  DEVX_SET(qpc, qpc, mtu, mlx5_mtu(attr->path_mtu));
+  DEVX_SET(qpc, qpc, log_msg_max, MLX5_QPC_LOG_MSG_SZ_MAX);
+  DEVX_SET(qpc, qpc, remote_qpn, attr->dest_qp_num);
+  DEVX_SET(qpc, qpc, log_rra_max, bit_log2(attr->max_dest_rd_atomic));
+  DEVX_SET(qpc, qpc, min_rnr_nak, attr->min_rnr_timer);
   DEVX_SET(qpc, qpc, next_rcv_psn, attr->rq_psn);
 
-  struct ibv_ah_attr* ah_attr = &attr->ah_attr;
+  struct ibv_ah_attr* ah_attr  = &attr->ah_attr;
   struct ibv_global_route* grh = &ah_attr->grh;
 
   // calculate new flow label if not set
-  uint32_t flow_label = grh->flow_label ? grh->flow_label
-                                        : mlx5_calc_flow_label(qp.qpn, attr->dest_qp_num);
+  uint32_t flow_label =
+      grh->flow_label ? grh->flow_label : mlx5_calc_flow_label(qp.qpn, attr->dest_qp_num);
 
   // all transports
   DEVX_SET(ads, primary_addr, stat_rate, mlx5_stat_rate(ah_attr->static_rate));
@@ -605,9 +604,9 @@ static int mlx5_modify_qp_init2rtr(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp& q
   // if there's a GRH: RoCE v1, RoCE v2, and IB + GRH
   if (ah_attr->is_global) {
     DEVX_SET(ads, primary_addr, src_addr_index, grh->sgid_index);
-    DEVX_SET(ads, primary_addr, hop_limit,      grh->hop_limit);
-    DEVX_SET(ads, primary_addr, tclass,         grh->traffic_class);
-    DEVX_SET(ads, primary_addr, flow_label,     flow_label);
+    DEVX_SET(ads, primary_addr, hop_limit, grh->hop_limit);
+    DEVX_SET(ads, primary_addr, tclass, grh->traffic_class);
+    DEVX_SET(ads, primary_addr, flow_label, flow_label);
     // remote GID/IP gets copied directly
     memcpy(rgid_rip, grh->dgid.raw, sizeof(grh->dgid.raw));
   }
@@ -615,15 +614,14 @@ static int mlx5_modify_qp_init2rtr(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp& q
   // InfiniBand
   if (gid_type == IBV_GID_TYPE_IB) {
     // IB + GRH needs to set GRH bit
-    DEVX_SET(ads, primary_addr, grh,  static_cast<bool>(ah_attr->is_global));
+    DEVX_SET(ads, primary_addr, grh, static_cast<bool>(ah_attr->is_global));
     DEVX_SET(ads, primary_addr, mlid, ah_attr->src_path_bits);
     DEVX_SET(ads, primary_addr, rlid, ah_attr->dlid);
-    DEVX_SET(ads, primary_addr, sl,   ah_attr->sl);
+    DEVX_SET(ads, primary_addr, sl, ah_attr->sl);
   }
 
   // RoCE v1 and RoCE v2
-  if (gid_type == IBV_GID_TYPE_ROCE_V1 ||
-      gid_type == IBV_GID_TYPE_ROCE_V2) {
+  if (gid_type == IBV_GID_TYPE_ROCE_V1 || gid_type == IBV_GID_TYPE_ROCE_V2) {
     assert(ah_attr->is_global && "ibv_qp_attr::ah_attr::is_global not set, but gid_type is RoCE");
     DEVX_SET(ads, primary_addr, eth_prio, ah_attr->sl);
     // get remote MAC address, copy directly into QP Context
@@ -632,7 +630,7 @@ static int mlx5_modify_qp_init2rtr(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp& q
 
   // RoCE v2
   if (gid_type == IBV_GID_TYPE_ROCE_V2) {
-    DEVX_SET(ads, primary_addr, dscp,      grh->traffic_class >> 2);
+    DEVX_SET(ads, primary_addr, dscp, grh->traffic_class >> 2);
     DEVX_SET(ads, primary_addr, udp_sport, ibv.flow_label_to_udp_sport(flow_label));
   }
 
@@ -649,20 +647,20 @@ static int mlx5_modify_qp_rtr2rts(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp& qp
   assert(attr->max_rd_atomic > 0 && "ibv_qp_attr::max_rd_atomic is 0");
 #endif /* !NDEBUG */
 
-  rtr2rts_qp_in  in  = {0};
+  rtr2rts_qp_in in   = {0};
   rtr2rts_qp_out out = {0};
 
   void* qpc          = DEVX_ADDR_OF(rtr2rts_qp_in, in, qpc);
   void* primary_addr = DEVX_ADDR_OF(qpc, qpc, primary_address_path);
 
   DEVX_SET(rtr2rts_qp_in, in, opcode, MLX5_CMD_OP_RTR2RTS_QP);
-  DEVX_SET(rtr2rts_qp_in, in, qpn,    qp.qpn);
+  DEVX_SET(rtr2rts_qp_in, in, qpn, qp.qpn);
 
   DEVX_SET(qpc, qpc, log_ack_req_freq, MLX5_QPC_LOG_ACK_REQ_FREQ_MAX);
-  DEVX_SET(qpc, qpc, log_sra_max,      bit_log2(attr->max_rd_atomic));
-  DEVX_SET(qpc, qpc, next_send_psn,    attr->sq_psn);
-  DEVX_SET(qpc, qpc, retry_count,      attr->retry_cnt);
-  DEVX_SET(qpc, qpc, rnr_retry,        attr->rnr_retry);
+  DEVX_SET(qpc, qpc, log_sra_max, bit_log2(attr->max_rd_atomic));
+  DEVX_SET(qpc, qpc, next_send_psn, attr->sq_psn);
+  DEVX_SET(qpc, qpc, retry_count, attr->retry_cnt);
+  DEVX_SET(qpc, qpc, rnr_retry, attr->rnr_retry);
 
   DEVX_SET(ads, primary_addr, ack_timeout, attr->timeout);
 
@@ -670,25 +668,25 @@ static int mlx5_modify_qp_rtr2rts(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp& qp
 }
 
 void mlx5_devx_qp::dump([[maybe_unused]] int conn_num) {
-  LOG_TRACE("== MLX5_DEVX_QP CONNECTION#%d ================================\n"
-            "  (uint32_t)  qpn              = 0x%x\n"
-            "  (void*)     sq               = %p\n"
-            "  (uint16_t)  sq_depth         = %hu\n"
-            "  (uint32_t*) qp_dbrec         = %p\n"
-            "  (uint32_t)  cqn              = 0x%x\n"
-            "  (void*)     cq               = %p\n"
-            "  (uint32_t)  cq_depth         = %u\n"
-            "  (uint32_t*) cq_dbrec         = %p\n"
-            "  (void*)     uar->reg_addr    = %p\n"
-            "  (void*)     uar->base_addr   = %p\n"
-            "  (uint32_t)  uar->page_id     = 0x%x\n"
-            "  (off_t)     uar->mmap_offset = 0x%lx\n"
-            "  (uint64_t)  uar->comp_mask   = 0x%lx\n"
-            "========",
-            conn_num, this->qpn, this->sq, this->sq_depth, this->qp_dbrec,
-            this->cqn, this->cq, this->cq_depth, this->cq_dbrec,
-            this->uar->reg_addr, this->uar->base_addr, this->uar->page_id,
-            this->uar->mmap_off, this->uar->comp_mask);
+  LOG_TRACE(
+      "== MLX5_DEVX_QP CONNECTION#%d ================================\n"
+      "  (uint32_t)  qpn              = 0x%x\n"
+      "  (void*)     sq               = %p\n"
+      "  (uint16_t)  sq_depth         = %hu\n"
+      "  (uint32_t*) qp_dbrec         = %p\n"
+      "  (uint32_t)  cqn              = 0x%x\n"
+      "  (void*)     cq               = %p\n"
+      "  (uint32_t)  cq_depth         = %u\n"
+      "  (uint32_t*) cq_dbrec         = %p\n"
+      "  (void*)     uar->reg_addr    = %p\n"
+      "  (void*)     uar->base_addr   = %p\n"
+      "  (uint32_t)  uar->page_id     = 0x%x\n"
+      "  (off_t)     uar->mmap_offset = 0x%lx\n"
+      "  (uint64_t)  uar->comp_mask   = 0x%lx\n"
+      "========",
+      conn_num, this->qpn, this->sq, this->sq_depth, this->qp_dbrec, this->cqn, this->cq,
+      this->cq_depth, this->cq_dbrec, this->uar->reg_addr, this->uar->base_addr, this->uar->page_id,
+      this->uar->mmap_off, this->uar->comp_mask);
 }
 
 }  // namespace rocshmem

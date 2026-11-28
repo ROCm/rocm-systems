@@ -29,7 +29,7 @@
 
 namespace rocshmem {
 
-TeamTracker::TeamTracker() { }
+TeamTracker::TeamTracker() {}
 
 void TeamTracker::track(rocshmem_team_t team) {
   if (team == ROCSHMEM_TEAM_INVALID) {

@@ -22,7 +22,7 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
-#include <unistd.h> // getpagesize()
+#include <unistd.h>  // getpagesize()
 #include <new>
 
 #include "bit.hpp"
@@ -41,7 +41,7 @@ void GDABackend::bnxt_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   struct bnxt_re_dv_qp dv_qp;
   int err;
 
-  struct ibv_qp *ib_qp = qps[conn_num];
+  struct ibv_qp* ib_qp = qps[conn_num];
   const NicDevice& nic = nic_for_qp(conn_num);
 
   /* Export SCQ */
@@ -62,33 +62,35 @@ void GDABackend::bnxt_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
 
   /* Export DB */
   void* gpu_dbr_ptr = nullptr;
-  CHECK_HIP(hipHostRegister(bnxt_qps[conn_num].db_region_attr->dbr, getpagesize(), hipHostRegisterDefault));
+  CHECK_HIP(hipHostRegister(bnxt_qps[conn_num].db_region_attr->dbr, getpagesize(),
+                            hipHostRegisterDefault));
   CHECK_HIP(hipHostGetDevicePointer(&gpu_dbr_ptr, bnxt_qps[conn_num].db_region_attr->dbr, 0));
 
   uint64_t* dbr = reinterpret_cast<uint64_t*>(gpu_dbr_ptr);
 
-  void*    sq_buf      = bnxt_qps[conn_num].sq_buf;
+  void* sq_buf         = bnxt_qps[conn_num].sq_buf;
   uint32_t sq_depth    = bnxt_qps[conn_num].mem_info.sq_slots;
-  void*    msntbl      = bnxt_qps[conn_num].msntbl;
+  void* msntbl         = bnxt_qps[conn_num].msntbl;
   uint32_t msn_tbl_sz  = bnxt_qps[conn_num].msn_tbl_sz;
   uint32_t psn_sz_log2 = bit_log2(bnxt_qps[conn_num].mem_info.sq_psn_sz);
   uint32_t mtu         = ibv_mtu_to_int(nic.portinfo.active_mtu);
 
-  void*    cq_buf   = bnxt_scqs[conn_num].buf;
+  void* cq_buf      = bnxt_scqs[conn_num].buf;
   uint32_t cq_depth = bnxt_scqs[conn_num].depth;
 
   if ((sq_depth % BNXT_RE_STATIC_WQE_BB) != 0) {
-    LOG_WARN("SQ depth not divisible by BNXT_RE_STATIC_WQE_BB. "
-             "There may be runtime errors.");
+    LOG_WARN(
+        "SQ depth not divisible by BNXT_RE_STATIC_WQE_BB. "
+        "There may be runtime errors.");
   }
 
   /* QueuePair is either QueuePairBNXT or QueuePairMux
    * both have a constructor that accepts rvalue reference QueuePairBNXT&&,
    * so just use that instead of trying to figure out which one we're using */
-  new (gpu_qp) QueuePair{QueuePairBNXT{ib_qp->qp_num, gpu_qp_init_info(conn_num), dbr,
-                                       bnxt_device_sq{sq_buf, sq_depth, msntbl, msn_tbl_sz,
-                                                      psn_sz_log2, mtu},
-                                       bnxt_device_cq{cq_buf, cq_depth}}};
+  new (gpu_qp) QueuePair{
+      QueuePairBNXT{ib_qp->qp_num, gpu_qp_init_info(conn_num), dbr,
+                    bnxt_device_sq{sq_buf, sq_depth, msntbl, msn_tbl_sz, psn_sz_log2, mtu},
+                    bnxt_device_cq{cq_buf, cq_depth}}};
 }
 
 void GDABackend::bnxt_create_cqs(int cqe) {
@@ -101,7 +103,7 @@ void GDABackend::bnxt_create_cqs(int cqe) {
 
   /* Create SCQs */
   for (size_t i = 0; i < qps.size(); i++) {
-    auto *ctx = nic_for_qp(i).context;
+    auto* ctx = nic_for_qp(i).context;
 
     /* Allocate SCQ mem */
     memset(&cq_attr, 0, sizeof(struct bnxt_re_dv_cq_attr));
@@ -130,7 +132,7 @@ void GDABackend::bnxt_create_cqs(int cqe) {
 
     /* Create SCQ */
     memset(&cq_init_attr, 0, sizeof(struct bnxt_re_dv_cq_init_attr));
-    cq_init_attr.cq_handle   = (uint64_t) bnxt_scqs[i].handle;
+    cq_init_attr.cq_handle   = (uint64_t)bnxt_scqs[i].handle;
     cq_init_attr.umem_handle = bnxt_scqs[i].umem_handle;
     cq_init_attr.ncqe        = cq_attr.ncqe;
 
@@ -140,7 +142,7 @@ void GDABackend::bnxt_create_cqs(int cqe) {
 
   /* Create RCQs */
   for (size_t i = 0; i < qps.size(); i++) {
-    auto *ctx = nic_for_qp(i).context;
+    auto* ctx = nic_for_qp(i).context;
 
     /* Allocate RCQ mem */
     memset(&cq_attr, 0, sizeof(struct bnxt_re_dv_cq_attr));
@@ -164,7 +166,7 @@ void GDABackend::bnxt_create_cqs(int cqe) {
 
     /* Create RCQ */
     memset(&cq_init_attr, 0, sizeof(struct bnxt_re_dv_cq_init_attr));
-    cq_init_attr.cq_handle   = (uint64_t) bnxt_rcqs[i].handle;
+    cq_init_attr.cq_handle   = (uint64_t)bnxt_rcqs[i].handle;
     cq_init_attr.umem_handle = bnxt_rcqs[i].umem_handle;
     cq_init_attr.ncqe        = cq_attr.ncqe;
 
@@ -176,8 +178,8 @@ void GDABackend::bnxt_create_cqs(int cqe) {
 void GDABackend::bnxt_create_qps(int sq_length) {
   struct ibv_qp_init_attr ib_qp_attr;
   struct bnxt_re_dv_umem_reg_attr umem_attr;
-  void *sq_ptr;
-  void *rq_ptr;
+  void* sq_ptr;
+  void* rq_ptr;
   void* sq_umem_handle;
   void* rq_umem_handle;
   uint64_t msntbl_len;
@@ -185,9 +187,9 @@ void GDABackend::bnxt_create_qps(int sq_length) {
   int err;
 
   for (size_t i = 0; i < qps.size(); i++) {
-    NicDevice &nic = nic_for_qp(i);
-    auto *ctx = nic.context;
-    auto *pd  = nic.pd_orig;
+    NicDevice& nic = nic_for_qp(i);
+    auto* ctx      = nic.context;
+    auto* pd       = nic.pd_orig;
 
     /* IB QP Init Attr */
     memset(&ib_qp_attr, 0, sizeof(struct ibv_qp_init_attr));
@@ -208,21 +210,21 @@ void GDABackend::bnxt_create_qps(int sq_length) {
 
     /* Alloc SQ */
     qp_allocator_->allocate(reinterpret_cast<void**>(&sq_ptr), bnxt_qps[i].mem_info.sq_len);
-    CHECK_HIP(hipMemset(sq_ptr, 0,  bnxt_qps[i].mem_info.sq_len));
-    bnxt_qps[i].mem_info.sq_va = (uint64_t) sq_ptr;
-    bnxt_qps[i].sq_buf = sq_ptr;
+    CHECK_HIP(hipMemset(sq_ptr, 0, bnxt_qps[i].mem_info.sq_len));
+    bnxt_qps[i].mem_info.sq_va = (uint64_t)sq_ptr;
+    bnxt_qps[i].sq_buf         = sq_ptr;
 
     /* Obtain MSN Table Pointer */
     msntbl_len             = (bnxt_qps[i].mem_info.sq_psn_sz * bnxt_qps[i].mem_info.sq_npsn);
     msntbl_offset          = bnxt_qps[i].mem_info.sq_len - msntbl_len;
-    bnxt_qps[i].msntbl     = (void*) ((char*) bnxt_qps[i].sq_buf + msntbl_offset);
+    bnxt_qps[i].msntbl     = (void*)((char*)bnxt_qps[i].sq_buf + msntbl_offset);
     bnxt_qps[i].msn_tbl_sz = bnxt_qps[i].mem_info.sq_npsn;
 
     /* Register SQ UMEM — CQ/QP control buffers are finegrained CPU-accessible
      * memory; dmabuf registration is not supported by the bnxt_re driver for
      * these internal structures (only for the symmetric heap MR). */
     memset(&umem_attr, 0, sizeof(struct bnxt_re_dv_umem_reg_attr));
-    umem_attr.addr         = (void*) bnxt_qps[i].mem_info.sq_va;
+    umem_attr.addr         = (void*)bnxt_qps[i].mem_info.sq_va;
     umem_attr.size         = bnxt_qps[i].mem_info.sq_len;
     umem_attr.access_flags = IBV_ACCESS_LOCAL_WRITE;
 
@@ -231,13 +233,13 @@ void GDABackend::bnxt_create_qps(int sq_length) {
 
     /* Alloc RQ */
     qp_allocator_->allocate(reinterpret_cast<void**>(&rq_ptr), bnxt_qps[i].mem_info.rq_len);
-    CHECK_HIP(hipMemset(rq_ptr, 0,  bnxt_qps[i].mem_info.rq_len));
-    bnxt_qps[i].mem_info.rq_va = (uint64_t) rq_ptr;
-    bnxt_qps[i].rq_buf = rq_ptr;
+    CHECK_HIP(hipMemset(rq_ptr, 0, bnxt_qps[i].mem_info.rq_len));
+    bnxt_qps[i].mem_info.rq_va = (uint64_t)rq_ptr;
+    bnxt_qps[i].rq_buf         = rq_ptr;
 
     /* Register RQ UMEM — same reasoning as SQ: plain path only */
     memset(&umem_attr, 0, sizeof(struct bnxt_re_dv_umem_reg_attr));
-    umem_attr.addr         = (void*) bnxt_qps[i].mem_info.rq_va;
+    umem_attr.addr         = (void*)bnxt_qps[i].mem_info.rq_va;
     umem_attr.size         = bnxt_qps[i].mem_info.rq_len;
     umem_attr.access_flags = IBV_ACCESS_LOCAL_WRITE;
 

@@ -54,9 +54,9 @@ class Context;
  * address space.
  */
 struct IpcSymmRegion {
-  uintptr_t local_base;   // this PE's registered buffer base address
-  size_t    length;       // registered length in bytes
-  char**    peer_bases;   // device array[shm_size] of peer-mapped bases
+  uintptr_t local_base;  // this PE's registered buffer base address
+  size_t length;         // registered length in bytes
+  char** peer_bases;     // device array[shm_size] of peer-mapped bases
 };
 
 /**
@@ -73,19 +73,19 @@ struct IpcSymmRegion {
 struct IpcSymmTable {
   int count;
   int capacity;
-  IpcSymmRegion *regions;
+  IpcSymmRegion* regions;
 };
 
 class IpcOnImpl {
  protected:
-  using HEAP_BASES_T = std::vector<char *, StdAllocatorHIP<char *>>;
+  using HEAP_BASES_T = std::vector<char*, StdAllocatorHIP<char*>>;
 
  public:
   int shm_rank{0};
 
   int shm_size{0};
 
-  char **ipc_bases{nullptr};
+  char** ipc_bases{nullptr};
 
   /**
    * @brief Size in bytes of the local symmetric heap.
@@ -96,12 +96,12 @@ class IpcOnImpl {
    */
   size_t heap_size{0};
 
-  int *pes_with_ipc_avail{nullptr};
+  int* pes_with_ipc_avail{nullptr};
 
   /**
    * @brief Device-visible table of symmetric user-buffer registrations.
    */
-  IpcSymmTable *symm_table{nullptr};
+  IpcSymmTable* symm_table{nullptr};
 
   /**
    * @brief Fast O(1) IPC availability check.
@@ -112,7 +112,7 @@ class IpcOnImpl {
    * check with zero memory loads.
    */
   int ipc_first_pe{0};
-  int ipc_stride{0};    // 0 = pattern invalid
+  int ipc_stride{0};  // 0 = pattern invalid
 
   // Node-local IPC communicator created by the MPI ipcHostInit and freed by ipcHostStop only if this
   // instance created it, so initFrom copies neither field. No MPI_COMM_NULL default: IpcImpl is
@@ -120,11 +120,9 @@ class IpcOnImpl {
   MPI_Comm shm_comm{};
   bool owns_shm_comm{false};
 
-  __host__ void ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
-                            MPI_Comm thread_comm);
+  __host__ void ipcHostInit(int my_pe, const HEAP_BASES_T& heap_bases, MPI_Comm thread_comm);
 
-  __host__ void ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
-                            TcpBootstrap *bootstrap);
+  __host__ void ipcHostInit(int my_pe, const HEAP_BASES_T& heap_bases, TcpBootstrap* bootstrap);
 
   __host__ void ipcHostStop();
 
@@ -142,7 +140,7 @@ class IpcOnImpl {
       return;
     }
     ipc_first_pe = host_ranks[0];
-    int stride = (count > 1) ? (host_ranks[1] - host_ranks[0]) : 1;
+    int stride   = (count > 1) ? (host_ranks[1] - host_ranks[0]) : 1;
     if (stride <= 0) {
       return;
     }
@@ -154,9 +152,11 @@ class IpcOnImpl {
     ipc_stride = stride;
   }
 
-  __host__ bool isIpcAvailable([[maybe_unused]] int my_pe, int target_pe, int *local_target_pe) {
-    if (nullptr == pes_with_ipc_avail) { return false; }
-    for (int i=0; i<shm_size; i++) {
+  __host__ bool isIpcAvailable([[maybe_unused]] int my_pe, int target_pe, int* local_target_pe) {
+    if (nullptr == pes_with_ipc_avail) {
+      return false;
+    }
+    for (int i = 0; i < shm_size; i++) {
       if (pes_with_ipc_avail[i] == target_pe) {
         *local_target_pe = i;
         return true;
@@ -165,13 +165,13 @@ class IpcOnImpl {
     return false;
   }
 
-  void initFrom(const IpcOnImpl &other) {
-    ipc_bases = other.ipc_bases;
-    heap_size = other.heap_size;
-    shm_size = other.shm_size;
-    shm_rank = other.shm_rank;
+  void initFrom(const IpcOnImpl& other) {
+    ipc_bases          = other.ipc_bases;
+    heap_size          = other.heap_size;
+    shm_size           = other.shm_size;
+    shm_rank           = other.shm_rank;
     pes_with_ipc_avail = other.pes_with_ipc_avail;
-    symm_table = other.symm_table;
+    symm_table         = other.symm_table;
   }
 
   /**
@@ -185,8 +185,8 @@ class IpcOnImpl {
    * @param[in] pe       Target PE id
    * @return Address of the corresponding data in PE 'pe'
    */
-  __device__ __forceinline__ char *ipcPeerPtr(const void *sym_addr, int pe) {
-    uintptr_t addr = reinterpret_cast<uintptr_t>(sym_addr);
+  __device__ __forceinline__ char* ipcPeerPtr(const void* sym_addr, int pe) {
+    uintptr_t addr      = reinterpret_cast<uintptr_t>(sym_addr);
     uintptr_t heap_base = constmem.heap_base;
 
     /*
@@ -202,7 +202,7 @@ class IpcOnImpl {
     if (symm_table != nullptr) {
       int n = symm_table->count;
       for (int i = 0; i < n; ++i) {
-        IpcSymmRegion &r = symm_table->regions[i];
+        IpcSymmRegion& r = symm_table->regions[i];
         if (addr >= r.local_base && addr < r.local_base + r.length) {
           return r.peer_bases[pe] + (addr - r.local_base);
         }
@@ -215,9 +215,8 @@ class IpcOnImpl {
 
   void assignSdmaChannel([[maybe_unused]] unsigned int ctx_id) {}
 
-
-  __device__ __attribute__((noinline))
-  bool isIpcAvailable_irregular(int target_pe, int *local_target_pe) {
+  __device__ __attribute__((noinline)) bool isIpcAvailable_irregular(int target_pe,
+                                                                     int* local_target_pe) {
     for (int i = 0; i < shm_size; i++) {
       if (pes_with_ipc_avail[i] == target_pe) {
         *local_target_pe = i;
@@ -227,8 +226,8 @@ class IpcOnImpl {
     return false;
   }
 
-  __device__ __attribute__((noinline))
-  bool isIpcAvailable_strided(unsigned offset, int stride, int *local_target_pe) {
+  __device__ __attribute__((noinline)) bool isIpcAvailable_strided(unsigned offset, int stride,
+                                                                   int* local_target_pe) {
     int idx = static_cast<int>(offset) / stride;
     if (static_cast<unsigned>(idx) < static_cast<unsigned>(constmem.ipc_shm_size) &&
         offset == static_cast<unsigned>(idx * stride)) {
@@ -238,12 +237,13 @@ class IpcOnImpl {
     return false;
   }
 
-  __device__ bool isIpcAvailable([[maybe_unused]] int my_pe, int target_pe, int *local_target_pe) {
+  __device__ bool isIpcAvailable([[maybe_unused]] int my_pe, int target_pe, int* local_target_pe) {
     // IPC disabled: shm_size == 0
-    if (constmem.ipc_shm_size == 0) return false;
+    if (constmem.ipc_shm_size == 0)
+      return false;
 
     unsigned offset = static_cast<unsigned>(target_pe - constmem.ipc_first_pe);
-    int stride = constmem.ipc_stride;
+    int stride      = constmem.ipc_stride;
 
     if (stride == 1) {
       // Consecutive PEs: branchless range check.
@@ -260,21 +260,20 @@ class IpcOnImpl {
     return isIpcAvailable_irregular(target_pe, local_target_pe);
   }
 
-
-  __device__ void ipcGpuInit(Backend *gpu_backend, Context *ctx, int thread_id);
+  __device__ void ipcGpuInit(Backend* gpu_backend, Context* ctx, int thread_id);
 
   template <MemcpyKind Kind = MemcpyKind::Put>
-  __device__ void ipcCopy(void *dst, void *src, size_t size, [[maybe_unused]] int local_pe) {
+  __device__ void ipcCopy(void* dst, void* src, size_t size, [[maybe_unused]] int local_pe) {
     memcpy_lane<Kind>(dst, src, size);
   }
 
   template <MemcpyKind Kind = MemcpyKind::Put>
-  __device__ void ipcCopy_wg(void *dst, void *src, size_t size, [[maybe_unused]] int local_pe) {
+  __device__ void ipcCopy_wg(void* dst, void* src, size_t size, [[maybe_unused]] int local_pe) {
     memcpy_wg_lds_stage<Kind>(dst, src, size);
   }
 
   template <MemcpyKind Kind = MemcpyKind::Put>
-  __device__ void ipcCopy_wave(void *dst, void *src, size_t size, [[maybe_unused]] int local_pe) {
+  __device__ void ipcCopy_wave(void* dst, void* src, size_t size, [[maybe_unused]] int local_pe) {
     memcpy_wave_lds_stage<Kind>(dst, src, size);
   }
 
@@ -291,79 +290,77 @@ class IpcOnImpl {
   }
 
   __device__ void ipcQuiet() {
-    atomic::threadfence<atomic::memory_scope::system,
-                        atomic::memory_order::release>();
+    atomic::threadfence<atomic::memory_scope::system, atomic::memory_order::release>();
   }
 
   __device__ void ipcQuiet([[maybe_unused]] int local_pe) {
-    atomic::threadfence<atomic::memory_scope::system,
-                        atomic::memory_order::release>();
+    atomic::threadfence<atomic::memory_scope::system, atomic::memory_order::release>();
   }
 
   template <typename T>
-  __device__ void ipcAMOAdd(T *val, T value) {
+  __device__ void ipcAMOAdd(T* val, T value) {
     atomic::fetch_add(val, value);
   }
 
   template <typename T>
-  __device__ T ipcAMOFetchAdd(T *val, T value) {
+  __device__ T ipcAMOFetchAdd(T* val, T value) {
     return atomic::fetch_add(val, value);
   }
 
   template <typename T>
-  __device__ void ipcAMOCas(T *val, T cond, T value) {
+  __device__ void ipcAMOCas(T* val, T cond, T value) {
     atomic::compare_exchange_strong(val, cond, value);
   }
 
   template <typename T>
-  __device__ T ipcAMOFetchCas(T *val, T cond, T value) {
+  __device__ T ipcAMOFetchCas(T* val, T cond, T value) {
     atomic::compare_exchange_strong(val, cond, value);
     return cond;
   }
 
   template <typename T>
-  __device__ void ipcAMOSet(T *val, T value) {
+  __device__ void ipcAMOSet(T* val, T value) {
     atomic::store(val, value);
   }
 
   template <typename T>
-  __device__ T ipcAMOSwap(T *val, T value) {
+  __device__ T ipcAMOSwap(T* val, T value) {
     return atomic::exchange(val, value);
   }
 
   template <typename T>
-  __device__ void ipcAMOAnd(T *val, T value) {
+  __device__ void ipcAMOAnd(T* val, T value) {
     atomic::fetch_and(val, value);
   }
 
   template <typename T>
-  __device__ T ipcAMOFetchAnd(T *val, T value) {
+  __device__ T ipcAMOFetchAnd(T* val, T value) {
     return atomic::fetch_and(val, value);
   }
 
   template <typename T>
-  __device__ void ipcAMOOr(T *val, T value) {
+  __device__ void ipcAMOOr(T* val, T value) {
     atomic::fetch_or(val, value);
   }
 
   template <typename T>
-  __device__ T ipcAMOFetchOr(T *val, T value) {
+  __device__ T ipcAMOFetchOr(T* val, T value) {
     return atomic::fetch_or(val, value);
   }
 
   template <typename T>
-  __device__ void ipcAMOXor(T *val, T value) {
+  __device__ void ipcAMOXor(T* val, T value) {
     atomic::fetch_xor(val, value);
   }
 
   template <typename T>
-  __device__ T ipcAMOFetchXor(T *val, T value) {
+  __device__ T ipcAMOFetchXor(T* val, T value) {
     return atomic::fetch_xor(val, value);
   }
 
   __device__ void zero_byte_read(int pe) {
-    int local_pe = pe % shm_size;
-    uint32_t *pe_ipc_base = reinterpret_cast<uint32_t *>(ipc_bases[local_pe]);
+    int local_pe          = pe % shm_size;
+    uint32_t* pe_ipc_base = reinterpret_cast<uint32_t*>(ipc_bases[local_pe]);
     [[maybe_unused]] volatile uint32_t read_value = atomic::load(pe_ipc_base);
   }
 };
@@ -373,7 +370,7 @@ class IpcSdmaImpl : public IpcOnImpl {
  public:
   SdmaImpl sdmaImpl_;
 
-  void initFrom(const IpcSdmaImpl &other) {
+  void initFrom(const IpcSdmaImpl& other) {
     IpcOnImpl::initFrom(other);
     sdmaImpl_ = other.sdmaImpl_;
   }
@@ -390,16 +387,14 @@ class IpcSdmaImpl : public IpcOnImpl {
     }
   }
 
-  __host__ void ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
-                            MPI_Comm thread_comm);
+  __host__ void ipcHostInit(int my_pe, const HEAP_BASES_T& heap_bases, MPI_Comm thread_comm);
 
-  __host__ void ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
-                            TcpBootstrap *bootstrap);
+  __host__ void ipcHostInit(int my_pe, const HEAP_BASES_T& heap_bases, TcpBootstrap* bootstrap);
 
   __host__ void ipcHostStop();
 
   template <MemcpyKind Kind = MemcpyKind::Put>
-  __device__ void ipcCopy(void *dst, void *src, size_t size, int local_pe) {
+  __device__ void ipcCopy(void* dst, void* src, size_t size, int local_pe) {
     if (size >= constmem.ipc_sdma_threshold) {
       auto* handle = sdmaImpl_.sdmaCopy<Kind>(dst, src, size, local_pe);
       assert(nullptr != handle /* Assuming sdma is available to all pes uniformly */);
@@ -408,8 +403,7 @@ class IpcSdmaImpl : public IpcOnImpl {
         // SDMA wrote dst to GL2, bypassing L1; device-scope acquire invalidates
         // stale L1 so the get returns fresh data (partner of sdmaCopy release).
         if constexpr (!is_put(Kind))
-          atomic::threadfence<atomic::memory_scope::device,
-                              atomic::memory_order::acquire>();
+          atomic::threadfence<atomic::memory_scope::device, atomic::memory_order::acquire>();
       }
       return;
     }
@@ -417,13 +411,14 @@ class IpcSdmaImpl : public IpcOnImpl {
   }
 
   template <MemcpyKind Kind = MemcpyKind::Put>
-  __device__ void ipcCopy_wg(void *dst, void *src, size_t size, int local_pe) {
+  __device__ void ipcCopy_wg(void* dst, void* src, size_t size, int local_pe) {
     if (size >= constmem.ipc_sdma_threshold * WF_SIZE) {
       sdma_anvil::SdmaQueueDeviceHandle* handle = nullptr;
       if (is_thread_zero_in_block()) {
         handle = sdmaImpl_.sdmaCopy<Kind>(dst, src, size, local_pe);
         assert(nullptr != handle /* Assuming sdma is available to all pes uniformly */);
-        if constexpr (is_blocking(Kind)) handle->quietAll();
+        if constexpr (is_blocking(Kind))
+          handle->quietAll();
       }
       if constexpr (is_blocking(Kind) && !is_put(Kind)) {
         // SDMA wrote dst to GL2, bypassing L1.  Only thread 0 drained, so the
@@ -432,8 +427,7 @@ class IpcSdmaImpl : public IpcOnImpl {
         // pre-barrier invalidate could be refilled with stale GL2) and be
         // device scope (workgroup scope would not reach L1).
         __builtin_amdgcn_s_barrier();
-        atomic::threadfence<atomic::memory_scope::device,
-                            atomic::memory_order::acquire>();
+        atomic::threadfence<atomic::memory_scope::device, atomic::memory_order::acquire>();
       }
       return;
     }
@@ -441,20 +435,20 @@ class IpcSdmaImpl : public IpcOnImpl {
   }
 
   template <MemcpyKind Kind = MemcpyKind::Put>
-  __device__ void ipcCopy_wave(void *dst, void *src, size_t size, int local_pe) {
+  __device__ void ipcCopy_wave(void* dst, void* src, size_t size, int local_pe) {
     if (size >= constmem.ipc_sdma_threshold * WF_SIZE) {
       sdma_anvil::SdmaQueueDeviceHandle* handle = nullptr;
       if (is_thread_zero_in_wave()) {
         handle = sdmaImpl_.sdmaCopy<Kind>(dst, src, size, local_pe);
         assert(nullptr != handle /* Assuming sdma is available to all pes uniformly */);
-        if constexpr (is_blocking(Kind)) handle->quietAll();
+        if constexpr (is_blocking(Kind))
+          handle->quietAll();
       }
       if constexpr (is_blocking(Kind) && !is_put(Kind)) {
         // SDMA wrote dst to GL2, bypassing L1.  Thread 0 drained; wave
         // reconvergence orders that before all lanes invalidate stale L1 via a
         // device-scope acquire (wave scope would not reach L1).
-        atomic::threadfence<atomic::memory_scope::device,
-                            atomic::memory_order::acquire>();
+        atomic::threadfence<atomic::memory_scope::device, atomic::memory_order::acquire>();
       }
       return;
     }
@@ -465,8 +459,8 @@ class IpcSdmaImpl : public IpcOnImpl {
             atomic::memory_order order = atomic::memory_order::release>
   __device__ __forceinline__ void ipcFence() {
     if (constmem.ipc_sdma_threshold != SDMA_THRESHOLD_DISABLED) {
-      if (atomic::load<atomic::memory_scope::device,
-                       atomic::memory_order::relaxed>(&sdmaImpl_.sdmaDirty) != 0)
+      if (atomic::load<atomic::memory_scope::device, atomic::memory_order::relaxed>(
+              &sdmaImpl_.sdmaDirty) != 0)
         sdmaImpl_.sdmaQuietAll();
     }
     atomic::threadfence<scope, order>();
@@ -477,9 +471,9 @@ class IpcSdmaImpl : public IpcOnImpl {
   __device__ __forceinline__ void ipcFence(int local_pe) {
     if (constmem.ipc_sdma_threshold != SDMA_THRESHOLD_DISABLED) {
       uint64_t pe_mask = sdmaImpl_.sdmaPeMask(local_pe);
-      if (atomic::load<atomic::memory_scope::device,
-                       atomic::memory_order::relaxed>(
-                        &sdmaImpl_.sdmaDirty) & pe_mask)
+      if (atomic::load<atomic::memory_scope::device, atomic::memory_order::relaxed>(
+              &sdmaImpl_.sdmaDirty) &
+          pe_mask)
         sdmaImpl_.sdmaQuietMask(pe_mask);
     }
     atomic::threadfence<scope, order>();
@@ -492,30 +486,26 @@ class IpcSdmaImpl : public IpcOnImpl {
       // already-drained SDMA get visible to subsequent CU loads. The dirty
       // bit may have been consumed by an earlier fence/quiet that issued only
       // a release fence, so it cannot gate the acquire here.
-      if (atomic::load<atomic::memory_scope::device,
-                       atomic::memory_order::relaxed>(&sdmaImpl_.sdmaDirty) != 0)
+      if (atomic::load<atomic::memory_scope::device, atomic::memory_order::relaxed>(
+              &sdmaImpl_.sdmaDirty) != 0)
         sdmaImpl_.sdmaQuietAll();
-      atomic::threadfence<atomic::memory_scope::system,
-                          atomic::memory_order::acq_rel>();
+      atomic::threadfence<atomic::memory_scope::system, atomic::memory_order::acq_rel>();
       return;
     }
-    atomic::threadfence<atomic::memory_scope::system,
-                        atomic::memory_order::release>();
+    atomic::threadfence<atomic::memory_scope::system, atomic::memory_order::release>();
   }
 
   __device__ void ipcQuiet(int local_pe) {
     if (constmem.ipc_sdma_threshold != SDMA_THRESHOLD_DISABLED) {
       uint64_t pe_mask = sdmaImpl_.sdmaPeMask(local_pe);
-      if (atomic::load<atomic::memory_scope::device,
-                       atomic::memory_order::relaxed>(
-                         &sdmaImpl_.sdmaDirty) & pe_mask)
+      if (atomic::load<atomic::memory_scope::device, atomic::memory_order::relaxed>(
+              &sdmaImpl_.sdmaDirty) &
+          pe_mask)
         sdmaImpl_.sdmaQuietMask(pe_mask);
-      atomic::threadfence<atomic::memory_scope::system,
-                          atomic::memory_order::acq_rel>();
+      atomic::threadfence<atomic::memory_scope::system, atomic::memory_order::acq_rel>();
       return;
     }
-    atomic::threadfence<atomic::memory_scope::system,
-                        atomic::memory_order::release>();
+    atomic::threadfence<atomic::memory_scope::system, atomic::memory_order::release>();
   }
 };
 #endif  // USE_SDMA

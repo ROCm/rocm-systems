@@ -33,12 +33,10 @@
 
 namespace rocshmem {
 
-__host__ inline MPI_Aint HostInterface::compute_offset(
-    const void* dest, void* win_start, [[maybe_unused]] void* win_end) {
-  assert((reinterpret_cast<char*>(const_cast<void*>(dest)) >=
-          reinterpret_cast<char*>(win_start)) &&
-         (reinterpret_cast<char*>(const_cast<void*>(dest)) <
-          reinterpret_cast<char*>(win_end)));
+__host__ inline MPI_Aint HostInterface::compute_offset(const void* dest, void* win_start,
+                                                       [[maybe_unused]] void* win_end) {
+  assert((reinterpret_cast<char*>(const_cast<void*>(dest)) >= reinterpret_cast<char*>(win_start)) &&
+         (reinterpret_cast<char*>(const_cast<void*>(dest)) < reinterpret_cast<char*>(win_end)));
 
   MPI_Aint dest_disp{};
   MPI_Aint start_disp{};
@@ -54,9 +52,8 @@ __host__ inline void HostInterface::complete_all(MPI_Win win) {
   mpilib_ftable_.Win_sync(win);      /* memory stores */
 }
 
-__host__ inline void HostInterface::initiate_put(void* dest, const void* source,
-                                                 size_t nelems, int pe,
-                                                 WindowInfoMPI* window_info) {
+__host__ inline void HostInterface::initiate_put(void* dest, const void* source, size_t nelems,
+                                                 int pe, WindowInfoMPI* window_info) {
   MPI_Win win{window_info->get_win()};
   void* win_start{window_info->get_start()};
   void* win_end{window_info->get_end()};
@@ -78,9 +75,8 @@ __host__ inline void HostInterface::initiate_put(void* dest, const void* source,
   mpilib_ftable_.Put(source, nelems, MPI_CHAR, pe, offset, nelems, MPI_CHAR, win);
 }
 
-__host__ inline void HostInterface::initiate_get(void* dest, const void* source,
-                                                 size_t nelems, int pe,
-                                                 WindowInfoMPI* window_info) {
+__host__ inline void HostInterface::initiate_get(void* dest, const void* source, size_t nelems,
+                                                 int pe, WindowInfoMPI* window_info) {
   MPI_Win win{window_info->get_win()};
   void* win_start{window_info->get_start()};
   void* win_end{window_info->get_end()};

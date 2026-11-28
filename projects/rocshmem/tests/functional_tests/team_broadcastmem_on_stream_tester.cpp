@@ -50,18 +50,17 @@ TeamBroadcastmemOnStreamTester::TeamBroadcastmemOnStreamTester(TesterArguments a
   if ((value = getenv("ROCSHMEM_TEST_BROADCAST_ROOT"))) {
     pe_root = atoi(value);
     if (pe_root < 0 || pe_root >= n_pes) {
-      std::cerr << "Invalid ROCSHMEM_TEST_BROADCAST_ROOT value. Using PE 0."
-                << std::endl;
+      std::cerr << "Invalid ROCSHMEM_TEST_BROADCAST_ROOT value. Using PE 0." << std::endl;
       pe_root = 0;
     }
   }
 
   int num_bytes_wg = args.max_msg_size;
-  int total_bytes = num_bytes_wg * num_teams;
-  buf_size = total_bytes;
+  int total_bytes  = num_bytes_wg * num_teams;
+  buf_size         = total_bytes;
 
-  source_buf = static_cast<char *>(alloc_test_buffer(buf_size, args.local_buf_type));
-  dest_buf = static_cast<char *>(alloc_test_buffer(buf_size));
+  source_buf = static_cast<char*>(alloc_test_buffer(buf_size, args.local_buf_type));
+  dest_buf   = static_cast<char*>(alloc_test_buffer(buf_size));
 
   team_world_dup.resize(num_teams);
 
@@ -106,24 +105,26 @@ void TeamBroadcastmemOnStreamTester::postLaunchKernel() {
   }
 
   // Get elapsed time for each work group from HIP events
-  for (uint32_t wg_id = 0; wg_id < static_cast<uint32_t>(num_teams) && wg_id < static_cast<uint32_t>(num_timers); wg_id++) {
+  for (uint32_t wg_id = 0;
+       wg_id < static_cast<uint32_t>(num_teams) && wg_id < static_cast<uint32_t>(num_timers);
+       wg_id++) {
     float elapsed_time_ms = 0.0f;
-    CHECK_HIP(hipEventElapsedTime(&elapsed_time_ms, start_events_timed[wg_id],
-                                  stop_events_timed[wg_id]));
+    CHECK_HIP(
+        hipEventElapsedTime(&elapsed_time_ms, start_events_timed[wg_id], stop_events_timed[wg_id]));
 
     // Convert milliseconds to GPU cycles
     // wall_clk_rate is in kHz, so: cycles = ms * wall_clk_rate
-    long long int elapsed_cycles = static_cast<long long int>(
-        elapsed_time_ms * static_cast<float>(wall_clk_rate));
+    long long int elapsed_cycles =
+        static_cast<long long int>(elapsed_time_ms * static_cast<float>(wall_clk_rate));
 
     start_time[wg_id] = 0;
-    end_time[wg_id] = elapsed_cycles;
+    end_time[wg_id]   = elapsed_cycles;
   }
 
   // Fill remaining timers with zero if num_timers > num_teams
   for (uint32_t i = num_teams; i < static_cast<uint32_t>(num_timers); i++) {
     start_time[i] = 0;
-    end_time[i] = 0;
+    end_time[i]   = 0;
   }
 
   for (int team_i = 0; team_i < num_teams; team_i++) {
@@ -162,16 +163,15 @@ void TeamBroadcastmemOnStreamTester::resetBuffers(size_t size) {
 }
 
 void TeamBroadcastmemOnStreamTester::launchKernel([[maybe_unused]] dim3 gridSize,
-                                                  [[maybe_unused]] dim3 blockSize,
-                                                  int loop,
+                                                  [[maybe_unused]] dim3 blockSize, int loop,
                                                   size_t size) {
   // Execute warmup iterations (skip)
   for (int i = 0; i < args.skip; i++) {
     for (int wg_id = 0; wg_id < num_teams; wg_id++) {
-      char *wg_source = source_buf + wg_id * size;
-      char *wg_dest = dest_buf + wg_id * size;
-      rocshmem_broadcastmem_on_stream(team_world_dup[wg_id], wg_dest,
-                                      wg_source, size, pe_root, streams[wg_id]);
+      char* wg_source = source_buf + wg_id * size;
+      char* wg_dest   = dest_buf + wg_id * size;
+      rocshmem_broadcastmem_on_stream(team_world_dup[wg_id], wg_dest, wg_source, size, pe_root,
+                                      streams[wg_id]);
     }
   }
 
@@ -186,10 +186,10 @@ void TeamBroadcastmemOnStreamTester::launchKernel([[maybe_unused]] dim3 gridSize
         CHECK_HIP(hipEventRecord(start_events_timed[wg_id], streams[wg_id]));
       }
 
-      char *wg_source = source_buf + wg_id * size;
-      char *wg_dest = dest_buf + wg_id * size;
-      rocshmem_broadcastmem_on_stream(team_world_dup[wg_id], wg_dest,
-                                      wg_source, size, pe_root, streams[wg_id]);
+      char* wg_source = source_buf + wg_id * size;
+      char* wg_dest   = dest_buf + wg_id * size;
+      rocshmem_broadcastmem_on_stream(team_world_dup[wg_id], wg_dest, wg_source, size, pe_root,
+                                      streams[wg_id]);
 
       // Record stop event for this work group on last iteration
       if (i == loop - 1) {
@@ -198,27 +198,25 @@ void TeamBroadcastmemOnStreamTester::launchKernel([[maybe_unused]] dim3 gridSize
     }
   }
 
-  num_msgs = (loop + args.skip) * num_teams;
+  num_msgs       = (loop + args.skip) * num_teams;
   num_timed_msgs = loop * num_teams;
 }
 
 void TeamBroadcastmemOnStreamTester::verifyResults(size_t size) {
   // Verify correctness: after broadcast, all PEs receive the broadcast data
   for (int wg_id = 0; wg_id < num_teams; wg_id++) {
-    int idx = wg_id * size;
+    int idx            = wg_id * size;
     int expected_value = (pe_root + 1) * 100 + wg_id;
 
     for (size_t k = 0; k < size; k++) {
       if (static_cast<unsigned char>(dest_buf[idx + k]) !=
           static_cast<unsigned char>(expected_value)) {
-        std::cerr << "PE " << my_pe << ": Verification failed for WG "
-                  << wg_id << " at byte " << k << std::endl;
-        std::cerr << "Expected value: " << expected_value
-                  << ", Got: " << static_cast<int>(dest_buf[idx + k])
+        std::cerr << "PE " << my_pe << ": Verification failed for WG " << wg_id << " at byte " << k
                   << std::endl;
+        std::cerr << "Expected value: " << expected_value
+                  << ", Got: " << static_cast<int>(dest_buf[idx + k]) << std::endl;
         rocshmem_global_exit(1);
       }
     }
   }
 }
-

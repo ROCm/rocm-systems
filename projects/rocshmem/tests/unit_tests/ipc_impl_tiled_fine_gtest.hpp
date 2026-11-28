@@ -48,329 +48,324 @@ const int WARP_SIZE = 64;
 const int THREAD_TRANSFER_GRANULARITY = 8;  // DWORDX2
 
 int warpsPerBlock(size_t block_size) {
-    return ((block_size - 1) + WARP_SIZE) / WARP_SIZE;
+  return ((block_size - 1) + WARP_SIZE) / WARP_SIZE;
 }
 
 // set signal pointer to ipc_impl.ipc_bases location at unused offset
 // be careful with test size to not overrun this location
-const uint32_t SIGNAL_OFFSET {67108864};
+const uint32_t SIGNAL_OFFSET{67108864};
 
-enum TestType {
-    READ = 0,
-    WRITE = 1
-};
+enum TestType { READ = 0, WRITE = 1 };
 
-__device__
-void
-tiled_validator(bool *error, int *golden, int *dest, size_t bytes) {
-    size_t elements {bytes / sizeof(int)};
-    for (size_t i = get_flat_id(); i < elements; i += get_flat_grid_size()) {
-        if (golden[i] != dest[i]) {
-            printf("golden[%zu] %d != dest[%zu] %d\n", i, golden[i], i, dest[i]);
-            *error = true;
-        }
+__device__ void tiled_validator(bool* error, int* golden, int* dest, size_t bytes) {
+  size_t elements{bytes / sizeof(int)};
+  for (size_t i = get_flat_id(); i < elements; i += get_flat_grid_size()) {
+    if (golden[i] != dest[i]) {
+      printf("golden[%zu] %d != dest[%zu] %d\n", i, golden[i], i, dest[i]);
+      *error = true;
     }
+  }
 }
 
 template <typename NotifierT>
-__global__
-void
-kernel_put_with_signal_tiled_validator(bool *error, int *golden, int *dest, size_t bytes, NotifierT *notifier) {
-    if (!get_flat_id()) {
-        while (atomic::load<atomic::memory_scope::system,
-                            atomic::memory_order::acquire>(dest + SIGNAL_OFFSET) != 0) {
-            ;
-        }
+__global__ void kernel_put_with_signal_tiled_validator(bool* error, int* golden, int* dest,
+                                                       size_t bytes, NotifierT* notifier) {
+  if (!get_flat_id()) {
+    while (atomic::load<atomic::memory_scope::system, atomic::memory_order::acquire>(
+               dest + SIGNAL_OFFSET) != 0) {
+      ;
     }
+  }
+  notifier->sync();
+  tiled_validator(error, golden, dest, bytes);
+}
+
+template <typename IpcImplT, typename NotifierT>
+__global__ void kernel_tiled_fine_copy(IpcImplT* ipc_impl, bool* error, int* golden, int* src,
+                                       int* dest, size_t bytes, TestType test,
+                                       NotifierT* notifier) {
+  if (!get_flat_id()) {
+    ipc_impl->ipcCopy(dest, src, bytes, 1);
+    ipc_impl->ipcFence();
+    if (test == WRITE) {
+      ipc_impl->ipcAMOFetchAdd(dest + SIGNAL_OFFSET, -1);
+    }
+  }
+  if (test == READ) {
     notifier->sync();
     tiled_validator(error, golden, dest, bytes);
+  }
 }
 
 template <typename IpcImplT, typename NotifierT>
-__global__
-void
-kernel_tiled_fine_copy(IpcImplT *ipc_impl, bool *error, int *golden, int *src, int *dest, size_t bytes, TestType test, NotifierT *notifier) {
-    if (!get_flat_id()) {
-        ipc_impl->ipcCopy(dest, src, bytes, 1);
-        ipc_impl->ipcFence();
-        if (test == WRITE) {
-            ipc_impl->ipcAMOFetchAdd(dest + SIGNAL_OFFSET, -1);
-        }
-    }
-    if (test == READ) {
-        notifier->sync();
-        tiled_validator(error, golden, dest, bytes);
-    }
-}
-
-template <typename IpcImplT, typename NotifierT>
-__global__
-void
-kernel_tiled_fine_copy_block(IpcImplT *ipc_impl, bool *error, int *golden, int *src, int *dest, size_t bytes, TestType test, NotifierT *notifier) {
-    size_t block_bytes = blockDim.x * THREAD_TRANSFER_GRANULARITY;
-    size_t block_byte_offset = blockIdx.x * block_bytes;
-    for (size_t i = block_byte_offset; i < bytes; i += get_flat_grid_size() * THREAD_TRANSFER_GRANULARITY) {
-	      int chunk = min(block_bytes, bytes - i);
-        ipc_impl->ipcCopy_wg((char*)dest + i, (char*)src + i, chunk, 1);
-        ipc_impl->ipcFence();
-        __syncthreads();
-        if (test == WRITE) {
-            if (!threadIdx.x) {
-                ipc_impl->ipcAMOFetchAdd(dest + SIGNAL_OFFSET, -1);
-            }
-        }
-    }
-    if (test == READ) {
-        notifier->sync();
-        tiled_validator(error, golden, dest, bytes);
-    }
-}
-
-template <typename IpcImplT, typename NotifierT>
-__global__
-void
-kernel_tiled_fine_copy_warp(IpcImplT *ipc_impl, bool *error, int *golden, int *src, int *dest, size_t bytes, TestType test, NotifierT *notifier) {
-    size_t warp_id = (blockIdx.x * blockDim.x + threadIdx.x) / WARP_SIZE;
-    size_t warp_bytes = WARP_SIZE * THREAD_TRANSFER_GRANULARITY;
-    size_t warp_byte_offset = warp_id * warp_bytes;
-    for (size_t i = warp_byte_offset; i < bytes; i += get_flat_grid_size() * THREAD_TRANSFER_GRANULARITY) {
-        int chunk = min(warp_bytes, bytes - i);
-        ipc_impl->ipcCopy_wave(((char*)dest) + i, ((char*)src) + i, chunk, 1);
-        ipc_impl->ipcFence();
-        if (test == WRITE) {
-            if (!(threadIdx.x % WARP_SIZE)) {
-                ipc_impl->ipcAMOFetchAdd(dest + SIGNAL_OFFSET, -1);
-            }
-        }
-    }
+__global__ void kernel_tiled_fine_copy_block(IpcImplT* ipc_impl, bool* error, int* golden, int* src,
+                                             int* dest, size_t bytes, TestType test,
+                                             NotifierT* notifier) {
+  size_t block_bytes       = blockDim.x * THREAD_TRANSFER_GRANULARITY;
+  size_t block_byte_offset = blockIdx.x * block_bytes;
+  for (size_t i = block_byte_offset; i < bytes;
+       i += get_flat_grid_size() * THREAD_TRANSFER_GRANULARITY) {
+    int chunk = min(block_bytes, bytes - i);
+    ipc_impl->ipcCopy_wg((char*)dest + i, (char*)src + i, chunk, 1);
+    ipc_impl->ipcFence();
     __syncthreads();
-    if (test == READ) {
-        notifier->sync();
-        tiled_validator(error, golden, dest, bytes);
+    if (test == WRITE) {
+      if (!threadIdx.x) {
+        ipc_impl->ipcAMOFetchAdd(dest + SIGNAL_OFFSET, -1);
+      }
     }
+  }
+  if (test == READ) {
+    notifier->sync();
+    tiled_validator(error, golden, dest, bytes);
+  }
+}
+
+template <typename IpcImplT, typename NotifierT>
+__global__ void kernel_tiled_fine_copy_warp(IpcImplT* ipc_impl, bool* error, int* golden, int* src,
+                                            int* dest, size_t bytes, TestType test,
+                                            NotifierT* notifier) {
+  size_t warp_id          = (blockIdx.x * blockDim.x + threadIdx.x) / WARP_SIZE;
+  size_t warp_bytes       = WARP_SIZE * THREAD_TRANSFER_GRANULARITY;
+  size_t warp_byte_offset = warp_id * warp_bytes;
+  for (size_t i = warp_byte_offset; i < bytes;
+       i += get_flat_grid_size() * THREAD_TRANSFER_GRANULARITY) {
+    int chunk = min(warp_bytes, bytes - i);
+    ipc_impl->ipcCopy_wave(((char*)dest) + i, ((char*)src) + i, chunk, 1);
+    ipc_impl->ipcFence();
+    if (test == WRITE) {
+      if (!(threadIdx.x % WARP_SIZE)) {
+        ipc_impl->ipcAMOFetchAdd(dest + SIGNAL_OFFSET, -1);
+      }
+    }
+  }
+  __syncthreads();
+  if (test == READ) {
+    notifier->sync();
+    tiled_validator(error, golden, dest, bytes);
+  }
 }
 
 template <typename Config>
 class IPCImplTiledFine : public ::testing::TestWithParam<std::tuple<int, int, int>> {
-    using IpcImplT = typename Config::impl_type;
-    using MPI_T = RemoteHeapInfo<CommunicatorMPI>;
-    using NotifierT = Notifier<atomic::memory_scope::device>;
-    using NotifierProxyT = NotifierProxy<atomic::memory_scope::device>;
-    using FN_T1 = void (*)(IpcImplT*, bool*, int*, int*, int*, size_t, TestType, NotifierT*);
-    using FN_T2 = void (*)(bool*, int*, int*, size_t, NotifierT*);
+  using IpcImplT       = typename Config::impl_type;
+  using MPI_T          = RemoteHeapInfo<CommunicatorMPI>;
+  using NotifierT      = Notifier<atomic::memory_scope::device>;
+  using NotifierProxyT = NotifierProxy<atomic::memory_scope::device>;
+  using FN_T1          = void (*)(IpcImplT*, bool*, int*, int*, int*, size_t, TestType, NotifierT*);
+  using FN_T2          = void (*)(bool*, int*, int*, size_t, NotifierT*);
 
-  public:
-    IPCImplTiledFine() {
-        MPIInstance::mpilib_dl_init();
-        hip_allocator_ = get_default_allocator();
-        heap_mem_ = new HeapMemoryType(*hip_allocator_, envvar::heap_size.get_value());
-        assert(heap_mem_ != nullptr);
-        mpi_ = new MPI_T (heap_mem_->get_ptr(), heap_mem_->get_size(), MPI_COMM_WORLD);
+ public:
+  IPCImplTiledFine() {
+    MPIInstance::mpilib_dl_init();
+    hip_allocator_ = get_default_allocator();
+    heap_mem_      = new HeapMemoryType(*hip_allocator_, envvar::heap_size.get_value());
+    assert(heap_mem_ != nullptr);
+    mpi_ = new MPI_T(heap_mem_->get_ptr(), heap_mem_->get_size(), MPI_COMM_WORLD);
 
-        Config::preInit();
-        ipc_impl_.ipcHostInit(mpi_->my_pe(), mpi_->get_heap_bases(), MPI_COMM_WORLD);
+    Config::preInit();
+    ipc_impl_.ipcHostInit(mpi_->my_pe(), mpi_->get_heap_bases(), MPI_COMM_WORLD);
 
-        assert(ipc_impl_dptr_ == nullptr);
-        hip_allocator_->allocate((void**)&ipc_impl_dptr_, sizeof(IpcImplT));
-        CHECK_HIP(hipMemcpy(ipc_impl_dptr_, &ipc_impl_, sizeof(IpcImplT), hipMemcpyHostToDevice));
+    assert(ipc_impl_dptr_ == nullptr);
+    hip_allocator_->allocate((void**)&ipc_impl_dptr_, sizeof(IpcImplT));
+    CHECK_HIP(hipMemcpy(ipc_impl_dptr_, &ipc_impl_, sizeof(IpcImplT), hipMemcpyHostToDevice));
 
-        assert(error_dptr_ == nullptr);
-        hip_allocator_->allocate((void**)&error_dptr_, sizeof(bool));
-        *error_dptr_ = false;
+    assert(error_dptr_ == nullptr);
+    hip_allocator_->allocate((void**)&error_dptr_, sizeof(bool));
+    *error_dptr_ = false;
+  }
+
+  ~IPCImplTiledFine() {
+    if (ipc_impl_dptr_) {
+      hip_allocator_->deallocate(ipc_impl_dptr_);
+    }
+    if (error_dptr_) {
+      hip_allocator_->deallocate(error_dptr_);
+    }
+    if (golden_dptr_) {
+      hip_allocator_->deallocate(golden_dptr_);
     }
 
-    ~IPCImplTiledFine() {
-        if (ipc_impl_dptr_) {
-            hip_allocator_->deallocate(ipc_impl_dptr_);
-        }
-        if (error_dptr_) {
-            hip_allocator_->deallocate(error_dptr_);
-        }
-        if (golden_dptr_) {
-            hip_allocator_->deallocate(golden_dptr_);
-        }
+    ipc_impl_.ipcHostStop();
+    delete heap_mem_;
+    MPIInstance::mpilib_dl_close();
+    delete mpi_;
+  }
 
-        ipc_impl_.ipcHostStop();
-        delete heap_mem_;
-        MPIInstance::mpilib_dl_close();
-	delete mpi_;
+  void launch(FN_T1 f, const dim3 grid, const dim3 block, int* src, int* dest, size_t bytes,
+              TestType test) {
+    f<<<grid, block>>>(ipc_impl_dptr_, error_dptr_, golden_dptr_, src, dest, bytes, test,
+                       notifier_.get());
+    CHECK_HIP(hipStreamSynchronize(nullptr));
+  }
 
+  void launch(FN_T2 f, const dim3 grid, const dim3 block, int* dest, size_t bytes) {
+    f<<<grid, block>>>(error_dptr_, golden_dptr_, dest, bytes, notifier_.get());
+    CHECK_HIP(hipStreamSynchronize(nullptr));
+  }
+
+  virtual void copy([[maybe_unused]] TestType test, [[maybe_unused]] dim3 grid,
+                    [[maybe_unused]] dim3 block) {
+    FAIL();
+  }
+
+  void write(const dim3 grid, const dim3 block, size_t elems, int signal_value) {
+    iota_golden(elems);
+    initialize_signal(WRITE, signal_value);
+    initialize_src_buffer(WRITE);
+    copy(WRITE, grid, block);
+    check_device_validation_errors(WRITE);
+  }
+
+  void read(const dim3 grid, const dim3 block, size_t elems) {
+    iota_golden(elems);
+    initialize_signal(READ);
+    initialize_src_buffer(READ);
+    copy(READ, grid, block);
+    check_device_validation_errors(READ);
+  }
+
+  void iota_golden(size_t elems) {
+    golden_.resize(elems);
+    std::iota(golden_.begin(), golden_.end(), 0);
+
+    assert(golden_dptr_ == nullptr);
+    size_t golden_dptr_bytes{golden_.size() * sizeof(int)};
+    hip_allocator_->allocate((void**)&golden_dptr_, golden_dptr_bytes);
+    CHECK_HIP(hipMemcpy(golden_dptr_, golden_.data(), golden_dptr_bytes, hipMemcpyHostToDevice));
+  }
+
+  void validate_golden(size_t elems) {
+    ASSERT_EQ(golden_.size(), elems);
+    for (int i = 0; i < static_cast<int>(golden_.size()); i++) {
+      ASSERT_EQ(golden_[i], i);
+    }
+  }
+
+  void initialize_signal(TestType test, int signal_value = 0) {
+    bool is_write_test = test;
+    if (is_write_test && mpi_->my_pe() == 0) {
+      int* dest = reinterpret_cast<int*>(ipc_impl_.ipc_bases[1]);
+      CHECK_HIP(hipMemcpy(dest + SIGNAL_OFFSET, &signal_value, sizeof(int), hipMemcpyHostToDevice));
+    }
+  }
+
+  void initialize_src_buffer(TestType test) {
+    if (!pe_initializes_src_buffer(test)) {
+      return;
+    }
+    size_t bytes = golden_.size() * sizeof(int);
+    auto dev_src = reinterpret_cast<int*>(ipc_impl_.ipc_bases[mpi_->my_pe()]);
+    CHECK_HIP(hipMemcpy(dev_src, golden_.data(), bytes, hipMemcpyHostToDevice));
+  }
+
+  bool pe_initializes_src_buffer(TestType test) {
+    bool is_write_test = test;
+    bool is_read_test  = !test;
+    return (is_write_test && mpi_->my_pe() == 0) || (is_read_test && mpi_->my_pe() == 1);
+  }
+
+  void execute(TestType test, FN_T1 fn, const dim3 grid, const dim3 block) {
+    size_t bytes = golden_.size() * sizeof(int);
+    if (mpi_->my_pe()) {
+      mpi_->barrier();
+      if (test == WRITE) {
+        int* dest    = reinterpret_cast<int*>(ipc_impl_.ipc_bases[1]);
+        FN_T2 val_fn = kernel_put_with_signal_tiled_validator;
+        launch(val_fn, grid, block, dest, bytes);
+        int signal_val;
+        CHECK_HIP(hipMemcpy(&signal_val, dest + SIGNAL_OFFSET, sizeof(int), hipMemcpyDeviceToHost));
+        ASSERT_EQ(signal_val, 0);
+      }
+      mpi_->barrier();
+      return;
+    }
+    int* src{nullptr};
+    int* dest{nullptr};
+    if (test == WRITE) {
+      src  = reinterpret_cast<int*>(ipc_impl_.ipc_bases[0]);
+      dest = reinterpret_cast<int*>(ipc_impl_.ipc_bases[1]);
+    } else {
+      src  = reinterpret_cast<int*>(ipc_impl_.ipc_bases[1]);
+      dest = reinterpret_cast<int*>(ipc_impl_.ipc_bases[0]);
+    }
+    mpi_->barrier();
+    launch(fn, grid, block, src, dest, bytes, test);
+    mpi_->barrier();
+  }
+
+  void check_device_validation_errors(TestType test) {
+    if (!pe_validates_dest_buffer(test)) {
+      return;
+    }
+    ASSERT_EQ(*error_dptr_, false);
+  }
+
+  void validate_dest_buffer(TestType test) {
+    if (!pe_validates_dest_buffer(test)) {
+      return;
     }
 
-    void launch(FN_T1 f, const dim3 grid, const dim3 block, int* src, int* dest, size_t bytes, TestType test) {
-        f<<<grid, block>>>(ipc_impl_dptr_, error_dptr_, golden_dptr_, src, dest, bytes, test, notifier_.get());
-        CHECK_HIP(hipStreamSynchronize(nullptr));
+    auto dev_dest = reinterpret_cast<int*>(ipc_impl_.ipc_bases[mpi_->my_pe()]);
+    for (int i = 0; i < static_cast<int>(golden_.size()); i++) {
+      ASSERT_EQ(golden_[i], dev_dest[i]);
     }
+  }
 
-    void launch(FN_T2 f, const dim3 grid, const dim3 block, int* dest, size_t bytes) {
-        f<<<grid, block>>>(error_dptr_, golden_dptr_, dest, bytes, notifier_.get());
-        CHECK_HIP(hipStreamSynchronize(nullptr));
-    }
+  bool pe_validates_dest_buffer(TestType test) { return !pe_initializes_src_buffer(test); }
 
-    virtual void copy([[maybe_unused]] TestType test, [[maybe_unused]] dim3 grid, [[maybe_unused]] dim3 block) {
-        FAIL();
-    }
+ protected:
+  HIPAllocator* hip_allocator_{nullptr};
 
-    void write(const dim3 grid, const dim3 block, size_t elems, int signal_value) {
-        iota_golden(elems);
-        initialize_signal(WRITE, signal_value);
-        initialize_src_buffer(WRITE);
-        copy(WRITE, grid, block);
-        check_device_validation_errors(WRITE);
-    }
+  NotifierProxyT notifier_{};
 
-    void read(const dim3 grid, const dim3 block, size_t elems) {
-        iota_golden(elems);
-        initialize_signal(READ);
-        initialize_src_buffer(READ);
-        copy(READ, grid, block);
-        check_device_validation_errors(READ);
-    }
+  HeapMemory* heap_mem_{nullptr};
 
-    void iota_golden(size_t elems) {
-        golden_.resize(elems);
-        std::iota(golden_.begin(), golden_.end(), 0);
+  MPI_T* mpi_{nullptr};
 
-        assert(golden_dptr_ == nullptr);
-        size_t golden_dptr_bytes {golden_.size() * sizeof(int)};
-        hip_allocator_->allocate((void**)&golden_dptr_, golden_dptr_bytes);
-        CHECK_HIP(hipMemcpy(golden_dptr_, golden_.data(), golden_dptr_bytes, hipMemcpyHostToDevice));
-    }
+  std::vector<int> golden_;
 
-    void validate_golden(size_t elems) {
-        ASSERT_EQ(golden_.size(), elems);
-        for (int i = 0; i < static_cast<int>(golden_.size()); i++) {
-            ASSERT_EQ(golden_[i], i);
-        }
-    }
+  int* golden_dptr_{nullptr};
 
-    void initialize_signal(TestType test, int signal_value = 0) {
-        bool is_write_test = test;
-        if (is_write_test && mpi_->my_pe() == 0) {
-            int *dest = reinterpret_cast<int*>(ipc_impl_.ipc_bases[1]);
-            CHECK_HIP(hipMemcpy(dest + SIGNAL_OFFSET, &signal_value, sizeof(int), hipMemcpyHostToDevice));
-        }
-    }
+  IpcImplT ipc_impl_{};
 
-    void initialize_src_buffer(TestType test) {
-        if (!pe_initializes_src_buffer(test)) {
-            return;
-        }
-        size_t bytes = golden_.size() * sizeof(int);
-        auto dev_src = reinterpret_cast<int*>(ipc_impl_.ipc_bases[mpi_->my_pe()]);
-        CHECK_HIP(hipMemcpy(dev_src, golden_.data(), bytes, hipMemcpyHostToDevice));
-    }
+  IpcImplT* ipc_impl_dptr_{nullptr};
 
-    bool pe_initializes_src_buffer(TestType test) {
-        bool is_write_test = test;
-        bool is_read_test = !test;
-        return (is_write_test && mpi_->my_pe() == 0) ||
-               (is_read_test && mpi_->my_pe() == 1);
-    }
-
-    void execute(TestType test, FN_T1 fn, const dim3 grid, const dim3 block) {
-        size_t bytes = golden_.size() * sizeof(int);
-        if (mpi_->my_pe()) {
-            mpi_->barrier();
-            if (test == WRITE) {
-                int *dest = reinterpret_cast<int*>(ipc_impl_.ipc_bases[1]);
-                FN_T2 val_fn = kernel_put_with_signal_tiled_validator;
-                launch(val_fn, grid, block, dest, bytes);
-                int signal_val;
-                CHECK_HIP(hipMemcpy(&signal_val, dest + SIGNAL_OFFSET, sizeof(int), hipMemcpyDeviceToHost));
-                ASSERT_EQ(signal_val, 0);
-            }
-            mpi_->barrier();
-            return;
-        }
-        int *src{nullptr};
-        int *dest{nullptr};
-        if (test == WRITE) {
-            src = reinterpret_cast<int*>(ipc_impl_.ipc_bases[0]);
-            dest = reinterpret_cast<int*>(ipc_impl_.ipc_bases[1]);
-        } else {
-            src = reinterpret_cast<int*>(ipc_impl_.ipc_bases[1]);
-            dest = reinterpret_cast<int*>(ipc_impl_.ipc_bases[0]);
-        }
-        mpi_->barrier();
-        launch(fn, grid, block, src, dest, bytes, test);
-        mpi_->barrier();
-    }
-
-    void check_device_validation_errors(TestType test) {
-        if (!pe_validates_dest_buffer(test)) {
-            return;
-        }
-        ASSERT_EQ(*error_dptr_, false);
-    }
-
-    void validate_dest_buffer(TestType test) {
-        if (!pe_validates_dest_buffer(test)) {
-            return;
-        }
-
-        auto dev_dest = reinterpret_cast<int*>(ipc_impl_.ipc_bases[mpi_->my_pe()]);
-        for (int i = 0; i < static_cast<int>(golden_.size()); i++) {
-            ASSERT_EQ(golden_[i], dev_dest[i]);
-        }
-    }
-
-    bool pe_validates_dest_buffer(TestType test) {
-        return !pe_initializes_src_buffer(test);
-    }
-
-  protected:
-    HIPAllocator *hip_allocator_ {nullptr};
-
-    NotifierProxyT notifier_ {};
-
-    HeapMemory *heap_mem_{nullptr};
-
-    MPI_T *mpi_ {nullptr};
-
-    std::vector<int> golden_;
-
-    int *golden_dptr_ {nullptr};
-
-    IpcImplT ipc_impl_ {};
-
-    IpcImplT *ipc_impl_dptr_ {nullptr};
-
-    bool *error_dptr_ {nullptr};
+  bool* error_dptr_{nullptr};
 };
 
 class DegenerateTiledFine : public IPCImplTiledFine<IpcOnTestConfig> {
-  public:
-    ~DegenerateTiledFine() override {};
+ public:
+  ~DegenerateTiledFine() override {};
 };
 
 class ParameterizedBlockTiledFine : public IPCImplTiledFine<IpcOnTestConfig> {
-  public:
-    ~ParameterizedBlockTiledFine() override {};
+ public:
+  ~ParameterizedBlockTiledFine() override {};
 
-    void copy(TestType test, dim3 grid, dim3 block) override {
-        execute(test, kernel_tiled_fine_copy_block<IpcOnImpl>, grid, block);
-    }
+  void copy(TestType test, dim3 grid, dim3 block) override {
+    execute(test, kernel_tiled_fine_copy_block<IpcOnImpl>, grid, block);
+  }
 };
 
 class ParameterizedWarpTiledFine : public IPCImplTiledFine<IpcOnTestConfig> {
-  public:
-    ~ParameterizedWarpTiledFine() override {};
+ public:
+  ~ParameterizedWarpTiledFine() override {};
 
-    void copy(TestType test, dim3 grid, dim3 block) override {
-        execute(test, kernel_tiled_fine_copy_warp<IpcOnImpl>, grid, block);
-    }
+  void copy(TestType test, dim3 grid, dim3 block) override {
+    execute(test, kernel_tiled_fine_copy_warp<IpcOnImpl>, grid, block);
+  }
 };
 
 class ParameterizedThreadTiledFine : public IPCImplTiledFine<IpcOnTestConfig> {
-  public:
-    ~ParameterizedThreadTiledFine() override {};
+ public:
+  ~ParameterizedThreadTiledFine() override {};
 
-    void copy(TestType test, dim3 grid, dim3 block) override {
-        execute(test, kernel_tiled_fine_copy<IpcOnImpl>, grid, block);
-    }
+  void copy(TestType test, dim3 grid, dim3 block) override {
+    execute(test, kernel_tiled_fine_copy<IpcOnImpl>, grid, block);
+  }
 };
 
-} // namespace rocshmem
+}  // namespace rocshmem
 
 #endif  // ROCSHMEM_IPC_IMPL_SIMPLE_FINE_GTEST_HPP

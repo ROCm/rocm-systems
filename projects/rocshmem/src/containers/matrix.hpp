@@ -115,9 +115,8 @@ class Matrix {
    * @param[in] allocator
    * @param[in] strategy
    */
-  Matrix(size_t number_rows, size_t number_columns,
-         size_t TYPE_constructor_param, MemoryAllocator allocator,
-         const IndexStrategy index_strat);
+  Matrix(size_t number_rows, size_t number_columns, size_t TYPE_constructor_param,
+         MemoryAllocator allocator, const IndexStrategy index_strat);
 
   /**
    * @brief
@@ -128,9 +127,8 @@ class Matrix {
    * @param[in] allocator
    * @param[in] strategy
    */
-  Matrix(size_t number_rows, size_t number_columns,
-         std::vector<size_t> TYPE_constructor_param, MemoryAllocator allocator,
-         const IndexStrategy index_strat);
+  Matrix(size_t number_rows, size_t number_columns, std::vector<size_t> TYPE_constructor_param,
+         MemoryAllocator allocator, const IndexStrategy index_strat);
 
   /**
    * @brief

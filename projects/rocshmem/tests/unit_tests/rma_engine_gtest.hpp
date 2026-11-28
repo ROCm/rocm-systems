@@ -46,7 +46,7 @@ namespace rocshmem {
 // Skips (does not fail) when no active RDMA port is found -- see SetUp().
 class RmaEngineTestFixture : public ::testing::Test {
  protected:
-  static constexpr size_t kHeapSize = 65536;
+  static constexpr size_t kHeapSize    = 65536;
   static constexpr size_t kScratchSize = 64;
 
   net::Ibv ibv_;
@@ -54,8 +54,8 @@ class RmaEngineTestFixture : public ::testing::Test {
   net::MrRegistry mr_;
   net::LaneMap lm_{1 /*ctx*/, 2 /*pes*/};
   net::RmaEngine rma_;
-  void *heap_{nullptr};
-  void *scratch_{nullptr};
+  void* heap_{nullptr};
+  void* scratch_{nullptr};
   uint32_t scratch_lkey_{0};
   uint64_t next_wr_id_{1};
 
@@ -77,40 +77,38 @@ class RmaEngineTestFixture : public ::testing::Test {
     // Host "symmetric heap".
     ASSERT_EQ(posix_memalign(&heap_, 4096, kHeapSize), 0);
     memset(heap_, 0, kHeapSize);
-    ASSERT_TRUE(mr_.register_heap(&ibv_, const_cast<ibv_pd *>(ctrl_.dev().pd),
-                                  heap_, kHeapSize, /*is_device=*/false,
+    ASSERT_TRUE(mr_.register_heap(&ibv_, const_cast<ibv_pd*>(ctrl_.dev().pd), heap_, kHeapSize,
+                                  /*is_device=*/false,
                                   /*dmabuf=*/{}));
 
     // Fake 2-PE allgather: both peers' region = our own heap (loopback).
-    auto self_allgather = [this](void *inout, size_t bpp) {
+    auto self_allgather = [this](void* inout, size_t bpp) {
       struct HeapKey {
         uintptr_t base;
         uint64_t rkey;
       };
       HeapKey me{reinterpret_cast<uintptr_t>(heap_), mr_.heap_rkey()};
       for (int pe = 0; pe < 2; ++pe) {
-        memcpy(static_cast<char *>(inout) + pe * bpp, &me, sizeof(HeapKey));
+        memcpy(static_cast<char*>(inout) + pe * bpp, &me, sizeof(HeapKey));
       }
     };
     ASSERT_TRUE(mr_.exchange_heap(2, 0, self_allgather));
 
     // AMO result scratch (host, registered).
     ASSERT_EQ(posix_memalign(&scratch_, 64, kScratchSize), 0);
-    *static_cast<uint64_t *>(scratch_) = 0;
-    scratch_lkey_ =
-        mr_.register_local(&ibv_, const_cast<ibv_pd *>(ctrl_.dev().pd),
-                           scratch_, kScratchSize, /*is_device=*/false,
-                           /*dmabuf=*/{});
+    *static_cast<uint64_t*>(scratch_) = 0;
+    scratch_lkey_ = mr_.register_local(&ibv_, const_cast<ibv_pd*>(ctrl_.dev().pd), scratch_,
+                                       kScratchSize, /*is_device=*/false,
+                                       /*dmabuf=*/{});
     ASSERT_NE(scratch_lkey_, 0u);
 
     std::vector<net::LocalMr> local_mrs{
-        {reinterpret_cast<uintptr_t>(heap_),
-         reinterpret_cast<uintptr_t>(heap_) + kHeapSize, mr_.heap_lkey()},
+        {reinterpret_cast<uintptr_t>(heap_), reinterpret_cast<uintptr_t>(heap_) + kHeapSize,
+         mr_.heap_lkey()},
         {reinterpret_cast<uintptr_t>(scratch_),
          reinterpret_cast<uintptr_t>(scratch_) + kScratchSize, scratch_lkey_},
     };
-    rma_ = net::RmaEngine(&ibv_, &ctrl_, &mr_, lm_,
-                          reinterpret_cast<uintptr_t>(heap_), local_mrs);
+    rma_ = net::RmaEngine(&ibv_, &ctrl_, &mr_, lm_, reinterpret_cast<uintptr_t>(heap_), local_mrs);
   }
 
   void TearDown() override {

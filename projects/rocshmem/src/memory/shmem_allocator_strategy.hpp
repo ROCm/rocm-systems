@@ -53,8 +53,7 @@ class ShmemAllocatorStrategy {
   /**
    * @brief Disable copy assignment
    */
-  ShmemAllocatorStrategy& operator=(const ShmemAllocatorStrategy& other) =
-      default;
+  ShmemAllocatorStrategy& operator=(const ShmemAllocatorStrategy& other) = default;
 
   /**
    * @brief Allocates memory from the symmetric heap

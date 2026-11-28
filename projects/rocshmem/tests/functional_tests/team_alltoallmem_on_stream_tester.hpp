@@ -44,16 +44,15 @@ class TeamAlltoallmemOnStreamTester : public Tester {
 
   virtual void preLaunchKernel() override;
 
-  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop,
-                            size_t size) override;
+  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop, size_t size) override;
 
   virtual void postLaunchKernel() override;
 
   virtual void verifyResults(size_t size) override;
 
  private:
-  char *source_buf;
-  char *dest_buf;
+  char* source_buf;
+  char* dest_buf;
   int my_pe;
   int n_pes;
   size_t buf_size;
@@ -67,4 +66,3 @@ class TeamAlltoallmemOnStreamTester : public Tester {
 #include "team_alltoallmem_on_stream_tester.cpp"
 
 #endif
-

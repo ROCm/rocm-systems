@@ -40,15 +40,14 @@ class TeamCtxInfraTester : public Tester {
 
   virtual void preLaunchKernel() override;
 
-  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop,
-                            size_t size) override;
+  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop, size_t size) override;
 
   virtual void postLaunchKernel() override;
 
   virtual void verifyResults(size_t size) override;
 
-  char *s_buf = nullptr;
-  char *r_buf = nullptr;
+  char* s_buf = nullptr;
+  char* r_buf = nullptr;
 
   TeamSplitType _splitType;
   rocshmem::rocshmem_team_t _parentTeam = rocshmem::ROCSHMEM_TEAM_WORLD;
@@ -60,10 +59,10 @@ class TeamCtxInfraTester : public Tester {
    * Number of user-creatable teams. Should equal ROCSHMEM_MAX_NUM_TEAMS
    * (default 40). Overridden at runtime if the env variable is set.
    */
-  int num_teams = 40;
-  rocshmem::rocshmem_team_t *team_world_dup = nullptr;
+  int num_teams                                = 40;
+  rocshmem::rocshmem_team_t* team_world_dup    = nullptr;
   rocshmem::rocshmem_team_t subset_parent_team = rocshmem::ROCSHMEM_TEAM_INVALID;
-  bool _skip_shared = false;
+  bool _skip_shared                            = false;
 };
 
 #endif

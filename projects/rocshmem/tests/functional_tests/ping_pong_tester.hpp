@@ -30,11 +30,10 @@
 /******************************************************************************
  * DEVICE TEST KERNEL
  *****************************************************************************/
-__global__ void PingPongTest(int loop, int skip, long long int *start_time,
-                             long long int *end_time, int *r_buf,
-                             int *s_buf, char *data_s_buf, char *data_r_buf,
-                             uint64_t *sig_addr, size_t size,
-                             unsigned op_type, ShmemContextType ctx_type);
+__global__ void PingPongTest(int loop, int skip, long long int* start_time, long long int* end_time,
+                             int* r_buf, int* s_buf, char* data_s_buf, char* data_r_buf,
+                             uint64_t* sig_addr, size_t size, unsigned op_type,
+                             ShmemContextType ctx_type);
 
 /******************************************************************************
  * HOST TESTER CLASS
@@ -47,16 +46,15 @@ class PingPongTester : public Tester {
  protected:
   virtual void resetBuffers(size_t size) override;
 
-  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop,
-                            size_t size) override;
+  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop, size_t size) override;
 
   virtual void verifyResults(size_t size) override;
 
-  int *r_buf;
-  int *s_buf;
-  char *data_s_buf;
-  char *data_r_buf;
-  uint64_t *sig_addr;
+  int* r_buf;
+  int* s_buf;
+  char* data_s_buf;
+  char* data_r_buf;
+  uint64_t* sig_addr;
 };
 
 #endif

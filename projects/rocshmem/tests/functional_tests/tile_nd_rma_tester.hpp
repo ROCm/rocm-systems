@@ -14,15 +14,15 @@ using namespace rocshmem;
 class TileNDRMATester : public Tester {
  public:
   // Fixed tile dimensions — no message-size sweep.
-  static constexpr int D0_3D = 8;
-  static constexpr int D1_3D = 16;
-  static constexpr int D2_3D = 4;
+  static constexpr int D0_3D         = 8;
+  static constexpr int D1_3D         = 16;
+  static constexpr int D2_3D         = 4;
   static constexpr int TILE_ELEMS_3D = D0_3D * D1_3D * D2_3D;  // 512
 
-  static constexpr int D0_4D = 2;
-  static constexpr int D1_4D = 8;
-  static constexpr int D2_4D = 8;
-  static constexpr int D3_4D = 4;
+  static constexpr int D0_4D         = 2;
+  static constexpr int D1_4D         = 8;
+  static constexpr int D2_4D         = 8;
+  static constexpr int D3_4D         = 4;
   static constexpr int TILE_ELEMS_4D = D0_4D * D1_4D * D2_4D * D3_4D;  // 512
 
   // Both 3D and 4D tiles have the same total element count.
@@ -41,9 +41,9 @@ class TileNDRMATester : public Tester {
  private:
   float* source_buf{nullptr};  // owns both symmetric allocations
   float* dest_buf{nullptr};
-  float* source{nullptr};      // points into source_buf or dest_buf
-  float* dest{nullptr};        // points into source_buf or dest_buf
-  size_t num_elements{0};      // elements per symmetric allocation
+  float* source{nullptr};  // points into source_buf or dest_buf
+  float* dest{nullptr};    // points into source_buf or dest_buf
+  size_t num_elements{0};  // elements per symmetric allocation
 };
 
 #endif  // TILE_ND_RMA_TESTER_HPP

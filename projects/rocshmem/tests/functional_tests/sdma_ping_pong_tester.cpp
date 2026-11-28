@@ -35,7 +35,7 @@
 using namespace rocshmem;
 
 namespace rocshmem {
-extern Backend *backend;
+extern Backend* backend;
 }
 
 /******************************************************************************
@@ -49,45 +49,41 @@ extern Backend *backend;
  *
  * Only thread 0 is active (single-producer handle).
  *****************************************************************************/
-__global__ void SdmaPingPongTest(int loop, int skip,
-                                 long long int *start_time,
-                                 long long int *end_time,
-                                 char *s_buf, char *r_buf,
-                                 uint64_t *sig_addr, size_t size,
-                                 unsigned op_type,
+__global__ void SdmaPingPongTest(int loop, int skip, long long int* start_time,
+                                 long long int* end_time, char* s_buf, char* r_buf,
+                                 uint64_t* sig_addr, size_t size, unsigned op_type,
                                  ShmemContextType ctx_type) {
   __shared__ rocshmem_ctx_t ctx;
   rocshmem_wg_ctx_create(ctx_type, &ctx);
 
   if (threadIdx.x == 0) {
-    Context *base_ctx = reinterpret_cast<Context *>(ctx.ctx_opaque);
-    auto &ipc = base_ctx->ipcImpl_;
-    auto &sdma = ipc.sdmaImpl_;
+    Context* base_ctx = reinterpret_cast<Context*>(ctx.ctx_opaque);
+    auto& ipc         = base_ctx->ipcImpl_;
+    auto& sdma        = ipc.sdmaImpl_;
 
-    int pe = rocshmem_ctx_my_pe(ctx);
-    int my_local = ipc.shm_rank;
+    int pe           = rocshmem_ctx_my_pe(ctx);
+    int my_local     = ipc.shm_rank;
     int target_local = 1 - my_local;
 
-    sdma_anvil::SdmaQueueDeviceHandle *handle =
+    sdma_anvil::SdmaQueueDeviceHandle* handle =
         sdma.deviceHandles_d[target_local * sdma.numChannels + sdma.sdmaChannel];
 
     int wg_id = hipBlockIdx_x;
 
-    char *my_base = ipc.ipc_bases[my_local];
-    char *remote_base = ipc.ipc_bases[target_local];
+    char* my_base     = ipc.ipc_bases[my_local];
+    char* remote_base = ipc.ipc_bases[target_local];
 
-    char *my_s = s_buf + size * wg_id;
-    char *my_r = r_buf + size * wg_id;
-    uint64_t r_offset = my_r - my_base;
-    void *remote_r_buf = remote_base + r_offset;
+    char* my_s         = s_buf + size * wg_id;
+    char* my_r         = r_buf + size * wg_id;
+    uint64_t r_offset  = my_r - my_base;
+    void* remote_r_buf = remote_base + r_offset;
 
-    uint64_t *my_sig = &sig_addr[wg_id];
-    uint64_t sig_offset_bytes =
-        reinterpret_cast<char *>(my_sig) - my_base;
-    uint64_t *remote_sig = reinterpret_cast<uint64_t *>(remote_base + sig_offset_bytes);
+    uint64_t* my_sig          = &sig_addr[wg_id];
+    uint64_t sig_offset_bytes = reinterpret_cast<char*>(my_sig) - my_base;
+    uint64_t* remote_sig      = reinterpret_cast<uint64_t*>(remote_base + sig_offset_bytes);
 
-    int *r_int = reinterpret_cast<int *>(my_r);
-    int *s_int = reinterpret_cast<int *>(my_s);
+    int* r_int = reinterpret_cast<int*>(my_r);
+    int* s_int = reinterpret_cast<int*>(my_s);
 
     // Drain all setup loads from HBM before entering the timed loop.
 #if defined(__GFX9__) || defined(__GFX10__) || defined(__GFX11__)
@@ -105,15 +101,15 @@ __global__ void SdmaPingPongTest(int loop, int skip,
         int val = i + 1;
         if (pe == 0) {
           *s_int = val;
-          atomic::threadfence<atomic::memory_scope::device,
-                              atomic::memory_order::release>();
+          atomic::threadfence<atomic::memory_scope::device, atomic::memory_order::release>();
           sdma_anvil::put(*handle, remote_r_buf, my_s, sizeof(int));
-          while (uncached_load(r_int) != val) {}
+          while (uncached_load(r_int) != val) {
+          }
         } else {
-          while (uncached_load(r_int) != val) {}
+          while (uncached_load(r_int) != val) {
+          }
           *s_int = val;
-          atomic::threadfence<atomic::memory_scope::device,
-                              atomic::memory_order::release>();
+          atomic::threadfence<atomic::memory_scope::device, atomic::memory_order::release>();
           sdma_anvil::put(*handle, remote_r_buf, my_s, sizeof(int));
         }
       } else {
@@ -121,15 +117,15 @@ __global__ void SdmaPingPongTest(int loop, int skip,
         if (pe == 0) {
           sdma_anvil::put(*handle, remote_r_buf, my_s, size);
           sdma_anvil::quiet(*handle);
-          atomic::fetch_add<atomic::memory_scope::system,
-                            atomic::memory_order::relaxed>(remote_sig, 1ULL);
+          atomic::fetch_add<atomic::memory_scope::system, atomic::memory_order::relaxed>(remote_sig,
+                                                                                         1ULL);
           sdma_anvil::waitSignal(my_sig, expected);
         } else {
           sdma_anvil::waitSignal(my_sig, expected);
           sdma_anvil::put(*handle, remote_r_buf, my_s, size);
           sdma_anvil::quiet(*handle);
-          atomic::fetch_add<atomic::memory_scope::system,
-                            atomic::memory_order::relaxed>(remote_sig, 1ULL);
+          atomic::fetch_add<atomic::memory_scope::system, atomic::memory_order::relaxed>(remote_sig,
+                                                                                         1ULL);
         }
       }
     }
@@ -145,11 +141,11 @@ __global__ void SdmaPingPongTest(int loop, int skip,
  * HOST TESTER CLASS METHODS
  *****************************************************************************/
 SdmaPingPongTester::SdmaPingPongTester(TesterArguments args) : Tester(args) {
-  s_buf = (char *)alloc_test_buffer(max_msg_size * args.num_wgs);
-  r_buf = (char *)alloc_test_buffer(max_msg_size * args.num_wgs);
-  sig_addr = (uint64_t *)alloc_test_buffer(sizeof(uint64_t) * args.num_wgs);
+  s_buf      = (char*)alloc_test_buffer(max_msg_size * args.num_wgs);
+  r_buf      = (char*)alloc_test_buffer(max_msg_size * args.num_wgs);
+  sig_addr   = (uint64_t*)alloc_test_buffer(sizeof(uint64_t) * args.num_wgs);
   rtt_factor = 2;
-  bw_factor = 2;
+  bw_factor  = 2;
 
   // False if SDMA failed to connect (e.g. no xGMI) and fell back to IPC.
   sdma_unavailable = !backend->ipcImpl.sdmaImpl_.sdmaEnabled;
@@ -171,18 +167,17 @@ void SdmaPingPongTester::resetBuffers(size_t size) {
   CHECK_HIP(hipMemset(sig_addr, 0, sizeof(uint64_t) * args.num_wgs));
 }
 
-void SdmaPingPongTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
-                                      size_t size) {
-  if (sdma_unavailable) return;
+void SdmaPingPongTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop, size_t size) {
+  if (sdma_unavailable)
+    return;
 
   size_t shared_bytes = 0;
 
-  hipLaunchKernelGGL(SdmaPingPongTest, gridSize, blockSize, shared_bytes,
-                     stream, loop, args.skip, start_time, end_time,
-                     s_buf, r_buf, sig_addr, size, args.op_type,
+  hipLaunchKernelGGL(SdmaPingPongTest, gridSize, blockSize, shared_bytes, stream, loop, args.skip,
+                     start_time, end_time, s_buf, r_buf, sig_addr, size, args.op_type,
                      _shmem_context);
 
-  num_msgs = (loop + args.skip) * gridSize.x;
+  num_msgs       = (loop + args.skip) * gridSize.x;
   num_timed_msgs = loop * gridSize.x;
 }
 
@@ -192,20 +187,20 @@ void SdmaPingPongTester::verifyResults(size_t size) {
     return;
   }
 
-  if (args.op_type <= 1) return;
+  if (args.op_type <= 1)
+    return;
 
-  size_t check_bytes = size * args.num_wgs;
+  size_t check_bytes  = size * args.num_wgs;
   *verification_error = false;
-  size_t block = std::min((size_t)1024, check_bytes);
-  size_t grid = (check_bytes + block - 1) / block;
-  hipLaunchKernelGGL(rocshmem::verify_results_kernel_char, grid, block, 0, stream,
-                     r_buf, check_bytes, check_bytes, 1, 1, 0, 1,
-                     verification_error);
+  size_t block        = std::min((size_t)1024, check_bytes);
+  size_t grid         = (check_bytes + block - 1) / block;
+  hipLaunchKernelGGL(rocshmem::verify_results_kernel_char, grid, block, 0, stream, r_buf,
+                     check_bytes, check_bytes, 1, 1, 0, 1, verification_error);
   CHECK_HIP(hipStreamSynchronize(stream));
 
   if (*verification_error) {
-    fprintf(stderr, "FAIL: r_buf data mismatch (expected 'a') at size=%zu rank=%d\n",
-            size, args.myid);
+    fprintf(stderr, "FAIL: r_buf data mismatch (expected 'a') at size=%zu rank=%d\n", size,
+            args.myid);
     rocshmem_global_exit(1);
   }
 }

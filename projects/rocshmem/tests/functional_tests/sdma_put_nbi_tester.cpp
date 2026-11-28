@@ -34,7 +34,7 @@
 using namespace rocshmem;
 
 namespace rocshmem {
-extern Backend *backend;
+extern Backend* backend;
 }
 
 /******************************************************************************
@@ -44,8 +44,7 @@ extern Backend *backend;
  * Pipelines multiple sdma_anvil::put calls and quiets only at batch boundaries.
  * With poll set, each quiet spins on the non-blocking isFlushed() instead.
  *****************************************************************************/
-static __device__ void SdmaPutNbiQuiet(sdma_anvil::SdmaQueueDeviceHandle &handle,
-                                       bool poll) {
+static __device__ void SdmaPutNbiQuiet(sdma_anvil::SdmaQueueDeviceHandle& handle, bool poll) {
   if (!poll) {
     sdma_anvil::quiet(handle);
     return;
@@ -55,30 +54,27 @@ static __device__ void SdmaPutNbiQuiet(sdma_anvil::SdmaQueueDeviceHandle &handle
   }
 }
 
-__global__ void SdmaPutNbiTest(int loop, int skip,
-                               long long int *start_time,
-                               long long int *end_time,
-                               char *source, char *dest, size_t size,
-                               int batch, ShmemContextType ctx_type,
-                               bool poll) {
+__global__ void SdmaPutNbiTest(int loop, int skip, long long int* start_time,
+                               long long int* end_time, char* source, char* dest, size_t size,
+                               int batch, ShmemContextType ctx_type, bool poll) {
   __shared__ rocshmem_ctx_t ctx;
   rocshmem_wg_ctx_create(ctx_type, &ctx);
 
   if (threadIdx.x == 0) {
-    Context *base_ctx = reinterpret_cast<Context *>(ctx.ctx_opaque);
-    auto &ipc = base_ctx->ipcImpl_;
-    auto &sdma = ipc.sdmaImpl_;
+    Context* base_ctx = reinterpret_cast<Context*>(ctx.ctx_opaque);
+    auto& ipc         = base_ctx->ipcImpl_;
+    auto& sdma        = ipc.sdmaImpl_;
 
-    int my_local = ipc.shm_rank;
+    int my_local     = ipc.shm_rank;
     int target_local = 1 - my_local;
 
-    sdma_anvil::SdmaQueueDeviceHandle *handle =
+    sdma_anvil::SdmaQueueDeviceHandle* handle =
         sdma.deviceHandles_d[target_local * sdma.numChannels + sdma.sdmaChannel];
 
-    char *my_base = ipc.ipc_bases[my_local];
-    char *remote_base = ipc.ipc_bases[target_local];
+    char* my_base     = ipc.ipc_bases[my_local];
+    char* remote_base = ipc.ipc_bases[target_local];
 
-    int wg_id = hipBlockIdx_x;
+    int wg_id      = hipBlockIdx_x;
     int start_slot = (batch - (skip % batch)) % batch;
 
     // Drain all setup loads from HBM before entering the timed loop.
@@ -99,7 +95,7 @@ __global__ void SdmaPutNbiTest(int loop, int skip,
       }
 
       uint64_t d_offset = (dest + size * slot) - my_base;
-      void *remote_dest = remote_base + d_offset;
+      void* remote_dest = remote_base + d_offset;
 
       sdma_anvil::put(*handle, remote_dest, source, size);
     }
@@ -115,8 +111,8 @@ __global__ void SdmaPutNbiTest(int loop, int skip,
  * HOST TESTER CLASS METHODS
  *****************************************************************************/
 SdmaPutNbiTester::SdmaPutNbiTester(TesterArguments args) : Tester(args) {
-  s_buf = (char *)alloc_test_buffer(max_msg_size);
-  r_buf = (char *)alloc_test_buffer(max_msg_size * batch_size);
+  s_buf = (char*)alloc_test_buffer(max_msg_size);
+  r_buf = (char*)alloc_test_buffer(max_msg_size * batch_size);
 
   // False if SDMA failed to connect (e.g. no xGMI) and fell back to IPC.
   sdma_unavailable = !backend->ipcImpl.sdmaImpl_.sdmaEnabled;
@@ -136,18 +132,17 @@ void SdmaPutNbiTester::resetBuffers(size_t size) {
   CHECK_HIP(hipMemset(r_buf, 0, size * batch_size));
 }
 
-void SdmaPutNbiTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
-                                    size_t size) {
-  if (sdma_unavailable) return;
+void SdmaPutNbiTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop, size_t size) {
+  if (sdma_unavailable)
+    return;
 
   size_t shared_bytes = 0;
 
-  hipLaunchKernelGGL(SdmaPutNbiTest, gridSize, blockSize, shared_bytes,
-                     stream, loop, args.skip, start_time, end_time,
-                     s_buf, r_buf, size, batch_size, _shmem_context,
+  hipLaunchKernelGGL(SdmaPutNbiTest, gridSize, blockSize, shared_bytes, stream, loop, args.skip,
+                     start_time, end_time, s_buf, r_buf, size, batch_size, _shmem_context,
                      _type == SdmaPutNbiPollTestType);
 
-  num_msgs = (loop + args.skip) * gridSize.x;
+  num_msgs       = (loop + args.skip) * gridSize.x;
   num_timed_msgs = loop * gridSize.x;
 }
 
@@ -157,15 +152,15 @@ void SdmaPutNbiTester::verifyResults(size_t size) {
     return;
   }
 
-  if (args.myid != 1) return;
+  if (args.myid != 1)
+    return;
 
-  size_t check_bytes = size * batch_size;
+  size_t check_bytes  = size * batch_size;
   *verification_error = false;
-  size_t block = std::min((size_t)1024, check_bytes);
-  size_t grid = (check_bytes + block - 1) / block;
-  hipLaunchKernelGGL(rocshmem::verify_results_kernel_char, grid, block, 0, stream,
-                     r_buf, check_bytes, check_bytes, 1, 1, 0, 1,
-                     verification_error);
+  size_t block        = std::min((size_t)1024, check_bytes);
+  size_t grid         = (check_bytes + block - 1) / block;
+  hipLaunchKernelGGL(rocshmem::verify_results_kernel_char, grid, block, 0, stream, r_buf,
+                     check_bytes, check_bytes, 1, 1, 0, 1, verification_error);
   CHECK_HIP(hipStreamSynchronize(stream));
 
   if (*verification_error) {

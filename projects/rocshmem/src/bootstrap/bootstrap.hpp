@@ -26,7 +26,6 @@
 #ifndef ROCSHMEM_BOOTSTRAP_HPP_
 #define ROCSHMEM_BOOTSTRAP_HPP_
 
-
 #include <array>
 #include <bitset>
 #include <future>
@@ -44,17 +43,17 @@ std::string version();
 /// Base class for bootstraps.
 class Bootstrap {
  public:
-  Bootstrap(){};
-  virtual ~Bootstrap() = default;
-  virtual int getRank() = 0;
-  virtual int getNranks() = 0;
-  virtual int getNranksPerNode() = 0;
-  virtual std::vector<int> getLocalRanks() = 0;
-  virtual std::vector<int> getIpcCapableRanks() = 0;
+  Bootstrap() {};
+  virtual ~Bootstrap()                                       = default;
+  virtual int getRank()                                      = 0;
+  virtual int getNranks()                                    = 0;
+  virtual int getNranksPerNode()                             = 0;
+  virtual std::vector<int> getLocalRanks()                   = 0;
+  virtual std::vector<int> getIpcCapableRanks()              = 0;
   virtual void send(void* data, int size, int peer, int tag) = 0;
   virtual void recv(void* data, int size, int peer, int tag) = 0;
-  virtual void allGather(void* allData, int size) = 0;
-  virtual void barrier() = 0;
+  virtual void allGather(void* allData, int size)            = 0;
+  virtual void barrier()                                     = 0;
 
   void groupBarrier(const std::vector<int>& ranks);
   void groupAllGather(void* allData, int size, const std::vector<int>& ranks);

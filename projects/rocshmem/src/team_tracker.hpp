@@ -105,7 +105,7 @@ class TeamTracker {
    *
    * @return number of teams supported by tracker
    */
-  __host__ __device__ int get_max_num_teams() { return max_num_teams_; } // TODO fix narrowing
+  __host__ __device__ int get_max_num_teams() { return max_num_teams_; }  // TODO fix narrowing
 
   /**
    * @brief Get team world pointer

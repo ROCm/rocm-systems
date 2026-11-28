@@ -34,23 +34,23 @@
 
 namespace rocshmem {
 
-using AWF_Queue_statusT = AtomicWFQueue<volatile char*>;
+using AWF_Queue_statusT   = AtomicWFQueue<volatile char*>;
 using AWF_Queue_ret_buffT = AtomicWFQueue<uint64_t*>;
 
 struct BlockHandle {
   ROStats profiler{};
-  queue_element_t *queue{nullptr};
+  queue_element_t* queue{nullptr};
   uint64_t queue_size{};
   volatile uint64_t read_index{};
   volatile uint64_t write_index{};
-  volatile uint64_t *host_read_index{};
-  volatile char *status{nullptr};
-  void *g_ret{nullptr};
-  void *atomic_ret{nullptr};
+  volatile uint64_t* host_read_index{};
+  volatile char* status{nullptr};
+  void* g_ret{nullptr};
+  void* atomic_ret{nullptr};
   volatile uint64_t lock{};
-  AWF_Queue_statusT *default_ctx_status{nullptr};
-  AWF_Queue_ret_buffT *default_ctx_g_ret{nullptr};
-  AWF_Queue_ret_buffT *default_ctx_atomic_ret{nullptr};
+  AWF_Queue_statusT* default_ctx_status{nullptr};
+  AWF_Queue_ret_buffT* default_ctx_g_ret{nullptr};
+  AWF_Queue_ret_buffT* default_ctx_atomic_ret{nullptr};
   // NBI elements queued (bumped after enqueue) and the highest count covered by a completed proxy fence or quiet.
   uint64_t nbi_posted{};
   uint64_t nbi_fenced{};
@@ -62,33 +62,31 @@ class DefaultBlockHandleProxy {
  public:
   DefaultBlockHandleProxy() = default;
 
-  DefaultBlockHandleProxy(void *g_ret, void *atomic_ret, Queue *queue,
-                          volatile char *status,
-                          AWF_Queue_statusT *default_ctx_status,
-                          AWF_Queue_ret_buffT *default_ctx_g_ret,
-                          AWF_Queue_ret_buffT *default_ctx_atomic_ret,
+  DefaultBlockHandleProxy(void* g_ret, void* atomic_ret, Queue* queue, volatile char* status,
+                          AWF_Queue_statusT* default_ctx_status,
+                          AWF_Queue_ret_buffT* default_ctx_g_ret,
+                          AWF_Queue_ret_buffT* default_ctx_atomic_ret,
                           const HIPAllocatorFinegrained& alloc = HIPAllocatorFinegrained(),
-                          size_t num_elems = 1)
-    : alloc_{alloc}, proxy_{num_elems, alloc_} {
-
+                          size_t num_elems                     = 1)
+      : alloc_{alloc}, proxy_{num_elems, alloc_} {
     // TODO(bpotter): create a default queue for this queue descriptor
     auto queue_descriptor{queue->descriptor(0)};
     auto block_handle{proxy_.get()};
     block_handle->profiler.resetStats();
-    block_handle->queue = queue->elements(0);
-    block_handle->queue_size = queue->size();
-    block_handle->read_index = queue_descriptor->read_index;
-    block_handle->write_index = queue_descriptor->write_index;
-    block_handle->host_read_index = &queue_descriptor->read_index;
-    block_handle->status = status;
-    block_handle->g_ret = g_ret;
-    block_handle->atomic_ret = atomic_ret;
-    block_handle->lock = 0;
-    block_handle->default_ctx_status = default_ctx_status;
-    block_handle->default_ctx_g_ret = default_ctx_g_ret;
+    block_handle->queue                  = queue->elements(0);
+    block_handle->queue_size             = queue->size();
+    block_handle->read_index             = queue_descriptor->read_index;
+    block_handle->write_index            = queue_descriptor->write_index;
+    block_handle->host_read_index        = &queue_descriptor->read_index;
+    block_handle->status                 = status;
+    block_handle->g_ret                  = g_ret;
+    block_handle->atomic_ret             = atomic_ret;
+    block_handle->lock                   = 0;
+    block_handle->default_ctx_status     = default_ctx_status;
+    block_handle->default_ctx_g_ret      = default_ctx_g_ret;
     block_handle->default_ctx_atomic_ret = default_ctx_atomic_ret;
-    block_handle->nbi_posted = 0;
-    block_handle->nbi_fenced = 0;
+    block_handle->nbi_posted             = 0;
+    block_handle->nbi_fenced             = 0;
   }
 
   DefaultBlockHandleProxy(const DefaultBlockHandleProxy& other) = delete;
@@ -99,7 +97,7 @@ class DefaultBlockHandleProxy {
 
   DefaultBlockHandleProxy& operator=(DefaultBlockHandleProxy&& other) = default;
 
-  __host__ __device__ BlockHandle *get() { return proxy_.get(); }
+  __host__ __device__ BlockHandle* get() { return proxy_.get(); }
 
  private:
   HIPAllocatorFinegrained alloc_{};
@@ -112,28 +110,26 @@ class BlockHandleProxy {
  public:
   BlockHandleProxy() = default;
 
-  BlockHandleProxy(void *g_ret, void *atomic_ret, Queue *queue, size_t offset,
-                   volatile char *status, size_t max_blocks,
+  BlockHandleProxy(void* g_ret, void* atomic_ret, Queue* queue, size_t offset,
+                   volatile char* status, size_t max_blocks,
                    const HIPAllocatorFinegrained& alloc = HIPAllocatorFinegrained())
-    : alloc_{alloc}, proxy_{max_blocks, alloc_} {
-
+      : alloc_{alloc}, proxy_{max_blocks, alloc_} {
     for (size_t i{0}; i < max_blocks; i++) {
       auto queue_descriptor{queue->descriptor(i)};
       auto block_handle{&proxy_.get()[i]};
       size_t block_offset{i * offset};
       block_handle->profiler.resetStats();
-      block_handle->queue = queue->elements(i);
-      block_handle->queue_size = queue->size();
-      block_handle->read_index = queue_descriptor->read_index;
-      block_handle->write_index = queue_descriptor->write_index;
+      block_handle->queue           = queue->elements(i);
+      block_handle->queue_size      = queue->size();
+      block_handle->read_index      = queue_descriptor->read_index;
+      block_handle->write_index     = queue_descriptor->write_index;
       block_handle->host_read_index = &queue_descriptor->read_index;
-      block_handle->status = status + block_offset;
-      block_handle->g_ret = reinterpret_cast<uint64_t*>(g_ret) + block_offset;
-      block_handle->atomic_ret = reinterpret_cast<uint64_t*>(atomic_ret) +
-                                 block_offset;
-      block_handle->lock = 0;
-      block_handle->nbi_posted = 0;
-      block_handle->nbi_fenced = 0;
+      block_handle->status          = status + block_offset;
+      block_handle->g_ret           = reinterpret_cast<uint64_t*>(g_ret) + block_offset;
+      block_handle->atomic_ret      = reinterpret_cast<uint64_t*>(atomic_ret) + block_offset;
+      block_handle->lock            = 0;
+      block_handle->nbi_posted      = 0;
+      block_handle->nbi_fenced      = 0;
     }
   }
 
@@ -145,7 +141,7 @@ class BlockHandleProxy {
 
   BlockHandleProxy& operator=(BlockHandleProxy&& other) = default;
 
-  __host__ __device__ BlockHandle *get() { return proxy_.get(); }
+  __host__ __device__ BlockHandle* get() { return proxy_.get(); }
 
  private:
   HIPAllocatorFinegrained alloc_{};

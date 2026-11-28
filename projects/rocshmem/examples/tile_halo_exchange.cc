@@ -49,7 +49,7 @@ struct Coord2D {
 
 template <typename T>
 struct Tensor2D {
-  using element_type = T;
+  using element_type        = T;
   static constexpr int ndim = 2;
 
   T* data;
@@ -58,16 +58,14 @@ struct Tensor2D {
   int row_stride;
   int col_stride;
 
-  __host__ __device__ Tensor2D(T* data_, int rows_, int cols_,
-                                int row_stride_ = -1, int col_stride_ = 1)
+  __host__ __device__ Tensor2D(T* data_, int rows_, int cols_, int row_stride_ = -1,
+                               int col_stride_ = 1)
       : data(data_), rows(rows_), cols(cols_), col_stride(col_stride_) {
     row_stride = (row_stride_ == -1) ? cols : row_stride_;
   }
 
   __host__ __device__ T* data_handle() const { return data; }
-  __host__ __device__ int stride(int dim) const {
-    return (dim == 0) ? row_stride : col_stride;
-  }
+  __host__ __device__ int stride(int dim) const { return (dim == 0) ? row_stride : col_stride; }
 };
 
 /******************************************************************************
@@ -86,14 +84,12 @@ struct Tensor2D {
  * @param east_pe PE ID of east neighbor (-1 if none)
  * @param west_pe PE ID of west neighbor (-1 if none)
  */
-__global__ void halo_exchange_kernel(Tensor2D<float> local_tensor,
-                                     int inner_size,
-                                     int north_pe, int south_pe,
-                                     int east_pe, int west_pe) {
+__global__ void halo_exchange_kernel(Tensor2D<float> local_tensor, int inner_size, int north_pe,
+                                     int south_pe, int east_pe, int west_pe) {
   __shared__ rocshmem_ctx_t ctx;
   rocshmem_wg_ctx_create(ROCSHMEM_CTX_WG_PRIVATE, &ctx);
 
-  int wg_id = blockIdx.x;
+  int wg_id      = blockIdx.x;
   int halo_width = 1;
   int total_size = inner_size + 2 * halo_width;
 
@@ -112,8 +108,7 @@ __global__ void halo_exchange_kernel(Tensor2D<float> local_tensor,
     Coord2D start(0, 0);
     Coord2D boundary(1, inner_size);
     rocshmem_ctx_tile_put_wg(ctx, dst_sub, src_sub, start, boundary, north_pe, 0);
-  }
-  else if (wg_id == 1 && south_pe >= 0) {
+  } else if (wg_id == 1 && south_pe >= 0) {
     // Send south boundary (row 8, cols 1-8) to south neighbor's north halo (row 0, cols 1-8)
     float* src_ptr = local_tensor.data + (total_size - halo_width - 1) * total_size + halo_width;
     float* dst_ptr = local_tensor.data + 0 * total_size + halo_width;
@@ -123,8 +118,7 @@ __global__ void halo_exchange_kernel(Tensor2D<float> local_tensor,
     Coord2D start(0, 0);
     Coord2D boundary(1, inner_size);
     rocshmem_ctx_tile_put_wg(ctx, dst_sub, src_sub, start, boundary, south_pe, 0);
-  }
-  else if (wg_id == 2 && east_pe >= 0) {
+  } else if (wg_id == 2 && east_pe >= 0) {
     // Send east boundary (rows 1-8, col 8) to east neighbor's west halo (rows 1-8, col 0)
     float* src_ptr = local_tensor.data + halo_width * total_size + (total_size - halo_width - 1);
     float* dst_ptr = local_tensor.data + halo_width * total_size + 0;
@@ -134,8 +128,7 @@ __global__ void halo_exchange_kernel(Tensor2D<float> local_tensor,
     Coord2D start(0, 0);
     Coord2D boundary(inner_size, 1);
     rocshmem_ctx_tile_put_wg(ctx, dst_sub, src_sub, start, boundary, east_pe, 0);
-  }
-  else if (wg_id == 3 && west_pe >= 0) {
+  } else if (wg_id == 3 && west_pe >= 0) {
     // Send west boundary (rows 1-8, col 1) to west neighbor's east halo (rows 1-8, col 9/last)
     float* src_ptr = local_tensor.data + halo_width * total_size + halo_width;
     float* dst_ptr = local_tensor.data + halo_width * total_size + (total_size - halo_width);
@@ -154,10 +147,9 @@ __global__ void halo_exchange_kernel(Tensor2D<float> local_tensor,
  * HELPER FUNCTIONS
  *****************************************************************************/
 
-void print_domain(const std::vector<float>& data, int size, int my_pe,
-                  int grid_row, int grid_col) {
-  std::cout << "\nPE " << my_pe << " (grid pos [" << grid_row << "," << grid_col
-            << "]) domain (" << size << "×" << size << "):" << std::endl;
+void print_domain(const std::vector<float>& data, int size, int my_pe, int grid_row, int grid_col) {
+  std::cout << "\nPE " << my_pe << " (grid pos [" << grid_row << "," << grid_col << "]) domain ("
+            << size << "×" << size << "):" << std::endl;
 
   for (int i = 0; i < size; i++) {
     std::cout << "  ";
@@ -201,13 +193,13 @@ int main(int argc, char** argv) {
   // Determine neighbor PEs (-1 if at boundary)
   int north_pe = (my_grid_row > 0) ? (my_grid_row - 1) * grid_size + my_grid_col : -1;
   int south_pe = (my_grid_row < grid_size - 1) ? (my_grid_row + 1) * grid_size + my_grid_col : -1;
-  int west_pe = (my_grid_col > 0) ? my_grid_row * grid_size + (my_grid_col - 1) : -1;
-  int east_pe = (my_grid_col < grid_size - 1) ? my_grid_row * grid_size + (my_grid_col + 1) : -1;
+  int west_pe  = (my_grid_col > 0) ? my_grid_row * grid_size + (my_grid_col - 1) : -1;
+  int east_pe  = (my_grid_col < grid_size - 1) ? my_grid_row * grid_size + (my_grid_col + 1) : -1;
 
   if (my_pe == 0) {
     std::cout << "=== 2D Halo Exchange using Tile API ===" << std::endl;
-    std::cout << "Grid topology: " << grid_size << "×" << grid_size
-              << " (" << n_pes << " PEs)" << std::endl;
+    std::cout << "Grid topology: " << grid_size << "×" << grid_size << " (" << n_pes << " PEs)"
+              << std::endl;
   }
 
   // Configuration
@@ -224,15 +216,14 @@ int main(int argc, char** argv) {
   // Initialize inner domain with unique values per PE: PE_ID * 100 + row * 10 + col
   for (int i = HALO_WIDTH; i < INNER_SIZE + HALO_WIDTH; i++) {
     for (int j = HALO_WIDTH; j < INNER_SIZE + HALO_WIDTH; j++) {
-      int inner_row = i - HALO_WIDTH;
-      int inner_col = j - HALO_WIDTH;
+      int inner_row                = i - HALO_WIDTH;
+      int inner_col                = j - HALO_WIDTH;
       h_domain[i * TOTAL_SIZE + j] = my_pe * 100.0f + inner_row * 10.0f + inner_col;
     }
   }
 
   // Copy to device
-  CHECK_HIP(hipMemcpy(d_domain, h_domain.data(),
-                      TOTAL_SIZE * TOTAL_SIZE * sizeof(float),
+  CHECK_HIP(hipMemcpy(d_domain, h_domain.data(), TOTAL_SIZE * TOTAL_SIZE * sizeof(float),
                       hipMemcpyHostToDevice));
 
   if (my_pe == 0) {
@@ -242,8 +233,7 @@ int main(int argc, char** argv) {
   rocshmem_barrier_all();
 
   // Print initial state
-  CHECK_HIP(hipMemcpy(h_domain.data(), d_domain,
-                      TOTAL_SIZE * TOTAL_SIZE * sizeof(float),
+  CHECK_HIP(hipMemcpy(h_domain.data(), d_domain, TOTAL_SIZE * TOTAL_SIZE * sizeof(float),
                       hipMemcpyDeviceToHost));
   print_domain(h_domain, TOTAL_SIZE, my_pe, my_grid_row, my_grid_col);
 
@@ -253,9 +243,8 @@ int main(int argc, char** argv) {
   // Launch 4 workgroups (one per direction), each with 256 threads
   Tensor2D<float> domain_tensor(d_domain, TOTAL_SIZE, TOTAL_SIZE);
 
-  hipLaunchKernelGGL(halo_exchange_kernel, 4, 256, 0, 0,
-                     domain_tensor, INNER_SIZE,
-                     north_pe, south_pe, east_pe, west_pe);
+  hipLaunchKernelGGL(halo_exchange_kernel, 4, 256, 0, 0, domain_tensor, INNER_SIZE, north_pe,
+                     south_pe, east_pe, west_pe);
   CHECK_HIP(hipStreamSynchronize(0));
 
   rocshmem_barrier_all();
@@ -267,8 +256,7 @@ int main(int argc, char** argv) {
   rocshmem_barrier_all();
 
   // Print final state
-  CHECK_HIP(hipMemcpy(h_domain.data(), d_domain,
-                      TOTAL_SIZE * TOTAL_SIZE * sizeof(float),
+  CHECK_HIP(hipMemcpy(h_domain.data(), d_domain, TOTAL_SIZE * TOTAL_SIZE * sizeof(float),
                       hipMemcpyDeviceToHost));
   print_domain(h_domain, TOTAL_SIZE, my_pe, my_grid_row, my_grid_col);
 
@@ -282,12 +270,12 @@ int main(int argc, char** argv) {
     for (int j = HALO_WIDTH; j < INNER_SIZE + HALO_WIDTH; j++) {
       int expected_inner_row = INNER_SIZE - 1;  // Last row of north neighbor's inner domain
       int expected_inner_col = j - HALO_WIDTH;
-      float expected = north_pe * 100.0f + expected_inner_row * 10.0f + expected_inner_col;
-      float actual = h_domain[0 * TOTAL_SIZE + j];
+      float expected         = north_pe * 100.0f + expected_inner_row * 10.0f + expected_inner_col;
+      float actual           = h_domain[0 * TOTAL_SIZE + j];
 
       if (std::abs(actual - expected) > 0.001f) {
-        std::cout << "PE " << my_pe << " north halo error at [0," << j
-                  << "]: expected " << expected << ", got " << actual << std::endl;
+        std::cout << "PE " << my_pe << " north halo error at [0," << j << "]: expected " << expected
+                  << ", got " << actual << std::endl;
         success = false;
       }
     }
@@ -298,12 +286,12 @@ int main(int argc, char** argv) {
     for (int j = HALO_WIDTH; j < INNER_SIZE + HALO_WIDTH; j++) {
       int expected_inner_row = 0;  // First row of south neighbor's inner domain
       int expected_inner_col = j - HALO_WIDTH;
-      float expected = south_pe * 100.0f + expected_inner_row * 10.0f + expected_inner_col;
-      float actual = h_domain[(TOTAL_SIZE - 1) * TOTAL_SIZE + j];
+      float expected         = south_pe * 100.0f + expected_inner_row * 10.0f + expected_inner_col;
+      float actual           = h_domain[(TOTAL_SIZE - 1) * TOTAL_SIZE + j];
 
       if (std::abs(actual - expected) > 0.001f) {
-        std::cout << "PE " << my_pe << " south halo error at [" << (TOTAL_SIZE - 1)
-                  << "," << j << "]: expected " << expected << ", got " << actual << std::endl;
+        std::cout << "PE " << my_pe << " south halo error at [" << (TOTAL_SIZE - 1) << "," << j
+                  << "]: expected " << expected << ", got " << actual << std::endl;
         success = false;
       }
     }
@@ -314,12 +302,12 @@ int main(int argc, char** argv) {
     for (int i = HALO_WIDTH; i < INNER_SIZE + HALO_WIDTH; i++) {
       int expected_inner_row = i - HALO_WIDTH;
       int expected_inner_col = INNER_SIZE - 1;  // Last column of west neighbor's inner domain
-      float expected = west_pe * 100.0f + expected_inner_row * 10.0f + expected_inner_col;
-      float actual = h_domain[i * TOTAL_SIZE + 0];
+      float expected         = west_pe * 100.0f + expected_inner_row * 10.0f + expected_inner_col;
+      float actual           = h_domain[i * TOTAL_SIZE + 0];
 
       if (std::abs(actual - expected) > 0.001f) {
-        std::cout << "PE " << my_pe << " west halo error at [" << i
-                  << ",0]: expected " << expected << ", got " << actual << std::endl;
+        std::cout << "PE " << my_pe << " west halo error at [" << i << ",0]: expected " << expected
+                  << ", got " << actual << std::endl;
         success = false;
       }
     }
@@ -330,13 +318,12 @@ int main(int argc, char** argv) {
     for (int i = HALO_WIDTH; i < INNER_SIZE + HALO_WIDTH; i++) {
       int expected_inner_row = i - HALO_WIDTH;
       int expected_inner_col = 0;  // First column of east neighbor's inner domain
-      float expected = east_pe * 100.0f + expected_inner_row * 10.0f + expected_inner_col;
-      float actual = h_domain[i * TOTAL_SIZE + (TOTAL_SIZE - 1)];
+      float expected         = east_pe * 100.0f + expected_inner_row * 10.0f + expected_inner_col;
+      float actual           = h_domain[i * TOTAL_SIZE + (TOTAL_SIZE - 1)];
 
       if (std::abs(actual - expected) > 0.001f) {
-        std::cout << "PE " << my_pe << " east halo error at [" << i
-                  << "," << (TOTAL_SIZE - 1) << "]: expected " << expected
-                  << ", got " << actual << std::endl;
+        std::cout << "PE " << my_pe << " east halo error at [" << i << "," << (TOTAL_SIZE - 1)
+                  << "]: expected " << expected << ", got " << actual << std::endl;
         success = false;
       }
     }

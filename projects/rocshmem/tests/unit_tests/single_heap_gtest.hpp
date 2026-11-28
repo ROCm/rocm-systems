@@ -31,15 +31,14 @@
 
 namespace rocshmem {
 
-class SingleHeapTestFixture : public ::testing::Test
-{
-  protected:
-    /**
-     * @brief Single heap object
-     */
-    SingleHeap single_heap_ {};
+class SingleHeapTestFixture : public ::testing::Test {
+ protected:
+  /**
+   * @brief Single heap object
+   */
+  SingleHeap single_heap_{};
 };
 
-} // namespace rocshmem
+}  // namespace rocshmem
 
-#endif // ROCSHMEM_SINGLE_HEAP_GTEST_HPP
+#endif  // ROCSHMEM_SINGLE_HEAP_GTEST_HPP

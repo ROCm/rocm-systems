@@ -17,7 +17,8 @@ namespace rocshmem {
 
 class QueuePairIONIC;
 
-template <> struct QueuePairTraits<QueuePairIONIC> {
+template <>
+struct QueuePairTraits<QueuePairIONIC> {
   enum class OpCode : uint8_t {
     RDMA_WRITE = IONIC_V2_OP_RDMA_WRITE,
     RDMA_READ  = IONIC_V2_OP_RDMA_READ,
@@ -47,21 +48,21 @@ template <> struct QueuePairTraits<QueuePairIONIC> {
 };
 
 class QueuePairIONIC : public QueuePairDevice<QueuePairIONIC> {
-private:
+ private:
   ionic_device_sq sq;
   ionic_device_cq cq;
 
-public:
+ public:
   __host__ explicit QueuePairIONIC(uint32_t qpn, QueuePairInitInfo&& init_info,
                                    ionic_device_sq&& sq, ionic_device_cq&& cq)
-    : QueuePairDevice{qpn, std::move(init_info)},
-      sq{std::move(sq)}, cq{std::move(cq)} { }
+      : QueuePairDevice{qpn, std::move(init_info)}, sq{std::move(sq)}, cq{std::move(cq)} {}
 
-  __host__ explicit QueuePairIONIC(uint32_t qpn,
-                                   uint64_t *nonfetching_atomic, uint32_t nonfetching_atomic_lkey,
-                                   ionic_device_sq&& sq, ionic_device_cq&& cq)
-    : QueuePairDevice{qpn, nonfetching_atomic, nonfetching_atomic_lkey},
-      sq{std::move(sq)}, cq{std::move(cq)} { }
+  __host__ explicit QueuePairIONIC(uint32_t qpn, uint64_t* nonfetching_atomic,
+                                   uint32_t nonfetching_atomic_lkey, ionic_device_sq&& sq,
+                                   ionic_device_cq&& cq)
+      : QueuePairDevice{qpn, nonfetching_atomic, nonfetching_atomic_lkey},
+        sq{std::move(sq)},
+        cq{std::move(cq)} {}
 
   __host__ QueuePairIONIC(const QueuePairIONIC& other)            = delete;
   __host__ QueuePairIONIC& operator=(const QueuePairIONIC& other) = delete;
@@ -69,30 +70,27 @@ public:
   __host__ QueuePairIONIC& operator=(QueuePairIONIC&& other)      = default;
   __host__ ~QueuePairIONIC()                                      = default;
 
-public:
+ public:
   template <OpCode Op, typename... Options>
-  __device__ __noinline__
-  void post_wqe_rma(uintptr_t laddr, uint32_t lkey,
-                    uintptr_t raddr, uint32_t rkey, size_t size,
-                    const ActiveWFInfo& wf_info, PostOpt<Options...> = {});
+  __device__ __noinline__ void post_wqe_rma(uintptr_t laddr, uint32_t lkey, uintptr_t raddr,
+                                            uint32_t rkey, size_t size, const ActiveWFInfo& wf_info,
+                                            PostOpt<Options...> = {});
 
   template <OpCode Op, typename... Options>
-  __device__ __noinline__
-  void post_wqe_rma_single(uintptr_t laddr, uint32_t lkey,
-                           uintptr_t raddr, uint32_t rkey, size_t size,
-                           PostOpt<Options...> = {});
+  __device__ __noinline__ void post_wqe_rma_single(uintptr_t laddr, uint32_t lkey, uintptr_t raddr,
+                                                   uint32_t rkey, size_t size,
+                                                   PostOpt<Options...> = {});
 
   template <OpCode Op, AMOFetchType Fetch, typename... Options>
-  __device__ __noinline__
-  amo_ret_t<Fetch> post_wqe_amo(uintptr_t raddr, uint32_t rkey,
-                                uint64_t swap_add, uint64_t compare,
-                                const ActiveWFInfo& wf_info, PostOpt<Options...> = {});
+  __device__ __noinline__ amo_ret_t<Fetch> post_wqe_amo(uintptr_t raddr, uint32_t rkey,
+                                                        uint64_t swap_add, uint64_t compare,
+                                                        const ActiveWFInfo& wf_info,
+                                                        PostOpt<Options...> = {});
 
   template <OpCode Op, AMOFetchType Fetch, typename... Options>
-  __device__ __noinline__
-  amo_ret_t<Fetch> post_wqe_amo_single(uintptr_t raddr, uint32_t rkey,
-                                       uint64_t swap_add, uint64_t compare,
-                                       PostOpt<Options...> = {});
+  __device__ __noinline__ amo_ret_t<Fetch> post_wqe_amo_single(uintptr_t raddr, uint32_t rkey,
+                                                               uint64_t swap_add, uint64_t compare,
+                                                               PostOpt<Options...> = {});
 
   __device__ __noinline__ void quiet_single();
 
@@ -100,7 +98,7 @@ public:
 
   __device__ __forceinline__ bool poll_cq_once(uint64_t target);
 
-private:
+ private:
   /**
    * @brief Reserve space in the sq to post this many wqes.
    * @param num_wqes number of sq wqes to reserve for this wave.
@@ -143,19 +141,20 @@ private:
 
 // can be called with all active lanes using any number of different QPs, don't assume anything
 template <QueuePairIONIC::OpCode Op, typename... Options>
-__device__ __noinline__ void QueuePairIONIC::post_wqe_rma(
-    uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey, size_t size,
-    const ActiveWFInfo& wf_info, PostOpt<Options...>) {
-  using PostOptions = PostOpt<Options...>;
-  uint32_t num_wqes = wf_info.num_pe_group_lanes;
+__device__ __noinline__ void QueuePairIONIC::post_wqe_rma(uintptr_t laddr, uint32_t lkey,
+                                                          uintptr_t raddr, uint32_t rkey,
+                                                          size_t size, const ActiveWFInfo& wf_info,
+                                                          PostOpt<Options...>) {
+  using PostOptions   = PostOpt<Options...>;
+  uint32_t num_wqes   = wf_info.num_pe_group_lanes;
   uint32_t my_sq_prod = 0;
   if (wf_info.is_pe_group_first) {
     my_sq_prod = reserve_sq<PostOptions>(num_wqes);
   }
-  my_sq_prod = __shfl(my_sq_prod, wf_info.pe_group_first_phys_lane_id);
-  uint32_t my_sq_pos = my_sq_prod + wf_info.pe_group_logical_lane_id;
-  struct ionic_v1_wqe *wqe = &sq.buf[my_sq_pos & sq.mask];
-  uint16_t wqe_flags = 0;
+  my_sq_prod               = __shfl(my_sq_prod, wf_info.pe_group_first_phys_lane_id);
+  uint32_t my_sq_pos       = my_sq_prod + wf_info.pe_group_logical_lane_id;
+  struct ionic_v1_wqe* wqe = &sq.buf[my_sq_pos & sq.mask];
+  uint16_t wqe_flags       = 0;
 
   if (!(my_sq_pos & (sq.mask + 1))) {
     wqe_flags |= IONIC_V1_FLAG_COLOR_BE;
@@ -172,9 +171,9 @@ __device__ __noinline__ void QueuePairIONIC::post_wqe_rma(
     }
   }
 
-  wqe->base.wqe_idx = my_sq_pos;
-  wqe->base.op = static_cast<uint8_t>(Op);
-  wqe->base.num_sge_key = size ? 1 : 0;
+  wqe->base.wqe_idx      = my_sq_pos;
+  wqe->base.op           = static_cast<uint8_t>(Op);
+  wqe->base.num_sge_key  = size ? 1 : 0;
   wqe->base.imm_data_key = 0;
 
   wqe->common.rdma.remote_va_high = endian::to_be<uint32_t>(raddr >> 32);
@@ -209,14 +208,15 @@ __device__ __noinline__ void QueuePairIONIC::post_wqe_rma(
 
 // precondition: called with all active lanes using different QPs
 template <QueuePairIONIC::OpCode Op, typename... Options>
-__device__ __noinline__ void QueuePairIONIC::post_wqe_rma_single(
-    uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey, size_t size, PostOpt<Options...>) {
-  using PostOptions = PostOpt<Options...>;
+__device__ __noinline__ void QueuePairIONIC::post_wqe_rma_single(uintptr_t laddr, uint32_t lkey,
+                                                                 uintptr_t raddr, uint32_t rkey,
+                                                                 size_t size, PostOpt<Options...>) {
+  using PostOptions                  = PostOpt<Options...>;
   static constexpr uint32_t num_wqes = 1;
-  uint32_t my_sq_prod = reserve_sq<PostOptions>(num_wqes);
-  uint32_t my_sq_pos = my_sq_prod;
-  struct ionic_v1_wqe *wqe = &sq.buf[my_sq_pos & sq.mask];
-  uint16_t wqe_flags = 0;
+  uint32_t my_sq_prod                = reserve_sq<PostOptions>(num_wqes);
+  uint32_t my_sq_pos                 = my_sq_prod;
+  struct ionic_v1_wqe* wqe           = &sq.buf[my_sq_pos & sq.mask];
+  uint16_t wqe_flags                 = 0;
 
   if (!(my_sq_pos & (sq.mask + 1))) {
     wqe_flags |= IONIC_V1_FLAG_COLOR_BE;
@@ -233,9 +233,9 @@ __device__ __noinline__ void QueuePairIONIC::post_wqe_rma_single(
     }
   }
 
-  wqe->base.wqe_idx = my_sq_pos;
-  wqe->base.op = static_cast<uint8_t>(Op);
-  wqe->base.num_sge_key = size ? 1 : 0;
+  wqe->base.wqe_idx      = my_sq_pos;
+  wqe->base.op           = static_cast<uint8_t>(Op);
+  wqe->base.num_sge_key  = size ? 1 : 0;
   wqe->base.imm_data_key = 0;
 
   wqe->common.rdma.remote_va_high = endian::to_be<uint32_t>(raddr >> 32);
@@ -272,9 +272,9 @@ __device__ __noinline__ QueuePairIONIC::amo_ret_t<Fetch> QueuePairIONIC::post_wq
     uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare,
     const ActiveWFInfo& wf_info, PostOpt<Options...>) {
   static_assert(Fetch != AMOFetchType::NonBlocking, "non-blocking AMOs not yet implemented");
-  using PostOptions = PostOpt<Options...>;
-  uint32_t num_wqes = wf_info.num_pe_group_lanes;
-  uint32_t my_sq_prod = 0;
+  using PostOptions           = PostOpt<Options...>;
+  uint32_t num_wqes           = wf_info.num_pe_group_lanes;
+  uint32_t my_sq_prod         = 0;
   uint64_t* wave_fetch_atomic = nullptr;
 
   if (wf_info.is_pe_group_first) {
@@ -291,15 +291,14 @@ __device__ __noinline__ QueuePairIONIC::amo_ret_t<Fetch> QueuePairIONIC::post_wq
   }
 
   if constexpr (Fetch == AMOFetchType::Blocking) {
-    wave_fetch_atomic =
-        reinterpret_cast<uint64_t*>(__shfl(reinterpret_cast<uintptr_t>(wave_fetch_atomic),
-                                           wf_info.pe_group_first_phys_lane_id));
+    wave_fetch_atomic = reinterpret_cast<uint64_t*>(__shfl(
+        reinterpret_cast<uintptr_t>(wave_fetch_atomic), wf_info.pe_group_first_phys_lane_id));
   }
 
-  my_sq_prod = __shfl(my_sq_prod, wf_info.pe_group_first_phys_lane_id);
-  uint32_t my_sq_pos = my_sq_prod + wf_info.pe_group_logical_lane_id;
-  struct ionic_v1_wqe *wqe = &sq.buf[my_sq_pos & sq.mask];
-  uint16_t wqe_flags = 0;
+  my_sq_prod               = __shfl(my_sq_prod, wf_info.pe_group_first_phys_lane_id);
+  uint32_t my_sq_pos       = my_sq_prod + wf_info.pe_group_logical_lane_id;
+  struct ionic_v1_wqe* wqe = &sq.buf[my_sq_pos & sq.mask];
+  uint16_t wqe_flags       = 0;
 
   if (!(my_sq_pos & (sq.mask + 1))) {
     wqe_flags |= IONIC_V1_FLAG_COLOR_BE;
@@ -309,9 +308,9 @@ __device__ __noinline__ QueuePairIONIC::amo_ret_t<Fetch> QueuePairIONIC::post_wq
     wqe_flags |= IONIC_V1_FLAG_SIG_BE;
   }
 
-  wqe->base.wqe_idx = my_sq_pos;
-  wqe->base.op = static_cast<uint8_t>(Op);
-  wqe->base.num_sge_key = 1;
+  wqe->base.wqe_idx      = my_sq_pos;
+  wqe->base.op           = static_cast<uint8_t>(Op);
+  wqe->base.num_sge_key  = 1;
   wqe->base.imm_data_key = 0;
 
   wqe->atomic_v2.remote_va_high = endian::to_be<uint32_t>(raddr >> 32);
@@ -353,10 +352,10 @@ template <QueuePairIONIC::OpCode Op, AMOFetchType Fetch, typename... Options>
 __device__ __noinline__ QueuePairIONIC::amo_ret_t<Fetch> QueuePairIONIC::post_wqe_amo_single(
     uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare, PostOpt<Options...>) {
   static_assert(Fetch != AMOFetchType::NonBlocking, "non-blocking AMOs not yet implemented");
-  using PostOptions = PostOpt<Options...>;
+  using PostOptions                  = PostOpt<Options...>;
   static constexpr uint32_t num_wqes = 1;
-  uint32_t my_sq_prod = reserve_sq<PostOptions>(num_wqes);
-  uint64_t* wave_fetch_atomic = nullptr;
+  uint32_t my_sq_prod                = reserve_sq<PostOptions>(num_wqes);
+  uint64_t* wave_fetch_atomic        = nullptr;
 
   if constexpr (Fetch == AMOFetchType::Blocking) {
     using PopBackResult = decltype(fetching_atomic_freelist->pop_front());
@@ -368,9 +367,9 @@ __device__ __noinline__ QueuePairIONIC::amo_ret_t<Fetch> QueuePairIONIC::post_wq
     wave_fetch_atomic = res.value;
   }
 
-  uint32_t my_sq_pos = my_sq_prod;
-  struct ionic_v1_wqe *wqe = &sq.buf[my_sq_pos & sq.mask];
-  uint16_t wqe_flags = 0;
+  uint32_t my_sq_pos       = my_sq_prod;
+  struct ionic_v1_wqe* wqe = &sq.buf[my_sq_pos & sq.mask];
+  uint16_t wqe_flags       = 0;
 
   if (!(my_sq_pos & (sq.mask + 1))) {
     wqe_flags |= IONIC_V1_FLAG_COLOR_BE;
@@ -380,9 +379,9 @@ __device__ __noinline__ QueuePairIONIC::amo_ret_t<Fetch> QueuePairIONIC::post_wq
     wqe_flags |= IONIC_V1_FLAG_SIG_BE;
   }
 
-  wqe->base.wqe_idx = my_sq_pos;
-  wqe->base.op = static_cast<uint8_t>(Op);
-  wqe->base.num_sge_key = 1;
+  wqe->base.wqe_idx      = my_sq_pos;
+  wqe->base.op           = static_cast<uint8_t>(Op);
+  wqe->base.num_sge_key  = 1;
   wqe->base.imm_data_key = 0;
 
   wqe->atomic_v2.remote_va_high = endian::to_be<uint32_t>(raddr >> 32);
@@ -424,21 +423,21 @@ __device__ __forceinline__ uint64_t QueuePairIONIC::cq_target() {
 
 // Only reads queue state, so lanes sharing a queue pair can call it.
 __device__ __forceinline__ bool QueuePairIONIC::poll_cq_once(uint64_t target) {
-  volatile struct ionic_v1_cqe *cqe = &cq.buf[0];
-  uint32_t qtf_be = cqe->qid_type_flags;
-  uint32_t msn = endian::from_be(cqe->send.msg_msn);
+  volatile struct ionic_v1_cqe* cqe = &cq.buf[0];
+  uint32_t qtf_be                   = cqe->qid_type_flags;
+  uint32_t msn                      = endian::from_be(cqe->send.msg_msn);
 
   if (!!(qtf_be & IONIC_V1_CQE_ERROR_BE)) {
 #if defined(BUILD_DEBUG_DEVICE)
-    uint32_t qtf = endian::from_be(qtf_be);
-    uint32_t qid = qtf >> IONIC_V1_CQE_QID_SHIFT;
-    uint32_t type = (qtf >> IONIC_V1_CQE_TYPE_SHIFT) & IONIC_V1_CQE_TYPE_MASK;
-    uint32_t flag = qtf & 0xf;
+    uint32_t qtf    = endian::from_be(qtf_be);
+    uint32_t qid    = qtf >> IONIC_V1_CQE_QID_SHIFT;
+    uint32_t type   = (qtf >> IONIC_V1_CQE_TYPE_SHIFT) & IONIC_V1_CQE_TYPE_MASK;
+    uint32_t flag   = qtf & 0xf;
     uint32_t status = endian::from_be(cqe->status_length);
-    uint64_t npg = cqe->send.npg_wqe_idx_timestamp & IONIC_V1_CQE_WQE_IDX_MASK;
+    uint64_t npg    = cqe->send.npg_wqe_idx_timestamp & IONIC_V1_CQE_WQE_IDX_MASK;
 
-    LOGD_ERROR("QUIET ERROR (CCQE): qid %u type %u flag %#x status %u msn %u npg %lu",
-               qid, type, flag, status, msn, npg);
+    LOGD_ERROR("QUIET ERROR (CCQE): qid %u type %u flag %#x status %u msn %u npg %lu", qid, type,
+               flag, status, msn, npg);
 #endif
     /* No other way to signal an error, so just crash. */
     abort();
@@ -453,14 +452,14 @@ __device__ __forceinline__ uint32_t QueuePairIONIC::reserve_sq(uint32_t num_wqes
   // reserve space for wqes in sq
   uint32_t my_sq_prod = 0;
   if constexpr (PostOptions::ThreadSafe) {
-    my_sq_prod = __scoped_atomic_fetch_add(&sq.pos, num_wqes,
-                                           __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+    my_sq_prod =
+        __scoped_atomic_fetch_add(&sq.pos, num_wqes, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
   } else {
     // need to at least acquire so that SQ values are current
     __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
     // we don't need thread safety, so just do plain loads/stores
     my_sq_prod = sq.pos;
-    sq.pos = my_sq_prod + num_wqes;
+    sq.pos     = my_sq_prod + num_wqes;
   }
 
   if constexpr (PostOptions::CheckSQ) {
@@ -473,8 +472,8 @@ __device__ __forceinline__ uint32_t QueuePairIONIC::reserve_sq(uint32_t num_wqes
 
 // precondition: called with all active lanes using different QPs
 template <typename PostOptions>
-__device__ __forceinline__ uint32_t QueuePairIONIC::commit_sq(
-    uint32_t my_sq_prod, uint32_t num_wqes) {
+__device__ __forceinline__ uint32_t QueuePairIONIC::commit_sq(uint32_t my_sq_prod,
+                                                              uint32_t num_wqes) {
   uint32_t dbprod = my_sq_prod + num_wqes;
 
   if constexpr (PostOptions::RingDB) {
@@ -513,36 +512,36 @@ __device__ __forceinline__ void QueuePairIONIC::ring_doorbell(uint32_t pos) {
    * This avoids the missed-write issue when multiple lanes write to the same address.
    */
   static constexpr size_t num_qtypes = 8;
-  uint64_t *lane_sq_dbreg = &sq.dbreg[__lane_id() * num_qtypes];
-  uint64_t dbval = sq.dbval | (pos & sq.mask);
+  uint64_t* lane_sq_dbreg            = &sq.dbreg[__lane_id() * num_qtypes];
+  uint64_t dbval                     = sq.dbval | (pos & sq.mask);
   __scoped_atomic_store_n(lane_sq_dbreg, dbval, __ATOMIC_RELEASE, __MEMORY_SCOPE_SYSTEM);
 }
 
 // precondition: called with all active lanes using different QPs
 __device__ inline void QueuePairIONIC::poll_cq_until(uint32_t cons) {
-  volatile struct ionic_v1_cqe *cqe = &cq.buf[0];
-  uint32_t qtf_be = cqe->qid_type_flags;
-  uint32_t msn = endian::from_be(cqe->send.msg_msn);
+  volatile struct ionic_v1_cqe* cqe = &cq.buf[0];
+  uint32_t qtf_be                   = cqe->qid_type_flags;
+  uint32_t msn                      = endian::from_be(cqe->send.msg_msn);
   while ((msn - cons) & 0x800000) {
     if (!!(qtf_be & IONIC_V1_CQE_ERROR_BE)) {
       break;
     }
 
     qtf_be = cqe->qid_type_flags;
-    msn = endian::from_be(cqe->send.msg_msn);
+    msn    = endian::from_be(cqe->send.msg_msn);
   }
 
   if (!!(qtf_be & IONIC_V1_CQE_ERROR_BE)) {
 #if defined(BUILD_DEBUG_DEVICE)
-    uint32_t qtf = endian::from_be(qtf_be);
-    uint32_t qid = qtf >> IONIC_V1_CQE_QID_SHIFT;
-    uint32_t type = (qtf >> IONIC_V1_CQE_TYPE_SHIFT) & IONIC_V1_CQE_TYPE_MASK;
-    uint32_t flag = qtf & 0xf;
+    uint32_t qtf    = endian::from_be(qtf_be);
+    uint32_t qid    = qtf >> IONIC_V1_CQE_QID_SHIFT;
+    uint32_t type   = (qtf >> IONIC_V1_CQE_TYPE_SHIFT) & IONIC_V1_CQE_TYPE_MASK;
+    uint32_t flag   = qtf & 0xf;
     uint32_t status = endian::from_be(cqe->status_length);
-    uint64_t npg = cqe->send.npg_wqe_idx_timestamp & IONIC_V1_CQE_WQE_IDX_MASK;
+    uint64_t npg    = cqe->send.npg_wqe_idx_timestamp & IONIC_V1_CQE_WQE_IDX_MASK;
 
-    LOGD_ERROR("QUIET ERROR (CCQE): qid %u type %u flag %#x status %u msn %u npg %lu",
-               qid, type, flag, status, msn, npg);
+    LOGD_ERROR("QUIET ERROR (CCQE): qid %u type %u flag %#x status %u msn %u npg %lu", qid, type,
+               flag, status, msn, npg);
 #endif
     /* No other way to signal an error, so just crash. */
     abort();

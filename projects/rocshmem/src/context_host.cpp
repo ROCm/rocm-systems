@@ -29,20 +29,15 @@
 namespace rocshmem {
 
 __host__ Context::Context(Backend* handle)
-    : num_pes(handle->getNumPEs()),
-      my_pe(handle->getMyPE()),
-      btype(handle->type) {
-}
+    : num_pes(handle->getNumPEs()), my_pe(handle->getMyPE()), btype(handle->type) {}
 
-__host__ Context::~Context() {
-}
+__host__ Context::~Context() {}
 
 /******************************************************************************
  ********************** CONTEXT DISPATCH IMPLEMENTATIONS **********************
  *****************************************************************************/
 
-__host__ void Context::putmem(void* dest, const void* source, size_t nelems,
-                              int pe) {
+__host__ void Context::putmem(void* dest, const void* source, size_t nelems, int pe) {
   if (nelems == 0) {
     return;
   }
@@ -52,8 +47,7 @@ __host__ void Context::putmem(void* dest, const void* source, size_t nelems,
   HOST_DISPATCH(putmem(dest, source, nelems, pe));
 }
 
-__host__ void Context::getmem(void* dest, const void* source, size_t nelems,
-                              int pe) {
+__host__ void Context::getmem(void* dest, const void* source, size_t nelems, int pe) {
   if (nelems == 0) {
     return;
   }
@@ -63,8 +57,7 @@ __host__ void Context::getmem(void* dest, const void* source, size_t nelems,
   HOST_DISPATCH(getmem(dest, source, nelems, pe));
 }
 
-__host__ void Context::putmem_nbi(void* dest, const void* source, size_t nelems,
-                                  int pe) {
+__host__ void Context::putmem_nbi(void* dest, const void* source, size_t nelems, int pe) {
   if (nelems == 0) {
     return;
   }
@@ -74,8 +67,7 @@ __host__ void Context::putmem_nbi(void* dest, const void* source, size_t nelems,
   HOST_DISPATCH(putmem_nbi(dest, source, nelems, pe));
 }
 
-__host__ void Context::getmem_nbi(void* dest, const void* source, size_t nelems,
-                                  int pe) {
+__host__ void Context::getmem_nbi(void* dest, const void* source, size_t nelems, int pe) {
   if (nelems == 0) {
     return;
   }
@@ -133,8 +125,7 @@ __host__ void Context::barrier_all_on_stream(hipStream_t stream) {
   HOST_DISPATCH(barrier_all_on_stream(stream));
 }
 
-__host__ void Context::barrier_on_stream(rocshmem_team_t team,
-                                         hipStream_t stream) {
+__host__ void Context::barrier_on_stream(rocshmem_team_t team, hipStream_t stream) {
   ctxHostStats.incStat(NUM_HOST_BARRIER_ALL);
 
   HOST_DISPATCH(barrier_on_stream(team, stream));
@@ -152,95 +143,83 @@ __host__ void Context::sync_all_on_stream(hipStream_t stream) {
   HOST_DISPATCH(sync_all_on_stream(stream));
 }
 
-__host__ void Context::sync_on_stream(rocshmem_team_t team,
-                                      hipStream_t stream) {
+__host__ void Context::sync_on_stream(rocshmem_team_t team, hipStream_t stream) {
   ctxHostStats.incStat(NUM_HOST_SYNC_ALL);
 
   HOST_DISPATCH(sync_on_stream(team, stream));
 }
 
-__host__ void Context::alltoallmem_on_stream(rocshmem_team_t team, void *dest,
-                                             const void *source, size_t nelems,
-                                             hipStream_t stream) {
+__host__ void Context::alltoallmem_on_stream(rocshmem_team_t team, void* dest, const void* source,
+                                             size_t nelems, hipStream_t stream) {
   ctxHostStats.incStat(NUM_HOST_ALLTOALL);
 
   HOST_DISPATCH(alltoallmem_on_stream(team, dest, source, nelems, stream));
 }
 
-__host__ void Context::broadcastmem_on_stream(rocshmem_team_t team, void *dest,
-                                              const void *source, size_t nelems,
-                                              int pe_root, hipStream_t stream) {
+__host__ void Context::broadcastmem_on_stream(rocshmem_team_t team, void* dest, const void* source,
+                                              size_t nelems, int pe_root, hipStream_t stream) {
   ctxHostStats.incStat(NUM_HOST_BROADCAST);
 
-  HOST_DISPATCH(
-      broadcastmem_on_stream(team, dest, source, nelems, pe_root, stream));
+  HOST_DISPATCH(broadcastmem_on_stream(team, dest, source, nelems, pe_root, stream));
 }
 
-__host__ void Context::getmem_on_stream(void *dest, const void *source,
-                                        size_t nelems, int pe,
+__host__ void Context::getmem_on_stream(void* dest, const void* source, size_t nelems, int pe,
                                         hipStream_t stream) {
   ctxHostStats.incStat(NUM_HOST_GET);
 
   HOST_DISPATCH(getmem_on_stream(dest, source, nelems, pe, stream));
 }
 
-__host__ void Context::putmem_on_stream(void *dest, const void *source,
-                                        size_t nelems, int pe,
+__host__ void Context::putmem_on_stream(void* dest, const void* source, size_t nelems, int pe,
                                         hipStream_t stream) {
   ctxHostStats.incStat(NUM_HOST_PUT);
 
   HOST_DISPATCH(putmem_on_stream(dest, source, nelems, pe, stream));
 }
 
-__host__ void Context::putmem_signal(void *dest, const void *source,
-                                     size_t nelems, uint64_t *sig_addr,
-                                     uint64_t signal, int sig_op, int pe) {
+__host__ void Context::putmem_signal(void* dest, const void* source, size_t nelems,
+                                     uint64_t* sig_addr, uint64_t signal, int sig_op, int pe) {
   if (nelems == 0) {
     return;
   }
 
   ctxHostStats.incStat(NUM_HOST_PUT);
 
-  HOST_DISPATCH(
-      putmem_signal(dest, source, nelems, sig_addr, signal, sig_op, pe));
+  HOST_DISPATCH(putmem_signal(dest, source, nelems, sig_addr, signal, sig_op, pe));
 }
 
-__host__ uint64_t Context::signal_fetch(const uint64_t *sig_addr) {
+__host__ uint64_t Context::signal_fetch(const uint64_t* sig_addr) {
   HOST_DISPATCH_RET(signal_fetch(sig_addr));
 }
 
-__host__ void Context::signal_wait_until(uint64_t *sig_addr, int cmp,
-                                         uint64_t cmp_value) {
+__host__ void Context::signal_wait_until(uint64_t* sig_addr, int cmp, uint64_t cmp_value) {
   HOST_DISPATCH(signal_wait_until(sig_addr, cmp, cmp_value));
 }
 
-__host__ void Context::putmem_signal_on_stream(void *dest, const void *source,
-                                               size_t nelems,
-                                               uint64_t *sig_addr,
-                                               uint64_t signal, int sig_op,
+__host__ void Context::putmem_signal_on_stream(void* dest, const void* source, size_t nelems,
+                                               uint64_t* sig_addr, uint64_t signal, int sig_op,
                                                int pe, hipStream_t stream) {
   ctxHostStats.incStat(NUM_HOST_PUT);
 
-  HOST_DISPATCH(putmem_signal_on_stream(dest, source, nelems, sig_addr, signal,
-                                        sig_op, pe, stream));
+  HOST_DISPATCH(
+      putmem_signal_on_stream(dest, source, nelems, sig_addr, signal, sig_op, pe, stream));
 }
 
-__host__ void Context::signal_add_on_stream(uint64_t *sig_addr, uint64_t signal,
-                                            int pe, hipStream_t stream) {
+__host__ void Context::signal_add_on_stream(uint64_t* sig_addr, uint64_t signal, int pe,
+                                            hipStream_t stream) {
   ctxHostStats.incStat(NUM_HOST_ATOMIC_ADD);
 
   HOST_DISPATCH(signal_add_on_stream(sig_addr, signal, pe, stream));
 }
 
-__host__ void Context::signal_set_on_stream(uint64_t *sig_addr, uint64_t signal,
-                                            int pe, hipStream_t stream) {
+__host__ void Context::signal_set_on_stream(uint64_t* sig_addr, uint64_t signal, int pe,
+                                            hipStream_t stream) {
   ctxHostStats.incStat(NUM_HOST_ATOMIC_SET);
 
   HOST_DISPATCH(signal_set_on_stream(sig_addr, signal, pe, stream));
 }
 
-__host__ void Context::signal_wait_until_on_stream(uint64_t *sig_addr, int cmp,
-                                                   uint64_t cmp_value,
+__host__ void Context::signal_wait_until_on_stream(uint64_t* sig_addr, int cmp, uint64_t cmp_value,
                                                    hipStream_t stream) {
   HOST_DISPATCH(signal_wait_until_on_stream(sig_addr, cmp, cmp_value, stream));
 }

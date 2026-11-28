@@ -57,8 +57,8 @@ class VerbsHost {
  public:
   VerbsHost() = default;
   ~VerbsHost();
-  VerbsHost(const VerbsHost &) = delete;
-  VerbsHost &operator=(const VerbsHost &) = delete;
+  VerbsHost(const VerbsHost&)            = delete;
+  VerbsHost& operator=(const VerbsHost&) = delete;
 
   /**
    * @param hdp          HDP policy (for GPU<->NIC visibility flushes).
@@ -72,14 +72,14 @@ class VerbsHost {
    * @param dev_name     HCA name filter, or nullptr for first ACTIVE port.
    * @return true on success.
    */
-  bool init(HdpPolicy *hdp, void *heap_base, size_t heap_size, bool heap_device,
-            int num_pes, int my_pe, int num_host_ctx, AllgatherFn allgather,
-            DmabufFn dmabuf, const char *dev_name);
+  bool init(HdpPolicy* hdp, void* heap_base, size_t heap_size, bool heap_device, int num_pes,
+            int my_pe, int num_host_ctx, AllgatherFn allgather, DmabufFn dmabuf,
+            const char* dev_name);
 
   /// Acquire a free WindowInfoVerbs (one per host context); nullptr if exhausted.
-  WindowInfoVerbs *acquire();
+  WindowInfoVerbs* acquire();
   /// Return a window to the pool.
-  void release(WindowInfoVerbs *w);
+  void release(WindowInfoVerbs* w);
 
  private:
   Ibv ibv_{};
@@ -92,7 +92,7 @@ class VerbsHost {
   std::vector<bool> avail_;
 
   // One registered host buffer sliced into per-context 8-byte AMO/g result slots.
-  void *amo_scratch_{nullptr};
+  void* amo_scratch_{nullptr};
   uint32_t amo_scratch_lkey_{0};
 
   bool initialized_{false};

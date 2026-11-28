@@ -31,15 +31,15 @@
 #include <cstdlib>
 
 // Helper macro for HIPRTC error checking
-#define CHECK_HIPRTC(cmd) \
-  do { \
-    hiprtcResult result = cmd; \
-    if (result != HIPRTC_SUCCESS) { \
-      fprintf(stderr, "error: %s (%d) at %s:%d\n", \
-              hiprtcGetErrorString(result), result, __FILE__, __LINE__); \
-      abort(); \
-    } \
-  } while(0)
+#define CHECK_HIPRTC(cmd)                                                                          \
+  do {                                                                                             \
+    hiprtcResult result = cmd;                                                                     \
+    if (result != HIPRTC_SUCCESS) {                                                                \
+      fprintf(stderr, "error: %s (%d) at %s:%d\n", hiprtcGetErrorString(result), result, __FILE__, \
+              __LINE__);                                                                           \
+      abort();                                                                                     \
+    }                                                                                              \
+  } while (0)
 
 // Kernel source that defines ROCSHMEM_CTX_DEFAULT
 // This kernel mimics the rocshmem device context definition to ensure
@@ -79,10 +79,7 @@ extern "C" __global__ void simple_test_kernel(int *result) {
  * HOST TESTER CLASS METHODS
  *****************************************************************************/
 HipModuleInitTester::HipModuleInitTester(TesterArguments args)
-    : Tester(args),
-      test_module(nullptr),
-      kernel_func(nullptr),
-      device_result(nullptr) {
+    : Tester(args), test_module(nullptr), kernel_func(nullptr), device_result(nullptr) {
   my_pe = rocshmem_my_pe();
   n_pes = rocshmem_n_pes();
 
@@ -91,7 +88,8 @@ HipModuleInitTester::HipModuleInitTester(TesterArguments args)
 
   // Compile the kernel using HIPRTC with rocshmem headers
   hiprtcProgram prog;
-  CHECK_HIPRTC(hiprtcCreateProgram(&prog, test_kernel_src, "simple_test_kernel.cpp", 0, nullptr, nullptr));
+  CHECK_HIPRTC(
+      hiprtcCreateProgram(&prog, test_kernel_src, "simple_test_kernel.cpp", 0, nullptr, nullptr));
 
   // Get device architecture for compilation
   hipDeviceProp_t props;
@@ -99,23 +97,16 @@ HipModuleInitTester::HipModuleInitTester(TesterArguments args)
   std::string arch = std::string("--offload-arch=") + props.gcnArchName;
 
   // Add include paths for rocshmem headers
-  std::string include_path = "-I" + std::string(CMAKE_SOURCE_DIR) + "/include";
+  std::string include_path  = "-I" + std::string(CMAKE_SOURCE_DIR) + "/include";
   std::string build_include = "-I" + std::string(CMAKE_BINARY_DIR) + "/include";
-  std::string src_include = "-I" + std::string(CMAKE_SOURCE_DIR) + "/src";
+  std::string src_include   = "-I" + std::string(CMAKE_SOURCE_DIR) + "/src";
 
   const char* rocm_path = std::getenv("ROCM_PATH");
-  std::string hip_include = rocm_path ?
-    "-I" + std::string(rocm_path) + "/include" :
-    "-I/opt/rocm/include";
+  std::string hip_include =
+      rocm_path ? "-I" + std::string(rocm_path) + "/include" : "-I/opt/rocm/include";
 
-  const char* options[] = {
-    arch.c_str(),
-    hip_include.c_str(),
-    include_path.c_str(),
-    build_include.c_str(),
-    src_include.c_str(),
-    "-D__HIP_PLATFORM_AMD__"
-  };
+  const char* options[] = {arch.c_str(),          hip_include.c_str(), include_path.c_str(),
+                           build_include.c_str(), src_include.c_str(), "-D__HIP_PLATFORM_AMD__"};
 
   hiprtcResult compileResult = hiprtcCompileProgram(prog, 6, options);
 
@@ -165,8 +156,7 @@ void HipModuleInitTester::resetBuffers([[maybe_unused]] size_t size) {
   CHECK_HIP(hipMemset(device_result, 0, sizeof(int)));
 }
 
-void HipModuleInitTester::launchKernel(dim3 gridSize, dim3 blockSize,
-                                        int loop, size_t size) {
+void HipModuleInitTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop, size_t size) {
   // Note: This test intentionally ignores gridSize/blockSize parameters and uses
   // a simple 1x1x1 launch.
   (void)gridSize;
@@ -196,21 +186,19 @@ void HipModuleInitTester::launchKernel(dim3 gridSize, dim3 blockSize,
   int ret = rocshmem_hipmodule_init(test_module, stream);
 
   if (ret != 0) {
-    fprintf(stderr, "[Rank %d] FAIL: rocshmem_hipmodule_init in graph failed with code %d\n", my_pe, ret);
+    fprintf(stderr, "[Rank %d] FAIL: rocshmem_hipmodule_init in graph failed with code %d\n", my_pe,
+            ret);
     CHECK_HIP(hipStreamEndCapture(stream, &graph));  // Clean up
     rocshmem_global_exit(1);
   }
 
   // Launch kernel within the graph
-  void *args[] = {&device_result};
-  CHECK_HIP(hipModuleLaunchKernel(
-      kernel_func,
-      1, 1, 1,    // gridDim
-      1, 1, 1,    // blockDim
-      0,          // sharedMem
-      stream,     // Use the capturing stream
-      args,
-      nullptr));
+  void* args[] = {&device_result};
+  CHECK_HIP(hipModuleLaunchKernel(kernel_func, 1, 1, 1,  // gridDim
+                                  1, 1, 1,               // blockDim
+                                  0,                     // sharedMem
+                                  stream,                // Use the capturing stream
+                                  args, nullptr));
 
   // End graph capture
   CHECK_HIP(hipStreamEndCapture(stream, &graph));
@@ -234,12 +222,11 @@ void HipModuleInitTester::launchKernel(dim3 gridSize, dim3 blockSize,
 
   // Verify result from graph execution
   int host_result = 0;
-  CHECK_HIP(hipMemcpy(&host_result, device_result, sizeof(int),
-                      hipMemcpyDeviceToHost));
+  CHECK_HIP(hipMemcpy(&host_result, device_result, sizeof(int), hipMemcpyDeviceToHost));
 
   if (host_result != 42) {
-    fprintf(stderr, "[Rank %d] FAIL: Graph execution failed (expected 42, got %d)\n",
-            my_pe, host_result);
+    fprintf(stderr, "[Rank %d] FAIL: Graph execution failed (expected 42, got %d)\n", my_pe,
+            host_result);
     rocshmem_global_exit(1);
   }
 
@@ -259,8 +246,7 @@ void HipModuleInitTester::verifyResults(size_t size) {
 
   // Verify the kernel executed correctly
   int host_result = 0;
-  CHECK_HIP(hipMemcpy(&host_result, device_result, sizeof(int),
-                      hipMemcpyDeviceToHost));
+  CHECK_HIP(hipMemcpy(&host_result, device_result, sizeof(int), hipMemcpyDeviceToHost));
 
   if (host_result == 42) {
     if (my_pe == 0) {
@@ -268,8 +254,8 @@ void HipModuleInitTester::verifyResults(size_t size) {
     }
   } else {
     // Explicitly fail the test when verification fails
-    fprintf(stderr, "[Rank %d] FAIL: Kernel verification failed (expected 42, got %d)\n",
-            my_pe, host_result);
+    fprintf(stderr, "[Rank %d] FAIL: Kernel verification failed (expected 42, got %d)\n", my_pe,
+            host_result);
     // Exit with error to ensure test is reported as failed
     rocshmem_global_exit(1);
   }

@@ -53,11 +53,12 @@ namespace rocshmem {
  * @param[in] fn_str   String describing checked function
  *
  */
-#define CHECK_NNULL(value, fn_str) do {                                        \
-  if (UNLIKELY(nullptr == (value))) {                                          \
-    LOG_ERROR_ABORT("%s: %s (%d)", fn_str, strerror(errno), errno);            \
-  }                                                                            \
-} while(0)
+#define CHECK_NNULL(value, fn_str)                                    \
+  do {                                                                \
+    if (UNLIKELY(nullptr == (value))) {                               \
+      LOG_ERROR_ABORT("%s: %s (%d)", fn_str, strerror(errno), errno); \
+    }                                                                 \
+  } while (0)
 
 /**
  * @name CHECK_ZERO
@@ -67,11 +68,12 @@ namespace rocshmem {
  * @param[in] fn_str   String describing checked function
  *
  */
-#define CHECK_ZERO(value, fn_str) do {                                         \
-  if (UNLIKELY(0 != (value))) {                                                \
-    LOG_ERROR_ABORT("%s: %s (%d)", fn_str, strerror(errno), errno);            \
-  }                                                                            \
-} while(0)
+#define CHECK_ZERO(value, fn_str)                                     \
+  do {                                                                \
+    if (UNLIKELY(0 != (value))) {                                     \
+      LOG_ERROR_ABORT("%s: %s (%d)", fn_str, strerror(errno), errno); \
+    }                                                                 \
+  } while (0)
 
 /**
  * @name CHECK_HIP
@@ -80,12 +82,13 @@ namespace rocshmem {
  * @param[in] instr    HIP function to run and check
  *
  */
-#define CHECK_HIP(instr) do {                                                  \
-  hipError_t error = (instr);                                                  \
-  if (error != hipSuccess) {                                                   \
-    LOG_ERROR_ABORT(#instr ": %s (%d)", hipGetErrorString(error), error);       \
-  }                                                                            \
-} while(0)
+#define CHECK_HIP(instr)                                                    \
+  do {                                                                      \
+    hipError_t error = (instr);                                             \
+    if (error != hipSuccess) {                                              \
+      LOG_ERROR_ABORT(#instr ": %s (%d)", hipGetErrorString(error), error); \
+    }                                                                       \
+  } while (0)
 
 /**
  * @name CHECK_HSA
@@ -94,49 +97,49 @@ namespace rocshmem {
  * @param[in] cmd HSA function to run and check
  *
  */
-#define CHECK_HSA(cmd) do {                                                    \
-  hsa_status_t error = cmd;                                                    \
-  if (error != HSA_STATUS_SUCCESS) {                                           \
-    LOG_ERROR_EXIT(#cmd ": %d", error);                                        \
-  }                                                                            \
-} while (0)
+#define CHECK_HSA(cmd)                    \
+  do {                                    \
+    hsa_status_t error = cmd;             \
+    if (error != HSA_STATUS_SUCCESS) {    \
+      LOG_ERROR_EXIT(#cmd ": %d", error); \
+    }                                     \
+  } while (0)
 
 /* Helper Macros for handling dynamic libraries */
 #define PPCAT_NX(prefix, func_name) prefix##func_name
-#define PPCAT(prefix, func_name) PPCAT_NX(prefix, func_name)
+#define PPCAT(prefix, func_name)    PPCAT_NX(prefix, func_name)
 
 #define STRINGIFY_NX(name) #name
-#define STRINGIFY(name) STRINGIFY_NX(name)
+#define STRINGIFY(name)    STRINGIFY_NX(name)
 
 #define DLSYM_OPT_HELPER(func_struct, prefix, handle, func_name)                            \
-do {                                                                                        \
-  *(void **) (&func_struct.func_name) = dlsym(handle, STRINGIFY(PPCAT(prefix, func_name))); \
-} while (0)
+  do {                                                                                      \
+    *(void**)(&func_struct.func_name) = dlsym(handle, STRINGIFY(PPCAT(prefix, func_name))); \
+  } while (0)
 
 #define DLSYM_HELPER(func_struct, prefix, handle, func_name)                                \
-do {                                                                                        \
-  *(void **) (&func_struct.func_name) = dlsym(handle, STRINGIFY(PPCAT(prefix, func_name))); \
-  if (!func_struct.func_name) {                                                             \
-    LOG_WARN("Failed to find function %s",  STRINGIFY(PPCAT(prefix, func_name)));           \
-    dlclose(handle);                                                                        \
-    handle = nullptr;                                                                       \
-    return ROCSHMEM_ERROR;                                                                  \
-  }                                                                                         \
-} while (0)
+  do {                                                                                      \
+    *(void**)(&func_struct.func_name) = dlsym(handle, STRINGIFY(PPCAT(prefix, func_name))); \
+    if (!func_struct.func_name) {                                                           \
+      LOG_WARN("Failed to find function %s", STRINGIFY(PPCAT(prefix, func_name)));          \
+      dlclose(handle);                                                                      \
+      handle = nullptr;                                                                     \
+      return ROCSHMEM_ERROR;                                                                \
+    }                                                                                       \
+  } while (0)
 
-#define DLSYM_VAR_HELPER(func_struct, handle, var_name)                     \
-do {                                                                        \
-  *(void **) (&func_struct.var_name) = dlsym(handle, STRINGIFY(var_name));  \
-  if (!func_struct.var_name) {                                             \
-    LOG_WARN("Failed to find function %s",  STRINGIFY(var_name));          \
-    dlclose(handle);                                                        \
-    handle = nullptr;                                                       \
-    return ROCSHMEM_ERROR;                                                  \
-  }                                                                         \
-} while (0)
+#define DLSYM_VAR_HELPER(func_struct, handle, var_name)                    \
+  do {                                                                     \
+    *(void**)(&func_struct.var_name) = dlsym(handle, STRINGIFY(var_name)); \
+    if (!func_struct.var_name) {                                           \
+      LOG_WARN("Failed to find function %s", STRINGIFY(var_name));         \
+      dlclose(handle);                                                     \
+      handle = nullptr;                                                    \
+      return ROCSHMEM_ERROR;                                               \
+    }                                                                      \
+  } while (0)
 
 extern const int gpu_clock_freq_mhz;
-
 
 typedef struct device_prop {
   int warpSize;
@@ -166,7 +169,9 @@ extern std::vector<device_prop_t> device_properties;
   return __ffsll(__ballot(1)) - 1;
 }
 
-[[maybe_unused]] __device__ __forceinline__ int wave_SZ() { return __popcll(__ballot(1)); }
+[[maybe_unused]] __device__ __forceinline__ int wave_SZ() {
+  return __popcll(__ballot(1));
+}
 
 /*
  * Returns true if the caller's thread index is (0, 0, 0) in its block.
@@ -218,8 +223,7 @@ extern std::vector<device_prop_t> device_properties;
  * in the grid. Callers from the same block will have the same index.
  */
 [[maybe_unused]] __device__ __forceinline__ int get_flat_grid_id() {
-  return hipBlockIdx_x + hipBlockIdx_y * hipGridDim_x +
-         hipBlockIdx_z * hipGridDim_x * hipGridDim_y;
+  return hipBlockIdx_x + hipBlockIdx_y * hipGridDim_x + hipBlockIdx_z * hipGridDim_x * hipGridDim_y;
 }
 
 /*
@@ -263,7 +267,8 @@ extern std::vector<device_prop_t> device_properties;
   return get_active_lane_num(get_active_lane_mask());
 }
 
-[[maybe_unused]] __device__ __forceinline__ int get_first_active_lane_id(uint64_t active_lane_mask) {
+[[maybe_unused]] __device__ __forceinline__ int get_first_active_lane_id(
+    uint64_t active_lane_mask) {
   return countr_zero(active_lane_mask);
 }
 
@@ -304,13 +309,14 @@ __device__ __forceinline__ bool is_last_active_lane() {
   __threadfence();
   __syncthreads();
   if (threadIdx.x == 0) {
-    atomic::fetch_add<atomic::memory_scope::device,
-                      atomic::memory_order::relaxed>(&global_counter[0], 1);
+    atomic::fetch_add<atomic::memory_scope::device, atomic::memory_order::relaxed>(
+        &global_counter[0], 1);
   }
   __syncthreads();
   if (threadIdx.x == 0) {
-    while (atomic::load<atomic::memory_scope::device,
-           atomic::memory_order::relaxed>(global_counter) != num_blocks);
+    while (atomic::load<atomic::memory_scope::device, atomic::memory_order::relaxed>(
+               global_counter) != num_blocks)
+      ;
   }
   __syncthreads();
 }
@@ -322,13 +328,11 @@ __device__ __forceinline__ bool is_last_active_lane() {
 /*
  * Each thread in wave tries to acquire a different lock.
  */
-[[maybe_unused]] __device__ __forceinline__ bool spin_lock_try_acquire_unique(uint32_t *lock) {
+[[maybe_unused]] __device__ __forceinline__ bool spin_lock_try_acquire_unique(uint32_t* lock) {
   uint32_t lock_val = SPIN_LOCK_UNLOCKED;
 
-  atomic::compare_exchange_strong<
-    atomic::memory_scope::device,
-    atomic::memory_order::acquire,
-    atomic::memory_order::acquire>(lock, lock_val, SPIN_LOCK_LOCKED);
+  atomic::compare_exchange_strong<atomic::memory_scope::device, atomic::memory_order::acquire,
+                                  atomic::memory_order::acquire>(lock, lock_val, SPIN_LOCK_LOCKED);
 
   return lock_val == SPIN_LOCK_UNLOCKED;
 }
@@ -337,7 +341,7 @@ __device__ __forceinline__ bool is_last_active_lane() {
  * Each thread in wave acquires a different lock.
  * (deadlock if locks are not different)
  */
-[[maybe_unused]] __device__ __forceinline__ void spin_lock_acquire_unique(uint32_t *lock) {
+[[maybe_unused]] __device__ __forceinline__ void spin_lock_acquire_unique(uint32_t* lock) {
   while (!spin_lock_try_acquire_unique(lock)) {
     // spin
   }
@@ -346,23 +350,23 @@ __device__ __forceinline__ bool is_last_active_lane() {
 /*
  * Each thread in wave releases a different lock.
  */
-[[maybe_unused]] __device__ __forceinline__ void spin_lock_release_unique(uint32_t *lock) {
-  atomic::store<atomic::memory_scope::device,
-                atomic::memory_order::release>(lock, SPIN_LOCK_UNLOCKED);
+[[maybe_unused]] __device__ __forceinline__ void spin_lock_release_unique(uint32_t* lock) {
+  atomic::store<atomic::memory_scope::device, atomic::memory_order::release>(lock,
+                                                                             SPIN_LOCK_UNLOCKED);
 }
 
 /*
  * Threads in activemask together try to acquire the same lock.
  */
-[[maybe_unused]] __device__ __forceinline__ bool spin_lock_try_acquire_shared(uint32_t *lock, uint64_t activemask) {
+[[maybe_unused]] __device__ __forceinline__ bool spin_lock_try_acquire_shared(uint32_t* lock,
+                                                                              uint64_t activemask) {
   uint32_t lock_val = SPIN_LOCK_INVALID;
 
   if (is_first_active_lane(activemask)) {
     lock_val = SPIN_LOCK_UNLOCKED;
-    atomic::compare_exchange_strong<
-      atomic::memory_scope::device,
-      atomic::memory_order::acquire,
-      atomic::memory_order::acquire>(lock, lock_val, SPIN_LOCK_LOCKED);
+    atomic::compare_exchange_strong<atomic::memory_scope::device, atomic::memory_order::acquire,
+                                    atomic::memory_order::acquire>(lock, lock_val,
+                                                                   SPIN_LOCK_LOCKED);
   }
   lock_val = __shfl(lock_val, get_first_active_lane_id(activemask));
 
@@ -372,7 +376,8 @@ __device__ __forceinline__ bool is_last_active_lane() {
 /*
  * Threads in activemask together acquire the same lock.
  */
-[[maybe_unused]] __device__ __forceinline__ void spin_lock_acquire_shared(uint32_t *lock, uint64_t activemask) {
+[[maybe_unused]] __device__ __forceinline__ void spin_lock_acquire_shared(uint32_t* lock,
+                                                                          uint64_t activemask) {
   while (!spin_lock_try_acquire_shared(lock, activemask)) {
     // spin
   }
@@ -381,14 +386,15 @@ __device__ __forceinline__ bool is_last_active_lane() {
 /*
  * Threads in activemask together release the same lock.
  */
-[[maybe_unused]] __device__ __forceinline__ void spin_lock_release_shared(uint32_t *lock, uint64_t activemask) {
+[[maybe_unused]] __device__ __forceinline__ void spin_lock_release_shared(uint32_t* lock,
+                                                                          uint64_t activemask) {
   if (is_first_active_lane(activemask)) {
-    atomic::store<atomic::memory_scope::device,
-                  atomic::memory_order::release>(lock, SPIN_LOCK_UNLOCKED);
+    atomic::store<atomic::memory_scope::device, atomic::memory_order::release>(lock,
+                                                                               SPIN_LOCK_UNLOCKED);
   }
 }
 
-#define LOAD(VAR) __atomic_load_n((VAR), __ATOMIC_SEQ_CST)
+#define LOAD(VAR)       __atomic_load_n((VAR), __ATOMIC_SEQ_CST)
 #define STORE(DST, SRC) __atomic_store_n((DST), (SRC), __ATOMIC_SEQ_CST)
 
 enum class MemcpyKind { Put, Get, PutBlocking, GetBlocking };
@@ -405,10 +411,9 @@ constexpr bool is_blocking(MemcpyKind k) {
 // AsmAccess::load/store (assembly.hpp) require dst/src to be genuine global
 // addresses (symmetric heap, or an IPC/RDMA-mapped remote of it).
 template <int ChunkSize, CachePolicy LoadPolicy, CachePolicy StorePolicy, int Unroll>
-__device__ __forceinline__ void copy_bulk(void* dst, void* src, int n_chunks, 
-                                          int tid, int stride) {
+__device__ __forceinline__ void copy_bulk(void* dst, void* src, int n_chunks, int tid, int stride) {
   using Acc = AsmAccess<ChunkSize, LoadPolicy, StorePolicy>;
-  using T = typename Acc::type;
+  using T   = typename Acc::type;
 
   const uint32_t buf_bytes = static_cast<uint32_t>(n_chunks * ChunkSize);
   i32x4_t src_rsrc, dst_rsrc;
@@ -416,21 +421,21 @@ __device__ __forceinline__ void copy_bulk(void* dst, void* src, int n_chunks,
   dst_rsrc = make_buffer_resource(dst, buf_bytes);
 
   int chunk_batch = stride * Unroll;
-  int offset = 0;
-  T regs[Unroll] = {};
+  int offset      = 0;
+  T regs[Unroll]  = {};
 
   // Unrolled block copy: issue all Unroll loads first to fill the memory pipeline,
   // then drain with stores. Hardware RAW tracking ensures load→store ordering per reg.
   for (; offset + chunk_batch <= n_chunks; offset += chunk_batch) {
-    #pragma unroll
+#pragma unroll
     for (int u = 0; u < Unroll; ++u) {
       regs[u] = Acc::load_buffer(src_rsrc,
-          static_cast<uint32_t>((offset + tid + u * stride) * ChunkSize));
+                                 static_cast<uint32_t>((offset + tid + u * stride) * ChunkSize));
     }
-    #pragma unroll
+#pragma unroll
     for (int u = 0; u < Unroll; ++u) {
-      Acc::store_buffer(dst_rsrc,
-          static_cast<uint32_t>((offset + tid + u * stride) * ChunkSize), regs[u]);
+      Acc::store_buffer(dst_rsrc, static_cast<uint32_t>((offset + tid + u * stride) * ChunkSize),
+                        regs[u]);
     }
   }
 
@@ -446,15 +451,18 @@ __device__ __forceinline__ void copy_prefix(uint8_t* dst, uint8_t* src, size_t p
   // Bottom-up evaluation mathematically guarantees alignment buildup without checking
   if (prefix & 1) {
     AsmAccess<1, LP, SP>::store(dst, AsmAccess<1, LP, SP>::load(src));
-    dst += 1; src += 1;
+    dst += 1;
+    src += 1;
   }
   if (prefix & 2) {
     AsmAccess<2, LP, SP>::store(dst, AsmAccess<2, LP, SP>::load(src));
-    dst += 2; src += 2;
+    dst += 2;
+    src += 2;
   }
   if (prefix & 4) {
     AsmAccess<4, LP, SP>::store(dst, AsmAccess<4, LP, SP>::load(src));
-    dst += 4; src += 4;
+    dst += 4;
+    src += 4;
   }
   if (prefix & 8) {
     AsmAccess<8, LP, SP>::store(dst, AsmAccess<8, LP, SP>::load(src));
@@ -465,15 +473,18 @@ template <CachePolicy LP, CachePolicy SP>
 __device__ __forceinline__ void copy_suffix(uint8_t* dst, uint8_t* src, size_t remainder) {
   if (remainder & 8) {
     AsmAccess<8, LP, SP>::store(dst, AsmAccess<8, LP, SP>::load(src));
-    dst += 8; src += 8;
+    dst += 8;
+    src += 8;
   }
   if (remainder & 4) {
     AsmAccess<4, LP, SP>::store(dst, AsmAccess<4, LP, SP>::load(src));
-    dst += 4; src += 4;
+    dst += 4;
+    src += 4;
   }
   if (remainder & 2) {
     AsmAccess<2, LP, SP>::store(dst, AsmAccess<2, LP, SP>::load(src));
-    dst += 2; src += 2;
+    dst += 2;
+    src += 2;
   }
   if (remainder & 1) {
     AsmAccess<1, LP, SP>::store(dst, AsmAccess<1, LP, SP>::load(src));
@@ -489,36 +500,39 @@ __device__ __forceinline__ void copy_remainder(uint8_t* dst, uint8_t* src, int s
     if (__builtin_expect(size >= 8 && __builtin_is_aligned(align, 8), 1)) {
       auto val = AsmAccess<8, LP, SP>::load(src);
       AsmAccess<8, LP, SP>::store(dst, val);
-      dst += 8; src += 8; size -= 8;
-    }
-    else if (size >= 4 && __builtin_is_aligned(align, 4)) {
+      dst += 8;
+      src += 8;
+      size -= 8;
+    } else if (size >= 4 && __builtin_is_aligned(align, 4)) {
       auto val = AsmAccess<4, LP, SP>::load(src);
       AsmAccess<4, LP, SP>::store(dst, val);
-      dst += 4; src += 4; size -= 4;
-    }
-    else if (size >= 2 && __builtin_is_aligned(align, 2)) {
+      dst += 4;
+      src += 4;
+      size -= 4;
+    } else if (size >= 2 && __builtin_is_aligned(align, 2)) {
       auto val = AsmAccess<2, LP, SP>::load(src);
       AsmAccess<2, LP, SP>::store(dst, val);
-      dst += 2; src += 2; size -= 2;
-    }
-    else {
+      dst += 2;
+      src += 2;
+      size -= 2;
+    } else {
       auto val = AsmAccess<1, LP, SP>::load(src);
       AsmAccess<1, LP, SP>::store(dst, val);
-      dst += 1; src += 1; size -= 1;
+      dst += 1;
+      src += 1;
+      size -= 1;
     }
   }
 }
 
 template <int ChunkSize, CachePolicy LP, CachePolicy SP, int Unroll>
-__device__ __forceinline__ void copy_aligned_body(uint8_t* dst, uint8_t* src,
-                                                  size_t size, int tid,
+__device__ __forceinline__ void copy_aligned_body(uint8_t* dst, uint8_t* src, size_t size, int tid,
                                                   int stride) {
   uintptr_t dst_addr = reinterpret_cast<uintptr_t>(dst);
   uintptr_t src_addr = reinterpret_cast<uintptr_t>(src);
 
   if (((dst_addr ^ src_addr) & (ChunkSize - 1)) != 0) {
-    for (size_t i = static_cast<size_t>(tid); i < size;
-        i += static_cast<size_t>(stride)) {
+    for (size_t i = static_cast<size_t>(tid); i < size; i += static_cast<size_t>(stride)) {
       auto val = AsmAccess<1, LP, SP>::load(src + i);
       AsmAccess<1, LP, SP>::store(dst + i, val);
     }
@@ -533,16 +547,14 @@ __device__ __forceinline__ void copy_aligned_body(uint8_t* dst, uint8_t* src,
   src += prefix;
   size -= prefix;
 
-  int n_chunks = static_cast<int>(size / ChunkSize);
+  int n_chunks  = static_cast<int>(size / ChunkSize);
   int remainder = static_cast<int>(size % ChunkSize);
 
   copy_bulk<ChunkSize, LP, SP, Unroll>(dst, src, n_chunks, tid, stride);
 
   if (tid == 0 && remainder > 0) {
-    copy_suffix<LP, SP>(
-        dst + static_cast<size_t>(n_chunks) * ChunkSize,
-        src + static_cast<size_t>(n_chunks) * ChunkSize,
-        remainder);
+    copy_suffix<LP, SP>(dst + static_cast<size_t>(n_chunks) * ChunkSize,
+                        src + static_cast<size_t>(n_chunks) * ChunkSize, remainder);
   }
 }
 
@@ -551,7 +563,8 @@ __device__ __forceinline__ void copy_aligned_body(uint8_t* dst, uint8_t* src,
 // ==============================================================================
 template <MemcpyKind Kind = MemcpyKind::Put, int Unroll = 8>
 [[maybe_unused]] __device__ __forceinline__ void memcpy_lane(void* dst, void* src, size_t size) {
-  if (size == 0) return;
+  if (size == 0)
+    return;
 
   constexpr CachePolicy LP = is_put(Kind) ? CachePolicy::Standard : CachePolicy::SystemScope;
   constexpr CachePolicy SP = is_put(Kind) ? CachePolicy::SystemScope : CachePolicy::Standard;
@@ -559,28 +572,23 @@ template <MemcpyKind Kind = MemcpyKind::Put, int Unroll = 8>
   // Many threads, large transfer: use cached Standard policy + system fences
   if (size >= 16 && get_flat_block_size() > 4) {
     if constexpr (!is_put(Kind)) {
-      atomic::threadfence<atomic::memory_scope::system,
-                          atomic::memory_order::acquire>();
+      atomic::threadfence<atomic::memory_scope::system, atomic::memory_order::acquire>();
     }
 
     copy_aligned_body<16, CachePolicy::Standard, CachePolicy::Standard, Unroll>(
         static_cast<uint8_t*>(dst), static_cast<uint8_t*>(src), size, 0, 1);
 
     if constexpr (is_put(Kind)) {
-      atomic::threadfence<atomic::memory_scope::system,
-                          atomic::memory_order::release>();
+      atomic::threadfence<atomic::memory_scope::system, atomic::memory_order::release>();
     }
   }
   // Normal cache-bypass path for small transfers or single-lane execution
   else {
     if (size >= 16) {
-      copy_aligned_body<16, LP, SP, Unroll>(static_cast<uint8_t*>(dst),
-                                            static_cast<uint8_t*>(src),
+      copy_aligned_body<16, LP, SP, Unroll>(static_cast<uint8_t*>(dst), static_cast<uint8_t*>(src),
                                             size, 0, 1);
     } else {
-      copy_remainder<LP, SP>(static_cast<uint8_t*>(dst),
-                             static_cast<uint8_t*>(src),
-                             size);
+      copy_remainder<LP, SP>(static_cast<uint8_t*>(dst), static_cast<uint8_t*>(src), size);
     }
   }
 }
@@ -589,7 +597,8 @@ template <MemcpyKind Kind = MemcpyKind::Put, int Unroll = 8>
 // dst/src and only differs by wave_tid/wave_size
 template <MemcpyKind Kind = MemcpyKind::Put, int Unroll = 8>
 [[maybe_unused]] __device__ __forceinline__ void memcpy_wave(void* dst, void* src, size_t size) {
-  if (size == 0) return;
+  if (size == 0)
+    return;
 
   constexpr CachePolicy LP = is_put(Kind) ? CachePolicy::Standard : CachePolicy::SystemScope;
   constexpr CachePolicy SP = is_put(Kind) ? CachePolicy::SystemScope : CachePolicy::Standard;
@@ -598,49 +607,41 @@ template <MemcpyKind Kind = MemcpyKind::Put, int Unroll = 8>
   int wave_size{wave_SZ()};
 
   if (size >= 16) {
-    copy_aligned_body<16, LP, SP, Unroll>(static_cast<uint8_t*>(dst),
-                                          static_cast<uint8_t*>(src),
+    copy_aligned_body<16, LP, SP, Unroll>(static_cast<uint8_t*>(dst), static_cast<uint8_t*>(src),
                                           size, wave_tid, wave_size);
   } else {
     // Small sizes skip bulk setup entirely
     if (wave_tid == 0) {
-      copy_remainder<LP, SP>(static_cast<uint8_t*>(dst),
-                             static_cast<uint8_t*>(src),
-                             size);
+      copy_remainder<LP, SP>(static_cast<uint8_t*>(dst), static_cast<uint8_t*>(src), size);
     }
   }
 }
 
 template <MemcpyKind Kind = MemcpyKind::Put, int Unroll = 8>
-[[maybe_unused]] __device__ __forceinline__ void memcpy_wg(void* dst, void* src,
-                                                             size_t size) {
-  if (size == 0) return;
+[[maybe_unused]] __device__ __forceinline__ void memcpy_wg(void* dst, void* src, size_t size) {
+  if (size == 0)
+    return;
 
   constexpr CachePolicy LP = is_put(Kind) ? CachePolicy::Standard : CachePolicy::SystemScope;
   constexpr CachePolicy SP = is_put(Kind) ? CachePolicy::SystemScope : CachePolicy::Standard;
 
-  int tid = get_flat_block_id();
+  int tid    = get_flat_block_id();
   int stride = get_flat_block_size();
 
   if (size >= 16) {
-    copy_aligned_body<16, LP, SP, Unroll>(static_cast<uint8_t*>(dst),
-                                          static_cast<uint8_t*>(src),
+    copy_aligned_body<16, LP, SP, Unroll>(static_cast<uint8_t*>(dst), static_cast<uint8_t*>(src),
                                           size, tid, stride);
   } else {
     // Small sizes skip bulk setup entirely
     if (tid == 0) {
-      copy_remainder<LP, SP>(static_cast<uint8_t*>(dst),
-                             static_cast<uint8_t*>(src),
-                             size);
+      copy_remainder<LP, SP>(static_cast<uint8_t*>(dst), static_cast<uint8_t*>(src), size);
     }
   }
 }
 
 /* Is ptr_b in range [ptr_a, ptr_a + len_a) */
 [[maybe_unused]]
-__host__ __device__ static bool
-is_ptr_in_range(uintptr_t ptr_a, size_t len_a, uintptr_t ptr_b) {
-
+__host__ __device__ static bool is_ptr_in_range(uintptr_t ptr_a, size_t len_a, uintptr_t ptr_b) {
   if ((len_a == 0) || (ptr_b < ptr_a)) {
     return false;
   }

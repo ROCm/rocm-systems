@@ -58,11 +58,10 @@ class QueueDescProxy {
 
   QueueDescProxy(size_t max_queues,
                  const HIPAllocatorFinegrained& alloc = HIPAllocatorFinegrained())
-    : alloc_{alloc}, proxy_{max_queues, alloc_}, max_queues_{max_queues} {
-
-    auto *queue_descs{proxy_.get()};
+      : alloc_{alloc}, proxy_{max_queues, alloc_}, max_queues_{max_queues} {
+    auto* queue_descs{proxy_.get()};
     for (size_t i{0}; i < max_queues_; i++) {
-      queue_descs[i].read_index = 0;
+      queue_descs[i].read_index  = 0;
       queue_descs[i].write_index = 0;
     }
   }
@@ -75,7 +74,7 @@ class QueueDescProxy {
 
   QueueDescProxy& operator=(QueueDescProxy&& other) = default;
 
-  __host__ __device__ queue_desc_t *get() { return proxy_.get(); }
+  __host__ __device__ queue_desc_t* get() { return proxy_.get(); }
 
  private:
   HIPAllocatorFinegrained alloc_{};

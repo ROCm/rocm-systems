@@ -44,27 +44,25 @@ using namespace rocshmem;
  *
  * Only thread 0 is active (w1z1 pattern).
  *****************************************************************************/
-__global__ void QpPingPongTest(int loop, int skip, long long int *start_time,
-                               long long int *end_time, int *r_buf,
-                               char *data_s_buf, char *data_r_buf,
-                               uint64_t *sig_addr, size_t size,
-                               unsigned op_type,
+__global__ void QpPingPongTest(int loop, int skip, long long int* start_time,
+                               long long int* end_time, int* r_buf, char* data_s_buf,
+                               char* data_r_buf, uint64_t* sig_addr, size_t size, unsigned op_type,
                                ShmemContextType ctx_type) {
   __shared__ rocshmem_ctx_t ctx;
   rocshmem_wg_ctx_create(ctx_type, &ctx);
 
   if (threadIdx.x == 0) {
-    GDAContext *gda_ctx = reinterpret_cast<GDAContext *>(ctx.ctx_opaque);
-    int pe = rocshmem_ctx_my_pe(ctx);
-    int target = 1 - pe;
+    GDAContext* gda_ctx = reinterpret_cast<GDAContext*>(ctx.ctx_opaque);
+    int pe              = rocshmem_ctx_my_pe(ctx);
+    int target          = 1 - pe;
 
-    QueuePair &qp = gda_ctx->qps[target];
+    QueuePair& qp = gda_ctx->qps[target];
 
     int wg_id = hipBlockIdx_x;
 
-    void *data_s = &data_s_buf[wg_id * size];
-    void *data_r = &data_r_buf[wg_id * size];
-    uint64_t *sig = &sig_addr[wg_id];
+    void* data_s  = &data_s_buf[wg_id * size];
+    void* data_r  = &data_r_buf[wg_id * size];
+    uint64_t* sig = &sig_addr[wg_id];
 
     // Drain all setup loads from HBM before entering the timed loop.
 #if defined(__GFX9__) || defined(__GFX10__) || defined(__GFX11__)
@@ -81,27 +79,31 @@ __global__ void QpPingPongTest(int loop, int skip, long long int *start_time,
       int val = i + 1;
 
       if (op_type <= 1) {
-        void *src = (op_type == 0) ? static_cast<void *>(&val) : data_s;
+        void* src = (op_type == 0) ? static_cast<void*>(&val) : data_s;
         if (op_type == 1) {
-          *reinterpret_cast<int *>(data_s) = val;
+          *reinterpret_cast<int*>(data_s) = val;
         }
         if (pe == 0) {
           qp.put_nbi_single(&r_buf[wg_id], src, sizeof(int));
-          while (uncached_load(&r_buf[wg_id]) != val) {}
+          while (uncached_load(&r_buf[wg_id]) != val) {
+          }
         } else {
-          while (uncached_load(&r_buf[wg_id]) != val) {}
+          while (uncached_load(&r_buf[wg_id]) != val) {
+          }
           qp.put_nbi_single(&r_buf[wg_id], src, sizeof(int));
         }
       } else {
         uint64_t expected = static_cast<uint64_t>(i + 1);
         if (pe == 0) {
           qp.put_nbi_single(data_r, data_s, size, PostOpt{RingDB<false>});
-          qp.atomic_add_single(sig, 1,            PostOpt{RingDB<true>});
-          while (uncached_load(sig) < expected) {}
+          qp.atomic_add_single(sig, 1, PostOpt{RingDB<true>});
+          while (uncached_load(sig) < expected) {
+          }
         } else {
-          while (uncached_load(sig) < expected) {}
+          while (uncached_load(sig) < expected) {
+          }
           qp.put_nbi_single(data_r, data_s, size, PostOpt{RingDB<false>});
-          qp.atomic_add_single(sig, 1,            PostOpt{RingDB<true>});
+          qp.atomic_add_single(sig, 1, PostOpt{RingDB<true>});
         }
       }
     }
@@ -123,12 +125,12 @@ QpPingPongTester::QpPingPongTester(TesterArguments args) : Tester(args) {
     }
     exit(1);
   }
-  r_buf = (int *)alloc_test_buffer(sizeof(int) * args.num_wgs);
-  data_s_buf = (char *)alloc_test_buffer(max_msg_size * args.num_wgs);
-  data_r_buf = (char *)alloc_test_buffer(max_msg_size * args.num_wgs);
-  sig_addr = (uint64_t *)alloc_test_buffer(sizeof(uint64_t) * args.num_wgs);
+  r_buf      = (int*)alloc_test_buffer(sizeof(int) * args.num_wgs);
+  data_s_buf = (char*)alloc_test_buffer(max_msg_size * args.num_wgs);
+  data_r_buf = (char*)alloc_test_buffer(max_msg_size * args.num_wgs);
+  sig_addr   = (uint64_t*)alloc_test_buffer(sizeof(uint64_t) * args.num_wgs);
   rtt_factor = 2;
-  bw_factor = 2;
+  bw_factor  = 2;
 }
 
 QpPingPongTester::~QpPingPongTester() {
@@ -145,34 +147,32 @@ void QpPingPongTester::resetBuffers(size_t size) {
   CHECK_HIP(hipMemset(sig_addr, 0, sizeof(uint64_t) * args.num_wgs));
 }
 
-void QpPingPongTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
-                                    size_t size) {
+void QpPingPongTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop, size_t size) {
   size_t shared_bytes = 0;
 
-  hipLaunchKernelGGL(QpPingPongTest, gridSize, blockSize, shared_bytes, stream,
-                     loop, args.skip, start_time, end_time, r_buf,
-                     data_s_buf, data_r_buf, sig_addr, size,
+  hipLaunchKernelGGL(QpPingPongTest, gridSize, blockSize, shared_bytes, stream, loop, args.skip,
+                     start_time, end_time, r_buf, data_s_buf, data_r_buf, sig_addr, size,
                      args.op_type, _shmem_context);
 
-  num_msgs = (loop + args.skip) * gridSize.x;
+  num_msgs       = (loop + args.skip) * gridSize.x;
   num_timed_msgs = loop * gridSize.x;
 }
 
 void QpPingPongTester::verifyResults(size_t size) {
-  if (args.op_type <= 1) return;
+  if (args.op_type <= 1)
+    return;
 
-  size_t check_bytes = size * args.num_wgs;
+  size_t check_bytes  = size * args.num_wgs;
   *verification_error = false;
-  size_t block = std::min((size_t)1024, check_bytes);
-  size_t grid = (check_bytes + block - 1) / block;
-  hipLaunchKernelGGL(rocshmem::verify_results_kernel_char, grid, block, 0, stream,
-                     data_r_buf, check_bytes, check_bytes, 1, 1, 0, 1,
-                     verification_error);
+  size_t block        = std::min((size_t)1024, check_bytes);
+  size_t grid         = (check_bytes + block - 1) / block;
+  hipLaunchKernelGGL(rocshmem::verify_results_kernel_char, grid, block, 0, stream, data_r_buf,
+                     check_bytes, check_bytes, 1, 1, 0, 1, verification_error);
   CHECK_HIP(hipStreamSynchronize(stream));
 
   if (*verification_error) {
-    fprintf(stderr, "FAIL: data_r_buf data mismatch (expected 'a') at size=%zu rank=%d\n",
-            size, args.myid);
+    fprintf(stderr, "FAIL: data_r_buf data mismatch (expected 'a') at size=%zu rank=%d\n", size,
+            args.myid);
     rocshmem_global_exit(1);
   }
 }

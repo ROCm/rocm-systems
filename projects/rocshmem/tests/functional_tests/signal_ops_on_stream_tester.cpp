@@ -29,11 +29,10 @@
 /******************************************************************************
  * HOST TESTER CLASS METHODS
  *****************************************************************************/
-SignalOpsOnStreamTester::SignalOpsOnStreamTester(TesterArguments args)
-    : Tester(args) {
+SignalOpsOnStreamTester::SignalOpsOnStreamTester(TesterArguments args) : Tester(args) {
   _print_results = false;
-  num_iters = args.skip + args.loop;
-  sig_addr = static_cast<uint64_t *>(alloc_test_buffer(sizeof(uint64_t)));
+  num_iters      = args.skip + args.loop;
+  sig_addr       = static_cast<uint64_t*>(alloc_test_buffer(sizeof(uint64_t)));
   CHECK_HIP(hipHostMalloc(&observed, num_iters * sizeof(uint64_t)));
 }
 
@@ -51,7 +50,7 @@ void SignalOpsOnStreamTester::launchKernel([[maybe_unused]] dim3 gridSize,
                                            [[maybe_unused]] dim3 blockSize,
                                            [[maybe_unused]] int loop,
                                            [[maybe_unused]] size_t size) {
-  int next_pe = (args.myid + 1) % args.numprocs;
+  int next_pe       = (args.myid + 1) % args.numprocs;
   uint64_t expected = 0;
 
   // PE 0 starts each round and the other PEs forward it once received, so
@@ -73,10 +72,9 @@ void SignalOpsOnStreamTester::launchKernel([[maybe_unused]] dim3 gridSize,
     if (args.myid == 0) {
       send(i);
     }
-    rocshmem_signal_wait_until_on_stream(sig_addr, ROCSHMEM_CMP_EQ, expected,
-                                         stream);
-    CHECK_HIP(hipMemcpyAsync(&observed[i], sig_addr, sizeof(uint64_t),
-                             hipMemcpyDeviceToHost, stream));
+    rocshmem_signal_wait_until_on_stream(sig_addr, ROCSHMEM_CMP_EQ, expected, stream);
+    CHECK_HIP(
+        hipMemcpyAsync(&observed[i], sig_addr, sizeof(uint64_t), hipMemcpyDeviceToHost, stream));
     if (args.myid != 0) {
       send(i);
     }
@@ -88,9 +86,8 @@ void SignalOpsOnStreamTester::verifyResults([[maybe_unused]] size_t size) {
   for (int i = 0; i < num_iters; i++) {
     expected += i + 1;
     if (observed[i] != expected) {
-      fprintf(stderr, "PE %d round %d (%s): observed %lu, expected %lu\n",
-              args.myid, i, (i % 2 == 0) ? "signal_set" : "signal_add",
-              observed[i], expected);
+      fprintf(stderr, "PE %d round %d (%s): observed %lu, expected %lu\n", args.myid, i,
+              (i % 2 == 0) ? "signal_set" : "signal_add", observed[i], expected);
       rocshmem_global_exit(1);
     }
   }

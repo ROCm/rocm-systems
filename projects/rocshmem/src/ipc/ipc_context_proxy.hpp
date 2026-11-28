@@ -25,7 +25,6 @@
 #ifndef LIBRARY_SRC_IPC_CONTEXT_PROXY_HPP_
 #define LIBRARY_SRC_IPC_CONTEXT_PROXY_HPP_
 
-
 #include "device_proxy.hpp"
 #include "backend_ipc.hpp"
 #include "memory/hip_allocator.hpp"
@@ -43,10 +42,9 @@ class IPCDefaultContextProxy {
   /*
    * Placement new the memory which is allocated by proxy_
    */
-  explicit IPCDefaultContextProxy(IPCBackend* backend, TeamInfo *tinfo,
-                                  HIPAllocator alloc = HIPAllocator(),
-                                  size_t num_elems = 1)
-  : alloc_{alloc}, proxy_{num_elems, alloc_}, constructed_{true} {
+  explicit IPCDefaultContextProxy(IPCBackend* backend, TeamInfo* tinfo,
+                                  HIPAllocator alloc = HIPAllocator(), size_t num_elems = 1)
+      : alloc_{alloc}, proxy_{num_elems, alloc_}, constructed_{true} {
     auto ctx{proxy_.get()};
     new (ctx) IPCContext(reinterpret_cast<Backend*>(backend), 0);
     ctx->tinfo = tinfo;

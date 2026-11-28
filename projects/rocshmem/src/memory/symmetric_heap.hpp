@@ -51,54 +51,55 @@
 namespace rocshmem {
 
 class RemoteHeapInfoAbstract {
-public:
-  virtual ~RemoteHeapInfoAbstract() = default;
-  virtual WindowInfo* get_window_info() = 0;
+ public:
+  virtual ~RemoteHeapInfoAbstract()                                                   = default;
+  virtual WindowInfo* get_window_info()                                               = 0;
   __host__ virtual const std::vector<char*, StdAllocatorHIP<char*>>& get_heap_bases() = 0;
   __device__ char** get_heap_bases() { return nullptr; }
 };
 
 class RemoteHeapInfoMPI : public RemoteHeapInfoAbstract {
-public:
-  RemoteHeapInfoMPI(char *base_ptr, size_t size, MPI_Comm comm) : rheap(base_ptr, size, comm) {};
+ public:
+  RemoteHeapInfoMPI(char* base_ptr, size_t size, MPI_Comm comm) : rheap(base_ptr, size, comm) {};
 
   WindowInfo* get_window_info() override { return rheap.get_window_info(); };
-  __host__ const std::vector<char*, StdAllocatorHIP<char*>>& get_heap_bases() override { return rheap.get_heap_bases(); };
+  __host__ const std::vector<char*, StdAllocatorHIP<char*>>& get_heap_bases() override {
+    return rheap.get_heap_bases();
+  };
   __device__ char** get_heap_bases() { return rheap.get_heap_bases(); };
 
-private:
+ private:
   RemoteHeapInfo<CommunicatorMPI> rheap;
 };
 
 class RemoteHeapInfoTCP : public RemoteHeapInfoAbstract {
-public:
-  RemoteHeapInfoTCP(char *base_ptr, size_t size, TcpBootstrap *bootstrap) : rheap(base_ptr, size, bootstrap) {};
+ public:
+  RemoteHeapInfoTCP(char* base_ptr, size_t size, TcpBootstrap* bootstrap)
+      : rheap(base_ptr, size, bootstrap) {};
 
   WindowInfo* get_window_info() override { return rheap.get_window_info(); };
-  __host__ const std::vector<char*, StdAllocatorHIP<char*>>&  get_heap_bases() override { return rheap.get_heap_bases(); };
-  __device__ char**  get_heap_bases() { return rheap.get_heap_bases(); };
+  __host__ const std::vector<char*, StdAllocatorHIP<char*>>& get_heap_bases() override {
+    return rheap.get_heap_bases();
+  };
+  __device__ char** get_heap_bases() { return rheap.get_heap_bases(); };
 
-private:
+ private:
   RemoteHeapInfo<CommunicatorTCP> rheap;
 };
 
 class SymmetricHeap {
-
  public:
-  SymmetricHeap(MPI_Comm comm, TcpBootstrap* bootstrap  = nullptr) {
-
+  SymmetricHeap(MPI_Comm comm, TcpBootstrap* bootstrap = nullptr) {
     if (comm != MPI_COMM_NULL) {
-      remote_heap_info_ = new RemoteHeapInfoMPI(single_heap_.get_base_ptr(),
-                                                single_heap_.get_size(), comm);
-    } else  {
-      remote_heap_info_ = new RemoteHeapInfoTCP(single_heap_.get_base_ptr(),
-                                                single_heap_.get_size(), bootstrap);
+      remote_heap_info_ =
+          new RemoteHeapInfoMPI(single_heap_.get_base_ptr(), single_heap_.get_size(), comm);
+    } else {
+      remote_heap_info_ =
+          new RemoteHeapInfoTCP(single_heap_.get_base_ptr(), single_heap_.get_size(), bootstrap);
     }
   }
 
-  ~SymmetricHeap() {
-    delete remote_heap_info_;
-  }
+  ~SymmetricHeap() { delete remote_heap_info_; }
   /**
    * @brief Allocates heap memory and returns ptr to caller
    *
@@ -150,7 +151,7 @@ class SymmetricHeap {
   /**
    * @brief Accessor for the allocator used to back the symmetric heap
    */
-  HIPAllocator *get_allocator() { return single_heap_.get_allocator(); }
+  HIPAllocator* get_allocator() { return single_heap_.get_allocator(); }
 
   /**
    * @brief Whether the symmetric heap is backed by HIP VMM memory
@@ -172,18 +173,14 @@ class SymmetricHeap {
    *
    * @return Vector containing the addresses of the symmetric heap bases
    */
-  __host__ const auto& get_heap_bases() {
-    return remote_heap_info_->get_heap_bases();
-  }
+  __host__ const auto& get_heap_bases() { return remote_heap_info_->get_heap_bases(); }
 
   /**
    * @brief Accessor for heap bases
    *
    * @return Vector containing the addresses of the symmetric heap bases
    */
-  __device__ auto get_heap_bases() {
-    return remote_heap_info_->get_heap_bases();
-  }
+  __device__ auto get_heap_bases() { return remote_heap_info_->get_heap_bases(); }
 
  private:
   /**
@@ -194,7 +191,7 @@ class SymmetricHeap {
   /**
    * @brief Implementation of remote heaps
    */
-  RemoteHeapInfoAbstract *remote_heap_info_{nullptr};
+  RemoteHeapInfoAbstract* remote_heap_info_{nullptr};
 };
 
 }  // namespace rocshmem

@@ -33,9 +33,8 @@ class Backend;
 
 class ROTeam : public Team {
  public:
-  ROTeam(Backend* handle, const TeamInfo& team_info_wrt_parent,
-         const TeamInfo& team_info_wrt_world, int num_pes, int my_pe,
-         MPI_Comm team_comm);
+  ROTeam(Backend* handle, const TeamInfo& team_info_wrt_parent, const TeamInfo& team_info_wrt_world,
+         int num_pes, int my_pe, MPI_Comm team_comm);
 
   virtual ~ROTeam();
 

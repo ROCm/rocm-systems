@@ -49,7 +49,7 @@ class RdmaLoopbackTestFixture : public ::testing::Test {
   net::IbCtrl ctrl_;
   net::MrRegistry mr_;
   net::LaneMap lm_{1, 2};
-  void *heap_{nullptr};
+  void* heap_{nullptr};
 
   void SetUp() override {
     if (!ibv_.load()) {
@@ -67,8 +67,8 @@ class RdmaLoopbackTestFixture : public ::testing::Test {
 
     ASSERT_EQ(posix_memalign(&heap_, 4096, kHeapSize), 0);
     memset(heap_, 0, kHeapSize);
-    ASSERT_TRUE(mr_.register_heap(&ibv_, const_cast<ibv_pd *>(ctrl_.dev().pd),
-                                  heap_, kHeapSize, /*is_device=*/false,
+    ASSERT_TRUE(mr_.register_heap(&ibv_, const_cast<ibv_pd*>(ctrl_.dev().pd), heap_, kHeapSize,
+                                  /*is_device=*/false,
                                   /*dmabuf=*/{}));
   }
 

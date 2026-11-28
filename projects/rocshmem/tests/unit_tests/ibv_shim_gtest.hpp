@@ -39,9 +39,9 @@ namespace rocshmem {
 class IbvShimTestFixture : public ::testing::Test {
  protected:
   net::Ibv ibv_;
-  struct ibv_device **device_list_{nullptr};
+  struct ibv_device** device_list_{nullptr};
   int num_devices_{0};
-  struct ibv_context *ctx_{nullptr};
+  struct ibv_context* ctx_{nullptr};
 
   void SetUp() override {
     if (!ibv_.load()) {

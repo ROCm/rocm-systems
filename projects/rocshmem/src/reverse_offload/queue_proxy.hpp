@@ -54,23 +54,23 @@ typedef struct queue_element {
    */
   ro_net_cmds type{};
   int PE{-1};
-  void *src{nullptr};
-  void *dst{nullptr};
+  void* src{nullptr};
+  void* dst{nullptr};
   int ro_net_win_id{-1};
   int logPE_stride{-1};
   int PE_size{-1};
-  long *pSync{nullptr};
+  long* pSync{nullptr};
   int op{-1};
   int datatype{-1};
   int PE_root{-1};
-  volatile char *status{nullptr};
+  volatile char* status{nullptr};
   intptr_t team_comm{};
   union {
     size_t size;
     unsigned long long atomic_value;
   } ol1;
   union {
-    void *pWrk;
+    void* pWrk;
     unsigned long long atomic_cond;
   } ol2;
 } __attribute__((__aligned__(64))) queue_element_t;
@@ -80,8 +80,8 @@ class QueueElementProxy {
 
  public:
   QueueElementProxy(const PosixAligned64Allocator& alloc = PosixAligned64Allocator(),
-                    size_t num_elems = 1)
-    : alloc_{alloc}, proxy_{num_elems, alloc_} {
+                    size_t num_elems                     = 1)
+      : alloc_{alloc}, proxy_{num_elems, alloc_} {
     new (proxy_.get()) queue_element_t();
   }
 
@@ -103,7 +103,7 @@ class QueueElementProxy {
 };
 
 class QueueProxy {
-  using ProxyT = DeviceProxy<queue_element_t *>;
+  using ProxyT         = DeviceProxy<queue_element_t*>;
   using ProxyPerBlockT = DeviceProxy<queue_element_t>;
 
  public:
@@ -117,19 +117,18 @@ class QueueProxy {
 
   QueueProxy(size_t max_queues, size_t queue_size,
              const HIPHostAllocator& alloc = HIPHostAllocator())
-    : alloc_{alloc},
-      queue_proxy_{max_queues, alloc_},
-      per_block_queue_proxy_{queue_size * max_queues, alloc_},
-      max_queues_{max_queues}, queue_size_{queue_size},
-      total_queue_elements_{queue_size * max_queues} {
-
-    auto **queue_array{queue_proxy_.get()};
-    auto *per_block_queue{per_block_queue_proxy_.get()};
+      : alloc_{alloc},
+        queue_proxy_{max_queues, alloc_},
+        per_block_queue_proxy_{queue_size * max_queues, alloc_},
+        max_queues_{max_queues},
+        queue_size_{queue_size},
+        total_queue_elements_{queue_size * max_queues} {
+    auto** queue_array{queue_proxy_.get()};
+    auto* per_block_queue{per_block_queue_proxy_.get()};
     for (size_t i{0}; i < max_queues_; i++) {
       queue_array[i] = per_block_queue + i * queue_size_;
     }
-    size_t total_queue_element_bytes{sizeof(queue_element_t) *
-                                     total_queue_elements_};
+    size_t total_queue_element_bytes{sizeof(queue_element_t) * total_queue_elements_};
     memset(per_block_queue, 0, total_queue_element_bytes);
   }
 
@@ -141,7 +140,7 @@ class QueueProxy {
 
   QueueProxy& operator=(QueueProxy&& other) = default;
 
-  __host__ __device__ queue_element_t **get() { return queue_proxy_.get(); }
+  __host__ __device__ queue_element_t** get() { return queue_proxy_.get(); }
 
  private:
   HIPHostAllocator alloc_{};

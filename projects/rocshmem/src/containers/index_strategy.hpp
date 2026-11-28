@@ -145,18 +145,14 @@ class Identity {
    *
    * @return
    */
-  __device__ size_t block_size() const {
-    return hipBlockDim_x * hipBlockDim_y * hipBlockDim_z;
-  }
+  __device__ size_t block_size() const { return hipBlockDim_x * hipBlockDim_y * hipBlockDim_z; }
 
   /**
    * @brief
    *
    * @return
    */
-  __device__ size_t grid_size() const {
-    return hipGridDim_x * hipGridDim_y * hipGridDim_z;
-  }
+  __device__ size_t grid_size() const { return hipGridDim_x * hipGridDim_y * hipGridDim_z; }
 
   /**
    * @brief
@@ -248,8 +244,7 @@ class Thread_Discontiguous_Block_Discontiguous {
    *
    * @param container_elems
    */
-  __host__ __device__ explicit Thread_Discontiguous_Block_Discontiguous(
-      size_t container_elems)
+  __host__ __device__ explicit Thread_Discontiguous_Block_Discontiguous(size_t container_elems)
       : _container_elems(container_elems) {}
 
   /**
@@ -298,13 +293,12 @@ class Thread_Discontiguous_Block_Contiguous {
    *
    * @param container_elems
    */
-  __host__ __device__ explicit Thread_Discontiguous_Block_Contiguous(
-      size_t container_elems)
+  __host__ __device__ explicit Thread_Discontiguous_Block_Contiguous(size_t container_elems)
       : _container_elems(container_elems) {
     size_t left_over = _container_elems % _id.grid_size();
 
-    _tile_offset = _id.block_id() * (_container_elems / _id.grid_size()) +
-                   min(_id.block_id(), left_over);
+    _tile_offset =
+        _id.block_id() * (_container_elems / _id.grid_size()) + min(_id.block_id(), left_over);
 
     _tile_num_elems = _container_elems / _id.grid_size();
     if (_id.block_id() < left_over) {
@@ -391,9 +385,7 @@ class Thread_Discontiguous_Block_Private {
    *
    * @return
    */
-  __device__ size_t next(size_t current_index) {
-    return current_index + _id.block_size();
-  }
+  __device__ size_t next(size_t current_index) { return current_index + _id.block_size(); }
 
  private:
   size_t _container_elems{0};
@@ -519,13 +511,13 @@ class Matrix_Device {
 };
 
 enum class IndexStrategyEnum {
-  TCBA = 0,
-  TDBD = 1,
-  TDBC = 2,
-  TDBP = 3,
-  MP = 4,
-  MB = 5,
-  MD = 6,
+  TCBA  = 0,
+  TDBD  = 1,
+  TDBC  = 2,
+  TDBP  = 3,
+  MP    = 4,
+  MB    = 5,
+  MD    = 6,
   UNSET = 7
 };
 
@@ -535,8 +527,7 @@ class IndexStrategy {
 
   __host__ __device__ IndexStrategy(IndexStrategyEnum ise) : _ise(ise) {}
 
-  __host__ __device__ IndexStrategy(IndexStrategyEnum ise,
-                                    size_t container_elems)
+  __host__ __device__ IndexStrategy(IndexStrategyEnum ise, size_t container_elems)
       : _ise(ise),
         _tcba(container_elems),
         _tdbd(container_elems),
@@ -550,23 +541,23 @@ class IndexStrategy {
    */
   __device__ size_t start() {
     switch (_ise) {
-      case IndexStrategyEnum::TCBA:
-        return _tcba.start();
-      case IndexStrategyEnum::TDBD:
-        return _tdbd.start();
-      case IndexStrategyEnum::TDBC:
-        return _tdbc.start();
-      case IndexStrategyEnum::TDBP:
-        return _tdbp.start();
-      case IndexStrategyEnum::MP:
-        return _mp.start();
-      case IndexStrategyEnum::MB:
-        return _mb.start();
-      case IndexStrategyEnum::MD:
-        return _md.start();
-      case IndexStrategyEnum::UNSET:
-        assert(false);
-        return 0;
+    case IndexStrategyEnum::TCBA:
+      return _tcba.start();
+    case IndexStrategyEnum::TDBD:
+      return _tdbd.start();
+    case IndexStrategyEnum::TDBC:
+      return _tdbc.start();
+    case IndexStrategyEnum::TDBP:
+      return _tdbp.start();
+    case IndexStrategyEnum::MP:
+      return _mp.start();
+    case IndexStrategyEnum::MB:
+      return _mb.start();
+    case IndexStrategyEnum::MD:
+      return _md.start();
+    case IndexStrategyEnum::UNSET:
+      assert(false);
+      return 0;
     }
   }
 
@@ -577,23 +568,23 @@ class IndexStrategy {
    */
   __device__ size_t end() {
     switch (_ise) {
-      case IndexStrategyEnum::TCBA:
-        return _tcba.end();
-      case IndexStrategyEnum::TDBD:
-        return _tdbd.end();
-      case IndexStrategyEnum::TDBC:
-        return _tdbc.end();
-      case IndexStrategyEnum::TDBP:
-        return _tdbp.end();
-      case IndexStrategyEnum::MP:
-        return _mp.end();
-      case IndexStrategyEnum::MB:
-        return _mb.end();
-      case IndexStrategyEnum::MD:
-        return _md.end();
-      case IndexStrategyEnum::UNSET:
-        assert(false);
-        return 0;
+    case IndexStrategyEnum::TCBA:
+      return _tcba.end();
+    case IndexStrategyEnum::TDBD:
+      return _tdbd.end();
+    case IndexStrategyEnum::TDBC:
+      return _tdbc.end();
+    case IndexStrategyEnum::TDBP:
+      return _tdbp.end();
+    case IndexStrategyEnum::MP:
+      return _mp.end();
+    case IndexStrategyEnum::MB:
+      return _mb.end();
+    case IndexStrategyEnum::MD:
+      return _md.end();
+    case IndexStrategyEnum::UNSET:
+      assert(false);
+      return 0;
     }
   }
 
@@ -606,23 +597,23 @@ class IndexStrategy {
    */
   __device__ size_t next(size_t current_index) {
     switch (_ise) {
-      case IndexStrategyEnum::TCBA:
-        return _tcba.next(current_index);
-      case IndexStrategyEnum::TDBD:
-        return _tdbd.next(current_index);
-      case IndexStrategyEnum::TDBC:
-        return _tdbc.next(current_index);
-      case IndexStrategyEnum::TDBP:
-        return _tdbp.next(current_index);
-      case IndexStrategyEnum::MP:
-        return _mp.next(current_index);
-      case IndexStrategyEnum::MB:
-        return _mb.next(current_index);
-      case IndexStrategyEnum::MD:
-        return _md.next(current_index);
-      case IndexStrategyEnum::UNSET:
-        assert(false);
-        return 0;
+    case IndexStrategyEnum::TCBA:
+      return _tcba.next(current_index);
+    case IndexStrategyEnum::TDBD:
+      return _tdbd.next(current_index);
+    case IndexStrategyEnum::TDBC:
+      return _tdbc.next(current_index);
+    case IndexStrategyEnum::TDBP:
+      return _tdbp.next(current_index);
+    case IndexStrategyEnum::MP:
+      return _mp.next(current_index);
+    case IndexStrategyEnum::MB:
+      return _mb.next(current_index);
+    case IndexStrategyEnum::MD:
+      return _md.next(current_index);
+    case IndexStrategyEnum::UNSET:
+      assert(false);
+      return 0;
     }
   }
 

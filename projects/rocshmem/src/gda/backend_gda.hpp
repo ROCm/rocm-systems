@@ -34,7 +34,7 @@
 #include "backend_bc.hpp"
 #include "gda_enums.hpp"
 #include "containers/free_list_impl.hpp"
-#include "hdp_proxy.hpp" //TODO useless?
+#include "hdp_proxy.hpp"  //TODO useless?
 #include "memory/hip_allocator.hpp"
 #include "context_incl.hpp"
 #include "gda_context_proxy.hpp"
@@ -55,22 +55,22 @@ class HostInterface;
 
 struct NicDevice {
   std::string nic_name;
-  struct ibv_device *device = nullptr;
-  struct ibv_context *context = nullptr;
-  struct ibv_device_attr device_attr {};
-  struct ibv_pd *pd_orig = nullptr;
-  struct ibv_port_attr portinfo {};
-  union ibv_gid gid {};
-  int port = 1;
-  int gid_index = 0;
-  uint32_t gid_type = 0;
-  struct ibv_mr *heap_mr = nullptr;
+  struct ibv_device* device   = nullptr;
+  struct ibv_context* context = nullptr;
+  struct ibv_device_attr device_attr{};
+  struct ibv_pd* pd_orig = nullptr;
+  struct ibv_port_attr portinfo{};
+  union ibv_gid gid{};
+  int port               = 1;
+  int gid_index          = 0;
+  uint32_t gid_type      = 0;
+  struct ibv_mr* heap_mr = nullptr;
 
   /* GDA_IONIC & GDA_MLX5*/
-  struct ibv_pd *pd_parent = nullptr;
+  struct ibv_pd* pd_parent = nullptr;
 
   /* GDA_IONIC */
-  struct ibv_pd *pd_uxdma[2] = {nullptr, nullptr};
+  struct ibv_pd* pd_uxdma[2] = {nullptr, nullptr};
 };
 
 class GDABackend : public Backend {
@@ -84,7 +84,7 @@ class GDABackend : public Backend {
 
   GDAProvider gda_provider = GDAProvider::UNSET;
 
-  uint32_t *heap_rkey = nullptr;
+  uint32_t* heap_rkey = nullptr;
 
   /**
    * @brief Device-visible flat table of symmetric user-buffer registrations.
@@ -95,7 +95,7 @@ class GDABackend : public Backend {
    * one entry per registration slot, pre-specialized to that (pe, nic). Each QP
    * points at the slice for its own (dest_pe, nic_idx). Null pre-ROCm-7.0.
    */
-  SymmBufferInfo *symm_buffers_{nullptr};
+  SymmBufferInfo* symm_buffers_{nullptr};
 
   /**
    * @brief Device-resident shared registration count (live slots per slice).
@@ -104,7 +104,7 @@ class GDABackend : public Backend {
    * register/unregister mutate the entry table contents and this count. Null
    * when symmetric registration is unavailable.
    */
-  int *symm_count_{nullptr};
+  int* symm_count_{nullptr};
 
   /**
    * @brief Host mirror of symm_buffers_ and its capacity/count.
@@ -124,11 +124,11 @@ class GDABackend : public Backend {
    * down, keyed by the registered alias base address.
    */
   struct GdaSymmRecord {
-    int slot{-1};                       // registration slot in each QP slice
-    std::vector<struct ibv_mr*> mrs{};  // per-NIC MRs for the buffer
-    std::vector<int> mr_fds{};          // per-NIC dmabuf fds (kept open for MR lifetime)
+    int slot{-1};                                  // registration slot in each QP slice
+    std::vector<struct ibv_mr*> mrs{};             // per-NIC MRs for the buffer
+    std::vector<int> mr_fds{};                     // per-NIC dmabuf fds (kept open for MR lifetime)
     hipMemGenericAllocationHandle_t gen_handle{};  // retained backing handle
-    bool has_gen_handle{false};         // whether gen_handle must be released
+    bool has_gen_handle{false};                    // whether gen_handle must be released
   };
 
   /**
@@ -140,7 +140,7 @@ class GDABackend : public Backend {
   int num_nics_{0};
 
   std::vector<QueuePairHost> host_qps;
-  QueuePair *gpu_qps = nullptr;
+  QueuePair* gpu_qps = nullptr;
   std::vector<ibv_qp*> qps;
   std::vector<ibv_cq*> cqs;
   std::vector<dest_info_t> dest_info;
@@ -149,40 +149,40 @@ class GDABackend : public Backend {
   std::vector<struct bnxt_host_qp> bnxt_qps;
   std::vector<struct bnxt_host_cq> bnxt_scqs;
   std::vector<struct bnxt_host_cq> bnxt_rcqs;
-  HIPAllocator *qp_allocator_{nullptr};
+  HIPAllocator* qp_allocator_{nullptr};
   /* GDA_BNXT END */
 
   /* GDA_IONIC START */
-  void *gpu_db_page = nullptr;
-  uint64_t *gpu_db_cq = nullptr;
-  uint64_t *gpu_db_sq = nullptr;
+  void* gpu_db_page   = nullptr;
+  uint64_t* gpu_db_cq = nullptr;
+  uint64_t* gpu_db_sq = nullptr;
   /* GDA_IONIC END */
 
   /* GDA_MLX5 START */
   std::vector<mlx5_devx_qp> mlx5_qps;
   /* GDA_MLX5 END */
 
-  NicPolicy nic_policy_ {NicPolicy::ROUND_ROBIN};
+  NicPolicy nic_policy_{NicPolicy::ROUND_ROBIN};
 
   /**
    * Effective QPs per PE per context type.
    * Exposed so GDAContext can read them.
    */
-  size_t qps_per_pe_default_ctx_ {1};
-  size_t qps_per_pe_usr_ctx_ {1};
+  size_t qps_per_pe_default_ctx_{1};
+  size_t qps_per_pe_usr_ctx_{1};
 
   /**
    * Determine number of QPs to create per PE =
    * qps_per_pe_default_ctx_ +
    * qps_per_pe_usr_ctx_ * ROCSHMEM_MAX_NUM_CONTEXTS
    */
-  size_t num_qps_per_pe {1};
+  size_t num_qps_per_pe{1};
 
   /**
    * Total number of QPs created =
    * num_qps_per_pe * num_pes;
    */
-  size_t num_qps {1};
+  size_t num_qps{1};
 
   /**
    * @brief Select one or more NICs based on topology/env vars.
@@ -194,22 +194,17 @@ class GDABackend : public Backend {
   void log_ctx_nics(unsigned int ctx_id, size_t qps_per_pe, int qp_offset);
 
   int nic_idx_for_qp(int qp_idx) const {
-    return ComputeNicIdxForQp(
-        qp_idx, num_pes, num_nics_,
-        static_cast<int>(qps_per_pe_default_ctx_),
-        static_cast<int>(qps_per_pe_usr_ctx_),
-        nic_policy_);
+    return ComputeNicIdxForQp(qp_idx, num_pes, num_nics_, static_cast<int>(qps_per_pe_default_ctx_),
+                              static_cast<int>(qps_per_pe_usr_ctx_), nic_policy_);
   }
 
-  NicDevice& nic_for_qp(int qp_idx) {
-    return nic_devices_[nic_idx_for_qp(qp_idx)];
-  }
+  NicDevice& nic_for_qp(int qp_idx) { return nic_devices_[nic_idx_for_qp(qp_idx)]; }
 
   size_t flat_pe_nic_idx(int pe, int nic_idx) const {
     return static_cast<size_t>(pe) * static_cast<size_t>(num_nics_) + static_cast<size_t>(nic_idx);
   }
 
-  const SymmBufferInfo * get_symm_buffers_slice(int pe, int nic_idx) const {
+  const SymmBufferInfo* get_symm_buffers_slice(int pe, int nic_idx) const {
     if (!symm_buffers_) {
       return nullptr;
     }
@@ -230,7 +225,7 @@ class GDABackend : public Backend {
    * @copydoc Backend::Backend(unsigned)
    */
   explicit GDABackend(MPI_Comm comm);
-  explicit GDABackend(TcpBootstrap *bootstr);
+  explicit GDABackend(TcpBootstrap* bootstr);
 
   /**
    * @copydoc Backend::~Backend()
@@ -246,8 +241,8 @@ class GDABackend : public Backend {
    * @return true if the device vendor matches the provider, false otherwise
    */
   static bool device_matches_provider_vendor(GDAProvider provider,
-                                             const struct ibv_device_attr &device_attr,
-                                             const char *device_name);
+                                             const struct ibv_device_attr& device_attr,
+                                             const char* device_name);
 
   /**
    * @brief Check if there are active InfiniBand/RDMA interfaces available
@@ -270,33 +265,33 @@ class GDABackend : public Backend {
   /**
    * @brief
    */
-  __device__ bool create_ctx(int64_t options, rocshmem_ctx_t *ctx);
+  __device__ bool create_ctx(int64_t options, rocshmem_ctx_t* ctx);
 
   /**
    * @brief Destroy a `rocshmem_ctx_t` context and returns it back to the
    * context free list.
    */
-  __device__ void destroy_ctx(rocshmem_ctx_t *ctx);
+  __device__ void destroy_ctx(rocshmem_ctx_t* ctx);
 
   /**
    * @copydoc Backend::ctx_create
    */
-  void ctx_create(int64_t options, void **ctx) override;
+  void ctx_create(int64_t options, void** ctx) override;
 
   /**
    * @copydoc Backend::ctx_destroy
    */
-  void ctx_destroy(Context *ctx) override;
+  void ctx_destroy(Context* ctx) override;
 
   /**
    * @brief Register a user buffer.
    */
-  int buffer_register(void *addr, size_t length) override;
+  int buffer_register(void* addr, size_t length) override;
 
   /**
    * @brief Unregister a user buffer.
    */
-  int buffer_unregister(void *addr) override;
+  int buffer_unregister(void* addr) override;
 
   /**
    * @brief Unregister all previously registered user buffers.
@@ -311,15 +306,14 @@ class GDABackend : public Backend {
    * per-PE alias base and per-PE/per-NIC remote keys and publishes them into a
    * device-visible table consulted by the RMA/AMO paths.
    */
-  int buffer_register_symmetric(void *addr, size_t length,
-                                void **registered_addr) override;
+  int buffer_register_symmetric(void* addr, size_t length, void** registered_addr) override;
 
   /**
    * @copydoc Backend::buffer_unregister_symmetric
    *
    * Collective.
    */
-  int buffer_unregister_symmetric(void *addr) override;
+  int buffer_unregister_symmetric(void* addr) override;
 
   /**
    * @brief Abort the application.
@@ -335,11 +329,9 @@ class GDABackend : public Backend {
   /**
    * @copydoc Backend::create_new_team
    */
-  void create_new_team(Team *parent_team,
-                       const TeamInfo& team_info_wrt_parent,
-                       const TeamInfo& team_info_wrt_world, int num_pes,
-                       int my_pe_in_new_team, MPI_Comm new_team_comm,
-                       rocshmem_team_t *new_team) override;
+  void create_new_team(Team* parent_team, const TeamInfo& team_info_wrt_parent,
+                       const TeamInfo& team_info_wrt_world, int num_pes, int my_pe_in_new_team,
+                       MPI_Comm new_team_comm, rocshmem_team_t* new_team) override;
 
   /**
    * @copydoc Backend::team_destroy(rocshmem_team_t)
@@ -351,7 +343,7 @@ class GDABackend : public Backend {
    *
    * @return Vector containing the addresses of the work/sync bases
    */
-  char** get_wrk_sync_bases() { return wrk_sync_pool_bases_; } //TODO UNUSED
+  char** get_wrk_sync_bases() { return wrk_sync_pool_bases_; }  // TODO UNUSED
 
   /**
    * @brief The host-facing interface that will be used
@@ -362,42 +354,42 @@ class GDABackend : public Backend {
   /**
    * @brief Scratchpad for the internal barrier algorithms.
    */
-  int64_t *barrier_sync{nullptr};
+  int64_t* barrier_sync{nullptr};
 
   /**
    * @brief Handle for raw memory for barrier sync
    */
-  long *barrier_pSync_pool{nullptr};
+  long* barrier_pSync_pool{nullptr};
 
   /**
    * @brief Handle for raw memory for reduce sync
    */
-  long *reduce_pSync_pool{nullptr};
+  long* reduce_pSync_pool{nullptr};
 
   /**
    * @brief Handle for raw memory for broadcast sync
    */
-  long *bcast_pSync_pool{nullptr};
+  long* bcast_pSync_pool{nullptr};
 
   /**
    * @brief Handle for raw memory for alltoall sync
    */
-  long *alltoall_pSync_pool{nullptr};
+  long* alltoall_pSync_pool{nullptr};
 
   /**
    * @brief Handle for raw memory for work
    */
-  void *pWrk_pool{nullptr};
+  void* pWrk_pool{nullptr};
 
   /**
    * @brief Handle for raw memory for alltoall
    */
-  void *pAta_pool{nullptr};
+  void* pAta_pool{nullptr};
 
   /**
    * @brief Handle for raw memory for fence/quiet
-  */
-  int *fence_pool{nullptr};
+   */
+  int* fence_pool{nullptr};
 
  protected:
   /**
@@ -412,8 +404,6 @@ class GDABackend : public Backend {
    * @copydoc Backend::reset_backend_stats()
    */
   void reset_backend_stats() override;
-
-
 
   /**
    * @brief Allocates uncacheable host memory for the hdp policy.
@@ -462,7 +452,6 @@ class GDABackend : public Backend {
   void setup_host_ctx();
   void setup_default_ctx();
 
-
   /**
    * @brief Allocation and initialization of resources required to
    * support IPC handover.
@@ -501,9 +490,9 @@ class GDABackend : public Backend {
    * @return The registered ibv_mr on success, nullptr otherwise.
    */
 #if HIP_VERSION >= 70200000
-  struct ibv_mr *register_symm_buffer_mr(
-      struct ibv_pd *pd, hipMemGenericAllocationHandle_t gen_handle,
-      bool use_dmabuf, void *iova, size_t length, int *out_fd);
+  struct ibv_mr* register_symm_buffer_mr(struct ibv_pd* pd,
+                                         hipMemGenericAllocationHandle_t gen_handle,
+                                         bool use_dmabuf, void* iova, size_t length, int* out_fd);
 #endif
 
   /**
@@ -528,7 +517,7 @@ class GDABackend : public Backend {
    * (@ref gda_nic_unregister) and the bulk shutdown path
    * (@ref symmetric_buffer_unregister_all).
    */
-  void release_symm_record_nic_resources(GdaSymmRecord &rec);
+  void release_symm_record_nic_resources(GdaSymmRecord& rec);
 
   /**
    * @brief Tear down every outstanding symmetric registration at shutdown.
@@ -563,19 +552,19 @@ class GDABackend : public Backend {
 #if defined(GDA_IONIC)
   void ionic_initialize_gpu_qp(QueuePair* qp, int conn_num);
   void ionic_create_cqs(int ncqes);
-  void ionic_setup_parent_domain(NicDevice &nic, struct ibv_parent_domain_init_attr* pattr);
-#endif // defined(GDA_IONIC)
+  void ionic_setup_parent_domain(NicDevice& nic, struct ibv_parent_domain_init_attr* pattr);
+#endif  // defined(GDA_IONIC)
 
 #if defined(GDA_BNXT)
   void bnxt_initialize_gpu_qp(QueuePair* qp, int conn_num);
   void bnxt_create_cqs(int ncqes);
   void bnxt_create_qps(int sq_length);
-#endif // defined(GDA_BNXT)
+#endif  // defined(GDA_BNXT)
 
 #if defined(GDA_MLX5)
   void mlx5_initialize_gpu_qp(QueuePair* qp, int conn_num);
   void mlx5_create_qps(int sq_length);
-#endif // defined(GDA_MLX5)
+#endif  // defined(GDA_MLX5)
 
   /**
    * @brief Setup InfiniBand Resources
@@ -605,12 +594,12 @@ class GDABackend : public Backend {
   /**
    * @brief Validated the rocSHMEM will run with the InfiniBand Device
    */
-  void validate_ib_device(NicDevice &nic);
+  void validate_ib_device(NicDevice& nic);
 
   /**
    * @brief Selects the best GID index
    */
-  void select_gid_index(NicDevice &nic);
+  void select_gid_index(NicDevice& nic);
 
   /**
    * @brief Create all CQs and QPs
@@ -657,12 +646,14 @@ class GDABackend : public Backend {
    */
   int ibv_mtu_to_int(enum ibv_mtu mtu);
 
-  static void* pd_alloc_host(ibv_pd* pd, void* pd_context, size_t size, size_t alignment, uint64_t resource_type);
-  static void* pd_alloc_device_uncached(ibv_pd* pd, void* pd_context, size_t size, size_t alignment, uint64_t resource_type);
+  static void* pd_alloc_host(ibv_pd* pd, void* pd_context, size_t size, size_t alignment,
+                             uint64_t resource_type);
+  static void* pd_alloc_device_uncached(ibv_pd* pd, void* pd_context, size_t size, size_t alignment,
+                                        uint64_t resource_type);
 
   static void pd_release(ibv_pd* pd, void* pd_context, void* ptr, uint64_t resource_type);
 
-  void create_parent_domain(NicDevice &nic);
+  void create_parent_domain(NicDevice& nic);
 
   void setup_gpu_qps();
   void cleanup_gpu_qps();
@@ -683,17 +674,17 @@ class GDABackend : public Backend {
   /**
    * @brief An array of @ref ROContexts that backs the context FreeList.
    */
-  GDAContext *ctx_array{nullptr};
+  GDAContext* ctx_array{nullptr};
 
   /**
    * @brief A free-list containing contexts.
    */
-  FreeListProxy<GDAContext *> ctx_free_list{};
+  FreeListProxy<GDAContext*> ctx_free_list{};
 
   /**
    * @brief The bitmask representing the availability of teams in the pool
    */
-  char *team_pool_bitmask_{nullptr};
+  char* team_pool_bitmask_{nullptr};
 
   /**
    * @brief Bitmask to store the reduced result of bitmasks on participating
@@ -702,7 +693,7 @@ class GDABackend : public Backend {
    * With no thread-safety for this bitmask, multithreaded creation of teams is
    * not supported.
    */
-  char *team_reduced_bitmask_{nullptr};
+  char* team_reduced_bitmask_{nullptr};
 
   /**
    * @brief Size of the bitmask
@@ -723,14 +714,15 @@ class GDABackend : public Backend {
    * @brief Temporary buffer pointer pointing to the same address as
    * wrk_sync_pool_, used to calculate the starting addresses of
    * different work and sync buffers.
-  */
-  char *wrk_sync_pool_top_{nullptr};
+   */
+  char* wrk_sync_pool_top_{nullptr};
 
   /**
    * @brief Array containing the addresses of the work/sync buffer bases
    * of other PEs
-  */
-  char** wrk_sync_pool_bases_{nullptr};//TODO UNUSED, maybe used again later when we decouple the sync from the main heap
+   */
+  char** wrk_sync_pool_bases_{
+      nullptr};  // TODO UNUSED, maybe used again later when we decouple the sync from the main heap
 
   /**
    * @brief Initialize memory required for work/sync buffers and open GDA
@@ -741,20 +733,20 @@ class GDABackend : public Backend {
   /**
    * @brief Close GDA memory handles for work/sync buffers and deallocate
    * work/sync buffer.
-  */
+   */
   void cleanup_wrk_sync_buffer();
 
   /**
    * @brief rte all-to-all
    */
-  void Alltoall_char_inplace (char *inoutbuf, size_t num_bytes, rocshmem_team_t team);
+  void Alltoall_char_inplace(char* inoutbuf, size_t num_bytes, rocshmem_team_t team);
 
   /**
    * @brief rte allreduce for teams
    */
-  void Allreduce_char_BAND (char* inbuf, char *outbuf, size_t num_bytes,
-                            const TeamInfo& new_team_info_wrt_world,
-                            int num_pes, int my_pe_in_new_team);
+  void Allreduce_char_BAND(char* inbuf, char* outbuf, size_t num_bytes,
+                           const TeamInfo& new_team_info_wrt_world, int num_pes,
+                           int my_pe_in_new_team);
 
   /**
    * @brief rte barrier for initialization
@@ -770,7 +762,7 @@ class GDABackend : public Backend {
   /**
    * @brief handle used for the dlopen of the IONIC library
    */
-  void *ionicdv_handle_{nullptr};
+  void* ionicdv_handle_{nullptr};
 
   /**
    * @brief structures holding the function pointers to the direct verbs functionality
@@ -781,7 +773,7 @@ class GDABackend : public Backend {
   /**
    * @brief handle used for the dlopen of the BCOM library
    */
-  void *bnxtdv_handle_{nullptr};
+  void* bnxtdv_handle_{nullptr};
 
   /**
    * @brief structures holding the function pointers to the direct verbs functionality
@@ -792,7 +784,7 @@ class GDABackend : public Backend {
   /**
    * @brief handle used for the dlopen of the MLX5 library
    */
-  void *mlx5dv_handle_{nullptr};
+  void* mlx5dv_handle_{nullptr};
 
 #if defined(GDA_IONIC)
   /**
@@ -804,7 +796,7 @@ class GDABackend : public Backend {
    * @brief open ionic dv lib
    */
   static void* ionic_dv_dlopen();
-#endif // defined(GDA_IONIC)
+#endif  // defined(GDA_IONIC)
 
 #if defined(GDA_BNXT)
   /**
@@ -816,7 +808,7 @@ class GDABackend : public Backend {
    * @brief open bnxt dv lib
    */
   static void* bnxt_dv_dlopen();
-#endif // defined(GDA_BNXT)
+#endif  // defined(GDA_BNXT)
 
 #if defined(GDA_MLX5)
   /**
@@ -828,7 +820,7 @@ class GDABackend : public Backend {
    * @brief open mlx5 dv lib
    */
   static void* mlx5_dv_dlopen();
-#endif // defined(GDA_MLX5)
+#endif  // defined(GDA_MLX5)
 };
 
 }  // namespace rocshmem

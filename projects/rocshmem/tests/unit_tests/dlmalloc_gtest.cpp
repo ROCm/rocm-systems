@@ -127,4 +127,3 @@ TEST_F(DLMallocTestFixture, alloc_1GB_free_1GB) {
 
   strat_.free(c_ptr);
 }
-

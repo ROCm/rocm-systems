@@ -45,7 +45,7 @@ struct OpWrap {
 template <>
 struct OpWrap<ROCSHMEM_SUM> {
   template <typename T>
-  __device__ static void Calc(T *src, T *dst, int i) {
+  __device__ static void Calc(T* src, T* dst, int i) {
     dst[i] += src[i];
   }
 };
@@ -53,7 +53,7 @@ struct OpWrap<ROCSHMEM_SUM> {
 template <>
 struct OpWrap<ROCSHMEM_MAX> {
   template <typename T>
-  __device__ static void Calc(T *src, T *dst, int i) {
+  __device__ static void Calc(T* src, T* dst, int i) {
     dst[i] = max(dst[i], src[i]);
   }
 };
@@ -61,7 +61,7 @@ struct OpWrap<ROCSHMEM_MAX> {
 template <>
 struct OpWrap<ROCSHMEM_MIN> {
   template <typename T>
-  __device__ static void Calc(T *src, T *dst, int i) {
+  __device__ static void Calc(T* src, T* dst, int i) {
     dst[i] = min(dst[i], src[i]);
   }
 };
@@ -69,7 +69,7 @@ struct OpWrap<ROCSHMEM_MIN> {
 template <>
 struct OpWrap<ROCSHMEM_PROD> {
   template <typename T>
-  __device__ static void Calc(T *src, T *dst, int i) {
+  __device__ static void Calc(T* src, T* dst, int i) {
     dst[i] *= src[i];
   }
 };
@@ -77,7 +77,7 @@ struct OpWrap<ROCSHMEM_PROD> {
 template <>
 struct OpWrap<ROCSHMEM_AND> {
   template <typename T>
-  __device__ static void Calc(T *src, T *dst, int i) {
+  __device__ static void Calc(T* src, T* dst, int i) {
     dst[i] &= src[i];
   }
 };
@@ -85,7 +85,7 @@ struct OpWrap<ROCSHMEM_AND> {
 template <>
 struct OpWrap<ROCSHMEM_OR> {
   template <typename T>
-  __device__ static void Calc(T *src, T *dst, int i) {
+  __device__ static void Calc(T* src, T* dst, int i) {
     dst[i] |= src[i];
   }
 };
@@ -93,10 +93,9 @@ struct OpWrap<ROCSHMEM_OR> {
 template <>
 struct OpWrap<ROCSHMEM_XOR> {
   template <typename T>
-  __device__ static void Calc(T *src, T *dst, int i) {
+  __device__ static void Calc(T* src, T* dst, int i) {
     dst[i] ^= src[i];
   }
 };
-
 }
-#endif // LIBRARY_SRC_ROCSHMEM_CALC_HPP_
+#endif  // LIBRARY_SRC_ROCSHMEM_CALC_HPP_

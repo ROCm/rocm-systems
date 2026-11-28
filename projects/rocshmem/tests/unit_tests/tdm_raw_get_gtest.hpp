@@ -43,9 +43,8 @@ static constexpr size_t TEST_TDM_GET_THRESHOLD = 1024;
 
 // PE 1 puller: pulls bytes from PE 0's heap via the real library path.
 template <typename IpcImplT>
-__global__
-void tdm_raw_get_kernel(IpcImplT* ipc_impl, uint8_t* local_dst,
-                        const uint8_t* remote_src, size_t bytes) {
+__global__ void tdm_raw_get_kernel(IpcImplT* ipc_impl, uint8_t* local_dst,
+                                   const uint8_t* remote_src, size_t bytes) {
   extern __shared__ uint8_t tdm_lds[];
   rocshmem_set_lds_stage(tdm_lds, rocshmem_query_lds_stage_bytes());
 
@@ -58,14 +57,14 @@ void tdm_raw_get_kernel(IpcImplT* ipc_impl, uint8_t* local_dst,
 // ---------------------------------------------------------------------------
 
 class TdmRawGetFixture : public ::testing::TestWithParam<size_t> {
-  using IpcImplT = IpcImpl;   // whatever IpcImpl is (IpcOnImpl when USE_IPC)
+  using IpcImplT = IpcImpl;  // whatever IpcImpl is (IpcOnImpl when USE_IPC)
   using MPI_T    = RemoteHeapInfo<CommunicatorMPI>;
 
  public:
   TdmRawGetFixture() {
     MPIInstance::mpilib_dl_init();
     hip_allocator_ = get_default_allocator();
-    heap_mem_ = new HeapMemoryType(*hip_allocator_, envvar::heap_size.get_value());
+    heap_mem_      = new HeapMemoryType(*hip_allocator_, envvar::heap_size.get_value());
     assert(heap_mem_);
     mpi_ = new MPI_T(heap_mem_->get_ptr(), heap_mem_->get_size(), MPI_COMM_WORLD);
     ipc_impl_.ipcHostInit(mpi_->my_pe(), mpi_->get_heap_bases(), MPI_COMM_WORLD);
@@ -82,12 +81,12 @@ class TdmRawGetFixture : public ::testing::TestWithParam<size_t> {
     CHECK_HIP(hipMemcpyToSymbol(HIP_SYMBOL(constmem), &get_threshold, sizeof(get_threshold),
                                 offsetof(constmem_t, lds_stage_get_threshold)));
     hip_allocator_->allocate((void**)&ipc_impl_dptr_, sizeof(IpcImplT));
-    CHECK_HIP(hipMemcpy(ipc_impl_dptr_, &ipc_impl_, sizeof(IpcImplT),
-                        hipMemcpyHostToDevice));
+    CHECK_HIP(hipMemcpy(ipc_impl_dptr_, &ipc_impl_, sizeof(IpcImplT), hipMemcpyHostToDevice));
   }
 
   ~TdmRawGetFixture() override {
-    if (ipc_impl_dptr_) hip_allocator_->deallocate(ipc_impl_dptr_);
+    if (ipc_impl_dptr_)
+      hip_allocator_->deallocate(ipc_impl_dptr_);
     ipc_impl_.ipcHostStop();
     delete mpi_;
     delete heap_mem_;
@@ -133,11 +132,11 @@ class TdmRawGetFixture : public ::testing::TestWithParam<size_t> {
   }
 
  private:
-  HIPAllocator*   hip_allocator_{nullptr};
+  HIPAllocator* hip_allocator_{nullptr};
   HeapMemoryType* heap_mem_{nullptr};
-  MPI_T*          mpi_{nullptr};
-  IpcImplT        ipc_impl_{};
-  IpcImplT*       ipc_impl_dptr_{nullptr};
+  MPI_T* mpi_{nullptr};
+  IpcImplT ipc_impl_{};
+  IpcImplT* ipc_impl_dptr_{nullptr};
 };
 
 }  // namespace rocshmem

@@ -32,142 +32,126 @@
 namespace rocshmem {
 
 template <typename T>
-__host__ void ROHostContext::p(T *dest, T value, int pe) {
+__host__ void ROHostContext::p(T* dest, T value, int pe) {
   host_interface->p<T>(dest, value, pe, context_window_info);
 }
 
 template <typename T>
-__host__ T ROHostContext::g(const T *source, int pe) {
+__host__ T ROHostContext::g(const T* source, int pe) {
   return host_interface->g<T>(source, pe, context_window_info);
 }
 
 template <typename T>
-__host__ void ROHostContext::put(T *dest, const T *source, size_t nelems,
-                                 int pe) {
+__host__ void ROHostContext::put(T* dest, const T* source, size_t nelems, int pe) {
   host_interface->put<T>(dest, source, nelems, pe, context_window_info);
 }
 
 template <typename T>
-__host__ void ROHostContext::get(T *dest, const T *source, size_t nelems,
-                                 int pe) {
+__host__ void ROHostContext::get(T* dest, const T* source, size_t nelems, int pe) {
   host_interface->get<T>(dest, source, nelems, pe, context_window_info);
 }
 
 template <typename T>
-__host__ void ROHostContext::put_nbi(T *dest, const T *source, size_t nelems,
-                                     int pe) {
+__host__ void ROHostContext::put_nbi(T* dest, const T* source, size_t nelems, int pe) {
   host_interface->put_nbi<T>(dest, source, nelems, pe, context_window_info);
 }
 
 template <typename T>
-__host__ void ROHostContext::get_nbi(T *dest, const T *source, size_t nelems,
-                                     int pe) {
+__host__ void ROHostContext::get_nbi(T* dest, const T* source, size_t nelems, int pe) {
   host_interface->get_nbi<T>(dest, source, nelems, pe, context_window_info);
 }
 
 template <typename T>
-__host__ void ROHostContext::amo_add(void *dst, T value, int pe) {
+__host__ void ROHostContext::amo_add(void* dst, T value, int pe) {
   host_interface->amo_add(dst, value, pe, context_window_info);
 }
 
 template <typename T>
-__host__ void ROHostContext::amo_cas(void *dst, T value, T cond, int pe) {
+__host__ void ROHostContext::amo_cas(void* dst, T value, T cond, int pe) {
   host_interface->amo_cas(dst, value, cond, pe, context_window_info);
 }
 
 template <typename T>
-__host__ T ROHostContext::amo_fetch_add(void *dst, T value, int pe) {
+__host__ T ROHostContext::amo_fetch_add(void* dst, T value, int pe) {
   return host_interface->amo_fetch_add(dst, value, pe, context_window_info);
 }
 
 template <typename T>
-__host__ T ROHostContext::amo_fetch_cas(void *dst, T value, T cond, int pe) {
-  return host_interface->amo_fetch_cas(dst, value, cond, pe,
-                                       context_window_info);
+__host__ T ROHostContext::amo_fetch_cas(void* dst, T value, T cond, int pe) {
+  return host_interface->amo_fetch_cas(dst, value, cond, pe, context_window_info);
 }
 
 template <typename T, ROCSHMEM_OP Op>
-__host__ int ROHostContext::reduce_scatter(rocshmem_team_t team, T *dest,
-                                           const T *source, int nreduce) {
+__host__ int ROHostContext::reduce_scatter(rocshmem_team_t team, T* dest, const T* source,
+                                           int nreduce) {
   return host_interface->reduce_scatter<T, Op>(team, dest, source, nreduce);
 }
 
 template <typename T, ROCSHMEM_OP Op>
-__host__ int ROHostContext::reduce_on_stream(rocshmem_team_t team, T *dest,
-                                             const T *source,
-                                             int nreduce,
-                                             hipStream_t stream) {
+__host__ int ROHostContext::reduce_on_stream(rocshmem_team_t team, T* dest, const T* source,
+                                             int nreduce, hipStream_t stream) {
   return host_interface->reduce_on_stream<T, Op>(team, dest, source, nreduce, stream);
 }
 
 template <typename T>
-__host__ void ROHostContext::broadcast(T *dest, const T *source, int nelems,
-                                       int pe_root, int pe_start,
-                                       int log_pe_stride, int pe_size,
-                                       long *p_sync) {
-  host_interface->broadcast<T>(dest, source, nelems, pe_root, pe_start,
-                               log_pe_stride, pe_size, p_sync);
+__host__ void ROHostContext::broadcast(T* dest, const T* source, int nelems, int pe_root,
+                                       int pe_start, int log_pe_stride, int pe_size, long* p_sync) {
+  host_interface->broadcast<T>(dest, source, nelems, pe_root, pe_start, log_pe_stride, pe_size,
+                               p_sync);
 }
 
 template <typename T>
-__host__ void ROHostContext::broadcast(rocshmem_team_t team, T *dest,
-                                       const T *source, int nelems,
+__host__ void ROHostContext::broadcast(rocshmem_team_t team, T* dest, const T* source, int nelems,
                                        int pe_root) {
   host_interface->broadcast<T>(team, dest, source, nelems, pe_root);
 }
 
 template <typename T>
-__host__ void ROHostContext::wait_until(T *ivars, int cmp, T val) {
+__host__ void ROHostContext::wait_until(T* ivars, int cmp, T val) {
   host_interface->wait_until<T>(ivars, cmp, val, context_window_info);
 }
 
 template <typename T>
-__host__ size_t ROHostContext::wait_until_any(T *ivars, size_t nelems,
-      const int *status, int cmp, T val) {
+__host__ size_t ROHostContext::wait_until_any(T* ivars, size_t nelems, const int* status, int cmp,
+                                              T val) {
   return host_interface->wait_until_any<T>(ivars, nelems, status, cmp, val, context_window_info);
 }
 
 template <typename T>
-__host__
-void ROHostContext::wait_until_all(T *ivars, size_t nelems,
-    const int *status, int cmp, T val) {
+__host__ void ROHostContext::wait_until_all(T* ivars, size_t nelems, const int* status, int cmp,
+                                            T val) {
   host_interface->wait_until_all(ivars, nelems, status, cmp, val, context_window_info);
 }
 
 template <typename T>
-__host__
-size_t ROHostContext::wait_until_some(T *ivars, size_t nelems,
-                              size_t* indices,
-                              const int *status,
-                              int cmp, T val) {
-  return host_interface->wait_until_some(ivars, nelems, indices, status, cmp, val, context_window_info);
+__host__ size_t ROHostContext::wait_until_some(T* ivars, size_t nelems, size_t* indices,
+                                               const int* status, int cmp, T val) {
+  return host_interface->wait_until_some(ivars, nelems, indices, status, cmp, val,
+                                         context_window_info);
 }
 
 template <typename T>
-__host__
-void ROHostContext::wait_until_all_vector(T *ivars, size_t nelems,
-                                    const int *status,
-                                    int cmp, T* vals) {
+__host__ void ROHostContext::wait_until_all_vector(T* ivars, size_t nelems, const int* status,
+                                                   int cmp, T* vals) {
   host_interface->wait_until_all_vector(ivars, nelems, status, cmp, vals, context_window_info);
 }
 
 template <typename T>
-__host__ size_t ROHostContext::wait_until_any_vector(T *ivars, size_t nelems,
-                                      const int *status,
-                                      int cmp, T* vals) {
-  return host_interface->wait_until_any_vector(ivars, nelems, status, cmp, vals, context_window_info);
+__host__ size_t ROHostContext::wait_until_any_vector(T* ivars, size_t nelems, const int* status,
+                                                     int cmp, T* vals) {
+  return host_interface->wait_until_any_vector(ivars, nelems, status, cmp, vals,
+                                               context_window_info);
 }
 
 template <typename T>
-__host__ size_t ROHostContext::wait_until_some_vector(T *ivars, size_t nelems,
-                                     size_t* indices,
-                                     const int *status,
-                                     int cmp, T* vals) {
-  return host_interface->wait_until_some_vector(ivars, nelems, indices, status, cmp, vals, context_window_info);
+__host__ size_t ROHostContext::wait_until_some_vector(T* ivars, size_t nelems, size_t* indices,
+                                                      const int* status, int cmp, T* vals) {
+  return host_interface->wait_until_some_vector(ivars, nelems, indices, status, cmp, vals,
+                                                context_window_info);
 }
 
 template <typename T>
-__host__ int ROHostContext::test(T *ivars, int cmp, T val) {
+__host__ int ROHostContext::test(T* ivars, int cmp, T val) {
   return host_interface->test<T>(ivars, cmp, val, context_window_info);
 }
 

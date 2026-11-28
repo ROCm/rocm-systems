@@ -49,8 +49,7 @@ static constexpr uint8_t kZeroPhysicalPodId[16] = {};
  * Macro to check if PodIds structure contains all zeros (detection failed)
  */
 #define IS_PODIDS_ZERO(podIds) \
-  (memcmp((podIds).physicalPodId, kZeroPhysicalPodId, 16) == 0 && \
-   (podIds).virtualPodId == 0)
+  (memcmp((podIds).physicalPodId, kZeroPhysicalPodId, 16) == 0 && (podIds).virtualPodId == 0)
 
 /**
  * Detect the pod IDs for the current rank's GPU.

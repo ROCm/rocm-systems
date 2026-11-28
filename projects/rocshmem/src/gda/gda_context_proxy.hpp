@@ -25,7 +25,6 @@
 #ifndef LIBRARY_SRC_GDA_CONTEXT_PROXY_HPP_
 #define LIBRARY_SRC_GDA_CONTEXT_PROXY_HPP_
 
-
 #include "device_proxy.hpp"
 #include "backend_gda.hpp"
 #include "memory/hip_allocator.hpp"
@@ -43,10 +42,9 @@ class GDADefaultContextProxy {
   /*
    * Placement new the memory which is allocated by proxy_
    */
-  explicit GDADefaultContextProxy(GDABackend* backend, TeamInfo *tinfo,
-                                  HIPAllocator alloc = HIPAllocator(),
-                                  size_t num_elems = 1)
-  : alloc_{alloc}, proxy_{num_elems, alloc_}, constructed_{true} {
+  explicit GDADefaultContextProxy(GDABackend* backend, TeamInfo* tinfo,
+                                  HIPAllocator alloc = HIPAllocator(), size_t num_elems = 1)
+      : alloc_{alloc}, proxy_{num_elems, alloc_}, constructed_{true} {
     auto ctx{proxy_.get()};
     new (ctx) GDAContext(reinterpret_cast<Backend*>(backend), 0);
     ctx->tinfo = tinfo;
@@ -72,8 +70,8 @@ class GDADefaultContextProxy {
 
   GDADefaultContextProxy& operator=(GDADefaultContextProxy&& other) {
     if (this != &other) {
-      proxy_ = std::move(other.proxy_);
-      constructed_ = true;
+      proxy_             = std::move(other.proxy_);
+      constructed_       = true;
       other.constructed_ = false;
     }
     return *this;

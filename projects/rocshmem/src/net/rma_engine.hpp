@@ -62,50 +62,48 @@ struct LocalMr {
 class RmaEngine {
  public:
   RmaEngine() = default;
-  RmaEngine(Ibv *ibv, IbCtrl *ctrl, MrRegistry *mr, LaneMap lm,
-            uintptr_t heap_base, std::vector<LocalMr> local_mrs);
+  RmaEngine(Ibv* ibv, IbCtrl* ctrl, MrRegistry* mr, LaneMap lm, uintptr_t heap_base,
+            std::vector<LocalMr> local_mrs);
 
   // --- addressing ---------------------------------------------------------
   //! Peer VA for a local symmetric-heap VA (offset preserved).
-  uintptr_t remote_va(int pe, const void *local_symmetric_va) const;
+  uintptr_t remote_va(int pe, const void* local_symmetric_va) const;
   //! Peer heap rkey.
   uint32_t rkey(int pe) const;
   //! lkey for a local buffer (heap or a registered scratch/return buffer); 0 if none.
-  uint32_t lkey_for(const void *addr) const;
+  uint32_t lkey_for(const void* addr) const;
 
   // --- posting (return the wr_id used; 0 on post failure) -----------------
   // Inline is chosen automatically when @p len fits the driver-granted
   // max_inline_data (see post_write); callers do not pass an inline hint.
-  uint64_t post_write(int lane, uintptr_t laddr, uint32_t lkey, uintptr_t raddr,
-                      uint32_t rk, uint32_t len, uint64_t wr_id);
-  uint64_t post_read(int lane, uintptr_t laddr, uint32_t lkey, uintptr_t raddr,
-                     uint32_t rk, uint32_t len, uint64_t wr_id);
+  uint64_t post_write(int lane, uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rk,
+                      uint32_t len, uint64_t wr_id);
+  uint64_t post_read(int lane, uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rk,
+                     uint32_t len, uint64_t wr_id);
   //! 8-byte inline RDMA_WRITE of an immediate value (the OpenSHMEM SIGNAL_SET
   //! realization). Inline => the value is copied into the WQE at post time, so
   //! no registered local source/lkey is required. Used for put-with-signal:
   //! posted after the payload write on the same RC QP, RC in-order placement
   //! guarantees the signal lands after the data at the responder.
-  uint64_t post_signal_set(int lane, uintptr_t raddr, uint32_t rk,
-                           uint64_t value, uint64_t wr_id);
-  uint64_t post_fadd(int lane, uintptr_t result, uint32_t lkey, uintptr_t raddr,
-                     uint32_t rk, uint64_t add, uint64_t wr_id);
-  uint64_t post_cas(int lane, uintptr_t result, uint32_t lkey, uintptr_t raddr,
-                    uint32_t rk, uint64_t cmp, uint64_t swp, uint64_t wr_id);
+  uint64_t post_signal_set(int lane, uintptr_t raddr, uint32_t rk, uint64_t value, uint64_t wr_id);
+  uint64_t post_fadd(int lane, uintptr_t result, uint32_t lkey, uintptr_t raddr, uint32_t rk,
+                     uint64_t add, uint64_t wr_id);
+  uint64_t post_cas(int lane, uintptr_t result, uint32_t lkey, uintptr_t raddr, uint32_t rk,
+                    uint64_t cmp, uint64_t swp, uint64_t wr_id);
 
   // --- completion ---------------------------------------------------------
   //! Reap up to @p max completions from context @p cq_index's CQ.
-  int poll(int cq_index, struct ibv_wc *wc, int max);
+  int poll(int cq_index, struct ibv_wc* wc, int max);
 
-  const LaneMap &lanes() const { return lm_; }
+  const LaneMap& lanes() const { return lm_; }
 
  private:
-  uint64_t post_atomic(int lane, int opcode, uintptr_t result, uint32_t lkey,
-                       uintptr_t raddr, uint32_t rk, uint64_t compare_add,
-                       uint64_t swap, uint64_t wr_id);
+  uint64_t post_atomic(int lane, int opcode, uintptr_t result, uint32_t lkey, uintptr_t raddr,
+                       uint32_t rk, uint64_t compare_add, uint64_t swap, uint64_t wr_id);
 
-  Ibv *ibv_{nullptr};
-  IbCtrl *ctrl_{nullptr};
-  MrRegistry *mr_{nullptr};
+  Ibv* ibv_{nullptr};
+  IbCtrl* ctrl_{nullptr};
+  MrRegistry* mr_{nullptr};
   LaneMap lm_{};
   uintptr_t heap_base_{0};
   std::vector<LocalMr> local_mrs_{};

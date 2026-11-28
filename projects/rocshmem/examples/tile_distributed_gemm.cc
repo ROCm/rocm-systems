@@ -55,7 +55,7 @@ using namespace rocshmem;
  */
 template <typename T>
 struct Tensor2D {
-  using element_type = T;
+  using element_type        = T;
   static constexpr int ndim = 2;
 
   T* data;
@@ -71,20 +71,16 @@ struct Tensor2D {
    * @param cols_ Number of columns
    * @param row_stride_ Stride between rows (default: cols for contiguous)
    */
-  __host__ __device__ Tensor2D(T* data_, int rows_, int cols_,
-                                int row_stride_ = -1, int col_stride_ = 1)
+  __host__ __device__ Tensor2D(T* data_, int rows_, int cols_, int row_stride_ = -1,
+                               int col_stride_ = 1)
       : data(data_), rows(rows_), cols(cols_), col_stride(col_stride_) {
     row_stride = (row_stride_ == -1) ? cols : row_stride_;
   }
 
   __host__ __device__ T* data_handle() const { return data; }
-  __host__ __device__ int stride(int dim) const {
-    return (dim == 0) ? row_stride : col_stride;
-  }
+  __host__ __device__ int stride(int dim) const { return (dim == 0) ? row_stride : col_stride; }
 
-  __host__ __device__ T& operator()(int i, int j) {
-    return data[i * row_stride + j * col_stride];
-  }
+  __host__ __device__ T& operator()(int i, int j) { return data[i * row_stride + j * col_stride]; }
 
   __host__ __device__ const T& operator()(int i, int j) const {
     return data[i * row_stride + j * col_stride];
@@ -114,9 +110,8 @@ struct Coord2D {
  * @param B_tensor Full matrix B as Tensor2D
  * @param C_tensor Local portion of matrix C as Tensor2D
  */
-__global__ void gemm_kernel(Tensor2D<int> A_tensor,
-                           Tensor2D<int> B_tensor,
-                           Tensor2D<int> C_tensor) {
+__global__ void gemm_kernel(Tensor2D<int> A_tensor, Tensor2D<int> B_tensor,
+                            Tensor2D<int> C_tensor) {
   int row = blockIdx.y * blockDim.y + threadIdx.y;
   int col = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -143,11 +138,9 @@ __global__ void gemm_kernel(Tensor2D<int> A_tensor,
  * @param tile_cols Number of columns in the tile
  * @param remote_pe PE ID to send to
  */
-__global__ void tile_exchange_kernel(Tensor2D<int> local_tensor,
-                                    Tensor2D<int> remote_buffer,
-                                    int tile_row, int tile_col,
-                                    int tile_rows, int tile_cols,
-                                    int remote_pe) {
+__global__ void tile_exchange_kernel(Tensor2D<int> local_tensor, Tensor2D<int> remote_buffer,
+                                     int tile_row, int tile_col, int tile_rows, int tile_cols,
+                                     int remote_pe) {
   if (threadIdx.x == 0 && blockIdx.x == 0) {
     // Define source tile on local PE
     Coord2D start(tile_row, tile_col);
@@ -155,8 +148,7 @@ __global__ void tile_exchange_kernel(Tensor2D<int> local_tensor,
 
     // Send tile using Tile API
     // Note: tile_put uses (dst, src) parameter order
-    rocshmem_tile_put(remote_buffer, local_tensor, start, boundary,
-                     remote_pe, 0);
+    rocshmem_tile_put(remote_buffer, local_tensor, start, boundary, remote_pe, 0);
   }
 }
 
@@ -174,11 +166,8 @@ __global__ void tile_exchange_kernel(Tensor2D<int> local_tensor,
  * @param tile_cols Number of columns in the tile
  * @param remote_pe PE ID to fetch from
  */
-__global__ void tile_get_kernel(Tensor2D<int> local_buffer,
-                                Tensor2D<int> tensor,
-                                int tile_row, int tile_col,
-                                int tile_rows, int tile_cols,
-                                int remote_pe) {
+__global__ void tile_get_kernel(Tensor2D<int> local_buffer, Tensor2D<int> tensor, int tile_row,
+                                int tile_col, int tile_rows, int tile_cols, int remote_pe) {
   if (threadIdx.x == 0 && blockIdx.x == 0) {
     // Define source tile on remote PE
     Coord2D start(tile_row, tile_col);
@@ -186,8 +175,7 @@ __global__ void tile_get_kernel(Tensor2D<int> local_buffer,
 
     // Fetch tile using Tile API
     // Note: tile_get uses (dst, src) parameter order
-    rocshmem_tile_get(local_buffer, tensor, start, boundary,
-                     remote_pe, 0);
+    rocshmem_tile_get(local_buffer, tensor, start, boundary, remote_pe, 0);
   }
 }
 
@@ -203,8 +191,7 @@ __global__ void tile_get_kernel(Tensor2D<int> local_buffer,
  * @param row_offset Global row offset (for distributed matrices)
  * @param pe_id PE identifier to make each PE's data unique
  */
-void init_matrix(std::vector<int>& mat, int rows, int cols,
-                 int row_offset, int pe_id) {
+void init_matrix(std::vector<int>& mat, int rows, int cols, int row_offset, int pe_id) {
   for (int i = 0; i < rows; i++) {
     for (int j = 0; j < cols; j++) {
       // Small values to avoid integer overflow in GEMM
@@ -218,10 +205,8 @@ void init_matrix(std::vector<int>& mat, int rows, int cols,
 /**
  * @brief Verify distributed GEMM result
  */
-bool verify_result(const std::vector<int>& C_local,
-                  const std::vector<int>& A_local,
-                  const std::vector<int>& B,
-                  int M_local, int K, int N) {
+bool verify_result(const std::vector<int>& C_local, const std::vector<int>& A_local,
+                   const std::vector<int>& B, int M_local, int K, int N) {
   int errors = 0;
   for (int i = 0; i < M_local; i++) {
     for (int j = 0; j < N; j++) {
@@ -264,8 +249,7 @@ int main(int argc, char* argv[]) {
   // Ensure M is divisible by number of PEs
   if (M % n_pes != 0) {
     if (my_pe == 0) {
-      std::cerr << "M (" << M << ") must be divisible by n_pes ("
-                << n_pes << ")" << std::endl;
+      std::cerr << "M (" << M << ") must be divisible by n_pes (" << n_pes << ")" << std::endl;
     }
     rocshmem_finalize();
     return 1;
@@ -276,8 +260,7 @@ int main(int argc, char* argv[]) {
   if (my_pe == 0) {
     std::cout << "Distributed GEMM: C(" << M << "×" << N << ") = "
               << "A(" << M << "×" << K << ") × B(" << K << "×" << N << ")\n";
-    std::cout << "Using " << n_pes << " PEs, "
-              << M_local << " rows per PE\n" << std::endl;
+    std::cout << "Using " << n_pes << " PEs, " << M_local << " rows per PE\n" << std::endl;
   }
 
   // Allocate host memory
@@ -301,7 +284,7 @@ int main(int argc, char* argv[]) {
 
   // Allocate symmetric heap for matrices
   int* d_A_local = (int*)rocshmem_malloc(M_local * K * sizeof(int));
-  int* d_B = (int*)rocshmem_malloc(K * N * sizeof(int));
+  int* d_B       = (int*)rocshmem_malloc(K * N * sizeof(int));
   int* d_C_local = (int*)rocshmem_malloc(M_local * N * sizeof(int));
 
   if (!d_A_local || !d_B || !d_C_local) {
@@ -311,8 +294,8 @@ int main(int argc, char* argv[]) {
   }
 
   // Copy data to device
-  CHECK_HIP(hipMemcpy(d_A_local, h_A_local.data(), M_local * K * sizeof(int),
-                      hipMemcpyHostToDevice));
+  CHECK_HIP(
+      hipMemcpy(d_A_local, h_A_local.data(), M_local * K * sizeof(int), hipMemcpyHostToDevice));
   CHECK_HIP(hipMemcpy(d_B, h_B.data(), K * N * sizeof(int), hipMemcpyHostToDevice));
   // CHECK_HIP(hipStreamSynchronize(0));
 
@@ -328,8 +311,7 @@ int main(int argc, char* argv[]) {
   dim3 block(16, 16);
   dim3 grid((N + block.x - 1) / block.x, (M_local + block.y - 1) / block.y);
 
-  hipLaunchKernelGGL(gemm_kernel, grid, block, 0, 0,
-                    A_tensor, B_tensor, C_tensor);
+  hipLaunchKernelGGL(gemm_kernel, grid, block, 0, 0, A_tensor, B_tensor, C_tensor);
 
   CHECK_HIP(hipDeviceSynchronize());
 
@@ -337,8 +319,8 @@ int main(int argc, char* argv[]) {
   rocshmem_barrier_all();
 
   // Copy result back to host
-  CHECK_HIP(hipMemcpy(h_C_local.data(), d_C_local, M_local * N * sizeof(int),
-                      hipMemcpyDeviceToHost));
+  CHECK_HIP(
+      hipMemcpy(h_C_local.data(), d_C_local, M_local * N * sizeof(int), hipMemcpyDeviceToHost));
   CHECK_HIP(hipStreamSynchronize(0));  // Ensure data is visible before verification
 
   // Verify result
@@ -356,24 +338,25 @@ int main(int argc, char* argv[]) {
   // Fetch directly into A_tensor instead of using a separate buffer
   if (n_pes > 1 && my_pe == 0) {
     std::cout << "\n--- Tile API Demo (tile_get) ---" << std::endl;
-    std::cout << "PE 0 fetching 4×4 tile from PE 1's matrix A directly into A_tensor..." << std::endl;
+    std::cout << "PE 0 fetching 4×4 tile from PE 1's matrix A directly into A_tensor..."
+              << std::endl;
     std::cout << "PE 0's d_A_local = " << d_A_local << std::endl;
     std::cout << "PE 0's d_B = " << d_B << std::endl;
     std::cout << "PE 0's d_C_local = " << d_C_local << std::endl;
 
     if (M_local >= 4 && K >= 4) {
-      std::cout << "\nFetching 4×4 tile from PE 1's A[0:4, 0:4] into PE 0's A_tensor[0:4, 0:4]" << std::endl;
+      std::cout << "\nFetching 4×4 tile from PE 1's A[0:4, 0:4] into PE 0's A_tensor[0:4, 0:4]"
+                << std::endl;
 
       // Fetch 4×4 tile from PE 1 directly into A_tensor at position [0,0]
       // This will overwrite PE 0's original A values in that region
-      hipLaunchKernelGGL(tile_get_kernel, 1, 1, 0, 0,
-                        A_tensor, A_tensor, 0, 0, 4, 4, 1);
+      hipLaunchKernelGGL(tile_get_kernel, 1, 1, 0, 0, A_tensor, A_tensor, 0, 0, 4, 4, 1);
       CHECK_HIP(hipStreamSynchronize(0));
 
       // Copy the modified A_tensor region back to host for verification
       std::vector<int> h_A_local(M_local * K);
-      CHECK_HIP(hipMemcpy(h_A_local.data(), d_A_local, M_local * K * sizeof(int),
-                          hipMemcpyDeviceToHost));
+      CHECK_HIP(
+          hipMemcpy(h_A_local.data(), d_A_local, M_local * K * sizeof(int), hipMemcpyDeviceToHost));
 
       // Verify: A_tensor[0:4, 0:4] should now contain PE 1's A matrix values
       int pe1_row_offset = 1 * M_local;
@@ -383,11 +366,10 @@ int main(int argc, char* argv[]) {
       for (int i = 0; i < 4; i++) {
         for (int j = 0; j < 4; j++) {
           int global_row = pe1_row_offset + i;
-          int expected = (global_row % 10) + (j % 10) + 1;
-          int actual = h_A_local[i * K + j];  // A_tensor is row-major with stride K
+          int expected   = (global_row % 10) + (j % 10) + 1;
+          int actual     = h_A_local[i * K + j];  // A_tensor is row-major with stride K
 
-          std::cout << "  [" << i << "," << j << "] expected=" << expected
-                    << " actual=" << actual;
+          std::cout << "  [" << i << "," << j << "] expected=" << expected << " actual=" << actual;
           if (expected != actual) {
             std::cout << " ✗ MISMATCH";
             tile_correct = false;
@@ -400,7 +382,8 @@ int main(int argc, char* argv[]) {
 
       if (tile_correct) {
         std::cout << "✓ Tile_get verification PASSED" << std::endl;
-        std::cout << "  Successfully fetched 4×4 region from PE 1 directly into A_tensor" << std::endl;
+        std::cout << "  Successfully fetched 4×4 region from PE 1 directly into A_tensor"
+                  << std::endl;
       } else {
         std::cout << "✗ Tile_get verification FAILED" << std::endl;
       }

@@ -65,8 +65,7 @@
 
 using namespace rocshmem;
 
-__global__ void user_mem_symm_test(int *source, int *dest, size_t nelem,
-                                   rocshmem_team_t team) {
+__global__ void user_mem_symm_test(int* source, int* dest, size_t nelem, rocshmem_team_t team) {
   __shared__ rocshmem_ctx_t ctx;
   int64_t ctx_type = 0;
 
@@ -80,27 +79,26 @@ __global__ void user_mem_symm_test(int *source, int *dest, size_t nelem,
   rocshmem_wg_ctx_destroy(&ctx);
 }
 
-static void init_sendbuf(int *source, int nelem, int my_pe, int npes) {
+static void init_sendbuf(int* source, int nelem, int my_pe, int npes) {
   for (int pe = 0; pe < npes; pe++) {
     for (int i = 0; i < nelem; i++) {
-      int idx = (pe * nelem) + i;
+      int idx     = (pe * nelem) + i;
       source[idx] = my_pe + pe;
     }
   }
 }
 
-static bool check_recvbuf(int *dest, int nelem, int my_pe, int npes) {
+static bool check_recvbuf(int* dest, int nelem, int my_pe, int npes) {
   bool res = true;
 
   for (int pe = 0; pe < npes; pe++) {
     for (int i = 0; i < nelem; i++) {
-      int idx = (pe * nelem) + i;
+      int idx    = (pe * nelem) + i;
       int result = my_pe + pe;
       if (dest[idx] != result) {
         res = false;
 #ifdef VERBOSE
-        std::cout << "recvbuf[" << i << "] = " << dest[i] << " expected "
-                  << result << std::endl;
+        std::cout << "recvbuf[" << i << "] = " << dest[i] << " expected " << result << std::endl;
 #endif
       }
     }
@@ -111,10 +109,9 @@ static bool check_recvbuf(int *dest, int nelem, int my_pe, int npes) {
 
 /* Query whether the GPU supports HIP virtual memory management. */
 static bool device_supports_vmm(int device_id) {
-  int supported = 0;
+  int supported  = 0;
   hipError_t err = hipDeviceGetAttribute(
-      &supported, hipDeviceAttributeVirtualMemoryManagementSupported,
-      device_id);
+      &supported, hipDeviceAttributeVirtualMemoryManagementSupported, device_id);
   return (err == hipSuccess) && (supported != 0);
 }
 
@@ -129,18 +126,17 @@ static bool device_supports_vmm(int device_id) {
  * The granularity-aligned size is returned via *aligned_size, since both the
  * symmetric registration and the later unmap must use that exact length.
  */
-static bool vmm_alloc(void **ptr, hipMemGenericAllocationHandle_t *handle,
-                      size_t size, size_t *aligned_size, int device_id) {
-  hipMemAllocationProp prop = {};
-  prop.type = hipMemAllocationTypePinned;
-  prop.location.type = hipMemLocationTypeDevice;
-  prop.location.id = device_id;
-  prop.requestedHandleTypes = hipMemHandleTypePosixFileDescriptor;
+static bool vmm_alloc(void** ptr, hipMemGenericAllocationHandle_t* handle, size_t size,
+                      size_t* aligned_size, int device_id) {
+  hipMemAllocationProp prop            = {};
+  prop.type                            = hipMemAllocationTypePinned;
+  prop.location.type                   = hipMemLocationTypeDevice;
+  prop.location.id                     = device_id;
+  prop.requestedHandleTypes            = hipMemHandleTypePosixFileDescriptor;
   prop.allocFlags.gpuDirectRDMACapable = 1;
 
   size_t granularity = 0;
-  if (hipMemGetAllocationGranularity(&granularity, &prop,
-                                     hipMemAllocationGranularityMinimum) !=
+  if (hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum) !=
           hipSuccess ||
       granularity == 0) {
     return false;
@@ -152,7 +148,7 @@ static bool vmm_alloc(void **ptr, hipMemGenericAllocationHandle_t *handle,
     return false;
   }
 
-  void *va = nullptr;
+  void* va = nullptr;
   if (hipMemAddressReserve(&va, alloc_size, 0, 0, 0) != hipSuccess) {
     (void)hipMemRelease(*handle);
     return false;
@@ -166,11 +162,11 @@ static bool vmm_alloc(void **ptr, hipMemGenericAllocationHandle_t *handle,
 
   hipMemAccessDesc access_desc[2];
   access_desc[0].location.type = hipMemLocationTypeDevice;
-  access_desc[0].location.id = device_id;
-  access_desc[0].flags = hipMemAccessFlagsProtReadWrite;
+  access_desc[0].location.id   = device_id;
+  access_desc[0].flags         = hipMemAccessFlagsProtReadWrite;
   access_desc[1].location.type = hipMemLocationTypeHost;
-  access_desc[1].location.id = 0;
-  access_desc[1].flags = hipMemAccessFlagsProtReadWrite;
+  access_desc[1].location.id   = 0;
+  access_desc[1].flags         = hipMemAccessFlagsProtReadWrite;
 
   if (hipMemSetAccess(va, alloc_size, access_desc, 2) != hipSuccess) {
     (void)hipMemUnmap(va, alloc_size);
@@ -179,13 +175,12 @@ static bool vmm_alloc(void **ptr, hipMemGenericAllocationHandle_t *handle,
     return false;
   }
 
-  *ptr = va;
+  *ptr          = va;
   *aligned_size = alloc_size;
   return true;
 }
 
-static void vmm_free(void *ptr, hipMemGenericAllocationHandle_t handle,
-                     size_t size) {
+static void vmm_free(void* ptr, hipMemGenericAllocationHandle_t handle, size_t size) {
   (void)hipMemUnmap(ptr, size);
   (void)hipMemAddressFree(ptr, size);
   (void)hipMemRelease(handle);
@@ -197,12 +192,10 @@ static void vmm_free(void *ptr, hipMemGenericAllocationHandle_t handle,
  * given memory, the case is reported and skipped so the example stays portable
  * across backends.
  */
-static bool run_symm_variant(const char *label, void *dest_buf,
-                             size_t dest_size, int *source, int nelem,
-                             int my_pe, int npes, rocshmem_team_t team,
-                             const char *prog) {
-  int *dest = reinterpret_cast<int *>(
-      rocshmem_buffer_register_symmetric(dest_buf, dest_size));
+static bool run_symm_variant(const char* label, void* dest_buf, size_t dest_size, int* source,
+                             int nelem, int my_pe, int npes, rocshmem_team_t team,
+                             const char* prog) {
+  int* dest = reinterpret_cast<int*>(rocshmem_buffer_register_symmetric(dest_buf, dest_size));
   if (dest == nullptr) {
     if (my_pe == 0) {
       std::cout << label
@@ -229,14 +222,12 @@ static bool run_symm_variant(const char *label, void *dest_buf,
   CHECK_HIP(hipMemcpy(host.data(), dest, nbytes, hipMemcpyDeviceToHost));
   bool pass = check_recvbuf(host.data(), nelem, my_pe, npes);
 
-  std::cout << "[" << my_pe << "] Test " << prog << " (" << label
-            << ") \t nelem " << nelem << " " << (pass ? "[PASS]" : "[FAIL]")
-            << std::endl;
+  std::cout << "[" << my_pe << "] Test " << prog << " (" << label << ") \t nelem " << nelem << " "
+            << (pass ? "[PASS]" : "[FAIL]") << std::endl;
 
   int ret = rocshmem_buffer_unregister_symmetric(dest);
   if (ROCSHMEM_SUCCESS != ret) {
-    std::cout << label << ": Error unregistering symmetric user buffer"
-              << std::endl;
+    std::cout << label << ": Error unregistering symmetric user buffer" << std::endl;
     rocshmem_global_exit(1);
   }
 
@@ -245,7 +236,7 @@ static bool run_symm_variant(const char *label, void *dest_buf,
 
 #define MAX_ELEM 256
 
-int main(int argc, char **argv) {
+int main(int argc, char** argv) {
   int nelem = MAX_ELEM;
 
   if (argc > 1) {
@@ -280,8 +271,7 @@ int main(int argc, char **argv) {
 
   ret = rocshmem_set_attr_uniqueid_args(rank, nranks, &uid, &attr);
   if (ret != ROCSHMEM_SUCCESS) {
-    std::cout << rank
-              << ": Error in rocshmem_set_attr_uniqueid_args. Aborting.\n";
+    std::cout << rank << ": Error in rocshmem_set_attr_uniqueid_args. Aborting.\n";
     MPI_Abort(MPI_COMM_WORLD, ret);
   }
 
@@ -292,7 +282,7 @@ int main(int argc, char **argv) {
   }
 
   int my_pe = rocshmem_my_pe();
-  int npes = rocshmem_n_pes();
+  int npes  = rocshmem_n_pes();
 
   int device_id = 0;
   CHECK_HIP(hipGetDevice(&device_id));
@@ -300,7 +290,7 @@ int main(int argc, char **argv) {
   size_t buffer_size = nelem * sizeof(int) * npes;
 
   /* Shared all-to-all source, used by every variant. */
-  int *source = reinterpret_cast<int *>(rocshmem_malloc(buffer_size));
+  int* source = reinterpret_cast<int*>(rocshmem_malloc(buffer_size));
   if (source == nullptr) {
     std::cout << "Error allocating source from symmetric heap" << std::endl;
     rocshmem_global_exit(1);
@@ -308,25 +298,23 @@ int main(int argc, char **argv) {
   init_sendbuf(source, nelem, my_pe, npes);
 
   rocshmem_team_t team_reduce_world_dup = ROCSHMEM_TEAM_INVALID;
-  rocshmem_team_split_strided(ROCSHMEM_TEAM_WORLD, 0, 1, npes, nullptr, 0,
-                              &team_reduce_world_dup);
+  rocshmem_team_split_strided(ROCSHMEM_TEAM_WORLD, 0, 1, npes, nullptr, 0, &team_reduce_world_dup);
 
   /* Variant 1: plain hipMalloc device memory. */
-  int *dest_hip = nullptr;
+  int* dest_hip = nullptr;
   CHECK_HIP(hipMalloc(&dest_hip, buffer_size));
-  run_symm_variant("hipMalloc", dest_hip, buffer_size, source, nelem, my_pe,
-                   npes, team_reduce_world_dup, argv[0]);
+  run_symm_variant("hipMalloc", dest_hip, buffer_size, source, nelem, my_pe, npes,
+                   team_reduce_world_dup, argv[0]);
   CHECK_HIP(hipFree(dest_hip));
 
   rocshmem_barrier_all();
 
   /* Variant 2: HIP VMM device memory (only attempted if the GPU supports it). */
   if (device_supports_vmm(device_id)) {
-    void *dest_vmm = nullptr;
+    void* dest_vmm = nullptr;
     hipMemGenericAllocationHandle_t dest_handle{};
     size_t dest_size = 0;
-    if (vmm_alloc(&dest_vmm, &dest_handle, buffer_size, &dest_size,
-                  device_id)) {
+    if (vmm_alloc(&dest_vmm, &dest_handle, buffer_size, &dest_size, device_id)) {
       run_symm_variant("VMM", dest_vmm, dest_size, source, nelem, my_pe, npes,
                        team_reduce_world_dup, argv[0]);
       vmm_free(dest_vmm, dest_handle, dest_size);

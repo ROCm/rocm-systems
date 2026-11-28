@@ -34,10 +34,10 @@ namespace rocshmem {
 
 // Static member definitions
 std::map<void*, HIPAllocatorVMMFabric::VMMFabricAllocationInfo> HIPAllocatorVMMFabric::allocations_;
-std::map<void*, HIPAllocatorVMMFabric::VMMFabricAllocationInfo> HIPAllocatorVMMFabric::imported_allocations_;
+std::map<void*, HIPAllocatorVMMFabric::VMMFabricAllocationInfo>
+    HIPAllocatorVMMFabric::imported_allocations_;
 
-hipError_t HIPAllocatorVMMFabric::VMMAlloc(void** ptr, size_t size)
-{
+hipError_t HIPAllocatorVMMFabric::VMMAlloc(void** ptr, size_t size) {
   VMMCommonAllocationInfo common_info;
   hipError_t err = VMMAllocCommon(ptr, size, hipMemHandleTypeFabric, &common_info);
   if (err != hipSuccess) {
@@ -46,15 +46,14 @@ hipError_t HIPAllocatorVMMFabric::VMMAlloc(void** ptr, size_t size)
 
   // Store allocator-specific metadata
   VMMFabricAllocationInfo info;
-  info.handle = common_info.handle;
-  info.size = common_info.size;
+  info.handle        = common_info.handle;
+  info.size          = common_info.size;
   allocations_[*ptr] = info;
 
   return hipSuccess;
 }
 
-hipError_t HIPAllocatorVMMFabric::VMMFree(void* ptr)
-{
+hipError_t HIPAllocatorVMMFabric::VMMFree(void* ptr) {
   if (ptr == nullptr) {
     return hipSuccess;
   }
@@ -70,7 +69,7 @@ hipError_t HIPAllocatorVMMFabric::VMMFree(void* ptr)
   // Convert to common allocation info
   VMMCommonAllocationInfo common_info;
   common_info.handle = info.handle;
-  common_info.size = info.size;
+  common_info.size   = info.size;
 
   // Use common free function
   hipError_t err = VMMFreeCommon(ptr, &common_info);
@@ -84,24 +83,22 @@ hipError_t HIPAllocatorVMMFabric::VMMFree(void* ptr)
   return hipSuccess;
 }
 
-HIPAllocatorVMMFabric::HIPAllocatorVMMFabric()
-    : HIPAllocator(VMMAlloc, VMMFree)
-{
+HIPAllocatorVMMFabric::HIPAllocatorVMMFabric() : HIPAllocator(VMMAlloc, VMMFree) {
   type_ = AllocatorTypeVMMFabric;
 
   // Check if the device supports fabric handles
   int device_id;
   hipError_t err = hipGetDevice(&device_id);
   if (err != hipSuccess) {
-    fprintf(stderr, "ROCSHMEM_ERROR: Failed to get current device for fabric handle support check: %s\n",
+    fprintf(stderr,
+            "ROCSHMEM_ERROR: Failed to get current device for fabric handle support check: %s\n",
             hipGetErrorString(err));
     abort();
   }
 
   int fabric_supported = 0;
-  err = hipDeviceGetAttribute(&fabric_supported,
-                               hipDeviceAttributeHandleTypeFabricSupported,
-                               device_id);
+  err = hipDeviceGetAttribute(&fabric_supported, hipDeviceAttributeHandleTypeFabricSupported,
+                              device_id);
   if (err != hipSuccess) {
     fprintf(stderr, "ROCSHMEM_ERROR: Failed to query fabric handle support attribute: %s\n",
             hipGetErrorString(err));
@@ -109,7 +106,8 @@ HIPAllocatorVMMFabric::HIPAllocatorVMMFabric()
   }
 
   if (!fabric_supported) {
-    fprintf(stderr, "ROCSHMEM_ERROR: Fabric handle type is not supported on device %d. "
+    fprintf(stderr,
+            "ROCSHMEM_ERROR: Fabric handle type is not supported on device %d. "
             "The vmm_fabric allocator requires a GPU with fabric handle support. "
             "Please use a different memory allocator.\n",
             device_id);
@@ -118,29 +116,27 @@ HIPAllocatorVMMFabric::HIPAllocatorVMMFabric()
 
   // Cache the VMM allocation granularity for this allocator.
   size_t granularity = VMMQueryGranularity(hipMemHandleTypeFabric);
-  mem_granularity_ = (granularity != 0) ? granularity : 1;
+  mem_granularity_   = (granularity != 0) ? granularity : 1;
 }
 
 hipError_t HIPAllocatorVMMFabric::ExportToFabricHandle(
-    hipMemGenericAllocationHandle_t generic_handle, size_t size, void *handle)
-{
+    hipMemGenericAllocationHandle_t generic_handle, size_t size, void* handle) {
   hipMemFabricHandle_t fabricHandle;
-  hipError_t err = hipMemExportToShareableHandle(&fabricHandle, generic_handle,
-                                                 hipMemHandleTypeFabric, 0);
+  hipError_t err =
+      hipMemExportToShareableHandle(&fabricHandle, generic_handle, hipMemHandleTypeFabric, 0);
   if (err != hipSuccess) {
     return err;
   }
 
   HIPIpcMemHandleFabric_t* ipc_handle = reinterpret_cast<HIPIpcMemHandleFabric_t*>(handle);
-  ipc_handle->fabric_handle = fabricHandle;
-  ipc_handle->size = size;
-  ipc_handle->offset = 0;
+  ipc_handle->fabric_handle           = fabricHandle;
+  ipc_handle->size                    = size;
+  ipc_handle->offset                  = 0;
 
   return hipSuccess;
 }
 
-hipError_t HIPAllocatorVMMFabric::GetIpcHandle(void *dev_ptr, void *handle)
-{
+hipError_t HIPAllocatorVMMFabric::GetIpcHandle(void* dev_ptr, void* handle) {
   if (dev_ptr == nullptr || handle == nullptr) {
     return hipErrorInvalidValue;
   }
@@ -154,15 +150,14 @@ hipError_t HIPAllocatorVMMFabric::GetIpcHandle(void *dev_ptr, void *handle)
   return ExportToFabricHandle(it->second.handle, it->second.size, handle);
 }
 
-hipError_t HIPAllocatorVMMFabric::OpenIpcHandle(void **dev_ptr, void *handle)
-{
+hipError_t HIPAllocatorVMMFabric::OpenIpcHandle(void** dev_ptr, void* handle) {
   if (dev_ptr == nullptr || handle == nullptr) {
     return hipErrorInvalidValue;
   }
 
   HIPIpcMemHandleFabric_t* fabric_ipc_handle = reinterpret_cast<HIPIpcMemHandleFabric_t*>(handle);
-  hipMemFabricHandle_t fabric_handle = fabric_ipc_handle->fabric_handle;
-  size_t size = fabric_ipc_handle->size;
+  hipMemFabricHandle_t fabric_handle         = fabric_ipc_handle->fabric_handle;
+  size_t size                                = fabric_ipc_handle->size;
   hipError_t err;
 
   // Import the fabric handle
@@ -175,8 +170,8 @@ hipError_t HIPAllocatorVMMFabric::OpenIpcHandle(void **dev_ptr, void *handle)
   }
 
   // Reserve address space
-  void *base_addr = nullptr;
-  err = hipMemAddressReserve(&base_addr, size, 0, 0, 0);
+  void* base_addr = nullptr;
+  err             = hipMemAddressReserve(&base_addr, size, 0, 0, 0);
   if (err != hipSuccess) {
     (void)hipMemRelease(imported_handle);
     return err;
@@ -203,8 +198,8 @@ hipError_t HIPAllocatorVMMFabric::OpenIpcHandle(void **dev_ptr, void *handle)
   // Set access permissions for device
   hipMemAccessDesc accessDesc;
   accessDesc.location.type = hipMemLocationTypeDevice;
-  accessDesc.location.id = device_id;
-  accessDesc.flags = hipMemAccessFlagsProtReadWrite;
+  accessDesc.location.id   = device_id;
+  accessDesc.flags         = hipMemAccessFlagsProtReadWrite;
 
   err = hipMemSetAccess(base_addr, size, &accessDesc, 1);
   if (err != hipSuccess) {
@@ -223,8 +218,7 @@ hipError_t HIPAllocatorVMMFabric::OpenIpcHandle(void **dev_ptr, void *handle)
   return hipSuccess;
 }
 
-hipError_t HIPAllocatorVMMFabric::CloseIpcHandle(void *dev_ptr)
-{
+hipError_t HIPAllocatorVMMFabric::CloseIpcHandle(void* dev_ptr) {
   if (dev_ptr == nullptr) {
     return hipSuccess;
   }
@@ -261,8 +255,7 @@ hipError_t HIPAllocatorVMMFabric::CloseIpcHandle(void *dev_ptr)
   return hipSuccess;
 }
 
-hipError_t HIPAllocatorVMMFabric::GetIpcHandleFromPtr(void *dev_ptr, size_t length, void *handle)
-{
+hipError_t HIPAllocatorVMMFabric::GetIpcHandleFromPtr(void* dev_ptr, size_t length, void* handle) {
   if (dev_ptr == nullptr || handle == nullptr || length == 0) {
     return hipErrorInvalidValue;
   }
@@ -285,27 +278,24 @@ hipError_t HIPAllocatorVMMFabric::GetIpcHandleFromPtr(void *dev_ptr, size_t leng
    */
   hipError_t rel_err = hipMemRelease(generic_handle);
   if (rel_err != hipSuccess) {
-    LOG_WARN("hipMemRelease failed in GetIpcHandleFromPtr: %s",
-             hipGetErrorString(rel_err));
+    LOG_WARN("hipMemRelease failed in GetIpcHandleFromPtr: %s", hipGetErrorString(rel_err));
   }
 
   return err;
 }
 
-size_t HIPAllocatorVMMFabric::GetIpcHandleSize()
-{
+size_t HIPAllocatorVMMFabric::GetIpcHandleSize() {
   return sizeof(HIPIpcMemHandleFabric_t);
 }
 
-HIPIpcHandleVec* HIPAllocatorVMMFabric::AllocateIpcHandleVec(int num_elems)
-{
+HIPIpcHandleVec* HIPAllocatorVMMFabric::AllocateIpcHandleVec(int num_elems) {
   HIPIpcHandleFabricVec* vec = new HIPIpcHandleFabricVec();
   vec->handle.resize(num_elems);
   return vec;
 }
 
-hipError_t HIPAllocatorVMMFabric::GetDmabufHandle(void *dev_ptr, size_t size, int *dmabuf_fd, uint64_t *dmabuf_offset)
-{
+hipError_t HIPAllocatorVMMFabric::GetDmabufHandle(void* dev_ptr, size_t size, int* dmabuf_fd,
+                                                  uint64_t* dmabuf_offset) {
   // Find allocation info
   auto it = allocations_.find(dev_ptr);
   if (it == allocations_.end()) {
@@ -315,7 +305,7 @@ hipError_t HIPAllocatorVMMFabric::GetDmabufHandle(void *dev_ptr, size_t size, in
   // Convert to common allocation info
   VMMCommonAllocationInfo common_info;
   common_info.handle = it->second.handle;
-  common_info.size = it->second.size;
+  common_info.size   = it->second.size;
 
   // Use common dmabuf export function
   return VMMGetDmabufHandleCommon(dev_ptr, size, &common_info, dmabuf_fd, dmabuf_offset);

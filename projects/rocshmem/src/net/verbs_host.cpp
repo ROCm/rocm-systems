@@ -31,8 +31,8 @@ namespace rocshmem {
 namespace net {
 
 namespace {
-constexpr int kCqDepth = 256;
-constexpr int kSqDepth = 256;
+constexpr int kCqDepth    = 256;
+constexpr int kSqDepth    = 256;
 constexpr size_t kAmoSlot = 8;  // one 8-byte AMO/g result slot per host context
 }  // namespace
 
@@ -44,10 +44,9 @@ VerbsHost::~VerbsHost() {
   }
 }
 
-bool VerbsHost::init(HdpPolicy *hdp, void *heap_base, size_t heap_size,
-                     bool heap_device, int num_pes, int my_pe, int num_host_ctx,
-                     AllgatherFn allgather, DmabufFn dmabuf,
-                     const char *dev_name) {
+bool VerbsHost::init(HdpPolicy* hdp, void* heap_base, size_t heap_size, bool heap_device,
+                     int num_pes, int my_pe, int num_host_ctx, AllgatherFn allgather,
+                     DmabufFn dmabuf, const char* dev_name) {
   if (!ibv_.load()) {
     LOG_ERROR("host-verbs: libibverbs load failed");
     return false;
@@ -63,8 +62,8 @@ bool VerbsHost::init(HdpPolicy *hdp, void *heap_base, size_t heap_size,
   }
 
   // Heap MR (dma-buf for device memory).
-  if (!mr_.register_heap(&ibv_, const_cast<ibv_pd *>(ctrl_.dev().pd), heap_base,
-                         heap_size, heap_device, dmabuf)) {
+  if (!mr_.register_heap(&ibv_, const_cast<ibv_pd*>(ctrl_.dev().pd), heap_base, heap_size,
+                         heap_device, dmabuf)) {
     LOG_ERROR("host-verbs: heap registration failed");
     return false;
   }
@@ -77,16 +76,14 @@ bool VerbsHost::init(HdpPolicy *hdp, void *heap_base, size_t heap_size,
     return false;
   }
   memset(amo_scratch_, 0, scratch_bytes);
-  amo_scratch_lkey_ =
-      mr_.register_local(&ibv_, const_cast<ibv_pd *>(ctrl_.dev().pd),
-                         amo_scratch_, scratch_bytes, /*is_device=*/false, {});
+  amo_scratch_lkey_ = mr_.register_local(&ibv_, const_cast<ibv_pd*>(ctrl_.dev().pd), amo_scratch_,
+                                         scratch_bytes, /*is_device=*/false, {});
 
   std::vector<LocalMr> local_mrs{
-      {reinterpret_cast<uintptr_t>(heap_base),
-       reinterpret_cast<uintptr_t>(heap_base) + heap_size, mr_.heap_lkey()},
+      {reinterpret_cast<uintptr_t>(heap_base), reinterpret_cast<uintptr_t>(heap_base) + heap_size,
+       mr_.heap_lkey()},
       {reinterpret_cast<uintptr_t>(amo_scratch_),
-       reinterpret_cast<uintptr_t>(amo_scratch_) + scratch_bytes,
-       amo_scratch_lkey_},
+       reinterpret_cast<uintptr_t>(amo_scratch_) + scratch_bytes, amo_scratch_lkey_},
   };
 
   // Exchange heap {base,rkey} and connect the RC mesh.
@@ -96,33 +93,30 @@ bool VerbsHost::init(HdpPolicy *hdp, void *heap_base, size_t heap_size,
   }
   std::vector<DestInfo> local, global;
   ctrl_.fill_local_dest(local);
-  global = allgather_array<DestInfo>(local, num_pes, my_pe, lm_.num_lanes(),
-                                     allgather);
+  global = allgather_array<DestInfo>(local, num_pes, my_pe, lm_.num_lanes(), allgather);
   if (!ctrl_.connect(my_pe, global)) {
     LOG_ERROR("host-verbs: RC connect failed");
     return false;
   }
 
-  rma_ = RmaEngine(&ibv_, &ctrl_, &mr_, lm_,
-                   reinterpret_cast<uintptr_t>(heap_base), std::move(local_mrs));
+  rma_ = RmaEngine(&ibv_, &ctrl_, &mr_, lm_, reinterpret_cast<uintptr_t>(heap_base),
+                   std::move(local_mrs));
 
   // One WindowInfoVerbs per host context (its own CQ/lane row + scratch slot).
   pool_.reserve(static_cast<size_t>(num_host_ctx));
   avail_.assign(static_cast<size_t>(num_host_ctx), true);
   for (int c = 0; c < num_host_ctx; c++) {
-    void *slot = static_cast<char *>(amo_scratch_) + static_cast<size_t>(c) * kAmoSlot;
-    pool_.push_back(std::make_unique<WindowInfoVerbs>(
-        &rma_, hdp, c, heap_base, heap_size, slot, amo_scratch_lkey_,
-        kSqDepth));
+    void* slot = static_cast<char*>(amo_scratch_) + static_cast<size_t>(c) * kAmoSlot;
+    pool_.push_back(std::make_unique<WindowInfoVerbs>(&rma_, hdp, c, heap_base, heap_size, slot,
+                                                      amo_scratch_lkey_, kSqDepth));
   }
 
   initialized_ = true;
-  LOG_INFO("host-verbs: initialized (%d host contexts, %d PEs)",
-           num_host_ctx, num_pes);
+  LOG_INFO("host-verbs: initialized (%d host contexts, %d PEs)", num_host_ctx, num_pes);
   return true;
 }
 
-WindowInfoVerbs *VerbsHost::acquire() {
+WindowInfoVerbs* VerbsHost::acquire() {
   if (!initialized_) {
     return nullptr;  // init() failed or was never called
   }
@@ -135,7 +129,7 @@ WindowInfoVerbs *VerbsHost::acquire() {
   return nullptr;
 }
 
-void VerbsHost::release(WindowInfoVerbs *w) {
+void VerbsHost::release(WindowInfoVerbs* w) {
   for (size_t i = 0; i < pool_.size(); i++) {
     if (pool_[i].get() == w) {
       avail_[i] = true;

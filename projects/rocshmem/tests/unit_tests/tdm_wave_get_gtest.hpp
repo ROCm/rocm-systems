@@ -44,18 +44,17 @@ static constexpr size_t TEST_TDM_WAVE_GET_THRESHOLD = 1024;
 
 // PE 1 puller: each wave pulls its own disjoint slice from PE 0.
 template <typename IpcImplT>
-__global__
-void tdm_wave_get_kernel(IpcImplT* ipc_impl, uint8_t* local_dst,
-                         const uint8_t* remote_src, size_t bytes_per_wave) {
+__global__ void tdm_wave_get_kernel(IpcImplT* ipc_impl, uint8_t* local_dst,
+                                    const uint8_t* remote_src, size_t bytes_per_wave) {
   extern __shared__ uint8_t tdm_lds[];
   rocshmem_set_lds_stage(tdm_lds, rocshmem_query_lds_stage_bytes());
 
-  const int wave_id = get_flat_block_id() / WF_SIZE;
+  const int wave_id   = get_flat_block_id() / WF_SIZE;
   const size_t offset = static_cast<size_t>(wave_id) * bytes_per_wave;
 
   ipc_impl->template ipcCopy_wave<MemcpyKind::GetBlocking>(
-      local_dst + offset, const_cast<uint8_t*>(remote_src) + offset,
-      bytes_per_wave, /*local_pe=*/0);
+      local_dst + offset, const_cast<uint8_t*>(remote_src) + offset, bytes_per_wave,
+      /*local_pe=*/0);
 }
 
 // ---------------------------------------------------------------------------
@@ -63,16 +62,15 @@ void tdm_wave_get_kernel(IpcImplT* ipc_impl, uint8_t* local_dst,
 // ---------------------------------------------------------------------------
 
 // Params: (bytes_per_wave, num_waves).
-class TdmWaveGetFixture
-    : public ::testing::TestWithParam<std::tuple<size_t, int>> {
-  using IpcImplT = IpcImpl;   // whatever IpcImpl is (IpcOnImpl when USE_IPC)
+class TdmWaveGetFixture : public ::testing::TestWithParam<std::tuple<size_t, int>> {
+  using IpcImplT = IpcImpl;  // whatever IpcImpl is (IpcOnImpl when USE_IPC)
   using MPI_T    = RemoteHeapInfo<CommunicatorMPI>;
 
  public:
   TdmWaveGetFixture() {
     MPIInstance::mpilib_dl_init();
     hip_allocator_ = get_default_allocator();
-    heap_mem_ = new HeapMemoryType(*hip_allocator_, envvar::heap_size.get_value());
+    heap_mem_      = new HeapMemoryType(*hip_allocator_, envvar::heap_size.get_value());
     assert(heap_mem_);
     mpi_ = new MPI_T(heap_mem_->get_ptr(), heap_mem_->get_size(), MPI_COMM_WORLD);
     ipc_impl_.ipcHostInit(mpi_->my_pe(), mpi_->get_heap_bases(), MPI_COMM_WORLD);
@@ -89,12 +87,12 @@ class TdmWaveGetFixture
     CHECK_HIP(hipMemcpyToSymbol(HIP_SYMBOL(constmem), &get_threshold, sizeof(get_threshold),
                                 offsetof(constmem_t, lds_stage_get_threshold)));
     hip_allocator_->allocate((void**)&ipc_impl_dptr_, sizeof(IpcImplT));
-    CHECK_HIP(hipMemcpy(ipc_impl_dptr_, &ipc_impl_, sizeof(IpcImplT),
-                        hipMemcpyHostToDevice));
+    CHECK_HIP(hipMemcpy(ipc_impl_dptr_, &ipc_impl_, sizeof(IpcImplT), hipMemcpyHostToDevice));
   }
 
   ~TdmWaveGetFixture() override {
-    if (ipc_impl_dptr_) hip_allocator_->deallocate(ipc_impl_dptr_);
+    if (ipc_impl_dptr_)
+      hip_allocator_->deallocate(ipc_impl_dptr_);
     ipc_impl_.ipcHostStop();
     delete mpi_;
     delete heap_mem_;
@@ -128,8 +126,7 @@ class TdmWaveGetFixture
       // Backend-free: compute LDS size from the forced tile size directly.
       const size_t smem = lds_stage::lds_bytes_for_tile(TEST_TDM_WAVE_GET_TILE_BYTES);
       tdm_wave_get_kernel<IpcImplT>
-          <<<dim3(1), block, smem>>>(ipc_impl_dptr_, local_dst, remote_src,
-                                     bytes_per_wave);
+          <<<dim3(1), block, smem>>>(ipc_impl_dptr_, local_dst, remote_src, bytes_per_wave);
       CHECK_HIP(hipStreamSynchronize(nullptr));
 
       std::vector<uint8_t> host_dst(bytes);
@@ -141,11 +138,11 @@ class TdmWaveGetFixture
   }
 
  private:
-  HIPAllocator*   hip_allocator_{nullptr};
+  HIPAllocator* hip_allocator_{nullptr};
   HeapMemoryType* heap_mem_{nullptr};
-  MPI_T*          mpi_{nullptr};
-  IpcImplT        ipc_impl_{};
-  IpcImplT*       ipc_impl_dptr_{nullptr};
+  MPI_T* mpi_{nullptr};
+  IpcImplT ipc_impl_{};
+  IpcImplT* ipc_impl_dptr_{nullptr};
 };
 
 }  // namespace rocshmem

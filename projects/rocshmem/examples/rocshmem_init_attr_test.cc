@@ -65,75 +65,72 @@
 
 using namespace rocshmem;
 
-int main (int argc, char **argv)
-{
-    int world_rank, world_nranks;
-    int ret;
-    rocshmem_uniqueid_t uid;
-    rocshmem_init_attr_t attr;
-    int provided;
+int main(int argc, char** argv) {
+  int world_rank, world_nranks;
+  int ret;
+  rocshmem_uniqueid_t uid;
+  rocshmem_init_attr_t attr;
+  int provided;
 
-    MPI_Init_thread (&argc, &argv, MPI_THREAD_MULTIPLE, &provided);
-    if (provided != MPI_THREAD_MULTIPLE) {
-      std::cerr << "MPI_THREAD_MULTIPLE support disabled.\n";
-    }
-    MPI_Comm_rank (MPI_COMM_WORLD, &world_rank);
-    MPI_Comm_size (MPI_COMM_WORLD, &world_nranks);
+  MPI_Init_thread(&argc, &argv, MPI_THREAD_MULTIPLE, &provided);
+  if (provided != MPI_THREAD_MULTIPLE) {
+    std::cerr << "MPI_THREAD_MULTIPLE support disabled.\n";
+  }
+  MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+  MPI_Comm_size(MPI_COMM_WORLD, &world_nranks);
 
-    // Create two disjoint groups of processes, each
-    // one creating a unique rocshmem environment independent
-    // of the other group
-    MPI_Comm newcomm;
-    int color = world_rank %2;
-    int rank, nranks;
+  // Create two disjoint groups of processes, each
+  // one creating a unique rocshmem environment independent
+  // of the other group
+  MPI_Comm newcomm;
+  int color = world_rank % 2;
+  int rank, nranks;
 
-    MPI_Comm_split(MPI_COMM_WORLD, color, world_rank, &newcomm);
-    MPI_Comm_rank (newcomm, &rank);
-    MPI_Comm_size (newcomm, &nranks);
+  MPI_Comm_split(MPI_COMM_WORLD, color, world_rank, &newcomm);
+  MPI_Comm_rank(newcomm, &rank);
+  MPI_Comm_size(newcomm, &nranks);
 
-    if (rank == 0) {
-      ret = rocshmem_get_uniqueid (&uid);
-      if (ret != ROCSHMEM_SUCCESS) {
-        std::cout << rank << ": Error in rocshmem_get_uniqueid. Aborting.\n";
-        MPI_Abort (MPI_COMM_WORLD, ret);
-      }
-    }
-
-    MPI_Bcast (&uid, sizeof(rocshmem_uniqueid_t), MPI_BYTE, 0, newcomm);
-    ret = rocshmem_set_attr_uniqueid_args(rank, nranks, &uid, &attr);
+  if (rank == 0) {
+    ret = rocshmem_get_uniqueid(&uid);
     if (ret != ROCSHMEM_SUCCESS) {
-      std::cout << rank << ": Error in rocshmem_set_attr_uniqueid_args. Aborting.\n";
-      MPI_Abort (MPI_COMM_WORLD, ret);
+      std::cout << rank << ": Error in rocshmem_get_uniqueid. Aborting.\n";
+      MPI_Abort(MPI_COMM_WORLD, ret);
     }
+  }
 
-    ret = rocshmem_init_attr(ROCSHMEM_INIT_WITH_UNIQUEID, &attr);
-    if (ret != ROCSHMEM_SUCCESS) {
-      std::cout << rank << ": Error in rocshmem_init_attr. Aborting.\n";
-      MPI_Abort (MPI_COMM_WORLD, ret);
-    }
+  MPI_Bcast(&uid, sizeof(rocshmem_uniqueid_t), MPI_BYTE, 0, newcomm);
+  ret = rocshmem_set_attr_uniqueid_args(rank, nranks, &uid, &attr);
+  if (ret != ROCSHMEM_SUCCESS) {
+    std::cout << rank << ": Error in rocshmem_set_attr_uniqueid_args. Aborting.\n";
+    MPI_Abort(MPI_COMM_WORLD, ret);
+  }
 
-    std::cout << rank << ": rocshmem_init_attr SUCCESS\n";
+  ret = rocshmem_init_attr(ROCSHMEM_INIT_WITH_UNIQUEID, &attr);
+  if (ret != ROCSHMEM_SUCCESS) {
+    std::cout << rank << ": Error in rocshmem_init_attr. Aborting.\n";
+    MPI_Abort(MPI_COMM_WORLD, ret);
+  }
 
-    if (world_rank == 0) {
-      int spec_major, spec_minor;
-      rocshmem_info_get_version(&spec_major, &spec_minor);
+  std::cout << rank << ": rocshmem_init_attr SUCCESS\n";
 
-      char name[ROCSHMEM_MAX_NAME_LEN];
-      rocshmem_info_get_name(name);
+  if (world_rank == 0) {
+    int spec_major, spec_minor;
+    rocshmem_info_get_version(&spec_major, &spec_minor);
 
-      int vendor_major, vendor_minor, vendor_patch;
-      rocshmem_vendor_get_version_info(&vendor_major, &vendor_minor,
-                                       &vendor_patch);
+    char name[ROCSHMEM_MAX_NAME_LEN];
+    rocshmem_info_get_name(name);
 
-      std::cout << "OpenSHMEM spec version: " << spec_major << "."
-                << spec_minor << "\n";
-      std::cout << "Vendor name: " << name << "\n";
-      std::cout << "Vendor version: " << vendor_major << "."
-                << vendor_minor << "." << vendor_patch << "\n";
-    }
+    int vendor_major, vendor_minor, vendor_patch;
+    rocshmem_vendor_get_version_info(&vendor_major, &vendor_minor, &vendor_patch);
 
-    rocshmem_finalize();
-    MPI_Comm_free (&newcomm);
-    MPI_Finalize();
-    return 0;
+    std::cout << "OpenSHMEM spec version: " << spec_major << "." << spec_minor << "\n";
+    std::cout << "Vendor name: " << name << "\n";
+    std::cout << "Vendor version: " << vendor_major << "." << vendor_minor << "." << vendor_patch
+              << "\n";
+  }
+
+  rocshmem_finalize();
+  MPI_Comm_free(&newcomm);
+  MPI_Finalize();
+  return 0;
 }

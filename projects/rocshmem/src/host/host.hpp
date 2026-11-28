@@ -45,7 +45,11 @@
 #include "mpi_instance.hpp"
 
 #ifdef USE_HOST_VERBS
-namespace rocshmem { namespace net { class VerbsHost; } }
+namespace rocshmem {
+namespace net {
+class VerbsHost;
+}
+}  // namespace rocshmem
 #endif
 
 namespace rocshmem {
@@ -112,11 +116,9 @@ class HostInterface {
   /**
    * @brief Primary constructors
    */
-  __host__ HostInterface(HdpPolicy* hdp_policy, MPI_Comm rocshmem_comm,
-                         SymmetricHeap* heap);
+  __host__ HostInterface(HdpPolicy* hdp_policy, MPI_Comm rocshmem_comm, SymmetricHeap* heap);
 
-  __host__ HostInterface(HdpPolicy* hdp_policy, TcpBootstrap *bootstrap,
-                         SymmetricHeap* heap);
+  __host__ HostInterface(HdpPolicy* hdp_policy, TcpBootstrap* bootstrap, SymmetricHeap* heap);
 
   /**
    * @brief Destructor
@@ -152,20 +154,16 @@ class HostInterface {
   __host__ T g(const T* source, int pe, WindowInfo* window_info);
 
   template <typename T>
-  __host__ void put(T* dest, const T* source, size_t nelems, int pe,
-                    WindowInfo* window_info);
+  __host__ void put(T* dest, const T* source, size_t nelems, int pe, WindowInfo* window_info);
 
   template <typename T>
-  __host__ void get(T* dest, const T* source, size_t nelems, int pe,
-                    WindowInfo* window_info);
+  __host__ void get(T* dest, const T* source, size_t nelems, int pe, WindowInfo* window_info);
 
   template <typename T>
-  __host__ void put_nbi(T* dest, const T* source, size_t nelems, int pe,
-                        WindowInfo* window_info);
+  __host__ void put_nbi(T* dest, const T* source, size_t nelems, int pe, WindowInfo* window_info);
 
   template <typename T>
-  __host__ void get_nbi(T* dest, const T* source, size_t nelems, int pe,
-                        WindowInfo* window_info);
+  __host__ void get_nbi(T* dest, const T* source, size_t nelems, int pe, WindowInfo* window_info);
 
   __host__ void putmem(void* dest, const void* source, size_t nelems, int pe,
                        WindowInfo* window_info);
@@ -173,8 +171,8 @@ class HostInterface {
   __host__ void getmem(void* dest, const void* source, size_t nelems, int pe,
                        WindowInfo* window_info);
 
-  __host__ void putmem_nbi(void* dest, const void* source, size_t nelems,
-                           int pe, WindowInfo* window_info);
+  __host__ void putmem_nbi(void* dest, const void* source, size_t nelems, int pe,
+                           WindowInfo* window_info);
 
   __host__ void getmem_nbi(void* dest, const void* source, size_t nelems, int pe,
                            WindowInfo* window_info);
@@ -183,15 +181,13 @@ class HostInterface {
   __host__ void amo_add(void* dst, T value, int pe, WindowInfo* window_info);
 
   template <typename T>
-  __host__ void amo_cas(void* dst, T value, T cond, int pe,
-                        WindowInfo* window_info);
+  __host__ void amo_cas(void* dst, T value, T cond, int pe, WindowInfo* window_info);
 
   template <typename T>
   __host__ T amo_fetch_add(void* dst, T value, int pe, WindowInfo* window_info);
 
   template <typename T>
-  __host__ T amo_fetch_cas(void* dst, T value, T cond, int pe,
-                           WindowInfo* window_info);
+  __host__ T amo_fetch_cas(void* dst, T value, T cond, int pe, WindowInfo* window_info);
 
   /**
    * @brief Blocking host-initiated signal operations (verbs transport).
@@ -202,15 +198,13 @@ class HostInterface {
    * fetch-add for SIGNAL_ADD; fetch/wait: HDP-flushed direct load of the
    * fine-grained host-coherent heap).
    */
-  __host__ void putmem_signal(void* dest, const void* source, size_t nelems,
-                              uint64_t* sig_addr, uint64_t signal, int sig_op,
-                              int pe, WindowInfo* window_info);
+  __host__ void putmem_signal(void* dest, const void* source, size_t nelems, uint64_t* sig_addr,
+                              uint64_t signal, int sig_op, int pe, WindowInfo* window_info);
 
-  __host__ uint64_t signal_fetch(const uint64_t* sig_addr,
-                                 WindowInfo* window_info);
+  __host__ uint64_t signal_fetch(const uint64_t* sig_addr, WindowInfo* window_info);
 
-  __host__ void signal_wait_until(uint64_t* sig_addr, int cmp,
-                                  uint64_t cmp_value, WindowInfo* window_info);
+  __host__ void signal_wait_until(uint64_t* sig_addr, int cmp, uint64_t cmp_value,
+                                  WindowInfo* window_info);
 
   __host__ void fence(WindowInfo* window_info);
 
@@ -230,33 +224,29 @@ class HostInterface {
 
   __host__ void sync_on_stream(rocshmem_team_t team, hipStream_t stream);
 
-  __host__ void alltoallmem_on_stream(rocshmem_team_t team, void *dest,
-                                      const void *source, size_t nelems,
-                                      hipStream_t stream);
+  __host__ void alltoallmem_on_stream(rocshmem_team_t team, void* dest, const void* source,
+                                      size_t nelems, hipStream_t stream);
 
-  __host__ void broadcastmem_on_stream(rocshmem_team_t team, void *dest,
-                                       const void *source, size_t nelems,
-                                       int pe_root, hipStream_t stream);
+  __host__ void broadcastmem_on_stream(rocshmem_team_t team, void* dest, const void* source,
+                                       size_t nelems, int pe_root, hipStream_t stream);
 
-  __host__ void getmem_on_stream(void *dest, const void *source, size_t nelems,
-                                 int pe, hipStream_t stream);
+  __host__ void getmem_on_stream(void* dest, const void* source, size_t nelems, int pe,
+                                 hipStream_t stream);
 
-  __host__ void putmem_on_stream(void *dest, const void *source, size_t nelems,
-                                 int pe, hipStream_t stream);
+  __host__ void putmem_on_stream(void* dest, const void* source, size_t nelems, int pe,
+                                 hipStream_t stream);
 
-  __host__ void putmem_signal_on_stream(void *dest, const void *source,
-                                        size_t nelems, uint64_t *sig_addr,
-                                        uint64_t signal, int sig_op, int pe,
+  __host__ void putmem_signal_on_stream(void* dest, const void* source, size_t nelems,
+                                        uint64_t* sig_addr, uint64_t signal, int sig_op, int pe,
                                         hipStream_t stream);
 
-  __host__ void signal_add_on_stream(uint64_t *sig_addr, uint64_t signal,
-                                     int pe, hipStream_t stream);
+  __host__ void signal_add_on_stream(uint64_t* sig_addr, uint64_t signal, int pe,
+                                     hipStream_t stream);
 
-  __host__ void signal_set_on_stream(uint64_t *sig_addr, uint64_t signal,
-                                     int pe, hipStream_t stream);
+  __host__ void signal_set_on_stream(uint64_t* sig_addr, uint64_t signal, int pe,
+                                     hipStream_t stream);
 
-  __host__ void signal_wait_until_on_stream(uint64_t *sig_addr, int cmp,
-                                            uint64_t cmp_value,
+  __host__ void signal_wait_until_on_stream(uint64_t* sig_addr, int cmp, uint64_t cmp_value,
                                             hipStream_t stream);
 
   __host__ void barrier_for_sync();
@@ -266,72 +256,64 @@ class HostInterface {
   __host__ void sync(rocshmem_team_t team, WindowInfo* window_info);
 
   template <typename T>
-  __host__ void broadcast(T* dest, const T* source, int nelems, int pe_root,
-                          int pe_start, int log_pe_stride, int pe_size,
+  __host__ void broadcast(T* dest, const T* source, int nelems, int pe_root, int pe_start,
+                          int log_pe_stride, int pe_size,
                           long* p_sync);  // NOLINT(runtime/int)
 
   template <typename T>
-  __host__ void broadcast(rocshmem_team_t team, T* dest, const T* source,
-                          int nelems, int pe_root);
+  __host__ void broadcast(rocshmem_team_t team, T* dest, const T* source, int nelems, int pe_root);
 
   template <typename T, ROCSHMEM_OP Op>
-  __host__ void to_all(T* dest, const T* source, int nreduce, int pe_start,
-                       int log_pe_stride, int pe_size, T* p_wrk,
+  __host__ void to_all(T* dest, const T* source, int nreduce, int pe_start, int log_pe_stride,
+                       int pe_size, T* p_wrk,
                        long* p_sync);  // NOLINT(runtime/int)
 
   template <typename T, ROCSHMEM_OP Op>
   __host__ int reduce(rocshmem_team_t team, T* dest, const T* source, int nreduce);
 
   template <typename T, ROCSHMEM_OP Op>
-  __host__ int reduce_scatter(rocshmem_team_t team, T* dest, const T* source,
-                              int nreduce);
+  __host__ int reduce_scatter(rocshmem_team_t team, T* dest, const T* source, int nreduce);
 
   template <typename T, ROCSHMEM_OP Op>
-  __host__ int reduce_on_stream(rocshmem_team_t team, T* dest, const T* source,
-                                int nreduce, hipStream_t stream);
+  __host__ int reduce_on_stream(rocshmem_team_t team, T* dest, const T* source, int nreduce,
+                                hipStream_t stream);
 
   template <typename T>
-  __host__ void wait_until(T *ivars, int cmp, T val,
-                           WindowInfo* window_info);
+  __host__ void wait_until(T* ivars, int cmp, T val, WindowInfo* window_info);
 
   template <typename T>
-  __host__ void wait_until_all(T *ivars, size_t nelems, const int* status,
-                               int cmp, T val,
+  __host__ void wait_until_all(T* ivars, size_t nelems, const int* status, int cmp, T val,
                                WindowInfo* window_info);
 
   template <typename T>
-  __host__ size_t wait_until_any(T *ivars, size_t nelems, const int* status,
-                                 int cmp, T val,
+  __host__ size_t wait_until_any(T* ivars, size_t nelems, const int* status, int cmp, T val,
                                  WindowInfo* window_info);
 
   template <typename T>
-  __host__ size_t wait_until_some(T *ivars, size_t nelems, size_t* indices,
-                                  const int* status, int cmp, T val,
-                                  WindowInfo* window_info);
+  __host__ size_t wait_until_some(T* ivars, size_t nelems, size_t* indices, const int* status,
+                                  int cmp, T val, WindowInfo* window_info);
 
   template <typename T>
-  __host__ void wait_until_all_vector(T *ivars, size_t nelems, const int* status,
-                                      int cmp, T* vals,
+  __host__ void wait_until_all_vector(T* ivars, size_t nelems, const int* status, int cmp, T* vals,
                                       WindowInfo* window_info);
 
   template <typename T>
-  __host__ size_t wait_until_any_vector(T *ivars, size_t nelems,
-                                        const int* status, int cmp,
+  __host__ size_t wait_until_any_vector(T* ivars, size_t nelems, const int* status, int cmp,
                                         T* vals, WindowInfo* window_info);
 
   template <typename T>
-  __host__ size_t wait_until_some_vector(T *ivars, size_t nelems, size_t* indices,
-                                         const int* status, int cmp,
-                                         T* vals, WindowInfo* window_info);
+  __host__ size_t wait_until_some_vector(T* ivars, size_t nelems, size_t* indices,
+                                         const int* status, int cmp, T* vals,
+                                         WindowInfo* window_info);
 
   template <typename T>
-  __host__ int test(T *ivars, int cmp, T val, WindowInfo* window_info);
+  __host__ int test(T* ivars, int cmp, T val, WindowInfo* window_info);
 
   __host__ void hdp_flush() { hdp_policy_->hdp_flush(); }
 
 #if defined USE_HDP_FLUSH
   __host__ void create_hdp_window();
-#endif // USE_HDP_FLUSH
+#endif  // USE_HDP_FLUSH
 
  private:
   /**************************************************************************
@@ -347,7 +329,7 @@ class HostInterface {
       mpilib_ftable_.Put(&flush_val, 1, MPI_UNSIGNED, i, 0, 1, MPI_UNSIGNED, hdp_win);
     }
     mpilib_ftable_.Win_flush_all(hdp_win);
-#endif // USE_HDP_FLUSH
+#endif  // USE_HDP_FLUSH
   }
 
   __host__ void flush_remote_hdp([[maybe_unused]] int pe) {
@@ -355,19 +337,18 @@ class HostInterface {
     unsigned flush_val{HdpPolicy::HDP_FLUSH_VAL};
     mpilib_ftable_.Put(&flush_val, 1, MPI_UNSIGNED, pe, 0, 1, MPI_UNSIGNED, hdp_win);
     mpilib_ftable_.Win_flush(pe, hdp_win);
-#endif // USE_HDP_FLUSH
+#endif  // USE_HDP_FLUSH
   }
 
-  __host__ void initiate_put(void* dest, const void* source, size_t nelems,
-                             int pe, WindowInfoMPI* window_info);
+  __host__ void initiate_put(void* dest, const void* source, size_t nelems, int pe,
+                             WindowInfoMPI* window_info);
 
-  __host__ void initiate_get(void* dest, const void* source, size_t nelems,
-                             int pe, WindowInfoMPI* window_info);
+  __host__ void initiate_get(void* dest, const void* source, size_t nelems, int pe,
+                             WindowInfoMPI* window_info);
 
   __host__ void complete_all(MPI_Win win);
 
-  __host__ MPI_Aint compute_offset(const void* dest, void* win_start,
-                                   void* win_end);
+  __host__ MPI_Aint compute_offset(const void* dest, void* win_start, void* win_end);
 
   __host__ MPI_Comm get_mpi_comm(int pe_start, int log_pe_stride, int pe_size);
 
@@ -380,16 +361,15 @@ class HostInterface {
   __host__ int compare(int cmp, T input_val, T target_val);
 
   template <typename T>
-  __host__ int test_and_compare(MPI_Aint offset, MPI_Datatype mpi_type,
-                                int cmp, T val, MPI_Win win);
+  __host__ int test_and_compare(MPI_Aint offset, MPI_Datatype mpi_type, int cmp, T val,
+                                MPI_Win win);
 
   template <typename T, ROCSHMEM_OP Op>
-  __host__ void to_all_internal(MPI_Comm mpi_comm, T* dest, const T* source,
-                                int nreduce);
+  __host__ void to_all_internal(MPI_Comm mpi_comm, T* dest, const T* source, int nreduce);
 
   template <typename T>
-  __host__ void broadcast_internal(MPI_Comm mpi_comm, T* dest, const T* source,
-                                   int nelems, int pe_root);
+  __host__ void broadcast_internal(MPI_Comm mpi_comm, T* dest, const T* source, int nelems,
+                                   int pe_root);
 
   /**************************************************************************
    **************************** INTERNAL MEMBERS ****************************
@@ -407,7 +387,7 @@ class HostInterface {
   /**
    * @brief Bootstrap object used in the non-mpi workloads
    */
-  TcpBootstrap *host_bootstrap_{nullptr};
+  TcpBootstrap* host_bootstrap_{nullptr};
 
   /**
    * @brief Duplicate of this processing element's id within global rank
@@ -457,12 +437,10 @@ class HostInterface {
    * caller falls through to the MPI-window path. Defined in host.cpp so the
    * verbs headers stay out of the device-compiled template header.
    */
-  __host__ bool verbs_amo_fetch_add(WindowInfo* window_info, void* dst,
-                                    uint64_t value, int pe,
+  __host__ bool verbs_amo_fetch_add(WindowInfo* window_info, void* dst, uint64_t value, int pe,
                                     uint64_t* fetch_val);
-  __host__ bool verbs_amo_fetch_cas(WindowInfo* window_info, void* dst,
-                                    uint64_t swap, uint64_t compare, int pe,
-                                    uint64_t* fetch_val);
+  __host__ bool verbs_amo_fetch_cas(WindowInfo* window_info, void* dst, uint64_t swap,
+                                    uint64_t compare, int pe, uint64_t* fetch_val);
 #endif
 
   /*
@@ -478,16 +456,13 @@ class HostInterface {
      * @brief Primary constructor
      */
     ActiveSetKey(int pe_start, int log_pe_stride, int pe_size)
-        : pe_start_(pe_start),
-          log_pe_stride_(log_pe_stride),
-          pe_size_(pe_size) {}
+        : pe_start_(pe_start), log_pe_stride_(log_pe_stride), pe_size_(pe_size) {}
 
     bool operator<(const ActiveSetKey& key) const {
       return pe_start_ < key.pe_start_ ||
-             (pe_start_ == key.pe_start_ &&
-              log_pe_stride_ < key.log_pe_stride_) ||
-             (pe_start_ == key.pe_start_ &&
-              log_pe_stride_ == key.log_pe_stride_ && pe_size_ < key.pe_size_);
+             (pe_start_ == key.pe_start_ && log_pe_stride_ < key.log_pe_stride_) ||
+             (pe_start_ == key.pe_start_ && log_pe_stride_ == key.log_pe_stride_ &&
+              pe_size_ < key.pe_size_);
     }
 
    private:

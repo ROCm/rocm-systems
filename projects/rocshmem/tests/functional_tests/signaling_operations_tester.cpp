@@ -32,11 +32,9 @@ using namespace rocshmem;
  * DEVICE TEST KERNEL
  *****************************************************************************/
 template <TestType Type>
-__global__ void PutmemSignalTest(int loop, int skip, long long int *start_time,
-                                 long long int *end_time, char *s_buf,
-                                 char *r_buf, size_t size, uint64_t *sig_addr,
-                                 ShmemContextType ctx_type,
-                                 int sig_op) {
+__global__ void PutmemSignalTest(int loop, int skip, long long int* start_time,
+                                 long long int* end_time, char* s_buf, char* r_buf, size_t size,
+                                 uint64_t* sig_addr, ShmemContextType ctx_type, int sig_op) {
   __shared__ rocshmem_ctx_t ctx;
   int wg_id = get_flat_grid_id();
   rocshmem_wg_ctx_create(ctx_type, &ctx);
@@ -49,28 +47,22 @@ __global__ void PutmemSignalTest(int loop, int skip, long long int *start_time,
 
   for (int i = 0; i < loop + skip; i++) {
     if (i == skip) {
-        __syncthreads();
-        start_time[wg_id] = wall_clock64();
+      __syncthreads();
+      start_time[wg_id] = wall_clock64();
     }
 
     if constexpr (Type == PutSignalTestType) {
-      rocshmem_ctx_putmem_signal(ctx, r_buf, s_buf, size, sig_addr,
-                                 signal, sig_op, 1);
+      rocshmem_ctx_putmem_signal(ctx, r_buf, s_buf, size, sig_addr, signal, sig_op, 1);
     } else if constexpr (Type == WGPutSignalTestType) {
-      rocshmem_ctx_putmem_signal_wg(ctx, r_buf, s_buf, size, sig_addr,
-                                    signal, sig_op, 1);
+      rocshmem_ctx_putmem_signal_wg(ctx, r_buf, s_buf, size, sig_addr, signal, sig_op, 1);
     } else if constexpr (Type == WAVEPutSignalTestType) {
-      rocshmem_ctx_putmem_signal_wave(ctx, r_buf, s_buf, size, sig_addr,
-                                      signal, sig_op, 1);
+      rocshmem_ctx_putmem_signal_wave(ctx, r_buf, s_buf, size, sig_addr, signal, sig_op, 1);
     } else if constexpr (Type == PutSignalNBITestType) {
-      rocshmem_ctx_putmem_signal_nbi(ctx, r_buf, s_buf, size, sig_addr,
-                                     signal, sig_op, 1);
+      rocshmem_ctx_putmem_signal_nbi(ctx, r_buf, s_buf, size, sig_addr, signal, sig_op, 1);
     } else if constexpr (Type == WGPutSignalNBITestType) {
-      rocshmem_ctx_putmem_signal_nbi_wg(ctx, r_buf, s_buf, size, sig_addr,
-                                        signal, sig_op, 1);
+      rocshmem_ctx_putmem_signal_nbi_wg(ctx, r_buf, s_buf, size, sig_addr, signal, sig_op, 1);
     } else if constexpr (Type == WAVEPutSignalNBITestType) {
-      rocshmem_ctx_putmem_signal_nbi_wave(ctx, r_buf, s_buf, size, sig_addr,
-                                          signal, sig_op, 1);
+      rocshmem_ctx_putmem_signal_nbi_wave(ctx, r_buf, s_buf, size, sig_addr, signal, sig_op, 1);
     }
   }
 
@@ -91,16 +83,15 @@ __global__ void PutmemSignalTest(int loop, int skip, long long int *start_time,
 #endif
 
 template <TestType Type>
-__global__ void SignalFetchTest(int loop, int skip, long long int *start_time,
-                                long long int *end_time, uint64_t *sig_addr,
-                                uint64_t *fetched_value) {
-
+__global__ void SignalFetchTest(int loop, int skip, long long int* start_time,
+                                long long int* end_time, uint64_t* sig_addr,
+                                uint64_t* fetched_value) {
   int wg_id = get_flat_grid_id();
 
   for (int i = 0; i < loop + skip; i++) {
     if (i == skip) {
-        __syncthreads();
-        start_time[wg_id] = wall_clock64();
+      __syncthreads();
+      start_time[wg_id] = wall_clock64();
     }
 
     if constexpr (Type == SignalFetchTestType) {
@@ -117,7 +108,6 @@ __global__ void SignalFetchTest(int loop, int skip, long long int *start_time,
   if (hipThreadIdx_x == 0) {
     end_time[wg_id] = wall_clock64();
   }
-
 }
 
 #if defined(__clang__)
@@ -125,11 +115,10 @@ __global__ void SignalFetchTest(int loop, int skip, long long int *start_time,
 #endif
 
 template <TestType Type>
-__global__ void SignalUpdateTest(int loop, int skip, long long int *start_time,
-                                 long long int *end_time,
-                                 uint64_t *sig_addr) {
-  int wg_id = get_flat_grid_id();
-  int my_pe = rocshmem_my_pe();
+__global__ void SignalUpdateTest(int loop, int skip, long long int* start_time,
+                                 long long int* end_time, uint64_t* sig_addr) {
+  int wg_id     = get_flat_grid_id();
+  int my_pe     = rocshmem_my_pe();
   int target_pe = (my_pe + 1) % rocshmem_n_pes();
 
   for (int i = 0; i < loop + skip; i++) {
@@ -143,8 +132,7 @@ __global__ void SignalUpdateTest(int loop, int skip, long long int *start_time,
     if constexpr (Type == SignalAddTestType) {
       rocshmem_signal_add(sig_addr, 1, target_pe);
     } else if constexpr (Type == SignalSetTestType) {
-      rocshmem_signal_set(sig_addr, static_cast<uint64_t>(my_pe + 1),
-                          target_pe);
+      rocshmem_signal_set(sig_addr, static_cast<uint64_t>(my_pe + 1), target_pe);
     }
   }
 
@@ -155,11 +143,9 @@ __global__ void SignalUpdateTest(int loop, int skip, long long int *start_time,
   }
 }
 
-__global__ void SignalWaitUntilTest(int loop, int skip,
-                                    long long int *start_time,
-                                    long long int *end_time,
-                                    uint64_t *sig_addr,
-                                    uint64_t *fetched_value) {
+__global__ void SignalWaitUntilTest(int loop, int skip, long long int* start_time,
+                                    long long int* end_time, uint64_t* sig_addr,
+                                    uint64_t* fetched_value) {
   if (get_flat_grid_id() != 0 || hipThreadIdx_x != 0) {
     return;
   }
@@ -173,8 +159,7 @@ __global__ void SignalWaitUntilTest(int loop, int skip,
     uint64_t expected = static_cast<uint64_t>(i + 1);
     rocshmem_signal_set(sig_addr, expected, target_pe);
     rocshmem_quiet();
-    *fetched_value = rocshmem_signal_wait_until(
-        sig_addr, ROCSHMEM_CMP_GE, expected);
+    *fetched_value = rocshmem_signal_wait_until(sig_addr, ROCSHMEM_CMP_GE, expected);
   }
 
   end_time[0] = wall_clock64();
@@ -183,17 +168,15 @@ __global__ void SignalWaitUntilTest(int loop, int skip,
 /******************************************************************************
  * HOST TESTER CLASS METHODS
  *****************************************************************************/
-SignalingOperationsTester::SignalingOperationsTester(TesterArguments args)
-  : Tester(args) {
-  s_buf = (char *)alloc_test_buffer(max_msg_size * args.wg_size, args.local_buf_type);
-  r_buf = (char *)alloc_test_buffer(max_msg_size * args.wg_size);
-  sig_addr = (uint64_t *)alloc_test_buffer(sizeof(uint64_t));
+SignalingOperationsTester::SignalingOperationsTester(TesterArguments args) : Tester(args) {
+  s_buf    = (char*)alloc_test_buffer(max_msg_size * args.wg_size, args.local_buf_type);
+  r_buf    = (char*)alloc_test_buffer(max_msg_size * args.wg_size);
+  sig_addr = (uint64_t*)alloc_test_buffer(sizeof(uint64_t));
   CHECK_HIP(hipHostMalloc(&fetched_value, sizeof(uint64_t)));
 }
 
-SignalingOperationsTester::SignalingOperationsTester(TesterArguments args,
-                                                     int signal_op)
-  : SignalingOperationsTester(args) {
+SignalingOperationsTester::SignalingOperationsTester(TesterArguments args, int signal_op)
+    : SignalingOperationsTester(args) {
   sig_op = signal_op;
 }
 
@@ -216,81 +199,68 @@ void SignalingOperationsTester::resetBuffers([[maybe_unused]] size_t size) {
   }
 }
 
-void SignalingOperationsTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
-                                             size_t size) {
+void SignalingOperationsTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop, size_t size) {
   size_t shared_bytes = rocshmem_query_lds_stage_bytes();
 
   switch (_type) {
-    case SignalAddTestType:
-      hipLaunchKernelGGL(SignalUpdateTest<SignalAddTestType>, gridSize,
-                         blockSize, shared_bytes, stream, loop, args.skip,
-                         start_time, end_time, sig_addr);
-      break;
-    case SignalSetTestType:
-      hipLaunchKernelGGL(SignalUpdateTest<SignalSetTestType>, gridSize,
-                         blockSize, shared_bytes, stream, loop, args.skip,
-                         start_time, end_time, sig_addr);
-      break;
-    case SignalWaitUntilTestType:
-      hipLaunchKernelGGL(SignalWaitUntilTest, gridSize, blockSize,
-                         shared_bytes, stream, loop, args.skip, start_time,
-                         end_time, sig_addr, fetched_value);
-      break;
-    case SignalFetchTestType:
-      hipLaunchKernelGGL(SignalFetchTest<SignalFetchTestType>, gridSize,
-                         blockSize, shared_bytes, stream, loop, args.skip,
-                         start_time, end_time, sig_addr, fetched_value);
-      break;
-    case WGSignalFetchTestType:
-      hipLaunchKernelGGL(SignalFetchTest<WGSignalFetchTestType>, gridSize,
-                         blockSize, shared_bytes, stream, loop, args.skip,
-                         start_time, end_time, sig_addr, fetched_value);
-      break;
-    case WAVESignalFetchTestType:
-      hipLaunchKernelGGL(SignalFetchTest<WAVESignalFetchTestType>, gridSize,
-                         blockSize, shared_bytes, stream, loop, args.skip,
-                         start_time, end_time, sig_addr, fetched_value);
-      break;
-    case PutSignalTestType:
-      hipLaunchKernelGGL(PutmemSignalTest<PutSignalTestType>, gridSize,
-                         blockSize, shared_bytes, stream, loop, args.skip,
-                         start_time, end_time, s_buf, r_buf, size, sig_addr,
-                         _shmem_context, sig_op);
-      break;
-    case WGPutSignalTestType:
-      hipLaunchKernelGGL(PutmemSignalTest<WGPutSignalTestType>, gridSize,
-                         blockSize, shared_bytes, stream, loop, args.skip,
-                         start_time, end_time, s_buf, r_buf, size, sig_addr,
-                         _shmem_context, sig_op);
-      break;
-    case WAVEPutSignalTestType:
-      hipLaunchKernelGGL(PutmemSignalTest<WAVEPutSignalTestType>, gridSize,
-                         blockSize, shared_bytes, stream, loop, args.skip,
-                         start_time, end_time, s_buf, r_buf, size, sig_addr,
-                         _shmem_context, sig_op);
-      break;
-    case PutSignalNBITestType:
-      hipLaunchKernelGGL(PutmemSignalTest<PutSignalNBITestType>, gridSize,
-                         blockSize, shared_bytes, stream, loop, args.skip,
-                         start_time, end_time, s_buf, r_buf, size, sig_addr,
-                         _shmem_context, sig_op);
-      break;
-    case WGPutSignalNBITestType:
-      hipLaunchKernelGGL(PutmemSignalTest<WGPutSignalNBITestType>, gridSize,
-                         blockSize, shared_bytes, stream, loop, args.skip,
-                         start_time, end_time, s_buf, r_buf, size, sig_addr,
-                         _shmem_context, sig_op);
-      break;
-    case WAVEPutSignalNBITestType:
-      hipLaunchKernelGGL(PutmemSignalTest<WAVEPutSignalNBITestType>, gridSize,
-                         blockSize, shared_bytes, stream, loop, args.skip,
-                         start_time, end_time, s_buf, r_buf, size, sig_addr,
-                         _shmem_context, sig_op);
-      break;
-    default:
-      std::cerr << "Invalid Test: unhandled TestType " << _type
-                << " in SignalingOperationsTester::launchKernel" << std::endl;
-      exit(-1);
+  case SignalAddTestType:
+    hipLaunchKernelGGL(SignalUpdateTest<SignalAddTestType>, gridSize, blockSize, shared_bytes,
+                       stream, loop, args.skip, start_time, end_time, sig_addr);
+    break;
+  case SignalSetTestType:
+    hipLaunchKernelGGL(SignalUpdateTest<SignalSetTestType>, gridSize, blockSize, shared_bytes,
+                       stream, loop, args.skip, start_time, end_time, sig_addr);
+    break;
+  case SignalWaitUntilTestType:
+    hipLaunchKernelGGL(SignalWaitUntilTest, gridSize, blockSize, shared_bytes, stream, loop,
+                       args.skip, start_time, end_time, sig_addr, fetched_value);
+    break;
+  case SignalFetchTestType:
+    hipLaunchKernelGGL(SignalFetchTest<SignalFetchTestType>, gridSize, blockSize, shared_bytes,
+                       stream, loop, args.skip, start_time, end_time, sig_addr, fetched_value);
+    break;
+  case WGSignalFetchTestType:
+    hipLaunchKernelGGL(SignalFetchTest<WGSignalFetchTestType>, gridSize, blockSize, shared_bytes,
+                       stream, loop, args.skip, start_time, end_time, sig_addr, fetched_value);
+    break;
+  case WAVESignalFetchTestType:
+    hipLaunchKernelGGL(SignalFetchTest<WAVESignalFetchTestType>, gridSize, blockSize, shared_bytes,
+                       stream, loop, args.skip, start_time, end_time, sig_addr, fetched_value);
+    break;
+  case PutSignalTestType:
+    hipLaunchKernelGGL(PutmemSignalTest<PutSignalTestType>, gridSize, blockSize, shared_bytes,
+                       stream, loop, args.skip, start_time, end_time, s_buf, r_buf, size, sig_addr,
+                       _shmem_context, sig_op);
+    break;
+  case WGPutSignalTestType:
+    hipLaunchKernelGGL(PutmemSignalTest<WGPutSignalTestType>, gridSize, blockSize, shared_bytes,
+                       stream, loop, args.skip, start_time, end_time, s_buf, r_buf, size, sig_addr,
+                       _shmem_context, sig_op);
+    break;
+  case WAVEPutSignalTestType:
+    hipLaunchKernelGGL(PutmemSignalTest<WAVEPutSignalTestType>, gridSize, blockSize, shared_bytes,
+                       stream, loop, args.skip, start_time, end_time, s_buf, r_buf, size, sig_addr,
+                       _shmem_context, sig_op);
+    break;
+  case PutSignalNBITestType:
+    hipLaunchKernelGGL(PutmemSignalTest<PutSignalNBITestType>, gridSize, blockSize, shared_bytes,
+                       stream, loop, args.skip, start_time, end_time, s_buf, r_buf, size, sig_addr,
+                       _shmem_context, sig_op);
+    break;
+  case WGPutSignalNBITestType:
+    hipLaunchKernelGGL(PutmemSignalTest<WGPutSignalNBITestType>, gridSize, blockSize, shared_bytes,
+                       stream, loop, args.skip, start_time, end_time, s_buf, r_buf, size, sig_addr,
+                       _shmem_context, sig_op);
+    break;
+  case WAVEPutSignalNBITestType:
+    hipLaunchKernelGGL(PutmemSignalTest<WAVEPutSignalNBITestType>, gridSize, blockSize,
+                       shared_bytes, stream, loop, args.skip, start_time, end_time, s_buf, r_buf,
+                       size, sig_addr, _shmem_context, sig_op);
+    break;
+  default:
+    std::cerr << "Invalid Test: unhandled TestType " << _type
+              << " in SignalingOperationsTester::launchKernel" << std::endl;
+    exit(-1);
   }
 
   num_msgs = (loop + args.skip) * gridSize.x;
@@ -301,26 +271,22 @@ void SignalingOperationsTester::launchKernel(dim3 gridSize, dim3 blockSize, int 
 }
 
 void SignalingOperationsTester::verifyResults(size_t size) {
-  auto check_value = [](const char *operation, uint64_t value,
-                        uint64_t expected) {
+  auto check_value = [](const char* operation, uint64_t value, uint64_t expected) {
     if (value != expected) {
-      fprintf(stderr, "%s Value %lu, Expected %lu\n", operation, value,
-              expected);
+      fprintf(stderr, "%s Value %lu, Expected %lu\n", operation, value, expected);
       exit(-1);
     }
   };
 
   if (_type == SignalAddTestType) {
-    uint64_t expected =
-        (args.skip + num_loops) * args.wg_size * args.num_wgs;
+    uint64_t expected = (args.skip + num_loops) * args.wg_size * args.num_wgs;
     check_value("Signal Add", *sig_addr, expected);
     return;
   }
 
   if (_type == SignalSetTestType) {
     int sender = (args.myid - 1 + args.numprocs) % args.numprocs;
-    check_value("Signal Set", *sig_addr,
-                static_cast<uint64_t>(sender + 1));
+    check_value("Signal Set", *sig_addr, static_cast<uint64_t>(sender + 1));
     return;
   }
 
@@ -331,8 +297,7 @@ void SignalingOperationsTester::verifyResults(size_t size) {
     return;
   }
 
-  if (_type == SignalFetchTestType     ||
-      _type == WAVESignalFetchTestType ||
+  if (_type == SignalFetchTestType || _type == WAVESignalFetchTestType ||
       _type == WGSignalFetchTestType) {
     if (0 == args.myid) {
       check_value("Signal Fetch", *fetched_value, args.myid + 123);
@@ -351,32 +316,32 @@ void SignalingOperationsTester::verifyResults(size_t size) {
       // Validate Signal
       if (ROCSHMEM_SIGNAL_SET == sig_op) {
         uint64_t expected_value = 1;
-        uint64_t value = *sig_addr;
+        uint64_t value          = *sig_addr;
 
         if (value != expected_value) {
           fprintf(stderr, "ROCSHMEM_SIGNAL_SET Value %lu, Expected %lu\n", value, expected_value);
           exit(-1);
         }
       } else if (ROCSHMEM_SIGNAL_ADD == sig_op) {
-        uint64_t value = *sig_addr;
-        uint64_t expected_value = (args.myid + 123); // Initial Value
+        uint64_t value          = *sig_addr;
+        uint64_t expected_value = (args.myid + 123);  // Initial Value
 
         switch (_type) {
-          case PutSignalTestType:
-          case PutSignalNBITestType:
-            expected_value += ((args.skip + num_loops) * args.wg_size * args.num_wgs);
-            break;
-          case WGPutSignalTestType:
-          case WGPutSignalNBITestType:
-            expected_value += ((args.skip + num_loops) * args.num_wgs);
-            break;
-          case WAVEPutSignalTestType:
-          case WAVEPutSignalNBITestType:
-            expected_value += ((args.skip + num_loops) * args.num_wgs * num_warps);
-            break;
-          default:
-            fprintf(stderr, "Invalid Test\n");
-            exit(-1);
+        case PutSignalTestType:
+        case PutSignalNBITestType:
+          expected_value += ((args.skip + num_loops) * args.wg_size * args.num_wgs);
+          break;
+        case WGPutSignalTestType:
+        case WGPutSignalNBITestType:
+          expected_value += ((args.skip + num_loops) * args.num_wgs);
+          break;
+        case WAVEPutSignalTestType:
+        case WAVEPutSignalNBITestType:
+          expected_value += ((args.skip + num_loops) * args.num_wgs * num_warps);
+          break;
+        default:
+          fprintf(stderr, "Invalid Test\n");
+          exit(-1);
         }
 
         if (value != expected_value) {

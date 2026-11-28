@@ -16,8 +16,8 @@ namespace {
 // Test-only helper to override cached envvar values before ipcHostInit.
 template <typename T>
 void override_envvar(const envvar::_detail::var<T>& var, T v) {
-  auto& m = const_cast<envvar::_detail::var<T>&>(var);
-  m.value = v;
+  auto& m     = const_cast<envvar::_detail::var<T>&>(var);
+  m.value     = v;
   m.value_set = true;
 }
 }  // namespace

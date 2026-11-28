@@ -33,12 +33,11 @@
 /******************************************************************************
  * HOST TESTER CLASS METHODS
  *****************************************************************************/
-QuietOnStreamTester::QuietOnStreamTester(TesterArguments args)
-    : Tester(args) {
+QuietOnStreamTester::QuietOnStreamTester(TesterArguments args) : Tester(args) {
   my_pe = rocshmem_my_pe();
   n_pes = rocshmem_n_pes();
 
-  char *value{nullptr};
+  char* value{nullptr};
   if ((value = getenv("ROCSHMEM_TEST_NUM_STREAMS"))) {
     num_streams = atoi(value);
   } else {
@@ -66,7 +65,7 @@ QuietOnStreamTester::QuietOnStreamTester(TesterArguments args)
 
   // Allocate test buffers - one int per stream
   source_buf = static_cast<int*>(alloc_test_buffer(num_streams * sizeof(int), args.local_buf_type));
-  dest_buf = static_cast<int*>(alloc_test_buffer(num_streams * sizeof(int)));
+  dest_buf   = static_cast<int*>(alloc_test_buffer(num_streams * sizeof(int)));
 }
 
 QuietOnStreamTester::~QuietOnStreamTester() {
@@ -84,20 +83,19 @@ void QuietOnStreamTester::preLaunchKernel() {
   bw_factor = 1;  // Point-to-point operation
 }
 
-void QuietOnStreamTester::postLaunchKernel() {
-}
+void QuietOnStreamTester::postLaunchKernel() {}
 
 void QuietOnStreamTester::resetBuffers([[maybe_unused]] size_t size) {
   // Initialize source values for each stream
   for (int stream_id = 0; stream_id < num_streams; stream_id++) {
     source_buf[stream_id] = my_pe + 1;
-    dest_buf[stream_id] = 0;
+    dest_buf[stream_id]   = 0;
   }
 }
 
 void QuietOnStreamTester::launchKernel([[maybe_unused]] dim3 gridSize,
-                                       [[maybe_unused]] dim3 blockSize,
-                                       int loop, [[maybe_unused]] size_t size) {
+                                       [[maybe_unused]] dim3 blockSize, int loop,
+                                       [[maybe_unused]] size_t size) {
   int next_pe = (my_pe + 1) % n_pes;
 
   for (int i = 0; i < num_streams; i++) {
@@ -106,8 +104,8 @@ void QuietOnStreamTester::launchKernel([[maybe_unused]] dim3 gridSize,
 
   // Just do one put+quiet operation per stream for correctness testing
   for (int stream_id = 0; stream_id < num_streams; stream_id++) {
-    rocshmem_putmem_on_stream(&dest_buf[stream_id], &source_buf[stream_id],
-                              sizeof(int), next_pe, streams[stream_id]);
+    rocshmem_putmem_on_stream(&dest_buf[stream_id], &source_buf[stream_id], sizeof(int), next_pe,
+                              streams[stream_id]);
     rocshmem_quiet_on_stream(streams[stream_id]);
   }
 
@@ -119,13 +117,13 @@ void QuietOnStreamTester::launchKernel([[maybe_unused]] dim3 gridSize,
 
 void QuietOnStreamTester::verifyResults([[maybe_unused]] size_t size) {
   // After quiet, each stream's buffer should have been updated by the previous PE
-  int prev_pe = (my_pe - 1 + n_pes) % n_pes;
+  int prev_pe  = (my_pe - 1 + n_pes) % n_pes;
   int expected = prev_pe + 1;
 
   for (int stream_id = 0; stream_id < num_streams; stream_id++) {
     if (dest_buf[stream_id] != expected) {
-      fprintf(stderr, "PE %d stream %d: Verification failed: expected %d, got %d\n",
-              my_pe, stream_id, expected, dest_buf[stream_id]);
+      fprintf(stderr, "PE %d stream %d: Verification failed: expected %d, got %d\n", my_pe,
+              stream_id, expected, dest_buf[stream_id]);
       rocshmem_global_exit(1);
     }
   }

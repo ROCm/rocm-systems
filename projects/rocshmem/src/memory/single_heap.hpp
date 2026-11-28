@@ -42,7 +42,6 @@
 namespace rocshmem {
 
 class SingleHeap {
-
  public:
   /**
    * @brief Primary constructor and destructor
@@ -150,21 +149,21 @@ class SingleHeap {
    *
    * @return Pointer to the HIPAllocator that allocated the heap
    */
-  HIPAllocator *get_allocator();
+  HIPAllocator* get_allocator();
 
  private:
   /**
    * @brief Heap memory object
    */
-  HeapMemory *heap_mem_{nullptr};
+  HeapMemory* heap_mem_{nullptr};
   /**
    * @brief Allocation strategy object
    */
-  ShmemAllocatorStrategy *strat_{nullptr};
+  ShmemAllocatorStrategy* strat_{nullptr};
   /**
    * @brief Allocator used to back the heap memory
    */
-  HIPAllocator *allocator_{nullptr};
+  HIPAllocator* allocator_{nullptr};
 };
 
 }  // namespace rocshmem

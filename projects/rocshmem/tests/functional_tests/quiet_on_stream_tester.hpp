@@ -44,8 +44,7 @@ class QuietOnStreamTester : public Tester {
 
   virtual void preLaunchKernel() override;
 
-  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop,
-                            size_t size) override;
+  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop, size_t size) override;
 
   virtual void postLaunchKernel() override;
 
@@ -59,8 +58,8 @@ class QuietOnStreamTester : public Tester {
   std::vector<hipStream_t> streams;
 
   // Simple test buffers
-  int *source_buf{nullptr};
-  int *dest_buf{nullptr};
+  int* source_buf{nullptr};
+  int* dest_buf{nullptr};
 };
 
 #include "quiet_on_stream_tester.cpp"

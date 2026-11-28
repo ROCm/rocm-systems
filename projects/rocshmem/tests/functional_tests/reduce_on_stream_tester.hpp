@@ -44,16 +44,15 @@ class ReduceOnStreamTester : public Tester {
 
   virtual void preLaunchKernel() override;
 
-  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop,
-                            size_t size) override;
+  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop, size_t size) override;
 
   virtual void postLaunchKernel() override;
 
   virtual void verifyResults(size_t size) override;
 
  private:
-  int *source_buf;
-  int *dest_buf;
+  int* source_buf;
+  int* dest_buf;
   int my_pe;
   int n_pes;
   size_t buf_size;

@@ -30,8 +30,8 @@
 namespace rocshmem {
 namespace net {
 
-RmaEngine::RmaEngine(Ibv *ibv, IbCtrl *ctrl, MrRegistry *mr, LaneMap lm,
-                     uintptr_t heap_base, std::vector<LocalMr> local_mrs)
+RmaEngine::RmaEngine(Ibv* ibv, IbCtrl* ctrl, MrRegistry* mr, LaneMap lm, uintptr_t heap_base,
+                     std::vector<LocalMr> local_mrs)
     : ibv_{ibv},
       ctrl_{ctrl},
       mr_{mr},
@@ -39,9 +39,8 @@ RmaEngine::RmaEngine(Ibv *ibv, IbCtrl *ctrl, MrRegistry *mr, LaneMap lm,
       heap_base_{heap_base},
       local_mrs_{std::move(local_mrs)} {}
 
-uintptr_t RmaEngine::remote_va(int pe, const void *local_symmetric_va) const {
-  return net::remote_addr(mr_->remote(pe),
-                          reinterpret_cast<uintptr_t>(local_symmetric_va),
+uintptr_t RmaEngine::remote_va(int pe, const void* local_symmetric_va) const {
+  return net::remote_addr(mr_->remote(pe), reinterpret_cast<uintptr_t>(local_symmetric_va),
                           heap_base_);
 }
 
@@ -49,9 +48,9 @@ uint32_t RmaEngine::rkey(int pe) const {
   return static_cast<uint32_t>(mr_->remote(pe).key);
 }
 
-uint32_t RmaEngine::lkey_for(const void *addr) const {
+uint32_t RmaEngine::lkey_for(const void* addr) const {
   auto a = reinterpret_cast<uintptr_t>(addr);
-  for (const auto &m : local_mrs_) {
+  for (const auto& m : local_mrs_) {
     if (a >= m.base && a < m.end) {
       return m.lkey;
     }
@@ -60,21 +59,20 @@ uint32_t RmaEngine::lkey_for(const void *addr) const {
   return 0;
 }
 
-uint64_t RmaEngine::post_write(int lane, uintptr_t laddr, uint32_t lkey,
-                               uintptr_t raddr, uint32_t rk, uint32_t len,
-                               uint64_t wr_id) {
+uint64_t RmaEngine::post_write(int lane, uintptr_t laddr, uint32_t lkey, uintptr_t raddr,
+                               uint32_t rk, uint32_t len, uint64_t wr_id) {
   struct ibv_sge sge;
   memset(&sge, 0, sizeof(sge));
-  sge.addr = laddr;
+  sge.addr   = laddr;
   sge.length = len;
-  sge.lkey = lkey;
+  sge.lkey   = lkey;
 
   struct ibv_send_wr wr;
   memset(&wr, 0, sizeof(wr));
-  wr.wr_id = wr_id;
-  wr.sg_list = &sge;
-  wr.num_sge = 1;
-  wr.opcode = IBV_WR_RDMA_WRITE;
+  wr.wr_id      = wr_id;
+  wr.sg_list    = &sge;
+  wr.num_sge    = 1;
+  wr.opcode     = IBV_WR_RDMA_WRITE;
   wr.send_flags = IBV_SEND_SIGNALED;
   // Request inline whenever the payload fits the inline capacity the driver
   // actually granted at QP-create time (vendor-specific, e.g. bnxt ~16B). This
@@ -85,10 +83,10 @@ uint64_t RmaEngine::post_write(int lane, uintptr_t laddr, uint32_t lkey,
     wr.send_flags |= IBV_SEND_INLINE;
   }
   wr.wr.rdma.remote_addr = raddr;
-  wr.wr.rdma.rkey = rk;
+  wr.wr.rdma.rkey        = rk;
 
-  struct ibv_send_wr *bad = nullptr;
-  int rc = ibv_->post_send(ctrl_->qp(lane), &wr, &bad);
+  struct ibv_send_wr* bad = nullptr;
+  int rc                  = ibv_->post_send(ctrl_->qp(lane), &wr, &bad);
   if (rc != 0) {
     LOG_ERROR("net: post_write rc=%d (lane %d)", rc, lane);
     return 0;
@@ -96,27 +94,26 @@ uint64_t RmaEngine::post_write(int lane, uintptr_t laddr, uint32_t lkey,
   return wr_id;
 }
 
-uint64_t RmaEngine::post_read(int lane, uintptr_t laddr, uint32_t lkey,
-                              uintptr_t raddr, uint32_t rk, uint32_t len,
-                              uint64_t wr_id) {
+uint64_t RmaEngine::post_read(int lane, uintptr_t laddr, uint32_t lkey, uintptr_t raddr,
+                              uint32_t rk, uint32_t len, uint64_t wr_id) {
   struct ibv_sge sge;
   memset(&sge, 0, sizeof(sge));
-  sge.addr = laddr;
+  sge.addr   = laddr;
   sge.length = len;
-  sge.lkey = lkey;
+  sge.lkey   = lkey;
 
   struct ibv_send_wr wr;
   memset(&wr, 0, sizeof(wr));
-  wr.wr_id = wr_id;
-  wr.sg_list = &sge;
-  wr.num_sge = 1;
-  wr.opcode = IBV_WR_RDMA_READ;
-  wr.send_flags = IBV_SEND_SIGNALED;
+  wr.wr_id               = wr_id;
+  wr.sg_list             = &sge;
+  wr.num_sge             = 1;
+  wr.opcode              = IBV_WR_RDMA_READ;
+  wr.send_flags          = IBV_SEND_SIGNALED;
   wr.wr.rdma.remote_addr = raddr;
-  wr.wr.rdma.rkey = rk;
+  wr.wr.rdma.rkey        = rk;
 
-  struct ibv_send_wr *bad = nullptr;
-  int rc = ibv_->post_send(ctrl_->qp(lane), &wr, &bad);
+  struct ibv_send_wr* bad = nullptr;
+  int rc                  = ibv_->post_send(ctrl_->qp(lane), &wr, &bad);
   if (rc != 0) {
     LOG_ERROR("net: post_read rc=%d (lane %d)", rc, lane);
     return 0;
@@ -124,28 +121,28 @@ uint64_t RmaEngine::post_read(int lane, uintptr_t laddr, uint32_t lkey,
   return wr_id;
 }
 
-uint64_t RmaEngine::post_signal_set(int lane, uintptr_t raddr, uint32_t rk,
-                                    uint64_t value, uint64_t wr_id) {
+uint64_t RmaEngine::post_signal_set(int lane, uintptr_t raddr, uint32_t rk, uint64_t value,
+                                    uint64_t wr_id) {
   // The immediate value is copied into the WQE at post time (IBV_SEND_INLINE),
   // so &value (a parameter, live for this call) needs no registration.
   struct ibv_sge sge;
   memset(&sge, 0, sizeof(sge));
-  sge.addr = reinterpret_cast<uintptr_t>(&value);
+  sge.addr   = reinterpret_cast<uintptr_t>(&value);
   sge.length = sizeof(value);
-  sge.lkey = 0;  // ignored for inline
+  sge.lkey   = 0;  // ignored for inline
 
   struct ibv_send_wr wr;
   memset(&wr, 0, sizeof(wr));
-  wr.wr_id = wr_id;
-  wr.sg_list = &sge;
-  wr.num_sge = 1;
-  wr.opcode = IBV_WR_RDMA_WRITE;
-  wr.send_flags = IBV_SEND_SIGNALED | IBV_SEND_INLINE;
+  wr.wr_id               = wr_id;
+  wr.sg_list             = &sge;
+  wr.num_sge             = 1;
+  wr.opcode              = IBV_WR_RDMA_WRITE;
+  wr.send_flags          = IBV_SEND_SIGNALED | IBV_SEND_INLINE;
   wr.wr.rdma.remote_addr = raddr;
-  wr.wr.rdma.rkey = rk;
+  wr.wr.rdma.rkey        = rk;
 
-  struct ibv_send_wr *bad = nullptr;
-  int rc = ibv_->post_send(ctrl_->qp(lane), &wr, &bad);
+  struct ibv_send_wr* bad = nullptr;
+  int rc                  = ibv_->post_send(ctrl_->qp(lane), &wr, &bad);
   if (rc != 0) {
     LOG_ERROR("net: post_signal_set rc=%d (lane %d)", rc, lane);
     return 0;
@@ -153,30 +150,29 @@ uint64_t RmaEngine::post_signal_set(int lane, uintptr_t raddr, uint32_t rk,
   return wr_id;
 }
 
-uint64_t RmaEngine::post_atomic(int lane, int opcode, uintptr_t result,
-                                uint32_t lkey, uintptr_t raddr, uint32_t rk,
-                                uint64_t compare_add, uint64_t swap,
+uint64_t RmaEngine::post_atomic(int lane, int opcode, uintptr_t result, uint32_t lkey,
+                                uintptr_t raddr, uint32_t rk, uint64_t compare_add, uint64_t swap,
                                 uint64_t wr_id) {
   struct ibv_sge sge;
   memset(&sge, 0, sizeof(sge));
-  sge.addr = result;  // fetched value lands here (8 bytes)
+  sge.addr   = result;  // fetched value lands here (8 bytes)
   sge.length = 8;
-  sge.lkey = lkey;
+  sge.lkey   = lkey;
 
   struct ibv_send_wr wr;
   memset(&wr, 0, sizeof(wr));
-  wr.wr_id = wr_id;
-  wr.sg_list = &sge;
-  wr.num_sge = 1;
-  wr.opcode = static_cast<enum ibv_wr_opcode>(opcode);
-  wr.send_flags = IBV_SEND_SIGNALED;
+  wr.wr_id                 = wr_id;
+  wr.sg_list               = &sge;
+  wr.num_sge               = 1;
+  wr.opcode                = static_cast<enum ibv_wr_opcode>(opcode);
+  wr.send_flags            = IBV_SEND_SIGNALED;
   wr.wr.atomic.remote_addr = raddr;
-  wr.wr.atomic.rkey = rk;
+  wr.wr.atomic.rkey        = rk;
   wr.wr.atomic.compare_add = compare_add;
-  wr.wr.atomic.swap = swap;
+  wr.wr.atomic.swap        = swap;
 
-  struct ibv_send_wr *bad = nullptr;
-  int rc = ibv_->post_send(ctrl_->qp(lane), &wr, &bad);
+  struct ibv_send_wr* bad = nullptr;
+  int rc                  = ibv_->post_send(ctrl_->qp(lane), &wr, &bad);
   if (rc != 0) {
     LOG_ERROR("net: post_atomic rc=%d (lane %d)", rc, lane);
     return 0;
@@ -184,21 +180,19 @@ uint64_t RmaEngine::post_atomic(int lane, int opcode, uintptr_t result,
   return wr_id;
 }
 
-uint64_t RmaEngine::post_fadd(int lane, uintptr_t result, uint32_t lkey,
-                              uintptr_t raddr, uint32_t rk, uint64_t add,
-                              uint64_t wr_id) {
+uint64_t RmaEngine::post_fadd(int lane, uintptr_t result, uint32_t lkey, uintptr_t raddr,
+                              uint32_t rk, uint64_t add, uint64_t wr_id) {
   return post_atomic(lane, IBV_WR_ATOMIC_FETCH_AND_ADD, result, lkey, raddr, rk,
                      /*compare_add=*/add, /*swap=*/0, wr_id);
 }
 
-uint64_t RmaEngine::post_cas(int lane, uintptr_t result, uint32_t lkey,
-                             uintptr_t raddr, uint32_t rk, uint64_t cmp,
-                             uint64_t swp, uint64_t wr_id) {
+uint64_t RmaEngine::post_cas(int lane, uintptr_t result, uint32_t lkey, uintptr_t raddr,
+                             uint32_t rk, uint64_t cmp, uint64_t swp, uint64_t wr_id) {
   return post_atomic(lane, IBV_WR_ATOMIC_CMP_AND_SWP, result, lkey, raddr, rk,
                      /*compare_add=*/cmp, /*swap=*/swp, wr_id);
 }
 
-int RmaEngine::poll(int cq_index, struct ibv_wc *wc, int max) {
+int RmaEngine::poll(int cq_index, struct ibv_wc* wc, int max) {
   return ibv_->poll_cq(ctrl_->cq(cq_index), max, wc);
 }
 

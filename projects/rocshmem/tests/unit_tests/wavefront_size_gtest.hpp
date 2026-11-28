@@ -31,15 +31,13 @@
 namespace rocshmem {
 
 class WavefrontSizeTestFixture : public ::testing::Test {
-public:
-  void SetUp() override {
-      wf_size = get_wf_size();
-  }
+ public:
+  void SetUp() override { wf_size = get_wf_size(); }
 
-protected:
+ protected:
   int wf_size;
 };
 
-} // namespace rocshmem
+}  // namespace rocshmem
 
 #endif  // ROCSHMEM_WAVEFRONT_SIZE_GTEST_HPP

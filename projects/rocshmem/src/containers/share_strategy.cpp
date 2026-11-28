@@ -213,17 +213,17 @@ __device__ uint64_t Block::broadcast_up(uint64_t fetch_value) {
 
 __device__ void ShareStrategy::syncthreads() const {
   switch (_sse) {
-    case ShareStrategyEnum::PRIVATE:
-      return;
-    case ShareStrategyEnum::BLOCK:
-      __syncthreads();
-      return;
-    case ShareStrategyEnum::DEVICE:
-      abort();
-      return;
-    case ShareStrategyEnum::UNUSED:
-      abort();
-      return;
+  case ShareStrategyEnum::PRIVATE:
+    return;
+  case ShareStrategyEnum::BLOCK:
+    __syncthreads();
+    return;
+  case ShareStrategyEnum::DEVICE:
+    abort();
+    return;
+  case ShareStrategyEnum::UNUSED:
+    abort();
+    return;
   }
 }
 

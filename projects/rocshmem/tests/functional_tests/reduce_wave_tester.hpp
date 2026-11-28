@@ -38,10 +38,8 @@ using namespace rocshmem;
 template <typename T1, ROCSHMEM_OP T2>
 class ReduceWaveTester : public Tester {
  public:
-  explicit ReduceWaveTester(TesterArguments args,
-                            std::function<void(T1 &, T1 &)> f1,
-                            std::function<std::pair<bool, std::string>(
-                                const T1 &, const T1 &)> f2);
+  explicit ReduceWaveTester(TesterArguments args, std::function<void(T1&, T1&)> f1,
+                            std::function<std::pair<bool, std::string>(const T1&, const T1&)> f2);
   virtual ~ReduceWaveTester();
 
  protected:
@@ -49,28 +47,26 @@ class ReduceWaveTester : public Tester {
 
   virtual void preLaunchKernel() override;
 
-  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop,
-                            size_t size) override;
+  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop, size_t size) override;
 
   virtual void postLaunchKernel() override;
 
   virtual void verifyResults(size_t size) override;
 
-  T1 *s_buf;
-  T1 *r_buf;
+  T1* s_buf;
+  T1* r_buf;
 
  private:
   int my_pe = 0;
   int n_pes = 0;
-  std::function<void(T1 &, T1 &)> init_buf;
-  std::function<std::pair<bool, std::string>(const T1 &, const T1 &)>
-      verify_buf;
+  std::function<void(T1&, T1&)> init_buf;
+  std::function<std::pair<bool, std::string>(const T1&, const T1&)> verify_buf;
   /**
    * This constant should equal ROCSHMEM_MAX_NUM_TEAMS - 1.
    * The default value for the maximum number of teams is 40.
    */
   int num_teams = 39;
-  rocshmem_team_t *team_reduce_wave_world_dup;
+  rocshmem_team_t* team_reduce_wave_world_dup;
 };
 
 #include "reduce_wave_tester.cpp"

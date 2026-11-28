@@ -47,8 +47,7 @@ class HdpHostSideFlushRocmPolicy {
     hdp_gpu_cpu_flush_flag_ = hdp_gpu_cpu_flush_flag;
     if (hdp_gpu_cpu_flush_flag_ != nullptr) {
       *hdp_gpu_cpu_flush_flag_ =
-          static_cast<std::underlying_type_t<hdp_poll_flag>>(
-              hdp_poll_flag::NO_FLUSH);
+          static_cast<std::underlying_type_t<hdp_poll_flag>>(hdp_poll_flag::NO_FLUSH);
     }
   }
 
@@ -81,9 +80,7 @@ class HdpHostSideFlushRocmPolicy {
    * @return A pointer to an object that stores a signal for the CPU thread to
    * perform the flush on the host.
    */
-  __host__ unsigned int* get_hdp_flush_ptr() const {
-    return hdp_gpu_cpu_flush_flag_;
-  }
+  __host__ unsigned int* get_hdp_flush_ptr() const { return hdp_gpu_cpu_flush_flag_; }
 
   /**
    * @brief Check if there is an active request to flush the hdp cache.
@@ -94,11 +91,11 @@ class HdpHostSideFlushRocmPolicy {
     if (hdp_gpu_cpu_flush_flag_ == nullptr) {
       return false;
     }
-    auto device_flag_value = 
-      atomic::load<atomic::memory_scope::system,
-                   atomic::memory_order::acquire>(hdp_gpu_cpu_flush_flag_);
-    const auto flush_value = static_cast<std::underlying_type_t<hdp_poll_flag>>(
-        hdp_poll_flag::FLUSH);
+    auto device_flag_value =
+        atomic::load<atomic::memory_scope::system, atomic::memory_order::acquire>(
+            hdp_gpu_cpu_flush_flag_);
+    const auto flush_value =
+        static_cast<std::underlying_type_t<hdp_poll_flag>>(hdp_poll_flag::FLUSH);
     return device_flag_value == flush_value;
   }
 
@@ -107,18 +104,16 @@ class HdpHostSideFlushRocmPolicy {
    */
   __host__ void clear_active_flush_flag() {
     const auto no_flush_value =
-        static_cast<std::underlying_type_t<hdp_poll_flag>>(
-            hdp_poll_flag::NO_FLUSH);
-    atomic::store<atomic::memory_scope::system,
-                  atomic::memory_order::release>(
-                    hdp_gpu_cpu_flush_flag_, no_flush_value);
+        static_cast<std::underlying_type_t<hdp_poll_flag>>(hdp_poll_flag::NO_FLUSH);
+    atomic::store<atomic::memory_scope::system, atomic::memory_order::release>(
+        hdp_gpu_cpu_flush_flag_, no_flush_value);
   }
 
   static const int HDP_FLUSH_VAL{0x01};
 
   enum class hdp_poll_flag : unsigned int {
     NO_FLUSH = 0x0,
-    FLUSH = 0x1,
+    FLUSH    = 0x1,
   };
 
  private:
@@ -126,8 +121,7 @@ class HdpHostSideFlushRocmPolicy {
     int hip_dev_id{};
     CHECK_HIP(hipGetDevice(&hip_dev_id));
     CHECK_HIP(hipDeviceGetAttribute(reinterpret_cast<int*>(&hdp_flush_ptr_),
-                                    hipDeviceAttributeHdpMemFlushCntl,
-                                    hip_dev_id));
+                                    hipDeviceAttributeHdpMemFlushCntl, hip_dev_id));
   }
 
   unsigned int* hdp_flush_ptr_{nullptr};
@@ -161,8 +155,7 @@ class HdpDeviceSideFlushRocmPolicy {
     int hip_dev_id{};
     CHECK_HIP(hipGetDevice(&hip_dev_id));
     CHECK_HIP(hipDeviceGetAttribute(reinterpret_cast<int*>(&hdp_flush_ptr_),
-                                    hipDeviceAttributeHdpMemFlushCntl,
-                                    hip_dev_id));
+                                    hipDeviceAttributeHdpMemFlushCntl, hip_dev_id));
   }
 
   unsigned int* hdp_flush_ptr_{nullptr};

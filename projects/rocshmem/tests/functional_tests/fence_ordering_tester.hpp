@@ -15,15 +15,14 @@ class FenceOrderingTester : public Tester {
   ~FenceOrderingTester() override;
 
   void resetBuffers(size_t size) override;
-  void launchKernel(dim3 gridSize, dim3 blockSize, int loop,
-                    size_t size) override;
+  void launchKernel(dim3 gridSize, dim3 blockSize, int loop, size_t size) override;
   void verifyResults(size_t size) override;
 
  private:
-  char *s_buf{nullptr};
-  char *r_buf{nullptr};
-  uint64_t *signal{nullptr};
-  int *error_count{nullptr};
+  char* s_buf{nullptr};
+  char* r_buf{nullptr};
+  uint64_t* signal{nullptr};
+  int* error_count{nullptr};
   int last_loop{0};  // actual loop count passed to the last launchKernel
 };
 

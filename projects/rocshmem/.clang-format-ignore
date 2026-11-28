@@ -1,0 +1,22 @@
+# Files clang-format must never touch. Paths are relative to this file.
+
+# Third-party / vendored code (keep identical to upstream so updates diff cleanly)
+src/memory/dlmalloc.cpp
+src/memory/dlmalloc.hpp
+
+# Vendor NIC driver/ABI headers
+src/gda/bnxt/bnxt_re_dv.h
+src/gda/bnxt/bnxt_re_hsi.h
+src/gda/ionic/ionic_dv.h
+src/gda/ionic/ionic_fw.h
+src/gda/mlx5/mlx5_ifc_core.hpp
+src/gda/mlx5/mlx5dv_core.hpp
+
+# Hardware packet/opcode definitions (generated-style, hand-aligned tables)
+src/sdma/sdma_opcodes.h
+src/sdma/sdma_pkt_struct.h
+src/sdma/sdma_pkt_struct_mi4.h
+
+# Generated and build output
+build/**
+docs/_build/**

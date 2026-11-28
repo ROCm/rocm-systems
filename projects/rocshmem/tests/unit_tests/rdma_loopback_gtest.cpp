@@ -28,28 +28,28 @@ using namespace rocshmem::net;
 TEST_F(RdmaLoopbackTestFixture, RdmaWriteLoopbackDataMatches) {
   // Write a pattern into src region [0..64), RDMA_WRITE it to dst region
   // [2048..).
-  char *h = static_cast<char *>(heap_);
-  const char *msg = "ROCSHMEM-VERBS-LOOPBACK-0123456789ABCDEF";
-  size_t len = strlen(msg) + 1;
+  char* h         = static_cast<char*>(heap_);
+  const char* msg = "ROCSHMEM-VERBS-LOOPBACK-0123456789ABCDEF";
+  size_t len      = strlen(msg) + 1;
   memcpy(h, msg, len);
 
   struct ibv_sge sge;
   memset(&sge, 0, sizeof(sge));
-  sge.addr = reinterpret_cast<uintptr_t>(h);
+  sge.addr   = reinterpret_cast<uintptr_t>(h);
   sge.length = len;
-  sge.lkey = mr_.heap_lkey();
+  sge.lkey   = mr_.heap_lkey();
 
   struct ibv_send_wr wr;
   memset(&wr, 0, sizeof(wr));
-  wr.wr_id = 0x1234;
-  wr.sg_list = &sge;
-  wr.num_sge = 1;
-  wr.opcode = IBV_WR_RDMA_WRITE;
-  wr.send_flags = IBV_SEND_SIGNALED;
+  wr.wr_id               = 0x1234;
+  wr.sg_list             = &sge;
+  wr.num_sge             = 1;
+  wr.opcode              = IBV_WR_RDMA_WRITE;
+  wr.send_flags          = IBV_SEND_SIGNALED;
   wr.wr.rdma.remote_addr = reinterpret_cast<uintptr_t>(h) + 2048;
-  wr.wr.rdma.rkey = mr_.heap_rkey();
+  wr.wr.rdma.rkey        = mr_.heap_rkey();
 
-  struct ibv_send_wr *bad = nullptr;
+  struct ibv_send_wr* bad = nullptr;
   ASSERT_EQ(ibv_.post_send(ctrl_.qp(0), &wr, &bad), 0);
 
   struct ibv_wc wc;

@@ -38,7 +38,8 @@ namespace rocshmem {
 
 class QueuePairMux;
 
-template <> struct QueuePairTraits<QueuePairMux> {
+template <>
+struct QueuePairTraits<QueuePairMux> {
   /**
    * @brief Mux OpCode enumeration
    */
@@ -49,48 +50,45 @@ template <> struct QueuePairTraits<QueuePairMux> {
     ATOMIC_FA,
   };
 
-  static constexpr size_t InlineMax =
-      std::min({
+  static constexpr size_t InlineMax = std::min({
 #if defined(GDA_IONIC)
-                QueuePairTraits<QueuePairIONIC>::InlineMax,
+      QueuePairTraits<QueuePairIONIC>::InlineMax,
 #endif
 #if defined(GDA_BNXT)
-                QueuePairTraits<QueuePairBNXT>::InlineMax,
+      QueuePairTraits<QueuePairBNXT>::InlineMax,
 #endif
 #if defined(GDA_MLX5)
-                QueuePairTraits<QueuePairMLX5>::InlineMax,
+      QueuePairTraits<QueuePairMLX5>::InlineMax,
 #endif
-                });
+  });
 
-  static constexpr size_t InlineThreshold =
-      std::min({
+  static constexpr size_t InlineThreshold = std::min({
 #if defined(GDA_IONIC)
-                QueuePairTraits<QueuePairIONIC>::InlineThreshold,
+      QueuePairTraits<QueuePairIONIC>::InlineThreshold,
 #endif
 #if defined(GDA_BNXT)
-                QueuePairTraits<QueuePairBNXT>::InlineThreshold,
+      QueuePairTraits<QueuePairBNXT>::InlineThreshold,
 #endif
 #if defined(GDA_MLX5)
-                QueuePairTraits<QueuePairMLX5>::InlineThreshold,
+      QueuePairTraits<QueuePairMLX5>::InlineThreshold,
 #endif
-                });
+  });
 };
 
 class QueuePairMux : public QueuePairSHMEM<QueuePairMux> {
-private:
+ private:
   union QueuePairUnion {
 #if defined(GDA_IONIC)
     QueuePairIONIC ionic;
 #endif
 #if defined(GDA_BNXT)
-    QueuePairBNXT  bnxt;
+    QueuePairBNXT bnxt;
 #endif
 #if defined(GDA_MLX5)
-    QueuePairMLX5  mlx5;
+    QueuePairMLX5 mlx5;
 #endif
   };
-  static_assert(std::is_aggregate_v<QueuePairUnion>,
-                "QueuePairUnion must be an aggregate type.");
+  static_assert(std::is_aggregate_v<QueuePairUnion>, "QueuePairUnion must be an aggregate type.");
   static_assert(std::is_trivially_destructible_v<QueuePairUnion>,
                 "QueuePairUnion must have a trivial destructor.");
 
@@ -113,18 +111,21 @@ private:
    */
   static inline GDAProvider provider{GDAProvider::UNSET};
 
-public:
+ public:
 #if defined(GDA_IONIC)
-  __host__ QueuePairMux(QueuePairIONIC&& ionic)
-    : qp{.ionic = std::move(ionic)} { provider = provider_ = GDAProvider::IONIC; }
+  __host__ QueuePairMux(QueuePairIONIC&& ionic) : qp{.ionic = std::move(ionic)} {
+    provider = provider_ = GDAProvider::IONIC;
+  }
 #endif
 #if defined(GDA_BNXT)
-  __host__ QueuePairMux(QueuePairBNXT&& bnxt)
-    : qp{.bnxt = std::move(bnxt)}  { provider = provider_ = GDAProvider::BNXT;  }
+  __host__ QueuePairMux(QueuePairBNXT&& bnxt) : qp{.bnxt = std::move(bnxt)} {
+    provider = provider_ = GDAProvider::BNXT;
+  }
 #endif
 #if defined(GDA_MLX5)
-  __host__ QueuePairMux(QueuePairMLX5&& mlx5)
-    : qp{.mlx5 = std::move(mlx5)}  { provider = provider_ = GDAProvider::MLX5;  }
+  __host__ QueuePairMux(QueuePairMLX5&& mlx5) : qp{.mlx5 = std::move(mlx5)} {
+    provider = provider_ = GDAProvider::MLX5;
+  }
 #endif
 
   __host__ QueuePairMux(const QueuePairMux& other)            = delete;
@@ -133,37 +134,35 @@ public:
   __host__ QueuePairMux& operator=(QueuePairMux&& other)      = default;
   __host__ ~QueuePairMux()                                    = default;
 
-public:
+ public:
   template <OpCode Op, typename... Options>
-  __device__ __forceinline__
-  void post_wqe_rma(uintptr_t laddr, uint32_t lkey,
-                    uintptr_t raddr, uint32_t rkey, size_t size,
-                    const ActiveWFInfo& wf_info, PostOpt<Options...> = {});
+  __device__ __forceinline__ void post_wqe_rma(uintptr_t laddr, uint32_t lkey, uintptr_t raddr,
+                                               uint32_t rkey, size_t size,
+                                               const ActiveWFInfo& wf_info,
+                                               PostOpt<Options...> = {});
 
   template <OpCode Op, typename... Options>
-  __device__ __forceinline__
-  void post_wqe_rma_single(uintptr_t laddr, uint32_t lkey,
-                           uintptr_t raddr, uint32_t rkey, size_t size,
-                           PostOpt<Options...> = {});
+  __device__ __forceinline__ void post_wqe_rma_single(uintptr_t laddr, uint32_t lkey,
+                                                      uintptr_t raddr, uint32_t rkey, size_t size,
+                                                      PostOpt<Options...> = {});
 
   template <OpCode Op, AMOFetchType Fetch, typename... Options>
-  __device__ __forceinline__
-  amo_ret_t<Fetch> post_wqe_amo(uintptr_t raddr, uint32_t rkey,
-                                uint64_t swap_add, uint64_t compare,
-                                const ActiveWFInfo& wf_info, PostOpt<Options...> = {});
+  __device__ __forceinline__ amo_ret_t<Fetch> post_wqe_amo(uintptr_t raddr, uint32_t rkey,
+                                                           uint64_t swap_add, uint64_t compare,
+                                                           const ActiveWFInfo& wf_info,
+                                                           PostOpt<Options...> = {});
 
   template <OpCode Op, AMOFetchType Fetch, typename... Options>
-  __device__ __forceinline__
-  amo_ret_t<Fetch> post_wqe_amo_single(uintptr_t raddr, uint32_t rkey,
-                                       uint64_t swap_add, uint64_t compare,
-                                       PostOpt<Options...> = {});
+  __device__ __forceinline__ amo_ret_t<Fetch> post_wqe_amo_single(uintptr_t raddr, uint32_t rkey,
+                                                                  uint64_t swap_add,
+                                                                  uint64_t compare,
+                                                                  PostOpt<Options...> = {});
 
   __device__ __forceinline__ void quiet_single();
 
   __device__ __forceinline__ uint64_t cq_target();
 
   __device__ __forceinline__ bool poll_cq_once(uint64_t target);
-
 
   /**
    * @brief Resolve the local (origin) virtual address and LKey of a symmetric address.
@@ -178,8 +177,8 @@ public:
    * @return {laddr, lkey} for addr or {0, std::numeric_limits<uint32_t>::max()} if not found.
    * Endianness of returned LKey value is ProviderEndianness.
    */
-  __device__ __forceinline__
-  std::tuple<uintptr_t, uint32_t> get_laddr_info(const void *addr, bool inlined = false) const;
+  __device__ __forceinline__ std::tuple<uintptr_t, uint32_t> get_laddr_info(
+      const void* addr, bool inlined = false) const;
 
   /**
    * @brief Resolve the remote (target) virtual address and RKey of a symmetric address.
@@ -193,8 +192,7 @@ public:
    * @return {raddr, rkey} for addr or {0, std::numeric_limits<uint32_t>::max()} if not found.
    * Endianness of returned RKey value is ProviderEndianness.
    */
-  __device__ __forceinline__
-  std::tuple<uintptr_t, uint32_t> get_raddr_info(const void *addr) const;
+  __device__ __forceinline__ std::tuple<uintptr_t, uint32_t> get_raddr_info(const void* addr) const;
 
   /*
    * @brief Query whether data can be inlined into a WQE.
@@ -218,7 +216,7 @@ public:
   template <typename T>
   static __host__ __device__ __forceinline__ T to_provider_endianness(T val);
 
-private:
+ private:
   // Static provider accessor (no `this`). Used by the static helpers can_inline /
   // to_provider_endianness and host invalid_provider. The host overload reads the
   // host-static `provider`; the device overload reads __constant__ constmem and
@@ -226,9 +224,11 @@ private:
   // path) the static helpers are only ever instantiated host-side, and can_inline's
   // single device use is a constant-evaluated static_assert that never reaches the
   // runtime switch, so the device overload is never odr-used and need not exist.
-  static __host__   __forceinline__ GDAProvider get_static_provider() { return provider; }
+  static __host__ __forceinline__ GDAProvider get_static_provider() { return provider; }
 #if defined(USE_CONSTMEM)
-  static __device__ __forceinline__ GDAProvider get_static_provider() { return constmem.gda_provider; }
+  static __device__ __forceinline__ GDAProvider get_static_provider() {
+    return constmem.gda_provider;
+  }
 #endif
 
   // Instance provider accessor (has `this`), used by the device dispatch methods.
@@ -260,8 +260,6 @@ private:
   static __host__ __device__ constexpr typename Provider::OpCode provider_op();
 };
 
-
-
 template <QueuePairMux::OpCode Op, typename Provider>
 __host__ __device__ constexpr typename Provider::OpCode QueuePairMux::provider_op() {
   if constexpr (Op == OpCode::RDMA_WRITE) {
@@ -279,24 +277,25 @@ __host__ __device__ constexpr typename Provider::OpCode QueuePairMux::provider_o
 }
 
 template <QueuePairMux::OpCode Op, typename... Options>
-__device__ __forceinline__ void QueuePairMux::post_wqe_rma(
-    uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey, size_t size,
-    const ActiveWFInfo& wf_info, PostOpt<Options...> options) {
+__device__ __forceinline__ void QueuePairMux::post_wqe_rma(uintptr_t laddr, uint32_t lkey,
+                                                           uintptr_t raddr, uint32_t rkey,
+                                                           size_t size, const ActiveWFInfo& wf_info,
+                                                           PostOpt<Options...> options) {
   switch (get_provider()) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
-    return qp.ionic.post_wqe_rma<provider_op<Op, QueuePairIONIC>()>(
-                                 laddr, lkey, raddr, rkey, size, wf_info, options);
+    return qp.ionic.post_wqe_rma<provider_op<Op, QueuePairIONIC>()>(laddr, lkey, raddr, rkey, size,
+                                                                    wf_info, options);
 #endif
 #if defined(GDA_BNXT)
   case GDAProvider::BNXT:
-    return qp.bnxt.post_wqe_rma<provider_op<Op, QueuePairBNXT>()>(
-                                laddr, lkey, raddr, rkey, size, wf_info, options);
+    return qp.bnxt.post_wqe_rma<provider_op<Op, QueuePairBNXT>()>(laddr, lkey, raddr, rkey, size,
+                                                                  wf_info, options);
 #endif
 #if defined(GDA_MLX5)
   case GDAProvider::MLX5:
-    return qp.mlx5.post_wqe_rma<provider_op<Op, QueuePairMLX5>()>(
-                                laddr, lkey, raddr, rkey, size, wf_info, options);
+    return qp.mlx5.post_wqe_rma<provider_op<Op, QueuePairMLX5>()>(laddr, lkey, raddr, rkey, size,
+                                                                  wf_info, options);
 #endif
   default:
     invalid_provider();
@@ -304,24 +303,25 @@ __device__ __forceinline__ void QueuePairMux::post_wqe_rma(
 }
 
 template <QueuePairMux::OpCode Op, typename... Options>
-__device__ __forceinline__ void QueuePairMux::post_wqe_rma_single(
-    uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey, size_t size,
-    PostOpt<Options...> options) {
+__device__ __forceinline__ void QueuePairMux::post_wqe_rma_single(uintptr_t laddr, uint32_t lkey,
+                                                                  uintptr_t raddr, uint32_t rkey,
+                                                                  size_t size,
+                                                                  PostOpt<Options...> options) {
   switch (get_provider()) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
-    return qp.ionic.post_wqe_rma_single<provider_op<Op, QueuePairIONIC>()>(
-                                        laddr, lkey, raddr, rkey, size, options);
+    return qp.ionic.post_wqe_rma_single<provider_op<Op, QueuePairIONIC>()>(laddr, lkey, raddr, rkey,
+                                                                           size, options);
 #endif
 #if defined(GDA_BNXT)
   case GDAProvider::BNXT:
-    return qp.bnxt.post_wqe_rma_single<provider_op<Op, QueuePairBNXT>()>(
-                                       laddr, lkey, raddr, rkey, size, options);
+    return qp.bnxt.post_wqe_rma_single<provider_op<Op, QueuePairBNXT>()>(laddr, lkey, raddr, rkey,
+                                                                         size, options);
 #endif
 #if defined(GDA_MLX5)
   case GDAProvider::MLX5:
-    return qp.mlx5.post_wqe_rma_single<provider_op<Op, QueuePairMLX5>()>(
-                                       laddr, lkey, raddr, rkey, size, options);
+    return qp.mlx5.post_wqe_rma_single<provider_op<Op, QueuePairMLX5>()>(laddr, lkey, raddr, rkey,
+                                                                         size, options);
 #endif
   default:
     invalid_provider();
@@ -337,17 +337,17 @@ __device__ __forceinline__ QueuePairMux::amo_ret_t<Fetch> QueuePairMux::post_wqe
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
     return qp.ionic.post_wqe_amo<provider_op<Op, QueuePairIONIC>(), Fetch>(
-                                 raddr, rkey, swap_add, compare, wf_info, options);
+        raddr, rkey, swap_add, compare, wf_info, options);
 #endif
 #if defined(GDA_BNXT)
   case GDAProvider::BNXT:
-    return qp.bnxt.post_wqe_amo<provider_op<Op, QueuePairBNXT>(), Fetch>(
-                                raddr, rkey, swap_add, compare, wf_info, options);
+    return qp.bnxt.post_wqe_amo<provider_op<Op, QueuePairBNXT>(), Fetch>(raddr, rkey, swap_add,
+                                                                         compare, wf_info, options);
 #endif
 #if defined(GDA_MLX5)
   case GDAProvider::MLX5:
-    return qp.mlx5.post_wqe_amo<provider_op<Op, QueuePairMLX5>(), Fetch>(
-                                raddr, rkey, swap_add, compare, wf_info, options);
+    return qp.mlx5.post_wqe_amo<provider_op<Op, QueuePairMLX5>(), Fetch>(raddr, rkey, swap_add,
+                                                                         compare, wf_info, options);
 #endif
   default:
     invalid_provider();
@@ -363,17 +363,17 @@ __device__ __forceinline__ QueuePairMux::amo_ret_t<Fetch> QueuePairMux::post_wqe
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
     return qp.ionic.post_wqe_amo_single<provider_op<Op, QueuePairIONIC>(), Fetch>(
-                                        raddr, rkey, swap_add, compare, options);
+        raddr, rkey, swap_add, compare, options);
 #endif
 #if defined(GDA_BNXT)
   case GDAProvider::BNXT:
     return qp.bnxt.post_wqe_amo_single<provider_op<Op, QueuePairBNXT>(), Fetch>(
-                                       raddr, rkey, swap_add, compare, options);
+        raddr, rkey, swap_add, compare, options);
 #endif
 #if defined(GDA_MLX5)
   case GDAProvider::MLX5:
     return qp.mlx5.post_wqe_amo_single<provider_op<Op, QueuePairMLX5>(), Fetch>(
-                                       raddr, rkey, swap_add, compare, options);
+        raddr, rkey, swap_add, compare, options);
 #endif
   default:
     invalid_provider();
@@ -437,8 +437,8 @@ __device__ __forceinline__ bool QueuePairMux::poll_cq_once(uint64_t target) {
   }
 }
 
-__device__ __forceinline__ std::tuple<uintptr_t, uint32_t>
-QueuePairMux::get_laddr_info(const void *addr, bool inlined) const {
+__device__ __forceinline__ std::tuple<uintptr_t, uint32_t> QueuePairMux::get_laddr_info(
+    const void* addr, bool inlined) const {
   switch (get_provider()) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
@@ -457,8 +457,8 @@ QueuePairMux::get_laddr_info(const void *addr, bool inlined) const {
   }
 }
 
-__device__ __forceinline__
-std::tuple<uintptr_t, uint32_t> QueuePairMux::get_raddr_info(const void *addr) const {
+__device__ __forceinline__ std::tuple<uintptr_t, uint32_t> QueuePairMux::get_raddr_info(
+    const void* addr) const {
   switch (get_provider()) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:

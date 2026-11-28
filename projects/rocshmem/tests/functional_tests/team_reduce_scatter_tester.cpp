@@ -35,38 +35,34 @@ using namespace rocshmem;
 template <typename T, ROCSHMEM_OP Op>
 __device__ int wg_team_reduce_scatter([[maybe_unused]] rocshmem_ctx_t ctx,
                                       [[maybe_unused]] rocshmem_team_t team,
-                                      [[maybe_unused]] T *dest,
-                                      [[maybe_unused]] const T *source,
+                                      [[maybe_unused]] T* dest, [[maybe_unused]] const T* source,
                                       [[maybe_unused]] int nreduce) {
   return ROCSHMEM_SUCCESS;
 }
 
-#define TEAM_REDUCE_SCATTER_DEF_GEN(T, TNAME, Op_API, Op)                       \
-  template <>                                                                    \
-  __device__ int wg_team_reduce_scatter<T, Op>(rocshmem_ctx_t ctx,              \
-                                               rocshmem_team_t team, T *dest,   \
-                                               const T *source, int nreduce) {  \
-    return rocshmem_ctx_##TNAME##_##Op_API##_reduce_scatter_wg(ctx, team, dest, \
-                                                                source, nreduce);\
+#define TEAM_REDUCE_SCATTER_DEF_GEN(T, TNAME, Op_API, Op)                                          \
+  template <>                                                                                      \
+  __device__ int wg_team_reduce_scatter<T, Op>(rocshmem_ctx_t ctx, rocshmem_team_t team, T * dest, \
+                                               const T* source, int nreduce) {                     \
+    return rocshmem_ctx_##TNAME##_##Op_API##_reduce_scatter_wg(ctx, team, dest, source, nreduce);  \
   }
 
-#define TEAM_ARITH_REDUCE_SCATTER_DEF_GEN(T, TNAME)              \
-  TEAM_REDUCE_SCATTER_DEF_GEN(T, TNAME, sum, ROCSHMEM_SUM)       \
-  TEAM_REDUCE_SCATTER_DEF_GEN(T, TNAME, min, ROCSHMEM_MIN)       \
-  TEAM_REDUCE_SCATTER_DEF_GEN(T, TNAME, max, ROCSHMEM_MAX)       \
+#define TEAM_ARITH_REDUCE_SCATTER_DEF_GEN(T, TNAME)        \
+  TEAM_REDUCE_SCATTER_DEF_GEN(T, TNAME, sum, ROCSHMEM_SUM) \
+  TEAM_REDUCE_SCATTER_DEF_GEN(T, TNAME, min, ROCSHMEM_MIN) \
+  TEAM_REDUCE_SCATTER_DEF_GEN(T, TNAME, max, ROCSHMEM_MAX) \
   TEAM_REDUCE_SCATTER_DEF_GEN(T, TNAME, prod, ROCSHMEM_PROD)
 
-#define TEAM_BITWISE_REDUCE_SCATTER_DEF_GEN(T, TNAME)            \
-  TEAM_REDUCE_SCATTER_DEF_GEN(T, TNAME, or, ROCSHMEM_OR)         \
-  TEAM_REDUCE_SCATTER_DEF_GEN(T, TNAME, and, ROCSHMEM_AND)       \
+#define TEAM_BITWISE_REDUCE_SCATTER_DEF_GEN(T, TNAME)      \
+  TEAM_REDUCE_SCATTER_DEF_GEN(T, TNAME, or, ROCSHMEM_OR)   \
+  TEAM_REDUCE_SCATTER_DEF_GEN(T, TNAME, and, ROCSHMEM_AND) \
   TEAM_REDUCE_SCATTER_DEF_GEN(T, TNAME, xor, ROCSHMEM_XOR)
 
-#define TEAM_INT_REDUCE_SCATTER_DEF_GEN(T, TNAME)  \
-  TEAM_ARITH_REDUCE_SCATTER_DEF_GEN(T, TNAME)      \
+#define TEAM_INT_REDUCE_SCATTER_DEF_GEN(T, TNAME) \
+  TEAM_ARITH_REDUCE_SCATTER_DEF_GEN(T, TNAME)     \
   TEAM_BITWISE_REDUCE_SCATTER_DEF_GEN(T, TNAME)
 
-#define TEAM_FLOAT_REDUCE_SCATTER_DEF_GEN(T, TNAME) \
-  TEAM_ARITH_REDUCE_SCATTER_DEF_GEN(T, TNAME)
+#define TEAM_FLOAT_REDUCE_SCATTER_DEF_GEN(T, TNAME) TEAM_ARITH_REDUCE_SCATTER_DEF_GEN(T, TNAME)
 
 TEAM_INT_REDUCE_SCATTER_DEF_GEN(int, int)
 TEAM_INT_REDUCE_SCATTER_DEF_GEN(short, short)
@@ -81,12 +77,9 @@ rocshmem_team_t team_reduce_scatter_world_dup;
  * DEVICE TEST KERNEL
  *****************************************************************************/
 template <typename T1, ROCSHMEM_OP T2>
-__global__ void TeamReduceScatterTest(int loop, int skip,
-                                      long long int *start_time,
-                                      long long int *end_time, T1 *s_buf,
-                                      T1 *r_buf, size_t size,
-                                      [[maybe_unused]] TestType type,
-                                      ShmemContextType ctx_type,
+__global__ void TeamReduceScatterTest(int loop, int skip, long long int* start_time,
+                                      long long int* end_time, T1* s_buf, T1* r_buf, size_t size,
+                                      [[maybe_unused]] TestType type, ShmemContextType ctx_type,
                                       rocshmem_team_t team) {
   __shared__ rocshmem_ctx_t ctx;
   int wg_id = get_flat_grid_id();
@@ -120,17 +113,16 @@ __global__ void TeamReduceScatterTest(int loop, int skip,
  *****************************************************************************/
 template <typename T1, ROCSHMEM_OP T2>
 TeamReduceScatterTester<T1, T2>::TeamReduceScatterTester(
-    TesterArguments args, std::function<void(T1 &, T1 &)> f1,
-    std::function<std::pair<bool, std::string>(const T1 &, const T1 &)> f2)
+    TesterArguments args, std::function<void(T1&, T1&)> f1,
+    std::function<std::pair<bool, std::string>(const T1&, const T1&)> f2)
     : Tester(args), init_buf{f1}, verify_buf{f2} {
   my_pe = rocshmem_team_my_pe(ROCSHMEM_TEAM_WORLD);
   n_pes = rocshmem_team_n_pes(ROCSHMEM_TEAM_WORLD);
 
   // source buffer: n_pes * max_msg_size elements (on symmetric heap)
-  s_buf = (T1 *)alloc_test_buffer(n_pes * max_msg_size * sizeof(T1),
-                                  args.local_buf_type);
+  s_buf = (T1*)alloc_test_buffer(n_pes * max_msg_size * sizeof(T1), args.local_buf_type);
   // dest buffer: max_msg_size elements (on symmetric heap)
-  r_buf = (T1 *)alloc_test_buffer(max_msg_size * sizeof(T1));
+  r_buf = (T1*)alloc_test_buffer(max_msg_size * sizeof(T1));
 }
 
 template <typename T1, ROCSHMEM_OP T2>
@@ -145,21 +137,19 @@ void TeamReduceScatterTester<T1, T2>::preLaunchKernel() {
 
   team_reduce_scatter_world_dup = ROCSHMEM_TEAM_INVALID;
   rocshmem_team_split_strided(ROCSHMEM_TEAM_WORLD, 0, 1, n_pes, nullptr, 0,
-                               &team_reduce_scatter_world_dup);
+                              &team_reduce_scatter_world_dup);
 }
 
 template <typename T1, ROCSHMEM_OP T2>
-void TeamReduceScatterTester<T1, T2>::launchKernel(dim3 gridSize,
-                                                    dim3 blockSize, int loop,
-                                                    uint64_t size) {
+void TeamReduceScatterTester<T1, T2>::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
+                                                   uint64_t size) {
   size_t shared_bytes = rocshmem_query_lds_stage_bytes();
 
-  hipLaunchKernelGGL(HIP_KERNEL_NAME(TeamReduceScatterTest<T1, T2>), gridSize,
-                     blockSize, shared_bytes, stream, loop, args.skip,
-                     start_time, end_time, s_buf, r_buf, size, _type,
-                     _shmem_context, team_reduce_scatter_world_dup);
+  hipLaunchKernelGGL(HIP_KERNEL_NAME(TeamReduceScatterTest<T1, T2>), gridSize, blockSize,
+                     shared_bytes, stream, loop, args.skip, start_time, end_time, s_buf, r_buf,
+                     size, _type, _shmem_context, team_reduce_scatter_world_dup);
 
-  num_msgs = loop + args.skip;
+  num_msgs       = loop + args.skip;
   num_timed_msgs = loop;
 }
 

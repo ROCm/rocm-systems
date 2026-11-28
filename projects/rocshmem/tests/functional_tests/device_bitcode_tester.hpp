@@ -38,8 +38,7 @@ class DeviceBitcodeTester : public Tester {
 
  protected:
   void resetBuffers(uint64_t size) override;
-  void launchKernel(dim3 gridSize, dim3 blockSize, int loop,
-                    uint64_t size) override;
+  void launchKernel(dim3 gridSize, dim3 blockSize, int loop, uint64_t size) override;
   void verifyResults(uint64_t size) override;
 
  private:
@@ -47,17 +46,15 @@ class DeviceBitcodeTester : public Tester {
   void launch(const char* kernel, void** args);
 
   template <typename T>
-  void run_rma_test(const char* label, const char* kernel,
-                    int count, T scale, T offset);
+  void run_rma_test(const char* label, const char* kernel, int count, T scale, T offset);
 
   template <typename T>
-  void run_scalar_put_test(const char* label, const char* kernel,
-                           T scale, T offset);
+  void run_scalar_put_test(const char* label, const char* kernel, T scale, T offset);
 
   int my_pe;
   int n_pes;
   hipModule_t module = nullptr;
-  bool all_pass = true;
+  bool all_pass      = true;
 };
 
 #endif

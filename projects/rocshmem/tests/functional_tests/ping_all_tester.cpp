@@ -31,15 +31,14 @@ using namespace rocshmem;
 /******************************************************************************
  * DEVICE TEST KERNEL
  *****************************************************************************/
-__global__ void PingAllTest(int loop, int skip, long long int *start_time,
-                            long long int *end_time, int *r_buf,
-                            ShmemContextType ctx_type) {
+__global__ void PingAllTest(int loop, int skip, long long int* start_time, long long int* end_time,
+                            int* r_buf, ShmemContextType ctx_type) {
   __shared__ rocshmem_ctx_t ctx;
   int wg_id = get_flat_grid_id();
 
   rocshmem_wg_ctx_create(ctx_type, &ctx);
 
-  int pe = rocshmem_ctx_my_pe(ctx);
+  int pe     = rocshmem_ctx_my_pe(ctx);
   int num_pe = rocshmem_ctx_n_pes(ctx);
   int status[1024];
   for (int j{0}; j < num_pe; j++) {
@@ -47,7 +46,7 @@ __global__ void PingAllTest(int loop, int skip, long long int *start_time,
   }
 
   if (is_thread_zero_in_block()) {
-    auto blk_pe_off {wg_id * num_pe};
+    auto blk_pe_off{wg_id * num_pe};
 
     for (int i = 0; i < loop + skip; i++) {
       if (i == skip) {
@@ -69,26 +68,27 @@ __global__ void PingAllTest(int loop, int skip, long long int *start_time,
  * HOST TESTER CLASS METHODS
  *****************************************************************************/
 PingAllTester::PingAllTester(TesterArguments args) : Tester(args) {
-  int num_pes {rocshmem_n_pes()};
-  r_buf = (int *)alloc_test_buffer(sizeof(int) * args.num_wgs * num_pes);
+  int num_pes{rocshmem_n_pes()};
+  r_buf = (int*)alloc_test_buffer(sizeof(int) * args.num_wgs * num_pes);
 }
 
-PingAllTester::~PingAllTester() { free_test_buffer(r_buf); }
+PingAllTester::~PingAllTester() {
+  free_test_buffer(r_buf);
+}
 
 void PingAllTester::resetBuffers([[maybe_unused]] size_t size) {
-  int num_pes {rocshmem_n_pes()};
+  int num_pes{rocshmem_n_pes()};
   memset(r_buf, 0, sizeof(int) * args.num_wgs * num_pes);
 }
 
 void PingAllTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
-                                  [[maybe_unused]] size_t size) {
+                                 [[maybe_unused]] size_t size) {
   size_t shared_bytes = 0;
 
-  hipLaunchKernelGGL(PingAllTest, gridSize, blockSize, shared_bytes, stream,
-                     loop, args.skip, start_time, end_time, r_buf,
-                     _shmem_context);
+  hipLaunchKernelGGL(PingAllTest, gridSize, blockSize, shared_bytes, stream, loop, args.skip,
+                     start_time, end_time, r_buf, _shmem_context);
 
-  num_msgs = (loop + args.skip) * gridSize.x;
+  num_msgs       = (loop + args.skip) * gridSize.x;
   num_timed_msgs = loop;
 }
 

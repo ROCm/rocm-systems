@@ -37,69 +37,53 @@
 namespace rocshmem {
 
 template <typename INDEX_STRAT>
-__global__
-void
-memory_set(int *raw_mem, size_t num_elems)
-{
-    assert(raw_mem);
+__global__ void memory_set(int* raw_mem, size_t num_elems) {
+  assert(raw_mem);
 
-    INDEX_STRAT idx_strat(num_elems);
+  INDEX_STRAT idx_strat(num_elems);
 
-    for (size_t i = idx_strat.start();
-         i < idx_strat.end();
-         i = idx_strat.next(i)) {
-        raw_mem[i]++;
-    }
+  for (size_t i = idx_strat.start(); i < idx_strat.end(); i = idx_strat.next(i)) {
+    raw_mem[i]++;
+  }
 }
 
-class IndexStrategyTestFixture : public ::testing::Test
-{
-  public:
-    IndexStrategyTestFixture()
-    {
-        assert(_raw_mem == nullptr);
-        size_t raw_mem_size_bytes = sizeof(int) * _mem_elements;
-        _hip_allocator.allocate(reinterpret_cast<void**>(&_raw_mem),
-                                raw_mem_size_bytes);
+class IndexStrategyTestFixture : public ::testing::Test {
+ public:
+  IndexStrategyTestFixture() {
+    assert(_raw_mem == nullptr);
+    size_t raw_mem_size_bytes = sizeof(int) * _mem_elements;
+    _hip_allocator.allocate(reinterpret_cast<void**>(&_raw_mem), raw_mem_size_bytes);
 
-        assert(_raw_mem);
-        for (size_t i = 0; i < _mem_elements; i++) {
-            _raw_mem[i] = 0;
-        }
+    assert(_raw_mem);
+    for (size_t i = 0; i < _mem_elements; i++) {
+      _raw_mem[i] = 0;
     }
+  }
 
-    ~IndexStrategyTestFixture()
-    {
-        if (_raw_mem) {
-            _hip_allocator.deallocate(_raw_mem);
-        }
+  ~IndexStrategyTestFixture() {
+    if (_raw_mem) {
+      _hip_allocator.deallocate(_raw_mem);
     }
+  }
 
-    template <typename INDEX_STRAT>
-    void
-    run_memory_set_test(const dim3 grid_dim, const dim3 block_dim)
-    {
-        hipLaunchKernelGGL(memory_set<INDEX_STRAT>,
-                           grid_dim,
-                           block_dim,
-                           0,
-                           nullptr,
-                           _raw_mem,
-                           _mem_elements);
+  template <typename INDEX_STRAT>
+  void run_memory_set_test(const dim3 grid_dim, const dim3 block_dim) {
+    hipLaunchKernelGGL(memory_set<INDEX_STRAT>, grid_dim, block_dim, 0, nullptr, _raw_mem,
+                       _mem_elements);
 
-        CHECK_HIP(hipStreamSynchronize(nullptr));
+    CHECK_HIP(hipStreamSynchronize(nullptr));
 
-        for(size_t i = 0; i < _mem_elements; i++) {
-            EXPECT_EQ(_raw_mem[i], 1);
-        }
+    for (size_t i = 0; i < _mem_elements; i++) {
+      EXPECT_EQ(_raw_mem[i], 1);
     }
+  }
 
-  protected:
-    int *_raw_mem = nullptr;
-    HIPAllocator _hip_allocator {};
-    static constexpr size_t _mem_elements = 262144;
+ protected:
+  int* _raw_mem = nullptr;
+  HIPAllocator _hip_allocator{};
+  static constexpr size_t _mem_elements = 262144;
 };
 
-} // namespace rocshmem
+}  // namespace rocshmem
 
 #endif  // ROCSHMEM_INDEX_STRATEGY_GTEST_HPP

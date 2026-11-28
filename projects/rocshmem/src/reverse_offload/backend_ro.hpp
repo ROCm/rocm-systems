@@ -57,7 +57,7 @@ class ROHostContext;
  */
 class ROBackend : public Backend {
   using RetBufferProxyT = DeviceProxy<uint64_t>;
-  using StatusProxyT = DeviceProxy<char>;
+  using StatusProxyT    = DeviceProxy<char>;
 
  public:
   /**
@@ -92,34 +92,32 @@ class ROBackend : public Backend {
   /**
    * @copydoc Backend::create_new_team
    */
-  void create_new_team(Team *parent_team,
-                       const TeamInfo& team_info_wrt_parent,
-                       const TeamInfo& team_info_wrt_world, int num_pes,
-                       int my_pe_in_new_team, MPI_Comm new_team_comm,
-                       rocshmem_team_t *new_team) override;
+  void create_new_team(Team* parent_team, const TeamInfo& team_info_wrt_parent,
+                       const TeamInfo& team_info_wrt_world, int num_pes, int my_pe_in_new_team,
+                       MPI_Comm new_team_comm, rocshmem_team_t* new_team) override;
 
   /**
    * @copydoc Backend::team_destroy(rocshmem_team_t)
    */
   void team_destroy(rocshmem_team_t team) override;
 
-  __device__ bool create_ctx(int64_t options, rocshmem_ctx_t *ctx);
+  __device__ bool create_ctx(int64_t options, rocshmem_ctx_t* ctx);
 
   /**
    * @brief Destroy a `rocshmem_ctx_t` context and returns it back to the
    * context free list.
    */
-  __device__ void destroy_ctx(rocshmem_ctx_t *ctx);
+  __device__ void destroy_ctx(rocshmem_ctx_t* ctx);
 
   /**
    * @copydoc Backend::ctx_create
    */
-  void ctx_create(int64_t options, void **ctx) override;
+  void ctx_create(int64_t options, void** ctx) override;
 
   /**
    * @copydoc Backend::ctx_destroy
    */
-  void ctx_destroy(Context *ctx) override;
+  void ctx_destroy(Context* ctx) override;
 
   /**
    * @copydoc Backend::buffer_register_symmetric
@@ -128,8 +126,7 @@ class ROBackend : public Backend {
    * only implemented for the IPC and GDA backends. Always returns
    * ROCSHMEM_ERROR without registering anything.
    */
-  int buffer_register_symmetric(void *addr, size_t length,
-                                void **registered_addr) override;
+  int buffer_register_symmetric(void* addr, size_t length, void** registered_addr) override;
 
   /**
    * @copydoc Backend::buffer_unregister_symmetric
@@ -137,7 +134,7 @@ class ROBackend : public Backend {
    * Not supported by the RO backend (see buffer_register_symmetric). Always
    * returns ROCSHMEM_ERROR.
    */
-  int buffer_unregister_symmetric(void *addr) override;
+  int buffer_unregister_symmetric(void* addr) override;
 
   /**
    * @brief Free all resources associated with the backend.
@@ -158,7 +155,7 @@ class ROBackend : public Backend {
    * @brief The host-facing interface that will be used
    * by all contexts of the ROBackend
    */
-  HostInterface *host_interface{nullptr};
+  HostInterface* host_interface{nullptr};
 
   /**
    * @brief Handle to device memory fields.
@@ -224,14 +221,14 @@ class ROBackend : public Backend {
    *
    * See the transport class for more details.
    */
-  MPITransport *transport_;
+  MPITransport* transport_;
 
   /**
    * @brief Proxy for the team info used by the device.
    *
    * See the transport class for more details.
    */
-  ROTeamProxy *team_world_proxy_;
+  ROTeamProxy* team_world_proxy_;
 
   /**
    * @brief Allocate and initialize team shared.
@@ -259,7 +256,7 @@ class ROBackend : public Backend {
   /**
    * @brief Pool of contexts for RO_NET
    */
-  WindowProxy *ro_window_proxy_;
+  WindowProxy* ro_window_proxy_;
 
  protected:
   /**
@@ -299,12 +296,12 @@ class ROBackend : public Backend {
   /**
    * @brief An array of @ref ROContexts that backs the context FreeList.
    */
-  ROContext *ctx_array{nullptr};
+  ROContext* ctx_array{nullptr};
 
   /**
    * @brief A free-list containing contexts.
    */
-  FreeListProxy<ROContext *> ctx_free_list{};
+  FreeListProxy<ROContext*> ctx_free_list{};
 
   /**
    * @brief AtomicWFQueue containing status flag buffers for default context
@@ -335,7 +332,7 @@ class ROBackend : public Backend {
 
   /**
    * @brief Holds the queue size for each context
-  */
+   */
   size_t queue_size_{512};
 
   /**

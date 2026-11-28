@@ -81,8 +81,7 @@ class MemoryAllocator {
    * @param[in] hip library allocation function
    * @param[in] hip library free function
    */
-  MemoryAllocator(hipError_t (*hip_alloc_fn)(void**, size_t),
-                  hipError_t (*hip_free_fn)(void*));
+  MemoryAllocator(hipError_t (*hip_alloc_fn)(void**, size_t), hipError_t (*hip_free_fn)(void*));
 
   /**
    * @brief Primary constructor
@@ -90,8 +89,7 @@ class MemoryAllocator {
    * @param[in] an allocation function
    * @param[in] a free function
    */
-  MemoryAllocator(std::function<void*(size_t)> alloc_fn,
-                  std::function<void(void*)> free_fn);
+  MemoryAllocator(std::function<void*(size_t)> alloc_fn, std::function<void(void*)> free_fn);
 
   /**
    * @brief Primary constructor
@@ -185,8 +183,7 @@ class MemoryAllocator {
   /**
    * @brief a hip-specific allocator function
    */
-  std::function<hipError_t(void**, size_t, unsigned)> _hip_alloc_with_flags{
-      nullptr};
+  std::function<hipError_t(void**, size_t, unsigned)> _hip_alloc_with_flags{nullptr};
 
   /**
    * @brief flags specified in hip_runtime_api.h

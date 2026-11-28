@@ -79,123 +79,123 @@ TEST_F(AtomicWFQueueTestFixture, init_1024_96) {
 }
 
 TEST_F(AtomicWFQueueTestFixture, dequeue_enqueue_threads_eq_qsize_2_32) {
-  int num_blocks {2};
-  int block_size {32};
-  int wf_size {this->wf_size};
-  int queue_size {num_blocks * ((block_size - 1) / wf_size + 1)};
+  int num_blocks{2};
+  int block_size{32};
+  int wf_size{this->wf_size};
+  int queue_size{num_blocks * ((block_size - 1) / wf_size + 1)};
   dequeue_enqueue(num_blocks, block_size, queue_size);
 }
 
 TEST_F(AtomicWFQueueTestFixture, dequeue_enqueue_threads_eq_qsize_32_192) {
-  int num_blocks {32};
-  int block_size {192};
-  int wf_size {this->wf_size};
-  int queue_size {num_blocks * ((block_size - 1) / wf_size + 1)};
+  int num_blocks{32};
+  int block_size{192};
+  int wf_size{this->wf_size};
+  int queue_size{num_blocks * ((block_size - 1) / wf_size + 1)};
   dequeue_enqueue(num_blocks, block_size, queue_size);
 }
 
 TEST_F(AtomicWFQueueTestFixture, dequeue_enqueue_threads_eq_qsize_64_256) {
-  int num_blocks {64};
-  int block_size {256};
-  int wf_size {this->wf_size};
-  int queue_size {num_blocks * ((block_size - 1) / wf_size + 1)};
+  int num_blocks{64};
+  int block_size{256};
+  int wf_size{this->wf_size};
+  int queue_size{num_blocks * ((block_size - 1) / wf_size + 1)};
   dequeue_enqueue(num_blocks, block_size, queue_size);
 }
 
 TEST_F(AtomicWFQueueTestFixture, dequeue_enqueue_threads_ge_qsize_16_32_4) {
-  int num_blocks {16};
-  int block_size {32};
-  int queue_size {4};
+  int num_blocks{16};
+  int block_size{32};
+  int queue_size{4};
   dequeue_enqueue(num_blocks, block_size, queue_size);
 }
 
 TEST_F(AtomicWFQueueTestFixture, dequeue_enqueue_threads_ge_qsize_16_96_8) {
-  int num_blocks {16};
-  int block_size {96};
-  int queue_size {8};
+  int num_blocks{16};
+  int block_size{96};
+  int queue_size{8};
   dequeue_enqueue(num_blocks, block_size, queue_size);
 }
 
 TEST_F(AtomicWFQueueTestFixture, dequeue_enqueue_threads_ge_qsize_16_320_8) {
-  int num_blocks {16};
-  int block_size {320};
-  int queue_size {8};
+  int num_blocks{16};
+  int block_size{320};
+  int queue_size{8};
   dequeue_enqueue(num_blocks, block_size, queue_size);
 }
 
 TEST_F(AtomicWFQueueTestFixture, dequeue_enqueue_threads_ge_qsize_32_192_16) {
-  int num_blocks {32};
-  int block_size {192};
-  int queue_size {16};
+  int num_blocks{32};
+  int block_size{192};
+  int queue_size{16};
   dequeue_enqueue(num_blocks, block_size, queue_size);
 }
 
 TEST_F(AtomicWFQueueTestFixture, dequeue_enqueue_threads_ge_qsize_64_256_64) {
-  int num_blocks {64};
-  int block_size {256};
-  int queue_size {64};
+  int num_blocks{64};
+  int block_size{256};
+  int queue_size{64};
   dequeue_enqueue(num_blocks, block_size, queue_size);
 }
 
 TEST_F(AtomicWFQueueTestFixture, dequeue_enqueue_threads_ge_qsize_64_576_64) {
-  int num_blocks {64};
-  int block_size {576};
-  int queue_size {64};
+  int num_blocks{64};
+  int block_size{576};
+  int queue_size{64};
   dequeue_enqueue(num_blocks, block_size, queue_size);
 }
 
 TEST_F(AtomicWFQueueTestFixture, dequeue_enqueue_qsize_ge_threads_4_8_16) {
-  int num_blocks {4};
-  int block_size {8};
-  int queue_size {16};
+  int num_blocks{4};
+  int block_size{8};
+  int queue_size{16};
   dequeue_enqueue(num_blocks, block_size, queue_size);
 }
 
 TEST_F(AtomicWFQueueTestFixture, dequeue_enqueue_qsize_ge_threads_4_96_16) {
-  int num_blocks {4};
-  int block_size {96};
-  int queue_size {16};
+  int num_blocks{4};
+  int block_size{96};
+  int queue_size{16};
   dequeue_enqueue(num_blocks, block_size, queue_size);
 }
 
 TEST_F(AtomicWFQueueTestFixture, dequeue_enqueue_qsize_ge_threads_32_192_128) {
-  int num_blocks {32};
-  int block_size {192};
-  int queue_size {128};
+  int num_blocks{32};
+  int block_size{192};
+  int queue_size{128};
   dequeue_enqueue(num_blocks, block_size, queue_size);
 }
 
 TEST_F(AtomicWFQueueTestFixture, dequeue_enqueue_qsize_ge_threads_32_320_256) {
-  int num_blocks {32};
-  int block_size {320};
-  int queue_size {256};
+  int num_blocks{32};
+  int block_size{320};
+  int queue_size{256};
   dequeue_enqueue(num_blocks, block_size, queue_size);
 }
 
 TEST_F(AtomicWFQueueTestFixture, dequeue_enqueue_qsize_ge_threads_64_16_128) {
-  int num_blocks {64};
-  int block_size {16};
-  int queue_size {128};
+  int num_blocks{64};
+  int block_size{16};
+  int queue_size{128};
   dequeue_enqueue(num_blocks, block_size, queue_size);
 }
 
 TEST_F(AtomicWFQueueTestFixture, dequeue_enqueue_qsize_ge_threads_64_96_256) {
-  int num_blocks {64};
-  int block_size {96};
-  int queue_size {256};
+  int num_blocks{64};
+  int block_size{96};
+  int queue_size{256};
   dequeue_enqueue(num_blocks, block_size, queue_size);
 }
 
 TEST_F(AtomicWFQueueTestFixture, dequeue_enqueue_qsize_ge_threads_64_320_512) {
-  int num_blocks {64};
-  int block_size {320};
-  int queue_size {512};
+  int num_blocks{64};
+  int block_size{320};
+  int queue_size{512};
   dequeue_enqueue(num_blocks, block_size, queue_size);
 }
 
 TEST_F(AtomicWFQueueTestFixture, dequeue_enqueue_qsize_ge_threads_64_576_1024) {
-  int num_blocks {64};
-  int block_size {576};
-  int queue_size {1024};
+  int num_blocks{64};
+  int block_size{576};
+  int queue_size{1024};
   dequeue_enqueue(num_blocks, block_size, queue_size);
 }

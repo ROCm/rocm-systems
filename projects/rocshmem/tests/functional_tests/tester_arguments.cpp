@@ -34,7 +34,7 @@
 
 using namespace rocshmem;
 
-TesterArguments::TesterArguments(int argc, char *argv[]) {
+TesterArguments::TesterArguments(int argc, char* argv[]) {
   if (argc > 0 && argv[0] != nullptr) {
     executable_name = argv[0];
   }
@@ -48,7 +48,7 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
       num_wgs = atoi(argv[i]);
     } else if (arg == "-s") {
       i++;
-      max_msg_size = atoll(argv[i]);
+      max_msg_size     = atoll(argv[i]);
       max_msg_size_set = true;
     } else if (arg == "-a") {
       i++;
@@ -68,10 +68,12 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
         };
         static const std::unordered_map<std::string, unsigned> name_to_algo = []() {
           std::unordered_map<std::string, unsigned> m;
-#define _ADD_TEST_ENTRY(name, val) \
-          { std::string k = #name; \
-            std::transform(k.begin(), k.end(), k.begin(), ::tolower); \
-            m[k] = val; }
+#define _ADD_TEST_ENTRY(name, val)                            \
+  {                                                           \
+    std::string k = #name;                                    \
+    std::transform(k.begin(), k.end(), k.begin(), ::tolower); \
+    m[k] = val;                                               \
+  }
           ROCSHMEM_FOREACH_TEST_TYPE(_ADD_TEST_ENTRY)
 #undef _ADD_TEST_ENTRY
           return m;
@@ -105,14 +107,14 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
       shmem_context = atoi(argv[i]);
     } else if (arg == "-m") {
       int atomics_addr_mode = atoi(argv[i]);
-      if(atomics_addr_mode >= static_cast<int>(AddrMode::PerGrid) &&
-         atomics_addr_mode <= static_cast<int>(AddrMode::PerBlock)) {
-         addr_mode = static_cast<AddrMode>(atomics_addr_mode);
+      if (atomics_addr_mode >= static_cast<int>(AddrMode::PerGrid) &&
+          atomics_addr_mode <= static_cast<int>(AddrMode::PerBlock)) {
+        addr_mode = static_cast<AddrMode>(atomics_addr_mode);
       }
       i++;
     } else if (arg == "-n") {
       i++;
-      loop = atoi(argv[i]);
+      loop       = atoi(argv[i]);
       loop_large = loop;
     } else if (arg == "-nloop") {
       i++;
@@ -160,9 +162,10 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
       } else if (std::string(argv[i]) == "managed") {
         local_buf_type = USER_BUF_TYPE_MANAGED;
       } else {
-        fprintf(stderr, "Invalid local buffer type. "
-                        "Please use one of [heap, host, device, fine, uncached, managed]. "
-                        "Defaulting to heap\n");
+        fprintf(stderr,
+                "Invalid local buffer type. "
+                "Please use one of [heap, host, device, fine, uncached, managed]. "
+                "Defaulting to heap\n");
         local_buf_type = USER_BUF_TYPE_HEAP;
       }
     } else {
@@ -174,106 +177,106 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
   TestType type = (TestType)algorithm;
 
   switch (type) {
-    case AMO_FAddTestType:
-    case AMO_AddTestType:
-    case AMO_SetTestType:
-    case AMO_SwapTestType:
-    case AMO_FetchAndTestType:
-    case AMO_AndTestType:
-    case AMO_FetchOrTestType:
-    case AMO_OrTestType:
-    case AMO_FetchXorTestType:
-    case AMO_XorTestType:
-    case AMO_FCswapTestType:
-    case AMO_CswapTestType:
-    case AMO_FIncTestType:
-    case AMO_IncTestType:
-    case AMO_FetchTestType:
-    case BarrierAllTestType:
-    case WAVEBarrierAllTestType:
-    case WGBarrierAllTestType:
-    case TeamBarrierTestType:
-    case TeamWAVEBarrierTestType:
-    case TeamWGBarrierTestType:
-    case BarrierAllOnStreamTestType:
-    case SyncAllTestType:
-    case WAVESyncAllTestType:
-    case WGSyncAllTestType:
-    case TeamSyncTestType:
-    case SignalWaitUntilOnStreamTestType:
-    case SignalOpsOnStreamTestType:
-    case SignalAddTestType:
-    case SignalSetTestType:
-    case SignalWaitUntilTestType:
-      min_msg_size = 8;
-      max_msg_size = 8;
-      break;
-    case PingPongTestType:
-    case SdmaPingPongTestType:
-      if (op_type == 2) {
-        min_msg_size = 1;
-      } else {
-        min_msg_size = 4;
-        max_msg_size = 4;
-      }
-      break;
-    case QpPingPongTestType:
-      if (op_type == 2) {
-        min_msg_size = 1;
-      } else {
-        min_msg_size = 4;
-        max_msg_size = 4;
-      }
-      break;
-    case PingAllTestType:
-    case ShmemPtrTestType:
+  case AMO_FAddTestType:
+  case AMO_AddTestType:
+  case AMO_SetTestType:
+  case AMO_SwapTestType:
+  case AMO_FetchAndTestType:
+  case AMO_AndTestType:
+  case AMO_FetchOrTestType:
+  case AMO_OrTestType:
+  case AMO_FetchXorTestType:
+  case AMO_XorTestType:
+  case AMO_FCswapTestType:
+  case AMO_CswapTestType:
+  case AMO_FIncTestType:
+  case AMO_IncTestType:
+  case AMO_FetchTestType:
+  case BarrierAllTestType:
+  case WAVEBarrierAllTestType:
+  case WGBarrierAllTestType:
+  case TeamBarrierTestType:
+  case TeamWAVEBarrierTestType:
+  case TeamWGBarrierTestType:
+  case BarrierAllOnStreamTestType:
+  case SyncAllTestType:
+  case WAVESyncAllTestType:
+  case WGSyncAllTestType:
+  case TeamSyncTestType:
+  case SignalWaitUntilOnStreamTestType:
+  case SignalOpsOnStreamTestType:
+  case SignalAddTestType:
+  case SignalSetTestType:
+  case SignalWaitUntilTestType:
+    min_msg_size = 8;
+    max_msg_size = 8;
+    break;
+  case PingPongTestType:
+  case SdmaPingPongTestType:
+    if (op_type == 2) {
+      min_msg_size = 1;
+    } else {
       min_msg_size = 4;
       max_msg_size = 4;
-      break;
-    case RandomAccessTestType:
-    case TeamAlltoallmemOnStreamTestType:
-    case TeamBroadcastmemOnStreamTestType:
-      min_msg_size = 4;
-      break;
-    case TeamFCollectTestType:
-    case FcollectWaveTestType:
-    case TeamAllToAllTestType:
-    case TeamAllToAllvTestType:
-    case TeamBroadcastTestType:
-    case BroadcastWaveTestType:
-    case AllToAllWaveTestType:
-    case ReduceWaveTestType:
-      min_msg_size = 8;
-      break;
-    case TeamCtxInfraTestType:
-    case TeamCtxInfraSingleTestType:
-    case TeamCtxInfraBlockTestType:
-    case TeamCtxInfraOddEvenTestType:
-    case TeamCtxSubsetParentInfraTestType:
-    case HostTeamSyncBarrierTestType:
-      max_msg_size = min_msg_size;
-      break;
-    case FenceOrderPutWaveNbiChunksTestType:
-      min_msg_size = 16;  // must be >= STRESS_NUM_CHUNKS for chunk_size >= 1
-      break;
-    case PTestType:
-    case GTestType:
+    }
+    break;
+  case QpPingPongTestType:
+    if (op_type == 2) {
       min_msg_size = 1;
-      max_msg_size = 1;
-      break;
-    case FloodPutTestType:
-    case FloodPutNBITestType:
-    case FloodPTestType:
-    case FloodGetTestType:
-    case FloodGetNBITestType:
-    case FloodGTestType:
-    case FloodAddTestType:
-    case FloodFAddTestType:
-    case FloodWaitAmoTestType:
-      min_msg_size = max_msg_size = 8;
-      break;
-    default:
-      break;
+    } else {
+      min_msg_size = 4;
+      max_msg_size = 4;
+    }
+    break;
+  case PingAllTestType:
+  case ShmemPtrTestType:
+    min_msg_size = 4;
+    max_msg_size = 4;
+    break;
+  case RandomAccessTestType:
+  case TeamAlltoallmemOnStreamTestType:
+  case TeamBroadcastmemOnStreamTestType:
+    min_msg_size = 4;
+    break;
+  case TeamFCollectTestType:
+  case FcollectWaveTestType:
+  case TeamAllToAllTestType:
+  case TeamAllToAllvTestType:
+  case TeamBroadcastTestType:
+  case BroadcastWaveTestType:
+  case AllToAllWaveTestType:
+  case ReduceWaveTestType:
+    min_msg_size = 8;
+    break;
+  case TeamCtxInfraTestType:
+  case TeamCtxInfraSingleTestType:
+  case TeamCtxInfraBlockTestType:
+  case TeamCtxInfraOddEvenTestType:
+  case TeamCtxSubsetParentInfraTestType:
+  case HostTeamSyncBarrierTestType:
+    max_msg_size = min_msg_size;
+    break;
+  case FenceOrderPutWaveNbiChunksTestType:
+    min_msg_size = 16;  // must be >= STRESS_NUM_CHUNKS for chunk_size >= 1
+    break;
+  case PTestType:
+  case GTestType:
+    min_msg_size = 1;
+    max_msg_size = 1;
+    break;
+  case FloodPutTestType:
+  case FloodPutNBITestType:
+  case FloodPTestType:
+  case FloodGetTestType:
+  case FloodGetNBITestType:
+  case FloodGTestType:
+  case FloodAddTestType:
+  case FloodFAddTestType:
+  case FloodWaitAmoTestType:
+    min_msg_size = max_msg_size = 8;
+    break;
+  default:
+    break;
   }
 }
 
@@ -296,94 +299,94 @@ void TesterArguments::show_usage(std::string executable_name) {
   std::cout << "\t-nskip Set skip/warmup count\n";
   std::cout << "\t-b|-batch Set buffer rotation batch size (default: loop count)\n";
   std::cout << "\t-noverif|-nocheck disable buffer verification\n";
-  std::cout << "\t--num-wf <number of wave-fronts per workgroup> (detected at runtime via HIP, overwrites -z if used)\n";
+  std::cout << "\t--num-wf <number of wave-fronts per workgroup> (detected at runtime via HIP, "
+               "overwrites -z if used)\n";
 }
 
 void TesterArguments::get_arguments() {
   numprocs = rocshmem_n_pes();
-  myid = rocshmem_my_pe();
+  myid     = rocshmem_my_pe();
 
   TestType type = (TestType)algorithm;
   // Check if test requires exactly 2 PEs
   // Tests that support arbitrary number of PEs are excluded
   bool requires_two_pes = true;
   switch (type) {
-    // Collective/barrier tests - support any number of PEs
-    case BarrierAllTestType:
-    case WAVEBarrierAllTestType:
-    case WGBarrierAllTestType:
-    case SyncAllTestType:
-    case WAVESyncAllTestType:
-    case WGSyncAllTestType:
-    case TeamSyncTestType:
-    case TeamWAVESyncTestType:
-    case TeamWGSyncTestType:
-    case TeamAllToAllTestType:
-    case TeamAllToAllvTestType:
-    case AllToAllWaveTestType:
-    case BroadcastWaveTestType:
-    case TeamFCollectTestType:
-    case FcollectWaveTestType:
-    case TeamReductionTestType:
-    case TeamReduceScatterTestType:
-    case ReduceWaveTestType:
-    case TeamReduceScatterWaveTestType:
-    case TeamBroadcastTestType:
-    case PingAllTestType:
-    case TeamBarrierTestType:
-    case TeamWAVEBarrierTestType:
-    case TeamWGBarrierTestType:
-    case TeamCtxInfraBlockTestType:
-    case TeamCtxInfraOddEvenTestType:
-    case TeamCtxSubsetParentInfraTestType:
-    // On-stream tests - support any number of PEs
-    case TeamAlltoallmemOnStreamTestType:
-    case BarrierAllOnStreamTestType:
-    case QuietOnStreamTestType:
-    case SyncAllOnStreamTestType:
-    case TeamBroadcastmemOnStreamTestType:
-    case GetmemOnStreamTestType:
-    case PutmemOnStreamTestType:
-    case PutmemSignalOnStreamTestType:
-    case SignalWaitUntilOnStreamTestType:
-    case SignalOpsOnStreamTestType:
-    case FloodPutTestType:
-    case FloodPutNBITestType:
-    case FloodPTestType:
-    case FloodGetTestType:
-    case FloodGetNBITestType:
-    case FloodGTestType:
-    case FloodAddTestType:
-    case FloodFAddTestType:
-    case FloodWaitAmoTestType:
-    case DeviceBitcodeTestType:
-    case BufferRegisterSymmetricTestType:
-    case TeamCtxSharedInfraTestType:
-    case FenceOrderFanoutTestType:
-    case TeamSplit2DTestType:
-    case HostTeamSyncBarrierTestType:
-    case HostAmoAllPesTestType:
-    case HostAmoSelfTestType:
-    // Tile collective tests - support any number of PEs
-    case TileBroadcastTestType:
-    case TileBroadcastWaveTestType:
-    case TileBroadcastWGTestType:
-    case TileAllgatherTestType:
-    case TileAllgatherWaveTestType:
-    case TileAllgatherWGTestType:
-    case TileReduceTestType:
-    case TileReduceWaveTestType:
-    case TileReduceWGTestType:
-      requires_two_pes = false;
-      break;
-    default:
-      break;
+  // Collective/barrier tests - support any number of PEs
+  case BarrierAllTestType:
+  case WAVEBarrierAllTestType:
+  case WGBarrierAllTestType:
+  case SyncAllTestType:
+  case WAVESyncAllTestType:
+  case WGSyncAllTestType:
+  case TeamSyncTestType:
+  case TeamWAVESyncTestType:
+  case TeamWGSyncTestType:
+  case TeamAllToAllTestType:
+  case TeamAllToAllvTestType:
+  case AllToAllWaveTestType:
+  case BroadcastWaveTestType:
+  case TeamFCollectTestType:
+  case FcollectWaveTestType:
+  case TeamReductionTestType:
+  case TeamReduceScatterTestType:
+  case ReduceWaveTestType:
+  case TeamReduceScatterWaveTestType:
+  case TeamBroadcastTestType:
+  case PingAllTestType:
+  case TeamBarrierTestType:
+  case TeamWAVEBarrierTestType:
+  case TeamWGBarrierTestType:
+  case TeamCtxInfraBlockTestType:
+  case TeamCtxInfraOddEvenTestType:
+  case TeamCtxSubsetParentInfraTestType:
+  // On-stream tests - support any number of PEs
+  case TeamAlltoallmemOnStreamTestType:
+  case BarrierAllOnStreamTestType:
+  case QuietOnStreamTestType:
+  case SyncAllOnStreamTestType:
+  case TeamBroadcastmemOnStreamTestType:
+  case GetmemOnStreamTestType:
+  case PutmemOnStreamTestType:
+  case PutmemSignalOnStreamTestType:
+  case SignalWaitUntilOnStreamTestType:
+  case SignalOpsOnStreamTestType:
+  case FloodPutTestType:
+  case FloodPutNBITestType:
+  case FloodPTestType:
+  case FloodGetTestType:
+  case FloodGetNBITestType:
+  case FloodGTestType:
+  case FloodAddTestType:
+  case FloodFAddTestType:
+  case FloodWaitAmoTestType:
+  case DeviceBitcodeTestType:
+  case BufferRegisterSymmetricTestType:
+  case TeamCtxSharedInfraTestType:
+  case FenceOrderFanoutTestType:
+  case TeamSplit2DTestType:
+  case HostTeamSyncBarrierTestType:
+  case HostAmoAllPesTestType:
+  case HostAmoSelfTestType:
+  // Tile collective tests - support any number of PEs
+  case TileBroadcastTestType:
+  case TileBroadcastWaveTestType:
+  case TileBroadcastWGTestType:
+  case TileAllgatherTestType:
+  case TileAllgatherWaveTestType:
+  case TileAllgatherWGTestType:
+  case TileReduceTestType:
+  case TileReduceWaveTestType:
+  case TileReduceWGTestType:
+    requires_two_pes = false;
+    break;
+  default:
+    break;
   }
 
   if (requires_two_pes && numprocs != 2) {
     if (myid == 0) {
-      std::cerr << "This test requires exactly two processes, we have "
-                << numprocs << "\n";
+      std::cerr << "This test requires exactly two processes, we have " << numprocs << "\n";
     }
     exit(-1);
   }

@@ -28,12 +28,13 @@
 #include <hip/hip_runtime.h>
 #include "mpi.h"
 
-#define CHECK_HIP_MPI(cond) {                                      \
-  if(cond != hipSuccess){                                          \
-     fprintf(stderr,"HIP error: %d line: %d\n", cond,  __LINE__);  \
-     MPI_Abort(MPI_COMM_WORLD, 1);  	     	  	 	   \
-  }                                                                \
-}
+#define CHECK_HIP_MPI(cond)                                        \
+  {                                                                \
+    if (cond != hipSuccess) {                                      \
+      fprintf(stderr, "HIP error: %d line: %d\n", cond, __LINE__); \
+      MPI_Abort(MPI_COMM_WORLD, 1);                                \
+    }                                                              \
+  }
 
 static int get_wf_size() {
   int deviceId;

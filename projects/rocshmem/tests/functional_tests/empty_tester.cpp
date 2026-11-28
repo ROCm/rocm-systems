@@ -31,9 +31,10 @@ using namespace rocshmem;
 /******************************************************************************
  * DEVICE TEST KERNEL
  *****************************************************************************/
-__global__ void EmptyTest([[maybe_unused]] int loop, [[maybe_unused]] int skip, [[maybe_unused]] long long int *start_time,
-                          [[maybe_unused]] long long int *end_time, [[maybe_unused]] int size, [[maybe_unused]] TestType type,
-                          ShmemContextType ctx_type) {
+__global__ void EmptyTest([[maybe_unused]] int loop, [[maybe_unused]] int skip,
+                          [[maybe_unused]] long long int* start_time,
+                          [[maybe_unused]] long long int* end_time, [[maybe_unused]] int size,
+                          [[maybe_unused]] TestType type, ShmemContextType ctx_type) {
   __shared__ rocshmem_ctx_t ctx;
   rocshmem_wg_ctx_create(ctx_type, &ctx);
 
@@ -49,13 +50,11 @@ EmptyTester::~EmptyTester() {}
 
 void EmptyTester::resetBuffers([[maybe_unused]] size_t size) {}
 
-void EmptyTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
-                               size_t size) {
+void EmptyTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop, size_t size) {
   size_t shared_bytes = 0;
 
-  hipLaunchKernelGGL(EmptyTest, gridSize, blockSize, shared_bytes, stream,
-                     loop, args.skip, start_time, end_time, size, _type,
-                     _shmem_context);
+  hipLaunchKernelGGL(EmptyTest, gridSize, blockSize, shared_bytes, stream, loop, args.skip,
+                     start_time, end_time, size, _type, _shmem_context);
 }
 
 void EmptyTester::verifyResults([[maybe_unused]] size_t size) {}

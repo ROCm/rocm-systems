@@ -38,20 +38,20 @@ void GDABackend::ionic_create_cqs(int ncqes) {
   struct ionic_cq_init_attr_ex ionic_cq_attr;
 
   memset(&cq_attr, 0, sizeof(cq_attr));
-  cq_attr.cqe           = ncqes;
-  cq_attr.cq_context    = nullptr;
-  cq_attr.channel       = nullptr;
-  cq_attr.comp_vector   = 0;
-  cq_attr.flags         = 0;
-  cq_attr.comp_mask     = IBV_CQ_INIT_ATTR_MASK_PD;
+  cq_attr.cqe         = ncqes;
+  cq_attr.cq_context  = nullptr;
+  cq_attr.channel     = nullptr;
+  cq_attr.comp_vector = 0;
+  cq_attr.flags       = 0;
+  cq_attr.comp_mask   = IBV_CQ_INIT_ATTR_MASK_PD;
 
   memset(&ionic_cq_attr, 0, sizeof(ionic_cq_attr));
   ionic_cq_attr.flags     = IONIC_CQ_INIT_ATTR_CCQE;
   ionic_cq_attr.comp_mask = IONIC_CQ_INIT_ATTR_MASK_FLAGS;
 
   for (size_t i = 0; i < qps.size(); i++) {
-    NicDevice &nic = nic_for_qp(i);
-    struct ibv_cq_ex *cq_ex = nullptr;
+    NicDevice& nic          = nic_for_qp(i);
+    struct ibv_cq_ex* cq_ex = nullptr;
 
     cq_attr.parent_domain = nic.pd_uxdma[i & 1];
 
@@ -64,7 +64,7 @@ void GDABackend::ionic_create_cqs(int ncqes) {
 }
 
 void GDABackend::ionic_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
-  ibv_qp* qp = qps[conn_num];
+  ibv_qp* qp           = qps[conn_num];
   const NicDevice& nic = nic_for_qp(conn_num);
 
   ionic_dv_ctx dvctx;
@@ -76,10 +76,10 @@ void GDABackend::ionic_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   void* gpu_db_page = nullptr;
   rocm_memory_lock_to_fine_grain(dvctx.db_page, 0x1000, &gpu_db_page, hip_dev_id);
 
-  uint64_t *db_page_u64 = reinterpret_cast<uint64_t*>(dvctx.db_page);
-  uint64_t *gpu_db_page_u64 = reinterpret_cast<uint64_t*>(gpu_db_page);
+  uint64_t* db_page_u64     = reinterpret_cast<uint64_t*>(dvctx.db_page);
+  uint64_t* gpu_db_page_u64 = reinterpret_cast<uint64_t*>(gpu_db_page);
 
-  uint64_t *gpu_db_ptr = &gpu_db_page_u64[dvctx.db_ptr - db_page_u64];
+  uint64_t* gpu_db_ptr = &gpu_db_page_u64[dvctx.db_ptr - db_page_u64];
 
   gpu_db_cq = &gpu_db_ptr[dvctx.cq_qtype];
   gpu_db_sq = &gpu_db_ptr[dvctx.sq_qtype];
@@ -92,15 +92,15 @@ void GDABackend::ionic_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   ionic_dv_qp dvqp;
   ionic_dv.get_qp(&dvqp, qp);
 
-  ionic_v1_wqe* sq_buf   = reinterpret_cast<ionic_v1_wqe*>(dvqp.sq.ptr);
-  uint64_t*     sq_dbreg = gpu_db_sq;
-  uint64_t      sq_dbval = dvqp.sq.db_val;
-  uint16_t      sq_mask  = dvqp.sq.mask;
+  ionic_v1_wqe* sq_buf = reinterpret_cast<ionic_v1_wqe*>(dvqp.sq.ptr);
+  uint64_t* sq_dbreg   = gpu_db_sq;
+  uint64_t sq_dbval    = dvqp.sq.db_val;
+  uint16_t sq_mask     = dvqp.sq.mask;
 
-  ionic_v1_cqe* cq_buf   = reinterpret_cast<ionic_v1_cqe*>(dvcq.q.ptr);
-  uint64_t*     cq_dbreg = gpu_db_cq;
-  uint64_t      cq_dbval = dvcq.q.db_val;
-  uint16_t      cq_mask  = dvcq.q.mask;
+  ionic_v1_cqe* cq_buf = reinterpret_cast<ionic_v1_cqe*>(dvcq.q.ptr);
+  uint64_t* cq_dbreg   = gpu_db_cq;
+  uint64_t cq_dbval    = dvcq.q.db_val;
+  uint16_t cq_mask     = dvcq.q.mask;
 
   /* QueuePair is either QueuePairIONIC or QueuePairMux
    * both have a constructor that accepts rvalue reference QueuePairIONIC&&,
@@ -110,7 +110,8 @@ void GDABackend::ionic_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
                                         ionic_device_cq{cq_buf, cq_dbreg, cq_dbval, cq_mask}}};
 }
 
-void GDABackend::ionic_setup_parent_domain(NicDevice &nic, struct ibv_parent_domain_init_attr* pattr) {
+void GDABackend::ionic_setup_parent_domain(NicDevice& nic,
+                                           struct ibv_parent_domain_init_attr* pattr) {
   ionic_dv.pd_set_sqcmb(nic.pd_parent, false, false, false);
   ionic_dv.pd_set_rqcmb(nic.pd_parent, false, false, false);
 

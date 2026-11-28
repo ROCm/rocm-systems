@@ -28,130 +28,109 @@
 
 using namespace rocshmem;
 
-TEST_F(IndexStrategyTestFixture,
-       run_TCBA_memory_set_test_grid_1_1_1_block_1_1_1) {
+TEST_F(IndexStrategyTestFixture, run_TCBA_memory_set_test_grid_1_1_1_block_1_1_1) {
   using IndexStrategy = Thread_Contiguous_Block_Agnostic;
   run_memory_set_test<IndexStrategy>({1, 1, 1}, {1, 1, 1});
 }
 
 //=============================================================================
-TEST_F(IndexStrategyTestFixture,
-       run_TDBD_memory_set_test_grid_1_1_1_block_64_1_1) {
+TEST_F(IndexStrategyTestFixture, run_TDBD_memory_set_test_grid_1_1_1_block_64_1_1) {
   using IndexStrategy = Thread_Discontiguous_Block_Discontiguous;
   run_memory_set_test<IndexStrategy>({1, 1, 1}, {64, 1, 1});
 }
 
-TEST_F(IndexStrategyTestFixture,
-       run_TDBD_memory_set_test_grid_1_1_1_block_64_2_1) {
+TEST_F(IndexStrategyTestFixture, run_TDBD_memory_set_test_grid_1_1_1_block_64_2_1) {
   using IndexStrategy = Thread_Discontiguous_Block_Discontiguous;
   run_memory_set_test<IndexStrategy>({1, 1, 1}, {64, 2, 1});
 }
 
-TEST_F(IndexStrategyTestFixture,
-       run_TDBD_memory_set_test_grid_1_1_1_block_64_4_1) {
+TEST_F(IndexStrategyTestFixture, run_TDBD_memory_set_test_grid_1_1_1_block_64_4_1) {
   using IndexStrategy = Thread_Discontiguous_Block_Discontiguous;
   run_memory_set_test<IndexStrategy>({1, 1, 1}, {64, 4, 1});
 }
 
-TEST_F(IndexStrategyTestFixture,
-       run_TDBD_memory_set_test_grid_1_1_1_block_64_16_1) {
+TEST_F(IndexStrategyTestFixture, run_TDBD_memory_set_test_grid_1_1_1_block_64_16_1) {
   using IndexStrategy = Thread_Discontiguous_Block_Discontiguous;
   run_memory_set_test<IndexStrategy>({1, 1, 1}, {64, 16, 1});
 }
 
-TEST_F(IndexStrategyTestFixture,
-       run_TDBD_memory_set_test_grid_1_1_1_block_16_16_4) {
+TEST_F(IndexStrategyTestFixture, run_TDBD_memory_set_test_grid_1_1_1_block_16_16_4) {
   using IndexStrategy = Thread_Discontiguous_Block_Discontiguous;
   run_memory_set_test<IndexStrategy>({1, 1, 1}, {16, 16, 4});
 }
 
-TEST_F(IndexStrategyTestFixture,
-       run_TDBD_memory_set_test_grid_4_1_1_block_16_16_4) {
+TEST_F(IndexStrategyTestFixture, run_TDBD_memory_set_test_grid_4_1_1_block_16_16_4) {
   using IndexStrategy = Thread_Discontiguous_Block_Discontiguous;
   run_memory_set_test<IndexStrategy>({4, 1, 1}, {16, 16, 4});
 }
 
-TEST_F(IndexStrategyTestFixture,
-       run_TDBD_memory_set_test_grid_4_4_4_block_16_16_4) {
+TEST_F(IndexStrategyTestFixture, run_TDBD_memory_set_test_grid_4_4_4_block_16_16_4) {
   using IndexStrategy = Thread_Discontiguous_Block_Discontiguous;
   run_memory_set_test<IndexStrategy>({4, 4, 4}, {16, 16, 4});
 }
 
-TEST_F(IndexStrategyTestFixture,
-       run_TDBD_memory_set_test_grid_1024_8_8_block_1024_1_1) {
+TEST_F(IndexStrategyTestFixture, run_TDBD_memory_set_test_grid_1024_8_8_block_1024_1_1) {
   using IndexStrategy = Thread_Discontiguous_Block_Discontiguous;
   run_memory_set_test<IndexStrategy>({1024, 8, 8}, {1024, 1, 1});
 }
 
-TEST_F(IndexStrategyTestFixture,
-       run_TDBD_memory_set_test_grid_1024_8_8_block_1_1024_1) {
+TEST_F(IndexStrategyTestFixture, run_TDBD_memory_set_test_grid_1024_8_8_block_1_1024_1) {
   using IndexStrategy = Thread_Discontiguous_Block_Discontiguous;
   run_memory_set_test<IndexStrategy>({1024, 8, 8}, {1, 1024, 1});
 }
 
-TEST_F(IndexStrategyTestFixture,
-       run_TDBD_memory_set_test_grid_1024_8_8_block_1_1_1024) {
+TEST_F(IndexStrategyTestFixture, run_TDBD_memory_set_test_grid_1024_8_8_block_1_1_1024) {
   using IndexStrategy = Thread_Discontiguous_Block_Discontiguous;
   run_memory_set_test<IndexStrategy>({1024, 8, 8}, {1, 1, 1024});
 }
 
 //=============================================================================
-TEST_F(IndexStrategyTestFixture,
-       run_TDBC_memory_set_test_grid_1_1_1_block_64_1_1) {
+TEST_F(IndexStrategyTestFixture, run_TDBC_memory_set_test_grid_1_1_1_block_64_1_1) {
   using IndexStrategy = Thread_Discontiguous_Block_Contiguous;
   run_memory_set_test<IndexStrategy>({1, 1, 1}, {64, 1, 1});
 }
 
-TEST_F(IndexStrategyTestFixture,
-       run_TDBC_memory_set_test_grid_1_1_1_block_64_2_1) {
+TEST_F(IndexStrategyTestFixture, run_TDBC_memory_set_test_grid_1_1_1_block_64_2_1) {
   using IndexStrategy = Thread_Discontiguous_Block_Contiguous;
   run_memory_set_test<IndexStrategy>({1, 1, 1}, {64, 2, 1});
 }
 
-TEST_F(IndexStrategyTestFixture,
-       run_TDBC_memory_set_test_grid_1_1_1_block_64_4_1) {
+TEST_F(IndexStrategyTestFixture, run_TDBC_memory_set_test_grid_1_1_1_block_64_4_1) {
   using IndexStrategy = Thread_Discontiguous_Block_Contiguous;
   run_memory_set_test<IndexStrategy>({1, 1, 1}, {64, 4, 1});
 }
 
-TEST_F(IndexStrategyTestFixture,
-       run_TDBC_memory_set_test_grid_1_1_1_block_64_16_1) {
+TEST_F(IndexStrategyTestFixture, run_TDBC_memory_set_test_grid_1_1_1_block_64_16_1) {
   using IndexStrategy = Thread_Discontiguous_Block_Contiguous;
   run_memory_set_test<IndexStrategy>({1, 1, 1}, {64, 16, 1});
 }
 
-TEST_F(IndexStrategyTestFixture,
-       run_TDBC_memory_set_test_grid_1_1_1_block_16_16_4) {
+TEST_F(IndexStrategyTestFixture, run_TDBC_memory_set_test_grid_1_1_1_block_16_16_4) {
   using IndexStrategy = Thread_Discontiguous_Block_Contiguous;
   run_memory_set_test<IndexStrategy>({1, 1, 1}, {16, 16, 4});
 }
 
-TEST_F(IndexStrategyTestFixture,
-       run_TDBC_memory_set_test_grid_4_1_1_block_16_16_4) {
+TEST_F(IndexStrategyTestFixture, run_TDBC_memory_set_test_grid_4_1_1_block_16_16_4) {
   using IndexStrategy = Thread_Discontiguous_Block_Contiguous;
   run_memory_set_test<IndexStrategy>({4, 1, 1}, {16, 16, 4});
 }
 
-TEST_F(IndexStrategyTestFixture,
-       run_TDBC_memory_set_test_grid_4_4_4_block_16_16_4) {
+TEST_F(IndexStrategyTestFixture, run_TDBC_memory_set_test_grid_4_4_4_block_16_16_4) {
   using IndexStrategy = Thread_Discontiguous_Block_Contiguous;
   run_memory_set_test<IndexStrategy>({4, 4, 4}, {16, 16, 4});
 }
 
-TEST_F(IndexStrategyTestFixture,
-       run_TDBC_memory_set_test_grid_1024_8_8_block_1024_1_1) {
+TEST_F(IndexStrategyTestFixture, run_TDBC_memory_set_test_grid_1024_8_8_block_1024_1_1) {
   using IndexStrategy = Thread_Discontiguous_Block_Contiguous;
   run_memory_set_test<IndexStrategy>({1024, 8, 8}, {1024, 1, 1});
 }
 
-TEST_F(IndexStrategyTestFixture,
-       run_TDBC_memory_set_test_grid_1024_8_8_block_1_1024_1) {
+TEST_F(IndexStrategyTestFixture, run_TDBC_memory_set_test_grid_1024_8_8_block_1_1024_1) {
   using IndexStrategy = Thread_Discontiguous_Block_Contiguous;
   run_memory_set_test<IndexStrategy>({1024, 8, 8}, {1, 1024, 1});
 }
 
-TEST_F(IndexStrategyTestFixture,
-       run_TDBC_memory_set_test_grid_1024_8_8_block_1_1_1024) {
+TEST_F(IndexStrategyTestFixture, run_TDBC_memory_set_test_grid_1024_8_8_block_1_1_1024) {
   using IndexStrategy = Thread_Discontiguous_Block_Contiguous;
   run_memory_set_test<IndexStrategy>({1024, 8, 8}, {1, 1, 1024});
 }

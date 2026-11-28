@@ -15,7 +15,8 @@ namespace rocshmem {
 
 class QueuePairBNXT;
 
-template <> struct QueuePairTraits<QueuePairBNXT> {
+template <>
+struct QueuePairTraits<QueuePairBNXT> {
   enum class OpCode : uint8_t {
     RDMA_WRITE = BNXT_RE_WR_OPCD_RDMA_WRITE,
     RDMA_READ  = BNXT_RE_WR_OPCD_RDMA_READ,
@@ -40,22 +41,26 @@ template <> struct QueuePairTraits<QueuePairBNXT> {
 };
 
 class QueuePairBNXT : public QueuePairDevice<QueuePairBNXT> {
-private:
+ private:
   uint64_t* dbr;
   bnxt_device_sq sq;
   bnxt_device_cq cq;
 
-public:
-  __host__ explicit QueuePairBNXT(uint32_t qpn, QueuePairInitInfo&& init_info,
-                                  uint64_t* dbr, bnxt_device_sq&& sq, bnxt_device_cq&& cq)
-    : QueuePairDevice{qpn, std::move(init_info)},
-      dbr{dbr}, sq{std::move(sq)}, cq{std::move(cq)} { }
+ public:
+  __host__ explicit QueuePairBNXT(uint32_t qpn, QueuePairInitInfo&& init_info, uint64_t* dbr,
+                                  bnxt_device_sq&& sq, bnxt_device_cq&& cq)
+      : QueuePairDevice{qpn, std::move(init_info)},
+        dbr{dbr},
+        sq{std::move(sq)},
+        cq{std::move(cq)} {}
 
-  __host__ explicit QueuePairBNXT(uint32_t qpn,
-                                  uint64_t *nonfetching_atomic, uint32_t nonfetching_atomic_lkey,
-                                  uint64_t* dbr, bnxt_device_sq&& sq, bnxt_device_cq&& cq)
-    : QueuePairDevice{qpn, nonfetching_atomic, nonfetching_atomic_lkey},
-      dbr{dbr}, sq{std::move(sq)}, cq{std::move(cq)} { }
+  __host__ explicit QueuePairBNXT(uint32_t qpn, uint64_t* nonfetching_atomic,
+                                  uint32_t nonfetching_atomic_lkey, uint64_t* dbr,
+                                  bnxt_device_sq&& sq, bnxt_device_cq&& cq)
+      : QueuePairDevice{qpn, nonfetching_atomic, nonfetching_atomic_lkey},
+        dbr{dbr},
+        sq{std::move(sq)},
+        cq{std::move(cq)} {}
 
   __host__ QueuePairBNXT(const QueuePairBNXT& other)            = delete;
   __host__ QueuePairBNXT& operator=(const QueuePairBNXT& other) = delete;
@@ -63,30 +68,27 @@ public:
   __host__ QueuePairBNXT& operator=(QueuePairBNXT&& other)      = default;
   __host__ ~QueuePairBNXT()                                     = default;
 
-public:
+ public:
   template <OpCode Op, typename... Options>
-  __device__ __noinline__
-  void post_wqe_rma(uintptr_t laddr, uint32_t lkey,
-                    uintptr_t raddr, uint32_t rkey, size_t size,
-                    const ActiveWFInfo& wf_info, PostOpt<Options...> = {});
+  __device__ __noinline__ void post_wqe_rma(uintptr_t laddr, uint32_t lkey, uintptr_t raddr,
+                                            uint32_t rkey, size_t size, const ActiveWFInfo& wf_info,
+                                            PostOpt<Options...> = {});
 
   template <OpCode Op, typename... Options>
-  __device__ __noinline__
-  void post_wqe_rma_single(uintptr_t laddr, uint32_t lkey,
-                           uintptr_t raddr, uint32_t rkey, size_t size,
-                           PostOpt<Options...> = {});
+  __device__ __noinline__ void post_wqe_rma_single(uintptr_t laddr, uint32_t lkey, uintptr_t raddr,
+                                                   uint32_t rkey, size_t size,
+                                                   PostOpt<Options...> = {});
 
   template <OpCode Op, AMOFetchType Fetch, typename... Options>
-  __device__ __noinline__
-  amo_ret_t<Fetch> post_wqe_amo(uintptr_t raddr, uint32_t rkey,
-                                uint64_t swap_add, uint64_t compare,
-                                const ActiveWFInfo& wf_info, PostOpt<Options...> = {});
+  __device__ __noinline__ amo_ret_t<Fetch> post_wqe_amo(uintptr_t raddr, uint32_t rkey,
+                                                        uint64_t swap_add, uint64_t compare,
+                                                        const ActiveWFInfo& wf_info,
+                                                        PostOpt<Options...> = {});
 
   template <OpCode Op, AMOFetchType Fetch, typename... Options>
-  __device__ __noinline__
-  amo_ret_t<Fetch> post_wqe_amo_single(uintptr_t raddr, uint32_t rkey,
-                                       uint64_t swap_add, uint64_t compare,
-                                       PostOpt<Options...> = {});
+  __device__ __noinline__ amo_ret_t<Fetch> post_wqe_amo_single(uintptr_t raddr, uint32_t rkey,
+                                                               uint64_t swap_add, uint64_t compare,
+                                                               PostOpt<Options...> = {});
 
   __device__ __noinline__ void quiet_single();
 
@@ -94,7 +96,7 @@ public:
 
   __device__ __forceinline__ bool poll_cq_once(uint64_t target);
 
-private:
+ private:
   __device__ void ring_doorbell(uint32_t slot_idx);
   __device__ void poll_cq_until(uint32_t requested_available_slots);
 
@@ -102,12 +104,12 @@ private:
   static __device__ void release_lock(uint32_t* lock);
 
   template <OpCode Op, bool CheckSQ>
-  __device__ void write_rma_wqe(uintptr_t laddr, uint32_t lkey,
-                                uintptr_t raddr, uint32_t rkey, size_t size, bool signaled);
+  __device__ void write_rma_wqe(uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey,
+                                size_t size, bool signaled);
 
   template <OpCode Op, AMOFetchType Fetch, bool CheckSQ>
-  __device__ uint64_t* write_amo_wqe(uintptr_t raddr, uint32_t rkey,
-                                     uint64_t swap_add, uint64_t compare, bool signaled);
+  __device__ uint64_t* write_amo_wqe(uintptr_t raddr, uint32_t rkey, uint64_t swap_add,
+                                     uint64_t compare, bool signaled);
 
   static __device__ void* get_hwqe(const bnxt_device_sq& sq, uint32_t idx);
   static __device__ void fill_psns_for_msntbl(bnxt_device_sq& sq, uint32_t msg_len);
@@ -122,14 +124,14 @@ private:
 };
 
 template <QueuePairBNXT::OpCode Op, bool CheckSQ>
-__device__ void QueuePairBNXT::write_rma_wqe(
-    uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey, size_t size, bool signaled) {
+__device__ void QueuePairBNXT::write_rma_wqe(uintptr_t laddr, uint32_t lkey, uintptr_t raddr,
+                                             uint32_t rkey, size_t size, bool signaled) {
   struct bnxt_re_bsqe hdr;
   struct bnxt_re_rdma rdma;
   struct bnxt_re_sge sge;
-  struct bnxt_re_bsqe *hdr_ptr;
-  struct bnxt_re_rdma *rdma_ptr;
-  struct bnxt_re_sge *sge_ptr;
+  struct bnxt_re_bsqe* hdr_ptr;
+  struct bnxt_re_rdma* rdma_ptr;
+  struct bnxt_re_sge* sge_ptr;
   uint32_t wqe_size;
   uint32_t wqe_type;
   uint32_t hdr_flags;
@@ -140,9 +142,9 @@ __device__ void QueuePairBNXT::write_rma_wqe(
     poll_cq_until(GDA_BNXT_WQE_SLOT_COUNT);
   }
 
-  hdr_ptr  = (struct bnxt_re_bsqe*) get_hwqe(sq, 0);
-  rdma_ptr = (struct bnxt_re_rdma*) get_hwqe(sq, 1);
-  sge_ptr  = (struct bnxt_re_sge*)  get_hwqe(sq, 2);
+  hdr_ptr  = (struct bnxt_re_bsqe*)get_hwqe(sq, 0);
+  rdma_ptr = (struct bnxt_re_rdma*)get_hwqe(sq, 1);
+  sge_ptr  = (struct bnxt_re_sge*)get_hwqe(sq, 2);
 
   /* Populate Header Segment */
   wqe_type  = BNXT_RE_HDR_WT_MASK & static_cast<uint8_t>(Op);
@@ -150,12 +152,11 @@ __device__ void QueuePairBNXT::write_rma_wqe(
   hdr_flags = signaled ? (BNXT_RE_HDR_FLAGS_MASK & BNXT_RE_WR_FLAGS_SIGNALED) : 0;
 
   if (inline_msg) {
-    hdr_flags |= ((uint32_t) BNXT_RE_WR_FLAGS_INLINE);
+    hdr_flags |= ((uint32_t)BNXT_RE_WR_FLAGS_INLINE);
   }
 
-  hdr.rsv_ws_fl_wt  = (wqe_size  << BNXT_RE_HDR_WS_SHIFT)
-                    | (hdr_flags << BNXT_RE_HDR_FLAGS_SHIFT)
-                    | wqe_type;
+  hdr.rsv_ws_fl_wt =
+      (wqe_size << BNXT_RE_HDR_WS_SHIFT) | (hdr_flags << BNXT_RE_HDR_FLAGS_SHIFT) | wqe_type;
   hdr.key_immd      = 0;
   hdr.lhdr.qkey_len = size;
 
@@ -171,7 +172,7 @@ __device__ void QueuePairBNXT::write_rma_wqe(
   }
 
   /* Write WQE to SQ */
-  memcpy(hdr_ptr,  &hdr,  sizeof(struct bnxt_re_bsqe));
+  memcpy(hdr_ptr, &hdr, sizeof(struct bnxt_re_bsqe));
   memcpy(rdma_ptr, &rdma, sizeof(struct bnxt_re_rdma));
 
   if (inline_msg) {
@@ -189,9 +190,10 @@ __device__ void QueuePairBNXT::write_rma_wqe(
 
 // can be called with all active lanes using any number of different QPs, don't assume anything
 template <QueuePairBNXT::OpCode Op, typename... Options>
-__device__ __noinline__ void QueuePairBNXT::post_wqe_rma(
-    uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey, size_t size,
-    const ActiveWFInfo& wf_info, PostOpt<Options...>) {
+__device__ __noinline__ void QueuePairBNXT::post_wqe_rma(uintptr_t laddr, uint32_t lkey,
+                                                         uintptr_t raddr, uint32_t rkey,
+                                                         size_t size, const ActiveWFInfo& wf_info,
+                                                         PostOpt<Options...>) {
   using PostOptions = PostOpt<Options...>;
   if constexpr (PostOptions::ThreadSafe) {
     if (wf_info.is_pe_group_first) {
@@ -228,8 +230,9 @@ __device__ __noinline__ void QueuePairBNXT::post_wqe_rma(
 
 // precondition: called with all active lanes using different QPs
 template <QueuePairBNXT::OpCode Op, typename... Options>
-__device__ __noinline__ void QueuePairBNXT::post_wqe_rma_single(
-    uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey, size_t size, PostOpt<Options...>) {
+__device__ __noinline__ void QueuePairBNXT::post_wqe_rma_single(uintptr_t laddr, uint32_t lkey,
+                                                                uintptr_t raddr, uint32_t rkey,
+                                                                size_t size, PostOpt<Options...>) {
   using PostOptions = PostOpt<Options...>;
   if constexpr (PostOptions::ThreadSafe) {
     acquire_lock(&sq.lock);
@@ -257,17 +260,17 @@ __device__ __noinline__ void QueuePairBNXT::post_wqe_rma_single(
 }
 
 template <QueuePairBNXT::OpCode Op, AMOFetchType Fetch, bool CheckSQ>
-__device__ uint64_t* QueuePairBNXT::write_amo_wqe(
-    uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare, bool signaled) {
+__device__ uint64_t* QueuePairBNXT::write_amo_wqe(uintptr_t raddr, uint32_t rkey, uint64_t swap_add,
+                                                  uint64_t compare, bool signaled) {
   static_assert(Fetch != AMOFetchType::NonBlocking, "non-blocking AMOs not yet implemented");
   static constexpr size_t size = sizeof(uint64_t);
 
   struct bnxt_re_bsqe hdr;
   struct bnxt_re_atomic amo;
   struct bnxt_re_sge sge;
-  struct bnxt_re_bsqe *hdr_ptr;
-  struct bnxt_re_atomic *amo_ptr;
-  struct bnxt_re_sge *sge_ptr;
+  struct bnxt_re_bsqe* hdr_ptr;
+  struct bnxt_re_atomic* amo_ptr;
+  struct bnxt_re_sge* sge_ptr;
   uint32_t wqe_size;
   uint32_t wqe_type;
   uint32_t hdr_flags;
@@ -277,18 +280,17 @@ __device__ uint64_t* QueuePairBNXT::write_amo_wqe(
     poll_cq_until(GDA_BNXT_WQE_SLOT_COUNT);
   }
 
-  hdr_ptr = (struct bnxt_re_bsqe*)   get_hwqe(sq, 0);
-  amo_ptr = (struct bnxt_re_atomic*) get_hwqe(sq, 1);
-  sge_ptr = (struct bnxt_re_sge*)    get_hwqe(sq, 2);
+  hdr_ptr = (struct bnxt_re_bsqe*)get_hwqe(sq, 0);
+  amo_ptr = (struct bnxt_re_atomic*)get_hwqe(sq, 1);
+  sge_ptr = (struct bnxt_re_sge*)get_hwqe(sq, 2);
 
   /* Populate Header Segment */
   wqe_type  = BNXT_RE_HDR_WT_MASK & static_cast<uint8_t>(Op);
   wqe_size  = BNXT_RE_HDR_WS_MASK & GDA_BNXT_WQE_SLOT_COUNT;
   hdr_flags = signaled ? (BNXT_RE_HDR_FLAGS_MASK & BNXT_RE_WR_FLAGS_SIGNALED) : 0;
 
-  hdr.rsv_ws_fl_wt  = (wqe_size  << BNXT_RE_HDR_WS_SHIFT)
-                    | (hdr_flags << BNXT_RE_HDR_FLAGS_SHIFT)
-                    | wqe_type;
+  hdr.rsv_ws_fl_wt =
+      (wqe_size << BNXT_RE_HDR_WS_SHIFT) | (hdr_flags << BNXT_RE_HDR_FLAGS_SHIFT) | wqe_type;
   hdr.key_immd = rkey;
   hdr.lhdr.rva = raddr;
 
@@ -325,7 +327,7 @@ __device__ __noinline__ QueuePairBNXT::amo_ret_t<Fetch> QueuePairBNXT::post_wqe_
     uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare,
     const ActiveWFInfo& wf_info, PostOpt<Options...>) {
   static_assert(Fetch != AMOFetchType::NonBlocking, "non-blocking AMOs not yet implemented");
-  using PostOptions = PostOpt<Options...>;
+  using PostOptions      = PostOpt<Options...>;
   uint64_t* atomic_laddr = nullptr;
 
   if constexpr (PostOptions::ThreadSafe) {
@@ -342,7 +344,8 @@ __device__ __noinline__ QueuePairBNXT::amo_ret_t<Fetch> QueuePairBNXT::post_wqe_
   for (int i = 0; i < wf_info.num_pe_group_lanes; i++) {
     if (i == wf_info.pe_group_logical_lane_id) {
       /* Write WQE to SQ */
-      atomic_laddr = write_amo_wqe<Op, Fetch, PostOptions::CheckSQ>(raddr, rkey, swap_add, compare, signaled);
+      atomic_laddr =
+          write_amo_wqe<Op, Fetch, PostOptions::CheckSQ>(raddr, rkey, swap_add, compare, signaled);
 
       /* Ring Doorbell */
       if constexpr (PostOptions::RingDB) {
@@ -371,7 +374,7 @@ template <QueuePairBNXT::OpCode Op, AMOFetchType Fetch, typename... Options>
 __device__ __noinline__ QueuePairBNXT::amo_ret_t<Fetch> QueuePairBNXT::post_wqe_amo_single(
     uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare, PostOpt<Options...>) {
   static_assert(Fetch != AMOFetchType::NonBlocking, "non-blocking AMOs not yet implemented");
-  using PostOptions = PostOpt<Options...>;
+  using PostOptions      = PostOpt<Options...>;
   uint64_t* atomic_laddr = nullptr;
 
   if constexpr (PostOptions::ThreadSafe) {
@@ -384,7 +387,8 @@ __device__ __noinline__ QueuePairBNXT::amo_ret_t<Fetch> QueuePairBNXT::post_wqe_
   bool signaled = PostOptions::signal_completion_single();
 
   /* Write WQE to SQ */
-  atomic_laddr = write_amo_wqe<Op, Fetch, PostOptions::CheckSQ>(raddr, rkey, swap_add, compare, signaled);
+  atomic_laddr =
+      write_amo_wqe<Op, Fetch, PostOptions::CheckSQ>(raddr, rkey, swap_add, compare, signaled);
 
   /* Ring Doorbell */
   if constexpr (PostOptions::RingDB) {
@@ -415,8 +419,8 @@ __device__ __forceinline__ uint64_t QueuePairBNXT::cq_target() {
 
 // Only reads queue state, so lanes sharing a queue pair can call it.
 __device__ __forceinline__ bool QueuePairBNXT::poll_cq_once(uint64_t target) {
-  struct bnxt_re_req_cqe *cqe = (struct bnxt_re_req_cqe *) cq.buf;
-  uint32_t sq_depth = sq.depth;
+  struct bnxt_re_req_cqe* cqe = (struct bnxt_re_req_cqe*)cq.buf;
+  uint32_t sq_depth           = sq.depth;
 
   // Read posted before the CQE, so completions that land in between can only make this report not yet.
   // The tail is derived from posted so both come from one read.
@@ -424,13 +428,12 @@ __device__ __forceinline__ bool QueuePairBNXT::poll_cq_once(uint64_t target) {
   uint32_t sq_tail = static_cast<uint32_t>(posted % sq_depth);
 
 #ifdef BUILD_DEBUG_DEVICE
-  uint32_t flg_val =
-      __scoped_atomic_load_n(static_cast<uint32_t*>(
-          __builtin_assume_aligned((char*)cqe + sizeof(struct bnxt_re_req_cqe)
-                                              + offsetof(struct bnxt_re_bcqe, flg_st_typ_ph),
-                                   4)),
-          __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
-  uint8_t status = (flg_val >> BNXT_RE_BCQE_STATUS_SHIFT) & BNXT_RE_BCQE_STATUS_MASK;
+  uint32_t flg_val = __scoped_atomic_load_n(static_cast<uint32_t*>(__builtin_assume_aligned(
+                                                (char*)cqe + sizeof(struct bnxt_re_req_cqe) +
+                                                    offsetof(struct bnxt_re_bcqe, flg_st_typ_ph),
+                                                4)),
+                                            __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
+  uint8_t status   = (flg_val >> BNXT_RE_BCQE_STATUS_SHIFT) & BNXT_RE_BCQE_STATUS_MASK;
   if (status != BNXT_RE_REQ_ST_OK) {
     print_cqe_error(status);
   }
@@ -444,7 +447,7 @@ __device__ __forceinline__ bool QueuePairBNXT::poll_cq_once(uint64_t target) {
 
 // precondition: called with all active lanes using different QPs
 __device__ inline void QueuePairBNXT::poll_cq_until(uint32_t requested_available_slots) {
-  struct bnxt_re_req_cqe *cqe;
+  struct bnxt_re_req_cqe* cqe;
   uint32_t sq_tail;
   uint32_t sq_head;
   uint32_t sq_depth;
@@ -454,16 +457,15 @@ __device__ inline void QueuePairBNXT::poll_cq_until(uint32_t requested_available
   sq_depth = sq.depth;
 
   do {
-    cqe = (struct bnxt_re_req_cqe *) cq.buf;
+    cqe = (struct bnxt_re_req_cqe*)cq.buf;
 
 #ifdef BUILD_DEBUG_DEVICE
-    uint32_t flg_val =
-        __scoped_atomic_load_n(static_cast<uint32_t*>(
-            __builtin_assume_aligned((char*)cqe + sizeof(struct bnxt_re_req_cqe)
-                                                + offsetof(struct bnxt_re_bcqe, flg_st_typ_ph),
-                                     4)),
-            __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
-    uint8_t status = (flg_val >> BNXT_RE_BCQE_STATUS_SHIFT) & BNXT_RE_BCQE_STATUS_MASK;
+    uint32_t flg_val = __scoped_atomic_load_n(static_cast<uint32_t*>(__builtin_assume_aligned(
+                                                  (char*)cqe + sizeof(struct bnxt_re_req_cqe) +
+                                                      offsetof(struct bnxt_re_bcqe, flg_st_typ_ph),
+                                                  4)),
+                                              __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
+    uint8_t status   = (flg_val >> BNXT_RE_BCQE_STATUS_SHIFT) & BNXT_RE_BCQE_STATUS_MASK;
     if (status != BNXT_RE_REQ_ST_OK) {
       print_cqe_error(status);
     }
@@ -492,9 +494,9 @@ __device__ __forceinline__ void QueuePairBNXT::ring_doorbell(uint32_t slot_idx) 
 
   key_lo = (slot_idx | epoch);
 
-  key_hi = (qp_num & BNXT_RE_DB_QID_MASK)
-         | (((uint64_t) BNXT_RE_QUE_TYPE_SQ & BNXT_RE_DB_TYP_MASK) << BNXT_RE_DB_TYP_SHIFT)
-         | (0x1UL << BNXT_RE_DB_VALID_SHIFT);
+  key_hi = (qp_num & BNXT_RE_DB_QID_MASK) |
+           (((uint64_t)BNXT_RE_QUE_TYPE_SQ & BNXT_RE_DB_TYP_MASK) << BNXT_RE_DB_TYP_SHIFT) |
+           (0x1UL << BNXT_RE_DB_VALID_SHIFT);
 
   hdr.typ_qid_indx = (key_lo | (key_hi << 32));
 
@@ -502,29 +504,28 @@ __device__ __forceinline__ void QueuePairBNXT::ring_doorbell(uint32_t slot_idx) 
   __scoped_atomic_store_n(dbr, hdr.typ_qid_indx, __ATOMIC_SEQ_CST, __MEMORY_SCOPE_SYSTEM);
 }
 
-__device__ __forceinline__ void* QueuePairBNXT::get_hwqe(
-    const bnxt_device_sq& sq, uint32_t idx) {
+__device__ __forceinline__ void* QueuePairBNXT::get_hwqe(const bnxt_device_sq& sq, uint32_t idx) {
   idx += sq.tail;
   if (idx >= sq.depth)
     idx -= sq.depth;
-  return (void *)((char*)sq.buf + (idx << 4));
+  return (void*)((char*)sq.buf + (idx << 4));
 }
 
-__device__ __forceinline__ void QueuePairBNXT::fill_psns_for_msntbl(
-    bnxt_device_sq& sq, uint32_t msg_len) {
+__device__ __forceinline__ void QueuePairBNXT::fill_psns_for_msntbl(bnxt_device_sq& sq,
+                                                                    uint32_t msg_len) {
   uint32_t npsn = 0, start_psn = 0, next_psn = 0;
   struct bnxt_re_msns msns;
-  uint64_t *msns_ptr;
+  uint64_t* msns_ptr;
   uint32_t pkt_cnt = 0;
   /* Start slot index of the WQE */
-  uint32_t st_idx = sq.tail; // * BNXT_RE_STATIC_WQE_SIZE_SLOTS; Do we need this?
+  uint32_t st_idx = sq.tail;  // * BNXT_RE_STATIC_WQE_SIZE_SLOTS; Do we need this?
   // Get the MSN table address
-  msns_ptr = (uint64_t *)pull_psn_buff(sq);
+  msns_ptr = (uint64_t*)pull_psn_buff(sq);
   // Start PSN is the last recorded PSN
   // Calculate the packet count based on the len of the WQE/MTU
   msns.start_idx_next_psn_start_psn = 0;
-  start_psn = sq.psn;
-  pkt_cnt = (msg_len / sq.mtu);
+  start_psn                         = sq.psn;
+  pkt_cnt                           = (msg_len / sq.mtu);
 
   if (msg_len % sq.mtu)
     pkt_cnt++;
@@ -538,8 +539,8 @@ __device__ __forceinline__ void QueuePairBNXT::fill_psns_for_msntbl(
 
   /* make it 24 bit */
   next_psn = sq.psn + pkt_cnt;
-  npsn = next_psn;
-  sq.psn = next_psn;
+  npsn     = next_psn;
+  sq.psn   = next_psn;
   msns.start_idx_next_psn_start_psn |= update_msn_tbl(st_idx, npsn, start_psn);
   sq.msn++;
   sq.msn %= sq.msn_tbl_sz;
@@ -547,8 +548,7 @@ __device__ __forceinline__ void QueuePairBNXT::fill_psns_for_msntbl(
   memcpy(msns_ptr, &msns, sizeof(uint64_t));
 }
 
-__device__ __forceinline__ void QueuePairBNXT::incr_tail(
-    bnxt_device_sq& sq, uint8_t cnt) {
+__device__ __forceinline__ void QueuePairBNXT::incr_tail(bnxt_device_sq& sq, uint8_t cnt) {
   sq.posted += cnt;
   sq.tail += cnt;
   if (sq.tail >= sq.depth) {
@@ -560,17 +560,17 @@ __device__ __forceinline__ void QueuePairBNXT::incr_tail(
 
 __device__ __forceinline__ struct bnxt_re_msns* QueuePairBNXT::pull_psn_buff(
     const bnxt_device_sq& sq) {
-  return (struct bnxt_re_msns*)(((char *) sq.msntbl) + ((sq.msn) << sq.psn_sz_log2));
+  return (struct bnxt_re_msns*)(((char*)sq.msntbl) + ((sq.msn) << sq.psn_sz_log2));
 }
 
-__device__ __forceinline__ uint64_t QueuePairBNXT::update_msn_tbl(
-    uint32_t st_idx, uint32_t npsn, uint32_t start_psn) {
-  return ((((uint64_t)(st_idx)    << BNXT_RE_SQ_MSN_SEARCH_START_IDX_SHIFT)
-                                            & BNXT_RE_SQ_MSN_SEARCH_START_IDX_MASK) |
-          (((uint64_t)(npsn)      << BNXT_RE_SQ_MSN_SEARCH_NEXT_PSN_SHIFT)
-                                            & BNXT_RE_SQ_MSN_SEARCH_NEXT_PSN_MASK)  |
-          (((uint64_t)(start_psn) << BNXT_RE_SQ_MSN_SEARCH_START_PSN_SHIFT)
-                                            & BNXT_RE_SQ_MSN_SEARCH_START_PSN_MASK));
+__device__ __forceinline__ uint64_t QueuePairBNXT::update_msn_tbl(uint32_t st_idx, uint32_t npsn,
+                                                                  uint32_t start_psn) {
+  return ((((uint64_t)(st_idx) << BNXT_RE_SQ_MSN_SEARCH_START_IDX_SHIFT) &
+           BNXT_RE_SQ_MSN_SEARCH_START_IDX_MASK) |
+          (((uint64_t)(npsn) << BNXT_RE_SQ_MSN_SEARCH_NEXT_PSN_SHIFT) &
+           BNXT_RE_SQ_MSN_SEARCH_NEXT_PSN_MASK) |
+          (((uint64_t)(start_psn) << BNXT_RE_SQ_MSN_SEARCH_START_PSN_SHIFT) &
+           BNXT_RE_SQ_MSN_SEARCH_START_PSN_MASK));
 }
 
 __device__ __forceinline__ void QueuePairBNXT::acquire_lock(uint32_t* lock) {
@@ -578,10 +578,8 @@ __device__ __forceinline__ void QueuePairBNXT::acquire_lock(uint32_t* lock) {
 
   do {
     expected = 0;
-  } while (0 == __scoped_atomic_compare_exchange_n(lock, &expected, 1, false,
-                                                    __ATOMIC_ACQUIRE,
-                                                    __ATOMIC_ACQUIRE,
-                                                    __MEMORY_SCOPE_SYSTEM));
+  } while (0 == __scoped_atomic_compare_exchange_n(lock, &expected, 1, false, __ATOMIC_ACQUIRE,
+                                                   __ATOMIC_ACQUIRE, __MEMORY_SCOPE_SYSTEM));
 }
 
 __device__ __forceinline__ void QueuePairBNXT::release_lock(uint32_t* lock) {
@@ -634,4 +632,3 @@ __device__ inline __noinline__ void QueuePairBNXT::print_cqe_error(uint8_t statu
 }  // namespace rocshmem
 
 #endif  // LIBRARY_SRC_GDA_BNXT_QUEUE_PAIR_HPP_
-

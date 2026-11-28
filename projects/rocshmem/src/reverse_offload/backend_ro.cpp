@@ -47,8 +47,7 @@ namespace rocshmem {
 
 extern rocshmem_ctx_t ROCSHMEM_HOST_CTX_DEFAULT;
 
-ROBackend::ROBackend(MPI_Comm comm)
-    : Backend(comm) {
+ROBackend::ROBackend(MPI_Comm comm) : Backend(comm) {
   type = BackendType::RO_BACKEND;
 
   poll_block_count_ = envvar::max_num_contexts;
@@ -75,10 +74,10 @@ ROBackend::ROBackend(MPI_Comm comm)
   queue_ = Queue(envvar::max_num_contexts, queue_size_);
 
   transport_ = new MPITransport(backend_comm, &queue_);
-  num_pes = transport_->getNumPes();
-  my_pe = transport_->getMyPe();
+  num_pes    = transport_->getNumPes();
+  my_pe      = transport_->getMyPe();
 
-  auto *bp{backend_proxy.get()};
+  auto* bp{backend_proxy.get()};
 
   bp->hdp_policy = hdp_proxy_.get();
 
@@ -88,8 +87,7 @@ ROBackend::ROBackend(MPI_Comm comm)
 
   bp->heap_ptr = &heap;
 
-  ro_window_proxy_ = new WindowProxy(&heap, transport_->get_world_comm(),
-                                     num_windows_);
+  ro_window_proxy_ = new WindowProxy(&heap, transport_->get_world_comm(), num_windows_);
 
   bp->heap_window_info = ro_window_proxy_->get();
 
@@ -104,12 +102,10 @@ ROBackend::ROBackend(MPI_Comm comm)
 
   ROCSHMEM_HOST_CTX_DEFAULT.ctx_opaque = default_host_ctx.get();
 
-  team_world_proxy_ = new ROTeamProxy(
-      this, transport_->get_world_comm(), my_pe, num_pes);
+  team_world_proxy_ = new ROTeamProxy(this, transport_->get_world_comm(), my_pe, num_pes);
   team_tracker.set_team_world(team_world_proxy_->get());
 
-  host::ROCSHMEM_TEAM_WORLD =
-      reinterpret_cast<rocshmem_team_t>(team_world_proxy_->get());
+  host::ROCSHMEM_TEAM_WORLD = reinterpret_cast<rocshmem_team_t>(team_world_proxy_->get());
   set_team_world_device(host::ROCSHMEM_TEAM_WORLD);
 
   /*
@@ -118,20 +114,17 @@ ROBackend::ROBackend(MPI_Comm comm)
    */
   setup_team_shared();
 
-  default_block_handle_proxy_ = DefaultBlockHandleProxy(
-                                g_ret_buffer_.get(),
-                                atomic_ret_buffer_.get(), &queue_,
-                                status_.get(), default_ctx_status_.get(),
-                                default_ctx_g_ret_buffer_.get(),
-                                default_ctx_atomic_ret_buffer_.get());
+  default_block_handle_proxy_ =
+      DefaultBlockHandleProxy(g_ret_buffer_.get(), atomic_ret_buffer_.get(), &queue_, status_.get(),
+                              default_ctx_status_.get(), default_ctx_g_ret_buffer_.get(),
+                              default_ctx_atomic_ret_buffer_.get());
 
-  TeamInfo *tinfo = team_tracker.get_team_world()->tinfo_wrt_world;
+  TeamInfo* tinfo = team_tracker.get_team_world()->tinfo_wrt_world;
 
   default_context_proxy_ = DefaultContextProxy(this, tinfo);
 
-  block_handle_proxy_ = BlockHandleProxy(g_ret_buffer_.get(),
-                        atomic_ret_buffer_.get(), &queue_,
-                        max_wg_size_, status_.get(), envvar::max_num_contexts);
+  block_handle_proxy_ = BlockHandleProxy(g_ret_buffer_.get(), atomic_ret_buffer_.get(), &queue_,
+                                         max_wg_size_, status_.get(), envvar::max_num_contexts);
   setup_ctxs();
 
   worker_thread = std::thread(&ROBackend::ro_net_poll, this);
@@ -147,7 +140,7 @@ int ROBackend::backend_can_run() {
     LOG_TRACE("Could not open libmpi.so");
     return ROCSHMEM_ERROR;
   }
-  //TODO dlsym MPI_Get_library_version and verify compat when HAVE_EXTERNAL_MPI is undef
+  // TODO dlsym MPI_Get_library_version and verify compat when HAVE_EXTERNAL_MPI is undef
   dlclose(handle);
   return ROCSHMEM_SUCCESS;
 }
@@ -173,9 +166,8 @@ void ROBackend::setup_default_ctx_buffers() {
   default_ctx_g_ret_buffer_.get()->allocate_queue(envvar::max_wavefront_buffers);
   default_ctx_atomic_ret_buffer_.get()->allocate_queue(envvar::max_wavefront_buffers);
 
-
-  char* status = status_default_ctx_.get();
-  uint64_t* g_ret_buf = g_ret_buffer_default_ctx_.get();
+  char* status             = status_default_ctx_.get();
+  uint64_t* g_ret_buf      = g_ret_buffer_default_ctx_.get();
   uint64_t* atomic_ret_buf = atomic_ret_buffer_default_ctx_.get();
 
   for (size_t i = 0; i < envvar::max_wavefront_buffers; i++) {
@@ -193,8 +185,8 @@ ROBackend::~ROBackend() {
   CHECK_HIP(hipFree(ctx_array));
 }
 
-__device__ bool ROBackend::create_ctx([[maybe_unused]] int64_t options, rocshmem_ctx_t *ctx) {
-  ROContext *ctx_;
+__device__ bool ROBackend::create_ctx([[maybe_unused]] int64_t options, rocshmem_ctx_t* ctx) {
+  ROContext* ctx_;
 
   auto pop_result = ctx_free_list.get()->pop_front();
   if (!pop_result.success) {
@@ -206,8 +198,8 @@ __device__ bool ROBackend::create_ctx([[maybe_unused]] int64_t options, rocshmem
   return true;
 }
 
-__device__ void ROBackend::destroy_ctx(rocshmem_ctx_t *ctx) {
-  ctx_free_list.get()->push_back(static_cast<ROContext *>(ctx->ctx_opaque));
+__device__ void ROBackend::destroy_ctx(rocshmem_ctx_t* ctx) {
+  ctx_free_list.get()->push_back(static_cast<ROContext*>(ctx->ctx_opaque));
 }
 
 void ROBackend::setup_team_shared() {
@@ -226,11 +218,11 @@ void ROBackend::setup_team_shared() {
    * device memory, so copy it to host for inspection.
    */
   std::vector<int> team_shared_pes(shm_size);
-  CHECK_HIP(hipMemcpy(team_shared_pes.data(), ipcImpl.pes_with_ipc_avail,
-                       shm_size * sizeof(int), hipMemcpyDeviceToHost));
+  CHECK_HIP(hipMemcpy(team_shared_pes.data(), ipcImpl.pes_with_ipc_avail, shm_size * sizeof(int),
+                      hipMemcpyDeviceToHost));
 
   int pe_start = team_shared_pes[0];
-  int stride = (shm_size > 1) ? (team_shared_pes[1] - team_shared_pes[0]) : 1;
+  int stride   = (shm_size > 1) ? (team_shared_pes[1] - team_shared_pes[0]) : 1;
   bool uniform = (stride > 0);
   for (int i = 2; i < shm_size && uniform; i++) {
     if (team_shared_pes[i] - team_shared_pes[i - 1] != stride) {
@@ -252,10 +244,9 @@ void ROBackend::setup_team_shared() {
   TeamInfo wrt_parent(nullptr, 0, 1, shm_size);
   TeamInfo wrt_world(nullptr, pe_start, stride, shm_size);
 
-  ROTeam *team_shared{nullptr};
+  ROTeam* team_shared{nullptr};
   CHECK_HIP(hipMalloc(&team_shared, sizeof(ROTeam)));
-  new (team_shared) ROTeam(this, wrt_parent, wrt_world,
-                           shm_size, shm_rank, MPI_COMM_NULL);
+  new (team_shared) ROTeam(this, wrt_parent, wrt_world, shm_size, shm_rank, MPI_COMM_NULL);
 
   team_tracker.set_team_shared(team_shared);
 
@@ -268,57 +259,55 @@ void ROBackend::setup_team_shared() {
 }
 
 void ROBackend::team_destroy(rocshmem_team_t team) {
-  ROTeam *team_obj{get_internal_ro_team(team)};
+  ROTeam* team_obj{get_internal_ro_team(team)};
 
   team_obj->~ROTeam();
   CHECK_HIP(hipFree(team_obj));
 }
 
-void ROBackend::create_new_team(Team *parent_team,
-                                const TeamInfo& team_info_wrt_parent,
-                                const TeamInfo& team_info_wrt_world,
-                                int num_pes, int my_pe_in_new_team,
-                                MPI_Comm new_team_comm,
-                                rocshmem_team_t *new_team) {
-  transport_->createNewTeam(this, parent_team, team_info_wrt_parent,
-                            team_info_wrt_world, num_pes, my_pe_in_new_team,
-                            new_team_comm, new_team);
+void ROBackend::create_new_team(Team* parent_team, const TeamInfo& team_info_wrt_parent,
+                                const TeamInfo& team_info_wrt_world, int num_pes,
+                                int my_pe_in_new_team, MPI_Comm new_team_comm,
+                                rocshmem_team_t* new_team) {
+  transport_->createNewTeam(this, parent_team, team_info_wrt_parent, team_info_wrt_world, num_pes,
+                            my_pe_in_new_team, new_team_comm, new_team);
 }
 
-void ROBackend::ctx_create(int64_t options, void **ctx) {
-  ROHostContext *new_ctx{nullptr};
+void ROBackend::ctx_create(int64_t options, void** ctx) {
+  ROHostContext* new_ctx{nullptr};
   new_ctx = new ROHostContext(this, options);
-  *ctx = new_ctx;
+  *ctx    = new_ctx;
 }
 
-ROHostContext *get_internal_ro_net_ctx(Context *ctx) {
-  return reinterpret_cast<ROHostContext *>(ctx);
+ROHostContext* get_internal_ro_net_ctx(Context* ctx) {
+  return reinterpret_cast<ROHostContext*>(ctx);
 }
 
-void ROBackend::ctx_destroy(Context *ctx) {
-  ROHostContext *ro_net_host_ctx{get_internal_ro_net_ctx(ctx)};
+void ROBackend::ctx_destroy(Context* ctx) {
+  ROHostContext* ro_net_host_ctx{get_internal_ro_net_ctx(ctx)};
   delete ro_net_host_ctx;
 }
 
-int ROBackend::buffer_register_symmetric([[maybe_unused]] void *addr,
+int ROBackend::buffer_register_symmetric([[maybe_unused]] void* addr,
                                          [[maybe_unused]] size_t length,
-                                         [[maybe_unused]] void **registered_addr) {
-  LOG_WARN("rocshmem_buffer_register_symmetric is not supported by the RO "
-           "backend");
+                                         [[maybe_unused]] void** registered_addr) {
+  LOG_WARN(
+      "rocshmem_buffer_register_symmetric is not supported by the RO "
+      "backend");
   return ROCSHMEM_ERROR;
 }
 
-int ROBackend::buffer_unregister_symmetric([[maybe_unused]] void *addr) {
-  LOG_WARN("rocshmem_buffer_unregister_symmetric is not supported by the RO "
-           "backend");
+int ROBackend::buffer_unregister_symmetric([[maybe_unused]] void* addr) {
+  LOG_WARN(
+      "rocshmem_buffer_unregister_symmetric is not supported by the RO "
+      "backend");
   return ROCSHMEM_ERROR;
 }
 
 void ROBackend::accumulate_ctx_device_stats() {
   ROCStats tmp;
   for (size_t i = 0; i < envvar::max_num_contexts; i++) {
-    CHECK_HIP(hipMemcpy(&tmp, &ctx_array[i].ctxStats, sizeof(ROCStats),
-                        hipMemcpyDeviceToHost));
+    CHECK_HIP(hipMemcpy(&tmp, &ctx_array[i].ctxStats, sizeof(ROCStats), hipMemcpyDeviceToHost));
     globalStats.hostAccumulateStats(tmp);
   }
 }
@@ -328,7 +317,7 @@ void ROBackend::accumulate_default_host_ctx_stats() {
 }
 
 void ROBackend::reset_backend_stats() {
-  auto *bp{backend_proxy.get()};
+  auto* bp{backend_proxy.get()};
 
   for (size_t i = 0; i < envvar::max_num_contexts; i++) {
     bp->profiler[i].resetStats();
@@ -340,7 +329,8 @@ void ROBackend::dump_backend_stats() {
   for (int i = 0; i < NUM_STATS; i++) {
     total += globalStats.getStat(i);
   }
-  if (!total) return;
+  if (!total)
+    return;
 
   int device_id;
   CHECK_HIP(hipGetDevice(&device_id));
@@ -354,41 +344,45 @@ void ROBackend::dump_backend_stats() {
   uint64_t us_fence2{0};
   uint64_t us_wait_host{0};
 
-  auto *bp{backend_proxy.get()};
+  auto* bp{backend_proxy.get()};
 
   for (size_t i = 0; i < envvar::max_num_contexts; i++) {
     ROStats tmp;
     CHECK_HIP(hipMemcpy(&tmp, bp->profiler + i, sizeof(ROStats), hipMemcpyDeviceToHost));
     us_wait_slot += tmp.getStat(WAITING_ON_SLOT) / gpu_frequency_mhz;
-    us_pack      += tmp.getStat(PACK_QUEUE)      / gpu_frequency_mhz;
-    us_fence1    += tmp.getStat(THREAD_FENCE_1)  / gpu_frequency_mhz;
-    us_fence2    += tmp.getStat(THREAD_FENCE_2)  / gpu_frequency_mhz;
+    us_pack += tmp.getStat(PACK_QUEUE) / gpu_frequency_mhz;
+    us_fence1 += tmp.getStat(THREAD_FENCE_1) / gpu_frequency_mhz;
+    us_fence2 += tmp.getStat(THREAD_FENCE_2) / gpu_frequency_mhz;
     us_wait_host += tmp.getStat(WAITING_ON_HOST) / gpu_frequency_mhz;
   }
-  if (!us_wait_slot && !us_pack && !us_fence1 && !us_fence2 && !us_wait_host) return;
+  if (!us_wait_slot && !us_pack && !us_fence1 && !us_fence2 && !us_wait_host)
+    return;
 
   char buf[1024];
-  int pos = 0;
+  int pos     = 0;
   auto append = [&](const char* fmt, ...) {
-    if (pos >= static_cast<int>(sizeof(buf)) - 1) return;
+    if (pos >= static_cast<int>(sizeof(buf)) - 1)
+      return;
     va_list args;
     va_start(args, fmt);
     int n = vsnprintf(buf + pos, sizeof(buf) - pos, fmt, args);
     va_end(args);
-    if (n > 0) pos += n;
+    if (n > 0)
+      pos += n;
   };
 
   auto pstat = [&](const char* name, uint64_t cycles) {
     double us = static_cast<double>(cycles) / total;
-    if (us != 0.0) append("  %-30s %.2f us\n", name, us);
+    if (us != 0.0)
+      append("  %-30s %.2f us\n", name, us);
   };
 
   append("PROXY STATS\n");
-  pstat("Wait_On_Slot",  us_wait_slot);
-  pstat("Pack_Queue",    us_pack);
-  pstat("Fence_1",       us_fence1);
-  pstat("Fence_2",       us_fence2);
-  pstat("Wait_Host",     us_wait_host);
+  pstat("Wait_On_Slot", us_wait_slot);
+  pstat("Pack_Queue", us_pack);
+  pstat("Fence_1", us_fence1);
+  pstat("Fence_2", us_fence2);
+  pstat("Wait_Host", us_wait_host);
 
   LOG_INFO("%s", buf);
 }
@@ -397,7 +391,7 @@ void ROBackend::ro_net_free_runtime() {
   /*
    * Validate that a handle was passed that is not a nullptr.
    */
-  auto *bp{backend_proxy.get()};
+  auto* bp{backend_proxy.get()};
   assert(bp);
 
   /*
@@ -428,7 +422,7 @@ void ROBackend::ro_net_free_runtime() {
   /*
    * Tear down team_shared (only allocated when IPC is enabled)
    */
-  auto *team_shared{static_cast<ROTeam*>(team_tracker.get_team_shared())};
+  auto* team_shared{static_cast<ROTeam*>(team_tracker.get_team_shared())};
   if (team_shared) {
     team_shared->~ROTeam();
     CHECK_HIP(hipFree(team_shared));
@@ -437,7 +431,7 @@ void ROBackend::ro_net_free_runtime() {
   /*
    * Tear down team_world
    */
-  auto *team_world{static_cast<ROTeam*>(team_tracker.get_team_world())};
+  auto* team_world{static_cast<ROTeam*>(team_tracker.get_team_world())};
   team_world->~ROTeam();
   // CHECK_HIP(hipFree(team_world));
 
@@ -448,7 +442,7 @@ void ROBackend::ro_net_free_runtime() {
 }
 
 void ROBackend::ro_net_poll() {
-  auto *bp{backend_proxy.get()};
+  auto* bp{backend_proxy.get()};
   while (!bp->worker_thread_exit) {
     for (size_t i{0}; i < poll_block_count_; i++) {
       int16_t request_count{0};
@@ -463,12 +457,13 @@ void ROBackend::ro_net_poll() {
 }
 
 void ROBackend::initIPC() {
-  const auto &heap_bases{heap.get_heap_bases()};
+  const auto& heap_bases{heap.get_heap_bases()};
 
-  ipcImpl.ipcHostInit(transport_->getMyPe(), heap_bases,
-                      transport_->get_world_comm());
+  ipcImpl.ipcHostInit(transport_->getMyPe(), heap_bases, transport_->get_world_comm());
 }
 
-void ROBackend::global_exit(int status) { transport_->global_exit(status); }
+void ROBackend::global_exit(int status) {
+  transport_->global_exit(status);
+}
 
 }  // namespace rocshmem

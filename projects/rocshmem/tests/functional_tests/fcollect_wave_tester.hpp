@@ -46,15 +46,14 @@ class FcollectWaveTester : public Tester {
 
   virtual void preLaunchKernel() override;
 
-  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop,
-                            size_t size) override;
+  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop, size_t size) override;
 
   virtual void postLaunchKernel() override;
 
   virtual void verifyResults(size_t size) override;
 
-  T1 *source_buf;
-  T1 *dest_buf;
+  T1* source_buf;
+  T1* dest_buf;
 
  private:
   int my_pe = 0;
@@ -64,7 +63,7 @@ class FcollectWaveTester : public Tester {
    * The default value for the maximum number of teams is 40.
    */
   int num_teams = 39;
-  rocshmem_team_t *team_fcollect_wave_world_dup;
+  rocshmem_team_t* team_fcollect_wave_world_dup;
 };
 
 #include "fcollect_wave_tester.cpp"

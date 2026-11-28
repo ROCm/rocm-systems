@@ -44,22 +44,21 @@ class PutmemSignalOnStreamTester : public Tester {
 
   virtual void preLaunchKernel() override;
 
-  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop,
-                            size_t size) override;
+  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop, size_t size) override;
 
   virtual void postLaunchKernel() override;
 
   virtual void verifyResults(size_t size) override;
 
  private:
-  char *source_buf;
-  char *dest_buf;
-  uint64_t *sig_addr;
+  char* source_buf;
+  char* dest_buf;
+  uint64_t* sig_addr;
   int my_pe;
   int n_pes;
   size_t buf_size;
   int num_streams = 1;
-  int pe_target;  // Target PE to put to
+  int pe_target;                     // Target PE to put to
   int sig_op = ROCSHMEM_SIGNAL_SET;  // Signal operation
   std::vector<hipStream_t> streams;
   std::vector<hipEvent_t> start_events_timed;
@@ -69,4 +68,3 @@ class PutmemSignalOnStreamTester : public Tester {
 #include "putmem_signal_on_stream_tester.cpp"
 
 #endif
-

@@ -26,16 +26,15 @@ using namespace rocshmem;
 using namespace rocshmem::net;
 
 TEST_F(RmaEngineTestFixture, PostWriteThenPollCompletes) {
-  char *h = static_cast<char *>(heap_);
-  const char *msg = "RMAENGINE-PUT-CHECK-0123456789";
-  size_t n = strlen(msg) + 1;
+  char* h         = static_cast<char*>(heap_);
+  const char* msg = "RMAENGINE-PUT-CHECK-0123456789";
+  size_t n        = strlen(msg) + 1;
   memcpy(h + 0, msg, n);
 
-  int lane = lm_.lane(/*ctx=*/0, /*pe=*/1);
-  uint64_t wr_id = rma_.post_write(
-      lane, reinterpret_cast<uintptr_t>(h + 0), rma_.lkey_for(h + 0),
-      rma_.remote_va(1, h + 2048), rma_.rkey(1), static_cast<uint32_t>(n),
-      next_wr_id_++);
+  int lane       = lm_.lane(/*ctx=*/0, /*pe=*/1);
+  uint64_t wr_id = rma_.post_write(lane, reinterpret_cast<uintptr_t>(h + 0), rma_.lkey_for(h + 0),
+                                   rma_.remote_va(1, h + 2048), rma_.rkey(1),
+                                   static_cast<uint32_t>(n), next_wr_id_++);
   ASSERT_NE(wr_id, 0u) << "post_write failed";
 
   struct ibv_wc wc = WaitForOneCompletion();
@@ -44,16 +43,15 @@ TEST_F(RmaEngineTestFixture, PostWriteThenPollCompletes) {
 }
 
 TEST_F(RmaEngineTestFixture, PostReadThenPollCompletes) {
-  char *h = static_cast<char *>(heap_);
-  const char *msg = "RMAENGINE-GET-CHECK-0123456789";
-  size_t n = strlen(msg) + 1;
+  char* h         = static_cast<char*>(heap_);
+  const char* msg = "RMAENGINE-GET-CHECK-0123456789";
+  size_t n        = strlen(msg) + 1;
   memcpy(h + 2048, msg, n);
 
-  int lane = lm_.lane(/*ctx=*/0, /*pe=*/1);
-  uint64_t wr_id = rma_.post_read(
-      lane, reinterpret_cast<uintptr_t>(h + 4096), rma_.lkey_for(h + 4096),
-      rma_.remote_va(1, h + 2048), rma_.rkey(1), static_cast<uint32_t>(n),
-      next_wr_id_++);
+  int lane       = lm_.lane(/*ctx=*/0, /*pe=*/1);
+  uint64_t wr_id = rma_.post_read(lane, reinterpret_cast<uintptr_t>(h + 4096),
+                                  rma_.lkey_for(h + 4096), rma_.remote_va(1, h + 2048),
+                                  rma_.rkey(1), static_cast<uint32_t>(n), next_wr_id_++);
   ASSERT_NE(wr_id, 0u) << "post_read failed";
 
   struct ibv_wc wc = WaitForOneCompletion();
@@ -62,34 +60,33 @@ TEST_F(RmaEngineTestFixture, PostReadThenPollCompletes) {
 }
 
 TEST_F(RmaEngineTestFixture, PostFaddReturnsPreImage) {
-  char *h = static_cast<char *>(heap_);
-  *reinterpret_cast<uint64_t *>(h + 8192) = 100;
+  char* h                                = static_cast<char*>(heap_);
+  *reinterpret_cast<uint64_t*>(h + 8192) = 100;
 
   int lane = lm_.lane(/*ctx=*/0, /*pe=*/1);
-  uint64_t wr_id = rma_.post_fadd(lane, reinterpret_cast<uintptr_t>(scratch_),
-                                  scratch_lkey_, rma_.remote_va(1, h + 8192),
-                                  rma_.rkey(1), /*add=*/5, next_wr_id_++);
+  uint64_t wr_id =
+      rma_.post_fadd(lane, reinterpret_cast<uintptr_t>(scratch_), scratch_lkey_,
+                     rma_.remote_va(1, h + 8192), rma_.rkey(1), /*add=*/5, next_wr_id_++);
   ASSERT_NE(wr_id, 0u) << "post_fadd failed";
 
   struct ibv_wc wc = WaitForOneCompletion();
   ASSERT_EQ(wc.status, IBV_WC_SUCCESS);
-  EXPECT_EQ(*reinterpret_cast<uint64_t *>(scratch_), 100u);
-  EXPECT_EQ(*reinterpret_cast<uint64_t *>(h + 8192), 105u);
+  EXPECT_EQ(*reinterpret_cast<uint64_t*>(scratch_), 100u);
+  EXPECT_EQ(*reinterpret_cast<uint64_t*>(h + 8192), 105u);
 }
 
 TEST_F(RmaEngineTestFixture, PostCasReturnsPreImage) {
-  char *h = static_cast<char *>(heap_);
-  *reinterpret_cast<uint64_t *>(h + 8192) = 105;
+  char* h                                = static_cast<char*>(heap_);
+  *reinterpret_cast<uint64_t*>(h + 8192) = 105;
 
-  int lane = lm_.lane(/*ctx=*/0, /*pe=*/1);
-  uint64_t wr_id =
-      rma_.post_cas(lane, reinterpret_cast<uintptr_t>(scratch_),
-                    scratch_lkey_, rma_.remote_va(1, h + 8192), rma_.rkey(1),
-                    /*cmp=*/105, /*swp=*/200, next_wr_id_++);
+  int lane       = lm_.lane(/*ctx=*/0, /*pe=*/1);
+  uint64_t wr_id = rma_.post_cas(lane, reinterpret_cast<uintptr_t>(scratch_), scratch_lkey_,
+                                 rma_.remote_va(1, h + 8192), rma_.rkey(1),
+                                 /*cmp=*/105, /*swp=*/200, next_wr_id_++);
   ASSERT_NE(wr_id, 0u) << "post_cas failed";
 
   struct ibv_wc wc = WaitForOneCompletion();
   ASSERT_EQ(wc.status, IBV_WC_SUCCESS);
-  EXPECT_EQ(*reinterpret_cast<uint64_t *>(scratch_), 105u);
-  EXPECT_EQ(*reinterpret_cast<uint64_t *>(h + 8192), 200u);
+  EXPECT_EQ(*reinterpret_cast<uint64_t*>(scratch_), 105u);
+  EXPECT_EQ(*reinterpret_cast<uint64_t*>(h + 8192), 200u);
 }

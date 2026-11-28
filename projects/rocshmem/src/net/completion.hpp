@@ -50,8 +50,7 @@ class CompletionCounters {
  public:
   CompletionCounters() = default;
   explicit CompletionCounters(int num_lanes)
-      : posted_(static_cast<size_t>(num_lanes), 0),
-        completed_(static_cast<size_t>(num_lanes), 0) {}
+      : posted_(static_cast<size_t>(num_lanes), 0), completed_(static_cast<size_t>(num_lanes), 0) {}
 
   //! Record @p n newly posted operations on @p lane.
   void on_post(int lane, uint64_t n = 1) {
@@ -66,9 +65,7 @@ class CompletionCounters {
   }
 
   //! Operations posted to @p lane but not yet completed.
-  uint64_t outstanding(int lane) const {
-    return posted_[lane] - completed_[lane];
-  }
+  uint64_t outstanding(int lane) const { return posted_[lane] - completed_[lane]; }
 
   //! True once every op posted to @p lane has completed.
   bool drained(int lane) const { return posted_[lane] == completed_[lane]; }

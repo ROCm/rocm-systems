@@ -61,8 +61,9 @@ PodIds detectLocalPodIds() {
   // Load AMD SMI library dynamically
   AmdsmiLoader amdsmi;
   if (!amdsmi.isLoaded()) {
-    LOG_WARN("Pod detection: libamd_smi.so could not be loaded, or it does not export "
-             "amdsmi_get_gpu_fabric_info (requires amd-smi 26.4 or newer)");
+    LOG_WARN(
+        "Pod detection: libamd_smi.so could not be loaded, or it does not export "
+        "amdsmi_get_gpu_fabric_info (requires amd-smi 26.4 or newer)");
     return podIds;
   }
 
@@ -86,16 +87,16 @@ PodIds detectLocalPodIds() {
   }
 
   amdsmi_bdf_t bdf{};
-  bdf.domain_number = domain;
-  bdf.bus_number = bus;
-  bdf.device_number = dev;
+  bdf.domain_number   = domain;
+  bdf.bus_number      = bus;
+  bdf.device_number   = dev;
   bdf.function_number = func;
 
   amdsmi_processor_handle gpuHandle;
   status = amdsmi.get_processor_handle_from_bdf(bdf, &gpuHandle);
   if (status != AMDSMI_STATUS_SUCCESS) {
-    LOG_WARN("Pod detection: amdsmi_get_processor_handle_from_bdf(%s) failed with status %d",
-             bdfId, static_cast<int>(status));
+    LOG_WARN("Pod detection: amdsmi_get_processor_handle_from_bdf(%s) failed with status %d", bdfId,
+             static_cast<int>(status));
     amdsmi.shut_down();
     return podIds;
   }
@@ -115,10 +116,10 @@ PodIds detectLocalPodIds() {
   podIds.virtualPodId = fabricInfo.info.v1.vpod_id;
 
   if (IS_PODIDS_ZERO(podIds)) {
-    LOG_WARN("Pod detection: %s reports an all-zero pod id (vpod_id=%u, accel_state=%u); "
-             "the driver is not exposing fabric pod membership on this device",
-             bdfId, fabricInfo.info.v1.vpod_id,
-             static_cast<unsigned>(fabricInfo.info.v1.accel_state));
+    LOG_WARN(
+        "Pod detection: %s reports an all-zero pod id (vpod_id=%u, accel_state=%u); "
+        "the driver is not exposing fabric pod membership on this device",
+        bdfId, fabricInfo.info.v1.vpod_id, static_cast<unsigned>(fabricInfo.info.v1.accel_state));
   }
 
   // Cleanup AMD SMI

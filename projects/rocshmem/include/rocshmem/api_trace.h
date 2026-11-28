@@ -31,7 +31,7 @@
 #include <hip/hip_runtime_api.h>
 
 // rocshmem_team_t mirrors the definition in rocshmem_common.hpp's namespace.
-typedef uint64_t *rocshmem_team_t;
+typedef uint64_t* rocshmem_team_t;
 
 #ifdef __cplusplus
 extern "C" {
@@ -52,52 +52,47 @@ typedef void (*quiet_on_stream_fn_t)(hipStream_t);
 
 typedef void (*sync_all_on_stream_fn_t)(hipStream_t);
 
-typedef void (*alltoallmem_on_stream_fn_t)(rocshmem_team_t team, void *dest,
-                                           const void *source, size_t size,
-                                           hipStream_t stream);
+typedef void (*alltoallmem_on_stream_fn_t)(rocshmem_team_t team, void* dest, const void* source,
+                                           size_t size, hipStream_t stream);
 
-typedef void (*broadcastmem_on_stream_fn_t)(rocshmem_team_t team, void *dest,
-                                            const void *source, size_t nelems,
-                                            int pe_root, hipStream_t stream);
+typedef void (*broadcastmem_on_stream_fn_t)(rocshmem_team_t team, void* dest, const void* source,
+                                            size_t nelems, int pe_root, hipStream_t stream);
 
-typedef void (*getmem_on_stream_fn_t)(void *dest, const void *source, size_t nelems,
-                                      int pe, hipStream_t stream);
+typedef void (*getmem_on_stream_fn_t)(void* dest, const void* source, size_t nelems, int pe,
+                                      hipStream_t stream);
 
-typedef void (*putmem_on_stream_fn_t)(void *dest, const void *source, size_t nelems,
-                                      int pe, hipStream_t stream);
+typedef void (*putmem_on_stream_fn_t)(void* dest, const void* source, size_t nelems, int pe,
+                                      hipStream_t stream);
 
-typedef void (*putmem_signal_on_stream_fn_t)(void *dest, const void *source,
-                                             size_t nelems, uint64_t *sig_addr,
-                                             uint64_t signal, int sig_op, int pe,
-                                             hipStream_t stream);
+typedef void (*putmem_signal_on_stream_fn_t)(void* dest, const void* source, size_t nelems,
+                                             uint64_t* sig_addr, uint64_t signal, int sig_op,
+                                             int pe, hipStream_t stream);
 
-typedef void (*signal_wait_until_on_stream_fn_t)(uint64_t *sig_addr, int cmp,
-                                                 uint64_t cmp_value,
+typedef void (*signal_wait_until_on_stream_fn_t)(uint64_t* sig_addr, int cmp, uint64_t cmp_value,
                                                  hipStream_t stream);
 
-typedef void (*signal_add_on_stream_fn_t)(uint64_t *sig_addr, uint64_t signal,
-                                          int pe, hipStream_t stream);
+typedef void (*signal_add_on_stream_fn_t)(uint64_t* sig_addr, uint64_t signal, int pe,
+                                          hipStream_t stream);
 
-typedef void (*signal_set_on_stream_fn_t)(uint64_t *sig_addr, uint64_t signal,
-                                          int pe, hipStream_t stream);
+typedef void (*signal_set_on_stream_fn_t)(uint64_t* sig_addr, uint64_t signal, int pe,
+                                          hipStream_t stream);
 
-typedef struct rocshmemApiFuncTable
-{
-    // DO NOT REORDER - ADD NEW FUNCTIONS AT BOTTOM ONLY
-    uint64_t                                  size;
+typedef struct rocshmemApiFuncTable {
+  // DO NOT REORDER - ADD NEW FUNCTIONS AT BOTTOM ONLY
+  uint64_t size;
 
-    // Host Stream Operations (11 functions)
-    barrier_all_on_stream_fn_t                barrier_all_on_stream_fn;
-    quiet_on_stream_fn_t                      quiet_on_stream_fn;
-    sync_all_on_stream_fn_t                   sync_all_on_stream_fn;
-    alltoallmem_on_stream_fn_t                alltoallmem_on_stream_fn;
-    broadcastmem_on_stream_fn_t               broadcastmem_on_stream_fn;
-    getmem_on_stream_fn_t                     getmem_on_stream_fn;
-    putmem_on_stream_fn_t                     putmem_on_stream_fn;
-    putmem_signal_on_stream_fn_t              putmem_signal_on_stream_fn;
-    signal_wait_until_on_stream_fn_t          signal_wait_until_on_stream_fn;
-    signal_add_on_stream_fn_t                 signal_add_on_stream_fn;
-    signal_set_on_stream_fn_t                 signal_set_on_stream_fn;
+  // Host Stream Operations (11 functions)
+  barrier_all_on_stream_fn_t barrier_all_on_stream_fn;
+  quiet_on_stream_fn_t quiet_on_stream_fn;
+  sync_all_on_stream_fn_t sync_all_on_stream_fn;
+  alltoallmem_on_stream_fn_t alltoallmem_on_stream_fn;
+  broadcastmem_on_stream_fn_t broadcastmem_on_stream_fn;
+  getmem_on_stream_fn_t getmem_on_stream_fn;
+  putmem_on_stream_fn_t putmem_on_stream_fn;
+  putmem_signal_on_stream_fn_t putmem_signal_on_stream_fn;
+  signal_wait_until_on_stream_fn_t signal_wait_until_on_stream_fn;
+  signal_add_on_stream_fn_t signal_add_on_stream_fn;
+  signal_set_on_stream_fn_t signal_set_on_stream_fn;
 
 } rocshmemApiFuncTable;
 

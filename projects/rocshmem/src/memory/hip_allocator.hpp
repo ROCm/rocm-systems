@@ -50,12 +50,7 @@
 
 namespace rocshmem {
 
-enum HIPIpcHandleType {
-  HandleTypeLegacy = 0,
-  HandleTypePosix,
-  HandleTypeFabric,
-  HandleTypeLast
-};
+enum HIPIpcHandleType { HandleTypeLegacy = 0, HandleTypePosix, HandleTypeFabric, HandleTypeLast };
 
 #if HIP_VERSION >= 70200000
 struct HIPIpcMemHandlePosix_t {
@@ -66,82 +61,64 @@ struct HIPIpcMemHandlePosix_t {
 #endif
 
 class HIPIpcHandleVec {
-public:
+ public:
   virtual ~HIPIpcHandleVec() = default;
 
   virtual HIPIpcHandleType GetIpcHandleType() = 0;
-  virtual void* GetHandleVecElem(int elem) = 0;
+  virtual void* GetHandleVecElem(int elem)    = 0;
 };
 
 class HIPIpcHandleLegacyVec : public HIPIpcHandleVec {
-public:
+ public:
   friend class HIPAllocator;
 
   HIPIpcHandleType GetIpcHandleType() { return HandleTypeLegacy; }
 
-  void* GetHandleVecElem(int elem)
-  {
-    return reinterpret_cast<void*> (&this->handle.at(elem));
-  }
+  void* GetHandleVecElem(int elem) { return reinterpret_cast<void*>(&this->handle.at(elem)); }
 
-protected:
+ protected:
   std::vector<hipIpcMemHandle_t> handle;
-
 };
 
 #if HIP_VERSION >= 70200000
 class HIPIpcHandlePosixVec : public HIPIpcHandleVec {
-public:
+ public:
   friend class HIPAllocatorVMMPosixFd;
 
   HIPIpcHandleType GetIpcHandleType() { return HandleTypePosix; }
 
-  void* GetHandleVecElem(int elem)
-  {
-    return reinterpret_cast<void*> (&this->handle.at(elem));
-  }
+  void* GetHandleVecElem(int elem) { return reinterpret_cast<void*>(&this->handle.at(elem)); }
 
-protected:
+ protected:
   std::vector<HIPIpcMemHandlePosix_t> handle;
-
 };
 #endif
 
 class HIPAllocator : public MemoryAllocator {
  public:
-
   HIPAllocator() : MemoryAllocator(hipMalloc, hipFree) {}
 
-  HIPAllocator(hipError_t (*hip_alloc_fn)(void**, size_t),
-               hipError_t (*hip_free_fn)(void*)) :
-      MemoryAllocator (hip_alloc_fn, hip_free_fn) {}
+  HIPAllocator(hipError_t (*hip_alloc_fn)(void**, size_t), hipError_t (*hip_free_fn)(void*))
+      : MemoryAllocator(hip_alloc_fn, hip_free_fn) {}
 
-  HIPAllocator (hipError_t (*hip_alloc_fn)(void**, size_t, unsigned),
-                hipError_t (*hip_free_fn)(void*), unsigned flags) :
-    MemoryAllocator (hip_alloc_fn, hip_free_fn, flags) {}
+  HIPAllocator(hipError_t (*hip_alloc_fn)(void**, size_t, unsigned),
+               hipError_t (*hip_free_fn)(void*), unsigned flags)
+      : MemoryAllocator(hip_alloc_fn, hip_free_fn, flags) {}
 
   virtual ~HIPAllocator() = default;
 
-  virtual hipError_t GetIpcHandle(void *dev_ptr, void *handle)
-  {
-    return hipIpcGetMemHandle(reinterpret_cast<hipIpcMemHandle_t *>(handle), dev_ptr);
+  virtual hipError_t GetIpcHandle(void* dev_ptr, void* handle) {
+    return hipIpcGetMemHandle(reinterpret_cast<hipIpcMemHandle_t*>(handle), dev_ptr);
   }
 
-  virtual hipError_t OpenIpcHandle(void **dev_ptr, void *handle)
-  {
-    return hipIpcOpenMemHandle(dev_ptr, *(reinterpret_cast<hipIpcMemHandle_t *>(handle)),
+  virtual hipError_t OpenIpcHandle(void** dev_ptr, void* handle) {
+    return hipIpcOpenMemHandle(dev_ptr, *(reinterpret_cast<hipIpcMemHandle_t*>(handle)),
                                hipIpcMemLazyEnablePeerAccess);
   }
 
-  virtual hipError_t CloseIpcHandle(void *dev_ptr)
-  {
-    return hipIpcCloseMemHandle(dev_ptr);
-  }
+  virtual hipError_t CloseIpcHandle(void* dev_ptr) { return hipIpcCloseMemHandle(dev_ptr); }
 
-  virtual size_t GetIpcHandleSize()
-  {
-    return sizeof(hipIpcMemHandle_t);
-  }
+  virtual size_t GetIpcHandleSize() { return sizeof(hipIpcMemHandle_t); }
 
 #if HIP_VERSION >= 70200000
   /**
@@ -151,10 +128,7 @@ class HIPAllocator : public MemoryAllocator {
    * override this so callers can verify that a user buffer's requested handle
    * type matches the one used by the symmetric heap.
    */
-  virtual hipMemAllocationHandleType GetVMMHandleType() const
-  {
-    return hipMemHandleTypeNone;
-  }
+  virtual hipMemAllocationHandleType GetVMMHandleType() const { return hipMemHandleTypeNone; }
 
   /**
    * @brief Validate that a user buffer can be registered as symmetric.
@@ -172,8 +146,7 @@ class HIPAllocator : public MemoryAllocator {
    * @param[in] device_id  This PE's device ordinal
    * @return true if all local checks pass, false otherwise
    */
-  bool ValidateVMMRegistration(const void *ptr, size_t size, int device_id) const
-  {
+  bool ValidateVMMRegistration(const void* ptr, size_t size, int device_id) const {
     /* Non-VMM allocators cannot back symmetric registrations. */
     hipMemAllocationHandleType handle_type = GetVMMHandleType();
     if (handle_type == hipMemHandleTypeNone) {
@@ -200,12 +173,11 @@ class HIPAllocator : public MemoryAllocator {
      * hipMalloc or host memory), whereas hipMemGetAccess fails gracefully with
      * an error, so use it as a safe gate.
      */
-    hipMemLocation location = {};
-    location.type = hipMemLocationTypeDevice;
-    location.id = device_id;
+    hipMemLocation location         = {};
+    location.type                   = hipMemLocationTypeDevice;
+    location.id                     = device_id;
     unsigned long long access_flags = 0;
-    if (hipMemGetAccess(&access_flags, &location, const_cast<void *>(ptr)) !=
-        hipSuccess) {
+    if (hipMemGetAccess(&access_flags, &location, const_cast<void*>(ptr)) != hipSuccess) {
       return false;
     }
 
@@ -223,13 +195,12 @@ class HIPAllocator : public MemoryAllocator {
      * Now safe to retain the backing VMM handle to inspect its properties.
      */
     hipMemGenericAllocationHandle_t handle;
-    if (hipMemRetainAllocationHandle(&handle, const_cast<void *>(ptr)) !=
-        hipSuccess) {
+    if (hipMemRetainAllocationHandle(&handle, const_cast<void*>(ptr)) != hipSuccess) {
       return false;
     }
 
     hipMemAllocationProp prop = {};
-    hipError_t err = hipMemGetAllocationPropertiesFromHandle(&prop, handle);
+    hipError_t err            = hipMemGetAllocationPropertiesFromHandle(&prop, handle);
     (void)hipMemRelease(handle);
     if (err != hipSuccess) {
       return false;
@@ -262,8 +233,7 @@ class HIPAllocator : public MemoryAllocator {
    * @param[out] alias   Filled with the newly mapped virtual address
    * @return hipSuccess, or an error (hipErrorNotSupported for non-VMM allocators)
    */
-  hipError_t MapLocalAlias(void *dev_ptr, size_t length, void **alias)
-  {
+  hipError_t MapLocalAlias(void* dev_ptr, size_t length, void** alias) {
     if (GetVMMHandleType() == hipMemHandleTypeNone) {
       return hipErrorNotSupported;
     }
@@ -277,8 +247,8 @@ class HIPAllocator : public MemoryAllocator {
       return err;
     }
 
-    void *va = nullptr;
-    err = hipMemAddressReserve(&va, length, 0, 0, 0);
+    void* va = nullptr;
+    err      = hipMemAddressReserve(&va, length, 0, 0, 0);
     if (err != hipSuccess) {
       (void)hipMemRelease(handle);
       return err;
@@ -292,16 +262,16 @@ class HIPAllocator : public MemoryAllocator {
     }
 
     int device_id = 0;
-    err = hipGetDevice(&device_id);
+    err           = hipGetDevice(&device_id);
     if (err == hipSuccess) {
       hipMemAccessDesc access_desc[2];
       access_desc[0].location.type = hipMemLocationTypeDevice;
-      access_desc[0].location.id = device_id;
-      access_desc[0].flags = hipMemAccessFlagsProtReadWrite;
+      access_desc[0].location.id   = device_id;
+      access_desc[0].flags         = hipMemAccessFlagsProtReadWrite;
       access_desc[1].location.type = hipMemLocationTypeHost;
-      access_desc[1].location.id = 0;
-      access_desc[1].flags = hipMemAccessFlagsProtReadWrite;
-      err = hipMemSetAccess(va, length, access_desc, 2);
+      access_desc[1].location.id   = 0;
+      access_desc[1].flags         = hipMemAccessFlagsProtReadWrite;
+      err                          = hipMemSetAccess(va, length, access_desc, 2);
     }
     if (err != hipSuccess) {
       (void)hipMemUnmap(va, length);
@@ -324,12 +294,11 @@ class HIPAllocator : public MemoryAllocator {
    * @param[in] length Length in bytes used when the alias was created
    * @return hipSuccess or the first error encountered
    */
-  hipError_t UnmapLocalAlias(void *alias, size_t length)
-  {
+  hipError_t UnmapLocalAlias(void* alias, size_t length) {
     if (alias == nullptr || length == 0) {
       return hipErrorInvalidValue;
     }
-    hipError_t err = hipMemUnmap(alias, length);
+    hipError_t err      = hipMemUnmap(alias, length);
     hipError_t free_err = hipMemAddressFree(alias, length);
     return (err != hipSuccess) ? err : free_err;
   }
@@ -346,9 +315,7 @@ class HIPAllocator : public MemoryAllocator {
    * @param[in]  length  Length of the region in bytes
    * @param[out] handle  Filled with the shareable IPC handle
    */
-  virtual hipError_t GetIpcHandleFromPtr(void * /*dev_ptr*/, size_t /*length*/,
-                                         void * /*handle*/)
-  {
+  virtual hipError_t GetIpcHandleFromPtr(void* /*dev_ptr*/, size_t /*length*/, void* /*handle*/) {
     return hipErrorNotSupported;
   }
 
@@ -360,36 +327,32 @@ class HIPAllocator : public MemoryAllocator {
    *
    * @param[in] handle Handle previously filled by GetIpcHandleFromPtr()
    */
-  virtual hipError_t CloseExportedHandle(void * /*handle*/)
-  {
-    return hipSuccess;
-  }
+  virtual hipError_t CloseExportedHandle(void* /*handle*/) { return hipSuccess; }
 
-  virtual HIPIpcHandleVec* AllocateIpcHandleVec(int num_elems)
-  {
+  virtual HIPIpcHandleVec* AllocateIpcHandleVec(int num_elems) {
     HIPIpcHandleLegacyVec* vec = new HIPIpcHandleLegacyVec();
     vec->handle.resize(num_elems);
     return vec;
   }
 
-  virtual hipError_t GetDmabufHandle(void *dev_ptr, size_t size, int *dmabuf_fd, uint64_t *dmabuf_offset)
-  {
+  virtual hipError_t GetDmabufHandle(void* dev_ptr, size_t size, int* dmabuf_fd,
+                                     uint64_t* dmabuf_offset) {
     if (dev_ptr == nullptr || dmabuf_fd == nullptr || dmabuf_offset == nullptr) {
       return hipErrorInvalidValue;
     }
 
     // Use HSA API to export dmabuf from device pointer
-    uint64_t offset = 0;
-    int fd = -1;
+    uint64_t offset     = 0;
+    int fd              = -1;
     hsa_status_t status = hsa_amd_portable_export_dmabuf(dev_ptr, size, &fd, &offset);
 
     if (status != HSA_STATUS_SUCCESS) {
-      *dmabuf_fd = -1;
+      *dmabuf_fd     = -1;
       *dmabuf_offset = 0;
       return hipErrorInvalidValue;
     }
 
-    *dmabuf_fd = fd;
+    *dmabuf_fd     = fd;
     *dmabuf_offset = offset;
     return hipSuccess;
   }
@@ -400,8 +363,7 @@ using HIPAllocatorCoarsegrained = HIPAllocator;
 class HIPAllocatorFinegrained : public HIPAllocator {
  public:
   HIPAllocatorFinegrained()
-      : HIPAllocator(hipExtMallocWithFlags, hipFree,
-                     hipDeviceMallocFinegrained) {
+      : HIPAllocator(hipExtMallocWithFlags, hipFree, hipDeviceMallocFinegrained) {
     type_ = AllocatorTypeFinegrained;
   }
 };
@@ -409,9 +371,7 @@ class HIPAllocatorFinegrained : public HIPAllocator {
 #if defined HAVE_DEVICE_MALLOC_UNCACHED
 class HIPAllocatorUncached : public HIPAllocator {
  public:
-  HIPAllocatorUncached()
-      : HIPAllocator(hipExtMallocWithFlags, hipFree,
-                     hipDeviceMallocUncached) {
+  HIPAllocatorUncached() : HIPAllocator(hipExtMallocWithFlags, hipFree, hipDeviceMallocUncached) {
     type_ = AllocatorTypeUncached;
   }
 };
@@ -433,23 +393,23 @@ class HIPAllocatorVMMPosixFd : public HIPAllocator {
 
   // Export a generic VMM handle to a POSIX shareable fd and fill the IPC handle
   // struct. The exported fd is returned via out_fd.
-  hipError_t ExportToPosixHandle(hipMemGenericAllocationHandle_t generic_handle,
-                                 size_t size, void *handle, int *out_fd);
+  hipError_t ExportToPosixHandle(hipMemGenericAllocationHandle_t generic_handle, size_t size,
+                                 void* handle, int* out_fd);
 
  public:
   HIPAllocatorVMMPosixFd();
 
-  hipError_t GetIpcHandle(void *dev_ptr, void *handle) override;
-  hipError_t OpenIpcHandle(void **dev_ptr, void *handle) override;
-  hipError_t CloseIpcHandle(void *dev_ptr) override;
+  hipError_t GetIpcHandle(void* dev_ptr, void* handle) override;
+  hipError_t OpenIpcHandle(void** dev_ptr, void* handle) override;
+  hipError_t CloseIpcHandle(void* dev_ptr) override;
   size_t GetIpcHandleSize() override;
   HIPIpcHandleVec* AllocateIpcHandleVec(int num_elems) override;
-  hipError_t GetDmabufHandle(void *dev_ptr, size_t size, int *dmabuf_fd, uint64_t *dmabuf_offset) override;
-  hipError_t GetIpcHandleFromPtr(void *dev_ptr, size_t length, void *handle) override;
-  hipError_t CloseExportedHandle(void *handle) override;
+  hipError_t GetDmabufHandle(void* dev_ptr, size_t size, int* dmabuf_fd,
+                             uint64_t* dmabuf_offset) override;
+  hipError_t GetIpcHandleFromPtr(void* dev_ptr, size_t length, void* handle) override;
+  hipError_t CloseExportedHandle(void* handle) override;
 
-  hipMemAllocationHandleType GetVMMHandleType() const override
-  {
+  hipMemAllocationHandleType GetVMMHandleType() const override {
     return hipMemHandleTypePosixFileDescriptor;
   }
 };
@@ -469,17 +429,16 @@ struct HIPIpcMemHandleFabric_t {
  * IPC handle vector for fabric handles
  */
 class HIPIpcHandleFabricVec : public HIPIpcHandleVec {
-public:
+ public:
   friend class HIPAllocatorVMMFabric;
 
   HIPIpcHandleType GetIpcHandleType() override { return HandleTypeFabric; }
 
-  void* GetHandleVecElem(int elem) override
-  {
+  void* GetHandleVecElem(int elem) override {
     return reinterpret_cast<void*>(&this->handle.at(elem));
   }
 
-protected:
+ protected:
   std::vector<HIPIpcMemHandleFabric_t> handle;
 };
 
@@ -502,31 +461,28 @@ class HIPAllocatorVMMFabric : public HIPAllocator {
 
   // Export a generic VMM handle to a fabric handle and fill the IPC handle
   // struct.
-  hipError_t ExportToFabricHandle(hipMemGenericAllocationHandle_t generic_handle,
-                                  size_t size, void *handle);
+  hipError_t ExportToFabricHandle(hipMemGenericAllocationHandle_t generic_handle, size_t size,
+                                  void* handle);
 
  public:
   HIPAllocatorVMMFabric();
 
-  hipError_t GetIpcHandle(void *dev_ptr, void *handle) override;
-  hipError_t OpenIpcHandle(void **dev_ptr, void *handle) override;
-  hipError_t CloseIpcHandle(void *dev_ptr) override;
+  hipError_t GetIpcHandle(void* dev_ptr, void* handle) override;
+  hipError_t OpenIpcHandle(void** dev_ptr, void* handle) override;
+  hipError_t CloseIpcHandle(void* dev_ptr) override;
   size_t GetIpcHandleSize() override;
   HIPIpcHandleVec* AllocateIpcHandleVec(int num_elems) override;
-  hipError_t GetDmabufHandle(void *dev_ptr, size_t size, int *dmabuf_fd, uint64_t *dmabuf_offset) override;
-  hipError_t GetIpcHandleFromPtr(void *dev_ptr, size_t length, void *handle) override;
+  hipError_t GetDmabufHandle(void* dev_ptr, size_t size, int* dmabuf_fd,
+                             uint64_t* dmabuf_offset) override;
+  hipError_t GetIpcHandleFromPtr(void* dev_ptr, size_t length, void* handle) override;
 
-  hipMemAllocationHandleType GetVMMHandleType() const override
-  {
-    return hipMemHandleTypeFabric;
-  }
+  hipMemAllocationHandleType GetVMMHandleType() const override { return hipMemHandleTypeFabric; }
 };
 #endif  // HAVE_AMDSMI_GPU_FABRIC_INFO
 
 class HIPHostAllocator : public MemoryAllocator {
  public:
-  HIPHostAllocator()
-      : MemoryAllocator(hipHostMalloc, hipFree, hipHostMallocCoherent) {}
+  HIPHostAllocator() : MemoryAllocator(hipHostMalloc, hipFree, hipHostMallocCoherent) {}
 };
 
 class PosixAligned64Allocator : public MemoryAllocator {

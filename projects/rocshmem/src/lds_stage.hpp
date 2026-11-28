@@ -41,8 +41,7 @@
 #define __has_builtin(x) 0
 #endif
 
-#if defined(__HIP_PLATFORM_AMD__) &&                        \
-    __has_builtin(__builtin_amdgcn_tensor_load_to_lds) &&   \
+#if defined(__HIP_PLATFORM_AMD__) && __has_builtin(__builtin_amdgcn_tensor_load_to_lds) && \
     __has_builtin(__builtin_amdgcn_tensor_store_from_lds)
 #define HIP_HAVE_TDM_INTRINSICS 1
 #else
@@ -52,8 +51,7 @@
 #if defined(__HIP_PLATFORM_AMD__) &&                                   \
     __has_builtin(__builtin_amdgcn_global_load_async_to_lds_b32) &&    \
     __has_builtin(__builtin_amdgcn_global_store_async_from_lds_b32) && \
-    __has_builtin(__builtin_amdgcn_asyncmark) &&                       \
-    __has_builtin(__builtin_amdgcn_wait_asyncmark)
+    __has_builtin(__builtin_amdgcn_asyncmark) && __has_builtin(__builtin_amdgcn_wait_asyncmark)
 #define HIP_HAVE_LDS_ASYNC_INTRINSICS 1
 #else
 #define HIP_HAVE_LDS_ASYNC_INTRINSICS 0
@@ -62,10 +60,10 @@
 // USE_TDM picks TDM; plain USE_LDS_STAGE picks async. Both gfx1250-only.
 #if defined(__gfx1250__) || defined(__gfx1250_strict__)
 #if defined(USE_TDM) && HIP_HAVE_TDM_INTRINSICS
-#define ROCSHMEM_LDS_STAGE_ENABLED 1
+#define ROCSHMEM_LDS_STAGE_ENABLED     1
 #define ROCSHMEM_LDS_STAGE_BACKEND_TDM 1
 #elif defined(USE_LDS_STAGE) && HIP_HAVE_LDS_ASYNC_INTRINSICS
-#define ROCSHMEM_LDS_STAGE_ENABLED 1
+#define ROCSHMEM_LDS_STAGE_ENABLED       1
 #define ROCSHMEM_LDS_STAGE_BACKEND_ASYNC 1
 #else
 #define ROCSHMEM_LDS_STAGE_ENABLED 0
@@ -92,7 +90,8 @@ __host__ __device__ constexpr size_t lds_bytes_for_tile(uint32_t tile_bytes) {
 // Bytes covered by whole tiles of tile_bytes_cap (or a partial single tile
 // if total_bytes is smaller than one).
 __device__ __forceinline__ size_t covered_bytes(size_t total_bytes, uint32_t tile_bytes_cap) {
-  if (total_bytes == 0) return 0;
+  if (total_bytes == 0)
+    return 0;
   if (total_bytes < tile_bytes_cap) {
     constexpr size_t elem_bytes = size_t{1} << FlatCopyElementLog2;
     return total_bytes - (total_bytes % elem_bytes);
@@ -114,35 +113,35 @@ enum class DataSize : uint32_t { Bits8 = 0, Bits16 = 1, Bits32 = 2, Bits64 = 3 }
 // cachepolicy = th_bits[2:0] | (scope_bits[1:0] << 3).
 // Memory scope (cachepolicy bits[4:3]), pre-shifted into place here.
 enum class Scope : unsigned {
-  Wgp = 0,           // workgroup processor: L1-level coherence (default)
-  ShaderEngine = 8,  // GL2/L2-level coherence within one shader engine
-  Device = 16,       // all shader engines on this GPU
-  System = 24,       // CPU + all GPUs on the node
+  Wgp          = 0,   // workgroup processor: L1-level coherence (default)
+  ShaderEngine = 8,   // GL2/L2-level coherence within one shader engine
+  Device       = 16,  // all shader engines on this GPU
+  System       = 24,  // CPU + all GPUs on the node
 };
 
 // Temporal hint (cachepolicy bits[2:0]) for tensor_load_to_lds. th=7 is
 // undefined for loads, so it's intentionally not a member here.
 enum class LoadTemporalHint : unsigned {
-  Default = 0,                 // write-allocate, cached in L1 and L2
-  NonTemporal = 1,             // TH_LOAD_NT: no L1 allocation
-  HwManaged = 2,               // TH_LOAD_HT: hardware-managed temporal hint
-  LastUse = 3,                 // TH_LOAD_LU: evict from L1 after this read
+  Default                = 0,  // write-allocate, cached in L1 and L2
+  NonTemporal            = 1,  // TH_LOAD_NT: no L1 allocation
+  HwManaged              = 2,  // TH_LOAD_HT: hardware-managed temporal hint
+  LastUse                = 3,  // TH_LOAD_LU: evict from L1 after this read
   NonTemporalReadThrough = 4,  // TH_LOAD_NT_RT
   ReadThroughNonTemporal = 5,  // TH_LOAD_RT_NT
-  NonTemporalHwManaged = 6,    // TH_LOAD_NT_HT
+  NonTemporalHwManaged   = 6,  // TH_LOAD_NT_HT
 };
 
 // Temporal hint for tensor_store_from_lds. Same bit positions as
 // LoadTemporalHint, but th=3/th=7 mean something different for stores.
 enum class StoreTemporalHint : unsigned {
-  Default = 0,                 // write-back
-  NonTemporal = 1,             // TH_STORE_NT: non-temporal write-through
-  HwManaged = 2,               // TH_STORE_HT: hardware-managed temporal hint
-  WriteBack = 3,               // TH_STORE_WB: explicit write-back
+  Default                = 0,  // write-back
+  NonTemporal            = 1,  // TH_STORE_NT: non-temporal write-through
+  HwManaged              = 2,  // TH_STORE_HT: hardware-managed temporal hint
+  WriteBack              = 3,  // TH_STORE_WB: explicit write-back
   NonTemporalReadThrough = 4,  // TH_STORE_NT_RT
   ReadThroughNonTemporal = 5,  // TH_STORE_RT_NT
-  NonTemporalHwManaged = 6,    // TH_STORE_NT_HT
-  NonTemporalWriteBack = 7,    // TH_STORE_NT_WB
+  NonTemporalHwManaged   = 6,  // TH_STORE_NT_HT
+  NonTemporalWriteBack   = 7,  // TH_STORE_NT_WB
 };
 
 constexpr int make_cache_policy(LoadTemporalHint th, Scope scope = Scope::Wgp) {
@@ -193,7 +192,8 @@ __device__ __forceinline__ i32x8 make_group1(DataSize data_size, uint32_t tensor
   s[7] = static_cast<uint32_t>((tensor_dim1_stride >> 16) & 0xFFFFFFFFull);
 
   i32x8 g1{};
-  for (int i = 0; i < 8; ++i) g1[i] = static_cast<int32_t>(s[i]);
+  for (int i = 0; i < 8; ++i)
+    g1[i] = static_cast<int32_t>(s[i]);
   return g1;
 }
 
@@ -231,12 +231,12 @@ __device__ __forceinline__ void store_from_lds(u32x4 group0, i32x8 group1,
 }
 
 template <int CachePolicy>
-__device__ __forceinline__ void load_to_lds(const Descriptor2D &d) {
+__device__ __forceinline__ void load_to_lds(const Descriptor2D& d) {
   load_to_lds<CachePolicy>(d.group0, d.group1);
 }
 
 template <int CachePolicy>
-__device__ __forceinline__ void store_from_lds(const Descriptor2D &d) {
+__device__ __forceinline__ void store_from_lds(const Descriptor2D& d) {
   store_from_lds<CachePolicy>(d.group0, d.group1);
 }
 
@@ -244,14 +244,15 @@ __device__ __forceinline__ void store_from_lds(const Descriptor2D &d) {
 // (tensor_wait<0>() drains each load+store pair). Otherwise serialized.
 // tile_bytes_cap must be a multiple of 8 bytes.
 template <int LoadCachePolicy, int StoreCachePolicy>
-__device__ inline void copy_pipelined_shallow(void *dst, const void *src, size_t bytes,
-                                              void *lds_scratch, uint32_t tile_bytes_cap,
+__device__ inline void copy_pipelined_shallow(void* dst, const void* src, size_t bytes,
+                                              void* lds_scratch, uint32_t tile_bytes_cap,
                                               bool double_buffered) {
   const size_t covered = covered_bytes(bytes, tile_bytes_cap);
-  if (covered == 0) return;
+  if (covered == 0)
+    return;
   const uint32_t tile_bytes =
       (bytes < tile_bytes_cap) ? static_cast<uint32_t>(covered) : tile_bytes_cap;
-  const size_t full_tiles = covered / tile_bytes;
+  const size_t full_tiles  = covered / tile_bytes;
   const uint32_t tile_dim0 = tile_bytes >> FlatCopyElementLog2;
 
   // Layout is invariant across tiles -- only GROUP0 (addresses) changes.
@@ -260,9 +261,9 @@ __device__ inline void copy_pipelined_shallow(void *dst, const void *src, size_t
                             /*tile_dim0=*/tile_dim0, /*tile_dim1=*/1,
                             /*tensor_dim0_stride=*/tile_dim0, /*tensor_dim1_stride=*/tile_dim0);
 
-  auto *dst_bytes = static_cast<char *>(dst);
-  const auto *src_bytes = static_cast<const char *>(src);
-  auto *lds_base = static_cast<uint8_t *>(lds_scratch);
+  auto* dst_bytes       = static_cast<char*>(dst);
+  const auto* src_bytes = static_cast<const char*>(src);
+  auto* lds_base        = static_cast<uint8_t*>(lds_scratch);
 
   if (double_buffered) {
     uintptr_t ping = reinterpret_cast<uintptr_t>(lds_base);
@@ -288,8 +289,8 @@ __device__ inline void copy_pipelined_shallow(void *dst, const void *src, size_t
       store_from_lds<StoreCachePolicy>(desc);
 
       uintptr_t tmp = ping;
-      ping = pong;
-      pong = tmp;
+      ping          = pong;
+      pong          = tmp;
     }
     // Drain the last in-flight load+store pair.
     tensor_wait<0>();
@@ -312,23 +313,24 @@ __device__ inline void copy_pipelined_shallow(void *dst, const void *src, size_t
 // Same as copy_pipelined_shallow, but pipeline depth 2 (tensor_wait<1>()):
 // op N-2 is always done by the time op N waits.
 template <int LoadCachePolicy, int StoreCachePolicy>
-__device__ inline void copy_pipelined_deep(void *dst, const void *src, size_t bytes,
-                                           void *lds_scratch, uint32_t tile_bytes_cap) {
+__device__ inline void copy_pipelined_deep(void* dst, const void* src, size_t bytes,
+                                           void* lds_scratch, uint32_t tile_bytes_cap) {
   const size_t covered = covered_bytes(bytes, tile_bytes_cap);
-  if (covered == 0) return;
+  if (covered == 0)
+    return;
   const uint32_t tile_bytes =
       (bytes < tile_bytes_cap) ? static_cast<uint32_t>(covered) : tile_bytes_cap;
-  const size_t full_tiles = covered / tile_bytes;
+  const size_t full_tiles  = covered / tile_bytes;
   const uint32_t tile_dim0 = tile_bytes >> FlatCopyElementLog2;
 
   Descriptor2D desc;
   desc.group1 = make_group1(DataSize::Bits64, tile_dim0, 1, tile_dim0, 1, tile_dim0, tile_dim0);
 
-  auto *dst_bytes = static_cast<char *>(dst);
-  const auto *src_bytes = static_cast<const char *>(src);
+  auto* dst_bytes        = static_cast<char*>(dst);
+  const auto* src_bytes  = static_cast<const char*>(src);
   const uintptr_t buf[2] = {
       reinterpret_cast<uintptr_t>(lds_scratch),
-      reinterpret_cast<uintptr_t>(static_cast<uint8_t *>(lds_scratch) + tile_bytes)};
+      reinterpret_cast<uintptr_t>(static_cast<uint8_t*>(lds_scratch) + tile_bytes)};
 
   auto issue_load = [&](uintptr_t lds_addr, uintptr_t global_addr) {
     desc.group0 = make_group0(lds_addr, global_addr);
@@ -344,11 +346,12 @@ __device__ inline void copy_pipelined_deep(void *dst, const void *src, size_t by
 
   for (size_t tile_even = 0; tile_even < full_tiles; tile_even += 2) {
     const size_t tile_odd = tile_even + 1;
-    const bool has_odd = tile_odd < full_tiles;
+    const bool has_odd    = tile_odd < full_tiles;
 
     if (has_odd) {
       tensor_wait<1>();
-      issue_load(buf[tile_odd & 1u], reinterpret_cast<uintptr_t>(src_bytes + tile_odd * tile_bytes));
+      issue_load(buf[tile_odd & 1u],
+                 reinterpret_cast<uintptr_t>(src_bytes + tile_odd * tile_bytes));
     }
 
     // No odd tile: load(tile_even) was one op ago, not two -- drain fully.
@@ -357,11 +360,13 @@ __device__ inline void copy_pipelined_deep(void *dst, const void *src, size_t by
     } else {
       tensor_wait<0>();
     }
-    issue_store(buf[tile_even & 1u], reinterpret_cast<uintptr_t>(dst_bytes + tile_even * tile_bytes));
+    issue_store(buf[tile_even & 1u],
+                reinterpret_cast<uintptr_t>(dst_bytes + tile_even * tile_bytes));
 
     if (has_odd) {
       tensor_wait<1>();
-      issue_store(buf[tile_odd & 1u], reinterpret_cast<uintptr_t>(dst_bytes + tile_odd * tile_bytes));
+      issue_store(buf[tile_odd & 1u],
+                  reinterpret_cast<uintptr_t>(dst_bytes + tile_odd * tile_bytes));
 
       const size_t next_even = tile_even + 2;
       if (next_even < full_tiles) {
@@ -391,26 +396,28 @@ constexpr uint32_t ElementBytes = 4;
 // Cache-policy ("aux"/cpol) bitfield; see cache_policy_aux() in assembly.hpp
 // for the authoritative encoding. An immediate, so it rides as a template
 // parameter like TDM's.
-constexpr int DefaultLoadCachePolicy = 0;
+constexpr int DefaultLoadCachePolicy  = 0;
 constexpr int DefaultStoreCachePolicy = 0;
 
 template <int CachePolicy = DefaultLoadCachePolicy>
-__device__ __forceinline__ void issue_load_chunk(void *lds_addr, const void *global_addr) {
+__device__ __forceinline__ void issue_load_chunk(void* lds_addr, const void* global_addr) {
   __builtin_amdgcn_global_load_async_to_lds_b32(
-      reinterpret_cast<int *>(const_cast<void *>(global_addr)),
-      reinterpret_cast<int *>(lds_addr), 0, CachePolicy);
+      reinterpret_cast<int*>(const_cast<void*>(global_addr)), reinterpret_cast<int*>(lds_addr), 0,
+      CachePolicy);
 }
 
 template <int CachePolicy = DefaultStoreCachePolicy>
-__device__ __forceinline__ void issue_store_chunk(void *global_addr, const void *lds_addr) {
+__device__ __forceinline__ void issue_store_chunk(void* global_addr, const void* lds_addr) {
   __builtin_amdgcn_global_store_async_from_lds_b32(
-      reinterpret_cast<int *>(global_addr),
-      reinterpret_cast<int *>(const_cast<void *>(lds_addr)), 0, CachePolicy);
+      reinterpret_cast<int*>(global_addr), reinterpret_cast<int*>(const_cast<void*>(lds_addr)), 0,
+      CachePolicy);
 }
 
 // --- Wait primitives -------------------------------------------------------
 // Tile-granular: one mark per issued tile.
-__device__ __forceinline__ void mark() { __builtin_amdgcn_asyncmark(); }
+__device__ __forceinline__ void mark() {
+  __builtin_amdgcn_asyncmark();
+}
 
 template <uint16_t Cnt>
 __device__ __forceinline__ void wait_mark() {
@@ -425,11 +432,11 @@ template <uint16_t Cnt>
 
 // This lane's strided slice of tile_bytes -- the raw chunk issues, no mark.
 template <int CachePolicy = DefaultLoadCachePolicy>
-__device__ __forceinline__ void issue_load_lane_chunks(void *lds_tile, const void *src_tile,
+__device__ __forceinline__ void issue_load_lane_chunks(void* lds_tile, const void* src_tile,
                                                        uint32_t tile_bytes, uint32_t lane_id,
                                                        uint32_t num_lanes) {
-  auto *lds_bytes = static_cast<uint8_t *>(lds_tile);
-  const auto *src_bytes = static_cast<const uint8_t *>(src_tile);
+  auto* lds_bytes       = static_cast<uint8_t*>(lds_tile);
+  const auto* src_bytes = static_cast<const uint8_t*>(src_tile);
   for (uint32_t off = lane_id * ElementBytes; off < tile_bytes; off += num_lanes * ElementBytes) {
     issue_load_chunk<CachePolicy>(lds_bytes + off, src_bytes + off);
   }
@@ -437,11 +444,11 @@ __device__ __forceinline__ void issue_load_lane_chunks(void *lds_tile, const voi
 
 // Store leg, mirrors issue_load_lane_chunks.
 template <int CachePolicy = DefaultStoreCachePolicy>
-__device__ __forceinline__ void issue_store_lane_chunks(void *dst_tile, const void *lds_tile,
+__device__ __forceinline__ void issue_store_lane_chunks(void* dst_tile, const void* lds_tile,
                                                         uint32_t tile_bytes, uint32_t lane_id,
                                                         uint32_t num_lanes) {
-  auto *dst_bytes = static_cast<uint8_t *>(dst_tile);
-  const auto *lds_bytes = static_cast<const uint8_t *>(lds_tile);
+  auto* dst_bytes       = static_cast<uint8_t*>(dst_tile);
+  const auto* lds_bytes = static_cast<const uint8_t*>(lds_tile);
   for (uint32_t off = lane_id * ElementBytes; off < tile_bytes; off += num_lanes * ElementBytes) {
     issue_store_chunk<CachePolicy>(dst_bytes + off, lds_bytes + off);
   }
@@ -449,7 +456,7 @@ __device__ __forceinline__ void issue_store_lane_chunks(void *dst_tile, const vo
 
 // _mark variants append one mark() per tile so wait_mark<N>() can count tiles.
 template <int CachePolicy = DefaultLoadCachePolicy>
-__device__ __forceinline__ void issue_load_tile_lane(void *lds_tile, const void *src_tile,
+__device__ __forceinline__ void issue_load_tile_lane(void* lds_tile, const void* src_tile,
                                                      uint32_t tile_bytes, uint32_t lane_id,
                                                      uint32_t num_lanes) {
   issue_load_lane_chunks<CachePolicy>(lds_tile, src_tile, tile_bytes, lane_id, num_lanes);
@@ -457,7 +464,7 @@ __device__ __forceinline__ void issue_load_tile_lane(void *lds_tile, const void 
 }
 
 template <int CachePolicy = DefaultStoreCachePolicy>
-__device__ __forceinline__ void issue_store_tile_lane(void *dst_tile, const void *lds_tile,
+__device__ __forceinline__ void issue_store_tile_lane(void* dst_tile, const void* lds_tile,
                                                       uint32_t tile_bytes, uint32_t lane_id,
                                                       uint32_t num_lanes) {
   issue_store_lane_chunks<CachePolicy>(dst_tile, lds_tile, tile_bytes, lane_id, num_lanes);
@@ -468,24 +475,25 @@ __device__ __forceinline__ void issue_store_tile_lane(void *dst_tile, const void
 
 // Tile-by-tile copy, striped across [lane_id, lane_id+num_lanes). pipeline
 // depth 1 when double_buffered (wait_mark<0>() drains each pair).
-template <int LoadCachePolicy = DefaultLoadCachePolicy, int StoreCachePolicy = DefaultStoreCachePolicy>
-[[maybe_unused]] __device__ inline void copy_pipelined_shallow_mark(void *dst, const void *src, size_t bytes,
-                                                   void *lds_scratch, uint32_t tile_bytes_cap,
-                                                   bool double_buffered, uint32_t lane_id = 0,
-                                                   uint32_t num_lanes = 1) {
+template <int LoadCachePolicy  = DefaultLoadCachePolicy,
+          int StoreCachePolicy = DefaultStoreCachePolicy>
+[[maybe_unused]] __device__ inline void copy_pipelined_shallow_mark(
+    void* dst, const void* src, size_t bytes, void* lds_scratch, uint32_t tile_bytes_cap,
+    bool double_buffered, uint32_t lane_id = 0, uint32_t num_lanes = 1) {
   const size_t covered = covered_bytes(bytes, tile_bytes_cap);
-  if (covered == 0) return;
+  if (covered == 0)
+    return;
   const uint32_t tile_bytes =
       (bytes < tile_bytes_cap) ? static_cast<uint32_t>(covered) : tile_bytes_cap;
   const size_t full_tiles = covered / tile_bytes;
 
-  auto *dst_bytes = static_cast<char *>(dst);
-  const auto *src_bytes = static_cast<const char *>(src);
-  auto *lds_base = static_cast<uint8_t *>(lds_scratch);
+  auto* dst_bytes       = static_cast<char*>(dst);
+  const auto* src_bytes = static_cast<const char*>(src);
+  auto* lds_base        = static_cast<uint8_t*>(lds_scratch);
 
   if (double_buffered) {
-    uint8_t *ping = lds_base;
-    uint8_t *pong = lds_base + tile_bytes;
+    uint8_t* ping = lds_base;
+    uint8_t* pong = lds_base + tile_bytes;
 
     // Prologue: start loading tile 0 into ping.
     issue_load_tile_lane<LoadCachePolicy>(ping, src_bytes, tile_bytes, lane_id, num_lanes);
@@ -498,15 +506,15 @@ template <int LoadCachePolicy = DefaultLoadCachePolicy, int StoreCachePolicy = D
 
       // Prefetch i+1 into pong and store i from ping before the next wait.
       if (has_next) {
-        issue_load_tile_lane<LoadCachePolicy>(pong, src_bytes + (i + 1) * tile_bytes, tile_bytes, lane_id,
-                                      num_lanes);
+        issue_load_tile_lane<LoadCachePolicy>(pong, src_bytes + (i + 1) * tile_bytes, tile_bytes,
+                                              lane_id, num_lanes);
       }
       issue_store_tile_lane<StoreCachePolicy>(dst_bytes + i * tile_bytes, ping, tile_bytes, lane_id,
-                                      num_lanes);
+                                              num_lanes);
 
-      uint8_t *tmp = ping;
-      ping = pong;
-      pong = tmp;
+      uint8_t* tmp = ping;
+      ping         = pong;
+      pong         = tmp;
     }
     // Drain the last in-flight load+store pair.
     wait_mark<0>();
@@ -514,10 +522,12 @@ template <int LoadCachePolicy = DefaultLoadCachePolicy, int StoreCachePolicy = D
     for (size_t i = 0; i < full_tiles; ++i) {
       const size_t offset = i * tile_bytes;
 
-      issue_load_tile_lane<LoadCachePolicy>(lds_base, src_bytes + offset, tile_bytes, lane_id, num_lanes);
+      issue_load_tile_lane<LoadCachePolicy>(lds_base, src_bytes + offset, tile_bytes, lane_id,
+                                            num_lanes);
       wait_mark<0>();
 
-      issue_store_tile_lane<StoreCachePolicy>(dst_bytes + offset, lds_base, tile_bytes, lane_id, num_lanes);
+      issue_store_tile_lane<StoreCachePolicy>(dst_bytes + offset, lds_base, tile_bytes, lane_id,
+                                              num_lanes);
       wait_mark<0>();
     }
   }
@@ -525,25 +535,27 @@ template <int LoadCachePolicy = DefaultLoadCachePolicy, int StoreCachePolicy = D
 
 // Same as copy_pipelined_shallow_mark, but pipeline depth 2 (wait_mark<1>()):
 // tile N-2 is always done by the time tile N waits.
-template <int LoadCachePolicy = DefaultLoadCachePolicy, int StoreCachePolicy = DefaultStoreCachePolicy>
-__device__ inline void copy_pipelined_deep_mark(void *dst, const void *src, size_t bytes,
-                                                void *lds_scratch, uint32_t tile_bytes_cap,
+template <int LoadCachePolicy  = DefaultLoadCachePolicy,
+          int StoreCachePolicy = DefaultStoreCachePolicy>
+__device__ inline void copy_pipelined_deep_mark(void* dst, const void* src, size_t bytes,
+                                                void* lds_scratch, uint32_t tile_bytes_cap,
                                                 uint32_t lane_id = 0, uint32_t num_lanes = 1) {
   const size_t covered = covered_bytes(bytes, tile_bytes_cap);
-  if (covered == 0) return;
+  if (covered == 0)
+    return;
   const uint32_t tile_bytes =
       (bytes < tile_bytes_cap) ? static_cast<uint32_t>(covered) : tile_bytes_cap;
   const size_t full_tiles = covered / tile_bytes;
 
-  auto *dst_bytes = static_cast<char *>(dst);
-  const auto *src_bytes = static_cast<const char *>(src);
-  uint8_t *const buf[2] = {static_cast<uint8_t *>(lds_scratch),
-                           static_cast<uint8_t *>(lds_scratch) + tile_bytes};
+  auto* dst_bytes       = static_cast<char*>(dst);
+  const auto* src_bytes = static_cast<const char*>(src);
+  uint8_t* const buf[2] = {static_cast<uint8_t*>(lds_scratch),
+                           static_cast<uint8_t*>(lds_scratch) + tile_bytes};
 
-  auto issue_load = [&](uint8_t *lds_addr, const void *global_addr) {
+  auto issue_load = [&](uint8_t* lds_addr, const void* global_addr) {
     issue_load_tile_lane<LoadCachePolicy>(lds_addr, global_addr, tile_bytes, lane_id, num_lanes);
   };
-  auto issue_store = [&](uint8_t *lds_addr, void *global_addr) {
+  auto issue_store = [&](uint8_t* lds_addr, void* global_addr) {
     issue_store_tile_lane<StoreCachePolicy>(global_addr, lds_addr, tile_bytes, lane_id, num_lanes);
   };
 
@@ -552,7 +564,7 @@ __device__ inline void copy_pipelined_deep_mark(void *dst, const void *src, size
 
   for (size_t tile_even = 0; tile_even < full_tiles; tile_even += 2) {
     const size_t tile_odd = tile_even + 1;
-    const bool has_odd = tile_odd < full_tiles;
+    const bool has_odd    = tile_odd < full_tiles;
 
     if (has_odd) {
       wait_mark<1>();
@@ -588,24 +600,25 @@ __device__ inline void copy_pipelined_deep_mark(void *dst, const void *src, size
 // legs since the per-tile op count is runtime and the operand is an immediate.
 
 // Mirrors copy_pipelined_shallow_mark.
-template <int LoadCachePolicy = DefaultLoadCachePolicy, int StoreCachePolicy = DefaultStoreCachePolicy>
-[[maybe_unused]] __device__ inline void copy_pipelined_shallow_asynccnt(void *dst, const void *src, size_t bytes,
-                                                       void *lds_scratch, uint32_t tile_bytes_cap,
-                                                       bool double_buffered, uint32_t lane_id = 0,
-                                                       uint32_t num_lanes = 1) {
+template <int LoadCachePolicy  = DefaultLoadCachePolicy,
+          int StoreCachePolicy = DefaultStoreCachePolicy>
+[[maybe_unused]] __device__ inline void copy_pipelined_shallow_asynccnt(
+    void* dst, const void* src, size_t bytes, void* lds_scratch, uint32_t tile_bytes_cap,
+    bool double_buffered, uint32_t lane_id = 0, uint32_t num_lanes = 1) {
   const size_t covered = covered_bytes(bytes, tile_bytes_cap);
-  if (covered == 0) return;
+  if (covered == 0)
+    return;
   const uint32_t tile_bytes =
       (bytes < tile_bytes_cap) ? static_cast<uint32_t>(covered) : tile_bytes_cap;
   const size_t full_tiles = covered / tile_bytes;
 
-  auto *dst_bytes = static_cast<char *>(dst);
-  const auto *src_bytes = static_cast<const char *>(src);
-  auto *lds_base = static_cast<uint8_t *>(lds_scratch);
+  auto* dst_bytes       = static_cast<char*>(dst);
+  const auto* src_bytes = static_cast<const char*>(src);
+  auto* lds_base        = static_cast<uint8_t*>(lds_scratch);
 
   if (double_buffered) {
-    uint8_t *ping = lds_base;
-    uint8_t *pong = lds_base + tile_bytes;
+    uint8_t* ping = lds_base;
+    uint8_t* pong = lds_base + tile_bytes;
 
     // Prologue: start loading tile 0 into ping.
     issue_load_lane_chunks<LoadCachePolicy>(ping, src_bytes, tile_bytes, lane_id, num_lanes);
@@ -619,14 +632,14 @@ template <int LoadCachePolicy = DefaultLoadCachePolicy, int StoreCachePolicy = D
       // Prefetch i+1 into pong and store i from ping before the next wait.
       if (has_next) {
         issue_load_lane_chunks<LoadCachePolicy>(pong, src_bytes + (i + 1) * tile_bytes, tile_bytes,
-                                        lane_id, num_lanes);
+                                                lane_id, num_lanes);
       }
-      issue_store_lane_chunks<StoreCachePolicy>(dst_bytes + i * tile_bytes, ping, tile_bytes, lane_id,
-                                        num_lanes);
+      issue_store_lane_chunks<StoreCachePolicy>(dst_bytes + i * tile_bytes, ping, tile_bytes,
+                                                lane_id, num_lanes);
 
-      uint8_t *tmp = ping;
-      ping = pong;
-      pong = tmp;
+      uint8_t* tmp = ping;
+      ping         = pong;
+      pong         = tmp;
     }
     // Drain the last in-flight load+store pair.
     wait_async_cnt<0>();
@@ -634,11 +647,12 @@ template <int LoadCachePolicy = DefaultLoadCachePolicy, int StoreCachePolicy = D
     for (size_t i = 0; i < full_tiles; ++i) {
       const size_t offset = i * tile_bytes;
 
-      issue_load_lane_chunks<LoadCachePolicy>(lds_base, src_bytes + offset, tile_bytes, lane_id, num_lanes);
+      issue_load_lane_chunks<LoadCachePolicy>(lds_base, src_bytes + offset, tile_bytes, lane_id,
+                                              num_lanes);
       wait_async_cnt<0>();
 
       issue_store_lane_chunks<StoreCachePolicy>(dst_bytes + offset, lds_base, tile_bytes, lane_id,
-                                        num_lanes);
+                                                num_lanes);
       wait_async_cnt<0>();
     }
   }
@@ -647,12 +661,14 @@ template <int LoadCachePolicy = DefaultLoadCachePolicy, int StoreCachePolicy = D
 // asynccnt counterpart of copy_pipelined_deep_mark (signature-compatible).
 // Depth-2 isn't expressible with an immediate asynccnt, so this drains each
 // tile fully while still double-buffering the next load behind the store.
-template <int LoadCachePolicy = DefaultLoadCachePolicy, int StoreCachePolicy = DefaultStoreCachePolicy>
-[[maybe_unused]] __device__ inline void copy_pipelined_deep_asynccnt(void *dst, const void *src, size_t bytes,
-                                                    void *lds_scratch, uint32_t tile_bytes_cap,
-                                                    uint32_t lane_id = 0, uint32_t num_lanes = 1) {
-  copy_pipelined_shallow_asynccnt<LoadCachePolicy, StoreCachePolicy>(dst, src, bytes, lds_scratch, tile_bytes_cap,
-                                                     /*double_buffered=*/true, lane_id, num_lanes);
+template <int LoadCachePolicy  = DefaultLoadCachePolicy,
+          int StoreCachePolicy = DefaultStoreCachePolicy>
+[[maybe_unused]] __device__ inline void copy_pipelined_deep_asynccnt(
+    void* dst, const void* src, size_t bytes, void* lds_scratch, uint32_t tile_bytes_cap,
+    uint32_t lane_id = 0, uint32_t num_lanes = 1) {
+  copy_pipelined_shallow_asynccnt<LoadCachePolicy, StoreCachePolicy>(
+      dst, src, bytes, lds_scratch, tile_bytes_cap,
+      /*double_buffered=*/true, lane_id, num_lanes);
 }
 
 }  // namespace async_lds

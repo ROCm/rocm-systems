@@ -40,15 +40,14 @@ class DeviceProxy {
  public:
   DeviceProxy() = default;
 
-  DeviceProxy(size_t num_elems, MemoryAllocator& alloc)
-      : num_elems_{num_elems} {
+  DeviceProxy(size_t num_elems, MemoryAllocator& alloc) : num_elems_{num_elems} {
     size_t size_bytes = sizeof(T) * num_elems_;
     T* temp{nullptr};
     alloc.allocate(reinterpret_cast<void**>(&temp), size_bytes);
     assert(temp);
     memset(static_cast<void*>(temp), 0, size_bytes);
     std::unique_ptr<T, Deleter> up{temp, Deleter{alloc}};
-    up_ = std::move(up);
+    up_  = std::move(up);
     ptr_ = up_.get();
   }
 

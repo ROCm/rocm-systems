@@ -41,8 +41,7 @@ class WfCoalOn {
    * same for active threads otherwise they must have diverged at the
    * function call level.
    */
-  __device__ bool coalesce(int pe, const void *source, const void *dest,
-                           size_t *size);
+  __device__ bool coalesce(int pe, const void* source, const void* dest, size_t* size);
 };
 
 // clang-format off

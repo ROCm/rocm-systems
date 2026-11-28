@@ -60,9 +60,9 @@ TEST_F(NetHelpersTestFixture, AllgatherValuePopulatesAllPes) {
   };
   int num_pes = 2, my_pe = 0;
   Blob mine{0xABC0, 0x22};
-  auto fake_allgather = [](void *inout, size_t bpp) {
+  auto fake_allgather = [](void* inout, size_t bpp) {
     // Pretend PE1 published {0xDEF0, 0x33}.
-    auto *p = static_cast<char *>(inout);
+    auto* p = static_cast<char*>(inout);
     Blob peer{0xDEF0, 0x33};
     std::memcpy(p + 1 * bpp, &peer, sizeof(Blob));
   };

@@ -32,22 +32,20 @@ using namespace rocshmem;
  * DEVICE TEST KERNEL
  *****************************************************************************/
 template <TestType Type>
-__global__ void DefaultCTXPrimitiveTest(int loop, int skip,
-                              long long int *start_time,
-                              long long int *end_time, char *source,
-                              char *dest, size_t size,
-                              [[maybe_unused]] ShmemContextType ctx_type,
-                              int wf_size, int batch, int *grid_psync) {
+__global__ void DefaultCTXPrimitiveTest(int loop, int skip, long long int* start_time,
+                                        long long int* end_time, char* source, char* dest,
+                                        size_t size, [[maybe_unused]] ShmemContextType ctx_type,
+                                        int wf_size, int batch, int* grid_psync) {
   int wg_id = get_flat_grid_id();
   int t_id  = get_flat_block_id();
   int wf_id = t_id / wf_size;
 
   /**
    * Shared array to capture the start time for each wavefront
-  * Max threads per block = 1024, wavefront size = 64 or 32 depending
-  * on the GPUs. Using 32 since its safer for the dimensioning of the array,
-  * the last 16 elements will not be used on GPUs with a wf size of 64.
-  * Maximum array size required = 1024/32 = 32
+   * Max threads per block = 1024, wavefront size = 64 or 32 depending
+   * on the GPUs. Using 32 since its safer for the dimensioning of the array,
+   * the last 16 elements will not be used on GPUs with a wf size of 64.
+   * Maximum array size required = 1024/32 = 32
    */
   __shared__ long long int wf_start_time[32];
 
@@ -67,7 +65,7 @@ __global__ void DefaultCTXPrimitiveTest(int loop, int skip,
     // Quiet at batch boundaries to allow safe buffer reuse
     if (offset == 0) {
       __syncthreads();
-      if(is_thread_zero_in_block()) {
+      if (is_thread_zero_in_block()) {
         rocshmem_quiet();
       }
       __syncthreads();
@@ -96,14 +94,14 @@ __global__ void DefaultCTXPrimitiveTest(int loop, int skip,
       }
     } else if constexpr (Type == DefaultCTXGTestType) {
       for (size_t s = 0; s < size; s++) {
-        char ret = rocshmem_char_g(&source[offset + s], 1);
+        char ret         = rocshmem_char_g(&source[offset + s], 1);
         dest[offset + s] = ret;
       }
     }
   }
 
   __syncthreads();
-  if(is_thread_zero_in_block()) {
+  if (is_thread_zero_in_block()) {
     rocshmem_quiet();
   }
 
@@ -114,9 +112,9 @@ __global__ void DefaultCTXPrimitiveTest(int loop, int skip,
   end_time[wg_id] = wall_clock64();
 
   // Find the earliest start time
-  int num_wfs = (get_flat_block_size() - 1 ) / wf_size + 1;
-  for (int i = num_wfs / 2; i > 0; i >>= 1 ) {
-    if(t_id < i) {
+  int num_wfs = (get_flat_block_size() - 1) / wf_size + 1;
+  for (int i = num_wfs / 2; i > 0; i >>= 1) {
+    if (t_id < i) {
       wf_start_time[t_id] = min(wf_start_time[t_id], wf_start_time[t_id + i]);
     }
   }
@@ -130,19 +128,17 @@ __global__ void DefaultCTXPrimitiveTest(int loop, int skip,
 /******************************************************************************
  * HOST TESTER CLASS METHODS
  *****************************************************************************/
-DefaultCTXPrimitiveTester::DefaultCTXPrimitiveTester(TesterArguments args)
- : Tester(args) {
+DefaultCTXPrimitiveTester::DefaultCTXPrimitiveTester(TesterArguments args) : Tester(args) {
   size_t buff_size = max_msg_size * batch_size * args.wg_size * args.num_wgs;
-  char *local = (char *) alloc_test_buffer(buff_size, args.local_buf_type);
-  char *remote = (char *) alloc_test_buffer(buff_size);
+  char* local      = (char*)alloc_test_buffer(buff_size, args.local_buf_type);
+  char* remote     = (char*)alloc_test_buffer(buff_size);
   CHECK_HIP(hipMalloc(&grid_psync, sizeof(int)));
 
   int max_co_resident_wgs_per_cu = 0;
   CHECK_HIP(hipOccupancyMaxActiveBlocksPerMultiprocessor(
-      &max_co_resident_wgs_per_cu,
-      DefaultCTXPrimitiveTest<DefaultCTXGetTestType>, args.wg_size, 0));
-  const int max_sustainable_wgs =
-      max_co_resident_wgs_per_cu * deviceProps.multiProcessorCount;
+      &max_co_resident_wgs_per_cu, DefaultCTXPrimitiveTest<DefaultCTXGetTestType>, args.wg_size,
+      0));
+  const int max_sustainable_wgs = max_co_resident_wgs_per_cu * deviceProps.multiProcessorCount;
   if (args.num_wgs > static_cast<unsigned>(max_sustainable_wgs)) {
     std::cerr << "Error: Requested work-groups (" << args.num_wgs
               << ") exceeds max co-resident work-groups (" << max_sustainable_wgs
@@ -151,19 +147,19 @@ DefaultCTXPrimitiveTester::DefaultCTXPrimitiveTester(TesterArguments args)
   }
 
   switch (_type) {
-    case DefaultCTXPutTestType:
-    case DefaultCTXPutNBITestType:
-    case DefaultCTXPTestType:
-      source = local;
-      dest = remote;
-      break;
-    case DefaultCTXGetTestType:
-    case DefaultCTXGetNBITestType:
-    case DefaultCTXGTestType:
-    default:
-      dest = local;
-      source = remote;
-      break;
+  case DefaultCTXPutTestType:
+  case DefaultCTXPutNBITestType:
+  case DefaultCTXPTestType:
+    source = local;
+    dest   = remote;
+    break;
+  case DefaultCTXGetTestType:
+  case DefaultCTXGetNBITestType:
+  case DefaultCTXGTestType:
+  default:
+    dest   = local;
+    source = remote;
+    break;
   }
 
   CHECK_HIP(hipMemsetAsync(source, 'a', buff_size, stream));
@@ -171,23 +167,23 @@ DefaultCTXPrimitiveTester::DefaultCTXPrimitiveTester(TesterArguments args)
 }
 
 DefaultCTXPrimitiveTester::~DefaultCTXPrimitiveTester() {
-  char *local = nullptr;
-  char *remote = nullptr;
+  char* local  = nullptr;
+  char* remote = nullptr;
 
   switch (_type) {
-    case DefaultCTXPutTestType:
-    case DefaultCTXPutNBITestType:
-    case DefaultCTXPTestType:
-      local = source;
-      remote = dest;
-      break;
-    case DefaultCTXGetTestType:
-    case DefaultCTXGetNBITestType:
-    case DefaultCTXGTestType:
-    default:
-      local = dest;
-      remote = source;
-      break;
+  case DefaultCTXPutTestType:
+  case DefaultCTXPutNBITestType:
+  case DefaultCTXPTestType:
+    local  = source;
+    remote = dest;
+    break;
+  case DefaultCTXGetTestType:
+  case DefaultCTXGetNBITestType:
+  case DefaultCTXGTestType:
+  default:
+    local  = dest;
+    remote = source;
+    break;
   }
 
   free_test_buffer(local, args.local_buf_type);
@@ -202,70 +198,60 @@ void DefaultCTXPrimitiveTester::resetBuffers(size_t size) {
   CHECK_HIP(hipStreamSynchronize(stream));
 }
 
-void DefaultCTXPrimitiveTester::launchKernel(dim3 gridSize, dim3 blockSize,
-                                             int loop, size_t size) {
+void DefaultCTXPrimitiveTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop, size_t size) {
   size_t shared_bytes = 0;
 
   switch (_type) {
-    case DefaultCTXGetTestType:
-      hipLaunchKernelGGL(DefaultCTXPrimitiveTest<DefaultCTXGetTestType>,
-                         gridSize, blockSize, shared_bytes, stream, loop,
-                         args.skip, start_time, end_time, source, dest, size,
-                         _shmem_context, wf_size, batch_size, grid_psync);
-      break;
-    case DefaultCTXGetNBITestType:
-      hipLaunchKernelGGL(
-          DefaultCTXPrimitiveTest<DefaultCTXGetNBITestType>, gridSize,
-          blockSize, shared_bytes, stream, loop, args.skip, start_time,
-          end_time, source, dest, size, _shmem_context, wf_size, batch_size,
-          grid_psync);
-      break;
-    case DefaultCTXPutTestType:
-      hipLaunchKernelGGL(DefaultCTXPrimitiveTest<DefaultCTXPutTestType>,
-                         gridSize, blockSize, shared_bytes, stream, loop,
-                         args.skip, start_time, end_time, source, dest, size,
-                         _shmem_context, wf_size, batch_size, grid_psync);
-      break;
-    case DefaultCTXPutNBITestType:
-      hipLaunchKernelGGL(
-          DefaultCTXPrimitiveTest<DefaultCTXPutNBITestType>, gridSize,
-          blockSize, shared_bytes, stream, loop, args.skip, start_time,
-          end_time, source, dest, size, _shmem_context, wf_size, batch_size,
-          grid_psync);
-      break;
-    case DefaultCTXPTestType:
-      hipLaunchKernelGGL(DefaultCTXPrimitiveTest<DefaultCTXPTestType>,
-                         gridSize, blockSize, shared_bytes, stream, loop,
-                         args.skip, start_time, end_time, source, dest, size,
-                         _shmem_context, wf_size, batch_size, grid_psync);
-      break;
-    case DefaultCTXGTestType:
-      hipLaunchKernelGGL(DefaultCTXPrimitiveTest<DefaultCTXGTestType>,
-                         gridSize, blockSize, shared_bytes, stream, loop,
-                         args.skip, start_time, end_time, source, dest, size,
-                         _shmem_context, wf_size, batch_size, grid_psync);
-      break;
-    default:
-      std::cerr << "Invalid Test: unhandled TestType " << _type
-                << " in DefaultCTXPrimitiveTester::launchKernel" << std::endl;
-      exit(-1);
+  case DefaultCTXGetTestType:
+    hipLaunchKernelGGL(DefaultCTXPrimitiveTest<DefaultCTXGetTestType>, gridSize, blockSize,
+                       shared_bytes, stream, loop, args.skip, start_time, end_time, source, dest,
+                       size, _shmem_context, wf_size, batch_size, grid_psync);
+    break;
+  case DefaultCTXGetNBITestType:
+    hipLaunchKernelGGL(DefaultCTXPrimitiveTest<DefaultCTXGetNBITestType>, gridSize, blockSize,
+                       shared_bytes, stream, loop, args.skip, start_time, end_time, source, dest,
+                       size, _shmem_context, wf_size, batch_size, grid_psync);
+    break;
+  case DefaultCTXPutTestType:
+    hipLaunchKernelGGL(DefaultCTXPrimitiveTest<DefaultCTXPutTestType>, gridSize, blockSize,
+                       shared_bytes, stream, loop, args.skip, start_time, end_time, source, dest,
+                       size, _shmem_context, wf_size, batch_size, grid_psync);
+    break;
+  case DefaultCTXPutNBITestType:
+    hipLaunchKernelGGL(DefaultCTXPrimitiveTest<DefaultCTXPutNBITestType>, gridSize, blockSize,
+                       shared_bytes, stream, loop, args.skip, start_time, end_time, source, dest,
+                       size, _shmem_context, wf_size, batch_size, grid_psync);
+    break;
+  case DefaultCTXPTestType:
+    hipLaunchKernelGGL(DefaultCTXPrimitiveTest<DefaultCTXPTestType>, gridSize, blockSize,
+                       shared_bytes, stream, loop, args.skip, start_time, end_time, source, dest,
+                       size, _shmem_context, wf_size, batch_size, grid_psync);
+    break;
+  case DefaultCTXGTestType:
+    hipLaunchKernelGGL(DefaultCTXPrimitiveTest<DefaultCTXGTestType>, gridSize, blockSize,
+                       shared_bytes, stream, loop, args.skip, start_time, end_time, source, dest,
+                       size, _shmem_context, wf_size, batch_size, grid_psync);
+    break;
+  default:
+    std::cerr << "Invalid Test: unhandled TestType " << _type
+              << " in DefaultCTXPrimitiveTester::launchKernel" << std::endl;
+    exit(-1);
   }
 
-  num_msgs = (loop + args.skip) * gridSize.x * blockSize.x;
+  num_msgs       = (loop + args.skip) * gridSize.x * blockSize.x;
   num_timed_msgs = loop * gridSize.x * blockSize.x;
 }
 
 void DefaultCTXPrimitiveTester::verifyResults(size_t size) {
-  int check_id =
-      (_type == DefaultCTXGetTestType ||
-       _type == DefaultCTXGetNBITestType || _type == DefaultCTXGTestType)
-          ? 0
-          : 1;
+  int check_id = (_type == DefaultCTXGetTestType || _type == DefaultCTXGetNBITestType ||
+                  _type == DefaultCTXGTestType)
+                     ? 0
+                     : 1;
 
   if (args.myid == check_id) {
-    int start_slot = (batch_size - (args.skip % batch_size)) % batch_size;
-    int verify_iters = std::min(batch_size, num_loops + args.skip);
-    size_t buf_bytes = size * batch_size;
+    int start_slot     = (batch_size - (args.skip % batch_size)) % batch_size;
+    int verify_iters   = std::min(batch_size, num_loops + args.skip);
+    size_t buf_bytes   = size * batch_size;
     size_t concurrency = args.wg_size * args.num_wgs;
 
     for (size_t b = 0; b < concurrency; b++) {
@@ -273,11 +259,10 @@ void DefaultCTXPrimitiveTester::verifyResults(size_t size) {
         int slot = (start_slot + iter) % batch_size;
         for (size_t i = 0; i < size; i++) {
           if (dest[b * buf_bytes + slot * size + i] != 'a') {
-            std::cerr << "Data validation error at buffer " << b
-                      << " slot " << slot << " idx " << i << std::endl;
-            std::cerr << " Got " << (int)(unsigned char)dest[b * buf_bytes + slot * size + i]
-                      << ", Expected " << (int)(unsigned char)'a'
+            std::cerr << "Data validation error at buffer " << b << " slot " << slot << " idx " << i
                       << std::endl;
+            std::cerr << " Got " << (int)(unsigned char)dest[b * buf_bytes + slot * size + i]
+                      << ", Expected " << (int)(unsigned char)'a' << std::endl;
             exit(-1);
           }
         }

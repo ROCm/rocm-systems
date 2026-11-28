@@ -22,20 +22,17 @@
 namespace rocshmem {
 
 __host__ QueuePairHost::QueuePairHost(struct ibv_pd* pd) : pd{pd} {
-  int access = IBV_ACCESS_LOCAL_WRITE
-             | IBV_ACCESS_REMOTE_WRITE
-             | IBV_ACCESS_REMOTE_READ
-             | IBV_ACCESS_REMOTE_ATOMIC;
+  int access = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ |
+               IBV_ACCESS_REMOTE_ATOMIC;
 
   if (envvar::gda::pcie_relaxed_ordering) {
     access |= IBV_ACCESS_RELAXED_ORDERING;
   }
 
   // Allocate and register the fetching and nonfetching atomics arrays
-  std::tie(nonfetching_atomic, nonfetching_atomic_mr)
-      = allocate_and_register<uint64_t>(1, access);
-  std::tie(fetching_atomic, fetching_atomic_mr)
-      = allocate_and_register<uint64_t>(FETCHING_ATOMIC_CNT, access);
+  std::tie(nonfetching_atomic, nonfetching_atomic_mr) = allocate_and_register<uint64_t>(1, access);
+  std::tie(fetching_atomic, fetching_atomic_mr) =
+      allocate_and_register<uint64_t>(FETCHING_ATOMIC_CNT, access);
 
   allocator.allocate(reinterpret_cast<void**>(&fetching_atomic_freelist), sizeof(FreeListT));
   new (fetching_atomic_freelist) FreeListT{allocator};
@@ -61,17 +58,17 @@ __host__ QueuePairHost::QueuePairHost(struct ibv_pd* pd) : pd{pd} {
 }
 
 __host__ QueuePairHost::QueuePairHost(QueuePairHost&& other) noexcept
-  : buffer_info             {std::move(other.buffer_info)},
-    num_user_buffers        {std::move(other.num_user_buffers)},
-    fetching_atomic         {std::move(other.fetching_atomic)},
-    nonfetching_atomic      {std::move(other.nonfetching_atomic)},
-    fetching_atomic_freelist{std::move(other.fetching_atomic_freelist)},
-    allocator               {std::move(other.allocator)},
-    buffer_info_map         {std::move(other.buffer_info_map)},
-    buffer_info_freelist    {std::move(other.buffer_info_freelist)},
-    pd                      {std::move(other.pd)},
-    fetching_atomic_mr      {std::move(other.fetching_atomic_mr)},
-    nonfetching_atomic_mr   {std::move(other.nonfetching_atomic_mr)} {
+    : buffer_info{std::move(other.buffer_info)},
+      num_user_buffers{std::move(other.num_user_buffers)},
+      fetching_atomic{std::move(other.fetching_atomic)},
+      nonfetching_atomic{std::move(other.nonfetching_atomic)},
+      fetching_atomic_freelist{std::move(other.fetching_atomic_freelist)},
+      allocator{std::move(other.allocator)},
+      buffer_info_map{std::move(other.buffer_info_map)},
+      buffer_info_freelist{std::move(other.buffer_info_freelist)},
+      pd{std::move(other.pd)},
+      fetching_atomic_mr{std::move(other.fetching_atomic_mr)},
+      nonfetching_atomic_mr{std::move(other.nonfetching_atomic_mr)} {
   other.buffer_info              = nullptr;
   other.fetching_atomic          = nullptr;
   other.nonfetching_atomic       = nullptr;
@@ -85,9 +82,10 @@ __host__ QueuePairHost& QueuePairHost::operator=(QueuePairHost&& other) {
 
   /* Step 1: ensure all resources in *this are deallocated */
   if (!buffer_info_map.empty()) {
-    LOG_WARN("Unmatched buffer_register detected: "
-             "move assignment operator %s called, but buffer registration map is not empty!",
-             __PRETTY_FUNCTION__ );
+    LOG_WARN(
+        "Unmatched buffer_register detected: "
+        "move assignment operator %s called, but buffer registration map is not empty!",
+        __PRETTY_FUNCTION__);
     /* Deregister every memory region registered with this QP */
     for (auto&& [addr, host_info] : buffer_info_map) {
       err = ibv.dereg_mr(host_info.mr);
@@ -151,9 +149,10 @@ __host__ QueuePairHost::~QueuePairHost() {
   int err = 0;
 
   if (!buffer_info_map.empty()) {
-    LOG_WARN("Unmatched buffer_register detected: "
-             "destructor %s called, but buffer registration map is not empty!",
-             __PRETTY_FUNCTION__ );
+    LOG_WARN(
+        "Unmatched buffer_register detected: "
+        "destructor %s called, but buffer registration map is not empty!",
+        __PRETTY_FUNCTION__);
     /* Deregister every memory region registered with this QP */
     for (auto&& [addr, host_info] : buffer_info_map) {
       err = ibv.dereg_mr(host_info.mr);
@@ -189,20 +188,19 @@ __host__ QueuePairHost::~QueuePairHost() {
   }
 }
 
-__host__ int QueuePairHost::buffer_register(void *addr, size_t length) {
+__host__ int QueuePairHost::buffer_register(void* addr, size_t length) {
   if (buffer_info_freelist.empty()) {
     assert(buffer_info_map.size() == num_user_buffers);
-    LOG_WARN("Unable to register user buffer (%p, %zu) with QP. "
-             "Please increase the value of %s.",
-             addr, length, envvar::gda::num_user_buffers.get_name().c_str());
+    LOG_WARN(
+        "Unable to register user buffer (%p, %zu) with QP. "
+        "Please increase the value of %s.",
+        addr, length, envvar::gda::num_user_buffers.get_name().c_str());
     return ROCSHMEM_ERROR;
   }
 
   /* Register addr */
-  int access = IBV_ACCESS_LOCAL_WRITE
-             | IBV_ACCESS_REMOTE_WRITE
-             | IBV_ACCESS_REMOTE_READ
-             | IBV_ACCESS_REMOTE_ATOMIC;
+  int access = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ |
+               IBV_ACCESS_REMOTE_ATOMIC;
 
   if (envvar::gda::pcie_relaxed_ordering) {
     access |= IBV_ACCESS_RELAXED_ORDERING;
@@ -227,9 +225,10 @@ __host__ int QueuePairHost::buffer_register(void *addr, size_t length) {
     return ROCSHMEM_SUCCESS;
   } else {
     auto&& [key, host_info] = *it;
-    LOG_WARN("Unable to register user buffer (%p, %zu) with QP: "
-             "already registered with length=%zu, lkey=%u, rkey=%u.",
-             addr, length, host_info.mr->length, host_info.mr->lkey, host_info.mr->rkey);
+    LOG_WARN(
+        "Unable to register user buffer (%p, %zu) with QP: "
+        "already registered with length=%zu, lkey=%u, rkey=%u.",
+        addr, length, host_info.mr->length, host_info.mr->lkey, host_info.mr->rkey);
     /* Deregister addr */
     int err = ibv.dereg_mr(mr);
     CHECK_ZERO(err, "ibv_dereg_mr (buffer_register)");
@@ -237,7 +236,7 @@ __host__ int QueuePairHost::buffer_register(void *addr, size_t length) {
   }
 }
 
-__host__ int QueuePairHost::buffer_unregister(void *addr) {
+__host__ int QueuePairHost::buffer_unregister(void* addr) {
   /* Lookup buffer host info */
   auto it = buffer_info_map.find(addr);
 
@@ -253,8 +252,10 @@ __host__ int QueuePairHost::buffer_unregister(void *addr) {
     buffer_info_map.erase(it);
     return ROCSHMEM_SUCCESS;
   } else {
-    LOG_WARN("Unable to unregister user buffer (%p) with this QP: "
-             "user buffer not registered.", addr);
+    LOG_WARN(
+        "Unable to unregister user buffer (%p) with this QP: "
+        "user buffer not registered.",
+        addr);
     return ROCSHMEM_ERROR;
   }
 }

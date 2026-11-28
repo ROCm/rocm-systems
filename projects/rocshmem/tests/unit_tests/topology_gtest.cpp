@@ -210,7 +210,7 @@ TEST_F(TopologyTestFixture, GetClosestNicToGpuWithHcaList) {
   if (numGpus > 0 && numNics > 0) {
     // Test with an exclude list (^mlx5_0 excludes mlx5_0)
     const char* excludeList = "^mlx5_0";
-    int result = GetClosestNicToGpu(0, excludeList, nullptr);
+    int result              = GetClosestNicToGpu(0, excludeList, nullptr);
     // Should return valid index or -1
     EXPECT_GE(result, -1);
     if (result >= 0) {
@@ -262,12 +262,9 @@ TEST_F(DeviceTypeTestFixture, GidPriorityOrdering) {
             static_cast<int>(GidPriority::ROCEV2_LINK_LOCAL));
   EXPECT_LT(static_cast<int>(GidPriority::ROCEV2_LINK_LOCAL),
             static_cast<int>(GidPriority::ROCEV1_IPV6));
-  EXPECT_LT(static_cast<int>(GidPriority::ROCEV1_IPV6),
-            static_cast<int>(GidPriority::ROCEV2_IPV6));
-  EXPECT_LT(static_cast<int>(GidPriority::ROCEV2_IPV6),
-            static_cast<int>(GidPriority::ROCEV1_IPV4));
-  EXPECT_LT(static_cast<int>(GidPriority::ROCEV1_IPV4),
-            static_cast<int>(GidPriority::ROCEV2_IPV4));
+  EXPECT_LT(static_cast<int>(GidPriority::ROCEV1_IPV6), static_cast<int>(GidPriority::ROCEV2_IPV6));
+  EXPECT_LT(static_cast<int>(GidPriority::ROCEV2_IPV6), static_cast<int>(GidPriority::ROCEV1_IPV4));
+  EXPECT_LT(static_cast<int>(GidPriority::ROCEV1_IPV4), static_cast<int>(GidPriority::ROCEV2_IPV4));
 }
 
 // Test multiple GPUs if available
@@ -311,37 +308,32 @@ TEST_F(PCIeTreeTestFixture, ExtractBusNumberInvalid) {
 // Test GetBusIdDistance function
 TEST_F(PCIeTreeTestFixture, GetBusIdDistanceSameSocket) {
   // GPU 0 and NIC 0 are on the same switch (bus 0x02 and 0x03)
-  int distance = GetBusIdDistance(
-    gpu_addresses_[0], nic_addresses_[0]);
+  int distance = GetBusIdDistance(gpu_addresses_[0], nic_addresses_[0]);
   EXPECT_EQ(distance, 1);  // |0x02 - 0x03| = 1
 }
 
 TEST_F(PCIeTreeTestFixture, GetBusIdDistanceDifferentSocket) {
   // GPU 0 (bus 0x02) and GPU 2 (bus 0x42)
-  int distance = GetBusIdDistance(
-    gpu_addresses_[0], gpu_addresses_[2]);
+  int distance = GetBusIdDistance(gpu_addresses_[0], gpu_addresses_[2]);
   EXPECT_EQ(distance, 0x40);  // |0x02 - 0x42| = 0x40
 }
 
 TEST_F(PCIeTreeTestFixture, GetBusIdDistanceZero) {
   // Same address
-  int distance = GetBusIdDistance(
-    gpu_addresses_[0], gpu_addresses_[0]);
+  int distance = GetBusIdDistance(gpu_addresses_[0], gpu_addresses_[0]);
   EXPECT_EQ(distance, 0);
 }
 
 TEST_F(PCIeTreeTestFixture, GetBusIdDistanceInvalid) {
   // Invalid address
-  int distance = GetBusIdDistance(
-    "invalid", gpu_addresses_[0]);
+  int distance = GetBusIdDistance("invalid", gpu_addresses_[0]);
   EXPECT_EQ(distance, -1);
 }
 
 // Test GetLcaBetweenNodes function
 TEST_F(PCIeTreeTestFixture, GetLcaSameSwitch) {
   // GPU 0 and NIC 0 are on the same PCIe switch
-  PCIeNode const* lca = GetLcaBetweenNodes(
-    &root_, gpu_addresses_[0], nic_addresses_[0]);
+  PCIeNode const* lca = GetLcaBetweenNodes(&root_, gpu_addresses_[0], nic_addresses_[0]);
   ASSERT_NE(lca, nullptr);
   // LCA should be the PCIe switch (0000:01:00.0)
   EXPECT_EQ(lca->address, "0000:01:00.0");
@@ -349,8 +341,7 @@ TEST_F(PCIeTreeTestFixture, GetLcaSameSwitch) {
 
 TEST_F(PCIeTreeTestFixture, GetLcaSameSocket) {
   // GPU 0 (switch 0) and GPU 1 (switch 1) are on the same socket
-  PCIeNode const* lca = GetLcaBetweenNodes(
-    &root_, gpu_addresses_[0], gpu_addresses_[1]);
+  PCIeNode const* lca = GetLcaBetweenNodes(&root_, gpu_addresses_[0], gpu_addresses_[1]);
   ASSERT_NE(lca, nullptr);
   // LCA should be the CPU socket (0000:00:01.0)
   EXPECT_EQ(lca->address, "0000:00:01.0");
@@ -358,8 +349,7 @@ TEST_F(PCIeTreeTestFixture, GetLcaSameSocket) {
 
 TEST_F(PCIeTreeTestFixture, GetLcaDifferentSocket) {
   // GPU 0 (socket 0) and GPU 2 (socket 1) are on different sockets
-  PCIeNode const* lca = GetLcaBetweenNodes(
-    &root_, gpu_addresses_[0], gpu_addresses_[2]);
+  PCIeNode const* lca = GetLcaBetweenNodes(&root_, gpu_addresses_[0], gpu_addresses_[2]);
   ASSERT_NE(lca, nullptr);
   // LCA should be the root
   EXPECT_EQ(lca->address, "root");
@@ -367,16 +357,14 @@ TEST_F(PCIeTreeTestFixture, GetLcaDifferentSocket) {
 
 TEST_F(PCIeTreeTestFixture, GetLcaSameNode) {
   // Same node - should return the node itself
-  PCIeNode const* lca = GetLcaBetweenNodes(
-    &root_, gpu_addresses_[0], gpu_addresses_[0]);
+  PCIeNode const* lca = GetLcaBetweenNodes(&root_, gpu_addresses_[0], gpu_addresses_[0]);
   ASSERT_NE(lca, nullptr);
   EXPECT_EQ(lca->address, gpu_addresses_[0]);
 }
 
 TEST_F(PCIeTreeTestFixture, GetLcaNotFound) {
   // Non-existent node
-  PCIeNode const* lca = GetLcaBetweenNodes(
-    &root_, "0000:99:00.0", gpu_addresses_[0]);
+  PCIeNode const* lca = GetLcaBetweenNodes(&root_, "0000:99:00.0", gpu_addresses_[0]);
   EXPECT_EQ(lca, nullptr);
 }
 
@@ -409,8 +397,7 @@ TEST_F(PCIeTreeTestFixture, GetLcaDepthNotFound) {
 // Test GetNearestDevicesInTree function
 TEST_F(PCIeTreeTestFixture, GetNearestDevicesSameSwitch) {
   // GPU 0 should be closest to NIC 0 (same switch)
-  std::set<int> nearest = GetNearestDevicesInTree(
-    gpu_addresses_[0], nic_addresses_, &root_);
+  std::set<int> nearest = GetNearestDevicesInTree(gpu_addresses_[0], nic_addresses_, &root_);
 
   ASSERT_EQ(nearest.size(), 1);
   EXPECT_EQ(*nearest.begin(), 0);  // NIC 0
@@ -420,14 +407,13 @@ TEST_F(PCIeTreeTestFixture, GetNearestDevicesSameSocket) {
   // GPU 0 should prefer NICs on the same socket
   // When NIC 0 is excluded, should prefer NIC 1 (same socket) over NIC 2/3 (different socket)
   std::vector<std::string> nicsExcludingFirst = {
-    "",                // NIC 0 excluded
-    nic_addresses_[1], // NIC 1 (same socket)
-    nic_addresses_[2], // NIC 2 (different socket)
-    nic_addresses_[3]  // NIC 3 (different socket)
+      "",                 // NIC 0 excluded
+      nic_addresses_[1],  // NIC 1 (same socket)
+      nic_addresses_[2],  // NIC 2 (different socket)
+      nic_addresses_[3]   // NIC 3 (different socket)
   };
 
-  std::set<int> nearest = GetNearestDevicesInTree(
-    gpu_addresses_[0], nicsExcludingFirst, &root_);
+  std::set<int> nearest = GetNearestDevicesInTree(gpu_addresses_[0], nicsExcludingFirst, &root_);
 
   ASSERT_EQ(nearest.size(), 1);
   EXPECT_EQ(*nearest.begin(), 1);  // NIC 1
@@ -435,8 +421,7 @@ TEST_F(PCIeTreeTestFixture, GetNearestDevicesSameSocket) {
 
 TEST_F(PCIeTreeTestFixture, GetNearestDevicesCrossSocket) {
   // GPU 2 (socket 1) should be closest to NIC 2 or NIC 3 (both on socket 1)
-  std::set<int> nearest = GetNearestDevicesInTree(
-    gpu_addresses_[2], nic_addresses_, &root_);
+  std::set<int> nearest = GetNearestDevicesInTree(gpu_addresses_[2], nic_addresses_, &root_);
 
   ASSERT_EQ(nearest.size(), 1);
   EXPECT_EQ(*nearest.begin(), 2);  // NIC 2 (same switch as GPU 2)
@@ -446,14 +431,13 @@ TEST_F(PCIeTreeTestFixture, GetNearestDevicesMultipleMatches) {
   // Create scenario with equidistant devices
   // GPU 0 with NICs from different sockets only
   std::vector<std::string> crossSocketNics = {
-    "",                // Exclude socket 0 NICs
-    "",
-    nic_addresses_[2], // NIC 2 (socket 1, switch 2)
-    nic_addresses_[3]  // NIC 3 (socket 1, switch 3)
+      "",  // Exclude socket 0 NICs
+      "",
+      nic_addresses_[2],  // NIC 2 (socket 1, switch 2)
+      nic_addresses_[3]   // NIC 3 (socket 1, switch 3)
   };
 
-  std::set<int> nearest = GetNearestDevicesInTree(
-    gpu_addresses_[0], crossSocketNics, &root_);
+  std::set<int> nearest = GetNearestDevicesInTree(gpu_addresses_[0], crossSocketNics, &root_);
 
   // Should match both NIC 2 and NIC 3 with equal priority
   EXPECT_GE(nearest.size(), 1);
@@ -463,8 +447,7 @@ TEST_F(PCIeTreeTestFixture, GetNearestDevicesMultipleMatches) {
 TEST_F(PCIeTreeTestFixture, GetNearestDevicesEmptyList) {
   std::vector<std::string> emptyList = {"", "", "", ""};
 
-  std::set<int> nearest = GetNearestDevicesInTree(
-    gpu_addresses_[0], emptyList, &root_);
+  std::set<int> nearest = GetNearestDevicesInTree(gpu_addresses_[0], emptyList, &root_);
 
   EXPECT_EQ(nearest.size(), 0);
 }
@@ -516,8 +499,8 @@ TEST_F(PCIeTreeTestFixture, GpuNicAffinityMapping) {
   // GPU 3 -> NIC 3 (same switch)
 
   for (size_t gpu_idx = 0; gpu_idx < gpu_addresses_.size(); gpu_idx++) {
-    std::set<int> nearest = GetNearestDevicesInTree(
-      gpu_addresses_[gpu_idx], nic_addresses_, &root_);
+    std::set<int> nearest =
+        GetNearestDevicesInTree(gpu_addresses_[gpu_idx], nic_addresses_, &root_);
 
     ASSERT_EQ(nearest.size(), 1) << "GPU " << gpu_idx;
     EXPECT_EQ(*nearest.begin(), gpu_idx) << "GPU " << gpu_idx;
@@ -528,18 +511,17 @@ TEST_F(PCIeTreeTestFixture, GpuNicAffinityMapping) {
 TEST_F(PCIeTreeTestFixture, BusDistanceMatrix) {
   // Test distances between all GPUs
   std::vector<std::vector<int>> expected_distances = {
-    {0,  3,  0x40, 0x43},  // GPU 0 to GPU 0,1,2,3
-    {3,  0,  0x3D, 0x40},  // GPU 1 to GPU 0,1,2,3
-    {0x40, 0x3D, 0, 3},    // GPU 2 to GPU 0,1,2,3
-    {0x43, 0x40, 3, 0}     // GPU 3 to GPU 0,1,2,3
+      {0, 3, 0x40, 0x43},  // GPU 0 to GPU 0,1,2,3
+      {3, 0, 0x3D, 0x40},  // GPU 1 to GPU 0,1,2,3
+      {0x40, 0x3D, 0, 3},  // GPU 2 to GPU 0,1,2,3
+      {0x43, 0x40, 3, 0}   // GPU 3 to GPU 0,1,2,3
   };
 
   for (size_t i = 0; i < gpu_addresses_.size(); i++) {
     for (size_t j = 0; j < gpu_addresses_.size(); j++) {
-      int distance = GetBusIdDistance(
-        gpu_addresses_[i], gpu_addresses_[j]);
+      int distance = GetBusIdDistance(gpu_addresses_[i], gpu_addresses_[j]);
       EXPECT_EQ(distance, expected_distances[i][j])
-        << "Distance between GPU " << i << " and GPU " << j;
+          << "Distance between GPU " << i << " and GPU " << j;
     }
   }
 }
@@ -547,22 +529,19 @@ TEST_F(PCIeTreeTestFixture, BusDistanceMatrix) {
 // Test LCA depth verification for known pairs
 TEST_F(PCIeTreeTestFixture, LcaDepthVerification) {
   // Devices on same switch: LCA depth should be 2 (switch level)
-  PCIeNode const* lca = GetLcaBetweenNodes(
-    &root_, gpu_addresses_[0], nic_addresses_[0]);
+  PCIeNode const* lca = GetLcaBetweenNodes(&root_, gpu_addresses_[0], nic_addresses_[0]);
   ASSERT_NE(lca, nullptr);
   int depth = GetLcaDepth(lca->address, &root_);
   EXPECT_EQ(depth, 2);  // Switch level
 
   // Devices on same socket: LCA depth should be 1 (socket level)
-  lca = GetLcaBetweenNodes(
-    &root_, gpu_addresses_[0], gpu_addresses_[1]);
+  lca = GetLcaBetweenNodes(&root_, gpu_addresses_[0], gpu_addresses_[1]);
   ASSERT_NE(lca, nullptr);
   depth = GetLcaDepth(lca->address, &root_);
   EXPECT_EQ(depth, 1);  // Socket level
 
   // Devices on different sockets: LCA depth should be 0 (root level)
-  lca = GetLcaBetweenNodes(
-    &root_, gpu_addresses_[0], gpu_addresses_[2]);
+  lca = GetLcaBetweenNodes(&root_, gpu_addresses_[0], gpu_addresses_[2]);
   ASSERT_NE(lca, nullptr);
   depth = GetLcaDepth(lca->address, &root_);
   EXPECT_EQ(depth, 0);  // Root level
@@ -588,11 +567,12 @@ TEST_F(DeviceTypeTestFixture, ParseNicMergeLevelKnown) {
 TEST_F(DeviceTypeTestFixture, ParseNicMergeLevelUnknown) {
   // Skip this test if warning logging is disabled (e.g., ROCSHMEM_DEBUG_LEVEL < WARN or includes :nowarn)
   if (!rocshmem::envvar::log_flags.show_warn) {
-    GTEST_SKIP() << "Skipping test because warning logging is disabled (ROCSHMEM_DEBUG_LEVEL < WARN or contains :nowarn)";
+    GTEST_SKIP() << "Skipping test because warning logging is disabled (ROCSHMEM_DEBUG_LEVEL < "
+                    "WARN or contains :nowarn)";
   }
 
   testing::internal::CaptureStderr();
-  auto result = ParseNicMergeLevel("INVALID");
+  auto result     = ParseNicMergeLevel("INVALID");
   std::string err = testing::internal::GetCapturedStderr();
 
   EXPECT_EQ(result, NIC_PATH_SYS);
@@ -652,7 +632,8 @@ TEST_F(DeviceTypeTestFixture, IbvDeviceNameAtIndex) {
 
 TEST_F(TopologyTestFixture, BuildFilteredNicAddressesNoFilter) {
   auto const& devList = GetIbvDeviceList();
-  if (devList.empty()) GTEST_SKIP() << "No IB devices available";
+  if (devList.empty())
+    GTEST_SKIP() << "No IB devices available";
 
   auto addrs = BuildFilteredNicAddresses(nullptr);
   EXPECT_EQ(addrs.size(), devList.size());
@@ -663,24 +644,27 @@ TEST_F(TopologyTestFixture, BuildFilteredNicAddressesNoFilter) {
       active_count++;
     }
   }
-  if (active_count == 0) GTEST_SKIP() << "No active IB ports; skipping test";
+  if (active_count == 0)
+    GTEST_SKIP() << "No active IB ports; skipping test";
 }
 
 TEST_F(TopologyTestFixture, BuildFilteredNicAddressesWithExclude) {
   auto const& devList = GetIbvDeviceList();
-  if (devList.empty()) GTEST_SKIP() << "No IB devices available";
+  if (devList.empty())
+    GTEST_SKIP() << "No IB devices available";
 
   std::string excl = "^" + devList[0].name;
-  auto addrs = BuildFilteredNicAddresses(excl.c_str());
+  auto addrs       = BuildFilteredNicAddresses(excl.c_str());
   EXPECT_TRUE(addrs[0].empty());
 }
 
 TEST_F(TopologyTestFixture, BuildFilteredNicAddressesWithInclude) {
   auto const& devList = GetIbvDeviceList();
-  if (devList.empty()) GTEST_SKIP() << "No IB devices available";
+  if (devList.empty())
+    GTEST_SKIP() << "No IB devices available";
 
   std::string incl = devList[0].name;
-  auto addrs = BuildFilteredNicAddresses(incl.c_str());
+  auto addrs       = BuildFilteredNicAddresses(incl.c_str());
   for (size_t i = 1; i < devList.size(); i++) {
     if (devList[i].name != devList[0].name) {
       EXPECT_TRUE(addrs[i].empty())
@@ -691,10 +675,11 @@ TEST_F(TopologyTestFixture, BuildFilteredNicAddressesWithInclude) {
 
 TEST_F(TopologyTestFixture, BuildFilteredNicAddressesWithMultiInclude) {
   auto const& devList = GetIbvDeviceList();
-  if (devList.size() < 2) GTEST_SKIP() << "Need at least 2 IB devices";
+  if (devList.size() < 2)
+    GTEST_SKIP() << "Need at least 2 IB devices";
 
   std::string incl = devList[0].name + "," + devList[1].name;
-  auto addrs = BuildFilteredNicAddresses(incl.c_str());
+  auto addrs       = BuildFilteredNicAddresses(incl.c_str());
   for (size_t i = 2; i < devList.size(); i++) {
     if (devList[i].name != devList[0].name && devList[i].name != devList[1].name) {
       EXPECT_TRUE(addrs[i].empty())
@@ -718,10 +703,11 @@ TEST(NicPolicyTest, RoundRobin_TwoNics_FourRows) {
   int num_pes = 2, num_nics = 2, def_qps = 4, usr_qps = 0;
   for (int row = 0; row < 4; row++) {
     for (int pe = 0; pe < num_pes; pe++) {
-      int qp_idx = row * num_pes + pe;
+      int qp_idx       = row * num_pes + pe;
       int expected_nic = row % num_nics;
-      EXPECT_EQ(ComputeNicIdxForQp(qp_idx, num_pes, num_nics, def_qps, usr_qps,
-                                    NicPolicy::ROUND_ROBIN), expected_nic)
+      EXPECT_EQ(
+          ComputeNicIdxForQp(qp_idx, num_pes, num_nics, def_qps, usr_qps, NicPolicy::ROUND_ROBIN),
+          expected_nic)
           << "row=" << row << " pe=" << pe;
     }
   }
@@ -731,8 +717,8 @@ TEST(NicPolicyTest, RoundRobin_FourNics_OneRow) {
   // 2 PEs, 4 NICs, 1 QP row per PE -> all map to NIC 0 (not enough QPs)
   int num_pes = 2, num_nics = 4, def_qps = 1, usr_qps = 1;
   for (int pe = 0; pe < num_pes; pe++) {
-    EXPECT_EQ(ComputeNicIdxForQp(pe, num_pes, num_nics, def_qps, usr_qps,
-                                  NicPolicy::ROUND_ROBIN), 0);
+    EXPECT_EQ(ComputeNicIdxForQp(pe, num_pes, num_nics, def_qps, usr_qps, NicPolicy::ROUND_ROBIN),
+              0);
   }
 }
 
@@ -793,7 +779,6 @@ TEST(NicPolicyTest, PerContext_ZeroUsrQps) {
   int num_pes = 2, num_nics = 2, def_qps = 2, usr_qps = 0;
   auto P = NicPolicy::PER_CONTEXT;
   for (int i = 0; i < 4; i++) {
-    EXPECT_EQ(ComputeNicIdxForQp(i, num_pes, num_nics, def_qps, usr_qps, P), 0)
-        << "qp_idx=" << i;
+    EXPECT_EQ(ComputeNicIdxForQp(i, num_pes, num_nics, def_qps, usr_qps, P), 0) << "qp_idx=" << i;
   }
 }

@@ -44,8 +44,7 @@ class HostRmaTester : public Tester {
 
  protected:
   virtual void resetBuffers(size_t size) override;
-  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop,
-                            size_t size) override;
+  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop, size_t size) override;
   virtual void verifyResults(size_t size) override;
 
  private:
@@ -54,22 +53,22 @@ class HostRmaTester : public Tester {
   int peer;
 
   /* Symmetric buffers for RMA tests */
-  char  *source_buf{nullptr};
-  char  *dest_buf{nullptr};
+  char* source_buf{nullptr};
+  char* dest_buf{nullptr};
 
   /* Symmetric long counter/flag for long AMO tests */
-  long *amo_buf{nullptr};
+  long* amo_buf{nullptr};
 
   /* Symmetric int counter/flag for int AMO tests (exercises 32-bit kernel path) */
-  int *amo_int_buf{nullptr};
+  int* amo_int_buf{nullptr};
 
   /* Symmetric 8-byte signal word + the value the target fetched (host signal) */
-  uint64_t *sig_buf{nullptr};
-  uint64_t  sig_fetched{0};
+  uint64_t* sig_buf{nullptr};
+  uint64_t sig_fetched{0};
 
   /* Symmetric array of longs for wait_until_all/any/some/vector tests */
   static constexpr size_t WAIT_NELEMS = 4;
-  long *wait_buf{nullptr};
+  long* wait_buf{nullptr};
 
   /* Local storage for results from _any / _some variants (non-symmetric) */
   size_t p2p_result_idx{SIZE_MAX};

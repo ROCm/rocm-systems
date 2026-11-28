@@ -64,11 +64,10 @@ namespace rocshmem {
  *
  */
 template <typename T>
-__device__ void rocshmem_put(rocshmem_ctx_t ctx, T *dest, const T *source,
-                              size_t nelems, int pe);
+__device__ void rocshmem_put(rocshmem_ctx_t ctx, T* dest, const T* source, size_t nelems, int pe);
 
 template <typename T>
-__device__ void rocshmem_put(T *dest, const T *source, size_t nelems, int pe);
+__device__ void rocshmem_put(T* dest, const T* source, size_t nelems, int pe);
 
 /**
  * @brief Writes a single value to \p dest at \p pe PE to \p dst at \p pe.
@@ -90,10 +89,10 @@ __device__ void rocshmem_put(T *dest, const T *source, size_t nelems, int pe);
  *
  */
 template <typename T>
-__device__ void rocshmem_p(rocshmem_ctx_t ctx, T *dest, T value, int pe);
+__device__ void rocshmem_p(rocshmem_ctx_t ctx, T* dest, T value, int pe);
 
 template <typename T>
-__device__ void rocshmem_p(T *dest, T value, int pe);
+__device__ void rocshmem_p(T* dest, T value, int pe);
 
 /**
  * @brief Reads contiguous data of \p nelems elements from \p source on \p pe
@@ -116,11 +115,10 @@ __device__ void rocshmem_p(T *dest, T value, int pe);
  *
  */
 template <typename T>
-__device__ void rocshmem_get(rocshmem_ctx_t ctx, T *dest, const T *source,
-                              size_t nelems, int pe);
+__device__ void rocshmem_get(rocshmem_ctx_t ctx, T* dest, const T* source, size_t nelems, int pe);
 
 template <typename T>
-__device__ void rocshmem_get(T *dest, const T *source, size_t nelems, int pe);
+__device__ void rocshmem_get(T* dest, const T* source, size_t nelems, int pe);
 
 /**
  * @brief reads and returns single value from \p source at \p pe.
@@ -140,10 +138,10 @@ __device__ void rocshmem_get(T *dest, const T *source, size_t nelems, int pe);
  *
  */
 template <typename T>
-__device__ T rocshmem_g(rocshmem_ctx_t ctx, const T *source, int pe);
+__device__ T rocshmem_g(rocshmem_ctx_t ctx, const T* source, int pe);
 
 template <typename T>
-__device__ T rocshmem_g(const T *source, int pe);
+__device__ T rocshmem_g(const T* source, int pe);
 
 /**
  * @brief Writes contiguous data of \p nelems elements from \p source on the
@@ -168,11 +166,10 @@ __device__ T rocshmem_g(const T *source, int pe);
  *
  */
 template <typename T>
-__device__ void rocshmem_put_nbi(rocshmem_ctx_t ctx, T *dest, const T *src,
-                                  size_t nelems, int pe);
+__device__ void rocshmem_put_nbi(rocshmem_ctx_t ctx, T* dest, const T* src, size_t nelems, int pe);
 
 template <typename T>
-__device__ void rocshmem_put_nbi(T *dest, const T *src, size_t nelems, int pe);
+__device__ void rocshmem_put_nbi(T* dest, const T* src, size_t nelems, int pe);
 
 /**
  * @brief Reads contiguous data of \p nelems elements from \p source on \p pe
@@ -197,12 +194,11 @@ __device__ void rocshmem_put_nbi(T *dest, const T *src, size_t nelems, int pe);
  *
  */
 template <typename T>
-__device__ void rocshmem_get_nbi(rocshmem_ctx_t ctx, T *dest, const T *source,
-                                  size_t nelems, int pe);
+__device__ void rocshmem_get_nbi(rocshmem_ctx_t ctx, T* dest, const T* source, size_t nelems,
+                                 int pe);
 
 template <typename T>
-__device__ void rocshmem_get_nbi(T *dest, const T *source, size_t nelems,
-                                  int pe);
+__device__ void rocshmem_get_nbi(T* dest, const T* source, size_t nelems, int pe);
 
 /**
  * @brief Atomically add the value \p val to \p dest on \p pe. The operation
@@ -223,11 +219,10 @@ __device__ void rocshmem_get_nbi(T *dest, const T *source, size_t nelems,
  *
  */
 template <typename T>
-__device__ T rocshmem_atomic_fetch_add(rocshmem_ctx_t ctx, T *dest, T val,
-                                        int pe);
+__device__ T rocshmem_atomic_fetch_add(rocshmem_ctx_t ctx, T* dest, T val, int pe);
 
 template <typename T>
-__device__ T rocshmem_atomic_fetch_add(T *dest, T val, int pe);
+__device__ T rocshmem_atomic_fetch_add(T* dest, T val, int pe);
 
 /**
  * @brief Atomically compares if the value in \p dest with \p cond is equal
@@ -250,11 +245,10 @@ __device__ T rocshmem_atomic_fetch_add(T *dest, T val, int pe);
  *
  */
 template <typename T>
-__device__ T rocshmem_atomic_compare_swap(rocshmem_ctx_t ctx, T *dest, T cond,
-                                           T val, int pe);
+__device__ T rocshmem_atomic_compare_swap(rocshmem_ctx_t ctx, T* dest, T cond, T val, int pe);
 
 template <typename T>
-__device__ T rocshmem_atomic_compare_swap(T *dest, T cond, T val, int pe);
+__device__ T rocshmem_atomic_compare_swap(T* dest, T cond, T val, int pe);
 
 /**
  * @brief Atomically add 1 to \p dest on \p pe. The operation
@@ -274,10 +268,10 @@ __device__ T rocshmem_atomic_compare_swap(T *dest, T cond, T val, int pe);
  *
  */
 template <typename T>
-__device__ T rocshmem_atomic_fetch_inc(rocshmem_ctx_t ctx, T *dest, int pe);
+__device__ T rocshmem_atomic_fetch_inc(rocshmem_ctx_t ctx, T* dest, int pe);
 
 template <typename T>
-__device__ T rocshmem_atomic_fetch_inc(T *dest, int pe);
+__device__ T rocshmem_atomic_fetch_inc(T* dest, int pe);
 
 /**
  * @brief Atomically return the value of \p dest to the calling PE.
@@ -297,10 +291,10 @@ __device__ T rocshmem_atomic_fetch_inc(T *dest, int pe);
  *
  */
 template <typename T>
-__device__ T rocshmem_atomic_fetch(rocshmem_ctx_t ctx, T *source, int pe);
+__device__ T rocshmem_atomic_fetch(rocshmem_ctx_t ctx, T* source, int pe);
 
 template <typename T>
-__device__ T rocshmem_atomic_fetch(T *source, int pe);
+__device__ T rocshmem_atomic_fetch(T* source, int pe);
 
 /**
  * @brief Atomically add the value \p val to \p dest on \p pe.
@@ -320,11 +314,10 @@ __device__ T rocshmem_atomic_fetch(T *source, int pe);
  *
  */
 template <typename T>
-__device__ void rocshmem_atomic_add(rocshmem_ctx_t ctx, T *dest, T val,
-                                     int pe);
+__device__ void rocshmem_atomic_add(rocshmem_ctx_t ctx, T* dest, T val, int pe);
 
 template <typename T>
-__device__ void rocshmem_atomic_add(T *dest, T val, int pe);
+__device__ void rocshmem_atomic_add(T* dest, T val, int pe);
 
 /**
  * @brief Atomically add 1 to \p dest on \p pe.
@@ -343,10 +336,10 @@ __device__ void rocshmem_atomic_add(T *dest, T val, int pe);
  *
  */
 template <typename T>
-__device__ void rocshmem_atomic_inc(rocshmem_ctx_t ctx, T *dest, int pe);
+__device__ void rocshmem_atomic_inc(rocshmem_ctx_t ctx, T* dest, int pe);
 
 template <typename T>
-__device__ void rocshmem_atomic_inc(T *dest, int pe);
+__device__ void rocshmem_atomic_inc(T* dest, int pe);
 
 /**
  * @brief Atomically set value for \p dest on \p pe.
@@ -366,11 +359,10 @@ __device__ void rocshmem_atomic_inc(T *dest, int pe);
  *
  */
 template <typename T>
-__device__ void rocshmem_atomic_set(rocshmem_ctx_t ctx, T *dest, T value,
-                                     int pe);
+__device__ void rocshmem_atomic_set(rocshmem_ctx_t ctx, T* dest, T value, int pe);
 
 template <typename T>
-__device__ void rocshmem_atomic_set(T *dest, T value, int pe);
+__device__ void rocshmem_atomic_set(T* dest, T value, int pe);
 
 /**
  * @brief Block the caller until the condition (* \p ptr \p cmps \p val) is
@@ -389,7 +381,7 @@ __device__ void rocshmem_atomic_set(T *dest, T value, int pe);
  *
  */
 template <typename T>
-__device__ void rocshmem_wait_until(T *ivars, int cmp, T val);
+__device__ void rocshmem_wait_until(T* ivars, int cmp, T val);
 
 /**
  * @brief test if the condition (* \p ptr \p cmps \p val) is
@@ -408,7 +400,7 @@ __device__ void rocshmem_wait_until(T *ivars, int cmp, T val);
  *
  */
 template <typename T>
-__device__ int rocshmem_test(T *ivars, int cmp, T val);
+__device__ int rocshmem_test(T* ivars, int cmp, T val);
 
 /**
  * @brief Perform a broadcast between PEs in the active set. The caller
@@ -433,11 +425,9 @@ __device__ int rocshmem_test(T *ivars, int cmp, T val);
  *
  */
 template <typename T>
-__device__ void rocshmem_wg_broadcast(rocshmem_ctx_t ctx, T *dest,
-                                       const T *source, int nelems,
-                                       int PE_root, int PE_start,
-                                       int logPE_stride, int PE_size,
-                                       long *pSync);
+__device__ void rocshmem_wg_broadcast(rocshmem_ctx_t ctx, T* dest, const T* source, int nelems,
+                                      int PE_root, int PE_start, int logPE_stride, int PE_size,
+                                      long* pSync);
 
 /**
  * @brief Perform an allreduce between PEs in the active set. The caller
@@ -464,10 +454,9 @@ __device__ void rocshmem_wg_broadcast(rocshmem_ctx_t ctx, T *dest,
  *
  */
 template <typename T, ROCSHMEM_OP Op>
-__device__ void rocshmem_wg_to_all(rocshmem_ctx_t ctx, T *dest,
-                                    const T *source, int nreduce, int PE_start,
-                                    int logPE_stride, int PE_size, T *pWrk,
-                                    long *pSync);
+__device__ void rocshmem_wg_to_all(rocshmem_ctx_t ctx, T* dest, const T* source, int nreduce,
+                                   int PE_start, int logPE_stride, int PE_size, T* pWrk,
+                                   long* pSync);
 
 /**
  * @brief Writes contiguous data of \p nelems elements from \p source on the
@@ -490,12 +479,11 @@ __device__ void rocshmem_wg_to_all(rocshmem_ctx_t ctx, T *dest,
  *
  */
 template <typename T>
-__device__ void rocshmem_put_wave(rocshmem_ctx_t ctx, T *dest,
-                                    const T *source, size_t nelems, int pe);
+__device__ void rocshmem_put_wave(rocshmem_ctx_t ctx, T* dest, const T* source, size_t nelems,
+                                  int pe);
 
 template <typename T>
-__device__ void rocshmem_put_wave(T *dest, const T *source, size_t nelems,
-                                    int pe);
+__device__ void rocshmem_put_wave(T* dest, const T* source, size_t nelems, int pe);
 
 /**
  * @brief Writes contiguous data of \p nelems elements from \p source on the
@@ -518,12 +506,11 @@ __device__ void rocshmem_put_wave(T *dest, const T *source, size_t nelems,
  *
  */
 template <typename T>
-__device__ void rocshmem_put_wg(rocshmem_ctx_t ctx, T *dest, const T *source,
-                                  size_t nelems, int pe);
+__device__ void rocshmem_put_wg(rocshmem_ctx_t ctx, T* dest, const T* source, size_t nelems,
+                                int pe);
 
 template <typename T>
-__device__ void rocshmem_put_wg(T *dest, const T *source, size_t nelems,
-                                  int pe);
+__device__ void rocshmem_put_wg(T* dest, const T* source, size_t nelems, int pe);
 
 /**
  * @brief Reads contiguous data of \p nelems elements from \p source on \p pe
@@ -545,12 +532,11 @@ __device__ void rocshmem_put_wg(T *dest, const T *source, size_t nelems,
  *
  */
 template <typename T>
-__device__ void rocshmem_get_wave(rocshmem_ctx_t ctx, T *dest,
-                                    const T *source, size_t nelems, int pe);
+__device__ void rocshmem_get_wave(rocshmem_ctx_t ctx, T* dest, const T* source, size_t nelems,
+                                  int pe);
 
 template <typename T>
-__device__ void rocshmem_get_wave(T *dest, const T *source, size_t nelems,
-                                    int pe);
+__device__ void rocshmem_get_wave(T* dest, const T* source, size_t nelems, int pe);
 
 /**
  * @brief Reads contiguous data of \p nelems elements from \p source on \p pe
@@ -572,12 +558,11 @@ __device__ void rocshmem_get_wave(T *dest, const T *source, size_t nelems,
  *
  */
 template <typename T>
-__device__ void rocshmem_get_wg(rocshmem_ctx_t ctx, T *dest, const T *source,
-                                  size_t nelems, int pe);
+__device__ void rocshmem_get_wg(rocshmem_ctx_t ctx, T* dest, const T* source, size_t nelems,
+                                int pe);
 
 template <typename T>
-__device__ void rocshmem_get_wg(T *dest, const T *source, size_t nelems,
-                                  int pe);
+__device__ void rocshmem_get_wg(T* dest, const T* source, size_t nelems, int pe);
 
 /**
  * @brief Writes contiguous data of \p nelems elements from \p source on the
@@ -600,12 +585,11 @@ __device__ void rocshmem_get_wg(T *dest, const T *source, size_t nelems,
  *
  */
 template <typename T>
-__device__ void rocshmem_put_nbi_wave(rocshmem_ctx_t ctx, T *dest,
-                                        const T *src, size_t nelems, int pe);
+__device__ void rocshmem_put_nbi_wave(rocshmem_ctx_t ctx, T* dest, const T* src, size_t nelems,
+                                      int pe);
 
 template <typename T>
-__device__ void rocshmem_put_nbi_wave(T *dest, const T *src, size_t nelems,
-                                        int pe);
+__device__ void rocshmem_put_nbi_wave(T* dest, const T* src, size_t nelems, int pe);
 
 /**
  * @brief Writes contiguous data of \p nelems elements from \p source on the
@@ -628,12 +612,11 @@ __device__ void rocshmem_put_nbi_wave(T *dest, const T *src, size_t nelems,
  *
  */
 template <typename T>
-__device__ void rocshmem_put_nbi_wg(rocshmem_ctx_t ctx, T *dest,
-                                      const T *src, size_t nelems, int pe);
+__device__ void rocshmem_put_nbi_wg(rocshmem_ctx_t ctx, T* dest, const T* src, size_t nelems,
+                                    int pe);
 
 template <typename T>
-__device__ void rocshmem_put_nbi_wg(T *dest, const T *src, size_t nelems,
-                                      int pe);
+__device__ void rocshmem_put_nbi_wg(T* dest, const T* src, size_t nelems, int pe);
 
 /**
  * @brief Reads contiguous data of \p nelems elements from \p source on \p pe
@@ -656,12 +639,11 @@ __device__ void rocshmem_put_nbi_wg(T *dest, const T *src, size_t nelems,
  *
  */
 template <typename T>
-__device__ void rocshmem_get_nbi_wave(rocshmem_ctx_t ctx, T *dest,
-                                        const T *source, size_t nelems, int pe);
+__device__ void rocshmem_get_nbi_wave(rocshmem_ctx_t ctx, T* dest, const T* source, size_t nelems,
+                                      int pe);
 
 template <typename T>
-__device__ void rocshmem_get_nbi_wave(T *dest, const T *source, size_t nelems,
-                                        int pe);
+__device__ void rocshmem_get_nbi_wave(T* dest, const T* source, size_t nelems, int pe);
 
 /**
  * @brief Reads contiguous data of \p nelems elements from \p source on \p pe
@@ -684,100 +666,81 @@ __device__ void rocshmem_get_nbi_wave(T *dest, const T *source, size_t nelems,
  *
  */
 template <typename T>
-__device__ void rocshmem_get_nbi_wg(rocshmem_ctx_t ctx, T *dest,
-                                      const T *source, size_t nelems, int pe);
+__device__ void rocshmem_get_nbi_wg(rocshmem_ctx_t ctx, T* dest, const T* source, size_t nelems,
+                                    int pe);
 
 template <typename T>
-__device__ void rocshmem_get_nbi_wg(T *dest, const T *source, size_t nelems,
-                                      int pe);
+__device__ void rocshmem_get_nbi_wg(T* dest, const T* source, size_t nelems, int pe);
 
-__device__ void rocshmem_putmem_wave(void *dest, const void *source,
-                                       size_t nelems, int pe) {
+__device__ void rocshmem_putmem_wave(void* dest, const void* source, size_t nelems, int pe) {
   rocshmem_ctx_putmem_wave(ROCSHMEM_CTX_DEFAULT, dest, source, nelems, pe);
 }
 
-__device__ void rocshmem_putmem_wg(void *dest, const void *source,
-                                     size_t nelems, int pe) {
+__device__ void rocshmem_putmem_wg(void* dest, const void* source, size_t nelems, int pe) {
   rocshmem_ctx_putmem_wg(ROCSHMEM_CTX_DEFAULT, dest, source, nelems, pe);
 }
 
 template <typename T>
-__device__ void rocshmem_put_wave(T *dest, const T *source, size_t nelems,
-                                    int pe) {
+__device__ void rocshmem_put_wave(T* dest, const T* source, size_t nelems, int pe) {
   rocshmem_put_wave(ROCSHMEM_CTX_DEFAULT, dest, source, nelems, pe);
 }
 
 template <typename T>
-__device__ void rocshmem_put_wg(T *dest, const T *source, size_t nelems,
-                                  int pe) {
+__device__ void rocshmem_put_wg(T* dest, const T* source, size_t nelems, int pe) {
   rocshmem_put_wg(ROCSHMEM_CTX_DEFAULT, dest, source, nelems, pe);
 }
 
-__device__ void rocshmem_getmem_wg(void *dest, const void *source,
-                                     size_t nelems, int pe) {
+__device__ void rocshmem_getmem_wg(void* dest, const void* source, size_t nelems, int pe) {
   rocshmem_ctx_getmem_wg(ROCSHMEM_CTX_DEFAULT, dest, source, nelems, pe);
 }
 
 template <typename T>
-__device__ void rocshmem_get_wg(T *dest, const T *source, size_t nelems,
-                                  int pe) {
+__device__ void rocshmem_get_wg(T* dest, const T* source, size_t nelems, int pe) {
   rocshmem_get_wg(ROCSHMEM_CTX_DEFAULT, dest, source, nelems, pe);
 }
 
-__device__ void rocshmem_getmem_wave(void *dest, const void *source,
-                                       size_t nelems, int pe) {
+__device__ void rocshmem_getmem_wave(void* dest, const void* source, size_t nelems, int pe) {
   rocshmem_ctx_getmem_wave(ROCSHMEM_CTX_DEFAULT, dest, source, nelems, pe);
 }
 
 template <typename T>
-__device__ void rocshmem_get_wave(T *dest, const T *source, size_t nelems,
-                                    int pe) {
+__device__ void rocshmem_get_wave(T* dest, const T* source, size_t nelems, int pe) {
   rocshmem_get_wave(ROCSHMEM_CTX_DEFAULT, dest, source, nelems, pe);
 }
 
-__device__ void rocshmem_putmem_nbi_wg(void *dest, const void *source,
-                                         size_t nelems, int pe) {
+__device__ void rocshmem_putmem_nbi_wg(void* dest, const void* source, size_t nelems, int pe) {
   rocshmem_ctx_putmem_nbi_wg(ROCSHMEM_CTX_DEFAULT, dest, source, nelems, pe);
 }
 
 template <typename T>
-__device__ void rocshmem_put_nbi_wg(T *dest, const T *source, size_t nelems,
-                                      int pe) {
+__device__ void rocshmem_put_nbi_wg(T* dest, const T* source, size_t nelems, int pe) {
   rocshmem_put_nbi_wg(ROCSHMEM_CTX_DEFAULT, dest, source, nelems, pe);
 }
 
-__device__ void rocshmem_putmem_nbi_wave(void *dest, const void *source,
-                                           size_t nelems, int pe) {
-  rocshmem_ctx_putmem_nbi_wave(ROCSHMEM_CTX_DEFAULT, dest, source, nelems,
-                                 pe);
+__device__ void rocshmem_putmem_nbi_wave(void* dest, const void* source, size_t nelems, int pe) {
+  rocshmem_ctx_putmem_nbi_wave(ROCSHMEM_CTX_DEFAULT, dest, source, nelems, pe);
 }
 
 template <typename T>
-__device__ void rocshmem_put_nbi_wave(T *dest, const T *source, size_t nelems,
-                                        int pe) {
+__device__ void rocshmem_put_nbi_wave(T* dest, const T* source, size_t nelems, int pe) {
   rocshmem_put_nbi_wave(ROCSHMEM_CTX_DEFAULT, dest, source, nelems, pe);
 }
 
-__device__ void rocshmem_getmem_nbi_wg(void *dest, const void *source,
-                                         size_t nelems, int pe) {
+__device__ void rocshmem_getmem_nbi_wg(void* dest, const void* source, size_t nelems, int pe) {
   rocshmem_ctx_getmem_nbi_wg(ROCSHMEM_CTX_DEFAULT, dest, source, nelems, pe);
 }
 
 template <typename T>
-__device__ void rocshmem_get_nbi_wg(T *dest, const T *source, size_t nelems,
-                                      int pe) {
+__device__ void rocshmem_get_nbi_wg(T* dest, const T* source, size_t nelems, int pe) {
   rocshmem_get_nbi_wg(ROCSHMEM_CTX_DEFAULT, dest, source, nelems, pe);
 }
 
-__device__ void rocshmem_getmem_nbi_wave(void *dest, const void *source,
-                                           size_t nelems, int pe) {
-  rocshmem_ctx_getmem_nbi_wave(ROCSHMEM_CTX_DEFAULT, dest, source, nelems,
-                                 pe);
+__device__ void rocshmem_getmem_nbi_wave(void* dest, const void* source, size_t nelems, int pe) {
+  rocshmem_ctx_getmem_nbi_wave(ROCSHMEM_CTX_DEFAULT, dest, source, nelems, pe);
 }
 
 template <typename T>
-__device__ void rocshmem_get_nbi_wave(T *dest, const T *source, size_t nelems,
-                                        int pe) {
+__device__ void rocshmem_get_nbi_wave(T* dest, const T* source, size_t nelems, int pe) {
   rocshmem_get_nbi_wave(ROCSHMEM_CTX_DEFAULT, dest, source, nelems, pe);
 }
 

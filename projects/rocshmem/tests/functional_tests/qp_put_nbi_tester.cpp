@@ -39,7 +39,7 @@ using namespace rocshmem;
  * each quiet spins on the non-blocking poll_cq_once() instead, first
  * on a target taken mid-batch and then on everything posted.
  *****************************************************************************/
-static __device__ void QpPutNbiQuiet(QueuePair &qp, bool poll) {
+static __device__ void QpPutNbiQuiet(QueuePair& qp, bool poll) {
   if (!poll) {
     qp.quiet_single();
     return;
@@ -49,21 +49,20 @@ static __device__ void QpPutNbiQuiet(QueuePair &qp, bool poll) {
   }
 }
 
-__global__ void QpPutNbiTest(int loop, int skip, long long int *start_time,
-                             long long int *end_time, char *source,
-                             char *dest, size_t size, int batch,
+__global__ void QpPutNbiTest(int loop, int skip, long long int* start_time, long long int* end_time,
+                             char* source, char* dest, size_t size, int batch,
                              ShmemContextType ctx_type, bool poll) {
   __shared__ rocshmem_ctx_t ctx;
   rocshmem_wg_ctx_create(ctx_type, &ctx);
 
   if (threadIdx.x == 0) {
-    GDAContext *gda_ctx = reinterpret_cast<GDAContext *>(ctx.ctx_opaque);
-    int pe = rocshmem_ctx_my_pe(ctx);
-    int target = 1 - pe;
+    GDAContext* gda_ctx = reinterpret_cast<GDAContext*>(ctx.ctx_opaque);
+    int pe              = rocshmem_ctx_my_pe(ctx);
+    int target          = 1 - pe;
 
-    QueuePair &qp = gda_ctx->qps[target];
+    QueuePair& qp = gda_ctx->qps[target];
 
-    int wg_id = hipBlockIdx_x;
+    int wg_id      = hipBlockIdx_x;
     int start_slot = (batch - (skip % batch)) % batch;
 
     // Drain all setup loads from HBM before entering the timed loop.
@@ -113,8 +112,8 @@ QpPutNbiTester::QpPutNbiTester(TesterArguments args) : Tester(args) {
     }
     exit(1);
   }
-  s_buf = (char *)alloc_test_buffer(max_msg_size);
-  r_buf = (char *)alloc_test_buffer(max_msg_size * batch_size);
+  s_buf = (char*)alloc_test_buffer(max_msg_size);
+  r_buf = (char*)alloc_test_buffer(max_msg_size * batch_size);
 }
 
 QpPutNbiTester::~QpPutNbiTester() {
@@ -127,28 +126,27 @@ void QpPutNbiTester::resetBuffers(size_t size) {
   CHECK_HIP(hipMemset(r_buf, 0, size * batch_size));
 }
 
-void QpPutNbiTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
-                                  size_t size) {
+void QpPutNbiTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop, size_t size) {
   size_t shared_bytes = 0;
 
-  hipLaunchKernelGGL(QpPutNbiTest, gridSize, blockSize, shared_bytes, stream,
-                     loop, args.skip, start_time, end_time, s_buf, r_buf, size,
-                     batch_size, _shmem_context, _type == QpPutNbiPollTestType);
+  hipLaunchKernelGGL(QpPutNbiTest, gridSize, blockSize, shared_bytes, stream, loop, args.skip,
+                     start_time, end_time, s_buf, r_buf, size, batch_size, _shmem_context,
+                     _type == QpPutNbiPollTestType);
 
-  num_msgs = (loop + args.skip) * gridSize.x;
+  num_msgs       = (loop + args.skip) * gridSize.x;
   num_timed_msgs = loop * gridSize.x;
 }
 
 void QpPutNbiTester::verifyResults(size_t size) {
-  if (args.myid != 1) return;
+  if (args.myid != 1)
+    return;
 
-  size_t check_bytes = size * batch_size;
+  size_t check_bytes  = size * batch_size;
   *verification_error = false;
-  size_t block = std::min((size_t)1024, check_bytes);
-  size_t grid = (check_bytes + block - 1) / block;
-  hipLaunchKernelGGL(rocshmem::verify_results_kernel_char, grid, block, 0, stream,
-                     r_buf, check_bytes, check_bytes, 1, 1, 0, 1,
-                     verification_error);
+  size_t block        = std::min((size_t)1024, check_bytes);
+  size_t grid         = (check_bytes + block - 1) / block;
+  hipLaunchKernelGGL(rocshmem::verify_results_kernel_char, grid, block, 0, stream, r_buf,
+                     check_bytes, check_bytes, 1, 1, 0, 1, verification_error);
   CHECK_HIP(hipStreamSynchronize(stream));
 
   if (*verification_error) {

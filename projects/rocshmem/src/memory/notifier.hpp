@@ -32,21 +32,16 @@
 
 namespace rocshmem {
 
-template<atomic::memory_scope scope>
+template <atomic::memory_scope scope>
 class Notifier {
-
  public:
-  __device__ uint64_t load() {
-    return atomic::load<scope, atomic::memory_order::acquire>(&value_);
-  }
+  __device__ uint64_t load() { return atomic::load<scope, atomic::memory_order::acquire>(&value_); }
 
   __device__ void store(uint64_t val) {
     atomic::store<scope, atomic::memory_order::release>(&value_, val);
   }
 
-  __device__ void fence() {
-    atomic::threadfence<scope>();
-  }
+  __device__ void fence() { atomic::threadfence<scope>(); }
 
   __device__ void sync() {
     if constexpr (scope == atomic::memory_scope::single ||
@@ -62,11 +57,11 @@ class Notifier {
       return;
     }
 
-    uint32_t done {signal_ + 1};
+    uint32_t done{signal_ + 1};
     __syncthreads();
 
-    uint32_t retval {0};
-    bool executor {!threadIdx.x && !threadIdx.y && !threadIdx.z};
+    uint32_t retval{0};
+    bool executor{!threadIdx.x && !threadIdx.y && !threadIdx.z};
     if (executor) {
       retval = atomic::fetch_add<scope, atomic::memory_order::acq_rel>(&count_, 1);
       fence();
@@ -82,8 +77,7 @@ class Notifier {
     }
 
     if (executor) {
-      while (atomic::load<scope, atomic::memory_order::acquire>(
-               &signal_) != done) {
+      while (atomic::load<scope, atomic::memory_order::acquire>(&signal_) != done) {
         ;
       }
     }
@@ -93,9 +87,9 @@ class Notifier {
  private:
   uint64_t value_{};
 
-  uint32_t signal_ {};
+  uint32_t signal_{};
 
-  uint32_t count_ {};
+  uint32_t count_{};
 };
 
 template <atomic::memory_scope scope>
@@ -103,9 +97,8 @@ class NotifierProxy {
   using ProxyT = DeviceProxy<Notifier<scope>>;
 
  public:
-  NotifierProxy(const HIPAllocator& alloc = HIPAllocator(),
-                size_t num_elems = 1)
-    : alloc_{alloc}, proxy_{num_elems, alloc_} {
+  NotifierProxy(const HIPAllocator& alloc = HIPAllocator(), size_t num_elems = 1)
+      : alloc_{alloc}, proxy_{num_elems, alloc_} {
     new (proxy_.get()) Notifier<scope>();
   }
 
@@ -117,9 +110,7 @@ class NotifierProxy {
 
   NotifierProxy& operator=(NotifierProxy&& other) = default;
 
-  ~NotifierProxy() {
-    proxy_.get()->~Notifier<scope>();
-  }
+  ~NotifierProxy() { proxy_.get()->~Notifier<scope>(); }
 
   __host__ __device__ Notifier<scope>* get() { return proxy_.get(); }
 

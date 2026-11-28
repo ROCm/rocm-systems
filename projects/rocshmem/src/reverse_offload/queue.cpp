@@ -28,13 +28,13 @@
 
 namespace rocshmem {
 
-Queue::Queue() { }
+Queue::Queue() {}
 
 Queue::Queue(size_t max_queues, size_t queue_size)
     : queue_proxy_{max_queues, queue_size},
       queue_desc_proxy_{max_queues},
       max_queues_{max_queues},
-      queue_size_{queue_size} { }
+      queue_size_{queue_size} {}
 
 uint64_t Queue::get_read_index(uint64_t queue_index) {
   return descriptor(queue_index)->read_index % queue_size_;
@@ -57,13 +57,13 @@ bool Queue::process(uint64_t queue_index, MPITransport* transport) {
 }
 
 queue_element* Queue::next_element(uint64_t queue_index) {
-  queue_element *next_elem{nullptr};
+  queue_element* next_elem{nullptr};
   if (!envvar::ro::net_cpu_queue) {
     hdp_proxy_.get()->hdp_flush();
     copy_element_to_cache(queue_index);
     next_elem = queue_element_cache_proxy_.get();
   } else {
-    auto queues {queue_proxy_.get()};
+    auto queues{queue_proxy_.get()};
     auto read_slot{get_read_index(queue_index)};
     next_elem = &queues[queue_index][read_slot];
   }
@@ -71,10 +71,10 @@ queue_element* Queue::next_element(uint64_t queue_index) {
 }
 
 void Queue::copy_element_to_cache(uint64_t queue_index) {
-    auto element{queue_element_cache_proxy_.get()};
-    auto read_slot{get_read_index(queue_index)};
-    auto queues {queue_proxy_.get()};
-    ::memcpy(element, &queues[queue_index][read_slot], sizeof(queue_element_t));
+  auto element{queue_element_cache_proxy_.get()};
+  auto read_slot{get_read_index(queue_index)};
+  auto queues{queue_proxy_.get()};
+  ::memcpy(element, &queues[queue_index][read_slot], sizeof(queue_element_t));
 }
 
 void Queue::flush_hdp() {

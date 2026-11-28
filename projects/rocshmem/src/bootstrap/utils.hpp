@@ -33,7 +33,10 @@
 
 #include "log.hpp"
 
-#define ERROR(...) { LOG_ERROR_ABORT(__VA_ARGS__); }
+#define ERROR(...)                \
+  {                               \
+    LOG_ERROR_ABORT(__VA_ARGS__); \
+  }
 
 namespace rocshmem {
 
@@ -101,4 +104,4 @@ struct PairHash {
 
 }  // namespace rocshmem
 
-#endif // ROCSHMEM_UTILS_HPP
+#endif  // ROCSHMEM_UTILS_HPP

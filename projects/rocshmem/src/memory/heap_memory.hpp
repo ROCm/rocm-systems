@@ -42,21 +42,20 @@
 
 namespace rocshmem {
 
-  class HeapMemory {
-   public:
-    virtual ~HeapMemory() = default;
+class HeapMemory {
+ public:
+  virtual ~HeapMemory() = default;
 
-    virtual __host__ __device__ char* get_ptr() = 0;
-    virtual __host__ __device__ size_t get_size() = 0;
+  virtual __host__ __device__ char* get_ptr()   = 0;
+  virtual __host__ __device__ size_t get_size() = 0;
 
-    AllocatorType type_;
+  AllocatorType type_;
 
-    /**
-     * @brief Allocation granularity (bytes) of the backing allocator.
-     */
-    size_t granularity_{1};
-  };
-
+  /**
+   * @brief Allocation granularity (bytes) of the backing allocator.
+   */
+  size_t granularity_{1};
+};
 
 class HeapMemoryType : public HeapMemory {
  public:
@@ -87,7 +86,7 @@ class HeapMemoryType : public HeapMemory {
     ptr_ = up_.get();
 
     // Get allocator type from the base class without unsafe casting
-    type_ = allocator_.get_type();
+    type_        = allocator_.get_type();
     granularity_ = allocator_.get_granularity();
   }
 
@@ -115,9 +114,7 @@ class HeapMemoryType : public HeapMemory {
    public:
     Deleter() = default;
     explicit Deleter(const MemoryAllocator& alloc) : a_{alloc} {}
-    void operator()(void* x) {
-      a_.deallocate(x);
-    }
+    void operator()(void* x) { a_.deallocate(x); }
 
    private:
     MemoryAllocator a_{};

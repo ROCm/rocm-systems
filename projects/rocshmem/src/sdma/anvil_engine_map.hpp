@@ -36,7 +36,9 @@ namespace sdma_anvil {
 // Every queue slot on an even-numbered MI300 SDMA engine is reachable by a GPU-written doorbell.
 // Slots 0-3 on odd engines are not (ROCM-32598), and this code cannot choose a slot, so use only
 // even engines until the slot-aware workaround can inspect and park unusable queues.
-inline bool isUsableSdmaEngine(int engineId) { return engineId >= 0 && engineId % 2 == 0; }
+inline bool isUsableSdmaEngine(int engineId) {
+  return engineId >= 0 && engineId % 2 == 0;
+}
 
 // Number of even engines in a node-local engine range. A zero total means the count is unknown.
 inline uint32_t usableSdmaEngines(uint32_t numSdmaEnginesTotal) {
@@ -47,7 +49,8 @@ inline uint32_t usableSdmaEngines(uint32_t numSdmaEnginesTotal) {
 // if it contains only odd engines, use the paired even engine immediately below the lowest one.
 // Return -1 for an empty mask.
 inline int preferredUsableEngine(uint32_t preferredMask) {
-  if (preferredMask == 0) return -1;
+  if (preferredMask == 0)
+    return -1;
   const uint32_t evenMask = preferredMask & 0x55555555u;
   return evenMask != 0 ? __builtin_ctz(evenMask) : (__builtin_ctz(preferredMask) & ~1);
 }
@@ -77,8 +80,7 @@ inline bool oamMapEngineNeedsFold(uint32_t numSdmaXgmiEngines, uint32_t numSdmaE
 inline int foldOamMapEngine(int oamEngine, int srcFn, int dstFn, uint32_t numEnginesTotal) {
   const int src = srcFn < 0 ? 0 : srcFn;
   const int dst = dstFn < 0 ? 0 : dstFn;
-  return 2 * ((oamEngine + src + dst) %
-              static_cast<int>(usableSdmaEngines(numEnginesTotal)));
+  return 2 * ((oamEngine + src + dst) % static_cast<int>(usableSdmaEngines(numEnginesTotal)));
 }
 
 // PCI function and the function-0 BDF of the same device. function is -1 when the tail is not a
@@ -97,13 +99,14 @@ struct PciFunctionBus {
 // is the whole range.
 inline PciFunctionBus pciFunctionBus(const std::string& busId) {
   PciFunctionBus loc;
-  loc.busId = busId;
+  loc.busId     = busId;
   loc.physBusId = busId;
-  loc.function = -1;
-  if (busId.empty()) return loc;
+  loc.function  = -1;
+  if (busId.empty())
+    return loc;
   const char c = busId.back();
   if (c >= '0' && c <= '7') {
-    loc.function = c - '0';
+    loc.function         = c - '0';
     loc.physBusId.back() = '0';
   }
   return loc;
@@ -123,9 +126,10 @@ inline bool queueBudgetExceeded(uint32_t used, int requested, uint32_t numEngine
 inline int leastLoadedPreferredEngine(uint32_t preferredMask,
                                       const std::vector<uint32_t>& queuesPerEngine) {
   const uint32_t evenMask = preferredMask & 0x55555555u;
-  int best = -1;
+  int best                = -1;
   for (size_t e = 0; e < queuesPerEngine.size() && e < 32; e += 2) {
-    if ((evenMask & (1u << e)) == 0) continue;
+    if ((evenMask & (1u << e)) == 0)
+      continue;
     if (best < 0 || queuesPerEngine[e] < queuesPerEngine[static_cast<size_t>(best)]) {
       best = static_cast<int>(e);
     }

@@ -162,29 +162,25 @@ class Stats {
  public:
   __device__ uint64_t startTimer() const { return wall_clock64(); }
 
-  __device__ void endTimer(uint64_t start, int index) {
-    incStat(index, wall_clock64() - start);
-  }
+  __device__ void endTimer(uint64_t start, int index) { incStat(index, wall_clock64() - start); }
 
-  __device__ void incStat(int index, int value = 1) {
-    atomicAdd(&stats[index], value);
-  }
+  __device__ void incStat(int index, int value = 1) { atomicAdd(&stats[index], value); }
 
-  __device__ void accumulateStats(const Stats<I> &otherStats) {
-    for (int i = 0; i < I; i++) incStat(i, otherStats.getStat(i));
+  __device__ void accumulateStats(const Stats<I>& otherStats) {
+    for (int i = 0; i < I; i++)
+      incStat(i, otherStats.getStat(i));
   }
 
   // Host-side accumulation: plain addition into an already-host-accessible
   // Stats object (e.g. globalStats in hipHostMalloc memory).  Not atomic —
   // must only be called from the host when no GPU kernels are concurrently
   // writing to this object or to otherStats.
-  __host__ void hostAccumulateStats(const Stats<I> &otherStats) {
-    for (int i = 0; i < I; i++) stats[i] += otherStats.getStat(i);
+  __host__ void hostAccumulateStats(const Stats<I>& otherStats) {
+    for (int i = 0; i < I; i++)
+      stats[i] += otherStats.getStat(i);
   }
 
-  __host__ __device__ void resetStats() {
-    memset(&stats, 0, sizeof(StatType) * I);
-  }
+  __host__ __device__ void resetStats() { memset(&stats, 0, sizeof(StatType) * I); }
 
   __host__ __device__ StatType getStat(int index) const {
 #ifdef __HIP_DEVICE_COMPILE__
@@ -198,8 +194,7 @@ class Stats {
     // LDAR (load-acquire), which prevents later loads from being speculated
     // before this one and ensures the value is read from the coherent memory
     // subsystem rather than a stale CPU register or store buffer.
-    return __atomic_load_n(const_cast<StatType *>(&stats[index]),
-                           __ATOMIC_ACQUIRE);
+    return __atomic_load_n(const_cast<StatType*>(&stats[index]), __ATOMIC_ACQUIRE);
 #endif
   }
 };
@@ -211,31 +206,32 @@ class HostStats {
  public:
   __host__ uint64_t startTimer() const { return wtime(); }
 
-  __host__ void endTimer(uint64_t start, int index) {
-    incStat(index, wtime() - start);
-  }
+  __host__ void endTimer(uint64_t start, int index) { incStat(index, wtime() - start); }
 
   __host__ void incStat(int index, int value = 1) {
     stats[index].fetch_add(value, std::memory_order_relaxed);
   }
 
-  __host__ void accumulateStats(const HostStats<I> &otherStats) {
-    for (int i = 0; i < I; i++) incStat(i, otherStats.getStat(i));
+  __host__ void accumulateStats(const HostStats<I>& otherStats) {
+    for (int i = 0; i < I; i++)
+      incStat(i, otherStats.getStat(i));
   }
 
   __host__ void resetStats() {
     /* Using loop to ensure atomic writes */
-    for (int i = 0; i < I; i++) stats[i] = 0;
+    for (int i = 0; i < I; i++)
+      stats[i] = 0;
   }
 
   __host__ StatType getStat(int index) const { return stats[index].load(); }
+
  private:
   double wtime(void) {
     double wt;
     struct timespec tp;
 
-    (void) clock_gettime(CLOCK_MONOTONIC, &tp);
-    wt = (static_cast<double>(tp.tv_nsec))/1.0e+9;
+    (void)clock_gettime(CLOCK_MONOTONIC, &tp);
+    wt = (static_cast<double>(tp.tv_nsec)) / 1.0e+9;
     wt += static_cast<double>(tp.tv_sec);
     return wt;
   }

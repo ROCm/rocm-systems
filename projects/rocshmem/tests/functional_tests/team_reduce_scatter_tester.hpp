@@ -37,8 +37,8 @@ template <typename T1, ROCSHMEM_OP T2>
 class TeamReduceScatterTester : public Tester {
  public:
   explicit TeamReduceScatterTester(
-      TesterArguments args, std::function<void(T1 &, T1 &)> f1,
-      std::function<std::pair<bool, std::string>(const T1 &, const T1 &)> f2);
+      TesterArguments args, std::function<void(T1&, T1&)> f1,
+      std::function<std::pair<bool, std::string>(const T1&, const T1&)> f2);
   virtual ~TeamReduceScatterTester();
 
  protected:
@@ -46,23 +46,21 @@ class TeamReduceScatterTester : public Tester {
 
   virtual void preLaunchKernel() override;
 
-  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop,
-                            uint64_t size) override;
+  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop, uint64_t size) override;
 
   virtual void postLaunchKernel() override;
 
   virtual void verifyResults(uint64_t size) override;
 
-  T1 *s_buf;  // source: n_pes * size elements per PE
-  T1 *r_buf;  // dest:   size elements per PE
+  T1* s_buf;  // source: n_pes * size elements per PE
+  T1* r_buf;  // dest:   size elements per PE
 
  private:
   int my_pe = 0;
   int n_pes = 0;
 
-  std::function<void(T1 &, T1 &)> init_buf;
-  std::function<std::pair<bool, std::string>(const T1 &, const T1 &)>
-      verify_buf;
+  std::function<void(T1&, T1&)> init_buf;
+  std::function<std::pair<bool, std::string>(const T1&, const T1&)> verify_buf;
 };
 
 #include "team_reduce_scatter_tester.cpp"

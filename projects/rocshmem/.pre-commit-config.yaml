@@ -1,0 +1,45 @@
+# pre-commit configuration for projects/rocshmem.
+#
+# CI (.github/workflows/rocshmem-format.yml) runs exactly this file, so a
+# developer can reproduce a CI failure locally. Run from the repository root:
+#
+#   # once, to check staged files on `git commit`
+#   pre-commit install --config projects/rocshmem/.pre-commit-config.yaml
+#
+#   # just what you changed in your branch
+#   pre-commit run --config projects/rocshmem/.pre-commit-config.yaml \
+#     --files $(git diff --name-only origin/develop...HEAD)
+#
+#   # everything
+#   pre-commit run --config projects/rocshmem/.pre-commit-config.yaml --all-files
+#
+# To fix formatting rather than just check it:
+#   git clang-format --style file          # staged changes
+#   projects/rocshmem/scripts/run-clang-format.sh [path]
+#
+# pre-commit itself: `pip install pre-commit` (or `uv tool install pre-commit`).
+
+# Only ever look at files under projects/rocshmem, whatever file list
+# pre-commit is handed.
+files: ^projects/rocshmem/
+
+repos:
+  # C/C++/HIP formatting. Blocking: the tree is already formatted, so this only
+  # reports files a PR changes. --dry-run never edits; -Werror makes a
+  # difference a non-zero exit. Paths in .clang-format-ignore are skipped.
+  #
+  # `rev` pins the clang-format major version; keep it in line with
+  # MIN_VERSION in scripts/run-clang-format.sh. A different major version can
+  # format differently and make a clean file look dirty.
+  - repo: https://github.com/pre-commit/mirrors-clang-format
+    rev: v22.1.8
+    hooks:
+      - id: clang-format
+        name: clang-format (C/C++)
+        entry: clang-format --dry-run -Werror --style=file
+        # The hook's default `types_or` list has no entry for .hip (pre-commit's
+        # file-type database does not know it), so clear it and let `files`
+        # below choose the extensions. `types: [text]` still skips binaries.
+        types: [text]
+        types_or: []
+        files: ^projects/rocshmem/(examples|include|src|tests)/.*\.(c|cc|cpp|cu|h|hpp|hip)$
