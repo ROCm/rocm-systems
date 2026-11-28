@@ -67,6 +67,17 @@ __device__ __forceinline__ void StorePartial(uint8_t *dst, const void *src, uint
     }
 }
 
+// Reads the first `num_bytes` (at most 16) bytes at `src` into a uint4 whose other bytes are 0. The odd-left YUYV
+// kernels read their source from one pixel before the crop, so in the last block of a row they read only the
+// macropixels holding its pixels: a whole 16-byte block could run past the end of the decoded surface.
+__device__ __forceinline__ uint4 LoadPartialUint4(const uint8_t *src, uint32_t num_bytes) {
+    uint32_t words[4] = {0, 0, 0, 0};
+    for (uint32_t i = 0; i < num_bytes; i++) {
+        words[i >> 2] |= static_cast<uint32_t>(src[i]) << ((i & 3) * 8);
+    }
+    return make_uint4(words[0], words[1], words[2], words[3]);
+}
+
 __global__ void ColorConvertRGBAToRGBBatchedKernel(const RGBAToRGBBatchParams *params, uint32_t n_images) {
     if (hipBlockIdx_z >= n_images) return;
     const RGBAToRGBBatchParams &p = params[hipBlockIdx_z];
@@ -199,6 +210,8 @@ void ExtractYFromPackedYUYVBatched(hipStream_t stream, uint32_t max_gx, uint32_t
         dim3(16, 4, 1), 0, stream>>>(d_params, n_images);
 }
 
+// kOddLeft: the first destination pixel is the second pixel of the source macropixel (a crop with an odd left edge).
+template <bool kOddLeft>
 __global__ void ConvertPackedYUYVToPlanarYUVBatchedKernel(const PackedYUYVToPlanarYUVBatchParams *params, uint32_t n_images) {
     if (hipBlockIdx_z >= n_images) return;
     const PackedYUYVToPlanarYUVBatchParams &p = params[hipBlockIdx_z];
@@ -220,12 +233,27 @@ __global__ void ConvertPackedYUYVToPlanarYUVBatchedKernel(const PackedYUYVToPlan
         uint32_t dst_y_idx = y * dst_luma_stride_in_bytes + (x << 3);
         uint32_t dst_uv_idx = y * dst_chroma_stride_in_bytes + (x << 2);
 
-        uint4 src = *((uint4 *)(&src_image[src_idx]));
+        uint4 src;
+        if (kOddLeft && p.dst_width - (x << 3) < 8) {
+            // Pixel i of the block is the luma at byte 2 * i + 2, so the last block of a row reads only the
+            // macropixels up to the one holding its last pixel.
+            src = LoadPartialUint4(&src_image[src_idx], ((p.dst_width - (x << 3)) >> 1) * 4 + 4);
+        } else {
+            src = *((uint4 *)(&src_image[src_idx]));
+        }
         uint2 dst_y;
         uint32_t dst_u, dst_v;
 
-        dst_y.x = hipPack(make_float4(hipUnpack0(src.x), hipUnpack2(src.x), hipUnpack0(src.y), hipUnpack2(src.y)));
-        dst_y.y = hipPack(make_float4(hipUnpack0(src.z), hipUnpack2(src.z), hipUnpack0(src.w), hipUnpack2(src.w)));
+        if (kOddLeft) {
+            // Luma is bytes 2, 4, ..., 16; chroma still comes from the macropixels holding pixels 0, 2, 4 and 6.
+            // Byte 16 is the luma of pixel 7, so it is read only when the block has all 8 pixels.
+            float y8 = (p.dst_width - (x << 3) >= 8) ? static_cast<float>(src_image[src_idx + 16]) : 0.0f;
+            dst_y.x = hipPack(make_float4(hipUnpack2(src.x), hipUnpack0(src.y), hipUnpack2(src.y), hipUnpack0(src.z)));
+            dst_y.y = hipPack(make_float4(hipUnpack2(src.z), hipUnpack0(src.w), hipUnpack2(src.w), y8));
+        } else {
+            dst_y.x = hipPack(make_float4(hipUnpack0(src.x), hipUnpack2(src.x), hipUnpack0(src.y), hipUnpack2(src.y)));
+            dst_y.y = hipPack(make_float4(hipUnpack0(src.z), hipUnpack2(src.z), hipUnpack0(src.w), hipUnpack2(src.w)));
+        }
         dst_u = hipPack(make_float4(hipUnpack1(src.x), hipUnpack1(src.y), hipUnpack1(src.z), hipUnpack1(src.w)));
         dst_v = hipPack(make_float4(hipUnpack3(src.x), hipUnpack3(src.y), hipUnpack3(src.z), hipUnpack3(src.w)));
 
@@ -248,7 +276,62 @@ void ConvertPackedYUYVToPlanarYUVBatched(hipStream_t stream, uint32_t max_gx, ui
     const PackedYUYVToPlanarYUVBatchParams *d_params, uint32_t n_images) {
     uint32_t grid_x = static_cast<uint32_t>(ceil(static_cast<float>(max_gx) / 16));
     uint32_t grid_y = static_cast<uint32_t>(ceil(static_cast<float>(max_gy) / 4));
-    ConvertPackedYUYVToPlanarYUVBatchedKernel<<<dim3(grid_x, grid_y, n_images),
+    ConvertPackedYUYVToPlanarYUVBatchedKernel<false><<<dim3(grid_x, grid_y, n_images),
+        dim3(16, 4, 1), 0, stream>>>(d_params, n_images);
+}
+
+void ConvertPackedYUYVToPlanarYUVOddLeftBatched(hipStream_t stream, uint32_t max_gx, uint32_t max_gy,
+    const PackedYUYVToPlanarYUVBatchParams *d_params, uint32_t n_images) {
+    uint32_t grid_x = static_cast<uint32_t>(ceil(static_cast<float>(max_gx) / 16));
+    uint32_t grid_y = static_cast<uint32_t>(ceil(static_cast<float>(max_gy) / 4));
+    ConvertPackedYUYVToPlanarYUVBatchedKernel<true><<<dim3(grid_x, grid_y, n_images),
+        dim3(16, 4, 1), 0, stream>>>(d_params, n_images);
+}
+
+__global__ void CopyYUYVOddLeftBatchedKernel(const YUYVOddLeftBatchParams *params, uint32_t n_images) {
+    if (hipBlockIdx_z >= n_images) return;
+    const YUYVOddLeftBatchParams &p = params[hipBlockIdx_z];
+    uint32_t x = (hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x) * 8;
+    uint32_t y = hipBlockDim_y * hipBlockIdx_y + hipThreadIdx_y;
+    if (x >= p.dst_width || y >= p.dst_height) {
+        return;
+    }
+    // Destination macropixel k is (Y, U, Y, V) = source bytes (4k + 2, 4k + 1, 4k + 4, 4k + 3), so the first n pixels
+    // of a block use source bytes up to 2n.
+    uint32_t src_idx = y * p.src_image_stride_in_bytes + (x << 1);
+    uint32_t dst_idx = y * p.dst_image_stride_in_bytes + (x << 1);
+    uint32_t num_pixels = p.dst_width - x;
+    uint4 src;
+    float y8 = 0.0f;
+    if (num_pixels >= 8) {
+        src = *((const uint4 *)(&p.src_image[src_idx]));
+        y8 = static_cast<float>(p.src_image[src_idx + 16]);
+    } else {
+        // The last block of a row reads only the bytes its pixels use. Loading the whole block could read past the
+        // end of the image, which the copy of a crop with an even left edge never does.
+        uint32_t words[4] = {0, 0, 0, 0};
+        for (uint32_t i = 0; i <= 2 * num_pixels; i++) {
+            words[i >> 2] |= static_cast<uint32_t>(p.src_image[src_idx + i]) << ((i & 3) * 8);
+        }
+        src = make_uint4(words[0], words[1], words[2], words[3]);
+    }
+    uint4 dst;
+    dst.x = hipPack(make_float4(hipUnpack2(src.x), hipUnpack1(src.x), hipUnpack0(src.y), hipUnpack3(src.x)));
+    dst.y = hipPack(make_float4(hipUnpack2(src.y), hipUnpack1(src.y), hipUnpack0(src.z), hipUnpack3(src.y)));
+    dst.z = hipPack(make_float4(hipUnpack2(src.z), hipUnpack1(src.z), hipUnpack0(src.w), hipUnpack3(src.z)));
+    dst.w = hipPack(make_float4(hipUnpack2(src.w), hipUnpack1(src.w), y8, hipUnpack3(src.w)));
+    if (num_pixels >= 8) {
+        *((uint4 *)(&p.dst_image[dst_idx])) = dst;
+    } else {
+        StorePartial(&p.dst_image[dst_idx], &dst, num_pixels * 2);
+    }
+}
+
+void CopyYUYVOddLeftBatched(hipStream_t stream, uint32_t max_gx, uint32_t max_gy,
+    const YUYVOddLeftBatchParams *d_params, uint32_t n_images) {
+    uint32_t grid_x = static_cast<uint32_t>(ceil(static_cast<float>(max_gx) / 16));
+    uint32_t grid_y = static_cast<uint32_t>(ceil(static_cast<float>(max_gy) / 4));
+    CopyYUYVOddLeftBatchedKernel<<<dim3(grid_x, grid_y, n_images),
         dim3(16, 4, 1), 0, stream>>>(d_params, n_images);
 }
 
@@ -259,16 +342,94 @@ void ConvertPackedYUYVToPlanarYUVBatched(hipStream_t stream, uint32_t max_gx, ui
 // cover every supported YUV surface layout for both packed and planar RGB output.
 // ============================================================================
 
+// Reads the first `num_bytes` (at most 8) bytes at `src` into a uint2 whose other bytes are 0. In the last block of a
+// row, the odd-crop chroma loads read only the bytes their pixels use: with an odd top edge they also read the chroma
+// row below the ones the plain kernels read, which can be the last row of the surface, so a full load could read past
+// its end.
+__device__ __forceinline__ uint2 LoadPartialUint2(const uint8_t *src, uint32_t num_bytes) {
+    uint32_t words[2] = {0, 0};
+    for (uint32_t i = 0; i < num_bytes; i++) {
+        words[i >> 2] |= static_cast<uint32_t>(src[i]) << ((i & 3) * 8);
+    }
+    return make_uint2(words[0], words[1]);
+}
+
+// Odd-crop loads for one 8-pixel row of an NV12 block whose first pixel is the second pixel of the U,V pair at `src`
+// (x_phase 1): pixels 0..7 take their chroma from pairs 0, 1, 1, 2, 2, 3, 3, 4. With x_phase 0 they take it from
+// pairs 0, 0, 1, 1, 2, 2, 3, 3, as the plain kernels do. Only the pairs of the first num_pixels pixels are read.
+__device__ __forceinline__ void LoadNV12ChromaRowOddCrop(const uint8_t *src, uint32_t x_phase, uint32_t num_pixels, uint2 &u, uint2 &v) {
+    uint2 uv;
+    uint32_t uv4 = 0;
+    if (num_pixels >= 8) {
+        uv = *((const uint2 *)src);
+        if (x_phase) {
+            uv4 = *((const uint16_t *)(src + 8));
+        }
+    } else {
+        // Pixel i takes its chroma from pair (i + x_phase) >> 1, so the last pixel needs pairs up to this one.
+        uint32_t num_pairs = ((num_pixels - 1 + x_phase) >> 1) + 1;
+        uv = LoadPartialUint2(src, num_pairs * 2);
+    }
+    if (x_phase) {
+        u.x = hipPack(make_float4(hipUnpack0(uv.x), hipUnpack2(uv.x), hipUnpack2(uv.x), hipUnpack0(uv.y)));
+        u.y = hipPack(make_float4(hipUnpack0(uv.y), hipUnpack2(uv.y), hipUnpack2(uv.y), hipUnpack0(uv4)));
+        v.x = hipPack(make_float4(hipUnpack1(uv.x), hipUnpack3(uv.x), hipUnpack3(uv.x), hipUnpack1(uv.y)));
+        v.y = hipPack(make_float4(hipUnpack1(uv.y), hipUnpack3(uv.y), hipUnpack3(uv.y), hipUnpack1(uv4)));
+    } else {
+        u.x = hipPack(make_float4(hipUnpack0(uv.x), hipUnpack0(uv.x), hipUnpack2(uv.x), hipUnpack2(uv.x)));
+        u.y = hipPack(make_float4(hipUnpack0(uv.y), hipUnpack0(uv.y), hipUnpack2(uv.y), hipUnpack2(uv.y)));
+        v.x = hipPack(make_float4(hipUnpack1(uv.x), hipUnpack1(uv.x), hipUnpack3(uv.x), hipUnpack3(uv.x)));
+        v.y = hipPack(make_float4(hipUnpack1(uv.y), hipUnpack1(uv.y), hipUnpack3(uv.y), hipUnpack3(uv.y)));
+    }
+}
+
+// Odd-crop loads for one 8-pixel row of a YUYV block whose first pixel is the second pixel of the macropixel at `src`
+// (the odd-crop kernels only see YUYV with x_phase 1): luma is bytes 2, 4, ..., 16 and pixel i takes its chroma from
+// macropixel (i + 1) >> 1. Only the macropixels holding the first num_pixels pixels are read, so the fifth one is read
+// only for a block of 8 pixels.
+__device__ __forceinline__ void LoadYUYVRowOddLeft(const uint8_t *src, uint32_t num_pixels, uint2 &yv, uint2 &u, uint2 &v) {
+    uint4 l;
+    uint32_t e = 0;
+    if (num_pixels >= 8) {
+        l = *((const uint4 *)src);
+        e = *((const uint32_t *)(src + 16));
+    } else {
+        // The last pixel takes its chroma from macropixel num_pixels >> 1, which ends within the first 16 bytes.
+        l = LoadPartialUint4(src, (num_pixels >> 1) * 4 + 4);
+    }
+    yv.x = hipPack(make_float4(hipUnpack2(l.x), hipUnpack0(l.y), hipUnpack2(l.y), hipUnpack0(l.z)));
+    yv.y = hipPack(make_float4(hipUnpack2(l.z), hipUnpack0(l.w), hipUnpack2(l.w), hipUnpack0(e)));
+    u.x = hipPack(make_float4(hipUnpack1(l.x), hipUnpack1(l.y), hipUnpack1(l.y), hipUnpack1(l.z)));
+    u.y = hipPack(make_float4(hipUnpack1(l.z), hipUnpack1(l.w), hipUnpack1(l.w), hipUnpack1(e)));
+    v.x = hipPack(make_float4(hipUnpack3(l.x), hipUnpack3(l.y), hipUnpack3(l.y), hipUnpack3(l.z)));
+    v.y = hipPack(make_float4(hipUnpack3(l.z), hipUnpack3(l.w), hipUnpack3(l.w), hipUnpack3(e)));
+}
+
 // Fills the six per-2x8 sample vectors (y0,y1,u0,u1,v0,v1) from whichever source
 // layout the `layout` tag denotes. All five layouts share the same 8-luma-per-thread,
 // 2-rows-per-thread geometry, so only the load differs.
-__device__ __forceinline__ void LoadYUVSamples(uint32_t layout,
+// kOddCrop: the image is cropped with a left or top edge inside a subsampled chroma sample, and x_phase / y_phase are
+// its YUVToRGBBatchParams::src_x_phase / src_y_phase. num_pixels is the number of pixels of the block inside the
+// destination (8 except in the last block of a row), and has_row1 is false for the last row pair of an odd-height
+// destination, whose second row is outside the image: the odd-crop chroma loads read only chroma samples covering
+// destination pixels.
+template <bool kOddCrop>
+__device__ __forceinline__ void LoadYUVSamples(uint32_t layout, uint32_t x_phase, uint32_t y_phase, uint32_t num_pixels, bool has_row1,
     const uint8_t *src_y_image, uint32_t src_y_stride, uint32_t src_y_row_pair_stride,
     const uint8_t *src_u_image, const uint8_t *src_v_image,
     const uint8_t *src_chroma_image, uint32_t src_chroma_stride,
     uint32_t x, uint32_t y,
     uint2 &y0, uint2 &y1, uint2 &u0, uint2 &u1, uint2 &v0, uint2 &v1) {
 
+    if (kOddCrop && layout == YUV_LAYOUT_YUYV && x_phase) {
+        uint32_t l0_idx = y * src_y_row_pair_stride + (x << 4);
+        // Without the block's second row (has_row1 false), its samples are not stored, so the first source row is read
+        // again instead of a row that can lie past the end of the decoded surface.
+        uint32_t l1_idx = l0_idx + (has_row1 ? src_y_stride : 0);
+        LoadYUYVRowOddLeft(&src_y_image[l0_idx], num_pixels, y0, u0, v0);
+        LoadYUYVRowOddLeft(&src_y_image[l1_idx], num_pixels, y1, u1, v1);
+        return;
+    }
     if (layout == YUV_LAYOUT_YUYV) {
         uint32_t l0_idx = y * src_y_row_pair_stride + (x << 4);
         uint32_t l1_idx = l0_idx + src_y_stride;
@@ -300,6 +461,27 @@ __device__ __forceinline__ void LoadYUVSamples(uint32_t layout,
         u1 = *((uint2 *)(&src_u_image[src_y1_idx]));
         v0 = *((uint2 *)(&src_v_image[src_y0_idx]));
         v1 = *((uint2 *)(&src_v_image[src_y1_idx]));
+    } else if (kOddCrop && layout == YUV_LAYOUT_YUV440) {
+        // With y_phase, the block's second row takes its chroma from the next chroma row.
+        uint32_t src_chroma0_idx = y * src_y_stride + (x << 3);
+        uint32_t src_chroma1_idx = src_chroma0_idx + ((y_phase && has_row1) ? src_y_stride : 0);
+        if (num_pixels >= 8) {
+            u0 = *((uint2 *)(&src_u_image[src_chroma0_idx]));
+            v0 = *((uint2 *)(&src_v_image[src_chroma0_idx]));
+            u1 = *((uint2 *)(&src_u_image[src_chroma1_idx]));
+            v1 = *((uint2 *)(&src_v_image[src_chroma1_idx]));
+        } else {
+            u0 = LoadPartialUint2(&src_u_image[src_chroma0_idx], num_pixels);
+            v0 = LoadPartialUint2(&src_v_image[src_chroma0_idx], num_pixels);
+            u1 = LoadPartialUint2(&src_u_image[src_chroma1_idx], num_pixels);
+            v1 = LoadPartialUint2(&src_v_image[src_chroma1_idx], num_pixels);
+        }
+    } else if (kOddCrop && layout == YUV_LAYOUT_NV12) {
+        // With y_phase, the block's second row takes its chroma from the next chroma row.
+        uint32_t src_uv0_idx = y * src_chroma_stride + (x << 3);
+        uint32_t src_uv1_idx = src_uv0_idx + ((y_phase && has_row1) ? src_chroma_stride : 0);
+        LoadNV12ChromaRowOddCrop(&src_chroma_image[src_uv0_idx], x_phase, num_pixels, u0, v0);
+        LoadNV12ChromaRowOddCrop(&src_chroma_image[src_uv1_idx], x_phase, num_pixels, u1, v1);
     } else if (layout == YUV_LAYOUT_YUV440) {
         uint32_t src_chroma_idx = y * src_y_stride + (x << 3);
         u0 = *((uint2 *)(&src_u_image[src_chroma_idx]));
@@ -471,6 +653,7 @@ __device__ __forceinline__ void ConvertYUVToRGB(
         rgb1.data[5] = hipPack(f);
 }
 
+template <bool kOddCrop>
 __global__ void ColorConvertYUVToRGBBatchedKernel(const YUVToRGBBatchParams *params, uint32_t n_images) {
     if (hipBlockIdx_z >= n_images) return;
     const YUVToRGBBatchParams &p = params[hipBlockIdx_z];
@@ -480,7 +663,10 @@ __global__ void ColorConvertYUVToRGBBatchedKernel(const YUVToRGBBatchParams *par
 
     if ((x < p.dst_width_in_8px_blocks) && (y < p.dst_height_in_2row_blocks)) {
         uint2 y0, y1, u0, u1, v0, v1;
-        LoadYUVSamples(p.layout, p.src_y_image, p.src_y_image_stride_in_bytes, p.src_y_image_row_pair_stride_in_bytes,
+        // The plain instantiation passes constants for the odd-crop arguments, so it compiles to the same code as without them.
+        LoadYUVSamples<kOddCrop>(p.layout, kOddCrop ? p.src_x_phase : 0, kOddCrop ? p.src_y_phase : 0,
+                          kOddCrop ? p.dst_width - (x << 3) : 8, !kOddCrop || (y * 2 + 1) < p.dst_height,
+                          p.src_y_image, p.src_y_image_stride_in_bytes, p.src_y_image_row_pair_stride_in_bytes,
                           p.src_u_image, p.src_v_image, p.src_chroma_image, p.src_chroma_image_stride_in_bytes,
                           x, y, y0, y1, u0, u1, v0, v1);
         DUINT6 rgb0, rgb1;
@@ -504,10 +690,19 @@ void ColorConvertYUVToRGBBatched(hipStream_t stream, uint32_t max_gx, uint32_t m
     const YUVToRGBBatchParams *d_params, uint32_t n_images) {
     uint32_t grid_x = static_cast<uint32_t>(ceil(static_cast<float>(max_gx) / 16));
     uint32_t grid_y = static_cast<uint32_t>(ceil(static_cast<float>(max_gy) / 4));
-    ColorConvertYUVToRGBBatchedKernel<<<dim3(grid_x, grid_y, n_images),
+    ColorConvertYUVToRGBBatchedKernel<false><<<dim3(grid_x, grid_y, n_images),
         dim3(16, 4, 1), 0, stream>>>(d_params, n_images);
 }
 
+void ColorConvertYUVToRGBOddCropBatched(hipStream_t stream, uint32_t max_gx, uint32_t max_gy,
+    const YUVToRGBBatchParams *d_params, uint32_t n_images) {
+    uint32_t grid_x = static_cast<uint32_t>(ceil(static_cast<float>(max_gx) / 16));
+    uint32_t grid_y = static_cast<uint32_t>(ceil(static_cast<float>(max_gy) / 4));
+    ColorConvertYUVToRGBBatchedKernel<true><<<dim3(grid_x, grid_y, n_images),
+        dim3(16, 4, 1), 0, stream>>>(d_params, n_images);
+}
+
+template <bool kOddCrop>
 __global__ void ColorConvertYUVToRGBPlanarBatchedKernel(const YUVToRGBPlanarBatchParams *params, uint32_t n_images) {
     if (hipBlockIdx_z >= n_images) return;
     const YUVToRGBPlanarBatchParams &p = params[hipBlockIdx_z];
@@ -517,7 +712,10 @@ __global__ void ColorConvertYUVToRGBPlanarBatchedKernel(const YUVToRGBPlanarBatc
 
     if ((x < p.dst_width_in_8px_blocks) && (y < p.dst_height_in_2row_blocks)) {
         uint2 y0, y1, u0, u1, v0, v1;
-        LoadYUVSamples(p.layout, p.src_y_image, p.src_y_image_stride_in_bytes, p.src_y_image_row_pair_stride_in_bytes,
+        // The plain instantiation passes constants for the odd-crop arguments, so it compiles to the same code as without them.
+        LoadYUVSamples<kOddCrop>(p.layout, kOddCrop ? p.src_x_phase : 0, kOddCrop ? p.src_y_phase : 0,
+                          kOddCrop ? p.dst_width - (x << 3) : 8, !kOddCrop || (y * 2 + 1) < p.dst_height,
+                          p.src_y_image, p.src_y_image_stride_in_bytes, p.src_y_image_row_pair_stride_in_bytes,
                           p.src_u_image, p.src_v_image, p.src_chroma_image, p.src_chroma_image_stride_in_bytes,
                           x, y, y0, y1, u0, u1, v0, v1);
         DUINT6 rgb0, rgb1;
@@ -573,6 +771,14 @@ void ColorConvertYUVToRGBPlanarBatched(hipStream_t stream, uint32_t max_gx, uint
     const YUVToRGBPlanarBatchParams *d_params, uint32_t n_images) {
     uint32_t grid_x = static_cast<uint32_t>(ceil(static_cast<float>(max_gx) / 16));
     uint32_t grid_y = static_cast<uint32_t>(ceil(static_cast<float>(max_gy) / 4));
-    ColorConvertYUVToRGBPlanarBatchedKernel<<<dim3(grid_x, grid_y, n_images),
+    ColorConvertYUVToRGBPlanarBatchedKernel<false><<<dim3(grid_x, grid_y, n_images),
+        dim3(16, 4, 1), 0, stream>>>(d_params, n_images);
+}
+
+void ColorConvertYUVToRGBPlanarOddCropBatched(hipStream_t stream, uint32_t max_gx, uint32_t max_gy,
+    const YUVToRGBPlanarBatchParams *d_params, uint32_t n_images) {
+    uint32_t grid_x = static_cast<uint32_t>(ceil(static_cast<float>(max_gx) / 16));
+    uint32_t grid_y = static_cast<uint32_t>(ceil(static_cast<float>(max_gy) / 4));
+    ColorConvertYUVToRGBPlanarBatchedKernel<true><<<dim3(grid_x, grid_y, n_images),
         dim3(16, 4, 1), 0, stream>>>(d_params, n_images);
 }

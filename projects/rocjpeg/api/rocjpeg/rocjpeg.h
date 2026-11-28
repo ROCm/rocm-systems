@@ -158,7 +158,10 @@ typedef struct {
                            Set all four coordinates to 0 to decode the full image. Otherwise the rectangle must lie
                            within the image, 0 <= left < right <= width and 0 <= top < bottom <= height, where right
                            and bottom are exclusive; the decode functions return ROCJPEG_STATUS_INVALID_PARAMETER
-                           for any other rectangle. */
+                           for any other rectangle. For ROCJPEG_OUTPUT_NATIVE and ROCJPEG_OUTPUT_YUV_PLANAR output of
+                           an image with subsampled chroma, the chroma of the output starts with the chroma sample
+                           that covers the left column and the top row of the rectangle, also when left or top is
+                           odd. */
     struct {
         uint32_t width; /**< Target width of the picture to be resized. */
         uint32_t height; /**< Target height of the picture to be resized. */

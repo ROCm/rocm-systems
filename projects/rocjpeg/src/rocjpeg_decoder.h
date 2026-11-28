@@ -258,8 +258,9 @@ private:
 
    // Per-image output producers for the group loop in FinalizeDecodeBatched. Instead of
    // launching a kernel per image, they append params to the per-kernel scratch buffers
-   // below, which LaunchBatchedParams then issues in one launch each. Memcpy-only work
-   // (CopyChannel) is still issued inline.
+   // below, which LaunchBatchedParams then issues in one launch each. Memcpy work
+   // (CopyChannel) is still issued inline, except the repack of a YUY2 crop with an odd
+   // left edge, which CopyChannel appends to b_yuyv_odd_left_.
    RocJpegStatus AccumulateColorConvertToRGB(HipInteropDeviceMem& hip_interop, uint32_t picture_width, uint32_t picture_height, RocJpegImage *destination, const RocJpegDecodeParams *decode_params, bool is_roi_valid);
    RocJpegStatus AccumulateColorConvertToRGBPlanar(HipInteropDeviceMem& hip_interop, uint32_t picture_width, uint32_t picture_height, RocJpegImage *destination, const RocJpegDecodeParams *decode_params, bool is_roi_valid);
    RocJpegStatus AccumulatePlanarYUVOutputFormat(HipInteropDeviceMem& hip_interop, uint32_t picture_width, uint32_t picture_height, uint16_t chroma_height, RocJpegImage *destination, const RocJpegDecodeParams *decode_params, bool is_roi_valid);
@@ -299,6 +300,13 @@ private:
    // NV12/YUV444/YUV440/YUYV/YUV400, selected per image by a surface-layout tag.
    BatchedKernelParams<YUVToRGBBatchParams>            b_yuv_rgb_;
    BatchedKernelParams<YUVToRGBPlanarBatchParams>      b_yuv_rgbp_;
+   // Crops whose left or top edge falls inside a subsampled chroma sample (an odd left edge for YUY2 and NV12, an odd
+   // top edge for NV12 and YUV440) use these buffers instead when adjusting the source offsets is not enough, so that
+   // the common case keeps the plain kernels.
+   BatchedKernelParams<PackedYUYVToPlanarYUVBatchParams>  b_yuyv_yuvp_odd_left_;
+   BatchedKernelParams<YUYVOddLeftBatchParams>            b_yuyv_odd_left_;
+   BatchedKernelParams<YUVToRGBBatchParams>               b_yuv_rgb_odd_crop_;
+   BatchedKernelParams<YUVToRGBPlanarBatchParams>         b_yuv_rgbp_odd_crop_;
 };
 
 #endif //ROC_JPEG_DECODER_H_

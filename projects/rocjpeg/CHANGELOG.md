@@ -14,6 +14,7 @@ Documentation for rocJPEG is available at
 
 * Fixed the RGB, RGB planar, Y, and YUV planar outputs writing past the image when its width is not a multiple of 8 or its height is odd. With output buffers sized exactly to the image, this overwrote memory after the buffer and made the right and bottom edges of the image nondeterministic.
 * Fixed the build using no GPU targets when `AMDGPU_TARGETS` or `GPU_ARCHS` is set in the environment but empty. An empty value is now treated the same as an unset one and the default target list applies.
+* Fixed wrong colors in the cropped output of 4:2:0, 4:2:2, and 4:4:0 images when the crop is done after decoding (`hw_roi_decode` is 0 in `RocJpegDecodeCaps`) and the left or top coordinate of the crop rectangle is odd. With an odd left coordinate, U and V were swapped in the native, YUV planar, RGB, and RGB planar outputs of 4:2:0 and 4:2:2 images. With an odd top coordinate, every other row of the RGB and RGB planar outputs of 4:2:0 and 4:4:0 images took its chroma from the neighboring chroma row.
 
 ### Changed
 

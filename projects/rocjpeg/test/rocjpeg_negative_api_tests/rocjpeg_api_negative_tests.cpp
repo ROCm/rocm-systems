@@ -103,10 +103,12 @@ const std::vector<uint8_t> &GraySeedJpeg() {
 
 /**
  * @brief A 64x64 4:2:0 baseline JPEG with a color gradient, decoded by
- *        TestCrossDeviceDecode.
+ *        TestCrossDeviceDecode and TestCropMatchesFullDecode.
  *
  * 64x64 is the smallest image rocJPEG decodes, and the gradient keeps a correct
- * decode from matching an output buffer that was never written.
+ * decode from matching an output buffer that was never written. Red rises to
+ * the right, green rises downwards and blue falls along both, so U and V differ
+ * and change from one chroma sample to the next in both directions.
  */
 const std::vector<uint8_t> &CrossDeviceJpeg() {
     static const std::vector<uint8_t> kJpeg = {
@@ -154,6 +156,128 @@ const std::vector<uint8_t> &CrossDeviceJpeg() {
         0x3E, 0x91, 0xF9, 0x9C, 0x19, 0x23, 0x85, 0xD2, 0x38, 0x29, 0x23, 0x85,
         0xD2, 0x38, 0x0E, 0xFA, 0x47, 0xE6, 0x70, 0x64, 0x80, 0x84, 0x86, 0x09,
         0x48, 0x08, 0x48, 0x60, 0x3B, 0xE9, 0x1F, 0x99, 0xC7, 0xFF, 0xD9
+    };
+    return kJpeg;
+}
+
+/**
+ * @brief The gradient of CrossDeviceJpeg as a 64x64 4:2:2 baseline JPEG, decoded
+ *        by TestCropMatchesFullDecode.
+ */
+const std::vector<uint8_t> &Gradient422Jpeg() {
+    static const std::vector<uint8_t> kJpeg = {
+        0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01,
+        0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0xFF, 0xDB, 0x00, 0x43,
+        0x00, 0x08, 0x06, 0x06, 0x07, 0x06, 0x05, 0x08, 0x07, 0x07, 0x07, 0x09,
+        0x09, 0x08, 0x0A, 0x0C, 0x14, 0x0D, 0x0C, 0x0B, 0x0B, 0x0C, 0x19, 0x12,
+        0x13, 0x0F, 0x14, 0x1D, 0x1A, 0x1F, 0x1E, 0x1D, 0x1A, 0x1C, 0x1C, 0x20,
+        0x24, 0x2E, 0x27, 0x20, 0x22, 0x2C, 0x23, 0x1C, 0x1C, 0x28, 0x37, 0x29,
+        0x2C, 0x30, 0x31, 0x34, 0x34, 0x34, 0x1F, 0x27, 0x39, 0x3D, 0x38, 0x32,
+        0x3C, 0x2E, 0x33, 0x34, 0x32, 0xFF, 0xDB, 0x00, 0x43, 0x01, 0x09, 0x09,
+        0x09, 0x0C, 0x0B, 0x0C, 0x18, 0x0D, 0x0D, 0x18, 0x32, 0x21, 0x1C, 0x21,
+        0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32,
+        0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32,
+        0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32,
+        0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32,
+        0x32, 0x32, 0xFF, 0xC0, 0x00, 0x11, 0x08, 0x00, 0x40, 0x00, 0x40, 0x03,
+        0x01, 0x21, 0x00, 0x02, 0x11, 0x01, 0x03, 0x11, 0x01, 0xFF, 0xC4, 0x00,
+        0x17, 0x00, 0x01, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x03, 0x06, 0x07, 0xFF, 0xC4,
+        0x00, 0x17, 0x10, 0x00, 0x03, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x03, 0x61, 0xFF,
+        0xC4, 0x00, 0x17, 0x01, 0x01, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05, 0x07, 0x06, 0x04,
+        0xFF, 0xC4, 0x00, 0x17, 0x11, 0x00, 0x03, 0x01, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x03,
+        0x04, 0xFF, 0xDA, 0x00, 0x0C, 0x03, 0x01, 0x00, 0x02, 0x11, 0x03, 0x11,
+        0x00, 0x3F, 0x00, 0xE4, 0xE9, 0x0C, 0x10, 0x91, 0xC2, 0xBF, 0x7A, 0x9C,
+        0xD9, 0x9C, 0xBA, 0x47, 0x04, 0x24, 0x30, 0x1E, 0xF5, 0x1F, 0xCC, 0xE2,
+        0x12, 0x18, 0x21, 0x23, 0x80, 0xF7, 0xA8, 0xFE, 0x67, 0x2E, 0x91, 0xC1,
+        0x09, 0x00, 0x7B, 0xD4, 0x7F, 0x33, 0x99, 0xA4, 0x86, 0x08, 0x48, 0xE1,
+        0xB7, 0xBD, 0x48, 0xC6, 0x67, 0x2E, 0x91, 0xC1, 0x09, 0x00, 0x8B, 0xD4,
+        0x7B, 0x33, 0x88, 0x48, 0x60, 0x84, 0x8E, 0x03, 0xDE, 0xA3, 0xF9, 0x9C,
+        0xBA, 0x47, 0x04, 0x24, 0x01, 0xEF, 0x51, 0xFC, 0xCE, 0x66, 0x92, 0x18,
+        0x21, 0x23, 0x86, 0xDE, 0xF5, 0x23, 0x19, 0x9C, 0xBA, 0x47, 0x04, 0x24,
+        0x01, 0xEF, 0x51, 0xFC, 0xCE, 0x21, 0x21, 0x82, 0x12, 0x38, 0x0F, 0x7A,
+        0x8F, 0x66, 0x72, 0xE9, 0x1C, 0x10, 0x90, 0x07, 0xBD, 0x47, 0xF3, 0x39,
+        0x9A, 0x48, 0xE0, 0x84, 0x8E, 0x1B, 0x7B, 0xD4, 0x8C, 0x66, 0x72, 0xE9,
+        0x1C, 0x10, 0x90, 0x08, 0xBD, 0x47, 0xF3, 0x38, 0x84, 0x8E, 0x17, 0x48,
+        0xE0, 0x3D, 0xEA, 0x3F, 0x99, 0xC4, 0x24, 0x30, 0x42, 0x40, 0x1E, 0xF5,
+        0x1E, 0xCC, 0xE6, 0x69, 0x23, 0x85, 0xD2, 0x38, 0x6D, 0xEF, 0x52, 0x31,
+        0x99, 0xC4, 0x24, 0x30, 0x42, 0x40, 0x1E, 0xF5, 0x1F, 0xCC, 0xE2, 0x12,
+        0x38, 0x5D, 0x23, 0x80, 0xF7, 0xA8, 0xFE, 0x67, 0x10, 0x90, 0xC1, 0x09,
+        0x00, 0x7B, 0xD4, 0x7F, 0x33, 0x99, 0xA4, 0x8E, 0x17, 0x48, 0xE1, 0xB7,
+        0xBD, 0x48, 0xC6, 0x67, 0x10, 0x90, 0xC1, 0x09, 0x00, 0x7B, 0xD4, 0x7B,
+        0x33, 0x88, 0x48, 0xE1, 0x74, 0x8E, 0x04, 0x5E, 0xA3, 0xF9, 0x9C, 0x42,
+        0x43, 0x04, 0x24, 0x30, 0x1E, 0xF5, 0x1F, 0xCC, 0xE6, 0x69, 0x23, 0x85,
+        0xD2, 0x38, 0x6D, 0xEF, 0x52, 0x31, 0x99, 0xC4, 0x24, 0x30, 0x42, 0x43,
+        0x01, 0xEF, 0x51, 0xFC, 0xCE, 0x21, 0x23, 0x85, 0xD2, 0x38, 0x0F, 0x7A,
+        0x8F, 0x66, 0x71, 0x09, 0x01, 0x09, 0x0C, 0x07, 0xBD, 0x47, 0xF3, 0x39,
+        0x9A, 0x48, 0xE1, 0x74, 0x8E, 0x1B, 0x7B, 0xD4, 0x8C, 0x66, 0x71, 0x09,
+        0x01, 0x09, 0x0C, 0x07, 0xBD, 0x47, 0xF3, 0x38, 0x84, 0x8E, 0x17, 0x48,
+        0xE0, 0x45, 0xEA, 0x3F, 0x99, 0xC4, 0x24, 0x04, 0x24, 0x30, 0x1E, 0xF5,
+        0x1E, 0xCC, 0xE7, 0xFF, 0xD9
+    };
+    return kJpeg;
+}
+
+/**
+ * @brief The gradient of CrossDeviceJpeg as a 64x64 4:4:0 baseline JPEG, decoded
+ *        by TestCropMatchesFullDecode.
+ */
+const std::vector<uint8_t> &Gradient440Jpeg() {
+    static const std::vector<uint8_t> kJpeg = {
+        0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01,
+        0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0xFF, 0xDB, 0x00, 0x43,
+        0x00, 0x08, 0x06, 0x06, 0x07, 0x06, 0x05, 0x08, 0x07, 0x07, 0x07, 0x09,
+        0x09, 0x08, 0x0A, 0x0C, 0x14, 0x0D, 0x0C, 0x0B, 0x0B, 0x0C, 0x19, 0x12,
+        0x13, 0x0F, 0x14, 0x1D, 0x1A, 0x1F, 0x1E, 0x1D, 0x1A, 0x1C, 0x1C, 0x20,
+        0x24, 0x2E, 0x27, 0x20, 0x22, 0x2C, 0x23, 0x1C, 0x1C, 0x28, 0x37, 0x29,
+        0x2C, 0x30, 0x31, 0x34, 0x34, 0x34, 0x1F, 0x27, 0x39, 0x3D, 0x38, 0x32,
+        0x3C, 0x2E, 0x33, 0x34, 0x32, 0xFF, 0xDB, 0x00, 0x43, 0x01, 0x09, 0x09,
+        0x09, 0x0C, 0x0B, 0x0C, 0x18, 0x0D, 0x0D, 0x18, 0x32, 0x21, 0x1C, 0x21,
+        0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32,
+        0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32,
+        0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32,
+        0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32,
+        0x32, 0x32, 0xFF, 0xC0, 0x00, 0x11, 0x08, 0x00, 0x40, 0x00, 0x40, 0x03,
+        0x01, 0x12, 0x00, 0x02, 0x11, 0x01, 0x03, 0x11, 0x01, 0xFF, 0xC4, 0x00,
+        0x17, 0x00, 0x01, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05, 0x04, 0x06, 0x07, 0xFF, 0xC4,
+        0x00, 0x17, 0x10, 0x00, 0x03, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x03, 0x61, 0xFF,
+        0xC4, 0x00, 0x18, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x05, 0x06, 0x08,
+        0x07, 0xFF, 0xC4, 0x00, 0x17, 0x11, 0x00, 0x03, 0x01, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02,
+        0x03, 0x04, 0xFF, 0xDA, 0x00, 0x0C, 0x03, 0x01, 0x00, 0x02, 0x11, 0x03,
+        0x11, 0x00, 0x3F, 0x00, 0xE4, 0xE9, 0x0C, 0x11, 0x48, 0x61, 0xEB, 0xAF,
+        0xA4, 0x93, 0x3B, 0x13, 0x24, 0x70, 0x45, 0x23, 0x80, 0xDF, 0x49, 0x42,
+        0x76, 0x25, 0x48, 0xE0, 0x8A, 0x47, 0x01, 0xBE, 0x91, 0xF3, 0xB1, 0x32,
+        0x43, 0x04, 0x52, 0x00, 0xDF, 0x49, 0x42, 0x76, 0x26, 0x48, 0x60, 0x8A,
+        0x43, 0x01, 0xBE, 0x91, 0xF3, 0xB1, 0x32, 0x47, 0x04, 0x52, 0x38, 0x0D,
+        0xF4, 0x8F, 0x9D, 0x89, 0x52, 0x38, 0x22, 0x91, 0xC0, 0x6F, 0xA4, 0xA1,
+        0x3B, 0x13, 0x24, 0x04, 0x52, 0x00, 0xDF, 0x48, 0xF9, 0xD8, 0xCD, 0x24,
+        0x30, 0x45, 0x23, 0x86, 0xCD, 0xF4, 0x9C, 0xFD, 0x3B, 0x13, 0x24, 0x70,
+        0x45, 0x23, 0x80, 0xDF, 0x48, 0xF9, 0xD8, 0x95, 0x23, 0x82, 0x29, 0x1C,
+        0x06, 0xFA, 0x4A, 0x13, 0xB1, 0x32, 0x40, 0x45, 0x20, 0x0D, 0xF4, 0x8F,
+        0x9D, 0x89, 0x92, 0x18, 0x22, 0x91, 0xC0, 0x6F, 0xA4, 0xA1, 0x3B, 0x13,
+        0x24, 0x70, 0x41, 0x23, 0x80, 0xDF, 0x48, 0xF9, 0xD8, 0x99, 0x23, 0x82,
+        0x29, 0x0C, 0x06, 0xFA, 0x47, 0xCE, 0xC4, 0xC9, 0x01, 0x14, 0x80, 0x37,
+        0xD2, 0x50, 0x9D, 0x8C, 0xD2, 0x47, 0x04, 0x52, 0x38, 0x6C, 0xDF, 0x49,
+        0xCF, 0xB3, 0xB1, 0x2A, 0x47, 0x04, 0x52, 0x38, 0x0D, 0xF4, 0x94, 0x27,
+        0x62, 0x64, 0x86, 0x08, 0xA4, 0x30, 0x1B, 0xE9, 0x1F, 0x3B, 0x13, 0x24,
+        0x04, 0x52, 0x00, 0xDF, 0x48, 0xF9, 0xD8, 0x99, 0x23, 0x82, 0x29, 0x1C,
+        0x06, 0xFA, 0x4A, 0x13, 0xB1, 0x2A, 0x47, 0x04, 0x52, 0x38, 0x0D, 0xF4,
+        0x8F, 0x9D, 0x89, 0x92, 0x18, 0x22, 0x90, 0xC0, 0x6F, 0xA4, 0xA1, 0x3B,
+        0x13, 0x24, 0x04, 0x52, 0x18, 0x0D, 0xF4, 0x8F, 0x9D, 0x8C, 0xD2, 0x47,
+        0x04, 0x52, 0x38, 0x6C, 0xDF, 0x49, 0xCF, 0xD3, 0xB1, 0x2A, 0x47, 0x04,
+        0x52, 0x38, 0x0D, 0xF4, 0x8F, 0x9D, 0x89, 0x92, 0x18, 0x22, 0x90, 0x06,
+        0xFA, 0x4A, 0x13, 0xB1, 0x32, 0x43, 0x04, 0x52, 0x18, 0x0D, 0xF4, 0x8F,
+        0x9D, 0x89, 0x92, 0x38, 0x22, 0x91, 0xC0, 0x6F, 0xA4, 0x7C, 0xEC, 0x4A,
+        0x91, 0xC1, 0x14, 0x8E, 0x03, 0x7D, 0x25, 0x09, 0xD8, 0x99, 0x20, 0x22,
+        0x90, 0x06, 0xFA, 0x47, 0xCE, 0xC4, 0xC9, 0x0C, 0x11, 0x48, 0x60, 0x37,
+        0xD2, 0x50, 0x9D, 0x8F, 0xFF, 0xD9
     };
     return kJpeg;
 }
@@ -474,6 +598,97 @@ std::vector<uint8_t> FlatColorJpeg(uint16_t width, uint16_t height) {
     jpeg.push_back(0xFF);
     jpeg.push_back(0xD9);
     return jpeg;
+}
+
+/**
+ * @brief How the samples of one output plane cover the image, for comparing a crop with the full decode.
+ *
+ * A sample takes bytes_per_sample bytes and covers x_subsampling x y_subsampling pixels. Sample (row, column) of a
+ * crop whose top left corner is (left, top) must equal sample (top / y_subsampling + row, left / x_subsampling + column)
+ * of the full decode: the chroma of the crop starts with the chroma sample covering its left column and top row. The
+ * samples of a packed YUYV plane are macropixels of two pixels, whose chroma follows that rule but whose two luma
+ * bytes come from the crop's own pixels.
+ */
+struct PlaneLayout {
+    uint32_t x_subsampling;
+    uint32_t y_subsampling;
+    uint32_t bytes_per_sample;
+    bool packed_yuyv;
+};
+
+/**
+ * @brief Describes the planes of an output format for the chroma subsamplings of TestCropMatchesFullDecode: 4:2:0,
+ *        4:2:2 and 4:4:0.
+ */
+std::vector<PlaneLayout> OutputPlaneLayouts(RocJpegOutputFormat output_format, RocJpegChromaSubsampling subsampling) {
+    const PlaneLayout pixel = {1, 1, 1, false};
+    const PlaneLayout chroma = {subsampling == ROCJPEG_CSS_440 ? 1u : 2u, subsampling == ROCJPEG_CSS_422 ? 1u : 2u, 1, false};
+    switch (output_format) {
+        case ROCJPEG_OUTPUT_NATIVE:
+            if (subsampling == ROCJPEG_CSS_420) {
+                // Luma, then interleaved U,V pairs.
+                return {pixel, {2, 2, 2, false}};
+            } else if (subsampling == ROCJPEG_CSS_422) {
+                // Y0, U, Y1, V macropixels.
+                return {{2, 1, 4, true}};
+            }
+            return {pixel, chroma, chroma};
+        case ROCJPEG_OUTPUT_YUV_PLANAR:
+            return {pixel, chroma, chroma};
+        case ROCJPEG_OUTPUT_Y:
+            return {pixel};
+        case ROCJPEG_OUTPUT_RGB:
+            return {{1, 1, 3, false}};
+        default:
+            return {pixel, pixel, pixel};
+    }
+}
+
+/**
+ * @brief Counts the bytes of one plane of a crop that differ from the full decode, as described by PlaneLayout.
+ *
+ * Only width / x_subsampling columns and height / y_subsampling rows of samples are compared, which every output holds
+ * whatever the parity of the crop size. Packed YUYV rows are compared over all width * 2 bytes instead: with an odd
+ * width they end with the Y and U of the last pixel, half a macropixel that whole-macropixel columns would leave out.
+ *
+ * @param layout The layout of the plane.
+ * @param crop The plane of the crop.
+ * @param full The same plane of the full decode.
+ * @param pitch The pitch of both planes.
+ * @param crop_params The decode parameters of the crop.
+ * @param first_mismatch Receives the position and the values of the first differing byte.
+ * @return The number of differing bytes.
+ */
+uint32_t CountCropMismatches(const PlaneLayout &layout, const std::vector<uint8_t> &crop, const std::vector<uint8_t> &full,
+                             uint32_t pitch, const RocJpegDecodeParams &crop_params, std::string &first_mismatch) {
+    const uint32_t left = crop_params.crop_rectangle.left;
+    const uint32_t top = crop_params.crop_rectangle.top;
+    const uint32_t num_rows = (crop_params.crop_rectangle.bottom - top) / layout.y_subsampling;
+    const uint32_t num_columns = (crop_params.crop_rectangle.right - left) / layout.x_subsampling;
+    const uint32_t num_row_bytes = layout.packed_yuyv ? (crop_params.crop_rectangle.right - left) * 2
+                                                      : num_columns * layout.bytes_per_sample;
+    uint32_t num_mismatches = 0;
+    for (uint32_t row = 0; row < num_rows; row++) {
+        const size_t crop_row = static_cast<size_t>(row) * pitch;
+        const size_t full_row = static_cast<size_t>(top / layout.y_subsampling + row) * pitch;
+        for (uint32_t byte = 0; byte < num_row_bytes; byte++) {
+            const uint32_t column = byte / layout.bytes_per_sample;
+            const uint32_t byte_in_sample = byte % layout.bytes_per_sample;
+            uint32_t full_byte = (left / layout.x_subsampling + column) * layout.bytes_per_sample + byte_in_sample;
+            if (layout.packed_yuyv && byte_in_sample % 2 == 0) {
+                // Y0 and Y1 of macropixel `column` are the luma of crop pixels 2 * column and 2 * column + 1.
+                full_byte = (left + 2 * column + byte_in_sample / 2) * 2;
+            }
+            if (crop[crop_row + byte] != full[full_row + full_byte]) {
+                if (num_mismatches == 0) {
+                    first_mismatch = "row " + std::to_string(row) + ", byte " + std::to_string(byte) + ": expected " +
+                                     std::to_string(full[full_row + full_byte]) + " but got " + std::to_string(crop[crop_row + byte]);
+                }
+                num_mismatches++;
+            }
+        }
+    }
+    return num_mismatches;
 }
 
 }  // namespace
@@ -1873,6 +2088,201 @@ int RocJpegApiNegativeTests::TestStreamParseFuzz() {
     return EXIT_SUCCESS;
 }
 
+int RocJpegApiNegativeTests::TestCropMatchesFullDecode() {
+    std::cout << "info: Executing crop tests that compare cropped decodes with the full decode" << std::endl;
+    RocJpegDecodeCaps decode_caps = {};
+    RocJpegStatus rocjpeg_status = rocJpegGetDecoderCaps(rocjpeg_handle_, &decode_caps);
+    if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
+        std::cerr << "rocJpegGetDecoderCaps: Expected ROCJPEG_STATUS_SUCCESS but got " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+        return EXIT_FAILURE;
+    }
+    if (decode_caps.hw_roi_decode) {
+        std::cout << "info: Skipping, the decoder crops while decoding (hw_roi_decode is 1) and these tests cover cropping after decoding" << std::endl;
+        return EXIT_SUCCESS;
+    }
+
+    // Every plane of every output is large enough for any output format of a 64x64 image. outputs[0] receives the full
+    // decode and outputs[1 + k] crop k.
+    constexpr uint32_t kPitch = 64 * 3;
+    constexpr size_t kPlaneSize = static_cast<size_t>(kPitch) * 64;
+    constexpr int kNumPlanes = 3;
+    constexpr int kNumCrops = 10;
+    constexpr int kNumOutputs = 1 + kNumCrops;
+    std::unique_ptr<void, HipBufferDeleter> buffers[kNumOutputs][kNumPlanes];
+    RocJpegImage outputs[kNumOutputs] = {};
+    for (int k = 0; k < kNumOutputs; k++) {
+        for (int plane = 0; plane < kNumPlanes; plane++) {
+            void *buffer = nullptr;
+            if (hipMalloc(&buffer, kPlaneSize) != hipSuccess) {
+                std::cerr << "hipMalloc failed for plane " << plane << " of output " << k << std::endl;
+                return EXIT_FAILURE;
+            }
+            buffers[k][plane].reset(buffer);
+            outputs[k].channel[plane] = static_cast<uint8_t *>(buffer);
+            outputs[k].pitch[plane] = kPitch;
+        }
+    }
+    // Fills every plane of an output with 0xA5, so that bytes a decode leaves unwritten never hold the result of an
+    // earlier decode and an unwritten plane is blank.
+    auto fill_output = [&](const RocJpegImage &output) {
+        for (int plane = 0; plane < kNumPlanes; plane++) {
+            if (hipMemset(output.channel[plane], 0xA5, kPlaneSize) != hipSuccess) {
+                std::cerr << "Failed to fill an output buffer" << std::endl;
+                return false;
+            }
+        }
+        return true;
+    };
+    auto read_output = [&](const RocJpegImage &output, std::vector<uint8_t> (&planes)[kNumPlanes]) {
+        for (int plane = 0; plane < kNumPlanes; plane++) {
+            planes[plane].resize(kPlaneSize);
+            if (hipMemcpy(planes[plane].data(), output.channel[plane], kPlaneSize, hipMemcpyDeviceToHost) != hipSuccess) {
+                std::cerr << "Failed to copy an output buffer to the host" << std::endl;
+                return false;
+            }
+        }
+        return true;
+    };
+    // Decodes the parsed stream with rocJpegDecode into a filled output and reads the output back to the host. `name`
+    // completes "rocJpegDecode" in the error messages.
+    auto decode = [&](const RocJpegDecodeParams &decode_params, RocJpegImage &output, std::vector<uint8_t> (&planes)[kNumPlanes],
+                      const std::string &name) {
+        if (!fill_output(output)) {
+            return false;
+        }
+        RocJpegStatus status = rocJpegDecode(rocjpeg_handle_, rocjpeg_stream_handle_, &decode_params, &output);
+        if (status != ROCJPEG_STATUS_SUCCESS) {
+            std::cerr << "rocJpegDecode" << name << ": Expected ROCJPEG_STATUS_SUCCESS but got " << rocJpegGetErrorName(status) << std::endl;
+            return false;
+        }
+        return read_output(output, planes);
+    };
+
+    struct TestImage {
+        const char *name;
+        const std::vector<uint8_t> &jpeg;
+        RocJpegChromaSubsampling subsampling;
+    };
+    const TestImage images[] = {{"4:2:0", CrossDeviceJpeg(), ROCJPEG_CSS_420},
+                                {"4:2:2", Gradient422Jpeg(), ROCJPEG_CSS_422},
+                                {"4:4:0", Gradient440Jpeg(), ROCJPEG_CSS_440}};
+    std::vector<uint8_t> full[kNumPlanes];
+
+    // rocJPEG cannot convert colors on a GPU it has no kernels for, such as an integrated GPU, and leaves the output
+    // unwritten there. The gradient never decodes to a single value, so a blank full decode means the comparisons
+    // below would test nothing.
+    rocjpeg_status = rocJpegStreamParse(images[0].jpeg.data(), images[0].jpeg.size(), rocjpeg_stream_handle_);
+    if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
+        std::cerr << "Expected ROCJPEG_STATUS_SUCCESS when parsing the 64x64 4:2:0 JPEG but got " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+        return EXIT_FAILURE;
+    }
+    RocJpegDecodeParams rgb_decode_params = {};
+    rgb_decode_params.output_format = ROCJPEG_OUTPUT_RGB;
+    if (!decode(rgb_decode_params, outputs[0], full, " of the 4:2:0 image to ROCJPEG_OUTPUT_RGB")) {
+        return EXIT_FAILURE;
+    }
+    if (full[0] == std::vector<uint8_t>(kPlaneSize, full[0][0])) {
+        std::cout << "info: Skipping, the full RGB decode on device 0 produced a blank image" << std::endl;
+        return EXIT_SUCCESS;
+    }
+
+    const struct {
+        RocJpegOutputFormat format;
+        const char *name;
+    } output_formats[] = {{ROCJPEG_OUTPUT_NATIVE, "ROCJPEG_OUTPUT_NATIVE"}, {ROCJPEG_OUTPUT_YUV_PLANAR, "ROCJPEG_OUTPUT_YUV_PLANAR"},
+                          {ROCJPEG_OUTPUT_Y, "ROCJPEG_OUTPUT_Y"}, {ROCJPEG_OUTPUT_RGB, "ROCJPEG_OUTPUT_RGB"},
+                          {ROCJPEG_OUTPUT_RGB_PLANAR, "ROCJPEG_OUTPUT_RGB_PLANAR"}};
+    // (left, top, right, bottom). An odd left or top edge falls inside a chroma sample of the subsampled planes. The
+    // output kernels work on blocks of 8 pixels, and the narrow crops end 2, 4, 5 or 6 pixels into their last block.
+    // The last crop reaches the right and bottom edges of the image with an odd width and height.
+    const int16_t crop_rectangles[kNumCrops][4] = {{2, 2, 34, 34}, {1, 0, 33, 32}, {0, 1, 32, 33},
+                                                   {1, 1, 33, 33}, {3, 5, 35, 37}, {1, 0, 5, 2},
+                                                   {0, 1, 5, 4}, {1, 1, 7, 4}, {3, 5, 13, 9},
+                                                   {1, 1, 64, 64}};
+    std::vector<uint8_t> crops[kNumCrops][kNumPlanes];
+    std::vector<uint8_t> batched[kNumPlanes];
+    int result = EXIT_SUCCESS;
+    int num_compared = 0;
+    for (const TestImage &image : images) {
+        if ((decode_caps.subsampling_mask & (1u << image.subsampling)) == 0) {
+            std::cout << "info: Skipping the " << image.name << " image, whose chroma subsampling the decoder does not support" << std::endl;
+            continue;
+        }
+        rocjpeg_status = rocJpegStreamParse(image.jpeg.data(), image.jpeg.size(), rocjpeg_stream_handle_);
+        if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
+            std::cerr << "Expected ROCJPEG_STATUS_SUCCESS when parsing the 64x64 " << image.name << " JPEG but got "
+                      << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+            return EXIT_FAILURE;
+        }
+        for (const auto &output_format : output_formats) {
+            // decode_params[0] decodes the full image and decode_params[1 + k] crop k; names[k] describes the decode.
+            RocJpegDecodeParams decode_params[kNumOutputs] = {};
+            std::string names[kNumOutputs];
+            for (int k = 0; k < kNumOutputs; k++) {
+                decode_params[k].output_format = output_format.format;
+                names[k] = std::string(" of the ") + image.name + " image to " + output_format.name;
+                if (k > 0) {
+                    const int16_t *rectangle = crop_rectangles[k - 1];
+                    decode_params[k].crop_rectangle.left = rectangle[0];
+                    decode_params[k].crop_rectangle.top = rectangle[1];
+                    decode_params[k].crop_rectangle.right = rectangle[2];
+                    decode_params[k].crop_rectangle.bottom = rectangle[3];
+                    names[k] += " with crop rectangle (" + std::to_string(rectangle[0]) + ", " + std::to_string(rectangle[1]) + ", " +
+                                std::to_string(rectangle[2]) + ", " + std::to_string(rectangle[3]) + ")";
+                }
+            }
+            // Decode the full image and every crop on its own, and compare each crop with the full decode.
+            if (!decode(decode_params[0], outputs[0], full, names[0])) {
+                return EXIT_FAILURE;
+            }
+            const std::vector<PlaneLayout> layouts = OutputPlaneLayouts(output_format.format, image.subsampling);
+            for (int k = 0; k < kNumCrops; k++) {
+                if (!decode(decode_params[1 + k], outputs[1 + k], crops[k], names[1 + k])) {
+                    return EXIT_FAILURE;
+                }
+                for (size_t plane = 0; plane < layouts.size(); plane++) {
+                    std::string first_mismatch;
+                    uint32_t num_mismatches = CountCropMismatches(layouts[plane], crops[k][plane], full[plane], kPitch,
+                                                                  decode_params[1 + k], first_mismatch);
+                    if (num_mismatches > 0) {
+                        std::cerr << "rocJpegDecode" << names[1 + k] << ": plane " << plane << " differs from the full decode in "
+                                  << num_mismatches << " bytes, first at " << first_mismatch << std::endl;
+                        result = EXIT_FAILURE;
+                    }
+                }
+                num_compared++;
+            }
+            // Decode all crops again with one rocJpegDecodeBatched call, which converts the images decoded together in
+            // one batch, mixing crops with odd and even edges. Each output must match the decode of its crop on its own.
+            for (int k = 1; k < kNumOutputs; k++) {
+                if (!fill_output(outputs[k])) {
+                    return EXIT_FAILURE;
+                }
+            }
+            std::vector<RocJpegStreamHandle> stream_handles(kNumCrops, rocjpeg_stream_handle_);
+            rocjpeg_status = rocJpegDecodeBatched(rocjpeg_handle_, stream_handles.data(), kNumCrops, &decode_params[1], &outputs[1]);
+            if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
+                std::cerr << "rocJpegDecodeBatched" << names[0] << " with every crop rectangle: Expected ROCJPEG_STATUS_SUCCESS but got "
+                          << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+                return EXIT_FAILURE;
+            }
+            for (int k = 0; k < kNumCrops; k++) {
+                if (!read_output(outputs[1 + k], batched)) {
+                    return EXIT_FAILURE;
+                }
+                for (int plane = 0; plane < kNumPlanes; plane++) {
+                    if (batched[plane] != crops[k][plane]) {
+                        std::cerr << "rocJpegDecodeBatched" << names[1 + k] << ": plane " << plane << " differs from the output of rocJpegDecode" << std::endl;
+                        result = EXIT_FAILURE;
+                    }
+                }
+            }
+        }
+    }
+    std::cout << "info: Compared " << num_compared << " cropped decodes with the full decode" << std::endl;
+    return result;
+}
+
 int RocJpegApiNegativeTests::CheckCrossDeviceDecode(int handle_device, int caller_device) {
     std::cout << "info: Decoding with a handle on device " << handle_device << " from threads on device " << caller_device << std::endl;
     // Everything up to and including the reference decode is done with handle_device current and only checks that
@@ -2037,7 +2447,7 @@ int RocJpegApiNegativeTests::TestCrossDeviceDecode() {
 int RocJpegApiNegativeTests::RunTests() {
     if (TestInvalidStreamCreate() || TestInvalidStreamParse () || TestInvalidStreamDestroy() || TestInvalidCreate() || TestInvalidDestroy() ||
         TestInvalidGetImageInfo() || TestInvalidDecode() || TestInvalidDecodeBatched() || TestInvalidGetErrorName() ||
-        TestInvalidGetDecoderCaps() || TestStreamParseFuzz() || TestCrossDeviceDecode()) {
+        TestInvalidGetDecoderCaps() || TestStreamParseFuzz() || TestCropMatchesFullDecode() || TestCrossDeviceDecode()) {
         std::cerr << "One or more negative tests failed." << std::endl;
         return EXIT_FAILURE;
     } else {
