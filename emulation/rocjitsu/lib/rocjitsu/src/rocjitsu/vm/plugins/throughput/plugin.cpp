@@ -180,7 +180,7 @@ void ThroughputPlugin::onAmdgpuDispatchExecutionEnd(uint32_t dispatch_id) {
   add(aggregate_counts_, state.counts);
   add(aggregate_execution_nanoseconds_, state.execution_nanoseconds);
   add(aggregate_untimed_instructions_, state.untimed_instructions);
-  dispatch_seconds_sum_ += wall_seconds;
+  dispatch_durations_.record(wall_seconds);
   ++completed_dispatches_;
   if (!have_active_window_) {
     first_begin_ = state.begun ? state.begin : end;
@@ -199,7 +199,7 @@ void ThroughputPlugin::onShutdown() {
   summary_emitted_ = true;
   const double wall_seconds = have_active_window_ ? seconds_between(first_begin_, last_end_) : 0.0;
   emit_record("summary", nullptr, aggregate_counts_, aggregate_execution_nanoseconds_,
-              aggregate_untimed_instructions_, wall_seconds, dispatch_seconds_sum_);
+              aggregate_untimed_instructions_, wall_seconds, dispatch_durations_.sum());
 }
 
 void ThroughputPlugin::emit_record(std::string_view record, const KernelDispatchInfo *info,
