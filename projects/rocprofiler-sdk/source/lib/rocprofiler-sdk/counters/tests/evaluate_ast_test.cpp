@@ -33,6 +33,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <functional>
 #include <tuple>
 #include <unordered_map>
 #include <utility>
@@ -1552,5 +1553,65 @@ TEST(evaluate_ast, counter_reduction_dimension)
             EXPECT_FLOAT_EQ(v.counter_value, expected[pos].counter_value);
             pos++;
         }
+    }
+}
+
+TEST(evaluate_ast, evaluate_broadcast_scalar_left_operand_order)
+{
+    using namespace rocprofiler::counters;
+
+    rocprofiler_counter_instance_id_t base_id = 0;
+    set_counter_in_rec(base_id, {.handle = 0});
+
+    std::unordered_map<std::string, Metric> metrics = {
+        {"VOORHEES", Metric("gfx9", "VOORHEES", "a", "1", "a", "", "", 0)},
+        {"SUB_LEFT", Metric("gfx9", "SUB_LEFT", "a", "1", "a", "100-VOORHEES", "", 1)},
+        {"DIV_LEFT", Metric("gfx9", "DIV_LEFT", "a", "1", "a", "64/VOORHEES", "", 2)},
+        {"SUB_RIGHT", Metric("gfx9", "SUB_RIGHT", "a", "1", "a", "VOORHEES-100", "", 3)},
+        {"DIV_RIGHT", Metric("gfx9", "DIV_RIGHT", "a", "1", "a", "VOORHEES/64", "", 4)}};
+
+    auto samples = construct_test_data_dim(base_id, {ROCPROFILER_DIMENSION_NONE}, 8);
+    ASSERT_EQ(samples.size(), 8);
+    const std::vector<double> values = {2, 4, 5, 8, 10, 16, 20, 32};
+    for(size_t i = 0; i < samples.size(); i++)
+        samples[i].counter_value = values[i];
+
+    std::unordered_map<std::string, EvaluateAST> asts;
+    for(const auto& [name, metric] : metrics)
+    {
+        RawAST* ast = nullptr;
+        auto*   buf = yy_scan_string(metric.expression().empty() ? metric.name().c_str()
+                                                                 : metric.expression().c_str());
+        yyparse(&ast);
+        ASSERT_TRUE(ast) << metric.expression();
+        asts.emplace(name, EvaluateAST({.handle = metric.id()}, metrics, *ast, "gfx9"));
+        yy_delete_buffer(buf);
+        delete ast;
+    }
+
+    auto op_sub = [](double v) { return 100.0 - v; };
+    auto op_div = [](double v) { return 64.0 / v; };
+    auto sub_r  = [](double v) { return v - 100.0; };
+    auto div_r  = [](double v) { return v / 64.0; };
+
+    struct check_t
+    {
+        std::string                   name;
+        std::function<double(double)> fn;
+    };
+    std::vector<check_t> checks = {
+        {"SUB_LEFT", op_sub}, {"DIV_LEFT", op_div}, {"SUB_RIGHT", sub_r}, {"DIV_RIGHT", div_r}};
+
+    for(const auto& c : checks)
+    {
+        std::unordered_map<uint64_t, std::vector<rocprofiler_record_counter_t>> decode = {
+            {metrics.at("VOORHEES").id(), samples}};
+        std::vector<std::unique_ptr<std::vector<rocprofiler_record_counter_t>>> cache;
+        asts.at(c.name).expand_derived(asts);
+        auto* ret = asts.at(c.name).evaluate(decode, cache);
+        ASSERT_TRUE(ret) << c.name;
+        ASSERT_EQ(ret->size(), values.size()) << c.name;
+        for(size_t i = 0; i < values.size(); i++)
+            EXPECT_DOUBLE_EQ(ret->at(i).counter_value, c.fn(values[i])) << c.name << " " << i;
     }
 }

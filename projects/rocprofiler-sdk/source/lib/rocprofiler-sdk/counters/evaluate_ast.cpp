@@ -871,9 +871,27 @@ EvaluateAST::evaluate(
         auto* r1 = _children.at(0).evaluate(results_map, cache);
         auto* r2 = _children.at(1).evaluate(results_map, cache);
 
-        if(r1->size() < r2->size()) swap(r1, r2);
-
         CHECK(!r1->empty() && !r2->empty());
+
+        if(r1->size() < r2->size() && r1->size() == 1)
+        {
+            // Left operand is the broadcast side: keep operand order, but
+            // retain identity fields of the multi-record side.
+            for(auto& val : *r2)
+            {
+                auto res        = op(*r1->begin(), val);
+                res.id          = val.id;
+                res.dispatch_id = val.dispatch_id;
+                val             = res;
+            }
+            return r2;
+        }
+
+        if(r1->size() < r2->size())
+        {
+            throw std::runtime_error(
+                fmt::format("Mismatched Sizes {}, {}", r1->size(), r2->size()));
+        }
 
         if(r2->size() == 1)
         {
