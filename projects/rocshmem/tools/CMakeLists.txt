@@ -32,3 +32,13 @@ target_link_libraries(rocshmem_info
 )
 
 _rocshmem_set_native_link_jobs(rocshmem_info)
+
+# rocm_install(TARGETS) adds $ORIGIN/../lib; add rocm_sysdeps (numa) as well.
+set_property(TARGET rocshmem_info APPEND PROPERTY
+  INSTALL_RPATH "$ORIGIN/../lib/rocm_sysdeps/lib")
+
+# Outside a TheRock subproject build (which sets its own relative RPATH), keep
+# the link directories in the installed RPATH so private installs still resolve.
+if(NOT DEFINED THEROCK_SUBPROJECT_TARGET)
+  set_property(TARGET rocshmem_info PROPERTY INSTALL_RPATH_USE_LINK_PATH TRUE)
+endif()
