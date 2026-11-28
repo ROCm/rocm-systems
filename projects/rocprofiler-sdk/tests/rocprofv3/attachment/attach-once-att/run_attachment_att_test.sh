@@ -121,7 +121,7 @@ LD_PRELOAD=${ROCPROF_PRELOAD} ${ROCPROFV3} \
     ${ATT_LIB_ARG} \
     --kernel-include-regex simple_kernel \
     --kernel-iteration-range 1-3 \
-    --att-target-cu 0 \
+    --att-target-cu -1 \
     --att-shader-engine-mask 0xFFFFFFFF \
     --att-buffer-size 0x1000000 \
     -f json rocpd \

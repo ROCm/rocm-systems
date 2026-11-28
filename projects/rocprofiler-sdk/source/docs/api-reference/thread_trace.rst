@@ -83,7 +83,7 @@ The configuration parameters are described here:
 
 - ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK: Configures the Shader Engine (SE) mask, which determines the SEs to be traced. This is a bitmask where each bit corresponds to a SE. For MI3xx, each hex digit corresponds to an XCD. It's highly recommended to trace only one SE at a time to avoid data loss.
 
-- ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU: Configures the target Compute Unit (CU) or WGP. Instruction tracing can only operate on a single CU or WGP at a time. The same target is used for all SEs in ``ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK``.
+- ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU: Configures the target Compute Unit (CU) or WGP. Instruction tracing can only operate on a single CU or WGP at a time. The same target is used for all SEs in ``ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK``. A negative value selects one available on all traced SEs.
 
 - ROCPROFILER_THREAD_TRACE_PARAMETER_SIMD_SELECT: Configures SIMD selection. For gfx9, this is a bitmask where each bit corresponds to a SIMD lane. For example, 0xF selects all SIMD lanes in the ``target_cu``. For gfx10, gfx11, and gfx12, this selects a single SIMD ID to trace. Results are taken mod4 for compatibility with gfx9 so 0xF selects SIMD3 of the target WGP.
 

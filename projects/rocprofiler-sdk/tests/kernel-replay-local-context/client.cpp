@@ -400,6 +400,7 @@ configure_att()
     RC(rocprofiler_create_context(&g_att_ctx));
     auto agents     = gpu_agents();
     auto parameters = std::vector<rocprofiler_thread_trace_parameter_t>{};
+    parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU, static_cast<uint64_t>(-1)});
     parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK, 0x1});
     bool any = false;
     for(auto id : agents)
