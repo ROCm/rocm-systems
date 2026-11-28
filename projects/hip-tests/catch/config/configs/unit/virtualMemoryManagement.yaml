@@ -1,5 +1,11 @@
 ---
 virtualMemoryManagement:
+  Unit_hipMemLifecycle_Full: *level_default
+  Unit_hipMemLifecycle_ReserveOnly: *level_default
+  Unit_hipMemLifecycle_ReuseReservation: *level_default
+  Unit_hipMemLifecycle_Full_Comgr: *level_default
+  Unit_hipMemLifecycle_ReserveOnly_Comgr: *level_default
+  Unit_hipMemLifecycle_ReuseReservation_Comgr: *level_default
   Unit_hipMemGetAllocationGranularity_AllGPUs:
     <<: *level_default
   Unit_hipMemGetAllocationGranularity_NegativeTests:

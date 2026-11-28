@@ -39,6 +39,7 @@ set(TEST_SRC
     hipMemSetGetAccess.cc
     hipMemGetAllocationPropertiesFromHandle.cc
     hipMemMap.cc
+    hipMemLifecycle.cc
     hipMemRelease.cc
     hipMemUnmap.cc)
 
