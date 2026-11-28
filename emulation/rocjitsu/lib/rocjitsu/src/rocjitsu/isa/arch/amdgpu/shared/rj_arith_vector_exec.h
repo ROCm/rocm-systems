@@ -65,6 +65,72 @@ inline bool try_move_packed_vgpr_half(Wavefront &wave, const Operand &destinatio
   return true;
 }
 
+// Plain VOP2 has a one-word count or mask and a one- or two-VGPR value.
+// Borrow allocated registers, and broadcast a uniform operand once into aligned
+// storage so rj-arith can use its wide SIMD backend even for an inline count.
+template <size_t Words, bool HasVgprMsb = false, typename Wave32, typename Wave64>
+inline bool try_vop2_logic(Wavefront &wave, uint32_t selector, const Operand &source,
+                           const Operand &value, const Operand &destination, Wave32 wave32,
+                           Wave64 wave64) {
+  const bool vector_source = selector >= 256;
+  const bool inline_integer = selector >= 128 && selector <= 192;
+  if ((!vector_source && !inline_integer && selector >= kFlatScratchSelectorFirst &&
+       selector != 255) ||
+      source.delegate() || value.delegate() || destination.delegate() || wave.gpr_idx_en() ||
+      wave.cu().observes_register_access() || wave.instruction_execution_failed()) {
+    return false;
+  }
+  const uint64_t exec = wave.exec();
+  if (!exec) {
+    return true;
+  }
+  uint32_t count_reg = selector - 256;
+  uint32_t src = value.encoding_value(), dst = destination.encoding_value();
+  auto bank = wave.vgpr_bank(false);
+  if constexpr (HasVgprMsb) {
+    // Each encoded register names the first word of a tuple in its own bank.
+    count_reg += wave.vgpr_msb_for_role(VgprMsbRole::Src0) << 8;
+    src += wave.vgpr_msb_for_role(VgprMsbRole::Src1) << 8;
+    dst += wave.vgpr_msb_for_role(VgprMsbRole::Dst) << 8;
+    bank = {0, wave.num_vgprs()};
+  }
+  if (!bank.contains(src, Words) || !bank.contains(dst, Words) ||
+      (vector_source && !bank.contains(count_reg))) {
+    return false;
+  }
+  RegisterAccess registers(wave);
+  const uint32_t base = wave.vgpr_alloc().base;
+  alignas(64) std::array<uint32_t, 64> broadcast;
+  const uint32_t *a;
+  if (vector_source) {
+    a = registers.try_bulk_read_vgpr(base + count_reg);
+  } else {
+    const uint32_t scalar = inline_integer ? selector - 128 : registers.read_lane(source, 0);
+    if (wave.instruction_execution_failed()) {
+      return true;
+    }
+    broadcast.fill(scalar);
+    a = broadcast.data();
+  }
+  std::array<const uint32_t *, Words> b;
+  for (size_t word = 0; word < Words; ++word) {
+    b[word] = registers.try_bulk_read_vgpr(base + src + word);
+  }
+  const auto flags = wave.cu().arithmetic_flags();
+  auto status = registers.try_masked_bulk_write_vgprs<Words>(
+      base + dst, exec, [&](uint32_t *const *d, uint64_t mask) {
+        return wave.wf_size() == 32 ? wave32(flags, uint32_t(mask), 0, d, &a, b.data())
+                                    : wave64(flags, mask, 0, d, &a, b.data());
+      });
+  if (!status) {
+    return false;
+  }
+  if (*status != RJ_ARITH_SUCCESS) {
+    wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+  }
+  return true;
+}
+
 // A normal VGPR uses observed storage directly. Uniform, subword or delegated
 // operands use scratch storage; their existing implementation owns routing.
 class VectorInput32 {

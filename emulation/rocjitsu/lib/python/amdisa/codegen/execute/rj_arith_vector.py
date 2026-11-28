@@ -86,6 +86,33 @@ BINARY32 = {
     'V_MBCNT_LO_U32_B32',
     'V_MBCNT_HI_U32_B32',
 }
+# Ordinary VOP2 logic and shifts consume full VGPR words and ignore FP controls.
+VOP2_LOGIC = {
+    'V_AND_B32',
+    'V_OR_B32',
+    'V_XOR_B32',
+    'V_XNOR_B32',
+    'V_LSHLREV_B32',
+    'V_LSHRREV_B32',
+    'V_ASHRREV_I32',
+}
+
+
+def vop2_logic_path(ctx: ExecuteContext, api: str, words: int) -> str:
+    if ctx.enc_name != 'ENC_VOP2' or ctx.arch_name not in (
+        'rdna3',
+        'rdna3_5',
+        'rdna4',
+        'cdna5',
+    ):
+        return ''
+    banked = ', true' if ctx.profile.uses_vgpr_msb_indexing else ''
+    return (
+        f'  if (amdgpu::arith::try_vop2_logic<{words}{banked}>(wf, inst_.src0, {ctx.src_ops[0]}, '
+        f'{ctx.src_ops[1]}, {ctx.dst_ops[0]}, {wave_api(api, 32)}, {wave_api(api, 64)})) return;\n'
+    )
+
+
 UNARY32 = {
     'V_BFREV_B32',
     'V_CLS_I32',
@@ -362,6 +389,8 @@ def gen_vector32(ctx: ExecuteContext) -> str | None:
             '    return;\n'
             '  }\n'
         )
+    if mnemonic in VOP2_LOGIC:
+        fast_path += vop2_logic_path(ctx, api, 1)
     return (
         fast_path
         + f'  amdgpu::arith::execute_{kind}32(wf, {wave_api(api, 32)}, {wave_api(api, 64)},\n'
@@ -524,7 +553,8 @@ def gen_wide_integer(ctx: ExecuteContext) -> str | None:
         if len(dst) != 1 or len(src) != 2 or result_writer is not None:
             return None
         return (
-            f'  amdgpu::arith::execute_shift64(wf, {wave_api(api, 32)}, {wave_api(api, 64)},\n'
+            vop2_logic_path(ctx, api, 2)
+            + f'  amdgpu::arith::execute_shift64(wf, {wave_api(api, 32)}, {wave_api(api, 64)},\n'
             '      wf.cu().arithmetic_flags(),\n'
             f'      {modifiers}, {dst[0]}, {src[0]}, {src[1]});'
         )
