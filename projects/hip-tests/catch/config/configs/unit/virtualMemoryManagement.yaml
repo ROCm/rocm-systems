@@ -341,4 +341,5 @@ virtualMemoryManagement:
       reason: "AIRUNTIME-2744 - failing in PSDB; needs to be re-triaged."
     tags: [image]
   Unit_hipMemSetAccess_SegmentsAccess: *level_default
+  Unit_hipMemSetAccess_SegmentsMemcpy2D: *level_default
   Unit_hipMemExportFabricHandleToStdout_Positive_Basic: *level_default

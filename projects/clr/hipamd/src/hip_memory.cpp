@@ -2226,6 +2226,68 @@ hipError_t validateImageObject(hipArray_t array, amd::Coord3D& origin, amd::Coor
   return hipSuccess;
 }
 
+// ================================================================================================
+// A VMM mapping is a sub-buffer of its reserved VA range, and other mappings of the same range
+// can follow it back to back.
+static bool isVmmMapping(amd::Memory* memory) {
+  return (memory->parent() != nullptr) && (memory->getMemFlags() & CL_MEM_VA_RANGE_AMD);
+}
+
+// Returns the size of the memory object or, for a VMM mapping, the size of the mapping plus the
+// mappings that directly follow it in the same range. The walk stops as soon as `required` bytes
+// are covered.
+static size_t getMappedSize(amd::Memory* memory, size_t required) {
+  size_t mapped_size = memory->getSize();
+  if (!isVmmMapping(memory)) {
+    return mapped_size;
+  }
+  amd::Memory* mapping = memory;
+  while (mapped_size < required) {
+    address next_ptr = reinterpret_cast<address>(mapping->getSvmPtr()) + mapping->getSize();
+    amd::Memory* next = amd::MemObjMap::FindMemObj(next_ptr);
+    if (next == nullptr || next->parent() != memory->parent() || next->getSvmPtr() != next_ptr) {
+      break;
+    }
+    mapped_size += next->getSize();
+    mapping = next;
+  }
+  return mapped_size;
+}
+
+// True if the bytes [offset, offset + size) of a VMM mapping are in the mapping or in the
+// mappings that directly follow it in the same range.
+static bool isMappedRange(amd::Memory* memory, size_t offset, size_t size) {
+  if (size > std::numeric_limits<size_t>::max() - offset) {
+    return false;
+  }
+  return getMappedSize(memory, offset + size) >= (offset + size);
+}
+
+// Bytes a pitched region touches from its first byte:
+// (depth - 1) * rowPitch * sliceRows + (height - 1) * rowPitch + width.
+// Returns false if a dimension is 0 or the value overflows.
+static bool getPitchedSpan(size_t width, size_t height, size_t depth, size_t rowPitch,
+                           size_t sliceRows, size_t* span) {
+  constexpr size_t kMax = std::numeric_limits<size_t>::max();
+  if ((width == 0) || (height == 0) || (depth == 0)) {
+    return false;
+  }
+  if ((rowPitch != 0) && ((sliceRows > kMax / rowPitch) || ((height - 1) > kMax / rowPitch))) {
+    return false;
+  }
+  const size_t slicePitch = rowPitch * sliceRows;
+  if ((slicePitch != 0) && ((depth - 1) > kMax / slicePitch)) {
+    return false;
+  }
+  const size_t sliceBytes = (depth - 1) * slicePitch;
+  const size_t rowBytes = (height - 1) * rowPitch;
+  if ((sliceBytes > kMax - rowBytes) || ((sliceBytes + rowBytes) > kMax - width)) {
+    return false;
+  }
+  *span = sliceBytes + rowBytes + width;
+  return true;
+}
+
 hipError_t validateMemoryObject(const void* ptr, bool isDeviceMemory, amd::Coord3D& origin,
                                 amd::Coord3D& copyRegion, size_t rowPitch, size_t slicePitch,
                                 amd::BufferRect& rect) {
@@ -2247,7 +2309,16 @@ hipError_t validateMemoryObject(const void* ptr, bool isDeviceMemory, amd::Coord
 
   amd::Coord3D start(rect.start_, 0, 0);
   amd::Coord3D size(rect.end_, 1, 1);
-  if (memory && !memory->validateRegion(start, size)) {
+  if (memory && isVmmMapping(memory)) {
+    // VMM mapping: the region may continue into the next mappings of the reserved range. Keep
+    // the checks of validateRegion: a region that is not empty and doesn't wrap around.
+    const size_t region_start = offset + rect.start_;
+    const size_t region_end = region_start + rect.end_;
+    if ((rect.end_ == 0) || (region_start < offset) || (region_end < region_start) ||
+        (getMappedSize(memory, region_end) < region_end)) {
+      return hipErrorInvalidValue;
+    }
+  } else if (memory && !memory->validateRegion(start, size)) {
     return hipErrorInvalidValue;
   }
 
@@ -2748,6 +2819,21 @@ hipError_t hipMemcpyFromArray_spt(void* dst, hipArray_const_t src, size_t wOffse
                                                 getPerThreadDefaultStream()));
 }
 
+// True if a pitched region of a VMM mapping, starting `offset` bytes into the mapping, is in the
+// mapping or in the mappings that directly follow it. Slices are pitch * ysize apart.
+static bool isMappedPitchedRegion(amd::Memory* memory, size_t offset, const hipPitchedPtr& ptr,
+                                  const hipPos& pos, const hipExtent& extent) {
+  constexpr size_t kMax = std::numeric_limits<size_t>::max();
+  if ((pos.x > kMax - extent.width) || (pos.y > kMax - extent.height) ||
+      (pos.z > kMax - extent.depth)) {
+    return false;
+  }
+  size_t span = 0;
+  return getPitchedSpan(pos.x + extent.width, pos.y + extent.height, pos.z + extent.depth,
+                        ptr.pitch, ptr.ysize, &span) &&
+         isMappedRange(memory, offset, span);
+}
+
 hipError_t ihipMemcpy3D_validate(const hipMemcpy3DParms* p) {
   // Passing more than one non-zero source or destination will cause hipMemcpy3D() to
   // return an error.
@@ -2792,15 +2878,23 @@ hipError_t ihipMemcpy3D_validate(const hipMemcpy3DParms* p) {
     }
     auto totalExtentBytes = p->extent.width * p->extent.height * p->extent.depth;
     // get memory obj of the PitchPtr
-    size_t offset = 0;
-    amd::Memory* srcPtrMemObj = getMemoryObject(hip::getCurrentDevice(), p->srcPtr.ptr, offset);
-    amd::Memory* dstPtrMemObj = getMemoryObject(hip::getCurrentDevice(), p->dstPtr.ptr, offset);
+    size_t srcOffset = 0;
+    size_t dstOffset = 0;
+    amd::Memory* srcPtrMemObj = getMemoryObject(hip::getCurrentDevice(), p->srcPtr.ptr, srcOffset);
+    amd::Memory* dstPtrMemObj = getMemoryObject(hip::getCurrentDevice(), p->dstPtr.ptr, dstOffset);
 
     if (dstPtrMemObj != nullptr && (p->dstPtr.xsize != 0 && p->dstPtr.ysize != 0)) {
       // Use the memoryObj to get 3d data
       const auto& dstUsrData = dstPtrMemObj->getUserData();
       //  dst ptr out of bound cases for linear memory
-      if (dstUsrData.pitch_ == 0 || dstUsrData.height_ == 0 || dstUsrData.depth_ == 0) {
+      if (isVmmMapping(dstPtrMemObj)) {
+        // VMM mapping: the copy may continue into the next mappings of the reserved range. Check
+        // every byte it touches, from the pointer's offset in its mapping.
+        if ((totalExtentBytes != 0) &&
+            !isMappedPitchedRegion(dstPtrMemObj, dstOffset, p->dstPtr, p->dstPos, p->extent)) {
+          return hipErrorInvalidValue;
+        }
+      } else if (dstUsrData.pitch_ == 0 || dstUsrData.height_ == 0 || dstUsrData.depth_ == 0) {
         auto dstDepth = dstPtrMemObj->getSize() / (p->dstPtr.xsize * p->dstPtr.ysize);
         if ((p->dstPtr.xsize * (p->dstPtr.ysize - p->dstPos.y) * (dstDepth - p->dstPos.z)) <
             totalExtentBytes) {
@@ -2816,7 +2910,14 @@ hipError_t ihipMemcpy3D_validate(const hipMemcpy3DParms* p) {
     if (srcPtrMemObj != nullptr && (p->srcPtr.xsize != 0 && p->srcPtr.ysize != 0)) {
       const auto& srcUsrData = srcPtrMemObj->getUserData();
       //  src ptr out of bound cases for linear memory
-      if (srcUsrData.pitch_ == 0 || srcUsrData.height_ == 0 || srcUsrData.depth_ == 0) {
+      if (isVmmMapping(srcPtrMemObj)) {
+        // VMM mapping: the copy may continue into the next mappings of the reserved range. Check
+        // every byte it touches, from the pointer's offset in its mapping.
+        if ((totalExtentBytes != 0) &&
+            !isMappedPitchedRegion(srcPtrMemObj, srcOffset, p->srcPtr, p->srcPos, p->extent)) {
+          return hipErrorInvalidValue;
+        }
+      } else if (srcUsrData.pitch_ == 0 || srcUsrData.height_ == 0 || srcUsrData.depth_ == 0) {
         auto srcDepth = srcPtrMemObj->getSize() / (p->srcPtr.xsize * p->srcPtr.ysize);
         if ((p->srcPtr.xsize * (p->srcPtr.ysize - p->srcPos.y) * (srcDepth - p->srcPos.z)) <
             totalExtentBytes) {
@@ -3710,7 +3811,8 @@ hipError_t ihipGraphMemsetParams_validate(const hipMemsetParams* pNodeParams) {
       return hipErrorUnknown;
     }
 
-    if ((pNodeParams->pitch * pNodeParams->height) > memObj->getSize()) {
+    const size_t sizeBytes = pNodeParams->pitch * pNodeParams->height;
+    if (sizeBytes > getMappedSize(memObj, sizeBytes)) {
       return hipErrorInvalidValue;
     }
   }
@@ -3889,8 +3991,22 @@ hipError_t ihipMemset3D_validate(hipPitchedPtr pitchedDevPtr, amd::Memory* memor
   if (memory == nullptr) {
     return hipErrorInvalidValue;
   }
+  size_t required = sizeBytes;
+  const size_t rows = extent.height * extent.depth;
+  if (isVmmMapping(memory) && (rows != 0)) {
+    // VMM mapping: the fill may continue into the next mappings of the reserved range, so check
+    // every byte it touches, which must not reach unmapped memory. Slices are pitch * ysize apart
+    // (pitch * height when ysize is 0).
+    const size_t sliceRows = (pitchedDevPtr.ysize != 0) ? pitchedDevPtr.ysize : extent.height;
+    size_t span = 0;
+    if (!getPitchedSpan(sizeBytes / rows, extent.height, extent.depth, pitchedDevPtr.pitch,
+                        sliceRows, &span)) {
+      return hipErrorInvalidValue;
+    }
+    required = std::max(sizeBytes, span);
+  }
   // Return error if sizeBytes passed to memcpy is more than the actual size allocated
-  if (sizeBytes > (memory->getSize() - offset)) {
+  if (!isMappedRange(memory, offset, required)) {
     return hipErrorInvalidValue;
   }
   if (pitchedDevPtr.pitch == memory->getUserData().pitch_) {
