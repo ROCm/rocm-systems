@@ -38,7 +38,7 @@ if ("${GIT_REV}" STREQUAL "")
 else()
   # Check for changes (denote with a '+') after hash
   execute_process(
-    COMMAND bash -c "git diff --quiet --exit-code || echo +"
+    COMMAND sh -c "git diff --quiet --exit-code || echo +"
     WORKING_DIRECTORY ${RCCL_SOURCE_DIR}
     OUTPUT_VARIABLE GIT_DIFF)
   # Collect branch information

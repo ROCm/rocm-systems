@@ -1,3 +1,4 @@
+#!/bin/sh
 # Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -20,8 +21,10 @@
 
 HIP_FILE=$1
 
-if [[ "$HIP_FILE" =~ .*/src/device/.*\.h ]]; then
+case "$HIP_FILE" in
+  */src/device/*.h*)
   sed -i "s/__syncthreads()/__syncthreads(); insert_random_delay_per_warp()/" "$HIP_FILE"
 
   echo "Added fault injection to $HIP_FILE"
-fi
+  ;;
+esac
