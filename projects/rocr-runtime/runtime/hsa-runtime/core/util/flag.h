@@ -390,6 +390,9 @@ class Flag {
     var = os::GetEnvVar("HSA_ENABLE_LIGHTWEIGHT_COREDUMP");
     lightweight_core_dump_enable_ = (var == "1");
 
+    var = os::GetEnvVar("HSA_ENABLE_GPU_STANDALONE_CORE");
+    gpu_standalone_core_enable_ = (var != "0");
+
     // This limits the maximum number of hardware queues that can be created per
     // priority level for counted queues on every GPU agent. By default, the limit is set to 4.
     var = os::GetEnvVar("GPU_MAX_HW_QUEUES");
@@ -592,6 +595,11 @@ class Flag {
     return lightweight_core_dump_enable_;
   }
 
+  [[nodiscard]]
+  bool gpu_standalone_core_enable() const {
+    return gpu_standalone_core_enable_;
+  }
+
   void set_sdma(bool peer_sdma, bool sdma_gang) {
     enable_peer_sdma_ = peer_sdma ? SDMA_ENABLE : SDMA_DISABLE;
     enable_sdma_gang_ = sdma_gang ? SDMA_ENABLE : SDMA_DISABLE;
@@ -703,6 +711,7 @@ class Flag {
   bool enable_core_dump_progress_ = false;
   std::string core_dump_pattern_;
   bool lightweight_core_dump_enable_ = false;
+  bool gpu_standalone_core_enable_ = true;
 
   uint32_t cp_queues_limit_;
   size_t counted_queue_size_;

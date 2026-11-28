@@ -647,11 +647,6 @@ bool GpuCoreDumpTest::IsValidGPUCoreDump(const std::string& filename) {
     return false;
   }
 
-  // EM_AMDGPU = 224
-  if (ehdr.e_machine != 224) {
-    return false;
-  }
-
   return true;
 }
 

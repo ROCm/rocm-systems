@@ -80,6 +80,10 @@ constexpr uint32_t NOTE_ALIGNMENT_SHIFT = 2;
 const std::string PREFIX_FILE_NAME = "gpucore";
 constexpr size_t MAX_BUFFER_SIZE = 4 * 1024 * 1024;
 
+#include <link.h>
+
+static kfd_runtime_info runtime_info;
+
 namespace rocr {
 namespace amd {
 namespace coredump {
@@ -445,15 +449,6 @@ struct NoteSegmentBuilder : public SegmentBuilder {
     // Get KFD version - use {1, 18} for current kernel compatibility
     HsaVersionInfo versionInfo = {1, 18};
 
-    // Get runtime info (r_debug, ttmp_setup, runtime_state cached from runtime_enable)
-    kfd_runtime_info runtime_info;
-    memset(&runtime_info, 0, sizeof(runtime_info));
-
-    if (HSAKMT_CALL(hsaKmtGetCoreRuntimeInfo(&runtime_info)) != HSAKMT_STATUS_SUCCESS) {
-      fprintf(stderr, "Failed to get runtime info\n");
-      return HSA_STATUS_ERROR;
-    }
-
     // Build device snapshots from GPU agents
     std::vector<kfd_dbg_device_info_entry> device_snapshots;
     const auto& gpu_agents = core::Runtime::runtime_singleton_->gpu_agents();
@@ -530,9 +525,21 @@ struct NoteSegmentBuilder : public SegmentBuilder {
     noteHeaderBuilder.Write<uint32_t> (NT_AMDGPU_CORE_STATE);  /* type.  */
     noteHeaderBuilder.Write<char[8]> ("AMDGPU\0");
 
-    raw_.resize(noteHeaderBuilder.Size() + note_package_builder_.Size());
+    /* Note core extended info for standalone GPU core file parsing.  */
+    PackageBuilder extInfoNoteBuilder;
+    extInfoNoteBuilder.Write<uint32_t>(7);                     /* namesz */
+    extInfoNoteBuilder.Write<uint32_t>(2 * sizeof(uint32_t));  /* descsz */
+    extInfoNoteBuilder.Write<uint32_t>(NT_AMDGPU_CORE_EXT_INFO);
+    extInfoNoteBuilder.Write<char[8]>("AMDGPU\0");
+    extInfoNoteBuilder.Write<uint32_t>(1);                     /* version */
+    extInfoNoteBuilder.Write<uint32_t>(getpid());              /* pid */
+
+    raw_.resize(noteHeaderBuilder.Size() + note_package_builder_.Size()
+                + extInfoNoteBuilder.Size());
     if (!(noteHeaderBuilder.GetBuffer(raw_.data())
-          && note_package_builder_.GetBuffer(&raw_[noteHeaderBuilder.Size()]))) {
+          && note_package_builder_.GetBuffer(&raw_[noteHeaderBuilder.Size()])
+          && extInfoNoteBuilder.GetBuffer(&raw_[noteHeaderBuilder.Size()
+                                                + note_package_builder_.Size()]))) {
       fprintf(stderr, "Failed to build the NT_AMDGPU_CORE_STATE note.\n");
       return HSA_STATUS_ERROR;
     }
@@ -584,7 +591,69 @@ struct LoadSegmentBuilder : public SegmentBuilder {
         return status;
       }
     }
-    
+
+    // register load segments required for standalone gpu core dump
+    std::vector<std::pair<uintptr_t, size_t>> shader_info;
+    if (!lightweight_dump && runtime_info.r_debug &&
+        core::Runtime::runtime_singleton_->flag().gpu_standalone_core_enable()) {
+
+      // add of r_debug and code object info
+      auto *rdebug = reinterpret_cast<struct r_debug *>(runtime_info.r_debug);
+      shader_info.emplace_back(reinterpret_cast<uintptr_t>(rdebug), sizeof(*rdebug));
+      for (struct link_map *lm = rdebug->r_map; lm != nullptr; lm = lm->l_next) {
+        shader_info.emplace_back(reinterpret_cast<uintptr_t>(lm), sizeof(struct link_map));
+        if (lm->l_name == nullptr || lm->l_name[0] == '\0')
+          continue;
+        shader_info.emplace_back(reinterpret_cast<uintptr_t>(lm->l_name), strlen(lm->l_name) + 1);
+
+        if (strncmp(lm->l_name, "memory://", 9) == 0) {
+          const char *off = strstr(lm->l_name, "#offset=0x");
+          const char *sz  = strstr(lm->l_name, "&size=");
+          if (off && sz) {
+            uintptr_t addr = strtoull(off + 10, nullptr, 16);
+            size_t     size = strtoull(sz  +  6, nullptr, 10);
+            if (addr && size)
+              shader_info.emplace_back(addr, size);
+          }
+        }
+      }
+
+      // add of kernel descriptors and arguments
+      hsa_amd_pointer_info_t info;
+      info.size = sizeof(info);
+      for (const core::Agent* agent : core::Runtime::runtime_singleton_->gpu_agents()) {
+        const AMD::GpuAgent* gpu_agent = static_cast<const AMD::GpuAgent*>(agent);
+        for (core::Queue* queue : gpu_agent->GetAqlQueues()) {
+          const auto& q = static_cast<AMD::AqlQueue*>(queue)->amd_queue_;
+          const auto* ring =
+              reinterpret_cast<const hsa_kernel_dispatch_packet_t*>(q.hsa_queue.base_address);
+
+	  // iterate through each packet
+          for (uint64_t id = q.read_dispatch_id; id < q.write_dispatch_id; ++id) {
+            const hsa_kernel_dispatch_packet_t& pkt = ring[id % q.hsa_queue.size];
+            if (((pkt.header >> HSA_PACKET_HEADER_TYPE)
+                 & ((1 << HSA_PACKET_HEADER_WIDTH_TYPE) - 1)) != HSA_PACKET_TYPE_KERNEL_DISPATCH)
+              continue;
+
+            // add descriptor
+            if (core::Runtime::runtime_singleton_->PtrInfo(
+                    reinterpret_cast<const void*>(pkt.kernel_object), &info,
+                    nullptr, nullptr, nullptr) == HSA_STATUS_SUCCESS
+                && info.type != HSA_EXT_POINTER_TYPE_UNKNOWN && info.sizeInBytes != 0)
+              shader_info.emplace_back(reinterpret_cast<uintptr_t>(info.agentBaseAddress),
+                                       info.sizeInBytes);
+
+            // add args
+            if (core::Runtime::runtime_singleton_->PtrInfo(
+                    pkt.kernarg_address, &info, nullptr, nullptr, nullptr) == HSA_STATUS_SUCCESS
+                && info.type != HSA_EXT_POINTER_TYPE_UNKNOWN && info.sizeInBytes != 0)
+              shader_info.emplace_back(reinterpret_cast<uintptr_t>(info.agentBaseAddress),
+                                       info.sizeInBytes);
+          }
+        }
+      }
+    }
+
     const std::string maps_path = "/proc/self/maps";
     std::ifstream maps(maps_path);
     if (!maps.is_open()) {
@@ -613,8 +682,38 @@ struct LoadSegmentBuilder : public SegmentBuilder {
 
       bool is_gpu_mapping = (path.rfind("/dev/dri/renderD", 0) == 0);
 
-      // Skip non-GPU path mappings
-      if (!is_gpu_mapping) continue;
+      // Skip non-GPU path mappings that hold no shader info
+      if (!is_gpu_mapping && shader_info.empty())
+        continue;
+      
+      uint32_t flags = SHF_ALLOC;
+      flags |= (perms.find('w', 0) != std::string::npos) ? SHF_WRITE : 0;
+      flags |= (perms.find('x', 0) != std::string::npos) ? SHF_EXECINSTR : 0;
+
+      // Add mapping for shader core info in host for standalone GPU core
+      bool seg_added = false;
+      for (auto it = shader_info.begin(); it != shader_info.end(); ) {
+        if (start > it->first || it->first >= end) {
+          ++it;
+	  continue;
+        }
+
+        if (!seg_added && !is_gpu_mapping) {
+          SegmentInfo s;
+          s.stype = LOAD;
+          s.vaddr = start;
+          s.size  = size;
+          s.flags = flags;
+          s.builder = this;
+          segments.push_back(s);
+          seg_added = true;
+        }
+
+        it = shader_info.erase(it);
+      }
+
+      if (!is_gpu_mapping)
+        continue;
 
       // For lightweight dumps, keep only scratch allocations
       if (lightweight_dump && !filter.should_include(start, size)) {
@@ -623,10 +722,6 @@ struct LoadSegmentBuilder : public SegmentBuilder {
       }
 
       // Add all gpu mappings to the full coredump
-      uint32_t flags = SHF_ALLOC;
-      flags |= (perms.find('w', 0) != std::string::npos) ? SHF_WRITE : 0;
-      flags |= (perms.find('x', 0) != std::string::npos) ? SHF_EXECINSTR : 0;
-
       debug_print("LOAD 0x%lx size: %ld\n", start, size);
       SegmentInfo s;
       s.stype = LOAD;
@@ -636,6 +731,7 @@ struct LoadSegmentBuilder : public SegmentBuilder {
       s.builder = this;
       segments.push_back(s);
     }
+
     return HSA_STATUS_SUCCESS;
   }
 
@@ -740,7 +836,12 @@ hsa_status_t write_core_dump_to_fd(int fd, const SegmentsInfo& segments,
   ehdr.e_ident[EI_OSABI] = ELF::ELFOSABI_AMDGPU_HSA;
   ehdr.e_ident[EI_ABIVERSION] = 0;
   ehdr.e_type = ET_CORE;
-  ehdr.e_machine = ELF::EM_AMDGPU;
+  std::ifstream exe("/proc/self/exe", std::ios::binary);
+  if (!exe.seekg(offsetof(Elf64_Ehdr, e_machine)) ||
+      !exe.read(reinterpret_cast<char*>(&ehdr.e_machine), sizeof(ehdr.e_machine))) {
+    perror("Failed to read host ELF machine");
+    return HSA_STATUS_ERROR;
+  }
   ehdr.e_version = EV_CURRENT;
   ehdr.e_entry = 0;
   ehdr.e_phoff = sizeof(Elf64_Ehdr);
@@ -1064,6 +1165,12 @@ hsa_status_t dump_gpu_core(std::vector<AMD::AqlQueue*>* suspended_queues_out) {
   // Return list of suspended queues to caller if requested
   if (suspended_queues_out != nullptr) {
     *suspended_queues_out = suspended_queues;
+  }
+
+  memset(&runtime_info, 0, sizeof(runtime_info));
+  if (HSAKMT_CALL(hsaKmtGetCoreRuntimeInfo(&runtime_info)) != HSAKMT_STATUS_SUCCESS) {
+    fprintf(stderr, "Failed to get runtime info\n");
+    return HSA_STATUS_ERROR;
   }
 
   impl::NoteSegmentBuilder nbuilder;
