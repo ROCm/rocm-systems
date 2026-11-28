@@ -403,6 +403,54 @@ TEST(TraceMemoryManagerTest, GetBufferPacketsReturnsAllocationFailure)
         HSA_STATUS_ERROR_INVALID_ALLOCATION);
 }
 
+namespace
+{
+struct alloc_counts_t
+{
+    size_t allocs   = 0;
+    size_t deallocs = 0;
+};
+
+hsa_status_t
+counting_alloc(void** ptr, size_t size, aqlprofile_buffer_desc_flags_t flags, void* data)
+{
+    ++static_cast<alloc_counts_t*>(data)->allocs;
+    return dummy_alloc(ptr, size, flags, nullptr);
+}
+
+void
+counting_dealloc(void* ptr, void* data)
+{
+    ++static_cast<alloc_counts_t*>(data)->deallocs;
+    dummy_dealloc(ptr, nullptr);
+}
+}  // namespace
+
+TEST(TraceMemoryManagerTest, HostBufferIsReusedAndOnlyGrows)
+{
+    aqlprofile_agent_handle_t agent = {.handle = 1};
+    alloc_counts_t            counts{};
+    {
+        TraceMemoryManager mgr(agent, counting_alloc, counting_dealloc, dummy_copy, &counts);
+
+        void* first = mgr.GetHostBuffer(4096);
+        ASSERT_NE(first, nullptr);
+        EXPECT_EQ(mgr.GetHostBuffer(4096), first);
+        EXPECT_EQ(mgr.GetHostBuffer(1024), first);
+        EXPECT_EQ(counts.allocs, 1u);
+        EXPECT_EQ(counts.deallocs, 0u);
+
+        void* grown = mgr.GetHostBuffer(3u << 20);
+        ASSERT_NE(grown, nullptr);
+        std::memset(grown, 0, 3u << 20);
+        EXPECT_EQ(counts.allocs, 2u);
+        EXPECT_EQ(counts.deallocs, 1u);
+        EXPECT_EQ(mgr.GetHostBuffer(1024), grown);
+        EXPECT_EQ(counts.allocs, 2u);
+    }
+    EXPECT_EQ(counts.deallocs, counts.allocs);
+}
+
 TEST(CodeobjMemoryManagerTest, CmdBufferAlloc)
 {
     aqlprofile_agent_handle_t agent = {.handle = 1};

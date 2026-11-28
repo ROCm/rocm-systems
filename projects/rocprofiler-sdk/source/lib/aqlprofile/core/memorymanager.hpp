@@ -34,6 +34,7 @@
 #    undef MoveMemory
 #endif
 
+#include <algorithm>
 #include <vector>
 #include <atomic>
 #include <mutex>
@@ -267,13 +268,26 @@ public:
     }
 
     // Host-visible, GPU-mapped scratch used as the landing buffer for trace readback.
-    std::unique_ptr<void, MemoryDeleter> AllocHostBuffer(size_t size)
+    void* GetHostBuffer(size_t size)
     {
-        aqlprofile_buffer_desc_flags_t flags{};
-        flags.host_access = flags.device_access = true;
-        flags.memory_hint                       = AQLPROFILE_MEMORY_HINT_HOST;
-        return AllocMemory(size, flags);
+        if(size > host_buffer_size)
+        {
+            size_t new_size = std::max<size_t>(host_buffer_size, MIN_HOST_BUFFER_SIZE);
+            while(new_size < size)
+                new_size *= 2;
+
+            aqlprofile_buffer_desc_flags_t flags{};
+            flags.host_access = flags.device_access = true;
+            flags.memory_hint                       = AQLPROFILE_MEMORY_HINT_HOST;
+            host_buffer.reset();
+            host_buffer_size = 0;
+            host_buffer      = AllocMemory(new_size, flags);
+            host_buffer_size = new_size;
+        }
+        return host_buffer.get();
     }
+
+    std::mutex host_buffer_mutex{};
 
     void* AddExtraCmdBuf(size_t size)
     {
@@ -350,6 +364,10 @@ protected:
 
     std::vector<std::unique_ptr<void, MemoryDeleter>> extra_output_buffers{};
     std::vector<std::unique_ptr<void, MemoryDeleter>> extra_cmd_buffers{};
+
+    static constexpr size_t              MIN_HOST_BUFFER_SIZE = 1 << 20;
+    std::unique_ptr<void, MemoryDeleter> host_buffer          = nullptr;
+    size_t                               host_buffer_size     = 0;
 };
 
 class CodeobjMemoryManager : public MemoryManager
