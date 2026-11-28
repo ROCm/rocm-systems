@@ -8,6 +8,25 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
+- **Added VR temperatures to `amd-smi metric` temperature output**.  
+  - Added VRGFX, VRSOC, and VRMEM temperatures to metric output:
+```shell
+$ amd-smi metric --temperature -g 0
+GPU: 0
+    TEMPERATURE:
+        EDGE: N/A
+        HOTSPOT: 46 °C
+        MEM: 35 °C
+        HBM_STACKS: [35 °C, 31 °C, 32 °C, 31 °C, 34 °C, 33 °C, 31 °C, N/A, N/A, N/A, N/A, N/A]
+        VRGFX: N/A
+        VRMEM: N/A
+        VRSOC: 42 °C
+        MID: [N/A, N/A]
+        AID: [43 °C, 45 °C]
+        XCD:
+            XCP_0: [32 °C, 30 °C, 33 °C, 28 °C, 32 °C, 31 °C, 31 °C, 29 °C]
+```
+
 - **Added ``amd-smi metric --nic --rdma [idx]`` and the Python ``amdsmi_get_nic_rdma_port_statistics()``**.  
   - Prints the RDMA hardware counters of each RDMA port of an AI-NIC. The Python function returns a dictionary of counter name to value.
 
