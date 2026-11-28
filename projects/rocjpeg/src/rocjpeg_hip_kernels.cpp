@@ -235,8 +235,8 @@ __global__ void ConvertPackedYUYVToPlanarYUVBatchedKernel(const PackedYUYVToPlan
             *((uint32_t *)(&destination_u[dst_uv_idx])) = dst_u;
             *((uint32_t *)(&destination_v[dst_uv_idx])) = dst_v;
         } else {
-            // The chroma planes are (dst_width >> 1) wide, so this block has (dst_width >> 1) - 4 * x chroma samples left.
-            uint32_t num_chroma = (p.dst_width >> 1) - (x << 2);
+            // The chroma planes are dst_chroma_width wide, so this block has dst_chroma_width - 4 * x chroma samples left.
+            uint32_t num_chroma = p.dst_chroma_width - (x << 2);
             StorePartial(&destination_y[dst_y_idx], &dst_y, num_pixels);
             StorePartial(&destination_u[dst_uv_idx], &dst_u, num_chroma);
             StorePartial(&destination_v[dst_uv_idx], &dst_v, num_chroma);

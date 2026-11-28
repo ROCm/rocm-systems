@@ -54,6 +54,12 @@ THE SOFTWARE.
  * integrated GPU that rocJPEG has no kernels for, only the direction with the
  * handle on the discrete GPU tests anything, and that GPU may be the first or
  * the last device. A direction whose handle device cannot decode is skipped.
+ *
+ * It also checks the chroma of images with an odd width or height
+ * (TestOddDimensionChroma): rocJpegGetImageInfo must report the chroma sizes
+ * rounded up, the YUV planar output must fill planes of those sizes, including
+ * the last chroma row or column, which covers only the last image row or
+ * column, and no output may write past the sizes the documentation gives.
  */
 class RocJpegApiNegativeTests {
     public:
@@ -73,6 +79,7 @@ class RocJpegApiNegativeTests {
         int TestInvalidGetDecoderCaps();
         int TestStreamParseFuzz();
         int TestCrossDeviceDecode();
+        int TestOddDimensionChroma();
 
         /**
          * @brief Parses a stream out of an exactly sized heap allocation.

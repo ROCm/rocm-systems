@@ -117,7 +117,8 @@ struct PackedYUYVToPlanarYUVBatchParams {
     const uint8_t *src_image;
     uint32_t src_image_stride_in_bytes;
     uint32_t dst_width_in_8px_blocks; // Destination width in 8-pixel-wide blocks; each thread writes 8 luma samples of one row.
-    uint32_t dst_width;               // Destination luma width in pixels (chroma width is dst_width >> 1); the last block of a row is clipped to it.
+    uint32_t dst_width;               // Destination luma width in pixels; the last block of a row is clipped to it.
+    uint32_t dst_chroma_width;        // Destination chroma width in samples, (dst_width + 1) >> 1 or dst_width >> 1; the last block of a row is clipped to it.
 };
 void ConvertPackedYUYVToPlanarYUVBatched(hipStream_t stream, uint32_t max_gx, uint32_t max_gy,
     const PackedYUYVToPlanarYUVBatchParams *d_params, uint32_t n_images);

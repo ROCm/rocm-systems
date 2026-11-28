@@ -14,6 +14,7 @@ Documentation for rocJPEG is available at
 
 * Fixed the RGB, RGB planar, Y, and YUV planar outputs writing past the image when its width is not a multiple of 8 or its height is odd. With output buffers sized exactly to the image, this overwrote memory after the buffer and made the right and bottom edges of the image nondeterministic.
 * Fixed the build using no GPU targets when `AMDGPU_TARGETS` or `GPU_ARCHS` is set in the environment but empty. An empty value is now treated the same as an unset one and the default target list applies.
+* Fixed the YUV planar output leaving out the last chroma row or column of 4:2:0, 4:2:2, and 4:4:0 images and crops with an odd height or width. `rocJpegGetImageInfo` now reports chroma widths and heights rounded up, as the JPEG standard defines them. Size the YUV planar chroma planes with these values, or for a crop, with the crop width and height halved and rounded up where the chroma is subsampled. With an odd height, chroma planes sized with the halved height rounded down are now overrun by one row. The native output keeps its documented buffer sizes.
 
 ### Changed
 

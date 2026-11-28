@@ -158,6 +158,172 @@ const std::vector<uint8_t> &CrossDeviceJpeg() {
     return kJpeg;
 }
 
+/**
+ * @brief A color of the TestOddDimensionChroma images, as RGB and as the Cb and Cr samples JPEG encodes it as
+ *        (ITU-T T.871).
+ */
+struct OddDimensionColor {
+    uint8_t rgb[3];
+    uint8_t cb;
+    uint8_t cr;
+};
+
+/** @brief The color of the TestOddDimensionChroma images, except for their last row or column. */
+constexpr OddDimensionColor kBodyColor = {{200, 30, 30}, 99, 213};
+/** @brief The color of the last row (odd height) or the last column (odd width) of the TestOddDimensionChroma images. */
+constexpr OddDimensionColor kEdgeColor = {{30, 30, 200}, 213, 114};
+
+/**
+ * @brief A 64x65 4:2:0 baseline JPEG, decoded by TestOddDimensionChroma.
+ *
+ * The TestOddDimensionChroma images are kBodyColor except for their last row (odd height) or last column (odd width),
+ * which is kEdgeColor. The last chroma row or column of such an image covers only that image row or column, so it
+ * has the chroma of kEdgeColor, and the one before it the chroma of kBodyColor. The images were encoded with
+ * libjpeg-turbo at quality 95 with optimized Huffman tables.
+ */
+const std::vector<uint8_t> &OddHeight420Jpeg() {
+    static const std::vector<uint8_t> kJpeg = {
+        0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01,
+        0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0xFF, 0xDB, 0x00, 0x43,
+        0x00, 0x02, 0x01, 0x01, 0x01, 0x01, 0x01, 0x02, 0x01, 0x01, 0x01, 0x02,
+        0x02, 0x02, 0x02, 0x02, 0x04, 0x03, 0x02, 0x02, 0x02, 0x02, 0x05, 0x04,
+        0x04, 0x03, 0x04, 0x06, 0x05, 0x06, 0x06, 0x06, 0x05, 0x06, 0x06, 0x06,
+        0x07, 0x09, 0x08, 0x06, 0x07, 0x09, 0x07, 0x06, 0x06, 0x08, 0x0B, 0x08,
+        0x09, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x06, 0x08, 0x0B, 0x0C, 0x0B, 0x0A,
+        0x0C, 0x09, 0x0A, 0x0A, 0x0A, 0xFF, 0xDB, 0x00, 0x43, 0x01, 0x02, 0x02,
+        0x02, 0x02, 0x02, 0x02, 0x05, 0x03, 0x03, 0x05, 0x0A, 0x07, 0x06, 0x07,
+        0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A,
+        0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A,
+        0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A,
+        0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A,
+        0x0A, 0x0A, 0xFF, 0xC0, 0x00, 0x11, 0x08, 0x00, 0x41, 0x00, 0x40, 0x03,
+        0x01, 0x22, 0x00, 0x02, 0x11, 0x01, 0x03, 0x11, 0x01, 0xFF, 0xC4, 0x00,
+        0x15, 0x00, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0xFF, 0xC4, 0x00, 0x14,
+        0x10, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xC4, 0x00, 0x16, 0x01, 0x01,
+        0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x09, 0x07, 0xFF, 0xC4, 0x00, 0x14, 0x11, 0x01,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0xFF, 0xDA, 0x00, 0x0C, 0x03, 0x01, 0x00, 0x02,
+        0x11, 0x03, 0x11, 0x00, 0x3F, 0x00, 0x90, 0xC0, 0x61, 0x6A, 0xA8, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x09, 0xFC, 0x05,
+        0xC8, 0x47, 0x30, 0x00, 0x00, 0x00, 0x00, 0x7F, 0xFF, 0xD9
+    };
+    return kJpeg;
+}
+
+/** @brief A 64x65 4:4:0 baseline JPEG (luma sampled 1x2), decoded by TestOddDimensionChroma. */
+const std::vector<uint8_t> &OddHeight440Jpeg() {
+    static const std::vector<uint8_t> kJpeg = {
+        0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01,
+        0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0xFF, 0xDB, 0x00, 0x43,
+        0x00, 0x02, 0x01, 0x01, 0x01, 0x01, 0x01, 0x02, 0x01, 0x01, 0x01, 0x02,
+        0x02, 0x02, 0x02, 0x02, 0x04, 0x03, 0x02, 0x02, 0x02, 0x02, 0x05, 0x04,
+        0x04, 0x03, 0x04, 0x06, 0x05, 0x06, 0x06, 0x06, 0x05, 0x06, 0x06, 0x06,
+        0x07, 0x09, 0x08, 0x06, 0x07, 0x09, 0x07, 0x06, 0x06, 0x08, 0x0B, 0x08,
+        0x09, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x06, 0x08, 0x0B, 0x0C, 0x0B, 0x0A,
+        0x0C, 0x09, 0x0A, 0x0A, 0x0A, 0xFF, 0xDB, 0x00, 0x43, 0x01, 0x02, 0x02,
+        0x02, 0x02, 0x02, 0x02, 0x05, 0x03, 0x03, 0x05, 0x0A, 0x07, 0x06, 0x07,
+        0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A,
+        0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A,
+        0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A,
+        0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A,
+        0x0A, 0x0A, 0xFF, 0xC0, 0x00, 0x11, 0x08, 0x00, 0x41, 0x00, 0x40, 0x03,
+        0x01, 0x12, 0x00, 0x02, 0x11, 0x01, 0x03, 0x11, 0x01, 0xFF, 0xC4, 0x00,
+        0x15, 0x00, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0xFF, 0xC4, 0x00, 0x14,
+        0x10, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xC4, 0x00, 0x16, 0x01, 0x01,
+        0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x09, 0x07, 0xFF, 0xC4, 0x00, 0x14, 0x11, 0x01,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0xFF, 0xDA, 0x00, 0x0C, 0x03, 0x01, 0x00, 0x02,
+        0x11, 0x03, 0x11, 0x00, 0x3F, 0x00, 0x90, 0xC6, 0x16, 0xAA, 0x80, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x09, 0xFC, 0x5C, 0x84, 0x73, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x7F, 0xFF, 0xD9
+    };
+    return kJpeg;
+}
+
+/** @brief A 65x64 4:2:0 baseline JPEG, decoded by TestOddDimensionChroma. */
+const std::vector<uint8_t> &OddWidth420Jpeg() {
+    static const std::vector<uint8_t> kJpeg = {
+        0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01,
+        0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0xFF, 0xDB, 0x00, 0x43,
+        0x00, 0x02, 0x01, 0x01, 0x01, 0x01, 0x01, 0x02, 0x01, 0x01, 0x01, 0x02,
+        0x02, 0x02, 0x02, 0x02, 0x04, 0x03, 0x02, 0x02, 0x02, 0x02, 0x05, 0x04,
+        0x04, 0x03, 0x04, 0x06, 0x05, 0x06, 0x06, 0x06, 0x05, 0x06, 0x06, 0x06,
+        0x07, 0x09, 0x08, 0x06, 0x07, 0x09, 0x07, 0x06, 0x06, 0x08, 0x0B, 0x08,
+        0x09, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x06, 0x08, 0x0B, 0x0C, 0x0B, 0x0A,
+        0x0C, 0x09, 0x0A, 0x0A, 0x0A, 0xFF, 0xDB, 0x00, 0x43, 0x01, 0x02, 0x02,
+        0x02, 0x02, 0x02, 0x02, 0x05, 0x03, 0x03, 0x05, 0x0A, 0x07, 0x06, 0x07,
+        0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A,
+        0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A,
+        0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A,
+        0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A,
+        0x0A, 0x0A, 0xFF, 0xC0, 0x00, 0x11, 0x08, 0x00, 0x40, 0x00, 0x41, 0x03,
+        0x01, 0x22, 0x00, 0x02, 0x11, 0x01, 0x03, 0x11, 0x01, 0xFF, 0xC4, 0x00,
+        0x15, 0x00, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0xFF, 0xC4, 0x00, 0x14,
+        0x10, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xC4, 0x00, 0x16, 0x01, 0x01,
+        0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x09, 0x07, 0xFF, 0xC4, 0x00, 0x14, 0x11, 0x01,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0xFF, 0xDA, 0x00, 0x0C, 0x03, 0x01, 0x00, 0x02,
+        0x11, 0x03, 0x11, 0x00, 0x3F, 0x00, 0x90, 0xC0, 0x61, 0x6A, 0xA8, 0x00,
+        0x00, 0x00, 0x00, 0x09, 0xFC, 0x05, 0xC8, 0x47, 0x35, 0x00, 0x02, 0x1B,
+        0xAC, 0x60, 0x00, 0x00, 0x00, 0x00, 0x27, 0xF0, 0x17, 0x21, 0x1C, 0xD4,
+        0x00, 0x08, 0x6E, 0xB1, 0x80, 0x00, 0x00, 0x00, 0x00, 0x9F, 0xC0, 0x5C,
+        0x84, 0x73, 0x50, 0x00, 0x21, 0xBA, 0xC6, 0x00, 0x00, 0x00, 0x00, 0x02,
+        0x7F, 0x01, 0x72, 0x11, 0xCD, 0xFF, 0xD9
+    };
+    return kJpeg;
+}
+
+/** @brief A 65x64 4:2:2 baseline JPEG, decoded by TestOddDimensionChroma. */
+const std::vector<uint8_t> &OddWidth422Jpeg() {
+    static const std::vector<uint8_t> kJpeg = {
+        0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01,
+        0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0xFF, 0xDB, 0x00, 0x43,
+        0x00, 0x02, 0x01, 0x01, 0x01, 0x01, 0x01, 0x02, 0x01, 0x01, 0x01, 0x02,
+        0x02, 0x02, 0x02, 0x02, 0x04, 0x03, 0x02, 0x02, 0x02, 0x02, 0x05, 0x04,
+        0x04, 0x03, 0x04, 0x06, 0x05, 0x06, 0x06, 0x06, 0x05, 0x06, 0x06, 0x06,
+        0x07, 0x09, 0x08, 0x06, 0x07, 0x09, 0x07, 0x06, 0x06, 0x08, 0x0B, 0x08,
+        0x09, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x06, 0x08, 0x0B, 0x0C, 0x0B, 0x0A,
+        0x0C, 0x09, 0x0A, 0x0A, 0x0A, 0xFF, 0xDB, 0x00, 0x43, 0x01, 0x02, 0x02,
+        0x02, 0x02, 0x02, 0x02, 0x05, 0x03, 0x03, 0x05, 0x0A, 0x07, 0x06, 0x07,
+        0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A,
+        0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A,
+        0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A,
+        0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A,
+        0x0A, 0x0A, 0xFF, 0xC0, 0x00, 0x11, 0x08, 0x00, 0x40, 0x00, 0x41, 0x03,
+        0x01, 0x21, 0x00, 0x02, 0x11, 0x01, 0x03, 0x11, 0x01, 0xFF, 0xC4, 0x00,
+        0x15, 0x00, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0xFF, 0xC4, 0x00, 0x14,
+        0x10, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xC4, 0x00, 0x16, 0x01, 0x01,
+        0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x09, 0x07, 0xFF, 0xC4, 0x00, 0x14, 0x11, 0x01,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0xFF, 0xDA, 0x00, 0x0C, 0x03, 0x01, 0x00, 0x02,
+        0x11, 0x03, 0x11, 0x00, 0x3F, 0x00, 0x90, 0xC6, 0x16, 0xAA, 0x80, 0x00,
+        0x00, 0x09, 0xFC, 0x5C, 0x84, 0x73, 0x50, 0x02, 0x1B, 0xAC, 0x60, 0x00,
+        0x00, 0x02, 0x7F, 0x17, 0x21, 0x1C, 0xD4, 0x00, 0x86, 0xEB, 0x18, 0x00,
+        0x00, 0x00, 0x9F, 0xC5, 0xC8, 0x47, 0x35, 0x00, 0x21, 0xBA, 0xC6, 0x00,
+        0x00, 0x00, 0x27, 0xF1, 0x72, 0x11, 0xCD, 0x40, 0x08, 0x6E, 0xB1, 0x80,
+        0x00, 0x00, 0x09, 0xFC, 0x5C, 0x84, 0x73, 0x50, 0x02, 0x1B, 0xAC, 0x60,
+        0x00, 0x00, 0x02, 0x7F, 0x17, 0x21, 0x1C, 0xD4, 0x00, 0x86, 0xEB, 0x18,
+        0x00, 0x00, 0x00, 0x9F, 0xC5, 0xC8, 0x47, 0x35, 0x00, 0x21, 0xBA, 0xC6,
+        0x00, 0x00, 0x00, 0x27, 0xF1, 0x72, 0x11, 0xCD, 0xFF, 0xD9
+    };
+    return kJpeg;
+}
+
 /** @brief Frees a HIP device buffer owned by a std::unique_ptr. */
 struct HipBufferDeleter {
     void operator()(void *buffer) const { (void)hipFree(buffer); }
@@ -474,6 +640,143 @@ std::vector<uint8_t> FlatColorJpeg(uint16_t width, uint16_t height) {
     jpeg.push_back(0xFF);
     jpeg.push_back(0xD9);
     return jpeg;
+}
+
+/**
+ * @brief An image decoded by TestOddDimensionChroma, with the chroma subsampling and the component sizes
+ *        rocJpegGetImageInfo must report for it.
+ */
+struct OddDimensionImage {
+    const char *name;
+    const std::vector<uint8_t> &(*jpeg)();
+    RocJpegChromaSubsampling subsampling;
+    uint32_t width;
+    uint32_t height;
+    uint32_t chroma_width;  // Rounded up, as ITU-T T.81 defines the dimensions of a subsampled component.
+    uint32_t chroma_height; // Rounded up.
+};
+
+/** @brief The images decoded by TestOddDimensionChroma. */
+const std::vector<OddDimensionImage> &OddDimensionImages() {
+    static const std::vector<OddDimensionImage> kImages = {
+        {"64x65 4:2:0", OddHeight420Jpeg, ROCJPEG_CSS_420, 64, 65, 32, 33},
+        {"64x65 4:4:0", OddHeight440Jpeg, ROCJPEG_CSS_440, 64, 65, 64, 33},
+        {"65x64 4:2:0", OddWidth420Jpeg, ROCJPEG_CSS_420, 65, 64, 33, 32},
+        {"65x64 4:2:2", OddWidth422Jpeg, ROCJPEG_CSS_422, 65, 64, 33, 64},
+    };
+    return kImages;
+}
+
+/** @brief The pitch and the number of rows of an output plane. */
+struct PlaneSize {
+    uint32_t pitch;
+    uint32_t rows;
+};
+
+/** @brief The number of bytes after each output plane of TestOddDimensionChroma that a decode must not change. */
+constexpr size_t kCanarySize = 64;
+/** @brief The fill of the TestOddDimensionChroma output buffers, which is far from every sample of its images. */
+constexpr uint8_t kOutputFill = 0xA5;
+/** @brief How far a decoded sample may be from the value of its color, for the JPEG compression and the RGB conversion. */
+constexpr int kSampleTolerance = 16;
+
+/**
+ * @brief Decodes into planes of exactly the given sizes, each followed by a canary, and reads the planes back.
+ *
+ * The planes share one allocation, each followed by kCanarySize bytes, so a decode that writes past the end of a
+ * plane changes the canary after it rather than memory the test cannot see. The whole allocation starts out filled
+ * with kOutputFill.
+ *
+ * @param handle The decoder handle.
+ * @param stream_handle The parsed stream to decode.
+ * @param decode_params The output format and crop rectangle of the decode.
+ * @param sizes The pitch and rows of each plane, in channel order.
+ * @param label Describes the decode in error messages.
+ * @param planes Receives the planes, pitch * rows bytes each.
+ * @return EXIT_SUCCESS if the decode succeeds and leaves every canary unchanged, EXIT_FAILURE otherwise.
+ */
+int DecodeIntoPlanes(RocJpegHandle handle, RocJpegStreamHandle stream_handle, const RocJpegDecodeParams &decode_params,
+                     const std::vector<PlaneSize> &sizes, const std::string &label, std::vector<std::vector<uint8_t>> &planes) {
+    planes.clear();
+    std::vector<size_t> offsets;
+    size_t total_size = 0;
+    for (const PlaneSize &size : sizes) {
+        offsets.push_back(total_size);
+        total_size += static_cast<size_t>(size.pitch) * size.rows + kCanarySize;
+    }
+    void *buffer = nullptr;
+    if (hipMalloc(&buffer, total_size) != hipSuccess) {
+        std::cerr << label << ": hipMalloc failed for the output" << std::endl;
+        return EXIT_FAILURE;
+    }
+    std::unique_ptr<void, HipBufferDeleter> buffer_owner(buffer);
+    if (hipMemset(buffer, kOutputFill, total_size) != hipSuccess) {
+        std::cerr << label << ": hipMemset failed for the output" << std::endl;
+        return EXIT_FAILURE;
+    }
+    RocJpegImage destination = {};
+    for (size_t c = 0; c < sizes.size(); c++) {
+        destination.channel[c] = static_cast<uint8_t *>(buffer) + offsets[c];
+        destination.pitch[c] = sizes[c].pitch;
+    }
+    RocJpegStatus rocjpeg_status = rocJpegDecode(handle, stream_handle, &decode_params, &destination);
+    if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
+        std::cerr << label << ": Expected ROCJPEG_STATUS_SUCCESS but got " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+        return EXIT_FAILURE;
+    }
+    std::vector<uint8_t> output(total_size);
+    if (hipMemcpy(output.data(), buffer, total_size, hipMemcpyDeviceToHost) != hipSuccess) {
+        std::cerr << label << ": Failed to copy the output to the host" << std::endl;
+        return EXIT_FAILURE;
+    }
+    int result = EXIT_SUCCESS;
+    for (size_t c = 0; c < sizes.size(); c++) {
+        const size_t plane_end = offsets[c] + static_cast<size_t>(sizes[c].pitch) * sizes[c].rows;
+        planes.emplace_back(output.begin() + offsets[c], output.begin() + plane_end);
+        if (std::any_of(output.begin() + plane_end, output.begin() + plane_end + kCanarySize,
+                        [](uint8_t value) { return value != kOutputFill; })) {
+            std::cerr << label << ": Expected nothing written past channel " << c << " (pitch " << sizes[c].pitch << ", "
+                      << sizes[c].rows << " rows) but the canary after it was overwritten" << std::endl;
+            result = EXIT_FAILURE;
+        }
+    }
+    return result;
+}
+
+/**
+ * @brief Checks that the last row or column of a decoded plane has the edge color of the TestOddDimensionChroma
+ *        images, and the row or column before it the body color.
+ *
+ * @param plane A plane read back by DecodeIntoPlanes.
+ * @param pitch The pitch of the plane.
+ * @param width The width of the plane in pixels.
+ * @param height The height of the plane in rows.
+ * @param bytes_per_pixel 1 for a Y, U, or V plane, 3 for interleaved RGB.
+ * @param last_rows True to check the last two rows, false to check the last two columns.
+ * @param edge The bytes_per_pixel expected bytes of every pixel of the last row or column.
+ * @param body The bytes_per_pixel expected bytes of every pixel of the row or column before it.
+ * @param label Describes the plane in error messages.
+ * @return EXIT_SUCCESS if every byte is within kSampleTolerance of its expected value, EXIT_FAILURE otherwise.
+ */
+int CheckLastTwoLines(const std::vector<uint8_t> &plane, uint32_t pitch, uint32_t width, uint32_t height, uint32_t bytes_per_pixel,
+                      bool last_rows, const uint8_t *edge, const uint8_t *body, const std::string &label) {
+    const uint32_t num_lines = last_rows ? height : width;
+    const uint32_t line_length = last_rows ? width : height;
+    for (uint32_t line = num_lines - 2; line < num_lines; line++) {
+        const uint8_t *expected = (line == num_lines - 1) ? edge : body;
+        for (uint32_t i = 0; i < line_length; i++) {
+            const size_t offset = last_rows ? static_cast<size_t>(line) * pitch + i * bytes_per_pixel
+                                            : static_cast<size_t>(i) * pitch + line * bytes_per_pixel;
+            for (uint32_t k = 0; k < bytes_per_pixel; k++) {
+                if (std::abs(static_cast<int>(plane[offset + k]) - static_cast<int>(expected[k])) > kSampleTolerance) {
+                    std::cerr << label << ": Expected " << static_cast<int>(expected[k]) << " but got " << static_cast<int>(plane[offset + k])
+                              << " in " << (last_rows ? "row " : "column ") << line << " (pixel " << i << ", byte " << k << ")" << std::endl;
+                    return EXIT_FAILURE;
+                }
+            }
+        }
+    }
+    return EXIT_SUCCESS;
 }
 
 }  // namespace
@@ -2034,10 +2337,185 @@ int RocJpegApiNegativeTests::TestCrossDeviceDecode() {
     return EXIT_SUCCESS;
 }
 
+int RocJpegApiNegativeTests::TestOddDimensionChroma() {
+    std::cout << "info: Executing chroma tests for images with an odd width or height" << std::endl;
+    RocJpegDecodeCaps decode_caps = {};
+    RocJpegStatus rocjpeg_status = rocJpegGetDecoderCaps(rocjpeg_handle_, &decode_caps);
+    if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
+        std::cerr << "rocJpegGetDecoderCaps: Expected ROCJPEG_STATUS_SUCCESS but got " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+        return EXIT_FAILURE;
+    }
+    // The crops below check how rocJPEG crops a decoded image. A decoder that crops in hardware decodes only the crop
+    // rectangle instead, so they are skipped there.
+    if (decode_caps.hw_roi_decode != 0) {
+        std::cout << "info: Skipping the crops, which this decoder does in hardware" << std::endl;
+    }
+    int result = EXIT_SUCCESS;
+    std::vector<std::vector<uint8_t>> planes;
+    for (const OddDimensionImage &image : OddDimensionImages()) {
+        if ((decode_caps.subsampling_mask & (1u << image.subsampling)) == 0 ||
+            image.width < decode_caps.min_width || image.height < decode_caps.min_height) {
+            std::cout << "info: Skipping the " << image.name << " image, which the decoder does not support" << std::endl;
+            continue;
+        }
+        const std::vector<uint8_t> &jpeg = image.jpeg();
+        rocjpeg_status = rocJpegStreamParse(jpeg.data(), jpeg.size(), rocjpeg_stream_handle_);
+        if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
+            std::cerr << "Expected ROCJPEG_STATUS_SUCCESS when parsing the " << image.name << " JPEG but got "
+                      << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+            return EXIT_FAILURE;
+        }
+        const std::string of_image = std::string(" of the ") + image.name + " image";
+        // The edge color is in the last row of an odd-height image and in the last column of an odd-width one.
+        const bool odd_height = (image.height % 2) != 0;
+
+        // Scenario 1: rocJpegGetImageInfo reports the chroma widths and heights rounded up.
+        uint8_t num_components = 0;
+        RocJpegChromaSubsampling subsampling = ROCJPEG_CSS_UNKNOWN;
+        uint32_t widths[ROCJPEG_MAX_COMPONENT] = {};
+        uint32_t heights[ROCJPEG_MAX_COMPONENT] = {};
+        rocjpeg_status = rocJpegGetImageInfo(rocjpeg_handle_, rocjpeg_stream_handle_, &num_components, &subsampling, widths, heights);
+        if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
+            std::cerr << "rocJpegGetImageInfo" << of_image << ": Expected ROCJPEG_STATUS_SUCCESS but got " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+            return EXIT_FAILURE;
+        }
+        if (subsampling != image.subsampling || widths[0] != image.width || heights[0] != image.height ||
+            widths[1] != image.chroma_width || heights[1] != image.chroma_height ||
+            widths[2] != image.chroma_width || heights[2] != image.chroma_height) {
+            std::cerr << "rocJpegGetImageInfo" << of_image << ": Expected chroma subsampling " << image.subsampling << " and component sizes "
+                      << image.width << "x" << image.height << ", " << image.chroma_width << "x" << image.chroma_height << ", "
+                      << image.chroma_width << "x" << image.chroma_height << " but got " << subsampling << " and " << widths[0] << "x"
+                      << heights[0] << ", " << widths[1] << "x" << heights[1] << ", " << widths[2] << "x" << heights[2] << std::endl;
+            result = EXIT_FAILURE;
+        }
+
+        // Scenario 2: ROCJPEG_OUTPUT_YUV_PLANAR fills planes of exactly these sizes without writing past them, so the last
+        // chroma row or column has the chroma of the last image row or column.
+        RocJpegDecodeParams decode_params = {};
+        decode_params.output_format = ROCJPEG_OUTPUT_YUV_PLANAR;
+        std::string label = "ROCJPEG_OUTPUT_YUV_PLANAR" + of_image;
+        const PlaneSize luma_size = {image.width, image.height};
+        const PlaneSize chroma_size = {image.chroma_width, image.chroma_height};
+        if (DecodeIntoPlanes(rocjpeg_handle_, rocjpeg_stream_handle_, decode_params, {luma_size, chroma_size, chroma_size}, label, planes) ||
+            CheckLastTwoLines(planes[1], chroma_size.pitch, image.chroma_width, image.chroma_height, 1, odd_height,
+                              &kEdgeColor.cb, &kBodyColor.cb, label + ", channel 1") ||
+            CheckLastTwoLines(planes[2], chroma_size.pitch, image.chroma_width, image.chroma_height, 1, odd_height,
+                              &kEdgeColor.cr, &kBodyColor.cr, label + ", channel 2")) {
+            result = EXIT_FAILURE;
+        }
+
+        // Scenario 3: with an odd width, ROCJPEG_OUTPUT_YUV_PLANAR into chroma planes only (width >> 1) wide, the chroma
+        // width rounded down, leaves out the last chroma column instead of writing past the planes.
+        if (!odd_height) {
+            const PlaneSize narrow_chroma_size = {image.width >> 1, image.chroma_height};
+            if (DecodeIntoPlanes(rocjpeg_handle_, rocjpeg_stream_handle_, decode_params, {luma_size, narrow_chroma_size, narrow_chroma_size},
+                                 label + " with a chroma pitch of " + std::to_string(narrow_chroma_size.pitch), planes)) {
+                result = EXIT_FAILURE;
+            }
+        }
+
+        // Scenario 4: ROCJPEG_OUTPUT_YUV_PLANAR of a crop that leaves out the first two rows of an odd-height image, or the
+        // first two columns of an odd-width one, so that its height or width is odd too. Its chroma planes are the crop
+        // size, halved and rounded up where the chroma is subsampled, and their last row or column has the chroma of the
+        // last image row or column.
+        if (decode_caps.hw_roi_decode == 0) {
+            RocJpegDecodeParams crop_params = decode_params;
+            crop_params.crop_rectangle.left = odd_height ? 0 : 2;
+            crop_params.crop_rectangle.top = odd_height ? 2 : 0;
+            crop_params.crop_rectangle.right = static_cast<int16_t>(image.width);
+            crop_params.crop_rectangle.bottom = static_cast<int16_t>(image.height);
+            const uint32_t crop_width = image.width - crop_params.crop_rectangle.left;
+            const uint32_t crop_height = image.height - crop_params.crop_rectangle.top;
+            const PlaneSize crop_chroma_size = {image.chroma_width == image.width ? crop_width : (crop_width + 1) / 2,
+                                                image.chroma_height == image.height ? crop_height : (crop_height + 1) / 2};
+            const std::string crop_label = "ROCJPEG_OUTPUT_YUV_PLANAR of the crop (" + std::to_string(crop_params.crop_rectangle.left) + ", " +
+                                           std::to_string(crop_params.crop_rectangle.top) + ", " + std::to_string(image.width) + ", " +
+                                           std::to_string(image.height) + ")" + of_image;
+            if (DecodeIntoPlanes(rocjpeg_handle_, rocjpeg_stream_handle_, crop_params, {{crop_width, crop_height}, crop_chroma_size, crop_chroma_size},
+                                 crop_label, planes) ||
+                CheckLastTwoLines(planes[1], crop_chroma_size.pitch, crop_chroma_size.pitch, crop_chroma_size.rows, 1, odd_height,
+                                  &kEdgeColor.cb, &kBodyColor.cb, crop_label + ", channel 1") ||
+                CheckLastTwoLines(planes[2], crop_chroma_size.pitch, crop_chroma_size.pitch, crop_chroma_size.rows, 1, odd_height,
+                                  &kEdgeColor.cr, &kBodyColor.cr, crop_label + ", channel 2")) {
+                result = EXIT_FAILURE;
+            }
+        }
+
+        // Scenario 5: ROCJPEG_OUTPUT_NATIVE writes nothing past the documented sizes, which round the chroma height down:
+        // packed YUYV for 4:2:2, Y and interleaved UV for 4:2:0, and Y, U, and V for 4:4:0.
+        std::vector<PlaneSize> native_sizes;
+        if (image.subsampling == ROCJPEG_CSS_422) {
+            native_sizes = {{image.width * 2, image.height}};
+        } else if (image.subsampling == ROCJPEG_CSS_420) {
+            native_sizes = {luma_size, {image.width, image.height >> 1}};
+        } else {
+            native_sizes = {luma_size, {image.width, image.height / 2}, {image.width, image.height / 2}};
+        }
+        decode_params.output_format = ROCJPEG_OUTPUT_NATIVE;
+        if (DecodeIntoPlanes(rocjpeg_handle_, rocjpeg_stream_handle_, decode_params, native_sizes, "ROCJPEG_OUTPUT_NATIVE" + of_image, planes)) {
+            result = EXIT_FAILURE;
+        }
+
+        // Scenario 6: ROCJPEG_OUTPUT_RGB gives the last row or column the edge color and the one before it the body color.
+        // The expected colors assume that each chroma sample is repeated for the pixels it covers, as in the color
+        // conversion after decoding. A decoder that converts to RGB in hardware may interpolate the chroma instead, so
+        // the check is skipped there.
+        if ((decode_caps.hw_rgb_output_format_mask & (1u << ROCJPEG_OUTPUT_RGB)) != 0 &&
+            (decode_caps.hw_rgb_subsampling_mask & (1u << image.subsampling)) != 0) {
+            std::cout << "info: Skipping the ROCJPEG_OUTPUT_RGB check" << of_image << ", which this decoder converts in hardware" << std::endl;
+        } else {
+            decode_params.output_format = ROCJPEG_OUTPUT_RGB;
+            label = "ROCJPEG_OUTPUT_RGB" + of_image;
+            if (DecodeIntoPlanes(rocjpeg_handle_, rocjpeg_stream_handle_, decode_params, {{image.width * 3, image.height}}, label, planes) ||
+                CheckLastTwoLines(planes[0], image.width * 3, image.width, image.height, 3, odd_height, kEdgeColor.rgb, kBodyColor.rgb, label)) {
+                result = EXIT_FAILURE;
+            }
+        }
+
+        // Scenario 7: ROCJPEG_OUTPUT_YUV_PLANAR into chroma planes of different pitches, channel 2 with the smaller one,
+        // writes past neither of them. The conversion writes channel 2 with the pitch of channel 1, which overruns such a
+        // channel 2 from the second chroma row it writes, so these crops of the first rows have a single chroma row apart
+        // from the last one of an odd height. With an odd width, the crop is one row of 4:2:2 or two of 4:2:0, and channel
+        // 1 has room for the last chroma column but channel 2 has not, so the column is left out of both. With an odd
+        // 4:2:0 height, the crop is three rows, and the last chroma row covers only the third. The first chroma row has
+        // the body color.
+        if (decode_caps.hw_roi_decode == 0 && (!odd_height || image.subsampling == ROCJPEG_CSS_420)) {
+            RocJpegDecodeParams pitch_params = {};
+            pitch_params.output_format = ROCJPEG_OUTPUT_YUV_PLANAR;
+            pitch_params.crop_rectangle.right = static_cast<int16_t>(image.width);
+            pitch_params.crop_rectangle.bottom = odd_height ? 3 : (image.subsampling == ROCJPEG_CSS_420 ? 2 : 1);
+            const uint32_t crop_height = pitch_params.crop_rectangle.bottom;
+            const uint32_t chroma_rows = image.chroma_height == image.height ? crop_height : (crop_height + 1) / 2;
+            const PlaneSize v_size = {image.width >> 1, chroma_rows};
+            const PlaneSize u_size = {v_size.pitch + 1, chroma_rows};
+            const std::string pitch_label = "ROCJPEG_OUTPUT_YUV_PLANAR of the crop (0, 0, " + std::to_string(image.width) + ", " +
+                                            std::to_string(crop_height) + ")" + of_image + " with chroma pitches of " +
+                                            std::to_string(u_size.pitch) + " and " + std::to_string(v_size.pitch);
+            int pitch_result = DecodeIntoPlanes(rocjpeg_handle_, rocjpeg_stream_handle_, pitch_params, {{image.width, crop_height}, u_size, v_size},
+                                                pitch_label, planes);
+            for (uint32_t i = 0; pitch_result == EXIT_SUCCESS && i < v_size.pitch; i++) {
+                if (std::abs(planes[1][i] - kBodyColor.cb) > kSampleTolerance || std::abs(planes[2][i] - kBodyColor.cr) > kSampleTolerance) {
+                    std::cerr << pitch_label << ": Expected the body color in chroma column " << i << " of the first row but got "
+                              << static_cast<int>(planes[1][i]) << ", " << static_cast<int>(planes[2][i]) << std::endl;
+                    pitch_result = EXIT_FAILURE;
+                }
+            }
+            if (pitch_result == EXIT_SUCCESS && planes[1][v_size.pitch] != kOutputFill) {
+                std::cerr << pitch_label << ": Expected chroma column " << v_size.pitch << " of channel 1 to be left out but it was written" << std::endl;
+                pitch_result = EXIT_FAILURE;
+            }
+            if (pitch_result != EXIT_SUCCESS) {
+                result = EXIT_FAILURE;
+            }
+        }
+    }
+    return result;
+}
+
 int RocJpegApiNegativeTests::RunTests() {
     if (TestInvalidStreamCreate() || TestInvalidStreamParse () || TestInvalidStreamDestroy() || TestInvalidCreate() || TestInvalidDestroy() ||
         TestInvalidGetImageInfo() || TestInvalidDecode() || TestInvalidDecodeBatched() || TestInvalidGetErrorName() ||
-        TestInvalidGetDecoderCaps() || TestStreamParseFuzz() || TestCrossDeviceDecode()) {
+        TestInvalidGetDecoderCaps() || TestStreamParseFuzz() || TestOddDimensionChroma() || TestCrossDeviceDecode()) {
         std::cerr << "One or more negative tests failed." << std::endl;
         return EXIT_FAILURE;
     } else {

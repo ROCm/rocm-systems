@@ -479,6 +479,14 @@ RocJpegStatus RocJpegDecoder::FinalizeSubBatches(const VASurfaceID *surface_ids,
                     break;
                 case ROCJPEG_OUTPUT_YUV_PLANAR:
                     CHECK_ROCJPEG(GetChromaHeight(mem.surface_format, picture_height, chroma_height));
+                    if (mem.surface_format == VA_FOURCC_NV12 || mem.surface_format == VA_FOURCC_422V) {
+                        // GetChromaHeight rounds down, to the native chroma height. The planar chroma planes also get
+                        // the last chroma row of an odd height, which only the last picture row uses, so they have
+                        // (picture_height + 1) >> 1 rows: for the whole image, the rounded up height that
+                        // rocJpegGetImageInfo reports; for a crop, the crop height halved and rounded up. For NV12,
+                        // AccumulatePlanarYUVOutputFormat leaves that row out when the two chroma pitches differ.
+                        chroma_height = (picture_height + 1) >> 1;
+                    }
                     CHECK_ROCJPEG(AccumulatePlanarYUVOutputFormat(mem, picture_width, picture_height, chroma_height, &destinations[idx], &decode_params[idx], is_roi_valid));
                     break;
                 case ROCJPEG_OUTPUT_Y:
@@ -748,6 +756,8 @@ RocJpegStatus RocJpegDecoder::GetImageInfo(RocJpegStreamHandle jpeg_stream_handl
     widths[3] = 0;
     heights[3] = 0;
 
+    // Subsampled chroma dimensions are rounded up, as ITU-T T.81 (A.1.1) defines them: with an odd width or height,
+    // the last chroma column or row covers only the last image column or row.
     switch (jpeg_stream_params->chroma_subsampling) {
         case CSS_444:
             *subsampling = ROCJPEG_CSS_444;
@@ -757,17 +767,17 @@ RocJpegStatus RocJpegDecoder::GetImageInfo(RocJpegStreamHandle jpeg_stream_handl
         case CSS_440:
             *subsampling = ROCJPEG_CSS_440;
             widths[2] = widths[1] = widths[0];
-            heights[2] = heights[1] = heights[0] >> 1;
+            heights[2] = heights[1] = (heights[0] + 1) >> 1;
             break;
         case CSS_422:
             *subsampling = ROCJPEG_CSS_422;
-            widths[2] = widths[1] = widths[0] >> 1;
+            widths[2] = widths[1] = (widths[0] + 1) >> 1;
             heights[2] = heights[1] = heights[0];
             break;
         case CSS_420:
             *subsampling = ROCJPEG_CSS_420;
-            widths[2] = widths[1] = widths[0] >> 1;
-            heights[2] = heights[1] = heights[0] >> 1;
+            widths[2] = widths[1] = (widths[0] + 1) >> 1;
+            heights[2] = heights[1] = (heights[0] + 1) >> 1;
             break;
         case CSS_400:
             *subsampling = ROCJPEG_CSS_400;
@@ -776,7 +786,7 @@ RocJpegStatus RocJpegDecoder::GetImageInfo(RocJpegStreamHandle jpeg_stream_handl
             break;
         case CSS_411:
             *subsampling = ROCJPEG_CSS_411;
-            widths[2] = widths[1] = widths[0] >> 2;
+            widths[2] = widths[1] = (widths[0] + 3) >> 2;
             heights[2] = heights[1] = heights[0];
             break;
         default:
@@ -901,6 +911,10 @@ RocJpegStatus RocJpegDecoder::CopyChannel(HipInteropDeviceMem& hip_interop_dev_m
  *
  * This function takes the surface format, picture height, and a reference to the chroma height.
  * It calculates the chroma height based on the surface format and assigns the result to the chroma_height parameter.
+ *
+ * For the vertically subsampled formats (NV12 and 422V) the height is rounded down, picture_height >> 1, which is the
+ * chroma height documented for ROCJPEG_OUTPUT_NATIVE: with an odd height, the last chroma row is left out, so that
+ * native chroma buffers sized by that formula are not overrun. The planar YUV output rounds it up instead.
  *
  * @param surface_format The surface format of the image.
  * @param picture_height The height of the picture.
@@ -1146,6 +1160,17 @@ RocJpegStatus RocJpegDecoder::AccumulatePlanarYUVOutputFormat(HipInteropDeviceMe
             roi_offset = top * mem.pitch[0] + (left * 2);
         }
     }
+    // The chroma planes of the horizontally subsampled formats (YUY2 and NV12) are (picture_width + 1) >> 1 wide: with
+    // an odd width, the last chroma column is the one only the last picture column uses. That column is written only
+    // if the destination chroma pitch has room for it, so that a destination sized with the chroma width rounded down
+    // is not overrun. Both conversions below also write channel 2 with the pitch of channel 1, so when the two chroma
+    // pitches differ, the last chroma column, and for NV12 the last chroma row of an odd height, could be written past
+    // the end of channel 2. With different chroma pitches, the chroma width and the NV12 chroma height are rounded down.
+    const bool same_chroma_pitch = destination->pitch[2] == destination->pitch[1];
+    uint32_t chroma_width = (picture_width + 1) >> 1;
+    if (!same_chroma_pitch || chroma_width > destination->pitch[1]) {
+        chroma_width = picture_width >> 1;
+    }
     if (mem.surface_format == VA_FOURCC_YUY2) {
         PackedYUYVToPlanarYUVBatchParams bp;
         bp.dst_height                  = picture_height;
@@ -1158,13 +1183,14 @@ RocJpegStatus RocJpegDecoder::AccumulatePlanarYUVOutputFormat(HipInteropDeviceMe
         bp.src_image_stride_in_bytes   = mem.pitch[0];
         bp.dst_width_in_8px_blocks     = (picture_width + 7) / 8;
         bp.dst_width                   = picture_width;
+        bp.dst_chroma_width            = chroma_width;
         b_yuyv_yuvp_.Add(bp, (picture_width + 7) >> 3, picture_height);
     } else {
         // Copy Luma
         CHECK_ROCJPEG(CopyChannel(mem, picture_width, picture_height, 0, destination, decode_params, is_roi_valid));
         if (mem.surface_format == VA_FOURCC_NV12) {
-            uint32_t uv_width  = picture_width  >> 1;
-            uint32_t uv_height = picture_height >> 1;
+            uint32_t uv_width  = chroma_width;
+            uint32_t uv_height = same_chroma_pitch ? chroma_height : picture_height >> 1;
             InterleavedUVToPlanarUVBatchParams bp;
             bp.dst_width                 = uv_width;
             bp.dst_height                = uv_height;
