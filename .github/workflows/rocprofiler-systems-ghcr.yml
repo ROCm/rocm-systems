@@ -2,6 +2,21 @@ name: rocprofiler-systems GHCR Packages for CI Images
 
 on:
   workflow_dispatch:
+    inputs:
+      target:
+        description: 'Distro and version to build'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - ubuntu-22.04
+          - ubuntu-24.04
+          - ubuntu-26.04
+          - debian-12
+          - rhel-8.10
+          - rhel-9
+          - rhel-10
   schedule:
     - cron: 0 5 * * *
   push:
@@ -53,8 +68,23 @@ jobs:
       - name: Output data for containers matrix
         working-directory: projects/rocprofiler-systems/docker
         id: generate_matrix_ci_base
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TARGET: ${{ inputs.target }}
         run: |
+          set -e
           DISTROS=$(cat containers-ci.yml | yq '.distros' -I=0 -o=json)
+
+          if [ "$EVENT_NAME" = 'workflow_dispatch' ] && [ -n "$INPUT_TARGET" ] && [ "$INPUT_TARGET" != 'all' ]; then
+            DISTROS=$(echo "$DISTROS" | jq -c --arg target "$INPUT_TARGET" \
+              '[.[] | select((.distro + "-" + .version) == $target)]')
+          fi
+
+          if [ "$(echo "$DISTROS" | jq 'length')" -eq 0 ]; then
+            echo "::error::No containers-ci.yml entries match target '${INPUT_TARGET}'"
+            exit 1
+          fi
+
           echo "matrix_data=$DISTROS" >> $GITHUB_OUTPUT
 
   rocprofiler-systems-ci-gfx:
