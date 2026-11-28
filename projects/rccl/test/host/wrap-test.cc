@@ -11037,14 +11037,17 @@ TEST(WrapMicrotestIsolated, SelectBroadcast_Gfx950AndGfx942TablesHandIpcLLToTwoP
   });
 }
 
-// gfx950: two-phase to 8 MiB, the ring above; gfx942 to 4 MiB. The 256 KiB hand-off from LL is pinned above.
-TEST(WrapMicrotestIsolated, SelectBroadcast_Gfx950TableRunsTwoPhaseInItsWindow) {
-  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_Gfx950TableRunsTwoPhaseInItsWindow", []() {
+// gfx950: the IPC window to 64 MiB, the ring above; gfx942 to 4 MiB. The 256 KiB hand-off from LL is pinned above.
+TEST(WrapMicrotestIsolated, SelectBroadcast_Gfx950TableRunsIpcInItsWindow) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_Gfx950TableRunsIpcInItsWindow", []() {
     g_loadParam = Bc2PhaseParams(-1, -1);
     Bc2PhaseHooks hooks;
     ncclComm* comm = MakeIpcBroadcastComm("gfx950");
-    const std::pair<size_t, int> cases[] = {
-      {kMiB + 1152, kAlgoBcIpc}, {8 * kMiB, kAlgoBcIpc}, {8 * kMiB + kDdaBcIpcGranuleBytes, NCCL_ALGO_RING}};
+    const std::pair<size_t, int> cases[] = {{kMiB + 1152, kAlgoBcIpc},
+                                            {8 * kMiB, kAlgoBcIpc},
+                                            {8 * kMiB + kDdaBcIpcGranuleBytes, kAlgoBcIpc},
+                                            {64 * kMiB, kAlgoBcIpc},
+                                            {64 * kMiB + kDdaBcIpcGranuleBytes, NCCL_ALGO_RING}};
     for (const auto& [bytes, algo] : cases) {
       EXPECT_EQ(algo, BroadcastAlgo(comm, bytes)) << bytes;
     }
@@ -11052,7 +11055,7 @@ TEST(WrapMicrotestIsolated, SelectBroadcast_Gfx950TableRunsTwoPhaseInItsWindow) 
     EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, kMiB, ncclInt8, 0, false, &d));
     EXPECT_EQ(NCCL_PROTO_SIMPLE, d.protocol);
     EXPECT_EQ(153u, d.nMaxChannels);  // ncclBroadcastDdaIpcBlocks
-    EXPECT_EQ(8 * kMiB, rcclDdaEntryThreshold(comm, ncclFuncBroadcast));
+    EXPECT_EQ(64 * kMiB, rcclDdaEntryThreshold(comm, ncclFuncBroadcast));
 
     // The window alone turns Broadcast DDA on with RCCL_DDA_BC unset.
     rcclArchThresholds table = *comm->archThresholds;
@@ -11114,6 +11117,35 @@ TEST(WrapMicrotestIsolated, SelectBroadcast_TwoPhaseWindowEnvOverrides) {
     EXPECT_EQ(kAlgoBcIpc, BroadcastAlgo(gfx942, 8 * kMiB));
     gfx942->ddaIpcMemHandler = nullptr;
     DeleteCommWithArch(gfx942);
+  });
+}
+
+// The pipelined kernel starts above 8 MiB on gfx950, off elsewhere; the env replaces the table, and 0 or below is off.
+TEST(WrapMicrotestIsolated, BcIpcPipeMinBytes_TableAndEnv) {
+  RUN_ISOLATED_TEST("Wrap_BcIpcPipeMinBytes_TableAndEnv", []() {
+    const auto params = [](int64_t pipeMin) {
+      return [=, base = Bc2PhaseParams(-1, -1)](const char* env, int64_t def) -> int64_t {
+        return std::strcmp(env, "RCCL_DDA_BC_IPC_PIPE_MIN_BYTES") == 0 ? pipeMin : base(env, def);
+      };
+    };
+    g_loadParam = params(-1);
+    EXPECT_EQ(0u, rcclDdaBcIpcPipeMinBytes(nullptr));
+    const std::pair<const char*, size_t> tables[] = {
+      {"gfx950", 8 * kMiB + kDdaBcIpcGranuleBytes}, {"gfx942", 0}, {"gfx1250", 0}};
+    for (const auto& [arch, pipeMin] : tables) {
+      SCOPED_TRACE(arch);
+      ncclComm* comm = MakeIpcBroadcastComm(arch);
+      g_loadParam = params(-1);
+      EXPECT_EQ(pipeMin, rcclDdaBcIpcPipeMinBytes(comm));
+      g_loadParam = params(2 * kMiB);
+      EXPECT_EQ(2 * kMiB, rcclDdaBcIpcPipeMinBytes(comm));
+      g_loadParam = params(0);
+      EXPECT_EQ(0u, rcclDdaBcIpcPipeMinBytes(comm));
+      g_loadParam = params(-5);
+      EXPECT_EQ(0u, rcclDdaBcIpcPipeMinBytes(comm));
+      comm->ddaIpcMemHandler = nullptr;
+      DeleteCommWithArch(comm);
+    }
   });
 }
 

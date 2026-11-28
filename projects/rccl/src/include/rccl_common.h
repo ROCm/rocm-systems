@@ -388,6 +388,8 @@ size_t rcclDdaLL128Threshold(const ncclComm* comm, ncclFunc_t func);
 size_t rcclDdaVmmThreshold(const ncclComm* comm, ncclFunc_t func);
 // The two-phase IPC Broadcast window [*minBytes, *maxBytes] in total bytes; *maxBytes == 0 means off.
 void rcclDdaBcIpcWindow(const ncclComm* comm, size_t* minBytes, size_t* maxBytes);
+// Smallest Broadcast in that window to take the pipelined kernel, in total bytes; 0 means off.
+size_t rcclDdaBcIpcPipeMinBytes(const ncclComm* comm);
 // Ceiling for the DDA LL128 two-shot AllReduce: RCCL_DDA_LL128_TWOSHOT_THRESHOLD
 // when set, else the AllReduce LL128 tier cap where the arch table has that tier,
 // else the env var's default.

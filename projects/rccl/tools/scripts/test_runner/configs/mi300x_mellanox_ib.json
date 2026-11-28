@@ -3845,6 +3845,11 @@
           "test_filter": "DdaIpcMPI_IndexData.ReduceScatter*"
         },
         {
+          "name": "DDA_IpcBroadcastIndexData_8Ranks",
+          "description": "DDA IPC Broadcast with the per-arch table defaults: LL, the IPC window and its pipelined-kernel edges, checked exactly on every rank",
+          "test_filter": "DdaIpcMPI_IndexData.Broadcast*"
+        },
+        {
           "name": "DDA_IpcCommLifecycle_8Ranks",
           "description": "DDA IPC must come up, with no HIP error pending, on communicators created after another one is destroyed; needs cuMem, which is cached per process",
           "test_filter": "DdaIpcMPI_CommLifecycle.*",
@@ -3861,7 +3866,21 @@
             "RCCL_DDA_LL_THRESHOLD": "262144",
             "RCCL_DDA_LL128_THRESHOLD": "4194304",
             "RCCL_DDA_BC_IPC_MIN_BYTES": "262272",
-            "RCCL_DDA_BC_IPC_MAX_BYTES": "8388608"
+            "RCCL_DDA_BC_IPC_MAX_BYTES": "8388608",
+            "RCCL_DDA_BC_IPC_PIPE_MIN_BYTES": "0"
+          }
+        },
+        {
+          "name": "DDA_BroadcastIpcPipe_8Ranks",
+          "description": "DDA IPC pipelined Broadcast across its window, with roots, in-place, unaligned and back-to-back calls mixed with two-phase and LL; the caps are cached per process",
+          "test_filter": "DdaMPI_BroadcastIpcPipe.*",
+          "env_variables": {
+            "RCCL_DDA_BC": "1",
+            "RCCL_DDA_LL_THRESHOLD": "262144",
+            "RCCL_DDA_LL128_THRESHOLD": "4194304",
+            "RCCL_DDA_BC_IPC_MIN_BYTES": "262272",
+            "RCCL_DDA_BC_IPC_MAX_BYTES": "67108864",
+            "RCCL_DDA_BC_IPC_PIPE_MIN_BYTES": "2097152"
           }
         },
         {

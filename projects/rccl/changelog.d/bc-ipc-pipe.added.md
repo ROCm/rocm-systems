@@ -1,0 +1,1 @@
+* Added `RCCL_DDA_BC_IPC_PIPE_MIN_BYTES`: inside the two-phase DDA IPC `ncclBroadcast` window, the size from which a pipelined kernel runs, overlapping the root's scatter of one chunk with the gather of the previous one. `-1` (default) follows the per-arch table: above 8 MiB on gfx950, off on gfx942 and gfx1250. `0` turns it off.

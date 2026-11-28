@@ -122,6 +122,8 @@ RCCL_PARAM(DdaBc, "DDA_BC", kDdaThresholdUnset);
 // Two-phase IPC Broadcast window edges: unset follows the table (ddaBcIpc{Min,Max}Bytes), else the value; MAX 0 off.
 RCCL_PARAM(DdaBcIpcMinBytes, "DDA_BC_IPC_MIN_BYTES", kDdaThresholdUnset);
 RCCL_PARAM(DdaBcIpcMaxBytes, "DDA_BC_IPC_MAX_BYTES", kDdaThresholdUnset);
+// Pipelined kernel inside that window: unset follows the table (ddaBcIpcPipeMinBytes), else the value; 0 off.
+RCCL_PARAM(DdaBcIpcPipeMinBytes, "DDA_BC_IPC_PIPE_MIN_BYTES", kDdaThresholdUnset);
 // When set, bypass the per-arch tuning table entirely and use base-commit
 // env-var defaults for all thresholds (DDA, CE, symMaxR2).  Useful for
 // isolating arch-table effects without rebuilding.
@@ -1463,6 +1465,14 @@ inline void rcclDdaBcIpcWindowTab(const rcclArchThresholds* table, size_t* minBy
 }
 void rcclDdaBcIpcWindow(const ncclComm* comm, size_t* minBytes, size_t* maxBytes) {
   rcclDdaBcIpcWindowTab(extAlgoArchTable(comm), minBytes, maxBytes);
+}
+
+// RCCL_DDA_BC_IPC_PIPE_MIN_BYTES when set (a negative value reads as 0, off), else the table, else 0.
+size_t rcclDdaBcIpcPipeMinBytes(const ncclComm* comm) {
+  const rcclArchThresholds* table = extAlgoArchTable(comm);
+  size_t minBytes = table != nullptr ? table->ddaBcIpcPipeMinBytes : 0;
+  ddaThresholdFromEnv(rcclParamDdaBcIpcPipeMinBytes(), &minBytes);
+  return minBytes;
 }
 
 // AllReduce DDA VMM ahead of the LL tier (see rcclArchThresholds::ddaArVmmFirst*).

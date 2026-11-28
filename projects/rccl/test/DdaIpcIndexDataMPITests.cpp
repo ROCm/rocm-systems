@@ -10,8 +10,8 @@
  *
  * DdaIpcMPI_IndexData: every rank sends rank- and index-dependent data, so each element and each slice of the result
  * is distinct. A per-rank constant fill sums to the same value everywhere and hides a kernel that reads or writes the
- * wrong offset. On gfx950 and gfx942 it also checks DDA Broadcast over the IPC scratch: the LL one-shot, and the
- * two-phase kernel where its window starts.
+ * wrong offset. On gfx950 and gfx942 it also checks DDA Broadcast over the IPC scratch: the LL one-shot, the
+ * two-phase kernel where its window starts, and the window top and pipelined-kernel edges on the table defaults.
  *
  * DdaIpcMPI_CommLifecycle: DDA IPC must come up on a communicator created after another one is destroyed. It needs
  * cuMem, and NCCL_CUMEM_ENABLE is cached at the first read, so run this suite in its own process.
@@ -392,6 +392,46 @@ TEST_F(DdaIpcMPI_IndexData, BroadcastLL) {
        {size_t{4}, size_t{1024}, size_t{2048}, size_t{4096}, size_t{4100}, llOnlyCount, capCount, capCount + 4}) {
     for (int root : {0, 5}) {
       runBroadcast(count, root);
+      if (HasFailure() || IsSkipped()) {
+        return;
+      }
+    }
+  }
+}
+
+// The table's IPC window and pipelined-kernel edges with no env; the grid each call reports names the kernel.
+TEST_F(DdaIpcMPI_IndexData, BroadcastIpcWindowEdges) {
+  skipUnlessBcDdaIpc();
+  if (IsSkipped()) {
+    return;
+  }
+  const ncclComm* comm = getActiveCommunicator();
+  size_t lo = 0;
+  size_t hi = 0;
+  rcclDdaBcIpcWindow(comm, &lo, &hi);
+  const size_t pipeMin = rcclDdaBcIpcPipeMinBytes(comm);
+  std::vector<size_t> sizes;
+  for (size_t edge : {hi, pipeMin}) {
+    if (edge >= kDdaBcIpcGranuleBytes && edge <= comm->ddaScratchBytes) {
+      sizes.insert(sizes.end(), {edge - kDdaBcIpcGranuleBytes, edge, edge + kDdaBcIpcGranuleBytes});
+    }
+  }
+  for (size_t bytes : sizes) {
+    int algo = -1;
+    int protocol = -1;
+    int channels = -1;
+    ASSERT_MPI_EQ(ncclSuccess, rcclGetCollImplInfo(getActiveCommunicator(), ncclFuncBroadcast, bytes / sizeof(float),
+                                                   ncclFloat32, ncclSum, nullptr, nullptr, 0, &algo, &protocol,
+                                                   &channels));
+    const bool pipe = pipeMin != 0 && bytes >= pipeMin;
+    const bool pipeGrid = channels == static_cast<int>(kDdaBcIpcPipeBlocks);
+    const bool gridOk = algo != static_cast<int>(RCCL_DDA_IPC) || pipe == pipeGrid;
+    expectAllRanksOk(gridOk, "Broadcast bytes=" + std::to_string(bytes) + " IPC grid " + std::to_string(channels));
+    if (HasFailure()) {
+      return;
+    }
+    for (int root : {0, 5}) {
+      runBroadcast(bytes / sizeof(float), root);
       if (HasFailure() || IsSkipped()) {
         return;
       }

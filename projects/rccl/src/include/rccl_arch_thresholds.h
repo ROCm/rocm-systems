@@ -231,6 +231,8 @@ struct rcclArchThresholds {
   // so the two overlap and LL takes the sizes it declines. 0 max = off; a table that leaves these out gets 0.
   size_t ddaBcIpcMinBytes;
   size_t ddaBcIpcMaxBytes;
+  // Inside that window, the pipelined kernel takes this size and above; 0 = off.
+  size_t ddaBcIpcPipeMinBytes;
 };
 
 // Compute-partition mode a gfx1250 comm is tuned for (RCCL_TUNING_PARTITION_MODE). It picks

@@ -158,6 +158,21 @@ public:
     }
   }
 
+  // Split-phase syncOnSameBlockIdx on mailbox `slot` (< nBlocks); each signal needs a wait before the kernel ends.
+  __device__ __forceinline__ void signalOnSlot(int slot, bool& aborted) const {
+    __syncthreads();
+    if (threadIdx.x < NRANKS && !aborted) {
+      aborted = __any(!allMailboxes_[threadIdx.x].setFlagWithMemFence(selfRank_, slot, params_));
+    }
+  }
+
+  __device__ __forceinline__ void waitOnSlot(int slot, bool& aborted) const {
+    if (threadIdx.x < NRANKS && !aborted) {
+      aborted = __any(!allMailboxes_[selfRank_].waitFlagWithMemFence(threadIdx.x, slot, params_));
+    }
+    __syncthreads();
+  }
+
 private:
   int nBlocks_{-1};
   int selfRank_{-1};

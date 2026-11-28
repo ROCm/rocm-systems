@@ -1733,7 +1733,7 @@ threshold table introduced for gfx1250.
           the per-architecture table. On gfx1250 the table sets the DDA LL ceiling
           to 16 KiB and the DDA LL128 ceiling to 128 KiB on both SPX and DPX, and on
           gfx950 and gfx942 the DDA LL ceiling to 256 KiB and the two-phase IPC window
-          (``RCCL_DDA_BC_IPC_MIN_BYTES``) to 256 KiB-8 MiB on gfx950 and 256 KiB-4 MiB
+          (``RCCL_DDA_BC_IPC_MIN_BYTES``) to 256 KiB-64 MiB on gfx950 and 256 KiB-4 MiB
           on gfx942, so DDA Broadcast is on by default there; the other tables have no
           Broadcast DDA tier, so Broadcast keeps its previous path. The DDA LL and
           LL128 tier ceilings always apply, and ``RCCL_DDA_LL_THRESHOLD`` and
@@ -1763,13 +1763,27 @@ threshold table introduced for gfx1250.
         | ``N`` (bytes): Use ``N`` as the lower edge of the window, overriding the table.
 
     * - | ``RCCL_DDA_BC_IPC_MAX_BYTES``
-        | Largest ``ncclBroadcast``, in total bytes, that takes the two-phase DDA IPC
-          kernel (see ``RCCL_DDA_BC_IPC_MIN_BYTES``). When ``-1`` (default), resolved
-          from ``ddaBcIpcMaxBytes`` in the arch table: 8 MiB on gfx950, 4 MiB on gfx942
+        | Largest ``ncclBroadcast``, in total bytes, that takes the DDA IPC kernels:
+          two-phase, or pipelined from ``RCCL_DDA_BC_IPC_PIPE_MIN_BYTES`` (see
+          ``RCCL_DDA_BC_IPC_MIN_BYTES``). When ``-1`` (default), resolved
+          from ``ddaBcIpcMaxBytes`` in the arch table: 64 MiB on gfx950, 4 MiB on gfx942
           and off on gfx1250. ``RCCL_DDA_THRESHOLD=0`` also turns it off.
       - | ``-1``: Resolved from the per-arch table at runtime (default).
-        | ``0``: Disable the two-phase DDA IPC Broadcast.
+        | ``0``: Disable the DDA IPC Broadcast window.
         | ``N`` (bytes): Use ``N`` as the upper edge of the window, overriding the table.
+
+    * - | ``RCCL_DDA_BC_IPC_PIPE_MIN_BYTES``
+        | Smallest ``ncclBroadcast``, in total bytes, inside the two-phase DDA IPC window
+          (see ``RCCL_DDA_BC_IPC_MIN_BYTES``) that takes its pipelined kernel: the
+          message moves in chunks, so the root's scatter of one chunk overlaps the
+          ranks' gather of the previous one. It runs on 56 blocks. When ``-1``
+          (default), resolved from ``ddaBcIpcPipeMinBytes`` in the arch table: just
+          above 8 MiB (8 MiB + 128 bytes) on gfx950, off on gfx942 and gfx1250.
+      - | ``-1``: Resolved from the per-arch table at runtime (default).
+        | ``0``: Disable the pipelined kernel; the window runs the two-phase kernel only. On
+          gfx950 also set ``RCCL_DDA_BC_IPC_MAX_BYTES=8388608`` to keep the ring above 8 MiB.
+        | ``N`` (bytes): Use the pipelined kernel from ``N`` up, overriding the table.
+
     * - | ``RCCL_DDA_LL128_A2A_THREADS``
         | Threads per block for the gfx1250 DDA fabric LL128 ``ncclAlltoAll`` kernel.
           When ``0`` (default), resolved from ``ddaA2aLL128Threads`` in the arch

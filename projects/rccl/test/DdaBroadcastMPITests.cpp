@@ -7,7 +7,8 @@
 /**
  * @file DdaBroadcastMPITests.cpp
  * @brief MPI end-to-end data tests for the DDA fabric Broadcast one-shot kernels (LL, LL128). The LL cases also run
- *        over the IPC scratch of a single-node 8-rank comm on gfx942 and gfx950, as does the two-phase IPC kernel.
+ *        over the IPC scratch of a single-node 8-rank comm on gfx942 and gfx950, as do the two-phase and pipelined
+ *        IPC kernels.
  *
  * Every call carries a payload derived from (root, call sequence, element), so a
  * stale bank or a missed handshake cannot pass. Every rank checks its whole
@@ -21,8 +22,10 @@
  *
  * Run (example):
  *   RCCL_DDA_BC=1 RCCL_DDA_LL_THRESHOLD=262144 RCCL_DDA_LL128_THRESHOLD=4194304 \
- *   RCCL_DDA_BC_IPC_MIN_BYTES=262272 RCCL_DDA_BC_IPC_MAX_BYTES=8388608 \
- *     mpirun -np 8 ./rccl-UnitTestsMPI --gtest_filter='DdaMPI_Broadcast*'
+ *   RCCL_DDA_BC_IPC_MIN_BYTES=262272 RCCL_DDA_BC_IPC_MAX_BYTES=8388608 RCCL_DDA_BC_IPC_PIPE_MIN_BYTES=0 \
+ *     mpirun -np 8 ./rccl-UnitTestsMPI --gtest_filter='DdaMPI_Broadcast*:-DdaMPI_BroadcastIpcPipe.*'
+ * The pipelined suite runs in its own process with RCCL_DDA_BC_IPC_MAX_BYTES=67108864 and
+ * RCCL_DDA_BC_IPC_PIPE_MIN_BYTES=2097152 (standard_env_dda_bc_pipe).
  */
 
 #ifdef MPI_TESTS_ENABLED
@@ -59,6 +62,9 @@ constexpr size_t kLL128Cap = 4 * 1024 * 1024;
 // Two-phase IPC window: it runs ahead of LL, so it starts one granule above the LL cap to keep the LL cases on LL.
 constexpr size_t kBcIpcMin = kLLCap + kDdaBcIpcGranuleBytes;
 constexpr size_t kBcIpcMax = 8 * 1024 * 1024;
+// Pipelined suite: the window runs to kBcPipeMax and the pipelined kernel takes kBcPipeMin and up.
+constexpr size_t kBcPipeMin = 2 * 1024 * 1024;
+constexpr size_t kBcPipeMax = 64 * 1024 * 1024;
 // Guard bytes on each side of a payload; a multiple of 16 so the offset alone sets alignment.
 constexpr size_t kGuard = 64;
 constexpr uint8_t kGuardByte = 0xA5;
@@ -147,7 +153,16 @@ protected:
             {"RCCL_DDA_LL_THRESHOLD", std::to_string(kLLCap)},
             {"RCCL_DDA_LL128_THRESHOLD", std::to_string(kLL128Cap)},
             {"RCCL_DDA_BC_IPC_MIN_BYTES", std::to_string(kBcIpcMin)},
-            {"RCCL_DDA_BC_IPC_MAX_BYTES", std::to_string(kBcIpcMax)}};
+            {"RCCL_DDA_BC_IPC_MAX_BYTES", std::to_string(bcIpcMax())},
+            {"RCCL_DDA_BC_IPC_PIPE_MIN_BYTES", std::to_string(bcPipeMin())}};
+  }
+
+  // Top of the two-phase window and start of the pipelined kernel the sizes assume; 0 keeps the window two-phase only.
+  virtual size_t bcIpcMax() const {
+    return kBcIpcMax;
+  }
+  virtual size_t bcPipeMin() const {
+    return 0;
   }
 
   // Why the cached settings are not the ones the sizes assume, or empty.
@@ -161,8 +176,11 @@ protected:
     size_t ipcMin = 0;
     size_t ipcMax = 0;
     rcclDdaBcIpcWindow(comm, &ipcMin, &ipcMax);
-    if (overIpc_ && (ipcMin != kBcIpcMin || ipcMax != kBcIpcMax)) {
+    if (overIpc_ && (ipcMin != kBcIpcMin || ipcMax != bcIpcMax())) {
       return "the two-phase window is not RCCL_DDA_BC_IPC_MIN_BYTES / RCCL_DDA_BC_IPC_MAX_BYTES";
+    }
+    if (overIpc_ && rcclDdaBcIpcPipeMinBytes(comm) != bcPipeMin()) {
+      return "the pipelined kernel start is not RCCL_DDA_BC_IPC_PIPE_MIN_BYTES";
     }
     return {};
   }
@@ -224,6 +242,12 @@ protected:
     while (!envGuards_.empty()) envGuards_.pop_back();
   }
 
+  // Grid the selection must report for an IPC call of `bytes`, or -1 for any; the pipelined suite pins its kernel's.
+  virtual int expectedIpcChannels(size_t bytes) const {
+    (void)bytes;
+    return -1;
+  }
+
   void expectAlgo(size_t bytes, const void* sendBuf, void* recvBuf, int expectedAlgo) {
     int algo = -1, protocol = -1, maxChannels = -1;
     EXPECT_EQ(ncclSuccess,
@@ -236,6 +260,10 @@ protected:
     EXPECT_EQ(algo, expectedAlgo) << "Rank " << rank_ << ": bytes=" << bytes << " selected "
                                   << (algoName ? algoName : "?") << ", expected "
                                   << (expectedName ? expectedName : "?");
+    const int channels = expectedAlgo == RCCL_DDA_IPC ? expectedIpcChannels(bytes) : -1;
+    if (channels >= 0) {
+      EXPECT_EQ(maxChannels, channels) << "Rank " << rank_ << ": bytes=" << bytes << " IPC grid";
+    }
   }
 
   // One allocation (in place) or two; payload at kGuard + offset.
@@ -487,41 +515,62 @@ TEST_F(DdaMPI_BroadcastLL, BackToBackNoSync) {
 // Whole granules (1/8 slices of whole 16 B units) inside the window; 1 MiB + 1152 B leaves a partial grid.
 constexpr size_t kBcIpcOdd = 1024 * 1024 + 1152;
 constexpr size_t kBcIpcMid = 2 * 1024 * 1024;
+// The two-phase kernel's largest grid (the IPC all-gather grid at its cap).
+constexpr int kBcIpcMaxGrid = 24;
 
 class DdaMPI_BroadcastIpc2Phase : public DdaMPI_BroadcastLL {
  protected:
+  // The suite's sizes: smallest, odd (partial last unit of work), middle and largest.
+  struct Sizes {
+    size_t min, odd, mid, max;
+  };
+  virtual Sizes sizes() const {
+    return {kBcIpcMin, kBcIpcOdd, kBcIpcMid, kBcIpcMax};
+  }
   bool requiresIpc() const override {
     return true;
   }
   bool needsLLEpochCells() const override {
     return false;
   }
+
+  void allRootsCase(bool inPlace) {
+    const Sizes z = sizes();
+    allRoots({z.min, z.odd, z.mid, z.max}, inPlace, RCCL_DDA_IPC);
+  }
+  void unalignedCase() {
+    unaligned({sizes().min, sizes().odd}, kLLOffsets, std::size(kLLOffsets), RCCL_DDA_IPC);
+  }
+  void backToBackCase() {
+    const Sizes z = sizes();
+    const size_t steps[7] = {z.min, z.odd, z.max, z.mid, z.odd, z.min, z.max};
+    backToBackRounds(steps, RCCL_DDA_IPC);
+  }
 };
 
 // Every root, separate buffers, so the root's local copy is checked too.
 TEST_F(DdaMPI_BroadcastIpc2Phase, AllRootsOutOfPlace) {
-  allRoots({kBcIpcMin, kBcIpcOdd, kBcIpcMid, kBcIpcMax}, false, RCCL_DDA_IPC);
+  allRootsCase(false);
 }
 
 // Every root, sendbuff == recvbuff.
 TEST_F(DdaMPI_BroadcastIpc2Phase, AllRootsInPlace) {
-  allRoots({kBcIpcMin, kBcIpcOdd, kBcIpcMid, kBcIpcMax}, true, RCCL_DDA_IPC);
+  allRootsCase(true);
 }
 
 // Back-to-back launches on one comm, root rotating: each reuses the scratch the previous one read.
 TEST_F(DdaMPI_BroadcastIpc2Phase, RepeatedLaunches) {
-  repeated(kBcIpcOdd, 9, RCCL_DDA_IPC);
+  repeated(sizes().odd, 9, RCCL_DDA_IPC);
 }
 
 // User buffers off 16-byte alignment take the unaligned variant on that rank only.
 TEST_F(DdaMPI_BroadcastIpc2Phase, UnalignedBuffers) {
-  unaligned({kBcIpcMin, kBcIpcOdd}, kLLOffsets, std::size(kLLOffsets), RCCL_DDA_IPC);
+  unalignedCase();
 }
 
 // Seven two-phase launches with no sync between them: a rank runs ahead into scratch its peers may still read.
 TEST_F(DdaMPI_BroadcastIpc2Phase, BackToBackNoSync) {
-  const size_t sizes[7] = {kBcIpcMin, kBcIpcOdd, kBcIpcMax, kBcIpcMid, kBcIpcOdd, kBcIpcMin, kBcIpcMax};
-  backToBackRounds(sizes, RCCL_DDA_IPC);
+  backToBackCase();
 }
 
 // Two-phase and LL interleaved with no sync between launches, with the hand-off from the LL cap to the window.
@@ -532,6 +581,85 @@ TEST_F(DdaMPI_BroadcastIpc2Phase, BackToBackNoSyncWithLL) {
                                            {64 * 1024, RCCL_DDA_FABRIC_LL}, {kBcIpcMax, RCCL_DDA_IPC},
                                            {kLLCap, RCCL_DDA_FABRIC_LL},    {kBcIpcMin, RCCL_DDA_IPC},
                                            {16, RCCL_DDA_FABRIC_LL}};
+  backToBackRounds(steps);
+}
+
+// ---- DDA IPC pipelined Broadcast, kBcPipeMin-kBcPipeMax; two-phase keeps kBcIpcMin up to it ----
+
+// 2 MiB is one chunk with a partial and an empty sub-slice; 5 MiB + 1152 B ends in a partial chunk; 64 MiB is 8 chunks.
+constexpr size_t kBcPipeOdd = 5 * 1024 * 1024 + 1152;
+constexpr size_t kBcPipeMid = 16 * 1024 * 1024;
+// A last chunk of one 128 B granule (two chunks of 7 x 384 KiB first), and the gfx950 table's first pipelined size.
+constexpr size_t kBcPipeTinyTail = 2 * 7 * 384 * 1024 + 128;
+constexpr size_t kBcPipeGfx950Min = 8 * 1024 * 1024 + 128;
+
+// Every IPC call also checks the grid it reports, so each data case names the kernel it validated.
+class DdaMPI_BroadcastIpcPipe : public DdaMPI_BroadcastIpc2Phase {
+ protected:
+  Sizes sizes() const override {
+    return {kBcPipeMin, kBcPipeOdd, kBcPipeMid, kBcPipeMax};
+  }
+  size_t bcIpcMax() const override {
+    return kBcPipeMax;
+  }
+  size_t bcPipeMin() const override {
+    return kBcPipeMin;
+  }
+  int expectedIpcChannels(size_t bytes) const override {
+    return bytes >= kBcPipeMin ? static_cast<int>(kDdaBcIpcPipeBlocks) : -1;
+  }
+};
+
+// The pipelined grid from kBcPipeMin up, the two-phase all-gather grid below it.
+TEST_F(DdaMPI_BroadcastIpcPipe, GridFollowsPipeMin) {
+  const std::pair<size_t, int> cases[] = {{kBcPipeMin - kDdaBcIpcGranuleBytes, kBcIpcMaxGrid},
+                                          {kBcPipeMin, static_cast<int>(kDdaBcIpcPipeBlocks)},
+                                          {kBcPipeMax, static_cast<int>(kDdaBcIpcPipeBlocks)}};
+  for (const auto& [bytes, grid] : cases) {
+    int algo = -1, protocol = -1, channels = -1;
+    EXPECT_EQ(ncclSuccess, rcclGetCollImplInfo(getActiveCommunicator(), ncclFuncBroadcast, bytes, ncclInt8, ncclSum,
+                                               nullptr, nullptr, /*graphCapturing=*/0, &algo, &protocol, &channels));
+    EXPECT_EQ(algo, RCCL_DDA_IPC) << bytes;
+    EXPECT_EQ(channels, grid) << bytes;
+  }
+}
+
+// Every root, separate buffers, plus the smallest tail chunk and the gfx950 table's first pipelined size.
+TEST_F(DdaMPI_BroadcastIpcPipe, AllRootsOutOfPlace) {
+  allRootsCase(false);
+  if (HasFatalFailure() || IsSkipped()) {
+    return;
+  }
+  allRoots({kBcPipeTinyTail, kBcPipeGfx950Min}, false, RCCL_DDA_IPC);
+}
+
+TEST_F(DdaMPI_BroadcastIpcPipe, AllRootsInPlace) {
+  allRootsCase(true);
+}
+
+TEST_F(DdaMPI_BroadcastIpcPipe, RepeatedLaunches) {
+  repeated(sizes().odd, 9, RCCL_DDA_IPC);
+}
+
+TEST_F(DdaMPI_BroadcastIpcPipe, UnalignedBuffers) {
+  unalignedCase();
+}
+
+TEST_F(DdaMPI_BroadcastIpcPipe, BackToBackNoSync) {
+  backToBackCase();
+}
+
+// Pipelined, two-phase and LL interleaved with no sync: the IPC kernels share the scratch and the barrier mailboxes.
+TEST_F(DdaMPI_BroadcastIpcPipe, BackToBackNoSyncWithTwoPhaseAndLL) {
+  DDA_FABRIC_SKIP_OR_FAIL(mpiCoordinatedSkipReason(getActiveCommunicator()->ddaLLEpochDev == nullptr,
+                                                   "the LL epoch cells did not initialize, so LL cannot run"));
+  const std::pair<size_t, int> steps[7] = {{16, RCCL_DDA_FABRIC_LL},
+                                           {kBcPipeOdd, RCCL_DDA_IPC},
+                                           {kBcIpcOdd, RCCL_DDA_IPC},
+                                           {kBcPipeMin, RCCL_DDA_IPC},
+                                           {kBcPipeMin - kDdaBcIpcGranuleBytes, RCCL_DDA_IPC},
+                                           {kLLCap, RCCL_DDA_FABRIC_LL},
+                                           {kBcPipeMax, RCCL_DDA_IPC}};
   backToBackRounds(steps);
 }
 

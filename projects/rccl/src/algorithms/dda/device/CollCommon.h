@@ -139,21 +139,31 @@ static inline __device__ uint4 vecElementAdd(const uint4& a, const uint4& b) {
   return res;
 }
 
-// One 16-byte unit. A side that may sit off 16-byte alignment goes through __builtin_memcpy, as
+// One 16-byte load or store. A side that may sit off 16-byte alignment goes through __builtin_memcpy, as
 // ddaLL128User{Load,Store}16B<false> do; an aligned side keeps the 16-byte access.
-template <bool kSrcAligned, bool kDstAligned>
-static inline __device__ void ddaCopy16B(const void* src, void* dst) {
+template <bool kAligned>
+static inline __device__ uint4 ddaLoad16B(const void* src) {
   uint4 v;
-  if constexpr (kSrcAligned) {
+  if constexpr (kAligned) {
     v = *reinterpret_cast<const uint4*>(src);
   } else {
     __builtin_memcpy(&v, src, sizeof(v));
   }
-  if constexpr (kDstAligned) {
+  return v;
+}
+
+template <bool kAligned>
+static inline __device__ void ddaStore16B(void* dst, const uint4& v) {
+  if constexpr (kAligned) {
     *reinterpret_cast<uint4*>(dst) = v;
   } else {
     __builtin_memcpy(dst, &v, sizeof(v));
   }
+}
+
+template <bool kSrcAligned, bool kDstAligned>
+static inline __device__ void ddaCopy16B(const void* src, void* dst) {
+  ddaStore16B<kDstAligned>(dst, ddaLoad16B<kSrcAligned>(src));
 }
 
 // kSrcAligned / kDstAligned = false: that buffer may sit off 16-byte alignment (the DDA two-phase Broadcast's user

@@ -173,7 +173,8 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
     return ncclSuccess;
   }
 
-  const int nBlocksMax = ddaMaxNBlocksForScratch();
+  // Mailbox slots: one per block for most kernels, two per block for the pipelined Broadcast.
+  const int nBlocksMax = std::max(ddaMaxNBlocksForScratch(), nccl_dda_detail::kDdaIpcBarrierSlots);
   auto barrierPair = dda::common::IpcGpuBarrier::mallocAndInit(kDdaNranks, nBlocksMax, comm->rank, comm->bootstrap,
                                                                dda::common::DdaKernelParams{comm->abortFlagDev});
   // From here on every rank reaches the ready allgather below, so a local failure cannot leave peers on DDA.

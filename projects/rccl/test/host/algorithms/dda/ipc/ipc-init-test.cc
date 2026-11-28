@@ -29,6 +29,7 @@
 
 namespace {
 bool g_ipcBarrierFails = false;
+int g_ipcBarrierNBlocks = -1;  // nBlocks of the last IpcGpuBarrier::mallocAndInit
 }  // namespace
 
 // The real handler and barrier open HIP IPC handles; these hand back this rank's own pointers.
@@ -53,8 +54,9 @@ ncclResult_t ncclIpcMemHandler::getPeerDeviceMemPtr(int, void** outPeerPtr) cons
 }
 
 namespace dda::common {
-std::pair<std::unique_ptr<IpcGpuBarrierResources>, IpcGpuBarrier> IpcGpuBarrier::mallocAndInit(int, int, int, void*,
-                                                                                              DdaKernelParams) {
+std::pair<std::unique_ptr<IpcGpuBarrierResources>, IpcGpuBarrier> IpcGpuBarrier::mallocAndInit(int, int nBlocks, int,
+                                                                                              void*, DdaKernelParams) {
+  g_ipcBarrierNBlocks = nBlocks;
   if (g_ipcBarrierFails) return {nullptr, IpcGpuBarrier{}};
   return {std::make_unique<IpcGpuBarrierResources>(), IpcGpuBarrier{}};
 }
@@ -229,6 +231,16 @@ TEST_F(IpcInitMicrotest, CommInit_AllRanksReady_KeepsEpochCells) {
   for (int i = 0; i < comm_->ddaLLEpochLen; ++i) {
     EXPECT_EQ(0u, comm_->ddaLLEpochDev[i]) << "cell " << i;
   }
+}
+
+// The pipelined Broadcast signals on two mailbox slots per block, so the barrier is sized for that.
+TEST_F(IpcInitMicrotest, CommInit_BarrierHasTwoSlotsPerPipelinedBroadcastBlock) {
+  g_ipcBarrierNBlocks = -1;
+  EXPECT_EQ(ncclSuccess, ncclDdaIpcCommInit(comm_.get()));
+
+  EXPECT_EQ(nccl_dda_detail::kDdaIpcBarrierSlots, g_ipcBarrierNBlocks);
+  EXPECT_GE(g_ipcBarrierNBlocks, 2 * static_cast<int>(kDdaBcIpcPipeBlocks));
+  EXPECT_GE(g_ipcBarrierNBlocks, DDA_IPC_MAXBLOCKS);
 }
 
 // The Simple paths see the scratch below the LL region; DDA Broadcast LL banks sit in the region.
