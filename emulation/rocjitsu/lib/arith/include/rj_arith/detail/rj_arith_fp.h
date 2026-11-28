@@ -2020,9 +2020,9 @@ int rj_arith_v_mad_mixhi_f16_w64_gfx908(uint64_t flags, uint64_t exec_mask,
                                         const uint32_t *const *a, const uint32_t *const *b,
                                         const uint32_t *const *c, uint32_t *trapsts);
 
-// Mixed MAD on gfx942 (gfx950 callers should use *_gfx950 below). Each operand occupies
-// one VGPR, selected per source as FP32 or FP16. Retains an FP32 fused intermediate before
-// optional guest-rounded half narrowing; CLAMP precedes narrowing. Denormal controls and
+// Mixed MAD on gfx942/gfx950. Each operand occupies one VGPR, selected per
+// source as FP32 or FP16. Retains an FP32 fused intermediate before optional
+// guest-rounded half narrowing; CLAMP precedes narrowing. Denormal controls and
 // FP32 guest rounding are unused. Low/high outputs preserve the other half.
 // Compatibility retains the fused result even where legacy SIMD split the product and sum.
 // Loose, allow-Loose and Compatibility share this approximation;
@@ -2051,36 +2051,6 @@ int rj_arith_v_mad_mixhi_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t in
                                  uint32_t *const *d, const uint32_t *const *a,
                                  const uint32_t *const *b, const uint32_t *const *c,
                                  uint32_t *trapsts);
-
-// MI350X (gfx950) V_MAD_MIX_* / V_FMA_MIX_* matches single-rounded fused mixed FMA across
-// guest rounding, symmetric denormal flushing, DX10_CLAMP_OFF and FP16_OVFL under IEEE=1.
-// Compatibility and qualified mode 2 use that exact model; uncaptured IEEE=0 or split
-// F16/F32 input-denormal flags return UNSUPPORTED_SEMANTICS in strict mode 2 and fall back
-// to Loose in allow-Loose. Mode 3 returns UNSUPPORTED_FP_STATUS and DPP flags are rejected.
-int rj_arith_v_mad_mix_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask,
-                                      uint64_t instruction_flags, uint32_t *const *d,
-                                      const uint32_t *const *a, const uint32_t *const *b,
-                                      const uint32_t *const *c, uint32_t *trapsts);
-int rj_arith_v_mad_mix_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask,
-                                      uint64_t instruction_flags, uint32_t *const *d,
-                                      const uint32_t *const *a, const uint32_t *const *b,
-                                      const uint32_t *const *c, uint32_t *trapsts);
-int rj_arith_v_mad_mixlo_f16_w32_gfx950(uint64_t flags, uint32_t exec_mask,
-                                        uint64_t instruction_flags, uint32_t *const *d,
-                                        const uint32_t *const *a, const uint32_t *const *b,
-                                        const uint32_t *const *c, uint32_t *trapsts);
-int rj_arith_v_mad_mixlo_f16_w64_gfx950(uint64_t flags, uint64_t exec_mask,
-                                        uint64_t instruction_flags, uint32_t *const *d,
-                                        const uint32_t *const *a, const uint32_t *const *b,
-                                        const uint32_t *const *c, uint32_t *trapsts);
-int rj_arith_v_mad_mixhi_f16_w32_gfx950(uint64_t flags, uint32_t exec_mask,
-                                        uint64_t instruction_flags, uint32_t *const *d,
-                                        const uint32_t *const *a, const uint32_t *const *b,
-                                        const uint32_t *const *c, uint32_t *trapsts);
-int rj_arith_v_mad_mixhi_f16_w64_gfx950(uint64_t flags, uint64_t exec_mask,
-                                        uint64_t instruction_flags, uint32_t *const *d,
-                                        const uint32_t *const *a, const uint32_t *const *b,
-                                        const uint32_t *const *c, uint32_t *trapsts);
 
 // Packed FP32 FMA uses two VGPRs per operand and independent whole-word selectors.
 // RJ_ARITH_PK_* flags select/negate each FP32 result's inputs and optionally clamp.
