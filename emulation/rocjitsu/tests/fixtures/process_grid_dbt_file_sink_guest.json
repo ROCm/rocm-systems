@@ -1,0 +1,10 @@
+{
+  "dbt_guest": {
+    "enabled": true,
+    "guest_isa": "gfx950",
+    "host_isa": "gfx950",
+    "host_gpu_id": 0,
+    "execution_backend": "simulator",
+    "simulator_config": "process_grid_file_sink_config.json"
+  }
+}
