@@ -237,6 +237,9 @@ module:
   Unit_hipModuleUnload_basic:
     <<: *level_default
     tags: [load, P0]
+  Unit_hipModuleUnload_Positive_FileDeletableAfterUnload:
+    <<: *level_default
+    tags: [load]
   Unit_hipModuleGetFunctionCount_Functional:
     <<: *level_default
     disabled:

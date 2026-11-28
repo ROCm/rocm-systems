@@ -438,6 +438,11 @@ bool Program::createKernels(void* binary, size_t binSize, bool useUniformWorkGro
 
 bool Program::setKernels(void* binary, size_t binSize, amd::Os::FileDesc fdesc,
                                   size_t foffset, std::string uri) {
+  // setKernels owns fdesc. PAL loads the code object from the in-memory binary
+  // and does not use the file, so close it now.
+  if (fdesc != amd::Os::FDescInit()) {
+    amd::Os::CloseFileHandle(fdesc);
+  }
   // Collect the information about compiled binary, except the trap handler
   if (!isNull() && (palDevice().captureMgr() != nullptr) && !isTrapHandler()) {
     apiHash_ = palDevice().captureMgr()->AddElfBinary(binary, binSize, binary, binSize,
