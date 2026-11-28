@@ -996,11 +996,13 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterGraphicsHandleToNodesExt(
     HSAuint64 GraphicsResourceHandle, HsaGraphicsResourceInfo* GraphicsResourceInfo,
     HSAuint64 NumberOfNodes, HSAuint32* NodeArray, HSA_REGISTER_MEM_FLAGS RegisterFlags) {
   CHECK_VIRTIO_KFD_OPEN();
+  if (NumberOfNodes > VHSAKMT_MEMORY_MAX_NODES) return -EINVAL;
 
   vhsakmt_device_handle dev = vhsakmt_dev();
   uint32_t bo_handle, res_id;
   uint64_t meta_data_size = VHSA_GL_METADATA_MAX_SIZE;
-  unsigned req_len = sizeof(struct vhsakmt_ccmd_gl_inter_req) + NumberOfNodes * sizeof(NodeArray);
+  size_t req_len = VHSA_ALIGN_UP(
+      sizeof(struct vhsakmt_ccmd_gl_inter_req) + NumberOfNodes * sizeof(*NodeArray), 8);
   struct vhsakmt_ccmd_gl_inter_req* req;
   struct vhsakmt_ccmd_gl_inter_rsp* rsp;
   int r;
@@ -1017,7 +1019,10 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterGraphicsHandleToNodesExt(
   req->reg_ghd_to_nodes.GraphicsResourceHandle = GraphicsResourceHandle;
 #else
   r = vhsakmt_handle_to_resid(dev, GraphicsResourceHandle, &res_id, &bo_handle);
-  if (r) return r;
+  if (r) {
+    free(req);
+    return r;
+  }
 
   req->reg_ghd_to_nodes.GraphicsResourceHandle = bo_handle;
   req->reg_ghd_to_nodes.res_handle = res_id;
@@ -1025,7 +1030,7 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterGraphicsHandleToNodesExt(
 
   req->reg_ghd_to_nodes.flag = RegisterFlags.Value;
 
-  memcpy(req->payload, NodeArray, NumberOfNodes * sizeof(NodeArray));
+  memcpy(req->payload, NodeArray, NumberOfNodes * sizeof(*NodeArray));
 
   rsp =
       vhsakmt_alloc_rsp(dev, &req->hdr, sizeof(struct vhsakmt_ccmd_gl_inter_rsp) + meta_data_size);
@@ -1035,7 +1040,10 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterGraphicsHandleToNodesExt(
   }
 
   vhsakmt_execbuf_cpu(dev, &req->hdr, __FUNCTION__);
-  if (rsp->ret) return rsp->ret;
+  if (rsp->ret) {
+    free(req);
+    return rsp->ret;
+  }
 
   memcpy(GraphicsResourceInfo, &rsp->info, sizeof(HsaGraphicsResourceInfo));
   if (rsp->info.MetadataSizeInBytes) {
