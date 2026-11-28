@@ -9,6 +9,7 @@
 #include "conversion/conversion64.h"
 #include "conversion/float_conversion.h"
 #include "conversion/x86_64/lanes.h"
+#include "conversion/x86_64/native.h"
 #include "rj_arith/detail/rj_arith_conversion.h"
 
 #include <immintrin.h>
@@ -26,23 +27,23 @@ void conversion64_x86_64_v4(uint64_t flags, uint32_t exec_mask, uint32_t mode, u
   constexpr bool to_double = from_integer || Op == Conversion64::FloatToDouble;
   if constexpr (to_double || Op == Conversion64::DoubleToFloat) {
     using V = conversion_simd::Lanes<64>;
-    uint32_t result[to_double ? 2 : 1][32];
     for (int lane = 0; lane < 32; lane += V::size()) {
       V raw = V::load_words(a[0] + lane);
       if constexpr (!to_double) {
         raw |= V::load_words(a[1] + lane) << 32;
       }
-      V bits = conversion_detail::convert64<Op>(raw, flags, mode, quiet_nan);
-      bits.store_words(result[0] + lane);
+      V bits;
       if constexpr (to_double) {
-        (bits >> 32).store_words(result[1] + lane);
+        bits = conversion_simd::to_double<Op>(raw, flags, mode, quiet_nan);
+      } else {
+        bits = conversion_simd::double_to_float(raw, flags, mode);
       }
-    }
-    // Snapshot the wave before stores: either destination may alias either source VGPR.
-    using W = conversion_simd::Lanes<32>;
-    for (int reg = 0; reg < (to_double ? 2 : 1); ++reg) {
-      for (int lane = 0; lane < 32; lane += W::size()) {
-        W(result[reg] + lane).store(d[reg] + lane, exec_mask >> lane);
+      // Consume both source words before either store. Whole-VGPR aliases
+      // cannot affect another lane group, so a wave-sized snapshot is unnecessary.
+      const auto lane_exec_mask = __mmask8(exec_mask >> lane);
+      _mm256_mask_storeu_epi32(d[0] + lane, lane_exec_mask, bits.low_words());
+      if constexpr (to_double) {
+        _mm256_mask_storeu_epi32(d[1] + lane, lane_exec_mask, (bits >> 32).low_words());
       }
     }
   } else {

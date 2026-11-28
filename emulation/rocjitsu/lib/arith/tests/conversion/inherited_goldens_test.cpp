@@ -56,6 +56,13 @@ TEST(ConversionInheritedGoldens, FloatingDestinations) {
        RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS},
       {rj_arith_v_cvt_f32_f64_w32_gfx12, 0x380ffffff0000000ULL, 0x00800000,
        RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS},
+      // Directed tininess boundary: equality stays tiny; one source ULP above rounds normal.
+      {rj_arith_v_cvt_f32_f64_w32_gfx12, 0x380fffffe0000000ULL, 0,
+       RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS | RJ_ARITH_FP_ROUND_UP},
+      {rj_arith_v_cvt_f32_f64_w32_gfx12, 0x380fffffe0000001ULL, 0x00800000,
+       RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS | RJ_ARITH_FP_ROUND_UP},
+      {rj_arith_v_cvt_f32_f64_w32_gfx12, 0xb80fffffe0000001ULL, 0x80800000,
+       RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS | RJ_ARITH_FP_ROUND_DOWN},
       {rj_arith_v_cvt_f16_f32_w32_gfx12, 0x47800000U, 0x7c00},
       {rj_arith_v_cvt_f16_f32_w32_gfx12, 0x47800000U, 0x7bff, RJ_ARITH_FP_ROUND_ZERO},
       {rj_arith_v_cvt_f16_f32_w32_gfx12, 0xc7800000U, 0xfbff, RJ_ARITH_FP_ROUND_UP},

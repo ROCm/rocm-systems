@@ -5,6 +5,7 @@
 #include "conversion/float_conversion.h"
 #include "conversion/x86_64/half_widen.h"
 #include "conversion/x86_64/lanes.h"
+#include "conversion/x86_64/native.h"
 
 namespace rocjitsu::arith {
 // Convert a wave and preserve inactive lanes and unselected destination halves.
@@ -17,6 +18,16 @@ void conversion16_x86_64_v4(uint64_t flags, uint32_t exec_mask, uint32_t mode, u
     V result;
     if constexpr (Op == Conversion16::HalfToFloat) {
       result = conversion_simd::half_to_float(raw, flags, mode, quiet_nan);
+    } else if constexpr (Op == Conversion16::FloatToHalf || Op == Conversion16::SignedToHalf ||
+                         Op == Conversion16::UnsignedToHalf) {
+      if ((mode & RJ_ARITH_CVT_SDWA) && (mode & RJ_ARITH_ALU_OMOD_MASK)) {
+        result = conversion_detail::convert16<Op>(raw, flags, mode, quiet_nan);
+      } else if constexpr (Op == Conversion16::FloatToHalf) {
+        result = conversion_simd::float_to_half(raw, flags, mode);
+      } else {
+        result =
+            conversion_simd::integer_to_half<Op == Conversion16::UnsignedToHalf>(raw, flags, mode);
+      }
     } else {
       result = conversion_detail::convert16<Op>(raw, flags, mode, quiet_nan);
     }

@@ -8,22 +8,13 @@
 #include "conversion/conversion64.h"
 #include "conversion/float_conversion.h"
 #include "conversion/x86_64/lanes.h"
+#include "conversion/x86_64/native.h"
 #include "rj_arith/detail/rj_arith_conversion.h"
 
 #include <immintrin.h>
 #include <stdint.h>
 
 namespace rocjitsu::arith {
-namespace {
-
-// Extract each 64-bit lane's low 32-bit word into consecutive lanes.
-__m128i low_words(__m256i words) {
-  auto packed = _mm256_permutevar8x32_epi32(words, _mm256_setr_epi32(0, 2, 4, 6, 1, 3, 5, 7));
-  return _mm256_castsi256_si128(packed);
-}
-
-} // namespace
-
 // Convert FP64, FP32, or 32-bit integers. Preserve destination lanes outside exec_mask.
 // Requires the named CPU features and validated instruction controls.
 template <Conversion64 Op>
@@ -40,13 +31,19 @@ void conversion64_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t mode, u
       if constexpr (!to_double) {
         raw |= V::load_words(a[1] + lane) << 32;
       }
-      V bits = conversion_detail::convert64<Op>(raw, flags, mode, quiet_nan);
+      V bits;
+      if constexpr (to_double) {
+        bits = conversion_simd::to_double<Op>(raw, flags, mode, quiet_nan);
+      } else {
+        bits = conversion_simd::double_to_float(raw, flags, mode);
+      }
       bits.store_words(result[0] + lane);
       if constexpr (to_double) {
         (bits >> 32).store_words(result[1] + lane);
       }
     }
-    // Snapshot the wave before stores: either destination may alias either source VGPR.
+    // Coalesce 64-bit lanes' low words into full-width AVX2 masked stores.
+    // This is cheaper than repeated 128-bit masked stores, especially for directed conversion.
     using W = conversion_simd::Lanes<32>;
     for (int reg = 0; reg < (to_double ? 2 : 1); ++reg) {
       for (int lane = 0; lane < 32; lane += W::size()) {
@@ -69,14 +66,16 @@ void conversion64_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t mode, u
         auto nan = _mm256_cmp_pd(value, value, _CMP_UNORD_Q);
         value = _mm256_min_pd(_mm256_max_pd(value, _mm256_set1_pd(-2147483648.0)),
                               _mm256_set1_pd(2147483647.0));
-        output = _mm_andnot_si128(low_words(_mm256_castpd_si256(nan)), _mm256_cvttpd_epi32(value));
+        output = _mm_andnot_si128(conversion_simd::Lanes<64>(_mm256_castpd_si256(nan)).low_words(),
+                                  _mm256_cvttpd_epi32(value));
       } else if constexpr (Op == Conversion64::DoubleToUnsigned) {
         value = _mm256_min_pd(_mm256_max_pd(value, zero), _mm256_set1_pd(4294967295.0));
         auto high = _mm256_cmp_pd(value, _mm256_set1_pd(2147483648.0), _CMP_GE_OQ);
         auto adjusted = _mm256_sub_pd(value, _mm256_and_pd(high, _mm256_set1_pd(2147483648.0)));
         output = _mm256_cvttpd_epi32(adjusted);
         output = _mm_or_si128(
-            output, _mm_and_si128(low_words(_mm256_castpd_si256(high)), _mm_set1_epi32(INT32_MIN)));
+            output, _mm_and_si128(conversion_simd::Lanes<64>(_mm256_castpd_si256(high)).low_words(),
+                                  _mm_set1_epi32(INT32_MIN)));
       }
       _mm_storeu_si128(reinterpret_cast<__m128i *>(result[0] + lane), output);
     }

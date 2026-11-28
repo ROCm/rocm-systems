@@ -8,6 +8,7 @@
 #include "conversion/float_conversion.h"
 #include "conversion/packed_conversion.h"
 #include "conversion/x86_64/lanes.h"
+#include "conversion/x86_64/native.h"
 #include "rj_arith/detail/rj_arith_conversion.h"
 
 #include <immintrin.h>
@@ -43,17 +44,14 @@ void packed_conversion_x86_64_v4(uint64_t flags, uint32_t exec_mask, uint32_t mo
                                  const uint32_t *a, const uint32_t *b) {
   if constexpr (Op == PackedConversion::HalfRtz) {
     using V = conversion_simd::Lanes<32>;
-    const auto low =
-        conversion_detail::float_policy<conversion_detail::fmt::F32, conversion_detail::fmt::F16>(
-            (flags & ~RJ_ARITH_FP_ROUND_MASK) | RJ_ARITH_FP_ROUND_ZERO,
-            mode & (RJ_ARITH_ALU_ABS_A | RJ_ARITH_ALU_NEG_A));
-    const auto high =
-        conversion_detail::float_policy<conversion_detail::fmt::F32, conversion_detail::fmt::F16>(
-            (flags & ~RJ_ARITH_FP_ROUND_MASK) | RJ_ARITH_FP_ROUND_ZERO,
-            (mode >> 1) & (RJ_ARITH_ALU_ABS_A | RJ_ARITH_ALU_NEG_A));
+    const uint64_t rtz_flags = (flags & ~RJ_ARITH_FP_ROUND_MASK) | RJ_ARITH_FP_ROUND_ZERO;
+    constexpr uint32_t source_modifiers = RJ_ARITH_ALU_ABS_A | RJ_ARITH_ALU_NEG_A;
     const auto output = sdwa_output_policy(flags, mode);
     for (int lane = 0; lane < 32; lane += V::size()) {
-      V result = low(V(a + lane)) | (high(V(b + lane)) << 16);
+      V result =
+          conversion_simd::float_to_half(V(a + lane), rtz_flags, mode & source_modifiers) |
+          (conversion_simd::float_to_half(V(b + lane), rtz_flags, (mode >> 1) & source_modifiers)
+           << 16);
       if (mode & RJ_ARITH_CVT_SDWA) {
         result = sdwa_finalize_packed_f16(result, output);
       }
