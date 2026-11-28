@@ -2007,6 +2007,11 @@ amdsmi_status_t amdsmi_get_temp_metric(amdsmi_processor_handle processor_handle,
     return AMDSMI_STATUS_INVAL;
   }
 
+  // amdgpu reports the ASIC shutdown limit as temp#_emergency; rsmi has no shutdown metric.
+  if (metric == AMDSMI_TEMP_SHUTDOWN) {
+    metric = AMDSMI_TEMP_EMERGENCY;
+  }
+
   // PLX comes from gpu_metrics. The unit tests cover the helper; this
   // delegation is covered by TempRead on an APU, where the sensor is absent.
   if (sensor_type == AMDSMI_TEMPERATURE_TYPE_PLX) {
