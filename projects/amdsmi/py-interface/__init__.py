@@ -155,6 +155,7 @@ from .amdsmi_interface import amdsmi_stop_gpu_event_notification
 # # Process Information
 from .amdsmi_interface import amdsmi_get_gpu_process_list
 from .amdsmi_interface import amdsmi_get_gpu_process_list_by_pid
+from .amdsmi_interface import amdsmi_get_gpu_process_info_self
 
 # # ECC Error Information
 from .amdsmi_interface import amdsmi_get_gpu_total_ecc_count

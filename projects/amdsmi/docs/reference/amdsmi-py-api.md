@@ -2002,6 +2002,50 @@ finally:
     amdsmi.amdsmi_shut_down()
 ```
 
+### amdsmi_get_gpu_process_info_self
+
+Description: Returns the calling process's usage of the given GPU. Unlike `amdsmi_get_gpu_process_list`, it needs neither the host PID nor access to other processes, so it works inside a container with its own PID namespace. Only descriptors open on this handle's DRM render node are counted, so compute partitions of one GPU are reported separately. Memory prefers `drm-total-*` (buffer size, including non-resident allocations). On older kernels that only print `drm-memory-*`, the values are resident size and can drop when buffers are evicted without being freed.
+
+Input parameters:
+
+* `processor_handle` device which to query
+
+Output: Dictionary with the fields of an `amdsmi_get_gpu_process_list` entry
+
+Field | Description
+---|---
+`name` | Path of the calling process's executable
+`pid` | Process ID in the caller's PID namespace
+`mem` | Total memory usage on this GPU in Bytes
+`engine_usage` | `gfx` and `enc` engine usage in ns
+`memory_usage` | `gtt_mem`, `cpu_mem`, and `vram_mem` usage in Bytes
+`cu_occupancy` | Always "N/A"; KFD identifies processes by host PID
+`sdma_usage` | Always "N/A"; KFD identifies processes by host PID
+`evicted_time` | Always "N/A"; KFD identifies processes by host PID
+
+Exceptions that can be thrown by `amdsmi_get_gpu_process_info_self` function:
+
+* `AmdSmiLibraryException`, with `AMDSMI_STATUS_NOT_FOUND` if the calling process has not opened the device, `AMDSMI_STATUS_NOT_SUPPORTED` if the handle has no DRM render node, `AMDSMI_STATUS_FILE_ERROR` if an fdinfo entry could not be read, or `AMDSMI_STATUS_UNEXPECTED_DATA` if a client's counters are malformed. `AMDSMI_STATUS_NOT_SUPPORTED` is also raised when the installed library predates this API
+* `AmdSmiParameterException`
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        info = amdsmi.amdsmi_get_gpu_process_info_self(devices[0])
+        print(info["memory_usage"]["vram_mem"])
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
 ### amdsmi_get_gpu_total_ecc_count
 
 Description: Returns the ECC error count for the given GPU.

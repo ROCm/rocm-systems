@@ -8848,6 +8848,39 @@ amdsmi_status_t amdsmi_get_gpu_process_list_by_pid(amdsmi_processor_handle* proc
                                                    amdsmi_proc_info_by_pid_t* procs,
                                                    uint32_t* max_processes);
 
+/**
+ *  @brief Get the calling process's usage of a GPU.
+ *
+ *  @details Reads the calling process's own DRM client usage stats, so unlike
+ *  ::amdsmi_get_gpu_process_list it needs neither the host PID nor access to other
+ *  processes, and works inside a container with its own PID namespace. Only
+ *  descriptors open on this handle's DRM render node are counted, so compute
+ *  partitions of one GPU are reported separately. Memory prefers drm-total-* (buffer size,
+ * including non-resident allocations). On older kernels that only print drm-memory-*, the values
+ * are resident size and can drop when buffers are evicted without being freed. @p info->pid is the
+ * PID in the caller's namespace. cu_occupancy, evicted_time and sdma_usage come from KFD, which
+ * identifies processes by host PID, and are set to their maximum values (unavailable).
+ *
+ *  @ingroup tagProcessInfo
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @param[in]  processor_handle Device which to query
+ *  @param[out] info             Reference to the usage of the calling process. Must be
+ *                               allocated by the user.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success,
+ *                            | ::AMDSMI_STATUS_NOT_FOUND if the calling process has not
+ * opened the device,
+ *                            | ::AMDSMI_STATUS_NOT_SUPPORTED if the handle has no DRM render
+ * node,
+ *                            | ::AMDSMI_STATUS_FILE_ERROR if an fdinfo entry could not be read,
+ *                            | ::AMDSMI_STATUS_UNEXPECTED_DATA if a client's counters are
+ * malformed.
+ */
+amdsmi_status_t amdsmi_get_gpu_process_info_self(amdsmi_processor_handle processor_handle,
+                                                 amdsmi_proc_info_t* info);
+
 /** @} End tagProcessInfo */
 
 /*****************************************************************************/

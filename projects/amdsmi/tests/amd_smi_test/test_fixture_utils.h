@@ -17,6 +17,7 @@
 #include <utility>
 
 #include "amd_smi/amdsmi.h"
+#include "amd_smi/impl/amd_smi_self_fdinfo.h"
 #include "rocm_smi/rocm_smi_kfd.h"
 
 namespace amd::smi {
@@ -29,6 +30,7 @@ namespace amd::smi::test_hooks {
 void SetSysfsDrmRoot(const std::string& root);
 void SetKfdNodesPathRoot(const std::string& root);
 void SetAppTmpDir(const std::string& dir);
+void SetSelfFdinfoReaderHook(const SelfFdinfoReader& reader);
 }  // namespace amd::smi::test_hooks
 
 // Generic (not RAS-specific) fake-sysfs fixture tree, reusable by any unit

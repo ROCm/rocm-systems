@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include <fcntl.h>
+#include <sys/sysmacros.h>
 #include <sys/utsname.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -43,6 +44,7 @@
 #include "amd_smi/impl/amd_smi_nic_stats.h"
 #include "amd_smi/impl/amd_smi_processor.h"
 #include "amd_smi/impl/amd_smi_rdma_port.h"
+#include "amd_smi/impl/amd_smi_self_fdinfo.h"
 #include "amd_smi/impl/amd_smi_socket.h"
 #include "amd_smi/impl/amd_smi_system.h"
 #include "amd_smi/impl/amd_smi_test_internal.h"
@@ -6364,6 +6366,53 @@ amdsmi_status_t amdsmi_get_gpu_process_list_by_pid(amdsmi_processor_handle* proc
   }
 
   return (capacity >= num_pids) ? AMDSMI_STATUS_SUCCESS : AMDSMI_STATUS_OUT_OF_RESOURCES;
+}
+
+namespace {
+
+// Device number of the render node, from its sysfs "dev" file ("<major>:<minor>").
+bool RenderDevFromMinor(uint32_t drm_render_minor, dev_t* render_dev) {
+  std::ifstream dev_file(amd::smi::test_hooks::SysfsDrmRoot() + "/renderD" +
+                         std::to_string(drm_render_minor) + "/dev");
+  unsigned int major_num = 0;
+  unsigned int minor_num = 0;
+  char colon = '\0';
+  if (!(dev_file >> major_num >> colon >> minor_num) || colon != ':') return false;
+  *render_dev = makedev(major_num, minor_num);
+  return true;
+}
+
+}  // namespace
+
+amdsmi_status_t amdsmi_get_gpu_process_info_self(amdsmi_processor_handle processor_handle,
+                                                 amdsmi_proc_info_t* info) {
+  AMDSMI_CHECK_INIT();
+
+  if (!info) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
+  amdsmi_status_t status_code = get_gpu_device_from_handle(processor_handle, &gpu_device);
+  if (status_code != AMDSMI_STATUS_SUCCESS) {
+    return status_code;
+  }
+
+#ifdef ENABLE_WSL_BACKEND
+  // WSL has no amdgpu DRM clients in /proc/self/fdinfo.
+  if (gpu_device->backend()) return AMDSMI_STATUS_NOT_SUPPORTED;
+#endif
+
+  const uint32_t render_minor = gpu_device->get_drm_render_minor();
+  if (render_minor == std::numeric_limits<uint32_t>::max()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+  dev_t render_dev = 0;
+  if (!RenderDevFromMinor(render_minor, &render_dev)) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+
+  return gpuvsmi_get_self_info(render_dev, *info, amd::smi::test_hooks::SelfFdinfoReaderHook());
 }
 
 amdsmi_status_t amdsmi_get_power_info(amdsmi_processor_handle processor_handle,
