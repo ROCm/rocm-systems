@@ -459,6 +459,7 @@ if(BUILD_TESTS)
       device/ChannelMaskMapTests.cpp
       device/CoopApplicationBuildTests.cpp
       DeviceApiTests.cpp
+      DeviceApiFlowTests.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp
       common/GpuCountProbe.cpp
