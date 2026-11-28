@@ -86,6 +86,7 @@
 #include "suites/functional/concurrent_init_shutdown.h"
 #include "suites/functional/concurrent_shutdown.h"
 #include "suites/functional/reference_count.h"
+#include "suites/functional/pc_sampling_extension_table_test.h"
 #include "suites/functional/signal_concurrent.h"
 #include "suites/functional/signal_allocation_validation.h"
 #include "suites/functional/signal_wait_multi.h"
@@ -256,6 +257,11 @@ TEST(rocrtstFunc, Reference_Count) {
   if (!RunCustomTestProlog(&rc)) return;
   rc.TestReferenceCount();
   RunCustomTestEpilog(&rc);
+}
+
+TEST(rocrtstFunc, PcSamplingExtensionTable) {
+  PcSamplingExtensionTableTest test;
+  RunGenericTest(&test);
 }
 
 TEST(rocrtstFunc, Max_Reference_Count) {
