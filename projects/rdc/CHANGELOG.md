@@ -18,6 +18,9 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 - **`rdc_field_watch()` documents that a `max_keep_samples` or `max_keep_age` of 0 keeps no samples**.
   - The documentation said 0 meant no limit. To keep every sample, pass a large value, such as `UINT32_MAX`.
 
+- **RDC keeps at most 256 jobs, running or stopped**.
+  - A job with a new ID that starts when RDC already keeps 256 jobs removes the job that stopped first, and `rdc_job_get_stats()` returns `RDC_ST_NOT_FOUND` for it. If no job has stopped, a start on a group whose job fields are not watched first stops the running job, started first, whose GPU group was destroyed or runs a later job, and that job makes room (it stays stopped if the start then fails); if there is none, `rdc_job_start_stats()` returns `RDC_ST_MAX_LIMIT`. A start that fails removes no other job. Every job used to stay in memory until `rdc_job_remove()` or `rdc_job_remove_all()` removed it.
+
 - `rdc_job_start_stats()` returns `RDC_ST_MAX_LIMIT` for a group of more than `RDC_MAX_NUM_GPUS_PER_JOB` (16) GPUs, the most that `rdc_job_info_t` holds.
 
 - `rdc_job_get_stats()` fills `gpus[0]` to `gpus[num_gpus - 1]`, ordered by `gpu_id`, which names the GPU or GPU partition of each entry. It used to place each GPU at the index of its GPU ID. The summary averages each statistic over the GPUs that have samples for it.
@@ -95,6 +98,12 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 - `rdci discovery` now reports an error instead of exiting successfully with an incomplete GPU list when `rdcd` cannot read a GPU's attributes. Failed `rdc_device_get_attributes()` calls now return zeroed attributes, and `rdcd` replies to failed requests no longer contain garbage values.
 
 - `rdc_job_get_stats()` and `rdci stats -j` report every GPU of a job. Only the GPU with the lowest ID was summarized, and the entries of the other GPUs were not filled in. Job statistics for a GPU partition, or for a GPU whose ID is above 15, no longer crash `rdcd`. A GPU without a total memory reading reports memory utilization as unavailable instead of failing the call, and memory utilization is no longer inflated on GPUs with 400 GiB of memory or more.
+
+- A job start that fails, for example on a GPU group that runs another job, no longer leaves a running job behind. Its job ID returned `RDC_ST_ALREADY_EXIST` until the job was removed, and stopping it stopped the stats of the group's other job. A start that failed to set up process events, whose job kept collecting stats although `rdc_job_start_stats()` returned the error, no longer leaves a job either.
+
+- `rdc_job_remove()` and `rdc_job_remove_all()` now free the ID of a job that cannot stop, for example after a client unwatched the job fields of its group. Starting a job with that ID returned `RDC_ST_ALREADY_EXIST`.
+
+- Two `rdc_job_start_stats()` calls with the same job ID at the same time no longer both succeed. One of the two GPU groups then kept a watch that failed its later jobs with `RDC_ST_CONFLICT`.
 
 - `rdcd` no longer crashes during `rdci diag`, and later diagnostic runs and profiler fields keep working. Repeated `rdci diag` runs also no longer use up GPU memory in `rdcd`.
   - After the first `rdci diag`, `rdcd` keeps the ROCm runtime loaded until it stops, as it already does after the first profiler field read, so changing the GPU partition mode needs `rdcd` stopped. `rdci diag` requests now run one at a time.
