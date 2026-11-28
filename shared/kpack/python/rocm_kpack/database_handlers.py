@@ -442,6 +442,58 @@ class HotswapCacheHandler(DatabaseHandler):
         return self._DOMAIN_TO_BUNDLE.get(domain)
 
 
+# Same architecture id as _GFX_ARCH_PATTERN. "-strict" is its own target, as it
+# is for rocBLAS and composable_kernel. xnack is a feature; base_arch() strips
+# it before the artifact name is chosen.
+_LIBHIPCXX_ARCH_FILE_PATTERN = re.compile(
+    r"\.(gfx\d+[a-z]*(?:-strict)?(?:-xnack[+-])?)"
+    r"\.(?:gpu|build\.yml|compile_cmd|unsupported)$"
+)
+
+
+class LibhipcxxTestHandler(DatabaseHandler):
+    """Handler for the per-target files of prebuilt libhipcxx tests.
+
+    The hiprtc and amdclang++ lit tests write files of a prebuilt test once
+    per target, with the target in the name:
+        bin/libhipcxx/lit-hiprtc/.../<test>.<arch>.gpu         device build
+        bin/libhipcxx/lit-hiprtc/.../<test>.<arch>.build.yml   run description
+        bin/libhipcxx/lit-*/.../<test>.<arch>.compile_cmd      compile command
+        bin/libhipcxx/lit-*/.../<test>.<arch>.unsupported      test not built
+    (lit-hiprtc and lit-amdclang hold the tests of the two compilers; only
+    hiprtc writes .gpu and .build.yml, as its tests have no fat executable.)
+    Each goes to the artifact of its target, so an artifact holds complete
+    tests for its own targets and nothing for the others. The executable of an
+    amdclang++ test is a fat binary that the splitter handles itself.
+    """
+
+    _TEST_DIRS = ("libhipcxx/lit-hiprtc/", "libhipcxx/lit-amdclang/")
+
+    def name(self) -> str:
+        return "libhipcxx"
+
+    def _in_test_dir(self, path: Path, prefix_root: Path) -> bool:
+        try:
+            rel_path = path.relative_to(prefix_root).as_posix()
+        except ValueError:
+            return False
+        return any(test_dir in rel_path for test_dir in self._TEST_DIRS)
+
+    def detect(self, path: Path, prefix_root: Path) -> Optional[str]:
+        """
+        Detect the per-target files of a prebuilt libhipcxx test.
+
+        Pattern: bin/libhipcxx/lit-{hiprtc,amdclang}/**/*.gfx*.{gpu,build.yml,compile_cmd,unsupported}
+
+        Returns:
+            Architecture id (e.g., 'gfx1250' or 'gfx1250-strict') or None.
+        """
+        if not self._in_test_dir(path, prefix_root):
+            return None
+        match = _LIBHIPCXX_ARCH_FILE_PATTERN.search(path.name)
+        return match.group(1) if match else None
+
+
 # Registry of available handlers
 AVAILABLE_HANDLERS = {
     "rocblas": RocBLASHandler,
@@ -452,6 +504,7 @@ AVAILABLE_HANDLERS = {
     "composablekernel": ComposableKernelHandler,
     "hipkernelprovider": HipKernelProviderArchContentHandler,
     "hotswap_cache": HotswapCacheHandler,
+    "libhipcxx": LibhipcxxTestHandler,
 }
 
 

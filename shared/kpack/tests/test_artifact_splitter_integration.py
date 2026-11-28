@@ -4,6 +4,7 @@ Integration tests for the artifact splitter.
 These tests simulate real artifact splitting scenarios with mock data.
 """
 
+import re
 import shutil
 import struct
 from argparse import Namespace
@@ -876,6 +877,167 @@ class TestArtifactSplitterIntegration:
         assert not (generic_prefix / relative_cache).exists()
         assert (generic_prefix / "share/common.txt").exists()
         assert not (output_dir / "rccl_lib_gfx1100").exists()
+
+    def test_libhipcxx_hiprtc_files_go_to_their_arch(self, toolchain, tmp_path):
+        parent_dir = tmp_path / "shard"
+        input_dir = parent_dir / "libhipcxx_test_gfx1250-gfx942"
+        input_dir.mkdir(parents=True)
+        prefix = "math-libs/libhipcxx_hiprtc_tests/stage"
+        write_artifact_manifest(input_dir, [prefix])
+
+        test_dir = (
+            input_dir / prefix / "bin/libhipcxx/lit-hiprtc/test/cuda/float/Output"
+        )
+        test_dir.mkdir(parents=True)
+        # A test built for every target of the job, strict is its own target.
+        for arch in ("gfx1250", "gfx1250-strict", "gfx942"):
+            (test_dir / f"half.pass.cpp.{arch}.gpu").write_bytes(
+                b"build " + arch.encode()
+            )
+            (test_dir / f"half.pass.cpp.{arch}.build.yml").write_text(f"run {arch}")
+            (test_dir / f"half.pass.cpp.{arch}.compile_cmd").write_text(f"cmd {arch}")
+        # A test only gfx1250 supports leaves a marker for the other target.
+        (test_dir / "only1250.pass.cpp.gfx1250.gpu").write_bytes(b"only build")
+        (test_dir / "only1250.pass.cpp.gfx1250.build.yml").write_text("run")
+        (test_dir / "only1250.pass.cpp.gfx942.unsupported").write_text("pre-gfx1250\n")
+        # Without an arch in the name a file is not split.
+        (test_dir / "half.pass.cpp.compile_cmd").write_text("plain")
+
+        output_dir = tmp_path / "output"
+        args = Namespace(
+            input_dir=parent_dir,
+            output_dir=output_dir,
+            split_databases=["libhipcxx"],
+            verbose=False,
+            tmp_dir=tmp_path / "tmp",
+            gpu_targets=["gfx1250", "gfx1250-strict", "gfx942"],
+        )
+        batch_split(args, toolchain)
+
+        relative_test = Path("bin/libhipcxx/lit-hiprtc/test/cuda/float/Output")
+
+        def files(artifact):
+            directory = output_dir / artifact / prefix / relative_test
+            if not directory.exists():
+                return set()
+            return {p.name for p in directory.iterdir()}
+
+        # Each artifact holds all the files of its own target and none of the others.
+        assert files("libhipcxx_test_gfx1250") == {
+            "half.pass.cpp.gfx1250.gpu",
+            "half.pass.cpp.gfx1250.build.yml",
+            "half.pass.cpp.gfx1250.compile_cmd",
+            "only1250.pass.cpp.gfx1250.gpu",
+            "only1250.pass.cpp.gfx1250.build.yml",
+        }
+        assert files("libhipcxx_test_gfx1250-strict") == {
+            "half.pass.cpp.gfx1250-strict.gpu",
+            "half.pass.cpp.gfx1250-strict.build.yml",
+            "half.pass.cpp.gfx1250-strict.compile_cmd",
+        }
+        assert files("libhipcxx_test_gfx942") == {
+            "half.pass.cpp.gfx942.gpu",
+            "half.pass.cpp.gfx942.build.yml",
+            "half.pass.cpp.gfx942.compile_cmd",
+            "only1250.pass.cpp.gfx942.unsupported",
+        }
+        assert files("libhipcxx_test_generic") == {"half.pass.cpp.compile_cmd"}
+        gfx1250_test = output_dir / "libhipcxx_test_gfx1250" / prefix / relative_test
+        assert (gfx1250_test / "half.pass.cpp.gfx1250.build.yml").read_text() == (
+            "run gfx1250"
+        )
+
+    def test_libhipcxx_amdclang_files_go_to_their_arch(self, toolchain, tmp_path):
+        parent_dir = tmp_path / "shard"
+        input_dir = parent_dir / "libhipcxx_test_gfx1100-gfx1101"
+        input_dir.mkdir(parents=True)
+        prefix = "math-libs/libhipcxx_tests/stage"
+        write_artifact_manifest(input_dir, [prefix])
+
+        test_dir = (
+            input_dir / prefix / "bin/libhipcxx/lit-amdclang/test/cuda/float/Output"
+        )
+        test_dir.mkdir(parents=True)
+        # The compile command is recorded for every target of the build.
+        for arch in ("gfx1100", "gfx1101"):
+            (test_dir / f"half.pass.cpp.{arch}.compile_cmd").write_text(f"cmd {arch}")
+        # A test gfx1101 does not support leaves a marker for that target.
+        (test_dir / "only1100.pass.cpp.gfx1100.compile_cmd").write_text("cmd")
+        (test_dir / "only1100.pass.cpp.gfx1101.unsupported").write_text("pre\n")
+        # The executable and the files without an arch are not split by name.
+        (test_dir / "half.pass.cpp.exe").write_bytes(b"not a fat binary")
+        (test_dir / "half.pass.cpp.compile_cmd").write_text("plain")
+
+        output_dir = tmp_path / "output"
+        args = Namespace(
+            input_dir=parent_dir,
+            output_dir=output_dir,
+            split_databases=["libhipcxx"],
+            verbose=False,
+            tmp_dir=tmp_path / "tmp",
+            gpu_targets=["gfx1100", "gfx1101"],
+        )
+        batch_split(args, toolchain)
+
+        relative_test = Path("bin/libhipcxx/lit-amdclang/test/cuda/float/Output")
+
+        def files(artifact):
+            directory = output_dir / artifact / prefix / relative_test
+            if not directory.exists():
+                return set()
+            return {p.name for p in directory.iterdir()}
+
+        assert files("libhipcxx_test_gfx1100") == {
+            "half.pass.cpp.gfx1100.compile_cmd",
+            "only1100.pass.cpp.gfx1100.compile_cmd",
+        }
+        assert files("libhipcxx_test_gfx1101") == {
+            "half.pass.cpp.gfx1101.compile_cmd",
+            "only1100.pass.cpp.gfx1101.unsupported",
+        }
+        assert files("libhipcxx_test_generic") == {
+            "half.pass.cpp.exe",
+            "half.pass.cpp.compile_cmd",
+        }
+        gfx1101_test = output_dir / "libhipcxx_test_gfx1101" / prefix / relative_test
+        assert (gfx1101_test / "half.pass.cpp.gfx1101.compile_cmd").read_text() == (
+            "cmd gfx1101"
+        )
+
+    def test_libhipcxx_hiprtc_files_of_other_targets_are_dropped(
+        self, toolchain, tmp_path
+    ):
+        parent_dir = tmp_path / "shard"
+        input_dir = parent_dir / "libhipcxx_test_gfx1250"
+        input_dir.mkdir(parents=True)
+        prefix = "math-libs/libhipcxx_hiprtc_tests/stage"
+        write_artifact_manifest(input_dir, [prefix])
+
+        test_dir = (
+            input_dir / prefix / "bin/libhipcxx/lit-hiprtc/test/cuda/float/Output"
+        )
+        test_dir.mkdir(parents=True)
+        (test_dir / "half.pass.cpp.gfx1250.gpu").write_bytes(b"gfx1250 build")
+        (test_dir / "half.pass.cpp.gfx1250.build.yml").write_text("run")
+
+        output_dir = tmp_path / "output"
+        args = Namespace(
+            input_dir=parent_dir,
+            output_dir=output_dir,
+            split_databases=["libhipcxx"],
+            verbose=False,
+            tmp_dir=tmp_path / "tmp",
+            gpu_targets=["gfx1100"],
+        )
+        batch_split(args, toolchain)
+
+        # The files are for a target this shard does not produce, so they are
+        # dropped together, not left behind in the generic artifact.
+        relative_test = Path("bin/libhipcxx/lit-hiprtc/test/cuda/float/Output")
+        generic_test = output_dir / "libhipcxx_test_generic" / prefix / relative_test
+        assert not (generic_test / "half.pass.cpp.gfx1250.gpu").exists()
+        assert not (generic_test / "half.pass.cpp.gfx1250.build.yml").exists()
+        assert not (output_dir / "libhipcxx_test_gfx1250").exists()
 
     def test_kpack_uses_original_prefix_not_synthetic(
         self, test_assets_dir, toolchain, tmp_path
