@@ -72,9 +72,10 @@ template <int Lanes, bool Bf16, bool Accumulate, typename Call> void check(Call 
                     (mode & RJ_ARITH_DOT_NEG_C ? 0x80000000U : 0U);
               expect_f32(regs.v[destination][lane], (low + high) + std::bit_cast<float>(acc),
                          RJ_ARITH_SEMANTICS_LOOSE, /*atol=*/1e-6, /*rtol=*/1e-6);
-              // Two products of one must be added before the large accumulator;
-              // sequential FMAs would lose both units. CLAMP is ignored as before.
-              if (lane == 0 && (mode == 0 || mode == RJ_ARITH_DOT_CLAMP) && destination >= 2) {
+              // Compatibility adds the pair before C; native Loose may round each update.
+              // CLAMP remains ignored in both modes.
+              if (semantics == RJ_ARITH_SEMANTICS_COMPATIBILITY && lane == 0 &&
+                  (mode == 0 || mode == RJ_ARITH_DOT_CLAMP) && destination >= 2) {
                 EXPECT_EQ(regs.v[destination][lane], 0x4b800001U);
               }
             }

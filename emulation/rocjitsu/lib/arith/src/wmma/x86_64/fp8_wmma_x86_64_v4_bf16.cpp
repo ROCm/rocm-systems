@@ -4,6 +4,7 @@
 // Native BF16 pair dots for loose gfx12 FP8/BF8 WMMA using AVX-512BW LUT decode.
 
 #include "common/simd.h"
+#include "common/x86_64/fp8_bf16_x86_64_v4.h"
 #include "wmma/x86_64/wmma_loose_x86_64_v4.h"
 
 namespace rocjitsu::arith {
@@ -22,7 +23,7 @@ bool fp8_wmma_x86_64_v4_bf16(uint32_t *const *d, const uint32_t *const *a, const
   alignas(64) uint32_t left[8][16];
   alignas(64) uint32_t right[8][16];
   if constexpr (Bf8A == Bf8B) {
-    const WmmaFp8Bf16Lut<Bf8A> lut;
+    const Fp8Bf16Lut<Bf8A> lut;
     RJ_ARITH_UNROLL(4)
     for (int k = 0; k < 16; k += 4) {
       const int reg = wmma_gfx12_packed_local(k) / 4;
@@ -36,7 +37,7 @@ bool fp8_wmma_x86_64_v4_bf16(uint32_t *const *d, const uint32_t *const *a, const
     }
   } else {
     {
-      const WmmaFp8Bf16Lut<Bf8A> lut_a;
+      const Fp8Bf16Lut<Bf8A> lut_a;
       RJ_ARITH_UNROLL(4)
       for (int k = 0; k < 16; k += 4) {
         const int reg = wmma_gfx12_packed_local(k) / 4;
@@ -47,7 +48,7 @@ bool fp8_wmma_x86_64_v4_bf16(uint32_t *const *d, const uint32_t *const *a, const
       }
     }
     {
-      const WmmaFp8Bf16Lut<Bf8B> lut_b;
+      const Fp8Bf16Lut<Bf8B> lut_b;
       RJ_ARITH_UNROLL(4)
       for (int k = 0; k < 16; k += 4) {
         const int reg = wmma_gfx12_packed_local(k) / 4;

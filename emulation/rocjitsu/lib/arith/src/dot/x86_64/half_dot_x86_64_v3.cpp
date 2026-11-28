@@ -12,17 +12,15 @@
 #include <stdint.h>
 
 namespace rocjitsu::arith {
-namespace {
-
 // Accumulate loose DOT2 into 16-bit results for the selected lanes. Requires validated
 // controls; preserve inactive destination lanes.
-template <bool Bf16>
-void dot(bool saturate, uint32_t exec_mask, uint32_t instruction_flags, uint32_t *d,
-         const uint32_t *a, const uint32_t *b, const uint32_t *c) {
+template <int Lanes, bool Bf16>
+void half_dot_x86_64_v3(bool saturate, uint64_t exec_mask, uint32_t instruction_flags, uint32_t *d,
+                        const uint32_t *a, const uint32_t *b, const uint32_t *c) {
   int c_shift = instruction_flags & RJ_ARITH_ALU_HIGH_C ? 16 : 0;
   int d_shift = instruction_flags & RJ_ARITH_ALU_HIGH_D ? 16 : 0;
   auto keep = _mm256_set1_epi32(d_shift ? 65535 : -65536);
-  for (int lane = 0; lane < 32; lane += 8) {
+  for (int lane = 0; lane < Lanes; lane += 8) {
     auto va = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(a + lane));
     auto vb = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(b + lane));
     auto vc = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(c + lane));
@@ -42,17 +40,13 @@ void dot(bool saturate, uint32_t exec_mask, uint32_t instruction_flags, uint32_t
   }
 }
 
-} // namespace
-
-// Accumulate loose DOT2 into 16-bit results. Preserve destination lanes outside exec_mask.
-// Requires the named CPU features and validated instruction controls.
-void half_dot_x86_64_v3(bool bf16, bool saturate, uint32_t exec_mask, uint32_t instruction_flags,
-                        uint32_t *d, const uint32_t *a, const uint32_t *b, const uint32_t *c) {
-  if (bf16) {
-    dot<true>(saturate, exec_mask, instruction_flags, d, a, b, c);
-  } else {
-    dot<false>(saturate, exec_mask, instruction_flags, d, a, b, c);
-  }
-}
+template void half_dot_x86_64_v3<32, false>(bool, uint64_t, uint32_t, uint32_t *, const uint32_t *,
+                                            const uint32_t *, const uint32_t *);
+template void half_dot_x86_64_v3<32, true>(bool, uint64_t, uint32_t, uint32_t *, const uint32_t *,
+                                           const uint32_t *, const uint32_t *);
+template void half_dot_x86_64_v3<64, false>(bool, uint64_t, uint32_t, uint32_t *, const uint32_t *,
+                                            const uint32_t *, const uint32_t *);
+template void half_dot_x86_64_v3<64, true>(bool, uint64_t, uint32_t, uint32_t *, const uint32_t *,
+                                           const uint32_t *, const uint32_t *);
 
 } // namespace rocjitsu::arith

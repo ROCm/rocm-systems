@@ -38,14 +38,22 @@ int dot(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags, uint32_t
     return RJ_ARITH_SUCCESS;
   }
 
-#if defined(RJ_ARITH_HAVE_X86_64_V4)
+#if defined(RJ_ARITH_HAVE_X86_64_V4_BF16)
   if constexpr (Bf16) {
-    if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4) &&
-        !rocjitsu::arith::is_exact(flags)) {
-      rocjitsu::arith::dot2_bf16_x86_64_v4(exec_mask, uint32_t(instruction_flags), d[0], a[0], b[0],
-                                           c[0]);
+    if (!rocjitsu::arith::is_exact(flags) &&
+        rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_ZEN4)) {
+      rocjitsu::arith::dot2_bf16_x86_64_v4_bf16<32, false>(exec_mask, uint32_t(instruction_flags),
+                                                           d[0], a[0], b[0], c[0]);
       return RJ_ARITH_SUCCESS;
     }
+  }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4) &&
+      !rocjitsu::arith::is_exact(flags)) {
+    rocjitsu::arith::dot2_x86_64_v4<32, Bf16>(exec_mask, uint32_t(instruction_flags), d[0], a[0],
+                                              b[0], c[0]);
+    return RJ_ARITH_SUCCESS;
   }
 #endif
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
@@ -132,6 +140,24 @@ int dot_wave64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags, u
   }
   if (!exec_mask) {
     return RJ_ARITH_SUCCESS;
+  }
+  if (!rocjitsu::arith::is_exact(flags) && !(instruction_flags >> 32)) {
+#if defined(RJ_ARITH_HAVE_X86_64_V4_BF16)
+    if constexpr (Bf16) {
+      if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_ZEN4)) {
+        rocjitsu::arith::dot2_bf16_x86_64_v4_bf16<64, false>(exec_mask, uint32_t(instruction_flags),
+                                                             d[0], a[0], b[0], c[0]);
+        return RJ_ARITH_SUCCESS;
+      }
+    }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+    if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+      rocjitsu::arith::dot2_x86_64_v4<64, Bf16>(exec_mask, uint32_t(instruction_flags), d[0], a[0],
+                                                b[0], c[0]);
+      return RJ_ARITH_SUCCESS;
+    }
+#endif
   }
   for (int half = 0; half < 2; ++half) {
     uint64_t half_instruction_flags =

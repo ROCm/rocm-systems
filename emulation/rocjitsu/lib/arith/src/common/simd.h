@@ -108,8 +108,9 @@ void ds_swizzle_x86_64_v3(int lanes, uint64_t exec_mask, uint32_t *d, const uint
 // Loose FP16/BF16 DOT2 with a selected 16-bit result half.
 // Preserve the other destination half and inactive lanes; D may alias inputs.
 // Requires the named CPU features and validated instruction controls.
-void half_dot_x86_64_v3(bool bf16, bool saturate, uint32_t exec_mask, uint32_t instruction_flags,
-                        uint32_t *d, const uint32_t *a, const uint32_t *b, const uint32_t *c);
+template <int Lanes, bool Bf16>
+void half_dot_x86_64_v3(bool saturate, uint64_t exec_mask, uint32_t instruction_flags, uint32_t *d,
+                        const uint32_t *a, const uint32_t *b, const uint32_t *c);
 
 // Loose FP8/BF8 WMMA in gfx12 Wave32 layout. D may alias any input.
 // Requires the named CPU features and validated instruction controls.
@@ -223,20 +224,22 @@ void half_fma_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t instruction
 // Loose FP16/BF16 DOT2 with a selected 16-bit result half.
 // Preserve the other destination half and inactive lanes; D may alias inputs.
 // Requires the named CPU features and validated instruction controls.
-void half_dot_x86_64_v4(bool bf16, bool saturate, uint32_t exec_mask, uint32_t instruction_flags,
-                        uint32_t *d, const uint32_t *a, const uint32_t *b, const uint32_t *c);
+template <int Lanes, bool Bf16>
+void half_dot_x86_64_v4(bool saturate, uint64_t exec_mask, uint32_t instruction_flags, uint32_t *d,
+                        const uint32_t *a, const uint32_t *b, const uint32_t *c);
 
 // Loose four-product FP8/BF8 dot with FP32 accumulation.
 // Preserve inactive lanes; D may alias inputs.
 // Requires the named CPU features and validated instruction controls.
-void fp8_dot_x86_64_v4(bool bf8_a, bool bf8_b, uint32_t exec_mask, uint32_t instruction_flags,
-                       uint32_t *d, const uint32_t *a, const uint32_t *b, const uint32_t *c);
+template <int Lanes, bool Bf8A, bool Bf8B>
+void fp8_dot_x86_64_v4(uint64_t exec_mask, uint32_t instruction_flags, uint32_t *d,
+                       const uint32_t *a, const uint32_t *b, const uint32_t *c);
 
-// Loose BF16 DOT2 using widened FP32 FMA, with half selectors.
-// Preserve inactive lanes; D may alias inputs.
-// Requires the named CPU features and validated instruction controls.
-void dot2_bf16_x86_64_v4(uint32_t exec_mask, uint32_t instruction_flags, uint32_t *d,
-                         const uint32_t *a, const uint32_t *b, const uint32_t *c);
+// Loose FP16/BF16 DOT2 through FP32 FMAs, with half selectors.
+// Preserve inactive lanes and aliases. Requires validated controls.
+template <int Lanes, bool Bf16>
+void dot2_x86_64_v4(uint64_t exec_mask, uint32_t instruction_flags, uint32_t *d, const uint32_t *a,
+                    const uint32_t *b, const uint32_t *c);
 
 // Compute A*literal+B when (Operands == rocjitsu::arith::FmaOperands::MultiplyLiteral), otherwise
 // A*B+literal. Operands must be MultiplyLiteral or AddLiteral. Preserve inactive lanes. Requires
@@ -311,6 +314,12 @@ void fma_exact_x86_64_v4(uint64_t flags, uint32_t exec_mask, uint32_t instructio
 
 #if defined(RJ_ARITH_HAVE_X86_64_V4_BF16)
 
+// Loose native BF16 pairs for a complete wave. Packed results use ALU controls;
+// FP32 results use DOT controls. Preserve inactive lanes and unselected output halves.
+template <int Lanes, bool Packed>
+void dot2_bf16_x86_64_v4_bf16(uint64_t exec_mask, uint32_t instruction_flags, uint32_t *d,
+                              const uint32_t *a, const uint32_t *b, const uint32_t *c);
+
 // Try loose gfx12 FP8/BF8 pair dots. A subnormal C declines the operation
 // with D unchanged. Requires Zen 4 dispatch and validated instruction controls.
 template <bool Bf8A, bool Bf8B>
@@ -328,6 +337,12 @@ bool wmma_x86_64_v4_bf16(uint32_t instruction_flags, uint32_t *const *d, const u
 #endif
 
 #if defined(RJ_ARITH_HAVE_AVX512VNNI)
+
+// Exact integer DOT4/DOT8 with final C saturation or wrapping and masked publication.
+// Requires validated controls and Zen4 dispatch. Sources may alias D.
+template <int Lanes, int Bits, bool Unsigned>
+void integer_dot_avx512vnni(uint64_t exec_mask, uint32_t instruction_flags, uint32_t *d,
+                            const uint32_t *a, const uint32_t *b, const uint32_t *c);
 
 // Compute a gfx11 integer tile with independent sixteen-lane factor groups.
 // Requires validated modifiers. D may overlap any input.

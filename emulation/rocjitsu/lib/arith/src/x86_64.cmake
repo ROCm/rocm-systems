@@ -196,7 +196,7 @@ set(rj_arith_x86_64_v4_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/compare/x86_64/class_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/compare/x86_64/float_compare_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/compare/x86_64/integer_compare_x86_64_v4.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/dot/x86_64/dot2_bf16_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/dot/x86_64/dot2_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/dot/x86_64/dot2_exact_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/dot/x86_64/fp8_dot_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/dot/x86_64/half_dot_x86_64_v4.cpp
@@ -269,6 +269,7 @@ set(rj_arith_x86_64_v4_sources
 )
 
 set(rj_arith_x86_64_v4_bf16_sources
+    ${CMAKE_CURRENT_SOURCE_DIR}/dot/x86_64/dot2_x86_64_v4_bf16.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/mfma_fp8_x86_64_v4_bf16.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/mfma_half_x86_64_v4_bf16.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/mfma_mixed_x86_64_v4_bf16.cpp
@@ -279,6 +280,7 @@ set(rj_arith_x86_64_v4_bf16_sources
 )
 
 set(rj_arith_avx512vnni_sources
+    ${CMAKE_CURRENT_SOURCE_DIR}/dot/x86_64/integer_dot_avx512vnni.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/gfx1250_integer_avx512vnni.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/matrix_i8_avx512vnni.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/sparse_matrix_i8_avx512vnni.cpp

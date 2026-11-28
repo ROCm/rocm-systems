@@ -13100,10 +13100,16 @@ TEST(ArithBridgeTest, CdnaFloatDotPairSumAndAccumulation) {
           fixture.wave->set_exec(0x8000000000000001ULL);
           fixture.wave->set_mode_raw(0); // Guest denormal controls do not affect DOT.
           fixture.wave->set_trapsts(0x10);
+          // Compatibility distinguishes pair-first rounding at 2^24. Loose
+          // uses small C so either native accumulation order is valid.
+          const uint32_t initial =
+              semantics == ArithmeticSemantics::Loose ? 0x3f800000U : 0x4b800000U;
+          const uint32_t result =
+              semantics == ArithmeticSemantics::Loose ? 0x40400000U : 0x4b800001U;
           for (int lane = 0; lane < 64; ++lane) {
             fixture.cu->write_vgpr(fixture.base(), lane, bf16 ? 0x3f803f80U : 0x3c003c00U);
             fixture.cu->write_vgpr(fixture.base() + 1, lane, bf16 ? 0x3f803f80U : 0x3c003c00U);
-            fixture.cu->write_vgpr(fixture.base() + 2, lane, 0x4b800000U);
+            fixture.cu->write_vgpr(fixture.base() + 2, lane, initial);
           }
           std::vector<uint32_t> words;
           if (form == 0) {
@@ -13145,9 +13151,9 @@ TEST(ArithBridgeTest, CdnaFloatDotPairSumAndAccumulation) {
           ASSERT_TRUE(instruction.succeeded());
           ASSERT_TRUE(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
                           .succeeded());
-          EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 2, 0), 0x4b800001U);
-          EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 2, 63), 0x4b800001U);
-          EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 2, 1), 0x4b800000U);
+          EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 2, 0), result);
+          EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 2, 63), result);
+          EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 2, 1), initial);
           EXPECT_EQ(fixture.wave->trapsts(), 0x10U);
         }
       }

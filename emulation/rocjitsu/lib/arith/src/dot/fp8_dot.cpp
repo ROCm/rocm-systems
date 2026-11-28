@@ -36,6 +36,14 @@ int dot(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags, uint32_t
   if (exec_mask == 0) {
     return RJ_ARITH_SUCCESS;
   }
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+  if (!rocjitsu::arith::is_exact(flags) &&
+      rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+    rocjitsu::arith::fp8_dot_x86_64_v4<32, Bf8A, Bf8B>(exec_mask, uint32_t(instruction_flags), d[0],
+                                                       a[0], b[0], c[0]);
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
   if (instruction_flags & rocjitsu::arith::kDotHalfSelection) {
     return rocjitsu::arith::with_dot_halves(
         instruction_flags, a, b,
@@ -70,13 +78,7 @@ int dot(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags, uint32_t
     }
     return RJ_ARITH_SUCCESS;
   }
-#if defined(RJ_ARITH_HAVE_X86_64_V4)
-  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
-    rocjitsu::arith::fp8_dot_x86_64_v4(Bf8A, Bf8B, exec_mask, instruction_flags, d[0], a[0], b[0],
-                                       c[0]);
-    return RJ_ARITH_SUCCESS;
-  }
-#endif
+
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
   if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
     rocjitsu::arith::fp8_dot_x86_64_v3(Bf8A, Bf8B, exec_mask, instruction_flags, d[0], a[0], b[0],
@@ -121,6 +123,14 @@ int dot_wave64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags, u
   if (!exec_mask) {
     return RJ_ARITH_SUCCESS;
   }
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+  if (!rocjitsu::arith::is_exact(flags) && !(instruction_flags >> 32) &&
+      rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+    rocjitsu::arith::fp8_dot_x86_64_v4<64, Bf8A, Bf8B>(exec_mask, uint32_t(instruction_flags), d[0],
+                                                       a[0], b[0], c[0]);
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
   for (int half = 0; half < 2; ++half) {
     uint64_t half_instruction_flags =
         rocjitsu::arith::dpp_half_wave_instruction_flags(instruction_flags, half);
