@@ -24,7 +24,7 @@ if(WIN32)
   endif()
 endif()
 
-set(CMAKE_HIP_ARCHITECTURES OFF CACHE STRING "HIP architectures to compile for")
+set(CMAKE_HIP_ARCHITECTURES native CACHE STRING "HIP architectures to compile for")
 
 project(12_cmake_hip_add_executable LANGUAGES CXX HIP)
 
