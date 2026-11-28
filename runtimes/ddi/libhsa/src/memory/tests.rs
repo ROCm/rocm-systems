@@ -316,6 +316,130 @@ fn virtual_mapping_contains_only_its_half_open_range() {
 }
 
 #[test]
+/// Verifies byte-sized anonymous reservations reach runtime lookup while size
+/// and flag errors leave output untouched.
+fn virtual_reservation_validates_anonymous_byte_sizes_before_runtime_lookup() {
+    let page = current_host_page().unwrap();
+    let sentinel = std::ptr::dangling_mut::<c_void>();
+    for size in [1, 4, 8, 128, page - 1, page, page + 1, page * 2 + 1] {
+        let mut address = sentinel;
+        // SAFETY: The output is writable throughout validation.
+        assert_eq!(
+            unsafe {
+                hsa_amd_vmem_address_reserve(&raw mut address, size, 0, VMEM_ADDRESS_NO_REGISTER)
+            },
+            NOT_INITIALIZED
+        );
+        assert_eq!(address, sentinel);
+        for alignment in [page as u64, (page * 16) as u64] {
+            let mut address = sentinel;
+            // SAFETY: The output is writable throughout validation.
+            assert_eq!(
+                unsafe {
+                    hsa_amd_vmem_address_reserve_align(
+                        &raw mut address,
+                        size,
+                        0,
+                        alignment,
+                        VMEM_ADDRESS_NO_REGISTER,
+                    )
+                },
+                NOT_INITIALIZED
+            );
+            assert_eq!(address, sentinel);
+        }
+    }
+    for (size, flags) in [
+        (0, VMEM_ADDRESS_NO_REGISTER),
+        (4, 0),
+        (page + 1, 0),
+        (page, 2),
+        (4, VMEM_ADDRESS_NO_REGISTER | 2),
+        (usize::MAX, VMEM_ADDRESS_NO_REGISTER),
+    ] {
+        let mut address = sentinel;
+        // SAFETY: The output is writable throughout the rejected request.
+        assert_eq!(
+            unsafe {
+                hsa_amd_vmem_address_reserve_align(&raw mut address, size, 0, page as u64, flags)
+            },
+            INVALID_ARGUMENT
+        );
+        assert_eq!(address, sentinel);
+    }
+    // SAFETY: Null output is rejected before it can be dereferenced.
+    assert_eq!(
+        unsafe {
+            hsa_amd_vmem_address_reserve_align(
+                std::ptr::null_mut(),
+                4,
+                0,
+                page as u64,
+                VMEM_ADDRESS_NO_REGISTER,
+            )
+        },
+        INVALID_ARGUMENT
+    );
+}
+
+#[test]
+/// Verifies logical bytes, managed page coverage and cleanup padding have
+/// distinct bounds under the production containment arithmetic.
+fn virtual_reservation_ranges_separate_logical_bytes_and_managed_pages() {
+    let base = 0x1_0000;
+    let page = 4096;
+    for (logical, usable) in [(4, page), (page + 1, page * 2)] {
+        assert!(reservation_contains_range(base, logical, base, logical));
+        assert!(reservation_contains_range(
+            base,
+            logical,
+            base + logical - 1,
+            1
+        ));
+        assert!(!reservation_contains_range(
+            base,
+            logical,
+            base,
+            logical + 1
+        ));
+        assert!(!reservation_contains_range(
+            base,
+            logical,
+            base + logical,
+            1
+        ));
+        assert!(!reservation_contains_range(base, logical, base, usable));
+        assert!(reservation_contains_range(base, usable, base, usable));
+        assert!(reservation_contains_range(base, usable, base + logical, 1));
+        assert!(reservation_contains_range(
+            base,
+            usable,
+            base + usable - 1,
+            1
+        ));
+        assert!(!reservation_contains_range(base, usable, base + usable, 1));
+        assert!(!reservation_contains_range(
+            base,
+            usable,
+            base + usable - 1,
+            2
+        ));
+        for extent in [logical, usable] {
+            assert!(!reservation_contains_range(base, extent, base, 0));
+            assert!(!reservation_contains_range(base, extent, base - 1, 1));
+            assert!(!reservation_contains_range(base, extent, base, usize::MAX));
+            assert!(!reservation_contains_range(base, extent, usize::MAX, 2));
+        }
+    }
+    assert!(!reservation_contains_range(
+        usize::MAX - 1,
+        4,
+        usize::MAX - 1,
+        1
+    ));
+}
+
+#[test]
 /// Verifies that CPU permissions share one process mapping without losing
 /// agent-specific grants when either CPU changes access.
 fn virtual_host_permissions_union_cpu_grants() {

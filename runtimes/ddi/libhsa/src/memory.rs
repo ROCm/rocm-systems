@@ -515,8 +515,8 @@ pub(crate) struct VmemReservation {
 }
 
 impl VmemReservation {
-    /// Records a reserved virtual range and its registration state.
-    pub(crate) fn new(address: VirtualAddress, registered: bool) -> Self {
+    /// Records the original byte extent independently of native page coverage.
+    pub(crate) fn new(address: VirtualAddress, size: usize, registered: bool) -> Self {
         let info = address.info();
         Self {
             address,
@@ -524,7 +524,7 @@ impl VmemReservation {
                 pointer_type: POINTER_TYPE_RESERVED_ADDR,
                 agent_base: 0,
                 host_base: Some(info.address as usize),
-                size: info.size as usize,
+                size,
                 owner: HsaAgent { handle: 0 },
                 global_flags: 0,
                 registered,
@@ -538,17 +538,33 @@ impl VmemReservation {
         }
     }
 
-    /// Checks whether the requested address belongs to this object.
+    /// Checks logical bounds used by public VMM operations and ownership.
     pub(crate) fn contains_range(&self, address: usize, size: usize) -> bool {
-        address
-            .checked_sub(self.address.info().address as usize)
-            .and_then(|offset| offset.checked_add(size))
-            .is_some_and(|end| size != 0 && end <= self.description.size)
+        reservation_contains_range(
+            self.address.info().address as usize,
+            self.description.size,
+            address,
+            size,
+        )
+    }
+
+    /// Checks managed page coverage, excluding native cleanup padding.
+    pub(crate) fn contains_managed_range(&self, address: usize, size: usize) -> bool {
+        let info = self.address.info();
+        reservation_contains_range(info.address as usize, info.size as usize, address, size)
     }
 
     /// Releases this object’s native backing.
     pub(crate) fn free(&mut self) -> Result<(), rocddi::Error> {
         self.address.free()
+    }
+}
+
+/// Checks a nonempty half-open range without overflowing either extent.
+fn reservation_contains_range(base: usize, extent: usize, address: usize, size: usize) -> bool {
+    match (base.checked_add(extent), address.checked_add(size)) {
+        (Some(limit), Some(end)) => size != 0 && address >= base && end <= limit,
+        _ => false,
     }
 }
 

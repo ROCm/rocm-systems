@@ -18,12 +18,24 @@ use crate::memory::*;
 use crate::platform::memory as native_memory;
 use crate::status::{boundary, map_error};
 
+/// Converts byte-sized anonymous reservations to their native page coverage.
+/// Registered virtual memory retains its page-multiple size requirement.
+fn reservation_usable_size(size: usize, page: usize, flags: u64) -> Result<usize, Status> {
+    if size == 0
+        || flags & !VMEM_ADDRESS_NO_REGISTER != 0
+        || (flags & VMEM_ADDRESS_NO_REGISTER == 0 && size % page != 0)
+    {
+        return Err(INVALID_ARGUMENT);
+    }
+    size.checked_next_multiple_of(page).ok_or(INVALID_ARGUMENT)
+}
+
 #[cfg_attr(
     all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_vmem_address_reserve")
 )]
 #[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
-/// Reserves a virtual address range without backing memory.
+/// Reserves virtual addresses, granting host access to unregistered ranges.
 pub unsafe extern "C" fn hsa_amd_vmem_address_reserve(
     address: *mut *mut c_void,
     size: usize,
@@ -58,15 +70,14 @@ pub unsafe extern "C" fn hsa_amd_vmem_address_reserve_align(
             Ok(page) => page,
             Err(status) => return status,
         };
-        if address.is_null()
-            || size == 0
-            || size % page != 0
-            || alignment < page as u64
-            || !alignment.is_power_of_two()
-            || flags & !VMEM_ADDRESS_NO_REGISTER != 0
-        {
+        if address.is_null() || alignment < page as u64 || !alignment.is_power_of_two() {
             return INVALID_ARGUMENT;
         }
+        let usable_size = match reservation_usable_size(size, page, flags) {
+            Ok(size) => size,
+            Err(status) => return status,
+        };
+        let registered = flags & VMEM_ADDRESS_NO_REGISTER == 0;
         let mut guard = match lock() {
             Ok(guard) => guard,
             Err(status) => return status,
@@ -81,19 +92,42 @@ pub unsafe extern "C" fn hsa_amd_vmem_address_reserve_align(
             .iter()
             .map(|gpu| &gpu.device)
             .collect::<Vec<_>>();
-        let reservation = match VirtualAddress::reserve(&devices, size as u64, alignment, requested)
-        {
-            Ok(reservation) => reservation,
-            Err(error) => return map_error(error),
+        let service = if registered {
+            None
+        } else {
+            let Some(device) = devices.first() else {
+                return INVALID_ARGUMENT;
+            };
+            let Some(session) = runtime.native_session() else {
+                return ERROR;
+            };
+            match session.memory_advice_for(device) {
+                Ok(service) => Some(service),
+                Err(error) => return map_error(error),
+            }
         };
+        let reservation =
+            match VirtualAddress::reserve(&devices, usable_size as u64, alignment, requested) {
+                Ok(reservation) => reservation,
+                Err(error) => return map_error(error),
+            };
+        if let Some(service) = service {
+            let info = reservation.info();
+            // SAFETY: This unpublished owner retains the entire anonymous
+            // usable extent; the runtime lock excludes mapping changes.
+            // Initial host access is not explicit SVM use.
+            if let Err(error) = unsafe { service.commit_host_range(info.address, info.size) } {
+                return map_error(error);
+            }
+        }
         let base = reservation.info().address as usize;
         if runtime.memory_state.vmem_reservations.contains_key(&base) {
             return ERROR;
         }
-        runtime.memory_state.vmem_reservations.insert(
-            base,
-            VmemReservation::new(reservation, flags & VMEM_ADDRESS_NO_REGISTER == 0),
-        );
+        runtime
+            .memory_state
+            .vmem_reservations
+            .insert(base, VmemReservation::new(reservation, size, registered));
         // SAFETY: The caller supplied writable output storage.
         unsafe { address.write(base as *mut c_void) };
         SUCCESS
@@ -993,4 +1027,70 @@ pub unsafe extern "C" fn hsa_amd_vmem_import_fabric_handle(
         unsafe { memory_handle.write(HsaAmdVmemAllocHandle { handle }) };
         SUCCESS
     })
+}
+
+#[cfg(test)]
+/// Reservation geometry checks shared with the production adapter.
+mod tests {
+    use super::*;
+
+    #[test]
+    /// Checks anonymous byte sizes round to pages and registered sizes stay strict.
+    fn anonymous_reservation_sizes_cover_only_the_touched_pages() {
+        for page in [4096, 65536] {
+            for (size, usable) in [
+                (1, page),
+                (4, page),
+                (8, page),
+                (128, page),
+                (page - 1, page),
+                (page, page),
+                (page + 1, page * 2),
+                (page * 2 + 1, page * 3),
+            ] {
+                assert_eq!(
+                    reservation_usable_size(size, page, VMEM_ADDRESS_NO_REGISTER),
+                    Ok(usable)
+                );
+                assert_eq!(
+                    reservation_usable_size(size, page, 0),
+                    if size % page == 0 {
+                        Ok(size)
+                    } else {
+                        Err(INVALID_ARGUMENT)
+                    }
+                );
+            }
+        }
+    }
+
+    #[test]
+    /// Checks zero, reserved flags and page-rounding overflow fail validation.
+    fn reservation_sizes_reject_zero_unknown_flags_and_overflow() {
+        for page in [4096, 65536] {
+            for flags in [0, VMEM_ADDRESS_NO_REGISTER, 2, u64::MAX] {
+                assert_eq!(
+                    reservation_usable_size(0, page, flags),
+                    Err(INVALID_ARGUMENT)
+                );
+            }
+            for flags in [2, VMEM_ADDRESS_NO_REGISTER | 2, u64::MAX] {
+                assert_eq!(
+                    reservation_usable_size(page, page, flags),
+                    Err(INVALID_ARGUMENT)
+                );
+            }
+            let largest_page_multiple = usize::MAX - (page - 1);
+            assert_eq!(
+                reservation_usable_size(largest_page_multiple, page, VMEM_ADDRESS_NO_REGISTER),
+                Ok(largest_page_multiple)
+            );
+            for size in [largest_page_multiple + 1, usize::MAX] {
+                assert_eq!(
+                    reservation_usable_size(size, page, VMEM_ADDRESS_NO_REGISTER),
+                    Err(INVALID_ARGUMENT)
+                );
+            }
+        }
+    }
 }

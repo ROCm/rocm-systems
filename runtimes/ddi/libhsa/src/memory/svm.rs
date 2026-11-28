@@ -27,7 +27,7 @@ fn managed_range(runtime: &HsaSession, address: u64, size: u64) -> Result<Manage
         .vmem_reservations
         .range(..=address_host)
         .next_back()
-        .filter(|(_, reservation)| reservation.contains_range(address_host, size_host))
+        .filter(|(_, reservation)| reservation.contains_managed_range(address_host, size_host))
         .ok_or(INVALID_ARGUMENT)?;
     if reservation.description.registered
         || runtime.memory_state.vmem_mappings.values().any(|mapping| {

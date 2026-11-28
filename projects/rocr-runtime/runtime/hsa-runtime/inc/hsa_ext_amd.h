@@ -4802,7 +4802,10 @@ typedef enum hsa_amd_vmem_address_reserve_flag_s {
 /**
  * @brief Allocate a reserved address range
  *
- * Reserve a virtual address range. The size must be a multiple of the system page size.
+ * Reserve a virtual address range. Unless @p flags includes
+ * ::HSA_AMD_VMEM_ADDRESS_NO_REGISTER, the size must be a multiple of the system page size.
+ * Unregistered ranges allow any nonzero byte size and initially permit host reads and writes.
+ * Release the range with the original requested size, including for unregistered ranges.
  * If it is not possible to allocate the address specified by @p address, then @p va will be
  * a different address range.
  * Address range should be released by calling hsa_amd_vmem_address_free.
@@ -4829,7 +4832,10 @@ hsa_status_t hsa_amd_vmem_address_reserve(void** va, size_t size, uint64_t addre
 /**
  * @brief Allocate a reserved address range
  *
- * Reserve a virtual address range. The size must be a multiple of the system page size.
+ * Reserve a virtual address range. Unless @p flags includes
+ * ::HSA_AMD_VMEM_ADDRESS_NO_REGISTER, the size must be a multiple of the system page size.
+ * Unregistered ranges allow any nonzero byte size and initially permit host reads and writes.
+ * Release the range with the original requested size, including for unregistered ranges.
  * If it is not possible to allocate the address specified by @p address, then @p va will be
  * a different address range.
  * Address range should be released by calling hsa_amd_vmem_address_free.
