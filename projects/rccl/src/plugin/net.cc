@@ -10,7 +10,9 @@
 #include "checks.h"
 #include "plugin.h"
 #include "nccl_net.h"
+#if defined(NCCL_OS_LINUX)
 #include "net_telemetry.h"
+#endif
 
 #include <string.h>
 #include <errno.h>
@@ -373,10 +375,12 @@ static ncclResult_t ncclNetPluginFinalize(struct ncclComm* comm, int pluginIndex
 }
 
 ncclResult_t ncclNetInit(struct ncclComm* comm) {
+#if defined(NCCL_OS_LINUX)
   // Not NCCLCHECKed: telemetry reports its own failures. See net_telemetry.h.
   if (rcclTelemetryInit() != 0) {
     INFO(NCCL_NET, "Telemetry was requested but could not start; continuing without it");
   }
+#endif
   bool ncclNetPluginInitialized = false;
   comm->ncclCollNet = nullptr;
   std::call_once(initPluginLibsOnceFlag, initPluginLibsOnceFunc);

@@ -109,7 +109,7 @@ static ncclResult_t getDmaBufFd(void* addr, size_t length, int* fd, bool forceNo
 // ROCr portable dmabuf export.
 static ncclResult_t getDmaBufFd(void* addr, size_t length, int* fd, bool sym_buffer = false) {
   if (ncclParamDmaBufEnable() == 0) return ncclInvalidUsage;
-#if HIP_VERSION >= 70000000
+#if HIP_VERSION >= 70000000 && defined(NCCL_OS_LINUX)
   static size_t hostPageSize = ncclOsGetPageSize();
   size_t alignedSize = length;
   uint64_t offset;

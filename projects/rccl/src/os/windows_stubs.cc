@@ -555,4 +555,11 @@ ncclResult_t ncclRmaFinalize(struct ncclComm* comm) {
   return ncclSuccess;
 }
 
+// The proxy-trace profiler is not built on Windows.
+void ncclProfilerProxyTraceDumpIfAny(void*) {}
+bool ncclProfilerProxyDiagEnabled() { return false; }
+ncclResult_t ncclProfilerRecordProxyDiagState(int, struct ncclProxyArgs*, uint8_t, int64_t, int64_t, uint16_t) {
+  return ncclSuccess;
+}
+
 #endif /* NCCL_OS_WINDOWS */

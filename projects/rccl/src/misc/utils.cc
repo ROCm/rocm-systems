@@ -11,7 +11,9 @@
 
 #include "nvmlwrap.h"
 
+#if defined(NCCL_OS_LINUX)
 #include <unistd.h>
+#endif
 #include <stdlib.h>
 #include <mutex>
 
@@ -44,7 +46,7 @@ ncclResult_t busIdToInt64(const char* busId, int64_t* id) {
     }
   }
   hexStr[hexOffset] = '\0';
-  *id = strtol(hexStr, NULL, 16);
+  *id = strtoll(hexStr, NULL, 16);
   return ncclSuccess;
 }
 
@@ -370,7 +372,7 @@ size_t get_sc_page_size() {
   static size_t cached_page_size = 0;
   size_t ps = __atomic_load_n(&cached_page_size, __ATOMIC_RELAXED);
   if (ps == 0) {
-    ps = (size_t)sysconf(_SC_PAGESIZE);
+    ps = ncclOsGetPageSize();
     __atomic_store_n(&cached_page_size, ps, __ATOMIC_RELAXED);
   }
   return ps;

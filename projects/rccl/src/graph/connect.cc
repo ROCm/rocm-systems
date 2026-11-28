@@ -402,7 +402,7 @@ static ncclResult_t printRecvSendLocalRanks(const struct ncclComm* comm, const i
   int numChannels = (nChannels > MAXCHANNELS / 2) ? 2 * nChannels : nChannels;
 
   for (int c = 0; c < numChannels; c++) {
-    sprintf(buff + offset, "     %02d%n", c, &inc);
+    inc = sprintf(buff + offset, "     %02d", c);
     offset += inc;
   }
   INFO(NCCL_GRAPH, "[RINGS] %s", buff);
@@ -412,7 +412,7 @@ static ncclResult_t printRecvSendLocalRanks(const struct ncclComm* comm, const i
     for (int c = 0; c < nChannels; c++) {
       int recvRank = comm->rankToLocalRank[ringRecv[c * comm->nNodes + n]];
       int sendRank = comm->rankToLocalRank[ringSend[c * comm->nNodes + n]];
-      sprintf(buff + offset, " %02d->%02d%n", recvRank, sendRank, &inc);
+      inc = sprintf(buff + offset, " %02d->%02d", recvRank, sendRank);
       offset += inc;
     }
     INFO(NCCL_GRAPH, "[RINGS] %s", buff);
