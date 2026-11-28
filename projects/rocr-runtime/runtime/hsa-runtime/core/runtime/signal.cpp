@@ -520,13 +520,14 @@ hsa_status_t SignalBatch::Create(uint32_t count, const hsa_signal_value_t* initi
                                  bool use_interrupt, const MemoryRegion* region,
                                  const std::vector<hsa_agent_t>& access_agents,
                                  bool host_access_via_hdp, bool host_access_across_link,
-                                 bool host_caches_arena, SignalBatch** batch,
+                                 bool host_caches_arena, bool uncached, SignalBatch** batch,
                                  hsa_signal_t* signals) {
   const size_t arena_bytes = size_t(count) * sizeof(SharedSignal);
 
   void* arena = nullptr;
   hsa_status_t status = Runtime::runtime_singleton_->AllocateMemory(
-      region, arena_bytes, MemoryRegion::AllocateNonPaged, &arena);
+      region, arena_bytes,
+      MemoryRegion::AllocateNonPaged | (uncached ? MemoryRegion::AllocateUncached : 0), &arena);
   if (status != HSA_STATUS_SUCCESS) return status;
   MAKE_NAMED_SCOPE_GUARD(arenaGuard, [&]() { Runtime::runtime_singleton_->FreeMemory(arena); });
 

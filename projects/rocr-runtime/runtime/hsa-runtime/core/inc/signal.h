@@ -263,12 +263,14 @@ class SignalBatch {
   /// already mapped for every agent. @p host_access_across_link states that the host reaches the
   /// arena uncached across PCIe or XGMI; the batch then keeps a host-side copy of each member's
   /// Signal*, since reading it from the slot would cost link round trips. @p host_caches_arena
-  /// states that the host maps the arena write-back (coherent XGMI).
+  /// states that the host maps the arena write-back (coherent XGMI). @p uncached allocates the
+  /// arena so that no GPU cache holds its lines.
   static hsa_status_t Create(uint32_t count, const hsa_signal_value_t* initial_values,
                              bool use_interrupt, const MemoryRegion* region,
                              const std::vector<hsa_agent_t>& access_agents,
                              bool host_access_via_hdp, bool host_access_across_link,
-                             bool host_caches_arena, SignalBatch** batch, hsa_signal_t* signals);
+                             bool host_caches_arena, bool uncached, SignalBatch** batch,
+                             hsa_signal_t* signals);
 
   static __forceinline hsa_amd_signal_batch_t Convert(SignalBatch* batch) {
     const hsa_amd_signal_batch_t handle = {
