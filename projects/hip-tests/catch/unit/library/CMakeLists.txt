@@ -14,6 +14,7 @@ set(TEST_SRC
     hipKernelSetAttributeForDevice.cc
     hipKernelSetCacheConfig.cc
     lib_attribute.cc
+    kernel_function_multi_device.cc
 )
 
 if (HIP_PLATFORM MATCHES "amd")

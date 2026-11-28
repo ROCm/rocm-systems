@@ -84,32 +84,68 @@ hipError_t LibraryContainer::Kernel(hipKernel_t* k, const std::string &name) {
   return hipSuccess;
 }
 
-hipError_t LibraryContainer::ResolveKernelForDevice(hipKernel_t* k, const std::string& name,
-                                                    int device) {
+hipError_t LibraryContainer::CodeObjectForDevice(hip::DynCO** code_object, int device) {
   IHIP_RETURN_ONFAIL(BuildIt());
   if (device == DeviceId()) {
-    return Kernel(k, name);
+    *code_object = dynco_.get();
+    return hipSuccess;
   }
 
-  // The first setter/getter for a non-primary device loads its code object. Later calls from
-  // either API reuse this entry and the kernel cached internally by Function::GetDynFunc.
+  // The first use for a non-primary device loads its code object; later uses reuse it. Global and
+  // managed-variable state stays owned by the primary code object.
   std::scoped_lock<std::mutex> lock(lib_mutex_);
   auto dynco = code_objects_by_device_.find(device);
   if (dynco == code_objects_by_device_.end()) {
     auto target = std::make_unique<hip::DynCO>(device);
     const char* fname = filename_.empty() ? nullptr : filename_.c_str();
     const void* image = filename_.empty() ? image_storage_.data() : nullptr;
-    // This code object is used only to resolve functions for the requested device, no need to
-    // initialize global and managed variables.
     constexpr bool init_global_vars = false;
     IHIP_RETURN_ONFAIL(target->loadCodeObject(fname, image, init_global_vars));
+    IHIP_RETURN_ONFAIL(target->linkGlobalVars(*dynco_));
     dynco = code_objects_by_device_.emplace(device, std::move(target)).first;
   }
+  *code_object = dynco->second.get();
+  return hipSuccess;
+}
 
+hipError_t LibraryContainer::ResolveKernelForDevice(hipKernel_t* k, const std::string& name,
+                                                    int device) {
+  hip::DynCO* code_object = nullptr;
+  IHIP_RETURN_ONFAIL(CodeObjectForDevice(&code_object, device));
+  if (code_object == dynco_.get()) {
+    return Kernel(k, name);
+  }
   hipFunction_t function = nullptr;
-  IHIP_RETURN_ONFAIL(dynco->second->getDynFunc(&function, name));
+  IHIP_RETURN_ONFAIL(code_object->getDynFunc(&function, name));
   *k = reinterpret_cast<hipKernel_t>(function);
+  return hipSuccess;
+}
 
+// Kernel of a library kernel's code object for device, or kernel itself if not a library kernel.
+hipError_t ResolveLibraryKernelForDevice(hipKernel_t* target, hipKernel_t kernel, int device) {
+  *target = kernel;
+  hipLibrary_t library = nullptr;
+  if (!hip::PlatformState::Instance().GetFunctionLibrary(kernel, &library)) {
+    return hipSuccess;
+  }
+  auto* container = reinterpret_cast<hip::LibraryContainer*>(library);
+  const char* name = nullptr;
+  if (container->GetKernelName(&name, kernel) != hipSuccess || name == nullptr) {
+    return hipErrorInvalidResourceHandle;
+  }
+  return container->ResolveKernelForDevice(target, name, device);
+}
+
+hipError_t ResolveLibraryFunctionForDevice(hipFunction_t* function, int device) {
+  const amd::Kernel* kernel = hip::asKernel(*function);
+  if (kernel == nullptr ||
+      kernel->getDeviceKernel(*hip::g_devices[device]->devices()[0]) != nullptr) {
+    return hipSuccess;
+  }
+  hipKernel_t resolved = nullptr;
+  IHIP_RETURN_ONFAIL(
+      ResolveLibraryKernelForDevice(&resolved, reinterpret_cast<hipKernel_t>(*function), device));
+  *function = reinterpret_cast<hipFunction_t>(resolved);
   return hipSuccess;
 }
 
@@ -121,26 +157,28 @@ size_t LibraryContainer::KernelCount() {
   return count;
 }
 
-hipError_t LibraryContainer::GetGlobal(const std::string& name, void** dptr, size_t* bytes) {
-  return dynco_->GetGlobal(name, dptr, bytes);
+hipError_t LibraryContainer::GetGlobal(const std::string& name, void** dptr, size_t* bytes,
+                                       int device) {
+  hip::DynCO* code_object = nullptr;
+  IHIP_RETURN_ONFAIL(CodeObjectForDevice(&code_object, device));
+  return code_object->GetGlobal(name, dptr, bytes);
 }
 
 hipError_t LibraryContainer::GetManaged(const std::string& name, void** dptr, size_t* bytes) {
   return dynco_->GetManaged(name, dptr, bytes);
 }
 
-hipError_t LibraryContainer::Module(hipModule_t* module) {
-  std::scoped_lock<std::mutex> lock(lib_mutex_);
-  if (dynco_ == nullptr) {
-    return hipErrorInvalidValue;
-  }
-  hipModule_t mod = dynco_->getModule();
+hipError_t LibraryContainer::Module(hipModule_t* module, int device) {
+  hip::DynCO* code_object = nullptr;
+  IHIP_RETURN_ONFAIL(CodeObjectForDevice(&code_object, device));
+  hipModule_t mod = code_object->getModule();
   if (mod == nullptr) {
     return hipErrorNotFound;
   }
-  if (!module_registered_) {
-    IHIP_RETURN_ONFAIL(hip::PlatformState::Instance().RegisterLibraryModule(mod, dynco_.get()));
-    module_registered_ = true;
+  std::scoped_lock<std::mutex> lock(lib_mutex_);
+  if (registered_modules_.count(mod) == 0) {
+    IHIP_RETURN_ONFAIL(hip::PlatformState::Instance().RegisterLibraryModule(mod, code_object));
+    registered_modules_.insert(mod);
   }
   *module = mod;
   return hipSuccess;
@@ -158,13 +196,12 @@ LibraryContainer::~LibraryContainer() {
   for (const auto& k : kernels_) {
     (void)hip::PlatformState::Instance().UnregisterLibraryFunction(k.second);
   }
+  for (hipModule_t mod : registered_modules_) {
+    hip::PlatformState::Instance().UnregisterLibraryModule(mod);
+  }
+  registered_modules_.clear();
   code_objects_by_device_.clear();
   kernels_.clear();
-
-  if (module_registered_) {
-    hip::PlatformState::Instance().UnregisterLibraryModule(dynco_->getModule());
-    module_registered_ = false;
-  }
   // dynco_ unique_ptr destruction frees vars, functions, and the underlying fatbin.
 }
 
@@ -286,7 +323,7 @@ hipError_t hipLibraryGetGlobal(void** dptr, size_t* bytes, hipLibrary_t library,
   if (ret != hipSuccess) {
     HIP_RETURN(ret);
   }
-  HIP_RETURN(l->GetGlobal(std::string{name}, dptr, bytes));
+  HIP_RETURN(l->GetGlobal(std::string{name}, dptr, bytes, ihipGetDevice()));
 }
 
 hipError_t hipLibraryGetManaged(void** dptr, size_t* bytes, hipLibrary_t library,
@@ -319,7 +356,7 @@ hipError_t hipLibraryGetModule(hipModule_t* pMod, hipLibrary_t library) {
   if (ret != hipSuccess) {
     HIP_RETURN(ret);
   }
-  HIP_RETURN(l->Module(pMod));
+  HIP_RETURN(l->Module(pMod, ihipGetDevice()));
 }
 
 hipError_t hipLibraryEnumerateKernels(hipKernel_t* kernels, unsigned int numKernels,
@@ -504,19 +541,20 @@ hipError_t hipKernelSetAttribute(hipFunction_attribute attrib, int value, hipKer
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  amd::Kernel* d_kernel = hip::asKernel(kernel);
+  if (dev < 0 || static_cast<size_t>(dev) >= hip::g_devices.size()) {
+    HIP_RETURN(hipErrorInvalidDevice);
+  }
+
+  hipKernel_t target_kernel = kernel;
+  HIP_RETURN_ONFAIL(ResolveLibraryKernelForDevice(&target_kernel, kernel, dev));
+
+  amd::Kernel* d_kernel = hip::asKernel(target_kernel);
   if (d_kernel == nullptr) {
     HIP_RETURN(hipErrorInvalidDeviceFunction);
   }
 
-  auto* currentDevice = hip::getCurrentDevice();
-  const auto& devices = currentDevice->devices();
-  if (dev < 0 || static_cast<size_t>(dev) >= devices.size()) {
-    HIP_RETURN(hipErrorInvalidDevice);
-  }
-
-  device::Kernel* deviceKernel = const_cast<device::Kernel*>(
-      d_kernel->getDeviceKernel(*devices[dev]));
+  device::Kernel* deviceKernel =
+      const_cast<device::Kernel*>(d_kernel->getDeviceKernel(*hip::g_devices[dev]->devices()[0]));
   if (deviceKernel == nullptr) {
     HIP_RETURN(hipErrorMissingConfiguration);
   }
@@ -736,7 +774,9 @@ hipError_t hipKernelGetFunction(hipFunction_t* pFunc, hipKernel_t kernel) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  *pFunc = reinterpret_cast<hipFunction_t>(kernel);
+  hipKernel_t target_kernel = kernel;
+  HIP_RETURN_ONFAIL(ResolveLibraryKernelForDevice(&target_kernel, kernel, hip::ihipGetDevice()));
+  *pFunc = reinterpret_cast<hipFunction_t>(target_kernel);
 
   HIP_RETURN(hipSuccess);
 }

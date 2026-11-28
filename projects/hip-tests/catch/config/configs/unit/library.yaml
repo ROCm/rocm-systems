@@ -144,6 +144,21 @@ library:
   Unit_hipLibraryGetModule_Negative_StaleAfterLibraryUnload:
     <<: *level_2
     tags: [module]
+  Unit_hipKernelGetFunction_MultiDevice_LaunchesOnEachDevice:
+    <<: *level_2
+    tags: [module]
+  Unit_hipKernelGetFunction_MultiDevice_SharesManagedVariable:
+    <<: *level_2
+    tags: [module]
+  Unit_hipLibrary_MultiDevice_RawKernelLaunch:
+    <<: *level_2
+    tags: [module]
+  Unit_hipLibraryGetGlobal_MultiDevice_PerDeviceStorage:
+    <<: *level_2
+    tags: [module]
+  Unit_hipLibraryGetModule_MultiDevice_MatchesKernelFunction:
+    <<: *level_2
+    tags: [module]
   Unit_hipLibraryGetModule_Negative_Parameters:
     <<: *level_2
     tags: [module]

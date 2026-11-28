@@ -47,12 +47,38 @@ hipError_t DynCO::loadCodeObject(const char* fname, const void* image, bool init
   return hipSuccess;
 }
 
+hipError_t DynCO::linkGlobalVars(DynCO& owner) {
+  std::scoped_lock lock(dclock_, owner.dclock_);
+  hip::Stream* stream = hip::getNullStream(*g_devices[device_id_]->asContext());
+  if (stream == nullptr) {
+    return hipErrorInvalidResourceHandle;
+  }
+  for (const auto& [name, owner_var] : owner.vars_) {
+    auto it = vars_.try_emplace(name, nullptr).first;
+    if (it->second == nullptr) {
+      it->second = new Var(name, Var::DeviceVarKind::DVK_Variable, 0, nullptr);
+    }
+    if (owner_var->GetVarKind() != Var::DVK_Managed) {
+      continue;
+    }
+    void* pointer = owner_var->GetManagedVarPtr();
+    amd::Memory* mem = nullptr;
+    IHIP_RETURN_ONFAIL(GetDeviceVar(&mem, name));
+    IHIP_RETURN_ONFAIL(ihipMemcpy(reinterpret_cast<address>(memDevPtr(mem)), &pointer,
+                                  mem->getSize(), hipMemcpyHostToDevice, *stream));
+    it->second->SetManagedVarInfo(pointer, owner_var->GetSize());
+    borrowed_managed_vars_.insert(name);
+  }
+  return hipSuccess;
+}
+
 // Dynamic Code Object
 DynCO::~DynCO() {
   std::scoped_lock lock(dclock_);
 
   for (auto& elem : vars_) {
-    if (elem.second->GetVarKind() == Var::DVK_Managed) {
+    if (elem.second->GetVarKind() == Var::DVK_Managed &&
+        borrowed_managed_vars_.count(elem.first) == 0) {
       [[maybe_unused]] hipError_t err = ihipFree(elem.second->GetManagedVarPtr());
       assert(err == hipSuccess && "Failed to free managed variable pointer");
     }
