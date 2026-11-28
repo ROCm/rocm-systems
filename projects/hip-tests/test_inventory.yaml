@@ -1,0 +1,1823 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# HIP test suite inventory.
+#
+# Stable, evidence-backed records for the meaningful test groups under
+# projects/hip-tests. Facts are derived from CMake suite placement, the
+# config/ YAML case metadata, contract source annotations, and the in-repo CI
+# workflow - not from the generated catch/TEST_PLAN.md, which is cited as
+# evidence but never duplicated here. All source and evidence paths are relative
+# to this component directory (projects/hip-tests); CI lanes that live outside
+# this repository are marked `external:`.
+
+schema_version: 1
+component: hip-tests
+source_of_truth:
+  suite_placement: catch/*/CMakeLists.txt
+  case_metadata: catch/config/configs/*.yaml
+  contract_assertions: catch/contract/**/*.cc
+  generated_inventory: catch/TEST_PLAN.md
+  ci_gates: ../../.github/workflows/*.yml and external CI references in TESTING.md
+
+vocabularies:
+  kind: [contract, unit, functional, integration, stress, performance]
+  disposition: [keep, merge_into, migrate, demote, retire, new, review]
+  gating: [trusted, informational, unstable, not_applicable]
+  cadence: [pr, build, on_demand]
+
+# How ctest labels referenced by records are produced. catch/config/parse_config.py
+# emits, per case: one [group] tag (the config file stem - e.g. contract,
+# performance, stress, multiproc, or the unit subdirectory name), one [level_N]
+# tag per declared level, one category tag ([quick]/[standard]/[comprehensive]/
+# [full]) for every category whose levels intersect the case (see
+# catch/config/configs/test_categories.yaml), the per-case semantic [tag]s from
+# the config, and [disabled]/[exclude_<target>] tags for skips.
+# catch_discover_tests(ADD_TAGS_AS_LABELS) turns every tag into a ctest label, so
+# the ctest_labels below are the stable group/category labels; per-case semantic
+# tags also exist but vary case by case.
+ctest_label_model:
+  group_label: catch/config/parse_config.py emits '[<config-stem>]' per case.
+  category_labels: [quick, standard, comprehensive, full]
+  level_labels: [level_0, level_1, level_2, level_3, level_4]
+  skip_labels: '[disabled], [exclude_<target>] - see catch/config/configs/test_categories.yaml'
+
+suites:
+
+  # ---------------------------------------------------------------------------
+  # Contract tier: catch/contract/, built ON by default via BUILD_CONTRACT_TESTS.
+  # Each domain subdirectory builds a per-domain Contract<Domain>Test executable
+  # through hip_add_exe_to_target(... TEST_TARGET_NAME contract_tests); the
+  # contract_tests custom target (declared ALL) aggregates them. @asserts tags
+  # feed catch/tools/gen_test_plan.py -> catch/TEST_PLAN.md.
+  # ---------------------------------------------------------------------------
+
+  - id: contract-memory
+    owner: HIP Runtime - Memory
+    name: HIP contract memory-allocation tests
+    kind: contract
+    domain: memory
+    purpose: Public allocation, free, memset, host-memory, pitched, managed, and advise invariants and invalid-input behavior.
+    oracle: Return code, allocation/state round-trip, or an explicitly accepted unsupported outcome.
+    source:
+      paths:
+        - catch/contract/memory
+        - catch/contract/memset
+        - catch/contract/driver_memset_async
+        - catch/contract/driver_memset_2d
+        - catch/contract/driver_memset_async_2d3d
+        - catch/contract/host_memory
+        - catch/contract/host_alloc_aliases
+        - catch/contract/pitched_memory
+        - catch/contract/driver_pitched_memory
+        - catch/contract/managed_memory
+        - catch/contract/mem_advise
+        - catch/contract/mem_advise_v2
+        - catch/contract/pointer_info
+        - catch/contract/pointer_query
+        - catch/contract/symbol_copy
+        - catch/contract/mem_batch_discard
+      build_option: BUILD_CONTRACT_TESTS
+      build_target: contract_tests
+      executable_pattern: Contract<Domain>Test per catch/contract/<domain>/CMakeLists.txt (e.g. ContractMemoryTest).
+    metadata:
+      framework: Catch2
+      annotations: '@asserts:'
+      config: catch/config/configs/contract.yaml
+      generated_plan: catch/TEST_PLAN.md
+    execution:
+      cadence: pr
+      gating: trusted
+      ctest_labels: [contract]
+      platforms: [linux, windows, wsl]
+      backends: [amd, nvidia]
+      prerequisites: [HIP runtime and device]
+      ci_lane:
+        external: TheRock build and HIP runtime test jobs run the device suite; see TESTING.md "Pre-submit and CI gates".
+    evidence:
+      - path: catch/contract/CMakeLists.txt
+        claim: Contract memory domains are built under BUILD_CONTRACT_TESTS via add_subdirectory.
+      - path: catch/contract/memory/CMakeLists.txt
+        claim: ContractMemoryTest is built by hip_add_exe_to_target with TEST_TARGET_NAME contract_tests.
+      - path: catch/config/configs/contract.yaml
+        claim: Contract memory cases (Contract_Memory_*) carry level and semantic tags.
+      - path: catch/TEST_PLAN.md
+        claim: Generated plan enumerates the asserted memory invariants (not duplicated here).
+    history: Contract coverage drift is enforced so new public memory APIs cannot land without an invariant or an explicit allowlist rationale.
+    disposition: keep
+    disposition_rationale: Contract tests are the portable allocation-API baseline; exhaustive sizing and behavior belong to the functional unit-memory group.
+
+  - id: contract-transfer
+    owner: HIP Runtime - Memory
+    name: HIP contract memory-transfer tests
+    kind: contract
+    domain: transfer
+    purpose: hipMemcpy family, async transfers, 3D copies, array copies, and driver copy invariants including direction and zero-byte handling.
+    oracle: Byte-for-byte round-trip, return code, or accepted unsupported outcome.
+    source:
+      paths:
+        - catch/contract/transfer
+        - catch/contract/async_transfer
+        - catch/contract/driver_memcpy
+        - catch/contract/driver_memcpy_2d
+        - catch/contract/copy3d
+        - catch/contract/async_copy3d
+        - catch/contract/driver_copy3d
+        - catch/contract/mem_batch_copy
+        - catch/contract/mem_batch_copy_3d
+        - catch/contract/mem_copy_with_attributes
+        - catch/contract/array_copy
+        - catch/contract/array_copy_ext
+        - catch/contract/array_memory
+        - catch/contract/array3d
+        - catch/contract/driver_array
+        - catch/contract/mipmapped_array
+        - catch/contract/mem_map_array
+      build_option: BUILD_CONTRACT_TESTS
+      build_target: contract_tests
+      executable_pattern: Contract<Domain>Test per catch/contract/<domain>/CMakeLists.txt.
+    metadata:
+      framework: Catch2
+      annotations: '@asserts:'
+      config: catch/config/configs/contract.yaml
+      generated_plan: catch/TEST_PLAN.md
+    execution:
+      cadence: pr
+      gating: trusted
+      ctest_labels: [contract]
+      platforms: [linux, windows, wsl]
+      backends: [amd, nvidia]
+      prerequisites: [HIP runtime and device]
+      ci_lane:
+        external: TheRock build and HIP runtime test jobs run the device suite; see TESTING.md.
+    evidence:
+      - path: catch/contract/CMakeLists.txt
+        claim: Transfer, copy3d, and array copy domains are built under BUILD_CONTRACT_TESTS.
+      - path: catch/config/configs/contract.yaml
+        claim: Contract_Transfer_* and Contract_DriverMemcpy_* cases are declared with transfer/driver_memcpy tags.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/contract/transfer) built via catch/contract/CMakeLists.txt under BUILD_CONTRACT_TESTS.
+    disposition: keep
+    disposition_rationale: Transfer contracts pin direction and round-trip semantics; sweep-sized transfer coverage stays in functional unit groups.
+
+  - id: contract-memory-pool-vmm
+    owner: HIP Runtime - Memory
+    name: HIP contract memory pool and virtual memory tests
+    kind: contract
+    domain: memory_pool
+    purpose: Memory-pool lifecycle/access, mem-location pools, shareable-handle pools, and virtual memory management (VMM) address/handle invariants.
+    oracle: Return code, pool/mapping state round-trip, or accepted unsupported outcome on capability-gated paths.
+    source:
+      paths:
+        - catch/contract/memory_pool
+        - catch/contract/memory_pool_lifecycle
+        - catch/contract/memory_pool_access
+        - catch/contract/mem_location_pool
+        - catch/contract/mempool_shareable_handle
+        - catch/contract/vmm
+        - catch/contract/vmm_handle
+      build_option: BUILD_CONTRACT_TESTS
+      build_target: contract_tests
+      executable_pattern: Contract<Domain>Test per catch/contract/<domain>/CMakeLists.txt.
+    metadata:
+      framework: Catch2
+      annotations: '@asserts:'
+      config: catch/config/configs/contract.yaml
+      generated_plan: catch/TEST_PLAN.md
+    execution:
+      cadence: pr
+      gating: trusted
+      ctest_labels: [contract]
+      platforms: [linux, windows, wsl]
+      backends: [amd, nvidia]
+      prerequisites: [HIP runtime and device, VMM-capable driver for virtual memory cases]
+      ci_lane:
+        external: TheRock build and HIP runtime test jobs run the device suite; see TESTING.md.
+    evidence:
+      - path: catch/contract/CMakeLists.txt
+        claim: memory_pool*, mem_location_pool, mempool_shareable_handle, vmm, and vmm_handle are built under BUILD_CONTRACT_TESTS.
+    history: VMM shareable-handle and pool paths are capability-gated; unsupported outcomes are accepted explicitly rather than failed.
+    disposition: keep
+    disposition_rationale: Pool/VMM contracts assert portable invariants with capability gating; deeper VMM behavior lives in the functional unit-vmm group.
+
+  - id: contract-device
+    owner: HIP Runtime - Device/Context
+    name: HIP contract device management tests
+    kind: contract
+    domain: device
+    purpose: Device enumeration/identity, configuration, lifecycle, reset, texture queries, and green-context invariants.
+    oracle: Return code, device-state round-trip (e.g. reset leaves the device usable), or accepted unsupported outcome.
+    source:
+      paths:
+        - catch/contract/device
+        - catch/contract/device_identity
+        - catch/contract/device_config
+        - catch/contract/device_lifecycle
+        - catch/contract/device_reset
+        - catch/contract/device_texture_query
+        - catch/contract/green_context
+      build_option: BUILD_CONTRACT_TESTS
+      build_target: contract_tests
+      executable_pattern: Contract<Domain>Test per catch/contract/<domain>/CMakeLists.txt.
+    metadata:
+      framework: Catch2
+      annotations: '@asserts:'
+      config: catch/config/configs/contract.yaml
+      generated_plan: catch/TEST_PLAN.md
+    execution:
+      cadence: pr
+      gating: trusted
+      ctest_labels: [contract]
+      platforms: [linux, windows, wsl]
+      backends: [amd, nvidia]
+      prerequisites: [HIP runtime and device]
+      ci_lane:
+        external: TheRock build and HIP runtime test jobs run the device suite; see TESTING.md.
+    evidence:
+      - path: catch/contract/CMakeLists.txt
+        claim: device, device_identity, device_config, device_lifecycle, device_reset, device_texture_query, and green_context are built under BUILD_CONTRACT_TESTS.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/contract/device) built via catch/contract/CMakeLists.txt under BUILD_CONTRACT_TESTS.
+    disposition: keep
+    disposition_rationale: Device contracts hold the portable management invariants; functional device coverage remains in unit-device-context.
+
+  - id: contract-context
+    owner: HIP Runtime - Device/Context
+    name: HIP contract context tests
+    kind: contract
+    domain: context
+    purpose: Driver context creation, mutation, and configuration invariants and invalid-state behavior.
+    oracle: Return code or context-state round-trip.
+    source:
+      paths:
+        - catch/contract/context
+        - catch/contract/context_mutation
+        - catch/contract/context_config
+      build_option: BUILD_CONTRACT_TESTS
+      build_target: contract_tests
+      executable_pattern: Contract<Domain>Test per catch/contract/<domain>/CMakeLists.txt.
+    metadata:
+      framework: Catch2
+      annotations: '@asserts:'
+      config: catch/config/configs/contract.yaml
+      generated_plan: catch/TEST_PLAN.md
+    execution:
+      cadence: pr
+      gating: trusted
+      ctest_labels: [contract]
+      platforms: [linux, windows, wsl]
+      backends: [amd, nvidia]
+      prerequisites: [HIP runtime and device]
+      ci_lane:
+        external: TheRock build and HIP runtime test jobs run the device suite; see TESTING.md.
+    evidence:
+      - path: catch/contract/CMakeLists.txt
+        claim: context, context_mutation, and context_config are built under BUILD_CONTRACT_TESTS.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/contract/context) built via catch/contract/CMakeLists.txt under BUILD_CONTRACT_TESTS.
+    disposition: keep
+    disposition_rationale: Driver context contracts stay portable; functional context behavior remains under unit-device-context.
+
+  - id: contract-stream-event
+    owner: HIP Runtime - Stream/Event
+    name: HIP contract stream and event tests
+    kind: contract
+    domain: stream_event
+    purpose: Stream creation/properties/attributes, callbacks, CU masks, stream-ordered memory ops, stream attach, and event invariants.
+    oracle: Return code, ordering/synchronization observable, or accepted unsupported outcome.
+    source:
+      paths:
+        - catch/contract/stream_event
+        - catch/contract/stream_props
+        - catch/contract/stream_callbacks
+        - catch/contract/stream_attributes
+        - catch/contract/stream_memory_ops
+        - catch/contract/stream_cu_mask
+        - catch/contract/stream_attach
+      build_option: BUILD_CONTRACT_TESTS
+      build_target: contract_tests
+      executable_pattern: Contract<Domain>Test per catch/contract/<domain>/CMakeLists.txt.
+    metadata:
+      framework: Catch2
+      annotations: '@asserts:'
+      config: catch/config/configs/contract.yaml
+      generated_plan: catch/TEST_PLAN.md
+    execution:
+      cadence: pr
+      gating: trusted
+      ctest_labels: [contract]
+      platforms: [linux, windows, wsl]
+      backends: [amd, nvidia]
+      prerequisites: [HIP runtime and device]
+      ci_lane:
+        external: TheRock build and HIP runtime test jobs run the device suite; see TESTING.md.
+    evidence:
+      - path: catch/contract/CMakeLists.txt
+        claim: stream_event, stream_props, stream_callbacks, stream_attributes, stream_memory_ops, stream_cu_mask, and stream_attach are built under BUILD_CONTRACT_TESTS.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/contract/stream_event) built via catch/contract/CMakeLists.txt under BUILD_CONTRACT_TESTS.
+    disposition: keep
+    disposition_rationale: Stream/event contracts pin portable ordering and property invariants; functional stream coverage remains in unit-stream-event.
+
+  - id: contract-peer
+    owner: HIP Runtime - Multi-GPU
+    name: HIP contract peer access and copy tests
+    kind: contract
+    domain: peer
+    purpose: Peer query, peer-access enable/disable, and peer copy invariants, with clean single-GPU degradation.
+    oracle: Return code, peer-copy data observable, or accepted unsupported/single-GPU outcome.
+    source:
+      paths:
+        - catch/contract/peer_query
+        - catch/contract/peer_access
+        - catch/contract/peer_copy
+      build_option: BUILD_CONTRACT_TESTS
+      build_target: contract_tests
+      executable_pattern: Contract<Domain>Test per catch/contract/<domain>/CMakeLists.txt.
+    metadata:
+      framework: Catch2
+      annotations: '@asserts:'
+      config: catch/config/configs/contract.yaml
+      generated_plan: catch/TEST_PLAN.md
+    execution:
+      cadence: pr
+      gating: trusted
+      ctest_labels: [contract]
+      platforms: [linux, windows, wsl]
+      backends: [amd, nvidia]
+      prerequisites: [HIP runtime and device, multiple peer-capable devices for peer-copy paths]
+      ci_lane:
+        external: TheRock build and HIP runtime test jobs run the device suite; multi-GPU coverage depends on runner topology; see TESTING.md.
+    evidence:
+      - path: catch/contract/CMakeLists.txt
+        claim: peer_query, peer_access, and peer_copy are built under BUILD_CONTRACT_TESTS.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/contract/peer_query) built via catch/contract/CMakeLists.txt under BUILD_CONTRACT_TESTS.
+    disposition: keep
+    disposition_rationale: Peer contracts assert portable invariants and skip cleanly on single-GPU hosts; multi-GPU execution-context classification is tracked as a restructuring review item.
+
+  - id: contract-kernel-launch
+    owner: HIP Runtime - Kernel Launch
+    name: HIP contract kernel and launch tests
+    kind: contract
+    domain: kernel_launch
+    purpose: Kernel object attributes, call-config and function attributes, kernel launch, driver launch-ex, and kernel name reference.
+    oracle: Return code, launch/result observable, or accepted unsupported outcome.
+    source:
+      paths:
+        - catch/contract/kernel
+        - catch/contract/call_config
+        - catch/contract/func_attributes
+        - catch/contract/kernel_launch
+        - catch/contract/driver_launch_ex
+        - catch/contract/kernel_name_ref
+        - catch/contract/kernel_object_attributes
+      build_option: BUILD_CONTRACT_TESTS
+      build_target: contract_tests
+      executable_pattern: Contract<Domain>Test per catch/contract/<domain>/CMakeLists.txt.
+    metadata:
+      framework: Catch2
+      annotations: '@asserts:'
+      config: catch/config/configs/contract.yaml
+      generated_plan: catch/TEST_PLAN.md
+    execution:
+      cadence: pr
+      gating: trusted
+      ctest_labels: [contract]
+      platforms: [linux, windows, wsl]
+      backends: [amd, nvidia]
+      prerequisites: [HIP runtime and device]
+      ci_lane:
+        external: TheRock build and HIP runtime test jobs run the device suite; see TESTING.md.
+    evidence:
+      - path: catch/contract/CMakeLists.txt
+        claim: kernel, call_config, func_attributes, kernel_launch, driver_launch_ex, kernel_name_ref, and kernel_object_attributes are built under BUILD_CONTRACT_TESTS.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/contract/kernel) built via catch/contract/CMakeLists.txt under BUILD_CONTRACT_TESTS.
+    disposition: keep
+    disposition_rationale: Launch contracts pin portable configuration and attribute invariants; exhaustive launch behavior lives in unit-kernel-launch.
+
+  - id: contract-multi-device-launch
+    owner: HIP Runtime - Multi-GPU
+    name: HIP contract multi-device launch tests
+    kind: contract
+    domain: multi_gpu
+    purpose: hipLaunch cooperative/multi-device launch invariants and clean single-GPU degradation.
+    oracle: Return code, cross-device launch observable, or accepted unsupported/single-GPU outcome.
+    source:
+      paths:
+        - catch/contract/multi_device_launch
+      build_option: BUILD_CONTRACT_TESTS
+      build_target: contract_tests
+      executable_pattern: Contract<Domain>Test per catch/contract/multi_device_launch/CMakeLists.txt.
+    metadata:
+      framework: Catch2
+      annotations: '@asserts:'
+      config: catch/config/configs/contract.yaml
+      generated_plan: catch/TEST_PLAN.md
+    execution:
+      cadence: pr
+      gating: trusted
+      ctest_labels: [contract]
+      platforms: [linux, windows, wsl]
+      backends: [amd, nvidia]
+      prerequisites: [HIP runtime and device, multiple devices for cross-device launch paths]
+      ci_lane:
+        external: TheRock build and HIP runtime test jobs run the device suite; multi-device coverage depends on runner topology; see TESTING.md.
+    evidence:
+      - path: catch/contract/CMakeLists.txt
+        claim: multi_device_launch is built under BUILD_CONTRACT_TESTS.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/contract/multi_device_launch) built via catch/contract/CMakeLists.txt under BUILD_CONTRACT_TESTS.
+    disposition: review
+    disposition_rationale: The contract case remains active and portable, but its multi-GPU execution-context classification needs explicit integration/multi-GPU metadata; tracked as an open restructuring item rather than a move.
+    related_restructuring: TEST_RESTRUCTURING.md
+
+  - id: contract-occupancy
+    owner: HIP Runtime - Kernel Launch
+    name: HIP contract occupancy tests
+    kind: contract
+    domain: occupancy
+    purpose: Occupancy calculator, extended, and variable-SMEM query invariants and invalid-input behavior.
+    oracle: Return code or occupancy value within documented bounds.
+    source:
+      paths:
+        - catch/contract/occupancy
+        - catch/contract/occupancy_ext
+        - catch/contract/occupancy_variable
+      build_option: BUILD_CONTRACT_TESTS
+      build_target: contract_tests
+      executable_pattern: Contract<Domain>Test per catch/contract/<domain>/CMakeLists.txt.
+    metadata:
+      framework: Catch2
+      annotations: '@asserts:'
+      config: catch/config/configs/contract.yaml
+      generated_plan: catch/TEST_PLAN.md
+    execution:
+      cadence: pr
+      gating: trusted
+      ctest_labels: [contract]
+      platforms: [linux, windows, wsl]
+      backends: [amd, nvidia]
+      prerequisites: [HIP runtime and device]
+      ci_lane:
+        external: TheRock build and HIP runtime test jobs run the device suite; see TESTING.md.
+    evidence:
+      - path: catch/contract/CMakeLists.txt
+        claim: occupancy, occupancy_ext, and occupancy_variable are built under BUILD_CONTRACT_TESTS.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/contract/occupancy) built via catch/contract/CMakeLists.txt under BUILD_CONTRACT_TESTS.
+    disposition: keep
+    disposition_rationale: Occupancy contracts pin portable query invariants; functional occupancy coverage remains in unit-occupancy.
+
+  - id: contract-graph
+    owner: HIP Runtime - Graph
+    name: HIP contract graph tests
+    kind: contract
+    domain: graph
+    purpose: Graph creation, capture, node types, update, clone, child graphs, host nodes, exec lifecycle, debug, and user-object invariants and invalid-state behavior.
+    oracle: Return code, graph/node state observable, or accepted unsupported outcome.
+    source:
+      paths:
+        - catch/contract/graph
+        - catch/contract/graph_capture
+        - catch/contract/stream_capture_mode
+        - catch/contract/capture_to_graph
+        - catch/contract/graph_kernel
+        - catch/contract/graph_event
+        - catch/contract/graph_topology
+        - catch/contract/graph_clone
+        - catch/contract/graph_update
+        - catch/contract/graph_exec_lifecycle
+        - catch/contract/graph_node_types
+        - catch/contract/graph_child
+        - catch/contract/graph_host
+        - catch/contract/graph_mem_nodes
+        - catch/contract/graph_generic_node
+        - catch/contract/graph_memcpy3d_node
+        - catch/contract/graph_batch_mem_op
+        - catch/contract/driver_graph_node
+        - catch/contract/graph_instantiate_params
+        - catch/contract/graph_debug
+        - catch/contract/graph_node_find
+        - catch/contract/graph_user_objects
+        - catch/contract/graph_node_enabled
+        - catch/contract/graph_node_attributes
+        - catch/contract/graph_node_params
+        - catch/contract/graph_node_setters
+        - catch/contract/graph_symbol_copy_nodes
+      build_option: BUILD_CONTRACT_TESTS
+      build_target: contract_tests
+      executable_pattern: Contract<Domain>Test per catch/contract/<domain>/CMakeLists.txt.
+    metadata:
+      framework: Catch2
+      annotations: '@asserts:'
+      config: catch/config/configs/contract.yaml
+      generated_plan: catch/TEST_PLAN.md
+    execution:
+      cadence: pr
+      gating: trusted
+      ctest_labels: [contract]
+      platforms: [linux, windows, wsl]
+      backends: [amd, nvidia]
+      prerequisites: [HIP runtime and device]
+      ci_lane:
+        external: TheRock build and HIP runtime test jobs run the device suite; see TESTING.md.
+    evidence:
+      - path: catch/contract/CMakeLists.txt
+        claim: The graph and graph_* node domains plus capture/driver_graph_node are built under BUILD_CONTRACT_TESTS.
+    history: "Repository evidence shows structural-only coverage for the graph memory-free node: it is constructed and its parameters are round-tripped without graph instantiation or launch. The originating crash rationale is not located or verified in repository evidence; see TESTING_INCIDENTS.md (TI-006)."
+    disposition: keep
+    disposition_rationale: Graph contracts pin portable lifecycle and node invariants; functional graph behavior remains in unit-graph.
+
+  - id: contract-texture
+    owner: HIP Runtime - Texture/Surface
+    name: HIP contract texture tests
+    kind: contract
+    domain: texture
+    purpose: Texture object and reference query/bind invariants, including driver texture objects and reference-symbol paths.
+    oracle: Return code, sampled-value observable, or accepted unsupported outcome.
+    source:
+      paths:
+        - catch/contract/texture
+        - catch/contract/driver_texture_object
+        - catch/contract/texture_reference
+        - catch/contract/texture_reference_symbol
+      build_option: BUILD_CONTRACT_TESTS
+      build_target: contract_tests
+      executable_pattern: Contract<Domain>Test per catch/contract/<domain>/CMakeLists.txt.
+    metadata:
+      framework: Catch2
+      annotations: '@asserts:'
+      config: catch/config/configs/contract.yaml
+      generated_plan: catch/TEST_PLAN.md
+    execution:
+      cadence: pr
+      gating: trusted
+      ctest_labels: [contract]
+      platforms: [linux, windows, wsl]
+      backends: [amd, nvidia]
+      prerequisites: [HIP runtime and device]
+      ci_lane:
+        external: TheRock build and HIP runtime test jobs run the device suite; see TESTING.md.
+    evidence:
+      - path: catch/contract/CMakeLists.txt
+        claim: texture, driver_texture_object, texture_reference, and texture_reference_symbol are built under BUILD_CONTRACT_TESTS.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/contract/texture) built via catch/contract/CMakeLists.txt under BUILD_CONTRACT_TESTS.
+    disposition: keep
+    disposition_rationale: Texture contracts pin portable query/bind invariants; functional texture/surface coverage remains in unit-texture-surface.
+
+  - id: contract-module-loader
+    owner: HIP Runtime - Module/Loader
+    name: HIP contract module, library, and JIT loader tests
+    kind: contract
+    domain: module
+    purpose: Module load (file/ex/exec), JIT link, and library load invariants and invalid-input behavior for the code-object loader.
+    oracle: Return code, loaded-symbol/launch observable, or accepted unsupported outcome.
+    source:
+      paths:
+        - catch/contract/module
+        - catch/contract/module_load_ex
+        - catch/contract/module_load_file
+        - catch/contract/module_exec
+        - catch/contract/jit_link
+        - catch/contract/library
+        - catch/contract/library_file
+      build_option: BUILD_CONTRACT_TESTS
+      build_target: contract_tests
+      executable_pattern: Contract<Domain>Test per catch/contract/<domain>/CMakeLists.txt.
+    metadata:
+      framework: Catch2
+      annotations: '@asserts:'
+      config: catch/config/configs/contract.yaml
+      generated_plan: catch/TEST_PLAN.md
+    execution:
+      cadence: pr
+      gating: trusted
+      ctest_labels: [contract]
+      platforms: [linux, windows, wsl]
+      backends: [amd, nvidia]
+      prerequisites: [HIP runtime and device, code-object/module loading support]
+      ci_lane:
+        external: TheRock build and HIP runtime test jobs run the device suite; see TESTING.md.
+    evidence:
+      - path: catch/contract/CMakeLists.txt
+        claim: module, module_load_ex, module_load_file, module_exec, jit_link, library, and library_file are built under BUILD_CONTRACT_TESTS.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/contract/module) built via catch/contract/CMakeLists.txt under BUILD_CONTRACT_TESTS.
+    disposition: keep
+    disposition_rationale: Loader contracts pin portable load/link invariants; functional module/loader behavior remains in unit-module-loader and unit-rtc.
+
+  - id: contract-error
+    owner: HIP Runtime - Error Handling
+    name: HIP contract error-handling tests
+    kind: contract
+    domain: error
+    purpose: Runtime and driver error-reporting invariants, including sticky-error semantics and string/name lookups.
+    oracle: Return code and error-state round-trip (sticky vs cleared).
+    source:
+      paths:
+        - catch/contract/error_api
+        - catch/contract/driver_error
+      build_option: BUILD_CONTRACT_TESTS
+      build_target: contract_tests
+      executable_pattern: Contract<Domain>Test per catch/contract/<domain>/CMakeLists.txt.
+    metadata:
+      framework: Catch2
+      annotations: '@asserts:'
+      config: catch/config/configs/contract.yaml
+      generated_plan: catch/TEST_PLAN.md
+    execution:
+      cadence: pr
+      gating: trusted
+      ctest_labels: [contract]
+      platforms: [linux, windows, wsl]
+      backends: [amd, nvidia]
+      prerequisites: [HIP runtime and device]
+      ci_lane:
+        external: TheRock build and HIP runtime test jobs run the device suite; see TESTING.md.
+    evidence:
+      - path: catch/contract/CMakeLists.txt
+        claim: error_api and driver_error are built under BUILD_CONTRACT_TESTS.
+    history: Sticky-error cleanup is a recurring hazard; see TESTING_INCIDENTS.md (TI-002).
+    disposition: keep
+    disposition_rationale: Error contracts pin portable sticky/cleared semantics; functional error coverage remains in unit-error-handling.
+
+  - id: contract-interop
+    owner: HIP Runtime - Interop
+    name: HIP contract interop and IPC tests
+    kind: contract
+    domain: interop
+    purpose: Graphics interop, external-resource import, and IPC handle invariants, with explicit rejection/unsupported handling where producers are absent.
+    oracle: Return code, imported-resource observable, or accepted unsupported/rejection outcome.
+    source:
+      paths:
+        - catch/contract/graphics_interop
+        - catch/contract/external_resource
+        - catch/contract/ipc
+      build_option: BUILD_CONTRACT_TESTS
+      build_target: contract_tests
+      executable_pattern: Contract<Domain>Test per catch/contract/<domain>/CMakeLists.txt.
+    metadata:
+      framework: Catch2
+      annotations: '@asserts:'
+      config: catch/config/configs/contract.yaml
+      generated_plan: catch/TEST_PLAN.md
+    execution:
+      cadence: pr
+      gating: trusted
+      ctest_labels: [contract]
+      platforms: [linux, windows, wsl]
+      backends: [amd, nvidia]
+      prerequisites: [HIP runtime and device, external producer or graphics environment for import paths]
+      ci_lane:
+        external: TheRock build and HIP runtime test jobs run the device suite; interop coverage depends on environment; see TESTING.md.
+    evidence:
+      - path: catch/contract/CMakeLists.txt
+        claim: graphics_interop, external_resource, and ipc are built under BUILD_CONTRACT_TESTS.
+    history: External-semaphore graph-node and some interop import paths are environment- or capability-gated; see TESTING_INCIDENTS.md (TI-001).
+    disposition: keep
+    disposition_rationale: Interop/IPC contracts pin portable rejection and import invariants; richer interop behavior remains in unit-interop-graphics and integration-multiprocess.
+
+  - id: contract-runtime-services
+    owner: HIP Runtime - Core Services
+    name: HIP contract runtime services tests
+    kind: contract
+    domain: runtime
+    purpose: Runtime init/version, extension, logging, profiler-control, and driver entry-point lookup invariants.
+    oracle: Return code, returned handle/function pointer, or accepted unsupported outcome.
+    source:
+      paths:
+        - catch/contract/runtime
+        - catch/contract/extension
+        - catch/contract/logging
+        - catch/contract/profiler
+        - catch/contract/driver_entry_point
+      build_option: BUILD_CONTRACT_TESTS
+      build_target: contract_tests
+      executable_pattern: Contract<Domain>Test per catch/contract/<domain>/CMakeLists.txt.
+    metadata:
+      framework: Catch2
+      annotations: '@asserts:'
+      config: catch/config/configs/contract.yaml
+      generated_plan: catch/TEST_PLAN.md
+    execution:
+      cadence: pr
+      gating: trusted
+      ctest_labels: [contract]
+      platforms: [linux, windows, wsl]
+      backends: [amd, nvidia]
+      prerequisites: [HIP runtime and device]
+      ci_lane:
+        external: TheRock build and HIP runtime test jobs run the device suite; see TESTING.md.
+    evidence:
+      - path: catch/contract/CMakeLists.txt
+        claim: runtime, extension, logging, profiler, and driver_entry_point are built under BUILD_CONTRACT_TESTS.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/contract/runtime) built via catch/contract/CMakeLists.txt under BUILD_CONTRACT_TESTS.
+    disposition: keep
+    disposition_rationale: Runtime-service contracts pin portable init/lookup invariants and remain the API baseline for these paths.
+
+  # ---------------------------------------------------------------------------
+  # Legacy unit/functional tier: catch/unit/, built ON by default via
+  # BUILD_UNIT_TESTS. Each subdirectory is a feature group; parse_config.py emits
+  # the subdirectory name as the [group] ctest label. These groups predate the
+  # contract tier and remain active; where a contract domain now pins the portable
+  # invariants, the legacy group is marked `review` (not retired) because it still
+  # provides broader functional and sweep-sized coverage.
+  # ---------------------------------------------------------------------------
+
+  - id: unit-memory
+    owner: HIP Runtime - Memory
+    name: HIP unit memory tests
+    kind: functional
+    domain: memory
+    purpose: Functional allocation, copy, memset, managed, and device-memory behavior across sizes and configurations.
+    oracle: Data correctness, return code, and state round-trip across parameter sweeps.
+    source:
+      paths:
+        - catch/unit/memory
+        - catch/unit/device_memory
+      build_option: BUILD_UNIT_TESTS
+      build_target: build_tests
+    metadata:
+      framework: Catch2
+      config: catch/config/configs/unit/memory.yaml
+    execution:
+      cadence: pr
+      gating: trusted
+      ctest_labels: [memory, device_memory]
+      platforms: [linux, windows, wsl]
+      backends: [amd, nvidia]
+      prerequisites: [HIP runtime and device]
+      ci_lane:
+        external: TheRock build and HIP runtime test jobs run the device suite; see TESTING.md.
+    evidence:
+      - path: catch/unit/CMakeLists.txt
+        claim: memory and device_memory are built under BUILD_UNIT_TESTS.
+      - path: catch/config/configs/unit/memory.yaml
+        claim: Unit memory cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/device_memory.yaml
+        claim: Unit device-memory cases carry level/skip metadata driving ctest labels.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/unit/memory) built via catch/unit/CMakeLists.txt under BUILD_UNIT_TESTS.
+    disposition: review
+    disposition_rationale: Legacy functional memory coverage stays active; contract-memory pins the portable invariants but does not replace sweep-sized functional behavior. Classification pending restructuring review.
+    related_restructuring: TEST_RESTRUCTURING.md
+
+  - id: unit-stream-event
+    owner: HIP Runtime - Stream/Event
+    name: HIP unit stream and event tests
+    kind: functional
+    domain: stream_event
+    purpose: Functional stream, event, and stream-per-thread behavior, synchronization, and ordering.
+    oracle: Ordering/synchronization observable and return code.
+    source:
+      paths:
+        - catch/unit/stream
+        - catch/unit/event
+        - catch/unit/streamperthread
+      build_option: BUILD_UNIT_TESTS
+      build_target: build_tests
+    metadata:
+      framework: Catch2
+      config: catch/config/configs/unit/stream.yaml
+    execution:
+      cadence: pr
+      gating: trusted
+      ctest_labels: [stream, event, streamperthread]
+      platforms: [linux, windows, wsl]
+      backends: [amd, nvidia]
+      prerequisites: [HIP runtime and device]
+      ci_lane:
+        external: TheRock build and HIP runtime test jobs run the device suite; see TESTING.md.
+    evidence:
+      - path: catch/unit/CMakeLists.txt
+        claim: stream, event, and streamperthread are built under BUILD_UNIT_TESTS.
+      - path: catch/config/configs/unit/stream.yaml
+        claim: Unit stream cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/event.yaml
+        claim: Unit event cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/streamperthread.yaml
+        claim: Unit streamperthread cases carry level/skip metadata driving ctest labels.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/unit/stream) built via catch/unit/CMakeLists.txt under BUILD_UNIT_TESTS.
+    disposition: review
+    disposition_rationale: Legacy functional stream/event coverage stays active alongside contract-stream-event; classification pending restructuring review.
+    related_restructuring: TEST_RESTRUCTURING.md
+
+  - id: unit-graph
+    owner: HIP Runtime - Graph
+    name: HIP unit graph tests
+    kind: functional
+    domain: graph
+    purpose: Functional graph capture, build, update, and execution behavior.
+    oracle: Graph execution result and return code.
+    source:
+      paths:
+        - catch/unit/graph
+      build_option: BUILD_UNIT_TESTS
+      build_target: build_tests
+    metadata:
+      framework: Catch2
+      config: catch/config/configs/unit/graph.yaml
+    execution:
+      cadence: pr
+      gating: trusted
+      ctest_labels: [graph]
+      platforms: [linux, windows, wsl]
+      backends: [amd, nvidia]
+      prerequisites: [HIP runtime and device]
+      ci_lane:
+        external: TheRock build and HIP runtime test jobs run the device suite; see TESTING.md.
+    evidence:
+      - path: catch/unit/CMakeLists.txt
+        claim: graph is built under BUILD_UNIT_TESTS.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/unit/graph) built via catch/unit/CMakeLists.txt under BUILD_UNIT_TESTS.
+    disposition: review
+    disposition_rationale: Legacy functional graph coverage stays active alongside contract-graph; classification pending restructuring review.
+    related_restructuring: TEST_RESTRUCTURING.md
+
+  - id: unit-kernel-launch
+    owner: HIP Runtime - Kernel Launch
+    name: HIP unit kernel and execution-control tests
+    kind: functional
+    domain: kernel_launch
+    purpose: Functional kernel launch, execution control, launch bounds, and execution-context behavior.
+    oracle: Kernel result correctness and return code.
+    source:
+      paths:
+        - catch/unit/kernel
+        - catch/unit/executionControl
+        - catch/unit/launchBounds
+        - catch/unit/executionContext
+      build_option: BUILD_UNIT_TESTS
+      build_target: build_tests
+    metadata:
+      framework: Catch2
+      config: catch/config/configs/unit/kernel.yaml
+    execution:
+      cadence: pr
+      gating: trusted
+      ctest_labels: [kernel, executionControl, launchBounds, executionctx]
+      platforms: [linux, windows, wsl]
+      backends: [amd, nvidia]
+      prerequisites: [HIP runtime and device]
+      ci_lane:
+        external: TheRock build and HIP runtime test jobs run the device suite; see TESTING.md.
+    evidence:
+      - path: catch/unit/CMakeLists.txt
+        claim: kernel, executionControl, launchBounds, and executionContext are built under BUILD_UNIT_TESTS.
+      - path: catch/config/configs/unit/kernel.yaml
+        claim: Unit kernel cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/executionControl.yaml
+        claim: Unit executionControl cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/launchBounds.yaml
+        claim: Unit launchBounds cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/executionctx.yaml
+        claim: Unit executionctx (executionContext source) cases carry level/skip metadata driving ctest labels.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/unit/kernel) built via catch/unit/CMakeLists.txt under BUILD_UNIT_TESTS.
+    disposition: review
+    disposition_rationale: Legacy functional launch coverage stays active alongside contract-kernel-launch; classification pending restructuring review.
+    related_restructuring: TEST_RESTRUCTURING.md
+
+  - id: unit-device-context
+    owner: HIP Runtime - Device/Context
+    name: HIP unit device and context tests
+    kind: functional
+    domain: device
+    purpose: Functional device management and driver-context behavior.
+    oracle: Device/context state observable and return code.
+    source:
+      paths:
+        - catch/unit/device
+        - catch/unit/context
+      build_option: BUILD_UNIT_TESTS
+      build_target: build_tests
+    metadata:
+      framework: Catch2
+      config: catch/config/configs/unit/device.yaml
+    execution:
+      cadence: pr
+      gating: trusted
+      ctest_labels: [device, context]
+      platforms: [linux, windows, wsl]
+      backends: [amd, nvidia]
+      prerequisites: [HIP runtime and device]
+      ci_lane:
+        external: TheRock build and HIP runtime test jobs run the device suite; see TESTING.md.
+    evidence:
+      - path: catch/unit/CMakeLists.txt
+        claim: device and context are built under BUILD_UNIT_TESTS.
+      - path: catch/config/configs/unit/device.yaml
+        claim: Unit device cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/context.yaml
+        claim: Unit context cases carry level/skip metadata driving ctest labels.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/unit/device) built via catch/unit/CMakeLists.txt under BUILD_UNIT_TESTS.
+    disposition: review
+    disposition_rationale: Legacy functional device/context coverage stays active alongside contract-device and contract-context; classification pending restructuring review.
+    related_restructuring: TEST_RESTRUCTURING.md
+
+  - id: unit-occupancy
+    owner: HIP Runtime - Kernel Launch
+    name: HIP unit occupancy tests
+    kind: functional
+    domain: occupancy
+    purpose: Functional occupancy calculator behavior across block/shared-memory configurations.
+    oracle: Occupancy value within documented bounds and return code.
+    source:
+      paths:
+        - catch/unit/occupancy
+      build_option: BUILD_UNIT_TESTS
+      build_target: build_tests
+    metadata:
+      framework: Catch2
+      config: catch/config/configs/unit/occupancy.yaml
+    execution:
+      cadence: pr
+      gating: trusted
+      ctest_labels: [occupancy]
+      platforms: [linux, windows, wsl]
+      backends: [amd, nvidia]
+      prerequisites: [HIP runtime and device]
+      ci_lane:
+        external: TheRock build and HIP runtime test jobs run the device suite; see TESTING.md.
+    evidence:
+      - path: catch/unit/CMakeLists.txt
+        claim: occupancy is built under BUILD_UNIT_TESTS.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/unit/occupancy) built via catch/unit/CMakeLists.txt under BUILD_UNIT_TESTS.
+    disposition: review
+    disposition_rationale: Legacy functional occupancy coverage stays active alongside contract-occupancy; classification pending restructuring review.
+    related_restructuring: TEST_RESTRUCTURING.md
+
+  - id: unit-texture-surface
+    owner: HIP Runtime - Texture/Surface
+    name: HIP unit texture and surface tests
+    kind: functional
+    domain: texture
+    purpose: Functional texture, surface, and channel-descriptor behavior.
+    oracle: Sampled/written value correctness and return code.
+    source:
+      paths:
+        - catch/unit/texture
+        - catch/unit/surface
+        - catch/unit/channelDescriptor
+      build_option: BUILD_UNIT_TESTS
+      build_target: build_tests
+    metadata:
+      framework: Catch2
+      config: catch/config/configs/unit/texture.yaml
+    execution:
+      cadence: pr
+      gating: trusted
+      ctest_labels: [texture, surface, channelDescriptor]
+      platforms: [linux, windows, wsl]
+      backends: [amd, nvidia]
+      prerequisites: [HIP runtime and device]
+      ci_lane:
+        external: TheRock build and HIP runtime test jobs run the device suite; see TESTING.md.
+    evidence:
+      - path: catch/unit/CMakeLists.txt
+        claim: texture, surface, and channelDescriptor are built under BUILD_UNIT_TESTS.
+      - path: catch/config/configs/unit/texture.yaml
+        claim: Unit texture cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/surface.yaml
+        claim: Unit surface cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/channelDescriptor.yaml
+        claim: Unit channelDescriptor cases carry level/skip metadata driving ctest labels.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/unit/texture) built via catch/unit/CMakeLists.txt under BUILD_UNIT_TESTS.
+    disposition: review
+    disposition_rationale: Legacy functional texture/surface coverage stays active alongside contract-texture; classification pending restructuring review.
+    related_restructuring: TEST_RESTRUCTURING.md
+
+  - id: unit-rtc
+    owner: HIP Runtime - Module/Loader
+    name: HIP unit HIPRTC tests
+    kind: functional
+    domain: rtc
+    purpose: Runtime compilation (HIPRTC) behavior - program creation, compilation, name expression, and link paths.
+    oracle: Compilation/link result and compiled-kernel execution correctness.
+    source:
+      paths:
+        - catch/unit/rtc
+      build_option: BUILD_UNIT_TESTS
+      build_target: build_tests
+    metadata:
+      framework: Catch2
+      config: catch/config/configs/unit/rtc.yaml
+    execution:
+      cadence: pr
+      gating: trusted
+      ctest_labels: [rtc]
+      platforms: [linux, windows, wsl]
+      backends: [amd, nvidia]
+      prerequisites: [HIP runtime and device, HIPRTC available]
+      ci_lane:
+        external: TheRock build and HIP runtime test jobs run the device suite; see TESTING.md.
+    evidence:
+      - path: catch/unit/CMakeLists.txt
+        claim: rtc is built under BUILD_UNIT_TESTS.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/unit/rtc) built via catch/unit/CMakeLists.txt under BUILD_UNIT_TESTS.
+    disposition: keep
+    disposition_rationale: HIPRTC is a distinct runtime-compilation surface with no separate contract domain today; retained as the primary RTC coverage.
+
+  - id: unit-module-loader
+    owner: HIP Runtime - Module/Loader
+    name: HIP unit module, loader, and library tests
+    kind: functional
+    domain: module
+    purpose: Functional module/library load, dynamic loading, and code-object behavior.
+    oracle: Loaded-symbol/launch correctness and return code.
+    source:
+      paths:
+        - catch/unit/module
+        - catch/unit/dynamicLoading
+        - catch/unit/library
+      build_option: BUILD_UNIT_TESTS
+      build_target: build_tests
+    metadata:
+      framework: Catch2
+      config: catch/config/configs/unit/module.yaml
+    execution:
+      cadence: pr
+      gating: trusted
+      ctest_labels: [module, dynamicLoading, library]
+      platforms: [linux, windows, wsl]
+      backends: [amd, nvidia]
+      prerequisites: [HIP runtime and device, code-object/module loading support]
+      ci_lane:
+        external: TheRock build and HIP runtime test jobs run the device suite; see TESTING.md.
+    evidence:
+      - path: catch/unit/CMakeLists.txt
+        claim: module, dynamicLoading, and library are built under BUILD_UNIT_TESTS.
+      - path: catch/config/configs/unit/module.yaml
+        claim: Unit module cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/dynamicLoading.yaml
+        claim: Unit dynamicLoading cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/library.yaml
+        claim: Unit library cases carry level/skip metadata driving ctest labels.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/unit/module) built via catch/unit/CMakeLists.txt under BUILD_UNIT_TESTS.
+    disposition: review
+    disposition_rationale: Legacy functional loader coverage stays active alongside contract-module-loader; classification pending restructuring review.
+    related_restructuring: TEST_RESTRUCTURING.md
+
+  - id: unit-vmm
+    owner: HIP Runtime - Memory
+    name: HIP unit virtual memory management tests
+    kind: functional
+    domain: memory_pool
+    purpose: Functional virtual-memory reserve/map/unmap and access-descriptor behavior.
+    oracle: Mapping/access observable and return code, with capability gating.
+    source:
+      paths:
+        - catch/unit/virtualMemoryManagement
+      build_option: BUILD_UNIT_TESTS
+      build_target: build_tests
+    metadata:
+      framework: Catch2
+      config: catch/config/configs/unit/virtualMemoryManagement.yaml
+    execution:
+      cadence: pr
+      gating: trusted
+      ctest_labels: [virtualMemoryManagement]
+      platforms: [linux, windows, wsl]
+      backends: [amd, nvidia]
+      prerequisites: [HIP runtime and device, VMM-capable driver]
+      ci_lane:
+        external: TheRock build and HIP runtime test jobs run the device suite; see TESTING.md.
+    evidence:
+      - path: catch/unit/CMakeLists.txt
+        claim: virtualMemoryManagement is built under BUILD_UNIT_TESTS.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/unit/virtualMemoryManagement) built via catch/unit/CMakeLists.txt under BUILD_UNIT_TESTS.
+    disposition: review
+    disposition_rationale: Legacy functional VMM coverage stays active alongside contract-memory-pool-vmm; classification pending restructuring review.
+    related_restructuring: TEST_RESTRUCTURING.md
+
+  - id: unit-error-handling
+    owner: HIP Runtime - Error Handling
+    name: HIP unit error-handling tests
+    kind: functional
+    domain: error
+    purpose: Functional error reporting, sticky-error, and error-string behavior.
+    oracle: Error-state round-trip and return code.
+    source:
+      paths:
+        - catch/unit/errorHandling
+      build_option: BUILD_UNIT_TESTS
+      build_target: build_tests
+    metadata:
+      framework: Catch2
+      config: catch/config/configs/unit/errorHandling.yaml
+    execution:
+      cadence: pr
+      gating: trusted
+      ctest_labels: [errorHandling]
+      platforms: [linux, windows, wsl]
+      backends: [amd, nvidia]
+      prerequisites: [HIP runtime and device]
+      ci_lane:
+        external: TheRock build and HIP runtime test jobs run the device suite; see TESTING.md.
+    evidence:
+      - path: catch/unit/CMakeLists.txt
+        claim: errorHandling is built under BUILD_UNIT_TESTS.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/unit/errorHandling) built via catch/unit/CMakeLists.txt under BUILD_UNIT_TESTS.
+    disposition: review
+    disposition_rationale: Legacy functional error coverage stays active alongside contract-error; classification pending restructuring review.
+    related_restructuring: TEST_RESTRUCTURING.md
+
+  - id: unit-device-libraries
+    owner: HIP Runtime - Device Libraries
+    name: HIP unit device-library and math tests
+    kind: functional
+    domain: device_libraries
+    purpose: Device-side math, atomics, warp, sync primitives, complex/vector types, and device-library behavior.
+    oracle: Numerical correctness and device-side primitive behavior.
+    source:
+      paths:
+        - catch/unit/math
+        - catch/unit/atomics
+        - catch/unit/warp
+        - catch/unit/syncthreads
+        - catch/unit/threadfence
+        - catch/unit/complex
+        - catch/unit/vector_types
+        - catch/unit/deviceLib
+      build_option: BUILD_UNIT_TESTS
+      build_target: build_tests
+    metadata:
+      framework: Catch2
+      config: catch/config/configs/unit/math.yaml
+    execution:
+      cadence: pr
+      gating: trusted
+      ctest_labels: [math, atomics, warp, syncthreads, threadfence, complex, vector_types, deviceLib]
+      platforms: [linux, windows, wsl]
+      backends: [amd, nvidia]
+      prerequisites: [HIP runtime and device]
+      ci_lane:
+        external: TheRock build and HIP runtime test jobs run the device suite; math/atomics/syncthreads are Unix-only per unit CMake; see TESTING.md.
+    evidence:
+      - path: catch/unit/CMakeLists.txt
+        claim: math, atomics, and syncthreads are built under BUILD_UNIT_TESTS within a UNIX guard; warp, threadfence, complex, vector_types, and deviceLib are built unconditionally under BUILD_UNIT_TESTS.
+      - path: catch/config/configs/unit/math.yaml
+        claim: Unit math cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/atomics.yaml
+        claim: Unit atomics cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/warp.yaml
+        claim: Unit warp cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/syncthreads.yaml
+        claim: Unit syncthreads cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/threadfence.yaml
+        claim: Unit threadfence cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/complex.yaml
+        claim: Unit complex cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/vector_types.yaml
+        claim: Unit vector_types cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/deviceLib.yaml
+        claim: Unit deviceLib cases carry level/skip metadata driving ctest labels.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/unit/math) built via catch/unit/CMakeLists.txt under BUILD_UNIT_TESTS.
+    disposition: keep
+    disposition_rationale: Device-library and math correctness has no contract-tier counterpart; retained as primary device-side coverage.
+
+  - id: unit-printf
+    owner: HIP Runtime - Device Libraries
+    name: HIP unit printf tests
+    kind: functional
+    domain: printf
+    purpose: Device-side printf formatting and buffering behavior.
+    oracle: Captured printf output matches expectation.
+    source:
+      paths:
+        - catch/unit/printf
+      build_option: BUILD_UNIT_TESTS
+      build_target: build_tests
+    metadata:
+      framework: Catch2
+      config: catch/config/configs/unit/printf.yaml
+    execution:
+      cadence: pr
+      gating: trusted
+      ctest_labels: [printf]
+      platforms: [linux, windows, wsl]
+      backends: [amd, nvidia]
+      prerequisites: [HIP runtime and device]
+      ci_lane:
+        external: TheRock build and HIP runtime test jobs run the device suite; see TESTING.md.
+    evidence:
+      - path: catch/unit/CMakeLists.txt
+        claim: printf is built under BUILD_UNIT_TESTS.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/unit/printf) built via catch/unit/CMakeLists.txt under BUILD_UNIT_TESTS.
+    disposition: keep
+    disposition_rationale: Device printf has no contract-tier counterpart; retained as primary coverage.
+
+  - id: unit-cooperative-multigpu
+    owner: HIP Runtime - Multi-GPU
+    name: HIP unit cooperative-groups and peer/multi-GPU tests
+    kind: functional
+    domain: multi_gpu
+    purpose: Cooperative-groups launch/sync, peer-to-peer access, and cluster behavior, including multi-device paths.
+    oracle: Cooperative/peer result correctness, with clean single-GPU degradation.
+    source:
+      paths:
+        - catch/unit/cooperativeGrps
+        - catch/unit/p2p
+        - catch/unit/cluster
+      build_option: BUILD_UNIT_TESTS
+      build_target: build_tests
+    metadata:
+      framework: Catch2
+      config: catch/config/configs/unit/cooperativeGrps.yaml
+    execution:
+      cadence: pr
+      gating: trusted
+      ctest_labels: [cooperativeGrps, p2p, cluster]
+      platforms: [linux, windows, wsl]
+      backends: [amd, nvidia]
+      prerequisites: [HIP runtime and device, multiple peer-capable devices for multi-GPU paths]
+      ci_lane:
+        external: TheRock build and HIP runtime test jobs run the device suite; cluster is AMD-only per unit CMake; multi-GPU coverage depends on runner topology; see TESTING.md.
+    evidence:
+      - path: catch/unit/CMakeLists.txt
+        claim: cooperativeGrps and p2p are built under BUILD_UNIT_TESTS; cluster is built under BUILD_UNIT_TESTS within an HIP_PLATFORM amd guard.
+      - path: catch/config/configs/unit/cooperativeGrps.yaml
+        claim: Unit cooperativeGrps cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/p2p.yaml
+        claim: Unit p2p cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/cluster.yaml
+        claim: Unit cluster cases carry level/skip metadata driving ctest labels.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/unit/cooperativeGrps) built via catch/unit/CMakeLists.txt under BUILD_UNIT_TESTS.
+    disposition: review
+    disposition_rationale: Cooperative and peer launch cases live in unit directories but are integration/multi-GPU by execution context; explicit multi-GPU classification is an open restructuring item. Source is not moved by this documentation change.
+    related_restructuring: TEST_RESTRUCTURING.md
+
+  - id: unit-interop-graphics
+    owner: HIP Runtime - Interop
+    name: HIP unit graphics interop tests
+    kind: functional
+    domain: interop
+    purpose: Vulkan and OpenGL interop behavior on AMD platforms.
+    oracle: Imported-resource correctness and return code, gated on graphics environment.
+    source:
+      paths:
+        - catch/unit/vulkan_interop
+        - catch/unit/gl_interop
+      build_option: BUILD_UNIT_TESTS
+      build_target: build_tests
+    metadata:
+      framework: Catch2
+      config: catch/config/configs/unit/vulkan_interop.yaml
+    execution:
+      cadence: on_demand
+      gating: informational
+      ctest_labels: [vulkan_interop, gl_interop]
+      platforms: [linux, windows]
+      backends: [amd]
+      prerequisites: [HIP runtime and device, Vulkan/OpenGL-capable host and drivers]
+      ci_lane:
+        external: Graphics interop runs where a graphics-capable environment is configured; see TESTING.md "Supported configurations".
+    evidence:
+      - path: catch/unit/CMakeLists.txt
+        claim: vulkan_interop and gl_interop are built under BUILD_UNIT_TESTS only within an HIP_PLATFORM amd guard (gl_interop noted disabled on NVIDIA per EXSWHTEC-246).
+      - path: catch/config/configs/unit/vulkan_interop.yaml
+        claim: Unit vulkan_interop cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/gl_interop.yaml
+        claim: Unit gl_interop cases carry level/skip metadata driving ctest labels.
+    history: gl_interop is AMD-gated because the NVIDIA header path pulls in GL/gl.h, which headless CUDA nodes lack; see TESTING_INCIDENTS.md (TI-006).
+    disposition: review
+    disposition_rationale: Graphics interop stays active and AMD-gated alongside contract-interop; environment-gated classification pending restructuring review.
+    related_restructuring: TEST_RESTRUCTURING.md
+
+  - id: unit-compiler
+    owner: HIP Runtime - Compiler Integration
+    name: HIP unit compiler and language-integration tests
+    kind: functional
+    domain: compiler
+    purpose: Compiler-facing paths - g++/C compilation integration, HIP-specific language features, and compiler behavior used by runtime tests.
+    oracle: Compilation success and runtime behavior of compiled artifacts.
+    source:
+      paths:
+        - catch/unit/compiler
+        - catch/unit/g++
+        - catch/unit/c_compilation
+        - catch/unit/hip_specific
+      build_option: BUILD_UNIT_TESTS
+      build_target: build_tests
+    metadata:
+      framework: Catch2
+      config: catch/config/configs/unit/compiler.yaml
+    execution:
+      cadence: pr
+      gating: trusted
+      ctest_labels: [compiler, g++, c_compilation, hip_specific]
+      platforms: [linux, windows, wsl]
+      backends: [amd, nvidia]
+      prerequisites: [HIP runtime and device, host toolchain]
+      ci_lane:
+        external: TheRock build and HIP runtime test jobs run the device suite; c_compilation and hip_specific are AMD-only per unit CMake; see TESTING.md.
+    evidence:
+      - path: catch/unit/CMakeLists.txt
+        claim: compiler and g++ are built under BUILD_UNIT_TESTS; c_compilation and hip_specific are built within an HIP_PLATFORM amd guard (the sibling gcc directory is present but its add_subdirectory is commented out, so it is not built and carries no record).
+      - path: catch/config/configs/unit/compiler.yaml
+        claim: Unit compiler cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/g++.yaml
+        claim: Unit g++ cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/c_compilation.yaml
+        claim: Unit c_compilation cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/hip_specific.yaml
+        claim: Unit hip_specific cases carry level/skip metadata driving ctest labels.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/unit/compiler) built via catch/unit/CMakeLists.txt under BUILD_UNIT_TESTS.
+    disposition: keep
+    disposition_rationale: Compiler-facing coverage used by runtime tests has no contract-tier counterpart; retained as primary coverage.
+
+  - id: unit-multithread-sync
+    owner: HIP Runtime - Stream/Event
+    name: HIP unit multithreading and synchronization tests
+    kind: functional
+    domain: synchronization
+    purpose: Host multithreaded runtime use and cross-stream/host synchronization behavior.
+    oracle: Correctness under concurrency and synchronization observable.
+    source:
+      paths:
+        - catch/unit/multiThread
+        - catch/unit/synchronization
+      build_option: BUILD_UNIT_TESTS
+      build_target: build_tests
+    metadata:
+      framework: Catch2
+      config: catch/config/configs/unit/multiThread.yaml
+    execution:
+      cadence: pr
+      gating: trusted
+      ctest_labels: [multiThread, synchronization]
+      platforms: [linux, windows, wsl]
+      backends: [amd, nvidia]
+      prerequisites: [HIP runtime and device]
+      ci_lane:
+        external: TheRock build and HIP runtime test jobs run the device suite; see TESTING.md.
+    evidence:
+      - path: catch/unit/CMakeLists.txt
+        claim: multiThread and synchronization are built under BUILD_UNIT_TESTS.
+      - path: catch/config/configs/unit/multiThread.yaml
+        claim: Unit multiThread cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/synchronization.yaml
+        claim: Unit synchronization cases carry level/skip metadata driving ctest labels.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/unit/multiThread) built via catch/unit/CMakeLists.txt under BUILD_UNIT_TESTS.
+    disposition: keep
+    disposition_rationale: Concurrency/synchronization behavior has no contract-tier counterpart; retained as primary coverage.
+
+  - id: unit-amd-specific
+    owner: HIP Runtime - AMD Platform
+    name: HIP unit AMD-specific tests
+    kind: functional
+    domain: amd_specific
+    purpose: AMD-only runtime features - HRR, host callbacks, clock, and thermal/TDM paths.
+    oracle: AMD-specific feature behavior and return code.
+    source:
+      paths:
+        - catch/unit/hrr
+        - catch/unit/callback
+        - catch/unit/clock
+        - catch/unit/TDM
+      build_option: BUILD_UNIT_TESTS
+      build_target: build_tests
+    metadata:
+      framework: Catch2
+      config: catch/config/configs/unit/hrr.yaml
+    execution:
+      cadence: pr
+      gating: trusted
+      ctest_labels: [hrr, callback, clock]
+      platforms: [linux, windows, wsl]
+      backends: [amd]
+      prerequisites: [HIP runtime and AMD device]
+      ci_lane:
+        external: TheRock build and HIP runtime test jobs run the device suite on AMD; see TESTING.md.
+    evidence:
+      - path: catch/unit/CMakeLists.txt
+        claim: hrr, callback, and clock are built under BUILD_UNIT_TESTS within an HIP_PLATFORM amd guard; TDM is built within the same guard but only on gfx1250-family offload arches and, lacking a unit config file, carries no config-driven ctest group label.
+      - path: catch/config/configs/unit/hrr.yaml
+        claim: Unit hrr cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/callback.yaml
+        claim: Unit callback cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/clock.yaml
+        claim: Unit clock cases carry level/skip metadata driving ctest labels.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/unit/hrr) built via catch/unit/CMakeLists.txt under BUILD_UNIT_TESTS.
+    disposition: keep
+    disposition_rationale: AMD-specific feature coverage is backend-gated and has no portable contract counterpart; retained as primary coverage.
+
+  - id: unit-sanity
+    owner: HIP Runtime - Test Harness
+    name: HIP unit sanity and harness tests
+    kind: functional
+    domain: harness
+    purpose: Harness sanity checks, assertions, environment handling, and type/API-boundary macro coverage (ABM, TypeQualifiers).
+    oracle: Harness and macro behavior correctness.
+    source:
+      paths:
+        - catch/unit/sanityTests
+        - catch/unit/assertion
+        - catch/unit/env
+        - catch/ABM
+        - catch/TypeQualifiers
+      build_option: BUILD_UNIT_TESTS
+      build_target: build_tests
+    metadata:
+      framework: Catch2
+      config: catch/config/configs/unit/sanityTests.yaml
+    execution:
+      cadence: pr
+      gating: trusted
+      ctest_labels: [sanityTests, assertion, env, ABM, TypeQualifiers]
+      platforms: [linux, windows, wsl]
+      backends: [amd, nvidia]
+      prerequisites: [HIP runtime and device]
+      ci_lane:
+        external: TheRock build and HIP runtime test jobs run the device suite; see TESTING.md.
+    evidence:
+      - path: catch/unit/CMakeLists.txt
+        claim: sanityTests, assertion, and env are built under BUILD_UNIT_TESTS.
+      - path: catch/CMakeLists.txt
+        claim: ABM and TypeQualifiers are built under BUILD_UNIT_TESTS at the catch/ level.
+      - path: catch/config/configs/unit/sanityTests.yaml
+        claim: Unit sanityTests cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/assertion.yaml
+        claim: Unit assertion cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/unit/env.yaml
+        claim: Unit env cases carry level/skip metadata driving ctest labels.
+      - path: catch/config/configs/ABM.yaml
+        claim: ABM cases carry level/skip metadata driving the ctest ABM label as a non-unit group.
+      - path: catch/config/configs/TypeQualifiers.yaml
+        claim: TypeQualifiers cases carry level/skip metadata driving the ctest TypeQualifiers label as a non-unit group.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/unit/sanityTests) built via catch/unit/CMakeLists.txt under BUILD_UNIT_TESTS.
+    disposition: keep
+    disposition_rationale: Harness and macro-boundary coverage underpins all other suites; retained.
+
+  - id: unit-oob
+    owner: HIP Runtime - Memory
+    name: HIP unit out-of-bounds tests
+    kind: functional
+    domain: oob
+    purpose: Deliberately out-of-bounds inputs to verify runtime rejection and signal preservation.
+    oracle: Expected rejection/error without masking later signal.
+    source:
+      paths:
+        - catch/unit/oob
+      build_option: BUILD_UNIT_TESTS
+      build_target: build_tests
+    metadata:
+      framework: Catch2
+      config: catch/config/configs/unit/oob.yaml
+    execution:
+      cadence: pr
+      gating: trusted
+      ctest_labels: [oob]
+      platforms: [linux]
+      backends: [amd]
+      prerequisites: [HIP runtime and AMD device, non-ASAN build]
+      ci_lane:
+        external: TheRock build and HIP runtime test jobs run the device suite where OOB is enabled; see TESTING.md.
+    evidence:
+      - path: catch/unit/CMakeLists.txt
+        claim: oob is built only when ENABLE_OOB_TESTS and HIP_PLATFORM amd and not ASAN and UNIX.
+      - path: catch/CMakeLists.txt
+        claim: ENABLE_OOB_TESTS defaults ON (option ENABLE_OOB_TESTS "Build OOB tests, deliberately wrong inputs" ON).
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/unit/oob) built via catch/unit/CMakeLists.txt under BUILD_UNIT_TESTS.
+    disposition: keep
+    disposition_rationale: OOB coverage is build-gated and signal-preserving with no contract counterpart; retained.
+
+  # ---------------------------------------------------------------------------
+  # Integration (currently distributed), performance, stress, and static gates.
+  # ---------------------------------------------------------------------------
+
+  - id: integration-multiprocess
+    owner: HIP Runtime - Integration
+    name: HIP multiprocess integration tests
+    kind: integration
+    domain: multi_process
+    purpose: Cross-process runtime behavior - IPC handle exchange and multi-process device sharing - exercised as separate processes.
+    oracle: Cross-process data/handle correctness and clean teardown.
+    source:
+      paths:
+        - catch/multiproc
+      build_option: BUILD_UNIT_TESTS
+      build_target: build_tests
+    metadata:
+      framework: Catch2
+      config: catch/config/configs/multiproc.yaml
+    execution:
+      cadence: pr
+      gating: trusted
+      ctest_labels: [multiproc]
+      platforms: [linux, wsl]
+      backends: [amd, nvidia]
+      prerequisites: [HIP runtime and device, multiple processes; Unix only]
+      ci_lane:
+        external: TheRock build and HIP runtime test jobs run the device suite on Unix; see TESTING.md.
+    evidence:
+      - path: catch/CMakeLists.txt
+        claim: multiproc is added under BUILD_UNIT_TESTS only when UNIX.
+      - path: catch/config/configs/multiproc.yaml
+        claim: multiproc is a non-unit group with its own case metadata.
+      - path: catch/config/common.py
+        claim: multiproc is listed in NON_UNIT_GROUPS.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/multiproc) built via catch/CMakeLists.txt under BUILD_UNIT_TESTS.
+    disposition: review
+    disposition_rationale: Multiprocess cases are integration by nature but live outside a dedicated integration tier; integration responsibilities are distributed and pending restructuring review.
+    related_restructuring: TEST_RESTRUCTURING.md
+
+  - id: performance-api
+    owner: HIP Runtime - Performance
+    name: HIP performance API microbenchmarks
+    kind: performance
+    domain: performance
+    purpose: Per-API performance microbenchmarks - memset, memcpy, kernel launch, stream, event, warp sync, and split-barrier timing.
+    oracle: Timing/throughput measurement (informational), not a pass/fail correctness oracle.
+    source:
+      paths:
+        - catch/performance/api
+      build_option: BUILD_PERF_TESTS
+      build_target: build_tests
+    metadata:
+      framework: Catch2
+      config: catch/config/configs/performance.yaml
+    execution:
+      cadence: on_demand
+      gating: informational
+      ctest_labels: [performance]
+      platforms: [linux, windows, wsl]
+      backends: [amd, nvidia]
+      prerequisites: [HIP runtime and device, BUILD_PERF_TESTS enabled]
+      ci_lane:
+        external: Performance sweeps run on demand or on a schedule, not on every PR; see TESTING.md "Pre-submit and CI gates".
+    evidence:
+      - path: catch/CMakeLists.txt
+        claim: performance is added only when BUILD_PERF_TESTS (default OFF).
+      - path: catch/performance/CMakeLists.txt
+        claim: performance builds api and scenarios subdirectories.
+      - path: catch/performance/api/CMakeLists.txt
+        claim: api covers memset, memcpy, kernelLaunch, stream, event, warpSync, splitBarrier, and example.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/performance/api) built via catch/CMakeLists.txt under BUILD_PERF_TESTS.
+    disposition: keep
+    disposition_rationale: Performance microbenchmarks are a separate opt-in build mode and informational gate; retained as-is.
+
+  - id: performance-scenarios
+    owner: HIP Runtime - Performance
+    name: HIP performance scenario benchmarks
+    kind: performance
+    domain: performance
+    purpose: Composite performance scenarios combining multiple APIs under representative workloads.
+    oracle: Timing/throughput measurement (informational).
+    source:
+      paths:
+        - catch/performance/scenarios
+      build_option: BUILD_PERF_TESTS
+      build_target: build_tests
+    metadata:
+      framework: Catch2
+      config: catch/config/configs/performance.yaml
+    execution:
+      cadence: on_demand
+      gating: informational
+      ctest_labels: [performance]
+      platforms: [linux, windows, wsl]
+      backends: [amd, nvidia]
+      prerequisites: [HIP runtime and device, BUILD_PERF_TESTS enabled]
+      ci_lane:
+        external: Performance sweeps run on demand or on a schedule, not on every PR; see TESTING.md.
+    evidence:
+      - path: catch/performance/CMakeLists.txt
+        claim: scenarios is built as part of the performance group.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/performance/scenarios) built via catch/performance/CMakeLists.txt under BUILD_PERF_TESTS.
+    disposition: keep
+    disposition_rationale: Scenario benchmarks share the opt-in performance build mode; retained as-is.
+
+  - id: stress-suite
+    owner: HIP Runtime - Stress
+    name: HIP stress tests
+    kind: stress
+    domain: stress
+    purpose: Long-running and high-pressure validation - memory, module, printf, stream, and device-allocation stress.
+    oracle: Survival under sustained pressure without corruption, leak, or crash.
+    source:
+      paths:
+        - catch/stress/memory
+        - catch/stress/module
+        - catch/stress/printf
+        - catch/stress/stream
+        - catch/stress/deviceallocation
+      build_option: BUILD_STRESS_TESTS
+      build_target: stress_test
+    metadata:
+      framework: Catch2
+      config: catch/config/configs/stress.yaml
+    execution:
+      cadence: on_demand
+      gating: informational
+      ctest_labels: [stress]
+      platforms: [linux, windows, wsl]
+      backends: [amd, nvidia]
+      prerequisites: [HIP runtime and device, BUILD_STRESS_TESTS enabled]
+      ci_lane:
+        external: Stress sweeps run on demand or on a schedule, not on every PR; see TESTING.md "Pre-submit and CI gates".
+    evidence:
+      - path: catch/CMakeLists.txt
+        claim: stress is added only when BUILD_STRESS_TESTS (default OFF).
+      - path: catch/stress/CMakeLists.txt
+        claim: stress builds memory, module, and deviceallocation always, and printf and stream within an HIP_PLATFORM amd guard.
+      - path: catch/stress/memory/CMakeLists.txt
+        claim: memory_stress is built via hip_add_exe_to_target with TEST_TARGET_NAME stress_test.
+    history: Historical origin not located in available change history; the behavior it pins is evidenced by its catalogued sources (e.g. catch/stress/memory) built via catch/CMakeLists.txt under BUILD_STRESS_TESTS.
+    disposition: keep
+    disposition_rationale: Stress is a separate opt-in build mode and informational gate; retained as-is.
+
+  - id: static-contract-coverage
+    owner: HIP Runtime - Test Governance
+    name: Contract API coverage drift check
+    kind: contract
+    domain: static_validation
+    purpose: Static-analysis governance (not a device test) - fails when a newly declared public HIP runtime API ships without a contract test and is not on the uncovered allowlist, when contract case names break the naming convention, or when the CONTRACT_COVERAGE.md snapshot drifts.
+    oracle: Checker exit code against the HIP header, contract sources, and the allowlist.
+    source:
+      paths:
+        - catch/contract/tools/check_contract_coverage.py
+        - catch/contract/uncovered_apis.txt
+        - CONTRACT_COVERAGE.md
+      build_option: not_applicable
+      build_target: not_applicable
+    metadata:
+      framework: python-static-analysis
+      config: catch/contract/AUTHORING.md
+    execution:
+      cadence: pr
+      gating: trusted
+      ctest_labels: []
+      platforms: [linux]
+      backends: [not_applicable]
+      prerequisites: [Python 3; no PyYAML, ROCm, GPU, or build required]
+      ci_lane:
+        in_repo: ../../.github/workflows/hip-contract-coverage.yml (job contract-coverage, step "Check contract-test coverage").
+    evidence:
+      - path: ../../.github/workflows/hip-contract-coverage.yml
+        claim: The workflow's single contract-coverage job runs check_contract_coverage.py --check as a trusted, path-filtered static check; its paths filter restricts the job to pull requests touching the HIP headers, the contract tier, or the contract tooling, so docs-only changes do not trigger it. Whether it blocks merge is governed by branch protection external to this repository.
+      - path: catch/contract/tools/check_contract_coverage.py
+        claim: The coverage checker is the static check run by the contract-coverage job.
+      - path: catch/contract/uncovered_apis.txt
+        claim: Intentionally uncovered public APIs are allowlisted with rationale.
+    history: The drift check exists so new public HIP APIs cannot land without a contract test or an explicit allowlist rationale; see CONTRACT_COVERAGE.md and TESTING_INCIDENTS.md (TI-004).
+    disposition: keep
+    disposition_rationale: The static coverage check governs the contract tier and is defined in-repo; retained.
+
+  - id: static-test-plan
+    owner: HIP Runtime - Test Governance
+    name: Generated test-plan staleness check
+    kind: contract
+    domain: static_validation
+    purpose: Static-analysis governance (not a device test) - fails when catch/TEST_PLAN.md is out of date with the contract sources (a case was added, renamed, or removed, or an @asserts tag changed, without regenerating the plan).
+    oracle: Generator --check exit code comparing regenerated-in-memory plan to the committed TEST_PLAN.md.
+    source:
+      paths:
+        - catch/tools/gen_test_plan.py
+        - catch/TEST_PLAN.md
+      build_option: not_applicable
+      build_target: not_applicable
+    metadata:
+      framework: python-static-analysis
+      annotations: '@asserts:'
+      generated_plan: catch/TEST_PLAN.md
+    execution:
+      cadence: pr
+      gating: trusted
+      ctest_labels: []
+      platforms: [linux]
+      backends: [not_applicable]
+      prerequisites: [Python 3; no ROCm, GPU, or build required]
+      ci_lane:
+        in_repo: ../../.github/workflows/hip-contract-coverage.yml (job contract-coverage, step "Check test plan is up to date").
+    evidence:
+      - path: ../../.github/workflows/hip-contract-coverage.yml
+        claim: The workflow's single contract-coverage job runs gen_test_plan.py --check as a trusted, path-filtered static check under the same paths filter; docs-only changes do not trigger it. Merge-required status is governed by branch protection external to this repository.
+      - path: catch/tools/gen_test_plan.py
+        claim: gen_test_plan.py generates TEST_PLAN.md from @asserts annotations and provides the --check staleness check.
+      - path: catch/TEST_PLAN.md
+        claim: The generated plan is the derived case inventory; it is cited here, never hand-edited or duplicated.
+    history: Historical origin not located in available change history; this suite is a standalone Python workflow static check (catch/tools/gen_test_plan.py --check), not CMake-wired, invoked by the .github/workflows/hip-contract-coverage.yml contract-coverage job as recorded in this inventory's evidence.
+    disposition: keep
+    disposition_rationale: The test-plan staleness check keeps the generated inventory honest and is defined in-repo; retained.
+
+  # ---------------------------------------------------------------------------
+  # catch/config governance: two build-time static checks wired by
+  # catch/config/CMakeLists.txt under if(ENABLE_YAML_TAGS) (the option
+  # catch/CMakeLists.txt defaults ON). Both are ALL custom targets that run
+  # during any hip-tests build - they are not CI-workflow jobs - and are pulled
+  # in as dependencies of the hip_tests_config header-generation target. They
+  # govern the YAML case metadata the unit/group configs declare, not any device
+  # API, so they carry no GPU/backend dependency and emit no ctest labels.
+  # ---------------------------------------------------------------------------
+  - id: static-config-check
+    owner: HIP Runtime - Test Governance
+    name: HIP test YAML config governance check
+    kind: contract
+    domain: static_validation
+    purpose: Build-time governance (not a device test) - fails the build when any case in the catch/config YAML configs is missing a 'level', carries a 'disabled'/'unsupported' skip that is neither a list nor a {targets, reason} mapping, has a populated skip with no 'reason', or a 'reason' with no real Jira reference from a known project key.
+    oracle: catch/config/check_config.py exit code over the catch/config/configs YAML tree; a non-zero exit fails the build.
+    source:
+      paths:
+        - catch/config/check_config.py
+        - catch/config/common.py
+        - catch/config/CMakeLists.txt
+      build_option: ENABLE_YAML_TAGS
+      build_target: check_hip_tests_config
+    metadata:
+      framework: python-static-analysis
+      config: catch/config/configs/test_categories.yaml
+    execution:
+      cadence: build
+      gating: trusted
+      ctest_labels: []
+      platforms: [linux, windows]
+      backends: [not_applicable]
+      prerequisites: [Python 3; PyYAML; CMake configure with ENABLE_YAML_TAGS=ON (default); no ROCm, GPU, or device required]
+      ci_lane:
+        external: Runs during any hip-tests build as the check_hip_tests_config ALL custom target wired by catch/config/CMakeLists.txt (ENABLE_YAML_TAGS defaults ON) and as a dependency of hip_tests_config; it is a build-time check, not a dedicated in-repo CI workflow. See TESTING.md "Pre-submit and CI gates".
+    evidence:
+      - path: catch/config/CMakeLists.txt
+        claim: Registers check_hip_tests_config as an ALL custom target under if(ENABLE_YAML_TAGS) that runs check_config.py over catch/config/configs, and adds it as a dependency of the hip_tests_config header-generation target.
+      - path: catch/config/check_config.py
+        claim: The static checker; it exits non-zero (failing the build) on any missing 'level', malformed skip field, populated skip with no 'reason', or 'reason' with no real Jira reference.
+      - path: catch/CMakeLists.txt
+        claim: Declares option(ENABLE_YAML_TAGS "Enable YAML tags for test cases" ON), so the check is active by default in a normal build.
+    history: Repository evidence records check_config.py as a build-time governance check wired through catch/config/CMakeLists.txt (the check_hip_tests_config ALL custom target, gated on ENABLE_YAML_TAGS which catch/CMakeLists.txt defaults ON); it guards the catch/config YAML case metadata rather than any device API.
+    disposition: keep
+    disposition_rationale: This is the only enforcement that every YAML-registered case declares a level and that every skip cites a tracked Jira reason; retained as a hard build-time gate.
+
+  - id: static-sources-check
+    owner: HIP Runtime - Test Governance
+    name: HIP test source/YAML config sync check
+    kind: contract
+    domain: static_validation
+    purpose: Build-time governance (not a device test) - surfaces Catch2 test cases found in the hip-tests source tree that have no corresponding entry in the catch/config YAML configs. It warns by default and only fails the build when the strict environment switch is set.
+    oracle: catch/config/check_sources.py diff of source-discovered case names against the YAML config case names; it prints a WARNING by default and exits non-zero (failing the build) only when THEROCK_REQUIRE_HIP_YAML_ENTRIES is truthy.
+    source:
+      paths:
+        - catch/config/check_sources.py
+        - catch/config/common.py
+        - catch/config/CMakeLists.txt
+      build_option: ENABLE_YAML_TAGS
+      build_target: check_hip_tests_sources
+    metadata:
+      framework: python-static-analysis
+      config: catch/config/configs/test_categories.yaml
+    execution:
+      cadence: build
+      gating: informational
+      ctest_labels: []
+      platforms: [linux, windows]
+      backends: [not_applicable]
+      prerequisites: [Python 3; PyYAML; CMake configure with ENABLE_YAML_TAGS=ON (default); no ROCm, GPU, or device required]
+      ci_lane:
+        external: Runs during any hip-tests build as the check_hip_tests_sources ALL custom target wired by catch/config/CMakeLists.txt (ENABLE_YAML_TAGS defaults ON) and as a dependency of hip_tests_config; warning-only unless THEROCK_REQUIRE_HIP_YAML_ENTRIES is set, and not a dedicated in-repo CI workflow. See TESTING.md "Pre-submit and CI gates".
+    evidence:
+      - path: catch/config/CMakeLists.txt
+        claim: Registers check_hip_tests_sources as an ALL custom target under if(ENABLE_YAML_TAGS) that runs check_sources.py with the configs directory and CMAKE_SOURCE_DIR, and adds it as a dependency of the hip_tests_config header-generation target.
+      - path: catch/config/check_sources.py
+        claim: The static checker; it prints a WARNING by default and only escalates to a non-zero exit (failing the build) when THEROCK_REQUIRE_HIP_YAML_ENTRIES is truthy.
+      - path: catch/CMakeLists.txt
+        claim: Declares option(ENABLE_YAML_TAGS "Enable YAML tags for test cases" ON), so the check is active by default in a normal build.
+    history: Repository evidence records check_sources.py as a build-time governance check wired through catch/config/CMakeLists.txt (the check_hip_tests_sources ALL custom target, gated on ENABLE_YAML_TAGS which catch/CMakeLists.txt defaults ON); it reconciles source-discovered Catch2 cases against catch/config YAML entries, warning by default and failing only under THEROCK_REQUIRE_HIP_YAML_ENTRIES.
+    disposition: keep
+    disposition_rationale: This is the only signal that a newly added Catch2 case was registered without a YAML config entry; retained as a warning-by-default governance check that can be escalated to a hard gate via THEROCK_REQUIRE_HIP_YAML_ENTRIES.
+
+  # ---------------------------------------------------------------------------
+  # Host/harness tier: the HipTestLevel* executables validate the test harness
+  # itself (HIP_TEST_LEVEL selection and the abort-on-invalid-level guard) rather
+  # than any HIP device API. They are registered through hip_add_host_test in
+  # catch/hipTestMain/tests/CMakeLists.txt (LABELS hosttest) and built under the
+  # build_tests aggregate when the hipTestMain subdirectory is added - which
+  # catch/CMakeLists.txt does whenever any of the unit/contract/perf/stress test
+  # groups is enabled. They need no GPU to run.
+  # ---------------------------------------------------------------------------
+  - id: harness-test-level
+    owner: HIP Runtime - Test Harness
+    name: HIP test-harness level-selection host tests
+    kind: unit
+    domain: test_harness
+    purpose: Host-side validation of the catch harness HIP_TEST_LEVEL selection logic and the abort-on-invalid-level guard, so an unparseable or unsupported level fails fast instead of silently running the wrong cases.
+    oracle: Return code and Catch2 assertions for the level-resolution cases; for the abort case, the process aborts with the "is not a supported level" diagnostic and never runs the guarded body (PASS/FAIL regular expressions on the registered ctest).
+    source:
+      paths:
+        - catch/hipTestMain/tests
+      build_option: BUILD_UNIT_TESTS OR BUILD_CONTRACT_TESTS OR BUILD_PERF_TESTS OR BUILD_STRESS_TESTS (hipTestMain is added by catch/CMakeLists.txt when any test group is enabled)
+      build_target: build_tests
+      executable_pattern: HipTestLevelUnitTest and HipTestLevelAbortTest, each registered via hip_add_host_test in catch/hipTestMain/tests/CMakeLists.txt.
+    metadata:
+      framework: Catch2
+      config: catch/hipTestMain/tests/CMakeLists.txt
+    execution:
+      cadence: pr
+      gating: trusted
+      ctest_labels: [hosttest]
+      platforms: [linux, windows, wsl]
+      backends: [amd, nvidia]
+      prerequisites: [HIP test-harness build; no GPU or device required]
+      ci_lane:
+        external: Built under the build_tests aggregate and discovered as 'hosttest'-labelled ctest cases where the HIP test harness is exercised; see TESTING.md "Pre-submit and CI gates".
+    evidence:
+      - path: catch/hipTestMain/tests/CMakeLists.txt
+        claim: HipTestLevelUnitTest and HipTestLevelAbortTest are registered via hip_add_host_test with LABELS hosttest; the abort test asserts the "is not a supported level" diagnostic and that the guarded body never runs.
+      - path: catch/CMakeLists.txt
+        claim: hipTestMain (which add_subdirectory(tests) wires in) is built when any of BUILD_UNIT_TESTS, BUILD_CONTRACT_TESTS, BUILD_PERF_TESTS, or BUILD_STRESS_TESTS is enabled.
+      - path: catch/hipTestMain/CMakeLists.txt
+        claim: add_subdirectory(tests) registers the host-test executables under hipTestMain.
+      - path: catch/hipTestMain/hip_test_level.cc
+        claim: The level-resolution logic the HipTestLevelUnitTest exercises lives here and is compiled into both host-test executables.
+    history: Repository evidence records these as host-side harness tests of the HIP_TEST_LEVEL selection and abort paths, registered through hip_add_host_test in catch/hipTestMain/tests/CMakeLists.txt and built under build_tests via the hipTestMain subdirectory (catch/CMakeLists.txt); they guard the harness's own level contract rather than any device API.
+    disposition: keep
+    disposition_rationale: These host tests are the only coverage of the harness HIP_TEST_LEVEL selection and abort-on-invalid-level behavior; retained as the harness's self-contract.
