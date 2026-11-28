@@ -47,7 +47,7 @@ inline void compute_integer(uint32_t mode, uint32_t *const *d, const uint32_t *c
   constexpr unsigned mask = (1u << Bits) - 1;
   alignas(64) uint32_t left[K / 4][16];
   alignas(64) uint32_t select[K / 4][16];
-  U32 right[K / 4][6 * Parts];
+  U32 right[K / 4][16 * Parts];
   for (int pair = 0; pair < K / 4; ++pair) {
     int ck = 2 * pair;
     int pos = swmmac4_position<K, Wave>(ck);
@@ -66,7 +66,7 @@ inline void compute_integer(uint32_t mode, uint32_t *const *d, const uint32_t *c
       U32 v = (l & 0xffffu) | (h << 16);
       std::memcpy(left[pair] + row, &v, sizeof(v));
       U32 nibbles = (load(index[0] + field.lane + row) >> (key + 2 * slot)) & 15u;
-      U32 offsets = pair_offset<1>(nibbles) * Parts;
+      U32 offsets = nibbles * Parts;
       std::memcpy(select[pair] + row, &offsets, sizeof(offsets));
     }
     for (int p = 0; p < Parts; ++p) {
@@ -82,11 +82,12 @@ inline void compute_integer(uint32_t mode, uint32_t *const *d, const uint32_t *c
         }
         four[i] = (((load(b[bf.reg] + bf.lane + p * Width) >> bf.shift) & mask) ^ sign_b) - sign_b;
       }
-      int i = 0;
-      for (int hi = 1; hi < 4; ++hi) {
-        for (int lo = 0; lo < hi; ++lo) {
-          U32 packed = (four[lo] & 0xffffu) | (four[hi] << 16);
-          right[pair][i++ * Parts + p] = packed;
+      // Index all 16 2-bit selector pairs (hi << 2 | lo), matching hardware on non-ascending
+      // metadata.
+      for (int hi = 0; hi < 4; ++hi) {
+        U32 high = four[hi] << 16;
+        for (int lo = 0; lo < 4; ++lo) {
+          right[pair][(hi * 4 + lo) * Parts + p] = (four[lo] & 0xffffu) | high;
         }
       }
     }

@@ -63,7 +63,7 @@ bool swmmac_fp8_x86_64_v4_bf16(uint32_t mode, uint32_t *const *d, const uint32_t
     return false;
   }
 
-  alignas(64) uint32_t left[8][16], selected[8][16], right[8][6 * 16];
+  alignas(64) uint32_t left[8][16], selected[8][16], right[8][16 * 16];
   const int key = SwmmacIndex<8, 32, Wave>::shift(mode);
   const auto low_mask = _mm512_set1_epi32(0xffff);
   for (int pair = 0; pair < 8; ++pair) {
@@ -73,21 +73,31 @@ bool swmmac_fp8_x86_64_v4_bf16(uint32_t mode, uint32_t *const *d, const uint32_t
     _mm512_store_si512(left[pair], wmma_fp8_bf16_pairs<Bf8A>(words, (ck / 2) % 2));
     auto metadata = sparse_x86::load(index[0] + af.lane);
     auto nibble = (metadata >> (key + 2 * swmmac_index_slot<8, Wave>(ck))) & 15u;
-    _mm512_store_si512(selected[pair], bit_cast<__m512i>(sparse_x86::pair_offset<16>(nibble)));
+    _mm512_store_si512(selected[pair], bit_cast<__m512i>(nibble << 4));
 
-    // Each B word contains four consecutive K values. Form the six legal pairs
-    // in metadata order, with the earlier K in the high half for DPBF16.
+    // Each B word contains four consecutive K values. Form all 16 selector pairs
+    // (hi << 2 | lo), with lo in the high half and hi in the low half for DPBF16.
     auto bf = swmmac_b_field<8, Wave>(0, 4 * pair);
     words = _mm512_loadu_si512(b[bf.reg] + bf.lane);
     auto b01 = wmma_fp8_bf16_pairs<Bf8B>(words, 0), b23 = wmma_fp8_bf16_pairs<Bf8B>(words, 1);
-    auto b0 = _mm512_andnot_si512(low_mask, b01), b1 = _mm512_slli_epi32(b01, 16);
-    auto b2 = _mm512_srli_epi32(b23, 16), b3 = _mm512_and_si512(low_mask, b23);
-    _mm512_store_si512(right[pair], b01);
-    _mm512_store_si512(right[pair] + 16, _mm512_or_si512(b0, b2));
-    _mm512_store_si512(right[pair] + 32, _mm512_or_si512(b1, b2));
-    _mm512_store_si512(right[pair] + 48, _mm512_or_si512(b0, b3));
-    _mm512_store_si512(right[pair] + 64, _mm512_or_si512(b1, b3));
-    _mm512_store_si512(right[pair] + 80, b23);
+    const __m512i lo_in_hi[4] = {
+        _mm512_andnot_si512(low_mask, b01),
+        _mm512_slli_epi32(b01, 16),
+        _mm512_andnot_si512(low_mask, b23),
+        _mm512_slli_epi32(b23, 16),
+    };
+    const __m512i hi_in_lo[4] = {
+        _mm512_srli_epi32(b01, 16),
+        _mm512_and_si512(low_mask, b01),
+        _mm512_srli_epi32(b23, 16),
+        _mm512_and_si512(low_mask, b23),
+    };
+    for (int hi = 0; hi < 4; ++hi) {
+      for (int lo = 0; lo < 4; ++lo) {
+        _mm512_store_si512(right[pair] + (hi * 4 + lo) * 16,
+                           _mm512_or_si512(lo_in_hi[lo], hi_in_lo[hi]));
+      }
+    }
   }
   for (int pair = 0; pair < 8; ++pair) {
     RJ_ARITH_UNROLL(16)
