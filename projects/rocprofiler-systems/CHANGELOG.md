@@ -83,6 +83,17 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   could lower the state (for example from `Finalized` back to `Active`). The transition is
   now an atomic compare-and-swap. `push()` also no longer changes the state when recording
   the previous state in the history throws (for example `std::bad_alloc`).
+- Fixed `rocprof-sys-instrument` ending the tracing session before the application ran when
+  `main` ends with a tail call (a `jmp` to another function instead of a `ret`), which
+  optimized builds such as `llama-bench` produce. The finalize snippet is no longer
+  inserted at `main` exit points that are tail calls; every other exit point keeps it. Later
+  GPU buffer callbacks no longer throw `Trying to use buffered storage while it is not running`
+  and abort the process. In runtime instrumentation, the finalizer that pops the `main` region
+  no longer touches the destroyed thread-local region cache when it runs at process exit, which
+  could crash with a segmentation fault after the tracing session was finalized. A thread
+  that exits with regions still open now hands them to the region registry, so the finalization
+  flush still writes them. Before, the `main` region was missing from runtime-instrumented traces
+  of a `main` that ends with a tail call.
 
 ## ROCm Systems Profiler 1.10.0 for ROCm 10.2 (unreleased)
 

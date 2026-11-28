@@ -16,6 +16,7 @@
 #include <optional>
 #include <ostream>
 #include <string>
+#include <thread>
 #include <tuple>
 #include <utility>
 
@@ -1004,4 +1005,120 @@ TEST_F(category_region_policy_test, flush_all_emits_one_incomplete_region_per_fr
     mocked_region_cache_t::flush_all_pending_cached_entries();
 
     EXPECT_TRUE(region.pending_entries().empty());
+}
+
+// ---------------------------------------------------------------------------------------
+// policy-injected: registry_handle_t hand-off of open frames when the thread exits
+// ---------------------------------------------------------------------------------------
+
+TEST_F(category_region_policy_test, handle_destruction_hands_open_frame_to_flush_all)
+{
+    using ::testing::_;
+    using ::testing::Return;
+
+    mocked_region_cache_t region;
+
+    // start (10), then the flush-all end_ts (999)
+    EXPECT_CALL(*test_globals::g_clock_gmock, now())
+        .WillOnce(Return(10u))
+        .WillOnce(Return(999u));
+    EXPECT_CALL(*test_globals::g_thread_meta_gmock, resolve_current_thread()).Times(0);
+    EXPECT_CALL(*test_globals::g_thread_meta_gmock,
+                resolve_thread(std::this_thread::get_id()))
+        .Times(1)
+        .WillOnce(Return(42u));
+    EXPECT_CALL(*test_globals::g_region_sink_gmock,
+                store_region(42u, std::string{ "entry [incomplete]" }, 10u, 999u,
+                             std::string{ "cat" }, _))
+        .Times(1);
+
+    {
+        mocked_region_cache_t::registry_handle_t handle{ &region };
+        region.cache_start("entry", "cat");
+    }
+    // The handle left the registry, so the frame is no longer reachable through the
+    // instance list. Without the hand-off the flush would drop it silently
+    EXPECT_TRUE(region.pending_entries().empty());
+
+    mocked_region_cache_t::flush_all_pending_cached_entries();
+}
+
+TEST_F(category_region_policy_test, handle_destruction_without_open_frames_emits_nothing)
+{
+    using ::testing::_;
+
+    mocked_region_cache_t region;
+
+    EXPECT_CALL(*test_globals::g_clock_gmock, now())
+        .WillRepeatedly(::testing::Return(1u));
+    EXPECT_CALL(*test_globals::g_thread_meta_gmock, resolve_thread(_)).Times(0);
+    EXPECT_CALL(*test_globals::g_region_sink_gmock, store_region(_, _, _, _, _, _))
+        .Times(0);
+
+    {
+        mocked_region_cache_t::registry_handle_t handle{ &region };
+    }
+
+    mocked_region_cache_t::flush_all_pending_cached_entries();
+}
+
+TEST_F(category_region_policy_test, handed_over_frames_are_emitted_only_once)
+{
+    using ::testing::_;
+    using ::testing::Return;
+
+    mocked_region_cache_t region;
+
+    EXPECT_CALL(*test_globals::g_clock_gmock, now())
+        .WillOnce(Return(5u))
+        .WillRepeatedly(Return(50u));
+    EXPECT_CALL(*test_globals::g_thread_meta_gmock, resolve_thread(_))
+        .Times(1)
+        .WillOnce(Return(7u));
+    EXPECT_CALL(*test_globals::g_region_sink_gmock,
+                store_region(7u, std::string{ "once [incomplete]" }, 5u, 50u,
+                             std::string{ "cat" }, _))
+        .Times(1);
+
+    {
+        mocked_region_cache_t::registry_handle_t handle{ &region };
+        region.cache_start("once", "cat");
+    }
+
+    mocked_region_cache_t::flush_all_pending_cached_entries();
+    // the second flush must not emit the same frame again
+    mocked_region_cache_t::flush_all_pending_cached_entries();
+}
+
+TEST_F(category_region_policy_test, frames_of_an_exited_thread_keep_that_threads_id)
+{
+    using ::testing::_;
+    using ::testing::Return;
+
+    std::thread::id worker_tid = {};
+
+    EXPECT_CALL(*test_globals::g_clock_gmock, now())
+        .WillOnce(Return(20u))
+        .WillOnce(Return(2000u));
+    // the frame belongs to the worker, not to the thread that finalizes
+    EXPECT_CALL(*test_globals::g_thread_meta_gmock, resolve_current_thread()).Times(0);
+
+    std::thread worker{ [&worker_tid] {
+        mocked_region_cache_t region;
+        mocked_region_cache_t::registry_handle_t handle{ &region };
+        worker_tid = std::this_thread::get_id();
+        region.cache_start("worker-frame", "cat");
+    } };
+    worker.join();
+
+    ASSERT_NE(worker_tid, std::thread::id{});
+    EXPECT_CALL(*test_globals::g_thread_meta_gmock, resolve_thread(worker_tid))
+        .Times(1)
+        .WillOnce(Return(77u));
+    EXPECT_CALL(*test_globals::g_region_sink_gmock,
+                store_region(77u, std::string{ "worker-frame [incomplete]" }, 20u, 2000u,
+                             std::string{ "cat" }, _))
+        .Times(1);
+
+    mocked_region_cache_t::flush_all_pending_cached_entries();
 }

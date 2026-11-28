@@ -2406,14 +2406,21 @@ try
         }
     }
 
-    if(main_exit_points)
+    // An optimized main can end with a tail call (jmp) instead of a ret. Dyninst reports
+    // that jmp as an exit point, but main has not finished there: finalizing at that
+    // point shuts the tracing session down before the program does its work.
+    auto main_end_points = filter_tail_call_points(main_exit_points);
+
+    if(!main_end_points.empty())
     {
         verbprintf(1, "Adding main exit snippets...\n");
-        // insert_instr(addr_space, *main_exit_points, _fini_sequence, BPatch_exit);
-        addr_space->insertSnippet(_fini_sequence, *main_exit_points);
+        // insert_instr(addr_space, main_end_points, _fini_sequence, BPatch_exit);
+        addr_space->insertSnippet(_fini_sequence, main_end_points);
     }
     else
     {
+        verbprintf(
+            1, "Main has no exit point besides tail calls. Adding fini callbacks...\n");
         for(auto* itr : _objs)
         {
             if(itr->name().find("librocprof-sys") != std::string::npos)

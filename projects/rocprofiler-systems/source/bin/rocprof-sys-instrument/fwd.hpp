@@ -350,6 +350,19 @@ filter_objects(std::vector<object_t*> const* app_objects);
 std::vector<module_t*>
 filter_modules(std::vector<module_t*> const* app_modules);
 
+/// @brief Remove the tail calls from the exit points of a function.
+///
+/// Dyninst reports a tail call (a jump to another function) as an exit point, but the
+/// function has not finished when it executes. Every other exit point is kept,
+/// including those that end in a call that does not return, such as exit().
+///
+/// @param[in] exit_points Exit points of the function. May be null, in which case the
+///                        result is empty.
+/// @return The points of @p exit_points that do not end in a branch instruction, in
+///         their original order. Null entries are dropped.
+std::vector<point_t*>
+filter_tail_call_points(std::vector<point_t*> const* exit_points);
+
 std::unique_ptr<std::vector<module_t*>>
 get_modules(std::vector<object_t*> const* app_objects);
 
