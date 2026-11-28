@@ -9,8 +9,11 @@
 #include <array>
 #include <bit>
 #include <cmath>
+#include <cstdlib>
+#include <cstring>
 #include <gtest/gtest.h>
 #include <span>
+#include <string_view>
 
 namespace {
 using namespace rocjitsu::arith::test;
@@ -306,13 +309,18 @@ TEST(MfmaGfx942Exact, QualificationIsLocalToTargetAndControls) {
       c[reg] = c_buf[reg].data();
       d[reg] = d_buf[reg].data();
     }
-    // Dense source-lane controls (CBSZ, ABID, BLGP, including wrapping ABID >= 2^CBSZ)
-    // remain gated in strict modes pending simulator A-lane read-mask alignment, leaving D
-    // untouched while Loose and ExactAllowLoose execute the approximate fallback.
-    for (uint64_t unqualified_control : {1ULL, 8ULL, 1ULL | (5ULL << 3), 4ULL, 1ULL << 7}) {
+    // Reserved CBSZ (5..7) and out-of-range ABID >= 2^CBSZ remain rejected in strict modes
+    // before accessing operands, leaving D untouched while Loose and ExactAllowLoose execute
+    // the MI300X-aligned approximate path.
+    for (uint64_t unqualified_control :
+         {5ULL, 7ULL, 8ULL, 1ULL | (2ULL << 3), 1ULL | (5ULL << 3), 2ULL | (4ULL << 3),
+          3ULL | (8ULL << 3), 5ULL | (3ULL << 7)}) {
       for (uint64_t semantics : {RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS,
                                  RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL}) {
         for (uint64_t ovfl : {uint64_t{0}, RJ_ARITH_FP16_OVFL}) {
+          EXPECT_EQ(
+              form.entry(semantics | ovfl, unqualified_control, nullptr, nullptr, nullptr, nullptr),
+              RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
           d_buf[0][0] = 0xdeadbeefU;
           EXPECT_EQ(form.entry(semantics | ovfl, unqualified_control, d, a, b, c),
                     RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
@@ -340,10 +348,462 @@ TEST(MfmaGfx942Exact, QualificationIsLocalToTargetAndControls) {
     }
     for (uint64_t semantics : {RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS,
                                RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL}) {
-      EXPECT_EQ(form.gfx950(semantics, 0, nullptr, nullptr, nullptr, nullptr),
-                RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
-      EXPECT_EQ(form.gfx950(semantics | RJ_ARITH_FP16_OVFL, 0, nullptr, nullptr, nullptr, nullptr),
-                RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
+      for (uint64_t controls :
+           {uint64_t{0}, uint64_t{2} | (uint64_t{3} << 3) | (uint64_t{2} << 7)}) {
+        EXPECT_EQ(form.gfx950(semantics, controls, nullptr, nullptr, nullptr, nullptr),
+                  RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
+        EXPECT_EQ(form.gfx950(semantics | RJ_ARITH_FP16_OVFL, controls, nullptr, nullptr, nullptr,
+                              nullptr),
+                  RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
+      }
+    }
+  }
+}
+
+uint64_t splitmix64_controls(uint64_t &state) {
+  uint64_t z = (state += 0x9e3779b97f4a7c15ULL);
+  z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
+  z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
+  return z ^ (z >> 31);
+}
+
+double unit_controls(uint64_t &state) {
+  return double(splitmix64_controls(state) >> 11) * (1.0 / 9007199254740992.0);
+}
+
+uint16_t f16_bits_from_double(double x) {
+  const uint64_t u = std::bit_cast<uint64_t>(x);
+  const uint16_t sign = static_cast<uint16_t>((u >> 48) & 0x8000U);
+  const int exp = static_cast<int>((u >> 52) & 0x7ffU);
+  const uint64_t frac = u & 0x000fffffffffffffULL;
+  if (exp == 0x7ff) {
+    return sign | (frac ? 0x7e00U : 0x7c00U);
+  }
+  if (exp == 0 && frac == 0) {
+    return sign;
+  }
+  const int unbiased = exp - 1023;
+  if (unbiased > 15) {
+    return sign | 0x7c00U;
+  }
+  const uint64_t sig = (uint64_t{1} << 52) | frac;
+  int h_exp = unbiased + 15;
+  int shift = 42;
+  if (h_exp <= 0) {
+    shift += (1 - h_exp);
+    h_exp = 0;
+    if (shift > 53) {
+      return sign;
+    }
+  }
+  const uint64_t kept = sig >> shift;
+  const uint64_t rem = sig & ((uint64_t{1} << shift) - 1);
+  const uint64_t half = uint64_t{1} << (shift - 1);
+  const uint16_t round = (rem > half || (rem == half && (kept & 1))) ? 1U : 0U;
+  uint16_t mag = static_cast<uint16_t>((h_exp << 10) + (h_exp ? (kept & 0x3ffU) : kept) + round);
+  if (mag > 0x7c00U) {
+    mag = 0x7c00U;
+  }
+  return sign | mag;
+}
+
+uint16_t bf16_bits_from_double(double x) {
+  const uint32_t b = std::bit_cast<uint32_t>(static_cast<float>(x));
+  if ((b & 0x7fffffffU) > 0x7f800000U) {
+    return static_cast<uint16_t>((b >> 16) | 0x40U);
+  }
+  return static_cast<uint16_t>((b + 0x7fffU + ((b >> 16) & 1U)) >> 16);
+}
+
+void fill_controls_elem(uint8_t *dst, int elem, uint64_t &state, int wave_kind, int lane,
+                        int idx_in_lane) {
+  if (wave_kind == 0 || wave_kind == 1) {
+    const bool tag_a = (wave_kind == 0);
+    const int tag = lane * 4 + (idx_in_lane % 4) + 1;
+    if (elem == 0) {
+      const uint16_t v =
+          f16_bits_from_double(tag_a ? double(tag) * 0.125 : double(tag % 17 + 1) * 0.25);
+      std::memcpy(dst, &v, 2);
+    } else if (elem == 1) {
+      const uint16_t v =
+          bf16_bits_from_double(tag_a ? double(tag) * 0.5 : double(tag % 17 + 1) * 0.25);
+      std::memcpy(dst, &v, 2);
+    } else if (elem == 2) {
+      const float v = float(tag) * 0.25f + 0.0625f * float(idx_in_lane);
+      std::memcpy(dst, &v, 4);
+    } else {
+      uint8_t code = uint8_t(1 + ((lane * 3 + idx_in_lane * 7) % 126));
+      if ((lane + idx_in_lane) & 1) {
+        code |= 0x80U;
+      }
+      if (code == 0x80U) {
+        code = 0x81U;
+      }
+      *dst = code;
+    }
+    return;
+  }
+
+  const bool neg = (splitmix64_controls(state) & 1ULL) != 0;
+  const double sign = neg ? -1.0 : 1.0;
+  double x = 0.0;
+  if (wave_kind == 2) {
+    x = 2.0 * unit_controls(state) - 1.0;
+  } else if (wave_kind == 3) {
+    const int lo = elem == 0 ? -14 : -60;
+    const int hi = elem == 0 ? 14 : 60;
+    x = sign * std::ldexp(1.0 + unit_controls(state),
+                          lo + int(splitmix64_controls(state) % uint64_t(hi - lo + 1)));
+  } else if (wave_kind == 4) {
+    if (elem == 0) {
+      x = sign * (32768.0 + 32736.0 * unit_controls(state));
+    } else if (elem <= 2) {
+      x = sign *
+          std::ldexp(1.5 + 0.4 * unit_controls(state), 63 + int(splitmix64_controls(state) % 3));
+    } else {
+      uint8_t code = uint8_t(0x78U + (splitmix64_controls(state) % 8));
+      if (neg) {
+        code |= 0x80U;
+      }
+      *dst = code;
+      return;
+    }
+  } else {
+    switch (splitmix64_controls(state) % 6) {
+    case 0:
+      x = std::bit_cast<double>(neg ? uint64_t{0xfff0000000000000ULL}
+                                    : uint64_t{0x7ff0000000000000ULL});
+      break;
+    case 1:
+      x = std::bit_cast<double>(uint64_t{0x7ff8000000000000ULL});
+      break;
+    case 2:
+      x = neg ? -0.0 : 0.0;
+      break;
+    case 3:
+      x = sign * (elem == 0 ? 5.9604644775390625e-08 : 1.0e-40);
+      break;
+    default:
+      x = sign * (1.0 + unit_controls(state)) * 64.0;
+      break;
+    }
+    if (elem >= 3) {
+      uint8_t code = uint8_t(splitmix64_controls(state));
+      if (splitmix64_controls(state) % 5 == 0) {
+        code = 0x80U;
+      }
+      *dst = code;
+      return;
+    }
+  }
+
+  if (elem == 0) {
+    const uint16_t b = f16_bits_from_double(x);
+    std::memcpy(dst, &b, 2);
+  } else if (elem == 1) {
+    const uint16_t b = bf16_bits_from_double(x);
+    std::memcpy(dst, &b, 2);
+  } else if (elem == 2) {
+    const float f = static_cast<float>(x);
+    std::memcpy(dst, &f, 4);
+  } else {
+    const float f = static_cast<float>(x);
+    *dst = static_cast<uint8_t>(std::bit_cast<uint32_t>(f) & 0xffU);
+  }
+}
+
+const Form &find_form(std::string_view name) {
+  for (const auto &form : kForms) {
+    if (name == form.name) {
+      return form;
+    }
+  }
+  std::abort();
+}
+
+int capture_seed_index(std::string_view name) {
+  constexpr std::string_view kCaptureOrder[] = {
+      "f16_32x32x8",      "f16_16x16x16",     "f16_32x32x4_2b",   "f16_16x16x4_4b",
+      "f16_4x4x4_16b",    "bf16_32x32x8",     "bf16_16x16x16",    "bf16_32x32x4_2b",
+      "bf16_16x16x4_4b",  "bf16_4x4x4_16b",   "xf32_32x32x4",     "xf32_16x16x8",
+      "fp8_32x32x16",     "bf8_32x32x16",     "fp8_bf8_32x32x16", "bf8_fp8_32x32x16",
+      "fp8_fp8_16x16x32", "fp8_bf8_16x16x32", "bf8_fp8_16x16x32", "bf8_bf8_16x16x32",
+  };
+  for (size_t i = 0; i < std::size(kCaptureOrder); ++i) {
+    if (name == kCaptureOrder[i]) {
+      return int(i);
+    }
+  }
+  std::abort();
+}
+
+uint64_t hash_vgprs_fnv1a(const std::array<std::array<uint32_t, 64>, 32> &regs, int outputs) {
+  uint64_t h = 0xcbf29ce484222325ULL;
+  for (int r = 0; r < outputs; ++r) {
+    for (int lane = 0; lane < 64; ++lane) {
+      const uint32_t w = regs[r][lane];
+      for (int b = 0; b < 4; ++b) {
+        h ^= uint64_t((w >> (8 * b)) & 0xffU);
+        h *= 0x100000001b3ULL;
+      }
+    }
+  }
+  return h;
+}
+
+TEST(MfmaGfx942Exact, SourceLaneControlsMatchMi300xSilicon) {
+  // Captured on AMD Instinct MI300X VF (gfx942, ROCm 7.2.4 / HIP 7.2.53211, mfma_controls.bin):
+  // single-batch (Batch == 1) dense MFMA forms ignore CBSZ/ABID/BLGP, while multi-batch
+  // (Batch > 1) F16/BF16 forms apply BLGP to B and adjacent M-lane block broadcast (clamping to
+  // lane % 16 when M << CBSZ > 64) to A across CBSZ <= 4 && ABID < 2^CBSZ.
+  struct ControlSiliconCase {
+    const char *form_name;
+    uint32_t cbsz, abid, blgp;
+    uint64_t wave0_fnv1a, wave2_fnv1a, wave5_fnv1a;
+  };
+  constexpr ControlSiliconCase kQualifiedCases[] = {
+      {"f16_32x32x8", 2, 3, 2, 0x256c07a0b9dbac54ULL, 0x6d9c226eb84c487fULL, 0x00cb242081fb5dbeULL},
+      {"f16_16x16x16", 4, 15, 7, 0x82d2299a8108c65dULL, 0x4962a4322bbbb81cULL,
+       0x1a82a679fbb74b25ULL},
+      {"bf16_32x32x8", 3, 5, 3, 0x8833c74b774bd77aULL, 0x2acd70f4b55d165aULL,
+       0x996a9ad2d8bdc2a5ULL},
+      {"bf16_16x16x16", 1, 1, 1, 0x09bd74749d55785bULL, 0xd5c3cf713c6290deULL,
+       0x1a82a679fbb74b25ULL},
+      {"xf32_32x32x4", 2, 3, 2, 0x239af12e175ed22cULL, 0x33cea65fc6cdb878ULL,
+       0xbe24c1a949d745feULL},
+      {"xf32_16x16x8", 4, 9, 6, 0x714911ff64f3a116ULL, 0xd6f940e5242a196bULL,
+       0x196ed7a289ec2aeaULL},
+      {"fp8_32x32x16", 4, 15, 7, 0xfdb5262a70c6e07eULL, 0x97668aa1f75ba101ULL,
+       0x623bdcfa1176c325ULL},
+      {"bf8_32x32x16", 2, 3, 2, 0xd2d9be59abf4c8e0ULL, 0xdc4041211cbcb6dbULL,
+       0x623bdcfa1176c325ULL},
+      {"fp8_bf8_32x32x16", 3, 5, 3, 0xdbc152358ae8ccf0ULL, 0xeeae72bb28bad3a6ULL,
+       0x623bdcfa1176c325ULL},
+      {"bf8_fp8_32x32x16", 1, 1, 1, 0x93f644bbc5a999f5ULL, 0x6a5dd9984c3d33eaULL,
+       0x623bdcfa1176c325ULL},
+      {"fp8_fp8_16x16x32", 4, 9, 6, 0xdca95a19ef3357a3ULL, 0x7f15c7224aff83b9ULL,
+       0x1a82a679fbb74b25ULL},
+      {"fp8_bf8_16x16x32", 2, 3, 2, 0xc435b61eab9d3599ULL, 0xf4cb50b72da2bb80ULL,
+       0x1a82a679fbb74b25ULL},
+      {"bf8_fp8_16x16x32", 3, 5, 3, 0x46abf0c0ab2e610aULL, 0x0d963fbe3e0c636fULL,
+       0x1a82a679fbb74b25ULL},
+      {"bf8_bf8_16x16x32", 4, 15, 7, 0xe2df9f213585b20dULL, 0x22bc9fa745f7b458ULL,
+       0x1a82a679fbb74b25ULL},
+      {"f16_32x32x4_2b", 1, 0, 0, 0x784453fa7c8011cfULL, 0xef4edb27e5f89292ULL,
+       0x4287e7e9dec39bccULL},
+      {"f16_32x32x4_2b", 1, 1, 1, 0x2c52dd1af2af9f46ULL, 0x2d4f78151143a59aULL,
+       0x5f014a8b9a4131fbULL},
+      {"f16_32x32x4_2b", 2, 3, 2, 0x361b97756d46bc19ULL, 0xdc485257acf3d0ccULL,
+       0x160f1eed316f963bULL},
+      {"f16_32x32x4_2b", 4, 9, 6, 0x0ad6a32031f33aedULL, 0x2de0ac90b522a2c9ULL,
+       0x439381d2406bd7a6ULL},
+      {"f16_16x16x4_4b", 1, 0, 0, 0x0f756ce635f1d575ULL, 0x170f481b547182ebULL,
+       0x8a1f1fa67e2f7fddULL},
+      {"f16_16x16x4_4b", 1, 1, 0, 0xc0eefca48b3cfdb8ULL, 0x9fbff02d636b1fe8ULL,
+       0x1fd04a7f5f6fde32ULL},
+      {"f16_16x16x4_4b", 2, 3, 2, 0xd9d18e2c809fd05aULL, 0x2246aea62fe676faULL,
+       0x231784c56a0734fbULL},
+      {"f16_16x16x4_4b", 3, 5, 3, 0x96087ae0909b1bd9ULL, 0x436ca38ff849d512ULL,
+       0xef8c26af06727e64ULL},
+      {"f16_4x4x4_16b", 1, 1, 1, 0x7804096b98b3c39bULL, 0x043f06320622120fULL,
+       0x30bf29198f2a7df2ULL},
+      {"f16_4x4x4_16b", 2, 3, 2, 0x33e3e17ff61ad3e3ULL, 0x0ec6016855f21c97ULL,
+       0x45634eebd54692a3ULL},
+      {"f16_4x4x4_16b", 3, 5, 3, 0x6cb61df41e023033ULL, 0x534e3087c88736c4ULL,
+       0x286d3e2b46e75d1dULL},
+      {"f16_4x4x4_16b", 4, 9, 6, 0x4bc574c92fb80468ULL, 0x88518dd5fd123e43ULL,
+       0x9771ef69d7e6b018ULL},
+      {"f16_4x4x4_16b", 4, 15, 7, 0x49b54194cf00570dULL, 0x8d417b4a83beb68eULL,
+       0xe9d83ba5f5a7f37fULL},
+      {"bf16_32x32x4_2b", 1, 1, 1, 0x6a37d3dcad7178adULL, 0x0c0a78893d1e4bddULL,
+       0x3d05b7c3ea1e4d2fULL},
+      {"bf16_32x32x4_2b", 3, 5, 3, 0xb2bf876f0248abe5ULL, 0x798e2de328423244ULL,
+       0xdee3fe04d500829dULL},
+      {"bf16_16x16x4_4b", 1, 1, 0, 0xb7364d6434a953d1ULL, 0x9b3c2a8076e49dbfULL,
+       0xbfe869376f423121ULL},
+      {"bf16_16x16x4_4b", 2, 2, 0, 0x0a4fd50cac300e14ULL, 0x42014435782f5ae6ULL,
+       0x2088607a91df6c81ULL},
+      {"bf16_16x16x4_4b", 4, 15, 7, 0xeaae1944b4f53aa8ULL, 0x595776eeeb74eb0bULL,
+       0x7f36b812ec14f552ULL},
+      {"bf16_4x4x4_16b", 0, 0, 1, 0x589ad4cc14fb4eddULL, 0x7b5f7cc0505ed1ccULL,
+       0x0da3397ebe096db7ULL},
+      {"bf16_4x4x4_16b", 0, 0, 2, 0xebf41789df7426a1ULL, 0x5622dac95d2ec234ULL,
+       0xa3cff56e935d1234ULL},
+      {"bf16_4x4x4_16b", 0, 0, 3, 0xce1f3b17081ef2ccULL, 0xe9197ae4c44d8b89ULL,
+       0x89f3674c807584e3ULL},
+      {"bf16_4x4x4_16b", 0, 0, 4, 0xe38afd3db8a43a3aULL, 0xe8e4c52418a89790ULL,
+       0xefe33293431c3b99ULL},
+      {"bf16_4x4x4_16b", 0, 0, 5, 0x2f8eb7711583644aULL, 0xc4a9f2d67dd8ee47ULL,
+       0x26ee7330e85d899cULL},
+      {"bf16_4x4x4_16b", 0, 0, 6, 0x65e29749c3af66daULL, 0xbddf813a685e5183ULL,
+       0x1edc9cf574433a48ULL},
+      {"bf16_4x4x4_16b", 0, 0, 7, 0xd47deb3596ed3499ULL, 0xf7a1ee2d5215fe71ULL,
+       0x6825f1b2ccebc635ULL},
+      {"bf16_4x4x4_16b", 4, 15, 7, 0xac618efa6bdda60dULL, 0xf69c71aa4167322fULL,
+       0xaed99c8f60f54936ULL},
+  };
+
+  struct WaveBuffers {
+    std::array<std::array<uint32_t, 64>, 2> a{}, b{};
+    std::array<std::array<uint32_t, 64>, 32> c{};
+  };
+  auto generate_waves = [](const Form &form) {
+    std::array<WaveBuffers, 6> waves{};
+    const int outputs = form.m * form.m * form.batches / 64;
+    const int cd_bytes = outputs * 4;
+    const int esz_a = form.format_a <= 1 ? 2 : form.format_a == 2 ? 4 : 1;
+    const int esz_b = form.format_b <= 1 ? 2 : form.format_b == 2 ? 4 : 1;
+    uint64_t state = 0x2026112400ULL + uint64_t(capture_seed_index(form.name));
+    for (int w = 0; w < 6; ++w) {
+      for (int lane = 0; lane < 64; ++lane) {
+        std::array<uint8_t, 8> a_bytes{}, b_bytes{};
+        for (int off = 0, idx = 0; off < 8; off += esz_a, ++idx) {
+          fill_controls_elem(&a_bytes[size_t(off)], form.format_a, state, w, lane, idx);
+        }
+        for (int off = 0, idx = 0; off < 8; off += esz_b, ++idx) {
+          fill_controls_elem(&b_bytes[size_t(off)], form.format_b, state,
+                             (w == 0   ? 1
+                              : w == 1 ? 0
+                                       : w),
+                             lane, idx);
+        }
+        std::memcpy(&waves[size_t(w)].a[0][size_t(lane)], &a_bytes[0], 4);
+        std::memcpy(&waves[size_t(w)].a[1][size_t(lane)], &a_bytes[4], 4);
+        std::memcpy(&waves[size_t(w)].b[0][size_t(lane)], &b_bytes[0], 4);
+        std::memcpy(&waves[size_t(w)].b[1][size_t(lane)], &b_bytes[4], 4);
+        for (int off = 0; off < cd_bytes; off += 4) {
+          float cv = 0.0f;
+          if (w == 0 || w == 1) {
+            cv = float(lane * 16 + off / 4 + 1) * 0.0625f;
+          } else if (w == 4) {
+            const int sel = (lane + off / 4) % 4;
+            cv = sel == 0 ? 0.0f : sel == 1 ? 65500.0f : sel == 2 ? 3.0e38f : -3.0e38f;
+          } else {
+            fill_controls_elem(reinterpret_cast<uint8_t *>(&cv), 2, state, w, lane, off / 4);
+          }
+          std::memcpy(&waves[size_t(w)].c[size_t(off / 4)][size_t(lane)], &cv, 4);
+        }
+      }
+    }
+    return waves;
+  };
+
+  for (const auto &tc : kQualifiedCases) {
+    const Form &form = find_form(tc.form_name);
+    const int outputs = form.m * form.m * form.batches / 64;
+    const uint64_t controls =
+        uint64_t(tc.cbsz) | (uint64_t(tc.abid) << 3) | (uint64_t(tc.blgp) << 7);
+    const auto waves = generate_waves(form);
+    struct WaveDigest {
+      int wave;
+      uint64_t expected_fnv1a;
+    };
+    for (const WaveDigest wd : {WaveDigest{0, tc.wave0_fnv1a}, WaveDigest{2, tc.wave2_fnv1a},
+                                WaveDigest{5, tc.wave5_fnv1a}}) {
+      SCOPED_TRACE(::testing::Message() << tc.form_name << " cbsz=" << tc.cbsz << " abid="
+                                        << tc.abid << " blgp=" << tc.blgp << " wave=" << wd.wave);
+      const auto &wb = waves[size_t(wd.wave)];
+      for (uint64_t cpu : supported_cpu_levels()) {
+        for (uint64_t semantics : {RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE,
+                                   RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS,
+                                   RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL}) {
+          for (int alias_offset : {0, outputs, 2 * outputs, 3 * outputs}) {
+            std::array<std::array<uint32_t, 64>, 128> storage{};
+            for (int r = 0; r < outputs; ++r) {
+              storage[size_t(r)] = wb.c[size_t(r)];
+            }
+            storage[size_t(outputs)] = wb.a[0];
+            storage[size_t(outputs + 1)] = wb.a[1];
+            storage[size_t(2 * outputs)] = wb.b[0];
+            storage[size_t(2 * outputs + 1)] = wb.b[1];
+            const uint32_t *a[] = {storage[size_t(outputs)].data(),
+                                   storage[size_t(outputs + 1)].data()};
+            const uint32_t *b[] = {storage[size_t(2 * outputs)].data(),
+                                   storage[size_t(2 * outputs + 1)].data()};
+            const uint32_t *c[32];
+            uint32_t *d[32];
+            for (int r = 0; r < outputs; ++r) {
+              c[r] = storage[size_t(r)].data();
+              d[r] = storage[size_t(alias_offset + r)].data();
+            }
+            ASSERT_EQ(form.entry(cpu | semantics, controls, d, a, b, c), RJ_ARITH_SUCCESS);
+            std::array<std::array<uint32_t, 64>, 32> out{};
+            for (int r = 0; r < outputs; ++r) {
+              out[size_t(r)] = storage[size_t(alias_offset + r)];
+            }
+            EXPECT_EQ(hash_vgprs_fnv1a(out, outputs), wd.expected_fnv1a);
+          }
+        }
+      }
+    }
+  }
+
+  // Out-of-range ABID >= 2^CBSZ wraps modulo 2^CBSZ on MI300X hardware; strict modes reject these
+  // uncalibrated encodings while Loose and ExactAllowLoose reproduce the MI300X wave-0 output.
+  struct WrappedControlCase {
+    const char *form_name;
+    uint32_t cbsz, abid, blgp;
+    uint64_t wave0_fnv1a;
+  };
+  constexpr WrappedControlCase kWrappedCases[] = {
+      {"f16_16x16x4_4b", 1, 2, 0, 0x0f756ce635f1d575ULL},
+      {"f16_16x16x4_4b", 1, 3, 0, 0xc0eefca48b3cfdb8ULL},
+      {"f16_16x16x4_4b", 1, 2, 5, 0xfc086e3bf6a59510ULL},
+      {"bf16_4x4x4_16b", 2, 6, 0, 0xa90acb4b09b912c4ULL},
+      {"bf16_4x4x4_16b", 3, 13, 0, 0x6a1cf7de928c1c56ULL},
+  };
+  for (const auto &tc : kWrappedCases) {
+    const Form &form = find_form(tc.form_name);
+    const int outputs = form.m * form.m * form.batches / 64;
+    const uint64_t controls =
+        uint64_t(tc.cbsz) | (uint64_t(tc.abid) << 3) | (uint64_t(tc.blgp) << 7);
+    const auto waves = generate_waves(form);
+    const auto &wb = waves[0];
+    const uint32_t *a[] = {wb.a[0].data(), wb.a[1].data()};
+    const uint32_t *b[] = {wb.b[0].data(), wb.b[1].data()};
+    const uint32_t *c[32];
+    for (int r = 0; r < outputs; ++r) {
+      c[r] = wb.c[size_t(r)].data();
+    }
+    for (uint64_t semantics :
+         {RJ_ARITH_SEMANTICS_LOOSE, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE}) {
+      std::array<std::array<uint32_t, 64>, 32> out{};
+      uint32_t *d[32];
+      for (int r = 0; r < outputs; ++r) {
+        d[r] = out[size_t(r)].data();
+      }
+      ASSERT_EQ(form.entry(semantics, controls, d, a, b, c), RJ_ARITH_SUCCESS);
+      EXPECT_EQ(hash_vgprs_fnv1a(out, outputs), tc.wave0_fnv1a);
+    }
+  }
+
+  // Verify MODE.FP16_OVFL output clamping composes with nonzero batched source-lane controls:
+  // on bf16_16x16x4_4b with cbsz=1, abid=1, blgp=1, batch 0 row 0 col 0 reads A from lane 16 and
+  // B from lane 0, clamping 2^64 * 2^64 (+Inf) to +MAX_FLOAT (0x7f7fffff) under FP16_OVFL=1.
+  {
+    std::array<std::array<uint32_t, 64>, 2> a_buf{}, b_buf{};
+    std::array<std::array<uint32_t, 64>, 16> c_buf{}, d_buf{};
+    a_buf[0][16] = 0x00005f80U;
+    b_buf[0][0] = 0x00005f80U;
+    const uint32_t *a[] = {a_buf[0].data(), a_buf[1].data()};
+    const uint32_t *b[] = {b_buf[0].data(), b_buf[1].data()};
+    const uint32_t *c[16];
+    uint32_t *d[16];
+    for (int r = 0; r < 16; ++r) {
+      c[r] = c_buf[size_t(r)].data();
+      d[r] = d_buf[size_t(r)].data();
+    }
+    constexpr uint64_t kControls = uint64_t{1} | (uint64_t{1} << 3) | (uint64_t{1} << 7);
+    for (uint64_t cpu : supported_cpu_levels()) {
+      ASSERT_EQ(rj_arith_v_mfma_f32_16x16x4_4b_bf16_w64(
+                    cpu | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL, kControls, d, a, b, c),
+                RJ_ARITH_SUCCESS);
+      EXPECT_EQ(d_buf[0][0], 0x7f800000U);
+      ASSERT_EQ(rj_arith_v_mfma_f32_16x16x4_4b_bf16_w64(
+                    cpu | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL | RJ_ARITH_FP16_OVFL, kControls, d,
+                    a, b, c),
+                RJ_ARITH_SUCCESS);
+      EXPECT_EQ(d_buf[0][0], 0x7f7fffffU);
     }
   }
 }

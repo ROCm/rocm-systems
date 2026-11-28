@@ -48,10 +48,40 @@ int mfma(uint64_t flags, uint64_t instruction_flags, uint32_t *const *d, const u
                            kMatrixIgnoredFpFlags | RJ_ARITH_FP_DX10_CLAMP_OFF)) {
     return error;
   }
-  // Captured gfx942 forms with default source controls support exact modes for
-  // both FP16_OVFL=0 and 1. Compatibility retains the fast approximate reduction.
+  const bool exact_qualified =
+      Gfx942 && is_exact(flags) && is_gfx942_mfma_controls_qualified(instruction_flags);
+  if (!exact_qualified &&
+      (flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+  }
+  // MI300X single-batch forms ignore CBSZ/ABID/BLGP; multi-batch forms broadcast A within
+  // adjacent M-lane block groups (clamping to lane % 16 when (M << CBSZ) > 64) and permute B.
+  alignas(64) uint32_t permuted_a[2][64], permuted_b[2][64];
+  const uint32_t *permuted_a_ptrs[2] = {permuted_a[0], permuted_a[1]};
+  const uint32_t *permuted_b_ptrs[2] = {permuted_b[0], permuted_b[1]};
   if constexpr (Gfx942) {
-    if (is_exact(flags) && !instruction_flags) {
+    if constexpr (Batch == 1) {
+      instruction_flags = 0;
+    } else if (instruction_flags != 0) {
+      static_assert(M * K * Batch == 256);
+      const uint32_t cbsz = static_cast<uint32_t>(instruction_flags & 7ULL);
+      const uint32_t abid = static_cast<uint32_t>((instruction_flags >> 3) & 15ULL);
+      for (int lane = 0; lane < 64; ++lane) {
+        const uint32_t al =
+            rj_arith_gfx942_batched_mfma_a_lane(static_cast<uint32_t>(lane), cbsz, abid, M);
+        const int bl = mfma_b_lane(lane, instruction_flags);
+        permuted_a[0][lane] = a[0][al];
+        permuted_a[1][lane] = a[1][al];
+        permuted_b[0][lane] = b[0][bl];
+        permuted_b[1][lane] = b[1][bl];
+      }
+      a = permuted_a_ptrs;
+      b = permuted_b_ptrs;
+      instruction_flags = 0;
+    }
+    // Captured gfx942 forms with qualified CBSZ/ABID/BLGP controls support exact modes for
+    // both FP16_OVFL=0 and 1. Compatibility retains the fast approximate reduction.
+    if (exact_qualified) {
       constexpr MfmaGfx942Format format = Bf16 ? MfmaGfx942Format::Bf16 : MfmaGfx942Format::F16;
       const bool no_inf_nan = (flags & RJ_ARITH_FP16_OVFL) != 0;
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
@@ -69,9 +99,6 @@ int mfma(uint64_t flags, uint64_t instruction_flags, uint32_t *const *d, const u
       mfma_gfx942_exact(format, M, K, Batch, no_inf_nan, d, a, b, c);
       return RJ_ARITH_SUCCESS;
     }
-  }
-  if ((flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
-    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
   }
   // Exact gfx942 modes clamp each K-step above; gfx942 approximate arithmetic
   // ignores FP16_OVFL in every backend, including SIMD implementations.

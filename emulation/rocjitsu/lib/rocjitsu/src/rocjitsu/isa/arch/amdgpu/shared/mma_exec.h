@@ -643,11 +643,12 @@ template <uint32_t N, uint32_t K>
 // ---------------------------------------------------------------------------
 
 /// AMD's matrix calculator at 2ef91896 applies adjacent M-lane block groups
-/// to gfx908, gfx90a and gfx942. CDNA2 follows that mapping. MI100 and MI200
-/// describe the same fields. The gfx908 model retains full-wave broadcast
-/// pending a hardware comparison. The gfx942/gfx950 model follows the
-/// full-wave formula in MI300 §7.1.5.1 and CDNA4 §7.1.6.1. Both guides'
-/// §13.3.6.1 ABID tables describe adjacent groups.
+/// to gfx908, gfx90a and gfx942. CDNA2 (gfx90a) follows that mapping via
+/// matrix_block_lanes = M. Calibrated batched gfx942 F16 and BF16 MFMA uses
+/// rj_arith_gfx942_batched_mfma_a_lane (and single-batch gfx942 F16, BF16,
+/// XF32, and FNUZ FP8/BF8 read all 64 lanes without permutation). gfx908,
+/// gfx950, and gfx942 F32/I8 MFMA retain the full-wave formula in MI300
+/// §7.1.5.1 and CDNA4 §7.1.6.1 pending a hardware comparison.
 inline uint32_t permute_a_lane(uint32_t lane, uint32_t cbsz, uint32_t abid,
                                uint32_t matrix_block_lanes = 0) {
   if (cbsz == 0 || cbsz > 4) {

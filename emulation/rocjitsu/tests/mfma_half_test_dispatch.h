@@ -24,12 +24,18 @@ void execute_mfma_half_shape(amdgpu::ComputeUnitCore &cu, uint32_t d, uint32_t a
     if constexpr (!Bf16) {
       if (cu.arch() == rocjitsu::IsaFamily::Cdna2) {
         entry = rj_arith_v_mfma_f32_32x32x4_2b_f16_w64_gfx90a;
+      } else if (cu.arch() == rocjitsu::IsaFamily::Cdna1) {
+        entry = rj_arith_v_mfma_f32_32x32x4_2b_f16_w64_gfx908;
+      } else if (cu.arch() == rocjitsu::IsaFamily::Cdna4) {
+        entry = rj_arith_v_mfma_f32_32x32x4_2b_f16_w64_gfx950;
       } else {
         entry = rj_arith_v_mfma_f32_32x32x4_2b_f16_w64;
       }
     } else if constexpr (Bf16) {
       if (cu.arch() == rocjitsu::IsaFamily::Cdna2) {
         entry = rj_arith_v_mfma_f32_32x32x4_2b_bf16_w64_gfx90a;
+      } else if (cu.arch() == rocjitsu::IsaFamily::Cdna4) {
+        entry = rj_arith_v_mfma_f32_32x32x4_2b_bf16_w64_gfx950;
       } else {
         entry = rj_arith_v_mfma_f32_32x32x4_2b_bf16_w64;
       }
@@ -38,12 +44,18 @@ void execute_mfma_half_shape(amdgpu::ComputeUnitCore &cu, uint32_t d, uint32_t a
     if constexpr (!Bf16) {
       if (cu.arch() == rocjitsu::IsaFamily::Cdna2) {
         entry = rj_arith_v_mfma_f32_16x16x4_4b_f16_w64_gfx90a;
+      } else if (cu.arch() == rocjitsu::IsaFamily::Cdna1) {
+        entry = rj_arith_v_mfma_f32_16x16x4_4b_f16_w64_gfx908;
+      } else if (cu.arch() == rocjitsu::IsaFamily::Cdna4) {
+        entry = rj_arith_v_mfma_f32_16x16x4_4b_f16_w64_gfx950;
       } else {
         entry = rj_arith_v_mfma_f32_16x16x4_4b_f16_w64;
       }
     } else if constexpr (Bf16) {
       if (cu.arch() == rocjitsu::IsaFamily::Cdna2) {
         entry = rj_arith_v_mfma_f32_16x16x4_4b_bf16_w64_gfx90a;
+      } else if (cu.arch() == rocjitsu::IsaFamily::Cdna4) {
+        entry = rj_arith_v_mfma_f32_16x16x4_4b_bf16_w64_gfx950;
       } else {
         entry = rj_arith_v_mfma_f32_16x16x4_4b_bf16_w64;
       }
@@ -52,12 +64,18 @@ void execute_mfma_half_shape(amdgpu::ComputeUnitCore &cu, uint32_t d, uint32_t a
     if constexpr (!Bf16) {
       if (cu.arch() == rocjitsu::IsaFamily::Cdna2) {
         entry = rj_arith_v_mfma_f32_4x4x4_16b_f16_w64_gfx90a;
+      } else if (cu.arch() == rocjitsu::IsaFamily::Cdna1) {
+        entry = rj_arith_v_mfma_f32_4x4x4_16b_f16_w64_gfx908;
+      } else if (cu.arch() == rocjitsu::IsaFamily::Cdna4) {
+        entry = rj_arith_v_mfma_f32_4x4x4_16b_f16_w64_gfx950;
       } else {
         entry = rj_arith_v_mfma_f32_4x4x4_16b_f16_w64;
       }
     } else if constexpr (Bf16) {
       if (cu.arch() == rocjitsu::IsaFamily::Cdna2) {
         entry = rj_arith_v_mfma_f32_4x4x4_16b_bf16_w64_gfx90a;
+      } else if (cu.arch() == rocjitsu::IsaFamily::Cdna4) {
+        entry = rj_arith_v_mfma_f32_4x4x4_16b_bf16_w64_gfx950;
       } else {
         entry = rj_arith_v_mfma_f32_4x4x4_16b_bf16_w64;
       }
@@ -66,12 +84,18 @@ void execute_mfma_half_shape(amdgpu::ComputeUnitCore &cu, uint32_t d, uint32_t a
     if constexpr (!Bf16) {
       if (cu.arch() == rocjitsu::IsaFamily::Cdna2) {
         entry = rj_arith_v_mfma_f32_32x32x8_f16_w64_gfx90a;
+      } else if (cu.arch() == rocjitsu::IsaFamily::Cdna1) {
+        entry = rj_arith_v_mfma_f32_32x32x8_f16_w64_gfx908;
+      } else if (cu.arch() == rocjitsu::IsaFamily::Cdna4) {
+        entry = rj_arith_v_mfma_f32_32x32x8_f16_w64_gfx950;
       } else {
         entry = rj_arith_v_mfma_f32_32x32x8_f16_w64;
       }
     } else if constexpr (Bf16) {
       if (cu.arch() == rocjitsu::IsaFamily::Cdna2) {
         entry = rj_arith_v_mfma_f32_32x32x8_bf16_w64_gfx90a;
+      } else if (cu.arch() == rocjitsu::IsaFamily::Cdna4) {
+        entry = rj_arith_v_mfma_f32_32x32x8_bf16_w64_gfx950;
       } else {
         entry = rj_arith_v_mfma_f32_32x32x8_bf16_w64;
       }
@@ -80,12 +104,18 @@ void execute_mfma_half_shape(amdgpu::ComputeUnitCore &cu, uint32_t d, uint32_t a
     if constexpr (!Bf16) {
       if (cu.arch() == rocjitsu::IsaFamily::Cdna2) {
         entry = rj_arith_v_mfma_f32_16x16x16_f16_w64_gfx90a;
+      } else if (cu.arch() == rocjitsu::IsaFamily::Cdna1) {
+        entry = rj_arith_v_mfma_f32_16x16x16_f16_w64_gfx908;
+      } else if (cu.arch() == rocjitsu::IsaFamily::Cdna4) {
+        entry = rj_arith_v_mfma_f32_16x16x16_f16_w64_gfx950;
       } else {
         entry = rj_arith_v_mfma_f32_16x16x16_f16_w64;
       }
     } else if constexpr (Bf16) {
       if (cu.arch() == rocjitsu::IsaFamily::Cdna2) {
         entry = rj_arith_v_mfma_f32_16x16x16_bf16_w64_gfx90a;
+      } else if (cu.arch() == rocjitsu::IsaFamily::Cdna4) {
+        entry = rj_arith_v_mfma_f32_16x16x16_bf16_w64_gfx950;
       } else {
         entry = rj_arith_v_mfma_f32_16x16x16_bf16_w64;
       }
@@ -152,11 +182,17 @@ void execute_mfma_half_shape(amdgpu::ComputeUnitCore &cu, uint32_t d, uint32_t a
   if (util::force_scalar()) {
     flags &= ~RJ_ARITH_CPU_MASK;
   }
+  const bool cdna3 = cu.arch() == rocjitsu::IsaFamily::Cdna3;
   const unsigned block = cu.arch() == rocjitsu::IsaFamily::Cdna2 ? M : 0;
-  const uint64_t a_lanes = amdgpu::mfma_permuted_lane_mask(
-      [&](uint32_t lane) { return amdgpu::permute_a_lane(lane, cbsz, abid, block); });
-  const uint64_t b_lanes = amdgpu::mfma_permuted_lane_mask(
-      [&](uint32_t lane) { return amdgpu::permute_b_lane(lane, blgp); });
+  const uint64_t a_lanes =
+      cdna3 && Batch == 1 ? ~uint64_t{0} : amdgpu::mfma_permuted_lane_mask([&](uint32_t lane) {
+        return cdna3 ? rj_arith_gfx942_batched_mfma_a_lane(lane, cbsz, abid, M)
+                     : amdgpu::permute_a_lane(lane, cbsz, abid, block);
+      });
+  const uint64_t b_lanes =
+      cdna3 && Batch == 1 ? ~uint64_t{0} : amdgpu::mfma_permuted_lane_mask([&](uint32_t lane) {
+        return amdgpu::permute_b_lane(lane, blgp);
+      });
   amdgpu::arith::exec_dense_fp_matrix<M * K * Batch / 128, M * M * Batch / 64, 64>(
       *wave, entry, flags, cbsz | (uint64_t(abid) << 3) | (uint64_t(blgp) << 7), d, a, b, c,
       constant == amdgpu::ACC_FROM_VGPR ? std::nullopt : std::optional<uint64_t>(constant), a_lanes,

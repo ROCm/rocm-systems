@@ -72,18 +72,20 @@ template <int M, bool Bf8A, bool Bf8B, bool Fnuz> void arithmetic(Entry entry) {
         auto read = [&](int base, int index, int k) {
           constexpr int per_lane = K / (64 / M);
           int source_lane = k / per_lane * M + index;
-          int cbsz = int(controls & 7), blgp = int(controls >> 7 & 7);
-          if (base == 0 && cbsz > 0 && cbsz <= 4) {
-            int size = 64 >> cbsz;
-            source_lane = source_lane % size + size * (int(controls >> 3 & 15) % (1 << cbsz));
-          }
-          if (base == 2 && blgp) {
-            if (blgp <= 2) {
-              source_lane = source_lane % 32 + (blgp - 1) * 32;
-            } else if (blgp == 3) {
-              source_lane = (source_lane + 16) % 64;
-            } else {
-              source_lane = source_lane % 16 + (blgp - 4) * 16;
+          if constexpr (!Fnuz) {
+            int cbsz = int(controls & 7), blgp = int(controls >> 7 & 7);
+            if (base == 0 && cbsz > 0 && cbsz <= 4) {
+              int size = 64 >> cbsz;
+              source_lane = source_lane % size + size * (int(controls >> 3 & 15) % (1 << cbsz));
+            }
+            if (base == 2 && blgp) {
+              if (blgp <= 2) {
+                source_lane = source_lane % 32 + (blgp - 1) * 32;
+              } else if (blgp == 3) {
+                source_lane = (source_lane + 16) % 64;
+              } else {
+                source_lane = source_lane % 16 + (blgp - 4) * 16;
+              }
             }
           }
           uint8_t code = uint8_t(input[base + k % per_lane / 4][source_lane] >> (8 * (k % 4)));
@@ -99,7 +101,9 @@ template <int M, bool Bf8A, bool Bf8B, bool Fnuz> void arithmetic(Entry entry) {
       for (uint64_t semantics : semantics_modes()) {
         // gfx942's qualified exact cases have captured expectations in gfx942_exact_test.
         if constexpr (Fnuz) {
-          if (!controls && semantics != RJ_ARITH_SEMANTICS_LOOSE &&
+          const bool qualified =
+              (controls & 7) <= 4 && ((controls >> 3) & 15) < (1ULL << (controls & 7));
+          if (qualified && semantics != RJ_ARITH_SEMANTICS_LOOSE &&
               semantics != RJ_ARITH_SEMANTICS_COMPATIBILITY) {
             continue;
           }

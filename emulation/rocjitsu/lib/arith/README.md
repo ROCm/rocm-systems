@@ -4,9 +4,9 @@ CDNA floating-point matrices include gfx942/gfx950 dense and sparse FP16/BF16
 and FP8/BF8 MFMA/SMFMAC, gfx942 XF32 MFMA, and gfx1250 FP16/BF16 and OCP FP8/BF8
 WMMA/SWMMAC, including packed FP16/BF16 and mixed BF16F32 outputs.
 Loose and Compatibility use established approximate arithmetic. The 20 dense
-gfx942 MFMA forms (when CBSZ, ABID and BLGP are zero) and the 12 sparse gfx942
-`V_SMFMAC_F32_*` forms also support strict bit-exact modes for both
-`FP16_OVFL` clear and set; the gfx950 and gfx1250 forms remain approximate.
+gfx942 MFMA forms (across CBSZ 0..4 with ABID < 2^CBSZ and BLGP 0..7) and the
+12 sparse gfx942 `V_SMFMAC_F32_*` forms also support strict bit-exact modes for
+both `FP16_OVFL` clear and set; the gfx950 and gfx1250 forms remain approximate.
 
 The Rocjitsu Arithmetic Library (`rj-arith`) provides a synchronous C interface to GPU arithmetic. Each call executes one GPU instruction for an entire wave on the
 calling CPU thread. The library includes matrix instructions, floating-point arithmetic, dot products, conversions, math functions, comparisons, integer arithmetic, scalar arithmetic, dual-issue arithmetic, graphics arithmetic and register/lane routing, with portable code and x86 SIMD paths.

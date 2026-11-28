@@ -49,61 +49,78 @@ void arithmetic(Entry entry, uint32_t factor_mask = UINT32_MAX, Entry gfx942 = n
   const auto levels = supported_cpu_levels();
   for (uint64_t controls :
        {0ULL, 1ULL | (1ULL << 3) | (3ULL << 7), 4ULL | (13ULL << 3) | (7ULL << 7), 7ULL}) {
-    std::array<std::array<float, 64>, OutputRegs> expected{};
-    for (int batch = 0; batch < Batch; ++batch) {
-      for (int row = 0; row < M; ++row) {
-        for (int col = 0; col < M; ++col) {
-          const int groups = (64 + M * M / 4 - 1) / (M * M / 4);
-          const int reg = batch * (M * M / 64) + row / (4 * (64 / M)) * 4 + row % 4;
-          const int lane = batch % groups * M + row / 4 % (64 / M) * groups * M + col;
-          float sum = std::bit_cast<float>(input[2 * InputRegs + reg][lane]);
-          // Reference indexing follows the legacy GFX9 executor; do not call
-          // the implementation's layout helpers from this test.
-          auto read = [&](int operand, int index, int k) {
-            const int per_lane = K / (64 / (M * Batch));
-            int source_lane = batch * M + k / per_lane * M * Batch + index;
-            int cbsz = int(controls & 7), blgp = int(controls >> 7 & 7);
-            if (operand == 0 && cbsz > 0 && cbsz <= 4) {
-              int size = ABlockLanes ? ABlockLanes : 64 >> cbsz;
-              if (size <= (64 >> cbsz)) {
-                int group = size << cbsz;
-                source_lane = source_lane / group * group + source_lane % size +
-                              size * (int(controls >> 3 & 15) % (1 << cbsz));
-              }
-            }
-            if (operand == 1 && blgp) {
-              if (blgp <= 2) {
-                source_lane = source_lane % 32 + (blgp - 1) * 32;
-              } else if (blgp == 3) {
-                source_lane = (source_lane + 16) % 64;
-              } else {
-                source_lane = source_lane % 16 + (blgp - 4) * 16;
-              }
-            }
-            if constexpr (FullF32) {
-              return std::bit_cast<float>(input[operand * InputRegs + k % per_lane][source_lane] &
-                                          factor_mask);
-            } else {
-              uint16_t value = uint16_t(
-                  input[operand * InputRegs + k % per_lane / 2][source_lane] >> (16 * (k % 2)));
-              return Bf16 ? std::bit_cast<float>(uint32_t(value) << 16) : float(half_value(value));
-            }
-          };
-          for (int k = 0; k < K; ++k) {
-            sum = std::fma(read(0, row, k), read(1, col, k), sum);
-          }
-          expected[reg][lane] = sum;
-        }
-      }
-    }
     for (Entry target : {entry, gfx942}) {
       if (!target) {
         continue;
       }
+      const bool is_gfx942 = target == gfx942;
+      std::array<std::array<float, 64>, OutputRegs> expected{};
+      for (int batch = 0; batch < Batch; ++batch) {
+        for (int row = 0; row < M; ++row) {
+          for (int col = 0; col < M; ++col) {
+            const int groups = (64 + M * M / 4 - 1) / (M * M / 4);
+            const int reg = batch * (M * M / 64) + row / (4 * (64 / M)) * 4 + row % 4;
+            const int lane = batch % groups * M + row / 4 % (64 / M) * groups * M + col;
+            float sum = std::bit_cast<float>(input[2 * InputRegs + reg][lane]);
+            // Reference indexing follows the legacy GFX9 executor; do not call
+            // the implementation's layout helpers from this test.
+            auto read = [&](int operand, int index, int k) {
+              const int per_lane = K / (64 / (M * Batch));
+              int source_lane = batch * M + k / per_lane * M * Batch + index;
+              int cbsz = int(controls & 7), abid = int(controls >> 3 & 15),
+                  blgp = int(controls >> 7 & 7);
+              if (!is_gfx942 || Batch > 1) {
+                if (operand == 0 && cbsz > 0 && cbsz <= 4) {
+                  if (is_gfx942) {
+                    if (M > (64 >> cbsz)) {
+                      source_lane %= 16;
+                    } else {
+                      int group = M << cbsz;
+                      source_lane =
+                          source_lane / group * group + source_lane % M + M * (abid % (1 << cbsz));
+                    }
+                  } else {
+                    int size = ABlockLanes ? ABlockLanes : 64 >> cbsz;
+                    if (size <= (64 >> cbsz)) {
+                      int group = size << cbsz;
+                      source_lane = source_lane / group * group + source_lane % size +
+                                    size * (abid % (1 << cbsz));
+                    }
+                  }
+                }
+                if (operand == 1 && blgp) {
+                  if (blgp <= 2) {
+                    source_lane = source_lane % 32 + (blgp - 1) * 32;
+                  } else if (blgp == 3) {
+                    source_lane = (source_lane + 16) % 64;
+                  } else {
+                    source_lane = source_lane % 16 + (blgp - 4) * 16;
+                  }
+                }
+              }
+              if constexpr (FullF32) {
+                return std::bit_cast<float>(input[operand * InputRegs + k % per_lane][source_lane] &
+                                            factor_mask);
+              } else {
+                uint16_t value = uint16_t(
+                    input[operand * InputRegs + k % per_lane / 2][source_lane] >> (16 * (k % 2)));
+                return Bf16 ? std::bit_cast<float>(uint32_t(value) << 16)
+                            : float(half_value(value));
+              }
+            };
+            for (int k = 0; k < K; ++k) {
+              sum = std::fma(read(0, row, k), read(1, col, k), sum);
+            }
+            expected[reg][lane] = sum;
+          }
+        }
+      }
       for (uint64_t cpu : levels) {
         for (uint64_t semantics : semantics_modes()) {
           // Qualified gfx942 exact outputs have captured expectations in gfx942_exact_test.
-          if (target == gfx942 && !controls && semantics != RJ_ARITH_SEMANTICS_LOOSE &&
+          const bool gfx942_qualified =
+              is_gfx942 && (controls & 7) <= 4 && ((controls >> 3) & 15) < (1ULL << (controls & 7));
+          if (gfx942_qualified && semantics != RJ_ARITH_SEMANTICS_LOOSE &&
               semantics != RJ_ARITH_SEMANTICS_COMPATIBILITY) {
             continue;
           }

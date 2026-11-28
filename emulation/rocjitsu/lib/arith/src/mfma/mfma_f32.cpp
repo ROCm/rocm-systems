@@ -43,10 +43,11 @@ int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32
                            kMatrixIgnoredFpFlags | RJ_ARITH_FP_DX10_CLAMP_OFF)) {
     return error;
   }
-  // Only the captured gfx942 XF32 forms with default source controls are qualified.
-  // Compatibility retains the existing fast approximate implementation.
+  // Captured gfx942 XF32 forms ignore CBSZ/ABID/BLGP in hardware; CBSZ <= 4 with
+  // ABID < 2^CBSZ and BLGP 0..7 are qualified in exact modes. Compatibility retains
+  // the existing fast approximate implementation.
   if constexpr (Gfx942) {
-    if (is_exact(flags) && !controls) {
+    if (is_exact(flags) && is_gfx942_mfma_controls_qualified(controls)) {
       const bool no_inf_nan = (flags & RJ_ARITH_FP16_OVFL) != 0;
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
       if (!no_inf_nan && cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
@@ -63,6 +64,7 @@ int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32
       mfma_gfx942_exact(MfmaGfx942Format::Xf32, M, K, Batch, no_inf_nan, d, a, b, c);
       return RJ_ARITH_SUCCESS;
     }
+    controls = 0;
   }
   if ((flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
     return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
