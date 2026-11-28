@@ -859,8 +859,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx942 = {
   .forceCeScratch = true,
   .bcRingLLMaxBytes = 0,
   .bcRingLL128MaxBytes = 0,
-  // Off until an A/B on gfx942; RCCL_DDA_IPC_BANKED_SCRATCH=1 turns it on.
-  .ddaIpcBankedScratch = false,
+  .ddaIpcBankedScratch = true,
 };
 
 bool rcclWindowFits(size_t totalBytes, size_t minBytes, size_t maxBytes) {

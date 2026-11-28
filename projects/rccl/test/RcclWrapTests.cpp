@@ -3231,12 +3231,12 @@ TEST(RcclDdaTierThresholds, ForceCeScratchPerArch)
     EXPECT_TRUE(rcclGetArchThresholds("gfx942")->forceCeScratch);
 }
 
-// Banked DDA IPC scratch is on by default on gfx950 only; gfx1250 has no DDA IPC path.
+// Banked DDA IPC scratch is on by default on gfx950 and gfx942; gfx1250 has no DDA IPC path.
 TEST(RcclDdaTierThresholds, IpcBankedScratchPerArch)
 {
     EXPECT_FALSE(rcclGetArchThresholds("gfx1250")->ddaIpcBankedScratch);
     EXPECT_TRUE(rcclGetArchThresholds("gfx950")->ddaIpcBankedScratch);
-    EXPECT_FALSE(rcclGetArchThresholds("gfx942")->ddaIpcBankedScratch);
+    EXPECT_TRUE(rcclGetArchThresholds("gfx942")->ddaIpcBankedScratch);
 }
 
 // Only the gfx1250 SPX table opens the AllGather TDM window.
