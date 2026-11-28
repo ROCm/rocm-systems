@@ -97,3 +97,32 @@ performance penalty.
             :end-before: // [sphinx-end]
             :emphasize-lines: 57-59
             :language: cpp
+
+.. _multi_device_peer_copy:
+
+Peer-to-peer copy functions
+-------------------------------------------------------------------------------
+
+Use :cpp:func:`hipMemcpyPeer` and :cpp:func:`hipMemcpyPeerAsync` to copy memory
+from one device to another. In addition to the destination and source
+pointers, both functions take the ID of the destination device and the source
+device.
+
+* :cpp:func:`hipMemcpyPeer` is ordered after pending work on the current
+  device, the source device, and the destination device.
+* :cpp:func:`hipMemcpyPeerAsync` runs the copy in the stream that you pass, and
+  doesn't wait for work in streams on other devices. Make sure that the source
+  data is ready before the copy starts, for example with an event, and
+  synchronize the stream before you use the copied data.
+
+The following example enables peer access if the devices support it, copies a
+buffer from device 0 to device 1 with :cpp:func:`hipMemcpyPeer`, and copies it
+back with :cpp:func:`hipMemcpyPeerAsync`.
+
+.. literalinclude:: ../../tools/example_codes/p2p_memcpy_peer.hip
+    :start-after: // [sphinx-start]
+    :end-before: // [sphinx-end]
+    :language: cpp
+
+For the full list of peer-to-peer functions, see the
+:ref:`peer-to-peer device memory access reference <peer_to_peer_device_memory_access_reference>`.
