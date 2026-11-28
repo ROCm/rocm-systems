@@ -7,6 +7,7 @@
 #include "cl_common.hpp"
 #include "vdi_common.hpp"
 #include "device/device.hpp"
+#include "device/comgrctx.hpp"
 #include "platform/runtime.hpp"
 #include "rocclr/utils/versions.hpp"
 #include "os/os.hpp"
@@ -303,7 +304,15 @@ RUNTIME_ENTRY(cl_int, clGetDeviceInfo,
       CASE(CL_DEVICE_PROFILING_TIMER_OFFSET_AMD, profilingTimerOffset_);
       CASE(CL_DEVICE_ENDIAN_LITTLE, littleEndian_);
       CASE(CL_DEVICE_AVAILABLE, available_);
-      CASE(CL_DEVICE_COMPILER_AVAILABLE, compilerAvailable_);
+    case CL_DEVICE_COMPILER_AVAILABLE:
+    case CL_DEVICE_LINKER_AVAILABLE: {
+      // comgr loads on first use, not at device init: report whether it can
+      const amd::device::Info& info = as_amd(device)->info();
+      cl_bool available = (param_name == CL_DEVICE_COMPILER_AVAILABLE) ? info.compilerAvailable_
+                                                                       : info.linkerAvailable_;
+      available = (available && amd::Comgr::Load()) ? CL_TRUE : CL_FALSE;
+      return amd::clGetInfo(available, param_value_size, param_value, param_value_size_ret);
+    }
       CASE(CL_DEVICE_EXECUTION_CAPABILITIES, executionCapabilities_);
       CASE(CL_DEVICE_SVM_CAPABILITIES, svmCapabilities_);
       CASE(CL_DEVICE_PREFERRED_PLATFORM_ATOMIC_ALIGNMENT, preferredPlatformAtomicAlignment_);
@@ -334,7 +343,6 @@ RUNTIME_ENTRY(cl_int, clGetDeviceInfo,
       CASE(CL_DEVICE_QUEUE_ON_DEVICE_MAX_SIZE, queueOnDeviceMaxSize_);
       CASE(CL_DEVICE_MAX_ON_DEVICE_QUEUES, maxOnDeviceQueues_);
       CASE(CL_DEVICE_MAX_ON_DEVICE_EVENTS, maxOnDeviceEvents_);
-      CASE(CL_DEVICE_LINKER_AVAILABLE, linkerAvailable_);
       CASE(CL_DEVICE_BUILT_IN_KERNELS, builtInKernels_);
       CASE(CL_DEVICE_IMAGE_MAX_BUFFER_SIZE, imageMaxBufferSize_);
       CASE(CL_DEVICE_IMAGE_MAX_ARRAY_SIZE, imageMaxArraySize_);

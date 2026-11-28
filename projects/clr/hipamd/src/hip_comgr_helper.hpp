@@ -109,7 +109,6 @@ bool convertSPIRVToLLVMBC(const comgr_helper::ComgrDataSetUniqueHandle& linkInpu
                           const std::string& isa, const std::vector<std::string>& linkOptions,
                           std::string& buildLog,
                           comgr_helper::ComgrDataSetUniqueHandle& linkOutputs);
-bool demangleName(const std::string& mangledName, std::string& demangledName);
 std::string handleMangledName(std::string loweredName);
 bool fillMangledNames(const std::vector<char>& executable,
                       std::map<std::string, std::string>& mangledNames, bool isBitcode);

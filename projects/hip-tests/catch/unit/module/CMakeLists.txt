@@ -434,6 +434,113 @@ if(HIP_PLATFORM MATCHES "amd")
   endif()
 endif()
 
+# Code object metadata tests (hipCodeObjectMetadata.cc): the same kernels in every container the
+# runtime reads (uncompressed and compressed v2/v3 fat binaries, generic targets alone and next
+# to the native ones, raw ELF per target) and a code object with two metadata notes, linked from
+# two separately assembled objects as Tensile's code objects are.
+if(HIP_PLATFORM MATCHES "amd")
+  list(APPEND TEST_SRC hipCodeObjectMetadata.cc)
+  set(CO_MD_SRC ${CMAKE_CURRENT_SOURCE_DIR}/codeObjectMetadataKernels.cc)
+  # Multi-ASIC fat binaries: other processors (feature variants included) and the generic
+  # targets next to the device's own, so the runtime has to find its entry among many. The
+  # processors the tests are built for are dropped here; OFFLOAD_ARCH_LIST adds them.
+  set(CO_MD_OTHER_ARCHS gfx900 gfx906 gfx908 gfx90a:xnack- gfx90a:xnack+ gfx942 gfx1010 gfx1030
+                        gfx1100 gfx1101 gfx1102 gfx1151 gfx1200 gfx1201)
+  set(CO_MD_MULTI_ARCHS "")
+  foreach(_arch ${CO_MD_OTHER_ARCHS})
+    string(REGEX REPLACE ":.*" "" _processor "${_arch}")
+    if(NOT _processor IN_LIST HIP_GPU_ARCH_LIST)
+      list(APPEND CO_MD_MULTI_ARCHS --offload-arch=${_arch})
+    endif()
+  endforeach()
+  list(APPEND CO_MD_MULTI_ARCHS ${OFFLOAD_ARCH_GENERIC_STR})
+  # The same, embedded in the test executable (registered with __hipRegisterFatBinary), once
+  # uncompressed and once compressed. Compression is set per translation unit: the compressed one
+  # is a wrapper that builds hipCodeObjectMetadataEmbedded.cc again
+  set(CO_MD_EMBEDDED_COMPRESSED ${CMAKE_CURRENT_BINARY_DIR}/hipCodeObjectMetadataEmbeddedCompressed.cc)
+  file(WRITE ${CO_MD_EMBEDDED_COMPRESSED}
+       "#define CO_MD_EMBEDDED_COMPRESSED 1\n"
+       "#include \"${CMAKE_CURRENT_SOURCE_DIR}/hipCodeObjectMetadataEmbedded.cc\"\n")
+  list(APPEND TEST_SRC hipCodeObjectMetadataEmbedded.cc ${CO_MD_EMBEDDED_COMPRESSED})
+  set_property(SOURCE hipCodeObjectMetadataEmbedded.cc ${CO_MD_EMBEDDED_COMPRESSED}
+               APPEND PROPERTY COMPILE_OPTIONS ${CO_MD_MULTI_ARCHS} -mcode-object-version=6)
+  set_property(SOURCE ${CO_MD_EMBEDDED_COMPRESSED} APPEND PROPERTY COMPILE_OPTIONS
+               --offload-compress)
+  set_property(SOURCE ${CO_MD_EMBEDDED_COMPRESSED} APPEND PROPERTY OBJECT_DEPENDS
+               ${CMAKE_CURRENT_SOURCE_DIR}/hipCodeObjectMetadataEmbedded.cc)
+  set(CO_MD_FLAGS ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} -mprintf-kind=buffered --cuda-device-only
+                  -x hip -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT})
+  set(CO_MD_OUTPUTS "")
+  foreach(_variant "" Compressed CompressedV2 Generic NativeAndGeneric MultiAsic MultiAsicCompressed)
+    set(_out ${CMAKE_CURRENT_BINARY_DIR}/codeObjectMetadata${_variant}.code)
+    set(_archs ${OFFLOAD_ARCH_LIST})
+    set(_extra "")
+    set(_env "")
+    if(_variant MATCHES "Compressed")
+      set(_extra --offload-compress)
+    endif()
+    if(_variant STREQUAL "CompressedV2")
+      set(_env ${CMAKE_COMMAND} -E env COMPRESSED_BUNDLE_FORMAT_VERSION=2)
+    endif()
+    if(_variant STREQUAL "Generic")
+      set(_archs ${OFFLOAD_ARCH_GENERIC_STR})
+      set(_extra -mcode-object-version=6)
+    endif()
+    if(_variant STREQUAL "NativeAndGeneric")
+      set(_archs ${OFFLOAD_ARCH_LIST} ${OFFLOAD_ARCH_GENERIC_STR})
+      set(_extra -mcode-object-version=6)
+    endif()
+    if(_variant MATCHES "MultiAsic")
+      set(_archs ${CO_MD_MULTI_ARCHS} ${OFFLOAD_ARCH_LIST})
+      list(APPEND _extra -mcode-object-version=6)
+    endif()
+    add_custom_command(OUTPUT ${_out}
+                       COMMAND ${_env} ${CMAKE_HIP_COMPILER} ${CO_MD_FLAGS} ${_archs} ${_extra}
+                       ${CO_MD_SRC} -o ${_out}
+                       DEPENDS ${CO_MD_SRC}
+                       COMMENT "Compiling codeObjectMetadata${_variant}.code")
+    list(APPEND CO_MD_OUTPUTS ${_out})
+  endforeach()
+  if(UNIX)
+    # The tags built, so the test fails rather than skips when a device's files are missing
+    set(_tags "")
+    foreach(_arch_flag ${OFFLOAD_ARCH_LIST})
+      string(REPLACE "--offload-arch=" "" _arch "${_arch_flag}")
+      string(REPLACE ":" "_" _tag "${_arch}")
+      string(APPEND _tags " ${_tag}")
+      set(_raw ${CMAKE_CURRENT_BINARY_DIR}/codeObjectMetadata-${_tag}.co)
+      add_custom_command(OUTPUT ${_raw}
+                         COMMAND ${CMAKE_HIP_COMPILER} ${CO_MD_FLAGS} --offload-arch=${_arch}
+                         --no-gpu-bundle-output ${CO_MD_SRC} -o ${_raw}
+                         DEPENDS ${CO_MD_SRC}
+                         COMMENT "Compiling codeObjectMetadata-${_tag}.co")
+      set(_notes "")
+      foreach(_part A B)
+        set(_src ${CMAKE_CURRENT_SOURCE_DIR}/codeObjectNote${_part}.cc)
+        set(_asm ${CMAKE_CURRENT_BINARY_DIR}/codeObjectNote${_part}-${_tag}.s)
+        add_custom_command(OUTPUT ${_asm}
+                           COMMAND ${CMAKE_HIP_COMPILER} ${CO_MD_FLAGS} --offload-arch=${_arch}
+                           --no-gpu-bundle-output -S ${_src} -o ${_asm}
+                           DEPENDS ${_src}
+                           COMMENT "Compiling codeObjectNote${_part}-${_tag}.s")
+        list(APPEND _notes ${_asm})
+      endforeach()
+      # Assembled separately and linked: one NT_AMDGPU_METADATA note per object
+      set(_multi ${CMAKE_CURRENT_BINARY_DIR}/codeObjectMultiNote-${_tag}.co)
+      add_custom_command(OUTPUT ${_multi}
+                         COMMAND ${CMAKE_HIP_COMPILER} -target amdgcn-amd-amdhsa -mcpu=${_arch}
+                         ${_notes} -o ${_multi}
+                         DEPENDS ${_notes}
+                         COMMENT "Linking codeObjectMultiNote-${_tag}.co")
+      list(APPEND CO_MD_OUTPUTS ${_raw} ${_multi})
+    endforeach()
+    set_property(SOURCE hipCodeObjectMetadata.cc APPEND PROPERTY COMPILE_DEFINITIONS
+                 "CO_MD_TARGETS=\"${_tags} \"")
+  endif()
+  add_custom_target(codeObjectMetadata_code DEPENDS ${CO_MD_OUTPUTS})
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CO_MD_OUTPUTS})
+endif()
+
 if(HIP_PLATFORM MATCHES "amd")
   set(RTCLIB "hiprtc::hiprtc")
 else()
@@ -492,6 +599,7 @@ if(HIP_PLATFORM MATCHES "amd")
   add_dependencies(ModuleTest copyKernelGenericTarget_code)
   add_dependencies(ModuleTest copyKernelGenericTargetCompressed_code)
   add_dependencies(ModuleTest anyOrderLaunch_code)
+  add_dependencies(ModuleTest codeObjectMetadata_code)
 
   if(UNIX)
     add_dependencies(ModuleTest copiousArgKernel_code copiousArgKernel0_code copiousArgKernel1_code copiousArgKernel2_code

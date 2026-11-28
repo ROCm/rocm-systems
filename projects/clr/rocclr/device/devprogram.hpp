@@ -11,6 +11,8 @@
 #include "platform/memory.hpp"
 #include "amd_comgr/amd_comgr.h"
 
+#include <string_view>
+
 namespace amd {
 namespace hsa {
 namespace loader {
@@ -37,11 +39,6 @@ class Options;
 namespace amd::device {
 class ClBinary;
 class Kernel;
-
-struct SymbolInfo {
-  int sym_type;
-  std::vector<std::string>* var_names;
-};
 
 struct SymbolLoweredName {
   const char* name_expression;
@@ -122,14 +119,19 @@ class Program {
   mutable std::string buildLog_;  //!< build log.
   int32_t buildStatus_;           //!< build status.
   int32_t buildError_;            //!< build error
+  bool compilerUnavailable_ = false;  //!< A compile or link step needed comgr and it didn't load
 
   size_t globalVariableTotalSize_;
   amd::option::Options* programOptions_;
 
 
-  amd_comgr_metadata_node_t metadata_ = {};                             //!< COMgr metadata
-  uint32_t codeObjectVer_;                                              //!< version of code object
-  std::map<std::string, amd_comgr_metadata_node_t> kernelMetadataMap_;  //!< Map of kernel metadata
+  uint32_t codeObjectVer_;                  //!< version of code object
+  std::vector<std::string> printfStrings_;  //!< amdhsa.printf format strings
+  //! Kernel metadata maps by kernel name: views into the code object's metadata notes, valid
+  //! while createKernels() creates the kernels from the code object
+  std::map<std::string, std::string_view> kernelMetadataMap_;
+  std::vector<std::string> dynFuncNames_;  //!< Named STT_FUNC symbols in .dynsym
+  std::vector<std::string> dynVarNames_;   //!< Named STT_OBJECT symbols in .dynsym
   //! Sanitizer lock - lock when launching init/fini kernels
   static std::recursive_mutex initFiniLock_;
 
@@ -227,10 +229,11 @@ class Program {
   //! Returns TRUE if the program is a trap handler for debugger support
   bool isTrapHandler() const { return trapHandler_; }
 
-  amd_comgr_metadata_node_t metadata() const { return metadata_; }
+  //! Returns the amdhsa.printf format strings of the code object
+  const std::vector<std::string>& printfStrings() const { return printfStrings_; }
 
-  //! Get the kernel metadata
-  const bool getKernelMetadata(const std::string& name, amd_comgr_metadata_node_t* meta) const {
+  //! Get the kernel metadata map, in place in the code object (see kernelMetadataMap_)
+  const bool getKernelMetadata(const std::string& name, std::string_view* meta) const {
     auto it = kernelMetadataMap_.find(name);
     if (it != kernelMetadataMap_.end()) {
       *meta = it->second;
@@ -244,15 +247,10 @@ class Program {
   //! Check if program is HIP based
   const bool isHIP() const { return (isHIP_ == 1); }
 
-  //! Get mangled name of a name expresion
-  const bool getLoweredNames(std::vector<std::string>* mangledNames) const;
-
-  //! Get demangled names
-  bool getDemangledName(const std::string& mangledNames, std::string& demangledNames) const;
-
-  bool getGlobalFuncFromCodeObj(std::vector<std::string>* func_names) const;
-  bool getGlobalVarFromCodeObj(std::vector<std::string>* var_names) const;
-  bool getUndefinedVarFromCodeObj(std::vector<std::string>* var_names) const;
+  //! Names of the code object's dynamic STT_FUNC symbols
+  const std::vector<std::string>& getGlobalFuncFromCodeObj() const { return dynFuncNames_; }
+  //! Names of the code object's dynamic STT_OBJECT symbols
+  const std::vector<std::string>& getGlobalVarFromCodeObj() const { return dynVarNames_; }
 
   virtual bool createGlobalVarObj(amd::Memory** amd_mem_obj, void** dptr, size_t* bytes,
                                   const char* globalName) const {
@@ -285,6 +283,9 @@ class Program {
 
   //! Link the device program.
   bool linkImpl(amd::option::Options* options);
+
+  //! Loads comgr for a compile or link step. On failure logs it and sets compilerUnavailable_
+  bool requireCompiler();
 
   //! Link the device programs.
   bool linkImpl(const std::vector<Program*>& inputPrograms, amd::option::Options* options,
@@ -349,8 +350,6 @@ class Program {
     return false;
   }
 
-  bool getSymbolsFromCodeObj(std::vector<std::string>* var_names,
-                             amd_comgr_symbol_type_t sym_type) const;
   bool getUndefinedVarInfo(std::string var_name, void** var_addr, size_t* var_size);
   bool defineUndefinedVars();
 
@@ -391,7 +390,8 @@ class Program {
                                 amd::option::Options* amdOptions, char* executable[],
                                 size_t* executableSize, file_type_t continueCompileFrom);
 
-  //! Create the map for the kernel name and its metadata for fast access
+  //! Checks the code object's ISA and reads its metadata notes (the printf strings, the code
+  //! object version and the map of each kernel, kernelMetadataMap_) and its dynamic symbols
   bool createKernelMetadataMap(void* binary, size_t binSize);
 
   bool trySubstObjFile(const char* SubstCfgFile, const std::string& sourceCode,
@@ -402,18 +402,6 @@ class Program {
 
   //! Disable operator=
   Program& operator=(const Program&);
-};
-
-class ComgrBinaryData {
- public:
-  ComgrBinaryData() : binaryData_({0}), created_(false) {}
-  ~ComgrBinaryData();
-  bool create(amd_comgr_data_kind_t kind, void* binary, size_t binSize);
-  amd_comgr_data_t& data();
-
- private:
-  amd_comgr_data_t binaryData_;
-  bool created_;
 };
 
 }  // namespace amd::device

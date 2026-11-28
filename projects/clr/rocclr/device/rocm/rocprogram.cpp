@@ -217,6 +217,8 @@ bool Program::createKernels(void* binary, size_t binSize, bool useUniformWorkGro
     aKernel->setInternalKernelFlag(internalKernel);
     addKernel(aKernel);
   }
+  // The kernel maps point into the code object; the kernels hold what they need
+  kernelMetadataMap_.clear();
   return true;
 }
 

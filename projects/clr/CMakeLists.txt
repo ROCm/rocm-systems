@@ -98,6 +98,13 @@ endif()
 # which selects the sanitizer runtime linkage.
 include("${CMAKE_CURRENT_LIST_DIR}/cmake/CLRSanitizers.cmake")
 
+# Offline tests of the code object formats (no GPU; fetches Catch2), added by rocclr. CTest
+# reads only the CTestTestfile of the directory that enables testing, so enable it here.
+option(CODEOBJECT_BUILD_TESTS "Build the code object unit tests (codeobject_test)" OFF)
+if(CODEOBJECT_BUILD_TESTS)
+    enable_testing()
+endif()
+
 # rocclr is only used for the AMD HIP path and OpenCL; the NVIDIA path does not use it.
 if((CLR_BUILD_HIP AND HIP_PLATFORM STREQUAL "amd") OR CLR_BUILD_OCL)
     add_subdirectory(rocclr)

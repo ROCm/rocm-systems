@@ -7,71 +7,6 @@
 #pragma once
 
 // Static values initialization from class Kernel.
-const amd::Kernel::ArgFieldMapType amd::Kernel::kArgFieldMap[] = {
-    {"Name", ArgField::Name},
-    {"TypeName", ArgField::TypeName},
-    {"Size", ArgField::Size},
-    {"Align", ArgField::Align},
-    {"ValueKind", ArgField::ValueKind},
-    {"PointeeAlign", ArgField::PointeeAlign},
-    {"AddrSpaceQual", ArgField::AddrSpaceQual},
-    {"AccQual", ArgField::AccQual},
-    {"ActualAccQual", ArgField::ActualAccQual},
-    {"IsConst", ArgField::IsConst},
-    {"IsRestrict", ArgField::IsRestrict},
-    {"IsVolatile", ArgField::IsVolatile},
-    {"IsPipe", ArgField::IsPipe},
-    {"Offset", ArgField::Offset}};
-
-const amd::Kernel::ArgValueKindType amd::Kernel::kArgValueKind[] = {
-    {"ByValue", amd::KernelParameterDescriptor::ValueObject},
-    {"GlobalBuffer", amd::KernelParameterDescriptor::MemoryObject},
-    {"DynamicSharedPointer", amd::KernelParameterDescriptor::MemoryObject},
-    {"Sampler", amd::KernelParameterDescriptor::SamplerObject},
-    {"Image", amd::KernelParameterDescriptor::ImageObject},
-    {"Pipe", amd::KernelParameterDescriptor::MemoryObject},
-    {"Queue", amd::KernelParameterDescriptor::QueueObject},
-    {"HiddenGlobalOffsetX", amd::KernelParameterDescriptor::HiddenGlobalOffsetX},
-    {"HiddenGlobalOffsetY", amd::KernelParameterDescriptor::HiddenGlobalOffsetY},
-    {"HiddenGlobalOffsetZ", amd::KernelParameterDescriptor::HiddenGlobalOffsetZ},
-    {"HiddenNone", amd::KernelParameterDescriptor::HiddenNone},
-    {"HiddenPrintfBuffer", amd::KernelParameterDescriptor::HiddenPrintfBuffer},
-    {"HiddenDefaultQueue", amd::KernelParameterDescriptor::HiddenDefaultQueue},
-    {"HiddenCompletionAction", amd::KernelParameterDescriptor::HiddenCompletionAction},
-    {"HiddenMultigridSyncArg", amd::KernelParameterDescriptor::HiddenMultiGridSync},
-    {"HiddenHostcallBuffer", amd::KernelParameterDescriptor::HiddenHostcallBuffer}};
-
-const amd::Kernel::ArgAccQualType amd::Kernel::kArgAccQual[] = {
-    {"Default", CL_KERNEL_ARG_ACCESS_NONE},
-    {"ReadOnly", CL_KERNEL_ARG_ACCESS_READ_ONLY},
-    {"WriteOnly", CL_KERNEL_ARG_ACCESS_WRITE_ONLY},
-    {"ReadWrite", CL_KERNEL_ARG_ACCESS_READ_WRITE}};
-
-const amd::Kernel::ArgAddrSpaceQualType amd::Kernel::kArgAddrSpaceQual[] = {
-    {"Private", CL_KERNEL_ARG_ADDRESS_PRIVATE},   {"Global", CL_KERNEL_ARG_ADDRESS_GLOBAL},
-    {"Constant", CL_KERNEL_ARG_ADDRESS_CONSTANT}, {"Local", CL_KERNEL_ARG_ADDRESS_LOCAL},
-    {"Generic", CL_KERNEL_ARG_ADDRESS_GLOBAL},    {"Region", CL_KERNEL_ARG_ADDRESS_PRIVATE}};
-
-const amd::Kernel::AttrFieldMapType amd::Kernel::kAttrFieldMap[] = {
-    {"ReqdWorkGroupSize", AttrField::ReqdWorkGroupSize},
-    {"WorkGroupSizeHint", AttrField::WorkGroupSizeHint},
-    {"VecTypeHint", AttrField::VecTypeHint},
-    {"RuntimeHandle", AttrField::RuntimeHandle}};
-
-const amd::Kernel::CodePropFieldMapType amd::Kernel::kCodePropFieldMap[] = {
-    {"KernargSegmentSize", CodePropField::KernargSegmentSize},
-    {"GroupSegmentFixedSize", CodePropField::GroupSegmentFixedSize},
-    {"PrivateSegmentFixedSize", CodePropField::PrivateSegmentFixedSize},
-    {"KernargSegmentAlign", CodePropField::KernargSegmentAlign},
-    {"WavefrontSize", CodePropField::WavefrontSize},
-    {"NumSGPRs", CodePropField::NumSGPRs},
-    {"NumVGPRs", CodePropField::NumVGPRs},
-    {"MaxFlatWorkGroupSize", CodePropField::MaxFlatWorkGroupSize},
-    {"IsDynamicCallStack", CodePropField::IsDynamicCallStack},
-    {"IsXNACKEnabled", CodePropField::IsXNACKEnabled},
-    {"NumSpilledSGPRs", CodePropField::NumSpilledSGPRs},
-    {"NumSpilledVGPRs", CodePropField::NumSpilledVGPRs}};
-
 const amd::Kernel::ArgAccQualV3Type amd::Kernel::kArgAccQualV3[] = {
     {"default", CL_KERNEL_ARG_ACCESS_NONE},
     {"read_only", CL_KERNEL_ARG_ACCESS_READ_ONLY},
@@ -155,9 +90,9 @@ const amd::Kernel::ArgFieldMapV3Type amd::Kernel::kArgFieldMapV3[] = {
 
 // Templated find function to retrieve the right value based on string
 template <typename V, typename T, size_t N>
-V amd::Kernel::FindValue(const T (&structure)[N], const std::string& name) {
+V amd::Kernel::FindValue(const T (&structure)[N], std::string_view name) {
   for (size_t idx = 0; idx < N; ++idx) {
-    if (std::string(structure[idx].name) == name) {
+    if (name == structure[idx].name) {
       return structure[idx].value;
     }
   }
@@ -166,9 +101,9 @@ V amd::Kernel::FindValue(const T (&structure)[N], const std::string& name) {
 
 // Templated find function to retrieve cl_int values.
 template <typename T, size_t N>
-cl_int amd::Kernel::FindValue(const T (&structure)[N], const std::string& name) {
+cl_int amd::Kernel::FindValue(const T (&structure)[N], std::string_view name) {
   for (size_t idx = 0; idx < N; ++idx) {
-    if (std::string(structure[idx].name) == name) {
+    if (name == structure[idx].name) {
       return structure[idx].value;
     }
   }
