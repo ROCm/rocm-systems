@@ -1423,6 +1423,110 @@ int rcclP2pTaskParts(struct ncclComm* comm, ncclFunc_t collAPI, int peer) {
 
 RCCL_PARAM_DECLARE(SaturateP2pNChannels);
 
+// Direct P2P AllToAll peer layers. K peers in flight (>= 2, rounded down to a power of two) gives each peer
+// p2pnChannels / K channels instead of p2pnChannelsPerPeer and puts K schedule rounds in each kernel launch, so a GPU
+// writes to at most K peers at a time on the same channel pool and grid. The rounds of one layer take disjoint channel
+// sets (round mod K), so a channel carries one peer per launch. RCCL_A2A_P2P_PEERS_IN_FLIGHT sets K; 0 or 1 turns it
+// off, and a negative value (the default) selects kRcclA2aP2pPeersInFlightGfx1250 on gfx1250 and off elsewhere.
+// Both ends of a pair agree: the rule reads only comm-wide fields (the arch of an arch-uniform comm, as the
+// p2pnChannelsPerPeer tiling does) and the AllToAll bytes, which are equal on every rank. Single-node comms only (a
+// fabric comm spanning hosts is one node), so every peer is on the linear channel map. Off for the self copy, P2P over
+// NET, the rearchitected enqueue, pools above 256 channels, peers below kRcclA2aP2pLayerMinPeerBytes and when K adds
+// no channels.
+RCCL_PARAM(A2aP2pPeersInFlight, "A2A_P2P_PEERS_IN_FLIGHT", -1);
+constexpr int64_t kRcclA2aP2pPeersInFlightGfx1250 = 16;
+constexpr ssize_t kRcclA2aP2pLayerMinPeerBytes = ssize_t(4) << 20;
+
+// Channels per peer of a layered AllToAll task to or from peer; 0 when the layering is off for it.
+static int rcclA2aP2pLayerParts(struct ncclComm* comm, ncclFunc_t collAPI, ssize_t bytes, int peer) {
+  int64_t peersInFlight = rcclParamA2aP2pPeersInFlight();
+  if (peersInFlight < 0) {
+    peersInFlight = comm->cudaArch == 1250 ? kRcclA2aP2pPeersInFlightGfx1250 : 0;
+  }
+  // One peer in flight would need the whole pool per peer: ncclDevWorkP2p counts channels in 8 bits.
+  if (peersInFlight < 2 || collAPI != ncclFuncAlltoAll || peer == comm->rank || bytes < kRcclA2aP2pLayerMinPeerBytes) {
+    return 0;
+  }
+  // The rearchitected enqueue pre-connects in task_posttuning, which does not know the layer sets.
+  if (comm->nNodes != 1 || comm->p2pNet || ncclParamEnqueueRearchEnable()) {
+    return 0;
+  }
+  // ncclDevWorkP2p holds the channel counts and the channel base in 8 bits.
+  int pool = comm->p2pnChannels;
+  if (pool <= 0 || pool > 256 || (pool & (pool - 1)) != 0 || comm->p2pnChannelsPerPeer <= 0) {
+    return 0;
+  }
+  int parts = pool / pow2Down(static_cast<int>(std::min<int64_t>(peersInFlight, pool)));
+  return parts > comm->p2pnChannelsPerPeer ? parts : 0;
+}
+
+// Peers in flight of a layered round (the number of channel sets); a layer is that many consecutive rounds.
+static int rcclA2aP2pLayerSets(struct ncclComm* comm, int parts) {
+  return comm->p2pnChannels / parts;
+}
+
+// Channel base of a layered round: its set is round mod sets. The linear map starts at base * p2pnChannelsPerPeer, so
+// the set starts at channel (round mod sets) * parts.
+static uint8_t rcclA2aP2pLayerBase(struct ncclComm* comm, int p2pRound, int parts) {
+  int set = p2pRound % rcclA2aP2pLayerSets(comm, parts);
+  return static_cast<uint8_t>(set * (parts / comm->p2pnChannelsPerPeer));
+}
+
+// Channels per peer of a round's send/recv pair when both are layered tasks of one AllToAll with the same count; 0
+// otherwise. A capped CTA count keeps the default plan. rcclA2aP2pLayerTaskAppend isolates layered AllToAll tasks, so
+// on every rank a round pairs tasks of the same AllToAll and both ends of a link pick the same channel set.
+static int rcclA2aP2pLayerPairParts(struct ncclComm* comm, struct ncclTaskP2p* recv, struct ncclTaskP2p* send) {
+  if (recv == nullptr || send == nullptr || recv->maxCTAs < MAXCHANNELS || send->maxCTAs < MAXCHANNELS ||
+      recv->collOpCount != send->collOpCount) {
+    return 0;
+  }
+  int parts = rcclA2aP2pLayerParts(comm, send->collAPI, send->bytes, send->root);
+  return parts == rcclA2aP2pLayerParts(comm, recv->collAPI, recv->bytes, recv->root) ? parts : 0;
+}
+
+// Marks the layered channels of an AllToAll task to or from peer for pre-connect (P2P connector 1 only).
+static void rcclA2aP2pLayerPreconnect(struct ncclComm* comm, bool isSendNotRecv, int peer, int parts) {
+  int round = 0;
+  while (peer != (isSendNotRecv ? comm->p2pSchedule[round].sendRank : comm->p2pSchedule[round].recvRank)) {
+    round += 1;
+  }
+  uint8_t base = rcclA2aP2pLayerBase(comm, round, parts);
+  for (int c = 0; c < parts; c++) {
+    int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, c, comm->p2pnChannelsPerPeer, comm->nNodes,
+                                          comm->p2pChannelShiftSize);
+    struct ncclChannelPeer* channelPeer = comm->channels[channelId].peers[peer];
+    struct ncclConnector* conn = isSendNotRecv ? &channelPeer->send[1] : &channelPeer->recv[1];
+    if (conn->hasSeen != 0) {
+      continue;
+    }
+    conn->hasSeen = 1;
+    conn->p2pOnly = 1;
+    struct channelMasks* masks = isSendNotRecv ? &comm->connectSend[peer + CHANNEL_MASK_OFFSET(comm->nRanks, 1)] :
+                                                 &comm->connectRecv[peer + CHANNEL_MASK_OFFSET(comm->nRanks, 1)];
+    masks->masks[channelId / 64] |= uint64_t(1) << (channelId % 64);
+    ncclGroupCommPreconnect(comm);
+  }
+}
+
+// Called for each new P2P task. A task the scheduler may layer (uncapped CTAs) makes the group isolate its collective
+// tasks, so explicit Send/Recv, Gather or Scatter in the same group never share a round with it, and marks its layer
+// channel set for pre-connect.
+static void rcclA2aP2pLayerTaskAppend(struct ncclComm* comm, struct ncclTaskP2p* task, bool isSendNotRecv,
+                                      int connIndex) {
+  if (task->maxCTAs < MAXCHANNELS) {
+    return;
+  }
+  int parts = rcclA2aP2pLayerParts(comm, task->collAPI, task->bytes, task->root);
+  if (parts == 0) {
+    return;
+  }
+  comm->planner.p2pCollNeedsIsolation = true;
+  // AllToAll tasks use connector 1 (the Copy Engine connector serves direct Send/Recv only); kept as a guard.
+  if (connIndex == 1) {
+    rcclA2aP2pLayerPreconnect(comm, isSendNotRecv, task->root, parts);
+  }
+}
+
 static int rcclP2pPolicyChannels(struct ncclComm* comm, struct ncclTaskP2p* task) {
   struct Policy {
     const char* arch;
@@ -1525,12 +1629,19 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
       p2pTasks[dir] ?
         std::min(nChannelsMax, rcclP2pTaskParts(comm, p2pTasks[dir]->collAPI, dir ? sendRank : recvRank)) :
         nChannelsMax;
+  // A layered AllToAll round (rcclA2aP2pLayerParts) takes its layer channel set in both directions.
+  int layerParts = rcclA2aP2pLayerPairParts(comm, p2pTasks[0], p2pTasks[1]);
+  if (layerParts > 0) {
+    taskParts[0] = layerParts;
+    taskParts[1] = layerParts;
+  }
   bool batchP2P = rcclP2pBatchEligible(comm, sendBytes, recvBytes);
   // Keep work-fusion size-gated (batchP2P) but select the channel map from the
   // communicator flag. Keying the map to eligibility collapsed large AllToAll
   // onto the flags-off layout and forced a dual pre-connect. Channel base must
   // also match task_posttuning / init, which have no per-op size.
-  uint8_t base = ncclP2pChannelBaseForRound(comm, p2pRound, rcclEffectiveP2pBatchEnable(comm));
+  uint8_t base = layerParts > 0 ? rcclA2aP2pLayerBase(comm, p2pRound, layerParts) :
+                                  ncclP2pChannelBaseForRound(comm, p2pRound, rcclEffectiveP2pBatchEnable(comm));
   struct ncclProxyOp proxyOps[2] = {};
   int nProxyOps = selfSend ? 0 : 2;
   // Latency-bound send/recv uses one of two separately-generated kernel variants:
@@ -1596,6 +1707,10 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
     p2pChMax[dir] = kChannels[dir] > 0 ? std::min(kChannels[dir], nChannelsMax) : nChannelsMax;
     p2pChMin[dir] =
       kChannels[dir] > 0 ? p2pChMax[dir] : ((comm->nNodes <= 1 && asymmetric) ? nChannelsMax : nChannelsMin);
+    if (layerParts > 0) {
+      p2pChMin[dir] = layerParts;
+      p2pChMax[dir] = layerParts;
+    }
   }
   int a2aMinPeers = NCCL_NET_ATTR_UNDEF, a2aMaxPeers = NCCL_NET_ATTR_UNDEF;
   int connStepSize[2] = {0, 0};
@@ -2025,7 +2140,16 @@ static ncclResult_t scheduleP2pTasksToPlan(struct ncclComm* comm, int* p2pEpoch,
       } else {
         // Isolated collective tasks have the same bounds in both directions.
         int pairMaxCTAs = std::max(send ? send->maxCTAs : 0, recv ? recv->maxCTAs : 0);
-        int pairChannelsMax = std::min(comm->p2pnChannelsPerPeer, pairMaxCTAs);
+        // A layered AllToAll ends the plan before each layer but the first, so a launch holds one layer and every
+        // channel one peer; every rank cuts at the same rounds (the rule is comm-wide).
+        int layerParts = rcclA2aP2pLayerPairParts(comm, recv, send);
+        int layerSets = layerParts > 0 ? rcclA2aP2pLayerSets(comm, layerParts) : 0;
+        if (layerParts > 0 && *p2pRound % layerSets == 0 && plan->nWorkBatches != 0) {
+          INFO(NCCL_P2P, "AllToAll peer layer ends the plan before round %d (%d peers in flight, %d channels per peer)",
+               *p2pRound, layerSets, layerParts);
+          return ncclSuccess;
+        }
+        int pairChannelsMax = layerParts > 0 ? layerParts : std::min(comm->p2pnChannelsPerPeer, pairMaxCTAs);
         int maxCTAs = std::min(planMaxCTAs, pairMaxCTAs);
         if (maxCTAs < MAXCHANNELS) {
           // RCCL: multi-word channel mask, and the same round base / part mapping addP2pToPlan uses.
@@ -2041,7 +2165,8 @@ static ncclResult_t scheduleP2pTasksToPlan(struct ncclComm* comm, int* p2pEpoch,
         }
         // Ensure room for worst case of one new batch per channel. Cap by both the round's
         // maxCTAs-derived pairChannelsMax and the CE-connector-aware per-task channel policy.
-        int reservationChannels = std::min(pairChannelsMax, rcclP2pReservationChannels(comm, recv, send));
+        int reservationChannels =
+          layerParts > 0 ? layerParts : std::min(pairChannelsMax, rcclP2pReservationChannels(comm, recv, send));
         if (!ncclTestBudget(budget, plan->nWorkBatches + reservationChannels,
                             plan->workBytes + sizeof(struct ncclDevWorkP2p))) {
           if (plan->nWorkBatches == 0) {
@@ -4301,6 +4426,8 @@ static ncclResult_t p2pTaskAppend(struct ncclComm* comm, struct ncclInfo* info, 
   // Mark channels that need pre-connect
   if (comm->rank != peer) {
     int connIndex = rcclP2pTaskConnIndex(comm, collAPI, peer);
+    // Isolates a layered AllToAll task and marks its layer channel set (rcclA2aP2pLayerTaskAppend).
+    rcclA2aP2pLayerTaskAppend(comm, p2p, isSendNotRecv, connIndex);
     bool& seen =
       isSendNotRecv ?
         (connIndex == NCCL_CONN_IDX_P2P_CE ? planner->peers[peer].sendCeSeen : planner->peers[peer].sendSeen) :
