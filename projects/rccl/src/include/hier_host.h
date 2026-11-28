@@ -33,17 +33,20 @@ struct rcclHostLayout {
   int localRank; // Position among this host's ranks, in rank order
 };
 
+// Scratch at least doubles each time it grows, so this covers any size.
+constexpr int kHostHierMaxRetired = 64;
+
 struct rcclHostHier {
   struct rcclHostLayout layout;
   ncclComm_t intra; // Ranks of this host, ordered by local rank
   ncclComm_t inter; // The same local rank on every host, ordered by host. Null with one host
+  int* hostRanks; // Comm rank of local rank l on host h at h * ranksPerHost + l
   // Shared by every host-hierarchical collective on the comm, so running them
   // concurrently on two streams is unsafe.
   void* scratch;
   size_t scratchBytes;
-  // Recorded after each host-hierarchical collective, on whichever stream it ran. Consecutive collectives on the comm
-  // are ordered on the device, so the latest record follows every earlier use of scratch.
-  cudaEvent_t scratchUsed;
+  void* retired[kHostHierMaxRetired]; // Outgrown scratch buffers, freed at teardown
+  int nRetired;
 };
 
 // Returns true and fills layout when every host holds the same number of ranks,
@@ -66,9 +69,22 @@ ncclResult_t rcclHostHierTeardown(struct ncclComm* comm);
 // they keep their own abort flags, which the parent's abort and revoke must also set.
 int rcclHostHierChildren(const struct ncclComm* comm, ncclComm_t children[2]);
 
-// Sizes, in bytes, at which host-hierarchical AllReduce beat the default path in
-// gfx1250 MNNVL fp32 sum measurements with 8 ranks per host. False for unmeasured host counts.
-bool rcclHostHierAllReduceAutoWindow(int nHosts, size_t bytes);
+// Sizes, in bytes, at which host-hierarchical AllReduce beat the default path in gfx1250
+// MNNVL fp32 sum measurements with 8 ranks per host (DPX) on 2, 4 and 8 hosts. The
+// rcclHostHierAllReduceAutoType combinations gain at the same sizes. Auto mode is DPX
+// only, so this is false for other layouts. Auto mode also needs the DPX tuning table.
+bool rcclHostHierAllReduceAutoWindow(int nHosts, int ranksPerHost, size_t bytes);
+
+// Sizes, in bytes, at which the fused DDA kernel beat the three collectives in gfx1250 fp32, fp16 and bf16 sum
+// measurements on two hosts with 8 ranks per host: above 2 MiB to below 7 MiB, and above 8 MiB to 16 MiB. The three
+// collectives were faster at 2 MiB and at 7-8 MiB, and did not lose to the default path anywhere from 2 to 16 MiB.
+bool rcclHostHierAllReduceFusedWindow(int nHosts, int ranksPerHost, size_t bytes);
+
+// Datatype and op combinations that auto mode uses at the fp32-sum sizes of rcclHostHierAllReduceAutoWindow, from
+// gfx1250 DPX measurements: sum on fp32, fp16, bf16 and fp8, which gained at every size of the window on two, four and
+// eight hosts. Prod, max, min, avg and integer sums lost at 64-256 MiB. The caller still applies opSplitsAcrossStages,
+// which drops integer avg and PreMulSum.
+bool rcclHostHierAllReduceAutoType(ncclDataType_t datatype, ncclRedOp_t op);
 
 // Whether RCCL_HOST_HIER_ALLREDUCE and the operands allow host-hierarchical
 // AllReduce. registeredBuffers: the send or receive buffer is in a registered
@@ -78,7 +94,9 @@ bool rcclHostHierAllReduceEligible(struct ncclComm* comm, size_t count, ncclData
                                    bool registeredBuffers);
 
 // ReduceScatter within the host, AllReduce across hosts, then AllGather within
-// the host. Needs rcclHostHierEnsure to have succeeded.
+// the host: in one fused DDA kernel where RCCL_HOST_HIER_ALLREDUCE_FUSED selects
+// it, otherwise as three collectives on the child comms. Needs
+// rcclHostHierEnsure to have succeeded.
 ncclResult_t rcclHostHierAllReduce(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
                                    ncclRedOp_t op, struct ncclComm* comm, cudaStream_t stream);
 

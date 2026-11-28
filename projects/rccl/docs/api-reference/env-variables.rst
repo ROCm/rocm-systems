@@ -533,13 +533,30 @@ collected in the following table.
           communicator, so all ranks must use the same value.
       - | ``-1``: Auto (default). On gfx1250 when every rank is in one MNNVL
           clique and the communicator set up DDA fabric (communicators made
-          by ``ncclCommSplit`` do not), used for ``ncclFloat32`` ``ncclSum``
-          on buffers outside registered windows, with eight ranks per host on
-          the DPX tuning table and these message sizes: above 1 MiB to 16 MiB
-          and 64 to 128 MiB on two hosts, 2 to 256 MiB on four hosts, and 2 to 512 MiB on
-          eight hosts. Not used with other host counts.
+          by ``ncclCommSplit`` do not), used on buffers outside registered
+          windows with eight ranks per host on the DPX tuning table, for
+          ``ncclSum`` on ``ncclFloat32``, ``ncclFloat16``, ``ncclBfloat16``,
+          ``ncclFloat8e4m3`` and ``ncclFloat8e5m2``, at these message sizes:
+          above 1 MiB to 16 MiB and 64 to 128 MiB on two hosts, 2 to 256 MiB
+          on four hosts and 2 to 512 MiB on eight hosts. Auto mode is DPX only and is not
+          used with other layouts.
         | ``0``: Disabled.
         | ``1``: Enabled for every eligible AllReduce.
+
+    * - | ``RCCL_HOST_HIER_ALLREDUCE_FUSED``
+        | Runs host-hierarchical AllReduce (see ``RCCL_HOST_HIER_ALLREDUCE``) as
+          one DDA fabric kernel instead of three collectives on split
+          communicators. The kernel pushes each stage into peer scratch and
+          needs DDA fabric on the communicator with ``RCCL_DDA_ENABLE`` set,
+          ``ncclSum`` on ``ncclFloat32``, ``ncclFloat16`` or ``ncclBfloat16``,
+          at most 16 hosts and 16 ranks per host, and a count that splits into
+          16-byte pieces per local rank. Otherwise the three collectives run.
+          All ranks must use the same value.
+      - | ``-1``: Auto (default). Used on one or two hosts with eight ranks
+          per host for messages above 2 MiB and below 7 MiB, and above 8 MiB
+          up to 16 MiB.
+        | ``0``: Disabled.
+        | ``1``: Used wherever the kernel applies.
 
     * - | ``NCCL_TREE_COMPACT``
         | Builds the inter-node trees with a half-interleave node remapping.

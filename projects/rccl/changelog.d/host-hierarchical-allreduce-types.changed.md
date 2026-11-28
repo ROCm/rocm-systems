@@ -1,0 +1,1 @@
+* `RCCL_HOST_HIER_ALLREDUCE`: the default (`-1`) now uses host-hierarchical AllReduce for more datatypes on gfx1250, at the same message sizes as FP32 `ncclSum`: with eight ranks per host (DPX), `ncclSum` on FP16 and BF16 is now also used on four and eight hosts, and `ncclSum` on FP8 on two, four and eight hosts.
