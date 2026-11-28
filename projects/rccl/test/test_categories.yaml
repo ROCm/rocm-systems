@@ -116,6 +116,7 @@ test_categories:
       - "CollTraceUtilsTest.*"
       - "DebugAttn.*"
       - "GinPluginInitFail.*"
+      - "GinRmaPluginVersion.*"
       - "TunerPluginConstants.*"
       - "CpuAffinity.*"
       - "DdaReduceScatterFabricLL.*"

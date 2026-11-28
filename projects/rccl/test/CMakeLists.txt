@@ -323,6 +323,7 @@ if(BUILD_TESTS)
     device/DdaAllReduceFabricLL128PeerParTests.cpp
     NetPluginReloadTests.cpp
     GinPluginInitFailTests.cpp
+    GinRmaPluginVersionTests.cpp
     plugin/net_reload_plugin.cpp
     ProfilerPluginCloseTests.cpp
     InspectorRingDropTests.cpp
@@ -388,6 +389,21 @@ if(BUILD_TESTS)
   # keeps it linkable here but out of .dynsym, as rccl-UnitTestsFixturesDebug does below.
   target_compile_options(rccl-UnitTests PRIVATE
     -fvisibility=hidden -fvisibility-inlines-hidden)
+
+  # GinRmaPluginVersionTests loads this plugin through NCCL_GIN_PLUGIN / NCCL_RMA_PLUGIN; it
+  # exports only the newest GIN/RMA plugin symbols. Built and installed beside rccl-UnitTests.
+  add_library(rccl-test-gin-rma-latest-plugin SHARED plugin/gin_rma_latest_plugin.cpp)
+  target_include_directories(rccl-test-gin-rma-latest-plugin PRIVATE ${RCCL_COMMON_INCLUDE_DIRS})
+  target_link_libraries(rccl-test-gin-rma-latest-plugin PRIVATE hip::host)
+  if(TARGET rccl)
+    add_dependencies(rccl-test-gin-rma-latest-plugin rccl)
+  endif()
+  add_dependencies(rccl-UnitTests rccl-test-gin-rma-latest-plugin)
+  set_source_files_properties(GinRmaPluginVersionTests.cpp PROPERTIES COMPILE_DEFINITIONS
+    "RCCL_TEST_GIN_RMA_LATEST_PLUGIN_NAME=\"$<TARGET_FILE_NAME:rccl-test-gin-rma-latest-plugin>\"")
+  install(TARGETS rccl-test-gin-rma-latest-plugin
+    LIBRARY DESTINATION ${CMAKE_INSTALL_BINDIR}
+    COMPONENT tests)
 
   # A real shared library, unlike the net plugin above: ProfilerPluginCloseTests checks
   # that RCCL unloads an external profiler plugin, so it needs a separately loadable

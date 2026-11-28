@@ -2021,6 +2021,21 @@
           "name": "CollTraceUtils.getSizeMb",
           "description": "CollTrace utils get size MB",
           "test_filter": "CollTraceUtilsTest.getSizeMbTest"
+        },
+        {
+          "name": "GinRmaPluginVersion.LoadsGinPluginV15",
+          "description": "NCCL 2.32.6 GIN plugin API v15: an external GIN plugin exporting only ncclGinPlugin_v15 is loaded and initialized",
+          "test_filter": "GinRmaPluginVersion.LoadsGinPluginV15"
+        },
+        {
+          "name": "GinRmaPluginVersion.LoadsRmaPluginV17",
+          "description": "NCCL 2.32.6 RMA plugin API v17: an external RMA plugin exporting only ncclRmaPlugin_v17 is loaded and initialized",
+          "test_filter": "GinRmaPluginVersion.LoadsRmaPluginV17"
+        },
+        {
+          "name": "GinRmaPluginVersion.LoadsLegacyRmaPluginV13",
+          "description": "An external RMA plugin exporting only the v13 symbol still loads through the compatibility path",
+          "test_filter": "GinRmaPluginVersion.LoadsLegacyRmaPluginV13"
         }
       ]
     },

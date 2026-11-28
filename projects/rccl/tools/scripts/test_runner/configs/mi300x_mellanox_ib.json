@@ -1543,7 +1543,10 @@
       "tests": [
         {"name": "GinPluginInitFail.FinalizesWhenDevicesFailsAfterInit", "description": "NCCL 2.30.7 / NVIDIA/nccl#2179: ncclGinPluginInit() must finalize() the context when devices() fails after a successful init()", "test_filter": "GinPluginInitFail.FinalizesWhenDevicesFailsAfterInit"},
         {"name": "GinPluginInitFail.FinalizesWhenDevicesReportsZero", "description": "NCCL 2.30.7 / NVIDIA/nccl#2179: ncclGinPluginInit() must finalize() the context when devices() reports ndev <= 0 after a successful init()", "test_filter": "GinPluginInitFail.FinalizesWhenDevicesReportsZero"},
-        {"name": "GinPluginInitFail.DoesNotFinalizeAfterFailedInit", "description": "NCCL 2.30.7 / NVIDIA/nccl#2179: finalize() must not run for a GIN plugin whose init() failed", "test_filter": "GinPluginInitFail.DoesNotFinalizeAfterFailedInit"}
+        {"name": "GinPluginInitFail.DoesNotFinalizeAfterFailedInit", "description": "NCCL 2.30.7 / NVIDIA/nccl#2179: finalize() must not run for a GIN plugin whose init() failed", "test_filter": "GinPluginInitFail.DoesNotFinalizeAfterFailedInit"},
+        {"name": "GinRmaPluginVersion.LoadsGinPluginV15", "description": "NCCL 2.32.6 GIN plugin API v15: an external GIN plugin exporting only ncclGinPlugin_v15 is loaded and initialized", "test_filter": "GinRmaPluginVersion.LoadsGinPluginV15"},
+        {"name": "GinRmaPluginVersion.LoadsRmaPluginV17", "description": "NCCL 2.32.6 RMA plugin API v17: an external RMA plugin exporting only ncclRmaPlugin_v17 is loaded and initialized", "test_filter": "GinRmaPluginVersion.LoadsRmaPluginV17"},
+        {"name": "GinRmaPluginVersion.LoadsLegacyRmaPluginV13", "description": "An external RMA plugin exporting only the v13 symbol still loads through the compatibility path", "test_filter": "GinRmaPluginVersion.LoadsLegacyRmaPluginV13"}
       ]
     },
     "debug_tests": {
