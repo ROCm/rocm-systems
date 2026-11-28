@@ -108,7 +108,8 @@ int rj_arith_v_dual_mul_dx9_zero_f32_w32_gfx1150(uint64_t flags, uint32_t exec_m
       semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
     return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
   }
-  if (!(flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS)) {
+  // Loose multiplication already flushes rounded results in the ordinary SIMD path.
+  if (semantics == RJ_ARITH_SEMANTICS_LOOSE || !(flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS)) {
     return rj_arith_v_dual_mul_dx9_zero_f32_w32_gfx12(flags, exec_mask, 0, d, a, b, trapsts);
   }
   // Stage before stores so overlapping operands remain intact. The inherited native
