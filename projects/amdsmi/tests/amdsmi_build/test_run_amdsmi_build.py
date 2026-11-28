@@ -18,6 +18,8 @@ import tempfile
 import textwrap
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 
 def _load_module():
@@ -251,6 +253,60 @@ class SummarizeTests(unittest.TestCase):
             summary = results / "summary.md"
             self.assertEqual(rab.summarize_results(results, "TestOS", summary), 1)
             self.assertIn("unit test (exit 1)", summary.read_text())
+
+class SkipVerifyTests(unittest.TestCase):
+    PROJECT_DIR = Path(__file__).resolve().parents[2]
+
+    def _parse(self, *extra):
+        argv = [
+            "run_amdsmi_build.py",
+            "--project-dir", str(self.PROJECT_DIR),
+            "--package-manager", "apt",
+            "--package-format", "deb",
+            "--no-autodetect",
+            *extra,
+        ]
+        with mock.patch.object(sys, "argv", argv):
+            return rab.parse_args()
+
+    def test_flag_defaults_to_off_and_turns_on(self):
+        self.assertFalse(self._parse().skip_verify)
+        self.assertTrue(self._parse("--skip-verify").skip_verify)
+
+    def _install(self, skip_verify):
+        """Run install_package with commands recorded, not run, and with the
+        /opt/rocm and /usr paths pointed at an empty temp tree."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            cfg = SimpleNamespace(
+                package_manager="apt",
+                refresh_apt=False,
+                retries=1,
+                log_dir=root / "logs",
+                skip_verify=skip_verify,
+            )
+            pkg = root / "amd-smi-lib_1.0_amd64.deb"
+            calls = []
+
+            def fake_run(cmd, name, **_kwargs):
+                calls.append(name)
+
+            def rooted(path):
+                return root / "fs" / str(path).lstrip("/")
+
+            with mock.patch.object(rab, "run_command", fake_run), mock.patch.object(
+                rab, "Path", rooted
+            ):
+                rab.install_package(cfg, pkg)
+        return calls
+
+    def test_skip_verify_installs_but_skips_the_driver_check(self):
+        self.assertEqual(self._install(skip_verify=True), ["apt-install"])
+
+    def test_verification_still_runs_by_default(self):
+        self.assertEqual(
+            self._install(skip_verify=False), ["apt-install", "verify-1", "verify-2"]
+        )
 
 
 if __name__ == "__main__":

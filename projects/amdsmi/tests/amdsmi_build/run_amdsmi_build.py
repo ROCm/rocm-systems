@@ -875,6 +875,10 @@ def install_package(cfg: "RunnerConfig", package_path: Path) -> None:
         symlink_path.symlink_to(rocm_binary)
         print(f"Linked {symlink_path} -> {rocm_binary}")
 
+    if cfg.skip_verify:
+        print("Skipping post-install verification (--skip-verify): it needs the amdgpu driver")
+        return
+
     # Verify installation: CLI version + Python import/init/shutdown under the
     # interpreter the module was actually installed for. The system package
     # installs amdsmi/ into a specific interpreter's site-packages, so verify
@@ -1121,6 +1125,7 @@ class RunnerConfig:
     qa_rpaths: bool
     skip_build: bool
     skip_install: bool
+    skip_verify: bool
     upgrade_from: "Optional[Path]"
     python_interpreters: "Optional[str]"
 
@@ -1167,6 +1172,12 @@ def parse_args() -> RunnerConfig:
         "--skip-build", action="store_true", help="Skip build step (use existing build dir)"
     )
     parser.add_argument("--skip-install", action="store_true", help="Skip package installation")
+    parser.add_argument(
+        "--skip-verify",
+        action="store_true",
+        help="Install without the post-install amd-smi/amdsmi_init check, which needs the amdgpu "
+        "driver (for build runners without a GPU)",
+    )
     parser.add_argument(
         "--upgrade-from",
         type=Path,
@@ -1223,6 +1234,7 @@ def parse_args() -> RunnerConfig:
         qa_rpaths=args.qa_rpaths or profile.get("qa_rpaths", False),
         skip_build=args.skip_build,
         skip_install=args.skip_install,
+        skip_verify=args.skip_verify,
         upgrade_from=args.upgrade_from,
         python_interpreters=args.python_interpreters,
     )
