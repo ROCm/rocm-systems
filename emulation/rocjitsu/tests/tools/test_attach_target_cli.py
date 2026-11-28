@@ -43,24 +43,30 @@ class AttachTargetCliTest(unittest.TestCase):
         bound.listen(1)
         self.sockets.append(bound)
 
-    def run_attach(self, target):
+    def run_attach(self, target, *extra_args, script=None, cwd=None):
+        if script is None:
+            script = (
+                "import os; "
+                "print(os.environ.get('ROCJITSU_INVOCATION_DIR', '')); "
+                "print(os.environ.get('ROCJITSU_REQUIRE_SELECTED_DAEMON', ''))"
+            )
         return subprocess.run(
             [
                 self.cli,
                 "--attach",
                 str(target),
+                *extra_args,
                 "--",
                 sys.executable,
                 "-c",
-                "import os; "
-                "print(os.environ.get('ROCJITSU_INVOCATION_DIR', '')); "
-                "print(os.environ.get('ROCJITSU_REQUIRE_SELECTED_DAEMON', ''))",
+                script,
             ],
             env=self.env,
             text=True,
             capture_output=True,
             timeout=30,
             check=False,
+            cwd=cwd,
         )
 
     def test_default_id_path_and_socket_targets(self):
@@ -82,6 +88,87 @@ class AttachTargetCliTest(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 lines = result.stdout.splitlines()
                 self.assertEqual(lines, [str(runtime_dir), "1"])
+
+    def test_clear_env_keeps_selected_runtime(self):
+        self.bind_daemon_socket(self.runtime)
+        self.env["RJ_SHOULD_NOT_LEAK"] = "bad"
+        result = self.run_attach(
+            "default",
+            "--clear-env-vars",
+            script=(
+                "import os; "
+                "print(os.environ.get('ROCJITSU_INVOCATION_DIR', '')); "
+                "print(os.environ.get('ROCJITSU_REQUIRE_SELECTED_DAEMON', '')); "
+                "raise SystemExit(0 if 'RJ_SHOULD_NOT_LEAK' not in os.environ else 1)"
+            ),
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        lines = result.stdout.splitlines()
+        self.assertEqual(lines, [str(self.runtime), "1"])
+
+    def test_child_xdg_override_selects_child_runtime(self):
+        self.env.pop("ROCJITSU_RUNTIME_DIR", None)
+        parent_xdg = self.root / "parent-xdg"
+        child_xdg = self.root / "child-xdg"
+        self.env["XDG_RUNTIME_DIR"] = str(parent_xdg)
+        child_runtime = child_xdg / "rocjitsu"
+        self.bind_daemon_socket(child_runtime)
+        result = self.run_attach("default", "--env", f"XDG_RUNTIME_DIR={child_xdg}")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        lines = result.stdout.splitlines()
+        self.assertEqual(lines, [str(child_runtime), "1"])
+
+    def test_empty_runtime_override_falls_through_to_child_xdg(self):
+        child_xdg = self.root / "empty-override-xdg"
+        child_runtime = child_xdg / "rocjitsu"
+        self.bind_daemon_socket(child_runtime)
+        result = self.run_attach(
+            "default",
+            "--env",
+            "ROCJITSU_RUNTIME_DIR=",
+            "--env",
+            f"XDG_RUNTIME_DIR={child_xdg}",
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        lines = result.stdout.splitlines()
+        self.assertEqual(lines, [str(child_runtime), "1"])
+
+    def test_parent_relative_runtime_survives_workdir(self):
+        launch_cwd = self.root / "launch-cwd"
+        workdir = self.root / "workdir"
+        launch_cwd.mkdir()
+        workdir.mkdir()
+        self.env["ROCJITSU_RUNTIME_DIR"] = "r"
+        selected_runtime = launch_cwd / "r"
+        self.bind_daemon_socket(selected_runtime)
+        result = self.run_attach(
+            "default",
+            "--workdir",
+            str(workdir),
+            cwd=launch_cwd,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        lines = result.stdout.splitlines()
+        self.assertEqual(lines, [str(selected_runtime), "1"])
+
+    def test_child_relative_runtime_override_survives_workdir(self):
+        launch_cwd = self.root / "child-launch-cwd"
+        workdir = self.root / "child-workdir"
+        launch_cwd.mkdir()
+        workdir.mkdir()
+        selected_runtime = launch_cwd / "r"
+        self.bind_daemon_socket(selected_runtime)
+        result = self.run_attach(
+            "default",
+            "--env",
+            "ROCJITSU_RUNTIME_DIR=r",
+            "--workdir",
+            str(workdir),
+            cwd=launch_cwd,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        lines = result.stdout.splitlines()
+        self.assertEqual(lines, [str(selected_runtime), "1"])
 
     def test_rejects_non_socket_target(self):
         runtime_dir = self.root / "not-a-socket"

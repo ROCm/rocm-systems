@@ -296,13 +296,13 @@ std::optional<int> open_proc_maps_snapshot(const char *path, int flags) {
   return snapshot;
 }
 
-/// @brief Connect to the daemon for this invocation's per-PID runtime directory.
-/// @details Connects to <runtime_dir>/daemon.sock. Only when that per-PID
-/// directory does not exist (attach / daemon-only clients that share the
-/// well-known location) does it fall back to rpc_default_socket_path(). The
-/// fallback is gated on dir-absence rather than connect-failure so a daemon-mode
-/// app is never silently cross-connected to an unrelated daemon at the shared
-/// well-known socket if its own daemon's socket is transiently unavailable.
+/// @brief Connect to the daemon for this invocation's resolved runtime directory.
+/// @details Connects to <runtime_dir>/daemon.sock. Only when that directory does
+/// not exist (legacy attach / daemon-only clients that share the well-known
+/// location) does it fall back to rpc_default_socket_path(). The fallback is
+/// gated on dir-absence rather than connect-failure so a daemon-mode app is
+/// never silently cross-connected to an unrelated daemon at the shared well-known
+/// socket if its own daemon's socket is transiently unavailable.
 int connect_to_daemon(const std::string &runtime_dir) {
   int sock = try_connect(runtime_dir + "/daemon.sock");
   if (sock >= 0) {

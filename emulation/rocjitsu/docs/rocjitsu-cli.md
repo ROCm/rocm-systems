@@ -99,9 +99,15 @@ Usage: rocjitsu [options] -- <app> [args...]
 |--------|-------------|
 | `--config <path>` | Path to simulation config JSON. Cannot be combined with `--profile`. |
 | `--profile <name>` | Bundled profile config to run. Defaults to `mi350x` when neither `--config` nor `--profile` is supplied outside attach mode. |
-| `--node <id>` | Select a local node from a multi-node system manifest. Legacy `vm.gpu.num_gpus` configs need no node selector. Not available with `--attach`. |
-| `--cpu-thread-budget <n>`, `--cpu-thread-budget=<n>` | Replace `cpu_thread_budget` for this launch only; the source JSON is left unchanged. Zero selects automatic sizing. Not available with `--attach`. |
-| `--wait-checking <mode>`, `--wait-checking=<mode>` | Override wait checking for this launch only. `on` enables ordinary checks, `off` disables them, and `all` also enables gfx1250 XCNT checks. The source JSON is left unchanged. Not available with `--attach`. |
+| `--node <id>` | Select a local node from a multi-node system manifest. Legacy `vm.gpu.num_gpus` configs need no node selector. Not available with `--attach` or `dbt_guest` mode. |
+| `--cpu-thread-budget <n>`, `--cpu-thread-budget=<n>` | Replace `cpu_thread_budget` for this launch only; the source JSON is left unchanged. Zero selects automatic sizing. Not available with `--attach`. Dedicated flags win over `--option`, regardless of argument order. |
+| `--wait-checking <mode>`, `--wait-checking=<mode>` | Override wait checking for this launch only. `on` enables ordinary checks, `off` disables them, and `all` also enables gfx1250 XCNT checks. The source JSON is left unchanged. Not available with `--attach`. Dedicated flags win over `--option`, regardless of argument order. |
+| `--option KEY=VALUE`, `-o KEY=VALUE` | Override a supported top-level config value for this launch. Supported keys are `cpu_thread_budget` and `wait_checking`; `--cpu-thread-budget` and `--wait-checking` take precedence. |
+| `--env KEY=VALUE` | Add or replace an environment variable for the launched app/debugger. Attach socket lookup uses these child runtime-directory overrides before validating the socket. |
+| `--clear-env-vars` | Start the launched app/debugger from a scrubbed environment that keeps only basic process/session variables needed for executable lookup, home/terminal/locale behavior, and temporary files: `PATH`, `HOME`, `TERM`, `USER`, `LOGNAME`, `SHELL`, `LANG`, `LC_ALL`, and `TMPDIR`. Apply `--env` afterward to replace or remove values. |
+| `--workdir <dir>` | Change to an existing directory before executing the target. Relative app paths are resolved from this directory. |
+| `--gdb` | Run the launched app under `rocgdb`. Unless `--attach` is used, debugger launches implicitly start a daemon so ROCgdb and the inferior share one simulated GPU backend. |
+| `--gdb-ex <cmd>` | Add a `rocgdb` command before the program. May be repeated, implies `--gdb`, and runs ROCgdb in batch mode when commands are present. |
 | `--thread-budget-table` | Print engine and dispatch allocations without running a VM. |
 | `--daemon` | Run in daemon mode: fork a daemon process hosting the simulation engine, then launch the application with the interposer. Without `-- <app>`, runs the daemon server only. |
 | `--attach <id_or_path>` | Attach to a running daemon. Use `default` for the current runtime directory, a daemon ID under that runtime directory, a runtime directory path, or a `daemon.sock` path. |
@@ -111,6 +117,8 @@ Usage: rocjitsu [options] -- <app> [args...]
 | `--version`, `-v` | Print version, Git revision, commit date, and commit title, then exit. |
 | `paths [--json]` | Print config/runtime search paths, the daemon socket, and `config_handoff_path`, the process-independent fallback config handoff opened by the interposer when no invocation directory is set. A launch writes its own handoff under `$ROCJITSU_INVOCATION_DIR/config_path` inside the exec'd app. `--json` must follow `paths`, as in `rocjitsu paths --json`. |
 | `--` | Separator between rocjitsu options and the target application command line. |
+
+When `--attach` is combined with `--clear-env-vars` and no child runtime override remains, rocjitsu keeps the launcher-selected daemon by exporting the resolved invocation directory. An explicit empty `--env ROCJITSU_RUNTIME_DIR=` follows the normal child fallback through `XDG_RUNTIME_DIR` and then `/tmp/rocjitsu-<uid>`.
 
 ### Usage Examples
 
@@ -127,11 +135,29 @@ rocjitsu paths --json
 # Show launch-time CPU thread allocation without starting a VM
 rocjitsu --profile mi350x --cpu-thread-budget 8 --thread-budget-table
 
+# Override app environment and working directory
+rocjitsu --profile mi350x --env HIP_VISIBLE_DEVICES=0 --workdir /tmp/run -- ./app
+
+# Debug through ROCgdb; this implicitly starts a daemon unless --attach is used
+rocjitsu --profile mi350x --gdb-ex 'break add_one' --gdb-ex run -- ./app
+
+# Propagate the app's exit status from a scripted ROCgdb run
+rocjitsu --profile mi350x --gdb-ex run --gdb-ex 'quit $_exitcode' -- ./app
+
 # Daemon mode: fork daemon + launch app
 rocjitsu --daemon --config configs/gfx950_mi350x_kmd.json -- ./app args...
 
 # Daemon-only: run server (no app launched)
 rocjitsu --daemon --config configs/gfx950_mi350x_kmd.json
+
+# Multi-node manifest: start one daemon per local node with a distinct runtime
+ROCJITSU_RUNTIME_DIR=/tmp/rocjitsu-node-a \
+  rocjitsu --daemon --config configs/system_manifest.json --node node-a
+ROCJITSU_RUNTIME_DIR=/tmp/rocjitsu-node-b \
+  rocjitsu --daemon --config configs/system_manifest.json --node node-b
+
+# Connect a client to a specific node daemon
+rocjitsu --attach /tmp/rocjitsu-node-a -- ./rank0
 
 # Attach to the daemon in the current runtime directory
 rocjitsu --attach default -- ./app
@@ -196,6 +222,13 @@ runtime directory. A path selects that runtime directory directly; for example,
 selects its parent directory. Use `rocjitsu paths` or `rocjitsu paths --json` to
 inspect the default paths.
 
+`--attach --clear-env-vars` still uses the daemon socket selected by the
+launcher. If the child environment has no runtime-directory override, attach
+exports the launcher's resolved runtime directory to the interposer. An explicit
+`--env ROCJITSU_RUNTIME_DIR=` is a child override: it clears that variable for
+attach lookup, so selection falls through to the child `XDG_RUNTIME_DIR` and
+then `/tmp/rocjitsu-<uid>`.
+
 The daemon has already built its machine from the config it was started with.
 For that reason, attach rejects launch-only settings that would otherwise mutate
 the machine being built, including `--profile`, `--node`,
@@ -222,6 +255,17 @@ runtime directory.
 
 A future `rocjitsu ps` command will list discoverable daemon targets; see
 ROCm/rocm-systems#16298.
+
+Batch debugger launches return ROCgdb's exit status by default. Use
+`--gdb-ex 'quit $_exitcode'` after `--gdb-ex run` when a script should receive
+the debuggee's exit status instead.
+
+Environment variables that configure the simulator daemon itself must be set on
+the `rocjitsu` process, not only with `--env`, when `--gdb` or `--gdb-ex`
+implicitly starts a daemon. For example, set `RJ_FORCE_SCALAR=1 rocjitsu
+--profile mi350x --gdb -- ./app` if the daemon must see that variable; `--env
+RJ_FORCE_SCALAR=1` reaches ROCgdb and the inferior, but not the daemon that was
+already forked.
 
 ## Architecture
 
