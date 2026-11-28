@@ -46,17 +46,6 @@ protected:
 
     }
 
-    // The workflow and batch tests below drive a single sender/receiver pair
-    // (rank 0 and its peer), so any other process count deadlocks in the transfer or
-    // in the collective communicator teardown. Ring-based tests (P2pWithMemcpyTest,
-    // P2pRegistrationBasicBuffersTest, the P2pIpcBufferRegistration family) stay valid
-    // at every process count. GTEST_SKIP must run in the test body itself: called
-    // from a helper it only records the skip part and the body keeps executing.
-    bool runningWithExactlyTwoProcesses() const
-    {
-        return config.world_size == 2;
-    }
-
     // Helper: Allocate P2P-specific resources
     void setupP2PBuffers()
     {
@@ -834,17 +823,14 @@ public:
 
 TEST_F(P2pMPITest, P2pWorkflow)
 {
-    if(!runningWithExactlyTwoProcesses())
+    // The workflow drives one sender/receiver pair (rank 0 and its peer) through the
+    // low-level transport API, so any larger world deadlocks past that pair.
+    if(!validateTestPrerequisites(kMinProcessesForMPI, /*max=*/2, kRequirePowerOfTwo, 1,
+                                  kRequireSingleNode))
     {
-        GTEST_SKIP() << "P2pWorkflow requires exactly 2 processes, got " << config.world_size;
+        GTEST_SKIP() << "P2pWorkflow drives one rank pair and requires exactly 2 processes, got "
+                     << config.world_size;
     }
-
-    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI,
-                                          kNoProcessLimit,
-                                          kRequirePowerOfTwo,
-                                          1,
-                                          kRequireSingleNode))
-        << "Test requirements not met - all ranks must meet requirements";
 
     // Setup P2P-specific buffers BEFORE creating communicator
     setupP2PBuffers();
@@ -1748,24 +1734,21 @@ TEST_F(P2pMPITest, IpcGraphRegisterBufferTest)
 // (comm->nNodes <= 1), so the channel-base mapping matches pre-7.14 behaviour.
 TEST_F(P2pMPITest, P2pBatchAutoDisableOnSingleNode)
 {
-    if(!runningWithExactlyTwoProcesses())
-    {
-        GTEST_SKIP() << "P2pBatchAutoDisableOnSingleNode requires exactly 2 processes, got "
-                     << config.world_size;
-    }
-
     if(getenv("RCCL_P2P_BATCH_ENABLE"))
     {
         GTEST_SKIP() << "RCCL_P2P_BATCH_ENABLE is explicitly set — "
                         "cannot test auto-detect path";
     }
 
-    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI,
-                                          kNoProcessLimit,
-                                          kRequirePowerOfTwo,
-                                          1,
-                                          kRequireSingleNode))
-        << "Test requirements not met - all ranks must meet requirements";
+    // The batch path drives one sender/receiver pair (rank 0 and its peer), so any
+    // larger world deadlocks past that pair.
+    if(!validateTestPrerequisites(kMinProcessesForMPI, /*max=*/2, kRequirePowerOfTwo, 1,
+                                  kRequireSingleNode))
+    {
+        GTEST_SKIP() << "P2pBatchAutoDisableOnSingleNode drives one rank pair and requires "
+                        "exactly 2 processes, got "
+                     << config.world_size;
+    }
 
     setupP2PBuffers();
     ASSERT_MPI_SUCCESS(createTestCommunicator());

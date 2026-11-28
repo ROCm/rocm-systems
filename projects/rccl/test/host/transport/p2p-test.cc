@@ -7858,18 +7858,21 @@ TEST_F(P2pProxyCeMicrotestIsolated, SendProxyFree_MemcpyResources_TearsDownCeSta
         ncclProxyConnection conn{};
         conn.needsProxyProgress = 1;   // set by the CE arm of send proxySetup
         ncclProxyState      state{};
-        const hipStream_t ownedStream = reinterpret_cast<hipStream_t>(0x66);
+        // This connection is the last user of the proxy thread's shared CE
+        // stream, so freeing it drops the refcount to zero and destroys it.
+        const hipStream_t sharedStream = reinterpret_cast<hipStream_t>(0x66);
+        state.p2pCeStream    = sharedStream;
+        state.p2pCeStreamRefs = 1;
         int streamDestroys = 0;
         ScopedHook streamDestroy(g_hipStreamDestroy, [&](hipStream_t stream) {
             ++streamDestroys;
-            EXPECT_EQ(stream, ownedStream);
+            EXPECT_EQ(stream, sharedStream);
             return hipSuccess;
         });
         auto* info = static_cast<p2pShmProxyInfo*>(
             std::calloc(1, sizeof(p2pShmProxyInfo)));
         info->ceRecvMem = nullptr;   // ncclCudaHostFree(nullptr) is a no-op
-        info->stream = ownedStream;
-        info->ownsStream = true;
+        info->stream = sharedStream;
         // Sentinel device buffer so the ncclCudaFree release is observable in
         // g_freeCalls (the shutdown guard short-circuits before HIP but the
         // recording shim still logs the pointer).

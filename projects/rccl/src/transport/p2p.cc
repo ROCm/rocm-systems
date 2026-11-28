@@ -79,7 +79,6 @@ struct p2pShmProxyInfo {
   // Used by CE memcpy progress only
   uint64_t step;
   cudaStream_t stream;
-  bool ownsStream;
   cudaEvent_t events[NCCL_STEPS];
 };
 static_assert(sizeof(p2pConnectInfo) <= CONNECT_SIZE, "P2P Connect info is too large");
@@ -980,16 +979,14 @@ static ncclResult_t p2pSendProxyConnect(struct ncclProxyConnection* connection, 
   if (reqSize != sizeof(void*)) return ncclInternalError;
   proxyInfo->recvFifo = *((char**)reqBuff);
 
-  if (rcclP2pCeSharesProxyStream(proxyState->cudaArch)) {
-    if (proxyState->p2pCeStreamRefs == 0) {
-      CUDACHECK(cudaStreamCreateWithFlags(&proxyState->p2pCeStream, cudaStreamNonBlocking));
-    }
-    proxyState->p2pCeStreamRefs++;
-    proxyInfo->stream = proxyState->p2pCeStream;
-  } else {
-    CUDACHECK(cudaStreamCreateWithFlags(&proxyInfo->stream, cudaStreamNonBlocking));
-    proxyInfo->ownsStream = true;
+  // Per-connection CE proxy streams stall SDMA completions cross-process (AICOMRCCL-4050),
+  // so every CE connection of this proxy thread runs its copies on one shared non-blocking
+  // stream, created lazily and torn down when the last connection goes away.
+  if (proxyState->p2pCeStreamRefs == 0) {
+    CUDACHECK(cudaStreamCreateWithFlags(&proxyState->p2pCeStream, cudaStreamNonBlocking));
   }
+  proxyState->p2pCeStreamRefs++;
+  proxyInfo->stream = proxyState->p2pCeStream;
   for (int i = 0; i < NCCL_STEPS; i++) {
     CUDACHECK(cudaEventCreate(proxyInfo->events + i));
   }
@@ -1028,9 +1025,7 @@ static ncclResult_t p2pSendProxyFree(struct ncclProxyConnection* connection, str
       NCCLCHECK(ncclShmIpcClose(&proxyInfo->desc));
       NCCLCHECK(ncclCudaHostFree(proxyInfo->ceRecvMem));
       NCCLCHECK(ncclCudaFree(proxyInfo->ceDevBuff, proxyState->memManager));
-      if (proxyInfo->ownsStream) {
-        CUDACHECK(cudaStreamDestroy(proxyInfo->stream));
-      } else if (proxyInfo->stream != nullptr) {
+      if (proxyInfo->stream != nullptr) {
         if (proxyState->p2pCeStreamRefs <= 0 || proxyInfo->stream != proxyState->p2pCeStream) {
           WARN("P2P CE shared stream state mismatch: refs=%d proxy stream=%p connection stream=%p",
                proxyState->p2pCeStreamRefs, proxyState->p2pCeStream, proxyInfo->stream);
