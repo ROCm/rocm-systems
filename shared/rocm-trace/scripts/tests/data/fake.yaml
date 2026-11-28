@@ -1,0 +1,46 @@
+# Copyright Advanced Micro Devices, Inc. SPDX-License-Identifier: MIT
+
+version: 1
+provider: fake_provider
+output_name: fake_probes
+includes:
+  - fake_table.h
+tables:
+  - name: FakeTable
+    size_member: size
+  - name: FakeDeclTable
+    size_member: version.minor_id
+  - name: FakeRenamedTable
+    size_member: size
+success:
+  fakeError_t: fakeSuccess
+defaults:
+  level: information
+capture_level: fake_capture_level
+apis:
+  fakeAlloc:
+    out: [ptr]
+    keywords: [ALLOC]
+  fakeName:
+    out: [name]
+    strings: [name]
+  fakeLoad:
+    level: verbose
+  fakeGetFunction:
+    out: [function]
+    uncapped: [kname]
+  fakeOpen:
+    out: [ptr]
+  fakeCallback:
+    omit: [user]
+  fakeErrorString:
+    strings: [result]
+  fakeGetDim:
+    out: [dim]
+  fakeReserved:
+    out: [arg_exception]
+  fakeCount:
+    out: [count]
+  fakeSkipped:
+    skip: true
+    reason: "the test of a skipped entry"

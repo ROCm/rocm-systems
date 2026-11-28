@@ -1,0 +1,6 @@
+# Copyright Advanced Micro Devices, Inc. SPDX-License-Identifier: MIT
+# Needed only to regenerate the probes or run the tests; runtime builds use the
+# checked-in output.
+libclang==18.1.1
+PyYAML==6.0.2
+pytest>=7
