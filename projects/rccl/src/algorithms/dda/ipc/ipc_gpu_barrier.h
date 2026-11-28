@@ -81,8 +81,13 @@ public:
   }
 
 private:
-  int nBlocks_;
-  FlagType* flags_;
+  // Initialized in-class so a default-constructed mailbox is deterministic.
+  // IpcGpuBarrier holds a std::array<DeviceMailbox, NRANKS> but fills only the
+  // first nRanks entries when RCCL_DDA_NRANKS_RELAX admits a smaller clique;
+  // without these the unused tail would carry indeterminate values into the
+  // kernel argument.
+  int nBlocks_{0};
+  FlagType* flags_{nullptr};
 
   __device__ inline int getFlagIdx(int rank, int block) const {
     return block * NRANKS + rank;
@@ -116,8 +121,17 @@ public:
   // compiler copy the whole object (mailbox table included) to per-lane scratch at
   // every launch, because allMailboxes_ is indexed per lane. Keeping the barrier
   // const lets it be read straight from the kernarg segment.
-  template <bool hasPreviousMemAccess, bool hasSubsequentMemAccess>
-  __device__ __forceinline__ void syncOnSameBlockIdx(bool& aborted) const {
+  //
+  // Active-peer bound: kNRanks when > 0 (the calling kernel's compile-time clique
+  // size; must equal the nRanks this barrier was built with), else nRanksRt (the
+  // NRANKS == 0 runtime kernel under RCCL_DDA_NRANKS_RELAX). Deliberately not a
+  // member, for the same by-value-kernel-argument reason as `aborted`: a member
+  // read here is a scratch load + vmcnt(0) wait on every barrier, and growing
+  // the struct also slows the full-clique kernels (measured ~2-3% busbw at
+  // 64K-1M, 8 ranks, MI355X).
+  template <bool hasPreviousMemAccess, bool hasSubsequentMemAccess, int kNRanks = 0>
+  __device__ __forceinline__ void syncOnSameBlockIdx(bool& aborted, int nRanksRt = NRANKS) const {
+    static_assert(kNRanks >= 0 && kNRanks <= NRANKS, "kNRanks out of range");
     enum class MemFenceType {
       RELEASE_ACQUIRE,
       RELEASE_ONLY,
@@ -134,7 +148,8 @@ public:
     if constexpr (hasPreviousMemAccess) {
       __syncthreads();
     }
-    if (threadIdx.x < NRANKS && !aborted) {
+    const int activeRanks = (kNRanks > 0) ? kNRanks : nRanksRt;
+    if (threadIdx.x < activeRanks && !aborted) { // active peers only; NRANKS would deadlock for <8
       auto peerRank = threadIdx.x;
       bool signaled = false;
       if constexpr (fenceType == MemFenceType::ACQUIRE_ONLY) {

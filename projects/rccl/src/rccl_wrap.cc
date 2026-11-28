@@ -1631,7 +1631,7 @@ inline size_t rcclDdaVmmThresholdCtxTab(const rcclArchThresholds* table, ncclFun
 }
 
 bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t threshold,
-                    bool query, const char* prefix) {
+                    bool query, const char* prefix, int minRanks) {
   // Implicit launch order does not disqualify DDA: rcclAddonLaunch joins the
   // per-device launch order the same way native kernel launches do.
   if (!rcclParamDdaEnable() || ncclGroupDepth != 0) {
@@ -1645,7 +1645,9 @@ bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t threshold,
   if (IsArchMatch(comm->archName, "gfx1250")) {
     // gfx1250 has no nRanks floor.
   } else if (IsArchMatch(comm->archName, "gfx942") || IsArchMatch(comm->archName, "gfx950")) {
-    if (comm->nRanks < 8) return false;
+    // Participant-count floor supplied by the caller; see the declaration in
+    // rccl_common.h for which collectives relax it.
+    if (comm->nRanks < minRanks) return false;
   } else {
     return false;
   }

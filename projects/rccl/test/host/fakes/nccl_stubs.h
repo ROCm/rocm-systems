@@ -26,6 +26,11 @@ extern std::function<ncclResult_t(struct ncclAsyncJob*, ncclResult_t (*)(struct 
                                   void (*)(struct ncclAsyncJob*), void (*)(void*), struct ncclComm*)>
     g_ncclAsyncLaunch;
 
+// init.cc:2011 reads this per rank into the AllGather3 payload; the real function
+// is a plain env-var read with no arguments, so this is the only way a test can
+// make it answer anything other than its hardcoded default.
+extern bool g_ncclDdaNranksRelaxEnabled;
+
 // src/init.cc's device bringup reaches src/enqueue.cc through this. Fail-loud by default; script it to reach past it.
 #ifndef RCCL_STUBS_OMIT_ncclInitKernelsForDevice
 extern std::function<ncclResult_t(int /*cudaArch*/, int /*maxSharedMem*/, size_t* /*maxStackSize*/)>

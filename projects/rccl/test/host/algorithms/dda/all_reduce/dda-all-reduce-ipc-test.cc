@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "../common/DdaIpcTestHelpers.hpp"
+#include "fakes/dda_ipc_nranks_fakes.h"
 #include "fakes/hip_fakes.h"
 
 #include DDA_ALL_REDUCE_IPC_CC_PATH
@@ -170,6 +171,7 @@ struct Launch {
   const void* sendbuff;
   void* recvbuff;
   int rank;
+  int nRanksRuntime;
   hipStream_t stream;
   hipEvent_t stopEvent;
   size_t memcpysBefore;
@@ -188,14 +190,18 @@ class DdaAllReduceIpcDispatchTest : public ::testing::Test {
                                   hipEvent_t, hipEvent_t stopEvent, int) {
       launches_.push_back({kernel, grid.x, block.x, *static_cast<void**>(args[0]), *static_cast<size_t*>(args[2]),
                            *static_cast<const void**>(args[3]), *static_cast<void**>(args[1]),
-                           *static_cast<int*>(args[4]), stream, stopEvent, g_hipMemcpyAsyncArgs.size()});
+                           *static_cast<int*>(args[4]), *static_cast<int*>(args[5]), stream, stopEvent,
+                           g_hipMemcpyAsyncArgs.size()});
       return hipSuccess;
     };
     mock_.comm.ddaIpcBarrierState = BarrierState();
     mock_.comm.rank = 3;
     mock_.comm.addonStopEvent = kStopEvent;
   }
-  void TearDown() override { ResetHipFakes(); }
+  void TearDown() override {
+    ResetHipFakes();
+    g_ddaIpcNranksRelaxed = false;
+  }
 
   ncclResult_t Run(size_t count, ncclDataType_t datatype) {
     return ncclAllReduceDdaIpc(kSendbuff, kRecvbuff, count, datatype, ncclSum, mock_.get(), kStream);
@@ -336,6 +342,64 @@ TEST_F(DdaAllReduceIpcDispatchTest, LaunchGeometryFollowsTheDispatchedElementSiz
   EXPECT_EQ(512u, launches_[0].blockX);
   EXPECT_EQ(2u, launches_[1].gridX);
   EXPECT_EQ(512u, launches_[1].blockX);
+}
+
+// RCCL_DDA_NRANKS_RELAX dispatch: the 8-rank clique keeps the compile-time
+// NRANKS = 8 kernel, any other supported count takes the NRANKS = 0 runtime-rank
+// kernel and is handed the live rank count. Forcing the 8-rank instantiation for
+// every count, or dropping the runtime argument, fails one of these.
+TEST_F(DdaAllReduceIpcDispatchTest, EightRanksKeepTheCompileTimeKernel) {
+  ASSERT_EQ(8, mock_.comm.nRanks);
+  ASSERT_EQ(ncclSuccess, Run(16, ncclFloat32));
+  ASSERT_EQ(1u, launches_.size());
+  EXPECT_EQ(Flat<float>(), launches_[0].kernel);
+  EXPECT_EQ(8, launches_[0].nRanksRuntime);
+}
+
+TEST_F(DdaAllReduceIpcDispatchTest, RelaxedFourRanksLaunchTheRuntimeRankKernel) {
+  g_ddaIpcNranksRelaxed = true;
+  mock_.comm.nRanks = 4;
+  ASSERT_EQ(ncclSuccess, Run(16, ncclFloat32));
+  ASSERT_EQ(1u, launches_.size());
+  EXPECT_EQ(reinterpret_cast<const void*>(&dda::common::ddaAllReduceFlatIpc<float, 0, false>), launches_[0].kernel);
+  EXPECT_EQ(4, launches_[0].nRanksRuntime);
+}
+
+// The tree side of the same split. Above the 256 KiB threshold a relaxed 4-rank
+// comm must still take the tree kernel -- the NRANKS = 0 one, with the live rank
+// count -- since the launcher's tree check divides by the runtime count; deciding
+// it with the compile-time NRANKS instead would silently send every relaxed
+// tree-sized AllReduce down the flat kernel. 65536 + 16 floats is past the
+// threshold and splits into four 16-byte-aligned slices.
+TEST_F(DdaAllReduceIpcDispatchTest, RelaxedFourRanksTreePayloadLaunchesTheRuntimeRankTreeKernel) {
+  g_ddaIpcNranksRelaxed = true;
+  mock_.comm.nRanks = 4;
+  const size_t count = kFp32CountAtThreshold + 16;
+  ASSERT_EQ(ncclSuccess, Run(count, ncclFloat32));
+  ASSERT_EQ(1u, launches_.size());
+  EXPECT_EQ(reinterpret_cast<const void*>(&dda::common::ddaAllReduceTreeIpc<float, 0, false>), launches_[0].kernel);
+  EXPECT_EQ(4, launches_[0].nRanksRuntime);
+  EXPECT_EQ(count, launches_[0].count);
+}
+
+// The knob only widens the supported range: with it on, the 8-rank clique still
+// gets the compile-time kernels on both the flat and the tree side.
+TEST_F(DdaAllReduceIpcDispatchTest, RelaxOnEightRanksKeepTheCompileTimeKernels) {
+  g_ddaIpcNranksRelaxed = true;
+  ASSERT_EQ(8, mock_.comm.nRanks);
+  ASSERT_EQ(ncclSuccess, Run(16, ncclFloat32));
+  ASSERT_EQ(ncclSuccess, Run(kFp32CountAtThreshold + 4 * kDdaNranks, ncclFloat32));
+  ASSERT_EQ(2u, launches_.size());
+  EXPECT_EQ(Flat<float>(), launches_[0].kernel);
+  EXPECT_EQ(Tree<float>(), launches_[1].kernel);
+  EXPECT_EQ(8, launches_[0].nRanksRuntime);
+  EXPECT_EQ(8, launches_[1].nRanksRuntime);
+}
+
+TEST_F(DdaAllReduceIpcDispatchTest, FourRanksWithoutRelaxAreRefusedWithoutLaunching) {
+  mock_.comm.nRanks = 4;
+  EXPECT_EQ(ncclInvalidUsage, Run(16, ncclFloat32));
+  EXPECT_TRUE(launches_.empty());
 }
 
 TEST_F(DdaAllReduceIpcDispatchTest, LaunchErrorIsReported) {

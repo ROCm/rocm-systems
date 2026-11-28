@@ -65,6 +65,7 @@ namespace {
 constexpr int kNRanks = nccl_dda_detail::kDdaNranks;
 constexpr int kRank = 1;
 constexpr int kCuCount = 40;
+constexpr size_t kGathersPerInit = 3;  // two readiness checks, then the final level agreement
 void* const kBootstrap = reinterpret_cast<void*>(0xB007);
 char kGfx950[] = "gfx950";
 
@@ -102,7 +103,8 @@ class IpcInitMicrotest : public ::testing::Test {
       return hipSuccess;
     };
     g_hipGetLastError = [] { return hipSuccess; };
-    // Every peer publishes this rank's flag unless peerReady_ overrides one.
+    // Every peer publishes this rank's level unless peerReady_ overrides one. Init agrees three times (scratch
+    // handles, barrier setup, final outcome); only the last carries the epoch-cell tier, so only it is overridden.
     g_bootstrapAllGather = [this](void* state, void* allData, int size) {
       EXPECT_EQ(kBootstrap, state);
       EXPECT_EQ(static_cast<int>(sizeof(int)), size);
@@ -111,7 +113,7 @@ class IpcInitMicrotest : public ::testing::Test {
       for (int r = 0; r < kNRanks; ++r) {
         if (r != kRank) slots[r] = slots[kRank];
       }
-      if (peerReady_ >= 0) slots[kRank + 1] = peerReady_;
+      if (peerReady_ >= 0 && published_.size() == kGathersPerInit) slots[kRank + 1] = peerReady_;
       return gatherResult_;
     };
 
@@ -172,7 +174,7 @@ class IpcInitMicrotest : public ::testing::Test {
 TEST_F(IpcInitMicrotest, CommInit_AllRanksReady_KeepsEpochCells) {
   EXPECT_EQ(ncclSuccess, ncclDdaIpcCommInit(comm_.get()));
 
-  EXPECT_EQ(std::vector<int>{2}, published_);
+  EXPECT_EQ((std::vector<int>{1, 1, 2}), published_);
   EXPECT_NE(nullptr, comm_->ddaIpcMemHandler);
   ASSERT_EQ(1u, epochAllocs_.size());
   EXPECT_EQ(epochAllocs_[0], comm_->ddaLLEpochDev);
@@ -184,7 +186,7 @@ TEST_F(IpcInitMicrotest, CommInit_LocalEpochAllocFails_PublishesItAndDropsOnlyTh
 
   EXPECT_EQ(ncclSuccess, ncclDdaIpcCommInit(comm_.get()));
 
-  EXPECT_EQ(std::vector<int>{1}, published_);
+  EXPECT_EQ((std::vector<int>{1, 1, 1}), published_);
   ExpectDdaWithoutEpochCells();
 }
 
@@ -194,7 +196,7 @@ TEST_F(IpcInitMicrotest, CommInit_PeerEpochAllocFails_FreesLocalCells) {
 
   EXPECT_EQ(ncclSuccess, ncclDdaIpcCommInit(comm_.get()));
 
-  EXPECT_EQ(std::vector<int>{2}, published_);
+  EXPECT_EQ((std::vector<int>{1, 1, 2}), published_);
   ASSERT_EQ(1u, epochAllocs_.size());
   EXPECT_EQ(0u, live_.count(epochAllocs_[0]));
   ExpectDdaWithoutEpochCells();
@@ -205,7 +207,7 @@ TEST_F(IpcInitMicrotest, CommInit_PeerBarrierFails_SkipsDdaIpc) {
 
   EXPECT_EQ(ncclSuccess, ncclDdaIpcCommInit(comm_.get()));
 
-  EXPECT_EQ(std::vector<int>{2}, published_);
+  EXPECT_EQ((std::vector<int>{1, 1, 2}), published_);
   ExpectNoDda();
   EXPECT_TRUE(live_.empty());
 }
@@ -215,15 +217,17 @@ TEST_F(IpcInitMicrotest, CommInit_LocalBarrierFails_StillJoinsTheReadyGather) {
 
   EXPECT_EQ(ncclSuccess, ncclDdaIpcCommInit(comm_.get()));
 
-  EXPECT_EQ(std::vector<int>{0}, published_);
+  EXPECT_EQ((std::vector<int>{1, 1, 0}), published_);
   EXPECT_TRUE(epochAllocs_.empty());
   ExpectNoDda();
 }
 
-TEST_F(IpcInitMicrotest, CommInit_ReadyGatherFails_SkipsDdaIpc) {
+// A failed all-gather is not an agreed verdict (peers may have seen it succeed), so comm init fails instead of
+// claiming a clean fall-back to the ring path.
+TEST_F(IpcInitMicrotest, CommInit_ReadyGatherFails_FailsCommInitAndFreesEverything) {
   gatherResult_ = ncclRemoteError;
 
-  EXPECT_EQ(ncclSuccess, ncclDdaIpcCommInit(comm_.get()));
+  EXPECT_EQ(ncclRemoteError, ncclDdaIpcCommInit(comm_.get()));
 
   ExpectNoDda();
   EXPECT_TRUE(live_.empty());

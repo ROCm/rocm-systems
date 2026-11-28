@@ -94,6 +94,7 @@ rccl_add_dda_micro_binary(rccl-UnitTestsMicroDdaAllReduceFabricLl128 all_reduce/
 rccl_add_dda_micro_binary(rccl-UnitTestsMicroDdaAllReduceIpc all_reduce/dda-all-reduce-ipc-test.cc
   KERNELS
   SOURCES
+    fakes/dda_ipc_nranks_fakes.cc
     fakes/hip_fakes.cc
     fakes/nccl_fakes.cc)
 
@@ -189,9 +190,17 @@ rccl_add_dda_micro_binary(rccl-UnitTestsMicroDdaIpcInit ipc/ipc-init-test.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/device/device_buffer.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc)
 
+rccl_add_dda_micro_binary(rccl-UnitTestsMicroDdaIpcMemHandler ipc/ipc-mem-handler-test.cc
+  SOURCES
+    fakes/bootstrap_stubs.cc
+    fakes/hip_fakes.cc
+    fakes/nccl_fakes.cc
+    fakes/utils_fakes.cc)
+
 rccl_add_dda_micro_binary(rccl-UnitTestsMicroDdaIpcLifecycle ipc/dda-ipc-lifecycle-test.cc
   SOURCES
     fakes/bootstrap_stubs.cc
+    fakes/env_fakes.cc  # ncclLoadParam for the RCCL_DDA_NRANKS_RELAX param ipc_init.cu defines
     fakes/hip_fakes.cc
     fakes/nccl_fakes.cc
     fakes/utils_fakes.cc
