@@ -8,6 +8,8 @@
 #include <hip/hip_ext_ocp.h>
 
 #include <cmath>
+#include <cstdint>
+#include <cstring>
 #include <utility>
 #include <vector>
 
@@ -27,7 +29,8 @@ namespace {
 
 // Is a raw fp8 bit pattern NaN / Inf for the given interpretation?
 bool is_e4m3_special(unsigned i) { return (i & 0x7fu) == 0x7fu; }  // 0x7f, 0xff are NaN
-bool is_e5m2_special(unsigned i) { return (i & 0x7fu) >= 0x7bu; }  // sat E5M2: 0x7b inf, 0x7c overflow, 0x7d-7f NaN
+// 0x7c, 0xfc are Inf; 0x7d-0x7f, 0xfd-0xff are NaN
+bool is_e5m2_special(unsigned i) { return (i & 0x7fu) >= 0x7cu; }
 
 // All representable (finite, non-NaN) fp8 values for an interpretation.
 template <bool is_e4m3> std::vector<float> all_representable_fp8() {
@@ -118,12 +121,12 @@ HIP_TEST_CASE(Unit_ext_ocp_fp8_known_values_host) {
     }
   }
   SECTION("e5m2") {
-    // NOTE: 0x7B (E5M2 max normal, 57344) is intentionally excluded here. Under
-    // the saturating decode (sat=true) the reference classifies 0x7B as the
-    // saturated-inf pattern, so operator float() returns inf rather than 57344.
-    // Re-add {0x7B, 57344.0f} once the E5M2 max-normal/inf aliasing is resolved.
-    std::vector<std::pair<unsigned, float>> table = {
-        {0x3C, 1.0f}, {0x40, 2.0f}, {0x38, 0.5f}, {0x04, 6.10352e-05f} /*min normal 2^-14*/};
+    std::vector<std::pair<unsigned, float>> table = {{0x3C, 1.0f},
+                                                     {0x40, 2.0f},
+                                                     {0x38, 0.5f},
+                                                     {0x04, 6.10352e-05f} /*min normal 2^-14*/,
+                                                     {0x7B, 57344.0f} /*max normal*/,
+                                                     {0xFB, -57344.0f}};
     for (auto [pat, exp] : table) {
       __hipext_ocp_fp8_e5m2 t;
       t.__x = static_cast<__amd_fp8_storage_t>(pat);
@@ -131,6 +134,12 @@ HIP_TEST_CASE(Unit_ext_ocp_fp8_known_values_host) {
       INFO("e5m2 pattern 0x" << std::hex << pat);
       REQUIRE(f == Catch::Approx(exp));
     }
+    // 0x7C / 0xFC are +-Inf, one step above the largest finite value.
+    __hipext_ocp_fp8_e5m2 inf;
+    inf.__x = 0x7C;
+    REQUIRE(static_cast<float>(inf) == INFINITY);
+    inf.__x = 0xFC;
+    REQUIRE(static_cast<float>(inf) == -INFINITY);
   }
 }
 
@@ -256,6 +265,125 @@ HIP_TEST_CASE(Unit_ext_ocp_fp8_fp16_bf16_source_host) {
     REQUIRE(from_fp16.__x == from_float_v.__x);
     REQUIRE(from_bf16.__x == from_float_v.__x);
   }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - A binary16 subnormal has no implicit leading 1. Converting it to fp8 must
+ *    give the same encoding as converting the same value from float, for every
+ *    binary16 subnormal (both signs). Known values: 2^-24 -> 0x00 and
+ *    1.5 * 2^-15 -> 0x03 for E5M2.
+ * Test source
+ * ------------------------
+ *  - /unit/deviceLib/ext_ocp_fp8.cc
+ */
+HIP_TEST_CASE(Unit_ext_ocp_fp8_fp16_subnormal_source_host) {
+  auto fp16_from_bits = [](unsigned bits) {
+    uint16_t u = static_cast<uint16_t>(bits);
+    __amd_fp16_storage_t h;
+    std::memcpy(&h, &u, sizeof(h));
+    return h;
+  };
+  auto encode_fp16 = [&](unsigned bits, __amd_fp8_interpretation_t interp) {
+    __amd_fp16_storage_t h = fp16_from_bits(bits);
+    return __amd_cvt_fp16x2_to_fp8x2(__amd_fp16x2_storage_t{h, h}, interp) & 0xffu;
+  };
+  auto encode_float = [&](unsigned bits, __amd_fp8_interpretation_t interp) {
+    float f = static_cast<float>(fp16_from_bits(bits));
+    return __amd_cvt_floatx2_to_fp8x2(__amd_floatx2_storage_t{f, f}, interp) & 0xffu;
+  };
+
+  for (auto interp : {__AMD_OCP_E4M3, __AMD_OCP_E5M2}) {
+    for (unsigned sign : {0x0000u, 0x8000u}) {
+      for (unsigned bits = 1; bits <= 0x3ffu; ++bits) {
+        INFO("interpretation " << interp << " binary16 0x" << std::hex << (sign | bits));
+        REQUIRE(encode_fp16(sign | bits, interp) == encode_float(sign | bits, interp));
+      }
+    }
+  }
+
+  REQUIRE(encode_fp16(0x0001, __AMD_OCP_E5M2) == 0x00);  // 2^-24
+  REQUIRE(encode_fp16(0x0300, __AMD_OCP_E5M2) == 0x03);  // 1.5 * 2^-15
+  REQUIRE(encode_fp16(0x03ff, __AMD_OCP_E5M2) == 0x04);  // rounds up to 2^-14, the min normal
+  REQUIRE(encode_fp16(0x8300, __AMD_OCP_E5M2) == 0x83);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - The host conversion saturates: a value that rounds past the largest finite
+ *    value, and +-Inf, give +-max (E4M3: 448 = 0x7e, since 0x7f is NaN; E5M2:
+ *    57344 = 0x7b), with round-to-nearest-even and with stochastic rounding.
+ *    NaN stays NaN.
+ * Test source
+ * ------------------------
+ *  - /unit/deviceLib/ext_ocp_fp8.cc
+ */
+HIP_TEST_CASE(Unit_ext_ocp_fp8_overflow_saturates_host) {
+  SECTION("e4m3") {
+    // 464 is the tie between 448 and 480 and rounds to the even 448; anything above overflows
+    for (float v : {448.0f, 449.0f, 464.0f, 465.0f, 500.0f, 1e5f, 3.0e38f, INFINITY}) {
+      INFO("v " << v);
+      REQUIRE(__hipext_ocp_fp8_e4m3(v).__x == 0x7e);
+      REQUIRE(__hipext_ocp_fp8_e4m3(-v).__x == 0xfe);
+      for (unsigned seed : {0u, 0x12345678u, 0xffffffffu}) {
+        REQUIRE(__hipext_ocp_fp8_e4m3(v, seed).__x == 0x7e);
+        REQUIRE(__hipext_ocp_fp8_e4m3(-v, seed).__x == 0xfe);
+      }
+    }
+    REQUIRE((__hipext_ocp_fp8_e4m3(NAN).__x & 0x7f) == 0x7f);
+
+    __amd_fp8x2_storage_t packed =
+        __amd_cvt_floatx2_to_fp8x2(__amd_floatx2_storage_t{500.0f, INFINITY}, __AMD_OCP_E4M3);
+    REQUIRE((packed & 0xff) == 0x7e);
+    REQUIRE((packed >> 8) == 0x7e);
+  }
+  SECTION("e5m2") {
+    // 61440 is the tie between 57344 and 65536 and rounds up, so it overflows
+    for (float v : {57344.0f, 60000.0f, 61440.0f, 1e5f, 3.0e38f, INFINITY}) {
+      INFO("v " << v);
+      REQUIRE(__hipext_ocp_fp8_e5m2(v).__x == 0x7b);
+      REQUIRE(__hipext_ocp_fp8_e5m2(-v).__x == 0xfb);
+      for (unsigned seed : {0u, 0x12345678u, 0xffffffffu}) {
+        REQUIRE(__hipext_ocp_fp8_e5m2(v, seed).__x == 0x7b);
+        REQUIRE(__hipext_ocp_fp8_e5m2(-v, seed).__x == 0xfb);
+      }
+    }
+    REQUIRE((__hipext_ocp_fp8_e5m2(NAN).__x & 0x7f) > 0x7c);
+  }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Every fp8 value is exactly representable in binary16, so decoding to fp16
+ *    must give the same value as decoding to float for all 256 bit patterns.
+ *    E5M2 subnormals (0x01-0x03) lie in the binary16 subnormal range.
+ * Test source
+ * ------------------------
+ *  - /unit/deviceLib/ext_ocp_fp8.cc
+ */
+HIP_TEST_CASE(Unit_ext_ocp_fp8_to_fp16_matches_float_host) {
+  for (auto interp : {__AMD_OCP_E4M3, __AMD_OCP_E5M2}) {
+    for (unsigned c = 0; c <= 0xffu; ++c) {
+      float f = __amd_cvt_fp8_to_float(static_cast<__amd_fp8_storage_t>(c), interp);
+      float h =
+          static_cast<float>(__amd_cvt_fp8_to_fp16(static_cast<__amd_fp8_storage_t>(c), interp));
+      INFO("interpretation " << interp << " pattern 0x" << std::hex << c << " float " << f
+                             << " fp16 " << h);
+      if (std::isnan(f)) {
+        REQUIRE(std::isnan(h));
+      } else {
+        REQUIRE(h == f);
+        REQUIRE(std::signbit(h) == std::signbit(f));
+      }
+    }
+  }
+
+  // E5M2 min subnormal 2^-16 and 0x03 = 3 * 2^-16
+  REQUIRE(static_cast<float>(__amd_cvt_fp8_to_fp16(0x01, __AMD_OCP_E5M2)) == 0x1p-16f);
+  REQUIRE(static_cast<float>(__amd_cvt_fp8_to_fp16(0x83, __AMD_OCP_E5M2)) == -3 * 0x1p-16f);
 }
 
 // ---- Device consistency -----------------------------------------------------
