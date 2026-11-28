@@ -8,6 +8,8 @@
 #include "platform/kernel.hpp"
 #include "os/os.hpp"
 #include "device/device.hpp"
+#include "device/devhostcall.hpp"
+#include "device/devrpc.hpp"
 #include "device/pal/paldefs.hpp"
 #include "device/pal/palmemory.hpp"
 #include "device/pal/paldevice.hpp"
@@ -806,10 +808,7 @@ Device::~Device() {
     p2p_stage_ = nullptr;
   }
 
-  if (glb_ctx_ != nullptr) {
-    glb_ctx_->release();
-    glb_ctx_ = nullptr;
-  }
+  destroyRpcBuffer();
 
   delete srdManager_;
 
@@ -828,6 +827,12 @@ Device::~Device() {
 
   // Destroy transfer queue
   delete xferQueue_;
+  xferQueue_ = nullptr;
+
+  if (glb_ctx_ != nullptr) {
+    glb_ctx_->release();
+    glb_ctx_ = nullptr;
+  }
 
   if (trap_handler_ != nullptr) {
     trap_handler_->release();
@@ -3092,6 +3097,55 @@ amd::Memory* Device::ImportShareableVMMHandle(void* osHandle) {
     return nullptr;
   }
   return amd_mem_obj;
+}
+
+// ================================================================================================
+void* Device::getOrCreateRpcBuffer() {
+  std::scoped_lock lock(rpcLock_);
+
+  if (void* existing = rpcBuffer_.load(std::memory_order_acquire)) {
+    return existing;
+  }
+
+  auto wavesPerCu = info().maxThreadsPerCU_ / info().wavefrontWidth_;
+  rpcPortCount_ = static_cast<uint32_t>(
+      std::min(static_cast<uint64_t>(info().maxComputeUnits_ * wavesPerCu), amd::kMaxRpcPortCount));
+  auto size = amd::getRpcBufferSize(info().wavefrontWidth_, rpcPortCount_);
+
+  void* buffer = svmAlloc(
+      context(), size, 64,
+      CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_SVM_ATOMICS | ROCCLR_MEM_INTERNAL_MEMORY, nullptr);
+  if (buffer == nullptr) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE, "Failed to allocate RPC buffer for device %p", this);
+    return nullptr;
+  }
+  std::memset(buffer, 0, size);
+
+  if (!amd::enableRpc(*this, buffer, info().wavefrontWidth_, rpcPortCount_)) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE, "Failed to enable RPC for device %p", this);
+    svmFree(buffer);
+    return nullptr;
+  }
+
+  rpcBuffer_.store(buffer, std::memory_order_release);
+  ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Created RPC buffer %p (ports=%u, size=%zu) for device %p",
+          buffer, rpcPortCount_, size, this);
+  return buffer;
+}
+
+void Device::flushRpc() {
+  if (void* buffer = rpcBuffer_.load(std::memory_order_acquire)) {
+    amd::flushRpc(buffer);
+  }
+}
+
+void Device::destroyRpcBuffer() {
+  if (void* buffer = rpcBuffer_.exchange(nullptr, std::memory_order_acq_rel)) {
+    amd::flushRpc(buffer);
+    amd::disableRpc(buffer);
+    svmFree(buffer);
+    ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Destroyed RPC buffer for device %p", this);
+  }
 }
 
 }  // namespace amd::pal

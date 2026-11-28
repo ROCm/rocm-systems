@@ -10,6 +10,7 @@
 
 #include "device/devhcmessages.hpp"
 #include "device/devhostcall.hpp"
+#include "device/devrpc.hpp"
 #include "device/devsignal.hpp"
 
 #include "os/os.hpp"
@@ -318,7 +319,10 @@ void HostcallBuffer::initialize(uint32_t num_packets) {
  */
 class HostcallListener {
   std::set<HostcallBuffer*> buffers_;
-  device::Signal* doorbell_;
+  std::set<RpcBufferInfo*> rpc_buffers_;
+  device::Signal* doorbell_ = nullptr;
+  device::Signal* rpc_doorbell_ = nullptr;
+  device::Signal* rpc_wait_signal_ = nullptr;
   MessageHandler messages_;
   // Keep track of devices for which signal creation have already been done
   std::set<const amd::Device*> devices_;
@@ -340,6 +344,7 @@ class HostcallListener {
   } thread_;  //!< The hostcall listener thread.
 
   void consumePackets();
+  bool waitForRpc(uint64_t timeout);
 
  public:
   /** \brief Add a buffer to the listener.
@@ -361,7 +366,10 @@ class HostcallListener {
 
   /* \brief Return true if no buffers are registered.
    */
-  bool idle() const { return buffers_.empty(); }
+  bool addRpcBuffer(RpcBufferInfo* info);
+  void removeRpcBufferByPtr(void* raw);
+  void flushRpcBufferByPtr(void* raw);
+  bool idle() const { return buffers_.empty() && rpc_buffers_.empty(); }
 
   void terminate();
   bool initSignal(const amd::Device& dev);
@@ -408,6 +416,7 @@ void HostcallListener::consumePackets() {
     }
 
     ProcessResult result = ProcessResult::kIdleFull;
+    bool rpc_busy = false;
     {
       amd::ScopedLock lock{listenerLock};
       for (auto buf : buffers_) {
@@ -418,9 +427,12 @@ void HostcallListener::consumePackets() {
           buf->resetScanLimit();
         }
       }
+      for (auto info : rpc_buffers_) {
+        rpc_busy |= processRpcBuffer(info);
+      }
     }
 
-    if (result != ProcessResult::kIdleFull) {
+    if (result != ProcessResult::kIdleFull || rpc_busy) {
       timeout = kSignalTimeoutFloor;
       if (++yield_spins >= kYieldSpins) {
         yield_spins = 0;
@@ -430,6 +442,9 @@ void HostcallListener::consumePackets() {
     }
 
     yield_spins = 0;
+    if (waitForRpc(timeout)) {
+      continue;
+    }
     uint64_t new_value =
         doorbell_->Wait(signal_value, device::Signal::Condition::Ne, timeout);
     if (new_value != signal_value) {
@@ -454,29 +469,40 @@ void HostcallListener::consumePackets() {
         kHostThreadActive.state = Init::State::kExit;
         return;
       }
-      uint64_t new_value = doorbell_->Wait(signal_value, device::Signal::Condition::Ne, timeout);
-      if (new_value != signal_value) {
-        signal_value = new_value;
-        // Reduce the timeout for quicker processing
-        timeout = timeout >> 0x1;
-        timeout = std::max(kTimeoutFloor, timeout);
+
+      bool have_hostcall;
+      {
+        amd::ScopedLock lock{listenerLock};
+        have_hostcall = !buffers_.empty();
+      }
+      if (waitForRpc(have_hostcall ? kTimeoutFloor : timeout)) {
+        timeout = std::min(kTimeoutCeil, timeout << 1);
         break;
       }
-      // Increase the timeout since we dont need to check as frequently
-      timeout = timeout << 0x1;
-      timeout = std::min(kTimeoutCeil, timeout);
+      if (have_hostcall) {
+        uint64_t new_value = doorbell_->Wait(signal_value, device::Signal::Condition::Ne, timeout);
+        if (new_value != signal_value) {
+          signal_value = new_value;
+          timeout = std::max(kTimeoutFloor, timeout >> 1);
+          break;
+        }
+        timeout = std::min(kTimeoutCeil, timeout << 1);
+      } else {
+        amd::Os::yield();
+        break;
+      }
     }
 
     if (signal_value == SIGNAL_DONE) {
       return;
     }
 
-    if (!idle()) {
-      amd::ScopedLock lock{listenerLock};
-
-      for (auto ii : buffers_) {
-        ii->processPackets(messages_);
-      }
+    amd::ScopedLock lock{listenerLock};
+    for (auto ii : buffers_) {
+      ii->processPackets(messages_);
+    }
+    for (auto ii : rpc_buffers_) {
+      processRpcBuffer(ii);
     }
   }
 
@@ -484,10 +510,33 @@ void HostcallListener::consumePackets() {
 }
 #endif  // USE_NEW_HOSTCALL_IMPL
 
+bool HostcallListener::waitForRpc(uint64_t timeout) {
+  device::Signal* signal = nullptr;
+  {
+    amd::ScopedLock lock{listenerLock};
+    if (rpc_buffers_.empty()) {
+      return false;
+    }
+    auto* info = *rpc_buffers_.begin();
+    signal = info->interrupt != nullptr ? info->interrupt : info->signal;
+    rpc_wait_signal_ = signal;
+  }
+
+  signal->Wait(0, device::Signal::Condition::Ne, timeout);
+
+  {
+    amd::ScopedLock lock{listenerLock};
+    rpc_wait_signal_ = nullptr;
+    listenerLock.notifyAll();
+  }
+  return true;
+}
+
 void HostcallListener::terminate() {
   if (thread_.state() >= Thread::FINISHED || amd::Os::isThreadAlive(thread_)) {
     kHostThreadActive.state = Init::State::kExit;
     doorbell_->Reset(SIGNAL_DONE);
+    if (rpc_doorbell_) rpc_doorbell_->Reset(1);
 
     // FIXME_lmoriche: fix termination handshake
     while (thread_.state() < Thread::FINISHED) {
@@ -498,6 +547,7 @@ void HostcallListener::terminate() {
 #if DEVICE_ADDRESS_SANITIZER
   delete urilocator;
 #endif
+  delete rpc_doorbell_;
   delete doorbell_;
   devices_.clear();
 }
@@ -514,6 +564,72 @@ void HostcallListener::addBuffer(HostcallBuffer* buffer) {
 void HostcallListener::removeBuffer(HostcallBuffer* buffer) {
   assert(buffers_.count(buffer) != 0 && "unknown buffer");
   buffers_.erase(buffer);
+}
+
+bool HostcallListener::addRpcBuffer(RpcBufferInfo* info) {
+  if (info->device->settings().rocr_backend_) {
+    if (rpc_doorbell_ == nullptr) {
+      rpc_doorbell_ = info->device->createSignal();
+      if (rpc_doorbell_ == nullptr ||
+          !rpc_doorbell_->Init(*info->device, 0, device::Signal::WaitState::Blocked)) {
+        delete rpc_doorbell_;
+        rpc_doorbell_ = nullptr;
+        return false;
+      }
+    }
+    info->signal = rpc_doorbell_;
+  } else {
+    info->signal = info->device->createSignal();
+    info->owns_signal = true;
+    if (info->signal == nullptr ||
+        !info->signal->Init(*info->device, 0, device::Signal::WaitState::Active)) {
+      delete info->signal;
+      return false;
+    }
+#if defined(_WIN32)
+    info->interrupt = info->device->createSignal();
+    if (info->interrupt == nullptr ||
+        !info->interrupt->Init(*info->device, 0, device::Signal::WaitState::Blocked)) {
+      delete info->interrupt;
+      delete info->signal;
+      return false;
+    }
+#endif
+  }
+
+  initRpcDoorbell(info->buffer, *info->signal, info->interrupt);
+  rpc_buffers_.insert(info);
+  return true;
+}
+
+void HostcallListener::removeRpcBufferByPtr(void* raw) {
+  for (auto* b : rpc_buffers_) {
+    if (b->buffer == raw) {
+      if (b->owns_signal) {
+        device::Signal* wait_signal = b->interrupt != nullptr ? b->interrupt : b->signal;
+        if (rpc_wait_signal_ == wait_signal) {
+          wait_signal->Reset(1);
+          while (rpc_wait_signal_ == wait_signal) {
+            listenerLock.wait();
+          }
+        }
+        delete b->interrupt;
+        delete b->signal;
+      }
+      rpc_buffers_.erase(b);
+      delete b;
+      return;
+    }
+  }
+}
+
+void HostcallListener::flushRpcBufferByPtr(void* raw) {
+  for (auto* b : rpc_buffers_) {
+    if (b->buffer == raw) {
+      flushRpcBuffer(b);
+      return;
+    }
+  }
 }
 
 bool HostcallListener::initSignal(const amd::Device& dev) {
@@ -586,7 +702,7 @@ bool enableHostcalls(const amd::Device& dev, void* bfr, uint32_t numPackets) {
 #endif  // USE_NEW_HOSTCALL_IMPL
 
   amd::ScopedLock lock(listenerLock);
-  
+
   // Don't start a new listener until any previous one is fully terminated.
   while (listenerTerminating) {
     listenerLock.wait();
@@ -676,4 +792,86 @@ void disableHostcalls(void* bfr) {
   }
 }
 #endif  // USE_NEW_HOSTCALL_IMPL
+
+bool enableRpc(amd::Device& dev, void* bfr, uint32_t num_lanes, uint32_t num_ports) {
+  auto* info = new RpcBufferInfo{bfr, num_lanes, num_ports, &dev};
+  HostcallListener* listenerToTerminate = nullptr;
+  bool enabled = false;
+  {
+    amd::ScopedLock lock(listenerLock);
+    while (listenerTerminating) {
+      listenerLock.wait();
+    }
+    if (!hostcallListener) {
+      hostcallListener = new HostcallListener();
+      if (!hostcallListener->initSignal(dev)) {
+        ClPrint(amd::LOG_ERROR, (amd::LOG_INIT | amd::LOG_QUEUE | amd::LOG_RESOURCE),
+                "Failed to launch hostcall listener for RPC");
+        delete hostcallListener;
+        hostcallListener = nullptr;
+        delete info;
+        return false;
+      }
+      ClPrint(amd::LOG_INFO, (amd::LOG_INIT | amd::LOG_QUEUE | amd::LOG_RESOURCE),
+              "Launched hostcall listener at %p (for RPC)", hostcallListener);
+    }
+    if (hostcallListener->addRpcBuffer(info)) {
+      ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Registered RPC buffer %p with listener %p", bfr,
+              hostcallListener);
+      enabled = true;
+    } else {
+      ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE, "Failed to initialize RPC doorbell");
+      delete info;
+      if (hostcallListener->idle()) {
+        listenerToTerminate = hostcallListener;
+        hostcallListener = nullptr;
+        listenerTerminating = true;
+      }
+    }
+  }
+  if (listenerToTerminate) {
+    listenerToTerminate->terminate();
+    delete listenerToTerminate;
+    amd::ScopedLock lock(listenerLock);
+    listenerTerminating = false;
+    listenerLock.notifyAll();
+  }
+  return enabled;
+}
+
+void flushRpc(void* bfr) {
+  amd::ScopedLock lock(listenerLock);
+  if (!hostcallListener) {
+    return;
+  }
+  assert(bfr && "expected an RPC buffer");
+  hostcallListener->flushRpcBufferByPtr(bfr);
+}
+
+void disableRpc(void* bfr) {
+  assert(bfr && "expected an RPC buffer");
+  HostcallListener* listenerToTerminate = nullptr;
+  {
+    amd::ScopedLock lock(listenerLock);
+    if (!hostcallListener) {
+      return;
+    }
+    hostcallListener->removeRpcBufferByPtr(bfr);
+    if (hostcallListener->idle()) {
+      listenerToTerminate = hostcallListener;
+      hostcallListener = nullptr;
+      listenerTerminating = true;
+    }
+  }
+  if (listenerToTerminate) {
+    listenerToTerminate->terminate();
+    delete listenerToTerminate;
+    {
+      amd::ScopedLock lock(listenerLock);
+      listenerTerminating = false;
+      listenerLock.notifyAll();
+    }
+    ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Terminated hostcall listener");
+  }
+}
 }  // namespace amd

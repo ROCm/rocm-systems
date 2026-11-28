@@ -12,7 +12,11 @@
 
 namespace amd::roc {
 
-Signal::~Signal() { Hsa::signal_destroy(signal_); }
+Signal::~Signal() {
+  if (signal_.handle != 0) {
+    Hsa::signal_destroy(signal_);
+  }
+}
 
 bool Signal::Init(const amd::Device& dev, uint64_t init, device::Signal::WaitState ws) {
   hsa_status_t status = Hsa::signal_create(init, 0, nullptr, &signal_);
@@ -31,6 +35,14 @@ uint64_t Signal::Wait(uint64_t value, device::Signal::Condition c, uint64_t time
 }
 
 void Signal::Reset(uint64_t value) { Hsa::signal_store_screlease(signal_, value); }
+
+uint64_t Signal::Load() { return Hsa::signal_load_relaxed(signal_); }
+
+device::Signal::Doorbell Signal::getDoorbell() {
+  amd_signal_t* signal = amd_signal_from_handle(signal_.handle);
+  return {reinterpret_cast<uint64_t*>(const_cast<int64_t*>(&signal->value)),
+          reinterpret_cast<uint64_t*>(signal->event_mailbox_ptr), signal->event_id};
+}
 
 // ================================================================================================
 // IpcSignal implementation

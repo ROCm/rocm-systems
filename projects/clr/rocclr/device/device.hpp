@@ -2598,6 +2598,9 @@ class Device : public RuntimeObject {
   //! Clears hostcall memory tracking list without releasing.
   void ClearHostcallMemories();
 
+  //! Service pending RPC requests owned by this device.
+  virtual void flushRpc() {}
+
   //! Enable the specified extension
   char* getExtensionString();
 

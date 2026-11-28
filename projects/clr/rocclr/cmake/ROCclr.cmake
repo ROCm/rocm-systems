@@ -6,6 +6,9 @@
 # It is possible to support multiple backends concurrently in the same binary.
 option(ROCCLR_ENABLE_HSA   "Enable support for HSA runtime"    ON)
 option(ROCCLR_ENABLE_PAL   "Enable support for PAL runtime"    OFF)
+option(ROCCLR_ENABLE_RPC   "Enable LLVM libc RPC support"      ON)
+set(RPC_SHARED_INCLUDE_DIR "" CACHE PATH
+  "Directory containing the LLVM libc shared RPC headers")
 
 if((NOT ROCCLR_ENABLE_HSA) AND (NOT ROCCLR_ENABLE_PAL))
   message(FATAL "Support for at least one runtime needs to be enabled!")
@@ -50,6 +53,7 @@ target_sources(rocclr PRIVATE
   ${ROCCLR_SRC_DIR}/device/devhcmessages.cpp
   ${ROCCLR_SRC_DIR}/device/devhcprintf.cpp
   ${ROCCLR_SRC_DIR}/device/devhostcall.cpp
+  ${ROCCLR_SRC_DIR}/device/devrpc.cpp
   ${ROCCLR_SRC_DIR}/device/device.cpp
   ${ROCCLR_SRC_DIR}/device/devkernel.cpp
   ${ROCCLR_SRC_DIR}/device/devprogram.cpp
@@ -132,6 +136,28 @@ target_include_directories(rocclr PUBLIC
   ${ROCCLR_SRC_DIR}/elf
   ${ROCCLR_SRC_DIR}/include
   ${AMD_OPENCL_INCLUDE_DIRS})
+
+set(_ROCCLR_RPC_INCLUDE_DIR "")
+if(ROCCLR_ENABLE_RPC)
+  set(_ROCCLR_RPC_CMAKE "${CMAKE_CURRENT_LIST_DIR}/../../../cmake/RPCSharedHeaders.cmake")
+  if(NOT EXISTS "${_ROCCLR_RPC_CMAKE}")
+    set(_ROCCLR_RPC_CMAKE "${CMAKE_CURRENT_LIST_DIR}/../../cmake/RPCSharedHeaders.cmake")
+  endif()
+  include("${_ROCCLR_RPC_CMAKE}")
+  unset(_ROCCLR_RPC_CMAKE)
+  find_rpc_shared_headers(_ROCCLR_RPC_INCLUDE_DIR "${CMAKE_CXX_COMPILER}")
+endif()
+
+if(_ROCCLR_RPC_INCLUDE_DIR)
+  target_compile_definitions(rocclr PRIVATE ROCCLR_ENABLE_RPC)
+  set_source_files_properties(${ROCCLR_SRC_DIR}/device/devrpc.cpp PROPERTIES
+    INCLUDE_DIRECTORIES "${_ROCCLR_RPC_INCLUDE_DIR}")
+  message(STATUS "ROCclr RPC support: ${_ROCCLR_RPC_INCLUDE_DIR}")
+elseif(ROCCLR_ENABLE_RPC)
+  message(STATUS "ROCclr RPC support disabled: required shared RPC headers were not found")
+else()
+  message(STATUS "ROCclr RPC support disabled by ROCCLR_ENABLE_RPC")
+endif()
 
 target_link_libraries(rocclr PUBLIC Threads::Threads)
 # IPC on Windows is not supported

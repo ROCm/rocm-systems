@@ -172,4 +172,7 @@ set(CPACK_PRE_BUILD_SCRIPTS "${CMAKE_CURRENT_BINARY_DIR}/catch_package.cmake")
 # called during install and cpack. But skipped in cpack step
 install(SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/catch_package.cmake")
 
+set(CPACK_SOURCE_INSTALLED_DIRECTORIES
+    "${CMAKE_SOURCE_DIR};/"
+    "${CMAKE_CURRENT_LIST_DIR}/../../../cmake;/cmake")
 include(CPack)

@@ -285,6 +285,12 @@ bool Program::setKernels(void* binary, size_t binSize, amd::Os::FileDesc fdesc,
   UriLocator::recordCodeObjects(hsaExecutable_);
 #endif
 
+  // Initialize the RPC client if this executable contains __llvm_rpc_client.
+  if (!const_cast<roc::Device&>(rocDevice()).initRpcForProgram(hsaExecutable_)) {
+    buildLog_ += "Error: Failed to initialize RPC client for program\n";
+    return false;
+  }
+
   for (auto& kit : kernels()) {
     Kernel* kernel = static_cast<Kernel*>(kit.second);
     if (!kernel->postLoad()) {

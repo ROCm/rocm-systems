@@ -307,6 +307,10 @@ if(NOT BUILD_SHARED_LIBS)
    string(REGEX REPLACE ",? ?hip-runtime-amd" "" CPACK_DEBIAN_STATIC_PACKAGE_DEPENDS ${CPACK_DEBIAN_STATIC_PACKAGE_DEPENDS})
    string(APPEND CPACK_DEBIAN_STATIC_PACKAGE_DEPENDS  ", hsa-rocr-static-dev, hipcc-static-dev, rocminfo-static-dev, comgr-static-dev")
 endif()
+
+set(CPACK_SOURCE_INSTALLED_DIRECTORIES
+    "${CMAKE_SOURCE_DIR};/"
+    "${CMAKE_CURRENT_LIST_DIR}/../../../cmake;/cmake")
 include(CPack)
 #static package generation
 # Group binary and dev component to single package
