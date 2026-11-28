@@ -456,6 +456,7 @@ if(BUILD_TESTS)
       device/HierarchicalShuffleTests.cpp
       device/NcclUtilityDeviceTests.cpp
       device/SymkWorldPointerGetterTests.cpp
+      device/FlowCreditTests.cpp
       device/ChannelMaskMapTests.cpp
       device/CoopApplicationBuildTests.cpp
       DeviceApiTests.cpp
