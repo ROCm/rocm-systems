@@ -17,7 +17,7 @@
 #   ./run-clang-tidy.sh --build-dir DIR           # use an existing build tree
 #   ./run-clang-tidy.sh --strict                  # exit non-zero on findings
 #   ./run-clang-tidy.sh --include-upstream        # also report NCCL-owned code
-#   ./run-clang-tidy.sh src/graph/tuning.cc       # analyse matching files only
+#   ./run-clang-tidy.sh src/graph/tuning.cc ...   # analyse the named files only
 #
 # By default, findings in files that NVIDIA/nccl also ships at the same path
 # are dropped. Those files are maintained upstream, so a finding in one is
@@ -37,14 +37,14 @@ MIN_VERSION=18
 RCCL_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="${RCCL_ROOT}/build/clang-tidy"
 STRICT=0
-FILTER=""
+FILTERS=()
 # Any valid architecture does; see the configure step below.
 GPU_TARGETS="${GPU_TARGETS:-gfx942}"
 INCLUDE_UPSTREAM=0
 NCCL_REF="${NCCL_REF:-nccl/master}"
 
 usage() {
-  echo "Usage: $0 [--build-dir DIR] [--strict] [--include-upstream] [path-filter]" >&2
+  echo "Usage: $0 [--build-dir DIR] [--strict] [--include-upstream] [path ...]" >&2
 }
 
 # ---------------------------------------------------------------------------
@@ -75,11 +75,7 @@ while [[ $# -gt 0 ]]; do
       exit 1
       ;;
     *)
-      if [[ -n "$FILTER" ]]; then
-        usage
-        exit 1
-      fi
-      FILTER="$1"
+      FILTERS+=("$1")
       ;;
   esac
   shift
@@ -189,6 +185,7 @@ if [[ "$INCLUDE_UPSTREAM" -eq 0 ]]; then
   # silently unfiltered output.
   git -C "$RCCL_ROOT" ls-tree -r --full-tree --name-only "$NCCL_REF" \
     | grep -E '\.(c|cc|cpp|h|hpp|cu|cuh)$' \
+    | sed -E 'p; s|\.cuh$|.h|; s|\.cu$|.cu.cpp|' \
     | sed 's|^|/|' \
     | sort -u > "$UPSTREAM_LIST"
 fi
@@ -196,13 +193,49 @@ fi
 # ---------------------------------------------------------------------------
 # Analyse
 # ---------------------------------------------------------------------------
+NOT_ANALYSED_LIST="${BUILD_DIR}/clang-tidy-not-analysed.txt"
+rm -f "$NOT_ANALYSED_LIST"
+
 # Explicit -config-file: clang-tidy finds .clang-tidy by walking up from each
 # analysed file, and those are the hipified copies in the build directory,
 # possibly outside the tree. Relying on the walk-up silently yields nothing.
 ARGS=(-p "$BUILD_DIR" -quiet -j "$(nproc)" -config-file "${RCCL_ROOT}/.clang-tidy"
   "${RUN_CLANG_TIDY_ARGS[@]}")
-if [[ -n "$FILTER" ]]; then
-  ARGS+=("$FILTER")
+if [[ ${#FILTERS[@]} -gt 0 ]]; then
+  # run-clang-tidy takes one unanchored regex over the compile database paths,
+  # which point at the hipified copies under ${BUILD_DIR}/hipify/. Reduce each
+  # path to one relative to projects/rccl (pre-commit passes repo-relative
+  # paths such as projects/rccl/src/x.cc), then anchor it to /hipify/ and the
+  # end so src/init.cc does not also match src/transport/init.cc. x.cu is
+  # hipified to x.cu.cpp, and add_file_unique (cmake/Dependencies.cmake)
+  # renames a repeated basename to x_tmp.cc.
+  to_regex() {
+    sed -E 's|^(.*/)?projects/rccl/||; s|^\./||; s|(\.[A-Za-z0-9]+)$|(_tmp)?\1|; s/\./\\./g; s|^|/hipify/|; s|$|(\\.cpp)?$|'
+  }
+  # Some sources (e.g. those the device linker builds outside the rccl target)
+  # are not in the compile database. Report them as not analysed rather than
+  # failing, and record them so the CI summary does not read as a clean run.
+  DB_FILES="$(sed -nE 's|^ *"file": "(.*)",?$|\1|p' "${BUILD_DIR}/compile_commands.json")"
+  ANALYSED=()
+  NOT_ANALYSED=()
+  for f in "${FILTERS[@]}"; do
+    if grep -E "$(printf '%s\n' "$f" | to_regex)" <<<"$DB_FILES" >/dev/null; then
+      ANALYSED+=("$f")
+    else
+      NOT_ANALYSED+=("$f")
+    fi
+  done
+  printf '%s\n' "${NOT_ANALYSED[@]}" | sed '/^$/d' > "$NOT_ANALYSED_LIST"
+  if [[ ${#NOT_ANALYSED[@]} -gt 0 ]]; then
+    echo "WARNING: not in ${BUILD_DIR}/compile_commands.json, so not analysed:" >&2
+    printf '         %s\n' "${NOT_ANALYSED[@]}" >&2
+  fi
+  # No findings file: an empty one would read as "analysed, nothing found".
+  if [[ ${#ANALYSED[@]} -eq 0 ]]; then
+    exit 0
+  fi
+  FILTER_REGEX="$(printf '%s\n' "${ANALYSED[@]}" | to_regex | paste --serial --delimiters='|')"
+  ARGS+=("$FILTER_REGEX")
 fi
 
 # Keep stderr and check the driver's own status via PIPESTATUS: a driver that
@@ -212,7 +245,7 @@ set +e
 "$RUN_CLANG_TIDY" "${ARGS[@]}" 2>"$STDERR_LOG" \
   | grep -E '(warning|error):' \
   | sed "s|${BUILD_DIR}/hipify/||" \
-  | sed 's/_tmp\.cc:/.cc:/' \
+  | sed -E 's|_tmp(\.[A-Za-z0-9]+(\.[A-Za-z0-9]+)?:)|\1|' \
   | sort -u > "${BUILD_DIR}/clang-tidy-all.txt"
 DRIVER_STATUS=${PIPESTATUS[0]}
 set -e
