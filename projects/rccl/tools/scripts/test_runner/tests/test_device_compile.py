@@ -312,21 +312,19 @@ class TargetIdTest(unittest.TestCase):
 
 
 class DeviceCompileCmdTest(unittest.TestCase):
-    def test_gline_tables_only_precedes_forwarded_g0(self):
-        cmd = driver.device_compile_cmd(
-            "clang", "gfx942", ["-O1", "-g0"], "disp.s", "common.cu.cpp"
-        )
-
-        self.assertIn("-gline-tables-only", cmd)
-        self.assertLess(cmd.index("-gline-tables-only"), cmd.index("-g0"))
-
-    def test_release_flags_keep_gline_tables_only(self):
+    def test_release_flags_add_no_debug_info(self):
         cmd = driver.device_compile_cmd(
             "clang", "gfx942", ["-O3"], "disp.s", "common.cu.cpp"
         )
 
-        self.assertIn("-gline-tables-only", cmd)
-        self.assertNotIn("-g0", cmd)
+        self.assertEqual([f for f in cmd if f.startswith("-g")], [])
+
+    def test_debug_flags_are_forwarded(self):
+        cmd = driver.device_compile_cmd(
+            "clang", "gfx942", ["-O1", "-g"], "disp.s", "common.cu.cpp"
+        )
+
+        self.assertEqual([f for f in cmd if f.startswith("-g")], ["-g"])
 
 
 class PatchDispatcherNoDeadStripTest(unittest.TestCase):
