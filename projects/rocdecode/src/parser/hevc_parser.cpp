@@ -2360,7 +2360,7 @@ void HevcVideoParser::DecodeRps() {
                             break;
                         }
                     } else {
-                        if (poc_lt_curr_[i] == dpb_buffer_.frame_buffer_list[j].pic_order_cnt) {
+                        if (poc_lt_curr_[i] == dpb_buffer_.frame_buffer_list[j].pic_order_cnt && dpb_buffer_.frame_buffer_list[j].use_status != kNotUsed) {
                             ref_pic_set_lt_curr_[i] = j;  // RefPicSetLtCurr
                             dpb_buffer_.frame_buffer_list[j].is_reference = kUsedForLongTerm;
                             break;
@@ -2378,7 +2378,7 @@ void HevcVideoParser::DecodeRps() {
                             break;
                         }
                     } else {
-                        if (poc_lt_foll_[i] == dpb_buffer_.frame_buffer_list[j].pic_order_cnt) {
+                        if (poc_lt_foll_[i] == dpb_buffer_.frame_buffer_list[j].pic_order_cnt && dpb_buffer_.frame_buffer_list[j].use_status != kNotUsed) {
                             ref_pic_set_lt_foll_[i] = j;  // RefPicSetLtFoll
                             dpb_buffer_.frame_buffer_list[j].is_reference = kUsedForLongTerm;
                             break;
