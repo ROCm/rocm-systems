@@ -564,6 +564,10 @@ rocprofiler-sdk:
       - gfx1250
       block: GL1C
       event: 1
+    - architectures:
+      - gfx1201
+      block: GL1C
+      event: 1
   - name: GL1C_CYCLE
     description: ''
     properties: []
@@ -574,6 +578,10 @@ rocprofiler-sdk:
       - gfx1152
       - gfx1153
       - gfx1250
+      block: GL1C
+      event: 0
+    - architectures:
+      - gfx1201
       block: GL1C
       event: 0
   - name: GL1C_GL2_REQ_READ_128B
@@ -615,6 +623,10 @@ rocprofiler-sdk:
       - gfx1250
       block: GL1C
       event: 7
+    - architectures:
+      - gfx1201
+      block: GL1C
+      event: 9
   - name: GL1C_GL2_REQ_READ_LATENCY
     description: ''
     properties: []
@@ -804,6 +816,10 @@ rocprofiler-sdk:
       - gfx1250
       block: GL2C
       event: 121
+    - architectures:
+      - gfx1201
+      block: GL2C
+      event: 148
   - name: GL2C_EA_RDREQ_32B
     description: Number of 32-byte GL2C/EA read requests
     properties: []
@@ -819,6 +835,10 @@ rocprofiler-sdk:
       - gfx1250
       block: GL2C
       event: 119
+    - architectures:
+      - gfx1201
+      block: GL2C
+      event: 146
   - name: GL2C_EA_RDREQ_64B
     description: Number of 64-byte GL2C/EA read requests
     properties: []
@@ -834,6 +854,10 @@ rocprofiler-sdk:
       - gfx1250
       block: GL2C
       event: 120
+    - architectures:
+      - gfx1201
+      block: GL2C
+      event: 147
   - name: GL2C_EA_RDREQ_96B
     description: Number of 96-byte GL2C/EA read requests
     properties: []
@@ -856,6 +880,10 @@ rocprofiler-sdk:
       - gfx1153
       block: GL2C
       event: 85
+    - architectures:
+      - gfx1201
+      block: GL2C
+      event: 114
   - name: GL2C_HIT
     description: Number of cache hits
     properties: []
@@ -899,6 +927,10 @@ rocprofiler-sdk:
       - gfx1153
       block: GL2C
       event: 88
+    - architectures:
+      - gfx1201
+      block: GL2C
+      event: 122
   - name: GL2C_MISS
     description: Number of cache misses.  UC reads count as misses.
     properties: []
@@ -954,6 +986,10 @@ rocprofiler-sdk:
       - gfx1250
       block: GL2C
       event: 69
+    - architectures:
+      - gfx1201
+      block: GL2C
+      event: 2
   - name: GL2C_COMPRESSED_READ_96_REQ
     description: ''
     properties: []
@@ -980,6 +1016,10 @@ rocprofiler-sdk:
       - gfx1250
       block: GL2C
       event: 68
+    - architectures:
+      - gfx1201
+      block: GL2C
+      event: 1
   - name: GL2C_EA_RDREQ_DRAM
     description: ''
     properties: []
@@ -1035,6 +1075,10 @@ rocprofiler-sdk:
       - gfx1250
       block: GL2C
       event: 96
+    - architectures:
+      - gfx1201
+      block: GL2C
+      event: 80
   - name: GL2C_READ_32_REQ
     description: ''
     properties: []
@@ -1050,6 +1094,10 @@ rocprofiler-sdk:
       - gfx1250
       block: GL2C
       event: 94
+    - architectures:
+      - gfx1201
+      block: GL2C
+      event: 78
   - name: GL2C_READ_64_REQ
     description: ''
     properties: []
@@ -1065,6 +1113,10 @@ rocprofiler-sdk:
       - gfx1250
       block: GL2C
       event: 95
+    - architectures:
+      - gfx1201
+      block: GL2C
+      event: 79
   - name: GL2C_READ
     description: ''
     properties: []
@@ -1604,6 +1656,10 @@ rocprofiler-sdk:
       - gfx1250
       block: SQ
       event: 1
+    - architectures:
+      - gfx1201
+      block: SQ
+      event: 1
   - name: SQ_BUSY_CYCLES
     description: Number of clock cycles there are active waves in a shader engine (as reported by the distributed sequencer).
       This value does not denote the number of active waves, only the clock cycle in which any wave is present in a SE. This
@@ -1921,6 +1977,10 @@ rocprofiler-sdk:
       - gfx1250
       block: SQ
       event: 392
+    - architectures:
+      - gfx1201
+      block: SQ
+      event: 75
   - name: SQ_INST_LEVEL_SMEM
     description: Level count number of in-flight SMEM instructions (*2 load/store; *2 atomic; *2 memtime; *4 wb/inv). Set
       next counter to ACCUM_PREV and divide by INSTS_SMEM for average latency per smem request. Falls slightly short of total
@@ -2140,6 +2200,10 @@ rocprofiler-sdk:
       - gfx950
       block: SQ
       event: 106
+    - architectures:
+      - gfx1201
+      block: SQ
+      event: 27
   - name: SQ_WAIT_INST_ANY
     description: Number of wave-cycles spent waiting for any instruction issue. Units in quad-cycles(4 cycles).
     properties: []
@@ -2171,6 +2235,10 @@ rocprofiler-sdk:
       - gfx1250
       block: SQ
       event: 34
+    - architectures:
+      - gfx1201
+      block: SQ
+      event: 26
   - name: SQ_WAIT_INST_LDS
     description: Number of wave-cycles spent waiting for LDS instruction issue. In units of 4 cycles. (per-simd, nondeterministic)
     properties: []
@@ -2254,6 +2322,10 @@ rocprofiler-sdk:
       - gfx1250
       block: SQ
       event: 32
+    - architectures:
+      - gfx1201
+      block: SQ
+      event: 24
   - name: SQ_EVENTS
     description: Number of events. (unwindowed, emulated, global)
     properties: []
@@ -3030,6 +3102,10 @@ rocprofiler-sdk:
       - gfx1250
       block: SQ
       event: 664
+    - architectures:
+      - gfx1201
+      block: SQ
+      event: 327
   - name: SQC_DCACHE_REQ_READ_1
     description: Number of constant cache 1 dw read requests. (per-SQ)
     properties: []
@@ -3280,6 +3356,10 @@ rocprofiler-sdk:
       - gfx1250
       block: SQ
       event: 643
+    - architectures:
+      - gfx1201
+      block: SQ
+      event: 303
   - name: SQC_ICACHE_REQ
     description: Number of requests. (per-SQ, per-Bank)
     properties: []
@@ -3384,6 +3464,10 @@ rocprofiler-sdk:
       - gfx1250
       block: SQ
       event: 653
+    - architectures:
+      - gfx1201
+      block: SQ
+      event: 315
   - name: SQC_TC_REQ
     description: Total number of TC requests that were issued by instruction and constant caches. (No-Masking, nondeterministic)
     properties: []
@@ -3446,6 +3530,10 @@ rocprofiler-sdk:
       - gfx950
       block: TA
       event: 13
+    - architectures:
+      - gfx1201
+      block: TA
+      event: 15
   - name: TCP_GATE_EN1
     description: TCP interface clocks are turned on. Not Windowed.
     properties: []
@@ -3555,6 +3643,10 @@ rocprofiler-sdk:
       - gfx1153
       block: TCP
       event: 10
+    - architectures:
+      - gfx1201
+      block: TCP
+      event: 10
   - name: TCP_REQ_WRITE
     description: ''
     properties: []
@@ -3564,6 +3656,10 @@ rocprofiler-sdk:
       - gfx1151
       - gfx1152
       - gfx1153
+      block: TCP
+      event: 14
+    - architectures:
+      - gfx1201
       block: TCP
       event: 14
   - name: TCP_REQ
@@ -3995,6 +4091,9 @@ rocprofiler-sdk:
       - gfx1153
       - gfx1250
       expression: reduce(GL1C_BUSY,sum)
+    - architectures:
+      - gfx1201
+      expression: reduce(GL1C_BUSY,sum)
   - name: GL1C_CYCLE_sum
     description: ''
     properties: []
@@ -4005,6 +4104,9 @@ rocprofiler-sdk:
       - gfx1152
       - gfx1153
       - gfx1250
+      expression: reduce(GL1C_CYCLE,sum)
+    - architectures:
+      - gfx1201
       expression: reduce(GL1C_CYCLE,sum)
   - name: GL1C_GL2_REQ_READ_128B_sum
     description: ''
@@ -4038,6 +4140,9 @@ rocprofiler-sdk:
       - gfx1152
       - gfx1153
       - gfx1250
+      expression: reduce(GL1C_GL2_REQ_READ_64B,sum)
+    - architectures:
+      - gfx1201
       expression: reduce(GL1C_GL2_REQ_READ_64B,sum)
   - name: GL1C_GL2_REQ_READ_LATENCY_sum
     description: ''
@@ -4203,6 +4308,9 @@ rocprofiler-sdk:
       - gfx1153
       - gfx1250
       expression: reduce(GL2C_BUSY,sum)
+    - architectures:
+      - gfx1201
+      expression: reduce(GL2C_BUSY,sum)
   - name: GL2C_COMPRESSED_READ_96_REQ_sum
     description: ''
     properties: []
@@ -4223,6 +4331,9 @@ rocprofiler-sdk:
       - gfx1152
       - gfx1153
       - gfx1250
+      expression: reduce(GL2C_CYCLE,sum)
+    - architectures:
+      - gfx1201
       expression: reduce(GL2C_CYCLE,sum)
   - name: GL2C_EA_RDREQ_DRAM_sum
     description: ''
@@ -4261,6 +4372,9 @@ rocprofiler-sdk:
       - gfx1153
       - gfx1250
       expression: reduce(GL2C_READ_128_REQ,sum)
+    - architectures:
+      - gfx1201
+      expression: reduce(GL2C_READ_128_REQ,sum)
   - name: GL2C_READ_32_REQ_sum
     description: ''
     properties: []
@@ -4272,6 +4386,9 @@ rocprofiler-sdk:
       - gfx1153
       - gfx1250
       expression: reduce(GL2C_READ_32_REQ,sum)
+    - architectures:
+      - gfx1201
+      expression: reduce(GL2C_READ_32_REQ,sum)
   - name: GL2C_READ_64_REQ_sum
     description: ''
     properties: []
@@ -4282,6 +4399,9 @@ rocprofiler-sdk:
       - gfx1152
       - gfx1153
       - gfx1250
+      expression: reduce(GL2C_READ_64_REQ,sum)
+    - architectures:
+      - gfx1201
       expression: reduce(GL2C_READ_64_REQ,sum)
   - name: GL2C_READ_sum
     description: ''
@@ -4538,6 +4658,9 @@ rocprofiler-sdk:
       - gfx1153
       - gfx1250
       expression: reduce(SQC_DCACHE_MISSES,sum)
+    - architectures:
+      - gfx1201
+      expression: reduce(SQC_DCACHE_MISSES,sum)
   - name: SQC_DCACHE_REQ_sum
     description: ''
     properties: []
@@ -4656,6 +4779,9 @@ rocprofiler-sdk:
       - gfx1153
       - gfx1250
       expression: reduce(SQC_TC_INST_REQ,sum)
+    - architectures:
+      - gfx1201
+      expression: reduce(SQC_TC_INST_REQ,sum)
   - name: TCP_DATA_FIFO_STALL_sum
     description: ''
     properties: []
@@ -4728,6 +4854,9 @@ rocprofiler-sdk:
       - gfx1152
       - gfx1153
       expression: reduce(TCP_REQ_READ,sum)
+    - architectures:
+      - gfx1201
+      expression: reduce(TCP_REQ_READ,sum)
   - name: TCP_REQ_WRITE_sum
     description: ''
     properties: []
@@ -4737,6 +4866,9 @@ rocprofiler-sdk:
       - gfx1151
       - gfx1152
       - gfx1153
+      expression: reduce(TCP_REQ_WRITE,sum)
+    - architectures:
+      - gfx1201
       expression: reduce(TCP_REQ_WRITE,sum)
   - name: TCP_REQ_sum
     description: ''
@@ -4772,6 +4904,9 @@ rocprofiler-sdk:
       - gfx1152
       - gfx1153
       expression: reduce(GL2C_EA_RDREQ_128B,sum)
+    - architectures:
+      - gfx1201
+      expression: reduce(GL2C_EA_RDREQ_128B,sum)
   - name: GL2C_EA_RDREQ_32B_sum
     description: Number of 32-byte GL2C/EA read requests. Sum over GL2C instances.
     properties: []
@@ -4782,6 +4917,9 @@ rocprofiler-sdk:
       - gfx1152
       - gfx1153
       expression: reduce(GL2C_EA_RDREQ_32B,sum)
+    - architectures:
+      - gfx1201
+      expression: reduce(GL2C_EA_RDREQ_32B,sum)
   - name: GL2C_EA_RDREQ_64B_sum
     description: Number of 64-byte GL2C/EA read requests. Sum over GL2C instances.
     properties: []
@@ -4791,6 +4929,9 @@ rocprofiler-sdk:
       - gfx1151
       - gfx1152
       - gfx1153
+      expression: reduce(GL2C_EA_RDREQ_64B,sum)
+    - architectures:
+      - gfx1201
       expression: reduce(GL2C_EA_RDREQ_64B,sum)
   - name: GL2C_EA_RDREQ_96B_sum
     description: Number of 96-byte GL2C/EA read requests. Sum over GL2C instances.
@@ -4812,6 +4953,9 @@ rocprofiler-sdk:
       - gfx1151
       - gfx1152
       - gfx1153
+      expression: reduce(GL2C_EA_WRREQ_64B,sum)
+    - architectures:
+      - gfx1201
       expression: reduce(GL2C_EA_WRREQ_64B,sum)
   - name: GL2C_HIT_sum
     description: Number of cache hits. Sum over GL2C instances.
@@ -5186,6 +5330,9 @@ rocprofiler-sdk:
       - gfx1152
       - gfx1153
       expression: simd_count/simd_per_cu
+    - architectures:
+      - gfx1201
+      expression: simd_count/simd_per_cu
   - name: SIMD_NUM
     description: SIMD Number
     properties: []
@@ -5199,6 +5346,9 @@ rocprofiler-sdk:
       - gfx1151
       - gfx1152
       - gfx1153
+      expression: simd_count
+    - architectures:
+      - gfx1201
       expression: simd_count
   - name: CpUtil
     description: 'Unit: percent'
@@ -5305,6 +5455,9 @@ rocprofiler-sdk:
       - gfx1152
       - gfx1153
       expression: (GL2C_EA_RDREQ_32B_sum*32+GL2C_EA_RDREQ_64B_sum*64+GL2C_EA_RDREQ_96B_sum*96+GL2C_EA_RDREQ_128B_sum*128)/1024
+    - architectures:
+      - gfx1201
+      expression: (GL2C_EA_RDREQ_32B_sum*32+GL2C_EA_RDREQ_64B_sum*64+GL2C_EA_RDREQ_128B_sum*128+GL2C_EA_RDREQ_256B_sum*256)/1024
   - name: BANDWIDTH_EA
     description: Memory Bandwidth measured at the TCC_EA interface. In units of bytes/cycle.
     properties: []
@@ -5328,6 +5481,9 @@ rocprofiler-sdk:
       - gfx90a
       - gfx942
       - gfx950
+      expression: FETCH_SIZE
+    - architectures:
+      - gfx1201
       expression: FETCH_SIZE
   - name: FlatLDSInsts
     description: The average number of FLAT instructions that read or write to LDS executed per work item (affected by flow
@@ -5367,12 +5523,19 @@ rocprofiler-sdk:
       - gfx1250
       block: GL2C
       event: 117
+    - architectures:
+      - gfx1201
+      block: GL2C
+      event: 140
   - name: GL2C_EA_RDREQ_sum
     description: Number of GL2C/EA read requests (either 32-byte, 64-byte, 128-byte or 256-byte). Sum over GL2C instances.
     properties: []
     definitions:
     - architectures:
       - gfx1250
+      expression: reduce(GL2C_EA_RDREQ,sum)
+    - architectures:
+      - gfx1201
       expression: reduce(GL2C_EA_RDREQ,sum)
   - name: GL2C_EA_WRREQ
     description: Number of transactions (all sizes) going over the GL2C_EA_WRREQ interface for all clients. This does not
@@ -5383,6 +5546,10 @@ rocprofiler-sdk:
       - gfx1250
       block: GL2C
       event: 105
+    - architectures:
+      - gfx1201
+      block: GL2C
+      event: 108
   - name: GL2C_EA_WRREQ_sum
     description: Number of transactions (either 32-byte or 64-byte) going over the GL2C_EA_WRREQ interface. Sum over GL2C
       instances.
@@ -5390,6 +5557,9 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx1250
+      expression: reduce(GL2C_EA_WRREQ,sum)
+    - architectures:
+      - gfx1201
       expression: reduce(GL2C_EA_WRREQ,sum)
   - name: GL2C_EA_WRREQ_STALL
     description: Number of cycles a write request was stalled.
@@ -5399,6 +5569,10 @@ rocprofiler-sdk:
       - gfx1250
       block: GL2C
       event: 107
+    - architectures:
+      - gfx1201
+      block: GL2C
+      event: 122
   - name: GL2C_WRREQ_STALL_max
     description: Number of cycles a write request was stalled. Max over GL2C instances.
     properties: []
@@ -5408,6 +5582,9 @@ rocprofiler-sdk:
       - gfx1151
       - gfx1152
       - gfx1153
+      expression: reduce(GL2C_MC_WRREQ_STALL,max)
+    - architectures:
+      - gfx1201
       expression: reduce(GL2C_MC_WRREQ_STALL,max)
   - name: GPUBusy
     description: The percentage of time GPU was busy.
@@ -5420,6 +5597,9 @@ rocprofiler-sdk:
       - gfx1151
       - gfx1152
       - gfx1153
+      expression: 100*reduce(GRBM_GUI_ACTIVE,max)/reduce(GRBM_COUNT,max)
+    - architectures:
+      - gfx1201
       expression: 100*reduce(GRBM_GUI_ACTIVE,max)/reduce(GRBM_COUNT,max)
   - name: GPU_UTIL
     description: Percentage of the time that GUI is active
@@ -5434,6 +5614,9 @@ rocprofiler-sdk:
       - gfx1151
       - gfx1152
       - gfx1153
+      expression: 100*reduce(GRBM_GUI_ACTIVE,max)/reduce(GRBM_COUNT,max)
+    - architectures:
+      - gfx1201
       expression: 100*reduce(GRBM_GUI_ACTIVE,max)/reduce(GRBM_COUNT,max)
   - name: GRBM_TC_BUSY
     description: Any of the Texture Cache Blocks (TCP/TCI/TCA/TCC) are busy.
@@ -5484,6 +5667,9 @@ rocprofiler-sdk:
       - gfx1152
       - gfx1153
       expression: 100*reduce(GL2C_HIT,sum)/(reduce(GL2C_HIT,sum)+reduce(GL2C_MISS,sum))
+    - architectures:
+      - gfx1201
+      expression: 100*reduce(GL2C_HIT,sum)/(reduce(GL2C_HIT,sum)+reduce(GL2C_MISS,sum))
   - name: L2CacheTagRamStallRate
     description: 'Unit: percent'
     properties: []
@@ -5507,6 +5693,9 @@ rocprofiler-sdk:
       - gfx942
       - gfx950
       expression: 100*reduce(SQ_LDS_BANK_CONFLICT,sum)/reduce(GRBM_GUI_ACTIVE,max)/CU_NUM
+    - architectures:
+      - gfx1201
+      expression: 100*reduce(SQC_LDS_BANK_CONFLICT,sum)/reduce(SQC_LDS_IDX_ACTIVE,sum)
   - name: LDSInsts
     description: The average number of LDS read or LDS write instructions executed per work item (affected by flow control).  Excludes
       FLAT instructions that read from or write to LDS.
@@ -5554,6 +5743,9 @@ rocprofiler-sdk:
       - gfx942
       - gfx950
       expression: 100*reduce(SQ_LDS_IDX_ACTIVE,sum)/(reduce(GRBM_GUI_ACTIVE,max)*CU_NUM)
+    - architectures:
+      - gfx1201
+      expression: 100*reduce(SQC_LDS_IDX_ACTIVE,sum)/(reduce(GRBM_GUI_ACTIVE,max)*(SIMD_NUM/4))
   - name: MAX_WAVE_SIZE
     description: Max wave size constant
     properties: []
@@ -5583,6 +5775,9 @@ rocprofiler-sdk:
       - gfx942
       - gfx950
       expression: reduce(accumulate(SQ_LEVEL_WAVES, LOW_RES),sum)/reduce(SQ_BUSY_CU_CYCLES,sum)
+    - architectures:
+      - gfx1201
+      expression: reduce(SQ_WAVE_CYCLES,sum)/reduce(SQ_BUSY_CYCLES,sum)
   - name: MeanOccupancyPerCU
     description: Mean occupancy per compute unit.
     properties: []
@@ -5598,6 +5793,9 @@ rocprofiler-sdk:
       - gfx942
       - gfx950
       expression: reduce(accumulate(SQ_LEVEL_WAVES, HIGH_RES),sum)/reduce(GRBM_GUI_ACTIVE,max)/CU_NUM
+    - architectures:
+      - gfx1201
+      expression: reduce(SQ_WAVE_CYCLES,sum)/reduce(GRBM_GUI_ACTIVE,max)/CU_NUM
   - name: OccupancyPercent
     description: GPU Occupancy as % of maximum.
     properties: []
@@ -5613,6 +5811,9 @@ rocprofiler-sdk:
       - gfx942
       - gfx950
       expression: 400*reduce(SQ_WAVE_CYCLES,sum)/reduce(GRBM_GUI_ACTIVE,max)/CU_NUM/32
+    - architectures:
+      - gfx1201
+      expression: 100*reduce(SQ_WAVE_CYCLES,sum)/reduce(GRBM_GUI_ACTIVE,max)/CU_NUM/32
   - name: MemUnitBusy
     description: 'The percentage of GPUTime the memory unit is active. The result includes the stall time (MemUnitStalled).
       This is measured with all extra fetches and writes and any cache or memory effects taken into account. Value range:
@@ -5626,6 +5827,9 @@ rocprofiler-sdk:
       - gfx1151
       - gfx1152
       - gfx1153
+      expression: 100*reduce(TA_TA_BUSY,max)/reduce(GRBM_GUI_ACTIVE,max)
+    - architectures:
+      - gfx1201
       expression: 100*reduce(TA_TA_BUSY,max)/reduce(GRBM_GUI_ACTIVE,max)
   - name: MemUnitStalled
     description: 'The percentage of GPUTime the memory unit is stalled. Try reducing the number or size of fetches and writes
@@ -5724,6 +5928,9 @@ rocprofiler-sdk:
       - gfx1152
       - gfx1153
       expression: reduce(SQ_INSTS_SALU,sum)/reduce(SQ_WAVES,sum)
+    - architectures:
+      - gfx1201
+      expression: reduce(SQ_INSTS_SALU,sum)/reduce(SQ_WAVES,sum)
   - name: SE_NUM
     description: SE_NUM
     properties: []
@@ -5738,6 +5945,9 @@ rocprofiler-sdk:
       - gfx1152
       - gfx1153
       expression: array_count/simd_arrays_per_engine
+    - architectures:
+      - gfx1201
+      expression: array_count/simd_arrays_per_engine
   - name: SFetchInsts
     description: The average number of scalar fetch instructions from the video memory executed per work-item (affected by
       flow control).
@@ -5750,6 +5960,9 @@ rocprofiler-sdk:
       - gfx1151
       - gfx1152
       - gfx1153
+      expression: reduce(SQ_INSTS_SMEM,sum)/reduce(SQ_WAVES,sum)
+    - architectures:
+      - gfx1201
       expression: reduce(SQ_INSTS_SMEM,sum)/reduce(SQ_WAVES,sum)
   - name: SPI_RA_SGPR_SIMD_FULL_CSN
     description: Sum of SIMD where SGPR can't take csn wave when !fits. Source is RA0
@@ -7759,6 +7972,9 @@ rocprofiler-sdk:
       - gfx1152
       - gfx1153
       expression: reduce(TA_TA_BUSY,avr)
+    - architectures:
+      - gfx1201
+      expression: reduce(TA_TA_BUSY,avr)
   - name: TA_BUSY_max
     description: TA block is busy. Max over TA instances.
     properties: []
@@ -7773,6 +7989,9 @@ rocprofiler-sdk:
       - gfx1152
       - gfx1153
       expression: reduce(TA_TA_BUSY,max)
+    - architectures:
+      - gfx1201
+      expression: reduce(TA_TA_BUSY,max)
   - name: TA_BUSY_min
     description: TA block is busy. Min over TA instances.
     properties: []
@@ -7786,6 +8005,9 @@ rocprofiler-sdk:
       - gfx1151
       - gfx1152
       - gfx1153
+      expression: reduce(TA_TA_BUSY,min)
+    - architectures:
+      - gfx1201
       expression: reduce(TA_TA_BUSY,min)
   - name: TA_DATA_STALLED_BY_TC_CYCLES
     description: Number of cycles data path stalled by TC. Perf_Windowing not supported for this counter.
@@ -11418,6 +11640,9 @@ rocprofiler-sdk:
       - gfx942
       - gfx950
       expression: 100*reduce(SQ_ACTIVE_INST_VALU,sum)/CU_NUM/reduce(GRBM_GUI_ACTIVE,max)
+    - architectures:
+      - gfx1201
+      expression: 100*reduce(SQ_INST_CYCLES_VALU,sum)/(SIMD_NUM/4)/reduce(GRBM_GUI_ACTIVE,max)
   - name: VALUInsts
     description: The average number of vector ALU instructions executed per work-item (affected by flow control).
     properties: []
@@ -11429,6 +11654,9 @@ rocprofiler-sdk:
       - gfx1151
       - gfx1152
       - gfx1153
+      expression: reduce(SQ_INSTS_VALU,sum)/reduce(SQ_WAVES,sum)
+    - architectures:
+      - gfx1201
       expression: reduce(SQ_INSTS_VALU,sum)/reduce(SQ_WAVES,sum)
   - name: VALUUtilization
     description: 'The percentage of active vector ALU threads in a wave. A lower number can mean either more thread divergence
@@ -11450,6 +11678,9 @@ rocprofiler-sdk:
       - gfx942
       - gfx950
       expression: reduce(SQ_BUSY_CU_CYCLES,sum)/reduce(GRBM_COUNT,max)/CU_NUM
+    - architectures:
+      - gfx1201
+      expression: reduce(SQ_BUSY_CYCLES,sum)/reduce(GRBM_COUNT,max)/(SIMD_NUM/4)
   - name: VFetchInsts
     description: The average number of vector fetch instructions from the video memory executed per work-item (affected by
       flow control). Excludes FLAT instructions that fetch from video memory.
@@ -11487,6 +11718,9 @@ rocprofiler-sdk:
       - gfx90a
       - gfx942
       expression: 100*reduce(SQ_ACTIVE_INST_VALU,sum)/(reduce(GRBM_GUI_ACTIVE,max)*CU_NUM)
+    - architectures:
+      - gfx1201
+      expression: 100*reduce(SQ_INST_CYCLES_VALU,sum)/(reduce(GRBM_GUI_ACTIVE,max)*(SIMD_NUM/4))
   - name: VmemLatency
     description: 'Unit: cycles'
     properties: []
@@ -11604,6 +11838,9 @@ rocprofiler-sdk:
       - gfx1151
       - gfx1152
       - gfx1153
+      expression: 100*GL2C_WRREQ_STALL_max/reduce(GRBM_GUI_ACTIVE,max)
+    - architectures:
+      - gfx1201
       expression: 100*GL2C_WRREQ_STALL_max/reduce(GRBM_GUI_ACTIVE,max)
   - name: sL1dCacheHitRate
     description: 'Unit: percent'
@@ -11899,6 +12136,10 @@ rocprofiler-sdk:
       - gfx1250
       block: SQ
       event: 333
+    - architectures:
+      - gfx1201
+      block: SQ
+      event: 102
   - name: CHA_BUSY
     description: Count busy cyles. Not windowable.
     properties: []
@@ -12742,6 +12983,10 @@ rocprofiler-sdk:
       - gfx1250
       block: GL1C
       event: 28
+    - architectures:
+      - gfx1201
+      block: GL1C
+      event: 36
   - name: GL1C_REQ_READ_64B
     description: Number of read requests with logical size 64B
     properties: []
@@ -12758,6 +13003,10 @@ rocprofiler-sdk:
       - gfx1250
       block: GL1C
       event: 30
+    - architectures:
+      - gfx1201
+      block: GL1C
+      event: 38
   - name: GL1C_REQ_READ_256B
     description: Number of read requests with logical size 256B
     properties: []
@@ -12782,6 +13031,10 @@ rocprofiler-sdk:
       - gfx1250
       block: GL1C
       event: 34
+    - architectures:
+      - gfx1201
+      block: GL1C
+      event: 42
   - name: GL1C_REQ_WRITE_64B
     description: Number of write requests with logical size 64B
     properties: []
@@ -14880,6 +15133,10 @@ rocprofiler-sdk:
       - gfx1250
       block: GL2C
       event: 122
+    - architectures:
+      - gfx1201
+      block: GL2C
+      event: 149
   - name: GL2C_EA_RD_UNCACHED_32B
     description: Number of uncached write/atomic requests issued to main memory.
     properties: []
@@ -19381,6 +19638,9 @@ rocprofiler-sdk:
     - architectures:
       - gfx1250
       expression: reduce(GL1C_REQ_READ_32B,sum)
+    - architectures:
+      - gfx1201
+      expression: reduce(GL1C_REQ_READ_32B,sum)
   - name: GL1C_REQ_READ_64B_sum
     description: sum of GL1C REQ READ 64B.
     properties: []
@@ -19394,6 +19654,9 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx1250
+      expression: reduce(GL1C_REQ_READ_128B,sum)
+    - architectures:
+      - gfx1201
       expression: reduce(GL1C_REQ_READ_128B,sum)
   - name: GL1C_REQ_READ_256B_sum
     description: sum of GL1C REQ READ 256B.
@@ -19415,6 +19678,9 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx1250
+      expression: reduce(GL1C_REQ_WRITE_32B,sum)
+    - architectures:
+      - gfx1201
       expression: reduce(GL1C_REQ_WRITE_32B,sum)
   - name: GL1C_REQ_WRITE_64B_sum
     description: sum of GL1C REQ WRITE 64B.
@@ -21179,6 +21445,9 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx1250
+      expression: reduce(GL2C_EA_RDREQ_256B,sum)
+    - architectures:
+      - gfx1201
       expression: reduce(GL2C_EA_RDREQ_256B,sum)
   - name: GL2C_EA_RD_UNCACHED_32B_sum
     description: sum of GL2C EA RD UNCACHED 32B.
@@ -24223,6 +24492,131 @@ rocprofiler-sdk:
       - gfx1200
       - gfx1201
       expression: reduce(SQC_LDS_ATOMIC_DWORDS,sum)
+  - name: GL2C_EA_WRREQ_STALL_max
+    description: Number of cycles a write request was stalled. Max over GL2C instances.
+    properties: []
+    definitions:
+    - architectures:
+      - gfx1201
+      expression: reduce(GL2C_EA_WRREQ_STALL,max)
+  - name: L0CacheHit
+    description: The percentage of read requests that hit the data in the L0 cache. The L0 cache contains
+      vector data, which is data that may vary in each thread across the wavefront. Value range 0% (no hit)
+      to 100% (optimal).
+    properties: []
+    definitions:
+    - architectures:
+      - gfx1201
+      expression: (1-(reduce(TCP_REQ_MISS,sum)/reduce(TCP_REQ,sum)))*100
+  - name: SQ_INSTS_VEC32_LEVEL_LDS
+    description: Number of in-flight wave32 LDS (indexed, flat) instructions issued.{level, nondeterministic}
+    properties: []
+    definitions:
+    - architectures:
+      - gfx1201
+      block: SQ
+      event: 250
+  - name: SQ_INSTS_WAVE32
+    description: Number of wave32 instructions issued, for flat, lds, valu, tex. {emulated, C1}
+    properties: []
+    definitions:
+    - architectures:
+      - gfx1201
+      block: SQ
+      event: 58
+  - name: SQ_INSTS_WAVE32_LDS
+    description: Number of wave32 LDS indexed instructions issued. Wave64 may count 1 or 2, depending on
+      what gets issued. {emulated, C1}
+    properties: []
+    definitions:
+    - architectures:
+      - gfx1201
+      block: SQ
+      event: 60
+  - name: SQ_INSTS_WAVE32_VALU
+    description: Number of wave32 valu instructions issued. Wave64 may count 1 or 2, depending on what gets
+      issued. {emulated, C1}
+    properties: []
+    definitions:
+    - architectures:
+      - gfx1201
+      block: SQ
+      event: 61
+  - name: SQ_WAVE32_INSTS
+    description: Number of instructions issued by wave32 waves. Skipped instructions are not counted. {emulated}
+    properties: []
+    definitions:
+    - architectures:
+      - gfx1201
+      block: SQ
+      event: 70
+  - name: SQ_WAVE64_INSTS
+    description: Number of instructions issued by wave64 waves. Skipped instructions are not counted. {emulated}
+    properties: []
+    definitions:
+    - architectures:
+      - gfx1201
+      block: SQ
+      event: 71
+  - name: TA_BUFFER_LOAD_WAVEFRONTS
+    description: Number of buffer load vec32 packets processed by TA
+    properties: []
+    definitions:
+    - architectures:
+      - gfx1201
+      block: TA
+      event: 45
+  - name: TA_BUFFER_LOAD_WAVEFRONTS_sum
+    description: Number of buffer load vec32 packets processed by the TA. Sum over TA instances.
+    properties: []
+    definitions:
+    - architectures:
+      - gfx1201
+      expression: reduce(TA_BUFFER_LOAD_WAVEFRONTS,sum)
+  - name: TA_BUFFER_STORE_WAVEFRONTS
+    description: Number of buffer store vec32 packets processed by TA
+    properties: []
+    definitions:
+    - architectures:
+      - gfx1201
+      block: TA
+      event: 46
+  - name: TA_BUFFER_STORE_WAVEFRONTS_sum
+    description: Number of buffer store vec32 packets processed by the TA. Sum over TA instances.
+    properties: []
+    definitions:
+    - architectures:
+      - gfx1201
+      expression: reduce(TA_BUFFER_STORE_WAVEFRONTS,sum)
+  - name: WAVE_DEP_WAIT
+    description: Percentage of the SQ_WAVE_CYCLE time spent waiting for anything.
+    properties: []
+    definitions:
+    - architectures:
+      - gfx1201
+      expression: 100*reduce(SQ_WAIT_ANY,sum)/reduce(SQ_WAVE_CYCLES,sum)
+  - name: WAVE_ISSUE_WAIT
+    description: Percentage of the SQ_WAVE_CYCLE time spent waiting for any instruction issue.
+    properties: []
+    definitions:
+    - architectures:
+      - gfx1201
+      expression: 100*reduce(SQ_WAIT_INST_ANY,sum)/reduce(SQ_WAVE_CYCLES,sum)
+  - name: SQC_DCACHE_DUPLICATE_MISSES
+    description: gfx1201 SQ event 328.
+    properties: []
+    definitions:
+    - architectures:
+      - gfx1201
+      block: SQ
+      event: 328
+  - name: SQC_DCACHE_DUPLICATE_MISSES_sum
+    description: Per-dispatch sum of SQC_DCACHE_DUPLICATE_MISSES across hardware instances.
+    properties: []
+    definitions:
+    - architectures:
+      - gfx1201
+      expression: reduce(SQC_DCACHE_DUPLICATE_MISSES,sum)
   fw-restriction-schema-version: 1
   firmware_restrictions:
   - affected_architectures:
