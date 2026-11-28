@@ -1479,11 +1479,15 @@ static ncclResult_t ncclIbReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
     }
   }
 
-  // Flush QPs are created lazily on the first flush (see ncclIbCreateFlushQp), so
-  // here we only stash the remote-derived RTR inputs the loopback QP needs.
+  // Create the flush QPs here, right after the data QPs, not on the first flush. The
+  // ionic (AINIC) driver assigns new QPs to its two uDMA pipelines alternately, so the
+  // QP creation order decides the pipeline: with a flush QP after every receive QP,
+  // the send QPs of a ring alternate between the pipelines; without it they can all
+  // land on one pipeline, which then limits the send bandwidth of the NIC.
   if (rComm->flushEnabled) {
     rComm->flushQpSl = remMeta->sl;
     rComm->flushQpTc = remMeta->tc;
+    NCCLCHECK(ncclIbCreateFlushQp(rComm));
   }
 
   if (rComm->base.resiliency) {
@@ -1493,9 +1497,8 @@ static ncclResult_t ncclIbReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
   return ncclSuccess;
 }
 
-// Build the flush QP and its host buffer on the first flush. NCCL only issues a
-// network-read flush when the topology needs one, so connections that never flush
-// never allocate these resources.
+// Build the flush QP and its host buffer. ncclIbReceiverQpsCreateToRts calls this at
+// connection setup; later calls, such as the one on the first flush, are no-ops.
 ncclResult_t ncclIbCreateFlushQp(struct ncclIbRecvComm* comm) {
   if (comm->flushEnabled == 0 || comm->flushQpsCreated) return ncclSuccess;
 
@@ -1966,8 +1969,8 @@ ib_recv:
     ibDev = ncclIbDevs + rCommDev->base.ibDevN;
 
     // Allocate Flush dummy buffer for GPU Direct RDMA. The flush QP itself and its host
-    // scratch MR are created lazily by ncclIbCreateFlushQp() on the first flush, but the
-    // RCCL relaxed-ordering scratchpad is registered here while the DMA-BUF/peermem
+    // scratch MR are created by ncclIbCreateFlushQp() in ncclIbReceiverQpsCreateToRts(),
+    // and the RCCL relaxed-ordering scratchpad is registered here while the DMA-BUF/peermem
     // decision for this accept is still available.
     if (rComm->flushEnabled) {
       bool gpuFlushRegistered = false;
