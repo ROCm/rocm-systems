@@ -4,8 +4,6 @@
 
 .. _using-pc-sampling:
 
-==================
-Using PC sampling
 *****************************
 Using PC sampling
 *****************************
