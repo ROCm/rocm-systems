@@ -123,7 +123,7 @@ NCCL_DEVICE_INLINE ncclResult_t ncclLsaBarrierSession_internal<Coop>::waitIntern
     NVCC_PRAGMA_UNROLL_DISABLED
     for (int i = this->coop.thread_rank(); i < this->team.nRanks - 1; i += this->coop.size()) {
       int peer = i + (this->team.rank <= i ? 1 : 0);
-      cuda::atomic_ref<uint32_t> inbox(*this->ucInbox(this->team.rank, peer));
+      cuda::atomic_ref<uint32_t> inbox(*this->ucInboxSelf(peer));
       NVCC_PRAGMA_UNROLL_DISABLED
       while (true) {
         uint32_t got = inbox.load(nccl::utility::acquireOrderOf(order));
