@@ -353,9 +353,6 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipArray3DCreate_Negative_Non2DTextureGather, char, 
                    float2, float4) {
   CHECK_IMAGE_SUPPORT
 
-#if HT_AMD
-  HIP_SKIP_TEST(HipTest::SkipReason::kTextureGatherUnsupportedAmd);
-#endif
   using vec_info = vector_info<TestType>;
   DriverContext ctx;
 

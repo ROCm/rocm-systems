@@ -4,21 +4,23 @@
  * SPDX-License-Identifier: MIT
  */
 
-// Child of Unit_hipInit_Positive_NoQueuesAtInit. Counts the hardware queues this process creates,
-// by intercepting the KFD create-queue ioctl, and reports them as "key=value" pairs:
-//   init_queues  queues created by hipInit, hipGetDeviceCount and hipGetDeviceProperties of every
-//                device
-//   used_queues  queues created up to the end of a kernel on device 0
+// Child of Unit_hipInit_Positive_NoQueuesAtInit. Tracks hardware queue lifetimes by intercepting
+// the KFD create/destroy ioctls and reports them as "key=value" pairs:
+//   init_queues     queues retained after hipInit and device queries
+//   used_queues     queues created after those queries, through a kernel on device 0
+//   tracking_errors duplicate live IDs or unmatched successful destructions
 // Returns 0 when it could report, 1 on a HIP error (printed to stderr).
 
 #include <hip/hip_runtime.h>
 
 #include <dlfcn.h>
-#include <linux/ioctl.h>
+#include <linux/kfd_ioctl.h>
 
-#include <atomic>
+#include <cerrno>
 #include <cstdarg>
 #include <iostream>
+#include <mutex>
+#include <set>
 
 #define CHECK(call)                                                                                \
   do {                                                                                             \
@@ -31,12 +33,45 @@
 
 namespace {
 
-// AMDKFD_IOC_CREATE_QUEUE (linux/kfd_ioctl.h). Matched by type and number only: the size encoded in
-// the request grows with the args struct, which differs between kernel and ROCr headers.
+// Match by type and number only: the size encoded in a request grows with its args struct,
+// which differs between kernel and ROCr headers. The queue_id fields retain their offsets.
 constexpr unsigned kKfdIoctlType = 'K';
 constexpr unsigned kKfdIoctlCreateQueue = 0x02;
+constexpr unsigned kKfdIoctlDestroyQueue = 0x03;
 
-std::atomic<int> created_queues{0};
+struct QueueSnapshot {
+  size_t live;
+  size_t created;
+  size_t errors;
+};
+
+struct QueueTracker {
+  std::mutex mutex;
+  std::set<uint32_t> live_ids;
+  size_t created = 0;
+  size_t errors = 0;
+
+  void recordCreate(uint32_t id) {
+    ++created;
+    if (!live_ids.insert(id).second) ++errors;
+  }
+
+  void recordDestroy(uint32_t id) {
+    if (live_ids.erase(id) != 1) ++errors;
+  }
+
+  QueueSnapshot snapshot() {
+    std::lock_guard<std::mutex> lock(mutex);
+    return {live_ids.size(), created, errors};
+  }
+};
+
+QueueTracker& queueTracker() {
+  // Library destructors can destroy queues after main and after this executable's statics.
+  // Keep the interception state alive until process teardown.
+  static auto* const tracker = new QueueTracker;
+  return *tracker;
+}
 
 __global__ void emptyKernel() {}
 
@@ -48,12 +83,31 @@ extern "C" __attribute__((visibility("default"))) int ioctl(int fd, unsigned lon
   va_start(ap, request);
   void* arg = va_arg(ap, void*);
   va_end(ap);
-  using IoctlFn = int (*)(int, unsigned long, void*);
+  using IoctlFn = int (*)(int, unsigned long, ...);
   static const IoctlFn real = reinterpret_cast<IoctlFn>(dlsym(RTLD_NEXT, "ioctl"));
-  const int ret = real(fd, request, arg);
-  if (ret == 0 && _IOC_TYPE(request) == kKfdIoctlType && _IOC_NR(request) == kKfdIoctlCreateQueue) {
-    ++created_queues;
+  if (real == nullptr) {
+    errno = ENOSYS;
+    return -1;
   }
+  const bool create = _IOC_NR(request) == kKfdIoctlCreateQueue;
+  const bool destroy = _IOC_NR(request) == kKfdIoctlDestroyQueue;
+  if (_IOC_TYPE(request) != kKfdIoctlType || (!create && !destroy)) {
+    return real(fd, request, arg);
+  }
+
+  auto& tracker = queueTracker();
+  // Keep native operations and their observations in the same order, including queue-ID reuse.
+  std::lock_guard<std::mutex> lock(tracker.mutex);
+  const int ret = real(fd, request, arg);
+  const int saved_errno = errno;
+  if (ret == 0) {
+    if (create) {
+      tracker.recordCreate(static_cast<kfd_ioctl_create_queue_args*>(arg)->queue_id);
+    } else {
+      tracker.recordDestroy(static_cast<kfd_ioctl_destroy_queue_args*>(arg)->queue_id);
+    }
+  }
+  errno = saved_errno;
   return ret;
 }
 
@@ -65,13 +119,16 @@ int main() {
     hipDeviceProp_t props;
     CHECK(hipGetDeviceProperties(&props, i));
   }
-  const int init_queues = created_queues;
+  const QueueSnapshot initialized = queueTracker().snapshot();
 
   CHECK(hipSetDevice(0));
   emptyKernel<<<1, 1>>>();
   CHECK(hipGetLastError());
   CHECK(hipDeviceSynchronize());
 
-  std::cout << "init_queues=" << init_queues << " used_queues=" << created_queues << std::endl;
+  const QueueSnapshot used = queueTracker().snapshot();
+  std::cout << "init_queues=" << initialized.live
+            << " used_queues=" << used.created - initialized.created
+            << " tracking_errors=" << used.errors << std::endl;
   return 0;
 }
