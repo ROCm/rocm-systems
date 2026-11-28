@@ -4646,6 +4646,17 @@ static ncclResult_t commDestroySync(struct ncclAsyncJob* job_) {
       INFO(NCCL_DESTROY, "commDestroySync: comm 0x%" PRIx64 " rank %d sync deviceStream error %d", comm->commHash,
            comm->rank, ret);
     }
+    // hostStream/deviceStream do not cover addon work on the user stream. With
+    // RCCL_ADDON_DONE_EVENT_ORDERING=1, doneEvent (synced in DDA IPC teardown) does.
+    // With =0 that record is skipped, so destroy/abort need a device-wide sync here.
+    if (rcclParamAddonDoneEventOrdering() == 0) {
+      cudaError_t syncErr = hipDeviceSynchronize();
+      if (syncErr != cudaSuccess) {
+        INFO(NCCL_DESTROY, "commDestroySync: comm 0x%" PRIx64 " rank %d device sync error %s", comm->commHash,
+             comm->rank, cudaGetErrorString(syncErr));
+        if (ret == ncclSuccess) ret = ncclUnhandledCudaError;
+      }
+    }
 
     int aborting = COMPILER_ATOMIC_LOAD(comm->abortFlag, std::memory_order_acquire) != 0;
     if (aborting) {

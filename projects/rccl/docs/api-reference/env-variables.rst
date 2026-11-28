@@ -1368,6 +1368,26 @@ application adds explicit synchronization between streams.
       - | ``0``: Disabled (default).
         | ``1``: Enabled. Operations execute in host launch order.
 
+    * - | ``RCCL_ADDON_DONE_EVENT_ORDERING``
+        | Controls done event ordering for addon collectives that launch on the
+          user's stream through ``rcclAddonLaunch``, outside the native kernel
+          path: DDA, hierarchical, GIN SDMA, and Copy Engine 2-shot AllReduce
+          and ReduceScatter. When enabled, a collective issued on a different
+          stream than the communicator's previous one waits for the previous
+          collective to finish, and each such addon collective records the
+          communicator's done event. When disabled, both are skipped and the
+          application must order collectives across streams itself, including
+          a native collective that follows an addon one on another stream.
+          Collectives on the native enqueue path, including Copy Engine
+          collectives launched by ``ncclLaunchCeColl``, are unaffected and
+          still wait on and record the done event. With ``0``, destroy and
+          abort no longer rely on the done event to cover in-flight addon work
+          on the user's stream; they perform a device-wide sync instead. Graph
+          capture ordering
+          (``NCCL_GRAPH_STREAM_ORDERING``) is unaffected.
+      - | ``1``: Enabled (default).
+        | ``0``: Disabled.
+
 Inspector profiling
 ===================
 

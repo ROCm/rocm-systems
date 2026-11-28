@@ -6756,6 +6756,34 @@ TEST_F(InitMicrotest, CommDestroySync_StreamSyncFails_WarnsAndStillStopsProxy) {
   EXPECT_EQ(1, proxyStop.calls);
 }
 
+TEST_F(InitMicrotest, CommDestroySync_AddonDoneEventOrderingOff_DeviceSyncsBeforeCloseMappings) {
+  Teardown_LifecycleComm c(/*cudaDev=*/3);
+  Teardown_AllowStreamCaptureExchange();
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deft) -> int64_t {
+    if (env && std::strcmp(env, "RCCL_ADDON_DONE_EVENT_ORDERING") == 0) return 0;
+    return deft;
+  });
+  std::vector<std::string> callOrder;
+  ScopedHook deviceSync(g_hipDeviceSynchronize, [&]() {
+    callOrder.push_back("deviceSync");
+    return hipSuccess;
+  });
+  ScopedHook closeMappings(g_ncclDdaIpcCommClosePeerMappings, [&](ncclComm*) {
+    callOrder.push_back("closeMappings");
+    return ncclSuccess;
+  });
+  ScopedHook collTrace(g_collTraceDestroy, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
+
+  EXPECT_EQ(ncclSuccess, Teardown_RunDestroySync(c.get()));
+  auto syncIt = std::find(callOrder.begin(), callOrder.end(), "deviceSync");
+  auto closeIt = std::find(callOrder.begin(), callOrder.end(), "closeMappings");
+  ASSERT_NE(syncIt, callOrder.end());
+  ASSERT_NE(closeIt, callOrder.end());
+  EXPECT_LT(syncIt, closeIt);
+  EXPECT_EQ(1, proxyStop.calls);
+}
+
 TEST_F(InitMicrotest, CommDestroySync_ProxyStopFails_WarnsAndReturnsThatError) {
   Teardown_LifecycleComm c;
   Teardown_AllowStreamCaptureExchange();
