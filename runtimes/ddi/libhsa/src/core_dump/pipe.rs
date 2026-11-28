@@ -618,8 +618,11 @@ mod tests {
         // This isolated test may reap its own failed bootstrap. Production
         // deliberately never falls back to numeric wait/signal without pidfd.
         let deadline = Instant::now() + Duration::from_secs(2);
-        // SAFETY: gettid takes no pointers and has no failure mode.
-        let children = format!("/proc/self/task/{}/children", unsafe { libc::gettid() });
+        // SAFETY: gettid takes no pointers and has no failure mode. The raw
+        // syscall also works on glibc versions without a gettid wrapper.
+        let children = format!("/proc/self/task/{}/children", unsafe {
+            libc::syscall(libc::SYS_gettid)
+        });
         loop {
             let mut status = 0;
             // SAFETY: Only this test's bootstrap can be a child of this process.
