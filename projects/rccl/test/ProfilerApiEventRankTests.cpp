@@ -6,12 +6,15 @@
 
 // ProfilerApiEventRank: group/collective/P2P API and kernel-launch event descriptors must carry
 // the rank of the communicator they were issued on, not rank 0 (NVIDIA/nccl#2300).
+// ProfilerBatchedBroadcast: a broadcast batched through the AllGatherV path keeps its profiler
+// activation mask and API event handles when it collapses into a regular collective task.
 
 #include <gtest/gtest.h>
 #include <rccl/rccl.h>
 #include <hip/hip_runtime.h>
 
 #include <atomic>
+#include <cstring>
 
 #include "common/ProcessIsolatedTestRunner.hpp"
 #include "nccl_common.h"
@@ -26,12 +29,22 @@ constexpr uint64_t kApiEvents =
 // the one that context was created for.
 std::atomic<uint64_t> seenOnNonZeroRank{0}, wrongRank{0};
 
+// Handed out for every Broadcast CollApi event, so a Broadcast Coll event can name its parent.
+int bcastCollApiHandle;
+std::atomic<int> bcastColl{0}, bcastCollWrongParent{0};
+
 ncclResult_t rankStartEvent(void* context, void** eHandle, ncclProfilerEventDescr_v7_t* eDescr) {
   const int rank = *static_cast<int*>(context);
   const uint64_t type = eDescr->type & kApiEvents;
   *eHandle = context;
   if (rank != 0) seenOnNonZeroRank |= type;
   if (eDescr->rank != rank) wrongRank |= type;
+  if (eDescr->type == ncclProfileCollApi && strcmp(eDescr->collApi.func, "Broadcast") == 0) {
+    *eHandle = &bcastCollApiHandle;
+  } else if (eDescr->type == ncclProfileColl && strcmp(eDescr->coll.func, "Broadcast") == 0) {
+    ++bcastColl;
+    if (eDescr->parentObj != &bcastCollApiHandle) ++bcastCollWrongParent;
+  }
   return ncclSuccess;
 }
 
@@ -44,7 +57,7 @@ extern "C" __attribute__((visibility("default"))) ncclProfiler_v7_t ncclProfiler
     "RankCheck",
     [](void** context, uint64_t, int* eActivationMask, const char*, int, int, int rank, ncclDebugLogger_t) {
       *context = new int(rank);
-      *eActivationMask = static_cast<int>(kApiEvents);
+      *eActivationMask = static_cast<int>(kApiEvents | ncclProfileColl);
       return ncclSuccess;
     },
     rankStartEvent, [](void*) { return ncclSuccess; },
@@ -93,6 +106,43 @@ TEST(ProfilerApiEventRank, ApiEventsCarryCommRank) {
     ASSERT_EQ(seenOnNonZeroRank.load(), kApiEvents) << "API event types seen from rank 1 (bitmask)";
     EXPECT_EQ(wrongRank.load(), 0u) << "API event types reported with the wrong rank (bitmask)";
   }, {{"NCCL_PROFILER_PLUGIN", "STATIC_PLUGIN"}});
+}
+
+// NCCL_ALLGATHERV_ENABLE=1 queues each broadcast in the batched path; with one root it becomes a
+// regular Broadcast task, which must still emit its Coll event under the broadcast's CollApi event.
+// NCCL_ALGO keeps rcclSelectBroadcast from taking a DDA path that bypasses the enqueue.
+TEST(ProfilerBatchedBroadcast, CollEventKeepsApiParent) {
+  RUN_ISOLATED_TEST_WITH_ENV("ProfilerBatchedBroadcast.CollEventKeepsApiParent", []() {
+    if (int n = 0; hipGetDeviceCount(&n) != hipSuccess || n < 2) GTEST_SKIP() << "requires at least 2 GPUs";
+    constexpr int kRanks = 2;
+    constexpr size_t kCount = 1024;
+    ncclComm_t comms[kRanks];
+    hipStream_t streams[kRanks];
+    float* bufs[kRanks];
+    ASSERT_EQ(ncclCommInitAll(comms, kRanks, nullptr), ncclSuccess);
+    for (int r = 0; r < kRanks; ++r) {
+      ASSERT_EQ(hipSetDevice(r), hipSuccess);
+      ASSERT_EQ(hipStreamCreate(&streams[r]), hipSuccess);
+      ASSERT_EQ(hipMalloc(&bufs[r], kCount * sizeof(float)), hipSuccess);
+      ASSERT_EQ(hipMemset(bufs[r], 0, kCount * sizeof(float)), hipSuccess);
+    }
+    ASSERT_EQ(ncclGroupStart(), ncclSuccess);
+    for (int r = 0; r < kRanks; ++r) {
+      ASSERT_EQ(ncclBroadcast(bufs[r], bufs[r], kCount, ncclFloat, /*root=*/0, comms[r], streams[r]), ncclSuccess);
+    }
+    ASSERT_EQ(ncclGroupEnd(), ncclSuccess);
+    for (int r = 0; r < kRanks; ++r) {
+      ASSERT_EQ(hipStreamSynchronize(streams[r]), hipSuccess);
+    }
+    for (int r = 0; r < kRanks; ++r) {
+      ASSERT_EQ(ncclCommDestroy(comms[r]), ncclSuccess);
+      ASSERT_EQ(hipStreamDestroy(streams[r]), hipSuccess);
+      ASSERT_EQ(hipFree(bufs[r]), hipSuccess);
+    }
+
+    EXPECT_EQ(bcastColl.load(), kRanks) << "Broadcast Coll events (one per rank expected)";
+    EXPECT_EQ(bcastCollWrongParent.load(), 0) << "Broadcast Coll events not parented to the Broadcast CollApi event";
+  }, {{"NCCL_PROFILER_PLUGIN", "STATIC_PLUGIN"}, {"NCCL_ALLGATHERV_ENABLE", "1"}, {"NCCL_ALGO", "Ring"}});
 }
 
 } // namespace RcclUnitTesting

@@ -1426,7 +1426,8 @@
         {"name": "CollImplInfo.AllGatherSymkNotReportedWhenCuMemDisabled", "description": "With cuMem disabled, rcclSymKGetInfo falls back to the real AllGather backend and never claims SYM", "test_filter": "CollImplInfo.AllGatherSymkNotReportedWhenCuMemDisabled"},
         {"name": "CollImplInfo.ReduceScatterMatchesDispatchLog", "description": "rcclGetCollImplInfo reports the ReduceScatter algo/proto/channels the dispatch log recorded, at every size", "test_filter": "CollImplInfo.ReduceScatterMatchesDispatchLog"},
         {"name": "CollImplInfo.ReduceScatterSymmetricMatchesDispatchLog", "description": "Same for ReduceScatter with buffers registered as symmetric windows (-R 2 path)", "test_filter": "CollImplInfo.ReduceScatterSymmetricMatchesDispatchLog"},
-        {"name": "CollImplInfo.ReduceScatterSymkNotReportedWhenCuMemDisabled", "description": "With cuMem disabled, rcclSymKGetInfo falls back to the real ReduceScatter backend and never claims SYM", "test_filter": "CollImplInfo.ReduceScatterSymkNotReportedWhenCuMemDisabled"}
+        {"name": "CollImplInfo.ReduceScatterSymkNotReportedWhenCuMemDisabled", "description": "With cuMem disabled, rcclSymKGetInfo falls back to the real ReduceScatter backend and never claims SYM", "test_filter": "CollImplInfo.ReduceScatterSymkNotReportedWhenCuMemDisabled"},
+        {"name": "ProfilerBatchedBroadcast.CollEventKeepsApiParent", "description": "A batched single-root broadcast keeps its profiler activation mask and CollApi parent when it becomes a Broadcast task", "test_filter": "ProfilerBatchedBroadcast.CollEventKeepsApiParent"}
       ]
     },
     "collimplinfo_symmetric_cumem": {
