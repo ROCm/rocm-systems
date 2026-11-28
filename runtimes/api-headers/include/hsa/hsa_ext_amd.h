@@ -2514,7 +2514,7 @@ typedef struct hsa_amd_memory_copy_rect_ptr_s {
  * LINEAR (default, single copy when num_entries == 0):
  *   src, src_agent  -- source pointer and agent
  *   dst, dst_agent  -- destination pointer and agent
- *   size            -- copy size in bytes
+ *   size            -- copy size in bytes, must be non-zero
  *   num_entries        -- 0
  *
  * LINEAR (multi-copy when num_entries > 0, one signal for all entries):
@@ -2529,7 +2529,8 @@ typedef struct hsa_amd_memory_copy_rect_ptr_s {
  *   src, src_agent    -- source pointer and agent (must be GPU)
  *   dst_list          -- caller-owned array of num_entries destination pointers
  *   dst_agent_list    -- caller-owned array of num_entries destination agents
- *   size              -- copy size in bytes (same for every destination)
+ *   size              -- copy size in bytes (same for every destination), must be
+ *                        non-zero
  *   num_entries          -- number of entries in dst_list / dst_agent_list (>= 1, <= 65536)
  *
  * LINEAR_SWAP (exchange contents of two buffers, multi-entry when num_entries > 0):
