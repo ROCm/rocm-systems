@@ -40,11 +40,19 @@ path, which points to the shared `uapi/linux/drm` location.
 It is copied verbatim from the Linux revision above; refresh it from that
 upstream file so the per-queue reset and CAP2 definitions remain in sync.
 
-The HSA headers and Rust `ddi/libhsa` provider expose AMD extension revision
-1.39, including rectangular batches and managed SVM pointer classification.
-The loader 1.04 table includes caller-owned executable destinations, and the
-image table includes sampler v3. Builds inside this repository check the HSA
-mirrors against their primary files.
+The HSA headers expose AMD extension revision 1.40. The Rust `ddi/libhsa`
+provider still reports 1.39 and does not serve the agent broadcast destination
+ceiling added in 1.40; the two are expected to converge when the provider picks
+that attribute up. Both cover rectangular batches and managed SVM pointer
+classification. The loader 1.04 table includes caller-owned executable
+destinations, and the image table includes sampler v3.
+
+The HSA mirrors are compared against their primary files by the `ddi/libhsa`
+build script. Building that crate inside a checkout that also contains the
+runtime tree fails on any difference; the comparison is skipped when the
+primary directory is absent, as in a standalone source package. The
+`api-headers HSA mirror check` workflow checks out both directories and builds
+the crate whenever either side of the mirror changes.
 
 Signal batches are supported in fine-grained system pools and in qualified
 host-visible GPU pools. PCIe-backed GPU signal stores use a readback to flush

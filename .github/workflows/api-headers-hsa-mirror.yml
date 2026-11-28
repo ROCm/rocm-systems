@@ -1,0 +1,84 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+name: "api-headers HSA mirror check"
+
+# The headers under runtimes/api-headers/include/hsa are byte-for-byte mirrors
+# of the primary copies under projects/rocr-runtime/runtime/hsa-runtime/inc.
+#
+# The comparison itself already exists: the libhsa build script reads every
+# mirror, compares it against the primary of the same name, and fails the build
+# on any difference. Nothing reached it, for three independent reasons:
+#   1. libhsa is a member of the runtimes cargo workspace, and no workflow
+#      builds that workspace.
+#   2. The workflows that reference the mirrors trigger only on
+#      runtimes/api-headers, so editing a primary header - the change that
+#      actually produces the drift - started nothing.
+#   3. The build script returns success when the primary directory is absent,
+#      and those workflows omit the runtime tree from their sparse checkout, so
+#      the check would have compared nothing even if it had run.
+#
+# This job closes all three: it triggers on both sides of the mirror, checks out
+# both directories so the primary is present, and builds libhsa so the existing
+# check executes.
+
+on:
+  pull_request:
+    paths:
+      - "projects/rocr-runtime/runtime/hsa-runtime/inc/**"
+      - "runtimes/api-headers/include/hsa/**"
+      - ".github/workflows/api-headers-hsa-mirror.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "projects/rocr-runtime/runtime/hsa-runtime/inc/**"
+      - "runtimes/api-headers/include/hsa/**"
+      - ".github/workflows/api-headers-hsa-mirror.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  hsa-mirror-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          # Both sides of the mirror are required. The runtimes tree carries the
+          # crate and its path dependencies; the inc directory is the primary
+          # the build script compares against.
+          sparse-checkout: |
+            runtimes
+            projects/rocr-runtime/runtime/hsa-runtime/inc
+            .github/workflows
+          persist-credentials: false
+
+      - name: Confirm the primary header directory is present
+        shell: bash
+        # A missing primary directory is treated by the build script as nothing
+        # to compare, and it returns success. Without this guard, a sparse
+        # checkout that stopped fetching the runtime tree would turn the job
+        # into a silent pass rather than a failure.
+        run: test -d projects/rocr-runtime/runtime/hsa-runtime/inc
+
+      - name: Install Rust
+        shell: bash
+        # Matches the channel pinned by runtimes/rust-toolchain.toml so the
+        # toolchain file does not trigger a second download.
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
+            sh -s -- -y --profile minimal --default-toolchain 1.98.0
+          echo "${HOME}/.cargo/bin" >> "${GITHUB_PATH}"
+
+      - name: Compare each HSA mirror against its primary
+        working-directory: runtimes
+        shell: bash
+        # Building the crate runs its build script, which performs the
+        # comparison. A check build is enough to execute it and avoids
+        # codegen for the whole dependency graph.
+        run: cargo check --locked -p libhsa
