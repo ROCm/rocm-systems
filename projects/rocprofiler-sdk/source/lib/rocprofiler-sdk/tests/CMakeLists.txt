@@ -30,6 +30,7 @@ set(rocprofiler_lib_sources
     contexts.cpp
     enum_string.cpp
     hsa.cpp
+    internal_threading.cpp
     kernel_dispatch_pipe_id.cpp
     late_start.cpp
     naming.cpp

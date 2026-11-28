@@ -32,6 +32,8 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/internal_threading.h>
 
+#include <PTL/Types.hh>
+
 #include <pthread.h>
 
 #include <atomic>
@@ -267,6 +269,24 @@ get_task_groups()
     return _v;
 }
 
+// The child handler builds thread pools, which takes both of these locks. Holding them across
+// fork() keeps the child from inheriting them locked by a thread that does not exist there. Nested
+// use takes the notifier lock first, so lock in that order. An atfork child handler that needs
+// either lock must be registered after this one: it runs while the forking thread still holds them.
+void
+lock_for_fork()
+{
+    get_creation_notifier<ROCPROFILER_LIBRARY>().mutex.lock();
+    PTL::TypeMutex<PTL::ThreadPool>().lock();
+}
+
+void
+unlock_after_fork()
+{
+    PTL::TypeMutex<PTL::ThreadPool>().unlock();
+    get_creation_notifier<ROCPROFILER_LIBRARY>().mutex.unlock();
+}
+
 void
 create_forked_callback_threads()
 {
@@ -275,6 +295,9 @@ create_forked_callback_threads()
     // stale. First statement so no third atfork registration can reorder ahead of
     // it. Release pairs with fork_stale()/the destructor guard's acquire.
     g_fork_generation.fetch_add(1, std::memory_order_release);
+
+    // Taken by this thread in lock_for_fork(); it is the only thread in the child.
+    unlock_after_fork();
 
     if(get_task_groups())
     {
@@ -306,7 +329,7 @@ initialize()
         create_callback_thread();
         ::atexit(&registration::finalize);
         // ensure the callback threads are created on the forked process
-        ::pthread_atfork(nullptr, nullptr, create_forked_callback_threads);
+        ::pthread_atfork(lock_for_fork, unlock_after_fork, create_forked_callback_threads);
     });
 }
 
