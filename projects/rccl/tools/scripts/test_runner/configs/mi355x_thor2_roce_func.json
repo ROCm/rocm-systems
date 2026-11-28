@@ -2109,6 +2109,11 @@
           "name": "CollTraceUtils.getSizeMb",
           "description": "CollTrace utils get size MB",
           "test_filter": "CollTraceUtilsTest.getSizeMbTest"
+        },
+        {
+          "name": "ProfilerV8Timestamp.HostApiEventsCarryNcclStampedCpuClock",
+          "description": "Verify a v8 profiler plugin that selects CLOCK_MONOTONIC gets host API events stamped by RCCL on that clock",
+          "test_filter": "ProfilerV8Timestamp.HostApiEventsCarryNcclStampedCpuClock"
         }
       ]
     },

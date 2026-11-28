@@ -324,6 +324,7 @@ if(BUILD_TESTS)
     NetPluginReloadTests.cpp
     GinPluginInitFailTests.cpp
     plugin/net_reload_plugin.cpp
+    ProfilerV8TimestampTests.cpp
     ProfilerPluginCloseTests.cpp
     InspectorRingDropTests.cpp
     ProfilerApiEventRankTests.cpp
@@ -388,6 +389,16 @@ if(BUILD_TESTS)
   # keeps it linkable here but out of .dynsym, as rccl-UnitTestsFixturesDebug does below.
   target_compile_options(rccl-UnitTests PRIVATE
     -fvisibility=hidden -fvisibility-inlines-hidden)
+
+  # ProfilerV8TimestampTests: a working plugin that exports ncclProfiler_v8 only, so it has to be
+  # loaded by path like the stub rather than through STATIC_PLUGIN, where the v7 test plugins live.
+  add_library(rccl-test-profiler-v8 SHARED plugin/profiler_v8_stamp_plugin.cpp)
+  add_dependencies(rccl-UnitTests rccl-test-profiler-v8)
+  target_compile_definitions(rccl-UnitTests PRIVATE
+    RCCL_TEST_PROFILER_V8_NAME="$<TARGET_FILE_NAME:rccl-test-profiler-v8>")
+  install(TARGETS rccl-test-profiler-v8
+    LIBRARY DESTINATION ${CMAKE_INSTALL_BINDIR}
+    COMPONENT tests)
 
   # A real shared library, unlike the net plugin above: ProfilerPluginCloseTests checks
   # that RCCL unloads an external profiler plugin, so it needs a separately loadable
