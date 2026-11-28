@@ -44,6 +44,8 @@
 #define HSA_RUNTME_CORE_INC_IPC_SIGNAL_H_
 
 #include <atomic>
+#include <array>
+#include <map>
 #include <utility>
 
 #include "core/inc/signal.h"
@@ -101,14 +103,22 @@ class IPCSignal : private SharedMemorySignal, public BusyWaitSignal {
   }
 
  private:
+  using IPCHandleKey = std::array<uint64_t, 8>;
+
   static __forceinline int& rtti_id() {
     static int rtti_id_ = 0;
       return rtti_id_;
   }
   static std::mutex lock_;
+  static std::map<IPCHandleKey, IPCSignal*> attachments_;
 
-  explicit IPCSignal(SharedMemorySignal&& abi_block)
-      : SharedMemorySignal(std::move(abi_block)), BusyWaitSignal(signal(), true) {}
+  IPCHandleKey ipc_handle_;
+
+  ~IPCSignal() override;
+
+  explicit IPCSignal(SharedMemorySignal&& abi_block, const IPCHandleKey& ipc_handle)
+      : SharedMemorySignal(std::move(abi_block)), BusyWaitSignal(signal(), true),
+        ipc_handle_(ipc_handle) {}
 
   DISALLOW_COPY_AND_ASSIGN(IPCSignal);
 };
