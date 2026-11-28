@@ -27,13 +27,23 @@ Set `PR_URL=https://github.com/ROCm/rocm-systems/pull/<PR_NUMBER>` from the firs
 gh pr view $PR_URL --json number,title,author,body,files,additions,deletions,state,baseRefName,headRefName,comments,reviews
 ```
 
-### 3. Fetch the Diff
+### 3. Set Up Worktree
+
+Check out the PR in its own worktree with the `amdsmi-using-git-worktrees` skill (`new-worktree.sh -p <PR_NUMBER>`). If `rocm-systems-pr<PR_NUMBER>` already exists, refresh it from there:
+
+```bash
+git fetch origin "pull/<PR_NUMBER>/head" && git checkout --detach FETCH_HEAD
+```
+
+Run every later step (build, tests, file reads) inside this worktree.
+
+### 4. Fetch the Diff
 
 ```bash
 gh pr diff $PR_URL
 ```
 
-### 4. Gather CI Evidence
+### 5. Gather CI Evidence
 
 Check for linked CI runs and fetch step-level data:
 
@@ -45,15 +55,15 @@ gh pr checks $PR_URL
 gh run view <RUN_ID> --json jobs
 ```
 
-Find a recent baseline run on `main` for comparison:
+Find a recent baseline run on `develop` for comparison:
 
 ```bash
-gh run list --branch main --workflow <WORKFLOW> --limit 1 --json databaseId,conclusion
+gh run list --branch develop --workflow <WORKFLOW> --limit 1 --json databaseId,conclusion
 ```
 
 Compare step timings and status between PR run and baseline. Pass this evidence to the test and performance subagents.
 
-### 5. Fetch Unresolved Comments
+### 6. Fetch Unresolved Comments
 
 ```bash
 gh pr view $PR_URL --json comments,reviews,reviewRequests
@@ -61,7 +71,7 @@ gh pr view $PR_URL --json comments,reviews,reviewRequests
 
 Extract unresolved review comments for the unresolved comments analysis.
 
-### 6. Dispatch Review
+### 7. Dispatch Review
 
 Invoke the **AMD-SMI Review Agent** with:
 
@@ -70,11 +80,12 @@ Invoke the **AMD-SMI Review Agent** with:
 - The review type(s) from `$ARGUMENTS` (or "comprehensive" if none)
 - CI evidence (test results, step timings, baseline comparison)
 - Unresolved comments
+- The worktree path so subagents build, test and read the PR's code
 
 The agent will dispatch to the appropriate subagent(s) and produce a formatted review.
 By default, comprehensive reviews include a rebuttal round (Round 2) with the skeptic subagent. If `fast` was specified, the rebuttal round is skipped.
 
-### 7. Report Results
+### 8. Report Results
 
 - Present the review inline
 - Summarize the overall assessment

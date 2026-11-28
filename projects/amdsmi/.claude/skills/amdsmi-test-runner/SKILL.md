@@ -87,12 +87,21 @@ pass/fail summary. It derives the project root, so run it from anywhere in the t
 Each suite's full output is in `<logdir>/<suite>.log`; the exit code is non-zero
 if any suite failed.
 
+## Root-Only Tests
+
+Set/reset tests (C++ `*ReadWrite*` cases, Python tests that call
+`amdsmi_set_*`/`amdsmi_reset_*`) need root and change GPU state. Ask the user
+before running them with `sudo`, and run only the tests that need root (e.g.
+`sudo ./amdsmitst --gtest_filter='*FanReadWrite*'`). If the user declines, list
+them under **Run as root (user)** with the exact `sudo` command for each.
+
 ## Output
 
 On success, report:
 - **C++ tests:** X passed, Y failed, Z skipped
 - **Python tests:** X passed, Y failed
 - **Any new test failures** compared to baseline
+- **Run as root (user):** the root-only tests and their commands
 
 On failure:
 - **Which suite failed** (C++ GTest, Python unit, CLI)

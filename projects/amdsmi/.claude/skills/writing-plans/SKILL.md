@@ -48,7 +48,7 @@ Every plan starts with:
 ```markdown
 # <Feature Name> Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL — use `executing-plans` (or the `amdsmi-development` agent's subagent dispatch) to implement task-by-task. Steps use checkbox (`- [ ]`) syntax.
+> **For agentic workers:** REQUIRED SUB-SKILL — use `executing-plans` (or the `AMD-SMI Development Agent`'s subagent dispatch) to implement task-by-task. Steps use checkbox (`- [ ]`) syntax.
 
 **Goal:** <one sentence>
 
@@ -132,7 +132,7 @@ After saving the plan, offer the user a choice:
 
 > Plan saved to `${TMPDIR:-/tmp}/amdsmi-agent-plans/<filename>.md`. Two execution options:
 >
-> 1. **Subagent-driven** (recommended for multi-task plans) — invoke the `amdsmi-development` agent or planning agent, fresh subagent per task with review between tasks
+> 1. **Subagent-driven** (recommended for multi-task plans) — invoke the `AMD-SMI Development Agent` or `AMD-SMI Planning Agent`, fresh subagent per task with review between tasks
 > 2. **Inline execution** — execute tasks in this session using the `executing-plans` skill, batched with checkpoints
 >
 > Which approach?

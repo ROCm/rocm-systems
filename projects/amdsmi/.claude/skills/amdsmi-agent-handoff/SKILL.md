@@ -39,11 +39,16 @@ Rules:
 
 ## Where the Doc Goes
 
-Write to the OS temp dir, **not** the workspace:
+Write to the OS temp dir, **not** the workspace. Create one file per handoff:
 
 ```bash
-HANDOFF="${TMPDIR:-/tmp}/amdsmi-handoff-$(date +%Y%m%d-%H%M%S).md"
+HANDOFF="$(mktemp "${TMPDIR:-/tmp}/amdsmi-handoff-$(date +%Y%m%d-%H%M%S)-<to>-<task>-XXXX.md")"
+echo "$HANDOFF"
+# e.g. amdsmi-handoff-20261028-143005-dev-fan-speed-a7Qz.md
 ```
+
+`mktemp` creates the file (owner-only), so write into it (`cat > "$HANDOFF"`).
+Reuse the echoed path in later commands — `$HANDOFF` is lost in a new shell.
 
 Pass the path to the receiver. Workspace stays clean (no stray handoff files in git).
 
@@ -102,6 +107,7 @@ BLOCKERS (if any):
 |---------|-----|
 | Pasting the plan/diff into the handoff | Reference it by path |
 | Writing the handoff into the workspace | Write to `${TMPDIR:-/tmp}` |
+| Reusing one handoff path for parallel dispatches | Run `mktemp` once per handoff |
 | Omitting the Out-of-scope list | Always state what NOT to touch |
 | Including tokens/passwords in Artifacts | Redact; reference the secret's location instead |
 | Restating a skill's steps | List it under Suggested Skills — the receiver loads it |

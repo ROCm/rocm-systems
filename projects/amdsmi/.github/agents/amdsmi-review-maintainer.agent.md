@@ -525,11 +525,12 @@ Prefer running a check to asserting it.
   reverse only the hunk under test.
 
   ```bash
-  git worktree add --detach "${TMPDIR:-/tmp}/amdsmi-agent-mutation" <head-sha>
-  cd "${TMPDIR:-/tmp}/amdsmi-agent-mutation"
+  WT=$(mktemp -d "${TMPDIR:-/tmp}/amdsmi-agent-mutation-XXXX")
+  git worktree add --detach "$WT" <head-sha>
+  cd "$WT"
   git diff origin/develop...<head-sha> -- projects/amdsmi ':!projects/amdsmi/tests' | git apply -R
   # after both runs:
-  git worktree remove --force "${TMPDIR:-/tmp}/amdsmi-agent-mutation"
+  git worktree remove --force "$WT"
   ```
 
 - **Overlap (BR4)** — List every open PR that touches `projects/amdsmi` (no

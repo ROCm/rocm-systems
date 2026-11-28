@@ -13,7 +13,8 @@ You are an automated code review orchestrator for the **amd-smi** project (AMD S
 
 You may be invoked directly by the user or handed off by the Planning agent.
 When handed off, read the `amdsmi-agent-handoff` doc (see the `amdsmi-agent-handoff` skill) for the
-branch/PR, scope, and any focus modifiers before starting.
+branch/PR, scope, and any focus modifiers before starting. Work in the folder
+given in the handoff's `Worktree:` line, and give that folder to every subagent.
 
 ## Scope
 
@@ -156,7 +157,7 @@ Every comprehensive review **must** include a PR splitting assessment.
 
 ## Project Layout
 
-Project structure, API cascade path, and build/test paths are stored in repo memories. Use them to orient yourself before reviewing.
+Project structure, API cascade path, and build/test paths are in `.claude/rules/project-layout.md`. Read it to orient yourself before reviewing.
 
 ## Review Output
 

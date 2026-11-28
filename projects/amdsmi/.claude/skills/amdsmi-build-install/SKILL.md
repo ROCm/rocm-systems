@@ -40,12 +40,17 @@ For multi-OS install validation, see the [amdsmi-packaging-test](../amdsmi-packa
 
 ## Build Commands
 
-All commands assume `$WORKSPACE` is the amd-smi workspace root (where `CMakeLists.txt` lives).
+All commands assume `$WORKSPACE` is the amd-smi workspace root (where `CMakeLists.txt` lives). Set it first:
+
+```bash
+WORKSPACE="$(git rev-parse --show-toplevel)"
+[[ -d "$WORKSPACE/projects/amdsmi" ]] && WORKSPACE="$WORKSPACE/projects/amdsmi"
+```
 
 ### Step 1: Clean
 
 ```bash
-cd "$WORKSPACE"
+cd "${WORKSPACE:?set WORKSPACE first (see Build Commands)}"
 sudo rm -rf esmi_ib_library esmi_ib_library_temp build
 ```
 
@@ -56,6 +61,7 @@ mkdir -p build && cd build
 cmake .. -DBUILD_TESTS=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo
 make -j "$(nproc)"
 make package
+cd "$WORKSPACE"
 ```
 
 ### Step 3: Uninstall Previous
@@ -107,15 +113,15 @@ If the installed version string doesn't match the version from `cmake_modules/ve
 For use in scripts or as a single terminal command:
 
 ```bash
-cd "$WORKSPACE" && \
+cd "${WORKSPACE:?set WORKSPACE first (see Build Commands)}" && \
 sudo rm -rf esmi_ib_library esmi_ib_library_temp build && \
 mkdir -p build && cd build && \
 cmake .. -DBUILD_TESTS=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo && \
 make -j "$(nproc)" && \
 make package && \
-sudo python3 -m pip uninstall -y amdsmi 2>/dev/null || true && \
-sudo dpkg --remove --force-depends amd-smi-lib-tests 2>/dev/null || true && \
-sudo dpkg --remove --force-depends amd-smi-lib 2>/dev/null || true && \
+{ sudo python3 -m pip uninstall -y amdsmi 2>/dev/null || true; } && \
+{ sudo dpkg --remove --force-depends amd-smi-lib-tests 2>/dev/null || true; } && \
+{ sudo dpkg --remove --force-depends amd-smi-lib 2>/dev/null || true; } && \
 sudo rm -f /usr/local/bin/amd-smi && \
 sudo dpkg -i amd-smi-lib*99999-local_amd64.deb && \
 sudo dpkg -i amd-smi-lib-tests*99999-local_amd64.deb && \

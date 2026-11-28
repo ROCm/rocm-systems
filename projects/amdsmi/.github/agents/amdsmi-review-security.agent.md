@@ -14,7 +14,7 @@ You review security for the amd-smi project. All security issues are **❌ BLOCK
 
 ## Project Layout
 
-Project structure and API cascade path are stored in repo memories.
+Project structure and API cascade path are in `.claude/rules/project-layout.md`. Read it before reviewing.
 
 ## Your Job
 

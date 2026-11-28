@@ -1,7 +1,7 @@
 ---
 name: amdsmi-review-docs
 description: "Documentation review subagent. Checks docs, comments, help text, docstrings. Use when: documentation review, docs check, help text."
-tools: read/readFile, search/textSearch, search/fileSearch, search/listDirectory
+tools: read/readFile, search/textSearch, search/fileSearch, search/listDirectory, execute/runInTerminal, execute/getTerminalOutput, execute/awaitTerminal
 model: "Claude Sonnet 5.5"
 user-invocable: false
 applyTo: "projects/amdsmi/**"
@@ -14,7 +14,7 @@ You review documentation, comments, help text, and docstrings for the amd-smi pr
 
 ## Project Layout
 
-Project structure and API cascade path are stored in repo memories.
+Project structure and API cascade path are in `.claude/rules/project-layout.md`. Read it before reviewing.
 
 ## Your Job
 

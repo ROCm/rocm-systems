@@ -44,7 +44,7 @@ WORKTREE="${WORKTREE_PARENT}/rocm-systems-pr${PR_NUM}"
 # Reuse existing worktree if already present
 if [[ -d "$WORKTREE" ]]; then
   cd "${WORKTREE}/projects/amdsmi"
-  git checkout "$BRANCH" 2>/dev/null && git pull origin "$BRANCH" --ff-only 2>/dev/null
+  git fetch origin "pull/${PR_NUM}/head" && git checkout --detach FETCH_HEAD
 else
   cd "$MAIN_CHECKOUT"
   git fetch origin "${BRANCH}:${BRANCH}" 2>/dev/null || git fetch origin "pull/${PR_NUM}/head:${BRANCH}"

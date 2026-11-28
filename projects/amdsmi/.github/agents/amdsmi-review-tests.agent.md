@@ -1,7 +1,7 @@
 ---
 name: amdsmi-review-tests
 description: "Test review subagent. Checks test coverage, quality, missing tests. Use when: test review, coverage check, test quality."
-tools: execute/runInTerminal, read/readFile, search/textSearch, search/fileSearch, search/listDirectory
+tools: execute/runInTerminal, execute/getTerminalOutput, execute/awaitTerminal, read/readFile, search/textSearch, search/fileSearch, search/listDirectory
 model: "Claude Sonnet 5.5"
 user-invocable: false
 applyTo: "projects/amdsmi/**"
@@ -25,7 +25,7 @@ warning is a false positive there. Doc/config-only changes auto-pass.
 
 ## Test Validation
 
-**C++ (amdsmitst):** The build subagent builds and installs first. To run GTest:
+**C++ (amdsmitst):** Run from the `build/` folder of the code under review. If it's missing (e.g. `no-build`), say tests were not run — don't report a failure. To run GTest:
 ```bash
 cd build/tests
 source ../../tests/amd_smi_test/amdsmitst.exclude
@@ -38,7 +38,7 @@ Parse output: any `[  FAILED  ]` → ❌ BLOCKING.
 
 ## Project Layout
 
-Project structure and test directories are stored in repo memories.
+Project structure and test directories are in `.claude/rules/project-layout.md`. Read it before reviewing.
 
 ## Your Job
 
