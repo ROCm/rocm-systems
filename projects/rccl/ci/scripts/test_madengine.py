@@ -41,6 +41,7 @@ import shlex
 import shutil
 import signal
 import stat
+import statistics
 import subprocess
 import sys
 import tempfile
@@ -82,6 +83,17 @@ _TFLOPS_METRICS = {"TFLOPS_per_gpu_avg"}
 # Applied to the candidate/baseline ratio of one same-node A/B pair.
 REGRESSION_THRESHOLD_TRAINING = 0.03  # 3%
 REGRESSION_THRESHOLD_INFERENCE = 0.05  # 5%
+
+# Training is scored on the median of its per-iteration throughput, not on
+# Megatron's running mean: a few iterations stalled by seconds move the mean
+# by several percent while every other iteration runs at full speed (FP8
+# 70B, run 45125244674: mean -5.3%, median +0.2%, same RCCL in both phases).
+# A slowdown that hits every iteration moves the median as much as the mean.
+# Fewer measured iterations than this and the median is no better than the
+# mean; the row is scored on the mean instead.
+MIN_GATE_ITERATIONS = 5
+# An iteration this much slower than the phase's fast end counts as stalled.
+STALL_FACTOR = 1.03
 
 BASELINE = "baseline"
 CANDIDATE = "candidate"
@@ -2490,6 +2502,54 @@ def parse_live_log_metrics(work_dir: Path) -> list[dict]:
     return runs
 
 
+# The first number of each pair is the iteration's own, the second the mean.
+_ITER_TPS_RE = re.compile(
+    r"iteration\s+\d+/\s*\d+"
+    r".*tokens per GPU \(tokens/s/GPU\):\s*(?P<tps>[\d.]+)/[\d.]+"
+)
+
+
+def parse_iteration_throughput(run_dir: Path) -> dict[str, list[float]]:
+    """Per-iteration tokens/s/GPU of each precision, from the phase's node logs.
+
+    Megatron prints the pair from iteration 3 on, the window its running mean
+    covers, and only on the last rank: each precision takes the node log that
+    has the most values. Logs without "Running: Model - Precision - Mode"
+    headers (MaxText) yield nothing.
+    """
+    best: dict[str, list[float]] = {}
+    for log_path in sorted((run_dir / "slurm_output").glob("*.out")):
+        found: dict[str, list[float]] = {}
+        precision = None
+        with open(log_path, errors="replace") as f:
+            for raw_line in f:
+                line = _ANSI_RE.sub("", raw_line)
+                hdr = _RUN_HEADER_RE.search(line)
+                if hdr:
+                    precision = hdr.group(2)
+                    found[precision] = []
+                    continue
+                m = _ITER_TPS_RE.search(line)
+                if m and precision:
+                    val = float(m.group("tps"))
+                    if _usable_metric(val):
+                        found[precision].append(val)
+        for prec, values in found.items():
+            if len(values) > len(best.get(prec, [])):
+                best[prec] = values
+    return best
+
+
+def iteration_stats(values: list[float]) -> dict:
+    """Median and stalled-iteration count of one run's per-iteration throughput."""
+    fast = statistics.quantiles(values, n=10, method="inclusive")[-1]
+    return {
+        "median": statistics.median(values),
+        "iterations": len(values),
+        "stalled": sum(1 for v in values if v * STALL_FACTOR < fast),
+    }
+
+
 _SWEEP_POINT_RE = re.compile(r"_(isl\d+_osl\d+_con\d+)$")
 
 
@@ -2610,6 +2670,16 @@ def collect_phase_results(
             log.info("Live-log result: %s = %.1f (completed=%s)",
                      run.get("precision"), val, run.get("completed"))
 
+    iterations = parse_iteration_throughput(run_dir)
+    for row in results:
+        values = iterations.get(row["precision"] or "", [])
+        if len(values) < MIN_GATE_ITERATIONS:
+            continue
+        row["iteration_values"] = values
+        row.update(iteration_stats(values))
+        log.info("Iterations: %s median %.1f over %d, %d stalled",
+                 row["precision"], row["median"], row["iterations"], row["stalled"])
+
     return results
 
 
@@ -2617,9 +2687,11 @@ def check_ab_regression(
     baseline: float,
     candidate: float,
     workload_type: str,
+    metric: str = "",
 ) -> tuple[bool, str]:
     """Score the candidate against the baseline measured on the same nodes.
 
+    *metric* names what the two values are, for the message.
     Returns (is_regression, message).
     """
     if baseline <= 0:
@@ -2631,8 +2703,9 @@ def check_ab_regression(
         else REGRESSION_THRESHOLD_INFERENCE
     )
     ratio = candidate / baseline
+    label = f" ({metric})" if metric else ""
     msg = (
-        f"candidate {candidate:.1f} vs baseline {baseline:.1f} = "
+        f"candidate {candidate:.1f} vs baseline {baseline:.1f}{label} = "
         f"{ratio:.4f} ({ratio - 1:+.1%}), threshold: -{threshold:.0%}"
     )
 
@@ -2807,6 +2880,10 @@ def pair_by_precision(
 
     A precision missing from a phase, or *expected* but absent from both, keeps
     a row with None so the gate fails instead of skipping it.
+
+    ``ratio`` is what the gate scores: of the iteration medians (``metric`` is
+    "median") when both phases have them, else of ``metric_value``, the mean
+    (``metric`` is "avg"). ``ratio_avg`` is always of the mean.
     """
     comparisons: dict[str, dict] = {
         precision: {"precision": precision, BASELINE: None, CANDIDATE: None}
@@ -2823,11 +2900,19 @@ def pair_by_precision(
 
     for entry in comparisons.values():
         base, cand = entry[BASELINE], entry[CANDIDATE]
-        entry["ratio"] = None
-        if base and cand:
-            base_val, cand_val = base.get("metric_value"), cand.get("metric_value")
-            if base_val and cand_val:
-                entry["ratio"] = cand_val / base_val
+        entry.update(ratio=None, ratio_avg=None, metric="avg", gate_values=None)
+        if not (base and cand):
+            continue
+        base_val, cand_val = base.get("metric_value"), cand.get("metric_value")
+        if base_val and cand_val:
+            entry["ratio_avg"] = cand_val / base_val
+            entry["ratio"] = entry["ratio_avg"]
+            entry["gate_values"] = (base_val, cand_val)
+        # Both sides on the same statistic, or neither.
+        if base.get("median") and cand.get("median"):
+            base_val, cand_val = base["median"], cand["median"]
+            entry.update(ratio=cand_val / base_val, metric="median",
+                         gate_values=(base_val, cand_val))
 
     return [comparisons[p] for p in sorted(comparisons)]
 
@@ -2856,7 +2941,7 @@ def score_comparisons(
             failed = True
             continue
         reg, msg = check_ab_regression(
-            base["metric_value"], cand["metric_value"], workload_type,
+            *c["gate_values"], workload_type, metric=c["metric"],
         )
         msgs.append(f"[{prec}] {msg}")
         if reg:
@@ -2880,6 +2965,11 @@ def _format_phase(row: dict | None) -> str:
         return "no metric"
     tflops = row.get("tflops_avg")
     suffix = f" ({tflops:.1f} TFLOP/s/GPU)" if tflops else ""
+    median = row.get("median")
+    if median:
+        return (f"median {median:.1f}, mean {val:.1f}{suffix}, "
+                f"{row['stalled']}/{row['iterations']} iterations stalled "
+                f"[{row['status']}]")
     return f"{val:.1f}{suffix} [{row['status']}]"
 
 
@@ -2933,6 +3023,10 @@ def generate_summary_report(
         for c in comparisons:
             ratio = c.get("ratio")
             ratio_s = f"{ratio:.4f} ({ratio - 1:+.1%})" if ratio else "N/A"
+            ratio_avg = c.get("ratio_avg")
+            if c.get("metric") == "median" and ratio_avg:
+                ratio_s += (" of the iteration medians;"
+                            f" of the means {ratio_avg:.4f} ({ratio_avg - 1:+.1%})")
             lines.append(f"{c['precision'] or '?':>5}:  ratio {ratio_s}")
             lines.append(f"        baseline  {_format_phase(c[BASELINE])}")
             lines.append(f"        candidate {_format_phase(c[CANDIDATE])}")
@@ -3437,9 +3531,17 @@ def main() -> None:
                 row = c[phase]
                 if row is None:
                     continue
-                phase_extra = {**extra, "phase": phase, "image": images[phase]}
+                # metric_value stays the mean, as in earlier records; the
+                # median, the per-iteration values and the mean ratio sit
+                # beside it, and "ratio" is what the gate scored.
+                phase_extra = {**extra, "phase": phase, "image": images[phase],
+                               "gate_metric": c["metric"]}
+                for key in ("median", "iterations", "stalled", "iteration_values"):
+                    if key in row:
+                        phase_extra[key] = row[key]
                 if phase == CANDIDATE and c["ratio"] is not None:
                     phase_extra["ratio"] = c["ratio"]
+                    phase_extra["ratio_avg"] = c["ratio_avg"]
                 append_result(
                     results_dir,
                     args.workload,
