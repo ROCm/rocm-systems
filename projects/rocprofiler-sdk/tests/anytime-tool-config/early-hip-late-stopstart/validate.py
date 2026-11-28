@@ -38,6 +38,8 @@ KERNEL_DISPATCH over the same streams. The proof of per-client context independe
 import sys
 import pytest
 
+PER_PHASE = 4 * 5  # NUM_STREAMS * PHASE_ITERS
+
 
 def _sdk(data):
     assert "rocprofiler-sdk-json-tool" in data
@@ -75,44 +77,43 @@ def test_exact_dispatch_counts(tool_a_data, tool_b_data):
       Tool B (registers after warm-up, stopped during phase B) captures neither the memsets
           nor warm-up, and drops phase B: only phases A and C: 2*20 = 40.
     """
-    per_phase = 4 * 5  # NUM_STREAMS * PHASE_ITERS
-    a_expected = 4 + 4 * per_phase  # 4 stream-init memsets + all four phases = 84
-    b_expected = 2 * per_phase  # phases A + C only = 40
+    a_expected = 4 + 4 * PER_PHASE  # 4 stream-init memsets + all four phases = 84
+    b_expected = 2 * PER_PHASE  # phases A + C only = 40
     a = len(_dispatch_starts(tool_a_data))
     b = len(_dispatch_starts(tool_b_data))
     assert a == a_expected, f"Tool A should capture {a_expected} dispatches, got {a}"
     assert b == b_expected, f"Tool B should capture {b_expected} dispatches, got {b}"
 
 
-def _largest_gap_window(starts):
-    """Return (gap_start, gap_end, gap, median_gap) for the largest inter-dispatch gap."""
-    gaps = [(b - a, a, b) for a, b in zip(starts, starts[1:])]
-    gap, gstart, gend = max(gaps)
-    ordered = sorted(g for g, _, _ in gaps)
-    median = ordered[len(ordered) // 2]
-    return gstart, gend, gap, median
+def _stopped_window(starts):
+    """Return (gap_start, gap_end, gap, median_gap) for Tool B's stopped window.
+
+    Each phase ends with a synchronize, so B's first PER_PHASE dispatches are phase A and
+    the rest are phase C. The stopped window is the gap between them. It is often shorter
+    than a scheduling stall inside a phase, so it cannot be found as the largest gap.
+    """
+    assert len(starts) == 2 * PER_PHASE
+    gaps = sorted(b - a for a, b in zip(starts, starts[1:]))
+    gstart, gend = starts[PER_PHASE - 1], starts[PER_PHASE]
+    return gstart, gend, gend - gstart, gaps[len(gaps) // 2]
 
 
 def test_b_has_stopped_window_gap(tool_b_data):
-    """Tool B's missed work is one contiguous block: it has a single large internal gap."""
-    starts = _dispatch_starts(tool_b_data)
-    assert len(starts) >= 2
-    _, _, gap, median = _largest_gap_window(starts)
+    """Tool B's missed work is one contiguous block: a large gap between phases A and C."""
+    _, _, gap, median = _stopped_window(_dispatch_starts(tool_b_data))
     assert (
         gap > median * 5
     ), f"expected a large gap across the stopped window; gap={gap}, median={median}"
 
 
 def test_a_captured_what_b_dropped(tool_a_data, tool_b_data):
-    """The tool that was never stopped (A) captured dispatches inside B's stopped window."""
-    b_starts = _dispatch_starts(tool_b_data)
-    assert len(b_starts) >= 2
-    gap_start, gap_end, _, _ = _largest_gap_window(b_starts)
+    """The tool that was never stopped (A) captured every dispatch in B's stopped window."""
+    gap_start, gap_end, _, _ = _stopped_window(_dispatch_starts(tool_b_data))
 
     a_in_window = [t for t in _dispatch_starts(tool_a_data) if gap_start < t < gap_end]
-    assert len(a_in_window) > 0, (
-        "Tool A captured nothing inside Tool B's stopped window; expected A to record the "
-        f"work B dropped (window {gap_start}..{gap_end})"
+    assert len(a_in_window) == PER_PHASE, (
+        f"expected Tool A to record the {PER_PHASE} phase B dispatches that Tool B dropped, "
+        f"got {len(a_in_window)} inside Tool B's stopped window ({gap_start}..{gap_end})"
     )
 
 
