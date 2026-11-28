@@ -278,3 +278,147 @@ TEST_F(EnqueueMicrotest, ScheduleP2p_ReservesExactlyOneWorkItemForTheNextRound) 
     EXPECT_EQ(4 * work, sc.bp.p()->workBytes);
   }
 }
+
+// ===========================================================================
+// isolateP2pCollTasks / scheduleP2pTasksToPlan -- with P2P batching on, a
+// collective's tasks never share a round with explicit send/recv, and the
+// collectives of one group still share a plan once the explicit ops drained.
+// ===========================================================================
+
+namespace {
+struct TwoCollectivesScene {
+  static constexpr int kRanks = 4;
+
+  BatchPlanComm bp{/*nNodes=*/1, /*cudaArch=*/942};
+  std::unique_ptr<ncclTopoSystem> topo{new ncclTopoSystem{}};
+  std::vector<ncclComm::P2pSchedulePair> rounds = std::vector<ncclComm::P2pSchedulePair>(kRanks);
+  std::vector<ncclKernelPlanner::Peer> plannerPeers = std::vector<ncclKernelPlanner::Peer>(kRanks);
+  std::vector<ncclChannelPeer> channelPeers = std::vector<ncclChannelPeer>(kRanks);
+  std::vector<ncclChannelPeer*> peerSlots = std::vector<ncclChannelPeer*>(kRanks);
+  std::vector<ncclTaskP2p> tasks = std::vector<ncclTaskP2p>(4 * kRanks + 1);
+  std::vector<char> bufs = std::vector<char>(4 * kRanks + 1);
+  ncclTaskP2p* explicitSend = nullptr;
+
+  // An AlltoAll (collOpCount 1) then a secondApi collective (collOpCount 2); withExplicitSend
+  // adds an ncclSend to peer 1.
+  explicit TwoCollectivesScene(bool withExplicitSend, ncclFunc_t secondApi = ncclFuncAlltoAll) {
+    InstallSendRecvDevFuncIds();
+    ncclComm* c = bp.c();
+    c->rank = 0;
+    c->nRanks = kRanks;
+    c->p2pnChannels = kRanks;
+    c->p2pnChannelsPerPeer = 1;
+    c->p2pChannelShiftSize = 0;
+    c->p2pChunkSize = 512 << 10;
+    c->buffSizes[NCCL_PROTO_SIMPLE] = 4 << 20;
+    SetSingleGpuArch(topo.get(), "gfx942");
+    c->topo = topo.get();
+    for (int round = 0; round < kRanks; ++round) {
+      rounds[round].sendRank = round;
+      rounds[round].recvRank = (kRanks - round) % kRanks;
+    }
+    c->p2pSchedule = rounds.data();
+    c->planner.peers = plannerPeers.data();
+    for (int peer = 0; peer < kRanks; ++peer) peerSlots[peer] = &channelPeers[peer];
+    for (int ch = 0; ch < kRanks; ++ch) c->channels[ch].peers = peerSlots.data();
+
+    int next = 0;
+    for (int coll = 1; coll <= 2; ++coll) {
+      for (int peer = 0; peer < kRanks; ++peer) {
+        for (bool isSend : {true, false}) {
+          ncclTaskP2p* t = &tasks[next];
+          t->func = isSend ? ncclFuncSend : ncclFuncRecv;
+          t->collAPI = coll == 1 ? ncclFuncAlltoAll : secondApi;
+          t->collOpCount = coll;
+          t->bytes = 4096;
+          t->maxCTAs = MAXCHANNELS;
+          t->root = peer;
+          t->buff = &bufs[next++];
+          ncclIntruQueueEnqueue(isSend ? &plannerPeers[peer].sendQueue : &plannerPeers[peer].recvQueue, t);
+        }
+      }
+    }
+    c->planner.nTasksP2p = 4 * kRanks;
+    c->planner.p2pCollOpCount = 2;
+    if (withExplicitSend) {
+      explicitSend = &tasks[next];
+      explicitSend->func = ncclFuncSend;
+      explicitSend->collAPI = ncclFuncSend;
+      explicitSend->collOpCount = 0;
+      explicitSend->bytes = 4096;
+      explicitSend->maxCTAs = MAXCHANNELS;
+      explicitSend->root = 1;
+      explicitSend->buff = &bufs[next];
+      ncclIntruQueueEnqueue(&plannerPeers[1].sendQueue, explicitSend);
+      c->planner.nTasksP2p += 1;
+    }
+  }
+
+  ncclResult_t schedule() {
+    ncclKernelPlanBudget budget = MakeBudget(ssize_t(1) << 30, ssize_t(1) << 30);
+    int epoch = 0, round = 0;
+    return scheduleP2pTasksToPlan(bp.c(), &epoch, &round, bp.p(), &budget);
+  }
+};
+}  // namespace
+
+TEST_F(EnqueueMicrotest, IsolateP2pCollTasks_BatchingOn_KeepsExplicitSendOutOfCollectiveRounds) {
+  TwoCollectivesScene sc(/*withExplicitSend=*/true);
+  SetParam("RCCL_P2P_BATCH_ENABLE", 1);
+  isolateP2pCollTasks(sc.bp.c());
+  // Only the explicit send stays in the peer queues; every collective task waits in its own queue.
+  EXPECT_EQ(sc.explicitSend, ncclIntruQueueHead(&sc.plannerPeers[1].sendQueue));
+  EXPECT_EQ(nullptr, sc.explicitSend->next);
+  for (int peer = 0; peer < TwoCollectivesScene::kRanks; ++peer) {
+    EXPECT_TRUE(ncclIntruQueueEmpty(&sc.plannerPeers[peer].recvQueue)) << "peer " << peer;
+    if (peer != 1) EXPECT_TRUE(ncclIntruQueueEmpty(&sc.plannerPeers[peer].sendQueue)) << "peer " << peer;
+  }
+  EXPECT_EQ(4 * TwoCollectivesScene::kRanks, sc.bp.c()->planner.p2pCollTaskQueue.nElems);
+}
+
+TEST_F(EnqueueMicrotest, IsolateP2pCollTasks_BatchingOff_LeavesTheQueuesAlone) {
+  TwoCollectivesScene sc(/*withExplicitSend=*/true);
+  SetParam("RCCL_P2P_BATCH_ENABLE", 0);
+  isolateP2pCollTasks(sc.bp.c());
+  EXPECT_EQ(0, sc.bp.c()->planner.p2pCollTaskQueue.nElems);
+  EXPECT_NE(sc.explicitSend, ncclIntruQueueHead(&sc.plannerPeers[1].sendQueue)) << "the collective send stays first";
+}
+
+TEST_F(EnqueueMicrotest, ScheduleP2p_BatchIsolatedCollectives_ShareOnePlan) {
+  // Isolation that comes only from batching keeps grouped collectives in one plan.
+  TwoCollectivesScene sc(/*withExplicitSend=*/false);
+  SetParam("RCCL_P2P_BATCH_ENABLE", 1);
+  isolateP2pCollTasks(sc.bp.c());
+  ASSERT_EQ(ncclSuccess, sc.schedule());
+  EXPECT_EQ(0, sc.bp.c()->planner.nTasksP2p) << "both AlltoAlls must land in the first plan";
+}
+
+TEST_F(EnqueueMicrotest, ScheduleP2p_BatchIsolatedCollectivesOfOneLayout_ShareOnePlan) {
+  TwoCollectivesScene sc(/*withExplicitSend=*/false, ncclFuncReduceScatter);
+  SetParam("RCCL_P2P_BATCH_ENABLE", 1);
+  isolateP2pCollTasks(sc.bp.c());
+  ASSERT_EQ(ncclSuccess, sc.schedule());
+  EXPECT_EQ(0, sc.bp.c()->planner.nTasksP2p) << "AlltoAll and direct ReduceScatter share the batched layout";
+}
+
+TEST_F(EnqueueMicrotest, ScheduleP2p_BatchIsolatedCollectivesOfMixedLayouts_SplitPlans) {
+  // A Gather takes the unbatched layout; sharing a round with an AlltoAll would give the two ends
+  // of one Gather transfer different channel bases.
+  for (ncclFunc_t unbatched : {ncclFuncGather, ncclFuncScatter}) {
+    TwoCollectivesScene sc(/*withExplicitSend=*/false, unbatched);
+    SetParam("RCCL_P2P_BATCH_ENABLE", 1);
+    isolateP2pCollTasks(sc.bp.c());
+    ASSERT_EQ(ncclSuccess, sc.schedule());
+    EXPECT_EQ(2 * TwoCollectivesScene::kRanks, sc.bp.c()->planner.nTasksP2p)
+      << "collAPI " << int(unbatched) << " must wait for the next plan";
+  }
+}
+
+TEST_F(EnqueueMicrotest, ScheduleP2p_MaxCtasIsolation_StillGivesEachCollectiveItsOwnPlan) {
+  TwoCollectivesScene sc(/*withExplicitSend=*/false);
+  SetParam("RCCL_P2P_BATCH_ENABLE", 1);
+  sc.bp.c()->planner.p2pCollNeedsIsolation = true;
+  isolateP2pCollTasks(sc.bp.c());
+  ASSERT_EQ(ncclSuccess, sc.schedule());
+  EXPECT_EQ(2 * TwoCollectivesScene::kRanks, sc.bp.c()->planner.nTasksP2p) << "the second AlltoAll waits";
+}

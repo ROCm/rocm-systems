@@ -410,3 +410,37 @@ TEST_F(EnqueueMicrotest, P2pBatchEligible_UnsetThresholdOtherArchsKeepNodeScoped
   BatchComm gfx1250At8(/*nNodes=*/8, "gfx1250");
   EXPECT_TRUE(rcclP2pBatchEligible(gfx1250At8.get(), perPeer, perPeer));
 }
+
+TEST_F(EnqueueMicrotest, P2pBatchEligible_OnlyRankUniformTasksFuse) {
+  // The round's tasks decide too: only AlltoAll / direct AllGather / ReduceScatter tasks fuse,
+  // so ranks pairing explicit send/recv (alltoallv) never fuse rounds the peer does not.
+  constexpr ssize_t perPeer = 64 * 1024;
+  BatchComm bc(/*nNodes=*/4, "gfx950");
+  SetBatchParam(1);
+  ncclTaskP2p a2aSend{}, a2aRecv{}, agSend{}, rsRecv{}, send{}, recv{};
+  a2aSend.collAPI = ncclFuncAlltoAll;
+  a2aRecv.collAPI = ncclFuncAlltoAll;
+  agSend.collAPI = ncclFuncAllGather;
+  rsRecv.collAPI = ncclFuncReduceScatter;
+  send.collAPI = ncclFuncSend;
+  recv.collAPI = ncclFuncRecv;
+
+  ncclTaskP2p* a2a[2] = {&a2aRecv, &a2aSend};
+  ncclTaskP2p* recvOnly[2] = {&a2aRecv, nullptr};
+  ncclTaskP2p* direct[2] = {&rsRecv, &agSend};
+  EXPECT_TRUE(rcclP2pBatchEligible(bc.get(), a2a, perPeer, perPeer));
+  EXPECT_TRUE(rcclP2pBatchEligible(bc.get(), recvOnly, perPeer, perPeer));
+  EXPECT_TRUE(rcclP2pBatchEligible(bc.get(), direct, perPeer, perPeer));
+
+  ncclTaskP2p* sendRecv[2] = {&recv, &send};
+  ncclTaskP2p* mixed[2] = {&a2aRecv, &send};
+  ncclTaskP2p* none[2] = {nullptr, nullptr};
+  EXPECT_FALSE(rcclP2pBatchEligible(bc.get(), sendRecv, perPeer, perPeer));
+  EXPECT_FALSE(rcclP2pBatchEligible(bc.get(), mixed, perPeer, perPeer));
+  EXPECT_FALSE(rcclP2pBatchEligible(bc.get(), none, perPeer, perPeer));
+
+  // The size policy still applies on top.
+  EXPECT_FALSE(rcclP2pBatchEligible(bc.get(), a2a, perPeer, perPeer / 2));
+  SetBatchParam(0);
+  EXPECT_FALSE(rcclP2pBatchEligible(bc.get(), a2a, perPeer, perPeer));
+}

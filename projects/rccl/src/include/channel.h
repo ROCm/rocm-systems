@@ -67,6 +67,18 @@ inline bool rcclP2pBatchEligible(int enabled, ssize_t sendBytes, ssize_t recvByt
   return enabled && sendBytes == recvBytes && sendBytes <= threshold && recvBytes <= threshold;
 }
 
+// Fuse only collectives with rank-uniform per-peer sizes; otherwise ranks fuse different rounds
+// and mismatched proxy opCounts deadlock PXN receives.
+inline bool rcclP2pBatchApiUniform(ncclFunc_t collAPI) {
+  return collAPI == ncclFuncAlltoAll || collAPI == ncclFuncAllGather || collAPI == ncclFuncReduceScatter;
+}
+
+// Channel layout for a P2P task: the batched layout only for tasks that can fuse, so rounds that never
+// fuse keep their own channels, as with batching off. Both ends of a P2P op use the same collective.
+inline int rcclP2pTaskBatchLayout(int p2pBatchEnable, ncclFunc_t collAPI) {
+  return rcclP2pBatchApiUniform(collAPI) ? p2pBatchEnable : 0;
+}
+
 // Fusion size cutoff. A negative threshold, including an explicit
 // RCCL_P2P_BATCH_THRESHOLD=-1, means "arch default": the parameter default is
 // -1, and the wrapper passes that value through with no separate "was set" bit.
