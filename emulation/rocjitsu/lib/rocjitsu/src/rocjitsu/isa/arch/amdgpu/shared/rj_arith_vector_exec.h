@@ -27,9 +27,9 @@
 
 namespace rocjitsu::amdgpu::arith {
 
-// CDNA5 V_MOV_B16 e32 encodes each VGPR half in selector bit 7. Let rj-arith
-// select the halves directly so the two physical registers need resolving only
-// once. The ordinary operand path handles staged DPP sources and observation.
+// Packed VOP1 half moves encode the selected half in selector bit 7. Let rj-arith
+// select the halves directly so the two physical registers need resolving only once.
+// The ordinary operand path handles staged DPP sources and observation.
 inline bool try_move_packed_vgpr_half(Wavefront &wave, const Operand &destination,
                                       const Operand &source) {
   if (source.encoding_value() < 256 || source.encoding_value() > 511 || source.delegate() ||
