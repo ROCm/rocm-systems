@@ -1381,6 +1381,7 @@
         {"name": "Register.P2pIpcSegmentReuse", "description": "Verify a reused P2P IPC registration stays in bounds when the registered buffer spans multiple cuMem segments", "test_filter": "Register.P2pIpcSegmentReuse"},
         {"name": "SendRecv.SinglePairs", "description": "SendRecv single pairs", "test_filter": "SendRecv.SinglePairs"},
         {"name": "SendRecv.UserBufferRegister", "description": "SendRecv user buffer register", "test_filter": "SendRecv.UserBufferRegister"},
+        {"name": "SendRecv.LegacyLLExtendsPastPerChannelThreshold", "description": "Legacy LL extends past the per-channel P2P_LL_THRESHOLD when the payload fits one LL step (NCCL 2.32.6)", "test_filter": "SendRecv.LegacyLLExtendsPastPerChannelThreshold"},
         {"name": "SendRecv.SingleRankGroupedSendRecvToSelf", "description": "1-rank grouped send/recv to self, default env and forced 256 P2P channels per peer", "test_filter": "SendRecv.SingleRankGroupedSendRecvToSelf"},
         {"name": "GroupCall.Identical", "description": "GroupCall identical", "test_filter": "GroupCall.Identical"},
         {"name": "GroupCall.Different", "description": "GroupCall different", "test_filter": "GroupCall.Different"},
