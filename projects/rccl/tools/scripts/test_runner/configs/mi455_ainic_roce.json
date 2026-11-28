@@ -2078,6 +2078,11 @@
           "test_filter": "Register.P2pIpcSegmentReuse"
         },
         {
+          "name": "Register.CommRegisterHandleOutput",
+          "description": "ncclCommRegister rejects a NULL handle pointer and returns a NULL handle for a CPU-backed buffer (NCCL PR #2433)",
+          "test_filter": "Register.CommRegisterHandleOutput"
+        },
+        {
           "name": "SendRecv.SinglePairs",
           "description": "SendRecv single pairs",
           "test_filter": "SendRecv.SinglePairs"
@@ -2091,6 +2096,11 @@
           "name": "SendRecv.SingleRankGroupedSendRecvToSelf",
           "description": "1-rank grouped send/recv to self, default env and forced 256 P2P channels per peer",
           "test_filter": "SendRecv.SingleRankGroupedSendRecvToSelf"
+        },
+        {
+          "name": "P2pMaxCtas",
+          "description": "maxCTAs bounds P2P kernel grids (comm cap not a power of two, per-call Scatter/Gather cap)",
+          "test_filter": "P2pMaxCtas.*"
         },
         {
           "name": "GroupCall.Identical",
@@ -2121,6 +2131,16 @@
           "name": "NonBlocking.SingleCalls",
           "description": "NonBlocking single calls",
           "test_filter": "NonBlocking.SingleCalls"
+        },
+        {
+          "name": "NonBlocking.InvalidArgumentLeavesCommUsable",
+          "description": "NonBlocking comm stays usable after a call returns ncclInvalidArgument",
+          "test_filter": "NonBlocking.InvalidArgumentLeavesCommUsable"
+        },
+        {
+          "name": "NonBlocking.SingleRankLifecycle",
+          "description": "NonBlocking single-rank comm init, AllReduce, finalize and destroy",
+          "test_filter": "NonBlocking.SingleRankLifecycle"
         },
         {
           "name": "Standalone.SplitComms_RankCheck",

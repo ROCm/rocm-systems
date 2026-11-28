@@ -534,6 +534,23 @@ TEST_F(CostModelMicrotest, SymKernelEnvNarrowsSelectionToTheNamedKernel) {
   EXPECT_EQ(0, comm_->tuningContext.enabled[kRingSimple][ncclFuncAllReduce]);
 }
 
+TEST_F(CostModelMicrotest, EmptyEnvEntryIsRejectedNotDereferenced) {
+  // NVIDIA/nccl#2455: strtok_r() returns NULL for an entry made only of ':', and parseList()
+  // used that NULL as the element list, so NCCL_ALGO=":" killed init with SIGSEGV. Every
+  // variable and every separator-only shape goes through the same branch; each must come back
+  // as ncclInvalidUsage like any other malformed value.
+  const char* const vars[] = {"NCCL_ALGO", "NCCL_PROTO", "NCCL_SYM_KERNEL"};
+  const char* const values[] = {":", "::", ":;"};
+  for (const char* var : vars) {
+    for (const char* value : values) {
+      ResetEnvFakes();
+      SetMicroEnv(var, value);
+      comm_ = MakeComm();
+      EXPECT_EQ(ncclInvalidUsage, ncclTuningCostModelInit(comm_.get())) << var << "=\"" << value << "\"";
+    }
+  }
+}
+
 TEST_F(CostModelMicrotest, NoModelMapRowCarriesAFinalizeYet) {
   // No modelMap row carries a finalize, so the function is unobservable today; pin that so
   // adding one forces this test to grow a fake. The return is deliberately not asserted:

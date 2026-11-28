@@ -74,6 +74,7 @@ test_categories:
       - "CheapPostSendFenceTests.*"
       - "Gfx1250SendRecvLl128WindowTests.*"
       - "ProfilerOverhead.*"
+      - "ProfilerKernelChTiming.*"
       - "BitOpsTemplateAllIntTestsFixture.*"
       - "BitOpsTemplateUnsignedTestsFixture.*"
       - "PackRoundtripTest.*"
@@ -102,6 +103,7 @@ test_categories:
       - "RcclEpLayoutTest.*"
       - "DeviceApi.RejectedCreate*"
       - "GinDeviceTest.*"
+      - "GinBackendMaskDispatchTest.*"
     exclude_windows:
       - "*"
     labels:

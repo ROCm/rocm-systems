@@ -1829,6 +1829,44 @@ TEST_F(TopoProcessNetMicrotest, ProcessNet_InconsistentRailIsInvalidUsage) {
   EXPECT_TRUE(Logged("Inconsistent rail/plane for net a0: existing 7/"));
 }
 
+// NCCL 2.32.6 (0608f81e, a26f3d4a): a CollNet plugin and the net plugin both stamp the two-port NIC a0/a1. When
+// the second plugin reports the same port for both devices, a port-derived plane disagreed with the first
+// plugin's and init failed with "Inconsistent rail/plane"; the plane is now a1's index among its NIC's nets.
+TEST_F(TopoProcessNetMicrotest, ProcessNet_SecondPluginWithOtherPortsKeepsThePlane) {
+  Devs({"a0", "a1"});
+  g_netDevs[1].port = 2;
+  info_.net = false;
+  info_.coll = true;
+  ASSERT_EQ(ncclSuccess, Process());
+  std::string plane = Attr(Net("a1"), "plane");
+
+  g_netDevs[1].port = 1;  // the second plugin numbers its ports differently
+  info_.net = true;
+  info_.coll = false;
+  EXPECT_EQ(ncclSuccess, Process());
+
+  EXPECT_FALSE(Logged("Inconsistent rail/plane"));
+  EXPECT_EQ(plane, Attr(Net("a1"), "plane"));
+  EXPECT_NE(Attr(Net("a0"), "plane"), Attr(Net("a1"), "plane"));
+}
+
+// Control: the same two plugins reporting the same ports import consistently on every tree.
+TEST_F(TopoProcessNetMicrotest, ProcessNet_SecondPluginWithSamePortsKeepsThePlane) {
+  Devs({"a0", "a1"});
+  g_netDevs[1].port = 2;
+  info_.net = false;
+  info_.coll = true;
+  ASSERT_EQ(ncclSuccess, Process());
+  std::string plane = Attr(Net("a1"), "plane");
+
+  info_.net = true;
+  info_.coll = false;
+  EXPECT_EQ(ncclSuccess, Process());
+
+  EXPECT_FALSE(Logged("Inconsistent rail/plane"));
+  EXPECT_EQ(plane, Attr(Net("a1"), "plane"));
+}
+
 TEST_F(TopoProcessNetMicrotest, ProcessNet_CollPluginMarksCollAndKeepsNetUnlessSet) {
   Devs({"a0", "b0"});
   info_.net = false;
@@ -2456,6 +2494,46 @@ TEST_F(TopoGetSystemMicrotest, GetSystem_FailuresAreReturned) {
   TopoFile("<system version=\"3\"/>");
   EXPECT_EQ(ncclInvalidUsage, GetSystem());
   EXPECT_EQ(nullptr, system_);
+}
+
+// NCCL v2.32.6-1 (GitHub #2160, PR #2386): the fused XML was the rank's own NCCL_TOPO_XML_MAX_NODES buffer,
+// but subtrees whose attributes differ per rank do not dedup, so their union can outgrow it and init failed
+// with "too many XML nodes". Each local rank here contributes a 4510-node subtree tagged with its rank:
+// two of them fit their own gather slots but not one 8192-node buffer.
+TEST_F(TopoGetSystemMicrotest, GetSystem_FusesPerRankXmlsLargerThanOneBuffer) {
+  TopoFile(XgmiSystem(2, 1, true));
+  Ranks({getHostHash(), getHostHash()}, 0);
+  int grown = 0;
+  ScopedHook allGather(g_bootstrapIntraNodeAllGather,
+                       [&grown](void*, int*, int rank, int nranks, void* data, int size) {
+    // Copy this rank's XML to every slot before growing any, so each slot holds only its own subtree.
+    for (int r = 0; r < nranks; r++) {
+      if (r != rank) memcpy((char*)data + (size_t)r * size, (char*)data + (size_t)rank * size, size);
+    }
+    for (int r = 0; r < nranks; r++) {
+      ncclXml* x = (ncclXml*)((char*)data + (size_t)r * size);
+      NCCLCHECK(ncclTopoConvertXml(x, (uintptr_t)x->nodes, 0));
+      ncclXmlNode *top, *pad, *group, *leaf;
+      NCCLCHECK(xmlFindTag(x, "system", &top));
+      NCCLCHECK(xmlAddNode(x, top, "pad", &pad));
+      NCCLCHECK(xmlSetAttrInt(pad, "owner", r));
+      for (int g = 0; g < 9; g++) {
+        NCCLCHECK(xmlAddNode(x, pad, "pad", &group));
+        for (int l = 0; l < 500; l++) NCCLCHECK(xmlAddNode(x, group, "pad", &leaf));
+      }
+      NCCLCHECK(ncclTopoConvertXml(x, (uintptr_t)x->nodes, 1));
+      grown++;
+    }
+    return ncclSuccess;
+  });
+
+  ncclResult_t res = GetSystem();
+  ASSERT_EQ(2, grown);  // Both gathered XMLs fit their slots; only the fusion can run out of room.
+  ASSERT_EQ(ncclSuccess, res);
+
+  ASSERT_NE(nullptr, system_);
+  EXPECT_EQ(1, system_->nodes[GPU].count);
+  EXPECT_FALSE(Logged("too many XML nodes"));
 }
 
 // --- topo_expl models: each loads with the CPU class a live host with its CPUID would get.

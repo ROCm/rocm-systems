@@ -10,6 +10,9 @@
 #include <gtest/gtest.h>
 
 #include <cpuid.h>
+#include <dirent.h>
+#include <limits.h>
+#include <unistd.h>
 
 #include <map>
 #include <string>
@@ -354,6 +357,35 @@ TEST_F(XmlMicrotest, GetXmlGraphFromFile_WrongVersionIsInvalidUsage) {
   EXPECT_EQ(ncclInvalidUsage, ncclTopoGetXmlGraphFromFile(file.path(), xml_.get()));
 
   EXPECT_TRUE(Logged("XML Graph has wrong version 2, 1 needed"));
+}
+
+// Number of this process's descriptors open on `path`.
+int OpenFdsOn(const char* path) {
+  char target[PATH_MAX];
+  if (realpath(path, target) == nullptr) return -1;
+  int n = 0;
+  DIR* dir = opendir("/proc/self/fd");
+  if (dir == nullptr) return -1;
+  while (struct dirent* e = readdir(dir)) {
+    char link[PATH_MAX];
+    std::string fdPath = std::string("/proc/self/fd/") + e->d_name;
+    ssize_t len = readlink(fdPath.c_str(), link, sizeof(link) - 1);
+    if (len > 0 && std::string(link, len) == target) n++;
+  }
+  closedir(dir);
+  return n;
+}
+
+// NCCL 2.32.6 (3aaf66f3d40, a63cbabbb99): a file that fails to parse is closed before the error returns.
+TEST_F(XmlMicrotest, GetXmlFromFile_ParseFailureClosesTheFile) {
+  TempFile topo("<system version=\"2\"><cpu>");
+  TempFile graph("<graphs version=\"1\"><graph");
+  ASSERT_EQ(0, OpenFdsOn(topo.path()));
+
+  EXPECT_EQ(ncclInternalError, ncclTopoGetXmlFromFile(topo.path(), xml_.get(), 1));
+  EXPECT_EQ(0, OpenFdsOn(topo.path()));
+  EXPECT_NE(ncclSuccess, ncclTopoGetXmlGraphFromFile(graph.path(), xml_.get()));
+  EXPECT_EQ(0, OpenFdsOn(graph.path()));
 }
 
 // --- Trimming

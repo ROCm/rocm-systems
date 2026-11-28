@@ -1320,6 +1320,34 @@ TEST_F(DiagIbWriteBwMicrotest, Run_NonZeroRankMeasuresWithoutReporting) {
   EXPECT_EQ(gathers_, 5);
 }
 
+// Peer hostnames and devices arrive over the bootstrap and are pasted into a shell command line; a name that is
+// not a single plain argument must stop the check before any ib_write_bw command is built (NCCL v2.32.6-1).
+TEST_F(DiagIbWriteBwMicrotest, Run_UnsafePeerNameRunsNoCommand) {
+  const char* const hostile[] = {"nodeA0;touch /tmp/pwned", "$(reboot)", "`id`", "nodeA0 extra", "-oProxyCommand=x",
+                                 "nodeA0|sh", ""};
+  for (const char* name : hostile) {
+    for (bool device : {false, true}) {
+      SCOPED_TRACE(std::string(device ? "device=" : "hostname=") + name);
+      ResetPairScene(2);
+      if (device) {
+        std::snprintf(info_[0].device, sizeof(info_[0].device), "%s", name);
+      } else {
+        std::snprintf(info_[0].hostname, sizeof(info_[0].hostname), "%s", name);
+      }
+      inbox_[kReady] = {Bytes(true)};
+      inbox_[kSync] = {Bytes(97.44), Bytes(90.0)};
+      EXPECT_EQ(CaptureStdout([&] { Run(); }), "");
+      EXPECT_TRUE(clientCommands_.empty()) << clientCommands_.front();
+      EXPECT_TRUE(serverCommands_.empty()) << serverCommands_.front();
+      EXPECT_EQ(gathers_, 1);
+    }
+    const LocalInfo local = Info("me", "mlx5_1");
+    const LocalInfo server = Info(name, "mlx5_0");
+    char out[IB_BW_COMMAND_BYTES];
+    EXPECT_FALSE(buildCommand(out, sizeof(out), false, local, server, false, false, 5, 12345, 1)) << out;
+  }
+}
+
 TEST_F(DiagIbWriteBwMicrotest, Run_CrossNicAddsCrossSummaryAndIncompleteIsInfo) {
   BuildTwoNodePair(0);
   comm_->graphs[1].nChannels = 2;

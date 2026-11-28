@@ -877,6 +877,28 @@ TEST_F(RasPeersMicrotest, HandlePeersUpdateEchoesLocalStateWhenHashesStillDiffer
   EXPECT_EQ(0, ncclSocketsCompare(&g_enqueuedMsgs[0].msg->peersUpdate.peers[0].addr, &self));
 }
 
+// NCCL v2.32.6-1 (PR #2406): a peer can list itself among the dead peers.  rasDeadPeersUpdate() then
+// disconnects -- in the real code frees -- the very connection and socket the message arrived on, so
+// the handler must not touch either afterwards: no echo through it and no lastSent* writes into it.
+TEST_F(RasPeersMicrotest, HandlePeersUpdateFromSelfDeclaredDeadPeerLeavesItsConnectionAlone) {
+  const ncclSocketAddress self = MakeIpv4("10.0.0.1", 1);
+  const ncclSocketAddress sender = MakeIpv4("10.0.0.2", 2);
+  SetPeers({MakePeer(self, 1)}, 0);
+  rasConnection* conn = AddConnection(sender);
+  // A stale deadPeersHash makes the pre-merge path prepare an echo back to the sender.
+  auto msg = MakePeersUpdate({}, {sender}, rasPeersHash, 1234);
+
+  ASSERT_EQ(ncclSuccess, rasMsgHandlePeersUpdate(msg.get(), conn->sock));
+  EXPECT_EQ(1, nRasDeadPeers);
+  ASSERT_EQ(1u, g_disconnectedAddrs.size());
+  EXPECT_EQ(0, ncclSocketsCompare(&g_disconnectedAddrs[0], &sender));
+  for (const EnqueuedMsg& entry : g_enqueuedMsgs) {
+    EXPECT_NE(conn, entry.conn) << "peers update enqueued on the connection rasDeadPeersUpdate() terminated";
+  }
+  EXPECT_EQ(0u, conn->lastSentPeersHash) << "write into the terminated connection";
+  EXPECT_EQ(0u, conn->lastSentDeadPeersHash) << "write into the terminated connection";
+}
+
 TEST_F(RasPeersMicrotest, LinkCalculatePeerMovesByDirectionAndSkipsDeadPeers) {
   const rasPeerInfo a = MakePeer(MakeIpv4("10.0.0.1", 1), 1);
   const rasPeerInfo b = MakePeer(MakeIpv4("10.0.0.2", 1), 2);

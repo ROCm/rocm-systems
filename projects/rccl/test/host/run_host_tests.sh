@@ -247,6 +247,12 @@ do_makefile_depflags() {
   python3 "$RCCL_ROOT/test/test_makefile_depflags.py" -v
 }
 
+# Example-tuner optimizer guard (test/test_tuner_optimize_config.py, NCCL PR #2453).
+do_tuner_optimize_guards() {
+  echo "==> Tuner optimizer guards (unittest: test/test_tuner_optimize_config.py)"
+  python3 "$RCCL_ROOT/test/test_tuner_optimize_config.py" -v
+}
+
 # Run the device-table generator guard. It is plain unittest and needs only
 # python3. The suite is also registered with add_test() in test/CMakeLists.txt,
 # but nothing in RCCL CI runs `ctest`, so that registration never gates. Running
@@ -325,6 +331,7 @@ do_guards() {
   do_device_table_guards || rc=1
   do_kernel_count_guards || rc=1
   do_tuner_embed_guards || rc=1
+  do_tuner_optimize_guards || rc=1
   do_accl_report_guards || rc=1
   do_test_runner_guards || rc=1
   do_poison_hip_atomics || rc=1

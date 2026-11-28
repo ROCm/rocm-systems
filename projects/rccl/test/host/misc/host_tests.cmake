@@ -86,6 +86,15 @@ rccl_add_misc_micro_binary(rccl-UnitTestsMicroMiscArgcheck argcheck-test.cc)
 
 rccl_add_misc_micro_binary(rccl-UnitTestsMicroMiscCrypt crypt-test.cc)
 
+# Needs the OpenSSL 3 headers; libssl is dlopen'd at run time.
+find_path(RCCL_MICRO_OPENSSL_INCLUDE_DIR openssl/ssl.h)
+if(RCCL_MICRO_OPENSSL_INCLUDE_DIR)
+  rccl_add_misc_micro_binary(rccl-UnitTestsMicroMiscCryptTls crypt-tls-test.cc
+    EXTRA_DEFS NCCL_TLS_BACKEND_OPENSSL3=1)
+  target_include_directories(rccl-UnitTestsMicroMiscCryptTls PRIVATE ${RCCL_MICRO_OPENSSL_INCLUDE_DIR})
+  target_link_libraries(rccl-UnitTestsMicroMiscCryptTls PRIVATE ${CMAKE_DL_LIBS})
+endif()
+
 rccl_add_misc_micro_binary(rccl-UnitTestsMicroMiscDvsymbols dvsymbols-test.cc
   PROCESS_ISOLATED
   SOURCES

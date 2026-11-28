@@ -709,6 +709,28 @@ TEST_F(SymKernelMicrotest, SymkAvailable_SymmetricSupport_Available) {
   EXPECT_TRUE(ncclSymkAvailable(comm_.get(), ncclFuncAllGather, ncclDevSum, ncclFloat32, /*nElts=*/1024));
 }
 
+// NCCL v2.32.6 (GitHub #2447): generate.py emits avg (SumPostDiv) kernels only for ReduceScatter. Offering symk for
+// AllReduce avg leaves ncclSymkGetKernelIndex() at -1, and the launch failed with an unhandled HIP/CUDA error.
+// Every non-Genk kernel the mask keeps for a (red,ty) must have a generated kernel to launch.
+TEST_F(SymKernelMicrotest, SymkAvailable_AllReduceAvg_NotAvailable) {
+  comm_->symmetricSupport = true;
+  for (ncclDataType_t ty : {ncclFloat32, ncclFloat16, ncclBfloat16, ncclFloat8e4m3, ncclFloat8e5m2}) {
+    // In-test control: the fixture does offer symk for AllReduce sum and ReduceScatter avg.
+    ASSERT_TRUE(ncclSymkAvailable(comm_.get(), ncclFuncAllReduce, ncclDevSum, ty, /*nElts=*/1024)) << ty;
+    ASSERT_TRUE(ncclSymkAvailable(comm_.get(), ncclFuncReduceScatter, ncclDevSumPostDiv, ty, /*nElts=*/1024)) << ty;
+
+    EXPECT_FALSE(ncclSymkAvailable(comm_.get(), ncclFuncAllReduce, ncclDevSumPostDiv, ty, /*nElts=*/1024)) << ty;
+    ncclSymkKernelMask kmask = ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSumPostDiv, ty, /*nElts=*/1024);
+    for (int id = 0; id < ncclSymkKernelId_Count; id++) {
+      if (!KernelBitSet(kmask, (ncclSymkKernelId)id) || KernelBitSet(ncclGenkKernelMask(), (ncclSymkKernelId)id)) {
+        continue;
+      }
+      EXPECT_GE(ncclSymkGetKernelIndex((ncclSymkKernelId)id, ncclDevSumPostDiv, ty), 0)
+          << ncclSymkKernelIdToString(id) << " offered for AllReduce avg, ty " << ty;
+    }
+  }
+}
+
 // HIP builds no AlltoAll_LL kernel (it is inline PTX), so the symmetric path must never be offered for AlltoAll, even
 // once init has provisioned scratch and the mask would keep the kernel.
 TEST_F(SymKernelMicrotest, SymkImplemented_AlltoAll_NotImplementedOnHip) {

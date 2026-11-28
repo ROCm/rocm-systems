@@ -2792,6 +2792,28 @@ TEST_F(NetSendProxyConnectMicrotest, RemoteProxy_ZeroesShmControlWords) {
   EXPECT_EQ(r->recvMem->tail, 0u);
 }
 
+// NCCL 2.32.6 (rn-a00d56c784): a PXN proxy that asks for a device pointer to its legacy SHM bank makes
+// ncclShmOpen hipHostRegister it, which can block on a driver lock held by a thread waiting on that
+// proxy. The proxy touches the bank from the CPU only, so it must not ask for the device mapping.
+TEST_F(NetSendProxyConnectMicrotest, RemoteProxy_ShmBankNotRegisteredWithGpu) {
+  AddConn();
+  conns_[0].sameProcess = 0;
+  int devPtrRequests = 0;
+  ScopedHook shm(g_shmAllocateShareableBuffer, [&](size_t n, bool, void*, void** h, void** d) {
+    *h = Alloc(n);
+    if (d) {
+      devPtrRequests++;
+      *d = *h;  // keep the unfixed path running so it fails only on the oracle below
+    }
+    return ncclSuccess;
+  });
+
+  ASSERT_EQ(Connect(), ncclSuccess);
+
+  EXPECT_EQ(shm.calls, 1);
+  EXPECT_EQ(devPtrRequests, 0) << "the proxy requested a GPU mapping (hipHostRegister) of its legacy SHM bank";
+}
+
 TEST_F(NetSendProxyConnectMicrotest, SharedBuffers_UsesPoolAndWithholdsCredits) {
   sendNetResources* r = AddConn(/*shared=*/1);
 
@@ -5721,6 +5743,48 @@ TEST_F(NetRecvProgressMicrotest, Done_PluginWithoutConsumedHook_StillCompletes) 
 
   EXPECT_EQ(sub.done, 1u);
   EXPECT_EQ(sub.recvRequestsCache[0], nullptr);
+}
+
+// NCCL #2389: an LL op whose receive completes late must not erase the rendezvous flag
+// that the next registered op, landing on the same FIFO slot, has already published.
+TEST_F(NetRecvProgressMicrotest, Receive_LateLlCompletion_KeepsNextRegisteredOpsFlag) {
+  args_->protocol = NCCL_PROTO_LL;
+  ncclProxySubArgs& ll = AddSub(1);
+  net_.testDone = 0;
+  ASSERT_EQ(Progress(), ncclSuccess);  // the LL op posts; its completion stays unpolled
+  ASSERT_EQ(net_.irecvs.size(), 1u);
+
+  // A registered op NCCL_STEPS steps later shares the LL op's slot.
+  res_.step = ll.base + NCCL_STEPS;
+  std::vector<uint8_t> user(256);
+  FakeRingAlgo ring(2);
+  ring.buff = user.data();
+  ring.size = 256;
+  auto reg = std::make_unique<ncclProxyArgs>();
+  reg->state = ncclProxyOpReady;
+  reg->protocol = NCCL_PROTO_SIMPLE;
+  reg->sliceSteps = reg->chunkSteps = 1;
+  reg->collAPI = ncclFuncRecv;
+  reg->nPeers = reg->nChannels = 1;
+  ncclProxySubArgs& regSub = reg->subs[reg->nsubs++];
+  regSub.connection = &conn_;
+  regSub.nsteps = 1;
+  regSub.channelId = 1;
+  regSub.reg = 1;
+  regSub.ringAlgo = &ring;
+  ASSERT_EQ(recvProxyProgress(&proxyState_, reg.get()), ncclSuccess);
+  ASSERT_EQ(regSub.base % NCCL_STEPS, ll.base % NCCL_STEPS);
+  EXPECT_EQ(net_.irecvs.size(), 1u);  // gated: the kernel has not started
+
+  Fifo(regSub.base).size = 0;  // the kernel enters the registered op and publishes its flag
+  net_.testDone = 1;
+  ASSERT_EQ(Progress(), ncclSuccess);  // the proxy now polls the LL op's completion
+  ASSERT_EQ(ll.received, 1u);
+  EXPECT_EQ(Fifo(regSub.base).size, 0) << "the LL receive erased the registered op's flag";
+
+  ASSERT_EQ(recvProxyProgress(&proxyState_, reg.get()), ncclSuccess);
+  ASSERT_EQ(net_.irecvs.size(), 2u) << "the registered op never posts its receive: the ring hangs";
+  EXPECT_EQ(net_.irecvs[1].data[0], user.data());
 }
 
 TEST_F(NetRecvProgressMicrotest, TestFails_ReturnsError) {

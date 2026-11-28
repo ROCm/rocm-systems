@@ -15,10 +15,14 @@ namespace {
 constexpr int kRanks = 2;
 constexpr size_t kBytes = 1 << 20;
 std::atomic<int> kernelChStops{0}, kernelPhases{0};
+// KernelCh start pTimers (each event's handle points at its slot) and the longest stop - start seen.
+std::atomic<uint64_t> kernelChStarts[256], maxKernelChTicks{0};
+std::atomic<int> kernelChSlots{0};
 constexpr auto noop = [](void*) { return ncclSuccess; };
 
-// Two ranks in this process: issue(comm, buf, stream) per rank in one group, then check(comms) before teardown.
-template <typename Issue, typename Check> void runTwoRanks(Issue issue, Check check) {
+// Two ranks in this process: issue(comm, buf, stream, round) per rank in one group per round, then check(comms)
+// before teardown.
+template <typename Issue, typename Check> void runTwoRanks(Issue issue, Check check, int rounds = 1) {
   ncclComm_t comms[kRanks];
   hipStream_t streams[kRanks];
   char* bufs[kRanks];
@@ -28,14 +32,56 @@ template <typename Issue, typename Check> void runTwoRanks(Issue issue, Check ch
     ASSERT_EQ(hipStreamCreate(&streams[r]), hipSuccess);
     ASSERT_EQ(hipMalloc(&bufs[r], 4 * kBytes), hipSuccess);
   }
-  ASSERT_EQ(ncclGroupStart(), ncclSuccess);
-  for (int r = 0; r < kRanks; ++r) ASSERT_EQ(issue(comms[r], bufs[r], streams[r]), ncclSuccess);
-  ASSERT_EQ(ncclGroupEnd(), ncclSuccess);
-  for (int r = 0; r < kRanks; ++r) ASSERT_EQ(hipStreamSynchronize(streams[r]), hipSuccess);
+  for (int round = 0; round < rounds; ++round) {
+    ASSERT_EQ(ncclGroupStart(), ncclSuccess);
+    for (int r = 0; r < kRanks; ++r) ASSERT_EQ(issue(comms[r], bufs[r], streams[r], round), ncclSuccess);
+    ASSERT_EQ(ncclGroupEnd(), ncclSuccess);
+    for (int r = 0; r < kRanks; ++r) ASSERT_EQ(hipStreamSynchronize(streams[r]), hipSuccess);
+  }
   check(comms);
   for (int r = 0; r < kRanks; ++r) ASSERT_EQ(ncclCommDestroy(comms[r]), ncclSuccess);
   for (int r = 0; r < kRanks; ++r) ASSERT_EQ(hipStreamDestroy(streams[r]), hipSuccess);
   for (int r = 0; r < kRanks; ++r) ASSERT_EQ(hipFree(bufs[r]), hipSuccess);
+}
+
+// Wait until at least `atLeast` KernelCh stops have arrived and the count has settled.
+void waitForKernelChStops(int atLeast) {
+  for (int i = 0, last = -1, quiet = 0; i < 1000 && quiet < 20; ++i) {
+    usleep(10000);
+    const int now = kernelChStops;
+    quiet = (now >= atLeast && now == last) ? quiet + 1 : 0;
+    last = now;
+  }
+}
+
+__global__ void spinTicks(uint64_t ticks) {
+  for (const uint64_t t0 = wall_clock64(); wall_clock64() - t0 < ticks;) {}
+}
+
+// Round 0 connects the ranks; in round 1 rank 1's kernel queues behind a ~500 ms spin, so rank 0's recv waits for it.
+// rank0Sends adds rank 0 -> 1 traffic, putting thread 0 (which times the KernelCh stop) in send warps that finish early.
+void expectRank0KernelChSpansPeerDelay(bool rank0Sends) {
+  int rateKHz = 0;
+  ASSERT_EQ(hipDeviceGetAttribute(&rateKHz, hipDeviceAttributeWallClockRate, 0), hipSuccess);
+  const uint64_t delayTicks = uint64_t(rateKHz) * 500;
+  ASSERT_GT(delayTicks, 0u);
+  ASSERT_NO_FATAL_FAILURE(runTwoRanks([&](ncclComm_t comm, char* buf, hipStream_t stream, int round) {
+    int rank = 0, dev = 0;
+    ncclResult_t res = ncclCommUserRank(comm, &rank);
+    if (res == ncclSuccess) res = ncclCommCuDevice(comm, &dev);
+    if (res != ncclSuccess) return res;
+    if (rank == 1 && round == 1) {
+      if (hipSetDevice(dev) != hipSuccess) return ncclUnhandledCudaError;
+      hipLaunchKernelGGL(spinTicks, dim3(1), dim3(1), 0, stream, delayTicks);
+      if (hipGetLastError() != hipSuccess) return ncclUnhandledCudaError;
+    }
+    if (rank == 1 || rank0Sends) res = ncclSend(buf, 1024, ncclInt8, 1 - rank, comm, stream);
+    if (res == ncclSuccess && (rank == 0 || rank0Sends)) res = ncclRecv(buf + kBytes, 1024, ncclInt8, 1 - rank, comm, stream);
+    return res;
+  }, [](ncclComm_t*) { waitForKernelChStops(2 * kRanks); }, /*rounds=*/2));
+  ASSERT_GE(kernelChStops.load(), 2 * kRanks) << "KernelCh events missing";
+  EXPECT_GE(maxKernelChTicks.load(), delayTicks / 2)
+      << "no KernelCh event lasted while rank 0 waited ~" << delayTicks << " ticks for its peer";
 }
 } // namespace
 
@@ -51,10 +97,19 @@ extern "C" __attribute__((visibility("default"))) ncclProfiler_v7_t ncclProfiler
   [](void* context, void** eHandle, ncclProfilerEventDescr_v7_t* eDescr) { // startEvent
     *eHandle = context;
     if (eDescr->type == ncclProfileKernelPhase) ++kernelPhases;
+    if (eDescr->type == ncclProfileKernelCh) {
+      std::atomic<uint64_t>* start = &kernelChStarts[kernelChSlots++ % 256];
+      start->store(eDescr->kernelCh.pTimer);
+      *eHandle = start;
+    }
     return ncclSuccess;
   },
   noop, // stopEvent
-  [](void*, ncclProfilerEventState_v7_t eState, ncclProfilerEventStateArgs_v7_t*) { // recordEventState
+  [](void* eHandle, ncclProfilerEventState_v7_t eState, ncclProfilerEventStateArgs_v7_t* eStateArgs) { // recordEventState
+    if (eState == ncclProfilerKernelChStop && eHandle != &kernelChStops) {
+      const uint64_t ticks = eStateArgs->kernelCh.pTimer - static_cast<std::atomic<uint64_t>*>(eHandle)->load();
+      for (uint64_t m = maxKernelChTicks; ticks > m && !maxKernelChTicks.compare_exchange_weak(m, ticks);) {}
+    }
     if (eState == ncclProfilerKernelChStop) ++kernelChStops;
     return ncclSuccess;
   },
@@ -69,16 +124,9 @@ TEST(ProfilerOverhead, RegularKernelsEmitNoKernelPhase) {
   RUN_ISOLATED_TESTS(Config("ProfilerOverhead.RegularKernelsEmitNoKernelPhase", []() {
     // Wait before teardown: ncclCommDestroy drops pending events. Each channel's phase events precede its KernelCh
     // stop, but each comm drains on its own profiler thread, so wait until the stops have settled, not just begun.
-    ASSERT_NO_FATAL_FAILURE(runTwoRanks([](ncclComm_t comm, char* buf, hipStream_t stream) {
+    ASSERT_NO_FATAL_FAILURE(runTwoRanks([](ncclComm_t comm, char* buf, hipStream_t stream, int) {
       return ncclAllReduce(buf, buf, 1024, ncclFloat, ncclSum, comm, stream);
-    }, [](ncclComm_t*) {
-      for (int i = 0, last = -1, quiet = 0; i < 1000 && quiet < 20; ++i) {
-        usleep(10000);
-        const int now = kernelChStops;
-        quiet = (now >= kRanks && now == last) ? quiet + 1 : 0;
-        last = now;
-      }
-    }));
+    }, [](ncclComm_t*) { waitForKernelChStops(kRanks); }));
     ASSERT_GE(kernelChStops.load(), kRanks) << "KernelCh events missing, so KernelPhase events could be too";
     EXPECT_EQ(kernelPhases.load(), 0) << "KernelPhase events reported for a non-symmetric kernel";
   }).withEnvironment({{"NCCL_PROFILER_PLUGIN", "STATIC_PLUGIN"}}).withNumGpus(kRanks));
@@ -93,7 +141,7 @@ TEST(ProfilerOverhead, NoPluginBroadcastPublishesNoKernelCh) {
   using Config = ProcessIsolatedTestRunner::TestConfig;
   RUN_ISOLATED_TESTS(Config("ProfilerOverhead.NoPluginBroadcastPublishesNoKernelCh", []() {
     // Two roots in one group, so the broadcasts are batched as Bcast work (NCCL_ALLGATHERV_ENABLE).
-    ASSERT_NO_FATAL_FAILURE(runTwoRanks([](ncclComm_t comm, char* buf, hipStream_t stream) {
+    ASSERT_NO_FATAL_FAILURE(runTwoRanks([](ncclComm_t comm, char* buf, hipStream_t stream, int) {
       char* send = buf + (~reinterpret_cast<uintptr_t>(buf) & 0x8000);
       ncclResult_t res = ncclBroadcast(send, buf + 2 * kBytes, kBytes, ncclInt8, 0, comm, stream);
       return res != ncclSuccess ? res : ncclBroadcast(send, buf + 3 * kBytes, kBytes, ncclInt8, 1, comm, stream);
@@ -108,5 +156,24 @@ TEST(ProfilerOverhead, NoPluginBroadcastPublishesNoKernelCh) {
       EXPECT_EQ(published, 0u) << "KernelCh work-start counters published with no profiler plugin loaded";
     }));
   }).withEnvironment({{"NCCL_PROFILER_PLUGIN", "none"}, {"NCCL_ALLGATHERV_ENABLE", "1"}}).withNumGpus(kRanks));
+}
+
+// profiler(FINI) runs on thread 0 alone, so without a barrier it stamped the channel's KernelCh stop as soon as
+// thread 0's warps left the work, while the other warps were still receiving (NCCL PR #2473).
+TEST(ProfilerKernelChTiming, StopWaitsForAllWarps) {
+  if (int n = 0; hipGetDeviceCount(&n) != hipSuccess || n < kRanks) GTEST_SKIP() << "requires 2 GPUs";
+  using Config = ProcessIsolatedTestRunner::TestConfig;
+  RUN_ISOLATED_TESTS(Config("ProfilerKernelChTiming.StopWaitsForAllWarps", []() {
+    expectRank0KernelChSpansPeerDelay(/*rank0Sends=*/true);
+  }).withEnvironment({{"NCCL_PROFILER_PLUGIN", "STATIC_PLUGIN"}, {"NCCL_LAUNCH_MODE", "PARALLEL"}}).withNumGpus(kRanks));
+}
+
+// Control: rank 0 only receives, so thread 0 is among the waiting warps and the stop is late with or without the fix.
+TEST(ProfilerKernelChTiming, ControlRecvOnlySpansPeerDelay) {
+  if (int n = 0; hipGetDeviceCount(&n) != hipSuccess || n < kRanks) GTEST_SKIP() << "requires 2 GPUs";
+  using Config = ProcessIsolatedTestRunner::TestConfig;
+  RUN_ISOLATED_TESTS(Config("ProfilerKernelChTiming.ControlRecvOnlySpansPeerDelay", []() {
+    expectRank0KernelChSpansPeerDelay(/*rank0Sends=*/false);
+  }).withEnvironment({{"NCCL_PROFILER_PLUGIN", "STATIC_PLUGIN"}, {"NCCL_LAUNCH_MODE", "PARALLEL"}}).withNumGpus(kRanks));
 }
 } // namespace RcclUnitTesting

@@ -309,6 +309,7 @@ if(BUILD_TESTS)
     TeamTopologyTests.cpp
     UniqueIdHexTests.cpp
     P2pChannelScalingTests.cpp
+    P2pMaxCtasTests.cpp
     PipeUtilsTests.cpp
     VersionGateTests.cpp
     HipProbeTests.cpp

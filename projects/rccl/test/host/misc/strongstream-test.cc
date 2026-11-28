@@ -1079,6 +1079,18 @@ TEST_F(StrongstreamMicrotest, AdvanceToEvent_CapturedHipFailuresPropagate) {
   }
 }
 
+// NCCL 2.32.6 (6ef1eecdeb6): a failure after the scratch stream is created still destroys it.
+TEST_F(StrongstreamMicrotest, AdvanceToEvent_CapturedFailureDestroysTheScratchStream) {
+  for (const char* fn : {"hipStreamWaitEvent", "hipStreamGetCaptureInfo_v2", "hipStreamUpdateCaptureDependencies"}) {
+    SCOPED_TRACE(fn);
+    g_liveStreams.clear();
+    FailNext(fn);
+    EXPECT_EQ(ncclStreamAdvanceToEvent(Captured(1), kOrigin, nullptr), ncclUnhandledCudaError);
+    EXPECT_EQ(Count("hipStreamCreateWithFlags"), Count("hipStreamDestroy"));
+    EXPECT_TRUE(g_liveStreams.empty());
+  }
+}
+
 // `s` takes over the dependency set of `source` directly, without a scratch stream.
 TEST_F(StrongstreamMicrotest, AdvanceToStream_ReplacesTheFrontierWithTheSources) {
   const hipStream_t source = reinterpret_cast<hipStream_t>(0x999);
