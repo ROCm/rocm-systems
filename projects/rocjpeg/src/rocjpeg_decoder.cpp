@@ -294,11 +294,22 @@ RocJpegStatus RocJpegDecoder::Decode(RocJpegStreamHandle jpeg_stream_handle, con
         return ROCJPEG_STATUS_INVALID_PARAMETER;
     }
 
-    VASurfaceID current_surface_id;
-    CHECK_ROCJPEG(jpeg_vaapi_decoder_.SubmitDecode(&jpeg_stream_params, current_surface_id, decode_params));
+    // Stays VA_INVALID_SURFACE until SubmitDecode assigns a surface to it.
+    VASurfaceID current_surface_id = VA_INVALID_SURFACE;
+    RocJpegStatus rocjpeg_status = jpeg_vaapi_decoder_.SubmitDecode(&jpeg_stream_params, current_surface_id, decode_params);
+    if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
+        // Sync and release the surface SubmitDecode acquired before it failed, which may be in flight on the
+        // hardware, so its pool entry is not leaked.
+        if (current_surface_id != VA_INVALID_SURFACE) {
+            jpeg_vaapi_decoder_.SyncSurface(current_surface_id);
+            jpeg_vaapi_decoder_.SetSurfaceAsIdle(current_surface_id);
+        }
+        FunctionExitLog(g_rocjpeg_logger);
+        return rocjpeg_status;
+    }
 
     // A single image is just a batch of one. FinalizeDecodeBatched releases the surface even if it fails.
-    RocJpegStatus rocjpeg_status = FinalizeDecodeBatched(&current_surface_id, &jpeg_stream_params, decode_params, destination, 1);
+    rocjpeg_status = FinalizeDecodeBatched(&current_surface_id, &jpeg_stream_params, decode_params, destination, 1);
     FunctionExitLog(g_rocjpeg_logger);
     return rocjpeg_status;
 }
@@ -330,9 +341,17 @@ RocJpegStatus RocJpegDecoder::DecodeAsync(RocJpegStreamHandle jpeg_stream_handle
     AsyncDecodeState state;
     state.jpeg_stream_params = *jpeg_stream_params;
     state.decode_params = *decode_params;
+    // Stays VA_INVALID_SURFACE until SubmitDecode assigns a surface to it.
+    state.surface_id = VA_INVALID_SURFACE;
 
     RocJpegStatus rocjpeg_status = jpeg_vaapi_decoder_.SubmitDecode(&state.jpeg_stream_params, state.surface_id, &state.decode_params);
     if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
+        // Sync and release the surface SubmitDecode acquired before it failed, which may be in flight on the
+        // hardware, so its pool entry is not leaked.
+        if (state.surface_id != VA_INVALID_SURFACE) {
+            jpeg_vaapi_decoder_.SyncSurface(state.surface_id);
+            jpeg_vaapi_decoder_.SetSurfaceAsIdle(state.surface_id);
+        }
         FunctionExitLog(g_rocjpeg_logger);
         return rocjpeg_status;
     }
