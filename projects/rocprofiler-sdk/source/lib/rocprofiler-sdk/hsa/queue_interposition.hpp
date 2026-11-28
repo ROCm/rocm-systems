@@ -71,6 +71,9 @@ struct QueueState
     const hsa_queue_t* hsa_queue       = nullptr;  ///< HSA queue pointer for Queue* lookup
     hsa_signal_t       doorbell_signal = {0};      ///< The queue's doorbell signal
     std::mutex         gate_lock       = {};       ///< Lock for packet submission gating
+    /// Serializes bypass-phase write-index claims with their unflushed-shadow check. Leaf lock:
+    /// may be taken under gate_lock, never the reverse, and never held across a call out.
+    std::mutex claim_mu = {};
 
     /// Signal-less admission latch. Plain bool, guarded by gate_lock: set
     /// by the destroy path's close_admission_and_snapshot_locked() so no later batch can
@@ -285,6 +288,17 @@ notify_queue_interposition_consumer_context_started(const context::context* ctx)
 
 void
 notify_queue_interposition_consumer_context_stopped(const context::context* ctx);
+
+/// Internal (hidden-visibility) observer of wrapper root admission, for unit tests that pin a
+/// transition at the seal. No wrapper or transition path reads it.
+struct root_admission_snapshot_t
+{
+    bool     sealed         = false;
+    uint64_t admitted_roots = 0;
+};
+
+root_admission_snapshot_t
+get_root_admission_snapshot();
 
 /**
  * @brief Install interposition wrappers into the HSA core API table

@@ -85,7 +85,7 @@ These are known gaps, listed so they are not rediscovered:
   `hsa_init()`, so it needs ROCr even though it never dispatches; `counters/tests/hsa_tables.cpp`
   builds an API table out of the *real* `hsa_*` function pointers and deliberately leaves the
   intercept-registration entries unwired. The closest thing to a synthetic packet flow is
-  `source/lib/rocprofiler-sdk/tests/queue_interposition.cpp`, which drives ring buffers and
+  `source/lib/rocprofiler-sdk/tests/queue_interposition_test.cpp`, which drives ring buffers and
   doorbells with no device — but it exercises `process_doorbell_impl`, not `Queue::WriteInterceptor`,
   which is where replay lives.
 
