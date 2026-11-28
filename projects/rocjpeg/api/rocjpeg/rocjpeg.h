@@ -317,7 +317,9 @@ typedef struct {
     uint32_t min_height; /**< Minimum supported image height in pixels. */
     uint32_t max_width; /**< Maximum supported image width in pixels. */
     uint32_t max_height; /**< Maximum supported image height in pixels. */
-    uint32_t subsampling_mask; /**< Supported chroma subsamplings; each bit represents a RocJpegChromaSubsampling enum. */
+    uint32_t subsampling_mask; /**< Supported chroma subsamplings; each bit represents a RocJpegChromaSubsampling enum.
+                                    For ROCJPEG_CSS_440, only images whose luma (Y) sampling factors are 1x2 are
+                                    supported, not those with 2x2 luma sampling (see rocJpegGetImageInfo()). */
     uint32_t output_format_mask; /**< Output formats supported for every subsampling in subsampling_mask;
                                       each bit represents a RocJpegOutputFormat enum. */
     uint32_t hw_rgb_subsampling_mask; /**< Chroma subsamplings for which the output formats in hw_rgb_output_format_mask
@@ -374,6 +376,12 @@ RocJpegStatus ROCJPEGAPI rocJpegDestroy(RocJpegHandle handle);
  *
  * This function does not wait for decodes running on the same `handle`, so it can be called from another thread
  * while a decode is in progress, for example to prepare the next batch of images.
+ *
+ * An image whose luma (Y) sampling factors are 2x2 and whose chroma (Cb and Cr) sampling factors are 2x1
+ * (horizontal x vertical) is reported as ROCJPEG_CSS_440, with the chroma at full width and half height. This
+ * sampling layout is not supported by the decode functions: rocJpegDecode() and rocJpegDecodeAsync() return
+ * ROCJPEG_STATUS_JPEG_NOT_SUPPORTED for such an image, and rocJpegDecodeBatched() and rocJpegDecodeBatchedAsync()
+ * for a batch that contains one. 4:4:0 images whose luma sampling factors are 1x2 (Cb and Cr 1x1) are supported.
  *
  * @param handle The handle to the RocJpegDecoder instance.
  * @param jpeg_stream_handle The handle to the RocJpegStream instance representing the JPEG image.

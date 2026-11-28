@@ -433,22 +433,32 @@ RocJpegDecodeParams CropDecodeParams(const InvalidCropCase &crop_case) {
 }
 
 /**
- * @brief Builds a flat 4:2:0 JPEG of the given size from the color seed.
+ * @brief Builds a JPEG of the given size and sampling factors from the color seed, by default a flat 4:2:0 image.
  *
  * The 16x16 seed is below the minimum size the hardware decoder accepts, so tests that need a decode to be
  * submitted build a larger image from it the same way as the restart marker fixture of TestStreamParseFuzz: the
  * frame is widened to width x height, a DRI segment of one MCU is inserted ahead of the scan header, and the
- * scan repeats the seed's all-zero MCU once per 16x16 block with a restart marker between MCUs.
+ * scan repeats an all-zero MCU once per 16x16 block with a restart marker between MCUs.
+ *
+ * Any sampling factors with 2x2 luma keep the MCU at 16x16. The MCU is coded for them with the seed's Huffman
+ * tables, in which an all-zero luma block is 1 bit of DC plus 1 bit of EOB, and a chroma block, whose only DC symbol
+ * is category 3, is 1 bit of code plus 3 additional bits plus 1 bit of EOB. That is 18 bits for 4:2:0 and 28 for
+ * 4:4:0 with Cb and Cr at 2x1, padded to a byte boundary with 1 bits. Category 3 codes differences of 4 to 7, so
+ * where a chroma component has two blocks per MCU their DC values differ and the chroma is not flat.
  *
  * @param width The image width; a multiple of 16.
  * @param height The image height; a multiple of 16.
- * @return The stream, or an empty vector if the seed no longer carries parsable SOF and SOS segments.
+ * @param sampling_factors The Y, Cb, and Cr sampling factor bytes of the frame header (horizontal factor in the high
+ *        nibble); the Y factors must be 2x2.
+ * @return The stream, or an empty vector if the Y sampling factors are not 2x2 or the seed no longer carries parsable
+ *         SOF and SOS segments.
  */
-std::vector<uint8_t> FlatColorJpeg(uint16_t width, uint16_t height) {
+std::vector<uint8_t> FlatColorJpeg(uint16_t width, uint16_t height,
+                                   const std::array<uint8_t, 3> &sampling_factors = {0x22, 0x11, 0x11}) {
     const std::vector<uint8_t> &seed = ColorSeedJpeg();
     const size_t sof_offset = FindMarker(seed, 0xC0);
     const size_t sos_offset = FindMarker(seed, 0xDA);
-    if (sof_offset + 9 > seed.size() || sos_offset + 4 > seed.size()) {
+    if (sampling_factors[0] != 0x22 || sof_offset + 18 > seed.size() || sos_offset + 4 > seed.size()) {
         return {};
     }
     const size_t scan_start = sos_offset + 2 + ((static_cast<size_t>(seed[sos_offset + 2]) << 8) | seed[sos_offset + 3]);
@@ -460,9 +470,19 @@ std::vector<uint8_t> FlatColorJpeg(uint16_t width, uint16_t height) {
     jpeg[sof_offset + 6] = static_cast<uint8_t>(height & 0xFF);
     jpeg[sof_offset + 7] = static_cast<uint8_t>(width >> 8);
     jpeg[sof_offset + 8] = static_cast<uint8_t>(width & 0xFF);
+    // The component descriptors follow the 8-byte segment header as (identifier, sampling factors, quantisation table)
+    // triplets.
+    uint32_t mcu_bits = 0;
+    for (size_t i = 0; i < sampling_factors.size(); i++) {
+        jpeg[sof_offset + 11 + 3 * i] = sampling_factors[i];
+        mcu_bits += (sampling_factors[i] >> 4) * (sampling_factors[i] & 0x0F) * (i == 0 ? 2u : 5u);
+    }
     const std::vector<uint8_t> dri_segment = {0xFF, 0xDD, 0x00, 0x04, 0x00, 0x01};
     jpeg.insert(jpeg.begin() + sos_offset, dri_segment.begin(), dri_segment.end());
-    const std::vector<uint8_t> complete_mcu = {0x00, 0x00, 0x3F};
+    std::vector<uint8_t> complete_mcu((mcu_bits + 7) / 8, 0x00);
+    if (mcu_bits % 8 != 0) {
+        complete_mcu.back() = static_cast<uint8_t>(0xFF >> (mcu_bits % 8));
+    }
     const uint32_t num_mcus = (width / 16u) * (height / 16u);
     for (uint32_t i = 0; i < num_mcus; i++) {
         if (i > 0) {
@@ -770,6 +790,63 @@ int RocJpegApiNegativeTests::TestInvalidGetImageInfo() {
         return EXIT_FAILURE;
     }
 
+    // Scenario 2: Parse the 16x16 color seed with the sampling factors of its frame header replaced by both layouts
+    // of 4:4:0 and of 4:2:2. Y 2x2 with Cb and Cr 2x1 gives the chroma full width and half height, so it is 4:4:0
+    // like Y 1x2 with Cb and Cr 1x1, not 4:2:2. The scan still codes the seed's 4:2:0 MCU, so these streams are
+    // only parsed, never decoded.
+    const std::vector<uint8_t> &seed = ColorSeedJpeg();
+    const size_t sof_offset = FindMarker(seed, 0xC0);
+    if (sof_offset + 18 > seed.size()) {
+        std::cerr << "The color seed no longer carries a parsable SOF segment." << std::endl;
+        return EXIT_FAILURE;
+    }
+    const struct {
+        const char *name;
+        std::array<uint8_t, 3> sampling_factors;
+        RocJpegChromaSubsampling subsampling;
+    } sampling_cases[] = {
+        {"Y 2x2, Cb and Cr 2x1", {0x22, 0x21, 0x21}, ROCJPEG_CSS_440},
+        {"Y 1x2, Cb and Cr 1x1", {0x12, 0x11, 0x11}, ROCJPEG_CSS_440},
+        {"Y 2x2, Cb and Cr 1x2", {0x22, 0x12, 0x12}, ROCJPEG_CSS_422},
+        {"Y 2x1, Cb and Cr 1x1", {0x21, 0x11, 0x11}, ROCJPEG_CSS_422},
+    };
+    for (const auto &sampling_case : sampling_cases) {
+        std::vector<uint8_t> jpeg = seed;
+        // The component descriptors follow the 8-byte segment header as (identifier, sampling factors, quantisation
+        // table) triplets.
+        jpeg[sof_offset + 11] = sampling_case.sampling_factors[0];
+        jpeg[sof_offset + 14] = sampling_case.sampling_factors[1];
+        jpeg[sof_offset + 17] = sampling_case.sampling_factors[2];
+        rocjpeg_status = rocJpegStreamParse(jpeg.data(), jpeg.size(), rocjpeg_stream_handle_);
+        if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
+            std::cerr << "rocJpegStreamParse with " << sampling_case.name << ": Expected ROCJPEG_STATUS_SUCCESS but got "
+                      << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+            return EXIT_FAILURE;
+        }
+        uint8_t num_components = 0;
+        RocJpegChromaSubsampling subsampling = ROCJPEG_CSS_UNKNOWN;
+        uint32_t widths[ROCJPEG_MAX_COMPONENT] = {};
+        uint32_t heights[ROCJPEG_MAX_COMPONENT] = {};
+        rocjpeg_status = rocJpegGetImageInfo(rocjpeg_handle_, rocjpeg_stream_handle_, &num_components, &subsampling, widths, heights);
+        if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
+            std::cerr << "rocJpegGetImageInfo with " << sampling_case.name << ": Expected ROCJPEG_STATUS_SUCCESS but got "
+                      << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+            return EXIT_FAILURE;
+        }
+        // 4:4:0 halves the chroma height of the 16x16 image, and 4:2:2 its chroma width.
+        const bool is_440 = sampling_case.subsampling == ROCJPEG_CSS_440;
+        const uint32_t chroma_width = is_440 ? 16 : 8;
+        const uint32_t chroma_height = is_440 ? 8 : 16;
+        if (subsampling != sampling_case.subsampling || num_components != 3 || widths[0] != 16 || heights[0] != 16 ||
+            widths[1] != chroma_width || heights[1] != chroma_height || widths[2] != chroma_width || heights[2] != chroma_height) {
+            std::cerr << "rocJpegGetImageInfo with " << sampling_case.name << ": Expected subsampling " << static_cast<int>(sampling_case.subsampling)
+                      << " with 3 components, 16x16 luma, and " << chroma_width << "x" << chroma_height << " chroma but got subsampling "
+                      << static_cast<int>(subsampling) << " with " << static_cast<int>(num_components) << " components, " << widths[0] << "x" << heights[0]
+                      << " luma, and " << widths[1] << "x" << heights[1] << " and " << widths[2] << "x" << heights[2] << " chroma" << std::endl;
+            return EXIT_FAILURE;
+        }
+    }
+
     return EXIT_SUCCESS;
 }
 
@@ -959,6 +1036,117 @@ int RocJpegApiNegativeTests::TestInvalidDecodeBatched() {
         }
     }
     return result;
+}
+
+int RocJpegApiNegativeTests::TestUnsupportedSamplingDecode() {
+    std::cout << "info: Executing negative test cases for decoding a 4:4:0 JPEG with 2x2 luma sampling" << std::endl;
+    // Scenario 1: Decode a valid 4:4:0 JPEG whose luma is sampled 2x2 and whose chroma is sampled 2x1 with every
+    // decode function. rocJpegGetImageInfo reports it as 4:4:0, but this sampling layout is not supported, so each
+    // decode function has to return ROCJPEG_STATUS_JPEG_NOT_SUPPORTED instead of returning success with an image that
+    // was never decoded. The batches put a 4:2:0 image ahead of it, which a decoder with a single JPEG core has
+    // already submitted when the 4:4:0 image is rejected. A 4:2:0 decode on the same handle afterwards has to succeed.
+    RocJpegDecodeCaps decode_caps = {};
+    RocJpegStatus rocjpeg_status = rocJpegGetDecoderCaps(rocjpeg_handle_, &decode_caps);
+    if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
+        std::cerr << "rocJpegGetDecoderCaps: Expected ROCJPEG_STATUS_SUCCESS but got " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+        return EXIT_FAILURE;
+    }
+    // Round the minimum size the decoder accepts up to whole 16x16 MCUs, so that the 4:4:0 image is rejected for its
+    // sampling layout rather than for its size.
+    const uint16_t width = static_cast<uint16_t>((std::max(decode_caps.min_width, 16u) + 15u) & ~15u);
+    const uint16_t height = static_cast<uint16_t>((std::max(decode_caps.min_height, 16u) + 15u) & ~15u);
+    const std::vector<uint8_t> jpeg_420 = FlatColorJpeg(width, height);
+    const std::vector<uint8_t> jpeg_440 = FlatColorJpeg(width, height, {0x22, 0x21, 0x21});
+    if (jpeg_420.empty() || jpeg_440.empty()) {
+        std::cerr << "The color seed no longer carries parsable SOF and SOS segments." << std::endl;
+        return EXIT_FAILURE;
+    }
+    rocjpeg_status = rocJpegStreamParse(jpeg_420.data(), jpeg_420.size(), rocjpeg_stream_handle_);
+    if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
+        std::cerr << "Expected ROCJPEG_STATUS_SUCCESS when parsing the " << width << "x" << height << " 4:2:0 JPEG but got "
+                  << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+        return EXIT_FAILURE;
+    }
+    RocJpegStreamHandle stream_handle_440 = nullptr;
+    rocjpeg_status = rocJpegStreamCreate(&stream_handle_440);
+    if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
+        std::cerr << "rocJpegStreamCreate: Expected ROCJPEG_STATUS_SUCCESS but got " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+        return EXIT_FAILURE;
+    }
+    std::unique_ptr<void, decltype(&rocJpegStreamDestroy)> stream_owner(stream_handle_440, rocJpegStreamDestroy);
+    rocjpeg_status = rocJpegStreamParse(jpeg_440.data(), jpeg_440.size(), stream_handle_440);
+    if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
+        std::cerr << "Expected ROCJPEG_STATUS_SUCCESS when parsing the " << width << "x" << height << " 4:4:0 JPEG but got "
+                  << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+        return EXIT_FAILURE;
+    }
+
+    // Every destination holds a whole RGB image, so a decode that is wrongly accepted writes only to memory it owns.
+    // Index 0 is the 4:2:0 image and index 1 the 4:4:0 image.
+    RocJpegStreamHandle stream_handles[2] = {rocjpeg_stream_handle_, stream_handle_440};
+    RocJpegDecodeParams decode_params[2] = {};
+    RocJpegImage destinations[2] = {};
+    std::unique_ptr<void, HipBufferDeleter> buffers[2];
+    for (int k = 0; k < 2; k++) {
+        decode_params[k].output_format = ROCJPEG_OUTPUT_RGB;
+        void *buffer = nullptr;
+        if (hipMalloc(&buffer, width * 3u * height) != hipSuccess) {
+            std::cerr << "hipMalloc failed for the output of destination " << k << std::endl;
+            return EXIT_FAILURE;
+        }
+        buffers[k].reset(buffer);
+        destinations[k].channel[0] = static_cast<uint8_t *>(buffer);
+        destinations[k].pitch[0] = width * 3u;
+    }
+
+    rocjpeg_status = rocJpegDecode(rocjpeg_handle_, stream_handle_440, &decode_params[1], &destinations[1]);
+    if (rocjpeg_status != ROCJPEG_STATUS_JPEG_NOT_SUPPORTED) {
+        std::cerr << "rocJpegDecode of the 4:4:0 JPEG with 2x2 luma: Expected ROCJPEG_STATUS_JPEG_NOT_SUPPORTED but got "
+                  << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+        return EXIT_FAILURE;
+    }
+    rocjpeg_status = rocJpegDecodeAsync(rocjpeg_handle_, stream_handle_440, &decode_params[1], &destinations[1]);
+    if (rocjpeg_status != ROCJPEG_STATUS_JPEG_NOT_SUPPORTED) {
+        std::cerr << "rocJpegDecodeAsync of the 4:4:0 JPEG with 2x2 luma: Expected ROCJPEG_STATUS_JPEG_NOT_SUPPORTED but got "
+                  << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+        return EXIT_FAILURE;
+    }
+    // A rejected submit must not leave a decode pending for the destination.
+    rocjpeg_status = rocJpegDecodeSync(rocjpeg_handle_, &destinations[1]);
+    if (rocjpeg_status != ROCJPEG_STATUS_INVALID_PARAMETER) {
+        std::cerr << "rocJpegDecodeSync after a rejected 4:4:0 JPEG with 2x2 luma: Expected ROCJPEG_STATUS_INVALID_PARAMETER but got "
+                  << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+        return EXIT_FAILURE;
+    }
+    rocjpeg_status = rocJpegDecodeBatched(rocjpeg_handle_, stream_handles, 2, decode_params, destinations);
+    if (rocjpeg_status != ROCJPEG_STATUS_JPEG_NOT_SUPPORTED) {
+        std::cerr << "rocJpegDecodeBatched of a 4:2:0 JPEG and a 4:4:0 JPEG with 2x2 luma: Expected ROCJPEG_STATUS_JPEG_NOT_SUPPORTED but got "
+                  << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+        return EXIT_FAILURE;
+    }
+    rocjpeg_status = rocJpegDecodeBatchedAsync(rocjpeg_handle_, stream_handles, 2, decode_params, destinations);
+    if (rocjpeg_status != ROCJPEG_STATUS_JPEG_NOT_SUPPORTED) {
+        std::cerr << "rocJpegDecodeBatchedAsync of a 4:2:0 JPEG and a 4:4:0 JPEG with 2x2 luma: Expected ROCJPEG_STATUS_JPEG_NOT_SUPPORTED but got "
+                  << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+        return EXIT_FAILURE;
+    }
+    // A rejected submit must not leave decodes pending for any destination in the batch.
+    for (int k = 0; k < 2; k++) {
+        rocjpeg_status = rocJpegDecodeSync(rocjpeg_handle_, &destinations[k]);
+        if (rocjpeg_status != ROCJPEG_STATUS_INVALID_PARAMETER) {
+            std::cerr << "rocJpegDecodeSync for destination " << k << " after a rejected batch: Expected ROCJPEG_STATUS_INVALID_PARAMETER but got "
+                      << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+            return EXIT_FAILURE;
+        }
+    }
+
+    rocjpeg_status = rocJpegDecode(rocjpeg_handle_, rocjpeg_stream_handle_, &decode_params[0], &destinations[0]);
+    if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
+        std::cerr << "rocJpegDecode of the 4:2:0 JPEG after the rejected decodes: Expected ROCJPEG_STATUS_SUCCESS but got "
+                  << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+        return EXIT_FAILURE;
+    }
+    return EXIT_SUCCESS;
 }
 
 int RocJpegApiNegativeTests::TestInvalidGetDecoderCaps() {
@@ -1534,8 +1722,8 @@ int RocJpegApiNegativeTests::TestStreamParseFuzz() {
         // because a frame also has to classify as a subsampling
         // GetChromaSubsampling recognises. Across every three-component layout
         // it accepts, the largest sum that is not already over the limit is
-        // eight, from the two 4:2:2 spellings; 4:4:4 at 2x2 or 4x4 would sum to
-        // 12 and 48 and is rejected by the cases above.
+        // eight, from 2x2 luma with 1x2 (4:2:2) or 2x1 (4:4:0) chroma; 4:4:4 at
+        // 2x2 or 4x4 would sum to 12 and 48 and is rejected by the cases above.
         //
         // The eight-block layouts are the ones that matter here: a limit
         // lowered to six, or applied to the largest product rather than the
@@ -2036,8 +2224,8 @@ int RocJpegApiNegativeTests::TestCrossDeviceDecode() {
 
 int RocJpegApiNegativeTests::RunTests() {
     if (TestInvalidStreamCreate() || TestInvalidStreamParse () || TestInvalidStreamDestroy() || TestInvalidCreate() || TestInvalidDestroy() ||
-        TestInvalidGetImageInfo() || TestInvalidDecode() || TestInvalidDecodeBatched() || TestInvalidGetErrorName() ||
-        TestInvalidGetDecoderCaps() || TestStreamParseFuzz() || TestCrossDeviceDecode()) {
+        TestInvalidGetImageInfo() || TestInvalidDecode() || TestInvalidDecodeBatched() || TestUnsupportedSamplingDecode() ||
+        TestInvalidGetErrorName() || TestInvalidGetDecoderCaps() || TestStreamParseFuzz() || TestCrossDeviceDecode()) {
         std::cerr << "One or more negative tests failed." << std::endl;
         return EXIT_FAILURE;
     } else {

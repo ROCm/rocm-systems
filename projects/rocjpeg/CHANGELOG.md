@@ -14,6 +14,7 @@ Documentation for rocJPEG is available at
 
 * Fixed the RGB, RGB planar, Y, and YUV planar outputs writing past the image when its width is not a multiple of 8 or its height is odd. With output buffers sized exactly to the image, this overwrote memory after the buffer and made the right and bottom edges of the image nondeterministic.
 * Fixed the build using no GPU targets when `AMDGPU_TARGETS` or `GPU_ARCHS` is set in the environment but empty. An empty value is now treated the same as an unset one and the default target list applies.
+* Fixed `rocJpegGetImageInfo` reporting 4:4:0 JPEGs whose luma is sampled 2x2 (Cb and Cr 2x1) as `ROCJPEG_CSS_422`, and the decode APIs returning success for them without decoding the image, which left the output blank or holding the pixels of an image decoded earlier on the same handle. These images are now reported as `ROCJPEG_CSS_440`, and the decode APIs (`rocJpegDecode`, `rocJpegDecodeAsync`, `rocJpegDecodeBatched`, and `rocJpegDecodeBatchedAsync`) return `ROCJPEG_STATUS_JPEG_NOT_SUPPORTED` for them.
 
 ### Changed
 
