@@ -174,11 +174,6 @@ static std::pair<dim3, dim3> ddaArLLOneShotTierGeom(ncclComm* comm, size_t bytes
   return *spread ? spreadGeom : ddaArLLOneShotGeom(comm, bytes, cap);
 }
 
-// The LDS-staged writers need gfx1250's async LDS stores (ASYNC_COPY_SUPPORTED) and one LL128 warp per wave.
-static bool ddaArLL128StagedWireOk(const ncclComm* comm) {
-  return comm->archName != nullptr && IsArchMatch(comm->archName, "gfx1250") && comm->WarpSize == kDdaLL128Warp;
-}
-
 // Calls pick(std::integral_constant<int, N>{}): NRANKS_CT 4/8 unroll the peer loops, 0 is the runtime fallback.
 template <typename Pick>
 static auto ddaArPickRanksCt(int nRanks, Pick pick) {
@@ -271,15 +266,16 @@ static ncclResult_t ncclAllReduceDdaFabricLLTyped(const void* sendbuff, void* re
 // Smallest per-rank shard whose LL128 two-shot takes the staged writer: enough slices per warp to pay off.
 constexpr size_t kDdaArLL128AsyncMinShardBytes = 2 * 1024 * 1024;
 
-// Writer of an LL128 two-shot launch: staged from kDdaArLL128AsyncMinShardBytes where ddaArLL128StagedWireOk.
+// Writer of an LL128 two-shot launch: staged from kDdaArLL128AsyncMinShardBytes where ddaLL128StagedWireOk.
 // Opt-in with RCCL_DDA_LL128_ASYNC_WIRE=1; at 0 (default) every launch takes the cooperative writer and no dynamic LDS.
 static int ddaArLL128Wire(const ncclComm* comm, size_t bytes) {
   if (rcclParamDdaLL128AsyncWire() == 0) {
     return dda::common::kDdaLL128WireCoop;
   }
   const size_t shard = bytes / (size_t)std::max(comm->nRanks, 1);
-  return ddaArLL128StagedWireOk(comm) && shard >= kDdaArLL128AsyncMinShardBytes ? dda::common::kDdaLL128WireAsync
-                                                                                  : dda::common::kDdaLL128WireCoop;
+  return dda::common::ddaLL128StagedWireOk(comm->archName, comm->WarpSize) && shard >= kDdaArLL128AsyncMinShardBytes
+           ? dda::common::kDdaLL128WireAsync
+           : dda::common::kDdaLL128WireCoop;
 }
 
 // Dynamic LDS of an LL128 launch: the peer-parallel fold's slice per warp, or the staged writer's two windows per warp.

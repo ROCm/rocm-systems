@@ -25,6 +25,9 @@
 constexpr unsigned kDdaLL128AGDefaultThreads = 512;
 
 RCCL_PARAM(DdaLL128AGThreads, "DDA_LL128_AG_THREADS", 0);
+// Stages phase 1 from this many pushed payload bytes a block; <= 0 is off. Needs gfx1250 wave32 and
+// kDdaLL128AGStageThreads.
+RCCL_PARAM(DdaLL128AGAsyncWireMinBytes, "DDA_LL128_AG_ASYNC_WIRE_MIN_BYTES", 80 * 1024);
 
 namespace {
 
@@ -32,6 +35,8 @@ using dda::common::ddaBankSize;
 using dda::common::ddaLL128AgSlotWords;
 using dda::common::ddaLL128BlocksPerPeer;
 using dda::common::ddaLL128Slices;
+using dda::common::ddaLL128StageBytes;
+using dda::common::kDdaLL128AGStageThreads;
 using dda::common::kDdaLL128DataBytesPerSlice;
 using dda::common::kDdaLL128Warp;
 using dda::common::kDdaLL128WireWordsPerSlice;
@@ -54,6 +59,24 @@ unsigned ddaLL128AGThreads(unsigned blockSize) {
   return blockSize;
 }
 
+
+// LDS a block gets without raising its limit; the staged windows must fit it.
+constexpr size_t kDdaDefaultLdsBytes = 64 * 1024;
+static_assert(ddaLL128StageBytes(kDdaLL128AGStageThreads) <= kDdaDefaultLdsBytes, "staged windows exceed the LDS");
+
+// Payload bytes one block of `grid` pushes in phase 1: perRankBytes to each of nPeers peers, over every block.
+size_t ddaLL128AGBytesPerBlock(size_t perRankBytes, int nPeers, const dim3& grid) {
+  return perRankBytes * (size_t)nPeers / ((size_t)grid.x * grid.y);
+}
+
+// Whether a launch takes the staged phase 1. Every input matches on all ranks of a DDA comm, so every rank agrees.
+bool ddaLL128AGUseAsyncWire(const ncclComm* comm, size_t bytesPerBlock, unsigned threads) {
+  const int64_t minBytes = rcclParamDdaLL128AGAsyncWireMinBytes();
+  if (minBytes <= 0 || bytesPerBlock < (size_t)minBytes) {
+    return false;
+  }
+  return dda::common::ddaLL128StagedWireOk(comm->archName, comm->WarpSize) && threads == kDdaLL128AGStageThreads;
+}
 
 // Single source of the launch geometry: grid.x = one column per remote peer,
 // grid.y = the per-peer slice split.
@@ -90,14 +113,31 @@ static ncclResult_t ncclAllGatherDdaFabricLL128Typed(
   uint32_t* epochDev = comm->ddaLLEpochDev;
   const int epochLen = comm->ddaLLEpochLen;
 
-  INFO(NCCL_COLL,
-       "DDA fabric AllGather LL128: nRanks=%d perRankBytes=%zu slices=%zu grid=%ux%u block=%u "
-       "(warp-per-slice, bpp=%u, slotWords=%zu)",
-       nRanks, perRankBytes, slices, grid.x, grid.y, block.x, blocksPerPeer,
-       ddaLL128AgSlotWords(bankSize, nRanks));
+  const size_t bytesPerBlock = ddaLL128AGBytesPerBlock(perRankBytes, nRanks - 1, grid);
+  const bool asyncWire = ddaLL128AGUseAsyncWire(comm, bytesPerBlock, block.x);
 
   const dda::common::DdaKernelParams params{comm->abortFlagDev};
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
+  if (asyncWire) {
+    // Same grid, block and arguments; the staged phase 1 adds the windows' LDS and the peers a fill goes to.
+    const int pushPeers = dda::common::kDdaLL128AGStagePushPeers;
+    const size_t lds = ddaLL128StageBytes(block.x);
+    INFO(NCCL_COLL,
+         "DDA fabric AllGather LL128 async wire: nRanks=%d perRankBytes=%zu slices=%zu grid=%ux%u block=%u "
+         "bytesPerBlock=%zu pushPeers=%d groups=%d lds=%zu",
+         nRanks, perRankBytes, slices, grid.x, grid.y, block.x, bytesPerBlock, pushPeers,
+         dda::common::ddaLL128AGStageGroups(nRanks - 1, pushPeers), lds);
+    hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabricLL128Staged<T>), grid, block, lds, stream,
+                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff),
+                          static_cast<const T*>(sendbuff), perRankBytes, comm->rank, nRanks, epochDev, epochLen,
+                          slices, bankSize, params, pushPeers);
+    CUDACHECK(cudaGetLastError());
+    return ncclSuccess;
+  }
+  INFO(NCCL_COLL,
+       "DDA fabric AllGather LL128: nRanks=%d perRankBytes=%zu slices=%zu grid=%ux%u block=%u "
+       "(warp-per-slice, bpp=%u, slotWords=%zu)",
+       nRanks, perRankBytes, slices, grid.x, grid.y, block.x, blocksPerPeer, ddaLL128AgSlotWords(bankSize, nRanks));
   // NRANKS_CT 4/8: unrolled; 0: runtime fallback.
   switch (nRanks) {
   case 4:

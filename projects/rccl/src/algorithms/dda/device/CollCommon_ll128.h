@@ -28,6 +28,7 @@
 #endif
 
 #include "algorithms/dda/device/CollCommon.h"
+#include "archinfo.h"
 #include "device/tdm/asyncCopy.h"
 #include "nccl_device/rccl_ptr.h"
 
@@ -330,12 +331,17 @@ constexpr size_t ddaLL128StageBytes(unsigned threads) {
   return (size_t)(threads / kDdaLL128Warp) * kDdaLL128StageWindows * kDdaLL128WireBytesPerSlice;
 }
 constexpr CachePolicy kDdaLL128StagePolicy = createCachePolicy(TemporalHint::RT, MemScope::SYS);
+// A phase 2 fill waits on nRanks - 1 pushes: rungs at 1, 3, 7 and 15 pushes are exact at 2, 4, 8 and 16 ranks.
+constexpr int kDdaLL128StageWaitRungs = 4;
 #if ASYNC_COPY_SUPPORTED
 // Async stores a lane issues per push of one slice; lastOps and the wait ladder count in these.
 constexpr int kDdaLL128StagePushOps = asyncAlignedCopyOps<kDdaLL128WireBytesPerSlice, kDdaLL128Warp>();
-// A phase 2 fill waits on nRanks - 1 pushes: rungs at 1, 3, 7 and 15 pushes are exact at 2, 4, 8 and 16 ranks.
-constexpr int kDdaLL128StageWaitRungs = 4;
 #endif
+
+// Host: whether a comm can run the staged writer, which needs gfx1250's async LDS stores and one LL128 warp a wave.
+inline bool ddaLL128StagedWireOk(const char* archName, int warpSize) {
+  return archName != nullptr && IsArchMatch(archName, "gfx1250") && warpSize == kDdaLL128Warp;
+}
 
 template <int WIRE>
 constexpr bool ddaLL128Staged() {

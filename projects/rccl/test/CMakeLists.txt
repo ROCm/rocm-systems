@@ -321,6 +321,8 @@ if(BUILD_TESTS)
     device/DdaReduceScatterFabricLLTests.cpp
     device/DdaAllReduceFabricLLTests.cpp
     device/DdaAllReduceFabricLL128PeerParTests.cpp
+    # Also in rccl-UnitTestsFixtures; this copy runs the production b128 user-buffer loads and stores.
+    device/DdaAllGatherFabricLL128Tests.cpp
     NetPluginReloadTests.cpp
     GinPluginInitFailTests.cpp
     plugin/net_reload_plugin.cpp
@@ -442,6 +444,7 @@ if(BUILD_TESTS)
       device/DdaAllReduceFabricLLTests.cpp
       device/DdaAllReduceFabricLL128TwoShotTests.cpp
       device/DdaAllReduceFabricLL128PeerParTests.cpp
+      device/DdaAllGatherFabricLL128Tests.cpp
       device/DdaVecElementAddTests.cpp
       device/DdaLL128PollWireTests.cpp
       device/DdaLL128ArchGeometryTests.cpp

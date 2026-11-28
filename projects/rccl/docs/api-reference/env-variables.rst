@@ -1690,6 +1690,18 @@ threshold table introduced for gfx1250.
         | ``N``: Use ``N`` threads per block, overriding the table. ``N`` must be a
           multiple of 32 from 32 to 1024. Pre-table default: ``512``.
 
+    * - | ``RCCL_DDA_LL128_AG_ASYNC_WIRE_MIN_BYTES``
+        | Payload bytes per block from which the DDA LL128 ``ncclAllGather`` stages
+          its wire slices in LDS and sends them with gfx1250 async LDS stores. A
+          block's payload is the per-rank bytes times ``nRanks - 1``, divided by the
+          blocks in the launch grid. Only gfx1250 communicators with one LL128 warp
+          per wavefront (wave32) and 512-thread blocks stage; they take two 2 KiB
+          windows per warp of dynamic LDS. This is a byte threshold, not the on/off
+          switch ``RCCL_DDA_LL128_ASYNC_WIRE``, which applies to ``ncclAllReduce`` only.
+      - | ``81920``: Stage from 80 KiB of payload per block (default).
+        | ``0`` or negative: Never stage.
+        | ``N`` (bytes): Stage from ``N`` bytes of payload per block.
+
     * - | ``RCCL_DDA_LL128_ASYNC_WIRE``
         | Opts in to the LDS-staged writer for the DDA LL128 two-shot ``ncclAllReduce``
           on gfx1250 communicators with one LL128 warp per wavefront (wave32). When
