@@ -354,9 +354,9 @@ GpuAgent::~GpuAgent() {
   regions_.clear();
 }
 
-void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_target,
-                              void*& code_buf, size_t& code_buf_size) const {
-  // Select precompiled shader implementation from name/target.
+namespace {
+
+  // Precompiled shader implementation, selected by name and agent ISA.
   struct ASICShader {
     const void* code;
     size_t size;
@@ -384,7 +384,7 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
     ASICShader compute_1250_rev0;
   };
 
-  std::map<std::string, CompiledShader> compiled_shaders = {
+  const std::map<std::string, CompiledShader> compiled_shaders = {
       {"TrapHandler",
        {
            {NULL, 0, 0, 0},                                                 // gfx7
@@ -451,71 +451,124 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
            {kCodeFill11, sizeof(kCodeFill11), 19, 8},                       // gfx11
            {kCodeFill12, sizeof(kCodeFill12), 19, 8},                       // gfx12
            {kCodeFill1250, sizeof(kCodeFill1250), 19, 8},                   // gfx1250
+       }},
+      {"SwapCopy",
+       {
+           {NULL, 0, 0, 0},                                           // gfx7 (not supported)
+           {NULL, 0, 0, 0},                                           // gfx8 (not supported)
+           {kCodeSwapCopy9, sizeof(kCodeSwapCopy9), 19, 16},          // gfx9
+           {kCodeSwapCopy9, sizeof(kCodeSwapCopy9), 19, 16},          // gfx90a
+           {kCodeSwapCopy9, sizeof(kCodeSwapCopy9), 19, 16},          // gfx942
+           {kCodeSwapCopy1010, sizeof(kCodeSwapCopy1010), 19, 16},    // gfx1010
+           {kCodeSwapCopy10, sizeof(kCodeSwapCopy10), 19, 16},        // gfx10
+           {kCodeSwapCopy11, sizeof(kCodeSwapCopy11), 19, 16},        // gfx11
+           {kCodeSwapCopy12, sizeof(kCodeSwapCopy12), 19, 16},        // gfx12
+           {kCodeSwapCopy1250, sizeof(kCodeSwapCopy1250), 19, 16},    // gfx1250
+       }},
+      {"BroadcastCopy",
+       {
+           {NULL, 0, 0, 0},                                                   // gfx7
+           {NULL, 0, 0, 0},                                                   // gfx8
+           {kCodeBroadcastCopy9, sizeof(kCodeBroadcastCopy9), 20, 17},        // gfx9
+           {kCodeBroadcastCopy9, sizeof(kCodeBroadcastCopy9), 20, 17},        // gfx90a
+           {kCodeBroadcastCopy9, sizeof(kCodeBroadcastCopy9), 20, 17},        // gfx942
+           {kCodeBroadcastCopy1010, sizeof(kCodeBroadcastCopy1010), 20, 17},  // gfx1010
+           {kCodeBroadcastCopy10, sizeof(kCodeBroadcastCopy10), 20, 17},      // gfx10
+           {kCodeBroadcastCopy11, sizeof(kCodeBroadcastCopy11), 20, 17},      // gfx11
+           {kCodeBroadcastCopy12, sizeof(kCodeBroadcastCopy12), 20, 17},      // gfx12
+           {kCodeBroadcastCopy1250, sizeof(kCodeBroadcastCopy1250), 20, 17},  // gfx1250
        }}};
 
-  auto compiled_shader_it = compiled_shaders.find(func_name);
-  assert(compiled_shader_it != compiled_shaders.end() &&
-         "Precompiled shader unavailable");
+  // @brief Returns the shader named func_name built for isa, or NULL when this
+  // generation has no build of it. Single source of truth for both
+  // GpuAgent::AssembleShader and GpuAgent::IsShaderAvailable.
+  const ASICShader* SelectASICShader(const char* func_name, const core::Isa& isa,
+                                     uint32_t asic_revision) {
+    auto compiled_shader_it = compiled_shaders.find(func_name);
+    assert(compiled_shader_it != compiled_shaders.end() &&
+           "Precompiled shader unavailable");
 
-  ASICShader* asic_shader = NULL;
+    const ASICShader* asic_shader = NULL;
 
-  switch (supported_isas()[0]->GetMajorVersion()) {
-    case 7:
-      asic_shader = &compiled_shader_it->second.compute_7;
-      break;
-    case 8:
-      asic_shader = &compiled_shader_it->second.compute_8;
-      break;
-    case 9:
-      if((supported_isas()[0]->GetMinorVersion() == 0) && (supported_isas()[0]->GetStepping() == 10)) {
-        asic_shader = &compiled_shader_it->second.compute_90a;
-      } else if(supported_isas()[0]->GetMinorVersion() == 4 || supported_isas()[0]->GetMinorVersion() == 5) {
-        asic_shader = &compiled_shader_it->second.compute_942;
-      } else {
-        asic_shader = &compiled_shader_it->second.compute_9;
-      }
-      break;
-    case 10:
-      if(supported_isas()[0]->GetMinorVersion() == 1)
-        asic_shader = &compiled_shader_it->second.compute_1010;
-      else
-        asic_shader = &compiled_shader_it->second.compute_10;
-      break;
-    case 11:
-        asic_shader = &compiled_shader_it->second.compute_11;
-      break;
-    case 12:
-        if (supported_isas()[0]->GetMinorVersion() == 5 &&
-            supported_isas()[0]->GetStepping() == 0 &&
-            properties_.Capability.ui32.ASICRevision == 0) {
-          // The trap-during-VOP3PX PC fixup in the second-level trap handler
-          // applies to gfx1250 (12.5.0) revision 0 only.  Later 12.5 steppings
-          // such as gfx1251 always use compute_1250, even when KFD reports
-          // ASICRevision 0.  Every later gfx1250 revision uses the blob
-          // assembled without the fixup.  Shaders that do not vary by
-          // revision leave this slot zeroed.
-          ASICShader& rev0 = compiled_shader_it->second.compute_1250_rev0;
-          // An entry that supplies the later-revision blob must supply the
-          // revision 0 blob too.  Falling back would hand a revision 0 part
-          // the blob assembled without the fixup, and the check below cannot
-          // catch it because the fallback pointer is valid.
-          assert((rev0.code != NULL ||
-                  compiled_shader_it->second.compute_1250.code == NULL) &&
-                 "Incomplete shader table entry for this revision");
-          asic_shader =
-              (rev0.code != NULL) ? &rev0 : &compiled_shader_it->second.compute_1250;
-        } else if (supported_isas()[0]->GetMinorVersion() >= 5) {
-          asic_shader = &compiled_shader_it->second.compute_1250;
+    switch (isa.GetMajorVersion()) {
+      case 7:
+        asic_shader = &compiled_shader_it->second.compute_7;
+        break;
+      case 8:
+        asic_shader = &compiled_shader_it->second.compute_8;
+        break;
+      case 9:
+        if((isa.GetMinorVersion() == 0) && (isa.GetStepping() == 10)) {
+          asic_shader = &compiled_shader_it->second.compute_90a;
+        } else if(isa.GetMinorVersion() == 4 || isa.GetMinorVersion() == 5) {
+          asic_shader = &compiled_shader_it->second.compute_942;
         } else {
-          asic_shader = &compiled_shader_it->second.compute_12;
+          asic_shader = &compiled_shader_it->second.compute_9;
         }
-      break;
-    default:
-      assert(false && "Precompiled shader unavailable for target");
+        break;
+      case 10:
+        if(isa.GetMinorVersion() == 1)
+          asic_shader = &compiled_shader_it->second.compute_1010;
+        else
+          asic_shader = &compiled_shader_it->second.compute_10;
+        break;
+      case 11:
+          asic_shader = &compiled_shader_it->second.compute_11;
+        break;
+      case 12:
+          if (isa.GetMinorVersion() == 5 && isa.GetStepping() == 0 && asic_revision == 0) {
+            // The trap-during-VOP3PX PC fixup in the second-level trap handler
+            // applies to gfx1250 (12.5.0) revision 0 only.  Later 12.5 steppings
+            // such as gfx1251 always use compute_1250, even when KFD reports
+            // ASICRevision 0.  Every later gfx1250 revision uses the blob
+            // assembled without the fixup.  Shaders that do not vary by
+            // revision leave this slot zeroed.
+            const ASICShader& rev0 = compiled_shader_it->second.compute_1250_rev0;
+            // An entry that supplies the later-revision blob must supply the
+            // revision 0 blob too.  Falling back would hand a revision 0 part
+            // the blob assembled without the fixup, and the check below cannot
+            // catch it because the fallback pointer is valid.
+            assert((rev0.code != NULL ||
+                    compiled_shader_it->second.compute_1250.code == NULL) &&
+                   "Incomplete shader table entry for this revision");
+            asic_shader =
+                (rev0.code != NULL) ? &rev0 : &compiled_shader_it->second.compute_1250;
+          } else if (isa.GetMinorVersion() >= 5) {
+            asic_shader = &compiled_shader_it->second.compute_1250;
+          } else {
+            asic_shader = &compiled_shader_it->second.compute_12;
+          }
+        break;
+      default:
+        assert(false && "Precompiled shader unavailable for target");
+        return NULL;
+    }
+
+    if (asic_shader->code == NULL || asic_shader->size == 0 ||
+        asic_shader->num_sgprs == 0 || asic_shader->num_vgprs == 0) {
+      return NULL;
+    }
+
+    return asic_shader;
   }
 
-  assert((asic_shader->code && asic_shader->size && asic_shader->num_sgprs && asic_shader->num_vgprs)
-          && "Invalid shader");
+}  // namespace
+
+bool GpuAgent::IsShaderAvailable(const char* func_name) const {
+  return SelectASICShader(func_name, *supported_isas()[0],
+                          properties_.Capability.ui32.ASICRevision) != NULL;
+}
+
+void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_target,
+                              void*& code_buf, size_t& code_buf_size) const {
+  const ASICShader* asic_shader = SelectASICShader(func_name, *supported_isas()[0],
+                                                   properties_.Capability.ui32.ASICRevision);
+  assert(asic_shader != NULL && "Invalid shader");
+  if (asic_shader == NULL) {
+    code_buf = NULL;
+    code_buf_size = 0;
+    return;
+  }
 
   // Allocate a GPU-visible buffer for the shader.
   size_t header_size =
@@ -1971,12 +2024,16 @@ bool GpuAgent::PrefersSdmaBlit() const {
 }
 
 uint32_t GpuAgent::MaxBroadcastDestinations() const {
-  // Only the SDMA engines carry a broadcast. When SDMA is unavailable
-  // DmaCopyBatchFallback has no shader equivalent for broadcast and rejects the
-  // op, so nothing can service it and the agent accepts no destinations at all.
-  // Answered from the SDMA preference rather than from a blit object so that
-  // querying this attribute does not force a blit - and its queue - to be
-  // created as a side effect.
+  // Mirrors how DmaCopyBatch routes a broadcast. On the SDMA engines one
+  // always completes: the dedicated multicast packet carries it where that
+  // exists and per-entry fan-out covers the rest. With SDMA unavailable the
+  // compute-shader fallback carries it instead, and that shader is not built
+  // for every generation - where it is absent nothing can service the op and
+  // the agent accepts no destinations at all.
+  //
+  // Answered from the SDMA preference and the shader table rather than from a
+  // blit object so that querying this attribute does not force a blit - and
+  // its queue - to be created as a side effect.
   //
   // The preference is what the agent is configured for, which is not identical
   // to what DmaCopyBroadcast finds at submit time: it tests the H2D blit's
@@ -1986,21 +2043,25 @@ uint32_t GpuAgent::MaxBroadcastDestinations() const {
   // agent's configuration, not the momentary availability of DMA resources, so
   // it stays stable across queries and cannot be perturbed by asking. The
   // header documents that a copy within the ceiling may still be rejected.
-  if (!PrefersSdmaBlit()) return 0;
+  if (!PrefersSdmaBlit() && !IsShaderAvailable("BroadcastCopy")) return 0;
 
-  // No routing inside DmaCopyBroadcast caps the destination count below the
-  // API's own. The dedicated multicast packet describes at most
+  // Reported for both routings, because neither caps the destination count
+  // below the API's own. The dedicated multicast packet describes at most
   // BlitSdmaBase::kMaxMulticastDsts destinations, but a request exceeding that
-  // is sent to per-entry fan-out rather than refused, so the count an agent
-  // accepts does not depend on which engine happens to service the copy - or,
-  // equivalently, on the transfer size that selects between them. That matters
-  // because this query carries no size and so could not describe a
-  // size-dependent ceiling honestly.
+  // is sent to per-entry fan-out rather than refused; the shader path likewise
+  // splits a request across dispatches. So the count an agent accepts does not
+  // depend on which engine happens to service the copy - or, equivalently, on
+  // the transfer size that selects between them. That matters because this
+  // query carries no size and so could not describe a size-dependent ceiling
+  // honestly.
   //
   // What remains is the limit of the request itself:
   // hsa_amd_memory_copy_op_t::num_entries is a uint16_t, so no larger count
   // can even be expressed.
-  return std::numeric_limits<decltype(hsa_amd_memory_copy_op_t::num_entries)>::max();
+  static_assert(BlitKernel::kMaxBroadcastDestinations ==
+                    std::numeric_limits<decltype(hsa_amd_memory_copy_op_t::num_entries)>::max(),
+                "the shader path's ceiling must be the API's own");
+  return BlitKernel::kMaxBroadcastDestinations;
 }
 
 hsa_status_t GpuAgent::DmaCopyBroadcast(
@@ -2128,6 +2189,30 @@ hsa_status_t GpuAgent::DmaCopySwap(
   core::Signal* out_signal_obj = core::Signal::Convert(op.completion_signal);
   core::Signal& out_signal = *out_signal_obj;
 
+  // Route by capability: where the SDMA engine has no usable swap sub-op, the
+  // shader blit serves the op instead of the agent rejecting a request it can
+  // still satisfy. Swap support is a property of the agent's ISA, so any SDMA
+  // blit answers for all of them; the H2D one is the same probe DmaCopyBatch
+  // uses. Both the scalar and the list form route to the fallback: the list
+  // form is the one a batch-copy caller builds, so restricting the fallback to
+  // the scalar form would leave a batched swap with no route at all on an
+  // agent whose SDMA engine lacks the swap sub-op.
+  //
+  // gfx125+ reaches the swap packet through its own condition rather than
+  // through swap_supported_, so it is native-capable here even though it does
+  // not claim the flag. Diverting it to the shader blit would move it off a
+  // working engine path, so it is excluded from the fallback. This mirrors the
+  // condition the fan-out validation and the SDMA submit guard already apply.
+  lazy_ptr<core::Blit>& sdma_blit = GetBlitObject(BlitHostToDev);
+  BlitSdmaBase* const sdma_base = sdma_blit->isSDMA()
+      ? static_cast<BlitSdmaBase*>((*sdma_blit).get())
+      : nullptr;
+  const bool sdma_swap = sdma_base != nullptr &&
+      (sdma_base->SwapSupported() || sdma_base->IsGfx125Plus());
+
+  if (!sdma_swap)
+    return DmaCopyBatchFallback(op, dep_signals);
+
   if (op.num_entries == 0) {
     const void* src_arr[1] = { op.src };
     void* dst_arr[1] = { op.dst };
@@ -2210,16 +2295,66 @@ hsa_status_t GpuAgent::DmaCopyBatchFallback(
     out_signal.SubRelease(1);
     return HSA_STATUS_SUCCESS;
   }
-  case HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST:
-  case HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP:
+  case HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP: {
+    // Swap shader fallback: bidirectional buffer exchange using BlitKernel.
+    // Reached both where the SDMA engine has no usable swap sub-op and where
+    // SDMA is disabled outright.
+    //
+    // No alignment gate here, unlike the native path, which rejects addresses
+    // below the swap packet's granularity (see the SWAP alignment note in
+    // hsa_ext_amd.h). The shader addresses memory per 16-byte chunk plus a
+    // byte tail, so it is correct on any alignment. Rejecting input this path
+    // can serve, purely to match a restriction of a different engine, would
+    // fail a request for no reason; the documented alignment requirement still
+    // governs what a portable caller may rely on.
+    //
+    // Asymmetric swap is not supported: both regions must be the same size
+    // (mirrors the native DmaCopySwap path). The list form carries one size
+    // per entry and so is symmetric by construction.
+    if (op.num_entries == 0 && op.src_size != op.dst_size) {
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+
+    lazy_ptr<core::Blit>& blit_dev = GetBlitObject(BlitDevToDev);
+
+    // Reject where the swap shader is not built for this ISA, rather than
+    // silently no-op. BlitDevToDev is always a kernel blit.
+    if (!IsShaderAvailable("SwapCopy")) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+    if (profiling_enabled())
+      out_signal.async_copy_agent(core::Agent::Convert(this->public_handle()));
+
+    if (op.num_entries == 0) {
+      return blit_dev->SubmitSwapCopyCommand(const_cast<void*>(op.src), op.dst, op.src_size,
+                                             dep_signals, out_signal);
+    }
+
+    // List form: src_list / dst_list hold the two sides of each exchange.
+    return blit_dev->SubmitSwapCopyCommand(op.num_entries, op.src_list, op.dst_list,
+                                           op.size_list, dep_signals, out_signal);
+  }
+  case HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST: {
+    // Broadcast shader fallback: one source written to each of op.dst_list.
+    lazy_ptr<core::Blit>& blit_dev = GetBlitObject(BlitDevToDev);
+
+    // Reject where the broadcast shader is not built for this ISA, rather than
+    // completing without copying anything. BlitDevToDev is always a kernel blit.
+    if (!IsShaderAvailable("BroadcastCopy")) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+    if (profiling_enabled())
+      out_signal.async_copy_agent(core::Agent::Convert(this->public_handle()));
+
+    return blit_dev->SubmitBroadcastCopyCommand(op.src, op.dst_list, op.num_entries, op.size,
+                                                dep_signals, out_signal);
+  }
   case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC:
   case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST:
   case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST:
   case HSA_AMD_MEMORY_COPY_OP_RECT:
-    // No shader-blit equivalent for broadcast/swap/indirect/rect yet; these are the
-    // slots for the 1-to-N / swap / indirect / rect blit shaders once added. Until
-    // then, reject under SDMA=0 (same as the SDMA fan-out path would), leaving
-    // the completion signal untouched as above.
+    // Neither indirect copy nor rect has a shader-blit equivalent; indirect is
+    // served only by the native SDMA wait/signal-indirect path, and rect has no
+    // shader form. Reject under SDMA=0 (same as the SDMA fan-out path would),
+    // leaving the completion signal untouched as above.
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 

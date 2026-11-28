@@ -119,6 +119,63 @@ class Blit {
 
   virtual void GangLeader(bool gang_leader) = 0;
   virtual bool GangLeader() const { return false; };
+
+  /// @brief Submit a batch of swap copy commands, exchanging the contents of
+  /// each address pair. After execution entry i's buffer A holds the original
+  /// contents of its buffer B and vice versa. All entries share @p out_signal,
+  /// which is released once every entry has completed.
+  ///
+  /// @note N-entry rather than single-pair because that is the shape the HSA
+  /// batch-copy API and its HIP caller use; a swap batch must not have to be
+  /// unrolled into N ops by the caller just to reach a blit.
+  ///
+  /// @param num_entries Number of address pairs, >= 1.
+  /// @param addr_a_list Array of @p num_entries first-buffer addresses.
+  /// @param addr_b_list Array of @p num_entries second-buffer addresses.
+  /// @param size_list Array of @p num_entries swap sizes in bytes.
+  /// @param dep_signals Arrays of dependent signals.
+  /// @param out_signal Output signal.
+  virtual hsa_status_t SubmitSwapCopyCommand(
+      uint32_t num_entries, void* const* addr_a_list, void* const* addr_b_list,
+      const size_t* size_list, std::vector<core::Signal*>& dep_signals,
+      core::Signal& out_signal) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  /// @brief Single-pair form of the above.
+  ///
+  /// @note Deliberately non-virtual: the N-entry overload is the only
+  /// overridable entry point, so an implementation cannot accidentally support
+  /// one shape and silently reject the other.
+  hsa_status_t SubmitSwapCopyCommand(void* addr_a, void* addr_b, size_t size,
+                                     std::vector<core::Signal*>& dep_signals,
+                                     core::Signal& out_signal) {
+    void* const addr_a_list[1] = {addr_a};
+    void* const addr_b_list[1] = {addr_b};
+    const size_t size_list[1] = {size};
+    return SubmitSwapCopyCommand(1, addr_a_list, addr_b_list, size_list,
+                                 dep_signals, out_signal);
+  }
+
+  /// @brief Submit a broadcast copy: one source buffer written to each of
+  /// @p num_destinations destination buffers. All destinations share
+  /// @p out_signal, which is released once every one has been written.
+  ///
+  /// @param src Source buffer address.
+  /// @param dst_list Array of @p num_destinations destination addresses.
+  /// @param num_destinations Number of destination buffers, >= 1. An
+  /// implementation that can only drive a bounded number of destinations per
+  /// dispatch splits the request internally rather than rejecting it, so the
+  /// accepted range does not depend on which engine services the copy.
+  /// @param size Bytes written to each destination.
+  /// @param dep_signals Arrays of dependent signals.
+  /// @param out_signal Output signal.
+  virtual hsa_status_t SubmitBroadcastCopyCommand(
+      const void* src, void* const* dst_list, uint32_t num_destinations,
+      size_t size, std::vector<core::Signal*>& dep_signals,
+      core::Signal& out_signal) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
 };
 }  // namespace core
 }  // namespace rocr

@@ -59,6 +59,7 @@
 #include "suites/functional/memory_fragment.h"
 #include "suites/functional/device_mem_no_host_access.h"
 #include "suites/functional/memory_fill.h"
+#include "suites/functional/memory_async_batch_copy.h"
 #include "suites/functional/deallocation_notifier.h"
 #include "suites/functional/virtual_memory.h"
 #include "suites/functional/loader_reserved_address.h"
@@ -229,6 +230,76 @@ TEST(rocrtstFunc, MemoryFillTest) {
   if (!RunCustomTestProlog(&mf)) return;
   mf.MemoryFillTest();
   RunCustomTestEpilog(&mf);
+}
+
+TEST(rocrtstFunc, MemoryBatchCopy_Linear_Single) {
+  MemoryAsyncBatchCopy bc;
+  if (!RunCustomTestProlog(&bc)) return;
+  bc.LinearSingleTest();
+  RunCustomTestEpilog(&bc);
+}
+
+TEST(rocrtstFunc, MemoryBatchCopy_Linear_Multi) {
+  MemoryAsyncBatchCopy bc;
+  if (!RunCustomTestProlog(&bc)) return;
+  bc.LinearMultiTest();
+  RunCustomTestEpilog(&bc);
+}
+
+TEST(rocrtstFunc, MemoryBatchCopy_Linear_Peer) {
+  MemoryAsyncBatchCopy bc;
+  if (!RunCustomTestProlog(&bc)) return;
+  bc.LinearPeerTest();
+  RunCustomTestEpilog(&bc);
+}
+
+TEST(rocrtstFunc, MemoryBatchCopy_Broadcast) {
+  MemoryAsyncBatchCopy bc;
+  if (!RunCustomTestProlog(&bc)) return;
+  bc.BroadcastTest();
+  RunCustomTestEpilog(&bc);
+}
+
+TEST(rocrtstFunc, MemoryBatchCopy_Swap) {
+  MemoryAsyncBatchCopy bc;
+  if (!RunCustomTestProlog(&bc)) return;
+  bc.SwapTest();
+  RunCustomTestEpilog(&bc);
+}
+
+TEST(rocrtstFunc, MemoryBatchCopy_Rect) {
+  MemoryAsyncBatchCopy bc;
+  if (!RunCustomTestProlog(&bc)) return;
+  bc.RectTest();
+  RunCustomTestEpilog(&bc);
+}
+
+TEST(rocrtstFunc, MemoryBatchCopy_Indirect) {
+  MemoryAsyncBatchCopy bc;
+  if (!RunCustomTestProlog(&bc)) return;
+  bc.IndirectTest();
+  RunCustomTestEpilog(&bc);
+}
+
+TEST(rocrtstFunc, MemoryBatchCopy_Dependency) {
+  MemoryAsyncBatchCopy bc;
+  if (!RunCustomTestProlog(&bc)) return;
+  bc.DependencyTest();
+  RunCustomTestEpilog(&bc);
+}
+
+TEST(rocrtstFunc, MemoryBatchCopy_Mixed_Ops) {
+  MemoryAsyncBatchCopy bc;
+  if (!RunCustomTestProlog(&bc)) return;
+  bc.MixedOpsTest();
+  RunCustomTestEpilog(&bc);
+}
+
+TEST(rocrtstFunc, MemoryBatchCopy_Negative) {
+  MemoryAsyncBatchCopy bc;
+  if (!RunCustomTestProlog(&bc)) return;
+  bc.NegativeTest();
+  RunCustomTestEpilog(&bc);
 }
 
 TEST(rocrtstFunc, Concurrent_Init_Test) {
