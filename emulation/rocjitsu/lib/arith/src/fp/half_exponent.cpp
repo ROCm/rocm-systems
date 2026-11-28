@@ -450,3 +450,49 @@ int rj_arith_v_ldexp_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t
   }
   return half_exponent_wave64<true>(flags, exec_mask, instruction_flags, d, a, b, true, true);
 }
+
+int rj_arith_v_ldexp_f16_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts) {
+  const bool requested_mode2 =
+      (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS;
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  if (int error =
+          half_exponent<true>(flags, 0, instruction_flags, nullptr, nullptr, nullptr, true)) {
+    return error;
+  }
+  if (requested_mode2 && (instruction_flags >> 32)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+  }
+  return half_exponent<true>(flags, exec_mask, instruction_flags, d, a, b, true);
+}
+
+int rj_arith_v_ldexp_f16_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts) {
+  const bool requested_mode2 =
+      (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS;
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  if (int error =
+          half_exponent<true>(flags, 0, instruction_flags, nullptr, nullptr, nullptr, true)) {
+    return error;
+  }
+  if (requested_mode2 && (instruction_flags >> 32)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+  }
+  return half_exponent_wave64<true>(flags, exec_mask, instruction_flags, d, a, b, true);
+}

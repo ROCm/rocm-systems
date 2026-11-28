@@ -253,12 +253,12 @@ TEST(OlderHalfUnary, Bindings) {
        rj_arith_v_exp_f16_w32_gfx1250, rj_arith_v_log_f16_w32_gfx1250,
        rj_arith_v_sin_f16_w32_gfx1250, rj_arith_v_cos_f16_w32_gfx1250,
        rj_arith_v_fract_f16_w32_gfx12},
-      {rj_arith_v_trunc_f16_w32_gfx942, rj_arith_v_ceil_f16_w32_gfx942,
-       rj_arith_v_rndne_f16_w32_gfx942, rj_arith_v_floor_f16_w32_gfx942,
-       rj_arith_v_frexp_mant_f16_w32_gfx942, nullptr, rj_arith_v_rcp_f16_w32_gfx950,
+      {rj_arith_v_trunc_f16_w32_gfx950, rj_arith_v_ceil_f16_w32_gfx950,
+       rj_arith_v_rndne_f16_w32_gfx950, rj_arith_v_floor_f16_w32_gfx950,
+       rj_arith_v_frexp_mant_f16_w32_gfx950, nullptr, rj_arith_v_rcp_f16_w32_gfx950,
        rj_arith_v_rsq_f16_w32_gfx950, rj_arith_v_sqrt_f16_w32_gfx950, rj_arith_v_exp_f16_w32_gfx950,
        rj_arith_v_log_f16_w32_gfx950, rj_arith_v_sin_f16_w32_gfx950, rj_arith_v_cos_f16_w32_gfx950,
-       rj_arith_v_fract_f16_w32_gfx942},
+       rj_arith_v_fract_f16_w32_gfx950},
   };
   for (const auto &family : families) {
     ScopedIsaExecutionBackend backend(family.backend);

@@ -14832,7 +14832,9 @@ TEST(ArithBridgeTest, CdnaIntegralUnaryAliasingAndHalfPublication) {
         EXPECT_EQ(fixture.cu->read_vgpr(fixture.base(), 0), upper | c.expected);
         const uint32_t nan = fixture.cu->read_vgpr(fixture.base(), lanes - 1);
         if (semantics == ArithmeticSemantics::Compatibility) {
-          EXPECT_EQ(nan, c.half ? upper | 0x7f23U : 0xffc12345U);
+          const bool preserve_snan = arch == 1;
+          EXPECT_EQ(nan, c.half ? upper | (preserve_snan ? 0x7d23U : 0x7f23U)
+                                : (preserve_snan ? 0xff812345U : 0xffc12345U));
         } else {
           // Loose permits native NaN quieting and payload behavior.
           EXPECT_EQ(nan & (c.half ? 0x7c00U : 0x7f800000U), c.half ? 0x7c00U : 0x7f800000U);
@@ -14919,8 +14921,9 @@ TEST(ArithBridgeTest, CdnaNumericQualification) {
           }
           auto instruction = f.decoder->decode_window(words);
           ASSERT_TRUE(instruction.succeeded());
-          const bool strict = semantics == ArithmeticSemantics::BitExactEmpiricalNoFpStatus ||
-                              semantics == ArithmeticSemantics::BitExactEmpirical;
+          const bool strict =
+              semantics == ArithmeticSemantics::BitExactEmpirical ||
+              (arch != 1 && semantics == ArithmeticSemantics::BitExactEmpiricalNoFpStatus);
           EXPECT_EQ(f.cu->execute_instruction(instruction.value().get(), *f.wave).succeeded(),
                     !strict || !exec_mask);
           if (strict || !exec_mask) {
@@ -14931,6 +14934,12 @@ TEST(ArithBridgeTest, CdnaNumericQualification) {
                                          0x40a00000U, 0xbf800000U, 0x3f800000U,
                                          0x40c00000U, 0x40000000U, 2U};
             EXPECT_EQ(f.cu->read_vgpr(f.base() + 6, 0), expected[op]);
+          } else if (arch == 1 && semantics != ArithmeticSemantics::Loose) {
+            // MI350X (gfx950) LDEXP_F32 and LDEXP_F64 preserve sNaN inputs when MODE.IEEE is 0.
+            EXPECT_EQ(f.cu->read_vgpr(f.base() + 6, 0), op == 1 ? 0x7f800123U : 0x12345678U);
+            if (op == 2) {
+              EXPECT_EQ(f.cu->read_vgpr(f.base() + 7, 0), 0x7ff00000U);
+            }
           }
           EXPECT_EQ(f.wave->trapsts(), 0x80U);
           EXPECT_EQ(f.wave->pending_alu_causes(), 0U);
@@ -15333,9 +15342,11 @@ TEST(ArithBridgeTest, CdnaInheritedNanQuieting) {
       auto instruction = f.decoder->decode_window(words);
       ASSERT_TRUE(instruction.succeeded());
       ASSERT_TRUE(f.cu->execute_instruction(instruction.value().get(), *f.wave).succeeded());
-      EXPECT_EQ(f.cu->read_vgpr(f.base() + 6, 0), op == 11 ? 0x7fc00123U : 0x12345678U);
+      const bool preserve_snan = arch == 1 && op >= 10;
+      EXPECT_EQ(f.cu->read_vgpr(f.base() + 6, 0),
+                op == 11 ? (preserve_snan ? 0x7f800123U : 0x7fc00123U) : 0x12345678U);
       if (op != 11) {
-        EXPECT_EQ(f.cu->read_vgpr(f.base() + 7, 0), 0x7ff80000U);
+        EXPECT_EQ(f.cu->read_vgpr(f.base() + 7, 0), preserve_snan ? 0x7ff00000U : 0x7ff80000U);
       }
     }
   }
@@ -15883,7 +15894,9 @@ TEST(ArithBridgeTest, CdnaHalfFmaPolicyAndHalfWrites) {
                                                                  : preserve_high ? 0xdead0000
                                                                                  : 0);
               } else if (lane == lanes - 1) {
-                const uint32_t expected = rounding == 1 ? 0x3c01 : 0x3c00;
+                const bool flushes_mac_subnormals = arch == rocjitsu::IsaFamily::Cdna4 && form == 2;
+                const uint32_t expected =
+                    rounding == 1 && !flushes_mac_subnormals ? 0x3c01 : 0x3c00;
                 EXPECT_EQ(actual, high || preserve_high ? packed(expected) : expected);
               } else {
                 EXPECT_EQ(actual, packed(1));
@@ -15969,8 +15982,9 @@ TEST(ArithBridgeTest, CdnaHalfMacVop2AndDpp) {
       for (unsigned lane = 0; lane < 64; ++lane) {
         const bool active = dpp || lane == 0 || lane == 63;
         const bool source_is_two = bool(lane & 1) != dpp;
+        const uint32_t high_half = arch == rocjitsu::IsaFamily::Cdna4 ? 0U : 0xdead0000U;
         const uint32_t expected =
-            active ? 0xdead0000U | (source_is_two ? 0x4200U : 0x4000U) : 0xdead3c00U;
+            active ? high_half | (source_is_two ? 0x4200U : 0x4000U) : 0xdead3c00U;
         EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 2, lane), expected) << lane;
       }
     }
@@ -16241,12 +16255,16 @@ TEST(ArithBridgeTest, CdnaPackedHalfQualificationAndLooseFallback) {
                                      {.vdst = 2, .src0 = 256, .src1 = 257, .op_sel_hi = 3});
         auto instruction = f.decoder->decode_window(words);
         ASSERT_TRUE(instruction.succeeded());
-        const bool strict = semantics == ArithmeticSemantics::BitExactEmpiricalNoFpStatus;
+        const bool cdna4 = arch == rocjitsu::IsaFamily::Cdna4;
+        const bool strict = !cdna4 && semantics == ArithmeticSemantics::BitExactEmpiricalNoFpStatus;
         EXPECT_EQ(f.cu->execute_instruction(instruction.value().get(), *f.wave).succeeded(),
                   !strict);
         const bool compatibility = semantics == ArithmeticSemantics::Compatibility;
-        const uint32_t result = multiply ? (compatibility ? 0x04000400U : 0U)
-                                         : (compatibility ? 0x40007d00U : 0x40007f00U);
+        const uint32_t result =
+            multiply
+                ? (cdna4 ? 0U : (compatibility ? 0x04000400U : 0U))
+                : ((cdna4 ? semantics != ArithmeticSemantics::Loose : compatibility) ? 0x40007d00U
+                                                                                     : 0x40007f00U);
         EXPECT_EQ(f.cu->read_vgpr(f.base() + 2, 0), strict ? 0x3c003c00U : result);
       }
     }
@@ -16277,7 +16295,8 @@ TEST(ArithBridgeTest, CdnaOrdinaryHalfMulMinimumNormal) {
       auto instruction = f.decoder->decode_window(words);
       ASSERT_TRUE(instruction.succeeded());
       ASSERT_TRUE(f.cu->execute_instruction(instruction.value().get(), *f.wave).succeeded());
-      EXPECT_EQ(f.cu->read_vgpr(f.base() + 2, 0) & 0xffffU, scaled ? 0x0800U : 0x0400U);
+      EXPECT_EQ(f.cu->read_vgpr(f.base() + 2, 0) & 0xffffU,
+                arch == rocjitsu::IsaFamily::Cdna4 ? 0x0000U : (scaled ? 0x0800U : 0x0400U));
     }
   }
 }
@@ -16335,7 +16354,8 @@ TEST(ArithBridgeTest, CdnaHalfArithmeticQuietsSnan) {
         auto instruction = f.decoder->decode_window(words);
         ASSERT_TRUE(instruction.succeeded());
         ASSERT_TRUE(f.cu->execute_instruction(instruction.value().get(), *f.wave).succeeded());
-        EXPECT_EQ(f.cu->read_vgpr(f.base() + 2, 0) & 0xffffU, 0x7e01U);
+        EXPECT_EQ(f.cu->read_vgpr(f.base() + 2, 0) & 0xffffU,
+                  arch == rocjitsu::IsaFamily::Cdna4 ? 0x7c01U : 0x7e01U);
       }
     }
   }
@@ -16395,7 +16415,9 @@ TEST(ArithBridgeTest, CdnaHalfFmaRejectsUnqualifiedStrictPolicies) {
         }
         auto instruction = f.decoder->decode_window(words);
         ASSERT_TRUE(instruction.succeeded());
-        const bool strict = semantics != ArithmeticSemantics::BitExactEmpiricalAllowLoose;
+        const bool strict = semantics == ArithmeticSemantics::BitExactEmpirical ||
+                            (arch != rocjitsu::IsaFamily::Cdna4 &&
+                             semantics == ArithmeticSemantics::BitExactEmpiricalNoFpStatus);
         EXPECT_EQ(f.cu->execute_instruction(instruction.value().get(), *f.wave).succeeded(),
                   !strict);
         if (strict) {
@@ -16455,14 +16477,16 @@ TEST(ArithBridgeTest, CdnaHalfExponentQualification) {
           }
           auto instruction = f.decoder->decode_window(words);
           ASSERT_TRUE(instruction.succeeded());
-          const bool strict = semantics == ArithmeticSemantics::BitExactEmpiricalNoFpStatus;
+          const bool cdna4 = arch == rocjitsu::IsaFamily::Cdna4;
+          const bool strict =
+              !cdna4 && semantics == ArithmeticSemantics::BitExactEmpiricalNoFpStatus;
           EXPECT_EQ(f.cu->execute_instruction(instruction.value().get(), *f.wave).succeeded(),
                     !strict);
           const auto result = f.cu->read_vgpr(f.base() + 2, 0);
           if (strict) {
             EXPECT_EQ(result, 0xdeadbeefU);
           } else {
-            EXPECT_EQ(result & 0xffffU, ldexp ? 0x7e01U : 0xffe9U);
+            EXPECT_EQ(result & 0xffffU, ldexp ? (cdna4 ? 0x7c01U : 0x7e01U) : 0xffe9U);
           }
           EXPECT_EQ(f.wave->trapsts(), 0x10U);
         }
@@ -20938,6 +20962,131 @@ TEST(ArithBridgeTest, Cdna4F32F64MfmaDot2F16AndMadMixExact) {
                       ->execute_instruction(mixf32_inst.value().get(), *allow_loose_fixture.wave)
                       .succeeded());
       EXPECT_EQ(allow_loose_fixture.cu->read_vgpr(allow_loose_fixture.base() + 3, 0), 0x00400000U);
+    }
+  }
+}
+
+TEST(ArithBridgeTest, Gfx950ValuFpCalibrationAndQualification) {
+  for (auto semantics :
+       {ArithmeticSemantics::Compatibility, ArithmeticSemantics::BitExactEmpiricalNoFpStatus,
+        ArithmeticSemantics::BitExactEmpirical}) {
+    const bool mode2 = semantics == ArithmeticSemantics::BitExactEmpiricalNoFpStatus;
+    const bool mode3 = semantics == ArithmeticSemantics::BitExactEmpirical;
+
+    // 1. VOP3 V_FMA_F16 and V_MAD_F16 preserve VGPR[31:16]; V_FMA_LEGACY_F16,
+    //    V_MAD_LEGACY_F16, and V_MAC_F16 zero-extend VGPR[31:16].
+    for (int variant = 0; variant < 5; ++variant) {
+      BridgeFixture f(rocjitsu::IsaFamily::Cdna4, 64, ArithmeticPolicy{semantics});
+      f.wave->set_exec(1);
+      f.wave->set_mode_raw(0x2c0); // IEEE=1, preserve FP16 denorms
+      f.cu->write_vgpr(f.base(), 0, 0x00003be0U);
+      f.cu->write_vgpr(f.base() + 1, 0, 0x00003be0U);
+      f.cu->write_vgpr(f.base() + 2, 0, 0x0000b800U);
+      f.cu->write_vgpr(f.base() + 3, 0, 0xdeadb800U);
+      const uint16_t opcodes[] = {cdna4::kVFmaF16Vop3, cdna4::kVFmaLegacyF16Vop3,
+                                  cdna4::kVMadF16Vop3, cdna4::kVMadLegacyF16Vop3,
+                                  cdna4::kVMacF16Vop3};
+      const auto words =
+          variant == 4 ? cdna4::build_vop3(opcodes[variant], {.vdst = 3, .src0 = 256, .src1 = 257})
+                       : cdna4::build_vop3(opcodes[variant],
+                                           {.vdst = 3, .src0 = 256, .src1 = 257, .src2 = 258});
+      auto inst = f.decoder->decode_window(words);
+      ASSERT_TRUE(inst.succeeded());
+      EXPECT_EQ(f.cu->execute_instruction(inst.value().get(), *f.wave).succeeded(), !mode3);
+      if (!mode3) {
+        const uint32_t out = f.cu->read_vgpr(f.base() + 3, 0);
+        const bool preserve_hi = variant == 0 || variant == 2;
+        EXPECT_EQ(out >> 16, preserve_hi ? 0xdeadU : 0x0000U) << "variant=" << variant;
+        // Two-step MAD/MAC (0x3be0 * 0x3be0 -> 0x3bc0, - 0.5 -> 0x3780) vs fused FMA (0x3781).
+        const bool two_step = variant >= 2;
+        EXPECT_EQ(out & 0xffffU, two_step ? 0x3780U : 0x3781U) << "variant=" << variant;
+      }
+    }
+
+    // 2. Plain SDWA on V_MUL_F16 succeeds in mode 2, while SDWA OMOD/CLAMP, DPP, and
+    //    uncaptured literal forms (V_MADMK_F16, V_FMAMK_F32) reject mode 2.
+    {
+      BridgeFixture f(rocjitsu::IsaFamily::Cdna4, 64, ArithmeticPolicy{semantics});
+      f.wave->set_exec(1);
+      f.wave->set_mode_raw(0xc0);
+      f.cu->write_vgpr(f.base(), 0, 0x40003c00U);
+      f.cu->write_vgpr(f.base() + 1, 0, 0x00004200U);
+      f.cu->write_vgpr(f.base() + 2, 0, 0xdeadbeefU);
+      const uint32_t sdwa_sel = (4U << 24) | (5U << 16) | (2U << 11) | (5U << 8);
+      const auto plain_sdwa = std::array<uint32_t, 2>{
+          cdna4::build_vop2(cdna4::kVMulF16Vop2, {.src0 = SRC_SDWA, .vsrc1 = 1, .vdst = 2})[0],
+          sdwa_sel}; // src0=WORD_1 (2.0), src1=WORD_0 (3.0), dst=WORD_1, UNUSED_PRESERVE
+      auto inst = f.decoder->decode_window(plain_sdwa);
+      ASSERT_TRUE(inst.succeeded());
+      EXPECT_EQ(f.cu->execute_instruction(inst.value().get(), *f.wave).succeeded(), !mode3);
+      if (!mode3) {
+        EXPECT_EQ(f.cu->read_vgpr(f.base() + 2, 0), 0x4600beefU);
+      }
+
+      const auto omod_sdwa = std::array<uint32_t, 2>{
+          cdna4::build_vop2(cdna4::kVMulF16Vop2, {.src0 = SRC_SDWA, .vsrc1 = 1, .vdst = 2})[0],
+          sdwa_sel | (1U << 14)};
+      inst = f.decoder->decode_window(omod_sdwa);
+      ASSERT_TRUE(inst.succeeded());
+      EXPECT_EQ(f.cu->execute_instruction(inst.value().get(), *f.wave).succeeded(),
+                !mode2 && !mode3);
+
+      const auto dpp_add = std::array<uint32_t, 2>{
+          cdna4::build_vop2(cdna4::kVAddF32Vop2, {.src0 = SRC_DPP, .vsrc1 = 1, .vdst = 2})[0],
+          0xff00b100U};
+      inst = f.decoder->decode_window(dpp_add);
+      ASSERT_TRUE(inst.succeeded());
+      EXPECT_EQ(f.cu->execute_instruction(inst.value().get(), *f.wave).succeeded(),
+                !mode2 && !mode3);
+
+      const auto literal_fma = std::array<uint32_t, 2>{
+          cdna4::build_vop2(cdna4::kVFmamkF32Vop2, {.src0 = 256, .vsrc1 = 1, .vdst = 2})[0],
+          0x40000000U};
+      inst = f.decoder->decode_window(literal_fma);
+      ASSERT_TRUE(inst.succeeded());
+      EXPECT_EQ(f.cu->execute_instruction(inst.value().get(), *f.wave).succeeded(),
+                !mode2 && !mode3);
+    }
+
+    // 3. V_PK_FMA_F32, V_MUL_LEGACY_F32, and V_TRIG_PREOP_F64 accept mode 2 and reject mode 3.
+    {
+      BridgeFixture f(rocjitsu::IsaFamily::Cdna4, 64, ArithmeticPolicy{semantics});
+      f.wave->set_exec(1);
+      f.wave->set_mode_raw(0xf0); // IEEE=0
+      f.cu->write_vgpr(f.base(), 0, 0x00000000U);
+      f.cu->write_vgpr(f.base() + 1, 0, 0x7f800123U);
+      f.cu->write_vgpr(f.base() + 2, 0, 0x7f800000U);
+      f.cu->write_vgpr(f.base() + 3, 0, 0x3f800000U);
+      f.cu->write_vgpr(f.base() + 4, 0, 0x3f800000U);
+      f.cu->write_vgpr(f.base() + 5, 0, 0x00000000U);
+      const auto pk_fma = cdna4::build_vop3p(
+          cdna4::kVPkFmaF32Vop3p,
+          {.vdst = 6, .op_sel_hi_2 = 1, .src0 = 256, .src1 = 258, .src2 = 260, .op_sel_hi = 3});
+      auto inst = f.decoder->decode_window(pk_fma);
+      ASSERT_TRUE(inst.succeeded());
+      EXPECT_EQ(f.cu->execute_instruction(inst.value().get(), *f.wave).succeeded(), !mode3);
+      if (!mode3) {
+        EXPECT_EQ(f.cu->read_vgpr(f.base() + 6, 0), 0xffc00000U);
+        EXPECT_EQ(f.cu->read_vgpr(f.base() + 7, 0), 0x7f800123U);
+      }
+
+      const auto mul_leg =
+          cdna4::build_vop3(cdna4::kVMulLegacyF32Vop3, {.vdst = 6, .src0 = 256, .src1 = 258});
+      inst = f.decoder->decode_window(mul_leg);
+      ASSERT_TRUE(inst.succeeded());
+      EXPECT_EQ(f.cu->execute_instruction(inst.value().get(), *f.wave).succeeded(), !mode3);
+      if (!mode3) {
+        EXPECT_EQ(f.cu->read_vgpr(f.base() + 6, 0), 0x00000000U);
+      }
+
+      f.cu->write_vgpr(f.base(), 0, 0x00000000U);
+      f.cu->write_vgpr(f.base() + 1, 0, 0x3ff00000U);
+      f.cu->write_vgpr(f.base() + 2, 0, 0U);
+      const auto preop =
+          cdna4::build_vop3(cdna4::kVTrigPreopF64Vop3, {.vdst = 6, .src0 = 256, .src1 = 258});
+      inst = f.decoder->decode_window(preop);
+      ASSERT_TRUE(inst.succeeded());
+      EXPECT_EQ(f.cu->execute_instruction(inst.value().get(), *f.wave).succeeded(), !mode3);
     }
   }
 }

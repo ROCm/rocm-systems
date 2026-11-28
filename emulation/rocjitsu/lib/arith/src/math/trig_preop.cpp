@@ -234,3 +234,27 @@ int rj_arith_v_trig_preop_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint
   }
   return run_wave64<false>(flags, exec_mask, mode, d, a, b, excp_flag_user);
 }
+
+int rj_arith_v_trig_preop_f64_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                         uint32_t *const *d, const uint32_t *const *a,
+                                         const uint32_t *const *b, uint32_t *state) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  flags &= ~(RJ_ARITH_FP_ROUND_MASK | RJ_ARITH_FP_DX10_CLAMP_OFF);
+  return run<true>(flags, exec_mask, mode, d, a, b, state);
+}
+
+int rj_arith_v_trig_preop_f64_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                         uint32_t *const *d, const uint32_t *const *a,
+                                         const uint32_t *const *b, uint32_t *state) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  flags &= ~(RJ_ARITH_FP_ROUND_MASK | RJ_ARITH_FP_DX10_CLAMP_OFF);
+  return run_wave64<true>(flags, exec_mask, mode, d, a, b, state);
+}

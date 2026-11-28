@@ -773,9 +773,11 @@ std::vector<ArithmeticCase> adjacent_fp_cases() {
       add(name + "FlushNegativeSubnormal", instruction, {{0, 0x80000001u}},
           {{6, exponent ? 0u : 0x80000000u}}, 0u);
       add(name + "SignalingNaN", instruction, {{0, 0xff80002au}},
-          {{6, exponent                                      ? 0u
-               : encoding.arch == rocjitsu::IsaFamily::Rdna3 ? 0xff80002au
-                                                             : 0xffc0002au}},
+          {{6, exponent ? 0u
+               : encoding.arch == rocjitsu::IsaFamily::Rdna3 ||
+                       encoding.arch == rocjitsu::IsaFamily::Cdna4
+                   ? 0xff80002au
+                   : 0xffc0002au}},
           0xf0u);
       add(name + "NegativeNormal", instruction, {{0, 0xbe800000u}},
           {{6, exponent ? uint32_t(-1) : 0xbf000000u}}, 0xf0u);
@@ -1212,12 +1214,14 @@ std::vector<ArithmeticCase> modifier_environment_cases() {
         const char *name;
         uint32_t a, b, expected;
       };
-      // Inherited legacy MUL quiets NaNs even without IEEE mode and flushes
-      // after rounding, so promotion to minimum normal survives output flushing.
+      // Uncalibrated CDNA3/5 legacy MUL quiets NaNs without IEEE mode and flushes
+      // after rounding; physical MI350X (CDNA4) preserves sNaN when IEEE=0 and
+      // tests tininess before rounding like RDNA3 V_MUL_DX9_ZERO_F32.
+      const bool cdna4 = architecture.arch == rocjitsu::IsaFamily::Cdna4;
       for (const auto &sample :
            {Sample{"ZeroInfinity", 0, 0x7f800000U, 0},
-            Sample{"QuietNan", 0x7f812345U, 0x3f800000U, 0x7fc12345U},
-            Sample{"NormalPromotion", 0x00800000U, 0x3f7fffffU, 0x00800000U}}) {
+            Sample{"QuietNan", 0x7f812345U, 0x3f800000U, cdna4 ? 0x7f812345U : 0x7fc12345U},
+            Sample{"NormalPromotion", 0x00800000U, 0x3f7fffffU, cdna4 ? 0U : 0x00800000U}}) {
         cases.push_back(
             {"MulArch" + std::to_string(static_cast<int>(architecture.arch)) + sample.name,
              architecture.arch,

@@ -203,8 +203,7 @@ void VPkFmaF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
-  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
-      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
     wf.report_instruction_execution_error(
         amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
@@ -227,9 +226,10 @@ void VPkFmaF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
       (amdgpu::pk16_src_needs_narrowing(inst_.src1, src1.size_bits()) ? 2u : 0u) |
       (amdgpu::pk16_src_needs_narrowing(inst_.src2, src2.size_bits()) ? 4u : 0u);
   const unsigned replicate_sources = 0;
-  amdgpu::arith::execute_packed_fma16<false>(
-      wf, rj_arith_v_pk_fma_f16_w32, rj_arith_v_pk_fma_f16_w64, wf.cu().arithmetic_flags(),
-      modifiers, vdst, src0, src1, src2, true, narrow_sources, replicate_sources);
+  amdgpu::arith::execute_packed_fma16<false>(wf, rj_arith_v_pk_fma_f16_w32_gfx950,
+                                             rj_arith_v_pk_fma_f16_w64_gfx950,
+                                             wf.cu().arithmetic_flags(), modifiers, vdst, src0,
+                                             src1, src2, true, narrow_sources, replicate_sources);
 }
 
 void VPkAddF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -246,7 +246,7 @@ void VPkAddF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
       (amdgpu::pk16_src_needs_narrowing(inst_.src0, src0.size_bits()) ? 1u : 0u) |
       (amdgpu::pk16_src_needs_narrowing(inst_.src1, src1.size_bits()) ? 2u : 0u);
   amdgpu::arith::execute_packed_binary16(
-      wf, rj_arith_v_pk_add_f16_w32_gfx942, rj_arith_v_pk_add_f16_w64_gfx942,
+      wf, rj_arith_v_pk_add_f16_w32_gfx950, rj_arith_v_pk_add_f16_w64_gfx950,
       wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1, true, narrow_sources);
 }
 
@@ -264,7 +264,7 @@ void VPkMulF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
       (amdgpu::pk16_src_needs_narrowing(inst_.src0, src0.size_bits()) ? 1u : 0u) |
       (amdgpu::pk16_src_needs_narrowing(inst_.src1, src1.size_bits()) ? 2u : 0u);
   amdgpu::arith::execute_packed_binary16(
-      wf, rj_arith_v_pk_mul_f16_w32_gfx942, rj_arith_v_pk_mul_f16_w64_gfx942,
+      wf, rj_arith_v_pk_mul_f16_w32_gfx950, rj_arith_v_pk_mul_f16_w64_gfx950,
       wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1, true, narrow_sources);
 }
 
@@ -533,8 +533,8 @@ void VPkFmaF32Vop3p::execute_impl(amdgpu::Wavefront &wf) {
                              (inst_.op_sel_hi_2 ? 0u : RJ_ARITH_PK_HI_C_LOW) |
                              ((inst_.neg & 4) ? RJ_ARITH_PK_NEG_LO_C : 0u) |
                              ((inst_.neg_hi & 4) ? RJ_ARITH_PK_NEG_HI_C : 0u);
-  amdgpu::arith::execute_packed_fma32(wf, rj_arith_v_pk_fma_f32_w32_gfx942,
-                                      rj_arith_v_pk_fma_f32_w64_gfx942, wf.cu().arithmetic_flags(),
+  amdgpu::arith::execute_packed_fma32(wf, rj_arith_v_pk_fma_f32_w32_gfx950,
+                                      rj_arith_v_pk_fma_f32_w64_gfx950, wf.cu().arithmetic_flags(),
                                       modifiers, vdst, src0, src1, src2, true);
 }
 
@@ -549,7 +549,7 @@ void VPkMulF32Vop3p::execute_impl(amdgpu::Wavefront &wf) {
                              ((inst_.neg & 2) ? RJ_ARITH_PK_NEG_LO_B : 0u) |
                              ((inst_.neg_hi & 2) ? RJ_ARITH_PK_NEG_HI_B : 0u);
   amdgpu::arith::execute_packed_binary32(
-      wf, rj_arith_v_pk_mul_f32_w32_gfx942, rj_arith_v_pk_mul_f32_w64_gfx942,
+      wf, rj_arith_v_pk_mul_f32_w32_gfx950, rj_arith_v_pk_mul_f32_w64_gfx950,
       wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1, true);
 }
 
@@ -564,7 +564,7 @@ void VPkAddF32Vop3p::execute_impl(amdgpu::Wavefront &wf) {
                              ((inst_.neg & 2) ? RJ_ARITH_PK_NEG_LO_B : 0u) |
                              ((inst_.neg_hi & 2) ? RJ_ARITH_PK_NEG_HI_B : 0u);
   amdgpu::arith::execute_packed_binary32(
-      wf, rj_arith_v_pk_add_f32_w32_gfx942, rj_arith_v_pk_add_f32_w64_gfx942,
+      wf, rj_arith_v_pk_add_f32_w32_gfx950, rj_arith_v_pk_add_f32_w64_gfx950,
       wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1, true);
 }
 

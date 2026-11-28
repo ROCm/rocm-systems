@@ -316,7 +316,7 @@ int unary_loose(uint64_t flags, uint32_t exec_mask, uint64_t modifiers, uint32_t
     } else {
       result[lane] = rocjitsu::arith::as_bits(rocjitsu::arith::alu_output_f32(value, output_mode));
     }
-    if constexpr (Op == rocjitsu::arith::Unary::Fract) {
+    if constexpr (Op == rocjitsu::arith::Unary::Fract || Op == rocjitsu::arith::Unary::FrexpMant) {
       uint32_t raw = rocjitsu::arith::as_bits(rocjitsu::arith::alu_input(a[0][lane], modifiers));
       if (!(flags & RJ_ARITH_FP_IEEE_MODE) && (raw & 0x7fffffff) > 0x7f800000 &&
           (!(modifiers & RJ_ARITH_ALU_CLAMP) || PreserveClampNan)) {
@@ -409,6 +409,42 @@ int unary_wave64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *co
     }
   }
   return RJ_ARITH_SUCCESS;
+}
+
+template <rocjitsu::arith::Unary Op, typename Mask>
+int gfx950_unary_f32(uint64_t flags, Mask exec_mask, uint64_t instruction_flags, uint32_t *const *d,
+                     const uint32_t *const *a, uint32_t *trapsts) {
+  const bool requested_mode2 =
+      (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS;
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  const uint64_t core_flags =
+      Op == rocjitsu::arith::Unary::Fract
+          ? flags
+          : rocjitsu::arith::sdwa_fixed_round_flags(flags, instruction_flags);
+  return rocjitsu::arith::with_sdwa_output<rocjitsu::arith::SdwaOutput::F32Mode>(
+      flags, exec_mask, instruction_flags, d, [&](uint64_t core_mode) {
+        if (int error =
+                unary<Op, true, false, true>(core_flags, 0, core_mode, nullptr, nullptr, trapsts)) {
+          return error;
+        }
+        if (requested_mode2 &&
+            ((instruction_flags >> 32) || (instruction_flags & RJ_ARITH_ALU_SDWA))) {
+          return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+        }
+        if constexpr (sizeof(Mask) == 4) {
+          return unary<Op, true, false, true>(core_flags, exec_mask, core_mode, d, a, trapsts);
+        } else {
+          return unary_wave64<Op, true, false, true>(core_flags, exec_mask, core_mode, d, a,
+                                                     trapsts);
+        }
+      });
 }
 
 } // namespace
@@ -1496,4 +1532,88 @@ int rj_arith_v_fract_f32_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t
   }
   return unary_wave64<rocjitsu::arith::Unary::Fract, true, true, false, true>(flags, exec_mask,
                                                                               mode, d, a);
+}
+
+int rj_arith_v_trunc_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    uint32_t *trapsts) {
+  return gfx950_unary_f32<rocjitsu::arith::Unary::Trunc>(flags, exec_mask, instruction_flags, d, a,
+                                                         trapsts);
+}
+
+int rj_arith_v_trunc_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    uint32_t *trapsts) {
+  return gfx950_unary_f32<rocjitsu::arith::Unary::Trunc>(flags, exec_mask, instruction_flags, d, a,
+                                                         trapsts);
+}
+
+int rj_arith_v_ceil_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   uint32_t *trapsts) {
+  return gfx950_unary_f32<rocjitsu::arith::Unary::Ceil>(flags, exec_mask, instruction_flags, d, a,
+                                                        trapsts);
+}
+
+int rj_arith_v_ceil_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   uint32_t *trapsts) {
+  return gfx950_unary_f32<rocjitsu::arith::Unary::Ceil>(flags, exec_mask, instruction_flags, d, a,
+                                                        trapsts);
+}
+
+int rj_arith_v_floor_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    uint32_t *trapsts) {
+  return gfx950_unary_f32<rocjitsu::arith::Unary::Floor>(flags, exec_mask, instruction_flags, d, a,
+                                                         trapsts);
+}
+
+int rj_arith_v_floor_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    uint32_t *trapsts) {
+  return gfx950_unary_f32<rocjitsu::arith::Unary::Floor>(flags, exec_mask, instruction_flags, d, a,
+                                                         trapsts);
+}
+
+int rj_arith_v_rndne_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    uint32_t *trapsts) {
+  return gfx950_unary_f32<rocjitsu::arith::Unary::Rndne>(flags, exec_mask, instruction_flags, d, a,
+                                                         trapsts);
+}
+
+int rj_arith_v_rndne_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    uint32_t *trapsts) {
+  return gfx950_unary_f32<rocjitsu::arith::Unary::Rndne>(flags, exec_mask, instruction_flags, d, a,
+                                                         trapsts);
+}
+
+int rj_arith_v_frexp_mant_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                         uint64_t instruction_flags, uint32_t *const *d,
+                                         const uint32_t *const *a, uint32_t *trapsts) {
+  return gfx950_unary_f32<rocjitsu::arith::Unary::FrexpMant>(flags, exec_mask, instruction_flags, d,
+                                                             a, trapsts);
+}
+
+int rj_arith_v_frexp_mant_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                         uint64_t instruction_flags, uint32_t *const *d,
+                                         const uint32_t *const *a, uint32_t *trapsts) {
+  return gfx950_unary_f32<rocjitsu::arith::Unary::FrexpMant>(flags, exec_mask, instruction_flags, d,
+                                                             a, trapsts);
+}
+
+int rj_arith_v_fract_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    uint32_t *trapsts) {
+  return gfx950_unary_f32<rocjitsu::arith::Unary::Fract>(flags, exec_mask, instruction_flags, d, a,
+                                                         trapsts);
+}
+
+int rj_arith_v_fract_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    uint32_t *trapsts) {
+  return gfx950_unary_f32<rocjitsu::arith::Unary::Fract>(flags, exec_mask, instruction_flags, d, a,
+                                                         trapsts);
 }

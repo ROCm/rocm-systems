@@ -5,7 +5,7 @@
 
 from . import ExecuteContext
 from .rj_arith_names import wave_api
-from .rj_arith_float import cdna_qualification_guard
+from .rj_arith_float import cdna4_qualification_guard, cdna_qualification_guard
 
 CDNA_INTEGRAL_UNARY = {
     f'V_{op}_F{bits}'
@@ -24,8 +24,13 @@ def gen_cdna_integral_unary(ctx: ExecuteContext) -> str | None:
         return None
     half = ctx.inst.name.endswith('_F16')
     old = ctx.arch_name != 'cdna5'
-    api = 'rj_arith_' + ctx.inst.name.lower() + ('_gfx942' if old else '_gfx12')
-    lines = cdna_qualification_guard(ctx.arch_name)
+    suffix = '_gfx950' if ctx.arch_name == 'cdna4' else '_gfx942' if old else '_gfx12'
+    api = 'rj_arith_' + ctx.inst.name.lower() + suffix
+    lines = (
+        cdna4_qualification_guard(e32_routed=not ctx.is_vop3)
+        if ctx.arch_name == 'cdna4'
+        else cdna_qualification_guard(ctx.arch_name)
+    )
     modifiers = '0'
     if ctx.is_vop3:
         lines += [

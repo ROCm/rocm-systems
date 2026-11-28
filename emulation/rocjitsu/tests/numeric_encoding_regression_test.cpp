@@ -1350,7 +1350,12 @@ TEST_P(LegacyMathRegression, HalfAddKeepsTheInheritedScalingOrderAndNaNQuieting)
   check(vop3(cdna4::kVAddF16Vop3, 0, 3), 0x7c00, 0);
   put(0, 0x7c01);
   put(1, 0x3c00);
-  check(vop3(cdna4::kVAddF16Vop3), 0x7e01, 0);
+  const bool cdna4_target = std::get<0>(GetParam()) == rocjitsu::IsaFamily::Cdna4;
+  check(vop3(cdna4::kVAddF16Vop3), cdna4_target ? 0x7c01 : 0x7e01, 0);
+  if (cdna4_target) {
+    wave_->set_mode_raw(1u << 9);
+    check(vop3(cdna4::kVAddF16Vop3), 0x7e01, 0);
+  }
 }
 
 class OlderPackedHalf : public NumericEncodingRegression {};

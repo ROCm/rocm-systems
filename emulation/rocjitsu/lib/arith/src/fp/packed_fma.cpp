@@ -324,3 +324,66 @@ int rj_arith_v_pk_fmac_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask,
   }
   return run_wave64<true, true, true>(flags, exec_mask, instruction_flags, d, a, b, d, trapsts);
 }
+
+int rj_arith_v_pk_fma_f16_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, const uint32_t *const *c,
+                                     uint32_t *trapsts) {
+  return rj_arith_v_pk_fma_f16_w32(flags, exec_mask, instruction_flags, d, a, b, c, trapsts);
+}
+
+int rj_arith_v_pk_fma_f16_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, const uint32_t *const *c,
+                                     uint32_t *trapsts) {
+  return rj_arith_v_pk_fma_f16_w64(flags, exec_mask, instruction_flags, d, a, b, c, trapsts);
+}
+
+int rj_arith_v_pk_fmac_f16_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts) {
+  const bool requested_mode2 =
+      (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS;
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  if (int error = run<true, true, true>(flags, 0, uint32_t(instruction_flags), nullptr, nullptr,
+                                        nullptr, nullptr, trapsts)) {
+    return error;
+  }
+  if (requested_mode2 && (instruction_flags & RJ_ARITH_ALU_SDWA)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+  }
+  return run<true, true, true>(flags, exec_mask, uint32_t(instruction_flags), d, a, b, d, trapsts);
+}
+
+int rj_arith_v_pk_fmac_f16_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts) {
+  const bool requested_mode2 =
+      (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS;
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  if (int error = run<true, true, true>(flags, 0, uint32_t(instruction_flags), nullptr, nullptr,
+                                        nullptr, nullptr, trapsts)) {
+    return error;
+  }
+  if (requested_mode2 && (instruction_flags & RJ_ARITH_ALU_SDWA)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+  }
+  return run_wave64<true, true, true>(flags, exec_mask, uint32_t(instruction_flags), d, a, b, d,
+                                      trapsts);
+}
