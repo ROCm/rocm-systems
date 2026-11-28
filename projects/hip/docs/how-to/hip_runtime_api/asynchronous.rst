@@ -180,6 +180,21 @@ streams, ensuring correct task execution order. :cpp:func:`hipEventSynchronize`
 lets the application wait for an event to complete before proceeding with the next
 operation.
 
+.. note::
+
+   On the AMD ROCm backend, event timestamps are captured when the host
+   runtime collects the completed command batch, not at the instant the GPU
+   finishes. If an application defers the synchronization call until well
+   after the GPU work has completed, the interval reported by
+   :cpp:func:`hipEventElapsedTime` can include the host-side delay between
+   GPU completion and the synchronize call. This behavior is
+   implementation-dependent and does not apply to all HIP backends. For
+   accurate AMD GPU kernel timing, avoid unrelated host work between GPU
+   completion and the synchronize call, or use
+   `rocprofv3 <https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/>`_
+   kernel traces, which report GPU execution time independently of host
+   synchronization.
+
 Programmatic dependent launch and synchronization
 -------------------------------------------------------------------------------
 
