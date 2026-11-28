@@ -82,7 +82,8 @@ Both explicit strict modes remain unqualified for these operations.
 
 gfx950 unscaled OCP FP8/BF8 widening (`v_cvt_{f32,pk_f32}_{fp8,bf8}_gfx950`),
 narrowing (`v_cvt_{pk,sr}_{fp8,bf8}_f32_gfx950`), and BF16/FP16 conversion
-(`v_cvt_f32_bf16_gfx950`, `v_cvt_{pk,sr}_{bf16,f16}_f32_gfx950`) entry points
+(`v_cvt_f32_bf16_gfx950`, `v_cvt_{pk,sr}_{bf16,f16}_f32_gfx950`) entry points,
+plus `v_dot2{,c}_f32_bf16_gfx950` (retaining Loose SIMD in Compatibility),
 are calibrated against MI350X hardware captures and accept mode 2; gfx950
 signed-byte dense MFMA and sparse SMFMAC entry points saturate signed
 accumulation per hardware pass under `RJ_ARITH_FP16_OVFL` and ignore
@@ -103,7 +104,7 @@ effective `OMOD` paths remain rejected in strict mode 2.
 
 CDNA matrix support covers twenty dense and twelve sparse gfx942 MFMA/SMFMAC
 forms (FP16/BF16, dense XF32, and FNUZ FP8/BF8), fourteen dense and eight sparse
-gfx950 half-input forms plus eight dense and twelve sparse OCP FP8/BF8 forms,
+gfx950 half-input forms plus eight dense and sixteen sparse OCP FP8/BF8 forms,
 and five gfx1250 half-input WMMA forms plus sixteen FP8/BF8 K64/K128 forms.
 gfx942 FP8/BF8 uses FNUZ; gfx950 and gfx1250 use OCP.
 All have scalar, AVX2 and AVX-512-v4 approximate implementations. Loose and
@@ -111,14 +112,21 @@ Compatibility retain those paths. The twenty dense gfx942 MFMA forms (with
 default CBSZ/ABID/BLGP controls) and the twelve sparse gfx942 `V_SMFMAC_F32_*`
 forms (across all CBSZ/ABID metadata selectors) support the integer empirical
 model contributed in #14809 for both `FP16_OVFL` clear and set (flushing NaN to
-+0.0 and clamping +-Inf to +-MAX_FLOAT after each internal K-step). Exact modes
-use that model; exact-allow-Loose falls back outside its qualified controls.
++0.0 and clamping +-Inf to +-MAX_FLOAT after each internal K-step). On gfx950,
+all fourteen dense FP16/BF16 MFMA forms and eight dense OCP FP8/BF8 MFMA forms
+(with default CBSZ/ABID/BLGP, across both `FP16_OVFL` states) plus all
+twenty-four compact and wide `V_SMFMAC_F32_*` forms (across all CBSZ/ABID
+metadata selectors and both `FP16_OVFL` states) support the MI350X-calibrated
+integer step model (24-bit chunk alignment for half inputs, two 13-bit-aligned
+8-product chunks per 16-product pass for OCP FP8/BF8, and per-pass `FP16_OVFL`
+NaN-to-+0.0 flush and +-Inf-to-+-MAX_FLOAT clamping across finite overflow and
+source infinities, verified against `gfx950_mfma.bin`). Exact modes use those
+models; exact-allow-Loose falls back outside their qualified controls.
 All-negative-zero sums (+0), negative subnormal underflow to +0, subnormal C
-preservation, XF32 NaNs with payload only in bits 12:0 (truncating to infinity),
-BF16 2^128 product overflow, and subnormal BF16 product outputs and ties are all
-MI300X hardware-captured. This qualification does not extend to gfx950
-dense/sparse half and fixed-FP8 forms or gfx1250, whose strict modes remain
-unsupported. On gfx950, the four mixed-format MXFP matrix instructions
+preservation, XF32 NaNs with payload only in bits 12:0 (truncating to infinity
+on gfx942), BF16 2^128 product overflow, and subnormal BF16 product outputs and
+ties are hardware-captured. `_gfx950` XF32 and gfx1250 matrix strict modes
+remain unsupported. On gfx950, the four mixed-format MXFP matrix instructions
 (`V_MFMA_F32_{16X16X128,32X32X64}_F8F6F4` and
 `V_MFMA_SCALE_F32_{16X16X128,32X32X64}_F8F6F4`) support MI350X-calibrated
 empirical exact modes across all 25 `(FP8, BF8, FP6, BF6, FP4)` format pairs,

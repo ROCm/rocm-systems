@@ -21,7 +21,8 @@ using Entry = decltype(&rj_arith_v_mfma_f32_16x16x16_f16_w64);
 // Compare a full instruction against the established approximate reduction,
 // including batched layouts and sources that overlap the destination.
 template <int M, int K, int Batch, bool Bf16, bool FullF32 = false, int ABlockLanes = 0>
-void arithmetic(Entry entry, uint32_t factor_mask = UINT32_MAX, Entry gfx942 = nullptr) {
+void arithmetic(Entry entry, uint32_t factor_mask = UINT32_MAX, Entry gfx942 = nullptr,
+                bool exact_entry = false) {
   constexpr int InputRegs = M * K * Batch / (FullF32 ? 64 : 128);
   constexpr int OutputRegs = M * M * Batch / 64;
   constexpr int Count = 2 * InputRegs + 2 * OutputRegs;
@@ -102,8 +103,10 @@ void arithmetic(Entry entry, uint32_t factor_mask = UINT32_MAX, Entry gfx942 = n
       }
       for (uint64_t cpu : levels) {
         for (uint64_t semantics : semantics_modes()) {
-          // Qualified gfx942 exact outputs have captured expectations in gfx942_exact_test.
-          if (target == gfx942 && !controls && semantics != RJ_ARITH_SEMANTICS_LOOSE &&
+          // Qualified gfx942 and gfx950 half-input exact outputs have captured expectations in
+          // gfx942_exact_test and gfx950_exact_test.
+          if ((target == gfx942 || (target == entry && exact_entry)) && !controls &&
+              semantics != RJ_ARITH_SEMANTICS_LOOSE &&
               semantics != RJ_ARITH_SEMANTICS_COMPATIBILITY) {
             continue;
           }
@@ -402,55 +405,59 @@ TEST(MfmaHalf, Bf16SpecialValuesAndFallbacks) {
 
 TEST(MfmaHalf, mfma_f32_32x32x4_2b_f16) {
   arithmetic<32, 4, 2, false>(rj_arith_v_mfma_f32_32x32x4_2b_f16_w64_gfx950, UINT32_MAX,
-                              rj_arith_v_mfma_f32_32x32x4_2b_f16_w64);
+                              rj_arith_v_mfma_f32_32x32x4_2b_f16_w64, /*exact_entry=*/true);
 }
 TEST(MfmaHalf, mfma_f32_16x16x4_4b_f16) {
   arithmetic<16, 4, 4, false>(rj_arith_v_mfma_f32_16x16x4_4b_f16_w64_gfx950, UINT32_MAX,
-                              rj_arith_v_mfma_f32_16x16x4_4b_f16_w64);
+                              rj_arith_v_mfma_f32_16x16x4_4b_f16_w64, /*exact_entry=*/true);
 }
 TEST(MfmaHalf, mfma_f32_4x4x4_16b_f16) {
   arithmetic<4, 4, 16, false>(rj_arith_v_mfma_f32_4x4x4_16b_f16_w64_gfx950, UINT32_MAX,
-                              rj_arith_v_mfma_f32_4x4x4_16b_f16_w64);
+                              rj_arith_v_mfma_f32_4x4x4_16b_f16_w64, /*exact_entry=*/true);
 }
 TEST(MfmaHalf, mfma_f32_32x32x8_f16) {
   arithmetic<32, 8, 1, false>(rj_arith_v_mfma_f32_32x32x8_f16_w64_gfx950, UINT32_MAX,
-                              rj_arith_v_mfma_f32_32x32x8_f16_w64);
+                              rj_arith_v_mfma_f32_32x32x8_f16_w64, /*exact_entry=*/true);
 }
 TEST(MfmaHalf, mfma_f32_16x16x16_f16) {
   arithmetic<16, 16, 1, false>(rj_arith_v_mfma_f32_16x16x16_f16_w64_gfx950, UINT32_MAX,
-                               rj_arith_v_mfma_f32_16x16x16_f16_w64);
+                               rj_arith_v_mfma_f32_16x16x16_f16_w64, /*exact_entry=*/true);
 }
 TEST(MfmaHalf, mfma_f32_16x16x32_f16) {
-  arithmetic<16, 32, 1, false>(rj_arith_v_mfma_f32_16x16x32_f16_w64);
+  arithmetic<16, 32, 1, false>(rj_arith_v_mfma_f32_16x16x32_f16_w64, UINT32_MAX, nullptr,
+                               /*exact_entry=*/true);
 }
 TEST(MfmaHalf, mfma_f32_32x32x16_f16) {
-  arithmetic<32, 16, 1, false>(rj_arith_v_mfma_f32_32x32x16_f16_w64);
+  arithmetic<32, 16, 1, false>(rj_arith_v_mfma_f32_32x32x16_f16_w64, UINT32_MAX, nullptr,
+                               /*exact_entry=*/true);
 }
 TEST(MfmaHalf, mfma_f32_32x32x4_2b_bf16) {
   arithmetic<32, 4, 2, true>(rj_arith_v_mfma_f32_32x32x4_2b_bf16_w64_gfx950, UINT32_MAX,
-                             rj_arith_v_mfma_f32_32x32x4_2b_bf16_w64);
+                             rj_arith_v_mfma_f32_32x32x4_2b_bf16_w64, /*exact_entry=*/true);
 }
 TEST(MfmaHalf, mfma_f32_16x16x4_4b_bf16) {
   arithmetic<16, 4, 4, true>(rj_arith_v_mfma_f32_16x16x4_4b_bf16_w64_gfx950, UINT32_MAX,
-                             rj_arith_v_mfma_f32_16x16x4_4b_bf16_w64);
+                             rj_arith_v_mfma_f32_16x16x4_4b_bf16_w64, /*exact_entry=*/true);
 }
 TEST(MfmaHalf, mfma_f32_4x4x4_16b_bf16) {
   arithmetic<4, 4, 16, true>(rj_arith_v_mfma_f32_4x4x4_16b_bf16_w64_gfx950, UINT32_MAX,
-                             rj_arith_v_mfma_f32_4x4x4_16b_bf16_w64);
+                             rj_arith_v_mfma_f32_4x4x4_16b_bf16_w64, /*exact_entry=*/true);
 }
 TEST(MfmaHalf, mfma_f32_32x32x8_bf16) {
   arithmetic<32, 8, 1, true>(rj_arith_v_mfma_f32_32x32x8_bf16_w64_gfx950, UINT32_MAX,
-                             rj_arith_v_mfma_f32_32x32x8_bf16_w64);
+                             rj_arith_v_mfma_f32_32x32x8_bf16_w64, /*exact_entry=*/true);
 }
 TEST(MfmaHalf, mfma_f32_16x16x16_bf16) {
   arithmetic<16, 16, 1, true>(rj_arith_v_mfma_f32_16x16x16_bf16_w64_gfx950, UINT32_MAX,
-                              rj_arith_v_mfma_f32_16x16x16_bf16_w64);
+                              rj_arith_v_mfma_f32_16x16x16_bf16_w64, /*exact_entry=*/true);
 }
 TEST(MfmaHalf, mfma_f32_16x16x32_bf16) {
-  arithmetic<16, 32, 1, true>(rj_arith_v_mfma_f32_16x16x32_bf16_w64);
+  arithmetic<16, 32, 1, true>(rj_arith_v_mfma_f32_16x16x32_bf16_w64, UINT32_MAX, nullptr,
+                              /*exact_entry=*/true);
 }
 TEST(MfmaHalf, mfma_f32_32x32x16_bf16) {
-  arithmetic<32, 16, 1, true>(rj_arith_v_mfma_f32_32x32x16_bf16_w64);
+  arithmetic<32, 16, 1, true>(rj_arith_v_mfma_f32_32x32x16_bf16_w64, UINT32_MAX, nullptr,
+                              /*exact_entry=*/true);
 }
 
 TEST(MfmaFullF32, mfma_f32_16x16x8_xf32) {

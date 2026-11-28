@@ -6,6 +6,7 @@
 #include "common/internal.h"
 #include "mfma/backends.h"
 #include "mfma/gfx942_exact.h"
+#include "mfma/gfx950_exact.h"
 #include "mfma/reduction.h"
 #include "rj_arith/detail/rj_arith_common.h"
 #include "rj_arith/detail/rj_arith_mfma.h"
@@ -39,7 +40,8 @@ template <int M, int K, int Batch, bool Bf16, rocjitsu::arith::MfmaF32Model Mode
 // Evaluate a full MFMA wave after validating controls; errors do not access
 // operands.
 template <int M, int K, int Batch, bool Bf16, bool Gfx942 = false,
-          rocjitsu::arith::MfmaF32Model Model = rocjitsu::arith::MfmaF32Model::Default>
+          rocjitsu::arith::MfmaF32Model Model = rocjitsu::arith::MfmaF32Model::Default,
+          bool Gfx950 = false>
 int mfma(uint64_t flags, uint64_t instruction_flags, uint32_t *const *d, const uint32_t *const *a,
          const uint32_t *const *b, const uint32_t *const *c) {
   using namespace rocjitsu::arith;
@@ -48,8 +50,8 @@ int mfma(uint64_t flags, uint64_t instruction_flags, uint32_t *const *d, const u
                            kMatrixIgnoredFpFlags | RJ_ARITH_FP_DX10_CLAMP_OFF)) {
     return error;
   }
-  // Captured gfx942 forms with default source controls support exact modes for
-  // both FP16_OVFL=0 and 1. Compatibility retains the fast approximate reduction.
+  // Default source controls are qualified on MI300X (gfx942) and MI350X (gfx950) across both
+  // FP16_OVFL states. Compatibility retains the fast approximate implementation.
   if constexpr (Gfx942) {
     if (is_exact(flags) && !instruction_flags) {
       constexpr MfmaGfx942Format format = Bf16 ? MfmaGfx942Format::Bf16 : MfmaGfx942Format::F16;
@@ -67,6 +69,12 @@ int mfma(uint64_t flags, uint64_t instruction_flags, uint32_t *const *d, const u
       }
 #endif
       mfma_gfx942_exact(format, M, K, Batch, no_inf_nan, d, a, b, c);
+      return RJ_ARITH_SUCCESS;
+    }
+  } else if constexpr (Gfx950) {
+    if (is_exact(flags) && !instruction_flags) {
+      mfma_gfx950_exact(Bf16 ? MfmaGfx950Format::Bf16 : MfmaGfx950Format::F16, M, K, Batch,
+                        (flags & RJ_ARITH_FP16_OVFL) != 0, d, a, b, c);
       return RJ_ARITH_SUCCESS;
     }
   }
@@ -148,14 +156,16 @@ int rj_arith_v_mfma_f32_16x16x16_f16_w64(uint64_t flags, uint64_t instruction_fl
 int rj_arith_v_mfma_f32_16x16x32_f16_w64(uint64_t flags, uint64_t instruction_flags,
                                          uint32_t *const *d, const uint32_t *const *a,
                                          const uint32_t *const *b, const uint32_t *const *c) {
-  return mfma<16, 32, 1, false>(flags, instruction_flags, d, a, b, c);
+  return mfma<16, 32, 1, false, false, rocjitsu::arith::MfmaF32Model::Default, true>(
+      flags, instruction_flags, d, a, b, c);
 }
 
 // Evaluate 32x32x16 FP16 MFMA with 1 independent matrix block(s).
 int rj_arith_v_mfma_f32_32x32x16_f16_w64(uint64_t flags, uint64_t instruction_flags,
                                          uint32_t *const *d, const uint32_t *const *a,
                                          const uint32_t *const *b, const uint32_t *const *c) {
-  return mfma<32, 16, 1, false>(flags, instruction_flags, d, a, b, c);
+  return mfma<32, 16, 1, false, false, rocjitsu::arith::MfmaF32Model::Default, true>(
+      flags, instruction_flags, d, a, b, c);
 }
 
 // Evaluate 32x32x4 BF16 MFMA with 2 independent matrix block(s).
@@ -197,93 +207,95 @@ int rj_arith_v_mfma_f32_16x16x16_bf16_w64(uint64_t flags, uint64_t instruction_f
 int rj_arith_v_mfma_f32_16x16x32_bf16_w64(uint64_t flags, uint64_t instruction_flags,
                                           uint32_t *const *d, const uint32_t *const *a,
                                           const uint32_t *const *b, const uint32_t *const *c) {
-  return mfma<16, 32, 1, true>(flags, instruction_flags, d, a, b, c);
+  return mfma<16, 32, 1, true, false, rocjitsu::arith::MfmaF32Model::Default, true>(
+      flags, instruction_flags, d, a, b, c);
 }
 
 // Evaluate 32x32x16 BF16 MFMA with 1 independent matrix block(s).
 int rj_arith_v_mfma_f32_32x32x16_bf16_w64(uint64_t flags, uint64_t instruction_flags,
                                           uint32_t *const *d, const uint32_t *const *a,
                                           const uint32_t *const *b, const uint32_t *const *c) {
-  return mfma<32, 16, 1, true>(flags, instruction_flags, d, a, b, c);
+  return mfma<32, 16, 1, true, false, rocjitsu::arith::MfmaF32Model::Default, true>(
+      flags, instruction_flags, d, a, b, c);
 }
 
-// Evaluate the gfx950 form using the existing approximate model.
 int rj_arith_v_mfma_f32_32x32x4_2b_f16_w64_gfx950(uint64_t flags, uint64_t instruction_flags,
                                                   uint32_t *const *d, const uint32_t *const *a,
                                                   const uint32_t *const *b,
                                                   const uint32_t *const *c) {
-  return mfma<32, 4, 2, false>(flags, instruction_flags, d, a, b, c);
+  return mfma<32, 4, 2, false, false, rocjitsu::arith::MfmaF32Model::Default, true>(
+      flags, instruction_flags, d, a, b, c);
 }
 
-// Evaluate the gfx950 form using the existing approximate model.
 int rj_arith_v_mfma_f32_16x16x4_4b_f16_w64_gfx950(uint64_t flags, uint64_t instruction_flags,
                                                   uint32_t *const *d, const uint32_t *const *a,
                                                   const uint32_t *const *b,
                                                   const uint32_t *const *c) {
-  return mfma<16, 4, 4, false>(flags, instruction_flags, d, a, b, c);
+  return mfma<16, 4, 4, false, false, rocjitsu::arith::MfmaF32Model::Default, true>(
+      flags, instruction_flags, d, a, b, c);
 }
 
-// Evaluate the gfx950 form using the existing approximate model.
 int rj_arith_v_mfma_f32_4x4x4_16b_f16_w64_gfx950(uint64_t flags, uint64_t instruction_flags,
                                                  uint32_t *const *d, const uint32_t *const *a,
                                                  const uint32_t *const *b,
                                                  const uint32_t *const *c) {
-  return mfma<4, 4, 16, false>(flags, instruction_flags, d, a, b, c);
+  return mfma<4, 4, 16, false, false, rocjitsu::arith::MfmaF32Model::Default, true>(
+      flags, instruction_flags, d, a, b, c);
 }
 
-// Evaluate the gfx950 form using the existing approximate model.
 int rj_arith_v_mfma_f32_32x32x8_f16_w64_gfx950(uint64_t flags, uint64_t instruction_flags,
                                                uint32_t *const *d, const uint32_t *const *a,
                                                const uint32_t *const *b, const uint32_t *const *c) {
-  return mfma<32, 8, 1, false>(flags, instruction_flags, d, a, b, c);
+  return mfma<32, 8, 1, false, false, rocjitsu::arith::MfmaF32Model::Default, true>(
+      flags, instruction_flags, d, a, b, c);
 }
 
-// Evaluate the gfx950 form using the existing approximate model.
 int rj_arith_v_mfma_f32_16x16x16_f16_w64_gfx950(uint64_t flags, uint64_t instruction_flags,
                                                 uint32_t *const *d, const uint32_t *const *a,
                                                 const uint32_t *const *b,
                                                 const uint32_t *const *c) {
-  return mfma<16, 16, 1, false>(flags, instruction_flags, d, a, b, c);
+  return mfma<16, 16, 1, false, false, rocjitsu::arith::MfmaF32Model::Default, true>(
+      flags, instruction_flags, d, a, b, c);
 }
 
-// Evaluate the gfx950 form using the existing approximate model.
 int rj_arith_v_mfma_f32_32x32x4_2b_bf16_w64_gfx950(uint64_t flags, uint64_t instruction_flags,
                                                    uint32_t *const *d, const uint32_t *const *a,
                                                    const uint32_t *const *b,
                                                    const uint32_t *const *c) {
-  return mfma<32, 4, 2, true>(flags, instruction_flags, d, a, b, c);
+  return mfma<32, 4, 2, true, false, rocjitsu::arith::MfmaF32Model::Default, true>(
+      flags, instruction_flags, d, a, b, c);
 }
 
-// Evaluate the gfx950 form using the existing approximate model.
 int rj_arith_v_mfma_f32_16x16x4_4b_bf16_w64_gfx950(uint64_t flags, uint64_t instruction_flags,
                                                    uint32_t *const *d, const uint32_t *const *a,
                                                    const uint32_t *const *b,
                                                    const uint32_t *const *c) {
-  return mfma<16, 4, 4, true>(flags, instruction_flags, d, a, b, c);
+  return mfma<16, 4, 4, true, false, rocjitsu::arith::MfmaF32Model::Default, true>(
+      flags, instruction_flags, d, a, b, c);
 }
 
-// Evaluate the gfx950 form using the existing approximate model.
 int rj_arith_v_mfma_f32_4x4x4_16b_bf16_w64_gfx950(uint64_t flags, uint64_t instruction_flags,
                                                   uint32_t *const *d, const uint32_t *const *a,
                                                   const uint32_t *const *b,
                                                   const uint32_t *const *c) {
-  return mfma<4, 4, 16, true>(flags, instruction_flags, d, a, b, c);
+  return mfma<4, 4, 16, true, false, rocjitsu::arith::MfmaF32Model::Default, true>(
+      flags, instruction_flags, d, a, b, c);
 }
 
-// Evaluate the gfx950 form using the existing approximate model.
 int rj_arith_v_mfma_f32_32x32x8_bf16_w64_gfx950(uint64_t flags, uint64_t instruction_flags,
                                                 uint32_t *const *d, const uint32_t *const *a,
                                                 const uint32_t *const *b,
                                                 const uint32_t *const *c) {
-  return mfma<32, 8, 1, true>(flags, instruction_flags, d, a, b, c);
+  return mfma<32, 8, 1, true, false, rocjitsu::arith::MfmaF32Model::Default, true>(
+      flags, instruction_flags, d, a, b, c);
 }
 
-// Evaluate the gfx950 form using the existing approximate model.
 int rj_arith_v_mfma_f32_16x16x16_bf16_w64_gfx950(uint64_t flags, uint64_t instruction_flags,
                                                  uint32_t *const *d, const uint32_t *const *a,
                                                  const uint32_t *const *b,
                                                  const uint32_t *const *c) {
-  return mfma<16, 16, 1, true>(flags, instruction_flags, d, a, b, c);
+  return mfma<16, 16, 1, true, false, rocjitsu::arith::MfmaF32Model::Default, true>(
+      flags, instruction_flags, d, a, b, c);
 }
 
 // Evaluate 2 32x32x2 BF16 matrix block(s) with the inherited gfx908 policy.

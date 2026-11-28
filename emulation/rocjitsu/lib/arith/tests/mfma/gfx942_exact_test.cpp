@@ -340,10 +340,15 @@ TEST(MfmaGfx942Exact, QualificationIsLocalToTargetAndControls) {
     }
     for (uint64_t semantics : {RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS,
                                RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL}) {
-      EXPECT_EQ(form.gfx950(semantics, 0, nullptr, nullptr, nullptr, nullptr),
+      EXPECT_EQ(form.gfx950(semantics, 1, nullptr, nullptr, nullptr, nullptr),
                 RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
-      EXPECT_EQ(form.gfx950(semantics | RJ_ARITH_FP16_OVFL, 0, nullptr, nullptr, nullptr, nullptr),
-                RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
+      if (form.format_a == 2) {
+        EXPECT_EQ(form.gfx950(semantics, 0, nullptr, nullptr, nullptr, nullptr),
+                  RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
+        EXPECT_EQ(
+            form.gfx950(semantics | RJ_ARITH_FP16_OVFL, 0, nullptr, nullptr, nullptr, nullptr),
+            RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
+      }
     }
   }
 }
@@ -638,10 +643,8 @@ TEST(MfmaGfx942Exact, SparseQualificationIsLocalToTarget) {
     SCOPED_TRACE(form.name);
     for (uint64_t semantics : {RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS,
                                RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL}) {
-      EXPECT_EQ(form.gfx950(semantics, 0, nullptr, nullptr, nullptr, nullptr),
-                RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
-      EXPECT_EQ(form.gfx950(semantics | RJ_ARITH_FP16_OVFL, 0, nullptr, nullptr, nullptr, nullptr),
-                RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
+      EXPECT_EQ(form.gfx950(semantics, 1ULL << 7, nullptr, nullptr, nullptr, nullptr),
+                RJ_ARITH_ERROR_INVALID_FLAGS);
     }
   }
 }

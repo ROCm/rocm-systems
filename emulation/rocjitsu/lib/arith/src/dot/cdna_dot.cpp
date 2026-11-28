@@ -1,12 +1,13 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// CDNA FP16/BF16 vector dots: host FP32 pair sum followed by accumulation.
-// Inherits rocjitsu's arithmetic order, not the distinct gfx11/gfx12 exact models.
+// CDNA FP16/BF16 vector dots: Compatibility and Loose retain host FP32 pair-sum SIMD arithmetic,
+// while gfx950 BF16 exact modes use the MI350X-calibrated 2-product integer model.
 
 #include "common/float_encoding.h"
 #include "common/internal.h"
 #include "common/simd.h"
+#include "mfma/gfx950_exact.h"
 #include "rj_arith/detail/rj_arith_common.h"
 #include "rj_arith/detail/rj_arith_dot.h"
 
@@ -126,7 +127,7 @@ uint32_t dot2_f16_gfx950_exact(uint16_t lo_a, uint16_t lo_b, uint16_t hi_a, uint
 namespace {
 
 // Compute selected lanes after validating the complete request. Guest FP modes and
-// CLAMP do not affect this inherited model; unsupported exact requests leave D unchanged.
+// CLAMP do not affect either model; unsupported requests leave D unchanged.
 template <bool Bf16, bool Accumulate, typename Mask>
 int dot(uint64_t flags, Mask exec_mask, uint64_t mode, uint32_t *const *d, const uint32_t *const *a,
         const uint32_t *const *b, const uint32_t *const *c) {
@@ -135,11 +136,44 @@ int dot(uint64_t flags, Mask exec_mask, uint64_t mode, uint32_t *const *d, const
   if (int error = validate(flags, mode & ~(Accumulate ? 0ULL : 0x7ffULL), kMatrixIgnoredFpFlags)) {
     return error;
   }
-  if ((flags & RJ_ARITH_SEMANTICS_MASK) > RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE) {
+  if constexpr (Bf16) {
+    if (reports_fp_status(flags)) {
+      return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+    }
+  } else if ((flags & RJ_ARITH_SEMANTICS_MASK) >
+             RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE) {
     return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
   }
   if (!exec_mask) {
     return RJ_ARITH_SUCCESS;
+  }
+  const int a0 = mode & RJ_ARITH_DOT_LO_A_HIGH ? 16 : 0;
+  const int b0 = mode & RJ_ARITH_DOT_LO_B_HIGH ? 16 : 0;
+  const int a1 = mode & RJ_ARITH_DOT_HI_A_LOW ? 0 : 16;
+  const int b1 = mode & RJ_ARITH_DOT_HI_B_LOW ? 0 : 16;
+  if constexpr (Bf16) {
+    if (is_exact(flags)) {
+      for (int base = 0; base < int(sizeof(Mask) * 8); base += 32) {
+        const uint32_t *av = a[0] + base, *bv = b[0] + base;
+        uint32_t *dv = d[0] + base;
+        const uint32_t *cv = Accumulate ? dv : c[0] + base;
+        const uint32_t active = uint32_t(exec_mask >> base);
+        for (int lane = 0; lane < 32; ++lane) {
+          if (!((active >> lane) & 1)) {
+            continue;
+          }
+          const uint32_t aw = av[lane], bw = bv[lane], cw = cv[lane];
+          const uint16_t lo_a = uint16_t(aw >> a0) ^ (mode & RJ_ARITH_DOT_NEG_LO_A ? 0x8000U : 0U);
+          const uint16_t lo_b = uint16_t(bw >> b0) ^ (mode & RJ_ARITH_DOT_NEG_LO_B ? 0x8000U : 0U);
+          const uint16_t hi_a = uint16_t(aw >> a1) ^ (mode & RJ_ARITH_DOT_NEG_HI_A ? 0x8000U : 0U);
+          const uint16_t hi_b = uint16_t(bw >> b1) ^ (mode & RJ_ARITH_DOT_NEG_HI_B ? 0x8000U : 0U);
+          const uint32_t acc = (cw & (mode & RJ_ARITH_DOT_ABS_C ? 0x7fffffffU : ~0U)) ^
+                               (mode & RJ_ARITH_DOT_NEG_C ? 0x80000000U : 0U);
+          dv[lane] = dot2_bf16_gfx950_exact(lo_a, lo_b, hi_a, hi_b, acc);
+        }
+      }
+      return RJ_ARITH_SUCCESS;
+    }
   }
   for (int base = 0; base < int(sizeof(Mask) * 8); base += 32) {
     const uint32_t *av = a[0] + base, *bv = b[0] + base;
@@ -158,10 +192,6 @@ int dot(uint64_t flags, Mask exec_mask, uint64_t mode, uint32_t *const *d, const
       continue;
     }
 #endif
-    const int a0 = mode & RJ_ARITH_DOT_LO_A_HIGH ? 16 : 0;
-    const int b0 = mode & RJ_ARITH_DOT_LO_B_HIGH ? 16 : 0;
-    const int a1 = mode & RJ_ARITH_DOT_HI_A_LOW ? 0 : 16;
-    const int b1 = mode & RJ_ARITH_DOT_HI_B_LOW ? 0 : 16;
     auto factor = [](uint32_t bits, int shift, bool negate) {
       uint16_t half = uint16_t(bits >> shift) ^ (negate ? 0x8000U : 0U);
       return Bf16 ? bf16_to_float(half) : f16_to_float(half);

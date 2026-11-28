@@ -565,14 +565,13 @@ def gen_mfma(ctx: ExecuteContext) -> str:
         if arch in ('cdna2', 'cdna4') and input_type == 'F32':
             flags += ' | ((wf.fp_denorm_mode_f32() & 1u) ? 0 : RJ_ARITH_FP_FLUSH_INPUT_DENORMALS)'
             flags += ' | ((wf.fp_denorm_mode_f32() & 2u) ? 0 : RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS)'
-        # CDNA4 §7.1.2 specifies finite F32 overflow saturation, but MI350X
-        # wave2_3f captures ignore MODE.FP16_OVFL on F32 MFMA (e.g.
-        # v_mfma_f32_4x4x1_16b_f32: 0xdf800000 * 0xff000000 + 0xff7fffff ->
-        # 0x7f800000 under both FP16_OVFL=0 and 1). MI300's table also lists
-        # it; gfx942 retains its existing F32 behavior and forwards the bit on
+        # CDNA4 §7.1.2 specifies FP32 overflow saturation on MFMA/SMFMAC; MI350X
+        # captures verify per-pass saturation on F16, BF16 and OCP FP8/BF8 (while
+        # approximate F16 and FP8 paths continue to ignore the bit), whereas F32
+        # MFMA ignores MODE.FP16_OVFL (wave2_3f). gfx942 also forwards the bit on
         # non-F32 forms to enforce exact-model qualification.
         if (arch == 'cdna3' and input_type != 'F32') or (
-            arch == 'cdna4' and input_type == 'BF16'
+            arch == 'cdna4' and input_type not in ('F32', 'XF32')
         ):
             flags += ' | (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0)'
         L.append(f'      wf, {api}, {flags}, controls,')

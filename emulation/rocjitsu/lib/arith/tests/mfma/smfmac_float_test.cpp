@@ -58,8 +58,12 @@ template <int M, int K, int Bits> void arithmetic(Entry entry, Entry gfx942 = nu
       auto expected = input;
       ASSERT_EQ(invoke(target, RJ_ARITH_SEMANTICS_COMPATIBILITY, expected, aliasing_offset),
                 RJ_ARITH_SUCCESS);
+      auto expected_ovfl = input;
+      ASSERT_EQ(invoke(target, RJ_ARITH_SEMANTICS_COMPATIBILITY | RJ_ARITH_FP16_OVFL, expected_ovfl,
+                       aliasing_offset),
+                RJ_ARITH_SUCCESS);
       auto exact_expected = input;
-      if (target == gfx942) {
+      {
         // Verify aliased tied destinations match a disjoint accumulator copy in exact mode.
         auto disjoint = input;
         for (int reg = 0; reg < D; ++reg) {
@@ -71,49 +75,43 @@ template <int M, int K, int Bits> void arithmetic(Entry entry, Entry gfx942 = nu
           exact_expected[aliasing_offset + reg] = disjoint[Dest + reg];
         }
       }
+      auto exact_ovfl_expected = input;
+      {
+        auto disjoint = input;
+        for (int reg = 0; reg < D; ++reg) {
+          disjoint[Dest + reg] = input[aliasing_offset + reg];
+        }
+        ASSERT_EQ(invoke(target, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL | RJ_ARITH_FP16_OVFL,
+                         disjoint, Dest),
+                  RJ_ARITH_SUCCESS);
+        for (int reg = 0; reg < D; ++reg) {
+          exact_ovfl_expected[aliasing_offset + reg] = disjoint[Dest + reg];
+        }
+      }
       for (uint64_t cpu : levels) {
         for (uint64_t semantics : semantics_modes()) {
           auto actual = input;
           int status = invoke(target, cpu | semantics, actual, aliasing_offset);
-          if (target == gfx942 && semantics != RJ_ARITH_SEMANTICS_LOOSE &&
+          ASSERT_EQ(status, RJ_ARITH_SUCCESS);
+          if (semantics != RJ_ARITH_SEMANTICS_LOOSE &&
               semantics != RJ_ARITH_SEMANTICS_COMPATIBILITY) {
-            ASSERT_EQ(status, RJ_ARITH_SUCCESS);
             EXPECT_EQ(actual, exact_expected);
-          } else if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
-                     semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
-            ASSERT_EQ(status, RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
-            EXPECT_EQ(actual, input);
           } else {
-            ASSERT_EQ(status, RJ_ARITH_SUCCESS);
             EXPECT_EQ(actual, expected);
           }
         }
-        if (target == gfx942) {
-          // RJ_ARITH_FP16_OVFL applies per-step clamping in exact modes while Loose ignores it.
-          auto exact_ovfl = input;
-          {
-            auto disjoint = input;
-            for (int reg = 0; reg < D; ++reg) {
-              disjoint[Dest + reg] = input[aliasing_offset + reg];
-            }
-            ASSERT_EQ(invoke(target, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL | RJ_ARITH_FP16_OVFL,
-                             disjoint, Dest),
-                      RJ_ARITH_SUCCESS);
-            for (int reg = 0; reg < D; ++reg) {
-              exact_ovfl[aliasing_offset + reg] = disjoint[Dest + reg];
-            }
-          }
-          for (uint64_t semantics : semantics_modes()) {
-            auto actual = input;
-            int status =
-                invoke(target, cpu | semantics | RJ_ARITH_FP16_OVFL, actual, aliasing_offset);
-            ASSERT_EQ(status, RJ_ARITH_SUCCESS);
-            if (semantics == RJ_ARITH_SEMANTICS_LOOSE ||
-                semantics == RJ_ARITH_SEMANTICS_COMPATIBILITY) {
-              EXPECT_EQ(actual, expected);
-            } else {
-              EXPECT_EQ(actual, exact_ovfl);
-            }
+        // RJ_ARITH_FP16_OVFL applies per-pass clamping in exact modes on both gfx942 and gfx950,
+        // while Loose/Compatibility saturates finite overflow on gfx950 and ignores it on gfx942.
+        for (uint64_t semantics : semantics_modes()) {
+          auto actual = input;
+          int status =
+              invoke(target, cpu | semantics | RJ_ARITH_FP16_OVFL, actual, aliasing_offset);
+          ASSERT_EQ(status, RJ_ARITH_SUCCESS);
+          if (semantics == RJ_ARITH_SEMANTICS_LOOSE ||
+              semantics == RJ_ARITH_SEMANTICS_COMPATIBILITY) {
+            EXPECT_EQ(actual, expected_ovfl);
+          } else {
+            EXPECT_EQ(actual, exact_ovfl_expected);
           }
         }
       }
@@ -125,8 +123,7 @@ template <int M, int K, int Bits> void arithmetic(Entry entry, Entry gfx942 = nu
       const int set = (controls & 3) ? 0 : (controls >> 3) % (32 / metadata_bits);
       const int shift = metadata_bits * set;
       for (uint64_t mode : {uint64_t(RJ_ARITH_SEMANTICS_COMPATIBILITY),
-                            uint64_t(target == gfx942 ? RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL
-                                                      : RJ_ARITH_SEMANTICS_COMPATIBILITY)}) {
+                            uint64_t(RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL)}) {
         auto expected = input;
         for (auto &word : expected[Index]) {
           word >>= shift;
