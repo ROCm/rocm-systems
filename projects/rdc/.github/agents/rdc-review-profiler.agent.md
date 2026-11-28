@@ -42,13 +42,13 @@ include/rdc/rdc.h                                ← rdc_field_t enum value (e.g
 
 ### Derived Fields
 Some `RDC_FI_PROF_*` fields are not raw counters — they are computed in `apply_field_transformation()`:
-- **`RDC_FI_PROF_OCC_ELAPSED`** — derived from `GRBM_GUI_ACTIVE` (active_cycles) and `MeanOccupancyPerActiveCU` (requires two counter reads)
-- **`RDC_FI_PROF_EVAL_*`** — divided by elapsed time (ms) to produce bandwidth/FLOPS rate metrics
+- **`RDC_FI_PROF_OCC_ELAPSED`** — `MeanOccupancyPerActiveCU` × `GRBM_GUI_ACTIVE` (active cycles) / `GRBM_COUNT` (elapsed cycles) (needs three counters)
+- **`RDC_FI_PROF_EVAL_*`** — divided by elapsed time (ms) to produce bandwidth/FLOPS rate metrics, except the `_PERCENT` ones below
 - **`RDC_FI_PROF_GPU_UTIL_PERCENT`** — raw `GPU_UTIL` counter divided by 100.0
-- **`RDC_FI_PROF_EVAL_FLOPS_16_PERCENT`** — arch-branched: uses 1024 divisor for gfx90a (MI200), 2048 for MI300+
+- **`RDC_FI_PROF_EVAL_FLOPS_*_PERCENT`** — `RDC_OPS_*_PER_SIMDCYCLE` is already per cycle, so these are never divided by time: ops per SIMD per cycle / (peak ops per CU per cycle / SIMDs per CU), a ratio where 1.0 is the peak. The fp16 peak is arch-branched: 1024 for gfx90a (MI200), 2048 for every other GPU, gfx950 too although its peaks differ; fp32 and fp64 use 256
 
 ### SIMD_UTILIZATION Sampling Window
-`SIMD_UTILIZATION` uses `simd_utilization_duration_us_k` (500ms) instead of the standard `collection_duration_us_k` (10ms) because short windows produce oscillating readings for multi-second compute/idle cycles. Changes to sampling duration must account for this.
+`SIMD_UTILIZATION` uses `simd_utilization_duration_us_k` (500ms) instead of the standard `collection_duration_us_k` (100ms) because short windows produce oscillating readings for multi-second compute/idle cycles. Changes to sampling duration must account for this.
 
 ### Greedy Counter Packing
 `sample_counters_with_packing()` implements greedy bin-packing: it tries to fit as many counters as possible into a single rocprofiler config, spawning multiple passes when `ROCPROFILER_STATUS_ERROR_EXCEEDS_HW_LIMIT` is returned. Each pass is a separate `usleep(duration)` window. **Adding many new `RDC_FI_PROF_*` fields can multiply the sampling time** if they can't fit into a single HW counter slot set.

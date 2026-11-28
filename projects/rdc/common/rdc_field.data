@@ -196,7 +196,7 @@ FLD_DESC_ENT(RDC_FI_PROF_ACTIVE_WAVES,          "Number of Active Waves",       
 FLD_DESC_ENT(RDC_FI_PROF_ELAPSED_CYCLES,        "Number of Elapsed Cycles over all SMs", "ELAPSED_CYCLES",    true)
 FLD_DESC_ENT(RDC_FI_PROF_TENSOR_ACTIVE_PERCENT, "Percent of Active Pipe Tensors",        "TENSOR_PERCENT",    true)
 FLD_DESC_ENT(RDC_FI_PROF_GPU_UTIL_PERCENT,      "Percent of GPU Utilization",            "GPU_UTIL_PERCENT",  true)
-// metrics with EVAL are divided by time passed
+// metrics with EVAL are divided by time passed, except the EVAL_FLOPS_*_PERCENT ones
 FLD_DESC_ENT(RDC_FI_PROF_EVAL_MEM_R_BW,         "Fetched from video memory kb / ms",     "MEM_R_BW",          true)
 FLD_DESC_ENT(RDC_FI_PROF_EVAL_MEM_W_BW,         "Written to video memory kb / ms",       "MEM_W_BW",          true)
 FLD_DESC_ENT(RDC_FI_PROF_EVAL_FLOPS_16,         "Number of fp16 OPS / ms",               "FLOPS_16",          true)
@@ -206,9 +206,9 @@ FLD_DESC_ENT(RDC_FI_PROF_VALU_PIPE_ISSUE_UTIL,  "Percent of Active Pipe VALU",  
 FLD_DESC_ENT(RDC_FI_PROF_SM_ACTIVE,             "Ratio of Cycles with active warp on SM","VALUBusy",          true)
 FLD_DESC_ENT(RDC_FI_PROF_OCC_PER_ACTIVE_CU,     "Mean occ per active compute unit",      "OCC_CU",            true)
 FLD_DESC_ENT(RDC_FI_PROF_OCC_ELAPSED,           "Mean occ per active cu over elapsed",   "OCC_CU_ELAPSED",    true)
-FLD_DESC_ENT(RDC_FI_PROF_EVAL_FLOPS_16_PERCENT, "Number of fp16 OPS percent of max",     "FLOPS_16_PERCENT",  true)
-FLD_DESC_ENT(RDC_FI_PROF_EVAL_FLOPS_32_PERCENT, "Number of fp32 OPS percent of max",     "FLOPS_32_PERCENT",  true)
-FLD_DESC_ENT(RDC_FI_PROF_EVAL_FLOPS_64_PERCENT, "Number of fp64 OPS percent of max",     "FLOPS_64_PERCENT",  true)
+FLD_DESC_ENT(RDC_FI_PROF_EVAL_FLOPS_16_PERCENT, "fp16 OPS per cycle, ratio to peak",     "FLOPS_16_PERCENT",  true)
+FLD_DESC_ENT(RDC_FI_PROF_EVAL_FLOPS_32_PERCENT, "fp32 OPS per cycle, ratio to peak",     "FLOPS_32_PERCENT",  true)
+FLD_DESC_ENT(RDC_FI_PROF_EVAL_FLOPS_64_PERCENT, "fp64 OPS per cycle, ratio to peak",     "FLOPS_64_PERCENT",  true)
 // CPC
 FLD_DESC_ENT(RDC_FI_PROF_CPC_CPC_STAT_BUSY,                  "", "CPC_CPC_STAT_BUSY",                  false)
 FLD_DESC_ENT(RDC_FI_PROF_CPC_CPC_STAT_IDLE,                  "", "CPC_CPC_STAT_IDLE",                  false)

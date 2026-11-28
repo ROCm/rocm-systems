@@ -471,6 +471,43 @@ if(BUILD_RUNTIME)
     )
 endif()
 
+# rdc_rocp_field_tests: the profiler fields RdcRocpBase derives from its counters (the FLOPS
+# percents and OCC_ELAPSED). Compiles RdcRocpBase.cc into the test, which defines the counter
+# sampler and the HSA, rocprofiler-sdk and AMD SMI calls that file makes, so it links none of
+# them and runs on GPU-less CI; librdc_bootstrap provides the logger and the entity codec. It
+# needs the profiler's headers, so it is built with the profiler module.
+if(BUILD_PROFILER)
+    find_package(rocprofiler-sdk 1.1.0 HINTS ${ROCM_DIR}/lib/cmake CONFIG REQUIRED)
+    add_executable(
+        rdc_rocp_field_tests
+        ${SRC_DIR}/test_rocp_fields.cc
+        ${PROJECT_SOURCE_DIR}/rdc_libs/rdc_modules/rdc_rocp/RdcRocpBase.cc
+    )
+    target_include_directories(
+        rdc_rocp_field_tests
+        PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/include ${AMD_SMI_INCLUDE_DIR}
+    )
+    target_link_libraries(
+        rdc_rocp_field_tests
+        PRIVATE
+            rocprofiler-sdk::rocprofiler-sdk-headers
+            rocprofiler-sdk::rocprofiler-sdk-external-nolink
+            rdc_bootstrap
+            GTest::gtest_main
+            pthread
+    )
+    set_target_properties(
+        rdc_rocp_field_tests
+        PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/../../../lib"
+    )
+    add_test(NAME rdc_rocp_field_tests COMMAND rdc_rocp_field_tests)
+    install(
+        TARGETS rdc_rocp_field_tests
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
+        COMPONENT ${TESTS_COMPONENT}
+    )
+endif()
+
 # rdc_field_values_tests: the field values RdcMetricFetcherImpl reads from the fake
 # AMD SMI (tests/fake_amdsmi). Compiles RdcMetricFetcherImpl.cc and the files it
 # needs from librdc, and links the fake, which provides every amdsmi call, instead
