@@ -466,8 +466,8 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
     0,                   // [2] AllGather       -- ddaLLMax total (DPX)
-    256ULL*1024,         // [3] ReduceScatter   -- LL beats LL128 through 4M/8M at 16/32
-                         //                        (256K/rank). LL128 is ~2x from 8M/16M (DPX)
+    0,                   // [3] ReduceScatter   -- ddaLLMax total, and LL runs to 2M from 32 ranks
+                         //                        (ddaRsLLLargeComm*) (DPX)
     1ULL*1024*1024,      // [4] AllReduce       -- LL two-shot beats LL128 1.4-1.9x to 8M/16M/32M/64M
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
@@ -528,6 +528,13 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
   .ddaA2aLL128MaxBlocksMaxBytes = 16ULL*1024*1024,
 
   .ddaLL128BcTwoShotThreads = 256,  // two-shot broadcast: 256 threads
+  // ReduceScatter LL128 block size, LL128 kernel crossover, and the LL cap on large comms.
+  .ddaRsLL128Threads = 256,
+  .ddaRsLL128PeerMaxShard = 512ULL*1024,
+  .ddaRsLL128PeerMaxShardPerRank = 64ULL*1024,
+  .ddaRsLL128PeerMaxBytes = 32ULL*1024*1024,
+  .ddaRsLLLargeCommMinRanks = 32,
+  .ddaRsLLLargeCommMaxBytes = 2ULL*1024*1024,
   // Ring / Tree crossovers, same sweep (AllReduce LL128: AICOMRCCL-2874/2875).
   .arRingLL128MaxPerRank = 16ULL*1024*1024,       // Ring Simple beats LL128 1.1-1.3x from 256M/512M/1G
                                                   // at 8/16/32 (DPX)
