@@ -641,8 +641,14 @@ TEST_F(NetIbCastP2pIsendMicrotest, Isend_AdaptiveRouting_SplitsBulkWriteFromTheI
   EXPECT_EQ(chain[0].wr.send_flags, 0);
   EXPECT_EQ(chain[0].sge.length, 1001u);
   EXPECT_EQ(chain[1].wr.opcode, IBV_WR_RDMA_WRITE_WITH_IMM);
-  EXPECT_EQ(chain[1].wr.num_sge, 0);
   EXPECT_EQ(chain[1].wr.send_flags, IBV_SEND_SIGNALED);
+  // The trailer writes the size record.
+  EXPECT_EQ(chain[1].wr.num_sge, 1);
+  EXPECT_EQ(chain[1].wr.wr.rdma.remote_addr, kCmplsAddr);
+  EXPECT_EQ(chain[1].wr.wr.rdma.rkey, kCmplsRkey);
+  EXPECT_EQ(chain[1].sge.addr, (uint64_t)send_->remCmplsRecords.elems[0]);
+  EXPECT_EQ(chain[1].sge.length, sizeof(int));
+  EXPECT_EQ(send_->remCmplsRecords.elems[0][0], 1001);
 
   // At the threshold, or when both sides have an out-of-order RQ, the data rides the immediate itself.
   for (int variant = 0; variant < 2; variant++) {
@@ -651,6 +657,40 @@ TEST_F(NetIbCastP2pIsendMicrotest, Isend_AdaptiveRouting_SplitsBulkWriteFromTheI
     ASSERT_EQ(Isend(variant == 0 ? 1000 : 1001, 1, &req), ncclSuccess);
     EXPECT_EQ(Chain(0, 1 + variant).size(), 1u) << variant;
   }
+}
+
+// CTS offload has the NIC fill in the data writes, so the trailer stays empty and writes no size record.
+TEST_F(NetIbCastP2pIsendMicrotest, Isend_AdaptiveRoutingWithCtsOffload_KeepsTheEmptyTrailer) {
+  WireSend();
+  send_->ar = 1;
+  IbCastArThreshold = 1000;
+  send_->useCtsOffload = true;
+  void* req = nullptr;
+  ASSERT_EQ(Isend(1001, 1, &req), ncclSuccess);
+  const auto& chain = Chain(0, 0);
+  ASSERT_EQ(chain.size(), 2u);
+  EXPECT_EQ(chain[0].wr.opcode, IBV_WR_RDMA_WRITE);
+  EXPECT_EQ(chain[1].wr.opcode, IBV_WR_RDMA_WRITE_WITH_IMM);
+  EXPECT_EQ(chain[1].wr.num_sge, 0);
+  EXPECT_EQ(chain[1].wr.wr.rdma.remote_addr, 0u);
+}
+
+// The size record lives in the receiver's memory, so its write takes the remote device's key, as the
+// data write does; the local device still supplies the source lkey.
+TEST_F(NetIbCastP2pIsendMicrotest, Isend_SizeRecord_UsesTheRemoteDevicesKey) {
+  WireSend(1, 2);
+  send_->base.qps[0].remDevIdx = 1;
+  send_->ar = 1;
+  IbCastArThreshold = 1000;
+  Cts(0, 1, 1, 4096);
+  void* req = nullptr;
+  ASSERT_EQ(Isend(1001, 1, &req), ncclSuccess);
+  const auto& chain = Chain(0, 0);
+  ASSERT_EQ(chain.size(), 2u);
+  EXPECT_EQ(chain[0].wr.wr.rdma.rkey, kRemoteRkey + 1);
+  EXPECT_EQ(chain[1].wr.num_sge, 1);
+  EXPECT_EQ(chain[1].wr.wr.rdma.rkey, kCmplsRkey + 1);
+  EXPECT_EQ(chain[1].sge.lkey, kSgeLkey);
 }
 
 TEST_F(NetIbCastP2pIsendMicrotest, Isend_OptionalRecvCompletion_PostsAPlainWrite) {
@@ -1206,7 +1246,8 @@ TEST_F(NetIbCastP2pIrecvMicrotest, Irecv_LaterSlot_PostsAnUnsignalledCtsAtItsFif
   void* req = nullptr;
   ASSERT_EQ(Irecv(2, &req), ncclSuccess);
   const auto& cts = Chain(0, 0)[0];
-  EXPECT_EQ(cts.wr.send_flags, IBV_SEND_INLINE);
+  // Two CTS entries exceed the QP's one-entry inline limit, so the write is not inlined.
+  EXPECT_EQ(cts.wr.send_flags, 0);
   EXPECT_EQ(cts.wr.wr.rdma.remote_addr, kCtsFifoAddr + 3 * NCCL_NET_IB_MAX_RECVS * sizeof(ncclIbSendFifo));
   EXPECT_EQ(cts.sge.length, 2 * sizeof(ncclIbSendFifo));
   EXPECT_EQ(Req(req)->events[0], 1);
@@ -1623,6 +1664,26 @@ TEST_F(NetIbCastP2pTestMicrotest, Test_RecvByIndexSingleQp_WaitsForTheCtsThenRep
   ASSERT_EQ(Test(req, &done, sizes), ncclSuccess);
   EXPECT_EQ(done, 1);
   EXPECT_EQ(sizes[0], 777);
+}
+
+// Adaptive Routing: the sender wrote the size record, and the immediate's byte count is not added on top.
+TEST_F(NetIbCastP2pTestMicrotest, Test_RecvByIndexSizeRecord_WinsOverTheImmediatesByteCount) {
+  WireRecv();
+  void* req = nullptr;
+  ASSERT_EQ(Irecv(1, &req), ncclSuccess);
+  const uint16_t idx = (uint16_t)(Req(req) - recv_->base.reqs);
+  Req(req)->recv.cmplsRecords->sizes[0] = 1001;
+  ibv_wc& data = verbs_[0].Complete(0, IBV_WC_RECV_RDMA_WITH_IMM, verbs_[0].qps[0].qp_num);
+  data.imm_data = htobe32((uint32_t)idx << WR_IMM_RX_REQ_IDX_BIT_POS);
+  data.byte_len = sizeof(int);
+  int done = 0;
+  int sizes[1] = {0};
+  ASSERT_EQ(Test(req, &done, sizes), ncclSuccess);
+  verbs_[0].Complete(0, IBV_WC_RDMA_WRITE, verbs_[0].qps[0].qp_num);
+  ASSERT_EQ(Test(req, &done, sizes), ncclSuccess);
+  EXPECT_EQ(done, 1);
+  EXPECT_EQ(sizes[0], 1001);
+  EXPECT_EQ(Req(req)->recv.aggSize, 0);
 }
 
 TEST_F(NetIbCastP2pTestMicrotest, Test_RecvByIndexSplit_CountsEveryQpsImmediate) {
@@ -2120,6 +2181,25 @@ TEST_F(NetIbCastP2pByOrderMicrotest, ByOrder_RecvDataAndCts_CompleteTheRequest) 
   ASSERT_EQ(Test(req, &done, sizes), ncclSuccess);
   EXPECT_EQ(done, 1);
   EXPECT_EQ(sizes[0], 40);
+}
+
+// Software-CTS BY_ORDER under Adaptive Routing: the size record wins over the immediate's byte count.
+TEST_F(NetIbCastP2pByOrderMicrotest, ByOrder_RecvSizeRecord_WinsOverTheImmediatesByteCount) {
+  WireRecv(1, 1, BY_ORDER);
+  void* req = nullptr;
+  ASSERT_EQ(Irecv(1, &req), ncclSuccess);
+  const uint64_t idx = Req(req) - recv_->base.reqs;
+  Req(req)->recv.cmplsRecords->sizes[0] = 1001;
+  ibv_wc& wc = verbs_[0].Complete(idx, IBV_WC_RECV_RDMA_WITH_IMM, verbs_[0].qps[0].qp_num);
+  wc.byte_len = sizeof(int);
+  int done = 0;
+  int sizes[1] = {};
+  ASSERT_EQ(Test(req, &done, sizes), ncclSuccess);
+  verbs_[0].Complete(idx, IBV_WC_RDMA_WRITE, verbs_[0].qps[0].qp_num);
+  ASSERT_EQ(Test(req, &done, sizes), ncclSuccess);
+  EXPECT_EQ(done, 1);
+  EXPECT_EQ(sizes[0], 1001);
+  EXPECT_EQ(Req(req)->recv.aggSize, 0);
 }
 
 TEST_F(NetIbCastP2pByOrderMicrotest, ByOrder_RecvFlushAndFailures) {

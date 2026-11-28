@@ -1175,7 +1175,7 @@ TEST_F(NetIbCastConnectQpMicrotest, Create_GenericRcQpTakesItsQueuesFromTheAttri
   EXPECT_EQ(c->attr.cap.max_inline_data, 0u);
   IbCastUseInline = true;
   ASSERT_EQ(IbCastQpCreate(&qp, &a), ncclSuccess);
-  EXPECT_EQ(verbs_.creates.back().attr.cap.max_inline_data, sizeof(ncclIbSendFifo) * NCCL_NET_IB_MAX_RECVS);
+  EXPECT_EQ(verbs_.creates.back().attr.cap.max_inline_data, sizeof(ncclIbSendFifo));
 }
 
 TEST_F(NetIbCastConnectQpMicrotest, Create_GenericFailure_Propagates) {
@@ -1206,7 +1206,7 @@ TEST_F(NetIbCastConnectQpMicrotest, Create_OooRq_UsesMlx5WithTheOutOfOrderFlag) 
   a.oooRq = false;
   ASSERT_EQ(ncclIbCreateQpMlx5(&a, &qp), ncclSuccess);
   EXPECT_EQ(mlx5DvAttrs_.back().create_flags, 0u);
-  EXPECT_EQ(mlx5Attrs_.back().cap.max_inline_data, sizeof(ncclIbSendFifo) * NCCL_NET_IB_MAX_RECVS);
+  EXPECT_EQ(mlx5Attrs_.back().cap.max_inline_data, sizeof(ncclIbSendFifo));
 }
 
 TEST_F(NetIbCastConnectQpMicrotest, Create_Mlx5Failure_WarnsAndFails) {
