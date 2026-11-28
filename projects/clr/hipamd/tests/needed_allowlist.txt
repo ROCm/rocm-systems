@@ -1,0 +1,11 @@
+# Allowed DT_NEEDED entries of libamdhip64 (regular expressions, one per line).
+# ROCr (libhsa-runtime64) and comgr (libamd_comgr) must NOT be listed: they are loaded with dlopen.
+^librocprofiler-register\.so
+^libstdc\+\+\.so
+^libgcc_s\.so
+^libm\.so
+^libc\.so
+^libdl\.so
+^libpthread\.so
+^librt\.so
+^ld-linux

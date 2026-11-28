@@ -17,10 +17,10 @@ bool Hsa::is_ready_ = false;
 
 bool Hsa::LoadLib() {
 #if defined(ROCR_DYN_DLL)
-  static const char* rocr_lib_name = WINDOWS_SWITCH("hsa-runtime64.dll", "hsa-runtime64.so.1");
+  static const char* rocr_lib_name = WINDOWS_SWITCH("hsa-runtime64.dll", "libhsa-runtime64.so.1");
   cep_.handle = Os::loadLibrary(rocr_lib_name);
   if (nullptr == cep_.handle) {
-    ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "Failed to load COMGR library.");
+    ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "Failed to load ROCr library.");
     return false;
   }
 #endif
@@ -131,6 +131,11 @@ bool Hsa::LoadLib() {
   GET_ROCR_SYMBOL(hsa_amd_agent_set_attribute)
   GET_ROCR_SYMBOL(hsa_amd_vmem_address_reserve_align)
   GET_ROCR_SYMBOL(hsa_amd_enable_logging)
+  // External semaphores need ROCr 1.24+ (open/close) and 1.27+ (queue signal/wait): optional
+  GET_ROCR_OPTIONAL_SYMBOL(hsa_amd_external_semaphore_handle_open)
+  GET_ROCR_OPTIONAL_SYMBOL(hsa_amd_external_semaphore_handle_close)
+  GET_ROCR_OPTIONAL_SYMBOL(hsa_amd_queue_signal_external_semaphore)
+  GET_ROCR_OPTIONAL_SYMBOL(hsa_amd_queue_wait_external_semaphore)
   GET_ROCR_SYMBOL(hsa_amd_memory_get_preferred_copy_engine)
   GET_ROCR_SYMBOL(hsa_amd_ais_file_read)
   GET_ROCR_SYMBOL(hsa_amd_ais_file_write)

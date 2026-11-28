@@ -1254,7 +1254,7 @@ void Memory::refreshOwningAgent() {
     assert(deviceMemory_ != nullptr && "refreshOwningAgent called before memory was backed!");
     hsa_amd_pointer_info_t ptr_info = {};
     ptr_info.size = sizeof(ptr_info);
-    if (hsa_amd_pointer_info(reinterpret_cast<address>(deviceMemory_), &ptr_info, nullptr, nullptr,
+    if (Hsa::pointer_info(reinterpret_cast<address>(deviceMemory_), &ptr_info, nullptr, nullptr,
                              nullptr) == HSA_STATUS_SUCCESS) {
       agent = ptr_info.agentOwner;
     }

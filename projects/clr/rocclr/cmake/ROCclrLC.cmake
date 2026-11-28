@@ -13,9 +13,13 @@ find_package(amd_comgr 3.2 REQUIRED CONFIG
 get_target_property(_amd_comgr_lib_type amd_comgr TYPE)
 target_compile_definitions(rocclr PUBLIC)
 if(_amd_comgr_lib_type STREQUAL "SHARED_LIBRARY")
+  # comgr is loaded with dlopen (amd::Comgr): take only its include directories, so that
+  # libamdhip64 has no DT_NEEDED entry for it whatever the linker's --as-needed setting is.
   target_compile_definitions(rocclr PUBLIC COMGR_DYN_DLL)
+  target_link_libraries(rocclr PUBLIC $<COMPILE_ONLY:amd_comgr>)
+else()
+  target_link_libraries(rocclr PUBLIC amd_comgr)
 endif()
-target_link_libraries(rocclr PUBLIC amd_comgr)
 
 # Comgr DLL name for Windows dynamic loading
 if(WIN32)

@@ -364,3 +364,11 @@ install(
     DESTINATION
     ${CONFIG_LANG_PACKAGE_INSTALL_DIR}/
     )
+
+# Dependency guard: with ROCr and comgr loaded through dlopen, libamdhip64 must not have them as
+# DT_NEEDED entries or undefined symbols (see tests/check_deps.sh).
+if(UNIX AND BUILD_SHARED_LIBS AND ROCR_DLL_LOAD)
+  add_test(NAME amdhip64_check_deps
+    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/../tests/check_deps.sh $<TARGET_FILE:amdhip64>
+            ${CMAKE_CURRENT_SOURCE_DIR}/../tests/needed_allowlist.txt)
+endif()

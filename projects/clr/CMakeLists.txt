@@ -88,6 +88,9 @@ endif()
 
 option(BUILD_SHARED_LIBS "Build the shared library" ON)
 
+# Lets the subprojects register CTest tests (e.g. the amdhip64 dependency guard).
+enable_testing()
+
 # Static HIP embeds rocclr objects into amdhip64 and requires BUILD_STATIC_LIBS.
 # OpenCL uses BUILD_SHARED_LIBS only to select the amdocl library type.
 if(CLR_BUILD_HIP AND NOT BUILD_SHARED_LIBS)
