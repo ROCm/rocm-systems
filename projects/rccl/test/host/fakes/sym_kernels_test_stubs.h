@@ -88,7 +88,9 @@
   X(ncclSymkDevKernel_ReduceScatter_TmaLD_avg_f16) \
   X(ncclSymkDevKernel_ReduceScatter_TmaLD_avg_bf16) \
   X(ncclSymkDevKernel_ReduceScatter_TmaLD_avg_f8e4m3) \
-  X(ncclSymkDevKernel_ReduceScatter_TmaLD_avg_f8e5m2)
+  X(ncclSymkDevKernel_ReduceScatter_TmaLD_avg_f8e5m2) \
+  X(ncclSymkDevKernel_ReduceScatter_HierLsaTmaLDST_sum_f32) \
+  X(ncclSymkDevKernel_ReduceScatter_HierLsaTmaLDST_sum_bf16)
 
 // One stub per kernel plus its _profile sibling: both arrays sym_kernels_host.cc defines need a real address.
 #define RCCL_SYMK_TEST_STUB(name) \

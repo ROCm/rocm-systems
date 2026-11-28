@@ -103,6 +103,13 @@ const std::vector<ExpectedKernelCase>& TmaValidCases() {
       {"ReduceScatter_TmaLD_avg_f8e5m2", ncclSymkKernelId_ReduceScatter_TmaLD, ncclDevSumPostDiv, ncclFloat8e5m2,
        (void*)ncclSymkDevKernel_ReduceScatter_TmaLD_avg_f8e5m2,
        (void*)ncclSymkDevKernel_ReduceScatter_TmaLD_avg_f8e5m2_profile},
+
+      {"ReduceScatter_HierLsaTmaLDST_sum_f32", ncclSymkKernelId_ReduceScatter_HierLsaTmaLDST, ncclDevSum, ncclFloat32,
+       (void*)ncclSymkDevKernel_ReduceScatter_HierLsaTmaLDST_sum_f32,
+       (void*)ncclSymkDevKernel_ReduceScatter_HierLsaTmaLDST_sum_f32_profile},
+      {"ReduceScatter_HierLsaTmaLDST_sum_bf16", ncclSymkKernelId_ReduceScatter_HierLsaTmaLDST, ncclDevSum,
+       ncclBfloat16, (void*)ncclSymkDevKernel_ReduceScatter_HierLsaTmaLDST_sum_bf16,
+       (void*)ncclSymkDevKernel_ReduceScatter_HierLsaTmaLDST_sum_bf16_profile},
   };
   return kCases;
 }
@@ -341,6 +348,10 @@ const std::vector<InvalidKernelCase>& InvalidCases() {
                      ncclDevSum, ncclInt32});
       all.push_back({"ReduceScatter_TmaLD_UnknownType_Int64", ncclSymkKernelId_ReduceScatter_TmaLD, ncclDevSum,
                      ncclInt64});
+      all.push_back({"ReduceScatter_HierLsaTmaLDST_UnsupportedRed_Avg", ncclSymkKernelId_ReduceScatter_HierLsaTmaLDST,
+                     ncclDevSumPostDiv, ncclFloat32});
+      all.push_back({"ReduceScatter_HierLsaTmaLDST_UnknownType_F16", ncclSymkKernelId_ReduceScatter_HierLsaTmaLDST,
+                     ncclDevSum, ncclFloat16});
     } else {
       all.push_back({"UnimplementedId_AllGather_TmaST", ncclSymkKernelId_AllGather_TmaST, ncclDevSum, ncclFloat32});
       all.push_back({"UnimplementedId_AllGather_HierLsaTmaST", ncclSymkKernelId_AllGather_HierLsaTmaST, ncclDevSum,
@@ -349,6 +360,8 @@ const std::vector<InvalidKernelCase>& InvalidCases() {
                      ncclDevSum, ncclFloat32});
       all.push_back({"UnimplementedId_ReduceScatter_TmaLD", ncclSymkKernelId_ReduceScatter_TmaLD, ncclDevSum,
                      ncclFloat32});
+      all.push_back({"UnimplementedId_ReduceScatter_HierLsaTmaLDST", ncclSymkKernelId_ReduceScatter_HierLsaTmaLDST,
+                     ncclDevSum, ncclFloat32});
     }
     return all;
   }();

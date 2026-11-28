@@ -259,6 +259,12 @@ constexpr int ncclSymkAgHierTmaMaxBlocks = 48;
 
 // Max blocks for the hierarchical LSA ReduceScatter kernel.
 constexpr int ncclSymkRsHierMaxBlocks = 96;
+// Max blocks for the hierarchical TDM ReduceScatter kernel. Its slots and flags are sized for
+// ncclSymkRsHierMaxBlocks rows, so it may not exceed that.
+constexpr int ncclSymkRsHierTmaMaxBlocks = 96;
+// Tile reduceBatch's TDM path (ReduceBatchMode::Tdm) stages per warp: one blob, a warp's 8 unrolled
+// 16-byte packs. The window holds two source tiles and one result tile.
+constexpr int ncclSymkReduceBatchTileBytes = 4 << 10;
 
 // How the hierarchical LSA AllGather kernel splits nBlocks over nGroups packages. Group 0 copies with
 // whole blocks where a pushing group forwards with half of each, so it gets about half as many blocks
@@ -377,6 +383,7 @@ enum ncclSymkKernelId {
   ncclSymkKernelId_AllGather_HierLsaST,
   ncclSymkKernelId_AllGather_HierLsaTmaST,
   ncclSymkKernelId_ReduceScatter_HierLsaLDST,
+  ncclSymkKernelId_ReduceScatter_HierLsaTmaLDST,
 
   ncclSymkKernelId_Count
 };
@@ -396,7 +403,8 @@ constexpr char const* ncclSymKernelStr[] = {
   "ReduceScatter_Ring_LL", "Broadcast_Ring_LL", "Reduce_Ring_LL", "AllReduce_Ring_LL128", "AllReduce_Tree_LL128",
   "AllGather_Ring_LL128", "ReduceScatter_Ring_LL128", "Broadcast_Ring_LL128", "Reduce_Ring_LL128", "AlltoAll_LL",
   // RCCL kernels, which follow NCCL's
-  "AllGather_RailRing_LsaST", "AllGather_HierLsaST", "AllGather_HierLsaTmaST", "ReduceScatter_HierLsaLDST"
+  "AllGather_RailRing_LsaST", "AllGather_HierLsaST", "AllGather_HierLsaTmaST", "ReduceScatter_HierLsaLDST",
+  "ReduceScatter_HierLsaTmaLDST"
 };
 
 // Per-channel view of the finalized topology ring for this rank. index is this rank's position in the ring when rank

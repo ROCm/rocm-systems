@@ -81,7 +81,8 @@ constexpr ncclSymkKernelMask kernelMask_RS =
   1ull << ncclSymkKernelId_ReduceScatter_TmaLD | 1ull << ncclSymkKernelId_ReduceScatter_LL |
   1ull << ncclSymkKernelId_ReduceScatter_RailA2A_LsaLD | 1ull << ncclSymkKernelId_ReduceScatter_RailA2A_LsaLDMC |
   1ull << ncclSymkKernelId_ReduceScatter_Ring_Simple | 1ull << ncclSymkKernelId_ReduceScatter_Ring_LL |
-  1ull << ncclSymkKernelId_ReduceScatter_Ring_LL128 | 1ull << ncclSymkKernelId_ReduceScatter_HierLsaLDST;
+  1ull << ncclSymkKernelId_ReduceScatter_Ring_LL128 | 1ull << ncclSymkKernelId_ReduceScatter_HierLsaLDST |
+  1ull << ncclSymkKernelId_ReduceScatter_HierLsaTmaLDST;
 
 constexpr ncclSymkKernelMask kernelMask_LSA =
   1ull << ncclSymkKernelId_AllReduce_AGxLL_R | 1ull << ncclSymkKernelId_AllReduce_AGxLLMC_R |
@@ -121,14 +122,15 @@ constexpr ncclSymkKernelMask kernelMask_GinCapable = kernelMask_GinOnly | kernel
 constexpr ncclSymkKernelMask kernelMask_Tma =
   1ull << ncclSymkKernelId_AllGather_TmaST | 1ull << ncclSymkKernelId_AllGather_TmaSTMC |
   1ull << ncclSymkKernelId_AllGather_HierLsaTmaST | 1ull << ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST |
-  1ull << ncclSymkKernelId_ReduceScatter_TmaLD;
+  1ull << ncclSymkKernelId_ReduceScatter_TmaLD | 1ull << ncclSymkKernelId_ReduceScatter_HierLsaTmaLDST;
 
 constexpr ncclSymkKernelMask kernelMask_DynamicSmem = (kernelMask_GinOnly & kernelMask_RS) | kernelMask_Tma;
 
 // Needs the LSA team to factor into equal-size packages
 constexpr ncclSymkKernelMask kernelMask_Hier = 1ull << ncclSymkKernelId_AllGather_HierLsaST |
                                                1ull << ncclSymkKernelId_AllGather_HierLsaTmaST |
-                                               1ull << ncclSymkKernelId_ReduceScatter_HierLsaLDST;
+                                               1ull << ncclSymkKernelId_ReduceScatter_HierLsaLDST |
+                                               1ull << ncclSymkKernelId_ReduceScatter_HierLsaTmaLDST;
 
 constexpr ncclSymkKernelMask kernelMask_Symk = (kernelMask_AG | kernelMask_AR | kernelMask_RS) & ~kernelMask_Genk;
 
@@ -234,6 +236,12 @@ bool ncclSymkTmaDeepEligible(struct ncclComm* comm, ncclSymkKernelId k, size_t n
     // tier whatever the block count; the 256 B tier may still be skipped. Deep unrolls that tier 4x.
     bytePerChunk = ncclSymkGetBytesPerChunk(ncclSymkMinWarpsPerBlock, 4 * ncclSymkUnrollPacks);
     chunkMod = 1;
+    break;
+  case ncclSymkKernelId_ReduceScatter_HierLsaTmaLDST:
+    // Each block stages whole single-warp tiles of its share of every rank's block, so every block needs
+    // one tile for the TDM path to engage.
+    bytePerChunk = ncclSymkReduceBatchTileBytes;
+    chunkMod = nBlocks;
     break;
   default:
     WARN("Unexpected kernel id %d in ncclSymkTmaDeepEligible", (int)k);
@@ -410,6 +418,9 @@ static void getRequirements_gin(struct ncclComm* comm, int* out_nBlocks, size_t*
 // 0 keeps the compiled-in default.
 NCCL_PARAM(SymAgHierCtas, "SYM_AG_HIER_CTAS", 0);
 NCCL_PARAM(SymAgHierChunkBytes, "SYM_AG_HIER_CHUNK_BYTES", 0);
+// Bytes per destination of one hierarchical ReduceScatter round, for tuning. Rounded down to the slots'
+// alignment and clamped to what the slots hold. Every rank must see the same value.
+NCCL_PARAM(SymRsHierChunkBytes, "SYM_RS_HIER_CHUNK_BYTES", 0);
 
 static constexpr int64_t ncclSymkAgHierMaxChunkBytesEnv = int64_t(1) << 30;
 
@@ -500,6 +511,11 @@ int ncclSymkHierGroups(struct ncclComm* comm) {
 uint32_t ncclSymkRsHierLaunchChunkSize(struct ncclComm* comm, size_t blockBytes) {
   // The communicator's chunk size is what the slots hold, so a launch may only go below it.
   uint32_t chunk = comm->symkState.kcomm.rsHierChunkSize;
+  int64_t forced = ncclParamSymRsHierChunkBytes();
+  if (forced > 0) {
+    size_t aligned = std::max<size_t>(size_t(forced) & ~(ncclSymkRsHierSlotsAlign - 1), ncclSymkRsHierSlotsAlign);
+    return uint32_t(std::min<size_t>(aligned, chunk));
+  }
   if (blockBytes >= ncclSymkRsHierChunkSwitchBlockBytes) return chunk;
   return uint32_t(std::min<size_t>(ncclSymkRsHierMinChunkBytes, chunk));
 }
@@ -859,9 +875,10 @@ ncclSymkKernelMask ncclSymkMask(struct ncclComm* comm, ncclFunc_t coll, int /*nc
   }
 
   if (ncclSymkHierGroups(comm) == 0) kmask &= ~kernelMask_Hier;
-  // generate.py builds the hierarchical ReduceScatter for sum only, in fp32 and bf16.
+  // generate.py builds the hierarchical ReduceScatters for sum only, in fp32 and bf16.
   if (red != ncclDevSum || (ty != ncclFloat32 && ty != ncclBfloat16)) {
-    kmask &= ~(1ull << ncclSymkKernelId_ReduceScatter_HierLsaLDST);
+    kmask &= ~(1ull << ncclSymkKernelId_ReduceScatter_HierLsaLDST |
+               1ull << ncclSymkKernelId_ReduceScatter_HierLsaTmaLDST);
   }
   return kmask;
 }
