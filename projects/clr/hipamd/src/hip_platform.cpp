@@ -240,7 +240,11 @@ void __hipRegisterVar(void** modules,       // The device modules containing cod
   auto* fat_binary_modules = reinterpret_cast<hip::FatBinaryInfo**>(modules);
   hip::Var* var_ptr = new hip::Var(std::string(hostVar), hip::Var::DeviceVarKind::DVK_Variable,
                                    size, fat_binary_modules);
-  hipError_t err = PlatformState::Instance().StatCO().RegisterGlobalVar(var, var_ptr);
+  // The compiler's ext flag means a declaration without a definition. Preserve only
+  // defined __constant__ allocations; extern definitions and registered inline definitions count.
+  const char* constant_name = constant != 0 && ext == 0 ? deviceVar : nullptr;
+  hipError_t err =
+      PlatformState::Instance().StatCO().RegisterGlobalVar(var, var_ptr, constant_name);
   guarantee((err == hipSuccess), "Cannot register Static Global Var, error:%d", err);
 }
 

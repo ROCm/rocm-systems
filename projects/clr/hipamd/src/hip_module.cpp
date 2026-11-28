@@ -191,7 +191,10 @@ hipError_t hipFuncGetAttribute(int* value, hipFunction_attribute attrib, hipFunc
       *value = static_cast<int>(wrkGrpInfo->size_);
       break;
     case HIP_FUNC_ATTRIBUTE_CONST_SIZE_BYTES:
-      *value = static_cast<int>(wrkGrpInfo->constMemSize_ - 1);
+      *value = static_cast<int>(PlatformState::Instance()
+                                    .StatCO()
+                                    .GetConstantMemorySize(kernel->program())
+                                    .value_or(wrkGrpInfo->constMemSize_));
       break;
     case HIP_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES:
       *value = static_cast<int>(wrkGrpInfo->privateMemSize_);
@@ -350,6 +353,21 @@ hipError_t hipFuncSetSharedMemConfig(const void* func, hipSharedMemConfig config
   HIP_RETURN(hipSuccess);
 }
 
+static bool ihipGridExceedsDeviceLimit(const amd::LaunchParams& launch_params,
+                                       const amd::Device& device) {
+  // Grid limits count blocks. Extension APIs provide work-item counts, which
+  // may include a partial final block, so compare before dividing by local size.
+  // Keep the original HIP grid check even if its global product overflowed.
+  for (size_t axis = 0; axis < 3; ++axis) {
+    if (launch_params.grid_[axis] > device.info().maxGridDim_[axis] ||
+        static_cast<uint64_t>(launch_params.global_[axis]) >
+            static_cast<uint64_t>(device.info().maxGridDim_[axis]) * launch_params.local_[axis]) {
+      return true;
+    }
+  }
+  return false;
+}
+
 hipError_t ihipLaunchKernel_validate(hipFunction_t f, const amd::LaunchParams& launch_params,
                                      void** kernelParams, void** extra, int deviceId,
                                      uint32_t params = 0) {
@@ -375,6 +393,9 @@ hipError_t ihipLaunchKernel_validate(hipFunction_t f, const amd::LaunchParams& l
 
   const amd::Device* device = g_devices[deviceId]->devices()[0];
   const auto& info = device->info();
+  if (ihipGridExceedsDeviceLimit(launch_params, *device)) {
+    return hipErrorInvalidConfiguration;
+  }
   if (launch_params.sharedMemBytes_ > info.localMemSizePerCU_) {  // sharedMemPerBlock
     return hipErrorInvalidValue;
   }
@@ -810,11 +831,17 @@ hipError_t hipModuleLaunchKernel(hipFunction_t f, uint32_t gridDimX, uint32_t gr
   int deviceId = hip::Stream::DeviceId(hStream);
   const amd::Device* device = g_devices[deviceId]->devices()[0];
 
+  amd::HIPLaunchParams launch_params(gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ,
+                                     sharedMemBytes, *device, 0, 0, 0, 1, 1, 1);
+  // The module API reports oversized grids as InvalidValue, including during
+  // capture. Other launch APIs retain the shared validator's status.
+  if (ihipGridExceedsDeviceLimit(launch_params, *device)) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
   STREAM_CAPTURE(hipModuleLaunchKernel, hStream, f, gridDimX, gridDimY, gridDimZ, blockDimX,
                  blockDimY, blockDimZ, sharedMemBytes, kernelParams, extra);
 
-  amd::HIPLaunchParams launch_params(gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ,
-                                     sharedMemBytes, *device, 0, 0, 0, 1, 1, 1);
   if (!launch_params.IsValidConfig() ||
        launch_params.local_.product() > device->info().maxWorkGroupSize_) {
     HIP_RETURN(hipErrorInvalidValue);

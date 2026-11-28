@@ -33,6 +33,15 @@ HIP_TEST_CASE(Unit_hipFuncGetAttribute_Positive_Basic) {
     REQUIRE((value == 0 || value == 1));
   }
 
+#if HT_AMD
+  SECTION("constSizeBytes") {
+    // The offline module has no constants or static host registrations.
+    value = -1;
+    HIP_CHECK(hipFuncGetAttribute(&value, HIP_FUNC_ATTRIBUTE_CONST_SIZE_BYTES, kernel));
+    REQUIRE(value == 0);
+  }
+#endif
+
   SECTION("maxThreadsPerBlock") {
     HIP_CHECK(hipFuncGetAttribute(&value, HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK, kernel));
     REQUIRE(value == GetDeviceAttribute(hipDeviceAttributeMaxThreadsPerBlock, 0));
