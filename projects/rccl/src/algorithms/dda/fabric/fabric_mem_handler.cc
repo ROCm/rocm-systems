@@ -12,6 +12,7 @@
 #include "debug.h"
 #include "p2p.h"
 
+#include <algorithm>
 #include <cstring>
 
 namespace {
@@ -120,6 +121,18 @@ ncclResult_t ncclFabricMemHandler::exchangeMemPtrs() {
   }
 
   exchanged_ = true;
+  return ncclSuccess;
+}
+
+ncclResult_t ncclFabricAllRanksOk(void* bootstrap, int rank, int nranks, bool localOk, bool* allOk) {
+  std::vector<int> ok(static_cast<size_t>(nranks), 0);
+  ok[static_cast<size_t>(rank)] = localOk ? 1 : 0;
+  NCCLCHECK(bootstrapAllGather(bootstrap, ok.data(), static_cast<int>(sizeof(int))));
+  auto notOk = std::find(ok.begin(), ok.end(), 0);
+  *allOk = notOk == ok.end();
+  if (!*allOk) {
+    INFO(NCCL_INIT, "ncclFabricAllRanksOk: rank %d not ok; skipping fabric DDA path", (int)(notOk - ok.begin()));
+  }
   return ncclSuccess;
 }
 
