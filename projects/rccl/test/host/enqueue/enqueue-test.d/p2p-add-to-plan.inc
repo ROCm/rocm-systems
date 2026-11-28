@@ -310,6 +310,29 @@ TEST_F(EnqueueMicrotest, AddP2pToPlan_DirectCeUsesExplicitConnectorAndMinimumSte
   }
 }
 
+// NCCL 2.32.6: an AlltoAll pair hands the comm's NET receive-peer envelope to every proxy op as separate
+// min/max hints, instead of one task-count estimate for both.
+TEST_F(EnqueueMicrotest, AddP2pToPlan_AlltoAllProxyOpsCarryA2aPeerEnvelope) {
+  SetParam("P2P_LL128_ENABLE", 0);
+  Gfx1250AddP2pScene sc;
+  sc.bp.c()->p2pA2aMinPeers = 2;
+  sc.bp.c()->p2pA2aMaxPeers = 6;
+  sc.sendTask.collAPI = ncclFuncAlltoAll;
+  sc.recvTask.collAPI = ncclFuncAlltoAll;
+  g_proxySaveOpJustInquire = true;
+
+  ASSERT_EQ(ncclSuccess, sc.add(/*sendBytes=*/8192, /*recvBytes=*/8192));
+  int nOps = 0;
+  for (int ch = 0; ch < sc.bp.c()->p2pnChannels; ++ch) {
+    for (ncclProxyOp* op = ChannelProxyHead(sc.bp, ch); op != nullptr; op = op->enqNext) {
+      ++nOps;
+      EXPECT_EQ(6, op->nPeers) << "channel " << ch << " pattern " << op->pattern;
+      EXPECT_EQ(2, op->minPeers) << "channel " << ch << " pattern " << op->pattern;
+    }
+  }
+  EXPECT_GE(nOps, 2) << "expected at least one send and one recv proxy op";
+}
+
 TEST_F(EnqueueMicrotest, AddP2pToPlan_FeatureOnLoweredCollectiveStaysOnKernelConnector) {
   ScopedP2pCeEnv ce;
   SetParam("P2P_LL128_ENABLE", 0);

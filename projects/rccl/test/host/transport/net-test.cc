@@ -720,6 +720,21 @@ TEST_F(NetAttrsMicrotest, SetXferAttrs_RecvP2p_PinsRecvPeersAndLeavesAlgoUnset) 
   EXPECT_EQ(a.algo, (uint32_t)NCCL_NET_ATTR_UNDEF);
 }
 
+// NCCL 2.32.6: the AlltoAll NET peer envelope reaches the plugin as distinct min and max concurrent peers.
+TEST_F(NetAttrsMicrotest, SetXferAttrs_RecvAlltoAll_SplitsMinAndMaxPeers) {
+  proxyState_.netAttr = NCCL_NET_ATTR_INIT;
+  args_.nPeers = 6;
+  args_.minPeers = 2;
+  args_.nChannels = 1;
+  args_.collAPI = ncclFuncAlltoAll;
+
+  setXferNetAttrs(&proxyState_, &args_, /*send=*/0);
+
+  ASSERT_EQ(net_.setNetAttrCalls, 1);
+  EXPECT_EQ(net_.lastAttr.recvCommAttr.minConcurrentPeers, 2);
+  EXPECT_EQ(net_.lastAttr.recvCommAttr.maxConcurrentPeers, 6);
+}
+
 TEST_F(NetAttrsMicrotest, SetXferAttrs_UnchangedHints_SkipsPlugin) {
   proxyState_.netAttr = NCCL_NET_ATTR_INIT;
   args_.nPeers = 2;
