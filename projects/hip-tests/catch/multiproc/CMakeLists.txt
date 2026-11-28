@@ -19,6 +19,7 @@ set(TEST_SRC
   deviceAllocationMproc.cc
   hipNoGpuTsts.cc
   hipMemGetInfoMProc.cc
+  hipStreamCreateMproc.cc
 )
 
 if(UNIX)

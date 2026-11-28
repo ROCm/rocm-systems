@@ -24,6 +24,7 @@
 #include <stack>
 #include <string>
 #include <thread>
+#include <type_traits>
 #include <vector>
 
 namespace amd::roc {
@@ -1368,4 +1369,16 @@ class VirtualGPU : public device::VirtualDevice {
 
   using KernelArgImpl = device::Settings::KernelArgImpl;
 };
+
+// VirtualGPU has 64-byte aligned members. A class-scope operator new(size_t) in a base class hides
+// the aligned global operator new, so the class hierarchy must provide the aligned form, or new
+// VirtualGPU gets only the default heap alignment (ROCm/TheRock#10048).
+template <class T, class = void> struct HasAlignedClassNew : std::false_type {};
+template <class T>
+struct HasAlignedClassNew<T,
+                          std::void_t<decltype(T::operator new(std::size_t{}, std::align_val_t{}))>>
+    : std::true_type {};
+static_assert(alignof(VirtualGPU) <= __STDCPP_DEFAULT_NEW_ALIGNMENT__ ||
+                  HasAlignedClassNew<VirtualGPU>::value,
+              "new VirtualGPU must get the class alignment");
 }  // namespace amd::roc
