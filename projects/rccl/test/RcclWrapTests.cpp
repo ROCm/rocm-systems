@@ -3240,7 +3240,7 @@ TEST(RcclDdaTierThresholds, SymTdmWindowPerArch)
     EXPECT_EQ(spx->symTdmMinR2[ncclFuncAllGather], 64 * MiB);
     EXPECT_EQ(spx->symTdmMaxR2[ncclFuncAllGather], 128 * MiB);
     EXPECT_EQ(spx->symTdmMaxR2Graph[ncclFuncAllGather], 4096 * MiB);
-    EXPECT_EQ(spx->symTdmCrossTrayMaxR2[ncclFuncAllGather], 512 * MiB);
+    EXPECT_EQ(spx->symTdmCrossTrayMaxR2[ncclFuncAllGather], 1024 * MiB);
     const rcclArchThresholds* tables[] = {spx, rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX),
                                           rcclGetArchThresholds("gfx950"), rcclGetArchThresholds("gfx942")};
     for (const rcclArchThresholds* t : tables)

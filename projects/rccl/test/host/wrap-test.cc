@@ -1798,7 +1798,7 @@ rcclArchThresholds MakeRankScaledTable() {
   t.symTdmMinR2[ncclFuncAllGather] = 64 * kMiB;
   t.symTdmMaxR2[ncclFuncAllGather] = 128 * kMiB;
   t.symTdmMaxR2Graph[ncclFuncAllGather] = 4096 * kMiB;
-  t.symTdmCrossTrayMaxR2[ncclFuncAllGather] = 512 * kMiB;
+  t.symTdmCrossTrayMaxR2[ncclFuncAllGather] = 1024 * kMiB;
   return t;
 }
 
@@ -7305,8 +7305,8 @@ TEST(WrapMicrotestIsolated, SelectAllGather_TdmWindowAtGfx1250Edges) {
         EXPECT_TRUE(picksSymk(64 * kMiB, false, true)) << "graph, symTdmMinR2";
         EXPECT_TRUE(picksSymk(4096 * kMiB, false, true)) << "graph, symTdmMaxR2Graph";
         EXPECT_FALSE(picksSymk(4096 * kMiB + 64, false, true)) << "graph, just past symTdmMaxR2Graph";
-        EXPECT_TRUE(picksSymk(512 * kMiB, true, true)) << "graph cross-tray, symTdmCrossTrayMaxR2";
-        EXPECT_FALSE(picksSymk(512 * kMiB + 64, true, true)) << "graph cross-tray, just past symTdmCrossTrayMaxR2";
+        EXPECT_TRUE(picksSymk(1024 * kMiB, true, true)) << "graph cross-tray, symTdmCrossTrayMaxR2";
+        EXPECT_FALSE(picksSymk(1024 * kMiB + 64, true, true)) << "graph cross-tray, just past symTdmCrossTrayMaxR2";
       });
 }
 
