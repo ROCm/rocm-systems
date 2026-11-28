@@ -450,7 +450,8 @@ MATH_UNARY_KERNEL_DEF(tgamma)
  *    - Tests the numerical accuracy of `tgammaf(x)` for all possible inputs below 171.7 and that
  * are not very small negative numbers, as they lead to overflow for IEEE compatible double. The
  * results are compared against reference function `double std::tgamma(double)`. The maximum ulp
- * error is 5.
+ * error on AMD is 16, following the OCML pointwise accuracy bound.
+ * On NVIDIA the maximum ulp error is 5.
  *
  * Test source
  * ------------------------
@@ -461,10 +462,18 @@ MATH_UNARY_KERNEL_DEF(tgamma)
  */
 HIP_TEST_CASE(Unit_Device_tgammaf_Accuracy_Limited_Positive) {
   double (*ref)(double) = std::tgamma;
-  UnarySinglePrecisionRangeTest(tgamma_kernel<float>, ref, ULPValidatorBuilderFactory<float>(5),
+#if HT_AMD
+  // OCML specifies a pointwise bound of 16 ULPs. The HIP math table instead
+  // reports the ULP distance at the point of maximum absolute error; its
+  // value is not a bound on every input's ULP distance.
+  constexpr int max_ulps = 16;
+#else
+  constexpr int max_ulps = 5;
+#endif
+  const auto validator_builder = ULPValidatorBuilderFactory<float>(max_ulps);
+  UnarySinglePrecisionRangeTest(tgamma_kernel<float>, ref, validator_builder,
                                 std::numeric_limits<float>::lowest(), -0.001f);
-  UnarySinglePrecisionRangeTest(tgamma_kernel<float>, ref, ULPValidatorBuilderFactory<float>(5), 0,
-                                171.7);
+  UnarySinglePrecisionRangeTest(tgamma_kernel<float>, ref, validator_builder, 0, 171.7);
 }
 
 /**

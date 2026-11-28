@@ -1,5 +1,6 @@
 ---
 math:
+  Unit_ExponentialValidator_ResultBounds: *level_default
   Unit_Device_sin_Accuracy_Positive_float: *level_default
   Unit_Device_sin_Accuracy_Positive_double: *level_default
   Unit_Device_sin_sinf_Negative_RTC:

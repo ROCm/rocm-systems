@@ -12,72 +12,61 @@
 #include <cstring>
 namespace math_reference {
 
-inline double sin_pi(double x) {
-    if (std::isnan(x)) return x;
-    if (std::isinf(x)) return std::numeric_limits<double>::quiet_NaN();
-
-    double int_part;
-    double frac_part = std::modf(x, &int_part);
-    if (frac_part == 0.0) {
-        return std::copysign(0.0, x);
-    }
-    if (std::fabs(frac_part) == 0.5) {
-        int n = static_cast<int>(int_part);
-        double result = (n % 2 == 0) ? 1.0 : -1.0;
-        return x < 0.0 ? -result : result;
-    }
-
-    double sign = x < 0.0 ? -1.0 : 1.0;
-    double r = std::fmod(std::fabs(x), 2.0);
-    double result;
-    if (r <= 1.0) {
-        result = std::sin(r * M_PI);
-    } else {
-        result = -std::sin((r - 1.0) * M_PI);
-    }
-    return result * sign;
-}
-
-inline double cos_pi(double x) {
-    if (std::isnan(x)) return x;
-    if (std::isinf(x)) return std::numeric_limits<double>::quiet_NaN();
-
-    double xd = std::fabs(x);
-    double int_part;
-    double frac_part = std::modf(xd, &int_part);
-    if (frac_part == 0.0) {
-        int n = static_cast<int>(int_part);
-        return (n % 2 == 0) ? 1.0 : -1.0;
-    }
-    if (std::fabs(frac_part) == 0.5) {
-        return 0.0;
-    }
-
-    double r = std::fmod(xd, 2.0);
-    double result;
-    if (r <= 1.0) {
-        result = std::cos(r * M_PI);
-    } else {
-        result = -std::cos((r - 1.0) * M_PI);
-    }
-    return result;
-}
-
-inline float sin_pi(float x) {
-    return static_cast<float>(sin_pi(static_cast<double>(x)));
-}
-
-inline float cos_pi(float x) {
-    return static_cast<float>(cos_pi(static_cast<double>(x)));
-}
-
+// Reduce in units of half a turn before multiplying by pi. This avoids
+// cancellation near integer and half-integer roots, and keeps large arguments
+// out of integer conversions. remquo guarantees enough quotient bits for the
+// four quadrants even when the complete quotient is not representable.
 inline long double sin_pi(long double x) {
-    return static_cast<long double>(sin_pi(static_cast<double>(x)));
+  if (std::isnan(x)) return x;
+  if (std::isinf(x)) return std::numeric_limits<long double>::quiet_NaN();
+
+  int quadrant = 0;
+  const long double r = std::remquo(x, 0.5L, &quadrant);
+  quadrant = (quadrant % 4 + 4) % 4;
+  if (r == 0.0L && quadrant % 2 == 0) return std::copysign(0.0L, x);
+
+  constexpr long double pi = 3.141592653589793238462643383279502884L;
+  switch (quadrant) {
+    case 0:
+      return std::sin(pi * r);
+    case 1:
+      return std::cos(pi * r);
+    case 2:
+      return -std::sin(pi * r);
+    default:
+      return -std::cos(pi * r);
+  }
 }
 
 inline long double cos_pi(long double x) {
-    return static_cast<long double>(cos_pi(static_cast<double>(x)));
+  if (std::isnan(x)) return x;
+  if (std::isinf(x)) return std::numeric_limits<long double>::quiet_NaN();
+
+  int quadrant = 0;
+  const long double r = std::remquo(x, 0.5L, &quadrant);
+  quadrant = (quadrant % 4 + 4) % 4;
+  if (r == 0.0L && quadrant % 2 != 0) return 0.0L;
+
+  constexpr long double pi = 3.141592653589793238462643383279502884L;
+  switch (quadrant) {
+    case 0:
+      return std::cos(pi * r);
+    case 1:
+      return -std::sin(pi * r);
+    case 2:
+      return -std::cos(pi * r);
+    default:
+      return std::sin(pi * r);
+  }
 }
+
+inline double sin_pi(double x) { return static_cast<double>(sin_pi(static_cast<long double>(x))); }
+
+inline double cos_pi(double x) { return static_cast<double>(cos_pi(static_cast<long double>(x))); }
+
+inline float sin_pi(float x) { return static_cast<float>(sin_pi(static_cast<long double>(x))); }
+
+inline float cos_pi(float x) { return static_cast<float>(cos_pi(static_cast<long double>(x))); }
 
 // =============================================================================
 // Inverse Error Function (erfinv, erfcinv) Reference Implementations
