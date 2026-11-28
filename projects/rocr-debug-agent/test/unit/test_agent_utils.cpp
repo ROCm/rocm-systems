@@ -208,3 +208,93 @@ TEST (AgentUtilsTest, ExpandFormatTokensCombined)
                + std::to_string (::getuid ()) + "-"
                + std::to_string (::getgid ()) + ".log");
 }
+
+namespace
+{
+
+using bytes_t = std::vector<uint8_t>;
+
+struct hex_case
+{
+  bytes_t bytes;
+  const char *expected;
+};
+
+struct register_case
+{
+  const char *type;
+  bytes_t bytes;
+  const char *expected;
+};
+
+void
+check_register_cases (const std::vector<register_case> &cases)
+{
+  for (const register_case &c : cases)
+    {
+      SCOPED_TRACE (c.type);
+      EXPECT_EQ (register_value_string (c.type, c.bytes), c.expected);
+    }
+}
+
+} /* namespace */
+
+/* Bytes are printed most significant first, in lowercase, two digits each.  */
+TEST (AgentUtilsTest, HexStringFormatting)
+{
+  const std::vector<hex_case> cases = {
+    { {}, "" },
+    { { 0x00 }, "00" },
+    { { 0x0f }, "0f" },
+    { { 0xff, 0x00 }, "00ff" },
+    { { 0xef, 0xcd, 0xab, 0x89, 0x67, 0x45, 0x23, 0x01 }, "0123456789abcdef" },
+    { { 0xAB }, "ab" },
+  };
+
+  for (const hex_case &c : cases)
+    EXPECT_EQ (hex_string (c.bytes), c.expected);
+}
+
+/* A type without '[' is formatted as a plain hex string.  */
+TEST (AgentUtilsTest, RegisterValueStringScalar)
+{
+  check_register_cases ({
+    { "int", { 1, 0, 0, 0 }, "00000001" },
+    { "float", { 0x78, 0x56, 0x34, 0x12 }, "12345678" },
+    { "", { 1, 0, 0, 0 }, "00000001" },
+  });
+}
+
+/* A vector type is split into indexed elements joined by a single space.  */
+TEST (AgentUtilsTest, RegisterValueStringVector)
+{
+  check_register_cases ({
+    { "int[2]", { 1, 0, 0, 0, 2, 0, 0, 0 }, "[0] 00000001 [1] 00000002" },
+    { "int[1]", { 1, 0, 0, 0 }, "[0] 00000001" },
+    { "char[4]", { 1, 2, 3, 4 }, "[0] 01 [1] 02 [2] 03 [3] 04" },
+  });
+}
+
+/* A zero, negative or too large count, or an empty value, falls back to a
+   hex dump of the whole value.  */
+TEST (AgentUtilsTest, RegisterValueStringHexFallback)
+{
+  check_register_cases ({
+    { "int[0]", { 1, 0, 0, 0 }, "00000001" },
+    { "int[8]", { 1, 0, 0, 0 }, "00000001" },
+    /* std::stoi gives -1, which converts to a huge size_t.  */
+    { "int[-1]", { 1, 0, 0, 0 }, "00000001" },
+    { "int[2]", {}, "" },
+  });
+}
+
+/* The last '[' selects the count and the rest is the element type, which is
+   formatted recursively.  */
+TEST (AgentUtilsTest, RegisterValueStringNestedVector)
+{
+  const bytes_t bytes = { 1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0, 4, 0, 0, 0 };
+
+  EXPECT_EQ (register_value_string ("int[2][2]", bytes),
+             "[0] [0] 00000001 [1] 00000002 "
+             "[1] [0] 00000003 [1] 00000004");
+}
