@@ -1219,6 +1219,8 @@ static HSAKMT_STATUS topology_sysfs_get_node_props(HsaKFDContext *ctx,
 			props->NumCUPerArray = (uint32_t)prop_val;
 		else if (strcmp(prop_name, "simd_per_cu") == 0)
 			props->NumSIMDPerCU = (uint32_t)prop_val;
+		else if (strcmp(prop_name, "max_cu_per_engine") == 0)
+			props->MaxPhysCUperEngine = (uint32_t)prop_val;
 		else if (strcmp(prop_name, "max_slots_scratch_cu") == 0)
 			props->MaxSlotsScratchCU = (uint32_t)prop_val;
 		else if (strcmp(prop_name, "fw_version") == 0) {

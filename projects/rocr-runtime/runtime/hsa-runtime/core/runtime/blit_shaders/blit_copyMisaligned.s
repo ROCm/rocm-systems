@@ -86,7 +86,7 @@
 .endif
 
 .macro S_WAITCNT_KMCNT
-  .if (.amdgcn.gfx_generation_number == 12 && .amdgcn.gfx_generation_minor >= 5)
+  .if (.amdgcn.gfx_generation_number == 12 && .amdgcn.gfx_generation_minor >= 5) || (.amdgcn.gfx_generation_number > 12)
     s_wait_kmcnt             0
   .else
     s_waitcnt                lgkmcnt(0)
@@ -94,7 +94,7 @@
 .endm
 
 .macro S_WAITCNT_LOADCNT
-  .if (.amdgcn.gfx_generation_number == 12 && .amdgcn.gfx_generation_minor >= 5)
+  .if (.amdgcn.gfx_generation_number == 12 && .amdgcn.gfx_generation_minor >= 5) || (.amdgcn.gfx_generation_number > 12)
     s_wait_loadcnt           0
   .else
     s_waitcnt                vmcnt(0)
@@ -120,7 +120,7 @@ CopyMisaligned:
   s_load_dword    s16, s[0:1], 0x30
   S_WAITCNT_KMCNT
 
-  .if (.amdgcn.gfx_generation_number == 12)
+  .if (.amdgcn.gfx_generation_number >= 12)
     s_lshl_b32          s2, ttmp9, 0x6
   .else
     s_lshl_b32          s2, s2, 0x6

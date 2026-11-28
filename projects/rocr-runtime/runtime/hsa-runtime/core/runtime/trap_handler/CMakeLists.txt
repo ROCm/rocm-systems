@@ -53,10 +53,10 @@ find_package(LLVM REQUIRED HINTS ${CMAKE_PREFIX_PATH}/llvm PATHS /opt/rocm/llvm 
 # ASIC revision reported by KFD.  The opt-in direction is deliberate: a target
 # added here without a matching ASM_DEFSYM entry gets the handler without the
 # rewind, which is correct everywhere except revision 0.
-set (TARGET_DEVS "gfx900;gfx942;gfx950;gfx1010;gfx1030;gfx1100;gfx1200;gfx1250;gfx1250")
-set (POSTFIX "9;942;950;1010;10;11;12;1250;1250_rev0")
-set (SOURCE_SUFFIX ";;;;;;_gfx12;_gfx12;_gfx12")
-set (ASM_DEFSYM ";;;;;;;;HAVE_VOP3PX_FIXUP=1")
+set (TARGET_DEVS "gfx900;gfx942;gfx950;gfx1010;gfx1030;gfx1100;gfx1200;gfx1250;gfx1250;gfx1310")
+set (POSTFIX "9;942;950;1010;10;11;12;1250;1250_rev0;13")
+set (SOURCE_SUFFIX ";;;;;;_gfx12;_gfx12;_gfx12;_gfx13")
+set (ASM_DEFSYM ";;;;;;;;HAVE_VOP3PX_FIXUP=1;")
 
 # The four lists above are indexed in parallel, so a miscounted separator in
 # any one of them silently pairs a value with the wrong target rather than

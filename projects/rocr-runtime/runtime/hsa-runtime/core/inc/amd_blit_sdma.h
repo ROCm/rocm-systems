@@ -511,9 +511,6 @@ template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
   uint64_t cached_reserve_index_;
   uint64_t cached_commit_index_;
 
-  static const uint32_t linear_copy_command_size_;
-
-  static const uint32_t broadcast_copy_command_size_;
 
   static const uint32_t swap_copy_command_size_;
 
@@ -536,6 +533,8 @@ template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
   static const uint32_t poll_64b_command_size_;
 
   uint32_t gcr_command_size();
+  uint32_t linear_copy_command_size();
+  uint32_t broadcast_copy_command_size();
 
   // Max copy size of a single linear copy command packet.
   size_t max_single_linear_copy_size_;

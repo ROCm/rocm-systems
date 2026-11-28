@@ -237,7 +237,8 @@ bool Isa::HasImageSupport() const {
 
   if ((GetMajorVersion() == 9 &&
         (GetMinorVersion() == 4 || GetMinorVersion() == 5)) ||
-      (GetMajorVersion() == 12 && GetMinorVersion() == 5))
+      (GetMajorVersion() == 12 && GetMinorVersion() == 5) ||
+      GetMajorVersion() == 13)
     return false;
 
   return true;
@@ -463,6 +464,7 @@ const IsaRegistry::IsaMap& IsaRegistry::GetSupportedIsas() {
   // object fail the compatibility check.
   ISAREG_ENTRY_GEN("gfx1250-strict",         12, 5, 0, unsupported, unsupported, 32, "")
   ISAREG_ENTRY_GEN("gfx1251",                12, 5, 1, unsupported, unsupported, 32, "gfx12-5-generic")
+  ISAREG_ENTRY_GEN("gfx1310",                13, 1, 0, unsupported, unsupported, 32, "")
 #undef ISAREG_ENTRY_GEN
 
   return *supported_isas;
