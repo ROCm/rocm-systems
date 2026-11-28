@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 // AVX2 loose FP16/BF16 WMMA. Four rows share each decoded B vector;
-// packed outputs narrow after each gfx11 DOT2 or gfx12 DOT4.
+// packed outputs narrow only at the final store.
 
 #include "common/compiler.h"
 #include "common/simd.h"
@@ -92,8 +92,6 @@ template <bool Bf16, int Lanes, bool Rdna3, bool Packed, bool Saturate, bool Dir
   auto apply_c_mod = [&](__m256 v) { return _mm256_xor_ps(_mm256_and_ps(v, keep), sign); };
 
   alignas(32) uint32_t result[DirectStore ? 1 : DestinationRegs][DirectStore ? 1 : Lanes];
-  constexpr int StageK = Packed ? (Rdna3 ? 2 : 4) : 16;
-  constexpr int Stages = 16 / StageK;
 
 #if defined(__clang__)
 #pragma clang loop unroll(disable)
@@ -131,55 +129,15 @@ template <bool Bf16, int Lanes, bool Rdna3, bool Packed, bool Saturate, bool Dir
       }
     }
 
-    if constexpr (!Packed) {
+    RJ_ARITH_UNROLL(4)
+    for (int step = 0; step < 16; ++step) {
+      const __m256 b_low = _mm256_load_ps(right[step]);
+      const __m256 b_high = _mm256_load_ps(right[step] + 8);
       RJ_ARITH_UNROLL(4)
-      for (int step = 0; step < 16; ++step) {
-        const __m256 b_low = _mm256_load_ps(right[step]);
-        const __m256 b_high = _mm256_load_ps(right[step] + 8);
-        RJ_ARITH_UNROLL(4)
-        for (int r = 0; r < Rows; ++r) {
-          const __m256 x = _mm256_broadcast_ss(&left[step][base + r]);
-          low[r] = _mm256_fmadd_ps(x, b_low, low[r]);
-          high[r] = _mm256_fmadd_ps(x, b_high, high[r]);
-        }
-      }
-    } else {
-      // Peel the final unrounded stage so no conditional sits inside the
-      // unroll(disable) loop (preventing LLVM LoopPeel from stripping metadata
-      // and serializing individual rows across all 16 K steps).
-      auto fma_step = [&](int step) {
-        const __m256 b_low = _mm256_load_ps(right[step]);
-        const __m256 b_high = _mm256_load_ps(right[step] + 8);
-        RJ_ARITH_UNROLL(4)
-        for (int r = 0; r < Rows; ++r) {
-          const __m256 x = _mm256_broadcast_ss(&left[step][base + r]);
-          low[r] = _mm256_fmadd_ps(x, b_low, low[r]);
-          high[r] = _mm256_fmadd_ps(x, b_high, high[r]);
-        }
-      };
-      auto fma_round_step = [&](int step) {
-        const __m256 b_low = _mm256_load_ps(right[step]);
-        const __m256 b_high = _mm256_load_ps(right[step] + 8);
-        RJ_ARITH_UNROLL(4)
-        for (int r = 0; r < Rows; ++r) {
-          const __m256 x = _mm256_broadcast_ss(&left[step][base + r]);
-          low[r] = wmma_round_stage_v3<Bf16, Saturate>(_mm256_fmadd_ps(x, b_low, low[r]));
-          high[r] = wmma_round_stage_v3<Bf16, Saturate>(_mm256_fmadd_ps(x, b_high, high[r]));
-        }
-      };
-#if defined(__clang__)
-#pragma clang loop unroll(disable)
-#endif
-      for (int stage = 0; stage < Stages - 1; ++stage) {
-        const int s = stage * StageK;
-        for (int j = 0; j < StageK - 1; ++j) {
-          fma_step(s + j);
-        }
-        fma_round_step(s + StageK - 1);
-      }
-      constexpr int Last = (Stages - 1) * StageK;
-      for (int j = 0; j < StageK; ++j) {
-        fma_step(Last + j);
+      for (int r = 0; r < Rows; ++r) {
+        const __m256 x = _mm256_broadcast_ss(&left[step][base + r]);
+        low[r] = _mm256_fmadd_ps(x, b_low, low[r]);
+        high[r] = _mm256_fmadd_ps(x, b_high, high[r]);
       }
     }
 
@@ -298,7 +256,7 @@ template void wmma_f32_x86_64_v3<true, 64, true>(uint32_t, uint32_t *const *,
 
 // Compute loose WMMA with packed FP16/BF16 C/D and validated instruction flags.
 // D may overlap inputs; preserve the unused gfx11 half. saturate controls
-// finite FP16 overflow at each narrowing stage.
+// finite FP16 overflow at the final store.
 template <bool Bf16, int Lanes, bool Rdna3>
 void wmma_packed_x86_64_v3(uint32_t instruction_flags, bool saturate, uint32_t *const *d,
                            const uint32_t *const *a, const uint32_t *const *b,

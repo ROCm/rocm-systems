@@ -46,14 +46,16 @@ void smfmac_decode(const uint32_t *const *input, float *values) {
   }
 }
 
-// Reduce one sparse row, retaining input order and repairing only NaN output lanes.
+// Reduce one sparse row; Compatibility additionally preserves inherited NaN payload priority.
 template <int Columns, int Terms>
 void sparse_float_row(const float *values, const float (*right)[Columns], const int *selected,
-                      float *result) {
+                      float *result, bool preserve_compatibility = true) {
 #if !defined(__AVX512F__)
   float initial[Columns];
   for (int col = 0; col < Columns; ++col) {
-    initial[col] = result[col];
+    if (preserve_compatibility) {
+      initial[col] = result[col];
+    }
   }
 #endif
 #if defined(__AVX512F__)
@@ -68,7 +70,7 @@ void sparse_float_row(const float *values, const float (*right)[Columns], const 
     // the payload. Within that term A has priority over B. Without a NaN
     // factor the initial accumulator wins, followed by the invalid-operation NaN.
     auto pending = _mm512_fpclass_ps_mask(acc, 0x81);
-    if (pending) {
+    if (preserve_compatibility && pending) {
       auto quiet = _mm512_set1_epi32(0x00400000);
       for (int t = Terms - 1; t >= 0 && pending; --t) {
         auto x = as_bits(values[t]);
@@ -104,6 +106,11 @@ void sparse_float_row(const float *values, const float (*right)[Columns], const 
   }
 #endif
 #if !defined(__AVX512F__)
+#if defined(__AVX2__)
+  if (!preserve_compatibility) {
+    return;
+  }
+#endif
   for (int col = 0; col < Columns; ++col) {
 #if defined(__AVX2__)
     // Replay only NaN outputs to preserve A/B/C payload priority across host FMAs.
@@ -111,9 +118,10 @@ void sparse_float_row(const float *values, const float (*right)[Columns], const 
       continue;
     }
 #endif
-    float acc = initial[col];
+    float acc = preserve_compatibility ? initial[col] : result[col];
     for (int t = 0; t < Terms; ++t) {
-      acc = matrix_nan_fma(values[t], right[selected[t]][col], acc);
+      acc = preserve_compatibility ? matrix_nan_fma(values[t], right[selected[t]][col], acc)
+                                   : __builtin_fmaf(values[t], right[selected[t]][col], acc);
     }
     result[col] = acc;
   }

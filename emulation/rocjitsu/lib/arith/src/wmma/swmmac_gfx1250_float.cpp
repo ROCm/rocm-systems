@@ -12,6 +12,7 @@ template <int Bits, bool BfA, bool BfB, int Form>
 int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32_t *const *a,
              const uint32_t *const *b, const uint32_t *const *index) {
   using namespace rocjitsu::arith;
+  const uint64_t implementation_flags = flags;
   flags = resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
   if (int error = validate(flags, controls & ~uint64_t(RJ_ARITH_SWMMAC_INDEX_KEY_1),
                            kMatrixIgnoredFpFlags | RJ_ARITH_FP_DX10_CLAMP_OFF)) {
@@ -35,17 +36,17 @@ int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32
   }
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
   if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
-    swmmac_float_x86_64_v4<Bits, BfA, BfB, Form>(flags, d, a, b, index);
+    swmmac_float_x86_64_v4<Bits, BfA, BfB, Form>(implementation_flags, d, a, b, index);
     return RJ_ARITH_SUCCESS;
   }
 #endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
   if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
-    swmmac_float_x86_64_v3<Bits, BfA, BfB, Form>(flags, d, a, b, index);
+    swmmac_float_x86_64_v3<Bits, BfA, BfB, Form>(implementation_flags, d, a, b, index);
     return RJ_ARITH_SUCCESS;
   }
 #endif
-  swmmac1250_float_kernel<Bits, BfA, BfB, Form>(flags, d, a, b, index);
+  swmmac1250_float_kernel<Bits, BfA, BfB, Form>(implementation_flags, d, a, b, index);
   return RJ_ARITH_SUCCESS;
 }
 } // namespace

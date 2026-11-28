@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: MIT
 
 // AVX-512 BF16 (vdpbf16ps) pair-dot backends for loose gfx1250 BF16, FP8/BF8, and mixed f8f6f4
-// WMMA. When any operand fails a VDPBF16PS range, subnormal, signed-zero, or nonfinite guard, an
+// WMMA. Compatibility screens VDPBF16PS range, subnormal, signed-zero and nonfinite cases. An
 // out-of-line AVX-512 FP32 FMA fallback reuses the already-loaded/decoded BF16 pairs directly so
-// fallback waves avoid redundant operand loads and decodes.
+// fallback waves avoid redundant operand loads and decodes. Loose uses native pair dots throughout.
 #include "common/compiler.h"
 #include "common/x86_64/bf16_broadcast.h"
 #include "mfma/mixed_formats.h"
@@ -278,9 +278,9 @@ gfx1250_mixed_pairs_fma_fallback(uint64_t controls, uint32_t *const *d, const ui
 
 // Decode a 16-row gfx1250 f8f6f4 operand directly to K-paired BF16 (high half = even K,
 // low half = odd K so VDPBF16PS preserves guest K order without extra rotations).
-// Returns false if any FP8/BF8 element is nonfinite; FP6/BF6/FP4 are always finite.
+// When preserve_nan is set, nonfinite FP8/BF8 requests FMA fallback for Compatibility.
 bool gfx1250_mixed_decode_bf16_16(const uint32_t *const *input, int format, bool interleave_four,
-                                  uint32_t out[64][16]) {
+                                  uint32_t out[64][16], bool preserve_nan) {
   if (format == RJ_ARITH_MATRIX_FORMAT_FP8 || format == RJ_ARITH_MATRIX_FORMAT_BF8) {
     const bool is_bf8 = format == RJ_ARITH_MATRIX_FORMAT_BF8;
     __mmask64 bad = 0;
@@ -289,7 +289,9 @@ bool gfx1250_mixed_decode_bf16_16(const uint32_t *const *input, int format, bool
       const int lane = 16 * ((k / 16) % 2);
       const __m512i w = _mm512_loadu_si512(input[reg] + lane);
       if (is_bf8) {
-        bad |= fp8_has_nonfinite<true>(w);
+        if (preserve_nan) {
+          bad |= fp8_has_nonfinite<true>(w);
+        }
         _mm512_store_si512(
             out[k / 2],
             _mm512_rol_epi32(gfx1250_fp8_to_bf16_pairs<true>(_mm512_cvtepi32_epi16(w)), 16));
@@ -298,7 +300,9 @@ bool gfx1250_mixed_decode_bf16_16(const uint32_t *const *input, int format, bool
                                                 _mm512_cvtepi32_epi16(_mm512_srli_epi32(w, 16))),
                                             16));
       } else {
-        bad |= fp8_has_nonfinite<false>(w);
+        if (preserve_nan) {
+          bad |= fp8_has_nonfinite<false>(w);
+        }
         _mm512_store_si512(
             out[k / 2],
             _mm512_rol_epi32(gfx1250_fp8_to_bf16_pairs<false>(_mm512_cvtepi32_epi16(w)), 16));
@@ -409,9 +413,10 @@ void wmma_gfx1250_half_x86_64_v4_bf16(uint64_t flags, uint64_t controls, uint32_
                                       const uint32_t *const *c) {
   static_assert(Form == Wmma1250Form::F32Bf16 || Form == Wmma1250Form::Bf16 ||
                 Form == Wmma1250Form::Bf16F32);
+  const bool compatibility = (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY;
   constexpr bool DotFirst = Form != Wmma1250Form::Bf16;
 
-  // Load A and B once, verifying safe BF16 exponent ranges before touching accumulators.
+  // Load A/B once; only Compatibility qualifies the native dot against its FMA model.
   alignas(64) uint32_t left[16][16], right[16][16];
   __mmask32 bad = 0;
   for (int step = 0; step < 16; ++step) {
@@ -419,7 +424,9 @@ void wmma_gfx1250_half_x86_64_v4_bf16(uint64_t flags, uint64_t controls, uint32_
     const int lane = 16 * ((step / 4) % 2);
     const __m512i aw = _mm512_loadu_si512(a[reg] + lane);
     const __m512i bw = _mm512_loadu_si512(b[reg] + lane);
-    bad |= bf16_outside_safe_range(aw) | bf16_outside_safe_range(bw);
+    if (compatibility) {
+      bad |= bf16_outside_safe_range(aw) | bf16_outside_safe_range(bw);
+    }
     // Rotate 16-bit pairs so vdpbf16ps evaluates the low K element before the high K element.
     _mm512_store_si512(left[step], _mm512_rol_epi32(aw, 16));
     _mm512_store_si512(right[step], _mm512_rol_epi32(bw, 16));
@@ -435,7 +442,7 @@ void wmma_gfx1250_half_x86_64_v4_bf16(uint64_t flags, uint64_t controls, uint32_
     for (int row = 0; row < 16; ++row) {
       acc[row] = _mm512_setzero_ps();
     }
-  } else if (!(controls & RJ_ARITH_WMMA_INLINE_C)) {
+  } else if (compatibility && !(controls & RJ_ARITH_WMMA_INLINE_C)) {
     // Check packed BF16 C directly at 16-bit width (8 ZMMs) while widening into acc[16].
     const __m512i keep16 =
         _mm512_set1_epi16((controls & RJ_ARITH_WMMA_ABS_C) ? 0x7fff : static_cast<int16_t>(0xffff));
@@ -466,7 +473,7 @@ void wmma_gfx1250_half_x86_64_v4_bf16(uint64_t flags, uint64_t controls, uint32_
     }
   } else {
     gfx1250_load_acc_zmm<Form>(c, controls, acc);
-    if (f32_needs_fallback(_mm512_castps_si512(acc[0]))) [[unlikely]] {
+    if (compatibility && f32_needs_fallback(_mm512_castps_si512(acc[0]))) [[unlikely]] {
       gfx1250_half_bf16_fma_fallback<Form>(flags, controls, d, left, right, c);
       return;
     }
@@ -493,7 +500,9 @@ void wmma_gfx1250_half_x86_64_v4_bf16(uint64_t flags, uint64_t controls, uint32_
         const __m512i init_bits = _mm512_xor_si512(_mm512_and_si512(bits, keep), negate);
         acc[reg + 8 * group] = _mm512_add_ps(acc[reg + 8 * group], _mm512_castsi512_ps(init_bits));
         if constexpr (Form == Wmma1250Form::Bf16F32) {
-          nan_c |= _mm512_cmp_ps_mask(acc[reg + 8 * group], acc[reg + 8 * group], _CMP_UNORD_Q);
+          if (compatibility) {
+            nan_c |= _mm512_cmp_ps_mask(acc[reg + 8 * group], acc[reg + 8 * group], _CMP_UNORD_Q);
+          }
         }
       }
     }
@@ -520,6 +529,7 @@ template <int K, bool Bf8A, bool Bf8B, bool Packed>
 void wmma_gfx1250_fp8_x86_64_v4_bf16(uint64_t flags, uint64_t controls, uint32_t *const *d,
                                      const uint32_t *const *a, const uint32_t *const *b,
                                      const uint32_t *const *c) {
+  const bool compatibility = (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY;
   constexpr Wmma1250Form form = Packed ? Wmma1250Form::F16 : Wmma1250Form::F32F16;
   // Decode A/B first while all 32 ZMMs are available for the vpermi2w LUT tables.
   alignas(64) uint32_t left[K / 2][16], right[K / 2][16];
@@ -529,7 +539,9 @@ void wmma_gfx1250_fp8_x86_64_v4_bf16(uint64_t flags, uint64_t controls, uint32_t
     const int lane = 16 * ((k / 16) % 2);
     const __m512i aw = _mm512_loadu_si512(a[reg] + lane);
     const __m512i bw = _mm512_loadu_si512(b[reg] + lane);
-    bad_ab |= fp8_has_nonfinite<Bf8A>(aw) | fp8_has_nonfinite<Bf8B>(bw);
+    if (compatibility) {
+      bad_ab |= fp8_has_nonfinite<Bf8A>(aw) | fp8_has_nonfinite<Bf8B>(bw);
+    }
     _mm512_store_si512(
         left[k / 2],
         _mm512_rol_epi32(gfx1250_fp8_to_bf16_pairs<Bf8A>(_mm512_cvtepi32_epi16(aw)), 16));
@@ -555,7 +567,9 @@ void wmma_gfx1250_fp8_x86_64_v4_bf16(uint64_t flags, uint64_t controls, uint32_t
   __mmask16 bad_c = 0;
   RJ_ARITH_UNROLL(16)
   for (int row = 0; row < 16; ++row) {
-    bad_c |= f32_needs_fallback(_mm512_castps_si512(acc[row]));
+    if (compatibility) {
+      bad_c |= f32_needs_fallback(_mm512_castps_si512(acc[row]));
+    }
   }
   if (bad_c) [[unlikely]] {
     gfx1250_fp8_pairs_fma_fallback<K, form>(flags, controls, d, left, right, c);
@@ -580,7 +594,7 @@ void wmma_gfx1250_fp8_x86_64_v4_bf16(uint64_t flags, uint64_t controls, uint32_t
 // -0.0f without affecting any other sum (x + (-0.0f) == x). Scales and C (including
 // subnormal/Inf/NaN) are applied in exact FP32.
 template <int Block>
-void wmma_gfx1250_mixed_x86_64_v4_bf16(uint64_t controls, uint32_t *const *d,
+void wmma_gfx1250_mixed_x86_64_v4_bf16(uint64_t flags, uint64_t controls, uint32_t *const *d,
                                        const uint32_t *const *a, const uint32_t *const *b,
                                        const uint32_t *const *c, const uint32_t *const *scale_a,
                                        const uint32_t *const *scale_b) {
@@ -589,8 +603,9 @@ void wmma_gfx1250_mixed_x86_64_v4_bf16(uint64_t controls, uint32_t *const *d,
   const bool interleave_four = Block == 0 && fa >= 2 && fb >= 2;
 
   alignas(64) uint32_t left[64][16], right[64][16];
-  const bool ok_a = gfx1250_mixed_decode_bf16_16(a, fa, interleave_four, left);
-  const bool ok_b = gfx1250_mixed_decode_bf16_16(b, fb, interleave_four, right);
+  const bool compatibility = (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY;
+  const bool ok_a = gfx1250_mixed_decode_bf16_16(a, fa, interleave_four, left, compatibility);
+  const bool ok_b = gfx1250_mixed_decode_bf16_16(b, fb, interleave_four, right, compatibility);
   if (!ok_a || !ok_b) [[unlikely]] {
     gfx1250_mixed_pairs_fma_fallback<Block>(controls, d, left, right, c, scale_a, scale_b);
     return;
@@ -708,17 +723,15 @@ INSTANTIATE_FP8_BF16(128, true, true, false);
 INSTANTIATE_FP8_BF16(128, true, true, true);
 #undef INSTANTIATE_FP8_BF16
 
-template void wmma_gfx1250_mixed_x86_64_v4_bf16<0>(uint64_t, uint32_t *const *,
+template void wmma_gfx1250_mixed_x86_64_v4_bf16<0>(uint64_t, uint64_t, uint32_t *const *,
                                                    const uint32_t *const *, const uint32_t *const *,
                                                    const uint32_t *const *, const uint32_t *const *,
                                                    const uint32_t *const *);
-template void
-wmma_gfx1250_mixed_x86_64_v4_bf16<16>(uint64_t, uint32_t *const *, const uint32_t *const *,
-                                      const uint32_t *const *, const uint32_t *const *,
-                                      const uint32_t *const *, const uint32_t *const *);
-template void
-wmma_gfx1250_mixed_x86_64_v4_bf16<32>(uint64_t, uint32_t *const *, const uint32_t *const *,
-                                      const uint32_t *const *, const uint32_t *const *,
-                                      const uint32_t *const *, const uint32_t *const *);
+template void wmma_gfx1250_mixed_x86_64_v4_bf16<16>(
+    uint64_t, uint64_t, uint32_t *const *, const uint32_t *const *, const uint32_t *const *,
+    const uint32_t *const *, const uint32_t *const *, const uint32_t *const *);
+template void wmma_gfx1250_mixed_x86_64_v4_bf16<32>(
+    uint64_t, uint64_t, uint32_t *const *, const uint32_t *const *, const uint32_t *const *,
+    const uint32_t *const *, const uint32_t *const *, const uint32_t *const *);
 
 } // namespace rocjitsu::arith

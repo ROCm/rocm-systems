@@ -14,6 +14,7 @@ int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32
              const uint32_t *const *b, const uint32_t *const *c,
              const uint32_t *const *scale_a = nullptr, const uint32_t *const *scale_b = nullptr) {
   using namespace rocjitsu::arith;
+  [[maybe_unused]] const uint64_t implementation_flags = flags;
   flags = resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
   if (int error =
           validate(flags, controls & ~((M == 32 ? 0xc0ULL : 0xffULL) | (Block ? 0x3f00ULL : 0)),
@@ -45,7 +46,8 @@ int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32
 #if defined(RJ_ARITH_HAVE_X86_64_V4_BF16)
     if constexpr (M == 16) {
       if (!both_fp4) {
-        wmma_gfx1250_mixed_x86_64_v4_bf16<Block>(controls, d, a, b, c, scale_a, scale_b);
+        wmma_gfx1250_mixed_x86_64_v4_bf16<Block>(implementation_flags, controls, d, a, b, c,
+                                                 scale_a, scale_b);
         return RJ_ARITH_SUCCESS;
       }
     }

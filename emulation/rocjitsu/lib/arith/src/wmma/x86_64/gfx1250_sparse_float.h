@@ -442,7 +442,8 @@ void swmmac1250_float_vector(uint64_t flags, uint32_t *const *d, const uint32_t 
                                     : Wmma1250Form::F32F16;
   alignas(64) float result[16][16];
   gfx1250_load_sparse_accumulators<form>(d, 0, result);
-  if (swmmac1250_reduce_simd<Bits, BfA, BfB>(a, b, index, result)) {
+  const bool any_nan = swmmac1250_reduce_simd<Bits, BfA, BfB>(a, b, index, result);
+  if ((flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY && any_nan) {
     alignas(64) float initial[16][16];
     gfx1250_load_sparse_accumulators<form>(d, 0, initial);
     swmmac1250_repair_inputs<Bits, BfA, BfB>(a, b, index, initial, result);

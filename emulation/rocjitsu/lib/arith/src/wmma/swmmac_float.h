@@ -34,12 +34,11 @@ using Swmmac8Backend = void(uint32_t, uint32_t *const *, const uint32_t *const *
 template <bool Bf16, int WaveSize, bool Packed> Swmmac16Backend swmmac16_x86_64_v3;
 template <bool Bf8A, bool Bf8B, int WaveSize> Swmmac8Backend swmmac8_x86_64_v3;
 template <bool Bf16, int WaveSize, bool Packed> Swmmac16Backend swmmac16_x86_64_v4;
-template <bool Bf8A, bool Bf8B, int WaveSize> Swmmac8Backend swmmac8_x86_64_v4;
 
-// Try the native FP8 pair-dot under eligible host controls and input accumulators.
-// A decline leaves all destination registers untouched.
+// Compute Loose FP8 pair dots using native BF16 rounding and flushing.
+// Inputs may overlap D; all source reads precede the destination stores.
 template <bool Bf8A, bool Bf8B, int Wave>
-bool swmmac_fp8_x86_64_v4_bf16(uint32_t, uint32_t *const *, const uint32_t *const *,
+void swmmac_fp8_x86_64_v4_bf16(uint32_t, uint32_t *const *, const uint32_t *const *,
                                const uint32_t *const *, const uint32_t *const *);
 
 } // namespace rocjitsu::arith

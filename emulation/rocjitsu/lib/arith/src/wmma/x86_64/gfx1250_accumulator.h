@@ -150,8 +150,7 @@ inline void gfx1250_load_accumulators(const uint32_t *const *c, uint64_t control
 }
 
 template <Wmma1250Form Form, bool Sparse = false>
-inline Gfx1250PackedWords gfx1250_narrow_result(Gfx1250PackedFloat values, bool compatibility,
-                                                bool saturate) {
+inline Gfx1250PackedWords gfx1250_narrow_result(Gfx1250PackedFloat values, bool saturate) {
   using Words = Gfx1250PackedWords;
   Words bits = bit_cast<Words>(values);
   Words upper = bits >> 16;
@@ -168,18 +167,15 @@ inline Gfx1250PackedWords gfx1250_narrow_result(Gfx1250PackedFloat values, bool 
     }
     return value;
   } else {
-    if (compatibility) {
-      return upper;
-    }
-    Words rounded = (bits + 0x7fffu + (upper & 1u)) >> 16;
-    Words value;
+    Words value = upper;
     if constexpr (Sparse) {
+      Words rounded = (bits + 0x7fffu + (upper & 1u)) >> 16;
       // Sparse BF16 retains a marker if narrowing discards any NaN payload bit.
       Words special = upper | (bit_cast<Words>((bits & 0xffffu) != 0u) & 1u);
       value = ((bits & 0x7f800000u) == 0x7f800000u) ? special : rounded;
-    } else {
-      value = ((bits & 0x7fffffffu) > 0x7f800000u) ? (upper | 0x40u) : rounded;
     }
+    // Dense Loose permits the same truncation as Compatibility. The sparse
+    // conversion retains its inherited rounding and NaN-payload policy.
     if (saturate) {
       value = ((value & 0x7fffu) == 0x7f80u) ? value - 1u : value;
     }
@@ -213,8 +209,8 @@ inline void gfx1250_store_results(uint64_t flags, uint32_t *const *d, const floa
           Gfx1250PackedFloat lo, hi;
           std::memcpy(&lo, result[row] + col, sizeof(lo));
           std::memcpy(&hi, result[row + 1] + col, sizeof(hi));
-          auto words = gfx1250_narrow_result<Form, Sparse>(lo, compatibility, saturate) |
-                       (gfx1250_narrow_result<Form, Sparse>(hi, compatibility, saturate) << 16);
+          auto words = gfx1250_narrow_result<Form, Sparse>(lo, saturate) |
+                       (gfx1250_narrow_result<Form, Sparse>(hi, saturate) << 16);
           std::memcpy(d[reg] + 16 * group + col, &words, sizeof(words));
         }
       }
@@ -290,8 +286,8 @@ template <Wmma1250Form Form, bool Sparse = false>
       for (int group = 0; group < 2; ++group) {
         const int row = 2 * reg + 8 * group;
         Gfx1250PackedWords words =
-            gfx1250_narrow_result<Form, Sparse>(acc[row], compatibility, saturate) |
-            (gfx1250_narrow_result<Form, Sparse>(acc[row + 1], compatibility, saturate) << 16);
+            gfx1250_narrow_result<Form, Sparse>(acc[row], saturate) |
+            (gfx1250_narrow_result<Form, Sparse>(acc[row + 1], saturate) << 16);
         _mm512_storeu_si512(d[reg] + 16 * group, bit_cast<__m512i>(words));
       }
     }

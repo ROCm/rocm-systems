@@ -131,22 +131,12 @@ template <bool Saturate> [[gnu::always_inline]] inline __m256i wmma_narrow_f16(_
 
 // Snapshot C before any D store, including the selected gfx11 half.
 // For gfx12 packed C, loads each packed register once for both adjacent rows.
-// When TrackSubnormal is true, tracks the minimum nonzero FP32 magnitude minus 1
-// across all 16 widened rows to detect any subnormal input accumulator.
-template <bool Bf16, int Lanes, bool Rdna3, bool Packed, bool TrackSubnormal = false>
-[[gnu::always_inline]] inline __m512i wmma_load_acc(__m512 (&acc)[16], uint32_t mods,
-                                                    const uint32_t *const *c) {
+template <bool Bf16, int Lanes, bool Rdna3, bool Packed>
+[[gnu::always_inline]] inline void wmma_load_acc(__m512 (&acc)[16], uint32_t mods,
+                                                 const uint32_t *const *c) {
   const __m512i keep = _mm512_set1_epi32(mods & RJ_ARITH_WMMA_ABS_C ? INT32_MAX : -1);
   const __m512i sign = _mm512_set1_epi32(mods & RJ_ARITH_WMMA_NEG_C ? INT32_MIN : 0);
-  const __m512i abs_mask = _mm512_set1_epi32(INT32_MAX);
-  const __m512i neg_one = _mm512_set1_epi32(-1);
-  __m512i min_mag = neg_one;
-
   auto finalize = [&](__m512i bits) -> __m512 {
-    if constexpr (TrackSubnormal) {
-      __m512i mag = _mm512_and_si512(bits, abs_mask);
-      min_mag = _mm512_min_epu32(min_mag, _mm512_add_epi32(mag, neg_one));
-    }
     // (bits & keep) ^ sign in one instruction (ternary logic 0x6a = C ^ (A & B)).
     return _mm512_castsi512_ps(_mm512_ternarylogic_epi32(bits, keep, sign, 0x6a));
   };
@@ -175,7 +165,6 @@ template <bool Bf16, int Lanes, bool Rdna3, bool Packed, bool TrackSubnormal = f
       acc[row] = finalize(bits);
     }
   }
-  return min_mag;
 }
 
 // Interleave index for packing 16 low-half FP16s from an even row and 16
@@ -255,41 +244,11 @@ template <bool Bf16, int Lanes, bool Rdna3, bool Packed, bool Saturate>
 
 // Both inputs contain adjacent BF16 K pairs with their halves swapped:
 // DPBF16 consumes the high half first. Keep one accumulator per output row.
-template <bool Packed, bool Rdna3>
 [[gnu::always_inline]] inline void
 wmma_bf16_pairs(__m512 (&sums)[16], const uint32_t (&left)[8][16], const uint32_t (&right)[8][16]) {
-  const __m512i bf16_mask = _mm512_set1_epi32(int(0xffff0000U));
-  auto trunc_rows = [&]() {
-    RJ_ARITH_UNROLL(16)
-    for (int row = 0; row < 16; ++row) {
-      sums[row] = _mm512_castsi512_ps(_mm512_and_si512(_mm512_castps_si512(sums[row]), bf16_mask));
-    }
-  };
-  if constexpr (!Packed) {
-    // Keep the outer loop rolled so left[step][row] stays in memory and folds
-    // directly into vdpbf16ps {1to16} without extra broadcasts or spills.
-    RJ_ARITH_UNROLL(1)
-    for (int step = 0; step < 8; ++step) {
-      wmma_bf16_pair_step(sums, left[step], _mm512_load_si512(right[step]));
-    }
-  } else if constexpr (Rdna3) {
-    // Peel step 7 so no conditional sits inside the unroll(disable) loop.
-    RJ_ARITH_UNROLL(1)
-    for (int step = 0; step < 7; ++step) {
-      wmma_bf16_pair_step(sums, left[step], _mm512_load_si512(right[step]));
-      trunc_rows();
-    }
-    wmma_bf16_pair_step(sums, left[7], _mm512_load_si512(right[7]));
-  } else {
-    // gfx12 packed narrows every 2 pairs (4 K elements). Packed BF16 stores
-    // discard the low 16 bits, so keeping all 4 stages in the rolled loop is
-    // exact and avoids peeled register extracts on GCC.
-    RJ_ARITH_UNROLL(1)
-    for (int stage = 0; stage < 4; ++stage) {
-      wmma_bf16_pair_step(sums, left[2 * stage], _mm512_load_si512(right[2 * stage]));
-      wmma_bf16_pair_step(sums, left[2 * stage + 1], _mm512_load_si512(right[2 * stage + 1]));
-      trunc_rows();
-    }
+  RJ_ARITH_UNROLL(1)
+  for (int step = 0; step < 8; ++step) {
+    wmma_bf16_pair_step(sums, left[step], _mm512_load_si512(right[step]));
   }
 }
 #endif

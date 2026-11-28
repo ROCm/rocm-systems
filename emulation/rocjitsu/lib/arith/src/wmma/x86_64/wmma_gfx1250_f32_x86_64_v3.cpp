@@ -6,8 +6,9 @@
 #include "wmma/gfx1250_f32.h"
 namespace rocjitsu::arith {
 // Evaluate the full Wave32 instruction in this ISA domain.
-void wmma_gfx1250_f32_x86_64_v3(uint64_t controls, uint32_t *const *d, const uint32_t *const *a,
+void wmma_gfx1250_f32_x86_64_v3([[maybe_unused]] uint64_t flags, uint64_t controls,
+                                uint32_t *const *d, const uint32_t *const *a,
                                 const uint32_t *const *b, const uint32_t *const *c) {
-  RJ_ARITH_IMPL_NAMESPACE::wmma_gfx1250_f32_kernel(controls, d, a, b, c);
+  RJ_ARITH_IMPL_NAMESPACE::wmma_gfx1250_f32_kernel(flags, controls, d, a, b, c);
 }
 } // namespace rocjitsu::arith

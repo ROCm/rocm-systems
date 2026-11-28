@@ -17,6 +17,7 @@ int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32
              const uint32_t *const *b, const uint32_t *const *c) {
   using namespace rocjitsu::arith;
   const bool compatibility = (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY;
+  [[maybe_unused]] const uint64_t implementation_flags = flags;
   flags = resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
   if (int error = validate(
           flags,
@@ -40,7 +41,8 @@ int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32
   }
 #if defined(RJ_ARITH_HAVE_X86_64_V4_BF16)
   if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_ZEN4)) {
-    wmma_gfx1250_fp8_x86_64_v4_bf16<K, Bf8A, Bf8B, Packed>(flags, controls, d, a, b, c);
+    wmma_gfx1250_fp8_x86_64_v4_bf16<K, Bf8A, Bf8B, Packed>(implementation_flags, controls, d, a, b,
+                                                           c);
     return RJ_ARITH_SUCCESS;
   }
 #endif

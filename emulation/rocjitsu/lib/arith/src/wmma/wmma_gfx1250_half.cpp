@@ -90,7 +90,9 @@ int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32
         acc += initial;
       }
       if constexpr (Form == Wmma1250Form::Bf16F32) {
-        acc = gfx1250_repair_nan(acc, left, right, row, col, initial);
+        if (compatibility) {
+          acc = gfx1250_repair_nan(acc, left, right, row, col, initial);
+        }
       }
       result[row][col] = acc;
     }

@@ -18,14 +18,6 @@
 
 namespace {
 
-// Truncate FP32 to BF16 precision and return it widened back to FP32,
-// retaining sign and exponent bits, including subnormal encodings.
-[[gnu::noinline]] float truncate_bf16(float value) {
-  // Keep this noinline: GCC 15.2 and 16.2.1 at -O2/-O3 removes the mask when inlined
-  // into the packed accumulator's FMA recurrence. See tests/compiler/bf16_truncation.cpp.
-  return rocjitsu::arith::as_float(rocjitsu::arith::as_bits(value) & 0xffff0000U);
-}
-
 // Exact scalar gfx12 FP16/BF16 SWMMAC fallback; out-of-line so SIMD dispatchers
 // avoid stack-frame setup on the hot path.
 template <bool Bf16, int WaveSize, bool Packed>
@@ -89,33 +81,7 @@ template <bool Bf16, int WaveSize, bool Packed>
   // Decode the inputs for scalar accumulation; snapshot tied D as C.
   rocjitsu::arith::SwmmacFloatInputs input;
   rocjitsu::arith::swmmac16_prepare<Bf16, WaveSize, Packed>(input, mode, dest, a, b, index);
-  if constexpr (Packed) {
-    for (int row = 0; row < 16; ++row) {
-      for (int col = 0; col < 16; ++col) {
-        float acc = input.acc[row][col];
-        for (int stage = 0; stage < 4; ++stage) {
-          for (int i = 0; i < 4; ++i) {
-            int ck = 4 * stage + i;
-            float bv = input.b[input.selected[row][ck]][col];
-            if (mode & (i % 2 ? RJ_ARITH_WMMA_NEG_HI_B : RJ_ARITH_WMMA_NEG_LO_B)) {
-              bv = -bv;
-            }
-            acc = __builtin_fmaf(input.a[row][ck], bv, acc);
-          }
-          // Narrow between stages, not just at the final store.
-          if constexpr (Bf16) {
-            acc = truncate_bf16(acc);
-          } else {
-            acc = rocjitsu::arith::as_float(rocjitsu::arith::packed16::widen<false>(
-                rocjitsu::arith::float_to_f16(acc, saturate)));
-          }
-        }
-        input.acc[row][col] = acc;
-      }
-    }
-  } else {
-    rocjitsu::arith::swmmac_float_accumulate(mode, input);
-  }
+  rocjitsu::arith::swmmac_float_accumulate(mode, input);
   uint32_t result[Packed ? 4 : 8][32];
   rocjitsu::arith::swmmac_float_pack<Bf16, Packed>(result, input.acc, saturate);
   for (int reg = 0; reg < (Packed ? 4 : 8); ++reg) {

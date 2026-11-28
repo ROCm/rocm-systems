@@ -39,6 +39,8 @@ int rj_arith_v_wmma_f32_16x16x4_f32_w32(uint64_t flags, uint64_t controls, uint3
 
 // gfx1250 Wave32 16x16x32 half-input WMMA with FP32 C/D: eight VGPRs per operand.
 // Supports Loose, allow-Loose and Compatibility; strict exact modes are unsupported.
+// Native BF16 pair-dot rounding/flushing is allowed in Loose. Compatibility
+// retains the legacy FMA and NaN priority where different.
 // BF16 adds C after reducing the dot; FP16 starts the reduction at C. ABS_C then
 // NEG_C modify C; A/B NEG bits are accepted but ignored, as in the legacy executor.
 // Guest FP controls are ignored. EXEC is irrelevant: all 32 lanes participate.
@@ -53,15 +55,16 @@ int rj_arith_v_wmma_f32_16x16x32_bf16_w32(uint64_t flags, uint64_t instruction_f
 
 // gfx1250 packed-result forms: A/B eight VGPRs, D four. Same-type C uses four
 // packed VGPRs; BF16F32 C uses eight FP32 VGPRs. Narrow only after FP32 accumulation:
-// Loose rounds to nearest-even; Compatibility retains BF16 truncation. Loose FP16/BF16
+// FP16 rounds to nearest-even; BF16 truncates in both semantics. Loose FP16/BF16
 // saturate overflow and signed infinities to signed max finite when FP16_OVFL is
 // set, including infinite C inputs; Compatibility ignores that bit.
-// Same-type forms start at C; Loose
+// Loose may use native NaN selection; deterministic NaN priority applies only
+// to Compatibility. Same-type forms start at C; Loose
 // applies ABS_C then NEG_C, while Compatibility ignores them. BF16F32 reduces
 // the dot before C, honors ABS_C/NEG_C and
-// retains the legacy deterministic NaN priority. Semantics/alias/error rules above apply.
-// For packed C forms, INLINE_C broadcasts c[0][0]: a low-half F16/BF16
-// encoding in Loose/allow-Loose, or the inherited FP32 encoding in Compatibility.
+// retains the legacy deterministic NaN priority in Compatibility. Semantics/alias/error rules above
+// apply. For packed C forms, INLINE_C broadcasts c[0][0]: a low-half F16/BF16 encoding in
+// Loose/allow-Loose, or the inherited FP32 encoding in Compatibility.
 constexpr uint32_t RJ_ARITH_WMMA_INLINE_C = 1U << 10;
 int rj_arith_v_wmma_f16_16x16x32_f16_w32(uint64_t flags, uint64_t instruction_flags,
                                          uint32_t *const *d, const uint32_t *const *a,
@@ -125,8 +128,9 @@ int rj_arith_v_swmmac_i32_16x16x64_iu4_w64(uint64_t flags, uint64_t instruction_
 // VGPRs, B four, index one, and in/out D eight. FP8 is E4M3FN; BF8 is E5M2.
 // Metadata pairs must contain strictly increasing positions in each group of
 // four (unchecked; otherwise results are unspecified). RJ_ARITH_SWMMAC_INDEX_KEY_1 selects the
-// upper 16 metadata bits per lane; no other instruction modifiers apply. Loose semantics use FP32
-// FMA with host nearest-even rounding and denormals enabled. Exception flags may change. Exact
+// upper 16 metadata bits per lane; no other instruction modifiers apply. Loose uses
+// FP32 FMA or native BF16 pair dots, which may flush subnormal accumulators. Host FP
+// controls must be default; sticky exception flags may change. Exact
 // semantics use two native DOT8 steps from the borrowed gfx1201 model, assuming the default host FP
 // environment. RJ_ARITH_FP16_OVFL has no effect. All inputs and D are read before ascending
 // destination-register stores; last store wins aliases. EXEC is ignored; every lane is read and
@@ -186,8 +190,8 @@ int rj_arith_v_swmmac_f32_16x16x32_bf8_bf8_w64(uint64_t flags, uint64_t instruct
 // the first/second member of each selected pair, including B after selection.
 // RJ_ARITH_WMMA_ABS_C then RJ_ARITH_WMMA_NEG_C modify the tied accumulator. CLAMP does
 // not apply. Loose semantics accumulate selected products
-// with FP32 FMA, narrowing packed outputs after each four products (FP16 RNE,
-// BF16 truncation). Host FP state must
+// with FP32 FMA or native BF16 pair dots, narrowing packed outputs only once
+// (FP16 RNE, BF16 truncation). Native BF16 may flush subnormals. Host FP state must
 // provide nearest-even rounding with denormals enabled; exception flags may change.
 // RJ_ARITH_FP16_OVFL saturates finite overflow when narrowing to FP16; otherwise it
 // has no effect. Exact semantics use four borrowed gfx1201 DOT4 steps, narrowing
@@ -237,7 +241,9 @@ int rj_arith_v_swmmac_bf16_16x16x32_bf16_w64(uint64_t flags, uint64_t instructio
 // and IEEE controls in all semantics. DX10_CLAMP_OFF is accepted and ignored only on gfx11;
 // gfx12 rejects it. Packed FP16 still honors RJ_ARITH_FP16_OVFL.
 // The mixed-format FP16 input-denormal override flags are rejected.
-// All semantics assume the default host FP environment.
+// All semantics assume the default host FP environment. Loose permits native
+// BF16 flushing of factors, accumulators and intermediate results, and native NaN
+// selection. Exact/Compatibility retain their instruction-specific policies.
 //
 // WMMA modifier layout follows neg_lo[0:2], then neg_hi[0:2]. For C,
 // neg_hi means absolute value, applied before neg_lo negation.
@@ -302,12 +308,14 @@ int rj_arith_v_wmma_f32_16x16x16_bf16_w64(uint64_t flags, uint64_t instruction_f
 // RDNA3 packed-output and integer WMMA use the same interleaved C/D layout
 // above: 8 VGPRs in Wave32, 4 in Wave64. Packed A/B use 8 VGPRs each;
 // IU8 uses 4 each and IU4 uses 2 each. All lanes participate and whole VGPRs may alias.
-// Packed forms support all six NEG/NEG_HI bits and RJ_ARITH_WMMA_HIGH_C_D, narrow
-// after each DOT2 step, and honor RJ_ARITH_FP16_OVFL for finite FP16 overflow.
+// Packed forms support all six NEG/NEG_HI bits and RJ_ARITH_WMMA_HIGH_C_D.
+// Exact/Compatibility narrow after each DOT2; Loose narrows only at the end.
+// RJ_ARITH_FP16_OVFL saturates finite FP16 overflow.
 // Integer forms support SIGNED_A/B and CLAMP (signed saturation after each
 // two IU8 or four IU4 products); without CLAMP they wrap modulo 2^32. Both semantics are
 // supported. Integer forms reject guest rounding, denormal, IEEE and DX10 controls;
-// FP16_OVFL is accepted and ignored. Packed and integer paths preserve the host FP environment.
+// FP16_OVFL is accepted and ignored. No path changes host FP controls; ordinary
+// Loose arithmetic may raise sticky exception flags.
 int rj_arith_v_wmma_f16_16x16x16_f16_w32(uint64_t flags, uint64_t instruction_flags,
                                          uint32_t *const *d, const uint32_t *const *a,
                                          const uint32_t *const *b, const uint32_t *const *c);
@@ -361,7 +369,8 @@ int rj_arith_v_wmma_f32_16x16x16_bf16_w32_gfx12(uint64_t flags, uint64_t instruc
 // A[row][k] and B[k][col] map to [(k % 4) / 2][row or col + 16 * (k / 4)], half k % 2.
 // Controls and status follow the gfx12 Wave32 contract above.
 // C/D[row][col] maps to [row % 4][col + 16 * (row / 8) + 32 * ((row / 4) % 2)].
-// Both semantics and all WMMA modifiers are supported. Loose uses scalar or AVX2.
+// Both semantics and all WMMA modifiers are supported. Loose may use native
+// BF16 pair dots, including their subnormal flushing.
 int rj_arith_v_wmma_f32_16x16x16_f16_w64_gfx12(uint64_t flags, uint64_t instruction_flags,
                                                uint32_t *const *d, const uint32_t *const *a,
                                                const uint32_t *const *b, const uint32_t *const *c);
@@ -373,7 +382,8 @@ int rj_arith_v_wmma_f32_16x16x16_bf16_w64_gfx12(uint64_t flags, uint64_t instruc
 // Packed-output WMMA: A/B hold 4 VGPRs (wave32) or 2 (wave64);
 // C/D hold 4 or 2 VGPRs respectively, with adjacent rows in low/high halves.
 // Both semantics and all six floating WMMA modifiers are supported. Packed
-// results narrow after each four-product step; RJ_ARITH_FP16_OVFL controls FP16 overflow.
+// results narrow after each DOT4 in exact/Compatibility and only once in Loose;
+// RJ_ARITH_FP16_OVFL controls FP16 overflow. Native BF16 may flush subnormals in Loose.
 int rj_arith_v_wmma_f16_16x16x16_f16_w32_gfx12(uint64_t flags, uint64_t instruction_flags,
                                                uint32_t *const *d, const uint32_t *const *a,
                                                const uint32_t *const *b, const uint32_t *const *c);
@@ -479,6 +489,7 @@ int rj_arith_v_wmma_i32_16x16x32_iu4_w64_gfx12(uint64_t flags, uint64_t instruct
 // gfx1250 OCP FP8/BF8 Wave32 WMMA: A/B each consume K/8 VGPRs.
 // FP32 C/D consume eight VGPRs; packed FP16 C/D consume four. No EXEC or FP-status output.
 // Supports Loose, allow-Loose and Compatibility; strict exact modes are unsupported.
+// Native BF16 pair-dot rounding/flushing and NaN selection are permitted in Loose.
 // FP32 C accepts ABS then NEG. Packed C in Loose/allow-Loose also applies ABS then NEG;
 // INLINE_C uses the low-half F16 bits of c[0][0]. Compatibility ignores packed C
 // modifiers and uses the inherited full FP32 inline word instead.
@@ -606,7 +617,8 @@ int rj_arith_v_wmma_scale16_f32_32x16x128_f4_w32(uint64_t flags, uint64_t contro
 // F32 D occupies eight VGPRs; packed D four. BF16F32 requires eight D pointers,
 // reads all eight as FP32 and writes only the first four as BF16. The only control
 // is RJ_ARITH_SWMMAC_INDEX_KEY_1, described above.
-// Compatibility preserves ordered FMA and NaN priority. Packed outputs round once
+// Compatibility preserves ordered FMA and NaN priority; Loose uses native NaN
+// selection without payload repair. Packed outputs round once
 // to nearest-even and honor FP16_OVFL, including infinite inputs. Other FP modes
 // are ignored; strict empirical semantics are unsupported. Aliases are supported.
 int rj_arith_v_swmmac_f32_16x16x64_f16_w32(uint64_t flags, uint64_t controls, uint32_t *const *d,

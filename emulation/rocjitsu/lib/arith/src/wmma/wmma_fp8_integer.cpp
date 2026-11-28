@@ -120,8 +120,9 @@ int floating_validated(uint64_t flags, uint32_t *const *d, const uint32_t *const
     return RJ_ARITH_SUCCESS;
   }
 #if defined(RJ_ARITH_HAVE_X86_64_V4_BF16)
-  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_ZEN4) &&
-      rocjitsu::arith::fp8_wmma_x86_64_v4_bf16<Bf8A, Bf8B>(d, a, b, c)) {
+  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_ZEN4)) {
+    rocjitsu::arith::fp8_wmma_x86_64_v4_bf16<Bf8A, Bf8B>(d, a, b, c);
+
     return RJ_ARITH_SUCCESS;
   }
 #endif

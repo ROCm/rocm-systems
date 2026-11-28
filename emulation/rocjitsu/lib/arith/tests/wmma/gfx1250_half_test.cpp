@@ -112,9 +112,6 @@ void check_arithmetic(Entry entry, bool inject_nonfinite) {
           float value = DotFirst ? sum + initial : sum;
           uint32_t bits = std::bit_cast<uint32_t>(value);
           uint16_t bf16 = uint16_t(bits >> 16);
-          if (!compatibility && std::isfinite(value)) {
-            bf16 += (bits & 0xffffU) > 0x8000U || ((bits & 0xffffU) == 0x8000U && (bf16 & 1));
-          }
           expected[row][col] =
               Packed ? (Bf16 ? bf16_value(bf16) : float(half_value(half_bits(value)))) : value;
         }
@@ -271,8 +268,8 @@ TEST(WmmaGfx1250Half, FinalPacking) {
             uint64_t flags = cpu | semantics | (saturate ? RJ_ARITH_FP16_OVFL : 0);
             ASSERT_EQ(entry(flags, 0, d, a, b, c), RJ_ARITH_SUCCESS);
             uint16_t expected = form == 0 ? (saturate && !compatibility ? 0x7bff : 0x7c00)
-                                : large   ? (compatibility || saturate ? 0x7f7f : 0x7f80)
-                                          : (compatibility ? 0x3f80 : 0x3f81);
+                                : large   ? 0x7f7f
+                                          : 0x3f80;
             EXPECT_EQ(uint16_t(d[0][0]), expected)
                 << cpu << '/' << semantics << '/' << form << '/' << saturate;
           }
