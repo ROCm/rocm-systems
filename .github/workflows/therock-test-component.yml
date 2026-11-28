@@ -26,6 +26,15 @@ on:
       default_container_image:
         type: string
         default: "ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98"
+      aws_role_to_assume:
+        # IAM role assumed before the test step, for components whose test
+        # script needs AWS access. Empty by default, which skips the credential
+        # step entirely.
+        type: string
+        default: ""
+      aws_region:
+        type: string
+        default: "us-east-1"
 
 
 permissions:
@@ -39,6 +48,14 @@ jobs:
       ${{ fromJSON(inputs.component).expect_failure == true && '(xfail)' || '' }}
     runs-on: ${{ inputs.test_runs_on }}
     continue-on-error: ${{ fromJSON(inputs.component).expect_failure == true }}
+    permissions:
+      contents: read
+      # Used only by the credential step below, i.e. only when the caller passes
+      # aws_role_to_assume. One job serves every component, so the permission is
+      # declared unconditionally and EVERY caller has to grant it: permissions
+      # can be maintained or reduced through a reusable-workflow chain, never
+      # elevated, so a caller that withholds it makes this file fail to start.
+      id-token: write
     container:
       # If the component has specified an alternate image, honor that option.
       # Otherwise use the default image.
@@ -123,6 +140,16 @@ jobs:
           else
             echo "KUBE_CPU_REQUEST not set, thread limits not configured"
           fi
+
+      # Last step before the test, so the whole session lifetime is available to
+      # it. Skipped for pull requests from forks, where the rocDecode
+      # conformance sweep prints a skip banner and exits 0.
+      - name: Configure AWS credentials
+        if: ${{ inputs.aws_role_to_assume != '' && !github.event.pull_request.head.repo.fork }}
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          aws-region: ${{ inputs.aws_region }}
+          role-to-assume: ${{ inputs.aws_role_to_assume }}
 
       - name: Test
         timeout-minutes: ${{ fromJSON(inputs.component).timeout_minutes }}

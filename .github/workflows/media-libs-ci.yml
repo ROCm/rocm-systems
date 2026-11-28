@@ -114,6 +114,13 @@ jobs:
     name: "Test Media Libs"
     needs: [therock-ci-linux]
     uses: ./.github/workflows/therock-media-test-packages.yml
+    permissions:
+      contents: read
+      # The rocDecode conformance sweep reads its stream corpus from a private
+      # S3 bucket, reached with a short-lived role assumed through GitHub's OIDC
+      # provider. Pull requests from forks are not given a token, and the sweep
+      # skips itself there rather than failing.
+      id-token: write
     with:
       amdgpu_families: "gfx94X-dcgpu"
       test_runs_on: "linux-gfx942-1gpu-ccs-csp-ossci-rocm"
