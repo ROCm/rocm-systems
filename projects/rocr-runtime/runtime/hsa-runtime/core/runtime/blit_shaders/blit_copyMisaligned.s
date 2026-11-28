@@ -85,6 +85,12 @@
     .set CopyMisalignedRsrc1VGPRs , 0
 .endif
 
+.macro S_WAIT_XCNT
+  .if (.amdgcn.gfx_generation_number == 12 && .amdgcn.gfx_generation_minor >= 5)
+    s_wait_xcnt              0x0
+  .endif
+.endm
+
 .macro S_WAITCNT_KMCNT
   .if (.amdgcn.gfx_generation_number == 12 && .amdgcn.gfx_generation_minor >= 5)
     s_wait_kmcnt             0
@@ -144,6 +150,7 @@ CopyMisaligned:
 
   .macro mCopyMisalignedPhase1Load iter iter_end
     flat_load_ubyte     v[6 + \iter], v[2:3]
+    S_WAIT_XCNT
     V_ADD_CO_U32        v2, v2, s16
     V_ADD_CO_CI_U32     v3, v3, 0x0
 
@@ -158,6 +165,7 @@ CopyMisaligned:
 
   .macro mCopyMisalignedPhase1Store iter iter_end
     flat_store_byte        v[4:5], v[6 + \iter]
+    S_WAIT_XCNT
     V_ADD_CO_U32           v4, v4, s16
     V_ADD_CO_CI_U32        v5, v5, 0x0
 
@@ -188,11 +196,13 @@ CopyMisaligned:
 
 
     flat_load_ubyte         v1, v[2:3]
+    S_WAIT_XCNT
     V_ADD_CO_U32            v2, v2, s16
     V_ADD_CO_CI_U32         v3, v3, 0x0
     S_WAITCNT_LOADCNT
 
     flat_store_byte         v[4:5], v1
+    S_WAIT_XCNT
     V_ADD_CO_U32            v4, v4, s16
     V_ADD_CO_CI_U32         v5, v5, 0x0
 

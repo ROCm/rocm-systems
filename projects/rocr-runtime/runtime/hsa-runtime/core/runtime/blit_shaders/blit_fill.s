@@ -70,6 +70,12 @@
 	.endif
 .endm
 
+.macro S_WAIT_XCNT
+  .if (.amdgcn.gfx_generation_number == 12 && .amdgcn.gfx_generation_minor >= 5)
+    s_wait_xcnt              0x0
+  .endif
+.endm
+
 .macro S_WAITCNT_KMCNT
   .if (.amdgcn.gfx_generation_number == 12 && .amdgcn.gfx_generation_minor >= 5)
     s_wait_kmcnt             0
@@ -155,8 +161,10 @@ Fill:
 .macro mFillPhase1 iter iter_end
     .if kFillVecWidth == 4
       flat_store_dwordx4   v[2:3], v[4:7]
+      S_WAIT_XCNT
     .else
       flat_store_dword     v[2:3], v4
+      S_WAIT_XCNT
     .endif
 
      V_ADD_CO_U32          v2, v2, s12
@@ -188,6 +196,7 @@ mFillPhase1 0, kFillUnroll - 1
 
 
     flat_store_dword        v[2:3], v4
+    S_WAIT_XCNT
     V_ADD_CO_U32            v2, v2, s12
     V_ADD_CO_CI_U32         v3, v3, 0x0
 
