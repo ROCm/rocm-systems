@@ -9551,6 +9551,73 @@ INSTANTIATE_TEST_SUITE_P(True16, PackedVgprMoveTest,
                          ::testing::Values(rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
                                            rocjitsu::IsaFamily::Rdna4));
 
+TEST(ArithBridgeTest, Vop3HalfMoveKeepsHighRegisterBitIndependentOfHalfSelectors) {
+  for (unsigned lanes : {32U, 64U}) {
+    BridgeFixture fixture(rocjitsu::IsaFamily::Rdna4, lanes);
+    ASSERT_NE(fixture.wave, nullptr);
+    fixture.cu->set_plugin_group(nullptr);
+    const uint64_t exec = 0xa55af00f0f0f00f3ULL;
+    fixture.wave->set_exec(exec);
+    for (uint8_t dst : {130, 135}) {
+      for (uint8_t opsel : {0, 1, 8, 9}) {
+        const auto words = rdna4::build_vop3(rdna4::kVMovB16Vop3,
+                                             {.vdst = dst, .opsel = opsel, .src0 = 256 + 135});
+        auto instruction = fixture.decoder->decode_window(words);
+        ASSERT_TRUE(instruction.succeeded());
+        for (unsigned lane = 0; lane < lanes; ++lane) {
+          fixture.cu->write_vgpr(fixture.base() + dst, lane, 0xa1b2c3d4);
+          fixture.cu->write_vgpr(fixture.base() + 135, lane, 0x88991122 + lane);
+        }
+        ASSERT_TRUE(
+            fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
+        for (unsigned lane = 0; lane < lanes; ++lane) {
+          const uint32_t input = 0x88991122 + lane;
+          uint32_t expected = dst == 135 ? input : 0xa1b2c3d4;
+          if ((exec >> lane) & 1) {
+            const uint32_t half = (input >> (16 * (opsel & 1))) & 0xffff;
+            const unsigned shift = opsel & 8 ? 16 : 0;
+            expected = (expected & ~(0xffffU << shift)) | (half << shift);
+          }
+          EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + dst, lane), expected);
+        }
+      }
+    }
+  }
+}
+
+TEST(ArithBridgeTest, DualZeroMovesRespectLaneMasksAndDistinguishLiteral128) {
+  for (auto arch : {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
+                    rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5}) {
+    BridgeFixture fixture(arch, 32);
+    ASSERT_NE(fixture.wave, nullptr);
+    fixture.cu->set_plugin_group(nullptr);
+    for (uint32_t exec : {0u, 0x80000005u, ~0u}) {
+      for (uint32_t mask : {~0u, 0xfffffffeu}) {
+        fixture.wave->set_exec(exec);
+        fixture.wave->set_vgpr_write_mask(mask);
+        for (uint32_t src_y : {128u, 255u}) {
+          // v_dual_mov_b32 v4, 0 :: v_dual_mov_b32 v9, 0 or literal 128.
+          const std::array<uint32_t, 3> words{0xca100080, 0x04080000u | src_y, 128};
+          auto instruction = fixture.decoder->decode_window(words);
+          ASSERT_TRUE(instruction.succeeded());
+          for (unsigned lane = 0; lane < 32; ++lane) {
+            fixture.cu->write_vgpr(fixture.base() + 4, lane, 0x6400 + lane);
+            fixture.cu->write_vgpr(fixture.base() + 9, lane, 0x9900 + lane);
+          }
+          ASSERT_TRUE(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
+                          .succeeded());
+          for (unsigned lane = 0; lane < 32; ++lane) {
+            const bool active = ((exec & mask) >> lane) & 1;
+            EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 4, lane), active ? 0u : 0x6400 + lane);
+            EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 9, lane),
+                      active ? (src_y == 255 ? 128u : 0u) : 0x9900 + lane);
+          }
+        }
+      }
+    }
+  }
+}
+
 TEST(ArithBridgeTest, Rdna35PackedVgprMoveUsesSelectedHalfOfVgpr0ForUnallocatedSource) {
   BridgeFixture fixture(rocjitsu::IsaFamily::Rdna3_5, 32, {}, 8);
   ASSERT_NE(fixture.wave, nullptr);
