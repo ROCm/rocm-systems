@@ -249,4 +249,64 @@ void TimeStamp::BarrierPacketTimestampValidationTest(void) {
   }
 }
 
+void TimeStamp::ConvertTickToSystemDomainTest(void) {
+  PrinTimeStampSubtestHeader(
+      "ConvertTickToSystemDomainTest: GPU ticks to system domain conversion");
+  std::vector<hsa_agent_t> gpus;
+  ASSERT_SUCCESS(hsa_iterate_agents(rocrtst::IterateGPUAgents, &gpus));
+  ASSERT_GT(gpus.size(), 0u);
+
+  std::vector<hsa_agent_t> cpus;
+  ASSERT_SUCCESS(hsa_iterate_agents(rocrtst::IterateCPUAgents, &cpus));
+  ASSERT_GT(cpus.size(), 0u);
+
+  for (hsa_agent_t gpu : gpus) {
+    hsa_amd_clock_counters_t counters = {};
+    ASSERT_SUCCESS(hsa_agent_get_info(
+        gpu, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_CLOCK_COUNTERS), &counters));
+    ASSERT_NE(counters.system_clock_frequency, 0u);
+
+    uint64_t system_tick = 0;
+    ASSERT_SUCCESS(
+        hsa_amd_profiling_convert_tick_to_system_domain(gpu, counters.gpu_clock_counter,
+                                                        &system_tick));
+
+    // The counters were sampled together, so the converted tick has to land
+    // close to the system clock value read with them.
+    const uint64_t tolerance = counters.system_clock_frequency / 10;  // 100 ms
+    const uint64_t diff = system_tick > counters.system_clock_counter
+                              ? system_tick - counters.system_clock_counter
+                              : counters.system_clock_counter - system_tick;
+    EXPECT_LE(diff, tolerance) << "converted " << system_tick << " expected near "
+                               << counters.system_clock_counter;
+
+    // Conversion is monotonic: a later GPU tick never maps to an earlier time.
+    uint64_t later_tick = 0;
+    ASSERT_SUCCESS(hsa_amd_profiling_convert_tick_to_system_domain(
+        gpu, counters.gpu_clock_counter + 1000, &later_tick));
+    EXPECT_GE(later_tick, system_tick);
+
+    // A tick far ahead of the last clock sync forces a resync. The GPU clock
+    // is assumed to run at about the system clock rate, so one system-clock
+    // second of GPU ticks is far enough ahead.
+    uint64_t far_tick = 0;
+    ASSERT_SUCCESS(hsa_amd_profiling_convert_tick_to_system_domain(
+        gpu, counters.gpu_clock_counter + counters.system_clock_frequency, &far_tick));
+    EXPECT_GT(far_tick, system_tick);
+
+    // Argument checks.
+    EXPECT_EQ(hsa_amd_profiling_convert_tick_to_system_domain(gpu, counters.gpu_clock_counter,
+                                                              nullptr),
+              HSA_STATUS_ERROR_INVALID_ARGUMENT);
+  }
+
+  // Only GPU agents have a tick domain to convert.
+  uint64_t unused = 0;
+  EXPECT_EQ(hsa_amd_profiling_convert_tick_to_system_domain(cpus[0], 1, &unused),
+            HSA_STATUS_ERROR_INVALID_AGENT);
+  hsa_agent_t invalid_agent = {0};
+  EXPECT_EQ(hsa_amd_profiling_convert_tick_to_system_domain(invalid_agent, 1, &unused),
+            HSA_STATUS_ERROR_INVALID_AGENT);
+}
+
 #undef RET_IF_HSA_ERR

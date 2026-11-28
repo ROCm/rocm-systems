@@ -4,6 +4,9 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include <algorithm>
+#include <vector>
+
 #include "suites/functional/queue_create.h"
 #include "hsa/hsa_ext_amd.h"
 #include "hsa/hsa.h"
@@ -354,6 +357,156 @@ void QueueCreateTest::SdmaQueueCreateDestroyTest() {
   fprintf(stdout, "[ SKIPPED ] SdmaQueueCreateDestroyTest: HSA headers predate "
                   "queue read/write pointer queries\n");
 #endif
+}
+
+void QueueCreateTest::AqlQueueInfoTest() {
+  ASSERT_SUCCESS(rocrtst::SetDefaultAgents(this));
+  ASSERT_SUCCESS(rocrtst::SetPoolsTypical(this));
+
+  uint32_t queue_size = 0;
+  ASSERT_SUCCESS(hsa_agent_get_info(*gpu_device1(), HSA_AGENT_INFO_QUEUE_MAX_SIZE, &queue_size));
+  queue_size = std::min<uint32_t>(queue_size, 1024);
+
+  hsa_queue_t* queue = nullptr;
+  ASSERT_SUCCESS(hsa_queue_create(*gpu_device1(), queue_size, HSA_QUEUE_TYPE_MULTI, nullptr,
+                                  nullptr, UINT32_MAX, UINT32_MAX, &queue));
+  ASSERT_NE(queue, nullptr);
+
+  hsa_agent_t agent = {};
+  ASSERT_SUCCESS(hsa_amd_queue_get_info(queue, HSA_AMD_QUEUE_INFO_AGENT, &agent));
+  EXPECT_EQ(agent.handle, gpu_device1()->handle);
+
+  uint64_t doorbell = 0;
+  ASSERT_SUCCESS(hsa_amd_queue_get_info(queue, HSA_AMD_QUEUE_INFO_DOORBELL_ID, &doorbell));
+  EXPECT_NE(doorbell, 0u);
+
+  // Only counted queues carry a use count. Other queues report (uint32_t)-1.
+  uint32_t use_count = 0;
+  ASSERT_SUCCESS(hsa_amd_queue_get_info(queue, HSA_QUEUE_INFO_USE_COUNT, &use_count));
+  EXPECT_EQ(use_count, UINT32_MAX);
+
+  uint32_t hw_id = UINT32_MAX;
+  ASSERT_SUCCESS(hsa_amd_queue_get_info(queue, HSA_QUEUE_INFO_HW_ID, &hw_id));
+  EXPECT_EQ(hw_id, queue->id);
+
+  uint8_t major = 0;
+  uint8_t minor = 0;
+  ASSERT_SUCCESS(hsa_amd_queue_get_info(
+      queue, HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_DISPATCH_PKT_VERSION_MAJOR, &major));
+  ASSERT_SUCCESS(hsa_amd_queue_get_info(
+      queue, HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_DISPATCH_PKT_VERSION_MINOR, &minor));
+  ASSERT_SUCCESS(hsa_amd_queue_get_info(
+      queue, HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_BARRIER_PKT_VERSION_MAJOR, &major));
+  ASSERT_SUCCESS(hsa_amd_queue_get_info(
+      queue, HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_BARRIER_PKT_VERSION_MINOR, &minor));
+
+  uint64_t metadata_ring = 0;
+  ASSERT_SUCCESS(
+      hsa_amd_queue_get_info(queue, HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_RING_BUFFER,
+                             &metadata_ring));
+
+  uint8_t properties[8] = {};
+  ASSERT_SUCCESS(hsa_amd_queue_get_info(queue, HSA_AMD_QUEUE_INFO_PROPERTIES, properties));
+
+  // A healthy idle queue has not faulted.
+  bool vm_fault = true;
+  uint64_t vm_fault_address = 0;
+  uint32_t vm_fault_reason = 0;
+  ASSERT_SUCCESS(hsa_amd_queue_get_info(queue, HSA_AMD_QUEUE_INFO_VM_FAULT_STATUS, &vm_fault));
+  EXPECT_FALSE(vm_fault);
+  ASSERT_SUCCESS(
+      hsa_amd_queue_get_info(queue, HSA_AMD_QUEUE_INFO_VM_FAULT_ADDRESS, &vm_fault_address));
+  ASSERT_SUCCESS(
+      hsa_amd_queue_get_info(queue, HSA_AMD_QUEUE_INFO_VM_FAULT_REASON, &vm_fault_reason));
+
+  hsa_amd_queue_engine_t engine = HSA_AMD_QUEUE_ENGINE_SDMA;
+  ASSERT_SUCCESS(hsa_amd_queue_get_info(queue, HSA_AMD_QUEUE_INFO_ENGINE_TYPE, &engine));
+  EXPECT_EQ(engine, HSA_AMD_QUEUE_ENGINE_COMPUTE);
+
+  // These attributes only apply to SDMA queues.
+  uint32_t sdma_engine_id = 0;
+  EXPECT_EQ(hsa_amd_queue_get_info(queue, HSA_AMD_QUEUE_INFO_SDMA_ENGINE_ID, &sdma_engine_id),
+            HSA_STATUS_ERROR_INVALID_ARGUMENT);
+  uint64_t pointer = 0;
+  EXPECT_EQ(hsa_amd_queue_get_info(queue, HSA_AMD_QUEUE_INFO_READ_POINTER, &pointer),
+            HSA_STATUS_ERROR_INVALID_ARGUMENT);
+  EXPECT_EQ(hsa_amd_queue_get_info(queue, HSA_AMD_QUEUE_INFO_WRITE_POINTER, &pointer),
+            HSA_STATUS_ERROR_INVALID_ARGUMENT);
+  EXPECT_EQ(hsa_amd_queue_get_info(queue, static_cast<hsa_queue_info_attribute_t>(0x7FFF),
+                                   &pointer),
+            HSA_STATUS_ERROR_INVALID_ARGUMENT);
+
+  ASSERT_SUCCESS(hsa_queue_destroy(queue));
+}
+
+void QueueCreateTest::AqlQueuePriorityAndCuMaskTest() {
+  ASSERT_SUCCESS(rocrtst::SetDefaultAgents(this));
+  ASSERT_SUCCESS(rocrtst::SetPoolsTypical(this));
+
+  set_kernel_file_name("test_case_template_kernels.hsaco");
+  set_kernel_name("square");
+  ASSERT_SUCCESS(rocrtst::LoadKernelFromObjFile(this, gpu_device1()));
+
+  uint32_t queue_size = 0;
+  ASSERT_SUCCESS(hsa_agent_get_info(*gpu_device1(), HSA_AGENT_INFO_QUEUE_MAX_SIZE, &queue_size));
+  queue_size = std::min<uint32_t>(queue_size, 1024);
+
+  hsa_queue_t* queue = nullptr;
+  ASSERT_SUCCESS(hsa_queue_create(*gpu_device1(), queue_size, HSA_QUEUE_TYPE_MULTI, nullptr,
+                                  nullptr, UINT32_MAX, UINT32_MAX, &queue));
+  ASSERT_NE(queue, nullptr);
+
+  DispatchAndVerify(queue, "default priority");
+
+  const hsa_amd_queue_priority_t priorities[] = {
+      HSA_AMD_QUEUE_PRIORITY_LOW, HSA_AMD_QUEUE_PRIORITY_HIGH, HSA_AMD_QUEUE_PRIORITY_NORMAL};
+  const char* labels[] = {"low priority", "high priority", "normal priority"};
+  for (size_t i = 0; i < sizeof(priorities) / sizeof(priorities[0]); ++i) {
+    ASSERT_SUCCESS(hsa_amd_queue_set_priority(queue, priorities[i])) << labels[i];
+    DispatchAndVerify(queue, labels[i]);
+  }
+
+  EXPECT_EQ(hsa_amd_queue_set_priority(nullptr, HSA_AMD_QUEUE_PRIORITY_NORMAL),
+            HSA_STATUS_ERROR_INVALID_ARGUMENT);
+
+  // Round-trip the CU mask: read it, write it back, and read it again.
+  uint32_t num_cus = 0;
+  ASSERT_SUCCESS(hsa_agent_get_info(
+      *gpu_device1(), static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT),
+      &num_cus));
+  const uint32_t mask_bits = (num_cus + 31) / 32 * 32;
+  const uint32_t mask_dwords = mask_bits / 32;
+  std::vector<uint32_t> mask(mask_dwords, 0xDEADBEEF);
+  ASSERT_SUCCESS(hsa_amd_queue_cu_get_mask(queue, mask_bits, mask.data()));
+
+  hsa_status_t err = hsa_amd_queue_cu_set_mask(queue, mask_bits, mask.data());
+  ASSERT_TRUE(err == HSA_STATUS_SUCCESS || err == static_cast<hsa_status_t>(HSA_STATUS_CU_MASK_REDUCED))
+      << "status " << err;
+
+  std::vector<uint32_t> mask_after(mask_dwords, 0xDEADBEEF);
+  ASSERT_SUCCESS(hsa_amd_queue_cu_get_mask(queue, mask_bits, mask_after.data()));
+  // A reduced mask is clipped by the runtime, so it can legitimately differ.
+  if (err == HSA_STATUS_SUCCESS) {
+    EXPECT_EQ(mask, mask_after);
+  }
+  DispatchAndVerify(queue, "cu mask round trip");
+
+  // Asking for more bits than the queue tracks zero-fills the remainder.
+  std::vector<uint32_t> wide(mask_dwords + 2, 0xDEADBEEF);
+  ASSERT_SUCCESS(hsa_amd_queue_cu_get_mask(queue, (mask_dwords + 2) * 32, wide.data()));
+  EXPECT_EQ(wide[mask_dwords], 0u);
+  EXPECT_EQ(wide[mask_dwords + 1], 0u);
+
+  // Argument checks.
+  EXPECT_EQ(hsa_amd_queue_cu_get_mask(queue, 0, mask.data()), HSA_STATUS_ERROR_INVALID_ARGUMENT);
+  EXPECT_EQ(hsa_amd_queue_cu_get_mask(queue, 33, mask.data()), HSA_STATUS_ERROR_INVALID_ARGUMENT);
+  EXPECT_EQ(hsa_amd_queue_cu_get_mask(queue, mask_bits, nullptr),
+            HSA_STATUS_ERROR_INVALID_ARGUMENT);
+  EXPECT_EQ(hsa_amd_queue_cu_set_mask(queue, 33, mask.data()), HSA_STATUS_ERROR_INVALID_ARGUMENT);
+  EXPECT_EQ(hsa_amd_queue_cu_set_mask(queue, mask_bits, nullptr),
+            HSA_STATUS_ERROR_INVALID_ARGUMENT);
+
+  ASSERT_SUCCESS(hsa_queue_destroy(queue));
 }
 
 void QueueCreateTest::InvalidArgsTest() {

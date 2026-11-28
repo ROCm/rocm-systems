@@ -36,6 +36,11 @@ class TimeStamp : public TestBase {
   void TimeStampTest (void);
 
   void BarrierPacketTimestampValidationTest(void);
+
+  // Convert GPU clock ticks to the system domain with
+  // hsa_amd_profiling_convert_tick_to_system_domain and check the result
+  // against the system clock sampled at the same time.
+  void ConvertTickToSystemDomainTest(void);
 private:
   void FreeResources();  // Helper to clean up queue and signals
 

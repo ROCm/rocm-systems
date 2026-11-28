@@ -572,4 +572,75 @@ void MemoryTest::MemAvailableTest(void) {
   }
 }
 
+void MemoryTest::PointerInfoUserDataTest(void) {
+  std::vector<std::shared_ptr<rocrtst::agent_pools_t>> agent_pools;
+
+  PrintMemorySubtestHeader("Pointer info user data in Memory Pools");
+
+  ASSERT_SUCCESS(rocrtst::GetAgentPools(&agent_pools));
+
+  int tested = 0;
+  for (auto a : agent_pools) {
+    for (auto p : a->pools) {
+      rocrtst::pool_info_t pool_i;
+      ASSERT_SUCCESS(rocrtst::AcquirePoolInfo(p, &pool_i));
+      if (!pool_i.alloc_allowed || !pool_i.alloc_granule) continue;
+
+      void* ptr = nullptr;
+      ASSERT_SUCCESS(hsa_amd_memory_pool_allocate(p, pool_i.alloc_granule, 0, &ptr));
+      ASSERT_NE(ptr, nullptr);
+
+      int first = 1;
+      int second = 2;
+      hsa_amd_pointer_info_t info = {};
+      info.size = sizeof(info);
+
+      // Freshly allocated memory carries no user data.
+      ASSERT_SUCCESS(hsa_amd_pointer_info(ptr, &info, nullptr, nullptr, nullptr));
+      EXPECT_EQ(info.type, HSA_EXT_POINTER_TYPE_HSA);
+      EXPECT_EQ(info.userData, nullptr);
+
+      ASSERT_SUCCESS(hsa_amd_pointer_info_set_userdata(ptr, &first));
+      info = {};
+      info.size = sizeof(info);
+      ASSERT_SUCCESS(hsa_amd_pointer_info(ptr, &info, nullptr, nullptr, nullptr));
+      EXPECT_EQ(info.userData, &first);
+
+      // The last value written wins, and NULL clears it.
+      ASSERT_SUCCESS(hsa_amd_pointer_info_set_userdata(ptr, &second));
+      info = {};
+      info.size = sizeof(info);
+      ASSERT_SUCCESS(hsa_amd_pointer_info(ptr, &info, nullptr, nullptr, nullptr));
+      EXPECT_EQ(info.userData, &second);
+
+      ASSERT_SUCCESS(hsa_amd_pointer_info_set_userdata(ptr, nullptr));
+      info = {};
+      info.size = sizeof(info);
+      ASSERT_SUCCESS(hsa_amd_pointer_info(ptr, &info, nullptr, nullptr, nullptr));
+      EXPECT_EQ(info.userData, nullptr);
+
+      // The accessible agent list is returned through the caller's allocator.
+      uint32_t num_accessible = 0;
+      hsa_agent_t* accessible = nullptr;
+      info = {};
+      info.size = sizeof(info);
+      ASSERT_SUCCESS(hsa_amd_pointer_info(ptr, &info, malloc, &num_accessible, &accessible));
+      if (num_accessible > 0) {
+        EXPECT_NE(accessible, nullptr);
+      }
+      free(accessible);
+
+      ASSERT_SUCCESS(hsa_amd_memory_pool_free(ptr));
+      ++tested;
+    }
+  }
+  ASSERT_GT(tested, 0);
+
+  // Argument checks.
+  EXPECT_EQ(hsa_amd_pointer_info_set_userdata(nullptr, &tested), HSA_STATUS_ERROR_INVALID_ARGUMENT);
+  int stack_value = 0;
+  EXPECT_EQ(hsa_amd_pointer_info_set_userdata(&stack_value, &tested),
+            HSA_STATUS_ERROR_INVALID_ARGUMENT);
+}
+
 #undef RET_IF_HSA_ERR

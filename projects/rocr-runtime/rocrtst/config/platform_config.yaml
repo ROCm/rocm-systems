@@ -218,6 +218,10 @@ platforms:
       - rocrtstStress.Queue_Add_Write_Index_ConcurrentTest
       - rocrtstStress.Queue_CAS_Write_Index_ConcurrentTest
       - rocrtstStress.Queue_LoadStore_Write_Index_ConcurrentTest
+      # Multi-megabyte copies and scratch allocations sized to every CU of
+      # the device, which is too slow on an emulator.
+      - rocrtstFunc.MemoryCopyEngine_*
+      - rocrtstFunc.Scratch_*
       # Exercises the WSL/DXG thunk's heap VA reservations; that backend does
       # not exist here, so the test would only ever report itself skipped.
       - rocrtstFunc.Heap_Reservation
