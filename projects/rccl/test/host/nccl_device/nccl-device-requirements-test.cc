@@ -306,6 +306,34 @@ TEST(NcclDeviceRequirementsMicrotest, GinBarrierCreateRequirement_NullCommAndSig
   }
 }
 
+// Since NCCL 2.32.4 device code strides each GIN barrier by ncclGinBarrierSlots(), which never
+// drops below 2 (the two-signal phase-bit barrier must always fit). The host requirement must
+// match: a 1-rank team reserves 2 signals per barrier, not 1, or barrier i>0 overruns the next
+// requirement's signals. Multi-rank teams keep one slot per rank.
+TEST(NcclDeviceRequirementsMicrotest, GinBarrierCreateRequirement_SingleRankTeam_ReservesTwoSignalsPerBarrier) {
+  struct Case {
+    const char* name;
+    int nBarriers;
+    int nRanks;
+    int goldenGinSignalCount;
+  };
+  const std::vector<Case> cases = {
+    {"one_rank_one_barrier", 1, 1, 2},
+    {"one_rank_three_barriers", 3, 1, 6},
+    {"two_ranks_three_barriers", 3, 2, 6},
+    {"eight_ranks_two_barriers", 2, 8, 16},
+  };
+  for (const Case& c : cases) {
+    SCOPED_TRACE(c.name);
+    ncclTeam_t team{c.nRanks, /*rank=*/0, /*stride=*/1};
+    ncclGinBarrierHandle_t handle = poisonedHandle<ncclGinBarrierHandle_t>();
+    ncclDevResourceRequirements_t req = poisonedRequirement();
+    ASSERT_EQ(ncclGinBarrierCreateRequirement(/*comm=*/nullptr, team, c.nBarriers, &handle, &req), ncclSuccess);
+    EXPECT_EQ(req.ginSignalCount, c.goldenGinSignalCount);
+    EXPECT_EQ(req.outGinSignalStart, &handle.signal0);
+  }
+}
+
 // ncclCftBarrierCreateRequirement (src/nccl_device/cft_barrier.cc)
 
 // bufferSize == (3*nBarriers + nBarriers*team.nRanks) * NCCL_CFT_BARRIER_GRAN (16, vs. the LSA
