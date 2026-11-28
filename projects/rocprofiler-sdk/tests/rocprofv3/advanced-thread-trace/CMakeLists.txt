@@ -115,6 +115,16 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/hsa_code_object_testapp-trace/json_input
     FAIL_REGULAR_EXPRESSION "AssertionError")
 
+# GPU-free unit test for test_code_object_memory candidate ordering and failure behavior.
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-att-code-object-memory-unit
+    TEST_PATHS test_code_object_memory.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    TIMEOUT 45
+    LABELS "unit-tests"
+    FAIL_REGULAR_EXPRESSION "AssertionError")
+
 function(configure_att_input _FILENAME)
     set(LIB_PATH_LOC "${attdecoder_LIB_DIR}")
     configure_file(${CMAKE_CURRENT_SOURCE_DIR}//${_FILENAME}.in
