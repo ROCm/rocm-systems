@@ -3,3 +3,28 @@ c_compilation:
   Unit_hipGetDeviceProp_ctest:
     <<: *level_default
     tags: [integration, rtc]
+  # Regression tests for AMD headers
+  Unit_hipBf16Compile_ctest:
+    <<: *level_2
+    tags: [integration, rtc]
+    disabled:
+      targets: [nvidia_linux, nvidia_windows]
+      reason: "AIRUNTIME-2744 - regression test for the AMD hip_bf16.h header; the companion C object (hipBf16Compile.c) is only built under HIP_PLATFORM amd in unit/c_compilation/CMakeLists.txt, so the case is never linked on nvidia; needs to be re-triaged."
+  Unit_hipFp8Compile_ctest:
+    <<: *level_2
+    tags: [integration, rtc]
+    disabled:
+      targets: [nvidia_linux, nvidia_windows]
+      reason: "AIRUNTIME-2744 - regression test for the AMD hip_fp8.h header; the companion C object (hipFp8Compile.c) is only built under HIP_PLATFORM amd in unit/c_compilation/CMakeLists.txt, so the case is never linked on nvidia; needs to be re-triaged."
+  Unit_hipFp4Compile_ctest:
+    <<: *level_2
+    tags: [integration, rtc]
+    disabled:
+      targets: [nvidia_linux, nvidia_windows]
+      reason: "AIRUNTIME-2744 - regression test for the AMD hip_fp4.h header; the companion C object (hipFp4Compile.c) is only built under HIP_PLATFORM amd in unit/c_compilation/CMakeLists.txt, so the case is never linked on nvidia; needs to be re-triaged."
+  Unit_hipFp6Compile_ctest:
+    <<: *level_2
+    tags: [integration, rtc]
+    disabled:
+      targets: [nvidia_linux, nvidia_windows]
+      reason: "AIRUNTIME-2744 - regression test for the AMD hip_fp6.h header; the companion C object (hipFp6Compile.c) is only built under HIP_PLATFORM amd in unit/c_compilation/CMakeLists.txt, so the case is never linked on nvidia; needs to be re-triaged."
