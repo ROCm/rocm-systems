@@ -417,12 +417,13 @@ malformed-evidence integrity issues.
 
 By default, the analyzer reports every observed same-instruction store
 collision. To suppress collisions for an intentional same-value store, replay
-the same capture with `--suppress-uniform-store-collisions`. Prepare supports native B32 stores
-on gfx942 and gfx950 wave64 (`ds_write_b32`), gfx1100 and gfx1201 wave32
-or wave64, and gfx1250 wave32 (`ds_store_b32`). It can prove that the
-address and payload are uniform when both VGPRs
-come from plain four-byte `v_mov_b32` broadcasts of an SGPR or inline constant
-in the store's basic block. Each broadcast must cover all lanes active at the
+the same capture with `--suppress-uniform-store-collisions`. Prepare supports native
+single-range B32, B64, B96, and B128 stores on gfx942 and gfx950 wave64
+(`ds_write_*`), gfx1100 and gfx1201 wave32 or wave64, and gfx1250 wave32
+(`ds_store_*`). The address VGPR and every payload VGPR must come from a
+plain four-byte `v_mov_b32` broadcast of an SGPR or inline constant in the
+store's basic block. For B96 this requires all three payload words, and for
+B128 all four. Different words can come from different SGPRs. Each broadcast must cover all lanes active at the
 store, including active lanes 32–63 on wave64. A later register clobber,
 possible EXEC expansion, or missing proof keeps the collision reportable.
 Earlier captures without proofs keep their original findings under either policy.

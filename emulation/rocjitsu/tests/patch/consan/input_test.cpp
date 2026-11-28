@@ -98,6 +98,68 @@ TEST(ConSanInput, UniformStoreProofRequiresTwoLocalBroadcastsCoveringActiveLanes
   EXPECT_TRUE(build_input_program(banked, target, "lds_producer_consumer", error).failed());
 }
 
+TEST(ConSanInput, MultiwordProofRequiresEveryWordOfTheDecodedStoreTuple) {
+  const std::filesystem::path fixture =
+      test::target_fixture_path({"gfx1250", 32}, "width-flat-load-backward");
+  if (fixture.empty())
+    GTEST_SKIP() << "AMD assembler/linker fixtures unavailable";
+  const std::vector<uint8_t> image = test::read_fixture(fixture);
+  const TargetProfile &target = *target_profile(1250);
+  InputError error;
+  const FailureOr<InputProgram> baseline =
+      build_input_program(image, target, "lds_producer_consumer", error);
+  ASSERT_TRUE(baseline.succeeded()) << error.message;
+  const size_t entry =
+      baseline.value().text_file_offset + baseline.value().kernel.entry_text_offset;
+  const auto move = [](uint8_t dst, uint16_t src) {
+    return cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = src, .vdst = dst})[0];
+  };
+  constexpr uint8_t address = 1;
+  constexpr uint8_t data = 2;
+  const auto check = [&](uint16_t opcode, uint8_t words, std::initializer_list<uint32_t> clobber,
+                         UniformStoreProof expected, uint8_t address_reg = 1) {
+    // Distinct SGPR broadcasts model a four-word packed value at B128.
+    std::vector<uint32_t> code = {move(address_reg, cdna5::OPR_SRC_POS_INT_MIN)};
+    for (uint8_t i = 0; i < words; ++i)
+      code.push_back(move(data + i, 4 + i));
+    code.insert(code.end(), clobber);
+    const std::array<uint32_t, 2> store =
+        cdna5::build_vds(opcode, {.addr = address_reg, .data0 = data});
+    code.insert(code.end(), store.begin(), store.end());
+    code.push_back(cdna5::build_sopp(cdna5::kSEndpgmSopp)[0]);
+    std::vector<uint8_t> candidate = image;
+    ASSERT_LE(entry + code.size() * sizeof(uint32_t), candidate.size());
+    std::memcpy(candidate.data() + entry, code.data(), code.size() * sizeof(uint32_t));
+    const FailureOr<InputProgram> input =
+        build_input_program(candidate, target, "lds_producer_consumer", error);
+    ASSERT_TRUE(input.succeeded()) << error.message;
+    ASSERT_FALSE(input.value().accesses.empty());
+    const NativeLdsAccess &site = input.value().accesses.back();
+    EXPECT_EQ(site.width, words * 4u);
+    EXPECT_EQ(site.uniform_store_proof, expected);
+  };
+  constexpr UniformStoreProof proved = UniformStoreProof::BlockLocalBroadcast;
+  constexpr UniformStoreProof unknown = UniformStoreProof::None;
+  constexpr std::array forms = {cdna5::kDsStoreB64Vds, cdna5::kDsStoreB96Vds,
+                                cdna5::kDsStoreB128Vds};
+  for (uint8_t i = 0; i < forms.size(); ++i) {
+    const uint8_t words = i + 2;
+    SCOPED_TRACE(::testing::Message() << "B" << words * 32);
+    check(forms[i], words, {}, proved);
+    check(forms[i], words, {}, proved, data + words - 1); // ADDR aliases the high word.
+    for (uint8_t reg = address; reg < data + words; ++reg)
+      check(forms[i], words, {move(reg, cdna5::OPR_SRC_VGPR_MIN)}, unknown);
+
+    // The B64 load writes a pair. Cover partial overlaps at both boundaries
+    // and an adjacent pair immediately past DATA0 (including the B96 case).
+    for (uint8_t dst : {uint8_t{address - 1}, uint8_t(data + words - 1), uint8_t(data + words)}) {
+      const std::array<uint32_t, 2> overwrite =
+          cdna5::build_vds(cdna5::kDsLoadB64Vds, {.addr = address, .vdst = dst});
+      check(forms[i], words, {overwrite[0], overwrite[1]}, dst == data + words ? proved : unknown);
+    }
+  }
+}
+
 TEST(ConSanInput, Wave64UniformStoreRequiresTheSameExecBitsAndVgprBank) {
   const std::filesystem::path fixture =
       test::target_fixture_path({"gfx950", 64}, "width-flat-load-overlap");

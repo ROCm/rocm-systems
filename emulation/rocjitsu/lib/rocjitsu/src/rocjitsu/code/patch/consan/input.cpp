@@ -180,11 +180,22 @@ struct ApertureWords {
 class BlockUniformWords {
 public:
   UniformStoreProof store_proof(const Instruction &store) const {
-    if (store.amdgpu_operation() != amdgpu::Operation::DS_STORE_B32 &&
-        store.amdgpu_operation() != amdgpu::Operation::DS_WRITE_B32)
+    using Op = amdgpu::Operation;
+    switch (store.amdgpu_operation()) {
+    case Op::DS_STORE_B32:
+    case Op::DS_WRITE_B32:
+    case Op::DS_STORE_B64:
+    case Op::DS_WRITE_B64:
+    case Op::DS_STORE_B96:
+    case Op::DS_WRITE_B96:
+    case Op::DS_STORE_B128:
+    case Op::DS_WRITE_B128:
+      break;
+    default:
       return UniformStoreProof::None;
-    // The native classifier checked both allocated VGPR operands. The DS
-    // immediate displacement is common to every lane.
+    }
+    // The native classifier checked the exact DATA0 tuple width and allocation.
+    // contains() requires every word. The DS displacement is common to all lanes.
     const std::optional<RegisterRef> address = store.src_operand(0)->decoded_vgpr();
     const std::optional<RegisterRef> data = store.src_operand(1)->decoded_vgpr();
     return address && data && words_.contains(*address) && words_.contains(*data)
