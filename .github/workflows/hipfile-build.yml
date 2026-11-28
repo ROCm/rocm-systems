@@ -85,7 +85,7 @@ jobs:
       ais_hipfile_pkg_dev_filename: ${{ steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_DEV_FILENAME }}
       ais_hipfile_pkg_filename: ${{ steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_FILENAME }}
       ais_hipfile_pkg_version: ${{ steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_VERSION }}
-    runs-on: [ubuntu-24.04]
+    runs-on: [ubuntu-26.04]
     steps:
       - name: Set early AIS CI environment variables
         # ROCm Build Environment Args

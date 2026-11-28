@@ -2,11 +2,11 @@
 #
 # SPDX-License-Identifier: MIT
 
-ARG UBUNTU_CODENAME=noble
+ARG UBUNTU_CODENAME=resolute
 FROM ubuntu:${UBUNTU_CODENAME} AS base
 LABEL org.opencontainers.image.source=https://github.com/ROCm/hipFile
 ARG UBUNTU_CODENAME
-ARG UBUNTU_MAJOR_VERSION=24
+ARG UBUNTU_MAJOR_VERSION=26
 ARG UBUNTU_MINOR_VERSION=04
 ARG ROCM_VERSION=10.2.0
 
@@ -120,8 +120,8 @@ RUN apt update && \
         git \
         libmount-dev \
         llvm-dev \
-        python3.12-dev \
-        python3.12-venv
+        python3.14-dev \
+        python3.14-venv
 
 # Install ROCm dev runtime packages.
 # Every 7.11+ and nightly ships as amdrocm-runtime-dev<MAJOR>.<MINOR> package;

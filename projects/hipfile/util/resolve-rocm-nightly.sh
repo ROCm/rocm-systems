@@ -18,7 +18,7 @@
 # Because the same helpers are both shipped to CI and exercised by --test, the
 # two can never drift.
 
-NIGHTLY_DEB_BASE="https://nightly.repo.amd.com/rocm/core/packages/ubuntu2404"
+NIGHTLY_DEB_BASE="https://nightly.repo.amd.com/rocm/core/packages/ubuntu2604"
 
 # --- pure helpers ---------------------------------------------------------
 

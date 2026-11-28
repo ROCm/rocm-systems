@@ -29,7 +29,7 @@ permissions:
 jobs:
   profiler_abi:
     name: profiler ABI compile check
-    runs-on: [ubuntu-24.04]
+    runs-on: [ubuntu-26.04]
     steps:
       - name: Set AIS CI container name
         # On non-pull_request triggering workflows, AIS_PR_NUMBER may be empty.

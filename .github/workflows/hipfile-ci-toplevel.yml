@@ -29,7 +29,7 @@ permissions:
 
 jobs:
   Precheck:
-    runs-on: [ubuntu-24.04]
+    runs-on: [ubuntu-26.04]
     # packages: read to check which CI images are already published in GHCR
     permissions:
       contents: read

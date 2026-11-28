@@ -9,7 +9,7 @@ env:
   # (ROCm 10.2 is LLVM 24).
   AIS_CLANG_TIDY_VERSION: 24
   # Ubuntu codename for the apt.llvm.org repository, matching the CI image.
-  AIS_CLANG_TIDY_DISTRO: noble
+  AIS_CLANG_TIDY_DISTRO: resolute
 
 on:
   workflow_call:
@@ -26,7 +26,7 @@ permissions:
 jobs:
   clang_tidy:
     name: clang-tidy
-    runs-on: [ubuntu-24.04]
+    runs-on: [ubuntu-26.04]
     steps:
       - name: Set AIS CI container name
         # On non-pull_request triggering workflows, AIS_PR_NUMBER may be empty.
