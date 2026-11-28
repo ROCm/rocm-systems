@@ -1509,7 +1509,13 @@ hsa_status_t Runtime::SetPtrInfoData(const void* ptr, void* userptr) {
 }
 
 #define IPC_SOCK_SERVER_DMABUF_FD_HANDLE_LENGTH 64
-#define IPC_SOCK_SERVER_NAME_LENGTH 32
+// Magic stamped into hsa_amd_ipc_memory_t handle[5] (unused by the DMA-BUF
+// export layout and always zeroed by older runtimes via the memset in
+// IPCCreate) to identify handles whose handle[2] carries the IPC socket
+// server connection token rather than the legacy exporter pid. Checked in
+// IPCAttach so a handle from a mismatched runtime is rejected immediately
+// instead of timing out while connecting to a socket name that cannot exist.
+#define IPC_DMABUF_HANDLE_TOKEN_MAGIC 0x78687361u  // "xhsa"
 #define IPC_SOCK_SERVER_CONN_CLOSE_HANDLE UINT64_MAX
 void Runtime::AsyncIPCSockServerConnLoop(void*) {
   auto& ipc_sock_server_fd_ = runtime_singleton_->ipc_sock_server_fd_;
@@ -1608,13 +1614,17 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
   uint32_t dmaBufFdHandleHi = (reinterpret_cast<uint64_t>(ptr) >> 32);
   handle->handle[0] = dmaBufFdHandleLo;
   handle->handle[1] = dmaBufFdHandleHi;
-  handle->handle[2] = os::GetProcessId();  // socket server name handle
+  // handle[2] (the IPC socket server connection token) is stamped under
+  // ipc_sock_server_lock_ after the server is known to exist; see below.
 
   Agent* agent = Agent::Convert(info.agentOwner);
   handle->handle[3] = agent->device_type() == Agent::kAmdCpuDevice;
   // System sub allocations are not supported for now.
   if (handle->handle[3] && useFrag) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   handle->handle[4] = agent->node_id();
+  // Mark this handle as carrying a connection token in handle[2]; older
+  // runtimes leave this word zero. See IPC_DMABUF_HANDLE_TOKEN_MAGIC.
+  handle->handle[5] = IPC_DMABUF_HANDLE_TOKEN_MAGIC;
   if (useFrag) handle->handle[6] |= 0x80000000 | fragOffset;
 
   // Work around to defer export on import call to minimize FD creation.
@@ -1687,8 +1697,8 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
     if (old_thread) {
       lock.unlock();
       // Wake up the server thread blocked in accept() by sending close signal
-      IPCClientImport(os::GetProcessId(), IPC_SOCK_SERVER_CONN_CLOSE_HANDLE, 0, nullptr, nullptr,
-                      nullptr, false, 0);
+      IPCClientImport(ipc_sock_server_token_, IPC_SOCK_SERVER_CONN_CLOSE_HANDLE, 0, nullptr,
+                      nullptr, nullptr, false, 0);
       os::WaitForThread(old_thread);
       os::CloseThread(old_thread);
       lock.lock();
@@ -1701,10 +1711,12 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
     // Re-check after unlock/relock because another thread could have created
     // the server while we were waiting for the old thread to exit.
     if (ipc_sock_server_conns_.empty() && !ipc_sock_server_thread_) {
-      char socketName[IPC_SOCK_SERVER_NAME_LENGTH];
-      snprintf(socketName, sizeof(socketName), "xhsa%i", handle->handle[2]);
-
-      ipc_sock_server_fd_ = os::CreateIPCServer(socketName, 1);
+      // The OS layer generates a collision-free server name and returns the
+      // connection token for importers (Linux: kernel-autobound abstract
+      // socket name, unique per network namespace; Windows: process id).
+      // Pid-derived names collide across containers that share a network
+      // namespace while having separate pid namespaces.
+      ipc_sock_server_fd_ = os::CreateIPCServerUnique(&ipc_sock_server_token_, 1);
       assert(ipc_sock_server_fd_ != os::INVALID_SOCKET_VALUE &&
              "DMA buffer could not"
              "be exported for IPC!");
@@ -1719,6 +1731,10 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
       }
     }
   }
+  // Publish the live server's connection token so importers can connect.
+  // Read under ipc_sock_server_lock_: the token changes whenever the server
+  // is torn down and recreated.
+  handle->handle[2] = ipc_sock_server_token_;
   ipc_sock_server_conns_[reinterpret_cast<uint64_t>(ptr)] = len;
 
   // TODO: fragment block discard for better memory performance causes memory violations
@@ -1742,11 +1758,11 @@ void Runtime::ReleaseImportHandles(HsaMemoryObjectHandle owner,
 int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle, unsigned int numNodes,
                              HSAuint32* nodes, void** importAddress, HSAuint64* importSize,
                              bool isDmabufSysmem, uint32_t shared_handle) {
-  char socketName[IPC_SOCK_SERVER_NAME_LENGTH];
-  snprintf(socketName, IPC_SOCK_SERVER_NAME_LENGTH, "xhsa%i", conn_handle);
   std::chrono::milliseconds timeout(10000);
   std::chrono::milliseconds retryInterval(1);
-  os::IPCSocket socket_fd = os::ConnectToIPCServer(socketName, timeout, retryInterval);
+  // conn_handle carries the exporter's server connection token (from
+  // hsa_amd_ipc_memory_t handle[2]); the OS layer maps it to the name.
+  os::IPCSocket socket_fd = os::ConnectToIPCServerByToken(conn_handle, timeout, retryInterval);
   assert(socket_fd != os::INVALID_SOCKET_VALUE && "Connection to export DMA buffer not made!");
   if (socket_fd == os::INVALID_SOCKET_VALUE) return -1;
 
@@ -1957,6 +1973,11 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
   }
 
   if (ipc_dmabuf_supported_) {
+    // Reject handles from a runtime using a different handle[2] scheme
+    // (e.g. the legacy pid-named socket) before attempting to connect;
+    // such a connect could never succeed and would only time out.
+    if (importHandle.handle[5] != IPC_DMABUF_HANDLE_TOKEN_MAGIC)
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     uint64_t dmaBufFDHandleLo = importHandle.handle[0];
     uint64_t dmaBufFDHandleHi = importHandle.handle[1];
     dmaBufFDHandle = (dmaBufFDHandleHi << 32) | dmaBufFDHandleLo;
@@ -2813,6 +2834,7 @@ Runtime::Runtime()
       thunkLoader_(nullptr),
       kfd_version{},
       ipc_sock_server_fd_(os::INVALID_SOCKET_VALUE),
+      ipc_sock_server_token_(0),
       ipc_sock_server_thread_(nullptr),
       ipc_sock_server_shutdown_in_progress_(false) {
   virtual_mem_api_supported_ = false;
@@ -2939,14 +2961,16 @@ void Runtime::Unload() {
   // Close IPC socket server. Capture thread handle under lock to avoid race
   // with IPCCreate which may be restarting the server concurrently.
   os::Thread thread_to_close = nullptr;
+  uint32_t token_to_signal = 0;
   {
     std::lock_guard<std::mutex> lock(ipc_sock_server_lock_);
     thread_to_close = ipc_sock_server_thread_;
+    token_to_signal = ipc_sock_server_token_;
     ipc_sock_server_thread_ = nullptr;
   }
 
   if (thread_to_close) {
-    IPCClientImport(os::GetProcessId(), IPC_SOCK_SERVER_CONN_CLOSE_HANDLE, 0, nullptr, nullptr,
+    IPCClientImport(token_to_signal, IPC_SOCK_SERVER_CONN_CLOSE_HANDLE, 0, nullptr, nullptr,
                     nullptr, false, 0);
     os::WaitForThread(thread_to_close);
     os::CloseThread(thread_to_close);
