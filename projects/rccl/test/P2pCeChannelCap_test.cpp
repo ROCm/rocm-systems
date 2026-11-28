@@ -59,12 +59,6 @@ TEST(P2pCeChannelCapTests, Gfx1250CeStepIsCappedAt32MiB)
               32 * 1024 * 1024);
 }
 
-TEST(P2pCeChannelCapTests, Gfx1250CeConnectionsShareTheProxyStream)
-{
-    EXPECT_TRUE(rcclP2pCeSharesProxyStream(/*cudaArch=*/1250));
-    EXPECT_FALSE(rcclP2pCeSharesProxyStream(/*cudaArch=*/1200));
-}
-
 TEST(P2pCeChannelCapTests, SimpleChunkFollowsCopyEngineConnectorSteps)
 {
     const int chunk = 512 * 1024;

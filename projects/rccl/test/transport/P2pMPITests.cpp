@@ -823,12 +823,14 @@ public:
 
 TEST_F(P2pMPITest, P2pWorkflow)
 {
-    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI,
-                                          kNoProcessLimit,
-                                          kRequirePowerOfTwo,
-                                          1,
-                                          kRequireSingleNode))
-        << "Test requirements not met - all ranks must meet requirements";
+    // The workflow drives one sender/receiver pair (rank 0 and its peer) through the
+    // low-level transport API, so any larger world deadlocks past that pair.
+    if(!validateTestPrerequisites(kMinProcessesForMPI, /*max=*/2, kRequirePowerOfTwo, 1,
+                                  kRequireSingleNode))
+    {
+        GTEST_SKIP() << "P2pWorkflow drives one rank pair and requires exactly 2 processes, got "
+                     << config.world_size;
+    }
 
     // Setup P2P-specific buffers BEFORE creating communicator
     setupP2PBuffers();
@@ -1738,12 +1740,15 @@ TEST_F(P2pMPITest, P2pBatchAutoDisableOnSingleNode)
                         "cannot test auto-detect path";
     }
 
-    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI,
-                                          kNoProcessLimit,
-                                          kRequirePowerOfTwo,
-                                          1,
-                                          kRequireSingleNode))
-        << "Test requirements not met - all ranks must meet requirements";
+    // The batch path drives one sender/receiver pair (rank 0 and its peer), so any
+    // larger world deadlocks past that pair.
+    if(!validateTestPrerequisites(kMinProcessesForMPI, /*max=*/2, kRequirePowerOfTwo, 1,
+                                  kRequireSingleNode))
+    {
+        GTEST_SKIP() << "P2pBatchAutoDisableOnSingleNode drives one rank pair and requires "
+                        "exactly 2 processes, got "
+                     << config.world_size;
+    }
 
     setupP2PBuffers();
     ASSERT_MPI_SUCCESS(createTestCommunicator());

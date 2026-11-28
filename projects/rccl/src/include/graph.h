@@ -51,9 +51,8 @@ inline size_t rcclP2pCeStepSizePolicy(int cudaArch, bool useMemcpy, int64_t conf
   size_t step = configured > (int64_t)fallback ? (size_t)configured : fallback;
   return step < (size_t)kRcclP2pCeMaxStepSize ? step : (size_t)kRcclP2pCeMaxStepSize;
 }
-inline bool rcclP2pCeSharesProxyStream(int cudaArch) {
-  return cudaArch == 1250;
-}
+// Per-connection CE proxy streams stall SDMA completions cross-process (AICOMRCCL-4050), so
+// every CE connection of a proxy thread shares one non-blocking stream; see p2pSendProxyConnect.
 inline int rcclP2pConnectorStepSize(int p2pChunkSize, bool useCe, int connStepSize) {
   return useCe && connStepSize > 0 ? connStepSize : p2pChunkSize;
 }
