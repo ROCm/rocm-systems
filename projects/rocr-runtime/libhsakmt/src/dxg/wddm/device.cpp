@@ -1557,22 +1557,69 @@ bool WDDMDevice::GetKmdDbgVersion(struct Wkmi::KmdDbgVersion* version) const {
   return false;
 }
 
+#if defined(__linux__)
 bool WDDMDevice::RegisterRuntimeState(uint32_t runtime_state, const void* r_debug,
-                                      bool ttmp_setup_hint) const {
+                                      bool ttmp_setup_hint) {
   int priv_size = Wkmi::GetDebuggerCmdPrivDataSize();
   void* priv_data = alloca(priv_size);
 
-#ifdef WIN32
+  int runtime_state_fd = -1;
+  D3DKMT_HANDLE runtime_state_syncobj = 0;
+
+  {
+    // Hold event_lock_ across syncobj creation and the KMD escape so this
+    // cannot interleave with another event create/destroy. The wait itself
+    // stays outside the lock.
+    std::lock_guard<std::mutex> lock(event_lock_);
+    if (!CreateCpuNotificationEventLocked(&runtime_state_fd, &runtime_state_syncobj))
+      return false;
+
+    memset(priv_data, 0, priv_size);
+    // The completion event is the CPU_NOTIFICATION syncobj bound to
+    // runtime_state_fd. The escape event handle is a Windows event object.
+    Wkmi::FillinRegisterRuntimeStatePrivData(priv_data, runtime_state, r_debug, ttmp_setup_hint,
+                                             nullptr);
+    if (!Escape(priv_data, priv_size, true)) {
+      // KMD never consumed the completion syncobj. Tear it down before
+      // releasing event_lock_, matching CreateEvent()'s failure path.
+      DestroyCpuNotificationEventLocked(runtime_state_fd, runtime_state_syncobj);
+      return false;
+    }
+  }
+
+  struct pollfd pfd = {
+      .fd = runtime_state_fd,
+      .events = POLLIN,
+      .revents = 0,
+  };
+  int poll_ret;
+  int saved_errno;
+  do {
+    poll_ret = poll(&pfd, 1, -1);
+    // poll() sets errno only on -1. POLLERR/POLLHUP/POLLNVAL return >= 0
+    // and leave errno untouched. Snapshot before pr_err: its get_thread_id()
+    // builds a stringstream and can clobber errno.
+    saved_errno = (poll_ret < 0) ? errno : 0;
+  } while (poll_ret < 0 && saved_errno == EINTR);
+  bool ret = poll_ret > 0 && (pfd.revents & POLLIN) != 0;
+  if (!ret) {
+    pr_err("RegisterRuntimeState completion wait failed: poll=%d revents=%#x errno=%d\n",
+           poll_ret, pfd.revents, saved_errno);
+  }
+
+  DestroyCpuNotificationEvent(runtime_state_fd, runtime_state_syncobj);
+  return ret;
+}
+#else
+bool WDDMDevice::RegisterRuntimeState(uint32_t runtime_state, const void* r_debug,
+                                      bool ttmp_setup_hint) {
+  int priv_size = Wkmi::GetDebuggerCmdPrivDataSize();
+  void* priv_data = alloca(priv_size);
+
   HANDLE init_event = CreateEvent(nullptr, true, false, TEXT("RuntimeInitEvent"));
   if (!init_event) {
     return false;
   }
-#else   // !WIN32
-  // It isn't clear yet how system events are going to be shared across OSes.
-  HANDLE init_event = nullptr;
-  pr_warn_once("not supported\n");
-  return false;
-#endif  // !WIN32
 
   memset(priv_data, 0, priv_size);
   Wkmi::FillinRegisterRuntimeStatePrivData(priv_data, runtime_state, r_debug, ttmp_setup_hint,
@@ -1580,15 +1627,14 @@ bool WDDMDevice::RegisterRuntimeState(uint32_t runtime_state, const void* r_debu
 
   bool ret = Escape(priv_data, priv_size, true);
 
-#ifdef WIN32
   if (ret) {
     ret = (WaitForSingleObject(init_event, INFINITE) == WAIT_OBJECT_0);
   }
 
   CloseHandle(init_event);
-#endif  // WIN32
   return ret;
 }
+#endif
 
 bool WDDMDevice::SetTrapHandler(uint64_t tba, uint64_t tma) const {
   int priv_size = Wkmi::GetDebuggerCmdPrivDataSize();
