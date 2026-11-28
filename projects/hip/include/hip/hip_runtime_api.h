@@ -2539,8 +2539,8 @@ hipError_t hipSetDevice(int deviceId);
  *
  * @returns #hipSuccess, #hipErrorInvalidDevice, #hipErrorInvalidValue
  *
- * @see #hipGetDevice, #hipGetDeviceCount. #hipSetDevice. #hipGetDeviceProperties.
- * #hipSetDeviceFlags. #hipChooseDevice
+ * @see #hipGetDevice, #hipGetDeviceCount, #hipSetDevice, hipGetDeviceProperties,
+ * #hipSetDeviceFlags, hipChooseDevice
  *
  * */
 hipError_t hipSetValidDevices(int* device_arr, int len);
