@@ -22,7 +22,10 @@ THE SOFTWARE.
 #include "rdc_lib/impl/RdcConfigSettingsImpl.h"
 
 #include <chrono>
+#include <cstring>
 #include <ctime>
+#include <limits>
+#include <type_traits>
 #include <vector>
 
 #include "amd_smi/amdsmi.h"
@@ -32,6 +35,110 @@ THE SOFTWARE.
 
 namespace amd {
 namespace rdc {
+
+namespace {
+
+constexpr uint64_t kMicrowattsPerWatt = 1'000'000;
+constexpr uint64_t kHzPerMHz = 1'000'000;
+
+// The clock that a clock limit setting limits.
+amdsmi_clk_type_t clock_of(rdc_config_type_t type) {
+  return type == RDC_CFG_MEMORY_CLOCK_LIMIT ? AMDSMI_CLK_TYPE_MEM : AMDSMI_CLK_TYPE_GFX;
+}
+
+// Gives one GPU a setting: the power cap, or the upper limit of a clock.
+amdsmi_status_t apply_setting(amdsmi_processor_handle processor_handle,
+                              const rdc_config_setting_t& setting) {
+  if (setting.type == RDC_CFG_POWER_LIMIT) {
+    return amdsmi_set_power_cap(processor_handle, 0, setting.target_value * kMicrowattsPerWatt);
+  }
+  return amdsmi_set_gpu_clk_limit(processor_handle, clock_of(setting.type), CLK_LIMIT_MAX,
+                                  setting.target_value);
+}
+
+// Puts one GPU's setting of the given type back to its default: the default power
+// cap, or the automatic performance level for a clock whose upper limit is not its
+// top frequency level.
+amdsmi_status_t reset_setting(amdsmi_processor_handle processor_handle, rdc_config_type_t type) {
+  if (type == RDC_CFG_POWER_LIMIT) {
+    amdsmi_power_cap_info_t cap_info = {};
+    amdsmi_status_t status = amdsmi_get_power_cap_info(processor_handle, 0, &cap_info);
+    if (status != AMDSMI_STATUS_SUCCESS) {
+      RDC_LOG(RDC_ERROR, "RdcConfigSettingsImpl: Failed to get power cap : " << status);
+      return status;
+    }
+    if (cap_info.power_cap == cap_info.default_power_cap) {
+      return AMDSMI_STATUS_SUCCESS;
+    }
+    status = amdsmi_set_power_cap(processor_handle, 0, cap_info.default_power_cap);
+    if (status != AMDSMI_STATUS_SUCCESS) {
+      RDC_LOG(RDC_ERROR, "RdcConfigSettingsImpl: Failed to reset power cap : " << status);
+    }
+    return status;
+  }
+
+  const amdsmi_clk_type_t clk = clock_of(type);
+  amdsmi_frequencies_t freqs = {};
+  amdsmi_status_t status = amdsmi_get_clk_freq(processor_handle, clk, &freqs);
+  if (status != AMDSMI_STATUS_SUCCESS) {
+    RDC_LOG(RDC_ERROR, "RdcConfigSettingsImpl: Failed to get clock " << clk << " freq: " << status);
+    return status;
+  }
+  amdsmi_clk_info_t info = {};
+  status = amdsmi_get_clock_info(processor_handle, clk, &info);
+  if (status != AMDSMI_STATUS_SUCCESS) {
+    RDC_LOG(RDC_ERROR, "RdcConfigSettingsImpl: Failed to get clock " << clk << " info: " << status);
+    return status;
+  }
+  // A table with no level, or with more than it holds, has no top level to
+  // compare with: reset anyway.
+  if (freqs.num_supported > 0 && freqs.num_supported <= AMDSMI_MAX_NUM_FREQUENCIES &&
+      info.max_clk * kHzPerMHz == freqs.frequency[freqs.num_supported - 1]) {
+    return AMDSMI_STATUS_SUCCESS;
+  }
+  status = amdsmi_set_gpu_perf_level(processor_handle, AMDSMI_DEV_PERF_LEVEL_AUTO);
+  if (status != AMDSMI_STATUS_SUCCESS) {
+    RDC_LOG(RDC_ERROR,
+            "RdcConfigSettingsImpl: Failed to reset clock " << clk << " limit : " << status);
+  }
+  return status;
+}
+
+// Gives one GPU a cached setting again if the GPU no longer has it. The power cap
+// is compared in microwatts, a clock's upper limit in MHz.
+void reapply_setting(amdsmi_processor_handle processor_handle,
+                     const rdc_config_setting_t& setting) {
+  uint64_t current = 0;
+  uint64_t target = setting.target_value;
+  amdsmi_status_t status;
+  if (setting.type == RDC_CFG_POWER_LIMIT) {
+    amdsmi_power_cap_info_t cap_info = {};
+    status = amdsmi_get_power_cap_info(processor_handle, 0, &cap_info);
+    current = cap_info.power_cap;
+    target *= kMicrowattsPerWatt;
+  } else {
+    amdsmi_clk_info_t info = {};
+    status = amdsmi_get_clock_info(processor_handle, clock_of(setting.type), &info);
+    current = info.max_clk;
+  }
+  if (status != AMDSMI_STATUS_SUCCESS) {
+    RDC_LOG(RDC_ERROR, "RdcConfigSettingsImpl::monitorSettings(): Failed to read setting "
+                           << setting.type << " : " << status);
+    return;
+  }
+  if (current == target) {
+    return;
+  }
+  RDC_LOG(RDC_INFO, "RdcConfigSettingsImpl::monitorSettings(): Mismatched setting "
+                        << setting.type << ", resetting");
+  status = apply_setting(processor_handle, setting);
+  if (status != AMDSMI_STATUS_SUCCESS) {
+    RDC_LOG(RDC_ERROR, "RdcConfigSettingsImpl::monitorSettings(): Failed to set setting "
+                           << setting.type << " : " << status);
+  }
+}
+
+}  // namespace
 
 RdcConfigSettingsImpl::RdcConfigSettingsImpl(const RdcGroupSettingsPtr& group_settings)
     : group_settings_(group_settings), is_running_(false) {}
@@ -50,122 +157,39 @@ RdcConfigSettingsImpl::~RdcConfigSettingsImpl() {
 
 // Monitoring thread of gpu settings
 void RdcConfigSettingsImpl::monitorSettings() {
-  rdc_gpu_group_t group_id;
-  amdsmi_processor_handle processor_handle;
-  amdsmi_status_t status;
-  rdc_status_t rdc_status;
-  rdc_group_info_t rdc_group_info = {};
-  amdsmi_power_cap_info_t cap_info = {};
-  amdsmi_clk_info_t info = {};
-  uint64_t cached_value;
-
-  while (true) {
-    {  // Scope block for mutex
-      std::unique_lock<std::mutex> lock(mutex_);
-      cv_.wait_for(lock, std::chrono::minutes(1),
-                   [this] { return !is_running_ || cached_group_settings_.empty(); });
-
-      if (!is_running_ || cached_group_settings_.empty()) {
-        break;  // Stop if the thread is requested to stop or settings are empty
+  std::unique_lock<std::mutex> lock(mutex_);
+  while (is_running_) {
+    // No setting to check: wait for one, or for the destructor, without waking up.
+    if (cached_group_settings_.empty()) {
+      cv_.wait(lock);
+      continue;
+    }
+    if (cv_.wait_for(lock, monitor_period_, [this] { return !is_running_; })) {
+      break;
+    }
+    for (const auto& group_pair : cached_group_settings_) {
+      rdc_group_info_t rdc_group_info;
+      if (get_group_info(group_pair.first, &rdc_group_info) != RDC_ST_OK) {
+        // Error log handled in get_group_info
+        continue;
       }
-
-      for (const auto& group_pair : cached_group_settings_) {
-        group_id = group_pair.first;
-        const auto& cached_settings = group_pair.second;
-        rdc_status = get_group_info(group_id, &rdc_group_info);
-        if (rdc_status != RDC_ST_OK) {
-          // Error log handled in get_group_info
+      for (uint32_t i = 0; i < rdc_group_info.count; ++i) {
+        amdsmi_processor_handle processor_handle;
+        amdsmi_status_t status =
+            get_processor_handle_from_id(rdc_group_info.entity_ids[i], &processor_handle);
+        if (status == AMDSMI_STATUS_NOT_FOUND) {
+          continue;  // a GPU AMD SMI cannot identify gets the settings once AMD SMI identifies it
+        }
+        if (status != AMDSMI_STATUS_SUCCESS) {
+          RDC_LOG(RDC_ERROR,
+                  "RdcConfigSettingsImpl::monitorSettings(): get_processor_handle_from_id failed: "
+                      << status);
           continue;
         }
-        for (unsigned int i = 0; i < rdc_group_info.count; ++i) {
-          status = get_processor_handle_from_id(rdc_group_info.entity_ids[i], &processor_handle);
-          if (status == AMDSMI_STATUS_NOT_FOUND) {
-            continue;  // a GPU AMD SMI cannot identify gets the settings once AMD SMI identifies it
-          }
-          if (status != AMDSMI_STATUS_SUCCESS) {
-            RDC_LOG(
-                RDC_ERROR,
-                "RdcConfigSettingsImpl::monitorSettings(): get_processor_handle_from_id failed: "
-                    << status);
-            continue;
-          }
-
-          // Power cap
-          status = amdsmi_get_power_cap_info(processor_handle, 0, &cap_info);
-          if (status != AMDSMI_STATUS_SUCCESS) {
-            RDC_LOG(RDC_ERROR,
-                    "RdcConfigSettingsImpl::monitorSettings(); amdsmi_get_power_cap_info failed: "
-                        << status);
-            continue;
-          }
-
-          auto power_cap_it = cached_settings.find(RDC_CFG_POWER_LIMIT);
-          if (power_cap_it != cached_settings.end()) {
-            cached_value = power_cap_it->second.target_value;
-            if (microwattsToWatts(cap_info.power_cap) != cached_value) {
-              RDC_LOG(
-                  RDC_INFO,
-                  "RdcConfigSettingsImpl::monitorSettings(); Mismatched Power values, resetting");
-              status = amdsmi_set_power_cap(processor_handle, 0, wattsToMicrowatts(cached_value));
-              if (status != AMDSMI_STATUS_SUCCESS) {
-                RDC_LOG(
-                    RDC_ERROR,
-                    "RdcConfigSettingsImpl::monitorSettings(); amdsmi_set_power_cap_info failed: "
-                        << status);
-                continue;
-              }
-            }
-          }
-
-          // Mem clock
-          status = amdsmi_get_clock_info(processor_handle, AMDSMI_CLK_TYPE_MEM, &info);
-          if (status != AMDSMI_STATUS_SUCCESS) {
-            RDC_LOG(RDC_ERROR,
-                    "RdcConfigSettingsImpl::monitorSettings(); amdsmi_get_clk_freq for mem failed: "
-                        << status);
-            continue;
-          }
-
-          auto mem_clk_it = cached_settings.find(RDC_CFG_MEMORY_CLOCK_LIMIT);
-          if (mem_clk_it != cached_settings.end()) {
-            cached_value = mem_clk_it->second.target_value;
-            if (info.max_clk != cached_value) {
-              status = amdsmi_set_gpu_clk_limit(processor_handle, AMDSMI_CLK_TYPE_MEM,
-                                                CLK_LIMIT_MAX, cached_value);
-              if (status != AMDSMI_STATUS_SUCCESS) {
-                RDC_LOG(RDC_ERROR,
-                        "RdcConfigSettingsImpl::monitorSettings(); amdsmi_set_gpu_clk_limit failed "
-                        "for mem clk: "
-                            << status);
-                continue;
-              }
-            }
-          }
-
-          // GFX clock
-          status = amdsmi_get_clock_info(processor_handle, AMDSMI_CLK_TYPE_GFX, &info);
-          if (status != AMDSMI_STATUS_SUCCESS) {
-            RDC_LOG(RDC_ERROR,
-                    "RdcConfigSettingsImpl::monitorSettings(); amdsmi_get_clk_freq for gfx failed: "
-                        << status);
-            continue;
-          }
-
-          auto gfx_clk_it = cached_settings.find(RDC_CFG_GFX_CLOCK_LIMIT);
-          if (gfx_clk_it != cached_settings.end()) {
-            cached_value = gfx_clk_it->second.target_value;
-            if (info.max_clk != cached_value) {
-              status = amdsmi_set_gpu_clk_limit(processor_handle, AMDSMI_CLK_TYPE_GFX,
-                                                CLK_LIMIT_MAX, cached_value);
-              if (status != AMDSMI_STATUS_SUCCESS) {
-                RDC_LOG(RDC_ERROR,
-                        "RdcConfigSettingsImpl::monitorSettings(); amdsmi_set_gpu_clk_limit failed "
-                        "for gfx clk: "
-                            << status);
-                continue;
-              }
-            }
-          }
+        // Each setting on its own: one that cannot be read or set does not keep the
+        // others from being checked.
+        for (const auto& setting_pair : group_pair.second) {
+          reapply_setting(processor_handle, setting_pair.second);
         }
       }
     }
@@ -173,39 +197,73 @@ void RdcConfigSettingsImpl::monitorSettings() {
   RDC_LOG(RDC_INFO, "RdcConfigSettingsImpl Monitoring Thread Stopped");
 }
 
-uint64_t RdcConfigSettingsImpl::wattsToMicrowatts(uint64_t watts) const {
-  return watts * 1'000'000;
-}
-
-uint64_t RdcConfigSettingsImpl::microwattsToWatts(int microwatts) const {
-  return microwatts / 1'000'000;
-}
-
-uint64_t RdcConfigSettingsImpl::mHzToHz(uint64_t mhz) const { return mhz * 1000000ULL; }
-
+// The group's GPUs. A group table that reports success without filling the info in
+// gives an empty group, and a count above what the info holds is an error.
 rdc_status_t RdcConfigSettingsImpl::get_group_info(rdc_gpu_group_t group_id,
                                                    rdc_group_info_t* rdc_group_info) {
+  *rdc_group_info = {};
   rdc_status_t status = group_settings_->rdc_group_gpu_get_info(group_id, rdc_group_info);
   if (status != RDC_ST_OK) {
     RDC_LOG(RDC_ERROR,
-            "RdcConfigSettingsImpl::rdc_config_set(): rdc_group_gpu_get_info failed : " << status);
+            "RdcConfigSettingsImpl::get_group_info(): rdc_group_gpu_get_info failed : " << status);
+    return status;
   }
-  return status;
+  if (rdc_group_info->count > RDC_GROUP_MAX_ENTITIES) {
+    RDC_LOG(RDC_ERROR, "RdcConfigSettingsImpl::get_group_info(): group "
+                           << group_id << " reports " << rdc_group_info->count
+                           << " GPUs, more than " << RDC_GROUP_MAX_ENTITIES);
+    return RDC_ST_UNKNOWN_ERROR;
+  }
+  return RDC_ST_OK;
 }
+
+RdcConfigSettingsImpl::RdcConfigSettingsImpl(const RdcGroupSettingsPtr& group_settings,
+                                             std::chrono::milliseconds monitor_period)
+    : group_settings_(group_settings), is_running_(false), monitor_period_(monitor_period) {}
 
 // Set configuration setting
 rdc_status_t RdcConfigSettingsImpl::rdc_config_set(rdc_gpu_group_t group_id,
                                                    rdc_config_setting_t setting) {
-  amdsmi_processor_handle processor_handle;
-  amdsmi_status_t amd_ret = AMDSMI_STATUS_SUCCESS;
+  // A client can send any number as the type. Compare it as an integer: loading a
+  // value outside rdc_config_type_t through the enum is undefined.
+  std::underlying_type_t<rdc_config_type_t> type;
+  std::memcpy(&type, &setting.type, sizeof(type));
+  if (type != RDC_CFG_GFX_CLOCK_LIMIT && type != RDC_CFG_MEMORY_CLOCK_LIMIT &&
+      type != RDC_CFG_POWER_LIMIT) {
+    RDC_LOG(RDC_ERROR, "RdcConfigSettingsImpl::rdc_config_set(): unknown setting type " << type);
+    return RDC_ST_BAD_PARAMETER;
+  }
+  // The power cap is set in microwatts, which must fit in 64 bits.
+  if (setting.type == RDC_CFG_POWER_LIMIT &&
+      setting.target_value > std::numeric_limits<uint64_t>::max() / kMicrowattsPerWatt) {
+    RDC_LOG(RDC_ERROR, "RdcConfigSettingsImpl::rdc_config_set(): power limit too large: "
+                           << setting.target_value);
+    return RDC_ST_BAD_PARAMETER;
+  }
+
+  // One change at a time, and none while the monitoring thread checks the GPUs.
+  std::lock_guard<std::mutex> lock(mutex_);
 
   // Get the group info for gpu_index list
   rdc_group_info_t rdc_group_info;
   if (get_group_info(group_id, &rdc_group_info) != RDC_ST_OK) {
     return RDC_ST_UNKNOWN_ERROR;
   }
+  // Nothing to apply the setting to, so do not cache it as if it succeeded.
+  if (rdc_group_info.count == 0) {
+    RDC_LOG(RDC_ERROR,
+            "RdcConfigSettingsImpl::rdc_config_set(): group " << group_id << " has no GPU");
+    return RDC_ST_BAD_PARAMETER;
+  }
 
-  for (unsigned int i = 0; i < rdc_group_info.count; ++i) {
+  // The GPUs this call changed, to put back if a later one fails, and the GPU
+  // that rejected the setting: before it writes a clock limit, amd-smi switches
+  // the GPU to the manual performance level, also when the write then fails.
+  std::vector<amdsmi_processor_handle> changed;
+  amdsmi_processor_handle rejecting = nullptr;
+  amdsmi_status_t amd_ret = AMDSMI_STATUS_SUCCESS;
+  for (uint32_t i = 0; i < rdc_group_info.count; ++i) {
+    amdsmi_processor_handle processor_handle;
     amd_ret = get_processor_handle_from_id(rdc_group_info.entity_ids[i], &processor_handle);
     if (amd_ret == AMDSMI_STATUS_NOT_FOUND) {
       // A GPU AMD SMI cannot identify stays in the group: the monitoring thread gives it the
@@ -219,47 +277,77 @@ rdc_status_t RdcConfigSettingsImpl::rdc_config_set(rdc_gpu_group_t group_id,
           "RdcConfigSettingsImpl::rdc_config_set(): Failed to get processor handle : " << amd_ret);
       break;
     }
-
-    if (setting.type == RDC_CFG_POWER_LIMIT) {
-      amd_ret = amdsmi_set_power_cap(processor_handle, 0, wattsToMicrowatts(setting.target_value));
-      if (amd_ret != AMDSMI_STATUS_SUCCESS) {
-        RDC_LOG(RDC_ERROR,
-                "RdcConfigSettingsImpl::rdc_config_set: amdsmi_set_power_cap failed : " << amd_ret);
-        break;
-      }
-    } else if (setting.type == RDC_CFG_MEMORY_CLOCK_LIMIT) {
-      amd_ret = amdsmi_set_gpu_clk_limit(processor_handle, AMDSMI_CLK_TYPE_MEM, CLK_LIMIT_MAX,
-                                         setting.target_value);
-      if (amd_ret != AMDSMI_STATUS_SUCCESS) {
-        RDC_LOG(
-            RDC_ERROR,
-            "RdcConfigSettingsImpl::rdc_config_set: amdsmi_set_gpu_clk_limit failed : " << amd_ret);
-        break;
-      }
-    } else if (setting.type == RDC_CFG_GFX_CLOCK_LIMIT) {
-      amd_ret = amdsmi_set_gpu_clk_limit(processor_handle, AMDSMI_CLK_TYPE_GFX, CLK_LIMIT_MAX,
-                                         setting.target_value);
-      if (amd_ret != AMDSMI_STATUS_SUCCESS) {
-        RDC_LOG(
-            RDC_ERROR,
-            "RdcConfigSettingsImpl::rdc_config_set: amdsmi_set_gpu_clk_limit failed : " << amd_ret);
-        break;
-      }
+    amd_ret = apply_setting(processor_handle, setting);
+    if (amd_ret != AMDSMI_STATUS_SUCCESS) {
+      RDC_LOG(RDC_ERROR, "RdcConfigSettingsImpl::rdc_config_set(): Failed to set setting "
+                             << type << " : " << amd_ret);
+      rejecting = processor_handle;
+      break;
     }
+    changed.push_back(processor_handle);
   }
 
-  if (amd_ret == AMDSMI_STATUS_SUCCESS) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    cached_group_settings_[group_id][setting.type] = setting;
-    if (!is_running_) {
-      is_running_ = true;
-      monitor_thread_ = std::thread(&RdcConfigSettingsImpl::monitorSettings, this);
-      RDC_LOG(RDC_INFO, "RdcConfigSettingsImpl Monitoring Thread Started");
+  if (amd_ret != AMDSMI_STATUS_SUCCESS) {
+    // Put the GPUs that took the setting back: to the group's setting of this type
+    // if it has one, else to the default.
+    const bool clock = setting.type != RDC_CFG_POWER_LIMIT;
+    const rdc_config_setting_t* previous = nullptr;
+    const rdc_config_setting_t* other_clock = nullptr;  // the group's limit of the other clock
+    auto group_iter = cached_group_settings_.find(group_id);
+    if (group_iter != cached_group_settings_.end()) {
+      auto setting_iter = group_iter->second.find(setting.type);
+      if (setting_iter != group_iter->second.end()) {
+        previous = &setting_iter->second;
+      }
+      auto other_iter = group_iter->second.find(setting.type == RDC_CFG_GFX_CLOCK_LIMIT
+                                                    ? RDC_CFG_MEMORY_CLOCK_LIMIT
+                                                    : RDC_CFG_GFX_CLOCK_LIMIT);
+      if (clock && other_iter != group_iter->second.end()) {
+        other_clock = &other_iter->second;
+      }
     }
-    return RDC_ST_OK;
-  } else {
+    for (auto it = changed.rbegin(); it != changed.rend(); ++it) {
+      amdsmi_status_t undo = AMDSMI_STATUS_SUCCESS;
+      if (previous != nullptr) {
+        undo = apply_setting(*it, *previous);
+      } else if (!clock) {
+        undo = reset_setting(*it, setting.type);
+      } else {
+        // The GPU took the limit at the manual level, even a limit at the top
+        // level. The automatic level also puts the other clock's limit back to
+        // the top, so the group's limit of that clock is set again.
+        undo = amdsmi_set_gpu_perf_level(*it, AMDSMI_DEV_PERF_LEVEL_AUTO);
+        if (undo == AMDSMI_STATUS_SUCCESS && other_clock != nullptr) {
+          undo = apply_setting(*it, *other_clock);
+        }
+      }
+      if (undo != AMDSMI_STATUS_SUCCESS) {
+        RDC_LOG(RDC_ERROR,
+                "RdcConfigSettingsImpl::rdc_config_set(): Failed to put a GPU back : " << undo);
+      }
+    }
+    // The GPU that rejected a clock limit kept its limits, but can be at the
+    // manual level now. With a clock limit of the group, it was at that level
+    // before; else it goes back to the automatic level.
+    if (rejecting != nullptr && clock && previous == nullptr && other_clock == nullptr) {
+      const amdsmi_status_t undo = amdsmi_set_gpu_perf_level(rejecting, AMDSMI_DEV_PERF_LEVEL_AUTO);
+      if (undo != AMDSMI_STATUS_SUCCESS) {
+        RDC_LOG(RDC_ERROR,
+                "RdcConfigSettingsImpl::rdc_config_set(): Failed to put a GPU back : " << undo);
+      }
+    }
     return RDC_ST_UNKNOWN_ERROR;
   }
+
+  cached_group_settings_[group_id][setting.type] = setting;
+  if (!is_running_) {
+    is_running_ = true;
+    monitor_thread_ = std::thread(&RdcConfigSettingsImpl::monitorSettings, this);
+    RDC_LOG(RDC_INFO, "RdcConfigSettingsImpl Monitoring Thread Started");
+  }
+  // An idle monitoring thread waits for a setting.
+  cv_.notify_all();
+  return RDC_ST_OK;
 }
 
 // Display user configured settings
@@ -294,11 +382,8 @@ rdc_status_t RdcConfigSettingsImpl::rdc_config_get(rdc_gpu_group_t group_id,
 
 // Clear cache of user configured settings
 rdc_status_t RdcConfigSettingsImpl::rdc_config_clear(rdc_gpu_group_t group_id) {
-  amdsmi_status_t amd_ret = AMDSMI_STATUS_SUCCESS;
-  amdsmi_processor_handle processor_handle;
-
   // Check if group_id has any cached settings
-  std::unique_lock<std::mutex> lock(mutex_);
+  std::lock_guard<std::mutex> lock(mutex_);
   auto group_iter = cached_group_settings_.find(group_id);
   if (group_iter == cached_group_settings_.end()) {
     // No cached settings for this group, nothing to clear
@@ -309,113 +394,33 @@ rdc_status_t RdcConfigSettingsImpl::rdc_config_clear(rdc_gpu_group_t group_id) {
   if (get_group_info(group_id, &rdc_group_info) != RDC_ST_OK) {
     return RDC_ST_UNKNOWN_ERROR;
   }
-  // Iterate over each GPU in the group and clear only the cached settings
-  for (unsigned int i = 0; i < rdc_group_info.count; ++i) {
-    amd_ret = get_processor_handle_from_id(rdc_group_info.entity_ids[i], &processor_handle);
-    if (amd_ret == AMDSMI_STATUS_NOT_FOUND) {
-      amd_ret = AMDSMI_STATUS_SUCCESS;  // a GPU AMD SMI cannot identify has no handle to reset
+  // Reset each cached setting on each GPU of the group: one that fails does not keep
+  // the others from being reset.
+  amdsmi_status_t amd_ret = AMDSMI_STATUS_SUCCESS;
+  for (uint32_t i = 0; i < rdc_group_info.count; ++i) {
+    amdsmi_processor_handle processor_handle;
+    amdsmi_status_t status =
+        get_processor_handle_from_id(rdc_group_info.entity_ids[i], &processor_handle);
+    if (status == AMDSMI_STATUS_NOT_FOUND) {
+      continue;  // a GPU AMD SMI cannot identify has no handle to reset
+    }
+    if (status != AMDSMI_STATUS_SUCCESS) {
+      RDC_LOG(
+          RDC_ERROR,
+          "RdcConfigSettingsImpl::rdc_config_clear(): Failed to get processor handle : " << status);
+      amd_ret = status;
       continue;
     }
-    if (amd_ret != AMDSMI_STATUS_SUCCESS) {
-      RDC_LOG(RDC_ERROR,
-              "RdcConfigSettingsImpl::rdc_config_clear(): Failed to get processor handle : "
-                  << amd_ret);
-      break;
-    }
-
-    // Reset power cap if it was set
-    if (group_iter->second.find(RDC_CFG_POWER_LIMIT) != group_iter->second.end()) {
-      amdsmi_power_cap_info_t cap_info = {};
-      amd_ret = amdsmi_get_power_cap_info(processor_handle, 0, &cap_info);
-      if (amd_ret == AMDSMI_STATUS_SUCCESS && cap_info.power_cap != cap_info.default_power_cap) {
-        amd_ret = amdsmi_set_power_cap(processor_handle, 0, cap_info.default_power_cap);
-        if (amd_ret != AMDSMI_STATUS_SUCCESS) {
-          RDC_LOG(RDC_ERROR, "RdcConfigSettingsImpl::rdc_config_clear: Failed to reset power cap : "
-                                 << amd_ret);
-          break;
-        }
-      }
-    }
-
-    // Reset GFX clock limit if it was set
-    if (group_iter->second.find(RDC_CFG_GFX_CLOCK_LIMIT) != group_iter->second.end()) {
-      amdsmi_frequencies_t freqs = {};
-      amdsmi_clk_info_t info = {};
-
-      amd_ret = amdsmi_get_clk_freq(processor_handle, AMDSMI_CLK_TYPE_GFX, &freqs);
-      if (amd_ret != AMDSMI_STATUS_SUCCESS) {
-        RDC_LOG(RDC_ERROR,
-                "RdcConfigSettingsImpl::rdc_config_clear: Failed to get GFX freq: " << amd_ret);
-        break;
-      }
-
-      amd_ret = amdsmi_get_clock_info(processor_handle, AMDSMI_CLK_TYPE_GFX, &info);
-      if (amd_ret != AMDSMI_STATUS_SUCCESS) {
-        RDC_LOG(RDC_ERROR,
-                "RdcConfigSettingsImpl::rdc_config_clear: Failed to get GFX info: " << amd_ret);
-        break;
-      }
-
-      uint64_t curr = mHzToHz(info.max_clk);
-      uint64_t maxf = freqs.frequency[freqs.num_supported - 1];
-      if (curr != maxf) {
-        amd_ret = amdsmi_set_gpu_perf_level(processor_handle, AMDSMI_DEV_PERF_LEVEL_AUTO);
-        if (amd_ret != AMDSMI_STATUS_SUCCESS) {
-          RDC_LOG(RDC_ERROR,
-                  "RdcConfigSettingsImpl::rdc_config_clear: Failed to reset GFX clock limit : "
-                      << amd_ret);
-          break;
-        }
-      }
-    }
-
-    // Reset memory clock limit if it was set
-    if (group_iter->second.find(RDC_CFG_MEMORY_CLOCK_LIMIT) != group_iter->second.end()) {
-      amdsmi_frequencies_t freqs = {};
-      amdsmi_clk_info_t info = {};
-
-      amd_ret = amdsmi_get_clk_freq(processor_handle, AMDSMI_CLK_TYPE_MEM, &freqs);
-      if (amd_ret != AMDSMI_STATUS_SUCCESS) {
-        RDC_LOG(RDC_ERROR,
-                "RdcConfigSettingsImpl::rdc_config_clear: Failed to get MEM freq: " << amd_ret);
-        break;
-      }
-
-      amd_ret = amdsmi_get_clock_info(processor_handle, AMDSMI_CLK_TYPE_MEM, &info);
-      if (amd_ret != AMDSMI_STATUS_SUCCESS) {
-        RDC_LOG(RDC_ERROR,
-                "RdcConfigSettingsImpl::rdc_config_clear: Failed to get MEM info: " << amd_ret);
-        break;
-      }
-
-      uint64_t curr = mHzToHz(info.max_clk);
-      uint64_t maxf = freqs.frequency[freqs.num_supported - 1];
-      if (curr != maxf) {
-        amd_ret = amdsmi_set_gpu_perf_level(processor_handle, AMDSMI_DEV_PERF_LEVEL_AUTO);
-        if (amd_ret != AMDSMI_STATUS_SUCCESS) {
-          RDC_LOG(RDC_ERROR,
-                  "RdcConfigSettingsImpl::rdc_config_clear: Failed to reset memory clock limit:"
-                      << amd_ret);
-          break;
-        }
+    for (const auto& setting_pair : group_iter->second) {
+      status = reset_setting(processor_handle, setting_pair.first);
+      if (status != AMDSMI_STATUS_SUCCESS) {
+        amd_ret = status;
       }
     }
   }
 
-  cached_group_settings_.erase(group_id);
-
-  if (cached_group_settings_.empty()) {
-    is_running_ = false;
-    cv_.notify_all();
-    lock.unlock();
-
-    if (monitor_thread_.joinable()) {
-      monitor_thread_.join();  // Wait for the thread to finish
-    }
-
-    RDC_LOG(RDC_INFO, "RdcConfigSettingsImpl Monitoring Thread Stopped");
-  }
-
+  // The monitoring thread stops checking the group and waits for the next setting.
+  cached_group_settings_.erase(group_iter);
   return (amd_ret == AMDSMI_STATUS_SUCCESS) ? RDC_ST_OK : RDC_ST_UNKNOWN_ERROR;
 }
 

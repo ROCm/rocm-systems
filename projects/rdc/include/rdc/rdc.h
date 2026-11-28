@@ -1905,8 +1905,17 @@ rdc_status_t rdc_link_status_get(rdc_handle_t p_rdc_handle, rdc_link_status_t* r
  *  @brief Set one configuration
  *
  *  @details Set the given configuration to all nodes belong to the given group.
- *  A GPU of the group that AMD SMI cannot identify (see rdc_device_get_all())
- *  gets the configuration within about a minute after AMD SMI identifies it.
+ *  Once a minute, RDC sets it again on each GPU of the group that no longer has
+ *  it, until rdc_config_clear(). When a GPU of the group rejects the setting, the
+ *  GPUs that took it get back the group's previous setting of that type, or
+ *  their default when the group had none, and the group's settings stay as
+ *  they were. A clock limit's default is the automatic performance level, after
+ *  which a GPU gets the group's limit of the other clock again. amd-smi switches
+ *  a GPU to the manual level before it writes a clock limit, so a GPU that
+ *  rejects one goes back to the automatic level too when the group has no
+ *  clock limit. On a GPU of the group that AMD SMI cannot identify (see
+ *  rdc_device_get_all()), RDC tries to set the configuration within about a
+ *  minute after AMD SMI identifies it.
  *
  *  @param[in] p_rdc_handle Node handle
  *
@@ -1915,6 +1924,11 @@ rdc_status_t rdc_link_status_get(rdc_handle_t p_rdc_handle, rdc_link_status_t* r
  *  @param[in] setting Configuration to be set for the nodes
  *
  *  @retval RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_BAD_PARAMETER The setting type is not one of
+ *  ::rdc_config_type_t, the group has no GPU, or the power limit in microwatts
+ *  does not fit in 64 bits.
+ *  @retval ::RDC_ST_UNKNOWN_ERROR The group cannot be read, or a GPU of the group
+ *  rejected the setting.
  */
 rdc_status_t rdc_config_set(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
                             rdc_config_setting_t setting);
@@ -1938,13 +1952,20 @@ rdc_status_t rdc_config_get(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
 /**
  *  @brief Clear the setting
  *
- *  @details Clear all the configurations for the nodes belongs to the given group
+ *  @details Clear all the configurations for the nodes belongs to the given group.
+ *  Each GPU of the group gets the default of each setting back: its default power
+ *  cap, and the automatic performance level for a clock limit. A GPU that fails
+ *  does not stop the others, and the group's settings are removed in any case
+ *  once the group has been read.
  *
  *  @param[in] p_rdc_handle Node handle
  *
  *  @param[in] group_id Group id to which nodes belong
  *
- *  @retval RDC_ST_OK is returned upon successful call.
+ *  @retval RDC_ST_OK is returned upon successful call, and for a group with no
+ *  setting.
+ *  @retval ::RDC_ST_UNKNOWN_ERROR The group cannot be read (its settings stay), or
+ *  a GPU of the group could not be reset.
  */
 rdc_status_t rdc_config_clear(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id);
 

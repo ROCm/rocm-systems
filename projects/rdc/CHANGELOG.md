@@ -124,6 +124,15 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - `rdc_stop_embedded()` after `rdc_config_set()` no longer aborts with "terminate called without an active exception".
 
+- `rdci config --set` no longer reports success when the setting is rejected.
+  - An empty group, an unknown setting type and a power limit too large to apply are rejected, and when one GPU of the group rejects a setting, the GPUs that already took it get their previous setting back. A clock limit that is put back keeps the group's limit of the other clock, and a GPU that rejects a clock limit goes back to the automatic performance level when the group has no clock limit.
+
+- `rdci config --clear` no longer stops at the first GPU it cannot reset. It resets the other GPUs of the group and reports the failure.
+
+- `rdcd` now restores a configured clock limit that a GPU lost even when it cannot read that GPU's power cap.
+
+- `rdcd` no longer stops unexpectedly when configuration settings are set and cleared at the same time.
+
 - `rdcd` names the owner of a lock file that it cannot open, instead of reporting "Numerical result out of range". It no longer reports "Bad file descriptor" for a lock file that does not exist, and prints the path of a lock file that it cannot read.
 
 - `rdcd` no longer follows a symbolic link at its lock file path or writes into a file that belongs to another user or has another name, and a root `rdcd` no longer refuses to start because of a `/tmp/rdcd.lock` that another user created and locked. For a lock file it refuses to use, `rdcd` exits with an error that names it.
