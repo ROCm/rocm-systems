@@ -26,6 +26,7 @@ typedef struct {
   API(hsa_code_object_reader_create_from_memory)
   API(hsa_code_object_reader_destroy)
   API(hsa_executable_create)
+  API(hsa_executable_create_alt)
   API(hsa_executable_load_agent_code_object)
   API(hsa_executable_freeze)
   API(hsa_executable_get_symbol_by_name)
@@ -69,6 +70,7 @@ static void load_api(void *library) {
   LOAD(hsa_code_object_reader_create_from_memory);
   LOAD(hsa_code_object_reader_destroy);
   LOAD(hsa_executable_create);
+  LOAD(hsa_executable_create_alt);
   LOAD(hsa_executable_load_agent_code_object);
   LOAD(hsa_executable_freeze);
   LOAD(hsa_executable_get_symbol_by_name);
@@ -157,6 +159,23 @@ int main(int argc, char **argv) {
   void *code = read_file(argv[2], &code_size);
   hsa_code_object_reader_t reader;
   check(api.hsa_code_object_reader_create_from_memory(code, code_size, &reader), "reader");
+  const hsa_profile_t profiles[] = {HSA_PROFILE_BASE, HSA_PROFILE_FULL};
+  const hsa_default_float_rounding_mode_t roundings[] = {
+      HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT,
+      HSA_DEFAULT_FLOAT_ROUNDING_MODE_ZERO,
+      HSA_DEFAULT_FLOAT_ROUNDING_MODE_NEAR};
+  for (size_t profile = 0; profile < sizeof(profiles) / sizeof(profiles[0]); ++profile) {
+    for (size_t rounding = 0; rounding < sizeof(roundings) / sizeof(roundings[0]); ++rounding) {
+      hsa_executable_t policy_executable;
+      check(api.hsa_executable_create_alt(profiles[profile], roundings[rounding],
+          NULL, &policy_executable), "policy executable create");
+      hsa_loaded_code_object_t policy_loaded;
+      check(api.hsa_executable_load_agent_code_object(policy_executable, gpu,
+          reader, NULL, &policy_loaded), "policy code object load");
+      check(api.hsa_executable_freeze(policy_executable, NULL), "policy executable freeze");
+      check(api.hsa_executable_destroy(policy_executable), "policy executable destroy");
+    }
+  }
   hsa_profile_t profile;
   check(api.hsa_agent_get_info(gpu, HSA_AGENT_INFO_PROFILE, &profile), "GPU profile");
   hsa_executable_t executable;
