@@ -133,6 +133,9 @@ install(
 #Package: rocm-opencl,rocm-opencl-dev/devel,rocm-ocl-icd
 
 set(BUILD_DIR ${CMAKE_CURRENT_BINARY_DIR}/packages/opencl)
+set(OPENCL_ICD_INSTALL_PATH "${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_SYSCONFDIR}/OpenCL/vendors/${OPENCL_AMD_ICD_FILE}")
+get_filename_component(OPENCL_ROCM_PREFIX_NAME "${CPACK_PACKAGING_INSTALL_PREFIX}" NAME)
+set(OPENCL_ICD_SYSTEM_FILE "amdocl64_${OPENCL_ROCM_PREFIX_NAME}.icd")
 configure_file(packaging/rocm-opencl.postinst ${BUILD_DIR}/postinst @ONLY)
 configure_file(packaging/rocm-opencl.postrm ${BUILD_DIR}/postrm @ONLY)
 configure_file(packaging/rocm-opencl.rpm_post ${BUILD_DIR}/rpm_post @ONLY)

@@ -2,14 +2,27 @@
 
 set -e
 
+ICD_INSTALL_PATH=@OPENCL_ICD_INSTALL_PATH@
+ICD_SYSTEM_PATH=/@CMAKE_INSTALL_SYSCONFDIR@/OpenCL/vendors/@OPENCL_ICD_SYSTEM_FILE@
+
 rm_ldconfig() {
   ldconfig
 }
 
+rm_icd_registration() {
+  if [ -L "${ICD_SYSTEM_PATH}" ] && [ "$(readlink "${ICD_SYSTEM_PATH}")" = "${ICD_INSTALL_PATH}" ]; then
+    rm "${ICD_SYSTEM_PATH}"
+  fi
+}
+
 case "$1" in
   purge)
+    rm_icd_registration
   ;;
   remove | upgrade )
+    if [ "$1" = "remove" ]; then
+      rm_icd_registration
+    fi
     rm_ldconfig
   ;;
   *)

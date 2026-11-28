@@ -1,4 +1,10 @@
-if [ $1 -eq 0 ]; then
+ICD_INSTALL_PATH=@OPENCL_ICD_INSTALL_PATH@
+ICD_SYSTEM_PATH=/@CMAKE_INSTALL_SYSCONFDIR@/OpenCL/vendors/@OPENCL_ICD_SYSTEM_FILE@
+
+if [ "$1" -eq 0 ]; then
+  if [ -L "${ICD_SYSTEM_PATH}" ] && [ "$(readlink "${ICD_SYSTEM_PATH}")" = "${ICD_INSTALL_PATH}" ]; then
+    rm "${ICD_SYSTEM_PATH}"
+  fi
   # ldconfig during remove/uninstall operation. No ldconfig during upgrade
   ldconfig
 fi
