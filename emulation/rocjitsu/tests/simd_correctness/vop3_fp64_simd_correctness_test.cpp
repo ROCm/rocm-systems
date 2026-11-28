@@ -242,20 +242,12 @@ void check_all_mods(const Case &c, uint64_t exec) {
 }
 
 TEST(Vop3Fp64SimdCorrectness, FullExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   for (const auto &c : kCases) {
     check_all_mods(c, /*exec=*/~0ULL);
   }
 }
 
 TEST(Vop3Fp64SimdCorrectness, PartialExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   for (const auto &c : kCases) {
     check_case(c, /*abs=*/0, /*neg=*/0, /*omod=*/0, /*clamp=*/0, /*exec=*/0xA5A5'F0F0'1234'8001ULL);
   }

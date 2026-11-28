@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/graphics/bvh_intersection.h"
+#include "rocjitsu/vm/graphics/bvh_rounding.h"
 
 #include "rocjitsu/isa/arch/amdgpu/shared/buffer_address.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/fp_rounding.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/image_address.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
@@ -146,29 +147,70 @@ BvhResultWords triangle(const Node &node, const BvhIntersectionAccess &resource,
   std::array<float, 4> bary{};
   float numerator, denominator;
   std::array<Vector3, 3> projected;
+#if RJ_HOST_HAS_AVX512F || RJ_HOST_HAS_AVX2
   {
-    const fp_mode::detail::ScopedFenv toward_zero(3);
+    using namespace bvh_rounding;
+    // Process the three vertices together, retaining each FP32 rounding point.
+    const unsigned first = (dominant_axis + 1) % 3, second = (dominant_axis + 2) % 3;
+    const auto coordinate = [&](unsigned axis) {
+      return subtract(pack(vertex0[axis], vertex1[axis], vertex2[axis]),
+                      broadcast(ray.origin[axis]));
+    };
+    const auto depth = coordinate(dominant_axis);
+    const auto direction = broadcast(ray.direction[dominant_axis]);
+    const auto x = subtract(multiply(coordinate(first), direction),
+                            multiply(depth, broadcast(ray.direction[first])));
+    const auto y = subtract(multiply(coordinate(second), direction),
+                            multiply(depth, broadcast(ray.direction[second])));
+    const auto edge = subtract(
+        multiply(permute<_MM_SHUFFLE(3, 1, 0, 2)>(x), permute<_MM_SHUFFLE(3, 0, 2, 1)>(y)),
+        multiply(permute<_MM_SHUFFLE(3, 1, 0, 2)>(y), permute<_MM_SHUFFLE(3, 0, 2, 1)>(x)));
+    const auto weights = multiply(edge, direction);
+    const auto distances = multiply(edge, depth);
+    const auto pairs = interleave_low(distances, weights);
+    const auto totals = add(add(pairs, permute<_MM_SHUFFLE(3, 2, 3, 2)>(pairs)),
+                            interleave_high(distances, weights));
+    float result[4], px[4], py[4], pz[4];
+    store(result, totals);
+    numerator = result[0];
+    denominator = result[1];
+    store(bary.data(), weights);
+    store(px, x);
+    store(py, y);
+    store(pz, depth);
+    for (unsigned i = 0; i < 3; ++i) {
+      projected[i] = {px[i], py[i], pz[i]};
+    }
+  }
+#else
+  {
+    // This unit rounds each FP32 step toward zero, independently of MODE.
+    const auto add = [](float a, float b) { return fp_mode::detail::add_f32(a, b, 3); };
+    const auto sub = [](float a, float b) { return fp_mode::detail::subtract_f32(a, b, 3); };
+    const auto mul = [](float a, float b) { return fp_mode::detail::multiply_f32(a, b, 3); };
     const unsigned first_axis = (dominant_axis + 1) % 3, second_axis = (dominant_axis + 2) % 3;
     const auto project = [&](const Vector3 &point) -> Vector3 {
-      const float depth = point[dominant_axis] - ray.origin[dominant_axis];
-      return {(point[first_axis] - ray.origin[first_axis]) * ray.direction[dominant_axis] -
-                  depth * ray.direction[first_axis],
-              (point[second_axis] - ray.origin[second_axis]) * ray.direction[dominant_axis] -
-                  depth * ray.direction[second_axis],
-              depth};
+      const float depth = sub(point[dominant_axis], ray.origin[dominant_axis]);
+      return {
+          sub(mul(sub(point[first_axis], ray.origin[first_axis]), ray.direction[dominant_axis]),
+              mul(depth, ray.direction[first_axis])),
+          sub(mul(sub(point[second_axis], ray.origin[second_axis]), ray.direction[dominant_axis]),
+              mul(depth, ray.direction[second_axis])),
+          depth};
     };
     projected = {project(vertex0), project(vertex1), project(vertex2)};
     std::array<float, 3> distances;
     for (unsigned vertex_index = 0; vertex_index < 3; ++vertex_index) {
       const auto &first = projected[(vertex_index + 2) % 3];
       const auto &second = projected[(vertex_index + 1) % 3];
-      const float edge = first[0] * second[1] - first[1] * second[0];
-      bary[vertex_index] = edge * ray.direction[dominant_axis];
-      distances[vertex_index] = edge * projected[vertex_index][2];
+      const float edge = sub(mul(first[0], second[1]), mul(first[1], second[0]));
+      bary[vertex_index] = mul(edge, ray.direction[dominant_axis]);
+      distances[vertex_index] = mul(edge, projected[vertex_index][2]);
     }
-    numerator = (distances[0] + distances[1]) + distances[2];
-    denominator = (bary[0] + bary[1]) + bary[2];
+    numerator = add(add(distances[0], distances[1]), distances[2]);
+    denominator = add(add(bary[0], bary[1]), bary[2]);
   }
+#endif
   // W7900 uses FP32 edge signs for coverage. When an edge rounds to zero,
   // the top-left rule uses the same projected endpoints. For a horizontal
   // edge the dominant ray direction determines the orientation of X.
@@ -311,7 +353,6 @@ void complete_bvh_intersection(Wavefront &wf, ComputeUnitCore &cu, const VectorM
   if (!cu.owns_vgpr_range(wf, state.dst_reg_base, 4)) {
     return;
   }
-  const fp_mode::detail::ScopedFenv environment(0);
   for (uint64_t mask = state.exec_mask; mask; mask &= mask - 1) {
     const unsigned lane = std::countr_zero(mask);
     BvhResultWords result{kInvalidNode, kInvalidNode, kInvalidNode, kInvalidNode};

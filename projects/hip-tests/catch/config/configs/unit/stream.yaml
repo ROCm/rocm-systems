@@ -391,6 +391,9 @@ stream:
   Unit_hipExtStreamCreateWithCUMask_AllCUsMasked:
     <<: *level_default
     tags: [properties, P0]
+  Unit_hipExtStreamCreateWithCUMask_TeardownWithTracer:
+    <<: *level_default
+    tags: [lifecycle]
   Unit_hipExtStreamCreateWithCUMask_NegTst:
     <<: *level_default
     disabled:
@@ -501,6 +504,12 @@ stream:
     disabled:
       targets: [amd_windows, nvidia]
       reason: "AIRUNTIME-2892 - gfx1201 (amd_windows) fails: result == 0x1234 -> 0 == 4660 (0x1234); needs to be re-triaged on nvidia"
+    tags: [synchronization, memory]
+  Unit_hipStreamWriteValue32_Capture_RecordsNode:
+    <<: *level_default
+    disabled:
+      targets: [amd_windows, nvidia]
+      reason: "AIRUNTIME-2892 - batch memory operations are not implemented on amd_windows (PAL) or with hipMallocSignalMemory on nvidia, as for Unit_hipStreamBatchMemOp_Capture."
     tags: [synchronization, memory]
   Unit_hipStreamSetAttribute_hipStreamGetAttribute_Basic:
     <<: *level_default

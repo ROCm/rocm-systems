@@ -61,7 +61,8 @@ if(UNIX)
   set(AMD_TEST_SRC ${AMD_TEST_SRC}
        RtcFunctions.cpp
        RtcUtility.cpp
-       hiprtcComplrOptnTesting.cc)
+       hiprtcComplrOptnTesting.cc
+       hiprtcUnnamedProgram.cc)
 endif()
 
 if(HIP_PLATFORM MATCHES "nvidia")

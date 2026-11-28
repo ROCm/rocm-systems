@@ -305,17 +305,17 @@ struct CvtScaleSelection {
     return {base, pair, 1};
   }
 
-  // Table 37. Bit 3 selects Block16. In Block32, bit 0 selects the scale half-wave
-  // and bits 1 and 2 contribute 2 and 1 to the byte index shared by both data halves.
-  // In Block16, bit 1 selects both the scale half-wave and byte pair. Bit 0 is
-  // ignored. Selectors 12..15 are reserved.
+  // Bit 3 selects Block16. Bit 0 selects the scale half-wave in both modes.
+  // In Block16, bit 1 chooses byte pair 0/1 or 2/3. Table 37 lists the wrong
+  // scale half-wave for selectors 9 and 10. In Block32, bits 1 and 2 contribute
+  // 2 and 1 to the byte index shared by both data halves. Selectors 12..15 are reserved.
   static constexpr CvtScaleSelection f8(unsigned opsel) {
+    const auto base = static_cast<uint8_t>((opsel & 1) * 16);
+    const auto pair = static_cast<uint8_t>(opsel & 2);
     if (opsel & 8) {
-      const unsigned half = (opsel >> 1) & 1;
-      return {static_cast<uint8_t>(half * 16), static_cast<uint8_t>(half * 2), 1};
+      return {base, pair, 1};
     }
-    return {static_cast<uint8_t>((opsel & 1) * 16),
-            static_cast<uint8_t>((opsel & 2) | ((opsel >> 2) & 1)), 0};
+    return {base, static_cast<uint8_t>(pair | ((opsel >> 2) & 1)), 0};
   }
 
   constexpr unsigned lane(unsigned data_lane) const { return (data_lane & ~16u) | lane_base; }

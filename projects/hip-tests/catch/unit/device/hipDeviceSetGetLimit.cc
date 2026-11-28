@@ -7,6 +7,8 @@
 #include <hip_test_common.hh>
 #include <hip_test_process.hh>
 
+#include <vector>
+
 /**
  * @addtogroup hipDeviceSetLimit hipDeviceSetLimit
  * @{
@@ -39,6 +41,58 @@ void DeviceSetLimitTest(hipLimit_t limit) {
  *  - HIP_VERSION >= 5.3
  */
 HIP_TEST_CASE(Unit_hipDeviceSetLimit_Positive_StackSize) { DeviceSetLimitTest(hipLimitStackSize); }
+
+// Every thread fills its own dynamically sized stack array, so its stack use is only known at
+// launch, and threads whose stacks overlap corrupt each other's sums
+static __global__ void FillDynamicStack(int* sums, int count) {
+  const int tid = threadIdx.x;
+  volatile int* data = static_cast<int*>(__builtin_alloca(count * sizeof(int)));
+  for (int i = 0; i < count; ++i) {
+    data[i] = i + tid;
+  }
+  int total = 0;
+  for (int i = 0; i < count; ++i) {
+    total += data[i];
+  }
+  sums[tid] = total;
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - A kernel with a dynamic stack gets the stack size set with hipDeviceSetLimit, also above
+ *    16 KiB: every thread of a block fills a 64 KiB dynamic stack array with a 128 KiB limit,
+ *    and each result is checked.
+ * Test source
+ * ------------------------
+ *  - unit/device/hipDeviceSetGetLimit.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.14
+ */
+HIP_TEST_CASE(Unit_hipDeviceSetLimit_Positive_LargeDynamicStack) {
+  constexpr int kCount = 16 * 1024;  // 64 KiB
+  constexpr size_t kStackLimit = 96 * 1024;  // Below the gfx9 maximum (~127 KiB)
+  size_t old_limit = 0;
+  HIP_CHECK(hipDeviceGetLimit(&old_limit, hipLimitStackSize));
+  HIP_CHECK(hipDeviceSetLimit(hipLimitStackSize, kStackLimit));
+
+  constexpr int kThreads = 256;
+  int* sums = nullptr;
+  HIP_CHECK(hipMalloc(&sums, kThreads * sizeof(int)));
+  HIP_CHECK(hipMemset(sums, 0, kThreads * sizeof(int)));
+  hipLaunchKernelGGL(FillDynamicStack, dim3(1), dim3(kThreads), 0, 0, sums, kCount);
+  HIP_CHECK(hipGetLastError());
+  std::vector<int> result(kThreads);
+  HIP_CHECK(hipMemcpy(result.data(), sums, kThreads * sizeof(int), hipMemcpyDeviceToHost));
+  for (int tid = 0; tid < kThreads; ++tid) {
+    INFO("thread " << tid);
+    REQUIRE(result[tid] == kCount * (kCount - 1) / 2 + kCount * tid);
+  }
+
+  HIP_CHECK(hipFree(sums));
+  HIP_CHECK(hipDeviceSetLimit(hipLimitStackSize, old_limit));
+}
 
 #if HT_NVIDIA
 

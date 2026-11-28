@@ -11,6 +11,7 @@
 
 #include "compute_unit_test_util.h"
 #include "decode_test_util.h"
+#include "float_format_reference.h"
 #include "mma_test_util.h"
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/code/analysis/def_use_chain.h"
@@ -65,7 +66,6 @@
 #include "rocjitsu/vm/plugins/execution_plugin.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 #include "test_encodings_util.h"
-#include "util/data_types.h"
 #include "util/except.h"
 #include "util/simd.h"
 #include "util/simd_test_hooks.h"
@@ -5911,9 +5911,6 @@ TEST(Rdna4True16Vop3Test, AddF16DppPreservesMaskedDestinationHalf) {
 }
 
 TEST(Rdna4True16Vop3Test, UnaryDpp16ScalarAndSimdMatchMaskedLaneRouting) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-  }
 
   constexpr uint32_t kWaveSize = 32;
   constexpr uint32_t kSrc = 0;
@@ -6002,9 +5999,6 @@ TEST(Rdna4True16Vop3Test, UnaryDpp16ScalarAndSimdMatchMaskedLaneRouting) {
 }
 
 TEST(Rdna4True16Vop3Test, VopcDpp16ScalarAndSimdMatchMaskedLaneRouting) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-  }
 
   constexpr uint32_t kWaveSize = 32;
   constexpr uint32_t kSrc0 = 0;
@@ -6098,9 +6092,6 @@ TEST(Rdna4True16Vop3Test, VopcDpp16ScalarAndSimdMatchMaskedLaneRouting) {
 }
 
 TEST(Rdna4True16Vop3Test, UnaryDpp8ScalarAndSimdMatchPermutedLanes) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-  }
 
   constexpr uint32_t kWaveSize = 32;
   constexpr uint32_t kSrc = 0;
@@ -8844,8 +8835,10 @@ TEST(Gfx1250CvtScaleTest, UnpackSelectsE8M0ScaleLaneAndByte) {
   };
   constexpr Selection f4_f6[] = {{0, 0, 1}, {16, 0, 1}, {0, 2, 3}, {16, 2, 3},
                                  {0, 0, 2}, {16, 0, 2}, {0, 1, 3}, {16, 1, 3}};
-  constexpr Selection f8[] = {{0, 0, 0}, {16, 0, 0}, {0, 2, 2}, {16, 2, 2}, {0, 1, 1},  {16, 1, 1},
-                              {0, 3, 3}, {16, 3, 3}, {0, 0, 1}, {0, 0, 1},  {16, 2, 3}, {16, 2, 3}};
+  // In hardware, Block16 selectors 9 and 10 read the opposite scale half-wave
+  // from the one printed in Table 37.
+  constexpr Selection f8[] = {{0, 0, 0}, {16, 0, 0}, {0, 2, 2}, {16, 2, 2}, {0, 1, 1}, {16, 1, 1},
+                              {0, 3, 3}, {16, 3, 3}, {0, 0, 1}, {16, 0, 1}, {0, 2, 3}, {16, 2, 3}};
   struct Case {
     uint16_t opcode;
     // Every packed element is 1.0 in the source format.

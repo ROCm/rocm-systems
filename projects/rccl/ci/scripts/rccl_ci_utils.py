@@ -379,6 +379,9 @@ def parse_junit_xml(xml_path: Path) -> dict:
     failed_tests = []
     skipped_tests = []
     error_details = []
+    # One record per testcase, for callers that need the class or file a
+    # test came from (the same method name can occur in several files).
+    cases = []
     tests_run = 0
     failures = 0
     errors = 0
@@ -397,25 +400,39 @@ def parse_junit_xml(xml_path: Path) -> dict:
         error = tc.find("error")
         skipped = tc.find("skipped")
         if failure is not None:
+            outcome = "failed"
             failed_tests.append(name)
             error_details.append(
                 f"FAILED: {name}\n  {failure.get('message', '')}"
             )
         elif error is not None:
+            outcome = "failed"
             failed_tests.append(name)
             error_details.append(
                 f"ERROR: {name}\n  {error.get('message', '')}"
             )
         elif skipped is not None:
+            outcome = "skipped"
             skipped_tests.append(name)
         else:
+            outcome = "passed"
             passed_tests.append((name, duration))
+        detail = next((e for e in (failure, error, skipped) if e is not None), None)
+        cases.append({
+            "name": name,
+            "classname": tc.get("classname", ""),
+            "file": tc.get("file", ""),
+            "outcome": outcome,
+            "duration": duration,
+            "message": detail.get("message", "") if detail is not None else "",
+        })
 
     return {
         "passed": passed_tests,
         "failed": failed_tests,
         "skipped": skipped_tests,
         "error_details": error_details,
+        "cases": cases,
         "tests_run": tests_run,
         "failures": failures,
         "errors": errors,

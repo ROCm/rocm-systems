@@ -596,7 +596,11 @@ def gen_float_unary32_existing(ctx: ExecuteContext) -> str | None:
     suffix = (
         '_gfx1250'
         if arch == 'cdna5'
-        else '_gfx942' if cdna else '_gfx12' if arch == 'rdna4' else ''
+        else (
+            '_gfx950'
+            if arch == 'cdna4' and mnemonic in CDNA_MATH_F32
+            else '_gfx942' if cdna else '_gfx12' if arch == 'rdna4' else ''
+        )
     )
     if mnemonic == 'V_FREXP_EXP_I32_F32':
         suffix = '_gfx12' if arch in ('rdna4', 'cdna5') else ''
@@ -607,6 +611,17 @@ def gen_float_unary32_existing(ctx: ExecuteContext) -> str | None:
         else wave_api(api, 64)
     )
     lines = cdna_qualification_guard(arch) if mnemonic == 'V_FREXP_EXP_I32_F32' else []
+    if arch == 'cdna4' and not is_vop3 and mnemonic in CDNA_MATH_F32:
+        lines += [
+            '  if ((inst_.src0 == amdgpu::SRC_SDWA || inst_.src0 == amdgpu::SRC_DPP) && wf.exec()) {',
+            '    const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;',
+            '    if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||',
+            '        semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {',
+            '      wf.report_instruction_execution_error(amdgpu::InstructionExecutionError::UnsupportedOperandValue);',
+            '      return;',
+            '    }',
+            '  }',
+        ]
     modifiers = '0'
     if is_vop3:
         lines += [
@@ -985,7 +1000,7 @@ def gen_float_unary64_existing(ctx: ExecuteContext) -> str | None:
                 'rdna3': '',
                 'rdna4': '_gfx12',
                 'cdna3': '_gfx942',
-                'cdna4': '_gfx942',
+                'cdna4': '_gfx950',
                 'cdna5': '_gfx1250',
             }[arch]
         )
@@ -2737,7 +2752,11 @@ def gen_mixed_fma(ctx: ExecuteContext) -> str | None:
         + (
             '_gfx908'
             if arch == 'cdna1'
-            else '_gfx12' if not bf16 and arch in ('rdna4', 'cdna5') else ''
+            else (
+                '_gfx950'
+                if arch == 'cdna4'
+                else '_gfx12' if not bf16 and arch in ('rdna4', 'cdna5') else ''
+            )
         )
     )
     byte_mask = (
@@ -3075,7 +3094,7 @@ def gen_float_dot32(ctx: ExecuteContext) -> str | None:
         'rj_arith_v_dot2_f32_'
         + ('bf16' if bf16 else 'f16')
         + (
-            ('_gfx950' if bf16 else '_gfx942')
+            ('_gfx950' if arch == 'cdna4' else '_gfx942')
             if host_model
             else '_gfx12' if arch == 'rdna4' else ''
         )
@@ -3433,7 +3452,11 @@ def gen_float_unary16(ctx: ExecuteContext) -> str | None:
     suffix = (
         '_gfx1250'
         if arch == 'cdna5'
-        else '_gfx942' if cdna else '_gfx12' if arch == 'rdna4' else ''
+        else (
+            '_gfx950'
+            if arch == 'cdna4' and mnemonic in CDNA_MATH_F16
+            else '_gfx942' if cdna else '_gfx12' if arch == 'rdna4' else ''
+        )
     )
     if mnemonic == 'V_FREXP_EXP_I16_F16':
         suffix = '_gfx12' if arch in ('rdna4', 'cdna5') else ''
@@ -3448,7 +3471,13 @@ def gen_float_unary16(ctx: ExecuteContext) -> str | None:
     writer = ''
     modifiers = '0'
     lines = (
-        ['  if (!wf.exec()) { return; }'] if older else cdna_qualification_guard(arch)
+        ['  if (!wf.exec()) { return; }']
+        if older
+        else (
+            []
+            if arch == 'cdna4' and mnemonic in CDNA_MATH_F16
+            else cdna_qualification_guard(arch)
+        )
     )
     if older:
         lines += [
@@ -3521,6 +3550,17 @@ def gen_float_unary16(ctx: ExecuteContext) -> str | None:
         if is_vop3 or mnemonic == 'V_FREXP_EXP_I16_F16':
             writer = ', amdgpu::arith::HalfUnaryWriter{true}'
         elif mnemonic != 'V_FREXP_EXP_I16_F16':
+            if arch == 'cdna4' and mnemonic in CDNA_MATH_F16:
+                lines += [
+                    '  if ((inst_.src0 == amdgpu::SRC_SDWA || inst_.src0 == amdgpu::SRC_DPP) && wf.exec()) {',
+                    '    const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;',
+                    '    if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||',
+                    '        semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {',
+                    '      wf.report_instruction_execution_error(amdgpu::InstructionExecutionError::UnsupportedOperandValue);',
+                    '      return;',
+                    '    }',
+                    '  }',
+                ]
             lines += [
                 '  const uint64_t modifiers = inst_.src0 == amdgpu::SRC_SDWA',
                 '      ? RJ_ARITH_ALU_SDWA | uint64_t(sdwa_omod_) * RJ_ARITH_ALU_OMOD_2 |',

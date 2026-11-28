@@ -7,6 +7,7 @@
 
 #include <cassert>
 #include <cstddef>
+#include <cstring>
 #include <fstream>
 #include <memory>
 #include <iostream>
@@ -211,3 +212,84 @@ HIP_TEST_CASE(Unit_RTC_LinkAddFile_Default) {
     REQUIRE(fs::remove(file_name));
   }
 }
+
+#if HT_AMD
+/**
+ * Test Description
+ * ------------------------
+ *  - Links an LLVM bitcode bundle (HIPRTC_JIT_INPUT_LLVM_BUNDLED_BITCODE) built at run time: the
+ *    -fgpu-rdc bitcode of a kernel wrapped in a clang offload bundle with a host entry and an
+ *    entry for the device's target. The runtime must unbundle the device entry, so the linked
+ *    code object holds the kernel and the kernel runs.
+ * Test source
+ * ------------------------
+ *  - unit/rtc/linker.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.14
+ */
+HIP_TEST_CASE(Unit_RTC_LinkAddData_BundledBitcode) {
+  hipDeviceProp_t prop;
+  HIP_CHECK(hipGetDeviceProperties(&prop, 0));
+  const std::string arch = prop.gcnArchName;
+
+  static constexpr const char* kSource = R"(extern "C" __global__ void k(int* a) { a[0] = 4242; })";
+  hiprtcProgram program;
+  HIPRTC_CHECK(hiprtcCreateProgram(&program, kSource, "bundled.cu", 0, nullptr, nullptr));
+  const std::string archOption = "--offload-arch=" + arch;
+  const char* options[] = {"-fgpu-rdc", archOption.c_str()};
+  HIPRTC_CHECK(hiprtcCompileProgram(program, 2, options));
+  size_t bitcodeSize = 0;
+  HIPRTC_CHECK(hiprtcGetBitcodeSize(program, &bitcodeSize));
+  std::vector<char> bitcode(bitcodeSize);
+  HIPRTC_CHECK(hiprtcGetBitcode(program, bitcode.data()));
+  HIPRTC_CHECK(hiprtcDestroyProgram(&program));
+
+  // Clang offload bundle: magic, entry count, {offset, size, id size, id} per entry, payloads.
+  const std::vector<std::string> ids = {"host-x86_64-unknown-linux-gnu-",
+                                        "hip-amdgcn-amd-amdhsa--" + arch};
+  auto put64 = [](std::vector<char>& out, uint64_t value) {
+    const char* bytes = reinterpret_cast<const char*>(&value);
+    out.insert(out.end(), bytes, bytes + sizeof(value));
+  };
+  static constexpr char kMagic[] = "__CLANG_OFFLOAD_BUNDLE__";
+  std::vector<char> bundle(kMagic, kMagic + sizeof(kMagic) - 1);
+  put64(bundle, ids.size());
+  size_t headerSize = bundle.size();
+  for (const auto& id : ids) headerSize += 3 * sizeof(uint64_t) + id.size();
+  const size_t payloadOffset = (headerSize + 4095) & ~size_t{4095};
+  const uint64_t sizes[] = {0, bitcode.size()};
+  for (size_t i = 0; i < ids.size(); ++i) {
+    put64(bundle, payloadOffset);
+    put64(bundle, sizes[i]);
+    put64(bundle, ids[i].size());
+    bundle.insert(bundle.end(), ids[i].begin(), ids[i].end());
+  }
+  bundle.resize(payloadOffset, 0);
+  bundle.insert(bundle.end(), bitcode.begin(), bitcode.end());
+
+  hiprtcLinkState linkState;
+  HIPRTC_CHECK(hiprtcLinkCreate(0, nullptr, nullptr, &linkState));
+  HIPRTC_CHECK(hiprtcLinkAddData(linkState, HIPRTC_JIT_INPUT_LLVM_BUNDLED_BITCODE, bundle.data(),
+                                 bundle.size(), "bundle", 0, nullptr, nullptr));
+  void* code = nullptr;
+  size_t codeSize = 0;
+  HIPRTC_CHECK(hiprtcLinkComplete(linkState, &code, &codeSize));
+
+  hipModule_t module;
+  HIP_CHECK(hipModuleLoadData(&module, code));
+  hipFunction_t function;
+  HIP_CHECK(hipModuleGetFunction(&function, module, "k"));
+  int* result_d = nullptr;
+  HIP_CHECK(hipMalloc(&result_d, sizeof(int)));
+  void* args[] = {&result_d};
+  HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, nullptr, args, nullptr));
+  int result = 0;
+  HIP_CHECK(hipMemcpy(&result, result_d, sizeof(int), hipMemcpyDeviceToHost));
+  REQUIRE(result == 4242);
+
+  HIP_CHECK(hipFree(result_d));
+  HIP_CHECK(hipModuleUnload(module));
+  HIPRTC_CHECK(hiprtcLinkDestroy(linkState));
+}
+#endif

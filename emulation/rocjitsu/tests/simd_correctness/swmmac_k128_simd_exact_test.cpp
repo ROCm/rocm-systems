@@ -4,6 +4,7 @@
 /// @file swmmac_k128_simd_exact_test.cpp
 /// @brief Decoded scalar-vs-AVX-512 checks for gfx1250 K=128 FP8/BF8 SWMMAC.
 
+#include "float_format_reference.h"
 #include "mma_exact_test_support.h"
 #include "rocjitsu/isa/isa_family.h"
 

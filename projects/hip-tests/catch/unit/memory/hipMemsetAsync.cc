@@ -5,6 +5,7 @@
  */
 
 #include "MemUtils.hh"
+#include <vector>
 
 /*
  * This testcase verifies that asynchronous memset functions are asynchronous with respect to the
@@ -136,4 +137,87 @@ HIP_TEST_CASE(Unit_hipMemset3DASyncMulti) {
   data2.offset = data1.width;
 
   doMemsetTest<char>(mallocType, memset_type, data1, data2);
+}
+
+/*
+ * A memset of another device's buffer from this device's stream works without
+ * hipDeviceEnablePeerAccess: the fill grants the buffer peer access, as a copy does.
+ * hipMemsetAsync, hipMemsetD32Async and hipMemset2DAsync with pitch == width.
+ */
+HIP_TEST_CASE(Unit_hipMemsetAsync_PeerBufferFromOtherDeviceStream) {
+  if (HipTest::getDeviceCount() < 2) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+  }
+  int can_access_peer = 0;
+  HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, 0, 1));
+  if (!can_access_peer) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+  }
+
+  constexpr size_t kN = 1024;  // elements
+
+  // Allocate the target buffer on device 1.
+  HIP_CHECK(hipSetDevice(1));
+  uint8_t* dev1_buf = nullptr;
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&dev1_buf), kN * sizeof(uint8_t)));
+
+  // All operations issued on a stream belonging to device 0.
+  HIP_CHECK(hipSetDevice(0));
+  hipStream_t stream0 = nullptr;
+  HIP_CHECK(hipStreamCreate(&stream0));
+
+  SECTION("hipMemsetAsync") {
+    // Fill device-1 buffer from device-0 stream; the runtime must grant peer access.
+    HIP_CHECK(hipMemsetAsync(dev1_buf, 0x5A, kN * sizeof(uint8_t), stream0));
+    HIP_CHECK(hipStreamSynchronize(stream0));
+
+    // Read back via device 1 to verify every byte.
+    std::vector<uint8_t> host(kN, 0);
+    HIP_CHECK(hipSetDevice(1));
+    HIP_CHECK(hipMemcpy(host.data(), dev1_buf, kN * sizeof(uint8_t), hipMemcpyDeviceToHost));
+    for (size_t i = 0; i < kN; ++i) {
+      INFO("byte " << i);
+      REQUIRE(host[i] == 0x5Au);
+    }
+    HIP_CHECK(hipSetDevice(0));
+  }
+
+  SECTION("hipMemsetD32Async") {
+    constexpr uint32_t kFill32 = 0xDEADBEEFu;
+    HIP_CHECK(hipMemsetD32Async(reinterpret_cast<hipDeviceptr_t>(dev1_buf), kFill32,
+                                kN / sizeof(uint32_t), stream0));
+    HIP_CHECK(hipStreamSynchronize(stream0));
+
+    std::vector<uint32_t> host(kN / sizeof(uint32_t), 0);
+    HIP_CHECK(hipSetDevice(1));
+    HIP_CHECK(hipMemcpy(host.data(), dev1_buf,
+                        (kN / sizeof(uint32_t)) * sizeof(uint32_t), hipMemcpyDeviceToHost));
+    for (size_t i = 0; i < host.size(); ++i) {
+      INFO("element " << i);
+      REQUIRE(host[i] == kFill32);
+    }
+    HIP_CHECK(hipSetDevice(0));
+  }
+
+  SECTION("hipMemset2DAsync pitch==width") {
+    // 2D memset with pitch == width takes the flat fill path that grants peer access.
+    constexpr size_t kWidth = 64;  // bytes
+    constexpr size_t kHeight = kN / kWidth;
+    HIP_CHECK(hipMemset2DAsync(dev1_buf, kWidth, 0xAB, kWidth, kHeight, stream0));
+    HIP_CHECK(hipStreamSynchronize(stream0));
+
+    std::vector<uint8_t> host(kWidth * kHeight, 0);
+    HIP_CHECK(hipSetDevice(1));
+    HIP_CHECK(hipMemcpy(host.data(), dev1_buf, kWidth * kHeight, hipMemcpyDeviceToHost));
+    for (size_t i = 0; i < host.size(); ++i) {
+      INFO("byte " << i);
+      REQUIRE(host[i] == 0xABu);
+    }
+    HIP_CHECK(hipSetDevice(0));
+  }
+
+  HIP_CHECK(hipStreamDestroy(stream0));
+  HIP_CHECK(hipSetDevice(1));
+  HIP_CHECK(hipFree(dev1_buf));
+  HIP_CHECK(hipSetDevice(0));
 }

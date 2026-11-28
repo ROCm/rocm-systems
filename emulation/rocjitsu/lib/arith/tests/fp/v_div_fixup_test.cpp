@@ -177,6 +177,17 @@ TEST(FpDivFixupGfx11, IeeeNanAndStatusQualification) {
   check_rdna3_ieee_nan<64, 64>(rj_arith_v_div_fixup_f64_w64);
 }
 
+TEST(FpDivFixupGfx950, IeeeNanAndStatusQualification) {
+  check_rdna3_ieee_nan<16, 32>(rj_arith_v_div_fixup_f16_w32_gfx950);
+  check_rdna3_ieee_nan<16, 64>(rj_arith_v_div_fixup_f16_w64_gfx950);
+  check_rdna3_ieee_nan<16, 32>(rj_arith_v_div_fixup_legacy_f16_w32_gfx950);
+  check_rdna3_ieee_nan<16, 64>(rj_arith_v_div_fixup_legacy_f16_w64_gfx950);
+  check_rdna3_ieee_nan<32, 32>(rj_arith_v_div_fixup_f32_w32_gfx950);
+  check_rdna3_ieee_nan<32, 64>(rj_arith_v_div_fixup_f32_w64_gfx950);
+  check_rdna3_ieee_nan<64, 32>(rj_arith_v_div_fixup_f64_w32_gfx950);
+  check_rdna3_ieee_nan<64, 64>(rj_arith_v_div_fixup_f64_w64_gfx950);
+}
+
 // Disputed gfx1100 CLAMP/NaN/OMOD status rules cannot be promised by strict mode.
 TEST(FpDivFixupGfx11, UnsupportedStatusBeforeOperandAccess) {
   for (auto call : {rj_arith_v_div_fixup_f32_w32, rj_arith_v_div_fixup_f64_w32}) {

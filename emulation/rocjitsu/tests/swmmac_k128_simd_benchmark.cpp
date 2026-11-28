@@ -12,6 +12,7 @@
 
 #include "compute_unit_test_util.h"
 #include "decode_test_util.h"
+#include "float_format_reference.h"
 #include "mma_test_util.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
@@ -23,7 +24,6 @@
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
-#include "util/data_types.h"
 #include "util/simd.h"
 #include "util/simd_test_hooks.h"
 
@@ -261,13 +261,7 @@ void benchmark_case(const BenchCase &test) {
 
 class SwmmacK128SimdBenchmark : public testing::TestWithParam<size_t> {};
 
-TEST_P(SwmmacK128SimdBenchmark, DecodedInstruction) {
-  SKIP_IF_NO_SIMD();
-  if (util::native<float>::size() != 16) {
-    GTEST_SKIP() << "the K=128 SWMMAC fast paths require 16-lane native SIMD";
-  }
-  benchmark_case(BENCH_CASES[GetParam()]);
-}
+TEST_P(SwmmacK128SimdBenchmark, DecodedInstruction) { benchmark_case(BENCH_CASES[GetParam()]); }
 
 INSTANTIATE_TEST_SUITE_P(Forms, SwmmacK128SimdBenchmark,
                          testing::Range<size_t>(0, BENCH_CASES.size()),

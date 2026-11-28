@@ -94,9 +94,10 @@ public:
     }
     if (operand.simd_capable()) {
       auto view = registers.read_operand(operand, exec_mask, byte_mask);
-      for (uint32_t lane = 0; lane < wave.wf_size(); lane += util::native_width_v<uint32_t>) {
-        view.load_native<uint32_t>(lane).copy_to(values_.data() + lane,
-                                                 util::stdx::element_aligned);
+      RJ_REGISTER_NO_UNROLL
+      for (uint32_t lane = 0; lane < wave.wf_size();
+           lane += util::register_block_lanes_v<uint32_t>) {
+        view.load_native<uint32_t>(lane).copy_to(values_.data() + lane);
       }
     } else {
       values_.fill(0);
@@ -301,7 +302,8 @@ inline bool write_vector32_result(Wavefront &wave, RegisterAccess &registers,
   }
   if (destination.simd_capable()) {
     auto output = registers.write_operand(destination, exec_mask, byte_mask);
-    for (uint32_t lane = 0; lane < wave.wf_size(); lane += util::native_width_v<uint32_t>) {
+    RJ_REGISTER_NO_UNROLL
+    for (uint32_t lane = 0; lane < wave.wf_size(); lane += util::register_block_lanes_v<uint32_t>) {
       if (output.store_native(lane, util::load<uint32_t>(result.data() + lane), exec_mask >> lane)
               .failed()) {
         return false;
@@ -445,7 +447,8 @@ inline bool write_vector64_result(Wavefront &wave, RegisterAccess &registers,
   }
   if (destination.simd_capable()) {
     auto output = registers.write_operand_pair32(destination, exec_mask);
-    for (uint32_t lane = 0; lane < wave.wf_size(); lane += util::native_width_v<uint32_t>) {
+    RJ_REGISTER_NO_UNROLL
+    for (uint32_t lane = 0; lane < wave.wf_size(); lane += util::register_block_lanes_v<uint32_t>) {
       if (output
               .store_native_pair(lane, util::load<uint32_t>(result[0].data() + lane),
                                  util::load<uint32_t>(result[1].data() + lane), exec_mask >> lane)
@@ -709,7 +712,9 @@ inline void execute_sdwa_carry32(Inst &inst, Wavefront &wave, Wave32 wave32, Wav
         }
         auto output = registers.write_operand(destination, write_mask,
                                               sdwa::sdwa_dst_byte_mask(selection, unused));
-        for (uint32_t lane = 0; lane < wave.wf_size(); lane += util::native_width_v<uint32_t>) {
+        RJ_REGISTER_NO_UNROLL
+        for (uint32_t lane = 0; lane < wave.wf_size();
+             lane += util::register_block_lanes_v<uint32_t>) {
           if (output.store_native(lane, util::load<uint32_t>(result + lane), write_mask >> lane)
                   .failed()) {
             return;
@@ -813,7 +818,9 @@ inline void execute_qsad(Wavefront &wave, Ternary32Function wave32, Ternary64Fun
     word.encoding_value_ = destination.encoding_value_ + reg;
     if (word.simd_capable()) {
       auto output = registers.write_operand(word, exec_mask);
-      for (uint32_t lane = 0; lane < wave.wf_size(); lane += util::native_width_v<uint32_t>) {
+      RJ_REGISTER_NO_UNROLL
+      for (uint32_t lane = 0; lane < wave.wf_size();
+           lane += util::register_block_lanes_v<uint32_t>) {
         if (output
                 .store_native(lane, util::load<uint32_t>(result[reg].data() + lane),
                               exec_mask >> lane)
@@ -880,7 +887,9 @@ inline bool try_execute_sdwa_integer32(Inst &inst, Wavefront &wave, Wave32 wave3
             }
             auto output = registers.write_operand(destination, exec_mask,
                                                   sdwa::sdwa_dst_byte_mask(selection, unused));
-            for (uint32_t lane = 0; lane < wave.wf_size(); lane += util::native_width_v<uint32_t>) {
+            RJ_REGISTER_NO_UNROLL
+            for (uint32_t lane = 0; lane < wave.wf_size();
+                 lane += util::register_block_lanes_v<uint32_t>) {
               if (output.store_native(lane, util::load<uint32_t>(result + lane), exec_mask >> lane)
                       .failed()) {
                 return true;

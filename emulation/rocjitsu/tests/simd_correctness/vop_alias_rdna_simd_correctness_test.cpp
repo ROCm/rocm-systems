@@ -272,20 +272,12 @@ void check_case(const VopCase &c, uint64_t exec) {
 }
 
 TEST(VopAliasRdnaSimdCorrectness, FullExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   for (const auto &c : kCases) {
     check_case(c, /*exec=*/0x00000000FFFFFFFFULL);
   }
 }
 
 TEST(VopAliasRdnaSimdCorrectness, PartialExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   for (const auto &c : kCases) {
     check_case(c, /*exec=*/0x00000000A5A5F0F1ULL);
   }

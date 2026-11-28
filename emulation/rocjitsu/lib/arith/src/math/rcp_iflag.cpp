@@ -22,7 +22,7 @@ namespace {
 
 // Compute reciprocal and optional guest causes for the selected lanes. Reject invalid controls
 // before changing outputs.
-template <bool Rdna3, bool Cdna = false>
+template <bool Rdna3, bool Cdna = false, bool Gfx950 = false>
 int rcp_iflag(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d,
               const uint32_t *const *a, uint32_t *excp_flag_user) {
   if ((mode >> 32) &&
@@ -56,7 +56,8 @@ int rcp_iflag(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const
     } else {
       exec_mask = rocjitsu::arith::dpp16_source(flags, exec_mask, mode, permuted, a[0]);
     }
-    return rcp_iflag<Rdna3, Cdna>(flags, exec_mask, uint32_t(mode), d, &source, excp_flag_user);
+    return rcp_iflag<Rdna3, Cdna, Gfx950>(flags, exec_mask, uint32_t(mode), d, &source,
+                                          excp_flag_user);
   }
   const uint32_t prior_exceptions = rocjitsu::arith::reports_fp_status(flags) ? *excp_flag_user : 0;
   if (rocjitsu::arith::is_exact(flags)) {
@@ -74,12 +75,13 @@ int rcp_iflag(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const
       }
       generated = zeros & exec_mask ? RJ_ARITH_EXCEPTION_INT_DIV0 : 0;
     }
-    // CDNA/gfx12 always quiet NaNs; gfx11 quiets only with IEEE set. OMOD is already applied.
-    // Reuse the same integer reciprocal model without reapplying that gating.
+    // gfx942/gfx12 always quiet NaNs; gfx11 and gfx950 quiet only with IEEE set. OMOD is already
+    // applied. Reuse the same integer reciprocal model without reapplying that gating.
+    const bool quiet_snan = !Rdna3 || (Cdna && !Gfx950) || (flags & RJ_ARITH_FP_IEEE_MODE);
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
     if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
       rocjitsu::arith::rcp_exact_x86_64_v4(flags, exec_mask, uint32_t(mode), d[0], a[0],
-                                           !Rdna3 || Cdna || (flags & RJ_ARITH_FP_IEEE_MODE));
+                                           quiet_snan);
       if (rocjitsu::arith::reports_fp_status(flags)) {
         *excp_flag_user = prior_exceptions | generated;
       }
@@ -89,7 +91,7 @@ int rcp_iflag(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
     if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
       rocjitsu::arith::rcp_exact_x86_64_v3(flags, exec_mask, uint32_t(mode), d[0], a[0],
-                                           !Rdna3 || Cdna || (flags & RJ_ARITH_FP_IEEE_MODE));
+                                           quiet_snan);
       if (rocjitsu::arith::reports_fp_status(flags)) {
         *excp_flag_user = prior_exceptions | generated;
       }
@@ -99,7 +101,7 @@ int rcp_iflag(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const
     uint32_t result[32];
     for (int lane = 0; lane < 32; ++lane) {
       result[lane] = rocjitsu::arith::unary_exact_value<rocjitsu::arith::Unary::Rcp>(
-          flags, uint32_t(mode), a[0][lane], Rdna3 && !Cdna);
+          flags, uint32_t(mode), a[0][lane], Rdna3 && (!Cdna || Gfx950));
     }
     for (int lane = 0; lane < 32; ++lane) {
       if ((exec_mask >> lane) & 1) {
@@ -170,11 +172,12 @@ int rcp_iflag(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const
 
 // Compute reciprocal and optional guest causes for Wave64. Reject invalid controls before
 // changing outputs.
-template <bool Rdna3, bool Cdna = false>
+template <bool Rdna3, bool Cdna = false, bool Gfx950 = false>
 int rcp_iflag_wave64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *d,
                      const uint32_t *const *a, uint32_t *excp_flag_user) {
   // Validate before either Wave64 half can modify outputs, even when EXEC is empty.
-  if (int error = rcp_iflag<Rdna3, Cdna>(flags, 0, mode, nullptr, nullptr, excp_flag_user)) {
+  if (int error =
+          rcp_iflag<Rdna3, Cdna, Gfx950>(flags, 0, mode, nullptr, nullptr, excp_flag_user)) {
     return error;
   }
   if (!exec_mask) {
@@ -198,7 +201,7 @@ int rcp_iflag_wave64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t
     }
     uint32_t *dest = d[0] + half * 32;
     const uint32_t *source = a[0] + half * 32;
-    if (int error = rcp_iflag<Rdna3, Cdna>(
+    if (int error = rcp_iflag<Rdna3, Cdna, Gfx950>(
             flags, uint32_t(exec_mask >> (half * 32)), half_instruction_flags, &dest, &source,
             rocjitsu::arith::reports_fp_status(flags) ? &exceptions : nullptr)) {
       return error;
@@ -228,6 +231,54 @@ int cdna_rcp_iflag(uint64_t flags, Mask exec_mask, uint64_t mode, uint32_t *cons
     return rcp_iflag_wave64<!Gfx1250, true>(flags, exec_mask, mode, d, a, state);
   } else {
     return rcp_iflag<!Gfx1250, true>(flags, exec_mask, mode, d, a, state);
+  }
+}
+
+// MI350X (gfx950) RCP_IFLAG: preserves sNaN when MODE.IEEE is clear, accumulates Compatibility
+// signed-zero INT_DIV0 causes, rejects explicit mode 3, and rejects uncaptured OMOD in mode 2.
+template <typename Mask>
+int gfx950_rcp_iflag(uint64_t flags, Mask exec_mask, uint64_t mode, uint32_t *const *d,
+                     const uint32_t *const *a, uint32_t *state) {
+  if (mode & RJ_ARITH_ALU_SDWA) {
+    const uint64_t core_flags = flags & ~RJ_ARITH_FP_ROUND_MASK;
+    return rocjitsu::arith::with_sdwa_output<rocjitsu::arith::SdwaOutput::F32Mode>(
+        flags, exec_mask, mode, d, [&](uint64_t core_mode) {
+          return cdna_rcp_iflag<false>(core_flags, exec_mask, core_mode, d, a, state);
+        });
+  }
+  const uint64_t semantics = flags & RJ_ARITH_SEMANTICS_MASK;
+  uint64_t resolved =
+      rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL);
+  if (int error = rocjitsu::arith::validate_semantics(resolved)) {
+    return error;
+  }
+  const uint64_t check_flags =
+      (flags & ~RJ_ARITH_SEMANTICS_MASK) | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    if (int error = rcp_iflag<true, true, true>(check_flags, 0, mode, nullptr, nullptr, nullptr)) {
+      return error;
+    }
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  const bool active_omod = (mode & RJ_ARITH_ALU_OMOD_MASK) &&
+                           (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) &&
+                           !(flags & RJ_ARITH_FP_IEEE_MODE);
+  if (active_omod) {
+    if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
+      if (int error =
+              rcp_iflag<true, true, true>(check_flags, 0, mode, nullptr, nullptr, nullptr)) {
+        return error;
+      }
+      return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+    }
+    if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE) {
+      resolved = (flags & ~RJ_ARITH_SEMANTICS_MASK) | RJ_ARITH_SEMANTICS_LOOSE;
+    }
+  }
+  if constexpr (sizeof(Mask) == sizeof(uint64_t)) {
+    return rcp_iflag_wave64<true, true, true>(resolved, exec_mask, mode, d, a, state);
+  } else {
+    return rcp_iflag<true, true, true>(resolved, exec_mask, mode, d, a, state);
   }
 }
 
@@ -310,4 +361,17 @@ int rj_arith_v_rcp_iflag_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uin
                                          uint32_t *const *d, const uint32_t *const *a,
                                          uint32_t *state) {
   return cdna_rcp_iflag<true>(flags, exec_mask, mode, d, a, state);
+}
+
+// Evaluate MI350X (gfx950) reciprocal with IEEE-gated NaN quieting and Compatibility INT_DIV0.
+int rj_arith_v_rcp_iflag_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                        uint32_t *const *d, const uint32_t *const *a,
+                                        uint32_t *state) {
+  return gfx950_rcp_iflag(flags, exec_mask, mode, d, a, state);
+}
+
+int rj_arith_v_rcp_iflag_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                        uint32_t *const *d, const uint32_t *const *a,
+                                        uint32_t *state) {
+  return gfx950_rcp_iflag(flags, exec_mask, mode, d, a, state);
 }

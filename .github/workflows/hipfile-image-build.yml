@@ -43,12 +43,17 @@ on:
         description: "The full name & tag of the CI image to use."
         value: ${{ inputs.ci_image_name }}
 
+# Read-only by default. packages: write only in build_AIS_image, the job that
+# pushes images. As a reusable workflow, it can never get more than the caller
+# grants (build_CI_image in hipfile-ci-toplevel.yml).
 permissions:
   contents: read
-  packages: write
 
 jobs:
   build_AIS_image:
+    permissions:
+      contents: read
+      packages: write
     runs-on: [ubuntu-24.04]
     container: docker:28.5
     steps:
@@ -58,6 +63,7 @@ jobs:
           sparse-checkout: |
             projects/hipfile
             .github/workflows
+          persist-credentials: false
 
       - name: Authenticating to GitHub Container Registry.
         uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0

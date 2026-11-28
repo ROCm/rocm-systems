@@ -232,6 +232,102 @@ HIP_TEST_CASE(Unit_hipGraphAddMemFreeNode_Functional) {
 
   REQUIRE(before == after);
 }
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Verify that an allocation made by stream capture (hipMallocAsync) is tracked like one made by
+ *    hipGraphAddMemAllocNode:
+ *    -# A free node for it can be added to another graph, once; a second free is rejected.
+ *    -# A captured hipFreeAsync of memory that is not a graph allocation (hipMallocAsync outside
+ *       the capture, or hipMalloc) is rejected with hipErrorInvalidValue, and the capture can
+ *       still be ended.
+ * Test source
+ * ------------------------
+ *  - /unit/graph/hipGraphAddMemFreeNode.cc
+ * Test requirements
+ * ------------------------
+ * - HIP_VERSION >= 7.14
+ */
+HIP_TEST_CASE(Unit_hipGraphAddMemFreeNode_CapturedAllocation) {
+  int mem_pool_support = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
+  if (!mem_pool_support) {
+    HIP_SKIP_TEST("Runtime doesn't support Memory Pool. Skip the test case.");
+  }
+
+  constexpr size_t Nbytes = 1024 * 1024;
+  StreamGuard stream_guard(Streams::created);
+  hipStream_t stream = stream_guard.stream();
+
+  SECTION("free node in another graph") {
+    hipGraph_t allocGraph = nullptr;
+    void* dptr = nullptr;
+    HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+    HIP_CHECK(hipMallocAsync(&dptr, Nbytes, stream));
+    HIP_CHECK(hipStreamEndCapture(stream, &allocGraph));
+    REQUIRE(dptr != nullptr);
+
+    hipGraph_t freeGraph = nullptr;
+    hipGraphNode_t freeNode = nullptr;
+    HIP_CHECK(hipGraphCreate(&freeGraph, 0));
+    HIP_CHECK(hipGraphAddMemFreeNode(&freeNode, freeGraph, nullptr, 0, dptr));
+    HIP_CHECK_ERROR(hipGraphAddMemFreeNode(&freeNode, freeGraph, nullptr, 0, dptr),
+                    hipErrorInvalidValue);
+
+    // Run the allocation, then the free, so the pool gets the memory back.
+    hipGraphExec_t allocExec = nullptr, freeExec = nullptr;
+    HIP_CHECK(hipGraphInstantiate(&allocExec, allocGraph, nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphInstantiate(&freeExec, freeGraph, nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphLaunch(allocExec, stream));
+    HIP_CHECK(hipGraphLaunch(freeExec, stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+
+    HIP_CHECK(hipGraphExecDestroy(freeExec));
+    HIP_CHECK(hipGraphExecDestroy(allocExec));
+    HIP_CHECK(hipGraphDestroy(freeGraph));
+    HIP_CHECK(hipGraphDestroy(allocGraph));
+  }
+
+  SECTION("captured free of stream ordered memory allocated outside the capture") {
+    void* dptr = nullptr;
+    HIP_CHECK(hipMallocAsync(&dptr, Nbytes, stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+
+    hipGraph_t graph = nullptr;
+    HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+    HIP_CHECK_ERROR(hipFreeAsync(dptr, stream), hipErrorInvalidValue);
+    HIP_CHECK(hipStreamEndCapture(stream, &graph));
+
+    size_t numNodes = 0;
+    HIP_CHECK(hipGraphGetNodes(graph, nullptr, &numNodes));
+    REQUIRE(numNodes == 0);
+
+    HIP_CHECK(hipGraphDestroy(graph));
+    HIP_CHECK(hipFreeAsync(dptr, stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+  }
+
+  SECTION("captured free of non-graph memory") {
+    void* dptr = nullptr;
+    HIP_CHECK(hipMalloc(&dptr, Nbytes));
+
+    hipGraph_t graph = nullptr;
+    HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+    HIP_CHECK_ERROR(hipFreeAsync(dptr, stream), hipErrorInvalidValue);
+    HIP_CHECK(hipStreamEndCapture(stream, &graph));
+
+    size_t numNodes = 0;
+    HIP_CHECK(hipGraphGetNodes(graph, nullptr, &numNodes));
+    REQUIRE(numNodes == 0);
+
+    HIP_CHECK(hipGraphDestroy(graph));
+    HIP_CHECK(hipFree(dptr));
+  }
+  (void)hipGetLastError();  // consume the error of the rejected free
+  HIP_CHECK(hipDeviceGraphMemTrim(0));
+}
+
 /**
  * End doxygen group GraphTest.
  * @}

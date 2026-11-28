@@ -201,20 +201,12 @@ void check_case(const CarryCase &c, uint64_t exec) {
 }
 
 TEST(Vop2CarrySimdCorrectness, FullExecMask) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   for (const auto &c : kCases) {
     check_case(c, /*exec=*/~0ULL);
   }
 }
 
 TEST(Vop2CarrySimdCorrectness, PartialExecMask) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   // Sparse/alternating pattern crossing SIMD chunk boundaries: exercises the
   // masked result store and per-chunk VCC merge (active bits updated, inactive
   // zeroed) on both halves of a wave64.

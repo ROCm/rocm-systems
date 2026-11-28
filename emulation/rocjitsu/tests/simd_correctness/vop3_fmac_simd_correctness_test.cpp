@@ -279,30 +279,18 @@ void check_all_mods(const Case &c, uint64_t exec) {
 }
 
 TEST(Vop3FmacSimdCorrectness, FullExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   for (const auto &c : kCases) {
     check_all_mods(c, /*exec=*/~0ULL);
   }
 }
 
 TEST(Vop3FmacSimdCorrectness, PartialExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   for (const auto &c : kCases) {
     check_case(c, /*abs=*/0, /*neg=*/0, /*omod=*/0, /*clamp=*/0, /*exec=*/0xA5A5'F0F0'1234'8001ULL);
   }
 }
 
 TEST(Vop3FmacSimdCorrectness, VMacF16LowDstZeroesHighHalf) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   ForceScalarGuard gate_guard;
 
   auto run_mode = [](bool force_scalar) -> std::array<uint64_t, WF_SIZE> {

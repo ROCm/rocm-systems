@@ -17,14 +17,14 @@ INTERFACE library that contributes an include path and nothing to link.
 
 | File | Description |
 |------|-------------|
-| `data_types.h` | Floating-point format conversions: FP16, BF16, FP8 (E4M3), BF8 (E5M2), FP4, FP6. Scalar and vectorized block converters with IEEE-754 rounding modes (truncation, round-to-nearest-even, stochastic). |
+| `data_types.h` | Basic FP16/BF16 conversions for graphics, memory formats and inline operands. |
 | `convert.h` | Type-erasing conversion between opaque C API handles and internal object pointers. |
 
 ### SIMD
 
 | File | Description |
 |------|-------------|
-| `simd.h` | Vectorized operations via `<experimental/simd>` with scalar fallback. Float conversions, integer arithmetic (`mul_hi`, `popcount`, `clz`), rounding, and transcendental approximations (`rcp`, `rsq`, `log`, `exp`). |
+| `simd.h` | Native-width raw register blocks, broadcasts and masked stores for operand transport. |
 | `simd_test_hooks.h` | Test-only seam for forcing scalar execution to compare against SIMD paths. |
 
 ### Memory and Concurrency

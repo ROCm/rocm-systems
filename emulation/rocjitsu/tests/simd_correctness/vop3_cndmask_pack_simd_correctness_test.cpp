@@ -310,46 +310,24 @@ void check_pack_opsel_high_halves(uint64_t exec) {
 }
 
 TEST(Vop3CndmaskPackSimdCorrectness, Cndmask_FullExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   for (uint64_t sel : kSels) {
     check_cndmask_one(/*exec=*/~0ULL, sel);
   }
 }
 
 TEST(Vop3CndmaskPackSimdCorrectness, Cndmask_PartialExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   for (uint64_t sel : kSels) {
     check_cndmask_one(/*exec=*/0xA5A5'F0F0'1234'8001ULL, sel);
   }
 }
 
-TEST(Vop3CndmaskPackSimdCorrectness, Pack_FullExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
-  check_pack_one(/*exec=*/~0ULL);
-}
+TEST(Vop3CndmaskPackSimdCorrectness, Pack_FullExec) { check_pack_one(/*exec=*/~0ULL); }
 
 TEST(Vop3CndmaskPackSimdCorrectness, Pack_PartialExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   check_pack_one(/*exec=*/0xA5A5'F0F0'1234'8001ULL);
 }
 
 TEST(Vop3CndmaskPackSimdCorrectness, Pack_OpSelHighHalves) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   check_pack_opsel_high_halves(/*exec=*/0xA5A5'F0F0'1234'8001ULL);
 }
 

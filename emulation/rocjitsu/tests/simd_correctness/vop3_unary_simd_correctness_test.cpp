@@ -230,10 +230,6 @@ void check_fp_all_mods(const Case &c, uint64_t exec) {
 }
 
 TEST(Vop3UnarySimdCorrectness, Fp_AllModifiers_FullExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   for (const auto &c : kCases) {
     if (c.kind == Kind::FP) {
       check_fp_all_mods(c, /*exec=*/~0ULL);
@@ -242,10 +238,6 @@ TEST(Vop3UnarySimdCorrectness, Fp_AllModifiers_FullExec) {
 }
 
 TEST(Vop3UnarySimdCorrectness, Fp_AllModifiers_PartialExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   for (const auto &c : kCases) {
     if (c.kind == Kind::FP) {
       check_fp_all_mods(c, /*exec=*/0xA5A5'F0F0'1234'8001ULL);
@@ -254,10 +246,6 @@ TEST(Vop3UnarySimdCorrectness, Fp_AllModifiers_PartialExec) {
 }
 
 TEST(Vop3UnarySimdCorrectness, Plain_FullAndPartialExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   for (const auto &c : kCases) {
     if (c.kind != Kind::PLAIN) {
       continue;

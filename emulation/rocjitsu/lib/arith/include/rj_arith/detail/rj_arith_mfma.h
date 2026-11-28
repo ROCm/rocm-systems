@@ -252,6 +252,31 @@ int rj_arith_v_mfma_f32_16x16x4_f32_w64(uint64_t flags, uint64_t controls, uint3
                                         const uint32_t *const *a, const uint32_t *const *b,
                                         const uint32_t *const *c);
 
+// MI350X (gfx950) FP32 MFMA: honors symmetric FP32 input/output denormal flushing,
+// ignores guest FP32 rounding and RJ_ARITH_FP16_OVFL, and applies CDNA4 adjacent-block
+// CBSZ/ABID broadcast (clamping 1 << CBSZ > 64 / M to lane % 16) in both Loose and exact
+// paths. Exact modes 2 and 3 qualify CBSZ <= 4 with matching input/output denormal flags;
+// split denormal flags or CBSZ >= 5 return UNSUPPORTED_SEMANTICS in strict modes and fall
+// back when allowed.
+int rj_arith_v_mfma_f32_32x32x1_2b_f32_w64_gfx950(uint64_t flags, uint64_t controls,
+                                                  uint32_t *const *d, const uint32_t *const *a,
+                                                  const uint32_t *const *b,
+                                                  const uint32_t *const *c);
+int rj_arith_v_mfma_f32_16x16x1_4b_f32_w64_gfx950(uint64_t flags, uint64_t controls,
+                                                  uint32_t *const *d, const uint32_t *const *a,
+                                                  const uint32_t *const *b,
+                                                  const uint32_t *const *c);
+int rj_arith_v_mfma_f32_4x4x1_16b_f32_w64_gfx950(uint64_t flags, uint64_t controls,
+                                                 uint32_t *const *d, const uint32_t *const *a,
+                                                 const uint32_t *const *b,
+                                                 const uint32_t *const *c);
+int rj_arith_v_mfma_f32_32x32x2_f32_w64_gfx950(uint64_t flags, uint64_t controls,
+                                               uint32_t *const *d, const uint32_t *const *a,
+                                               const uint32_t *const *b, const uint32_t *const *c);
+int rj_arith_v_mfma_f32_16x16x4_f32_w64_gfx950(uint64_t flags, uint64_t controls,
+                                               uint32_t *const *d, const uint32_t *const *a,
+                                               const uint32_t *const *b, const uint32_t *const *c);
+
 // FP64 MFMA: A/B use two VGPRs each, C/D eight (16x16) or two (4x4 batches).
 // At zero controls this also implements gfx90a. Bits 0/1/2 negate A/B/C
 // on gfx942/gfx950; gfx90a has no such sign controls. All lanes
@@ -263,6 +288,19 @@ int rj_arith_v_mfma_f64_16x16x4_f64_w64(uint64_t flags, uint64_t controls, uint3
 int rj_arith_v_mfma_f64_4x4x4_4b_f64_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
                                          const uint32_t *const *a, const uint32_t *const *b,
                                          const uint32_t *const *c);
+
+// MI350X (gfx950) FP64 MFMA: controls bits 0..2 negate A/B/C (BLGP) after bits 3..5
+// take |A|, |B|, |C| (VOP3P-MAI CBSZ / neg_hi). Sequential IEEE RNE FMA emits
+// canonical -qNaN (0xfff8000000000000) on 0*Inf and Inf-Inf. Strict mode 2 qualifies
+// BLGP == 0 with CBSZ <= 4 and returns UNSUPPORTED_SEMANTICS otherwise; mode 3 returns
+// UNSUPPORTED_FP_STATUS without modifying D (CDNA4 DGEMM arithmetic exceptions have no
+// TRAPSTS output here).
+int rj_arith_v_mfma_f64_16x16x4_f64_w64_gfx950(uint64_t flags, uint64_t controls,
+                                               uint32_t *const *d, const uint32_t *const *a,
+                                               const uint32_t *const *b, const uint32_t *const *c);
+int rj_arith_v_mfma_f64_4x4x4_4b_f64_w64_gfx950(uint64_t flags, uint64_t controls,
+                                                uint32_t *const *d, const uint32_t *const *a,
+                                                const uint32_t *const *b, const uint32_t *const *c);
 
 // Signed-byte MFMA: A/B use M*K*batch/256 VGPRs, C/D use M*M*batch/64.
 // Accumulation wraps at 32 bits by default. Unsuffixed shared forms preserve the

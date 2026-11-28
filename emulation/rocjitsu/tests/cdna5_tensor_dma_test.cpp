@@ -4513,6 +4513,9 @@ TEST(Gfx1250ExecutionTest, TensorDmaCoalescingCopiesAFullBatch) {
   constexpr uint32_t kProcessId = 81252;
   constexpr uint64_t kGlobal = 0x370000;
   constexpr uint32_t kBytes = 256;
+  constexpr uint32_t kPaddingInterval = 32;
+  constexpr uint32_t kPaddingBytes = 4;
+  constexpr uint32_t kLdsBytes = kBytes + (kBytes / kPaddingInterval) * kPaddingBytes;
   alignas(4096) std::array<uint8_t, kBytes> backing;
   KfdProcess process(kProcessId);
   Gfx1250Sim sim;
@@ -4521,8 +4524,8 @@ TEST(Gfx1250ExecutionTest, TensorDmaCoalescingCopiesAFullBatch) {
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
   wf->set_process_id(kProcessId);
-  wf->set_lds_base(cu->allocate_lds(kBytes));
-  wf->set_lds_size(kBytes);
+  wf->set_lds_base(cu->allocate_lds(kLdsBytes));
+  wf->set_lds_size(kLdsBytes);
   process.map_pages(kGlobal, backing.data(), backing.size());
   amdgpu::LegacyGpuVmAdapter legacy_vm(sim.soc->gpu_vm(), sim.soc->memory());
   const auto address_space =
@@ -4537,20 +4540,39 @@ TEST(Gfx1250ExecutionTest, TensorDmaCoalescingCopiesAFullBatch) {
   desc.global_base = kGlobal;
   desc.tensor_dims[0] = kBytes / desc.elem_size;
   desc.tile_dims[0] = desc.tensor_dims[0];
-  for (bool store : {false, true}) {
+  desc.pad_interval = kPaddingInterval / sizeof(uint32_t);
+  desc.pad_amount = kPaddingBytes / sizeof(uint32_t);
+  struct BatchCase {
+    bool store;
+    bool padded;
+  };
+  for (const BatchCase batch : {BatchCase{false, false}, BatchCase{false, true},
+                                BatchCase{true, false}, BatchCase{true, true}}) {
+    SCOPED_TRACE(::testing::Message() << "store=" << batch.store << " padded=" << batch.padded);
+    desc.pad = batch.padded;
+    std::array<uint8_t, kLdsBytes> expected_lds;
+    for (uint32_t i = 0; i < kLdsBytes; ++i) {
+      expected_lds[i] = static_cast<uint8_t>(i + 1);
+      wf->lds().write8(wf->lds_base() + i, expected_lds[i]);
+    }
     for (uint32_t i = 0; i < kBytes; ++i) {
       backing[i] = static_cast<uint8_t>(i);
-      wf->lds().write8(wf->lds_base() + i, static_cast<uint8_t>(i + 1));
+      if (!batch.store) {
+        const uint32_t offset = i + (batch.padded ? (i / kPaddingInterval) * kPaddingBytes : 0);
+        expected_lds[offset] = backing[i];
+      }
     }
-    TensorDmaState state(desc, store);
+    TensorDmaState state(desc, batch.store);
     ASSERT_TRUE(prepare_tensor(state, *wf).succeeded());
     const size_t copied = try_coalesced_transfer(state, *wf);
     ASSERT_EQ(copied, kBytes / desc.elem_size);
     state.next_element += copied;
     ASSERT_EQ(resume_tensor_dma_state(state, *wf), amdgpu::VmAccessOutcome::Complete);
     for (uint32_t i = 0; i < kBytes; ++i) {
-      EXPECT_EQ(backing[i], static_cast<uint8_t>(store ? i + 1 : i));
-      EXPECT_EQ(wf->lds().read8(wf->lds_base() + i), static_cast<uint8_t>(store ? i + 1 : i));
+      EXPECT_EQ(backing[i], static_cast<uint8_t>(batch.store ? i + 1 : i));
+    }
+    for (uint32_t i = 0; i < kLdsBytes; ++i) {
+      EXPECT_EQ(wf->lds().read8(wf->lds_base() + i), expected_lds[i]) << "LDS offset " << i;
     }
   }
   ASSERT_TRUE(legacy_vm.unregister_address_space(address_space));
