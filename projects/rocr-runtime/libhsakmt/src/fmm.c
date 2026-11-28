@@ -323,9 +323,11 @@ typedef struct svm_api_range svm_api_range_t;
  * The synchronous path gets that from holding svm_api_mutex across both, which
  * a worker cannot do without serializing everything again, so instead the
  * queue is part of the ordering: before a register or a map touches a range,
- * svm_revoke_sync_locked() cancels any queued revoke the new registration
- * fully covers, and waits out anything else that overlaps. A revoke can
- * therefore never land on pages a live registration has since been granted.
+ * svm_revoke_sync_locked() cancels a queued revoke only when the new grant
+ * covers both its range and every GPU it names, and waits out anything else
+ * that overlaps. A revoke can therefore never land on pages a live
+ * registration has since been granted, and can never be dropped for a GPU the
+ * grant leaves without access.
  */
 struct svm_revoke_work {
 	struct svm_revoke_work *next;
@@ -1713,15 +1715,62 @@ static bool svm_range_covers(void *outer_start, uint64_t outer_size,
 }
 
 /*
+ * Return true when a grant of @gpu_ids re-grants every GPU that a queued
+ * revoke of (@revoke_mask, @revoke_all) would take away.
+ *
+ * The mask is rebuilt here rather than shared with
+ * svm_api_range_add_gpus_locked(), which sets gpu_all for any GPU past the
+ * width of the mask so that the revoke over-approximates. Coverage has to err
+ * the other way: a GPU the mask cannot name counts as not granted, and a
+ * revoke that names every GPU is only covered by a grant that does the same.
+ */
+static bool svm_grant_covers_revoke(const struct hsa_kfd_fmm_context *fmm_ctx,
+				    const uint32_t *gpu_ids, uint32_t num_gpu_ids,
+				    uint64_t revoke_mask, bool revoke_all)
+{
+	uint32_t num_gpus = fmm_ctx->all_gpu_id_array_size / sizeof(uint32_t);
+	uint64_t grant_mask = 0;
+	uint32_t i, j;
+
+	if (!gpu_ids || !num_gpu_ids)
+		return false;
+
+	for (i = 0; i < num_gpu_ids; i++) {
+		for (j = 0; j < num_gpus && j < SVM_API_GPU_MASK_BITS; j++) {
+			if (fmm_ctx->all_gpu_id_array[j] != gpu_ids[i])
+				continue;
+			grant_mask |= 1ULL << j;
+			break;
+		}
+	}
+
+	if (revoke_all) {
+		uint64_t all_mask;
+
+		if (num_gpus > SVM_API_GPU_MASK_BITS)
+			return false;
+		all_mask = num_gpus == SVM_API_GPU_MASK_BITS ?
+			   ~0ULL : (1ULL << num_gpus) - 1;
+		return grant_mask == all_mask;
+	}
+
+	return (revoke_mask & ~grant_mask) == 0;
+}
+
+/*
  * Make the deferred queue safe for a registration or a grant of
- * [address, address + size): cancel the queued revokes it fully covers, since
- * the range is live again and the pages would only have been re-granted, and
+ * [address, address + size) to @gpu_ids: cancel a queued revoke only when this
+ * grant both covers its range and re-grants every GPU it would remove, since
+ * then the pages end up exactly where the revoke would have left them, and
  * wait out anything else that overlaps rather than letting it land afterwards.
+ *
+ * A caller that grants nothing passes a NULL @gpu_ids and so cancels nothing.
  *
  * Called with svm_api_mutex held; the wait drops it.
  */
 static void svm_revoke_sync_locked(struct hsa_kfd_fmm_context *fmm_ctx,
-				   void *address, uint64_t size)
+				   void *address, uint64_t size,
+				   const uint32_t *gpu_ids, uint32_t num_gpu_ids)
 {
 	struct svm_revoke_work *prev, *w, *next;
 	bool wait;
@@ -1742,10 +1791,13 @@ static void svm_revoke_sync_locked(struct hsa_kfd_fmm_context *fmm_ctx,
 				w = next;
 				continue;
 			}
-			if (!svm_range_covers(address, size, w->addr, w->size)) {
-				/* Partial overlap: trimming it would be exact
-				 * but this is rare, so let the worker finish
-				 * it first instead.
+			if (!svm_range_covers(address, size, w->addr, w->size) ||
+			    !svm_grant_covers_revoke(fmm_ctx, gpu_ids, num_gpu_ids,
+						     w->gpu_mask, w->gpu_all)) {
+				/* Partial overlap, or a revoke this grant does
+				 * not fully undo. Trimming the range would be
+				 * exact but both are rare, so let the worker
+				 * finish the item first instead.
 				 */
 				wait = true;
 				break;
@@ -1960,7 +2012,11 @@ static HSAKMT_STATUS fmm_register_mem_svm_api(HsaKFDContext *ctx,
 	 */
 	if (fmm_ctx->svm.svm_host_unregister) {
 		pthread_mutex_lock(&fmm_ctx->svm_api_mutex);
-		svm_revoke_sync_locked(fmm_ctx, (void *)aligned_addr, aligned_size);
+		/* Register grants no GPU access of its own, so it can only
+		 * wait a queued revoke out, never cancel it.
+		 */
+		svm_revoke_sync_locked(fmm_ctx, (void *)aligned_addr, aligned_size,
+				       NULL, 0);
 		tracked = svm_api_range_get_locked(fmm_ctx, address, (void *)aligned_addr,
 						   aligned_size, size);
 		pthread_mutex_unlock(&fmm_ctx->svm_api_mutex);
@@ -4689,7 +4745,9 @@ static HSAKMT_STATUS _fmm_map_to_gpu_userptr(HsaKFDContext *ctx,
 			 */
 			pthread_mutex_lock(&fmm_ctx->svm_api_mutex);
 			svm_revoke_sync_locked(fmm_ctx, svm_addr,
-					       PAGE_ALIGN_UP(page_offset + size));
+					       PAGE_ALIGN_UP(page_offset + size),
+					       nodes_to_map,
+					       nodes_array_size / sizeof(uint32_t));
 			ret = fmm_map_mem_svm_api(ctx, svm_addr,
 						  PAGE_ALIGN_UP(page_offset + size),
 						  nodes_to_map,
