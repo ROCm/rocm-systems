@@ -7846,11 +7846,11 @@ int SelectAllGatherAlgo(ncclComm* comm) {
 }
 
 // Distinct send and receive buffers, so the out-of-place path is the one selected.
-int SelectAlltoAllAlgo(ncclComm* comm) {
+int SelectAlltoAllAlgo(ncclComm* comm, size_t count = 8) {
   alignas(256) static char send[256];
   alignas(256) static char recv[256];
   rcclCollDecision decision{};
-  EXPECT_EQ(ncclSuccess, rcclSelectAlltoAll(comm, send, recv, /*count=*/8, ncclFloat32, /*stream=*/nullptr,
+  EXPECT_EQ(ncclSuccess, rcclSelectAlltoAll(comm, send, recv, count, ncclFloat32, /*stream=*/nullptr,
                                             /*query=*/true, /*graphCapturingHint=*/false, &decision));
   return decision.algo;
 }
@@ -9539,6 +9539,45 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_DdaIpcChosenOnNonGfx1250Arch) {
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_IPC, decision.algo);
 
         DeleteCommWithArch(comm);
+      });
+}
+
+// The real tables set the 8-rank DDA IPC AlltoAll cap: gfx950 takes DDA IPC to 64 MiB total, gfx942 to 4 MiB.
+// Totals above the cap take Direct p2p.
+TEST(WrapMicrotestIsolated, SelectAlltoAll_DdaIpcCapFollowsTheArchTable) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAlltoAll_DdaIpcCapFollowsTheArchTable",
+      []() {
+        ScopedHook ipcEligible(g_allToAllDdaIpcEligible,
+                               [](ncclComm*, const void*, void*, size_t, ncclDataType_t) { return true; });
+        const int ipc = (int)rcclAddonAlgos_t::RCCL_DDA_IPC;
+        const int direct = (int)rcclAddonAlgos_t::RCCL_DIRECT_ALLTOALL;
+        constexpr size_t kLineFloats = 16 / sizeof(float);
+        struct Case {
+          const char* arch;
+          size_t mib;         // total MiB
+          size_t extraLines;  // 16-byte lines per peer on top
+          int algo;
+        };
+        const Case cases[] = {
+            {"gfx950", 4, 0, ipc},
+            {"gfx950", 4, 1, ipc},
+            {"gfx950", 16, 0, ipc},
+            {"gfx950", 64, 0, ipc},
+            {"gfx950", 64, 1, direct},
+            {"gfx942", 4, 0, ipc},
+            {"gfx942", 4, 1, direct},
+            {"gfx942", 64, 0, direct},
+        };
+        for (const Case& c : cases) {
+          ncclComm* comm = MakeCommWithArch(c.arch);
+          comm->nRanks = 8;
+          comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds(c.arch, RCCL_TUNING_PARTITION_SPX);
+          EXPECT_NE(nullptr, comm->archThresholds) << c.arch;
+          const size_t count = c.mib * kMiB / comm->nRanks / sizeof(float) + c.extraLines * kLineFloats;
+          EXPECT_EQ(c.algo, SelectAlltoAllAlgo(comm, count)) << c.arch << " " << c.mib << " MiB + " << c.extraLines;
+          DeleteCommWithArch(comm);
+        }
       });
 }
 

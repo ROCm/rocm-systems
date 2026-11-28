@@ -144,17 +144,17 @@ TEST_F(DdaIpcEligibilityTest, AllToAll_StagingBytesAtThresholdFitsScratch)
         kAlltoAllFloat32CountAt4MbThreshold,
         mockComm_.comm.nRanks,
         sizeof(float));
-    EXPECT_EQ(stagingBytes, rcclGetArchThresholds("gfx950")->ddaVmmMax[ncclFuncAlltoAll]);
+    EXPECT_EQ(stagingBytes, rcclGetArchThresholds("gfx942")->ddaVmmMax[ncclFuncAlltoAll]);
     EXPECT_LE(stagingBytes, mockComm_.comm.ddaScratchBytes);
 }
 
 TEST_F(DdaIpcEligibilityTest, AllToAll_StagingBytesOneCountOverThresholdStillEligible)
 {
-    // Eligibility is independent of the 4 MiB dispatch cap enforced in collectives.cc.
+    // Eligibility is independent of the gfx942 4 MiB dispatch cap enforced in rcclSelectAlltoAll.
     const size_t count = kAlltoAllFloat32CountAt4MbThreshold + 4;
     const size_t stagingBytes = testAlltoAllDdaIpcStagingBytes(
         count, mockComm_.comm.nRanks, sizeof(float));
-    EXPECT_GT(stagingBytes, rcclGetArchThresholds("gfx950")->ddaVmmMax[ncclFuncAlltoAll]);
+    EXPECT_GT(stagingBytes, rcclGetArchThresholds("gfx942")->ddaVmmMax[ncclFuncAlltoAll]);
     EXPECT_TRUE(ncclAllToAllDdaIpcEligible(
         mockComm_.get(), sendbuff_, recvbuff_, count, ncclFloat32));
 }
@@ -170,6 +170,20 @@ TEST_F(DdaIpcEligibilityTest, AllToAll_ZeroCount)
 {
     EXPECT_FALSE(ncclAllToAllDdaIpcEligible(
         mockComm_.get(), sendbuff_, recvbuff_, 0, ncclFloat32));
+}
+
+// DDA IPC AlltoAll is single node at every size the arch caps allow, 64 MiB on gfx950 included.
+TEST_F(DdaIpcEligibilityTest, AllToAll_MultiNode)
+{
+    for (size_t count : {size_t{4}, kAlltoAllFloat32CountAt4MbThreshold, kAlltoAllFloat32CountAt64MbThreshold})
+    {
+        mockComm_.comm.nNodes = 1;
+        EXPECT_TRUE(ncclAllToAllDdaIpcEligible(
+            mockComm_.get(), sendbuff_, recvbuff_, count, ncclFloat32)) << count;
+        mockComm_.comm.nNodes = 2;
+        EXPECT_FALSE(ncclAllToAllDdaIpcEligible(
+            mockComm_.get(), sendbuff_, recvbuff_, count, ncclFloat32)) << count;
+    }
 }
 
 TEST_F(DdaIpcEligibilityTest, ReduceScatter_EligibleFloat32)

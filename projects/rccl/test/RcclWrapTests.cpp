@@ -3563,7 +3563,7 @@ TEST(RcclAlltoAllDecision, Gfx1250Dpx_A2aBandsIgnoreBufferAlignment)
     }
 }
 
-// gfx950, message at its DDA-IPC ceiling (ddaVmmMax[A2A] = 4 MiB):
+// gfx950, message at its DDA-IPC ceiling (ddaVmmMax[A2A] = 64 MiB):
 // rcclSelectAlltoAll must choose RCCL_DDA_IPC.
 TEST(RcclAlltoAllDecision, Gfx950_DdaIpc_Band)
 {
@@ -3575,12 +3575,16 @@ TEST(RcclAlltoAllDecision, Gfx950_DdaIpc_Band)
     const size_t ddaMax = tbl->ddaVmmMax[ncclFuncAlltoAll];
     ASSERT_GT(ddaMax, 0ul) << "gfx950 must have a non-zero DDA-IPC cap for AlltoAll";
 
-    rcclCollDecision dec{};
-    ASSERT_EQ(SelectA2A(*comm, ddaMax, dec), ncclSuccess);
-    EXPECT_EQ(dec.algo, RCCL_DDA_IPC);
+    for (ncclDataType_t dt : {ncclFloat32, ncclBfloat16})
+    {
+        rcclCollDecision dec{};
+        ASSERT_EQ(SelectA2A(*comm, ddaMax, dec, 0, 0, dt), ncclSuccess);
+        EXPECT_EQ(dec.algo, RCCL_DDA_IPC) << dt;
+        EXPECT_EQ(dec.nMaxChannels, uint32_t{DDA_IPC_MAXBLOCKS}) << dt;
+    }
 }
 
-// gfx950, message above its 4 MiB DDA-IPC cap: falls to RCCL_DIRECT_ALLTOALL.
+// gfx950, message above its 64 MiB DDA-IPC cap: falls to RCCL_DIRECT_ALLTOALL.
 TEST(RcclAlltoAllDecision, Gfx950_AboveDdaCap_DirectFallback)
 {
     auto comm = std::make_unique<ncclComm>();
@@ -3595,6 +3599,45 @@ TEST(RcclAlltoAllDecision, Gfx950_AboveDdaCap_DirectFallback)
 
     rcclCollDecision dec{};
     ASSERT_EQ(SelectA2A(*comm, totalBytes, dec), ncclSuccess);
+    EXPECT_EQ(dec.algo, RCCL_DIRECT_ALLTOALL);
+}
+
+// gfx950 runs DDA IPC AlltoAll above the old 4 MiB cap on the DDA IPC block cap; a 2-node comm takes Direct.
+TEST(RcclAlltoAllDecision, Gfx950_DdaIpc_Above4MiB)
+{
+    auto comm = std::make_unique<ncclComm>();
+    auto topo = std::make_unique<ncclTopoSystem>();
+    InitA2ADecisionComm(*comm, *topo, "gfx950", 8);
+    const size_t align = 16u * (size_t)comm->nRanks;
+    for (size_t totalBytes : {(4ul << 20) + align, 8ul << 20, 16ul << 20, 32ul << 20})
+    {
+        rcclCollDecision dec{};
+        ASSERT_EQ(SelectA2A(*comm, totalBytes, dec), ncclSuccess) << totalBytes;
+        EXPECT_EQ(dec.algo, RCCL_DDA_IPC) << totalBytes;
+        EXPECT_EQ(dec.nMaxChannels, uint32_t{DDA_IPC_MAXBLOCKS}) << totalBytes;
+    }
+    comm->nNodes = 2;
+    rcclCollDecision dec{};
+    ASSERT_EQ(SelectA2A(*comm, 16ul << 20, dec), ncclSuccess);
+    EXPECT_EQ(dec.algo, RCCL_DIRECT_ALLTOALL);
+}
+
+// gfx942, message one line above its 4 MiB DDA-IPC cap: falls to RCCL_DIRECT_ALLTOALL.
+TEST(RcclAlltoAllDecision, Gfx942_AboveDdaCap_DirectFallback)
+{
+    auto comm = std::make_unique<ncclComm>();
+    auto topo = std::make_unique<ncclTopoSystem>();
+    InitA2ADecisionComm(*comm, *topo, "gfx942", 8);
+    const rcclArchThresholds* tbl = rcclGetArchThresholds("gfx942");
+    ASSERT_NE(tbl, nullptr);
+    const size_t ddaMax = tbl->ddaVmmMax[ncclFuncAlltoAll];
+    ASSERT_EQ(ddaMax, 4ul << 20);
+    const size_t align = 16u * (size_t)comm->nRanks;
+
+    rcclCollDecision dec{};
+    ASSERT_EQ(SelectA2A(*comm, ddaMax, dec), ncclSuccess);
+    EXPECT_EQ(dec.algo, RCCL_DDA_IPC);
+    ASSERT_EQ(SelectA2A(*comm, ddaMax + align, dec), ncclSuccess);
     EXPECT_EQ(dec.algo, RCCL_DIRECT_ALLTOALL);
 }
 

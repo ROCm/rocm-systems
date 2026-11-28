@@ -6,11 +6,12 @@
 
 /**
  * @file DdaIpcIndexDataMPITests.cpp
- * @brief MPI end-to-end checks for the DDA IPC AllReduce and ReduceScatter kernels and for DDA IPC init.
+ * @brief MPI end-to-end checks for the DDA IPC AllReduce, ReduceScatter and AlltoAll kernels and for DDA IPC init.
  *
  * DdaIpcMPI_IndexData: every rank sends rank- and index-dependent data, so each element and each slice of the result
  * is distinct. A per-rank constant fill sums to the same value everywhere and hides a kernel that reads or writes the
- * wrong offset.
+ * wrong offset. AlltoAll runs in place and out of place, back to back with a DDA IPC AllReduce after each call; every
+ * size that selects DDA IPC is data-checked, and the sizes just over each cap must select another path.
  *
  * DdaIpcMPI_CommLifecycle: DDA IPC must come up on a communicator created after another one is destroyed. It needs
  * cuMem, and NCCL_CUMEM_ENABLE is cached at the first read, so run this suite in its own process.
@@ -22,13 +23,14 @@
 
 #ifdef MPI_TESTS_ENABLED
 
-#include <gtest/gtest.h>
-#include <hip/hip_runtime.h>
-#include <mpi.h>
-
+#include <cstdint>
 #include <cstdlib>
 #include <string>
 #include <vector>
+
+#include <gtest/gtest.h>
+#include <hip/hip_runtime.h>
+#include <mpi.h>
 
 #include "DeviceBufferHelpers.hpp"
 #include "MPIHelpers.hpp"
@@ -54,6 +56,29 @@ constexpr int kLifecycleCycles = 2;
 
 // 4 KiB fp32: well below the DDA IPC AllReduce caps on gfx942 and gfx950.
 constexpr size_t kLifecycleCount = 1024;
+
+// AlltoAll bytes per peer: one block, several blocks, and each side of the 4 MiB (gfx942) and 64 MiB (gfx950) caps.
+constexpr size_t kA2aPerPeerBytes[] = {
+  251ULL * 16,          // single block, prime line count
+  (8ULL << 10) + 16,    // two blocks
+  512ULL << 10,         // 4 MiB total
+  (512ULL << 10) + 16,  // just over 4 MiB total
+  2ULL << 20,           // 16 MiB total
+  8ULL << 20,           // 64 MiB total
+  (8ULL << 20) + 16,    // just over 64 MiB total
+};
+
+// The first three sizes are within every arch's DDA IPC AlltoAll cap, so they always run.
+constexpr size_t kA2aCasesUpTo4Mb = 3;
+
+// fp32 AllReduce run after each AlltoAll: above the flat/tree threshold, so it also stages through the scratch.
+constexpr size_t kA2aInterleavedArCount = 1u << 20;
+
+// Word w of the chunk rank src sends to rank dst. Pair and index both differ, so a chunk at the wrong peer or offset
+// fails; 24 index bits outlast the largest chunk (2M + 4 words).
+uint32_t a2aPattern(int src, int dst, size_t w) {
+  return (static_cast<uint32_t>(src) << 28) | (static_cast<uint32_t>(dst) << 24) | static_cast<uint32_t>(w & 0xFFFFFF);
+}
 
 struct IndexCase {
   ncclDataType_t dtype;
@@ -218,6 +243,144 @@ protected:
     }
   }
 
+  // Runs every AlltoAll size out of place, then in place.
+  void runAlltoAll() {
+    // RCCL_CE_ALLREDUCE=1 lets CE take the interleaved AllReduce ahead of DDA.
+    const bool ceAllReduce = rcclCeAllReduceEnabled(getActiveCommunicator());
+    const std::string skip = mpiCoordinatedSkipReason(ceAllReduce, "CE AllReduce routes away from DDA IPC");
+    if (!skip.empty()) {
+      GTEST_SKIP() << skip;
+    }
+    for (bool inPlace : {false, true}) {
+      runAlltoAllOnce(inPlace);
+      if (HasFailure() || IsSkipped()) {
+        return;
+      }
+    }
+  }
+
+  // An AlltoAll arena call: where in the arena it ran and its bytes per peer.
+  struct A2aCall {
+    size_t offset;
+    size_t perPeer;
+  };
+
+  // Launches every DDA IPC size back to back, each followed by a DDA IPC AllReduce, syncs once, then checks all.
+  void runAlltoAllOnce(bool inPlace) {
+    ncclComm* comm = getActiveCommunicator();
+    const size_t ddaMax = rcclDdaEntryThreshold(comm, ncclFuncAlltoAll);
+    size_t arenaBytes = 0;
+    for (size_t perPeer : kA2aPerPeerBytes) {
+      arenaBytes += perPeer * static_cast<size_t>(nRanks_);
+    }
+    void* sendArena = nullptr;
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&sendArena, arenaBytes));
+    DeviceBufferAutoGuard sendGuard(sendArena);
+    void* recvArena = sendArena;
+    DeviceBufferAutoGuard recvGuard;
+    if (!inPlace) {
+      ASSERT_MPI_EQ(hipSuccess, hipMalloc(&recvArena, arenaBytes));
+      recvGuard.set(recvArena);
+      ASSERT_MPI_EQ(hipSuccess, hipMemset(recvArena, 0xA5, arenaBytes));
+    }
+    // Rank r sends r + 1 to every AllReduce, so each result element is nRanks * (nRanks + 1) / 2.
+    const size_t nSizes = sizeof(kA2aPerPeerBytes) / sizeof(kA2aPerPeerBytes[0]);
+    void* arSend = nullptr;
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&arSend, kA2aInterleavedArCount * sizeof(float)));
+    DeviceBufferAutoGuard arSendGuard(arSend);
+    void* arRecv = nullptr;
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&arRecv, nSizes * kA2aInterleavedArCount * sizeof(float)));
+    DeviceBufferAutoGuard arRecvGuard(arRecv);
+    const int rank = rank_;
+    ASSERT_MPI_EQ(hipSuccess, initializeBufferWithPattern<float>(arSend, kA2aInterleavedArCount,
+                                                                 [=](size_t) { return float(rank + 1); }));
+    int arAlgo = -1;
+    int arProtocol = -1;
+    int arChannels = -1;
+    ASSERT_MPI_EQ(ncclSuccess, rcclGetCollImplInfo(comm, ncclFuncAllReduce, kA2aInterleavedArCount, ncclFloat32,
+                                                   ncclSum, arSend, arRecv, 0, &arAlgo, &arProtocol, &arChannels));
+    ASSERT_MPI_EQ(static_cast<int>(RCCL_DDA_IPC), arAlgo);
+
+    std::vector<A2aCall> launched;
+    size_t offset = 0;
+    for (size_t perPeer : kA2aPerPeerBytes) {
+      const size_t total = perPeer * static_cast<size_t>(nRanks_);
+      const A2aCall call{offset, perPeer};
+      offset += total;
+      char* send = static_cast<char*>(sendArena) + call.offset;
+      char* recv = static_cast<char*>(recvArena) + call.offset;
+      const size_t count = perPeer / sizeof(float);
+      int algo = -1;
+      int protocol = -1;
+      int maxChannels = -1;
+      ASSERT_MPI_EQ(ncclSuccess, rcclGetCollImplInfo(comm, ncclFuncAlltoAll, count, ncclFloat32, ncclSum, send, recv,
+                                                     0, &algo, &protocol, &maxChannels));
+      const char* algoName = nullptr;
+      rcclGetAlgoName(algo, &algoName);
+      const bool dda = total <= ddaMax;
+      EXPECT_EQ(dda, algo == static_cast<int>(RCCL_DDA_IPC))
+        << "Rank " << rank_ << ": total " << total << " selected " << (algoName ? algoName : "?");
+      ASSERT_MPI_EQ(dda, algo == static_cast<int>(RCCL_DDA_IPC));
+      if (!dda) {
+        continue;
+      }
+      const size_t wordsPerPeer = perPeer / sizeof(uint32_t);
+      ASSERT_MPI_EQ(hipSuccess, initializeBufferWithPattern<uint32_t>(send, total / sizeof(uint32_t), [=](size_t w) {
+                      return a2aPattern(rank, static_cast<int>(w / wordsPerPeer), w % wordsPerPeer);
+                    }));
+      ASSERT_MPI_EQ(ncclSuccess, ncclAlltoAll(send, recv, count, ncclFloat32, comm, getActiveStream()));
+      float* arOut = static_cast<float*>(arRecv) + launched.size() * kA2aInterleavedArCount;
+      ASSERT_MPI_EQ(ncclSuccess, ncclAllReduce(arSend, arOut, kA2aInterleavedArCount, ncclFloat32, ncclSum, comm,
+                                               getActiveStream()));
+      launched.push_back(call);
+    }
+    ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+    EXPECT_GE(launched.size(), kA2aCasesUpTo4Mb) << "Rank " << rank_ << ": DDA cap " << ddaMax;
+
+    const std::string tag = inPlace ? "AlltoAll in-place" : "AlltoAll out-of-place";
+    std::string detail;
+    const bool ok =
+      verifyAlltoAll(recvArena, launched, &detail) && verifyInterleavedAllReduce(arRecv, launched.size(), &detail);
+    EXPECT_TRUE(ok) << "Rank " << rank_ << ": " << tag << ": " << detail;
+    int badRanks = ok ? 0 : 1;
+    MPI_Allreduce(MPI_IN_PLACE, &badRanks, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+    EXPECT_EQ(0, badRanks) << tag << ": " << badRanks << " rank(s) received wrong values";
+  }
+
+  // Word w of chunk p in this rank's receive buffer must be the word w peer p sent it.
+  bool verifyAlltoAll(const void* recvArena, const std::vector<A2aCall>& launched, std::string* detail) {
+    const int rank = rank_;
+    for (const A2aCall& call : launched) {
+      const size_t wordsPerPeer = call.perPeer / sizeof(uint32_t);
+      size_t badIdx = 0;
+      uint32_t want = 0;
+      uint32_t got = 0;
+      if (!verifyBufferData<uint32_t>(
+            static_cast<const char*>(recvArena) + call.offset, wordsPerPeer * static_cast<size_t>(nRanks_),
+            [=](size_t w) { return a2aPattern(static_cast<int>(w / wordsPerPeer), rank, w % wordsPerPeer); }, 0, 0.0,
+            &badIdx, &want, &got)) {
+        *detail = "perPeerBytes=" + std::to_string(call.perPeer) + " word " + std::to_string(badIdx) + " = " +
+                  std::to_string(got) + ", expected " + std::to_string(want);
+        return false;
+      }
+    }
+    return true;
+  }
+
+  bool verifyInterleavedAllReduce(const void* arRecv, size_t nCalls, std::string* detail) {
+    const float wantSum = float(nRanks_ * (nRanks_ + 1) / 2);
+    size_t badIdx = 0;
+    float want = 0.0f;
+    float got = 0.0f;
+    if (!verifyBufferData<float>(
+          arRecv, nCalls * kA2aInterleavedArCount, [=](size_t) { return wantSum; }, 0, 0.0, &badIdx, &want, &got)) {
+      *detail = "interleaved AllReduce element " + std::to_string(badIdx) + " = " + std::to_string(got) +
+                ", expected " + std::to_string(want);
+      return false;
+    }
+    return true;
+  }
+
   void runReduceScatter(const std::vector<IndexCase>& cases) {
     for (const IndexCase& c : cases) {
       runCase(ncclFuncReduceScatter, c);
@@ -254,6 +417,11 @@ TEST_F(DdaIpcMPI_IndexData, AllReduceTree) {
 // Each rank reduces slice rank * recvcount of every peer: one block, then several blocks per shard.
 TEST_F(DdaIpcMPI_IndexData, ReduceScatter) {
   runReduceScatter({{ncclFloat32, 1024}, {ncclFloat32, 65536}, {ncclBfloat16, 8192}});
+}
+
+// Each rank sends chunk p of its buffer to peer p.
+TEST_F(DdaIpcMPI_IndexData, AlltoAll) {
+  runAlltoAll();
 }
 
 class DdaIpcMPI_CommLifecycle : public MPITestBase {
