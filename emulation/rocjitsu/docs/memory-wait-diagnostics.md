@@ -103,7 +103,8 @@ even when its eagerly computed value disables all vector lanes.
 The shared target model handles CDNA1 through CDNA5 and RDNA1 through RDNA4, including
 RDNA3.5. Each ordered completion class retains the suffix requested by a wait.
 Scalar memory results require a zero wait. A mixed counter can prove an ordered
-result ready only using younger operations in that same completion class. The
+result ready only using younger operations in that same completion class. On gfx1250,
+`global_inv` shares the ordinary load completion order, including with EXEC zero. The
 [counter coverage document](memory-wait-counter-coverage.md) details producer families, multi-counter operations,
 instruction units, and exceptions.
 
