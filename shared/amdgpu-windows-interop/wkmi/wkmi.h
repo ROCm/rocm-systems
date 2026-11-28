@@ -61,9 +61,10 @@ struct HwsInfo {
       uint32_t computeHwsEnabled : 1;  ///< Compute engine HWS enabled
       uint32_t dmaHwsEnabled     : 1;  ///< DMA engine HWS enabled
       uint32_t dma1HwsEnabled    : 1;  ///< DMA1 engine HWS enabled
+      uint32_t dma2HwsEnabled    : 1;  ///< DMA2 engine HWS enabled
       uint32_t aql_queue         : 1;  ///< Kernel mode driver supports native AQL queue
       uint32_t sdma_queue        : 1;  ///< Kernel mode driver supports native HSA SDMA user queue
-      uint32_t reserved : 26;          ///< Reserved for future use
+      uint32_t reserved : 25;          ///< Reserved for future use
     } hwsMask;                         ///< Hardware scheduling mask bitfield
     uint32_t osHwsEnableFlags;         ///< OS HWS enable flags (raw value)
   };

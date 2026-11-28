@@ -74,6 +74,11 @@ class Flag {
   const size_t DEFAULT_SCRATCH_SINGLE_LIMIT_ASYNC_PER_XCC = (3 * (1UL << 30));  // 3 GB
   const size_t DEFAULT_PCS_MAX_DEVICE_BUFFER_SIZE = (256 * (1UL << 20));        // 256 MB
 
+  // Historical hardcoded value of SDMA_PKT_POLL_REGMEM::DW5_UNION.interval.
+  const uint32_t DEFAULT_SDMA_POLL_INTERVAL = 0x04;
+  // DW5_UNION.interval is a 16-bit field.
+  const uint32_t MAX_SDMA_POLL_INTERVAL = 0xffff;
+
   Flag() {}
 
   virtual ~Flag() {}
@@ -239,6 +244,18 @@ class Flag {
 
     var = os::GetEnvVar("HSA_ENABLE_SDMA_HDP_FLUSH");
     enable_sdma_hdp_flush_ = (var == "0") ? false : true;
+
+    // Interval field of the SDMA POLL_REGMEM packet, i.e. how long the SDMA engine
+    // waits between successive reads of the polled address. The packet field is 16
+    // bits wide; out-of-range values are clamped rather than silently truncated.
+    var = os::GetEnvVar("HSA_SDMA_POLL_INTERVAL");
+    if (var.empty()) {
+      sdma_poll_interval_ = DEFAULT_SDMA_POLL_INTERVAL;
+    } else {
+      unsigned long parsed = strtoul(var.c_str(), nullptr, 0);
+      sdma_poll_interval_ = static_cast<uint32_t>(
+          (parsed > MAX_SDMA_POLL_INTERVAL) ? MAX_SDMA_POLL_INTERVAL : parsed);
+    }
 
     var = os::GetEnvVar("HSA_REV_COPY_DIR");
     rev_copy_dir_ = (var == "1") ? true : false;
@@ -430,6 +447,8 @@ class Flag {
   bool enable_interrupt() const { return enable_interrupt_; }
 
   bool enable_sdma_hdp_flush() const { return enable_sdma_hdp_flush_; }
+
+  uint32_t sdma_poll_interval() const { return sdma_poll_interval_; }
 
   bool running_valgrind() const { return running_valgrind_; }
 
@@ -623,6 +642,7 @@ class Flag {
   bool enable_vm_fault_message_;
   bool enable_interrupt_;
   bool enable_sdma_hdp_flush_;
+  uint32_t sdma_poll_interval_;
   bool running_valgrind_;
   bool sdma_wait_idle_;
   bool enable_queue_fault_message_;
