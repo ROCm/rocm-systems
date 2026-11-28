@@ -3737,6 +3737,70 @@ TEST_F(P2pSetupMicrotest, RecvSetup_SameProcessPeer_SelectsDirectAndFillsConnect
     p2pTransport.recv.free(&comm_, &recv);
 }
 
+// Legacy-IPC export decision (NCCL 2.32.6, "Skip legacy IPC export for P2P
+// direct mappings"). A same-process P2P/direct connection consumes directPtr
+// and never imports the legacy IPC descriptor, so the proxy allocation must not
+// export one through hipIpcGetMemHandle; a cross-process legacy connection
+// still needs it. The proxy seam forwards the request setup built to the real
+// proxySetup, so the decision travels the production path end to end; the
+// oracle is the number of hipIpcGetMemHandle calls (cuMemEnable stays 0, the
+// legacy allocation arm).
+class P2pSetupLegacyIpcExportMicrotest : public P2pSetupMicrotest {
+protected:
+    // Drives one send and one recv connection setup to peer_ and returns how
+    // many legacy IPC handles the proxy side exported.
+    int SetupSendAndRecvCountingIpcExports()
+    {
+        int exports = 0;
+        bool recvSide = false;
+        auto proxyConn = std::make_unique<ncclProxyConnection>();
+        auto proxyState = std::make_unique<ncclProxyState>();
+        ScopedHook ipcGet(g_hipIpcGetMemHandle,
+            [&exports](hipIpcMemHandle_t*, void*) -> hipError_t {
+                ++exports;
+                return hipSuccess;
+            });
+        InstallTopo(/*read=*/0);
+        InstallXgmiLink();
+        connect_.emplace(g_proxyConnect, MarkProxyConnInitialized());
+        proxy_.emplace(g_proxyCallBlocking,
+            [&](struct ncclComm*, struct ncclProxyConnector*, int type,
+                void* req, int reqSize, void* resp, int respSize) -> ncclResult_t {
+                if (type != ncclProxyMsgSetup) return ncclSuccess;
+                int done = 0;
+                auto setup = recvSide ? p2pTransport.recv.proxySetup : p2pTransport.send.proxySetup;
+                return setup(proxyConn.get(), proxyState.get(), req, reqSize, resp, respSize, &done);
+            });
+
+        EXPECT_EQ(p2pTransport.send.setup(&comm_, nullptr, &myInfo_, &peer_,
+                                          &connect_info_, &send_, 0, 0),
+                  ncclSuccess);
+        recvSide = true;
+        ncclConnect recvInfo{};
+        ncclConnector recv{};
+        EXPECT_EQ(p2pTransport.recv.setup(&comm_, nullptr, &myInfo_, &peer_,
+                                          &recvInfo, &recv, 0, 0),
+                  ncclSuccess);
+
+        p2pTransport.send.free(&comm_, &send_);
+        p2pTransport.recv.free(&comm_, &recv);
+        proxy_.reset();  // its lambda captures this frame's locals
+        return exports;
+    }
+};
+
+TEST_F(P2pSetupLegacyIpcExportMicrotest, SameProcessDirect_SkipsLegacyIpcExport)
+{
+    // peer_ defaults to the same process => both ends select P2P_DIRECT.
+    EXPECT_EQ(SetupSendAndRecvCountingIpcExports(), 0);
+}
+
+TEST_F(P2pSetupLegacyIpcExportMicrotest, CrossProcessLegacy_StillExportsLegacyIpcHandle)
+{
+    peer_.pidHash = kPid + 1;  // different process => P2P_IPC on both ends
+    EXPECT_EQ(SetupSendAndRecvCountingIpcExports(), 2);
+}
+
 TEST_F(P2pSetupMicrotest, SendSetup_ReadEnableParamOverridesTopology_ForcesReadFlag)
 {
     // The topology says "no read", but NCCL_P2P_READ_ENABLE is set to a
