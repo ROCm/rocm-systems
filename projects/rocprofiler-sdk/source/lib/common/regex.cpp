@@ -229,6 +229,10 @@ struct Parser
                             special_preds.emplace_back(
                                 [](unsigned char x) { return std::isspace(x) != 0; });
                             break;
+                        case 'S':
+                            special_preds.emplace_back(
+                                [](unsigned char x) { return std::isspace(x) == 0; });
+                            break;
                     }
                     continue;
                 }
