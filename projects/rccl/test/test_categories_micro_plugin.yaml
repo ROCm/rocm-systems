@@ -12,6 +12,7 @@ test_categories:
       - "Plugin*"
       - "Profiler*"
       - "Rma*"  # rma.cc's RmaPluginInitTest and RmaInternalBackendTest, and rma/rma_v<N>.cc
+      - "TunerV*"  # tuner/tuner_v<N>.cc
     exclude_windows:
       - "*"
     labels:

@@ -138,6 +138,9 @@ struct Gfx94P2pLlOpts {
   int isAllNvlink = 1;
   bool ll128OptIn = false;
   int p2pChunkSize = 1 << 19;
+  // The LL fit fallback needs nChannelsMax > 1: with one channel its cap equals the per-channel cutoff.
+  int nChannels = 1;
+  const char* gcn = nullptr; // nullptr: gfx950 for cudaArch 950, else gfx942
 };
 
 struct Gfx94P2pLlScene {
@@ -150,7 +153,9 @@ struct Gfx94P2pLlScene {
   char sendMem[8]{};
   char recvMem[8]{};
 
-  explicit Gfx94P2pLlScene(Gfx94P2pLlOpts opts) : bp(opts.nNodes, opts.cudaArch) {
+  int nChannels;
+
+  explicit Gfx94P2pLlScene(Gfx94P2pLlOpts opts) : bp(opts.nNodes, opts.cudaArch), nChannels(opts.nChannels) {
     InstallSendRecvDevFuncIds();
     ncclComm* c = bp.c();
     c->rank = 0;
@@ -162,14 +167,14 @@ struct Gfx94P2pLlScene {
     c->allocP2pNetLLBuffers = opts.ll128OptIn;
     c->ll128LineElems = 8;
     c->ll128DataElems = 7;
-    c->p2pnChannels = 1;
-    c->p2pnChannelsPerPeer = 1;
+    c->p2pnChannels = opts.nChannels;
+    c->p2pnChannelsPerPeer = opts.nChannels;
     c->p2pChannelShiftSize = 0;
     c->p2pChunkSize = opts.p2pChunkSize;
     c->buffSizes[NCCL_PROTO_LL] = 1 << 20;
     c->buffSizes[NCCL_PROTO_LL128] = 1 << 20;
     c->buffSizes[NCCL_PROTO_SIMPLE] = 1 << 20;
-    SetSingleGpuArch(topo.get(), opts.cudaArch == 950 ? "gfx950" : "gfx942");
+    SetSingleGpuArch(topo.get(), opts.gcn ? opts.gcn : (opts.cudaArch == 950 ? "gfx950" : "gfx942"));
     topo->ll128Enabled = opts.ll128OptIn;
     c->topo = topo.get();
 
@@ -182,12 +187,12 @@ struct Gfx94P2pLlScene {
         peers[i].send[ci].conn.buffs[NCCL_PROTO_LL128] = peers[i].recv[ci].conn.buffs[NCCL_PROTO_LL128] = ll128Buf;
       }
     }
-    c->channels[0].peers = peerSlots.data();
+    for (int ch = 0; ch < opts.nChannels; ++ch) c->channels[ch].peers = peerSlots.data();
   }
 
   ncclResult_t add(ssize_t bytes) {
     struct ncclTaskP2p* tasks[2] = {nullptr, nullptr};
-    return addP2pToPlan(bp.c(), bp.p(), /*nChannelsMin=*/1, /*nChannelsMax=*/1, /*p2pRound=*/0,
+    return addP2pToPlan(bp.c(), bp.p(), /*nChannelsMin=*/1, /*nChannelsMax=*/nChannels, /*p2pRound=*/0,
                         /*sendRank=*/1, sendMem, bytes, /*recvRank=*/1, recvMem, bytes,
                         /*sendOpCount=*/0, /*recvOpCount=*/0, tasks);
   }
@@ -580,6 +585,34 @@ TEST_F(EnqueueMicrotest, AddP2pToPlan_Gfx94EmptyLlThreshold_Widens) {
   SetMicroEnv("NCCL_P2P_LL_THRESHOLD", "");
   SetParam("P2P_LL_THRESHOLD", 4096);
   ExpectGfx94RecvProtoLL(940, 16 << 10, 1);
+}
+
+// Over PCIe, 4 channels make the fit fallback's cap 16 KiB, so where it applies 8 KiB/peer turns
+// LL through it. Navi (gfx11, gfx12) has no fit fallback, so only the per-channel 4 KiB rule
+// picks LL, as before the 2.32.6 sync.
+Gfx94P2pLlOpts PcieP2pLlOpts(int cudaArch, const char* gcn) {
+  Gfx94P2pLlOpts opts;
+  opts.cudaArch = cudaArch;
+  opts.gcn = gcn;
+  opts.isAllNvlink = 0;
+  opts.nChannels = 4;
+  return opts;
+}
+
+TEST_F(EnqueueMicrotest, AddP2pToPlan_Navi_StaysSimpleAboveThePerChannelCutoff) {
+  PinP2pLlThreshold(/*userSet=*/false);
+  for (auto [cudaArch, gcn] : {std::pair{1100, "gfx1100"}, std::pair{1150, "gfx1151"}, std::pair{1200, "gfx1201"}}) {
+    SCOPED_TRACE(gcn);
+    ExpectGfx94RecvProtoLL(PcieP2pLlOpts(cudaArch, gcn), 4 << 10, 1);
+    ExpectGfx94RecvProtoLL(PcieP2pLlOpts(cudaArch, gcn), 8 << 10, 0);
+    ExpectGfx94RecvProtoLL(PcieP2pLlOpts(cudaArch, gcn), 16 << 10, 0);
+  }
+  // Controls: the same scene on gfx942 and gfx1250 reaches the fit fallback.
+  for (auto [cudaArch, gcn] : {std::pair{940, "gfx942"}, std::pair{1250, "gfx1250"}}) {
+    SCOPED_TRACE(gcn);
+    ExpectGfx94RecvProtoLL(PcieP2pLlOpts(cudaArch, gcn), 8 << 10, 1);
+    ExpectGfx94RecvProtoLL(PcieP2pLlOpts(cudaArch, gcn), 16 << 10, 1);
+  }
 }
 
 // 32 KiB is inside the widen (stock cutoff is 4 KiB). Each gate that is off must
