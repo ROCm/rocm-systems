@@ -56,7 +56,10 @@ class TestCpuIdentity(unittest.TestCase):
 
     def test_get_cpu_handles(self):
         self.common.print_func_name("")
-        self.common.Test_API(amdsmi_get_cpu_handles=amdsmi.amdsmi_get_cpu_handles)
+        # The result holds opaque C handles, which the shared JSON printer cannot serialize, so
+        # log the handle count here instead of passing the raw result to Test_API.
+        ret = amdsmi.amdsmi_get_cpu_handles()
+        self.common.print("\tamdsmi_get_cpu_handles():", {"cpu_count": ret["cpu_count"]})
         return
 
     def test_get_cpu_model(self):

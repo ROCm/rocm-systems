@@ -12,6 +12,7 @@ namespace {
 std::string g_sysfs_drm_root = "/sys/class/drm";
 std::string g_app_tmp_dir = "/tmp";
 std::string g_kfd_nodes_path_root = "/sys/class/kfd/kfd/topology/nodes";
+int g_esmi_status_override = kNoEsmiStatusOverride;
 }  // namespace
 
 // The setters are declared only in the tests (test_fixture_utils.h), not in the header above.
@@ -28,5 +29,9 @@ AMDSMI_TEST_HOOK void SetKfdNodesPathRoot(const std::string& root) { g_kfd_nodes
 const std::string& AppTmpDir() { return g_app_tmp_dir; }
 
 AMDSMI_TEST_HOOK void SetAppTmpDir(const std::string& dir) { g_app_tmp_dir = dir; }
+
+int EsmiStatusOverride() { return g_esmi_status_override; }
+
+AMDSMI_TEST_HOOK void SetEsmiStatusOverride(int status) { g_esmi_status_override = status; }
 
 }  // namespace amd::smi::test_hooks

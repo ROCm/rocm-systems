@@ -60,6 +60,10 @@ const std::map<esmi_status_t, amdsmi_status_t> esmi_status_map = {
     {ESMI_ARG_PTR_NULL, AMDSMI_STATUS_ARG_PTR_NULL},
     {ESMI_HSMP_TIMEOUT, AMDSMI_STATUS_HSMP_TIMEOUT},
     {ESMI_NO_HSMP_MSG_SUP, AMDSMI_STATUS_NO_HSMP_MSG_SUP},
+    // No AMD SMI status names an unmet prerequisite, so use the generic failure.
+    {ESMI_PRE_REQ_NOT_SAT, AMDSMI_STATUS_API_FAILED},
+    {ESMI_SMU_BUSY, AMDSMI_STATUS_BUSY},
+    {ESMI_METRICS_TABLE_NOT_SUPPORTED, AMDSMI_STATUS_NOT_SUPPORTED},
 };
 
 amdsmi_status_t esmi_to_amdsmi_status(esmi_status_t status);

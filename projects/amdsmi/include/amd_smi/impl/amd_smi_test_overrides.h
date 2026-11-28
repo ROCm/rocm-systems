@@ -29,4 +29,10 @@ AMDSMI_TEST_HOOK const std::string& KfdNodesPathRoot();
 // leaving files that a later real run on the same host would read.
 AMDSMI_TEST_HOOK const std::string& AppTmpDir();
 
+// ESMI status that amdsmi_get_cpu_hsmp_proto_ver() reports instead of calling ESMI, so a test can
+// inject an ESMI failure without CPU hardware. kNoEsmiStatusOverride (the default) means "call
+// ESMI as usual". Only compiled in when BUILD_TESTS is set.
+inline constexpr int kNoEsmiStatusOverride = -1;
+AMDSMI_TEST_HOOK int EsmiStatusOverride();
+
 }  // namespace amd::smi::test_hooks
