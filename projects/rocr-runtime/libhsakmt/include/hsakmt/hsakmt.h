@@ -1506,9 +1506,7 @@ hsaKmtMemHandleFree(
 */
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtMemHandleFreePreserveMetadata(
-    HsaMemoryObjectHandle Handle
-);
+hsaKmtMemHandleFreePreserveMetadata(HsaMemoryObjectHandle Handle);
 
 HSAKMT_STATUS
 HSAKMTAPI
