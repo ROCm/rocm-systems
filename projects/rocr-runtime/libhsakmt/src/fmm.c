@@ -1894,11 +1894,14 @@ void hsakmt_kfdcontext_fini_fmm_context(HsaKFDContext *ctx)
 }
 
 /* After fork the worker does not exist in the child, so drop the queue it
- * would have drained instead of trying to join a thread that is gone.
+ * would have drained instead of trying to join a thread that is gone, and
+ * drop the range tracking, which describes the parent's registrations.
  */
 static void svm_revoke_worker_reset(struct hsa_kfd_fmm_context *fmm_ctx)
 {
 	struct svm_revoke_work *w, *next;
+	svm_api_range_t *r;
+	rbtree_node_t *n;
 
 	for (w = fmm_ctx->svm_revoke_head; w; w = next) {
 		next = w->next;
@@ -1911,6 +1914,28 @@ static void svm_revoke_worker_reset(struct hsa_kfd_fmm_context *fmm_ctx)
 	fmm_ctx->svm_revoke_inflight = NULL;
 	fmm_ctx->svm_revoke_running = false;
 	fmm_ctx->svm_revoke_stop = false;
+
+	while (fmm_ctx->svm_api_range_tree.root != &fmm_ctx->svm_api_range_tree.sentinel) {
+		n = rbtree_min(fmm_ctx->svm_api_range_tree.root,
+			       &fmm_ctx->svm_api_range_tree.sentinel);
+		r = rb_entry(n, svm_api_range_t, node);
+		hsakmt_rbtree_delete(&fmm_ctx->svm_api_range_tree, n);
+		free(r);
+	}
+	fmm_ctx->svm_api_max_extent = 0;
+
+	/* fork() copies the mutex in whatever state it had, so the child can
+	 * inherit it locked by a thread that does not exist there, and copies
+	 * the condition variables with the worker still recorded as a waiter.
+	 * The first would deadlock the next caller that takes it; the second
+	 * would hang pthread_cond_destroy() in
+	 * hsakmt_kfdcontext_fini_fmm_context(). Neither object can be repaired,
+	 * so the child starts from fresh ones, as fmm_clear_aperture() already
+	 * does for fmm_mutex.
+	 */
+	pthread_mutex_init(&fmm_ctx->svm_api_mutex, NULL);
+	pthread_cond_init(&fmm_ctx->svm_revoke_queued, NULL);
+	pthread_cond_init(&fmm_ctx->svm_revoke_retired, NULL);
 }
 
 static HSAKMT_STATUS fmm_register_mem_svm_api(HsaKFDContext *ctx,
