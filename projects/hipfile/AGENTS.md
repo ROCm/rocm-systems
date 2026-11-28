@@ -437,7 +437,13 @@ for, so security takes priority over speed and convenience.
 - **Fix security scan findings.** CodeQL
   ([hipfile-codeql.yml](../../.github/workflows/hipfile-codeql.yml), plus
   the monorepo's own CodeQL for Python and Actions) runs on PRs, and its
-  findings get fixed, not dismissed.
+  findings get fixed, not dismissed. The exception is findings caused by how
+  a test framework works, such as the unused static functions that
+  GoogleTest's `INSTANTIATE_TEST_SUITE_P` defines.
+  [`util/codeql-filter-sarif.py`](util/codeql-filter-sarif.py) removes them,
+  one query in one directory at a time, before CI uploads the results. Add
+  an entry there, with the reason, only for a finding that can't be fixed in
+  the code.
 
 ## Data path performance
 

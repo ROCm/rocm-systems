@@ -22,6 +22,13 @@ against the installed hipFile with warnings as errors. Runs the `get-version`
 example, which needs no GPU, and checks that its header and library versions
 match. Used by CI after it installs the hipFile packages.
 
+## codeql-filter-sarif.py
+
+Removes the CodeQL results that come from how GoogleTest works, such as the
+unused static functions that `INSTANTIATE_TEST_SUITE_P` defines, from SARIF
+files before CI uploads them. Each exclusion covers one query in one
+directory, and the script says why each one is there. Used by CI.
+
 ## files-changed.sh
 
 Determines if important files changed. Used by CI.
