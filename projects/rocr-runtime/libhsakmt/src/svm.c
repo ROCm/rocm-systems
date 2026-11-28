@@ -40,6 +40,8 @@ hsaKmtSVMSetAttrCtx(HsaKFDContext *ctx,
 		 HSA_SVM_ATTRIBUTE *attrs)
 {
 	struct kfd_ioctl_svm_args *args;
+	bool set_granularity;
+	bool set_access;
 	HSAuint64 s_attr;
 	HSAKMT_STATUS r;
 	HSAuint32 i;
@@ -57,11 +59,11 @@ hsaKmtSVMSetAttrCtx(HsaKFDContext *ctx,
 		return HSAKMT_STATUS_INVALID_PARAMETER;
 
 	/* Check ioctl size-field limit (14 bits = 16383 bytes max, ~2044 attrs) */
-	if (sizeof(*args) + nattr * sizeof(*attrs) > ((1UL << _IOC_SIZEBITS) - 1))
+	if (sizeof(*args) + (nattr + 1) * sizeof(*attrs) > ((1UL << _IOC_SIZEBITS) - 1))
 		return HSAKMT_STATUS_INVALID_PARAMETER;
 
 	s_attr = sizeof(*attrs) * nattr;
-	args = malloc(sizeof(*args) + s_attr);
+	args = malloc(sizeof(*args) + s_attr + sizeof(*attrs));
 	if (!args)
 		return HSAKMT_STATUS_NO_MEMORY;
 
@@ -71,7 +73,12 @@ hsaKmtSVMSetAttrCtx(HsaKFDContext *ctx,
 	args->nattr = nattr;
 	memcpy(args->attrs, attrs, s_attr);
 
+	set_granularity = false;
+	set_access = false;
 	for (i = 0; i < nattr; i++) {
+		if (attrs[i].type == KFD_IOCTL_SVM_ATTR_GRANULARITY)
+			set_granularity = true;
+
 		if (attrs[i].type != KFD_IOCTL_SVM_ATTR_PREFERRED_LOC &&
 		    attrs[i].type != KFD_IOCTL_SVM_ATTR_PREFETCH_LOC &&
 		    attrs[i].type != KFD_IOCTL_SVM_ATTR_ACCESS &&
@@ -79,6 +86,7 @@ hsaKmtSVMSetAttrCtx(HsaKFDContext *ctx,
 		    attrs[i].type != KFD_IOCTL_SVM_ATTR_NO_ACCESS)
 		    continue;
 
+		set_access = true;
 		if (attrs[i].type == KFD_IOCTL_SVM_ATTR_PREFERRED_LOC &&
 		    attrs[i].value == INVALID_NODEID) {
 			args->attrs[i].value = KFD_IOCTL_SVM_LOCATION_UNDEFINED;
@@ -97,6 +105,13 @@ hsaKmtSVMSetAttrCtx(HsaKFDContext *ctx,
 			r = HSAKMT_STATUS_INVALID_NODE_UNIT;
 			goto out;
 		}
+	}
+
+	if (hsakmt_svm_granularity >= 0 && !set_granularity && set_access) {
+		args->attrs[i].type = HSA_SVM_ATTR_GRANULARITY;
+		args->attrs[i].value = hsakmt_svm_granularity;
+		args->nattr++;
+		s_attr = s_attr + sizeof(*attrs);
 	}
 
 	/* Driver does one copy_from_user, with extra attrs size */
