@@ -37,7 +37,6 @@
 #include <cstdint>
 #include <functional>
 #include <mutex>
-#include <optional>
 #include <queue>
 #include <stdexcept>
 #include <utility>
@@ -66,7 +65,6 @@ struct pool
     // get an object from the pool. if all objects are in use, a new one will be created and added
     // to the pool
     pool_object<Tp>& acquire();
-    void             release(size_type idx);
 
     template <typename FuncT, typename... Args>
     pool_object<Tp>& acquire(FuncT&& ctor, Args&&... args);
@@ -74,18 +72,28 @@ struct pool
     template <typename FuncT = void (*)(pool_object<Tp>&)>
     void clear(FuncT&& func = [](pool_object<Tp>&) {});
 
+    // Clears only when no object is borrowed. Acquisition, release, and teardown are serialized.
+    template <typename FuncT = void (*)(pool_object<Tp>&)>
+    bool clear_if_idle(FuncT&& func = [](pool_object<Tp>&) {});
+
     std::string get_usage_report() const;
 
 private:
-    size_type              m_count         = 256;
-    std::function<void()>  m_function      = nullptr;
-    mutable std::mutex     m_pool_mtx      = {};
-    pool_array_type        m_pool          = {};
-    mutable std::mutex     m_available_mtx = {};
-    std::queue<size_type>  m_available     = {};
-    std::atomic<size_type> m_released      = 0;
-    std::atomic<size_type> m_reused        = 0;
-    std::atomic<size_type> m_new_batch     = 0;
+    friend struct pool_object<Tp>;
+
+    bool release(size_type idx);
+
+    template <typename FuncT>
+    void clear_locked(FuncT&& func);
+
+    size_type              m_count     = 256;
+    std::function<void()>  m_function  = nullptr;
+    mutable std::mutex     m_pool_mtx  = {};
+    pool_array_type        m_pool      = {};
+    std::queue<size_type>  m_available = {};
+    std::atomic<size_type> m_released  = 0;
+    std::atomic<size_type> m_reused    = 0;
+    std::atomic<size_type> m_new_batch = 0;
 };
 
 template <typename Tp>
@@ -115,60 +123,36 @@ template <typename Tp>
 pool_object<Tp>&
 pool<Tp>::acquire()
 {
-    auto _idx = std::optional<size_type>{};
+    auto lock = std::unique_lock<std::mutex>{m_pool_mtx};
+    if(m_available.empty())
     {
-        auto _avail_lk = std::unique_lock<std::mutex>{m_available_mtx};
-        if(!m_available.empty())
-        {
-            _idx = m_available.front();
-            m_available.pop();
-            if(m_released > 0)
-            {
-                m_reused++;
-            }
-        }
+        ROCP_INFO << fmt::format(
+            "Pool of type {} exhausted. Creating new batch of {} objects. New pool size: {}",
+            cxx_demangle(typeid(Tp).name()),
+            m_count,
+            m_pool.size() + m_count);
+        m_new_batch++;
+        m_function();
     }
 
-    if(_idx.has_value())
-    {
-        auto  _read_lk = std::unique_lock<std::mutex>{m_pool_mtx};
-        auto& _obj     = m_pool.at(_idx.value());
-        ROCP_FATAL_IF(!_obj.acquire()) << fmt::format(
-            "Pool object at index {} was expected to be available but was not", _idx.value());
-        return _obj;
-    }
-
-    // add a new batch
-    {
-        auto _write_pool_lk  = std::unique_lock<std::mutex>{m_pool_mtx};
-        auto _write_avail_lk = std::unique_lock<std::mutex>{m_available_mtx};
-        if(m_available.empty())
-        {
-            ROCP_INFO << fmt::format(
-                "Pool of type {} exhausted. Creating new batch of {} objects. New pool size: {}",
-                cxx_demangle(typeid(Tp).name()),
-                m_count,
-                m_pool.size() + m_count);
-            m_new_batch++;
-            m_function();
-        }
-    }
-
-    return acquire();
+    auto idx = m_available.front();
+    m_available.pop();
+    if(m_released > 0) m_reused++;
+    auto& obj = m_pool.at(idx);
+    ROCP_FATAL_IF(!obj.acquire()) << fmt::format(
+        "Pool object at index {} was expected to be available but was not", idx);
+    return obj;
 }
 
 template <typename Tp>
-void
+bool
 pool<Tp>::release(size_type idx)
 {
-    if(idx < m_pool.size())
-    {
-        auto _write_lk = std::unique_lock<std::mutex>{m_available_mtx};
-        ROCP_FATAL_IF(m_pool.at(idx).in_use())
-            << fmt::format("Pool object at index {} was expected to be not in use", idx);
-        m_available.push(idx);
-        m_released++;
-    }
+    auto lock = std::unique_lock<std::mutex>{m_pool_mtx};
+    if(idx >= m_pool.size() || !m_pool.at(idx).mark_released()) return false;
+    m_available.push(idx);
+    m_released++;
+    return true;
 }
 
 // get an object from the pool. if all objects are in use, a new one will be created and added to
@@ -185,17 +169,38 @@ pool<Tp>::acquire(FuncT&& ctor, Args&&... args)
 
 template <typename Tp>
 template <typename FuncT>
+bool
+pool<Tp>::clear_if_idle(FuncT&& func)
+{
+    auto lock = std::unique_lock<std::mutex>{m_pool_mtx};
+    for(const auto& itr : m_pool)
+    {
+        if(itr.in_use()) return false;
+    }
+    clear_locked(std::forward<FuncT>(func));
+    return true;
+}
+
+template <typename Tp>
+template <typename FuncT>
 void
 pool<Tp>::clear(FuncT&& func)
 {
-    auto _write_pool_lk = std::unique_lock<std::mutex>{m_pool_mtx};
-
-    for(auto& itr : m_pool)
-    {
+    auto lock = std::unique_lock<std::mutex>{m_pool_mtx};
+    for(const auto& itr : m_pool)
         ROCP_WARNING_IF(itr.in_use()) << fmt::format(
             "Pool object at index {} is still in use during pool clear", itr.index());
-        itr.release();
-        // run cleanup lambda
+    clear_locked(std::forward<FuncT>(func));
+}
+
+template <typename Tp>
+template <typename FuncT>
+void
+pool<Tp>::clear_locked(FuncT&& func)
+{
+    for(auto& itr : m_pool)
+    {
+        itr.mark_released();
         if constexpr(std::is_invocable_v<FuncT, pool_object<Tp>&>)
         {
             func(itr);
@@ -206,12 +211,9 @@ pool<Tp>::clear(FuncT&& func)
         }
         else
         {
-            static_assert(mpl::assert_false<FuncT>::value,
-                          "Invalid function type for pool<Tp>::clear");
+            static_assert(mpl::assert_false<FuncT>::value, "Invalid pool cleanup function type");
         }
     }
-
-    auto _write_avail_lk = std::unique_lock<std::mutex>{m_available_mtx};
 
     while(!m_available.empty())
         m_available.pop();
@@ -225,8 +227,7 @@ template <typename Tp>
 std::string
 pool<Tp>::get_usage_report() const
 {
-    auto _pool_lk  = std::unique_lock<std::mutex>{m_pool_mtx};
-    auto _avail_lk = std::unique_lock<std::mutex>{m_available_mtx};
+    auto lock = std::unique_lock<std::mutex>{m_pool_mtx};
     return fmt::format("Usage report for pool (type='{}') :: size={}, available={}, reused={}, "
                        "released={}, batches={}",
                        cxx_demangle(typeid(Tp).name()),

@@ -23,6 +23,7 @@
 #include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
+#include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/kfd/resource.hpp"
 #include "lib/rocprofiler-sdk/spm/decode.hpp"
 #include "lib/rocprofiler-sdk/spm/interface.hpp"
@@ -84,7 +85,8 @@ CounterAQLPacket::CounterMemoryPool::Alloc(void** ptr, size_t size, desc_t flags
 void
 CounterAQLPacket::CounterMemoryPool::Free(void* ptr, void* data)
 {
-    if(ptr == nullptr) return;
+    // The runtime invalidated its allocations at shutdown, so freeing through it is not possible.
+    if(ptr == nullptr || is_runtime_shutdown()) return;
 
     assert(data);
     auto& pool = *reinterpret_cast<CounterAQLPacket::CounterMemoryPool*>(data);
@@ -190,7 +192,7 @@ TraceMemoryPool::Free(void* ptr, void* data)
 
     if(pool.kfd_memory)
         pool.kfd_memory->deallocate(ptr);
-    else if(pool.free_fn)
+    else if(pool.free_fn && !is_runtime_shutdown())
         pool.free_fn(ptr);
 }
 
@@ -364,7 +366,7 @@ SPMMemoryPool::SPMMemoryPool(const AgentCache& agent, const AmdExtTable& ext, co
 void
 SPMMemoryPool::Free(void* ptr, void* data)
 {
-    if(ptr == nullptr) return;
+    if(ptr == nullptr || is_runtime_shutdown()) return;
     auto* pool = reinterpret_cast<SPMMemoryPool*>(data);
 
     ROCP_FATAL_IF(!pool || !pool->free_fn) << "Unable to deallocate from HSA memory pool";

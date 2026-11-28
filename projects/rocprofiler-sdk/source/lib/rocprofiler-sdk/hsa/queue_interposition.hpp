@@ -29,6 +29,7 @@
 #include <hsa/hsa_api_trace.h>
 
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <functional>
 #include <memory>
@@ -320,6 +321,15 @@ void
 interposition_sync();
 
 /**
+ * @brief Wait, bounded, for in-flight completions to retire
+ *
+ * Returns false if batches were still in flight at @p deadline. A caller that must not free the
+ * state those batches name should retain it and let the runtime reclaim it instead.
+ */
+bool
+interposition_sync_until(std::chrono::steady_clock::time_point deadline);
+
+/**
  * @brief Create the wake signal and launch the completion-monitor thread
  *
  * Does nothing if the monitor is already running, if interception was never installed, or once
@@ -337,13 +347,12 @@ start_completion_monitor();
  * pooled signals and correlation-id references are released. Must run before the signal pool is
  * torn down, so those releases target a live pool. A batch whose completion signal never dropped
  * produces no dispatch record and keeps its pooled signal, since its timestamps were never
- * written and the GPU may still write to that signal. Every caller returns with the monitor
- * thread dead and every record delivered, waiting on the record emitter to do so. Producers still
- * inside the doorbell path are not waited on; they see the monitor stopped and dispose of their
- * own batch.
+ * written and the GPU may still write to that signal. With wait_for_records disabled, only
+ * the HSA monitor is joined; the caller must retain state used by any pending record deliveries.
+ * Producers still inside the doorbell path see the stopped monitor and dispose of their own batch.
  */
 void
-stop_completion_monitor();
+stop_completion_monitor(bool wait_for_records = true);
 }  // namespace queue_interposition
 }  // namespace hsa
 }  // namespace rocprofiler

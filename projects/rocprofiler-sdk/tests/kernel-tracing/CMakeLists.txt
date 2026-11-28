@@ -35,7 +35,7 @@ rocprofiler_add_integration_validate_test(
     LABELS "integration-tests"
     TIMEOUT 45
     FIXTURES_REQUIRED kernel-tracing
-    DISCOVERY_ARGS -k "not test_total_runtime"
+    DISCOVERY_ARGS -k "not (test_total_runtime or test_app_dispatch_time)"
     ARGS --input ${CMAKE_CURRENT_BINARY_DIR}/kernel-tracing-test.json)
 
 rocprofiler_add_integration_validate_test(
@@ -89,3 +89,35 @@ rocprofiler_add_integration_validate_test(
     DISCOVERY_ARGS -k "test_kernel_dispatch_pipe_ids"
     ARGS --input ${CMAKE_CURRENT_BINARY_DIR}/kernel-tracing-signal-less-test.json
          --signal-less-log ${kernel-tracing-signal-less-log})
+
+string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" ROCPROFV3_PRELOAD_ENV
+               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
+
+rocprofiler_add_integration_execute_test(
+    kernel-tracing-app-dispatch-time
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --kernel-trace -d
+        ${CMAKE_CURRENT_BINARY_DIR}/app-dispatch-time-trace -o out --output-format csv --
+        $<TARGET_FILE:hsa_dispatch_time_testapp>
+        ${CMAKE_CURRENT_BINARY_DIR}/app-dispatch-time-application-times.csv
+    DEPENDS hsa_dispatch_time_testapp
+    TIMEOUT 45
+    WSL_TIMEOUT_SCALE
+    LABELS "integration-tests"
+    ENVIRONMENT "ROCPROFILER_QUEUE_INTERPOSITION=0"
+                "ROCPROFILER_CI_FREQ_SCALE_TIMESTAMPS=1" "${ROCPROFV3_PRELOAD_ENV}"
+    FIXTURES_SETUP kernel-tracing-app-dispatch-time)
+
+rocprofiler_add_integration_validate_test(
+    kernel-tracing-app-dispatch-time
+    TEST_PATHS validate.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    LABELS "integration-tests"
+    TIMEOUT 45
+    FIXTURES_REQUIRED kernel-tracing-app-dispatch-time
+    DISCOVERY_ARGS -k test_app_dispatch_time
+    ARGS --application-times
+         ${CMAKE_CURRENT_BINARY_DIR}/app-dispatch-time-application-times.csv
+         --kernel-trace
+         ${CMAKE_CURRENT_BINARY_DIR}/app-dispatch-time-trace/out_kernel_trace.csv)

@@ -26,8 +26,10 @@
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
+#include "lib/rocprofiler-sdk/hsa/async_copy.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
+#include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_correlation.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_profiler.hpp"
 #include "lib/rocprofiler-sdk/kfd/signal_less.hpp"
@@ -42,10 +44,13 @@
 #include <unistd.h>
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
+#include <thread>
+#include <vector>
 
 namespace rocprofiler
 {
@@ -623,6 +628,38 @@ QueueController::destroy_queue(hsa_queue_t* id)
     _queues.wlock([&](auto& map) { map.erase(id); });
 }
 
+void
+QueueController::reset()
+{
+    auto queues = std::vector<hsa_queue_t*>{};
+    _queues.rlock([&](const queue_map_t& map) {
+        queues.reserve(map.size());
+        for(const auto& [id, _] : map)
+            queues.emplace_back(id);
+    });
+
+    _profiler_serializer.wlock([](auto& map) { map.clear(); });
+#if !defined(NDEBUG)
+    _debug_signals.wlock([](auto& map) { map.clear(); });
+#endif
+
+    for(auto* id : queues)
+    {
+        // An adopted queue is not registered with the serializer, so its ready_signal is not
+        // retired by queue_ready(). Zero the handle once it is destroyed here to keep the
+        // Queue destructor from destroying the same handle again.
+        _queues.wlock([&](auto& map) {
+            auto itr = map.find(id);
+            if(itr == map.end()) return;
+            auto& signal = itr->second->ready_signal;
+            if(signal.handle != 0 &&
+               get_core_table().hsa_signal_destroy_fn(signal) == HSA_STATUS_SUCCESS)
+                signal.handle = 0;
+        });
+        destroy_queue(id);
+    }
+}
+
 ClientID
 QueueController::add_callback(std::optional<rocprofiler_agent_t> agent, queue_callbacks_t callbacks)
 {
@@ -1153,6 +1190,62 @@ queue_controller_sync()
     return _drained;
 }
 
+bool
+queue_controller_drain_until(std::chrono::steady_clock::time_point deadline)
+{
+    auto* controller = common::static_object<QueueController>::get();
+    if(!controller || internal_threading::fork_stale()) return true;
+
+    const bool monitor_drained = queue_interposition::interposition_sync_until(deadline);
+    bool       queues_drained  = false;
+    do
+    {
+        queues_drained = true;
+        controller->iterate_queues([&queues_drained](const Queue* queue) {
+            queues_drained = queues_drained && (queue->active_async_packets() == 0);
+        });
+        const auto now = std::chrono::steady_clock::now();
+        if(queues_drained || now >= deadline) break;
+        std::this_thread::sleep_until(std::min(deadline, now + std::chrono::milliseconds{2}));
+    } while(true);
+
+    const bool copies_drained = async_copy_sync(deadline);
+    return monitor_drained && queues_drained && copies_drained;
+}
+
+void
+queue_controller_shutdown(bool drained)
+{
+    auto* controller = common::static_object<QueueController>::get();
+    if(!controller || internal_threading::fork_stale()) return;
+
+    // A ROCr retry can enter the interceptor after the first drain. Close admission before
+    // retiring the callback data and check for completions registered since that drain.
+    drained = close_queue_write_interceptors() && drained;
+    if(drained)
+    {
+        controller->iterate_queues([&drained](const Queue* queue) {
+            drained = drained && (queue->active_async_packets() == 0);
+        });
+        drained = drained &&
+                  queue_interposition::interposition_sync_until(std::chrono::steady_clock::now());
+    }
+
+    // Stop HSA access by the monitor, but leave host record delivery to SDK finalization.
+    queue_interposition::stop_completion_monitor(false);
+    if(!drained)
+    {
+        ROCP_WARNING << "HSA completion drain timed out; retaining completion state for the "
+                        "life of the process";
+        return;
+    }
+
+    controller->reset();
+    async_copy_retire();
+    queue_fini();
+    queue_interposition::get_queue_registry().wlock([](auto& map) { map.clear(); });
+}
+
 void
 queue_controller_fini()
 {
@@ -1164,8 +1257,9 @@ queue_controller_fini()
     // (queue_fini below tears the pool down).
     queue_interposition::stop_completion_monitor();
 
-    // finalize queue data (e.g. clean up signal pool)
-    if(enable_queue_intercept()) queue_fini();
+    // finalize queue data (e.g. clean up signal pool). Once the runtime has shut down its
+    // signals are invalid, so the pool is left to process teardown instead.
+    if(enable_queue_intercept() && !is_runtime_shutdown()) queue_fini();
 
     queue_interposition::interposition_fini();
 }

@@ -22,6 +22,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+import csv
 import json
 import pytest
 import re
@@ -39,6 +40,20 @@ def pytest_addoption(parser):
         action="store",
         default=None,
         help="stderr of a run that requested KFD dispatch-log signal-less completion",
+    )
+    parser.addoption("--application-times", help="Application dispatch timestamps CSV")
+    parser.addoption("--kernel-trace", help="Kernel trace CSV")
+
+
+@pytest.fixture
+def dispatch_times(request):
+    def read_csv(option):
+        with open(request.config.getoption(option)) as inp:
+            return list(csv.DictReader(inp))
+
+    return (
+        read_csv("--application-times"),
+        read_csv("--kernel-trace"),
     )
 
 

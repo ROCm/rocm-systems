@@ -31,6 +31,7 @@
 
 #include <hsa/hsa_api_trace.h>
 
+#include <chrono>
 #include <cstdint>
 #include <string_view>
 #include <vector>
@@ -211,6 +212,23 @@ dlsym_table<hsa_amd_ext_table_t>(hsa_amd_ext_table_t* _orig);
 
 int
 get_hsa_ref_count();
+
+/**
+ * @brief Whether the final hsa_shut_down has succeeded
+ *
+ * After it returns, the runtime has invalidated the signals, queues, and allocations the SDK holds.
+ * State that could not be retired before the call is abandoned to process teardown, so teardown
+ * paths consult this to avoid calling into a closed runtime. Cleared by the next successful
+ * hsa_init.
+ */
+#if defined(ROCPROFILER_CI_STRICT_TIMESTAMPS) && ROCPROFILER_CI_STRICT_TIMESTAMPS > 0
+constexpr auto hsa_drain_timeout = std::chrono::seconds{5};
+#else
+constexpr auto hsa_drain_timeout = std::chrono::seconds{30};
+#endif
+
+bool
+is_runtime_shutdown();
 }  // namespace hsa
 }  // namespace rocprofiler
 

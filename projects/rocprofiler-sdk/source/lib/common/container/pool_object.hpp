@@ -91,6 +91,14 @@ struct pool_object
     auto index(size_t index) { m_index = index; }
 
 private:
+    friend struct pool<Tp>;
+
+    bool mark_released()
+    {
+        bool expected = true;
+        return m_in_use.compare_exchange_strong(expected, false);
+    }
+
     Tp                m_object = {};
     std::atomic<bool> m_in_use = false;
     size_t            m_index  = 0;
@@ -109,12 +117,8 @@ template <typename Tp>
 bool
 pool_object<Tp>::release()
 {
-    bool expected = true;
-    auto val      = m_in_use.compare_exchange_strong(expected, false);
-
-    if(val && m_pool) m_pool->release(m_index);
-
-    return val;
+    if(m_pool) return m_pool->release(m_index);
+    return mark_released();
 }
 }  // namespace container
 }  // namespace common

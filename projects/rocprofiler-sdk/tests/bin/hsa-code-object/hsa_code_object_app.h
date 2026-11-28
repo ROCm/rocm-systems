@@ -242,6 +242,9 @@ public:
         err = hsa_executable_symbol_get_info(
             symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, &kern.handle);
         RET_IF_HSA_ERR(err);
+        err = hsa_executable_symbol_get_info(
+            symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_SIZE, &kern.kernarg_size);
+        RET_IF_HSA_ERR(err);
 
         return true;
     }

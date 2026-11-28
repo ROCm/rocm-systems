@@ -42,6 +42,23 @@ def node_exists(name, data, min_len=1):
         assert len(data[name]) >= min_len
 
 
+def test_app_dispatch_time(dispatch_times):
+    """Compare application queries with the corresponding profiled kernels."""
+    application, trace = dispatch_times
+    kernels = sorted(
+        (row for row in trace if row["Kernel_Name"] == "copyA"),
+        key=lambda row: int(row["Dispatch_Id"]),
+    )
+    assert len(application) == 8
+    assert len(kernels) == 2 * len(application)
+
+    # Each iteration queries the first kernel and then submits a second one with a barrier.
+    for query, kernel in zip(application, kernels[::2]):
+        assert int(query["End"]) - int(query["Start"]) == int(
+            kernel["End_Timestamp"]
+        ) - int(kernel["Start_Timestamp"])
+
+
 def test_data_structure(input_data):
     """verify minimum amount of expected data is present"""
     data = input_data

@@ -1122,14 +1122,13 @@ completion_monitor_loop(completion_monitor& mon)
 }
 
 // Poll the in-flight counter down to zero, warning every drain_warn_interval. The counter falls
-// without the monitor thread: the record emitter decrements it once a batch's records are out. The
-// wait is unbounded, as are the callers it gates -- code-object unload and signal-pool teardown are
-// safe only once the records naming those objects are out.
+// without the monitor thread: the record emitter decrements it once a batch's records are out.
+// Callers that must not wait indefinitely pass a deadline and get false back if it passes first.
 //
 // A drain entered from a tool callback running on the record emitter waits on that callback's own
-// still-counted batch and never returns; the warning names that case.
-void
-wait_for_inflight_drain(completion_monitor& mon)
+// still-counted batch and cannot complete; the warning names that case.
+bool
+wait_for_inflight_drain(completion_monitor& mon, std::chrono::steady_clock::time_point deadline)
 {
     const auto start        = std::chrono::steady_clock::now();
     auto       next_warning = start + drain_warn_interval;
@@ -1147,25 +1146,34 @@ wait_for_inflight_drain(completion_monitor& mon)
                 std::chrono::duration_cast<std::chrono::seconds>(now - start).count());
             next_warning = now + drain_warn_interval;
         }
+        if(now >= deadline)
+        {
+            ROCP_WARNING << fmt::format(
+                "Completion monitor drain stopped waiting on {} batch(es) at its deadline",
+                mon.inflight.load(std::memory_order_acquire));
+            return false;
+        }
         std::this_thread::sleep_for(poll_interval);
     }
+
+    return true;
 }
 
 // Wait for all in-flight completions to retire without stopping the monitor.
 // Safe to call while interception is still active (e.g. on context stop).
-void
-drain_completion_monitor()
+bool
+drain_completion_monitor(std::chrono::steady_clock::time_point deadline)
 {
     // Skips the drain both during and after finalization. stop_completion_monitor covers that path,
     // and past destroy_static_objects the monitor's static_object is null, so it must not be
     // constructed or dereferenced here.
-    if(registration::get_fini_status() != 0 || internal_threading::fork_stale()) return;
+    if(registration::get_fini_status() != 0 || internal_threading::fork_stale()) return true;
 
     // Polls `inflight`, not `state`: work outlives the monitor thread, since submit_to_task_group
     // admits on fini-status and emitter existence alone. Must not bump wake_signal -- this runs on
     // arbitrary tool threads with nothing serializing it against stop_completion_monitor, which
     // destroys that signal.
-    wait_for_inflight_drain(get_completion_monitor());
+    return wait_for_inflight_drain(get_completion_monitor(), deadline);
 }
 
 // Local kernel-dispatch tracing path: swaps in pooled completion signals,
@@ -2325,7 +2333,14 @@ notify_queue_interposition_consumer_context_stopped(const context::context* ctx)
 void
 interposition_sync()
 {
-    drain_completion_monitor();
+    drain_completion_monitor(std::chrono::steady_clock::time_point::max());
+}
+
+bool
+interposition_sync_until(std::chrono::steady_clock::time_point deadline)
+{
+    if(registration::get_fini_status() > 0 || internal_threading::fork_stale()) return true;
+    return wait_for_inflight_drain(get_completion_monitor(), deadline);
 }
 
 // Create the wake signal and launch the monitor thread. A second call while it is already
@@ -2368,9 +2383,9 @@ start_completion_monitor()
         if(!admitted) return;
 
         // Stand the record emitter up before the monitor, so the first batch the monitor retires
-        // already has somewhere to send its records. Created once and kept across cycles: a stop
-        // joins it, so it holds no work from a previous one. create_task_group brackets its own
-        // thread creation with the internal-thread notifications.
+        // already has somewhere to send its records. It is kept across HSA runtime cycles and
+        // joined before SDK finalization destroys callback state. create_task_group brackets its
+        // own thread creation with the internal-thread notifications.
         if(!mon.record_emitter) mon.record_emitter = internal_threading::create_task_group(1);
 
         // Bracket creation with the internal-thread notifications so tools honoring the
@@ -2382,11 +2397,10 @@ start_completion_monitor()
     });
 }
 
-// Stop the monitor, wake it so it observes the state change, and join. Every caller returns with
-// the monitor thread dead, every registered batch retired, and every record delivered -- a second
-// caller blocks on the handle lock until the first has finished rather than returning early.
+// Stop all monitor HSA access before the runtime closes. Record delivery can be joined separately
+// when the SDK is about to free state used by tool callbacks.
 void
-stop_completion_monitor()
+stop_completion_monitor(bool wait_for_records)
 {
     // Finalization has completed: destroy_static_objects has nulled the monitor's static_object, so
     // a second hsa_shut_down from another DSO's teardown must not construct or dereference it.
@@ -2417,18 +2431,8 @@ stop_completion_monitor()
         mon.wake_signal = {};
     });
 
-    // Outside the lock, and every caller does it, not just the one that won the exchange. Outside,
-    // because a tool callback running on the emitter can re-enter this function and would otherwise
-    // wait for a lock held by the thread waiting for that callback. Every caller, because the loser
-    // of the exchange goes straight on to signal-pool teardown and correlation-id finalization, and
-    // records still in the emitter name both.
-    //
-    // This wait is unbounded: it ends when the tool callbacks queued on the emitter return. It is
-    // the only drain that runs on this path -- drain_completion_monitor, which
-    // queue_controller_fini reaches through queue_controller_sync just before this call, returns
-    // immediately once finalization has begun, leaving force_retire_all above and this join to
-    // dispose of everything.
-    if(mon.record_emitter) mon.record_emitter->join();
+    // Only SDK finalization waits for tool callbacks here, outside the monitor lock.
+    if(wait_for_records && mon.record_emitter) mon.record_emitter->join();
 }
 
 void
@@ -2504,8 +2508,9 @@ interposition_fini()
     // child's interception inert.
     if(internal_threading::fork_stale()) return;
 
-    // clean up signal pool
-    signal_pool_fini();
+    // After the runtime shut down, pooled signals are already invalid: destroying them would call
+    // into a closed runtime, and entries a shutdown drain abandoned are the runtime's to reclaim.
+    if(!is_runtime_shutdown()) signal_pool_fini();
 
     get_queue_registry().wlock([](auto& map) { map.clear(); });
 }

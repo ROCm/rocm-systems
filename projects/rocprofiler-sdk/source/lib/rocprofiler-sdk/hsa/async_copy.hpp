@@ -24,6 +24,7 @@
 
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 
+#include <chrono>
 #include <optional>
 #include <utility>
 
@@ -71,8 +72,14 @@ get_ids();
 void
 async_copy_init(hsa_api_table_t* _orig, uint64_t _tbl_instance);
 
+// Returns false if completion callbacks were still outstanding when the wait timed out.
+bool
+async_copy_sync(
+    std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::time_point::max());
+
+// Retire the counting signal. Only valid once no copy completion is outstanding.
 void
-async_copy_sync();
+async_copy_retire();
 
 void
 async_copy_fini();

@@ -48,9 +48,11 @@
 
 #include <hsa/hsa.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <mutex>
+#include <thread>
 #include <type_traits>
 #include <unordered_map>
 #include <utility>
@@ -325,9 +327,9 @@ struct active_signals
     active_signals& operator=(const active_signals&) = delete;
     active_signals& operator=(active_signals&&) noexcept = delete;
 
-    void create();          // create hsa signal
-    void destroy();         // destroy hsa signal
-    void sync();            // wait for outstanding signal completion callbacks
+    void create();   // create hsa signal
+    void destroy();  // destroy hsa signal
+    bool sync(std::chrono::steady_clock::time_point deadline);
     void fetch_add(int v);  // increment hsa signal value
     void fetch_sub(int v);  // decrement hsa signal value
 
@@ -361,66 +363,74 @@ active_signals::destroy()
     if(m_signal.handle == 0) return;
 
     // function pointer may be null during unit testing
-    if(hsa::get_hsa_ref_count() > 0 && get_core_table()->hsa_signal_destroy_fn)
+    if(hsa::get_hsa_ref_count() > 0 && get_core_table()->hsa_signal_destroy_fn &&
+       !is_runtime_shutdown())
     {
         ROCP_HSA_TABLE_CALL(ERROR, get_core_table()->hsa_signal_destroy_fn(m_signal));
-        m_signal.handle = 0;
     }
+
+    m_signal.handle = 0;
+    // A retired runtime no longer owes completions for this signal, so the outstanding count does
+    // not carry into the next runtime generation.
+    m_count.store(0);
 }
 
-void
-active_signals::sync()
+bool
+active_signals::sync(std::chrono::steady_clock::time_point deadline)
 {
-    if(m_signal.handle == 0) return;
+    auto outstanding = m_count.load();
+    if(outstanding == 0) return true;
+    if(m_signal.handle == 0 || is_runtime_shutdown()) return false;
 
-#if defined(ROCPROFILER_CI_STRICT_TIMESTAMPS) && ROCPROFILER_CI_STRICT_TIMESTAMPS > 0
-    constexpr auto timeout_sec = std::chrono::seconds{5};
-#else
-    // wait a maximum of thirty seconds
-    constexpr auto timeout_sec = std::chrono::seconds{30};
-#endif
+    constexpr auto timeout = hsa_drain_timeout;
 
-    constexpr auto timeout =
-        std::chrono::duration_cast<std::chrono::nanoseconds>(timeout_sec).count();
+    using clock_type             = std::chrono::steady_clock;
+    deadline                     = std::min(deadline, clock_type::now() + timeout);
+    constexpr auto poll_interval = std::chrono::microseconds{100};
+    const auto     initial       = outstanding;
 
-    if(m_count.load() > 0)
+    // Only the host counter reaches zero after handlers have finished releasing their signals.
+    while(outstanding != 0)
     {
-        auto _cnt_beg      = m_count.load();
-        auto _signal_value = get_core_table()->hsa_signal_wait_scacquire_fn(
-            m_signal, HSA_SIGNAL_CONDITION_LT, 1, timeout, HSA_WAIT_STATE_ACTIVE);
-        auto _cnt_end = m_count.load();
-        if(_signal_value != 0)
-        {
-            ROCP_CI_LOG_IF(WARNING, _cnt_end > 0)
-                << "rocprofiler-sdk timed out after " << timeout_sec.count()
-                << " seconds waiting for " << _cnt_beg
-                << " completion callbacks from HSA for async memory copy tracing. " << _cnt_end
-                << " completion callbacks were not delivered";
-        }
+        const auto now = clock_type::now();
+        if(now >= deadline) break;
+        std::this_thread::sleep_until(std::min(deadline, now + poll_interval));
+        outstanding = m_count.load();
     }
+
+    ROCP_CI_LOG_IF(WARNING, outstanding > 0)
+        << "rocprofiler-sdk timed out waiting for " << initial
+        << " HSA async memory copy completion callbacks; " << outstanding << " still outstanding";
+    return outstanding == 0;
 }
 
 void
 active_signals::fetch_add(int v)
 {
     create();
-    if(m_signal.handle == 0) return;
+    if(m_signal.handle == 0 || is_runtime_shutdown()) return;
 
-    m_count.fetch_add(1);
+    // Mirror of fetch_sub(): the HSA operation must be complete before the count can be observed
+    // as raised, so a count of zero cannot be reported while this signal has work outstanding.
     get_core_table()->hsa_signal_add_screlease_fn(m_signal, v);
+    m_count.fetch_add(1);
 }
 
 void
 active_signals::fetch_sub(int v)
 {
-    if(m_signal.handle == 0) return;
+    if(m_signal.handle == 0 || is_runtime_shutdown()) return;
 
     auto _cnt = m_count.load();
     ROCP_CI_LOG_IF(WARNING, _cnt == 0) << "active_signals count (currently = 0) was requested to "
                                           "decrement more times than it was incremented";
 
-    if(_cnt > 0) m_count.fetch_sub(1);
+    // The HSA operation has to precede the decrement: a count of zero is what makes sync() report
+    // the completions drained, and the caller may retire the signal as soon as it does.
+    // Decrementing first would let that retirement zero m_signal while this subtract is still using
+    // it.
     get_core_table()->hsa_signal_subtract_screlease_fn(m_signal, v);
+    if(_cnt > 0) m_count.fetch_sub(1);
 }
 
 active_signals*
@@ -1560,7 +1570,6 @@ clear_copy_time_cache()
 {
     if(auto* cache = common::static_object<copy_time_cache>::get())
     {
-        async_copy_sync();
         auto lock = cache->lock_lifetime();
         cache->clear();
     }
@@ -1662,12 +1671,12 @@ async_copy_init(hsa_api_table_t* _orig, uint64_t _tbl_instance)
     }
 }
 
-void
-async_copy_sync()
+bool
+async_copy_sync(std::chrono::steady_clock::time_point deadline)
 {
-    if(!async_copy::get_active_signals()) return;
+    if(!async_copy::get_active_signals()) return true;
 
-    async_copy::get_active_signals()->sync();
+    return async_copy::get_active_signals()->sync(deadline);
 }
 
 void
@@ -1681,7 +1690,16 @@ async_copy_fini()
 {
     if(!async_copy::get_active_signals()) return;
 
-    async_copy_sync();
+    // Only retire the counting signal when no copy completion is still outstanding: it is HSA
+    // state, and a handler that has not run yet can still be waiting on it.
+    if(async_copy_sync()) async_copy::get_active_signals()->destroy();
+}
+
+void
+async_copy_retire()
+{
+    if(!async_copy::get_active_signals()) return;
+
     async_copy::get_active_signals()->destroy();
 }
 }  // namespace hsa
