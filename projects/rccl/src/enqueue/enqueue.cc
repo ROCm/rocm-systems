@@ -934,7 +934,7 @@ static ncclResult_t scheduleCollTasksToPlan(struct ncclComm* comm, struct ncclKe
   int nPlanColls = 0;
   size_t trafficBytes[2 * 2] = {0, 0, 0, 0}; // [collnet][nvls]
   int nChannels[2 * 2] = {0, 0, 0, 0}; // [collnet][nvls]
-  int const nMaxChannels[2 * 2] = // [collnet][nvls]
+  int nMaxChannels[2 * 2] = // [collnet][nvls]
     {ncclCommNMaxChannels(comm, 0, 0), ncclCommNMaxChannels(comm, 0, 1), ncclCommNMaxChannels(comm, 1, 0),
      ncclCommNMaxChannels(comm, 1, 1)};
   // RCCL: one minimum-traffic constant shared with the cell layout (ncclComputeCollChannelLayout) and
@@ -1022,6 +1022,27 @@ static ncclResult_t scheduleCollTasksToPlan(struct ncclComm* comm, struct ncclKe
   plan->warpSpeedPlan =
     rcclWarpSpeedSupported(comm, plan, ncclIntruQueueHead(&planner->collTaskQueue), planCollCount);
   bool const warpSpeedPlan = plan->warpSpeedPlan;
+
+  // A plan that is not wave-per-channel launches one workgroup per channel, so budget it in
+  // workgroups: the wave-channel pool divided by the multiplier, or the largest per-task cap if
+  // that is higher. A task tuned for WarpSpeed counts wave-channels in nMaxChannels.
+  // A per-call-configured collective keeps its explicit caps.
+  int const wsMult = comm->warpSpeedChannelMultiplier;
+  struct ncclTaskColl* wsTask = ncclIntruQueueHead(&planner->collTaskQueue);
+  if (wsMult > 1 && comm->topo->warpSpeedEnabled && !warpSpeedPlan && planCollCount > 0 && !wsTask->aggIsolate) {
+    int capMax[2 * 2] = {0, 0, 0, 0}; // [collnet][nvls]
+    int capSum[2 * 2] = {0, 0, 0, 0}; // [collnet][nvls]
+    for (int i = 0; i < planCollCount; i++, wsTask = wsTask->next) {
+      int const kind = 2 * wsTask->isCollnet + wsTask->isNvls;
+      int const cap = wsTask->useWarpSpeed ? std::max(1, wsTask->nMaxChannels / wsMult) : wsTask->nMaxChannels;
+      capMax[kind] = std::max(capMax[kind], cap);
+      capSum[kind] += cap;
+    }
+    for (int kind = 0; kind < 2 * 2; kind++) {
+      nMaxChannels[kind] = std::min(nMaxChannels[kind], std::max({1, nMaxChannels[kind] / wsMult, capMax[kind]}));
+      nChannels[kind] = std::min(capSum[kind], nMaxChannels[kind]);
+    }
+  }
 #endif
 
   while (nPlanColls != 0 && !ncclIntruQueueEmpty(&planner->collTaskQueue)) {

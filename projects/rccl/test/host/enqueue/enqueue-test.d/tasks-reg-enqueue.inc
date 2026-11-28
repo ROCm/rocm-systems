@@ -430,6 +430,29 @@ TEST_F(EnqueueMicrotest, WarpSpeedPlanner_TwoEligibleThenOrdinaryStayInOneOrdina
   scene.ExpectConservedInOrder(/*accepted=*/3);
 }
 
+TEST_F(EnqueueMicrotest, WarpSpeedPlanner_OrdinaryPlanIsBudgetedInWorkgroups) {
+  WarpSpeedScheduleScene scene({false, false, false}, {NCCL_ALGO_RING, NCCL_ALGO_RING, NCCL_ALGO_RING},
+                               /*maxWorkBatches=*/314, /*historicalMultistream=*/true);
+  ncclComm* comm = scene.bp.c();
+  comm->nChannels = 224;
+  comm->warpSpeedChannelMultiplier = 4;
+  scene.topo->warpSpeedEnabled = true;
+  for (ncclTaskColl& task : scene.tasks) {
+    task.func = ncclFuncReduceScatter;
+    task.count = 8 << 20;
+    task.trafficBytes = task.count * sizeof(float) * ncclFuncTrafficPerByte(task.func, comm->nRanks);
+    task.nMaxChannels = 56;
+    task.maxCTAs = MAXCHANNELS;
+  }
+
+  EXPECT_EQ(3, scene.ScheduleAndFinish());
+  scene.ExpectWarpSpeedMode(false);
+  // 224 wave-channels are 56 workgroups: the three per-task caps do not add up to 168.
+  EXPECT_EQ(0, scene.tasks[0].channelLo);
+  EXPECT_EQ(55, scene.tasks[2].channelHi);
+  for (ncclTaskColl const& task : scene.tasks) EXPECT_EQ(56, task.nMaxChannels);
+}
+
 TEST_F(EnqueueMicrotest, WarpSpeedPlanner_TreeAndBelowThresholdTasksStayOrdinary) {
   WarpSpeedScheduleScene scene({false, false, false, false},
                                {NCCL_ALGO_TREE, NCCL_ALGO_RING, NCCL_ALGO_TREE, NCCL_ALGO_RING},
