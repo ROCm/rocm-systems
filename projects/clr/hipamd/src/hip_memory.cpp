@@ -2472,6 +2472,11 @@ hipError_t ihipMemcpyParam3D(const HIP_MEMCPY3D* pCopy, hipStream_t stream, bool
                (pCopy->dstMemoryType == hipMemoryTypeDevice)) {
       // Device to Device copies dont need to wait for host synchronization
       isAsync = true;
+    } else if ((command->type() == CL_COMMAND_WRITE_BUFFER_RECT) ||
+               (command->type() == CL_COMMAND_WRITE_IMAGE)) {
+      // The source is pageable host memory, which the copy reads when it runs. Wait for the copy,
+      // so the caller may reuse or free the source once the call returns, as with hipMemcpyAsync.
+      isAsync = false;
     }
     return ihipMemcpyCmdEnqueue(command, isAsync, hip_stream);
   }

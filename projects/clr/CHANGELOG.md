@@ -43,6 +43,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 * Resolved a segmentation fault on every call to the eight external-semaphore graph node APIs (`hipGraphAddExternalSemaphoresSignalNode`, `hipGraphAddExternalSemaphoresWaitNode`, and their `GetParams`/`SetParams`/`Exec...SetParams` APIs). Their runtime dispatch-table entries were never set; they now route to the implementations, and `hipGraphAddExternalSemaphoresSignalNode` returns `hipErrorInvalidValue` for invalid arguments as the wait variant does.
 * On Windows, `hipMalloc3DArray`, `hipArray3DCreate` and `hipMallocMipmappedArray` no longer reject 3D extents above 2048 or layered arrays with more than 2048 layers. `maxTexture3D`, `maxSurface3D` and the layered limits (`maxTexture1DLayered`, `maxTexture2DLayered` and their surface equivalents) now report the device's limits, matching Linux.
 * `hipCtxDestroy` no longer releases the device context for a context the caller did not create with `hipCtxCreate`, which could free the context while the runtime still referenced it.
+* `hipMemcpy2DAsync`, `hipMemcpy3DAsync`, `hipMemcpy2DToArrayAsync`, `hipDrvMemcpy3DAsync` and the other pitched and array copies from pageable host memory now wait for the copy to finish before they return, as `hipMemcpyAsync` does for pageable sources it does not stage. Previously the copy read the source after the call returned, so a source reused or freed after the call gave wrong data or a GPU memory fault. Copies from pinned or registered host memory stay asynchronous.
 
 ### Changed
 

@@ -87,6 +87,9 @@ memory:
   Unit_hipMemcpy3DAsync_Positive_Array:
     <<: *level_default
     tags: [transfer, image, P1]
+  Unit_hipMemcpy3DAsync_Positive_PageableSourceReuse:
+    <<: *level_default
+    tags: [transfer, image, P1]
   Unit_hipMemcpy3DAsync_Negative_Parameters:
     <<: *level_default
     tags: [transfer, P1]
@@ -192,6 +195,9 @@ memory:
   Unit_hipMemcpy2DAsync_Positive_Basic:
     <<: *level_default
     tags: [transfer, P0]
+  Unit_hipMemcpy2DAsync_Positive_PageableSourceReuse:
+    <<: *level_default
+    tags: [transfer, P1]
   Unit_hipMemcpy2DAsync_Positive_Synchronization_Behavior:
     <<: *level_default
     tags: [transfer, P1]

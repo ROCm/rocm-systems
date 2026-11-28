@@ -5587,6 +5587,10 @@ hipError_t hipMemcpyAtoHAsync(void* dstHost, hipArray_t srcArray, size_t srcOffs
 /**
  * @brief Copies from host memory to a 1D array.
  *
+ *  @note If the source is pageable host memory rather than pinned (hipHostMalloc) or registered
+ * (hipHostRegister) memory, the copy is performed synchronously: the call returns only after the
+ * copy and earlier work in the stream have completed.
+ *
  *  @param[out]  dstArray Destination array
  *  @param[in]   dstOffset Offset in bytes of destination array
  *  @param[in]   srcHost Source host pointer
@@ -6235,6 +6239,11 @@ hipError_t hipMemcpy2D(void* dst, size_t dpitch, const void* src, size_t spitch,
 hipError_t hipMemcpyParam2D(const hip_Memcpy2D* pCopy);
 /**
  *  @brief Copies memory for 2D arrays.
+ *
+ *  @note If the source is pageable host memory rather than pinned (hipHostMalloc) or registered
+ * (hipHostRegister) memory, the copy is performed synchronously: the call returns only after the
+ * copy and earlier work in the stream have completed.
+ *
  *  @param[in]   pCopy Parameters for the memory copy
  *  @param[in]   stream Stream to use
  *  @returns     #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidPitchValue,
@@ -6307,6 +6316,10 @@ hipError_t hipMemcpy2DToArray(hipArray_t dst, size_t wOffset, size_t hOffset, co
                               size_t spitch, size_t width, size_t height, hipMemcpyKind kind);
 /**
  *  @brief Copies data between host and device.
+ *
+ *  @note If the source is pageable host memory rather than pinned (hipHostMalloc) or registered
+ * (hipHostRegister) memory, the copy is performed synchronously: the call returns only after the
+ * copy and earlier work in the stream have completed.
  *
  *  @param[out]  dst   Destination memory address
  *  @param[in]   wOffset Destination starting X offset
@@ -6471,6 +6484,10 @@ hipError_t hipMemcpy3D(const struct hipMemcpy3DParms* p);
 /**
  *  @brief Copies data between host and device asynchronously.
  *
+ *  @note If the source is pageable host memory rather than pinned (hipHostMalloc) or registered
+ * (hipHostRegister) memory, the copy is performed synchronously: the call returns only after the
+ * copy and earlier work in the stream have completed.
+ *
  *  @param[in]   p        3D memory copy parameters
  *  @param[in]   stream   Stream to use
  *  @returns     #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidPitchValue,
@@ -6493,6 +6510,10 @@ hipError_t hipMemcpy3DAsync(const struct hipMemcpy3DParms* p, hipStream_t stream
 hipError_t hipDrvMemcpy3D(const HIP_MEMCPY3D* pCopy);
 /**
  *  @brief Copies data between host and device asynchronously.
+ *
+ *  @note If the source is pageable host memory rather than pinned (hipHostMalloc) or registered
+ * (hipHostRegister) memory, the copy is performed synchronously: the call returns only after the
+ * copy and earlier work in the stream have completed.
  *
  *  @param[in]   pCopy    3D memory copy parameters
  *  @param[in]   stream   Stream to use
@@ -6572,6 +6593,10 @@ hipError_t hipExtMemcpyBatchAsync(void** dsts, void** srcs,
 
 /**
  * @brief Perform Batch of 3D copies
+ *
+ * @note An operation whose source is pageable host memory rather than pinned (hipHostMalloc) or
+ * registered (hipHostRegister) memory is performed synchronously: the call returns only after
+ * that copy and earlier work in the stream have completed.
  *
  * @param [in] numOps  - Total number of memcpy operations.
  * @param [in] opList  - Array of size numOps containing the actual memcpy operations.
