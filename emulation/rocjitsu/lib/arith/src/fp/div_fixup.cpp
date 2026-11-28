@@ -147,7 +147,8 @@ int run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
   bool saturate = flags & RJ_ARITH_FP16_OVFL;
   // Older CDNA/gfx1250 always quiet selected NaNs; gfx950 honors MODE.IEEE like RDNA3.
   // FP16 SIMD final packing uses nearest rounding; directed modes use the scalar packer.
-  const uint64_t numeric_flags = flags | (cdna_numeric ? RJ_ARITH_FP_IEEE_MODE : 0);
+  [[maybe_unused]] const uint64_t numeric_flags =
+      flags | (cdna_numeric ? RJ_ARITH_FP_IEEE_MODE : 0);
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
   if ((Width != 16 || Cdna || !(flags & RJ_ARITH_FP_ROUND_MASK)) &&
       rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {

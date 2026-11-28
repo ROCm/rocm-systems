@@ -3,9 +3,13 @@
 
 // Packed BF16 arithmetic shares inputs across CPU paths, including aliases and overflow.
 #include "common/cpu.h"
+#include "common/floating_point.h"
+#include "common/registers.h"
 #include "rj_arith/detail/rj_arith_common.h"
 #include "rj_arith/detail/rj_arith_fp.h"
+#include <bit>
 #include <gtest/gtest.h>
+#include <random>
 #include <stdint.h>
 
 namespace {
@@ -68,6 +72,71 @@ TEST(PackedBf16, NumericSelection) {
           ASSERT_EQ(function(cpu | semantics, 1, 0, &d, &pa, &pb, nullptr), RJ_ARITH_SUCCESS);
           EXPECT_EQ(a[0], function == rj_arith_v_pk_min_num_bf16_w32 ? test.minimum : test.maximum);
           EXPECT_EQ(a[1], 123U);
+        }
+      }
+    }
+  }
+}
+
+// Exercise packed selectors, special values and every complete VGPR alias using the same data.
+TEST(PackedBf16, LooseModifiersAndAliasing) {
+  using rocjitsu::arith::test::Registers;
+  Registers<4, 32> input;
+  std::minstd_rand engine;
+  for (int reg = 0; reg < 4; ++reg) {
+    for (int lane = 0; lane < 32; ++lane) {
+      const uint32_t low = uint32_t(engine()) >> 15;
+      const uint32_t high = uint32_t(engine()) >> 15;
+      input.v[reg][lane] = low | (high << 16);
+    }
+    input.v[reg][reg] = 0x7f807fc1U;
+  }
+  constexpr uint32_t modes[] = {
+      0, RJ_ARITH_PK_CLAMP,
+      RJ_ARITH_PK_NEG_LO_A | RJ_ARITH_PK_NEG_HI_B | RJ_ARITH_PK_LO_B_HIGH | RJ_ARITH_PK_HI_A_LOW,
+      RJ_ARITH_PK_NEG_LO_C | RJ_ARITH_PK_NEG_HI_C | RJ_ARITH_PK_LO_C_HIGH | RJ_ARITH_PK_HI_C_LOW |
+          RJ_ARITH_PK_CLAMP};
+  const auto call = [](int op, uint64_t flags, uint32_t mode, Registers<4, 32> &v, int dest) {
+    uint32_t status = 123;
+    constexpr uint32_t exec_mask = 0xa5a55a5aU;
+    const int result =
+        op == 0
+            ? rj_arith_v_pk_add_bf16_w32(flags, exec_mask, mode, v.v + dest, v.v, v.v + 1, &status)
+        : op == 1
+            ? rj_arith_v_pk_mul_bf16_w32(flags, exec_mask, mode, v.v + dest, v.v, v.v + 1, &status)
+            : rj_arith_v_pk_fma_bf16_w32(flags, exec_mask, mode, v.v + dest, v.v, v.v + 1, v.v + 2,
+                                         &status);
+    EXPECT_EQ(result, RJ_ARITH_SUCCESS);
+    EXPECT_EQ(status, 123U);
+  };
+  for (int op = 0; op < 3; ++op) {
+    for (uint32_t mode : modes) {
+      if (op != 2 && (mode & (RJ_ARITH_PK_NEG_LO_C | RJ_ARITH_PK_NEG_HI_C))) {
+        continue;
+      }
+      for (uint64_t controls : {uint64_t(0), RJ_ARITH_FP16_OVFL | RJ_ARITH_FP_ROUND_MASK |
+                                                 RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
+                                                 RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS}) {
+        auto expected = input;
+        call(op, controls | RJ_ARITH_SEMANTICS_LOOSE, mode, expected, 3);
+        for (auto cpu : rocjitsu::arith::test::supported_cpu_levels()) {
+          for (int dest : {0, 1, 2, 3}) {
+            auto actual = input;
+            call(op, cpu | controls | RJ_ARITH_SEMANTICS_LOOSE, mode, actual, dest);
+            for (int lane = 0; lane < 32; ++lane) {
+              if (!((0xa5a55a5aU >> lane) & 1)) {
+                EXPECT_EQ(actual.v[dest][lane], input.v[dest][lane]);
+                continue;
+              }
+              for (int shift : {0, 16}) {
+                const auto value = (actual.v[dest][lane] >> shift) << 16;
+                const auto reference = (expected.v[3][lane] >> shift) << 16;
+                rocjitsu::arith::test::expect_f32(value, std::bit_cast<float>(reference),
+                                                  RJ_ARITH_SEMANTICS_LOOSE,
+                                                  /*atol=*/1e-40, /*rtol=*/1e-2);
+              }
+            }
+          }
         }
       }
     }

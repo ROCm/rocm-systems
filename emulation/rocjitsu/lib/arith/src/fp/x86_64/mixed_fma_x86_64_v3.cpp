@@ -9,6 +9,7 @@
 #include "fp/mixed_fma.h"
 #include "fp/mixed_fma_control.h"
 #include "fp/scalar_repair.h"
+#include "fp/x86_64/half_fma_x86_64_v3.h"
 #include "fp/x86_64/mixed_half_x86_64_v3.h"
 #include "rj_arith/detail/rj_arith_fp.h"
 
@@ -26,6 +27,19 @@ __m256 input8(const uint32_t *p, uint32_t mode) {
   return _mm256_castsi256_ps(_mm256_xor_si256(
       _mm256_and_si256(words, _mm256_set1_epi32(mode & RJ_ARITH_ALU_ABS_A ? INT32_MAX : -1)),
       _mm256_set1_epi32(mode & RJ_ARITH_ALU_NEG_A ? INT32_MIN : 0)));
+}
+
+// Apply the independent denormal policy of one decoded mixed-format source.
+__m256 flush_mixed_input8(__m256 input, uint64_t flags, uint32_t source_mode) {
+  if (!rocjitsu::arith::mixed_fma_flush_input(flags, source_mode)) {
+    return input;
+  }
+  auto bits = _mm256_castps_si256(input);
+  auto tiny = _mm256_cmpgt_epi32(
+      _mm256_set1_epi32(source_mode & RJ_ARITH_MIX_F16_A ? 0x38800000 : 0x00800000),
+      _mm256_and_si256(bits, _mm256_set1_epi32(INT32_MAX)));
+  return _mm256_castsi256_ps(
+      _mm256_blendv_epi8(bits, _mm256_and_si256(bits, _mm256_set1_epi32(INT32_MIN)), tiny));
 }
 
 // Read four mixed FP16/FP32 operands, applying half selection and source sign modifiers.
@@ -57,21 +71,9 @@ void mixed_float(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *d,
     auto x = input8(a + lane, mode), y = input8(b + lane, mode >> 1),
          z = input8(c + lane, mode >> 2);
     if constexpr (GuestPolicy) {
-      // Apply guest input flushing only to operands represented as FP32.
-      auto flush = [flags](__m256 input, uint32_t source_mode) {
-        if (!mixed_fma_flush_input(flags, source_mode)) {
-          return input;
-        }
-        auto bits = _mm256_castps_si256(input);
-        auto tiny = _mm256_cmpgt_epi32(
-            _mm256_set1_epi32(source_mode & RJ_ARITH_MIX_F16_A ? 0x38800000 : 0x00800000),
-            _mm256_and_si256(bits, _mm256_set1_epi32(INT32_MAX)));
-        return _mm256_castsi256_ps(
-            _mm256_blendv_epi8(bits, _mm256_and_si256(bits, _mm256_set1_epi32(INT32_MIN)), tiny));
-      };
-      x = flush(x, mode);
-      y = flush(y, mode >> 1);
-      z = flush(z, mode >> 2);
+      x = flush_mixed_input8(x, flags, mode);
+      y = flush_mixed_input8(y, flags, mode >> 1);
+      z = flush_mixed_input8(z, flags, mode >> 2);
     }
     auto result = _mm256_fmadd_ps(x, y, z);
     unsigned repair = 0;
@@ -143,14 +145,13 @@ namespace {
 
 // Compute mixed-precision FMA into one halfword of D, preserving the other half and inactive
 // lanes.
-template <bool GuestPolicy>
 void mixed_half(bool high, uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *d,
                 const uint32_t *a, const uint32_t *b, const uint32_t *c) {
   for (int lane = 0; lane < 32; lane += 4) {
     auto x = input4(a + lane, mode), y = input4(b + lane, mode >> 1),
          z = input4(c + lane, mode >> 2);
-    if constexpr (GuestPolicy) {
-      // Apply guest input flushing only to operands represented as FP32.
+    {
+      // Apply the independent flushing policy of each operand format.
       auto flush = [flags](__m128 input, uint32_t source_mode) {
         if (!mixed_fma_flush_input(flags, source_mode)) {
           return input;
@@ -166,11 +167,10 @@ void mixed_half(bool high, uint64_t flags, uint32_t exec_mask, uint32_t mode, ui
       y = flush(y, mode >> 1);
       z = flush(z, mode >> 2);
     }
-    auto result =
-        mixed_half_value4(x, y, z, flags & RJ_ARITH_FP16_OVFL, mode & RJ_ARITH_ALU_CLAMP,
-                          GuestPolicy && (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS),
-                          GuestPolicy && (flags & RJ_ARITH_FP_DX10_CLAMP_OFF),
-                          GuestPolicy ? unsigned((flags & RJ_ARITH_FP_ROUND_MASK) >> 24) : 0);
+    auto result = mixed_half_value4(x, y, z, flags & RJ_ARITH_FP16_OVFL, mode & RJ_ARITH_ALU_CLAMP,
+                                    flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS,
+                                    flags & RJ_ARITH_FP_DX10_CLAMP_OFF,
+                                    unsigned((flags & RJ_ARITH_FP_ROUND_MASK) >> 24));
     unsigned shift = high ? 16 : 0;
     auto original = _mm_loadu_si128(reinterpret_cast<const __m128i *>(d + lane));
     auto output_mask = _mm_set1_epi32(int(uint32_t(65535) << shift));
@@ -186,10 +186,25 @@ void mixed_half(bool high, uint64_t flags, uint32_t exec_mask, uint32_t mode, ui
 
 // Evaluate mixed FP16/FP32 fused multiply-add. Preserve destination lanes outside exec_mask.
 // Requires the named CPU features and validated instruction controls.
-void mixed_fma_half_x86_64_v3(bool high, bool saturate, uint32_t exec_mask, uint32_t mode,
+void mixed_fma_half_x86_64_v3(bool high, uint64_t flags, uint32_t exec_mask, uint32_t mode,
                               uint32_t *d, const uint32_t *a, const uint32_t *b,
                               const uint32_t *c) {
-  mixed_half<false>(high, saturate ? RJ_ARITH_FP16_OVFL : 0, exec_mask, mode, d, a, b, c);
+  const int shift = high ? 16 : 0;
+  for (int lane = 0; lane < 32; lane += 8) {
+    auto x = flush_mixed_input8(input8(a + lane, mode), flags, mode);
+    auto y = flush_mixed_input8(input8(b + lane, mode >> 1), flags, mode >> 1);
+    auto z = flush_mixed_input8(input8(c + lane, mode >> 2), flags, mode >> 2);
+    auto result = half_fma_value(x, y, z, flags & RJ_ARITH_FP16_OVFL, mode,
+                                 flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS,
+                                 flags & RJ_ARITH_FP_DX10_CLAMP_OFF);
+    result = _mm256_or_si256(
+        _mm256_sll_epi32(result, _mm_cvtsi32_si128(shift)),
+        _mm256_and_si256(_mm256_loadu_si256(reinterpret_cast<const __m256i *>(d + lane)),
+                         _mm256_set1_epi32(high ? 0xffff : -65536)));
+    const auto active = _mm256_sllv_epi32(_mm256_set1_epi32(int(exec_mask >> lane)),
+                                          _mm256_setr_epi32(31, 30, 29, 28, 27, 26, 25, 24));
+    _mm256_maskstore_epi32(reinterpret_cast<int *>(d + lane), active, result);
+  }
 }
 
 // Evaluate mixed FP16/FP32 fused multiply-add. Preserve destination lanes outside exec_mask.
@@ -197,7 +212,7 @@ void mixed_fma_half_x86_64_v3(bool high, bool saturate, uint32_t exec_mask, uint
 void mixed_fma_half_guest_x86_64_v3(bool high, uint64_t flags, uint32_t exec_mask, uint32_t mode,
                                     uint32_t *d, const uint32_t *a, const uint32_t *b,
                                     const uint32_t *c) {
-  mixed_half<true>(high, flags, exec_mask, mode, d, a, b, c);
+  mixed_half(high, flags, exec_mask, mode, d, a, b, c);
 }
 
 } // namespace rocjitsu::arith

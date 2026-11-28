@@ -8,6 +8,7 @@
 #include "fp/fp64_impl.h"
 #include "fp/fp64_round.h"
 #include "fp/x86_64/fp64_output_x86_64_v4.h"
+#include "rj_arith/detail/rj_arith_common.h"
 #include "rj_arith/detail/rj_arith_fp.h"
 
 #include <immintrin.h>
@@ -252,11 +253,15 @@ void run(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_
          bool quiet_snan, bool native_math, bool cdna) {
   uint32_t result[2][32];
   // A NaN source or an invalid operation always yields a NaN. Such results are rare, so this
-  // re-evaluates with NaN priority only when the host produced one.
+  // repairs Strict/Compatibility priority only when the host produced NaNs; Loose keeps
+  // the native first pass.
   if constexpr (op == Fp64::Add || op == Fp64::Mul || op == Fp64::Fma) {
     if (evaluate<op, false>(flags, instruction_flags, a, b, c, result, quiet_snan, native_math,
                             cdna)) {
-      evaluate<op, true>(flags, instruction_flags, a, b, c, result, quiet_snan, native_math, cdna);
+      if ((flags & RJ_ARITH_SEMANTICS_MASK) != RJ_ARITH_SEMANTICS_LOOSE) {
+        evaluate<op, true>(flags, instruction_flags, a, b, c, result, quiet_snan, native_math,
+                           cdna);
+      }
     }
   } else {
     evaluate<op, false>(flags, instruction_flags, a, b, c, result, quiet_snan, native_math, cdna);

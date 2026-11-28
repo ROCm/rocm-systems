@@ -57,6 +57,7 @@ uint16_t narrow(uint64_t bits, unsigned rounding) {
 int run(rocjitsu::arith::MixedFma destination, uint64_t flags, uint32_t exec_mask, uint64_t mode,
         uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
         const uint32_t *const *c) {
+  const uint64_t semantics = flags & RJ_ARITH_SEMANTICS_MASK;
   flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
   const uint32_t known = RJ_ARITH_ALU_NEG_A | RJ_ARITH_ALU_NEG_B | RJ_ARITH_ALU_NEG_C |
                          RJ_ARITH_ALU_ABS_A | RJ_ARITH_ALU_ABS_B | RJ_ARITH_ALU_ABS_C |
@@ -70,6 +71,8 @@ int run(rocjitsu::arith::MixedFma destination, uint64_t flags, uint32_t exec_mas
   if ((flags & RJ_ARITH_SEMANTICS_MASK) > RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE) {
     return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
   }
+  // Compatibility keeps its compensated narrowing; Loose may round through FP32.
+  flags = (flags & ~RJ_ARITH_SEMANTICS_MASK) | semantics;
   if (mode >> 32) {
     return rocjitsu::arith::execute_dpp(
         flags, exec_mask, mode, a, [&](uint32_t active, const uint32_t *const *source) {
@@ -120,7 +123,8 @@ uint32_t rocjitsu::arith::mixed_bf16_value(MixedFma destination, uint64_t flags,
   const float x = as_float(a), y = as_float(b), z = as_float(c);
   const bool special = (a & 0x7fffffffU) >= 0x7f800000U || (b & 0x7fffffffU) >= 0x7f800000U ||
                        (c & 0x7fffffffU) >= 0x7f800000U;
-  if (destination == MixedFma::Float || special) {
+  const bool loose = (flags & RJ_ARITH_SEMANTICS_MASK) != RJ_ARITH_SEMANTICS_COMPATIBILITY;
+  if (destination == MixedFma::Float || special || loose) {
     float value = __builtin_fmaf(x, y, z);
     if (clamp) {
       value = !(value > 0) ? 0 : value > 1 ? 1 : value;

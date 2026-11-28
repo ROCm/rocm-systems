@@ -4,6 +4,7 @@
 // Mixed BF16 FMA: inherited rounding examples, CPU-path agreement and overlap.
 #include "common/contracts.h"
 #include "common/cpu.h"
+#include "common/floating_point.h"
 #include "common/registers.h"
 #include "common/semantics.h"
 #include "rj_arith/detail/rj_arith_common.h"
@@ -16,6 +17,19 @@
 namespace {
 using rocjitsu::arith::test::Registers;
 using Call = decltype(&rj_arith_v_fma_mix_f32_bf16_w32);
+
+// Compare a Loose result at destination precision and retain the unselected BF16 half.
+void expect_loose(uint32_t actual, uint32_t expected, uint32_t original, int kind) {
+  const int shift = kind == 2 ? 16 : 0;
+  const uint32_t actual_bits = kind ? ((actual >> shift) & 0xffffU) << 16 : actual;
+  const uint32_t expected_bits = kind ? ((expected >> shift) & 0xffffU) << 16 : expected;
+  rocjitsu::arith::test::expect_f32(actual_bits, std::bit_cast<float>(expected_bits),
+                                    RJ_ARITH_SEMANTICS_LOOSE, /*atol=*/1e-40, /*rtol=*/1e-2);
+  if (kind) {
+    const uint32_t keep = kind == 1 ? 0xffff0000U : 0xffffU;
+    EXPECT_EQ(actual & keep, original & keep);
+  }
+}
 
 // Check one result format against selected inherited goldens and all CPU paths.
 void check(Call call, int kind) {
@@ -56,11 +70,16 @@ void check(Call call, int kind) {
           const auto &g = goldens[lane % 6];
           uint32_t expected = std::bit_cast<uint32_t>(std::fma(
               std::bit_cast<float>(g.a), std::bit_cast<float>(g.b), std::bit_cast<float>(g.c)));
+          const bool loose = !strict && semantics != RJ_ARITH_SEMANTICS_COMPATIBILITY;
           if (kind) {
-            expected = kind == 1 ? 0x12340000U | g.result[rounding]
-                                 : (uint32_t(g.result[rounding]) << 16) | 0x5678U;
+            const auto bits = g.result[loose ? 0 : rounding];
+            expected = kind == 1 ? 0x12340000U | bits : (uint32_t(bits) << 16) | 0x5678U;
           }
-          EXPECT_EQ(output.v[3][lane], strict ? 0x12345678U : expected);
+          if (loose) {
+            expect_loose(output.v[3][lane], expected, 0x12345678U, kind);
+          } else {
+            EXPECT_EQ(output.v[3][lane], strict ? 0x12345678U : expected);
+          }
         }
       }
     }
@@ -72,7 +91,9 @@ void check(Call call, int kind) {
     Registers<4, 32> input;
     for (int reg = 0; reg < 4; ++reg) {
       for (int lane = 0; lane < 32; ++lane) {
-        input.v[reg][lane] = (uint32_t(random()) >> 15) | ((uint32_t(random()) >> 15) << 16);
+        const uint32_t lo = uint32_t(random()) >> 15;
+        const uint32_t hi = uint32_t(random()) >> 15;
+        input.v[reg][lane] = lo | (hi << 16);
       }
     }
     const uint32_t mode =
@@ -83,7 +104,9 @@ void check(Call call, int kind) {
          RJ_ARITH_MIX_BF16_C);
     const int aliasing_offset = sample % 4;
     const uint32_t exec_mask = sample & 1 ? 0xa5a55a5aU : ~0U;
-    const uint64_t flags = RJ_ARITH_SEMANTICS_COMPATIBILITY | (uint64_t(sample % 4) << 24);
+    const uint64_t semantics =
+        sample & 4 ? RJ_ARITH_SEMANTICS_COMPATIBILITY : RJ_ARITH_SEMANTICS_LOOSE;
+    const uint64_t flags = semantics | (uint64_t((sample / 8) % 4) << 24);
     auto expected = input;
     ASSERT_EQ(call(flags, exec_mask, mode, expected.v + aliasing_offset, expected.v, expected.v + 1,
                    expected.v + 2, nullptr),
@@ -96,7 +119,12 @@ void check(Call call, int kind) {
                 RJ_ARITH_SUCCESS);
       for (int reg = 0; reg < 4; ++reg) {
         for (int lane = 0; lane < 32; ++lane) {
-          EXPECT_EQ(output.v[reg][lane], expected.v[reg][lane]);
+          if (semantics == RJ_ARITH_SEMANTICS_LOOSE && reg == aliasing_offset &&
+              ((exec_mask >> lane) & 1)) {
+            expect_loose(output.v[reg][lane], expected.v[reg][lane], input.v[reg][lane], kind);
+          } else {
+            EXPECT_EQ(output.v[reg][lane], expected.v[reg][lane]);
+          }
           if (reg != aliasing_offset || !((exec_mask >> lane) & 1)) {
             EXPECT_EQ(output.v[reg][lane], input.v[reg][lane]);
           }

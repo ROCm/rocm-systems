@@ -50,6 +50,10 @@ int run(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_t
   if (exec_mask == 0) {
     return RJ_ARITH_SUCCESS;
   }
+  // Loose uses host nearest rounding; strict and Compatibility retain guest ROUND.
+  if ((flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_LOOSE) {
+    flags &= ~RJ_ARITH_FP_ROUND_MASK;
+  }
   uint32_t modes[2];
   if constexpr (Accumulate) {
     modes[0] = instruction_flags;
@@ -71,6 +75,14 @@ int run(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_t
       rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3) &&
       rocjitsu::arith::packed_fma_exact_x86_64_v3(flags, exec_mask, modes, d[0], a[0], b[0], c[0],
                                                   excp_flag_user, Rdna3)) {
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+  if (!rocjitsu::arith::is_exact(flags) && !(flags & RJ_ARITH_FP_ROUND_MASK) &&
+      rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+    rocjitsu::arith::packed_fma_x86_64_v4<Accumulate>(flags, exec_mask, instruction_flags, d[0],
+                                                      a[0], b[0], c[0]);
     return RJ_ARITH_SUCCESS;
   }
 #endif

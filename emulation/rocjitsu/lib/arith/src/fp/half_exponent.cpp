@@ -120,7 +120,9 @@ int half_exponent(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags
     return RJ_ARITH_SUCCESS;
   }
   if constexpr (Ldexp) {
-    if (rocjitsu::arith::is_exact(flags) || (flags & RJ_ARITH_FP_ROUND_MASK)) {
+    // V4's integer scaling also beats the older Loose AVX2 widening route.
+    if (rocjitsu::arith::is_exact(flags) || (flags & RJ_ARITH_FP_ROUND_MASK) ||
+        rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
       // gfx11 exact semantics keep signaling NaNs when IEEE is clear.
       const bool quiet_snan = force_quiet_snan || !rdna3 || (flags & RJ_ARITH_FP_IEEE_MODE) ||
                               !rocjitsu::arith::is_exact(flags);

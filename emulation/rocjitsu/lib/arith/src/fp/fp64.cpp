@@ -75,6 +75,7 @@ template <rocjitsu::arith::Fp64 Op>
 // changing outputs.
 // AcceptExact marks entry points whose results were checked against their architecture's
 // captures (gfx12 and RDNA3 arithmetic and rounding); the RDNA2 FMA entry stays loose-only.
+// gfx1250 Compatibility uses mode 1 to retain NaN priority; explicit Loose may use native NaNs.
 template <rocjitsu::arith::Fp64 Op, bool Rdna3 = false, bool Cdna = false, bool AcceptExact = false,
           bool NativeMath = false, bool LegacyRound = false, bool LegacyNative = false>
 int fp64(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_t *const *d,
@@ -135,11 +136,13 @@ int fp64(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_
     return RJ_ARITH_SUCCESS;
   }
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
-  if constexpr (NativeMath || Op == rocjitsu::arith::Fp64::Trunc ||
-                Op == rocjitsu::arith::Fp64::Ceil || Op == rocjitsu::arith::Fp64::Rndne ||
-                Op == rocjitsu::arith::Fp64::Floor || Op == rocjitsu::arith::Fp64::Fract ||
-                Op == rocjitsu::arith::Fp64::FrexpMant || Op == rocjitsu::arith::Fp64::Fma ||
-                Op == rocjitsu::arith::Fp64::Add || Op == rocjitsu::arith::Fp64::Mul) {
+  if constexpr (NativeMath || Op == rocjitsu::arith::Fp64::Rcp ||
+                Op == rocjitsu::arith::Fp64::Rsq || Op == rocjitsu::arith::Fp64::Sqrt ||
+                Op == rocjitsu::arith::Fp64::Trunc || Op == rocjitsu::arith::Fp64::Ceil ||
+                Op == rocjitsu::arith::Fp64::Rndne || Op == rocjitsu::arith::Fp64::Floor ||
+                Op == rocjitsu::arith::Fp64::Fract || Op == rocjitsu::arith::Fp64::FrexpMant ||
+                Op == rocjitsu::arith::Fp64::Fma || Op == rocjitsu::arith::Fp64::Add ||
+                Op == rocjitsu::arith::Fp64::Mul) {
     if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
       rocjitsu::arith::fp64_x86_64_v4(Op, flags, exec_mask, instruction_flags, d, a, b, c,
                                       quiet_snan, NativeMath, Cdna);
@@ -157,11 +160,12 @@ int fp64(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_
 #endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
   // AVX2 has no per-instruction directed FP64 ADD/MUL/FMA. Use the inherited integer
-  // model for directed modes; nearest rounding retains the existing SIMD path.
+  // model for directed exact/Compatibility modes; Loose may use host nearest rounding.
   constexpr bool directed_arithmetic = Op == rocjitsu::arith::Fp64::Fma ||
                                        Op == rocjitsu::arith::Fp64::Add ||
                                        Op == rocjitsu::arith::Fp64::Mul;
-  if ((!directed_arithmetic || !(flags & RJ_ARITH_FP_ROUND_MASK)) &&
+  if ((!directed_arithmetic || !rocjitsu::arith::is_exact(flags) ||
+       !(flags & RJ_ARITH_FP_ROUND_MASK)) &&
       rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
     rocjitsu::arith::fp64_x86_64_v3(Op, flags, exec_mask, instruction_flags, d, a, b, c, quiet_snan,
                                     NativeMath, Cdna);
@@ -1468,7 +1472,8 @@ int rj_arith_v_fmac_f64_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t
     return RJ_ARITH_SUCCESS;
   }
   const uint32_t *accumulator[] = {d[0], d[1]};
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE);
   return fp64<rocjitsu::arith::Fp64::Fma, false, true>(
       flags, exec_mask, uint32_t(instruction_flags), d, a, b, accumulator);
 }
@@ -1741,7 +1746,8 @@ int rj_arith_v_mul_f64_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t 
                                    uint32_t *const *d, const uint32_t *const *a,
                                    const uint32_t *const *b,
                                    [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -1780,7 +1786,8 @@ int rj_arith_v_mul_f64_w64_gfx1250(uint64_t flags, uint64_t exec_mask, uint64_t 
                                    uint32_t *const *d, const uint32_t *const *a,
                                    const uint32_t *const *b,
                                    [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -1821,7 +1828,8 @@ int rj_arith_v_fma_f64_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t 
                                    uint32_t *const *d, const uint32_t *const *a,
                                    const uint32_t *const *b, const uint32_t *const *c,
                                    [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -1862,7 +1870,8 @@ int rj_arith_v_fma_f64_w64_gfx1250(uint64_t flags, uint64_t exec_mask, uint64_t 
                                    uint32_t *const *d, const uint32_t *const *a,
                                    const uint32_t *const *b, const uint32_t *const *c,
                                    [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -1901,7 +1910,8 @@ int rj_arith_v_add_f64_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t 
                                    uint32_t *const *d, const uint32_t *const *a,
                                    const uint32_t *const *b,
                                    [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -1940,7 +1950,8 @@ int rj_arith_v_add_f64_w64_gfx1250(uint64_t flags, uint64_t exec_mask, uint64_t 
                                    uint32_t *const *d, const uint32_t *const *a,
                                    const uint32_t *const *b,
                                    [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -2171,10 +2182,11 @@ int rj_arith_v_fma_f64_w32_gfx10(uint64_t flags, uint32_t exec_mask, uint64_t in
                                  uint32_t *const *d, const uint32_t *const *a,
                                  const uint32_t *const *b, const uint32_t *const *c,
                                  [[maybe_unused]] uint32_t *trapsts) {
+  const uint64_t numeric_flags = flags;
   if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/true)) {
     return error;
   }
-  return rj_arith_v_fma_f64_w32(flags, exec_mask, instruction_flags, d, a, b, c, trapsts);
+  return rj_arith_v_fma_f64_w32(numeric_flags, exec_mask, instruction_flags, d, a, b, c, trapsts);
 }
 
 // RDNA2 FMA inherits the RDNA3 numeric model; strict exact is unsupported pending gfx10 captures.
@@ -2182,10 +2194,11 @@ int rj_arith_v_fma_f64_w64_gfx10(uint64_t flags, uint64_t exec_mask, uint64_t in
                                  uint32_t *const *d, const uint32_t *const *a,
                                  const uint32_t *const *b, const uint32_t *const *c,
                                  [[maybe_unused]] uint32_t *trapsts) {
+  const uint64_t numeric_flags = flags;
   if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/true)) {
     return error;
   }
-  return rj_arith_v_fma_f64_w64(flags, exec_mask, instruction_flags, d, a, b, c, trapsts);
+  return rj_arith_v_fma_f64_w64(numeric_flags, exec_mask, instruction_flags, d, a, b, c, trapsts);
 }
 
 // Evaluate the instruction under its inherited architecture policy.

@@ -131,6 +131,29 @@
 namespace rocjitsu::amdgpu {
 namespace {
 
+// Check written half results numerically in Loose; all other storage stays exact.
+void expect_half_arithmetic(uint32_t actual, uint32_t expected, uint32_t half_mask, bool loose) {
+  if (!loose) {
+    EXPECT_EQ(actual, expected);
+    return;
+  }
+  EXPECT_EQ(actual & ~half_mask, expected & ~half_mask);
+  for (unsigned shift : {0U, 16U}) {
+    if (!(half_mask & (0xffffU << shift))) {
+      continue;
+    }
+    const float got = util::f16_to_f32(uint16_t(actual >> shift));
+    const float want = util::f16_to_f32(uint16_t(expected >> shift));
+    if (std::isnan(want)) {
+      EXPECT_TRUE(std::isnan(got));
+    } else if (std::isinf(want)) {
+      EXPECT_EQ(got, want);
+    } else {
+      EXPECT_NEAR(got, want, 0x1p-24f + 1e-3f * std::abs(want));
+    }
+  }
+}
+
 class WriteRecorder : public ExecutionPlugin {
 public:
   WriteRecorder() : ExecutionPlugin("rj_arith_write_recorder") {}
@@ -3128,9 +3151,9 @@ TEST(ArithBridgeTest, HalfFmaFormsRoundingPartialAccumulatorsAndState) {
               for (uint32_t lane = 0; lane < lanes; ++lane) {
                 const uint32_t half =
                     !rejected && ((exec_mask >> lane) & 1) ? (rounding == 1 ? 0x3c01 : 0x3c00) : 1;
-                EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 2, lane), packed(half))
-                    << rdna3 << '/' << form << '/' << rounding << '/' << policy_index << '/'
-                    << shift;
+                expect_half_arithmetic(fixture.cu->read_vgpr(fixture.base() + 2, lane),
+                                       packed(half), 0xffffU << shift,
+                                       policy_index == 1 && !rejected && ((exec_mask >> lane) & 1));
               }
               const uint32_t causes =
                   policy_index == 2 && !rejected
@@ -13122,8 +13145,11 @@ TEST(ArithBridgeTest, CdnaMixedMadRoundingAndAliasing) {
             expected <<= 16;
           }
           for (unsigned lane = 0; lane < 64; ++lane) {
-            EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 2, lane),
-                      lane == 0 || lane == 63 ? expected : 0x3a000000U);
+            expect_half_arithmetic(fixture.cu->read_vgpr(fixture.base() + 2, lane),
+                                   lane == 0 || lane == 63 ? expected : 0x3a000000U,
+                                   output == 2 ? 0xffff0000U : 0xffffU,
+                                   semantics == ArithmeticSemantics::Loose && output != 0 &&
+                                       (lane == 0 || lane == 63));
           }
         }
       }
@@ -15808,7 +15834,9 @@ TEST(ArithBridgeTest, CdnaHalfFmaPolicyAndHalfWrites) {
                                                                                  : 0);
               } else if (lane == lanes - 1) {
                 const uint32_t expected = rounding == 1 ? 0x3c01 : 0x3c00;
-                EXPECT_EQ(actual, high || preserve_high ? packed(expected) : expected);
+                expect_half_arithmetic(actual, high || preserve_high ? packed(expected) : expected,
+                                       high ? 0xffff0000U : 0xffffU,
+                                       semantics == ArithmeticSemantics::Loose);
               } else {
                 EXPECT_EQ(actual, packed(1));
               }
@@ -16051,8 +16079,10 @@ TEST(ArithBridgeTest, CdnaPackedHalfArithmetic) {
               value = (value << 16) | (value >> 16);
             }
             for (unsigned lane = 0; lane < lanes; ++lane) {
-              EXPECT_EQ(fixture.cu->read_vgpr(fixture.base(), lane),
-                        lane == 0 || lane == lanes - 1 ? value : inputs[0]);
+              expect_half_arithmetic(fixture.cu->read_vgpr(fixture.base(), lane),
+                                     lane == 0 || lane == lanes - 1 ? value : inputs[0], ~0U,
+                                     semantics == ArithmeticSemantics::Loose &&
+                                         (lane == 0 || lane == lanes - 1));
             }
             EXPECT_EQ(fixture.wave->trapsts(), 0x10U);
           }
@@ -18972,7 +19002,12 @@ TEST(ArithBridgeTest, OlderRadeonFp64Arithmetic) {
             const uint64_t actual =
                 f.cu->read_vgpr(f.base() + destination, lane) |
                 (uint64_t(f.cu->read_vgpr(f.base() + destination + 1, lane)) << 32);
-            EXPECT_EQ(actual, wanted) << lane;
+            if (semantics == ArithmeticSemantics::Loose && ((exec_mask >> lane) & 1) &&
+                std::isnan(std::bit_cast<double>(wanted))) {
+              EXPECT_TRUE(std::isnan(std::bit_cast<double>(actual))) << lane;
+            } else {
+              EXPECT_EQ(actual, wanted) << lane;
+            }
           }
           EXPECT_EQ(f.wave->trapsts(), 0x100U);
         };

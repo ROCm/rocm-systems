@@ -40,6 +40,7 @@ template <rocjitsu::arith::MixedFma Destination, typename Mask>
 int run(uint64_t flags, Mask exec_mask, uint64_t mode, uint32_t *const *d, const uint32_t *const *a,
         const uint32_t *const *b, const uint32_t *const *c) {
   using namespace rocjitsu::arith;
+  const bool compatibility = (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY;
   flags = resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
   const uint32_t known = RJ_ARITH_ALU_NEG_A | RJ_ARITH_ALU_NEG_B | RJ_ARITH_ALU_NEG_C |
                          RJ_ARITH_ALU_ABS_A | RJ_ARITH_ALU_ABS_B | RJ_ARITH_ALU_ABS_C |
@@ -59,6 +60,10 @@ int run(uint64_t flags, Mask exec_mask, uint64_t mode, uint32_t *const *d, const
   }
   if (!exec_mask) {
     return RJ_ARITH_SUCCESS;
+  }
+  // Validation uses the resolved mode; backends retain the inherited Compatibility NaN policy.
+  if (compatibility) {
+    flags = (flags & ~RJ_ARITH_SEMANTICS_MASK) | RJ_ARITH_SEMANTICS_COMPATIBILITY;
   }
   for (int offset = 0; offset < int(sizeof(Mask) * 8); offset += 32) {
     const uint32_t active = uint32_t(exec_mask >> offset);

@@ -23,91 +23,7 @@ __m256i clamp64(__m256i value, int low, int high) {
   return _mm256_blendv_epi8(value, hi, _mm256_cmpgt_epi64(value, hi));
 }
 
-// Scale FP32 by powers of two.
-template <bool GuestDenormals>
-void run32(uint64_t flags, uint32_t instruction_flags, uint32_t result[2][32],
-           const uint32_t *const *a, const uint32_t *b) {
-  auto keep = _mm256_set1_epi32(instruction_flags & RJ_ARITH_ALU_ABS_A ? INT32_MAX : -1);
-  auto flip = _mm256_set1_epi32(instruction_flags & RJ_ARITH_ALU_NEG_A ? INT32_MIN : 0);
-  const double scales[] = {1, 2, 4, 0.5};
-  for (int lane = 0; lane < 32; lane += 8) {
-    auto raw = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(a[0] + lane));
-    auto adjustment = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(b + lane));
-    adjustment = _mm256_min_epi32(_mm256_max_epi32(adjustment, _mm256_set1_epi32(-4096)),
-                                  _mm256_set1_epi32(4096));
-    raw = _mm256_xor_si256(_mm256_and_si256(raw, keep), flip);
-    if (GuestDenormals && (flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS)) {
-      raw = _mm256_castps_si256(flush_denorm_f32(_mm256_castsi256_ps(raw)));
-    }
-    auto magnitude = _mm256_and_si256(raw, _mm256_set1_epi32(INT32_MAX));
-    auto subnormal = _mm256_cmpgt_epi32(_mm256_set1_epi32(0x800000), magnitude);
-    auto small = _mm256_and_si256(raw, subnormal);
-    auto scaled =
-        _mm256_castps_si256(_mm256_mul_ps(_mm256_castsi256_ps(small), _mm256_set1_ps(0x1p24)));
-    auto normalized = _mm256_blendv_epi8(raw, scaled, subnormal);
-    auto exponent =
-        _mm256_srli_epi32(_mm256_and_si256(normalized, _mm256_set1_epi32(INT32_MAX)), 23);
-    exponent = _mm256_add_epi32(exponent, adjustment);
-    exponent = _mm256_sub_epi32(exponent, _mm256_and_si256(subnormal, _mm256_set1_epi32(24)));
-    auto significand = _mm256_and_si256(normalized, _mm256_set1_epi32((INT32_MIN | 0x7fffff)));
-    auto normal = _mm256_or_si256(
-        significand,
-        _mm256_slli_epi32(_mm256_min_epi32(_mm256_max_epi32(exponent, _mm256_set1_epi32(1)),
-                                           _mm256_set1_epi32(254)),
-                          23));
-
-    // Move an underflowing value into the normal range, then round once on
-    // scaling back down. Clamping the integer exponent prevents wraparound.
-    auto raised = _mm256_add_epi32(exponent, _mm256_set1_epi32(24));
-    auto tiny = _mm256_or_si256(
-        significand,
-        _mm256_slli_epi32(_mm256_min_epi32(_mm256_max_epi32(raised, _mm256_set1_epi32(1)),
-                                           _mm256_set1_epi32(254)),
-                          23));
-    auto underflow =
-        _mm256_castps_si256(_mm256_mul_ps(_mm256_castsi256_ps(tiny), _mm256_set1_ps(0x1p-24)));
-    auto bits =
-        _mm256_blendv_epi8(normal, underflow, _mm256_cmpgt_epi32(_mm256_set1_epi32(1), exponent));
-    auto sign = _mm256_and_si256(raw, _mm256_set1_epi32(INT32_MIN));
-    bits = _mm256_blendv_epi8(bits, sign, _mm256_cmpgt_epi32(_mm256_set1_epi32(-23), exponent));
-    bits = _mm256_blendv_epi8(bits, _mm256_or_si256(sign, _mm256_set1_epi32(0x7f800000)),
-                              _mm256_cmpgt_epi32(exponent, _mm256_set1_epi32(254)));
-    auto special =
-        _mm256_or_si256(_mm256_cmpeq_epi32(magnitude, _mm256_setzero_si256()),
-                        _mm256_cmpgt_epi32(magnitude, _mm256_set1_epi32(0x7f800000 - 1)));
-    auto quiet = _mm256_and_si256(_mm256_cmpgt_epi32(magnitude, _mm256_set1_epi32(0x7f800000)),
-                                  _mm256_set1_epi32(0x400000));
-    bits = _mm256_blendv_epi8(bits, _mm256_or_si256(raw, quiet), special);
-    auto value = _mm256_castsi256_ps(bits);
-    if ((instruction_flags & RJ_ARITH_ALU_OMOD_HALF) ||
-        (GuestDenormals && (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS))) {
-      auto finite = _mm256_cmpgt_epi32(_mm256_set1_epi32(0x7f800000), magnitude);
-      auto tiny_before_rounding =
-          _mm256_and_si256(finite, _mm256_cmpgt_epi32(_mm256_set1_epi32(1), exponent));
-      auto zero = instruction_flags & RJ_ARITH_ALU_OMOD_HALF ? _mm256_setzero_ps()
-                                                             : _mm256_castsi256_ps(sign);
-      value = _mm256_blendv_ps(value, zero, _mm256_castsi256_ps(tiny_before_rounding));
-    }
-    if (instruction_flags & RJ_ARITH_ALU_OMOD_HALF) {
-      value = prepare_omod_f32(value, instruction_flags);
-      value = _mm256_mul_ps(value, _mm256_set1_ps(scales[(instruction_flags >> 6) & 3]));
-    }
-    if (instruction_flags & RJ_ARITH_ALU_CLAMP) {
-      auto clamped = _mm256_min_ps(_mm256_max_ps(value, _mm256_setzero_ps()), _mm256_set1_ps(1));
-      if (GuestDenormals && (flags & RJ_ARITH_FP_DX10_CLAMP_OFF)) {
-        clamped = _mm256_blendv_ps(clamped, value, _mm256_cmp_ps(value, value, _CMP_UNORD_Q));
-      }
-      value = clamped;
-    }
-    if (GuestDenormals && (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS)) {
-      value = flush_denorm_f32(value);
-    }
-    bits = _mm256_castps_si256(value);
-    _mm256_storeu_si256(reinterpret_cast<__m256i *>(result[0] + lane), bits);
-  }
-}
-
-// Scale FP32 by powers of two.
+// Scale FP64 by powers of two, including subnormal inputs and outputs.
 template <bool GuestDenormals>
 void run64(uint64_t flags, uint32_t instruction_flags, uint32_t result[2][32],
            const uint32_t *const *a, const uint32_t *b) {
@@ -193,18 +109,19 @@ void run64(uint64_t flags, uint32_t instruction_flags, uint32_t result[2][32],
   }
 }
 
-// Scale FP32 by powers of two for the selected lanes. Requires validated controls; preserve
+// Scale FP64 by powers of two for the selected lanes. Requires validated controls; preserve
 // inactive destination lanes.
 template <bool GuestDenormals>
-void run(bool fp64, uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags,
-         uint32_t *const *d, const uint32_t *const *a, const uint32_t *b) {
+void run(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_t *const *d,
+         const uint32_t *const *a, const uint32_t *b) {
   uint32_t result[2][32];
-  if (fp64) {
+  // NaNs qualify for exponent-only scaling; range/subnormal cases retain general SIMD.
+  const bool general = (instruction_flags & (RJ_ARITH_ALU_OMOD_MASK | RJ_ARITH_ALU_CLAMP)) ||
+                       ldexp_f64_normal_x86_64_v3(flags, instruction_flags, true, result, a, b);
+  if (general) {
     run64<GuestDenormals>(flags, instruction_flags, result, a, b);
-  } else {
-    run32<GuestDenormals>(flags, instruction_flags, result, a, b);
   }
-  for (int reg = 0; reg < (fp64 ? 2 : 1); ++reg) {
+  for (int reg = 0; reg < 2; ++reg) {
     for (int lane = 0; lane < 32; lane += 8) {
       auto lane_exec_mask = _mm256_sllv_epi32(_mm256_set1_epi32(int(exec_mask >> lane)),
                                               _mm256_setr_epi32(31, 30, 29, 28, 27, 26, 25, 24));
@@ -289,19 +206,15 @@ void ldexp_f64_store_x86_64_v3(uint32_t exec_mask, uint32_t *const *d,
   }
 }
 
-// Scale FP32 by powers of two. Preserve destination lanes outside exec_mask.
-// Requires the named CPU features and validated instruction controls.
-void ldexp_x86_64_v3(bool fp64, uint32_t exec_mask, uint32_t instruction_flags, uint32_t *const *d,
-                     const uint32_t *const *a, const uint32_t *b) {
-  run<false>(fp64, 0, exec_mask, instruction_flags, d, a, b);
-}
-
-// Scale FP32 by powers of two. Preserve destination lanes outside exec_mask.
-// Requires the named CPU features and validated instruction controls.
-void ldexp_guest_x86_64_v3(bool fp64, uint64_t flags, uint32_t exec_mask,
-                           uint32_t instruction_flags, uint32_t *const *d, const uint32_t *const *a,
-                           const uint32_t *b) {
-  run<true>(fp64, flags, exec_mask, instruction_flags, d, a, b);
+// Scale FP64 with nearest rounding, preserving complete VGPR aliases and inactive lanes.
+void ldexp_f64_loose_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a, const uint32_t *b) {
+  if (flags & (RJ_ARITH_FP_FLUSH_INPUT_DENORMALS | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS |
+               RJ_ARITH_FP_DX10_CLAMP_OFF)) {
+    run<true>(flags, exec_mask, instruction_flags, d, a, b);
+  } else {
+    run<false>(0, exec_mask, instruction_flags, d, a, b);
+  }
 }
 
 // Exact normal scales change only the exponent. Boundary and subnormal lanes

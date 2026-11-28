@@ -31,6 +31,20 @@ inline __m256 mixed_bf16_input8(const uint32_t *source, uint32_t mode) {
   return _mm256_castsi256_ps(bits);
 }
 
+// Narrow eight FP32 results to BF16 with nearest-even rounding and quiet NaNs.
+// Loose permits the preceding FP32 rounding; Compatibility uses compensated sums below.
+inline __m256i mixed_bf16_loose_narrow8(__m256 value) {
+  auto bits = _mm256_castps_si256(value);
+  auto increment =
+      _mm256_add_epi32(_mm256_set1_epi32(0x7fff),
+                       _mm256_and_si256(_mm256_srli_epi32(bits, 16), _mm256_set1_epi32(1)));
+  auto result = _mm256_srli_epi32(_mm256_add_epi32(bits, increment), 16);
+  auto nan = _mm256_cmpgt_epi32(_mm256_and_si256(bits, _mm256_set1_epi32(INT32_MAX)),
+                                _mm256_set1_epi32(0x7f800000));
+  return _mm256_blendv_epi8(
+      result, _mm256_or_si256(_mm256_srli_epi32(bits, 16), _mm256_set1_epi32(0x40)), nan);
+}
+
 // Round four exact finite product-plus-addend sums to guest BF16 encodings.
 // Product and addend supply the exact-zero sign; error retains lost sum bits.
 inline __m128i mixed_bf16_narrow4(__m256d sum, __m256d error, __m256d product, __m256d addend,

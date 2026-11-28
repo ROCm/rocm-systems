@@ -156,6 +156,12 @@ template <bool Half, typename Call> static void check_guest_controls(Call call) 
                      r.v + 3, r.v, r.v + 1, r.v + 2, nullptr),
                 RJ_ARITH_SUCCESS);
       EXPECT_EQ(r.v[3][0], one + (rounding == RJ_ARITH_FP_ROUND_UP));
+      // Loose may keep host nearest rounding under the same guest control word.
+      ASSERT_EQ(call(cpu | RJ_ARITH_SEMANTICS_LOOSE | rounding, 1, 0, r.v + 3, r.v, r.v + 1,
+                     r.v + 2, nullptr),
+                RJ_ARITH_SUCCESS);
+      expect_fp(r.v[3][0], one, Half ? 16 : 32, RJ_ARITH_SEMANTICS_LOOSE,
+                /*atol=*/0, /*rtol=*/Half ? 1e-3 : 1e-6);
     }
     for (uint64_t flushing :
          {uint64_t(0), RJ_ARITH_FP_FLUSH_INPUT_DENORMALS, RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS}) {
@@ -326,6 +332,10 @@ template <int Lanes, typename Call> void check_fma16_rounding_boundaries(Call ca
   };
   for (uint64_t cpu : supported_cpu_levels()) {
     for (uint64_t semantics : semantics_modes()) {
+      // These goldens distinguish single rounding; Loose arithmetic is checked separately.
+      if (semantics == RJ_ARITH_SEMANTICS_LOOSE) {
+        continue;
+      }
       for (uint64_t fp_flags : {uint64_t{0}, RJ_ARITH_FP16_OVFL}) {
         for (const auto &sample : cases) {
           SCOPED_TRACE(testing::Message()
@@ -824,8 +834,7 @@ TEST(FpFmaF64, RoundedMinimumNormal) {
        {0x0020000000000000ULL, 0x0020000000000000ULL, 0, 0}},
   };
   for (uint64_t cpu : supported_cpu_levels()) {
-    for (uint64_t semantics : {RJ_ARITH_SEMANTICS_LOOSE, RJ_ARITH_SEMANTICS_COMPATIBILITY,
-                               RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS}) {
+    for (uint64_t semantics : hardware_semantics()) {
       for (const auto &test : cases) {
         for (unsigned rounding = 0; rounding < 4; ++rounding) {
           Registers<8, 32> r;

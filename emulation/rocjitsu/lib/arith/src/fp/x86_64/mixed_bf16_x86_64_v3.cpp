@@ -26,13 +26,21 @@ void rocjitsu::arith::mixed_bf16_x86_64_v3(MixedFma destination, uint64_t flags,
                                            uint32_t mode, uint32_t *d, const uint32_t *a,
                                            const uint32_t *b, const uint32_t *c) {
   const bool clamp = mode & RJ_ARITH_ALU_CLAMP;
+  const bool loose = (flags & RJ_ARITH_SEMANTICS_MASK) != RJ_ARITH_SEMANTICS_COMPATIBILITY;
   const unsigned rounding = unsigned((flags & RJ_ARITH_FP_ROUND_MASK) >> 24);
   for (int lane = 0; lane < 32; lane += 8) {
     const auto x = mixed_bf16_input8(a + lane, mode);
     const auto y = mixed_bf16_input8(b + lane, mode >> 1);
     const auto z = mixed_bf16_input8(c + lane, mode >> 2);
     __m256i result;
-    if (destination == MixedFma::Float) {
+    if (loose) {
+      auto value = _mm256_fmadd_ps(x, y, z);
+      if (clamp) {
+        value = _mm256_min_ps(_mm256_max_ps(value, _mm256_setzero_ps()), _mm256_set1_ps(1));
+      }
+      result = destination == MixedFma::Float ? _mm256_castps_si256(value)
+                                              : mixed_bf16_loose_narrow8(value);
+    } else if (destination == MixedFma::Float) {
       result = _mm256_castps_si256(_mm256_fmadd_ps(x, y, z));
     } else {
       const auto lo = half4(_mm256_castps256_ps128(x), _mm256_castps256_ps128(y),
@@ -41,7 +49,9 @@ void rocjitsu::arith::mixed_bf16_x86_64_v3(MixedFma destination, uint64_t flags,
                             _mm256_extractf128_ps(z, 1), rounding, clamp);
       result = _mm256_inserti128_si256(_mm256_castsi128_si256(lo), hi, 1);
     }
-    result = mixed_bf16_finish8(destination, flags, clamp, x, y, z, result);
+    if (!loose) {
+      result = mixed_bf16_finish8(destination, flags, clamp, x, y, z, result);
+    }
     result = mixed_bf16_merge8(destination, result, d + lane);
     const auto active = _mm256_sllv_epi32(_mm256_set1_epi32(int(exec_mask >> lane)),
                                           _mm256_setr_epi32(31, 30, 29, 28, 27, 26, 25, 24));

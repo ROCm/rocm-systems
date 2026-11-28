@@ -14,8 +14,13 @@ enum class MixedFma { Float, Low, High };
 
 // All backends require their named CPU features and validated controls; preserve inactive
 // lanes and the unselected destination half. Inputs may alias D.
-// Exact arithmetic for every guest rounding mode, with guest denormal and NaN policies.
+// Retain guest rounding and NaN policies.
 void mixed_fma_exact_x86_64_v4(MixedFma destination, bool rdna3, uint64_t flags, uint32_t exec_mask,
+                               uint32_t mode, uint32_t *d, const uint32_t *a, const uint32_t *b,
+                               const uint32_t *c);
+
+// Native FP32 FMA with nearest guest rounding and the mixed-format output policy.
+void mixed_fma_loose_x86_64_v4(MixedFma destination, bool rdna3, uint64_t flags, uint32_t exec_mask,
                                uint32_t mode, uint32_t *d, const uint32_t *a, const uint32_t *b,
                                const uint32_t *c);
 
@@ -32,8 +37,9 @@ void mixed_fma_float_x86_64_v3(uint32_t exec_mask, uint32_t mode, uint32_t *d, c
 void mixed_fma_float_guest_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *d,
                                      const uint32_t *a, const uint32_t *b, const uint32_t *c);
 
-// Loose FP16 result with nearest rounding and preserved denormals; saturate if requested.
-void mixed_fma_half_x86_64_v3(bool high, bool saturate, uint32_t exec_mask, uint32_t mode,
+// Loose FP16 result from a native FP32 FMA, with guest denormal and output controls.
+// Requires nearest guest rounding; preserve inactive lanes and the other destination half.
+void mixed_fma_half_x86_64_v3(bool high, uint64_t flags, uint32_t exec_mask, uint32_t mode,
                               uint32_t *d, const uint32_t *a, const uint32_t *b, const uint32_t *c);
 
 // FP16 result with guest rounding, denormal controls and saturation. Write the selected half.
