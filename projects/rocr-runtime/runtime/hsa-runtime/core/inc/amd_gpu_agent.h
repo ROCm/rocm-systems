@@ -255,6 +255,15 @@ class GpuAgent : public GpuAgentInt {
   void AssembleShader(const char* func_name, AssembleTarget assemble_target, void*& code_buf,
                       size_t& code_buf_size) const;
 
+  // @brief Whether a precompiled shader named func_name exists for this agent's ISA.
+  //
+  // Not every shader is built for every generation. Callers that can operate
+  // without a given shader must consult this before calling AssembleShader,
+  // which requires the shader to be present.
+  //
+  // @param [in] func_name Name of the shader, as passed to AssembleShader.
+  bool IsShaderAvailable(const char* func_name) const;
+
   // @brief Frees code object created by AssembleShader.
   //
   // @param [in] code_buf Code object buffer.

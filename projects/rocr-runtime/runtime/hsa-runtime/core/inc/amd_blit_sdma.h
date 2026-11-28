@@ -590,6 +590,18 @@ template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
   bool is_gfx125plus_;
 
   /// True if SDMA supports linear swap copy (gfx94X+).
+  ///
+  /// The claim is deliberately narrower than the packet definition. A part may
+  /// encode a swap sub-op without the engine retiring it, and an engine that
+  /// accepts a swap it never completes stalls the queue instead of returning a
+  /// status the caller can act on - so an over-broad claim costs a copy engine
+  /// rather than an error. gfx94X+ are the parts on which the packet has been
+  /// exercised on hardware.
+  ///
+  /// This flag gates the swap sub-op alone. gfx125+ reaches the packet through
+  /// a separate condition in SubmitBodies and so does not depend on it; every
+  /// other part that does not claim it is served by the shader blit (see
+  /// GpuAgent::DmaCopySwap).
   bool swap_supported_;
 
   /// True if SDMA supports the linear wait/signal-indirect copy packet (gfx125+).
