@@ -81,8 +81,14 @@ if(CMAKE_SCRIPT_MODE_FILE)
         set(ENV{PYTHONPATH} "${PYTHON_PATH}")
         set(ENV{PYTHONWARNINGS} "ignore")
 
-        set(_command "${PYTEST_EXECUTABLE}" --collect-only -q
-                     "--rootdir=${WORKING_DIRECTORY}" ${DISCOVERY_EXTRA_ARGS})
+        if(PYTEST_PYTHON_EXECUTABLE)
+            set(_command
+                "${PYTEST_PYTHON_EXECUTABLE}" "${PYTEST_EXECUTABLE}" --collect-only -q
+                "--rootdir=${WORKING_DIRECTORY}" ${DISCOVERY_EXTRA_ARGS})
+        else()
+            set(_command "${PYTEST_EXECUTABLE}" --collect-only -q
+                         "--rootdir=${WORKING_DIRECTORY}" ${DISCOVERY_EXTRA_ARGS})
+        endif()
 
         foreach(test_path IN LISTS TEST_PATHS)
             list(APPEND _command "${test_path}")

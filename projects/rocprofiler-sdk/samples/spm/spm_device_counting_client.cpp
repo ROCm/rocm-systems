@@ -34,6 +34,7 @@
 #include <set>
 #include <sstream>
 #include <stdexcept>
+#include <unordered_map>
 #include <vector>
 
 #define ROCPROFILER_CALL(result, msg)                                                              \
