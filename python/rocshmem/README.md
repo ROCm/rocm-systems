@@ -91,6 +91,20 @@ export LD_LIBRARY_PATH=$CMAKE_PREFIX_PATH/lib:$ROCM_PATH/lib:$LD_LIBRARY_PATH
 
 > Note: this package is not published to PyPI yet; install from source only.
 
+### Packaging inputs
+
+Packagers that ship the wheel next to a ROCm runtime wheel (e.g. TheRock) can
+set these when running `pip wheel`. All are optional.
+
+| Variable | Effect | Example |
+| --- | --- | --- |
+| `ROCSHMEM4PY_VERSION_SUFFIX` | Replaces the `+rocshmem<ver>` version suffix. | `+rocm7.10.0` |
+| `ROCSHMEM4PY_EXTRA_INSTALL_REQUIREMENTS` | `\|`-separated requirements added to the wheel. | `rocm-sdk-core==7.10.0` |
+| `ROCSHMEM4PY_INSTALL_RPATH` | Colon-separated RPATH replacing the build RPATH; needs `patchelf`. | `$ORIGIN/_rocm_sdk_core/lib` |
+
+`build_tests/` covers them without a GPU:
+`CMAKE_PREFIX_PATH=/opt/rocshmem python -m pytest build_tests`.
+
 ### Building against different rocSHMEM backend configurations
 
 The binding statically links `librocshmem.a`, so its build and runtime

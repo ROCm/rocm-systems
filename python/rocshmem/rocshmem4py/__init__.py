@@ -23,7 +23,8 @@ from typing import Sequence, Optional, Any
 try:
     # Single source of truth for the package version: the installed
     # distribution metadata (rocshmem4py-<ver>[+rocshmem<lib-ver>]), which
-    # setup.py derives from pyproject.toml plus the linked rocSHMEM version.
+    # setup.py derives from pyproject.toml plus the linked rocSHMEM version
+    # (or ROCSHMEM4PY_VERSION_SUFFIX). __rocshmem_version__ is the library's.
     __version__ = _dist_version("rocshmem4py")
 except PackageNotFoundError:
     __version__ = "0.0.0+unknown"

@@ -13,10 +13,16 @@ import subprocess
 from setuptools import Extension, setup
 from setuptools.command.build_ext import build_ext
 
+try:
+    from packaging.requirements import InvalidRequirement, Requirement
+except ImportError:  # setuptools < 71
+    from setuptools.extern.packaging.requirements import InvalidRequirement, Requirement
+
 # Base release version of the binding's own Python API. The full version
 # reported to pip is this plus a PEP 440 local segment recording the linked
 # rocSHMEM library version (e.g. "0.1.0+rocshmem3.6.0"), so a built wheel is
-# self-documenting about which rocSHMEM it was compiled against.
+# self-documenting about which rocSHMEM it was compiled against, unless
+# ROCSHMEM4PY_VERSION_SUFFIX replaces that segment.
 BASE_VERSION = "0.1.0"
 
 
@@ -53,13 +59,41 @@ def _detect_rocshmem_version():
     return None
 
 
+_VERSION_SUFFIX_RE = re.compile(r"\+[a-z0-9]+([-_.][a-z0-9]+)*", re.IGNORECASE)
+
+
 def _package_version():
+    # Packagers replace the local segment, e.g. "+rocm7.10.0".
+    suffix = os.environ.get("ROCSHMEM4PY_VERSION_SUFFIX", "").strip()
+    if suffix:
+        if not _VERSION_SUFFIX_RE.fullmatch(suffix):
+            raise RuntimeError(
+                f"ROCSHMEM4PY_VERSION_SUFFIX={suffix!r} must be '+' followed by "
+                "a PEP 440 local version label, e.g. '+rocm7.10.0'"
+            )
+        return f"{BASE_VERSION}{suffix}"
     lib_version = _detect_rocshmem_version()
     if not lib_version:
         return BASE_VERSION
     # PEP 440 local version label: alphanumerics and periods only.
     local = "rocshmem" + re.sub(r"[^0-9A-Za-z.]", ".", lib_version)
     return f"{BASE_VERSION}+{local}"
+
+
+def _install_requires():
+    """'|'-separated PEP 508 requirements from the packager, e.g.
+    "rocm-sdk-core==7.10.0"."""
+    raw = os.environ.get("ROCSHMEM4PY_EXTRA_INSTALL_REQUIREMENTS", "")
+    requirements = [entry.strip() for entry in raw.split("|") if entry.strip()]
+    for requirement in requirements:
+        try:
+            Requirement(requirement)
+        except InvalidRequirement as e:
+            raise RuntimeError(
+                f"ROCSHMEM4PY_EXTRA_INSTALL_REQUIREMENTS entry {requirement!r} "
+                f"is not a valid PEP 508 requirement: {e}"
+            ) from e
+    return requirements
 
 
 class CMakeExtension(Extension):
@@ -111,6 +145,10 @@ class CMakeBuild(build_ext):
             cmake_args.append(
                 f'-DROCSHMEM_GPU_TARGETS={os.environ["ROCSHMEM_GPU_TARGETS"]}'
             )
+        # Always passed, even empty, so a value cached by an earlier in-tree
+        # build is cleared.
+        rpath = os.environ.get("ROCSHMEM4PY_INSTALL_RPATH", "")
+        cmake_args.append(f"-DROCSHMEM4PY_INSTALL_RPATH={rpath}")
 
         build_args = ["--config", cfg, "--", f"-j{os.cpu_count() or 4}"]
 
@@ -127,6 +165,7 @@ class CMakeBuild(build_ext):
 
 setup(
     version=_package_version(),
+    install_requires=_install_requires(),
     ext_modules=[CMakeExtension("_rocshmem4py", sourcedir=".")],
     cmdclass={"build_ext": CMakeBuild},
 )
