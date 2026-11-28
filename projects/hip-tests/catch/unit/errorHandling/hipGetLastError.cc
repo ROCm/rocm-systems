@@ -829,7 +829,6 @@ HIP_TEST_CASE(Unit_hipGetLastError_with_Kernel_divide_by_zero) {
   HIP_CHECK(hipStreamDestroy(stream));
 }
 
-#if HT_NVIDIA
 /**
  * Test Description
  * ------------------------
@@ -860,44 +859,43 @@ HIP_TEST_CASE(Unit_hipGetLastError_with_Kernel_Invalid_Configuration) {
     HIP_CHECK(hipGetLastError());
     incrementKernl<<<1, 0, 0, stream>>>(i_d);
     ret = hipGetLastError();
-    REQUIRE(ret == hipErrorInvalidConfiguration);
+    REQUIRE(ret == kHipErrorInvalidLaunchConfig);
   }
   SECTION("Kernel call invalid configuration- blocks=0 & threadsPerBlock=1") {
     HIP_CHECK(hipGetLastError());
     incrementKernl<<<0, 1, 0, stream>>>(i_d);
     ret = hipGetLastError();
-    REQUIRE(ret == hipErrorInvalidConfiguration);
+    REQUIRE(ret == kHipErrorInvalidLaunchConfig);
   }
   SECTION("Kernel call invalid configuration- blocks=0 & threadsPerBlock=0") {
     HIP_CHECK(hipGetLastError());
     incrementKernl<<<0, 0, 0, stream>>>(i_d);
     ret = hipGetLastError();
-    REQUIRE(ret == hipErrorInvalidConfiguration);
+    REQUIRE(ret == kHipErrorInvalidLaunchConfig);
   }
 
   SECTION("GGLKernel invalid configuration- blocks=1 & threadsPerBlock=0") {
     HIP_CHECK(hipGetLastError());
     hipLaunchKernelGGL(incrementKernl, dim3(1), dim3(0), 0, stream, i_d);
     ret = hipGetLastError();
-    REQUIRE(ret == hipErrorInvalidConfiguration);
+    REQUIRE(ret == kHipErrorInvalidLaunchConfig);
   }
   SECTION("GGLKernel invalid configuration- blocks=0 & threadsPerBlock=1") {
     HIP_CHECK(hipGetLastError());
     hipLaunchKernelGGL(incrementKernl, dim3(0), dim3(1), 0, stream, i_d);
     ret = hipGetLastError();
-    REQUIRE(ret == hipErrorInvalidConfiguration);
+    REQUIRE(ret == kHipErrorInvalidLaunchConfig);
   }
   SECTION("GGLKernel invalid configuration- blocks=0 & threadsPerBlock=0") {
     HIP_CHECK(hipGetLastError());
     hipLaunchKernelGGL(incrementKernl, dim3(0), dim3(0), 0, stream, i_d);
     ret = hipGetLastError();
-    REQUIRE(ret == hipErrorInvalidConfiguration);
+    REQUIRE(ret == kHipErrorInvalidLaunchConfig);
   }
 
   HIP_CHECK(hipFree(i_d));
   HIP_CHECK(hipStreamDestroy(stream));
 }
-#endif
 /**
  * Test Description
  * ------------------------
@@ -1063,20 +1061,16 @@ static void __global__ emptyKernl() { }
  *  - HIP_VERSION >= 6.4
  */
 
-// Below test failed on NVIDIA due to error mismatch produced by the Invalid Kernel config.
-// For more details please check the ticket SWDEV-501851 comments.
-#if HT_AMD
 HIP_TEST_CASE(Unit_hipGetLastError_Kernel_Invalid_Config) {
   hipError_t ret;
     hipLaunchKernelGGL(emptyKernl, dim3(0), dim3(0), 0, 0);
     int* A_d;
     HIP_CHECK(hipMalloc(&A_d, 1024));
     ret = hipGetLastError();
-    REQUIRE(ret == hipErrorInvalidConfiguration);
+    REQUIRE(ret == kHipErrorInvalidLaunchConfig);
     HIP_CHECK_ERROR(hipGetLastError(), hipSuccess);
     HIP_CHECK(hipFree(A_d));
 }
-#endif
 /**
  * End doxygen group ErrorTest.
  * @}

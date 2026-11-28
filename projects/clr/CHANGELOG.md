@@ -43,6 +43,8 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 * Resolved a segmentation fault on every call to the eight external-semaphore graph node APIs (`hipGraphAddExternalSemaphoresSignalNode`, `hipGraphAddExternalSemaphoresWaitNode`, and their `GetParams`/`SetParams`/`Exec...SetParams` APIs). Their runtime dispatch-table entries were never set; they now route to the implementations, and `hipGraphAddExternalSemaphoresSignalNode` returns `hipErrorInvalidValue` for invalid arguments as the wait variant does.
 * On Windows, `hipMalloc3DArray`, `hipArray3DCreate` and `hipMallocMipmappedArray` no longer reject 3D extents above 2048 or layered arrays with more than 2048 layers. `maxTexture3D`, `maxSurface3D` and the layered limits (`maxTexture1DLayered`, `maxTexture2DLayered` and their surface equivalents) now report the device's limits, matching Linux.
 * `hipCtxDestroy` no longer releases the device context for a context the caller did not create with `hipCtxCreate`, which could free the context while the runtime still referenced it.
+* A kernel launch that exceeds the device's `hipDeviceProp_t.maxGridSize` limits is now rejected and reports `hipErrorInvalidValue`, matching CUDA. The workgroup count is rounded up, so a non-uniform launch cannot bypass the limit with a partial final workgroup.
+* A launch configuration rejected by launch parameter validation now reports `hipErrorInvalidValue` on every kernel launch API, matching CUDA 13.4. Some APIs previously returned `hipErrorInvalidConfiguration` for these conditions, so applications testing for that code need updating.
 
 ### Changed
 

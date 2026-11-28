@@ -257,19 +257,16 @@ static void __global__ emptyKernl() {}
  * ------------------------
  *  - HIP_VERSION >= 6.4
  */
-// Below test failed on NVIDIA due to error mismatch produced by the Invalid Kernel config.
 // For more details please check the ticket SWDEV-501896 comments.
-#if HT_AMD
 HIP_TEST_CASE(Unit_hipPeekAtLastError_Kernel_Invalid_Config) {
   hipError_t ret;
     hipLaunchKernelGGL(emptyKernl, dim3(0), dim3(0), 0, 0);
     int* A_d;
     HIP_CHECK(hipMalloc(&A_d, 1024));
     ret = hipPeekAtLastError();
-    REQUIRE(ret == hipErrorInvalidConfiguration);
+    REQUIRE(ret == kHipErrorInvalidLaunchConfig);
     HIP_CHECK(hipFree(A_d));
 }
-#endif
 /**
  * End doxygen group ErrorTest.
  * @}

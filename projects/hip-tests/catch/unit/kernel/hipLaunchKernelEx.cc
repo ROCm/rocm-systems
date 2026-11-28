@@ -177,7 +177,7 @@ HIP_TEST_CASE(Unit_hipLaunchKernelExC_NegetiveTsts) {
 
   SECTION("Invalid Kernel Config") {
     HIP_CHECK_ERROR(hipLaunchKernelExC(&invalidConfig, (void*)cooperativeKernelExC, kernelArgs),
-                    hipErrorInvalidConfiguration);
+                    kHipErrorInvalidLaunchConfig);
   }
   HIP_CHECK(hipFree(d_output));
 }
@@ -283,7 +283,7 @@ HIP_TEST_CASE(Unit_hipLaunchKernelEx_NegetiveTsts) {
   SECTION("Invalid Kernel Config") {
     HIP_CHECK_ERROR(hipLaunchKernelEx(&invalidConfig, (void (*)(int*, int))cooperativeKernelEx,
                                       d_output, totalThreads),
-                    hipErrorInvalidConfiguration);
+                    kHipErrorInvalidLaunchConfig);
   }
   HIP_CHECK(hipFree(d_output));
 }

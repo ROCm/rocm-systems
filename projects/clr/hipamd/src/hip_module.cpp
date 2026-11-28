@@ -365,12 +365,12 @@ hipError_t ihipLaunchKernel_validate(hipFunction_t f, const amd::LaunchParams& l
 
   if (launch_params.global_[0] == 0 || launch_params.global_[1] == 0 ||
       launch_params.global_[2] == 0) {
-    return hipErrorInvalidConfiguration;
+    return hipErrorInvalidValue;
   }
 
   if (launch_params.local_[0] == 0 || launch_params.local_[1] == 0 ||
       launch_params.local_[2] == 0) {
-    return hipErrorInvalidConfiguration;
+    return hipErrorInvalidValue;
   }
 
   const amd::Device* device = g_devices[deviceId]->devices()[0];
@@ -381,8 +381,9 @@ hipError_t ihipLaunchKernel_validate(hipFunction_t f, const amd::LaunchParams& l
 
   // Make sure dispatch doesn't exceed max workgroup size limit
   if (launch_params.local_.product() > info.maxWorkGroupSize_) {
-    return hipErrorInvalidConfiguration;
+    return hipErrorInvalidValue;
   }
+
   amd::Kernel* kernel = hip::asKernel(f);
   if (!kernel) {
     LogPrintfError("%s", "Kernel object is invalid or null, possibly due to architecture mismatch.");
@@ -814,7 +815,7 @@ hipError_t hipModuleLaunchKernel(hipFunction_t f, uint32_t gridDimX, uint32_t gr
                  blockDimY, blockDimZ, sharedMemBytes, kernelParams, extra);
 
   amd::HIPLaunchParams launch_params(gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ,
-                                     sharedMemBytes, *device, 0, 0, 0, 1, 1, 1);
+                                     sharedMemBytes, device->info().maxGridDim_, 0, 0, 0, 1, 1, 1);
   if (!launch_params.IsValidConfig() ||
        launch_params.local_.product() > device->info().maxWorkGroupSize_) {
     HIP_RETURN(hipErrorInvalidValue);
@@ -861,12 +862,13 @@ hipError_t hipExtModuleLaunchKernel(hipFunction_t f, uint32_t globalWorkSizeX,
                  kernelParams, extra, startEvent, stopEvent, flags);
 
   amd::LaunchParams launch_params(globalWorkSizeX, globalWorkSizeY, globalWorkSizeZ, localWorkSizeX,
-                                  localWorkSizeY, localWorkSizeZ, sharedMemBytes, *device, 1, 1, 1, 1,
+                                  localWorkSizeY, localWorkSizeZ, sharedMemBytes,
+                                  device->info().maxGridDim_, 1, 1, 1, 1,
                                   1, 1, false);
 
   if (!launch_params.IsValidConfig() ||
        launch_params.local_.product() > device->info().maxWorkGroupSize_) {
-    HIP_RETURN(hipErrorInvalidConfiguration);
+    HIP_RETURN(hipErrorInvalidValue);
   }
 
   if (sharedMemBytes > device->info().localMemSizePerCU_) {
@@ -902,8 +904,13 @@ hipError_t hipHccModuleLaunchKernel(hipFunction_t f, uint32_t globalWorkSizeX,
   int deviceId = hip::Stream::DeviceId(hStream);
   const amd::Device* device = g_devices[deviceId]->devices()[0];
   amd::LaunchParams launch_params(globalWorkSizeX, globalWorkSizeY, globalWorkSizeZ, blockDimX,
-                                  blockDimY, blockDimZ, sharedMemBytes, *device, 1, 1, 1, 1, 1, 1,
+                                  blockDimY, blockDimZ, sharedMemBytes,
+                                  device->info().maxGridDim_, 1, 1, 1, 1, 1, 1,
                                   false);
+
+  if (!launch_params.IsValidConfig()) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
 
   HIP_RETURN(ihipModuleLaunchKernel(f, launch_params, hStream, kernelParams, extra, startEvent,
                                     stopEvent));
@@ -929,7 +936,7 @@ hipError_t hipModuleLaunchCooperativeKernel(hipFunction_t f, unsigned int gridDi
                  blockDimX, blockDimY, blockDimZ, sharedMemBytes, kernelParams);
 
   amd::HIPLaunchParams launch_params(gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ,
-                                     sharedMemBytes, *device, 0, 0, 0, 1, 1, 1);
+                                     sharedMemBytes, device->info().maxGridDim_, 0, 0, 0, 1, 1, 1);
 
   if (!launch_params.IsValidConfig() ||
       launch_params.local_.product() > device->info().maxWorkGroupSize_) {
@@ -1043,10 +1050,11 @@ hipError_t ihipModuleLaunchCooperativeKernelMultiDevice(hipFunctionLaunchParams*
     const amd::Device& device = hip_stream->vdev()->device();
     amd::HIPLaunchParams launch_params(launch.gridDimX, launch.gridDimY, launch.gridDimZ,
                                        launch.blockDimX, launch.blockDimY, launch.blockDimZ,
-                                       launch.sharedMemBytes, device, 0, 0, 0, 1, 1, 1);
+                                       launch.sharedMemBytes,
+                                       device.info().maxGridDim_, 0, 0, 0, 1, 1, 1);
 
     if (!launch_params.IsValidConfig()) {
-      return hipErrorInvalidConfiguration;
+      return hipErrorInvalidValue;
     }
 
     result = ihipModuleLaunchKernel(launch.function, launch_params, launch.hStream,
@@ -1176,11 +1184,12 @@ hipError_t hipLaunchCooperativeKernel_common(const void* f, dim3 gridDim, dim3 b
   const amd::Device* device = g_devices[deviceId]->devices()[0];
 
   amd::HIPLaunchParams launch_params(gridDim.x, gridDim.y, gridDim.z, blockDim.x, blockDim.y,
-                                     blockDim.z, sharedMemBytes, *device, 0, 0, 0, 1, 1, 1);
+                                     blockDim.z, sharedMemBytes,
+                                     device->info().maxGridDim_, 0, 0, 0, 1, 1, 1);
 
   if (!launch_params.IsValidConfig() ||
       launch_params.local_.product() > device->info().maxWorkGroupSize_) {
-    return hipErrorInvalidConfiguration;
+    return hipErrorInvalidValue;
   }
 
   if (sharedMemBytes > device->info().localMemSizePerCU_) {
@@ -1642,10 +1651,11 @@ hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config, hipFunction_t f
   const amd::Device* drvDevice = g_devices[drvDeviceId]->devices()[0];
   amd::HIPLaunchParams launch_params(config->gridDimX, config->gridDimY, config->gridDimZ,
                                      config->blockDimX, config->blockDimY, config->blockDimZ,
-                                     config->sharedMemBytes, *drvDevice, 0, 0, 0, 1, 1, 1);
+                                     config->sharedMemBytes,
+                                     drvDevice->info().maxGridDim_, 0, 0, 0, 1, 1, 1);
 
   if (!launch_params.IsValidConfig()) {
-    HIP_RETURN(hipErrorInvalidConfiguration);
+    HIP_RETURN(hipErrorInvalidValue);
   }
 
   if (config->numAttrs == 0) {
@@ -1707,7 +1717,8 @@ hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config, hipFunction_t f
 
   amd::HIPLaunchParams launch_params_cluster(
       config->gridDimX, config->gridDimY, config->gridDimZ, config->blockDimX, config->blockDimY,
-      config->blockDimZ, config->sharedMemBytes, *drvDevice, 0, 0, 0, clusterDim.x, clusterDim.y,
+      config->blockDimZ, config->sharedMemBytes,
+      drvDevice->info().maxGridDim_, 0, 0, 0, clusterDim.x, clusterDim.y,
       clusterDim.z, clusterDimsSpecified);
 
   HIP_RETURN(ihipModuleLaunchKernel(f, launch_params_cluster, hStream, kernelParams, extra, nullptr,
