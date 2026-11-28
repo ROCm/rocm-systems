@@ -50,42 +50,51 @@ template <bool Half, bool Accumulate, bool Legacy = false, bool Gfx1150 = false>
       c &= sign;
     }
   }
-  // Loose nearest-even FP32 uses the host FMA. gfx1250's inherited model also uses it
-  // for loose FP32 in any rounding mode, and for FP16, which rounds once to FP32 and
-  // then to FP16. The RDNA4 FP16 model rounds, saturates and flushes in every
-  // semantics mode.
-  if constexpr (!Half || Legacy) {
-    if ((Half && Legacy) ||
-        (!rocjitsu::arith::is_exact(flags) && (Legacy || !(flags & RJ_ARITH_FP_ROUND_MASK)))) {
-      float x = Half ? rocjitsu::arith::f16_to_float(uint16_t(a)) : rocjitsu::arith::as_float(a);
-      float y = Half ? rocjitsu::arith::f16_to_float(uint16_t(b)) : rocjitsu::arith::as_float(b);
-      float z = Half ? rocjitsu::arith::f16_to_float(uint16_t(c)) : rocjitsu::arith::as_float(c);
-      uint32_t result =
-          Half ? rocjitsu::arith::float_to_f16(__builtin_fmaf(x, y, z), flags & RJ_ARITH_FP16_OVFL)
-               : rocjitsu::arith::as_bits(__builtin_fmaf(x, y, z));
-      if (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) {
-        uint32_t magnitude = result & (sign - 1);
-        constexpr uint32_t normal = Half ? 0x400 : 0x800000;
-        if (magnitude < normal) {
+  // Loose nearest-even arithmetic uses host FP32 FMA, narrowing once more for FP16.
+  // gfx1250's inherited model also uses it for FP32 in any rounding mode and for FP16.
+  // Exact and Compatibility arithmetic retain their existing fused-rounding models.
+  if ((Half && Legacy) ||
+      (!rocjitsu::arith::is_exact(flags) && (Legacy || !(flags & RJ_ARITH_FP_ROUND_MASK)))) {
+    if constexpr (Half && !Legacy) {
+      // A NaN already determines the scalar result; skip conversion and native FMA.
+      const uint32_t nan = (a & 0x7fffU) > inf   ? a
+                           : (b & 0x7fffU) > inf ? b
+                           : (c & 0x7fffU) > inf ? c
+                                                 : 0;
+      if (nan) {
+        *d = nan | 0x200U;
+        return RJ_ARITH_SUCCESS;
+      }
+    }
+    float x = Half ? rocjitsu::arith::f16_to_float(uint16_t(a)) : rocjitsu::arith::as_float(a);
+    float y = Half ? rocjitsu::arith::f16_to_float(uint16_t(b)) : rocjitsu::arith::as_float(b);
+    float z = Half ? rocjitsu::arith::f16_to_float(uint16_t(c)) : rocjitsu::arith::as_float(c);
+    uint32_t result =
+        Half ? rocjitsu::arith::float_to_f16(__builtin_fmaf(x, y, z), flags & RJ_ARITH_FP16_OVFL)
+             : rocjitsu::arith::as_bits(__builtin_fmaf(x, y, z));
+    if (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) {
+      uint32_t magnitude = result & (sign - 1);
+      constexpr uint32_t normal = Half ? 0x400 : 0x800000;
+      if (magnitude < normal) {
+        result &= sign;
+      }
+      if (magnitude == normal) {
+        // TwoSum retains tiny addends when deciding which side of the tininess
+        // threshold the exact result occupies. The product is exact in double.
+        double product = double(x) * double(y), sum = product + double(z), part = sum - product;
+        double residual = (product - (sum - part)) + (double(z) - part);
+        double absolute = (result & sign) ? -sum : sum,
+               tail = (result & sign) ? -residual : residual;
+        constexpr double threshold = Half ? (0x1p-14 - 0x1p-26) : (0x1p-126 - 0x1p-151);
+        if (absolute < threshold || (absolute == threshold && tail < 0)) {
           result &= sign;
         }
-        if (magnitude == normal) {
-          // TwoSum retains tiny addends when deciding which side of the tininess
-          // threshold the exact result occupies. The product is exact in double.
-          double product = double(x) * double(y), sum = product + double(z), part = sum - product;
-          double residual = (product - (sum - part)) + (double(z) - part);
-          double absolute = (result & sign) ? -sum : sum,
-                 tail = (result & sign) ? -residual : residual;
-          constexpr double threshold = Half ? (0x1p-14 - 0x1p-26) : (0x1p-126 - 0x1p-151);
-          if (absolute < threshold || (absolute == threshold && tail < 0)) {
-            result &= sign;
-          }
-        }
       }
-      *d = result;
-      return RJ_ARITH_SUCCESS;
     }
+    *d = result;
+    return RJ_ARITH_SUCCESS;
   }
+
   if constexpr (Half) {
     *d = rocjitsu::arith::half_fma_value<Gfx1150>(uint16_t(a), uint16_t(b), uint16_t(c), 0, flags);
   } else {

@@ -76,15 +76,26 @@ int floating(uint64_t flags, uint32_t mode, uint32_t *scc, uint32_t a, uint32_t 
     }
   }
   bool ordered = (a & magnitude) <= infinity && (b & magnitude) <= infinity;
-  if (!(a & magnitude)) {
-    a = 0;
+  bool less, equal;
+  if constexpr (Bits == 32) {
+    // Native predicates already agree on signed zero and unordered comparisons.
+    const float x = rocjitsu::arith::as_float(a), y = rocjitsu::arith::as_float(b);
+    less = x < y;
+    equal = x == y;
+  } else {
+    if (!(a & magnitude)) {
+      a = 0;
+    }
+    if (!(b & magnitude)) {
+      b = 0;
+    }
+    // Flip positive signs and invert negative encodings without data-dependent branches.
+    a ^= ((0U - (a >> (Bits - 1))) & magnitude) | sign;
+    b ^= ((0U - (b >> (Bits - 1))) & magnitude) | sign;
+    less = a < b;
+    equal = a == b;
   }
-  if (!(b & magnitude)) {
-    b = 0;
-  }
-  a ^= a & sign ? (sign | magnitude) : sign;
-  b ^= b & sign ? (sign | magnitude) : sign;
-  store(scc, rocjitsu::arith::float_compare_result<Predicate>(a < b, a == b, ordered) & 1);
+  store(scc, rocjitsu::arith::float_compare_result<Predicate>(less, equal, ordered) & 1);
   return RJ_ARITH_SUCCESS;
 }
 

@@ -4,7 +4,7 @@
 // Scalar-result FP16/FP32 special functions with guest modifiers and denormal rules.
 // Owns public entry points and their validation/dispatch policy.
 
-// Stage ordering follows rocjitsu shared/pseudo_scalar.h and transcendental.h.
+// Exact stage ordering follows rocjitsu shared/pseudo_scalar.h and transcendental.h.
 // GFX1201 captures correct half OMOD underflow: newly created -0 keeps its sign.
 
 #include "common/float_encoding.h"
@@ -20,28 +20,45 @@
 
 namespace {
 
-// Evaluate a scalar-result special function. Reject invalid controls before changing outputs.
+constexpr uint64_t kModifiers =
+    RJ_ARITH_ALU_ABS_A | RJ_ARITH_ALU_NEG_A | RJ_ARITH_ALU_OMOD_MASK | RJ_ARITH_ALU_CLAMP;
+
+// Apply scalar sign modifiers and quiet a NaN, or produce zero under CLAMP.
+template <bool Half> uint32_t nan_result(uint32_t raw, uint32_t mode) {
+  constexpr uint32_t sign = Half ? 0x8000U : 0x80000000U;
+  raw &= Half ? 0xffffU : 0xffffffffU;
+  if (mode & RJ_ARITH_ALU_ABS_A) {
+    raw &= sign - 1;
+  }
+  if (mode & RJ_ARITH_ALU_NEG_A) {
+    raw ^= sign;
+  }
+  return mode & RJ_ARITH_ALU_CLAMP ? 0 : raw | (Half ? 0x200U : 0x00400000U);
+}
+
+// Encode an infinite result from finite input, applying Loose saturation and CLAMP.
+template <bool Half> uint32_t infinite_result(bool negative, uint64_t flags, uint32_t mode) {
+  if (mode & RJ_ARITH_ALU_CLAMP) {
+    return negative ? 0 : Half ? 0x3c00U : 0x3f800000U;
+  }
+  return (negative ? (Half ? 0x8000U : 0x80000000U) : 0) |
+         (Half && (flags & RJ_ARITH_FP16_OVFL) ? 0x7bffU
+          : Half                               ? 0x7c00U
+                                               : 0x7f800000U);
+}
+
+// Evaluate one Loose scalar result with validated controls.
 template <rocjitsu::arith::Unary Op, bool Half>
-int run(uint64_t flags, uint32_t mode, uint32_t *d, uint32_t raw) {
-  const uint32_t known =
-      RJ_ARITH_ALU_ABS_A | RJ_ARITH_ALU_NEG_A | RJ_ARITH_ALU_OMOD_MASK | RJ_ARITH_ALU_CLAMP;
-  if (int error = rocjitsu::arith::validate(flags, mode & ~known,
-                                            RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
-                                                RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS)) {
-    return error;
-  }
-  // Every FP32 and FP16 form has a hardware model: the VALU EXP/LOG F16 model also matches the
-  // gfx1201 V_S_EXP_F16/V_S_LOG_F16 captures.
-  if (rocjitsu::arith::is_exact(flags)) {
-    if constexpr (Half) {
-      *d = rocjitsu::arith::half_unary_exact_value<Op>(flags, mode, uint16_t(raw));
-    } else {
-      *d = rocjitsu::arith::unary_exact_value<Op>(flags, mode, raw, false);
-    }
-    return RJ_ARITH_SUCCESS;
-  }
+[[gnu::always_inline]] inline int evaluate_loose(uint64_t flags, uint32_t mode, uint32_t *d,
+                                                 uint32_t raw) {
   constexpr uint32_t sign = Half ? 0x8000 : 0x80000000, mag = sign - 1,
                      inf = Half ? 0x7c00 : 0x7f800000;
+  // Skip conversions and libm on NaNs; native FP32 arithmetic handles them cheaply.
+  if ((Half || Op == rocjitsu::arith::Unary::Exp || Op == rocjitsu::arith::Unary::Log) &&
+      (raw & mag) > inf) {
+    *d = nan_result<Half>(raw, mode);
+    return RJ_ARITH_SUCCESS;
+  }
   if constexpr (Half) {
     raw &= 65535;
   }
@@ -58,13 +75,33 @@ int run(uint64_t flags, uint32_t mode, uint32_t *d, uint32_t raw) {
   if ((!Half || (flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS)) && !(raw & inf)) {
     raw &= sign;
   }
+  if constexpr (Op != rocjitsu::arith::Unary::Exp) {
+    // Zero and negative domain results need neither host math nor half conversion.
+    if (!(raw & mag)) {
+      if constexpr (Op == rocjitsu::arith::Unary::Sqrt) {
+        *d = mode & (RJ_ARITH_ALU_CLAMP | (Half ? 0 : RJ_ARITH_ALU_OMOD_MASK)) ? 0 : raw;
+      } else {
+        *d = infinite_result<Half>(Op == rocjitsu::arith::Unary::Log || (raw & sign), flags, mode);
+      }
+      return RJ_ARITH_SUCCESS;
+    }
+    if constexpr (Op != rocjitsu::arith::Unary::Rcp) {
+      if (raw & sign) {
+        *d = mode & RJ_ARITH_ALU_CLAMP ? 0 : inf | (Half ? 0x200U : 0x00400000U);
+        return RJ_ARITH_SUCCESS;
+      }
+    }
+  }
+  // EXP/LOG use FP32 libm; native divide/sqrt retain their FP64 intermediates.
   double x = Half ? rocjitsu::arith::f16_to_float(uint16_t(raw)) : rocjitsu::arith::as_float(raw),
          value;
   if constexpr (Op == rocjitsu::arith::Unary::Exp) {
-    value = __builtin_exp2(__builtin_isfinite(x) ? rocjitsu::arith::clamp(x, -256., 256.) : x);
+    value = __builtin_exp2f(__builtin_isfinite(x)
+                                ? rocjitsu::arith::clamp(x, Half ? -32. : -256., Half ? 32. : 256.)
+                                : x);
   }
   if constexpr (Op == rocjitsu::arith::Unary::Log) {
-    value = __builtin_log2(x);
+    value = __builtin_log2f(x);
   }
   if constexpr (Op == rocjitsu::arith::Unary::Rcp) {
     value = 1 / x;
@@ -77,33 +114,24 @@ int run(uint64_t flags, uint32_t mode, uint32_t *d, uint32_t raw) {
   }
   const unsigned omod = (mode >> 6) & 3;
   if constexpr (Half) {
-    bool ovfl = flags & RJ_ARITH_FP16_OVFL;
-    uint16_t result =
-        __builtin_isfinite(value)
-            ? rocjitsu::arith::half_fma_narrow(rocjitsu::arith::bit_cast<uint64_t>(value), ovfl)
-            : rocjitsu::arith::float_to_f16(float(value), false);
+    // Loose scales and clamps before its single narrowing to FP16.
+    if (omod) {
+      value *= omod == 1 ? 2 : omod == 2 ? 4 : 0.5f;
+    }
+    if (mode & RJ_ARITH_ALU_CLAMP) {
+      value = !(value > 0) ? 0 : value > 1 ? 1 : value;
+    }
+    const bool ovfl = flags & RJ_ARITH_FP16_OVFL;
+    uint16_t result = rocjitsu::arith::float_to_f16(value, ovfl);
     if (ovfl && finite && __builtin_isinf(value)) {
       result = (__builtin_signbit(value) ? 0x8000 : 0) | 0x7bff;
     }
-    if ((flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) && !(result & 0x7c00)) {
+    if ((omod || (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS)) && !(result & 0x7c00)) {
       result &= 0x8000;
-    }
-    if (omod) {
-      if ((result & 0x7fff) < 0x400) {
-        result = 0;
-      }
-      float scaled = rocjitsu::arith::f16_to_float(result) * (omod == 1 ? 2 : omod == 2 ? 4 : 0.5f);
-      result = rocjitsu::arith::float_to_f16(scaled, ovfl);
-      if (!(result & 0x7c00)) {
-        result &= 0x8000;
-      }
-    }
-    if (mode & RJ_ARITH_ALU_CLAMP) {
-      result = rocjitsu::arith::half_fma_clamp(result);
     }
     *d = result;
   } else {
-    float rounded = float(value);
+    float rounded = value;
     uint32_t result = rocjitsu::arith::as_bits(rounded);
     if (!(result & 0x7f800000)) {
       result &= 0x80000000;
@@ -127,21 +155,47 @@ int run(uint64_t flags, uint32_t mode, uint32_t *d, uint32_t raw) {
   return RJ_ARITH_SUCCESS;
 }
 
+// Validate an ordinary scalar-result instruction before numerical evaluation.
+template <rocjitsu::arith::Unary Op, bool Half>
+int run(uint64_t flags, uint32_t mode, uint32_t *d, uint32_t raw) {
+  if (int error = rocjitsu::arith::validate(flags, mode & ~kModifiers,
+                                            RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
+                                                RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS)) {
+    return error;
+  }
+  // Every FP32 and FP16 form has a hardware model: the VALU EXP/LOG F16 model also matches the
+  // gfx1201 V_S_EXP_F16/V_S_LOG_F16 captures.
+  if (rocjitsu::arith::is_exact(flags)) {
+    if constexpr (Half) {
+      *d = rocjitsu::arith::half_unary_exact_value<Op>(flags, mode, uint16_t(raw));
+    } else {
+      *d = rocjitsu::arith::unary_exact_value<Op>(flags, mode, raw, false);
+    }
+    return RJ_ARITH_SUCCESS;
+  }
+  return evaluate_loose<Op, Half>(flags, mode, d, raw);
+}
+
 // Preserve the inherited gfx1250 model without claiming hardware-validated exactness.
 // Strict semantics reject before outputs; fallback semantics use the ordinary Loose path.
 template <rocjitsu::arith::Unary Op, bool Half>
 int run_gfx1250(uint64_t flags, uint64_t mode, uint32_t *d, uint32_t raw) {
   const bool compatibility = (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY;
   flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
-  const uint64_t known =
-      RJ_ARITH_ALU_ABS_A | RJ_ARITH_ALU_NEG_A | RJ_ARITH_ALU_OMOD_MASK | RJ_ARITH_ALU_CLAMP;
-  if (int error = rocjitsu::arith::validate(flags, mode & ~known,
+  if (int error = rocjitsu::arith::validate(flags, mode & ~kModifiers,
                                             RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
                                                 RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS)) {
     return error;
   }
   if ((flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
     return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+  }
+  // Both policies can publish a NaN without entering their numerical helpers.
+  constexpr uint32_t magnitude = Half ? 0x7fffU : 0x7fffffffU;
+  constexpr uint32_t infinity = Half ? 0x7c00U : 0x7f800000U;
+  if ((raw & magnitude) > infinity) {
+    *d = nan_result<Half>(raw, uint32_t(mode));
+    return RJ_ARITH_SUCCESS;
   }
   if (compatibility) {
     if constexpr (Half) {
@@ -151,7 +205,7 @@ int run_gfx1250(uint64_t flags, uint64_t mode, uint32_t *d, uint32_t raw) {
     }
     return RJ_ARITH_SUCCESS;
   }
-  return run<Op, Half>(flags & ~RJ_ARITH_SEMANTICS_MASK, uint32_t(mode), d, raw);
+  return evaluate_loose<Op, Half>(flags & ~RJ_ARITH_SEMANTICS_MASK, uint32_t(mode), d, raw);
 }
 
 } // namespace
