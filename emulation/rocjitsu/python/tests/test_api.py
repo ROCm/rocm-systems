@@ -589,6 +589,44 @@ assert not rocjitsu.run(lambda: importlib.util.find_spec('parent_only_framework'
                     ):
                         time.sleep(0.01)
                     self.assertTrue(Path(directory, "daemon.sock").exists())
+                    attach_probe = """
+import json
+import os
+from pathlib import Path
+
+descriptor = os.open("/dev/kfd", os.O_RDWR)
+try:
+    print(json.dumps(sorted(
+        int(line.split()[1])
+        for path in Path("/sys/class/kfd/kfd/topology/nodes").glob("*/properties")
+        if int(path.with_name("gpu_id").read_text()) == 1250
+        for line in path.read_text().splitlines()
+        if line.startswith("gfx_target_version ") and int(line.split()[1]) != 0
+    )))
+finally:
+    os.close(descriptor)
+"""
+                    for attach_args in (
+                        ["--attach", "default"],
+                        ["--attach", "default", "--config", str(CONFIG)],
+                    ):
+                        result = subprocess.run(
+                            [
+                                launcher,
+                                *attach_args,
+                                "--",
+                                sys.executable,
+                                "-c",
+                                attach_probe,
+                            ],
+                            env={**os.environ, **env},
+                            text=True,
+                            capture_output=True,
+                            timeout=30,
+                            check=True,
+                        )
+                        self.assertEqual(json.loads(result.stdout), [120500])
+                        self.assertIsNone(daemon.poll())
                     for _ in range(2):
                         with rocjitsu.Session(
                             CONFIG, mode="attach", env=env, capture_output=True

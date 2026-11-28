@@ -540,7 +540,11 @@ hsa_status_t HSA_API fake_amd_memory_async_batch_copy(const hsa_amd_memory_copy_
       }
       continue;
     case HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST:
+#if defined(HSA_AMD_INTERFACE_VERSION_MAJOR) && defined(HSA_AMD_INTERFACE_VERSION_MINOR) &&        \
+    (HSA_AMD_INTERFACE_VERSION_MAJOR > 1 ||                                                        \
+     (HSA_AMD_INTERFACE_VERSION_MAJOR == 1 && HSA_AMD_INTERFACE_VERSION_MINOR >= 37))
     case HSA_AMD_MEMORY_COPY_OP_RECT:
+#endif
       if (op.num_entries == 0 || op.dst_agent_list == nullptr) {
         return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       }
@@ -1657,6 +1661,9 @@ TEST(HsaHooksUnitTest, BatchCopyMapsBroadcastScalarSourceAndDestinationList) {
                                {kHostAgent.handle, kHostAgent.handle});
 }
 
+#if defined(HSA_AMD_INTERFACE_VERSION_MAJOR) && defined(HSA_AMD_INTERFACE_VERSION_MINOR) &&        \
+    (HSA_AMD_INTERFACE_VERSION_MAJOR > 1 ||                                                        \
+     (HSA_AMD_INTERFACE_VERSION_MAJOR == 1 && HSA_AMD_INTERFACE_VERSION_MINOR >= 37))
 TEST(HsaHooksUnitTest, BatchCopyMapsRectScalarSourceAndDestinationList) {
   int src0 = 0;
   int src1 = 0;
@@ -1685,6 +1692,8 @@ TEST(HsaHooksUnitTest, BatchCopyMapsRectScalarSourceAndDestinationList) {
   expect_batch_copy_forwarding(op, {kHostAgent.handle, kHostAgent.handle},
                                {kHostAgent.handle, kHostAgent.handle});
 }
+
+#endif
 
 TEST(HsaHooksUnitTest, BatchCopyMapsMultiIndirectScalarSourceAndDestinationList) {
   int src0 = 0;
