@@ -986,7 +986,12 @@ rdc_status_t rdc_init(uint64_t init_flags);
 /**
  *  @brief Shutdown ROCm RDC.
  *
- *  @details Do any necessary clean up.
+ *  @details Do any necessary clean up. RDC's libraries stay loaded until the
+ *  process exits, so handles from rdc_start_embedded() or rdc_connect() that
+ *  are still open stay usable; stop them with rdc_stop_embedded() or
+ *  rdc_disconnect().
+ *
+ *  @retval ::RDC_ST_OK is returned upon successful call.
  */
 rdc_status_t rdc_shutdown();
 
@@ -1016,7 +1021,8 @@ rdc_status_t rdc_shutdown();
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  *  @retval ::RDC_ST_FAIL_LOAD_MODULE is returned when librdc cannot be loaded
- *  or AMD SMI fails to initialize.
+ *  (also when a librdc from another RDC build needs a function that is
+ *  missing) or AMD SMI fails to initialize.
  */
 rdc_status_t rdc_start_embedded(rdc_operation_mode_t op_mode, rdc_handle_t* p_rdc_handle);
 
@@ -1057,6 +1063,9 @@ rdc_status_t rdc_stop_embedded(rdc_handle_t p_rdc_handle);
  *  Set it as nullptr if the communication is not encrypted.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_FAIL_LOAD_MODULE is returned when ipAndPort or
+ *  p_rdc_handle is NULL, or librdc_client cannot be loaded (also when a
+ *  librdc_client from another RDC build needs a function that is missing).
  */
 rdc_status_t rdc_connect(const char* ipAndPort, rdc_handle_t* p_rdc_handle, const char* root_ca,
                          const char* client_cert, const char* client_key);
@@ -1169,7 +1178,9 @@ rdc_status_t rdc_job_remove_all(rdc_handle_t p_rdc_handle);
  *  @brief Request RDC to update all fields to be watched.
  *
  *  @details In RDC_OPERATION_MODE_MANUAL, the user must call this method
- *  periodically.
+ *  periodically. With wait_for_update 0 the update runs in the background.
+ *  Each call first waits for the previous background update, from any thread,
+ *  to finish.
  *
  *  @param[in] p_rdc_handle The RDC handler.
  *

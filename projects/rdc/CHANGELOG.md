@@ -86,6 +86,14 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - Opening or stopping an RDC handle no longer crashes the process when another handle is in use, and concurrent `rdc_connect()` calls no longer fail at random.
 
+- An idle `rdcd`, or RDC in embedded mode, no longer checks for field updates every millisecond.
+
+- `rdc_shutdown()` before `rdc_stop_embedded()` no longer crashes the process.
+
+- `rdc_start_embedded()` and `rdc_connect()` return `RDC_ST_FAIL_LOAD_MODULE` when `librdc.so` or `librdc_client.so` comes from another RDC build and needs a function that is missing, instead of stopping the process when it first calls that function.
+
+- `rdcd` and RDC in embedded mode no longer crash when several clients or threads ask for background field updates at the same time, or start the first diagnostics at the same time.
+
 - Certificates signed with the RDC certificate authority setup in `authentication/openssl.cnf` can no longer sign other certificates. A certificate request could ask to become a signing certificate, and its holder could then create client and server certificates that `rdcd` and `rdci` trust.
   - If you signed requests that other people created, check the certificates in the `newcerts` directory of your CA for `CA:TRUE`. If you find one, create a new root certificate and reissue all certificates.
 

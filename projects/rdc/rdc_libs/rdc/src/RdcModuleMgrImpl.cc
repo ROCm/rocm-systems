@@ -92,17 +92,18 @@ RdcModuleMgrImpl::RdcModuleMgrImpl(const RdcMetricFetcherPtr& fetcher) : fetcher
   insert_modules<RdcRocrLib, RdcRocpLib>();
 }
 
+// Each module is made once, on first use, whichever threads ask for it at the same time.
 RdcTelemetryPtr RdcModuleMgrImpl::get_telemetry_module() {
-  if (rdc_telemetry_module_ == nullptr) {
+  std::call_once(telemetry_module_once_, [this] {
     rdc_telemetry_module_.reset(new RdcTelemetryModule(telemetry_modules_));
-  }
+  });
   return rdc_telemetry_module_;
 }
 
 RdcDiagnosticPtr RdcModuleMgrImpl::get_diagnostic_module() {
-  if (rdc_diagnostic_module_ == nullptr) {
+  std::call_once(diagnostic_module_once_, [this] {
     rdc_diagnostic_module_.reset(new RdcDiagnosticModule(diagnostic_modules_));
-  }
+  });
   return rdc_diagnostic_module_;
 }
 

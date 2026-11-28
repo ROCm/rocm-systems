@@ -64,7 +64,7 @@ namespace amd {
 namespace rdc {
 
 // TODO(bill_liu): make it configurable
-const uint32_t METIC_UPDATE_FREQUENCY = 1000;  // 1000 microseconds by default
+const uint32_t METIC_UPDATE_FREQUENCY = 1000;  // shortest sleep between updates, in microseconds
 
 RdcEmbeddedHandler::RdcEmbeddedHandler(rdc_operation_mode_t mode)
     : smi_session_(),
@@ -95,7 +95,10 @@ rdc_status_t RdcEmbeddedHandler::rdc_job_start_stats(rdc_gpu_group_t groupId, co
   rdc_status_t status = get_gpu_gauges(&gpu_gauges);
   if (status != RDC_ST_OK) return status;
 
-  return watch_table_->rdc_job_start_stats(groupId, job_id, update_freq, gpu_gauges);
+  status = watch_table_->rdc_job_start_stats(groupId, job_id, update_freq, gpu_gauges);
+  // The job's fields can fall due before the update loop would wake up.
+  if (status == RDC_ST_OK) metrics_updater_->wake();
+  return status;
 }
 
 rdc_status_t RdcEmbeddedHandler::get_gpu_gauges(rdc_gpu_gauges_t* gpu_gauges) {
@@ -385,8 +388,11 @@ rdc_status_t RdcEmbeddedHandler::rdc_field_watch(rdc_gpu_group_t group_id,
                                                  rdc_field_grp_t field_group_id,
                                                  uint64_t update_freq, double max_keep_age,
                                                  uint32_t max_keep_samples) {
-  return watch_table_->rdc_field_watch(group_id, field_group_id, update_freq, max_keep_age,
-                                       max_keep_samples);
+  rdc_status_t status = watch_table_->rdc_field_watch(group_id, field_group_id, update_freq,
+                                                      max_keep_age, max_keep_samples);
+  // The new watch can fall due before the update loop would wake up.
+  if (status == RDC_ST_OK) metrics_updater_->wake();
+  return status;
 }
 
 rdc_status_t RdcEmbeddedHandler::rdc_field_get_latest_value(uint32_t gpu_index, rdc_field_t field,
@@ -462,6 +468,12 @@ rdc_status_t RdcEmbeddedHandler::rdc_test_case_run(rdc_gpu_group_t group_id,
 
 // Control API
 rdc_status_t RdcEmbeddedHandler::rdc_field_update_all(uint32_t wait_for_update) {
+  // One update at a time: each call first waits for the previous background update to finish
+  // (std::async starts its task before the assignment to updater_ would wait for the old one).
+  std::lock_guard<std::mutex> lock(updater_mutex_);
+  if (updater_.valid()) {
+    updater_.wait();
+  }
   if (wait_for_update == 1) {
     return watch_table_->rdc_field_update_all();
   }
@@ -515,7 +527,10 @@ rdc_status_t RdcEmbeddedHandler::rdc_health_set(rdc_gpu_group_t group_id, unsign
     return RDC_ST_BAD_PARAMETER;
   }
 
-  return watch_table_->rdc_health_set(group_id, components);
+  rdc_status_t status = watch_table_->rdc_health_set(group_id, components);
+  // The health fields can fall due before the update loop would wake up.
+  if (status == RDC_ST_OK) metrics_updater_->wake();
+  return status;
 }
 
 rdc_status_t RdcEmbeddedHandler::rdc_health_get(rdc_gpu_group_t group_id,

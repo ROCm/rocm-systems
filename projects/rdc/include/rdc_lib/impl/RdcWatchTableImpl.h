@@ -93,6 +93,7 @@ class RdcWatchTableImpl : public RdcWatchTable {
   //!< is expensive. Internally, this function will throttle the cleanup to
   //!< once per second.
   rdc_status_t rdc_field_update_all() override;
+  uint64_t ms_until_next_update() override;
   rdc_status_t rdc_field_listen_notif(uint32_t timeout_ms) override;
 
   RdcWatchTableImpl(const RdcGroupSettingsPtr& group_settings, const RdcCacheManagerPtr& cache_mgr,
