@@ -5,13 +5,16 @@
 // The caller applies EXEC and handles FP exception reporting.
 
 #include "common/compiler.h"
-#include "compare/float_compare_impl.h"
-#include "rj_arith/detail/rj_arith_compare.h"
+#include "common/isa.h"
+#include "compare/float_compare.h"
+#include "compare/predicate.h"
+#include "compare/x86_64/predicate.h"
+#include "rj_arith/detail/rj_arith_common.h"
 
 #include <immintrin.h>
 #include <stdint.h>
 
-namespace rocjitsu::arith {
+namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE {
 namespace {
 
 template <int Bits> class Lanes {
@@ -43,9 +46,6 @@ public:
 
   // Return the bitwise intersection of the vector operands.
   static V band(V a, V b) { return _mm256_and_si256(a, b); }
-
-  // Return the bitwise union of the vector operands.
-  static V bor(V a, V b) { return _mm256_or_si256(a, b); }
 
   // Return the bitwise exclusive-or of the vector operands.
   static V bxor(V a, V b) { return _mm256_xor_si256(a, b); }
@@ -80,21 +80,37 @@ public:
     }
   }
 
-  // Return the lane mask for unsigned a < b.
-  static M lt_unsigned(V a, V b) {
-    auto flip = set(1ULL << (Bits == 64 ? 63 : 31));
-    return gt(bxor(b, flip), bxor(a, flip));
+  // Compare numeric values, widening FP16 without changing their values.
+  template <unsigned Predicate> static uint32_t compare(V a, V b) {
+    constexpr int immediate = float_compare_immediate<Predicate>();
+    if constexpr (Bits == 64) {
+      return uint32_t(_mm256_movemask_pd(
+          _mm256_cmp_pd(_mm256_castsi256_pd(a), _mm256_castsi256_pd(b), immediate)));
+    } else {
+      if constexpr (Bits == 16) {
+        auto ah = _mm_packus_epi32(_mm256_castsi256_si128(a), _mm256_extracti128_si256(a, 1));
+        auto bh = _mm_packus_epi32(_mm256_castsi256_si128(b), _mm256_extracti128_si256(b, 1));
+        return uint32_t(
+            _mm256_movemask_ps(_mm256_cmp_ps(_mm256_cvtph_ps(ah), _mm256_cvtph_ps(bh), immediate)));
+      } else {
+        return uint32_t(_mm256_movemask_ps(
+            _mm256_cmp_ps(_mm256_castsi256_ps(a), _mm256_castsi256_ps(b), immediate)));
+      }
+    }
   }
 };
 
 } // namespace
+} // namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE
+
+namespace rocjitsu::arith {
 
 // Evaluate a full wave; the result-mask width selects 32 or 64 lanes.
 // Requires the named CPU features and validated instruction controls.
 template <int Bits, unsigned Predicate, typename Mask>
 Mask float_compare_x86_64_v3(uint32_t mode, bool flush, const uint32_t *const *a,
                              const uint32_t *const *b) {
-  using L = Lanes<Bits>;
+  using L = RJ_ARITH_IMPL_NAMESPACE::Lanes<Bits>;
   constexpr int lanes = 256 / (Bits == 64 ? 64 : 32);
   constexpr uint64_t sign = 1ULL << (Bits - 1), magnitude = sign - 1;
   constexpr uint64_t infinity = Bits == 16   ? 0x7c00
@@ -102,7 +118,7 @@ Mask float_compare_x86_64_v3(uint32_t mode, bool flush, const uint32_t *const *a
                                              : 0x7ff0000000000000ULL;
   auto zero = L::set(0), inf = L::set(infinity), mag = L::set(magnitude), sign_bit = L::set(sign);
   static_assert(sizeof(Mask) == 4 || sizeof(Mask) == 8);
-  Mask less = 0, equal = 0, unordered = 0;
+  Mask result = 0;
   RJ_ARITH_UNROLL(16)
   for (int lane = 0; lane < int(sizeof(Mask) * 8); lane += lanes) {
     auto av = L::load(a, lane), bv = L::load(b, lane);
@@ -112,26 +128,26 @@ Mask float_compare_x86_64_v3(uint32_t mode, bool flush, const uint32_t *const *a
       bv = L::band(_mm256_srl_epi32(bv, _mm_cvtsi32_si128(mode & RJ_ARITH_ALU_HIGH_B ? 16 : 0)),
                    L::set(65535));
     }
-    av = L::band(av, L::set(mode & RJ_ARITH_ALU_ABS_A ? magnitude : UINT64_MAX));
-    bv = L::band(bv, L::set(mode & RJ_ARITH_ALU_ABS_B ? magnitude : UINT64_MAX));
-    av = L::bxor(av, L::set(mode & RJ_ARITH_ALU_NEG_A ? sign : 0));
-    bv = L::bxor(bv, L::set(mode & RJ_ARITH_ALU_NEG_B ? sign : 0));
-    if (flush) {
-      av = L::select(L::eq(L::band(av, inf), zero), av, L::band(av, sign_bit));
-      bv = L::select(L::eq(L::band(bv, inf), zero), bv, L::band(bv, sign_bit));
+    if constexpr (Predicate == CompareOrdered || Predicate == CompareUnordered) {
+      // Classify raw encodings: sign and denormal controls cannot change NaN-ness.
+      result |= Mask(L::mask(L::gt(L::band(av, mag), inf)) | L::mask(L::gt(L::band(bv, mag), inf)))
+                << lane;
+    } else {
+      av = L::band(av, L::set(mode & RJ_ARITH_ALU_ABS_A ? magnitude : UINT64_MAX));
+      bv = L::band(bv, L::set(mode & RJ_ARITH_ALU_ABS_B ? magnitude : UINT64_MAX));
+      av = L::bxor(av, L::set(mode & RJ_ARITH_ALU_NEG_A ? sign : 0));
+      bv = L::bxor(bv, L::set(mode & RJ_ARITH_ALU_NEG_B ? sign : 0));
+      if (flush) {
+        av = L::select(L::eq(L::band(av, inf), zero), av, L::band(av, sign_bit));
+        bv = L::select(L::eq(L::band(bv, inf), zero), bv, L::band(bv, sign_bit));
+      }
+      result |= Mask(L::template compare<Predicate>(av, bv)) << lane;
     }
-    unordered |= Mask(L::mask(L::gt(L::band(av, mag), inf)) | L::mask(L::gt(L::band(bv, mag), inf)))
-                 << lane;
-    av = L::select(L::eq(L::band(av, mag), zero), av, zero);
-    bv = L::select(L::eq(L::band(bv, mag), zero), bv, zero);
-    av = L::bxor(
-        av, L::select(L::eq(L::band(av, sign_bit), sign_bit), sign_bit, L::set(sign | magnitude)));
-    bv = L::bxor(
-        bv, L::select(L::eq(L::band(bv, sign_bit), sign_bit), sign_bit, L::set(sign | magnitude)));
-    less |= Mask(L::mask(L::lt_unsigned(av, bv))) << lane;
-    equal |= Mask(L::mask(L::eq(av, bv))) << lane;
   }
-  return float_compare_result<Predicate>(less, equal, ~unordered);
+  if constexpr (Predicate == CompareOrdered) {
+    return ~result;
+  }
+  return result;
 }
 
 template uint32_t
