@@ -857,9 +857,15 @@ memory:
     tags: [transfer]
   Unit_hipMemcpy3DBatchAsync_DuringApiCall_IgnoresSourceWritesAfterReturn:
     <<: *level_default
-    disabled:
-      targets: [amd_linux, amd_windows, amd_wsl]
-      reason: "ROCM-31101 - DuringApiCall on an ephemeral host source is not applied on the 3D batch path yet."
+    tags: [transfer, image]
+  Unit_hipMemcpy3DBatchAsync_DuringApiCall_Layered1D:
+    <<: *level_default
+    tags: [transfer, image]
+  Unit_hipMemcpy3DBatchAsync_DuringApiCall_NonHostSources:
+    <<: *level_default
+    tags: [transfer, image]
+  Unit_hipMemcpy3DBatchAsync_DuringApiCall_CaptureIsUnsupported:
+    <<: *level_default
     tags: [transfer]
   Unit_hipMemcpy3DBatchAsync_NonZeroFlags_SetsFailIdxToSizeMax:
     <<: *level_default

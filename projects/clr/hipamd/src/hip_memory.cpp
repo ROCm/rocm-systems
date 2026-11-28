@@ -5,6 +5,8 @@
  */
 
 #include <cstring>
+#include <memory>
+#include <new>
 #include <type_traits>
 
 #include <hip/hip_runtime.h>
@@ -2462,11 +2464,13 @@ hipError_t ihipMemcpyParam3D(const HIP_MEMCPY3D* pCopy, hipStream_t stream, bool
     if (status != hipSuccess) {
       return status;
     }
-    // Transfers from device memory to pageable host memory and transfers from any
-    // host memory to any host memory are synchronous with respect to the host.
-    // Device to Device copies do not need to host side synchronization.
-    if (dstMemoryType == hipMemoryTypeHost || ((pCopy->srcMemoryType == hipMemoryTypeHost) &&
-                                               (pCopy->dstMemoryType == hipMemoryTypeHost))) {
+    // Copies involving pageable host memory and copies between any two host
+    // allocations are synchronous with respect to the host. The effective types
+    // above already classify pinned host allocations as device operands.
+    // Device to device copies do not require host synchronization.
+    if (srcMemoryType == hipMemoryTypeHost || dstMemoryType == hipMemoryTypeHost ||
+        ((pCopy->srcMemoryType == hipMemoryTypeHost) &&
+         (pCopy->dstMemoryType == hipMemoryTypeHost))) {
       isAsync = false;
     } else if ((pCopy->srcMemoryType == hipMemoryTypeDevice) &&
                (pCopy->dstMemoryType == hipMemoryTypeDevice)) {
@@ -3492,6 +3496,71 @@ hipError_t hipMemcpyWithAttributesAsync(void* dst, const void* src, size_t size,
 }
 
 // ================================================================================================
+// A snapshot uses a write command even when its host address belongs to the system-memory arena.
+// This keeps the source storage, and any pin of it, alive until the queued write completes.
+static hipError_t EnqueueMemcpy3DSnapshot(const HIP_MEMCPY3D& desc,
+                                          std::unique_ptr<char[]>&& snapshot, hip::Stream& stream) {
+  if (desc.dstMemoryType == hipMemoryTypeHost) {
+    amd::Command* command = nullptr;
+    hipError_t status = ihipGetMemcpyParam3DCommand(command, &desc, &stream);
+    if (status != hipSuccess || command == nullptr) {
+      return status;
+    }
+    return ihipMemcpyCmdEnqueue(command, false, &stream);
+  }
+
+  amd::Coord3D src_origin(0, 0, 0);
+  amd::Coord3D dst_origin(desc.dstXInBytes, desc.dstY, desc.dstZ);
+  amd::Coord3D copy_region(desc.WidthInBytes, desc.Height, desc.Depth);
+  amd::BufferRect src_rect;
+  amd::BufferRect dst_rect;
+  amd::Image* src_image = nullptr;
+  amd::Image* dst_image = nullptr;
+  hipError_t status = ihipDrvMemcpy3D_validate(&desc, src_origin, dst_origin, copy_region,
+                                               &src_rect, &dst_rect, &src_image, &dst_image);
+  if (status != hipSuccess) {
+    return status;
+  }
+
+  hip::Stream* queue_stream = &stream;
+  amd::Command::EventWaitList wait_list;
+  amd::WriteMemoryCommand* command = nullptr;
+  amd::CopyMetadata metadata(true, amd::CopyMetadata::CopyEnginePreference::NONE);
+  if (dst_image != nullptr) {
+    if (&stream.device() != dst_image->GetDeviceById()) {
+      queue_stream = hip::getNullStream(dst_image->GetDeviceById()->context());
+      if (amd::Command* previous = stream.getLastQueuedCommand(true)) {
+        wait_list.push_back(previous);
+      }
+    }
+    command = new amd::WriteMemoryCommand(*queue_stream, CL_COMMAND_WRITE_IMAGE, wait_list,
+                                          *dst_image, dst_origin, copy_region, snapshot.get(),
+                                          desc.srcPitch, desc.srcPitch * desc.srcHeight, metadata);
+  } else {
+    size_t offset = 0;
+    amd::Memory* dst_memory = getMemoryObject(hip::getCurrentDevice(), desc.dstDevice, offset);
+    // The source rectangle is relative to the snapshot, never to an arena memory object.
+    src_origin = amd::Coord3D(0, 0, 0);
+    src_rect.create(src_origin.c, copy_region.c, desc.srcPitch, desc.srcPitch * desc.srcHeight);
+    command =
+        new amd::WriteMemoryCommand(stream, CL_COMMAND_WRITE_BUFFER_RECT, wait_list, *dst_memory,
+                                    amd::Coord3D(dst_rect.start_, 0, 0), copy_region,
+                                    snapshot.get(), dst_rect, src_rect, metadata);
+  }
+  for (amd::Event* previous : wait_list) {
+    previous->release();
+  }
+  if (command == nullptr) {
+    return hipErrorOutOfMemory;
+  }
+  if (!command->validatePeerMemory()) {
+    command->release();
+    return hipErrorInvalidValue;
+  }
+  command->setSourceSnapshot(std::move(snapshot));
+  return ihipMemcpyCmdEnqueue(command, true, &stream);
+}
+
 // Shared implementation behind hipMemcpy3DBatchAsync and hipMemcpy3DWithAttributesAsync. Callers
 // validate flags, opList and the stream before handing the operations over.
 static hipError_t ihipMemcpy3DBatch(size_t numOps, struct hipMemcpy3DBatchOp* opList,
@@ -3500,13 +3569,28 @@ static hipError_t ihipMemcpy3DBatch(size_t numOps, struct hipMemcpy3DBatchOp* op
   hip::Stream* hip_stream = hip::getStream(stream);
 
   std::vector<std::vector<amd::BatchCopyRectOp>> copy_ops_by_device(g_devices.size());
-  std::vector<std::pair<size_t, HIP_MEMCPY3D>> per_entry_copies;
+  struct PerEntryCopy {
+    size_t index;
+    HIP_MEMCPY3D desc;
+    bool complete_before_return = false;
+    std::unique_ptr<char[]> snapshot;
+  };
+  std::vector<PerEntryCopy> per_entry_copies;
   std::vector<HIP_MEMCPY3D> host_copies;
   for (size_t i = 0; i < numOps; ++i) {
     const hipMemcpySrcAccessOrder access_order = opList[i].srcAccessOrder;
     if (access_order < hipMemcpySrcAccessOrderStream || access_order > hipMemcpySrcAccessOrderAny) {
       *failIdx = i;
       return hipErrorInvalidValue;
+    }
+    if (access_order == hipMemcpySrcAccessOrderDuringApiCall) {
+      if (hip_stream->GetCaptureStatus() == hipStreamCaptureStatusActive) {
+        hip_stream->InvalidateCapture();
+        return hipErrorStreamCaptureUnsupported;
+      }
+      if (hip_stream->GetCaptureStatus() == hipStreamCaptureStatusInvalidated) {
+        return hipErrorStreamCaptureInvalidated;
+      }
     }
     hipMemcpy3DParms parms = getMemcpy3DParms(opList[i]);
     hipError_t status = ihipMemcpy3D_validate(&parms);
@@ -3537,8 +3621,85 @@ static hipError_t ihipMemcpy3DBatch(size_t numOps, struct hipMemcpy3DBatchOp* op
       *failIdx = i;
       return status;
     }
+    if (access_order == hipMemcpySrcAccessOrderDuringApiCall) {
+      const void* host_source = nullptr;
+      amd::Memory* source_memory = nullptr;
+      size_t source_offset = 0;
+      if (src_memory_type != hipMemoryTypeArray) {
+        const void* source = opList[i].src.op.ptr.ptr;
+        source_memory = getMemoryObject(hip::getCurrentDevice(), source, source_offset);
+        if (source_memory == nullptr) {
+          host_source = source;
+        } else if (getMemoryType(source_memory) == hipMemoryTypeHost &&
+                   !IsManagedMemory(source_memory->getMemFlags())) {
+          host_source = source_memory->getHostMem() != nullptr ? source_memory->getHostMem()
+                                                               : source_memory->getSvmPtr();
+        }
+      }
+
+      PerEntryCopy entry{i, desc, true, {}};
+      if (host_source != nullptr) {
+        // Layered 1D images exchange the command's height and depth. Snapshot the pointer's
+        // original rows and layers before describing the packed data in those image axes.
+        const size_t source_height = parms.extent.height;
+        const size_t source_depth = parms.extent.depth;
+        const size_t source_pitch = parms.srcPtr.pitch;
+        if (source_height > SIZE_MAX / desc.WidthInBytes ||
+            source_depth > SIZE_MAX / (desc.WidthInBytes * source_height) ||
+            source_pitch < desc.WidthInBytes || parms.srcPtr.ysize < source_height ||
+            parms.srcPtr.ysize > SIZE_MAX / source_pitch) {
+          *failIdx = i;
+          return hipErrorInvalidValue;
+        }
+        const size_t slice_bytes = desc.WidthInBytes * source_height;
+        const size_t source_slice_pitch = source_pitch * parms.srcPtr.ysize;
+        // Validate the byte span explicitly: image validation expresses the region width in
+        // elements, while the host snapshot must read complete rows of bytes.
+        size_t source_end = desc.WidthInBytes;
+        if (source_height - 1 > (SIZE_MAX - source_end) / source_pitch) {
+          *failIdx = i;
+          return hipErrorInvalidValue;
+        }
+        source_end += (source_height - 1) * source_pitch;
+        if (source_depth - 1 > (SIZE_MAX - source_end) / source_slice_pitch) {
+          *failIdx = i;
+          return hipErrorInvalidValue;
+        }
+        source_end += (source_depth - 1) * source_slice_pitch;
+        const size_t source_limit = source_memory != nullptr ? source_memory->getSize() : SIZE_MAX;
+        if (source_offset > source_limit || source_end > source_limit - source_offset) {
+          *failIdx = i;
+          return hipErrorInvalidValue;
+        }
+        entry.snapshot.reset(new (std::nothrow) char[slice_bytes * source_depth]);
+        if (entry.snapshot == nullptr) {
+          *failIdx = i;
+          return hipErrorOutOfMemory;
+        }
+        for (size_t z = 0; z < source_depth; ++z) {
+          for (size_t y = 0; y < source_height; ++y) {
+            std::memcpy(entry.snapshot.get() + z * slice_bytes + y * desc.WidthInBytes,
+                        static_cast<const char*>(host_source) + source_offset +
+                            z * source_slice_pitch + y * source_pitch,
+                        desc.WidthInBytes);
+          }
+        }
+        entry.desc.srcMemoryType = hipMemoryTypeHost;
+        entry.desc.srcHost = entry.snapshot.get();
+        entry.desc.srcDevice = nullptr;
+        entry.desc.srcXInBytes = entry.desc.srcY = entry.desc.srcZ = 0;
+        entry.desc.srcPitch = desc.WidthInBytes;
+        // Image1DArray consumes the slice pitch as its layer stride, even though layers occupy
+        // the command's Y axis. Keep one packed source row per layer in that case.
+        entry.desc.srcHeight = source_height;
+      }
+      // Device, managed and array sources retain the existing copy path and complete before
+      // returning. DuringApiCall permits out-of-stream access but does not require it.
+      per_entry_copies.push_back(std::move(entry));
+      continue;
+    }
     if (src_memory_type == hipMemoryTypeArray || dst_memory_type == hipMemoryTypeArray) {
-      per_entry_copies.emplace_back(i, desc);
+      per_entry_copies.push_back({i, desc});
       continue;
     }
 
@@ -3585,7 +3746,7 @@ static hipError_t ihipMemcpy3DBatch(size_t numOps, struct hipMemcpy3DBatchOp* op
         break;
       case hipWriteBuffer:
       case hipReadBuffer:
-        per_entry_copies.emplace_back(i, desc);
+        per_entry_copies.push_back({i, desc});
         break;
     }
   }
@@ -3619,10 +3780,20 @@ static hipError_t ihipMemcpy3DBatch(size_t numOps, struct hipMemcpy3DBatchOp* op
     return status;
   }
 
-  for (auto& [index, desc] : per_entry_copies) {
-    status = ihipMemcpyParam3D(&desc, stream, true);
+  for (PerEntryCopy& entry : per_entry_copies) {
+    if (entry.snapshot != nullptr) {
+      status = EnqueueMemcpy3DSnapshot(entry.desc, std::move(entry.snapshot), *hip_stream);
+    } else if (entry.complete_before_return) {
+      amd::Command* command = nullptr;
+      status = ihipGetMemcpyParam3DCommand(command, &entry.desc, hip_stream);
+      if (status == hipSuccess && command != nullptr) {
+        status = ihipMemcpyCmdEnqueue(command, false, hip_stream);
+      }
+    } else {
+      status = ihipMemcpyParam3D(&entry.desc, stream, true);
+    }
     if (status != hipSuccess) {
-      *failIdx = index;
+      *failIdx = entry.index;
       break;
     }
   }

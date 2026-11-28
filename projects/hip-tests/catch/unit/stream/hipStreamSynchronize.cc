@@ -7,6 +7,10 @@
 #include <hip_test_common.hh>
 #include "streamCommon.hh"
 #include <utils.hh>
+#include <resource_guards.hh>
+
+#include <future>
+#include <thread>
 namespace hipStreamSynchronizeTest {
 
 /**
@@ -82,47 +86,61 @@ HIP_TEST_CASE(Unit_hipStreamSynchronize_NullStreamSynchronization) {
 }
 
 /**
- * @brief Check that synchronizing one stream does implicitly synchronize other streams.
- *        Check that submiting work to the nullStream does not affect synchronization of other
- * streams. Check that querying the nullStream does not affect synchronization of other streams.
+ * @brief Check that synchronizing an already completed stream does not wait for
+ * unrelated pending work, including after a null-stream launch or query.
  */
 HIP_TEST_CASE(Unit_hipStreamSynchronize_SynchronizeStreamAndQueryNullStream) {
-#if HT_AMD
-  HIP_SKIP_TEST("tracked issue EXSWCPHIPT-22.");
-#else
+  const StreamGuard stream1(Streams::created);
+  const StreamGuard stream2(Streams::created);
+  LinearAllocGuard<int> release(LinearAllocs::hipHostMalloc, sizeof(int));
+  *release.ptr() = 0;
 
-  hipStream_t stream1;
-  hipStream_t stream2;
+  hip::stream::empty_kernel<<<1, 1, 0, stream1.stream()>>>();
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipStreamSynchronize(stream1.stream()));
 
-  HIP_CHECK(hipStreamCreate(&stream1));
-  HIP_CHECK(hipStreamCreate(&stream2));
+  // Complete stream1 before holding stream2 so shared hardware queues cannot
+  // prevent stream1 from progressing. Do not enqueue new stream1 work after
+  // touching the null stream: such work would correctly wait for stream2.
+  WaitForHostRelease<<<1, 1, 0, stream2.stream()>>>(release.ptr());
+  const auto launchError = hipGetLastError();
+  std::promise<void> queriesDone;
+  std::thread releaser([flag = release.ptr(), done = queriesDone.get_future()] {
+    // Bound a regression that incorrectly waits for stream2 on the host.
+    done.wait_for(std::chrono::seconds(10));
+    __atomic_store_n(flag, 1, __ATOMIC_RELEASE);
+  });
 
-  LaunchDelayKernel(std::chrono::milliseconds(500), stream1);
-  LaunchDelayKernel(std::chrono::milliseconds(isQuickLevel() ? 100 : 2000), stream2);
-
+  hipError_t nullActionError = hipSuccess;
+  hipError_t expectedNullActionError = hipSuccess;
   SECTION("Do not use NullStream") {}
   SECTION("Submit Kernel to NullStream") {
-    hip::stream::empty_kernel<<<1, 1, 0, hip::nullStream> > >();
+    hip::stream::empty_kernel<<<1, 1, 0, hip::nullStream>>>();
+    nullActionError = hipGetLastError();
   }
   SECTION("Query NullStream") {
-    HIP_CHECK_ERROR(hipStreamQuery(hip::nullStream), hipErrorNotReady);
+    nullActionError = hipStreamQuery(hip::nullStream);
+    expectedNullActionError = hipErrorNotReady;
   }
 
-  HIP_CHECK_ERROR(hipStreamQuery(stream1), hipErrorNotReady);
-  HIP_CHECK_ERROR(hipStreamQuery(stream2), hipErrorNotReady);
+  // Capture statuses before releasing stream2, and join before Catch assertions
+  // so a failing check cannot strand a GPU kernel or a joinable host thread.
+  const auto sync1Error = hipStreamSynchronize(stream1.stream());
+  const auto query1Error = hipStreamQuery(stream1.stream());
+  const auto query2Error = hipStreamQuery(stream2.stream());
+  const auto queryNullError = hipStreamQuery(hip::nullStream);
+  queriesDone.set_value();
+  releaser.join();
+  HIP_CHECK(hipStreamSynchronize(stream2.stream()));
+  HIP_CHECK(hipStreamSynchronize(hip::nullStream));
 
-
-  HIP_CHECK(hipStreamSynchronize(stream1));
-  HIP_CHECK(hipStreamQuery(stream1));
-  HIP_CHECK_ERROR(hipStreamQuery(stream2), hipErrorNotReady);
-  HIP_CHECK_ERROR(hipStreamQuery(hip::nullStream), hipErrorNotReady);
-
-  HIP_CHECK(hipStreamSynchronize(stream2));
-  HIP_CHECK(hipStreamQuery(stream2));
-
-  HIP_CHECK(hipStreamDestroy(stream1));
-  HIP_CHECK(hipStreamDestroy(stream2));
-#endif
+  HIP_CHECK(launchError);
+  HIP_CHECK_ERROR(nullActionError, expectedNullActionError);
+  HIP_CHECK(sync1Error);
+  HIP_CHECK(query1Error);
+  HIP_CHECK_ERROR(query2Error, hipErrorNotReady);
+  HIP_CHECK_ERROR(queryNullError, hipErrorNotReady);
+  HIP_CHECK(hipStreamQuery(stream2.stream()));
 }
 
 /**
