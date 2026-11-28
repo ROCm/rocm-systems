@@ -10,6 +10,21 @@ set(CMAKE_INCLUDE_SYSTEM_FLAG_RCCLDEV "-isystem")
 set(CMAKE_RCCLDEV_COMPILE_OBJECT
   "<CMAKE_RCCLDEV_COMPILER> --compile <DEFINES> <INCLUDES> <FLAGS> -o <OBJECT> <SOURCE>")
 
+# Header dependencies: CMake does not scan custom languages, so the driver
+# writes a depfile (see -MD in tools/rccl-device-compile).
+# <DEP_TARGET>/<DEP_FILE> are only expanded from CMake 3.20; on older versions
+# they would reach the build system literally (e.g. build.ninja) and break every
+# device compile, so header dependency tracking is skipped there.
+if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.20")
+  set(CMAKE_DEPFILE_FLAGS_RCCLDEV "-MD -MT <DEP_TARGET> -MF <DEP_FILE>")
+  set(CMAKE_RCCLDEV_DEPFILE_FORMAT gcc)
+  set(CMAKE_RCCLDEV_DEPENDS_USE_COMPILER TRUE)
+else()
+  message(WARNING "RCCLDEV: CMake ${CMAKE_VERSION} is older than 3.20; header "
+    "dependency tracking is disabled for device objects, so editing a header "
+    "will not recompile them. Use CMake >= 3.20 for correct incremental builds.")
+endif()
+
 # Link rule: objects -> shared module (device.elf)
 # <LINK_FLAGS> carries target_link_options (e.g. --dispatcher=..., --arch=...).
 # <OBJECTS> is the list of compiled object files.

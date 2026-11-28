@@ -10,6 +10,8 @@ Compile mode (--compile):
     2. Extracts device function + resource JSON (inline)
     3. Assembles extracted .s to .o via amdclang++
     Side effect: writes out.resources.json alongside out.o
+    -MD/-MMD with -MF <depfile> [-MT <target>] write a make-style depfile of
+    the user headers the source includes.
 
 Link mode (--link):
     rccl-device-compile --link --arch=gfx942 --dispatcher=common.cu.cpp -o device.elf obj1.o obj2.o
@@ -538,6 +540,13 @@ def do_compile(args, forwarded_flags):
         # Step 1: Compile to assembly
         compile_cmd = device_compile_cmd(clang, target_id, forwarded_flags,
                                              asm_file, source)
+        depfile = getattr(args, 'depfile', None)
+        if depfile:
+            # The clang driver ignores -MD/-MF with --offload-device-only, so
+            # ask the frontend for the depfile directly.
+            dep_target = getattr(args, 'dep_target', None) or output
+            compile_cmd[-1:-1] = ['-Xclang', '-dependency-file', '-Xclang', depfile,
+                                  '-Xclang', '-MT', '-Xclang', dep_target]
         run(compile_cmd, f"compile {os.path.basename(source)}")
 
         # Step 2: Extract device function (inline)
@@ -774,6 +783,14 @@ def parse_compiler_flags(argv):
         elif arg == '-o' and i + 1 < len(argv):
             our_args.extend(['-o', argv[i + 1]])
             i += 1
+        # Dependency-file flags, handled in do_compile
+        elif arg in ('-MD', '-MMD'):
+            pass
+        elif arg in ('-MF', '-MT') and i + 1 < len(argv):
+            our_args.append(('--depfile=' if arg == '-MF' else '--dep-target=') + argv[i + 1])
+            i += 1
+        elif arg.startswith('-MF') or arg.startswith('-MT'):
+            our_args.append(('--depfile=' if arg.startswith('-MF') else '--dep-target=') + arg[3:])
         # Forwarded compiler flags
         elif arg.startswith('-D') or arg.startswith('-I') or arg.startswith('-isystem'):
             forwarded.append(arg)
@@ -830,6 +847,8 @@ def main():
     parser.add_argument('--rocshmem-bitcode', default=None, dest='rocshmem_bitcode')
     parser.add_argument('--profile-rt', default=None, dest='profile_rt')
     parser.add_argument('-o', '--output', required=False)
+    parser.add_argument('--depfile', default=None)
+    parser.add_argument('--dep-target', default=None, dest='dep_target')
     parser.add_argument('--keep-temps', action='store_true')
     parser.add_argument('--version', action='store_true')
 
