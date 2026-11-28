@@ -52,7 +52,7 @@ extern std::function<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, int*)>
 // enqueue.cc's rcclEffectiveP2pBatchEnable: default 0 is batching off, the single-node answer.
 extern std::function<int(struct ncclComm*)> g_rcclEffectiveP2pBatchEnable;
 
-// enqueue.cc's rcclP2pTaskParts: default p2pnChannelsPerPeer; install the multi-node AINIC Scatter limit per test.
+// enqueue.cc's rcclP2pTaskParts: default p2pnChannelsPerPeer; install the multi-node AINIC Scatter/AlltoAll limit per test.
 extern std::function<int(struct ncclComm*, ncclFunc_t, int)> g_rcclP2pTaskParts;
 extern std::function<bool(struct ncclComm*, ncclFunc_t, int)> g_rcclP2pTaskUsesCe;
 extern std::function<int(struct ncclComm*, ncclFunc_t, int)> g_rcclP2pTaskConnIndex;

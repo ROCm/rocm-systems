@@ -160,7 +160,7 @@ static ncclResult_t postTuneP2pRecordPreconnect(struct ncclComm* comm, int peer,
 
   // P2P-NET selection is size-dependent and happens later in addP2pToPlan.
   // Record a complete tile only when lifting a CE-specific cap; preserve
-  // intentional limits such as multi-node AINIC Scatter for kernel P2P.
+  // intentional limits such as multi-node AINIC Scatter and AlltoAll for kernel P2P.
   if (comm->p2pNet) {
     int netParts = connIndex == NCCL_CONN_IDX_P2P_CE ? comm->p2pnChannelsPerPeer : nParts;
     for (int c = 0; c < netParts; c++) {

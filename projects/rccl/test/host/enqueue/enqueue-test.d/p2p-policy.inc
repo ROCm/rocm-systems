@@ -11,10 +11,10 @@
 // ===========================================================================
 // rcclP2pTaskParts (enqueue.cc:1333) and rcclP2pPolicyChannels (enqueue.cc:1342)
 //
-// Multi-node AINIC Scatter takes the most power-of-two parts whose nRanks - 1
-// flows fit p2pnChannels, at most p2pnChannelsPerPeer; everything else takes
-// p2pnChannelsPerPeer. Both ends of a pair must get the same answer, so it may
-// depend only on comm-wide fields.
+// Multi-node AINIC Scatter and AlltoAll take the most power-of-two parts whose
+// nRanks - 1 flows fit p2pnChannels, at most p2pnChannelsPerPeer; everything else
+// takes p2pnChannelsPerPeer. Both ends of a pair must get the same answer, so it
+// may depend only on comm-wide fields.
 // ===========================================================================
 
 namespace {
@@ -29,58 +29,65 @@ std::unique_ptr<ncclComm> P2pPartsComm(int nNodes, int nRanks, int p2pnChannels,
 }
 }  // namespace
 
-TEST_F(EnqueueMicrotest, P2pTaskParts_AinicScatterTakesThePartsWhoseFlowsFitThePool) {
+TEST_F(EnqueueMicrotest, P2pTaskParts_AinicScatterAndAlltoAllTakeThePartsWhoseFlowsFitThePool) {
   g_rcclUseAinicValue = true;
   struct Case {
-    int nNodes, nRanks, p2pnChannels, perPeer, scatterParts;
+    int nNodes, nRanks, p2pnChannels, perPeer, limitedParts;
   };
   // 8 GPUs per node with the MI355X pools, the pool boundary (16 peers x 2 parts fill 32 channels,
   // 17 peers do not), power-of-two rounding (64 / 19 = 3) and the one-part floor (64 / 127 = 0).
   for (Case k : {Case{2, 16, 32, 2, 2}, Case{3, 24, 64, 4, 2}, Case{4, 32, 32, 2, 1}, Case{8, 64, 64, 2, 1},
                  Case{2, 17, 32, 2, 2}, Case{2, 18, 32, 2, 1}, Case{3, 20, 64, 8, 2}, Case{16, 128, 64, 2, 1}}) {
     auto comm = P2pPartsComm(k.nNodes, k.nRanks, k.p2pnChannels, k.perPeer);
-    EXPECT_EQ(k.scatterParts, rcclP2pTaskParts(comm.get(), ncclFuncScatter, /*peer=*/0))
-      << k.nRanks << " ranks, " << k.p2pnChannels << " channels";
-    for (ncclFunc_t f : {ncclFuncSendRecv, ncclFuncSend, ncclFuncRecv, ncclFuncAlltoAll, ncclFuncGather,
-                         ncclFuncAlltoAllv}) {
+    for (ncclFunc_t f : {ncclFuncScatter, ncclFuncAlltoAll}) {
+      EXPECT_EQ(k.limitedParts, rcclP2pTaskParts(comm.get(), f, /*peer=*/0))
+        << "collAPI=" << int(f) << ", " << k.nRanks << " ranks, " << k.p2pnChannels << " channels";
+    }
+    for (ncclFunc_t f : {ncclFuncSendRecv, ncclFuncSend, ncclFuncRecv, ncclFuncGather, ncclFuncAlltoAllv}) {
       EXPECT_EQ(k.perPeer, rcclP2pTaskParts(comm.get(), f, /*peer=*/0)) << "collAPI=" << int(f);
     }
   }
 }
 
-TEST_F(EnqueueMicrotest, P2pTaskParts_ScatterKeepsPerPeerOutsideMultiNodeAinicOrWithAUserCount) {
-  auto comm = P2pPartsComm(/*nNodes=*/4, /*nRanks=*/32, /*p2pnChannels=*/32, /*perPeer=*/2);
-  g_rcclUseAinicValue = false;
-  EXPECT_EQ(2, rcclP2pTaskParts(comm.get(), ncclFuncScatter, /*peer=*/0)) << "not AINIC";
-  g_rcclUseAinicValue = true;
-  comm->config.nChannelsPerNetPeer = 2;
-  EXPECT_EQ(2, rcclP2pTaskParts(comm.get(), ncclFuncScatter, /*peer=*/0))
-    << "NCCL_NCHANNELS_PER_NET_PEER set";
-  comm->config.nChannelsPerNetPeer = NCCL_CONFIG_UNDEF_INT;
-  comm->nNodes = 1;
-  EXPECT_EQ(2, rcclP2pTaskParts(comm.get(), ncclFuncScatter, /*peer=*/0)) << "single node";
+TEST_F(EnqueueMicrotest, P2pTaskParts_ScatterAndAlltoAllKeepPerPeerOutsideMultiNodeAinicOrWithAUserCount) {
+  for (ncclFunc_t f : {ncclFuncScatter, ncclFuncAlltoAll}) {
+    auto comm = P2pPartsComm(/*nNodes=*/4, /*nRanks=*/32, /*p2pnChannels=*/32, /*perPeer=*/2);
+    g_rcclUseAinicValue = false;
+    EXPECT_EQ(2, rcclP2pTaskParts(comm.get(), f, /*peer=*/0)) << "collAPI=" << int(f) << ", not AINIC";
+    g_rcclUseAinicValue = true;
+    comm->config.nChannelsPerNetPeer = 2;
+    EXPECT_EQ(2, rcclP2pTaskParts(comm.get(), f, /*peer=*/0))
+      << "collAPI=" << int(f) << ", NCCL_NCHANNELS_PER_NET_PEER set";
+    comm->config.nChannelsPerNetPeer = NCCL_CONFIG_UNDEF_INT;
+    comm->nNodes = 1;
+    EXPECT_EQ(2, rcclP2pTaskParts(comm.get(), f, /*peer=*/0)) << "collAPI=" << int(f) << ", single node";
+  }
 }
 
-TEST_F(EnqueueMicrotest, P2pPolicyChannels_ScatterBelowPerPeerReturnsItsParts) {
+TEST_F(EnqueueMicrotest, P2pPolicyChannels_ScatterAndAlltoAllBelowPerPeerReturnTheirParts) {
   // Returns before the arch policy table, so comm->topo is never read.
   g_rcclUseAinicValue = true;
   auto comm = P2pPartsComm(/*nNodes=*/4, /*nRanks=*/32, /*p2pnChannels=*/32, /*perPeer=*/2);
-  ncclTaskP2p task{};
-  task.collAPI = ncclFuncScatter;
-  EXPECT_EQ(1, rcclP2pPolicyChannels(comm.get(), &task));
+  for (ncclFunc_t f : {ncclFuncScatter, ncclFuncAlltoAll}) {
+    ncclTaskP2p task{};
+    task.collAPI = f;
+    EXPECT_EQ(1, rcclP2pPolicyChannels(comm.get(), &task)) << "collAPI=" << int(f);
+  }
   EXPECT_EQ(-1, rcclP2pPolicyChannels(comm.get(), nullptr));
 }
 
-TEST_F(EnqueueMicrotest, P2pReservationChannels_P2pNetPreservesAinicScatterLimit) {
+TEST_F(EnqueueMicrotest, P2pReservationChannels_P2pNetPreservesAinicScatterAndAlltoAllLimit) {
   g_rcclUseAinicValue = true;
   auto comm = P2pPartsComm(/*nNodes=*/4, /*nRanks=*/32, /*p2pnChannels=*/32, /*perPeer=*/2);
   comm->p2pNet = 1;
-  ncclTaskP2p task{};
-  task.collAPI = ncclFuncScatter;
-  task.root = 1;
-  task.bytes = 64 << 20;
+  for (ncclFunc_t f : {ncclFuncScatter, ncclFuncAlltoAll}) {
+    ncclTaskP2p task{};
+    task.collAPI = f;
+    task.root = 1;
+    task.bytes = 64 << 20;
 
-  EXPECT_EQ(1, rcclP2pReservationChannels(comm.get(), /*recv=*/nullptr, &task));
+    EXPECT_EQ(1, rcclP2pReservationChannels(comm.get(), /*recv=*/nullptr, &task)) << "collAPI=" << int(f);
+  }
 }
 
 // gfx942 remote alltoall cap (enqueue.cc). Returns 2 when the stored
