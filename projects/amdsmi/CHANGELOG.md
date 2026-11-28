@@ -152,6 +152,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Hardened the `@<path>` file loader shared by `--ampp-configure` and `--power-stabilization-configure`**.  
   - The loader now requires a regular file (rejecting symlinks, so not `/dev/stdin`), enforces a 1 MiB cap against bytes actually read, and guards against `UnicodeDecodeError`/`RecursionError`.
 
+- **`amdsmi_get_gpu_fabric_info()` now returns `vpod_active_accelerators` as the documented bitmap**.
+  - Bit N set means accelerator ID N is active, so a vPoD of more than 32 accelerators is reported whole; the array used to hold the first 32 active IDs, and callers that read it as a list of IDs must decode the bitmap. `fabric_version` now reads `1` once any field is read. `amd-smi fabric` lists every active ID. The ABI layout is unchanged.
+
 ### Removed
 
 - **Removed the ``FW`` block from ``amd-smi static --nic``** (breaking).  
@@ -220,6 +223,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Fixed `amd-smi set --ampp-configure=@<path>` lowercasing its file path**.  
   - The `=` form of `--ampp-configure` incorrectly lowercased its `@<path>` value, breaking case-sensitive paths. It now preserves case, matching the space-separated form.
+
+- **Fixed `amdsmi_get_gpu_fabric_info()` reporting `addr_mode` and the configured `accel_state` stages as `UNKNOWN`**.
+  - The library now recognizes the driver's `source-aliasing`, `source-identification`, `ppod_configured` and `vpod_configured`; both configured stages read `CONFIGURED`. An empty `local_accels` no longer reads as accelerator ID 0.
 
 - **Setting the current memory partition now cancels a pending memory partition change**.  
   - Previously, amd-smi did not send this request to the driver, so the next driver reload still applied a different partition requested earlier. Older amdgpu drivers ignore the request because of a driver bug and still apply the partition requested earlier; update to an amdgpu driver that has the fix. If a read-only `/sys` (for example, in a container) refuses the request, amd-smi now reports an error instead of success.

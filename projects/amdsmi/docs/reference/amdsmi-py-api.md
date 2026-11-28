@@ -7471,7 +7471,7 @@ Output: Dictionary with the corresponding fields
 Field | Description
 ---|---
 `bdf` | BDF of the fabric device
-`version` | Fabric info structure version
+`version` | Fabric info structure version: `1` once any field was read, otherwise 4294967295
 `accelerator_id` | Accelerator identifier (range 0 to 1023)
 `fabric_type` | Fabric type: `UALOE`, `UALLINK`, or `UNKNOWN`
 `bandwidth` | Station bandwidth share in Mb/s
@@ -7480,10 +7480,10 @@ Field | Description
 `ppod_size` | Physical PoD size
 `vpod_id` | Virtual PoD identifier
 `vpod_size` | Virtual PoD size
-`local_accelerators` | List of local accelerator IDs
-`vpod_active_accelerators` | Active-accelerator bitmap as a list of 32-bit words (bit N set = accelerator ID N is active)
+`local_accelerators` | List of 16 local accelerator ID slots; unused slots are 4294967295
+`vpod_active_accelerators` | Active-accelerator bitmap as a list of 32 32-bit words: bit (N mod 32) of word (N / 32) set = accelerator ID N is active
 `addr_mode` | NPA address mode: `SOURCE_ALIASING`, `SOURCE_IDENTIFICATION`, or `UNKNOWN`
-`accel_state` | Accelerator vPoD state: `UNCONFIGURED`, `CONFIGURED`, `READY`, `ACTIVE`, `ERROR`, or `UNKNOWN`
+`accel_state` | Accelerator vPoD state: `UNCONFIGURED`, `CONFIGURED` (pPoD or vPoD configured), `READY`, `ACTIVE`, `ERROR`, or `UNKNOWN`
 
 Exceptions that can be thrown by `amdsmi_get_gpu_fabric_info` function:
 

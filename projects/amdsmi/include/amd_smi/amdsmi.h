@@ -6377,7 +6377,7 @@ typedef enum {
  */
 typedef enum {
   AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_UNCONFIGURED,
-  AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_CONFIGURED,
+  AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_CONFIGURED,  //!< pPoD or vPoD configured, not yet ready
   AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_READY,
   AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_ACTIVE,
   AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_ERROR,
@@ -6400,8 +6400,9 @@ typedef struct {
   uint32_t vpod_id;    //!< Virtual PoD Identifier
   uint32_t vpod_size;  //!< Virtual PoD size
   uint32_t vpod_active_accelerators
-      [AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE];  //!< 1024-bit list (32 x 32-bit words): bit
-                                                        //!< N set = accelerator ID N is active
+      [AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE];  //!< 1024-bit bitmap (32 x 32-bit words):
+                                                        //!< bit (N mod 32) of word (N / 32) set =
+                                                        //!< accelerator ID N is active
   uint32_t local_accelerators[AMDSMI_FABRIC_MAX_LOCAL_GPUS];  //!< Local Accelerator IDs
   amdsmi_fabric_npa_address_mode_t addr_mode;          //!< Source aliasing or identification mode
   amdsmi_fabric_accelerator_vpod_state_t accel_state;  //!< Accelerator vPoD State
@@ -6413,8 +6414,8 @@ typedef struct {
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
  */
 typedef struct {
-  amdsmi_bdf_t bdf;  //!< BDF (Bus, Device, Function) of the Fabric device
-  uint32_t fabric_version;
+  amdsmi_bdf_t bdf;         //!< BDF (Bus, Device, Function) of the Fabric device
+  uint32_t fabric_version;  //!< Version of the fabric_info layout: 1 once any v1 field was read
   union fabric_info_ {
     amdsmi_fabric_info_v1_t v1;
   } fabric_info;

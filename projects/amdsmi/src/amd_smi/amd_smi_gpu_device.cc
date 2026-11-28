@@ -547,8 +547,9 @@ inline const auto UALoeLinkTypeMap =
 
 using UALoeAddressModeTypeMap_t = std::map<std::string_view, amdsmi_fabric_npa_address_mode_t>;
 inline const auto UALoeAddressModeTypeMap = UALoeAddressModeTypeMap_t{
-    {"aliasing", amdsmi_fabric_npa_address_mode_t::AMDSMI_FABRIC_NPA_ADDRESS_MODE_SOURCE_ALIASING},
-    {"identification",
+    {"source-aliasing",
+     amdsmi_fabric_npa_address_mode_t::AMDSMI_FABRIC_NPA_ADDRESS_MODE_SOURCE_ALIASING},
+    {"source-identification",
      amdsmi_fabric_npa_address_mode_t::AMDSMI_FABRIC_NPA_ADDRESS_MODE_SOURCE_IDENTIFICATION}};
 
 using UALoeAcceleratorStateTypeMap_t =
@@ -557,6 +558,10 @@ inline const auto UALoeAcceleratorStateTypeMap = UALoeAcceleratorStateTypeMap_t{
     {"unconfigured",
      amdsmi_fabric_accelerator_vpod_state_t::AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_UNCONFIGURED},
     {"configured",
+     amdsmi_fabric_accelerator_vpod_state_t::AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_CONFIGURED},
+    {"ppod_configured",
+     amdsmi_fabric_accelerator_vpod_state_t::AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_CONFIGURED},
+    {"vpod_configured",
      amdsmi_fabric_accelerator_vpod_state_t::AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_CONFIGURED},
     {"ready", amdsmi_fabric_accelerator_vpod_state_t::AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_READY},
     {"active", amdsmi_fabric_accelerator_vpod_state_t::AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_ACTIVE},
@@ -758,44 +763,35 @@ auto get_vpod_size(const std::string& link_value, amdsmi_fabric_info_t& local_fa
 /*
  *  Note:   For get_vpod_active_accelerators(), and get_local_accelerators(),
  *          we handle all lines from the file at once, and then fill the array.
+ *          vpod_active_accels lists accelerator IDs; they are stored as a bitmap,
+ *          ID N in bit (N % 32) of word (N / 32).
  */
-template <std::size_t MaxElems>
-auto get_vpod_active_accelerators(
-    const UALoeLinkInfoLines_t& file_lines,
-    std::array<AcceleratorArrayType_t, MaxElems>& local_active_accelerators) -> void {
-  std::fill(std::begin(local_active_accelerators), std::end(local_active_accelerators),
-            std::numeric_limits<AcceleratorArrayType_t>::max());
+template <std::size_t MaxWords>
+auto get_vpod_active_accelerators(const UALoeLinkInfoLines_t& file_lines,
+                                  AcceleratorArrayType_t (&active_accelerators)[MaxWords]) -> void {
+  constexpr auto kBitsPerWord = std::size_t(std::numeric_limits<AcceleratorArrayType_t>::digits);
+  std::fill(std::begin(active_accelerators), std::end(active_accelerators), 0);
 
-  auto idx = std::size_t(0);
   auto accel_count = std::size_t(0);
   for (const auto& line : file_lines) {
-    if (idx >= MaxElems) {
-      break;
-    }
-
     // We are supposed to only have 1 line per file, and separated by spaces
-    auto accel_vector = split_string(line, ' ');
-
-    if (!accel_vector.empty()) {
-      accel_count = accel_vector.size();
-      for (const auto& accel_value_str : accel_vector) {
-        if (idx < MaxElems) {
-          auto result = parse_number_from_string<AcceleratorArrayType_t>(accel_value_str);
-          if (result.has_value()) {
-            local_active_accelerators[idx++] = static_cast<AcceleratorArrayType_t>(result.value());
-          }
-        }
+    for (const auto& accel_value_str : split_string(line, ' ')) {
+      auto result = parse_number_from_string<AcceleratorArrayType_t>(accel_value_str);
+      if (result.has_value() && (result.value() < (MaxWords * kBitsPerWord))) {
+        active_accelerators[result.value() / kBitsPerWord] |=
+            (AcceleratorArrayType_t(1) << (result.value() % kBitsPerWord));
+        ++accel_count;
       }
     }
   }
 
   std::ostringstream outstream;
   outstream << __PRETTY_FUNCTION__ << " | File lines: " << file_lines.size()
-            << " | local_active_accelerators_count: " << accel_count
-            << "local_active_accelerators: ";
-  std::copy(std::begin(local_active_accelerators), std::end(local_active_accelerators),
+            << " | active_accelerators_count: " << accel_count
+            << " | active_accelerators (bitmap): " << std::hex;
+  std::copy(std::begin(active_accelerators), std::end(active_accelerators),
             amd::smi::make_ostream_joiner(&outstream, ", "));
-  outstream << " |";
+  outstream << std::dec << " |";
   log_ualoe_file_info(std::move(outstream));
 }
 
@@ -1035,8 +1031,6 @@ auto AMDSmiGPUDevice::get_fabric_info_from_ualoe(amdsmi_fabric_info_t& fabric_in
 
   auto local_fabric_info = amdsmi_fabric_info_t{};
   auto local_ppod_id = std::array<std::uint8_t, AMDSMI_FABRIC_PPOD_ID_SIZE>{};
-  auto local_active_accelerators = std::array<gpu_device::details::AcceleratorArrayType_t,
-                                              AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE>{};
   auto local_accelerators =
       std::array<gpu_device::details::AcceleratorArrayType_t, AMDSMI_FABRIC_MAX_LOCAL_GPUS>{};
 
@@ -1095,7 +1089,8 @@ auto AMDSmiGPUDevice::get_fabric_info_from_ualoe(amdsmi_fabric_info_t& fabric_in
       static_cast<amdsmi_fabric_accelerator_vpod_state_t>(
           std::numeric_limits<decltype(local_fabric_info.fabric_info.v1.accel_state)>::max());
 
-  std::fill(std::begin(local_active_accelerators), std::end(local_active_accelerators),
+  std::fill(std::begin(local_fabric_info.fabric_info.v1.local_accelerators),
+            std::end(local_fabric_info.fabric_info.v1.local_accelerators),
             std::numeric_limits<gpu_device::details::AcceleratorArrayType_t>::max());
   std::fill(std::begin(local_accelerators), std::end(local_accelerators),
             std::numeric_limits<gpu_device::details::AcceleratorArrayType_t>::max());
@@ -1164,11 +1159,8 @@ auto AMDSmiGPUDevice::get_fabric_info_from_ualoe(amdsmi_fabric_info_t& fabric_in
      *      - LOCAL_ACCELS
      */
     if (link_info_type_key == UALoeLinkInfo_t::VPOD_ACTIVE_ACCELS) {
-      gpu_device::details::get_vpod_active_accelerators(ualoe_file_lines,
-                                                        local_active_accelerators);
-      std::copy(local_active_accelerators.data(),
-                (local_active_accelerators.data() + local_active_accelerators.size()),
-                local_fabric_info.fabric_info.v1.vpod_active_accelerators);
+      gpu_device::details::get_vpod_active_accelerators(
+          ualoe_file_lines, local_fabric_info.fabric_info.v1.vpod_active_accelerators);
       continue;
     }
     if (link_info_type_key == UALoeLinkInfo_t::LOCAL_ACCELS) {
@@ -1226,6 +1218,10 @@ auto AMDSmiGPUDevice::get_fabric_info_from_ualoe(amdsmi_fabric_info_t& fabric_in
           break;
       }
     }
+  }
+
+  if (link_info_files_with_usable_content > 0) {
+    local_fabric_info.fabric_version = kFABRIC_INFO_VERSION_1;
   }
 
   /**
