@@ -100,25 +100,32 @@ still runs (and CTest still passes) without the full data set.
 Measures decode FPS (running the `videoDecodePerf` sample on each stream) and compares it
 against the GPU-specific baseline, flagging streams whose Avg FPS has dropped beyond the
 tolerance. Prints a summary box, writes a per-stream comparison CSV to
-`$HOME/rocDecode_perf_results/<timestamp>/` (outside the repo; override the base with
-`ROCDECODE_PERF_RESULTS_DIR`), and exits `0` if there are no regressions, `1` otherwise.
+`$HOME/rocDecode_perf_results/<timestamp>_m<N>/` (outside the repo; `<N>` is the output
+memory type; override the base with `ROCDECODE_PERF_RESULTS_DIR`), and exits `0` if there
+are no regressions, `1` otherwise.
+
+A stream that `videoDecodePerf` fails to decode (non-zero exit or no FPS reported, in any of
+its runs) is reported as `FAILED`, not skipped, and fails the run (exit 1) in every mode.
 
 If no baseline is available — either the baseline file is missing or it has no column for
 the detected GPU — the script runs in **measure-only mode**: all streams are measured, FPS
 is saved to CSV (which can serve as a future baseline), and the summary reports
-`— NO BASELINE` per codec with `— MEASURED` overall (exit 0). The specific reason is
-printed as a WARNING.
+`— NO BASELINE` per codec with `— MEASURED` overall (exit 0, unless a stream failed). The
+specific reason is printed as a WARNING.
 
 ```shell
-test/perf_regression.py [--perf-dir DIR] [--baseline FILE] [--tolerance PCT] [--runs N] [--device ID] [--gpu NAME] [--quick] [--check-rocm]
+test/perf_regression.py [--perf-dir DIR] [--baseline FILE] [--tolerance PCT] [--runs N] [--device ID] [--gpu NAME] [--quick] [--check-rocm] [--mem-type {0,1,2,3}] [--save-baseline] [--force]
 ```
 
 | Option | Description |
 | --- | --- |
 | `--perf-dir DIR` | Streams + baseline dir (default: `$ROCDECODE_PERF_DIR`). |
-| `--baseline FILE` | Baseline HTML (default: `<perf-dir>/rocDecode_perf_baseline.html`). |
+| `--baseline FILE` | Baseline file, HTML or CSV (default: `<perf-dir>/rocDecode_perf_baseline.html` for `--mem-type 3`, `<perf-dir>/local_baselines/<GPU>_m<N>.csv` otherwise). With `--save-baseline`, the CSV to write. |
+| `--mem-type N` | Output surface memory type passed to `videoDecodePerf` as `-m`: 0 device internal, 1 device copied, 2 host copied, 3 not mapped / decode only (default: 3). See [Memory types and local baselines](#memory-types-and-local-baselines). |
+| `--save-baseline` | Measure every stream (averaging `--runs` runs each) and save the result as the local baseline for this GPU and memory type, instead of comparing. Not allowed with `--quick`. |
+| `--force` | Overwrite an existing baseline file. Only valid together with `--save-baseline`. |
 | `--tolerance PCT` | Regression threshold, % Avg FPS drop (default: `$ROCDECODE_PERF_TOLERANCE` or 5). |
-| `--runs N` | Runs to average when confirming a flagged stream (default: 3). |
+| `--runs N` | Runs to average when confirming a flagged stream, or per stream with `--save-baseline` (default: 3). |
 | `--device ID` | GPU device id (default: 0). |
 | `--gpu NAME` | GPU name for baseline lookup (e.g. `Navi31`, `MI300X`). Overrides auto-detection. Also overridable via `ROCDECODE_PERF_GPU` env var; `--gpu` takes priority. |
 | `--quick` | Fast check: one baseline stream per leaf subfolder, capped at ≤4K (8K skipped). |
@@ -168,6 +175,43 @@ export ROCDECODE_PERF_DIR="$HOME/Movies/rocDecodePerformance"
 The baseline is not distributed with the repo (it lives on an internal SharePoint site);
 download `rocDecode_perf_baseline.html` into `$ROCDECODE_PERF_DIR` for regression
 comparison. Without the baseline file, the script runs in measure-only mode (see above).
+
+### Memory types and local baselines
+
+The SharePoint baseline holds decode-only numbers, measured with `videoDecodePerf -m 3`,
+which never maps a decoded frame. To measure the paths that apps actually use, pass
+`--mem-type`: `0` maps each frame in place (`rocDecGetVideoFrame`, no copy), `1` also copies
+it to device memory, `2` copies it to host memory. These modes are slower than decode-only,
+so they are compared against a **local baseline** recorded on the same machine:
+
+```
+$ROCDECODE_PERF_DIR/local_baselines/<GPU>_m<N>.csv    # e.g. Navi31_m1.csv
+```
+
+Record a baseline once for each GPU and memory type, using a known-good build:
+
+```shell
+test/perf_regression.py --mem-type 1 --save-baseline
+```
+
+`--save-baseline` measures every stream (averaging `--runs` runs each). It cannot be
+combined with `--quick`: later runs compare only the streams that are in the baseline. It
+refuses to overwrite an existing file unless `--force` is given. Besides `File` and `FPS`,
+the CSV records the codec, memory type, GPU, time and `ROCM_PATH`, so you can tell later
+where a baseline came from. A baseline whose recorded memory type or GPU differs from the run
+is rejected (a CSV with only `File` and `FPS` is accepted), so a copied-mode baseline cannot
+be compared against a decode-only run by mistake. Local baselines describe one machine and software stack; they
+are not a substitute for the shared SharePoint baseline.
+
+Baseline selection:
+
+- `--mem-type 3` (the default) uses the SharePoint HTML. If it has no column for this GPU,
+  a local `<GPU>_m3.csv` is used when present.
+- `--mem-type 0`, `1` or `2` uses `<GPU>_m<N>.csv`.
+- `--baseline FILE` overrides both. Comparing `--mem-type 0`-`2` against the HTML prints a
+  warning, because those numbers are decode-only.
+- With no usable baseline, the run is measure-only (see above) and prints the
+  `--save-baseline` command to record one.
 
 ## Claude Code Skills
 
@@ -232,7 +276,11 @@ Optional arguments:
 
 - `/perf-check quick` — fast one-stream-per-subfolder variant (`--quick`, ≤4K only).
 - `/perf-check --gpu Navi31` — specify the GPU name for baseline lookup explicitly.
-- `/perf-check quick --gpu Navi31` — both combined.
+- `/perf-check m1` (or `m0`, `m2`, `m3`) — measure with that output memory type
+  (`--mem-type N`); see [Memory types and local baselines](#memory-types-and-local-baselines).
+- `/perf-check m1 save-baseline` — record the local baseline for that memory type
+  (`--save-baseline`; add `force` to overwrite an existing one).
+- Arguments combine, e.g. `/perf-check quick m1 --gpu Navi31`.
 
 Requires `ROCDECODE_PERF_DIR` (streams + baseline) as described under
 [`perf_regression.py`](#perf_regressionpy--performance-regression-check) above. On Windows,
