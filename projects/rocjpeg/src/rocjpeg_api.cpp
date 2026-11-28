@@ -21,6 +21,8 @@ THE SOFTWARE.
 */
 
 #include <cstddef>
+#include <cstdint>
+#include <limits>
 #include "rocjpeg_api_stream_handle.h"
 #include "rocjpeg_api_decoder_handle.h"
 #include "rocjpeg_commons.h"
@@ -65,11 +67,12 @@ RocJpegStatus ROCJPEGAPI rocJpegStreamCreate(RocJpegStreamHandle *jpeg_stream_ha
  * and updates the provided JPEG stream handle accordingly.
  *
  * @param data The pointer to the JPEG stream data.
- * @param length The length of the JPEG stream data.
+ * @param length The length of the JPEG stream data in bytes, at most UINT32_MAX.
  * @param jpeg_stream_handle The handle to the JPEG stream.
  * @return The status of the JPEG stream parsing operation.
  *         - ROCJPEG_STATUS_SUCCESS if the parsing is successful.
- *         - ROCJPEG_STATUS_INVALID_PARAMETER if the input parameters are invalid.
+ *         - ROCJPEG_STATUS_INVALID_PARAMETER if data or jpeg_stream_handle is nullptr,
+ *           or if length is greater than UINT32_MAX.
  *         - ROCJPEG_STATUS_BAD_JPEG if the JPEG stream is invalid.
  */
 RocJpegStatus ROCJPEGAPI rocJpegStreamParse(const unsigned char *data, size_t length, RocJpegStreamHandle jpeg_stream_handle) {
@@ -79,8 +82,16 @@ RocJpegStatus ROCJPEGAPI rocJpegStreamParse(const unsigned char *data, size_t le
         FunctionExitLog(g_rocjpeg_logger);
         return ROCJPEG_STATUS_INVALID_PARAMETER;
     }
+    // The parser takes a 32-bit length. A longer length would be cut to its low 32 bits
+    // and the stream parsed with a different length than the one passed, so reject it.
+    if (length > std::numeric_limits<uint32_t>::max()) {
+        ErrorLog(g_rocjpeg_logger, "Invalid JPEG stream length (" + ROCJPEG_TOSTR(length) + " bytes): at most " +
+                 ROCJPEG_TOSTR(std::numeric_limits<uint32_t>::max()) + " bytes are supported");
+        FunctionExitLog(g_rocjpeg_logger);
+        return ROCJPEG_STATUS_INVALID_PARAMETER;
+    }
     auto rocjpeg_stream_handle = static_cast<RocJpegStreamParserHandle*>(jpeg_stream_handle);
-    if (!rocjpeg_stream_handle->rocjpeg_stream->ParseJpegStream(data, length)) {
+    if (!rocjpeg_stream_handle->rocjpeg_stream->ParseJpegStream(data, static_cast<uint32_t>(length))) {
         ErrorLog(g_rocjpeg_logger, "Failed to parse JPEG stream");
         FunctionExitLog(g_rocjpeg_logger);
         return ROCJPEG_STATUS_BAD_JPEG;

@@ -18,6 +18,7 @@ Documentation for rocJPEG is available at
 ### Changed
 
 * The decode APIs (`rocJpegDecode`, `rocJpegDecodeAsync`, `rocJpegDecodeBatched`, and `rocJpegDecodeBatchedAsync`) now return `ROCJPEG_STATUS_INVALID_PARAMETER` when the crop rectangle in `RocJpegDecodeParams` does not lie within the image.
+* `rocJpegStreamParse` now returns `ROCJPEG_STATUS_INVALID_PARAMETER` when `length` is greater than `UINT32_MAX`. Previously only the low 32 bits of the length were used, so a valid JPEG could fail with `ROCJPEG_STATUS_BAD_JPEG` or succeed with part of its scan missing.
 * The `jpegDecodePerf` sample accepts up to 64 decoding threads (`-t`), up from 32.
 
 ## rocJPEG 1.13.0 for ROCm 10.2.0

@@ -215,7 +215,8 @@ RocJpegStatus ROCJPEGAPI rocJpegStreamCreate(RocJpegStreamHandle *jpeg_stream_ha
  * stream handles are being decoded.
  *
  * @param data The pointer to the JPEG stream data.
- * @param length The length of the JPEG stream data.
+ * @param length The length of the JPEG stream data in bytes, at most UINT32_MAX. A larger length returns
+ *               ROCJPEG_STATUS_INVALID_PARAMETER.
  * @param jpeg_stream_handle The handle to the JPEG stream.
  * @return The status of the JPEG stream parsing operation.
  */
