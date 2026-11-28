@@ -518,6 +518,15 @@ if(TARGET consan_hsa_runner)
                     endforeach()
                 endif()
                 foreach(
+                    _scenario
+                    IN
+                    LISTS _uniform_store_cases_${_gpu}_${_wave_size}
+                )
+                    consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} named-assembly
+                        ${_scenario} ${_threads} production analysis
+                    )
+                endforeach()
+                foreach(
                     _fixture
                     IN
                     LISTS

@@ -36,6 +36,68 @@ namespace {
 
 constexpr const TargetProfile &kTarget = kNativeLdsTargets[2];
 
+TEST(ConSanInput, UniformStoreProofRequiresTwoLocalBroadcastsCoveringActiveLanes) {
+  const std::filesystem::path fixture =
+      test::target_fixture_path({"gfx1250", 32}, "width-flat-load-backward");
+  if (fixture.empty())
+    GTEST_SKIP() << "AMD assembler/linker fixtures unavailable";
+  const std::vector<uint8_t> image = test::read_fixture(fixture);
+  const TargetProfile &target = *target_profile(1250);
+  InputError error;
+  const FailureOr<InputProgram> baseline =
+      build_input_program(image, target, "lds_producer_consumer", error);
+  ASSERT_TRUE(baseline.succeeded()) << error.message;
+  const size_t entry =
+      baseline.value().text_file_offset + baseline.value().kernel.entry_text_offset;
+  const auto candidate = [&](std::initializer_list<uint32_t> setup) {
+    std::vector<uint32_t> words(setup);
+    const std::array<uint32_t, 2> store =
+        cdna5::build_vds(cdna5::kDsStoreB32Vds, {.offset0 = 4, .addr = 1, .data0 = 2});
+    words.insert(words.end(), store.begin(), store.end());
+    words.push_back(cdna5::build_sopp(cdna5::kSEndpgmSopp)[0]);
+    std::vector<uint8_t> bytes = image;
+    if (entry + words.size() * sizeof(uint32_t) > bytes.size())
+      return std::vector<uint8_t>{};
+    std::memcpy(bytes.data() + entry, words.data(), words.size() * sizeof(uint32_t));
+    return bytes;
+  };
+  const auto check = [&](std::initializer_list<uint32_t> setup, UniformStoreProof expected) {
+    const std::vector<uint8_t> bytes = candidate(setup);
+    const FailureOr<InputProgram> program =
+        build_input_program(bytes, target, "lds_producer_consumer", error);
+    ASSERT_TRUE(program.succeeded()) << error.message;
+    ASSERT_EQ(program.value().accesses.size(), 1u);
+    EXPECT_EQ(program.value().accesses.front().uniform_store_proof, expected);
+  };
+  const auto move = [](uint8_t destination, uint16_t source) {
+    return cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = source, .vdst = destination})[0];
+  };
+  const auto set_exec = [](uint8_t source) {
+    return cdna5::build_sop1(cdna5::kSMovB32Sop1,
+                             {.ssrc0 = source, .sdst = cdna5::OPR_SDST_EXEC_LO})[0];
+  };
+  constexpr uint32_t address = move(1, cdna5::OPR_SSRC_POS_INT_MIN);
+  constexpr uint32_t data = move(2, 4); // s4
+  constexpr uint32_t partial = set_exec(cdna5::OPR_SSRC_POS_INT_MIN + 3);
+  constexpr uint32_t narrow = cdna5::build_sop1(cdna5::kSAndSaveExecB32Sop1,
+                                                {.ssrc0 = cdna5::OPR_SSRC_VCC_LO, .sdst = 8})[0];
+  constexpr uint32_t branch = cdna5::build_sopp(cdna5::kSCbranchScc1Sopp, {.simm16 = 1})[0];
+  constexpr UniformStoreProof proved = UniformStoreProof::BlockLocalBroadcast;
+  constexpr UniformStoreProof unknown = UniformStoreProof::None;
+  check({partial, address, data}, proved);
+  check({address, data, narrow}, proved);
+  check({partial, address, data, set_exec(cdna5::OPR_SSRC_NEG_INT_MIN)}, unknown);
+  check({move(1, cdna5::OPR_SRC_VGPR_MIN), data}, unknown);
+  check({address, move(2, cdna5::OPR_SRC_VGPR_MIN)}, unknown);
+  check({address, data, move(1, cdna5::OPR_SRC_VGPR_MIN)}, unknown);
+  // v_mov_b32_dpp v2, v2 row_shr:1 row_mask:1 bank_mask:1
+  check({address, data, move(2, amdgpu::SRC_DPP), 0x11011102}, unknown);
+  check({address, branch, data}, unknown); // branch can skip the data definition
+  const std::vector<uint8_t> banked =
+      candidate({cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = 1})[0], address, data});
+  EXPECT_TRUE(build_input_program(banked, target, "lds_producer_consumer", error).failed());
+}
+
 TEST(ConSanInput, GroupFlatNeedsAnUnclobberedApertureOnEveryIncomingPathAndActiveLane) {
   const std::filesystem::path fixture =
       test::target_fixture_path({"gfx950", 64}, "width-flat-load-overlap");

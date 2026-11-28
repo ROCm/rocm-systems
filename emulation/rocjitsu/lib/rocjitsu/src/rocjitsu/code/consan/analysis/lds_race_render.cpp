@@ -137,6 +137,17 @@ void write_flat_sites(std::ostream &out, const LdsRaceImageEntry &entry) {
   }
 }
 
+// The legacy collision counters count findings remaining under the selected policy.
+void write_collision_counts(std::ostream &out, uint64_t groups, uint64_t pairs,
+                            uint64_t suppressed_groups, uint64_t suppressed_pairs) {
+  out << ",\"raw_collision_groups\":" << groups + suppressed_groups
+      << ",\"suppressed_collision_groups\":" << suppressed_groups
+      << ",\"collision_groups\":" << groups
+      << ",\"raw_collision_lane_pairs\":" << pairs + suppressed_pairs
+      << ",\"suppressed_collision_lane_pairs\":" << suppressed_pairs
+      << ",\"collision_lane_pairs\":" << pairs;
+}
+
 } // namespace
 
 std::string render_lds_race_analysis(const LdsRaceResult &result) {
@@ -165,6 +176,18 @@ std::string render_lds_race_analysis(const LdsRaceResult &result) {
     out << ",\"disposition\":\""
         << (entry.disposition == EntryDisposition::Selected ? "selected" : "native_uncovered")
         << '"';
+    if (entry.disposition == EntryDisposition::Selected) {
+      out << ",\"uniform_store_proofs\":[";
+      bool first_proof = true;
+      for (const SiteFacts &site : entry.uniform_store_sites) {
+        if (!first_proof)
+          out << ',';
+        first_proof = false;
+        out << "{\"site\":" << site.id << ",\"original_offset\":" << site.original_offset
+            << ",\"source\":\"block_local_broadcast\"}";
+      }
+      out << ']';
+    }
     if (result.flat_policy && result.entries.size() > 1) {
       write_flat_sites(out, entry);
     }
@@ -185,7 +208,11 @@ std::string render_lds_race_analysis(const LdsRaceResult &result) {
       << ",\"ordering_unresolved_pairs\":" << result.ordering_unresolved_pairs
       << ",\"ordered_pairs\":" << result.ordered_pairs
       << ",\"cross_wave_pairs\":" << result.cross_wave_pairs
-      << ",\"collision_groups\":" << result.collision_groups << ",\"executions\":[";
+      << ",\"suppress_uniform_store_collisions\":" << result.suppress_uniform_store_collisions;
+  write_collision_counts(out, result.collision_groups, result.collision_lane_pairs,
+                         result.suppressed_collision_groups,
+                         result.suppressed_collision_lane_pairs);
+  out << ",\"executions\":[";
   bool first = true;
   for (const LdsRaceExecutionResult &execution : result.executions) {
     if (!first) {
@@ -215,9 +242,11 @@ std::string render_lds_race_analysis(const LdsRaceResult &result) {
         << ",\"required_barrier_waves\":" << execution.required_barrier_waves
         << ",\"completed_barrier_waves\":" << execution.completed_barrier_waves
         << ",\"cross_wave_pairs\":" << execution.cross_wave_pairs
-        << ",\"cross_wave_lane_pairs\":" << execution.cross_wave_lane_pairs
-        << ",\"collision_groups\":" << execution.collision_groups
-        << ",\"collision_lane_pairs\":" << execution.collision_lane_pairs << ",\"issues\":[";
+        << ",\"cross_wave_lane_pairs\":" << execution.cross_wave_lane_pairs;
+    write_collision_counts(out, execution.collision_groups, execution.collision_lane_pairs,
+                           execution.suppressed_collision_groups,
+                           execution.suppressed_collision_lane_pairs);
+    out << ",\"issues\":[";
     bool first_issue = true;
     for (const LdsRaceIntegrityIssue &issue : execution.issues) {
       if (!first_issue) {

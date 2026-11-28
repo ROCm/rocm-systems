@@ -22,11 +22,14 @@ int main(int argc, char **argv) {
   AnalysisOptions options;
   if (argc < 2) {
     std::cerr
-        << "Usage: rj_consan_analyze CAPTURE [--examples 0.." << kMaxFindingExamples << "]\n"
+        << "Usage: rj_consan_analyze CAPTURE [--examples 0.." << kMaxFindingExamples
+        << "] [--suppress-uniform-store-collisions]\n"
         << "  --examples LIMIT: retain at most LIMIT finding examples per check per execution\n"
         << "  (default " << options.examples << ", maximum " << kMaxFindingExamples
         << "; 0 hides finding examples).\n"
-        << "  Counts, coverage and integrity diagnostics are unchanged by this limit.\n";
+        << "  Counts, coverage and integrity diagnostics are unchanged by this limit.\n"
+        << "  --suppress-uniform-store-collisions: suppress proved uniform store "
+           "self-collisions.\n";
     return kExitInputError;
   }
   for (int index = 2; index < argc; ++index) {
@@ -39,6 +42,8 @@ int main(int argc, char **argv) {
           options.examples > kMaxFindingExamples) {
         return kExitInputError;
       }
+    } else if (option == "--suppress-uniform-store-collisions") {
+      options.suppress_uniform_store_collisions = true;
     } else {
       return kExitInputError;
     }

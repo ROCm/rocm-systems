@@ -37,12 +37,14 @@ void issue(LdsRaceExecutionResult &result, uint32_t wave, uint32_t site, const c
 struct Observation {
   LdsRaceParticipant participant;
   bool phase_valid = true;
+  bool uniform_store = false;
   uint32_t lanes() const { return std::popcount(participant.mask); }
 };
 
 struct SiteGroup {
   std::vector<Observation> records;
   uint32_t sequence = 0;
+  uint32_t occupied_slots = 0;
   uint64_t mask = 0;
   std::optional<uint64_t> transpose_exec;
   std::set<uint32_t> offsets;
@@ -209,6 +211,7 @@ void read_wave(const Manifest &facts, const CapturedExecution &execution,
   }
   using Operation = std::pair<uint32_t, uint32_t>;
   std::map<Operation, SiteGroup> groups;
+  std::set<uint32_t> sites_with_unattributed_records;
   const uint32_t lanes =
       std::min(facts.wave_size, execution.dimensions.workgroup[0] - wave * facts.wave_size);
   const uint64_t active_mask = lanes == 64 ? UINT64_MAX : (uint64_t{1} << lanes) - 1;
@@ -235,12 +238,19 @@ void read_wave(const Manifest &facts, const CapturedExecution &execution,
       const uint32_t width = *wire::read_u32(record, wire::kRecordWidth);
       const uint64_t mask = *wire::read_u64(record, wire::kRecordGuestMask);
       const uint32_t flags = *wire::read_u32(record, wire::kRecordFlags);
-      if (commit != wire::kAccessCommitted ||
-          wire::read_u32(record, wire::kRecordAnalysis) != uint32_t(site.analysis) ||
-          wire::read_u32(record, wire::kRecordKind) != uint32_t(site.record) ||
-          wire::read_u32(record, wire::kRecordSite) != site.id ||
-          wire::read_u32(record, wire::kRecordRange) != 0 || sequence == 0 || sequence > final ||
-          width != site.width || mask == 0 || (mask & ~request_mask) != 0 ||
+      const bool identified =
+          commit == wire::kAccessCommitted &&
+          wire::read_u32(record, wire::kRecordAnalysis) == uint32_t(site.analysis) &&
+          wire::read_u32(record, wire::kRecordKind) == uint32_t(site.record) &&
+          wire::read_u32(record, wire::kRecordSite) == site.id &&
+          wire::read_u32(record, wire::kRecordRange) == 0 && sequence != 0 && sequence <= final;
+      // A damaged occupied slot still precludes proving a single group. In a
+      // loop only a committed identity can assign the damage to one occurrence.
+      SiteGroup &group = groups[{site.id, repeated ? sequence : 0}];
+      group.occupied_slots |= 1u << address_group;
+      if (repeated && !identified)
+        sites_with_unattributed_records.insert(site.id);
+      if (!identified || width != site.width || mask == 0 || (mask & ~request_mask) != 0 ||
           !all_zero(record.subspan(reserved_begin))) {
         ++result.rejected_records;
         issue(result, wave, site.id, "invalid_record_commit_identity_mask_or_sequence", workgroup);
@@ -254,7 +264,6 @@ void read_wave(const Manifest &facts, const CapturedExecution &execution,
         issue(result, wave, site.id, "invalid_or_out_of_bounds_effective_range", workgroup);
         continue;
       }
-      SiteGroup &group = groups[{site.id, repeated ? sequence : 0}];
       if (transpose) {
         const uint64_t anchor_exec = *wire::read_u64(record, wire::kRecordAnchorExec);
         if (group.transpose_exec && *group.transpose_exec != anchor_exec)
@@ -375,6 +384,21 @@ void read_wave(const Manifest &facts, const CapturedExecution &execution,
       expand_dual_group(group, facts.sites[site.first], coalesce, execution.group_bytes, examples,
                         result, observations);
     } else {
+      if (facts.sites[site.first].uniform_store_proof == UniformStoreProof::BlockLocalBroadcast &&
+          !group.records.empty()) {
+        // Acyclic probes allocate sequential slots starting at zero. A loop
+        // occurrence can instead occupy any one lane-selected bank.
+        const bool one_slot =
+            repeated ? std::has_single_bit(group.occupied_slots) : group.occupied_slots == 1;
+        if (one_slot && !sites_with_unattributed_records.contains(site.first)) {
+          observations.push_back(group.records.front());
+          observations.back().uniform_store = true;
+          continue;
+        }
+        if (group.records.size() > 1)
+          issue(result, wave, site.first, "observed_addresses_contradict_uniform_store_proof",
+                workgroup);
+      }
       observations.insert(observations.end(), group.records.begin(), group.records.end());
     }
   }
@@ -594,7 +618,8 @@ void compare(const std::vector<const Observation *> &first,
 
 LdsRaceExecutionResult analyze_lds_race_execution(const Manifest &facts,
                                                   const CapturedExecution &execution,
-                                                  uint32_t examples) {
+                                                  uint32_t examples,
+                                                  bool suppress_uniform_store_collisions) {
   LdsRaceExecutionResult result = {.serial = execution.serial,
                                    .issues = {},
                                    .cross_wave_examples = {},
@@ -645,6 +670,12 @@ LdsRaceExecutionResult analyze_lds_race_execution(const Manifest &facts,
     }
     if (participant.access == AccessKind::Write && observation.lanes() > 1) {
       const uint64_t pairs = uint64_t{observation.lanes()} * (observation.lanes() - 1) / 2;
+      if (suppress_uniform_store_collisions && observation.uniform_store &&
+          observation.phase_valid) {
+        ++result.suppressed_collision_groups;
+        result.suppressed_collision_lane_pairs += pairs;
+        continue;
+      }
       ++result.collision_groups;
       result.collision_lane_pairs += pairs;
       if (result.collision_examples.size() < examples) {

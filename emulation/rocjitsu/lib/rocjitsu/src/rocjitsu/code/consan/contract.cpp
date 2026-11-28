@@ -78,7 +78,8 @@ void encode_site(wire::Encoder &encoder, const SiteFacts &site) {
   encoder.u32(static_cast<uint32_t>(site.analysis));
   encoder.u32(static_cast<uint32_t>(site.record));
   // The original single-range encoding wrote zero in this word.
-  encoder.u32((static_cast<uint32_t>(site.origin) << 24) |
+  encoder.u32((static_cast<uint32_t>(site.uniform_store_proof) << 28) |
+              (static_cast<uint32_t>(site.origin) << 24) |
               (static_cast<uint32_t>(site.assumption) << 20) |
               (static_cast<uint32_t>(site.lds_ranges.shape) << 16) |
               (uint32_t{site.lds_ranges.offset1} << 8) | site.lds_ranges.offset0);
@@ -106,7 +107,8 @@ bool decode_site(wire::Decoder &decoder, SiteFacts &site) {
       !decoder.u32(site.probe_size) || !decoder.u32(site.first_slot)) {
     return false;
   }
-  site.origin = static_cast<AccessOrigin>(ranges >> 24);
+  site.uniform_store_proof = static_cast<UniformStoreProof>(ranges >> 28);
+  site.origin = static_cast<AccessOrigin>((ranges >> 24) & 0xf);
   site.assumption = static_cast<FlatAssumption>((ranges >> 20) & 0xf);
   site.lds_ranges = {.shape = static_cast<LdsRangeShape>((ranges >> 16) & 0xf),
                      .offset0 = static_cast<uint8_t>(ranges),
@@ -117,6 +119,25 @@ bool decode_site(wire::Decoder &decoder, SiteFacts &site) {
   return true;
 }
 
+Digest flat_options_digest(FlatPolicy policy, bool uniform_store_proofs) {
+  util::Sha256 hash;
+  hash.update(kMvpOptions);
+  hash.update(policy == FlatPolicy::Strict ? "strict" : "likely");
+  if (uniform_store_proofs)
+    hash.update(";uniform-store-proof=block-local-broadcast");
+  return hash.finish();
+}
+
+std::optional<FlatPolicy> uniform_store_profile(const Digest &options) {
+  static const Digest likely = mvp_options_digest(FlatPolicy::Likely);
+  static const Digest strict = mvp_options_digest(FlatPolicy::Strict);
+  if (options == likely)
+    return FlatPolicy::Likely;
+  if (options == strict)
+    return FlatPolicy::Strict;
+  return std::nullopt;
+}
+
 } // namespace
 
 Digest digest(std::span<const uint8_t> bytes) {
@@ -125,16 +146,13 @@ Digest digest(std::span<const uint8_t> bytes) {
   return hash.finish();
 }
 
-Digest mvp_options_digest(FlatPolicy policy) {
-  util::Sha256 hash;
-  hash.update(kMvpOptions);
-  hash.update(policy == FlatPolicy::Strict ? "strict" : "likely");
-  return hash.finish();
-}
+Digest mvp_options_digest(FlatPolicy policy) { return flat_options_digest(policy, true); }
 
 std::optional<FlatPolicy> saved_flat_policy(const Digest &options) {
-  static const Digest likely = mvp_options_digest(FlatPolicy::Likely);
-  static const Digest strict = mvp_options_digest(FlatPolicy::Strict);
+  if (const std::optional<FlatPolicy> policy = uniform_store_profile(options))
+    return policy;
+  static const Digest likely = flat_options_digest(FlatPolicy::Likely, false);
+  static const Digest strict = flat_options_digest(FlatPolicy::Strict, false);
   if (options == likely)
     return FlatPolicy::Likely;
   if (options == strict)
@@ -310,6 +328,15 @@ Result validate_manifest(const Manifest &manifest, util::DiagnosticEmitter diagn
          (site.width == 4 ||
           (policy && (site.width == 2 || site.width == 8 || site.width == 16))) &&
          ranges.shape == LdsRangeShape::Single);
+    // A nonzero proof is valid only for a producer profile that defines it.
+    if (site.uniform_store_proof != UniformStoreProof::None &&
+        (site.uniform_store_proof != UniformStoreProof::BlockLocalBroadcast ||
+         !uniform_store_profile(manifest.options) || manifest.target != 1250 ||
+         manifest.wave_size != 32 || site.origin != AccessOrigin::Native ||
+         site.access != AccessKind::Write || ranges.shape != LdsRangeShape::Single ||
+         site.width != 4)) {
+      return diagnostic.emit() << "invalid uniform store proof for site";
+    }
     const bool wide_flat = site.origin == AccessOrigin::GroupFlat &&
                            (target->arch == IsaFamily::Rdna4 || target->arch == IsaFamily::Cdna5);
     const uint32_t guest_size = wide_flat ? 12 : 8;

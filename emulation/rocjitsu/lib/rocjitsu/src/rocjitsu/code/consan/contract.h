@@ -215,6 +215,9 @@ struct LdsRangeRecipe {
   bool operator==(const LdsRangeRecipe &) const = default;
 };
 
+// Static proof for the effective address and all stored data under the store EXEC.
+enum class UniformStoreProof : uint32_t { None = 0, BlockLocalBroadcast = 1 };
+
 /// @brief One physical native LDS instruction, owned by the sole entry.
 /// @details Offsets are .text-relative. A zero mapping size means missing,
 /// whereas offset zero is a valid location. Both checks share this reservation.
@@ -237,6 +240,7 @@ public:
   uint64_t probe_offset = 0;
   uint32_t probe_size = 0;
   uint32_t first_slot = 0;
+  UniformStoreProof uniform_store_proof = UniformStoreProof::None;
   bool operator==(const SiteFacts &) const = default;
 };
 

@@ -28,6 +28,9 @@ CASES = (
     'disjoint',
     'read_read',
     'collision',
+    'uniform_store_read',
+    'uniform_store_write',
+    'uniform_store_varying',
     'single_lane',
     'repeat',
     'repeat_race',
@@ -390,6 +393,8 @@ class Driver:
         wide = fixture_name.startswith('wide_')
         if fixture_name.startswith('transpose_'):
             mode = fixture_name
+        if fixture_name.startswith('uniform_store_'):
+            mode = 'defined'
         if fixture_name.startswith('atomic_'):
             mode = fixture_name if fixture_name.endswith('_count') else 'defined'
         if fixture_name.startswith('flat_'):
@@ -434,7 +439,9 @@ class Driver:
         if (
             synchronized
             or wide
-            or fixture_name.startswith(('transpose_', 'atomic_', 'flat_'))
+            or fixture_name.startswith(
+                ('transpose_', 'atomic_', 'flat_', 'uniform_store_')
+            )
             or fixture_name == 'mixed_barrier'
             or (grouped and args.case not in ('grouped_oversized', 'grouped_edge'))
             or (
@@ -895,6 +902,9 @@ class Driver:
             'disjoint': 4,
             'read_read': 2,
             'collision': 1,
+            'uniform_store_read': 2,
+            'uniform_store_write': 2,
+            'uniform_store_varying': 2,
             'single_lane': 1,
             'alias': 4,
             'immediate': 2,
@@ -957,6 +967,14 @@ class Driver:
                 )
             )
             assert len(observations) == count, observations
+            if fixture.startswith('uniform_store_'):
+                assert [
+                    (wave, kind, record['site'], record['mask'], record['offset'])
+                    for wave, kind, record in observations
+                ] == [
+                    (0, 2, 0, 3, 0),
+                    (1, 2 if fixture == 'uniform_store_write' else 1, 1, 1, 0),
+                ]
             if fixture in ('race', 'read_read', 'high_lane'):
                 assert [
                     (wave, kind, record['mask'], record['offset'])

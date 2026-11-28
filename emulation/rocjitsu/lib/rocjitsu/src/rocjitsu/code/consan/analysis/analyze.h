@@ -15,6 +15,7 @@ struct AnalysisOptions {
   // Pair counts can grow as a product of observation counts. This software budget
   // bounds finding objects/output, not observations, probes, coverage or counts.
   uint32_t examples = 8;
+  bool suppress_uniform_store_collisions = false;
 };
 
 /// @brief Coordinate LDS diagnosis of an owning capture.

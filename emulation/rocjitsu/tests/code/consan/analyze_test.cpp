@@ -1608,6 +1608,135 @@ TEST_F(ConSanAnalysis, BothChecksConsumeTheSameWriteObservation) {
             execution.collision_examples.front().first);
 }
 
+TEST_F(ConSanAnalysis, UniformStoreOptInKeepsCrossWaveWritesAndCountsIndependentOfExamples) {
+  Manifest &facts = test::manifest(capture_.header);
+  facts.target = 1250;
+  facts.sites[0].uniform_store_proof = UniformStoreProof::BlockLocalBroadcast;
+  access(0, 0, 1, 0, 7);
+  for (bool suppress : {false, true}) {
+    const FailureOr<LdsRaceResult> result =
+        analyze({.examples = 0, .suppress_uniform_store_collisions = suppress});
+    ASSERT_TRUE(result.succeeded()) << error_.message();
+    EXPECT_EQ(has_findings(result.value()), !suppress);
+    EXPECT_EQ(result.value().collision_groups, suppress ? 0u : 1u);
+    EXPECT_EQ(result.value().suppressed_collision_groups, suppress ? 1u : 0u);
+    EXPECT_EQ(result.value().collision_lane_pairs, suppress ? 0u : 3u);
+    EXPECT_EQ(result.value().suppressed_collision_lane_pairs, suppress ? 3u : 0u);
+    EXPECT_TRUE(result.value().executions[0].collision_examples.empty());
+    const std::string json = render_analysis(result.value());
+    EXPECT_NE(json.find(R"("raw_collision_groups":1)"), std::string::npos);
+    EXPECT_NE(json.find(R"("raw_collision_lane_pairs":3)"), std::string::npos);
+    EXPECT_NE(json.find(R"("source":"block_local_broadcast")"), std::string::npos);
+  }
+  access(1, 1, 1, 0);
+  for (AccessKind peer : {AccessKind::Read, AccessKind::Write, AccessKind::Atomic}) {
+    facts.sites[1].access = peer;
+    const FailureOr<LdsRaceResult> result = analyze({.suppress_uniform_store_collisions = true});
+    ASSERT_TRUE(result.succeeded()) << error_.message();
+    ASSERT_EQ(result.value().executions.size(), 1u);
+    const LdsRaceExecutionResult &execution = result.value().executions[0];
+    EXPECT_TRUE(has_findings(result.value()));
+    EXPECT_EQ(execution.valid_observations, 2u);
+    EXPECT_EQ(execution.cross_wave_pairs, 1u);
+    EXPECT_EQ(execution.cross_wave_lane_pairs, 3u);
+    ASSERT_EQ(execution.cross_wave_examples.size(), 1u);
+    EXPECT_EQ(execution.cross_wave_examples[0].first.access, AccessKind::Write);
+    EXPECT_EQ(execution.cross_wave_examples[0].second.access, peer);
+  }
+}
+
+TEST_F(ConSanAnalysis, LegacyProfileWithoutProofCannotSuppressEvenWithEqualObservedAddresses) {
+  Manifest &facts = test::manifest(capture_.header);
+  facts.target = 1250;
+  access(0, 0, 1, 0, 7);
+  // The last pre-proof likely profile used this exact options identity.
+  facts.options = {
+      0xbb, 0x0b, 0x1d, 0x5a, 0x4d, 0x69, 0xed, 0xb2, 0xf6, 0x53, 0x9d,
+      0x23, 0xc7, 0xe8, 0x01, 0xeb, 0xab, 0xe6, 0x71, 0x8b, 0x5e, 0xaf,
+      0xa8, 0xb7, 0xe5, 0x42, 0x05, 0x54, 0x33, 0x3d, 0x6a, 0xdb,
+  };
+  const FailureOr<LdsRaceResult> result = analyze({.suppress_uniform_store_collisions = true});
+  ASSERT_TRUE(result.succeeded()) << error_.message();
+  EXPECT_EQ(result.value().collision_groups, 1u);
+  EXPECT_EQ(result.value().collision_lane_pairs, 3u);
+  EXPECT_EQ(result.value().suppressed_collision_groups, 0u);
+}
+
+TEST_F(ConSanAnalysis, DamagedAcyclicStoreReservationKeepsCollisionAndCrossWaveWrite) {
+  Manifest &facts = test::manifest(capture_.header);
+  facts.target = 1250;
+  facts.sites[0].uniform_store_proof = UniformStoreProof::BlockLocalBroadcast;
+  std::vector<uint8_t> &report = capture_.executions[0].report;
+  const std::vector<uint8_t> empty = report;
+  for (const bool vacant_first : {true, false}) {
+    SCOPED_TRACE(vacant_first);
+    report = empty;
+    access(0, 0, 1, 0, 3, vacant_first ? 1 : 0);
+    if (!vacant_first) {
+      access(0, 0, 1, 4, 4, 1);
+      wire::write_u32(report, record(0, 0, 1) + wire::kRecordFlags, 0);
+    }
+    for (const bool peer : {false, true}) {
+      if (peer)
+        access(1, 1, 1);
+      const FailureOr<LdsRaceResult> result =
+          analyze({.examples = 0, .suppress_uniform_store_collisions = true});
+      ASSERT_TRUE(result.succeeded()) << error_.message();
+      EXPECT_TRUE(has_findings(result.value()));
+      EXPECT_EQ(result.value().collision_groups, 1u);
+      EXPECT_EQ(result.value().collision_lane_pairs, 1u);
+      EXPECT_EQ(result.value().suppressed_collision_groups, 0u);
+      EXPECT_EQ(result.value().cross_wave_pairs, peer ? 1u : 0u);
+      EXPECT_EQ(result.value().executions[0].cross_wave_lane_pairs, peer ? 2u : 0u);
+      EXPECT_FALSE(result.value().coverage_complete);
+    }
+  }
+}
+
+TEST_F(ConSanAnalysis, RepeatedStoreUsesCommittedOccurrenceIdentityForDamagedBanks) {
+  access(0, 0, 1, 0, 3);
+  access(0, 0, 2, 0, 12, 2);
+  barrier();
+  Manifest &facts = test::manifest(capture_.header);
+  facts.scope = ScopeKind::NativeLdsWorkgroupBarrierLoop;
+  facts.sites[0].uniform_store_proof = UniformStoreProof::BlockLocalBroadcast;
+  std::vector<uint8_t> &report = capture_.executions[0].report;
+  wire::write_u32(report, completion(0) + wire::kSyncSequence, 2);
+  // Bank one is occupied by a damaged record belonging to occurrence one.
+  // Occurrence two's single retained group legitimately uses nonzero bank two.
+  access(0, 0, 1, 4, 2, 1);
+  wire::write_u32(report, record(0, 0, 1) + wire::kRecordFlags, 0);
+  for (const bool identified : {true, false}) {
+    if (!identified)
+      wire::write_u32(report, record(0, 0, 1) + wire::kRecordCommit, 0);
+    const FailureOr<LdsRaceResult> result =
+        analyze({.examples = 0, .suppress_uniform_store_collisions = true});
+    ASSERT_TRUE(result.succeeded()) << error_.message();
+    EXPECT_TRUE(has_findings(result.value()));
+    EXPECT_EQ(result.value().collision_groups, identified ? 1u : 2u);
+    EXPECT_EQ(result.value().suppressed_collision_groups, identified ? 1u : 0u);
+    EXPECT_EQ(result.value().executions[0].valid_observations, 2u);
+    EXPECT_EQ(result.value().executions[0].rejected_records, 1u);
+    EXPECT_FALSE(result.value().coverage_complete);
+  }
+}
+
+TEST_F(ConSanAnalysis, DistinctAddressesContradictUniformStoreProofForThatOccurrence) {
+  Manifest &facts = test::manifest(capture_.header);
+  facts.target = 1250;
+  facts.sites[0].uniform_store_proof = UniformStoreProof::BlockLocalBroadcast;
+  access(0, 0, 1, 0, 3);
+  access(0, 0, 1, 4, 12, 1);
+  access(1, 0, 1, 0, 7);
+  const FailureOr<LdsRaceResult> result = analyze({.suppress_uniform_store_collisions = true});
+  ASSERT_TRUE(result.succeeded()) << error_.message();
+  EXPECT_EQ(result.value().collision_groups, 2u);
+  EXPECT_EQ(result.value().suppressed_collision_groups, 1u);
+  EXPECT_EQ(result.value().cross_wave_pairs, 1u);
+  EXPECT_FALSE(result.value().coverage_complete);
+  EXPECT_EQ(result.value().executions[0].integrity_events, 1u);
+}
+
 TEST_F(ConSanAnalysis, ExampleLimitsNeverChangeCompleteGroupOrLanePairCounts) {
   test::manifest(capture_.header).sites[1].access = AccessKind::Write;
   for (uint32_t wave = 0; wave < 2; ++wave) {
@@ -2495,6 +2624,38 @@ TEST_F(ConSanAnalysis, SecondSelectedEntryContributesDualAndTransposeMetadata) {
   ASSERT_EQ(result.value().executions.size(), 1u);
   EXPECT_EQ(result.value().executions.front().entry_key, second.entry.original_descriptor_offset);
   EXPECT_EQ(result.value().executions.front().valid_observations, 2u);
+}
+
+TEST_F(ConSanAnalysis, UniformStoreProofIsLocalToTheSelectedEntryAndSite) {
+  capture_.header = test::multi_entry_header();
+  capture_.executions.clear();
+  Manifest &first = *capture_.header.image.entries[0].selected;
+  Manifest &second = *capture_.header.image.entries[1].selected;
+  first.target = second.target = 1250;
+  second.sites[0].uniform_store_proof = UniformStoreProof::BlockLocalBroadcast;
+  for (Manifest *manifest : {&first, &second}) {
+    manifest->sites[0].access = AccessKind::Write;
+    manifest->sites[1].access = AccessKind::Write;
+    const uint32_t serial = static_cast<uint32_t>(capture_.executions.size()) + 1;
+    CapturedExecution execution = test::execution(*manifest, serial, serial);
+    for (uint32_t wave = 0; wave < 2; ++wave) {
+      wire::write_u32(execution.report, row(wave) + wire::kRowStatus,
+                      wire::kRowEntered | wire::kRowExited);
+    }
+    capture_.executions.push_back(std::move(execution));
+    access(0, 0, 1, 0, 3, 0, serial - 1);
+    access(0, 1, 2, 0, 7, 0, serial - 1);
+  }
+  const FailureOr<LdsRaceResult> result = analyze({.suppress_uniform_store_collisions = true});
+  ASSERT_TRUE(result.succeeded()) << error_.message();
+  ASSERT_EQ(result.value().entries.size(), 2u);
+  EXPECT_TRUE(result.value().entries[0].uniform_store_sites.empty());
+  EXPECT_EQ(result.value().entries[1].uniform_store_sites, std::vector{second.sites[0]});
+  ASSERT_EQ(result.value().executions.size(), 2u);
+  EXPECT_EQ(result.value().executions[0].collision_groups, 2u);
+  EXPECT_EQ(result.value().executions[1].collision_groups, 1u);
+  EXPECT_EQ(result.value().collision_lane_pairs, 7u);
+  EXPECT_EQ(result.value().suppressed_collision_lane_pairs, 1u);
 }
 
 TEST_F(ConSanAnalysis, GroupFlatPremisesAndCoverageBelongToTheirSelectedEntry) {

@@ -33,7 +33,7 @@ TEST(ConSanDigest, OptionsIdentityNamesTheSoftwareAddressGroupReservation) {
       "address-groups-per-site=" + std::to_string(kAddressGroupsPerSite) + ";";
   EXPECT_NE(kMvpOptions.find(reservation), std::string_view::npos);
   EXPECT_EQ(hex(mvp_options_digest()),
-            "bb0b1d5a4d69edb2f6539d23c7e801ebabe6718b5eafa8b7e5420554333d6adb");
+            "3cd7b7a8b89b035af89ad9f3f64fbb69778bb1cb5ce4ed38265cd8847d8e524e");
 }
 
 TEST(ConSanDigest, KnownAnswersIncludePaddingAndMultipleBlocks) {
@@ -969,6 +969,60 @@ TEST_F(ConSanContract, GroupFlatOriginSurvivesRoundTripOnlyInItsProvenProfile) {
   site.origin = AccessOrigin::Native;
   site.access = AccessKind::Atomic;
   EXPECT_TRUE(validate_manifest(manifest).succeeded());
+}
+
+TEST_F(ConSanContract, UniformStoreProofUsesPreviouslyZeroBitsOfItsOwnSite) {
+  Manifest facts = example();
+  facts.target = 1250;
+  const FailureOr<std::vector<uint8_t>> legacy = encode_manifest(facts);
+  ASSERT_TRUE(legacy.succeeded());
+  EXPECT_EQ(legacy.value()[site_offset() + 19], 0);
+  facts.sites[0].uniform_store_proof = UniformStoreProof::BlockLocalBroadcast;
+  const FailureOr<std::vector<uint8_t>> encoded = encode_manifest(facts);
+  ASSERT_TRUE(encoded.succeeded());
+  EXPECT_EQ(encoded.value().size(), legacy.value().size());
+  EXPECT_EQ(encoded.value()[site_offset() + 19], 0x10);
+  const FailureOr<Manifest> decoded = decode_manifest(encoded.value());
+  ASSERT_TRUE(decoded.succeeded());
+  EXPECT_EQ(decoded.value(), facts);
+
+  bytes_ = encoded.value();
+  put32(site_offset() + 16, 2u << 28);
+  rehash();
+  EXPECT_TRUE(decode_manifest(bytes_, error_.emitter()).failed());
+  EXPECT_EQ(error_.message(), "invalid uniform store proof for site");
+  for (FlatPolicy policy : {FlatPolicy::Strict, FlatPolicy::Likely}) {
+    util::Sha256 previous;
+    previous.update(kMvpOptions);
+    previous.update(policy == FlatPolicy::Strict ? "strict" : "likely");
+    facts.options = previous.finish();
+    EXPECT_EQ(saved_flat_policy(facts.options), policy);
+    EXPECT_TRUE(validate_manifest(facts).failed());
+    facts.sites[0].uniform_store_proof = UniformStoreProof::None;
+    EXPECT_TRUE(encode_manifest(facts).succeeded());
+    facts.sites[0].uniform_store_proof = UniformStoreProof::BlockLocalBroadcast;
+  }
+  facts.options = mvp_options_digest();
+  facts.target = 1100;
+  EXPECT_TRUE(validate_manifest(facts).failed());
+  facts.target = 1250;
+  SiteFacts &site = facts.sites[0];
+  site.width = 8;
+  EXPECT_TRUE(validate_manifest(facts).failed());
+  site.width = 4;
+  site.lds_ranges.shape = LdsRangeShape::Dual;
+  EXPECT_TRUE(validate_manifest(facts).failed());
+  site.lds_ranges.shape = LdsRangeShape::Single;
+  for (AccessKind role : {AccessKind::Read, AccessKind::Atomic}) {
+    site.access = role;
+    EXPECT_TRUE(validate_manifest(facts).failed());
+  }
+  site.access = AccessKind::Write;
+  site.origin = AccessOrigin::GroupFlat;
+  site.original_size = site.prepared_guest_size = 12;
+  EXPECT_TRUE(validate_manifest(facts).failed());
+  site.uniform_store_proof = UniformStoreProof::None;
+  EXPECT_TRUE(validate_manifest(facts).succeeded());
 }
 
 TEST_F(ConSanContract, UnsignedHelperPremisesRequireMatchingFourByteReadsOrWrites) {

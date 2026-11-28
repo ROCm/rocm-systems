@@ -415,6 +415,24 @@ loss. Same-instruction store collisions use exact address and lane-mask evidence
 independently of barrier position. Capacity loss is reported separately from
 malformed-evidence integrity issues.
 
+By default, the analyzer reports every observed same-instruction store
+collision. To suppress collisions for an intentional same-value store, replay
+the same capture with `--suppress-uniform-store-collisions`. On gfx1250 wave32,
+prepare can prove a native `ds_store_b32` address and payload when both VGPRs
+come from plain four-byte `v_mov_b32` broadcasts of an SGPR or inline constant
+in the store's basic block. Each broadcast must cover all lanes active at the
+store. A later register clobber, possible EXEC expansion, or missing proof
+keeps the collision reportable. Earlier captures without proofs keep their
+original findings under either policy.
+
+JSON records the effective option in `suppress_uniform_store_collisions` and
+identifies each proved original site under its entry's `uniform_store_proofs`.
+`raw_collision_groups`, `suppressed_collision_groups`, and `collision_groups`
+count observed, suppressed, and remaining groups. The corresponding
+`*_lane_pairs` counts measure pairs of lanes. A suppressed self-collision
+still supplies a write observation for cross-wave read/write and write/write
+checks.
+
 The analyzer keeps ordered, confirmed unordered, and unresolved pairs separate.
 Only confirmed conflicts contribute to the findings exit status; incomplete
 coverage alone does not. Always inspect `coverage_complete` alongside findings.

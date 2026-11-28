@@ -32,6 +32,7 @@ FailureOr<LdsRaceResult> analyze_capture(const Capture &capture, const AnalysisO
   }
   LdsRaceResult result;
   result.run_identity = capture.header.run_identity;
+  result.suppress_uniform_store_collisions = options.suppress_uniform_store_collisions;
   result.original = capture.header.image.original;
   result.selection_profile = capture.header.image.selection_profile;
   for (const ImageEntryFacts &entry : capture.header.image.entries) {
@@ -47,6 +48,8 @@ FailureOr<LdsRaceResult> analyze_capture(const Capture &capture, const AnalysisO
           row.flat_sites.push_back(site);
           result.has_group_flat = true;
         }
+        if (site.uniform_store_proof == UniformStoreProof::BlockLocalBroadcast)
+          row.uniform_store_sites.push_back(site);
         result.has_dual_ranges |= is_dual(site.lds_ranges.shape);
         result.has_transpose |= is_transpose(site.lds_ranges.shape);
       }
@@ -71,8 +74,8 @@ FailureOr<LdsRaceResult> analyze_capture(const Capture &capture, const AnalysisO
       return diagnostic.emit() << "invalid capture entry or execution identity";
     }
     generations[execution.storage_slot] = execution.storage_generation;
-    LdsRaceExecutionResult analyzed =
-        analyze_lds_race_execution(*manifest, execution, options.examples);
+    LdsRaceExecutionResult analyzed = analyze_lds_race_execution(
+        *manifest, execution, options.examples, options.suppress_uniform_store_collisions);
     analyzed.coverage_complete &=
         std::ranges::none_of(manifest->flat_exclusions, [](const FlatExclusion &site) {
           return site.reason != FlatExclusionReason::NonGroup;
@@ -83,6 +86,9 @@ FailureOr<LdsRaceResult> analyze_capture(const Capture &capture, const AnalysisO
     result.cross_wave_pairs += analyzed.cross_wave_pairs;
     result.ordering_unresolved_pairs += analyzed.ordering_unresolved_pairs;
     result.collision_groups += analyzed.collision_groups;
+    result.collision_lane_pairs += analyzed.collision_lane_pairs;
+    result.suppressed_collision_groups += analyzed.suppressed_collision_groups;
+    result.suppressed_collision_lane_pairs += analyzed.suppressed_collision_lane_pairs;
     result.coverage_complete &= analyzed.coverage_complete;
     result.executions.push_back(std::move(analyzed));
   }

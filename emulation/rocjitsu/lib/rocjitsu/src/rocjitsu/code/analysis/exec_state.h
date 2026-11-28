@@ -24,6 +24,9 @@ namespace rocjitsu {
 class BasicBlock;
 class Instruction;
 
+/// @brief Whether an explicit destination or the opcode semantics write EXEC.
+[[nodiscard]] bool writes_execution_mask(const Instruction &inst);
+
 /// @brief Approximated EXEC mask state at a program point.
 enum class ExecState : uint8_t {
   Full,

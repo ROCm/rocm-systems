@@ -68,6 +68,13 @@ foreach(
         if(_gpu STREQUAL "gfx1250")
             list(APPEND _barrier_cases 9 40 41)
         endif()
+        if(_gpu STREQUAL "gfx1250")
+            set(_uniform_store_cases_${_gpu}_${_wave_size}
+                uniform_store_read
+                uniform_store_write
+                uniform_store_varying
+            )
+        endif()
         foreach(
             _case
             IN
@@ -86,6 +93,7 @@ foreach(
                 dense-sites
                 ${_names}
                 ${_barrier_cases}
+                ${_uniform_store_cases_${_gpu}_${_wave_size}}
         )
             set(_case_number ${_case})
             set(_layout_options)
@@ -108,7 +116,16 @@ foreach(
                 set(_case_number 1)
                 set(_metadata_target "amdgcn-amd-amdhsa-unknown-${_gpu}")
             endif()
-            if(_case STREQUAL "distant-entry")
+            if(_case MATCHES "^uniform_store_")
+                set(_case_number 1)
+                set(_fixture_name ${_case})
+                set(_layout_options -DCONSAN_UNIFORM_STORE=1)
+                if(_case STREQUAL "uniform_store_varying")
+                    list(APPEND _layout_options -DCONSAN_VARYING_VALUE=1)
+                elseif(_case STREQUAL "uniform_store_write")
+                    list(APPEND _layout_options -DCONSAN_PEER_WRITE=1)
+                endif()
+            elseif(_case STREQUAL "distant-entry")
                 set(_case_number 2)
                 set(_layout_options -DCONSAN_PREFIX_NOPS=33000)
             elseif(_case STREQUAL "dense-sites")

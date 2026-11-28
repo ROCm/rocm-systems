@@ -37,6 +37,7 @@ struct NativeLdsAccess {
   LdsRangeRecipe lds_ranges{};
   AccessOrigin origin = AccessOrigin::Native;
   FlatAssumption assumption = FlatAssumption::None;
+  UniformStoreProof uniform_store_proof = UniformStoreProof::None;
 };
 
 struct FlatSitePolicy {
