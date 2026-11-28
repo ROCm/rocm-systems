@@ -6,6 +6,7 @@
 
 #include "compute_unit_test_util.h"
 #include "decode_test_util.h"
+#include "float_format_reference.h"
 #include "mma_test_util.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
@@ -18,7 +19,6 @@
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
-#include "util/data_types.h"
 #include "util/simd.h"
 #include "util/simd_test_hooks.h"
 
@@ -244,10 +244,6 @@ void bench(const char *label, BenchFixture &fx, const std::function<void()> &run
 
 // Mixed BF16/F32 WMMA includes decode dispatch and register access.
 TEST(WmmaSimdBenchmark, DecodedBf16F32_16x16x32_bf16) {
-  SKIP_IF_NO_SIMD();
-  if (util::native<float>::size() != 16) {
-    GTEST_SKIP() << "the BF16F32 fast path requires 16-lane native SIMD";
-  }
   BenchFixture fx;
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
   constexpr uint32_t M = 16, N = 16, K = 32;
@@ -274,7 +270,6 @@ TEST(WmmaSimdBenchmark, DecodedBf16F32_16x16x32_bf16) {
 }
 
 TEST(WmmaSimdBenchmark, DecodedScaleF32_16x16x128_fp4) {
-  SKIP_IF_NO_SIMD();
   BenchFixture fx;
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
   constexpr uint32_t M = 16, N = 16, K = 128;
@@ -302,7 +297,6 @@ TEST(WmmaSimdBenchmark, DecodedScaleF32_16x16x128_fp4) {
 }
 
 TEST(WmmaSimdBenchmark, DecodedScaleF32_32x16x128_fp4) {
-  SKIP_IF_NO_SIMD();
   BenchFixture fx;
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
   constexpr uint32_t M = 32, N = 16, K = 128;

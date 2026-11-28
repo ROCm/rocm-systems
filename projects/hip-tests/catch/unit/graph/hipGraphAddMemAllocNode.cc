@@ -300,6 +300,19 @@ static void createOversizedMemAllocGraph(hipGraph_t* graph, hipGraphExec_t* grap
   HIP_CHECK(hipGraphInstantiate(graph_exec, *graph, nullptr, nullptr, 0));
 }
 
+// A launch-time allocation failure is reported by the launch or by the next sync. CUDA returns it
+// from the launch, and the next sync succeeds. CLR records it on the stream for the next sync
+// (#7004), and with direct dispatch also returns it from the launch.
+static void requireOomReported(hipError_t launch_ret, hipError_t sync_ret) {
+  INFO("launch " << launch_ret << ", sync " << sync_ret);
+  if (launch_ret == hipErrorOutOfMemory) {
+    REQUIRE((sync_ret == hipSuccess || sync_ret == hipErrorOutOfMemory));
+  } else {
+    REQUIRE(launch_ret == hipSuccess);
+    REQUIRE(sync_ret == hipErrorOutOfMemory);
+  }
+}
+
 static hipError_t queryUntilComplete(hipStream_t stream) {
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
   hipError_t ret = hipErrorNotReady;
@@ -346,8 +359,7 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_LaunchOutOfMemory) {
     HIP_CHECK(hipGraphExecDestroy(graph_exec));
     HIP_CHECK(hipGraphDestroy(graph));
     HIP_CHECK(hipDeviceGraphMemTrim(0));
-    REQUIRE((launch_ret == hipSuccess || launch_ret == hipErrorOutOfMemory));
-    REQUIRE(sync_ret == hipErrorOutOfMemory);
+    requireOomReported(launch_ret, sync_ret);
   }
 
   SECTION("hipStreamSynchronize nullptr") {
@@ -356,8 +368,7 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_LaunchOutOfMemory) {
     HIP_CHECK(hipGraphExecDestroy(graph_exec));
     HIP_CHECK(hipGraphDestroy(graph));
     HIP_CHECK(hipDeviceGraphMemTrim(0));
-    REQUIRE((launch_ret == hipSuccess || launch_ret == hipErrorOutOfMemory));
-    REQUIRE(sync_ret == hipErrorOutOfMemory);
+    requireOomReported(launch_ret, sync_ret);
   }
 
   SECTION("hipStreamSynchronize nullptr observes blocking stream error") {
@@ -368,8 +379,7 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_LaunchOutOfMemory) {
     HIP_CHECK(hipGraphExecDestroy(graph_exec));
     HIP_CHECK(hipGraphDestroy(graph));
     HIP_CHECK(hipDeviceGraphMemTrim(0));
-    REQUIRE((launch_ret == hipSuccess || launch_ret == hipErrorOutOfMemory));
-    REQUIRE(sync_ret == hipErrorOutOfMemory);
+    requireOomReported(launch_ret, sync_ret);
   }
 
   SECTION("hipStreamQuery") {
@@ -416,7 +426,14 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_LaunchOutOfMemory) {
     HIP_CHECK(hipDeviceGraphMemTrim(0));
     REQUIRE((launch_ret_a == hipSuccess || launch_ret_a == hipErrorOutOfMemory));
     REQUIRE((launch_ret_b == hipSuccess || launch_ret_b == hipErrorOutOfMemory));
-    REQUIRE(sync_ret == hipErrorOutOfMemory);
+    // A launch that didn't report it leaves it to the sync (see requireOomReported)
+    const bool both_at_launch =
+        (launch_ret_a == hipErrorOutOfMemory) && (launch_ret_b == hipErrorOutOfMemory);
+    if (both_at_launch) {
+      REQUIRE((sync_ret == hipSuccess || sync_ret == hipErrorOutOfMemory));
+    } else {
+      REQUIRE(sync_ret == hipErrorOutOfMemory);
+    }
     // Null-stream sync must clear BOTH streams' latched errors, not just the one reported.
     REQUIRE(query_a == hipSuccess);
     REQUIRE(query_b == hipSuccess);
@@ -486,8 +503,7 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_LaunchOutOfMemory_ChildGraph
   HIP_CHECK(hipGraphExecDestroy(graph_exec));
   HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipDeviceGraphMemTrim(0));
-  REQUIRE((launch_ret == hipSuccess || launch_ret == hipErrorOutOfMemory));
-  REQUIRE(sync_ret == hipErrorOutOfMemory);
+  requireOomReported(launch_ret, sync_ret);
 }
 
 /**

@@ -41,6 +41,19 @@ else()
 endif()
 add_custom_target(get_function_module DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/get_function_module.code)
 
+# Device-only, buffered printf: keeps a repeated format string twice in amdhsa.printf
+if (HIP_PLATFORM MATCHES "amd")
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/printf_duplicate_module.code
+                   COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
+                   -mprintf-kind=buffered
+                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/printf_duplicate_module.cc
+                    -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
+                   -o printf_duplicate_module.code
+                   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/printf_duplicate_module.cc)
+  add_custom_target(printf_duplicate_module
+                    DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/printf_duplicate_module.code)
+endif()
+
 # Deliberately-mismatched fat binary for Unit_FatBin_NoCompatibleCodeObject_*:
 # built for gfx900+gfx906 only (fixed archs, NOT ${OFFLOAD_ARCH_LIST}) so it
 # never matches a modern (non-Vega) runner and drives ExtractFatBinaryUsingCOMGR
@@ -193,7 +206,11 @@ if(HIP_PLATFORM MATCHES "amd")
     hipExtModuleLaunchKernel.cc
     hipHccModuleLaunchKernel.cc
     hipLinkCreate.cc
-    hipModuleLoadMalformedFatBinary.cc)
+    hipModuleLoadMalformedFatBinary.cc
+    hipModulePrintf.cc
+    hipModuleFunctionHandle.cc)
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
+    ${CMAKE_CURRENT_BINARY_DIR}/printf_duplicate_module.code)
 
   if(BUILD_SHARED_LIBS)
     set(TEST_SRC
@@ -451,11 +468,21 @@ if(HIP_PLATFORM MATCHES "amd")
     set_source_files_properties(hipExtModuleLaunchKernel.cc PROPERTIES
       COMPILE_DEFINITIONS HIP_TESTS_SPIRV_BUILD)
   endif()
+  add_dependencies(ModuleTest printf_duplicate_module)
   # Wire kernel artifacts to ModuleTest so `make ModuleTest` builds them.
   # These are loaded at runtime by tests in the ModuleTest binary.
   add_dependencies(ModuleTest copyKernel_code copyKernel_s)
   add_dependencies(ModuleTest addKernel_code)
   add_dependencies(ModuleTest fatbin_mismatch_module)
+  # Application whose own kernels are built for gfx900+gfx906 only, like fatbin_mismatch_module:
+  # --no-offload-arch=all drops the archs the build passes to every source
+  add_executable(hipFatBinMismatch_exe EXCLUDE_FROM_ALL hipFatBinMismatch_exe.cc)
+  set_source_files_properties(hipFatBinMismatch_exe.cc PROPERTIES
+                              LANGUAGE ${GPGPU_LANGUAGE}
+                              COMPILE_OPTIONS "--no-offload-arch=all;--offload-arch=gfx900;--offload-arch=gfx906")
+  target_link_libraries(hipFatBinMismatch_exe ${GPGPU_LINKER_LIBRARIES})
+  add_dependencies(ModuleTest hipFatBinMismatch_exe)
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipFatBinMismatch_exe)
   # TODO - Rock build failure from clang
   if(NOT WIN32)
     add_dependencies(ModuleTest addKernel_spv)

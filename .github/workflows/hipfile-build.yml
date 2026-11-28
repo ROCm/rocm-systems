@@ -113,6 +113,7 @@ jobs:
           sparse-checkout: |
             projects/hipfile
             .github/workflows
+          persist-credentials: false
       - name: Authenticating to GitHub Container Registry
         uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
@@ -160,7 +161,10 @@ jobs:
               # Embed compiler+standard in the package release so the per-combo
               # artifacts (named after the package filename) stay unique.
               _AIS_CXX_TAG="${_AIS_SAFE_COMPILER_NAME}.cxx${_AIS_INPUT_CXX_STANDARD}"
-              export CPACK_DEBIAN_PACKAGE_RELEASE="${JOB_DESIGNATOR}${SLES_BUILD_ID_PREFIX}${BUILD_ID}.${_AIS_CXX_TAG}~$(source /etc/os-release && echo ${VERSION_ID})"
+              # /etc/os-release only exists in the container, so shellcheck cannot follow it.
+              # shellcheck source=/dev/null
+              _AIS_OS_VERSION_ID="$(source /etc/os-release && echo "${VERSION_ID}")"
+              export CPACK_DEBIAN_PACKAGE_RELEASE="${JOB_DESIGNATOR}${SLES_BUILD_ID_PREFIX}${BUILD_ID}.${_AIS_CXX_TAG}~${_AIS_OS_VERSION_ID}"
               export CPACK_RPM_PACKAGE_RELEASE="${JOB_DESIGNATOR}${SLES_BUILD_ID_PREFIX}${BUILD_ID}.${_AIS_CXX_TAG}"
               cmake \
                 -DCMAKE_BUILD_TYPE=Debug \

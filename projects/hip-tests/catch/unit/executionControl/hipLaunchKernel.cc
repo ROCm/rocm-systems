@@ -81,6 +81,13 @@ HIP_TEST_CASE(Unit_hipLaunchKernel_Negative_Parameters) {
                     hipErrorInvalidDeviceFunction);
   }
 
+  SECTION("f is not a kernel") {
+    static int not_a_kernel = 0;
+    HIP_CHECK_ERROR(hipLaunchKernel(&not_a_kernel, dim3{1, 1, 1}, dim3{1, 1, 1}, nullptr, 0,
+                                    nullptr),
+                    hipErrorInvalidDeviceFunction);
+  }
+
   SECTION("gridDim.x == 0") {
     HIP_CHECK_ERROR(hipLaunchKernel(reinterpret_cast<void*>(kernel), dim3{0, 1, 1}, dim3{1, 1, 1},
                                     nullptr, 0, nullptr),

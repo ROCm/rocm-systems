@@ -11,6 +11,7 @@
 
 #include "compute_unit_test_util.h"
 #include "execution_plugin_test_util.h"
+#include "float_format_reference.h"
 #include "mfma_f32_test_dispatch.h"
 #include "mfma_f64_test_dispatch.h"
 #include "mfma_f8_test_dispatch.h"
@@ -27,6 +28,7 @@
 #include "rocjitsu/vm/amdgpu/hwreg.h"
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
 #include "rocjitsu/vm/amdgpu/memory_wait_scoreboard.h"
+#include "scoped_fp_environment.h"
 #include "util/host_target.h"
 #include "util/simd.h"
 #include "util/simd_test_hooks.h"
@@ -179,10 +181,7 @@ TEST(ExecutionPluginTest, Gfx11TfeRequiresTheWholeDestinationBeforeReadingAddres
 }
 
 TEST(ExecutionPluginTest, ValuSimdReadObservationUsesActiveExecMask) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-    return;
-  } else {
+  {
     ForceScalarOverride force_simd(false);
     PluginFixture f;
     ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
@@ -1132,10 +1131,7 @@ TEST(ExecutionPluginTest, StreamoutDoesNotAcquireDataForUnallocatedReturnTuple) 
 }
 
 TEST(ExecutionPluginTest, ValuSimdWriteObservationUsesActiveExecMask) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-    return;
-  } else {
+  {
     ForceScalarOverride force_simd(false);
     PluginFixture f;
     ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
@@ -1170,10 +1166,7 @@ TEST(ExecutionPluginTest, ValuSimdWriteObservationUsesActiveExecMask) {
 // shared_infra_test.cpp; these tests prove that decoded instructions carry the
 // resulting source and destination lane sets through to plugin callbacks.
 TEST(ExecutionPluginTest, DppObservationReportsExactSourceAndDestinationLanes) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-    return;
-  } else {
+  {
     PluginFixture f;
     ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
     auto *plugin = f.attach_ordering_plugin();
@@ -1500,10 +1493,7 @@ TEST(ExecutionPluginTest, Rdna2F16TernaryPreservesDestinationWithoutObservingAnE
 }
 
 TEST(ExecutionPluginTest, Gfx1250Simd64BitWriteReportsBothDestinationRegisters) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-    return;
-  } else {
+  {
     ForceScalarOverride force_simd(false);
     Wave32PluginFixture f;
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
@@ -1642,10 +1632,6 @@ TEST(ExecutionPluginTest, Rdna4DppTrue16SourceReportsOpSelHalf) {
 }
 
 TEST(ExecutionPluginTest, Dpp64BitSourceSimdStagesBothPhysicalDwords) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-    return;
-  }
   ForceScalarOverride force_simd(false);
   ScopedIsaExecutionBackend execution_backend_scope{&cdna4::execution_backend()};
   PluginFixture f;
@@ -2087,10 +2073,7 @@ TEST(ExecutionPluginTest, SgprWriteObservationUsesExplicitWavePhysicalBlock) {
 // bytes are storage bookkeeping, while pad/sign-extension and clamp can widen
 // the architectural write mask.
 TEST(ExecutionPluginTest, SdwaObservationReportsExactSourceAndDestinationBytes) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-    return;
-  } else {
+  {
     ForceScalarOverride force_simd(false);
     PluginFixture f;
     ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
@@ -2718,7 +2701,7 @@ TEST(ExecutionPluginTest, VopdIntegerPairsPreserveMasksAliasesAndObservation) {
                 uint32_t observed_write_lanes = 0;
                 for (const auto &event : vgpr_read_events(*plugin)) {
                   EXPECT_EQ(event.byte_mask, ExecutionPlugin::kFullByteMask);
-                  if (util::has_stdx_simd && !force_scalar) {
+                  if (!force_scalar) {
                     EXPECT_EQ(event.lane_mask, exec);
                   }
                   reads[event.physical_reg - base] |= event.lane_mask;
@@ -2726,7 +2709,7 @@ TEST(ExecutionPluginTest, VopdIntegerPairsPreserveMasksAliasesAndObservation) {
                 }
                 for (const auto &event : vgpr_write_events(*plugin)) {
                   EXPECT_EQ(event.byte_mask, ExecutionPlugin::kFullByteMask);
-                  if (util::has_stdx_simd && !force_scalar) {
+                  if (!force_scalar) {
                     EXPECT_EQ(event.lane_mask, exec);
                   }
                   writes[event.physical_reg - base] |= event.lane_mask;
@@ -2749,7 +2732,7 @@ TEST(ExecutionPluginTest, VopdIntegerPairsPreserveMasksAliasesAndObservation) {
                   }
                   expected_writes = {{kDstX, exec}, {kDstY, exec}};
                 }
-                if (util::has_stdx_simd && !force_scalar) {
+                if (!force_scalar) {
                   // SIMD views report once per operand, not once per active lane.
                   EXPECT_EQ(vgpr_read_events(*plugin).size(), expected_reads.size());
                   EXPECT_EQ(vgpr_write_events(*plugin).size(), expected_writes.size());
@@ -3070,7 +3053,7 @@ TEST(ExecutionPluginTest, VopdArithmeticObserversSeeCallerFpState) {
         observer->read_mxcsrs.clear();
         {
           // Restore the original host environment even after a fatal assertion.
-          fp_mode::detail::ScopedFenv environment(0);
+          rocjitsu::ScopedDefaultFpEnvironment environment;
           _mm_setcsr((_mm_getcsr() & ~_MM_EXCEPT_MASK) | _MM_EXCEPT_UNDERFLOW);
           const uint32_t host_mxcsr = _mm_getcsr();
 
@@ -3174,10 +3157,6 @@ TEST(ExecutionPluginTest, Vop3CompareObservesOnlyArchitecturalDestinationReads) 
 }
 
 TEST(ExecutionPluginTest, Vop3DppCarryWritesScalarDestinationWithoutReadingIt) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-    return;
-  }
 
   Wave32PluginFixture f;
   ASSERT_NE(f.cu, nullptr);
@@ -3234,10 +3213,7 @@ TEST(ExecutionPluginTest, Vop3DppCarryWritesScalarDestinationWithoutReadingIt) {
 }
 
 TEST(ExecutionPluginTest, F64SourceReadObservationReportsBothHalves) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-    return;
-  } else {
+  {
     ForceScalarOverride force_simd(false);
     PluginFixture f;
     ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
@@ -3272,12 +3248,9 @@ TEST(ExecutionPluginTest, F64SourceReadObservationReportsBothHalves) {
 }
 
 TEST(ExecutionPluginTest, Vop3FmacSimdReadObservationReportsAccumulator) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-    return;
-  } else {
+  {
     ForceScalarOverride force_simd(false);
-    amdgpu::fp_mode::detail::ScopedFenv floating_environment(0);
+    rocjitsu::ScopedDefaultFpEnvironment floating_environment;
     PluginFixture f;
     ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
     auto *plugin = f.attach_ordering_plugin();
@@ -3681,9 +3654,6 @@ TEST(ExecutionPluginTest, MfmaF32NativeWidthFastPathUsesRegionReads) {
 }
 
 TEST(ExecutionPluginTest, MfmaSnapshotsReadBeforeFullWaveWritesAndSkipConstantAccumulators) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-  }
   ForceScalarOverride force_simd(false);
   struct Case {
     const char *name;
@@ -3766,9 +3736,6 @@ TEST(ExecutionPluginTest, MfmaSnapshotsReadBeforeFullWaveWritesAndSkipConstantAc
 // cbsz/abid or blgp broadcast part of a register. The snapshot path writes each destination
 // register once.
 TEST(ExecutionPluginTest, MfmaSnapshotObservationsMatchForcedScalar) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-  }
   ForceScalarOverride restore(util::force_scalar());
   constexpr uint32_t A = 0, B = 16, C = 32, D = 64;
   using Run = std::function<void(ComputeUnitCore &, uint32_t)>;

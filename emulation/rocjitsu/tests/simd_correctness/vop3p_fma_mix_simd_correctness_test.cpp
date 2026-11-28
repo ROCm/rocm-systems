@@ -397,90 +397,42 @@ constexpr uint64_t kPartialExecCdna = 0xA5A5F0F012348001ULL;
 // --- RDNA3: v_fma_mix_* ---
 
 TEST(Vop3pFmaMixSimdCorrectness, RdnaFmaMixF32_FullExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-    return;
-  }
   check_op<32, 0>(kVop3pOpFmaMixF32, kFullExecRdna, DST_SENTINEL, "v_fma_mix_f32");
 }
 TEST(Vop3pFmaMixSimdCorrectness, RdnaFmaMixF32_PartialExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-    return;
-  }
   check_op<32, 0>(kVop3pOpFmaMixF32, kPartialExecRdna, DST_SENTINEL, "v_fma_mix_f32");
 }
 TEST(Vop3pFmaMixSimdCorrectness, RdnaFmaMixLoF16_FullExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-    return;
-  }
   check_op<32, 0>(kVop3pOpFmaMixLoF16, kFullExecRdna, DST_SENTINEL, "v_fma_mixlo_f16");
 }
 TEST(Vop3pFmaMixSimdCorrectness, RdnaFmaMixLoF16_PartialExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-    return;
-  }
   check_op<32, 0>(kVop3pOpFmaMixLoF16, kPartialExecRdna, DST_SENTINEL, "v_fma_mixlo_f16");
 }
 TEST(Vop3pFmaMixSimdCorrectness, RdnaFmaMixHiF16_FullExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-    return;
-  }
   check_op<32, 0>(kVop3pOpFmaMixHiF16, kFullExecRdna, DST_SENTINEL, "v_fma_mixhi_f16");
 }
 TEST(Vop3pFmaMixSimdCorrectness, RdnaFmaMixHiF16_PartialExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-    return;
-  }
   check_op<32, 0>(kVop3pOpFmaMixHiF16, kPartialExecRdna, DST_SENTINEL, "v_fma_mixhi_f16");
 }
 
 // --- CDNA4: v_mad_mix_* ---
 
 TEST(Vop3pFmaMixSimdCorrectness, CdnaMadMixF32_FullExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-    return;
-  }
   check_op<64, 1>(kVop3pOpMadMixF32, kFullExecCdna, DST_SENTINEL, "v_mad_mix_f32");
 }
 TEST(Vop3pFmaMixSimdCorrectness, CdnaMadMixF32_PartialExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-    return;
-  }
   check_op<64, 1>(kVop3pOpMadMixF32, kPartialExecCdna, DST_SENTINEL, "v_mad_mix_f32");
 }
 TEST(Vop3pFmaMixSimdCorrectness, CdnaMadMixLoF16_FullExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-    return;
-  }
   check_op<64, 1>(kVop3pOpMadMixLoF16, kFullExecCdna, DST_SENTINEL, "v_mad_mixlo_f16");
 }
 TEST(Vop3pFmaMixSimdCorrectness, CdnaMadMixLoF16_PartialExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-    return;
-  }
   check_op<64, 1>(kVop3pOpMadMixLoF16, kPartialExecCdna, DST_SENTINEL, "v_mad_mixlo_f16");
 }
 TEST(Vop3pFmaMixSimdCorrectness, CdnaMadMixHiF16_FullExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-    return;
-  }
   check_op<64, 1>(kVop3pOpMadMixHiF16, kFullExecCdna, DST_SENTINEL, "v_mad_mixhi_f16");
 }
 TEST(Vop3pFmaMixSimdCorrectness, CdnaMadMixHiF16_PartialExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-    return;
-  }
   check_op<64, 1>(kVop3pOpMadMixHiF16, kPartialExecCdna, DST_SENTINEL, "v_mad_mixhi_f16");
 }
 

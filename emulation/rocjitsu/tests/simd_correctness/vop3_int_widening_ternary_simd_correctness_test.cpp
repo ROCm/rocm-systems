@@ -240,30 +240,18 @@ void check_mad_u32_u16_opsel_high_halves(uint64_t exec) {
 }
 
 TEST(Vop3IntWideningTernarySimdCorrectness, FullExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   for (const auto &c : kCases) {
     check_case(c, /*exec=*/~0ULL);
   }
 }
 
 TEST(Vop3IntWideningTernarySimdCorrectness, PartialExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   for (const auto &c : kCases) {
     check_case(c, /*exec=*/0xA5A5'F0F0'1234'8001ULL);
   }
 }
 
 TEST(Vop3IntWideningTernarySimdCorrectness, MadU32U16_OpSelHighHalves) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   check_mad_u32_u16_opsel_high_halves(/*exec=*/0xA5A5'F0F0'1234'8001ULL);
 }
 

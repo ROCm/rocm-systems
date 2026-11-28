@@ -27,9 +27,10 @@ concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: true
 
+# Read-only by default. packages: write only in update_nightly_AIS_CI_image,
+# the one job that pushes images.
 permissions:
   contents: read
-  packages: write
 
 jobs:
   # Resolve runs on the runner (not the docker:28.5 container) because the
@@ -46,6 +47,7 @@ jobs:
           sparse-checkout: |
             projects/hipfile
             .github/workflows
+          persist-credentials: false
       - name: Resolve ROCm nightly metadata
         id: nightly
         working-directory: projects/hipfile
@@ -53,6 +55,9 @@ jobs:
 
   update_nightly_AIS_CI_image:
     needs: resolve_nightly
+    permissions:
+      contents: read
+      packages: write
     strategy:
       fail-fast: false
       matrix:
@@ -74,6 +79,7 @@ jobs:
           sparse-checkout: |
             projects/hipfile
             .github/workflows
+          persist-credentials: false
 
       - name: Authenticating to GitHub Container Registry.
         uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0

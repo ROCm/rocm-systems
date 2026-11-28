@@ -17,6 +17,9 @@ same pool in the same unit.
 Unit_hipOccupancy_Positive_ZeroLdsMatchesThreadLimit - Validate that a kernel which uses no LDS is
 limited only by maxThreadsPerMultiProcessor, i.e. that the occupancy is reported per the same
 multiprocessor that multiProcessorCount counts.
+Unit_hipOccupancy_Positive_WgpModeDoublesLdsPool - Validate that on gfx10, gfx11 and gfx12 (before
+gfx1250), which run in WGP mode unless GPU_ENABLE_WGP_MODE=0, a multiprocessor is a WGP with twice
+the LDS of a block, and that two blocks each using the per block maximum fit on it.
 
 Note: the LDS allocation granularity is not exposed through hipDeviceProp_t, so these tests avoid
 depending on it. They verify that the occupancy API and the device properties stay consistent with
@@ -27,7 +30,10 @@ physically correct requires measuring co-residency on the device.
 #include "occupancy_common.hh"
 
 #include <climits>
+#include <cstdlib>
+#include <cstring>
 #include <limits>
+#include <string>
 
 static __global__ void dynLdsKernel(unsigned int* out) {
   extern __shared__ unsigned int smem[];
@@ -120,4 +126,38 @@ HIP_TEST_CASE(Unit_hipOccupancy_Positive_ZeroLdsMatchesThreadLimit) {
   // proportionally fewer blocks here.
   INFO("blockSize = " << blockSize << ", numBlocks = " << numBlocks);
   REQUIRE((numBlocks * blockSize) == devProp.maxThreadsPerMultiProcessor);
+}
+
+namespace {
+// True for the targets whose runtime defaults to WGP mode: gfx10, gfx11 and gfx12 before gfx1250.
+bool RunsInWgpMode(const hipDeviceProp_t& devProp) {
+  const char* env = std::getenv("GPU_ENABLE_WGP_MODE");
+  // Parsed as the runtime parses a bool flag: on only for "true" or a non-zero number.
+  if (env != nullptr && std::strcmp(env, "true") != 0 && std::atoi(env) == 0) {
+    return false;
+  }
+  const std::string arch = devProp.gcnArchName;
+  if (arch.rfind("gfx1", 0) != 0 || arch.size() < 7) {
+    return false;  // gfx9 and older have no WGP
+  }
+  return arch.rfind("gfx125", 0) != 0;
+}
+}  // namespace
+
+HIP_TEST_CASE(Unit_hipOccupancy_Positive_WgpModeDoublesLdsPool) {
+  hipDeviceProp_t devProp;
+  HIP_CHECK(hipGetDeviceProperties(&devProp, 0));
+
+  const size_t expectedPool = devProp.sharedMemPerBlock * (RunsInWgpMode(devProp) ? 2 : 1);
+  INFO("arch " << devProp.gcnArchName << ", sharedMemPerBlock " << devProp.sharedMemPerBlock
+               << ", sharedMemPerMultiprocessor " << devProp.sharedMemPerMultiprocessor);
+  REQUIRE(devProp.sharedMemPerMultiprocessor == expectedPool);
+  REQUIRE(devProp.maxSharedMemoryPerMultiProcessor == expectedPool);
+
+  // One wave per block keeps the thread budget out of the way, so LDS is the only limit.
+  int numBlocks = 0;
+  HIP_CHECK(hipOccupancyMaxActiveBlocksPerMultiprocessor(
+      &numBlocks, reinterpret_cast<const void*>(dynLdsKernel), devProp.warpSize,
+      devProp.sharedMemPerBlock));
+  REQUIRE(static_cast<size_t>(numBlocks) == expectedPool / devProp.sharedMemPerBlock);
 }

@@ -202,6 +202,39 @@ HIP_TEST_CASE(Unit_hipDeviceFlushGPUDirectRDMAWrites_CapabilityConsistency) {
 /**
  * Test Description
  * ------------------------
+ *  - GPUDirect RDMA with HIP VMM allocations is a case of GPUDirect RDMA, so a device that
+ *    reports hipDeviceAttributeGPUDirectRDMAWithHipVMMSupported must also report
+ *    hipDeviceAttributeGPUDirectRDMASupported and hipDeviceProp_t::gpuDirectRDMASupported.
+ * Test source
+ * ------------------------
+ *  - unit/device/hipDeviceFlushGPUDirectRDMAWrites.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.14
+ */
+HIP_TEST_CASE(Unit_hipDeviceFlushGPUDirectRDMAWrites_VmmImpliesRdma) {
+  int numDevices = 0;
+  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  for (int device = 0; device < numDevices; ++device) {
+    int vmmRdma = 0;
+    HIP_CHECK(hipDeviceGetAttribute(&vmmRdma, hipDeviceAttributeGPUDirectRDMAWithHipVMMSupported,
+                                    device));
+    if (vmmRdma == 0) {
+      continue;
+    }
+    int rdma = 0;
+    HIP_CHECK(hipDeviceGetAttribute(&rdma, hipDeviceAttributeGPUDirectRDMASupported, device));
+    hipDeviceProp_t prop;
+    HIP_CHECK(hipGetDeviceProperties(&prop, device));
+    INFO("device " << device);
+    REQUIRE(rdma == 1);
+    REQUIRE(prop.gpuDirectRDMASupported == 1);
+  }
+}
+
+/**
+ * Test Description
+ * ------------------------
  *  - Validates the basic flush call against the current device for both scopes:
  *    -# hipFlushGPUDirectRDMAWritesToOwner
  *    -# hipFlushGPUDirectRDMAWritesToAllDevices

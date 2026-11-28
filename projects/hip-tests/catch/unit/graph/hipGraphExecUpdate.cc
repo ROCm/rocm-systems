@@ -1560,6 +1560,83 @@ HIP_TEST_CASE(Unit_hipGraphExecUpdate_RebuildWithDisabledNodeKeepsSync) {
 }
 
 /**
+ * Test Description
+ * ------------------------
+ *  - Updates a kernel node's arguments with hipGraphExecUpdate many times, launching after each
+ *    update, and checks every launch uses the arguments of the update before it. Then updates
+ *    the arguments while a launch is still running and checks that launch keeps its own.
+ * Test source
+ * ------------------------
+ *  - unit/graph/hipGraphExecUpdate.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.14
+ */
+HIP_TEST_CASE(Unit_hipGraphExecUpdate_KernelArgsRepeatedAndInFlight) {
+  constexpr int kUpdates = 1000;
+  constexpr unsigned long long kLongDelay = 200000000ull;
+  int* out = nullptr;
+  HIP_CHECK(hipMalloc(&out, 2 * sizeof(int)));
+  HIP_CHECK(hipMemset(out, 0, 2 * sizeof(int)));
+
+  // A graph with one kernel node storing value to output after a delay
+  auto make_graph = [](int* output, int value, unsigned long long cycles) {
+    hipGraph_t graph;
+    HIP_CHECK(hipGraphCreate(&graph, 0));
+    void* args[] = {&output, &value, &cycles};
+    hipKernelNodeParams params{};
+    params.func = reinterpret_cast<void*>(GraphExecUpdateDelayStore);
+    params.gridDim = dim3(1);
+    params.blockDim = dim3(1);
+    params.kernelParams = args;
+    hipGraphNode_t node;
+    HIP_CHECK(hipGraphAddKernelNode(&node, graph, nullptr, 0, &params));
+    return graph;
+  };
+  auto update = [](hipGraphExec_t exec, hipGraph_t graph) {
+    hipGraphNode_t error_node = nullptr;
+    hipGraphExecUpdateResult result;
+    HIP_CHECK(hipGraphExecUpdate(exec, graph, &error_node, &result));
+    REQUIRE(result == hipGraphExecUpdateSuccess);
+  };
+
+  hipGraph_t graph = make_graph(out, -1, 0);
+  hipGraphExec_t exec;
+  HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphDestroy(graph));
+
+  for (int i = 0; i < kUpdates; ++i) {
+    hipGraph_t updated = make_graph(out, i, 0);
+    update(exec, updated);
+    HIP_CHECK(hipGraphDestroy(updated));
+    HIP_CHECK(hipGraphLaunch(exec, 0));
+    HIP_CHECK(hipStreamSynchronize(0));
+    int result = 0;
+    HIP_CHECK(hipMemcpy(&result, out, sizeof(int), hipMemcpyDeviceToHost));
+    REQUIRE(result == i);
+  }
+
+  // The first launch is still running when the update changes the output and value
+  HIP_CHECK(hipMemset(out, 0, 2 * sizeof(int)));
+  hipGraph_t first = make_graph(out, 11, kLongDelay);
+  update(exec, first);
+  HIP_CHECK(hipGraphDestroy(first));
+  HIP_CHECK(hipGraphLaunch(exec, 0));
+  hipGraph_t second = make_graph(out + 1, 22, 0);
+  update(exec, second);
+  HIP_CHECK(hipGraphDestroy(second));
+  HIP_CHECK(hipGraphLaunch(exec, 0));
+  HIP_CHECK(hipStreamSynchronize(0));
+  int results[2] = {};
+  HIP_CHECK(hipMemcpy(results, out, sizeof(results), hipMemcpyDeviceToHost));
+  REQUIRE(results[0] == 11);
+  REQUIRE(results[1] == 22);
+
+  HIP_CHECK(hipGraphExecDestroy(exec));
+  HIP_CHECK(hipFree(out));
+}
+
+/**
  * End doxygen group GraphTest.
  * @}
  */

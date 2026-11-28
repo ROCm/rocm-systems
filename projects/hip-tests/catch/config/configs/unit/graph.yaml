@@ -369,6 +369,7 @@ graph:
   Unit_hipGraphHostNodeSetParams_BasicFunc:
     <<: *level_default
     tags: [node]
+  Unit_hipGraphAddMemcpyNode1D_Positive_KernelCopyChainOrdering: *level_default
   Unit_hipGraphAddMemcpyNode1D_Positive_Basic:
     <<: *level_default
     tags: [node, P0]
@@ -447,6 +448,12 @@ graph:
   Unit_hipGraphChildMultiStream_NestedChild:
     <<: *level_2
     tags: [node, child, multistream]
+  Unit_hipGraphAddChildGraphNode_ChildNodesRunOncePerLaunch:
+    <<: *level_default
+    tags: [node]
+  Unit_hipGraphAddChildGraphNode_DependentsWaitForChild:
+    <<: *level_default
+    tags: [node]
   Unit_hipGraphNodeGetType_Negative:
     <<: *level_default
     tags: [query]
@@ -531,6 +538,12 @@ graph:
   Unit_hipGraphInstantiate_functionalScenarios:
     <<: *level_default
     tags: [lifecycle]
+  Unit_hipGraphInstantiate_ConcurrentThreads:
+    <<: *level_default
+    tags: [lifecycle]
+  Unit_hipGraphInstantiate_KernelArgsOutliveStreamWork:
+    <<: *level_default
+    tags: [lifecycle]
   Unit_hipGraphExecUpdate_Negative_Basic:
     <<: *level_default
     tags: [exec]
@@ -591,6 +604,9 @@ graph:
   Unit_hipGraphExecUpdate_RebuildWithDisabledNodeKeepsSync:
     <<: *level_default
     tags: [exec]
+  Unit_hipGraphExecUpdate_KernelArgsRepeatedAndInFlight:
+    <<: *level_default
+    tags: [exec]
   Unit_hipGraphExecUpdate_CapturedMemcpyAndKernel:
     <<: *level_default
     tags: [exec]
@@ -631,6 +647,9 @@ graph:
     disabled:
       targets: [amd_linux]
       reason: "AIRUNTIME-2744 - ROCM-22772: self-skips because there are fewer than two GPUs (multi-device) -- not locally verifiable; further investigation needed; needs to be re-triaged"
+    tags: [multigpu]
+  Unit_hipGraphAddMemcpyNode1D_HostMemoryFromOtherDevice:
+    <<: *level_default
     tags: [multigpu]
   Unit_hipGraphExecMemcpyNodeSetParamsFromSymbol_Negative:
     <<: *level_default
@@ -965,6 +984,18 @@ graph:
   Unit_hipGraphAddBatchMemOpNode_NegativeTsts:
     <<: *level_default
     tags: [node]
+  Unit_hipGraphAddBatchMemOpNode_ParamArrayCopied:
+    <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - PAL does not implement batch memory operations (as Unit_hipGraphExecBatchMemOpNodeSetParams_UpdateTakesEffect)."
+    tags: [node]
+  Unit_hipGraphExecUpdate_BatchMemOpNode:
+    <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - PAL does not implement batch memory operations (as Unit_hipGraphExecBatchMemOpNodeSetParams_UpdateTakesEffect)."
+    tags: [exec]
   Unit_hipGraphBatchMemOpNode_WriteAndWait:
     <<: *level_default
     disabled:
@@ -1839,6 +1870,9 @@ graph:
   Unit_hipGraphAddMemFreeNode_Functional:
     <<: *level_default
     tags: [node]
+  Unit_hipGraphAddMemFreeNode_CapturedAllocation:
+    <<: *level_default
+    tags: [node]
   Unit_hipDrvGraphMemcpyNodeGetParams_Negative_Parameters:
     <<: *level_default
     tags: [query]
@@ -1885,6 +1919,9 @@ graph:
     <<: *level_default
     tags: [exec]
   Unit_hipDeviceGraphMemTrim_Negative_Parameters:
+    <<: *level_default
+    tags: [exec]
+  Unit_hipDeviceGraphMemTrim_Positive_AfterChildGraphDestroy:
     <<: *level_default
     tags: [exec]
   Unit_hipDrvGraphExecMemsetNodeSetParams_BasicPositive:

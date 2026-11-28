@@ -126,3 +126,54 @@ TEST(Dot2CF32Bf16W32Gfx950, Arithmetic) {
 TEST(Dot2CF32Bf16W64Gfx950, Arithmetic) {
   check<64, true, true>(rj_arith_v_dot2c_f32_bf16_w64_gfx950);
 }
+
+TEST(Dot2F32F16Gfx950, ExactArithmeticAndContracts) {
+  auto check_gfx950 = []<int Lanes, bool Accumulate>(auto call) {
+    using Mask = WaveMask<Lanes>;
+    auto input = dot2_inputs<Lanes, false, false>();
+    input.v[0][0] = input.v[1][0] = 0x3c003c00U;
+    input.v[2][0] = input.v[3][0] = 0x4b800000U;
+    // Canonical -qNaN (0xffc00000) on payload NaN in A or C, and subnormal preservation under
+    // flush.
+    input.v[0][1] = 0x7e123c00U;
+    input.v[1][1] = 0x3c003c00U;
+    input.v[2][1] = input.v[3][1] = 0U;
+    input.v[0][2] = 0x00010001U; // 2^-24
+    input.v[1][2] = 0x3c003c00U; // 1.0
+    input.v[2][2] = input.v[3][2] = 0U;
+    for (uint64_t cpu : supported_cpu_levels()) {
+      for (uint64_t semantics : semantics_modes()) {
+        for (uint64_t mode : {uint64_t(0), uint64_t(RJ_ARITH_DOT_CLAMP), uint64_t(1) << 40}) {
+          auto regs = input;
+          uint32_t status = 0x55aaU;
+          const int expected_error = (mode & ~(Accumulate ? 0ULL : 0x7ffULL))
+                                         ? RJ_ARITH_ERROR_INVALID_FLAGS
+                                     : semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL
+                                         ? RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS
+                                         : RJ_ARITH_SUCCESS;
+          const uint64_t flags = cpu | semantics | RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
+                                 RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS | RJ_ARITH_FP_ROUND_MASK |
+                                 RJ_ARITH_FP16_OVFL;
+          ASSERT_EQ((invoke_dot<Accumulate, true>(call, flags, ~Mask(0), mode, regs.v + 3, regs.v,
+                                                  regs.v + 1, regs.v + 2, &status)),
+                    expected_error);
+          EXPECT_EQ(status, 0x55aaU);
+          if (expected_error) {
+            regs.expect_preserved(input, 0, 0);
+            continue;
+          }
+          EXPECT_EQ(regs.v[3][0], 0x4b800001U);
+          if (semantics != RJ_ARITH_SEMANTICS_LOOSE) {
+            EXPECT_EQ(regs.v[3][1], 0xffc00000U);
+            // 2^-24 + 2^-24 = 2^-23 (0x34000000) even when guest denorm flush is set.
+            EXPECT_EQ(regs.v[3][2], 0x34000000U);
+          }
+        }
+      }
+    }
+  };
+  check_gfx950.template operator()<32, false>(rj_arith_v_dot2_f32_f16_w32_gfx950);
+  check_gfx950.template operator()<64, false>(rj_arith_v_dot2_f32_f16_w64_gfx950);
+  check_gfx950.template operator()<32, true>(rj_arith_v_dot2c_f32_f16_w32_gfx950);
+  check_gfx950.template operator()<64, true>(rj_arith_v_dot2c_f32_f16_w64_gfx950);
+}

@@ -10,7 +10,7 @@
 #include <limits>
 #include <vector>
 
-#include "util/data_types.h"
+#include "float_format_reference.h"
 
 #define HIP_CHECK(e)                                                                               \
   do {                                                                                             \

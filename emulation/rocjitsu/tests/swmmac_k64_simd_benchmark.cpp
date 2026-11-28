@@ -265,10 +265,6 @@ void benchmark_case(const BenchCase &test) {
 } // namespace
 
 TEST(SwmmacK64SimdBenchmark, DecodedF16Bf16Forms) {
-  SKIP_IF_NO_SIMD();
-  if (util::native<float>::size() != 16) {
-    GTEST_SKIP() << "the K=64 SWMMAC fast paths require 16-lane native SIMD";
-  }
 
   for (const auto &test : BENCH_CASES) {
     SCOPED_TRACE(test.label);

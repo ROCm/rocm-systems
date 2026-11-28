@@ -1612,8 +1612,9 @@ def test_cdna_mixed_mad_bridge(arch, name):
             op_sel_hi_2_expr='inst_.op_sel_hi_2',
         )
     )
-    assert f'rj_arith_{name.lower()}_w32' in body
-    assert f'rj_arith_{name.lower()}_w64' in body
+    suffix = '_gfx950' if arch == 'cdna4' else ''
+    assert f'rj_arith_{name.lower()}_w32{suffix},' in body
+    assert f'rj_arith_{name.lower()}_w64{suffix},' in body
     assert 'is_inline_float_src' in body
 
 
@@ -3014,7 +3015,7 @@ def test_host_model_float_dot_bindings(arch):
                 if arch != 'cdna4' and fmt == 'BF16':
                     assert body is None
                     continue
-                suffix = 'gfx942' if fmt == 'F16' else 'gfx950'
+                suffix = 'gfx950' if arch == 'cdna4' else 'gfx942'
                 assert f'rj_arith_v_dot2_f32_{fmt.lower()}_w64_{suffix},' in body
                 assert 'const unsigned replicate_sources = 0;' in body
                 if accumulate:
@@ -3245,7 +3246,7 @@ def test_older_normalized_layout_and_sdwa_policy(arch):
 @pytest.mark.parametrize('vop3', [False, True])
 def test_cdna_math_preserves_destination_and_status_policy(arch, name, vop3):
     body = gen_float_unary32(context(arch, name, ['dst'], ['src'], is_vop3=vop3))
-    suffix = 'gfx1250' if arch == 'cdna5' else 'gfx942'
+    suffix = 'gfx1250' if arch == 'cdna5' else 'gfx950' if arch == 'cdna4' else 'gfx942'
     assert f'rj_arith_{name.lower()}_w32_{suffix}' in body
     assert ('nullptr' if arch == 'cdna5' else f'_w64_{suffix}') in body
     assert 'guest_rounding=*/false' in body
@@ -3253,6 +3254,10 @@ def test_cdna_math_preserves_destination_and_status_policy(arch, name, vop3):
         assert 'compatibility_all_exec=*/true' in body
     if arch != 'cdna5' and not vop3:
         assert 'execute_cdna_float_unary(' in body
+        assert (
+            '(inst_.src0 == amdgpu::SRC_SDWA || inst_.src0 == amdgpu::SRC_DPP) && wf.exec()'
+            in body
+        ) == (arch == 'cdna4')
     else:
         assert 'execute_cdna_float_unary' not in body
 
@@ -3262,7 +3267,9 @@ def test_cdna_math_preserves_destination_and_status_policy(arch, name, vop3):
 @pytest.mark.parametrize('vop3', [False, True])
 def test_cdna_fp64_math_uses_shared_guest_policy(arch, name, vop3):
     body = gen_float_unary64(context(arch, name, ['dst'], ['src'], is_vop3=vop3))
-    suffix = '_gfx1250' if arch == 'cdna5' else '_gfx942'
+    suffix = (
+        '_gfx1250' if arch == 'cdna5' else '_gfx950' if arch == 'cdna4' else '_gfx942'
+    )
     for wave in ((32,) if arch == 'cdna5' else (32, 64)):
         assert f'rj_arith_{name.lower()}_w{wave}{suffix},' in body
     assert 'arithmetic_flags()' in body
@@ -3276,7 +3283,7 @@ def test_cdna_fp64_math_uses_shared_guest_policy(arch, name, vop3):
 @pytest.mark.parametrize('vop3', [False, True])
 def test_cdna_half_math_binding(arch, name, vop3):
     body = gen_float_unary16(context(arch, name, ['dst'], ['src'], is_vop3=vop3))
-    suffix = 'gfx1250' if arch == 'cdna5' else 'gfx942'
+    suffix = 'gfx1250' if arch == 'cdna5' else 'gfx950' if arch == 'cdna4' else 'gfx942'
     assert f'rj_arith_{name.lower()}_w32_{suffix}' in body
     assert ('nullptr' if arch == 'cdna5' else f'_w64_{suffix}') in body
     assert 'guest_rounding=*/false' in body
@@ -3287,6 +3294,10 @@ def test_cdna_half_math_binding(arch, name, vop3):
         else:
             assert 'sdwa_half_math_writer(*this)' in body
             assert 'sdwa_omod_' in body and 'sdwa_clamp_' in body
+            assert (
+                '(inst_.src0 == amdgpu::SRC_SDWA || inst_.src0 == amdgpu::SRC_DPP) && wf.exec()'
+                in body
+            ) == (arch == 'cdna4')
 
 
 @pytest.mark.parametrize('arch', ['cdna3', 'cdna4'])

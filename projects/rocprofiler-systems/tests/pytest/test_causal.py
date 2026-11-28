@@ -8,7 +8,7 @@ causal tests
 from __future__ import annotations
 
 import pytest
-from conftest import RocprofsysTest
+from conftest import RocprofsysTest, assert_resolved_settings
 
 pytestmark = [pytest.mark.causal]
 
@@ -251,4 +251,83 @@ class TestCausalE2E(RocprofsysTest):
             result,
             file_name="causal/experiments.json",
             additional_args=validation_args,
+        )
+
+
+# ====================================================================================== #
+# Causal perf backend open-failure tests
+# ====================================================================================== #
+
+# causal.cpp argv: fraction, iterations, seed, slow-func work count.
+CAUSAL_CPU_ARGS = ["70", "2", "1", "100000"]
+CAUSAL_PERF_OPEN_ERROR = r"Perf backend for causal profiling failed to activate"
+
+# (backend, pass_regex, fail_regex, resolved backend). A resolved backend of None
+# means perf was requested explicitly, so the run must fail before writing anything.
+CAUSAL_BACKEND_CASES = [
+    pytest.param(
+        "perf",
+        [CAUSAL_PERF_OPEN_ERROR, r"Failed to open perf event:"],
+        [],
+        None,
+        id="perf",
+    ),
+    pytest.param("timer", [], [CAUSAL_PERF_OPEN_ERROR], "timer", id="timer"),
+    pytest.param("auto", [CAUSAL_PERF_OPEN_ERROR], [], "timer", id="auto"),
+]
+
+
+@pytest.mark.build_only
+@pytest.mark.timeout(180)
+@pytest.mark.class_name("causal-open-failure")
+class TestCausalOpenFailure(RocprofsysTest):
+    @pytest.mark.parametrize(
+        "backend, pass_regex, fail_regex, resolved_backend", CAUSAL_BACKEND_CASES
+    )
+    def test_backend(self, backend, pass_regex, fail_regex, resolved_backend):
+        perf_must_fail = resolved_backend is None
+        result = self.run_test(
+            "causal",
+            "causal-cpu-rocprofsys",
+            causal_mode="func",
+            causal_args=["-b", backend, "-n", "1", "-s", "0"],
+            run_args=CAUSAL_CPU_ARGS,
+            fail_on_pass=perf_must_fail,
+            fail_on_not_found=True,
+            deny_perf_events=True,
+        )
+        self.assert_regex(
+            result,
+            pass_regex=pass_regex or None,
+            fail_regex=fail_regex or None,
+            use_abort_fail_regex=not perf_must_fail,
+        )
+
+        experiments = result.output_dir / "causal" / "experiments.json"
+        coz = experiments.with_suffix(".coz")
+        if perf_must_fail:
+            # Exit code 1 is a clean exit; the old crash aborted with SIGABRT (-6).
+            if result.returncode != 1:
+                pytest.fail(f"perf open failure should exit 1, got {result.returncode}")
+            written = [
+                *(path for path in (experiments, coz) if path.exists()),
+                *([result.perfetto_file] if result.perfetto_file else []),
+                *result.rocpd_files,
+            ]
+            if written:
+                pytest.fail(f"perf open failure still wrote: {written}")
+            return
+
+        self.assert_file_exists(
+            [experiments, coz],
+            description="causal profile",
+            subtest_name="causal experiments and coz profile exist",
+        )
+        assert_resolved_settings(result, {"ROCPROFSYS_CAUSAL_BACKEND": resolved_backend})
+        self.assert_causal_json(
+            result,
+            file_name="causal/experiments.json",
+            additional_args=["-n", "0"],
+            pass_regex=[r"Samples:\n\s+\d+ ::"],
+            subtest_name="causal experiments contain samples",
         )

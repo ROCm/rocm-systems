@@ -139,6 +139,28 @@ TEST(FpDivFmasGfx11, SignalingNan) {
   check_rdna3_nan<64, 64>(rj_arith_v_div_fmas_f64_w64);
 }
 
+TEST(FpDivFmasGfx950, SignalingNanAndGuards) {
+  check_rdna3_nan<32, 32>(rj_arith_v_div_fmas_f32_w32_gfx950);
+  check_rdna3_nan<32, 64>(rj_arith_v_div_fmas_f32_w64_gfx950);
+  check_rdna3_nan<64, 32>(rj_arith_v_div_fmas_f64_w32_gfx950);
+  check_rdna3_nan<64, 64>(rj_arith_v_div_fmas_f64_w64_gfx950);
+  using namespace rocjitsu::arith::test;
+  for (uint64_t cpu : supported_cpu_levels()) {
+    Registers<8, 32> r;
+    write_fp(r.v, 0, 32, 0x3f800000U);
+    write_fp(r.v + 2, 0, 32, 0x3f800000U);
+    write_fp(r.v + 4, 0, 32, 0U);
+    EXPECT_EQ(rj_arith_v_div_fmas_f32_w32_gfx950(
+                  cpu | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS |
+                      RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS,
+                  1U, RJ_ARITH_ALU_OMOD_2, r.v + 6, r.v, r.v + 2, r.v + 4, 0U, nullptr),
+              RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
+    EXPECT_EQ(rj_arith_v_div_fmas_f32_w32_gfx950(cpu | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL, 1U,
+                                                 0, r.v + 6, r.v, r.v + 2, r.v + 4, 0U, nullptr),
+              RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS);
+  }
+}
+
 namespace {
 
 // Smallest-normal boundary captures with VCC clear. Tininess is judged after rounding at normal

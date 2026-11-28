@@ -11,6 +11,7 @@ Provides reusable components for testing rocprofiler-systems:
 - GPU and system detection utilities
 """
 
+from .capabilities import deny_perf_events_supported
 from .config import (
     RocprofsysConfig,
     discover_build_config,
@@ -71,6 +72,7 @@ __all__ = [
     "TestResult",
     # Validators
     "ValidationResult",
+    "deny_perf_events_supported",
     "detect_gpu",
     "discover_build_config",
     "discover_install_config",

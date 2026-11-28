@@ -156,3 +156,81 @@ TEST(CdnaHalfMath, SdwaOutput) {
     }
   }
 }
+
+namespace {
+
+template <int Lanes, typename Call> void check_gfx950(Call call, Call reference) {
+  using namespace rocjitsu::arith::test;
+  using Mask = std::conditional_t<Lanes == 32, uint32_t, uint64_t>;
+  Registers<2, Lanes> input;
+  std::minstd_rand rng;
+  for (int lane = 0; lane < Lanes; ++lane) {
+    input.v[0][lane] = (uint32_t(rng() >> 15) << 16) | uint32_t(rng() >> 15);
+  }
+  input.v[0][0] = 0xfc017c01U;
+  input.v[0][1] = 0xfc007c00U;
+  input.v[0][2] = 0x80010001U;
+  input.v[0][3] = 0x80000000U;
+  const uint64_t modes[] = {0, RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_D,
+                            RJ_ARITH_ALU_NEG_A | RJ_ARITH_ALU_OMOD_2 | RJ_ARITH_ALU_CLAMP};
+  const uint64_t fp_modes[] = {0, RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS,
+                               RJ_ARITH_FP_IEEE_MODE | RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
+                                   RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS | RJ_ARITH_FP16_OVFL};
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (uint64_t semantics : semantics_modes()) {
+      for (uint64_t fp : fp_modes) {
+        for (uint64_t mode : modes) {
+          Registers<2, Lanes> actual = input, expected = input;
+          uint32_t state = 0x80000000U, expected_state = state;
+          const uint64_t flags = cpu | semantics | fp;
+          const Mask exec_mask = Mask(0xaaaaaaaaaaaaaaaaULL) | 1;
+          const int result = call(flags, exec_mask, mode, actual.v + 1, actual.v, &state);
+          const bool active_omod = (mode & RJ_ARITH_ALU_OMOD_MASK) &&
+                                   (fp & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) &&
+                                   !(fp & RJ_ARITH_FP_IEEE_MODE);
+          if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+            EXPECT_EQ(result, RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS);
+            actual.expect_preserved(input, 0, 0);
+            EXPECT_EQ(state, expected_state);
+            continue;
+          }
+          if (active_omod && semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
+            EXPECT_EQ(result, RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
+            actual.expect_preserved(input, 0, 0);
+            EXPECT_EQ(state, expected_state);
+            continue;
+          }
+          const uint64_t ref_flags =
+              active_omod && semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE
+                  ? (flags & ~RJ_ARITH_SEMANTICS_MASK) | RJ_ARITH_SEMANTICS_LOOSE
+                  : flags;
+          ASSERT_EQ(result, reference(ref_flags, exec_mask, mode, expected.v + 1, expected.v,
+                                      &expected_state));
+          EXPECT_EQ(state, expected_state);
+          for (int lane = 0; lane < Lanes; ++lane) {
+            EXPECT_EQ(actual.v[1][lane], expected.v[1][lane]);
+          }
+        }
+      }
+    }
+  }
+}
+
+} // namespace
+
+TEST(CdnaHalfMath, Gfx950ExactAndActiveOmodGuard) {
+  check_gfx950<32>(rj_arith_v_rcp_f16_w32_gfx950, rj_arith_v_rcp_f16_w32);
+  check_gfx950<64>(rj_arith_v_rcp_f16_w64_gfx950, rj_arith_v_rcp_f16_w64);
+  check_gfx950<32>(rj_arith_v_rsq_f16_w32_gfx950, rj_arith_v_rsq_f16_w32);
+  check_gfx950<64>(rj_arith_v_rsq_f16_w64_gfx950, rj_arith_v_rsq_f16_w64);
+  check_gfx950<32>(rj_arith_v_sqrt_f16_w32_gfx950, rj_arith_v_sqrt_f16_w32);
+  check_gfx950<64>(rj_arith_v_sqrt_f16_w64_gfx950, rj_arith_v_sqrt_f16_w64);
+  check_gfx950<32>(rj_arith_v_exp_f16_w32_gfx950, rj_arith_v_exp_f16_w32);
+  check_gfx950<64>(rj_arith_v_exp_f16_w64_gfx950, rj_arith_v_exp_f16_w64);
+  check_gfx950<32>(rj_arith_v_log_f16_w32_gfx950, rj_arith_v_log_f16_w32);
+  check_gfx950<64>(rj_arith_v_log_f16_w64_gfx950, rj_arith_v_log_f16_w64);
+  check_gfx950<32>(rj_arith_v_sin_f16_w32_gfx950, rj_arith_v_sin_f16_w32);
+  check_gfx950<64>(rj_arith_v_sin_f16_w64_gfx950, rj_arith_v_sin_f16_w64);
+  check_gfx950<32>(rj_arith_v_cos_f16_w32_gfx950, rj_arith_v_cos_f16_w32);
+  check_gfx950<64>(rj_arith_v_cos_f16_w64_gfx950, rj_arith_v_cos_f16_w64);
+}

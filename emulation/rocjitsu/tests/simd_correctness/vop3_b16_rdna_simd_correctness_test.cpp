@@ -288,52 +288,24 @@ void check_cndmask_b16(uint64_t exec, uint64_t sel) {
 }
 
 TEST(Vop3B16RdnaSimdCorrectness, BitwiseBinary_FullExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-    return;
-  }
   for (const auto &c : kBinCases) {
     check_binary(c, /*exec=*/0xFFFFFFFFULL);
   }
 }
 TEST(Vop3B16RdnaSimdCorrectness, BitwiseBinary_PartialExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-    return;
-  }
   for (const auto &c : kBinCases) {
     check_binary(c, /*exec=*/0xA5A58001ULL);
   }
 }
-TEST(Vop3B16RdnaSimdCorrectness, NotB16_FullExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-    return;
-  }
-  check_not_b16(/*exec=*/0xFFFFFFFFULL);
-}
-TEST(Vop3B16RdnaSimdCorrectness, NotB16_PartialExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-    return;
-  }
-  check_not_b16(/*exec=*/0xA5A58001ULL);
-}
+TEST(Vop3B16RdnaSimdCorrectness, NotB16_FullExec) { check_not_b16(/*exec=*/0xFFFFFFFFULL); }
+TEST(Vop3B16RdnaSimdCorrectness, NotB16_PartialExec) { check_not_b16(/*exec=*/0xA5A58001ULL); }
 TEST(Vop3B16RdnaSimdCorrectness, CndmaskB16_FullExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-    return;
-  }
   for (uint64_t sel :
        {uint64_t{0}, uint64_t{~0ULL}, uint64_t{0xAAAAAAAAULL}, uint64_t{0x12345678ULL}}) {
     check_cndmask_b16(/*exec=*/0xFFFFFFFFULL, sel);
   }
 }
 TEST(Vop3B16RdnaSimdCorrectness, CndmaskB16_PartialExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-    return;
-  }
   for (uint64_t sel :
        {uint64_t{0}, uint64_t{~0ULL}, uint64_t{0xAAAAAAAAULL}, uint64_t{0x12345678ULL}}) {
     check_cndmask_b16(/*exec=*/0xA5A58001ULL, sel);
@@ -381,10 +353,6 @@ void check_mov_b16(uint64_t exec, uint32_t omod, uint32_t clamp) {
 }
 
 TEST(Vop3B16RdnaSimdCorrectness, MovB16_FullExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-    return;
-  }
   for (uint32_t omod : {0u, 1u, 2u, 3u}) {
     for (uint32_t clamp : {0u, 1u}) {
       check_mov_b16(/*exec=*/0xFFFFFFFFULL, omod, clamp);
@@ -392,10 +360,6 @@ TEST(Vop3B16RdnaSimdCorrectness, MovB16_FullExec) {
   }
 }
 TEST(Vop3B16RdnaSimdCorrectness, MovB16_PartialExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-    return;
-  }
   for (uint32_t omod : {0u, 1u, 2u, 3u}) {
     for (uint32_t clamp : {0u, 1u}) {
       check_mov_b16(/*exec=*/0xA5A58001ULL, omod, clamp);

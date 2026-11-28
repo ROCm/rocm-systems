@@ -687,18 +687,17 @@ int rj_arith_v_fract_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t
                                     uint32_t *const *d, const uint32_t *const *a,
                                     uint32_t *trapsts);
 
-// Inherited CDNA FP32 math models, also used for gfx950 through the gfx942 APIs.
-// EXP/LOG/SIN/COS reuse these models on gfx908/gfx90a/gfx1010/gfx1030/gfx1150;
-// gfx908/gfx90a also reuse the legacy EXP/LOG forms.
-// RCP, RCP_IFLAG, RSQ and SQRT also carry the same inherited model on
-// gfx908/gfx90a/gfx1010/gfx1030/gfx1150, without new empirical qualification.
-// Compatibility preserves Rocjitsu's existing numeric and FP-status policies;
-// strict empirical semantics are unsupported pending validation on these architectures.
-// Loose and allow-Loose requests retain the corresponding existing math paths.
+// Inherited CDNA FP32 math models for gfx942, gfx1250, and older profiles
+// (gfx908/gfx90a/gfx1010/gfx1030/gfx1150), plus MI350X-calibrated gfx950 entry points.
+// Compatibility preserves Rocjitsu's existing numeric and FP-status policies; gfx950
+// qualifies empirical bit-exact semantics without FP status (rejecting uncaptured
+// effective OMOD or SDWA in strict mode), while uncalibrated architectures reject strict modes.
 // Each operand occupies one VGPR. Controls and DPP follow the corresponding
-// gfx11 (gfx942/gfx950) or gfx12 (gfx1250) math entry point. RCP_IFLAG instead
-// retains the CDNA legacy rule: always quiet NaNs; in Compatibility, signed zero
-// raises INT_DIV0 even with CLAMP, while subnormal inputs do not raise it.
+// gfx11 (gfx942/gfx950) or gfx12 (gfx1250) math entry point. On gfx942/gfx1250
+// and older targets, RCP_IFLAG retains the CDNA legacy rule and always quiets NaNs;
+// on gfx950, signaling NaNs stay signaling when MODE.IEEE is clear and quiet when
+// MODE.IEEE is set. In Compatibility, signed zero raises INT_DIV0 even with CLAMP,
+// while subnormal inputs do not raise it.
 // gfx942 forms accept ALU_SDWA: arithmetic uses nearest rounding, then output
 // scaling/clamp follows the inherited SDWA policy before separate byte placement.
 // SIN/IFLAG output follows guest MODE rounding/denormal gating; other math output
@@ -706,6 +705,10 @@ int rj_arith_v_fract_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t
 int rj_arith_v_rcp_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
 int rj_arith_v_rcp_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_rcp_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_rcp_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
 int rj_arith_v_rcp_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *const *d, const uint32_t *const *a,
@@ -716,12 +719,22 @@ int rj_arith_v_rcp_iflag_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask,
 int rj_arith_v_rcp_iflag_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask,
                                         uint64_t instruction_flags, uint32_t *const *d,
                                         const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_rcp_iflag_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_rcp_iflag_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a, uint32_t *trapsts);
 int rj_arith_v_rcp_iflag_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
                                          uint64_t instruction_flags, uint32_t *const *d,
                                          const uint32_t *const *a, uint32_t *excp_flag_user);
 int rj_arith_v_rsq_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
 int rj_arith_v_rsq_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_rsq_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_rsq_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
 int rj_arith_v_rsq_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *const *d, const uint32_t *const *a,
@@ -730,12 +743,20 @@ int rj_arith_v_sqrt_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t 
                                    uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
 int rj_arith_v_sqrt_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_sqrt_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_sqrt_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
 int rj_arith_v_sqrt_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                     uint32_t *const *d, const uint32_t *const *a,
                                     uint32_t *excp_flag_user);
 int rj_arith_v_exp_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
 int rj_arith_v_exp_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_exp_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_exp_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
 int rj_arith_v_exp_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *const *d, const uint32_t *const *a,
@@ -744,12 +765,20 @@ int rj_arith_v_log_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t i
                                   uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
 int rj_arith_v_log_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_log_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_log_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
 int rj_arith_v_log_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *const *d, const uint32_t *const *a,
                                    uint32_t *excp_flag_user);
 int rj_arith_v_sin_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
 int rj_arith_v_sin_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_sin_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_sin_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
 int rj_arith_v_sin_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *const *d, const uint32_t *const *a,
@@ -758,13 +787,19 @@ int rj_arith_v_cos_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t i
                                   uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
 int rj_arith_v_cos_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_cos_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_cos_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
 int rj_arith_v_cos_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *const *d, const uint32_t *const *a,
                                    uint32_t *excp_flag_user);
 
-// Inherited CDNA FP16 math; gfx950 shares the gfx942 entry points.
-// Compatibility retains the legacy numeric model without reporting FP status.
-// Strict empirical modes are unsupported pending validation on these architectures.
+// Inherited CDNA FP16 math for gfx942 and gfx1250, plus MI350X-calibrated gfx950
+// entry points. Compatibility retains the legacy numeric model without reporting
+// FP status; gfx950 qualifies empirical bit-exact semantics without FP status
+// (rejecting uncaptured effective OMOD in strict mode and falling back to Loose
+// when allowed), while gfx942 and gfx1250 reject strict empirical modes.
 // One VGPR per operand; HIGH_A/HIGH_D select halves, preserving the other destination half.
 // Controls and DPP follow the corresponding gfx11 (gfx942/gfx950) or gfx12 (gfx1250) APIs.
 // gfx942/gfx950 also accept ALU_SDWA to finalize the already-scaled selected half;
@@ -772,6 +807,10 @@ int rj_arith_v_cos_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t 
 int rj_arith_v_rcp_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
 int rj_arith_v_rcp_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_rcp_f16_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_rcp_f16_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
 int rj_arith_v_rcp_f16_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *const *d, const uint32_t *const *a,
@@ -781,6 +820,10 @@ int rj_arith_v_rsq_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t i
                                   uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
 int rj_arith_v_rsq_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_rsq_f16_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_rsq_f16_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
 int rj_arith_v_rsq_f16_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *const *d, const uint32_t *const *a,
                                    uint32_t *excp_flag_user);
@@ -788,6 +831,10 @@ int rj_arith_v_rsq_f16_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t 
 int rj_arith_v_sqrt_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
 int rj_arith_v_sqrt_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_sqrt_f16_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_sqrt_f16_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
 int rj_arith_v_sqrt_f16_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                     uint32_t *const *d, const uint32_t *const *a,
@@ -797,6 +844,10 @@ int rj_arith_v_exp_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t i
                                   uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
 int rj_arith_v_exp_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_exp_f16_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_exp_f16_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
 int rj_arith_v_exp_f16_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *const *d, const uint32_t *const *a,
                                    uint32_t *excp_flag_user);
@@ -804,6 +855,10 @@ int rj_arith_v_exp_f16_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t 
 int rj_arith_v_log_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
 int rj_arith_v_log_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_log_f16_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_log_f16_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
 int rj_arith_v_log_f16_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *const *d, const uint32_t *const *a,
@@ -813,6 +868,10 @@ int rj_arith_v_sin_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t i
                                   uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
 int rj_arith_v_sin_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_sin_f16_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_sin_f16_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
 int rj_arith_v_sin_f16_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *const *d, const uint32_t *const *a,
                                    uint32_t *excp_flag_user);
@@ -820,6 +879,10 @@ int rj_arith_v_sin_f16_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t 
 int rj_arith_v_cos_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
 int rj_arith_v_cos_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_cos_f16_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_cos_f16_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
 int rj_arith_v_cos_f16_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *const *d, const uint32_t *const *a,

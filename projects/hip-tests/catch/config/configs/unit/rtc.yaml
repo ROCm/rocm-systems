@@ -6,6 +6,12 @@ rtc:
   Unit_hiprtc_ProfileRuntimeLink:
     <<: *level_2
     tags: [link]
+  Unit_hiprtcCreateProgram_UnnamedLeavesCwdUntouched:
+    <<: *level_default
+    unsupported:
+      targets: [amd_windows, nvidia]
+      reason: "AIRUNTIME-2744 - uses inotify; the test is compiled only for AMD Linux."
+    tags: [compile]
   Unit_hiprtc_warpsize:
     <<: *level_default
     tags: [compile]
@@ -65,6 +71,12 @@ rtc:
     tags: [link]
   Unit_RTC_LinkAddFile_Default:
     <<: *level_default
+    tags: [link]
+  Unit_RTC_LinkAddData_BundledBitcode:
+    <<: *level_default
+    unsupported:
+      targets: [nvidia]
+      reason: "AIRUNTIME-2744 - AMD clang offload bundles; the test is compiled only for AMD."
     tags: [link]
   Unit_hiprtc_half_shuffle:
     <<: *level_default

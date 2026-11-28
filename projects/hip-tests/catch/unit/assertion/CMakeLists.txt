@@ -15,6 +15,9 @@ elseif(HIP_PLATFORM MATCHES "amd")
         static_assert.cc
         assert.cc
     )
+    if(UNIX)
+        set(TEST_SRC ${TEST_SRC} assert_stack.cc)
+    endif()
     hip_add_exe_to_target(NAME AssertionTest
                           TEST_SRC ${TEST_SRC}
                           TEST_TARGET_NAME build_tests
