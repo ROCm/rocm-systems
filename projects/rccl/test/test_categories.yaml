@@ -126,6 +126,7 @@ test_categories:
       - "RasClientHelpers.*"
       - "UniqueIdHex.*"
       - "ProfilerApiEventRank.*"
+      - "InspectorCollAlgo.*"
       - "Diagnostics.*"
       - "HipProbe.*"
     exclude_windows:

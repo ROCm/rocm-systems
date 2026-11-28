@@ -2109,6 +2109,16 @@
           "name": "CollTraceUtils.getSizeMb",
           "description": "CollTrace utils get size MB",
           "test_filter": "CollTraceUtilsTest.getSizeMbTest"
+        },
+        {
+          "name": "InspectorCollAlgo.CollPerfCarriesAlgoProto",
+          "description": "NCCL 2.32.6: Inspector JSON coll_perf records carry the collective's algorithm and protocol (coll_algo/coll_proto)",
+          "test_filter": "InspectorCollAlgo.CollPerfCarriesAlgoProto"
+        },
+        {
+          "name": "InspectorCollAlgo.WritesCollRecords",
+          "description": "Inspector profiler plugin writes coll_perf records for grouped AllReduces",
+          "test_filter": "InspectorCollAlgo.WritesCollRecords"
         }
       ]
     },

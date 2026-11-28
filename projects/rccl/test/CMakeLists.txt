@@ -332,6 +332,7 @@ if(BUILD_TESTS)
     ProxyProtocolTests.cpp
     TopoCpuArchTests.cpp
     TeardownStressTests.cpp
+    InspectorCollAlgoTests.cpp
     _RecorderTests.cpp
     IbvSymbolsEnvTests.cpp
     common/main.cpp
@@ -368,6 +369,13 @@ if(BUILD_TESTS)
 
   # Create rccl-UnitTests binary
   add_executable(rccl-UnitTests ${TEST_SOURCE_FILES})
+
+  # InspectorCollAlgoTests loads the in-tree Inspector plugin; it skips when there is none.
+  if(TARGET rccl-profiler-inspector)
+    add_dependencies(rccl-UnitTests rccl-profiler-inspector)
+    set_source_files_properties(InspectorCollAlgoTests.cpp PROPERTIES COMPILE_DEFINITIONS
+      "RCCL_INSPECTOR_PLUGIN_SO=\"$<TARGET_FILE:rccl-profiler-inspector>\"")
+  endif()
 
   # AICOMRCCL-1534 / net-plugin assignment tests: net_reload_plugin.cpp is compiled into
   # rccl-UnitTests and loaded in-process via NCCL_NET_PLUGIN=STATIC_PLUGIN (dlopen(NULL)).
