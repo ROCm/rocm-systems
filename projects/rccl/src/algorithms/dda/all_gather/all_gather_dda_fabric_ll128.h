@@ -36,7 +36,7 @@ constexpr size_t ddaLL128AgSlotWords(size_t bankSize, int nRanks) {
 // peer; grid.y splits that peer's slices across blocks, one
 // warp per slice. Each column packs this rank's payload into its peer's slot,
 // then polls its own slot for that peer's payload and unpacks it.
-template <typename T, int NRANKS_CT>
+template <typename T, int NRANKS_CT, bool kAligned = true>
 #if defined(USE_ROCM)
 __launch_bounds__(1024)
 #endif
@@ -90,20 +90,30 @@ __launch_bounds__(1024)
     const int eltInSlice =
       rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
     uint64_t regs[kDdaLL128WordsPerThread];
-    ddaLL128LoadRegsBatched<int8_t>(regs, srcBytes + dataByte, eltInSlice, lane, flagLane);
+    ddaLL128LoadRegsBatched<int8_t, kDdaLL128LineElems, kAligned>(regs, srcBytes + dataByte, eltInSlice, lane,
+                                                                  flagLane);
     ddaLL128StoreWire(
       scatterSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, regs, flag, flagLane);
   }
 
   // Local copy sendbuff -> recvbuff[selfRank].
   {
-    v4u_gptr s4 = (v4u_gptr)sendbuff;
-    v4u_gptr d4 = (v4u_gptr)(reinterpret_cast<char*>(recvbuff) + (size_t)selfRank * perRankBytes);
+    char* const dst = reinterpret_cast<char*>(recvbuff) + (size_t)selfRank * perRankBytes;
     const size_t nVec = perRankBytes >> 4; // 16B chunks
     const size_t gtid = (size_t)flatBlockId * (size_t)nthreads + (size_t)tid;
     const size_t stride = (size_t)total * (size_t)nthreads;
-    for (size_t i = gtid; i < nVec; i += stride) {
-      d4[i] = s4[i];
+    if constexpr (kAligned) {
+      v4u_gptr s4 = (v4u_gptr)sendbuff;
+      v4u_gptr d4 = (v4u_gptr)dst;
+      for (size_t i = gtid; i < nVec; i += stride) {
+        d4[i] = s4[i];
+      }
+    } else {
+      for (size_t i = gtid; i < nVec; i += stride) {
+        uint64_t lo, hi;
+        ddaLL128UserLoad16B<false>(srcBytes + 16 * i, lo, hi);
+        ddaLL128UserStore16B<false>(dst + 16 * i, lo, hi);
+      }
     }
   }
 
@@ -118,7 +128,7 @@ __launch_bounds__(1024)
                                  params)) {
       break; // not return: every thread must reach the __syncthreads below
     }
-    ddaLL128StoreRegs<int8_t>(dstBytes + dataByte, vr, eltInSlice, lane, flagLane);
+    ddaLL128StoreRegs<int8_t, kDdaLL128LineElems, kAligned>(dstBytes + dataByte, vr, eltInSlice, lane, flagLane);
   }
   ddaLL128WaitStores();
   __syncthreads();

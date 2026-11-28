@@ -26,6 +26,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <type_traits>
 
 // Batched kernel block size, overriding the table: a multiple of the warp up to kDdaLL128RsMaxThreads, else ignored.
 RCCL_PARAM(DdaLL128RSThreads, "DDA_LL128_RS_THREADS", 0);
@@ -133,11 +134,13 @@ static ncclResult_t ncclReduceScatterDdaFabricLL128Typed(const void* sendbuff, v
   uint32_t* epochDev = comm->ddaLLEpochDev;
   const int epochLen = comm->ddaLLEpochLen;
 
+  // Alignment differs between ranks, so it only picks this rank's user-buffer access, never the wire.
+  const bool aligned = dda::common::ddaUserBuffers16ByteAligned(sendbuff, recvbuff);
   INFO(NCCL_COLL,
        "DDA fabric ReduceScatter LL128: nRanks=%d shardBytes=%zu slices=%zu grid=%u block=%u "
-       "(%s, bankSize=%zu)",
+       "(%s, bankSize=%zu, aligned=%d)",
        nRanks, shardBytes, slices, geom.grid.x, geom.block.x, geom.peerPar ? "peer-parallel" : "warp-per-slice",
-       bankSize);
+       bankSize, (int)aligned);
 
   const dda::common::DdaKernelParams params{comm->abortFlagDev};
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
@@ -148,15 +151,23 @@ static ncclResult_t ncclReduceScatterDdaFabricLL128Typed(const void* sendbuff, v
                           shardBytes, comm->rank, nRanks, epochDev, epochLen, slices, bankSize, params);
   };
   // NRANKS_CT 4/8: unrolled peer loops; 0: runtime fallback.
+  const auto launchRanks = [&](auto n) {
+    constexpr int kN = decltype(n)::value;
+    dda::common::ddaPickAligned(aligned, [&](auto a) {
+      constexpr bool kAligned = decltype(a)::value;
+      launch(dda::common::ddaReduceScatterFabricLL128<T, kN, kAligned>,
+             dda::common::ddaReduceScatterFabricLL128PeerPar<T, kN, kAligned>);
+    });
+  };
   switch (nRanks) {
   case 4:
-    launch(dda::common::ddaReduceScatterFabricLL128<T, 4>, dda::common::ddaReduceScatterFabricLL128PeerPar<T, 4>);
+    launchRanks(std::integral_constant<int, 4>{});
     break;
   case 8:
-    launch(dda::common::ddaReduceScatterFabricLL128<T, 8>, dda::common::ddaReduceScatterFabricLL128PeerPar<T, 8>);
+    launchRanks(std::integral_constant<int, 8>{});
     break;
   default:
-    launch(dda::common::ddaReduceScatterFabricLL128<T, 0>, dda::common::ddaReduceScatterFabricLL128PeerPar<T, 0>);
+    launchRanks(std::integral_constant<int, 0>{});
     break;
   }
 
@@ -169,6 +180,8 @@ static ncclResult_t ncclReduceScatterDdaFabricLL128Typed(const void* sendbuff, v
 
 bool ncclReduceScatterDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t recvcount,
                                              ncclDataType_t datatype, ncclRedOp_t op) {
+  (void)sendbuff;
+  (void)recvbuff;
   if (comm == nullptr || comm->bootstrap == nullptr) {
     return false;
   }
@@ -194,12 +207,9 @@ bool ncclReduceScatterDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuf
   const size_t shardBytes = recvcount * ncclTypeSize(datatype);
 
   // The LL128 line format packs 16B-aligned data with no chunk straddling a
-  // line, so a partial 16B chunk has nowhere to go, and the 16B wire accesses
-  // need both user buffers aligned to match.
+  // line, so a partial 16B chunk has nowhere to go. Buffer alignment is not
+  // checked: it differs between ranks, and every rank has to pick the same tier.
   if (shardBytes % 16 != 0) {
-    return false;
-  }
-  if (!dda::common::ddaUserBuffers16ByteAligned(sendbuff, recvbuff)) {
     return false;
   }
 

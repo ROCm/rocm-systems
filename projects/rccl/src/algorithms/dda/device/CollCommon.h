@@ -230,10 +230,17 @@ inline bool ddaAlltoAllSingleBlockGrid(size_t count, int typeSize) {
 }
 
 // copyFromSrcToDest loads user buffers as uint4, so both pointers have to be
-// 16-byte aligned. Shared by the IPC eligibility checks.
+// 16-byte aligned. Shared by the IPC eligibility checks, and by the fabric LL128
+// launchers to pick their kernels' user-buffer access (never their eligibility).
 inline bool ddaUserBuffers16ByteAligned(const void* sendbuff, const void* recvbuff) {
   return (reinterpret_cast<uintptr_t>(sendbuff) % 16) == 0 &&
          (reinterpret_cast<uintptr_t>(recvbuff) % 16) == 0;
+}
+
+// Picks this rank's aligned or any-address user-buffer instance; both use the same wire format.
+template <typename Pick>
+inline auto ddaPickAligned(bool aligned, Pick pick) {
+  return aligned ? pick(std::true_type{}) : pick(std::false_type{});
 }
 
 // Reduce-scatter IPC copies each shard inside the kernel at or below this size.

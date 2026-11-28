@@ -77,13 +77,13 @@ const void* LLTypeTier(bool spread, ncclDataType_t datatype, int nRanks) {
 constexpr size_t Floats(size_t bytes) {
   return bytes / sizeof(float);
 }
-template <typename T, int N>
+template <typename T, int N, bool kAligned = true>
 const void* LL128OneShot() {
-  return KernelPtr(&dda::common::ddaAllReduceFlatLL128<T, N>);
+  return KernelPtr(&dda::common::ddaAllReduceFlatLL128<T, N, kAligned>);
 }
-template <typename T, int N>
+template <typename T, int N, bool kAligned = true>
 const void* LL128TwoShot() {
-  return KernelPtr(&dda::common::ddaAllReduceTwoShotLL128<T, N>);
+  return KernelPtr(&dda::common::ddaAllReduceTwoShotLL128<T, N, dda::common::kDdaLL128WireCoop, kAligned>);
 }
 
 using EligibleFn = bool (*)(ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t);
@@ -142,6 +142,15 @@ class DdaAllReduceFabricLLMicrotest : public ::testing::Test {
     g_ddaLaunches.clear();
     EXPECT_EQ(RunLL128(count, datatype, cap), ncclSuccess);
     return Only();
+  }
+
+  // The kernel the LL128 launcher picks for fp32 `count` on these buffers.
+  const void* LL128KernelFor(size_t count, uintptr_t sendbuff, uintptr_t recvbuff) {
+    g_ddaLaunches.clear();
+    EXPECT_EQ(ncclAllReduceDdaFabricLL128(reinterpret_cast<const void*>(sendbuff), reinterpret_cast<void*>(recvbuff),
+                                          count, ncclFloat32, ncclSum, mock_.get(), kStream, rcclDdaLaunchCap{}),
+              ncclSuccess);
+    return Only().kernel;
   }
 
   // One-shot thresholds low enough that 1 KiB messages and up run two-shot.
@@ -331,10 +340,11 @@ TEST_F(DdaAllReduceFabricLLMicrotest, LL128OneShotEligible_UpToOneShotThresholdO
   EXPECT_FALSE(Eligible(ddaLL128ArOneShotEligible, 260));
 }
 
+// Buffer alignment differs between ranks and every rank must pick the same tier, so it never decides eligibility.
 TEST_F(DdaAllReduceFabricLLMicrotest, LL128OneShotEligible_AlignedWholeMessageWithinTheSlotSlices) {
   EXPECT_FALSE(Eligible(ddaLL128ArOneShotEligible, 6));
-  EXPECT_FALSE(Eligible(ddaLL128ArOneShotEligible, 64, ncclFloat32, ncclSum, reinterpret_cast<void*>(0x1008)));
-  EXPECT_FALSE(
+  EXPECT_TRUE(Eligible(ddaLL128ArOneShotEligible, 64, ncclFloat32, ncclSum, reinterpret_cast<void*>(0x1008)));
+  EXPECT_TRUE(
       Eligible(ddaLL128ArOneShotEligible, 64, ncclFloat32, ncclSum, kSendbuff, reinterpret_cast<void*>(0x2001)));
   // 8 ranks, a bank of two 2 KiB slices per rank.
   comm().ddaScratchBytes = 2 * 8 * 2 * kSliceWire;
@@ -363,8 +373,8 @@ TEST_F(DdaAllReduceFabricLLMicrotest, LL128TwoShotEligible_AlignedShardsWithinHa
   EXPECT_TRUE(Eligible(ddaLL128ArTwoShotEligible, 12));
   comm().nRanks = 8;
   EXPECT_FALSE(Eligible(ddaLL128ArTwoShotEligible, 16));
-  EXPECT_FALSE(Eligible(ddaLL128ArTwoShotEligible, 64, ncclFloat32, ncclSum, reinterpret_cast<void*>(0x1004)));
-  EXPECT_FALSE(
+  EXPECT_TRUE(Eligible(ddaLL128ArTwoShotEligible, 64, ncclFloat32, ncclSum, reinterpret_cast<void*>(0x1004)));
+  EXPECT_TRUE(
       Eligible(ddaLL128ArTwoShotEligible, 64, ncclFloat32, ncclSum, kSendbuff, reinterpret_cast<void*>(0x2002)));
   // 8 ranks, a bank holding two staging areas of two 2 KiB slices per rank.
   comm().ddaScratchBytes = 2 * 2 * 8 * 2 * kSliceWire;
@@ -401,6 +411,19 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_OneShotFirstThenTwoShotElseIntern
   EXPECT_EQ(RunLL128(260), ncclInternalError);
   EXPECT_EQ(RunLL128(256, ncclInt32), ncclInternalError);
   EXPECT_TRUE(g_ddaLaunches.empty());
+}
+
+// Each LL128 kernel comes in an aligned and an any-address instance; my own buffers pick which.
+TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_AlignedKernelFrom16ByteOwnBuffersOnly) {
+  EXPECT_EQ(LL128KernelFor(64, 0x1000, 0x2010), (LL128OneShot<float, 8, true>()));
+  EXPECT_EQ(LL128KernelFor(64, 0x1008, 0x2000), (LL128OneShot<float, 8, false>()));
+  EXPECT_EQ(LL128KernelFor(64, 0x1000, 0x2001), (LL128OneShot<float, 8, false>()));
+  OnlyTwoShot();
+  EXPECT_EQ(LL128KernelFor(256, 0x1010, 0x2000), (LL128TwoShot<float, 8, true>()));
+  EXPECT_EQ(LL128KernelFor(256, 0x1004, 0x2000), (LL128TwoShot<float, 8, false>()));
+  EXPECT_EQ(LL128KernelFor(256, 0x1000, 0x2002), (LL128TwoShot<float, 8, false>()));
+  comm().nRanks = 6;
+  EXPECT_EQ(LL128KernelFor(240, 0x1000, 0x2008), (LL128TwoShot<float, 0, false>()));
 }
 
 TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_EachDatatypeLaunchesItsOwnKernelForBothShots) {
@@ -906,9 +929,9 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_SpreadEachDatatypeLaunchesItsOwnKern
 
 // ---- LDS-staged LL128 wire writer ----
 
-template <typename T, int N, int W>
+template <typename T, int N, int W, bool kAligned = true>
 const void* LL128TwoShotW() {
-  return KernelPtr(&dda::common::ddaAllReduceTwoShotLL128<T, N, W>);
+  return KernelPtr(&dda::common::ddaAllReduceTwoShotLL128<T, N, W, kAligned>);
 }
 
 constexpr int kAsync = dda::common::kDdaLL128WireAsync;
@@ -929,6 +952,13 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_StagedWriterOffByDefault) {
   }
   params_["RCCL_DDA_LL128_ASYNC_WIRE"] = 1;
   EXPECT_EQ(RunOneLL128(16 * kMiB / 4).kernel, (LL128TwoShotW<float, 8, kAsync>())) << "1 opts in";
+}
+
+TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_StagedWriterAlignedKernelFrom16ByteOwnBuffersOnly) {
+  params_["RCCL_DDA_LL128_ASYNC_WIRE"] = 1;
+  comm().WarpSize = 32;
+  EXPECT_EQ(LL128KernelFor(16 * kMiB / 4, 0x1000, 0x2000), (LL128TwoShotW<float, 8, kAsync, true>()));
+  EXPECT_EQ(LL128KernelFor(16 * kMiB / 4, 0x1004, 0x2000), (LL128TwoShotW<float, 8, kAsync, false>()));
 }
 
 // With RCCL_DDA_LL128_ASYNC_WIRE=1, from a 2 MiB shard a gfx1250 wave32 comm takes the staged writer on the same grid.
@@ -998,13 +1028,13 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_StagedKernelsPerRankCountAndDatat
 
 // ---- Peer-parallel LL128 kernels (RCCL_DDA_LL128_AR_PEER_PARALLEL, on by default) ----
 
-template <typename T, int N>
+template <typename T, int N, bool kAligned = true>
 const void* LL128OneShotPP() {
-  return KernelPtr(&dda::common::ddaAllReduceFlatLL128PeerPar<T, N>);
+  return KernelPtr(&dda::common::ddaAllReduceFlatLL128PeerPar<T, N, kAligned>);
 }
-template <typename T, int N>
+template <typename T, int N, bool kAligned = true>
 const void* LL128TwoShotPP() {
-  return KernelPtr(&dda::common::ddaAllReduceTwoShotLL128PeerPar<T, N>);
+  return KernelPtr(&dda::common::ddaAllReduceTwoShotLL128PeerPar<T, N, kAligned>);
 }
 
 // Floats in `slices` LL128 slices.
@@ -1052,6 +1082,16 @@ TEST_F(DdaAllReduceFabricLL128PeerParMicrotest, RunLL128_BothShotsTakeThePeerPar
   EXPECT_EQ(RunOneLL128(512, ncclBfloat16).kernel, (LL128TwoShotPP<bf16, 8>()));
   EXPECT_EQ(RunOneLL128(2048, ncclFloat8e4m3).kernel, (LL128TwoShotPP<dda::common::fp8e4m3, 8>()));
   EXPECT_EQ(RunOneLL128(2048, ncclFloat8e5m2).kernel, (LL128TwoShotPP<dda::common::fp8e5m2, 8>()));
+}
+
+TEST_F(DdaAllReduceFabricLL128PeerParMicrotest, RunLL128_AlignedKernelFrom16ByteOwnBuffersOnly) {
+  EXPECT_EQ(LL128KernelFor(64, 0x1000, 0x2000), (LL128OneShotPP<float, 8, true>()));
+  EXPECT_EQ(LL128KernelFor(64, 0x1008, 0x2000), (LL128OneShotPP<float, 8, false>()));
+  EXPECT_EQ(LL128KernelFor(64, 0x1000, 0x2004), (LL128OneShotPP<float, 8, false>()));
+  OnlyTwoShot();
+  EXPECT_EQ(LL128KernelFor(256, 0x1000, 0x2000), (LL128TwoShotPP<float, 8, true>()));
+  EXPECT_EQ(LL128KernelFor(256, 0x1001, 0x2000), (LL128TwoShotPP<float, 8, false>()));
+  EXPECT_EQ(LL128KernelFor(256, 0x1000, 0x2008), (LL128TwoShotPP<float, 8, false>()));
 }
 
 // RCCL_DDA_LL128_AR_PEER_PARALLEL=0 restores the one-warp-per-slice kernels and their 512-thread blocks.

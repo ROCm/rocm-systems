@@ -46,19 +46,18 @@ constexpr size_t ddaLL128ArSlotWords(size_t bankSize, int nRanks) {
 //
 // Self does not round-trip through scratch; its contribution is packed straight
 // from sendbuff. Scratch is double buffered: bank = flag & 1.
-template <typename T, int NRANKS_CT>
-__launch_bounds__(512)
-  __global__ void ddaAllReduceFlatLL128(T* const* __restrict__ peerScratch, // ddaPeerPtrsDev: nRanks scratch bases
-                                        T* __restrict__ recvbuff, // local user output
-                                        const T* __restrict__ sendbuff, // local user input
-                                        size_t bytes, // full-message payload; multiple of 16
-                                        int selfRank, int nRanksRt,
-                                        uint32_t* __restrict__ epochDev, // per-block LL epoch cells
-                                        int epochLen, // number of cells in epochDev
-                                        size_t slicesTotal, // slices this call actually uses
-                                        size_t bankSize, // scratch bank size (from host)
-                                        DdaKernelParams params) {
-
+template <typename T, int NRANKS_CT, bool kAligned = true>
+__launch_bounds__(512) __global__
+  void ddaAllReduceFlatLL128(T* const* __restrict__ peerScratch, // ddaPeerPtrsDev: nRanks scratch bases
+                             T* __restrict__ recvbuff, // local user output
+                             const T* __restrict__ sendbuff, // local user input
+                             size_t bytes, // full-message payload; multiple of 16
+                             int selfRank, int nRanksRt,
+                             uint32_t* __restrict__ epochDev, // per-block LL epoch cells
+                             int epochLen, // number of cells in epochDev
+                             size_t slicesTotal, // slices this call actually uses
+                             size_t bankSize, // scratch bank size (from host)
+                             DdaKernelParams params) {
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
 
   const int tid = threadIdx.x;
@@ -92,7 +91,7 @@ __launch_bounds__(512)
     const int eltInSlice =
       rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
     uint64_t regs[kDdaLL128WordsPerThread] = {};
-    ddaLL128LoadRegs<int8_t>(regs, srcBytes + dataByte, eltInSlice, lane, flagLane);
+    ddaLL128LoadRegs<int8_t, kDdaLL128LineElems, kAligned>(regs, srcBytes + dataByte, eltInSlice, lane, flagLane);
 
 #pragma unroll
     for (int r = 1; r < nRanks; ++r) {
@@ -118,7 +117,7 @@ __launch_bounds__(512)
     for (int peer = 0; peer < nRanks; ++peer) {
       uint64_t vr[kDdaLL128WordsPerThread] = {};
       if (peer == selfRank) {
-        ddaLL128LoadRegs<int8_t>(vr, srcBytes + dataByte, eltInSlice, lane, flagLane);
+        ddaLL128LoadRegs<int8_t, kDdaLL128LineElems, kAligned>(vr, srcBytes + dataByte, eltInSlice, lane, flagLane);
       } else {
         const uint64_t* gatherSlot = gatherBase + (uint64_t)peer * (uint64_t)slotWords;
         if (!ddaLL128PollWire(gatherSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, vr, flag, lane,
@@ -137,7 +136,7 @@ __launch_bounds__(512)
       }
     }
 
-    ddaLL128StoreRegs<int8_t>(dstBytes + dataByte, acc, eltInSlice, lane, flagLane);
+    ddaLL128StoreRegs<int8_t, kDdaLL128LineElems, kAligned>(dstBytes + dataByte, acc, eltInSlice, lane, flagLane);
   }
 
   ddaLL128WaitStores();

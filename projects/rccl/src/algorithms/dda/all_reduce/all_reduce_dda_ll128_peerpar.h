@@ -108,9 +108,9 @@ __device__ __forceinline__ bool ddaLL128ArPeerPoll(const uint64_t* wire, uint64_
 // them, so they are ddaLdsBarrier: on gfx1250 they do not wait for the fabric
 // stores in flight. Returns false, on every warp alike, if a poll saw the abort
 // flag.
-template <typename T, int NRANKS_CT>
-__device__ __forceinline__ bool ddaLL128ArPeerFold(DdaLL128Pair (*lds)[kDdaLL128PairsPerSlice], int& aborted,
-                                                   bool live, int nRanks, int selfRank, int groupWarps, int warp,
+template <typename T, int NRANKS_CT, bool kAligned>
+__device__ __forceinline__ bool ddaLL128ArPeerFold(DdaLL128Pair (*lds)[kDdaLL128PairsPerSlice], int& aborted, bool live,
+                                                   int nRanks, int selfRank, int groupWarps, int warp,
                                                    const int8_t* self, int eltInSlice, const uint64_t* gather,
                                                    size_t slotWords, uint64_t flag, DdaKernelParams params) {
   const int lane = threadIdx.x % kDdaLL128Warp;
@@ -127,7 +127,7 @@ __device__ __forceinline__ bool ddaLL128ArPeerFold(DdaLL128Pair (*lds)[kDdaLL128
     if (live && rank < nRanks) {
       uint64_t vr[kDdaLL128WordsPerThread] = {};
       if (rank == selfRank) {
-        ddaLL128LoadRegsBatched<int8_t>(vr, self, eltInSlice, lane, flagLane);
+        ddaLL128LoadRegsBatched<int8_t, kDdaLL128LineElems, kAligned>(vr, self, eltInSlice, lane, flagLane);
       } else if (!ddaLL128ArPeerPoll(gather + (uint64_t)rank * (uint64_t)slotWords + 2 * lane, vr, flag, lane,
                                      params)) {
         aborted = 1;
@@ -188,18 +188,18 @@ __device__ __forceinline__ bool ddaLL128ArPeerFold(DdaLL128Pair (*lds)[kDdaLL128
 // The barriers are block-wide, so every warp runs the same number of phase-2
 // iterations. A slice belongs to one group in both phases, and only that group
 // writes it, after all of its reads, so an in-place call is safe.
-template <typename T, int NRANKS_CT>
-__launch_bounds__(kDdaLL128ArPeerMaxThreads)
-  __global__ void ddaAllReduceFlatLL128PeerPar(T* const* __restrict__ peerScratch, // ddaPeerPtrsDev: scratch bases
-                                               T* __restrict__ recvbuff, // local user output
-                                               const T* __restrict__ sendbuff, // local user input
-                                               size_t bytes, // full-message payload; multiple of 16
-                                               int selfRank, int nRanksRt,
-                                               uint32_t* __restrict__ epochDev, // per-block LL epoch cells
-                                               int epochLen, // number of cells in epochDev
-                                               size_t slicesTotal, // slices this call actually uses
-                                               size_t bankSize, // scratch bank size (from host)
-                                               DdaKernelParams params) {
+template <typename T, int NRANKS_CT, bool kAligned = true>
+__launch_bounds__(kDdaLL128ArPeerMaxThreads) __global__
+  void ddaAllReduceFlatLL128PeerPar(T* const* __restrict__ peerScratch, // ddaPeerPtrsDev: scratch bases
+                                    T* __restrict__ recvbuff, // local user output
+                                    const T* __restrict__ sendbuff, // local user input
+                                    size_t bytes, // full-message payload; multiple of 16
+                                    int selfRank, int nRanksRt,
+                                    uint32_t* __restrict__ epochDev, // per-block LL epoch cells
+                                    int epochLen, // number of cells in epochDev
+                                    size_t slicesTotal, // slices this call actually uses
+                                    size_t bankSize, // scratch bank size (from host)
+                                    DdaKernelParams params) {
   // One wire slice per warp: the copy it parked this round.
   DdaLL128Pair (*lds)[kDdaLL128PairsPerSlice] = ddaLL128ArPeerLds();
   __shared__ int aborted;
@@ -247,7 +247,8 @@ __launch_bounds__(kDdaLL128ArPeerMaxThreads)
     const size_t rem = bytes - dataByte;
     const int eltInSlice = rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
     uint64_t regs[kDdaLL128WordsPerThread] = {};
-    ddaLL128LoadRegsBatched<int8_t>(regs, srcBytes + dataByte, eltInSlice, lane, flagLane);
+    ddaLL128LoadRegsBatched<int8_t, kDdaLL128LineElems, kAligned>(regs, srcBytes + dataByte, eltInSlice, lane,
+                                                                  flagLane);
 
     for (int r = 1 + groupWarp; r < nRanks; r += groupWarps) {
       const int peer = (selfRank + r) % nRanks;
@@ -265,9 +266,9 @@ __launch_bounds__(kDdaLL128ArPeerMaxThreads)
     const size_t rem = live ? bytes - dataByte : 0;
     const int eltInSlice = rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
 
-    if (!ddaLL128ArPeerFold<T, NRANKS_CT>(lds, aborted, live, nRanks, selfRank, groupWarps, warp, srcBytes + dataByte,
-                                          eltInSlice, gatherBase + s * (size_t)kDdaLL128WireWordsPerSlice, slotWords,
-                                          flag, params)) {
+    if (!ddaLL128ArPeerFold<T, NRANKS_CT, kAligned>(
+          lds, aborted, live, nRanks, selfRank, groupWarps, warp, srcBytes + dataByte, eltInSlice,
+          gatherBase + s * (size_t)kDdaLL128WireWordsPerSlice, slotWords, flag, params)) {
       ddaSetLLEpoch(epochDev, epochLen, blockIdx.x, gridDim.x, flag32);
       return;
     }
@@ -280,7 +281,7 @@ __launch_bounds__(kDdaLL128ArPeerMaxThreads)
         out[2 * u] = v.lo;
         out[2 * u + 1] = v.hi;
       }
-      ddaLL128StoreRegs<int8_t>(dstBytes + dataByte, out, eltInSlice, lane, flagLane);
+      ddaLL128StoreRegs<int8_t, kDdaLL128LineElems, kAligned>(dstBytes + dataByte, out, eltInSlice, lane, flagLane);
     }
   }
 
@@ -305,18 +306,18 @@ __launch_bounds__(kDdaLL128ArPeerMaxThreads)
 // so sendbuff shard `peer` is read before recvbuff shard `peer` is written, in
 // program order; my own shard is read before phase 2's fold barrier and written
 // after it.
-template <typename T, int NRANKS_CT>
-__launch_bounds__(kDdaLL128ArPeerMaxThreads)
-  __global__ void ddaAllReduceTwoShotLL128PeerPar(T* const* __restrict__ peerScratch, // ddaPeerPtrsDev: scratch bases
-                                                  T* __restrict__ recvbuff, // local user output
-                                                  const T* __restrict__ sendbuff, // local user input
-                                                  size_t shardBytes, // per-rank shard payload; multiple of 16
-                                                  int selfRank, int nRanksRt,
-                                                  uint32_t* __restrict__ epochDev, // per-block LL epoch cells
-                                                  int epochLen, // number of cells in epochDev
-                                                  size_t slicesTotal, // slices per shard this call uses
-                                                  size_t bankSize, // scratch bank size (from host)
-                                                  DdaKernelParams params) {
+template <typename T, int NRANKS_CT, bool kAligned = true>
+__launch_bounds__(kDdaLL128ArPeerMaxThreads) __global__
+  void ddaAllReduceTwoShotLL128PeerPar(T* const* __restrict__ peerScratch, // ddaPeerPtrsDev: scratch bases
+                                       T* __restrict__ recvbuff, // local user output
+                                       const T* __restrict__ sendbuff, // local user input
+                                       size_t shardBytes, // per-rank shard payload; multiple of 16
+                                       int selfRank, int nRanksRt,
+                                       uint32_t* __restrict__ epochDev, // per-block LL epoch cells
+                                       int epochLen, // number of cells in epochDev
+                                       size_t slicesTotal, // slices per shard this call uses
+                                       size_t bankSize, // scratch bank size (from host)
+                                       DdaKernelParams params) {
   // One wire slice per warp: the copy it parked this round.
   DdaLL128Pair (*lds)[kDdaLL128PairsPerSlice] = ddaLL128ArPeerLds();
   __shared__ int aborted;
@@ -368,8 +369,8 @@ __launch_bounds__(kDdaLL128ArPeerMaxThreads)
     const size_t rem = shardBytes - sliceByte;
     const int eltInSlice = rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
     uint64_t regs[kDdaLL128WordsPerThread] = {};
-    ddaLL128LoadRegsBatched<int8_t>(regs, srcBytes + (size_t)peer * shardBytes + sliceByte, eltInSlice, lane,
-                                    flagLane);
+    ddaLL128LoadRegsBatched<int8_t, kDdaLL128LineElems, kAligned>(
+      regs, srcBytes + (size_t)peer * shardBytes + sliceByte, eltInSlice, lane, flagLane);
     uint64_t* scatterSlot =
       reinterpret_cast<uint64_t*>(peerScratch[peer]) + bankWords + (uint64_t)selfRank * (uint64_t)slotWords;
     ddaLL128StoreWire(scatterSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, regs, flag, flagLane);
@@ -383,10 +384,9 @@ __launch_bounds__(kDdaLL128ArPeerMaxThreads)
     const size_t rem = live ? shardBytes - sliceByte : 0;
     const int eltInSlice = rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
 
-    if (!ddaLL128ArPeerFold<T, NRANKS_CT>(lds, aborted, live, nRanks, selfRank, groupWarps, warp,
-                                          srcBytes + (size_t)selfRank * shardBytes + sliceByte, eltInSlice,
-                                          selfBase + bankWords + s * (size_t)kDdaLL128WireWordsPerSlice, slotWords,
-                                          flag, params)) {
+    if (!ddaLL128ArPeerFold<T, NRANKS_CT, kAligned>(
+          lds, aborted, live, nRanks, selfRank, groupWarps, warp, srcBytes + (size_t)selfRank * shardBytes + sliceByte,
+          eltInSlice, selfBase + bankWords + s * (size_t)kDdaLL128WireWordsPerSlice, slotWords, flag, params)) {
       ddaSetLLEpoch(epochDev, epochLen, blockIdx.x, gridDim.x, flag32);
       return;
     }
@@ -411,8 +411,8 @@ __launch_bounds__(kDdaLL128ArPeerMaxThreads)
         ddaLL128StoreWire(scatterSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, acc, flag, flagLane);
       }
       if (groupWarp == storeWarp) {
-        ddaLL128StoreRegs<int8_t>(dstBytes + (size_t)selfRank * shardBytes + sliceByte, acc, eltInSlice, lane,
-                                  flagLane);
+        ddaLL128StoreRegs<int8_t, kDdaLL128LineElems, kAligned>(dstBytes + (size_t)selfRank * shardBytes + sliceByte,
+                                                                acc, eltInSlice, lane, flagLane);
       }
     }
   }
@@ -430,7 +430,8 @@ __launch_bounds__(kDdaLL128ArPeerMaxThreads)
                             params)) {
       break;
     }
-    ddaLL128StoreRegs<int8_t>(dstBytes + (size_t)peer * shardBytes + sliceByte, vr, eltInSlice, lane, flagLane);
+    ddaLL128StoreRegs<int8_t, kDdaLL128LineElems, kAligned>(dstBytes + (size_t)peer * shardBytes + sliceByte, vr,
+                                                            eltInSlice, lane, flagLane);
   }
 
   ddaLL128WaitStores();

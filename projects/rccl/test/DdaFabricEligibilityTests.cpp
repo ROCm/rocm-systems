@@ -715,18 +715,19 @@ TEST_F(DdaFabricEligibilityTest, AllGatherLL128_UnalignedCount)
         mockComm_.get(), sendbuff_, recvbuff_, 3, ncclFloat32));
 }
 
-TEST_F(DdaFabricEligibilityTest, AllGatherLL128_UnalignedSendbuff)
+// Buffer alignment differs between ranks, and every rank has to pick the same tier, so it never changes eligibility.
+TEST_F(DdaFabricEligibilityTest, AllGatherLL128_UnalignedBuffersStayEligible)
 {
-    void* unaligned = reinterpret_cast<void*>(0x1008);
-    EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
-        mockComm_.get(), unaligned, recvbuff_, 4, ncclFloat32));
-}
-
-TEST_F(DdaFabricEligibilityTest, AllGatherLL128_UnalignedRecvbuff)
-{
-    void* unaligned = reinterpret_cast<void*>(0x2008);
-    EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
-        mockComm_.get(), sendbuff_, unaligned, 4, ncclFloat32));
+    ASSERT_TRUE(ncclAllGatherDdaFabricLL128Eligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
+    for (uintptr_t offset : {1, 4, 8}) {
+        void* sendMis = static_cast<char*>(sendbuff_) + offset;
+        void* recvMis = static_cast<char*>(recvbuff_) + offset;
+        EXPECT_TRUE(ncclAllGatherDdaFabricLL128Eligible(
+            mockComm_.get(), sendMis, recvbuff_, 4, ncclFloat32)) << "offset " << offset;
+        EXPECT_TRUE(ncclAllGatherDdaFabricLL128Eligible(
+            mockComm_.get(), sendbuff_, recvMis, 4, ncclFloat32)) << "offset " << offset;
+    }
 }
 
 // The cap is derived from the scratch rather than fixed, so shrinking the
@@ -1133,15 +1134,20 @@ TEST_F(DdaFabricEligibilityTest, AllReduceLL128OneShot_UnalignedBytes)
         mockComm_.get(), sendbuff_, recvbuff_, 1, ncclFloat32, ncclSum));
 }
 
-// The 16-byte wire accesses need both user buffers 16-byte aligned, which the LL
-// tiers do not require. 0x1008 is 8-byte aligned but not 16.
-TEST_F(DdaFabricEligibilityTest, AllReduceLL128OneShot_UnalignedBuffers)
+// Buffer alignment differs between ranks, and every rank has to pick the same tier, so it never changes eligibility:
+// a misaligned rank's launcher takes the kernels' unaligned user-buffer access instead.
+TEST_F(DdaFabricEligibilityTest, AllReduceLL128OneShot_UnalignedBuffersStayEligible)
 {
-    void* misaligned = reinterpret_cast<void*>(0x1008);
-    EXPECT_FALSE(ddaLL128ArOneShotEligible(
-        mockComm_.get(), misaligned, recvbuff_, 4, ncclFloat32, ncclSum));
-    EXPECT_FALSE(ddaLL128ArOneShotEligible(
-        mockComm_.get(), sendbuff_, misaligned, 4, ncclFloat32, ncclSum));
+    ASSERT_TRUE(ddaLL128ArOneShotEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32, ncclSum));
+    for (uintptr_t offset : {1, 4, 8}) {
+        void* sendMis = static_cast<char*>(sendbuff_) + offset;
+        void* recvMis = static_cast<char*>(recvbuff_) + offset;
+        EXPECT_TRUE(ddaLL128ArOneShotEligible(
+            mockComm_.get(), sendMis, recvbuff_, 4, ncclFloat32, ncclSum)) << "offset " << offset;
+        EXPECT_TRUE(ddaLL128ArOneShotEligible(
+            mockComm_.get(), sendbuff_, recvMis, 4, ncclFloat32, ncclSum)) << "offset " << offset;
+    }
 }
 
 // A scratch too small to give each rank even one slice floors the slot stride to
@@ -1199,6 +1205,22 @@ TEST_F(DdaFabricEligibilityTest, AllReduceLL128TwoShot_ShardUnaligned)
         mockComm_.get(), sendbuff_, recvbuff_, 32, ncclFloat32, ncclSum));
     EXPECT_FALSE(ddaLL128ArTwoShotEligible(
         mockComm_.get(), sendbuff_, recvbuff_, 8, ncclFloat32, ncclSum));
+}
+
+// As in the one-shot, buffer alignment never changes eligibility.
+TEST_F(DdaFabricEligibilityTest, AllReduceLL128TwoShot_UnalignedBuffersStayEligible)
+{
+    mockComm_.comm.nRanks = 8;
+    ASSERT_TRUE(ddaLL128ArTwoShotEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 32, ncclFloat32, ncclSum));
+    for (uintptr_t offset : {1, 4, 8}) {
+        void* sendMis = static_cast<char*>(sendbuff_) + offset;
+        void* recvMis = static_cast<char*>(recvbuff_) + offset;
+        EXPECT_TRUE(ddaLL128ArTwoShotEligible(
+            mockComm_.get(), sendMis, recvbuff_, 32, ncclFloat32, ncclSum)) << "offset " << offset;
+        EXPECT_TRUE(ddaLL128ArTwoShotEligible(
+            mockComm_.get(), sendbuff_, recvMis, 32, ncclFloat32, ncclSum)) << "offset " << offset;
+    }
 }
 
 TEST_F(DdaFabricEligibilityTest, AllReduceLL128TwoShot_EligibleBfloat16)
@@ -1484,18 +1506,19 @@ TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_UnalignedCount)
         mockComm_.get(), sendbuff_, recvbuff_, 3, ncclFloat32));
 }
 
-TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_UnalignedSendbuff)
+// Buffer alignment differs between ranks, and every rank has to pick the same tier, so it never changes eligibility.
+TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_UnalignedBuffersStayEligible)
 {
-    void* unaligned = reinterpret_cast<void*>(0x1008);
-    EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
-        mockComm_.get(), unaligned, recvbuff_, 4, ncclFloat32));
-}
-
-TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_UnalignedRecvbuff)
-{
-    void* unaligned = reinterpret_cast<void*>(0x2008);
-    EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
-        mockComm_.get(), sendbuff_, unaligned, 4, ncclFloat32));
+    ASSERT_TRUE(ncclAllGatherDdaFabricLL128Eligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
+    for (uintptr_t offset : {1, 4, 8}) {
+        void* sendMis = static_cast<char*>(sendbuff_) + offset;
+        void* recvMis = static_cast<char*>(recvbuff_) + offset;
+        EXPECT_TRUE(ncclAllGatherDdaFabricLL128Eligible(
+            mockComm_.get(), sendMis, recvbuff_, 4, ncclFloat32)) << "offset " << offset;
+        EXPECT_TRUE(ncclAllGatherDdaFabricLL128Eligible(
+            mockComm_.get(), sendbuff_, recvMis, 4, ncclFloat32)) << "offset " << offset;
+    }
 }
 
 // The cap is derived from the scratch rather than fixed, so shrinking the
@@ -1600,13 +1623,19 @@ TEST_F(DdaFabricLL128EligibilityTest, ReduceScatterLL128_UnalignedBytes)
         mockComm_.get(), sendbuff_, recvbuff_, 2, ncclFloat32, ncclSum));
 }
 
-TEST_F(DdaFabricLL128EligibilityTest, ReduceScatterLL128_UnalignedBuffers)
+// Buffer alignment differs between ranks, and every rank has to pick the same tier, so it never changes eligibility.
+TEST_F(DdaFabricLL128EligibilityTest, ReduceScatterLL128_UnalignedBuffersStayEligible)
 {
-    void* misaligned = reinterpret_cast<void*>(0x1008);
-    EXPECT_FALSE(ncclReduceScatterDdaFabricLL128Eligible(
-        mockComm_.get(), misaligned, recvbuff_, 4, ncclFloat32, ncclSum));
-    EXPECT_FALSE(ncclReduceScatterDdaFabricLL128Eligible(
-        mockComm_.get(), sendbuff_, misaligned, 4, ncclFloat32, ncclSum));
+    ASSERT_TRUE(ncclReduceScatterDdaFabricLL128Eligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32, ncclSum));
+    for (uintptr_t offset : {1, 4, 8}) {
+        void* sendMis = static_cast<char*>(sendbuff_) + offset;
+        void* recvMis = static_cast<char*>(recvbuff_) + offset;
+        EXPECT_TRUE(ncclReduceScatterDdaFabricLL128Eligible(
+            mockComm_.get(), sendMis, recvbuff_, 4, ncclFloat32, ncclSum)) << "offset " << offset;
+        EXPECT_TRUE(ncclReduceScatterDdaFabricLL128Eligible(
+            mockComm_.get(), sendbuff_, recvMis, 4, ncclFloat32, ncclSum)) << "offset " << offset;
+    }
 }
 
 TEST_F(DdaFabricLL128EligibilityTest, ReduceScatterLL128_MissingEpochCells)

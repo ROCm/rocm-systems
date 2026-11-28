@@ -318,31 +318,38 @@ static std::pair<dim3, dim3> ddaArLL128Geom(const ncclComm* comm, size_t bytes, 
 }
 
 template <typename T>
-static DdaArLL128Kernel<T> ddaArLL128OneShotKernel(int nRanks) {
-  return ddaArPickRanksCt(nRanks, [](auto n) -> DdaArLL128Kernel<T> {
-    constexpr int kN = decltype(n)::value;
-    return &dda::common::ddaAllReduceFlatLL128<T, kN>;
+static DdaArLL128Kernel<T> ddaArLL128OneShotKernel(int nRanks, bool aligned) {
+  return dda::common::ddaPickAligned(aligned, [nRanks](auto a) {
+    return ddaArPickRanksCt(nRanks, [](auto n) -> DdaArLL128Kernel<T> {
+      constexpr int kN = decltype(n)::value;
+      return &dda::common::ddaAllReduceFlatLL128<T, kN, decltype(a)::value>;
+    });
   });
 }
 
 template <typename T>
-static DdaArLL128Kernel<T> ddaArLL128OneShotPeerParKernel(int nRanks) {
-  return ddaArPickRanksCt(nRanks, [](auto n) -> DdaArLL128Kernel<T> {
-    constexpr int kN = decltype(n)::value;
-    return &dda::common::ddaAllReduceFlatLL128PeerPar<T, kN>;
+static DdaArLL128Kernel<T> ddaArLL128OneShotPeerParKernel(int nRanks, bool aligned) {
+  return dda::common::ddaPickAligned(aligned, [nRanks](auto a) {
+    return ddaArPickRanksCt(nRanks, [](auto n) -> DdaArLL128Kernel<T> {
+      constexpr int kN = decltype(n)::value;
+      return &dda::common::ddaAllReduceFlatLL128PeerPar<T, kN, decltype(a)::value>;
+    });
   });
 }
 
 template <typename T>
-static DdaArLL128Kernel<T> ddaArLL128TwoShotKernel(int nRanks, int wire, bool peerPar) {
-  return ddaArPickRanksCt(nRanks, [wire, peerPar](auto n) -> DdaArLL128Kernel<T> {
-    constexpr int kN = decltype(n)::value;
-    if (peerPar) {
-      return &dda::common::ddaAllReduceTwoShotLL128PeerPar<T, kN>;
-    }
-    return wire == dda::common::kDdaLL128WireAsync
-             ? &dda::common::ddaAllReduceTwoShotLL128<T, kN, dda::common::kDdaLL128WireAsync>
-             : &dda::common::ddaAllReduceTwoShotLL128<T, kN, dda::common::kDdaLL128WireCoop>;
+static DdaArLL128Kernel<T> ddaArLL128TwoShotKernel(int nRanks, int wire, bool peerPar, bool aligned) {
+  return dda::common::ddaPickAligned(aligned, [nRanks, wire, peerPar](auto a) {
+    return ddaArPickRanksCt(nRanks, [wire, peerPar](auto n) -> DdaArLL128Kernel<T> {
+      constexpr int kN = decltype(n)::value;
+      constexpr bool kAligned = decltype(a)::value;
+      if (peerPar) {
+        return &dda::common::ddaAllReduceTwoShotLL128PeerPar<T, kN, kAligned>;
+      }
+      return wire == dda::common::kDdaLL128WireAsync ?
+               &dda::common::ddaAllReduceTwoShotLL128<T, kN, dda::common::kDdaLL128WireAsync, kAligned> :
+               &dda::common::ddaAllReduceTwoShotLL128<T, kN, dda::common::kDdaLL128WireCoop, kAligned>;
+    });
   });
 }
 
@@ -369,16 +376,17 @@ static ncclResult_t ncclAllReduceDdaFabricLL128OneShotTyped(const void* sendbuff
   uint32_t* epochDev = comm->ddaLLEpochDev;
   const int epochLen = comm->ddaLLEpochLen;
 
+  const bool aligned = dda::common::ddaUserBuffers16ByteAligned(sendbuff, recvbuff);
   INFO(NCCL_COLL,
-       "DDA fabric AllReduce LL128 one-shot: nRanks=%d bytes=%zu slices=%zu grid=%u block=%u peerPar=%d "
+       "DDA fabric AllReduce LL128 one-shot: nRanks=%d bytes=%zu slices=%zu grid=%u block=%u peerPar=%d aligned=%d "
        "(bankSize=%zu)",
-       nRanks, bytes, slices, grid.x, block.x, (int)peerPar, bankSize);
+       nRanks, bytes, slices, grid.x, block.x, (int)peerPar, (int)aligned, bankSize);
 
   const size_t lds = ddaArLL128SharedBytes(dda::common::kDdaLL128WireCoop, peerPar, block.x);
   const dda::common::DdaKernelParams params{comm->abortFlagDev};
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
   const DdaArLL128Kernel<T> kernel =
-    peerPar ? ddaArLL128OneShotPeerParKernel<T>(nRanks) : ddaArLL128OneShotKernel<T>(nRanks);
+    peerPar ? ddaArLL128OneShotPeerParKernel<T>(nRanks, aligned) : ddaArLL128OneShotKernel<T>(nRanks, aligned);
   hipExtLaunchKernelGGL(kernel, grid, block, lds, stream, /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers,
                         static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), bytes, comm->rank, nRanks,
                         epochDev, epochLen, slices, bankSize, params);
@@ -412,14 +420,15 @@ static ncclResult_t ncclAllReduceDdaFabricLL128TwoShotTyped(const void* sendbuff
 
   const size_t lds = ddaArLL128SharedBytes(wire, peerPar, block.x);
 
+  const bool aligned = dda::common::ddaUserBuffers16ByteAligned(sendbuff, recvbuff);
   INFO(NCCL_COLL,
        "DDA fabric AllReduce LL128 two-shot: nRanks=%d bytes=%zu shardBytes=%zu slices=%zu grid=%u block=%u wire=%d "
-       "lds=%zu peerPar=%d (bankSize=%zu)",
-       nRanks, bytes, shardBytes, slices, grid.x, block.x, wire, lds, (int)peerPar, bankSize);
+       "lds=%zu peerPar=%d aligned=%d (bankSize=%zu)",
+       nRanks, bytes, shardBytes, slices, grid.x, block.x, wire, lds, (int)peerPar, (int)aligned, bankSize);
 
   const dda::common::DdaKernelParams params{comm->abortFlagDev};
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
-  hipExtLaunchKernelGGL(ddaArLL128TwoShotKernel<T>(nRanks, wire, peerPar), grid, block, lds, stream,
+  hipExtLaunchKernelGGL(ddaArLL128TwoShotKernel<T>(nRanks, wire, peerPar, aligned), grid, block, lds, stream,
                         /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff),
                         static_cast<const T*>(sendbuff), shardBytes, comm->rank, nRanks, epochDev, epochLen, slices,
                         bankSize, params);
@@ -617,12 +626,9 @@ static bool ddaLL128ArOneShotEligibleCapped(ncclComm* comm, const void* sendbuff
   const size_t bytes = count * ncclTypeSize(datatype);
 
   // The LL128 line format packs 16B-aligned data with no chunk straddling a
-  // line, so a partial 16B chunk has nowhere to go, and the 16B wire accesses
-  // need both user buffers aligned to match.
+  // line, so a partial 16B chunk has nowhere to go. Buffer alignment is not
+  // checked: it differs between ranks, and every rank has to pick the same tier.
   if (bytes % 16 != 0) {
-    return false;
-  }
-  if ((reinterpret_cast<uintptr_t>(sendbuff) % 16) != 0 || (reinterpret_cast<uintptr_t>(recvbuff) % 16) != 0) {
     return false;
   }
   // can the bank hold the data in the slot
@@ -642,6 +648,8 @@ bool ddaLL128ArOneShotEligible(ncclComm* comm, const void* sendbuff, void* recvb
 // Shape/resource eligibility for the LL128 two-shot variant.
 bool ddaLL128ArTwoShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                ncclDataType_t datatype, ncclRedOp_t op) {
+  (void)sendbuff;
+  (void)recvbuff;
   if (count * ncclTypeSize(datatype) > rcclDdaLL128TwoShotThreshold(comm)) {
     return false;
   }
@@ -672,7 +680,7 @@ bool ddaLL128ArTwoShotEligible(ncclComm* comm, const void* sendbuff, void* recvb
 
   // Every rank owns exactly one shard, and the LL128 line format packs 16B-aligned
   // data with no chunk straddling a line, so the shard itself must be a whole
-  // number of 16B chunks.
+  // number of 16B chunks. As in the one-shot, buffer alignment is not checked.
   if (bytes % (size_t)comm->nRanks != 0) {
     return false;
   }
@@ -680,9 +688,6 @@ bool ddaLL128ArTwoShotEligible(ncclComm* comm, const void* sendbuff, void* recvb
   const size_t shardBytes = bytes / (size_t)comm->nRanks;
 
   if (shardBytes % 16 != 0) {
-    return false;
-  }
-  if ((reinterpret_cast<uintptr_t>(sendbuff) % 16) != 0 || (reinterpret_cast<uintptr_t>(recvbuff) % 16) != 0) {
     return false;
   }
 

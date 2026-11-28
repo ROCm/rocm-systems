@@ -110,6 +110,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 ### Removed
 
 ### Resolved issues
+* Fixed gfx1250 DDA fabric `ncclAllReduce`, `ncclAllGather` and `ncclReduceScatter` hanging when some ranks pass user buffers that are not 16-byte aligned and others pass aligned ones. LL128 eligibility checked each rank's own buffer addresses, so ranks chose different algorithms and waited on each other forever. Eligibility now depends only on the message, as for `ncclBroadcast`, and each rank picks unaligned-safe loads and stores for its own buffers when they are not 16-byte aligned. Misaligned buffers now also use LL128 instead of falling back to a slower path.
 * Fixed `NCCL_CE_BATCH_CAPTURE_ENABLE=1` producing wrong results under HIP graph capture. `hipMemcpyBatchAsync` does not support graph capture, so Copy Engine copies recorded into a graph now always use per-copy `hipMemcpyAsync`, as with the variable unset, and RCCL logs once that it ignored the variable.
 * Fixed hierarchical Copy Engine `ncclAlltoAllv` failing with `ncclInvalidArgument` on rail-only host RMA (`NCCL_CROSS_NIC=0`). Like `ncclAlltoAll`, it puts to every remote rank, so it now falls back to the kernel path unless host RMA reaches every rank.
 * When mlx5 data-direct DMA-BUF registration is missing or fails, RCCL uses `ibv_reg_dmabuf_mr` and reports a failed data-direct attempt once per protection domain. A missing `mlx5dv_reg_dmabuf_mr` leaves data-direct off.

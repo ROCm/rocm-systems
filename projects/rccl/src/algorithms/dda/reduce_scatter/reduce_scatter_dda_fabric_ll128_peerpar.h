@@ -93,7 +93,7 @@ __device__ __forceinline__ DdaLL128RsPeerPos ddaLL128RsPeerPos(int nRanks) {
 
 // Rank-order fold of one slice across a warp group: rounds of P ranks parked in lds.in and folded after a block-wide
 // barrier, the sum left in lds.red. Every warp calls it once per slice group. Returns false, block-uniform, on abort.
-template <typename T, int NRANKS_CT>
+template <typename T, int NRANKS_CT, bool kAligned>
 __device__ __forceinline__ bool ddaLL128RsPeerFold(DdaLL128RsPeerLds& lds, const DdaLL128RsPeerPos& p, bool live,
                                                    int nRanks, int selfRank, const int8_t* self, int eltInSlice,
                                                    const uint64_t* gather, size_t slotWords, uint64_t flag,
@@ -107,7 +107,7 @@ __device__ __forceinline__ bool ddaLL128RsPeerFold(DdaLL128RsPeerLds& lds, const
     if (live && rank < nRanks) {
       uint64_t vr[kDdaLL128WordsPerThread] = {};
       if (rank == selfRank) {
-        ddaLL128LoadRegsBatched<int8_t>(vr, self, eltInSlice, p.lane, p.flagLane);
+        ddaLL128LoadRegsBatched<int8_t, kDdaLL128LineElems, kAligned>(vr, self, eltInSlice, p.lane, p.flagLane);
       } else if (!ddaLL128RsPeerPoll(gather + (uint64_t)rank * (uint64_t)slotWords + 2 * p.lane, vr, flag, p.lane,
                                      params)) {
         atomicExch(&lds.aborted, 1);
@@ -170,18 +170,18 @@ __device__ __forceinline__ void ddaLL128RsPeerLoadRed(const DdaLL128RsPeerLds& l
 
 // Peer-parallel LL128 reduce-scatter with ddaReduceScatterFabricLL128's contract and scratch layout. Phase 1 spreads
 // (slice, peer) sends over every warp of the grid, and phase 2 folds each slice of my shard across a warp group.
-template <typename T, int NRANKS_CT>
-__launch_bounds__(kDdaLL128RsPeerMaxThreads)
-  __global__ void ddaReduceScatterFabricLL128PeerPar(T* const* __restrict__ peerScratch, // ddaPeerPtrsDev
-                                                     T* __restrict__ recvbuff, // local user output (one shard)
-                                                     const T* __restrict__ sendbuff, // local input (nRanks shards)
-                                                     size_t shardBytes, // per-rank shard payload, a multiple of 16
-                                                     int selfRank, int nRanksRt,
-                                                     uint32_t* __restrict__ epochDev, // per-block LL epoch cells
-                                                     int epochLen, // number of cells in epochDev
-                                                     size_t slicesTotal, // slices per shard this call uses
-                                                     size_t bankSize, // scratch bank size (from host)
-                                                     DdaKernelParams params) {
+template <typename T, int NRANKS_CT, bool kAligned = true>
+__launch_bounds__(kDdaLL128RsPeerMaxThreads) __global__
+  void ddaReduceScatterFabricLL128PeerPar(T* const* __restrict__ peerScratch, // ddaPeerPtrsDev
+                                          T* __restrict__ recvbuff, // local user output (one shard)
+                                          const T* __restrict__ sendbuff, // local input (nRanks shards)
+                                          size_t shardBytes, // per-rank shard payload, a multiple of 16
+                                          int selfRank, int nRanksRt,
+                                          uint32_t* __restrict__ epochDev, // per-block LL epoch cells
+                                          int epochLen, // number of cells in epochDev
+                                          size_t slicesTotal, // slices per shard this call uses
+                                          size_t bankSize, // scratch bank size (from host)
+                                          DdaKernelParams params) {
   __shared__ DdaLL128RsPeerLds lds;
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
   const DdaLL128RsPeerPos p = ddaLL128RsPeerPos(nRanks);
@@ -210,8 +210,8 @@ __launch_bounds__(kDdaLL128RsPeerMaxThreads)
     const size_t rem = shardBytes - sliceByte;
     const int eltInSlice = rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
     uint64_t regs[kDdaLL128WordsPerThread] = {};
-    ddaLL128LoadRegsBatched<int8_t>(regs, srcBytes + (size_t)peer * shardBytes + sliceByte, eltInSlice, p.lane,
-                                    p.flagLane);
+    ddaLL128LoadRegsBatched<int8_t, kDdaLL128LineElems, kAligned>(
+      regs, srcBytes + (size_t)peer * shardBytes + sliceByte, eltInSlice, p.lane, p.flagLane);
     uint64_t* scatterSlot =
       reinterpret_cast<uint64_t*>(peerScratch[peer]) + bankWords + (uint64_t)selfRank * (uint64_t)slotWords;
     ddaLL128StoreWire(scatterSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * p.lane, regs, flag, p.flagLane);
@@ -226,16 +226,16 @@ __launch_bounds__(kDdaLL128RsPeerMaxThreads)
     const int eltInSlice =
       !live ? 0 : (shardBytes - sliceByte < (size_t)kDdaLL128DataBytesPerSlice ? (int)(shardBytes - sliceByte)
                                                                                : kDdaLL128DataBytesPerSlice);
-    if (!ddaLL128RsPeerFold<T, NRANKS_CT>(lds, p, live, nRanks, selfRank,
-                                          srcBytes + (size_t)selfRank * shardBytes + sliceByte, eltInSlice,
-                                          gatherBase + s * (size_t)kDdaLL128WireWordsPerSlice, slotWords, flag,
-                                          params)) {
+    if (!ddaLL128RsPeerFold<T, NRANKS_CT, kAligned>(
+          lds, p, live, nRanks, selfRank, srcBytes + (size_t)selfRank * shardBytes + sliceByte, eltInSlice,
+          gatherBase + s * (size_t)kDdaLL128WireWordsPerSlice, slotWords, flag, params)) {
       break;
     }
     if (live && p.pw == 0) {
       uint64_t acc[kDdaLL128WordsPerThread];
       ddaLL128RsPeerLoadRed(lds, p, acc);
-      ddaLL128StoreRegs<int8_t>(dstBytes + sliceByte, acc, eltInSlice, p.lane, p.flagLane);
+      ddaLL128StoreRegs<int8_t, kDdaLL128LineElems, kAligned>(dstBytes + sliceByte, acc, eltInSlice, p.lane,
+                                                              p.flagLane);
     }
   }
 
