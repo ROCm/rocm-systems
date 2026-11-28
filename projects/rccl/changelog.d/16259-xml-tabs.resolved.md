@@ -1,0 +1,1 @@
+* Fixed `NCCL_TOPO_FILE` and `NCCL_GRAPH_FILE` XML files indented or separated with tabs failing to load with `expecting '<'`. Tabs are now treated as whitespace between elements and between attributes, and runs of spaces or tabs between attributes no longer add empty attributes.

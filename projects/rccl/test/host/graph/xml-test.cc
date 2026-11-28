@@ -120,6 +120,44 @@ TEST_F(XmlMicrotest, GetXmlFromFile_SkipsUnknownElementsWithTheirChildren) {
   EXPECT_TRUE(Logged("Loading unnamed topology"));
 }
 
+TEST_F(XmlMicrotest, GetXmlFromFile_TabIndentationIsWhitespace) {
+  ASSERT_EQ(ncclSuccess, Parse("<system version=\"2\">\n"
+                               "\t<cpu numaid=\"0\">\n"
+                               "\t\t<pci busid=\"0000:01:00.0\"/>\n"
+                               "\t</cpu>\n"
+                               "</system>\n"));
+
+  EXPECT_EQ(3, xml_->maxIndex);
+  EXPECT_NE(nullptr, Find("pci", "busid", "0000:01:00.0"));
+}
+
+TEST_F(XmlMicrotest, GetXmlFromFile_TabSeparatesAttributesInsideATag) {
+  ASSERT_EQ(ncclSuccess, Parse("<system\tversion=\"2\">"
+                               "<cpu\tnumaid=\"0\"\taffinity=\"ff\"><pci\tbusid=\"0000:01:00.0\"\t/></cpu>"
+                               "</system>"));
+
+  ncclXmlNode* cpu = Find("cpu", "numaid", "0");
+  ASSERT_NE(nullptr, cpu);
+  EXPECT_EQ("ff", Attr(cpu, "affinity"));
+  EXPECT_EQ(2, cpu->nAttrs);
+  ncclXmlNode* pci = Find("pci", "busid", "0000:01:00.0");
+  ASSERT_NE(nullptr, pci);
+  EXPECT_EQ(NODE_TYPE_SINGLE, pci->type);
+  EXPECT_EQ(1, pci->nAttrs) << "the tab before /> is not an attribute";
+}
+
+TEST_F(XmlMicrotest, GetXmlFromFile_SeparatorRunsAddNoEmptyAttributes) {
+  ASSERT_EQ(ncclSuccess, Parse("<system version=\"2\">"
+                               "<cpu\t\tnumaid=\"0\"  \t affinity=\"ff\"\t\t></cpu>"
+                               "</system>"));
+
+  ncclXmlNode* cpu = Find("cpu", "numaid", "0");
+  ASSERT_NE(nullptr, cpu);
+  EXPECT_EQ(2, cpu->nAttrs);
+  EXPECT_EQ("ff", Attr(cpu, "affinity"));
+  EXPECT_EQ(NODE_TYPE_OPEN, cpu->type);
+}
+
 TEST_F(XmlMicrotest, GetXmlFromFile_CommentsMayEndInsideTheTagName) {
   ASSERT_EQ(ncclSuccess, Parse("<!--x--><!-- a > b -- c --><system version=\"2\"/>"));
 
