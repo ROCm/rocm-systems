@@ -101,6 +101,9 @@ virtualMemoryManagement:
   Unit_hipMemAddressReserve_Negative:
     <<: *level_default
   Unit_hipMemAddressReserve_Capture: *level_default
+  Unit_hipMemAddressReserve_Exhaustion: *level_default
+  Unit_hipMemAddressReserve_Exhaustion_CaptureMallocAsync: *level_default
+  Unit_hipMemAddressReserve_Exhaustion_GraphMemAllocNode: *level_default
   Unit_hipMemCreate_BasicAllocateDeAlloc_MultGranularity:
     <<: *level_default
   Unit_hipMemCreate_ChkDev2HstMemcpy_ReleaseHdlPostUnmap:

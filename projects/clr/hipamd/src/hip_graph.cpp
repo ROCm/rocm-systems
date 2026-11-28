@@ -1168,6 +1168,11 @@ hipError_t capturehipMallocAsync(hipStream_t stream, hipMemPool_t mem_pool, size
   }
   // Without VM runtime executes the node during capture, so it can return a valid device pointer
   *dev_ptr = (HIP_MEM_POOL_USE_VM) ? mem_alloc_node->ReserveAddress() : mem_alloc_node->Execute(s);
+  if (*dev_ptr == nullptr) {
+    amd::ScopedLock lock(hip::Graph::graphSetLock_);
+    s->GetCaptureGraph()->RemoveNode(mem_alloc_node);
+    return hipErrorOutOfMemory;
+  }
   s->SetLastCapturedNode(mem_alloc_node);
 
   // Track the allocation like the explicit path, so a captured escaped allocation
@@ -3563,6 +3568,11 @@ hipError_t hipGraphAddNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
       // The address must be provided during the node creation time
       nodeParams->alloc.dptr =
           (HIP_MEM_POOL_USE_VM) ? mem_alloc_node->ReserveAddress() : mem_alloc_node->Execute();
+      if (nodeParams->alloc.dptr == nullptr) {
+        amd::ScopedLock lock(hip::Graph::graphSetLock_);
+        reinterpret_cast<hip::Graph*>(graph)->RemoveNode(node);
+        HIP_RETURN(hipErrorOutOfMemory);
+      }
       break;
     case hipGraphNodeTypeMemFree:
       if (nodeParams->free.dptr == nullptr) {
