@@ -463,7 +463,7 @@ memory_allocation_impl(Args... args)
 
         tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION,
                                    ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION,
-                                   OpIdx,
+                                   rocprofiler_enum,
                                    tracing_data);
         // if no contexts are tracing memory copies for this direction, execute as usual
         if(tracing_data.empty())
@@ -603,7 +603,7 @@ memory_free_impl(Args... args)
 
         tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION,
                                    ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION,
-                                   OpIdx,
+                                   rocprofiler_enum,
                                    tracing_data);
         // if no contexts are tracing memory copies for this direction, execute as usual
         if(tracing_data.empty())
