@@ -5495,8 +5495,10 @@ HSAKMT_STATUS hsakmt_fmm_register_shared_memory(HsaKFDContext *ctx,
 	}
 
 	if (importArgs.mmap_offset) {
+		struct kfd_ioctl_export_dmabuf_args exportArgs = {0};
 		int32_t gpu_mem_id = gpu_mem_find_by_gpu_id(fmm_ctx, importArgs.gpu_id);
 		void *ret;
+		int dmabuf_fd;
 
 		if (gpu_mem_id < 0) {
 			vm_remove_object(aperture, obj);
@@ -5508,9 +5510,31 @@ HSAKMT_STATUS hsakmt_fmm_register_shared_memory(HsaKFDContext *ctx,
 		obj->node_id = fmm_ctx->gpu_mem[gpu_mem_id].node_id;
 		pthread_mutex_unlock(&aperture->fmm_mutex);
 
+		/*
+		 * Map through the dma-buf fd, not the render-node fake offset.
+		 * IPC import of a foreign dma-buf (memfd/udmabuf) creates an
+		 * EXTERNAL SG BO; CPU fault via the render node SIGBUSes.
+		 * EXPORT_DMABUF re-exports the original dma-buf (udmabuf or
+		 * amdgpu). mmap on that fd uses the exporter's vm_ops
+		 * (mmap_udmabuf / drm_gem_dmabuf_mmap).
+		 */
+		exportArgs.handle = importArgs.handle;
+		exportArgs.flags = O_CLOEXEC;
+		r = hsakmt_ioctl(ctx->fd, AMDKFD_IOC_EXPORT_DMABUF,
+				 (void *)&exportArgs);
+		if (r) {
+			pthread_mutex_lock(&aperture->fmm_mutex);
+			vm_remove_object(aperture, obj);
+			aperture_release_area(aperture, reservedMem,
+					(SizeInPages << PAGE_SHIFT));
+			err = HSAKMT_STATUS_ERROR;
+			goto err_free_mem_handle;
+		}
+		dmabuf_fd = exportArgs.dmabuf_fd;
+
 		ret = fmm_map_to_cpu(reservedMem, (SizeInPages << PAGE_SHIFT),
-				true, fmm_ctx->gpu_mem[gpu_mem_id].drm_render_fd,
-				importArgs.mmap_offset);
+				    true, dmabuf_fd, 0);
+		close(dmabuf_fd);
 
 		if (ret == MAP_FAILED) {
 			pthread_mutex_lock(&aperture->fmm_mutex);
