@@ -427,6 +427,33 @@ SPECIALIZE_REDUCE(FuncMinMax, double, 1, double, fn.isMinNotMax ? fmin(x, y) : f
 
 SPECIALIZE_REDUCE(FuncMinMax, half, 1, half, fn.isMinNotMax ? __hmin(x, y) : __hmax(x, y))
 
+#if defined(__HIP_PLATFORM_AMD__)
+// __hmin/__hmax open-code a NaN check per element; the packed instructions apply
+// the same rule (the number beats NaN) to both lanes. They differ from __hmin
+// only for +0 vs -0 (always -0 for min, +0 for max, rather than the first
+// operand) and for which payload two NaNs give.
+typedef _Float16 rccl_f16x2_t __attribute__((ext_vector_type(2)));
+
+__device__ __forceinline__ uint32_t hminmax2_f16(uint32_t x, uint32_t y, bool isMin) {
+  union {
+    uint32_t storage;
+    rccl_f16x2_t f16x2;
+  } a, b, r;
+  a.storage = x;
+  b.storage = y;
+#if __has_builtin(__builtin_elementwise_minnum)
+  r.f16x2 = isMin ? __builtin_elementwise_minnum(a.f16x2, b.f16x2)
+                  : __builtin_elementwise_maxnum(a.f16x2, b.f16x2);
+#else
+  r.f16x2 = isMin ? __builtin_elementwise_min(a.f16x2, b.f16x2)
+                  : __builtin_elementwise_max(a.f16x2, b.f16x2);
+#endif
+  return r.storage;
+}
+
+SPECIALIZE_REDUCE(FuncMinMax, half, 2, uint32_t, hminmax2_f16(x, y, fn.isMinNotMax))
+#endif
+
 #if defined(RCCL_BFLOAT16)
 #if __CUDA_ARCH__ >= 800
 SPECIALIZE_REDUCE(FuncSum, __nv_bfloat16, 1, __nv_bfloat16, __hadd(x, y))
@@ -443,6 +470,69 @@ SPECIALIZE_REDUCE(FuncSum, hip_bfloat16, 1, hip_bfloat16, (hip_bfloat16)((float)
 SPECIALIZE_REDUCE(FuncProd, hip_bfloat16, 1, hip_bfloat16, (hip_bfloat16)((float)(x) * (float)(y)))
 SPECIALIZE_REDUCE(FuncMinMax, hip_bfloat16, 1, hip_bfloat16,
                   (hip_bfloat16)(fn.isMinNotMax ? fminf((float)(x), (float)(y)) : fmaxf((float)(x), (float)(y))))
+
+// The same widen, operate, narrow as the 1-wide expressions above, elementwise,
+// but one v_cvt_pk_bf16_f32 narrows both lanes.
+typedef uint32_t bf16x2_storage_t;
+typedef float rccl_f32x2_t __attribute__((ext_vector_type(2)));
+typedef __bf16 rccl_bf16x2_t __attribute__((ext_vector_type(2)));
+
+// Two spellings of the same widening, kept on purpose: _cvt tells the compiler
+// the floats are canonical, so fminf/fmaxf need no quieting v_max_f32; _bitcast
+// lets it pair the lanes into v_pk_add_f32/v_pk_mul_f32.
+__device__ __forceinline__ rccl_f32x2_t rccl_widen2_f32_bf16_cvt(bf16x2_storage_t x) {
+  union {
+    bf16x2_storage_t storage;
+    rccl_bf16x2_t bf16x2;
+  } u;
+  u.storage = x;
+  return __builtin_convertvector(u.bf16x2, rccl_f32x2_t);
+}
+
+__device__ __forceinline__ rccl_f32x2_t rccl_widen2_f32_bf16_bitcast(bf16x2_storage_t x) {
+  union {
+    uint32_t u;
+    float f;
+  } lo, hi;
+  lo.u = x << 16;
+  hi.u = x & 0xFFFF0000u;
+  rccl_f32x2_t v = {lo.f, hi.f};
+  return v;
+}
+
+__device__ __forceinline__ bf16x2_storage_t rccl_narrow2_bf16_f32(rccl_f32x2_t v) {
+  union {
+    rccl_bf16x2_t bf16x2;
+    bf16x2_storage_t storage;
+  } u;
+  u.bf16x2 = __builtin_convertvector(v, rccl_bf16x2_t);
+  return u.storage;
+}
+
+__device__ __forceinline__ bf16x2_storage_t hadd2_bf16(bf16x2_storage_t x, bf16x2_storage_t y) {
+  return rccl_narrow2_bf16_f32(rccl_widen2_f32_bf16_bitcast(x) + rccl_widen2_f32_bf16_bitcast(y));
+}
+
+__device__ __forceinline__ bf16x2_storage_t hmul2_bf16(bf16x2_storage_t x, bf16x2_storage_t y) {
+  return rccl_narrow2_bf16_f32(rccl_widen2_f32_bf16_bitcast(x) * rccl_widen2_f32_bf16_bitcast(y));
+}
+
+__device__ __forceinline__ bf16x2_storage_t hminmax2_bf16(bf16x2_storage_t x, bf16x2_storage_t y,
+                                                          bool isMin) {
+  rccl_f32x2_t a = rccl_widen2_f32_bf16_cvt(x);
+  rccl_f32x2_t b = rccl_widen2_f32_bf16_cvt(y);
+  rccl_f32x2_t r = {isMin ? fminf(a[0], b[0]) : fmaxf(a[0], b[0]),
+                    isMin ? fminf(a[1], b[1]) : fmaxf(a[1], b[1])};
+  return rccl_narrow2_bf16_f32(r);
+}
+
+// On gfx1250 the 2-wide form makes the kernels larger.
+#if !(defined(__gfx1250__) || defined(__gfx1250_strict__))
+SPECIALIZE_REDUCE(FuncSum, hip_bfloat16, 2, bf16x2_storage_t, hadd2_bf16(x, y))
+SPECIALIZE_REDUCE(FuncProd, hip_bfloat16, 2, bf16x2_storage_t, hmul2_bf16(x, y))
+SPECIALIZE_REDUCE(FuncMinMax, hip_bfloat16, 2, bf16x2_storage_t,
+                  hminmax2_bf16(x, y, fn.isMinNotMax))
+#endif
 #endif
 #endif
 
@@ -466,17 +556,54 @@ SPECIALIZE_REDUCE(FuncMinMax, __nv_fp8_e5m2, 1, __nv_fp8_e5m2,
 SPECIALIZE_REDUCE(FuncMinMax, __nv_fp8_e5m2, 2, __nv_fp8x2_e5m2,
                   __nv_fp8x2_e5m2(fn.isMinNotMax ? __hmin2(__half2(x), __half2(y)) : __hmax2(__half2(x), __half2(y))))
 #else
+#if !(defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1200__) || defined(__gfx1201__) || \
+      defined(__gfx1250__) || defined(__gfx1250_strict__))
+// fnuz encodings: 0x80 is the only NaN and there is no -0, so sign-magnitude
+// order is value order, and fminf/fmaxf's choice can be made on the bytes.
+template <typename T>
+__device__ __forceinline__ T rcclMinMax(T x, T y, bool isMin) {
+  uint8_t a = reinterpret_cast<const uint8_t&>(x), b = reinterpret_cast<const uint8_t&>(y);
+  if (a == 0x80) return y;
+  if (b == 0x80) return x;
+  int va = (a & 0x80) ? -int(a & 0x7f) : int(a);
+  int vb = (b & 0x80) ? -int(b & 0x7f) : int(b);
+  return (isMin ? va <= vb : va >= vb) ? x : y;
+}
+#else
+template <typename T>
+__device__ __forceinline__ T rcclMinMax(T x, T y, bool isMin) {
+  return T(isMin ? fminf(float(x), float(y)) : fmaxf(float(x), float(y)));
+}
+#endif
+
+#if defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__) || defined(__gfx1250_strict__)
+__device__ __forceinline__ fp8x2_storage_t hminmax2(fp8x2_storage_t x, fp8x2_storage_t y, bool isMin) {
+  float2_t a = __builtin_amdgcn_cvt_pk_f32_fp8(x, false);
+  float2_t b = __builtin_amdgcn_cvt_pk_f32_fp8(y, false);
+  return __builtin_amdgcn_cvt_pk_fp8_f32(isMin ? fminf(a[0], b[0]) : fmaxf(a[0], b[0]),
+                                         isMin ? fminf(a[1], b[1]) : fmaxf(a[1], b[1]), 0, false);
+}
+
+__device__ __forceinline__ fp8x2_storage_t hminmax2_b(fp8x2_storage_t x, fp8x2_storage_t y, bool isMin) {
+  float2_t a = __builtin_amdgcn_cvt_pk_f32_bf8(x, false);
+  float2_t b = __builtin_amdgcn_cvt_pk_f32_bf8(y, false);
+  return __builtin_amdgcn_cvt_pk_bf8_f32(isMin ? fminf(a[0], b[0]) : fmaxf(a[0], b[0]),
+                                         isMin ? fminf(a[1], b[1]) : fmaxf(a[1], b[1]), 0, false);
+}
+
+SPECIALIZE_REDUCE(FuncMinMax, rccl_float8, 2, fp8x2_storage_t, hminmax2(x, y, fn.isMinNotMax))
+SPECIALIZE_REDUCE(FuncMinMax, rccl_bfloat8, 2, fp8x2_storage_t, hminmax2_b(x, y, fn.isMinNotMax))
+#endif
+
 SPECIALIZE_REDUCE(FuncSum, rccl_float8, 1, rccl_float8, hadd(x, y))
 SPECIALIZE_REDUCE(FuncSum, rccl_float8, 2, fp8x2_storage_t, hadd2(x, y))
 SPECIALIZE_REDUCE(FuncProd, rccl_float8, 1, rccl_float8, rccl_float8(float(x) * float(y)))
-SPECIALIZE_REDUCE(FuncMinMax, rccl_float8, 1, rccl_float8,
-                  rccl_float8(fn.isMinNotMax ? fminf(float(x), float(y)) : fmaxf(float(x), float(y))))
+SPECIALIZE_REDUCE(FuncMinMax, rccl_float8, 1, rccl_float8, rcclMinMax(x, y, fn.isMinNotMax))
 
 SPECIALIZE_REDUCE(FuncSum, rccl_bfloat8, 1, rccl_bfloat8, hadd_b(x, y))
 SPECIALIZE_REDUCE(FuncSum, rccl_bfloat8, 2, fp8x2_storage_t, hadd2_b(x, y))
 SPECIALIZE_REDUCE(FuncProd, rccl_bfloat8, 1, rccl_bfloat8, rccl_bfloat8(float(x) * float(y)))
-SPECIALIZE_REDUCE(FuncMinMax, rccl_bfloat8, 1, rccl_bfloat8,
-                  rccl_bfloat8(fn.isMinNotMax ? fminf(float(x), float(y)) : fmaxf(float(x), float(y))))
+SPECIALIZE_REDUCE(FuncMinMax, rccl_bfloat8, 1, rccl_bfloat8, rcclMinMax(x, y, fn.isMinNotMax))
 
 #if defined(RCCL_FP8_HAS_PK8)
 // gfx1250 converts 8 fp8 lanes per instruction, so reduce a whole BytePack<8>

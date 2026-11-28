@@ -451,6 +451,8 @@ if(BUILD_TESTS)
       device/TestTdmReduceCopy.cpp
       device/TestAsyncCopy.cpp
       device/TestLdsTransfer.cpp
+      device/SixteenBitReduce_test.cpp
+      device/NarrowFloatMinMax_test.cpp
       device/GinDeviceTests.cpp
       device/GinBackendMaskDispatch_test.cpp
       device/HierarchicalShuffleTests.cpp
