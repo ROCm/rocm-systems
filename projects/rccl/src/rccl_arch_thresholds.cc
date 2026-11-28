@@ -289,6 +289,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   // median of 2-5). Above the DDA LL128 caps that is 512M on 16 ranks and 1G on 32, 1.1x each.
   .rsSmallCommMaxRanks = 32,
   .rsSmallCommRingLL128MaxPerRank = 32ULL*1024*1024,
+  .rsDdaLL128NarrowMaxPerRank = 1ULL*1024*1024,   // batched shards to 1M start at 128 threads: 512K-1M at 8 and 64
   // CE-Scratch trails the DDA / Ring / Direct kernels it displaces between the DDA
   // ceiling and the scratch size (nRanks x 64 MiB) (AICOMRCCL-2876).
   .forceCeScratch = false,

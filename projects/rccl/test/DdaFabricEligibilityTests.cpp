@@ -1735,7 +1735,7 @@ TEST_F(DdaFabricLL128EligibilityTest, ReduceScatterLL128_MaxRanksEligible)
         mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32, ncclSum));
 }
 
-// 16 MiB total is the first power-of-two step above the 8 MiB LL cap and inside the 60 MiB LL128 cap.
+// 16 MiB total is above the 1 MiB LL cap and inside the 256 MiB LL128 cap.
 TEST_F(DdaFabricLL128EligibilityTest, ReduceScatterLL128_AboveLlCapWithinLl128Cap)
 {
     constexpr size_t totalBytes = 16ULL * 1024 * 1024;

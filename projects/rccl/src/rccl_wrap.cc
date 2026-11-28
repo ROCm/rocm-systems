@@ -1539,6 +1539,14 @@ size_t rcclDdaFabricRsLL128PeerMaxBytes(const ncclComm* comm) {
   return std::min(nRanks * shard, table->ddaRsLL128PeerMaxBytes);
 }
 
+const rcclArchThresholds* rcclDdaFabricRsLL128ShapeTable(const ncclComm* comm) {
+  const rcclArchThresholds* table = extAlgoArchTable(comm);
+  if (table == nullptr || table->rankScaledMinRanks <= 0 || comm->nRanks < table->rankScaledMinRanks) {
+    return nullptr;
+  }
+  return table;
+}
+
 // Widest window any enabled DDA tier can serve for this collective. The entry
 // gate only decides whether the per-tier checks run, so a tier tuned off (0)
 // must not hide the tiers that are still on: gfx1250 ReduceScatter has

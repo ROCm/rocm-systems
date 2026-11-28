@@ -214,6 +214,10 @@ struct rcclArchThresholds {
   int rsSmallCommMaxRanks;
   size_t rsSmallCommRingLL128MaxPerRank;
 
+  // DDA ReduceScatter LL128 batched kernel from rankScaledMinRanks ranks: shards up to this per rank start at
+  // 128-thread blocks, widening to ddaRsLL128Threads once the grid is full. 0 = ddaRsLL128Threads.
+  size_t rsDdaLL128NarrowMaxPerRank;
+
   // Force CE-Scratch for unregistered AllGather / AlltoAll / Gather / Scatter
   // whenever the receive fits ddaScratch, on top of the ceNonRegMin/Max window.
   // NCCL_CTA_POLICY_ZERO forces it on every arch (it is the one zero-CU path for

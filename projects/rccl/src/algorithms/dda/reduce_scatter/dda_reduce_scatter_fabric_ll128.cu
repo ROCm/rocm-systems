@@ -18,6 +18,7 @@
 #include "debug.h"
 #include "algorithms/dda/fabric/fabric_gpu_barrier.h" // dda::common::kDdaMaxNranks
 #include "param.h"
+#include "rccl_arch_thresholds.h"
 #include "rccl_common.h"
 
 #include <cuda_runtime.h>
@@ -45,15 +46,22 @@ using dda::common::kDdaLL128RsPeerMaxWarps;
 using dda::common::kDdaLL128Warp;
 using dda::common::kDdaLL128WireWordsPerSlice;
 
+// From rankScaledMinRanks ranks, small batched shards start at this block size (see ddaLL128RsNarrow).
+constexpr unsigned kDdaLL128RsNarrowThreads = 128;
+
+// A block size the batched kernel launches: a multiple of the warp up to kDdaLL128RsMaxThreads.
+static inline bool ddaLL128RsThreadsFit(int64_t threads) {
+  return ddaLL128ValidThreads(threads) && threads <= (int64_t)kDdaLL128RsMaxThreads;
+}
+
 // A valid DDA_LL128_RS_THREADS, else the arch table's block size if the launch bound allows it, else the bound.
 static inline unsigned ddaLL128RSThreads(const ncclComm* comm) {
-  const auto fits = [](int64_t v) { return ddaLL128ValidThreads(v) && v <= (int64_t)kDdaLL128RsMaxThreads; };
   const int64_t user = rcclParamDdaLL128RSThreads();
-  if (fits(user)) {
+  if (ddaLL128RsThreadsFit(user)) {
     return (unsigned)user;
   }
   const int tuned = rcclDdaFabricRsLL128Threads(comm);
-  return fits(tuned) ? (unsigned)tuned : kDdaLL128RsMaxThreads;
+  return ddaLL128RsThreadsFit(tuned) ? (unsigned)tuned : kDdaLL128RsMaxThreads;
 }
 
 // Peer-parallel while the whole message is within DDA_LL128_RS_PEER_MAX_BYTES, or the arch table's cap when unset.
@@ -66,6 +74,37 @@ static inline bool ddaLL128RsPeerParallel(const ncclComm* comm, size_t shardByte
   return bytes <= rcclDdaFabricRsLL128PeerMaxBytes(comm);
 }
 
+// Whether a batched shard starts narrow: up to rsDdaLL128NarrowMaxPerRank, with DDA_LL128_RS_THREADS unset (a valid
+// one always wins).
+static inline bool ddaLL128RsNarrow(const rcclArchThresholds* t, size_t shardBytes) {
+  if (t == nullptr || t->rsDdaLL128NarrowMaxPerRank == 0 || ddaLL128RsThreadsFit(rcclParamDdaLL128RSThreads())) {
+    return false;
+  }
+  return shardBytes <= t->rsDdaLL128NarrowMaxPerRank;
+}
+
+// Slices per batched block from rankScaledMinRanks ranks: a slice a warp, doubled up to a kDdaLL128RsMaxThreads
+// block's worth while the smaller grid takes no more passes through the slice loop than a slice a warp would.
+static inline size_t ddaLL128RsPackedSlicesPerBlock(const rcclArchThresholds* t, size_t slices, unsigned threads,
+                                                     int nBlocksMax) {
+  const size_t warps = threads / (unsigned)kDdaLL128Warp;
+  if (t == nullptr || slices == 0 || ddaLL128RsThreadsFit(rcclParamDdaLL128RSThreads())) {
+    return warps;
+  }
+  // Passes each warp makes when blocks are sized at slicesPerBlock slices.
+  const auto passes = [&](size_t slicesPerBlock) {
+    const size_t blocks = std::min((slices + slicesPerBlock - 1) / slicesPerBlock, (size_t)nBlocksMax);
+    return (slices + blocks * warps - 1) / (blocks * warps);
+  };
+  const size_t maxSlicesPerBlock = kDdaLL128RsMaxThreads / (unsigned)kDdaLL128Warp;
+  const size_t unpackedPasses = passes(warps);
+  size_t slicesPerBlock = warps;
+  while (slicesPerBlock * 2 <= maxSlicesPerBlock && passes(slicesPerBlock * 2) == unpackedPasses) {
+    slicesPerBlock *= 2;
+  }
+  return slicesPerBlock;
+}
+
 // Launch shape of whichever kernel the message takes.
 struct DdaLL128RsGeom {
   dim3 grid;
@@ -74,7 +113,9 @@ struct DdaLL128RsGeom {
 };
 
 // A warp (batched) or a warp group (peer-parallel) carries one slice, so blocks = ceil(slices / slicesPerBlock),
-// capped by the grid budget. More slices than the grid holds just means more passes through the slice loop.
+// capped by the grid budget. More slices than the grid holds just means more passes through the slice loop. From
+// rankScaledMinRanks ranks, small batched shards start at narrow blocks and widen to the batched block size once the
+// budget is full; larger ones pack more slices per block while that adds no pass through the slice loop.
 static inline DdaLL128RsGeom ddaReduceScatterFabricLL128Geom(ncclComm* comm, size_t shardBytes) {
   const size_t slices = ddaLL128Slices(shardBytes);
   int nBlocksMax = comm->ddaFabricMaxBlocks;
@@ -99,8 +140,18 @@ static inline DdaLL128RsGeom ddaReduceScatterFabricLL128Geom(ncclComm* comm, siz
     }
     slicesPerBlock = threads / groupThreads;
   } else {
-    threads = ddaLL128RSThreads(comm);
-    slicesPerBlock = threads / (unsigned)kDdaLL128Warp;
+    const rcclArchThresholds* t = rcclDdaFabricRsLL128ShapeTable(comm);
+    const unsigned batchedThreads = ddaLL128RSThreads(comm);
+    threads = batchedThreads;
+    if (ddaLL128RsNarrow(t, shardBytes)) {
+      threads = std::min(kDdaLL128RsNarrowThreads, batchedThreads);
+      while (threads < batchedThreads && slices > (size_t)nBlocksMax * (threads / (unsigned)kDdaLL128Warp)) {
+        threads = std::min(threads * 2, batchedThreads);
+      }
+      slicesPerBlock = threads / (unsigned)kDdaLL128Warp;
+    } else {
+      slicesPerBlock = ddaLL128RsPackedSlicesPerBlock(t, slices, threads, nBlocksMax);
+    }
   }
   unsigned blocks = (unsigned)std::min<size_t>((slices + slicesPerBlock - 1) / slicesPerBlock, (size_t)nBlocksMax);
   if (blocks == 0) {

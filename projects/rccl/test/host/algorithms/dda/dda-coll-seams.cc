@@ -9,6 +9,7 @@
 #include "algorithms/dda/DdaCollSeams.h"
 
 #include "fakes/param_redirect.h"
+#include "rccl_arch_thresholds.h"
 #include "rccl_common.h"
 
 std::vector<DdaLaunch> g_ddaLaunches;
@@ -39,6 +40,14 @@ static int DefaultDdaFabricA2aLL128Blocks(const ncclComm* comm, size_t) {
 static int DefaultDdaFabricBcLL128Threads(const ncclComm*) { return 0; }  // no table: 512 threads
 static int DefaultDdaFabricRsLL128Threads(const ncclComm*) { return 0; }  // no table: 512 threads
 static size_t DefaultDdaFabricRsLL128PeerMaxBytes(const ncclComm*) { return 0; }  // no table: batched at every size
+// The comm's own table from rankScaledMinRanks ranks, as rccl_wrap.cc resolves it when the arch table is in use.
+static const rcclArchThresholds* DefaultDdaFabricRsLL128ShapeTable(const ncclComm* comm) {
+  const rcclArchThresholds* t = comm != nullptr ? comm->archThresholds : nullptr;
+  if (t == nullptr || t->rankScaledMinRanks <= 0 || comm->nRanks < t->rankScaledMinRanks) {
+    return nullptr;
+  }
+  return t;
+}
 static bool DefaultDdaDatatypeSupported(const ncclComm* comm, ncclDataType_t datatype) {
   switch (datatype) {
   case ncclFloat32:
@@ -68,6 +77,8 @@ std::function<int(const ncclComm*, size_t)> g_rcclDdaFabricA2aLL128Blocks = Defa
 std::function<int(const ncclComm*)> g_rcclDdaFabricBcLL128Threads = DefaultDdaFabricBcLL128Threads;
 std::function<int(const ncclComm*)> g_rcclDdaFabricRsLL128Threads = DefaultDdaFabricRsLL128Threads;
 std::function<size_t(const ncclComm*)> g_rcclDdaFabricRsLL128PeerMaxBytes = DefaultDdaFabricRsLL128PeerMaxBytes;
+std::function<const rcclArchThresholds*(const ncclComm*)> g_rcclDdaFabricRsLL128ShapeTable =
+  DefaultDdaFabricRsLL128ShapeTable;
 std::function<bool(const ncclComm*, ncclDataType_t)> g_rcclDdaDatatypeSupported = DefaultDdaDatatypeSupported;
 
 size_t rcclDdaLLThreshold(const ncclComm* comm, ncclFunc_t func) { return g_rcclDdaLLThreshold(comm, func); }
@@ -93,6 +104,9 @@ int rcclDdaFabricA2aLL128Blocks(const ncclComm* comm, size_t totalBytes) {
 int rcclDdaFabricBcLL128Threads(const ncclComm* comm) { return g_rcclDdaFabricBcLL128Threads(comm); }
 int rcclDdaFabricRsLL128Threads(const ncclComm* comm) { return g_rcclDdaFabricRsLL128Threads(comm); }
 size_t rcclDdaFabricRsLL128PeerMaxBytes(const ncclComm* comm) { return g_rcclDdaFabricRsLL128PeerMaxBytes(comm); }
+const rcclArchThresholds* rcclDdaFabricRsLL128ShapeTable(const ncclComm* comm) {
+  return g_rcclDdaFabricRsLL128ShapeTable(comm);
+}
 bool rcclDdaDatatypeSupported(const ncclComm* comm, ncclDataType_t datatype) {
   return g_rcclDdaDatatypeSupported(comm, datatype);
 }
@@ -114,6 +128,7 @@ void ResetDdaCollSeams() {
   g_rcclDdaFabricBcLL128Threads = DefaultDdaFabricBcLL128Threads;
   g_rcclDdaFabricRsLL128Threads = DefaultDdaFabricRsLL128Threads;
   g_rcclDdaFabricRsLL128PeerMaxBytes = DefaultDdaFabricRsLL128PeerMaxBytes;
+  g_rcclDdaFabricRsLL128ShapeTable = DefaultDdaFabricRsLL128ShapeTable;
   g_rcclDdaDatatypeSupported = DefaultDdaDatatypeSupported;
 }
 

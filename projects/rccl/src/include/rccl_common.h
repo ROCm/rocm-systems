@@ -425,6 +425,9 @@ int rcclDdaFabricBcLL128Threads(const ncclComm* comm);
 int rcclDdaFabricRsLL128Threads(const ncclComm* comm);
 // Largest message the DDA LL128 ReduceScatter sends through its peer-parallel kernel, from the arch table, or 0.
 size_t rcclDdaFabricRsLL128PeerMaxBytes(const ncclComm* comm);
+// Arch table whose launch-shape entries apply to this DDA LL128 ReduceScatter (rankScaledMinRanks ranks and up), or
+// null below that, without a table, or under RCCL_IGNORE_ARCH_TABLE.
+const struct rcclArchThresholds* rcclDdaFabricRsLL128ShapeTable(const ncclComm* comm);
 
 // Cap for the DDA entry gate: the max of the LL, LL128 and VMM caps above,
 // skipping tiers turned off by RCCL_DDA_LL / RCCL_DDA_LL128. Pass this to
