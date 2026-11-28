@@ -302,6 +302,7 @@ struct svm_api_range {
 	void *revoke_start;		/* pages this registration owns outright */
 	uint64_t revoke_size;		/* 0 if it fills no whole page */
 	uint32_t refcount;		/* registrations of this same user pointer */
+	bool writable;			/* GPU-writable (GPU_RO clear); sticky once any RW registration sets it */
 	/* GPUs this range was actually mapped to, as a bitmask of indices into
 	 * all_gpu_id_array. Only these are revoked, since only these were ever
 	 * granted. gpu_all covers the case of more GPUs than the mask holds.
@@ -1356,7 +1357,8 @@ static svm_api_range_t *svm_api_range_find(struct hsa_kfd_fmm_context *fmm_ctx,
  */
 static bool svm_api_range_get_locked(struct hsa_kfd_fmm_context *fmm_ctx,
 				     void *user_addr, void *aligned_addr,
-				     uint64_t aligned_size, uint64_t user_size)
+				     uint64_t aligned_size, uint64_t user_size,
+				     bool writable)
 {
 	svm_api_range_t *r;
 	/* Register rounds out to map whole pages, revoke rounds in. The bytes
@@ -1369,6 +1371,10 @@ static bool svm_api_range_get_locked(struct hsa_kfd_fmm_context *fmm_ctx,
 	r = svm_api_range_find(fmm_ctx, user_addr);
 	if (r) {
 		++r->refcount;
+		/* Writability is sticky: an RW re-registration upgrades the page
+		 * and a later RO one must not flip it back.
+		 */
+		r->writable |= writable;
 		if (aligned_size > r->size)
 			r->size = aligned_size;
 		if (in_size > r->revoke_size) {
@@ -1394,6 +1400,7 @@ static bool svm_api_range_get_locked(struct hsa_kfd_fmm_context *fmm_ctx,
 	r->revoke_start = (void *)in_start;
 	r->revoke_size = in_size;
 	r->refcount = 1;
+	r->writable = writable;
 	r->node.key = rbtree_key((unsigned long)user_addr, 0);
 	hsakmt_rbtree_insert(&fmm_ctx->svm_api_range_tree, &r->node);
 	if (aligned_size > fmm_ctx->svm_api_max_extent)
@@ -1428,6 +1435,37 @@ static svm_api_range_t *svm_api_range_find_containing(struct hsa_kfd_fmm_context
 		node = hsakmt_rbtree_next(&fmm_ctx->svm_api_range_tree, node);
 	}
 	return NULL;
+}
+
+/*
+ * Whether a live tracked registration overlapping [@start, @start + @size) is
+ * GPU-writable. Each range stores its own writability, maintained in lock-step
+ * with the GPU_RO set/clear ioctls under svm_api_mutex, so the tree is the
+ * authority and no KFD GET_ATTR is needed. A fresh page with no tracked range
+ * reports not-writable, which is correct: nothing live needs write access there.
+ */
+static bool svm_api_range_writable_overlap_locked(struct hsa_kfd_fmm_context *fmm_ctx,
+						  HSAuint64 start, HSAuint64 size)
+{
+	HSAuint64 end = start + size;
+	HSAuint64 scan = start > fmm_ctx->svm_api_max_extent ?
+			 start - fmm_ctx->svm_api_max_extent : 0;
+	rbtree_key_t key = rbtree_key(scan, 0);
+	rbtree_node_t *node = rbtree_lookup_nearest(&fmm_ctx->svm_api_range_tree, &key,
+						    LKP_ADDR, RIGHT);
+
+	while (node) {
+		svm_api_range_t *r = rb_entry(node, svm_api_range_t, node);
+		HSAuint64 r_start = (HSAuint64)r->start;
+		HSAuint64 r_end = r_start + r->size;
+
+		if (r_start >= end)
+			break;
+		if (start < r_end && r->writable)
+			return true;
+		node = hsakmt_rbtree_next(&fmm_ctx->svm_api_range_tree, node);
+	}
+	return false;
 }
 
 /*
@@ -1929,9 +1967,8 @@ static HSAKMT_STATUS fmm_register_mem_svm_api(HsaKFDContext *ctx,
 	if (!fmm_ctx->first_gpu_mem)
 		return HSAKMT_STATUS_ERROR;
 
-	/* s_attr is a compile-time constant (16 bytes); no overflow possible */
-	s_attr = 2 * sizeof(struct kfd_ioctl_svm_attribute);
-	args = malloc(sizeof(*args) + s_attr);
+	/* Room for the max 3 attrs; the ioctl below sends only nattr of them */
+	args = malloc(sizeof(*args) + 3 * sizeof(struct kfd_ioctl_svm_attribute));
 	if (!args)
 		return HSAKMT_STATUS_NO_MEMORY;
 
@@ -1961,10 +1998,27 @@ static HSAKMT_STATUS fmm_register_mem_svm_api(HsaKFDContext *ctx,
 	if (fmm_ctx->svm.svm_host_unregister) {
 		pthread_mutex_lock(&fmm_ctx->svm_api_mutex);
 		svm_revoke_sync_locked(fmm_ctx, (void *)aligned_addr, aligned_size);
+		/* GPU_RO is tracking-only: clear it for a writable pin (an upgrade
+		 * that also drops a stale GPU_RO on a reused VA), set it for a
+		 * read-only pin unless a live writable registration still covers
+		 * these pages, which must not be downgraded.
+		 */
+		if (!flags.ui32.ReadOnly ||
+		    !svm_api_range_writable_overlap_locked(fmm_ctx, aligned_addr,
+							   aligned_size)) {
+			args->attrs[2].type = flags.ui32.ReadOnly ?
+					      HSA_SVM_ATTR_SET_FLAGS : HSA_SVM_ATTR_CLR_FLAGS;
+			args->attrs[2].value = HSA_SVM_FLAG_GPU_RO;
+			args->nattr = 3;
+		}
 		tracked = svm_api_range_get_locked(fmm_ctx, address, (void *)aligned_addr,
-						   aligned_size, size);
+						   aligned_size, size,
+						   !flags.ui32.ReadOnly);
 		pthread_mutex_unlock(&fmm_ctx->svm_api_mutex);
 	}
+
+	/* s_attr tracks nattr (2 or 3); at most 24 bytes, no overflow possible */
+	s_attr = args->nattr * sizeof(struct kfd_ioctl_svm_attribute);
 
 	/* Driver does one copy_from_user, with extra attrs size */
 	if (hsakmt_ioctl(ctx->fd, AMDKFD_IOC_SVM + (s_attr << _IOC_SIZESHIFT), args)) {
@@ -5048,6 +5102,28 @@ bool hsakmt_fmm_get_handle(HsaKFDContext *ctx,
 	return found;
 }
 
+/* Upgrade a read-only userptr BO to read/write in place via the kernel ioctl
+ * and clear the object's read-only flag. Caller holds aperture->fmm_mutex.
+ */
+static HSAKMT_STATUS fmm_upgrade_userptr_writable(HsaKFDContext *ctx,
+					       vm_object_t *object, void *addr)
+{
+	struct kfd_ioctl_upgrade_userptr_writable_args args;
+	uint32_t i;
+
+	for (i = 0; i < object->handle_num; i++) {
+		args.handle = object->handles[i];
+		if (hsakmt_ioctl(ctx->fd, AMDKFD_IOC_UPGRADE_USERPTR_WRITABLE,
+				 &args) != 0) {
+			pr_err("Failed to upgrade read-only userptr %p: %s\n",
+			       addr, strerror(errno));
+			return HSAKMT_STATUS_ERROR;
+		}
+	}
+	object->mflags.ui32.ReadOnly = 0;
+	return HSAKMT_STATUS_SUCCESS;
+}
+
 static HSAKMT_STATUS fmm_register_user_memory(HsaKFDContext *ctx,
 						void *addr,
 						HSAuint64 size,
@@ -5057,6 +5133,8 @@ static HSAKMT_STATUS fmm_register_user_memory(HsaKFDContext *ctx,
 	HSAuint32 page_offset = (HSAuint64)addr & (PAGE_SIZE-1);
 	HSAuint64 aligned_addr = (HSAuint64)addr - page_offset;
 	HSAuint64 aligned_size = PAGE_ALIGN_UP(page_offset + size);
+	HSAKMT_STATUS ret = HSAKMT_STATUS_SUCCESS;
+	bool readonly = flags.ui32.ReadOnly;
 	void *svm_addr;
 	HSAuint32 gpu_id;
 	vm_object_t *obj, *exist_obj;
@@ -5076,7 +5154,7 @@ static HSAKMT_STATUS fmm_register_user_memory(HsaKFDContext *ctx,
 	svm_addr = __fmm_allocate_device(ctx,
 			 gpu_id, NULL, aligned_size, aperture,
 			 &aligned_addr, KFD_IOC_ALLOC_MEM_FLAGS_USERPTR |
-			 KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE |
+			 (readonly ? 0 : KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE) |
 			 KFD_IOC_ALLOC_MEM_FLAGS_EXECUTABLE |
 			 (flags.ui32.CoarseGrain ? 0 : KFD_IOC_ALLOC_MEM_FLAGS_COHERENT) |
 			 (flags.ui32.ExtendedCoherent ? KFD_IOC_ALLOC_MEM_FLAGS_EXT_COHERENT : 0),
@@ -5095,6 +5173,18 @@ static HSAKMT_STATUS fmm_register_user_memory(HsaKFDContext *ctx,
 	 */
 	exist_obj = vm_find_object_by_userptr(aperture, addr, size);
 	if (exist_obj) {
+		/* Raced: another thread already registered this userptr.
+		* A read-only userptr needs to be upgraded to read/write in place.
+		*/
+		if (exist_obj->mflags.ui32.ReadOnly && !readonly) {
+			ret = fmm_upgrade_userptr_writable(ctx, exist_obj, addr);
+
+			if (ret != HSAKMT_STATUS_SUCCESS) {
+				pthread_mutex_unlock(&aperture->fmm_mutex);
+				__fmm_release(ctx, obj, aperture);
+				return ret;
+			}
+		}
 		++exist_obj->registration_count;
 	} else {
 		uint64_t extent;
@@ -5159,6 +5249,14 @@ HSAKMT_STATUS hsakmt_fmm_register_memory(HsaKFDContext *ctx,
 		pthread_mutex_lock(&aperture->fmm_mutex);
 		/* fall through for registered device ID array setup */
 	} else if (object->userptr) {
+		/* A read-only userptr needs to be upgraded to read/write in place */
+		if (object->mflags.ui32.ReadOnly && !flags.ui32.ReadOnly) {
+			ret = fmm_upgrade_userptr_writable(ctx, object, address);
+			if (ret != HSAKMT_STATUS_SUCCESS) {
+				pthread_mutex_unlock(&aperture->fmm_mutex);
+				return ret;
+			}
+		}
 		/* Update an existing userptr */
 		++object->registration_count;
 	} else {

@@ -31,6 +31,7 @@
 #define ROCCLR_MEM_PHYMEM (1u << 25)
 #define ROCCLR_MEM_HSA_CONTIGUOUS (1u << 24)
 #define ROCCLR_MEM_IO_MEMORY (1u << 23)
+#define ROCCLR_MEM_PIN_READ_ONLY (1u << 22)
 
 //! Host-NUMA VMM encoding in the upper 32 bits of the 64-bit cl_svm_mem_flags.
 //! The low 32 bits hold the existing CL_MEM_*/ROCCLR_MEM_* flags; host-NUMA VMM

@@ -1198,6 +1198,7 @@ bool Buffer::create(bool alloc_local, amd::Memory::ErrorCode* errorCode) {
       // single call and the rest reuse that mapping; OpenCL's context can be a genuine
       // subset, so it keeps locking per-device.
       const bool shareLock = amd::IS_HIP && owner()->getContext().devices().size() > 1;
+      const bool readOnly = (memFlags & ROCCLR_MEM_PIN_READ_ONLY) != 0;
 
       // addDeviceMemory() holds owner()->lockMemoryOps() for this whole call, so the first
       // device to reach here for a given owner is always fully initialized by the time any
@@ -1215,12 +1216,12 @@ bool Buffer::create(bool alloc_local, amd::Memory::ErrorCode* errorCode) {
         // attempt is never retried by a sibling.
         const bool tryAllAgents = shareLock && (first == nullptr || first == this);
         deviceMemory_ = dev().hostLock(owner()->getHostMem(), owner()->getSize(),
-                                       getHostMemorySegment(memFlags), tryAllAgents);
+                                       getHostMemorySegment(memFlags), tryAllAgents, readOnly);
         const bool lockedAllAgents = tryAllAgents && deviceMemory_ != nullptr;
         if (deviceMemory_ == nullptr && tryAllAgents) {
           // Group lock failed; fall back to locking just this device.
           deviceMemory_ = dev().hostLock(owner()->getHostMem(), owner()->getSize(),
-                                         getHostMemorySegment(memFlags));
+                                         getHostMemorySegment(memFlags), false, readOnly);
         }
         setHostLockState(deviceMemory_ != nullptr, lockedAllAgents);
       }
