@@ -316,6 +316,33 @@ fn virtual_mapping_contains_only_its_half_open_range() {
 }
 
 #[test]
+/// Verifies default and explicit alignments reach runtime lookup, while invalid
+/// alignments fail validation without changing the caller's output.
+fn virtual_reservation_validates_default_and_explicit_alignment() {
+    let page = current_host_page().unwrap();
+    let sentinel = std::ptr::dangling_mut::<c_void>();
+    for alignment in [0, page as u64, (page * 16) as u64] {
+        let mut address = sentinel;
+        // SAFETY: The output is writable; no initialized runtime is required
+        // to check that argument validation reaches runtime lookup.
+        assert_eq!(
+            unsafe { hsa_amd_vmem_address_reserve_align(&raw mut address, page, 0, alignment, 0) },
+            NOT_INITIALIZED
+        );
+        assert_eq!(address, sentinel);
+    }
+    for alignment in [1, (page / 2) as u64, (page * 3) as u64, u64::MAX] {
+        let mut address = sentinel;
+        // SAFETY: The output remains writable for this rejected request.
+        assert_eq!(
+            unsafe { hsa_amd_vmem_address_reserve_align(&raw mut address, page, 0, alignment, 0) },
+            INVALID_ARGUMENT
+        );
+        assert_eq!(address, sentinel);
+    }
+}
+
+#[test]
 /// Verifies that CPU permissions share one process mapping without losing
 /// agent-specific grants when either CPU changes access.
 fn virtual_host_permissions_union_cpu_grants() {

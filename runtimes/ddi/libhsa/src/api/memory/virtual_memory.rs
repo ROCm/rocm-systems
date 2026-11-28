@@ -58,6 +58,11 @@ pub unsafe extern "C" fn hsa_amd_vmem_address_reserve_align(
             Ok(page) => page,
             Err(status) => return status,
         };
+        let alignment = if alignment == 0 {
+            page as u64
+        } else {
+            alignment
+        };
         if address.is_null()
             || size == 0
             || size % page != 0
