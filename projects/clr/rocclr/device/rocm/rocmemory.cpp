@@ -1335,7 +1335,8 @@ static amd::HandleExportResult MapHsaExportError(hsa_status_t status) {
 
 // ================================================================================================
 amd::HandleExportResult Buffer::GetFDHandleForMem(void* dev_ptr, size_t size, bool vmm,
-                                                  void* handle, unsigned long long flags) {
+                                                  void* handle, unsigned long long flags,
+                                                  uint64_t* dmabuf_offset) {
   int dmabuffd = -1;
   size_t offset = 0;
 
@@ -1346,6 +1347,24 @@ amd::HandleExportResult Buffer::GetFDHandleForMem(void* dev_ptr, size_t size, bo
 
   // In case of vmm, we use a different set of APIs for retrieving the dmabuffd.
   if (vmm) {
+    if (dmabuf_offset != nullptr) {
+      // The fd covers the physical handle mapped at dev_ptr, and every mapping starts at handle
+      // offset 0, so the offset is the one inside the mapping. The mapping isn't the allocation
+      // for a mempool: its allocations are views of the VM heap's chunks.
+      hsa_amd_pointer_info_t info = {};
+      info.size = sizeof(info);
+      hsa_status_t hsa_status = Hsa::pointer_info(dev_ptr, &info, nullptr, nullptr, nullptr);
+      if (hsa_status != HSA_STATUS_SUCCESS || info.type != HSA_EXT_POINTER_TYPE_HSA_VMEM) {
+        LogPrintfError("Cannot find the VMM mapping of dev_ptr: %p, hsa returned status: %d",
+                       dev_ptr, hsa_status);
+        return amd::HandleExportResult::kError;
+      }
+      *dmabuf_offset = reinterpret_cast<uintptr_t>(dev_ptr) -
+          reinterpret_cast<uintptr_t>(info.agentBaseAddress);
+      if (handle == nullptr) {
+        return amd::HandleExportResult::kSuccess;
+      }
+    }
     hsa_amd_vmem_alloc_handle_t mem_handle;
 
     // Retrieve the corresponding phys_mem handle for the mapped dev_ptr.
@@ -1399,6 +1418,15 @@ amd::HandleExportResult Buffer::GetFDHandleForMem(void* dev_ptr, size_t size, bo
     return amd::HandleExportResult::kError;
   }
 
+  // ROCr may place dev_ptr inside a larger BO; the fd covers the whole BO
+  if (!vmm && dmabuf_offset != nullptr) {
+    *dmabuf_offset = offset;
+  }
+  if (handle == nullptr) {
+    // Offset-only query: ROCr knows the placement only through the export
+    Hsa::portable_close_dmabuf(dmabuffd);
+    return amd::HandleExportResult::kSuccess;
+  }
   // As per spec, handle passed through HIP API is ptr to int.
   *(reinterpret_cast<int*>(handle)) = dmabuffd;
   return amd::HandleExportResult::kSuccess;

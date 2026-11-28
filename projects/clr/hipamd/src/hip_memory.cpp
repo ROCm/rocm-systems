@@ -4572,6 +4572,24 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
       status = hipErrorNotSupported;
       break;
     }
+    case HIP_POINTER_ATTRIBUTE_AMD_DMABUF_OFFSET: {
+      // hipDrvPointerGetAttributes ignores the status: a failed query reads 0
+      *reinterpret_cast<uint64_t*>(data) = 0;
+      if (memObj == nullptr) {
+        return hipErrorInvalidValue;
+      }
+      // Query through the device that owns the memory, not the current one
+      uint64_t dmabuf_offset = 0;
+      const amd::HandleExportResult result =
+          memObj->getContext().devices()[0]->GetHandleForAddressRange(
+              ptr, memObj->getSize() - offset, nullptr, 0, &dmabuf_offset);
+      if (result != amd::HandleExportResult::kSuccess) {
+        return (result == amd::HandleExportResult::kNotSupported) ? hipErrorNotSupported
+                                                                  : hipErrorInvalidValue;
+      }
+      *reinterpret_cast<uint64_t*>(data) = dmabuf_offset;
+      break;
+    }
     default: {
       LogPrintfError("Invalid attribute: %d ", attribute);
       status = hipErrorInvalidValue;
@@ -5347,7 +5365,8 @@ hipError_t hipMemGetHandleForAddressRange(void* handle, hipDeviceptr_t dptr, siz
                                           unsigned long long flags) {
   HIP_INIT_API(hipMemGetHandleForAddressRange, handle, dptr, size, handleType, flags);
 
-  if (dptr == nullptr || size == 0 || handleType != hipMemRangeHandleTypeDmaBufFd ||
+  if (handle == nullptr || dptr == nullptr || size == 0 ||
+      handleType != hipMemRangeHandleTypeDmaBufFd ||
       (flags != 0 && flags != hipMemRangeFlagDmaBufMappingTypePcie)) {
     HIP_RETURN(hipErrorInvalidValue);
   }

@@ -113,6 +113,12 @@ HIP_TEST_CASE(Unit_hipMemGetHandleForAddressRange_Negative) {
                     hipErrorInvalidValue);
   }
 
+  SECTION("nullptr handle") {
+    HIP_CHECK_ERROR(hipMemGetHandleForAddressRange(nullptr, reinterpret_cast<hipDeviceptr_t>(dptr),
+                                                   sizeBytes, hipMemRangeHandleTypeDmaBufFd, 0),
+                    hipErrorInvalidValue);
+  }
+
   SECTION("size 0") {
     HIP_CHECK_ERROR(
         hipMemGetHandleForAddressRange(&handle, reinterpret_cast<hipDeviceptr_t>(dptr),
@@ -1084,4 +1090,226 @@ HIP_TEST_CASE(Unit_hipMemGetHandleForAddressRange_NoLeakOnRelease) {
   // so freeAfter stayed pinned at freeBefore.
   size_t reclaimed = (freeAfter > freeBefore) ? (freeAfter - freeBefore) : 0;
   REQUIRE(reclaimed >= granularity / 2);
+}
+
+/**
+ * Helper: exports a dma-buf for [ptr, ptr+bytes), queries HIP_POINTER_ATTRIBUTE_AMD_DMABUF_OFFSET,
+ * imports the fd, maps the whole dma-buf and reads bytes at the reported offset.
+ */
+static void ReadThroughDmaBuf(void* ptr, size_t bytes, std::vector<int>& out,
+                              uint64_t* offset_out = nullptr) {
+  int fd = -1;
+  HIP_CHECK(hipMemGetHandleForAddressRange(&fd, reinterpret_cast<hipDeviceptr_t>(ptr), bytes,
+                                           hipMemRangeHandleTypeDmaBufFd, 0));
+  REQUIRE(fd > 0);
+  uint64_t offset = ~0ull;
+  HIP_CHECK(hipPointerGetAttribute(&offset, HIP_POINTER_ATTRIBUTE_AMD_DMABUF_OFFSET,
+                                   reinterpret_cast<hipDeviceptr_t>(ptr)));
+  const off_t dmabuf_size = lseek(fd, 0, SEEK_END);
+  REQUIRE(dmabuf_size > 0);
+  REQUIRE(offset + bytes <= static_cast<uint64_t>(dmabuf_size));
+  if (offset_out != nullptr) *offset_out = offset;
+
+  hipMemGenericAllocationHandle_t imported;
+  HIP_CHECK(hipMemImportFromShareableHandle(&imported,
+                                            reinterpret_cast<void*>(static_cast<uintptr_t>(fd)),
+                                            hipMemHandleTypePosixFileDescriptor));
+  const size_t granularity = GetGranularity(0);
+  const size_t map_size = ((dmabuf_size + granularity - 1) / granularity) * granularity;
+  void* view = nullptr;
+  HIP_CHECK(hipMemAddressReserve(&view, map_size, granularity, 0, 0));
+  HIP_CHECK(hipMemMap(view, map_size, 0, imported, 0));
+  hipMemAccessDesc access{};
+  access.location.type = hipMemLocationTypeDevice;
+  access.location.id = 0;
+  access.flags = hipMemAccessFlagsProtReadWrite;
+  HIP_CHECK(hipMemSetAccess(view, map_size, &access, 1));
+
+  out.resize(bytes / sizeof(int));
+  HIP_CHECK(hipMemcpy(out.data(), static_cast<char*>(view) + offset, bytes, hipMemcpyDeviceToHost));
+
+  HIP_CHECK(hipMemUnmap(view, map_size));
+  HIP_CHECK(hipMemAddressFree(view, map_size));
+  HIP_CHECK(hipMemRelease(imported));
+  close(fd);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - HIP_POINTER_ATTRIBUTE_AMD_DMABUF_OFFSET gives the offset of a pointer inside the dma-buf
+ *  - hipMemGetHandleForAddressRange exports for it:
+ *  - 1) Small hipMalloc allocations (may share one BO) and a pointer inside a large one
+ *  - 2) Each gets its own pattern; reading the imported dma-buf at the reported offset
+ *  -    must return that pattern
+ * Test source
+ * ------------------------
+ *  - unit/virtualMemoryManagement/hipMemGetHandleForAddressRange.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.0
+ */
+HIP_TEST_CASE(Unit_hipMemGetHandleForAddressRange_AmdDmaBufOffset_DeviceMemory) {
+  hipDevice_t device;
+  HIP_CHECK(hipDeviceGet(&device, 0));
+  checkDmaBufSupported(device);
+  checkVMMSupported(device);
+
+  constexpr size_t kSmall = 4096;
+  constexpr size_t kLarge = 4 << 20;
+  constexpr size_t kInterior = 1 << 20;
+  std::vector<void*> ptrs;
+  for (int i = 0; i < 8; i++) {
+    void* p = nullptr;
+    HIP_CHECK(hipMalloc(&p, kSmall));
+    ptrs.push_back(p);
+  }
+  void* large = nullptr;
+  HIP_CHECK(hipMalloc(&large, kLarge));
+  HIP_CHECK(hipMemset(large, 0, kLarge));
+  ptrs.push_back(static_cast<char*>(large) + kInterior);
+
+  for (size_t i = 0; i < ptrs.size(); i++) {
+    HIP_CHECK(
+        hipMemsetD32(reinterpret_cast<hipDeviceptr_t>(ptrs[i]), 0x1000 + i, kSmall / sizeof(int)));
+  }
+  HIP_CHECK(hipDeviceSynchronize());
+
+  for (size_t i = 0; i < ptrs.size(); i++) {
+    INFO("allocation " << i);
+    std::vector<int> data;
+    ReadThroughDmaBuf(ptrs[i], kSmall, data);
+    REQUIRE(data.front() == static_cast<int>(0x1000 + i));
+    REQUIRE(data.back() == static_cast<int>(0x1000 + i));
+  }
+
+  for (int i = 0; i < 8; i++) HIP_CHECK(hipFree(ptrs[i]));
+  HIP_CHECK(hipFree(large));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - HIP_POINTER_ATTRIBUTE_AMD_DMABUF_OFFSET for a pointer inside a VMM mapping is the
+ *  - offset inside the mapped physical handle, and the data read through it matches
+ * Test source
+ * ------------------------
+ *  - unit/virtualMemoryManagement/hipMemGetHandleForAddressRange.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.0
+ */
+HIP_TEST_CASE(Unit_hipMemGetHandleForAddressRange_AmdDmaBufOffset_VM) {
+  hipDevice_t device;
+  HIP_CHECK(hipDeviceGet(&device, 0));
+  checkDmaBufSupported(device);
+  checkVMMSupported(device);
+
+  const size_t granularity = GetGranularity(device);
+  const size_t interior = granularity + 4096;
+  const size_t size = ((interior + 4096 + granularity - 1) / granularity) * granularity;
+  hipMemGenericAllocationHandle_t handle = GetPhysicalMemory(device, size);
+  void* base = nullptr;
+  HIP_CHECK(hipMemAddressReserve(&base, size, granularity, 0, 0));
+  HIP_CHECK(hipMemMap(base, size, 0, handle, 0));
+  hipMemAccessDesc access{};
+  access.location.type = hipMemLocationTypeDevice;
+  access.location.id = device;
+  access.flags = hipMemAccessFlagsProtReadWrite;
+  HIP_CHECK(hipMemSetAccess(base, size, &access, 1));
+
+  void* ptr = static_cast<char*>(base) + interior;
+  std::vector<int> pattern(4096 / sizeof(int), 0x5a5a);
+  HIP_CHECK(hipMemcpy(ptr, pattern.data(), 4096, hipMemcpyHostToDevice));
+
+  std::vector<int> data;
+  uint64_t offset = 0;
+  ReadThroughDmaBuf(ptr, 4096, data, &offset);
+  REQUIRE(offset == interior);
+  REQUIRE(data.front() == 0x5a5a);
+  REQUIRE(data.back() == 0x5a5a);
+
+  HIP_CHECK(hipMemUnmap(base, size));
+  HIP_CHECK(hipMemAddressFree(base, size));
+  ReleaseMemHandles();
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - HIP_POINTER_ATTRIBUTE_AMD_DMABUF_OFFSET for stream-ordered allocations: the pool maps its
+ *  - allocations from shared physical chunks, so the offset is the one inside the chunk the
+ *  - dma-buf covers, not inside the allocation. Reading the imported dma-buf at the reported
+ *  - offset must return each allocation's own pattern.
+ * Test source
+ * ------------------------
+ *  - unit/virtualMemoryManagement/hipMemGetHandleForAddressRange.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.0
+ */
+HIP_TEST_CASE(Unit_hipMemGetHandleForAddressRange_AmdDmaBufOffset_MemPool) {
+  hipDevice_t device;
+  HIP_CHECK(hipDeviceGet(&device, 0));
+  checkDmaBufSupported(device);
+  checkVMMSupported(device);
+  int pools_supported = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&pools_supported, hipDeviceAttributeMemoryPoolsSupported, device));
+  if (!pools_supported) {
+    HIP_SKIP_TEST("Memory pools are not supported");
+  }
+
+  constexpr size_t kSize = 64 << 10;
+  constexpr size_t kInterior = 16 << 10;
+  std::vector<void*> allocs;
+  for (int i = 0; i < 4; i++) {
+    void* p = nullptr;
+    HIP_CHECK(hipMallocAsync(&p, kSize, nullptr));
+    allocs.push_back(p);
+  }
+  std::vector<void*> ptrs(allocs);
+  ptrs.push_back(static_cast<char*>(allocs.back()) + kInterior);
+  for (size_t i = 0; i < ptrs.size(); i++) {
+    HIP_CHECK(hipMemsetD32Async(reinterpret_cast<hipDeviceptr_t>(ptrs[i]), 0x2000 + i,
+                                4096 / sizeof(int), nullptr));
+  }
+  HIP_CHECK(hipStreamSynchronize(nullptr));
+
+  for (size_t i = 0; i < ptrs.size(); i++) {
+    INFO("allocation " << i);
+    std::vector<int> data;
+    ReadThroughDmaBuf(ptrs[i], 4096, data);
+    REQUIRE(data.front() == static_cast<int>(0x2000 + i));
+    REQUIRE(data.back() == static_cast<int>(0x2000 + i));
+  }
+
+  for (void* p : allocs) HIP_CHECK(hipFreeAsync(p, nullptr));
+  HIP_CHECK(hipStreamSynchronize(nullptr));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - HIP_POINTER_ATTRIBUTE_AMD_DMABUF_OFFSET on host memory fails with hipErrorInvalidValue
+ * Test source
+ * ------------------------
+ *  - unit/virtualMemoryManagement/hipMemGetHandleForAddressRange.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.0
+ */
+HIP_TEST_CASE(Unit_hipMemGetHandleForAddressRange_AmdDmaBufOffset_Negative) {
+  std::vector<int> host(1024);
+  uint64_t offset = 0;
+  HIP_CHECK_ERROR(hipPointerGetAttribute(&offset, HIP_POINTER_ATTRIBUTE_AMD_DMABUF_OFFSET,
+                                         reinterpret_cast<hipDeviceptr_t>(host.data())),
+                  hipErrorInvalidValue);
+
+  // The bulk query always succeeds and reports the default value, 0
+  uint64_t bulk_offset = ~0ull;
+  hipPointer_attribute attr = HIP_POINTER_ATTRIBUTE_AMD_DMABUF_OFFSET;
+  void* data[] = {&bulk_offset};
+  HIP_CHECK(hipDrvPointerGetAttributes(1, &attr, data,
+                                       reinterpret_cast<hipDeviceptr_t>(host.data())));
+  REQUIRE(bulk_offset == 0);
 }

@@ -83,6 +83,10 @@ virtualMemoryManagement:
   Unit_hipMemGetHandleForAddressRange_MultipleThreads: *level_default
   Unit_hipMemGetHandleForAddressRange_DifferentOffsets: *level_default
   Unit_hipMemGetHandleForAddressRange_NoLeakOnRelease: *level_default
+  Unit_hipMemGetHandleForAddressRange_AmdDmaBufOffset_DeviceMemory: *level_default
+  Unit_hipMemGetHandleForAddressRange_AmdDmaBufOffset_VM: *level_default
+  Unit_hipMemGetHandleForAddressRange_AmdDmaBufOffset_MemPool: *level_default
+  Unit_hipMemGetHandleForAddressRange_AmdDmaBufOffset_Negative: *level_default
   Unit_hipMemExportToShareableHandle_Positive_Basic: *level_default
   Unit_hipMemExportToShareableHandle_Negative_Parameters: *level_default
   Unit_hipMemExportToShareableHandle_Capture: *level_default

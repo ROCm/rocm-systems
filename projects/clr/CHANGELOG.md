@@ -30,6 +30,10 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
         type and the device's CU-masking granularity. `hipExecAffinityTypeCUCount` is always reported
         as supported. Two HIP-specific extension types, `hipExtExecAffinityTypeGranularityCU` and
         `hipExtExecAffinityTypeGranularityWGP`, report the granularity the applies to the CU mask.
+* AMD-specific pointer attribute `HIP_POINTER_ATTRIBUTE_AMD_DMABUF_OFFSET` for `hipPointerGetAttribute`
+  and `hipDrvPointerGetAttributes`. It returns the byte offset of a pointer inside the dma-buf that
+  `hipMemGetHandleForAddressRange` exports for it, which can cover a larger buffer than the requested
+  range. Pass it as the offset when importing the fd, for example with `ibv_reg_dmabuf_mr`.
 
 ### Resolved issues
 
