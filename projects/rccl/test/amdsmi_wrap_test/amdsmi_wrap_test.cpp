@@ -13,8 +13,8 @@
  * fallback path.
  *
  * Build: make
- * Run:   ./amdsmi_wrap_test
- *        RCCL_USE_AMD_SMI_LIB=1 ./amdsmi_wrap_test  # to test AMD SMI path
+ * Run:   ./amdsmi_wrap_test                        # AMD SMI path (default)
+ *        RCCL_USE_AMD_SMI_LIB=0 ./amdsmi_wrap_test # sysfs fallback path
  */
 
 #include <cstdio>
@@ -228,7 +228,7 @@ bool test_getFirmwareVersion() {
 
     std::cout << "  Device 0 Firmware Version: " << fwVersion;
     if (fwVersion == 0) {
-        std::cout << " (unavailable - RCCL_USE_AMD_SMI_LIB may not be set)";
+        std::cout << " (unavailable or unsupported on this device)";
     }
     std::cout << std::endl;
 
@@ -300,6 +300,36 @@ bool test_fabric_functions() {
 }
 
 // ============================================================================
+// Test: Sysfs fallback path (RCCL_USE_AMD_SMI_LIB=0)
+// ============================================================================
+bool test_sysfs_fallback() {
+    printSection("Sysfs Fallback Path");
+
+    const char* useAmdSmiLib = getenv("RCCL_USE_AMD_SMI_LIB");
+    if (useAmdSmiLib == nullptr || strcmp(useAmdSmiLib, "0") != 0) {
+        std::cout << "  Skipping: set RCCL_USE_AMD_SMI_LIB=0 to test sysfs fallback" << std::endl;
+        return true;
+    }
+
+    ncclResult_t res = amd_smi_init();
+    TEST_ASSERT(res == ncclSuccess, "amd_smi_init() with sysfs fallback should return ncclSuccess");
+    TEST_PASS("amd_smi_init() with sysfs fallback succeeded");
+
+    uint32_t numDevs = 0;
+    res = amd_smi_getNumDevice(&numDevs);
+    TEST_ASSERT(res == ncclSuccess, "amd_smi_getNumDevice() with sysfs should return ncclSuccess");
+    std::cout << "  Sysfs path detected " << numDevs << " devices" << std::endl;
+    TEST_PASS("amd_smi_getNumDevice() with sysfs succeeded");
+
+    res = amd_smi_ensureFabricInitialized();
+    TEST_ASSERT(res == ncclSuccess, "amd_smi_ensureFabricInitialized() with sysfs should return ncclSuccess");
+    TEST_PASS("amd_smi_ensureFabricInitialized() with sysfs succeeded");
+
+    amd_smi_shutdown();
+    return true;
+}
+
+// ============================================================================
 // Main entry point
 // ============================================================================
 int main(int argc, char* argv[]) {
@@ -310,7 +340,7 @@ int main(int argc, char* argv[]) {
     // Check environment
     const char* useAmdSmiLib = getenv("RCCL_USE_AMD_SMI_LIB");
     std::cout << "\nEnvironment:" << std::endl;
-    std::cout << "  RCCL_USE_AMD_SMI_LIB: " << (useAmdSmiLib ? useAmdSmiLib : "not set") << std::endl;
+    std::cout << "  RCCL_USE_AMD_SMI_LIB: " << (useAmdSmiLib ? useAmdSmiLib : "not set (defaults to 1)") << std::endl;
 
     // Run all tests
     test_init_shutdown();
@@ -320,6 +350,7 @@ int main(int argc, char* argv[]) {
     test_getLinkInfo();
     test_getFirmwareVersion();
     test_fabric_functions();
+    test_sysfs_fallback();
 
     // Print summary
     std::cout << "\n" << std::string(60, '=') << std::endl;
