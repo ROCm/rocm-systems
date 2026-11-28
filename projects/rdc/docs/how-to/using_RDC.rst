@@ -15,6 +15,8 @@ This topic provides useful information for the following audience on using RDC:
 * OEM: RDC adds GPU information to their existing cluster management software.
 * Open source contributors: RDC is open source and accepts contributions from the community.
 
+For a glossary of terms used in this documentation, see :ref:`rdc-glossary`.
+
 Starting RDC
 ============
 
@@ -51,11 +53,11 @@ Here are the steps to start RDC using ``systemctl`` command, which runs RDC in t
 
 4. Modify RDCD options:
 
-   Edit ``/opt/rocm/etc/rdc_options`` to append any additional RDCD parameters.
+   Edit ``/opt/rocm/share/rdc/conf/rdc_options.conf`` to append any additional RDCD parameters.
 
    .. code-block:: shell
 
-    sudo nano /opt/rocm/etc/rdc_options
+    sudo nano /opt/rocm/share/rdc/conf/rdc_options.conf
 
    Example configuration:
 
@@ -240,11 +242,11 @@ The embedded mode is especially useful for a monitoring agent running on the com
 
 The RDC daemon ``rdcd`` can be used as a reference code for this purpose. The dependency on ``gRPC`` is also eliminated, if the RDC library is directly used.
 
-To run RDC in embedded mode, use:
+To run RDC in embedded mode, pass ``--rdc_embedded`` to a management tool that supports it, for example the bundled Prometheus plugin:
 
 .. code-block:: shell
 
-  python your_management_tool.py --rdc_embedded
+  python python_binding/rdc_prometheus.py --rdc_embedded
 
 .. note::
 
@@ -275,12 +277,6 @@ The RDCD logs provide useful status and debugging information. The logs can also
 
   Logging levels supported: `ERROR`, `INFO`, `DEBUG`.
 
-- Enable additional logging messages:
-
-  .. code-block:: shell
-
-    export RSMI_LOGGING=3
-
 If the GPU reset fails, restart the server. Note that restarting the server also initiates ``rdcd``. You might then encounter the following two scenarios:
 
 - ``rdcd`` returns the correct GPU information to ``rdci``
@@ -289,7 +285,7 @@ If the GPU reset fails, restart the server. Note that restarting the server also
 
   .. code-block:: shell
 
-    $ sudo systemctl restart rdcd
+    $ sudo systemctl restart rdc
 
 Known issues
 -------------

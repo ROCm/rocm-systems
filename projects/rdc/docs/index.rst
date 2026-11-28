@@ -11,7 +11,7 @@ ROCm Data Center tool documentation
 The ROCm Data Center tool (RDC) addresses key infrastructure challenges regarding AMD GPUs in cluster and data center environments and simplifies their administration.
 Here are the main RDC features:
 
-* GPU telemetry
+* GPU and CPU telemetry
 * GPU statistics for jobs
 * Integration with third-party tools
 * Open source
@@ -35,6 +35,14 @@ The code is open and hosted at `<https://github.com/ROCm/rocm-systems/tree/devel
     * :ref:`using-RDC`
     * :ref:`rdc-features`
     * :ref:`rdc-3rd-party`
+
+  .. grid-item-card:: Conceptual
+
+    * :ref:`components`
+
+  .. grid-item-card:: Reference
+
+    * :ref:`rdc-glossary`
 
   .. grid-item-card:: API reference
 

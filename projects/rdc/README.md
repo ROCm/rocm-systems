@@ -4,7 +4,7 @@ The ROCm™ Data Center Tool (RDC) simplifies administration and addresses key i
 
 ## 🌟 Main Features
 
-- **GPU Telemetry** 📊
+- **GPU and CPU Telemetry** 📊
 - **GPU Statistics for Jobs** 📈
 - **Integration with Third-Party Tools** 🔗
 - **Open Source** 🛠️
