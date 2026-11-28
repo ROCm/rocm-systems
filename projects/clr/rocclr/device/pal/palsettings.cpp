@@ -257,7 +257,8 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
 
   if (hwLDSSize_ == 0) {
     // Use hardcoded values for now, since PAL properties aren't available with offline devices
-    hwLDSSize_ = (IS_LINUX || amd::IS_HIP) ? 64 * Ki : 32 * Ki;
+    // Every ASIC accepted by the switch above is gfx10+, with 64 KiB of LDS per work-group
+    hwLDSSize_ = 64 * Ki;
   }
 
   imageSupport_ = true;
