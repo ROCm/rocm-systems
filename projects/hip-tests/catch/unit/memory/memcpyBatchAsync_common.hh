@@ -34,10 +34,11 @@ inline constexpr size_t kBackToBackIterations = 400;
 
 // A child that hangs, as these tests do with the legacy tracker when it re-arms a signal under a
 // queued wait, is killed after this long. A test takes about a second, and the ones that check
-// their own deadlines give up after 20 s at most. The all-device allgather moves much more data and
-// takes a few seconds on 8 GPUs.
+// their own deadlines give up after 20 s at most. The all-device allgather takes a few seconds on 8
+// GPUs but about 60 s on a 64-partition MI350X CPX host, where enabling 4032 peer pairs and filling
+// and checking 8064 buffers dominate both of its passes.
 inline constexpr int kSignalTrackerChildDeadlineSeconds = 30;
-inline constexpr int kSignalTrackerChildLongDeadlineSeconds = 60;
+inline constexpr int kSignalTrackerChildLongDeadlineSeconds = 120;
 
 // The exit code of a Catch2 run in which every test case was skipped, as HIP_SKIP_TEST does
 inline constexpr int kAllTestsSkippedExitCode = 4;
