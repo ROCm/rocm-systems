@@ -56,6 +56,7 @@
 #include "core/inc/signal.h"
 #include "core/inc/interrupt_signal.h"
 #include "core/inc/default_signal.h"
+#include "core/util/logging.h"
 
 namespace rocr {
 namespace AMD {
@@ -242,8 +243,10 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::Initialize(const core::Agent& agent,
   if (agent_->driver().CreateQueue(agent_->node_id(), kQueueType_, 100, HSA::HSA_AMD_QUEUE_PRIORITY_MAXIMUM,
                                    rec_eng, queue_start_addr_, kQueueSize, 0, nullptr,
                                    queue_resource_) != HSA_STATUS_SUCCESS) {
-    LogPrint(HSA_AMD_LOG_FLAG_INFO, "Failed to create queue, size=%d, type=%d,"
-       " priority=%d, engine_id=%d", kQueueSize, kQueueType_, HSA_QUEUE_PRIORITY_MAXIMUM, rec_eng);
+    LogWarning(rocr::LOG_SDMA,
+               "Failed to create queue, size=%zu, type=%d,"
+               " priority=%d, engine_id=%d",
+               kQueueSize, (int)kQueueType_, (int)HSA_QUEUE_PRIORITY_MAXIMUM, rec_eng);
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
 
@@ -2077,9 +2080,10 @@ void BlitSdma<useGCR, scopeFields>::UpdateWriteAndDoorbellRegister(uint64_t curr
       }
 
       LogPrint(HSA_AMD_LOG_FLAG_SDMA,
-               "SDMA ReleaseWrite: QueueId=%u, cmd_size=%lu, wptr=0x%lx, rptr=0x%lx",
-               queue_resource_.QueueId, new_index - curr_index, new_index,
-               *queue_rptr_);
+               "SDMA ReleaseWrite: QueueId=%llu, cmd_size=%llu, wptr=0x%llx, rptr=0x%llx",
+               (unsigned long long)queue_resource_.QueueId,
+               (unsigned long long)(new_index - curr_index), (unsigned long long)new_index,
+               (unsigned long long)*queue_rptr_);
 
       atomic::Store(&cached_commit_index_, new_index, std::memory_order_release);
       break;

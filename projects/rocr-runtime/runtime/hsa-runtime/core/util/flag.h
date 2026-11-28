@@ -408,6 +408,9 @@ class Flag {
     // unset=auto (use multicast up to kMulticastMaxSize, fan-out above).
     var = os::GetEnvVar("HSA_SDMA_MULTICAST");
     sdma_multicast_ = (var == "0") ? SDMA_DISABLE : ((var == "1") ? SDMA_ENABLE : SDMA_DEFAULT);
+
+    // HSA_LOG_LEVEL, HSA_LOG_MASK and HSA_LOG_FILE are parsed by log_init() in
+    // logging.cpp, which owns the logging state.
   }
 
   void parse_masks(uint32_t maxGpu, uint32_t maxCU) {

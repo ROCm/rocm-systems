@@ -78,9 +78,9 @@
 #include "intrin.h"
 #endif
 
+#include "core/util/logging.h"
+
 namespace rocr {
-extern FILE* log_file;
-extern uint8_t log_flags[8];
 
 typedef unsigned int uint;
 typedef uint64_t uint64;
@@ -91,7 +91,6 @@ typedef uint64_t uint64;
 // 4KB page size
 #define DEFAULT_GPU_PAGE_SIZE (1 << 12)
 
-void log_printf(const char* file, int line, const char* format, ...);
 
 #if defined(__GNUC__)
 #define __forceinline __inline__ __attribute__((always_inline))
@@ -212,21 +211,35 @@ static __forceinline unsigned long long int strtoull(const char* str,
 
 #define __FILENAME__ (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
 
+// Legacy LogPrint macro - redirects to new logging system
+// Maps legacy flags to new Log categories.
+// Emits at DEBUG, not INFO: every legacy caller is a per-packet AQL or SDMA
+// dump, and HSA_LOG_LEVEL=3 is documented as general operational info.
 #define LogPrint(flag, format, ...)                                                                \
   do {                                                                                             \
-    if (hsa_flag_isset64(log_flags, flag))                                                         \
-      rocr::log_printf(__FILENAME__, __LINE__, format, ##__VA_ARGS__);                             \
-  } while (false);
-
-#define LogSignalDuration(flag, signal, msg)                                                       \
-  do {                                                                                             \
-    if (hsa_flag_isset64(log_flags, flag)) {                                                       \
-      amd_signal_t* amd_signal = reinterpret_cast<amd_signal_t*>(signal.handle);                   \
-      rocr::log_printf(__FILENAME__, __LINE__,                                                     \
-        "%s Signal = (0x%lx), ticks start/end = %lu / %lu, Ticks elapsed = %lu", msg, signal,      \
-        amd_signal->start_ts, amd_signal->end_ts, amd_signal->end_ts - amd_signal->start_ts);      \
+    uint64_t _mask = 0;                                                                            \
+    switch (flag) {                                                                                \
+      case HSA_AMD_LOG_FLAG_AQL:                                                                   \
+        _mask = rocr::LOG_INFO_CAT;                                                                \
+        break;                                                                                     \
+      case HSA_AMD_LOG_FLAG_SDMA:                                                                  \
+        _mask = rocr::LOG_INFO_CAT;                                                                \
+        break;                                                                                     \
+      case HSA_AMD_LOG_FLAG_INFO:                                                                  \
+        _mask = rocr::LOG_INFO_CAT;                                                                \
+        break;                                                                                     \
+      case HSA_AMD_LOG_FLAG_MEM:                                                                   \
+        _mask = rocr::LOG_MEM;                                                                     \
+        break;                                                                                     \
+      case HSA_AMD_LOG_FLAG_ERROR:                                                                 \
+        _mask = rocr::LOG_ERROR_CAT;                                                               \
+        break;                                                                                     \
+      default:                                                                                     \
+        _mask = rocr::LOG_INFO_CAT;                                                                \
+        break;                                                                                     \
     }                                                                                              \
-  } while (false);
+    LogDebug(_mask, format, ##__VA_ARGS__);                                                        \
+  } while (false)
 
 // A macro to remove unused variable warnings
 #define UNUSED(x) (void)(x)

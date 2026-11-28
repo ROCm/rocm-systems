@@ -1844,7 +1844,7 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
              op_name, coord_idx, coord_dsts.size(),
              engine_groups.size() - (engine_groups.count(coord_idx) ? 1 : 0),
              core::Signal::Convert(&out_signal).handle,
-             prologue_signal ? prologue_signal.get() : nullptr);
+             (void*)(prologue_signal ? prologue_signal.get() : nullptr));
     stat = coordinator->SubmitFusedCoordinator(
         dep_signals, out_signal,
         prologue_signal.get(),
@@ -1891,7 +1891,7 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
                "completion_signal=0x%zx, body_signal=%p",
                op_name, grp.first, idxs.size(),
                core::Signal::Convert(&out_signal).handle,
-               body_sig);
+               (void*)body_sig);
       stat = engines[idxs[0]].blit->SubmitBodies(
           op, dst_list, src_list, size_list, idxs,
           ind_src, ind_dst, body_deps, out_signal, body_sig, dst_size_list);
