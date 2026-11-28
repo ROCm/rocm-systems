@@ -19,7 +19,7 @@ DISTROS=(
     "rhel:10"
 )
 
-ROCM_VERSIONS=("6.3" "6.4" "7.0" "7.1" "7.2")
+ROCM_VERSIONS=("0.0" "6.3" "6.4" "7.0" "7.1" "7.2" "10.0" "10.1" "10.2")
 
 : ${PARALLEL:=$(( $(nproc) / 4 ))}
 if [ "${PARALLEL}" -lt 1 ]; then PARALLEL=1; fi

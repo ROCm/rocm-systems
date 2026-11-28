@@ -43,7 +43,7 @@ usage()
     print_default_option distro "[ubuntu|opensuse|rhel|debian]" "OS distribution" "${DISTRO}"
     print_default_option versions "[VERSION] [VERSION...]" "Ubuntu, OpenSUSE, or RHEL release" "${VERSIONS}"
     print_default_option python-versions "[VERSION] [VERSION...]" "Python 3 minor releases" "${PYTHON_VERSIONS}"
-    print_default_option rocm-version "[VERSION]" "ROCm version to install (e.g. 7.2)" "${ROCM_VERSION:-none}"
+    print_default_option rocm-version "[VERSION]" "ROCm version to install (e.g. 7.2 or 10.0; 0.0 skips ROCm install)" "${ROCM_VERSION:-none}"
     print_default_option "jobs -j" "[N]" "parallel build jobs" "${NJOBS}"
     print_default_option elfutils-version "[0.183..0.188]" "ElfUtils version" "${ELFUTILS_VERSION}"
     print_default_option user "[USERNAME]" "DockerHub username" "${USER}"
@@ -173,8 +173,23 @@ fi
 for VERSION in ${VERSIONS}
 do
     BASE_IMAGE_ARG=""
-    if [ "${DISTRO}" = "ubuntu" ] && [ -n "${ROCM_VERSION}" ]; then
-        BASE_IMAGE_ARG="--build-arg BASE_IMAGE=rocm/dev-ubuntu-${VERSION}:${ROCM_VERSION}"
+
+    # Extract ROCm major, minor, and patch versions
+    ROCM_MAJOR="${ROCM_VERSION%%.*}"
+    ROCM_REST="${ROCM_VERSION#*.}"
+    ROCM_MINOR="${ROCM_REST%%.*}"
+    ROCM_PATCH="${ROCM_REST#*.}"
+    if [ "${ROCM_PATCH}" = "${ROCM_REST}" ]; then
+        ROCM_PATCH=0
+    fi
+
+    if [ "${DISTRO}" = "ubuntu" ] && [ -n "${ROCM_VERSION}" ] && [ "${ROCM_VERSION}" != "0.0" ]; then
+        if [ "${ROCM_MAJOR}" -lt 10 ]; then
+            BASE_IMAGE_ARG="--build-arg BASE_IMAGE=rocm/dev-ubuntu-${VERSION}:${ROCM_VERSION}"
+        else
+            # Hub tags are three-component, for example 10.1.0-full. There is no 10.1 tag.
+            BASE_IMAGE_ARG="--build-arg BASE_IMAGE=rocm/dev-ubuntu-${VERSION}:${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_PATCH}-full"
+        fi
     fi
 
     verbose-run docker build . \

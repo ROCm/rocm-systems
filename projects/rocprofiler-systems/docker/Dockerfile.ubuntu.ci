@@ -16,15 +16,15 @@ ARG EXTRA_PACKAGES=""
 ARG ELFUTILS_DOWNLOAD_VERSION="0.188"
 ARG NJOBS="8"
 
-ENV PATH="/usr/local/bin:${PATH}"
-ENV LIBRARY_PATH="/usr/local/lib:/usr/local/lib64"
-ENV LD_LIBRARY_PATH="/usr/local/lib:/usr/local/lib64"
+ENV ROCM_PATH="/opt/rocm"
+ENV PATH="/usr/local/bin:${ROCM_PATH}/bin:${PATH}"
+ENV LD_LIBRARY_PATH="/usr/local/lib:/usr/local/lib64:${ROCM_PATH}/lib"
 ENV CMAKE_PREFIX_PATH="/usr/local"
 
 RUN apt-get update && \
     apt-get dist-upgrade -y && \
     apt-get install -y --no-install-recommends \
-        autoconf autotools-dev bash-completion build-essential bzip2 ca-certificates \
+        autoconf automake autotools-dev bash-completion build-essential bzip2 ca-certificates \
         ccache chrpath cmake curl environment-modules flex gettext git-core gnupg2 gzip \
         iproute2 libgmock-dev libgtest-dev libiberty-dev libpapi-dev libpfm4-dev \
         libsqlite3-dev libtool libucx-dev locales lsb-release m4 ninja-build \
@@ -94,24 +94,45 @@ RUN if [ -n "${GPU_TYPE}" ]; then \
     fi
 
 ARG ROCM_VERSION=""
-RUN if [ -n "${ROCM_VERSION}" ]; then \
+RUN if [ -n "${ROCM_VERSION}" ] && [ "${ROCM_VERSION}" != "0.0" ]; then \
         ROCM_MAJOR=$(echo ${ROCM_VERSION} | cut -d. -f1) && \
         ROCM_MINOR=$(echo ${ROCM_VERSION} | cut -d. -f2) && \
-        ROCM_VERSN=$(( (ROCM_MAJOR*10000)+(ROCM_MINOR*100) )) && \
-        OS_CODENAME=$(grep '^VERSION_CODENAME=' /etc/os-release | cut -d'=' -f2) && \
-        if [ "${OS_CODENAME}" = "bookworm" ]; then OS_CODENAME=jammy; fi && \
-        wget -q https://repo.radeon.com/amdgpu-install/${ROCM_VERSION}/ubuntu/${OS_CODENAME}/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb && \
-        apt-get update && \
-        DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends --allow-downgrades \
-            -o Dpkg::Options::="--force-confnew" \
-            ./amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb && \
-        rm -f ./amdgpu-install_*.deb && \
-        apt-get update && \
-        if [ ! -d /opt/rocm ]; then \
-            apt-get install -y --no-install-recommends rocm-dev; \
-        fi && \
-        apt-get install -y --no-install-recommends rocdecode-dev libavformat-dev libavcodec-dev libomp-dev libopenmpi-dev && \
-        apt-get clean; \
+        ROCM_PATCH=$(echo ${ROCM_VERSION} | cut -d. -f3) && \
+        if [ -z "${ROCM_PATCH}" ]; then ROCM_PATCH=0; fi && \
+        if [ "${ROCM_MAJOR}" -ge 10 ]; then \
+            if [ -d /opt/rocm/bin ] && [ -d /opt/rocm/lib ]; then \
+                echo "Using ROCm ${ROCM_VERSION} from the base image at /opt/rocm"; \
+            else \
+                TARBALL="therock-dist-linux-multiarch-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_PATCH}.tar.gz" && \
+                curl -fSL "https://stable.repo.amd.com/rocm/core/tarball/${TARBALL}" -o "/tmp/${TARBALL}" && \
+                mkdir -p /tmp/rocm-extract && \
+                tar -xzf "/tmp/${TARBALL}" -C /tmp/rocm-extract && \
+                rm -f "/tmp/${TARBALL}" && \
+                if [ -d /tmp/rocm-extract/bin ] && [ -d /tmp/rocm-extract/lib ]; then \
+                    mv /tmp/rocm-extract /opt/rocm; \
+                else \
+                    echo "Error: unexpected TheRock tarball layout (expected bin/ and lib/ at the top level). Extracted:" >&2; \
+                    ls -la /tmp/rocm-extract >&2; \
+                    exit 1; \
+                fi; \
+            fi; \
+        else \
+            ROCM_VERSN=$(( (ROCM_MAJOR*10000)+(ROCM_MINOR*100) )) && \
+            OS_CODENAME=$(grep '^VERSION_CODENAME=' /etc/os-release | cut -d'=' -f2) && \
+            if [ "${OS_CODENAME}" = "bookworm" ]; then OS_CODENAME=jammy; fi && \
+            wget -q https://repo.radeon.com/amdgpu-install/${ROCM_VERSION}/ubuntu/${OS_CODENAME}/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb && \
+            apt-get update && \
+            DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends --allow-downgrades \
+                -o Dpkg::Options::="--force-confnew" \
+                ./amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb && \
+            rm -f ./amdgpu-install_*.deb && \
+            apt-get update && \
+            if [ ! -d /opt/rocm ]; then \
+                apt-get install -y --no-install-recommends rocm-dev; \
+            fi && \
+            apt-get install -y --no-install-recommends rocdecode-dev libavformat-dev libavcodec-dev libomp-dev libopenmpi-dev && \
+            apt-get clean; \
+        fi; \
     fi && \
     rm -rf /var/lib/apt/lists/*
 
