@@ -152,6 +152,12 @@ The tool can invoke this function pointer to explicitly invoke the `finalize` ca
 
 Otherwise, ROCprofiler-SDK invokes the `finalize` callback via an `atexit` handler.
 
+A request made for a client whose `tool_detach` (see :doc:`process_attachment`) is running is
+ignored: a detach only ends an attach session, so the client stays registered for the next attach
+and is finalized when ROCprofiler-SDK finalizes. A request made while the client's `finalize`
+callback runs does not invoke it again; from another thread it returns once the callback has
+completed.
+
 Full rocprofiler_configure sample
 ----------------------------------
 

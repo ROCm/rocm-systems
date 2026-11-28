@@ -58,6 +58,16 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_client_id_t
  *
  * If this function pointer is invoked explicitly, rocprofiler will disable calling the
  * ::rocprofiler_tool_finalize_t functioin pointer during it's `atexit` handler.
+ *
+ * A request for a client whose ::rocprofiler_tool_detach_t is running (from any thread) is
+ * ignored: a detach only ends an attach session, so the client stays registered for the next
+ * attach and its ::rocprofiler_tool_finalize_t is invoked when rocprofiler finalizes (e.g. at
+ * process exit). A request made while the client's ::rocprofiler_tool_finalize_t runs does not
+ * invoke it again: from another thread it returns once the callback has completed, from the
+ * thread running the callback it returns immediately.
+ *
+ * A request made from another thread while rocprofiler is finalizing, or while the process is
+ * exiting, waits for that finalization (which finalizes every client) to complete.
  */
 typedef void (*rocprofiler_client_finalize_t)(rocprofiler_client_id_t);
 

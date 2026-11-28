@@ -25,7 +25,8 @@
 #
 # Each subdirectory is a self-contained execute + validate test pair that exercises
 # registering a rocprofiler-sdk tool at a controlled point during a running process via
-# rocprofiler_force_configure (the "anytime" initialization path).
+# rocprofiler_force_configure (the "anytime" initialization path). The top-level tests
+# below cover client finalization: concurrent finalization and reattaching after a detach.
 #
 cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
@@ -55,6 +56,99 @@ rocprofiler_add_integration_execute_test(
     ENVIRONMENT "ROCPROFILER_LIBRARY_CTOR=0"
     PASS_REGULAR_EXPRESSION "Process exit waited for the active client"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+# Attach, detach and attach again with tools (tests/tools/reattach-tool.cpp) that finalize
+# themselves from tool_detach, as rocprofiler-systems does. The tools are loaded through
+# ROCP_TOOL_LIBRARIES, like a real attach tool, and print "reattach-tool[<name>]: FAIL:
+# ..." on a lifecycle violation.
+add_executable(reattach-after-detach)
+target_sources(reattach-after-detach PRIVATE reattach-after-detach.cpp)
+target_link_libraries(
+    reattach-after-detach
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::tests-build-flags
+            ${CMAKE_DL_LIBS} Threads::Threads)
+add_dependencies(reattach-after-detach rocprofiler-sdk-reattach-tool
+                 rocprofiler-sdk-reattach-tool-2)
+
+set(_REATTACH_TOOL_1 $<TARGET_FILE:rocprofiler-sdk-reattach-tool>)
+set(_REATTACH_TOOL_2 $<TARGET_FILE:rocprofiler-sdk-reattach-tool-2>)
+# printed by the tools when they are finalized
+set(_REATTACH_FINI_1 "reattach-tool\\[rocprofiler-sdk-reattach-tool\\]: tool_fini after")
+set(_REATTACH_FINI_2
+    "reattach-tool\\[rocprofiler-sdk-reattach-tool-2\\]: tool_fini after")
+
+# reattach_tool_test(<name> <pass regex> <tool library>... [MODE <driver mode>])
+function(reattach_tool_test _NAME _PASS_REGEX)
+    cmake_parse_arguments(ARG "" "MODE" "" ${ARGN})
+    list(JOIN ARG_UNPARSED_ARGUMENTS ":" _TOOL_LIBRARIES)
+    rocprofiler_add_integration_execute_test(
+        ${_NAME}
+        TARGET reattach-after-detach
+        ARGS ${ARG_MODE} ${ARG_UNPARSED_ARGUMENTS}
+        TIMEOUT 15
+        LABELS "integration-tests;anytime-tool-config;attachment"
+        ENVIRONMENT "ROCPROFILER_LIBRARY_CTOR=1" "ROCP_TOOL_LIBRARIES=${_TOOL_LIBRARIES}"
+        PASS_REGULAR_EXPRESSION "${_PASS_REGEX}"
+        FAIL_REGULAR_EXPRESSION
+            "${ROCPROFILER_DEFAULT_FAIL_REGEX}|reattach-tool[^:]*: FAIL")
+endfunction()
+
+# one client: the finalize request from tool_detach goes through finalize(); the request
+# the driver makes afterwards finalizes the tool
+reattach_tool_test(
+    reattach-after-detach
+    "${_REATTACH_FINI_1} 3 session\\(s\\).*Reattach after detach succeeded with 1 client\\(s\\)"
+    ${_REATTACH_TOOL_1})
+
+# two clients: the finalize requests go through the per-client finalizer; the second tool
+# is finalized at process exit
+reattach_tool_test(
+    reattach-after-detach-two-clients
+    "Reattach after detach succeeded with 2 client\\(s\\).*${_REATTACH_FINI_2} 3 session\\(s\\)"
+    ${_REATTACH_TOOL_1}
+    ${_REATTACH_TOOL_2})
+
+# the finalize request comes from a helper thread that tool_detach joins
+reattach_tool_test(
+    reattach-after-detach-helper-thread
+    "${_REATTACH_FINI_1} 3 session\\(s\\).*Reattach after detach succeeded with 1 client\\(s\\)"
+    ${_REATTACH_TOOL_1}
+    MODE
+    --finalize-on-helper-thread)
+
+# the process exits while tool_detach runs on another thread: the exit waits for it (the
+# tool's static objects must survive the detach), then finalizes the tool
+reattach_tool_test(
+    reattach-after-detach-exit-during-detach "${_REATTACH_FINI_1} 1 session\\(s\\)"
+    ${_REATTACH_TOOL_1} MODE --exit-during-detach)
+
+# the tool calls exit() from tool_detach: rocprofiler-sdk still finalizes it at exit
+reattach_tool_test(
+    reattach-after-detach-exit-from-detach
+    "calling exit\\(\\) from tool_detach.*${_REATTACH_FINI_1} 1 session\\(s\\)"
+    ${_REATTACH_TOOL_1} MODE --exit-from-detach)
+
+# a tool calls exit() from its finalize: with one client the re-entrant finalization must
+# return (the process exits instead of deadlocking); with two clients the other client
+# must still be finalized by the exit
+reattach_tool_test(
+    reattach-after-detach-exit-from-finalize "calling exit\\(\\) from tool_fini"
+    ${_REATTACH_TOOL_1} MODE --exit-from-finalize)
+reattach_tool_test(
+    reattach-after-detach-exit-from-finalize-two-clients
+    "calling exit\\(\\) from tool_fini.*${_REATTACH_FINI_2} 3 session\\(s\\)"
+    ${_REATTACH_TOOL_1} ${_REATTACH_TOOL_2} MODE --exit-from-finalize)
+
+# two threads request the same client's finalization at once (two clients, so the
+# per-client path is taken): the second request returns only once the finalize callback
+# has completed
+reattach_tool_test(
+    reattach-after-detach-concurrent-finalize
+    "Concurrent finalization request waited for the finalize callback.*${_REATTACH_FINI_2} 3 session\\(s\\)"
+    ${_REATTACH_TOOL_1}
+    ${_REATTACH_TOOL_2}
+    MODE
+    --concurrent-finalize)
 
 add_subdirectory(early-hip-late-dispatch)
 add_subdirectory(early-hip-late-memcpy)
