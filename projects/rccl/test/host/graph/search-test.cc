@@ -261,6 +261,45 @@ TEST_F(SearchMicrotest, Compute_CollNetDirectUsesCollCapableNics) {
   }
 }
 
+// --- Per-step cost of the search (NCCL 2.32.6): the recursive steps take their NET selection from a cache
+// that ncclTopoCompute holds, and size their GPU scratch to the GPU count without logging it. A search
+// step that allocates through the logged ncclCalloc shows up as a "Host Calloc" line naming the step.
+
+static int HostCallocsLoggedBy(const char* func) {
+  int n = 0;
+  for (const LogLine& l : g_logs) {
+    if (l.text.find("Host Calloc") != std::string::npos && l.text.find(func) != std::string::npos) n++;
+  }
+  return n;
+}
+
+TEST_F(SearchMicrotest, Compute_IntraNodeSearchStepsLogNoHostAllocation) {
+  Use(XgmiSystem(4));
+  g_logs.clear();
+
+  GraphPtr ring = Compute(0, NCCL_TOPO_PATTERN_RING);
+
+  ASSERT_EQ(6, ring->nChannels);  // the search walked every GPU of every channel
+  ASSERT_GE(HostCallocsLoggedBy("(ncclTopoCompute)"), 1) << "the fake log captures the allocations of the search";
+  EXPECT_EQ(0, HostCallocsLoggedBy("(ncclTopoSearchRec")) << "a search step allocated through the logged ncclCalloc";
+}
+
+TEST_F(SearchMicrotest, Compute_InterNodeSearchSelectsEachNetListOnce) {
+  Use(XgmiSystem(2, 1, true), 4);
+  g_logs.clear();
+
+  GraphPtr ring = Compute(0, NCCL_TOPO_PATTERN_RING);
+  GraphPtr tree = Compute(1, NCCL_TOPO_PATTERN_BALANCED_TREE);
+
+  ASSERT_GE(ring->nChannels, 1);
+  ASSERT_GE(tree->nChannels, 1);
+  EXPECT_EQ(0, HostCallocsLoggedBy("(ncclTopoSearchRec"))
+      << "a search step allocated its NET list or GPU scratch instead of using the selection cache";
+  // At most one NET list per (typeInter, gpu) per computation, gpu -1 and typeInter -1 included.
+  int maxLists = (PATH_DIS + 2) * (system_->nodes[GPU].count + 1);
+  EXPECT_LE(HostCallocsLoggedBy("(ncclTopoSelectNets)"), 2 * maxLists);
+}
+
 // --- Bandwidth accounting along a path
 
 TEST_F(SearchMicrotest, FollowPath_IntelPciHopsCostTwentyPercentMore) {
