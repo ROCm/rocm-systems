@@ -2432,6 +2432,34 @@ void VirtualGPU::submitStreamOperation(amd::StreamOperationCommand& cmd) {
 }
 
 // ================================================================================================
+void VirtualGPU::submitBatchMemoryOperation(amd::BatchMemoryOperationCommand& cmd) {
+  // Make sure VirtualGPU has an exclusive access to the resources
+  std::scoped_lock lock(execution());
+  profilingBegin(cmd);
+
+  // The blit kernel reaches the memory through raw addresses in its parameter array, which the
+  // memory dependency tracking can't see. Barriers before and after it order it against earlier and
+  // later work on the compute engine, so a write is visible to the kernels after it and a wait holds
+  // them back. The first barrier also flushes L2, so data written by earlier work reaches the system
+  // before a signal written by the batch (the ROCr path adds system scope for the same reason).
+  // Copies on the SDMA engine are ordered against it by the CPU waits on the last SDMA and compute
+  // events (Queue::flush and releaseGpuMemoryFence), not per memory object.
+  addBarrier(RgpSqqtBarrierReason::MemDependency, BarrierType::FlushL2);
+  memoryDependency().clear();
+
+  bool result = blitMgr().batchMemOps(cmd.getParamPtr(), cmd.paramSize(), cmd.count());
+  if (!result) {
+    LogError("submitBatchMemoryOperation failed!");
+    // No operation ran: fail the command, so the caller does not see success.
+    cmd.setStatus(CL_INVALID_OPERATION);
+  }
+
+  addBarrier(RgpSqqtBarrierReason::MemDependency);
+  memoryDependency().clear();
+  profilingEnd(cmd);
+}
+
+// ================================================================================================
 void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
   // Make sure VirtualGPU has an exclusive access to the resources
   std::scoped_lock lock(execution());

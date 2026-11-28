@@ -271,6 +271,7 @@ class KernelBlitManager : public DmaBlitManager {
     InitHeap,
     StreamOpsIncrement,
     StreamOpsDecrement,
+    BatchMemOp,
     BlitTotal,
   };
 
@@ -470,10 +471,7 @@ class KernelBlitManager : public DmaBlitManager {
                         uint heap_size, uint number_of_initial_blocks) const;
 
   //! Batch memory ops- Submits batch of streamWaits and streamWrite operations.
-  virtual bool batchMemOps(const void* paramArray, size_t paramSize, uint32_t count) const {
-    assert(!"Unimplemented");
-    return false;
-  }
+  virtual bool batchMemOps(const void* paramArray, size_t paramSize, uint32_t count) const;
 
  private:
   static constexpr size_t MaxXferBuffers = 2;
@@ -545,7 +543,7 @@ static const char* BlitName[KernelBlitManager::BlitTotal] = {
     "__amd_rocclr_scheduler",           "__amd_rocclr_gwsInit",
     "__amd_rocclr_streamOpsWrite",      "__amd_rocclr_streamOpsWait",
     "__amd_rocclr_initHeap",            "__amd_rocclr_streamOpsIncrement",
-    "__amd_rocclr_streamOpsDecrement"};
+    "__amd_rocclr_streamOpsDecrement",  "__amd_rocclr_batchMemOp"};
 
 /*@}*/  // namespace amd::pal
 }  // namespace amd::pal

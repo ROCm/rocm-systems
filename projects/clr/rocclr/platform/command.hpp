@@ -1120,7 +1120,9 @@ class BatchMemoryOperationCommand : public Command {
       : Command(queue, cmdType, eventWaitList),
         count_(count),
         flags_(flags),
-        paramArray_(paramArray),
+        // Keep a copy: the command may be submitted after the caller has reused its array
+        paramArray_(static_cast<const uint8_t*>(paramArray),
+                    static_cast<const uint8_t*>(paramArray) + count * paramSize),
         paramSize_(paramSize) {
     // Sanity check
     assert(((cmdType == ROCCLR_COMMAND_BATCH_STREAM)) && "Invalid batch memory operation");
@@ -1131,14 +1133,14 @@ class BatchMemoryOperationCommand : public Command {
   //! Returns the value
   const uint64_t count() const { return count_; }
   //! Return the pointer to the paramList
-  const void* getParamPtr() { return paramArray_; }
+  const void* getParamPtr() { return paramArray_.data(); }
   //! Return the size of a single mem op param in bytes
   const size_t paramSize() const { return paramSize_; }
 
  private:
   uint32_t count_;          // !< The number of operations in the array.
   [[maybe_unused]] uint32_t flags_;  // !< Reserved for future expansion. Must be 0.
-  const void* paramArray_;  // !< Pointer to the array of individual operations
+  std::vector<uint8_t> paramArray_;  // !< Copy of the array of individual operations
   size_t paramSize_;        // !< size in bytes of the param array passed
 };
 

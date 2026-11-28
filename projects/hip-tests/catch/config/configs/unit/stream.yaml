@@ -475,6 +475,18 @@ stream:
   Unit_hipStreamBatchMemOp_Negative_Tests:
     <<: *level_default
     tags: [memory]
+  Unit_hipStreamBatchMemOp_WriteAndWaitValues:
+    <<: *level_default
+    tags: [synchronization, memory]
+  Unit_hipStreamBatchMemOp_WaitHoldsBackLaterWork:
+    <<: *level_default
+    tags: [synchronization, memory]
+  Unit_hipStreamBatchMemOp_WriteOrderedAfterCopy:
+    <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - needs rocm-systems#12952 on PAL (a command batch flush must keep a pending SDMA event); without it the write can overtake the earlier SDMA copy. Enable when #12952 lands."
+    tags: [synchronization, memory]
   Unit_hipStreamBatchMemOp_SequentialOrdering:
     <<: *level_default
     disabled:
@@ -490,20 +502,20 @@ stream:
   Unit_hipStreamWaitWriteValue32_Capture:
     <<: *level_default
     disabled:
-      targets: [amd_windows, nvidia]
-      reason: "AIRUNTIME-2892 - gfx1201 (amd_windows) fails: result == 0x42 -> 0 == 66; needs to be re-triaged on nvidia"
+      targets: [nvidia]
+      reason: "AIRUNTIME-2892 - needs to be re-triaged on nvidia"
     tags: [synchronization]
   Unit_hipStreamWaitWriteValue64_Capture:
     <<: *level_default
     disabled:
-      targets: [amd_windows, nvidia]
-      reason: "AIRUNTIME-2892 - gfx1201 (amd_windows) fails: result == 0xCAFEBABECAFEBABEULL -> 0 == 14627333968358193854 (0xcafebabecafebabe); needs to be re-triaged on nvidia"
+      targets: [nvidia]
+      reason: "AIRUNTIME-2892 - needs to be re-triaged on nvidia"
     tags: [synchronization]
   Unit_hipStreamBatchMemOp_Capture:
     <<: *level_default
     disabled:
-      targets: [amd_windows, nvidia]
-      reason: "AIRUNTIME-2892 - gfx1201 (amd_windows) fails: result == 0x1234 -> 0 == 4660 (0x1234); needs to be re-triaged on nvidia"
+      targets: [nvidia]
+      reason: "AIRUNTIME-2892 - needs to be re-triaged on nvidia"
     tags: [synchronization, memory]
   Unit_hipStreamWriteValue32_Capture_RecordsNode:
     <<: *level_default

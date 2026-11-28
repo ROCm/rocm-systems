@@ -977,9 +977,6 @@ graph:
     tags: [exec]
   Unit_hipGraphExecBatchMemOpNodeSetParams_UpdateTakesEffect:
     <<: *level_default
-    disabled:
-      targets: [amd_windows]
-      reason: "AIRUNTIME-2892 - PAL does not implement batch memory operations; gfx1201 (amd_windows) fails: launch_and_read() == 1000 -> 0 == 1000 (0x3e8); needs to be re-triaged"
     tags: [exec]
   Unit_hipGraphAddBatchMemOpNode_NegativeTsts:
     <<: *level_default
@@ -999,8 +996,8 @@ graph:
   Unit_hipGraphBatchMemOpNode_WriteAndWait:
     <<: *level_default
     disabled:
-      targets: [amd_windows, nvidia]
-      reason: "AIRUNTIME-2892 - gfx1201 (amd_windows) fails: result == 1000 -> 0 == 1000 (0x3e8); needs to be re-triaged on nvidia"
+      targets: [nvidia]
+      reason: "AIRUNTIME-2892 - needs to be re-triaged on nvidia"
     tags: [node]
   Unit_hipGraphBatchMemOpNodeSetParams_NegativeTsts:
     <<: *level_default
