@@ -8,13 +8,17 @@
  * defined but only used when SDMA_IS_OSS7 is set.
  *
  * SDMA_IS_OSS7 is detected at compile time from the HIP architecture
- * macro __gfx950__ (MI350X / CDNA4 and later OSS7 parts).
+ * macros __gfx1250__ / __gfx1250_strict__ (MI400-series, OSS7.0 SDMA). gfx942 (MI300X, SDMA
+ * 4.4.2) and gfx950 (MI350X, SDMA 4.4.5) are NOT OSS7: they share the
+ * pre-OSS7 SDMA 4.4.x packet format, and the OSS7 packets (for example the
+ * fused COPY_LINEAR_WAIT_SIGNAL_MI4) are not valid on them. Add new OSS7.0
+ * architectures here as they land.
  */
 
 #pragma once
 
 /* ---- OSS7 detection: set by HIP compiler for each device arch ---- */
-#if defined(__gfx950__)
+#if defined(__gfx1250__) || defined(__gfx1250_strict__)
 #  define SDMA_IS_OSS7 1
 #else
 #  define SDMA_IS_OSS7 0
@@ -39,7 +43,7 @@ const unsigned int SDMA_SUBOP_COPY_LINEAR_SUB_WINDOW = 36;
 const unsigned int SDMA_SUBOP_WRITE_LINEAR = 0;
 const unsigned int SDMA_ATOMIC_ADD64 = 47;
 
-/* ---- OSS7.0 (MI4 / MI350X+) sub-opcodes and operations -- */
+/* ---- OSS7.0 (MI4 / MI400-series) sub-opcodes and operations -- */
 const unsigned int SDMA_SIGNAL_OP_ADD64_MI4 = 111;
 const unsigned int SDMA_WAIT_FUNC_GEQ_MI4 = 5;
 const unsigned int SDMA_SUBOP_COPY_LINEAR_PHY_MI4 = 0x8;

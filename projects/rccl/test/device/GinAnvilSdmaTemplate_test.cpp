@@ -1497,7 +1497,7 @@ __global__ void kernelSdmaIsOss7(int* out) {
   out[0] = SDMA_IS_OSS7;
 }
 
-// Fused SDMA signals compile only where SDMA_IS_OSS7 (gfx950); elsewhere useSdmaFusedSignal is always false.
+// Fused SDMA signals compile only where SDMA_IS_OSS7 (gfx1250); elsewhere useSdmaFusedSignal is always false.
 static bool sdmaIsOss7() {
   DeviceBuffer<int> d_oss7(1);
   d_oss7.zero();
@@ -1560,7 +1560,7 @@ TEST_F(GinAnvilSdmaTemplateTest, Put_MultiSegmentSplitsAtSegCap) {
 
 TEST_F(GinAnvilSdmaTemplateTest, Put_MultiSegmentFusedSignalsLastSegment) {
   if (!sdmaIsOss7()) {
-    GTEST_SKIP() << "fused SDMA signal needs SDMA_IS_OSS7 (gfx950)";
+    GTEST_SKIP() << "fused SDMA signal needs SDMA_IS_OSS7 (gfx1250)";
   }
   checkMultiSegmentSplit(/*fused=*/true);
   // Fusion needs SignalInc and no counter: a counter or a SignalAdd keeps one segment unfused (put, then quiet).
@@ -1597,7 +1597,7 @@ TEST_F(GinAnvilSdmaTemplateTest, PutValue_SdmaPathSignalQuietsOnlyOnHit) {
 // Fused SDMA-path PutValue issues one putSignal to the remote signal and skips the fence, quiet and signalPeer.
 TEST_F(GinAnvilSdmaTemplateTest, PutValue_SdmaFusedSignalSkipsSignalPeer) {
   if (!sdmaIsOss7()) {
-    GTEST_SKIP() << "fused SDMA signal needs SDMA_IS_OSS7 (gfx950)";
+    GTEST_SKIP() << "fused SDMA signal needs SDMA_IS_OSS7 (gfx1250)";
   }
   constexpr uint64_t kVal = 0x5A5A5A5A5A5A5A5AULL;
   SdmaSignalEnv env(/*threshold=*/0, /*mapDst=*/true, /*remoteSignalAddrs=*/true);
@@ -1893,7 +1893,7 @@ TEST_F(GinAnvilSdmaTemplateTest, ResetSignal_VaClearsWindowCell) {
 // one quiets the peer's queues and fences first, then still fuses, so the put
 // it carries is never waited on. The stub putSignal does not bump the cell, so
 // cells left at 0 show signalPeer did not run. useSdmaFusedSignal compiles to
-// false off gfx950, where these cases would pass without reaching the fused path.
+// false off gfx1250, where these cases would pass without reaching the fused path.
 static void checkFusedSignal(bool va, bool putValue, bool strong) {
   SCOPED_TRACE(::testing::Message() << "va=" << va << " putValue=" << putValue << " strong=" << strong);
   StrongSignalFixture f(0);
@@ -1934,7 +1934,7 @@ static void checkFusedSignal(bool va, bool putValue, bool strong) {
 
 TEST_F(GinAnvilSdmaTemplateTest, FusedSdmaSignal_StrongQuietsPeerQueuesFirst) {
   if (!sdmaIsOss7()) {
-    GTEST_SKIP() << "fused SDMA signal needs SDMA_IS_OSS7 (gfx950)";
+    GTEST_SKIP() << "fused SDMA signal needs SDMA_IS_OSS7 (gfx1250)";
   }
   for (const bool va : {false, true}) {
     for (const bool putValue : {false, true}) {
@@ -1945,7 +1945,7 @@ TEST_F(GinAnvilSdmaTemplateTest, FusedSdmaSignal_StrongQuietsPeerQueuesFirst) {
 
 TEST_F(GinAnvilSdmaTemplateTest, FusedSdmaSignal_WeakIssuesOnlyPutSignal) {
   if (!sdmaIsOss7()) {
-    GTEST_SKIP() << "fused SDMA signal needs SDMA_IS_OSS7 (gfx950)";
+    GTEST_SKIP() << "fused SDMA signal needs SDMA_IS_OSS7 (gfx1250)";
   }
   for (const bool va : {false, true}) {
     for (const bool putValue : {false, true}) {

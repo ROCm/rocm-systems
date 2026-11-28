@@ -221,7 +221,8 @@ TEST_F(GinAnvilIpcDeviceTest, DetailHelpers_ChannelAndDirty) {
   EXPECT_EQ(d_eff.download(), 2);  // (0 + 1*2) % 4 == 2
   hipDeviceProp_t prop{};
   ASSERT_EQ(hipSuccess, hipGetDeviceProperties(&prop, 0));
-  const bool oss7 = (std::strstr(prop.gcnArchName, "gfx950") != nullptr);
+  // useSdmaFusedSignal is true only where SDMA_IS_OSS7 is set (gfx1250, including gfx1250-strict).
+  const bool oss7 = (std::strstr(prop.gcnArchName, "gfx1250") != nullptr);
   EXPECT_EQ(d_fused.download(), oss7);
   EXPECT_NE(d_dirtyRead.download(), 0ULL);
 
