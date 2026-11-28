@@ -161,6 +161,86 @@ void KFDIPCTest::BasicTestParentProcess(int defaultGPUNode, pid_t cpid, int *pip
     EXPECT_SUCCESS(sdmaQueue.Destroy());
 }
 
+/* Mirrors HsaSharedMemoryStruct in fmm.c, which is what the opaque
+ * HsaSharedMemoryHandle carries. The test needs the size field so that a
+ * rejected import retires an amount of the aperture a handful of calls can
+ * exhaust.
+ */
+struct IpcSharedHandleLayout {
+    HSAuint32 ShareHandle[4];
+    HSAuint32 ApeType;
+    HSAuint32 ApeIdx;
+    HSAuint32 SizeInPages;
+    HSAuint32 ExportGpuId;
+};
+
+/* An import that the kernel rejects must give the VA reservation it took back.
+ * If it does not, every failed import retires that much of the aperture for
+ * the life of the process, and the reservation itself starts failing: the
+ * status seen by the caller turns from ERROR, meaning the import was refused,
+ * into NO_MEMORY, meaning there was no address space left to try it in.
+ */
+TEST_F(KFDIPCTest, ImportFailureReleasesReservation) {
+    TEST_START(TESTPROFILE_RUNALL)
+
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        if (!GetVramSize(gpuNode)) {
+            LOG() << "Skipping test: No VRAM found." << std::endl;
+            return;
+        }
+
+        /* 4 TB of aperture per rejected import, so that the 128 TB a dGPU
+         * aperture spans runs out well inside the loop below.
+         */
+        const HSAuint32 pagesPerImport = 0x40000000u;
+        const int attempts = 40;
+        HsaMemFlags mflags = {0};
+        HsaSharedMemoryHandle handle;
+        void *buffer = NULL;
+        int refused = 0, outOfAddressSpace = 0, unexpected = 0;
+
+        mflags.ui32.NonPaged = 1;
+        mflags.ui32.CoarseGrain = 1;
+
+        ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtAllocMemory, m_hsakmt_current_ctx,
+                                       gpuNode, PAGE_SIZE, mflags, &buffer), gpuNode);
+        ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtShareMemory, m_hsakmt_current_ctx,
+                                       buffer, PAGE_SIZE, &handle), gpuNode);
+
+        /* Keep the aperture and the exporting GPU, break the handle so the
+         * import ioctl refuses it, and ask for a size worth noticing.
+         */
+        IpcSharedHandleLayout *layout =
+            reinterpret_cast<IpcSharedHandleLayout *>(&handle);
+        layout->ShareHandle[0] ^= 0xdeadbeefu;
+        layout->ShareHandle[1] ^= 0x5a5a5a5au;
+        layout->SizeInPages = pagesPerImport;
+
+        for (int i = 0; i < attempts; i++) {
+            void *imported = NULL;
+            HSAuint64 importedSize = 0;
+            HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtRegisterSharedHandle,
+                                               m_hsakmt_current_ctx, &handle,
+                                               &imported, &importedSize);
+            if (status == HSAKMT_STATUS_ERROR)
+                refused++;
+            else if (status == HSAKMT_STATUS_NO_MEMORY)
+                outOfAddressSpace++;
+            else
+                unexpected++;
+        }
+
+        EXPECT_EQ_GPU(attempts, refused, gpuNode);
+        EXPECT_EQ_GPU(0, outOfAddressSpace, gpuNode);
+        EXPECT_EQ_GPU(0, unexpected, gpuNode);
+
+        EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtFreeMemory, m_hsakmt_current_ctx,
+                                       buffer, PAGE_SIZE), gpuNode);
+    }));
+
+    TEST_END
+}
+
 /* Test IPC memory.
  * 1. Parent Process [Create/Fill] LocalMemory (LM) --share--> Child Process
  * 2. Child Process import LM and check for the pattern.

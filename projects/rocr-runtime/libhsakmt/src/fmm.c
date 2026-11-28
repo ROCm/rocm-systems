@@ -5476,22 +5476,33 @@ HSAKMT_STATUS hsakmt_fmm_register_shared_memory(HsaKFDContext *ctx,
 			(SizeInPages << PAGE_SHIFT), 0);
 	if (!reservedMem) {
 		err = HSAKMT_STATUS_NO_MEMORY;
-		goto err_free_buffer;
+		goto err_unlock;
 	}
 
 	importArgs.va_addr = (uint64_t)reservedMem;
 	r = hsakmt_ioctl(ctx->fd, AMDKFD_IOC_IPC_IMPORT_HANDLE, (void *)&importArgs);
 	if (r) {
+		/* Nothing was imported, so only the reservation has to go
+		 * back. Keeping it would retire this much of the aperture
+		 * for the life of the process.
+		 */
+		aperture_release_area(aperture, reservedMem,
+				(SizeInPages << PAGE_SHIFT));
 		err = HSAKMT_STATUS_ERROR;
-		goto err_import;
+		goto err_unlock;
 	}
 
 	mflags.Value = importArgs.flags;
 	obj = aperture_allocate_object(aperture, reservedMem, importArgs.handle,
 			(SizeInPages << PAGE_SHIFT), mflags);
 	if (!obj) {
+		/* The import already succeeded, so the buffer object it
+		 * created has to be freed as well as the reservation.
+		 */
+		aperture_release_area(aperture, reservedMem,
+				(SizeInPages << PAGE_SHIFT));
 		err = HSAKMT_STATUS_NO_MEMORY;
-		goto err_free_mem;
+		goto err_free_mem_handle;
 	}
 
 	if (importArgs.mmap_offset) {
@@ -5503,7 +5514,7 @@ HSAKMT_STATUS hsakmt_fmm_register_shared_memory(HsaKFDContext *ctx,
 			aperture_release_area(aperture, reservedMem,
 					(SizeInPages << PAGE_SHIFT));
 			err = HSAKMT_STATUS_ERROR;
-			goto err_free_mem;
+			goto err_free_mem_handle;
 		}
 		obj->node_id = fmm_ctx->gpu_mem[gpu_mem_id].node_id;
 		pthread_mutex_unlock(&aperture->fmm_mutex);
@@ -5539,9 +5550,7 @@ err_free_mem_handle:
 	if (hsakmt_ioctl(ctx->fd, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &freeArgs) != 0) {
 		pr_err("Failed to free GPU memory for handle %llu\n", freeArgs.handle);
 	}
-err_free_mem:
-err_free_buffer:
-err_import:
+err_unlock:
 	pthread_mutex_unlock(&aperture->fmm_mutex);
 	return err;
 }
