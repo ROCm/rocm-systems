@@ -134,6 +134,16 @@ function(add_rocshmem_targets)
                     "instrumented library. Unset ROCSHMEM_INSTALL_DIR to build it "
                     "from source with ASAN propagated.")
             endif()
+            # With ENABLE_DEVICE_THINLTO, the device code of librocshmem.a joins the
+            # ThinLTO device link of librccl.so, which needs ThinLTO bitcode from the
+            # same compiler.
+            if(ENABLE_DEVICE_THINLTO)
+                message(WARNING
+                    "Using pre-built rocSHMEM at ${ROCSHMEM_INSTALL_DIR} with ENABLE_DEVICE_THINLTO=ON. "
+                    "It must be built by ${CMAKE_CXX_COMPILER} with -foffload-lto=thin, or the "
+                    "device link of librccl.so fails. Unset ROCSHMEM_INSTALL_DIR to build it "
+                    "from source with the same settings.")
+            endif()
             set(ROCSHMEM_INCLUDE_DIR "${ROCSHMEM_INCLUDE_DIR}" PARENT_SCOPE)
             set(ROCSHMEM_LIBRARY     "${ROCSHMEM_LIBRARY}"      PARENT_SCOPE)
             set(ROCSHMEM_SOURCE_DIR  "${ROCSHMEM_SOURCE_DIR}"   CACHE INTERNAL "rocSHMEM source directory")
@@ -159,6 +169,13 @@ function(add_rocshmem_targets)
         if(BUILD_ADDRESS_SANITIZER)
             set(_rocshmem_asan_opt "-DASAN=ON")
         endif()
+        # With ENABLE_DEVICE_THINLTO, the device code of librocshmem.a joins the
+        # ThinLTO device link of librccl.so, so build it with the same compiler
+        # and with ThinLTO bitcode.
+        set(_rocshmem_thinlto_opts "")
+        if(ENABLE_DEVICE_THINLTO)
+            set(_rocshmem_thinlto_opts "-DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER} -DCMAKE_CXX_FLAGS=-foffload-lto=thin")
+        endif()
         message(STATUS "rocSHMEM: building from ${ROCSHMEM_SOURCE_DIR}")
 
         # Both of these are named by absolute path as graph inputs -- the
@@ -182,7 +199,7 @@ function(add_rocshmem_targets)
             CONFIGURE_COMMAND   ""
             BUILD_COMMAND
                 ${CMAKE_COMMAND} -E make_directory build
-                && ${CMAKE_COMMAND} -E chdir build bash -lc "INSTALL_PREFIX=${ROCSHMEM_INSTALL_DIR} ../scripts/build_configs/gda -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -DUSE_EXTERNAL_MPI=OFF -DGDA_MLX5=ON -DGDA_BNXT=ON -DGDA_IONIC=ON -DBUILD_EXAMPLES=OFF -DBUILD_FUNCTIONAL_TESTS=OFF -DBUILD_UNIT_TESTS=OFF -DBUILD_CTESTS=OFF -DBUILD_TOOLS=OFF -DGPU_TARGETS=${_rocshmem_gpu_targets} ${_rocshmem_asan_opt} ${_rocshmem_cmake_opts} "
+                && ${CMAKE_COMMAND} -E chdir build bash -lc "INSTALL_PREFIX=${ROCSHMEM_INSTALL_DIR} ../scripts/build_configs/gda -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -DUSE_EXTERNAL_MPI=OFF -DGDA_MLX5=ON -DGDA_BNXT=ON -DGDA_IONIC=ON -DBUILD_EXAMPLES=OFF -DBUILD_FUNCTIONAL_TESTS=OFF -DBUILD_UNIT_TESTS=OFF -DBUILD_CTESTS=OFF -DBUILD_TOOLS=OFF -DGPU_TARGETS=${_rocshmem_gpu_targets} ${_rocshmem_thinlto_opts} ${_rocshmem_asan_opt} ${_rocshmem_cmake_opts} "
             INSTALL_COMMAND ""
         )
 
@@ -191,7 +208,7 @@ function(add_rocshmem_targets)
         # so the other config tree overwriting librocshmem.a invalidates it too.
         set(_rocshmem_opts_stamp "${ROCSHMEM_INSTALL_DIR}/rccl_build_options.txt")
         file(GENERATE OUTPUT "${_rocshmem_opts_stamp}"
-             CONTENT "${CMAKE_BUILD_TYPE} ${_rocshmem_gpu_targets} ${_rocshmem_asan_opt} ${_rocshmem_cmake_opts}\n")
+             CONTENT "${CMAKE_BUILD_TYPE} ${_rocshmem_gpu_targets} ${_rocshmem_thinlto_opts} ${_rocshmem_asan_opt} ${_rocshmem_cmake_opts}\n")
         ExternalProject_Add_StepDependencies(rocshmem_ext build "${_rocshmem_opts_stamp}")
 
         set(ROCSHMEM_INSTALL_DIR "${ROCSHMEM_INSTALL_DIR}"          PARENT_SCOPE)

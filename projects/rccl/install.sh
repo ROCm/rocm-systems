@@ -43,6 +43,7 @@ enable_tdm_simple=false
 enable_tdm_prim_ll128=false
 generate_sym_kernels=true
 device_linker=true
+device_thinlto=false
 warp_speed_enabled=true # note that this flag will be overridden to false for non MI350/MI300 platforms
 kernarg_preload=true
 quiet_warnings=false
@@ -80,6 +81,7 @@ function display_help()
     echo "       --debug-fast            Build debug library with lto optimization disabled (fast build times)"
     echo "    -d|--dependencies          Install RCCL dependencies"
     echo "       --device-linker         Build with assembly-extract device linker (default)"
+    echo "       --device-thinlto        Link device code with ThinLTO instead of the device linker (opt-in)"
     echo "       --disable-roctx         Build without ROCTX logging"
     echo "       --disable-sym-kernels   Disable symmetric memory kernels"
     echo "       --disable-warp-speed    Disable WARP_SPEED kernel optimizations"
@@ -149,7 +151,7 @@ function display_help()
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ "$?" -eq 4 ]]; then
-    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,all_unrolls,amdgpu_targets:,cmake-options:,debug,debug-fast,dependencies,device-linker,disable-colltrace,disable-kernarg-preload,disable-roctx,disable-sym-kernels,disable-warp-speed,dump-asm,enable-code-coverage,enable-full-coverage,enable_backtrace,enable-mpi-tests,enable-rccl-ep-tests,enable-tdm-simple,enable-tdm-prim-ll128,fast,force-reduce-pipeline,generate-sym-kernels,help,install,jobs:,kernel-resource-use,local_gpu_only,log-trace,ninja,no_clean,no-device-linker,npkit-enable,openmp-test-enable,package_build,prefix:,quiet-warnings,rm-legacy-include-dir,rocshmem,rocshmem-gin,roctx-enable,sqtt-enable,run_tests_all,run_tests_quick,static,tests_build,time-trace,verbose -- "$@")
+    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,all_unrolls,amdgpu_targets:,cmake-options:,debug,debug-fast,dependencies,device-linker,device-thinlto,disable-colltrace,disable-kernarg-preload,disable-roctx,disable-sym-kernels,disable-warp-speed,dump-asm,enable-code-coverage,enable-full-coverage,enable_backtrace,enable-mpi-tests,enable-rccl-ep-tests,enable-tdm-simple,enable-tdm-prim-ll128,fast,force-reduce-pipeline,generate-sym-kernels,help,install,jobs:,kernel-resource-use,local_gpu_only,log-trace,ninja,no_clean,no-device-linker,npkit-enable,openmp-test-enable,package_build,prefix:,quiet-warnings,rm-legacy-include-dir,rocshmem,rocshmem-gin,roctx-enable,sqtt-enable,run_tests_all,run_tests_quick,static,tests_build,time-trace,verbose -- "$@")
 else
     echo "Need a new version of getopt"
     exit 1
@@ -172,6 +174,7 @@ while true; do
          --debug-fast)               build_release=false; debug_fast=true;                                                             shift ;;
     -d | --dependencies)             install_dependencies=true;                                                                        shift ;;
          --device-linker)            device_linker=true;                                                                               shift ;;
+         --device-thinlto)           device_thinlto=true;                                                                              shift ;;
          --disable-roctx)            roctx_enabled=false;                                                                              shift ;;
          --disable-sym-kernels)      generate_sym_kernels=false;                                                                       shift ;;
          --disable-warp-speed)       warp_speed_enabled=false;                                                                         shift ;;
@@ -496,6 +499,11 @@ fi
 # Enabled by default; pass -DENABLE_DEVICE_LINKER=OFF when explicitly disabled.
 if [[ "${device_linker}" == false ]]; then
     cmake_common_options="${cmake_common_options} -DENABLE_DEVICE_LINKER=OFF"
+fi
+
+# ThinLTO device link (opt-in); CMake then turns off the device linker
+if [[ "${device_thinlto}" == true ]]; then
+    cmake_common_options="${cmake_common_options} -DENABLE_DEVICE_THINLTO=ON"
 fi
 
 # Enable WARP_SPEED only on MI350/MI300 platforms
