@@ -10,6 +10,7 @@ IMAGE="${IMAGE:-m2n-ruby:primus-rdma61}"
 NAME="${NAME:-m2n-multi}"
 NOFILE="${NOFILE:-1048576}"
 SSH_KEY="${SSH_KEY:-$HOME/.ssh/id_m2n}"
+# Host network: a second container on the node needs its own port (and NAME); launchers read SSH_PORT too.
 SSH_PORT="${SSH_PORT:-2222}"
 USER_NAME="$(whoami)"
 

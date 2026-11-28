@@ -6,6 +6,7 @@
 # Usage: bash dl_check.sh [1node|2node]   (MODES="pack direct pipe default" by default)
 #   pack|direct|pipe : NCCL_RESHARD_ALGORITHM=DIRECT, --copy-algorithm <mode>
 #   default          : no --algorithm/--copy-algorithm (bench default: RING compat, PACK)
+#   auto             : --algorithm auto, NCCL_RESHARD_LOG_LEVEL=INFO; opt-in, needs the #15937 bench change
 D=$(dirname "$(readlink -f "$0")")
 . $D/env.sh
 LAY=${1:-1node}
@@ -17,13 +18,6 @@ esac
 H=$((NP / 2)); Q=$((H / 2))
 mkdir -p $OUT
 echo "HEAD=$(git -C $SRC rev-parse --short HEAD 2>/dev/null) host=$(hostname -s) $LAY np=$NP"
-MPI="mpirun -np $NP $PLACE --map-by ppr:8:node --bind-to none --mca pml ob1 --mca btl ^vader,openib \
- --mca oob_tcp_if_include $NCCL_SOCKET_IFNAME --mca btl_tcp_if_include $NCCL_SOCKET_IFNAME \
- -x PATH -x LD_LIBRARY_PATH -x NCCL_GIN_ENABLE -x NCCL_GIN_TYPE -x NCCL_CUMEM_ENABLE -x NCCL_DMABUF_ENABLE \
- -x HSA_NO_SCRATCH_RECLAIM -x NCCL_ENV_PLUGIN -x NCCL_SOCKET_IFNAME -x NCCL_DEBUG -x NCCL_RESHARD_ALGORITHM \
- -x NCCL_RESHARD_LOG_LEVEL -x NCCL_M2N_ENABLE_EXPERIMENTAL"
-RSH="ssh -p $SSH_PORT -i $SSH_KEY -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR"
-
 declare -A SHAPE=(
   [same00]="--src-mesh-dims 1,$H --dst-mesh-dims 1,$H --src-shard-dim 0 --dst-shard-dim 0"
   [cross01]="--src-mesh-dims 1,$H --dst-mesh-dims 1,$H --src-shard-dim 0 --dst-shard-dim 1"
@@ -48,6 +42,7 @@ for m in $MODES; do
   [[ $m == pipe ]] && export NCCL_M2N_ENABLE_EXPERIMENTAL=1
   case $m in
     default) ARGS="" ;;
+    auto) ARGS="--algorithm auto"; export NCCL_RESHARD_LOG_LEVEL=INFO ;;
     *) ARGS="--algorithm direct --copy-algorithm $m"; export NCCL_RESHARD_ALGORITHM=DIRECT ;;
   esac
   for s in same00 cross01 cross10 mesh22; do
@@ -55,7 +50,7 @@ for m in $MODES; do
       L=$OUT/${m}_${s}_${z}.log
       read -r dims rest <<<"${SIZE[$z]}"
       echo "=== $m $s $z $(date -u +%T) args: $ARGS ${SHAPE[$s]} --tensor-dims $dims $rest" > $L
-      $MPI --mca plm_rsh_agent "$RSH" $BIN/reshard_bench $ARGS ${SHAPE[$s]} --tensor-dims $dims $rest --validate >> $L 2>&1 &
+      "${M2N_MPIRUN[@]}" -np $NP $PLACE $BIN/reshard_bench $ARGS ${SHAPE[$s]} --tensor-dims $dims $rest --validate >> $L 2>&1 &
       mp=$!
       t=0; while kill -0 $mp 2>/dev/null && (( t < ${TMO[$z]} )); do sleep 2; t=$((t+2)); done
       if kill -0 $mp 2>/dev/null; then

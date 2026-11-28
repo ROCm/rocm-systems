@@ -9,13 +9,7 @@ PLACE=()
 [[ $LAY == 2node ]] && PLACE=(--hostfile ${HF:-$WORK/hostfile})
 EXE=${MPI_BIN:-$BIN/basic_api_test_mpi}; X=(); [[ -z $MPI_BIN ]] && X=(--gtest_color=no)
 { echo "=== $L np=$NP $LAY host=$(hostname -s) $(date -u) args: $*"
-  timeout ${TMO:-3600} mpirun -np $NP "${PLACE[@]}" --map-by ppr:8:node --bind-to none \
-    --mca pml ob1 --mca btl ^vader,openib \
-    --mca oob_tcp_if_include $NCCL_SOCKET_IFNAME --mca btl_tcp_if_include $NCCL_SOCKET_IFNAME \
-    --mca plm_rsh_agent "ssh -p $SSH_PORT -i $SSH_KEY -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR" \
-    -x PATH -x LD_LIBRARY_PATH -x NCCL_GIN_ENABLE -x NCCL_GIN_TYPE -x NCCL_CUMEM_ENABLE -x NCCL_DMABUF_ENABLE \
-    -x HSA_NO_SCRATCH_RECLAIM -x NCCL_ENV_PLUGIN -x NCCL_SOCKET_IFNAME -x NCCL_DEBUG \
-    $EXE "$@" "${X[@]}"
+  timeout ${TMO:-3600} "${M2N_MPIRUN[@]}" -np $NP "${PLACE[@]}" $EXE "$@" "${X[@]}"
   echo "=== EXIT $? $(date -u)"; } > $LOG 2>&1
 grep -iE "^\[  PASSED|^\[  FAILED  \] [0-9]|^\[  SKIPPED \] [0-9]|validation (passed|failed)|^=== EXIT" $LOG | sort | uniq -c
 exit $(grep '^=== EXIT' $LOG | cut -d' ' -f3)

@@ -1,22 +1,23 @@
 #!/bin/bash
 # Build RCCL, nccl_m2n lib + tests, benches, and the nccl4py + nccl.m2n wheels from $SRC for M2N_GPU_ARCHS.
-# Run inside the container as yourself. Usage: bash build.sh [rccl|m2n|bench|py|all]
+# Run inside the container as yourself. Usage: bash build.sh [rccl|m2n|bench|py|extras|all]...
+#   all = rccl m2n bench py; extras (rccl-tests for the alltoall reference) only when named.
 set -eo pipefail
 D=$(dirname "$(readlink -f "$0")")
-WHAT=${1:-all}
-want() { [[ $WHAT == $1 || $WHAT == all ]]; }
+WHAT=" ${*:-all} "
+want() { [[ $WHAT == *" $1 "* || ( $1 != extras && $WHAT == *" all "* ) ]]; }
 # nccl_m2n staging kernels need wave64 (GFX9): gfx1xxx is rejected at compile time. Not GPU_ARCHS:
 # the Primus image sets that to "native".
 M2N_GPU_ARCHS=${M2N_GPU_ARCHS:-gfx90a;gfx942;gfx950}
 
-if [[ $WHAT != py ]]; then
+if [[ $WHAT != " py " ]]; then
   . $D/env.sh
   echo "SRC=$SRC HEAD=$(git -C $SRC rev-parse --short HEAD) ROCM_PATH=$ROCM_PATH"
 fi
 
 if want rccl; then
-  B=${RCCL_BUILD:-/tmp/m2n-rccl-build-$(id -u)}
-  cmake -S $SRC/projects/rccl -B $B -G Ninja -DCMAKE_BUILD_TYPE=Release \
+  B=${RCCL_BUILD:-$WORK/rccl-build}
+  cmake -S $SRC/projects/rccl -B $B -G "$CMAKE_GENERATOR" -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_CXX_COMPILER=$ROCM_PATH/llvm/bin/amdclang++ -DCMAKE_C_COMPILER=$ROCM_PATH/llvm/bin/amdclang \
     -DROCM_PATH=$ROCM_PATH -DCMAKE_PREFIX_PATH=$ROCM_PATH \
     "-DGPU_TARGETS=$M2N_GPU_ARCHS" "-DAMDGPU_TARGETS=$M2N_GPU_ARCHS" -DBUILD_TESTS=OFF \
@@ -28,7 +29,7 @@ fi
 
 if want m2n || want bench; then
   MK=(make -f Makefile.rocm -j32 ROCM_PATH=$ROCM_PATH NCCL_HOME=$RCCL_INSTALL RCCL_LIBDIR=$RCCL_INSTALL/lib
-      GTEST_DIR=${GTEST_DIR:-$(dirname "$SRC")/googletest/googletest} MPI_HOME=/opt/openmpi "OFFLOAD_ARCH=$M2N_GPU_ARCHS"
+      GTEST_DIR=${GTEST_DIR:-$(dirname "$SRC")/googletest/googletest} MPI_HOME=$MPI_HOME "OFFLOAD_ARCH=$M2N_GPU_ARCHS"
       BUILDDIR=$WORK/mk)
   cd $SRC/projects/rccl/contrib/nccl_m2n
   if want m2n; then
@@ -38,9 +39,20 @@ if want m2n || want bench; then
     ls -l $BIN/basic_api_test_local $BIN/basic_api_test_mpi
   fi
   if want bench; then
-    "${MK[@]}" reshard reshard_model > $WORK/logs/build_bench.log 2>&1 || { tail -30 $WORK/logs/build_bench.log; exit 1; }
-    ls -l $BIN/reshard_bench $BIN/reshard_model_bench
+    "${MK[@]}" reshard reshard_batch_user_window reshard_model > $WORK/logs/build_bench.log 2>&1 \
+      || { tail -30 $WORK/logs/build_bench.log; exit 1; }
+    ls -l $BIN/reshard_bench $BIN/reshard_batch_bench_user_window $BIN/reshard_model_bench
+    ldd $BIN/reshard_bench | grep librccl
   fi
+fi
+
+if want extras; then
+  # rccl-tests for the alltoall reference (links the base-image librccl, runs ours via LD_LIBRARY_PATH).
+  [[ -d $WORK/rccl-tests ]] || git clone -q --depth 1 https://github.com/ROCm/rccl-tests.git $WORK/rccl-tests
+  make -C $WORK/rccl-tests -j64 MPI=1 MPI_HOME=$MPI_HOME HIP_HOME=$ROCM_PATH NCCL_HOME=$RCCL_INSTALL \
+    "GPU_TARGETS=${M2N_GPU_ARCHS//;/ }" > $WORK/logs/build_rccl_tests.log 2>&1 \
+    || { tail -30 $WORK/logs/build_rccl_tests.log; exit 1; }
+  ls -l $WORK/rccl-tests/build/alltoall_perf
 fi
 
 if want py; then
