@@ -18,8 +18,8 @@ env:
     }}
   AIS_PKG_TYPE: ${{ inputs.platform == 'ubuntu' && 'DEB' || 'RPM' }}
   AIS_INPUT_ROCM_VERSION: ${{ inputs.rocm_version }}
-  # Code coverage report only vetted to work for amdclang++ on Ubuntu
-  AIS_USE_CODE_COVERAGE: ${{ inputs.cxx_compiler == 'amdclang++' && inputs.platform == 'ubuntu' && inputs.generate_coverage }}
+  # Collect coverage on the Ubuntu ROCm nightly build with amdclang++.
+  AIS_USE_CODE_COVERAGE: ${{ inputs.rocm_version == 'nightly' && inputs.cxx_compiler == 'amdclang++' && inputs.platform == 'ubuntu' && inputs.generate_coverage }}
   AIS_HIP_ARCHITECTURES: gfx950;gfx1201;gfx1200;gfx1101;gfx1100;gfx1030;gfx942;gfx90a;gfx908
 
 on:
@@ -238,8 +238,10 @@ jobs:
             /bin/bash -c '
               ctest -V -L "unit" --parallel 8
             '
-      - name: Generate coverage summary (${{ inputs.cxx_compiler }})
+      - name: Generate coverage files (${{ inputs.cxx_compiler }})
+        id: generate_coverage
         if: ${{ env.AIS_USE_CODE_COVERAGE == 'true' }}
+        continue-on-error: true
         run: |
           docker exec \
             -t \
@@ -247,7 +249,17 @@ jobs:
             "${AIS_CONTAINER_NAME}" \
             /bin/bash -c '
               export PATH="/opt/rocm/llvm/bin:${PATH}"
-              ../../rocm-systems/projects/hipfile/util/llvm-coverage.sh
+              ../../rocm-systems/projects/hipfile/util/llvm-coverage.sh -b .
+            '
+      - name: Output coverage summary to CI (${{ inputs.cxx_compiler }})
+        if: ${{ steps.generate_coverage.outcome == 'success' }}
+        continue-on-error: true
+        run: |
+          docker exec \
+            -t \
+            -w /ais/build/hipfile \
+            "${AIS_CONTAINER_NAME}" \
+            /bin/bash -ec '
               printf "# Code Coverage\n"
               printf "\`\`\`\n"
               cat coverage-report.txt
