@@ -8841,7 +8841,10 @@ static const std::vector<arch_compat_entry_t> arch_compat_table = {
   { EF_AMDGPU_MACH_AMDGCN_GFX1172, EF_AMDGPU_MACH_AMDGCN_GFX11_7_GENERIC },
 
   /* gfx12.5 family can run gfx12-5-generic code objects.  */
-  { EF_AMDGPU_MACH_AMDGCN_GFX1250, EF_AMDGPU_MACH_AMDGCN_GFX12_5_GENERIC }
+  { EF_AMDGPU_MACH_AMDGCN_GFX1250, EF_AMDGPU_MACH_AMDGCN_GFX12_5_GENERIC },
+
+  /* gfx12.5 can run gfx12.5-strict code objects.  */
+  { EF_AMDGPU_MACH_AMDGCN_GFX1250, EF_AMDGPU_MACH_AMDGCN_GFX1250_STRICT },
 };
 
 } /* namespace  */
