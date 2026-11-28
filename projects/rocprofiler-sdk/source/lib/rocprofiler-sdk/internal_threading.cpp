@@ -64,8 +64,9 @@ fork_stale()
 
 namespace
 {
-using task_group_vec_t     = common::container::stable_vector<task_group_t*>;
-using thread_pool_config_t = PTL::ThreadPool::Config;
+using task_group_vec_t              = common::container::stable_vector<task_group_t*>;
+using thread_pool_config_t          = PTL::ThreadPool::Config;
+thread_local bool task_group_thread = false;
 
 auto affinity_functor(intmax_t)
 {
@@ -85,10 +86,16 @@ get_thread_pool_config(size_t pool_size = 1)
                                 .pool_size    = pool_size,
                                 .task_queue   = nullptr,
                                 .set_affinity = affinity_functor,
-                                .initializer  = []() {},
-                                .finalizer    = []() {}};
+                                .initializer  = []() { task_group_thread = true; },
+                                .finalizer    = []() { task_group_thread = false; }};
 }
 }  // namespace
+
+bool
+is_task_group_thread()
+{
+    return task_group_thread;
+}
 
 TaskGroup::TaskGroup(size_t pool_size)
 : parent_type{new thread_pool_t{get_thread_pool_config(pool_size)}, false}
@@ -118,12 +125,40 @@ void
 TaskGroup::async(std::function<void()>&& _func)
 {
     ++m_tasks_count;
-    auto _async_func = [func = std::move(_func)](std::atomic<uint64_t>* tasks_count) {
+    auto ticket      = m_async_submitted.fetch_add(1, std::memory_order_acq_rel) + 1;
+    auto _async_func = [this, ticket, func = std::move(_func)]() {
         // ensure m_tasks_count is decremented even if func throws
-        auto _dtor = common::scope_destructor{[tasks_count]() { --(*tasks_count); }};
+        auto _dtor = common::scope_destructor{[this, ticket]() { complete_async(ticket); }};
         func();
     };
-    parent_type::async(std::move(_async_func), &m_tasks_count);
+    parent_type::async(std::move(_async_func));
+}
+
+void
+TaskGroup::complete_async(uint64_t ticket)
+{
+    {
+        auto lock = std::unique_lock<std::mutex>{m_async_mutex};
+        if(ticket == m_async_completed + 1)
+        {
+            m_async_completed = ticket;
+            while(!m_async_finished.empty() && *m_async_finished.begin() == m_async_completed + 1)
+            {
+                m_async_finished.erase(m_async_finished.begin());
+                ++m_async_completed;
+            }
+        }
+        else
+        {
+            m_async_finished.emplace(ticket);
+        }
+    }
+    // Gated on a waiter actually existing: this runs once per emitted dispatch record, and in the
+    // overwhelmingly common case nobody is fencing. Waiters publish themselves under
+    // m_async_mutex before they wait and re-test the predicate after taking it, so a waiter that
+    // arrives between the unlock above and this load cannot miss the state it just published.
+    if(m_async_waiters.load(std::memory_order_acquire) > 0) m_async_condition.notify_all();
+    --m_tasks_count;
 }
 
 void
@@ -152,6 +187,59 @@ void
 TaskGroup::join(bool async_only)
 {
     wait(async_only);
+}
+
+uint64_t
+TaskGroup::get_async_fence() const
+{
+    return m_async_submitted.load(std::memory_order_acquire);
+}
+
+// Registers a waiter for the lifetime of a wait so complete_async can skip notifying when nobody
+// is listening. Counted under m_async_mutex, which is also what the condition variable uses, so a
+// completion either sees the count or has already published the state the waiter re-tests.
+struct TaskGroup::async_waiter
+{
+    explicit async_waiter(TaskGroup& group)
+    : m_group{group}
+    {
+        m_group.m_async_waiters.fetch_add(1, std::memory_order_release);
+    }
+    ~async_waiter() { m_group.m_async_waiters.fetch_sub(1, std::memory_order_release); }
+
+    async_waiter(const async_waiter&) = delete;
+    async_waiter(async_waiter&&)      = delete;
+    async_waiter& operator=(const async_waiter&) = delete;
+    async_waiter& operator=(async_waiter&&) = delete;
+
+private:
+    TaskGroup& m_group;
+};
+
+bool
+TaskGroup::wait_async(uint64_t fence)
+{
+    if(is_task_group_thread() ||
+       m_fork_generation != g_fork_generation.load(std::memory_order_acquire))
+        return false;
+    auto lock    = std::unique_lock<std::mutex>{m_async_mutex};
+    auto waiting = async_waiter{*this};
+    m_async_condition.wait(lock, [this, fence]() { return m_async_completed >= fence; });
+    return true;
+}
+
+bool
+TaskGroup::wait_async_for(uint64_t fence, uint64_t timeout_ns)
+{
+    if(is_task_group_thread() ||
+       m_fork_generation != g_fork_generation.load(std::memory_order_acquire))
+        return false;
+
+    auto lock    = std::unique_lock<std::mutex>{m_async_mutex};
+    auto waiting = async_waiter{*this};
+    return m_async_condition.wait_for(lock, std::chrono::nanoseconds{timeout_ns}, [this, fence]() {
+        return m_async_completed >= fence;
+    });
 }
 
 namespace

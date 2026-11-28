@@ -32,10 +32,12 @@
 #include <PTL/ThreadPool.hh>
 
 #include <atomic>
+#include <condition_variable>
 #include <cstdint>
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -62,14 +64,32 @@ public:
     void async(std::function<void()>&&);
     void wait(bool async_only = false);
     void join(bool async_only = false);
+    // Ticket covering every async task submitted so far. wait_async blocks until all of them have
+    // run; tasks submitted afterwards do not extend it. wait_async_for is the bounded form the
+    // tests use to prove a fence has NOT been satisfied yet.
+    uint64_t get_async_fence() const;
+    bool     wait_async(uint64_t fence);
+    bool     wait_async_for(uint64_t fence, uint64_t timeout_ns);
 
 private:
+    struct async_waiter;
+
+    void complete_async(uint64_t ticket);
+
     std::mutex                             m_mutex           = {};
     std::atomic<uint64_t>                  m_tasks_count     = 0;
     thread_pool_t*                         m_pool            = nullptr;
     std::deque<std::shared_ptr<task_type>> m_tasks           = {};
     std::deque<std::shared_ptr<task_type>> m_completed_tasks = {};
     std::atomic<bool>                      m_async_only      = true;
+    std::atomic<uint64_t>                  m_async_submitted = 0;
+    std::atomic<uint64_t>                  m_async_waiters   = 0;
+    std::mutex                             m_async_mutex     = {};
+    std::condition_variable                m_async_condition = {};
+    // Highest ticket with no unfinished predecessor, plus the out-of-order completions waiting to
+    // join it. A later task finishing first must never advance the fence past an earlier one.
+    uint64_t           m_async_completed = 0;
+    std::set<uint64_t> m_async_finished  = {};
     // Fork generation the pool was constructed in. ~TaskGroup() leaks m_pool
     // rather than joining vanished workers when this is stale (see fork_stale).
     uint64_t m_fork_generation = 0;
@@ -82,6 +102,9 @@ using task_group_t = TaskGroup;
 // generation is conclusive (see D4/D6).
 bool
 fork_stale();
+
+bool
+is_task_group_thread();
 
 void notify_pre_internal_thread_create(rocprofiler_runtime_library_t);
 void notify_post_internal_thread_create(rocprofiler_runtime_library_t);

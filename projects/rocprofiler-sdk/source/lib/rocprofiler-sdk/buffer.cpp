@@ -28,7 +28,9 @@
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/domain.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
+#include "lib/rocprofiler-sdk/kernel_dispatch/tracing.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
@@ -324,13 +326,23 @@ rocprofiler_create_buffer(rocprofiler_context_id_t        context,
 rocprofiler_status_t
 rocprofiler_flush_buffer(rocprofiler_buffer_id_t buffer_id)
 {
+    auto completion_status = rocprofiler::kernel_dispatch::flush_buffer_records(buffer_id);
+    if(completion_status != ROCPROFILER_STATUS_SUCCESS &&
+       (rocprofiler::internal_threading::is_task_group_thread() ||
+        rocprofiler::hsa::is_async_signal_handler_thread()))
+        return completion_status;
+    ROCP_WARNING_IF(completion_status != ROCPROFILER_STATUS_SUCCESS &&
+                    completion_status != ROCPROFILER_STATUS_ERROR_BUFFER_NOT_FOUND)
+        << "Kernel-dispatch delivery could not complete; flushing available buffered records only";
+
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
     // Drain internal PC sampling buffers, if needed.
     auto status = rocprofiler::pc_sampling::flush_internal_agent_buffers(buffer_id);
     if(status != ROCPROFILER_STATUS_SUCCESS) return status;
 #endif
 
-    return rocprofiler::buffer::flush(buffer_id, true);
+    auto buffer_status = rocprofiler::buffer::flush(buffer_id, true);
+    return buffer_status == ROCPROFILER_STATUS_SUCCESS ? completion_status : buffer_status;
 }
 
 rocprofiler_status_t
