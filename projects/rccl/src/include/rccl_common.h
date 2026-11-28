@@ -87,17 +87,15 @@ typedef enum {
   RCCL_DDA_FABRIC_LL128,// DDA fabric, LL128 protocol (mid-message fast lane)
   RCCL_DDA_FABRIC_VMM,  // DDA fabric, VMM/Simple path
   RCCL_DDA_IPC,         // DDA IPC (single-node, fixed nRanks)
-  RCCL_GIN_SDMA,        // GIN-SDMA AllReduce (scaleup LSA/GIN)
+  RCCL_GIN_SDMA,        // GIN-SDMA (scaleup LSA/GIN)
   RCCL_A2A_PIVOT,       // AlltoAll pivot algorithm (large, aligned messages)
   RCCL_A2A_GDA,         // AlltoAll via GDA/RocSHMEM
-  RCCL_A2A_GIN_SDMA,    // AlltoAll via GIN LSA/SDMA
   // Appended rather than grouped with the other Direct entries so existing
   // values stay stable.
   RCCL_DIRECT_ALLTOALL, // AlltoAll as per-peer Send/Recv (no collective kernel)
   // Reporting only (rcclGetCollImplInfo / rcclSymKGetInfo): a symmetric dispatch that
   // resolves to a Tensor Data Mover kernel. Live dispatch always tags RCCL_SYMMETRIC.
   RCCL_SYMMETRIC_TDM,
-  RCCL_AG_GIN_SDMA,     // AllGather via GIN LSA/SDMA
   RCCL_ALGO_COUNT
 } rcclAddonAlgos_t;
 

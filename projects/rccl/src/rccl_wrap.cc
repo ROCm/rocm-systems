@@ -1040,12 +1040,6 @@ ncclResult_t rcclGetAlgoName(int algo, const char** algoName) {
     case rcclAddonAlgos_t::RCCL_A2A_GDA:
       *algoName = "A2A-GDA";
       break;
-    case rcclAddonAlgos_t::RCCL_A2A_GIN_SDMA:
-      *algoName = "A2A-GIN";
-      break;
-    case rcclAddonAlgos_t::RCCL_AG_GIN_SDMA:
-      *algoName = "AG-GIN";
-      break;
     default:
       WARN("Invalid algorithm value: %d", algo);
       return ncclInvalidArgument;
@@ -2406,7 +2400,7 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
     // kernel/CE/DDA alternatives, matching the GIN AllReduce selection order.
 #if defined(ENABLE_ROCSHMEM_GIN)
     if (ncclAllGatherGinSdmaEligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
-      decision->algo = RCCL_AG_GIN_SDMA;
+      decision->algo = RCCL_GIN_SDMA;
       decision->nMaxChannels = ncclAllGatherGinSdmaCtaCount(comm->nRanks, sendcount * typeSize);
       return rcclSelectDone("AG", query, decision);
     }
@@ -2945,7 +2939,7 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
   // below the DDA threshold (parity or better on small sizes).
 #if defined(ENABLE_ROCSHMEM_GIN)
   if (ncclAllToAllGinSdmaEligible(comm, sendbuff, recvbuff, count, datatype)) {
-    decision->algo = RCCL_A2A_GIN_SDMA;
+    decision->algo = RCCL_GIN_SDMA;
     return rcclSelectDone("A2A", query, decision);
   }
 #endif

@@ -5421,7 +5421,7 @@ TEST_F(GinMPIDeviceTests, Allgather_SdmaInternal) {
     ASSERT_MPI_EQ(ncclSuccess, rcclGetCollImplInfo(comm, ncclFuncAllGather, (countExpr), ncclFloat, ncclSum,         \
                                                    (sendPtr), (recvPtr), /*graphCapturing=*/0, &algo_, &proto_,      \
                                                    &channels_));                                                     \
-    ASSERT_MPI_EQ(static_cast<int>(rcclAddonAlgos_t::RCCL_AG_GIN_SDMA), algo_);                                      \
+    ASSERT_MPI_EQ(static_cast<int>(rcclAddonAlgos_t::RCCL_GIN_SDMA), algo_);                                      \
   } while (0)
 
   void* dSend = nullptr;

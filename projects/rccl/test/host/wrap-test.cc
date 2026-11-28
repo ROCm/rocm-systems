@@ -6908,7 +6908,7 @@ TEST(WrapMicrotestIsolated, SelectAllGather_GinSdmaPreemptsSymk) {
         EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32,
                                                    /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false,
                                                    &decision));
-        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_AG_GIN_SDMA, decision.algo);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_GIN_SDMA, decision.algo);
         EXPECT_EQ(4, decision.nMaxChannels);
         DeleteCommWithArch(comm);
       });

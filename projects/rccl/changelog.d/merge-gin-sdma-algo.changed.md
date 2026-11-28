@@ -1,0 +1,1 @@
+* `rcclAddonAlgos_t`: the GIN-SDMA AllReduce, AllGather, and AlltoAll backends now share the single `RCCL_GIN_SDMA` value, and `rcclGetAlgoName()` reports `GIN-SDMA` for all of them. `RCCL_A2A_GIN_SDMA` and `RCCL_AG_GIN_SDMA` are removed, so later `rcclAddonAlgos_t` values renumber.
