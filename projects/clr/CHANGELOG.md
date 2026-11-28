@@ -30,6 +30,11 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
         type and the device's CU-masking granularity. `hipExecAffinityTypeCUCount` is always reported
         as supported. Two HIP-specific extension types, `hipExtExecAffinityTypeGranularityCU` and
         `hipExtExecAffinityTypeGranularityWGP`, report the granularity the applies to the CU mask.
+* New floating-point emulation control types in `hip/library_types.h`, for API parity with the corresponding CUDA 13 types used by math libraries (for example, FP64/FP32 GEMM emulation in hipBLAS and hipBLASLt). Enumerator values match CUDA.
+    - `hipEmulationStrategy` (`hipEmulationStrategy_t`): `HIP_EMULATION_STRATEGY_DEFAULT`, `HIP_EMULATION_STRATEGY_PERFORMANT`, `HIP_EMULATION_STRATEGY_EAGER`.
+    - `hipEmulationMantissaControl` (`hipEmulationMantissaControl_t`): `HIP_EMULATION_MANTISSA_CONTROL_DYNAMIC`, `HIP_EMULATION_MANTISSA_CONTROL_FIXED`.
+    - `hipEmulationSpecialValuesSupport` (`hipEmulationSpecialValuesSupport_t`): a bitmask where `HIP_EMULATION_SPECIAL_VALUES_SUPPORT_INFINITY` (1) and `HIP_EMULATION_SPECIAL_VALUES_SUPPORT_NAN` (2) can be combined, plus `HIP_EMULATION_SPECIAL_VALUES_SUPPORT_NONE` (0) and `HIP_EMULATION_SPECIAL_VALUES_SUPPORT_DEFAULT` (0xFFFF).
+    - On the NVIDIA platform, these map to the corresponding CUDA types: `hipEmulationStrategy` with CUDA 13.0 or later, and `hipEmulationMantissaControl` and `hipEmulationSpecialValuesSupport` with CUDA 13.1 or later.
 
 ### Resolved issues
 
