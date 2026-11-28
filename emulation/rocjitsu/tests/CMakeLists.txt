@@ -399,6 +399,14 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_run_vfio_guest.py -v
     )
     add_test(
+        NAME VfioUserBenchUnitTest
+        COMMAND
+            ${Python3_EXECUTABLE} -B
+            ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_bench_vfio_user.py -v
+    )
+    # Its deadline tests fail by hanging.
+    set_tests_properties(VfioUserBenchUnitTest PROPERTIES TIMEOUT 300)
+    add_test(
         NAME RcclScaleoutRunUnitTest
         COMMAND
             ${Python3_EXECUTABLE} -B
@@ -436,6 +444,59 @@ if(ROCJITSU_ENABLE_VFIO)
         RocjitsuVfioRepeatedSocketsRejectAliases
         PROPERTIES TIMEOUT 15
     )
+
+    # Drive the built server end to end with scripts/bench-vfio-user.py, which
+    # brings the device up as a guest driver would and checks every work item
+    # of its benchmark kernels. The script compiles those kernels from OpenCL
+    # C when it runs, so the test exists only when the clang of the selected
+    # ROCM_PATH builds them for gfx1250. A missing or older toolchain disables
+    # the test; it never fails the configuration.
+    rj_find_rocm_program(RJ_VFIO_BENCH_CLANG clang)
+    set(_rj_vfio_bench_script "${CMAKE_SOURCE_DIR}/scripts/bench-vfio-user.py")
+    set(_rj_vfio_bench_toolchain FALSE)
+    if(RJ_VFIO_BENCH_CLANG)
+        execute_process(
+            COMMAND
+                ${Python3_EXECUTABLE} -B "${_rj_vfio_bench_script}"
+                --check-toolchain --clang "${RJ_VFIO_BENCH_CLANG}" --target
+                gfx1250
+            RESULT_VARIABLE _rj_vfio_bench_probe_result
+            OUTPUT_VARIABLE _rj_vfio_bench_probe_output
+            ERROR_VARIABLE _rj_vfio_bench_probe_output
+        )
+        if(_rj_vfio_bench_probe_result STREQUAL "0")
+            set(_rj_vfio_bench_toolchain TRUE)
+        endif()
+    endif()
+    if(_rj_vfio_bench_toolchain)
+        add_test(
+            NAME RocjitsuVfioUserBenchVerify
+            COMMAND
+                ${Python3_EXECUTABLE} -B "${_rj_vfio_bench_script}"
+                --verify-only --rocjitsu $<TARGET_FILE:rocjitsu_bin> --config
+                "${CMAKE_SOURCE_DIR}/configs/gfx1250_mi455x.json" --clang
+                "${RJ_VFIO_BENCH_CLANG}" --target gfx1250 --ready-timeout 60
+                --timeout 60
+        )
+        set_tests_properties(
+            RocjitsuVfioUserBenchVerify
+            PROPERTIES TIMEOUT 120 LABELS vfio
+        )
+        message(
+            STATUS
+            "VFIO-user benchmark verify test enabled (found ${RJ_VFIO_BENCH_CLANG})"
+        )
+    elseif(RJ_VFIO_BENCH_CLANG)
+        message(
+            STATUS
+            "VFIO-user benchmark verify test disabled (${RJ_VFIO_BENCH_CLANG} cannot build the gfx1250 kernels):\n${_rj_vfio_bench_probe_output}"
+        )
+    else()
+        message(
+            STATUS
+            "VFIO-user benchmark verify test disabled (no clang under ROCM_PATH)"
+        )
+    endif()
 endif()
 
 add_test(
@@ -836,6 +897,8 @@ add_executable(
     drm_info_layout_test.cpp
     pci/bar_access_trace_test.cpp
     pci/gpu_pci_device_test.cpp
+    pci/pci_transport_session_test.cpp
+    pci/vram_store_test.cpp
     pci/scratch_pci_device_test.cpp
     pci/ip_discovery_test.cpp
     pci/ip_block_model_test.cpp
@@ -889,6 +952,7 @@ if(ROCJITSU_ENABLE_VFIO)
             vmm/guest_region_map_test.cpp
             vmm/vfio_user_client.cpp
             vmm/vfio_device_host_test.cpp
+            vmm/vfio_server_dispatch_test.cpp
     )
     target_link_libraries(
         rocjitsu_tests
@@ -900,6 +964,14 @@ if(ROCJITSU_ENABLE_VFIO)
     # Serving now builds a whole machine, so a test that drives the server end to
     # end needs a real config rather than a synthesized one.
     rj_add_test_path(rocjitsu_tests RJ_VFU_TEST_CONFIG_PATH "${CMAKE_SOURCE_DIR}/configs/gfx1250_mi455x.json")
+endif()
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64)$")
+    target_sources(
+        rocjitsu_tests
+        PRIVATE
+            util_shared_memory_test.cpp
+            pci/translated_local_line_fill_test.cpp
+    )
 endif()
 if(RJ_ENABLE_EXPENSIVE_CHECKS)
     target_sources(

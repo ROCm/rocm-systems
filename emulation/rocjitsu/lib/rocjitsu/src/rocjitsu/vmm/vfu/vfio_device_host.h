@@ -25,6 +25,15 @@
 /// once, so the lock excludes other threads while allowing the serving thread to
 /// re-enter.
 ///
+/// One kind of work stays out of the library altogether, and so out of that
+/// lock. A copy that lies inside a single guest memory window the library has
+/// mapped into this process is made directly against the mapping, because
+/// device threads reach guest RAM concurrently and the library lock would
+/// otherwise serialize them. A separate reader/writer gate keeps a window
+/// mapped until every such copy has left it. A function bound to target grants
+/// does not do this: its addresses may name a peer's BAR, which only the grant
+/// table can tell from guest RAM.
+///
 /// Ordinary guest RAM is reachable only when the client shared it mmap-ably. A
 /// window that must instead be fetched by sending the client a command is refused,
 /// because unless the client negotiated a second socket for those, the command
@@ -58,7 +67,9 @@
 #include "rocjitsu/vmm/vfu/guest_region_map.h"
 #include "simdojo/components/pci_bar_address_decoder.h"
 #include "simdojo/components/pci_device.h"
+#include "util/distributed_shared_mutex.h"
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -220,12 +231,21 @@ public:
 
   /// @brief Record a guest memory window the client registered.
   /// @param[in] region The window, as the transport reported it.
+  /// @param[in] host_address Where this process can address the window's first
+  ///            byte, with every byte of the window addressable from there, or
+  ///            nullptr to leave the window reachable through the library only.
+  ///            Ignored, as if nullptr, unless a client is attached.
   /// @retval true The window was not already known, so the device should be told.
   /// @retval false An identical window was already recorded.
   /// @details A client may re-register a window it already holds, which the
   /// library accepts and still reports, so insertion is idempotent to keep this
   /// list and the device's view of it from drifting apart.
-  [[nodiscard]] bool record_guest_region(const simdojo::DmaRegion &region);
+  ///
+  /// A window recorded with a host address is one that @ref read_outcome and
+  /// @ref write_outcome may copy directly, without entering the library, until
+  /// @ref forget_guest_region, a client disconnect, or @ref detach withdraws it.
+  [[nodiscard]] bool record_guest_region(const simdojo::DmaRegion &region,
+                                         std::byte *host_address = nullptr);
 
   /// @brief Report that a shared window is not one this transport can serve.
   /// @param[in] region The window being declined.
@@ -235,6 +255,9 @@ public:
 
   /// @brief Forget a guest memory window that the client withdrew.
   /// @param[in] region The window being withdrawn.
+  /// @details Returns only once no copy is still using the window's mapping,
+  /// because the library unmaps it as soon as the callback that calls this
+  /// returns.
   void forget_guest_region(const simdojo::DmaRegion &region);
 
   [[nodiscard]] bool trigger(uint32_t vector) override;
@@ -256,6 +279,17 @@ public:
 private:
   simdojo::DmaAccessOutcome copy_guest_memory(uint64_t guest_phys, void *data, std::size_t length,
                                               bool to_guest);
+  /// @brief Copy a span lying inside one mmap-backed window without entering
+  ///        libvfio-user or taking @ref vfu_mutex_ or @ref state_mutex_.
+  /// @retval true The whole span was copied.
+  /// @retval false The span is not wholly inside one window recorded with a
+  ///         host address and granting the needed access. Nothing was copied
+  ///         and nothing is decided: the caller must take the serialized path.
+  [[nodiscard]] bool copy_mapped_window(uint64_t guest_phys, void *data, std::size_t length,
+                                        bool to_guest) const;
+  /// @brief Forget every window, waiting out copies still inside one. The
+  ///        caller holds @ref state_mutex_.
+  void clear_guest_regions_locked();
   [[nodiscard]] simdojo::DmaAccessOutcome atomic_destination(uint64_t guest_phys, uint32_t width,
                                                              bool to_guest) const;
   [[nodiscard]] bool
@@ -274,6 +308,8 @@ private:
   std::recursive_mutex vfu_mutex_;
 
   /// @brief Guards connection, reset, and guest-region state shared with callbacks.
+  /// @details @ref guest_regions_ is changed only with both this and @ref
+  /// mapped_gate_ held, so holding either one is enough to read it.
   mutable std::mutex state_mutex_;
 
   /// @brief The single outstanding request, and the lock guarding it.
@@ -321,7 +357,39 @@ private:
   /// neither be isolated from the first nor given clean state; refusing to serve
   /// one is honest, where quietly reattaching is not.
   bool single_client_ = false;
+
+  /// @brief The windows the client has shared, with the host address of each
+  ///        one a copy may reach directly.
+  ///
+  /// @details One record serves both the serialized callbacks and the copies
+  /// that bypass the library, rather than a second table of mapped windows that
+  /// every insertion, withdrawal and disconnect would have to mirror.
+  ///
+  /// A host address is recorded only while a client is attached, which is what
+  /// lets a copy that finds one skip the attachment check. @ref
+  /// record_guest_region drops the address when no client is attached, and
+  /// @ref detach and a client disconnect empty the record in the critical
+  /// section that clears @ref attached_. A function-level or bus reset does not
+  /// empty it: the client stays attached, and the library keeps its windows
+  /// mapped without announcing them again.
   GuestRegionMap guest_regions_;
+  /// @brief Excludes window withdrawal from copies that bypass libvfio-user.
+  ///
+  /// @details Held shared for as long as a copy reads @ref guest_regions_ or
+  /// touches a window's mapping, and exclusively while a window is recorded or
+  /// forgotten. libvfio-user unmaps a window as soon as its unregister callback
+  /// returns, so forgetting one waits here for every copy still inside it. A
+  /// shared holder only copies bytes: it never takes @ref vfu_mutex_ or @ref
+  /// state_mutex_ and never waits on anything, so the serving thread can take
+  /// the exclusive side while holding both. Lock order is @ref vfu_mutex_, @ref
+  /// state_mutex_, then this.
+  mutable util::DistributedSharedMutex mapped_gate_;
+  /// @brief Whether ordinary copies may bypass libvfio-user.
+  ///
+  /// @details Decided once in build(). False when this function belongs to a
+  /// target-grant group: an address there may name a peer BAR, a failed peer
+  /// range, or a quiescing owner, and only the grant table can tell.
+  std::atomic<bool> mapped_fast_path_{false};
   bool warned_unreachable_region_ = false;
   uint64_t declined_regions_ = 0;
   uint64_t declined_bytes_ = 0;

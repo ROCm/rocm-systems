@@ -430,8 +430,9 @@ jobs:
               -DRJ_BUILD_CONSAN_ANALYZER=ON
             )
           fi
-          if [[ "${{ matrix.name }}" == release ]]; then
-            # Exercise stock-driver peer grants in the required Linux lane.
+          if [[ "${{ matrix.name }}" == release || "${{ matrix.name }}" == tsan ]]; then
+            # Exercise stock-driver peer grants in the required Linux lane, and
+            # race the mapped guest-memory accesses under ThreadSanitizer.
             CMAKE_CONFIG_FLAGS+=(-DROCJITSU_ENABLE_VFIO=ON)
           fi
 
@@ -462,7 +463,7 @@ jobs:
           cmake --build "${ROCJITSU_BUILD_DIR}" -j
           echo "built=true" >> "${GITHUB_OUTPUT}"
 
-          if [[ "${{ matrix.name }}" == release ]]; then
+          if [[ "${{ matrix.name }}" == release || "${{ matrix.name }}" == tsan ]]; then
             VFIO_DISCOVERY="$(ctest --test-dir "${ROCJITSU_BUILD_DIR}" -N -R '^Vfio(TargetGrants|DeviceHost)')"
             echo "${VFIO_DISCOVERY}"
             if ! [[ "${VFIO_DISCOVERY}" =~ Total[[:space:]]Tests:[[:space:]][1-9][0-9]* ]]; then

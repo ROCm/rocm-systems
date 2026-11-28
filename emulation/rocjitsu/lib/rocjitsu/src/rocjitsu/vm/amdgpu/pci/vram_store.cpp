@@ -6,13 +6,13 @@
 #include "rocjitsu/vm/canonical_backing_id.h"
 
 #include "util/log.h"
+#include "util/shared_memory.h"
 
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <unistd.h>
 
 #include <array>
-#include <atomic>
 #include <cerrno>
 #include <cstring>
 #include <format>
@@ -39,6 +39,7 @@ VramStore::VramStore(const std::string &name, uint64_t bytes, uint64_t aperture_
     return;
   }
 
+#ifdef __x86_64__
   void *mapped = ::mmap(nullptr, aperture_bytes_, PROT_READ | PROT_WRITE, MAP_SHARED, fd_, 0);
   if (mapped == MAP_FAILED) {
     util::Logger::warn(std::format("{}: cannot map the video memory aperture", name));
@@ -63,6 +64,7 @@ VramStore::VramStore(const std::string &name, uint64_t bytes, uint64_t aperture_
     fd_ = -1;
     return;
   }
+#endif // __x86_64__
   backing_id_ = allocate_canonical_backing_id();
 }
 
@@ -76,20 +78,29 @@ VramStore::~VramStore() {
 }
 
 bool VramStore::read(uint64_t offset, uint32_t &value) const {
-  const std::lock_guard lock(access_mutex_);
-  if (fd_ < 0 || offset > bytes_ || sizeof(value) > bytes_ - offset) {
-    return false;
+  if (in_aperture(offset, sizeof(value))) {
+    // Not memcpy: a plain load would race a store or compare/exchange that
+    // another thread makes on these bytes.
+    util::load_once(reinterpret_cast<std::byte *>(&value), mapping_ + offset, sizeof(value));
+    return true;
   }
-  return ::pread(fd_, &value, sizeof(value), static_cast<off_t>(offset)) ==
-         static_cast<ssize_t>(sizeof(value));
+  return read_all(std::as_writable_bytes(std::span(&value, 1)), offset);
 }
 
 bool VramStore::read_all(std::span<std::byte> bytes, uint64_t at) const {
+  if (in_aperture(at, bytes.size())) {
+    util::load_once(bytes.data(), mapping_ + at, bytes.size());
+    return true;
+  }
   const std::lock_guard lock(access_mutex_);
   if (fd_ < 0 || at > bytes_ || bytes.size() > bytes_ - at) {
     return false;
   }
-  std::size_t done = 0;
+  // The part of a range that begins inside the aperture is mapped here and by
+  // the VMM, so it is loaded through the mapping like any other; a transfer by
+  // file offset would be a plain access to those bytes.
+  std::size_t done = mapped_prefix(at, bytes.size());
+  util::load_once(bytes.data(), mapping_ + at, done);
   while (done < bytes.size()) {
     const ssize_t read =
         ::pread(fd_, bytes.data() + done, bytes.size() - done, static_cast<off_t>(at + done));
@@ -108,20 +119,26 @@ bool VramStore::read_all(std::span<std::byte> bytes, uint64_t at) const {
 }
 
 bool VramStore::write(uint64_t offset, uint32_t value) {
-  const std::lock_guard lock(access_mutex_);
-  if (fd_ < 0 || offset > bytes_ || sizeof(value) > bytes_ - offset) {
-    return false;
+  if (in_aperture(offset, sizeof(value))) {
+    // Not memcpy: it may store a byte twice, which would undo a
+    // compare/exchange that another thread completes in between.
+    util::store_once(mapping_ + offset, reinterpret_cast<const std::byte *>(&value), sizeof(value));
+    return true;
   }
-  return ::pwrite(fd_, &value, sizeof(value), static_cast<off_t>(offset)) ==
-         static_cast<ssize_t>(sizeof(value));
+  return write_all(std::as_bytes(std::span(&value, 1)), offset);
 }
 
 bool VramStore::write_all(std::span<const std::byte> bytes, uint64_t at) {
+  if (in_aperture(at, bytes.size())) {
+    util::store_once(mapping_ + at, bytes.data(), bytes.size());
+    return true;
+  }
   const std::lock_guard lock(access_mutex_);
   if (fd_ < 0 || at > bytes_ || bytes.size() > bytes_ - at) {
     return false;
   }
-  std::size_t done = 0;
+  std::size_t done = mapped_prefix(at, bytes.size());
+  util::store_once(mapping_ + at, bytes.data(), done);
   while (done < bytes.size()) {
     const ssize_t wrote =
         ::pwrite(fd_, bytes.data() + done, bytes.size() - done, static_cast<off_t>(at + done));
@@ -150,20 +167,8 @@ std::optional<VramAtomicLoadResult> VramStore::atomic_load(uint64_t offset, uint
     return std::nullopt;
   }
 
-  if (mapping_ != nullptr && offset <= aperture_bytes_ && width <= aperture_bytes_ - offset) {
-    std::byte *target = mapping_ + offset;
-    uint64_t value = 0;
-    if (width == sizeof(uint64_t)) {
-      value = std::atomic_ref<uint64_t>(*reinterpret_cast<uint64_t *>(target))
-                  .load(std::memory_order_acquire);
-    } else if (width == sizeof(uint32_t)) {
-      value = std::atomic_ref<uint32_t>(*reinterpret_cast<uint32_t *>(target))
-                  .load(std::memory_order_acquire);
-    } else {
-      value = std::atomic_ref<uint16_t>(*reinterpret_cast<uint16_t *>(target))
-                  .load(std::memory_order_acquire);
-    }
-    return VramAtomicLoadResult{.value = value};
+  if (in_aperture(offset, width)) {
+    return VramAtomicLoadResult{.value = util::shared_load_word(mapping_ + offset, width)};
   }
 
   VramAtomicLoadResult result;
@@ -185,15 +190,8 @@ bool VramStore::atomic_store(uint64_t offset, uint32_t width, uint64_t value) {
     return false;
   }
 
-  if (mapping_ != nullptr && offset <= aperture_bytes_ && width <= aperture_bytes_ - offset) {
-    std::byte *target = mapping_ + offset;
-    if (width == sizeof(uint64_t)) {
-      std::atomic_ref<uint64_t>(*reinterpret_cast<uint64_t *>(target))
-          .store(value, std::memory_order_release);
-    } else {
-      std::atomic_ref<uint32_t>(*reinterpret_cast<uint32_t *>(target))
-          .store(static_cast<uint32_t>(value), std::memory_order_release);
-    }
+  if (in_aperture(offset, width)) {
+    util::shared_store_word(mapping_ + offset, width, value);
     return true;
   }
 
@@ -215,22 +213,10 @@ VramStore::compare_exchange(uint64_t offset, uint32_t width, uint64_t expected, 
   }
 
   VramAtomicCompareExchangeResult result{.observed = 0, .exchanged = false};
-  if (mapping_ != nullptr && offset <= aperture_bytes_ && width <= aperture_bytes_ - offset) {
-    std::byte *target = mapping_ + offset;
-    if (width == sizeof(uint64_t)) {
-      uint64_t observed = expected;
-      result.exchanged = std::atomic_ref<uint64_t>(*reinterpret_cast<uint64_t *>(target))
-                             .compare_exchange_strong(observed, desired, std::memory_order_acq_rel,
-                                                      std::memory_order_acquire);
-      result.observed = observed;
-    } else {
-      uint32_t observed = static_cast<uint32_t>(expected);
-      result.exchanged =
-          std::atomic_ref<uint32_t>(*reinterpret_cast<uint32_t *>(target))
-              .compare_exchange_strong(observed, static_cast<uint32_t>(desired),
-                                       std::memory_order_acq_rel, std::memory_order_acquire);
-      result.observed = observed;
-    }
+  if (in_aperture(offset, width)) {
+    result.observed = expected;
+    result.exchanged =
+        util::shared_compare_exchange_word(mapping_ + offset, width, result.observed, desired);
     return result;
   }
 

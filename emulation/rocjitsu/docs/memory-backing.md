@@ -65,8 +65,39 @@ A failed fence mapping rejects submission and can be retried after sufficient
 address space becomes available.
 
 Socket tokens support these mapping/metadata adapters, not file-offset I/O.
-The PCI model's `VramStore` still uses its own memfd with `pread`/`pwrite` and
-is outside this KFD backing support for file limits.
+The PCI model's `VramStore` still uses its own memfd, reached through its mapped
+aperture and with `pread`/`pwrite` past it, and is outside this KFD backing
+support for file limits.
+
+The mapped aperture is shared with the VMM, as is the guest RAM that a
+VFIO-user device maps. Dispatch threads and guest processors access those
+bytes concurrently, with no common lock and at widths of their own choosing, so
+rocjitsu reaches them only through `util/shared_memory.h`:
+
+- `VramStore` and `VfioDeviceHost` copy with `util::store_once()` and
+  `util::load_once()`, and perform their atomic loads, stores and
+  compare-exchanges with the single-word operations of the same header. Peer
+  BAR grants, which map another device's aperture, copy the same way.
+- Every access is an aligned atomic load, store or compare-exchange of 1, 2, 4
+  or 8 bytes. A copy stores or loads each shared byte once, so it cannot undo a
+  concurrent compare-exchange.
+- A 2-, 4- or 8-byte access at an address aligned for its width is a single
+  access and never sees or leaves part of a concurrent one. A longer or
+  misaligned span is several accesses and may observe a concurrent update
+  partway.
+- `VramStore` and the `vmm/vfu` sources use no `memcpy`, `std::copy` or
+  `std::atomic_ref` on these mappings, and `VramStore` does not hand out its
+  mapping.
+- A `VramStore` range that crosses the aperture end is split there. The part
+  inside the aperture is copied through the mapping like any other, and only
+  the rest is transferred by file offset.
+
+This is not ISO C++. Neither the C++ standard nor LLVM's memory model defines
+overlapping atomic accesses of different widths; the indivisibility of each
+access is a property of the processor, established for x86-64 only. The
+accesses are volatile, which is what makes LLVM leave the result of a racing
+load to the target instead of treating it as undefined. The header states
+exactly what is relied on.
 
 ## GPU core dump classification
 

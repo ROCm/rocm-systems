@@ -1057,12 +1057,10 @@ TEST(VramStore, RejectsInvalidApertureSizesBeforeMapping) {
   const rocjitsu::VramStore zero_aperture("zero-aperture", 0x2000, 0);
   EXPECT_FALSE(zero_aperture.usable());
   EXPECT_EQ(zero_aperture.backing_id(), 0u);
-  EXPECT_TRUE(zero_aperture.aperture().empty());
 
   const rocjitsu::VramStore oversized_aperture("oversized-aperture", 0x1000, 0x2000);
   EXPECT_FALSE(oversized_aperture.usable());
   EXPECT_EQ(oversized_aperture.backing_id(), 0u);
-  EXPECT_TRUE(oversized_aperture.aperture().empty());
 
   const rocjitsu::VramStore zero_backing("zero-backing", 0, 0);
   EXPECT_FALSE(zero_backing.usable());

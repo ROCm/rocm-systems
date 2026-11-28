@@ -28,6 +28,7 @@
 #include "rocjitsu/vmm/vfu/vfio_server.h"
 #include "rocjitsu/vmm/vfu/vfio_target_grants.h"
 #include "util/diagnostic.h"
+#include "util/shared_memory.h"
 #include "vfio_user_client.h"
 
 #include "simdojo/sim/simulation.h"
@@ -70,15 +71,22 @@ extern "C" {
 #include <cerrno>
 #include <chrono>
 #include <csignal>
+#include <cstddef>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <format>
+#include <functional>
 #include <future>
+#include <latch>
 #include <limits>
 #include <memory>
 #include <optional>
+#include <span>
+#include <stdexcept>
 #include <string>
+#include <string_view>
+#include <system_error>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -733,8 +741,8 @@ TEST(VfioDeviceHost, PerformsTypedAtomicAccessOnlyOnLiveMappedGuestMemory) {
   ASSERT_EQ(::ftruncate(backing, kWindowSize), 0);
   void *mapping = ::mmap(nullptr, kWindowSize, PROT_READ | PROT_WRITE, MAP_SHARED, backing, 0);
   ASSERT_NE(mapping, MAP_FAILED);
-  auto *value = static_cast<uint64_t *>(mapping);
-  std::atomic_ref<uint64_t>(*value).store(7, std::memory_order_release);
+  auto *const value = static_cast<std::byte *>(mapping);
+  util::shared_store<uint64_t>(value, 7);
   ASSERT_TRUE(client.dma_map(kGuestAddress, kWindowSize, backing, 0));
 
   const simdojo::DmaAtomicLoadResult loaded =
@@ -747,14 +755,14 @@ TEST(VfioDeviceHost, PerformsTypedAtomicAccessOnlyOnLiveMappedGuestMemory) {
   EXPECT_EQ(loaded16.value, 7u);
   EXPECT_EQ(served.host().atomic_store(kGuestAddress, sizeof(uint64_t), 11),
             simdojo::DmaAccessOutcome::Complete);
-  EXPECT_EQ(std::atomic_ref<uint64_t>(*value).load(std::memory_order_acquire), 11u);
+  EXPECT_EQ(util::shared_load<uint64_t>(value), 11u);
 
   const simdojo::DmaAtomicCompareExchangeResult exchanged =
       served.host().compare_exchange(kGuestAddress, sizeof(uint64_t), 11, 13);
   EXPECT_EQ(exchanged.outcome, simdojo::DmaAccessOutcome::Complete);
   EXPECT_EQ(exchanged.observed, 11u);
   EXPECT_TRUE(exchanged.exchanged);
-  EXPECT_EQ(std::atomic_ref<uint64_t>(*value).load(std::memory_order_acquire), 13u);
+  EXPECT_EQ(util::shared_load<uint64_t>(value), 13u);
 
   const simdojo::DmaAtomicCompareExchangeResult mismatch =
       served.host().compare_exchange(kGuestAddress, sizeof(uint64_t), 11, 17);
@@ -3199,4 +3207,1595 @@ TEST(VfioDeviceHost, DiscardsAskedWorkWhenServingHasStopped) {
   (void)served.host().ask_serving_thread([&ran] { ran = true; });
   std::this_thread::sleep_for(std::chrono::milliseconds(300));
   EXPECT_FALSE(ran) << "work ran with no serving thread to run it";
+}
+
+namespace {
+
+/// @brief Longest a test waits for another thread before it reports a failure.
+constexpr std::chrono::seconds kBoundedWait{10};
+
+/// @brief Longest a parked serving thread stays parked if nothing releases it.
+/// @details Longer than @ref kBoundedWait on purpose: a copy that wrongly waits
+/// for the serving thread must still be waiting when the test stops watching,
+/// rather than be let through by the park running out first.
+constexpr std::chrono::seconds kLongestPark{60};
+
+/// @brief How long a copy that has to wait for the serving thread is watched
+/// not finishing.
+constexpr std::chrono::milliseconds kSerializedCopyWatch{200};
+
+/// @brief What a destination holds before a copy that must not reach it.
+constexpr std::byte kUntouchedByte{0x5a};
+
+std::size_t host_page_size() { return static_cast<std::size_t>(::sysconf(_SC_PAGESIZE)); }
+
+/// @brief The byte a freshly filled backing file holds at @p file_offset.
+/// @details The period is prime and shorter than half a page, so a byte differs
+/// from its neighbours and from the bytes half a page and a page away: a copy
+/// that lands at the wrong offset reads, or leaves behind, the wrong value.
+std::byte backing_byte(std::size_t file_offset) {
+  return static_cast<std::byte>(0x10 + file_offset % 193);
+}
+
+/// @brief Bytes for the host to write, using values a filled backing file never
+/// holds.
+/// @param[in] length Number of bytes.
+/// @param[in] salt Shifts the sequence, so two writes to one span differ.
+std::vector<std::byte> fresh_bytes(std::size_t length, std::size_t salt) {
+  std::vector<std::byte> bytes(length);
+  for (std::size_t index = 0; index < length; ++index) {
+    bytes[index] = static_cast<std::byte>(0xe0 + (index + salt) % 16);
+  }
+  return bytes;
+}
+
+std::string_view outcome_name(simdojo::DmaAccessOutcome outcome) {
+  switch (outcome) {
+  case simdojo::DmaAccessOutcome::Complete:
+    return "Complete";
+  case simdojo::DmaAccessOutcome::Unavailable:
+    return "Unavailable";
+  case simdojo::DmaAccessOutcome::Faulted:
+    return "Faulted";
+  case simdojo::DmaAccessOutcome::Malformed:
+    return "Malformed";
+  }
+  return "an unknown outcome";
+}
+
+/// @brief A memfd a client shares with the device, and this test's view of it.
+///
+/// @details The view stands in for the guest. The file is filled so that every
+/// byte of it is known, and each write the host is asked for is recorded, which
+/// lets a test compare the whole file afterwards: a host write has to show up at
+/// the file offset its window names and nowhere else, including the pages on
+/// either side of a window.
+class GuestBacking {
+public:
+  explicit GuestBacking(std::size_t size_bytes)
+      : file_(::memfd_create("rj-vfu-test-guest-ram", MFD_CLOEXEC)), expected_(size_bytes) {
+    if (file_.get() < 0 || ::ftruncate(file_.get(), static_cast<off_t>(size_bytes)) != 0) {
+      return;
+    }
+    void *view = ::mmap(nullptr, size_bytes, PROT_READ | PROT_WRITE, MAP_SHARED, file_.get(), 0);
+    if (view == MAP_FAILED) {
+      return;
+    }
+    view_ = static_cast<std::byte *>(view);
+    for (std::size_t file_offset = 0; file_offset < size_bytes; ++file_offset) {
+      expected_[file_offset] = backing_byte(file_offset);
+    }
+    std::ranges::copy(expected_, view_);
+  }
+
+  ~GuestBacking() {
+    if (view_ != nullptr) {
+      (void)::munmap(view_, expected_.size());
+    }
+  }
+
+  GuestBacking(const GuestBacking &) = delete;
+  GuestBacking &operator=(const GuestBacking &) = delete;
+
+  [[nodiscard]] bool usable() const { return view_ != nullptr; }
+  [[nodiscard]] int fd() const { return file_.get(); }
+
+  /// @brief This test's own address for the byte at @p file_offset.
+  /// @details For reaching the file the way the guest does: through a mapping
+  /// the host knows nothing about, with no lock of the host's held.
+  [[nodiscard]] std::byte *guest_view(std::size_t file_offset) { return view_ + file_offset; }
+
+  /// @brief What the file should hold from @p file_offset, given the writes
+  /// recorded so far.
+  [[nodiscard]] std::vector<std::byte> expected(std::size_t file_offset, std::size_t length) const {
+    const std::span<const std::byte> bytes = std::span(expected_).subspan(file_offset, length);
+    return {bytes.begin(), bytes.end()};
+  }
+
+  /// @brief Record that the host was asked to write @p bytes at @p file_offset.
+  void expect_write(std::size_t file_offset, std::span<const std::byte> bytes) {
+    std::ranges::copy(bytes, expected_.begin() + static_cast<std::ptrdiff_t>(file_offset));
+  }
+
+  /// @brief Compare the whole file with what the recorded writes should leave.
+  [[nodiscard]] testing::AssertionResult matches_expectation() const {
+    for (std::size_t file_offset = 0; file_offset < expected_.size(); ++file_offset) {
+      if (view_[file_offset] != expected_[file_offset]) {
+        return testing::AssertionFailure()
+               << std::format("file offset {:#x} holds {:#04x} where {:#04x} was expected",
+                              file_offset, std::to_integer<unsigned>(view_[file_offset]),
+                              std::to_integer<unsigned>(expected_[file_offset]));
+      }
+    }
+    return testing::AssertionSuccess();
+  }
+
+private:
+  ScopedFd file_;
+  std::vector<std::byte> expected_;
+  std::byte *view_ = nullptr;
+};
+
+/// @brief Read one span of a window and overwrite it twice, expecting every
+/// step to complete and to move exactly the bytes the span names.
+/// @param[in] guest_phys Guest-physical address of the span.
+/// @param[in] file_offset Where the client's file holds the span.
+/// @param[in] length Number of bytes in the span.
+[[nodiscard]] testing::AssertionResult copies_completely(rocjitsu::VfioDeviceHost &host,
+                                                         GuestBacking &backing, uint64_t guest_phys,
+                                                         std::size_t file_offset,
+                                                         std::size_t length) {
+  const std::string where = std::format("{} byte(s) at {:#x}", length, guest_phys);
+  std::vector<std::byte> read_back(length);
+  simdojo::DmaAccessOutcome outcome = host.read_outcome(guest_phys, read_back);
+  if (outcome != simdojo::DmaAccessOutcome::Complete) {
+    return testing::AssertionFailure() << "reading " << where << " was " << outcome_name(outcome);
+  }
+  if (read_back != backing.expected(file_offset, length)) {
+    return testing::AssertionFailure()
+           << "reading " << where << " did not return the bytes at file offset " << file_offset;
+  }
+
+  const std::vector<std::byte> first = fresh_bytes(length, 0);
+  outcome = host.write_outcome(guest_phys, first);
+  if (outcome != simdojo::DmaAccessOutcome::Complete) {
+    return testing::AssertionFailure() << "writing " << where << " was " << outcome_name(outcome);
+  }
+  backing.expect_write(file_offset, first);
+  if (const testing::AssertionResult landed = backing.matches_expectation(); !landed) {
+    return landed;
+  }
+
+  // The plain forms answer the same question with a yes or a no.
+  const std::vector<std::byte> second = fresh_bytes(length, 5);
+  if (!host.write(guest_phys, second)) {
+    return testing::AssertionFailure() << "the plain write of " << where << " was refused";
+  }
+  backing.expect_write(file_offset, second);
+  if (!host.read(guest_phys, read_back)) {
+    return testing::AssertionFailure() << "the plain read of " << where << " was refused";
+  }
+  if (read_back != second) {
+    return testing::AssertionFailure()
+           << "reading " << where << " did not return what was just written there";
+  }
+  return backing.matches_expectation();
+}
+
+/// @brief Expect a read and a write of one span to be refused as @p refusal,
+/// with the read leaving its destination alone.
+/// @details That the guest was left alone too is for the caller to check, with
+/// @ref GuestBacking::matches_expectation, since no write is recorded here.
+[[nodiscard]] testing::AssertionResult refuses_copy(rocjitsu::VfioDeviceHost &host,
+                                                    uint64_t guest_phys, std::size_t length,
+                                                    simdojo::DmaAccessOutcome refusal) {
+  const std::string where = std::format("{} byte(s) at {:#x}", length, guest_phys);
+  std::vector<std::byte> destination(length, kUntouchedByte);
+  const simdojo::DmaAccessOutcome read = host.read_outcome(guest_phys, destination);
+  if (read != refusal) {
+    return testing::AssertionFailure() << "reading " << where << " was " << outcome_name(read)
+                                       << ", not " << outcome_name(refusal);
+  }
+  if (host.read(guest_phys, destination)) {
+    return testing::AssertionFailure() << "the plain read of " << where << " succeeded";
+  }
+  if (!std::ranges::all_of(destination, [](std::byte value) { return value == kUntouchedByte; })) {
+    return testing::AssertionFailure() << "the refused read of " << where << " changed its buffer";
+  }
+
+  const std::vector<std::byte> source = fresh_bytes(length, 9);
+  const simdojo::DmaAccessOutcome written = host.write_outcome(guest_phys, source);
+  if (written != refusal) {
+    return testing::AssertionFailure() << "writing " << where << " was " << outcome_name(written)
+                                       << ", not " << outcome_name(refusal);
+  }
+  if (host.write(guest_phys, source)) {
+    return testing::AssertionFailure() << "the plain write of " << where << " succeeded";
+  }
+  return testing::AssertionSuccess();
+}
+
+/// @brief Wait for the host to finish handling @p count client disconnects.
+[[nodiscard]] bool wait_for_completed_disconnects(rocjitsu::VfioDeviceHost &host, uint64_t count) {
+  for (int attempt = 0; attempt < 1000; ++attempt) {
+    if (host.client_snapshot().completed_disconnects >= count) {
+      return true;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  return false;
+}
+
+/// @brief Wait for a reset the client asked for to finish.
+/// @details The request is answered before the reset has run. The reset ends
+/// by giving the device a new transport session, so a generation that is
+/// neither absent nor @p generation_before marks its end.
+[[nodiscard]] bool wait_for_session_after(ServedDevice &served, uint64_t generation_before) {
+  const std::chrono::steady_clock::time_point deadline =
+      std::chrono::steady_clock::now() + kBoundedWait;
+  for (;;) {
+    const uint64_t generation = served.device().transport_session_generation();
+    if (generation != 0 && generation != generation_before) {
+      return true;
+    }
+    if (std::chrono::steady_clock::now() >= deadline) {
+      return false;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+}
+
+/// @brief Connect @p client and wait until the host regards it as attached.
+/// @details A connection is accepted a moment before the host records it, and
+/// what the host does for an attached client differs from what it does for
+/// none. A request is answered only after the record is made, so one round
+/// trip closes that gap.
+[[nodiscard]] bool attach_and_settle(ServedDevice &served, rocjitsu::test::VfioUserClient &client) {
+  uint32_t regions = 0;
+  uint32_t irqs = 0;
+  return served.attach(client) && client.device_info(regions, irqs);
+}
+
+bool holds_only(std::span<const std::byte> bytes, std::byte value) {
+  return std::ranges::all_of(bytes, [value](std::byte held) { return held == value; });
+}
+
+/// @brief Keeps the serving thread inside one request until released.
+///
+/// @details A request handed to the serving thread runs under the lock that
+/// serializes libvfio-user, exactly as the dispatch of a protocol message does,
+/// so parking one stands in for a guest request that is slow to service.
+///
+/// Declare this after the fixture that owns the serving thread. Its destructor
+/// then releases the request before the fixture joins that thread, and the
+/// state the request touches is shared with it, so it stays valid however the
+/// test leaves.
+class ParkedServingThread {
+public:
+  ~ParkedServingThread() { release(); }
+
+  /// @brief Park the serving thread of @p host and wait until it is parked.
+  [[nodiscard]] testing::AssertionResult park(rocjitsu::VfioDeviceHost &host) {
+    if (!host.ask_serving_thread([gate = gate_] { gate->hold_serving_thread(); })) {
+      return testing::AssertionFailure() << "the serving thread refused the request to park";
+    }
+    if (!gate_->arrived_before_deadline()) {
+      return testing::AssertionFailure() << "the serving thread never picked the request up";
+    }
+    return testing::AssertionSuccess();
+  }
+
+  /// @brief Let the serving thread go. Idempotent.
+  void release() {
+    if (released_) {
+      return;
+    }
+    gate_->let_go();
+    released_ = true;
+  }
+
+private:
+  /// @brief What the parked request and the test that parked it both hold on
+  /// to, since either may be the last to let go of it.
+  class Gate {
+  public:
+    /// @brief Run on the serving thread: report arrival, then stay until let
+    /// go, or until @ref kLongestPark if nothing ever does.
+    void hold_serving_thread() {
+      arrived_.set_value();
+      (void)may_leave_.wait_for(kLongestPark);
+    }
+
+    /// @brief Wait, on the test's thread, for the serving thread to arrive.
+    [[nodiscard]] bool arrived_before_deadline() const {
+      return has_arrived_.wait_for(kBoundedWait) == std::future_status::ready;
+    }
+
+    /// @brief Let the serving thread go. Call once, from the test's thread.
+    void let_go() { leave_.set_value(); }
+
+  private:
+    std::promise<void> arrived_;
+    std::promise<void> leave_;
+    // Each future is declared after the promise it is taken from.
+    std::future<void> has_arrived_ = arrived_.get_future();
+    std::future<void> may_leave_ = leave_.get_future();
+  };
+
+  std::shared_ptr<Gate> gate_ = std::make_shared<Gate>();
+  bool released_ = false;
+};
+
+/// @brief Rounds in one race between a plain guest write and an exchange.
+/// @details A write that stores a word twice is caught only in a round where
+/// the exchange lands between the two stores, which is a small fraction of the
+/// rounds even with the contended word placed to favour it. There are enough
+/// rounds that a whole run seldom misses.
+constexpr uint32_t kExchangeRaceRounds = 200000;
+
+/// @brief How long a race goes on for when its rounds are not finished sooner.
+/// @details On an idle host they are, many times over. Two threads that share
+/// their processors with other busy processes hand a round over only once per
+/// scheduler time slice, and the same rounds would then take minutes.
+constexpr std::chrono::seconds kExchangeRaceTimeLimit{5};
+
+/// @brief Rounds a race has to get through in that time to have tested anything.
+constexpr uint32_t kFewestExchangeRaceRounds = 16;
+
+/// @brief Offset of a word that is the last of its cache line.
+/// @details A write that starts here and is longer than the word crosses into
+/// the next line. If it repeated a store, it would repeat one that needs both
+/// lines, and the exchanging processor, which needs only the first, gets in
+/// between two of those far more often than between two stores that stay
+/// inside one line. A repeat inside one line is so rarely separated that a
+/// test relying on it passes nearly every run against a write that is wrong,
+/// which is why no race here writes just the contended word.
+constexpr std::size_t kLastWordOfALine = 0x400 - sizeof(uint32_t);
+
+/// @brief Set by the exchanging thread on the value a plain write left.
+constexpr uint64_t kExchangedMark = 1;
+
+/// @brief The value the plain write of @p round leaves in the contended word.
+/// @details Different in every round and never carrying the mark, so that an
+/// exchange can only succeed against the write of its own round and what it
+/// leaves is told apart from what the write left.
+constexpr uint64_t plain_value_of(uint32_t round, uint32_t width) {
+  const uint64_t low_half = uint64_t{round} << 1;
+  return width == sizeof(uint64_t) ? (low_half << 32) | low_half : low_half;
+}
+
+struct ExchangeRaceTally {
+  /// Plain writes that did not complete.
+  uint32_t refused_writes = 0;
+  /// Rounds in which no exchange found the plain value, though it began after
+  /// the plain write had returned.
+  uint32_t missed_exchanges = 0;
+  /// Rounds that did not settle on the exchanged value.
+  uint32_t undone_exchanges = 0;
+};
+
+/// @brief One compare/exchange on the contended word: true when it exchanged
+/// the first value for the second.
+using ExchangeWord = std::function<bool(uint64_t, uint64_t)>;
+
+/// @brief Exchange a word of guest memory the way another device thread does.
+ExchangeWord exchange_through_host(rocjitsu::VfioDeviceHost &host, uint64_t word_address,
+                                   uint32_t width) {
+  return [&host, word_address, width](uint64_t expected, uint64_t desired) {
+    const simdojo::DmaAtomicCompareExchangeResult result =
+        host.compare_exchange(word_address, width, expected, desired);
+    return result.outcome == simdojo::DmaAccessOutcome::Complete && result.exchanged;
+  };
+}
+
+/// @brief Exchange a word of guest memory the way the guest does: on its own
+/// mapping of the file, holding nothing the host could wait for.
+ExchangeWord exchange_as_guest(std::byte *word, uint32_t width) {
+  return [word, width](uint64_t expected, uint64_t desired) {
+    return util::shared_compare_exchange_word(word, width, expected, desired);
+  };
+}
+
+/// @brief One atomic load of the contended word, empty when it was refused.
+using LoadWord = std::function<std::optional<uint64_t>()>;
+
+LoadWord load_through_host(rocjitsu::VfioDeviceHost &host, uint64_t word_address, uint32_t width) {
+  return [&host, word_address, width]() -> std::optional<uint64_t> {
+    const simdojo::DmaAtomicLoadResult loaded = host.atomic_load(word_address, width);
+    if (loaded.outcome != simdojo::DmaAccessOutcome::Complete) {
+      return std::nullopt;
+    }
+    return loaded.value;
+  };
+}
+
+LoadWord load_as_guest(const std::byte *word, uint32_t width) {
+  return [word, width]() -> std::optional<uint64_t> { return util::shared_load_word(word, width); };
+}
+
+/// @brief Race one plain guest write per round against a compare/exchange on a
+///        word that the write covers.
+///
+/// @details Each round the calling thread writes a fresh value and a second
+/// thread, already retrying, exchanges that value for a marked one as soon as
+/// it appears. Nothing else writes the word, so the round has to settle on the
+/// marked value. A write that stored the word more than once would, when the
+/// exchange lands between two of its stores, put the unmarked value back.
+///
+/// A correct write passes every time. One that repeats a store is caught only
+/// in the rounds where the exchange happens to land between the stores, which
+/// is why there are many rounds. The race ends early, with the rounds it got
+/// through, once @ref kExchangeRaceTimeLimit has passed, and fails if those
+/// are fewer than @ref kFewestExchangeRaceRounds.
+///
+/// The threads hand rounds to each other through atomics alone and, the plain
+/// write under test aside, reach the word only through atomic accesses while
+/// both are running.
+///
+/// @param[in] width Width of the contended word in bytes, four or eight.
+/// @param[in] write_plain Writes the given value over the contended word with
+///            a plain guest write, returning its outcome.
+/// @param[in] exchange Exchanges one value of the contended word for another.
+/// @param[in] load_settled Loads the contended word once a round is over.
+ExchangeRaceTally race_guest_write_against_exchange(
+    uint32_t width, const std::function<simdojo::DmaAccessOutcome(uint64_t)> &write_plain,
+    const ExchangeWord &exchange, const LoadWord &load_settled) {
+  // Retrying without a pause keeps an attempt in flight when the plain write
+  // lands; yielding now and then keeps a single-processor host from spending a
+  // whole time slice on retries that cannot succeed until the other thread runs.
+  constexpr uint32_t kAttemptsBetweenYields = 64;
+
+  std::atomic<uint32_t> written_round{0};
+  std::atomic<uint32_t> exchanged_round{0};
+  std::atomic<uint32_t> missed_exchanges{0};
+  std::atomic<bool> race_is_over{false};
+
+  std::jthread exchanger([&] {
+    for (uint32_t round = 1; round <= kExchangeRaceRounds; ++round) {
+      const uint64_t plain = plain_value_of(round, width);
+      bool exchanged = false;
+      bool write_had_returned = false;
+      uint32_t attempts = 0;
+      while (!exchanged && !write_had_returned && !race_is_over.load()) {
+        // Sampled before the attempt: only an attempt that begins after the
+        // plain write has returned is certain to find its value, so only such
+        // an attempt failing ends the round as a miss.
+        write_had_returned = written_round.load() >= round;
+        exchanged = exchange(plain, plain | kExchangedMark);
+        if (!exchanged && ++attempts % kAttemptsBetweenYields == 0) {
+          std::this_thread::yield();
+        }
+      }
+      // Stopped while waiting for a write that is not going to be made.
+      if (!exchanged && !write_had_returned) {
+        break;
+      }
+      if (!exchanged) {
+        missed_exchanges.fetch_add(1);
+      }
+      exchanged_round.store(round);
+    }
+  });
+
+  ExchangeRaceTally tally;
+  uint32_t rounds_raced = 0;
+  const auto deadline = std::chrono::steady_clock::now() + kExchangeRaceTimeLimit;
+  for (uint32_t round = 1;
+       round <= kExchangeRaceRounds && std::chrono::steady_clock::now() < deadline; ++round) {
+    const uint64_t plain = plain_value_of(round, width);
+    if (write_plain(plain) != simdojo::DmaAccessOutcome::Complete) {
+      ++tally.refused_writes;
+    }
+    written_round.store(round);
+    while (exchanged_round.load() < round) {
+      std::this_thread::yield();
+    }
+    if (load_settled() != (plain | kExchangedMark)) {
+      ++tally.undone_exchanges;
+    }
+    rounds_raced = round;
+  }
+  race_is_over.store(true);
+  exchanger.join();
+  testing::Test::RecordProperty("rounds", std::to_string(rounds_raced));
+  EXPECT_GE(rounds_raced, kFewestExchangeRaceRounds)
+      << "too few rounds to have tested the write against a concurrent compare/exchange";
+  tally.missed_exchanges = missed_exchanges.load();
+  return tally;
+}
+
+} // namespace
+
+// The questions that need no window are answered before one is looked for, and
+// the answers must not depend on whether a client has shared anything.
+TEST(VfioDeviceHostGuestMemory, ClassifiesACopyBeforeLookingForAWindow) {
+  ServedDevice served;
+  ASSERT_TRUE(served.start());
+  constexpr uint64_t kGuestAddress = 0x480000;
+
+  EXPECT_EQ(served.host().read_outcome(kGuestAddress, std::span<std::byte>{}),
+            simdojo::DmaAccessOutcome::Complete)
+      << "an empty copy moves nothing, so there is nothing to refuse";
+  EXPECT_EQ(served.host().write_outcome(kGuestAddress, std::span<const std::byte>{}),
+            simdojo::DmaAccessOutcome::Complete);
+
+  std::array<std::byte, 2> wrapping{};
+  EXPECT_EQ(served.host().read_outcome(std::numeric_limits<uint64_t>::max(), wrapping),
+            simdojo::DmaAccessOutcome::Malformed)
+      << "a span that wraps the address space names no memory";
+  EXPECT_EQ(served.host().write_outcome(std::numeric_limits<uint64_t>::max(), wrapping),
+            simdojo::DmaAccessOutcome::Malformed);
+
+  EXPECT_TRUE(refuses_copy(served.host(), kGuestAddress, 4, simdojo::DmaAccessOutcome::Unavailable))
+      << "no client is attached, so there is no guest memory to reach";
+}
+
+TEST(VfioDeviceHostGuestMemory, CopiesTheStartMiddleAndLastByteOfAMappedWindow) {
+  const std::size_t page = host_page_size();
+  constexpr uint64_t kGuestAddress = 0x500000;
+  // A page of file on either side of the window shows a copy that strays.
+  const std::size_t window_offset = page;
+  const std::size_t window_size = 2 * page;
+  GuestBacking backing(4 * page);
+  ASSERT_TRUE(backing.usable());
+  ServedDevice served;
+  ASSERT_TRUE(served.start());
+  rocjitsu::test::VfioUserClient client;
+  ASSERT_TRUE(served.attach(client));
+  ASSERT_TRUE(client.dma_map(kGuestAddress, window_size, backing.fd(), window_offset));
+
+  EXPECT_TRUE(copies_completely(served.host(), backing, kGuestAddress, window_offset, 16));
+  // Odd in both address and length, and across the page boundary inside the
+  // window, so the copy is neither one word nor confined to one page.
+  EXPECT_TRUE(copies_completely(served.host(), backing, kGuestAddress + page - 5,
+                                window_offset + page - 5, 13));
+  EXPECT_TRUE(copies_completely(served.host(), backing, kGuestAddress + window_size - 1,
+                                window_offset + window_size - 1, 1));
+
+  std::vector<std::byte> whole_window(window_size);
+  EXPECT_EQ(served.host().read_outcome(kGuestAddress, whole_window),
+            simdojo::DmaAccessOutcome::Complete);
+  EXPECT_EQ(whole_window, backing.expected(window_offset, window_size));
+  EXPECT_TRUE(backing.matches_expectation());
+}
+
+TEST(VfioDeviceHostGuestMemory, RefusesACopyThatLeavesItsWindow) {
+  const std::size_t page = host_page_size();
+  constexpr uint64_t kGuestAddress = 0x520000;
+  const std::size_t window_offset = page;
+  const std::size_t window_size = page;
+  GuestBacking backing(3 * page);
+  ASSERT_TRUE(backing.usable());
+  ServedDevice served;
+  ASSERT_TRUE(served.start());
+  rocjitsu::test::VfioUserClient client;
+  ASSERT_TRUE(served.attach(client));
+  ASSERT_TRUE(client.dma_map(kGuestAddress, window_size, backing.fd(), window_offset));
+
+  const simdojo::DmaAccessOutcome faulted = simdojo::DmaAccessOutcome::Faulted;
+  EXPECT_TRUE(refuses_copy(served.host(), kGuestAddress + window_size - 1, 2, faulted))
+      << "one byte past the end";
+  EXPECT_TRUE(refuses_copy(served.host(), kGuestAddress + window_size, 1, faulted))
+      << "the first byte after the window";
+  EXPECT_TRUE(refuses_copy(served.host(), kGuestAddress - 1, 2, faulted))
+      << "one byte before the start";
+  EXPECT_TRUE(refuses_copy(served.host(), kGuestAddress, window_size + 1, faulted))
+      << "the whole window and one byte more";
+  EXPECT_TRUE(backing.matches_expectation())
+      << "a refused write reached the guest, or the file beside its window";
+
+  // The boundary itself is still inside.
+  EXPECT_TRUE(copies_completely(served.host(), backing, kGuestAddress + window_size - 1,
+                                window_offset + window_size - 1, 1));
+}
+
+// Two windows next to each other in the client's file but apart in guest
+// memory: a copy that treated the gap as mapped would run from one into the
+// other. A copy across two windows that do touch still has to complete, which
+// is the library's job rather than the single-window copy's.
+TEST(VfioDeviceHostGuestMemory, KeepsWindowsApartAcrossAGapAndJoinsThoseThatTouch) {
+  const std::size_t page = host_page_size();
+  constexpr uint64_t kGuestAddress = 0x540000;
+  GuestBacking backing(5 * page);
+  ASSERT_TRUE(backing.usable());
+  ServedDevice served;
+  ASSERT_TRUE(served.start());
+  rocjitsu::test::VfioUserClient client;
+  ASSERT_TRUE(served.attach(client));
+  // File pages one to three are shared; guest memory has a hole after the first.
+  const uint64_t first_window = kGuestAddress;
+  const uint64_t gap = kGuestAddress + page;
+  const uint64_t second_window = kGuestAddress + 2 * page;
+  const uint64_t third_window = kGuestAddress + 3 * page;
+  ASSERT_TRUE(client.dma_map(first_window, page, backing.fd(), page));
+  ASSERT_TRUE(client.dma_map(second_window, page, backing.fd(), 2 * page));
+  ASSERT_TRUE(client.dma_map(third_window, page, backing.fd(), 3 * page));
+
+  EXPECT_TRUE(copies_completely(served.host(), backing, gap - 1, 2 * page - 1, 1))
+      << "the last byte before the gap";
+  EXPECT_TRUE(copies_completely(served.host(), backing, second_window, 2 * page, 1))
+      << "the first byte after the gap";
+
+  const simdojo::DmaAccessOutcome faulted = simdojo::DmaAccessOutcome::Faulted;
+  EXPECT_TRUE(refuses_copy(served.host(), gap, 1, faulted)) << "inside the gap";
+  EXPECT_TRUE(refuses_copy(served.host(), gap - 1, 2, faulted)) << "into the gap";
+  EXPECT_TRUE(refuses_copy(served.host(), second_window - 1, 2, faulted)) << "out of the gap";
+  EXPECT_TRUE(refuses_copy(served.host(), gap - 1, page + 2, faulted)) << "across the gap";
+  EXPECT_TRUE(backing.matches_expectation()) << "a refused write reached the guest";
+
+  EXPECT_TRUE(copies_completely(served.host(), backing, third_window - 8, 3 * page - 8, 16))
+      << "across two windows that touch";
+}
+
+TEST(VfioDeviceHostGuestMemory, RefusesWritesToAWindowSharedReadOnly) {
+  const std::size_t page = host_page_size();
+  constexpr uint64_t kGuestAddress = 0x560000;
+  GuestBacking backing(page);
+  ASSERT_TRUE(backing.usable());
+  ServedDevice served;
+  ASSERT_TRUE(served.start());
+  rocjitsu::test::VfioUserClient client;
+  ASSERT_TRUE(served.attach(client));
+  ASSERT_TRUE(client.dma_map(kGuestAddress, page, backing.fd(), 0, 0, /*writable=*/false));
+
+  std::vector<std::byte> read_back(16);
+  EXPECT_EQ(served.host().read_outcome(kGuestAddress + 8, read_back),
+            simdojo::DmaAccessOutcome::Complete);
+  EXPECT_EQ(read_back, backing.expected(8, read_back.size()));
+  EXPECT_TRUE(served.host().read(kGuestAddress + page - 1, std::span(read_back).first(1)));
+  EXPECT_EQ(read_back.front(), backing_byte(page - 1));
+
+  const std::vector<std::byte> source = fresh_bytes(16, 0);
+  EXPECT_EQ(served.host().write_outcome(kGuestAddress + 8, source),
+            simdojo::DmaAccessOutcome::Faulted);
+  EXPECT_FALSE(served.host().write(kGuestAddress + 8, source));
+  EXPECT_TRUE(backing.matches_expectation()) << "a write reached memory shared read-only";
+}
+
+TEST(VfioDeviceHostGuestMemory, StopsServingAWindowTheClientUnmapped) {
+  const std::size_t page = host_page_size();
+  constexpr uint64_t kGuestAddress = 0x580000;
+  GuestBacking backing(3 * page);
+  ASSERT_TRUE(backing.usable());
+  ServedDevice served;
+  ASSERT_TRUE(served.start());
+  rocjitsu::test::VfioUserClient client;
+  ASSERT_TRUE(served.attach(client));
+  ASSERT_TRUE(client.dma_map(kGuestAddress, page, backing.fd(), 0));
+  ASSERT_TRUE(copies_completely(served.host(), backing, kGuestAddress + 8, 8, 16));
+
+  ASSERT_TRUE(client.dma_unmap(kGuestAddress, page));
+  EXPECT_TRUE(
+      refuses_copy(served.host(), kGuestAddress + 8, 16, simdojo::DmaAccessOutcome::Faulted));
+  EXPECT_TRUE(backing.matches_expectation()) << "a write reached memory the client withdrew";
+
+  // The same guest address now names other memory, and must not be answered
+  // from where the withdrawn window used to be.
+  ASSERT_TRUE(client.dma_map(kGuestAddress, page, backing.fd(), 2 * page));
+  EXPECT_TRUE(copies_completely(served.host(), backing, kGuestAddress + 8, 2 * page + 8, 16));
+}
+
+TEST(VfioDeviceHostGuestMemory, StopsServingMappedWindowsWhenTheClientDisconnects) {
+  const std::size_t page = host_page_size();
+  constexpr uint64_t kGuestAddress = 0x5a0000;
+  GuestBacking backing(3 * page);
+  ASSERT_TRUE(backing.usable());
+  ServedDevice served;
+  ASSERT_TRUE(served.start());
+  {
+    rocjitsu::test::VfioUserClient first;
+    ASSERT_TRUE(served.attach(first));
+    ASSERT_TRUE(first.dma_map(kGuestAddress, page, backing.fd(), 0));
+    ASSERT_TRUE(copies_completely(served.host(), backing, kGuestAddress + 8, 8, 16));
+  }
+  ASSERT_TRUE(wait_for_completed_disconnects(served.host(), 1));
+
+  EXPECT_TRUE(
+      refuses_copy(served.host(), kGuestAddress + 8, 16, simdojo::DmaAccessOutcome::Unavailable));
+  EXPECT_TRUE(backing.matches_expectation()) << "a write reached a departed client's memory";
+
+  // The next client starts with nothing shared, and what it then shares at the
+  // same guest address is its own memory rather than its predecessor's.
+  rocjitsu::test::VfioUserClient second;
+  ASSERT_TRUE(attach_and_settle(served, second));
+  EXPECT_TRUE(
+      refuses_copy(served.host(), kGuestAddress + 8, 16, simdojo::DmaAccessOutcome::Faulted))
+      << "the new client inherited a window it never shared";
+  ASSERT_TRUE(second.dma_map(kGuestAddress, page, backing.fd(), 2 * page));
+  EXPECT_TRUE(copies_completely(served.host(), backing, kGuestAddress + 8, 2 * page + 8, 16));
+}
+
+// The host keeps its own record of where each window is mapped, apart from the
+// library's. The next three tests drive that record directly, with memory the
+// library has never been told about, so that only a copy made straight from the
+// record can answer and anything the library answers is a refusal.
+TEST(VfioDeviceHostGuestMemory, CopiesStraightFromTheAddressAWindowWasLastRecordedAt) {
+  constexpr uint64_t kGuestAddress = 0x6a0000;
+  constexpr std::size_t kWindowSize = 256;
+  constexpr std::byte kFirstHomeByte{0x11};
+  constexpr std::byte kSecondHomeByte{0x22};
+  std::vector<std::byte> first_home(kWindowSize, kFirstHomeByte);
+  std::vector<std::byte> second_home(kWindowSize, kSecondHomeByte);
+  const simdojo::DmaRegion window{.guest_phys = kGuestAddress,
+                                  .length = kWindowSize,
+                                  .access = simdojo::DmaAccess::Read | simdojo::DmaAccess::Write};
+  ServedDevice served;
+  ASSERT_TRUE(served.start());
+  rocjitsu::test::VfioUserClient client;
+  ASSERT_TRUE(attach_and_settle(served, client));
+
+  EXPECT_TRUE(served.host().record_guest_region(window, first_home.data()));
+  std::array<std::byte, 16> read_back{};
+  EXPECT_EQ(served.host().read_outcome(kGuestAddress + 8, read_back),
+            simdojo::DmaAccessOutcome::Complete);
+  EXPECT_TRUE(holds_only(read_back, kFirstHomeByte));
+
+  // A client may announce a window it already holds, and the library may have
+  // mapped it somewhere else by then.
+  EXPECT_FALSE(served.host().record_guest_region(window, second_home.data()))
+      << "the same window announced again is not a new one";
+  EXPECT_EQ(served.host().read_outcome(kGuestAddress + 8, read_back),
+            simdojo::DmaAccessOutcome::Complete);
+  EXPECT_TRUE(holds_only(read_back, kSecondHomeByte));
+  const std::vector<std::byte> written = fresh_bytes(read_back.size(), 0);
+  EXPECT_EQ(served.host().write_outcome(kGuestAddress + 8, written),
+            simdojo::DmaAccessOutcome::Complete);
+  EXPECT_TRUE(std::ranges::equal(written, std::span(second_home).subspan(8, written.size())));
+  EXPECT_TRUE(holds_only(first_home, kFirstHomeByte))
+      << "a copy used the address the window had before it was announced again";
+
+  EXPECT_TRUE(refuses_copy(served.host(), kGuestAddress + kWindowSize - 1, 2,
+                           simdojo::DmaAccessOutcome::Faulted))
+      << "one byte past the end of the recorded window";
+  EXPECT_EQ(second_home.back(), kSecondHomeByte);
+
+  served.host().forget_guest_region(window);
+  EXPECT_TRUE(
+      refuses_copy(served.host(), kGuestAddress + 8, 16, simdojo::DmaAccessOutcome::Faulted));
+  EXPECT_TRUE(std::ranges::equal(written, std::span(second_home).subspan(8, written.size())))
+      << "a write reached a window after it was forgotten";
+}
+
+// An address is only as good as the client that mapped it. One recorded while
+// nobody is attached has no client behind it, and must not start being used
+// when somebody attaches later.
+TEST(VfioDeviceHostGuestMemory, IgnoresAHostAddressRecordedWithNoClientAttached) {
+  constexpr uint64_t kGuestAddress = 0x6c0000;
+  constexpr std::size_t kWindowSize = 256;
+  constexpr std::byte kHomeByte{0x33};
+  std::vector<std::byte> home(kWindowSize, kHomeByte);
+  const simdojo::DmaRegion window{.guest_phys = kGuestAddress,
+                                  .length = kWindowSize,
+                                  .access = simdojo::DmaAccess::Read | simdojo::DmaAccess::Write};
+  ServedDevice served;
+  ASSERT_TRUE(served.start());
+
+  EXPECT_TRUE(served.host().record_guest_region(window, home.data()));
+  EXPECT_TRUE(
+      refuses_copy(served.host(), kGuestAddress + 8, 16, simdojo::DmaAccessOutcome::Unavailable));
+
+  rocjitsu::test::VfioUserClient client;
+  ASSERT_TRUE(attach_and_settle(served, client));
+  EXPECT_TRUE(
+      refuses_copy(served.host(), kGuestAddress + 8, 16, simdojo::DmaAccessOutcome::Faulted))
+      << "an address recorded before the client attached was used for that client";
+  EXPECT_TRUE(holds_only(home, kHomeByte));
+  served.host().forget_guest_region(window);
+}
+
+// The library withdraws the windows it knows about when a client goes, but a
+// connection can also be lost without it saying so. Either way nothing recorded
+// for the departed client may be left for the next one to be answered from.
+TEST(VfioDeviceHostGuestMemory, ForgetsEveryRecordedWindowWhenTheClientDisconnects) {
+  constexpr uint64_t kGuestAddress = 0x6e0000;
+  constexpr std::size_t kWindowSize = 256;
+  constexpr std::byte kHomeByte{0x44};
+  std::vector<std::byte> home(kWindowSize, kHomeByte);
+  const simdojo::DmaRegion window{.guest_phys = kGuestAddress,
+                                  .length = kWindowSize,
+                                  .access = simdojo::DmaAccess::Read | simdojo::DmaAccess::Write};
+  ServedDevice served;
+  ASSERT_TRUE(served.start());
+  {
+    rocjitsu::test::VfioUserClient first;
+    ASSERT_TRUE(attach_and_settle(served, first));
+    ASSERT_TRUE(served.host().record_guest_region(window, home.data()));
+    std::array<std::byte, 16> read_back{};
+    ASSERT_EQ(served.host().read_outcome(kGuestAddress + 8, read_back),
+              simdojo::DmaAccessOutcome::Complete);
+    ASSERT_TRUE(holds_only(read_back, kHomeByte));
+  }
+  ASSERT_TRUE(wait_for_completed_disconnects(served.host(), 1));
+  EXPECT_TRUE(
+      refuses_copy(served.host(), kGuestAddress + 8, 16, simdojo::DmaAccessOutcome::Unavailable));
+
+  rocjitsu::test::VfioUserClient second;
+  ASSERT_TRUE(attach_and_settle(served, second));
+  EXPECT_TRUE(
+      refuses_copy(served.host(), kGuestAddress + 8, 16, simdojo::DmaAccessOutcome::Faulted))
+      << "a window recorded for the departed client was still there for the next";
+  EXPECT_TRUE(holds_only(home, kHomeByte));
+}
+
+// A reset is not a withdrawal. The client stays attached and the library keeps
+// its windows mapped without announcing them again, so a host that emptied its
+// record here would never be told of them a second time: every later copy
+// would go through the library, one at a time behind its lock, for the rest of
+// the session.
+//
+// Guest memory would still be reached that way, so the right bytes coming back
+// show nothing. Two things do tell the paths apart. The library cannot answer
+// for a window that only the host's record holds, and a copy inside a window
+// the client shared finishes while the serving thread is holding the library's
+// lock only if it never asks for that lock.
+TEST(VfioDeviceHostGuestMemory, KeepsServingMappedWindowsAcrossADeviceReset) {
+  const std::size_t page = host_page_size();
+  constexpr uint64_t kGuestAddress = 0x5c0000;
+  constexpr uint64_t kRecordedOnlyAddress = 0x7c0000;
+  constexpr std::size_t kRecordedOnlySize = 256;
+  constexpr std::byte kRecordedOnlyByte{0x66};
+  std::vector<std::byte> recorded_only_home(kRecordedOnlySize, kRecordedOnlyByte);
+  const simdojo::DmaRegion recorded_only{.guest_phys = kRecordedOnlyAddress,
+                                         .length = kRecordedOnlySize,
+                                         .access =
+                                             simdojo::DmaAccess::Read | simdojo::DmaAccess::Write};
+  GuestBacking backing(page);
+  ASSERT_TRUE(backing.usable());
+  ServedDevice served;
+  ASSERT_TRUE(served.start());
+  rocjitsu::test::VfioUserClient client;
+  ASSERT_TRUE(served.attach(client));
+  ASSERT_TRUE(client.dma_map(kGuestAddress, page, backing.fd(), 0));
+  ASSERT_TRUE(copies_completely(served.host(), backing, kGuestAddress + 8, 8, 16));
+  ASSERT_TRUE(served.host().record_guest_region(recorded_only, recorded_only_home.data()));
+
+  const uint64_t generation_before = served.device().transport_session_generation();
+  ASSERT_NE(generation_before, 0u);
+  ASSERT_TRUE(client.device_reset());
+  ASSERT_TRUE(wait_for_session_after(served, generation_before)) << "the reset never completed";
+
+  std::array<std::byte, 16> recorded_only_bytes{};
+  EXPECT_EQ(served.host().read_outcome(kRecordedOnlyAddress + 8, recorded_only_bytes),
+            simdojo::DmaAccessOutcome::Complete)
+      << "the reset emptied the host's record of where its windows are mapped";
+  EXPECT_TRUE(holds_only(recorded_only_bytes, kRecordedOnlyByte));
+
+  std::vector<std::byte> whole_window(page);
+  {
+    ParkedServingThread busy;
+    ASSERT_TRUE(busy.park(served.host()));
+    std::future<simdojo::DmaAccessOutcome> copy =
+        std::async(std::launch::async, [&served, &whole_window] {
+          return served.host().read_outcome(kGuestAddress, whole_window);
+        });
+    const std::future_status while_busy = copy.wait_for(kBoundedWait);
+    busy.release();
+    ASSERT_EQ(while_busy, std::future_status::ready)
+        << "after the reset a copy inside a mapped window waited for the serving thread";
+    EXPECT_EQ(copy.get(), simdojo::DmaAccessOutcome::Complete);
+  }
+  EXPECT_EQ(whole_window, backing.expected(0, page));
+  EXPECT_TRUE(copies_completely(served.host(), backing, kGuestAddress + 8, 8, 16));
+  EXPECT_TRUE(copies_completely(served.host(), backing, kGuestAddress + page - 1, page - 1, 1));
+
+  served.host().forget_guest_region(recorded_only);
+  ASSERT_TRUE(client.dma_unmap(kGuestAddress, page));
+  EXPECT_TRUE(
+      refuses_copy(served.host(), kGuestAddress + 8, 16, simdojo::DmaAccessOutcome::Faulted))
+      << "the window outlived its withdrawal after a reset";
+  EXPECT_TRUE(backing.matches_expectation());
+}
+
+// A function bound to target grants asks the grant table about every address,
+// because one that looks like guest RAM may name a peer's BAR, a peer range
+// that has failed, or an owner that is quiescing. A copy made straight from the
+// host's record skips that question, so such a host must never make one,
+// whatever its record holds.
+//
+// Both halves put an address in the record that the library has never heard
+// of, so the path that answered shows in which memory was touched rather than
+// in how long the copy took.
+TEST(VfioTargetGrants, GrantHostsNeverUseTheMappedPath) {
+  const std::size_t page = host_page_size();
+  // Clear of the peer BAR, which the fixture programs at 0x30000000.
+  constexpr uint64_t kGuestAddress = 0x1100'0000;
+  constexpr uint64_t kRecordedOnlyAddress = 0x1200'0000;
+  constexpr std::size_t kRecordedOnlySize = 256;
+  // Not a value a filled backing file holds in the bytes read below.
+  constexpr std::byte kOutsideLibraryByte{0x99};
+  GuestBacking backing(page);
+  ASSERT_TRUE(backing.usable());
+  std::vector<std::byte> elsewhere(page, kOutsideLibraryByte);
+  std::vector<std::byte> recorded_only_home(kRecordedOnlySize, kOutsideLibraryByte);
+  MappedGrantPair pair(/*seal_owner=*/true);
+  ASSERT_TRUE(pair.built());
+  rocjitsu::test::VfioUserClient requester;
+  rocjitsu::test::VfioUserClient owner;
+  ASSERT_TRUE(pair.attach(requester, owner));
+  // A request is answered only once the host regards its client as attached,
+  // and an address recorded before then would be dropped rather than kept.
+  ASSERT_TRUE(requester.dma_map(kGuestAddress, page, backing.fd(), 0));
+
+  // The window the client shared, announced again at an address that is not
+  // where the library mapped it. The library still answers from the client's
+  // file; a copy made from the record would answer from the other memory.
+  const simdojo::DmaRegion shared_window{.guest_phys = kGuestAddress,
+                                         .length = page,
+                                         .access =
+                                             simdojo::DmaAccess::Read | simdojo::DmaAccess::Write};
+  EXPECT_FALSE(pair.requester_host().record_guest_region(shared_window, elsewhere.data()))
+      << "the same window announced again is not a new one";
+  EXPECT_TRUE(copies_completely(pair.requester_host(), backing, kGuestAddress + 8, 8, 16))
+      << "a host bound to target grants copied straight from its record";
+  EXPECT_TRUE(holds_only(elsewhere, kOutsideLibraryByte))
+      << "a host bound to target grants wrote straight to a recorded address";
+
+  // A window the library does not hold at all, which it can only refuse.
+  const simdojo::DmaRegion recorded_only{.guest_phys = kRecordedOnlyAddress,
+                                         .length = kRecordedOnlySize,
+                                         .access =
+                                             simdojo::DmaAccess::Read | simdojo::DmaAccess::Write};
+  EXPECT_TRUE(pair.requester_host().record_guest_region(recorded_only, recorded_only_home.data()));
+  EXPECT_TRUE(refuses_copy(pair.requester_host(), kRecordedOnlyAddress + 8, 16,
+                           simdojo::DmaAccessOutcome::Faulted))
+      << "a host bound to target grants copied straight from its record";
+  EXPECT_TRUE(holds_only(recorded_only_home, kOutsideLibraryByte));
+  pair.requester_host().forget_guest_region(recorded_only);
+}
+
+TEST(VfioDeviceHostGuestMemory, StopsServingMappedWindowsOnceDetached) {
+  const std::size_t page = host_page_size();
+  constexpr uint64_t kGuestAddress = 0x5e0000;
+  GuestBacking backing(page);
+  ASSERT_TRUE(backing.usable());
+  ServedDevice served;
+  ASSERT_TRUE(served.start());
+  rocjitsu::test::VfioUserClient client;
+  ASSERT_TRUE(served.attach(client));
+  ASSERT_TRUE(client.dma_map(kGuestAddress, page, backing.fd(), 0));
+  ASSERT_TRUE(copies_completely(served.host(), backing, kGuestAddress + 8, 8, 16));
+
+  // The client is still connected and the library still has the window mapped;
+  // only the host's own decision to let go stands between a copy and it.
+  served.stop_serving();
+  served.host().detach();
+
+  EXPECT_TRUE(
+      refuses_copy(served.host(), kGuestAddress + 8, 16, simdojo::DmaAccessOutcome::Unavailable));
+  EXPECT_TRUE(backing.matches_expectation()) << "a write reached the guest after detach";
+}
+
+// A window need not start on a page of the client's file. The library maps
+// whole pages, so the window's first byte sits part-way into the mapping and
+// the bytes before it belong to something else.
+TEST(VfioDeviceHostGuestMemory, ServesAWindowAtAnUnalignedFileOffsetWithoutLeavingIt) {
+  const std::size_t page = host_page_size();
+  constexpr uint64_t kGuestAddress = 0x600000;
+  // The second half of the file's middle page. The first half shares the
+  // library's mapping, and the pages on either side do not.
+  const std::size_t window_offset = page + page / 2;
+  const std::size_t window_size = page / 2;
+  GuestBacking backing(3 * page);
+  ASSERT_TRUE(backing.usable());
+  ServedDevice served;
+  ASSERT_TRUE(served.start());
+  rocjitsu::test::VfioUserClient client;
+  ASSERT_TRUE(served.attach(client));
+  ASSERT_TRUE(client.dma_map(kGuestAddress, window_size, backing.fd(), window_offset));
+
+  EXPECT_TRUE(copies_completely(served.host(), backing, kGuestAddress, window_offset, 16));
+  EXPECT_TRUE(copies_completely(served.host(), backing, kGuestAddress + window_size / 2 - 5,
+                                window_offset + window_size / 2 - 5, 13));
+  EXPECT_TRUE(copies_completely(served.host(), backing, kGuestAddress + window_size - 1,
+                                window_offset + window_size - 1, 1));
+
+  const simdojo::DmaAccessOutcome faulted = simdojo::DmaAccessOutcome::Faulted;
+  EXPECT_TRUE(refuses_copy(served.host(), kGuestAddress + window_size - 1, 2, faulted))
+      << "one byte past the end, which is also the end of the mapping";
+  EXPECT_TRUE(refuses_copy(served.host(), kGuestAddress - 1, 2, faulted))
+      << "one byte before the start, which the mapping does hold";
+  EXPECT_TRUE(backing.matches_expectation()) << "a refused write reached the file";
+
+  // The whole window lies inside the mapping, so reaching it needs nothing the
+  // serving thread holds.
+  std::vector<std::byte> whole_window(window_size);
+  ParkedServingThread busy;
+  ASSERT_TRUE(busy.park(served.host()));
+  std::future<simdojo::DmaAccessOutcome> copy =
+      std::async(std::launch::async, [&served, &whole_window] {
+        return served.host().read_outcome(kGuestAddress, whole_window);
+      });
+  const std::future_status while_busy = copy.wait_for(kBoundedWait);
+  busy.release();
+  ASSERT_EQ(while_busy, std::future_status::ready)
+      << "the copy waited for the serving thread although its window is wholly mapped";
+  EXPECT_EQ(copy.get(), simdojo::DmaAccessOutcome::Complete);
+  EXPECT_EQ(whole_window, backing.expected(window_offset, window_size));
+}
+
+// The same offset with a whole page of window: the library maps one page from
+// the page boundary below the offset, which leaves the window's second half
+// beyond the end of the mapping. Such a window is not copied directly; it is
+// left to the library, and the serving thread's lock with it.
+//
+// Only the half the mapping does hold is touched here. The library hands out
+// addresses for the rest without checking them against its mapping, so there is
+// no behaviour for the rest that a test could rely on.
+TEST(VfioDeviceHostGuestMemory, LeavesAWindowItsMappingDoesNotCoverToTheLibrary) {
+  const std::size_t page = host_page_size();
+  constexpr uint64_t kGuestAddress = 0x620000;
+  const std::size_t window_offset = page + page / 2;
+  const std::size_t covered_size = page / 2;
+  GuestBacking backing(3 * page);
+  ASSERT_TRUE(backing.usable());
+  ServedDevice served;
+  ASSERT_TRUE(served.start());
+  rocjitsu::test::VfioUserClient client;
+  ASSERT_TRUE(served.attach(client));
+  ASSERT_TRUE(client.dma_map(kGuestAddress, page, backing.fd(), window_offset));
+
+  EXPECT_TRUE(copies_completely(served.host(), backing, kGuestAddress, window_offset, 16));
+  EXPECT_TRUE(copies_completely(served.host(), backing, kGuestAddress + covered_size / 2 - 5,
+                                window_offset + covered_size / 2 - 5, 13));
+  EXPECT_TRUE(copies_completely(served.host(), backing, kGuestAddress + covered_size - 1,
+                                window_offset + covered_size - 1, 1));
+
+  std::vector<std::byte> covered_half(covered_size);
+  ParkedServingThread busy;
+  ASSERT_TRUE(busy.park(served.host()));
+  std::future<simdojo::DmaAccessOutcome> copy =
+      std::async(std::launch::async, [&served, &covered_half] {
+        return served.host().read_outcome(kGuestAddress, covered_half);
+      });
+  // The serving thread holds the library's lock until released, so a copy that
+  // goes through the library cannot finish first however long this watches.
+  const std::future_status while_busy = copy.wait_for(kSerializedCopyWatch);
+  busy.release();
+  EXPECT_EQ(while_busy, std::future_status::timeout)
+      << "a window its mapping does not cover was copied without the library";
+  ASSERT_EQ(copy.wait_for(kBoundedWait), std::future_status::ready);
+  EXPECT_EQ(copy.get(), simdojo::DmaAccessOutcome::Complete);
+  EXPECT_EQ(covered_half, backing.expected(window_offset, covered_size));
+  EXPECT_TRUE(backing.matches_expectation());
+}
+
+// Device threads reach guest memory while the serving thread is inside a guest
+// request. Copies within one mapped window must not queue behind that request,
+// or every device thread is serialized on the slowest thing the guest asks for.
+TEST(VfioDeviceHostGuestMemory, CompletesCopiesWhileTheServingThreadIsBusy) {
+  constexpr std::size_t kCopyingThreads = 4;
+  // Odd, so that neighbouring threads' slices share machine words but no byte.
+  constexpr std::size_t kSliceBytes = 1021;
+  constexpr std::size_t kFirstSliceOffset = 3;
+  constexpr std::size_t kRounds = 64;
+  constexpr uint64_t kGuestAddress = 0x640000;
+  const std::size_t window_size = 2 * host_page_size();
+  ASSERT_GE(window_size, kFirstSliceOffset + kCopyingThreads * kSliceBytes);
+  GuestBacking backing(window_size);
+  ASSERT_TRUE(backing.usable());
+  ServedDevice served;
+  ASSERT_TRUE(served.start());
+  rocjitsu::test::VfioUserClient client;
+  ASSERT_TRUE(served.attach(client));
+  ASSERT_TRUE(client.dma_map(kGuestAddress, window_size, backing.fd(), 0));
+
+  const auto slice_bytes = [](std::size_t thread, std::size_t round) {
+    return fresh_bytes(kSliceBytes, thread * 5 + round);
+  };
+  ParkedServingThread busy;
+  ASSERT_TRUE(busy.park(served.host()));
+
+  // Each thread owns one slice, so what it reads back is what it wrote and the
+  // count of rounds that went wrong needs no cross-thread agreement.
+  std::vector<std::future<std::size_t>> copies;
+  copies.reserve(kCopyingThreads);
+  for (std::size_t thread = 0; thread < kCopyingThreads; ++thread) {
+    copies.push_back(std::async(std::launch::async, [&served, &slice_bytes, thread] {
+      const uint64_t slice_address = kGuestAddress + kFirstSliceOffset + thread * kSliceBytes;
+      std::vector<std::byte> read_back(kSliceBytes);
+      std::size_t failed_rounds = 0;
+      for (std::size_t round = 0; round < kRounds; ++round) {
+        const std::vector<std::byte> written = slice_bytes(thread, round);
+        const bool round_trip = served.host().write_outcome(slice_address, written) ==
+                                    simdojo::DmaAccessOutcome::Complete &&
+                                served.host().read_outcome(slice_address, read_back) ==
+                                    simdojo::DmaAccessOutcome::Complete &&
+                                read_back == written;
+        failed_rounds += round_trip ? 0 : 1;
+      }
+      return failed_rounds;
+    }));
+  }
+  const std::chrono::steady_clock::time_point deadline =
+      std::chrono::steady_clock::now() + kBoundedWait;
+  bool every_copy_finished = true;
+  for (std::future<std::size_t> &copy : copies) {
+    every_copy_finished =
+        copy.wait_until(deadline) == std::future_status::ready && every_copy_finished;
+  }
+  // Released before judging, so that copies which did wait can finish and be
+  // joined rather than outlive the test.
+  busy.release();
+  ASSERT_TRUE(every_copy_finished)
+      << "copies inside a mapped window waited for the serving thread's request to end";
+
+  for (std::size_t thread = 0; thread < kCopyingThreads; ++thread) {
+    EXPECT_EQ(copies[thread].get(), 0u) << "thread " << thread;
+    backing.expect_write(kFirstSliceOffset + thread * kSliceBytes,
+                         slice_bytes(thread, kRounds - 1));
+  }
+  EXPECT_TRUE(backing.matches_expectation())
+      << "concurrent copies left something other than each thread's last write";
+}
+
+// A guest write that lands in a mapped window holds no lock that an atomic
+// access to the same word waits for: another device thread's compare/exchange
+// takes the library's lock, which the write does not, and the guest's own takes
+// none at all. So the write must store each byte once. libc memcpy does not
+// promise that, and commonly copies a short span as two stores that overlap, so
+// an exchange that lands between the two is put back.
+void expect_no_exchange_undone(const ExchangeRaceTally &tally) {
+  EXPECT_EQ(tally.refused_writes, 0u);
+  EXPECT_EQ(tally.missed_exchanges, 0u);
+  EXPECT_EQ(tally.undone_exchanges, 0u)
+      << "a guest write stored a word again after a compare/exchange had replaced it";
+}
+
+class VfioDeviceHostGuestExchangeRace : public testing::Test {
+protected:
+  static constexpr uint64_t kGuestAddress = 0x660000;
+
+  void SetUp() override {
+    ASSERT_TRUE(backing_.usable());
+    ASSERT_TRUE(served_.start());
+    ASSERT_TRUE(served_.attach(client_));
+    ASSERT_TRUE(client_.dma_map(kGuestAddress, host_page_size(), backing_.fd(), 0));
+  }
+
+  /// @brief A plain guest write, at @p address, of @p length bytes that begin
+  /// with the value it is given.
+  [[nodiscard]] std::function<simdojo::DmaAccessOutcome(uint64_t)> write_at(uint64_t address,
+                                                                            std::size_t length) {
+    return [this, address, length](uint64_t plain) {
+      std::array<uint64_t, 2> buffer{plain, 0x0123456789abcdef};
+      return served_.host().write_outcome(address, std::as_bytes(std::span(buffer)).first(length));
+    };
+  }
+
+  GuestBacking backing_{host_page_size()};
+  ServedDevice served_;
+  rocjitsu::test::VfioUserClient client_;
+};
+
+TEST_F(VfioDeviceHostGuestExchangeRace,
+       WriteAcrossACacheLineDoesNotUndoAnotherDeviceThreadsCompareExchange) {
+  constexpr uint64_t kWord = kGuestAddress + kLastWordOfALine;
+  expect_no_exchange_undone(race_guest_write_against_exchange(
+      sizeof(uint32_t), write_at(kWord, 2 * sizeof(uint32_t)),
+      exchange_through_host(served_.host(), kWord, sizeof(uint32_t)),
+      load_through_host(served_.host(), kWord, sizeof(uint32_t))));
+}
+
+TEST_F(VfioDeviceHostGuestExchangeRace, WriteAcrossACacheLineDoesNotUndoTheGuestsCompareExchange) {
+  constexpr uint64_t kWord = kGuestAddress + kLastWordOfALine;
+  expect_no_exchange_undone(race_guest_write_against_exchange(
+      sizeof(uint32_t), write_at(kWord, 2 * sizeof(uint32_t)),
+      exchange_as_guest(backing_.guest_view(kLastWordOfALine), sizeof(uint32_t)),
+      load_through_host(served_.host(), kWord, sizeof(uint32_t))));
+}
+
+TEST_F(VfioDeviceHostGuestExchangeRace,
+       BufferWriteDoesNotUndoTheGuestsCompareExchangeOnAWordItCovers) {
+  // The buffer carries one word before the contended one and two after it, so
+  // that word is stored along with its neighbours rather than on its own.
+  constexpr uint64_t kWord = kGuestAddress + kLastWordOfALine;
+  constexpr uint32_t kWordBefore = 0xaaaa5555;
+  constexpr uint32_t kWordAfter = 0x3333cccc;
+  expect_no_exchange_undone(race_guest_write_against_exchange(
+      sizeof(uint32_t),
+      [this](uint64_t plain) {
+        const std::array<uint32_t, 4> buffer{kWordBefore, static_cast<uint32_t>(plain), kWordAfter,
+                                             kWordAfter};
+        return served_.host().write_outcome(kWord - sizeof(uint32_t),
+                                            std::as_bytes(std::span(buffer)));
+      },
+      exchange_as_guest(backing_.guest_view(kLastWordOfALine), sizeof(uint32_t)),
+      load_through_host(served_.host(), kWord, sizeof(uint32_t))));
+
+  std::array<uint32_t, 4> settled{};
+  ASSERT_EQ(served_.host().read_outcome(kWord - sizeof(uint32_t),
+                                        std::as_writable_bytes(std::span(settled))),
+            simdojo::DmaAccessOutcome::Complete);
+  EXPECT_EQ(settled[0], kWordBefore);
+  EXPECT_EQ(settled[2], kWordAfter);
+  EXPECT_EQ(settled[3], kWordAfter);
+}
+
+// The mapped path and the atomic accessors reach the same guest words from
+// different device threads with no lock in common. Both are meant to go
+// through util/shared_memory.h, which makes no plain access. A plain load or
+// store put back on either path races the other here, and only a
+// ThreadSanitizer build, configured with ROCJITSU_ENABLE_VFIO=ON so that it
+// compiles this file, reports it. Any other build checks no more than that an
+// aligned read never sees part of a write or an exchange, which a plain read
+// of one word would not either.
+TEST_F(VfioDeviceHostGuestExchangeRace,
+       OverlappingGuestAccessesOfEveryKindNeverSplitAnAlignedWord) {
+  constexpr uint64_t kQuadword = kGuestAddress + 0x100;
+  constexpr uint64_t kHighWord = kQuadword + sizeof(uint32_t);
+  constexpr uint32_t kRounds = 20000;
+  const auto lanes16 = [](uint32_t round) {
+    return uint64_t{round & 0xffffu} * 0x0001000100010001u;
+  };
+  const auto word_is_whole = [](uint64_t word) {
+    return (word & 0xffffu) == ((word >> 16) & 0xffffu);
+  };
+  const auto quadword_is_whole = [&](uint64_t quadword) {
+    return word_is_whole(quadword & 0xffffffffu) && word_is_whole(quadword >> 32);
+  };
+  rocjitsu::VfioDeviceHost &host = served_.host();
+  constexpr auto kComplete = simdojo::DmaAccessOutcome::Complete;
+  // The backing starts out patterned, so make the words whole before any
+  // thread looks at them.
+  const std::array<uint64_t, 3> whole{};
+  ASSERT_EQ(host.write_outcome(kQuadword - sizeof(uint64_t), std::as_bytes(std::span(whole))),
+            kComplete);
+
+  std::atomic<bool> stop{false};
+  std::atomic<uint32_t> refused{0};
+  std::atomic<uint32_t> split{0};
+  const auto count_unless = [](std::atomic<uint32_t> &counter, bool ok) {
+    if (!ok) {
+      counter.fetch_add(1, std::memory_order_relaxed);
+    }
+  };
+
+  std::vector<std::jthread> threads;
+  threads.emplace_back([&] {
+    std::array<uint64_t, 3> wide{};
+    while (!stop.load(std::memory_order_relaxed)) {
+      uint32_t high = 0;
+      uint64_t quadword = 0;
+      count_unless(
+          refused,
+          host.read_outcome(kHighWord, std::as_writable_bytes(std::span(&high, 1))) == kComplete &&
+              host.read_outcome(kQuadword, std::as_writable_bytes(std::span(&quadword, 1))) ==
+                  kComplete &&
+              host.read_outcome(kQuadword - sizeof(uint64_t),
+                                std::as_writable_bytes(std::span(wide))) == kComplete);
+      count_unless(split, word_is_whole(high) && quadword_is_whole(quadword) &&
+                              quadword_is_whole(wide[1]));
+    }
+  });
+  threads.emplace_back([&] {
+    uint32_t round = 0x4000;
+    while (!stop.load(std::memory_order_relaxed)) {
+      ++round;
+      const auto half = host.atomic_load(kQuadword + 2, sizeof(uint16_t));
+      const auto word = host.atomic_load(kHighWord, sizeof(uint32_t));
+      const auto quadword = host.atomic_load(kQuadword, sizeof(uint64_t));
+      count_unless(refused, half.outcome == kComplete && word.outcome == kComplete &&
+                                quadword.outcome == kComplete);
+      count_unless(split, word_is_whole(word.value) && quadword_is_whole(quadword.value));
+      count_unless(
+          refused,
+          host.compare_exchange(kHighWord, sizeof(uint32_t), word.value,
+                                lanes16(round) & 0xffffffffu)
+                      .outcome == kComplete &&
+              host.compare_exchange(kQuadword, sizeof(uint64_t), quadword.value, lanes16(round + 1))
+                      .outcome == kComplete &&
+              host.atomic_store(kQuadword, sizeof(uint32_t), lanes16(round + 2)) == kComplete &&
+              host.atomic_store(kQuadword, sizeof(uint64_t), lanes16(round + 3)) == kComplete);
+    }
+  });
+
+  for (uint32_t round = 1; round <= kRounds; ++round) {
+    const uint64_t value = lanes16(round);
+    const uint32_t word = static_cast<uint32_t>(value);
+    const std::array<uint32_t, 4> wide{word, word, word, word};
+    count_unless(
+        refused,
+        host.write_outcome(kHighWord, std::as_bytes(std::span(&word, 1))) == kComplete &&
+            host.write_outcome(kQuadword, std::as_bytes(std::span(&value, 1))) == kComplete &&
+            host.write_outcome(kQuadword - sizeof(uint32_t), std::as_bytes(std::span(wide))) ==
+                kComplete);
+  }
+  stop.store(true);
+  threads.clear();
+
+  EXPECT_EQ(refused.load(), 0u);
+  EXPECT_EQ(split.load(), 0u) << "an aligned read saw part of a write";
+}
+
+// A cache line fill reads a whole line of guest RAM on the mapped path while
+// other device threads and the guest exchange, atomically store and plainly
+// write single words of it, with no lock in common. The fill loads the words it
+// is not waiting on all the same, so a plain copy on the mapped path races
+// each of those writers here, which a ThreadSanitizer build reports. In any
+// build the test checks what the fill may rely on with no lock: the words
+// nobody stores stay intact, each stored word is one of the values its writer
+// stored, in the order it stored them, and no store or exchange is lost.
+TEST_F(VfioDeviceHostGuestExchangeRace, LineFillsRaceExchangesAndStoresOfOtherWordsInTheLine) {
+  constexpr std::size_t kLineOffset = 0x400;
+  constexpr uint64_t kLine = kGuestAddress + kLineOffset;
+  constexpr std::size_t kLineBytes = 128;
+  constexpr std::size_t kExchangedQuadword = 0x18;
+  // The low half of a quadword whose high half nobody stores: a fill loads
+  // both halves at once, and an exchange of one must leave the other alone.
+  constexpr std::size_t kGuestExchangedWord = 0x30;
+  constexpr std::size_t kAtomicallyStored = 0x48;
+  constexpr std::size_t kPlainWord = 0x60;
+  constexpr std::size_t kPlainQuadword = 0x68;
+  constexpr uint32_t kRounds = 20000;
+  constexpr auto kComplete = simdojo::DmaAccessOutcome::Complete;
+  // The round in the low half and its complement in the high half, so that a
+  // value made of two different stores is told apart from either.
+  const auto quadword_of = [](uint32_t round) { return (uint64_t{~round} << 32) | round; };
+  const auto word_of = [](uint32_t round) {
+    return ((~round & 0xffffu) << 16) | (round & 0xffffu);
+  };
+  const auto round_of_quadword = [](uint64_t quadword) -> std::optional<uint32_t> {
+    const uint32_t round = static_cast<uint32_t>(quadword);
+    if (static_cast<uint32_t>(quadword >> 32) != ~round) {
+      return std::nullopt;
+    }
+    return round;
+  };
+  const auto round_of_word = [](uint32_t word) -> std::optional<uint32_t> {
+    if ((word >> 16) != (~word & 0xffffu)) {
+      return std::nullopt;
+    }
+    return word & 0xffffu;
+  };
+  struct Stored {
+    std::size_t offset;
+    std::size_t width;
+  };
+  constexpr std::array<Stored, 5> kStored{
+      Stored{kExchangedQuadword, sizeof(uint64_t)}, Stored{kGuestExchangedWord, sizeof(uint32_t)},
+      Stored{kAtomicallyStored, sizeof(uint64_t)}, Stored{kPlainWord, sizeof(uint32_t)},
+      Stored{kPlainQuadword, sizeof(uint64_t)}};
+  const auto line_at_round = [&](uint32_t round) {
+    std::vector<std::byte> line = backing_.expected(kLineOffset, kLineBytes);
+    for (const Stored &stored : kStored) {
+      const uint64_t value = stored.width == sizeof(uint64_t) ? quadword_of(round) : word_of(round);
+      std::memcpy(line.data() + stored.offset, &value, stored.width);
+    }
+    return line;
+  };
+  rocjitsu::VfioDeviceHost &host = served_.host();
+  const std::vector<std::byte> initial = line_at_round(0);
+  ASSERT_EQ(host.write_outcome(kLine, initial), kComplete);
+
+  std::latch start{1};
+  std::atomic<bool> stop{false};
+  std::atomic<uint32_t> refused{0};
+  std::atomic<uint32_t> lost{0};
+  std::atomic<uint32_t> disturbed{0};
+  std::atomic<uint32_t> torn{0};
+  std::atomic<uint32_t> reordered{0};
+  const auto count_unless = [](std::atomic<uint32_t> &counter, bool ok) {
+    if (!ok) {
+      counter.fetch_add(1, std::memory_order_relaxed);
+    }
+  };
+
+  std::vector<std::jthread> writers;
+  writers.emplace_back([&] {
+    start.wait();
+    for (uint32_t round = 1; round <= kRounds; ++round) {
+      const simdojo::DmaAtomicCompareExchangeResult exchanged = host.compare_exchange(
+          kLine + kExchangedQuadword, sizeof(uint64_t), quadword_of(round - 1), quadword_of(round));
+      count_unless(refused, exchanged.outcome == kComplete);
+      // Nothing else stores this word, so an exchange can only fail to find
+      // its own last value if something put an older one back.
+      count_unless(lost, exchanged.exchanged);
+    }
+  });
+  writers.emplace_back([&] {
+    std::byte *const word = backing_.guest_view(kLineOffset + kGuestExchangedWord);
+    start.wait();
+    for (uint32_t round = 1; round <= kRounds; ++round) {
+      uint64_t expected = word_of(round - 1);
+      count_unless(lost, util::shared_compare_exchange_word(word, sizeof(uint32_t), expected,
+                                                            word_of(round)));
+    }
+  });
+  writers.emplace_back([&] {
+    start.wait();
+    for (uint32_t round = 1; round <= kRounds; ++round) {
+      count_unless(refused, host.atomic_store(kLine + kAtomicallyStored, sizeof(uint64_t),
+                                              quadword_of(round)) == kComplete);
+    }
+  });
+  writers.emplace_back([&] {
+    start.wait();
+    for (uint32_t round = 1; round <= kRounds; ++round) {
+      const uint32_t word = word_of(round);
+      const uint64_t quadword = quadword_of(round);
+      count_unless(
+          refused,
+          host.write_outcome(kLine + kPlainWord, std::as_bytes(std::span(&word, 1))) == kComplete &&
+              host.write_outcome(kLine + kPlainQuadword, std::as_bytes(std::span(&quadword, 1))) ==
+                  kComplete);
+    }
+  });
+  std::jthread filler([&] {
+    std::vector<std::byte> line(kLineBytes);
+    std::array<uint32_t, kStored.size()> last_round{};
+    start.wait();
+    // Sampled before the fill, so that one more fill follows the last store.
+    for (bool last = false; !last;) {
+      last = stop.load();
+      if (host.read_outcome(kLine, line) != kComplete) {
+        count_unless(refused, false);
+        continue;
+      }
+      std::vector<std::byte> unstored = line;
+      for (std::size_t index = 0; index < kStored.size(); ++index) {
+        const Stored &stored = kStored[index];
+        uint64_t value = 0;
+        std::memcpy(&value, line.data() + stored.offset, stored.width);
+        const std::optional<uint32_t> round = stored.width == sizeof(uint64_t)
+                                                  ? round_of_quadword(value)
+                                                  : round_of_word(static_cast<uint32_t>(value));
+        count_unless(torn, round.has_value());
+        if (round) {
+          count_unless(reordered, *round >= last_round[index]);
+          last_round[index] = *round;
+        }
+        std::memcpy(unstored.data() + stored.offset, initial.data() + stored.offset, stored.width);
+      }
+      count_unless(disturbed, unstored == initial);
+    }
+  });
+  start.count_down();
+  writers.clear();
+  stop.store(true);
+  filler.join();
+
+  EXPECT_EQ(refused.load(), 0u);
+  EXPECT_EQ(lost.load(), 0u) << "an exchange did not find the value the one before it left";
+  EXPECT_EQ(disturbed.load(), 0u) << "a fill returned a changed byte that no thread stores";
+  EXPECT_EQ(torn.load(), 0u) << "a fill returned a word that no single store left";
+  EXPECT_EQ(reordered.load(), 0u) << "a fill returned an older value of a word than one before it";
+  backing_.expect_write(kLineOffset, line_at_round(kRounds));
+  EXPECT_TRUE(backing_.matches_expectation());
+}
+
+// A function bound to target grants never takes the mapped path. It copies
+// guest RAM through the library's scatter list and a peer's BAR through the
+// grant's mapping of the owner's backing, in both cases under locks that
+// neither the guest nor the owning device takes. Those copies must store each
+// byte once for the same reason the mapped path must.
+class VfioTargetGrantsExchangeRace : public testing::Test {
+protected:
+  void SetUp() override {
+    ASSERT_TRUE(pair_.built());
+    ASSERT_TRUE(pair_.attach(requester_, owner_));
+  }
+
+  /// @brief A plain write by the requesting function, at @p address, of eight
+  /// bytes that begin with the value it is given.
+  [[nodiscard]] std::function<simdojo::DmaAccessOutcome(uint64_t)> write_at(uint64_t address) {
+    return [this, address](uint64_t plain) {
+      const std::array<uint32_t, 2> buffer{static_cast<uint32_t>(plain), 0x3333cccc};
+      return pair_.requester_host().write_outcome(address, std::as_bytes(std::span(buffer)));
+    };
+  }
+
+  MappedGrantPair pair_{/*seal_owner=*/true};
+  rocjitsu::test::VfioUserClient requester_;
+  rocjitsu::test::VfioUserClient owner_;
+};
+
+TEST_F(VfioTargetGrantsExchangeRace, WriteToGuestRamDoesNotUndoTheGuestsCompareExchange) {
+  // Clear of the peer BAR, which the fixture programs at 0x30000000.
+  constexpr uint64_t kGuestAddress = 0x1100'0000;
+  GuestBacking backing(host_page_size());
+  ASSERT_TRUE(backing.usable());
+  ASSERT_TRUE(requester_.dma_map(kGuestAddress, host_page_size(), backing.fd(), 0));
+  ASSERT_TRUE(finish_protocol_request(requester_));
+
+  std::byte *const word = backing.guest_view(kLastWordOfALine);
+  expect_no_exchange_undone(race_guest_write_against_exchange(
+      sizeof(uint32_t), write_at(kGuestAddress + kLastWordOfALine),
+      exchange_as_guest(word, sizeof(uint32_t)), load_as_guest(word, sizeof(uint32_t))));
+}
+
+TEST_F(VfioTargetGrantsExchangeRace, WriteToAPeerBarDoesNotUndoACompareExchangeOnItsBacking) {
+  constexpr uint64_t kPeerBar = 0x3000'0000;
+  constexpr std::size_t kWindowSize = 0x1000;
+  ASSERT_TRUE(requester_.dma_map(kPeerBar, kWindowSize, -1, 0));
+  ASSERT_TRUE(finish_protocol_request(requester_));
+
+  // The owning device and its guest reach the backing through mappings of
+  // their own, as this one is.
+  void *const mapped =
+      ::mmap(nullptr, kWindowSize, PROT_READ | PROT_WRITE, MAP_SHARED, pair_.owner().fd(), 0);
+  ASSERT_NE(mapped, MAP_FAILED);
+  std::byte *const word = static_cast<std::byte *>(mapped) + kLastWordOfALine;
+  expect_no_exchange_undone(race_guest_write_against_exchange(
+      sizeof(uint32_t), write_at(kPeerBar + kLastWordOfALine),
+      exchange_as_guest(word, sizeof(uint32_t)), load_as_guest(word, sizeof(uint32_t))));
+  EXPECT_EQ(pair_.owner().bar_calls(), 0u) << "the write went through the BAR callback";
+  ASSERT_EQ(::munmap(mapped, kWindowSize), 0);
+}
+
+// The library unmaps a window as soon as it has told the host the window is
+// gone. Copies that were inside it at that moment have to be let out first, and
+// copies that arrive afterwards have to be refused rather than find the address
+// the window used to have.
+TEST(VfioDeviceHostGuestMemory, WithdrawsAWindowFromUnderConcurrentReaders) {
+  constexpr std::size_t kReaders = 4;
+  constexpr uint64_t kGuestAddress = 0x680000;
+  // Large enough that a reader is usually in the middle of a copy.
+  const std::size_t window_size = 64 * host_page_size();
+  GuestBacking backing(window_size);
+  ASSERT_TRUE(backing.usable());
+  const std::vector<std::byte> contents = backing.expected(0, window_size);
+  ServedDevice served;
+  ASSERT_TRUE(served.start());
+  rocjitsu::test::VfioUserClient client;
+  ASSERT_TRUE(served.attach(client));
+  ASSERT_TRUE(client.dma_map(kGuestAddress, window_size, backing.fd(), 0));
+  ASSERT_TRUE(client.set_io_timeout(kBoundedWait));
+
+  struct ReaderReport {
+    std::size_t complete_reads;
+    std::size_t wrong_reads;
+    simdojo::DmaAccessOutcome last;
+  };
+  std::atomic<std::size_t> readers_under_way = 0;
+  std::atomic<bool> give_up = false;
+  const auto read_until_refused = [&served, &contents, &readers_under_way, &give_up, window_size] {
+    ReaderReport report{
+        .complete_reads = 0, .wrong_reads = 0, .last = simdojo::DmaAccessOutcome::Complete};
+    std::vector<std::byte> copy(window_size);
+    while (!give_up.load(std::memory_order_acquire)) {
+      report.last = served.host().read_outcome(kGuestAddress, copy);
+      if (report.last != simdojo::DmaAccessOutcome::Complete) {
+        break;
+      }
+      report.wrong_reads += copy == contents ? 0 : 1;
+      if (++report.complete_reads == 1) {
+        readers_under_way.fetch_add(1, std::memory_order_release);
+      }
+    }
+    return report;
+  };
+  std::vector<std::future<ReaderReport>> readers;
+  readers.reserve(kReaders);
+  for (std::size_t reader = 0; reader < kReaders; ++reader) {
+    readers.push_back(std::async(std::launch::async, read_until_refused));
+  }
+
+  const std::chrono::steady_clock::time_point deadline =
+      std::chrono::steady_clock::now() + kBoundedWait;
+  while (readers_under_way.load(std::memory_order_acquire) < kReaders &&
+         std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  const bool every_reader_started = readers_under_way.load(std::memory_order_acquire) == kReaders;
+  const bool unmapped = every_reader_started && client.dma_unmap(kGuestAddress, window_size);
+  const std::chrono::steady_clock::time_point stop_deadline =
+      std::chrono::steady_clock::now() + kBoundedWait;
+  bool every_reader_stopped = unmapped;
+  for (std::future<ReaderReport> &reader : readers) {
+    every_reader_stopped =
+        every_reader_stopped && reader.wait_until(stop_deadline) == std::future_status::ready;
+  }
+  // Only matters after a failure: lets a reader that is still looping be joined.
+  give_up.store(true, std::memory_order_release);
+  ASSERT_TRUE(every_reader_started) << "the readers never got going";
+  ASSERT_TRUE(unmapped) << "the window could not be withdrawn while it was being read";
+  ASSERT_TRUE(every_reader_stopped) << "a reader was still being served after the withdrawal";
+
+  for (std::size_t reader = 0; reader < kReaders; ++reader) {
+    const ReaderReport report = readers[reader].get();
+    EXPECT_GE(report.complete_reads, 1u) << "reader " << reader;
+    EXPECT_EQ(report.wrong_reads, 0u)
+        << "reader " << reader << " was given something other than the window's bytes";
+    EXPECT_EQ(report.last, simdojo::DmaAccessOutcome::Faulted) << "reader " << reader;
+  }
 }

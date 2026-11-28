@@ -14,6 +14,10 @@
 /// memory page by page can share hundreds of thousands of windows, so lookup and
 /// insertion have to stay logarithmic; scanning a list per window would make
 /// registering N windows quadratic and copying across them worse.
+///
+/// A window the transport has mapped into this process is recorded with the
+/// address it is mapped at, so a transfer lying inside one window can be
+/// resolved to host memory from this record alone.
 
 #pragma once
 
@@ -30,12 +34,16 @@ class GuestRegionMap {
 public:
   /// @brief Record a window the client shared.
   /// @param[in] region The window.
+  /// @param[in] host_address Where this process can address the window's first
+  ///            byte, with all @c region.length bytes addressable from there,
+  ///            or nullptr when the window is not mapped here.
   /// @retval true The window was not already recorded.
-  /// @retval false An identical window was already present, so nothing changed.
+  /// @retval false A window with the same address and length was already
+  ///         present; only its host address was replaced by @p host_address.
   /// @details A client may re-share a window it already holds, which the
   /// protocol reports as a fresh mapping; treating that as new would drift this
   /// record and the device's view of it apart.
-  bool insert(const simdojo::DmaRegion &region);
+  bool insert(const simdojo::DmaRegion &region, std::byte *host_address = nullptr);
 
   /// @brief Forget a window the client withdrew.
   /// @param[in] region The window being withdrawn.
@@ -50,11 +58,33 @@ public:
   ///          or zero if no shared window contains it.
   [[nodiscard]] std::size_t bytes_until_end(uint64_t guest_phys) const;
 
+  /// @brief Locate a span that lies wholly inside one window mapped here.
+  /// @param[in] guest_phys Guest-physical address of the span's first byte.
+  /// @param[in] length Number of bytes in the span.
+  /// @param[in] needed Access the window must grant.
+  /// @returns Where the span starts in this process, or nullptr unless a single
+  ///          recorded window contains @p guest_phys and the @p length bytes
+  ///          from it, was recorded with a host address, and grants every
+  ///          access in @p needed.
+  /// @details The address is only as durable as the mapping behind it, so the
+  /// caller must keep the window from being erased while it uses the result.
+  [[nodiscard]] std::byte *host_span(uint64_t guest_phys, std::size_t length,
+                                     simdojo::DmaAccess needed) const;
+
   /// @brief Return how many windows are recorded.
   [[nodiscard]] std::size_t size() const { return regions_.size(); }
 
 private:
-  std::map<uint64_t, simdojo::DmaRegion> regions_;
+  /// @brief One shared window, and where this process can address it.
+  struct Window {
+    simdojo::DmaRegion region;
+    std::byte *host_address = nullptr;
+  };
+
+  /// @brief Return the well-formed window containing @p guest_phys, or nullptr.
+  [[nodiscard]] const Window *containing(uint64_t guest_phys) const;
+
+  std::map<uint64_t, Window> regions_;
 };
 
 } // namespace rocjitsu

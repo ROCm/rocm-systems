@@ -40,7 +40,8 @@ enum class ServerSignalAction {
 /// @returns A process exit status: zero on an orderly shutdown.
 /// @details Blocks. A VMM such as QEMU connects to the socket and presents the
 /// function to its guest as a real PCI device. The config must contain one
-/// local GPU; use the socket-list overload for a multi-GPU node.
+/// local GPU; use the socket-list overload for a multi-GPU node. The GPU
+/// dispatches as wide as the config resolves, as it would in launch mode.
 int run_vfio_server(const std::string &config_path, const std::string &socket_path,
                     int ready_fd = -1, bool trace_fabric_effects = false);
 
@@ -54,6 +55,14 @@ int run_vfio_server(const std::string &config_path, const std::string &socket_pa
 /// @details Blocks. All functions share one simulation engine and one process
 /// lifetime. A permanently stopped function fails the multi-function session.
 /// SIGUSR1 requests an interrupt on every function in the group.
+///
+/// The CPU dispatch width the config resolves is applied only when
+/// @p socket_paths names a single function. Every GPU of a larger group
+/// dispatches serially whatever the config asks for: grouped functions copy
+/// guest memory through the serialized transport rather than through the
+/// windows mapped into this process, and dispatch workers queueing for
+/// serialized memory access were measured several times slower than serial
+/// dispatch. A config that sets a width above one is told so in a warning.
 int run_vfio_server(const std::string &config_path, const std::vector<std::string> &socket_paths,
                     int ready_fd = -1, bool trace_fabric_effects = false);
 
@@ -76,5 +85,23 @@ int run_vfio_server_with_engine_exit_for_test(const std::string &config_path,
 int run_vfio_server_with_serving_thread_failure_for_test(
     const std::string &config_path, const std::vector<std::string> &socket_paths, int ready_fd,
     std::size_t successful_threads);
+
+/// @brief Run the server and report the dispatch width each function ended up with.
+/// @param[in] config_path Simulation config describing the local GPU node.
+/// @param[in] socket_paths One AF_UNIX filesystem path per local GPU.
+/// @param[in] ready_fd Optional pipe descriptor notified once every socket is ready.
+/// @param[in] dispatch_fd Descriptor the widths are written to. It stays the
+/// caller's to close.
+/// @returns A process exit status: zero on an orderly shutdown.
+/// @details Test-only entry point. The width a served GPU dispatches at depends
+/// on how many functions the server presents, is decided while the server
+/// starts, and cannot be seen from outside the process. Before readiness is
+/// published this writes one native-endian uint32_t per local GPU to
+/// @p dispatch_fd, in local GPU ordinal order: the effective CPU dispatch width
+/// of the SoC behind that function. A server that fails to start writes fewer,
+/// or none.
+int run_vfio_server_reporting_dispatch_for_test(const std::string &config_path,
+                                                const std::vector<std::string> &socket_paths,
+                                                int ready_fd, int dispatch_fd);
 
 } // namespace rocjitsu

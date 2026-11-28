@@ -452,6 +452,156 @@ how to control that frontend's cache without imposing it on other workloads.
 Run the throughput plugin alone when comparing its instruction-family timing;
 other execution plugins add observer cost and may change interval boundaries.
 
+## Benchmark the VFIO-user server
+
+`scripts/bench-vfio-user.py` checks and times the
+[VFIO-user server](qemu-vfio.md) without QEMU or a guest. The script is the
+vfio-user client. It shares guest memory, programs the GART and the MES ring as
+the guest AMDGPU driver would, registers one AQL compute queue, and dispatches
+OpenCL kernels that it compiles for the emulated target. It drives the GC 12.1
+/ MES front end only, so use a gfx1250 config such as
+`configs/gfx1250_mi455x.json`. The numbers describe the server's transport and
+simulation paths. A guest adds QEMU, the kernel driver and ROCr on top, so
+measure a guest workload as well before claiming a guest-visible change.
+
+Build each revision with `-DROCJITSU_ENABLE_VFIO=ON`, as in
+[Build the VFIO-user server](qemu-vfio.md#build-the-vfio-user-server). The
+script needs Python 3.10 or newer and an amdgcn-capable clang with the
+`llvm-objdump` of the same LLVM. It uses `--clang` when given, else the LLVM
+under `$ROCM_PATH` (`/opt/rocm` when unset), else `amdclang` or `clang` on
+`PATH`. `--check-toolchain` compiles the kernels, prints the tools it used and
+exits without starting a server.
+
+```bash
+python3 scripts/bench-vfio-user.py \
+  --variant baseline:bin="$baseline_build/tools/rocjitsu/rocjitsu" \
+  --variant candidate:bin="$build/tools/rocjitsu/rocjitsu" \
+  --output results.json
+```
+
+Each `--variant` starts its own server; the first one is the baseline of the
+`vs first` column. Besides `bin=`, a variant can set `config=`,
+`cfg=dotted.path=JSON` (applied to a copy of the config, for example
+`cfg=cpu_dispatch_threads=1`), `env=NAME=VALUE`, `arg=FLAG`, `cpus=LIST`
+(affinity through `taskset`) and `target=GPU`. Without `--variant` the script
+runs `build/tools/rocjitsu/rocjitsu` from the source tree.
+
+The script compares kernel output with models it carries, at two points:
+
+- Every run begins with one dispatch of each kernel over 4096 work items and
+  37 iterations, and compares all 4096 outputs. `--verify-only` stops there.
+- Each timed dispatch starts from an output buffer the script has overwritten,
+  and the script keeps a copy of what the dispatch wrote. When the timing and
+  the server's CPU accounting for that kernel and grid are closed, it compares
+  every work item of every timed dispatch at the calibrated iteration count.
+  The `result` column of the Throughput table is `ok`, or the number of wrong
+  work items in the worst of the `--repeats` dispatches; `results.json` holds
+  the count for each one in `wrong_items`.
+
+The script exits with status 1 when any variant meets one of these, and with
+status 0 otherwise:
+
+- A work item of the check before timing is wrong.
+- A work item of any timed dispatch is wrong.
+- The variant did not finish. The server did not report readiness within
+  `--ready-timeout`, could not be started or reached, or exited while it was
+  in use. A vfio-user request failed, or the server sent nothing for 30
+  seconds while a reply was due; the limit is the same whether the client
+  sleeps or spins for the reply. The MES
+  did not complete a command within 10 seconds, or a dispatch did not complete
+  within `--timeout`.
+- The server ended badly once the variant was done with it. The script closes
+  its connection and sends SIGTERM, and expects exit status 0. A non-zero
+  status, death by a signal the script did not send, and a server that is
+  still running 20 seconds after SIGTERM and has to be killed all fail the
+  variant, even when every output was right. That includes a server that dies
+  of the script's own SIGTERM: the server handles that signal until its exit
+  status is final, so it can only die of it while leaving on a failure.
+
+A bad command line exits with status 2. Inputs that cannot work (a missing
+binary or config, no usable clang, kernels that do not compile, a results file
+that cannot be written) exit with status 1 before or after the variants run.
+A compiler or disassembler that runs for more than 300 seconds is one of
+those. SIGTERM stops the server and exits with status 143; an interrupt
+(SIGINT) also stops the server, and ends the script with a traceback. Neither
+writes `results.json`.
+
+The script names each failure on standard error (`wrong output:`, `server
+exited with status N`, `server was killed by SIGNAL`, `server did not stop
+within 20s of SIGTERM and was killed`) and in the report
+tables, lists the failed variants, and keeps the work directory that holds the
+full logs. When the variant did not finish or its server ended
+badly it also prints the end of the server log. `results.json` is written
+either way, with the exit status in `server_exit` and the reason, if any, in
+`server_fault`; a server that never reported readiness has neither, and how it
+ended is part of `error`. The other variants still run. A failed variant can still have
+rates in the tables; do not use them.
+
+What the checks do not cover:
+
+- Every row of the Throughput table is checked; there is no unchecked state.
+  The dispatches that calibrate the iteration count are not checked. The
+  Transport table has no output to compare: its no-op dispatches write none,
+  and the value of the register it reads is not examined. Those rows show
+  that each operation completed.
+- The timed output is compared with closed-form models, because walking tens
+  of millions of iterations per work item in Python is not affordable. The
+  unit tests hold those models to the stepwise one for every kernel: at
+  iteration counts up to about a million for the integer kernels, and past
+  the point where it stops changing for `fp_loop`.
+- `fp_loop` stops changing within about 10,000 iterations, when every work
+  item holds one of three values near 1.0. A timed dispatch runs far more
+  iterations than that, so its `fp_loop` check shows that every work item was
+  written with the converged value for its start, and not that the requested
+  number of iterations ran. The integer kernels do confirm the count.
+- Integer outputs must be equal. An `fp_loop` output may differ from the model
+  by one part in a million, and may match either a fused or a separate
+  multiply-add.
+- The script overwrites the output with all-ones words. That is a NaN for
+  `fp_loop`; for an integer kernel a work item whose correct value happens to
+  be `0xFFFFFFFF` would pass without being written.
+- The grid is at most 65,536 work items.
+
+Overwriting and copying the output happen between the timed dispatches. They
+are outside the interval that gives the lane-iteration and wave-instruction
+rates. They are inside the interval over which the server's cores, context
+switches per second and run-queue share are taken, as queueing each dispatch
+already was: the copies run in the client and cost microseconds per dispatch
+(up to 256 KiB each way at the largest grid), so they lengthen that interval
+by a negligible fraction unless `--target-seconds` is set to milliseconds.
+
+| Kernel | Exercises |
+|---|---|
+| `int_loop`, `i64_loop` | 32-bit and 64-bit integer loops with no memory access |
+| `fp_loop` | Single-precision multiply-add |
+| `mem_loop` | Loads from a buffer in guest RAM |
+| `mem_loop_vram` | The same kernel with the buffer in VRAM |
+| `lds_loop` | LDS loads behind a workgroup barrier |
+
+| Report table | Content |
+|---|---|
+| Verify | Per-kernel verdict of the check before timing, and any startup, dispatch or server-exit error |
+| Transport | Register-read round trip, no-op dispatch latency (polled, interrupt-driven, posted doorbell), and dispatches per second when one doorbell covers a batch |
+| Throughput | Per kernel and grid: lane-iterations and wave-instructions per second, server cores in use, system-time share, run-queue wait share, voluntary context switches, and the verdict on the timed output |
+
+A grid of 64 is one workgroup; 4096 is 64 workgroups, which a server with
+several dispatch threads can run side by side. A timed dispatch is calibrated
+to last about `--target-seconds`, which means two variants can run different
+iteration counts: compare the rates, not the seconds. The table shows the best
+of `--repeats`; `results.json` also holds the median. The
+[sampling protocol](#sampling-protocol) still applies. Run an identical-binary
+pair first to find the noise floor, repeat the invocation with the variant
+order swapped, and report medians over several invocations. On a shared host,
+[reserve CPUs](#reserve-cpus-with-systemd) and pin each server with `cpus=`;
+the client spins on one more CPU while it waits for a dispatch.
+
+Two CTest entries cover the script. `VfioUserBenchUnitTest` tests it against
+fakes and needs no server. `RocjitsuVfioUserBenchVerify` runs `--verify-only`
+against the built server, so it covers the check before timing and no timed
+dispatch. It is registered only when `ROCJITSU_ENABLE_VFIO` is `ON` and the
+clang under the selected `ROCM_PATH` compiles the kernels for gfx1250; the
+configure output says which was missing otherwise.
+
 ## Case study: gfx1250 IREE and Gluon
 
 This case study records how the protocol behaved during recent functional

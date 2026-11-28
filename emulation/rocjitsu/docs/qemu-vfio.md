@@ -156,6 +156,19 @@ The build also produces the profile-specific IP-discovery generator at:
 build-vfio/tools/rj-ip-discovery/rj-ip-discovery
 ```
 
+To check the built server without a guest, let `scripts/bench-vfio-user.py`
+bring the device up as a driver would and verify the output of one short
+dispatch of each of its compute kernels:
+
+```bash
+python3 scripts/bench-vfio-user.py --verify-only \
+  --rocjitsu build-vfio/tools/rocjitsu/rocjitsu
+```
+
+See
+[Benchmark the VFIO-user server](benchmarking.md#benchmark-the-vfio-user-server)
+for its timed mode and the toolchain it needs.
+
 If reconfiguration reports `Failed to unstash changes`, cached dependency
 sources may contain changes from an earlier build. Leave the old dependency
 directory intact, including its `.git` directory, local edits, and stashes,
@@ -317,6 +330,13 @@ python3 scripts/run-vfio-guest.py \
   --reject-log 'guest: FATAL:'
 ```
 
+The server runs one engine thread. Presenting one function, as here, it gives
+the GPU the CPU dispatch width the config resolves to, as launch mode does. Set
+`cpu_dispatch_threads: 1` in the config for serial dispatch. A server
+presenting several functions dispatches serially on every GPU whatever the
+config asks for. See
+[Simulation threading](configuration.md#simulation-threading).
+
 The 1 GiB VRAM limit leaves enough guest VRAM for ROCr to provision queue
 scratch at the device's advertised occupancy. A smaller limit can be adequate
 for scratch-free kernels but may make a private-segment dispatch wait
@@ -413,7 +433,9 @@ server and waits for one readiness signal, then checks that every requested
 socket exists before starting QEMU. For multiple GPUs, QEMU receives one
 `vfio-user-pci` device per socket on `pcie.0` at slots `0x4`, `0x5`, and so
 on, with IDs `rocjitsu-gpu-0`, `rocjitsu-gpu-1`, and so on. The single-GPU
-QEMU device arguments remain unchanged.
+QEMU device arguments remain unchanged. A server presenting more than one
+function dispatches serially on every GPU: the width `cpu_dispatch_threads` or
+`thread_allocations` resolves to is applied only to a server presenting one.
 
 The existing GEMM qualification contract covers one GPU. A multi-GPU launch
 does not by itself establish guest PCI enumeration, peer DMA, RCCL operation,
