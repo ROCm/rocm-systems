@@ -557,7 +557,8 @@ int rj_arith_s_rndne_f16(uint64_t flags, uint64_t instruction_flags, uint32_t *d
 
 // Scalar fused multiply-add ignores EXEC, including zero EXEC; d is required.
 // Operands and literals are raw IEEE bits. FP16 reads low halves and writes a
-// zero upper half. Rounds once to the destination format. SCC is unchanged.
+// zero upper half. Exact arithmetic rounds once to the destination format; Loose
+// may use an FP32 intermediate for FP16. SCC is unchanged.
 // instruction_flags must be zero. FP32 and FP16 support loose and exact semantics;
 // explicit mode 3 reporting is unsupported. Compatibility accumulates the gfx12 scalar FMA
 // causes into required excp_flag_user storage, judging overflow and tininess after rounding
@@ -568,8 +569,8 @@ int rj_arith_s_rndne_f16(uint64_t flags, uint64_t instruction_flags, uint32_t *d
 // unspecified. Exact results follow the borrowed FMA NaN ordering. Guest
 // input/output flushing, FP16_OVFL and RJ_ARITH_FP_ROUND_MASK (the destination
 // format's MODE field) are supported, with tininess detected before destination
-// subnormal rounding. Exact results use integer arithmetic; loose nearest-even FP32
-// requires host nearest-even rounding and enabled denormals. Errors leave d unchanged.
+// subnormal rounding. Exact results use integer arithmetic; loose nearest-even
+// arithmetic uses host FP32 FMA. Requires default host FP controls. Errors leave d unchanged.
 // Inputs may come from d storage.
 
 // Fused a * b + old *d.
@@ -1027,17 +1028,19 @@ int rj_arith_s_mulk_i32(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
 int rj_arith_s_ff0_i32_b32(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a);
 int rj_arith_s_ff0_i32_b64(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint64_t a);
 
-// Pseudo-scalar transcendental math on raw SGPR values. Executes once regardless
+// Scalar-result math on raw SGPR values. Executes once regardless
 // of EXEC, including zero. a is a scalar value; d must always be writable.
 // FP16 reads a's low half, ignores its high half, and zeros d's upper half.
 // Supports ABS_A, NEG_A, OMOD and CLAMP, with ABS before NEG. No half selectors.
 // Every operation supports empirical-exact semantics and Compatibility resolves to
 // mode 2; FP16 EXP/LOG use the VALU EXP/LOG F16 model, which matches the gfx1201
 // V_S_EXP_F16/V_S_LOG_F16 captures (FP16_OVFL saturation, OMOD and CLAMP included).
-// Mode 3 FP status reporting is unsupported. Loose calls leave state unchanged.
+// Mode 3 FP status reporting is unsupported. Loose leaves FP status unused and
+// may keep native FP32 intermediates through output scaling before narrowing to FP16.
 // FP32 always flushes input/output denormals. FP16 follows the guest input/output
-// flush flags and FP16_OVFL. Rounding precedes OMOD; nonzero OMOD flushes tiny
-// values before and after scaling. A zero created by negative underflow retains
+// flush flags and FP16_OVFL. Exact and Compatibility round before OMOD and flush
+// tiny values before and after scaling when OMOD is nonzero. In those modes,
+// a zero created by negative underflow retains
 // its sign; pre-existing zero becomes positive with OMOD. CLAMP maps NaN and
 // negative results to zero. Loose semantics require host nearest-even rounding
 // and enabled denormals; exact paths use integer arithmetic. Host rounding is

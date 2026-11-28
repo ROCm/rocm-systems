@@ -18,6 +18,19 @@ using namespace rocjitsu::arith::test;
 template <bool Half, bool Gfx1250 = false, typename Call> void check_pseudo(Call call, int op) {
   const bool exp_log = op == 7 || op == 8;
   for (auto cpu : supported_cpu_levels()) {
+    if constexpr (Half) {
+      if (op == 5 || op == 6) {
+        // Loose may saturate before or after OMOD, but zero's reciprocal stays finite here.
+        uint32_t d = 0, status = 0x80000000U;
+        ASSERT_EQ(call(cpu | RJ_ARITH_SEMANTICS_LOOSE | RJ_ARITH_FP16_OVFL, RJ_ARITH_ALU_OMOD_HALF,
+                       &d, 0, &status),
+                  RJ_ARITH_SUCCESS);
+        EXPECT_GE(f16_value(uint16_t(d)), 32752.f);
+        EXPECT_LE(f16_value(uint16_t(d)), 65504.f);
+        EXPECT_EQ(d >> 16, 0U);
+        EXPECT_EQ(status, 0x80000000U);
+      }
+    }
     for (auto semantics : semantics_modes()) {
       std::minstd_rand random;
       for (int sample = 0; sample < 64; ++sample) {
@@ -35,6 +48,9 @@ template <bool Half, bool Gfx1250 = false, typename Call> void check_pseudo(Call
           }
           if (sample == 1) {
             a = Half ? 0x7c00 : 0x7f800000U;
+          }
+          if (!precise && (sample == 2 || sample == 3)) {
+            a = sample == 2 ? 0 : Half ? 0x8000U : 0x80000000U;
           }
           if (!Half && precise) {
             a = unary_inputs[sample % 32];
@@ -296,6 +312,44 @@ TEST(PseudoMath, InheritedHalfRsq) {
                     RJ_ARITH_SUCCESS);
           EXPECT_EQ(result, sample[omod + 1]);
         }
+      }
+    }
+  }
+}
+
+// Loose scales in FP32 before narrowing; Compatibility retains the inherited FP16 overflow.
+TEST(PseudoMath, LooseScalingBeforeNarrowing) {
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (auto call : {rj_arith_v_s_exp_f16, rj_arith_v_s_exp_f16_gfx1250}) {
+      for (auto semantics : {RJ_ARITH_SEMANTICS_LOOSE, RJ_ARITH_SEMANTICS_COMPATIBILITY}) {
+        uint32_t result = 0xdeadbeefU, status = 0x80000000U;
+        ASSERT_EQ(call(cpu | semantics, RJ_ARITH_ALU_OMOD_HALF, &result, 0x4c00, &status),
+                  RJ_ARITH_SUCCESS);
+        // exp2(16) / 2 = 32768; narrowing exp2(16) first instead overflows to infinity.
+        EXPECT_EQ(result, semantics == RJ_ARITH_SEMANTICS_LOOSE ? 0x7800U : 0x7c00U);
+        EXPECT_EQ(status, 0x80000000U);
+      }
+    }
+  }
+}
+
+// Inherited NaN payloads are quieted; ABS precedes NEG and OMOD preserves the payload.
+TEST(PseudoMath, NaNModifiers) {
+  const struct {
+    decltype(&rj_arith_v_s_sqrt_f16_gfx1250) call;
+    uint32_t input, expected[2];
+  } cases[] = {{rj_arith_v_s_sqrt_f16_gfx1250, 0x1234fc01U, {0x7e01U, 0xfe01U}},
+               {rj_arith_v_s_sqrt_f32_gfx1250, 0xffa00001U, {0x7fe00001U, 0xffe00001U}}};
+  const uint64_t modes[] = {RJ_ARITH_ALU_ABS_A, RJ_ARITH_ALU_ABS_A | RJ_ARITH_ALU_NEG_A};
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (const auto &sample : cases) {
+      for (int i = 0; i < 2; ++i) {
+        uint32_t d = 0, status = 0x80000000U;
+        ASSERT_EQ(sample.call(cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY,
+                              modes[i] | RJ_ARITH_ALU_OMOD_HALF, &d, sample.input, &status),
+                  RJ_ARITH_SUCCESS);
+        EXPECT_EQ(d, sample.expected[i]);
+        EXPECT_EQ(status, 0x80000000U);
       }
     }
   }

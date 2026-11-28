@@ -170,6 +170,12 @@ endif()
 rj_configure_target(rj_arith WARNINGS)
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(rj_arith PRIVATE -ffp-contract=off)
+    # Only scalar-result native math needs this errno-free sqrt optimization.
+    set_property(
+        SOURCE scalar/pseudo_scalar.cpp
+        APPEND
+        PROPERTY COMPILE_OPTIONS -fno-math-errno
+    )
 endif()
 # Reset the CPU model for baseline sources. Explicit ISA feature flags (such as
 # -mavx2) remain the enclosing build's responsibility; -march does not cancel them.

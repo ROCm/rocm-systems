@@ -118,7 +118,8 @@ The [common header](../lib/arith/include/rj_arith/detail/rj_arith_common.h) defi
 
 Calls return `RJ_ARITH_SUCCESS` or an error distinguishing invalid controls,
 unsupported numerical semantics, unsupported FP status, and unsupported register
-effects. Errors leave all outputs unchanged, including FP status storage.
+effects. Host `errno` is not part of this interface. Errors leave all outputs
+unchanged, including FP status storage.
 Reserved semantics are rejected even for empty EXEC. Valid operand storage is
 an unchecked caller precondition unless the instruction explicitly permits null.
 
