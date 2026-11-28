@@ -30,10 +30,12 @@ constexpr int mfma_input_index(int index, int k, int batch) {
   return (local / PerWord * 64 + lane) * PerWord + local % PerWord;
 }
 
-// MI300 §7.1.5.1 and CDNA4 §7.1.6.1 give this full-wave A-lane formula.
-// Their §13.3.6.1 ABID tables describe adjacent block groups instead. The
-// reduction follows the formula pending a distinguishing hardware capture.
-// gfx90a instead uses adjacent M-lane groups, matching its inherited model.
+// MI300 §7.1.5.1 and CDNA4 §7.1.6.1 give this full-wave A-lane formula, while
+// their §13.3.6.1 ABID tables describe adjacent block groups. gfx908, gfx950, and
+// gfx942 F32/I8 MFMA follow this full-wave formula pending hardware calibration;
+// calibrated batched gfx942 F16/BF16 MFMA uses rj_arith_gfx942_batched_mfma_a_lane
+// (and single-batch gfx942 F16, BF16, XF32, and FNUZ FP8/BF8 ignore source controls).
+// gfx90a passes matrix_block_lanes = M for adjacent M-lane groups without clamping.
 inline int mfma_a_lane(int lane, uint64_t controls, int matrix_block_lanes = 0) {
   int cbsz = int(controls & 7);
   if (!cbsz || cbsz > 4) {

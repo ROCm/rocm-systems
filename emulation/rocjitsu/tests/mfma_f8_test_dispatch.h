@@ -56,10 +56,14 @@ void execute_mfma_f8_shape(amdgpu::ComputeUnitCore &cu, uint32_t d, uint32_t a, 
   if (util::force_scalar()) {
     flags &= ~RJ_ARITH_CPU_MASK;
   }
-  const uint64_t a_lanes = amdgpu::mfma_permuted_lane_mask(
-      [&](uint32_t lane) { return amdgpu::permute_a_lane(lane, cbsz, abid); });
-  const uint64_t b_lanes = amdgpu::mfma_permuted_lane_mask(
-      [&](uint32_t lane) { return amdgpu::permute_b_lane(lane, blgp); });
+  const uint64_t a_lanes =
+      Fnuz ? ~uint64_t{0} : amdgpu::mfma_permuted_lane_mask([&](uint32_t lane) {
+        return amdgpu::permute_a_lane(lane, cbsz, abid);
+      });
+  const uint64_t b_lanes =
+      Fnuz ? ~uint64_t{0} : amdgpu::mfma_permuted_lane_mask([&](uint32_t lane) {
+        return amdgpu::permute_b_lane(lane, blgp);
+      });
   amdgpu::arith::exec_dense_fp_matrix<M * K / 256, M * M / 64, 64>(
       *wave, entry, flags, cbsz | (uint64_t(abid) << 3) | (uint64_t(blgp) << 7), d, a, b, c,
       constant == amdgpu::ACC_FROM_VGPR ? std::nullopt : std::optional<uint64_t>(constant), a_lanes,

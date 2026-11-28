@@ -107,12 +107,15 @@ gfx950 half-input forms plus eight dense and twelve sparse OCP FP8/BF8 forms,
 and five gfx1250 half-input WMMA forms plus sixteen FP8/BF8 K64/K128 forms.
 gfx942 FP8/BF8 uses FNUZ; gfx950 and gfx1250 use OCP.
 All have scalar, AVX2 and AVX-512-v4 approximate implementations. Loose and
-Compatibility retain those paths. The twenty dense gfx942 MFMA forms (with
-default CBSZ/ABID/BLGP controls) and the twelve sparse gfx942 `V_SMFMAC_F32_*`
-forms (across all CBSZ/ABID metadata selectors) support the integer empirical
-model contributed in #14809 for both `FP16_OVFL` clear and set (flushing NaN to
-+0.0 and clamping +-Inf to +-MAX_FLOAT after each internal K-step). Exact modes
-use that model; exact-allow-Loose falls back outside its qualified controls.
+Compatibility retain those paths. The twenty dense gfx942 MFMA forms (across
+CBSZ 0..4 with ABID < 2^CBSZ and BLGP 0..7: ignored on single-batch forms;
+selecting adjacent M-lane A block groups with lane % 16 clamping when
+(M << CBSZ) > 64 and BLGP B-lane permutations on batched forms) and the twelve
+sparse gfx942 `V_SMFMAC_F32_*` forms (across all CBSZ/ABID metadata selectors)
+support the integer empirical model contributed in #14809 for both `FP16_OVFL`
+clear and set (flushing NaN to +0.0 and clamping +-Inf to +-MAX_FLOAT after each
+internal K-step). Exact modes use that model; exact-allow-Loose falls back
+outside its qualified controls (CBSZ > 4 or ABID >= 2^CBSZ).
 All-negative-zero sums (+0), negative subnormal underflow to +0, subnormal C
 preservation, XF32 NaNs with payload only in bits 12:0 (truncating to infinity),
 BF16 2^128 product overflow, and subnormal BF16 product outputs and ties are all

@@ -542,22 +542,37 @@ def gen_mfma(ctx: ExecuteContext) -> str:
             '  uint64_t controls = inst_.cbsz | (uint64_t(inst_.abid) << RJ_ARITH_MFMA_ABID_SHIFT)'
         )
         L.append('      | (uint64_t(inst_.blgp) << RJ_ARITH_MFMA_BLGP_SHIFT);')
-        L.append(
-            '  const uint64_t a_lanes = inst_.cbsz == 0 ? ~uint64_t{0} : amdgpu::mfma_permuted_lane_mask([&](uint32_t lane) {'
-        )
-        if arch == 'cdna4' and input_type == 'F32':
+        if arch == 'cdna3' and input_type != 'F32' and B == 1:
+            L.append('  const uint64_t a_lanes = ~uint64_t{0};')
+            L.append('  const uint64_t b_lanes = ~uint64_t{0};')
+        elif arch == 'cdna3' and input_type != 'F32':
             L.append(
-                f'    return (inst_.cbsz <= 4 && (1u << inst_.cbsz) > {64 // M}u) ? (lane % 16u) : amdgpu::permute_a_lane(lane, inst_.cbsz, inst_.abid, {M}); }});'
+                '  const uint64_t a_lanes = inst_.cbsz == 0 ? ~uint64_t{0} : amdgpu::mfma_permuted_lane_mask([&](uint32_t lane) {'
             )
+            L.append(
+                f'    return rj_arith_gfx942_batched_mfma_a_lane(lane, inst_.cbsz, inst_.abid, {M}); }});'
+            )
+            L.append(
+                '  const uint64_t b_lanes = inst_.blgp == 0 ? ~uint64_t{0} : amdgpu::mfma_permuted_lane_mask([&](uint32_t lane) {'
+            )
+            L.append('    return amdgpu::permute_b_lane(lane, inst_.blgp); });')
         else:
-            a_block = f', {M}' if arch == 'cdna2' else ''
             L.append(
-                f'    return amdgpu::permute_a_lane(lane, inst_.cbsz, inst_.abid{a_block}); }});'
+                '  const uint64_t a_lanes = inst_.cbsz == 0 ? ~uint64_t{0} : amdgpu::mfma_permuted_lane_mask([&](uint32_t lane) {'
             )
-        L.append(
-            '  const uint64_t b_lanes = inst_.blgp == 0 ? ~uint64_t{0} : amdgpu::mfma_permuted_lane_mask([&](uint32_t lane) {'
-        )
-        L.append('    return amdgpu::permute_b_lane(lane, inst_.blgp); });')
+            if arch == 'cdna4' and input_type == 'F32':
+                L.append(
+                    f'    return (inst_.cbsz <= 4 && (1u << inst_.cbsz) > {64 // M}u) ? (lane % 16u) : amdgpu::permute_a_lane(lane, inst_.cbsz, inst_.abid, {M}); }});'
+                )
+            else:
+                a_block = f', {M}' if arch == 'cdna2' else ''
+                L.append(
+                    f'    return amdgpu::permute_a_lane(lane, inst_.cbsz, inst_.abid{a_block}); }});'
+                )
+            L.append(
+                '  const uint64_t b_lanes = inst_.blgp == 0 ? ~uint64_t{0} : amdgpu::mfma_permuted_lane_mask([&](uint32_t lane) {'
+            )
+            L.append('    return amdgpu::permute_b_lane(lane, inst_.blgp); });')
         L.append(
             f'  amdgpu::arith::exec_dense_fp_matrix<{M * K * B * in_bits // 2048}, {M * N * B // 64}, 64>('
         )

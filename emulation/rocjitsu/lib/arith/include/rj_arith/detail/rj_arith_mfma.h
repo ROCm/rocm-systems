@@ -63,6 +63,24 @@ constexpr uint64_t RJ_ARITH_MFMA_CBSZ_MASK = 7ULL;
 constexpr uint64_t RJ_ARITH_MFMA_ABID_SHIFT = 3ULL;
 constexpr uint64_t RJ_ARITH_MFMA_BLGP_SHIFT = 7ULL;
 
+// MI300X-calibrated A-lane selection for batched gfx942 F16 and BF16 MFMA
+// (matrix_rows in {4, 16, 32}): CBSZ 1..4 selects one matrix_rows-lane block within each
+// adjacent (matrix_rows << CBSZ)-lane group (matching CDNA3 §13.3.6.1), clamping to
+// lane % 16 when (matrix_rows << CBSZ) > 64; CBSZ 0 and reserved 5..7 retain identity.
+// Batched gfx942 F32 and I8 MFMA still use the full-wave A broadcast mapping.
+static inline uint32_t rj_arith_gfx942_batched_mfma_a_lane(uint32_t lane, uint32_t cbsz,
+                                                           uint32_t abid, uint32_t matrix_rows) {
+  if (cbsz == 0 || cbsz > 4) {
+    return lane;
+  }
+  const uint32_t blocks = 1u << cbsz;
+  if (matrix_rows > 64u / blocks) {
+    return lane % 16u;
+  }
+  const uint32_t group = matrix_rows * blocks;
+  return (lane / group) * group + (abid & (blocks - 1u)) * matrix_rows + (lane % matrix_rows);
+}
+
 // gfx908/gfx90a signed-byte MFMA: A/B use M*K*batch/256 VGPRs each,
 // C/D use M*M*batch/64. CBSZ/ABID/BLGP controls follow the encoded fields above.
 // gfx908 broadcasts across Wave64; gfx90a selects adjacent M-lane block groups.
@@ -345,16 +363,21 @@ int rj_arith_v_mfma_i32_32x32x32_i8_w64(uint64_t flags, uint64_t controls, uint3
 // Compute D = A*B+C with FP32 accumulation on all 64 lanes, ignoring EXEC.
 // Shapes with a batch suffix compute that many independent matrices. A and B use
 // M*K*batch/128 VGPRs each, C and D use M*M*batch/64; each pointer addresses 64 words.
-// CBSZ 0..4 broadcasts A blocks; reserved 5..7 retain identity, and ABID wraps
-// within the chosen block count. BLGP 0..7 selects the legacy B lane permutation.
+// On single-batch gfx942 F16, BF16, XF32, and FNUZ FP8/BF8 forms, hardware ignores
+// CBSZ, ABID, and BLGP. On batched gfx942 F16 and BF16 forms, CBSZ 1..4 selects one
+// M-lane block within each adjacent (M << CBSZ)-lane group (clamping to lane % 16 when
+// (M << CBSZ) > 64), reserved CBSZ 5..7 retain identity, ABID wraps within 2^CBSZ, and
+// BLGP 0..7 selects the B lane permutation. Other entry points (including single- and
+// multi-batch F32 forms, gfx908, and gfx950) retain the full-wave A broadcast and
+// BLGP 0..7 B permutation; gfx90a selects adjacent M-lane A groups without clamping.
 // For gfx950 BF16 instructions, set RJ_ARITH_FP16_OVFL to saturate finite FP32
 // overflow. Infinities from source operands are preserved.
 // gfx942 approximate arithmetic ignores FP16_OVFL, preserving its legacy policy.
 // Compatibility and Loose retain approximate arithmetic. On gfx942, the five
-// original FP16/BF16 shapes and both XF32 shapes with zero CBSZ/ABID/BLGP
-// support exact modes for both FP16_OVFL=0 and FP16_OVFL=1 (which flushes NaN
-// to +0.0 and clamps +-Inf to +-MAX_FLOAT after each internal K-step);
-// exact-allow-Loose falls back when source controls are non-zero.
+// original FP16/BF16 shapes and both XF32 shapes with CBSZ <= 4, ABID < 2^CBSZ,
+// and BLGP 0..7 support exact modes for both FP16_OVFL=0 and FP16_OVFL=1 (which
+// flushes NaN to +0.0 and clamps +-Inf to +-MAX_FLOAT after each internal K-step);
+// exact-allow-Loose falls back to Loose when CBSZ > 4 or ABID >= 2^CBSZ.
 // The wider gfx950-only forms and the _gfx950 variants remain approximate;
 // strict requests return UNSUPPORTED_SEMANTICS. All inputs are consumed before D is stored
 // in register order. Aliasing is supported; errors leave D unchanged.
