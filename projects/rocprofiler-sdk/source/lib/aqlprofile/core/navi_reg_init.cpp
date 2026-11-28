@@ -94,6 +94,8 @@ navi_ip_offset_table_discovery_sysfs(uint32_t domain, uint32_t bdf)
     {
         LogErrors("Error in IP discovery for domain=" + std::to_string(domain) +
                   " bdf=" + std::to_string(bdf) + ": \n" + e.what());
+        // rethrow if custom path is specified to prevent silent fallback to sysfs
+        if(use_custom_ip_discovery_path()) throw;
         return nullptr;
     }
 
