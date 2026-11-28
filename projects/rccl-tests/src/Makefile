@@ -60,25 +60,35 @@ endif
 
 # Better define GPU_TARGETS in your environment to the minimal set
 # of archs to reduce compile time.
-# Currently, supports gfx906,gfx908,gfx90a,gfx942,gfx950,gfx1030,gfx1100,gfx1101,gfx1102,gfx1151,gfx1200,gfx1201,gfx1250
+# Currently, supports gfx906,gfx908,gfx90a,gfx942,gfx950,gfx1030,gfx1100,gfx1101,gfx1102,gfx1151,gfx1170,gfx1171,gfx1200,gfx1201,gfx1250
+
+# Expands to $(1) if $(HIPCC) can offload to that arch, else to nothing.
+offload_arch_if_supported = $(shell echo | $(HIPCC) -x hip --offload-arch=$(1) -nogpulib -nogpuinc --cuda-device-only -E - -o /dev/null >/dev/null 2>&1 && echo $(1))
+
 ifndef GPU_TARGETS
-GPU_TARGETS = gfx906 gfx908 gfx90a
+DEFAULT_GPU_TARGETS = gfx906 gfx908 gfx90a
   ifeq ($(shell test "0$(HIP_MAJOR)" -ge 7; echo $$?),0)
-    GPU_TARGETS += gfx942 gfx950
+    DEFAULT_GPU_TARGETS += gfx942 gfx950
     # gfx1250 - HIP compatibility is not yet fixed, currently gated by HIP version >= 7.2.0
     # as ROCm 7.12.0 is based on HIP 7.2.0
     ifeq ($(shell test "0$(HIP_MINOR)" -ge 2; echo $$?),0)
-      GPU_TARGETS += gfx1250
+      DEFAULT_GPU_TARGETS += gfx1250
     endif
   else ifeq ($(shell test "0$(HIP_MAJOR)" -eq 6; echo $$?),0)
     # Include gfx942 support if we're using ROCm 6.0 or above
-    GPU_TARGETS += gfx942
+    DEFAULT_GPU_TARGETS += gfx942
     ifeq ($(shell test "0$(HIP_MINOR)" -ge 5; echo $$?),0)
     # Include gfx950 support if we're using ROCm 6.5 or above
-    GPU_TARGETS += gfx950
+    DEFAULT_GPU_TARGETS += gfx950
     endif
   endif
-GPU_TARGETS += gfx1030 gfx1100 gfx1101 gfx1102 gfx1151 gfx1200 gfx1201
+DEFAULT_GPU_TARGETS += gfx1030 gfx1100 gfx1101 gfx1102 gfx1151 gfx1170 gfx1171 gfx1200 gfx1201
+# Like rocm_check_target_ids in CMakeLists.txt, keep only the targets $(HIPCC) can offload to.
+# If it accepts none (e.g. a wrapper that rejects the probe flags), keep the whole list.
+GPU_TARGETS := $(strip $(foreach target,$(DEFAULT_GPU_TARGETS),$(call offload_arch_if_supported,$(target))))
+  ifeq ($(GPU_TARGETS),)
+    GPU_TARGETS := $(DEFAULT_GPU_TARGETS)
+  endif
 endif
 
 GPU_TARGETS_FLAGS = $(foreach target,$(GPU_TARGETS),"--offload-arch=$(target)")

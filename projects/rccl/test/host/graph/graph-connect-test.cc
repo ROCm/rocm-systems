@@ -1172,8 +1172,13 @@ TEST_F(GraphConnectPostsetMicrotest, Postset_CrossNicRingsSwapChannelPairsOnOddN
 }
 
 TEST_F(GraphConnectPostsetMicrotest, Postset_Gfx1151AndInterGraphGenUseLoadBalancedRings) {
-  for (bool interGen : {false, true}) {
-    Use(1, 3, 0, interGen ? "gfx942" : "gfx1151");
+  struct Case {
+    const char* gcn;
+    bool interGen;
+  };
+  for (Case k : {Case{"gfx1151", false}, Case{"gfx1170", false}, Case{"gfx1171", false}, Case{"gfx942", true}}) {
+    const bool interGen = k.interGen;
+    Use(1, 3, 0, k.gcn);
     comm_->nChannels = 2;
     if (interGen) g_params["RCCL_INTER_GRAPH_GEN"] = 1;
     g_generateRings = [](int n, uint32_t nChannels, int* order) {
@@ -1186,7 +1191,7 @@ TEST_F(GraphConnectPostsetMicrotest, Postset_Gfx1151AndInterGraphGenUseLoadBalan
 
     ASSERT_EQ(ncclSuccess, Postset(all, 2, rings_));
 
-    EXPECT_EQ(std::vector<int>({0, 2, 1}), Ring(rings_, 1)) << interGen;
+    EXPECT_EQ(std::vector<int>({0, 2, 1}), Ring(rings_, 1)) << k.gcn;
     g_params.clear();
   }
 }

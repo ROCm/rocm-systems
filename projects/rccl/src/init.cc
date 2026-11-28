@@ -270,7 +270,7 @@ RCCL_PARAM(TdmLl128Enable, "TDM_LL128_ENABLE", 0);
 #endif
 
 /**
- * Used on gfx1151 (StrixHalo) to set the nChannels for ncclTopoPreset before determining number of nodes.
+ * Used on gfx1151 (StrixHalo) and gfx117x to set the nChannels for ncclTopoPreset before determining number of nodes.
  */
 RCCL_PARAM(InitChannels, "INIT_CHANNELS", -1);
 
@@ -2293,7 +2293,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   NCCLCHECKGOTO(ncclTopoPrintGraph(comm->topo, ringGraph), ret, fail);
 
   {
-    const bool isGfx1151 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1151");
+    const bool isGfx_115x_117x = rcclIsGfx1151Gfx117x(comm->topo->nodes[GPU].nodes[0].gpu.gcn);
     const bool isGfx_110x_120x = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx110") ||
                                  IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx120");
     const bool p2pDisabled = ncclParamP2pDisable();
@@ -2303,9 +2303,9 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
      */
     const bool intraGraphGen = rcclParamIntraGraphGen() || (p2pDisabled && isGfx_110x_120x);
 
-    if (isGfx1151 || intraGraphGen) {
+    if (isGfx_115x_117x || intraGraphGen) {
       /**
-       * GFX1151 (1 GPU/node): Uses Walecki + Greedy construction to generate 'nChannels'
+       * GFX1151 and GFX117x (1 GPU/node): Uses Walecki + Greedy construction to generate 'nChannels'
        * edge-balanced Hamiltonian rings. For N nodes, N/2 perfect rings are guaranteed;
        * additional channels are balanced via greedy heuristics to saturate Fat-Tree/Clos fabrics.
        * Note: nNodes is only known AFTER bootstrapAllGather (Postset), but nChannels
@@ -2320,7 +2320,8 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
        */
       int initChannels = (int)rcclParamInitChannels();
       int defaultNumChannels =
-        isGfx1151 ? 6 /* 2 X (comm->nNodes - 1) */ : ((isGfx_110x_120x && p2pDisabled) ? 56 : ringGraph->nChannels);
+        isGfx_115x_117x ? 6 /* 2 X (comm->nNodes - 1) */
+                        : ((isGfx_110x_120x && p2pDisabled) ? 56 : ringGraph->nChannels);
       int numChannels = initChannels > 0 ? initChannels : defaultNumChannels;
       ringGraph->minChannels = 1;
       ringGraph->maxChannels = std::min(MAXCHANNELS / 2, numChannels);
