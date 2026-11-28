@@ -1408,6 +1408,13 @@ endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/tuning/host_tests.cmake")
 
+# profiler-example-ce-test.cc compiles plugins/profiler/example/profiler_plugin_ce.cc unhipified: -iquote
+# resolves the plugin's "profiler.h" and "err.h" to its own nccl/ headers ahead of RCCL's, and
+# fakes/profiler_example_cuda/ supplies the cuda_runtime.h it includes.
+target_sources(rccl-UnitTestsMicroProfiler PRIVATE profiler-example-ce-test.cc)
+set_source_files_properties(profiler-example-ce-test.cc PROPERTIES COMPILE_OPTIONS
+  "-iquote;${CMAKE_CURRENT_SOURCE_DIR}/../../plugins/profiler/example/nccl;-I${CMAKE_CURRENT_SOURCE_DIR}/fakes/profiler_example_cuda")
+
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroProxy -- src/proxy.cc
 # ---------------------------------------------------------------------------
