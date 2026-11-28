@@ -88,7 +88,8 @@ struct InterleavedUVToPlanarUVBatchParams {
     uint32_t dst_height;
     uint8_t *dst_image1;
     uint8_t *dst_image2;
-    uint32_t dst_image_stride_in_bytes;
+    uint32_t dst_image1_stride_in_bytes;
+    uint32_t dst_image2_stride_in_bytes;
     const uint8_t *src_image;
     uint32_t src_image_stride_in_bytes;
 };
@@ -113,7 +114,8 @@ struct PackedYUYVToPlanarYUVBatchParams {
     uint8_t *destination_u;
     uint8_t *destination_v;
     uint32_t dst_luma_stride_in_bytes;
-    uint32_t dst_chroma_stride_in_bytes;
+    uint32_t dst_u_stride_in_bytes;
+    uint32_t dst_v_stride_in_bytes;
     const uint8_t *src_image;
     uint32_t src_image_stride_in_bytes;
     uint32_t dst_width_in_8px_blocks; // Destination width in 8-pixel-wide blocks; each thread writes 8 luma samples of one row.
