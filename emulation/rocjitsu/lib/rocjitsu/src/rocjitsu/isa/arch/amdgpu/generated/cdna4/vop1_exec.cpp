@@ -1017,14 +1017,15 @@ void VFractF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
-  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
-      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL ||
+      (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS &&
+       (inst_.src0 == amdgpu::SRC_DPP || (inst_.src0 == amdgpu::SRC_SDWA)))) {
     wf.report_instruction_execution_error(
         amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
   amdgpu::arith::execute_cdna_integral_unary<false, true>(
-      *this, wf, rj_arith_v_fract_f32_w32_gfx942, rj_arith_v_fract_f32_w64_gfx942,
+      *this, wf, rj_arith_v_fract_f32_w32_gfx950, rj_arith_v_fract_f32_w64_gfx950,
       wf.cu().arithmetic_flags(), 0, vdst, src0);
 }
 
@@ -1054,14 +1055,15 @@ RJ_NOINLINE void VFractF32Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
     return;
   }
   const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
-  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
-      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL ||
+      (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS &&
+       (inst_.src0 == amdgpu::SRC_DPP || (inst_.src0 == amdgpu::SRC_SDWA)))) {
     wf.report_instruction_execution_error(
         amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
   amdgpu::arith::execute_cdna_integral_unary<false, true>(
-      *this, wf, rj_arith_v_fract_f32_w32_gfx942, rj_arith_v_fract_f32_w64_gfx942,
+      *this, wf, rj_arith_v_fract_f32_w32_gfx950, rj_arith_v_fract_f32_w64_gfx950,
       wf.cu().arithmetic_flags(), 0, vdst, src0);
   dpp_write_mask_scope_.restore();
 }
@@ -1075,14 +1077,15 @@ void VTruncF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
-  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
-      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL ||
+      (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS &&
+       (inst_.src0 == amdgpu::SRC_DPP || (inst_.src0 == amdgpu::SRC_SDWA)))) {
     wf.report_instruction_execution_error(
         amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
   amdgpu::arith::execute_cdna_integral_unary<false, true>(
-      *this, wf, rj_arith_v_trunc_f32_w32_gfx942, rj_arith_v_trunc_f32_w64_gfx942,
+      *this, wf, rj_arith_v_trunc_f32_w32_gfx950, rj_arith_v_trunc_f32_w64_gfx950,
       wf.cu().arithmetic_flags(), 0, vdst, src0);
 }
 
@@ -1112,14 +1115,15 @@ RJ_NOINLINE void VTruncF32Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
     return;
   }
   const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
-  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
-      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL ||
+      (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS &&
+       (inst_.src0 == amdgpu::SRC_DPP || (inst_.src0 == amdgpu::SRC_SDWA)))) {
     wf.report_instruction_execution_error(
         amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
   amdgpu::arith::execute_cdna_integral_unary<false, true>(
-      *this, wf, rj_arith_v_trunc_f32_w32_gfx942, rj_arith_v_trunc_f32_w64_gfx942,
+      *this, wf, rj_arith_v_trunc_f32_w32_gfx950, rj_arith_v_trunc_f32_w64_gfx950,
       wf.cu().arithmetic_flags(), 0, vdst, src0);
   dpp_write_mask_scope_.restore();
 }
@@ -1133,14 +1137,15 @@ void VCeilF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
-  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
-      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL ||
+      (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS &&
+       (inst_.src0 == amdgpu::SRC_DPP || (inst_.src0 == amdgpu::SRC_SDWA)))) {
     wf.report_instruction_execution_error(
         amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
   amdgpu::arith::execute_cdna_integral_unary<false, true>(
-      *this, wf, rj_arith_v_ceil_f32_w32_gfx942, rj_arith_v_ceil_f32_w64_gfx942,
+      *this, wf, rj_arith_v_ceil_f32_w32_gfx950, rj_arith_v_ceil_f32_w64_gfx950,
       wf.cu().arithmetic_flags(), 0, vdst, src0);
 }
 
@@ -1170,14 +1175,15 @@ RJ_NOINLINE void VCeilF32Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
     return;
   }
   const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
-  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
-      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL ||
+      (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS &&
+       (inst_.src0 == amdgpu::SRC_DPP || (inst_.src0 == amdgpu::SRC_SDWA)))) {
     wf.report_instruction_execution_error(
         amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
   amdgpu::arith::execute_cdna_integral_unary<false, true>(
-      *this, wf, rj_arith_v_ceil_f32_w32_gfx942, rj_arith_v_ceil_f32_w64_gfx942,
+      *this, wf, rj_arith_v_ceil_f32_w32_gfx950, rj_arith_v_ceil_f32_w64_gfx950,
       wf.cu().arithmetic_flags(), 0, vdst, src0);
   dpp_write_mask_scope_.restore();
 }
@@ -1191,14 +1197,15 @@ void VRndneF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
-  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
-      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL ||
+      (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS &&
+       (inst_.src0 == amdgpu::SRC_DPP || (inst_.src0 == amdgpu::SRC_SDWA)))) {
     wf.report_instruction_execution_error(
         amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
   amdgpu::arith::execute_cdna_integral_unary<false, true>(
-      *this, wf, rj_arith_v_rndne_f32_w32_gfx942, rj_arith_v_rndne_f32_w64_gfx942,
+      *this, wf, rj_arith_v_rndne_f32_w32_gfx950, rj_arith_v_rndne_f32_w64_gfx950,
       wf.cu().arithmetic_flags(), 0, vdst, src0);
 }
 
@@ -1228,14 +1235,15 @@ RJ_NOINLINE void VRndneF32Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
     return;
   }
   const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
-  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
-      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL ||
+      (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS &&
+       (inst_.src0 == amdgpu::SRC_DPP || (inst_.src0 == amdgpu::SRC_SDWA)))) {
     wf.report_instruction_execution_error(
         amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
   amdgpu::arith::execute_cdna_integral_unary<false, true>(
-      *this, wf, rj_arith_v_rndne_f32_w32_gfx942, rj_arith_v_rndne_f32_w64_gfx942,
+      *this, wf, rj_arith_v_rndne_f32_w32_gfx950, rj_arith_v_rndne_f32_w64_gfx950,
       wf.cu().arithmetic_flags(), 0, vdst, src0);
   dpp_write_mask_scope_.restore();
 }
@@ -1249,14 +1257,15 @@ void VFloorF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
-  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
-      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL ||
+      (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS &&
+       (inst_.src0 == amdgpu::SRC_DPP || (inst_.src0 == amdgpu::SRC_SDWA)))) {
     wf.report_instruction_execution_error(
         amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
   amdgpu::arith::execute_cdna_integral_unary<false, true>(
-      *this, wf, rj_arith_v_floor_f32_w32_gfx942, rj_arith_v_floor_f32_w64_gfx942,
+      *this, wf, rj_arith_v_floor_f32_w32_gfx950, rj_arith_v_floor_f32_w64_gfx950,
       wf.cu().arithmetic_flags(), 0, vdst, src0);
 }
 
@@ -1286,14 +1295,15 @@ RJ_NOINLINE void VFloorF32Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
     return;
   }
   const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
-  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
-      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL ||
+      (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS &&
+       (inst_.src0 == amdgpu::SRC_DPP || (inst_.src0 == amdgpu::SRC_SDWA)))) {
     wf.report_instruction_execution_error(
         amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
   amdgpu::arith::execute_cdna_integral_unary<false, true>(
-      *this, wf, rj_arith_v_floor_f32_w32_gfx942, rj_arith_v_floor_f32_w64_gfx942,
+      *this, wf, rj_arith_v_floor_f32_w32_gfx950, rj_arith_v_floor_f32_w64_gfx950,
       wf.cu().arithmetic_flags(), 0, vdst, src0);
   dpp_write_mask_scope_.restore();
 }
@@ -2030,8 +2040,9 @@ void VFrexpExpI32F32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
-  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
-      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL ||
+      (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS &&
+       (inst_.src0 == amdgpu::SRC_DPP || (inst_.src0 == amdgpu::SRC_SDWA)))) {
     wf.report_instruction_execution_error(
         amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
@@ -2073,8 +2084,9 @@ RJ_NOINLINE void VFrexpExpI32F32Vop1::execute_modifier_impl(amdgpu::Wavefront &w
     return;
   }
   const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
-  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
-      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL ||
+      (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS &&
+       (inst_.src0 == amdgpu::SRC_DPP || (inst_.src0 == amdgpu::SRC_SDWA)))) {
     wf.report_instruction_execution_error(
         amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
@@ -2100,14 +2112,15 @@ void VFrexpMantF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
-  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
-      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL ||
+      (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS &&
+       (inst_.src0 == amdgpu::SRC_DPP || (inst_.src0 == amdgpu::SRC_SDWA)))) {
     wf.report_instruction_execution_error(
         amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
   amdgpu::arith::execute_cdna_integral_unary<false, true>(
-      *this, wf, rj_arith_v_frexp_mant_f32_w32_gfx942, rj_arith_v_frexp_mant_f32_w64_gfx942,
+      *this, wf, rj_arith_v_frexp_mant_f32_w32_gfx950, rj_arith_v_frexp_mant_f32_w64_gfx950,
       wf.cu().arithmetic_flags(), 0, vdst, src0);
 }
 
@@ -2137,14 +2150,15 @@ RJ_NOINLINE void VFrexpMantF32Vop1::execute_modifier_impl(amdgpu::Wavefront &wf)
     return;
   }
   const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
-  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
-      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL ||
+      (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS &&
+       (inst_.src0 == amdgpu::SRC_DPP || (inst_.src0 == amdgpu::SRC_SDWA)))) {
     wf.report_instruction_execution_error(
         amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
   amdgpu::arith::execute_cdna_integral_unary<false, true>(
-      *this, wf, rj_arith_v_frexp_mant_f32_w32_gfx942, rj_arith_v_frexp_mant_f32_w64_gfx942,
+      *this, wf, rj_arith_v_frexp_mant_f32_w32_gfx950, rj_arith_v_frexp_mant_f32_w64_gfx950,
       wf.cu().arithmetic_flags(), 0, vdst, src0);
   dpp_write_mask_scope_.restore();
 }
@@ -2864,14 +2878,15 @@ void VFrexpMantF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
-  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
-      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL ||
+      (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS &&
+       (inst_.src0 == amdgpu::SRC_DPP || (inst_.src0 == amdgpu::SRC_SDWA)))) {
     wf.report_instruction_execution_error(
         amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
   amdgpu::arith::execute_cdna_integral_unary<true, true>(
-      *this, wf, rj_arith_v_frexp_mant_f16_w32_gfx942, rj_arith_v_frexp_mant_f16_w64_gfx942,
+      *this, wf, rj_arith_v_frexp_mant_f16_w32_gfx950, rj_arith_v_frexp_mant_f16_w64_gfx950,
       wf.cu().arithmetic_flags(), 0, vdst, src0);
 }
 
@@ -2901,14 +2916,15 @@ RJ_NOINLINE void VFrexpMantF16Vop1::execute_modifier_impl(amdgpu::Wavefront &wf)
     return;
   }
   const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
-  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
-      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL ||
+      (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS &&
+       (inst_.src0 == amdgpu::SRC_DPP || (inst_.src0 == amdgpu::SRC_SDWA)))) {
     wf.report_instruction_execution_error(
         amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
   amdgpu::arith::execute_cdna_integral_unary<true, true>(
-      *this, wf, rj_arith_v_frexp_mant_f16_w32_gfx942, rj_arith_v_frexp_mant_f16_w64_gfx942,
+      *this, wf, rj_arith_v_frexp_mant_f16_w32_gfx950, rj_arith_v_frexp_mant_f16_w64_gfx950,
       wf.cu().arithmetic_flags(), 0, vdst, src0);
   dpp_write_mask_scope_.restore();
 }
@@ -2922,8 +2938,9 @@ void VFrexpExpI16F16Vop1::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
-  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
-      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL ||
+      (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS &&
+       (inst_.src0 == amdgpu::SRC_DPP || (inst_.src0 == amdgpu::SRC_SDWA)))) {
     wf.report_instruction_execution_error(
         amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
@@ -2966,8 +2983,9 @@ RJ_NOINLINE void VFrexpExpI16F16Vop1::execute_modifier_impl(amdgpu::Wavefront &w
     return;
   }
   const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
-  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
-      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL ||
+      (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS &&
+       (inst_.src0 == amdgpu::SRC_DPP || (inst_.src0 == amdgpu::SRC_SDWA)))) {
     wf.report_instruction_execution_error(
         amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
@@ -2994,14 +3012,15 @@ void VFloorF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
-  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
-      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL ||
+      (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS &&
+       (inst_.src0 == amdgpu::SRC_DPP || (inst_.src0 == amdgpu::SRC_SDWA)))) {
     wf.report_instruction_execution_error(
         amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
-  amdgpu::arith::execute_cdna_integral_unary<true, true>(*this, wf, rj_arith_v_floor_f16_w32_gfx942,
-                                                         rj_arith_v_floor_f16_w64_gfx942,
+  amdgpu::arith::execute_cdna_integral_unary<true, true>(*this, wf, rj_arith_v_floor_f16_w32_gfx950,
+                                                         rj_arith_v_floor_f16_w64_gfx950,
                                                          wf.cu().arithmetic_flags(), 0, vdst, src0);
 }
 
@@ -3031,14 +3050,15 @@ RJ_NOINLINE void VFloorF16Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
     return;
   }
   const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
-  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
-      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL ||
+      (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS &&
+       (inst_.src0 == amdgpu::SRC_DPP || (inst_.src0 == amdgpu::SRC_SDWA)))) {
     wf.report_instruction_execution_error(
         amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
-  amdgpu::arith::execute_cdna_integral_unary<true, true>(*this, wf, rj_arith_v_floor_f16_w32_gfx942,
-                                                         rj_arith_v_floor_f16_w64_gfx942,
+  amdgpu::arith::execute_cdna_integral_unary<true, true>(*this, wf, rj_arith_v_floor_f16_w32_gfx950,
+                                                         rj_arith_v_floor_f16_w64_gfx950,
                                                          wf.cu().arithmetic_flags(), 0, vdst, src0);
   dpp_write_mask_scope_.restore();
 }
@@ -3052,14 +3072,15 @@ void VCeilF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
-  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
-      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL ||
+      (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS &&
+       (inst_.src0 == amdgpu::SRC_DPP || (inst_.src0 == amdgpu::SRC_SDWA)))) {
     wf.report_instruction_execution_error(
         amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
-  amdgpu::arith::execute_cdna_integral_unary<true, true>(*this, wf, rj_arith_v_ceil_f16_w32_gfx942,
-                                                         rj_arith_v_ceil_f16_w64_gfx942,
+  amdgpu::arith::execute_cdna_integral_unary<true, true>(*this, wf, rj_arith_v_ceil_f16_w32_gfx950,
+                                                         rj_arith_v_ceil_f16_w64_gfx950,
                                                          wf.cu().arithmetic_flags(), 0, vdst, src0);
 }
 
@@ -3089,14 +3110,15 @@ RJ_NOINLINE void VCeilF16Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
     return;
   }
   const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
-  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
-      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL ||
+      (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS &&
+       (inst_.src0 == amdgpu::SRC_DPP || (inst_.src0 == amdgpu::SRC_SDWA)))) {
     wf.report_instruction_execution_error(
         amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
-  amdgpu::arith::execute_cdna_integral_unary<true, true>(*this, wf, rj_arith_v_ceil_f16_w32_gfx942,
-                                                         rj_arith_v_ceil_f16_w64_gfx942,
+  amdgpu::arith::execute_cdna_integral_unary<true, true>(*this, wf, rj_arith_v_ceil_f16_w32_gfx950,
+                                                         rj_arith_v_ceil_f16_w64_gfx950,
                                                          wf.cu().arithmetic_flags(), 0, vdst, src0);
   dpp_write_mask_scope_.restore();
 }
@@ -3110,14 +3132,15 @@ void VTruncF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
-  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
-      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL ||
+      (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS &&
+       (inst_.src0 == amdgpu::SRC_DPP || (inst_.src0 == amdgpu::SRC_SDWA)))) {
     wf.report_instruction_execution_error(
         amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
-  amdgpu::arith::execute_cdna_integral_unary<true, true>(*this, wf, rj_arith_v_trunc_f16_w32_gfx942,
-                                                         rj_arith_v_trunc_f16_w64_gfx942,
+  amdgpu::arith::execute_cdna_integral_unary<true, true>(*this, wf, rj_arith_v_trunc_f16_w32_gfx950,
+                                                         rj_arith_v_trunc_f16_w64_gfx950,
                                                          wf.cu().arithmetic_flags(), 0, vdst, src0);
 }
 
@@ -3147,14 +3170,15 @@ RJ_NOINLINE void VTruncF16Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
     return;
   }
   const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
-  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
-      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL ||
+      (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS &&
+       (inst_.src0 == amdgpu::SRC_DPP || (inst_.src0 == amdgpu::SRC_SDWA)))) {
     wf.report_instruction_execution_error(
         amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
-  amdgpu::arith::execute_cdna_integral_unary<true, true>(*this, wf, rj_arith_v_trunc_f16_w32_gfx942,
-                                                         rj_arith_v_trunc_f16_w64_gfx942,
+  amdgpu::arith::execute_cdna_integral_unary<true, true>(*this, wf, rj_arith_v_trunc_f16_w32_gfx950,
+                                                         rj_arith_v_trunc_f16_w64_gfx950,
                                                          wf.cu().arithmetic_flags(), 0, vdst, src0);
   dpp_write_mask_scope_.restore();
 }
@@ -3168,14 +3192,15 @@ void VRndneF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
-  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
-      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL ||
+      (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS &&
+       (inst_.src0 == amdgpu::SRC_DPP || (inst_.src0 == amdgpu::SRC_SDWA)))) {
     wf.report_instruction_execution_error(
         amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
-  amdgpu::arith::execute_cdna_integral_unary<true, true>(*this, wf, rj_arith_v_rndne_f16_w32_gfx942,
-                                                         rj_arith_v_rndne_f16_w64_gfx942,
+  amdgpu::arith::execute_cdna_integral_unary<true, true>(*this, wf, rj_arith_v_rndne_f16_w32_gfx950,
+                                                         rj_arith_v_rndne_f16_w64_gfx950,
                                                          wf.cu().arithmetic_flags(), 0, vdst, src0);
 }
 
@@ -3205,14 +3230,15 @@ RJ_NOINLINE void VRndneF16Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
     return;
   }
   const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
-  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
-      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL ||
+      (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS &&
+       (inst_.src0 == amdgpu::SRC_DPP || (inst_.src0 == amdgpu::SRC_SDWA)))) {
     wf.report_instruction_execution_error(
         amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
-  amdgpu::arith::execute_cdna_integral_unary<true, true>(*this, wf, rj_arith_v_rndne_f16_w32_gfx942,
-                                                         rj_arith_v_rndne_f16_w64_gfx942,
+  amdgpu::arith::execute_cdna_integral_unary<true, true>(*this, wf, rj_arith_v_rndne_f16_w32_gfx950,
+                                                         rj_arith_v_rndne_f16_w64_gfx950,
                                                          wf.cu().arithmetic_flags(), 0, vdst, src0);
   dpp_write_mask_scope_.restore();
 }
@@ -3226,14 +3252,15 @@ void VFractF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
-  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
-      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL ||
+      (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS &&
+       (inst_.src0 == amdgpu::SRC_DPP || (inst_.src0 == amdgpu::SRC_SDWA)))) {
     wf.report_instruction_execution_error(
         amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
-  amdgpu::arith::execute_cdna_integral_unary<true, true>(*this, wf, rj_arith_v_fract_f16_w32_gfx942,
-                                                         rj_arith_v_fract_f16_w64_gfx942,
+  amdgpu::arith::execute_cdna_integral_unary<true, true>(*this, wf, rj_arith_v_fract_f16_w32_gfx950,
+                                                         rj_arith_v_fract_f16_w64_gfx950,
                                                          wf.cu().arithmetic_flags(), 0, vdst, src0);
 }
 
@@ -3263,14 +3290,15 @@ RJ_NOINLINE void VFractF16Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
     return;
   }
   const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
-  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
-      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL ||
+      (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS &&
+       (inst_.src0 == amdgpu::SRC_DPP || (inst_.src0 == amdgpu::SRC_SDWA)))) {
     wf.report_instruction_execution_error(
         amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
-  amdgpu::arith::execute_cdna_integral_unary<true, true>(*this, wf, rj_arith_v_fract_f16_w32_gfx942,
-                                                         rj_arith_v_fract_f16_w64_gfx942,
+  amdgpu::arith::execute_cdna_integral_unary<true, true>(*this, wf, rj_arith_v_fract_f16_w32_gfx950,
+                                                         rj_arith_v_fract_f16_w64_gfx950,
                                                          wf.cu().arithmetic_flags(), 0, vdst, src0);
   dpp_write_mask_scope_.restore();
 }

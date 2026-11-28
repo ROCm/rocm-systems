@@ -27,10 +27,10 @@ def gen_packed_f32(ctx: ExecuteContext) -> str | None:
             f'((inst_.neg_hi & {1 << index}) ? RJ_ARITH_PK_NEG_HI_{source} : 0u)',
         ]
     old = ctx.arch_name != 'cdna5'
-    arch = 'gfx942' if old else 'gfx1250'
+    arch = 'gfx950' if ctx.arch_name == 'cdna4' else 'gfx942' if old else 'gfx1250'
     operation = ctx.inst.name.lower()
     wave32 = f'rj_arith_{operation}_w32_{arch}'
-    wave64 = f'rj_arith_{operation}_w64_gfx942' if old else 'nullptr'
+    wave64 = f'rj_arith_{operation}_w64_{arch}' if old else 'nullptr'
     helper = (
         'execute_packed_fma32' if len(ctx.src_ops) == 3 else 'execute_packed_binary32'
     )

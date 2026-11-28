@@ -100,6 +100,19 @@ int rj_arith_v_mul_legacy_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t i
                                   uint32_t *const *d, const uint32_t *const *a,
                                   const uint32_t *const *b, uint32_t *trapsts);
 
+// MI350X (gfx950) legacy multiply: calibrated against MI350X captures in Compatibility
+// and mode 2 (preserving selected input sNaNs when IEEE is clear; DPP remains
+// Loose/Compatibility-only).
+int rj_arith_v_mul_legacy_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                         uint64_t instruction_flags, uint32_t *const *d,
+                                         const uint32_t *const *a, const uint32_t *const *b,
+                                         uint32_t *trapsts);
+
+int rj_arith_v_mul_legacy_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                         uint64_t instruction_flags, uint32_t *const *d,
+                                         const uint32_t *const *a, const uint32_t *const *b,
+                                         uint32_t *trapsts);
+
 int rj_arith_v_mul_dx9_zero_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
                                             uint64_t instruction_flags, uint32_t *const *d,
                                             const uint32_t *const *a, const uint32_t *const *b,
@@ -758,6 +771,44 @@ int rj_arith_v_pk_fmac_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask,
                                       const uint32_t *const *a, const uint32_t *const *b,
                                       uint32_t *trapsts);
 int rj_arith_v_pk_fmac_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+
+// MI350X (gfx950) half MAD/MAC and packed FP16 FMA/FMAC, calibrated against MI350X captures.
+// MAD/MAC evaluate two separately rounded FP16 steps with mandatory input/output subnormal
+// flushing at both steps, IEEE-gated sNaN preservation, guest rounding, FP16_OVFL, and
+// MODE-gated OMOD/CLAMP on the final step. Supports Loose, allow-Loose, Compatibility, and
+// mode 2 (SDWA on PK_FMAC remains Loose/Compatibility-only); mode 3 returns UNSUPPORTED_FP_STATUS.
+int rj_arith_v_mad_f16_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, const uint32_t *const *c,
+                                  uint32_t *trapsts);
+int rj_arith_v_mad_f16_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, const uint32_t *const *c,
+                                  uint32_t *trapsts);
+int rj_arith_v_mad_legacy_f16_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                         uint64_t instruction_flags, uint32_t *const *d,
+                                         const uint32_t *const *a, const uint32_t *const *b,
+                                         const uint32_t *const *c, uint32_t *trapsts);
+int rj_arith_v_mad_legacy_f16_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                         uint64_t instruction_flags, uint32_t *const *d,
+                                         const uint32_t *const *a, const uint32_t *const *b,
+                                         const uint32_t *const *c, uint32_t *trapsts);
+int rj_arith_v_pk_fma_f16_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, const uint32_t *const *c,
+                                     uint32_t *trapsts);
+int rj_arith_v_pk_fma_f16_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, const uint32_t *const *c,
+                                     uint32_t *trapsts);
+int rj_arith_v_pk_fmac_f16_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_pk_fmac_f16_w64_gfx950(uint64_t flags, uint64_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *const *d,
                                       const uint32_t *const *a, const uint32_t *const *b,
                                       uint32_t *trapsts);
@@ -2125,6 +2176,29 @@ int rj_arith_v_pk_mul_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
                                       const uint32_t *const *a, const uint32_t *const *b,
                                       uint32_t *excp_flag_user);
 
+// MI350X (gfx950) packed FP32 FMA/ADD/MUL: calibrated against MI350X captures in
+// Compatibility and mode 2, honoring MODE.IEEE sNaN preservation on all three operations.
+int rj_arith_v_pk_fma_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, const uint32_t *const *c,
+                                     uint32_t *trapsts);
+int rj_arith_v_pk_fma_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, const uint32_t *const *c,
+                                     uint32_t *trapsts);
+int rj_arith_v_pk_add_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_pk_add_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_pk_mul_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_pk_mul_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint32_t *trapsts);
+
 // gfx1250 packed BF16: two halfword results per VGPR, packed source selectors,
 // NEG and CLAMP. Nearest-even arithmetic preserves denormals; FP16_OVFL saturates
 // finite-input overflow. Guest rounding/denormal controls are ignored. Supports
@@ -2831,6 +2905,47 @@ int rj_arith_v_pk_add_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_
                                      uint32_t *const *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *trapsts);
 
+// MI350X (gfx950) ordinary and packed FP16 binary arithmetic: unbounded-exponent tininess,
+// IEEE-gated sNaN preservation, and negative quiet NaN (0xfe00) on fresh invalid operations,
+// calibrated against MI350X captures in Compatibility and mode 2 (DPP and uncaptured SDWA
+// remain Loose/Compatibility-only; mode 3 returns UNSUPPORTED_FP_STATUS).
+int rj_arith_v_add_f16_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_add_f16_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_sub_f16_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_sub_f16_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_subrev_f16_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_subrev_f16_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_mul_f16_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_mul_f16_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_pk_add_f16_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_pk_add_f16_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_pk_mul_f16_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_pk_mul_f16_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint32_t *trapsts);
+
 // gfx1250 F16 ADD/SUB/SUBREV share the gfx12 numeric model; strict exact is unsupported
 // pending gfx1250 captures. Compatibility keeps the inherited hardware rules.
 int rj_arith_v_add_f16_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
@@ -2990,6 +3105,27 @@ int rj_arith_v_ldexp_f64_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t
                                     uint32_t *const *d, const uint32_t *const *a,
                                     const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts);
 int rj_arith_v_ldexp_f64_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts);
+
+// MI350X (gfx950) LDEXP: preserves sNaN inputs when IEEE is clear, calibrated against
+// MI350X captures in Compatibility and mode 2 (DPP remains Loose/Compatibility-only).
+int rj_arith_v_ldexp_f16_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts);
+int rj_arith_v_ldexp_f16_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts);
+int rj_arith_v_ldexp_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts);
+int rj_arith_v_ldexp_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts);
+int rj_arith_v_ldexp_f64_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts);
+int rj_arith_v_ldexp_f64_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                     uint32_t *const *d, const uint32_t *const *a,
                                     const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts);
 

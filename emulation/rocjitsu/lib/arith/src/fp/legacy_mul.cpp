@@ -122,20 +122,63 @@ int wave64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *d
   return RJ_ARITH_SUCCESS;
 }
 
+template <typename Mask, typename Entry>
+int run_gfx950(Entry entry, uint64_t flags, Mask exec_mask, uint64_t instruction_flags,
+               uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+               uint32_t *trapsts) {
+  const bool requested_mode2 =
+      (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS;
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  const uint64_t check_flags =
+      (flags & ~RJ_ARITH_SEMANTICS_MASK) | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS;
+  if (int error = entry(check_flags, 0, instruction_flags, nullptr, nullptr, nullptr, nullptr)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  if (requested_mode2 && (instruction_flags >> 32)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+  }
+  return entry(flags, exec_mask, instruction_flags, d, a, b, trapsts);
+}
+
 } // namespace
 
-// Multiply selected lanes with inherited gfx942/gfx950 policy; FP status remains unchanged.
+// Multiply selected lanes with inherited gfx942 policy; FP status remains unchanged.
 int rj_arith_v_mul_legacy_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a,
                                   const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts) {
   return run<true>(flags, exec_mask, instruction_flags, d, a, b);
 }
 
-// Multiply selected lanes with inherited gfx942/gfx950 policy; FP status remains unchanged.
+// Multiply selected lanes with inherited gfx942 policy; FP status remains unchanged.
 int rj_arith_v_mul_legacy_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a,
                                   const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts) {
   return wave64<true>(flags, exec_mask, instruction_flags, d, a, b);
+}
+
+// Multiply selected lanes with calibrated gfx950 DX9-zero rules; DPP and status remain unqualified.
+int rj_arith_v_mul_legacy_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                         uint64_t instruction_flags, uint32_t *const *d,
+                                         const uint32_t *const *a, const uint32_t *const *b,
+                                         uint32_t *trapsts) {
+  return run_gfx950(rj_arith_v_mul_dx9_zero_f32_w32, flags, exec_mask, instruction_flags, d, a, b,
+                    trapsts);
+}
+
+// Multiply selected lanes with calibrated gfx950 DX9-zero rules; DPP and status remain unqualified.
+int rj_arith_v_mul_legacy_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                         uint64_t instruction_flags, uint32_t *const *d,
+                                         const uint32_t *const *a, const uint32_t *const *b,
+                                         uint32_t *trapsts) {
+  return run_gfx950(rj_arith_v_mul_dx9_zero_f32_w64, flags, exec_mask, instruction_flags, d, a, b,
+                    trapsts);
 }
 
 // Multiply selected lanes with inherited gfx1250 policy; FP status remains unchanged.

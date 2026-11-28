@@ -24,6 +24,7 @@ rj_arith_add_test(rj_arith_gfx1250_binary_test fp/gfx1250_binary_test.cpp)
 rj_arith_add_test(rj_arith_inherited_math_goldens_test math/inherited_goldens_test.cpp)
 
 rj_arith_add_test(rj_arith_separately_rounded_mad_test fp/separately_rounded_mad_test.cpp)
+rj_arith_add_test(rj_arith_valu_gfx950_test fp/valu_gfx950_test.cpp)
 
 rj_arith_add_test(rj_arith_packed_f64_gfx1251_test fp/packed_f64_gfx1251_test.cpp)
 rj_arith_add_test(rj_arith_conversion_inherited_goldens_test conversion/inherited_goldens_test.cpp)

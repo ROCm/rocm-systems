@@ -644,3 +644,45 @@ int rj_arith_v_ldexp_f64_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t
   return ldexp_wave64<true, true, true>(requested_flags, exec_mask, instruction_flags, d, a, b,
                                         trapsts);
 }
+
+int rj_arith_v_ldexp_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    const uint32_t *const *b, uint32_t *trapsts) {
+  const bool requested_mode2 =
+      (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS;
+  if (int error = rj_arith_v_ldexp_f32_w32(flags, 0, instruction_flags, nullptr, nullptr, nullptr,
+                                           trapsts)) {
+    return error;
+  }
+  if (requested_mode2 && (instruction_flags >> 32)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+  }
+  return rj_arith_v_ldexp_f32_w32(flags, exec_mask, instruction_flags, d, a, b, trapsts);
+}
+
+int rj_arith_v_ldexp_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    const uint32_t *const *b, uint32_t *trapsts) {
+  const bool requested_mode2 =
+      (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS;
+  if (int error = rj_arith_v_ldexp_f32_w32(flags, 0, instruction_flags, nullptr, nullptr, nullptr,
+                                           trapsts)) {
+    return error;
+  }
+  if (requested_mode2 && (instruction_flags >> 32)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+  }
+  return rj_arith_v_ldexp_f32_w64(flags, exec_mask, instruction_flags, d, a, b, trapsts);
+}
+
+int rj_arith_v_ldexp_f64_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    const uint32_t *const *b, uint32_t *trapsts) {
+  return rj_arith_v_ldexp_f64_w32(flags, exec_mask, instruction_flags, d, a, b, trapsts);
+}
+
+int rj_arith_v_ldexp_f64_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    const uint32_t *const *b, uint32_t *trapsts) {
+  return rj_arith_v_ldexp_f64_w64(flags, exec_mask, instruction_flags, d, a, b, trapsts);
+}

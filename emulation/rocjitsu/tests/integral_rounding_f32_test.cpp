@@ -236,8 +236,15 @@ TEST(IntegralRoundingF32, Arithmetic) {
                     const rocjitsu::test::FloatingOutput output{
                         scale ? sample.omod : 0, wave->fp_round_mode_f32(), sample.clamp,
                         modern || wave->dx10_clamp()};
-                    const uint32_t result = std::bit_cast<uint32_t>(rocjitsu::test::finish_floating(
-                        integral_reference::evaluate(op, std::bit_cast<float>(raw)), output));
+                    const bool preserve_snan =
+                        family.arch == rocjitsu::IsaFamily::Cdna4 && !sdwa && !wave->ieee_mode() &&
+                        (raw & 0x7fffffffU) > 0x7f800000U && (!sample.clamp || !wave->dx10_clamp());
+                    const uint32_t result =
+                        preserve_snan
+                            ? raw
+                            : std::bit_cast<uint32_t>(rocjitsu::test::finish_floating(
+                                  integral_reference::evaluate(op, std::bit_cast<float>(raw)),
+                                  output));
                     expected = sdwa ? (expected & 0xffff) | (result << 16) : result;
                   }
                   const uint32_t actual = cu->read_vgpr(base + aliasing_offset, lane);

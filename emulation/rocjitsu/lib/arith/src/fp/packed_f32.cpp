@@ -17,12 +17,14 @@ enum class Operation { Add, Mul, Fma };
 
 // Evaluate both selected FP32 results without changing host FP controls. Compatibility
 // retains guest rounding and the inherited per-operation denormal/NaN policy.
-template <int Lanes, bool OldCdna, Operation Op = Operation::Fma>
+template <int Lanes, bool OldCdna, Operation Op = Operation::Fma, bool Gfx950 = false>
 int packed_arithmetic(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *d,
                       const uint32_t *const *a, const uint32_t *const *b,
                       const uint32_t *const *c) {
   const bool compatibility = (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY;
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags,
+      Gfx950 ? RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS : RJ_ARITH_SEMANTICS_LOOSE);
   constexpr uint64_t guest =
       rocjitsu::arith::kFmaGuestFpFlags | (OldCdna ? RJ_ARITH_FP_DX10_CLAMP_OFF : 0);
   constexpr uint32_t all_modifiers =
@@ -36,20 +38,27 @@ int packed_arithmetic(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_
   if (int error = rocjitsu::arith::validate(flags, mode & ~uint64_t(known), guest)) {
     return error;
   }
-  if ((flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
+  if constexpr (Gfx950) {
+    if (rocjitsu::arith::reports_fp_status(flags)) {
+      return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+    }
+  } else if ((flags & RJ_ARITH_SEMANTICS_MASK) >=
+             RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
     return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
   }
   if (!exec_mask) {
     return RJ_ARITH_SUCCESS;
   }
-  flags = (flags & ~RJ_ARITH_SEMANTICS_MASK) |
-          (compatibility ? RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS
-                         : RJ_ARITH_SEMANTICS_LOOSE);
+  if constexpr (!Gfx950) {
+    flags = (flags & ~RJ_ARITH_SEMANTICS_MASK) |
+            (compatibility ? RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS
+                           : RJ_ARITH_SEMANTICS_LOOSE);
+  }
   const bool flush_output = flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
   if constexpr (Op != Operation::Fma) {
     // Packed ADD/MUL flush after FP32 rounding, unlike FMA's intermediate
-    // tininess test. Native ADD/MUL also always quiet signaling NaNs.
-    flags = (flags & ~RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) | RJ_ARITH_FP_IEEE_MODE;
+    // tininess test. gfx942/gfx1250 always quiet signaling NaNs; gfx950 honors MODE.IEEE.
+    flags = (flags & ~RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) | (Gfx950 ? 0 : RJ_ARITH_FP_IEEE_MODE);
   }
   uint32_t result[2][Lanes];
   for (int word = 0; word < 2; ++word) {
@@ -180,4 +189,48 @@ int rj_arith_v_pk_mul_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
                                       [[maybe_unused]] uint32_t *excp_flag_user) {
   return packed_arithmetic<32, false, Operation::Mul>(flags, exec_mask, instruction_flags, d, a, b,
                                                       nullptr);
+}
+
+int rj_arith_v_pk_fma_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, const uint32_t *const *c,
+                                     [[maybe_unused]] uint32_t *trapsts) {
+  return packed_arithmetic<32, true, Operation::Fma, true>(flags, exec_mask, instruction_flags, d,
+                                                           a, b, c);
+}
+
+int rj_arith_v_pk_fma_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, const uint32_t *const *c,
+                                     [[maybe_unused]] uint32_t *trapsts) {
+  return packed_arithmetic<64, true, Operation::Fma, true>(flags, exec_mask, instruction_flags, d,
+                                                           a, b, c);
+}
+
+int rj_arith_v_pk_add_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts) {
+  return packed_arithmetic<32, true, Operation::Add, true>(flags, exec_mask, instruction_flags, d,
+                                                           a, b, nullptr);
+}
+
+int rj_arith_v_pk_add_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts) {
+  return packed_arithmetic<64, true, Operation::Add, true>(flags, exec_mask, instruction_flags, d,
+                                                           a, b, nullptr);
+}
+
+int rj_arith_v_pk_mul_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts) {
+  return packed_arithmetic<32, true, Operation::Mul, true>(flags, exec_mask, instruction_flags, d,
+                                                           a, b, nullptr);
+}
+
+int rj_arith_v_pk_mul_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts) {
+  return packed_arithmetic<64, true, Operation::Mul, true>(flags, exec_mask, instruction_flags, d,
+                                                           a, b, nullptr);
 }

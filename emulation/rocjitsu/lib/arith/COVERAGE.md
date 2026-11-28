@@ -84,10 +84,18 @@ gfx950 unscaled OCP FP8/BF8 widening (`v_cvt_{f32,pk_f32}_{fp8,bf8}_gfx950`),
 narrowing (`v_cvt_{pk,sr}_{fp8,bf8}_f32_gfx950`), and BF16/FP16 conversion
 (`v_cvt_f32_bf16_gfx950`, `v_cvt_{pk,sr}_{bf16,f16}_f32_gfx950`) entry points
 are calibrated against MI350X hardware captures and accept mode 2; gfx950
-signed-byte dense MFMA and sparse SMFMAC entry points saturate signed
-accumulation per hardware pass under `RJ_ARITH_FP16_OVFL` and ignore
-`CBSZ`/`ABID`/`BLGP` on single-batch dense forms while unsuffixed shared forms
-preserve gfx942 behavior.
+VALU FP16/FP32/FP64/packed arithmetic, rounding, exponent/mantissa, half MAD/MAC
+and `TRIG_PREOP_F64` (`_gfx950`, plus the VOP3/register FP32/FP16 FMA/binary/
+exponent bindings on `cdna4`) are likewise calibrated against MI350X captures in
+Compatibility and mode 2 (unbounded-exponent FP16 tininess, IEEE-gated sNaN
+preservation, negative quiet NaN on invalid FP16 operations, two-step flushed
+half MAD/MAC, `[31:16]` preservation on `V_FMA_F16`/`V_MAD_F16` vs zero-extension
+on `V_FMA_LEGACY_F16`/`V_MAD_LEGACY_F16`/`V_MAC_F16`, and the 1184-bit `TRIG_PREOP`
+table, while keeping mode 3, uncaptured DPP/SDWA, and literal `FMAAK`/`FMAMK`/
+`MADAK`/`MADMK` rejected in strict modes); gfx950 signed-byte dense MFMA and
+sparse SMFMAC entry points saturate signed accumulation per hardware pass under
+`RJ_ARITH_FP16_OVFL` and ignore `CBSZ`/`ABID`/`BLGP` on single-batch dense forms
+while unsuffixed shared forms preserve gfx942 behavior.
 
 gfx950 FP16 SFU (`v_{rcp,rsq,sqrt,exp,log,sin,cos}_f16_gfx950`), FP32 SFU
 (`v_{rcp,rcp_iflag,rsq,sqrt,exp,log,sin,cos}_f32_gfx950`), FP64 TRANS

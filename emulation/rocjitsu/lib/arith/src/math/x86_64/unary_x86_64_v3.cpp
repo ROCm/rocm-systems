@@ -103,7 +103,7 @@ void run(uint32_t exec_mask, uint32_t modifiers, uint32_t *d, const uint32_t *a,
         value = clamp_f32(value, flags & RJ_ARITH_FP_DX10_CLAMP_OFF);
       }
     }
-    if constexpr (unary_rounds_f32<Op> || Op == Unary::Fract) {
+    if constexpr (unary_rounds_f32<Op> || Op == Unary::Fract || Op == Unary::FrexpMant) {
       if (!(flags & RJ_ARITH_FP_IEEE_MODE) &&
           (!(modifiers & RJ_ARITH_ALU_CLAMP) || (flags & RJ_ARITH_FP_DX10_CLAMP_OFF))) {
         auto nan = _mm256_cmpgt_epi32(

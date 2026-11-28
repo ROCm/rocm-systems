@@ -420,44 +420,43 @@ std::vector<F16OutputCase> f16_output_cases() {
                      0,
                      3,
                      0x7c00});
-    // MAD_F16 currently ignores MODE input/output denormal controls and
-    // non-nearest rounding. These cases expose that separate semantic gap
-    // while requiring the scalar and SIMD paths to retain the same contract.
-    cases.push_back({std::string("Gfx950") + name + "CurrentFlushInputModeKeepsSubnormal",
+    // MI350X (gfx950) MAD_F16 and MAD_LEGACY_F16 force input and output subnormal
+    // flushing at both multiply and add steps while honoring guest directed rounding.
+    cases.push_back({std::string("Gfx950") + name + "FlushInputModeZeroesSubnormal",
                      rocjitsu::IsaFamily::Cdna4,
                      opcode,
                      {0x0001, 0x3c00, 0},
                      0x00,
                      0,
-                     0x0001});
-    cases.push_back({std::string("Gfx950") + name + "KeepsSubnormalInput",
+                     0x0000});
+    cases.push_back({std::string("Gfx950") + name + "KeepInputModeStillFlushesSubnormal",
                      rocjitsu::IsaFamily::Cdna4,
                      opcode,
                      {0x0001, 0x3c00, 0},
                      0xc0,
                      0,
-                     0x0001});
-    cases.push_back({std::string("Gfx950") + name + "CurrentFlushOutputModeKeepsTinyResult",
+                     0x0000});
+    cases.push_back({std::string("Gfx950") + name + "FlushOutputModeZeroesTinyResult",
                      rocjitsu::IsaFamily::Cdna4,
                      opcode,
                      {0x0400, 0x3800, 0},
                      0x40,
                      0,
-                     0x0200});
-    cases.push_back({std::string("Gfx950") + name + "KeepsTinyOutput",
+                     0x0000});
+    cases.push_back({std::string("Gfx950") + name + "KeepOutputModeStillFlushesTinyResult",
                      rocjitsu::IsaFamily::Cdna4,
                      opcode,
                      {0x0400, 0x3800, 0},
                      0xc0,
                      0,
-                     0x0200});
-    cases.push_back({std::string("Gfx950") + name + "CurrentRoundUpContract",
+                     0x0000});
+    cases.push_back({std::string("Gfx950") + name + "HonorsRoundUpMode",
                      rocjitsu::IsaFamily::Cdna4,
                      opcode,
                      {0x3c00, 0x3c00, 0x1000},
                      0xc4,
                      0,
-                     0x3c00});
+                     0x3c01});
   }
   const auto add_selections = [&](const char *target, rocjitsu::IsaFamily arch, auto operations) {
     for (const auto &[name, opcode] : operations) {
@@ -595,7 +594,8 @@ TEST_P(Vop3F16TernaryOutputOrderTest, MatchesScalarOutputContractWithSimdEnabled
                        (test.arch == rocjitsu::IsaFamily::Cdna4 &&
                         (test.opcode == cdna4::kVMin3F16Vop3 ||
                          test.opcode == cdna4::kVMax3F16Vop3 ||
-                         test.opcode == cdna4::kVMed3F16Vop3))) {
+                         test.opcode == cdna4::kVMed3F16Vop3 ||
+                         test.opcode == cdna4::kVMadF16Vop3))) {
               EXPECT_EQ(actual >> 16, DST_SENTINEL32 >> 16);
             }
           }

@@ -22,6 +22,7 @@ void selection_f16_x86_64_v4(Binary op, bool packed, uint64_t flags, uint32_t ex
 struct HalfOutputPolicy {
   bool rounded_tininess = false;
   bool scale_before_rounding = false;
+  bool negative_invalid_qnan = false;
 };
 
 // Evaluate FP16 binary arithmetic. Preserve destination lanes outside exec_mask.

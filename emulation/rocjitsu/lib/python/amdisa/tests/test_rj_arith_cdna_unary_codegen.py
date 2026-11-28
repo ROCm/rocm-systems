@@ -33,15 +33,20 @@ def context(arch, name, vop3=False):
 @pytest.mark.parametrize('vop3', [False, True])
 def test_integral_unary_policy_and_operands(arch, name, vop3):
     body = gen_cdna_integral_unary(context(arch, name, vop3))
-    suffix = 'gfx12' if arch == 'cdna5' else 'gfx942'
+    suffix = 'gfx12' if arch == 'cdna5' else 'gfx950' if arch == 'cdna4' else 'gfx942'
     for wave in (32, 64):
         assert f'rj_arith_{name.lower()}_w{wave}_{suffix}' in body
-    # Both encoding routes must reject unqualified strict replay before arithmetic.
-    guard = body.index('RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS')
+    # Unqualified strict requests (mode 3, and uncaptured DPP/SDWA mode 2 on CDNA4) reject first.
+    guard = body.index('RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL')
     reject = body.index('return;', guard)
     execute = body.index('execute_cdna_integral_unary')
     assert guard < reject < execute
-    assert 'RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL)' in body[guard:reject]
+    assert (
+        'RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS' in body[guard:reject]
+    ) == (arch != 'cdna4' or not vop3)
+    if arch == 'cdna4' and not vop3:
+        assert 'amdgpu::SRC_DPP' in body[guard:reject]
+        assert 'amdgpu::SRC_SDWA' in body[guard:reject]
     assert 'wf.cu().arithmetic_flags()' in body
     assert 'dst, src' in body
     assert ('RJ_ARITH_ALU_OMOD_2' in body) == vop3

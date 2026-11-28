@@ -55,7 +55,8 @@ uint64_t reference(uint64_t bits, bool wide, const Wavefront &wave, unsigned omo
                    bool sdwa) {
   const auto arch = wave.cu().arch();
   const bool modern = arch == rocjitsu::IsaFamily::Cdna5;
-  const bool cdna = arch == rocjitsu::IsaFamily::Cdna3 || arch == rocjitsu::IsaFamily::Cdna4;
+  const bool gfx950 = arch == rocjitsu::IsaFamily::Cdna4;
+  const bool cdna = arch == rocjitsu::IsaFamily::Cdna3;
   const unsigned denorm = wide ? wave.fp_denorm_mode_f16_f64() : wave.fp_denorm_mode_f32();
   const unsigned rounding = wide ? wave.fp_round_mode_f16_f64() : wave.fp_round_mode_f32();
   uint64_t flags = RJ_ARITH_SEMANTICS_COMPATIBILITY | (uint64_t(rounding) << 24);
@@ -63,10 +64,12 @@ uint64_t reference(uint64_t bits, bool wide, const Wavefront &wave, unsigned omo
   flags |= (denorm & 2) ? 0 : RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
   flags |= wave.ieee_mode() ? RJ_ARITH_FP_IEEE_MODE : 0;
   flags |= !modern && !wave.dx10_clamp() ? RJ_ARITH_FP_DX10_CLAMP_OFF : 0;
-  const auto call = wide     ? modern ? rj_arith_v_fract_f64_w32_gfx12
-                               : cdna ? rj_arith_v_fract_f64_w32_gfx942
-                                      : rj_arith_v_fract_f64_w32_gfx908
+  const auto call = wide     ? modern   ? rj_arith_v_fract_f64_w32_gfx12
+                               : gfx950 ? rj_arith_v_fract_f64_w32_gfx950
+                               : cdna   ? rj_arith_v_fract_f64_w32_gfx942
+                                        : rj_arith_v_fract_f64_w32_gfx908
                     : modern ? rj_arith_v_fract_f32_w32_gfx12
+                    : gfx950 ? rj_arith_v_fract_f32_w32_gfx950
                     : cdna   ? rj_arith_v_fract_f32_w32_gfx942
                              : rj_arith_v_fract_f32_w32_gfx908;
   const uint64_t modifiers = uint64_t(omod) * RJ_ARITH_ALU_OMOD_2 |

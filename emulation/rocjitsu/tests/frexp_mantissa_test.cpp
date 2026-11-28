@@ -297,11 +297,15 @@ TEST(FrexpMantissa, Arithmetic) {
                         modern || (!wave->ieee_mode() && !(denorm & 2)) ? omod : 0,
                         wide ? wave->fp_round_mode_f16_f64() : wave->fp_round_mode_f32(),
                         sample.modifiers == 2, modern || wave->dx10_clamp()};
+                    const bool preserve_snan = family.arch == rocjitsu::IsaFamily::Cdna4 && !wide &&
+                                               !sdwa && !wave->ieee_mode() &&
+                                               (uint32_t(bits) & 0x7fffffffU) > 0x7f800000U;
                     const auto value =
-                        wide ? std::bit_cast<uint64_t>(rocjitsu::test::finish_floating(
-                                   std::bit_cast<double>(mantissa), output))
-                             : uint64_t(std::bit_cast<uint32_t>(rocjitsu::test::finish_floating(
-                                   std::bit_cast<float>(uint32_t(mantissa)), output)));
+                        preserve_snan ? ((output.clamp && output.nan_to_zero) ? 0ULL : bits)
+                        : wide        ? std::bit_cast<uint64_t>(rocjitsu::test::finish_floating(
+                                     std::bit_cast<double>(mantissa), output))
+                               : uint64_t(std::bit_cast<uint32_t>(rocjitsu::test::finish_floating(
+                                     std::bit_cast<float>(uint32_t(mantissa)), output)));
                     expected = sdwa ? (expected & 0xffff) | (uint32_t(value) << 16) : value;
                   }
                   for (int word = 0; word < (wide ? 2 : 1); ++word) {

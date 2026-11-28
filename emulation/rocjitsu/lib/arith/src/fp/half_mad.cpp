@@ -125,6 +125,58 @@ int run(uint64_t flags, Mask exec_mask, uint64_t mode, uint32_t *const *d, const
   return RJ_ARITH_SUCCESS;
 }
 
+// MI350X (gfx950) half MAD/MAC: two separately rounded FP16 steps with mandatory
+// input/output subnormal flushing at both steps, IEEE-gated sNaN preservation, and
+// gated OMOD/CLAMP on the final step.
+void separately_rounded_mad_gfx950(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *d,
+                                   const uint32_t *a, const uint32_t *b, const uint32_t *c) {
+  alignas(64) uint32_t x[32], y[32], z[32], product[32] = {}, result[32] = {};
+  for (int lane = 0; lane < 32; ++lane) {
+    x[lane] = input_half(a[lane], mode);
+    y[lane] = input_half(b[lane], mode >> 1);
+    z[lane] = input_half(c[lane], mode >> 2);
+  }
+  const uint64_t arithmetic =
+      (flags & ~RJ_ARITH_SEMANTICS_MASK) | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS |
+      RJ_ARITH_FP_FLUSH_INPUT_DENORMALS | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
+  const uint64_t add_modifiers = mode & (RJ_ARITH_ALU_OMOD_MASK | RJ_ARITH_ALU_CLAMP);
+  const uint32_t *px = x, *py = y, *pz = z, *pp = product;
+  uint32_t *pd = product, *pr = result;
+  rj_arith_v_mul_f16_w32_gfx950(arithmetic, ~0U, 0, &pd, &px, &py, nullptr);
+  rj_arith_v_add_f16_w32_gfx950(arithmetic, ~0U, add_modifiers, &pr, &pp, &pz, nullptr);
+  const int shift = mode & RJ_ARITH_ALU_HIGH_D ? 16 : 0;
+  for (uint32_t active = exec_mask; active; active &= active - 1) {
+    int lane = __builtin_ctz(active);
+    d[lane] = (d[lane] & ~(0xffffU << shift)) | ((result[lane] & 0xffffU) << shift);
+  }
+}
+
+template <typename Mask>
+int run_gfx950(uint64_t flags, Mask exec_mask, uint64_t mode, uint32_t *const *d,
+               const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate(
+          flags, mode & ~uint64_t(rocjitsu::arith::kFma16InstructionFlags),
+          rocjitsu::arith::kFmaGuestFpFlags | RJ_ARITH_FP_DX10_CLAMP_OFF)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  if (!exec_mask) {
+    return RJ_ARITH_SUCCESS;
+  }
+  mode = rocjitsu::arith::rdna3_output_modifiers(flags, mode);
+  const bool exact = rocjitsu::arith::is_exact(flags) || (flags & RJ_ARITH_FP_ROUND_MASK);
+  for (int offset = 0; offset < int(sizeof(Mask) * 8); offset += 32) {
+    const auto evaluate = exact ? separately_rounded_mad_gfx950 : mad;
+    evaluate(flags, uint32_t(exec_mask >> offset), uint32_t(mode), d[0] + offset, a[0] + offset,
+             b[0] + offset, c[0] + offset);
+  }
+  return RJ_ARITH_SUCCESS;
+}
+
 } // namespace
 
 // Evaluate half MAD; errors leave both destination storage and FP status unchanged.
@@ -189,4 +241,34 @@ int rj_arith_v_mad_legacy_f16_w64_gfx90a(uint64_t flags, uint64_t exec_mask,
                                          const uint32_t *const *c,
                                          [[maybe_unused]] uint32_t *trapsts) {
   return run<true>(flags, exec_mask, instruction_flags, d, a, b, c);
+}
+
+int rj_arith_v_mad_f16_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, const uint32_t *const *c,
+                                  [[maybe_unused]] uint32_t *trapsts) {
+  return run_gfx950(flags, exec_mask, instruction_flags, d, a, b, c);
+}
+
+int rj_arith_v_mad_f16_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, const uint32_t *const *c,
+                                  [[maybe_unused]] uint32_t *trapsts) {
+  return run_gfx950(flags, exec_mask, instruction_flags, d, a, b, c);
+}
+
+int rj_arith_v_mad_legacy_f16_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                         uint64_t instruction_flags, uint32_t *const *d,
+                                         const uint32_t *const *a, const uint32_t *const *b,
+                                         const uint32_t *const *c,
+                                         [[maybe_unused]] uint32_t *trapsts) {
+  return run_gfx950(flags, exec_mask, instruction_flags, d, a, b, c);
+}
+
+int rj_arith_v_mad_legacy_f16_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                         uint64_t instruction_flags, uint32_t *const *d,
+                                         const uint32_t *const *a, const uint32_t *const *b,
+                                         const uint32_t *const *c,
+                                         [[maybe_unused]] uint32_t *trapsts) {
+  return run_gfx950(flags, exec_mask, instruction_flags, d, a, b, c);
 }

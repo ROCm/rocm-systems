@@ -1676,11 +1676,24 @@ def test_packed_f32_fma_pair_selectors(arch):
     assert 'dst, a, b, c' in body
     assert 'inst_.op_sel_hi_2 ? 0u : RJ_ARITH_PK_HI_C_LOW' in body
     assert 'RJ_ARITH_PK_NEG_HI_C' in body
-    assert (
-        'rj_arith_v_pk_fma_f32_w32_' + ('gfx1250' if arch == 'cdna5' else 'gfx942')
-        in body
-    )
-    assert ('rj_arith_v_pk_fma_f32_w64_gfx942' in body) == (arch != 'cdna5')
+    target = 'gfx1250' if arch == 'cdna5' else 'gfx950' if arch == 'cdna4' else 'gfx942'
+    assert f'rj_arith_v_pk_fma_f32_w32_{target}' in body
+    assert (f'rj_arith_v_pk_fma_f32_w64_{target}' in body) == (arch != 'cdna5')
+    for binary_name in ('V_PK_ADD_F32', 'V_PK_MUL_F32'):
+        binary_body = gen_packed_f32(
+            context(
+                arch,
+                binary_name,
+                ['dst'],
+                ['a', 'b'],
+                enc_name='ENC_VOP3P',
+                opsel_exprs=('inst_.op_sel', 'inst_.op_sel_hi'),
+            )
+        )
+        assert f'rj_arith_{binary_name.lower()}_w32_{target}' in binary_body
+        assert (f'rj_arith_{binary_name.lower()}_w64_{target}' in binary_body) == (
+            arch != 'cdna5'
+        )
     assert (
         gen_packed_f32(context(arch, 'V_PK_FMA_F32', ['dst'], ['a', 'b', 'c'])) is None
     )
@@ -1886,7 +1899,11 @@ def test_cdna_fp32_arithmetic_routes_guest_modes_and_state(arch):
         suffix = (
             ('_gfx12' if name == 'V_LDEXP_F32' or fma else '_gfx1250')
             if arch == 'cdna5'
-            else '_gfx942' if name == 'V_LDEXP_F32' else ''
+            else (
+                '_gfx950'
+                if name == 'V_LDEXP_F32' and arch == 'cdna4'
+                else '_gfx942' if name == 'V_LDEXP_F32' else ''
+            )
         )
         for wave in (32, 64):
             assert api + '_w' + str(wave) + suffix + ',' in body
@@ -1903,10 +1920,10 @@ def test_cdna_fp32_arithmetic_routes_guest_modes_and_state(arch):
                         is_vop3=encoding == 'ENC_VOP3',
                     )
                 )
-                guard = routed.index(
-                    'RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS'
-                )
-                assert 'RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL)' in routed
+                guard = routed.index('RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL')
+                assert (
+                    'RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS' in routed
+                ) == (arch != 'cdna4' or encoding == 'ENC_VOP2')
                 assert (
                     guard
                     < routed.index('return;', guard)
@@ -1948,7 +1965,9 @@ def test_cdna_ldexp64_guest_policy(arch):
     body = gen_float64_word(
         context(arch, 'V_LDEXP_F64', ['d'], ['a', 'exponent'], is_vop3=True)
     )
-    suffix = '_gfx12' if arch == 'cdna5' else '_gfx942'
+    suffix = (
+        '_gfx12' if arch == 'cdna5' else '_gfx950' if arch == 'cdna4' else '_gfx942'
+    )
     for wave in (32, 64):
         assert f'rj_arith_v_ldexp_f64_w{wave}{suffix},' in body
     assert 'd, a, exponent, ' + str(arch != 'cdna5').lower() in body
@@ -1996,7 +2015,7 @@ def test_cdna_unary_methods_use_arithmetic_bridge(arch):
     'arch,name,suffix',
     [
         ('cdna3', 'V_MUL_LEGACY_F32', ''),
-        ('cdna4', 'V_MUL_LEGACY_F32', ''),
+        ('cdna4', 'V_MUL_LEGACY_F32', '_gfx950'),
         ('cdna5', 'V_MUL_DX9_ZERO_F32', '_gfx1250'),
     ],
 )
@@ -2047,7 +2066,7 @@ def test_cdna_nan_quieting_adapters(arch):
         context(arch, 'V_LDEXP_F32', ['d'], ['a', 'b'], is_vop3=True)
     )
     for lanes in (32, 64):
-        assert f'rj_arith_v_ldexp_f32_w{lanes}_gfx942,' in body
+        assert f'rj_arith_v_ldexp_f32_w{lanes}{unary64_suffix},' in body
 
 
 @pytest.mark.parametrize('vop3', [False, True])
@@ -2249,7 +2268,11 @@ def test_cdna_half_arithmetic_modes_and_destination(arch):
             suffix = '_gfx12' if name == 'V_LDEXP_F16' else '_gfx1250'
         else:
             suffix = (
-                '_gfx942' if arch == 'cdna3' or name == 'V_LDEXP_F16' else '_gfx908'
+                '_gfx950'
+                if arch == 'cdna4'
+                else (
+                    '_gfx942' if arch == 'cdna3' or name == 'V_LDEXP_F16' else '_gfx908'
+                )
             )
         if arch == 'cdna5' and name == 'V_MUL_F16':
             suffix = '_gfx1250'
@@ -2303,7 +2326,9 @@ def test_cdna_half_fma_policy_and_destination(arch):
     for lanes in (32, 64):
         assert f'rj_arith_v_fma_f16_w{lanes}{suffix},' in body
     assert (
-        'd, a, b, c, false);' if arch == 'cdna5' else 'd, a, b, c, true, true);'
+        'd, a, b, c, false);'
+        if arch == 'cdna5'
+        else 'd, a, b, c, true);' if arch == 'cdna4' else 'd, a, b, c, true, true);'
     ) in body
     assert 'RJ_ARITH_ALU_HIGH_C' in body
     # Legacy MAD has a different intermediate rounding contract.
@@ -2323,8 +2348,12 @@ def test_cdna_legacy_half_fma_reuses_architectural_model(arch, name):
 
     inputs = ['a', 'b'] if name == 'V_MAC_F16' else ['a', 'b', 'c']
     body = gen_float_fma16(context(arch, name, ['d'], inputs, is_vop3=True))
-    assert 'rj_arith_v_fma_f16_w32' in body
-    assert 'rj_arith_v_fma_f16_w64' in body
+    if arch == 'cdna4' and name == 'V_MAC_F16':
+        assert 'rj_arith_v_mad_f16_w32_gfx950' in body
+        assert 'rj_arith_v_mad_f16_w64_gfx950' in body
+    else:
+        assert 'rj_arith_v_fma_f16_w32,' in body
+        assert 'rj_arith_v_fma_f16_w64,' in body
     assert ('d, a, b, d' if name == 'V_MAC_F16' else 'd, a, b, c') in body
     assert 'true, true' in body
     assert body.index('if (!wf.exec())') < body.index('const uint64_t semantics')
@@ -2340,11 +2369,16 @@ def test_cdna_half_mad_preserves_its_distinct_intermediate(arch, name):
     from amdisa.codegen.execute.rj_arith_float import gen_float_fma16
 
     body = gen_float_fma16(context(arch, name, ['d'], ['a', 'b', 'c'], is_vop3=True))
-    assert 'rj_arith_' + name.lower() + '_w64' in body
+    suffix = '_gfx950' if arch == 'cdna4' else '_gfx90a' if arch == 'cdna2' else ''
+    assert f'rj_arith_{name.lower()}_w64{suffix},' in body
     assert 'rj_arith_v_fma_f16' not in body
     assert 'RJ_ARITH_ALU_HIGH_D' in body and 'RJ_ARITH_ALU_ABS_C' in body
     assert 'RJ_ARITH_ALU_OMOD_2' in body
-    assert 'd, a, b, c, true, true' in body
+    assert (
+        'd, a, b, c, true);'
+        if arch == 'cdna4' and name == 'V_MAD_F16'
+        else 'd, a, b, c, true, true);'
+    ) in body
 
 
 @pytest.mark.parametrize('arch', ['cdna1', 'cdna2', 'cdna3', 'cdna4'])
@@ -2354,7 +2388,8 @@ def test_cdna_literal_half_mad_reuses_mad_arithmetic(arch, name):
 
     sources = ['a', 'literal', 'b'] if name == 'V_MADMK_F16' else ['a', 'b', 'literal']
     body = gen_float_fma16(context(arch, name, ['d'], sources))
-    assert 'rj_arith_v_mad_f16_w64' in body
+    suffix = '_gfx90a' if arch == 'cdna2' else ''
+    assert f'rj_arith_v_mad_f16_w64{suffix},' in body
     assert 'arithmetic_flags(), 0,' in body
     assert 'd, ' + ', '.join(sources) + ', true, true' in body
     assert gen_float_fma16(context(arch, name, ['d'], sources, is_vop3=True)) is None
@@ -2368,7 +2403,9 @@ def test_cdna_packed_fmac_retains_modifiers_and_omod(arch, encoding):
     body = gen_packed_fma16(
         context(arch, 'V_PK_FMAC_F16', ['d'], ['a', 'b'], enc_name=encoding)
     )
-    suffix = '_gfx12' if arch == 'cdna5' else '_gfx942'
+    suffix = (
+        '_gfx12' if arch == 'cdna5' else '_gfx950' if arch == 'cdna4' else '_gfx942'
+    )
     for wave in (32, 64):
         assert f'rj_arith_v_pk_fmac_f16_w{wave}{suffix},' in body
     assert 'execute_packed_fma16<true>' in body
@@ -2406,9 +2443,14 @@ def test_cdna_packed_half_arithmetic(arch):
             )
         )
         suffix = (
-            ('_gfx1250' if arch == 'cdna5' else '_gfx942')
-            if name == 'V_PK_MUL_F16' or (name == 'V_PK_ADD_F16' and arch != 'cdna5')
-            else ('_gfx12' if arch == 'cdna5' else '')
+            '_gfx950'
+            if arch == 'cdna4'
+            else (
+                ('_gfx1250' if arch == 'cdna5' else '_gfx942')
+                if name == 'V_PK_MUL_F16'
+                or (name == 'V_PK_ADD_F16' and arch != 'cdna5')
+                else ('_gfx12' if arch == 'cdna5' else '')
+            )
         )
         for lanes in (32, 64):
             assert f'rj_arith_{name.lower()}_w{lanes}{suffix},' in body
@@ -2438,11 +2480,22 @@ def test_cdna_half_fma_qualification_precedes_execution(arch):
         ('V_PK_FMAC_F16', gen_packed_fma16, ['a', 'b']),
         ('V_PK_ADD_F16', gen_packed_binary16, ['a', 'b']),
     ):
-        body = emit(context(arch, name, ['d'], sources, enc_name='ENC_VOP3P'))
+        body = emit(
+            context(
+                arch,
+                name,
+                ['d'],
+                sources,
+                enc_name='ENC_VOP3P',
+                is_vop3=name == 'V_FMA_F16',
+            )
+        )
         if name == 'V_PK_ADD_F16' and arch != 'cdna5':
-            continue  # Its CDNA API already rejects strict requests.
-        guard = body.index('RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS')
-        assert 'RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL)' in body
+            continue  # Its CDNA3/CDNA4 API enforces its own qualification boundary.
+        guard = body.index('RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL')
+        assert ('RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS' in body) == (
+            arch != 'cdna4'
+        )
         assert guard < body.index('amdgpu::arith::execute_')
 
 
@@ -2455,13 +2508,16 @@ def test_cdna_half_exponent_qualification(arch, vop3):
     )
 
     cases = [('V_FREXP_EXP_I16_F16', gen_float_unary16, ['a'])]
-    if arch == 'cdna5':
+    if arch in ('cdna4', 'cdna5'):
         cases.append(('V_LDEXP_F16', gen_float_binary16, ['a', 'b']))
     for name, emit, sources in cases:
         body = emit(context(arch, name, ['d'], sources, is_vop3=vop3))
-        assert body.index(
-            'RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS'
-        ) < body.index('amdgpu::arith::execute_')
+        assert body.index('RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL') < body.index(
+            'amdgpu::arith::execute_'
+        )
+        assert ('RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS' in body) == (
+            arch != 'cdna4' or not vop3
+        )
 
 
 def test_scaled_widen_gfx950_bindings_and_gates():
@@ -3180,7 +3236,9 @@ def test_cdna_half_unary_uses_the_decoded_route(arch):
     for name in ('FLOOR', 'FREXP_MANT', 'FRACT'):
         assert gen_float_unary16(context(arch, f'V_{name}_F16', ['d'], ['a'])) is None
         api = f'rj_arith_v_{name.lower()}_f16_w' + (
-            '32_gfx12' if arch == 'cdna5' else '64_gfx942'
+            '32_gfx12'
+            if arch == 'cdna5'
+            else '64_gfx950' if arch == 'cdna4' else '64_gfx942'
         )
         class_name = 'V' + ''.join(word.title() for word in name.split('_')) + 'F16'
         for encoding in ('vop1', 'vop3'):
@@ -3321,7 +3379,7 @@ def test_cdna_trig_preop_preserves_omod_rounding(arch):
     body = gen_float64_word(
         context(arch, 'V_TRIG_PREOP_F64', ['dst'], ['a', 'b'], is_vop3=True)
     )
-    suffix = 'gfx1250' if arch == 'cdna5' else 'gfx942'
+    suffix = 'gfx1250' if arch == 'cdna5' else 'gfx950' if arch == 'cdna4' else 'gfx942'
     assert f'rj_arith_v_trig_preop_f64_w32_{suffix}' in body
     assert '/*preop_rounding=*/true' in body
     assert ('nullptr' in body) == (arch == 'cdna5')
@@ -3862,7 +3920,10 @@ def test_inherited_exponents_preserve_integer_output_and_qualification(arch):
                 )
             )
             assert f'rj_arith_v_frexp_exp_i32_f{bits}_w32' in body
-            assert 'RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS' in body
+            assert 'RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL' in body
+            assert ('RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS' in body) == (
+                arch != 'cdna4' or bits == 64 or not vop3
+            )
             assert 'UnsupportedOperandValue' in body
             assert 'inst_.omod' not in body and 'inst_.clamp' not in body
             assert ('execute_exponent_sdwa' in body) == (bits == 32 and not vop3)
