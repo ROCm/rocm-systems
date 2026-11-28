@@ -557,6 +557,33 @@ bit_extract(Integral x, int first, int last)
     return (x >> first) & bit_mask(0, last - first);
 }
 
+// The value word of a device-resident signal refuses host read-modify-write; ROCr answers
+// hsa_amd_signal_value_pointer for such a signal with HSA_STATUS_ERROR_INVALID_SIGNAL.
+bool
+is_device_resident_signal(hsa_signal_t signal)
+{
+    const auto* ext_table = get_amd_ext_table();
+    if(ext_table == nullptr || ext_table->hsa_amd_signal_value_pointer_fn == nullptr) return false;
+
+    volatile hsa_signal_value_t* value = nullptr;
+    return ext_table->hsa_amd_signal_value_pointer_fn(signal, &value) ==
+           HSA_STATUS_ERROR_INVALID_SIGNAL;
+}
+
+// Runs on ROCr's async signal thread once the pooled signal completed: lowers the application's
+// signal as the dispatch would have, with a host store since it refuses read-modify-write. This
+// thread waits on every registered signal at once, so a packet waiting on this signal from another
+// queue never depends on rocprofiler's own completion monitor.
+bool
+complete_relayed_signal(hsa_signal_value_t /*value*/, void* arg)
+{
+    auto*      relay = static_cast<signal_relay_t*>(arg);
+    const auto value = get_core_table()->hsa_signal_load_scacquire_fn(relay->app_signal);
+    get_core_table()->hsa_signal_store_screlease_fn(relay->app_signal, value - 1);
+    relay->completed.store(true, std::memory_order_release);
+    return false;
+}
+
 // stopped: no monitor thread. active: monitor running and admitting new waits. Drains key off
 // registration::get_fini_status(), not this state.
 enum class monitor_state : uint8_t
@@ -708,6 +735,18 @@ release_completion_signals(const std::shared_ptr<queue_info_session_t>& session,
     {
         if(completed)
             batch.dispatch_times.emplace_back(kernel_dispatch::get_dispatch_time(*session, packet));
+
+        // A relayed pooled signal goes back to the pool only after ROCr completed the
+        // application's signal from it: reused earlier, it could miss its completion. During
+        // finalization ROCr may still call back into the relay, so it is not freed then.
+        if(auto* relay = packet.signal_relay)
+        {
+            while(completed && !relay->completed.load(std::memory_order_acquire) &&
+                  registration::get_fini_status() == 0)
+                std::this_thread::yield();
+            if(relay->completed.load(std::memory_order_acquire)) delete relay;
+            packet.signal_relay = nullptr;
+        }
 
         if(packet.pooled_signal)
         {
@@ -1277,7 +1316,7 @@ write_interceptor(Queue*                                queue,
         }
     }};
 
-    using packet_writer_fn_t = std::function<void(packet_vector_t &&)>;
+    using packet_writer_fn_t = std::function<void(packet_vector_t&&)>;
 
     auto process_packet_batch = [&queue, &corr_id, tracing_data_v, &deferred_completions](
                                     const rocprofiler_packet* _packets,
@@ -1351,8 +1390,25 @@ write_interceptor(Queue*                                queue,
 #else
             auto& _cs = pd.kernel_packet.kernel_dispatch.completion_signal;
 #endif
+            // A device-resident completion signal refuses host read-modify-write, and the
+            // application may reuse it as soon as the dispatch completes it. The dispatch
+            // completes a pooled signal instead, in the same packet, and the application's
+            // signal is completed from the host once the pooled one has been.
+            if(_cs != null_signal && is_device_resident_signal(_cs))
+            {
+                pd.signal_relay = new signal_relay_t{.app_signal = _cs};
+                _cs             = null_signal;
+            }
             if(_cs == null_signal) pd.pooled_signal = create_signal(&_cs);
             get_core_table()->hsa_signal_add_scacq_screl_fn(_cs, 1);
+            if(pd.signal_relay)
+            {
+                const auto armed  = get_core_table()->hsa_signal_load_scacquire_fn(_cs);
+                const auto status = get_amd_ext_table()->hsa_amd_signal_async_handler_fn(
+                    _cs, HSA_SIGNAL_CONDITION_LT, armed, complete_relayed_signal, pd.signal_relay);
+                ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS)
+                    << "failed to register the completion of a device-resident dispatch signal";
+            }
             pd.completion_signal = _cs;
             return _cs;
         };
