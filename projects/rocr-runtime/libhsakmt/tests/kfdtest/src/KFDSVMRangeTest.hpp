@@ -42,6 +42,7 @@ class KFDSVMRangeTest : public KFDBaseComponentTest,
     void PartialUnmapSysMemTest(int gpuNode);
     void BasicVramTest(int gpuNode);
     void SplitVramRangeTest(int gpuNode);
+    void SplitVramRestoreBoundaryTest(int gpuNode);
     void PrefetchTest(int gpuNode);
     void MigrateTest(int gpuNode);
     void MigrateAccessInPlaceTest(int gpuNode);
@@ -59,4 +60,4 @@ class KFDSVMRangeTest : public KFDBaseComponentTest,
     virtual void TearDown();
 };
 
-#endif  // __KFD_LOCALMEMORY_TEST__H__
+#endif  // __KFD_SVMRANGE_TEST__H__
