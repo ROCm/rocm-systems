@@ -61,6 +61,7 @@
 #include "core/inc/amd_aql_queue.h"
 #include "core/inc/amd_blit_kernel.h"
 #include "core/inc/amd_blit_sdma.h"
+#include "core/inc/amd_dmem_cgroup.h"
 #include "core/inc/amd_gpu_pm4.h"
 #include "core/inc/sdma_registers.h"
 #include "core/inc/amd_memory_region.h"
@@ -610,6 +611,18 @@ void GpuAgent::InitRegionList() {
 
           memory_bus_width_ = mem_props[mem_idx].Width;
           memory_max_frequency_ = mem_props[mem_idx].MemoryClockMax;
+
+          // Report a dmem cgroup cap as the pool size: allocators plan from it,
+          // and the kernel refuses anything beyond the cap anyway.
+          {
+            dmem_cgroup::VramLimit cgroup_limit;
+            if (dmem_cgroup::QueryVramLimit(properties_.DrmRenderMinor, &cgroup_limit)) {
+              debug_print("dmem cgroup caps node %u VRAM at %" PRIu64 " bytes\n", node_id(),
+                          cgroup_limit.max);
+              mem_props[mem_idx].SizeInBytes =
+                  std::min<HSAuint64>(mem_props[mem_idx].SizeInBytes, cgroup_limit.max);
+            }
+          }
         case HSA_HEAPTYPE_GPU_LDS:
         case HSA_HEAPTYPE_GPU_SCRATCH: {
           std::shared_ptr<MemoryRegion> region = std::make_shared<MemoryRegion>(false, false, false, false, true, this, mem_props[mem_idx]);
@@ -2760,11 +2773,26 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
 
       if (status != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
-      for (const auto& r : regions()) availableBytes += ((AMD::MemoryRegion*)(r.get()))->GetCacheSize();
-
+      // Memory this process already holds and can hand back out: cached
+      // fragments and scratch that is mapped but not reserved.
+      HSAuint64 reclaimableBytes = 0;
+      for (const auto& r : regions())
+        reclaimableBytes += ((AMD::MemoryRegion*)(r.get()))->GetCacheSize();
       const size_t free_scratch = scratch_cache_.free_bytes();
       const size_t reserved_scratch = scratch_cache_.reserved_bytes();
-      availableBytes += free_scratch - std::min(free_scratch, reserved_scratch);
+      reclaimableBytes += free_scratch - std::min(free_scratch, reserved_scratch);
+      availableBytes += reclaimableBytes;
+
+      // KFD reports what the device has free, which takes no account of the
+      // dmem cgroup cap charged against this process. Bound it by what the
+      // cgroup will still allow, counting the reclaimable memory the same way.
+      {
+        dmem_cgroup::VramLimit cgroup_limit;
+        if (dmem_cgroup::QueryVramLimit(properties_.DrmRenderMinor, &cgroup_limit)) {
+          availableBytes =
+              std::min<HSAuint64>(availableBytes, cgroup_limit.available + reclaimableBytes);
+        }
+      }
 
       *((uint64_t*)value) = availableBytes;
       break;

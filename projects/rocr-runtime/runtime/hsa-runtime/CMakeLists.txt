@@ -267,6 +267,7 @@ set ( SRCS core/driver/driver.cpp
            core/runtime/amd_sdma_queue.cpp
            core/runtime/amd_loader_context.cpp
            core/runtime/hsa_ven_amd_loader.cpp
+           core/runtime/amd_dmem_cgroup.cpp
            core/runtime/amd_memory_region.cpp
            core/runtime/amd_filter_device.cpp
            core/runtime/amd_topology.cpp
