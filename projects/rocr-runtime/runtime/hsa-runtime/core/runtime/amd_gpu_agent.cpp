@@ -2315,9 +2315,6 @@ hsa_status_t GpuAgent::DmaCopyBatchFallback(
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     }
 
-    SetCopyRequestRefCount(true);
-    MAKE_SCOPE_GUARD([&]() { SetCopyRequestRefCount(false); });
-
     lazy_ptr<core::Blit>& blit_dev = GetBlitObject(BlitDevToDev);
 
     // Reject where the swap shader is not built for this ISA, rather than
@@ -2338,9 +2335,6 @@ hsa_status_t GpuAgent::DmaCopyBatchFallback(
   }
   case HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST: {
     // Broadcast shader fallback: one source written to each of op.dst_list.
-    SetCopyRequestRefCount(true);
-    MAKE_SCOPE_GUARD([&]() { SetCopyRequestRefCount(false); });
-
     lazy_ptr<core::Blit>& blit_dev = GetBlitObject(BlitDevToDev);
 
     // Reject where the broadcast shader is not built for this ISA, rather than
