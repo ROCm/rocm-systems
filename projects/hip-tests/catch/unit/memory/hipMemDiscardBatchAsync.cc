@@ -6,6 +6,10 @@
 
 #include <hip_test_common.hh>
 #include <hip_test_defgroups.hh>
+#include <resource_guards.hh>
+#if HT_AMD && !defined(_WIN32)
+#include <hsa/hsa.h>
+#endif
 #include <utils.hh>
 #include <chrono>
 #include <vector>
@@ -22,11 +26,28 @@
  * Discard a batch of managed memory ranges asynchronously.
  */
 
-// Helper: check if device supports managed memory + concurrent managed access (HMM/XNACK)
+// Managed allocation support does not imply that XNACK is enabled.
 static bool HmmSupported(int device = 0) {
   return DeviceAttributesSupport(device,
     hipDeviceAttributeManagedMemory,
     hipDeviceAttributeConcurrentManagedAccess);
+}
+
+// AMD discard requires XNACK, including for hipMallocManaged allocations.
+static bool DiscardSupported(int device = 0) {
+  if (!HmmSupported(device)) {
+    return false;
+  }
+#if HT_AMD && !defined(_WIN32)
+  bool xnack_enabled = false;
+  REQUIRE(hsa_system_get_info(HSA_AMD_SYSTEM_INFO_XNACK_ENABLED, &xnack_enabled) ==
+          HSA_STATUS_SUCCESS);
+  return xnack_enabled;
+#elif HT_AMD
+  return false;
+#else
+  return true;
+#endif
 }
 
 // =====================================================================================
@@ -164,6 +185,82 @@ HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_NegativeTests) {
   HIP_CHECK(hipStreamDestroy(stream));
 }
 
+#if HT_AMD
+// A rejected discard must leave the stream's earlier pending work intact.
+HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_UnsupportedPreservesStream) {
+  if (!HmmSupported()) {
+    HIP_SKIP_TEST("Managed memory is required to exercise discard rejection");
+  }
+  if (DiscardSupported()) {
+    HIP_SKIP_TEST("This regression requires XNACK to be disabled");
+  }
+
+  const bool driver_api = GENERATE(false, true);
+  const bool with_prefetch = GENERATE(false, true);
+  CAPTURE(driver_api, with_prefetch);
+
+  constexpr size_t kSize = 4096;
+  LinearAllocGuard<unsigned char> managed(LinearAllocs::hipMallocManaged, kSize);
+  LinearAllocGuard<int> release(LinearAllocs::hipHostMalloc, sizeof(int));
+  StreamGuard stream(Streams::created);
+  EventsGuard completion(1);
+  memset(managed.ptr(), 0x5a, kSize);
+  *release.ptr() = 0;
+  void* ptrs[] = {managed.ptr()};
+  hipDeviceptr_t dptrs[] = {reinterpret_cast<hipDeviceptr_t>(managed.ptr())};
+  size_t sizes[] = {kSize};
+  hipMemLocation location{hipMemLocationTypeDevice, 0};
+  size_t location_indices[] = {0};
+  const auto timeout_ticks = static_cast<long long>(SpinTicksPerUs() * 10000000ULL);
+
+  WaitForHostReleaseWithTimeout<<<1, 1, 0, stream.stream()>>>(release.ptr(), timeout_ticks);
+  const auto launch_error = hipGetLastError();
+  // Keep an independent completion for cleanup if the API corrupts stream readiness.
+  const auto record_error = hipEventRecord(completion[0], stream.stream());
+  auto discard_error = hipSuccess;
+  auto last_error = hipSuccess;
+  auto query_before = hipSuccess;
+  auto query_while_blocked = hipSuccess;
+  if (launch_error == hipSuccess && record_error == hipSuccess) {
+    query_before = hipStreamQuery(stream.stream());
+    if (with_prefetch) {
+      discard_error = driver_api
+                          ? hipDrvMemDiscardAndPrefetchBatchAsync(
+                                dptrs, sizes, 1, &location, location_indices, 1, 0, stream.stream())
+                          : hipMemDiscardAndPrefetchBatchAsync(
+                                ptrs, sizes, 1, &location, location_indices, 1, 0, stream.stream());
+    } else {
+      discard_error = driver_api ? hipDrvMemDiscardBatchAsync(dptrs, sizes, 1, 0, stream.stream())
+                                 : hipMemDiscardBatchAsync(ptrs, sizes, 1, 0, stream.stream());
+    }
+    // Consume the expected sticky error before the next generated API variant.
+    last_error = hipGetLastError();
+    query_while_blocked = hipErrorNotReady;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds{100};
+    while (query_while_blocked == hipErrorNotReady && std::chrono::steady_clock::now() < deadline) {
+      query_while_blocked = hipStreamQuery(stream.stream());
+    }
+  }
+
+  // No assertion may throw while the kernel is waiting for the host release.
+  __atomic_store_n(release.ptr(), 1, __ATOMIC_RELEASE);
+  const auto completion_error =
+      record_error == hipSuccess ? hipEventSynchronize(completion[0]) : hipSuccess;
+  const auto synchronize_error = hipStreamSynchronize(stream.stream());
+  HIP_CHECK(launch_error);
+  HIP_CHECK(record_error);
+  HIP_CHECK(completion_error);
+  HIP_CHECK(synchronize_error);
+  HIP_CHECK_ERROR(discard_error, hipErrorNotSupported);
+  HIP_CHECK_ERROR(last_error, hipErrorNotSupported);
+  REQUIRE(query_before == hipErrorNotReady);
+  REQUIRE(query_while_blocked == hipErrorNotReady);
+  for (size_t i = 0; i < kSize; ++i) {
+    REQUIRE(managed.ptr()[i] == 0x5a);
+  }
+}
+#endif
+
 // =====================================================================================
 // Functional Tests — require HMM/XNACK support
 // =====================================================================================
@@ -179,11 +276,11 @@ HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_NegativeTests) {
  * Test requirements
  * ------------------------
  *  - HIP_VERSION >= 7.2
- *  - Device supports managed memory and concurrent managed access
+ *  - Device supports managed memory, concurrent managed access and XNACK on AMD
  */
 HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_SingleDiscard) {
-  if (!HmmSupported()) {
-    HIP_SKIP_TEST("HMM/managed memory not supported");
+  if (!DiscardSupported()) {
+    HIP_SKIP_TEST("Discard requires managed memory support and XNACK on AMD");
     return;
   }
 
@@ -226,11 +323,11 @@ HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_SingleDiscard) {
  * Test requirements
  * ------------------------
  *  - HIP_VERSION >= 7.2
- *  - Device supports managed memory and concurrent managed access
+ *  - Device supports managed memory, concurrent managed access and XNACK on AMD
  */
 HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_MultipleDiscards) {
-  if (!HmmSupported()) {
-    HIP_SKIP_TEST("HMM/managed memory not supported");
+  if (!DiscardSupported()) {
+    HIP_SKIP_TEST("Discard requires managed memory support and XNACK on AMD");
     return;
   }
 
@@ -277,11 +374,11 @@ HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_MultipleDiscards) {
  * Test requirements
  * ------------------------
  *  - HIP_VERSION >= 7.2
- *  - Device supports managed memory and concurrent managed access
+ *  - Device supports managed memory, concurrent managed access and XNACK on AMD
  */
 HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_LargeCount) {
-  if (!HmmSupported()) {
-    HIP_SKIP_TEST("HMM/managed memory not supported");
+  if (!DiscardSupported()) {
+    HIP_SKIP_TEST("Discard requires managed memory support and XNACK on AMD");
     return;
   }
 
@@ -326,11 +423,11 @@ HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_LargeCount) {
  * Test requirements
  * ------------------------
  *  - HIP_VERSION >= 7.2
- *  - Device supports managed memory and concurrent managed access
+ *  - Device supports managed memory, concurrent managed access and XNACK on AMD
  */
 HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_DiscardThenPrefetch) {
-  if (!HmmSupported()) {
-    HIP_SKIP_TEST("HMM/managed memory not supported");
+  if (!DiscardSupported()) {
+    HIP_SKIP_TEST("Discard requires managed memory support and XNACK on AMD");
     return;
   }
 
@@ -375,11 +472,11 @@ HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_DiscardThenPrefetch) {
  * Test requirements
  * ------------------------
  *  - HIP_VERSION >= 7.2
- *  - Device supports managed memory and concurrent managed access
+ *  - Device supports managed memory, concurrent managed access and XNACK on AMD
  */
 HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_StreamOrdering) {
-  if (!HmmSupported()) {
-    HIP_SKIP_TEST("HMM/managed memory not supported");
+  if (!DiscardSupported()) {
+    HIP_SKIP_TEST("Discard requires managed memory support and XNACK on AMD");
     return;
   }
 
@@ -424,16 +521,11 @@ HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_StreamOrdering) {
  * Test requirements
  * ------------------------
  *  - HIP_VERSION >= 7.2
- *  - Device supports managed memory, concurrent managed access and pageable memory access
+ *  - Device supports managed memory, concurrent managed access and XNACK on AMD
  */
 HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_Sync_Behavior) {
-  if (!HmmSupported()) {
-    HIP_SKIP_TEST("HMM/managed memory not supported");
-    return;
-  }
-  // The discard is rejected at submission without XNACK, which completes the command at once
-  if (!DeviceAttributesSupport(0, hipDeviceAttributePageableMemoryAccess)) {
-    HIP_SKIP_TEST("PageableMemoryAccess not supported");
+  if (!DiscardSupported()) {
+    HIP_SKIP_TEST("Discard requires managed memory support and XNACK on AMD");
     return;
   }
 
@@ -484,11 +576,11 @@ HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_Sync_Behavior) {
  * Test requirements
  * ------------------------
  *  - HIP_VERSION >= 7.2
- *  - Device supports managed memory and concurrent managed access
+ *  - Device supports managed memory, concurrent managed access and XNACK on AMD
  */
 HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_SubrangeDiscard) {
-  if (!HmmSupported()) {
-    HIP_SKIP_TEST("HMM/managed memory not supported");
+  if (!DiscardSupported()) {
+    HIP_SKIP_TEST("Discard requires managed memory support and XNACK on AMD");
     return;
   }
 
@@ -541,11 +633,11 @@ HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_SubrangeDiscard) {
  * Test requirements
  * ------------------------
  *  - HIP_VERSION >= 7.2
- *  - Device supports managed memory and concurrent managed access
+ *  - Device supports managed memory, concurrent managed access and XNACK on AMD
  */
 HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_SamePointerTwice) {
-  if (!HmmSupported()) {
-    HIP_SKIP_TEST("HMM/managed memory not supported");
+  if (!DiscardSupported()) {
+    HIP_SKIP_TEST("Discard requires managed memory support and XNACK on AMD");
     return;
   }
 
@@ -582,11 +674,11 @@ HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_SamePointerTwice) {
  * Test requirements
  * ------------------------
  *  - HIP_VERSION >= 7.2
- *  - Device supports managed memory and concurrent managed access
+ *  - Device supports managed memory, concurrent managed access and XNACK on AMD
  */
 HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_MinimalSize) {
-  if (!HmmSupported()) {
-    HIP_SKIP_TEST("HMM/managed memory not supported");
+  if (!DiscardSupported()) {
+    HIP_SKIP_TEST("Discard requires managed memory support and XNACK on AMD");
     return;
   }
 
@@ -622,11 +714,11 @@ HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_MinimalSize) {
  * Test requirements
  * ------------------------
  *  - HIP_VERSION >= 7.2
- *  - Device supports managed memory and concurrent managed access
+ *  - Device supports managed memory, concurrent managed access and XNACK on AMD
  */
 HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_DrvApiParity) {
-  if (!HmmSupported()) {
-    HIP_SKIP_TEST("HMM/managed memory not supported");
+  if (!DiscardSupported()) {
+    HIP_SKIP_TEST("Discard requires managed memory support and XNACK on AMD");
     return;
   }
 
@@ -683,11 +775,11 @@ HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_DrvApiParity) {
  * Test requirements
  * ------------------------
  *  - HIP_VERSION >= 7.2
- *  - Device supports managed memory and concurrent managed access
+ *  - Device supports managed memory, concurrent managed access and XNACK on AMD
  */
 HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_ContentAfterDiscard) {
-  if (!HmmSupported()) {
-    HIP_SKIP_TEST("HMM/managed memory not supported");
+  if (!DiscardSupported()) {
+    HIP_SKIP_TEST("Discard requires managed memory support and XNACK on AMD");
     return;
   }
 
@@ -985,8 +1077,8 @@ HIP_TEST_CASE(Unit_hipMemDiscardAndPrefetchBatchAsync_NegativeTests) {
  *  - HIP_VERSION >= 7.2
  */
 HIP_TEST_CASE(Unit_hipMemDiscardAndPrefetchBatchAsync_SingleBuffer) {
-  if (!HmmSupported()) {
-    HIP_SKIP_TEST("HMM not supported");
+  if (!DiscardSupported()) {
+    HIP_SKIP_TEST("Discard requires managed memory support and XNACK on AMD");
     return;
   }
 
@@ -1032,8 +1124,8 @@ HIP_TEST_CASE(Unit_hipMemDiscardAndPrefetchBatchAsync_SingleBuffer) {
  *  - HIP_VERSION >= 7.2
  */
 HIP_TEST_CASE(Unit_hipMemDiscardAndPrefetchBatchAsync_MultipleSameDevice) {
-  if (!HmmSupported()) {
-    HIP_SKIP_TEST("HMM not supported");
+  if (!DiscardSupported()) {
+    HIP_SKIP_TEST("Discard requires managed memory support and XNACK on AMD");
     return;
   }
 
@@ -1086,8 +1178,8 @@ HIP_TEST_CASE(Unit_hipMemDiscardAndPrefetchBatchAsync_MultipleSameDevice) {
  *  - HIP_VERSION >= 7.2
  */
 HIP_TEST_CASE(Unit_hipMemDiscardAndPrefetchBatchAsync_ParitySeparateCalls) {
-  if (!HmmSupported()) {
-    HIP_SKIP_TEST("HMM not supported");
+  if (!DiscardSupported()) {
+    HIP_SKIP_TEST("Discard requires managed memory support and XNACK on AMD");
     return;
   }
 
@@ -1218,8 +1310,8 @@ HIP_TEST_CASE(Unit_hipMemDiscardAndPrefetchBatchAsync_Atomicity) {
  *  - HIP_VERSION >= 7.2
  */
 HIP_TEST_CASE(Unit_hipDrvMemDiscardAndPrefetchBatchAsync_SingleBuffer) {
-  if (!HmmSupported()) {
-    HIP_SKIP_TEST("HMM not supported");
+  if (!DiscardSupported()) {
+    HIP_SKIP_TEST("Discard requires managed memory support and XNACK on AMD");
     return;
   }
 

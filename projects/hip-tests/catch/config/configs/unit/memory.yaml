@@ -2324,6 +2324,9 @@ memory:
   Unit_hipMemDiscardBatchAsync_NegativeTests:
     <<: *level_default
     tags: [query, managed_memory]
+  Unit_hipMemDiscardBatchAsync_UnsupportedPreservesStream:
+    <<: *level_default
+    tags: [query, managed_memory]
   Unit_hipMemDiscardBatchAsync_SingleDiscard:
     <<: *level_default
     tags: [managed_memory]

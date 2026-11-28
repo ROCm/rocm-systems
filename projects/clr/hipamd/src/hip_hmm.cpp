@@ -76,6 +76,16 @@ static bool AllDevicesSupportPageableMemoryAccess() {
 }
 
 // ================================================================================================
+static bool AllDevicesSupportXnack() {
+  for (const auto& hip_device : g_devices) {
+    if (!hip_device->devices()[0]->info().xnackEnabled_) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// ================================================================================================
 static bool AllDevicesSupportHmm() {
   for (const auto& hip_device : g_devices) {
     if (!hip_device->devices()[0]->info().hmmSupported_) {
@@ -220,6 +230,12 @@ hipError_t ihipMemDiscardBatchAsync(void** dev_ptrs, size_t* sizes, size_t count
 
     if (requires_pageable_support && !AllDevicesSupportPageableMemoryAccess()) {
       return hipErrorInvalidValue;
+    }
+
+    // Discard requires XNACK even for managed allocations. Reject unsupported
+    // submissions before enqueueing a command that cannot produce a completion signal.
+    if (!AllDevicesSupportXnack()) {
+      return hipErrorNotSupported;
     }
 
     command = new amd::SvmDiscardBatchAsyncCommand(*hip_stream, dev_ptrs_vec, sizes_vec);

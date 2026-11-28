@@ -1524,7 +1524,8 @@ bool SvmBuffer::Remove(uintptr_t ptr, uintptr_t* base) {
     return false;
   }
   --it;
-  if (ptr < it->first || ptr >= it->second) {
+  // A zero-length entry is an opaque physical handle and only matches its key.
+  if (ptr != it->first && ptr >= it->second) {
     return false;
   }
   *base = it->first;
@@ -1539,10 +1540,9 @@ bool SvmBuffer::Contains(uintptr_t ptr) {
     return false;
   }
   --it;
-  return ptr >= it->first && ptr < it->second;
+  return ptr == it->first || ptr < it->second;
 }
 
-// The allocation flags are ignored for now.
 void* SvmBuffer::malloc(Context& context, cl_svm_mem_flags flags, size_t size, size_t alignment,
                         const amd::Device* curDev, void* hostptr) {
   void* ret = context.svmAlloc(size, alignment, flags, curDev, hostptr);
@@ -1551,7 +1551,8 @@ void* SvmBuffer::malloc(Context& context, cl_svm_mem_flags flags, size_t size, s
     return nullptr;
   }
   uintptr_t ret_u = reinterpret_cast<uintptr_t>(ret);
-  Add(ret_u, ret_u + size);
+  // Physical allocations return opaque handles, so only record the exact key.
+  Add(ret_u, (flags & ROCCLR_MEM_PHYMEM) ? ret_u : ret_u + size);
   return ret;
 }
 
