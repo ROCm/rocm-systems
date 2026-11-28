@@ -25,6 +25,7 @@
 #define ROCM_VER_7_0_3_0 70060000  // 7.0.2.x backport range, exclusive upper bound
 #define ROCM_VER_7_12_0 71200000  // hipMemcpyBatchAsync native min
 #define ROCM_VER_7_12_60540 71260540  // upstream cuMem/VMM + DMA-BUF export
+#define ROCM_VER_7_18_26461 71826461  // hipMemcpyBatchAsync completes batches with several copies per destination
 
 // === Generic version-range predicates =====================================
 // Constant expressions, so they are valid in both #if directives (compile
@@ -52,6 +53,12 @@
 // probe exists for the batch API, so this version window is the only runtime guard.
 #define NCCL_CE_BATCH_ASYNC_VERSION_SUPPORTED(v) \
   (NCCL_VER_GE(v, ROCM_VER_7_12_0) || NCCL_VER_IN(v, ROCM_VER_7_0_2_2, ROCM_VER_7_0_3_0))
+
+// hipMemcpyBatchAsync batches holding several copies per destination: older
+// runtimes never signal their completion. 7.18.26461 is the first runtime
+// verified to complete them, so earlier builds that may carry the fix still
+// fall back to at most one copy per destination.
+#define NCCL_CE_MULTI_COPY_PER_DST_VERSION_SUPPORTED(v) NCCL_VER_GE(v, ROCM_VER_7_18_26461)
 
 // === Capability gate: both the symbol probe and the version must agree =====
 // CMake sets RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED when

@@ -1,0 +1,1 @@
+* A hang in the ring path of hierarchical Copy Engine `ncclAllGather` (`NCCL_HIER_CE_COLL_AG_RAIL_RING_ENABLE=1`) during the per-round intra-node fan-out, on HIP runtimes before 7.18.26461 that never complete a `hipMemcpyBatchAsync` batch holding several copies per destination. On those runtimes the fan-out now sends at most one copy per destination per batch.

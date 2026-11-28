@@ -137,13 +137,34 @@ static constexpr size_t HIER_COLL_CHUNK_ALIGN = 8 * 1024;
 static constexpr size_t HIER_COLL_AG_RING_HALF_AWARE_THRESHOLD = 128 * 1024 * 1024;
 static constexpr size_t HIER_COLL_AG_RING_MIN_HALF_AWARE_CHUNK = 8 * 1024 * 1024;
 
+// Ring scatter batch shape, picked from the running HIP runtime rather than the
+// build's ROCm. When it completes batches with several copies per destination,
+// each round fans every arrived cw and ccw chunk out in a single CE batch.
+// Otherwise each contiguous arrived piece is its own batch with at most one copy
+// per LSA peer, since the multi-copy batch never signals completion there.
+static bool ncclHierCeAgRingSingleScatterBatch() {
+  int driverVersion;
+  if (ncclCudaDriverVersion(&driverVersion) != ncclSuccess) return false;
+  return NCCL_CE_MULTI_COPY_PER_DST_VERSION_SUPPORTED(driverVersion);
+}
+
 // Below this per-rank size the ring stays on a single context: reaching a
 // second one costs a narrower chunk, which small messages do not earn back.
 static constexpr int64_t HIER_COLL_AG_RING_MULTI_CTX_THRESHOLD_DEFAULT = 4 * 1024 * 1024;
 
-// Ring selection: a positive value enables the rail ring, while zero or a
-// negative value keeps the Direct path, which is the default.
+// A positive value forces the Ring path and 0 forces Direct. -1 selects
+// automatically: Direct on two nodes, where the ring has a single remote peer
+// and never beats Direct, and otherwise Ring once each rank's contribution
+// reaches HIER_CE_COLL_AG_RAIL_RING_THRESHOLD. Direct posts every remote put at
+// once, so it has the lower latency, while Ring keeps each NIC on one peer and
+// wins once the transfer is bandwidth-bound. Must be set identically on all ranks.
 NCCL_PARAM(HierCeCollAgRailRingEnable, "HIER_CE_COLL_AG_RAIL_RING_ENABLE", -1);
+
+// Per-rank bytes at and above which automatic selection uses Ring on three or
+// more nodes. -1 selects the built-in default. On MI350X with eight GPUs per
+// node, the Ring/Direct crossover sits at 2 MiB per rank on 4, 8 and 16 nodes.
+NCCL_PARAM(HierCeCollAgRailRingThreshold, "HIER_CE_COLL_AG_RAIL_RING_THRESHOLD", -1);
+static constexpr int64_t HIER_COLL_AG_RAIL_RING_THRESHOLD_DEFAULT = 2 * 1024 * 1024;
 
 // Per-peer transfer size (bytes) below which hierarchical CE collectives keep
 // their inter-node rail on a single internal RMA context. Off by default (-1;
@@ -2342,13 +2363,88 @@ fail:
   goto exit;
 }
 
+struct ncclHierCeAgRingPiece {
+  uint8_t* slot;
+  size_t bytes;
+};
+
+// Merge one round's arrived cw and ccw chunks into contiguous recvbuf pieces.
+// halfBases[h] is where half h of the round's origin slot starts. When cw and
+// ccw come from the same origin rank (always on 2 nodes) the halves are
+// adjacent and form one piece; on 3+ nodes they come from different origins
+// and form two. pieces needs room for every chunk of both halves.
+static int ncclHierCeAgRingScatterPieces(struct ncclHierChunkPlan* const halfPlans[2], uint8_t* const halfBases[2],
+                                         struct ncclHierCeAgRingPiece* pieces) {
+  int nPieces = 0;
+  for (int half = 0; half < 2; half++) {
+    const struct ncclHierChunkPlan* cp = halfPlans[half];
+    if (cp->chunkStart == nullptr) continue;
+    for (int c = cp->chunkStart[0]; c < cp->chunkStart[1]; c++) {
+      uint8_t* chunkSlot = halfBases[half] + cp->chunkOff[c];
+      if (nPieces > 0 && pieces[nPieces - 1].slot + pieces[nPieces - 1].bytes == chunkSlot) {
+        pieces[nPieces - 1].bytes += cp->chunkBytes[c];
+      } else {
+        pieces[nPieces].slot = chunkSlot;
+        pieces[nPieces].bytes = cp->chunkBytes[c];
+        nPieces++;
+      }
+    }
+  }
+  return nPieces;
+}
+
+// Fan one contiguous recvbuf piece out to the LSA team as its own CE batch:
+// a single multicast write, or one unicast copy per LSA peer.
+static ncclResult_t ncclHierCeAgRingScatterPiece(struct ncclComm* comm, struct ncclCeBatchOpsParams* ops,
+                                                 cudaStream_t stream, struct ncclCeCollArgs* args,
+                                                 struct ncclDevrWindow* recvWin, uint8_t* src, size_t bytes,
+                                                 bool useMulticast, uint8_t* mcBase, uint8_t** peerBases, int lsaSize) {
+  size_t winOffset = src - (uint8_t*)recvWin->userPtr;
+  ops->numOps = 0;
+  if (useMulticast) {
+    ops->srcs[0] = src;
+    ops->dsts[0] = (void*)(mcBase + winOffset);
+    ops->sizes[0] = bytes;
+    ops->numOps = 1;
+  } else {
+    for (int r = 1; r < lsaSize; r++) {
+      ops->srcs[ops->numOps] = src;
+      ops->dsts[ops->numOps] = (void*)(peerBases[r - 1] + winOffset);
+      ops->sizes[ops->numOps] = bytes;
+      ops->numOps++;
+    }
+  }
+  return ncclCeLaunchBatchOps(comm, ops, stream, args);
+}
+
+// Append the fan-out of one arrived chunk to a round's single scatter batch
+// (ncclHierCeAgRingSingleScatterBatch) without launching it.
+static void ncclHierCeAgRingScatterAppend(struct ncclCeBatchOpsParams* ops, struct ncclDevrWindow* recvWin,
+                                          uint8_t* src, size_t bytes, bool useMulticast, uint8_t* mcBase,
+                                          uint8_t** peerBases, int lsaSize) {
+  size_t winOffset = src - (uint8_t*)recvWin->userPtr;
+  if (useMulticast) {
+    ops->srcs[ops->numOps] = src;
+    ops->dsts[ops->numOps] = (void*)(mcBase + winOffset);
+    ops->sizes[ops->numOps] = bytes;
+    ops->numOps++;
+    return;
+  }
+  for (int r = 1; r < lsaSize; r++) {
+    ops->srcs[ops->numOps] = src;
+    ops->dsts[ops->numOps] = (void*)(peerBases[r - 1] + winOffset);
+    ops->sizes[ops->numOps] = bytes;
+    ops->numOps++;
+  }
+}
+
 // Bidirectional ring variant of hierarchical CE allgather.
 //
 // DAG on the user stream:
 //   RailSync                    // cross-node entry barrier (net + wait)
+//   Round1PutGroupSubmit        // prime the pipeline with both clockwise and counterclockwise halves
 //   IntraNodeBarrier            // gates LSA peers' recvbuf writes before local fanout starts
 //   SelfBcast                   // CE scatter of own slice to LSA peers
-//   Round1PutGroupSubmit        // prime the pipeline with both clockwise and counterclockwise halves
 //   for each ring round:
 //     wait per active context   // one wait covers that context's cw + ccw arrivals for the current round
 //     NextRoundPutGroupSubmit   // submit the next round after current arrivals are known, before local fanout
@@ -2366,6 +2462,9 @@ static ncclResult_t ncclHierCeAllGatherRing(struct ncclComm* comm, struct ncclKe
   int myNode = comm->node;
   int nNodes = comm->nNodes;
   int nRemoteNodes = nNodes - 1;
+  int nRounds = nRemoteNodes;
+  int nextNode = (myNode + 1) % nNodes;
+  int prevNode = (myNode - 1 + nNodes) % nNodes;
   int myLsaRank = comm->devrState.lsaTeamSelf;
   int lsaSize = comm->devrState.lsaTeamSize;
   bool persistent = plan->persistent;
@@ -2392,11 +2491,7 @@ static ncclResult_t ncclHierCeAllGatherRing(struct ncclComm* comm, struct ncclKe
   int* cwCtxOps = nullptr;
   int* ccwCtxOps = nullptr;
   int* ctxFill = nullptr;
-  int* cwChunkFill = nullptr;
-  int* ccwChunkFill = nullptr;
   int* activeCtxs = nullptr;
-  int** cwChunksByCtx = nullptr;
-  int** ccwChunksByCtx = nullptr;
   uint8_t** scatterPeerBases = nullptr;
   int* waitNPeersByActiveCtx = nullptr;
   int** waitPeersByActiveCtx = nullptr;
@@ -2412,6 +2507,7 @@ static ncclResult_t ncclHierCeAllGatherRing(struct ncclComm* comm, struct ncclKe
   struct ncclCeBatchOpsParams ceBcastOps = {};
   struct ncclCeBatchOpsParams ceScatterOps = {};
   uint8_t* scatterMcBase = nullptr;
+  struct ncclHierCeAgRingPiece* scatterPieces = nullptr;
   struct ncclHierCeAllGatherRingRound* roundMeta = nullptr;
   struct ncclHierCeAllGatherRingIssueState issueState = {};
 
@@ -2419,14 +2515,10 @@ static ncclResult_t ncclHierCeAllGatherRing(struct ncclComm* comm, struct ncclKe
   NCCLCHECKGOTO(ncclCalloc(&cwCtxOps, numCtx), ret, fail);
   NCCLCHECKGOTO(ncclCalloc(&ccwCtxOps, numCtx), ret, fail);
   NCCLCHECKGOTO(ncclCalloc(&ctxFill, numCtx), ret, fail);
-  NCCLCHECKGOTO(ncclCalloc(&cwChunkFill, numCtx), ret, fail);
-  NCCLCHECKGOTO(ncclCalloc(&ccwChunkFill, numCtx), ret, fail);
   NCCLCHECKGOTO(ncclCalloc(&activeCtxs, numCtx), ret, fail);
   if (lsaSize > 1) {
     NCCLCHECKGOTO(ncclCalloc(&scatterPeerBases, lsaSize - 1), ret, fail);
   }
-  NCCLCHECKGOTO(ncclCalloc(&cwChunksByCtx, numCtx), ret, fail);
-  NCCLCHECKGOTO(ncclCalloc(&ccwChunksByCtx, numCtx), ret, fail);
   NCCLCHECKGOTO(ncclCalloc(&waitNPeersByActiveCtx, numCtx), ret, fail);
   NCCLCHECKGOTO(ncclCalloc(&waitPeersByActiveCtx, numCtx), ret, fail);
   NCCLCHECKGOTO(ncclCalloc(&waitSignalsByActiveCtx, numCtx), ret, fail);
@@ -2464,26 +2556,60 @@ static ncclResult_t ncclHierCeAllGatherRing(struct ncclComm* comm, struct ncclKe
       nActiveCtx++;
     }
 
-    for (int k = 0; k < numCtx; k++) {
-      if (cwCtxOps[k] > 0) NCCLCHECKGOTO(ncclCalloc(&cwChunksByCtx[k], cwCtxOps[k]), ret, fail);
-      if (ccwCtxOps[k] > 0) NCCLCHECKGOTO(ncclCalloc(&ccwChunksByCtx[k], ccwCtxOps[k]), ret, fail);
-    }
-    if (cwBytes > 0) {
-      for (int c = cwChunkPlan.chunkStart[0]; c < cwChunkPlan.chunkStart[1]; c++) {
-        int k = c % numCtx;
-        cwChunksByCtx[k][cwChunkFill[k]++] = c;
-      }
-    }
-    if (ccwBytes > 0) {
-      for (int c = ccwChunkPlan.chunkStart[0]; c < ccwChunkPlan.chunkStart[1]; c++) {
-        int k = c % numCtx;
-        ccwChunksByCtx[k][ccwChunkFill[k]++] = c;
-      }
-    }
-
     for (int i = 0; i < 2; i++) {
       NCCLCHECKGOTO(ncclCalloc(&groupStartParams[i], (size_t)nActiveCtx * startOps), ret, fail);
       NCCLCHECKGOTO(ncclCalloc(&groupDoneParams[i], (size_t)nActiveCtx * doneOps), ret, fail);
+    }
+
+    // Round 1 reads only sendbuff and writes this rank's slot in the rail
+    // peers' recvbuf, which RailSync already made safe. Submit it before the
+    // intra-node barrier and SelfBcast so the first network round overlaps them.
+    if (nActiveCtx > 0) {
+      int sendRailPeerCw = comm->nodeRanks[nextNode].localRankToRank[localRank];
+      int sendRailPeerCcw = comm->nodeRanks[prevNode].localRankToRank[localRank];
+
+      NCCLCHECKGOTO(ncclCalloc(&roundMeta, nRounds + 1), ret, fail);
+      for (int step = 1; step <= nRounds; step++) {
+        int originNodeSendCw = (myNode - (step - 1) + nNodes) % nNodes;
+        int originNodeSendCcw = (myNode + (step - 1)) % nNodes;
+        int originNodeRecvCw = (myNode - step + nNodes) % nNodes;
+        int originNodeRecvCcw = (myNode + step) % nNodes;
+        struct ncclHierCeAllGatherRingRound* rm = &roundMeta[step];
+        rm->originRankSendCw = comm->nodeRanks[originNodeSendCw].localRankToRank[localRank];
+        rm->originRankSendCcw = comm->nodeRanks[originNodeSendCcw].localRankToRank[localRank];
+        rm->originRankRecvCw = comm->nodeRanks[originNodeRecvCw].localRankToRank[localRank];
+        rm->originRankRecvCcw = comm->nodeRanks[originNodeRecvCcw].localRankToRank[localRank];
+        size_t sendOffset = (const uint8_t*)sendbuff - (const uint8_t*)sendWin->userPtr;
+        size_t slotOffsetCw =
+          ((const uint8_t*)recvbuff + rm->originRankSendCw * perRankBytes) - (const uint8_t*)recvWin->userPtr;
+        size_t slotOffsetCcw =
+          ((const uint8_t*)recvbuff + rm->originRankSendCcw * perRankBytes) - (const uint8_t*)recvWin->userPtr;
+        rm->srcWinHostCw = step == 1 ? sendWin : recvWin;
+        rm->srcWinHostCcw = step == 1 ? sendWin : recvWin;
+        rm->srcBaseOffsetCw = step == 1 ? sendOffset : slotOffsetCw;
+        rm->dstBaseOffsetCw = slotOffsetCw;
+        rm->srcBaseOffsetCcw = (step == 1 ? sendOffset : slotOffsetCcw) + cwBytes;
+        rm->dstBaseOffsetCcw = slotOffsetCcw + cwBytes;
+      }
+
+      issueState.numCtx = numCtx;
+      issueState.baseCtx = baseCtx;
+      issueState.nActiveCtx = nActiveCtx;
+      issueState.sendRailPeerCw = sendRailPeerCw;
+      issueState.sendRailPeerCcw = sendRailPeerCcw;
+      issueState.ctxOps = ctxOps;
+      issueState.ctxFill = ctxFill;
+      issueState.activeCtxs = activeCtxs;
+      issueState.cwChunkPlan = &cwChunkPlan;
+      issueState.ccwChunkPlan = &ccwChunkPlan;
+      issueState.groupDesc = groupDesc;
+      issueState.groupOps = groupOps;
+      issueState.groupStartParams = groupStartParams;
+      issueState.groupDoneParams = groupDoneParams;
+      issueState.rounds = roundMeta;
+
+      NCCLCHECKGOTO(ncclHierCeAllGatherRingIssueRound(comm, plan, stream, &issueState, /*step=*/1, /*slot=*/0), ret,
+                    fail);
     }
   }
 
@@ -2541,16 +2667,17 @@ static ncclResult_t ncclHierCeAllGatherRing(struct ncclComm* comm, struct ncclKe
   // Phase 4: Ring rounds (next-node send, previous-node receive)
   // ====================================================================
   if (nRemoteNodes > 0 && nActiveCtx > 0) {
-    int nRounds = nNodes - 1;
-    int nextNode = (myNode + 1) % nNodes;
-    int prevNode = (myNode - 1 + nNodes) % nNodes;
-    int sendRailPeerCw = comm->nodeRanks[nextNode].localRankToRank[localRank];
     int recvRailPeerCw = comm->nodeRanks[prevNode].localRankToRank[localRank];
-    int sendRailPeerCcw = comm->nodeRanks[prevNode].localRankToRank[localRank];
     int recvRailPeerCcw = comm->nodeRanks[nextNode].localRankToRank[localRank];
-    int nRoundChunks = (cwChunkPlan.chunkStart ? (cwChunkPlan.chunkStart[1] - cwChunkPlan.chunkStart[0]) : 0) +
-                       (ccwChunkPlan.chunkStart ? (ccwChunkPlan.chunkStart[1] - ccwChunkPlan.chunkStart[0]) : 0);
-    int scatterCapacity = agUseMulticast ? nRoundChunks : nRoundChunks * (lsaSize - 1);
+    struct ncclHierChunkPlan* halfPlans[2] = {&cwChunkPlan, &ccwChunkPlan};
+    int nRoundChunks = (cwChunkPlan.chunkStart ? cwChunkPlan.chunkStart[1] - cwChunkPlan.chunkStart[0] : 0) +
+                       (ccwChunkPlan.chunkStart ? ccwChunkPlan.chunkStart[1] - ccwChunkPlan.chunkStart[0] : 0);
+    bool singleScatterBatch = ncclHierCeAgRingSingleScatterBatch();
+    int scatterCapacity = agUseMulticast ? 1 : lsaSize - 1;
+    if (singleScatterBatch) scatterCapacity = agUseMulticast ? nRoundChunks : nRoundChunks * (lsaSize - 1);
+    if (!singleScatterBatch && scatterCapacity > 0 && nRoundChunks > 0) {
+      NCCLCHECKGOTO(ncclCalloc(&scatterPieces, nRoundChunks), ret, fail);
+    }
 
     for (int ai = 0; ai < nActiveCtx; ai++) {
       int k = activeCtxs[ai];
@@ -2570,53 +2697,7 @@ static ncclResult_t ncclHierCeAllGatherRing(struct ncclComm* comm, struct ncclKe
       waitNPeersByActiveCtx[k] = waitNPeers;
     }
 
-    NCCLCHECKGOTO(ncclCalloc(&roundMeta, nRounds + 1), ret, fail);
-    for (int step = 1; step <= nRounds; step++) {
-      int originNodeSendCw = (myNode - (step - 1) + nNodes) % nNodes;
-      int originNodeSendCcw = (myNode + (step - 1)) % nNodes;
-      int originNodeRecvCw = (myNode - step + nNodes) % nNodes;
-      int originNodeRecvCcw = (myNode + step) % nNodes;
-      roundMeta[step].originRankSendCw = comm->nodeRanks[originNodeSendCw].localRankToRank[localRank];
-      roundMeta[step].originRankSendCcw = comm->nodeRanks[originNodeSendCcw].localRankToRank[localRank];
-      roundMeta[step].originRankRecvCw = comm->nodeRanks[originNodeRecvCw].localRankToRank[localRank];
-      roundMeta[step].originRankRecvCcw = comm->nodeRanks[originNodeRecvCcw].localRankToRank[localRank];
-      roundMeta[step].srcWinHostCw = step == 1 ? sendWin : recvWin;
-      roundMeta[step].srcWinHostCcw = step == 1 ? sendWin : recvWin;
-      roundMeta[step].srcBaseOffsetCw = step == 1 ?
-                                          (const uint8_t*)sendbuff - (const uint8_t*)sendWin->userPtr :
-                                          ((const uint8_t*)recvbuff + roundMeta[step].originRankSendCw * perRankBytes) -
-                                            (const uint8_t*)recvWin->userPtr;
-      roundMeta[step].dstBaseOffsetCw =
-        ((const uint8_t*)recvbuff + roundMeta[step].originRankSendCw * perRankBytes) - (const uint8_t*)recvWin->userPtr;
-      roundMeta[step].srcBaseOffsetCcw =
-        (step == 1 ? (const uint8_t*)sendbuff - (const uint8_t*)sendWin->userPtr :
-                     ((const uint8_t*)recvbuff + roundMeta[step].originRankSendCcw * perRankBytes) -
-                       (const uint8_t*)recvWin->userPtr) +
-        cwBytes;
-      roundMeta[step].dstBaseOffsetCcw = ((const uint8_t*)recvbuff + roundMeta[step].originRankSendCcw * perRankBytes) -
-                                         (const uint8_t*)recvWin->userPtr + cwBytes;
-    }
-
-    issueState.numCtx = numCtx;
-    issueState.baseCtx = baseCtx;
-    issueState.nActiveCtx = nActiveCtx;
-    issueState.sendRailPeerCw = sendRailPeerCw;
-    issueState.sendRailPeerCcw = sendRailPeerCcw;
-    issueState.ctxOps = ctxOps;
-    issueState.ctxFill = ctxFill;
-    issueState.activeCtxs = activeCtxs;
-    issueState.cwChunkPlan = &cwChunkPlan;
-    issueState.ccwChunkPlan = &ccwChunkPlan;
-    issueState.groupDesc = groupDesc;
-    issueState.groupOps = groupOps;
-    issueState.groupStartParams = groupStartParams;
-    issueState.groupDoneParams = groupDoneParams;
-    issueState.rounds = roundMeta;
-
     if (scatterCapacity > 0) NCCLCHECKGOTO(ncclCeInitBatchOpsParams(&ceScatterOps, scatterCapacity), ret, fail);
-
-    NCCLCHECKGOTO(ncclHierCeAllGatherRingIssueRound(comm, plan, stream, &issueState, /*step=*/1, /*slot=*/0), ret,
-                  fail);
 
     for (int step = 1; step <= nRounds; step++) {
       auto* meta = &roundMeta[step];
@@ -2673,59 +2754,37 @@ static ncclResult_t ncclHierCeAllGatherRing(struct ncclComm* comm, struct ncclKe
         NCCLCHECKGOTO(ncclHierCeAllGatherRingIssueRound(comm, plan, stream, &issueState, step + 1, slot ^ 1), ret,
                       fail);
 
-      ceScatterOps.numOps = 0;
-      for (int ai = 0; ai < nActiveCtx; ai++) {
-        int k = activeCtxs[ai];
-        if (cwBytes > 0) {
-          for (int ci = 0; ci < cwCtxOps[k]; ci++) {
-            int c = cwChunksByCtx[k][ci];
-            size_t subBytes = cwChunkPlan.chunkBytes[c];
-            size_t off = cwChunkPlan.chunkOff[c];
-            uint8_t* chunkSlot = (uint8_t*)recvbuff + meta->originRankRecvCw * perRankBytes + off;
-            size_t winOffset = chunkSlot - (uint8_t*)recvWin->userPtr;
-
-            if (agUseMulticast) {
-              ceScatterOps.srcs[ceScatterOps.numOps] = chunkSlot;
-              ceScatterOps.dsts[ceScatterOps.numOps] = (void*)(scatterMcBase + winOffset);
-              ceScatterOps.sizes[ceScatterOps.numOps] = subBytes;
-              ceScatterOps.numOps++;
-            } else {
-              for (int r = 1; r < lsaSize; r++) {
-                ceScatterOps.srcs[ceScatterOps.numOps] = chunkSlot;
-                ceScatterOps.dsts[ceScatterOps.numOps] = (void*)(scatterPeerBases[r - 1] + winOffset);
-                ceScatterOps.sizes[ceScatterOps.numOps] = subBytes;
-                ceScatterOps.numOps++;
-              }
+      if (scatterCapacity > 0 && singleScatterBatch) {
+        // One CE batch for the whole round: every cw and ccw chunk, grouped by
+        // the rail context that carried it, fanned out to every LSA peer.
+        ceScatterOps.numOps = 0;
+        for (int ai = 0; ai < nActiveCtx; ai++) {
+          int k = activeCtxs[ai];
+          for (int half = 0; half < 2; half++) {
+            struct ncclHierChunkPlan* cp = half == 0 ? &cwChunkPlan : &ccwChunkPlan;
+            if (cp->chunkStart == nullptr) continue;
+            uint8_t* halfBase = half == 0 ? (uint8_t*)recvbuff + meta->originRankRecvCw * perRankBytes
+                                          : (uint8_t*)recvbuff + meta->originRankRecvCcw * perRankBytes + cwBytes;
+            for (int c = cp->chunkStart[0]; c < cp->chunkStart[1]; c++) {
+              if (c % numCtx != k) continue;
+              ncclHierCeAgRingScatterAppend(&ceScatterOps, recvWin, halfBase + cp->chunkOff[c], cp->chunkBytes[c],
+                                            agUseMulticast, scatterMcBase, scatterPeerBases, lsaSize);
             }
           }
         }
-        if (ccwBytes > 0) {
-          for (int ci = 0; ci < ccwCtxOps[k]; ci++) {
-            int c = ccwChunksByCtx[k][ci];
-            size_t subBytes = ccwChunkPlan.chunkBytes[c];
-            size_t off = ccwChunkPlan.chunkOff[c];
-            uint8_t* chunkSlot = (uint8_t*)recvbuff + meta->originRankRecvCcw * perRankBytes + cwBytes + off;
-            size_t winOffset = chunkSlot - (uint8_t*)recvWin->userPtr;
-
-            if (agUseMulticast) {
-              ceScatterOps.srcs[ceScatterOps.numOps] = chunkSlot;
-              ceScatterOps.dsts[ceScatterOps.numOps] = (void*)(scatterMcBase + winOffset);
-              ceScatterOps.sizes[ceScatterOps.numOps] = subBytes;
-              ceScatterOps.numOps++;
-            } else {
-              for (int r = 1; r < lsaSize; r++) {
-                ceScatterOps.srcs[ceScatterOps.numOps] = chunkSlot;
-                ceScatterOps.dsts[ceScatterOps.numOps] = (void*)(scatterPeerBases[r - 1] + winOffset);
-                ceScatterOps.sizes[ceScatterOps.numOps] = subBytes;
-                ceScatterOps.numOps++;
-              }
-            }
-          }
+        if (ceScatterOps.numOps > 0) NCCLCHECKGOTO(ncclCeLaunchBatchOps(comm, &ceScatterOps, stream, args), ret, fail);
+      } else if (scatterCapacity > 0) {
+        // Same batch shape as Direct: one CE batch per contiguous arrived piece,
+        // with at most one copy per LSA peer.
+        uint8_t* halfBases[2] = {(uint8_t*)recvbuff + meta->originRankRecvCw * perRankBytes,
+                                 (uint8_t*)recvbuff + meta->originRankRecvCcw * perRankBytes + cwBytes};
+        int nPieces = ncclHierCeAgRingScatterPieces(halfPlans, halfBases, scatterPieces);
+        for (int p = 0; p < nPieces; p++) {
+          NCCLCHECKGOTO(ncclHierCeAgRingScatterPiece(comm, &ceScatterOps, stream, args, recvWin, scatterPieces[p].slot,
+                                                     scatterPieces[p].bytes, agUseMulticast, scatterMcBase,
+                                                     scatterPeerBases, lsaSize),
+                        ret, fail);
         }
-      }
-
-      if (ceScatterOps.numOps > 0) {
-        NCCLCHECKGOTO(ncclCeLaunchBatchOps(comm, &ceScatterOps, stream, args), ret, fail);
       }
 
       NCCLCHECKGOTO(ncclCuStreamBatchMemOp(stream, nActiveCtx * doneOps, groupDoneParams[slot]), ret, fail);
@@ -2758,10 +2817,9 @@ exit:
   free(cwCtxOps);
   free(ccwCtxOps);
   free(ctxFill);
-  free(cwChunkFill);
-  free(ccwChunkFill);
   free(activeCtxs);
   free(scatterPeerBases);
+  free(scatterPieces);
   free(roundMeta);
   if (waitPeersByActiveCtx) {
     for (int k = 0; k < numCtx; k++) free(waitPeersByActiveCtx[k]);
@@ -2780,14 +2838,6 @@ exit:
   free(waitDesc);
   free(waitStartParams);
   free(waitDoneParams);
-  if (cwChunksByCtx) {
-    for (int k = 0; k < numCtx; k++) free(cwChunksByCtx[k]);
-  }
-  if (ccwChunksByCtx) {
-    for (int k = 0; k < numCtx; k++) free(ccwChunksByCtx[k]);
-  }
-  free(cwChunksByCtx);
-  free(ccwChunksByCtx);
   ncclHierCollFreeChunkPlan(&cwChunkPlan);
   ncclHierCollFreeChunkPlan(&ccwChunkPlan);
   return ret;
@@ -2795,9 +2845,18 @@ fail:
   goto exit;
 }
 
+static bool ncclHierCeAllGatherUseRing(int nNodes, size_t perRankBytes) {
+  int64_t enable = ncclParamHierCeCollAgRailRingEnable();
+  if (enable > 0) return true;
+  if (enable == 0 || nNodes <= 2) return false;
+  int64_t threshold = ncclParamHierCeCollAgRailRingThreshold();
+  if (threshold < 0) threshold = HIER_COLL_AG_RAIL_RING_THRESHOLD_DEFAULT;
+  return perRankBytes >= (size_t)threshold;
+}
+
 ncclResult_t ncclHierCeAllGather(struct ncclComm* comm, struct ncclKernelPlan* plan, cudaStream_t stream) {
   size_t perRankBytes = plan->ceCollArgs->nElts * plan->ceCollArgs->eltSize;
-  bool useRing = ncclParamHierCeCollAgRailRingEnable() > 0;
+  bool useRing = ncclHierCeAllGatherUseRing(comm->nNodes, perRankBytes);
   const char* railAlgo = useRing ? "Ring" : "Direct";
   if (comm->rank == 0)
     INFO(NCCL_TUNING, "AllGather [Hierarchical CE]: %zu Bytes -> Rail %s RMA proxy + CE", perRankBytes, railAlgo);
