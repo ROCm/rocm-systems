@@ -1067,6 +1067,13 @@ static ncclResult_t scheduleCollTasksToPlan(struct ncclComm* comm, struct ncclKe
       int nChannels = task->nMaxChannels;
       // Ensure room for worst case of one new batch per channel
       if (!ncclTestBudget(budget, plan->nWorkBatches + nChannels, plan->workBytes + workNode->size)) {
+        // Nothing scheduled yet: this collective will never fit.
+        if (plan->workBytes == 0) {
+          WARN("%s with %d channels does not fit an empty kernel plan (%zd bytes of kernel args); "
+               "lower NCCL_MAX_NCHANNELS",
+               ncclFuncToString(task->func), nChannels, budget->inArgsBytes);
+          return ncclInvalidUsage;
+        }
         return ncclSuccess;
       }
 
@@ -1120,6 +1127,13 @@ static ncclResult_t scheduleCollTasksToPlan(struct ncclComm* comm, struct ncclKe
 
       // Ensure room for worst case of one new batch per channel
       if (!ncclTestBudget(budget, plan->nWorkBatches + nChannels, plan->workBytes + workNode->size)) {
+        // Nothing scheduled yet: this collective will never fit.
+        if (plan->workBytes == 0) {
+          WARN("%s with %d channels does not fit an empty kernel plan (%zd bytes of kernel args); "
+               "lower NCCL_MAX_NCHANNELS",
+               ncclFuncToString(task->func), nChannels, budget->inArgsBytes);
+          return ncclInvalidUsage;
+        }
         return ncclSuccess;
       }
 
