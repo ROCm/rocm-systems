@@ -481,7 +481,6 @@ check_coalesced_record(uint64_t hip_event_handle, hipStream_t stream)
     pending.ancestor_corr_id = corr_id->ancestor;
     pending.corr_id_ref      = corr_id;
     corr_id->add_ref_count();
-    corr_id->add_kern_count();
 
     auto already_completed = false;
     auto completed_time    = profiling_time{};
@@ -507,7 +506,6 @@ check_coalesced_record(uint64_t hip_event_handle, hipStream_t stream)
                          completed_time,
                          ROCPROFILER_HIP_EVENT_RECORD,
                          pending.callback_record);
-        pending.corr_id_ref->sub_kern_count();
         pending.corr_id_ref->sub_ref_count();
     }
 }
@@ -568,7 +566,6 @@ discard_pending_wait(uint64_t signal_handle, uint64_t hip_event_handle)
     auto pw = consume_pending_wait_for_handle(signal_handle, hip_event_handle);
     if(pw.corr_id_ref)
     {
-        pw.corr_id_ref->sub_kern_count();
         pw.corr_id_ref->sub_ref_count();
     }
 }
@@ -643,7 +640,6 @@ register_deferred_wait(uint64_t hip_event_handle, hipStream_t wait_stream)
     pw.hip_event_handle = hip_event_handle;
     pw.source_info      = event_info;
     corr_id->add_ref_count();
-    corr_id->add_kern_count();
 
     register_pending_wait(event_info.original_signal, std::move(pw));
     return event_info.original_signal;
@@ -723,7 +719,6 @@ record_event_info(uint64_t hip_event_handle, event_record_info_t info)
         {
             auto pw = consume_pending_wait_for_handle(old_signal, hip_event_handle);
             if(!pw.corr_id_ref) break;
-            pw.corr_id_ref->sub_kern_count();
             pw.corr_id_ref->sub_ref_count();
         }
     }
@@ -801,7 +796,6 @@ erase_event_info(uint64_t hip_event_handle)
 
     for(auto* corr_id : released)
     {
-        corr_id->sub_kern_count();
         corr_id->sub_ref_count();
     }
 
@@ -972,7 +966,6 @@ BarrierAsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
                                  p.callback_record);
                 if(p.corr_id_ref)
                 {
-                    p.corr_id_ref->sub_kern_count();
                     p.corr_id_ref->sub_ref_count();
                 }
             }
@@ -985,7 +978,6 @@ BarrierAsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
 
         if(_corr_id)
         {
-            _corr_id->sub_kern_count();
             _corr_id->sub_ref_count();
         }
     }
@@ -1019,7 +1011,6 @@ plan_barrier(hsa::Queue&                    queue,
     const auto ancestor_corr_id = corr_id->ancestor;
 
     corr_id->add_ref_count();
-    corr_id->add_kern_count();
 
     auto _barrier_data         = barrier_data_t{};
     _barrier_data.tracing_data = tracing_data_v;
@@ -1202,7 +1193,6 @@ emit_bound_waits(const hsa::Queue&       queue,
 
         if(pw.corr_id_ref)
         {
-            pw.corr_id_ref->sub_kern_count();
             pw.corr_id_ref->sub_ref_count();
         }
     }

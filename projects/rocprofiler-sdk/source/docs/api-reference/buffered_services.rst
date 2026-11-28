@@ -13,6 +13,12 @@ Supported buffer record categories are enumerated in ``rocprofiler_buffer_catego
 a buffered tracing service requires buffer creation. Flushing the buffer implicitly or explicitly invokes a callback to the tool, which provides an array of one or more buffer records.
 To flush a buffer explicitly, use ``rocprofiler_flush_buffer`` function.
 
+Record placement and flushing are mutually exclusive within each internal
+buffer. Lossless buffering rotates among three internal buffers; discard
+buffering reuses its single allocated slot after flushing. A busy flush does
+not advance the active buffer, and an unsuccessful buffer destruction releases
+any locks it acquired before returning ``ROCPROFILER_STATUS_ERROR_BUFFER_BUSY``.
+
 Subscribing to buffer tracing services
 --------------------------------------
 
@@ -157,6 +163,21 @@ and domain is configured more than once.
 
         // ... etc. ...
     }
+
+Correlation ID lifetime and retirement
+-------------------------------------
+
+``ROCPROFILER_BUFFER_TRACING_CORRELATION_ID_RETIREMENT`` reports when an internal
+correlation ID is no longer referenced by its associated activities. A creating
+thread's exit does not retire an ID that is still referenced by asynchronous
+work.
+
+Internally, the SDK owns a registry of per-thread correlation-ID storage.
+Each thread registers its storage once and caches its address; subsequent
+allocations use only that storage's lock rather than a global allocation lock.
+The registry retains storage from exited threads. During finalization, the SDK
+closes registration, seals all registered storage against further insertion, and
+enumerates it for the existing dangling-ID retirement sweep.
 
 Buffer tracing callback function
 --------------------------------

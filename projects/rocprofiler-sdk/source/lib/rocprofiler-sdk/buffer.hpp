@@ -35,6 +35,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <mutex>
 #include <optional>
 #include <thread>
 
@@ -44,21 +45,22 @@ namespace buffer
 {
 struct instance
 {
-    using buffer_t                       = common::container::record_header_buffer;
-    static constexpr auto size           = 2;  // double buffering
-    static constexpr auto sync_wait_usec = std::chrono::microseconds{10};
+    using buffer_t             = common::container::record_header_buffer;
+    static constexpr auto size = 3;  // triple buffering
 
-    mutable std::array<buffer_t, size>         buffers       = {};
-    mutable std::array<std::atomic_flag, size> syncer        = {false, false};  // r/w lock
-    mutable std::atomic<uint32_t>              buffer_idx    = {};              // array index
-    mutable std::atomic<uint64_t>              drop_count    = {};
-    uint64_t                                   watermark     = 0;
-    uint64_t                                   context_id    = 0;  // rocprofiler_context_id_t value
-    uint64_t                                   buffer_id     = 0;  // rocprofiler_buffer_id_t value
-    uint64_t                                   task_group_id = 0;  // thread-pool assignment
-    rocprofiler_buffer_tracing_cb_t            callback      = nullptr;
-    void*                                      callback_data = nullptr;
-    rocprofiler_buffer_policy_t                policy        = ROCPROFILER_BUFFER_POLICY_NONE;
+    mutable std::array<buffer_t, size>         buffers = {};
+    mutable std::array<std::atomic_flag, size> syncer  = {
+        {ATOMIC_FLAG_INIT, ATOMIC_FLAG_INIT, ATOMIC_FLAG_INIT}};
+    mutable std::atomic<uint64_t>   buffer_idx    = {};  // generation, not just slot
+    std::mutex                      flush_mutex   = {};
+    mutable std::atomic<uint64_t>   drop_count    = {};
+    uint64_t                        watermark     = 0;
+    uint64_t                        context_id    = 0;  // rocprofiler_context_id_t value
+    uint64_t                        buffer_id     = 0;  // rocprofiler_buffer_id_t value
+    uint64_t                        task_group_id = 0;  // thread-pool assignment
+    rocprofiler_buffer_tracing_cb_t callback      = nullptr;
+    void*                           callback_data = nullptr;
+    rocprofiler_buffer_policy_t     policy        = ROCPROFILER_BUFFER_POLICY_NONE;
 
     template <typename Tp>
     bool emplace(uint32_t, uint32_t, Tp&);
@@ -121,76 +123,51 @@ template <typename Tp>
 inline bool
 rocprofiler::buffer::instance::emplace(uint32_t category, uint32_t kind, Tp& value)
 {
-    struct local_sync
+    for(;;)
     {
-        local_sync(uint64_t buffer_id, uint64_t idx, std::atomic_flag& flag)
-        : m_flag{flag}
+        auto  generation = buffer_idx.load(std::memory_order_relaxed);
+        auto  idx        = generation % buffers.size();
+        auto& flag       = syncer.at(idx);
+        if(flag.test_and_set(std::memory_order_acquire))
         {
-            if(m_flag.test_and_set())
+            std::this_thread::yield();
+            continue;
+        }
+        bool success      = false;
+        bool should_flush = false;
+        {
+            auto release =
+                common::scope_destructor{[&flag]() { flag.clear(std::memory_order_release); }};
+            // A delayed producer must not write into a previously flushed generation.
+            if(generation != buffer_idx.load(std::memory_order_relaxed)) continue;
+            auto& target = buffers.at(idx);
+            success      = target.emplace(category, kind, value);
+            if(!success && target.capacity() < sizeof(value))
             {
-                ROCP_INFO << fmt::format(
-                    "waiting for buffer flush to complete [id={}, index={}]...", buffer_id, idx);
-                while(m_flag.test_and_set())
-                {
-                    ROCP_TRACE << fmt::format(
-                        "waiting for buffer flush to complete [id={}, index={}]...",
-                        buffer_id,
-                        idx);
-                    std::this_thread::yield();
-                    std::this_thread::sleep_for(sync_wait_usec);
-                }
+                ROCP_CI_LOG(ERROR) << fmt::format(
+                    "buffer {} too small (size={}) to hold an object of type {} with size {}",
+                    buffer_id,
+                    target.capacity(),
+                    common::cxx_demangle(typeid(value).name()),
+                    sizeof(value));
+                return false;
             }
+            should_flush = target.count() >= watermark;
         }
-
-        ~local_sync() { m_flag.clear(); }
-
-        std::atomic_flag& m_flag;
-    };
-
-    // get the index of the current buffer
-    auto get_idx = [this]() { return buffer_idx.load(std::memory_order_acquire) % buffers.size(); };
-    auto idx     = get_idx();
-    auto success = false;
-    {
-        auto _syncer = local_sync{buffer_id, idx, syncer.at(idx)};  // ensure buffer not flushing
-        success      = buffers.at(idx).emplace(category, kind, value);
-    }
-
-    if(!success)
-    {
-        if(buffers.at(idx).capacity() < sizeof(value))
+        if(!success && policy == ROCPROFILER_BUFFER_POLICY_LOSSLESS)
         {
-            ROCP_CI_LOG(ERROR) << fmt::format(
-                "buffer {} too small (size={}) to hold an object of type {} with size {}",
-                buffer_id,
-                buffers.at(idx).capacity(),
-                common::cxx_demangle(typeid(value).name()),
-                sizeof(value));
-            return false;
-        }
-
-        if(policy == ROCPROFILER_BUFFER_POLICY_LOSSLESS)
-        {
-            // blocks until buffer is flushed
-            do
+            auto status = buffer::flush(buffer_id, false);
+            if(status != ROCPROFILER_STATUS_SUCCESS &&
+               status != ROCPROFILER_STATUS_ERROR_BUFFER_BUSY)
             {
-                buffer::flush(buffer_id, true);
-                idx          = get_idx();
-                auto _syncer = local_sync{buffer_id, idx, syncer.at(idx)};  // wait for flush
-                success      = buffers.at(idx).emplace(category, kind, value);
-            } while(!success);
+                ROCP_ERROR << "buffer " << buffer_id << " flush failed: " << status;
+                return false;
+            }
+            std::this_thread::yield();
+            continue;
         }
-        else
-        {
-            ++drop_count;
-        }
+        if(!success) ++drop_count;
+        if(should_flush) buffer::flush(buffer_id, false);
+        return success;
     }
-
-    if(buffers.at(idx).count() >= watermark)
-    {
-        // flush without syncing
-        buffer::flush(buffer_id, false);
-    }
-
-    return success;
 }

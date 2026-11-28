@@ -282,7 +282,7 @@ protected:
         int64_t index              = -1;
         if(!U::takes_param_by_value)
         {
-            if(ROCPROFILER_UNLIKELY(_this->is_reference_to_storage(&elt)))
+            if(_this->is_reference_to_storage(&elt))
             {
                 references_storage = true;
                 index              = &elt - _this->begin();
@@ -1101,7 +1101,7 @@ public:
     template <typename... Args>
     reference emplace_back(Args&&... args)
     {
-        if(ROCPROFILER_UNLIKELY(this->size() >= this->capacity()))
+        if(this->size() >= this->capacity())
             return this->grow_and_emplace_back(std::forward<Args>(args)...);
 
         ::new((void*) this->end()) T(std::forward<Args>(args)...);

@@ -321,7 +321,7 @@ template <typename Tp, size_t ChunkSizeV>
 typename stable_vector<Tp, ChunkSizeV>::chunk_type&
 stable_vector<Tp, ChunkSizeV>::last_chunk()
 {
-    if(ROCPROFILER_UNLIKELY(m_chunks.empty() || m_chunks.back()->size() == ChunkSizeV))
+    if(m_chunks.empty() || m_chunks.back()->size() == ChunkSizeV)
     {
         add_chunk();
     }

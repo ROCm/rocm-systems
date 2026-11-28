@@ -392,7 +392,6 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
             ROCP_FATAL_IF(_corr_id->get_ref_count() == 0)
                 << "reference counter for correlation id " << _corr_id->internal << " from thread "
                 << _corr_id->thread_idx << " has no reference count";
-            _corr_id->sub_kern_count();
             _corr_id->sub_ref_count();
         }
     }
@@ -725,7 +724,6 @@ WriteInterceptor(const void* packets,
             // increase the reference count to denote that this correlation id is being used in a
             // kernel
             corr_id->add_ref_count();
-            corr_id->add_kern_count();
 
             auto _packet_data = packet_data_t{};
 

@@ -404,8 +404,7 @@ execute_buffer_record_emplace(const buffered_context_data_vec_t&   buffered_cont
 
         auto  buffer_id = itr.ctx->buffered_tracer->buffer_data.at(domain);
         auto* buffer_v  = buffer::get_buffer(buffer_id);
-        if(buffer_v && buffer_v->context_id == itr.ctx->context_idx &&
-           buffer_v->buffer_id == buffer_id.handle)
+        if(buffer_v)
         {
             // make copy of record
             auto record_v = base_record;
