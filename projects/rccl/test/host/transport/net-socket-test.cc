@@ -1110,8 +1110,6 @@ class NetSocketAcceptMicrotest : public NetSocketMicrotest {
 
   ncclResult_t Accept(void** recvComm) { return ncclNetSocketAccept(lComm_, recvComm, nullptr); }
 
-  // Production frees the rejected socket but leaves stage->sock pointing at it (AICOMRCCL-3105).
-  void ForgetStagedSocket() { lComm_->stage.sock = nullptr; }
 };
 
 TEST_F(NetSocketAcceptMicrotest, Accept_PeerSendsIndices_PlacesEachConnectionAndReturnsConfiguredComm) {
@@ -1243,11 +1241,13 @@ TEST_F(NetSocketAcceptMicrotest, Accept_IndexOutOfRange_ClosesConnectionAndRetur
 
   EXPECT_EQ(recvComm, nullptr);
   EXPECT_EQ(g_sock.closed, std::vector<int>{fd});
-  ForgetStagedSocket();
+  EXPECT_EQ(lComm_->stage.state, ncclNetSocketCommStateStart);
+  EXPECT_EQ(lComm_->stage.sock, nullptr);
+  EXPECT_EQ(lComm_->stage.comm, nullptr);
 }
 
 // AICOMRCCL-3105
-TEST_F(NetSocketAcceptMicrotest, DISABLED_Accept_AfterRejectedIndex_StartsNewHandshake) {
+TEST_F(NetSocketAcceptMicrotest, Accept_AfterRejectedIndex_StartsNewHandshake) {
   MakeListenComm(1, 1);
   g_sock.acceptIndices = {2};
   void* recvComm = this;
@@ -1260,7 +1260,7 @@ TEST_F(NetSocketAcceptMicrotest, DISABLED_Accept_AfterRejectedIndex_StartsNewHan
   Track(recvComm);
 }
 
-TEST_F(NetSocketAcceptMicrotest, Accept_DuplicateIndex_ClosesDuplicateKeepsFirstAndReturnsInternalError) {
+TEST_F(NetSocketAcceptMicrotest, Accept_DuplicateIndex_ClosesAllAndReturnsInternalError) {
   MakeListenComm(1, 1);
   g_sock.acceptIndices = {0, 0};
   int firstFd = g_sock.nextFd;
@@ -1269,9 +1269,25 @@ TEST_F(NetSocketAcceptMicrotest, Accept_DuplicateIndex_ClosesDuplicateKeepsFirst
   EXPECT_EQ(Accept(&recvComm), ncclInternalError);
 
   EXPECT_EQ(recvComm, nullptr);
-  EXPECT_EQ(g_sock.closed, std::vector<int>{firstFd + 1});
-  EXPECT_EQ(lComm_->stage.comm->socks[0].socketDescriptor, firstFd);
-  ForgetStagedSocket();
+  EXPECT_EQ(g_sock.closed, (std::vector<int>{firstFd + 1, firstFd}));
+  EXPECT_EQ(lComm_->stage.iteration, 0);
+  EXPECT_EQ(lComm_->stage.sock, nullptr);
+  EXPECT_EQ(lComm_->stage.comm, nullptr);
+}
+
+TEST_F(NetSocketAcceptMicrotest, Accept_DuplicateControlIndex_ClosesAllAndReturnsInternalError) {
+  MakeListenComm(1, 1);
+  g_sock.acceptIndices = {1, 1};
+  int firstFd = g_sock.nextFd;
+  void* recvComm = this;
+
+  EXPECT_EQ(Accept(&recvComm), ncclInternalError);
+
+  EXPECT_EQ(recvComm, nullptr);
+  EXPECT_EQ(g_sock.closed, (std::vector<int>{firstFd + 1, firstFd}));
+  EXPECT_EQ(lComm_->stage.iteration, 0);
+  EXPECT_EQ(lComm_->stage.sock, nullptr);
+  EXPECT_EQ(lComm_->stage.comm, nullptr);
 }
 
 TEST_F(NetSocketAcceptMicrotest, Accept_SocketStepFails_PropagatesError) {
@@ -1485,13 +1501,17 @@ TEST_F(NetSocketTransferMicrotest, Test_SendNotAccepted_ReturnsNotDoneAndSendsOn
   EXPECT_EQ(Sent(comm->ctrlSock), SizeFrame(50) + data);
 }
 
-TEST_F(NetSocketTransferMicrotest, Test_SmallSendAcceptedOneByteAtATime_CompletesInOneCall) {
+TEST_F(NetSocketTransferMicrotest, Test_SmallSendAcceptedOneByteAtATime_CompletesAcrossCalls) {
   ncclNetSocketComm* comm = MakeComm(0, 0);
   std::string data = Pattern(20);
   void* req = Isend(comm, &data[0], data.size());
   g_sock.chunk = 1;
 
   ASSERT_EQ(Poll(req), ncclSuccess);
+  EXPECT_EQ(done_, 0);
+  EXPECT_EQ(Sent(comm->ctrlSock).size(), 1u);
+
+  for (int i = 0; i < 24 && done_ != 1; i++) ASSERT_EQ(Poll(req), ncclSuccess);
 
   EXPECT_EQ(done_, 1);
   EXPECT_EQ(Sent(comm->ctrlSock), SizeFrame(20) + data);
@@ -1550,7 +1570,7 @@ TEST_F(NetSocketTransferMicrotest, Test_SmallRecv_ReceivesPayloadAndReportsSende
   EXPECT_EQ(Inbound(comm->ctrlSock), "");
 }
 
-TEST_F(NetSocketTransferMicrotest, Test_SmallRecvDeliveredOneByteAtATime_CompletesInOneCall) {
+TEST_F(NetSocketTransferMicrotest, Test_SmallRecvDeliveredOneByteAtATime_CompletesAcrossCalls) {
   ncclNetSocketComm* comm = MakeComm(0, 0);
   std::string payload = Pattern(20);
   std::string buf(64, '\0');
@@ -1559,6 +1579,10 @@ TEST_F(NetSocketTransferMicrotest, Test_SmallRecvDeliveredOneByteAtATime_Complet
   g_sock.chunk = 1;
 
   ASSERT_EQ(Poll(req), ncclSuccess);
+  EXPECT_EQ(done_, 0);
+  EXPECT_EQ(g_sock.inbound[comm->ctrlSock.socketDescriptor].size(), SizeFrame(20).size() + payload.size() - 1);
+
+  for (int i = 0; i < 24 && done_ != 1; i++) ASSERT_EQ(Poll(req), ncclSuccess);
 
   EXPECT_EQ(done_, 1);
   EXPECT_EQ(size_, 20);
@@ -1596,7 +1620,7 @@ TEST_F(NetSocketTransferMicrotest, Test_RecvNothingArrived_ReturnsNotDoneUntilDa
 }
 
 // AICOMRCCL-3104
-TEST_F(NetSocketTransferMicrotest, DISABLED_Test_RecvInlinePayloadAfterSizeFrame_CompletesWithPayload) {
+TEST_F(NetSocketTransferMicrotest, Test_RecvInlinePayloadAfterSizeFrame_CompletesWithPayload) {
   ncclNetSocketComm* comm = MakeComm(0, 0);
   std::string payload = Pattern(50);
   std::string buf(100, '\0');
@@ -1839,7 +1863,7 @@ TEST_F(NetSocketTaskMicrotest, Test_NoFreeTaskSlot_ReturnsInternalError) {
 }
 
 // AICOMRCCL-3106
-TEST_F(NetSocketTaskMicrotest, DISABLED_Test_SplitFailed_LaterPollDoesNotUseControlSocket) {
+TEST_F(NetSocketTaskMicrotest, Test_SplitFailed_LaterPollDoesNotUseControlSocket) {
   SetParam("SOCKET_MIN_TASKSIZE", 16);
   ncclNetSocketComm* comm = MakeComm(2, 1);
   PreprovisionQueues(comm, 2);
@@ -1848,8 +1872,9 @@ TEST_F(NetSocketTaskMicrotest, DISABLED_Test_SplitFailed_LaterPollDoesNotUseCont
   void* req = Isend(comm, &data[0], data.size());
   ASSERT_EQ(Poll(req), ncclInternalError);
 
-  Poll(req);
+  EXPECT_EQ(Poll(req), ncclInternalError);
 
+  EXPECT_EQ(done_, 0);
   EXPECT_EQ(Sent(comm->ctrlSock), SizeFrame(1000));
 }
 
