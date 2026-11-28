@@ -10,6 +10,7 @@
 #include "hipArrayCommon.hh"
 #include "DriverContext.hh"
 #include <utils.hh>
+#include <vector>
 /*
  * This testcase verifies [ hipFree || hipFreeArray || hipFreeType::ArrayDestroy ||
  * hipFreeType::HostFree with hipHostMalloc ]
@@ -174,6 +175,26 @@ HIP_TEST_CASE(Unit_hipFreeNegativeHost) {
     delete hostPtr;
   }
 #endif
+}
+
+// hipFree on an address inside registered host memory must fail and leave the registration
+// alone; it used to abort the process in the runtime's pointer map.
+HIP_TEST_CASE(Unit_hipFreeNegativeHostRegisteredInteriorPtr) {
+#if HT_NVIDIA
+  HIP_SKIP_TEST("hipHostRegister is not supported on this device.");
+#endif
+  constexpr size_t kSize = 64 * 1024;
+  std::vector<char> buffer(kSize);
+  char* host = buffer.data();
+  HIP_CHECK(hipHostRegister(host, kSize, 0));
+  HIP_CHECK_ERROR(hipFree(host + 4096), hipErrorInvalidValue);
+  HIP_CHECK_ERROR(hipFree(host + kSize - 1), hipErrorInvalidValue);
+  void* device_memory = nullptr;
+  HIP_CHECK(hipHostGetDevicePointer(&device_memory, host, 0));
+  HIP_CHECK(hipMemset(device_memory, 1, kSize));
+  HIP_CHECK(hipDeviceSynchronize());
+  REQUIRE(host[kSize - 1] == 1);
+  HIP_CHECK(hipHostUnregister(host));
 }
 
 #if HT_NVIDIA
