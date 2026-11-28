@@ -82,6 +82,30 @@ CREATE TABLE IF NOT EXISTS
         rocdecode_trace INT,
         rocjpeg_trace INT,
         pmc_counters JSON DEFAULT ("[]"),
+        --
+        -- How the requested counter groups are collected. Two runs that request
+        -- the same counters but collect them differently are different configs:
+        --   single-pass  one group, collected on every dispatch
+        --   application-replay  several CLI groups, one full application run per
+        --                       group
+        --   kernel-replay
+        --                several groups, every dispatch replayed once per group
+        --                so every dispatch carries every group
+        --   multiplexed  groups rotated across dispatches via input-file pmc_groups
+        --   unknown      groups declared in an input file the harness does not read
+        --
+        kernel_replay INT,
+        counter_group_count INT,
+        counter_collection_mode TEXT CHECK (
+            counter_collection_mode IN (
+                "none",
+                "single-pass",
+                "application-replay",
+                "multiplexed",
+                "kernel-replay",
+                "unknown"
+            )
+        ),
         pc_sampling_host_trap INT,
         pc_sampling_stocastic INT,
         advanced_thread_trace INT,
