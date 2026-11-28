@@ -224,7 +224,7 @@ HSAKMT_STATUS hsakmt_validate_nodeid_array(HsaKFDContext *ctx,
 		uint32_t **gpu_id_array,
 		uint32_t NumberOfNodes, uint32_t *NodeArray);
 
-HSAKMT_STATUS hsakmt_topology_sysfs_get_system_props(HsaKFDContext *ctx, HsaSystemProperties *props);
+HSAKMT_STATUS hsakmt_topology_dinfo_get_system_props(HsaKFDContext *ctx, HsaSystemProperties *props);
 HSAKMT_STATUS hsakmt_topology_get_node_props(HsaKFDContext *ctx,
 				      HSAuint32 NodeId,
 				      HsaNodeProperties *NodeProperties);
