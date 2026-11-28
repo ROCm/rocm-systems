@@ -158,6 +158,9 @@ class Logger {
   void enableFileLogging();
   std::string getLogSettings();
   bool isLoggerEnabled();
+  bool isDebugEnabled() const {
+    return m_loggingIsOn && m_LogType != NO_LOG && m_LogLevel >= LOG_LEVEL_DEBUG;
+  }
 
  protected:
   Logger();
@@ -171,10 +174,13 @@ class Logger {
   std::string getCurrentTime();
 
  private:
+#ifdef BUILD_TESTS
+  friend class ScopedMetricsTestLog;
+#endif
   std::ofstream m_File;
   bool m_loggingIsOn = false;
-  LogLevel m_LogLevel;
-  LogType m_LogType;
+  LogLevel m_LogLevel = DISABLE_LOG;
+  LogType m_LogType = NO_LOG;
   std::mutex m_Mutex;
   std::unique_lock<std::mutex> m_Lock{m_Mutex, std::defer_lock};
 

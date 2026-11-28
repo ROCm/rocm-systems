@@ -5355,6 +5355,12 @@ void log_by_metrics_status(std::ostringstream& ss, rsmi_status_t status_code) {
 
 }  // namespace
 
+#ifdef BUILD_TESTS
+namespace test_hooks {
+thread_local uint64_t metrics_dumps_formatted = 0;
+}  // namespace test_hooks
+#endif
+
 auto Device::dev_log_gpu_metrics(std::ostringstream& outstream_metrics, DevInfoTypes type)
     -> rsmi_status_t {
   std::ostringstream ss;
@@ -5475,6 +5481,10 @@ auto Device::dev_log_gpu_metrics(std::ostringstream& outstream_metrics, DevInfoT
 
   header_output();
   table_content_output();
+#ifdef BUILD_TESTS
+  // Count formatted dumps even when the logger would discard them.
+  ++test_hooks::metrics_dumps_formatted;
+#endif
   outstream_metrics << tmp_outstream_metrics.rdbuf();
   LOG_DEBUG(tmp_outstream_metrics);
 
@@ -5728,6 +5738,17 @@ rsmi_status_t rsmi_dev_gpu_metrics_header_info_get(uint32_t dv_ind,
 
 namespace {
 
+// The getters need the decoded table, not its text representation. Only format
+// the dump when it will be logged; the explicit metrics-log API is independent.
+rsmi_status_t read_metrics_for_query(Device& device, DevInfoTypes type) {
+  if (ROCmLogging::Logger::getInstance()->isDebugEnabled()) {
+    std::ostringstream dump;
+    return device.dev_log_gpu_metrics(dump, type);
+  }
+  // Setup returns UNEXPECTED_DATA if the metrics factory returns null.
+  return device.setup_gpu_metrics_reading(type);
+}
+
 // Both public metrics entry points report a failed setup the same way, so keep
 // the wording and the reported status in one place.
 rsmi_status_t log_metrics_setup_failure(const char* caller, uint32_t dv_ind, DevInfoTypes type,
@@ -5774,7 +5795,6 @@ rsmi_status_t rsmi_dev_gpu_metrics_info_get(uint32_t dv_ind, rsmi_gpu_metrics_t*
   TRY DEVICE_MUTEX CHK_SUPPORT_NAME_ONLY(smu)
 
       auto status_code(rsmi_status_t::RSMI_STATUS_SUCCESS);
-  thread_local std::ostringstream ostrstream;
   thread_local std::ostringstream ss;
 
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
@@ -5818,7 +5838,7 @@ rsmi_status_t rsmi_dev_gpu_metrics_info_get(uint32_t dv_ind, rsmi_gpu_metrics_t*
   // A setup that failed left no table to copy, so stop here. Reporting the
   // reason it gave -- an unreadable revision, a malformed table -- keeps it from
   // being replaced by the generic unexpected-data result of the copy stage.
-  const auto setup_status = dev->dev_log_gpu_metrics(ostrstream, type);
+  const auto setup_status = read_metrics_for_query(*dev, type);
   if (setup_status != rsmi_status_t::RSMI_STATUS_SUCCESS) {
     return log_metrics_setup_failure(__PRETTY_FUNCTION__, dv_ind, type, file_name, setup_status);
   }
@@ -5850,7 +5870,6 @@ rsmi_status_t rsmi_dev_gpu_partition_metrics_info_get(uint32_t dv_ind, rsmi_gpu_
   TRY DEVICE_MUTEX CHK_SUPPORT_NAME_ONLY(smu)
 
       auto status_code(rsmi_status_t::RSMI_STATUS_SUCCESS);
-  thread_local std::ostringstream ostrstream;
   thread_local std::ostringstream ss;
 
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
@@ -5898,7 +5917,7 @@ rsmi_status_t rsmi_dev_gpu_partition_metrics_info_get(uint32_t dv_ind, rsmi_gpu_
   // A setup that failed left no table to copy, so stop here. Reporting the
   // reason it gave -- an unreadable revision, a malformed table -- keeps it from
   // being replaced by the generic unexpected-data result of the copy stage.
-  const auto setup_status = dev->dev_log_gpu_metrics(ostrstream, type);
+  const auto setup_status = read_metrics_for_query(*dev, type);
   if (setup_status != rsmi_status_t::RSMI_STATUS_SUCCESS) {
     return log_metrics_setup_failure(__PRETTY_FUNCTION__, dv_ind, type, file_name, setup_status);
   }
