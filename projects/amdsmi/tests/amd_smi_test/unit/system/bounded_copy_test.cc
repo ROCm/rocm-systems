@@ -14,6 +14,7 @@
 
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_container_id_parser.h"
+#include "amd_smi/impl/amd_smi_utils.h"
 #include "guarded_buffer.h"
 
 using amd::smi::CopyBounded;
@@ -77,4 +78,23 @@ TEST(SystemUnit, BoundedCopyEmbeddedNulDoesNotShortenTheCopy) {
   EXPECT_EQ(CopyBounded(gb.buf, sizeof(gb.buf), src), 7u);
   EXPECT_EQ(gb.buf[7], '\0');
   EXPECT_TRUE(gb.CanariesIntact());
+}
+
+TEST(SystemUnit, ClearCharBufferRejectsZeroLength) {
+  GuardedBuffer<8> buffer;
+  EXPECT_EQ(smi_clear_char_and_reinitialize(buffer.buf, 0, "hello"), AMDSMI_STATUS_INVAL);
+  EXPECT_EQ(buffer.buf[0], '\0');
+  EXPECT_TRUE(buffer.CanariesIntact());
+}
+
+TEST(SystemUnit, ClearCharBufferRejectsNull) {
+  EXPECT_EQ(smi_clear_char_and_reinitialize(nullptr, 1, "hello"), AMDSMI_STATUS_INVAL);
+}
+
+TEST(SystemUnit, ClearCharBufferTruncatesAndTerminates) {
+  GuardedBuffer<4> buffer;
+  EXPECT_EQ(smi_clear_char_and_reinitialize(buffer.buf, sizeof(buffer.buf), "longer"),
+            AMDSMI_STATUS_SUCCESS);
+  EXPECT_STREQ(buffer.buf, "lon");
+  EXPECT_TRUE(buffer.CanariesIntact());
 }
