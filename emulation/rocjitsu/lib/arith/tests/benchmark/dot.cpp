@@ -206,18 +206,6 @@ void add_dot(std::vector<Benchmark> &cases) {
   add(cases, "dot", "v_dot8_u32_u4_w64", [](Operands &r, uint64_t flags) {
     return rj_arith_v_dot8_u32_u4_w64(flags, UINT64_MAX, 0, r.d, r.a, r.b, r.c);
   });
-  add(cases, "dot", "v_dot2_f32_f16_w32_gfx950", [](Operands &r, uint64_t flags) {
-    return rj_arith_v_dot2_f32_f16_w32_gfx950(flags, UINT32_MAX, 0, r.d, r.a, r.b, r.c, &r.status);
-  });
-  add(cases, "dot", "v_dot2_f32_f16_w64_gfx950", [](Operands &r, uint64_t flags) {
-    return rj_arith_v_dot2_f32_f16_w64_gfx950(flags, UINT64_MAX, 0, r.d, r.a, r.b, r.c, &r.status);
-  });
-  add(cases, "dot", "v_dot2c_f32_f16_w32_gfx950", [](Operands &r, uint64_t flags) {
-    return rj_arith_v_dot2c_f32_f16_w32_gfx950(flags, UINT32_MAX, 0, r.d, r.a, r.b, &r.status);
-  });
-  add(cases, "dot", "v_dot2c_f32_f16_w64_gfx950", [](Operands &r, uint64_t flags) {
-    return rj_arith_v_dot2c_f32_f16_w64_gfx950(flags, UINT64_MAX, 0, r.d, r.a, r.b, &r.status);
-  });
 }
 
 } // namespace rocjitsu::arith::test

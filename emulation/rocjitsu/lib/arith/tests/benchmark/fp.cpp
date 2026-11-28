@@ -2152,24 +2152,6 @@ void add_fp(std::vector<Benchmark> &cases) {
   add(cases, "fp", "v_sqrt_f64_w64_gfx950", [](Operands &r, uint64_t flags) {
     return rj_arith_v_sqrt_f64_w64_gfx950(flags, UINT64_MAX, 0, r.d, r.a, &r.status);
   });
-  add(cases, "fp", "v_mad_mix_f32_w32_gfx950", [](Operands &r, uint64_t flags) {
-    return rj_arith_v_mad_mix_f32_w32_gfx950(flags, UINT32_MAX, 0, r.d, r.a, r.b, r.c, &r.status);
-  });
-  add(cases, "fp", "v_mad_mix_f32_w64_gfx950", [](Operands &r, uint64_t flags) {
-    return rj_arith_v_mad_mix_f32_w64_gfx950(flags, UINT64_MAX, 0, r.d, r.a, r.b, r.c, &r.status);
-  });
-  add(cases, "fp", "v_mad_mixlo_f16_w32_gfx950", [](Operands &r, uint64_t flags) {
-    return rj_arith_v_mad_mixlo_f16_w32_gfx950(flags, UINT32_MAX, 0, r.d, r.a, r.b, r.c, &r.status);
-  });
-  add(cases, "fp", "v_mad_mixlo_f16_w64_gfx950", [](Operands &r, uint64_t flags) {
-    return rj_arith_v_mad_mixlo_f16_w64_gfx950(flags, UINT64_MAX, 0, r.d, r.a, r.b, r.c, &r.status);
-  });
-  add(cases, "fp", "v_mad_mixhi_f16_w32_gfx950", [](Operands &r, uint64_t flags) {
-    return rj_arith_v_mad_mixhi_f16_w32_gfx950(flags, UINT32_MAX, 0, r.d, r.a, r.b, r.c, &r.status);
-  });
-  add(cases, "fp", "v_mad_mixhi_f16_w64_gfx950", [](Operands &r, uint64_t flags) {
-    return rj_arith_v_mad_mixhi_f16_w64_gfx950(flags, UINT64_MAX, 0, r.d, r.a, r.b, r.c, &r.status);
-  });
 }
 
 } // namespace rocjitsu::arith::test

@@ -12382,11 +12382,9 @@ TEST(ArithBridgeTest, CdnaF64MfmaInlineAccumulatorPrecision) {
           auto instruction = decoder->decode_window(words);
           ASSERT_TRUE(instruction.succeeded());
           const bool exact = semantics == ArithmeticSemantics::BitExactEmpiricalNoFpStatus;
-          const bool unsupported = exact && (!cdna4 || selector == 244);
           recorder->writes.clear();
-          EXPECT_EQ(cu->execute_instruction(instruction.value().get(), *wave).succeeded(),
-                    !unsupported);
-          if (unsupported) {
+          EXPECT_EQ(cu->execute_instruction(instruction.value().get(), *wave).succeeded(), !exact);
+          if (exact) {
             EXPECT_TRUE(recorder->writes.empty());
           }
           const uint64_t expected =
@@ -12397,7 +12395,7 @@ TEST(ArithBridgeTest, CdnaF64MfmaInlineAccumulatorPrecision) {
           for (uint32_t reg = 0; reg < 8; ++reg) {
             for (uint32_t lane = 0; lane < 64; ++lane) {
               EXPECT_EQ(cu->read_vgpr(dst + reg, lane),
-                        unsupported ? 0xdeadbeefU : uint32_t(expected >> (32 * (reg % 2))));
+                        exact ? 0xdeadbeefU : uint32_t(expected >> (32 * (reg % 2))));
             }
           }
         }
@@ -12762,8 +12760,8 @@ TEST(ArithBridgeTest, CdnaFloatingMfmaUsesLibraryPolicyAndAccumulatorBank) {
         auto decoder = Decoder::create(config.arch);
         auto instruction = decoder->decode_window(words);
         ASSERT_TRUE(instruction.succeeded());
-        const bool unsupported = semantics == ArithmeticSemantics::BitExactEmpiricalNoFpStatus &&
-                                 !(test.fp8 && !cdna4) && !(test.fp32 && cdna4);
+        const bool unsupported =
+            semantics == ArithmeticSemantics::BitExactEmpiricalNoFpStatus && !(test.fp8 && !cdna4);
         recorder->writes.clear();
         EXPECT_EQ(cu->execute_instruction(instruction.value().get(), *wave).succeeded(),
                   !unsupported);
@@ -20682,188 +20680,6 @@ TEST(ArithBridgeTest, Cdna4SfuAndDivisionExactAndGuards) {
     auto scale_omod_inst = f.decoder->decode_window(scale_omod);
     ASSERT_TRUE(scale_omod_inst.succeeded());
     EXPECT_FALSE(f.cu->execute_instruction(scale_omod_inst.value().get(), *f.wave).succeeded());
-  }
-}
-
-TEST(ArithBridgeTest, Cdna4F32F64MfmaDot2F16AndMadMixExact) {
-  // 1) F32 MFMA: CDNA4 adjacent-block CBSZ/ABID broadcast and symmetric FP_DENORM_32 flushing.
-  {
-    BridgeFixture fixture(rocjitsu::IsaFamily::Cdna4, 64,
-                          {ArithmeticSemantics::BitExactEmpiricalNoFpStatus});
-    ASSERT_NE(fixture.wave, nullptr);
-    fixture.wave->set_exec(~uint64_t{0});
-    fixture.wave->set_mode_raw(0xf0U);
-    for (uint32_t lane = 0; lane < 64; ++lane) {
-      fixture.cu->write_vgpr(fixture.base(), lane, std::bit_cast<uint32_t>(float(lane + 1)));
-      fixture.cu->write_vgpr(fixture.base() + 1, lane, 0x3f800000U);
-    }
-    auto words = cdna4::build_vop3p_mfma(
-        cdna4::kVMfmaF3216x16x14bF32Vop3pMfma,
-        {.vdst = 16, .cbsz = 1, .abid = 1, .acc_cd = 0, .src0 = 256, .src1 = 257, .src2 = 128});
-    auto inst = fixture.decoder->decode_window(words);
-    ASSERT_TRUE(inst.succeeded());
-    ASSERT_TRUE(fixture.cu->execute_instruction(inst.value().get(), *fixture.wave).succeeded());
-    EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 16, 0), std::bit_cast<uint32_t>(17.0f));
-
-    for (uint32_t lane = 0; lane < 64; ++lane) {
-      fixture.cu->write_vgpr(fixture.base(), lane, 0x00000001U);
-    }
-    auto sub_words = cdna4::build_vop3p_mfma(
-        cdna4::kVMfmaF324x4x116bF32Vop3pMfma,
-        {.vdst = 16, .cbsz = 0, .abid = 0, .acc_cd = 0, .src0 = 256, .src1 = 257, .src2 = 128});
-    auto sub_inst = fixture.decoder->decode_window(sub_words);
-    ASSERT_TRUE(sub_inst.succeeded());
-    ASSERT_TRUE(fixture.cu->execute_instruction(sub_inst.value().get(), *fixture.wave).succeeded());
-    EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 16, 0), 0x00000001U);
-    fixture.wave->set_mode_raw(0x00U);
-    ASSERT_TRUE(fixture.cu->execute_instruction(sub_inst.value().get(), *fixture.wave).succeeded());
-    EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 16, 0), 0U);
-  }
-
-  // 2) F64 MFMA: CBSZ source-abs modifier succeeds in mode 2; nonzero BLGP negate rejects.
-  {
-    BridgeFixture fixture(rocjitsu::IsaFamily::Cdna4, 64,
-                          {ArithmeticSemantics::BitExactEmpiricalNoFpStatus});
-    ASSERT_NE(fixture.wave, nullptr);
-    fixture.wave->set_exec(~uint64_t{0});
-    const uint64_t neg2 = std::bit_cast<uint64_t>(-2.0);
-    const uint64_t neg3 = std::bit_cast<uint64_t>(-3.0);
-    const uint64_t neg5 = std::bit_cast<uint64_t>(-5.0);
-    for (uint32_t lane = 0; lane < 64; ++lane) {
-      fixture.cu->write_vgpr(fixture.base(), lane, uint32_t(neg2));
-      fixture.cu->write_vgpr(fixture.base() + 1, lane, uint32_t(neg2 >> 32));
-      fixture.cu->write_vgpr(fixture.base() + 2, lane, uint32_t(neg3));
-      fixture.cu->write_vgpr(fixture.base() + 3, lane, uint32_t(neg3 >> 32));
-      fixture.cu->write_vgpr(fixture.base() + 4, lane, uint32_t(neg5));
-      fixture.cu->write_vgpr(fixture.base() + 5, lane, uint32_t(neg5 >> 32));
-    }
-    auto ok_words = cdna4::build_vop3p_mfma(cdna4::kVMfmaF644x4x44bF64Vop3pMfma, {.vdst = 16,
-                                                                                  .cbsz = 1,
-                                                                                  .abid = 0,
-                                                                                  .acc_cd = 0,
-                                                                                  .src0 = 256,
-                                                                                  .src1 = 258,
-                                                                                  .src2 = 260,
-                                                                                  .blgp = 0});
-    auto ok_inst = fixture.decoder->decode_window(ok_words);
-    ASSERT_TRUE(ok_inst.succeeded());
-    ASSERT_TRUE(fixture.cu->execute_instruction(ok_inst.value().get(), *fixture.wave).succeeded());
-    const uint64_t got = uint64_t(fixture.cu->read_vgpr(fixture.base() + 16, 0)) |
-                         (uint64_t(fixture.cu->read_vgpr(fixture.base() + 17, 0)) << 32);
-    EXPECT_EQ(std::bit_cast<double>(got), -29.0);
-
-    fixture.cu->write_vgpr(fixture.base() + 16, 0, 0xdeadbeefU);
-    auto bad_words = cdna4::build_vop3p_mfma(cdna4::kVMfmaF644x4x44bF64Vop3pMfma, {.vdst = 16,
-                                                                                   .cbsz = 0,
-                                                                                   .abid = 0,
-                                                                                   .acc_cd = 0,
-                                                                                   .src0 = 256,
-                                                                                   .src1 = 258,
-                                                                                   .src2 = 260,
-                                                                                   .blgp = 1});
-    auto bad_inst = fixture.decoder->decode_window(bad_words);
-    ASSERT_TRUE(bad_inst.succeeded());
-    EXPECT_TRUE(fixture.cu->execute_instruction(bad_inst.value().get(), *fixture.wave).failed());
-    EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 16, 0), 0xdeadbeefU);
-
-    // Mode 3 rejects CDNA4 F64 MFMA before modifying D (no TRAPSTS output for DGEMM).
-    BridgeFixture mode3_fixture(rocjitsu::IsaFamily::Cdna4, 64,
-                                {ArithmeticSemantics::BitExactEmpirical});
-    ASSERT_NE(mode3_fixture.wave, nullptr);
-    mode3_fixture.wave->set_exec(~uint64_t{0});
-    for (uint32_t lane = 0; lane < 64; ++lane) {
-      mode3_fixture.cu->write_vgpr(mode3_fixture.base(), lane, 0U);
-      mode3_fixture.cu->write_vgpr(mode3_fixture.base() + 1, lane, 0U);
-      mode3_fixture.cu->write_vgpr(mode3_fixture.base() + 2, lane, 0U);
-      mode3_fixture.cu->write_vgpr(mode3_fixture.base() + 3, lane, 0x7ff00000U);
-      mode3_fixture.cu->write_vgpr(mode3_fixture.base() + 4, lane, 0U);
-      mode3_fixture.cu->write_vgpr(mode3_fixture.base() + 5, lane, 0U);
-      mode3_fixture.cu->write_vgpr(mode3_fixture.base() + 16, lane, 0xdeadbeefU);
-      mode3_fixture.cu->write_vgpr(mode3_fixture.base() + 17, lane, 0xdeadbeefU);
-    }
-    auto mode3_words = cdna4::build_vop3p_mfma(cdna4::kVMfmaF644x4x44bF64Vop3pMfma, {.vdst = 16,
-                                                                                     .cbsz = 0,
-                                                                                     .abid = 0,
-                                                                                     .acc_cd = 0,
-                                                                                     .src0 = 256,
-                                                                                     .src1 = 258,
-                                                                                     .src2 = 260,
-                                                                                     .blgp = 0});
-    auto mode3_inst = mode3_fixture.decoder->decode_window(mode3_words);
-    ASSERT_TRUE(mode3_inst.succeeded());
-    EXPECT_TRUE(mode3_fixture.cu->execute_instruction(mode3_inst.value().get(), *mode3_fixture.wave)
-                    .failed());
-    EXPECT_EQ(mode3_fixture.cu->read_vgpr(mode3_fixture.base() + 16, 0), 0xdeadbeefU);
-    EXPECT_EQ(mode3_fixture.cu->read_vgpr(mode3_fixture.base() + 17, 0), 0xdeadbeefU);
-  }
-
-  // 3) V_DOT2_F32_F16 / V_DOT2C_F32_F16: exact 24-bit grid dot in mode 2; mode 3 rejects.
-  for (auto sem :
-       {ArithmeticSemantics::BitExactEmpiricalNoFpStatus, ArithmeticSemantics::BitExactEmpirical}) {
-    BridgeFixture fixture(rocjitsu::IsaFamily::Cdna4, 64, {sem});
-    ASSERT_NE(fixture.wave, nullptr);
-    fixture.wave->set_exec(1ULL);
-    fixture.wave->set_mode_raw(0x00U);
-    fixture.wave->set_trapsts(0x20U);
-    fixture.cu->write_vgpr(fixture.base(), 0, 0x00010001U);
-    fixture.cu->write_vgpr(fixture.base() + 1, 0, 0x3c003c00U);
-    fixture.cu->write_vgpr(fixture.base() + 2, 0, 0U);
-    auto dot_words = cdna4::build_vop3p(
-        cdna4::kVDot2F32F16Vop3p,
-        {.vdst = 2, .clamp = 1, .src0 = 256, .src1 = 257, .src2 = 258, .op_sel_hi = 3});
-    auto dot_inst = fixture.decoder->decode_window(dot_words);
-    ASSERT_TRUE(dot_inst.succeeded());
-    const bool reject = sem == ArithmeticSemantics::BitExactEmpirical;
-    EXPECT_EQ(fixture.cu->execute_instruction(dot_inst.value().get(), *fixture.wave).failed(),
-              reject);
-    EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 2, 0), reject ? 0U : 0x34000000U);
-    EXPECT_EQ(fixture.wave->trapsts(), 0x20U);
-  }
-
-  // 4) V_MAD_MIX_{F32,MIXLO_F16,MIXHI_F16}: single-round exact FMA in mode 2 under IEEE=1;
-  // uncaptured IEEE=0 and split denorm flags reject in strict mode 2 without touching vdst.
-  {
-    BridgeFixture fixture(rocjitsu::IsaFamily::Cdna4, 64,
-                          {ArithmeticSemantics::BitExactEmpiricalNoFpStatus});
-    ASSERT_NE(fixture.wave, nullptr);
-    fixture.wave->set_exec(1ULL);
-    fixture.wave->set_mode_raw(0xf0U | Wavefront::IEEE_BIT);
-    fixture.cu->write_vgpr(fixture.base(), 0, 0x4782U);
-    fixture.cu->write_vgpr(fixture.base() + 1, 0, 0xda00U);
-    fixture.cu->write_vgpr(fixture.base() + 2, 0, 0x03e1U);
-    fixture.cu->write_vgpr(fixture.base() + 3, 0, 0xabcd1234U);
-    auto mixlo = cdna4::build_vop3p(
-        cdna4::kVMadMixloF16Vop3p,
-        {.vdst = 3, .op_sel_hi_2 = 1, .src0 = 256, .src1 = 257, .src2 = 258, .op_sel_hi = 3});
-    auto mixlo_inst = fixture.decoder->decode_window(mixlo);
-    ASSERT_TRUE(mixlo_inst.succeeded());
-    ASSERT_TRUE(
-        fixture.cu->execute_instruction(mixlo_inst.value().get(), *fixture.wave).succeeded());
-    EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 3, 0), 0xabcde5a1U);
-
-    fixture.wave->set_mode_raw(0xb0U | Wavefront::IEEE_BIT); // split F32/F16 input denormals
-    EXPECT_TRUE(fixture.cu->execute_instruction(mixlo_inst.value().get(), *fixture.wave).failed());
-    EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 3, 0), 0xabcde5a1U);
-
-    // MI350X wave2_3f row 32 (V_MAD_MIX_F32 all-F32 sNaN): quiets under IEEE=1, rejects IEEE=0.
-    fixture.wave->set_mode_raw(0xf0U | Wavefront::IEEE_BIT);
-    fixture.cu->write_vgpr(fixture.base(), 0, 0x7f800005U);
-    fixture.cu->write_vgpr(fixture.base() + 1, 0, 0x7f800000U);
-    fixture.cu->write_vgpr(fixture.base() + 2, 0, 0xbf2a33e3U);
-    fixture.cu->write_vgpr(fixture.base() + 3, 0, 0xdeadbeefU);
-    auto mixf32 = cdna4::build_vop3p(
-        cdna4::kVMadMixF32Vop3p,
-        {.vdst = 3, .op_sel_hi_2 = 0, .src0 = 256, .src1 = 257, .src2 = 258, .op_sel_hi = 0});
-    auto mixf32_inst = fixture.decoder->decode_window(mixf32);
-    ASSERT_TRUE(mixf32_inst.succeeded());
-    ASSERT_TRUE(
-        fixture.cu->execute_instruction(mixf32_inst.value().get(), *fixture.wave).succeeded());
-    EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 3, 0), 0x7fc00005U);
-
-    fixture.cu->write_vgpr(fixture.base() + 3, 0, 0xdeadbeefU);
-    fixture.wave->set_mode_raw(0xf0U); // IEEE=0 uncaptured in strict mode 2
-    EXPECT_TRUE(fixture.cu->execute_instruction(mixf32_inst.value().get(), *fixture.wave).failed());
-    EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 3, 0), 0xdeadbeefU);
   }
 }
 } // namespace

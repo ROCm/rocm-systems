@@ -342,29 +342,6 @@ int rj_arith_v_dot2c_f32_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask,
                                         const uint32_t *const *a, const uint32_t *const *b,
                                         uint32_t *trapsts);
 
-// MI350X (gfx950) FP16 DOT2 uses the 2-product 24-bit aligned fixed-point dot with
-// nearest-even normalization and canonical -qNaN (0xffc00000) in Compatibility and
-// empirical exact mode without FP status; mode 3 returns UNSUPPORTED_FP_STATUS.
-int rj_arith_v_dot2_f32_f16_w32_gfx950(uint64_t flags, uint32_t exec_mask,
-                                       uint64_t instruction_flags, uint32_t *const *d,
-                                       const uint32_t *const *a, const uint32_t *const *b,
-                                       const uint32_t *const *c, uint32_t *trapsts);
-
-int rj_arith_v_dot2_f32_f16_w64_gfx950(uint64_t flags, uint64_t exec_mask,
-                                       uint64_t instruction_flags, uint32_t *const *d,
-                                       const uint32_t *const *a, const uint32_t *const *b,
-                                       const uint32_t *const *c, uint32_t *trapsts);
-
-int rj_arith_v_dot2c_f32_f16_w32_gfx950(uint64_t flags, uint32_t exec_mask,
-                                        uint64_t instruction_flags, uint32_t *const *d,
-                                        const uint32_t *const *a, const uint32_t *const *b,
-                                        uint32_t *trapsts);
-
-int rj_arith_v_dot2c_f32_f16_w64_gfx950(uint64_t flags, uint64_t exec_mask,
-                                        uint64_t instruction_flags, uint32_t *const *d,
-                                        const uint32_t *const *a, const uint32_t *const *b,
-                                        uint32_t *trapsts);
-
 int rj_arith_v_dot2_f32_bf16_w32_gfx950(uint64_t flags, uint32_t exec_mask,
                                         uint64_t instruction_flags, uint32_t *const *d,
                                         const uint32_t *const *a, const uint32_t *const *b,

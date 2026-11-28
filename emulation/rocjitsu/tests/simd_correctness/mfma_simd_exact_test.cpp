@@ -242,12 +242,10 @@ TEST(MfmaSimdExact, F64_AllShapes) {
     uint32_t m, n, k, b;
   } shapes[] = {{16, 16, 4, 1}, {4, 4, 4, 4}};
   for (auto s : shapes) {
-    for (uint32_t cbsz : {0U, 1U}) {
-      run_case("f64", Fmt::F64, Fmt::F64, [=](MfmaFixture &fx, uint32_t const_acc) {
-        rocjitsu::test::execute_mfma_f64_shape(*fx.cu, s.m, s.n, s.k, s.b, fx.vbase + DST,
-                                               fx.vbase + S0, fx.vbase + S1, fx.vbase + ACC,
-                                               const_acc, 0, cbsz);
-      });
-    }
+    run_case("f64", Fmt::F64, Fmt::F64, [=](MfmaFixture &fx, uint32_t const_acc) {
+      rocjitsu::test::execute_mfma_f64_shape(*fx.cu, s.m, s.n, s.k, s.b, fx.vbase + DST,
+                                             fx.vbase + S0, fx.vbase + S1, fx.vbase + ACC,
+                                             const_acc);
+    });
   }
 }
