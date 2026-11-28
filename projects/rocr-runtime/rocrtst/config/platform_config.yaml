@@ -97,6 +97,7 @@ groups:
     - rocrtstNeg.Queue_Validation_InvalidGroupMemory
     - rocrtstNeg.Queue_Validation_InvalidKernelObject
     - rocrtstNeg.Queue_Validation_InvalidPacket
+    - rocrtstNeg.System_Error_Handler_Signal_Exhaustion
 
   Atomics:
     - rocrtstFunc.Memory_Atomic_Add_Test
@@ -212,6 +213,7 @@ platforms:
       - rocrtstNeg.Queue_Validation_InvalidGroupMemory
       - rocrtstNeg.Queue_Validation_InvalidKernelObject
       - rocrtstNeg.Queue_Validation_InvalidPacket
+      - rocrtstNeg.System_Error_Handler_Signal_Exhaustion
       - rocrtstStress.Memory_Concurrent_Allocate_Test
       - rocrtstStress.Memory_Concurrent_Free_Test
       - rocrtstStress.Memory_Concurrent_Pool_Info_Test

@@ -76,6 +76,7 @@
 #include "suites/performance/signal_hint_cost.h"
 #include "suites/negative/memory_allocate_negative_tests.h"
 #include "suites/negative/queue_validation.h"
+#include "suites/negative/signal_exhaustion_error_handler.h"
 #include "suites/stress/memory_concurrent_tests.h"
 #include "suites/stress/queue_write_index_concurrent_tests.h"
 #include "suites/test_common/test_case_template.h"
@@ -1130,6 +1131,13 @@ TEST(rocrtstNeg, DISABLED_Queue_Validation_InvalidWorkGroupSize) {
     if (!RunCustomTestProlog(&qv)) return;
     qv.QueueValidationForInvalidWorkGroupSize();
     RunCustomTestEpilog(&qv);
+}
+
+TEST(rocrtstNeg, System_Error_Handler_Signal_Exhaustion) {
+    SignalExhaustionErrorHandlerTest st;
+    if (!RunCustomTestProlog(&st)) return;
+    st.TestSystemErrorHandlerAfterSignalExhaustion();
+    RunCustomTestEpilog(&st);
 }
 
 TEST(rocrtstStress, Memory_Concurrent_Allocate_Test) {
