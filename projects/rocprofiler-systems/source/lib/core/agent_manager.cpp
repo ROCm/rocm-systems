@@ -120,6 +120,12 @@ agent_manager::get_gpu_agents_count() const
 }
 
 size_t
+agent_manager::get_cpu_agents_count() const
+{
+    return get_agent_count(agent_type::cpu);
+}
+
+size_t
 agent_manager::get_agent_count(agent_type type) const
 {
     auto const it = _agent_counts.find(type);

@@ -206,7 +206,7 @@ TEST_F(sample_type_test, region_sample_empty_strings)
 TEST_F(sample_type_test, in_time_sample_serialize_deserialize)
 {
     const in_time_sample original(42, "GPU:0", 50000, "kernel_launch", 100, 99, 1500,
-                                  "main\nfoo\nbar", "file.cpp:42");
+                                  "main\nfoo\nbar", "file.cpp:42", 3);
 
     serialize(buffer.data(), original);
 
@@ -222,17 +222,18 @@ TEST_F(sample_type_test, in_time_sample_serialize_deserialize)
     EXPECT_EQ(deserialized.correlation_id, original.correlation_id);
     EXPECT_EQ(deserialized.call_stack, original.call_stack);
     EXPECT_EQ(deserialized.line_info, original.line_info);
+    EXPECT_EQ(deserialized.device_id, original.device_id);
 }
 
 TEST_F(sample_type_test, in_time_sample_get_size)
 {
     const in_time_sample sample(42, "GPU:0", 50000, "kernel_launch", 100, 99, 1500,
-                                "main\nfoo\nbar", "file.cpp:42");
+                                "main\nfoo\nbar", "file.cpp:42", 3);
 
-    const size_t expected_size = sizeof(size_t) + sizeof(size_t) + 5 +
-                                 sizeof(std::uint64_t) + sizeof(size_t) + 13 +
-                                 sizeof(std::uint64_t) * 3 + sizeof(size_t) + 12 +
-                                 sizeof(size_t) + 11 + sizeof(char) * 4;
+    const size_t expected_size =
+        sizeof(size_t) + sizeof(size_t) + 5 + sizeof(std::uint64_t) + sizeof(size_t) +
+        13 + sizeof(std::uint64_t) * 3 + sizeof(size_t) + 12 + sizeof(size_t) + 11 +
+        sizeof(char) * 4 + sizeof(std::uint32_t);
 
     EXPECT_EQ(get_size(sample), expected_size);
 }
