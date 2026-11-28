@@ -1,1 +1,0 @@
-* Fixed AlltoAllv leaving its internal group open or replay recording suppressed after a failed send/receive, and dropping `ncclInProgress` from group completion. If any rank is nonblocking, all ranks use the point-to-point path instead of the synchronous CE metadata exchange. Replay suppression is thread-local so overlapping calls cannot leave recording disabled.

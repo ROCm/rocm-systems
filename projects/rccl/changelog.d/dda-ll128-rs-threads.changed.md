@@ -1,1 +1,0 @@
-* `RCCL_DDA_LL128_RS_THREADS` now defaults to `0`, which reads the arch table (it was `1024`). The gfx1250 DDA LL128 `ncclReduceScatter` adds a peer-parallel kernel for smaller messages, up to an arch-table cap that the new `RCCL_DDA_LL128_RS_PEER_MAX_BYTES` overrides (`0` turns it off), and its DDA LL and LL128 caps are retuned.

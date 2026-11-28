@@ -1,1 +1,0 @@
-* Fixed GIN proxy queue pairs on AINIC all sharing one uDMA pipeline, which limited GIN proxy bandwidth. Each GIN or RMA proxy context now gets its own channel id, so under the default `RCCL_IB_UDMA_POLICY` consecutive contexts use different uDMA pipelines.

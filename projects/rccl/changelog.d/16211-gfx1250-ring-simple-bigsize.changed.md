@@ -1,1 +1,0 @@
-* On gfx1250, Ring Simple's start-of-step barrier orders LDS only, and `reduceCopy` stores 16-byte packs as buffer stores. The CMake options `ENABLE_SIMPLE_STORE_FREE_STEP_START` and `ENABLE_SIMPLE_BUFFER_STORE` (default `ON`) restore the previous behavior when set to `OFF`.
