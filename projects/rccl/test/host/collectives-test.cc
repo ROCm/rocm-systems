@@ -34,6 +34,7 @@
 #include "fakes/hip_fakes.h"
 #include "fakes/nccl_fakes.h"
 #include "fakes/nccl_stubs.h"
+#include "fakes/profiler_fakes.h"
 #include "fakes/rccl_wrap_fakes.h"
 #include "fakes/recorder_fakes.h"
 #include "fakes/strongstream_stubs.h"
@@ -416,7 +417,7 @@ struct SharedHooks {
     return ncclSuccess;
   }};
 
-  // enqueue.cc
+  // enqueue/enqueue.cc
   ScopedHook<ncclResult_t(ncclInfo*)> enqueueCheck{g_enqueueCheck, [](ncclInfo* info) {
     fake.trace.push_back(std::string("enqueue ") + info->opName);
     std::vector<size_t> sizes;
@@ -549,6 +550,7 @@ struct SharedHooks {
     fake.groupErrorAtEnd = ncclGroupError;
     if (ncclGroupDepth > 0) --ncclGroupDepth;
     if (ncclGroupDepth == 0) ncclGroupError = ncclSuccess;
+    // Note: doesn't call ncclProfilerStopGroupApiEvent()
     return fake.groupEndResult;
   }};
   ScopedHook<ncclResult_t(const ncclComm_t, int*)> commCount{g_commCount, [](const ncclComm_t comm, int* count) {
@@ -559,15 +561,54 @@ struct SharedHooks {
     *rank = comm->rank;
     return fake.userRankResult;
   }};
-  ScopedHook<ncclResult_t(ncclComm*, ncclCeCollArgs*, hipStream_t)> profStart{
-      g_profilerStartCeCollEvent, [](ncclComm*, ncclCeCollArgs* args, hipStream_t) {
-        fake.trace.push_back("profStart");
-        fake.profArgs = *args;
+
+  // plugin/profiler.cc
+  ScopedHook<ncclResult_t(ncclInfo*, bool)> groupApiStart{g_profilerStartGroupApiEvent, [](ncclInfo*, bool) {
+    if (ncclProfilerPluginLoaded()) fake.trace.push_back("profGroupApiStart");
+    return fake.profStartResult;
+  }};
+  ScopedHook<ncclResult_t()> groupApiStop{g_profilerStopGroupApiEvent, []() {
+    if (ncclProfilerPluginLoaded()) fake.trace.push_back("profGroupApiStop");
+    return ncclSuccess;
+  }};
+  ScopedHook<ncclResult_t(ncclInfo*, bool)> collApiStart{g_profilerStartCollApiEvent, [](ncclInfo* info, bool) {
+    // ncclProfilerStartCollApiEvent uses ncclFuncToString(info->coll) rather than info->opName
+    if (ncclProfilerPluginLoaded())
+      fake.trace.push_back(std::string("profCollApiStart ") + ncclFuncToString(info->coll));
+    return fake.profStartResult;
+  }};
+  ScopedHook<ncclResult_t()> collApiStop{g_profilerStopCollApiEvent, []() {
+    if (ncclProfilerPluginLoaded()) fake.trace.push_back("profCollApiStop");
+    return ncclSuccess;
+  }};
+  ScopedHook<ncclResult_t(ncclInfo*, bool, struct ncclProfilerEventRef*, struct ncclProfilerEventRef*)> addonStart{
+      g_profilerStartAddonEvent, [](ncclInfo* info, bool, struct ncclProfilerEventRef*, struct ncclProfilerEventRef*) {
+        // ncclProfilerStartAddonEvent uses ncclFuncToString(info->coll) rather than info->opName
+        if (ncclProfilerPluginLoaded()) {
+          fake.trace.push_back("profGroupStart");
+          fake.trace.push_back(std::string("profCollStart ") + ncclFuncToString(info->coll));
+        }
         return fake.profStartResult;
       }};
-  ScopedHook<ncclResult_t(ncclComm*, ncclCeCollArgs*, hipStream_t)> profStop{
+  ScopedHook<ncclResult_t(struct ncclProfilerEventRef*, struct ncclProfilerEventRef*)> addonStop{
+      g_profilerStopAddonEvent, [](struct ncclProfilerEventRef*, struct ncclProfilerEventRef*) {
+        if (ncclProfilerPluginLoaded()) {
+          fake.trace.push_back("profCollStop");
+          fake.trace.push_back("profGroupStop");
+        }
+        return ncclSuccess;
+      }};
+  ScopedHook<ncclResult_t(ncclComm*, ncclCeCollArgs*, hipStream_t)> ceCollStart{
+      g_profilerStartCeCollEvent, [](ncclComm*, ncclCeCollArgs* args, hipStream_t) {
+        if (ncclProfilerPluginLoaded()) {
+          fake.trace.push_back("profCeCollStart");
+          fake.profArgs = *args;
+        }
+        return fake.profStartResult;
+      }};
+  ScopedHook<ncclResult_t(ncclComm*, ncclCeCollArgs*, hipStream_t)> ceCollStop{
       g_profilerStopCeCollEvent, [](ncclComm*, ncclCeCollArgs*, hipStream_t) {
-        fake.trace.push_back("profStop");
+        if (ncclProfilerPluginLoaded()) fake.trace.push_back("profCeCollStop");
         return ncclSuccess;
       }};
 
@@ -652,6 +693,26 @@ class CollectivesMicrotest : public ::testing::Test {
 
   void Decide(int algo) { fake.decision.algo = algo; }
 
+  // Expected trace, based on ncclProfilerPluginLoaded() and result
+  std::vector<std::string> ExpectTrace(const char* fn, const std::string& coll, ncclResult_t result) {
+    if (!ncclProfilerPluginLoaded()) {
+      // No profiler plugin loaded, so profiler events are not logged.
+      return {"record", "select", "log " + coll, "begin", fn, "end"};
+    }
+    if (result == ncclSuccess) {
+      // Launch is successful (addonResult = ncclSuccess), so Group and Coll events are logged.
+      return {"record", "select", "log " + coll, "begin",
+              "profGroupApiStart", "profCollApiStart "+ coll, fn,
+              "profGroupStart", "profCollStart " + coll, "profCollStop", "profGroupStop",
+              "profCollApiStop", "end", "profGroupApiStop"};
+    } else {
+      // Launch is unsuccessful (addonResult = ncclRemoteError), so Group and Coll events are not logged.
+      return {"record", "select", "log " + coll, "begin",
+              "profGroupApiStart", "profCollApiStart "+ coll, fn,
+              "profCollApiStop", "end", "profGroupApiStop"};
+    }
+  }
+
   // Each addon arm of one collective: bracketed by the launch prologue/epilogue, no enqueue.
   struct AddonArm {
     int algo;
@@ -662,23 +723,31 @@ class CollectivesMicrotest : public ::testing::Test {
     for (const AddonArm& arm : arms) {
       SCOPED_TRACE(arm.fn);
       Decide(arm.algo);
-      fake.trace.clear();
-      fake.addons.clear();
-      fake.enqueued.clear();
-      fake.addonResult = ncclRemoteError;
-      EXPECT_EQ(ncclRemoteError, call());
-      EXPECT_EQ((std::vector<std::string>{"record", "select", "log " + coll, "begin", arm.fn, "end"}), fake.trace);
-      EXPECT_EQ(0u, comm_->opCount);  // only a successful launch advances it
-      EXPECT_EQ(ncclRemoteError, fake.addonEndSeen);
-      ASSERT_EQ(1u, fake.addons.size());
-      EXPECT_EQ(send_.data(), fake.addons[0].sendbuff);
-      EXPECT_EQ(recv_.data(), fake.addons[0].recvbuff);
-      EXPECT_EQ(kCount, fake.addons[0].count);
-      EXPECT_EQ(ncclFloat32, fake.addons[0].datatype);
-      EXPECT_EQ(op, fake.addons[0].op);
-      EXPECT_EQ(comm_.get(), fake.addons[0].comm);
-      EXPECT_EQ(stream_, fake.addons[0].stream);
-      EXPECT_TRUE(fake.enqueued.empty());
+      for (auto&& result : {ncclRemoteError, ncclSuccess}) {
+        SCOPED_TRACE(result);
+
+        // Reset fake and comm_
+        fake.trace.clear();
+        fake.addons.clear();
+        fake.enqueued.clear();
+        fake.addonEndSeen = ncclInternalError;
+        comm_->opCount = 0u;
+
+        fake.addonResult = result;
+        EXPECT_EQ(result, call());
+        EXPECT_EQ(ExpectTrace(arm.fn, coll, result), fake.trace);
+        EXPECT_EQ((result == ncclSuccess ? 1u : 0u), comm_->opCount);  // only a successful launch advances it
+        EXPECT_EQ(result, fake.addonEndSeen);
+        ASSERT_EQ(1u, fake.addons.size());
+        EXPECT_EQ(send_.data(), fake.addons[0].sendbuff);
+        EXPECT_EQ(recv_.data(), fake.addons[0].recvbuff);
+        EXPECT_EQ(kCount, fake.addons[0].count);
+        EXPECT_EQ(ncclFloat32, fake.addons[0].datatype);
+        EXPECT_EQ(op, fake.addons[0].op);
+        EXPECT_EQ(comm_.get(), fake.addons[0].comm);
+        EXPECT_EQ(stream_, fake.addons[0].stream);
+        EXPECT_TRUE(fake.enqueued.empty());
+      }
     }
     fake.addonResult = ncclSuccess;
   }
@@ -1308,6 +1377,15 @@ TEST_F(CollectivesMicrotest, AllGather_DdaArmsLaunchAsAddons) {
                   [&] { return AllGather(); }, ncclNumOps, "AllGather");
 }
 
+TEST_F(CollectivesMicrotest, AllGather_DdaArmsRunInsideAProfilerEvent) {
+  ScopedHook<bool()> pluginLoaded{g_profilerPluginLoaded, []() { return true; }};
+  ExpectAddonArms({{RCCL_DDA_FABRIC_LL, "ncclAllGatherDdaFabricLL"},
+                   {RCCL_DDA_FABRIC_LL128, "ncclAllGatherDdaFabricLL128"},
+                   {RCCL_DDA_FABRIC_VMM, "ncclAllGatherDdaFabric"},
+                   {RCCL_DDA_IPC, "ncclAllGatherDdaIpc"}},
+                  [&] { return AllGather(); }, ncclNumOps, "AllGather");
+}
+
 TEST_F(CollectivesMicrotest, AllGather_FailedPrologueSkipsTheAddon) {
   Decide(RCCL_DDA_IPC);
   fake.addonBeginResult = ncclSystemError;
@@ -1361,6 +1439,13 @@ TEST_F(CollectivesMicrotest, AllGather_CheckModeDivertsAddonsButKeepsDirect) {
 // Broadcast
 
 TEST_F(CollectivesMicrotest, Broadcast_DdaArmsLaunchAsAddons) {
+  ExpectAddonArms({{RCCL_DDA_FABRIC_LL, "ncclBroadcastDdaFabricLL"},
+                   {RCCL_DDA_FABRIC_LL128, "ncclBroadcastDdaFabricLL128"}},
+                  [&] { return Broadcast(); }, ncclNumOps, "Broadcast");
+}
+
+TEST_F(CollectivesMicrotest, Broadcast_DdaArmsRunInsideAProfilerEvent) {
+  ScopedHook<bool()> pluginLoaded{g_profilerPluginLoaded, []() { return true; }};
   ExpectAddonArms({{RCCL_DDA_FABRIC_LL, "ncclBroadcastDdaFabricLL"},
                    {RCCL_DDA_FABRIC_LL128, "ncclBroadcastDdaFabricLL128"}},
                   [&] { return Broadcast(); }, ncclNumOps, "Broadcast");
@@ -1906,6 +1991,16 @@ TEST_F(CollectivesMicrotest, AlltoAll_DdaArmsLaunchAsAddons) {
                   [&] { return AlltoAll(); }, ncclNumOps, "AlltoAll");
 }
 
+TEST_F(CollectivesMicrotest, AlltoAll_DdaArmsRunInsideAProfilerEvent) {
+  ScopedHook<bool()> pluginLoaded{g_profilerPluginLoaded, []() { return true; }};
+  comm_->rank = 0;
+  ExpectAddonArms({{RCCL_DDA_FABRIC_LL, "ncclAllToAllDdaFabricLL"},
+                   {RCCL_DDA_FABRIC_LL128, "ncclAllToAllDdaFabricLL128"},
+                   {RCCL_DDA_FABRIC_VMM, "ncclAllToAllDdaFabric"},
+                   {RCCL_DDA_IPC, "ncclAllToAllDdaIpc"}},
+                  [&] { return AlltoAll(); }, ncclNumOps, "AlltoAll");
+}
+
 TEST_F(CollectivesMicrotest, AlltoAll_CheckModeDivertsDda) {
   comm_->checkMode = ncclCheckModeDebugLocal;
   comm_->rank = 0;
@@ -1967,6 +2062,15 @@ TEST_F(CollectivesMicrotest, AllReduce_DdaArmsLaunchAsAddons) {
                   [&] { return AllReduce(); }, ncclProd, "AllReduce");
 }
 
+TEST_F(CollectivesMicrotest, AllReduce_DdaArmsRunInsideAProfilerEvent) {
+  ScopedHook<bool()> pluginLoaded{g_profilerPluginLoaded, []() { return true; }};
+  ExpectAddonArms({{RCCL_DDA_FABRIC_LL, "ncclAllReduceDdaFabricLL"},
+                   {RCCL_DDA_FABRIC_LL128, "ncclAllReduceDdaFabricLL128"},
+                   {RCCL_DDA_FABRIC_VMM, "ncclAllReduceDdaFabric"},
+                   {RCCL_DDA_IPC, "ncclAllReduceDdaIpc"}},
+                  [&] { return AllReduce(); }, ncclProd, "AllReduce");
+}
+
 // The decision's DDA cap (a re-routed call's, else none) reaches the fabric AllReduce launcher of each arm.
 TEST_F(CollectivesMicrotest, AllReduce_FabricArmsPassTheDecisionsCap) {
   for (int algo : {RCCL_DDA_FABRIC_LL, RCCL_DDA_FABRIC_LL128, RCCL_DDA_FABRIC_VMM}) {
@@ -1997,11 +2101,12 @@ TEST_F(CollectivesMicrotest, AllReduce_CheckModeDivertsAddons) {
 }
 
 TEST_F(CollectivesMicrotest, AllReduce_CeTwoShotRunsInsideAProfilerEvent) {
+  ScopedHook<bool()> pluginLoaded{g_profilerPluginLoaded, []() { return true; }};
   Decide(RCCL_CE_2SHOT);
   fake.ceArResult = ncclRemoteError;
   EXPECT_EQ(ncclRemoteError, AllReduce());
-  EXPECT_EQ((std::vector<std::string>{"record", "select", "profStart", "log AllReduce", "begin", "ceAllReduce", "end",
-                                      "profStop"}),
+  EXPECT_EQ((std::vector<std::string>{"record", "select", "profCeCollStart", "log AllReduce",
+                                      "begin", "ceAllReduce", "end", "profCeCollStop"}),
             fake.trace);
   EXPECT_EQ(ncclFuncAllReduce, fake.profArgs.func);
   EXPECT_EQ(ncclFloat32, fake.profArgs.datatype);
@@ -2024,13 +2129,14 @@ TEST_F(CollectivesMicrotest, AllReduce_CeTwoShotRunsInsideAProfilerEvent) {
 }
 
 TEST_F(CollectivesMicrotest, AllReduce_CeTwoShotSkipsEmptyCallsAndAFailedProfilerStart) {
+  ScopedHook<bool()> pluginLoaded{g_profilerPluginLoaded, []() { return true; }};
   Decide(RCCL_CE_2SHOT);
   EXPECT_EQ(ncclSuccess, AllReduce(0));
   EXPECT_EQ((std::vector<std::string>{"record", "select"}), fake.trace);
   fake.profStartResult = ncclInternalError;
   EXPECT_EQ(ncclInternalError, AllReduce());
   EXPECT_TRUE(fake.ceArs.empty());
-  EXPECT_EQ(0, std::count(fake.trace.begin(), fake.trace.end(), "profStop"));
+  EXPECT_EQ(0, std::count(fake.trace.begin(), fake.trace.end(), "profCeCollStop"));
 }
 
 // ReduceScatter dispatch
@@ -2088,6 +2194,16 @@ TEST_F(CollectivesMicrotest, ReduceScatter_FailuresBeforeDispatchStopIt) {
 }
 
 TEST_F(CollectivesMicrotest, ReduceScatter_DdaArmsLaunchAsAddons) {
+  comm_->rank = 0;
+  ExpectAddonArms({{RCCL_DDA_FABRIC_LL, "ncclReduceScatterDdaFabricLL"},
+                   {RCCL_DDA_FABRIC_LL128, "ncclReduceScatterDdaFabricLL128"},
+                   {RCCL_DDA_FABRIC_VMM, "ncclReduceScatterDdaFabric"},
+                   {RCCL_DDA_IPC, "ncclReduceScatterDdaIpc"}},
+                  [&] { return ReduceScatter(); }, ncclMin, "ReduceScatter");
+}
+
+TEST_F(CollectivesMicrotest, ReduceScatter_DdaArmsRunInsideAProfilerEvent) {
+  ScopedHook<bool()> pluginLoaded{g_profilerPluginLoaded, []() { return true; }};
   comm_->rank = 0;
   ExpectAddonArms({{RCCL_DDA_FABRIC_LL, "ncclReduceScatterDdaFabricLL"},
                    {RCCL_DDA_FABRIC_LL128, "ncclReduceScatterDdaFabricLL128"},

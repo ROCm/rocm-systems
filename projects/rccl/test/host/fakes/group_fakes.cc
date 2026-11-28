@@ -13,6 +13,7 @@
 #include "fail_loud.h"
 #include "group.h"       // the real declarations of the thread-locals defined below
 #include "nccl_fakes.h"  // g_loadParam, for the NCCL_PARAM default this stands in for
+#include "profiler.h"    // ncclProfilerStopGroupApiEvent, for ncclGroupEndInternal
 #include "signature-drift.h"
 
 ASSERT_HOOK_MATCHES_PROD(g_ncclCollPreconnect, ncclCollPreconnect);
@@ -29,8 +30,11 @@ thread_local struct ncclComm* ncclGroupCommHead[ncclGroupTaskTypeNum] = {nullptr
 thread_local int ncclGroupBlocking = -1;  // group.cc's "default mode" sentinel
 thread_local struct ncclComm* ncclGroupCommPreconnectHead = nullptr;
 
+// ncclProfilerStopGroupApiEvent has a hook in profiler_fakes.cc. RCCL only emits profiler GroupApi stop events
+// via calls to ncclGroupEndInternal. To allow testing of these events by replacing g_profilerStartGroupApiEvent,
+// the faked ncclGroupEndInternal needs to call ncclProfilerStopGroupApiEvent just like the real function.
 ncclResult_t ncclGroupStartInternal() { return ncclSuccess; }
-ncclResult_t ncclGroupEndInternal(ncclSimInfo_t*) { return ncclSuccess; }
+ncclResult_t ncclGroupEndInternal(ncclSimInfo_t*) { return ncclProfilerStopGroupApiEvent(); }
 
 static ncclResult_t DefaultNcclGroupJobAbort(struct ncclGroupJob*) { return ncclSuccess; }
 std::function<ncclResult_t(struct ncclGroupJob*)> g_ncclGroupJobAbort = DefaultNcclGroupJobAbort;

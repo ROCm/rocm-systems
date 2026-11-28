@@ -413,12 +413,7 @@ TEST_F(EnqueueMicrotest, P2pReservationChannels_UsesCeCapButKeepsP2pNetTile) {
 }
 
 TEST_F(EnqueueMicrotest, HostStreamPlanCallback_AbortOrRevokeReturns_DestroyStillRuns) {
-  auto ok = [](struct ncclKernelPlan*) { return ncclSuccess; };
-  ScopedHook startGroup(g_profilerStartGroupEvent, ok);
-  ScopedHook stopGroup(g_profilerStopGroupEvent, ok);
-  ScopedHook startTasks(g_profilerStartTaskEvents, ok);
-  ScopedHook stopTasks(g_profilerStopTaskEvents, ok);
-  ScopedHook postWork(g_profilerPostPlanWork, [](struct ncclComm*, struct ncclKernelPlan*) { return ncclSuccess; });
+  ScopedHook startGroup(g_profilerStartGroupEvent, [](struct ncclKernelPlan*) { return ncclSuccess; });
   ncclComm comm{};
   uint32_t abortFlag = 0;
   comm.abortFlag = &abortFlag;

@@ -47,11 +47,13 @@ To build the example plugin shipped as part of NCCL, just type `make`.
 4. If you set the dump file variable, type chrome://tracing on your chromium browser search bar and
    open the created dump file to visualize the traces.
 
-# Collectives using RCCL DDA are not traced
+# Collectives using RCCL DDA are partially traced
 
 RCCL direct device access (DDA) path launches its own kernels and bypasses the proxy and plan
-machinery the profiler is instrumented against, so a collective that selects RCCL DDA path produces no
-`COLL`, `GROUP` or `GPU` events at all.
+machinery the profiler is instrumented against, but does manually emit some profiler events: a
+collective that selects RCCL DDA path produces `COLL` and `GROUP` events, but does not emit any
+`GPU` events. Under graph capture, these events are emitted once when the graph is captured, but
+not on subsequent graph replay.
 
 Set `RCCL_DDA_ENABLE=0` to route the collectives through the instrumented path while profiling. The
 same applies to the inspector plugin.

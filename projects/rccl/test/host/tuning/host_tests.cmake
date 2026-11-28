@@ -43,6 +43,7 @@ rccl_add_tuning_micro_binary(rccl-UnitTestsMicroTuning tuning-test.cc
     fakes/env_fakes.cc
     fakes/group_fakes.cc
     fakes/nccl_fakes.cc
+    fakes/profiler_fakes.cc
     fakes/sym_kernels_fakes.cc)  # ncclSymkMask, ncclSymkAlltoAllLLForced
 
 rccl_add_tuning_micro_binary(rccl-UnitTestsMicroTuningCostModel cost-model-test.cc

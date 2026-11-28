@@ -1074,7 +1074,11 @@ void updateEvent(void* handle) {
     debugEvent(event, "GroupStop");
   } else if (type == ncclProfileColl) {
     struct collective* event = (struct collective *)handle;
-    if (__atomic_sub_fetch(&event->base.refCount, 1, __ATOMIC_ACQ_REL) == 0) {
+    // FIXME: Remove when Addon collectives gain KernelCh event support.
+    // RCCL Addon collectives (DDA, GIN-SDMA) do not support KernelCh events and report nChannels=0, nWarps=0.
+    // No KernelCh children are expected, so complete the Coll event now. Do not decrement refCount.
+    bool isAddonCollective = (event->nChannels == 0 && event->nWarps == 0);
+    if (isAddonCollective || __atomic_sub_fetch(&event->base.refCount, 1, __ATOMIC_ACQ_REL) == 0) {
       event->base.stopTs = eventTime();
       debugEvent(event, "CollStop");
       updateEvent(event->base.parent);
@@ -1165,6 +1169,11 @@ __hidden ncclResult_t exampleProfilerStopEvent(void* eHandle) {
   } else if (type == ncclProfileColl) {
     struct collective* event = (struct collective *)eHandle;
     event->base.stopTs = eventTime();
+    // FIXME: Remove when Addon collectives gain KernelCh event support.
+    // RCCL Addon collectives (DDA, GIN-SDMA) do not support KernelCh events and report nChannels=0, nWarps=0.
+    // No KernelCh children are expected, so complete the Coll event now.
+    bool isAddonCollective = (event->nChannels == 0 && event->nWarps == 0);
+    if (isAddonCollective) updateEvent(eHandle);
     return ncclSuccess;
   } else if (type == ncclProfileP2p) {
     struct p2p* event = (struct p2p *)eHandle;

@@ -13,12 +13,17 @@
 #include "group.h"
 #include "collectives.h"
 #include "utils.h"
+#include "profiler.h"
+#include "strongstream.h"
 #include "enqueue/raw_task.h"
 #include "enqueue/task_pretuning.h"
 #include "enqueue/task_classify.h"
 #include "enqueue/task_posttuning.h"
 #include "enqueue/task_sched.h"
 #include "enqueue/mgmt_task_enq.h"
+
+#include <assert.h>
+#include <cinttypes> // PRIx64
 
 #define NCCL_LL_ALIGNMENT_PER_THREAD sizeof(uint64_t)
 #define NCCL_LL128_ALIGNMENT_PER_WARP 480
@@ -90,26 +95,88 @@ ncclResult_t rcclAddonLaunchBegin(struct ncclComm* comm, cudaStream_t stream, st
 ncclResult_t rcclAddonLaunchEnd(struct ncclComm* comm, cudaStream_t stream,
                                 const struct rcclAddonLaunchState& state, ncclResult_t launchRes);
 
-template <typename LaunchFn>
-inline ncclResult_t rcclAddonLaunch(struct ncclComm* comm, cudaStream_t stream, LaunchFn&& launch) {
-  struct rcclAddonLaunchState state = {-1, false};
-  ncclResult_t result = rcclAddonLaunchBegin(comm, stream, &state);
-  if (result != ncclSuccess) return rcclAddonLaunchEnd(comm, stream, state, result);
-  return rcclAddonLaunchEnd(comm, stream, state, launch());
-}
-
 // An addon collective that returns before ncclEnqueueCheck must still print its per-collective COLL line and
 // advance comm->opCount on the user's comm. Hierarchical addons use this too: their sub-collectives run on the
 // separate intra/inter comms (and log there under their own names), so the parent comm is counted here exactly
 // once, matching the native path.
 void rcclLogCollInfo(const struct ncclInfo& info);
 
-template <typename LaunchFn>
-inline ncclResult_t rcclAddonLaunch(const struct ncclInfo& info, LaunchFn&& launch) {
+template <bool ProfilerEvents, typename LaunchFn>
+inline ncclResult_t rcclAddonDoLaunch(struct ncclInfo& info, LaunchFn&& launch) {
+  ncclResult_t launchRes = ncclSuccess;
+  // profilerRes only used when ProfilerEvents == true.
+  [[maybe_unused]] ncclResult_t profilerRes = ncclSuccess;
+  struct rcclAddonLaunchState state = {-1, false};
+
+  // Saves capturing graph and its validity into state.
+  NCCLCHECKGOTO(rcclAddonLaunchBegin(info.comm, info.stream, &state), launchRes, cleanupLaunchEnd);
+
+  if constexpr (ProfilerEvents) {
+    NCCLCHECKGOTO(ncclProfilerStartGroupApiEvent(&info, state.capturing), profilerRes, cleanupLaunchEnd);
+    NCCLCHECKGOTO(ncclProfilerRecordGroupApiEventState(ncclProfilerGroupStartApiStop), profilerRes, cleanupLaunchEnd);
+    // GroupApi events are implicitly completed in ncclGroupEnd[Internal], so they don't need cleanup here.
+    NCCLCHECKGOTO(ncclProfilerStartCollApiEvent(&info, state.capturing), profilerRes, cleanupLaunchEnd);
+  }
+
+  NCCLCHECKGOTO(launch(), launchRes, cleanupCollApiEvent);
+
+  if constexpr (ProfilerEvents) {
+    struct ncclProfilerEventRef groupEventHandle{};
+    struct ncclProfilerEventRef collEventHandle{};
+
+    NCCLCHECKGOTO(ncclProfilerStartAddonEvent(&info, state.capturing, &groupEventHandle, &collEventHandle),
+                  profilerRes, cleanupCollApiEvent);
+    ncclProfilerStopAddonEvent(&groupEventHandle, &collEventHandle);
+  }
+
+cleanupCollApiEvent:
+  // Always emit CollApi stop event, to match with the CollApi start event above.
+  if constexpr (ProfilerEvents) ncclProfilerStopCollApiEvent();
+
+cleanupLaunchEnd:
+  NCCLCHECK(rcclAddonLaunchEnd(info.comm, info.stream, state, launchRes));
+
+  // Profiler might have failed above, return that error if the collective itself hasn't also failed.
+  if constexpr (ProfilerEvents) return profilerRes;
+
+  return ncclSuccess;
+}
+
+// An addon collective that returns before ncclEnqueueCheck should still generate profiler events
+// when a profiler plugin is loaded. Hierarchical addons must pass ProfilerEvents = false,
+// since their sub-collectives go through ncclEnqueueCheck and generate the events themselves.
+// CE 2-shot collectives also use a different profiling path and must pass ProfilerEvents = false.
+template <bool ProfilerEvents = true, typename LaunchFn>
+inline ncclResult_t rcclAddonLaunch(struct ncclInfo& info, LaunchFn&& launch) {
+  ncclResult_t ret = ncclSuccess;
+
+  // Only collectives should use rcclAddonLaunch.
+  assert(info.coll != ncclFuncSendRecv && info.coll != ncclFuncSend && info.coll != ncclFuncRecv);
+  assert(info.coll != ncclFuncPutSignal && info.coll != ncclFuncSignal && info.coll != ncclFuncWaitSignal);
+
+  if constexpr (ProfilerEvents) {
+    // Ensure profilerGroupDepth updates correctly for implicit internal group.
+    if (ncclProfilerApiState.profilerGroupDepth > 0) {
+      ncclProfilerApiState.profilerGroupDepth++;
+    }
+    NCCLCHECK(ncclGroupStartInternal());
+  }
+
   rcclLogCollInfo(info);
-  ncclResult_t result = rcclAddonLaunch(info.comm, info.stream, std::forward<LaunchFn>(launch));
-  if (result == ncclSuccess) info.comm->opCount++;
-  return result;
+  TRACE_CALL("nccl%s(%" PRIx64 ",%" PRIx64 ",%zu,%d,%d,%d,%p,%p)", info.opName,
+             reinterpret_cast<int64_t>(info.sendbuff), reinterpret_cast<int64_t>(info.recvbuff), info.count,
+             info.datatype, info.op, info.root, info.comm, info.stream);
+  NCCLCHECKGOTO(rcclAddonDoLaunch<ProfilerEvents>(info, std::forward<LaunchFn>(launch)), ret, fail);
+
+  info.comm->opCount++;
+
+fail:
+  if constexpr (ProfilerEvents) {
+    ncclGroupErrCheck(ret);
+    NCCLCHECK(ncclGroupEndInternal());
+  }
+
+  return ret;
 }
 
 ncclResult_t ncclPrepareTasks(struct ncclComm* comm, bool* algoNeedConnect, bool* needConnect, bool* needGenkDevComm,

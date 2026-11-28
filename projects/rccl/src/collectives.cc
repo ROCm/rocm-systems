@@ -480,7 +480,7 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
       return ncclAllGatherDdaIpc(sendbuff, recvbuff, sendcount, datatype, comm, stream);
     });
   case RCCL_HIERARCHICAL_ALLGATHER:
-    return rcclAddonLaunch(info, [&] {
+    return rcclAddonLaunch<false>(info, [&] {
       return ncclHierarchicalAllGather_Impl(sendbuff, recvbuff, sendcount, datatype, comm, stream);
     });
 #if defined(ENABLE_ROCSHMEM_GIN)
@@ -860,7 +860,7 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
     // No CollApi parent: this path returns before ncclEnqueueCheck, so the
     // thread-local handle still names a previous collective.
     NCCLCHECK(ncclProfilerStartCeCollEvent(comm, &ceArgs, stream));
-    ncclResult_t ceRet = rcclAddonLaunch(info, [&] {
+    ncclResult_t ceRet = rcclAddonLaunch<false>(info, [&] {
       return ncclCeAllReduce(comm, sendbuff, recvbuff, count, datatype, op, stream, nullptr, &ceArgs);
     });
     ncclProfilerStopCeCollEvent(comm, &ceArgs, stream);
@@ -973,8 +973,12 @@ ncclResult_t ncclBroadcast_impl(const void* sendbuff, void* recvbuff, size_t cou
   }
   struct rcclCollDecision decision;
   NCCLCHECK(rcclSelectBroadcast(comm, count, datatype, root, /*query=*/false, &decision));
-  // Non-DDA decisions enqueue unchanged (info.decision stays unset).
+  info.decision = decision;
+  info.decisionValid = true;
+
+  // Non-DDA decisions enqueue unchanged (info.decisionValid = false, so info.decision is ignored).
   if (decision.algo < NCCL_NUM_ALGORITHMS) {
+    info.decisionValid = false;
     return ncclEnqueueCheck(&info);
   }
 
@@ -998,6 +1002,8 @@ ncclResult_t ncclBroadcast_impl(const void* sendbuff, void* recvbuff, size_t cou
       return ncclBroadcastDdaFabricLL128(sendbuff, recvbuff, count, datatype, root, comm, stream);
     });
   default:
+    // See above, 'if (decision.algo < NCCL_NUM_ALGORITHMS)'
+    info.decisionValid = false;
     return ncclEnqueueCheck(&info);
   }
 }
@@ -1332,7 +1338,7 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
     // No CollApi parent: this path returns before ncclEnqueueCheck, so the
     // thread-local handle still names a previous collective.
     NCCLCHECK(ncclProfilerStartCeCollEvent(comm, &ceArgs, stream));
-    ncclResult_t ceRet = rcclAddonLaunch(comm, stream, [&] {
+    ncclResult_t ceRet = rcclAddonLaunch<false>(info, [&] {
       return ncclCeReduceScatter(comm, sendbuff, recvbuff, recvcount, datatype, op, stream, nullptr, &ceArgs);
     });
     ncclProfilerStopCeCollEvent(comm, &ceArgs, stream);
@@ -1363,7 +1369,7 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
       return ncclReduceScatterDdaIpc(sendbuff, recvbuff, recvcount, datatype, op, comm, stream);
     });
   case RCCL_HIERARCHICAL_REDUCESCATTER:
-    return rcclAddonLaunch(info, [&] {
+    return rcclAddonLaunch<false>(info, [&] {
       return ncclHierarchicalReduceScatter_Impl(sendbuff, recvbuff, recvcount, datatype, op, comm, stream);
     });
   case RCCL_DIRECT_REDUCESCATTER:

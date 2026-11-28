@@ -14,7 +14,6 @@
 #include "comm.h"
 #include "gdrwrap.h"
 #include "utils.h"
-#include "profiler.h"
 
 #include "fakes/comm_fakes.h"
 
@@ -23,9 +22,6 @@
 ASSERT_HOOK_MATCHES_PROD(g_commSetAsyncError, ncclCommSetAsyncError);
 ASSERT_HOOK_MATCHES_PROD(g_commCount, ncclCommCount);
 ASSERT_HOOK_MATCHES_PROD(g_commUserRank, ncclCommUserRank);
-ASSERT_HOOK_MATCHES_PROD(g_profilerStartCeCollEvent, ncclProfilerStartCeCollEvent);
-ASSERT_HOOK_MATCHES_PROD(g_profilerStopCeCollEvent, ncclProfilerStopCeCollEvent);
-
 #undef ASSERT_HOOK_MATCHES_PROD
 
 // --- Controllable seam ----------------------------------------------------
@@ -65,14 +61,6 @@ static ncclResult_t DefaultCommUserRank(const ncclComm_t comm, int* rank) {
 std::function<ncclResult_t(const ncclComm_t, int*)> g_commUserRank = DefaultCommUserRank;
 ncclResult_t ncclCommUserRank(const ncclComm_t comm, int* rank) { return g_commUserRank(comm, rank); }
 
-static ncclResult_t DefaultProfilerCeCollEvent(struct ncclComm*, struct ncclCeCollArgs*, hipStream_t) {
-  return ncclSuccess;
-}
-std::function<ncclResult_t(struct ncclComm*, struct ncclCeCollArgs*, hipStream_t)> g_profilerStartCeCollEvent =
-    DefaultProfilerCeCollEvent;
-std::function<ncclResult_t(struct ncclComm*, struct ncclCeCollArgs*, hipStream_t)> g_profilerStopCeCollEvent =
-    DefaultProfilerCeCollEvent;
-
 // alloc.h per-device allocation counters, defined in src/init.cc.
 struct allocationTracker allocTracker[MAX_ALLOC_TRACK_NGPU] = {};
 
@@ -80,8 +68,6 @@ void ResetCommFakes() {
   g_commSetAsyncError = DefaultCommSetAsyncError;
   g_commCount = DefaultCommCount;
   g_commUserRank = DefaultCommUserRank;
-  g_profilerStartCeCollEvent = DefaultProfilerCeCollEvent;
-  g_profilerStopCeCollEvent = DefaultProfilerCeCollEvent;
   g_commEnsureReadyResult = ncclSuccess;
   g_envCtaPolicy = NCCL_CONFIG_UNDEF_INT;
   ncclGdrCopy = nullptr;
@@ -111,38 +97,3 @@ int64_t ncclParamCGAClusterSize() { return g_loadParam("CGA_CLUSTER_SIZE", NCCL_
 // overloads each target referenced.
 
 // roctx_scoped_range_in lives in roctx_fakes.cc.
-
-thread_local ncclProfilerApiState_t ncclProfilerApiState = {};
-ncclResult_t ncclProfilerStartGroupApiEvent(struct ncclInfo*, bool) { return ncclSuccess; }
-ncclResult_t ncclProfilerRecordGroupApiEventState(ncclProfilerEventState_t) { return ncclSuccess; }
-ncclResult_t ncclProfilerStopGroupApiEvent() { return ncclSuccess; }
-ncclResult_t ncclProfilerStartCollApiEvent(struct ncclInfo*, bool) { return ncclSuccess; }
-ncclResult_t ncclProfilerStopCollApiEvent() { return ncclSuccess; }
-ncclResult_t ncclProfilerStartP2pApiEvent(struct ncclInfo*, bool) {
-  return ncclSuccess;
-}
-ncclResult_t ncclProfilerStopP2pApiEvent() {
-  return ncclSuccess;
-}
-ncclResult_t ncclProfilerStartCeCollEvent(struct ncclComm* comm, struct ncclCeCollArgs* args, hipStream_t stream) {
-  return g_profilerStartCeCollEvent(comm, args, stream);
-}
-ncclResult_t ncclProfilerStopCeCollEvent(struct ncclComm* comm, struct ncclCeCollArgs* args, hipStream_t stream) {
-  return g_profilerStopCeCollEvent(comm, args, stream);
-}
-ncclResult_t ncclProfilerStartCeSyncEvent(struct ncclComm*, struct ncclCeCollArgs*, hipStream_t,
-                                          struct ncclProfilerEventRef* handle) {
-  *handle = ncclProfilerEventRef{};
-  return ncclSuccess;
-}
-ncclResult_t ncclProfilerStopCeSyncEvent(struct ncclComm*, struct ncclProfilerEventRef*, hipStream_t) {
-  return ncclSuccess;
-}
-ncclResult_t ncclProfilerStartCeBatchEvent(struct ncclComm*, struct ncclCeCollArgs*, struct ncclCeBatchOpsParams*,
-                                           hipStream_t, struct ncclProfilerEventRef* handle) {
-  *handle = ncclProfilerEventRef{};
-  return ncclSuccess;
-}
-ncclResult_t ncclProfilerStopCeBatchEvent(struct ncclComm*, struct ncclProfilerEventRef*, hipStream_t) {
-  return ncclSuccess;
-}

@@ -1069,6 +1069,7 @@ rccl_add_unit_micro_binary(rccl-UnitTestsMicroDevRuntime dev-runtime-test.cc ${_
     fakes/mgmt_task_enq_fakes.cc
     fakes/nccl_device_core_fakes.cc
     fakes/nccl_fakes.cc
+    fakes/profiler_fakes.cc
     fakes/rocmwrap_fakes.cc
     fakes/sym_kernels_fakes.cc
     fakes/utils_fakes.cc
@@ -1097,6 +1098,7 @@ rccl_add_unit_micro_binary(rccl-UnitTestsMicroGroup group-test.cc ${_MICRO_ROOT_
     fakes/nccl_device_core_fakes.cc
     fakes/nccl_fakes.cc
     fakes/os_fakes.cc
+    fakes/profiler_fakes.cc
     fakes/recorder_fakes.cc
     fakes/rma_fakes.cc
     fakes/rocmwrap_fakes.cc
@@ -1189,6 +1191,7 @@ rccl_add_unit_micro_binary(rccl-UnitTestsMicroCollectives collectives-test.cc
     fakes/hip_fakes.cc
     fakes/nccl_fakes.cc
     fakes/nccl_stubs.cc
+    fakes/profiler_fakes.cc
     fakes/rccl_wrap_fakes.cc
     fakes/recorder_fakes.cc
     fakes/strongstream_stubs.cc
@@ -1366,6 +1369,7 @@ rccl_add_unit_micro_binary(rccl-UnitTestsMicroCeColl ce-coll-test.cc
     fakes/dev_runtime_fakes.cc
     fakes/devcomm_fakes.cc               # ncclTeamLsa
     fakes/env_fakes.cc
+    fakes/profiler_fakes.cc              # ncclProfilerStart/Stop{CeColl,CeSync,CeBatch}Event
     fakes/rccl_wrap_fakes.cc             # rcclParamCeAllReduce, rcclParamCeReduceScatter, rcclParamCeArStagingBytes
     fakes/rma_fakes.cc
     fakes/tuning_fakes.cc

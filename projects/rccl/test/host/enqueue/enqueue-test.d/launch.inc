@@ -40,6 +40,24 @@ struct AddonComm {
   }
   ncclComm* c() { return comm.get(); }
 };
+
+ncclInfo MakeCollInfo(ncclComm* comm, hipStream_t stream) {
+  struct ncclInfo info{};
+  info.coll          = ncclFuncReduceScatter;
+  info.opName        = "ReduceScatter";
+  info.sendbuff      = nullptr;
+  info.recvbuff      = nullptr;
+  info.count         = static_cast<size_t>(comm->nRanks);
+  info.datatype      = ncclInt8;
+  info.root          = 0;
+  info.comm          = comm;
+  info.stream        = stream;
+  info.chunkSteps    = 1;
+  info.sliceSteps    = 1;
+  info.acc           = nullptr;
+  info.decisionValid = false;
+  return info;
+}
 }  // namespace
 
 TEST_F(EnqueueMicrotest, AddonLaunch_NothingTookTheEvent_EpilogueRecordsIt) {
@@ -57,7 +75,8 @@ TEST_F(EnqueueMicrotest, AddonLaunch_NothingTookTheEvent_EpilogueRecordsIt) {
     return hipSuccess;
   });
 
-  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(ac.c(), kAddonStream, [] { return ncclSuccess; }));
+  struct ncclInfo info = MakeCollInfo(ac.c(), kAddonStream);
+  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(info, [] { return ncclSuccess; }));
 
   ASSERT_EQ(1, record.calls);
   EXPECT_EQ(kAddonDoneEvent, recordedEvent);
@@ -75,7 +94,8 @@ TEST_F(EnqueueMicrotest, AddonLaunch_KernelTookTheEvent_EpilogueSkipsTheRecord) 
   ScopedHook record(g_hipEventRecord, [](hipEvent_t, hipStream_t) { return hipErrorInvalidValue; });
 
   hipEvent_t stopEvent = nullptr;
-  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(ac.c(), kAddonStream, [&] {
+  struct ncclInfo info = MakeCollInfo(ac.c(), kAddonStream);
+  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(info, [&] {
     stopEvent = rcclTakeAddonStopEvent(ac.c());
     return ncclSuccess;
   }));
@@ -96,8 +116,8 @@ TEST_F(EnqueueMicrotest, AddonLaunch_LaunchFailed_RecordsNothingAndLeavesTheTag)
                           });
   ScopedHook record(g_hipEventRecord, [](hipEvent_t, hipStream_t) { return hipErrorInvalidValue; });
 
-  EXPECT_EQ(ncclInternalError,
-            rcclAddonLaunch(ac.c(), kAddonStream, [] { return ncclInternalError; }));
+  struct ncclInfo info = MakeCollInfo(ac.c(), kAddonStream);
+  EXPECT_EQ(ncclInternalError, rcclAddonLaunch(info, [] { return ncclInternalError; }));
 
   EXPECT_EQ(0, record.calls);
   EXPECT_EQ(0u, ac.c()->lastStreamTag);
@@ -126,7 +146,8 @@ TEST_F(EnqueueMicrotest, AddonLaunch_SetDeviceFailed_SkipsLaunchAndRestoresTheDe
   int launches = 0;
   ncclResult_t res = ncclSuccess;
   RcclUnitTesting::CaptureLog([&] {
-    res = rcclAddonLaunch(ac.c(), kAddonStream, [&] {
+    struct ncclInfo info = MakeCollInfo(ac.c(), kAddonStream);
+    res = rcclAddonLaunch(info, [&] {
       ++launches;
       return ncclSuccess;
     });
@@ -162,7 +183,8 @@ TEST_F(EnqueueMicrotest, AddonLaunch_CaptureQueryFailed_SkipsLaunchAndRestoresTh
   ScopedHook record(g_hipEventRecord, [](hipEvent_t, hipStream_t) { return hipSuccess; });
 
   int launches = 0;
-  EXPECT_EQ(ncclInternalError, rcclAddonLaunch(ac.c(), kAddonStream, [&] {
+  struct ncclInfo info = MakeCollInfo(ac.c(), kAddonStream);
+  EXPECT_EQ(ncclInternalError, rcclAddonLaunch(info, [&] {
               ++launches;
               return ncclSuccess;
             }));
@@ -191,10 +213,7 @@ TEST_F(EnqueueMicrotest, AddonLaunch_WithInfo_AdvancesOpCountOnSuccess) {
   ac.c()->localRankToRank = localRankToRank;
   ac.c()->opCount = 7;
 
-  struct ncclInfo info = {};
-  info.opName = "ReduceScatter";
-  info.comm = ac.c();
-  info.stream = kAddonStream;
+  struct ncclInfo info = MakeCollInfo(ac.c(), kAddonStream);
   EXPECT_EQ(ncclSuccess, rcclAddonLaunch(info, [] { return ncclSuccess; }));
   EXPECT_EQ(8u, ac.c()->opCount);
 }
@@ -211,10 +230,7 @@ TEST_F(EnqueueMicrotest, AddonLaunch_WithInfo_LaunchFailedLeavesOpCount) {
   ac.c()->localRankToRank = localRankToRank;
   ac.c()->opCount = 7;
 
-  struct ncclInfo info = {};
-  info.opName = "ReduceScatter";
-  info.comm = ac.c();
-  info.stream = kAddonStream;
+  struct ncclInfo info = MakeCollInfo(ac.c(), kAddonStream);
   EXPECT_EQ(ncclInternalError, rcclAddonLaunch(info, [] { return ncclInternalError; }));
   EXPECT_EQ(7u, ac.c()->opCount);
 }
@@ -295,7 +311,8 @@ TEST_F(EnqueueMicrotest, AddonLaunch_CapturedWithStreamOrdering_JoinsTheDeviceSt
     return ncclSuccess;
   });
 
-  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(ac.c(), kAddonStream, [&] {
+  struct ncclInfo info = MakeCollInfo(ac.c(), kAddonStream);
+  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(info, [&] {
     EXPECT_EQ(nullptr, rcclTakeAddonStopEvent(ac.c()));
     calls.push_back("launch");
     return ncclSuccess;
@@ -334,7 +351,8 @@ TEST_F(EnqueueMicrotest, AddonLaunch_CapturedWithoutStreamOrdering_WaitsOnAndRec
   });
 
   for (int i = 0; i < 2; ++i) {
-    EXPECT_EQ(ncclSuccess, rcclAddonLaunch(ac.c(), kAddonStream, [] { return ncclSuccess; }));
+    struct ncclInfo info = MakeCollInfo(ac.c(), kAddonStream);
+    EXPECT_EQ(ncclSuccess, rcclAddonLaunch(info, [] { return ncclSuccess; }));
   }
 
   EXPECT_EQ(0, acquire.calls);
@@ -362,7 +380,8 @@ TEST_F(EnqueueMicrotest, AddonLaunch_NotCapturing_LeavesTheDeviceStreamAlone) {
                          [](struct ncclCudaGraph, hipEvent_t, hipStream_t) { return ncclInternalError; });
   ScopedHook record(g_hipEventRecord, [](hipEvent_t, hipStream_t) { return hipSuccess; });
 
-  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(ac.c(), kAddonStream, [] { return ncclSuccess; }));
+  struct ncclInfo info = MakeCollInfo(ac.c(), kAddonStream);
+  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(info, [] { return ncclSuccess; }));
 
   EXPECT_EQ(0, acquire.calls);
   EXPECT_EQ(0, release.calls);
@@ -383,7 +402,8 @@ TEST_F(EnqueueMicrotest, AddonLaunch_CapturedLaunchFailed_StillReleasesTheDevice
   ScopedHook release(g_strongStreamRelease,
                      [](struct ncclCudaGraph, struct ncclStrongStream*, bool) { return ncclSuccess; });
 
-  EXPECT_EQ(ncclInternalError, rcclAddonLaunch(ac.c(), kAddonStream, [] { return ncclInternalError; }));
+  struct ncclInfo info = MakeCollInfo(ac.c(), kAddonStream);
+  EXPECT_EQ(ncclInternalError, rcclAddonLaunch(info, [] { return ncclInternalError; }));
 
   EXPECT_EQ(1, acquire.calls);
   EXPECT_EQ(1, release.calls);
