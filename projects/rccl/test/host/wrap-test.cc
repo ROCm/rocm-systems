@@ -71,6 +71,7 @@
 // src/rccl_wrap.cc, e.g. ${PROJECT_BINARY_DIR}/hipify/src/rccl_wrap.cc.
 #include WRAP_CC_PATH
 
+#include "algorithms/dda/dda_init_detail.h"  // ddaFabricScratchSizing
 #include "dev_runtime_internal.h"
 
 namespace {
@@ -9308,6 +9309,38 @@ TEST(WrapMicrotestIsolated, DdaFabricA2aLL128Shape_FromTable) {
           comm->nRanks = n;
           EXPECT_EQ(128 * kKiB, rcclDdaLLThreshold(comm, ncclFuncAlltoAll)) << n;
           EXPECT_EQ(16 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncAlltoAll)) << n;
+        }
+        // SPX runs AllToAll LL128 to 64 MiB at every rank count; DPX above stays at 16 MiB.
+        comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
+        for (int n : {2, 4, 8, 16, 32, 64}) {
+          comm->nRanks = n;
+          EXPECT_EQ(128 * kKiB, rcclDdaLLThreshold(comm, ncclFuncAlltoAll)) << n;
+          EXPECT_EQ(64 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncAlltoAll)) << n;
+        }
+        DeleteCommWithArch(comm);
+      });
+}
+
+// Fabric init sizes scratch from the arch table; on the SPX table each AllToAll LL128 slot must carry a 64 MiB total.
+// The slot math is ddaLL128A2AMaxPerChunkBytes: one staging area per rank in one bank.
+TEST(WrapMicrotestIsolated, DdaFabricScratch_SpxCarriesA2aLL128Ceiling) {
+  RUN_ISOLATED_TEST(
+      "Wrap_DdaFabricScratch_SpxCarriesA2aLL128Ceiling",
+      []() {
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
+        ASSERT_NE(nullptr, comm->archThresholds);
+        for (int n : {2, 3, 4, 8, 16, 32, 64}) {
+          comm->nRanks = n;
+          const size_t ceiling = rcclDdaLL128Threshold(comm, ncclFuncAlltoAll);
+          ASSERT_EQ(64 * kMiB, ceiling) << n;
+          // These args mirror ddaFabricScratchSizing's call in fabric_init.cu; keep the two in step.
+          const size_t scratch = nccl_dda_detail::ddaFabricScratchSizing(
+              n, /*overrideBytes=*/-1, rcclParamDdaEnable(), rcclDdaScratchPayloadCap(comm), rcclParamDdaLL(),
+              rcclParamDdaLL128(), rcclDdaLL128Threshold(comm, ncclFuncAllReduce));
+          const size_t slotWords = dda::common::ddaLL128SlotWords(dda::common::ddaBankSize(scratch), n, 1);
+          const size_t perPeer = (ceiling + (size_t)n - 1) / (size_t)n;
+          EXPECT_GE(dda::common::ddaLL128SlotPayloadBytes(slotWords), perPeer) << n << " ranks, scratch " << scratch;
         }
         DeleteCommWithArch(comm);
       });

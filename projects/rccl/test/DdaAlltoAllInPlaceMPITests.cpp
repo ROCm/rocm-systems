@@ -18,6 +18,10 @@
  *
  * DdaAlltoAllPeerColumnsMPI repeats the cases with RCCL_DDA_FABRIC_MAXBLOCKS=2, so each LL128 block
  * column serves several peers.
+ *
+ * LL128UpTo64MiBKeepsData runs the 24, 32 and 64 MiB totals on the tables whose AlltoAll LL128 ceiling
+ * reaches 64 MiB (gfx1250 SPX): each must take LL128 and move every byte exactly. It skips when the
+ * comm's scratch slot cannot carry a 64 MiB total (e.g. a smaller RCCL_DDA_FABRIC_BUFFER_SIZE).
  */
 
 #ifdef MPI_TESTS_ENABLED
@@ -25,6 +29,7 @@
 #include "DdaFabricMPITestFixture.hpp"
 #include "DeviceBufferHelpers.hpp"
 #include "ResourceGuards.hpp"
+#include "algorithms/dda/alltoall/dda_alltoall.h"
 #include "rccl_common.h"
 
 #include <gtest/gtest.h>
@@ -34,6 +39,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
+#include <iterator>
 #include <memory>
 #include <string>
 
@@ -47,6 +53,8 @@ namespace
 constexpr size_t kPrimeLineBytes = 251 * 16;
 constexpr size_t kPerPeerBytes[] = {kPrimeLineBytes, 64 * 1024, 512 * 1024};
 constexpr size_t kSlack          = 64;
+// Totals in the gfx1250 SPX AlltoAll LL128 band above 16 MiB (up to 64 MiB).
+constexpr size_t kLL128BandTotals[] = {24u << 20, 32u << 20, 64u << 20};
 constexpr auto   kDrainTimeout   = std::chrono::seconds(120);
 
 struct OffsetCase
@@ -192,6 +200,53 @@ protected:
 TEST_F(DdaAlltoAllInPlaceMPI, OffsetsStayOnDda)
 {
     runAllCases();
+}
+
+// Ranks skip unless the active table runs AlltoAll LL128 up to 64 MiB. Per-peer bytes are whole 16-byte lines,
+// so with a rank count that does not divide the total the call stays just under it.
+TEST_F(DdaAlltoAllInPlaceMPI, LL128UpTo64MiBKeepsData)
+{
+    const ncclComm_t comm = getActiveCommunicator();
+    const size_t topTotal = kLL128BandTotals[std::size(kLL128BandTotals) - 1];
+    const std::string skip = mpiCoordinatedSkipReason(rcclDdaLL128Threshold(comm, ncclFuncAlltoAll) < topTotal,
+                                                      "Needs DDA AlltoAll LL128 up to 64 MiB (gfx1250 SPX table)");
+    if(!skip.empty())
+    {
+        GTEST_SKIP() << skip;
+    }
+    // The eligibility gate ignores the buffers; it refuses a chunk the comm's LL128 slot cannot carry.
+    const size_t topPerPeer = topTotal / static_cast<size_t>(nRanks_) / 16 * 16;
+    const bool slotTooSmall
+        = !ncclAllToAllDdaFabricLL128Eligible(comm, nullptr, nullptr, topPerPeer / sizeof(float), ncclFloat32);
+    const std::string slotSkip = mpiCoordinatedSkipReason(
+        slotTooSmall, "DDA scratch cannot carry a 64 MiB AlltoAll LL128 total (RCCL_DDA_FABRIC_BUFFER_SIZE)");
+    if(!slotSkip.empty())
+    {
+        GTEST_SKIP() << slotSkip;
+    }
+
+    void* base = nullptr;
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&base, topTotal + kSlack));
+    DeviceBufferAutoGuard guard(base);
+    void* recvBase = nullptr;
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&recvBase, topTotal + kSlack));
+    DeviceBufferAutoGuard recvGuard(recvBase);
+
+    const OffsetCase aligned{ncclFloat32, false, 0, 0};
+    for(size_t total : kLL128BandTotals)
+    {
+        const size_t perPeer = total / static_cast<size_t>(nRanks_) / 16 * 16;
+        SCOPED_TRACE("totalBytes=" + std::to_string(total) + " perPeerBytes=" + std::to_string(perPeer));
+        EXPECT_EQ(selectedAlgo(ncclFuncAlltoAll, perPeer / sizeof(float), ncclFloat32, base, recvBase),
+                  RCCL_DDA_FABRIC_LL128)
+            << "Rank " << rank_ << " of " << nRanks_;
+        runCase(static_cast<uint8_t*>(base), static_cast<uint8_t*>(recvBase), perPeer, aligned);
+        if(HasFatalFailure())
+        {
+            return;
+        }
+    }
+    EXPECT_EQ(ll128Cases_, static_cast<int>(std::size(kLL128BandTotals))) << "Rank " << rank_;
 }
 
 class DdaAlltoAllPeerColumnsMPI : public DdaAlltoAllInPlaceMPI

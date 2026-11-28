@@ -3457,7 +3457,7 @@ TEST(RcclAlltoAllDecision, Gfx1250_DdaLL_Band)
 }
 
 // gfx1250, message just above the LL ceiling and within the LL128 band
-// (ddaLL128Max[A2A] = 16 MiB total):
+// (ddaLL128Max[A2A] = 64 MiB total on SPX):
 // rcclSelectAlltoAll must choose RCCL_DDA_FABRIC_LL128.
 TEST(RcclAlltoAllDecision, Gfx1250_DdaLL128_Band)
 {
@@ -3480,7 +3480,7 @@ TEST(RcclAlltoAllDecision, Gfx1250_DdaLL128_Band)
     EXPECT_EQ(dec.algo, RCCL_DDA_FABRIC_LL128);
 }
 
-// gfx1250: above the 16 MiB LL128 cap AlltoAll takes DDA VMM up to its 256 MiB cap, then Direct p2p.
+// gfx1250: above the 64 MiB LL128 cap AlltoAll takes DDA VMM up to its 256 MiB cap, then Direct p2p.
 TEST(RcclAlltoAllDecision, Gfx1250_AboveDdaCap_DirectFallback)
 {
     auto comm = std::make_unique<ncclComm>();
@@ -3506,6 +3506,32 @@ TEST(RcclAlltoAllDecision, Gfx1250_AboveDdaCap_DirectFallback)
     }
 }
 
+// gfx1250 SPX table: DDA LL to 128 KiB total, DDA LL128 above it to 64 MiB, DDA VMM past that, from 2 to 64 ranks.
+TEST(RcclAlltoAllDecision, Gfx1250Spx_A2aBands)
+{
+    for (int nRanks : {2, 4, 8, 16, 32, 64})
+    {
+        auto comm = std::make_unique<ncclComm>();
+        auto topo = std::make_unique<ncclTopoSystem>();
+        InitA2ADecisionComm(*comm, *topo, "gfx1250", nRanks);
+        comm->archThresholds = rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
+        ASSERT_NE(comm->archThresholds, nullptr);
+        const size_t align = 16u * (size_t)comm->nRanks;
+        const std::pair<size_t, int> cases[] = {{128ul << 10, RCCL_DDA_FABRIC_LL},
+                                                {(128ul << 10) + align, RCCL_DDA_FABRIC_LL128},
+                                                {32ul << 20, RCCL_DDA_FABRIC_LL128},
+                                                {64ul << 20, RCCL_DDA_FABRIC_LL128},
+                                                {(64ul << 20) + align, RCCL_DDA_FABRIC_VMM},
+                                                {128ul << 20, RCCL_DDA_FABRIC_VMM}};
+        for (const auto& c : cases)
+        {
+            rcclCollDecision dec{};
+            ASSERT_EQ(SelectA2A(*comm, c.first, dec), ncclSuccess) << nRanks << " " << c.first;
+            EXPECT_EQ(dec.algo, c.second) << nRanks << " " << c.first;
+        }
+    }
+}
+
 // gfx1250 DPX table, 8 ranks: DDA LL to 128 KiB total, DDA LL128 above it to 16 MiB, DDA VMM past that.
 TEST(RcclAlltoAllDecision, Gfx1250Dpx_A2aBands)
 {
@@ -3518,7 +3544,8 @@ TEST(RcclAlltoAllDecision, Gfx1250Dpx_A2aBands)
     const std::pair<size_t, int> cases[] = {{128ul << 10, RCCL_DDA_FABRIC_LL},
                                             {(128ul << 10) + align, RCCL_DDA_FABRIC_LL128},
                                             {16ul << 20, RCCL_DDA_FABRIC_LL128},
-                                            {(16ul << 20) + align, RCCL_DDA_FABRIC_VMM}};
+                                            {(16ul << 20) + align, RCCL_DDA_FABRIC_VMM},
+                                            {32ul << 20, RCCL_DDA_FABRIC_VMM}};
     for (const auto& c : cases)
     {
         rcclCollDecision dec{};

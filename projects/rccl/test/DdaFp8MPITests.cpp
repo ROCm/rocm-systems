@@ -493,7 +493,7 @@ TEST_F(DdaFp8MPI_LL128, AllGather)
     });
 }
 
-// 256 KiB per peer gives each block several slices to move, and stays under the SPX 16 MiB LL128
+// 256 KiB per peer gives each block several slices to move, and stays under the SPX 64 MiB LL128
 // ceiling at 32 ranks.
 TEST_F(DdaFp8MPI_LL128, AllToAll)
 {
