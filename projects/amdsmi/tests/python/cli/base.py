@@ -183,6 +183,7 @@ class TestCliBase(unittest.TestCase):
     list_data: dict
     static_data: dict
     metric_data: dict
+    metric_named_data: dict
     partition_data: dict
     clk_freq: list
     gpus: list
@@ -207,6 +208,7 @@ class TestCliBase(unittest.TestCase):
 
         baseline = cls._build_baseline()
         TestCliBase.metric_data = baseline["metric_data"]
+        TestCliBase.metric_named_data = baseline["metric_named_data"]
         TestCliBase.static_data = baseline["static_data"]
         TestCliBase.list_data = baseline["list_data"]
         TestCliBase.partition_data = baseline["partition_data"]
@@ -224,6 +226,9 @@ class TestCliBase(unittest.TestCase):
         # O(1) — N being the number of test methods in this class.
         cmds = [
             ("metric", "amd-smi metric --json"),
+            # Sections named on the command line are reported for every GPU; the
+            # default dump leaves fan and an N/A perf_level out on an APU.
+            ("metric_named", "amd-smi metric --fan --perf-level --json"),
             ("static", "amd-smi static --json"),
             ("list", "amd-smi list --json"),
             ("partition", "amd-smi partition --current --json"),
