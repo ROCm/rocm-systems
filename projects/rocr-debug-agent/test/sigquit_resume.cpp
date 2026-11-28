@@ -30,7 +30,9 @@
 
 #include "util.h"
 
+#include <errno.h>
 #include <hip/hip_runtime.h>
+#include <poll.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -76,6 +78,16 @@ SigquitResumeTest ()
     ;
   printf ("Kernel started\n");
   fflush (stdout);
+
+  /* Wait for the release line by polling instead of blocking in fgets.  A
+     thread parked in a blocking read can delay signal handlers, like the
+     agent's SIGQUIT handler, when the program runs under TSAN.  */
+  struct pollfd stdin_fd = { STDIN_FILENO, POLLIN, 0 };
+  int ready;
+  while ((ready = poll (&stdin_fd, 1, 100)) == 0
+	 || (ready < 0 && errno == EINTR))
+    ;
+  TEST_ASSERT (ready > 0, "poll for release line");
 
   char line[16];
   TEST_ASSERT (fgets (line, sizeof (line), stdin) != nullptr, "release line");
