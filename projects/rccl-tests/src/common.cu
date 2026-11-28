@@ -2009,6 +2009,22 @@ testResult_t AllocateBuffs(void **sendbuff, size_t sendBytes, void **recvbuff, s
 
 testResult_t run(); // Main function
 
+#ifdef MPI_SUPPORT
+// The first GPU run() will give this process, from the local rank the launcher exports,
+// or -1 when no launcher variable is set. Launcher-specific names come before
+// SLURM_LOCALID, which is also set (to 0) in the batch step that runs mpirun.
+static int launcherFirstDevice() {
+  if (numDevices <= 0) return -1;
+  const char* device = getenv("NCCL_TESTS_DEVICE");
+  if (device) return atoi(device) % numDevices;
+  for (const char* name : {"OMPI_COMM_WORLD_LOCAL_RANK", "MPI_LOCALRANKID", "PALS_LOCAL_RANKID", "SLURM_LOCALID"}) {
+    const char* v = getenv(name);
+    if (v && v[0]) return (atoi(v) * nThreads * nGpus) % numDevices;
+  }
+  return -1;
+}
+#endif
+
 int main(int argc, char* argv[], char **envp) {
   // Make sure everyline is flushed so that we see the progress of the test
   ncclTestSetlinebuf(stdout);
@@ -2477,6 +2493,11 @@ int main(int argc, char* argv[], char **envp) {
   }
 
 #ifdef MPI_SUPPORT
+  // Open MPI's ROCm support creates HIP queues on the current device in MPI_Init. Left on
+  // device 0, every rank's queues land there; on 8x MI350X, adding the device API's SDMA
+  // queues oversubscribed device 0, which then stalled for about 1 ms every few ms.
+  const int firstDevice = launcherFirstDevice();
+  if (firstDevice >= 0) CUDACHECK(cudaSetDevice(firstDevice));
   MPI_Init(&argc, &argv);
 #endif
 
