@@ -1610,6 +1610,42 @@ TEST(Gfx1250SimulationTest, VgprMsbRolesSelectHighVgprBanks) {
   EXPECT_EQ(cu.read_vgpr(vb + 5, kLane), 0xDEADBEEFu);
 }
 
+TEST(Gfx1250SimulationTest, Vop2ShiftSelectsOperandBanksAndCrossesBankBoundary) {
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  auto *wf = sim.dispatch_scratch_wf();
+  ASSERT_NE(wf, nullptr);
+  auto &cu = *sim.cu();
+  cu.set_plugin_group(nullptr);
+  wf->set_vgpr_msb_mode(0xc6); // SRC0 bank 2, SRC1 bank 1, DST bank 3.
+  wf->set_exec(0x55555555);
+  const uint32_t base = wf->vgpr_alloc().base;
+  constexpr uint32_t keep = 0xdeadbeef;
+  const auto decoder = Decoder::create(IsaFamily::Cdna5);
+  for (uint16_t selector : {261, 129}) { // v5 or inline 1.
+    for (uint32_t lane = 0; lane < 32; ++lane) {
+      cu.write_vgpr(base + 517, lane, lane + 1);
+      cu.write_vgpr(base + 511, lane, 0x12345678);
+      cu.write_vgpr(base + 512, lane, 0x9abcdef0);
+      for (uint32_t reg : {7, 8, 775, 776}) {
+        cu.write_vgpr(base + reg, lane, keep);
+      }
+    }
+    const auto words =
+        cdna5::build_vop2(cdna5::kVLshlrevB64Vop2, {.src0 = selector, .vsrc1 = 255, .vdst = 7});
+    auto inst = decoder->decode_window(words);
+    ASSERT_TRUE(inst.succeeded());
+    ASSERT_TRUE(cu.execute_instruction(inst.value().get(), *wf).succeeded());
+    for (uint32_t lane = 0; lane < 32; ++lane) {
+      const uint64_t shifted = 0x9abcdef012345678ull << (selector == 261 ? lane + 1 : 1);
+      EXPECT_EQ(cu.read_vgpr(base + 775, lane), lane % 2 ? keep : uint32_t(shifted));
+      EXPECT_EQ(cu.read_vgpr(base + 776, lane), lane % 2 ? keep : uint32_t(shifted >> 32));
+      EXPECT_EQ(cu.read_vgpr(base + 7, lane), keep);
+      EXPECT_EQ(cu.read_vgpr(base + 8, lane), keep);
+    }
+  }
+}
+
 TEST(Gfx1250SimulationTest, VMovDppReadsSelectedHighVgprBank) {
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());

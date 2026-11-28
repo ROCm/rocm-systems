@@ -1588,6 +1588,64 @@ TEST(ArithBridgeTest, DecodedWideShiftsPreserveOverlappingInputsAndInactiveWords
   }
 }
 
+TEST(ArithBridgeTest, Vop2LogicPreservesMaskedLanesWithAliasedInputs) {
+  for (const uint32_t lanes : {32u, 64u}) {
+    BridgeFixture fixture(false, lanes);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
+    fixture.cu->set_plugin_group(nullptr);
+    constexpr uint64_t exec = 0xc00000058000000full, writes = 0x8000000780000005ull;
+    fixture.wave->set_exec(exec);
+    constexpr uint32_t scalar = 37;
+    fixture.cu->write_sgpr(fixture.wave->sgpr_alloc().base, scalar);
+    struct Count {
+      uint16_t selector;
+      uint32_t value;
+    };
+    for (const Count count : {Count{0, scalar}, Count{144, 16}, Count{255, 258}, Count{258, 64}}) {
+      // D overlaps the high word of the value and also the register count.
+      for (uint32_t lane = 0; lane < lanes; ++lane) {
+        fixture.cu->write_vgpr(fixture.base(), lane, 0x89abcdefu + lane);
+        fixture.cu->write_vgpr(fixture.base() + 1, lane, 0x12345678u);
+        fixture.cu->write_vgpr(fixture.base() + 2, lane, 64u + lane);
+      }
+      const auto encoding = rdna4::build_vop2(rdna4::kVLshlrevB64Vop2,
+                                              {.src0 = count.selector, .vsrc1 = 0, .vdst = 1});
+      // Literal 258 looks like a VGPR selector if the resolved word is misinterpreted.
+      const std::array words = {encoding[0], 258u};
+      auto inst = fixture.decoder->decode_window(words);
+      ASSERT_TRUE(inst.succeeded());
+      fixture.wave->set_vgpr_write_mask(writes);
+      ASSERT_TRUE(fixture.cu->execute_instruction(inst.value().get(), *fixture.wave).succeeded());
+      fixture.wave->set_vgpr_write_mask(~0ull);
+      for (uint32_t lane = 0; lane < lanes; ++lane) {
+        const uint32_t shift = count.value + (count.selector == 258 ? lane : 0);
+        const uint64_t value = (uint64_t{0x12345678u} << 32) | (0x89abcdefu + lane);
+        const auto shifted = value << (shift & 63);
+        const bool active = ((exec & writes) >> lane) & 1;
+        EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 1, lane),
+                  active ? uint32_t(shifted) : 0x12345678u);
+        EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 2, lane),
+                  active ? uint32_t(shifted >> 32) : 64u + lane);
+      }
+    }
+  }
+}
+
+TEST(ArithBridgeTest, Rdna35Vop2LogicResolvesUnallocatedSourceToVgpr0) {
+  BridgeFixture fixture(rocjitsu::IsaFamily::Rdna3_5, 32, {}, 8);
+  ASSERT_NE(fixture.wave, nullptr);
+  fixture.cu->set_plugin_group(nullptr);
+  fixture.wave->set_exec(1);
+  fixture.cu->write_vgpr(fixture.base(), 0, 0x3cU);
+  const auto words =
+      rdna3_5::build_vop2(rdna3_5::kVOrB32Vop2, {.src0 = 129, .vsrc1 = 127, .vdst = 5});
+  auto instruction = fixture.decoder->decode_window(words);
+  ASSERT_TRUE(instruction.succeeded());
+  ASSERT_TRUE(
+      fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
+  EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 5, 0), 0x3dU);
+}
+
 TEST(ArithBridgeTest, Rdna4WideShiftVop2UsesOneWordCountAndTwoWordValue) {
   BridgeFixture fixture(false);
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
