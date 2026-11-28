@@ -30,6 +30,7 @@ set(_MICRO_MISC_DEFS
   IBVWRAP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/ibvwrap.cc"
   IONICDVSYMBOLS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/ionicdvsymbols.cc"
   IONICDVWRAP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/ionicdvwrap.cc"
+  KERNEL_CONFIG_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/kernel_config.cc"
   MLX5DVSYMBOLS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/mlx5dvsymbols.cc"
   MLX5DVWRAP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/mlx5dvwrap.cc"
   NVMLWRAP_STUB_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/nvmlwrap_stub.cc"
@@ -146,6 +147,8 @@ rccl_add_misc_micro_binary(rccl-UnitTestsMicroMiscMlx5dvwrap mlx5dvwrap-test.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/ibvwrap.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/mlx5dvsymbols.cc
   REMOVE_DEFS ENABLE_QP_TRACKING)  # as for MiscIbvwrap
+
+rccl_add_misc_micro_binary(rccl-UnitTestsMicroMiscKernelConfig kernel-config-test.cc)
 
 rccl_add_misc_micro_binary(rccl-UnitTestsMicroMiscRecorder recorder-test.cc
   SOURCES

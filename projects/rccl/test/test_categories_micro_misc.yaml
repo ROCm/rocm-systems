@@ -19,6 +19,7 @@ test_categories:
       - "ApiTrace*"
       - "Argcheck*"
       - "Crypt*"
+      - "KernelConfig*"
       - "Recorder*"
       - "Shmutils*"
       - "Signals*"

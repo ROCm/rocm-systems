@@ -1,0 +1,1 @@
+* Fixed DMA-BUF support being turned off when the first kernel config file RCCL finds is empty, for example a zero-length `/boot/config-$(uname -r)`. Empty files are now skipped and the search continues.
