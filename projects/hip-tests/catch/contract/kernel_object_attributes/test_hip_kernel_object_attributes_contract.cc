@@ -31,7 +31,7 @@ constexpr char const kWriteValueKernelSource[] =
 constexpr char const kUseMaxSharedMemoryKernelName[] = "use_max_shared_memory";
 constexpr char const kUseMaxSharedMemoryKernelSource[] =
 R"%(
-extern "C" __global__ void use_max_shared_memory(int* result, int n)
+extern "C" __global__ void use_max_shared_memory(unsigned long long* result, unsigned long long n)
 {
   extern __shared__ int myArray[];
 
@@ -227,13 +227,13 @@ HIP_TEST_CASE(Contract_KernelObjectAttributes_HipKernelSetCacheConfig_Values_Are
   int maxSharedMemPerBlock = 0;
   int currentDevice = -1;
   hipDevice_t device;
-  int h_result;
-  LinearAllocGuard<int> d_result(LinearAllocs::hipMalloc, sizeof(h_result));
-  int n;
+  unsigned long long h_result;
+  LinearAllocGuard<unsigned long long> d_result(LinearAllocs::hipMalloc, sizeof(h_result));
+  unsigned long long n;
   hipKernel_t kernel;
   hipLibrary_t library;
   hipFunction_t useMaxSharedMemoryFunc;
-  int* devicePtr = d_result.ptr();
+  unsigned long long* devicePtr = d_result.ptr();
   void* args[] = { &devicePtr, &n };
 
   HIP_CHECK(hipGetDevice(&currentDevice));
