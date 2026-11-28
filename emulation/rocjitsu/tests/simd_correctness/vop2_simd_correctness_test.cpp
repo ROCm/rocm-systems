@@ -227,20 +227,12 @@ void check_case(const Vop2Case &c, uint64_t exec) {
 }
 
 TEST(Vop2SimdCorrectness, FullExecMask) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   for (const auto &c : kCases) {
     check_case(c, /*exec=*/~0ULL);
   }
 }
 
 TEST(Vop2SimdCorrectness, PartialExecMask) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
   // Alternating + sparse pattern: exercises masked_store blend and inactive-lane
   // preservation across SIMD chunk boundaries.
   for (const auto &c : kCases) {

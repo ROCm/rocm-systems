@@ -464,6 +464,72 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_H2D_Functional) {
   VerifyDeviceBuffers(dst_ptrs, copy_size);
 }
 
+namespace {
+__global__ void CopyIntsKernel(int* out, const int* in, size_t n) {
+  for (size_t i = blockIdx.x * blockDim.x + threadIdx.x; i < n; i += gridDim.x * blockDim.x) {
+    out[i] = in[i];
+  }
+}
+}  // namespace
+
+/**
+ * Test Description
+ * ------------------------
+ * - A single-op batch (one SDMA completion signal) must still order later work on the stream:
+ *   a kernel reading the H2D destination, an event recorded after a D2H batch, and stream sync.
+ *   Work is queued behind a delay kernel so the copies are still pending when it is issued.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpyBatchAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_SingleOp_OrdersLaterWork) {
+  constexpr size_t kCount = (4u << 20) / sizeof(int);
+  constexpr size_t kBytes = kCount * sizeof(int);
+  // The launch checks below read the sticky last error; drop one left by an earlier test
+  static_cast<void>(hipGetLastError());
+  StreamGuard stream_guard(Streams::created);
+  const hipStream_t stream = stream_guard.stream();
+  LinearAllocGuard<int> host_src(LinearAllocs::hipHostMalloc, kBytes);
+  LinearAllocGuard<int> host_dst(LinearAllocs::hipHostMalloc, kBytes);
+  LinearAllocGuard<int> dev_a(LinearAllocs::hipMalloc, kBytes);
+  LinearAllocGuard<int> dev_b(LinearAllocs::hipMalloc, kBytes);
+  for (size_t i = 0; i < kCount; i++) host_src.host_ptr()[i] = static_cast<int>(i * 7 + 1);
+  std::fill_n(host_dst.host_ptr(), kCount, 0);
+  HIP_CHECK(hipMemset(dev_b.ptr(), 0, kBytes));
+
+  hipEvent_t done;
+  HIP_CHECK(hipEventCreate(&done));
+  for (int iter = 0; iter < 3; iter++) {
+    LaunchDelayKernel(std::chrono::milliseconds(50), stream);
+    void* h2d_dst[] = {dev_a.ptr()};
+    void* h2d_src[] = {host_src.host_ptr()};
+    size_t sizes[] = {kBytes};
+    HIP_CHECK(hipMemcpyBatchAsync(h2d_dst, h2d_src, sizes, 1, nullptr, nullptr, 0, nullptr,
+                                  stream));
+    CopyIntsKernel<<<256, 256, 0, stream>>>(dev_b.ptr(), dev_a.ptr(), kCount);
+    HIP_CHECK(hipGetLastError());
+    void* d2h_dst[] = {host_dst.host_ptr()};
+    void* d2h_src[] = {dev_b.ptr()};
+    HIP_CHECK(hipMemcpyBatchAsync(d2h_dst, d2h_src, sizes, 1, nullptr, nullptr, 0, nullptr,
+                                  stream));
+    HIP_CHECK(hipEventRecord(done, stream));
+    HIP_CHECK(hipEventSynchronize(done));
+    for (size_t i = 0; i < kCount; i++) {
+      if (host_dst.host_ptr()[i] != static_cast<int>(i * 7 + 1)) {
+        INFO("iter " << iter << " index " << i);
+        REQUIRE(host_dst.host_ptr()[i] == static_cast<int>(i * 7 + 1));
+      }
+    }
+    std::fill_n(host_dst.host_ptr(), kCount, 0);
+    HIP_CHECK(hipMemsetAsync(dev_b.ptr(), 0, kBytes, stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+  }
+  HIP_CHECK(hipEventDestroy(done));
+}
+
 /**
  * Test Description
  * ------------------------
@@ -574,6 +640,154 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_D2H_Functional) {
   HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
 
   VerifyHostBuffers(dst, copy_size);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - A batch of 64 pageable (malloc) entries, H2D and D2H interleaved, with mixed and odd sizes
+ *   from 1 KB to 64 KB plus a few larger ones. The small entries go through the stream's staging
+ *   buffer and fill more than one staging chunk; the larger ones take the per-entry path. The
+ *   stream is created after five others, so it shares a pooled HW queue. The batch is queued
+ *   behind a delay kernel and a memset of the D2H sources, so the D2H entries must wait for
+ *   earlier stream work.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpyBatchAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Pageable_MixedChunks) {
+  constexpr size_t kEntries = 64;
+  constexpr size_t kSizes[] = {kOneKiB + 3,        4 * kOneKiB,       12 * kOneKiB + 5,
+                               32 * kOneKiB,       48 * kOneKiB + 17, 64 * kOneKiB,
+                               40 * kOneKiB + 1,   200 * kOneKiB + 9};
+  std::vector<StreamGuard> other_streams;
+  for (int i = 0; i < 5; i++) other_streams.emplace_back(Streams::created);
+  StreamGuard stream_guard(Streams::created);
+  const hipStream_t stream = stream_guard.stream();
+
+  std::vector<size_t> sizes(kEntries);
+  std::vector<std::vector<uint8_t>> host(kEntries);
+  std::vector<void*> dev(kEntries);
+  std::vector<void*> dsts(kEntries);
+  std::vector<void*> srcs(kEntries);
+  auto is_h2d = [](size_t i) { return (i % 3) != 1; };
+  auto h2d_byte = [](size_t i, size_t j) { return static_cast<uint8_t>(i * 31 + j * 7 + 1); };
+  auto d2h_byte = [](size_t i, int iter) { return static_cast<uint8_t>(0x80 + i + iter); };
+  for (size_t i = 0; i < kEntries; i++) {
+    sizes[i] = kSizes[(i * 5) % std::size(kSizes)];
+    host[i].resize(sizes[i]);
+    HIP_CHECK(hipMalloc(&dev[i], sizes[i]));
+    dsts[i] = is_h2d(i) ? dev[i] : host[i].data();
+    srcs[i] = is_h2d(i) ? static_cast<void*>(host[i].data()) : dev[i];
+  }
+
+  for (int iter = 0; iter < 3; iter++) {
+    for (size_t i = 0; i < kEntries; i++) {
+      if (is_h2d(i)) {
+        for (size_t j = 0; j < sizes[i]; j++) host[i][j] = h2d_byte(i, j + iter);
+        HIP_CHECK(hipMemset(dev[i], 0, sizes[i]));
+      } else {
+        std::fill(host[i].begin(), host[i].end(), 0);
+      }
+    }
+    LaunchDelayKernel(std::chrono::milliseconds(20), stream);
+    for (size_t i = 0; i < kEntries; i++) {
+      if (!is_h2d(i)) HIP_CHECK(hipMemsetAsync(dev[i], d2h_byte(i, iter), sizes[i], stream));
+    }
+    HIP_CHECK(hipMemcpyBatchAsync(dsts.data(), srcs.data(), sizes.data(), kEntries, nullptr,
+                                  nullptr, 0, nullptr, stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+
+    for (size_t i = 0; i < kEntries; i++) {
+      INFO("iter " << iter << " entry " << i << " size " << sizes[i]);
+      if (is_h2d(i)) {
+        std::vector<uint8_t> back(sizes[i]);
+        HIP_CHECK(hipMemcpy(back.data(), dev[i], sizes[i], hipMemcpyDeviceToHost));
+        for (size_t j = 0; j < sizes[i]; j++) {
+          if (back[j] != h2d_byte(i, j + iter)) REQUIRE(back[j] == h2d_byte(i, j + iter));
+        }
+      } else {
+        for (size_t j = 0; j < sizes[i]; j++) {
+          if (host[i][j] != d2h_byte(i, iter)) REQUIRE(host[i][j] == d2h_byte(i, iter));
+        }
+      }
+    }
+  }
+  for (void* p : dev) HIP_CHECK(hipFree(p));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - Batch entries between hipMalloc memory and a hipMemMap'd (VMM) range on the same device,
+ *   both directions, at sizes the staged pageable path would take. VMM memory has no host
+ *   mapping, so it must not be mistaken for pageable host memory.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpyBatchAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Vmm_DeviceMemory) {
+  int device = 0;
+  HIP_CHECK(hipGetDevice(&device));
+  int vmm = 0;
+  HIP_CHECK(
+      hipDeviceGetAttribute(&vmm, hipDeviceAttributeVirtualMemoryManagementSupported, device));
+  if (vmm == 0) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kVmmUnsupported);
+  }
+
+  hipMemAllocationProp prop{};
+  prop.type = hipMemAllocationTypePinned;
+  prop.location.type = hipMemLocationTypeDevice;
+  prop.location.id = device;
+  size_t granularity = 0;
+  HIP_CHECK(hipMemGetAllocationGranularity(&granularity, &prop,
+                                           hipMemAllocationGranularityRecommended));
+  const size_t vmm_size = std::max(granularity, 256 * kOneKiB);
+  void* vmm_ptr = nullptr;
+  HIP_CHECK(hipMemAddressReserve(&vmm_ptr, vmm_size, 0, nullptr, 0));
+  hipMemGenericAllocationHandle_t handle{};
+  HIP_CHECK(hipMemCreate(&handle, vmm_size, &prop, 0));
+  HIP_CHECK(hipMemMap(vmm_ptr, vmm_size, 0, handle, 0));
+  hipMemAccessDesc desc{};
+  desc.location.type = hipMemLocationTypeDevice;
+  desc.location.id = device;
+  desc.flags = hipMemAccessFlagsProtReadWrite;
+  HIP_CHECK(hipMemSetAccess(vmm_ptr, vmm_size, &desc, 1));
+
+  const size_t copy_size = GENERATE(4 * kOneKiB, 64 * kOneKiB);
+  StreamGuard stream_guard(Streams::created);
+  LinearAllocGuard<uint8_t> dev_a(LinearAllocs::hipMalloc, copy_size);
+  LinearAllocGuard<uint8_t> dev_b(LinearAllocs::hipMalloc, copy_size);
+  uint8_t* vmm_bytes = static_cast<uint8_t*>(vmm_ptr);
+  HIP_CHECK(hipMemset(dev_a.ptr(), 0x5a, copy_size));
+  HIP_CHECK(hipMemset(vmm_bytes + copy_size, 0xa5, copy_size));
+  HIP_CHECK(hipMemset(vmm_bytes, 0, copy_size));
+  HIP_CHECK(hipMemset(dev_b.ptr(), 0, copy_size));
+
+  // hipMalloc -> VMM and VMM -> hipMalloc in one batch
+  void* dsts[] = {vmm_bytes, dev_b.ptr()};
+  void* srcs[] = {dev_a.ptr(), vmm_bytes + copy_size};
+  size_t sizes[] = {copy_size, copy_size};
+  HIP_CHECK(hipMemcpyBatchAsync(dsts, srcs, sizes, 2, nullptr, nullptr, 0, nullptr,
+                                stream_guard.stream()));
+  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+
+  std::vector<uint8_t> back(copy_size);
+  HIP_CHECK(hipMemcpy(back.data(), vmm_bytes, copy_size, hipMemcpyDeviceToHost));
+  REQUIRE(std::all_of(back.begin(), back.end(), [](uint8_t b) { return b == 0x5a; }));
+  HIP_CHECK(hipMemcpy(back.data(), dev_b.ptr(), copy_size, hipMemcpyDeviceToHost));
+  REQUIRE(std::all_of(back.begin(), back.end(), [](uint8_t b) { return b == 0xa5; }));
+
+  HIP_CHECK(hipMemUnmap(vmm_ptr, vmm_size));
+  HIP_CHECK(hipMemRelease(handle));
+  HIP_CHECK(hipMemAddressFree(vmm_ptr, vmm_size));
 }
 
 /**

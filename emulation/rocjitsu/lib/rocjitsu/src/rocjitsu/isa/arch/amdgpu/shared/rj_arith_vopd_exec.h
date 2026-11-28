@@ -44,7 +44,7 @@ inline void execute_dual_pair(Wavefront &wave, const Slot &x, const Slot &y, Inv
     if constexpr (ResultWords == 2) {
       if (slot.dst->size_bits() == 64) {
         auto output = registers.write_operand64(*slot.dst, write_mask);
-        for (unsigned lane = 0; lane < 32; lane += util::native_width_v<uint64_t>) {
+        for (unsigned lane = 0; lane < 32; lane += util::register_block_lanes_v<uint64_t>) {
           if (output
                   .store_native(
                       lane, util::load64<uint64_t>(result.data() + lane, result.data() + 32 + lane),
@@ -57,7 +57,7 @@ inline void execute_dual_pair(Wavefront &wave, const Slot &x, const Slot &y, Inv
       }
     }
     auto output = registers.write_operand(*slot.dst, write_mask);
-    for (unsigned lane = 0; lane < 32; lane += util::native_width_v<uint32_t>) {
+    for (unsigned lane = 0; lane < 32; lane += util::register_block_lanes_v<uint32_t>) {
       if (output.store_native(lane, util::load<uint32_t>(result.data() + lane), write_mask >> lane)
               .failed()) {
         return false;

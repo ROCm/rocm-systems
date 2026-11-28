@@ -107,6 +107,9 @@ void ComandLineArgumentsUsage() {
     printf("\t--hws arg\t - Force HW capability\n");
     printf("\t--profile arg\t - Test profile\n");
     printf("\t--child arg\t - Child Process\n");
+    printf("\t--remotechild arg\t - Remote child process\n");
+    printf("\t--remote arg\t - Remote host\n");
+    printf("\t--remote-node arg\t - GPU node on the remote host (default: --node if given)\n");
     printf("\t--timeout arg\t - Time Out\n");
     printf("\t--dst_node\t - For testing multiple nodes\n");
     printf("\t--sleep_time\t - For testing CRIU, etc\n");
@@ -133,6 +136,9 @@ bool GetCommandLineArguments(int argc, char **argv, CommandLineArguments& rArgs)
         { "testnodenum", required_argument, 0, 0 },
         { "ais_threads", required_argument, 0, 0 },
         { "ais_size_mb", required_argument, 0, 0 },
+        { "remote", required_argument, 0, 0 },
+        { "remotechild", required_argument, 0, 0 },
+        { "remote-node", required_argument, 0, 0 },
         { 0, 0, 0, 0 }
     };
 
@@ -140,6 +146,7 @@ bool GetCommandLineArguments(int argc, char **argv, CommandLineArguments& rArgs)
     rArgs.TestProfile = TESTPROFILE_RUNALL;
     rArgs.ChildProcess = false;
     rArgs.TimeOut = 0;
+    rArgs.RemoteChildProcess = false;
     rArgs.NodeId = -1;
     rArgs.DstNodeId = -1;
     rArgs.SleepTime = 0;
@@ -147,6 +154,8 @@ bool GetCommandLineArguments(int argc, char **argv, CommandLineArguments& rArgs)
     rArgs.TestNodeNum = 0;
     rArgs.AisThreads = 8;
     rArgs.AisSizeMB = 1024;
+    rArgs.RemoteHost = "";
+    rArgs.RemoteNodeId = -1;
 
     while (true) {
         int c = getopt_long(argc, argv, "", long_options, &option_index);
@@ -247,6 +256,21 @@ bool GetCommandLineArguments(int argc, char **argv, CommandLineArguments& rArgs)
                 int aisSizeMB = atoi(optarg);
                 if (aisSizeMB > 0)
                     rArgs.AisSizeMB = aisSizeMB;
+            }
+            break;
+        case 11:
+            rArgs.RemoteHost = optarg;
+            break;
+        case 12:
+            rArgs.RemoteChildProcess = true;
+            if (!strcmp(optarg, "0") || !strcmp(optarg, "false") || !strcmp(optarg, "off"))
+                rArgs.RemoteChildProcess = false;
+            break;
+        case 13:
+            {
+                int remoteNodeId = atoi(optarg);
+                if (remoteNodeId >= 0)
+                    rArgs.RemoteNodeId = remoteNodeId;
             }
             break;
         }

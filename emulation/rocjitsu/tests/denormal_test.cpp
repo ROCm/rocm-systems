@@ -7,7 +7,6 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/denormal.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/denormal_value.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_format.h"
-#include "util/simd.h"
 
 #include <gtest/gtest.h>
 
@@ -41,20 +40,11 @@ TEST(DenormalTest, FlushValueUsesTheEncoding) {
   const double tiny64 = std::numeric_limits<double>::denorm_min();
   EXPECT_EQ(std::bit_cast<uint64_t>(flush::flush_value(-tiny64)), uint64_t{0x8000000000000000});
   EXPECT_EQ(flush::flush_value(-2.0), -2.0);
-
-  using V = util::native<float>;
-  V lanes([&](auto i) { return i % 2 == 0 ? -tiny : float(i); });
-  const V flushed = flush::flush_value(lanes);
-  for (std::size_t i = 0; i < V::size(); ++i) {
-    EXPECT_EQ(std::bit_cast<uint32_t>(float(flushed[i])),
-              i % 2 == 0 ? 0x80000000u : std::bit_cast<uint32_t>(float(i)));
-  }
 }
 
 // Every class other than a subnormal passes through bit for bit, including NaN
-// payloads, on SIMD lanes as on scalar ones.
-TEST(DenormalTest, FlushValueSimdKeepsEveryOtherClass) {
-  using V = util::native<float>;
+// payloads.
+TEST(DenormalTest, FlushValueKeepsEveryOtherClass) {
   constexpr std::pair<uint32_t, uint32_t> kCases[] = {
       {0x00000001u, 0x00000000u}, {0x80000001u, 0x80000000u}, {0x007fffffu, 0x00000000u},
       {0x807fffffu, 0x80000000u}, {0x00000000u, 0x00000000u}, {0x80000000u, 0x80000000u},
@@ -62,10 +52,8 @@ TEST(DenormalTest, FlushValueSimdKeepsEveryOtherClass) {
       {0xff800000u, 0xff800000u}, {0x7fc00000u, 0x7fc00000u}, {0x7f800001u, 0x7f800001u},
   };
   for (const auto &[in, out] : kCases) {
-    const V flushed = flush::flush_value(V(std::bit_cast<float>(in)));
-    for (std::size_t i = 0; i < V::size(); ++i) {
-      EXPECT_EQ(std::bit_cast<uint32_t>(float(flushed[i])), out) << std::hex << in;
-    }
+    EXPECT_EQ(std::bit_cast<uint32_t>(flush::flush_value(std::bit_cast<float>(in))), out)
+        << std::hex << in;
   }
 }
 

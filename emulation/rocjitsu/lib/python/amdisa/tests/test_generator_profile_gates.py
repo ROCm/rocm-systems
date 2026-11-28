@@ -2980,9 +2980,13 @@ def test_cdna_f64_mfma_uses_blgp_as_neg_immediate():
     ]
     inst = Instruction('V_MFMA_F64_16X16X4_F64', 'ENC_VOP3P_MFMA', 0, operands)
 
-    for arch in ('cdna3', 'cdna4'):
-        body = _gen_mfma(inst, arch)
-        assert 'cu.arithmetic_flags(), inst_.blgp,' in body
+    body_cdna3 = _gen_mfma(inst, 'cdna3')
+    assert 'cu.arithmetic_flags(), inst_.blgp,' in body_cdna3
+
+    body_cdna4 = _gen_mfma(inst, 'cdna4')
+    assert (
+        'cu.arithmetic_flags(), inst_.blgp | (uint64_t(inst_.cbsz) << 3),' in body_cdna4
+    )
 
     body = _gen_mfma(inst, 'cdna2')
     assert 'cu.arithmetic_flags(), 0u,' in body
@@ -10129,7 +10133,9 @@ def test_f32_mfma_library_dispatch(arch, m, k, batch):
         enc_field_names={'acc_cd'},
     )
     assert f'exec_dense_fp_matrix<1, {m * m * batch // 64}, 64>' in body
-    assert f'rj_arith_{name.lower()}_w64' in body
+    target_suffix = '_gfx950' if arch == 'cdna4' else ''
+    assert f'rj_arith_{name.lower()}_w64{target_suffix},' in body
+    assert ('wf.fp_denorm_mode_f32()' in body) == (arch == 'cdna4')
     assert 'inst_.acc_cd' in body
 
 
@@ -10158,11 +10164,14 @@ def test_f64_mfma_library_dispatch(arch, m, batch):
         enc_field_names={'acc_cd'},
     )
     assert f'exec_dense_fp_matrix<2, {outputs}, 64, {outputs}, false, true>' in body
-    assert f'rj_arith_{name.lower()}_w64' in body
-    controls = '0u' if arch == 'cdna2' else 'inst_.blgp'
-    assert f'cu.arithmetic_flags(), {controls}' in body
+    target_suffix = '_gfx950' if arch == 'cdna4' else ''
+    assert f'rj_arith_{name.lower()}_w64{target_suffix},' in body
     if arch == 'cdna2':
+        assert 'cu.arithmetic_flags(), 0u' in body
         assert 'inst_.blgp' not in body
+    else:
+        assert 'cu.arithmetic_flags(), inst_.blgp' in body
+    assert ('inst_.cbsz' in body) == (arch == 'cdna4')
     assert 'inst_.acc_cd' in body
     assert 'amdgpu::RegisterAccess(wf).read_scalar64(src2)' in body
     assert 'std::optional<uint64_t> inline_c' in body

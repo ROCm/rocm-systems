@@ -373,15 +373,22 @@ def gen_mfma(ctx: ExecuteContext) -> str:
             ]
         )
 
-    # On gfx942/gfx950 FP64 BLGP is a negate mask; gfx90a ignores it.
+    # On gfx942/gfx950 FP64 BLGP is a negate mask while gfx90a ignores it;
+    # on CDNA4 VOP3P-MAI, CBSZ encodes the 3-bit source ABS mask before NEG.
     if (
         arch in ('cdna2', 'cdna3', 'cdna4')
         and result_type == input_type == 'F64'
         and (M, N, K, B) in {(16, 16, 4, 1), (4, 4, 4, 4)}
     ):
         batch_suffix = f'_{B}b' if B > 1 else ''
-        api = f'rj_arith_v_mfma_f64_{M}x{N}x{K}{batch_suffix}_f64_w64'
-        controls = '0u' if arch == 'cdna2' else 'inst_.blgp'
+        target_suffix = '_gfx950' if arch == 'cdna4' else ''
+        api = f'rj_arith_v_mfma_f64_{M}x{N}x{K}{batch_suffix}_f64_w64{target_suffix}'
+        if arch == 'cdna2':
+            controls = '0u'
+        elif arch == 'cdna4':
+            controls = 'inst_.blgp | (uint64_t(inst_.cbsz) << 3)'
+        else:
+            controls = 'inst_.blgp'
         outputs = M * N * B // 32
         L.append(
             '  const bool compatibility = (cu.arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK)'
@@ -526,7 +533,7 @@ def gen_mfma(ctx: ExecuteContext) -> str:
             api = f'rj_arith_v_mfma_f32_{M}x{N}x{K}{batch_suffix}_{input_type.lower()}_w64{target}'
         if arch == 'cdna4' and (
             input_type in _F8_FIXED
-            or input_type == 'XF32'
+            or input_type in ('F32', 'XF32')
             or input_type in ('F16', 'BF16')
             and (M, K, B) not in {(16, 32, 1), (32, 16, 1)}
         ):
@@ -538,10 +545,15 @@ def gen_mfma(ctx: ExecuteContext) -> str:
         L.append(
             '  const uint64_t a_lanes = inst_.cbsz == 0 ? ~uint64_t{0} : amdgpu::mfma_permuted_lane_mask([&](uint32_t lane) {'
         )
-        a_block = f', {M}' if arch == 'cdna2' else ''
-        L.append(
-            f'    return amdgpu::permute_a_lane(lane, inst_.cbsz, inst_.abid{a_block}); }});'
-        )
+        if arch == 'cdna4' and input_type == 'F32':
+            L.append(
+                f'    return (inst_.cbsz <= 4 && (1u << inst_.cbsz) > {64 // M}u) ? (lane % 16u) : amdgpu::permute_a_lane(lane, inst_.cbsz, inst_.abid, {M}); }});'
+            )
+        else:
+            a_block = f', {M}' if arch == 'cdna2' else ''
+            L.append(
+                f'    return amdgpu::permute_a_lane(lane, inst_.cbsz, inst_.abid{a_block}); }});'
+            )
         L.append(
             '  const uint64_t b_lanes = inst_.blgp == 0 ? ~uint64_t{0} : amdgpu::mfma_permuted_lane_mask([&](uint32_t lane) {'
         )
@@ -550,16 +562,17 @@ def gen_mfma(ctx: ExecuteContext) -> str:
             f'  amdgpu::arith::exec_dense_fp_matrix<{M * K * B * in_bits // 2048}, {M * N * B // 64}, 64>('
         )
         flags = 'cu.arithmetic_flags()'
-        if arch == 'cdna2' and input_type == 'F32':
+        if arch in ('cdna2', 'cdna4') and input_type == 'F32':
             flags += ' | ((wf.fp_denorm_mode_f32() & 1u) ? 0 : RJ_ARITH_FP_FLUSH_INPUT_DENORMALS)'
             flags += ' | ((wf.fp_denorm_mode_f32() & 2u) ? 0 : RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS)'
-        # CDNA4 §7.1.2 specifies finite F32 overflow saturation. MI300's table
-        # also lists it, but gfx942 retains its existing floating-point behavior
-        # pending a physical mode-toggle measurement on that target.
-        # gfx942 also forwards the bit to enforce exact-model qualification;
-        # its approximate paths continue to ignore it.
+        # CDNA4 §7.1.2 specifies finite F32 overflow saturation, but MI350X
+        # wave2_3f captures ignore MODE.FP16_OVFL on F32 MFMA (e.g.
+        # v_mfma_f32_4x4x1_16b_f32: 0xdf800000 * 0xff000000 + 0xff7fffff ->
+        # 0x7f800000 under both FP16_OVFL=0 and 1). MI300's table also lists
+        # it; gfx942 retains its existing F32 behavior and forwards the bit on
+        # non-F32 forms to enforce exact-model qualification.
         if (arch == 'cdna3' and input_type != 'F32') or (
-            arch == 'cdna4' and input_type in ('F32', 'BF16')
+            arch == 'cdna4' and input_type == 'BF16'
         ):
             flags += ' | (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0)'
         L.append(f'      wf, {api}, {flags}, controls,')

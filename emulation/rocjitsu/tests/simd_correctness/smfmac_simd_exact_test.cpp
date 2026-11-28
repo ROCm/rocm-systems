@@ -4,6 +4,7 @@
 /// @file smfmac_simd_exact_test.cpp
 /// @brief Decoded CDNA3/CDNA4 F32 SMFMAC SIMD-vs-scalar checks.
 
+#include "float_format_reference.h"
 #include "mma_exact_test_support.h"
 #include "rocjitsu/isa/isa_family.h"
 
@@ -694,12 +695,15 @@ TEST(Cdna4MatrixControlTest, DenseF32AndBf16ClampFiniteOverflowOnly) {
           {.vdst = DST_OFF, .src0 = 256 + A_OFF, .src1 = 256 + B_OFF, .src2 = 256 + INDEX_OFF});
       std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
       ASSERT_NE(instruction, nullptr);
+      // On MI350X (gfx950), dense BF16 MFMA clamps finite overflow to +/-FLT_MAX
+      // under MODE.FP16_OVFL, whereas dense F32 MFMA ignores MODE.FP16_OVFL and
+      // rounds finite overflow to +/-Inf.
       struct Case {
         uint32_t a, c, normal, clamped;
       };
       const Case cases[] = {
-          {bf16 ? 0x7f7f7f7fu : 0x7f7fffffu, 0, 0x7f800000, 0x7f7fffff},
-          {bf16 ? 0xff7fff7fu : 0xff7fffffu, 0, 0xff800000, 0xff7fffff},
+          {bf16 ? 0x7f7f7f7fu : 0x7f7fffffu, 0, 0x7f800000, bf16 ? 0x7f7fffffu : 0x7f800000u},
+          {bf16 ? 0xff7fff7fu : 0xff7fffffu, 0, 0xff800000, bf16 ? 0xff7fffffu : 0xff800000u},
           {bf16 ? 0x7f807f80u : 0x7f800000u, 0, 0x7f800000, 0x7f800000},
           {0, 0xff800000, 0xff800000, 0xff800000},
       };
@@ -722,11 +726,15 @@ TEST(Cdna4MatrixControlTest, DenseF32AndBf16ClampFiniteOverflowOnly) {
       }
     }
 
-    // CBSZ=1 broadcasts one half of A to both halves of the result.
+    // On 4x4x1_16b_f32 (M=4, 16 blocks), CBSZ=1 broadcasts the ABID-selected
+    // 4-lane block across each adjacent pair of 4-lane blocks, while F32 MFMA
+    // still rounds finite overflow to +Inf even with MODE.FP16_OVFL set.
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
-      fx.cu->write_vgpr(fx.vbase + A_OFF, lane, lane < 32 ? 0x7f7fffffu : 0x7f800000u);
+      fx.cu->write_vgpr(fx.vbase + A_OFF, lane, (lane & 4) == 0 ? 0x3f800000u : 0x7f7fffffu);
       fx.cu->write_vgpr(fx.vbase + B_OFF, lane, 0x40000000u);
-      fx.cu->write_vgpr(fx.vbase + INDEX_OFF, lane, 0);
+      for (uint32_t r = 0; r < 4; ++r) {
+        fx.cu->write_vgpr(fx.vbase + INDEX_OFF + r, lane, 0);
+      }
     }
     fx.wf->set_mode_raw(amdgpu::Wavefront::FP16_OVFL_BIT);
     for (uint8_t abid : {0, 1}) {
@@ -741,8 +749,8 @@ TEST(Cdna4MatrixControlTest, DenseF32AndBf16ClampFiniteOverflowOnly) {
       std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
       ASSERT_NE(instruction, nullptr);
       ASSERT_TRUE(fx.cu->execute_instruction(instruction.get(), *fx.wf).succeeded());
-      const uint32_t expected = abid ? 0x7f800000u : 0x7f7fffffu;
-      for (uint32_t lane : {0u, 32u}) {
+      const uint32_t expected = abid ? 0x7f800000u : 0x40000000u;
+      for (uint32_t lane : {0u, 4u, 32u, 36u}) {
         EXPECT_EQ(fx.cu->read_vgpr(fx.vbase + DST_OFF, lane), expected);
       }
     }

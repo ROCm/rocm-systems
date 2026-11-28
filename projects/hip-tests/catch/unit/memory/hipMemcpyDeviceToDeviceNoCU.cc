@@ -6,6 +6,9 @@
 
 #include <hip_test_common.hh>
 #include <hip_test_kernels.hh>
+
+#include <chrono>
+#include <vector>
 /**
  * @addtogroup hipMemcpy hipMemcpy
  * @{
@@ -268,3 +271,63 @@ HIP_TEST_CASE(Unit_hipMemcpyDeviceToDeviceNoCU_Memcpy_Kernel_InParallel) {
  * End doxygen group MemoryTest.
  * @}
  */
+
+namespace {
+// Aggregate bandwidth (bytes/ms) of `streams` streams each doing `copies` NoCU D2D copies of
+// `bytes`, all in flight together. Every stream's first copy runs before timing, so each
+// stream has its SDMA engine assigned when timing starts.
+double NoCuAggregateBandwidth(int streams, int copies, size_t bytes) {
+  std::vector<hipStream_t> s(streams);
+  std::vector<void*> src(streams), dst(streams);
+  for (int i = 0; i < streams; i++) {
+    HIP_CHECK(hipStreamCreate(&s[i]));
+    HIP_CHECK(hipMalloc(&src[i], bytes));
+    HIP_CHECK(hipMalloc(&dst[i], bytes));
+    HIP_CHECK(hipMemset(src[i], i + 1, bytes));
+  }
+  for (int i = 0; i < streams; i++) {
+    HIP_CHECK(hipMemcpyAsync(dst[i], src[i], bytes, hipMemcpyDeviceToDeviceNoCU, s[i]));
+  }
+  HIP_CHECK(hipDeviceSynchronize());
+  const auto start = std::chrono::steady_clock::now();
+  for (int c = 0; c < copies; c++) {
+    for (int i = 0; i < streams; i++) {
+      HIP_CHECK(hipMemcpyAsync(dst[i], src[i], bytes, hipMemcpyDeviceToDeviceNoCU, s[i]));
+    }
+  }
+  HIP_CHECK(hipDeviceSynchronize());
+  const double ms =
+      std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+  for (int i = 0; i < streams; i++) {
+    unsigned char probe = 0;
+    HIP_CHECK(hipMemcpy(&probe, static_cast<char*>(dst[i]) + bytes - 1, 1, hipMemcpyDeviceToHost));
+    REQUIRE(probe == static_cast<unsigned char>(i + 1));
+    HIP_CHECK(hipFree(src[i]));
+    HIP_CHECK(hipFree(dst[i]));
+    HIP_CHECK(hipStreamDestroy(s[i]));
+  }
+  return static_cast<double>(bytes) * copies * streams / ms;
+}
+}  // namespace
+
+/**
+ * Test Description
+ * ------------------------
+ *  - More streams than SDMA engines doing NoCU device-to-device copies at once must spread over
+ *    the engines: 8 streams keep at least 85% of the aggregate bandwidth of 2 streams. Piling
+ *    the extra streams onto one engine drops it to about 1/2 to 2/3 on two-engine parts.
+ * Test source
+ * ------------------------
+ *  - unit/memory/hipMemcpyDeviceToDeviceNoCU.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.2
+ */
+HIP_TEST_CASE(Unit_hipMemcpyDeviceToDeviceNoCU_OversubscribedStreamsShareEngines) {
+  constexpr size_t kBytes = 64u << 20;
+  constexpr int kCopies = 8;
+  const double two = NoCuAggregateBandwidth(2, kCopies * 4, kBytes);
+  const double eight = NoCuAggregateBandwidth(8, kCopies, kBytes);
+  INFO("2 streams: " << two / 1e6 << " GB/s, 8 streams: " << eight / 1e6 << " GB/s");
+  REQUIRE(eight >= 0.85 * two);
+}

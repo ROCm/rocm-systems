@@ -34,6 +34,7 @@ jobs:
           sparse-checkout: |
             projects/hipfile
             .github/workflows
+          persist-credentials: false
 
       - name: Install clang-format
         shell: bash

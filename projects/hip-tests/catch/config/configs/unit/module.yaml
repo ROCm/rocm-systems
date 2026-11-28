@@ -42,6 +42,12 @@ module:
       targets: [amd_windows]
       reason: "AIRUNTIME-2892 - needs to be further investigated. gfx1201 (amd_windows) FAILs (false -> false, Rock window failures on gfx1151)."
     tags: [launch]
+  Unit_hipModuleGetFunction_LaunchHandleWithHipLaunchKernel:
+    <<: *level_default
+    tags: [launch]
+  Unit_hipModuleLaunchKernel_Printf_DuplicateFormatString:
+    <<: *level_default
+    tags: [launch]
   Unit_hipModuleLaunchKernel_Negative_Parameters:
     <<: *level_default
     disabled:
@@ -97,6 +103,9 @@ module:
     <<: *level_default
     tags: [function, P0]
   Unit_hipModuleGetFunction_Negative_Parameters:
+    <<: *level_default
+    tags: [function]
+  Unit_hipModuleGetFunction_NotFound_KeepsLastErrorClear:
     <<: *level_default
     tags: [function]
   Unit_hipModuleGetFunction_DiffDevice:
@@ -389,6 +398,12 @@ module:
     disabled:
       targets: [nvidia_linux, nvidia_windows]
       reason: "AIRUNTIME-2744 - fixture fatbin_mismatch_module.code is built only on the amd platform; needs to be re-triaged."
+    tags: [load]
+  Unit_FatBin_NoCompatibleCodeObject_StaticKernel:
+    <<: *level_default
+    disabled:
+      targets: [nvidia_linux, nvidia_windows]
+      reason: "AIRUNTIME-2744 - helper hipFatBinMismatch_exe is built only on the amd platform; needs to be re-triaged."
     tags: [load]
   Unit_FatBin_MixedArch_IncompatibleDeviceDoesNotPoisonOthers:
     <<: *level_default

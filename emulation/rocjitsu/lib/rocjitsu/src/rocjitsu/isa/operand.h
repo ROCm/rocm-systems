@@ -49,34 +49,27 @@ public:
     return data_[lane];
   }
 
-  template <typename T> util::native<T> simd_load(size_t lane_base) const {
-    assert(lane_base + util::native_width_v<T> <= lane_count_);
+  template <typename T> util::RegisterBlock<T> simd_load(size_t lane_base) const {
+    assert(lane_base + util::register_block_lanes_v<T> <= lane_count_);
     return util::load<T>(data_ + lane_base);
   }
   template <typename T>
-  void simd_store(size_t lane_base, util::native<T> value, uint64_t mask) const {
-    assert(lane_base + util::native_width_v<T> <= lane_count_);
+  void simd_store(size_t lane_base, util::RegisterBlock<T> value, uint64_t mask) const {
+    assert(lane_base + util::register_block_lanes_v<T> <= lane_count_);
     util::masked_store<T>(data_ + lane_base, value, mask);
   }
-  template <typename T> util::narrow32<T> simd_load_narrow(size_t lane_base) const {
-    assert(lane_base + util::native_width64 <= lane_count_);
-    return util::load_narrow<T>(data_ + lane_base);
-  }
+
   template <typename T>
-  void simd_store_narrow(size_t lane_base, util::narrow32<T> value, uint64_t mask) const {
-    assert(lane_base + util::native_width64 <= lane_count_);
-    util::masked_store_narrow<T>(data_ + lane_base, value, mask);
-  }
-  template <typename T> util::native<T> simd_load64(const VgprStorage &hi, size_t lane_base) const {
+  util::RegisterBlock<T> simd_load64(const VgprStorage &hi, size_t lane_base) const {
     assert(lane_count_ == hi.lane_count_);
-    assert(lane_base + util::native_width64 <= lane_count_);
+    assert(lane_base + util::register_block_lanes64 <= lane_count_);
     return util::load64<T>(data_ + lane_base, hi.data_ + lane_base);
   }
   template <typename T>
-  void simd_store64(const VgprStorage &hi, size_t lane_base, util::native<T> value,
+  void simd_store64(const VgprStorage &hi, size_t lane_base, util::RegisterBlock<T> value,
                     uint64_t mask) const {
     assert(lane_count_ == hi.lane_count_);
-    assert(lane_base + util::native_width64 <= lane_count_);
+    assert(lane_base + util::register_block_lanes64 <= lane_count_);
     util::masked_store64<T>(data_ + lane_base, hi.data_ + lane_base, value, mask);
   }
 
@@ -98,18 +91,15 @@ public:
     assert(lane < lane_count_);
     return data_[lane];
   }
-  template <typename T> util::native<T> simd_load(size_t lane_base) const {
-    assert(lane_base + util::native_width_v<T> <= lane_count_);
+  template <typename T> util::RegisterBlock<T> simd_load(size_t lane_base) const {
+    assert(lane_base + util::register_block_lanes_v<T> <= lane_count_);
     return util::load<T>(data_ + lane_base);
   }
-  template <typename T> util::narrow32<T> simd_load_narrow(size_t lane_base) const {
-    assert(lane_base + util::native_width64 <= lane_count_);
-    return util::load_narrow<T>(data_ + lane_base);
-  }
+
   template <typename T>
-  util::native<T> simd_load64(const ConstVgprStorage &hi, size_t lane_base) const {
+  util::RegisterBlock<T> simd_load64(const ConstVgprStorage &hi, size_t lane_base) const {
     assert(lane_count_ == hi.lane_count_);
-    assert(lane_base + util::native_width64 <= lane_count_);
+    assert(lane_base + util::register_block_lanes64 <= lane_count_);
     return util::load64<T>(data_ + lane_base, hi.data_ + lane_base);
   }
 

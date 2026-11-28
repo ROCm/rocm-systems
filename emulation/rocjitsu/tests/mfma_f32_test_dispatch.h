@@ -21,25 +21,30 @@ void execute_mfma_f32_shape(amdgpu::ComputeUnitCore &cu, uint32_t d, uint32_t a,
   using Entry = decltype(&rj_arith_v_mfma_f32_16x16x4_f32_w64);
   Entry entry = nullptr;
   if constexpr (M == 32 && K == 1 && Batch == 2) {
-    entry = cu.arch() == rocjitsu::IsaFamily::Cdna2 ? rj_arith_v_mfma_f32_32x32x1_2b_f32_w64_gfx90a
-            : cu.arch() == rocjitsu::IsaFamily::Cdna1
-                ? rj_arith_v_mfma_f32_32x32x1_2b_f32_w64_gfx908
-                : rj_arith_v_mfma_f32_32x32x1_2b_f32_w64;
+    entry =
+        cu.arch() == rocjitsu::IsaFamily::Cdna4   ? rj_arith_v_mfma_f32_32x32x1_2b_f32_w64_gfx950
+        : cu.arch() == rocjitsu::IsaFamily::Cdna2 ? rj_arith_v_mfma_f32_32x32x1_2b_f32_w64_gfx90a
+        : cu.arch() == rocjitsu::IsaFamily::Cdna1 ? rj_arith_v_mfma_f32_32x32x1_2b_f32_w64_gfx908
+                                                  : rj_arith_v_mfma_f32_32x32x1_2b_f32_w64;
   } else if constexpr (M == 16 && K == 1 && Batch == 4) {
-    entry = cu.arch() == rocjitsu::IsaFamily::Cdna2 ? rj_arith_v_mfma_f32_16x16x1_4b_f32_w64_gfx90a
-            : cu.arch() == rocjitsu::IsaFamily::Cdna1
-                ? rj_arith_v_mfma_f32_16x16x1_4b_f32_w64_gfx908
-                : rj_arith_v_mfma_f32_16x16x1_4b_f32_w64;
+    entry =
+        cu.arch() == rocjitsu::IsaFamily::Cdna4   ? rj_arith_v_mfma_f32_16x16x1_4b_f32_w64_gfx950
+        : cu.arch() == rocjitsu::IsaFamily::Cdna2 ? rj_arith_v_mfma_f32_16x16x1_4b_f32_w64_gfx90a
+        : cu.arch() == rocjitsu::IsaFamily::Cdna1 ? rj_arith_v_mfma_f32_16x16x1_4b_f32_w64_gfx908
+                                                  : rj_arith_v_mfma_f32_16x16x1_4b_f32_w64;
   } else if constexpr (M == 4 && K == 1 && Batch == 16) {
-    entry = cu.arch() == rocjitsu::IsaFamily::Cdna2   ? rj_arith_v_mfma_f32_4x4x1_16b_f32_w64_gfx90a
+    entry = cu.arch() == rocjitsu::IsaFamily::Cdna4   ? rj_arith_v_mfma_f32_4x4x1_16b_f32_w64_gfx950
+            : cu.arch() == rocjitsu::IsaFamily::Cdna2 ? rj_arith_v_mfma_f32_4x4x1_16b_f32_w64_gfx90a
             : cu.arch() == rocjitsu::IsaFamily::Cdna1 ? rj_arith_v_mfma_f32_4x4x1_16b_f32_w64_gfx908
                                                       : rj_arith_v_mfma_f32_4x4x1_16b_f32_w64;
   } else if constexpr (M == 32 && K == 2 && Batch == 1) {
-    entry = cu.arch() == rocjitsu::IsaFamily::Cdna2   ? rj_arith_v_mfma_f32_32x32x2_f32_w64_gfx90a
+    entry = cu.arch() == rocjitsu::IsaFamily::Cdna4   ? rj_arith_v_mfma_f32_32x32x2_f32_w64_gfx950
+            : cu.arch() == rocjitsu::IsaFamily::Cdna2 ? rj_arith_v_mfma_f32_32x32x2_f32_w64_gfx90a
             : cu.arch() == rocjitsu::IsaFamily::Cdna1 ? rj_arith_v_mfma_f32_32x32x2_f32_w64_gfx908
                                                       : rj_arith_v_mfma_f32_32x32x2_f32_w64;
   } else if constexpr (M == 16 && K == 4 && Batch == 1) {
-    entry = cu.arch() == rocjitsu::IsaFamily::Cdna2   ? rj_arith_v_mfma_f32_16x16x4_f32_w64_gfx90a
+    entry = cu.arch() == rocjitsu::IsaFamily::Cdna4   ? rj_arith_v_mfma_f32_16x16x4_f32_w64_gfx950
+            : cu.arch() == rocjitsu::IsaFamily::Cdna2 ? rj_arith_v_mfma_f32_16x16x4_f32_w64_gfx90a
             : cu.arch() == rocjitsu::IsaFamily::Cdna1 ? rj_arith_v_mfma_f32_16x16x4_f32_w64_gfx908
                                                       : rj_arith_v_mfma_f32_16x16x4_f32_w64;
   }
@@ -48,7 +53,7 @@ void execute_mfma_f32_shape(amdgpu::ComputeUnitCore &cu, uint32_t d, uint32_t a,
   if (util::force_scalar()) {
     flags &= ~RJ_ARITH_CPU_MASK;
   }
-  if (cu.arch() == rocjitsu::IsaFamily::Cdna2) {
+  if (cu.arch() == rocjitsu::IsaFamily::Cdna2 || cu.arch() == rocjitsu::IsaFamily::Cdna4) {
     if (!(wave->fp_denorm_mode_f32() & 1)) {
       flags |= RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
     }
@@ -56,9 +61,15 @@ void execute_mfma_f32_shape(amdgpu::ComputeUnitCore &cu, uint32_t d, uint32_t a,
       flags |= RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
     }
   }
-  const unsigned block = cu.arch() == rocjitsu::IsaFamily::Cdna2 ? M : 0;
-  uint64_t a_lanes = amdgpu::mfma_permuted_lane_mask(
-      [&](uint32_t lane) { return amdgpu::permute_a_lane(lane, cbsz, abid, block); });
+  const unsigned block =
+      (cu.arch() == rocjitsu::IsaFamily::Cdna2 || cu.arch() == rocjitsu::IsaFamily::Cdna4) ? M : 0;
+  uint64_t a_lanes = amdgpu::mfma_permuted_lane_mask([&](uint32_t lane) {
+    if (cu.arch() == rocjitsu::IsaFamily::Cdna4 && cbsz > 0 && cbsz <= 4 &&
+        (1u << cbsz) > 64u / M) {
+      return lane % 16u;
+    }
+    return amdgpu::permute_a_lane(lane, cbsz, abid, block);
+  });
   uint64_t b_lanes = amdgpu::mfma_permuted_lane_mask(
       [&](uint32_t lane) { return amdgpu::permute_b_lane(lane, blgp); });
   amdgpu::arith::exec_dense_fp_matrix<M * K * Batch / 64, M * M * Batch / 64, 64>(

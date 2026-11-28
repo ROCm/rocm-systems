@@ -61,9 +61,6 @@ protected:
     saved_force_scalar_ = util::force_scalar();
     // Reference computations include SCC=1, the smallest positive FP32 subnormal.
     ASSERT_EQ(std::fesetenv(FE_DFL_ENV), 0);
-    if (!std::get<2>(GetParam()) && !util::has_stdx_simd) {
-      GTEST_SKIP() << "SIMD execution is unavailable";
-    }
 
     amdgpu::ComputeUnitCore::Config config{};
     config.arch = rocjitsu::IsaFamily::Cdna5;

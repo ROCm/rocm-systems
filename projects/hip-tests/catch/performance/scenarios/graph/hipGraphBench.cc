@@ -35,7 +35,8 @@
  *   GRAPH_BENCH_TOPOLOGY         straight|paths2|paths4|full2|full4|all  (default: all)
  *   GRAPH_BENCH_SIZE             total kernel nodes for Launch/Verify     (default: 1024)
  *   GRAPH_BENCH_ITERS            timed launches per measurement           (default: 1000,
- *                                                                          100 at level_0)
+ *                                                                          100 at level_0
+ *                                                                          and in Sweep)
  *   GRAPH_BENCH_MODE             no-sync|sync|both                        (default: no-sync)
  *                                  no-sync = submission only, sync = submission + GPU
  *   GRAPH_BENCH_VERIFY_ITERS     launches per topology in Verify          (default: 50)
@@ -244,7 +245,9 @@ std::vector<bool> SelectedSyncModes() {
   return {mode == "sync"};
 }
 
-int TimedIters() { return EnvInt("GRAPH_BENCH_ITERS", isQuickLevel() ? 100 : 1000); }
+int TimedIters(int fallback = 1000) {
+  return EnvInt("GRAPH_BENCH_ITERS", isQuickLevel() ? 100 : fallback);
+}
 
 const char* ModeName(bool sync_in_timing) {
   return sync_in_timing ? "sync (submission+GPU)" : "no-sync (submission only)";
@@ -420,7 +423,9 @@ HIP_TEST_CASE(Performance_GraphBench_Launch) {
  */
 HIP_TEST_CASE(Performance_GraphBench_Sweep) {
   const auto topologies = SelectedTopologies();
-  const int iters = TimedIters();
+  // 100 launches per measurement by default: the sweep takes 70 measurements (14 sizes, 5
+  // topologies), and 1000 launches each ran for more than 2 minutes
+  const int iters = TimedIters(100);
   std::vector<int> sizes;
   for (int size = 1; size <= 8192; size *= 2) sizes.push_back(size);
 

@@ -54,6 +54,24 @@ HIP_TEST_CASE(Unit_hipModuleGetFunction_Negative_Parameters) {
   }
 }
 
+// Test description: A kernel name the module doesn't have is an expected lookup result, not a
+// sticky error: hipModuleGetFunction returns hipErrorNotFound, but hipGetLastError stays
+// hipSuccess, as in CUDA.
+HIP_TEST_CASE(Unit_hipModuleGetFunction_NotFound_KeepsLastErrorClear) {
+  auto mg = ModuleGuard::InitModule("get_function_module.code");
+  hipFunction_t kernel = nullptr;
+  HIP_CHECK(hipGetLastError());
+
+  HIP_CHECK_ERROR(hipModuleGetFunction(&kernel, mg.module(), "NonExistentKernel"),
+                  hipErrorNotFound);
+#if HT_AMD
+  // The per-call error still reports the failure.
+  HIP_CHECK_ERROR(hipExtGetLastError(), hipErrorNotFound);
+#endif
+  HIP_CHECK(hipPeekAtLastError());
+  HIP_CHECK(hipGetLastError());
+}
+
 // Test description: Loading kernel function from different device than the one on which the module
 // is loaded
 HIP_TEST_CASE(Unit_hipModuleGetFunction_DiffDevice) {

@@ -4,11 +4,11 @@
 #include "cdna5_sim_test_common.h"
 #include "config_test_util.h"
 #include "decode_test_util.h"
+#include "float_format_reference.h"
 #include "rocjitsu/code/patch/instrumentor.h"
 #include "rocjitsu/code/patch/probe_clobber.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
 #include "rocjitsu/isa/isa_family.h"
-#include "util/data_types.h"
 
 #include <gtest/gtest-spi.h>
 

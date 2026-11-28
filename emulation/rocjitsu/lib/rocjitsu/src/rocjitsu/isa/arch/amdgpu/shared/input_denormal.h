@@ -4,7 +4,7 @@
 #pragma once
 
 /// @file input_denormal.h
-/// @brief Input-denormal handling on scalar or SIMD floating-point encodings.
+/// @brief Input-denormal handling on scalar floating-point encodings.
 /// @details Callers select the source format and policy required by the instruction.
 /// Apply this stage before widening: an F16 subnormal is normal when represented in F32.
 /// Source modifiers and output-denormal handling are separate stages.

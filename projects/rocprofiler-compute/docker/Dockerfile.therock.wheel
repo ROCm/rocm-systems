@@ -1,16 +1,15 @@
 # Use a base image
-FROM ubuntu:22.04
+FROM ubuntu:24.04
 
 # Update package list and install prerequisites
 RUN apt-get update && apt-get install -y \
-    curl software-properties-common cmake locales git \
-    && add-apt-repository ppa:deadsnakes/ppa \
-    && apt-get update
+    curl cmake locales git
 
 # Generate the desired locale
 RUN locale-gen en_US.UTF-8
 
-# Install Python 3.12 and pip (use non-interactive to avoid timezone prompt)
+# Install Python 3.12, the Ubuntu 24.04 default, and pip (use non-interactive to
+# avoid timezone prompt)
 RUN DEBIAN_FRONTEND=noninteractive apt-get install -y python3.12 python3.12-venv python3.12-dev python3-pip libsqlite3-dev
 
 # Install ROCm from the multi-arch nightly index. GFX_ARCH selects which GPU

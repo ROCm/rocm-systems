@@ -31,6 +31,7 @@ const std::vector<const char*> ShaderList = {
     NoopIsa,
     CopyDwordIsa,
     BlitCopyIsa,
+    CopyPageIsa,
     InfiniteLoopIsa,
     AtomicIncIsa,
     ScratchCopyDwordIsa,
@@ -166,6 +167,13 @@ const std::vector<const char*> ShaderList = {
     "           flat_load_dwordx4 \\vdst, \\vaddr nt sc1 sc0\n"\
     "       .else\n"\
     "           flat_load_dwordx4 \\vdst, \\vaddr \\arg0 \\arg1\n"\
+    "       .endif\n"\
+    "   .endm\n"\
+    "   .macro FLAT_STORE_DWORDX2_NSS vaddr, vsrc arg0 arg1\n"\
+    "       .if (.amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor >= 4)\n"\
+    "           flat_store_dwordx2 \\vaddr, \\vsrc nt sc1 sc0\n"\
+    "       .else\n"\
+    "           flat_store_dwordx2 \\vaddr, \\vsrc \\arg0 \\arg1\n"\
     "       .endif\n"\
     "   .endm\n"\
     "   .macro FLAT_ATOMIC_ADD_NSS vdst, vaddr, vsrc arg0 arg1\n"\
@@ -512,6 +520,69 @@ const char *BlitCopyIsa =
 
         DONE:
         S_WAIT_MEM
+        s_endpgm
+)";
+
+/* Copy a buffer one 4KB page per workgroup: workgroup N copies the page at
+ * s[0:1] + N * 4KB to s[2:3] + N * 4KB. Dispatch with SetDim(size / 4KB, 1, 1);
+ * size must be a multiple of 4KB.
+ *
+ * Initial state:
+ *   s[0:1]   - source buffer base address
+ *   s[2:3]   - destination buffer base address
+ *   s4/ttmp9 - workgroup id (in s4 pre-GFX12, in ttmp9 on GFX12)
+ * Registers:
+ *   v[0:1]   - page offset: workgroup id * 4KB (v1 low, v0 high)
+ *   v[2:3]   - current source address
+ *   v[4:5]   - current destination address
+ *   v6       - bytes copied within the page
+ *   v[8:9]   - data being copied
+ */
+const char *CopyPageIsa =
+    SHADER_START
+    SHADER_MACROS_U32
+    SHADER_MACROS_FLAT
+    R"(
+        .if (.amdgcn.gfx_generation_number >= 12)
+            v_mov_b32           v0, ttmp9       // workgroup id
+        .else
+            v_mov_b32           v0, s4          // workgroup id
+        .endif
+        v_lshlrev_b32           v1, 12, v0      // low 32 bits of id * 4KB
+        v_lshrrev_b32           v0, 20, v0      // high 32 bits of id * 4KB
+
+        V_ADD_CO_U32            v2, s0, v1      // v[2:3] = s[0:1] + id * 4KB
+        v_mov_b32               v3, s1
+        V_ADD_CO_CI_U32         v3, v3, v0
+        V_ADD_CO_U32            v4, s2, v1      // v[4:5] = s[2:3] + id * 4KB
+        v_mov_b32               v5, s3
+        V_ADD_CO_CI_U32         v5, v5, v0
+
+        v_mov_b32               v6, 0
+        v_mov_b32               v7, 0x1000
+        L_COPY:
+        .if (.amdgcn.gfx_generation_number >= 12)
+            FLAT_LOAD_DWORDX2_NSS   v[8:9], v[2:3] scope:SCOPE_SYS
+            s_wait_loadcnt 0
+            FLAT_STORE_DWORDX2_NSS  v[4:5], v[8:9] scope:SCOPE_SYS
+        .else
+            FLAT_LOAD_DWORDX2_NSS   v[8:9], v[2:3] glc slc
+            s_waitcnt vmcnt(0) & lgkmcnt(0)
+            FLAT_STORE_DWORDX2_NSS  v[4:5], v[8:9] glc slc
+        .endif
+        V_ADD_CO_U32            v2, 8, v2
+        V_ADD_CO_CI_U32         v3, 0, v3
+        V_ADD_CO_U32            v4, 8, v4
+        V_ADD_CO_CI_U32         v5, 0, v5
+        V_ADD_CO_U32            v6, 8, v6
+        V_CMP_LT_U32            v6, v7
+        s_cbranch_vccnz         L_COPY
+
+        .if (.amdgcn.gfx_generation_number >= 12)
+            s_wait_idle
+        .else
+            s_waitcnt vmcnt(0) & lgkmcnt(0)
+        .endif
         s_endpgm
 )";
 
