@@ -962,7 +962,11 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitPrologue(
 template <bool useGCR, bool scopeFields>
 hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitEpilogue(
     core::Signal& out_signal,
-    const std::vector<core::Signal*>& body_signals) {
+    const std::vector<core::Signal*>& rendezvous_signals) {
+
+  // The engine groups rendezvous on signals the fan-out operation owns. Without
+  // one there is nothing this epilogue can wait on that is safe to observe.
+  if (rendezvous_signals.empty()) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   const bool profiling_enabled = agent_->profiling_enabled();
 
@@ -975,28 +979,44 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitEpilogue(
     total_timestamp_command_size = timestamp_command_size_;
   }
 
-  // Drain poll size: with platform atomics poll out_signal for 1 (one poll).
-  // Without platform atomics poll each body_signal for 0 (N polls).
+  // Drain poll size: every rendezvous signal is polled for 0. With platform
+  // atomics that is one shared counter the groups decrement; without them it is
+  // one signal per group, each fenced to 0 by its group.
   const uint32_t single_poll_size = is_gfx125plus_
       ? poll_64b_command_size_
       : poll_command_size_;
-  const uint32_t body_poll_size = body_signals.empty()
-      ? single_poll_size
-      : static_cast<uint32_t>(body_signals.size()) * single_poll_size;
+  const uint32_t drain_poll_size =
+      static_cast<uint32_t>(rendezvous_signals.size()) * single_poll_size;
 
   uint32_t gcr_cmd_size = 0;
   if (useGCR) gcr_cmd_size = gcr_command_size();
 
-  // Final signal write: epilogue drives out_signal to 0.
-  const size_t sync_command_size = is_gfx125plus_
-      ? fence_64b_command_size_
-      : (platform_atomic_support_ ? atomic_command_size_ : fence_command_size_);
+  // Final completion: the caller's signal is decremented exactly once. A batch
+  // shares one completion signal across its operations, so an absolute write
+  // would discard the counts of the operations still in flight.
+  //
+  // Without platform atomics the SDMA engine has no decrement and the target
+  // value has to be computed host side at submission time, which is only exact
+  // while no other operation of the batch completes in between. That limitation
+  // is the same one the single-engine copy path carries.
+  const uint64_t completion_signal_value =
+      platform_atomic_support_ ? 0 : static_cast<uint64_t>(out_signal.LoadRelaxed() - 1);
+
+  size_t sync_command_size;
+  if (platform_atomic_support_) {
+    sync_command_size = atomic_command_size_;
+  } else if (is_gfx125plus_) {
+    sync_command_size = fence_64b_command_size_;
+  } else {
+    sync_command_size = (completion_signal_value > UINT32_MAX)
+        ? 2 * fence_command_size_ : fence_command_size_;
+  }
 
   const uint64_t event_mailbox_ptr = out_signal.signal_.event_mailbox_ptr;
   const size_t interrupt_command_size =
       (event_mailbox_ptr != 0) ? (fence_command_size_ + trap_command_size_) : 0;
 
-  const uint32_t total_command_size = body_poll_size + gcr_cmd_size +
+  const uint32_t total_command_size = drain_poll_size + gcr_cmd_size +
       total_timestamp_command_size + sync_command_size + interrupt_command_size;
   const uint32_t pad_size = total_command_size < min_submission_size_
       ? min_submission_size_ - total_command_size
@@ -1014,27 +1034,19 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitEpilogue(
   }
   uint32_t wrapped_index = WrapIntoRing(curr_index);
 
-  // Drain: wait for bodies to finish.
-  if (body_signals.empty()) {
-    // Platform atomics: bodies decremented out_signal; poll for 1.
+  // Drain: wait for every engine group to reach its rendezvous.
+  for (core::Signal* rs : rendezvous_signals) {
     if (is_gfx125plus_) {
-      BuildPoll64bCommand(command_addr, out_signal.ValueLocation(), 1);
+      BuildPoll64bCommand(command_addr, rs->ValueLocation(), 0);
       command_addr += poll_64b_command_size_;
     } else {
-      uint32_t* sig_lo = reinterpret_cast<uint32_t*>(out_signal.ValueLocation());
-      BuildPollCommand(command_addr, &sig_lo[0], 1);
-      command_addr += poll_command_size_;
-    }
-  } else {
-    // No platform atomics (never gfx125+): bodies fenced body_signals to 0.
-    for (core::Signal* bs : body_signals) {
-      uint32_t* sig_lo = reinterpret_cast<uint32_t*>(bs->ValueLocation());
+      uint32_t* sig_lo = reinterpret_cast<uint32_t*>(rs->ValueLocation());
       BuildPollCommand(command_addr, &sig_lo[0], 0);
       command_addr += poll_command_size_;
     }
   }
   bytes_written_[wrapped_index] = prior_bytes;
-  wrapped_index += body_poll_size;
+  wrapped_index += drain_poll_size;
 
   if (useGCR) {
     BuildGCRCommand(command_addr, false);
@@ -1051,16 +1063,23 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitEpilogue(
     wrapped_index += timestamp_command_size_;
   }
 
-  // Write out_signal to 0 (final completion).
-  if (is_gfx125plus_) {
-    BuildFence64bCommand(command_addr, out_signal.ValueLocation(), 0);
-    command_addr += fence_64b_command_size_;
-  } else if (platform_atomic_support_) {
+  // Complete the caller's signal with a single decrement.
+  if (platform_atomic_support_) {
     BuildAtomicDecrementCommand(command_addr, out_signal.ValueLocation());
     command_addr += atomic_command_size_;
+  } else if (is_gfx125plus_) {
+    BuildFence64bCommand(command_addr, out_signal.ValueLocation(),
+                         completion_signal_value);
+    command_addr += fence_64b_command_size_;
   } else {
     uint32_t* sig_lo = reinterpret_cast<uint32_t*>(out_signal.ValueLocation());
-    BuildFenceCommand(command_addr, sig_lo, 0);
+    if (completion_signal_value > UINT32_MAX) {
+      BuildFenceCommand(command_addr, sig_lo + 1,
+                        static_cast<uint32_t>(completion_signal_value >> 32));
+      command_addr += fence_command_size_;
+    }
+    BuildFenceCommand(command_addr, sig_lo,
+                      static_cast<uint32_t>(completion_signal_value));
     command_addr += fence_command_size_;
   }
   bytes_written_[wrapped_index] = prior_bytes;
@@ -1090,10 +1109,19 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitEpilogue(
 }
 
 template <bool useGCR, bool scopeFields>
+bool BlitSdma<useGCR, scopeFields>::FanOutEpilogueRequired(
+    const core::Signal& out_signal) const {
+  return useGCR || agent_->profiling_enabled() ||
+         out_signal.signal_.event_mailbox_ptr != 0;
+}
+
+template <bool useGCR, bool scopeFields>
 hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitFusedCoordinator(
     const std::vector<core::Signal*>& dep_signals,
     core::Signal& out_signal,
     core::Signal* prologue_signal,
+    core::Signal* rendezvous_signal,
+    uint32_t rendezvous_count,
     hsa_amd_memory_copy_op_type_t op,
     const std::vector<void*>& dsts,
     const std::vector<const void*>& srcs,
@@ -1109,13 +1137,36 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitFusedCoordinator(
   const bool is_indirect = (indirect_src || indirect_dst);
   const bool has_mailbox = (out_signal.signal_.event_mailbox_ptr != 0);
 
-  // Epilogue fast path: the epilogue exists to (a) raise the completion
-  // interrupt (fence+trap) once all engines finish, (b) order a GCR cache
-  // writeback before signalling, and (c) emit the profiling end-timestamp.
-  // When none of those apply, the poll+fence are redundant: the final body
-  // packet decrements out_signal after its copy. We drop the whole epilogue and
-  // shift the signal target down by one so that decrement lands on the done value.
-  const bool skip_epilogue = !useGCR && !profiling_enabled && !has_mailbox;
+  // The caller's completion signal may be shared with the other operations of a
+  // batch, so this operation may only decrement it, exactly once. Everything the
+  // coordinator has to wait on therefore lives on the rendezvous signal that the
+  // fan-out operation owns. Without a rendezvous signal the only valid shape is a
+  // single engine group whose last body packet carries that one decrement, and
+  // then there is no epilogue left to emit: the epilogue exists to (a) raise the
+  // completion interrupt once all engines finish, (b) order a cache writeback
+  // before signalling, and (c) emit the profiling end timestamp.
+  const bool skip_epilogue = (rendezvous_signal == nullptr);
+  if (skip_epilogue && (useGCR || profiling_enabled || has_mailbox))
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  // The coordinator never waits on its own contribution. Its body packets carry
+  // no rendezvous SIGNAL, the rendezvous counter is sized to the other engine
+  // groups alone, and the epilogue polls it only when at least one such group
+  // exists. The coordinator's own bodies need no poll because they precede the
+  // epilogue in ring order. Keeping the two apart also means an inline SIGNAL
+  // and a poll of the same address are never adjacent packets on one ring.
+  const bool emit_rendezvous_poll = !skip_epilogue && rendezvous_count != 0;
+
+  // Without an epilogue the final body packet carries the one permitted
+  // decrement of the caller's completion signal; with one it carries no signal.
+  core::Signal* const body_completion = skip_epilogue ? &out_signal : nullptr;
+
+  // Completion value for the plates without a platform atomic decrement; see
+  // SubmitEpilogue for the limitation this carries under a shared signal.
+  const uint64_t completion_signal_value =
+      platform_atomic_support_ ? 0 : static_cast<uint64_t>(out_signal.LoadRelaxed() - 1);
+  const uint32_t completion_cmd_size =
+      platform_atomic_support_ ? atomic_command_size_ : fence_64b_command_size_;
 
   // --- Prologue size computation ---
   uint32_t prologue_size = 0;
@@ -1149,7 +1200,8 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitFusedCoordinator(
 
   const uint32_t wait_dws =
       (!body_deps.empty() && num_entries != 0) ? 7 : 0;
-  const uint32_t signal_dws = num_entries != 0 ? 5 : 0;
+  const uint32_t signal_dws =
+      (num_entries != 0 && body_completion != nullptr) ? 5 : 0;
   constexpr uint32_t kPacketCoreDws = 1 + 6;
 
   std::vector<uint32_t> chunks(num_entries);
@@ -1177,12 +1229,12 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitFusedCoordinator(
   uint32_t epilogue_size = 0;
 
   if (!skip_epilogue) {
-    epilogue_size += poll_64b_command_size_;
+    if (emit_rendezvous_poll) epilogue_size += poll_64b_command_size_;
 
     if (useGCR) epilogue_size += gcr_command_size();
     if (profiling_enabled) epilogue_size += timestamp_command_size_;
 
-    epilogue_size += fence_64b_command_size_;
+    epilogue_size += completion_cmd_size;
 
     if (has_mailbox)
       epilogue_size += fence_command_size_ + trap_command_size_;
@@ -1207,11 +1259,6 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitFusedCoordinator(
     post_bytes = bytes_queued_;
   }
   uint32_t wrapped_index = WrapIntoRing(curr_index);
-
-  // With no epilogue fence to perform the final completion decrement, the body
-  // SIGNAL must reach the done value itself: drop the target by one.
-  if (skip_epilogue)
-    out_signal.SubRelaxed(1);
 
   // === PROLOGUE SECTION ===
   if (need_prologue) {
@@ -1275,7 +1322,7 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitFusedCoordinator(
     const bool is_last_entry = i + 1 == num_entries;
     const core::Signal* wait_signal =
         is_first_entry ? wait_sig : nullptr;
-    core::Signal* signal_signal = is_last_entry ? &out_signal : nullptr;
+    core::Signal* signal_signal = is_last_entry ? body_completion : nullptr;
 
     if (is_indirect) {
       BuildWaitSignalIndirectCopyCommand(command_addr,
@@ -1309,10 +1356,12 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitFusedCoordinator(
   // Skipped entirely on the fast path: the final packet's SIGNAL is the
   // completion edge (see skip_epilogue above).
   if (!skip_epilogue) {
-    BuildPoll64bCommand(command_addr, out_signal.ValueLocation(), 1);
-    command_addr += poll_64b_command_size_;
-    bytes_written_[wrapped_index] = post_bytes;
-    wrapped_index += poll_64b_command_size_;
+    if (emit_rendezvous_poll) {
+      BuildPoll64bCommand(command_addr, rendezvous_signal->ValueLocation(), 0);
+      command_addr += poll_64b_command_size_;
+      bytes_written_[wrapped_index] = post_bytes;
+      wrapped_index += poll_64b_command_size_;
+    }
 
     if (useGCR) {
       BuildGCRCommand(command_addr, false);
@@ -1331,10 +1380,16 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitFusedCoordinator(
       wrapped_index += timestamp_command_size_;
     }
 
-    BuildFence64bCommand(command_addr, out_signal.ValueLocation(), 0);
-    command_addr += fence_64b_command_size_;
+    // Single decrement of the caller's completion signal.
+    if (platform_atomic_support_) {
+      BuildAtomicDecrementCommand(command_addr, out_signal.ValueLocation());
+    } else {
+      BuildFence64bCommand(command_addr, out_signal.ValueLocation(),
+                           completion_signal_value);
+    }
+    command_addr += completion_cmd_size;
     bytes_written_[wrapped_index] = post_bytes;
-    wrapped_index += fence_64b_command_size_;
+    wrapped_index += completion_cmd_size;
 
     if (has_mailbox) {
       BuildFenceCommand(command_addr,

@@ -1785,20 +1785,74 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
   for (uint32_t d = 0; d < num_entries; ++d)
     engine_groups[engines[d].idx].push_back(d);
 
-  // Classic path without platform atomics: allocate one body signal per group.
-  // Bodies fence their body_signal to 0; epilogue polls them instead of
-  // relying on atomic decrements of out_signal.
+  // The caller's completion signal is shared by every operation of a batch and
+  // is initialised to the operation count, so this operation may only decrement
+  // it, exactly once, at the end. The engines therefore rendezvous on signals
+  // this operation owns.
+  //
+  // With platform atomics one counter initialised to the group count serves all
+  // groups. Without them the engine has no decrement packet, so each group
+  // fences a signal of its own to 0 and the epilogue polls every one of them.
   const bool use_body_signals = !fused && !coordinator->PlatformAtomicSupport();
-  std::vector<core::unique_signal_ptr> body_signal_ptrs;
-  std::vector<core::Signal*> body_signals_raw;
+  const size_t num_groups = engine_groups.size();
+
+  // On the fused path the coordinator never waits on its own contribution: its
+  // body packets carry no rendezvous SIGNAL and its epilogue follows them
+  // in-order on the same ring. Only the groups on other engines decrement the
+  // rendezvous counter, so the counter is sized to those groups alone. This
+  // also keeps an inline SIGNAL and a poll of the same address from ever
+  // becoming adjacent packets on one ring.
+  const size_t num_remote_groups =
+      num_groups - (engine_groups.count(coord_idx) ? 1 : 0);
+
+  // A lone engine group with no epilogue to emit needs no rendezvous: its final
+  // body packet already carries the one permitted decrement. The classic path
+  // always emits an epilogue, so it always rendezvous.
+  const bool need_rendezvous = !fused || num_groups > 1 ||
+                               coordinator->FanOutEpilogueRequired(out_signal);
+
+  std::vector<core::unique_signal_ptr> rendezvous_signal_ptrs;
+  std::vector<core::Signal*> rendezvous_signals;
+  if (need_rendezvous) {
+    const size_t count = use_body_signals ? num_groups : 1;
+    const hsa_signal_value_t initial_value =
+        use_body_signals ? 1
+                         : static_cast<hsa_signal_value_t>(
+                               fused ? num_remote_groups : num_groups);
+    rendezvous_signal_ptrs.reserve(count);
+    rendezvous_signals.reserve(count);
+    for (size_t i = 0; i < count; ++i) {
+      rendezvous_signal_ptrs.emplace_back(new core::DefaultSignal(initial_value));
+      if (!rendezvous_signal_ptrs.back()->IsValid())
+        return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+      rendezvous_signals.push_back(rendezvous_signal_ptrs.back().get());
+    }
+  }
+
+  // Each submission below rings its engine's doorbell before it returns, so as
+  // soon as one of them succeeds its packets are visible to that engine and the
+  // engine may write the signal value locations they name. A later submission
+  // failure must not destroy those signals: the engine would then write into
+  // freed and possibly recycled memory and silently corrupt an unrelated
+  // signal. Leak the signals on that path instead. They are small, and the
+  // operation has already failed.
+  //
+  // Declared after the owning pointers so that it is destroyed before them.
+  bool packets_live = false;
+  MAKE_NAMED_SCOPE_GUARD(leakLiveSignals, [&]() {
+    if (!packets_live) return;
+    for (auto& rp : rendezvous_signal_ptrs) rp.release();
+    prologue_signal.release();
+  });
 
   hsa_status_t stat;
 
   if (fused) {
     // === gfx125+ WaitSignal path (1 doorbell for coordinator) ===
 
-    // One final packet per engine group decrements out_signal.
-    out_signal.AddRelaxed(static_cast<uint32_t>(engine_groups.size()));
+    core::Signal* const rendezvous =
+        need_rendezvous ? rendezvous_signals[0] : nullptr;
+    core::Signal& group_signal = rendezvous ? *rendezvous : out_signal;
 
     // Gather coordinator group entries.
     std::vector<void*> coord_dsts;
@@ -1828,45 +1882,35 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
       const std::vector<uint32_t>& idxs = grp.second;
       LogPrint(HSA_AMD_LOG_FLAG_SDMA,
                "SDMA FanOut(%s) Bodies: engine %02u, entries=%zu, "
-               "completion_signal=0x%zx",
+               "completion_signal=0x%zx, rendezvous_signal=%p",
                op_name, grp.first, idxs.size(),
-               core::Signal::Convert(&out_signal).handle);
+               core::Signal::Convert(&out_signal).handle, rendezvous);
       stat = engines[idxs[0]].blit->SubmitBodies(
           op, dst_list, src_list, size_list, idxs,
-          ind_src, ind_dst, body_deps, out_signal, nullptr, dst_size_list);
+          ind_src, ind_dst, body_deps, group_signal, nullptr, dst_size_list);
       if (stat != HSA_STATUS_SUCCESS) return stat;
+      packets_live = true;
     }
 
     // Coordinator: prologue + coord bodies + epilogue in one doorbell.
     LogPrint(HSA_AMD_LOG_FLAG_SDMA,
              "SDMA FanOut(%s) Coordinator: engine %02u, coord_entries=%zu, "
-             "other_groups=%zu, completion_signal=0x%zx, prologue_signal=%p",
-             op_name, coord_idx, coord_dsts.size(),
-             engine_groups.size() - (engine_groups.count(coord_idx) ? 1 : 0),
+             "other_groups=%zu, completion_signal=0x%zx, prologue_signal=%p, "
+             "rendezvous_signal=%p",
+             op_name, coord_idx, coord_dsts.size(), num_remote_groups,
              core::Signal::Convert(&out_signal).handle,
-             prologue_signal ? prologue_signal.get() : nullptr);
+             prologue_signal ? prologue_signal.get() : nullptr, rendezvous);
     stat = coordinator->SubmitFusedCoordinator(
         dep_signals, out_signal,
-        prologue_signal.get(),
+        prologue_signal.get(), rendezvous,
+        static_cast<uint32_t>(num_remote_groups),
         op, coord_dsts, coord_srcs, coord_sizes_a, coord_sizes_b,
         ind_src, ind_dst, body_deps);
     if (stat != HSA_STATUS_SUCCESS) return stat;
+    packets_live = true;
 
   } else {
     // === Classic path (gfx942 etc.): separate prologue/bodies/epilogue ===
-
-    if (use_body_signals) {
-      body_signal_ptrs.reserve(engine_groups.size());
-      body_signals_raw.reserve(engine_groups.size());
-      for (size_t i = 0; i < engine_groups.size(); ++i) {
-        body_signal_ptrs.emplace_back(new core::DefaultSignal(1));
-        if (!body_signal_ptrs.back()->IsValid())
-          return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-        body_signals_raw.push_back(body_signal_ptrs.back().get());
-      }
-    } else {
-      out_signal.AddRelaxed(static_cast<uint32_t>(engine_groups.size()));
-    }
 
     // Prologue
     if (need_prologue) {
@@ -1879,56 +1923,64 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
       stat = coordinator->SubmitPrologue(dep_signals, out_signal,
                                          *prologue_signal, fused);
       if (stat != HSA_STATUS_SUCCESS) return stat;
+      packets_live = true;
     }
 
-    // Bodies: one SubmitBodies call per engine group
+    // Bodies: one SubmitBodies call per engine group. Each group completes on a
+    // rendezvous signal, never on the caller's completion signal.
     size_t grp_idx = 0;
     for (const auto& grp : engine_groups) {
       const std::vector<uint32_t>& idxs = grp.second;
-      core::Signal* body_sig = use_body_signals ? body_signals_raw[grp_idx] : nullptr;
+      core::Signal* group_sig =
+          use_body_signals ? rendezvous_signals[grp_idx] : rendezvous_signals[0];
+      core::Signal* body_sig = use_body_signals ? group_sig : nullptr;
       LogPrint(HSA_AMD_LOG_FLAG_SDMA,
                "SDMA FanOut(%s) Bodies: engine %02u, entries=%zu, "
-               "completion_signal=0x%zx, body_signal=%p",
+               "completion_signal=0x%zx, rendezvous_signal=%p",
                op_name, grp.first, idxs.size(),
                core::Signal::Convert(&out_signal).handle,
-               body_sig);
+               group_sig);
       stat = engines[idxs[0]].blit->SubmitBodies(
           op, dst_list, src_list, size_list, idxs,
-          ind_src, ind_dst, body_deps, out_signal, body_sig, dst_size_list);
+          ind_src, ind_dst, body_deps, *group_sig, body_sig, dst_size_list);
       if (stat != HSA_STATUS_SUCCESS) return stat;
+      packets_live = true;
       ++grp_idx;
     }
 
     // Epilogue
     LogPrint(HSA_AMD_LOG_FLAG_SDMA,
              "SDMA FanOut(%s) Epilogue: coordinator %02u, completion_signal=0x%zx, "
-             "body_signals=%zu",
+             "rendezvous_signals=%zu",
              op_name, coord_idx, core::Signal::Convert(&out_signal).handle,
-             body_signals_raw.size());
-    stat = coordinator->SubmitEpilogue(out_signal, body_signals_raw);
+             rendezvous_signals.size());
+    stat = coordinator->SubmitEpilogue(out_signal, rendezvous_signals);
     if (stat != HSA_STATUS_SUCCESS) return stat;
+    packets_live = true;
   }
 
-  // --- Async cleanup: destroy prologue_signal and body_signals when done ---
+  // --- Async cleanup: destroy the signals this operation owns when it ends ---
   {
+    leakLiveSignals.Dismiss();
+
     struct CleanupCtx {
       core::Signal* prologue = nullptr;
-      std::vector<core::Signal*> bodies;
+      std::vector<core::Signal*> rendezvous;
     };
     auto* ctx = new CleanupCtx{};
     if (prologue_signal)
       ctx->prologue = prologue_signal.release();
-    for (auto& bp : body_signal_ptrs)
-      ctx->bodies.push_back(bp.release());
+    for (auto& rp : rendezvous_signal_ptrs)
+      ctx->rendezvous.push_back(rp.release());
 
-    if (ctx->prologue || !ctx->bodies.empty()) {
+    if (ctx->prologue || !ctx->rendezvous.empty()) {
       core::Runtime::runtime_singleton_->SetAsyncSignalHandler(
           core::Signal::Convert(&out_signal),
           HSA_SIGNAL_CONDITION_EQ, 0,
           [](hsa_signal_value_t, void* arg) -> bool {
             auto* c = reinterpret_cast<CleanupCtx*>(arg);
             if (c->prologue) c->prologue->DestroySignal();
-            for (auto* s : c->bodies) s->DestroySignal();
+            for (auto* s : c->rendezvous) s->DestroySignal();
             delete c;
             return false;
           },

@@ -145,15 +145,26 @@ class BlitSdmaBase : public core::Blit {
       core::Signal& prologue_signal,
       bool fused_bodies) = 0;
 
-  /// @brief Unified epilogue: drain bodies, GCR writeback, end timestamp (if
-  /// profiling), final out_signal write to 0, mailbox + trap interrupt.
-  /// When platform atomics are available (body_signals empty): polls out_signal
-  /// for 1 (bodies decremented it from N+1 to 1).
-  /// When platform atomics are absent (body_signals non-empty): polls each
-  /// body_signal for 0 (bodies fenced them), then fences out_signal to 0.
+  /// @brief Unified epilogue: drain the engine groups, GCR writeback, end
+  /// timestamp (if profiling), a single decrement of @p out_signal, mailbox +
+  /// trap interrupt.
+  /// @param rendezvous_signals  Signals the engine groups complete on; each is
+  ///   polled for 0. With platform atomics this is one shared counter owned by
+  ///   the fan-out operation and initialised to the group count; without them
+  ///   it is one signal per group, each fenced to 0 by its group. It is never
+  ///   the caller's completion signal: that signal may be shared with other
+  ///   operations of the same batch, so the epilogue only decrements it, once.
   virtual hsa_status_t SubmitEpilogue(
       core::Signal& out_signal,
-      const std::vector<core::Signal*>& body_signals = {}) = 0;
+      const std::vector<core::Signal*>& rendezvous_signals) = 0;
+
+  /// @brief True when the fused coordinator must emit a trailing epilogue
+  /// section after its body packets - a cache writeback, a profiling end
+  /// timestamp, or a completion interrupt. The fan-out operation allocates an
+  /// internal rendezvous signal whenever an epilogue exists, because the
+  /// epilogue has to wait for the bodies without observing the caller's
+  /// completion signal.
+  virtual bool FanOutEpilogueRequired(const core::Signal& out_signal) const = 0;
 
   /// @brief Single-doorbell fused submission for the coordinator engine: packs
   /// prologue (if needed) + body entries + epilogue into one ring reservation.
@@ -161,6 +172,17 @@ class BlitSdmaBase : public core::Blit {
   /// the coordinator engine also carries body entries.
   /// @param prologue_signal  If non-null, prologue logic fires this signal after
   ///   dep handling; other engines' bodies can poll on it.
+  /// @param rendezvous_signal  If non-null, an epilogue is emitted: it waits for
+  ///   the other engine groups on this signal and then decrements @p out_signal
+  ///   exactly once. The coordinator's own body packets never signal it, so the
+  ///   coordinator never waits on its own contribution. Null only when the
+  ///   coordinator is the sole engine group and no epilogue is required, in
+  ///   which case the final body packet's decrement of @p out_signal is already
+  ///   the single permitted touch.
+  /// @param rendezvous_count  Number of engine groups that decrement
+  ///   @p rendezvous_signal, that is, the groups on engines other than the
+  ///   coordinator's. Zero means the epilogue emits no poll at all, because the
+  ///   coordinator's body packets already precede it in ring order.
   /// @param body_deps  Dependencies for the body WaitSignal packets on this ring.
   ///   When prologue is on the same ring, these are satisfied in-order (the wait
   ///   resolves immediately), but are still encoded for packet correctness.
@@ -168,6 +190,8 @@ class BlitSdmaBase : public core::Blit {
       const std::vector<core::Signal*>& dep_signals,
       core::Signal& out_signal,
       core::Signal* prologue_signal,
+      core::Signal* rendezvous_signal,
+      uint32_t rendezvous_count,
       hsa_amd_memory_copy_op_type_t op,
       const std::vector<void*>& dsts,
       const std::vector<const void*>& srcs,
@@ -181,6 +205,11 @@ class BlitSdmaBase : public core::Blit {
   /// packet builders based on @p op. The first packet waits on dep_signals[0],
   /// the final packet decrements out_signal, and middle packets carry neither
   /// WAIT nor SIGNAL; dep_signals[1..] are leading 64b polls.
+  ///
+  /// @p out_signal is the completion target of this engine group alone. The
+  /// fan-out operation passes its internal rendezvous signal here whenever more
+  /// than the one decrement is needed, so that a completion signal shared with
+  /// other operations of the same batch is never used as a group counter.
   ///
   /// Entries are gathered directly from the caller's master @p dst_list /
   /// @p src_list / @p size_list arrays via @p indices, avoiding per-engine
@@ -322,12 +351,16 @@ template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
 
   hsa_status_t SubmitEpilogue(
       core::Signal& out_signal,
-      const std::vector<core::Signal*>& body_signals = {}) override;
+      const std::vector<core::Signal*>& rendezvous_signals) override;
+
+  bool FanOutEpilogueRequired(const core::Signal& out_signal) const override;
 
   hsa_status_t SubmitFusedCoordinator(
       const std::vector<core::Signal*>& dep_signals,
       core::Signal& out_signal,
       core::Signal* prologue_signal,
+      core::Signal* rendezvous_signal,
+      uint32_t rendezvous_count,
       hsa_amd_memory_copy_op_type_t op,
       const std::vector<void*>& dsts,
       const std::vector<const void*>& srcs,
