@@ -4087,6 +4087,21 @@
           "test_filter": "DdaIpcMPI_IndexData.ReduceScatter*"
         },
         {
+          "name": "DDA_IpcBroadcastLLIndexData_8Ranks",
+          "description": "DDA Broadcast LL one-shot over the IPC scratch at the arch table caps, and its banks are not misread from stale Simple staging; needs RCCL_DDA_LL and RCCL_DDA_LL_THRESHOLD unset",
+          "test_filter": "DdaIpcMPI_IndexData.BroadcastLL*"
+        },
+        {
+          "name": "DDA_IpcBroadcastLL_8Ranks",
+          "description": "DDA Broadcast LL one-shot over the IPC scratch: every root, in-place, unaligned and back-to-back calls up to the LL cap; the caps are cached per process",
+          "test_filter": "DdaMPI_BroadcastLL.*",
+          "env_variables": {
+            "RCCL_DDA_BC": "1",
+            "RCCL_DDA_LL_THRESHOLD": "262144",
+            "RCCL_DDA_LL128_THRESHOLD": "4194304"
+          }
+        },
+        {
           "name": "DDA_IpcCommLifecycle_8Ranks",
           "description": "DDA IPC must come up, with no HIP error pending, on communicators created after another one is destroyed; needs cuMem, which is cached per process",
           "test_filter": "DdaIpcMPI_CommLifecycle.*",

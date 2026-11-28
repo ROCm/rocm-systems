@@ -554,9 +554,9 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
 
 // gfx950: DDA-IPC cap is 64 MiB for AG, 128 MiB for AR/RS and 4 MiB for AlltoAll. No fabric LL/LL128.
 static const rcclArchThresholds rcclArchThresholds_gfx950 = {
-  // ddaLLMax: no fabric LL on gfx950.
+  // ddaLLMax: Broadcast LL one-shot over the IPC scratch; no fabric LL on gfx950.
   .ddaLLMax = {
-    0,                    // [0] Broadcast      -- not used
+    256ULL*1024,          // [0] Broadcast      -- 8-rank IPC one-shot; Ring above it
     0,                    // [1] Reduce          -- not used
     0,                    // [2] AllGather       -- no fabric LL
     0,                    // [3] ReduceScatter   -- no fabric LL
@@ -706,9 +706,9 @@ static const rcclArchThresholds rcclArchThresholds_gfx950 = {
 
 // gfx942: DDA-IPC cap is 8 MiB for AR/AG/RS and 4 MiB for AlltoAll. No fabric LL/LL128.
 static const rcclArchThresholds rcclArchThresholds_gfx942 = {
-  // ddaLLMax: no fabric LL on gfx942.
+  // ddaLLMax: Broadcast LL one-shot over the IPC scratch; no fabric LL on gfx942.
   .ddaLLMax = {
-    0,                    // [0] Broadcast      -- not used
+    256ULL*1024,          // [0] Broadcast      -- 8-rank IPC one-shot; Ring above it
     0,                    // [1] Reduce          -- not used
     0,                    // [2] AllGather       -- no fabric LL
     0,                    // [3] ReduceScatter   -- no fabric LL

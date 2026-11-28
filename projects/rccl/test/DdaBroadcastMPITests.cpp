@@ -6,7 +6,8 @@
 
 /**
  * @file DdaBroadcastMPITests.cpp
- * @brief MPI end-to-end data tests for the DDA fabric Broadcast one-shot kernels (LL, LL128).
+ * @brief MPI end-to-end data tests for the DDA fabric Broadcast one-shot kernels (LL, LL128). The LL cases also run
+ *        over the IPC scratch of a single-node 8-rank comm on gfx942 and gfx950.
  *
  * Every call carries a payload derived from (root, call sequence, element), so a
  * stale bank or a missed handshake cannot pass. Every rank checks its whole
@@ -152,21 +153,38 @@ protected:
     return {};
   }
 
+  // True where the suite's cases also run over the IPC scratch on gfx942/gfx950; the default is gfx1250 fabric only.
+  virtual bool runsOverIpc() const {
+    return false;
+  }
+
   void SetUp() override {
     DdaFabricMPITest::SetUp();
     for (const auto& [name, value] : ddaEnv())
       envGuards_.push_back(std::make_unique<MPIHelpers::MpiEnvGuard>(name, value.c_str()));
 
     if (!validateTestPrerequisites(kMinProcessesForMPI)) GTEST_SKIP() << "Need at least 2 MPI ranks";
-    DDA_FABRIC_SKIP_OR_FAIL(archSkipReason("DDA fabric Broadcast requires gfx1250"));
+    // Decided on every rank together, so all ranks take the same coordinated skip below.
+    const bool ipc = runsOverIpc() && MPIHelpers::allRanksTrue(DdaMPITestHelpers::isDdaIpcArchDevice());
+    if (!ipc) {
+      DDA_FABRIC_SKIP_OR_FAIL(archSkipReason("DDA fabric Broadcast requires gfx1250"));
+    }
 
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
     ASSERT_MPI_EQ(ncclSuccess, ncclCommUserRank(getActiveCommunicator(), &rank_));
     ASSERT_MPI_EQ(ncclSuccess, ncclCommCount(getActiveCommunicator(), &nRanks_));
 
-    DDA_FABRIC_SKIP_OR_FAIL(mpiCoordinatedSkipReason(getActiveCommunicator()->ddaFabricBarrierState == nullptr,
-                                                     "DDA fabric did not initialize (MNNVL off or ranks span "
-                                                     "cliques), so Broadcast cannot take DDA"));
+    const ncclComm* comm = getActiveCommunicator();
+    if (ipc) {
+      // DDA IPC comes up only on exactly 8 ranks on one node with P2P between every pair.
+      const bool ipcDown = comm->ddaIpcMemHandler == nullptr || comm->ddaLLEpochDev == nullptr;
+      DDA_FABRIC_SKIP_OR_FAIL(mpiCoordinatedSkipReason(ipcDown, "DDA IPC or its LL epoch cells did not initialize "
+                                                                "(needs 8 ranks on one node), so Broadcast cannot take DDA"));
+    } else {
+      DDA_FABRIC_SKIP_OR_FAIL(mpiCoordinatedSkipReason(comm->ddaFabricBarrierState == nullptr,
+                                                       "DDA fabric did not initialize (MNNVL off or ranks span "
+                                                       "cliques), so Broadcast cannot take DDA"));
+    }
     const std::string mismatch = configMismatch();
     DDA_FABRIC_SKIP_OR_FAIL(
       mpiCoordinatedSkipReason(!mismatch.empty(), (mismatch + "; run this suite in its own process").c_str()));
@@ -397,7 +415,12 @@ protected:
   }
 };
 
-class DdaMPI_BroadcastLL : public DdaBroadcastMPITest {};
+class DdaMPI_BroadcastLL : public DdaBroadcastMPITest {
+ protected:
+  bool runsOverIpc() const override {
+    return true;
+  }
+};
 
 // Every root, every LL size up to the cap, separate buffers.
 TEST_F(DdaMPI_BroadcastLL, AllRootsOutOfPlace) {

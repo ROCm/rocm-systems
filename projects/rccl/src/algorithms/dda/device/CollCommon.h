@@ -316,10 +316,15 @@ constexpr size_t kDdaLLMaxBytes = (size_t)(32) * 1024 * 1024;
 // it, floored to 128B so LL128 lines in bank 1 stay 128B-aligned. Every LL/LL128
 // tier that derives its slot stride from the bank rather than a fixed constant
 // puts bank 1 at the same byte offset, which is what stops one tier landing on
-// flag words another is still polling.
+// flag words another is still polling. Exception: IPC Broadcast LL keeps its banks
+// in the kDdaIpcLLRegionBytes region past ddaScratchBytes, which no other tier uses.
 constexpr size_t ddaBankSize(size_t bytes) {
   return (bytes / 2) / 128 * 128;
 }
+
+// Top of the single-node IPC scratch kept for LL (two banks). ncclDdaIpcCommInit sets ddaScratchBytes below it, so
+// no Simple path or CE copy stages user data there that an LL poll could take for its flags.
+constexpr size_t kDdaIpcLLRegionBytes = (size_t)(8) * 1024 * 1024;
 
 // Per-rank slot carved out of a bank, counted in whatever unit the protocol
 // addresses the wire with -- 16B packets for LL, 8B words for LL128. `div` folds
@@ -415,22 +420,14 @@ __device__ __forceinline__ void ddaLLAddPayload(uint32_t& acc0, uint32_t& acc1, 
   }
 }
 
+// One 16B line moves as a single 128-bit op so a reader never sees a flag word next to stale data. Without the b128
+// builtins this is one vector store / nontemporal vector load, as Ring LL does (storeLLLine/loadLLLine).
 __device__ __forceinline__ void ddaLLStoreLineB128(uint32_t* dst, uint32_t a0, uint32_t a1, uint32_t a2, uint32_t a3) {
+  const v4u v = {a0, a1, a2, a3};
 #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
-  union {
-    v4u v;
-    uint32_t w[4];
-  } u;
-  u.w[0] = a0;
-  u.w[1] = a1;
-  u.w[2] = a2;
-  u.w[3] = a3;
-  __builtin_amdgcn_global_store_b128((v4u_gptr)dst, u.v, RCCL_SYSTEM_SYNCSCOPE);
+  __builtin_amdgcn_global_store_b128((v4u_gptr)dst, v, RCCL_SYSTEM_SYNCSCOPE);
 #else
-  __builtin_nontemporal_store(a0, (u32_gptr)dst + 0);
-  __builtin_nontemporal_store(a1, (u32_gptr)dst + 1);
-  __builtin_nontemporal_store(a2, (u32_gptr)dst + 2);
-  __builtin_nontemporal_store(a3, (u32_gptr)dst + 3);
+  *(v4u_gptr)dst = v;
 #endif
   asm volatile("" ::: "memory");
 }
@@ -439,21 +436,14 @@ __device__ __forceinline__ void ddaLLLoadLineB128(const uint32_t* src, uint32_t&
                                                   uint32_t& o3) {
   asm volatile("" ::: "memory");
 #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
-  union {
-    v4u v;
-    uint32_t w[4];
-  } u;
-  u.v = __builtin_amdgcn_global_load_b128((v4u_gptr)src, RCCL_SYSTEM_SYNCSCOPE);
-  o0 = u.w[0];
-  o1 = u.w[1];
-  o2 = u.w[2];
-  o3 = u.w[3];
+  const v4u v = __builtin_amdgcn_global_load_b128((v4u_gptr)src, RCCL_SYSTEM_SYNCSCOPE);
 #else
-  o0 = __builtin_nontemporal_load((u32_gptr)src + 0);
-  o1 = __builtin_nontemporal_load((u32_gptr)src + 1);
-  o2 = __builtin_nontemporal_load((u32_gptr)src + 2);
-  o3 = __builtin_nontemporal_load((u32_gptr)src + 3);
+  const v4u v = __builtin_nontemporal_load((v4u_gptr)src);
 #endif
+  o0 = v[0];
+  o1 = v[1];
+  o2 = v[2];
+  o3 = v[3];
 }
 
 // Poll one 16B LL line until both flags match, or the comm abort flag is set.

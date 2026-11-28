@@ -28,7 +28,7 @@ struct DdaIpcMockComm
         comm.bootstrap           = &bootstrapPlaceholder;
         comm.nNodes              = 1;
         comm.nRanks              = nccl_dda_detail::kDdaNranks;
-        comm.ddaScratchBytes  = DDA_IPC_BUFFER_SIZE;
+        comm.ddaScratchBytes  = DDA_IPC_BUFFER_SIZE - dda::common::kDdaIpcLLRegionBytes;
         setIpcResourcesPresent(true);
     }
 

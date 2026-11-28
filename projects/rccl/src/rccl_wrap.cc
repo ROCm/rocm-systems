@@ -119,8 +119,6 @@ RCCL_PARAM(DdaLL128, "DDA_LL128", kDdaThresholdUnset);
 RCCL_PARAM(DdaLL128Threshold, "DDA_LL128_THRESHOLD", kDdaThresholdUnset);
 // Broadcast DDA: unset follows the arch table (any Broadcast DDA tier), 0 off, >0 on.
 RCCL_PARAM(DdaBc, "DDA_BC", kDdaThresholdUnset);
-// Development only: lets Broadcast LL run on the single-node IPC DDA path (e.g. gfx950).
-RCCL_PARAM(DdaBcAllowIpc, "DDA_BC_ALLOW_IPC", 0);
 // When set, bypass the per-arch tuning table entirely and use base-commit
 // env-var defaults for all thresholds (DDA, CE, symMaxR2).  Useful for
 // isolating arch-table effects without rebuilding.
@@ -2661,9 +2659,11 @@ ncclResult_t rcclSelectBroadcast(struct ncclComm* comm, size_t count, ncclDataTy
   if (!rcclDdaBcEnabled(archTable, comm->nRanks)) return ncclSuccess;
   const size_t entryMax = rcclDdaEntryThresholdTab(archTable, ncclFuncBroadcast, comm->nRanks);
   if (!rcclDdaEnabled(comm, bytes, entryMax, query, "BC")) return ncclSuccess;
-  // Gate on the fabric handler, as the other DDA fabric tiers do, not on the arch.
+  // Gate on the DDA handler, not on the arch. IPC runs LL only, in the scratch region kept free of Simple staging.
   const bool fabric = comm->ddaFabricMemHandler != nullptr;
-  if (!fabric && !(rcclParamDdaBcAllowIpc() && comm->ddaIpcMemHandler != nullptr)) return ncclSuccess;
+  if (!fabric && comm->ddaIpcMemHandler == nullptr) {
+    return ncclSuccess;
+  }
 
   const size_t llMax = rcclDdaLLThresholdTab(archTable, ncclFuncBroadcast, comm->nRanks);
   const size_t ll128Max = rcclDdaLL128ThresholdTab(archTable, ncclFuncBroadcast, comm->nRanks);
