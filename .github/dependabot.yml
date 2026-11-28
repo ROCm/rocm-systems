@@ -8,4 +8,11 @@ updates:
     github-actions:
       patterns:
       - '*'
-
+- package-ecosystem: cargo
+  directory: /projects/amdsmi/rust-interface
+  schedule:
+    interval: weekly
+  groups:
+    amdsmi-cargo:
+      patterns:
+      - '*'

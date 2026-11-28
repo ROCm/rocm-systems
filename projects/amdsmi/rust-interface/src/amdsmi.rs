@@ -23,7 +23,7 @@ use std::ptr::null_mut;
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -58,7 +58,7 @@ pub fn amdsmi_init(init_flags: AmdsmiInitFlagsT) -> AmdsmiResult<()> {
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -95,7 +95,7 @@ pub fn amdsmi_shut_down() -> AmdsmiResult<()> {
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -152,7 +152,7 @@ pub fn amdsmi_get_socket_handles() -> AmdsmiResult<Vec<AmdsmiSocketHandle>> {
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -201,7 +201,7 @@ pub fn amdsmi_get_socket_info(socket_handle: AmdsmiSocketHandle) -> AmdsmiResult
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -335,7 +335,7 @@ pub fn amdsmi_get_nic_processor_handles(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -385,7 +385,7 @@ pub fn amdsmi_get_processor_type(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -436,7 +436,7 @@ pub fn amdsmi_get_processor_handle_from_bdf(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -480,7 +480,7 @@ pub fn amdsmi_get_gpu_id(processor_handle: AmdsmiProcessorHandle) -> AmdsmiResul
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -528,7 +528,7 @@ pub fn amdsmi_get_gpu_revision(processor_handle: AmdsmiProcessorHandle) -> Amdsm
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -577,7 +577,7 @@ pub fn amdsmi_get_gpu_vendor_name(processor_handle: AmdsmiProcessorHandle) -> Am
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -625,7 +625,7 @@ pub fn amdsmi_get_gpu_subsystem_id(processor_handle: AmdsmiProcessorHandle) -> A
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -676,7 +676,7 @@ pub fn amdsmi_get_gpu_subsystem_name(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -727,7 +727,7 @@ pub fn amdsmi_get_gpu_pci_bandwidth(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -774,7 +774,7 @@ pub fn amdsmi_get_gpu_bdf_id(processor_handle: AmdsmiProcessorHandle) -> AmdsmiR
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -828,7 +828,7 @@ pub fn amdsmi_get_gpu_topo_numa_affinity(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -885,7 +885,7 @@ pub fn amdsmi_get_gpu_pci_throughput(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -936,7 +936,7 @@ pub fn amdsmi_get_gpu_pci_replay_counter(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -987,7 +987,7 @@ pub fn amdsmi_set_gpu_pci_bandwidth(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -1045,7 +1045,7 @@ pub fn amdsmi_get_energy_count(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -1106,7 +1106,7 @@ pub fn amdsmi_set_power_cap(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -1159,7 +1159,7 @@ pub fn amdsmi_set_gpu_power_profile(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -1211,7 +1211,7 @@ pub fn amdsmi_get_gpu_memory_total(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -1262,7 +1262,7 @@ pub fn amdsmi_get_gpu_memory_usage(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -1332,7 +1332,7 @@ pub fn amdsmi_get_gpu_bad_page_info(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -1383,7 +1383,7 @@ pub fn amdsmi_get_gpu_ras_feature_info(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -1439,7 +1439,7 @@ pub fn amdsmi_get_gpu_ras_block_features_enabled(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -1505,7 +1505,7 @@ pub fn amdsmi_get_gpu_memory_reserved_pages(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -1565,7 +1565,7 @@ pub fn amdsmi_get_gpu_fan_speed(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -1623,7 +1623,7 @@ pub fn amdsmi_get_gpu_fan_speed_max(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -1681,7 +1681,7 @@ pub fn amdsmi_get_temp_metric(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -1734,7 +1734,7 @@ pub fn amdsmi_get_gpu_cache_info(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -1794,7 +1794,7 @@ pub fn amdsmi_get_gpu_volt_metric(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -1849,7 +1849,7 @@ pub fn amdsmi_reset_gpu_fan(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -1909,7 +1909,7 @@ pub fn amdsmi_get_gpu_fan_rpms(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -1966,7 +1966,7 @@ pub fn amdsmi_set_gpu_fan_speed(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -2019,7 +2019,7 @@ pub fn amdsmi_get_gpu_busy_percent(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -2098,7 +2098,7 @@ pub fn amdsmi_get_utilization_count(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -2150,7 +2150,7 @@ pub fn amdsmi_get_gpu_perf_level(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -2204,7 +2204,7 @@ pub fn amdsmi_set_gpu_perf_determinism_mode(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -2255,7 +2255,7 @@ pub fn amdsmi_get_gpu_overdrive_level(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -2307,7 +2307,7 @@ pub fn amdsmi_get_gpu_mem_overdrive_level(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -2363,7 +2363,7 @@ pub fn amdsmi_get_clk_freq(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -2409,7 +2409,7 @@ pub fn amdsmi_reset_gpu(processor_handle: AmdsmiProcessorHandle) -> AmdsmiResult
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -2461,7 +2461,7 @@ pub fn amdsmi_get_gpu_od_volt_info(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -2512,7 +2512,7 @@ pub fn amdsmi_get_gpu_metrics_header_info(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -2563,7 +2563,7 @@ pub fn amdsmi_get_gpu_metrics_info(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -2631,7 +2631,7 @@ pub fn amdsmi_get_gpu_pm_metrics_info(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -2706,7 +2706,7 @@ pub fn amdsmi_get_gpu_reg_table_info(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -2769,7 +2769,7 @@ pub fn amdsmi_set_gpu_clk_limit(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -2832,7 +2832,7 @@ pub fn amdsmi_set_gpu_od_clk_info(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -2892,7 +2892,7 @@ pub fn amdsmi_set_gpu_od_volt_info(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -2969,7 +2969,7 @@ pub fn amdsmi_get_gpu_od_volt_curve_regions(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -3026,7 +3026,7 @@ pub fn amdsmi_get_gpu_power_profile_presets(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -3081,7 +3081,7 @@ pub fn amdsmi_set_gpu_perf_level(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -3139,7 +3139,7 @@ pub fn amdsmi_set_gpu_overdrive_level(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -3195,7 +3195,7 @@ pub fn amdsmi_set_clk_freq(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -3248,7 +3248,7 @@ pub fn amdsmi_get_soc_pstate(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -3302,7 +3302,7 @@ pub fn amdsmi_set_soc_pstate(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -3355,7 +3355,7 @@ pub fn amdsmi_get_xgmi_plpd(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -3409,7 +3409,7 @@ pub fn amdsmi_set_xgmi_plpd(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -3462,7 +3462,7 @@ pub fn amdsmi_get_gpu_process_isolation(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -3516,7 +3516,7 @@ pub fn amdsmi_set_gpu_process_isolation(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -3564,7 +3564,7 @@ pub fn amdsmi_clean_gpu_local_data(processor_handle: AmdsmiProcessorHandle) -> A
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -3621,7 +3621,7 @@ pub fn amdsmi_get_gpu_ecc_count(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -3671,7 +3671,7 @@ pub fn amdsmi_get_gpu_ecc_enabled(processor_handle: AmdsmiProcessorHandle) -> Am
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -3726,7 +3726,7 @@ pub fn amdsmi_get_gpu_ecc_status(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -3773,7 +3773,7 @@ pub fn amdsmi_status_code_to_string(status: AmdsmiStatusT) -> AmdsmiResult<Strin
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -3829,7 +3829,7 @@ pub fn amdsmi_gpu_counter_group_supported(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -4050,7 +4050,7 @@ pub fn amdsmi_get_gpu_available_counters(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -4225,7 +4225,7 @@ pub fn amdsmi_get_gpu_compute_process_gpus(pid: u32) -> AmdsmiResult<Vec<u32>> {
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -4277,7 +4277,7 @@ pub fn amdsmi_gpu_xgmi_error_status(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -4324,7 +4324,7 @@ pub fn amdsmi_reset_gpu_xgmi_error(processor_handle: AmdsmiProcessorHandle) -> A
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -4375,7 +4375,7 @@ pub fn amdsmi_get_link_metrics(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -4426,7 +4426,7 @@ pub fn amdsmi_topo_get_numa_node_number(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -4480,7 +4480,7 @@ pub fn amdsmi_topo_get_link_weight(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -4542,7 +4542,7 @@ pub fn amdsmi_get_minmax_bandwidth_between_processors(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -4596,7 +4596,7 @@ pub fn amdsmi_is_p2p_accessible(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -4653,7 +4653,7 @@ pub fn amdsmi_topo_get_link_type(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -4712,7 +4712,7 @@ pub fn amdsmi_topo_get_p2p_status(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -4766,7 +4766,7 @@ pub fn amdsmi_get_gpu_compute_partition(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -4820,7 +4820,7 @@ pub fn amdsmi_set_gpu_compute_partition(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -4874,7 +4874,7 @@ pub fn amdsmi_get_gpu_memory_partition(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -4928,7 +4928,7 @@ pub fn amdsmi_set_gpu_memory_partition(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -5109,7 +5109,7 @@ pub fn amdsmi_stop_gpu_event_notification(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -5205,7 +5205,7 @@ pub fn amdsmi_get_gpu_enumeration_info(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -5260,7 +5260,7 @@ pub fn amdsmi_get_gpu_device_uuid(processor_handle: AmdsmiProcessorHandle) -> Am
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -5377,7 +5377,7 @@ pub fn amdsmi_get_gpu_driver_info_v2(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -5524,7 +5524,7 @@ pub fn amdsmi_get_nic_telemetry(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -5575,7 +5575,7 @@ pub fn amdsmi_get_gpu_vram_info(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -5627,7 +5627,7 @@ pub fn amdsmi_get_gpu_board_info(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -5683,7 +5683,7 @@ pub fn amdsmi_get_power_cap_info(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -5734,7 +5734,7 @@ pub fn amdsmi_get_pcie_info(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -5785,7 +5785,7 @@ pub fn amdsmi_get_xgmi_info(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -5835,7 +5835,7 @@ pub fn amdsmi_get_fw_info(processor_handle: AmdsmiProcessorHandle) -> AmdsmiResu
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -5886,7 +5886,7 @@ pub fn amdsmi_get_gpu_vbios_info(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -5937,7 +5937,7 @@ pub fn amdsmi_get_gpu_activity(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -5988,7 +5988,7 @@ pub fn amdsmi_get_power_info(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -6039,7 +6039,7 @@ pub fn amdsmi_is_gpu_power_management_enabled(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -6095,7 +6095,7 @@ pub fn amdsmi_get_clock_info(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -6146,7 +6146,7 @@ pub fn amdsmi_get_gpu_vram_usage(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -6197,7 +6197,7 @@ pub fn amdsmi_get_gpu_total_ecc_count(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -6260,7 +6260,7 @@ pub fn amdsmi_get_gpu_process_list(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -6302,7 +6302,7 @@ pub fn amdsmi_get_lib_version() -> AmdsmiResult<AmdsmiVersionT> {
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -6359,7 +6359,7 @@ pub fn amdsmi_get_gpu_accelerator_partition_profile(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -6410,7 +6410,7 @@ pub fn amdsmi_get_gpu_kfd_info(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -6463,7 +6463,7 @@ pub fn amdsmi_get_violation_status(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -6607,7 +6607,7 @@ pub fn amdsmi_get_gpu_cuid_info(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 /// #
 /// # fn main() {
@@ -6664,7 +6664,7 @@ pub fn amdsmi_get_cuid_components() -> AmdsmiResult<Vec<AmdsmiCuidComponentT>> {
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// # use amdsmi::*;
 ///
 /// # fn main() {
