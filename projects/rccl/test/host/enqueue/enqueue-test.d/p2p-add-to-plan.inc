@@ -28,6 +28,7 @@ struct Gfx1250AddP2pScene {
   std::array<ncclPeerInfo, 4> peerInfo{};
   char llBuf[8]{};
   char ll128Buf[8]{};
+  char nanBuf[8]{};
   char sendMem[8]{};
   char recvMem[8]{};
   ncclTaskP2p recvTask{};
@@ -72,6 +73,8 @@ struct Gfx1250AddP2pScene {
           peers[slot].send[ci].conn.buffs[NCCL_PROTO_LL128] = ll128Buf;
           peers[slot].recv[ci].conn.buffs[NCCL_PROTO_LL] = llBuf;
           peers[slot].recv[ci].conn.buffs[NCCL_PROTO_LL128] = ll128Buf;
+          peers[slot].send[ci].conn.buffs[NCCL_PROTO_NAN] = nanBuf;
+          peers[slot].recv[ci].conn.buffs[NCCL_PROTO_NAN] = nanBuf;
         }
       }
       c->channels[ch].peers = &peerSlots[ch * c->nRanks];
@@ -85,18 +88,28 @@ struct Gfx1250AddP2pScene {
     sendTask.root = 1;
   }
 
-  ncclResult_t add(ssize_t sendBytes, ssize_t recvBytes) {
+  ncclResult_t add(ssize_t sendBytes, ssize_t recvBytes, int peer = 1) {
     struct ncclTaskP2p* tasks[2] = {&recvTask, &sendTask};
     int channelsPerPeer = bp.c()->p2pnChannelsPerPeer;
     return addP2pToPlan(bp.c(), bp.p(), /*nChannelsMin=*/channelsPerPeer, /*nChannelsMax=*/channelsPerPeer,
                         /*p2pRound=*/0,
-                        /*sendRank=*/1, sendMem, sendBytes, /*recvRank=*/1, recvMem, recvBytes,
+                        /*sendRank=*/peer, sendMem, sendBytes, /*recvRank=*/peer, recvMem, recvBytes,
                         /*sendOpCount=*/0, /*recvOpCount=*/0, tasks);
   }
 
   ncclConnector* Conn(int channel, bool send, int connIndex = 1) {
     int slot = channel * bp.c()->nRanks + 1;
     return send ? &peers[slot].send[connIndex] : &peers[slot].recv[connIndex];
+  }
+
+  // Both halves of `collAPI` on `datatype`, with a NaN FIFO on every link.
+  void asCollective(ncclFunc_t collAPI, ncclDataType_t datatype, size_t bytes) {
+    bp.c()->buffSizes[NCCL_PROTO_NAN] = 1 << 20;
+    for (ncclTaskP2p* t : {&recvTask, &sendTask}) {
+      t->collAPI = collAPI;
+      t->datatype = datatype;
+      t->bytes = bytes;
+    }
   }
 
   int p2pWorkCount() {
@@ -266,6 +279,79 @@ TEST_F(EnqueueMicrotest, AddP2pToPlan_Gfx1250Enable1AboveCap_UsesSimple) {
   auto* batch = sc.bp.tailBatch();
   ASSERT_NE(nullptr, batch);
   EXPECT_EQ(ncclDevFuncId_P2p(false), batch->funcId);
+}
+
+TEST_F(EnqueueMicrotest, AddP2pToPlan_NanAlltoAll_UsesNanKernelAndMarksF64) {
+  for (ncclDataType_t dt : {ncclFloat32, ncclFloat64}) {
+    UnderNanProto([dt] {
+      Gfx1250AddP2pScene sc;
+      sc.asCollective(ncclFuncAlltoAll, dt, 2048);
+      ASSERT_EQ(ncclSuccess, sc.add(/*sendBytes=*/2048, /*recvBytes=*/2048));
+      auto* work = sc.p2pWork();
+      ASSERT_NE(nullptr, work);
+      EXPECT_EQ(1, work->sendNan);
+      EXPECT_EQ(1, work->recvNan);
+      EXPECT_EQ(dt == ncclFloat64, work->sendNanF64);
+      EXPECT_EQ(dt == ncclFloat64, work->recvNanF64);
+      auto* batch = sc.bp.tailBatch();
+      ASSERT_NE(nullptr, batch);
+      EXPECT_EQ(ncclDevFuncId_P2p(false, true), batch->funcId);
+    });
+  }
+}
+
+// Network links do not carry the NaN-flag protocol.
+TEST_F(EnqueueMicrotest, AddP2pToPlan_NanAlltoAllNetworkPeer_StaysOffNan) {
+  UnderNanProto([] {
+    Gfx1250AddP2pScene sc;
+    sc.asCollective(ncclFuncAlltoAll, ncclFloat32, 2048);
+    for (int ci = 0; ci < NCCL_MAX_CONNS; ++ci) {
+      sc.peers[1].send[ci].transportComm = &netTransport.send;
+      sc.peers[1].recv[ci].transportComm = &netTransport.recv;
+    }
+    ASSERT_EQ(ncclSuccess, sc.add(/*sendBytes=*/2048, /*recvBytes=*/2048));
+    auto* work = sc.p2pWork();
+    ASSERT_NE(nullptr, work);
+    EXPECT_EQ(0, work->sendNan);
+    EXPECT_EQ(0, work->recvNan);
+    auto* batch = sc.bp.tailBatch();
+    ASSERT_NE(nullptr, batch);
+    EXPECT_EQ(ncclDevFuncId_P2p(false), batch->funcId);
+  });
+}
+
+// A Direct AllGather's self copy escapes like the wire (sendrecv.h runCopyNaN), so the owner's slice matches its
+// peers'. AlltoAll's does not: each block of its output has one source.
+TEST_F(EnqueueMicrotest, AddP2pToPlan_NanSelfCopy_OnlyAllGatherEscapes) {
+  for (ncclFunc_t collAPI : {ncclFuncAllGather, ncclFuncAlltoAll}) {
+    UnderNanProto([collAPI] {
+      Gfx1250AddP2pScene sc;
+      sc.asCollective(collAPI, ncclFloat32, 2048);
+      ASSERT_EQ(ncclSuccess, sc.add(/*sendBytes=*/2048, /*recvBytes=*/2048, /*peer=*/0));
+      auto* work = sc.p2pWork();
+      ASSERT_NE(nullptr, work);
+      EXPECT_EQ(collAPI == ncclFuncAllGather, work->sendNan);
+    });
+  }
+}
+
+// Across nodes a Direct AllGather slice reaches some ranks over the network, which does not escape it, so none of
+// its links, nor its self copy, take NaN.
+TEST_F(EnqueueMicrotest, AddP2pToPlan_NanAllGatherMultiNode_StaysOffNan) {
+  for (int peer : {1, 0}) {
+    UnderNanProto([peer] {
+      ScopedHook pxnDisable(g_pxnDisable, [](struct ncclComm*) { return 1; });
+      Gfx1250AddP2pScene sc;
+      sc.bp.c()->nNodes = 2;
+      sc.bp.c()->localRanks = sc.bp.c()->maxLocalRanks = 2;
+      sc.asCollective(ncclFuncAllGather, ncclFloat32, 2048);
+      ASSERT_EQ(ncclSuccess, sc.add(/*sendBytes=*/2048, /*recvBytes=*/2048, peer));
+      auto* work = sc.p2pWork();
+      ASSERT_NE(nullptr, work);
+      EXPECT_EQ(0, work->sendNan);
+      EXPECT_EQ(0, work->recvNan);
+    });
+  }
 }
 
 TEST_F(EnqueueMicrotest, AddP2pToPlan_DirectCeUsesExplicitConnectorAndMinimumStepAcrossParts) {

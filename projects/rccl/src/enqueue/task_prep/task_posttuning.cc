@@ -56,8 +56,12 @@ static ncclResult_t fillCollTaskFromRaw(struct ncclComm* comm, struct ncclTaskTu
   task->count = raw->count;
   task->root = raw->root;
   task->datatype = raw->datatype;
+  const ncclCollConfig_t* cfg = &raw->collConfig;
+  NCCLCHECK(ncclCollConfigGetAlgMask(cfg, task->func, &task->algMask));
   size_t elementSize = ncclTypeSize(task->datatype);
-  if (task->func == ncclFuncAllGather || task->func == ncclFuncBroadcast || task->func == ncclFuncAlltoAll) {
+  if ((task->func == ncclFuncAllGather &&
+       !rcclNanAllGatherKeepsDtype(comm, task->datatype, task->count * elementSize * comm->nRanks, task->algMask)) ||
+      task->func == ncclFuncBroadcast || task->func == ncclFuncAlltoAll) {
     task->count *= elementSize;
     task->datatype = ncclInt8;
     elementSize = 1;
@@ -73,7 +77,6 @@ static ncclResult_t fillCollTaskFromRaw(struct ncclComm* comm, struct ncclTaskTu
   task->groupApiEventHandle = {};
   task->collApiEventHandle = {};
 
-  const ncclCollConfig_t* cfg = &raw->collConfig;
   bool ctaPolicyEnvOverridden = ncclGetEnvCtaPolicy() != NCCL_CONFIG_UNDEF_INT;
   task->CTAPolicy = ncclCollConfigResolveCTAPolicy(cfg->CTAPolicy, comm->config.CTAPolicy, ctaPolicyEnvOverridden);
   task->aggIsolate = ncclCollConfigNeedAggIsolate(cfg) || task->CTAPolicy != comm->config.CTAPolicy;
@@ -89,7 +92,6 @@ static ncclResult_t fillCollTaskFromRaw(struct ncclComm* comm, struct ncclTaskTu
   NCCL_CONFIG_SET(task, nvlsCTAs, ncclParamNvlsChannels(), cfg->nvlsCTAs, comm->config.nvlsCTAs, 1, MAXCHANNELS);
   NCCL_CONFIG_SET(task, cgaClusterSize, ncclParamCGAClusterSize(), cfg->cgaClusterSize, comm->config.cgaClusterSize, 0,
                   NCCL_MAX_CGA_CLUSTER_SIZE);
-  NCCLCHECK(ncclCollConfigGetAlgMask(cfg, task->func, &task->algMask));
   task->forceAlgSelection = cfg->forceAlgSelection;
 
   return ncclSuccess;

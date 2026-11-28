@@ -28,6 +28,66 @@ THE SOFTWARE.
 #include "rccl_decision.h"
 #include "sym_kernels.h"
 #include "archinfo.h"
+#include <cstdlib>
+#include <cstring>
+#include <strings.h>
+
+// NaN-flag protocol (prims_nan.h). Readiness is "no element is NaN", so it is
+// only meaningful for these dtypes. Keep the list in sync with nan_tys in
+// device/generate.py. fp8 is excluded: gfx942 fnuz all-ones is finite.
+static inline bool rcclNanProtoDtype(ncclDataType_t datatype) {
+  switch (datatype) {
+  case ncclFloat16:
+  case ncclBfloat16:
+  case ncclFloat32:
+  case ncclFloat64:
+    return true;
+  default:
+    return false;
+  }
+}
+
+// Exact match, ignoring case as the NCCL_PROTO parser does. NCCL_PROTO=LL,NaN must not
+// skip the AllGather int8 collapse or move AlltoAll's send/recv onto the NaN-flag protocol.
+static inline bool rcclNanProtoForced() {
+  static const bool forced = [] {
+    const char* proto = ncclGetEnv("NCCL_PROTO");
+    return proto != nullptr && strcasecmp(proto, "NaN") == 0;
+  }();
+  return forced;
+}
+
+// NaN has no tuning constants of its own. It moves LL128's 128-bit lines without the flag lane, so every
+// protocol-indexed tuning table (latencies, bandwidths, thread budgets, correction factors) reads LL128's
+// entry for it.
+static inline int rcclTuningProto(int proto) {
+  return proto == NCCL_PROTO_NAN ? NCCL_PROTO_LL128 : proto;
+}
+
+// Collectives with a NaN kernel: AllReduce (ring and tree), ring AllGather and
+// ring ReduceScatter. AlltoAll takes NaN on the send/recv path instead.
+static inline bool rcclNanProtoKernel(ncclFunc_t func, int algo) {
+  switch (func) {
+  case ncclFuncAllReduce:
+    return algo == NCCL_ALGO_RING || algo == NCCL_ALGO_TREE;
+  case ncclFuncAllGather:
+  case ncclFuncReduceScatter:
+    return algo == NCCL_ALGO_RING;
+  default:
+    return false;
+  }
+}
+
+static inline bool rcclNanProtoFunc(ncclFunc_t func) {
+  return func == ncclFuncAllReduce || func == ncclFuncAllGather || func == ncclFuncReduceScatter;
+}
+
+// NCCL_PROTO=NaN forces NaN only where a NaN kernel can run; everything else
+// (other collectives, other dtypes) keeps the default protocol set. So the
+// protocol tuners parse NCCL_PROTO only when it names something else.
+static inline const char* rcclTunerProtoEnv() {
+  return rcclNanProtoForced() ? nullptr : ncclGetEnv("NCCL_PROTO");
+}
 
 typedef enum RcclTunableColls {
   RCCL_UNSUPPORTED_TUNABLE = -1,

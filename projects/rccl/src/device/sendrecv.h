@@ -19,8 +19,11 @@
 //                       gfx1250 when NCCL_P2P_LL128_ENABLE=1 (SendRecv 4 GPU/node
 //                       windows from 0 through the nRanks cap, or the threshold path
 //                       on other rank counts). Default ENABLE=-1 does not launch it.
-// The host picks the variant via ncclDevFuncId_P2p(useLL128); the per-op work->{send,recv}
-// ProtoLL bit only means "this op is latency-bound", not which LL-family protocol.
+//   UserRegMode == 2 -> latency-bound ops flagged work->{send,recv}Nan use the NaN-flag
+//                       protocol, the rest legacy LL. Launched when a float AlltoAll runs
+//                       under NCCL_PROTO=NaN, intra-node.
+// The host picks the variant via ncclDevFuncId_P2p(); the per-op work->{send,recv}
+// ProtoLL bit only means "this op is not SIMPLE", not which protocol it is.
 template <typename T, typename RedOp>
 struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE> {
   static_assert(sizeof(T) == 1, "SendRecv only works on single byte types T.");
@@ -61,6 +64,85 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
       prims.directRecv(cursor, n);
       cursor += n;
     } while (cursor < bytes);
+  }
+
+  // NaN-flag transfers are typed by the width the arrival test reads: U = half
+  // covers f16, bf16 and f32 (every all-ones dword of real data would be a NaN),
+  // U = double tests only the high dword of each element. The host keeps
+  // partitions and chunks multiples of 8 bytes, so U never splits an element.
+  template <typename U>
+  __device__ void runSendNaN(int tid, int tn, int group, struct ncclDevWorkP2p* work) {
+    size_t count = work->sendBytes / sizeof(U);
+    size_t chunk = u32fp8Decode(work->sendChunkSize_u32fp8) / sizeof(U);
+    Primitives<U, FuncSum<U>, FanAsymmetric<0, 1>, /*Direct=*/0, ProtoNaN, 1> prims(
+      tid, tn, nullptr, &work->sendRank, work->sendAddr, nullptr, /*redOpArg=*/0, group, work->sendConnIndex,
+      work->sendConnIndex, nullptr, work);
+    size_t cursor = 0;
+    do {
+      int n = min(chunk, count - cursor);
+      prims.send(cursor, n);
+      cursor += n;
+    } while (cursor < count);
+  }
+
+  template <typename U>
+  __device__ void runRecvNaN(int tid, int tn, int group, struct ncclDevWorkP2p* work) {
+    size_t count = work->recvBytes / sizeof(U);
+    size_t chunk = u32fp8Decode(work->recvChunkSize_u32fp8) / sizeof(U);
+    Primitives<U, FuncSum<U>, FanAsymmetric<1, 0>, /*Direct=*/0, ProtoNaN, 1> prims(
+      tid, tn, &work->recvRank, nullptr, nullptr, work->recvAddr, /*redOpArg=*/0, group, work->recvConnIndex,
+      work->recvConnIndex, nullptr, work);
+    size_t cursor = 0;
+    do {
+      int n = min(chunk, count - cursor);
+      prims.recv(cursor, n);
+      cursor += n;
+    } while (cursor < count);
+  }
+
+  // A Direct AllGather slice copied to its owner. The peers receive it through runRecvNaN with every all-ones
+  // dword the arrival test reads (each dword, or each f64's high dword) lowered to 0xFFFFFFFE, so the owner's copy
+  // takes the same escape. Dwords count from the part start, which is 8-byte aligned in the slice.
+  __device__ void runCopyNaN(int tid, int tn, struct ncclDevWorkP2p* work) {
+    const size_t bytes = work->sendBytes;
+    const bool f64 = work->sendNanF64;
+    const uintptr_t align = (uintptr_t)work->sendAddr | (uintptr_t)work->recvAddr;
+    size_t dwordBeg = 0;
+    if (align % 16 == 0) {
+      const uint4* src = (const uint4*)work->sendAddr;
+      uint4* dst = (uint4*)work->recvAddr;
+      for (size_t i = tid; i < bytes / 16; i += tn) {
+        uint4 v = src[i];
+        if (!f64) v.x = min(v.x, 0xFFFFFFFEu);
+        v.y = min(v.y, 0xFFFFFFFEu);
+        if (!f64) v.z = min(v.z, 0xFFFFFFFEu);
+        v.w = min(v.w, 0xFFFFFFFEu);
+        dst[i] = v;
+      }
+      dwordBeg = bytes / 16 * 4;
+    }
+    if (align % 4 == 0) {
+      const uint32_t* src = (const uint32_t*)work->sendAddr;
+      uint32_t* dst = (uint32_t*)work->recvAddr;
+      for (size_t i = dwordBeg + tid; i < bytes / 4; i += tn) {
+        dst[i] = f64 && i % 2 == 0 ? src[i] : min(src[i], 0xFFFFFFFEu);
+      }
+    } else {
+      // f16 and bf16 slices can sit on 2-byte boundaries.
+      const uint16_t* src = (const uint16_t*)work->sendAddr;
+      uint16_t* dst = (uint16_t*)work->recvAddr;
+      for (size_t i = tid; i < bytes / 4; i += tn) {
+        uint16_t lo = src[2 * i];
+        const uint16_t hi = src[2 * i + 1];
+        if (lo == 0xFFFF && hi == 0xFFFF) lo = 0xFFFE;
+        dst[2 * i] = lo;
+        dst[2 * i + 1] = hi;
+      }
+    }
+    // An odd trailing half never fills a dword, and the wire pads it with zeros.
+    if (tid == 0 && bytes % 4 != 0) {
+      ((uint16_t*)work->recvAddr)[bytes / 2 - 1] = ((const uint16_t*)work->sendAddr)[bytes / 2 - 1];
+    }
   }
 
 #if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__) && (!defined(__gfx1250__) && !defined(__gfx1250_strict__))
@@ -176,7 +258,11 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
     }
   }
 
-  if (isCopy) {
+  bool nanCopy = false;
+  if constexpr (UserRegMode == 2) nanCopy = isCopy && work->sendNan;
+  if (nanCopy) {
+    runCopyNaN(subtid, subtn, work);
+  } else if (isCopy) {
 #if defined(__gfx942__) || defined(__gfx950__) || (defined(__gfx1250__) || defined(__gfx1250_strict__))
     reduceCopy<COLL_UNROLL * 2, 0, RedOp, T, 0, 1, 1, 0, 1, 1, /*PreOpSrcs=*/0>(
       subtid, subtn, 0, false, 1, &work->sendAddr, 1, &work->recvAddr, (ssize_t)work->sendBytes);
@@ -186,7 +272,11 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
 #endif
   } else if (isSend) {
     if (work->sendProtoLL) {
-      if constexpr (UserRegMode == 1) {
+      if constexpr (UserRegMode == 2) {
+        if (!work->sendNan) runSend<ProtoLL>(subtid, subtn, group, work);
+        else if (work->sendNanF64) runSendNaN<double>(subtid, subtn, group, work);
+        else runSendNaN<half>(subtid, subtn, group, work);
+      } else if constexpr (UserRegMode == 1) {
         runSend<ProtoLL128>(subtid, subtn, group, work);
       } else {
         runSend<ProtoLL>(subtid, subtn, group, work);
@@ -204,7 +294,11 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
     }
   } else {
     if (work->recvProtoLL) {
-      if constexpr (UserRegMode == 1) {
+      if constexpr (UserRegMode == 2) {
+        if (!work->recvNan) runRecv<ProtoLL>(subtid, subtn, group, work);
+        else if (work->recvNanF64) runRecvNaN<double>(subtid, subtn, group, work);
+        else runRecvNaN<half>(subtid, subtn, group, work);
+      } else if constexpr (UserRegMode == 1) {
         runRecv<ProtoLL128>(subtid, subtn, group, work);
       } else {
         runRecv<ProtoLL>(subtid, subtn, group, work);

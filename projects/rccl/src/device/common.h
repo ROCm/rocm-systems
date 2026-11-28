@@ -97,9 +97,11 @@ struct ncclShmemData {
   uint64_t faults;
 #endif
   uint64_t barrier_pat;
-#if RCCL_TDM_STAGE_BYTES_PER_WARP
+#if RCCL_TDM_STAGE_BYTES_PER_WARP || RCCL_TDM_NAN_WINDOW_BYTES
   // A separate __shared__ should work better as it does not instantiate this for LL and LL128
-  alignas(RCCL_TDM_ALIGN) char tdmStage[RCCL_TDM_STAGE_BYTES_PER_WARP * (NCCL_MAX_NTHREADS / WARP_SIZE)];
+  alignas(RCCL_TDM_ALIGN) char tdmStage[max_constexpr<int>(
+    RCCL_TDM_STAGE_BYTES_PER_WARP * (NCCL_MAX_NTHREADS / WARP_SIZE),
+    RCCL_TDM_NAN_WINDOW_BYTES * (2 * (NCCL_MAX_NTHREADS / WARP_SIZE) + 1))];
 #endif
 };
 
@@ -119,6 +121,17 @@ extern __shared__ ulong2
 #if RCCL_TDM_STAGE_BYTES_PER_WARP
 __device__ inline void* ncclTdmStageForWarp(int warp) {
   return ncclShmem.tdmStage + warp * RCCL_TDM_STAGE_BYTES_PER_WARP;
+}
+#endif
+
+#if RCCL_TDM_NAN_WINDOW_BYTES
+// Receive (which = 0) or source (which = 1) window of block warp `warp`.
+__device__ inline char* ncclNanTdmWindow(int warp, int which) {
+  return ncclShmem.tdmStage + (2 * warp + which) * RCCL_TDM_NAN_WINDOW_BYTES;
+}
+// The block's all-ones window, past every warp's pair.
+__device__ inline char* ncclNanTdmSentinel() {
+  return ncclShmem.tdmStage + 2 * (NCCL_MAX_NTHREADS / WARP_SIZE) * RCCL_TDM_NAN_WINDOW_BYTES;
 }
 #endif
 

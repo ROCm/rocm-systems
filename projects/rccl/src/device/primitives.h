@@ -56,7 +56,7 @@
     } \
   } while (0)
 
-// LL and LL128 step barriers order LDS only instead of waiting for the step's stores to the peer
+// LL, LL128 and NaN step barriers order LDS only instead of waiting for the step's stores to the peer
 // (see storeFreeStepBarrier()). Configure with -DENABLE_STORE_FREE_STEP_BARRIER=OFF to keep the full-fence barriers.
 #if (defined(__gfx1250__) || defined(__gfx1250_strict__)) && !defined(RCCL_DISABLE_STORE_FREE_STEP_BARRIER)
 #define RCCL_STORE_FREE_STEP_BARRIER 1
@@ -82,12 +82,13 @@ inline __device__ void ldsOrderedBarrier(int nthreads, int threadsPerBlock, uint
   __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local");
 }
 
-// Runs an LL or LL128 step barrier that orders LDS between the waves but does not wait for their global or peer
+// Runs an LL, LL128 or NaN step barrier that orders LDS between the waves but does not wait for their global or peer
 // stores to complete. Returns false where the caller must run its full-fence barrier instead: other architectures,
 // and sends with a connFifo, whose proxy acts on a tail. Only valid where the receiver validates every line by its
-// per-step flag. The fences do not wait for outstanding loads (no s_wait_loadcnt), so every wave must use each value
-// it loaded from the step's slots before it arrives: the head store after the end-of-step barrier hands the slot
-// back to the upstream GPU, which can then overwrite a load still in flight.
+// contents (LL and LL128's per-step flag, NaN's payload) and no store from the step has to land before the barrier's
+// caller hands a slot back. The fences do not wait for outstanding loads (no s_wait_loadcnt), so every wave must use
+// each value it loaded from the step's slots before it arrives: the head store after the end-of-step barrier hands
+// the slot back to the upstream GPU, which can then overwrite a load still in flight.
 inline __device__ bool storeFreeStepBarrier(bool fifoSend, int nthreads, int threadsPerBlock, uint64_t& barrier_next,
                                             uint64_t* barriers) {
 #if RCCL_STORE_FREE_STEP_BARRIER
@@ -102,7 +103,7 @@ inline __device__ bool storeFreeStepBarrier(bool fifoSend, int nthreads, int thr
 #endif
 }
 
-// The store-free barriers are skipped on connFifo sends (LL, LL128, Simple) and receives (Simple).
+// The store-free barriers are skipped on connFifo sends (LL, LL128, NaN, Simple) and receives (Simple).
 #if RCCL_STORE_FREE_STEP_BARRIER || RCCL_SIMPLE_STORE_FREE_STEP_START
 inline __device__ bool anySendConnFifo(struct ncclDevChannel* channel, int const* sendPeers, int nsend, int connIndex) {
   bool fifo = false;
@@ -177,6 +178,22 @@ struct ProtoLL128 {
   // Granularity of data bytes transferred per thread.
   __device__ static int calcBytePerGrain() {
     return NCCL_LL128_SHMEM_ELEMS_PER_THREAD * NCCL_LL128_DATAELEMS * sizeof(uint64_t) / NCCL_LL128_LINEELEMS;
+  }
+  // Group width is how many consecutive group values a subchannel occupies.
+  static constexpr int MaxGroupWidth = 1;
+};
+
+struct ProtoNaN {
+  static constexpr int Id = NCCL_PROTO_NAN;
+
+  // Data bytes in one step of the fifo queue. The payload is its own ready flag,
+  // so unlike LL/LL128 the whole step is data.
+  __device__ static int calcBytePerStep() {
+    return ncclShmem.comm.buffSizes[NCCL_PROTO_NAN] / NCCL_STEPS;
+  }
+  // Granularity of data bytes transferred per thread.
+  __device__ static int calcBytePerGrain() {
+    return NCCL_NAN_ELEMS_PER_THREAD * sizeof(uint64_t);
   }
   // Group width is how many consecutive group values a subchannel occupies.
   static constexpr int MaxGroupWidth = 1;
@@ -283,4 +300,5 @@ __device__ inline int checkAbort(int& abortCache, const int abortValue, int& spi
 #include "prims_simple.h"
 #include "prims_ll.h"
 #include "prims_ll128.h"
+#include "prims_nan.h"
 #endif

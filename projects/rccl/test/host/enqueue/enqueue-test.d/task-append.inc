@@ -97,6 +97,48 @@ TEST_F(EnqueueMicrotest, CollTaskAppend_NoDecision_WritesNone) {
   EXPECT_EQ(RCCL_SYMK_EXTRACT_NONE, t->symkExtract);
 }
 
+namespace {
+// AllGather's default kernels are int8, so a task collapses to bytes unless NaN, a typed float kernel, will run.
+// Ring is AllGather's only NaN algorithm, so NCCL_ALGO without Ring (zero Ring/NaN bandwidth) collapses it too.
+void AppendFloatAllGather(ncclTaskColl* out, float ringNanBw = 1.0f) {
+  CollTaskComm cc;
+  cc.get()->buffSizes[NCCL_PROTO_NAN] = 1 << 20;
+  cc.get()->bandwidths[ncclFuncAllGather][NCCL_ALGO_RING][NCCL_PROTO_NAN] = ringNanBw;
+  ncclInfo info = MakeCollInfo(cc.get(), /*decisionValid=*/false, NCCL_ALGO_RING);
+  info.coll = ncclFuncAllGather;
+  ncclDevRedOpFull opDev{};
+  ASSERT_EQ(ncclSuccess, collTaskAppend(cc.get(), &info, opDev));
+  const ncclTaskColl* t = ncclTaskCollSorterDequeueAll(&cc.get()->planner.collSorter);
+  ASSERT_NE(nullptr, t);
+  *out = *t;
+}
+}  // namespace
+
+TEST_F(EnqueueMicrotest, CollTaskAppend_AllGather_CollapsesToBytes) {
+  ncclTaskColl t{};
+  AppendFloatAllGather(&t);
+  EXPECT_EQ(ncclInt8, t.datatype);
+  EXPECT_EQ(4u * 4, t.count);
+}
+
+TEST_F(EnqueueMicrotest, CollTaskAppend_NanAllGather_KeepsFloatDtype) {
+  UnderNanProto([] {
+    ncclTaskColl t{};
+    AppendFloatAllGather(&t);
+    EXPECT_EQ(ncclFloat32, t.datatype);
+    EXPECT_EQ(4u, t.count);
+  });
+}
+
+TEST_F(EnqueueMicrotest, CollTaskAppend_NanAllGatherWithoutRing_CollapsesToBytes) {
+  UnderNanProto([] {
+    ncclTaskColl t{};
+    AppendFloatAllGather(&t, /*ringNanBw=*/0.0f);
+    EXPECT_EQ(ncclInt8, t.datatype);
+    EXPECT_EQ(4u * 4, t.count);
+  });
+}
+
 // ===========================================================================
 // ceCollTaskAppend -- deferred CE staging setup (ROCM-32044)
 // ===========================================================================

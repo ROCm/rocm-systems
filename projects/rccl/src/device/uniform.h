@@ -47,6 +47,9 @@ namespace wave {
 __device__ inline uint32_t uniform(uint32_t v) {
   return __builtin_amdgcn_readfirstlane(v);
 }
+__device__ inline int32_t uniform(int32_t v) {
+  return __builtin_amdgcn_readfirstlane(v);
+}
 __device__ inline uint64_t uniform(uint64_t v) {
   const uint32_t lo = __builtin_amdgcn_readfirstlane(static_cast<uint32_t>(v));
   const uint32_t hi = __builtin_amdgcn_readfirstlane(static_cast<uint32_t>(v >> 32));
