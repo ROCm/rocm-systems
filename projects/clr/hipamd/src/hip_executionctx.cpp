@@ -270,6 +270,9 @@ hipError_t ExecutionCtx::recordEvent(hipEvent_t event) {
   // Create a single Marker to wait on all events in waitlist
   // Cache Flush not required for this fan-in marker
   amd::Command* fanIn = new amd::Marker(*snapshot[0], kMarkerDisableFlush, waitList);
+  if (!(e->flags() & hipEventDisableTiming)) {
+    fanIn->EnableTiming();
+  }
   fanIn->setCommandEntryScope(amd::Device::kCacheStateIgnore);
   return e->enqueueRecordCommand(snapshot[0], fanIn);
 }

@@ -1008,7 +1008,7 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_OccupancyExt_HipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_Default_DefaultMatchesPlain` | hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags | the default-flags query returns the same block count as the non-flags query |
 | `Contract_OccupancyExt_HipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_Default_DisableCachingOverrideSucceeds` | hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags | the disable-caching-override flag is accepted and yields a non-negative block count |
 | `Contract_OccupancyExt_HipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_Default_RejectsInvalidInputs` | hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags | rejects a null output pointer and an invalid flag value with hipErrorInvalidValue |
-| `Contract_OccupancyExt_HipOccupancyMaxPotentialClusterSize_ClusterQueries_CapabilityGatedRange` | hipOccupancyMaxPotentialClusterSize | on cluster-capable devices the cluster-occupancy queries report a usable range (size >= 1, active clusters >= 0) |
+| `Contract_OccupancyExt_HipOccupancyMaxPotentialClusterSize_ClusterQueries_CapabilityGatedRange` | hipOccupancyMaxPotentialClusterSize | single-block query: size >= 1, active >= 0 |
 
 ### `occupancy_variable` (6 cases)
 

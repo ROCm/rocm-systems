@@ -183,27 +183,27 @@ HIP_TEST_CASE(Contract_DriverLaunchEx_HipDevSmResourceSplit_Default_ProducesBoun
   REQUIRE(device_resource.type == hipDevResourceTypeSm);
   REQUIRE(device_resource.sm.smCount > 0);
 
+  const unsigned int alignment = device_resource.sm.smCoscheduledAlignment;
+  REQUIRE(alignment > 0);
+  REQUIRE(alignment <= device_resource.sm.smCount);
+
   hipDevResource group{};
   hipDevResource remainder{};
   hipDevSmResourceGroupParams params{};
-  params.smCount = 1;
+  params.smCount = alignment;
 
   const hipError_t status =
       hipDevSmResourceSplit(&group, 1, &device_resource, &remainder, 0, &params);
-  // The group-parameter split is a configuration some backends do not accept:
-  // RDNA GPUs support the count-based split (hipDevSmResourceSplitByCount) but
-  // reject the group-params variant with hipErrorInvalidResourceConfiguration,
-  // while all CDNA arches accept it. Treat both "not supported" and "invalid
-  // resource configuration" as a capability skip rather than a contract
-  // violation; the split is only asserted where the backend accepts the config.
-  if (status == hipErrorNotSupported || status == hipErrorInvalidResourceConfiguration) {
+  if (status == hipErrorNotSupported) {
     (void)hipGetLastError();
     HIP_SKIP_TEST("SM resource group splitting is not supported by this runtime path.");
   }
   HIP_CHECK(status);
 
+  REQUIRE(group.type == hipDevResourceTypeSm);
   REQUIRE(group.sm.smCount > 0);
   REQUIRE(group.sm.smCount <= device_resource.sm.smCount);
+  REQUIRE(group.sm.smCount % alignment == 0);
 #endif  // HT_NVIDIA && CUDA_VERSION < 13000
 }
 
