@@ -97,6 +97,8 @@ The behaviors of ``rocJpegDecode()`` and ``rocJpegDecodeBatched()`` depend on ``
   "ROCJPEG_OUTPUT_RGB", "Convert to interleaved RGB."
   "ROCJPEG_OUTPUT_RGB_PLANAR", "Convert to planar RGB."
 
+The decode functions return ``ROCJPEG_STATUS_INVALID_PARAMETER`` for any other value, including ``ROCJPEG_OUTPUT_FORMAT_MAX``, and a batched decode with such a value for any image rejects the whole batch without decoding any image.
+
 ``RocJpegOutputFormat`` is a member of the ``RocJpegDecodeParams`` struct. ``RocJpegDecodeParams`` defines the output format, crop rectangle, and target dimensions to use when decoding the image.
 
 .. code:: cpp

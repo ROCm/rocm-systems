@@ -222,6 +222,17 @@ private:
    static RocJpegStatus ValidateCropRectangle(const RocJpegDecodeParams &decode_params, const JpegStreamParameters &jpeg_stream_params);
 
    /**
+    * @brief Checks the decode parameters of one image before anything is submitted for it.
+    *
+    * The output format must be a RocJpegOutputFormat value below ROCJPEG_OUTPUT_FORMAT_MAX, and the crop rectangle
+    * must pass ValidateCropRectangle().
+    * @param decode_params The decode parameters to check.
+    * @param jpeg_stream_params The parsed JPEG stream parameters holding the image dimensions.
+    * @return ROCJPEG_STATUS_SUCCESS if the decode parameters are valid, ROCJPEG_STATUS_INVALID_PARAMETER otherwise.
+    */
+   static RocJpegStatus ValidateDecodeParams(const RocJpegDecodeParams &decode_params, const JpegStreamParameters &jpeg_stream_params);
+
+   /**
     * @brief Waits for the submitted surfaces and copies/converts the decoded output.
     *
     * This is the only finalize path; the single-image decoders call it with a batch size of one.

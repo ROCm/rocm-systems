@@ -116,7 +116,7 @@ typedef struct {
  * - `ROCJPEG_OUTPUT_Y`: Returns only the luma component (Y) and writes it to the first channel of the RocJpegImage.
  * - `ROCJPEG_OUTPUT_RGB`: Converts the decoded image to interleaved RGB format using the VCN JPEG decoder or HIP kernels and writes it to the first channel of the RocJpegImage.
  * - `ROCJPEG_OUTPUT_RGB_PLANAR`: Converts the decoded image to RGB PLANAR format using the VCN JPEG decoder or HIP kernels and writes the RGB channels to separate channels of the RocJpegImage.
- * - `ROCJPEG_OUTPUT_FORMAT_MAX`: Maximum allowed value for the output format.
+ * - `ROCJPEG_OUTPUT_FORMAT_MAX`: The number of output formats. It is not an output format itself.
  */
 typedef enum {
     /**< return native unchanged decoded YUV image from the VCN JPEG decoder.
@@ -134,7 +134,7 @@ typedef enum {
     ROCJPEG_OUTPUT_RGB = 3,
     /**< convert to RGB PLANAR using VCN JPEG decoder (on MI300+) or HIP kernels and write to first, second, and third channel of RocJpegImage. */
     ROCJPEG_OUTPUT_RGB_PLANAR = 4,
-    ROCJPEG_OUTPUT_FORMAT_MAX = 5 /**< maximum allowed value */
+    ROCJPEG_OUTPUT_FORMAT_MAX = 5 /**< number of output formats; not a valid output format */
 } RocJpegOutputFormat;
 
 /**
@@ -148,7 +148,9 @@ typedef enum {
  * followed by resizing the resulting ROI to the target dimension.
  */
 typedef struct {
-    RocJpegOutputFormat output_format; /**< Output data format. See RocJpegOutputFormat for description. */
+    RocJpegOutputFormat output_format; /**< Output data format. See RocJpegOutputFormat for description. It must be
+                                            a RocJpegOutputFormat value below ROCJPEG_OUTPUT_FORMAT_MAX; the decode
+                                            functions return ROCJPEG_STATUS_INVALID_PARAMETER for any other value. */
     struct {
         int16_t left; /**< Left coordinate of the crop rectangle. */
         int16_t top; /**< Top coordinate of the crop rectangle. */
