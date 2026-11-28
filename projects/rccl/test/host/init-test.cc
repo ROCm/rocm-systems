@@ -12567,3 +12567,50 @@ TEST_F(InitMicrotest, DevCommSetup_ChannelWithUserRanks_CopiesEachChannelsOwnRan
     comm->channels[c].devRingUserRanks = nullptr;
   }
 }
+
+// --- ncclComputeBuffSizes: P2P chunk-size params default to -2 and ignore values <= 0 (NCCL 2.32.6, 68dacb716f0c) ---
+
+namespace {
+// Calls ncclComputeBuffSizes, or the static computeBuffSizes it was renamed from, whichever this init.cc defines.
+template <class C>
+auto RunP2pBuffSizes(C* comm, int) -> decltype(ncclComputeBuffSizes(comm)) {
+  return ncclComputeBuffSizes(comm);
+}
+template <class C>
+auto RunP2pBuffSizes(C* comm, long) -> decltype(computeBuffSizes(comm)) {
+  return computeBuffSizes(comm);
+}
+}  // namespace
+
+TEST_F(InitMicrotest, ComputeBuffSizes_NonPositivePciChunkSize_FallsBackToTheDefault) {
+  for (int64_t value : {int64_t{0}, int64_t{-1}}) {
+    BuffSizes_Scene s;
+    s.comm()->nNodes = 1;
+    s.comm()->isAllNvlink = false;
+    SetParams({{"P2P_PCI_CHUNKSIZE", value}});
+    EXPECT_EQ(ncclSuccess, RunP2pBuffSizes(s.comm(), 0));
+    EXPECT_EQ(1 << 17, s.comm()->p2pChunkSize) << "NCCL_P2P_PCI_CHUNKSIZE=" << value;
+  }
+}
+TEST_F(InitMicrotest, ComputeBuffSizes_NonPositiveNvlChunkSize_FallsBackToTheDefault) {
+  for (int64_t value : {int64_t{0}, int64_t{-1}}) {
+    BuffSizes_Scene s;
+    s.comm()->nNodes = 1;
+    s.comm()->isAllNvlink = true;
+    SetParams({{"P2P_NVL_CHUNKSIZE", value}});
+    EXPECT_EQ(ncclSuccess, RunP2pBuffSizes(s.comm(), 0));
+    EXPECT_EQ(1 << 19, s.comm()->p2pChunkSize) << "NCCL_P2P_NVL_CHUNKSIZE=" << value;
+  }
+}
+TEST_F(InitMicrotest, ComputeBuffSizes_ChunkExceedsSimpleBuffer_LogsTheReduction) {
+  BuffSizes_Scene s;
+  s.comm()->nNodes = 1;
+  s.comm()->isAllNvlink = false;
+  SetParams({{"BUFFSIZE", 1 << 16}, {"P2P_PCI_CHUNKSIZE", 1 << 15}});
+  ncclResult_t res = ncclInternalError;
+  const std::string log = CaptureInfoLog([&] { res = RunP2pBuffSizes(s.comm(), 0); });
+  EXPECT_EQ(ncclSuccess, res);
+  EXPECT_EQ((1 << 16) / NCCL_STEPS, s.comm()->p2pChunkSize);
+  EXPECT_TRUE(LogHas(log, "reducing P2P Chunksize to")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, "Simple Buffer Size set to 65536")) << "actual log:\n" << log;
+}
