@@ -253,7 +253,7 @@ uint32_t Signal::WaitMultiple(uint32_t signal_count, const hsa_signal_t* hsa_sig
   MAKE_SCOPE_GUARD([&]() {
     if (signal_count > small_size) delete[] evts;
   });
-#if defined(__linux__)
+#if defined(__linux__) || defined(__FreeBSD__)
   uint64_t event_age[unique_evts];
 #else
   auto event_age = reinterpret_cast<uint64_t*>(_alloca(unique_evts * sizeof(unique_evts)));
@@ -399,7 +399,7 @@ uint32_t Signal::WaitAnyExceptions(uint32_t signal_count, const hsa_signal_t* hs
   std::sort(evts, evts + signal_count);
   HsaEvent** end = std::unique(evts, evts + signal_count);
   unique_evts = uint32_t(end - evts);
-#if defined(__linux__)
+#if defined(__linux__) || defined(__FreeBSD__)
   uint64_t event_age[unique_evts];
 #else
   auto event_age = reinterpret_cast<uint64_t*>(_alloca(unique_evts * sizeof(uint64_t)));

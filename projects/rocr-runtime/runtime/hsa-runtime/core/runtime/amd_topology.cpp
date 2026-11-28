@@ -70,7 +70,7 @@
 #include "core/inc/amd_virtio_driver.h"
 #endif
 
-#if defined(__linux__)
+#if defined(__linux__) || defined(__FreeBSD__)
 #include <link.h>
 #else
 #include "loader/executable.hpp"
@@ -83,12 +83,16 @@ namespace AMD {
 namespace {
 
 const std::array<std::function<hsa_status_t(std::unique_ptr<core::Driver>&)>,
-#if _WIN32
+#if defined(_WIN32) || defined(__FreeBSD__)
+                 // KFD only: neither has an XDNA/AIE driver to discover.
                  1
-#elif defined(__linux__) || defined(__FreeBSD__)
+#elif defined(__linux__)
                  static_cast<size_t>(core::DriverType::NUM_DRIVER_TYPES)
 #endif
                  >
+    // Every element must be initialised: DiscoverDrivers() calls all of them,
+    // and a default-constructed std::function throws when invoked.  So the
+    // entries below have to cover whatever size is selected above.
     discover_driver_funcs = {
         KfdDriver::DiscoverDriver
 #ifdef __linux__

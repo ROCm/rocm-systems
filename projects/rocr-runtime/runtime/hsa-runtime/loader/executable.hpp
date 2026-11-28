@@ -48,7 +48,9 @@
 #include <cstdint>
 #include <iostream>
 #include <libelf.h>
-#if defined(__linux__)
+#if defined(__linux__) || defined(__FreeBSD__)
+// Provides struct link_map and struct r_debug.  Windows has no equivalent, so
+// the block below defines compatible stand-ins there instead.
 #include <link.h>
 #endif
 #include <list>

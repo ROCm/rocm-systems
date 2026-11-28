@@ -45,7 +45,7 @@
 #include <cinttypes>
 #include <cstdint>
 #include <algorithm>
-#if defined(__linux__)
+#if defined(__linux__) || defined(__FreeBSD__)
 #include <sys/eventfd.h>
 #include <poll.h>
 #else
@@ -181,7 +181,7 @@ void SvmProfileControl::PollSmi() {
   };
 
   while (!exit) {
-#if defined(__linux__)
+#if defined(__linux__) || defined(__FreeBSD__)
     int ready = poll(&files[0], files.size(), -1);
 #else
     int ready = 0;
@@ -387,7 +387,7 @@ void SvmProfileControl::PollSmi() {
 }
 
 SvmProfileControl::SvmProfileControl() : event(-1), exit(false) {
-#if defined(__linux__)
+#if defined(__linux__) || defined(__FreeBSD__)
   event = eventfd(0, EFD_CLOEXEC);
   if (event == -1) return;
 #endif
@@ -399,7 +399,7 @@ SvmProfileControl::SvmProfileControl() : event(-1), exit(false) {
 }
 
 SvmProfileControl::~SvmProfileControl() {
-#if defined(__linux__)
+#if defined(__linux__) || defined(__FreeBSD__)
   if (event != -1) {
     eventfd_write(event, 1);
     close(event);

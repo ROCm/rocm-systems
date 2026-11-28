@@ -201,6 +201,12 @@ else()
                      "src/extsem.c")
     if (CMAKE_SYSTEM_NAME MATCHES "Linux")
       list(APPEND HSAKMT_SRC "src/perfctr.c" "src/pmc_table.c")
+      ## Per-OS KFD topology reader; see src/topology_dinfo.h.
+      list(APPEND HSAKMT_SRC "src/linux/topology_dinfo.c")
+    elseif (CMAKE_SYSTEM_NAME MATCHES "FreeBSD")
+      ## No perf_event_open(2): performance counters report NOT_SUPPORTED.
+      ## The topology is read from sysctl(3) instead of sysfs.
+      list(APPEND HSAKMT_SRC "src/freebsd/perfctr.c" "src/freebsd/topology_dinfo.c")
     endif()
   endif()
 
@@ -211,7 +217,15 @@ else()
   target_sources ( ${HSAKMT_TARGET} PRIVATE ${HSAKMT_SRC} )
 
   if (UNIX)
-    set(EXTRA_INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    ## The KFD UAPI headers (kfd_ioctl.h, udmabuf.h) live in include/hsakmt/linux/
+    ## and are shared by every UNIX OS; sources include them without naming an
+    ## OS.  On FreeBSD, include/hsakmt/freebsd/ supplies the <linux/ioctl.h> and
+    ## <linux/types.h> they include.
+    set(EXTRA_INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/src
+                           ${CMAKE_CURRENT_SOURCE_DIR}/include/hsakmt/linux)
+    if (CMAKE_SYSTEM_NAME MATCHES "FreeBSD")
+      set(HSAKMT_OS_COMPAT_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/include/hsakmt/freebsd)
+    endif()
   else()
     set(EXTRA_INCLUDE_DIRS 
       ${DK_HEADER}/ms_sdk/include/shared
@@ -225,10 +239,6 @@ else()
       ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/hsa-runtime)
   endif()
 
-  if (CMAKE_SYSTEM_NAME MATCHES "Linux")
-    target_include_directories( ${HSAKMT_TARGET} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include/hsakmt/linux )
-  endif()
-
   ## Add headers.  The public headers need to point at their location in both build and install
   ## directory layouts.  This declaration allows publishing library use data to downstream clients.
   target_include_directories( ${HSAKMT_TARGET}
@@ -237,6 +247,12 @@ else()
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     PRIVATE
     ${EXTRA_INCLUDE_DIRS} )
+  if (HSAKMT_OS_COMPAT_INCLUDE)
+    # In-tree users of hsakmt/linux/kfd_ioctl.h (ROCr's core dump code) need
+    # the <linux/*.h> stand-ins too.  They are never installed.
+    target_include_directories( ${HSAKMT_TARGET}
+      PUBLIC $<BUILD_INTERFACE:${HSAKMT_OS_COMPAT_INCLUDE}> )
+  endif()
 
   if (WIN32)
     add_compile_definitions(__AMD64__ LITTLEENDIAN_CPU HSA_LARGE_MODEL NOMINMAX)
@@ -273,6 +289,12 @@ else()
     # asserted here; the resolved path is deliberately not propagated.
     find_library(LIBC NAMES c REQUIRED)
     find_package(NUMA)
+    # Some NUMA package configs (e.g. FreeBSD's libnuma shim) only export
+    # the NUMA::numa imported target and leave NUMA_LIBRARIES empty, which
+    # would leave libnuma unlinked.
+    if(NUMA_FOUND AND NOT NUMA_LIBRARIES AND TARGET NUMA::numa)
+      set(NUMA_LIBRARIES NUMA::numa)
+    endif()
     if(NUMA_FOUND)
       set(NUMA "${NUMA_LIBRARIES}")
       # When NUMA was found as a target, ensure consumers can find it too
@@ -364,6 +386,18 @@ else()
       target_compile_definitions(${HSAKMT_TARGET} PRIVATE -DHAVE_GETAUXVAL=1)
     endif()
 
+    # include/hsakmt/drm/amdgpu_drm.h defines struct drm_color_ctm_3x4 unless
+    # HAVE_DRM_COLOR_CTM_3X4 says libdrm's drm_mode.h already does, as newer
+    # libdrm releases (FreeBSD's among them) do.  Defining it twice is an error.
+    include(CheckStructHasMember)
+    set(CMAKE_REQUIRED_INCLUDES ${DRM_INCLUDE_DIRS} ${DRM_AMDGPU_INCLUDE_DIRS})
+    check_struct_has_member("struct drm_color_ctm_3x4" matrix "drm_mode.h"
+                            HAVE_DRM_COLOR_CTM_3X4 LANGUAGE C)
+    unset(CMAKE_REQUIRED_INCLUDES)
+    if(HAVE_DRM_COLOR_CTM_3X4)
+      target_compile_definitions(${HSAKMT_TARGET} PRIVATE -DHAVE_DRM_COLOR_CTM_3X4=1)
+    endif()
+
     # Trusted search path for HSA_MODEL_LIB dlopen (see hsakmtmodel.c).
     set(HSAKMT_INSTALL_LIBDIR "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}")
     target_compile_definitions(${HSAKMT_TARGET} PRIVATE
@@ -433,7 +467,7 @@ else()
   endif()
   # Install public headers
   install ( DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/${HSAKMT_TARGET} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-    COMPONENT dev PATTERN "linux" EXCLUDE PATTERN "*virtio*" EXCLUDE)
+    COMPONENT dev PATTERN "linux" EXCLUDE PATTERN "freebsd" EXCLUDE PATTERN "*virtio*" EXCLUDE)
 
   # Record our usage data for clients find_package calls. On Windows, this is
   # only relocatable for the prebuilt WKMI path because that path installs
@@ -504,16 +538,16 @@ else()
     add_library (${HSAKMT_STATIC_DRM_TARGET}  STATIC "")
     target_sources (${HSAKMT_STATIC_DRM_TARGET} PRIVATE ${HSAKMT_SRC})
 
-    if (CMAKE_SYSTEM_NAME MATCHES "Linux")
-      target_include_directories( ${HSAKMT_STATIC_DRM_TARGET} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include/hsakmt/linux )
-    endif()
-
     target_include_directories( ${HSAKMT_STATIC_DRM_TARGET}
       PUBLIC
       $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
       $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
       PRIVATE
       ${EXTRA_INCLUDE_DIRS} )
+    if (HSAKMT_OS_COMPAT_INCLUDE)
+      target_include_directories( ${HSAKMT_STATIC_DRM_TARGET}
+        PUBLIC $<BUILD_INTERFACE:${HSAKMT_OS_COMPAT_INCLUDE}> )
+    endif()
 
     ## Set the VERSION and SOVERSION values
     set_property(TARGET ${HSAKMT_STATIC_DRM_TARGET} PROPERTY LINK_FLAGS ${HSAKMT_LINK_FLAGS}
@@ -549,6 +583,9 @@ else()
     if(UNIX)
       if(HAVE_GETAUXVAL)
         target_compile_definitions(${HSAKMT_STATIC_DRM_TARGET} PRIVATE -DHAVE_GETAUXVAL=1)
+      endif()
+      if(HAVE_DRM_COLOR_CTM_3X4)
+        target_compile_definitions(${HSAKMT_STATIC_DRM_TARGET} PRIVATE -DHAVE_DRM_COLOR_CTM_3X4=1)
       endif()
       target_compile_definitions(${HSAKMT_STATIC_DRM_TARGET} PRIVATE
         "HSAKMT_INSTALL_LIBDIR=\"${HSAKMT_INSTALL_LIBDIR}\"")

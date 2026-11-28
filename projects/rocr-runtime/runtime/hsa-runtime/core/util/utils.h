@@ -50,7 +50,7 @@
 #include "stdlib.h"
 #include "stdarg.h"
 #include "string.h"
-#if defined(__linux__)
+#if defined(__linux__) || defined(__FreeBSD__)
 #include "unistd.h"
 #endif
 #include <assert.h>
@@ -136,7 +136,7 @@ static __forceinline unsigned long long int strtoull(const char* str,
   do {                                                                                             \
   } while (false)
 #else
-#if defined(__linux__)
+#if defined(__linux__) || defined(__FreeBSD__)
 #define debug_warning_n(exp, limit)                                                                \
   do {                                                                                             \
     static std::atomic<unsigned int> count(0);                                                              \
@@ -481,7 +481,7 @@ static __forceinline void nontemporal_copy(void* dst, const void* src, size_t si
 static __forceinline void cacheline_flush(const void* p) {
 #if defined(_MSC_VER) || defined(__x86_64__) || defined(__i386__) || defined(__powerpc64__)
   _mm_clflush(p);
-#elif defined(__aarch64__) && defined(__linux__)
+#elif defined(__aarch64__) && (defined(__linux__) || defined(__FreeBSD__))
   __asm__ __volatile__("dc civac, %0" ::"r"(p) : "memory");
 #else
 #warning "No cacheline_flush() implementation for this processor"

@@ -250,7 +250,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFDCtx(HsaKFDContext **pCtx)
 
 		useSvmStr = getenv("HSA_USE_SVM");
 		hsakmt_primary_kfd_ctx.hsakmt_is_svm_api_supported = !(useSvmStr && !strcmp(useSvmStr, "0"));
-		result = hsakmt_topology_sysfs_get_system_props(&hsakmt_primary_kfd_ctx, &sys_props);
+		result = hsakmt_topology_dinfo_get_system_props(&hsakmt_primary_kfd_ctx, &sys_props);
 
 		if (result != HSAKMT_STATUS_SUCCESS)
 			goto topology_sysfs_failed;

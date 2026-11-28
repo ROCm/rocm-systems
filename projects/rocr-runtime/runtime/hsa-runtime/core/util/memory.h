@@ -45,7 +45,7 @@
 #ifndef HSA_RUNTIME_CORE_UTIL_MEMORY_H_
 #define HSA_RUNTIME_CORE_UTIL_MEMORY_H_
 
-#ifdef __linux__
+#if defined(__linux__) || defined(__FreeBSD__)
 #include "inc/hsa.h"
 #include <sys/mman.h>
 #endif

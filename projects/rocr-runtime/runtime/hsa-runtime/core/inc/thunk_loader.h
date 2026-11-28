@@ -44,7 +44,7 @@
 #define HSA_RUNTIME_CORE_INC_THUNK_LOADER_H
 
 #include <string>
-#if defined(__linux__)
+#if defined(__linux__) || defined(__FreeBSD__)
 #include <amdgpu.h>
 #else
 #include "hsakmt/drm/amdgpu.h"

@@ -660,8 +660,8 @@ static int handle_concrete_asic(HsaKFDContext *ctx,
 				 * To avoid fork child process COW MMU notifier
 				 * callback evict parent process queues.
 				 */
-				if (madvise(addr, size, MADV_DONTFORK))
-					pr_err("madvise failed -%d\n", errno);
+				if (hsakmt_madvise_dontfork(addr, size))
+					pr_err("failed to exclude the CWSR area from fork -%d\n", errno);
 
 				fill_cwsr_header(q, addr, Event, ErrPayload, node.NumXcc);
 

@@ -42,7 +42,7 @@
 
 #include <libelf.h>
 #include <limits.h>
-#if defined(__linux__)
+#if defined(__linux__) || defined(__FreeBSD__)
 #include <link.h>
 #include <unistd.h>
 #else
@@ -100,7 +100,7 @@ static __forceinline link_map*& r_debug_tail() {
 namespace rocr {
   // Having a side effect prevents call site optimization that allows removal of a noinline function call
   // with no side effect.
-#if defined(__linux__)
+#if defined(__linux__) || defined(__FreeBSD__)
   __attribute__((noinline))
 #else
   __declspec(noinline)

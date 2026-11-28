@@ -51,6 +51,30 @@
 #include "inc/hsa.h"
 #include "utils.h"
 
+#ifdef __FreeBSD__
+// FreeBSD lacks a few Linux-only mmap(2)/madvise(2)/clock flags that the OS
+// abstraction and its callers use unconditionally.  Each has a benign
+// equivalent here, so define the Linux spelling rather than guarding every use.
+#include <sys/mman.h>
+#include <time.h>
+
+// Retired in FreeBSD 11; overcommit is the default, so requesting it is a no-op.
+#ifndef MAP_NORESERVE
+#define MAP_NORESERVE 0
+#endif
+
+// No transparent-hugepage advice exists; 0 is MADV_NORMAL, i.e. "no preference".
+#ifndef MADV_HUGEPAGE
+#define MADV_HUGEPAGE 0
+#endif
+
+// No non-NTP-adjusted monotonic clock is exposed; plain CLOCK_MONOTONIC is the
+// closest equivalent and is already what FreeBSD's CLOCK_BOOTTIME maps to.
+#ifndef CLOCK_MONOTONIC_RAW
+#define CLOCK_MONOTONIC_RAW CLOCK_MONOTONIC
+#endif
+#endif  // __FreeBSD__
+
 namespace rocr {
 namespace os {
 typedef void* LibHandle;
@@ -72,7 +96,8 @@ static __forceinline std::underlying_type<os_t>::type os_index(os_t val) {
 
 #ifdef _WIN32
 static const os_t current_os = os_t::OS_WIN;
-#elif __linux__
+#elif defined(__linux__) || defined(__FreeBSD__)
+// OS_LINUX selects the POSIX implementation, which FreeBSD shares.
 static const os_t current_os = os_t::OS_LINUX;
 #else
 static_assert(false, "Operating System not detected!");
