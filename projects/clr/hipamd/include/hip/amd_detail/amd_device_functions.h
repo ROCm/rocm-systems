@@ -164,16 +164,25 @@ __device__ static inline unsigned int __lastbit_u32_u64(__hip_uint64_t input) {
 
 __device__ static inline unsigned int __bitextract_u32(unsigned int src0, unsigned int src1,
                                                        unsigned int src2) {
-  __hip_uint32_t offset = src1 & 31;
-  __hip_uint32_t width = src2 & 31;
-  return width == 0 ? 0 : (src0 << (32 - offset - width)) >> (32 - width);
+  // v_bfe_u32 already masks the offset and width to five bits and yields 0 for a width of 0,
+  // so it replaces the masking, shifts and select outright.
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_ubfe))
+    return __builtin_amdgcn_ubfe(src0, src1, src2);
+  __builtin_trap();
 }
 
 __device__ static inline __hip_uint64_t __bitextract_u64(__hip_uint64_t src0, unsigned int src1,
                                                          unsigned int src2) {
-  __hip_uint64_t offset = src1 & 63;
-  __hip_uint64_t width = src2 & 63;
-  return width == 0 ? 0 : (src0 << (64 - offset - width)) >> (64 - width);
+  // No 64-bit BFE is usable here: v_bfe_u64 does not exist, and s_bfe_u64 packs offset and width
+  // into one operand, which costs more to assemble than it saves unless both are constants.
+  //
+  // Selecting on width == 0 made the whole body conditional and sank the operand loads into the
+  // exec region; the double shift makes width 0 fall out arithmetically instead, branch-free.
+  __hip_uint32_t offset = src1 & 63;
+  __hip_uint32_t width = src2 & 63;
+  // 63 - width needs no mask: width is in [0, 63] and shifts only read the low six bits.
+  __hip_uint64_t mask = ((~(__hip_uint64_t)0) >> (63 - width)) >> 1;
+  return (src0 >> offset) & mask;
 }
 
 __device__ static inline unsigned int __bitinsert_u32(unsigned int src0, unsigned int src1,
