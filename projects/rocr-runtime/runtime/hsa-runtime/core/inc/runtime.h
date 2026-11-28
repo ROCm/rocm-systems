@@ -94,6 +94,19 @@
 #endif
 #endif
 
+// SANITIZER_AMDGPU gates the device-memory handling that keeps this runtime's
+// allocator in step with the sanitizer's. It is inferred from the compiler rather
+// than from a build option, so a build that asked for AddressSanitizer but whose
+// instrumentation flag never reached the compiler would silently drop that handling
+// and fail later, at run time, as a bogus free diagnostic. HSA_ASAN_REQUESTED is
+// defined by the build when AddressSanitizer was asked for; disagreeing with
+// SANITIZER_AMDGPU means the flag did not survive to this compile.
+#if defined(HSA_ASAN_REQUESTED) && !defined(SANITIZER_AMDGPU)
+#error "AddressSanitizer was requested but this translation unit is not instrumented: \
+-fsanitize=address did not reach the compiler. Check for a compiler launcher or \
+wrapper that rewrites the command line."
+#endif
+
 inline bool operator==(const hsa_amd_vmem_alloc_handle_t& lhs,
                        const hsa_amd_vmem_alloc_handle_t& rhs) {
   return lhs.handle == rhs.handle;
