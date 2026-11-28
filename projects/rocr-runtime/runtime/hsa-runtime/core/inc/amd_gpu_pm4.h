@@ -57,13 +57,11 @@
 #define PM4_HDR_IT_OPCODE_COPY_DATA                       0x40U
 #define PM4_HDR_IT_OPCODE_DMA_DATA                        0x50U
 
-#define PM4_HDR_SHADER_TYPE(x)                            (((x) & 0x1U) << 1)
 #define PM4_HDR_IT_OPCODE(x)                              (((x) & 0xFFU) << 8)
 #define PM4_HDR_COUNT(x)                                  (((x) & 0x3FFFU) << 16)
 #define PM4_HDR_TYPE(x)                                   (((x) & 0x3U) << 30)
 
-#define PM4_HDR(it_opcode, pkt_size_dw, gfxip_ver) (  \
-  PM4_HDR_SHADER_TYPE((gfxip_ver) == 7 ? 1 : 0)    |  \
+#define PM4_HDR(it_opcode, pkt_size_dw) (  \
   PM4_HDR_IT_OPCODE(it_opcode)                     |  \
   PM4_HDR_COUNT(pkt_size_dw - 2)                   |  \
   PM4_HDR_TYPE(3)                                     \

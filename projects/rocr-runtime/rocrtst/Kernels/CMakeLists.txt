@@ -64,7 +64,7 @@ endif()
 #
 # Define list of Target Device types for which to get code objects
 #
-set(DEV_LIST "gfx803" "gfx900" CACHE STRING "List of Gfx Devices")
+set(DEV_LIST "gfx900" CACHE STRING "List of Gfx Devices")
 set(TARGET_DEV_LIST ${DEV_LIST})
 separate_arguments(TARGET_DEV_LIST)
 

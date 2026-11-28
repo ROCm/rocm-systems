@@ -55,7 +55,6 @@
 #include "core/inc/hsa_ext_amd_impl.h"
 #include "core/inc/exceptions.h"
 #include "resource.h"
-#include "image_manager_kv.h"
 #include "image_manager_ai.h"
 #include "image_manager_nv.h"
 #include "image_manager_gfx11.h"
@@ -213,8 +212,10 @@ hsa_status_t ImageRuntime::CreateImageManager(hsa_agent_t agent, void* data) {
       image_manager = new ImageManagerAi();
       break;
     default:
-      image_manager = new ImageManagerKv();
-      break;
+      // Every GFX major in the ISA registry (isa.cpp) needs a case here. Returning an error
+      // here aborts CreateSingleton's agent iteration, which disables image support for the
+      // whole node rather than for this agent. Add a case when a new generation is added.
+      return HSA_STATUS_ERROR_INVALID_AGENT;
     }
     hsa_error_code = image_manager->Initialize(agent);
 

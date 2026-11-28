@@ -613,17 +613,6 @@ inline bool IsNoteStringSizeWithinRoom(size_t room, size_t offset, uint16_t clai
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX600:  MI.Name = "gfx600";  MI.XnackSupported = false; MI.SrameccSupported = false; break;
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX601:  MI.Name = "gfx601";  MI.XnackSupported = false; MI.SrameccSupported = false; break;
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX602:  MI.Name = "gfx602";  MI.XnackSupported = false; MI.SrameccSupported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX700:  MI.Name = "gfx700";  MI.XnackSupported = false; MI.SrameccSupported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX701:  MI.Name = "gfx701";  MI.XnackSupported = false; MI.SrameccSupported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX702:  MI.Name = "gfx702";  MI.XnackSupported = false; MI.SrameccSupported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX703:  MI.Name = "gfx703";  MI.XnackSupported = false; MI.SrameccSupported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX704:  MI.Name = "gfx704";  MI.XnackSupported = false; MI.SrameccSupported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX705:  MI.Name = "gfx705";  MI.XnackSupported = false; MI.SrameccSupported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX801:  MI.Name = "gfx801";  MI.XnackSupported = true;  MI.SrameccSupported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX802:  MI.Name = "gfx802";  MI.XnackSupported = false; MI.SrameccSupported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX803:  MI.Name = "gfx803";  MI.XnackSupported = false; MI.SrameccSupported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX805:  MI.Name = "gfx805";  MI.XnackSupported = false; MI.SrameccSupported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX810:  MI.Name = "gfx810";  MI.XnackSupported = true;  MI.SrameccSupported = false; break;
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX900:  MI.Name = "gfx900";  MI.XnackSupported = true;  MI.SrameccSupported = false; break;
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX902:  MI.Name = "gfx902";  MI.XnackSupported = true;  MI.SrameccSupported = false; break;
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX904:  MI.Name = "gfx904";  MI.XnackSupported = true;  MI.SrameccSupported = false; break;
@@ -685,28 +674,6 @@ inline bool IsNoteStringSizeWithinRoom(size_t room, size_t offset, uint16_t clai
         mach = ELF::EF_AMDGPU_MACH_AMDGCN_GFX601;
       else if (old_name == "AMD:AMDGPU:6:0:2")
         mach = ELF::EF_AMDGPU_MACH_AMDGCN_GFX602;
-      else if (old_name == "AMD:AMDGPU:7:0:0")
-        mach = ELF::EF_AMDGPU_MACH_AMDGCN_GFX700;
-      else if (old_name == "AMD:AMDGPU:7:0:1")
-        mach = ELF::EF_AMDGPU_MACH_AMDGCN_GFX701;
-      else if (old_name == "AMD:AMDGPU:7:0:2")
-        mach = ELF::EF_AMDGPU_MACH_AMDGCN_GFX702;
-      else if (old_name == "AMD:AMDGPU:7:0:3")
-        mach = ELF::EF_AMDGPU_MACH_AMDGCN_GFX703;
-      else if (old_name == "AMD:AMDGPU:7:0:4")
-        mach = ELF::EF_AMDGPU_MACH_AMDGCN_GFX704;
-      else if (old_name == "AMD:AMDGPU:7:0:5")
-        mach = ELF::EF_AMDGPU_MACH_AMDGCN_GFX705;
-      else if (old_name == "AMD:AMDGPU:8:0:1")
-        mach = ELF::EF_AMDGPU_MACH_AMDGCN_GFX801;
-      else if (old_name == "AMD:AMDGPU:8:0:0" || old_name == "AMD:AMDGPU:8:0:2")
-        mach = ELF::EF_AMDGPU_MACH_AMDGCN_GFX802;
-      else if (old_name == "AMD:AMDGPU:8:0:3" || old_name == "AMD:AMDGPU:8:0:4")
-        mach = ELF::EF_AMDGPU_MACH_AMDGCN_GFX803;
-      else if (old_name == "AMD:AMDGPU:8:0:5")
-        mach = ELF::EF_AMDGPU_MACH_AMDGCN_GFX805;
-      else if (old_name == "AMD:AMDGPU:8:1:0")
-        mach = ELF::EF_AMDGPU_MACH_AMDGCN_GFX810;
       else if (old_name == "AMD:AMDGPU:9:0:0" || old_name == "AMD:AMDGPU:9:0:1")
         mach = ELF::EF_AMDGPU_MACH_AMDGCN_GFX900;
       else if (old_name == "AMD:AMDGPU:9:0:2" || old_name == "AMD:AMDGPU:9:0:3")
@@ -737,11 +704,7 @@ inline bool IsNoteStringSizeWithinRoom(size_t room, size_t offset, uint16_t clai
         else if (MI.XnackSupported)
           MI.Name += ":xnack-";
       } else {
-        if (old_name == "AMD:AMDGPU:8:0:1")
-          MI.Name += ":xnack+";
-        else if (old_name == "AMD:AMDGPU:8:1:0")
-          MI.Name += ":xnack+";
-        else if (old_name == "AMD:AMDGPU:9:0:1")
+        if (old_name == "AMD:AMDGPU:9:0:1")
           MI.Name += ":xnack+";
         else if (old_name == "AMD:AMDGPU:9:0:3")
           MI.Name += ":xnack+";
@@ -1587,16 +1550,11 @@ inline bool IsNoteStringSizeWithinRoom(size_t room, size_t offset, uint16_t clai
     void AmdHsaCode::PrintDisassembly(std::ostream& out, const unsigned char *isa, size_t size, uint32_t isa_offset)
     {
     #ifdef SP3_STATIC_LIB
-      // Default asic is ci.
-      std::string asic = "CI";
+      std::string asic = "GFX9";
       std::string vendor_name, architecture_name;
       uint32_t major_version, minor_version, stepping;
       if (GetNoteIsa(vendor_name, architecture_name, &major_version, &minor_version, &stepping)) {
-        if (major_version == 7) {
-          asic = "CI";
-        } else if (major_version == 8) {
-          asic = "VI";
-        } else if (major_version == 9) {
+        if (major_version == 9) {
           asic = "GFX9";
         } else if (major_version == 10) {
           asic = "GFX10";
