@@ -86,6 +86,37 @@ rdc_status_t Smi2RdcError(amdsmi_status_t rsmi) {
   }
 }
 
+bool is_capability_miss(rdc_status_t status) {
+  switch (status) {
+    case RDC_ST_NOT_SUPPORTED:
+    case RDC_ST_BAD_PARAMETER:  // AMDSMI_STATUS_INVAL, e.g. xgmi_error read on MI300+
+    case RDC_ST_NOT_FOUND:
+    case RDC_ST_PERM_ERROR:  // privileges do not change for the life of the daemon
+      return true;
+    default:
+      return false;
+  }
+}
+
+const std::map<rdc_field_t, rdc_field_t>& health_field_fallbacks() {
+  static const std::map<rdc_field_t, rdc_field_t> fallbacks = {
+      // xgmi_error sysfs is unreadable on MI300-series and later (DF 4.x has no
+      // FICA access); XGMI faults surface as RAS errors on the XGMI_WAFL block.
+      {RDC_HEALTH_XGMI_ERROR, RDC_FI_ECC_XGMI_WAFL_UE},
+  };
+  return fallbacks;
+}
+
+bool is_health_field(rdc_field_t field_id) {
+  // Memory and EEPROM health also poll the total on mixed groups with and without ECC.
+  if (field_id == RDC_FI_ECC_UNCORRECT_TOTAL) return true;
+  if (field_id >= RDC_HEALTH_XGMI_ERROR && field_id < RDC_FI_CPU_FIRST) return true;
+  for (const auto& fb : health_field_fallbacks()) {
+    if (fb.second == field_id) return true;
+  }
+  return false;
+}
+
 namespace {
 
 // The flat GPU table and its state, guarded by s_table_mutex.

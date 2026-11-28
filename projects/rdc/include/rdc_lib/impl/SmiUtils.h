@@ -24,6 +24,7 @@ THE SOFTWARE.
 #define INCLUDE_RDC_LIB_IMPL_RSMIUTILS_H_
 
 #include <chrono>  // NOLINT(build/c++11)
+#include <map>
 #include <memory>
 #include <vector>
 
@@ -51,6 +52,16 @@ double derive_mem_activity_percent(double umc_activity_pct, bool have_prev,
                                    uint64_t prev_mem_activity_acc, uint64_t prev_firmware_ts,
                                    uint64_t cur_mem_activity_acc, uint64_t cur_firmware_ts,
                                    bool* have_rate = nullptr);
+
+//!< Whether a fetch status means the platform cannot serve the field, as
+//!< opposed to a transient failure.
+bool is_capability_miss(rdc_status_t status);
+//!< Health fields with an alternate source when the primary cannot be read on
+//!< this platform (primary -> fallback). The primary is tried first.
+const std::map<rdc_field_t, rdc_field_t>& health_field_fallbacks();
+//!< Whether the field is used by health monitoring: the RDC_HEALTH_* range or
+//!< a fallback from health_field_fallbacks().
+bool is_health_field(rdc_field_t field_id);
 
 // Physical/instance-0: gpu_id is a flat GPU index. Partition-instance: device_index is
 // a socket index, instance_index the per-socket proc. These diverge in CPX. See SmiUtils.cc.

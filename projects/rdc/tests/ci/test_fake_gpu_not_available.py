@@ -142,3 +142,32 @@ def test_bulk_fetch_leaves_metrics_the_gpu_does_not_report_to_other_calls(start_
             assert rows[gpu][field] == want, (
                 f"GPU {gpu} field {field}: {rows[gpu][field]}, not {want}"
             )
+
+
+@pytest.mark.parametrize(
+    ("components", "settings"),
+    [
+        ("e", {"RDC_FAKE_FAIL": "amdsmi_get_gpu_ecc_status@1=AMDSMI_STATUS_NOT_SUPPORTED"}),
+        ("t", {"RDC_FAKE_SENTINEL": "amdsmi_get_violation_status@1"}),
+    ],
+)
+def test_health_does_not_watch_unavailable_counts(start_rdcd, components, settings):
+    d = start_rdcd(**settings)
+    gid = _created_id(d.ok("group", "-c", "no_health_counts"))
+    d.ok("group", "-g", gid, "-a", "1")
+    result = d.rdci("health", "-g", gid, "-s", components)
+    assert result.returncode == 1, result.stdout  # RDC_ST_NOT_SUPPORTED
+    assert "not supported" in result.stdout.lower(), result.stdout
+
+
+def test_health_ecc_capability_miss_is_reported_once_in_mixed_group(start_rdcd):
+    d = start_rdcd(RDC_FAKE_FAIL="amdsmi_get_gpu_ecc_status@1=AMDSMI_STATUS_NOT_SUPPORTED")
+    gid = _created_id(d.ok("group", "-c", "mixed_ecc"))
+    d.ok("group", "-g", gid, "-a", "0,1")
+    d.ok("health", "-g", gid, "-s", "e")
+    # GPU 0 supports the field, so it stays in the field group used for periodic fetches.
+    rows = _dmon(d, [601])
+    assert rows[1][601] == "N/A"
+    log = d.out_log.read_text(errors="replace")
+    assert log.count("Health field ECC_UNCORRECT is not supported on GPU 1") == 1
+    assert "Fail to fetch 1:ECC_UNCORRECT" not in log

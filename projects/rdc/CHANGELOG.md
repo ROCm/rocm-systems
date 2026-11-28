@@ -41,6 +41,14 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - `rdc_diagnostic_run()` and `rdc_test_case_run()` with `rdcd` no longer crash when `config` is NULL.
 
+- **Fixed health watches on MI300-series and later GPUs and stopped the 1 Hz fetch error flood**.
+  - An unavailable memory field no longer prevents the other memory sub-checks from reporting incidents.
+  - XGMI health falls back to `RDC_FI_ECC_XGMI_WAFL_UE` where the legacy `xgmi_error` sysfs node is unreadable (MI300-series and later). The fallback is a cumulative uncorrectable count, so an XGMI error keeps the component at FAIL until driver reload.
+  - Health fields the platform cannot serve are probed at `rdci health -s`, reported once per GPU (a successful fallback is logged at INFO), and left out of the 1 s watch where no GPU in the group supports them; `-c` skips them per GPU. Re-run `-s` after changing a group's GPUs.
+  - The EEPROM health component watches the field `eeprom_check` reads (`RDC_FI_ECC_UNCORRECT_TOTAL`) instead of polling `RDC_HEALTH_EEPROM_CONFIG_VALID`, which no check consumes and which AMDSMI reports as unsupported on every platform. `eeprom_check` reports a corrupt EEPROM only if SMI returns `CORRUPTED_EEPROM` from that read; current AMDSMI does not.
+  - Per-fetch capability misses on health fields log at INFO instead of ERROR; the watch-set report above is the user-visible line.
+  - `rdc_health_set` returns `RDC_ST_NOT_SUPPORTED` when none of the requested fields can be read on any GPU in the group.
+
 - `rdci health -s` on a GPU group that does not exist no longer leaves an unused field group in rdcd. Repeated failures filled the field group table, and commands that need a new field group, such as `rdci dmon`, then failed until rdcd was restarted.
 
 - `rdc_status_string()` now describes `RDC_ST_DISABLED_MODULE`. It returned "Unknown", so the rdcd log reported a disabled module as an unknown error.
