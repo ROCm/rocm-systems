@@ -62,6 +62,16 @@ else()
   message(STATUS "Device Linker: no --hip-path/--hip-device-lib-path in CMAKE_CXX_FLAGS (standard ROCm install)")
 endif()
 
+# Forward source path remaps (-ffile-prefix-map= and its debug/macro/coverage
+# forms) too. A build from a scratch copy maps the scratch path to where the
+# tree is published; without them the device compiles record the scratch path,
+# and llvm-cov reports every file built for both host and device twice.
+string(REGEX MATCHALL "-f(file|debug|macro|coverage)-prefix-map=[^ ]+" _dl_prefix_map_flags "${CMAKE_CXX_FLAGS}")
+if(_dl_prefix_map_flags)
+  list(APPEND DL_HIP_COMPILER_FLAGS ${_dl_prefix_map_flags})
+  message(STATUS "Device Linker: forwarding path remaps: ${_dl_prefix_map_flags}")
+endif()
+
 set(DEVICE_BUILD_DIR "${PROJECT_BINARY_DIR}/device_build")
 set(SPECIALIZED_DIR  "${GEN_DIR}/specialized")
 
