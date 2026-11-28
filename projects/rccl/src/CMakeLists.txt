@@ -653,6 +653,7 @@ set(SRC_FILES
   transport/nvls.cc
   transport/nvls_ub.cc
   transport/p2p.cc
+  transport/p2p_prime.cu
   transport/rma_socket.cc
   transport/rma_socket.h
   transport/rma_socket_mem.cc
@@ -1059,6 +1060,7 @@ if(ENABLE_DEVICE_LINKER)
   list(FILTER HIP_SOURCES EXCLUDE REGEX "onerank\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "collectives\\.cc$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "diagnostics/device/p2p\\.cu\\.cpp$")
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "transport/p2p_prime\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_reduce_ipc\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_reduce_scatter_ipc\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_gather_ipc\\.cu\\.cpp$")

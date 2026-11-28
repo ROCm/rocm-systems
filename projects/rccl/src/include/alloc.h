@@ -958,10 +958,14 @@ finish:
 }
 #define ncclCudaMalloc(ptr, nelem, ...) ncclCudaMallocDebug(ptr, nelem, __FILE__, __LINE__, ##__VA_ARGS__)
 
+// [RCCL] Optional device work queued on the zeroing stream of a legacy (non-cuMem) ncclCudaCalloc, after the
+// memset and before the existing synchronize, so it adds no extra sync (used by p2p.cc to prime legacy IPC buffers).
+typedef ncclResult_t (*ncclCallocPostZeroFn)(const void* ptr, size_t size, cudaStream_t stream);
+
 template <typename T>
 ncclResult_t ncclCudaCallocDebug(T** ptr, size_t nelem, const char* filefunc, int line, struct ncclMemManager* manager,
                                  ncclMemType_t memType = ncclMemPersist, unsigned int flags = hipDeviceMallocDefault,
-                                 bool forceLegacy = false) {
+                                 bool forceLegacy = false, ncclCallocPostZeroFn postZero = nullptr) {
   ncclResult_t result = ncclSuccess;
   cudaStreamCaptureMode mode = cudaStreamCaptureModeRelaxed;
   *ptr = nullptr;
@@ -984,6 +988,16 @@ ncclResult_t ncclCudaCallocDebug(T** ptr, size_t nelem, const char* filefunc, in
       if (sidestream == nullptr) CUDACHECK(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking));
       CUDACHECKGOTO(hipExtMallocWithFlags((void**)ptr, nelem * ncclSizeOfT<T>(), flags), result, finish);
       CUDACHECKGOTO(cudaMemsetAsync(*ptr, 0, nelem * ncclSizeOfT<T>(), stream), result, finish);
+      if (postZero != nullptr) {
+        result = postZero(*ptr, nelem * ncclSizeOfT<T>(), stream);
+        if (result != ncclSuccess) {
+          (void)cudaStreamSynchronize(stream);
+          (void)cudaFree(*ptr);
+          *ptr = nullptr;
+          if (sidestream == nullptr) (void)cudaStreamDestroy(stream);
+          goto finish;
+        }
+      }
       CUDACHECKGOTO(cudaStreamSynchronize(stream), result, finish);
       if (sidestream == nullptr) CUDACHECKGOTO(cudaStreamDestroy(stream), result, finish);
     }

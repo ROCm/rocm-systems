@@ -732,6 +732,7 @@ foreach(_src IN LISTS _ce_reduce_srcs)
 endforeach()
 
 dl_add_fat_object(diagnostics_p2p ${HIPIFY_DIR}/src/diagnostics/device/p2p.cu.cpp)
+dl_add_fat_object(p2p_prime ${HIPIFY_DIR}/src/transport/p2p_prime.cu.cpp)
 
 set(_dda_dir ${HIPIFY_DIR}/src/algorithms/dda)
 foreach(_coll all_reduce reduce_scatter all_gather alltoall)

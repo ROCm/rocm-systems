@@ -251,6 +251,33 @@ ncclResult_t p2pCanConnect(int* ret, struct ncclComm* comm, struct ncclTopoGraph
     TRACE(P2P, "IPC: %016lx %016lx %016lx %016lx", devIpc[4], devIpc[5], devIpc[6], devIpc[7]); \
   } while (0)
 
+// Legacy IPC P2P buffers are written by the peer GPU and read by the owning GPU. On gfx950, when such a
+// buffer reuses memory that an earlier cacheable allocation had written with ordinary stores before it was
+// freed (e.g. buffers of a destroyed communicator or the application), the owner's loads can keep returning
+// that earlier data for some cache lines for the whole lifetime of the buffer, even though the peer's
+// stores land. Having the owning GPU read every cache line once after allocation and
+// zeroing, before the buffer is exported, avoids it. The reads are queued on ncclCudaCalloc's zeroing stream
+// ahead of its synchronize, so they add no extra sync.
+// RCCL_P2P_PRIME: -1 (default) = on for gfx950, 0 = off, 1 = on for every architecture. gfx942 does not show the
+// issue with the same driver mapping.
+RCCL_PARAM(P2pPrime, "P2P_PRIME", -1);
+
+static bool p2pPrimeLegacyIpcEnabled() {
+  int64_t param = rcclParamP2pPrime();
+  if (param >= 0) return param != 0;
+  // Per-device cache of the architecture check: 0 = unknown, 1 = off, 2 = on.
+  static int8_t archEnabled[64] = {};
+  int dev = 0;
+  if (cudaGetDevice(&dev) != cudaSuccess) return true;
+  int8_t cached = (dev >= 0 && dev < 64) ? __atomic_load_n(&archEnabled[dev], __ATOMIC_RELAXED) : 0;
+  if (cached != 0) return cached == 2;
+  hipDeviceProp_t prop;
+  if (!rcclQueryDeviceProp(&prop)) return true;
+  bool enabled = IsArchMatch(prop.gcnArchName, "gfx950");
+  if (dev >= 0 && dev < 64) __atomic_store_n(&archEnabled[dev], (int8_t)(enabled ? 2 : 1), __ATOMIC_RELAXED);
+  return enabled;
+}
+
 // cuMem API support
 static ncclResult_t p2pAllocateShareableBuffer(size_t size, int refcount, ncclIpcDesc* ipcDesc, void** ptr,
                                                int peerRank, struct ncclMemManager* manager, ncclMemType_t memtype,
@@ -299,12 +326,13 @@ static ncclResult_t p2pAllocateShareableBuffer(size_t size, int refcount, ncclIp
 #endif
   } else {
     // Allocate a CUDA buffer and generate an IPC handle for it
+    ncclCallocPostZeroFn prime = p2pPrimeLegacyIpcEnabled() ? ncclP2pPrimeBuffer : nullptr;
 #if defined(HIP_UNCACHED_MEMORY)
     NCCLCHECK(ncclCudaCalloc((char**)ptr, size, manager, memtype, hipDeviceMallocUncached,
-                             /*forceLegacy=*/forceLegacyIpc));
+                             /*forceLegacy=*/forceLegacyIpc, prime));
 #else
     NCCLCHECK(ncclCudaCalloc((char**)ptr, size, manager, memtype, hipDeviceMallocFinegrained,
-                             /*forceLegacy=*/forceLegacyIpc));
+                             /*forceLegacy=*/forceLegacyIpc, prime));
 #endif
     // Intra-process P2P/direct mappings consume directPtr and do not need a
     // legacy IPC handle. Exporting one invalidates peer access on Windows MCDM.

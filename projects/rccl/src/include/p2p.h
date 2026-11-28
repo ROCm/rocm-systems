@@ -79,6 +79,8 @@ ncclResult_t ncclP2pAllocateShareableBuffer(size_t size, int directMap, ncclIpcD
                                             int peerRank = -1, struct ncclMemManager* manager = nullptr,
                                             ncclMemType_t memtype = ncclMemPersist, bool skipLegacyIpcExport = false);
 ncclResult_t ncclP2pFreeShareableBuffer(ncclIpcDesc* ipcDesc);
+// Read one word per cache line of a device buffer on its owning device (src/transport/p2p_prime.cu).
+ncclResult_t ncclP2pPrimeBuffer(const void* buff, size_t size, cudaStream_t stream);
 ncclResult_t ncclP2pImportShareableBuffer(struct ncclComm* comm, int peer, size_t size, ncclIpcDesc* ipcDesc,
                                           void** devMemPtr, void* ownerPtr = nullptr,
                                           ncclMemType_t memType = ncclMemPersist);

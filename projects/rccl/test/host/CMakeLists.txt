@@ -1071,6 +1071,7 @@ rccl_add_unit_micro_binary(rccl-UnitTestsMicroDevRuntime dev-runtime-test.cc ${_
     fakes/nccl_fakes.cc
     fakes/rocmwrap_fakes.cc
     fakes/sym_kernels_fakes.cc
+    fakes/transport_p2p_prime_fakes.cc  # p2p_tmp.cc references ncclP2pPrimeBuffer (p2p_prime.cu)
     fakes/utils_fakes.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/devcomm/devcomm_v22902.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/devcomm/devcomm_v22907.cc
@@ -1102,6 +1103,7 @@ rccl_add_unit_micro_binary(rccl-UnitTestsMicroGroup group-test.cc ${_MICRO_ROOT_
     fakes/rocmwrap_fakes.cc
     fakes/search_fakes.cc
     fakes/sym_kernels_fakes.cc
+    fakes/transport_p2p_prime_fakes.cc  # p2p_tmp.cc references ncclP2pPrimeBuffer (p2p_prime.cu)
     fakes/transport_stubs.cc
     fakes/utils_fakes.cc
     # The register-symmetric devComm tests run the real dev_runtime.cc, with the siblings
