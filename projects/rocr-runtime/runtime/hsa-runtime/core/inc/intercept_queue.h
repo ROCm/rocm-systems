@@ -232,6 +232,10 @@ class InterceptQueue : public QueueProxy, private LocalSignal, public DoorbellSi
   // Whether a retry barrier is still outstanding (i.e. retry_outstanding_ is set).
   bool IsPendingRetryPoint() const;
 
+  // Re-runs the overflow drain from the async doorbell thread when overflow_ is non-empty and
+  // no retry barrier will wake it. Call with lock_ held.
+  void EnsureDrainWakeup();
+
   // Event signal to use for async packet processing and control flag.
   Signal* async_doorbell_;
 

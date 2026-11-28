@@ -44,6 +44,7 @@
 #include "core/inc/intercept_queue_logic.h"
 #include "core/inc/amd_aql_queue.h"
 #include "core/inc/default_signal.h"
+#include "core/util/timer.h"
 #include "core/util/utils.h"
 #include "inc/hsa_api_trace.h"
 
@@ -60,6 +61,24 @@ namespace {
 bool inline IsInterceptMarkerPacket(const AqlPacket* packet) {
   return (AqlPacket::type(packet->packet.header) == HSA_PACKET_TYPE_VENDOR_SPECIFIC) &&
       (packet->amd_vendor.format == AMD_AQL_FORMAT_INTERCEPT_MARKER);
+}
+
+// Number of consecutive slots starting at `write` (at most `limit`) that the packet processor
+// has retired, i.e. whose header reads INVALID. The HSA System Architecture specification
+// (Queues) lets a producer write a slot only once read_index has passed it AND its format field
+// reads INVALID. The processor is required to store INVALID before moving read_index and
+// normally does, but on MI250 the order is rarely (about 1e-7 per packet) inverted: the INVALID
+// store lands after read_index moved, and a header written in between is lost to it (see
+// PlanSubmit). The processor retires slots in order, so a prefix count is enough; a new ring is
+// filled with INVALID packets, so the first lap passes too.
+uint64_t RetiredSlots(AqlPacket* ring, uint64_t mask, uint64_t write, uint64_t limit) {
+  uint64_t n = 0;
+  for (; n < limit; ++n) {
+    const uint16_t header =
+        atomic::Load(&ring[(write + n) & mask].packet.header, std::memory_order_relaxed);
+    if (AqlPacket::type(header) != HSA_PACKET_TYPE_INVALID) break;
+  }
+  return n;
 }
 
 }  // namespace
@@ -236,18 +255,51 @@ uint64_t InterceptQueue::Submit(const AqlPacket* packets, uint64_t count) {
   }
 
   AqlPacket* ring = reinterpret_cast<AqlPacket*>(wrapped->amd_queue_.hsa_queue.base_address);
-  uint64_t mask = wrapped->amd_queue_.hsa_queue.size - 1;
+  const uint64_t qsize = wrapped->amd_queue_.hsa_queue.size;
+  uint64_t mask = qsize - 1;
+
+  // Only a hardware packet processor retires slots by writing INVALID headers; a software queue
+  // need not, and must not be gated on it.
+  const bool processor_retires_slots = AMD::AqlQueue::IsType(wrapped.get());
+
+  // When nothing fits and no retry barrier is outstanding, the packet processor is still
+  // releasing slots (a retry barrier has just completed, or the ring was filled to its last
+  // slot), so a short wait is almost always enough: on MI250 the read index trails the
+  // processor's INVALID store by up to ~210 us. The wait is time-bounded because it holds lock_
+  // on the doorbell or async events thread; when it runs out, StoreRelaxed() re-arms the drain
+  // and the next round waits again, until the processor releases a slot.
+  const timer::fast_clock::duration kMaxSlotWait = std::chrono::microseconds(500);
+  timer::fast_clock::time_point wait_start;
+  bool waiting = false;
 
   while (true) {
     uint64_t write = wrapped->LoadWriteIndexRelaxed();
     uint64_t read = wrapped->LoadReadIndexRelaxed();
     bool pending_retry_point = IsPendingRetryPoint();
 
+    // At most one slot per non-marker packet plus one for a retry barrier can be used this
+    // iteration, and the ring has only qsize of them.
+    uint64_t limit = count - marker_count + 1;
+    if (limit > qsize) limit = qsize;
+    const uint64_t retired_slots =
+        processor_retires_slots ? RetiredSlots(ring, mask, write, limit) : UINT64_MAX;
+
     // Pure slot-accounting decision (overflow/underflow hardening, unit tested). The
     // non-atomic write/read snapshot (transient read > write) is handled inside PlanSubmit.
-    const auto plan = intercept_queue_logic::PlanSubmit(
-        write, read, wrapped->amd_queue_.hsa_queue.size, count, marker_count, pending_retry_point,
-        !overflow_.empty());
+    const auto plan = intercept_queue_logic::PlanSubmit(write, read, qsize, count, marker_count,
+                                                        pending_retry_point, !overflow_.empty(),
+                                                        retired_slots);
+    if (plan.needs_wakeup) {
+      const timer::fast_clock::time_point now = timer::fast_clock::now();
+      if (!waiting) {
+        waiting = true;
+        wait_start = now;
+      }
+      if (now - wait_start < kMaxSlotWait) {
+        os::YieldThread();
+        continue;
+      }
+    }
     uint64_t submitted_count = plan.submitted_count;
 
     // If packets remain unsubmitted, insert a retry barrier to drain them later
@@ -346,6 +398,7 @@ void InterceptQueue::StoreRelaxed(hsa_signal_value_t value) {
       overflow_.erase(overflow_.begin(), overflow_.begin() + submitted_count);
       // Since there was no space to submit all the overflow packets, there is
       // no space for other packets either.
+      EnsureDrainWakeup();
       return;
     }
 
@@ -429,6 +482,21 @@ void InterceptQueue::StoreRelaxed(hsa_signal_value_t value) {
   next_packet_ = i;
   Cursor.queue = nullptr;
   atomic::Store(&amd_queue_.read_dispatch_id, next_packet_, std::memory_order_release);
+
+  // The final rewriter may have left packets in overflow_.
+  if (!overflow_.empty()) EnsureDrainWakeup();
+}
+
+void InterceptQueue::EnsureDrainWakeup() {
+  // Called with lock_ held and overflow_ non-empty. A pending retry barrier wakes the drain
+  // through HandleRetryDoorbell() when the processor reaches it. Without one nothing on the
+  // device refers to this queue any more, and the producer may already be blocked on the full
+  // proxy ring, so the drain would never run again: re-run it from the async doorbell thread.
+  // HandleAsyncDoorbell() resets the signal, so any other value trips its NE condition; the
+  // teardown handshake is keyed on quit_, not on the value, so next_packet_ (>= 1 here) cannot be
+  // mistaken for it.
+  if (IsPendingRetryPoint() || quit_) return;
+  async_doorbell_->StoreRelaxed(next_packet_);
 }
 
 hsa_status_t InterceptQueue::GetInfo(hsa_queue_info_attribute_t attribute, void* value) {
