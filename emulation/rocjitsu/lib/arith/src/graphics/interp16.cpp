@@ -7,6 +7,7 @@
 #include "common/float_encoding.h"
 #include "common/validation.h"
 #include "fp/fp64_impl.h"
+#include "fp/half_fma_scalar.h"
 #include "fp/mixed_fma_scalar.h"
 #include "graphics/interp.h"
 #include "graphics/interp16_scalar.h"
@@ -92,17 +93,23 @@ int run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
     return lanes ? rocjitsu::arith::interp_guest<P2, true, Rtz>(flags, lanes, mode, d, a, b, c)
                  : RJ_ARITH_SUCCESS;
   };
-  // The specialized kernel serves exact requests too: interp_guest runs exact semantics for
-  // every caller, and the backend hands back the lanes from the first block holding a
-  // non-finite operand, which is the only way the native FMA differs from the guest model
-  // once the guest rounding and denormal controls are known to be default.
+  // Exact requests repair nonfinite blocks through the inherited model. Loose keeps
+  // native arithmetic, including NaNs, and narrows only the final half result.
   if (flags & rocjitsu::arith::interp_round_denorm_flags) {
     return guest(exec_mask);
   }
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+  if (!rocjitsu::arith::is_exact(flags) &&
+      rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+    rocjitsu::arith::interp16_loose_x86_64_v4<P2, Rtz>(flags, exec_mask, mode, d[0], a[0], b[0],
+                                                       c[0]);
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
   if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
-    return guest(rocjitsu::arith::interp16_x86_64_v3<P2, Rtz>(flags & RJ_ARITH_FP16_OVFL, exec_mask,
-                                                              mode, d[0], a[0], b[0], c[0]));
+    return guest(rocjitsu::arith::interp16_x86_64_v3<P2, Rtz>(flags, exec_mask, mode, d[0], a[0],
+                                                              b[0], c[0]));
   }
 #endif
   unsigned sa = mode & RJ_ARITH_ALU_HIGH_A ? 16 : 0, sc = mode & RJ_ARITH_ALU_HIGH_C ? 16 : 0,
@@ -127,21 +134,37 @@ int run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
     if (mode & RJ_ARITH_ALU_NEG_C) {
       z ^= 0x80000000;
     }
-    if (((exec_mask >> lane) & 1u) &&
+    if (rocjitsu::arith::is_exact(flags) && ((exec_mask >> lane) & 1u) &&
         ((x & 0x7fffffff) >= 0x7f800000 || (y & 0x7fffffff) >= 0x7f800000 ||
          (z & 0x7fffffff) >= 0x7f800000)) {
       return guest(exec_mask);
     }
     if constexpr (P2) {
-      uint16_t h = Rtz ? rocjitsu::arith::interp16_rtz_half(x, y, z, mode & RJ_ARITH_ALU_CLAMP)
-                       : rocjitsu::arith::mixed_fma_half_value(x, y, z, mode & RJ_ARITH_ALU_CLAMP,
-                                                               flags & RJ_ARITH_FP16_OVFL);
+      uint16_t h;
+      if (!rocjitsu::arith::is_exact(flags)) {
+        float value = __builtin_fmaf(rocjitsu::arith::as_float(x), rocjitsu::arith::as_float(y),
+                                     rocjitsu::arith::as_float(z));
+        if ((mode & RJ_ARITH_ALU_CLAMP) &&
+            !((flags & RJ_ARITH_FP_DX10_CLAMP_OFF) && __builtin_isnan(value))) {
+          value = !(value > 0) ? 0 : value > 1 ? 1 : value;
+        }
+        h = Rtz && __builtin_isfinite(value)
+                ? rocjitsu::arith::half_fma_narrow(rocjitsu::arith::double_bits(double(value)),
+                                                   flags & RJ_ARITH_FP16_OVFL, 3)
+                : rocjitsu::arith::float_to_f16(value, flags & RJ_ARITH_FP16_OVFL);
+      } else {
+        h = Rtz ? rocjitsu::arith::interp16_rtz_half(x, y, z, mode & RJ_ARITH_ALU_CLAMP)
+                : rocjitsu::arith::mixed_fma_half_value(x, y, z, mode & RJ_ARITH_ALU_CLAMP,
+                                                        flags & RJ_ARITH_FP16_OVFL);
+      }
       result[lane] = (d[0][lane] & ~(65535u << sd)) | (uint32_t(h) << sd);
     } else {
-      float value = Rtz ? rocjitsu::arith::interp16_rtz_float(x, y, z)
+      float value = Rtz && rocjitsu::arith::is_exact(flags)
+                        ? rocjitsu::arith::interp16_rtz_float(x, y, z)
                         : __builtin_fmaf(rocjitsu::arith::as_float(x), rocjitsu::arith::as_float(y),
                                          rocjitsu::arith::as_float(z));
-      if (mode & RJ_ARITH_ALU_CLAMP) {
+      if ((mode & RJ_ARITH_ALU_CLAMP) &&
+          !((flags & RJ_ARITH_FP_DX10_CLAMP_OFF) && __builtin_isnan(value))) {
         value = !(value > 0) ? 0 : value > 1 ? 1 : value;
       }
       result[lane] = rocjitsu::arith::as_bits(value);

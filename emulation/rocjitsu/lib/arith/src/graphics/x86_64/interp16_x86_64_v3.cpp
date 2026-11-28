@@ -19,8 +19,10 @@ namespace rocjitsu::arith {
 // Evaluate an FP16 interpolation stage. Preserve destination lanes outside exec_mask.
 // Requires the named CPU features and validated instruction controls.
 template <bool P2, bool Rtz>
-uint32_t interp16_x86_64_v3(bool saturate, uint32_t exec_mask, uint32_t mode, uint32_t *d,
+uint32_t interp16_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *d,
                             const uint32_t *a, const uint32_t *b, const uint32_t *c) {
+  const bool exact = is_exact(flags);
+  const bool saturate = flags & RJ_ARITH_FP16_OVFL;
   for (int lane = 0; lane < 32; lane += 8) {
     auto aw = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(a + lane));
     auto x = half_input<false>(aw, mode & RJ_ARITH_ALU_HIGH_A ? 16 : 0, mode);
@@ -37,24 +39,39 @@ uint32_t interp16_x86_64_v3(bool saturate, uint32_t exec_mask, uint32_t mode, ui
       z = _mm256_permute_ps(half_input<false>(cw, mode & RJ_ARITH_ALU_HIGH_C ? 16 : 0, mode >> 2),
                             _MM_SHUFFLE(0, 0, 0, 0));
     }
-    const auto magnitude = [](__m256 input) {
-      return _mm256_and_si256(_mm256_castps_si256(input), _mm256_set1_epi32(INT32_MAX));
-    };
-    const auto largest =
-        _mm256_max_epi32(magnitude(x), _mm256_max_epi32(magnitude(y), magnitude(z)));
-    const auto special = _mm256_cmpgt_epi32(largest, _mm256_set1_epi32(0x7f7fffff));
-    if ((exec_mask >> lane) & uint32_t(_mm256_movemask_ps(_mm256_castsi256_ps(special)))) {
-      return exec_mask & (~uint32_t{0} << lane);
+    if (exact) {
+      const auto magnitude = [](__m256 input) {
+        return _mm256_and_si256(_mm256_castps_si256(input), _mm256_set1_epi32(INT32_MAX));
+      };
+      const auto largest =
+          _mm256_max_epi32(magnitude(x), _mm256_max_epi32(magnitude(y), magnitude(z)));
+      const auto special = _mm256_cmpgt_epi32(largest, _mm256_set1_epi32(0x7f7fffff));
+      if ((exec_mask >> lane) & uint32_t(_mm256_movemask_ps(_mm256_castsi256_ps(special)))) {
+        return exec_mask & (~uint32_t{0} << lane);
+      }
     }
     __m256i result;
     if constexpr (P2) {
-      auto lo = mixed_half_value4(_mm256_castps256_ps128(x), _mm256_castps256_ps128(y),
-                                  _mm256_castps256_ps128(z), saturate, mode & RJ_ARITH_ALU_CLAMP,
-                                  false, false, Rtz ? 3 : 0);
-      auto hi = mixed_half_value4(_mm256_extractf128_ps(x, 1), _mm256_extractf128_ps(y, 1),
-                                  _mm256_extractf128_ps(z, 1), saturate, mode & RJ_ARITH_ALU_CLAMP,
-                                  false, false, Rtz ? 3 : 0);
-      result = _mm256_inserti128_si256(_mm256_castsi128_si256(lo), hi, 1);
+      if (!exact) {
+        auto value = _mm256_fmadd_ps(x, y, z);
+        if (mode & RJ_ARITH_ALU_CLAMP) {
+          auto original = value;
+          value = _mm256_min_ps(_mm256_max_ps(value, _mm256_setzero_ps()), _mm256_set1_ps(1));
+          if (flags & RJ_ARITH_FP_DX10_CLAMP_OFF) {
+            value =
+                _mm256_blendv_ps(value, original, _mm256_cmp_ps(original, original, _CMP_UNORD_Q));
+          }
+        }
+        result = half_narrow(value, saturate, Rtz ? 3 : 0);
+      } else {
+        auto lo = mixed_half_value4(_mm256_castps256_ps128(x), _mm256_castps256_ps128(y),
+                                    _mm256_castps256_ps128(z), saturate, mode & RJ_ARITH_ALU_CLAMP,
+                                    false, false, Rtz ? 3 : 0);
+        auto hi = mixed_half_value4(_mm256_extractf128_ps(x, 1), _mm256_extractf128_ps(y, 1),
+                                    _mm256_extractf128_ps(z, 1), saturate,
+                                    mode & RJ_ARITH_ALU_CLAMP, false, false, Rtz ? 3 : 0);
+        result = _mm256_inserti128_si256(_mm256_castsi128_si256(lo), hi, 1);
+      }
       unsigned sd = mode & RJ_ARITH_ALU_HIGH_D ? 16 : 0;
       auto old = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(d + lane));
       result = _mm256_or_si256(_mm256_sll_epi32(result, _mm_cvtsi32_si128(sd)),
@@ -62,19 +79,29 @@ uint32_t interp16_x86_64_v3(bool saturate, uint32_t exec_mask, uint32_t mode, ui
     } else {
       __m256 value;
       if constexpr (Rtz) {
-        alignas(32) uint32_t xs[8], ys[8], zs[8], results[8];
-        _mm256_store_si256(reinterpret_cast<__m256i *>(xs), _mm256_castps_si256(x));
-        _mm256_store_si256(reinterpret_cast<__m256i *>(ys), _mm256_castps_si256(y));
-        _mm256_store_si256(reinterpret_cast<__m256i *>(zs), _mm256_castps_si256(z));
-        for (int i = 0; i < 8; ++i) {
-          results[i] = as_bits(interp16_rtz_float(xs[i], ys[i], zs[i]));
+        if (!exact) {
+          value = _mm256_fmadd_ps(x, y, z);
+        } else {
+          alignas(32) uint32_t xs[8], ys[8], zs[8], results[8];
+          _mm256_store_si256(reinterpret_cast<__m256i *>(xs), _mm256_castps_si256(x));
+          _mm256_store_si256(reinterpret_cast<__m256i *>(ys), _mm256_castps_si256(y));
+          _mm256_store_si256(reinterpret_cast<__m256i *>(zs), _mm256_castps_si256(z));
+          for (int i = 0; i < 8; ++i) {
+            results[i] = as_bits(interp16_rtz_float(xs[i], ys[i], zs[i]));
+          }
+          value =
+              _mm256_castsi256_ps(_mm256_load_si256(reinterpret_cast<const __m256i *>(results)));
         }
-        value = _mm256_castsi256_ps(_mm256_load_si256(reinterpret_cast<const __m256i *>(results)));
       } else {
         value = _mm256_fmadd_ps(x, y, z);
       }
       if (mode & RJ_ARITH_ALU_CLAMP) {
+        auto original = value;
         value = _mm256_min_ps(_mm256_max_ps(value, _mm256_setzero_ps()), _mm256_set1_ps(1));
+        if (flags & RJ_ARITH_FP_DX10_CLAMP_OFF) {
+          value =
+              _mm256_blendv_ps(value, original, _mm256_cmp_ps(original, original, _CMP_UNORD_Q));
+        }
       }
       result = _mm256_castps_si256(value);
     }
@@ -85,16 +112,16 @@ uint32_t interp16_x86_64_v3(bool saturate, uint32_t exec_mask, uint32_t mode, ui
   return 0;
 }
 
-template uint32_t interp16_x86_64_v3<false, false>(bool, uint32_t, uint32_t, uint32_t *,
+template uint32_t interp16_x86_64_v3<false, false>(uint64_t, uint32_t, uint32_t, uint32_t *,
                                                    const uint32_t *, const uint32_t *,
                                                    const uint32_t *);
-template uint32_t interp16_x86_64_v3<true, false>(bool, uint32_t, uint32_t, uint32_t *,
+template uint32_t interp16_x86_64_v3<true, false>(uint64_t, uint32_t, uint32_t, uint32_t *,
                                                   const uint32_t *, const uint32_t *,
                                                   const uint32_t *);
-template uint32_t interp16_x86_64_v3<false, true>(bool, uint32_t, uint32_t, uint32_t *,
+template uint32_t interp16_x86_64_v3<false, true>(uint64_t, uint32_t, uint32_t, uint32_t *,
                                                   const uint32_t *, const uint32_t *,
                                                   const uint32_t *);
-template uint32_t interp16_x86_64_v3<true, true>(bool, uint32_t, uint32_t, uint32_t *,
+template uint32_t interp16_x86_64_v3<true, true>(uint64_t, uint32_t, uint32_t, uint32_t *,
                                                  const uint32_t *, const uint32_t *,
                                                  const uint32_t *);
 

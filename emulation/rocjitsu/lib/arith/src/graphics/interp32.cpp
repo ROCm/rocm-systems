@@ -35,10 +35,8 @@ int run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
     return lanes ? rocjitsu::arith::interp_guest<P2, false>(flags, lanes, mode, d, a, b, c)
                  : RJ_ARITH_SUCCESS;
   };
-  // The specialized kernels serve exact requests too: interp_guest runs exact semantics for
-  // every caller, and both backends hand back the lanes from the first block whose result is
-  // NaN, which is the only way the native FMA differs from the guest model once the guest
-  // rounding and denormal controls are known to be default.
+  // Exact requests repair NaN blocks through the inherited model. Loose lets the
+  // same SIMD arithmetic publish native results without a NaN fallback.
   if (flags & rocjitsu::arith::interp_round_denorm_flags) {
     return guest(exec_mask);
   }
@@ -46,12 +44,14 @@ int run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
       rocjitsu::arith::wave_cpu_level(flags, !P2 || mode || rocjitsu::arith::aligned_for_512(a[0]));
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
   if (level >= RJ_ARITH_CPU_X86_64_V4) {
-    return guest(rocjitsu::arith::interp32_x86_64_v4<P2>(exec_mask, mode, d[0], a[0], b[0], c[0]));
+    return guest(
+        rocjitsu::arith::interp32_x86_64_v4<P2>(flags, exec_mask, mode, d[0], a[0], b[0], c[0]));
   }
 #endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
   if (level >= RJ_ARITH_CPU_X86_64_V3) {
-    return guest(rocjitsu::arith::interp32_x86_64_v3<P2>(exec_mask, mode, d[0], a[0], b[0], c[0]));
+    return guest(
+        rocjitsu::arith::interp32_x86_64_v3<P2>(flags, exec_mask, mode, d[0], a[0], b[0], c[0]));
   }
 #endif
   uint32_t result[32];
@@ -61,10 +61,12 @@ int run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
     float y = rocjitsu::arith::alu_input(b[0][lane], mode >> 1);
     float z = rocjitsu::arith::alu_input(c[0][P2 ? lane : quad], mode >> 2);
     const float value = __builtin_fmaf(x, y, z);
-    if (((exec_mask >> lane) & 1u) && __builtin_isnan(value)) {
+    if (rocjitsu::arith::is_exact(flags) && ((exec_mask >> lane) & 1u) && __builtin_isnan(value)) {
       return guest(exec_mask);
     }
-    result[lane] = rocjitsu::arith::as_bits(rocjitsu::arith::alu_output(value, mode));
+    result[lane] = (flags & RJ_ARITH_FP_DX10_CLAMP_OFF) && __builtin_isnan(value)
+                       ? rocjitsu::arith::as_bits(value)
+                       : rocjitsu::arith::as_bits(rocjitsu::arith::alu_output(value, mode));
   }
   for (int lane = 0; lane < 32; ++lane) {
     if ((exec_mask >> lane) & 1) {

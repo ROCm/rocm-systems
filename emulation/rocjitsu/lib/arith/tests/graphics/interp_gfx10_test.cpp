@@ -3,6 +3,8 @@
 
 // Preserve the imported gfx10 rounding model and exercise wave-level dispatch/aliasing.
 #include "common/cpu.h"
+#include "common/floating_point.h"
+#include "common/integer.h"
 #include "common/semantics.h"
 #include "rj_arith/rj_arith.h"
 #define RJ_ARITH_IMPL_NAMESPACE interp_test
@@ -178,9 +180,9 @@ TEST(Gfx10Interpolation, Arithmetic) {
   for (int op = 0; op < 6; ++op) {
     alignas(64) uint32_t a[32], b[32], c[32], reference[32], output[32];
     for (int lane = 0; lane < 32; ++lane) {
-      a[lane] = (uint32_t(random()) << 1) | (random() >> 30);
-      b[lane] = (uint32_t(random()) << 1) | (random() >> 30);
-      c[lane] = (uint32_t(random()) << 1) | (random() >> 30);
+      a[lane] = test::random_word(random);
+      b[lane] = test::random_word(random);
+      c[lane] = test::random_word(random);
     }
     a[3] = 0x7c007f80;
     b[5] = 0x7fc12345;
@@ -202,8 +204,25 @@ TEST(Gfx10Interpolation, Arithmetic) {
                   : RJ_ARITH_SUCCESS;
           ASSERT_EQ(calls[op](flags, 0xaaaaaaaa, 0, &ref, &ap, &bp, &cp), expected);
           ASSERT_EQ(calls[op](flags | cpu, 0xaaaaaaaa, 0, &out, &ap, &bp, &cp), expected);
+          // Loose may differ in intermediate rounding and NaN payloads across CPU paths.
+          const auto expect_result = [&](uint32_t actual, uint32_t value, bool written) {
+            if (written && op != 0 && semantics != RJ_ARITH_SEMANTICS_COMPATIBILITY) {
+              if (op == 5) {
+                EXPECT_EQ(actual & 0xffff0000U, value & 0xffff0000U);
+                test::expect_f32(std::bit_cast<uint32_t>(test::f16_value(uint16_t(actual))),
+                                 test::f16_value(uint16_t(value)), RJ_ARITH_SEMANTICS_LOOSE,
+                                 /*atol=*/0x1p-24f, /*rtol=*/1e-3f);
+              } else {
+                test::expect_f32(actual, std::bit_cast<float>(value), RJ_ARITH_SEMANTICS_LOOSE,
+                                 /*atol=*/1e-44f, /*rtol=*/2e-7f);
+              }
+            } else {
+              EXPECT_EQ(actual, value);
+            }
+          };
           for (int lane = 0; lane < 32; ++lane) {
-            EXPECT_EQ(output[lane], reference[lane]);
+            expect_result(output[lane], reference[lane],
+                          expected == RJ_ARITH_SUCCESS && ((0xaaaaaaaaU >> lane) & 1));
           }
           std::copy_n(a, 32, output);
           const uint32_t *alias = output;
@@ -214,7 +233,7 @@ TEST(Gfx10Interpolation, Arithmetic) {
             if (op == 5) {
               value = (a[lane] & 0xffff0000U) | (value & 0xffffU);
             }
-            EXPECT_EQ(output[lane], written ? value : a[lane]);
+            expect_result(output[lane], written ? value : a[lane], written);
           }
         }
       }
@@ -241,3 +260,19 @@ TEST(Gfx10InterpolationModel, ExplicitRoundingPreservesHostControls) {
 }
 
 } // namespace
+
+// Directed guest rounding remains observable even when Loose uses native arithmetic.
+TEST(Gfx10Interpolation, LooseDirectedHalfOverflow) {
+  for (auto cpu : test::supported_cpu_levels()) {
+    uint32_t a[32]{0x3c00}, b[32]{std::bit_cast<uint32_t>(65520.f)}, c[32]{}, d[32]{};
+    const uint32_t *ap = a, *bp = b, *cp = c;
+    uint32_t *dp = d;
+    d[0] = 0xdeadbeefU;
+    ASSERT_EQ(
+        rj_arith_v_interp_p2_f16_w32_gfx10(cpu | RJ_ARITH_SEMANTICS_LOOSE | RJ_ARITH_FP_ROUND_ZERO,
+                                           1, 0, &dp, &ap, &bp, &cp),
+        RJ_ARITH_SUCCESS);
+    EXPECT_EQ(d[0], 0xdead7bffU);
+    EXPECT_EQ(d[1], 0U);
+  }
+}

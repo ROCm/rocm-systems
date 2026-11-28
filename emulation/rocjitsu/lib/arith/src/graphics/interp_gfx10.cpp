@@ -9,6 +9,7 @@
 #include "common/validation.h"
 #include "fp/mixed_fma.h"
 #include "graphics/rounding.h"
+#include "rj_arith/detail/rj_arith_fp.h"
 #include "rj_arith/detail/rj_arith_graphics.h"
 
 namespace {
@@ -20,6 +21,7 @@ enum class Stage { Mov, P1, P2, P1LL, P1LV, P2Half };
 template <Stage Op, int Lanes>
 int interpolate(uint64_t flags, ExecMask<Lanes> exec_mask, uint64_t mode, uint32_t *const *d,
                 const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c) {
+  const bool loose = (flags & RJ_ARITH_SEMANTICS_MASK) != RJ_ARITH_SEMANTICS_COMPATIBILITY;
   if (int error = loose_only(flags, false)) {
     return error;
   }
@@ -58,8 +60,7 @@ int interpolate(uint64_t flags, ExecMask<Lanes> exec_mask, uint64_t mode, uint32
     return as_bits(f16_to_float(value));
   };
   const unsigned rounding = unsigned((flags & RJ_ARITH_FP_ROUND_MASK) >> 24);
-  // Reuse the native SIMD FMA kernels and their exceptional-lane repair. gfx10
-  // flushes half outputs after narrowing; keep that final stage below.
+  // gfx10 flushes half outputs after narrowing; keep that final stage below.
   uint64_t arithmetic_flags = flags;
   if constexpr (half_out) {
     arithmetic_flags &= ~RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
@@ -67,24 +68,43 @@ int interpolate(uint64_t flags, ExecMask<Lanes> exec_mask, uint64_t mode, uint32
   const uint32_t mixed_mode = (uint32_t(mode) & ~(RJ_ARITH_ALU_OMOD_MASK | RJ_ARITH_ALU_HIGH_D)) |
                               (half ? RJ_ARITH_MIX_F16_A : 0) | (half_c ? RJ_ARITH_MIX_F16_C : 0) |
                               (half_c && (mode & RJ_ARITH_ALU_HIGH_A) ? RJ_ARITH_ALU_HIGH_C : 0);
-  bool vectorized = false;
+  bool prepared = false;
   ExecMask<Lanes> repair = 0;
   if constexpr (Op != Stage::Mov) {
+    // Share native nearest-even FMA; directed guest rounding retains the imported model.
+    const bool native = loose && !(flags & RJ_ARITH_FP_ROUND_MASK);
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
-    if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+    if (!prepared && cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
       for (int base = 0; base < Lanes; base += 32) {
-        mixed_fma_exact_x86_64_v4(half_out ? MixedFma::Low : MixedFma::Float, true,
-                                  arithmetic_flags, uint32_t(exec_mask >> base),
-                                  half_out ? mixed_mode : mixed_mode & ~RJ_ARITH_ALU_CLAMP,
-                                  result + base, a[0] + base, b[0] + base, c[0] + base);
+        if (native) {
+          mixed_fma_loose_x86_64_v4(half_out ? MixedFma::Low : MixedFma::Float, true,
+                                    arithmetic_flags, uint32_t(exec_mask >> base),
+                                    half_out ? mixed_mode : mixed_mode & ~RJ_ARITH_ALU_CLAMP,
+                                    result + base, a[0] + base, b[0] + base, c[0] + base);
+        } else {
+          mixed_fma_exact_x86_64_v4(half_out ? MixedFma::Low : MixedFma::Float, true,
+                                    arithmetic_flags, uint32_t(exec_mask >> base),
+                                    half_out ? mixed_mode : mixed_mode & ~RJ_ARITH_ALU_CLAMP,
+                                    result + base, a[0] + base, b[0] + base, c[0] + base);
+        }
       }
-      vectorized = true;
+      prepared = true;
     }
 #endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
-    if (!vectorized && cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+    if (!prepared && cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
       for (int base = 0; base < Lanes; base += 32) {
-        if constexpr (half_out) {
+        if (native) {
+          if constexpr (half_out) {
+            mixed_fma_half_x86_64_v3(false, arithmetic_flags, uint32_t(exec_mask >> base),
+                                     mixed_mode, result + base, a[0] + base, b[0] + base,
+                                     c[0] + base);
+          } else {
+            mixed_fma_float_guest_x86_64_v3(arithmetic_flags, uint32_t(exec_mask >> base),
+                                            mixed_mode & ~RJ_ARITH_ALU_CLAMP, result + base,
+                                            a[0] + base, b[0] + base, c[0] + base);
+          }
+        } else if constexpr (half_out) {
           mixed_fma_half_guest_x86_64_v3(false, arithmetic_flags, uint32_t(exec_mask >> base),
                                          mixed_mode, result + base, a[0] + base, b[0] + base,
                                          c[0] + base);
@@ -99,22 +119,35 @@ int interpolate(uint64_t flags, ExecMask<Lanes> exec_mask, uint64_t mode, uint32
                                           a[0] + base, b[0] + base, c[0] + base);
         }
       }
-      vectorized = true;
+      prepared = true;
     }
 #endif
+    if (!prepared && native) {
+      auto call = half_out ? rj_arith_v_fma_mixlo_f16_w32 : rj_arith_v_fma_mix_f32_w32;
+      for (int base = 0; base < Lanes; base += 32) {
+        uint32_t *output = result + base;
+        const uint32_t *x = a[0] + base, *y = b[0] + base, *z = c[0] + base;
+        if (int error = call(arithmetic_flags, uint32_t(exec_mask >> base),
+                             half_out ? mixed_mode : mixed_mode & ~RJ_ARITH_ALU_CLAMP, &output, &x,
+                             &y, &z, nullptr)) {
+          return error;
+        }
+      }
+      prepared = true;
+    }
   }
   for (int lane = 0; lane < Lanes; ++lane) {
     if (!((exec_mask >> lane) & 1)) {
       continue;
     }
-    bool computed = vectorized && !((repair >> lane) & 1);
+    bool computed = prepared && !((repair >> lane) & 1);
     if constexpr (half_out) {
       // The inherited nonfinite FP64 FMA may select NaN payloads differently
       // across compilers. Share that baseline policy, rather than the mixed-FMA
       // backend's separately qualified NaN ordering, for these lanes only.
       const uint32_t coefficient = (a[0][lane] >> (mode & RJ_ARITH_ALU_HIGH_A ? 16 : 0)) & 0x7fff;
-      computed &= coefficient < 0x7c00 && (b[0][lane] & 0x7fffffff) < 0x7f800000 &&
-                  (c[0][lane] & 0x7fffffff) < 0x7f800000;
+      computed &= loose || (coefficient < 0x7c00 && (b[0][lane] & 0x7fffffff) < 0x7f800000 &&
+                            (c[0][lane] & 0x7fffffff) < 0x7f800000);
     }
     const uint32_t x = !computed && half ? half_input(a[0][lane], mode & RJ_ARITH_ALU_HIGH_A)
                        : !computed       ? a[0][lane]

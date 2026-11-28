@@ -224,6 +224,7 @@ set(rj_arith_x86_64_v4_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/mixed_mad_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/mixed_fma_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graphics/x86_64/cube_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/graphics/x86_64/interp16_loose_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graphics/x86_64/interp32_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graphics/x86_64/mullit_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/bit_count_x86_64_v4.cpp

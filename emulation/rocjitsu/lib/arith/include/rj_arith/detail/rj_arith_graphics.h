@@ -79,14 +79,14 @@ int rj_arith_v_interp_p2_f16_w64_gfx10(uint64_t flags, uint64_t exec_mask,
 // fma(A[Q+1],B[L],C[Q]); P2 computes fma(A[Q+2],B[L],C[L]). Source lanes are
 // read even if inactive in EXEC. Each operand uses one VGPR; whole VGPRs may
 // alias. Supports NEG_A/B/C, CLAMP, with no ABS or OMOD.
-// Compatibility resolves to bit-exact semantics and reports no FP status. Every
-// semantics shares one dispatch: without a guest rounding or denormal control the specialized
-// kernels run and hand back only the lanes the guest model must produce, so Loose, Compatibility
-// and bit-exact return the same bits at the same cost. All semantics require the
-// default host FP environment (nearest-even rounding, denormals enabled); host exception flags may
-// change. A selected NaN keeps its sign and payload. IEEE_MODE quiets FP32 results; DX10_CLAMP_OFF
-// preserves NaNs under CLAMP. For RDNA4, set IEEE_MODE and leave DX10_CLAMP_OFF clear. Guest
-// rounding and precision-specific input/output denormal controls are honored. WAIT_EXP belongs to
+// Compatibility resolves to bit-exact semantics and reports no FP status.
+// Loose uses native arithmetic, including NaN handling and intermediate rounding;
+// Compatibility and bit-exact modes retain the inherited guest arithmetic model.
+// All semantics assume default host FP controls; ordinary host exception flags may change.
+// In exact modes a selected NaN retains its sign/payload and IEEE_MODE quiets it.
+// DX10_CLAMP_OFF preserves NaNs under CLAMP. For RDNA4, set IEEE_MODE and leave
+// DX10_CLAMP_OFF clear. Guest rounding and precision-specific denormal controls
+// apply; Loose may differ in intermediate rounding. WAIT_EXP belongs to
 // the scheduler and is not an arithmetic modifier. Both architectures specify that interpolation
 // reports no GPU exceptions.
 int rj_arith_v_interp_p10_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
@@ -109,7 +109,8 @@ int rj_arith_v_interp_p2_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t in
 // A is FP16, B is FP32. P10 reads FP16 C and writes FP32 D; P2 reads FP32 C
 // and writes FP16 D, preserving the other destination half. Supports NEG_A/B/C,
 // CLAMP and HIGH_A; also HIGH_C for P10 or HIGH_D for P2. No ABS/OMOD.
-// RTZ forms override guest rounding toward zero; other forms use guest rounding.
+// RTZ P2 narrows toward zero; Loose may use a nearest-even FP32 intermediate.
+// Exact/Compatibility RTZ arithmetic overrides guest rounding toward zero.
 // Guest denormal controls apply to both forms. RJ_ARITH_FP16_OVFL
 // saturates finite P2 overflow; RTZ P2 already saturates finite overflow.
 // Input infinities remain infinite unless clamped. Semantics, including the

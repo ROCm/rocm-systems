@@ -4,6 +4,7 @@
 // Guest-controlled interpolation reuses the existing directed mixed-FMA arithmetic.
 #pragma once
 
+#include "common/validation.h"
 #include "rj_arith/detail/rj_arith_fp.h"
 #include <stdint.h>
 
@@ -25,7 +26,10 @@ int interp_guest(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *co
     cv[lane] = c[0][P2 ? lane : (lane & ~3)];
   }
   const uint32_t *ap = av, *cp = cv;
-  flags = (flags & ~RJ_ARITH_SEMANTICS_MASK) | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS;
+  if (is_exact(flags)) {
+    flags =
+        (flags & ~RJ_ARITH_SEMANTICS_MASK) | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS;
+  }
   if constexpr (Rtz) {
     flags = (flags & ~RJ_ARITH_FP_ROUND_MASK) | RJ_ARITH_FP_ROUND_ZERO;
   }
