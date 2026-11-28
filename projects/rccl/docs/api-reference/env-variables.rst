@@ -520,6 +520,27 @@ collected in the following table.
         | Default: ``16``
         | ``0``: No lower bound.
 
+    * - | ``RCCL_HOST_HIER_ALLREDUCE``
+        | Runs ``ncclAllReduce`` as a ReduceScatter within each physical host,
+          an AllReduce across hosts, and an AllGather within each host. Hosts
+          are told apart by host hash, so this also works where a scale-up
+          fabric reports the whole job as one node. Each stage picks its own
+          algorithm. Needs the same number of ranks, at least two, on every
+          host, a count divisible by that number, and a built-in reduction
+          operation (``ncclAvg`` only on floating-point types). It is not used
+          inside a group or a graph capture, while ``NCCL_ALGO`` is set, or
+          while a backend is forced. The first eligible call splits the
+          communicator, so all ranks must use the same value.
+      - | ``-1``: Auto (default). On gfx1250 when every rank is in one MNNVL
+          clique and the communicator set up DDA fabric (communicators made
+          by ``ncclCommSplit`` do not), used for ``ncclFloat32`` ``ncclSum``
+          on buffers outside registered windows, with eight ranks per host on
+          the DPX tuning table and these message sizes: above 1 MiB to 16 MiB
+          and 64 to 128 MiB on two hosts, 2 to 256 MiB on four hosts, and 2 to 512 MiB on
+          eight hosts. Not used with other host counts.
+        | ``0``: Disabled.
+        | ``1``: Enabled for every eligible AllReduce.
+
     * - | ``NCCL_TREE_COMPACT``
         | Builds the inter-node trees with a half-interleave node remapping.
           Intended for jobs whose nodes are ordered by network domain. Both

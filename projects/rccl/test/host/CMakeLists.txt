@@ -401,6 +401,7 @@ function(rccl_define_micro_source_lists)
     fakes/channel_fakes.cc
     fakes/nccl_fakes.cc
     fakes/hip_fakes.cc
+    fakes/hier_host_fakes.cc
     # Shared per-production-TU fakes (see MICROTEST_README.md for the map).
     fakes/amdsmi_fakes.cc
     fakes/api_trace_fakes.cc
@@ -1154,6 +1155,7 @@ rccl_add_unit_micro_binary(rccl-UnitTestsMicroWrap wrap-test.cc ${_MICRO_ROOT_TE
     fakes/dev_runtime_micro_fakes.cc
     fakes/env_fakes.cc
     fakes/hip_fakes.cc
+    fakes/hier_host_fakes.cc
     fakes/nccl_fakes.cc
     fakes/rccl_arch_thresholds_fakes.cc
     fakes/strongstream_stubs.cc
@@ -1187,6 +1189,7 @@ rccl_add_unit_micro_binary(rccl-UnitTestsMicroCollectives collectives-test.cc
     fakes/enqueue_fakes.cc
     fakes/group_fakes.cc
     fakes/hip_fakes.cc
+    fakes/hier_host_fakes.cc
     fakes/nccl_fakes.cc
     fakes/nccl_stubs.cc
     fakes/rccl_wrap_fakes.cc
@@ -1204,6 +1207,23 @@ target_compile_options(rccl-UnitTestsMicroCollectives PRIVATE
   "SHELL:-Xclang -fcuda-include-gpubinary -Xclang ${CMAKE_CURRENT_BINARY_DIR}/empty_gpubinary")
 
 include("${CMAKE_CURRENT_LIST_DIR}/device/host_tests.cmake")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroHierHost -- src/hier_host.cc
+# ---------------------------------------------------------------------------
+rccl_add_unit_micro_binary(rccl-UnitTestsMicroHierHost hier-host-test.cc
+  OBJECT_PREFIX rccl-root-obj
+  SOURCES
+    fakes/bootstrap_stubs.cc
+    fakes/comm_fakes.cc
+    fakes/hip_fakes.cc
+    fakes/nccl_fakes.cc
+    fakes/nccl_stubs.cc
+    fakes/recorder_fakes.cc
+    fakes/utils_fakes.cc
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_hier_host.yaml")
+target_compile_definitions(rccl-UnitTestsMicroHierHost PRIVATE
+  HIER_HOST_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/hier_host.cc")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroCpuset -- src/include/cpuset.h

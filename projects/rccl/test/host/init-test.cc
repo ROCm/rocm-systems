@@ -34,6 +34,7 @@
 #include "fakes/sym_kernels_fakes.h"                 // g_symkFinalize, g_symkHierAvailable
 #include "fakes/rccl_wrap_fakes.h"                   // g_rcclScaleCollLl128BuffSize{Calls,Factor}
 #include "fakes/mgmt_task_enq_fakes.h"               // g_ncclMgmtTaskEnqueue
+#include "fakes/hier_host_fakes.h"                   // g_hostHierChildren
 #include "../common/LogCapture.hpp"                 // CaptureLog: assert on WARN/INFO text
 #include "../common/ProcessIsolatedTestRunner.hpp"  // fork+execv process isolation
 
@@ -2712,6 +2713,30 @@ TEST_F(InitMicrotest, CommFree_AfterCommAlloc_ReturnsSuccessAndFrees) {
   EXPECT_EQ(1, abortRef);
 }
 
+// rcclHostHierTeardown destroys host-hierarchical AllReduce's child comms, or aborts them, so commFree must hand it
+// every comm.
+TEST_F(InitMicrotest, CommFree_CallsHostHierTeardownOnce) {
+  InstallCommAllocSuccess();
+  ncclComm* comm = nullptr;
+  ASSERT_EQ(ncclSuccess, ncclCalloc(&comm, 1));
+  ASSERT_EQ(ncclSuccess, commAlloc(comm, /*parent=*/nullptr, /*ndev=*/8, /*rank=*/0));
+  uint32_t abortFlag = 0;
+  int abortRef = 2;  // >1 so commFree skips the abortFlag free-branch
+  comm->abortFlag = &abortFlag;
+  comm->abortFlagRefCount = &abortRef;
+  const ncclComm* const freed = comm;
+  const ncclComm* tornDown = nullptr;
+  ScopedHook teardown(g_hostHierTeardown, [&](ncclComm* c) {
+    tornDown = c;
+    c->hostHier = nullptr;
+    return ncclSuccess;
+  });
+
+  EXPECT_EQ(ncclSuccess, commFree(comm));  // frees comm; do not touch it afterwards
+  EXPECT_EQ(1, teardown.calls);
+  EXPECT_EQ(freed, tornDown);
+}
+
 // See the comment at the ncclProfilerThreadDestroy call site in src/init.cc.
 TEST_F(InitMicrotest, CommFree_StopsProfilerThreadBeforeFreeingTheBuffersItPolls) {
   InstallCommAllocSuccess();
@@ -4700,6 +4725,31 @@ TEST_F(InitMicrotest, SetCommAbortFlags_ZeroAfterOne_ClearsAllFourFlags) {
   EXPECT_EQ(0u, c.parentDev());
   EXPECT_EQ(0u, c.child());
   EXPECT_EQ(0u, c.childDev());
+}
+
+// Host-hierarchical AllReduce's child comms keep their own abort flags, so the parent's set and clear must reach them.
+TEST_F(InitMicrotest, SetCommAbortFlags_HostHierChildren_SetAndClearTheirFlags) {
+  AbortFlagsComm parent, intra, inter;
+  parent.detachChild();
+  intra.detachChild();
+  inter.detachChild();
+  ScopedHook children(g_hostHierChildren, [&](const ncclComm* comm, ncclComm_t* out) {
+    if (comm != parent.get()) return 0;
+    out[0] = intra.get();
+    out[1] = inter.get();
+    return 2;
+  });
+
+  EXPECT_EQ(ncclSuccess, setCommAbortFlags(parent.get(), 1));
+  for (AbortFlagsComm* child : {&intra, &inter}) {
+    EXPECT_EQ(1u, child->parent());
+    EXPECT_EQ(1u, child->parentDev());
+  }
+  EXPECT_EQ(ncclSuccess, setCommAbortFlags(parent.get(), 0));
+  for (AbortFlagsComm* child : {&intra, &inter}) {
+    EXPECT_EQ(0u, child->parent());
+    EXPECT_EQ(0u, child->parentDev());
+  }
 }
 
 // The int -> uint32_t cast is a value-preserving bit reinterpretation, not a truthiness collapse.
@@ -9686,6 +9736,25 @@ TEST_F(InitMicrotest, CommShrink_AbortRequestedAndStreamSyncSucceeds_LowersTheAb
   EXPECT_EQ(0u, flagDevAtEntry);
   EXPECT_EQ(0u, c.abortFlag());
   EXPECT_EQ(0u, c.abortFlagDev());
+}
+
+// The shrink's abort also reaches the host-hierarchical child comms, which then must not run DDA either.
+TEST_F(InitMicrotest, CommShrink_AbortRequested_DisablesDdaOnTheHostHierChildren) {
+  Teardown_LifecycleComm c(/*cudaDev=*/1, /*rank=*/1);
+  AbortFlagsComm intra, inter;
+  ScopedHook children(g_hostHierChildren, [&](const ncclComm* comm, ncclComm_t* out) {
+    if (comm != c.get()) return 0;
+    out[0] = intra.get();
+    out[1] = inter.get();
+    return 2;
+  });
+  ncclComm_t out = nullptr;
+  int exclude[1] = {0};
+
+  (void)ncclCommShrink_impl(c.get(), exclude, /*excludeRanksCount=*/0, &out, /*config=*/nullptr, NCCL_SHRINK_ABORT);
+  EXPECT_TRUE(c.get()->ddaDisabledAfterAbort);
+  EXPECT_TRUE(intra.get()->ddaDisabledAfterAbort);
+  EXPECT_TRUE(inter.get()->ddaDisabledAfterAbort);
 }
 
 TEST_F(InitMicrotest, CommShrink_RevokedHeldGraph_KeepsDeviceAbortFlag) {

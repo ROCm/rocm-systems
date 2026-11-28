@@ -65,6 +65,7 @@ rccl_add_tuning_micro_binary(rccl-UnitTestsMicroTuningGeneral tuning-general-tes
     fakes/dev_runtime_micro_fakes.cc
     fakes/env_fakes.cc
     fakes/hip_fakes.cc
+    fakes/hier_host_fakes.cc
     fakes/nccl_fakes.cc
     fakes/rccl_arch_thresholds_fakes.cc
     fakes/strongstream_stubs.cc

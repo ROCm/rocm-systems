@@ -24,6 +24,7 @@
 #include "rma.h"
 #include "diagnostics.h"
 #include "enqueue.h"
+#include "hier_host.h"
 #include "graph.h"
 #include "graph/topo.h"
 #include "argcheck.h"
@@ -574,6 +575,7 @@ static ncclResult_t commFree(ncclComm_t comm) {
     comm->hierarchicalInterComm = nullptr;
   }
   comm->hierarchicalCommsInitialized = false;
+  NCCLCHECK(rcclHostHierTeardown(comm));
 
   if (comm->symmetricSupport) {
     ncclResult_t finalizeResult = ncclSymkFinalize(comm);
@@ -872,6 +874,8 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   comm->hierarchicalLazyCalls = 0;
   comm->hierarchicalCommsInitialized = false;
   comm->hierarchicalTempBuffer = nullptr;
+  comm->hostHier = nullptr;
+  comm->hostHierState = rcclHostHierUnprobed;
   // Enable PAT for interComm hierarchical collectives
   comm->forcePatEnable = (parent != nullptr) ? parent->forcePatEnable : false;
   comm->patSharedQps = rcclParamPatSharedQps() != 0;
@@ -5030,6 +5034,9 @@ static ncclResult_t setCommAbortFlags(ncclComm_t comm, int value) {
   setChildAbortFlags(comm, uval);
   if (comm->abortFlag != nullptr) COMPILER_ATOMIC_STORE(comm->abortFlag, uval, std::memory_order_release);
   if (comm->abortFlagDev != nullptr) COMPILER_ATOMIC_STORE(comm->abortFlagDev, uval, std::memory_order_release);
+  ncclComm_t hierChildren[2];
+  const int nHierChildren = rcclHostHierChildren(comm, hierChildren);
+  for (int i = 0; i < nHierChildren; i++) (void)setCommAbortFlags(hierChildren[i], value);
   return ncclSuccess;
 }
 
@@ -5341,6 +5348,10 @@ ncclResult_t ncclCommShrink_impl(ncclComm_t comm, int* excludeRanksList, int exc
   if (shrinkFlags & NCCL_SHRINK_ABORT) {
     // [RCCL] Disable DDA on the parent comm; see ncclComm::ddaDisabledAfterAbort.
     comm->ddaDisabledAfterAbort = true;
+    // The abort below also reaches the host-hierarchical child comms, which pick their own algorithms.
+    ncclComm_t hierChildren[2];
+    const int nHierChildren = rcclHostHierChildren(comm, hierChildren);
+    for (int i = 0; i < nHierChildren; i++) hierChildren[i]->ddaDisabledAfterAbort = true;
     NCCLCHECKGOTO(setCommAbortFlags(comm, 1), res, exit);
     NCCLCHECKGOTO(ncclStrongStreamSynchronize(&comm->sharedRes->deviceStream), res, exit);
     if (__atomic_load_n(&comm->revokedFlag, __ATOMIC_ACQUIRE) && comm->localPersistentRefs != 0) {

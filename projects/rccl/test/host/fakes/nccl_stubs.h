@@ -54,6 +54,11 @@ extern std::function<ncclResult_t(ncclComm_t)> g_ncclCommDestroy;
 // rcclEnsureHierarchicalComms creates its two child communicators through this API.
 extern std::function<ncclResult_t(ncclComm_t, int, int, ncclComm_t*, ncclConfig_t*)> g_ncclCommSplit;
 
+// Host-hierarchical AllReduce sets up DDA fabric on its child comms through these. Defaults: no fabric path, and an
+// init that must not be reached.
+extern std::function<bool(struct ncclComm*)> g_ncclDdaUseFabricPath;
+extern std::function<ncclResult_t(struct ncclComm*)> g_ncclDdaFabricCommInit;
+
 // commCleanup() ordering oracle (init.cc:3696). The block is pure ordering + error propagation, so the
 // oracle is the call-order log, not any return code. Every teardown step appends its own name in call
 // order: "tunerFinalize" (pushed by the test's own ncclTuner_t::finalize), "tunerUnload", and "commFree"
