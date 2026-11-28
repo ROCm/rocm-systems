@@ -12,7 +12,7 @@ name: AMDSMI Manylinux Wheels
 
 on:
   pull_request:
-    branches: [develop]
+    branches: [develop, 'release/**']
     paths:
       - 'projects/amdsmi/**'
       - '!projects/amdsmi/docs/**'
@@ -88,6 +88,7 @@ jobs:
       # the fetch cheap.
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          persist-credentials: false
           sparse-checkout: |
             projects/amdsmi
             shared/cuid
@@ -133,6 +134,15 @@ jobs:
             "$GITHUB_WORKSPACE/projects/amdsmi/tests/run_amdsmi_pkg_conflict_test.py" \
             --build-root "$AMDSMI_WHEEL_BUILD_DIR"
 
+      - name: Upload system library for ABI validation
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: amdsmi-system-elf-${{ matrix.target.id }}
+          path: ${{ env.AMDSMI_WHEEL_BUILD_DIR }}/src/libamd_smi.so
+          if-no-files-found: error
+          retention-days: 1
+          overwrite: true
+
       - name: Smoke test (install + import)
         run: |
           ${{matrix.target.python-bin}} -m pip install --upgrade pip
@@ -159,3 +169,41 @@ jobs:
           path: ${{github.workspace}}/wheels/*.whl
           if-no-files-found: error
           retention-days: 30
+
+  check-system-elf:
+    name: Check shipped system ABI (${{ matrix.target }})
+    needs: build-amdsmi-wheels
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [debian, rpm]
+    steps:
+      # Never run PR build scripts on the runner that evaluates the ABI.
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.base.sha || (github.event_name == 'workflow_dispatch' && github.event.repository.default_branch) || github.sha }}
+          persist-credentials: false
+          sparse-checkout: |
+            projects/amdsmi/abi
+            projects/amdsmi/tests/abi_check
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: amdsmi-system-elf-${{ matrix.target }}
+          path: ${{ runner.temp }}/abi-input
+
+      - name: Compare system ELF with trusted baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          baseline=projects/amdsmi/abi/shipped.json
+          tracked=$(git ls-tree --name-only HEAD -- "$baseline")
+          if [[ -z "$tracked" && "$GITHUB_EVENT_NAME" == pull_request ]]; then
+            message="ELF comparison not run: the PR base has no shipped ABI baseline."
+            echo "::warning::$message"
+            echo "$message" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          python3 -I projects/amdsmi/tests/abi_check/abi_gate.py shipped \
+            --baseline "$baseline" --library "$RUNNER_TEMP/abi-input/libamd_smi.so"

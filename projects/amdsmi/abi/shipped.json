@@ -1,0 +1,7056 @@
+{
+ "append_only": {},
+ "elf": {
+  "exports": [
+   "amdsmi_activate_ampp_profile@@AMDSMI_1",
+   "amdsmi_alloc_fabric_telemetry@@AMDSMI_1",
+   "amdsmi_clean_gpu_local_data@@AMDSMI_1",
+   "amdsmi_configure_ampp_profile@@AMDSMI_1",
+   "amdsmi_cpu_apb_disable@@AMDSMI_1",
+   "amdsmi_cpu_apb_enable@@AMDSMI_1",
+   "amdsmi_fabric_telem_id_to_string@@AMDSMI_1",
+   "amdsmi_first_online_core_on_cpu_socket@@AMDSMI_1",
+   "amdsmi_free_fabric_telemetry@@AMDSMI_1",
+   "amdsmi_free_name_value_pairs@@AMDSMI_1",
+   "amdsmi_get_afids_from_cper@@AMDSMI_1",
+   "amdsmi_get_ampp_fields@@AMDSMI_1",
+   "amdsmi_get_ampp_profiles@@AMDSMI_1",
+   "amdsmi_get_clk_freq@@AMDSMI_1",
+   "amdsmi_get_clock_info@@AMDSMI_1",
+   "amdsmi_get_cpu_affinity_with_scope@@AMDSMI_1",
+   "amdsmi_get_cpu_cc6_enable@@AMDSMI_1",
+   "amdsmi_get_cpu_cclk_limit@@AMDSMI_1",
+   "amdsmi_get_cpu_core_boostlimit@@AMDSMI_1",
+   "amdsmi_get_cpu_core_ccd_power@@AMDSMI_1",
+   "amdsmi_get_cpu_core_current_freq_limit@@AMDSMI_1",
+   "amdsmi_get_cpu_core_eff_floor_freq_limit@@AMDSMI_1",
+   "amdsmi_get_cpu_core_energy@@AMDSMI_1",
+   "amdsmi_get_cpu_core_floor_freq_limit@@AMDSMI_1",
+   "amdsmi_get_cpu_cores_per_socket@@AMDSMI_1",
+   "amdsmi_get_cpu_current_io_bandwidth@@AMDSMI_1",
+   "amdsmi_get_cpu_current_xgmi_bw@@AMDSMI_1",
+   "amdsmi_get_cpu_ddr_bw@@AMDSMI_1",
+   "amdsmi_get_cpu_dfc_ctrl@@AMDSMI_1",
+   "amdsmi_get_cpu_dimm_power_consumption@@AMDSMI_1",
+   "amdsmi_get_cpu_dimm_sb_reg@@AMDSMI_1",
+   "amdsmi_get_cpu_dimm_temp_range_and_refresh_rate@@AMDSMI_1",
+   "amdsmi_get_cpu_dimm_thermal_sensor@@AMDSMI_1",
+   "amdsmi_get_cpu_eff_floor_freq_limit@@AMDSMI_1",
+   "amdsmi_get_cpu_enabled_commands@@AMDSMI_1",
+   "amdsmi_get_cpu_family@@AMDSMI_1",
+   "amdsmi_get_cpu_fclk_mclk@@AMDSMI_1",
+   "amdsmi_get_cpu_floor_freq_limit@@AMDSMI_1",
+   "amdsmi_get_cpu_freq_range@@AMDSMI_1",
+   "amdsmi_get_cpu_handles@@AMDSMI_1",
+   "amdsmi_get_cpu_hsmp_driver_version@@AMDSMI_1",
+   "amdsmi_get_cpu_hsmp_proto_ver@@AMDSMI_1",
+   "amdsmi_get_cpu_model@@AMDSMI_1",
+   "amdsmi_get_cpu_model_name@@AMDSMI_1",
+   "amdsmi_get_cpu_pc6_enable@@AMDSMI_1",
+   "amdsmi_get_cpu_prochot_status@@AMDSMI_1",
+   "amdsmi_get_cpu_pwr_efficiency_mode@@AMDSMI_1",
+   "amdsmi_get_cpu_pwr_svi_telemetry_all_rails@@AMDSMI_1",
+   "amdsmi_get_cpu_rail_isofreq_policy@@AMDSMI_1",
+   "amdsmi_get_cpu_sdps_limit@@AMDSMI_1",
+   "amdsmi_get_cpu_smu_fw_version@@AMDSMI_1",
+   "amdsmi_get_cpu_socket_c0_residency@@AMDSMI_1",
+   "amdsmi_get_cpu_socket_count@@AMDSMI_1",
+   "amdsmi_get_cpu_socket_current_active_freq_limit@@AMDSMI_1",
+   "amdsmi_get_cpu_socket_energy@@AMDSMI_1",
+   "amdsmi_get_cpu_socket_freq_range@@AMDSMI_1",
+   "amdsmi_get_cpu_socket_lclk_dpm_level@@AMDSMI_1",
+   "amdsmi_get_cpu_socket_power@@AMDSMI_1",
+   "amdsmi_get_cpu_socket_power_cap@@AMDSMI_1",
+   "amdsmi_get_cpu_socket_power_cap_max@@AMDSMI_1",
+   "amdsmi_get_cpu_socket_temperature@@AMDSMI_1",
+   "amdsmi_get_cpu_svi3_vr_controller_temp@@AMDSMI_1",
+   "amdsmi_get_cpu_tdelta@@AMDSMI_1",
+   "amdsmi_get_cpu_xgmi_pstate_range@@AMDSMI_1",
+   "amdsmi_get_cpucore_handles@@AMDSMI_1",
+   "amdsmi_get_energy_count@@AMDSMI_1",
+   "amdsmi_get_esmi_err_msg@@AMDSMI_1",
+   "amdsmi_get_fabric_cper_entries@@AMDSMI_1",
+   "amdsmi_get_fabric_telemetry_data@@AMDSMI_1",
+   "amdsmi_get_fw_info@@AMDSMI_1",
+   "amdsmi_get_gpu_accelerator_partition_mem_alloc_mode@@AMDSMI_1",
+   "amdsmi_get_gpu_accelerator_partition_profile@@AMDSMI_1",
+   "amdsmi_get_gpu_accelerator_partition_profile_config@@AMDSMI_1",
+   "amdsmi_get_gpu_activity@@AMDSMI_1",
+   "amdsmi_get_gpu_asic_info@@AMDSMI_1",
+   "amdsmi_get_gpu_available_counters@@AMDSMI_1",
+   "amdsmi_get_gpu_bad_page_info@@AMDSMI_1",
+   "amdsmi_get_gpu_bad_page_threshold@@AMDSMI_1",
+   "amdsmi_get_gpu_bdf_id@@AMDSMI_1",
+   "amdsmi_get_gpu_board_info@@AMDSMI_1",
+   "amdsmi_get_gpu_busy_percent@@AMDSMI_1",
+   "amdsmi_get_gpu_cache_info@@AMDSMI_1",
+   "amdsmi_get_gpu_compute_partition@@AMDSMI_1",
+   "amdsmi_get_gpu_compute_partition_mem_alloc_mode@@AMDSMI_1",
+   "amdsmi_get_gpu_compute_process_gpus@@AMDSMI_1",
+   "amdsmi_get_gpu_compute_process_info@@AMDSMI_1",
+   "amdsmi_get_gpu_compute_process_info_by_pid@@AMDSMI_1",
+   "amdsmi_get_gpu_cper_entries@@AMDSMI_1",
+   "amdsmi_get_gpu_device_bdf@@AMDSMI_1",
+   "amdsmi_get_gpu_device_cuid@@AMDSMI_1",
+   "amdsmi_get_gpu_device_uuid@@AMDSMI_1",
+   "amdsmi_get_gpu_driver_info@@AMDSMI_1",
+   "amdsmi_get_gpu_ecc_count@@AMDSMI_1",
+   "amdsmi_get_gpu_ecc_enabled@@AMDSMI_1",
+   "amdsmi_get_gpu_ecc_status@@AMDSMI_1",
+   "amdsmi_get_gpu_enumeration_info@@AMDSMI_1",
+   "amdsmi_get_gpu_event_notification@@AMDSMI_1",
+   "amdsmi_get_gpu_fabric_info@@AMDSMI_1",
+   "amdsmi_get_gpu_fan_rpms@@AMDSMI_1",
+   "amdsmi_get_gpu_fan_speed@@AMDSMI_1",
+   "amdsmi_get_gpu_fan_speed_max@@AMDSMI_1",
+   "amdsmi_get_gpu_id@@AMDSMI_1",
+   "amdsmi_get_gpu_kfd_info@@AMDSMI_1",
+   "amdsmi_get_gpu_mem_overdrive_level@@AMDSMI_1",
+   "amdsmi_get_gpu_memory_partition@@AMDSMI_1",
+   "amdsmi_get_gpu_memory_partition_config@@AMDSMI_1",
+   "amdsmi_get_gpu_memory_reserved_pages@@AMDSMI_1",
+   "amdsmi_get_gpu_memory_total@@AMDSMI_1",
+   "amdsmi_get_gpu_memory_usage@@AMDSMI_1",
+   "amdsmi_get_gpu_metrics_header_info@@AMDSMI_1",
+   "amdsmi_get_gpu_metrics_info@@AMDSMI_1",
+   "amdsmi_get_gpu_od_volt_curve_regions@@AMDSMI_1",
+   "amdsmi_get_gpu_od_volt_info@@AMDSMI_1",
+   "amdsmi_get_gpu_overdrive_level@@AMDSMI_1",
+   "amdsmi_get_gpu_partition_metrics_info@@AMDSMI_1",
+   "amdsmi_get_gpu_pci_bandwidth@@AMDSMI_1",
+   "amdsmi_get_gpu_pci_replay_counter@@AMDSMI_1",
+   "amdsmi_get_gpu_pci_throughput@@AMDSMI_1",
+   "amdsmi_get_gpu_perf_level@@AMDSMI_1",
+   "amdsmi_get_gpu_pm_metrics_info@@AMDSMI_1",
+   "amdsmi_get_gpu_power_profile_presets@@AMDSMI_1",
+   "amdsmi_get_gpu_process_isolation@@AMDSMI_1",
+   "amdsmi_get_gpu_process_list@@AMDSMI_1",
+   "amdsmi_get_gpu_process_list_by_pid@@AMDSMI_1",
+   "amdsmi_get_gpu_ptl_formats@@AMDSMI_1",
+   "amdsmi_get_gpu_ptl_state@@AMDSMI_1",
+   "amdsmi_get_gpu_ras_block_features_enabled@@AMDSMI_1",
+   "amdsmi_get_gpu_ras_feature_info@@AMDSMI_1",
+   "amdsmi_get_gpu_reg_table_info@@AMDSMI_1",
+   "amdsmi_get_gpu_revision@@AMDSMI_1",
+   "amdsmi_get_gpu_subsystem_id@@AMDSMI_1",
+   "amdsmi_get_gpu_subsystem_name@@AMDSMI_1",
+   "amdsmi_get_gpu_topo_numa_affinity@@AMDSMI_1",
+   "amdsmi_get_gpu_total_ecc_count@@AMDSMI_1",
+   "amdsmi_get_gpu_uma_carveout_info@@AMDSMI_1",
+   "amdsmi_get_gpu_vbios_info@@AMDSMI_1",
+   "amdsmi_get_gpu_vendor_name@@AMDSMI_1",
+   "amdsmi_get_gpu_virtualization_mode@@AMDSMI_1",
+   "amdsmi_get_gpu_volt_metric@@AMDSMI_1",
+   "amdsmi_get_gpu_vram_info@@AMDSMI_1",
+   "amdsmi_get_gpu_vram_usage@@AMDSMI_1",
+   "amdsmi_get_gpu_vram_vendor@@AMDSMI_1",
+   "amdsmi_get_gpu_xcd_counter@@AMDSMI_1",
+   "amdsmi_get_gpu_xgmi_link_status@@AMDSMI_1",
+   "amdsmi_get_hsmp_metrics_table@@AMDSMI_1",
+   "amdsmi_get_hsmp_metrics_table_version@@AMDSMI_1",
+   "amdsmi_get_lib_version@@AMDSMI_1",
+   "amdsmi_get_link_metrics@@AMDSMI_1",
+   "amdsmi_get_link_topology@@AMDSMI_1",
+   "amdsmi_get_link_topology_nearest@@AMDSMI_1",
+   "amdsmi_get_minmax_bandwidth_between_processors@@AMDSMI_1",
+   "amdsmi_get_nic_asic_info@@AMDSMI_1",
+   "amdsmi_get_nic_bus_info@@AMDSMI_1",
+   "amdsmi_get_nic_device_bdf@@AMDSMI_1",
+   "amdsmi_get_nic_driver_info@@AMDSMI_1",
+   "amdsmi_get_nic_fw_info@@AMDSMI_1",
+   "amdsmi_get_nic_numa_info@@AMDSMI_1",
+   "amdsmi_get_nic_port_info@@AMDSMI_1",
+   "amdsmi_get_nic_port_statistics@@AMDSMI_1",
+   "amdsmi_get_nic_processor_handles@@AMDSMI_1",
+   "amdsmi_get_nic_rdma_dev_info@@AMDSMI_1",
+   "amdsmi_get_nic_rdma_port_statistics@@AMDSMI_1",
+   "amdsmi_get_nic_vendor_statistics@@AMDSMI_1",
+   "amdsmi_get_node_handle@@AMDSMI_1",
+   "amdsmi_get_npm_balancing_mode@@AMDSMI_1",
+   "amdsmi_get_npm_info@@AMDSMI_1",
+   "amdsmi_get_npm_supported_balancing_modes@@AMDSMI_1",
+   "amdsmi_get_pcie_info@@AMDSMI_1",
+   "amdsmi_get_power_cap_info@@AMDSMI_1",
+   "amdsmi_get_power_info@@AMDSMI_1",
+   "amdsmi_get_processor_count_from_handles@@AMDSMI_1",
+   "amdsmi_get_processor_handle_from_bdf@@AMDSMI_1",
+   "amdsmi_get_processor_handles@@AMDSMI_1",
+   "amdsmi_get_processor_handles_by_type@@AMDSMI_1",
+   "amdsmi_get_processor_info@@AMDSMI_1",
+   "amdsmi_get_processor_type@@AMDSMI_1",
+   "amdsmi_get_soc_pstate@@AMDSMI_1",
+   "amdsmi_get_socket_handles@@AMDSMI_1",
+   "amdsmi_get_socket_info@@AMDSMI_1",
+   "amdsmi_get_supported_power_cap@@AMDSMI_1",
+   "amdsmi_get_temp_metric@@AMDSMI_1",
+   "amdsmi_get_threads_per_core@@AMDSMI_1",
+   "amdsmi_get_tray_info@@AMDSMI_1",
+   "amdsmi_get_ttm_info@@AMDSMI_1",
+   "amdsmi_get_utilization_count@@AMDSMI_1",
+   "amdsmi_get_vcn_busy_percent@@AMDSMI_1",
+   "amdsmi_get_violation_status@@AMDSMI_1",
+   "amdsmi_get_xgmi_info@@AMDSMI_1",
+   "amdsmi_get_xgmi_plpd@@AMDSMI_1",
+   "amdsmi_gpu_control_counter@@AMDSMI_1",
+   "amdsmi_gpu_counter_group_supported@@AMDSMI_1",
+   "amdsmi_gpu_create_counter@@AMDSMI_1",
+   "amdsmi_gpu_destroy_counter@@AMDSMI_1",
+   "amdsmi_gpu_read_counter@@AMDSMI_1",
+   "amdsmi_gpu_validate_ras_eeprom@@AMDSMI_1",
+   "amdsmi_gpu_xgmi_error_status@@AMDSMI_1",
+   "amdsmi_init@@AMDSMI_1",
+   "amdsmi_init_gpu_event_notification@@AMDSMI_1",
+   "amdsmi_is_P2P_accessible@@AMDSMI_1",
+   "amdsmi_is_gpu_power_management_enabled@@AMDSMI_1",
+   "amdsmi_reset_gpu@@AMDSMI_1",
+   "amdsmi_reset_gpu_fan@@AMDSMI_1",
+   "amdsmi_reset_gpu_xgmi_error@@AMDSMI_1",
+   "amdsmi_reset_ttm_pages_limit@@AMDSMI_1",
+   "amdsmi_set_clk_freq@@AMDSMI_1",
+   "amdsmi_set_cpu_cc6_enable@@AMDSMI_1",
+   "amdsmi_set_cpu_core_boostlimit@@AMDSMI_1",
+   "amdsmi_set_cpu_core_floor_freq_limit@@AMDSMI_1",
+   "amdsmi_set_cpu_core_msr_floor_freq_limit@@AMDSMI_1",
+   "amdsmi_set_cpu_df_pstate_range@@AMDSMI_1",
+   "amdsmi_set_cpu_dfc_ctrl@@AMDSMI_1",
+   "amdsmi_set_cpu_dimm_sb_reg@@AMDSMI_1",
+   "amdsmi_set_cpu_floor_freq_limit@@AMDSMI_1",
+   "amdsmi_set_cpu_gmi3_link_width_range@@AMDSMI_1",
+   "amdsmi_set_cpu_msr_floor_freq_limit@@AMDSMI_1",
+   "amdsmi_set_cpu_pc6_enable@@AMDSMI_1",
+   "amdsmi_set_cpu_pcie_link_rate@@AMDSMI_1",
+   "amdsmi_set_cpu_pwr_efficiency_mode@@AMDSMI_1",
+   "amdsmi_set_cpu_rail_isofreq_policy@@AMDSMI_1",
+   "amdsmi_set_cpu_sdps_limit@@AMDSMI_1",
+   "amdsmi_set_cpu_socket_boostlimit@@AMDSMI_1",
+   "amdsmi_set_cpu_socket_lclk_dpm_level@@AMDSMI_1",
+   "amdsmi_set_cpu_socket_power_cap@@AMDSMI_1",
+   "amdsmi_set_cpu_xgmi_pstate_range@@AMDSMI_1",
+   "amdsmi_set_cpu_xgmi_width@@AMDSMI_1",
+   "amdsmi_set_gpu_accelerator_partition_mem_alloc_mode@@AMDSMI_1",
+   "amdsmi_set_gpu_accelerator_partition_profile@@AMDSMI_1",
+   "amdsmi_set_gpu_clk_limit@@AMDSMI_1",
+   "amdsmi_set_gpu_compute_partition@@AMDSMI_1",
+   "amdsmi_set_gpu_compute_partition_mem_alloc_mode@@AMDSMI_1",
+   "amdsmi_set_gpu_event_notification_mask@@AMDSMI_1",
+   "amdsmi_set_gpu_fan_speed@@AMDSMI_1",
+   "amdsmi_set_gpu_memory_partition@@AMDSMI_1",
+   "amdsmi_set_gpu_memory_partition_mode@@AMDSMI_1",
+   "amdsmi_set_gpu_od_clk_info@@AMDSMI_1",
+   "amdsmi_set_gpu_od_volt_info@@AMDSMI_1",
+   "amdsmi_set_gpu_overdrive_level@@AMDSMI_1",
+   "amdsmi_set_gpu_pci_bandwidth@@AMDSMI_1",
+   "amdsmi_set_gpu_perf_determinism_mode@@AMDSMI_1",
+   "amdsmi_set_gpu_perf_level@@AMDSMI_1",
+   "amdsmi_set_gpu_power_profile@@AMDSMI_1",
+   "amdsmi_set_gpu_process_isolation@@AMDSMI_1",
+   "amdsmi_set_gpu_ptl_formats@@AMDSMI_1",
+   "amdsmi_set_gpu_ptl_state@@AMDSMI_1",
+   "amdsmi_set_gpu_uma_carveout@@AMDSMI_1",
+   "amdsmi_set_npm_balancing_mode@@AMDSMI_1",
+   "amdsmi_set_npm_limit@@AMDSMI_1",
+   "amdsmi_set_power_cap@@AMDSMI_1",
+   "amdsmi_set_soc_pstate@@AMDSMI_1",
+   "amdsmi_set_ttm_pages_limit@@AMDSMI_1",
+   "amdsmi_set_xgmi_plpd@@AMDSMI_1",
+   "amdsmi_shut_down@@AMDSMI_1",
+   "amdsmi_status_code_to_string@@AMDSMI_1",
+   "amdsmi_stop_gpu_event_notification@@AMDSMI_1",
+   "amdsmi_topo_get_link_type@@AMDSMI_1",
+   "amdsmi_topo_get_link_weight@@AMDSMI_1",
+   "amdsmi_topo_get_numa_node_number@@AMDSMI_1",
+   "amdsmi_topo_get_p2p_status@@AMDSMI_1",
+   "rsmi_init@@AMDSMI_1",
+   "rsmi_is_P2P_accessible@@AMDSMI_1"
+  ],
+  "soname": "libamd_smi.so.27"
+ },
+ "header": {
+  "aliases": {
+   "processor_type_t": "amdsmi_processor_type_t"
+  },
+  "functions": {
+   "amdsmi_activate_ampp_profile": "amdsmi_status_t (void *, const char *)",
+   "amdsmi_alloc_fabric_telemetry": "amdsmi_status_t (void *, unsigned int, amdsmi_fabric_telemetry_t **)",
+   "amdsmi_clean_gpu_local_data": "amdsmi_status_t (void *)",
+   "amdsmi_configure_ampp_profile": "amdsmi_status_t (void *, const char *, const amdsmi_ampp_field_t *, unsigned int)",
+   "amdsmi_cpu_apb_disable": "amdsmi_status_t (void *, unsigned char)",
+   "amdsmi_cpu_apb_enable": "amdsmi_status_t (void *)",
+   "amdsmi_fabric_telem_id_to_string": "amdsmi_status_t (unsigned long, const char **)",
+   "amdsmi_first_online_core_on_cpu_socket": "amdsmi_status_t (void *, unsigned int *)",
+   "amdsmi_free_fabric_telemetry": "amdsmi_status_t (void *, amdsmi_fabric_telemetry_t *)",
+   "amdsmi_get_afids_from_cper": "amdsmi_status_t (char *, unsigned int, unsigned long *, unsigned int *)",
+   "amdsmi_get_ampp_fields": "amdsmi_status_t (void *, const char *, unsigned int *, amdsmi_ampp_field_t *)",
+   "amdsmi_get_ampp_profiles": "amdsmi_status_t (void *, char *, unsigned int *, amdsmi_ampp_profile_t *)",
+   "amdsmi_get_clk_freq": "amdsmi_status_t (void *, amdsmi_clk_type_t, amdsmi_frequencies_t *)",
+   "amdsmi_get_clock_info": "amdsmi_status_t (void *, amdsmi_clk_type_t, amdsmi_clk_info_t *)",
+   "amdsmi_get_cpu_affinity_with_scope": "amdsmi_status_t (void *, unsigned int, unsigned long *, amdsmi_affinity_scope_t)",
+   "amdsmi_get_cpu_cc6_enable": "amdsmi_status_t (void *, unsigned char *)",
+   "amdsmi_get_cpu_cclk_limit": "amdsmi_status_t (void *, unsigned int *)",
+   "amdsmi_get_cpu_core_boostlimit": "amdsmi_status_t (void *, unsigned int *)",
+   "amdsmi_get_cpu_core_ccd_power": "amdsmi_status_t (void *, unsigned int *)",
+   "amdsmi_get_cpu_core_current_freq_limit": "amdsmi_status_t (void *, unsigned int *)",
+   "amdsmi_get_cpu_core_eff_floor_freq_limit": "amdsmi_status_t (void *, unsigned int *)",
+   "amdsmi_get_cpu_core_energy": "amdsmi_status_t (void *, unsigned long *)",
+   "amdsmi_get_cpu_core_floor_freq_limit": "amdsmi_status_t (void *, unsigned int *)",
+   "amdsmi_get_cpu_cores_per_socket": "amdsmi_status_t (unsigned int, amdsmi_sock_info_t *)",
+   "amdsmi_get_cpu_current_io_bandwidth": "amdsmi_status_t (void *, amdsmi_link_id_bw_type_t, unsigned int *)",
+   "amdsmi_get_cpu_current_xgmi_bw": "amdsmi_status_t (void *, amdsmi_link_id_bw_type_t, unsigned int *)",
+   "amdsmi_get_cpu_ddr_bw": "amdsmi_status_t (void *, amdsmi_ddr_bw_metrics_t *)",
+   "amdsmi_get_cpu_dfc_ctrl": "amdsmi_status_t (void *, unsigned char *)",
+   "amdsmi_get_cpu_dimm_power_consumption": "amdsmi_status_t (void *, unsigned char, amdsmi_dimm_power_t *)",
+   "amdsmi_get_cpu_dimm_sb_reg": "amdsmi_status_t (void *, unsigned int, unsigned int, unsigned int, unsigned int, unsigned int *)",
+   "amdsmi_get_cpu_dimm_temp_range_and_refresh_rate": "amdsmi_status_t (void *, unsigned char, amdsmi_temp_range_refresh_rate_t *)",
+   "amdsmi_get_cpu_dimm_thermal_sensor": "amdsmi_status_t (void *, unsigned char, amdsmi_dimm_thermal_t *)",
+   "amdsmi_get_cpu_eff_floor_freq_limit": "amdsmi_status_t (void *, unsigned int *)",
+   "amdsmi_get_cpu_enabled_commands": "amdsmi_status_t (void *, _Bool *, unsigned int *, unsigned int *, unsigned int *)",
+   "amdsmi_get_cpu_family": "amdsmi_status_t (unsigned int *)",
+   "amdsmi_get_cpu_fclk_mclk": "amdsmi_status_t (void *, unsigned int *, unsigned int *)",
+   "amdsmi_get_cpu_floor_freq_limit": "amdsmi_status_t (void *, unsigned int *)",
+   "amdsmi_get_cpu_freq_range": "amdsmi_status_t (unsigned int *, unsigned int *)",
+   "amdsmi_get_cpu_handles": "amdsmi_status_t (unsigned int *, void **)",
+   "amdsmi_get_cpu_hsmp_driver_version": "amdsmi_status_t (void *, amdsmi_hsmp_driver_version_t *)",
+   "amdsmi_get_cpu_hsmp_proto_ver": "amdsmi_status_t (void *, unsigned int *)",
+   "amdsmi_get_cpu_model": "amdsmi_status_t (unsigned int *)",
+   "amdsmi_get_cpu_model_name": "amdsmi_status_t (void *, amdsmi_cpu_info_t *)",
+   "amdsmi_get_cpu_pc6_enable": "amdsmi_status_t (void *, unsigned char *)",
+   "amdsmi_get_cpu_prochot_status": "amdsmi_status_t (void *, unsigned int *)",
+   "amdsmi_get_cpu_pwr_efficiency_mode": "amdsmi_status_t (void *, unsigned int *, unsigned int *, unsigned int *)",
+   "amdsmi_get_cpu_pwr_svi_telemetry_all_rails": "amdsmi_status_t (void *, unsigned int *)",
+   "amdsmi_get_cpu_rail_isofreq_policy": "amdsmi_status_t (void *, unsigned char *)",
+   "amdsmi_get_cpu_sdps_limit": "amdsmi_status_t (void *, unsigned int *)",
+   "amdsmi_get_cpu_smu_fw_version": "amdsmi_status_t (void *, amdsmi_smu_fw_version_t *)",
+   "amdsmi_get_cpu_socket_c0_residency": "amdsmi_status_t (void *, unsigned int *)",
+   "amdsmi_get_cpu_socket_count": "amdsmi_status_t (unsigned int *)",
+   "amdsmi_get_cpu_socket_current_active_freq_limit": "amdsmi_status_t (void *, unsigned short *, char **)",
+   "amdsmi_get_cpu_socket_energy": "amdsmi_status_t (void *, unsigned long *)",
+   "amdsmi_get_cpu_socket_freq_range": "amdsmi_status_t (void *, unsigned short *, unsigned short *)",
+   "amdsmi_get_cpu_socket_lclk_dpm_level": "amdsmi_status_t (void *, unsigned char, amdsmi_dpm_level_t *)",
+   "amdsmi_get_cpu_socket_power": "amdsmi_status_t (void *, unsigned int *)",
+   "amdsmi_get_cpu_socket_power_cap": "amdsmi_status_t (void *, unsigned int *)",
+   "amdsmi_get_cpu_socket_power_cap_max": "amdsmi_status_t (void *, unsigned int *)",
+   "amdsmi_get_cpu_socket_temperature": "amdsmi_status_t (void *, unsigned int *)",
+   "amdsmi_get_cpu_svi3_vr_controller_temp": "amdsmi_status_t (void *, unsigned int *, unsigned int *, unsigned int *)",
+   "amdsmi_get_cpu_tdelta": "amdsmi_status_t (void *, unsigned char *)",
+   "amdsmi_get_cpu_xgmi_pstate_range": "amdsmi_status_t (void *, unsigned char *, unsigned char *)",
+   "amdsmi_get_cpucore_handles": "amdsmi_status_t (unsigned int *, void **)",
+   "amdsmi_get_energy_count": "amdsmi_status_t (void *, unsigned long *, float *, unsigned long *)",
+   "amdsmi_get_esmi_err_msg": "amdsmi_status_t (amdsmi_status_t, const char **)",
+   "amdsmi_get_fabric_cper_entries": "amdsmi_status_t (void *, unsigned int, char *, unsigned long *, amdsmi_cper_hdr_t **, unsigned long *, unsigned long *)",
+   "amdsmi_get_fabric_telemetry_data": "amdsmi_status_t (void *, amdsmi_fabric_telemetry_t *)",
+   "amdsmi_get_fw_info": "amdsmi_status_t (void *, amdsmi_fw_info_t *)",
+   "amdsmi_get_gpu_accelerator_partition_mem_alloc_mode": "amdsmi_status_t (void *, amdsmi_accelerator_partition_mem_alloc_mode_t *)",
+   "amdsmi_get_gpu_accelerator_partition_profile": "amdsmi_status_t (void *, amdsmi_accelerator_partition_profile_t *, unsigned int *)",
+   "amdsmi_get_gpu_accelerator_partition_profile_config": "amdsmi_status_t (void *, amdsmi_accelerator_partition_profile_config_t *)",
+   "amdsmi_get_gpu_activity": "amdsmi_status_t (void *, amdsmi_engine_usage_t *)",
+   "amdsmi_get_gpu_asic_info": "amdsmi_status_t (void *, amdsmi_asic_info_t *)",
+   "amdsmi_get_gpu_available_counters": "amdsmi_status_t (void *, amdsmi_event_group_t, unsigned int *)",
+   "amdsmi_get_gpu_bad_page_info": "amdsmi_status_t (void *, unsigned int *, amdsmi_retired_page_record_t *)",
+   "amdsmi_get_gpu_bad_page_threshold": "amdsmi_status_t (void *, unsigned int *)",
+   "amdsmi_get_gpu_bdf_id": "amdsmi_status_t (void *, unsigned long *)",
+   "amdsmi_get_gpu_board_info": "amdsmi_status_t (void *, amdsmi_board_info_t *)",
+   "amdsmi_get_gpu_busy_percent": "amdsmi_status_t (void *, unsigned int *)",
+   "amdsmi_get_gpu_cache_info": "amdsmi_status_t (void *, amdsmi_gpu_cache_info_t *)",
+   "amdsmi_get_gpu_compute_partition": "amdsmi_status_t (void *, char *, unsigned int)",
+   "amdsmi_get_gpu_compute_partition_mem_alloc_mode": "amdsmi_status_t (void *, amdsmi_compute_partition_mem_alloc_mode_t *)",
+   "amdsmi_get_gpu_compute_process_gpus": "amdsmi_status_t (unsigned int, unsigned int *, unsigned int *)",
+   "amdsmi_get_gpu_compute_process_info": "amdsmi_status_t (amdsmi_process_info_t *, unsigned int *)",
+   "amdsmi_get_gpu_compute_process_info_by_pid": "amdsmi_status_t (unsigned int, amdsmi_process_info_t *)",
+   "amdsmi_get_gpu_cper_entries": "amdsmi_status_t (void *, unsigned int, char *, unsigned long *, amdsmi_cper_hdr_t **, unsigned long *, unsigned long *)",
+   "amdsmi_get_gpu_device_bdf": "amdsmi_status_t (void *, amdsmi_bdf_t *)",
+   "amdsmi_get_gpu_device_cuid": "amdsmi_status_t (void *, unsigned int *, char *)",
+   "amdsmi_get_gpu_device_uuid": "amdsmi_status_t (void *, unsigned int *, char *)",
+   "amdsmi_get_gpu_driver_info": "amdsmi_status_t (void *, amdsmi_driver_info_t *)",
+   "amdsmi_get_gpu_ecc_count": "amdsmi_status_t (void *, amdsmi_gpu_block_t, amdsmi_error_count_t *)",
+   "amdsmi_get_gpu_ecc_enabled": "amdsmi_status_t (void *, unsigned long *)",
+   "amdsmi_get_gpu_ecc_status": "amdsmi_status_t (void *, amdsmi_gpu_block_t, amdsmi_ras_err_state_t *)",
+   "amdsmi_get_gpu_enumeration_info": "amdsmi_status_t (void *, amdsmi_enumeration_info_t *)",
+   "amdsmi_get_gpu_event_notification": "amdsmi_status_t (int, unsigned int *, amdsmi_evt_notification_data_t *)",
+   "amdsmi_get_gpu_fabric_info": "amdsmi_status_t (void *, amdsmi_fabric_info_t *)",
+   "amdsmi_get_gpu_fan_rpms": "amdsmi_status_t (void *, unsigned int, long *)",
+   "amdsmi_get_gpu_fan_speed": "amdsmi_status_t (void *, unsigned int, long *)",
+   "amdsmi_get_gpu_fan_speed_max": "amdsmi_status_t (void *, unsigned int, unsigned long *)",
+   "amdsmi_get_gpu_id": "amdsmi_status_t (void *, unsigned short *)",
+   "amdsmi_get_gpu_kfd_info": "amdsmi_status_t (void *, amdsmi_kfd_info_t *)",
+   "amdsmi_get_gpu_mem_overdrive_level": "amdsmi_status_t (void *, unsigned int *)",
+   "amdsmi_get_gpu_memory_partition": "amdsmi_status_t (void *, char *, unsigned int)",
+   "amdsmi_get_gpu_memory_partition_config": "amdsmi_status_t (void *, amdsmi_memory_partition_config_t *)",
+   "amdsmi_get_gpu_memory_reserved_pages": "amdsmi_status_t (void *, unsigned int *, amdsmi_retired_page_record_t *)",
+   "amdsmi_get_gpu_memory_total": "amdsmi_status_t (void *, amdsmi_memory_type_t, unsigned long *)",
+   "amdsmi_get_gpu_memory_usage": "amdsmi_status_t (void *, amdsmi_memory_type_t, unsigned long *)",
+   "amdsmi_get_gpu_metrics_header_info": "amdsmi_status_t (void *, amd_metrics_table_header_t *)",
+   "amdsmi_get_gpu_metrics_info": "amdsmi_status_t (void *, amdsmi_gpu_metrics_t *)",
+   "amdsmi_get_gpu_od_volt_curve_regions": "amdsmi_status_t (void *, unsigned int *, amdsmi_freq_volt_region_t *)",
+   "amdsmi_get_gpu_od_volt_info": "amdsmi_status_t (void *, amdsmi_od_volt_freq_data_t *)",
+   "amdsmi_get_gpu_overdrive_level": "amdsmi_status_t (void *, unsigned int *)",
+   "amdsmi_get_gpu_partition_metrics_info": "amdsmi_status_t (void *, amdsmi_gpu_metrics_t *)",
+   "amdsmi_get_gpu_pci_bandwidth": "amdsmi_status_t (void *, amdsmi_pcie_bandwidth_t *)",
+   "amdsmi_get_gpu_pci_replay_counter": "amdsmi_status_t (void *, unsigned long *)",
+   "amdsmi_get_gpu_pci_throughput": "amdsmi_status_t (void *, unsigned long *, unsigned long *, unsigned long *)",
+   "amdsmi_get_gpu_perf_level": "amdsmi_status_t (void *, amdsmi_dev_perf_level_t *)",
+   "amdsmi_get_gpu_pm_metrics_info": "amdsmi_status_t (void *, amdsmi_name_value_t **, unsigned int *)",
+   "amdsmi_get_gpu_power_profile_presets": "amdsmi_status_t (void *, unsigned int, amdsmi_power_profile_status_t *)",
+   "amdsmi_get_gpu_process_isolation": "amdsmi_status_t (void *, unsigned int *)",
+   "amdsmi_get_gpu_process_list": "amdsmi_status_t (void *, unsigned int *, amdsmi_proc_info_t *)",
+   "amdsmi_get_gpu_process_list_by_pid": "amdsmi_status_t (void **, unsigned int, amdsmi_proc_info_by_pid_t *, unsigned int *)",
+   "amdsmi_get_gpu_ptl_formats": "amdsmi_status_t (void *, amdsmi_ptl_data_format_t *, amdsmi_ptl_data_format_t *)",
+   "amdsmi_get_gpu_ptl_state": "amdsmi_status_t (void *, _Bool *)",
+   "amdsmi_get_gpu_ras_block_features_enabled": "amdsmi_status_t (void *, amdsmi_gpu_block_t, amdsmi_ras_err_state_t *)",
+   "amdsmi_get_gpu_ras_feature_info": "amdsmi_status_t (void *, amdsmi_ras_feature_t *)",
+   "amdsmi_get_gpu_reg_table_info": "amdsmi_status_t (void *, amdsmi_reg_type_t, amdsmi_name_value_t **, unsigned int *)",
+   "amdsmi_get_gpu_revision": "amdsmi_status_t (void *, unsigned short *)",
+   "amdsmi_get_gpu_subsystem_id": "amdsmi_status_t (void *, unsigned short *)",
+   "amdsmi_get_gpu_subsystem_name": "amdsmi_status_t (void *, char *, unsigned long)",
+   "amdsmi_get_gpu_topo_numa_affinity": "amdsmi_status_t (void *, int *)",
+   "amdsmi_get_gpu_total_ecc_count": "amdsmi_status_t (void *, amdsmi_error_count_t *)",
+   "amdsmi_get_gpu_uma_carveout_info": "amdsmi_status_t (void *, amdsmi_uma_carveout_info_t *)",
+   "amdsmi_get_gpu_vbios_info": "amdsmi_status_t (void *, amdsmi_vbios_info_t *)",
+   "amdsmi_get_gpu_vendor_name": "amdsmi_status_t (void *, char *, unsigned long)",
+   "amdsmi_get_gpu_virtualization_mode": "amdsmi_status_t (void *, amdsmi_virtualization_mode_t *)",
+   "amdsmi_get_gpu_volt_metric": "amdsmi_status_t (void *, amdsmi_voltage_type_t, amdsmi_voltage_metric_t, long *)",
+   "amdsmi_get_gpu_vram_info": "amdsmi_status_t (void *, amdsmi_vram_info_t *)",
+   "amdsmi_get_gpu_vram_usage": "amdsmi_status_t (void *, amdsmi_vram_usage_t *)",
+   "amdsmi_get_gpu_vram_vendor": "amdsmi_status_t (void *, char *, unsigned int)",
+   "amdsmi_get_gpu_xcd_counter": "amdsmi_status_t (void *, unsigned short *)",
+   "amdsmi_get_gpu_xgmi_link_status": "amdsmi_status_t (void *, amdsmi_xgmi_link_status_t *)",
+   "amdsmi_get_hsmp_metrics_table": "amdsmi_status_t (void *, amdsmi_hsmp_metrics_table_t *)",
+   "amdsmi_get_hsmp_metrics_table_version": "amdsmi_status_t (void *, unsigned int *)",
+   "amdsmi_get_lib_version": "amdsmi_status_t (amdsmi_version_t *)",
+   "amdsmi_get_link_metrics": "amdsmi_status_t (void *, amdsmi_link_metrics_t *)",
+   "amdsmi_get_link_topology": "amdsmi_status_t (void *, void *, amdsmi_link_topology_t *)",
+   "amdsmi_get_link_topology_nearest": "amdsmi_status_t (void *, amdsmi_link_type_t, amdsmi_topology_nearest_t *)",
+   "amdsmi_get_minmax_bandwidth_between_processors": "amdsmi_status_t (void *, void *, unsigned long *, unsigned long *)",
+   "amdsmi_get_nic_asic_info": "amdsmi_status_t (void *, amdsmi_nic_asic_info_t *)",
+   "amdsmi_get_nic_bus_info": "amdsmi_status_t (void *, amdsmi_nic_bus_info_t *)",
+   "amdsmi_get_nic_device_bdf": "amdsmi_status_t (void *, amdsmi_bdf_t *)",
+   "amdsmi_get_nic_driver_info": "amdsmi_status_t (void *, amdsmi_nic_driver_info_t *)",
+   "amdsmi_get_nic_fw_info": "amdsmi_status_t (void *, amdsmi_nic_fw_info_t *)",
+   "amdsmi_get_nic_numa_info": "amdsmi_status_t (void *, amdsmi_nic_numa_info_t *)",
+   "amdsmi_get_nic_port_info": "amdsmi_status_t (void *, amdsmi_nic_port_info_t *)",
+   "amdsmi_get_nic_port_statistics": "amdsmi_status_t (void *, unsigned int, unsigned int *, amdsmi_nic_stat_t *)",
+   "amdsmi_get_nic_processor_handles": "amdsmi_status_t (void *, unsigned int *, void **)",
+   "amdsmi_get_nic_rdma_dev_info": "amdsmi_status_t (void *, amdsmi_nic_rdma_devices_info_t *)",
+   "amdsmi_get_nic_rdma_port_statistics": "amdsmi_status_t (void *, unsigned int, unsigned int *, amdsmi_nic_stat_t *)",
+   "amdsmi_get_nic_vendor_statistics": "amdsmi_status_t (void *, unsigned int, unsigned int *, amdsmi_nic_stat_t *)",
+   "amdsmi_get_node_handle": "amdsmi_status_t (void *, void **)",
+   "amdsmi_get_npm_balancing_mode": "amdsmi_status_t (void *, amdsmi_npm_balancing_mode_t *)",
+   "amdsmi_get_npm_info": "amdsmi_status_t (void *, amdsmi_npm_info_t *)",
+   "amdsmi_get_npm_supported_balancing_modes": "amdsmi_status_t (void *, unsigned long *)",
+   "amdsmi_get_pcie_info": "amdsmi_status_t (void *, amdsmi_pcie_info_t *)",
+   "amdsmi_get_power_cap_info": "amdsmi_status_t (void *, unsigned int, amdsmi_power_cap_info_t *)",
+   "amdsmi_get_power_info": "amdsmi_status_t (void *, amdsmi_power_info_t *)",
+   "amdsmi_get_processor_count_from_handles": "amdsmi_status_t (void **, unsigned int *, unsigned int *, unsigned int *, unsigned int *)",
+   "amdsmi_get_processor_handle_from_bdf": "amdsmi_status_t (amdsmi_bdf_t, void **)",
+   "amdsmi_get_processor_handles": "amdsmi_status_t (void *, unsigned int *, void **)",
+   "amdsmi_get_processor_handles_by_type": "amdsmi_status_t (void *, amdsmi_processor_type_t, void **, unsigned int *)",
+   "amdsmi_get_processor_info": "amdsmi_status_t (void *, unsigned long, char *)",
+   "amdsmi_get_processor_type": "amdsmi_status_t (void *, amdsmi_processor_type_t *)",
+   "amdsmi_get_soc_pstate": "amdsmi_status_t (void *, amdsmi_dpm_policy_t *)",
+   "amdsmi_get_socket_handles": "amdsmi_status_t (unsigned int *, void **)",
+   "amdsmi_get_socket_info": "amdsmi_status_t (void *, unsigned long, char *)",
+   "amdsmi_get_supported_power_cap": "amdsmi_status_t (void *, unsigned int *, unsigned int *, amdsmi_power_cap_type_t *)",
+   "amdsmi_get_temp_metric": "amdsmi_status_t (void *, amdsmi_temperature_type_t, amdsmi_temperature_metric_t, long *)",
+   "amdsmi_get_threads_per_core": "amdsmi_status_t (unsigned int *)",
+   "amdsmi_get_tray_info": "amdsmi_status_t (void *, amdsmi_tray_info_t *)",
+   "amdsmi_get_ttm_info": "amdsmi_status_t (amdsmi_ttm_info_t *)",
+   "amdsmi_get_utilization_count": "amdsmi_status_t (void *, amdsmi_utilization_counter_t *, unsigned int, unsigned long *)",
+   "amdsmi_get_vcn_busy_percent": "amdsmi_status_t (void *, unsigned int *)",
+   "amdsmi_get_violation_status": "amdsmi_status_t (void *, amdsmi_violation_status_t *)",
+   "amdsmi_get_xgmi_info": "amdsmi_status_t (void *, amdsmi_xgmi_info_t *)",
+   "amdsmi_get_xgmi_plpd": "amdsmi_status_t (void *, amdsmi_dpm_policy_t *)",
+   "amdsmi_gpu_control_counter": "amdsmi_status_t (unsigned long, amdsmi_counter_command_t, void *)",
+   "amdsmi_gpu_counter_group_supported": "amdsmi_status_t (void *, amdsmi_event_group_t)",
+   "amdsmi_gpu_create_counter": "amdsmi_status_t (void *, amdsmi_event_type_t, unsigned long *)",
+   "amdsmi_gpu_destroy_counter": "amdsmi_status_t (unsigned long)",
+   "amdsmi_gpu_read_counter": "amdsmi_status_t (unsigned long, amdsmi_counter_value_t *)",
+   "amdsmi_gpu_validate_ras_eeprom": "amdsmi_status_t (void *)",
+   "amdsmi_gpu_xgmi_error_status": "amdsmi_status_t (void *, amdsmi_xgmi_status_t *)",
+   "amdsmi_init": "amdsmi_status_t (unsigned long)",
+   "amdsmi_init_gpu_event_notification": "amdsmi_status_t (void *)",
+   "amdsmi_is_P2P_accessible": "amdsmi_status_t (void *, void *, _Bool *)",
+   "amdsmi_is_gpu_power_management_enabled": "amdsmi_status_t (void *, _Bool *)",
+   "amdsmi_reset_gpu": "amdsmi_status_t (void *)",
+   "amdsmi_reset_gpu_fan": "amdsmi_status_t (void *, unsigned int)",
+   "amdsmi_reset_gpu_xgmi_error": "amdsmi_status_t (void *)",
+   "amdsmi_reset_ttm_pages_limit": "amdsmi_status_t (void)",
+   "amdsmi_set_clk_freq": "amdsmi_status_t (void *, amdsmi_clk_type_t, unsigned long)",
+   "amdsmi_set_cpu_cc6_enable": "amdsmi_status_t (void *, unsigned char)",
+   "amdsmi_set_cpu_core_boostlimit": "amdsmi_status_t (void *, unsigned int)",
+   "amdsmi_set_cpu_core_floor_freq_limit": "amdsmi_status_t (void *, unsigned int)",
+   "amdsmi_set_cpu_core_msr_floor_freq_limit": "amdsmi_status_t (void *, unsigned int)",
+   "amdsmi_set_cpu_df_pstate_range": "amdsmi_status_t (void *, unsigned char, unsigned char)",
+   "amdsmi_set_cpu_dfc_ctrl": "amdsmi_status_t (void *, unsigned char *)",
+   "amdsmi_set_cpu_dimm_sb_reg": "amdsmi_status_t (void *, unsigned int, unsigned int, unsigned int, unsigned int, unsigned int)",
+   "amdsmi_set_cpu_floor_freq_limit": "amdsmi_status_t (void *, unsigned int)",
+   "amdsmi_set_cpu_gmi3_link_width_range": "amdsmi_status_t (void *, unsigned char, unsigned char)",
+   "amdsmi_set_cpu_msr_floor_freq_limit": "amdsmi_status_t (void *, unsigned int)",
+   "amdsmi_set_cpu_pc6_enable": "amdsmi_status_t (void *, unsigned char)",
+   "amdsmi_set_cpu_pcie_link_rate": "amdsmi_status_t (void *, unsigned char, unsigned char *)",
+   "amdsmi_set_cpu_pwr_efficiency_mode": "amdsmi_status_t (void *, unsigned char, unsigned int *, unsigned int *)",
+   "amdsmi_set_cpu_rail_isofreq_policy": "amdsmi_status_t (void *, _Bool *)",
+   "amdsmi_set_cpu_sdps_limit": "amdsmi_status_t (void *, unsigned int)",
+   "amdsmi_set_cpu_socket_boostlimit": "amdsmi_status_t (void *, unsigned int)",
+   "amdsmi_set_cpu_socket_lclk_dpm_level": "amdsmi_status_t (void *, unsigned char, unsigned char, unsigned char)",
+   "amdsmi_set_cpu_socket_power_cap": "amdsmi_status_t (void *, unsigned int)",
+   "amdsmi_set_cpu_xgmi_pstate_range": "amdsmi_status_t (void *, unsigned char, unsigned char)",
+   "amdsmi_set_cpu_xgmi_width": "amdsmi_status_t (void *, unsigned char, unsigned char)",
+   "amdsmi_set_gpu_accelerator_partition_mem_alloc_mode": "amdsmi_status_t (void *, amdsmi_accelerator_partition_mem_alloc_mode_t)",
+   "amdsmi_set_gpu_accelerator_partition_profile": "amdsmi_status_t (void *, unsigned int)",
+   "amdsmi_set_gpu_clk_limit": "amdsmi_status_t (void *, amdsmi_clk_type_t, amdsmi_clk_limit_type_t, unsigned long)",
+   "amdsmi_set_gpu_compute_partition": "amdsmi_status_t (void *, amdsmi_compute_partition_type_t)",
+   "amdsmi_set_gpu_compute_partition_mem_alloc_mode": "amdsmi_status_t (void *, amdsmi_compute_partition_mem_alloc_mode_t)",
+   "amdsmi_set_gpu_event_notification_mask": "amdsmi_status_t (void *, unsigned long)",
+   "amdsmi_set_gpu_fan_speed": "amdsmi_status_t (void *, unsigned int, unsigned long)",
+   "amdsmi_set_gpu_memory_partition": "amdsmi_status_t (void *, amdsmi_memory_partition_type_t)",
+   "amdsmi_set_gpu_memory_partition_mode": "amdsmi_status_t (void *, amdsmi_memory_partition_type_t)",
+   "amdsmi_set_gpu_od_clk_info": "amdsmi_status_t (void *, amdsmi_freq_ind_t, unsigned long, amdsmi_clk_type_t)",
+   "amdsmi_set_gpu_od_volt_info": "amdsmi_status_t (void *, unsigned int, unsigned long, unsigned long)",
+   "amdsmi_set_gpu_overdrive_level": "amdsmi_status_t (void *, unsigned int)",
+   "amdsmi_set_gpu_pci_bandwidth": "amdsmi_status_t (void *, unsigned long)",
+   "amdsmi_set_gpu_perf_determinism_mode": "amdsmi_status_t (void *, unsigned long)",
+   "amdsmi_set_gpu_perf_level": "amdsmi_status_t (void *, amdsmi_dev_perf_level_t)",
+   "amdsmi_set_gpu_power_profile": "amdsmi_status_t (void *, unsigned int, amdsmi_power_profile_preset_masks_t)",
+   "amdsmi_set_gpu_process_isolation": "amdsmi_status_t (void *, unsigned int)",
+   "amdsmi_set_gpu_ptl_formats": "amdsmi_status_t (void *, amdsmi_ptl_data_format_t, amdsmi_ptl_data_format_t)",
+   "amdsmi_set_gpu_ptl_state": "amdsmi_status_t (void *, _Bool)",
+   "amdsmi_set_gpu_uma_carveout": "amdsmi_status_t (void *, unsigned int)",
+   "amdsmi_set_npm_balancing_mode": "amdsmi_status_t (void *, amdsmi_npm_balancing_mode_t)",
+   "amdsmi_set_npm_limit": "amdsmi_status_t (void *, unsigned long)",
+   "amdsmi_set_power_cap": "amdsmi_status_t (void *, unsigned int, unsigned long)",
+   "amdsmi_set_soc_pstate": "amdsmi_status_t (void *, unsigned int)",
+   "amdsmi_set_ttm_pages_limit": "amdsmi_status_t (unsigned long)",
+   "amdsmi_set_xgmi_plpd": "amdsmi_status_t (void *, unsigned int)",
+   "amdsmi_shut_down": "amdsmi_status_t (void)",
+   "amdsmi_status_code_to_string": "amdsmi_status_t (amdsmi_status_t, const char **)",
+   "amdsmi_stop_gpu_event_notification": "amdsmi_status_t (void *)",
+   "amdsmi_topo_get_link_type": "amdsmi_status_t (void *, void *, unsigned long *, amdsmi_link_type_t *)",
+   "amdsmi_topo_get_link_weight": "amdsmi_status_t (void *, void *, unsigned long *)",
+   "amdsmi_topo_get_numa_node_number": "amdsmi_status_t (void *, unsigned int *)",
+   "amdsmi_topo_get_p2p_status": "amdsmi_status_t (void *, void *, amdsmi_link_type_t *, amdsmi_p2p_capability_t *)"
+  },
+  "macros": {
+   "AMDSMI_APU_MAX_CORES": 16,
+   "AMDSMI_APU_MAX_IPU": 8,
+   "AMDSMI_APU_MAX_L3": 2,
+   "AMDSMI_APU_V24_CORES": 8,
+   "AMDSMI_CPER_NOTIFY_TYPE_IFOE_GUID": {
+    "text": "{ 0xFF , 0xFF , 0xFF , 0xFF , 0xFF , 0xFF , 0xFF , 0xFF , 0xFF , 0xFF , 0xFF , 0xFF , 0xFF , 0xFF , 0xFF , 0xFF }"
+   },
+   "AMDSMI_DATE_FORMAT": {
+    "text": "\"%04d-%02d-%02d:%02d:%02d:%02d.%03d\""
+   },
+   "AMDSMI_EVENT_MASK_FROM_INDEX": {
+    "fn": "( i ) ( 1ULL << ( ( i ) - 1 ) )"
+   },
+   "AMDSMI_FABRIC_LABEL_MAX_LENGTH": 32,
+   "AMDSMI_FABRIC_PPOD_ID_SIZE": 16,
+   "AMDSMI_GPU_CUID_SIZE": 38,
+   "AMDSMI_GPU_UUID_SIZE": 38,
+   "AMDSMI_LIB_VERSION_CREATE_STRING": {
+    "fn": "( MAJOR , MINOR , RELEASE ) ( # MAJOR \".\" # MINOR \".\" # RELEASE )"
+   },
+   "AMDSMI_LIB_VERSION_EXPAND_PARTS": {
+    "fn": "( MAJOR_STR , MINOR_STR , RELEASE_STR ) AMDSMI_LIB_VERSION_CREATE_STRING ( MAJOR_STR , MINOR_STR , RELEASE_STR )"
+   },
+   "AMDSMI_LIB_VERSION_MAJOR": 27,
+   "AMDSMI_LIB_VERSION_MINOR": 2,
+   "AMDSMI_LIB_VERSION_RELEASE": 0,
+   "AMDSMI_LIB_VERSION_STRING": {
+    "text": "AMDSMI_LIB_VERSION_EXPAND_PARTS ( AMDSMI_LIB_VERSION_MAJOR , AMDSMI_LIB_VERSION_MINOR , AMDSMI_LIB_VERSION_RELEASE )"
+   },
+   "AMDSMI_MAX_ACCELERATOR_PARTITIONS": 8,
+   "AMDSMI_MAX_ACCELERATOR_PROFILE": 32,
+   "AMDSMI_MAX_AID": 4,
+   "AMDSMI_MAX_CACHE_TYPES": 10,
+   "AMDSMI_MAX_CARVEOUT_OPTIONS": 16,
+   "AMDSMI_MAX_CONTAINER_TYPE": 2,
+   "AMDSMI_MAX_CP_PROFILE_RESOURCES": 32,
+   "AMDSMI_MAX_DEVICES": 32,
+   "AMDSMI_MAX_DRIVER_INFO_RSVD": 64,
+   "AMDSMI_MAX_ENGINES": 8,
+   "AMDSMI_MAX_FAN_SPEED": 255,
+   "AMDSMI_MAX_MM_IP_COUNT": 8,
+   "AMDSMI_MAX_NIC_FW": 16,
+   "AMDSMI_MAX_NIC_PORTS": 32,
+   "AMDSMI_MAX_NIC_RDMA_DEV": 32,
+   "AMDSMI_MAX_NUMBER_OF_AFIDS_PER_RECORD": 12,
+   "AMDSMI_MAX_NUM_AID": 2,
+   "AMDSMI_MAX_NUM_CLKS": 4,
+   "AMDSMI_MAX_NUM_CLKS_PER_AID": 2,
+   "AMDSMI_MAX_NUM_CLKS_PER_MID": 2,
+   "AMDSMI_MAX_NUM_FREQUENCIES": 33,
+   "AMDSMI_MAX_NUM_GFX_CLKS": 8,
+   "AMDSMI_MAX_NUM_HBM_STACKS": 12,
+   "AMDSMI_MAX_NUM_JPEG": 32,
+   "AMDSMI_MAX_NUM_JPEG_ENG_V1": 40,
+   "AMDSMI_MAX_NUM_MID": 2,
+   "AMDSMI_MAX_NUM_NUMA_NODES": 32,
+   "AMDSMI_MAX_NUM_PM_POLICIES": 32,
+   "AMDSMI_MAX_NUM_VCN": 4,
+   "AMDSMI_MAX_NUM_XCC": 8,
+   "AMDSMI_MAX_NUM_XCP": 8,
+   "AMDSMI_MAX_NUM_XGMI_LINKS": 8,
+   "AMDSMI_MAX_NUM_XGMI_PHYSICAL_LINK": 64,
+   "AMDSMI_MAX_POWER_EFFICIENCY_PPTLIMIT": 2097151,
+   "AMDSMI_MAX_POWER_EFFICIENCY_UTIL": 127,
+   "AMDSMI_MAX_SPD_DIMM_ADDRESS": 255,
+   "AMDSMI_MAX_SPD_LID": 15,
+   "AMDSMI_MAX_SPD_REG_OFFSET": 2047,
+   "AMDSMI_MAX_SPD_REG_SPACE": 1,
+   "AMDSMI_MAX_SPD_WRITE_DATA": 255,
+   "AMDSMI_MAX_STRING_LENGTH": 256,
+   "AMDSMI_MAX_SVI3_RAIL_INDEX": 4,
+   "AMDSMI_MAX_SVI3_RAIL_SELECTION": 1,
+   "AMDSMI_MAX_UTILIZATION_VALUES": 4,
+   "AMDSMI_MAX_UUID_ELEMENTS": 16,
+   "AMDSMI_NUM_HBM_INSTANCES": 4,
+   "AMDSMI_NUM_VOLTAGE_CURVE_POINTS": 3,
+   "AMDSMI_POWER_EFFICIENCY_MODE_4": 4,
+   "AMDSMI_POWER_EFFICIENCY_MODE_5": 5,
+   "AMDSMI_RAIL_INDEX_NONE": 4294967295,
+   "AMDSMI_TIME_FORMAT": {
+    "text": "\"%02d:%02d:%02d.%03d\""
+   }
+  },
+  "types": {
+   "amd_metrics_table_header_t": {
+    "align": 2,
+    "fields": [
+     [
+      "structure_size",
+      0,
+      2,
+      "unsigned short"
+     ],
+     [
+      "format_revision",
+      2,
+      1,
+      "unsigned char"
+     ],
+     [
+      "content_revision",
+      3,
+      1,
+      "unsigned char"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "31840e405675772c",
+    "size": 4
+   },
+   "amdsmi_accelerator_partition_mem_alloc_mode_t": {
+    "align": 4,
+    "enumerators": {
+     "AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_ALL": 2,
+     "AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_CAPPING": 1,
+     "AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_INVALID": 0
+    },
+    "kind": "enum",
+    "layout_hash": "ac0c976e3ef14905",
+    "size": 4
+   },
+   "amdsmi_accelerator_partition_profile_config_t": {
+    "align": 8,
+    "fields": [
+     [
+      "num_profiles",
+      0,
+      4,
+      "unsigned int"
+     ],
+     [
+      "num_resource_profiles",
+      4,
+      4,
+      "unsigned int"
+     ],
+     [
+      "resource_profiles",
+      8,
+      2048,
+      "amdsmi_accelerator_partition_resource_profile_t[32]"
+     ],
+     [
+      "default_profile_index",
+      2056,
+      4,
+      "unsigned int"
+     ],
+     [
+      "profiles",
+      2064,
+      36864,
+      "amdsmi_accelerator_partition_profile_t[32]"
+     ],
+     [
+      "reserved",
+      38928,
+      240,
+      "unsigned long[30]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "5e89b424d3fee8a0",
+    "size": 39168
+   },
+   "amdsmi_accelerator_partition_profile_t": {
+    "align": 8,
+    "fields": [
+     [
+      "profile_type",
+      0,
+      4,
+      "amdsmi_accelerator_partition_type_t"
+     ],
+     [
+      "num_partitions",
+      4,
+      4,
+      "unsigned int"
+     ],
+     [
+      "memory_caps",
+      8,
+      4,
+      "amdsmi_nps_caps_t"
+     ],
+     [
+      "profile_index",
+      12,
+      4,
+      "unsigned int"
+     ],
+     [
+      "num_resources",
+      16,
+      4,
+      "unsigned int"
+     ],
+     [
+      "resources",
+      20,
+      1024,
+      "unsigned int[8][32]"
+     ],
+     [
+      "reserved",
+      1048,
+      104,
+      "unsigned long[13]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "f854411a4b844a8c",
+    "size": 1152
+   },
+   "amdsmi_accelerator_partition_resource_profile_t": {
+    "align": 8,
+    "fields": [
+     [
+      "profile_index",
+      0,
+      4,
+      "unsigned int"
+     ],
+     [
+      "resource_type",
+      4,
+      4,
+      "amdsmi_accelerator_partition_resource_type_t"
+     ],
+     [
+      "partition_resource",
+      8,
+      4,
+      "unsigned int"
+     ],
+     [
+      "num_partitions_share_resource",
+      12,
+      4,
+      "unsigned int"
+     ],
+     [
+      "reserved",
+      16,
+      48,
+      "unsigned long[6]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "c1dcdaeb4eaa9a83",
+    "size": 64
+   },
+   "amdsmi_accelerator_partition_resource_type_t": {
+    "align": 4,
+    "enumerators": {
+     "AMDSMI_ACCELERATOR_DECODER": 2,
+     "AMDSMI_ACCELERATOR_DMA": 3,
+     "AMDSMI_ACCELERATOR_ENCODER": 1,
+     "AMDSMI_ACCELERATOR_JPEG": 4,
+     "AMDSMI_ACCELERATOR_MAX": 5,
+     "AMDSMI_ACCELERATOR_XCC": 0
+    },
+    "kind": "enum",
+    "layout_hash": "54bc6ddb142c8939",
+    "size": 4
+   },
+   "amdsmi_accelerator_partition_type_t": {
+    "align": 4,
+    "enumerators": {
+     "AMDSMI_ACCELERATOR_PARTITION_CPX": 5,
+     "AMDSMI_ACCELERATOR_PARTITION_DPX": 2,
+     "AMDSMI_ACCELERATOR_PARTITION_INVALID": 0,
+     "AMDSMI_ACCELERATOR_PARTITION_MAX": 6,
+     "AMDSMI_ACCELERATOR_PARTITION_QPX": 4,
+     "AMDSMI_ACCELERATOR_PARTITION_SPX": 1,
+     "AMDSMI_ACCELERATOR_PARTITION_TPX": 3
+    },
+    "kind": "enum",
+    "layout_hash": "2b14747b2f6447ef",
+    "size": 4
+   },
+   "amdsmi_affinity_scope_t": {
+    "align": 4,
+    "enumerators": {
+     "AMDSMI_AFFINITY_SCOPE_NODE": 0,
+     "AMDSMI_AFFINITY_SCOPE_SOCKET": 1
+    },
+    "kind": "enum",
+    "layout_hash": "8420ecc6587ca7d0",
+    "size": 4
+   },
+   "amdsmi_ampp_field_t": {
+    "align": 8,
+    "fields": [
+     [
+      "name",
+      0,
+      256,
+      "char[256]"
+     ],
+     [
+      "unit",
+      256,
+      256,
+      "char[256]"
+     ],
+     [
+      "value",
+      512,
+      8,
+      "long"
+     ],
+     [
+      "limit_min",
+      520,
+      8,
+      "long"
+     ],
+     [
+      "limit_max",
+      528,
+      8,
+      "long"
+     ],
+     [
+      "has_limits",
+      536,
+      1,
+      "_Bool"
+     ],
+     [
+      "reserved",
+      540,
+      16,
+      "unsigned int[4]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "37cf82efa65d359c",
+    "size": 560
+   },
+   "amdsmi_ampp_profile_t": {
+    "align": 4,
+    "fields": [
+     [
+      "name",
+      0,
+      256,
+      "char[256]"
+     ],
+     [
+      "index",
+      256,
+      4,
+      "unsigned int"
+     ],
+     [
+      "is_active",
+      260,
+      1,
+      "_Bool"
+     ],
+     [
+      "is_writable",
+      261,
+      1,
+      "_Bool"
+     ],
+     [
+      "is_configured",
+      262,
+      1,
+      "_Bool"
+     ],
+     [
+      "reserved",
+      264,
+      16,
+      "unsigned int[4]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "658867a8797bb680",
+    "size": 280
+   },
+   "amdsmi_apu_metrics_t": {
+    "align": 8,
+    "fields": [
+     [
+      "temperature_gfx",
+      0,
+      2,
+      "unsigned short"
+     ],
+     [
+      "temperature_soc",
+      2,
+      2,
+      "unsigned short"
+     ],
+     [
+      "temperature_core",
+      4,
+      32,
+      "unsigned short[16]"
+     ],
+     [
+      "temperature_l3",
+      36,
+      4,
+      "unsigned short[2]"
+     ],
+     [
+      "temperature_skin",
+      40,
+      2,
+      "unsigned short"
+     ],
+     [
+      "average_gfx_activity",
+      42,
+      2,
+      "unsigned short"
+     ],
+     [
+      "average_mm_activity",
+      44,
+      2,
+      "unsigned short"
+     ],
+     [
+      "average_vcn_activity",
+      46,
+      2,
+      "unsigned short"
+     ],
+     [
+      "average_ipu_activity",
+      48,
+      16,
+      "unsigned short[8]"
+     ],
+     [
+      "average_core_c0_activity",
+      64,
+      32,
+      "unsigned short[16]"
+     ],
+     [
+      "average_dram_reads",
+      96,
+      2,
+      "unsigned short"
+     ],
+     [
+      "average_dram_writes",
+      98,
+      2,
+      "unsigned short"
+     ],
+     [
+      "average_ipu_reads",
+      100,
+      2,
+      "unsigned short"
+     ],
+     [
+      "average_ipu_writes",
+      102,
+      2,
+      "unsigned short"
+     ],
+     [
+      "average_socket_power",
+      104,
+      4,
+      "unsigned int"
+     ],
+     [
+      "average_cpu_power",
+      108,
+      2,
+      "unsigned short"
+     ],
+     [
+      "average_soc_power",
+      110,
+      2,
+      "unsigned short"
+     ],
+     [
+      "average_gfx_power",
+      112,
+      4,
+      "unsigned int"
+     ],
+     [
+      "average_core_power",
+      116,
+      32,
+      "unsigned short[16]"
+     ],
+     [
+      "average_ipu_power",
+      148,
+      2,
+      "unsigned short"
+     ],
+     [
+      "average_apu_power",
+      152,
+      4,
+      "unsigned int"
+     ],
+     [
+      "average_dgpu_power",
+      156,
+      4,
+      "unsigned int"
+     ],
+     [
+      "average_all_core_power",
+      160,
+      4,
+      "unsigned int"
+     ],
+     [
+      "average_sys_power",
+      164,
+      2,
+      "unsigned short"
+     ],
+     [
+      "stapm_power_limit",
+      166,
+      2,
+      "unsigned short"
+     ],
+     [
+      "current_stapm_power_limit",
+      168,
+      2,
+      "unsigned short"
+     ],
+     [
+      "average_gfxclk_frequency",
+      170,
+      2,
+      "unsigned short"
+     ],
+     [
+      "average_socclk_frequency",
+      172,
+      2,
+      "unsigned short"
+     ],
+     [
+      "average_uclk_frequency",
+      174,
+      2,
+      "unsigned short"
+     ],
+     [
+      "average_fclk_frequency",
+      176,
+      2,
+      "unsigned short"
+     ],
+     [
+      "average_vclk_frequency",
+      178,
+      2,
+      "unsigned short"
+     ],
+     [
+      "average_dclk_frequency",
+      180,
+      2,
+      "unsigned short"
+     ],
+     [
+      "average_vpeclk_frequency",
+      182,
+      2,
+      "unsigned short"
+     ],
+     [
+      "average_ipuclk_frequency",
+      184,
+      2,
+      "unsigned short"
+     ],
+     [
+      "average_mpipu_frequency",
+      186,
+      2,
+      "unsigned short"
+     ],
+     [
+      "current_gfxclk",
+      188,
+      2,
+      "unsigned short"
+     ],
+     [
+      "current_socclk",
+      190,
+      2,
+      "unsigned short"
+     ],
+     [
+      "current_uclk",
+      192,
+      2,
+      "unsigned short"
+     ],
+     [
+      "current_fclk",
+      194,
+      2,
+      "unsigned short"
+     ],
+     [
+      "current_vclk",
+      196,
+      2,
+      "unsigned short"
+     ],
+     [
+      "current_dclk",
+      198,
+      2,
+      "unsigned short"
+     ],
+     [
+      "current_coreclk",
+      200,
+      32,
+      "unsigned short[16]"
+     ],
+     [
+      "current_l3clk",
+      232,
+      4,
+      "unsigned short[2]"
+     ],
+     [
+      "current_core_maxfreq",
+      236,
+      2,
+      "unsigned short"
+     ],
+     [
+      "current_gfx_maxfreq",
+      238,
+      2,
+      "unsigned short"
+     ],
+     [
+      "throttle_status",
+      240,
+      4,
+      "unsigned int"
+     ],
+     [
+      "indep_throttle_status",
+      248,
+      8,
+      "unsigned long"
+     ],
+     [
+      "throttle_residency_prochot",
+      256,
+      4,
+      "unsigned int"
+     ],
+     [
+      "throttle_residency_spl",
+      260,
+      4,
+      "unsigned int"
+     ],
+     [
+      "throttle_residency_fppt",
+      264,
+      4,
+      "unsigned int"
+     ],
+     [
+      "throttle_residency_sppt",
+      268,
+      4,
+      "unsigned int"
+     ],
+     [
+      "throttle_residency_thm_core",
+      272,
+      4,
+      "unsigned int"
+     ],
+     [
+      "throttle_residency_thm_gfx",
+      276,
+      4,
+      "unsigned int"
+     ],
+     [
+      "throttle_residency_thm_soc",
+      280,
+      4,
+      "unsigned int"
+     ],
+     [
+      "fan_pwm",
+      284,
+      2,
+      "unsigned short"
+     ],
+     [
+      "average_temperature_gfx",
+      286,
+      2,
+      "unsigned short"
+     ],
+     [
+      "average_temperature_soc",
+      288,
+      2,
+      "unsigned short"
+     ],
+     [
+      "average_temperature_core",
+      290,
+      32,
+      "unsigned short[16]"
+     ],
+     [
+      "average_temperature_l3",
+      322,
+      4,
+      "unsigned short[2]"
+     ],
+     [
+      "average_cpu_voltage",
+      326,
+      2,
+      "unsigned short"
+     ],
+     [
+      "average_soc_voltage",
+      328,
+      2,
+      "unsigned short"
+     ],
+     [
+      "average_gfx_voltage",
+      330,
+      2,
+      "unsigned short"
+     ],
+     [
+      "average_cpu_current",
+      332,
+      2,
+      "unsigned short"
+     ],
+     [
+      "average_soc_current",
+      334,
+      2,
+      "unsigned short"
+     ],
+     [
+      "average_gfx_current",
+      336,
+      2,
+      "unsigned short"
+     ],
+     [
+      "time_filter_alphavalue",
+      340,
+      4,
+      "unsigned int"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "04c1a018b02f6f9f",
+    "size": 344
+   },
+   "amdsmi_asic_info_t": {
+    "align": 8,
+    "fields": [
+     [
+      "market_name",
+      0,
+      256,
+      "char[256]"
+     ],
+     [
+      "vendor_id",
+      256,
+      4,
+      "unsigned int"
+     ],
+     [
+      "vendor_name",
+      260,
+      256,
+      "char[256]"
+     ],
+     [
+      "subvendor_id",
+      516,
+      4,
+      "unsigned int"
+     ],
+     [
+      "device_id",
+      520,
+      8,
+      "unsigned long"
+     ],
+     [
+      "rev_id",
+      528,
+      4,
+      "unsigned int"
+     ],
+     [
+      "asic_serial",
+      532,
+      256,
+      "char[256]"
+     ],
+     [
+      "oam_id",
+      788,
+      4,
+      "unsigned int"
+     ],
+     [
+      "num_of_compute_units",
+      792,
+      4,
+      "unsigned int"
+     ],
+     [
+      "target_graphics_version",
+      800,
+      8,
+      "unsigned long"
+     ],
+     [
+      "subsystem_id",
+      808,
+      4,
+      "unsigned int"
+     ],
+     [
+      "flags",
+      816,
+      8,
+      "unsigned long"
+     ],
+     [
+      "physical_acc_id",
+      824,
+      4,
+      "unsigned int"
+     ],
+     [
+      "chip_rev_id",
+      828,
+      4,
+      "unsigned int"
+     ],
+     [
+      "external_rev_id",
+      832,
+      4,
+      "unsigned int"
+     ],
+     [
+      "reserved",
+      836,
+      60,
+      "unsigned int[15]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "21b7bc8d79a19053",
+    "size": 896
+   },
+   "amdsmi_bdf_t": {
+    "align": 8,
+    "fields": [
+     [
+      "bdf",
+      0,
+      8,
+      "struct bdf_"
+     ],
+     [
+      "(anon #0)",
+      0,
+      8,
+      "struct amdsmi_bdf_t::(anon #0)"
+     ],
+     [
+      "as_uint",
+      0,
+      8,
+      "unsigned long"
+     ]
+    ],
+    "kind": "union",
+    "layout_hash": "4911dee8f78684a9",
+    "size": 8
+   },
+   "amdsmi_bit_field_t": {
+    "align": 8,
+    "kind": "typedef",
+    "size": 8,
+    "type": "unsigned long"
+   },
+   "amdsmi_board_info_t": {
+    "align": 8,
+    "fields": [
+     [
+      "model_number",
+      0,
+      256,
+      "char[256]"
+     ],
+     [
+      "product_serial",
+      256,
+      256,
+      "char[256]"
+     ],
+     [
+      "fru_id",
+      512,
+      256,
+      "char[256]"
+     ],
+     [
+      "product_name",
+      768,
+      256,
+      "char[256]"
+     ],
+     [
+      "manufacturer_name",
+      1024,
+      256,
+      "char[256]"
+     ],
+     [
+      "reserved",
+      1280,
+      512,
+      "unsigned long[64]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "442f72c143900689",
+    "size": 1792
+   },
+   "amdsmi_cache_property_type_t": {
+    "align": 4,
+    "enumerators": {
+     "AMDSMI_CACHE_PROPERTY_CPU_CACHE": 8,
+     "AMDSMI_CACHE_PROPERTY_DATA_CACHE": 2,
+     "AMDSMI_CACHE_PROPERTY_ENABLED": 1,
+     "AMDSMI_CACHE_PROPERTY_INST_CACHE": 4,
+     "AMDSMI_CACHE_PROPERTY_SIMD_CACHE": 16
+    },
+    "kind": "enum",
+    "layout_hash": "dbacbe09473aa1ae",
+    "size": 4
+   },
+   "amdsmi_card_form_factor_t": {
+    "align": 4,
+    "enumerators": {
+     "AMDSMI_CARD_FORM_FACTOR_CEM": 2,
+     "AMDSMI_CARD_FORM_FACTOR_OAM": 1,
+     "AMDSMI_CARD_FORM_FACTOR_PCIE": 0,
+     "AMDSMI_CARD_FORM_FACTOR_UNKNOWN": 3
+    },
+    "kind": "enum",
+    "layout_hash": "6a9915948898dafd",
+    "size": 4
+   },
+   "amdsmi_clk_info_t": {
+    "align": 4,
+    "fields": [
+     [
+      "clk",
+      0,
+      4,
+      "unsigned int"
+     ],
+     [
+      "min_clk",
+      4,
+      4,
+      "unsigned int"
+     ],
+     [
+      "max_clk",
+      8,
+      4,
+      "unsigned int"
+     ],
+     [
+      "clk_locked",
+      12,
+      1,
+      "unsigned char"
+     ],
+     [
+      "clk_deep_sleep",
+      13,
+      1,
+      "unsigned char"
+     ],
+     [
+      "reserved",
+      16,
+      16,
+      "unsigned int[4]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "db3e8d424b417d8c",
+    "size": 32
+   },
+   "amdsmi_clk_limit_type_t": {
+    "align": 4,
+    "enumerators": {
+     "AMDSMI_CLK_LIMIT_MAX": 1,
+     "AMDSMI_CLK_LIMIT_MIN": 0,
+     "CLK_LIMIT_MAX": 1,
+     "CLK_LIMIT_MIN": 0
+    },
+    "kind": "enum",
+    "layout_hash": "46a3124a32c66a78",
+    "size": 4
+   },
+   "amdsmi_clk_type_t": {
+    "align": 4,
+    "enumerators": {
+     "AMDSMI_CLK_TYPE_DCEF": 2,
+     "AMDSMI_CLK_TYPE_DCLK0": 8,
+     "AMDSMI_CLK_TYPE_DCLK1": 9,
+     "AMDSMI_CLK_TYPE_DF": 1,
+     "AMDSMI_CLK_TYPE_FIRST": 0,
+     "AMDSMI_CLK_TYPE_GFX": 0,
+     "AMDSMI_CLK_TYPE_MEM": 4,
+     "AMDSMI_CLK_TYPE_PCIE": 5,
+     "AMDSMI_CLK_TYPE_SOC": 3,
+     "AMDSMI_CLK_TYPE_SYS": 0,
+     "AMDSMI_CLK_TYPE_VCLK0": 6,
+     "AMDSMI_CLK_TYPE_VCLK1": 7,
+     "AMDSMI_CLK_TYPE__MAX": 9
+    },
+    "kind": "enum",
+    "layout_hash": "c79ba8da472c6097",
+    "size": 4
+   },
+   "amdsmi_compute_partition_mem_alloc_mode_t": {
+    "align": 4,
+    "enumerators": {
+     "AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_ALL": 2,
+     "AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_CAPPING": 1,
+     "AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_INVALID": 0
+    },
+    "kind": "enum",
+    "layout_hash": "430280a2fa3afaff",
+    "size": 4
+   },
+   "amdsmi_compute_partition_type_t": {
+    "align": 4,
+    "enumerators": {
+     "AMDSMI_COMPUTE_PARTITION_CPX": 5,
+     "AMDSMI_COMPUTE_PARTITION_DPX": 2,
+     "AMDSMI_COMPUTE_PARTITION_INVALID": 0,
+     "AMDSMI_COMPUTE_PARTITION_QPX": 4,
+     "AMDSMI_COMPUTE_PARTITION_SPX": 1,
+     "AMDSMI_COMPUTE_PARTITION_TPX": 3
+    },
+    "kind": "enum",
+    "layout_hash": "9f8ed30c00eec077",
+    "size": 4
+   },
+   "amdsmi_compute_tray_type_t": {
+    "align": 4,
+    "enumerators": {
+     "AMDSMI_COMPUTE_TRAY_TYPE_HELIOS_P": 1,
+     "AMDSMI_COMPUTE_TRAY_TYPE_HELIOS_R": 2,
+     "AMDSMI_COMPUTE_TRAY_TYPE_TITAN": 3,
+     "AMDSMI_COMPUTE_TRAY_TYPE_UNKNOWN": 0
+    },
+    "kind": "enum",
+    "layout_hash": "8ae98d33c121fe0e",
+    "size": 4
+   },
+   "amdsmi_container_types_t": {
+    "align": 4,
+    "enumerators": {
+     "AMDSMI_CONTAINER_DOCKER": 1,
+     "AMDSMI_CONTAINER_LXC": 0
+    },
+    "kind": "enum",
+    "layout_hash": "d3c5416bccdd29b2",
+    "size": 4
+   },
+   "amdsmi_counter_command_t": {
+    "align": 4,
+    "enumerators": {
+     "AMDSMI_CNTR_CMD_START": 0,
+     "AMDSMI_CNTR_CMD_STOP": 1
+    },
+    "kind": "enum",
+    "layout_hash": "b262b8aef2d067dd",
+    "size": 4
+   },
+   "amdsmi_counter_value_t": {
+    "align": 8,
+    "fields": [
+     [
+      "value",
+      0,
+      8,
+      "unsigned long"
+     ],
+     [
+      "time_enabled",
+      8,
+      8,
+      "unsigned long"
+     ],
+     [
+      "time_running",
+      16,
+      8,
+      "unsigned long"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "c3b5e022796dd460",
+    "size": 24
+   },
+   "amdsmi_cper_guid_t": {
+    "align": 1,
+    "fields": [
+     [
+      "b",
+      0,
+      16,
+      "unsigned char[16]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "dc76841b06cc0dd3",
+    "size": 16
+   },
+   "amdsmi_cper_hdr_t": {
+    "align": 1,
+    "fields": [
+     [
+      "signature",
+      0,
+      4,
+      "char[4]"
+     ],
+     [
+      "revision",
+      4,
+      2,
+      "unsigned short"
+     ],
+     [
+      "signature_end",
+      6,
+      4,
+      "unsigned int"
+     ],
+     [
+      "sec_cnt",
+      10,
+      2,
+      "unsigned short"
+     ],
+     [
+      "error_severity",
+      12,
+      4,
+      "amdsmi_cper_sev_t"
+     ],
+     [
+      "cper_valid_bits",
+      16,
+      4,
+      "amdsmi_cper_valid_bits_t"
+     ],
+     [
+      "record_length",
+      20,
+      4,
+      "unsigned int"
+     ],
+     [
+      "timestamp",
+      24,
+      8,
+      "amdsmi_cper_timestamp_t"
+     ],
+     [
+      "platform_id",
+      32,
+      16,
+      "char[16]"
+     ],
+     [
+      "partition_id",
+      48,
+      16,
+      "amdsmi_cper_guid_t"
+     ],
+     [
+      "creator_id",
+      64,
+      16,
+      "char[16]"
+     ],
+     [
+      "notify_type",
+      80,
+      16,
+      "amdsmi_cper_guid_t"
+     ],
+     [
+      "record_id",
+      96,
+      8,
+      "char[8]"
+     ],
+     [
+      "flags",
+      104,
+      4,
+      "unsigned int"
+     ],
+     [
+      "persistence_info",
+      108,
+      8,
+      "unsigned long"
+     ],
+     [
+      "reserved",
+      116,
+      12,
+      "unsigned char[12]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "419a4fbd30b1f827",
+    "size": 128
+   },
+   "amdsmi_cper_notify_type_t": {
+    "align": 8,
+    "enumerators": {
+     "AMDSMI_CPER_NOTIFY_TYPE_BOOT": 4655221457236894822,
+     "AMDSMI_CPER_NOTIFY_TYPE_CMC": 4976123370175105969,
+     "AMDSMI_CPER_NOTIFY_TYPE_CPE": 5356425115412803478,
+     "AMDSMI_CPER_NOTIFY_TYPE_CXL_COMPONENT": 5306157213770398665,
+     "AMDSMI_CPER_NOTIFY_TYPE_DMAR": 5487573144795207569,
+     "AMDSMI_CPER_NOTIFY_TYPE_INIT": 4992964802890589160,
+     "AMDSMI_CPER_NOTIFY_TYPE_MCE": 5531987820403847166,
+     "AMDSMI_CPER_NOTIFY_TYPE_NMI": 4812579876830546431,
+     "AMDSMI_CPER_NOTIFY_TYPE_PCIE": 5619395120325705759,
+     "AMDSMI_CPER_NOTIFY_TYPE_PEI": 4761520883332928940,
+     "AMDSMI_CPER_NOTIFY_TYPE_SEA": 1289362001033197706,
+     "AMDSMI_CPER_NOTIFY_TYPE_SEI": 5658685719731260545
+    },
+    "kind": "enum",
+    "layout_hash": "6c76b725df4aba34",
+    "size": 8
+   },
+   "amdsmi_cper_sev_t": {
+    "align": 4,
+    "enumerators": {
+     "AMDSMI_CPER_SEV_FATAL": 1,
+     "AMDSMI_CPER_SEV_NON_FATAL_CORRECTED": 2,
+     "AMDSMI_CPER_SEV_NON_FATAL_UNCORRECTED": 0,
+     "AMDSMI_CPER_SEV_NUM": 3,
+     "AMDSMI_CPER_SEV_UNUSED": 10
+    },
+    "kind": "enum",
+    "layout_hash": "9c0ece518f627253",
+    "size": 4
+   },
+   "amdsmi_cper_timestamp_t": {
+    "align": 1,
+    "fields": [
+     [
+      "seconds",
+      0,
+      1,
+      "unsigned char"
+     ],
+     [
+      "minutes",
+      1,
+      1,
+      "unsigned char"
+     ],
+     [
+      "hours",
+      2,
+      1,
+      "unsigned char"
+     ],
+     [
+      "flag",
+      3,
+      1,
+      "unsigned char"
+     ],
+     [
+      "day",
+      4,
+      1,
+      "unsigned char"
+     ],
+     [
+      "month",
+      5,
+      1,
+      "unsigned char"
+     ],
+     [
+      "year",
+      6,
+      1,
+      "unsigned char"
+     ],
+     [
+      "century",
+      7,
+      1,
+      "unsigned char"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "2310cad284cf517b",
+    "size": 8
+   },
+   "amdsmi_cper_valid_bits_t": {
+    "align": 1,
+    "fields": [
+     [
+      "valid_bits",
+      0,
+      4,
+      "struct valid_bits_"
+     ],
+     [
+      "valid_mask",
+      0,
+      4,
+      "unsigned int"
+     ]
+    ],
+    "kind": "union",
+    "layout_hash": "3a50226a47550529",
+    "size": 4
+   },
+   "amdsmi_cpu_info_t": {
+    "align": 8,
+    "fields": [
+     [
+      "model_name",
+      0,
+      256,
+      "char[256]"
+     ],
+     [
+      "cpu_family_id",
+      256,
+      4,
+      "unsigned int"
+     ],
+     [
+      "model_id",
+      260,
+      4,
+      "unsigned int"
+     ],
+     [
+      "threads_per_core",
+      264,
+      4,
+      "unsigned int"
+     ],
+     [
+      "cores_per_socket",
+      268,
+      4,
+      "unsigned int"
+     ],
+     [
+      "frequency_boost",
+      272,
+      1,
+      "_Bool"
+     ],
+     [
+      "vendor_id",
+      276,
+      4,
+      "unsigned int"
+     ],
+     [
+      "vendor_name",
+      280,
+      256,
+      "char[256]"
+     ],
+     [
+      "subvendor_id",
+      536,
+      4,
+      "unsigned int"
+     ],
+     [
+      "device_id",
+      544,
+      8,
+      "unsigned long"
+     ],
+     [
+      "rev_id",
+      552,
+      4,
+      "unsigned int"
+     ],
+     [
+      "asic_serial",
+      556,
+      256,
+      "char[256]"
+     ],
+     [
+      "socket_id",
+      812,
+      4,
+      "unsigned int"
+     ],
+     [
+      "core_id",
+      816,
+      4,
+      "unsigned int"
+     ],
+     [
+      "num_of_cpu_cores",
+      820,
+      4,
+      "unsigned int"
+     ],
+     [
+      "socket_count",
+      824,
+      4,
+      "unsigned int"
+     ],
+     [
+      "core_count",
+      828,
+      4,
+      "unsigned int"
+     ],
+     [
+      "reserved",
+      832,
+      68,
+      "unsigned int[17]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "da9d396a73c42a43",
+    "size": 904
+   },
+   "amdsmi_cpu_util_t": {
+    "align": 4,
+    "fields": [
+     [
+      "cpu_util_total",
+      0,
+      4,
+      "unsigned int"
+     ],
+     [
+      "cpu_util_user",
+      4,
+      4,
+      "unsigned int"
+     ],
+     [
+      "cpu_util_nice",
+      8,
+      4,
+      "unsigned int"
+     ],
+     [
+      "cpu_util_sys",
+      12,
+      4,
+      "unsigned int"
+     ],
+     [
+      "cpu_util_irq",
+      16,
+      4,
+      "unsigned int"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "3621ed00cd666dbb",
+    "size": 20
+   },
+   "amdsmi_cpusocket_handle": {
+    "align": 8,
+    "kind": "typedef",
+    "size": 8,
+    "type": "void *"
+   },
+   "amdsmi_ddr_bw_metrics_t": {
+    "align": 4,
+    "fields": [
+     [
+      "max_bw",
+      0,
+      4,
+      "unsigned int"
+     ],
+     [
+      "utilized_bw",
+      4,
+      4,
+      "unsigned int"
+     ],
+     [
+      "utilized_pct",
+      8,
+      4,
+      "unsigned int"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "a042ecdb81f69007",
+    "size": 12
+   },
+   "amdsmi_dev_perf_level_t": {
+    "align": 4,
+    "enumerators": {
+     "AMDSMI_DEV_PERF_LEVEL_AUTO": 0,
+     "AMDSMI_DEV_PERF_LEVEL_DETERMINISM": 8,
+     "AMDSMI_DEV_PERF_LEVEL_FIRST": 0,
+     "AMDSMI_DEV_PERF_LEVEL_HIGH": 2,
+     "AMDSMI_DEV_PERF_LEVEL_LAST": 8,
+     "AMDSMI_DEV_PERF_LEVEL_LOW": 1,
+     "AMDSMI_DEV_PERF_LEVEL_MANUAL": 3,
+     "AMDSMI_DEV_PERF_LEVEL_STABLE_MIN_MCLK": 6,
+     "AMDSMI_DEV_PERF_LEVEL_STABLE_MIN_SCLK": 7,
+     "AMDSMI_DEV_PERF_LEVEL_STABLE_PEAK": 5,
+     "AMDSMI_DEV_PERF_LEVEL_STABLE_STD": 4,
+     "AMDSMI_DEV_PERF_LEVEL_UNKNOWN": 256
+    },
+    "kind": "enum",
+    "layout_hash": "e877dcac5259bc03",
+    "size": 4
+   },
+   "amdsmi_dimm_power_t": {
+    "align": 2,
+    "fields": [
+     [
+      "power",
+      "0:0",
+      "15b",
+      "unsigned short"
+     ],
+     [
+      "update_rate",
+      "2:0",
+      "9b",
+      "unsigned short"
+     ],
+     [
+      "dimm_addr",
+      4,
+      1,
+      "unsigned char"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "cdbd4897b9de5a92",
+    "size": 6
+   },
+   "amdsmi_dimm_thermal_t": {
+    "align": 4,
+    "fields": [
+     [
+      "sensor",
+      "0:0",
+      "11b",
+      "unsigned short"
+     ],
+     [
+      "update_rate",
+      "2:0",
+      "9b",
+      "unsigned short"
+     ],
+     [
+      "dimm_addr",
+      4,
+      1,
+      "unsigned char"
+     ],
+     [
+      "temp",
+      8,
+      4,
+      "float"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "1f2594141ac1ebba",
+    "size": 12
+   },
+   "amdsmi_dpm_level_t": {
+    "align": 1,
+    "fields": [
+     [
+      "max_dpm_level",
+      0,
+      1,
+      "unsigned char"
+     ],
+     [
+      "min_dpm_level",
+      1,
+      1,
+      "unsigned char"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "edcdbd0da96e90da",
+    "size": 2
+   },
+   "amdsmi_dpm_policy_entry_t": {
+    "align": 4,
+    "fields": [
+     [
+      "policy_id",
+      0,
+      4,
+      "unsigned int"
+     ],
+     [
+      "policy_description",
+      4,
+      256,
+      "char[256]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "92368a84b12b4c2c",
+    "size": 260
+   },
+   "amdsmi_dpm_policy_t": {
+    "align": 4,
+    "fields": [
+     [
+      "num_supported",
+      0,
+      4,
+      "unsigned int"
+     ],
+     [
+      "current",
+      4,
+      4,
+      "unsigned int"
+     ],
+     [
+      "policies",
+      8,
+      8320,
+      "amdsmi_dpm_policy_entry_t[32]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "4f58c838ee0aafce",
+    "size": 8328
+   },
+   "amdsmi_driver_info_t": {
+    "align": 1,
+    "fields": [
+     [
+      "driver_version",
+      0,
+      256,
+      "char[256]"
+     ],
+     [
+      "driver_date",
+      256,
+      256,
+      "char[256]"
+     ],
+     [
+      "driver_name",
+      512,
+      256,
+      "char[256]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "f5efb03169707d6c",
+    "size": 768
+   },
+   "amdsmi_engine_usage_t": {
+    "align": 4,
+    "fields": [
+     [
+      "gfx_activity",
+      0,
+      4,
+      "unsigned int"
+     ],
+     [
+      "umc_activity",
+      4,
+      4,
+      "unsigned int"
+     ],
+     [
+      "mm_activity",
+      8,
+      4,
+      "unsigned int"
+     ],
+     [
+      "reserved",
+      12,
+      52,
+      "unsigned int[13]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "62fb58fd17ccdb60",
+    "size": 64
+   },
+   "amdsmi_enumeration_info_t": {
+    "align": 4,
+    "fields": [
+     [
+      "drm_render",
+      0,
+      4,
+      "unsigned int"
+     ],
+     [
+      "drm_card",
+      4,
+      4,
+      "unsigned int"
+     ],
+     [
+      "hsa_id",
+      8,
+      4,
+      "unsigned int"
+     ],
+     [
+      "hip_id",
+      12,
+      4,
+      "unsigned int"
+     ],
+     [
+      "hip_uuid",
+      16,
+      256,
+      "char[256]"
+     ],
+     [
+      "oam_id",
+      272,
+      4,
+      "unsigned int"
+     ],
+     [
+      "physical_acc_id",
+      276,
+      4,
+      "unsigned int"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "0edcb13bd8b86e5b",
+    "size": 280
+   },
+   "amdsmi_error_count_t": {
+    "align": 8,
+    "fields": [
+     [
+      "correctable_count",
+      0,
+      8,
+      "unsigned long"
+     ],
+     [
+      "uncorrectable_count",
+      8,
+      8,
+      "unsigned long"
+     ],
+     [
+      "deferred_count",
+      16,
+      8,
+      "unsigned long"
+     ],
+     [
+      "reserved",
+      24,
+      40,
+      "unsigned long[5]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "4cf9be1379451539",
+    "size": 64
+   },
+   "amdsmi_event_group_t": {
+    "align": 4,
+    "enumerators": {
+     "AMDSMI_EVNT_GRP_INVALID": 4294967295,
+     "AMDSMI_EVNT_GRP_XGMI": 0,
+     "AMDSMI_EVNT_GRP_XGMI_DATA_OUT": 10
+    },
+    "kind": "enum",
+    "layout_hash": "bc5ba1d0531abe12",
+    "size": 4
+   },
+   "amdsmi_event_handle_t": {
+    "align": 8,
+    "kind": "typedef",
+    "size": 8,
+    "type": "unsigned long"
+   },
+   "amdsmi_event_type_t": {
+    "align": 4,
+    "enumerators": {
+     "AMDSMI_EVNT_FIRST": 0,
+     "AMDSMI_EVNT_LAST": 15,
+     "AMDSMI_EVNT_XGMI_0_BEATS_TX": 3,
+     "AMDSMI_EVNT_XGMI_0_NOP_TX": 0,
+     "AMDSMI_EVNT_XGMI_0_REQUEST_TX": 1,
+     "AMDSMI_EVNT_XGMI_0_RESPONSE_TX": 2,
+     "AMDSMI_EVNT_XGMI_1_BEATS_TX": 7,
+     "AMDSMI_EVNT_XGMI_1_NOP_TX": 4,
+     "AMDSMI_EVNT_XGMI_1_REQUEST_TX": 5,
+     "AMDSMI_EVNT_XGMI_1_RESPONSE_TX": 6,
+     "AMDSMI_EVNT_XGMI_DATA_OUT_0": 10,
+     "AMDSMI_EVNT_XGMI_DATA_OUT_1": 11,
+     "AMDSMI_EVNT_XGMI_DATA_OUT_2": 12,
+     "AMDSMI_EVNT_XGMI_DATA_OUT_3": 13,
+     "AMDSMI_EVNT_XGMI_DATA_OUT_4": 14,
+     "AMDSMI_EVNT_XGMI_DATA_OUT_5": 15,
+     "AMDSMI_EVNT_XGMI_DATA_OUT_FIRST": 10,
+     "AMDSMI_EVNT_XGMI_DATA_OUT_LAST": 15,
+     "AMDSMI_EVNT_XGMI_FIRST": 0,
+     "AMDSMI_EVNT_XGMI_LAST": 7
+    },
+    "kind": "enum",
+    "layout_hash": "30c4b1b3b976bfd2",
+    "size": 4
+   },
+   "amdsmi_evt_notification_data_t": {
+    "align": 8,
+    "fields": [
+     [
+      "processor_handle",
+      0,
+      8,
+      "void *"
+     ],
+     [
+      "event",
+      8,
+      4,
+      "amdsmi_evt_notification_type_t"
+     ],
+     [
+      "message",
+      12,
+      256,
+      "char[256]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "c44b96d413d6f78f",
+    "size": 272
+   },
+   "amdsmi_evt_notification_type_t": {
+    "align": 4,
+    "enumerators": {
+     "AMDSMI_EVT_NOTIF_FIRST": 1,
+     "AMDSMI_EVT_NOTIF_GPU_POST_RESET": 4,
+     "AMDSMI_EVT_NOTIF_GPU_PRE_RESET": 3,
+     "AMDSMI_EVT_NOTIF_LAST": 13,
+     "AMDSMI_EVT_NOTIF_MIGRATE_END": 6,
+     "AMDSMI_EVT_NOTIF_MIGRATE_START": 5,
+     "AMDSMI_EVT_NOTIF_NONE": 0,
+     "AMDSMI_EVT_NOTIF_PAGE_FAULT_END": 8,
+     "AMDSMI_EVT_NOTIF_PAGE_FAULT_START": 7,
+     "AMDSMI_EVT_NOTIF_PROCESS_END": 13,
+     "AMDSMI_EVT_NOTIF_PROCESS_START": 12,
+     "AMDSMI_EVT_NOTIF_QUEUE_EVICTION": 9,
+     "AMDSMI_EVT_NOTIF_QUEUE_RESTORE": 10,
+     "AMDSMI_EVT_NOTIF_THERMAL_THROTTLE": 2,
+     "AMDSMI_EVT_NOTIF_UNMAP_FROM_GPU": 11,
+     "AMDSMI_EVT_NOTIF_VMFAULT": 1
+    },
+    "kind": "enum",
+    "layout_hash": "a7de7955261c1307",
+    "size": 4
+   },
+   "amdsmi_fabric_accelerator_vpod_state_t": {
+    "align": 4,
+    "enumerators": {
+     "AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_ACTIVE": 3,
+     "AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_CONFIGURED": 1,
+     "AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_ERROR": 4,
+     "AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_READY": 2,
+     "AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_UNCONFIGURED": 0,
+     "AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_UNKNOWN": 5
+    },
+    "kind": "enum",
+    "layout_hash": "7ec6b89305706517",
+    "size": 4
+   },
+   "amdsmi_fabric_info_t": {
+    "align": 8,
+    "fields": [
+     [
+      "bdf",
+      0,
+      8,
+      "amdsmi_bdf_t"
+     ],
+     [
+      "fabric_version",
+      8,
+      4,
+      "unsigned int"
+     ],
+     [
+      "fabric_info",
+      12,
+      244,
+      "union fabric_info_"
+     ],
+     [
+      "reserved",
+      256,
+      60,
+      "unsigned int[15]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "13a1736e6d46017e",
+    "size": 320
+   },
+   "amdsmi_fabric_info_v1_t": {
+    "align": 4,
+    "fields": [
+     [
+      "accelerator_id",
+      0,
+      4,
+      "unsigned int"
+     ],
+     [
+      "fabric_type",
+      4,
+      4,
+      "amdsmi_fabric_type_t"
+     ],
+     [
+      "bandwidth",
+      8,
+      4,
+      "unsigned int"
+     ],
+     [
+      "latency",
+      12,
+      4,
+      "unsigned int"
+     ],
+     [
+      "ppod_id",
+      16,
+      16,
+      "unsigned char[16]"
+     ],
+     [
+      "ppod_size",
+      32,
+      4,
+      "unsigned int"
+     ],
+     [
+      "vpod_id",
+      36,
+      4,
+      "unsigned int"
+     ],
+     [
+      "vpod_size",
+      40,
+      4,
+      "unsigned int"
+     ],
+     [
+      "vpod_active_accelerators",
+      44,
+      128,
+      "unsigned int[32]"
+     ],
+     [
+      "local_accelerators",
+      172,
+      64,
+      "unsigned int[16]"
+     ],
+     [
+      "addr_mode",
+      236,
+      4,
+      "amdsmi_fabric_npa_address_mode_t"
+     ],
+     [
+      "accel_state",
+      240,
+      4,
+      "amdsmi_fabric_accelerator_vpod_state_t"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "090428c386f6d699",
+    "size": 244
+   },
+   "amdsmi_fabric_label_t": {
+    "align": 1,
+    "fields": [
+     [
+      "text",
+      0,
+      32,
+      "char[32]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "74882da718b61f7e",
+    "size": 32
+   },
+   "amdsmi_fabric_npa_address_mode_t": {
+    "align": 4,
+    "enumerators": {
+     "AMDSMI_FABRIC_NPA_ADDRESS_MODE_SOURCE_ALIASING": 0,
+     "AMDSMI_FABRIC_NPA_ADDRESS_MODE_SOURCE_IDENTIFICATION": 1,
+     "AMDSMI_FABRIC_NPA_ADDRESS_MODE_UNKNOWN": 2
+    },
+    "kind": "enum",
+    "layout_hash": "722ea210f403a4f5",
+    "size": 4
+   },
+   "amdsmi_fabric_size_constants_t": {
+    "align": 4,
+    "enumerators": {
+     "AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE": 32,
+     "AMDSMI_FABRIC_MAX_LOCAL_GPUS": 16
+    },
+    "kind": "enum",
+    "layout_hash": "c0558725e485bd19",
+    "size": 4
+   },
+   "amdsmi_fabric_telemetry_category_mask_t": {
+    "align": 4,
+    "enumerators": {
+     "AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_ALL_KNOWN": 127,
+     "AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_CRYPTO": 4,
+     "AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_NETPORT": 64,
+     "AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_UALOE": 32,
+     "AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_NETPORT": 16,
+     "AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_PFC": 8,
+     "AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_SWITCH": 2,
+     "AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_UALOE": 1
+    },
+    "kind": "enum",
+    "layout_hash": "3f9ecc40fcc61b6e",
+    "size": 4
+   },
+   "amdsmi_fabric_telemetry_category_t": {
+    "align": 4,
+    "enumerators": {
+     "AMDSMI_FABRIC_TELEMETRY_CATEGORY_CRYPTO": 2,
+     "AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_NETPORT": 6,
+     "AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_UALOE": 5,
+     "AMDSMI_FABRIC_TELEMETRY_CATEGORY_INVALID": 4294967295,
+     "AMDSMI_FABRIC_TELEMETRY_CATEGORY_MAX": 7,
+     "AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT": 4,
+     "AMDSMI_FABRIC_TELEMETRY_CATEGORY_PFC": 3,
+     "AMDSMI_FABRIC_TELEMETRY_CATEGORY_SWITCH": 1,
+     "AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE": 0,
+     "AMDSMI_FABRIC_TELEMETRY_CATEGORY_UNKNOWN": 4294967295
+    },
+    "kind": "enum",
+    "layout_hash": "ac4508bf8723ac3b",
+    "size": 4
+   },
+   "amdsmi_fabric_telemetry_dataset_t": {
+    "align": 8,
+    "fields": [
+     [
+      "category",
+      0,
+      4,
+      "amdsmi_fabric_telemetry_category_t"
+     ],
+     [
+      "generation_count",
+      8,
+      8,
+      "unsigned long"
+     ],
+     [
+      "timestamp",
+      16,
+      16,
+      "struct timespec"
+     ],
+     [
+      "instance_count",
+      32,
+      4,
+      "unsigned int"
+     ],
+     [
+      "instances",
+      40,
+      8,
+      "amdsmi_fabric_telemetry_instance_t *"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "97ca5665101c9638",
+    "size": 48
+   },
+   "amdsmi_fabric_telemetry_instance_t": {
+    "align": 8,
+    "fields": [
+     [
+      "name",
+      0,
+      32,
+      "amdsmi_fabric_label_t"
+     ],
+     [
+      "logical_idx",
+      32,
+      4,
+      "unsigned int"
+     ],
+     [
+      "item_count",
+      36,
+      4,
+      "unsigned int"
+     ],
+     [
+      "items",
+      40,
+      8,
+      "amdsmi_fabric_telemetry_item_t *"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "473d84af6e4dccd1",
+    "size": 48
+   },
+   "amdsmi_fabric_telemetry_item_t": {
+    "align": 8,
+    "fields": [
+     [
+      "id",
+      0,
+      8,
+      "unsigned long"
+     ],
+     [
+      "value",
+      8,
+      8,
+      "unsigned long"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "4a6cf80a3c75770b",
+    "size": 16
+   },
+   "amdsmi_fabric_telemetry_t": {
+    "align": 8,
+    "fields": [
+     [
+      "datasets",
+      0,
+      56,
+      "amdsmi_fabric_telemetry_dataset_t *[7]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "50d81e8b9c20ed35",
+    "size": 56
+   },
+   "amdsmi_fabric_type_t": {
+    "align": 4,
+    "enumerators": {
+     "AMDSMI_FABRIC_TYPE_UALINK": 1,
+     "AMDSMI_FABRIC_TYPE_UALLINK": 1,
+     "AMDSMI_FABRIC_TYPE_UALOE": 0,
+     "AMDSMI_FABRIC_TYPE_UNKNOWN": 2
+    },
+    "kind": "enum",
+    "layout_hash": "643613a6bf676198",
+    "size": 4
+   },
+   "amdsmi_freq_ind_t": {
+    "align": 4,
+    "enumerators": {
+     "AMDSMI_FREQ_IND_INVALID": 4294967295,
+     "AMDSMI_FREQ_IND_MAX": 1,
+     "AMDSMI_FREQ_IND_MIN": 0
+    },
+    "kind": "enum",
+    "layout_hash": "e72a02bdb1a44015",
+    "size": 4
+   },
+   "amdsmi_freq_volt_region_t": {
+    "align": 8,
+    "fields": [
+     [
+      "freq_range",
+      0,
+      32,
+      "amdsmi_range_t"
+     ],
+     [
+      "volt_range",
+      32,
+      32,
+      "amdsmi_range_t"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "cbc164b088b79e60",
+    "size": 64
+   },
+   "amdsmi_frequencies_t": {
+    "align": 8,
+    "fields": [
+     [
+      "has_deep_sleep",
+      0,
+      1,
+      "_Bool"
+     ],
+     [
+      "num_supported",
+      4,
+      4,
+      "unsigned int"
+     ],
+     [
+      "current",
+      8,
+      4,
+      "unsigned int"
+     ],
+     [
+      "frequency",
+      16,
+      264,
+      "unsigned long[33]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "37f656fd5ed5d003",
+    "size": 280
+   },
+   "amdsmi_frequency_range_t": {
+    "align": 8,
+    "fields": [
+     [
+      "supported_freq_range",
+      0,
+      32,
+      "amdsmi_range_t"
+     ],
+     [
+      "current_freq_range",
+      32,
+      32,
+      "amdsmi_range_t"
+     ],
+     [
+      "reserved",
+      64,
+      32,
+      "unsigned int[8]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "41963be1b1dcad65",
+    "size": 96
+   },
+   "amdsmi_fw_block_t": {
+    "align": 4,
+    "enumerators": {
+     "AMDSMI_FW_ID_ASD": 72,
+     "AMDSMI_FW_ID_CP_CE": 2,
+     "AMDSMI_FW_ID_CP_ME": 4,
+     "AMDSMI_FW_ID_CP_MEC1": 7,
+     "AMDSMI_FW_ID_CP_MEC2": 8,
+     "AMDSMI_FW_ID_CP_MEC_JT1": 5,
+     "AMDSMI_FW_ID_CP_MEC_JT2": 6,
+     "AMDSMI_FW_ID_CP_MES": 46,
+     "AMDSMI_FW_ID_CP_PFP": 3,
+     "AMDSMI_FW_ID_CP_PM4": 38,
+     "AMDSMI_FW_ID_DFC": 33,
+     "AMDSMI_FW_ID_DMCU": 78,
+     "AMDSMI_FW_ID_DMCU_ERAM": 22,
+     "AMDSMI_FW_ID_DMCU_ISR": 23,
+     "AMDSMI_FW_ID_DRV_CAP": 35,
+     "AMDSMI_FW_ID_FIRST": 1,
+     "AMDSMI_FW_ID_IMU_DRAM": 42,
+     "AMDSMI_FW_ID_IMU_IRAM": 43,
+     "AMDSMI_FW_ID_ISP": 21,
+     "AMDSMI_FW_ID_MC": 36,
+     "AMDSMI_FW_ID_MES_KIQ": 47,
+     "AMDSMI_FW_ID_MES_STACK": 48,
+     "AMDSMI_FW_ID_MES_THREAD1": 49,
+     "AMDSMI_FW_ID_MES_THREAD1_STACK": 50,
+     "AMDSMI_FW_ID_MMSCH": 28,
+     "AMDSMI_FW_ID_PLDM_BUNDLE": 79,
+     "AMDSMI_FW_ID_PM": 77,
+     "AMDSMI_FW_ID_PPTABLE": 64,
+     "AMDSMI_FW_ID_PSP_BL": 37,
+     "AMDSMI_FW_ID_PSP_DBG": 66,
+     "AMDSMI_FW_ID_PSP_INTF": 67,
+     "AMDSMI_FW_ID_PSP_KEYDB": 32,
+     "AMDSMI_FW_ID_PSP_SOC": 65,
+     "AMDSMI_FW_ID_PSP_SOSDRV": 30,
+     "AMDSMI_FW_ID_PSP_SPL": 34,
+     "AMDSMI_FW_ID_PSP_SYSDRV": 29,
+     "AMDSMI_FW_ID_PSP_TOC": 31,
+     "AMDSMI_FW_ID_REG_ACCESS_WHITELIST": 41,
+     "AMDSMI_FW_ID_RLC": 9,
+     "AMDSMI_FW_ID_RLCV_LX7": 70,
+     "AMDSMI_FW_ID_RLC_P": 39,
+     "AMDSMI_FW_ID_RLC_RESTORE_LIST_CNTL": 26,
+     "AMDSMI_FW_ID_RLC_RESTORE_LIST_GPM_MEM": 24,
+     "AMDSMI_FW_ID_RLC_RESTORE_LIST_SRM_MEM": 25,
+     "AMDSMI_FW_ID_RLC_SAVE_RESTORE_LIST": 71,
+     "AMDSMI_FW_ID_RLC_SRLG": 75,
+     "AMDSMI_FW_ID_RLC_SRLS": 76,
+     "AMDSMI_FW_ID_RLC_V": 27,
+     "AMDSMI_FW_ID_RLX6": 51,
+     "AMDSMI_FW_ID_RLX6_CORE1": 68,
+     "AMDSMI_FW_ID_RLX6_DRAM_BOOT": 52,
+     "AMDSMI_FW_ID_RLX6_DRAM_BOOT_CORE1": 69,
+     "AMDSMI_FW_ID_RS64_ME": 53,
+     "AMDSMI_FW_ID_RS64_MEC": 59,
+     "AMDSMI_FW_ID_RS64_MEC_P0_DATA": 60,
+     "AMDSMI_FW_ID_RS64_MEC_P1_DATA": 61,
+     "AMDSMI_FW_ID_RS64_MEC_P2_DATA": 62,
+     "AMDSMI_FW_ID_RS64_MEC_P3_DATA": 63,
+     "AMDSMI_FW_ID_RS64_ME_P0_DATA": 54,
+     "AMDSMI_FW_ID_RS64_ME_P1_DATA": 55,
+     "AMDSMI_FW_ID_RS64_PFP": 56,
+     "AMDSMI_FW_ID_RS64_PFP_P0_DATA": 57,
+     "AMDSMI_FW_ID_RS64_PFP_P1_DATA": 58,
+     "AMDSMI_FW_ID_SDMA0": 10,
+     "AMDSMI_FW_ID_SDMA1": 11,
+     "AMDSMI_FW_ID_SDMA2": 12,
+     "AMDSMI_FW_ID_SDMA3": 13,
+     "AMDSMI_FW_ID_SDMA4": 14,
+     "AMDSMI_FW_ID_SDMA5": 15,
+     "AMDSMI_FW_ID_SDMA6": 16,
+     "AMDSMI_FW_ID_SDMA7": 17,
+     "AMDSMI_FW_ID_SDMA_TH0": 44,
+     "AMDSMI_FW_ID_SDMA_TH1": 45,
+     "AMDSMI_FW_ID_SEC_POLICY_STAGE2": 40,
+     "AMDSMI_FW_ID_SMU": 1,
+     "AMDSMI_FW_ID_TA_RAS": 73,
+     "AMDSMI_FW_ID_TA_XGMI": 74,
+     "AMDSMI_FW_ID_UVD": 19,
+     "AMDSMI_FW_ID_VCE": 20,
+     "AMDSMI_FW_ID_VCN": 18,
+     "AMDSMI_FW_ID__MAX": 80
+    },
+    "kind": "enum",
+    "layout_hash": "b3ee4f6837ff3240",
+    "size": 4
+   },
+   "amdsmi_fw_info_t": {
+    "align": 8,
+    "fields": [
+     [
+      "num_fw_info",
+      0,
+      1,
+      "unsigned char"
+     ],
+     [
+      "fw_info_list",
+      8,
+      2560,
+      "struct fw_info_list_[80]"
+     ],
+     [
+      "reserved",
+      2568,
+      28,
+      "unsigned int[7]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "b1aa024138e5403e",
+    "size": 2600
+   },
+   "amdsmi_gpu_block_t": {
+    "align": 8,
+    "enumerators": {
+     "AMDSMI_GPU_BLOCK_ATHUB": 16,
+     "AMDSMI_GPU_BLOCK_ATU": 2097152,
+     "AMDSMI_GPU_BLOCK_CS": 34359738368,
+     "AMDSMI_GPU_BLOCK_DACC_BE": 4194304,
+     "AMDSMI_GPU_BLOCK_DF": 256,
+     "AMDSMI_GPU_BLOCK_ECLR": 8388608,
+     "AMDSMI_GPU_BLOCK_FIRST": 1,
+     "AMDSMI_GPU_BLOCK_FUSE": 8192,
+     "AMDSMI_GPU_BLOCK_GFX": 4,
+     "AMDSMI_GPU_BLOCK_HDP": 64,
+     "AMDSMI_GPU_BLOCK_IH": 131072,
+     "AMDSMI_GPU_BLOCK_INVALID": 0,
+     "AMDSMI_GPU_BLOCK_JPEG": 65536,
+     "AMDSMI_GPU_BLOCK_KPX_SERDES": 16777216,
+     "AMDSMI_GPU_BLOCK_LAST": 274877906944,
+     "AMDSMI_GPU_BLOCK_LSDMA": 33554432,
+     "AMDSMI_GPU_BLOCK_MCA": 16384,
+     "AMDSMI_GPU_BLOCK_MMHUB": 8,
+     "AMDSMI_GPU_BLOCK_MMSCH": 524288,
+     "AMDSMI_GPU_BLOCK_MP0": 2048,
+     "AMDSMI_GPU_BLOCK_MP1": 4096,
+     "AMDSMI_GPU_BLOCK_MP5": 1048576,
+     "AMDSMI_GPU_BLOCK_MPART": 67108864,
+     "AMDSMI_GPU_BLOCK_MPIFOE": 134217728,
+     "AMDSMI_GPU_BLOCK_MPIO": 262144,
+     "AMDSMI_GPU_BLOCK_MPRAS": 268435456,
+     "AMDSMI_GPU_BLOCK_NBIF": 536870912,
+     "AMDSMI_GPU_BLOCK_NBIO": 1073741824,
+     "AMDSMI_GPU_BLOCK_OXRP": 2147483648,
+     "AMDSMI_GPU_BLOCK_PCIE_BIF": 32,
+     "AMDSMI_GPU_BLOCK_PCIE_PL": 4294967296,
+     "AMDSMI_GPU_BLOCK_PCS_XGMI": 8589934592,
+     "AMDSMI_GPU_BLOCK_PIE": 17179869184,
+     "AMDSMI_GPU_BLOCK_RESERVED": 9223372036854775808,
+     "AMDSMI_GPU_BLOCK_SDMA": 2,
+     "AMDSMI_GPU_BLOCK_SEM": 1024,
+     "AMDSMI_GPU_BLOCK_SHUB": 68719476736,
+     "AMDSMI_GPU_BLOCK_SMN": 512,
+     "AMDSMI_GPU_BLOCK_SSBDCI": 137438953472,
+     "AMDSMI_GPU_BLOCK_UCIE_PCS": 274877906944,
+     "AMDSMI_GPU_BLOCK_UMC": 1,
+     "AMDSMI_GPU_BLOCK_VCN": 32768,
+     "AMDSMI_GPU_BLOCK_XGMI_WAFL": 128
+    },
+    "kind": "enum",
+    "layout_hash": "4e3337705d581f73",
+    "size": 8
+   },
+   "amdsmi_gpu_cache_info_t": {
+    "align": 4,
+    "fields": [
+     [
+      "num_cache_types",
+      0,
+      4,
+      "unsigned int"
+     ],
+     [
+      "cache",
+      4,
+      320,
+      "struct cache_[10]"
+     ],
+     [
+      "reserved",
+      324,
+      60,
+      "unsigned int[15]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "3f1eb84b48e881a1",
+    "size": 384
+   },
+   "amdsmi_gpu_metrics_t": {
+    "align": 8,
+    "fields": [
+     [
+      "common_header",
+      0,
+      4,
+      "amd_metrics_table_header_t"
+     ],
+     [
+      "temperature_edge",
+      4,
+      2,
+      "unsigned short"
+     ],
+     [
+      "temperature_hotspot",
+      6,
+      2,
+      "unsigned short"
+     ],
+     [
+      "temperature_mem",
+      8,
+      2,
+      "unsigned short"
+     ],
+     [
+      "temperature_vrgfx",
+      10,
+      2,
+      "unsigned short"
+     ],
+     [
+      "temperature_vrsoc",
+      12,
+      2,
+      "unsigned short"
+     ],
+     [
+      "temperature_vrmem",
+      14,
+      2,
+      "unsigned short"
+     ],
+     [
+      "average_gfx_activity",
+      16,
+      2,
+      "unsigned short"
+     ],
+     [
+      "average_umc_activity",
+      18,
+      2,
+      "unsigned short"
+     ],
+     [
+      "average_mm_activity",
+      20,
+      2,
+      "unsigned short"
+     ],
+     [
+      "average_socket_power",
+      22,
+      2,
+      "unsigned short"
+     ],
+     [
+      "energy_accumulator",
+      24,
+      8,
+      "unsigned long"
+     ],
+     [
+      "system_clock_counter",
+      32,
+      8,
+      "unsigned long"
+     ],
+     [
+      "average_gfxclk_frequency",
+      40,
+      2,
+      "unsigned short"
+     ],
+     [
+      "average_socclk_frequency",
+      42,
+      2,
+      "unsigned short"
+     ],
+     [
+      "average_uclk_frequency",
+      44,
+      2,
+      "unsigned short"
+     ],
+     [
+      "average_vclk0_frequency",
+      46,
+      2,
+      "unsigned short"
+     ],
+     [
+      "average_dclk0_frequency",
+      48,
+      2,
+      "unsigned short"
+     ],
+     [
+      "average_vclk1_frequency",
+      50,
+      2,
+      "unsigned short"
+     ],
+     [
+      "average_dclk1_frequency",
+      52,
+      2,
+      "unsigned short"
+     ],
+     [
+      "current_gfxclk",
+      54,
+      2,
+      "unsigned short"
+     ],
+     [
+      "current_socclk",
+      56,
+      2,
+      "unsigned short"
+     ],
+     [
+      "current_uclk",
+      58,
+      2,
+      "unsigned short"
+     ],
+     [
+      "current_vclk0",
+      60,
+      2,
+      "unsigned short"
+     ],
+     [
+      "current_dclk0",
+      62,
+      2,
+      "unsigned short"
+     ],
+     [
+      "current_vclk1",
+      64,
+      2,
+      "unsigned short"
+     ],
+     [
+      "current_dclk1",
+      66,
+      2,
+      "unsigned short"
+     ],
+     [
+      "throttle_status",
+      68,
+      4,
+      "unsigned int"
+     ],
+     [
+      "current_fan_speed",
+      72,
+      2,
+      "unsigned short"
+     ],
+     [
+      "pcie_link_width",
+      74,
+      2,
+      "unsigned short"
+     ],
+     [
+      "pcie_link_speed",
+      76,
+      2,
+      "unsigned short"
+     ],
+     [
+      "gfx_activity_acc",
+      80,
+      8,
+      "unsigned long"
+     ],
+     [
+      "mem_activity_acc",
+      88,
+      8,
+      "unsigned long"
+     ],
+     [
+      "temperature_hbm",
+      96,
+      8,
+      "unsigned short[4]"
+     ],
+     [
+      "firmware_timestamp",
+      104,
+      8,
+      "unsigned long"
+     ],
+     [
+      "voltage_soc",
+      112,
+      2,
+      "unsigned short"
+     ],
+     [
+      "voltage_gfx",
+      114,
+      2,
+      "unsigned short"
+     ],
+     [
+      "voltage_mem",
+      116,
+      2,
+      "unsigned short"
+     ],
+     [
+      "indep_throttle_status",
+      120,
+      8,
+      "unsigned long"
+     ],
+     [
+      "current_socket_power",
+      128,
+      2,
+      "unsigned short"
+     ],
+     [
+      "vcn_activity",
+      130,
+      8,
+      "unsigned short[4]"
+     ],
+     [
+      "gfxclk_lock_status",
+      140,
+      4,
+      "unsigned int"
+     ],
+     [
+      "xgmi_link_width",
+      144,
+      2,
+      "unsigned short"
+     ],
+     [
+      "xgmi_link_speed",
+      146,
+      2,
+      "unsigned short"
+     ],
+     [
+      "pcie_bandwidth_acc",
+      152,
+      8,
+      "unsigned long"
+     ],
+     [
+      "pcie_bandwidth_inst",
+      160,
+      8,
+      "unsigned long"
+     ],
+     [
+      "pcie_l0_to_recov_count_acc",
+      168,
+      8,
+      "unsigned long"
+     ],
+     [
+      "pcie_replay_count_acc",
+      176,
+      8,
+      "unsigned long"
+     ],
+     [
+      "pcie_replay_rover_count_acc",
+      184,
+      8,
+      "unsigned long"
+     ],
+     [
+      "xgmi_read_data_acc",
+      192,
+      64,
+      "unsigned long[8]"
+     ],
+     [
+      "xgmi_write_data_acc",
+      256,
+      64,
+      "unsigned long[8]"
+     ],
+     [
+      "current_gfxclks",
+      320,
+      16,
+      "unsigned short[8]"
+     ],
+     [
+      "current_socclks",
+      336,
+      8,
+      "unsigned short[4]"
+     ],
+     [
+      "current_vclk0s",
+      344,
+      8,
+      "unsigned short[4]"
+     ],
+     [
+      "current_dclk0s",
+      352,
+      8,
+      "unsigned short[4]"
+     ],
+     [
+      "jpeg_activity",
+      360,
+      64,
+      "unsigned short[32]"
+     ],
+     [
+      "pcie_nak_sent_count_acc",
+      424,
+      8,
+      "unsigned long"
+     ],
+     [
+      "pcie_nak_rcvd_count_acc",
+      432,
+      8,
+      "unsigned long"
+     ],
+     [
+      "accumulation_counter",
+      440,
+      8,
+      "unsigned long"
+     ],
+     [
+      "prochot_residency_acc",
+      448,
+      8,
+      "unsigned long"
+     ],
+     [
+      "ppt_residency_acc",
+      456,
+      8,
+      "unsigned long"
+     ],
+     [
+      "socket_thm_residency_acc",
+      464,
+      8,
+      "unsigned long"
+     ],
+     [
+      "vr_thm_residency_acc",
+      472,
+      8,
+      "unsigned long"
+     ],
+     [
+      "hbm_thm_residency_acc",
+      480,
+      8,
+      "unsigned long"
+     ],
+     [
+      "num_partition",
+      488,
+      2,
+      "unsigned short"
+     ],
+     [
+      "xcp_stats",
+      496,
+      4160,
+      "amdsmi_gpu_xcp_metrics_t[8]"
+     ],
+     [
+      "pcie_lc_perf_other_end_recovery",
+      4656,
+      8,
+      "unsigned long"
+     ],
+     [
+      "vram_max_bandwidth",
+      4664,
+      8,
+      "unsigned long"
+     ],
+     [
+      "xgmi_link_status",
+      4672,
+      16,
+      "unsigned short[8]"
+     ],
+     [
+      "temperature_hbm_stacks",
+      4688,
+      24,
+      "unsigned short[12]"
+     ],
+     [
+      "temperature_mid",
+      4712,
+      4,
+      "unsigned short[2]"
+     ],
+     [
+      "temperature_aid",
+      4716,
+      4,
+      "unsigned short[2]"
+     ],
+     [
+      "current_uclk_aid",
+      4720,
+      4,
+      "unsigned short[2]"
+     ],
+     [
+      "current_socclks_mid",
+      4724,
+      4,
+      "unsigned short[2]"
+     ],
+     [
+      "apu_metrics",
+      4728,
+      8,
+      "amdsmi_apu_metrics_t *"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "2ca411ab191fdeb3",
+    "size": 4736
+   },
+   "amdsmi_gpu_ras_policy_info_t": {
+    "align": 8,
+    "fields": [
+     [
+      "major_version",
+      0,
+      1,
+      "unsigned char"
+     ],
+     [
+      "minor_version",
+      1,
+      1,
+      "unsigned char"
+     ],
+     [
+      "policy_data",
+      8,
+      40,
+      "union policy_data_"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "296df4759615a37b",
+    "size": 48
+   },
+   "amdsmi_gpu_ras_policy_v4_0_t": {
+    "align": 2,
+    "fields": [
+     [
+      "dram_non_critical_region_threshold",
+      0,
+      2,
+      "unsigned short"
+     ],
+     [
+      "dram_critical_region_threshold",
+      2,
+      2,
+      "unsigned short"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "2e232718a393f0d4",
+    "size": 4
+   },
+   "amdsmi_gpu_xcp_metrics_t": {
+    "align": 8,
+    "fields": [
+     [
+      "gfx_busy_inst",
+      0,
+      32,
+      "unsigned int[8]"
+     ],
+     [
+      "jpeg_busy",
+      32,
+      80,
+      "unsigned short[40]"
+     ],
+     [
+      "vcn_busy",
+      112,
+      8,
+      "unsigned short[4]"
+     ],
+     [
+      "gfx_busy_acc",
+      120,
+      64,
+      "unsigned long[8]"
+     ],
+     [
+      "gfx_below_host_limit_acc",
+      184,
+      64,
+      "unsigned long[8]"
+     ],
+     [
+      "gfx_below_host_limit_ppt_acc",
+      248,
+      64,
+      "unsigned long[8]"
+     ],
+     [
+      "gfx_below_host_limit_thm_acc",
+      312,
+      64,
+      "unsigned long[8]"
+     ],
+     [
+      "gfx_low_utilization_acc",
+      376,
+      64,
+      "unsigned long[8]"
+     ],
+     [
+      "gfx_below_host_limit_total_acc",
+      440,
+      64,
+      "unsigned long[8]"
+     ],
+     [
+      "temperature_xcd",
+      504,
+      16,
+      "unsigned short[8]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "c082de72884a74e4",
+    "size": 520
+   },
+   "amdsmi_hsmp_driver_version_t": {
+    "align": 4,
+    "fields": [
+     [
+      "major",
+      0,
+      4,
+      "unsigned int"
+     ],
+     [
+      "minor",
+      4,
+      4,
+      "unsigned int"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "0d8e2f310188c1fa",
+    "size": 8
+   },
+   "amdsmi_hsmp_metrics_table_t": {
+    "align": 1,
+    "fields": [
+     [
+      "accumulation_counter",
+      0,
+      4,
+      "unsigned int"
+     ],
+     [
+      "max_socket_temperature",
+      4,
+      4,
+      "unsigned int"
+     ],
+     [
+      "max_vr_temperature",
+      8,
+      4,
+      "unsigned int"
+     ],
+     [
+      "max_hbm_temperature",
+      12,
+      4,
+      "unsigned int"
+     ],
+     [
+      "max_socket_temperature_acc",
+      16,
+      8,
+      "unsigned long"
+     ],
+     [
+      "max_vr_temperature_acc",
+      24,
+      8,
+      "unsigned long"
+     ],
+     [
+      "max_hbm_temperature_acc",
+      32,
+      8,
+      "unsigned long"
+     ],
+     [
+      "socket_power_limit",
+      40,
+      4,
+      "unsigned int"
+     ],
+     [
+      "max_socket_power_limit",
+      44,
+      4,
+      "unsigned int"
+     ],
+     [
+      "socket_power",
+      48,
+      4,
+      "unsigned int"
+     ],
+     [
+      "timestamp",
+      52,
+      8,
+      "unsigned long"
+     ],
+     [
+      "socket_energy_acc",
+      60,
+      8,
+      "unsigned long"
+     ],
+     [
+      "ccd_energy_acc",
+      68,
+      8,
+      "unsigned long"
+     ],
+     [
+      "xcd_energy_acc",
+      76,
+      8,
+      "unsigned long"
+     ],
+     [
+      "aid_energy_acc",
+      84,
+      8,
+      "unsigned long"
+     ],
+     [
+      "hbm_energy_acc",
+      92,
+      8,
+      "unsigned long"
+     ],
+     [
+      "cclk_frequency_limit",
+      100,
+      4,
+      "unsigned int"
+     ],
+     [
+      "gfxclk_frequency_limit",
+      104,
+      4,
+      "unsigned int"
+     ],
+     [
+      "fclk_frequency",
+      108,
+      4,
+      "unsigned int"
+     ],
+     [
+      "uclk_frequency",
+      112,
+      4,
+      "unsigned int"
+     ],
+     [
+      "socclk_frequency",
+      116,
+      16,
+      "unsigned int[4]"
+     ],
+     [
+      "vclk_frequency",
+      132,
+      16,
+      "unsigned int[4]"
+     ],
+     [
+      "dclk_frequency",
+      148,
+      16,
+      "unsigned int[4]"
+     ],
+     [
+      "lclk_frequency",
+      164,
+      16,
+      "unsigned int[4]"
+     ],
+     [
+      "gfxclk_frequency_acc",
+      180,
+      64,
+      "unsigned long[8]"
+     ],
+     [
+      "cclk_frequency_acc",
+      244,
+      768,
+      "unsigned long[96]"
+     ],
+     [
+      "max_cclk_frequency",
+      1012,
+      4,
+      "unsigned int"
+     ],
+     [
+      "min_cclk_frequency",
+      1016,
+      4,
+      "unsigned int"
+     ],
+     [
+      "max_gfxclk_frequency",
+      1020,
+      4,
+      "unsigned int"
+     ],
+     [
+      "min_gfxclk_frequency",
+      1024,
+      4,
+      "unsigned int"
+     ],
+     [
+      "fclk_frequency_table",
+      1028,
+      16,
+      "unsigned int[4]"
+     ],
+     [
+      "uclk_frequency_table",
+      1044,
+      16,
+      "unsigned int[4]"
+     ],
+     [
+      "socclk_frequency_table",
+      1060,
+      16,
+      "unsigned int[4]"
+     ],
+     [
+      "vclk_frequency_table",
+      1076,
+      16,
+      "unsigned int[4]"
+     ],
+     [
+      "dclk_frequency_table",
+      1092,
+      16,
+      "unsigned int[4]"
+     ],
+     [
+      "lclk_frequency_table",
+      1108,
+      16,
+      "unsigned int[4]"
+     ],
+     [
+      "max_lclk_dpm_range",
+      1124,
+      4,
+      "unsigned int"
+     ],
+     [
+      "min_lclk_dpm_range",
+      1128,
+      4,
+      "unsigned int"
+     ],
+     [
+      "xgmi_width",
+      1132,
+      4,
+      "unsigned int"
+     ],
+     [
+      "xgmi_bitrate",
+      1136,
+      4,
+      "unsigned int"
+     ],
+     [
+      "xgmi_read_bandwidth_acc",
+      1140,
+      64,
+      "unsigned long[8]"
+     ],
+     [
+      "xgmi_write_bandwidth_acc",
+      1204,
+      64,
+      "unsigned long[8]"
+     ],
+     [
+      "socket_c0_residency",
+      1268,
+      4,
+      "unsigned int"
+     ],
+     [
+      "socket_gfx_busy",
+      1272,
+      4,
+      "unsigned int"
+     ],
+     [
+      "dram_bandwidth_utilization",
+      1276,
+      4,
+      "unsigned int"
+     ],
+     [
+      "socket_c0_residency_acc",
+      1280,
+      8,
+      "unsigned long"
+     ],
+     [
+      "socket_gfx_busy_acc",
+      1288,
+      8,
+      "unsigned long"
+     ],
+     [
+      "dram_bandwidth_acc",
+      1296,
+      8,
+      "unsigned long"
+     ],
+     [
+      "max_dram_bandwidth",
+      1304,
+      4,
+      "unsigned int"
+     ],
+     [
+      "dram_bandwidth_utilization_acc",
+      1308,
+      8,
+      "unsigned long"
+     ],
+     [
+      "pcie_bandwidth_acc",
+      1316,
+      32,
+      "unsigned long[4]"
+     ],
+     [
+      "prochot_residency_acc",
+      1348,
+      4,
+      "unsigned int"
+     ],
+     [
+      "ppt_residency_acc",
+      1352,
+      4,
+      "unsigned int"
+     ],
+     [
+      "socket_thm_residency_acc",
+      1356,
+      4,
+      "unsigned int"
+     ],
+     [
+      "vr_thm_residency_acc",
+      1360,
+      4,
+      "unsigned int"
+     ],
+     [
+      "hbm_thm_residency_acc",
+      1364,
+      4,
+      "unsigned int"
+     ],
+     [
+      "spare",
+      1368,
+      4,
+      "unsigned int"
+     ],
+     [
+      "gfxclk_frequency",
+      1372,
+      32,
+      "unsigned int[8]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "201f7dbd913ee60d",
+    "size": 1404
+   },
+   "amdsmi_init_flags_t": {
+    "align": 4,
+    "enumerators": {
+     "AMDSMI_INIT_ALL_PROCESSORS": 4294967295,
+     "AMDSMI_INIT_AMD_APUS": 3,
+     "AMDSMI_INIT_AMD_CPUS": 1,
+     "AMDSMI_INIT_AMD_GPUS": 2,
+     "AMDSMI_INIT_AMD_NICS": 16,
+     "AMDSMI_INIT_NON_AMD_CPUS": 4,
+     "AMDSMI_INIT_NON_AMD_GPUS": 8
+    },
+    "kind": "enum",
+    "layout_hash": "e1095a9dfab4a885",
+    "size": 4
+   },
+   "amdsmi_io_bw_encoding_t": {
+    "align": 4,
+    "enumerators": {
+     "AGG_BW0": 1,
+     "AMDSMI_AGG_BW0": 1,
+     "AMDSMI_RD_BW0": 2,
+     "AMDSMI_WR_BW0": 4,
+     "RD_BW0": 2,
+     "WR_BW0": 4
+    },
+    "kind": "enum",
+    "layout_hash": "75194c9af74f6528",
+    "size": 4
+   },
+   "amdsmi_kfd_info_t": {
+    "align": 8,
+    "fields": [
+     [
+      "kfd_id",
+      0,
+      8,
+      "unsigned long"
+     ],
+     [
+      "node_id",
+      8,
+      4,
+      "unsigned int"
+     ],
+     [
+      "current_partition_id",
+      12,
+      4,
+      "unsigned int"
+     ],
+     [
+      "reserved",
+      16,
+      48,
+      "unsigned int[12]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "eb60bd71c30e32e4",
+    "size": 64
+   },
+   "amdsmi_link_id_bw_type_t": {
+    "align": 8,
+    "fields": [
+     [
+      "bw_type",
+      0,
+      4,
+      "amdsmi_io_bw_encoding_t"
+     ],
+     [
+      "link_name",
+      8,
+      8,
+      "char *"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "c1b8850badcedb9c",
+    "size": 16
+   },
+   "amdsmi_link_metrics_t": {
+    "align": 8,
+    "fields": [
+     [
+      "num_links",
+      0,
+      4,
+      "unsigned int"
+     ],
+     [
+      "links",
+      8,
+      3584,
+      "struct _links[64]"
+     ],
+     [
+      "reserved",
+      3592,
+      56,
+      "unsigned long[7]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "d5f8a80e68649ccf",
+    "size": 3648
+   },
+   "amdsmi_link_status_t": {
+    "align": 4,
+    "enumerators": {
+     "AMDSMI_LINK_STATUS_DISABLED": 1,
+     "AMDSMI_LINK_STATUS_ENABLED": 0,
+     "AMDSMI_LINK_STATUS_ERROR": 3,
+     "AMDSMI_LINK_STATUS_INACTIVE": 2
+    },
+    "kind": "enum",
+    "layout_hash": "b4d2f941c65bbfea",
+    "size": 4
+   },
+   "amdsmi_link_topology_t": {
+    "align": 8,
+    "fields": [
+     [
+      "weight",
+      0,
+      8,
+      "unsigned long"
+     ],
+     [
+      "link_status",
+      8,
+      4,
+      "amdsmi_link_status_t"
+     ],
+     [
+      "link_type",
+      12,
+      4,
+      "amdsmi_link_type_t"
+     ],
+     [
+      "num_hops",
+      16,
+      1,
+      "unsigned char"
+     ],
+     [
+      "fb_sharing",
+      17,
+      1,
+      "unsigned char"
+     ],
+     [
+      "reserved",
+      20,
+      40,
+      "unsigned int[10]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "0e6cafbcccf6a411",
+    "size": 64
+   },
+   "amdsmi_link_type_t": {
+    "align": 4,
+    "enumerators": {
+     "AMDSMI_LINK_TYPE_INTERNAL": 0,
+     "AMDSMI_LINK_TYPE_NOT_APPLICABLE": 3,
+     "AMDSMI_LINK_TYPE_NUMA": 5,
+     "AMDSMI_LINK_TYPE_PCIE": 1,
+     "AMDSMI_LINK_TYPE_UNKNOWN": 4,
+     "AMDSMI_LINK_TYPE_XGMI": 2,
+     "AMDSMI_LINK_TYPE_XNUMA": 6
+    },
+    "kind": "enum",
+    "layout_hash": "02cb9365a1ce5930",
+    "size": 4
+   },
+   "amdsmi_memory_page_status_t": {
+    "align": 4,
+    "enumerators": {
+     "AMDSMI_MEM_PAGE_STATUS_PENDING": 1,
+     "AMDSMI_MEM_PAGE_STATUS_RESERVED": 0,
+     "AMDSMI_MEM_PAGE_STATUS_UNRESERVABLE": 2
+    },
+    "kind": "enum",
+    "layout_hash": "5fadb8b8e6cb60dc",
+    "size": 4
+   },
+   "amdsmi_memory_partition_config_t": {
+    "align": 8,
+    "fields": [
+     [
+      "partition_caps",
+      0,
+      4,
+      "amdsmi_nps_caps_t"
+     ],
+     [
+      "mp_mode",
+      4,
+      4,
+      "amdsmi_memory_partition_type_t"
+     ],
+     [
+      "num_numa_ranges",
+      8,
+      4,
+      "unsigned int"
+     ],
+     [
+      "numa_range",
+      16,
+      768,
+      "struct numa_range_[32]"
+     ],
+     [
+      "reserved",
+      784,
+      88,
+      "unsigned long[11]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "b38f2080fb401b04",
+    "size": 872
+   },
+   "amdsmi_memory_partition_type_t": {
+    "align": 4,
+    "enumerators": {
+     "AMDSMI_MEMORY_PARTITION_NPS1": 1,
+     "AMDSMI_MEMORY_PARTITION_NPS2": 2,
+     "AMDSMI_MEMORY_PARTITION_NPS4": 4,
+     "AMDSMI_MEMORY_PARTITION_NPS8": 8,
+     "AMDSMI_MEMORY_PARTITION_UNKNOWN": 0
+    },
+    "kind": "enum",
+    "layout_hash": "6436b1c3e63e2aa0",
+    "size": 4
+   },
+   "amdsmi_memory_type_t": {
+    "align": 4,
+    "enumerators": {
+     "AMDSMI_MEM_TYPE_FIRST": 0,
+     "AMDSMI_MEM_TYPE_GTT": 2,
+     "AMDSMI_MEM_TYPE_LAST": 2,
+     "AMDSMI_MEM_TYPE_VIS_VRAM": 1,
+     "AMDSMI_MEM_TYPE_VRAM": 0
+    },
+    "kind": "enum",
+    "layout_hash": "9d6632106a7d252d",
+    "size": 4
+   },
+   "amdsmi_mm_ip_t": {
+    "align": 4,
+    "enumerators": {
+     "AMDSMI_MM_UVD": 0,
+     "AMDSMI_MM_VCE": 1,
+     "AMDSMI_MM_VCN": 2,
+     "AMDSMI_MM__MAX": 3
+    },
+    "kind": "enum",
+    "layout_hash": "ce05cbf9498ee739",
+    "size": 4
+   },
+   "amdsmi_name_value_t": {
+    "align": 8,
+    "fields": [
+     [
+      "name",
+      0,
+      256,
+      "char[256]"
+     ],
+     [
+      "value",
+      256,
+      8,
+      "unsigned long"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "6c13e79258466002",
+    "size": 264
+   },
+   "amdsmi_nic_asic_info_t": {
+    "align": 2,
+    "fields": [
+     [
+      "vendor_id",
+      0,
+      2,
+      "unsigned short"
+     ],
+     [
+      "subvendor_id",
+      2,
+      2,
+      "unsigned short"
+     ],
+     [
+      "device_id",
+      4,
+      2,
+      "unsigned short"
+     ],
+     [
+      "subsystem_id",
+      6,
+      2,
+      "unsigned short"
+     ],
+     [
+      "revision",
+      8,
+      1,
+      "unsigned char"
+     ],
+     [
+      "permanent_address",
+      9,
+      256,
+      "char[256]"
+     ],
+     [
+      "product_name",
+      265,
+      256,
+      "char[256]"
+     ],
+     [
+      "part_number",
+      521,
+      256,
+      "char[256]"
+     ],
+     [
+      "serial_number",
+      777,
+      256,
+      "char[256]"
+     ],
+     [
+      "vendor_name",
+      1033,
+      256,
+      "char[256]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "6b131d0d6d578bb1",
+    "size": 1290
+   },
+   "amdsmi_nic_bus_info_t": {
+    "align": 8,
+    "fields": [
+     [
+      "bdf",
+      0,
+      8,
+      "amdsmi_bdf_t"
+     ],
+     [
+      "max_pcie_width",
+      8,
+      1,
+      "unsigned char"
+     ],
+     [
+      "max_pcie_speed",
+      12,
+      4,
+      "unsigned int"
+     ],
+     [
+      "pcie_interface_version",
+      16,
+      256,
+      "char[256]"
+     ],
+     [
+      "slot_type",
+      272,
+      256,
+      "char[256]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "9e09bea743dcd87b",
+    "size": 528
+   },
+   "amdsmi_nic_driver_info_t": {
+    "align": 1,
+    "fields": [
+     [
+      "name",
+      0,
+      256,
+      "char[256]"
+     ],
+     [
+      "version",
+      256,
+      256,
+      "char[256]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "fc95fbfca1a85c5b",
+    "size": 512
+   },
+   "amdsmi_nic_fw_entry_t": {
+    "align": 1,
+    "fields": [
+     [
+      "name",
+      0,
+      256,
+      "char[256]"
+     ],
+     [
+      "version",
+      256,
+      256,
+      "char[256]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "fc95fbfca1a85c5b",
+    "size": 512
+   },
+   "amdsmi_nic_fw_info_t": {
+    "align": 4,
+    "fields": [
+     [
+      "num_fw",
+      0,
+      4,
+      "unsigned int"
+     ],
+     [
+      "fw",
+      4,
+      8192,
+      "amdsmi_nic_fw_entry_t[16]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "08043b9a1f435cdb",
+    "size": 8196
+   },
+   "amdsmi_nic_numa_info_t": {
+    "align": 1,
+    "fields": [
+     [
+      "node",
+      0,
+      1,
+      "unsigned char"
+     ],
+     [
+      "affinity",
+      1,
+      256,
+      "char[256]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "e1e280e2cebf144e",
+    "size": 257
+   },
+   "amdsmi_nic_port_info_t": {
+    "align": 8,
+    "fields": [
+     [
+      "num_ports",
+      0,
+      4,
+      "unsigned int"
+     ],
+     [
+      "ports",
+      8,
+      74496,
+      "amdsmi_nic_port_t[32]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "e23bcdaafb6ae810",
+    "size": 74504
+   },
+   "amdsmi_nic_port_t": {
+    "align": 8,
+    "fields": [
+     [
+      "bdf",
+      0,
+      8,
+      "amdsmi_bdf_t"
+     ],
+     [
+      "port_num",
+      8,
+      4,
+      "unsigned int"
+     ],
+     [
+      "type",
+      12,
+      256,
+      "char[256]"
+     ],
+     [
+      "flavour",
+      268,
+      256,
+      "char[256]"
+     ],
+     [
+      "netdev",
+      524,
+      256,
+      "char[256]"
+     ],
+     [
+      "ifindex",
+      780,
+      1,
+      "unsigned char"
+     ],
+     [
+      "mac_address",
+      781,
+      256,
+      "char[256]"
+     ],
+     [
+      "carrier",
+      1037,
+      1,
+      "unsigned char"
+     ],
+     [
+      "mtu",
+      1038,
+      2,
+      "unsigned short"
+     ],
+     [
+      "link_state",
+      1040,
+      256,
+      "char[256]"
+     ],
+     [
+      "link_speed",
+      1296,
+      4,
+      "unsigned int"
+     ],
+     [
+      "active_fec",
+      1300,
+      4,
+      "unsigned int"
+     ],
+     [
+      "autoneg",
+      1304,
+      256,
+      "char[256]"
+     ],
+     [
+      "pause_autoneg",
+      1560,
+      256,
+      "char[256]"
+     ],
+     [
+      "pause_rx",
+      1816,
+      256,
+      "char[256]"
+     ],
+     [
+      "pause_tx",
+      2072,
+      256,
+      "char[256]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "ddc5673e7595c11a",
+    "size": 2328
+   },
+   "amdsmi_nic_rdma_dev_info_t": {
+    "align": 2,
+    "fields": [
+     [
+      "rdma_dev",
+      0,
+      256,
+      "char[256]"
+     ],
+     [
+      "node_guid",
+      256,
+      256,
+      "char[256]"
+     ],
+     [
+      "node_type",
+      512,
+      256,
+      "char[256]"
+     ],
+     [
+      "sys_image_guid",
+      768,
+      256,
+      "char[256]"
+     ],
+     [
+      "fw_ver",
+      1024,
+      256,
+      "char[256]"
+     ],
+     [
+      "num_rdma_ports",
+      1280,
+      1,
+      "unsigned char"
+     ],
+     [
+      "rdma_port_info",
+      1282,
+      16576,
+      "amdsmi_nic_rdma_port_info_t[32]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "4696034be8c5d03e",
+    "size": 17858
+   },
+   "amdsmi_nic_rdma_devices_info_t": {
+    "align": 2,
+    "fields": [
+     [
+      "num_rdma_dev",
+      0,
+      1,
+      "unsigned char"
+     ],
+     [
+      "rdma_dev_info",
+      2,
+      571456,
+      "amdsmi_nic_rdma_dev_info_t[32]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "fed9f51af1331c26",
+    "size": 571458
+   },
+   "amdsmi_nic_rdma_port_info_t": {
+    "align": 2,
+    "fields": [
+     [
+      "netdev",
+      0,
+      256,
+      "char[256]"
+     ],
+     [
+      "state",
+      256,
+      256,
+      "char[256]"
+     ],
+     [
+      "rdma_port",
+      512,
+      1,
+      "unsigned char"
+     ],
+     [
+      "max_mtu",
+      514,
+      2,
+      "unsigned short"
+     ],
+     [
+      "active_mtu",
+      516,
+      2,
+      "unsigned short"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "8470e52fc9456807",
+    "size": 518
+   },
+   "amdsmi_nic_stat_t": {
+    "align": 8,
+    "fields": [
+     [
+      "name",
+      0,
+      256,
+      "char[256]"
+     ],
+     [
+      "value",
+      256,
+      8,
+      "unsigned long"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "6c13e79258466002",
+    "size": 264
+   },
+   "amdsmi_node_handle": {
+    "align": 8,
+    "kind": "typedef",
+    "size": 8,
+    "type": "void *"
+   },
+   "amdsmi_npm_balancing_mode_t": {
+    "align": 4,
+    "enumerators": {
+     "AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING": 2,
+     "AMDSMI_NPM_BALANCING_MODE_INVALID": 0,
+     "AMDSMI_NPM_BALANCING_MODE_MAX": 3,
+     "AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING": 1
+    },
+    "kind": "enum",
+    "layout_hash": "1a5bd51d11362fd6",
+    "size": 4
+   },
+   "amdsmi_npm_info_t": {
+    "align": 8,
+    "fields": [
+     [
+      "status",
+      0,
+      4,
+      "amdsmi_npm_status_t"
+     ],
+     [
+      "limit",
+      8,
+      8,
+      "unsigned long"
+     ],
+     [
+      "ubb_power_threshold",
+      16,
+      4,
+      "unsigned int"
+     ],
+     [
+      "max_node_power_limit",
+      24,
+      8,
+      "unsigned long"
+     ],
+     [
+      "current_node_power",
+      32,
+      4,
+      "unsigned int"
+     ],
+     [
+      "reserved",
+      40,
+      24,
+      "unsigned long[3]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "ab932c41d4144de7",
+    "size": 64
+   },
+   "amdsmi_npm_status_t": {
+    "align": 4,
+    "enumerators": {
+     "AMDSMI_NPM_STATUS_DISABLED": 0,
+     "AMDSMI_NPM_STATUS_ENABLED": 1
+    },
+    "kind": "enum",
+    "layout_hash": "83693e9a21d2a5fc",
+    "size": 4
+   },
+   "amdsmi_nps_caps_t": {
+    "align": 4,
+    "fields": [
+     [
+      "nps_flags",
+      0,
+      4,
+      "struct nps_flags_"
+     ],
+     [
+      "nps_cap_mask",
+      0,
+      4,
+      "unsigned int"
+     ]
+    ],
+    "kind": "union",
+    "layout_hash": "6b306e4574d3c5ae",
+    "size": 4
+   },
+   "amdsmi_od_vddc_point_t": {
+    "align": 8,
+    "fields": [
+     [
+      "frequency",
+      0,
+      8,
+      "unsigned long"
+     ],
+     [
+      "voltage",
+      8,
+      8,
+      "unsigned long"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "4e525bc80c063313",
+    "size": 16
+   },
+   "amdsmi_od_volt_curve_t": {
+    "align": 8,
+    "fields": [
+     [
+      "vc_points",
+      0,
+      48,
+      "amdsmi_od_vddc_point_t[3]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "215942f6aa21f206",
+    "size": 48
+   },
+   "amdsmi_od_volt_freq_data_t": {
+    "align": 8,
+    "fields": [
+     [
+      "curr_sclk_range",
+      0,
+      32,
+      "amdsmi_range_t"
+     ],
+     [
+      "curr_mclk_range",
+      32,
+      32,
+      "amdsmi_range_t"
+     ],
+     [
+      "curr_fclk_range",
+      64,
+      32,
+      "amdsmi_range_t"
+     ],
+     [
+      "sclk_freq_limits",
+      96,
+      32,
+      "amdsmi_range_t"
+     ],
+     [
+      "mclk_freq_limits",
+      128,
+      32,
+      "amdsmi_range_t"
+     ],
+     [
+      "fclk_freq_limits",
+      160,
+      32,
+      "amdsmi_range_t"
+     ],
+     [
+      "curve",
+      192,
+      48,
+      "amdsmi_od_volt_curve_t"
+     ],
+     [
+      "num_regions",
+      240,
+      4,
+      "unsigned int"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "441f672485992128",
+    "size": 248
+   },
+   "amdsmi_p2p_capability_t": {
+    "align": 1,
+    "fields": [
+     [
+      "is_iolink_coherent",
+      0,
+      1,
+      "unsigned char"
+     ],
+     [
+      "is_iolink_atomics_32bit",
+      1,
+      1,
+      "unsigned char"
+     ],
+     [
+      "is_iolink_atomics_64bit",
+      2,
+      1,
+      "unsigned char"
+     ],
+     [
+      "is_iolink_dma",
+      3,
+      1,
+      "unsigned char"
+     ],
+     [
+      "is_iolink_bi_directional",
+      4,
+      1,
+      "unsigned char"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "6f80dc2ceeefbfe2",
+    "size": 5
+   },
+   "amdsmi_pcie_bandwidth_t": {
+    "align": 8,
+    "fields": [
+     [
+      "transfer_rate",
+      0,
+      280,
+      "amdsmi_frequencies_t"
+     ],
+     [
+      "lanes",
+      280,
+      132,
+      "unsigned int[33]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "207209f39c98ce03",
+    "size": 416
+   },
+   "amdsmi_pcie_info_t": {
+    "align": 8,
+    "fields": [
+     [
+      "pcie_static",
+      0,
+      96,
+      "struct pcie_static_"
+     ],
+     [
+      "pcie_metric",
+      96,
+      160,
+      "struct pcie_metric_"
+     ],
+     [
+      "reserved",
+      256,
+      256,
+      "unsigned long[32]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "26dfe1307f172428",
+    "size": 512
+   },
+   "amdsmi_power_cap_info_t": {
+    "align": 8,
+    "fields": [
+     [
+      "power_cap",
+      0,
+      8,
+      "unsigned long"
+     ],
+     [
+      "default_power_cap",
+      8,
+      8,
+      "unsigned long"
+     ],
+     [
+      "dpm_cap",
+      16,
+      8,
+      "unsigned long"
+     ],
+     [
+      "min_power_cap",
+      24,
+      8,
+      "unsigned long"
+     ],
+     [
+      "max_power_cap",
+      32,
+      8,
+      "unsigned long"
+     ],
+     [
+      "reserved",
+      40,
+      24,
+      "unsigned long[3]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "335c95272fbd4276",
+    "size": 64
+   },
+   "amdsmi_power_cap_type_t": {
+    "align": 4,
+    "enumerators": {
+     "AMDSMI_POWER_CAP_TYPE_PPT0": 0,
+     "AMDSMI_POWER_CAP_TYPE_PPT1": 1
+    },
+    "kind": "enum",
+    "layout_hash": "fa6e0f6c053cb0ba",
+    "size": 4
+   },
+   "amdsmi_power_info_t": {
+    "align": 8,
+    "fields": [
+     [
+      "socket_power",
+      0,
+      8,
+      "unsigned long"
+     ],
+     [
+      "current_socket_power",
+      8,
+      4,
+      "unsigned int"
+     ],
+     [
+      "average_socket_power",
+      12,
+      4,
+      "unsigned int"
+     ],
+     [
+      "gfx_voltage",
+      16,
+      8,
+      "unsigned long"
+     ],
+     [
+      "soc_voltage",
+      24,
+      8,
+      "unsigned long"
+     ],
+     [
+      "mem_voltage",
+      32,
+      8,
+      "unsigned long"
+     ],
+     [
+      "power_limit",
+      40,
+      4,
+      "unsigned int"
+     ],
+     [
+      "ubb_power",
+      44,
+      4,
+      "unsigned int"
+     ],
+     [
+      "reserved",
+      48,
+      144,
+      "unsigned long[18]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "32998bb33499f870",
+    "size": 192
+   },
+   "amdsmi_power_profile_preset_masks_t": {
+    "align": 8,
+    "enumerators": {
+     "AMDSMI_PWR_PROF_PRST_3D_FULL_SCR_MASK": 32,
+     "AMDSMI_PWR_PROF_PRST_BOOTUP_DEFAULT": 64,
+     "AMDSMI_PWR_PROF_PRST_COMPUTE_MASK": 8,
+     "AMDSMI_PWR_PROF_PRST_CUSTOM_MASK": 1,
+     "AMDSMI_PWR_PROF_PRST_INVALID": 18446744073709551615,
+     "AMDSMI_PWR_PROF_PRST_LAST": 64,
+     "AMDSMI_PWR_PROF_PRST_POWER_SAVING_MASK": 4,
+     "AMDSMI_PWR_PROF_PRST_VIDEO_MASK": 2,
+     "AMDSMI_PWR_PROF_PRST_VR_MASK": 16
+    },
+    "kind": "enum",
+    "layout_hash": "4afdb5a6cb09b852",
+    "size": 8
+   },
+   "amdsmi_power_profile_status_t": {
+    "align": 8,
+    "fields": [
+     [
+      "available_profiles",
+      0,
+      8,
+      "unsigned long"
+     ],
+     [
+      "current",
+      8,
+      8,
+      "amdsmi_power_profile_preset_masks_t"
+     ],
+     [
+      "num_profiles",
+      16,
+      4,
+      "unsigned int"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "6ff6d1afddd0429b",
+    "size": 24
+   },
+   "amdsmi_proc_gpu_entry_t": {
+    "align": 8,
+    "fields": [
+     [
+      "gpu_index",
+      0,
+      4,
+      "unsigned int"
+     ],
+     [
+      "mem",
+      8,
+      8,
+      "unsigned long"
+     ],
+     [
+      "engine_usage",
+      16,
+      64,
+      "struct amdsmi_proc_gpu_entry_t::engine_usage"
+     ],
+     [
+      "memory_usage",
+      80,
+      64,
+      "struct amdsmi_proc_gpu_entry_t::memory_usage"
+     ],
+     [
+      "cu_occupancy",
+      144,
+      4,
+      "unsigned int"
+     ],
+     [
+      "evicted_time",
+      148,
+      4,
+      "unsigned int"
+     ],
+     [
+      "sdma_usage",
+      152,
+      8,
+      "unsigned long"
+     ],
+     [
+      "reserved",
+      160,
+      32,
+      "unsigned int[8]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "1a3d75833987e48b",
+    "size": 192
+   },
+   "amdsmi_proc_info_by_pid_t": {
+    "align": 8,
+    "fields": [
+     [
+      "pid",
+      0,
+      4,
+      "unsigned int"
+     ],
+     [
+      "name",
+      4,
+      256,
+      "char[256]"
+     ],
+     [
+      "container_name",
+      260,
+      256,
+      "char[256]"
+     ],
+     [
+      "num_gpus",
+      516,
+      4,
+      "unsigned int"
+     ],
+     [
+      "gpus",
+      520,
+      6144,
+      "amdsmi_proc_gpu_entry_t[32]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "73bda1c503c52c16",
+    "size": 6664
+   },
+   "amdsmi_proc_info_t": {
+    "align": 8,
+    "fields": [
+     [
+      "name",
+      0,
+      256,
+      "char[256]"
+     ],
+     [
+      "pid",
+      256,
+      4,
+      "unsigned int"
+     ],
+     [
+      "mem",
+      264,
+      8,
+      "unsigned long"
+     ],
+     [
+      "engine_usage",
+      272,
+      64,
+      "struct engine_usage_"
+     ],
+     [
+      "memory_usage",
+      336,
+      64,
+      "struct memory_usage_"
+     ],
+     [
+      "container_name",
+      400,
+      256,
+      "char[256]"
+     ],
+     [
+      "cu_occupancy",
+      656,
+      4,
+      "unsigned int"
+     ],
+     [
+      "evicted_time",
+      660,
+      4,
+      "unsigned int"
+     ],
+     [
+      "sdma_usage",
+      664,
+      8,
+      "unsigned long"
+     ],
+     [
+      "reserved",
+      672,
+      32,
+      "unsigned int[8]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "80e9325c1147eb42",
+    "size": 704
+   },
+   "amdsmi_process_handle_t": {
+    "align": 4,
+    "kind": "typedef",
+    "size": 4,
+    "type": "unsigned int"
+   },
+   "amdsmi_process_info_t": {
+    "align": 8,
+    "fields": [
+     [
+      "process_id",
+      0,
+      4,
+      "unsigned int"
+     ],
+     [
+      "vram_usage",
+      8,
+      8,
+      "unsigned long"
+     ],
+     [
+      "sdma_usage",
+      16,
+      8,
+      "unsigned long"
+     ],
+     [
+      "cu_occupancy",
+      24,
+      4,
+      "unsigned int"
+     ],
+     [
+      "evicted_time",
+      28,
+      4,
+      "unsigned int"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "60a4dcce4b8e5334",
+    "size": 32
+   },
+   "amdsmi_processor_handle": {
+    "align": 8,
+    "kind": "typedef",
+    "size": 8,
+    "type": "void *"
+   },
+   "amdsmi_processor_type_t": {
+    "align": 4,
+    "enumerators": {
+     "AMDSMI_PROCESSOR_TYPE_AMD_APU": 6,
+     "AMDSMI_PROCESSOR_TYPE_AMD_CPU": 2,
+     "AMDSMI_PROCESSOR_TYPE_AMD_CPU_CORE": 5,
+     "AMDSMI_PROCESSOR_TYPE_AMD_GPU": 1,
+     "AMDSMI_PROCESSOR_TYPE_AMD_NIC": 7,
+     "AMDSMI_PROCESSOR_TYPE_BRCM_NIC": 8,
+     "AMDSMI_PROCESSOR_TYPE_BRCM_SWITCH": 9,
+     "AMDSMI_PROCESSOR_TYPE_NON_AMD_CPU": 4,
+     "AMDSMI_PROCESSOR_TYPE_NON_AMD_GPU": 3,
+     "AMDSMI_PROCESSOR_TYPE_UNKNOWN": 0
+    },
+    "kind": "enum",
+    "layout_hash": "85c2a328593f0ca4",
+    "size": 4
+   },
+   "amdsmi_ptl_data_format_t": {
+    "align": 4,
+    "enumerators": {
+     "AMDSMI_PTL_DATA_FORMAT_BF16": 2,
+     "AMDSMI_PTL_DATA_FORMAT_F16": 1,
+     "AMDSMI_PTL_DATA_FORMAT_F32": 3,
+     "AMDSMI_PTL_DATA_FORMAT_F64": 4,
+     "AMDSMI_PTL_DATA_FORMAT_F8": 5,
+     "AMDSMI_PTL_DATA_FORMAT_I8": 0,
+     "AMDSMI_PTL_DATA_FORMAT_INVALID": 4294967295,
+     "AMDSMI_PTL_DATA_FORMAT_VECTOR": 6
+    },
+    "kind": "enum",
+    "layout_hash": "69a967cb93d4e50a",
+    "size": 4
+   },
+   "amdsmi_range_t": {
+    "align": 8,
+    "fields": [
+     [
+      "lower_bound",
+      0,
+      8,
+      "unsigned long"
+     ],
+     [
+      "upper_bound",
+      8,
+      8,
+      "unsigned long"
+     ],
+     [
+      "reserved",
+      16,
+      16,
+      "unsigned long[2]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "a044a7ecbaf5c62a",
+    "size": 32
+   },
+   "amdsmi_ras_err_state_t": {
+    "align": 4,
+    "enumerators": {
+     "AMDSMI_RAS_ERR_STATE_DISABLED": 1,
+     "AMDSMI_RAS_ERR_STATE_ENABLED": 6,
+     "AMDSMI_RAS_ERR_STATE_INVALID": 4294967295,
+     "AMDSMI_RAS_ERR_STATE_LAST": 6,
+     "AMDSMI_RAS_ERR_STATE_MULT_UC": 4,
+     "AMDSMI_RAS_ERR_STATE_NONE": 0,
+     "AMDSMI_RAS_ERR_STATE_PARITY": 2,
+     "AMDSMI_RAS_ERR_STATE_POISON": 5,
+     "AMDSMI_RAS_ERR_STATE_SING_C": 3
+    },
+    "kind": "enum",
+    "layout_hash": "d7a3113ebefdef45",
+    "size": 4
+   },
+   "amdsmi_ras_feature_t": {
+    "align": 4,
+    "fields": [
+     [
+      "ras_eeprom_version",
+      0,
+      4,
+      "unsigned int"
+     ],
+     [
+      "ecc_correction_schema_flag",
+      4,
+      4,
+      "unsigned int"
+     ],
+     [
+      "ras_info",
+      8,
+      4,
+      "struct ras_info_"
+     ],
+     [
+      "needs_reboot",
+      12,
+      1,
+      "_Bool"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "6bdc862f3f6fd7a8",
+    "size": 16
+   },
+   "amdsmi_reg_type_t": {
+    "align": 4,
+    "enumerators": {
+     "AMDSMI_REG_PCIE": 2,
+     "AMDSMI_REG_USR": 3,
+     "AMDSMI_REG_USR1": 4,
+     "AMDSMI_REG_WAFL": 1,
+     "AMDSMI_REG_XGMI": 0
+    },
+    "kind": "enum",
+    "layout_hash": "47b5e5f1b19f7b41",
+    "size": 4
+   },
+   "amdsmi_retired_page_record_t": {
+    "align": 8,
+    "fields": [
+     [
+      "page_address",
+      0,
+      8,
+      "unsigned long"
+     ],
+     [
+      "page_size",
+      8,
+      8,
+      "unsigned long"
+     ],
+     [
+      "status",
+      16,
+      4,
+      "amdsmi_memory_page_status_t"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "c9116695011f5233",
+    "size": 24
+   },
+   "amdsmi_smu_fw_version_t": {
+    "align": 1,
+    "fields": [
+     [
+      "debug",
+      0,
+      1,
+      "unsigned char"
+     ],
+     [
+      "minor",
+      1,
+      1,
+      "unsigned char"
+     ],
+     [
+      "major",
+      2,
+      1,
+      "unsigned char"
+     ],
+     [
+      "unused",
+      3,
+      1,
+      "unsigned char"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "1aa86ea8c5919440",
+    "size": 4
+   },
+   "amdsmi_sock_info_t": {
+    "align": 4,
+    "fields": [
+     [
+      "socket_id",
+      0,
+      4,
+      "unsigned int"
+     ],
+     [
+      "cores_per_socket",
+      4,
+      4,
+      "unsigned int"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "df96c9fb7ab94add",
+    "size": 8
+   },
+   "amdsmi_socket_handle": {
+    "align": 8,
+    "kind": "typedef",
+    "size": 8,
+    "type": "void *"
+   },
+   "amdsmi_status_t": {
+    "align": 4,
+    "enumerators": {
+     "AMDSMI_STATUS_ADDRESS_FAULT": 13,
+     "AMDSMI_STATUS_AMDGPU_RESTART_ERR": 54,
+     "AMDSMI_STATUS_API_FAILED": 7,
+     "AMDSMI_STATUS_ARG_PTR_NULL": 53,
+     "AMDSMI_STATUS_BUSY": 30,
+     "AMDSMI_STATUS_CORRUPTED_EEPROM": 56,
+     "AMDSMI_STATUS_DIRECTORY_NOT_FOUND": 20,
+     "AMDSMI_STATUS_DRIVER_NOT_LOADED": 34,
+     "AMDSMI_STATUS_DRM_ERROR": 6,
+     "AMDSMI_STATUS_FAIL_LOAD_MODULE": 4,
+     "AMDSMI_STATUS_FAIL_LOAD_SYMBOL": 5,
+     "AMDSMI_STATUS_FILE_ERROR": 14,
+     "AMDSMI_STATUS_FILE_NOT_FOUND": 52,
+     "AMDSMI_STATUS_HSMP_TIMEOUT": 50,
+     "AMDSMI_STATUS_INIT_ERROR": 18,
+     "AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS": 17,
+     "AMDSMI_STATUS_INSUFFICIENT_SIZE": 41,
+     "AMDSMI_STATUS_INTERNAL_EXCEPTION": 16,
+     "AMDSMI_STATUS_INTERRUPT": 11,
+     "AMDSMI_STATUS_INVAL": 1,
+     "AMDSMI_STATUS_IO": 12,
+     "AMDSMI_STATUS_IPC_ERROR": 21,
+     "AMDSMI_STATUS_MAP_ERROR": 4294967294,
+     "AMDSMI_STATUS_MORE_DATA": 39,
+     "AMDSMI_STATUS_NON_AMD_CPU": 44,
+     "AMDSMI_STATUS_NOT_FOUND": 31,
+     "AMDSMI_STATUS_NOT_INIT": 32,
+     "AMDSMI_STATUS_NOT_SUPPORTED": 2,
+     "AMDSMI_STATUS_NOT_YET_IMPLEMENTED": 3,
+     "AMDSMI_STATUS_NO_DATA": 40,
+     "AMDSMI_STATUS_NO_DRV": 51,
+     "AMDSMI_STATUS_NO_ENERGY_DRV": 45,
+     "AMDSMI_STATUS_NO_HSMP_DRV": 47,
+     "AMDSMI_STATUS_NO_HSMP_MSG_SUP": 49,
+     "AMDSMI_STATUS_NO_HSMP_SUP": 48,
+     "AMDSMI_STATUS_NO_MSR_DRV": 46,
+     "AMDSMI_STATUS_NO_PERM": 10,
+     "AMDSMI_STATUS_NO_SLOT": 33,
+     "AMDSMI_STATUS_OUT_OF_RESOURCES": 15,
+     "AMDSMI_STATUS_REFCOUNT_OVERFLOW": 19,
+     "AMDSMI_STATUS_RETRY": 9,
+     "AMDSMI_STATUS_SETTING_UNAVAILABLE": 55,
+     "AMDSMI_STATUS_SUCCESS": 0,
+     "AMDSMI_STATUS_TIMEOUT": 8,
+     "AMDSMI_STATUS_UNEXPECTED_DATA": 43,
+     "AMDSMI_STATUS_UNEXPECTED_SIZE": 42,
+     "AMDSMI_STATUS_UNKNOWN_ERROR": 4294967295
+    },
+    "kind": "enum",
+    "layout_hash": "3867a9661fc5b49e",
+    "size": 4
+   },
+   "amdsmi_temp_range_refresh_rate_t": {
+    "align": 1,
+    "fields": [
+     [
+      "range",
+      "0:0",
+      "3b",
+      "unsigned char"
+     ],
+     [
+      "ref_rate",
+      "0:3",
+      "1b",
+      "unsigned char"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "65ec5fde0aeff45a",
+    "size": 1
+   },
+   "amdsmi_temperature_metric_t": {
+    "align": 4,
+    "enumerators": {
+     "AMDSMI_TEMP_CRITICAL": 5,
+     "AMDSMI_TEMP_CRITICAL_HYST": 6,
+     "AMDSMI_TEMP_CRIT_MIN": 9,
+     "AMDSMI_TEMP_CRIT_MIN_HYST": 10,
+     "AMDSMI_TEMP_CURRENT": 0,
+     "AMDSMI_TEMP_EMERGENCY": 7,
+     "AMDSMI_TEMP_EMERGENCY_HYST": 8,
+     "AMDSMI_TEMP_FIRST": 0,
+     "AMDSMI_TEMP_HIGHEST": 13,
+     "AMDSMI_TEMP_LAST": 14,
+     "AMDSMI_TEMP_LOWEST": 12,
+     "AMDSMI_TEMP_MAX": 1,
+     "AMDSMI_TEMP_MAX_HYST": 3,
+     "AMDSMI_TEMP_MIN": 2,
+     "AMDSMI_TEMP_MIN_HYST": 4,
+     "AMDSMI_TEMP_OFFSET": 11,
+     "AMDSMI_TEMP_SHUTDOWN": 14
+    },
+    "kind": "enum",
+    "layout_hash": "6925c40496b457c2",
+    "size": 4
+   },
+   "amdsmi_temperature_type_t": {
+    "align": 4,
+    "enumerators": {
+     "AMDSMI_TEMPERATURE_TYPE_BASEBOARD_FIRST": 200,
+     "AMDSMI_TEMPERATURE_TYPE_BASEBOARD_IBC": 222,
+     "AMDSMI_TEMPERATURE_TYPE_BASEBOARD_IBC_HSC": 221,
+     "AMDSMI_TEMPERATURE_TYPE_BASEBOARD_LAST": 249,
+     "AMDSMI_TEMPERATURE_TYPE_BASEBOARD_OAM_0_1_2_3_3V3_VR": 219,
+     "AMDSMI_TEMPERATURE_TYPE_BASEBOARD_OAM_0_1_HSC": 207,
+     "AMDSMI_TEMPERATURE_TYPE_BASEBOARD_OAM_2_3_HSC": 208,
+     "AMDSMI_TEMPERATURE_TYPE_BASEBOARD_OAM_4_5_6_7_3V3_VR": 220,
+     "AMDSMI_TEMPERATURE_TYPE_BASEBOARD_OAM_4_5_HSC": 209,
+     "AMDSMI_TEMPERATURE_TYPE_BASEBOARD_OAM_6_7_HSC": 210,
+     "AMDSMI_TEMPERATURE_TYPE_BASEBOARD_RETIMER_0_1_0V9_VR": 215,
+     "AMDSMI_TEMPERATURE_TYPE_BASEBOARD_RETIMER_0_1_2_3_1V2_VR": 213,
+     "AMDSMI_TEMPERATURE_TYPE_BASEBOARD_RETIMER_2_3_0V9_VR": 217,
+     "AMDSMI_TEMPERATURE_TYPE_BASEBOARD_RETIMER_4_5_0V9_VR": 216,
+     "AMDSMI_TEMPERATURE_TYPE_BASEBOARD_RETIMER_4_5_6_7_1V2_VR": 214,
+     "AMDSMI_TEMPERATURE_TYPE_BASEBOARD_RETIMER_6_7_0V9_VR": 218,
+     "AMDSMI_TEMPERATURE_TYPE_BASEBOARD_UBB_BACK": 202,
+     "AMDSMI_TEMPERATURE_TYPE_BASEBOARD_UBB_FPGA": 200,
+     "AMDSMI_TEMPERATURE_TYPE_BASEBOARD_UBB_FPGA_0V72_VR": 211,
+     "AMDSMI_TEMPERATURE_TYPE_BASEBOARD_UBB_FPGA_3V3_VR": 212,
+     "AMDSMI_TEMPERATURE_TYPE_BASEBOARD_UBB_FRONT": 201,
+     "AMDSMI_TEMPERATURE_TYPE_BASEBOARD_UBB_IBC": 204,
+     "AMDSMI_TEMPERATURE_TYPE_BASEBOARD_UBB_OAM1": 206,
+     "AMDSMI_TEMPERATURE_TYPE_BASEBOARD_UBB_OAM7": 203,
+     "AMDSMI_TEMPERATURE_TYPE_BASEBOARD_UBB_UFPGA": 205,
+     "AMDSMI_TEMPERATURE_TYPE_EDGE": 0,
+     "AMDSMI_TEMPERATURE_TYPE_FIRST": 0,
+     "AMDSMI_TEMPERATURE_TYPE_GPUBOARD_LAST": 175,
+     "AMDSMI_TEMPERATURE_TYPE_GPUBOARD_NODE_FIRST": 100,
+     "AMDSMI_TEMPERATURE_TYPE_GPUBOARD_NODE_LAST": 149,
+     "AMDSMI_TEMPERATURE_TYPE_GPUBOARD_NODE_OAM_X_04_HBM_B_VR": 104,
+     "AMDSMI_TEMPERATURE_TYPE_GPUBOARD_NODE_OAM_X_04_HBM_D_VR": 105,
+     "AMDSMI_TEMPERATURE_TYPE_GPUBOARD_NODE_OAM_X_IBC": 101,
+     "AMDSMI_TEMPERATURE_TYPE_GPUBOARD_NODE_OAM_X_IBC_2": 102,
+     "AMDSMI_TEMPERATURE_TYPE_GPUBOARD_NODE_OAM_X_VDD18_VR": 103,
+     "AMDSMI_TEMPERATURE_TYPE_GPUBOARD_NODE_RETIMER_X": 100,
+     "AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDAN_075": 175,
+     "AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDAN_075_GTA_A": 169,
+     "AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDAN_075_GTA_C": 170,
+     "AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDCR_075_HBM_B": 165,
+     "AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDCR_075_HBM_D": 166,
+     "AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDCR_075_UCIE": 171,
+     "AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDCR_11_HBM_B": 159,
+     "AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDCR_11_HBM_D": 160,
+     "AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDCR_SOCIO_A": 156,
+     "AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDCR_SOCIO_C": 157,
+     "AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDCR_SOC_A": 154,
+     "AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDCR_SOC_C": 155,
+     "AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDCR_VDD0": 150,
+     "AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDCR_VDD1": 151,
+     "AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDCR_VDD2": 152,
+     "AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDCR_VDD3": 153,
+     "AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDIO_04_HBM_B": 163,
+     "AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDIO_04_HBM_D": 164,
+     "AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDIO_065_UCIEAA": 172,
+     "AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDIO_065_UCIEAM_A": 173,
+     "AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDIO_065_UCIEAM_C": 174,
+     "AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDIO_11_E32": 162,
+     "AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDIO_11_GTA_A": 167,
+     "AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDIO_11_GTA_C": 168,
+     "AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDD_085_HBM": 158,
+     "AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDD_USR": 161,
+     "AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VR_FIRST": 150,
+     "AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VR_LAST": 199,
+     "AMDSMI_TEMPERATURE_TYPE_HBM_0": 3,
+     "AMDSMI_TEMPERATURE_TYPE_HBM_1": 4,
+     "AMDSMI_TEMPERATURE_TYPE_HBM_2": 5,
+     "AMDSMI_TEMPERATURE_TYPE_HBM_3": 6,
+     "AMDSMI_TEMPERATURE_TYPE_HOTSPOT": 1,
+     "AMDSMI_TEMPERATURE_TYPE_JUNCTION": 1,
+     "AMDSMI_TEMPERATURE_TYPE_PLX": 7,
+     "AMDSMI_TEMPERATURE_TYPE_VRAM": 2,
+     "AMDSMI_TEMPERATURE_TYPE__MAX": 249
+    },
+    "kind": "enum",
+    "layout_hash": "0a20188e91d2d4ab",
+    "size": 4
+   },
+   "amdsmi_topology_nearest_t": {
+    "align": 8,
+    "fields": [
+     [
+      "count",
+      0,
+      4,
+      "unsigned int"
+     ],
+     [
+      "processor_list",
+      8,
+      2048,
+      "void *[256]"
+     ],
+     [
+      "reserved",
+      2056,
+      120,
+      "unsigned long[15]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "88919c9e3934573c",
+    "size": 2176
+   },
+   "amdsmi_tray_info_t": {
+    "align": 4,
+    "fields": [
+     [
+      "max_acc_per_tray",
+      0,
+      4,
+      "unsigned int"
+     ],
+     [
+      "tray_type",
+      4,
+      4,
+      "amdsmi_compute_tray_type_t"
+     ],
+     [
+      "reserved",
+      8,
+      56,
+      "unsigned int[14]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "b99a413602c89d1c",
+    "size": 64
+   },
+   "amdsmi_ttm_info_t": {
+    "align": 8,
+    "fields": [
+     [
+      "current_pages",
+      0,
+      8,
+      "unsigned long"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "5395e094f3f02d2a",
+    "size": 8
+   },
+   "amdsmi_uma_carveout_info_t": {
+    "align": 4,
+    "fields": [
+     [
+      "current_index",
+      0,
+      4,
+      "unsigned int"
+     ],
+     [
+      "num_options",
+      4,
+      4,
+      "unsigned int"
+     ],
+     [
+      "options",
+      8,
+      4160,
+      "amdsmi_uma_carveout_option_t[16]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "6d25894fa506974c",
+    "size": 4168
+   },
+   "amdsmi_uma_carveout_option_t": {
+    "align": 4,
+    "fields": [
+     [
+      "index",
+      0,
+      4,
+      "unsigned int"
+     ],
+     [
+      "description",
+      4,
+      256,
+      "char[256]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "1ab87d4e2574f555",
+    "size": 260
+   },
+   "amdsmi_utilization_counter_t": {
+    "align": 8,
+    "fields": [
+     [
+      "type",
+      0,
+      4,
+      "amdsmi_utilization_counter_type_t"
+     ],
+     [
+      "value",
+      8,
+      8,
+      "unsigned long"
+     ],
+     [
+      "fine_value",
+      16,
+      32,
+      "unsigned long[4]"
+     ],
+     [
+      "fine_value_count",
+      48,
+      2,
+      "unsigned short"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "182d843924312afe",
+    "size": 56
+   },
+   "amdsmi_utilization_counter_type_t": {
+    "align": 4,
+    "enumerators": {
+     "AMDSMI_COARSE_DECODER_ACTIVITY": 2,
+     "AMDSMI_COARSE_GRAIN_GFX_ACTIVITY": 0,
+     "AMDSMI_COARSE_GRAIN_MEM_ACTIVITY": 1,
+     "AMDSMI_FINE_DECODER_ACTIVITY": 102,
+     "AMDSMI_FINE_GRAIN_GFX_ACTIVITY": 100,
+     "AMDSMI_FINE_GRAIN_MEM_ACTIVITY": 101,
+     "AMDSMI_UTILIZATION_COUNTER_FIRST": 0,
+     "AMDSMI_UTILIZATION_COUNTER_LAST": 102
+    },
+    "kind": "enum",
+    "layout_hash": "438f019ca9fbeca3",
+    "size": 4
+   },
+   "amdsmi_vbios_info_t": {
+    "align": 8,
+    "fields": [
+     [
+      "name",
+      0,
+      256,
+      "char[256]"
+     ],
+     [
+      "build_date",
+      256,
+      256,
+      "char[256]"
+     ],
+     [
+      "part_number",
+      512,
+      256,
+      "char[256]"
+     ],
+     [
+      "version",
+      768,
+      256,
+      "char[256]"
+     ],
+     [
+      "boot_firmware",
+      1024,
+      256,
+      "char[256]"
+     ],
+     [
+      "reserved",
+      1280,
+      288,
+      "unsigned long[36]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "eddf23c383969e27",
+    "size": 1568
+   },
+   "amdsmi_version_t": {
+    "align": 8,
+    "fields": [
+     [
+      "major",
+      0,
+      4,
+      "unsigned int"
+     ],
+     [
+      "minor",
+      4,
+      4,
+      "unsigned int"
+     ],
+     [
+      "release",
+      8,
+      4,
+      "unsigned int"
+     ],
+     [
+      "build",
+      16,
+      8,
+      "const char *"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "cc8cecaa771a1026",
+    "size": 24
+   },
+   "amdsmi_violation_status_t": {
+    "align": 8,
+    "fields": [
+     [
+      "reference_timestamp",
+      0,
+      8,
+      "unsigned long"
+     ],
+     [
+      "violation_timestamp",
+      8,
+      8,
+      "unsigned long"
+     ],
+     [
+      "acc_counter",
+      16,
+      8,
+      "unsigned long"
+     ],
+     [
+      "acc_prochot_thrm",
+      24,
+      8,
+      "unsigned long"
+     ],
+     [
+      "acc_ppt_pwr",
+      32,
+      8,
+      "unsigned long"
+     ],
+     [
+      "acc_socket_thrm",
+      40,
+      8,
+      "unsigned long"
+     ],
+     [
+      "acc_vr_thrm",
+      48,
+      8,
+      "unsigned long"
+     ],
+     [
+      "acc_hbm_thrm",
+      56,
+      8,
+      "unsigned long"
+     ],
+     [
+      "acc_gfx_clk_below_host_limit",
+      64,
+      8,
+      "unsigned long"
+     ],
+     [
+      "per_prochot_thrm",
+      72,
+      8,
+      "unsigned long"
+     ],
+     [
+      "per_ppt_pwr",
+      80,
+      8,
+      "unsigned long"
+     ],
+     [
+      "per_socket_thrm",
+      88,
+      8,
+      "unsigned long"
+     ],
+     [
+      "per_vr_thrm",
+      96,
+      8,
+      "unsigned long"
+     ],
+     [
+      "per_hbm_thrm",
+      104,
+      8,
+      "unsigned long"
+     ],
+     [
+      "per_gfx_clk_below_host_limit",
+      112,
+      8,
+      "unsigned long"
+     ],
+     [
+      "active_prochot_thrm",
+      120,
+      1,
+      "unsigned char"
+     ],
+     [
+      "active_ppt_pwr",
+      121,
+      1,
+      "unsigned char"
+     ],
+     [
+      "active_socket_thrm",
+      122,
+      1,
+      "unsigned char"
+     ],
+     [
+      "active_vr_thrm",
+      123,
+      1,
+      "unsigned char"
+     ],
+     [
+      "active_hbm_thrm",
+      124,
+      1,
+      "unsigned char"
+     ],
+     [
+      "active_gfx_clk_below_host_limit",
+      125,
+      1,
+      "unsigned char"
+     ],
+     [
+      "acc_gfx_clk_below_host_limit_pwr",
+      128,
+      512,
+      "unsigned long[8][8]"
+     ],
+     [
+      "acc_gfx_clk_below_host_limit_thm",
+      640,
+      512,
+      "unsigned long[8][8]"
+     ],
+     [
+      "acc_low_utilization",
+      1152,
+      512,
+      "unsigned long[8][8]"
+     ],
+     [
+      "acc_gfx_clk_below_host_limit_total",
+      1664,
+      512,
+      "unsigned long[8][8]"
+     ],
+     [
+      "per_gfx_clk_below_host_limit_pwr",
+      2176,
+      512,
+      "unsigned long[8][8]"
+     ],
+     [
+      "per_gfx_clk_below_host_limit_thm",
+      2688,
+      512,
+      "unsigned long[8][8]"
+     ],
+     [
+      "per_low_utilization",
+      3200,
+      512,
+      "unsigned long[8][8]"
+     ],
+     [
+      "per_gfx_clk_below_host_limit_total",
+      3712,
+      512,
+      "unsigned long[8][8]"
+     ],
+     [
+      "active_gfx_clk_below_host_limit_pwr",
+      4224,
+      64,
+      "unsigned char[8][8]"
+     ],
+     [
+      "active_gfx_clk_below_host_limit_thm",
+      4288,
+      64,
+      "unsigned char[8][8]"
+     ],
+     [
+      "active_low_utilization",
+      4352,
+      64,
+      "unsigned char[8][8]"
+     ],
+     [
+      "active_gfx_clk_below_host_limit_total",
+      4416,
+      64,
+      "unsigned char[8][8]"
+     ],
+     [
+      "reserved",
+      4480,
+      512,
+      "unsigned long[8][8]"
+     ],
+     [
+      "reserved2",
+      4992,
+      512,
+      "unsigned long[8][8]"
+     ],
+     [
+      "reserved3",
+      5504,
+      512,
+      "unsigned long[8][8]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "2a6d12cd25fff511",
+    "size": 6016
+   },
+   "amdsmi_virtualization_mode_t": {
+    "align": 4,
+    "enumerators": {
+     "AMDSMI_VIRTUALIZATION_MODE_BAREMETAL": 1,
+     "AMDSMI_VIRTUALIZATION_MODE_GUEST": 3,
+     "AMDSMI_VIRTUALIZATION_MODE_HOST": 2,
+     "AMDSMI_VIRTUALIZATION_MODE_PASSTHROUGH": 4,
+     "AMDSMI_VIRTUALIZATION_MODE_UNKNOWN": 0
+    },
+    "kind": "enum",
+    "layout_hash": "d5a79ace21aca1ce",
+    "size": 4
+   },
+   "amdsmi_voltage_metric_t": {
+    "align": 4,
+    "enumerators": {
+     "AMDSMI_VOLT_AVERAGE": 5,
+     "AMDSMI_VOLT_CURRENT": 0,
+     "AMDSMI_VOLT_FIRST": 0,
+     "AMDSMI_VOLT_HIGHEST": 7,
+     "AMDSMI_VOLT_LAST": 7,
+     "AMDSMI_VOLT_LOWEST": 6,
+     "AMDSMI_VOLT_MAX": 1,
+     "AMDSMI_VOLT_MAX_CRIT": 4,
+     "AMDSMI_VOLT_MIN": 3,
+     "AMDSMI_VOLT_MIN_CRIT": 2
+    },
+    "kind": "enum",
+    "layout_hash": "bf17d6a4c3f7e3f9",
+    "size": 4
+   },
+   "amdsmi_voltage_type_t": {
+    "align": 4,
+    "enumerators": {
+     "AMDSMI_VOLT_TYPE_FIRST": 0,
+     "AMDSMI_VOLT_TYPE_INVALID": 4294967295,
+     "AMDSMI_VOLT_TYPE_LAST": 1,
+     "AMDSMI_VOLT_TYPE_VDDBOARD": 1,
+     "AMDSMI_VOLT_TYPE_VDDGFX": 0
+    },
+    "kind": "enum",
+    "layout_hash": "42b3869a85bf533d",
+    "size": 4
+   },
+   "amdsmi_vram_info_t": {
+    "align": 8,
+    "fields": [
+     [
+      "vram_type",
+      0,
+      4,
+      "amdsmi_vram_type_t"
+     ],
+     [
+      "vram_vendor",
+      4,
+      256,
+      "char[256]"
+     ],
+     [
+      "vram_size",
+      264,
+      8,
+      "unsigned long"
+     ],
+     [
+      "vram_bit_width",
+      272,
+      4,
+      "unsigned int"
+     ],
+     [
+      "vram_max_bandwidth",
+      280,
+      8,
+      "unsigned long"
+     ],
+     [
+      "reserved",
+      288,
+      296,
+      "unsigned long[37]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "afb203cdcdc2a906",
+    "size": 584
+   },
+   "amdsmi_vram_type_t": {
+    "align": 4,
+    "enumerators": {
+     "AMDSMI_VRAM_TYPE_DDR2": 10,
+     "AMDSMI_VRAM_TYPE_DDR3": 11,
+     "AMDSMI_VRAM_TYPE_DDR4": 12,
+     "AMDSMI_VRAM_TYPE_DDR5": 13,
+     "AMDSMI_VRAM_TYPE_GDDR1": 17,
+     "AMDSMI_VRAM_TYPE_GDDR2": 18,
+     "AMDSMI_VRAM_TYPE_GDDR3": 19,
+     "AMDSMI_VRAM_TYPE_GDDR4": 20,
+     "AMDSMI_VRAM_TYPE_GDDR5": 21,
+     "AMDSMI_VRAM_TYPE_GDDR6": 22,
+     "AMDSMI_VRAM_TYPE_GDDR7": 23,
+     "AMDSMI_VRAM_TYPE_HBM": 1,
+     "AMDSMI_VRAM_TYPE_HBM2": 2,
+     "AMDSMI_VRAM_TYPE_HBM2E": 3,
+     "AMDSMI_VRAM_TYPE_HBM3": 4,
+     "AMDSMI_VRAM_TYPE_HBM3E": 5,
+     "AMDSMI_VRAM_TYPE_HBM4": 6,
+     "AMDSMI_VRAM_TYPE_LPDDR4": 30,
+     "AMDSMI_VRAM_TYPE_LPDDR5": 31,
+     "AMDSMI_VRAM_TYPE_UNKNOWN": 0,
+     "AMDSMI_VRAM_TYPE__MAX": 31
+    },
+    "kind": "enum",
+    "layout_hash": "b87d000a578ed8e1",
+    "size": 4
+   },
+   "amdsmi_vram_usage_t": {
+    "align": 4,
+    "fields": [
+     [
+      "vram_total",
+      0,
+      4,
+      "unsigned int"
+     ],
+     [
+      "vram_used",
+      4,
+      4,
+      "unsigned int"
+     ],
+     [
+      "reserved",
+      8,
+      8,
+      "unsigned int[2]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "2b253fc6cf5a3fac",
+    "size": 16
+   },
+   "amdsmi_xgmi_info_t": {
+    "align": 8,
+    "fields": [
+     [
+      "xgmi_lanes",
+      0,
+      1,
+      "unsigned char"
+     ],
+     [
+      "xgmi_hive_id",
+      8,
+      8,
+      "unsigned long"
+     ],
+     [
+      "xgmi_node_id",
+      16,
+      8,
+      "unsigned long"
+     ],
+     [
+      "index",
+      24,
+      4,
+      "unsigned int"
+     ],
+     [
+      "reserved",
+      28,
+      36,
+      "unsigned int[9]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "a8a8dd43b4bef48f",
+    "size": 64
+   },
+   "amdsmi_xgmi_link_status_t": {
+    "align": 8,
+    "fields": [
+     [
+      "total_links",
+      0,
+      4,
+      "unsigned int"
+     ],
+     [
+      "status",
+      4,
+      32,
+      "amdsmi_xgmi_link_status_type_t[8]"
+     ],
+     [
+      "reserved",
+      40,
+      56,
+      "unsigned long[7]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "2329986634d28405",
+    "size": 96
+   },
+   "amdsmi_xgmi_link_status_type_t": {
+    "align": 4,
+    "enumerators": {
+     "AMDSMI_XGMI_LINK_DISABLE": 2,
+     "AMDSMI_XGMI_LINK_DOWN": 0,
+     "AMDSMI_XGMI_LINK_UP": 1
+    },
+    "kind": "enum",
+    "layout_hash": "62f4b34106eba1b0",
+    "size": 4
+   },
+   "amdsmi_xgmi_status_t": {
+    "align": 4,
+    "enumerators": {
+     "AMDSMI_XGMI_STATUS_ERROR": 1,
+     "AMDSMI_XGMI_STATUS_MULTIPLE_ERRORS": 2,
+     "AMDSMI_XGMI_STATUS_NO_ERRORS": 0
+    },
+    "kind": "enum",
+    "layout_hash": "9a9d631180025eee",
+    "size": 4
+   },
+   "processor_type_t": {
+    "align": 4,
+    "enumerators": {
+     "AMDSMI_PROCESSOR_TYPE_AMD_APU": 6,
+     "AMDSMI_PROCESSOR_TYPE_AMD_CPU": 2,
+     "AMDSMI_PROCESSOR_TYPE_AMD_CPU_CORE": 5,
+     "AMDSMI_PROCESSOR_TYPE_AMD_GPU": 1,
+     "AMDSMI_PROCESSOR_TYPE_AMD_NIC": 7,
+     "AMDSMI_PROCESSOR_TYPE_BRCM_NIC": 8,
+     "AMDSMI_PROCESSOR_TYPE_BRCM_SWITCH": 9,
+     "AMDSMI_PROCESSOR_TYPE_NON_AMD_CPU": 4,
+     "AMDSMI_PROCESSOR_TYPE_NON_AMD_GPU": 3,
+     "AMDSMI_PROCESSOR_TYPE_UNKNOWN": 0
+    },
+    "kind": "enum",
+    "layout_hash": "85c2a328593f0ca4",
+    "size": 4
+   },
+   "struct _links": {
+    "align": 8,
+    "fields": [
+     [
+      "bdf",
+      0,
+      8,
+      "amdsmi_bdf_t"
+     ],
+     [
+      "bit_rate",
+      8,
+      4,
+      "unsigned int"
+     ],
+     [
+      "max_bandwidth",
+      12,
+      4,
+      "unsigned int"
+     ],
+     [
+      "link_type",
+      16,
+      4,
+      "amdsmi_link_type_t"
+     ],
+     [
+      "read",
+      24,
+      8,
+      "unsigned long"
+     ],
+     [
+      "write",
+      32,
+      8,
+      "unsigned long"
+     ],
+     [
+      "link_status",
+      40,
+      4,
+      "amdsmi_link_status_t"
+     ],
+     [
+      "reserved",
+      48,
+      8,
+      "unsigned long[1]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "0912f65ea7c3f322",
+    "size": 56
+   },
+   "struct amdsmi_bdf_t::(anon #0)": {
+    "align": 8,
+    "fields": [
+     [
+      "function_number",
+      "0:0",
+      "3b",
+      "unsigned long"
+     ],
+     [
+      "device_number",
+      "0:3",
+      "5b",
+      "unsigned long"
+     ],
+     [
+      "bus_number",
+      "1:0",
+      "8b",
+      "unsigned long"
+     ],
+     [
+      "domain_number",
+      "2:0",
+      "48b",
+      "unsigned long"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "4d0a24ea0500b810",
+    "size": 8
+   },
+   "struct amdsmi_proc_gpu_entry_t::engine_usage": {
+    "align": 8,
+    "fields": [
+     [
+      "gfx",
+      0,
+      8,
+      "unsigned long"
+     ],
+     [
+      "enc",
+      8,
+      8,
+      "unsigned long"
+     ],
+     [
+      "reserved",
+      16,
+      48,
+      "unsigned int[12]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "5509d557f37bbe31",
+    "size": 64
+   },
+   "struct amdsmi_proc_gpu_entry_t::memory_usage": {
+    "align": 8,
+    "fields": [
+     [
+      "gtt_mem",
+      0,
+      8,
+      "unsigned long"
+     ],
+     [
+      "cpu_mem",
+      8,
+      8,
+      "unsigned long"
+     ],
+     [
+      "vram_mem",
+      16,
+      8,
+      "unsigned long"
+     ],
+     [
+      "reserved",
+      24,
+      40,
+      "unsigned int[10]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "5db52cfa01f24f5e",
+    "size": 64
+   },
+   "struct bdf_": {
+    "align": 8,
+    "fields": [
+     [
+      "function_number",
+      "0:0",
+      "3b",
+      "unsigned long"
+     ],
+     [
+      "device_number",
+      "0:3",
+      "5b",
+      "unsigned long"
+     ],
+     [
+      "bus_number",
+      "1:0",
+      "8b",
+      "unsigned long"
+     ],
+     [
+      "domain_number",
+      "2:0",
+      "48b",
+      "unsigned long"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "4d0a24ea0500b810",
+    "size": 8
+   },
+   "struct cache_": {
+    "align": 4,
+    "fields": [
+     [
+      "cache_properties",
+      0,
+      4,
+      "unsigned int"
+     ],
+     [
+      "cache_size",
+      4,
+      4,
+      "unsigned int"
+     ],
+     [
+      "cache_level",
+      8,
+      4,
+      "unsigned int"
+     ],
+     [
+      "max_num_cu_shared",
+      12,
+      4,
+      "unsigned int"
+     ],
+     [
+      "num_cache_instance",
+      16,
+      4,
+      "unsigned int"
+     ],
+     [
+      "reserved",
+      20,
+      12,
+      "unsigned int[3]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "c07f589ebcd3225b",
+    "size": 32
+   },
+   "struct engine_usage_": {
+    "align": 8,
+    "fields": [
+     [
+      "gfx",
+      0,
+      8,
+      "unsigned long"
+     ],
+     [
+      "enc",
+      8,
+      8,
+      "unsigned long"
+     ],
+     [
+      "reserved",
+      16,
+      48,
+      "unsigned int[12]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "5509d557f37bbe31",
+    "size": 64
+   },
+   "struct fw_info_list_": {
+    "align": 8,
+    "fields": [
+     [
+      "fw_id",
+      0,
+      4,
+      "amdsmi_fw_block_t"
+     ],
+     [
+      "fw_version",
+      8,
+      8,
+      "unsigned long"
+     ],
+     [
+      "reserved",
+      16,
+      16,
+      "unsigned long[2]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "785932d25884525e",
+    "size": 32
+   },
+   "struct memory_usage_": {
+    "align": 8,
+    "fields": [
+     [
+      "gtt_mem",
+      0,
+      8,
+      "unsigned long"
+     ],
+     [
+      "cpu_mem",
+      8,
+      8,
+      "unsigned long"
+     ],
+     [
+      "vram_mem",
+      16,
+      8,
+      "unsigned long"
+     ],
+     [
+      "reserved",
+      24,
+      40,
+      "unsigned int[10]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "5db52cfa01f24f5e",
+    "size": 64
+   },
+   "struct nps_flags_": {
+    "align": 4,
+    "fields": [
+     [
+      "nps1_cap",
+      "0:0",
+      "1b",
+      "unsigned int"
+     ],
+     [
+      "nps2_cap",
+      "0:1",
+      "1b",
+      "unsigned int"
+     ],
+     [
+      "nps4_cap",
+      "0:2",
+      "1b",
+      "unsigned int"
+     ],
+     [
+      "nps8_cap",
+      "0:3",
+      "1b",
+      "unsigned int"
+     ],
+     [
+      "reserved",
+      "0:4",
+      "28b",
+      "unsigned int"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "b7b6fb6b57dc413b",
+    "size": 4
+   },
+   "struct numa_range_": {
+    "align": 8,
+    "fields": [
+     [
+      "memory_type",
+      0,
+      4,
+      "amdsmi_vram_type_t"
+     ],
+     [
+      "start",
+      8,
+      8,
+      "unsigned long"
+     ],
+     [
+      "end",
+      16,
+      8,
+      "unsigned long"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "2725be9a70d948f7",
+    "size": 24
+   },
+   "struct pcie_metric_": {
+    "align": 8,
+    "fields": [
+     [
+      "pcie_width",
+      0,
+      2,
+      "unsigned short"
+     ],
+     [
+      "pcie_speed",
+      4,
+      4,
+      "unsigned int"
+     ],
+     [
+      "pcie_bandwidth",
+      8,
+      4,
+      "unsigned int"
+     ],
+     [
+      "pcie_replay_count",
+      16,
+      8,
+      "unsigned long"
+     ],
+     [
+      "pcie_l0_to_recovery_count",
+      24,
+      8,
+      "unsigned long"
+     ],
+     [
+      "pcie_replay_roll_over_count",
+      32,
+      8,
+      "unsigned long"
+     ],
+     [
+      "pcie_nak_sent_count",
+      40,
+      8,
+      "unsigned long"
+     ],
+     [
+      "pcie_nak_received_count",
+      48,
+      8,
+      "unsigned long"
+     ],
+     [
+      "pcie_lc_perf_other_end_recovery_count",
+      56,
+      4,
+      "unsigned int"
+     ],
+     [
+      "reserved",
+      64,
+      96,
+      "unsigned long[12]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "9e1740405518f926",
+    "size": 160
+   },
+   "struct pcie_static_": {
+    "align": 8,
+    "fields": [
+     [
+      "max_pcie_width",
+      0,
+      2,
+      "unsigned short"
+     ],
+     [
+      "max_pcie_speed",
+      4,
+      4,
+      "unsigned int"
+     ],
+     [
+      "pcie_interface_version",
+      8,
+      4,
+      "unsigned int"
+     ],
+     [
+      "slot_type",
+      12,
+      4,
+      "amdsmi_card_form_factor_t"
+     ],
+     [
+      "max_pcie_interface_version",
+      16,
+      4,
+      "unsigned int"
+     ],
+     [
+      "reserved",
+      24,
+      72,
+      "unsigned long[9]"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "4cf90934f16c17e6",
+    "size": 96
+   },
+   "struct ras_info_": {
+    "align": 4,
+    "fields": [
+     [
+      "dram_ecc",
+      "0:0",
+      "1b",
+      "unsigned int"
+     ],
+     [
+      "sram_ecc",
+      "0:1",
+      "1b",
+      "unsigned int"
+     ],
+     [
+      "poisoning",
+      "0:2",
+      "1b",
+      "unsigned int"
+     ],
+     [
+      "rsvd",
+      "0:3",
+      "29b",
+      "unsigned int"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "abc3b1cb281eb36b",
+    "size": 4
+   },
+   "struct valid_bits_": {
+    "align": 1,
+    "fields": [
+     [
+      "platform_id",
+      "0:0",
+      "1b",
+      "unsigned int"
+     ],
+     [
+      "timestamp",
+      "0:1",
+      "1b",
+      "unsigned int"
+     ],
+     [
+      "partition_id",
+      "0:2",
+      "1b",
+      "unsigned int"
+     ],
+     [
+      "reserved",
+      "0:3",
+      "29b",
+      "unsigned int"
+     ]
+    ],
+    "kind": "struct",
+    "layout_hash": "9b711a91781a57d4",
+    "size": 4
+   },
+   "union fabric_info_": {
+    "align": 4,
+    "fields": [
+     [
+      "v1",
+      0,
+      244,
+      "amdsmi_fabric_info_v1_t"
+     ]
+    ],
+    "kind": "union",
+    "layout_hash": "e83914bdb8a17292",
+    "size": 244
+   },
+   "union policy_data_": {
+    "align": 8,
+    "fields": [
+     [
+      "v4_0",
+      0,
+      4,
+      "amdsmi_gpu_ras_policy_v4_0_t"
+     ],
+     [
+      "info",
+      0,
+      40,
+      "unsigned long[5]"
+     ]
+    ],
+    "kind": "union",
+    "layout_hash": "d86216c7891c292f",
+    "size": 40
+   }
+  }
+ },
+ "source": "43fa692e568e65a1fb84f2d1c74415b042839f10"
+}

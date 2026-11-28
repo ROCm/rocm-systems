@@ -9,7 +9,7 @@ on:
   pull_request:
     branches:
       - develop
-      - 'release/therock-*'
+      - 'release/**'
   merge_group:
   push:
     branches:
@@ -72,7 +72,7 @@ jobs:
             exit 0
           fi
           RELEASE=""
-          if [[ "$BASE_REF" != release/therock-* ]]; then
+          if [[ "$BASE_REF" != release/* ]]; then
             RELEASE=$(git ls-remote --heads origin 'refs/heads/release/therock-*' \
               | sed 's|.*refs/heads/||' \
               | { grep -E '^release/therock-[0-9]+(\.[0-9]+)*$' || true; } \
