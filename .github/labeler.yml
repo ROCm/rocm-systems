@@ -17,6 +17,7 @@
 "project: hip":
 - changed-files:
   - any-glob-to-any-file: 'projects/hip/**/*'
+  - any-glob-to-any-file: 'bindings/fortran/hip/**/*'
 
 "project: hipfile":
 - changed-files:
@@ -79,6 +80,7 @@
 "project: rocprofiler-sdk":
 - changed-files:
   - any-glob-to-any-file: 'projects/rocprofiler-sdk/**/*'
+  - any-glob-to-any-file: 'bindings/fortran/roctx/**/*'
 
 "project: rocprofiler-systems":
 - changed-files:
@@ -126,6 +128,11 @@ documentation:
     - docs/**/*
     - '**/docs/**/*'
     - '*.md'
+
+fortran:
+- changed-files:
+  - any-glob-to-any-file: 'bindings/fortran/**/*'
+  - any-glob-to-any-file: '.github/workflows/fortran-bindings*.yml'
 
 github actions:
 - changed-files:
