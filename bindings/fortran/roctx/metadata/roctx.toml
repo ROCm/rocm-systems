@@ -1,0 +1,10 @@
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+#
+# What the roctx C headers cannot express, beyond the defaults the generator
+# derives from them: one table per C function, and a key with braces names
+# several. A _64 or _spt variant without a table takes its base's. See "Fixing a
+# binding" in the generator README; `gen.sh --explain <function>` shows what
+# applies.
+
+format = 1
