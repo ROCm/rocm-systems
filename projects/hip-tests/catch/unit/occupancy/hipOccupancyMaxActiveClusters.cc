@@ -22,6 +22,8 @@ Testcase Scenarios :
 */
 #include "occupancy_common.hh"
 
+#include <algorithm>
+
 static __global__ void f1(float* a) { *a = 1.0; }
 static __global__ CLUSTER_DIMS(1, 1, 1) void f1_with_attr(float* a) { *a = 1.0; }
 static void host_f1(float* a) { *a = 1.0; }
@@ -40,13 +42,9 @@ HIP_TEST_CASE(Unit_hipOccupancyMaxActiveClusters_Positive_RangeValidation) {
   hipLaunchAttribute attribute[1];
   int clustersNoLDS = -1, clustersLDS = -1;
   int maxClusterSize = -1;
-  // maximum number of blocks per CU using no shared memory
-  int maxBlocks;
   hipDeviceProp_t props;
-  int numXCDs;
-  int sePerXCD;
-  int totalSE;
-  int maxInFlightClusterPerSPI;
+  // a maximum of 15 clusters can be in flight per shader engine
+  constexpr int maxInFlightClustersPerSE = 15;
 
   HIP_CHECK(hipGetDeviceProperties(&props, 0));
 
@@ -57,50 +55,61 @@ HIP_TEST_CASE(Unit_hipOccupancyMaxActiveClusters_Positive_RangeValidation) {
   auto& clusterDim = attribute[0].val.clusterDim;
 
   attribute[0].id = hipLaunchAttributeClusterDimension;
-  clusterDim.x = 4;
-  clusterDim.y = 2;
-  clusterDim.z = 2;
   config.numAttrs = 1;
   config.attrs = attribute;
   config.blockDim = {128};
-  config.gridDim = {4, 2, 2};
 
+  // does not validate the cluster dimensions, so it can be queried before picking them
   HIP_CHECK(hipOccupancyMaxPotentialClusterSize(&maxClusterSize, reinterpret_cast<const void*>(f1),
                                                 &config));
-  INFO("sharedMemPerBlock: " << props.sharedMemPerBlock);
-  HIP_CHECK(hipOccupancyMaxActiveBlocksPerMultiprocessor(
-      &maxBlocks, reinterpret_cast<const void*>(f1), 128, 0));
-  REQUIRE(maxBlocks > 0);
+  INFO("maxClusterSize: " << maxClusterSize);
+  REQUIRE(maxClusterSize > 0);
 
-  // these check that shared memory usage has an effect on occupancy calculations
+  // the largest of these cluster shapes that the device supports
+  static constexpr dim3 clusterShapes[] = {{4, 2, 2}, {2, 2, 2}, {2, 2, 1}, {2, 1, 1}, {1, 1, 1}};
+  for (const dim3& shape : clusterShapes) {
+    if (static_cast<int>(shape.x * shape.y * shape.z) <= maxClusterSize) {
+      clusterDim.x = shape.x;
+      clusterDim.y = shape.y;
+      clusterDim.z = shape.z;
+      break;
+    }
+  }
+  config.gridDim = {clusterDim.x, clusterDim.y, clusterDim.z};
+  const int clusterSize = clusterDim.x * clusterDim.y * clusterDim.z;
+
+  // the maximum cluster size is the number of CUs in a shader engine
+  const int cusPerSE = maxClusterSize;
+  const int numSE = props.multiProcessorCount / cusPerSE;
+  INFO("clusterSize: " << clusterSize << ", cusPerSE: " << cusPerSE << ", numSE: " << numSE);
+  INFO("sharedMemPerBlock: " << props.sharedMemPerBlock);
+  REQUIRE(numSE > 0);
+
+  // clusters that fit per SE given the blocks per CU, limited by the in-flight cluster count
+  auto expectedClusters = [&](size_t dynamicSmemBytes) {
+    int blocksPerCU = 0;
+    HIP_CHECK(hipOccupancyMaxActiveBlocksPerMultiprocessor(
+        &blocksPerCU, reinterpret_cast<const void*>(f1), 128, dynamicSmemBytes));
+    const int clustersPerSE =
+        std::min(blocksPerCU * cusPerSE / clusterSize, maxInFlightClustersPerSE);
+    return clustersPerSE * numSE;
+  };
+
   HIP_CHECK(
       hipOccupancyMaxActiveClusters(&clustersNoLDS, reinterpret_cast<const void*>(f1), &config));
   INFO("occupancy with no shared memory: " << clustersNoLDS);
+  REQUIRE(clustersNoLDS > 0);
+  REQUIRE(clustersNoLDS == expectedClusters(0));
 
-  HIP_CHECK(hipDeviceGetAttribute(&numXCDs, hipDeviceAttributeNumberOfXccs, 0));
-  sePerXCD = 2;
-  totalSE = numXCDs * sePerXCD;
-  maxInFlightClusterPerSPI = 15;
-
-  // limited by the number of in-flight clusters per SE
-  REQUIRE(clustersNoLDS == totalSE * maxInFlightClusterPerSPI);
-
-  config.dynamicSmemBytes = props.sharedMemPerBlock / 8;
-  HIP_CHECK(
-      hipOccupancyMaxActiveClusters(&clustersLDS, reinterpret_cast<const void*>(f1), &config));
-  INFO("occupancy limited by shared memory: " << clustersLDS);
-
-  float ratio = maxBlocks / static_cast<float>(clusterDim.x * clusterDim.y * clusterDim.z);
-  // limited due to shared memory
-  REQUIRE(clustersLDS == (maxClusterSize * ratio * totalSE) / 2);
-
-  config.dynamicSmemBytes = props.sharedMemPerBlock / 4;
-  HIP_CHECK(
-      hipOccupancyMaxActiveClusters(&clustersLDS, reinterpret_cast<const void*>(f1), &config));
-  INFO("occupancy non-max cluster size: " << clustersLDS);
-  // further limited by shared memory; the number of clusters per SE is lower than the maximum
-  // cluster size
-  REQUIRE(clustersLDS == (maxBlocks * ratio * totalSE) / 4);
+  // these check that shared memory usage has an effect on occupancy calculations
+  for (size_t divisor : {8, 4}) {
+    config.dynamicSmemBytes = props.sharedMemPerBlock / divisor;
+    HIP_CHECK(
+        hipOccupancyMaxActiveClusters(&clustersLDS, reinterpret_cast<const void*>(f1), &config));
+    INFO("dynamicSmemBytes: " << config.dynamicSmemBytes << ", occupancy: " << clustersLDS);
+    REQUIRE(clustersLDS == expectedClusters(config.dynamicSmemBytes));
+    REQUIRE(clustersLDS <= clustersNoLDS);
+  }
 }
 
 HIP_TEST_CASE(Unit_hipOccupancyMaxActiveClusters_Negative_Zero_Cluster) {
