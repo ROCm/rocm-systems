@@ -331,8 +331,7 @@ Result validate_manifest(const Manifest &manifest, util::DiagnosticEmitter diagn
     // A nonzero proof is valid only for a producer profile that defines it.
     if (site.uniform_store_proof != UniformStoreProof::None &&
         (site.uniform_store_proof != UniformStoreProof::BlockLocalBroadcast ||
-         !uniform_store_profile(manifest.options) || manifest.target != 1250 ||
-         manifest.wave_size != 32 || site.origin != AccessOrigin::Native ||
+         !uniform_store_profile(manifest.options) || site.origin != AccessOrigin::Native ||
          site.access != AccessKind::Write || ranges.shape != LdsRangeShape::Single ||
          site.width != 4)) {
       return diagnostic.emit() << "invalid uniform store proof for site";

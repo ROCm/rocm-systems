@@ -98,6 +98,53 @@ TEST(ConSanInput, UniformStoreProofRequiresTwoLocalBroadcastsCoveringActiveLanes
   EXPECT_TRUE(build_input_program(banked, target, "lds_producer_consumer", error).failed());
 }
 
+TEST(ConSanInput, Wave64UniformStoreRequiresTheSameExecBitsAndVgprBank) {
+  const std::filesystem::path fixture =
+      test::target_fixture_path({"gfx950", 64}, "width-flat-load-overlap");
+  if (fixture.empty())
+    GTEST_SKIP() << "AMD assembler/linker fixtures unavailable";
+  const std::vector<uint8_t> image = test::read_fixture(fixture);
+  const TargetProfile &target = *target_profile(950);
+  InputError error;
+  const FailureOr<InputProgram> baseline =
+      build_input_program(image, target, "lds_producer_consumer", error);
+  ASSERT_TRUE(baseline.succeeded()) << error.message;
+  const size_t entry =
+      baseline.value().text_file_offset + baseline.value().kernel.entry_text_offset;
+  constexpr uint32_t address = cdna4::build_vop1(cdna4::kVMovB32Vop1, {.src0 = 4, .vdst = 1})[0];
+  constexpr uint32_t data =
+      cdna4::build_vop1(cdna4::kVMovB32Vop1, {.src0 = cdna4::OPR_SRC_POS_INT_MIN, .vdst = 2})[0];
+  const auto check = [&](uint32_t update, std::optional<UniformStoreProof> expected,
+                         uint8_t accumulator = 0) {
+    const std::array<uint32_t, 2> store =
+        cdna4::build_ds(cdna4::kDsWriteB32Ds, {.acc = accumulator, .addr = 1, .data0 = 2});
+    const std::array words = {address,  data,     update,
+                              store[0], store[1], cdna4::build_sopp(cdna4::kSEndpgmSopp)[0]};
+    std::vector<uint8_t> bytes = image;
+    ASSERT_LE(entry + sizeof(words), bytes.size());
+    std::memcpy(bytes.data() + entry, words.data(), sizeof(words));
+    const FailureOr<InputProgram> input =
+        build_input_program(bytes, target, "lds_producer_consumer", error);
+    ASSERT_EQ(input.succeeded(), expected.has_value()) << error.message;
+    if (expected) {
+      ASSERT_EQ(input.value().accesses.size(), 1u);
+      EXPECT_EQ(input.value().accesses[0].uniform_store_proof, *expected);
+    }
+  };
+  constexpr uint8_t lo = cdna4::OPR_SSRC_EXEC_LO;
+  constexpr uint8_t hi = cdna4::OPR_SSRC_EXEC_HI;
+  constexpr UniformStoreProof proved = UniformStoreProof::BlockLocalBroadcast;
+  constexpr UniformStoreProof unknown = UniformStoreProof::None;
+  check(cdna4::build_sop1(cdna4::kSAndSaveExecB64Sop1, {.ssrc0 = 2, .sdst = 8})[0], proved);
+  check(cdna4::build_sop2(cdna4::kSAndB64Sop2, {.ssrc0 = lo, .ssrc1 = 2, .sdst = lo})[0], proved);
+  check(cdna4::build_sop2(cdna4::kSAndB32Sop2, {.ssrc0 = 2, .ssrc1 = hi, .sdst = hi})[0], proved);
+  check(cdna4::build_sop2(cdna4::kSAndB32Sop2, {.ssrc0 = lo, .ssrc1 = 2, .sdst = hi})[0], unknown);
+  check(cdna4::build_sop1(cdna4::kSMovB32Sop1, {.ssrc0 = 2, .sdst = hi})[0], unknown);
+  check(cdna4::build_sop1(cdna4::kSMovB64Sop1, {.ssrc0 = 8, .sdst = lo})[0], unknown);
+  check(cdna4::build_sopc(cdna4::kSSetGprIdxOnSopc, {.ssrc0 = 5, .ssrc1 = 8})[0], std::nullopt);
+  check(cdna4::build_sopp(cdna4::kSNopSopp)[0], std::nullopt, 1);
+}
+
 TEST(ConSanInput, GroupFlatNeedsAnUnclobberedApertureOnEveryIncomingPathAndActiveLane) {
   const std::filesystem::path fixture =
       test::target_fixture_path({"gfx950", 64}, "width-flat-load-overlap");

@@ -650,14 +650,15 @@ void expect_guest_state(const RunResult &before, const RunResult &after) {
   }
 }
 
-TEST_F(ConSanBootstrapSim, UniformStoreCollisionPreservesGuestRegistersAndWriterOutputs) {
+TEST_P(ConSanTargetSim, UniformStoreCollisionPreservesGuestRegistersAndWriterOutputs) {
+  const test::TargetMode target = GetParam();
+  const uint32_t threads = 2 * target.wave_size;
   for (const char *fixture :
        {"uniform_store_read", "uniform_store_write", "uniform_store_varying"}) {
     SCOPED_TRACE(fixture);
     RunResult before, after;
-    ASSERT_NO_FATAL_FAILURE(run(fixture, Bootstrap::None, before, {"gfx1250", 32}, 64, true));
-    ASSERT_NO_FATAL_FAILURE(
-        run(fixture, Bootstrap::Instrumented, after, {"gfx1250", 32}, 64, true));
+    ASSERT_NO_FATAL_FAILURE(run(fixture, Bootstrap::None, before, target, threads, true));
+    ASSERT_NO_FATAL_FAILURE(run(fixture, Bootstrap::Instrumented, after, target, threads, true));
     EXPECT_EQ(before.output, (std::array<uint32_t, 2>{7, 8}));
     expect_guest_state(before, after);
   }

@@ -180,7 +180,8 @@ struct ApertureWords {
 class BlockUniformWords {
 public:
   UniformStoreProof store_proof(const Instruction &store) const {
-    if (store.amdgpu_operation() != amdgpu::Operation::DS_STORE_B32)
+    if (store.amdgpu_operation() != amdgpu::Operation::DS_STORE_B32 &&
+        store.amdgpu_operation() != amdgpu::Operation::DS_WRITE_B32)
       return UniformStoreProof::None;
     // The native classifier checked both allocated VGPR operands. The DS
     // immediate displacement is common to every lane.
@@ -192,15 +193,8 @@ public:
   }
 
   void transfer(const Instruction &inst, const InstDefUse &effects) {
-    if (writes_execution_mask(inst)) {
-      // Saving the old mask into an ordinary SGPR and intersecting EXEC
-      // only removes lanes. Other mask writes may expose stale VGPR lanes.
-      const std::optional<RegisterRef> saved =
-          inst.num_dst_operands() ? inst.dst_operand(0)->to_register_ref() : std::nullopt;
-      if (inst.amdgpu_operation() != amdgpu::Operation::S_AND_SAVEEXEC_B32 || !saved ||
-          saved->cls != RegClass::SGPR)
-        words_ = {};
-    }
+    if (writes_execution_mask(inst) && !intersects_execution_mask(inst))
+      words_ = {};
     words_ -= effects.defs;
     if (effects.conditional_vgpr_def)
       words_.erase(*effects.conditional_vgpr_def);
@@ -215,6 +209,27 @@ public:
   }
 
 private:
+  static bool intersects_execution_mask(const Instruction &inst) {
+    using Op = amdgpu::Operation;
+    const std::optional<RegisterRef> dst =
+        inst.num_dst_operands() ? inst.dst_operand(0)->to_register_ref() : std::nullopt;
+    switch (inst.amdgpu_operation()) {
+    case Op::S_AND_SAVEEXEC_B32:
+    case Op::S_AND_SAVEEXEC_B64:
+      // A separate SGPR destination receives the saved mask.
+      return dst && dst->cls == RegClass::SGPR;
+    case Op::S_AND_B32:
+    case Op::S_AND_B64:
+      // The intersection must read the same EXEC bits it writes. Copying
+      // bits from exec_lo into exec_hi could activate different lanes.
+      return dst && dst->cls == RegClass::EXEC &&
+             (dst == inst.src_operand(0)->to_register_ref() ||
+              dst == inst.src_operand(1)->to_register_ref());
+    default:
+      return false;
+    }
+  }
+
   RegisterSet words_;
 };
 
@@ -289,7 +304,6 @@ Result collect_original_code(const std::vector<std::unique_ptr<BasicBlock>> &blo
   const std::array<const BasicBlock *, 1> entries{*root};
   const ExecMaskAnalysis exec(scope, program.wave_size, call.edges, entries);
   std::unordered_map<const BasicBlock *, FlatPointers> outgoing;
-  const bool prove_uniform = program.target->id == 1250 && program.wave_size == 32;
   size_t instruction_count = 0;
   for (const BasicBlock *block : ordered.value()) {
     if (block->has_implicit_terminator() ||
@@ -364,11 +378,9 @@ Result collect_original_code(const std::vector<std::unique_ptr<BasicBlock>> &blo
         latest = &instruction;
       }
       const InstDefUse effects(instruction, program.wave_size);
-      if (prove_uniform) {
-        if (program.accesses.size() != previous_accesses)
-          program.accesses.back().uniform_store_proof = uniform.store_proof(instruction);
-        uniform.transfer(instruction, effects);
-      }
+      if (program.accesses.size() != previous_accesses)
+        program.accesses.back().uniform_store_proof = uniform.store_proof(instruction);
+      uniform.transfer(instruction, effects);
       aperture.transfer(instruction, effects, exec.before(instruction));
       used |= effects.uses;
       used |= effects.defs;

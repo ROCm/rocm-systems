@@ -182,6 +182,10 @@ def build_root(path):
     raise AssertionError(f'no worktree CMake build owns {path}')
 
 
+def uniform_store_masks(wave_size):
+    return (3 << 62, 1 << 63) if wave_size == 64 else (3, 1)
+
+
 class Driver:
     def __init__(self, args):
         self.args = args
@@ -968,12 +972,13 @@ class Driver:
             )
             assert len(observations) == count, observations
             if fixture.startswith('uniform_store_'):
+                writer_mask, peer_mask = uniform_store_masks(self.args.wave_size)
                 assert [
                     (wave, kind, record['site'], record['mask'], record['offset'])
                     for wave, kind, record in observations
                 ] == [
-                    (0, 2, 0, 3, 0),
-                    (1, 2 if fixture == 'uniform_store_write' else 1, 1, 1, 0),
+                    (0, 2, 0, writer_mask, 0),
+                    (1, 2 if fixture == 'uniform_store_write' else 1, 1, peer_mask, 0),
                 ]
             if fixture in ('race', 'read_read', 'high_lane'):
                 assert [
