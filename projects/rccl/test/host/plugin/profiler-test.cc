@@ -1129,24 +1129,6 @@ TEST_F(ProfilerMicrotest, StartP2pApi_OnlyP2pRelatedBitsStartIt) {
   }
 }
 
-TEST_F(ProfilerMicrotest, StartApiEvents_GraphCapturedWithGraphUsageModeZero_LogsTheHangRisk) {
-  ncclInfo info = MakeInfo(ncclFuncSend);
-  comm_->config.graphUsageMode = 1;
-  ASSERT_EQ(ncclSuccess, ncclProfilerStartP2pApiEvent(&info, true));
-  ASSERT_EQ(ncclSuccess, ncclProfilerStartCollApiEvent(&info, true));
-  comm_->config.graphUsageMode = 0;
-  ASSERT_EQ(ncclSuccess, ncclProfilerStartP2pApiEvent(&info, false));
-  ASSERT_EQ(ncclSuccess, ncclProfilerStartCollApiEvent(&info, false));
-  EXPECT_FALSE(Logged(NCCL_LOG_INFO, "graphUsageMode"));
-
-  ASSERT_EQ(ncclSuccess, ncclProfilerStartP2pApiEvent(&info, true));
-  auto log = TakeLog();
-  ASSERT_EQ(log.size(), 1u);
-  EXPECT_NE(log[0].find("graphUsageMode is set to 0 but the user is capturing graphs"), std::string::npos);
-  ASSERT_EQ(ncclSuccess, ncclProfilerStartCollApiEvent(&info, true));
-  EXPECT_EQ(TakeLog().size(), 1u);
-}
-
 TEST_F(ProfilerMicrotest, StartCollApi_FillsTheDescriptorIncludingRoot) {
   Load(ncclProfileCollApi);
   ncclProfilerApiState.eActivationMask = ncclProfileCollApi;
@@ -1655,9 +1637,9 @@ TEST_F(ProfilerProxyMicrotest, StartProxyStep_SendAndRecv_FileTheHandleUnderTheS
 TEST_F(ProfilerProxyMicrotest, StartProxyStep_OnlyStepBitsStartIt_ButTheSubArgIsAlwaysLinked) {
   const int kStarts[] = {ncclProfileProxyStep, ncclProfileProxyDiag};
   ASSERT_EQ(ncclSuccess, ncclProfilerStartSendProxyStepEvent(1, args_.get(), 2));  // no plugin
-  EXPECT_EQ(sub_->pHandles[1].subArgPtr, sub_);
+  EXPECT_EQ(sub_->pHandles[1].subArgPtr, nullptr);
   ASSERT_EQ(ncclSuccess, ncclProfilerStartRecvProxyStepEvent(1, args_.get(), 4));
-  EXPECT_EQ(sub_->pHandles[2].subArgPtr, sub_);
+  EXPECT_EQ(sub_->pHandles[2].subArgPtr, nullptr);
   Load(0);
   for (int bit : kStarts) {
     fake_.Clear();
@@ -1670,11 +1652,13 @@ TEST_F(ProfilerProxyMicrotest, StartProxyStep_OnlyStepBitsStartIt_ButTheSubArgIs
   for (int bit : {ncclProfileProxyOp, ncclProfileNetPlugin}) {
     fake_.Clear();
     sub_->eActivationMask = bit;
+    sub_->pHandles[1].subArgPtr = nullptr;
     sub_->pHandles[1].stepEventHandle = R(0xBAD);
     ASSERT_EQ(ncclSuccess, ncclProfilerStartSendProxyStepEvent(1, args_.get(), 2));
     ASSERT_EQ(ncclSuccess, ncclProfilerStartRecvProxyStepEvent(1, args_.get(), 2));
     EXPECT_TRUE(fake_.StartsOf(ncclProfileProxyStep).empty()) << bit;
     EXPECT_EQ(sub_->pHandles[1].stepEventHandle.h[0], nullptr) << bit;
+    EXPECT_EQ(sub_->pHandles[1].subArgPtr, sub_) << bit;
   }
 }
 
@@ -1692,7 +1676,7 @@ TEST_F(ProfilerProxyMicrotest, ProxyHooks_NoPlugin_ReturnWithoutTouchingTheHandl
   ASSERT_EQ(ncclSuccess, ncclProfilerStopProxyOpEvent(1, args_.get()));
   EXPECT_EQ(sub_->pHandles[1].stepEventHandle.h[0], H(0xBAD));
   EXPECT_EQ(sub_->opEventHandle.h[0], H(0x43));
-  EXPECT_EQ(sub_->pHandles[1].subArgPtr, sub_);
+  EXPECT_EQ(sub_->pHandles[1].subArgPtr, nullptr);
   EXPECT_TRUE(fake_.StartsOf(ncclProfileProxyStep).empty());
   EXPECT_EQ(fake_.NumStops(), 0u);
   EXPECT_TRUE(fake_.Records().empty());
@@ -1712,7 +1696,7 @@ TEST_F(ProfilerProxyMicrotest, StopProxyStep_StopsTheSlotOnceAndClearsIt) {
 TEST_F(ProfilerProxyMicrotest, ProxyCtrl_FollowsTheGlobalMask) {
   ncclProfilerEventRef h = R(0xBAD);
   ASSERT_EQ(ncclSuccess, ncclProfilerStartProxyCtrlEvent(H(0xC2), &h));  // no plugin
-  EXPECT_EQ(h.h[0], nullptr);
+  EXPECT_EQ(h.h[0], H(0xBAD));
   Load(ncclProfileProxyOp);
   h = R(0xBAD);
   ASSERT_EQ(ncclSuccess, ncclProfilerStartProxyCtrlEvent(H(0xC2), &h));

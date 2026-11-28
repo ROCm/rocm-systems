@@ -177,6 +177,6 @@ gives the sections and the format. A nightly workflow folds the files into `CHAN
 
 ## Copyright
 
-All source code and accompanying documentation is copyright (c) 2015-2025, NVIDIA CORPORATION. All rights reserved.
+All source code and accompanying documentation is copyright (c) 2015-2026, NVIDIA CORPORATION. All rights reserved.
 
 All modifications are copyright (c) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.

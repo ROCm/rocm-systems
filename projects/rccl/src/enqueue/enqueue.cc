@@ -422,18 +422,20 @@ static void finishPlan(struct ncclComm* comm, struct ncclKernelPlan* plan) {
     if (op) channelUbound = c + 1;
   }
 
-  // hasProfilerOps gates the captured host callback for KernelCh-only plans.
-  for (struct ncclTaskColl* ct = ncclIntruQueueHead(&plan->collTaskQueue); ct != nullptr; ct = ct->next) {
-    if (ct->eActivationMask & ncclProfileKernelCh) {
-      plan->hasProfilerOps = true;
-      break;
-    }
-  }
-  if (!plan->hasProfilerOps) {
-    for (struct ncclTaskP2p* pt = ncclIntruQueueHead(&plan->p2pTaskQueue); pt != nullptr; pt = pt->next) {
-      if (pt->eActivationMask & ncclProfileKernelCh) {
+  if (ncclProfilerPluginLoaded()) {
+    // hasProfilerOps gates the captured host callback for KernelCh-only plans.
+    for (struct ncclTaskColl* ct = ncclIntruQueueHead(&plan->collTaskQueue); ct != nullptr; ct = ct->next) {
+      if (ct->eActivationMask & ncclProfileKernelCh) {
         plan->hasProfilerOps = true;
         break;
+      }
+    }
+    if (!plan->hasProfilerOps) {
+      for (struct ncclTaskP2p* pt = ncclIntruQueueHead(&plan->p2pTaskQueue); pt != nullptr; pt = pt->next) {
+        if (pt->eActivationMask & ncclProfileKernelCh) {
+          plan->hasProfilerOps = true;
+          break;
+        }
       }
     }
   }
@@ -1506,6 +1508,7 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
   int connIndex[2] = {p2pTasks[0] ? rcclP2pTaskConnIndex(comm, p2pTasks[0]->collAPI, recvRank) : 1,
                       p2pTasks[1] ? rcclP2pTaskConnIndex(comm, p2pTasks[1]->collAPI, sendRank) : 1};
   bool selfSend = (sendRank == comm->rank);
+  const bool profileP2p = ncclProfilerPluginLoaded();
   // recv: dir=0, send: dir=1
   void* addrs[2] = {recvAddr, sendAddr};
   ssize_t bytes[2] = {recvBytes, sendBytes};
@@ -1851,9 +1854,11 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
     a2aMinPeers = comm->p2pA2aMinPeers;
     a2aMaxPeers = comm->p2pA2aMaxPeers;
   }
-  ++plan->p2pPairCounter;
-  for (int i = 0; i < 2; i++) {
-    if (p2pTasks[i]) p2pTasks[i]->p2pPairId = plan->p2pPairCounter;
+  if (profileP2p) {
+    ++plan->p2pPairCounter;
+    for (int i = 0; i < 2; i++) {
+      if (p2pTasks[i]) p2pTasks[i]->p2pPairId = plan->p2pPairCounter;
+    }
   }
   for (int part = 0; part < nChannelsMax; part++) {
     int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, part, comm->p2pnChannelsPerPeer, comm->nNodes,
@@ -1861,8 +1866,10 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
     plan->channelMask.masks[channelId / 64] |= uint64_t(1) << (channelId % 64);
     // Each direction uses its first nChannels[dir] parts; track per-direction
     // channels so the profiler emits KernelCh per direction (see profiler.cc).
-    for (int i = 0; i < 2; i++)
-      if (part < nChannels[i]) p2pDirChannelMask[i] |= uint64_t(1) << channelId;
+    if (profileP2p) {
+      for (int i = 0; i < 2; i++)
+        if (part < nChannels[i]) p2pDirChannelMask[i] |= uint64_t(1) << channelId;
+    }
     // Add batch first.
     int funcIdx = ncclDevFuncId_P2p(useLL128SendRecv);
     if (funcIdx < 0) {
@@ -1922,8 +1929,10 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
       }
     }
   }
-  for (int i = 0; i < 2; i++) {
-    if (p2pTasks[i]) p2pTasks[i]->channelMask = p2pDirChannelMask[i];
+  if (profileP2p) {
+    for (int i = 0; i < 2; i++) {
+      if (p2pTasks[i]) p2pTasks[i]->channelMask = p2pDirChannelMask[i];
+    }
   }
 cleanup:
   free(handles[0]);
@@ -4270,6 +4279,12 @@ static ncclResult_t p2pTaskAppend(struct ncclComm* comm, struct ncclInfo* info, 
   NCCLCHECK(ncclProfilerRecordGroupApiEventState(ncclProfilerGroupStartApiStop));
 
   NCCLCHECK(ncclProfilerStartP2pApiEvent(info, isGraphCaptured));
+  if (isGraphCaptured && info->comm->config.graphUsageMode == 0) {
+    INFO(NCCL_P2P | NCCL_ENV,
+         "Comm config graphUsageMode is set to %d but the user is capturing graphs on the stream. Violating "
+         "graphUsageMode semantics can lead to hangs!",
+         info->comm->config.graphUsageMode);
+  }
 
   struct ncclTaskP2p* p2p = ncclMemoryPoolAlloc<struct ncclTaskP2p>(&comm->memPool_ncclTaskP2p, &comm->memPermanent);
   p2p->func = coll;
@@ -4288,7 +4303,7 @@ static ncclResult_t p2pTaskAppend(struct ncclComm* comm, struct ncclInfo* info, 
                     comm->config.maxCTAs, 1, MAXCHANNELS);
     planner->p2pCollNeedsIsolation |= p2p->maxCTAs < MAXCHANNELS;
   }
-  p2p->launchCompletionEvent = ncclCollConfigGetLaunchCompletionEvent(&info->collConfig);
+  p2p->launchCompletionEvent = info->collConfig.size == 0 ? nullptr : info->collConfig.launchCompletionEvent;
   p2p->eActivationMask = ncclProfilerApiState.eActivationMask;
   p2p->groupApiEventHandle = ncclProfilerApiState.groupApiEventHandle;
   p2p->p2pApiEventHandle = ncclProfilerApiState.p2pApiEventHandle;
@@ -4410,6 +4425,12 @@ static ncclResult_t collTaskAppend(struct ncclComm* comm, struct ncclInfo* info,
   NCCLCHECK(ncclProfilerStartGroupApiEvent(info, isGraphCaptured));
   NCCLCHECK(ncclProfilerRecordGroupApiEventState(ncclProfilerGroupStartApiStop));
   NCCLCHECK(ncclProfilerStartCollApiEvent(info, isGraphCaptured));
+  if (isGraphCaptured && info->comm->config.graphUsageMode == 0) {
+    INFO(NCCL_COLL | NCCL_ENV,
+         "Comm config graphUsageMode is set to %d but the user is capturing graphs on the stream. Violating "
+         "graphUsageMode semantics can lead to hangs!",
+         info->comm->config.graphUsageMode);
+  }
 
   // Plain broadcasts (no user config) use the batched-broadcast (AllGatherV) optimization. A config
   // that sets only the observational profiler tag is schedule-neutral, so admit it too and carry the
@@ -4597,6 +4618,12 @@ static ncclResult_t ceCollTaskAppend(struct ncclComm* comm, struct ncclInfo* inf
   NCCLCHECK(ncclProfilerStartGroupApiEvent(info, isGraphCaptured));
   NCCLCHECK(ncclProfilerRecordGroupApiEventState(ncclProfilerGroupStartApiStop));
   NCCLCHECK(ncclProfilerStartCollApiEvent(info, isGraphCaptured));
+  if (isGraphCaptured && info->comm->config.graphUsageMode == 0) {
+    INFO(NCCL_COLL | NCCL_ENV,
+         "Comm config graphUsageMode is set to %d but the user is capturing graphs on the stream. Violating "
+         "graphUsageMode semantics can lead to hangs!",
+         info->comm->config.graphUsageMode);
+  }
 
   t = ncclMemoryPoolAlloc<struct ncclTaskColl>(&comm->memPool_ncclTaskColl, &comm->memPermanent);
 
