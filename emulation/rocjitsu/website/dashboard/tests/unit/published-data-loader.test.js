@@ -77,7 +77,7 @@ beforeEach(() => {
   dataset = createSyntheticDataset(500);
 });
 
-test('loads 500 runs in index order with at most eight run requests in flight', async () => {
+test('loads 500 runs in index order with bounded run requests in flight', async () => {
   const { fetchImpl, state } = createFetchDouble({ delayMs: 1 });
 
   const { data } = await loadSynthetic(fetchImpl);
@@ -86,7 +86,7 @@ test('loads 500 runs in index order with at most eight run requests in flight', 
   expect(data.runs.map((run) => run.runId)).toEqual(
     dataset.runFiles.map((runFile) => runFile.split('/').at(-1).replace(/\.json$/, '')),
   );
-  expect(state.peak).toBeLessThanOrEqual(MAX_CONCURRENT_RUN_REQUESTS);
+  expect(state.peak).toBe(MAX_CONCURRENT_RUN_REQUESTS);
   expect(state.urls).toHaveLength(dataset.runCount + 1);
 });
 
@@ -566,7 +566,7 @@ test('accepts JSON served as text/plain by a raw file host', async () => {
 test('matches the result an unbounded loader produces', async () => {
   const { fetchImpl } = createFetchDouble();
 
-  const bounded = await loadSynthetic(fetchImpl, { concurrency: MAX_CONCURRENT_RUN_REQUESTS });
+  const bounded = await loadSynthetic(fetchImpl);
   const unbounded = await loadSynthetic(fetchImpl, { concurrency: dataset.runCount });
 
   expect(JSON.stringify(bounded.data)).toBe(JSON.stringify(unbounded.data));

@@ -15,10 +15,9 @@ function withReloadToken(url, reloadToken) {
   return reloadedUrl;
 }
 
-// A dataset of several hundred runs is one HTTP request per run. Browsers queue beyond their own
-// per-host limit anyway, and an unbounded fan-out makes every request share the same slow ramp, so
-// the loader keeps a fixed number of requests in flight and reports progress as they settle.
-export const MAX_CONCURRENT_RUN_REQUESTS = 8;
+// A dataset of several hundred runs is one HTTP request per run. Keep enough requests in flight
+// to overlap network latency while bounding fan-out and reporting progress as they settle.
+export const MAX_CONCURRENT_RUN_REQUESTS = 32;
 const DEFAULT_REQUEST_TIMEOUT_MS = 20_000;
 const DEFAULT_LOAD_TIMEOUT_MS = 60_000;
 const DEFAULT_RETRY_DELAYS_MS = [250, 750];
