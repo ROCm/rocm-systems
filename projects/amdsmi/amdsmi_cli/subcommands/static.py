@@ -128,8 +128,6 @@ class StaticCommands:
 
         Args:
             args (Namespace): Namespace containing the parsed CLI args
-            current_platform_args (list): gpu supported platform arguments
-            current_platform_values (list): gpu supported platform values for each argument
             multiple_devices (bool, optional): True if checking for multiple devices. Defaults to False.
             gpu (device_handle, optional): device_handle for target device. Defaults to None.
             asic (bool, optional): Value override for args.asic. Defaults to None.
