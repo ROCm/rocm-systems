@@ -1477,6 +1477,15 @@ memory:
   Unit_hipMemPoolGetAccess_Capture:
     <<: *level_2
     tags: [alloc, capture]
+  Unit_hipMemPoolAttrReleaseThreshold_Positive_PinnedUnderFreePressure:
+    <<: *level_default
+    tags: [alloc, P1]
+  Unit_hipMemPoolAttrReleaseThreshold_Positive_FiniteOnSynchronize:
+    <<: *level_default
+    tags: [alloc, P1]
+  Unit_hipMemPoolAttrReleaseThreshold_Positive_RetentionAndTrim:
+    <<: *level_default
+    tags: [alloc, P1]
   Unit_hipMemPoolSetGetAttribute_Positive_Default:
     <<: *level_default
     tags: [alloc, P1]
