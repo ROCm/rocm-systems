@@ -61,6 +61,17 @@
 namespace rocr {
 namespace core {
 
+namespace {
+// Bytes needed for the event_age array passed to hsaKmtWaitOnMultipleEvents_Ext:
+// one uint64_t per unique event. Shared by the allocation and the memset so the
+// two cannot disagree.
+inline constexpr std::size_t WaitEventAgeBytes(uint32_t unique_evts) {
+  return static_cast<std::size_t>(unique_evts) * sizeof(uint64_t);
+}
+static_assert(WaitEventAgeBytes(100) == 800,
+              "event_age buffer must reserve one uint64_t per unique signal");
+}  // namespace
+
 std::mutex Signal::ipcLock_;
 std::map<decltype(hsa_signal_t::handle), Signal*> Signal::ipcMap_;
 
@@ -256,9 +267,9 @@ uint32_t Signal::WaitMultiple(uint32_t signal_count, const hsa_signal_t* hsa_sig
 #if defined(__linux__)
   uint64_t event_age[unique_evts];
 #else
-  auto event_age = reinterpret_cast<uint64_t*>(_alloca(unique_evts * sizeof(unique_evts)));
+  auto event_age = reinterpret_cast<uint64_t*>(_alloca(WaitEventAgeBytes(unique_evts)));
 #endif
-  memset(event_age, 0, unique_evts * sizeof(uint64_t));
+  memset(event_age, 0, WaitEventAgeBytes(unique_evts));
   if (core::Runtime::runtime_singleton_->KfdVersion().supports_event_age)
     for (uint32_t i = 0; i < unique_evts; i++)
       event_age[i] = 1;
@@ -402,9 +413,9 @@ uint32_t Signal::WaitAnyExceptions(uint32_t signal_count, const hsa_signal_t* hs
 #if defined(__linux__)
   uint64_t event_age[unique_evts];
 #else
-  auto event_age = reinterpret_cast<uint64_t*>(_alloca(unique_evts * sizeof(uint64_t)));
+  auto event_age = reinterpret_cast<uint64_t*>(_alloca(WaitEventAgeBytes(unique_evts)));
 #endif
-  memset(event_age, 0, unique_evts * sizeof(uint64_t));
+  memset(event_age, 0, WaitEventAgeBytes(unique_evts));
   if (core::Runtime::runtime_singleton_->KfdVersion().supports_event_age)
     for (uint32_t i = 0; i < unique_evts; i++)
       event_age[i] = 1;
