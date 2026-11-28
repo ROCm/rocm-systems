@@ -619,9 +619,10 @@ bool LoaderContext::SegmentFreeze(amdgpu_hsa_elf_segment_t segment, // not used.
 bool LoaderContext::ImageExtensionSupported() {
   hsa_status_t hsa_status = HSA_STATUS_SUCCESS;
   bool result = false;
+  uint16_t version_minor = 0;
 
-  hsa_status =
-      HSA::hsa_system_extension_supported(HSA_EXTENSION_IMAGES, 1, 0, &result);
+  hsa_status = HSA::hsa_system_major_extension_supported(HSA_EXTENSION_IMAGES, 1, &version_minor,
+                                                         &result);
   if (HSA_STATUS_SUCCESS != hsa_status) {
     return false;
   }

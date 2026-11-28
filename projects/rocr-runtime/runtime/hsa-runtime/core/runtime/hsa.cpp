@@ -70,6 +70,12 @@ namespace rocr {
 
 using namespace amd::hsa;
 
+// Status returned by the deprecated APIs. They are no longer implemented, so callers must move to
+// the replacement named in the API's documentation in hsa.h.
+static inline hsa_status_t DeprecatedApiStatus() {
+  return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
+}
+
 template <class T> struct ValidityError;
 template <> struct ValidityError<core::Signal*> {
   enum { kValue = HSA_STATUS_ERROR_INVALID_SIGNAL };
@@ -260,42 +266,9 @@ hsa_status_t hsa_extension_get_name(uint16_t extension, const char** name) {
   CATCH;
 }
 
-hsa_status_t hsa_system_extension_supported(uint16_t extension, uint16_t version_major,
-                                            uint16_t version_minor, bool* result) {
-  TRY;
-  IS_OPEN();
-
-  if ((extension > HSA_EXTENSION_STD_LAST &&
-       (extension < HSA_AMD_FIRST_EXTENSION || extension > HSA_AMD_LAST_EXTENSION)) ||
-      result == NULL) {
-    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  }
-
-  *result = false;
-
-  if (extension == HSA_EXTENSION_PERFORMANCE_COUNTERS ||
-      extension == HSA_EXTENSION_PROFILING_EVENTS)
-    return HSA_STATUS_SUCCESS;
-
-  if (extension == HSA_EXTENSION_AMD_LOADER && version_major == 1) {
-    *result = version_minor <= 4;
-    return HSA_STATUS_SUCCESS;
-  }
-
-  uint16_t system_version_major = 0;
-  hsa_status_t status = core::Runtime::runtime_singleton_->GetSystemInfo(
-      HSA_SYSTEM_INFO_VERSION_MAJOR, &system_version_major);
-  assert(status == HSA_STATUS_SUCCESS);
-
-  if (version_major <= system_version_major) {
-    uint16_t system_version_minor = 0;
-    if (version_minor <= system_version_minor) {
-      *result = true;
-    }
-  }
-
-  return HSA_STATUS_SUCCESS;
-  CATCH;
+/* deprecated */
+hsa_status_t hsa_system_extension_supported(uint16_t, uint16_t, uint16_t, bool*) {
+  return DeprecatedApiStatus();
 }
 
 hsa_status_t hsa_system_major_extension_supported(uint16_t extension, uint16_t version_major,
@@ -334,74 +307,9 @@ hsa_status_t hsa_system_major_extension_supported(uint16_t extension, uint16_t v
   CATCH;
 }
 
-static size_t get_extension_table_length(uint16_t extension, uint16_t major, uint16_t minor) {
-  // Table to convert from major/minor to major/length
-  struct sizes_t {
-    std::string name;
-    size_t size;
-  };
-  static sizes_t sizes[] = {
-      {"hsa_ext_images_1_00_pfn_t", sizeof(hsa_ext_images_1_00_pfn_t)},
-      {"hsa_ext_finalizer_1_00_pfn_t", sizeof(hsa_ext_finalizer_1_00_pfn_t)},
-      {"hsa_ven_amd_loader_1_00_pfn_t", sizeof(hsa_ven_amd_loader_1_00_pfn_t)},
-      {"hsa_ven_amd_loader_1_01_pfn_t", sizeof(hsa_ven_amd_loader_1_01_pfn_t)},
-      {"hsa_ven_amd_loader_1_02_pfn_t", sizeof(hsa_ven_amd_loader_1_02_pfn_t)},
-      {"hsa_ven_amd_loader_1_03_pfn_t", sizeof(hsa_ven_amd_loader_1_03_pfn_t)},
-      {"hsa_ven_amd_loader_1_04_pfn_t", sizeof(hsa_ven_amd_loader_1_04_pfn_t)},
-      {"hsa_ven_amd_aqlprofile_1_00_pfn_t", sizeof(hsa_ven_amd_aqlprofile_1_00_pfn_t)},
-      {"hsa_ven_amd_pc_sampling_1_00_pfn_t", sizeof(hsa_ven_amd_pc_sampling_1_00_pfn_t)}};
-  static const size_t num_tables = sizeof(sizes) / sizeof(sizes_t);
-
-  if (minor > 99) return 0;
-
-  std::string name;
-
-  switch (extension) {
-    case HSA_EXTENSION_FINALIZER:
-      name = "hsa_ext_finalizer_";
-      break;
-    case HSA_EXTENSION_IMAGES:
-      name = "hsa_ext_images_";
-      break;
-    // case HSA_EXTENSION_PERFORMANCE_COUNTERS:
-    //  name = "hsa_ext_perf_counter_";
-    //  break;
-    // case HSA_EXTENSION_PROFILING_EVENTS:
-    //  name = "hsa_ext_profiling_event_";
-    //  break;
-    // case HSA_EXTENSION_AMD_PROFILER:
-    //  name = "hsa_ven_amd_profiler_";
-    //  break;
-    case HSA_EXTENSION_AMD_LOADER:
-      name = "hsa_ven_amd_loader_";
-      break;
-    case HSA_EXTENSION_AMD_AQLPROFILE:
-      name = "hsa_ven_amd_aqlprofile_";
-      break;
-    case HSA_EXTENSION_AMD_PC_SAMPLING:
-      name = "hsa_ven_amd_pc_sampling_";
-      break;
-    default:
-      return 0;
-  }
-
-  char buff[6];
-  snprintf(buff, sizeof(buff), "%02u", minor);
-  name += std::to_string(major) + "_" + buff + "_pfn_t";
-
-  for (size_t i = 0; i < num_tables; i++) {
-    if (sizes[i].name == name) return sizes[i].size;
-  }
-  return 0;
-}
-
-hsa_status_t hsa_system_get_extension_table(uint16_t extension, uint16_t version_major,
-                                            uint16_t version_minor, void* table) {
-  TRY;
-  return HSA::hsa_system_get_major_extension_table(
-      extension, version_major, get_extension_table_length(extension, version_major, version_minor),
-      table);
-  CATCH;
+/* deprecated */
+hsa_status_t hsa_system_get_extension_table(uint16_t, uint16_t, uint16_t, void*) {
+  return DeprecatedApiStatus();
 }
 
 hsa_status_t hsa_system_get_major_extension_table(uint16_t extension, uint16_t version_major,
@@ -599,18 +507,9 @@ hsa_status_t hsa_agent_get_info(hsa_agent_t agent_handle, hsa_agent_info_t attri
   CATCH;
 }
 
-hsa_status_t hsa_agent_get_exception_policies(hsa_agent_t agent_handle, hsa_profile_t profile,
-                                              uint16_t* mask) {
-  TRY;
-  IS_OPEN();
-  IS_BAD_PTR(mask);
-  IS_BAD_PROFILE(profile);
-  const core::Agent* agent = core::Agent::Convert(agent_handle);
-  IS_VALID(agent);
-
-  *mask = 0;
-  return HSA_STATUS_SUCCESS;
-  CATCH;
+/* deprecated */
+hsa_status_t hsa_agent_get_exception_policies(hsa_agent_t, hsa_profile_t, uint16_t*) {
+  return DeprecatedApiStatus();
 }
 
 hsa_status_t hsa_cache_get_info(hsa_cache_t cache, hsa_cache_info_t attribute, void* value) {
@@ -635,38 +534,9 @@ hsa_status_t hsa_agent_iterate_caches(hsa_agent_t agent_handle,
   CATCH;
 }
 
-hsa_status_t hsa_agent_extension_supported(uint16_t extension, hsa_agent_t agent_handle,
-                                           uint16_t version_major, uint16_t version_minor,
-                                           bool* result) {
-  TRY;
-  IS_OPEN();
-
-  if ((extension > HSA_EXTENSION_STD_LAST &&
-       (extension < HSA_AMD_FIRST_EXTENSION || extension > HSA_AMD_LAST_EXTENSION)) ||
-      result == NULL) {
-    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  }
-
-  *result = false;
-
-  const core::Agent* agent = core::Agent::Convert(agent_handle);
-  IS_VALID(agent);
-
-  if (agent->device_type() == core::Agent::kAmdGpuDevice) {
-    uint16_t agent_version_major = 0;
-    hsa_status_t status = agent->GetInfo(HSA_AGENT_INFO_VERSION_MAJOR, &agent_version_major);
-    assert(status == HSA_STATUS_SUCCESS);
-
-    if (version_major <= agent_version_major) {
-      uint16_t agent_version_minor = 0;
-      if (version_minor <= agent_version_minor) {
-        *result = true;
-      }
-    }
-  }
-
-  return HSA_STATUS_SUCCESS;
-  CATCH;
+/* deprecated */
+hsa_status_t hsa_agent_extension_supported(uint16_t, hsa_agent_t, uint16_t, uint16_t, bool*) {
+  return DeprecatedApiStatus();
 }
 
 hsa_status_t hsa_agent_major_extension_supported(uint16_t extension, hsa_agent_t agent_handle,
@@ -1576,22 +1446,8 @@ hsa_status_t hsa_agent_iterate_isas(hsa_agent_t agent,
 }
 
 /* deprecated */
-hsa_status_t hsa_isa_get_info(hsa_isa_t isa, hsa_isa_info_t attribute, uint32_t index,
-                              void* value) {
-  TRY;
-  IS_OPEN();
-  IS_BAD_PTR(value);
-
-  if (index != 0) {
-    return HSA_STATUS_ERROR_INVALID_INDEX;
-  }
-
-  const Isa* isa_object = Isa::Object(isa);
-  IS_VALID(isa_object);
-
-  return isa_object->GetInfo(attribute, value) ? HSA_STATUS_SUCCESS
-                                               : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  CATCH;
+hsa_status_t hsa_isa_get_info(hsa_isa_t, hsa_isa_info_t, uint32_t, void*) {
+  return DeprecatedApiStatus();
 }
 
 hsa_status_t hsa_isa_get_info_alt(hsa_isa_t isa, hsa_isa_info_t attribute, void* value) {
@@ -1671,68 +1527,13 @@ hsa_status_t hsa_isa_iterate_wavefronts(
 }
 
 /* deprecated */
-hsa_status_t hsa_isa_compatible(hsa_isa_t code_object_isa, hsa_isa_t agent_isa, bool* result) {
-  TRY;
-  IS_OPEN();
-  IS_BAD_PTR(result);
-
-  const Isa* code_object_isa_object = Isa::Object(code_object_isa);
-  IS_VALID(code_object_isa_object);
-
-  const Isa* agent_isa_object = Isa::Object(agent_isa);
-  IS_VALID(agent_isa_object);
-
-  *result = Isa::IsCompatible(*code_object_isa_object, *agent_isa_object, 0);
-  return HSA_STATUS_SUCCESS;
-  CATCH;
+hsa_status_t hsa_isa_compatible(hsa_isa_t, hsa_isa_t, bool*) {
+  return DeprecatedApiStatus();
 }
 
 //===--- Code Objects (deprecated) ----------------------------------------===//
 
 namespace {
-
-hsa_status_t IsCodeObjectAllocRegion(hsa_region_t region, void* data) {
-  assert(data);
-  assert(((hsa_region_t*)data)->handle == 0);
-
-  bool runtime_alloc_allowed = false;
-  hsa_status_t status = HSA::hsa_region_get_info(region, HSA_REGION_INFO_RUNTIME_ALLOC_ALLOWED,
-                                                 &runtime_alloc_allowed);
-  if (status != HSA_STATUS_SUCCESS) {
-    return status;
-  }
-
-  if (runtime_alloc_allowed) {
-    ((hsa_region_t*)data)->handle = region.handle;
-    return HSA_STATUS_INFO_BREAK;
-  }
-
-  return HSA_STATUS_SUCCESS;
-}
-
-hsa_status_t FindCodeObjectAllocRegionForAgent(hsa_agent_t agent, void* data) {
-  assert(data);
-  assert(((hsa_region_t*)data)->handle == 0);
-
-  hsa_device_type_t device = HSA_DEVICE_TYPE_CPU;
-  hsa_status_t status = HSA::hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &device);
-  if (status != HSA_STATUS_SUCCESS) {
-    return status;
-  }
-
-  if (device == HSA_DEVICE_TYPE_CPU) {
-    return HSA::hsa_agent_iterate_regions(agent, IsCodeObjectAllocRegion, data);
-  }
-
-  return HSA_STATUS_SUCCESS;
-}
-
-hsa_status_t FindCodeObjectAllocRegion(void* data) {
-  assert(data);
-  assert(((hsa_region_t*)data)->handle == 0);
-
-  return HSA::hsa_iterate_agents(FindCodeObjectAllocRegionForAgent, data);
-}
 
 amd::hsa::code::AmdHsaCodeManager* GetCodeManager() {
   return core::Runtime::runtime_singleton_->code_manager();
@@ -1742,70 +1543,17 @@ amd::hsa::code::AmdHsaCodeManager* GetCodeManager() {
 
 /* deprecated */
 hsa_status_t hsa_code_object_serialize(
-    hsa_code_object_t code_object,
-    hsa_status_t (*alloc_callback)(size_t size, hsa_callback_data_t data, void** address),
-    hsa_callback_data_t callback_data, const char* options, void** serialized_code_object,
-    size_t* serialized_code_object_size) {
-  TRY;
-  IS_OPEN();
-  IS_BAD_PTR(alloc_callback);
-  IS_BAD_PTR(serialized_code_object);
-  IS_BAD_PTR(serialized_code_object_size);
-
-  amd::hsa::code::AmdHsaCode* code = GetCodeManager()->FromHandle(code_object);
-  if (!code) {
-    return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
-  }
-
-  hsa_status_t status = alloc_callback(code->ElfSize(), callback_data, serialized_code_object);
-  if (status != HSA_STATUS_SUCCESS) {
-    return status;
-  }
-  assert(*serialized_code_object);
-
-  memcpy(*serialized_code_object, code->ElfData(), code->ElfSize());
-  *serialized_code_object_size = code->ElfSize();
-
-  return HSA_STATUS_SUCCESS;
-  CATCH;
+    hsa_code_object_t,
+    hsa_status_t (*)(size_t size, hsa_callback_data_t data, void** address),
+    hsa_callback_data_t, const char*, void**, size_t*) {
+  return DeprecatedApiStatus();
 }
 
 /* deprecated */
-hsa_status_t hsa_code_object_deserialize(void* serialized_code_object,
-                                         size_t serialized_code_object_size, const char* options,
-                                         hsa_code_object_t* code_object) {
-  TRY;
-  IS_OPEN();
-  IS_BAD_PTR(serialized_code_object);
-  IS_BAD_PTR(code_object);
-
-  if (serialized_code_object_size == 0) {
-    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  }
-
-  hsa_region_t code_object_alloc_region = {0};
-  hsa_status_t status = FindCodeObjectAllocRegion(&code_object_alloc_region);
-  if (status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK) {
-    return status;
-  }
-  assert(code_object_alloc_region.handle != 0);
-
-  void* code_object_alloc_data = nullptr;
-  status = HSA::hsa_memory_allocate(code_object_alloc_region, serialized_code_object_size,
-                                    &code_object_alloc_data);
-  if (status != HSA_STATUS_SUCCESS) {
-    return status;
-  }
-  assert(code_object_alloc_data);
-
-  memcpy(code_object_alloc_data, serialized_code_object, serialized_code_object_size);
-  code_object->handle = reinterpret_cast<uint64_t>(code_object_alloc_data);
-
-  return HSA_STATUS_SUCCESS;
-  CATCH;
+hsa_status_t hsa_code_object_deserialize(void*, size_t, const char*, hsa_code_object_t*) {
+  return DeprecatedApiStatus();
 }
 
-/* deprecated */
 hsa_status_t hsa_code_object_destroy(hsa_code_object_t code_object) {
   TRY;
   IS_OPEN();
@@ -1824,210 +1572,33 @@ hsa_status_t hsa_code_object_destroy(hsa_code_object_t code_object) {
   CATCH;
 }
 
-static std::string ConvertOldTargetNameToNew(const std::string& OldName, bool IsFinalizer,
-                                             uint32_t EFlags) {
-  std::string NewName = "";
-  bool xnack_supported = false;
-
-  // FIXME #1: Should 9:0:3 be completely (loader, sc, etc.) removed?
-  // FIXME #2: What does PAL do with respect to boltzmann/usual fiji/tonga?
-  if (OldName == "AMD:AMDGPU:6:0:0")
-    NewName = "amdgcn-amd-amdhsa--gfx600";
-  else if (OldName == "AMD:AMDGPU:6:0:1")
-    NewName = "amdgcn-amd-amdhsa--gfx601";
-  else if (OldName == "AMD:AMDGPU:6:0:2")
-    NewName = "amdgcn-amd-amdhsa--gfx602";
-  else if (OldName == "AMD:AMDGPU:7:0:0")
-    NewName = "amdgcn-amd-amdhsa--gfx700";
-  else if (OldName == "AMD:AMDGPU:7:0:1")
-    NewName = "amdgcn-amd-amdhsa--gfx701";
-  else if (OldName == "AMD:AMDGPU:7:0:2")
-    NewName = "amdgcn-amd-amdhsa--gfx702";
-  else if (OldName == "AMD:AMDGPU:7:0:3")
-    NewName = "amdgcn-amd-amdhsa--gfx703";
-  else if (OldName == "AMD:AMDGPU:7:0:4")
-    NewName = "amdgcn-amd-amdhsa--gfx704";
-  else if (OldName == "AMD:AMDGPU:7:0:5")
-    NewName = "amdgcn-amd-amdhsa--gfx705";
-  else if (OldName == "AMD:AMDGPU:8:0:1") {
-    NewName = "amdgcn-amd-amdhsa--gfx801";
-    xnack_supported = true;
-  } else if (OldName == "AMD:AMDGPU:8:0:0" || OldName == "AMD:AMDGPU:8:0:2")
-    NewName = "amdgcn-amd-amdhsa--gfx802";
-  else if (OldName == "AMD:AMDGPU:8:0:3" || OldName == "AMD:AMDGPU:8:0:4")
-    NewName = "amdgcn-amd-amdhsa--gfx803";
-  else if (OldName == "AMD:AMDGPU:8:0:5")
-    NewName = "amdgcn-amd-amdhsa--gfx805";
-  else if (OldName == "AMD:AMDGPU:8:1:0") {
-    NewName = "amdgcn-amd-amdhsa--gfx810";
-    xnack_supported = true;
-  } else if (OldName == "AMD:AMDGPU:9:0:0" || OldName == "AMD:AMDGPU:9:0:1") {
-    NewName = "amdgcn-amd-amdhsa--gfx900";
-    xnack_supported = true;
-  } else if (OldName == "AMD:AMDGPU:9:0:2" || OldName == "AMD:AMDGPU:9:0:3") {
-    NewName = "amdgcn-amd-amdhsa--gfx902";
-    xnack_supported = true;
-  } else if (OldName == "AMD:AMDGPU:9:0:4" || OldName == "AMD:AMDGPU:9:0:5") {
-    NewName = "amdgcn-amd-amdhsa--gfx904";
-    xnack_supported = true;
-  } else if (OldName == "AMD:AMDGPU:9:0:6" || OldName == "AMD:AMDGPU:9:0:7") {
-    NewName = "amdgcn-amd-amdhsa--gfx906";
-    xnack_supported = true;
-  } else if (OldName == "AMD:AMDGPU:9:0:12") {
-    NewName = "amdgcn-amd-amdhsa--gfx90c";
-    xnack_supported = true;
-  } else {
-    // Code object v2 only supports asics up to gfx906 plus gfx90c. Do NOT add
-    // handling of new asics into this if-else-if* block.
-    return "";
-  }
-
-  if (IsFinalizer) {
-    if (EFlags & ELF::EF_AMDGPU_FEATURE_XNACK_V2)
-      NewName = NewName + ":xnack+";
-    else if (xnack_supported)
-      NewName = NewName + ":xnack-";
-  } else {
-    if (OldName == "AMD:AMDGPU:8:0:1")
-      NewName = NewName + ":xnack+";
-    else if (OldName == "AMD:AMDGPU:8:1:0")
-      NewName = NewName + ":xnack+";
-    else if (OldName == "AMD:AMDGPU:9:0:1")
-      NewName = NewName + ":xnack+";
-    else if (OldName == "AMD:AMDGPU:9:0:3")
-      NewName = NewName + ":xnack+";
-    else if (OldName == "AMD:AMDGPU:9:0:5")
-      NewName = NewName + ":xnack+";
-    else if (OldName == "AMD:AMDGPU:9:0:7")
-      NewName = NewName + ":xnack+";
-    else if (xnack_supported)
-      NewName = NewName + ":xnack-";
-  }
-
-  return NewName;
+/* deprecated */
+hsa_status_t hsa_code_object_get_info(hsa_code_object_t, hsa_code_object_info_t, void*) {
+  return DeprecatedApiStatus();
 }
 
 /* deprecated */
-hsa_status_t hsa_code_object_get_info(hsa_code_object_t code_object,
-                                      hsa_code_object_info_t attribute, void* value) {
-  TRY;
-  IS_OPEN();
-  IS_BAD_PTR(value);
-
-  amd::hsa::code::AmdHsaCode* code = GetCodeManager()->FromHandle(code_object);
-  if (!code) {
-    return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
-  }
-
-  switch (attribute) {
-    case HSA_CODE_OBJECT_INFO_ISA: {
-      char isa_name[64];
-      hsa_status_t status = code->GetInfo(attribute, &isa_name);
-      if (status != HSA_STATUS_SUCCESS) {
-        return status;
-      }
-
-      std::string isa_name_str(isa_name);
-
-      bool IsFinalizer = true;
-      uint32_t codeHsailMajor;
-      uint32_t codeHsailMinor;
-      hsa_profile_t codeProfile;
-      hsa_machine_model_t codeMachineModel;
-      hsa_default_float_rounding_mode_t codeRoundingMode;
-      if (!code->GetNoteHsail(&codeHsailMajor, &codeHsailMinor, &codeProfile, &codeMachineModel,
-                              &codeRoundingMode)) {
-        // Only finalizer generated the "HSAIL" note.
-        IsFinalizer = false;
-      }
-
-      std::string new_isa_name_str =
-          ConvertOldTargetNameToNew(isa_name_str, IsFinalizer, code->EFlags());
-
-      hsa_isa_t isa_handle = {0};
-      status = HSA::hsa_isa_from_name(new_isa_name_str.c_str(), &isa_handle);
-      if (status != HSA_STATUS_SUCCESS) {
-        return status;
-      }
-
-      *((hsa_isa_t*)value) = isa_handle;
-      return HSA_STATUS_SUCCESS;
-    }
-    default: {
-      return code->GetInfo(attribute, value);
-    }
-  }
-  CATCH;
+hsa_status_t hsa_code_object_get_symbol(hsa_code_object_t, const char*, hsa_code_symbol_t*) {
+  return DeprecatedApiStatus();
 }
 
 /* deprecated */
-hsa_status_t hsa_code_object_get_symbol(hsa_code_object_t code_object, const char* symbol_name,
-                                        hsa_code_symbol_t* symbol) {
-  TRY;
-  IS_OPEN();
-  IS_BAD_PTR(symbol_name);
-  IS_BAD_PTR(symbol);
-
-  amd::hsa::code::AmdHsaCode* code = GetCodeManager()->FromHandle(code_object);
-  if (!code) {
-    return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
-  }
-
-  return code->GetSymbol(nullptr, symbol_name, symbol);
-  CATCH;
+hsa_status_t hsa_code_object_get_symbol_from_name(hsa_code_object_t, const char*, const char*,
+                                                  hsa_code_symbol_t*) {
+  return DeprecatedApiStatus();
 }
 
 /* deprecated */
-hsa_status_t hsa_code_object_get_symbol_from_name(hsa_code_object_t code_object,
-                                                  const char* module_name, const char* symbol_name,
-                                                  hsa_code_symbol_t* symbol) {
-  TRY;
-  IS_OPEN();
-  IS_BAD_PTR(symbol_name);
-  IS_BAD_PTR(symbol);
-
-  amd::hsa::code::AmdHsaCode* code = GetCodeManager()->FromHandle(code_object);
-  if (!code) {
-    return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
-  }
-
-  return code->GetSymbol(module_name, symbol_name, symbol);
-  CATCH;
+hsa_status_t hsa_code_symbol_get_info(hsa_code_symbol_t, hsa_code_symbol_info_t, void*) {
+  return DeprecatedApiStatus();
 }
 
 /* deprecated */
-hsa_status_t hsa_code_symbol_get_info(hsa_code_symbol_t code_symbol,
-                                      hsa_code_symbol_info_t attribute, void* value) {
-  TRY;
-  IS_OPEN();
-  IS_BAD_PTR(value);
-
-  code::Symbol* symbol = code::Symbol::FromHandle(code_symbol);
-  if (!symbol) {
-    return HSA_STATUS_ERROR_INVALID_CODE_SYMBOL;
-  }
-
-  return symbol->GetInfo(attribute, value);
-  CATCH;
-}
-
-/* deprecated */
-hsa_status_t hsa_code_object_iterate_symbols(hsa_code_object_t code_object,
-                                             hsa_status_t (*callback)(hsa_code_object_t code_object,
-                                                                      hsa_code_symbol_t symbol,
-                                                                      void* data),
-                                             void* data) {
-  TRY;
-  IS_OPEN();
-  IS_BAD_PTR(callback);
-
-  amd::hsa::code::AmdHsaCode* code = GetCodeManager()->FromHandle(code_object);
-  if (!code) {
-    return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
-  }
-
-  return code->IterateSymbols(code_object, callback, data);
-  CATCH;
+hsa_status_t hsa_code_object_iterate_symbols(
+    hsa_code_object_t,
+    hsa_status_t (*)(hsa_code_object_t code_object, hsa_code_symbol_t symbol, void* data),
+    void*) {
+  return DeprecatedApiStatus();
 }
 
 //===--- Executable -------------------------------------------------------===//
@@ -2097,7 +1668,6 @@ hsa_status_t hsa_code_object_reader_destroy(hsa_code_object_reader_t code_object
   CATCH;
 }
 
-/* deprecated */
 hsa_status_t hsa_executable_create(hsa_profile_t profile, hsa_executable_state_t executable_state,
                                    const char* options, hsa_executable_t* executable) {
   TRY;
@@ -2162,7 +1732,6 @@ hsa_status_t hsa_executable_destroy(hsa_executable_t executable) {
   CATCH;
 }
 
-/* deprecated */
 hsa_status_t hsa_executable_load_code_object(hsa_executable_t executable, hsa_agent_t agent,
                                              hsa_code_object_t code_object, const char* options) {
   TRY;
@@ -2341,7 +1910,6 @@ hsa_status_t hsa_executable_validate_alt(hsa_executable_t executable, const char
   CATCH;
 }
 
-/* deprecated */
 hsa_status_t hsa_executable_get_symbol(hsa_executable_t executable, const char* module_name,
                                        const char* symbol_name, hsa_agent_t agent,
                                        int32_t call_convention, hsa_executable_symbol_t* symbol) {
@@ -2413,22 +1981,11 @@ hsa_status_t hsa_executable_symbol_get_info(hsa_executable_symbol_t executable_s
 }
 
 /* deprecated */
-hsa_status_t hsa_executable_iterate_symbols(hsa_executable_t executable,
-                                            hsa_status_t (*callback)(hsa_executable_t executable,
-                                                                     hsa_executable_symbol_t symbol,
-                                                                     void* data),
-                                            void* data) {
-  TRY;
-  IS_OPEN();
-  IS_BAD_PTR(callback);
-
-  Executable* exec = Executable::Object(executable);
-  if (!exec) {
-    return HSA_STATUS_ERROR_INVALID_EXECUTABLE;
-  }
-
-  return exec->IterateSymbols(callback, data);
-  CATCH;
+hsa_status_t hsa_executable_iterate_symbols(
+    hsa_executable_t,
+    hsa_status_t (*)(hsa_executable_t executable, hsa_executable_symbol_t symbol, void* data),
+    void*) {
+  return DeprecatedApiStatus();
 }
 
 hsa_status_t hsa_executable_iterate_agent_symbols(

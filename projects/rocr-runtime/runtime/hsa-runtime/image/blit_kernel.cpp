@@ -56,6 +56,7 @@
 #include "core/inc/hsa_internal.h"
 #include "core/inc/hsa_ext_amd_impl.h"
 #include "core/inc/hsa_table_interface.h"
+#include "core/inc/isa.h"
 
 namespace rocr {
 namespace image {
@@ -179,15 +180,16 @@ hsa_status_t BlitKernel::BuildImageBlitCode(
   std::lock_guard<std::mutex> lock(lock_);
 
   for (std::pair<uint64_t, hsa_executable_t> pair : code_executable_map_) {
-    bool isa_compatible = false;
     hsa_isa_t code_isa = {pair.first};
 
-    status = HSA::hsa_isa_compatible(code_isa, agent_isa, &isa_compatible);
-    if (HSA_STATUS_SUCCESS != status) {
-      return status;
+    const core::Isa* code_isa_object = core::Isa::Object(code_isa);
+    const core::Isa* agent_isa_object = core::Isa::Object(agent_isa);
+    if (code_isa_object == nullptr || !code_isa_object->IsValid() || agent_isa_object == nullptr ||
+        !agent_isa_object->IsValid()) {
+      return HSA_STATUS_ERROR_INVALID_ISA;
     }
 
-    if (isa_compatible) {
+    if (core::Isa::IsCompatible(*code_isa_object, *agent_isa_object, 0)) {
       return PopulateKernelCode(agent, pair.second, blit_code_catalog);
     }
   }

@@ -678,6 +678,10 @@ hsa_status_t HSA_API hsa_extension_get_name(
  *
  * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p extension is not a valid
  * extension, or @p result is NULL.
+ *
+ * @retval HSA_STATUS_ERROR_NOT_SUPPORTED This function is deprecated and no
+ * longer implemented. It always returns this status (defined in hsa_ext_amd.h)
+ * without performing any operation. Use the replacement named above.
  */
 hsa_status_t HSA_API HSA_DEPRECATED hsa_system_extension_supported(
     uint16_t extension,
@@ -747,6 +751,10 @@ hsa_status_t HSA_API hsa_system_major_extension_supported(
  *
  * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p extension is not a valid
  * extension, or @p table is NULL.
+ *
+ * @retval HSA_STATUS_ERROR_NOT_SUPPORTED This function is deprecated and no
+ * longer implemented. It always returns this status (defined in hsa_ext_amd.h)
+ * without performing any operation. Use the replacement named above.
  */
 hsa_status_t HSA_API HSA_DEPRECATED hsa_system_get_extension_table(
     uint16_t extension,
@@ -1203,6 +1211,9 @@ typedef enum {
  * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p profile is not a valid
  * profile, or @p mask is NULL.
  *
+ * @retval HSA_STATUS_ERROR_NOT_SUPPORTED This function is deprecated and no
+ * longer implemented. It always returns this status (defined in hsa_ext_amd.h)
+ * without performing any operation. Use the replacement named above.
  */
 hsa_status_t HSA_API HSA_DEPRECATED hsa_agent_get_exception_policies(
     hsa_agent_t agent,
@@ -1334,6 +1345,10 @@ hsa_status_t HSA_API hsa_agent_iterate_caches(
  *
  * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p extension is not a valid
  * extension, or @p result is NULL.
+ *
+ * @retval HSA_STATUS_ERROR_NOT_SUPPORTED This function is deprecated and no
+ * longer implemented. It always returns this status (defined in hsa_ext_amd.h)
+ * without performing any operation. Use the replacement named above.
  */
 hsa_status_t HSA_API HSA_DEPRECATED hsa_agent_extension_supported(
     uint16_t extension,
@@ -3837,6 +3852,10 @@ typedef enum {
  * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p attribute is an invalid
  * instruction set architecture attribute, or @p value is
  * NULL.
+ *
+ * @retval HSA_STATUS_ERROR_NOT_SUPPORTED This function is deprecated and no
+ * longer implemented. It always returns this status (defined in hsa_ext_amd.h)
+ * without performing any operation. Use the replacement named above.
  */
 hsa_status_t HSA_API HSA_DEPRECATED hsa_isa_get_info(
     hsa_isa_t isa,
@@ -4082,6 +4101,10 @@ hsa_status_t HSA_API hsa_isa_iterate_wavefronts(
  * invalid.
  *
  * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p result is NULL.
+ *
+ * @retval HSA_STATUS_ERROR_NOT_SUPPORTED This function is deprecated and no
+ * longer implemented. It always returns this status (defined in hsa_ext_amd.h)
+ * without performing any operation. Use the replacement named above.
  */
 hsa_status_t HSA_API HSA_DEPRECATED hsa_isa_compatible(
     hsa_isa_t code_object_isa,
@@ -5122,6 +5145,10 @@ hsa_status_t HSA_API hsa_executable_symbol_get_info(
  * @retval ::HSA_STATUS_ERROR_INVALID_EXECUTABLE The executable is invalid.
  *
  * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p callback is NULL.
+ *
+ * @retval HSA_STATUS_ERROR_NOT_SUPPORTED This function is deprecated and no
+ * longer implemented. It always returns this status (defined in hsa_ext_amd.h)
+ * without performing any operation. Use the replacement named above.
  */
 hsa_status_t HSA_API HSA_DEPRECATED hsa_executable_iterate_symbols(
     hsa_executable_t executable,
@@ -5277,6 +5304,10 @@ typedef struct hsa_callback_data_s {
  *
  * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p alloc_callback, @p
  * serialized_code_object, or @p serialized_code_object_size are NULL.
+ *
+ * @retval HSA_STATUS_ERROR_NOT_SUPPORTED This function is deprecated and no
+ * longer implemented. It always returns this status (defined in hsa_ext_amd.h)
+ * without performing any operation. Use the replacement named above.
  */
 hsa_status_t HSA_API HSA_DEPRECATED hsa_code_object_serialize(
     hsa_code_object_t code_object,
@@ -5317,6 +5348,10 @@ hsa_status_t HSA_API HSA_DEPRECATED hsa_code_object_serialize(
  *
  * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p serialized_code_object, or @p
  * code_object are NULL, or @p serialized_code_object_size is 0.
+ *
+ * @retval HSA_STATUS_ERROR_NOT_SUPPORTED This function is deprecated and no
+ * longer implemented. It always returns this status (defined in hsa_ext_amd.h)
+ * without performing any operation. Use the replacement named above.
  */
 hsa_status_t HSA_API HSA_DEPRECATED hsa_code_object_deserialize(
     void *serialized_code_object,
@@ -5422,6 +5457,10 @@ typedef enum {
  *
  * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p attribute is an invalid
  * code object attribute, or @p value is NULL.
+ *
+ * @retval HSA_STATUS_ERROR_NOT_SUPPORTED This function is deprecated and no
+ * longer implemented. It always returns this status (defined in hsa_ext_amd.h)
+ * without performing any operation. Use the replacement named above.
  */
 hsa_status_t HSA_API HSA_DEPRECATED hsa_code_object_get_info(
     hsa_code_object_t code_object,
@@ -5526,6 +5565,10 @@ typedef struct hsa_code_symbol_s {
  *
  * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p symbol_name is NULL, or
  * @p symbol is NULL.
+ *
+ * @retval HSA_STATUS_ERROR_NOT_SUPPORTED This function is deprecated and no
+ * longer implemented. It always returns this status (defined in hsa_ext_amd.h)
+ * without performing any operation. Use the replacement named above.
  */
 hsa_status_t HSA_API HSA_DEPRECATED hsa_code_object_get_symbol(
     hsa_code_object_t code_object,
@@ -5559,6 +5602,10 @@ hsa_status_t HSA_API HSA_DEPRECATED hsa_code_object_get_symbol(
  *
  * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p symbol_name is NULL, or
  * @p symbol is NULL.
+ *
+ * @retval HSA_STATUS_ERROR_NOT_SUPPORTED This function is deprecated and no
+ * longer implemented. It always returns this status (defined in hsa_ext_amd.h)
+ * without performing any operation. Use the replacement named above.
  */
 hsa_status_t HSA_API HSA_DEPRECATED hsa_code_object_get_symbol_from_name(
     hsa_code_object_t code_object,
@@ -5754,6 +5801,10 @@ typedef struct hsa_luid_s {
  *
  * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p attribute is an invalid
  * code symbol attribute, or @p value is NULL.
+ *
+ * @retval HSA_STATUS_ERROR_NOT_SUPPORTED This function is deprecated and no
+ * longer implemented. It always returns this status (defined in hsa_ext_amd.h)
+ * without performing any operation. Use the replacement named above.
  */
 hsa_status_t HSA_API HSA_DEPRECATED hsa_code_symbol_get_info(
     hsa_code_symbol_t code_symbol,
@@ -5785,6 +5836,10 @@ hsa_status_t HSA_API HSA_DEPRECATED hsa_code_symbol_get_info(
  * @retval ::HSA_STATUS_ERROR_INVALID_CODE_OBJECT @p code_object is invalid.
  *
  * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p callback is NULL.
+ *
+ * @retval HSA_STATUS_ERROR_NOT_SUPPORTED This function is deprecated and no
+ * longer implemented. It always returns this status (defined in hsa_ext_amd.h)
+ * without performing any operation. Use the replacement named above.
  */
 hsa_status_t HSA_API HSA_DEPRECATED hsa_code_object_iterate_symbols(
     hsa_code_object_t code_object,

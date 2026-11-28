@@ -440,8 +440,8 @@ hsa_status_t LoadKernelFromObjFile(BinarySearch* bs) {
   RET_IF_HSA_ERR(err);
 
   hsa_executable_symbol_t kern_sym;
-  err = hsa_executable_get_symbol(executable, NULL, bs->kernel_name.c_str(),
-                                  bs->gpu_dev, 0, &kern_sym);
+  err = hsa_executable_get_symbol_by_name(executable, bs->kernel_name.c_str(),
+                                          &bs->gpu_dev, &kern_sym);
   RET_IF_HSA_ERR(err);
 
   err = hsa_executable_symbol_get_info(kern_sym,
