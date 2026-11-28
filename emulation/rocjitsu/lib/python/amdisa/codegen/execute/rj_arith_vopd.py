@@ -127,6 +127,13 @@ def gen_vopd_execution(
   if (wf.wf_size() != 32) {
 @WAVE64_GUARD@
   }
+  if (opx_ == kVopdMovB32 && opy_ == kVopdMovB32 &&
+      srcx0_.opr_type_ == OperandType::OPR_SRC && srcx0_.encoding_value() == 128 &&
+      srcy0_.opr_type_ == OperandType::OPR_SRC && srcy0_.encoding_value() == 128 &&
+      !srcx0_.delegate() && !srcy0_.delegate() && !wf.cu().observes_register_access()) {
+    amdgpu::arith::execute_dual_zero_moves(wf, dstx_, dsty_);
+    return;
+  }
   amdgpu::arith::execute_dual_pair(wf, x_, y_,
       [&](const Slot &slot, amdgpu::RegisterAccess &registers, uint32_t exec_mask,
           uint32_t *result, uint32_t *state) -> int {

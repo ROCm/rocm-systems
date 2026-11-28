@@ -27,13 +27,12 @@
 
 namespace rocjitsu::amdgpu::arith {
 
-// Packed VOP1 half moves encode the selected half in selector bit 7. Let rj-arith
-// select the halves directly so the two physical registers need resolving only once.
-// The ordinary operand path handles staged DPP sources and observation.
-inline bool try_move_packed_vgpr_half(Wavefront &wave, const Operand &destination,
-                                      const Operand &source) {
-  if (source.encoding_value() < 256 || source.encoding_value() > 511 || source.delegate() ||
-      wave.cu().observes_register_access() || wave.instruction_execution_failed() || !wave.exec()) {
+// Both encodings copy between whole physical VGPRs. The caller supplies the
+// half selectors from VOP1 register bit 7 or the VOP3 OPSEL field.
+inline bool try_move_vgpr_half(Wavefront &wave, const Operand &destination, const Operand &source,
+                               uint64_t modifiers) {
+  if (source.delegate() || destination.delegate() || wave.cu().observes_register_access() ||
+      wave.instruction_execution_failed() || !wave.exec()) {
     return false;
   }
   RegisterAccess registers(wave);
@@ -47,14 +46,12 @@ inline bool try_move_packed_vgpr_half(Wavefront &wave, const Operand &destinatio
     return false;
   }
   const uint32_t *values = lanes.value().data();
-  const uint64_t halves = ((source.encoding_value() & 128) ? RJ_ARITH_ALU_HIGH_A : 0u) |
-                          ((destination.encoding_value() & 128) ? RJ_ARITH_ALU_HIGH_D : 0u);
   const auto flags = wave.cu().arithmetic_flags();
   const uint32_t base = wave.vgpr_alloc().base + output->index;
   auto status = registers.try_bulk_write_vgprs<1>(base, 1, [&](uint32_t *const *d) {
     return wave.wf_size() == 32
-               ? rj_arith_v_mov_b16_w32(flags, uint32_t(wave.exec()), halves, d, &values)
-               : rj_arith_v_mov_b16_w64(flags, wave.exec(), halves, d, &values);
+               ? rj_arith_v_mov_b16_w32(flags, uint32_t(wave.exec()), modifiers, d, &values)
+               : rj_arith_v_mov_b16_w64(flags, wave.exec(), modifiers, d, &values);
   });
   if (!status) {
     return false;

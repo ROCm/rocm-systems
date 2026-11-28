@@ -936,6 +936,9 @@ void VMovB16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   const uint64_t modifiers = (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) |
                              ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u) |
                              ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u);
+  if (inst_.src0 >= 256 && amdgpu::arith::try_move_vgpr_half(wf, vdst, src0, modifiers)) {
+    return;
+  }
   amdgpu::arith::execute_integer16<1>(wf, rj_arith_v_mov_b16_w32, rj_arith_v_mov_b16_w64,
                                       wf.cu().arithmetic_flags(), modifiers, vdst, src0);
 }
@@ -966,6 +969,9 @@ RJ_NOINLINE void VMovB16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   const uint64_t modifiers = (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) |
                              ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u) |
                              ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u);
+  if (inst_.src0 >= 256 && amdgpu::arith::try_move_vgpr_half(wf, vdst, src0, modifiers)) {
+    return;
+  }
   amdgpu::arith::execute_integer16<1>(wf, rj_arith_v_mov_b16_w32, rj_arith_v_mov_b16_w64,
                                       wf.cu().arithmetic_flags(), modifiers, vdst, src0);
   dpp_write_mask_scope_.restore();

@@ -886,7 +886,9 @@ void VMovB16Vop1::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   const uint64_t modifiers = 0;
-  if (amdgpu::arith::try_move_packed_vgpr_half(wf, vdst, src0)) {
+  const uint64_t halves = ((inst_.src0 & 128) ? RJ_ARITH_ALU_HIGH_A : 0u) |
+                          ((inst_.vdst & 128) ? RJ_ARITH_ALU_HIGH_D : 0u);
+  if (inst_.src0 >= 256 && amdgpu::arith::try_move_vgpr_half(wf, vdst, src0, halves)) {
     return;
   }
   amdgpu::arith::execute_integer16<1>(wf, rj_arith_v_mov_b16_w32, rj_arith_v_mov_b16_w64,
@@ -914,7 +916,9 @@ RJ_NOINLINE void VMovB16Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   }
   const uint64_t modifiers = 0;
-  if (amdgpu::arith::try_move_packed_vgpr_half(wf, vdst, src0)) {
+  const uint64_t halves = ((inst_.src0 & 128) ? RJ_ARITH_ALU_HIGH_A : 0u) |
+                          ((inst_.vdst & 128) ? RJ_ARITH_ALU_HIGH_D : 0u);
+  if (inst_.src0 >= 256 && amdgpu::arith::try_move_vgpr_half(wf, vdst, src0, halves)) {
     return;
   }
   amdgpu::arith::execute_integer16<1>(wf, rj_arith_v_mov_b16_w32, rj_arith_v_mov_b16_w64,

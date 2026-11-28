@@ -80,11 +80,11 @@ def test_vector_move_and_conditional_controls(arch):
 
 
 @pytest.mark.parametrize('arch', ['rdna3', 'rdna3_5', 'rdna4', 'cdna5'])
-def test_packed_half_move_uses_direct_vgpr_helper(arch):
+def test_half_move_uses_encoding_specific_half_selectors(arch):
     packed = gen_integer16(context(arch, 'V_MOV_B16', ['d'], ['a']))
-    assert 'try_move_packed_vgpr_half' in packed
+    assert 'try_move_vgpr_half(wf, d, a, halves)' in packed
     vop3 = gen_integer16(context(arch, 'V_MOV_B16', ['d'], ['a'], is_vop3=True))
-    assert 'try_move_packed_vgpr_half' not in vop3
+    assert 'try_move_vgpr_half(wf, d, a, modifiers)' in vop3
 
 
 @pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
