@@ -91,6 +91,7 @@ struct AllGatherSdmaColl {
   static constexpr const char* kCtasAlias = gin_sdma_allgather::kAllGatherCtasEnvAlias;
   static constexpr int kSdmaCtas = gin_sdma_allgather::kAllGatherCtasSdma;
   static int lsaCtas(size_t) { return gin_sdma_allgather::kAllGatherCtasLsa; }
+  static int poolCtas() { return gin_sdma_allgather::allGatherPoolCtas(deviceCtaCount); }
 };
 
 static inline size_t AllGatherResolveSdmaThreshold() {

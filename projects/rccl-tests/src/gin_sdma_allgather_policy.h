@@ -200,12 +200,18 @@ inline const ArchLsaCtaLadder* archLsaCtaLadder(const char* gcnArchName,
 }
 
 // Gather -D 3 LSA<->SDMA crossover in bytes per rank, per architecture.
-// Architectures not in the table use kGatherSdmaThresholdDefault.
+// Architectures not in the table use kGatherSdmaThresholdDefault. On 8x MI350X
+// (gfx950) the SDMA put wins above 8 MiB per rank: a 128 MiB gather takes 297 us
+// against 308 us on the LSA tier, and 256 MiB takes 571 against 597 us. On 4x MI455X
+// (gfx1250) 96 LSA-tier CTAs match the SDMA put's bandwidth, so the LSA tier is used
+// at every size (kGatherSdmaNever).
 static constexpr size_t kGatherSdmaThresholdDefault = 1u << 20;
+// Larger than any chunk, and distinct from gin_sdma::kThresholdUnset.
+static constexpr size_t kGatherSdmaNever = ~(size_t)0 >> 1;
 static constexpr ArchSdmaThreshold kGatherSdmaThresholdByArch[] = {
   {"gfx942", 128u << 20},
-  {"gfx950", 32u << 20},
-  {"gfx1250", 512u << 10},
+  {"gfx950", 8u << 20},
+  {"gfx1250", kGatherSdmaNever},
 };
 
 inline size_t gatherArchSdmaThreshold(const char* gcnArchName) {
@@ -217,8 +223,9 @@ inline size_t gatherArchSdmaThreshold(const char* gcnArchName) {
 // Gather -D 3 LSA-tier CTA ladders. Every CTA runs its own LSA barrier, so small
 // chunks are barrier-bound and fewer CTAs win. Measured per rank on 8x MI300X
 // (gfx942): 1 CTA up to 2 KiB, 2 up to 8 KiB, 4 up to 32 KiB, 8 up to 512 KiB, 16
-// above. On 8x MI350X (gfx950): 2 up to 16 KiB, 16 above. On 4x MI455X (gfx1250):
-// 1 up to 8 KiB, 2 up to 32 KiB, 8 above.
+// above. On 8x MI350X (gfx950): 2 up to 16 KiB, 16 above. On 4x MI455X (gfx1250),
+// with the light done-flag fence: 2 up to 64 KiB, 4 up to 128 KiB, 8 up to 256 KiB,
+// 16 up to 512 KiB, 96 above; 96 CTAs reach the xGMI bandwidth host ncclGather gets.
 static constexpr LsaCtaStep kGatherLsaCtasGfx942[] = {
   {2u << 10, 1},
   {8u << 10, 2},
@@ -229,13 +236,15 @@ static constexpr LsaCtaStep kGatherLsaCtasGfx950[] = {
   {16u << 10, 2},
 };
 static constexpr LsaCtaStep kGatherLsaCtasGfx1250[] = {
-  {8u << 10, 1},
-  {32u << 10, 2},
+  {64u << 10, 2},
+  {128u << 10, 4},
+  {256u << 10, 8},
+  {512u << 10, 16},
 };
 static constexpr ArchLsaCtaLadder kGatherLsaCtasByArch[] = {
   {"gfx942", kGatherLsaCtasGfx942, sizeof(kGatherLsaCtasGfx942) / sizeof(kGatherLsaCtasGfx942[0]), 16},
   {"gfx950", kGatherLsaCtasGfx950, sizeof(kGatherLsaCtasGfx950) / sizeof(kGatherLsaCtasGfx950[0]), 16},
-  {"gfx1250", kGatherLsaCtasGfx1250, sizeof(kGatherLsaCtasGfx1250) / sizeof(kGatherLsaCtasGfx1250[0]), 8},
+  {"gfx1250", kGatherLsaCtasGfx1250, sizeof(kGatherLsaCtasGfx1250) / sizeof(kGatherLsaCtasGfx1250[0]), 96},
 };
 
 // The Gather ladder for an architecture, or nullptr when it has none.
@@ -249,6 +258,19 @@ inline const ArchLsaCtaLadder* gatherLsaCtaLadder(const char* gcnArchName) {
 inline int gatherLsaCtas(const ArchLsaCtaLadder* ladder, size_t chunkBytes_) {
   if (!ladder) return kAllGatherCtasLsa;
   return lsaCtasFromLadder(chunkBytes_, ladder->steps, ladder->nSteps, ladder->above);
+}
+
+// Gather -D 3 barrier, signal and done-flag pool: the AllGather pool, raised to the
+// largest grid the Gather ladder launches. Like allGatherPoolCtas(), it is both what
+// the requirements request and the ceiling every launched grid is clamped to.
+inline int gatherPoolCtas(int deviceCtaCount, const ArchLsaCtaLadder* ladder) {
+  int pool = allGatherPoolCtas(deviceCtaCount);
+  if (!ladder) return pool;
+  if (ladder->above > pool) pool = ladder->above;
+  for (size_t i = 0; ladder->steps && i < ladder->nSteps; i++) {
+    if (ladder->steps[i].ctas > pool) pool = ladder->steps[i].ctas;
+  }
+  return pool;
 }
 
 // Element offset of rank r's contribution within EVERY peer's AllGather recv
@@ -270,6 +292,89 @@ GIN_SDMA_AG_HD inline bool gatherRootSkipsSelfPut(bool isRoot, bool sameWindow, 
 // Signal increments the root waits for: one per rank that puts to it.
 GIN_SDMA_AG_HD inline uint64_t gatherRootExpectedSignals(int nRanks, bool rootSkipsSelfPut) {
   return (uint64_t)nRanks - (rootSkipsSelfPut ? 1 : 0);
+}
+
+// Gather -D 3 LL tier: each rank sends its chunk as 8-byte LL elements into the
+// root's scratch, which holds nRanks chunks per epoch. kGatherLLMaxBytes is the
+// largest per-rank chunk the scratch is ever sized for.
+static constexpr const char* kGatherLLMaxBytesEnv = "NCCL_GIN_ANVIL_SDMA_GATHER_LL_MAX_BYTES";
+static constexpr size_t kGatherLLMaxBytes = 64u << 10;
+static constexpr size_t kGatherLLDefaultMaxBytes = 2u << 10;
+
+// LL scratch slots (one 8-byte element each) for nRanks chunks of llMaxBytes.
+GIN_SDMA_AG_HD inline uint32_t gatherLLSlots(int nRanks, size_t llMaxBytes) {
+  if (nRanks <= 0) return 0;
+  return (uint32_t)((size_t)nRanks * (llMaxBytes / 8));
+}
+
+// True when a chunk takes the LL tier: LL is provisioned, the chunk is a whole
+// number of 8-byte elements within the cap, and nRanks chunks fit the scratch.
+GIN_SDMA_AG_HD inline bool gatherUsesLLTier(size_t chunkBytes_, size_t llMaxBytes, uint32_t llSlots,
+                                           int nRanks) {
+  return llSlots > 0 && chunkBytes_ > 0 && chunkBytes_ <= llMaxBytes && (chunkBytes_ % 8) == 0 &&
+         (uint64_t)nRanks * (chunkBytes_ / 8) <= llSlots;
+}
+
+// Gather -D 3 LL-tier cap in bytes per rank, per architecture: the largest chunk for
+// which one LL CTA beats the LSA tier. Architectures not in the table use
+// kGatherLLDefaultMaxBytes. On 8x MI300X (gfx942) and 8x MI350X (gfx950) LL wins up
+// to 2 KiB per rank, on 4x MI455X (gfx1250) up to 4 KiB.
+static constexpr ArchSdmaThreshold kGatherLLMaxBytesByArch[] = {
+  {"gfx942", 2u << 10},
+  {"gfx950", 2u << 10},
+  {"gfx1250", 4u << 10},
+};
+
+inline size_t gatherArchLLMaxBytes(const char* gcnArchName) {
+  return archSdmaThreshold(gcnArchName, kGatherLLMaxBytesByArch,
+                           sizeof(kGatherLLMaxBytesByArch) / sizeof(kGatherLLMaxBytesByArch[0]),
+                           kGatherLLDefaultMaxBytes);
+}
+
+// The root's one LL CTA receives every rank's chunk, so with many ranks the LSA tier
+// wins below the per-rank cap. On 1 to 8 MI455X nodes (gfx1250, 4 to 32 ranks) LL wins
+// up to about 20 KiB gathered and the LSA tier from 32 KiB. Architectures not in the
+// table have no total cap.
+static constexpr size_t kGatherLLNoTotalCap = ~(size_t)0;
+static constexpr ArchSdmaThreshold kGatherLLMaxTotalBytesByArch[] = {
+  {"gfx1250", 24u << 10},
+};
+
+// The per-rank LL cap for nRanks: gatherArchLLMaxBytes, lowered so that nRanks chunks
+// fit the architecture's total cap, in whole 8-byte elements.
+inline size_t gatherArchLLMaxBytesForRanks(const char* gcnArchName, int nRanks) {
+  const size_t cap = gatherArchLLMaxBytes(gcnArchName);
+  const size_t total = archSdmaThreshold(gcnArchName, kGatherLLMaxTotalBytesByArch,
+                                         sizeof(kGatherLLMaxTotalBytesByArch) / sizeof(kGatherLLMaxTotalBytesByArch[0]),
+                                         kGatherLLNoTotalCap);
+  if (nRanks <= 0 || total / (size_t)nRanks >= cap) return cap;
+  return total / (size_t)nRanks / 8 * 8;
+}
+
+// Gather -D 3 LSA tier: once the gathered size (chunkBytes * nRanks) reaches the
+// architecture's threshold, the root flags senders ready kGatherGroupRanks at a time,
+// so fewer of them store into it at once. Each group adds a flag round trip to the
+// root. On 2 to 5 MI455X nodes (gfx1250, 8 to 20 ranks), groups of 4 are 2 to 9%
+// faster from 256 MiB gathered and slower below it. Architectures not in the table
+// never group.
+static constexpr const char* kGatherGroupRanksEnv = "NCCL_GIN_ANVIL_SDMA_GATHER_GROUP_RANKS";
+static constexpr int kGatherGroupRanks = 4;
+static constexpr size_t kGatherGroupNever = ~(size_t)0 >> 1;
+static constexpr ArchSdmaThreshold kGatherGroupMinBytesByArch[] = {
+  {"gfx1250", 256u << 20},
+};
+
+inline size_t gatherArchGroupMinBytes(const char* gcnArchName) {
+  return archSdmaThreshold(gcnArchName, kGatherGroupMinBytesByArch,
+                           sizeof(kGatherGroupMinBytesByArch) / sizeof(kGatherGroupMinBytesByArch[0]),
+                           kGatherGroupNever);
+}
+
+// Ranks per group for one launch, 0 for no groups: envRanks when the env sets it
+// (envRanks >= 0), else kGatherGroupRanks from minBytes gathered.
+inline int gatherGroupRanks(size_t chunkBytes_, int nRanks, size_t minBytes, int envRanks) {
+  if (envRanks >= 0) return envRanks;
+  return nRanks > 0 && chunkBytes_ >= minBytes / (size_t)nRanks ? kGatherGroupRanks : 0;
 }
 
 // AllGather algorithm / bus bandwidth (GB/s) given the per-rank element count,
@@ -311,6 +416,12 @@ inline size_t resolveSdmaThresholdFromEnv(const char* perCollName = kAllGatherSd
                                           size_t compiledDefault = kAllGatherSdmaThresholdDefault) {
   return gin_sdma::resolveThreshold(gin_sdma::parseSize(getenv(perCollName)),
                                     gin_sdma::parseSize(getenv(kSdmaThresholdEnv)), compiledDefault);
+}
+
+// Gather LL cap in bytes per rank from kGatherLLMaxBytesEnv (K/M/G suffixes; 0 disables
+// the tier), else archDefault, clamped to kGatherLLMaxBytes.
+inline size_t resolveGatherLLMaxBytesFromEnv(size_t archDefault = kGatherLLDefaultMaxBytes) {
+  return gin_sdma::resolveLLCap(gin_sdma::parseSize(getenv(kGatherLLMaxBytesEnv)), archDefault, kGatherLLMaxBytes);
 }
 
 #endif  // host env helpers

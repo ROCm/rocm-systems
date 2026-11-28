@@ -13,10 +13,28 @@
 #include "common.h"
 #include "gin_sdma_allgather_policy.h"
 
+// gcnArchName of the current device, read once per process; nullptr if unavailable.
+// Gather's requirements use it on NCCL 2.29+ builds without ENABLE_DEVICE_API too.
+static inline const char* ginSdmaGcnArchName() {
+  static char name[256] = "";
+  static const bool ok = [] {
+    int dev = 0;
+    hipDeviceProp_t prop;
+    if (hipGetDevice(&dev) != hipSuccess || hipGetDeviceProperties(&prop, dev) != hipSuccess) return false;
+    snprintf(name, sizeof(name), "%s", prop.gcnArchName);
+    return true;
+  }();
+  return ok ? name : nullptr;
+}
+
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0)
+// With ginEnabled, a communicator without GIN is accepted: *ginEnabled is set to false
+// and only the LSA barriers are requested, so the caller must not use its GIN tier.
 static inline testResult_t ginSdmaAllGatherDevCommRequirements(int deviceImpl, ncclDevCommRequirements* reqs,
-                                                               ncclComm_t comm, const char* kernelName) {
+                                                               ncclComm_t comm, const char* kernelName,
+                                                               bool* ginEnabled = nullptr) {
   if (!reqs || !comm) return testInternalError;
+  if (ginEnabled) *ginEnabled = false;
 
   ncclCommProperties_t commProperties = NCCL_COMM_PROPERTIES_INITIALIZER;
   if (ncclCommQueryProperties(comm, &commProperties) != ncclSuccess) {
@@ -32,6 +50,10 @@ static inline testResult_t ginSdmaAllGatherDevCommRequirements(int deviceImpl, n
   switch(deviceImpl) {
     case 3: {
       if (commProperties.ginType == NCCL_GIN_TYPE_NONE) {
+        if (ginEnabled) {
+          reqs->lsaBarrierCount = gin_sdma_allgather::allGatherPoolCtas(deviceCtaCount);
+          return testSuccess;
+        }
         fprintf(stderr, "This test requires GIN support, but GIN support is not enabled for this communicator.\n");
         return testInvalidUsage;
       }
@@ -51,6 +73,7 @@ static inline testResult_t ginSdmaAllGatherDevCommRequirements(int deviceImpl, n
 #else
       reqs->ginForceEnable = true;
 #endif
+      if (ginEnabled) *ginEnabled = true;
       return testSuccess;
     }
     default:
@@ -83,21 +106,9 @@ static inline bool ginSdmaAllGatherDevCommRequirements(int deviceImpl, ncclDevCo
 //   kThresholdEnv, kDefaultThreshold, hostThresholdDefault(): the per-collective
 //     threshold env and its compiled default (kDefaultThreshold in the device pass);
 //   kCtasEnv, kCtasAlias (nullptr for none): the grid pin;
-//   kSdmaCtas, lsaCtas(chunkBytes): the size-adaptive grid of each tier.
+//   kSdmaCtas, lsaCtas(chunkBytes): the size-adaptive grid of each tier;
+//   poolCtas(): the barrier/signal pool its requirements request, which caps the grid.
 // Env values are read once per process.
-
-// gcnArchName of the current device, read once per process; nullptr if unavailable.
-static inline const char* ginSdmaGcnArchName() {
-  static char name[256] = "";
-  static const bool ok = [] {
-    int dev = 0;
-    hipDeviceProp_t prop;
-    if (hipGetDevice(&dev) != hipSuccess || hipGetDeviceProperties(&prop, dev) != hipSuccess) return false;
-    snprintf(name, sizeof(name), "%s", prop.gcnArchName);
-    return true;
-  }();
-  return ok ? name : nullptr;
-}
 
 template <typename Coll>
 static inline size_t ginSdmaResolveSdmaThreshold() {
@@ -124,8 +135,7 @@ static inline size_t ginSdmaResolveCtasEnv() {
 template <typename Coll>
 static inline int ginSdmaResolveLaunchCtas(size_t chunkBytes, size_t sdmaThreshold) {
   return gin_sdma_allgather::allGatherCtas(chunkBytes, sdmaThreshold, ginSdmaResolveCtasEnv<Coll>(),
-                                           gin_sdma_allgather::allGatherPoolCtas(deviceCtaCount),
-                                           Coll::kSdmaCtas, Coll::lsaCtas(chunkBytes));
+                                           Coll::poolCtas(), Coll::kSdmaCtas, Coll::lsaCtas(chunkBytes));
 }
 
 // Mirrors testLaunchDeviceKernel() plus the host-resolved sdmaThreshold. `count` is what
