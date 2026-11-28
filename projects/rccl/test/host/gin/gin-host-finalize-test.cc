@@ -66,7 +66,12 @@ ncclResult_t ncclTopoGetLocalGinDevs(struct ncclComm*, int* localGinDevs, int* l
   return ncclSuccess;
 }
 
-ncclResult_t bootstrapAllGather(void*, void*, int) { return ncclSuccess; }
+// Counted so a test can check that a rejected comm ran no collective.
+static int g_allGatherCalls = 0;
+ncclResult_t bootstrapAllGather(void*, void*, int) {
+  g_allGatherCalls++;
+  return ncclSuccess;
+}
 
 ncclTeam_t ncclTeamWorld(ncclComm_t comm) { return {comm->nRanks, comm->rank, 1}; }
 ncclTeam_t ncclTeamRail(ncclComm_t comm) { return {comm->nRanks, comm->rank, 1}; }
@@ -103,9 +108,12 @@ class GinHostFinalizeTest : public ::testing::Test {
     FakeGinVtable::setCurrent(&fake_);
     gin_ = fake_.vtable();
     g_localGinDevCount = 2;
+    g_allGatherCalls = 0;
     // Both are already value-initialized (make_unique, and `ncclComm comm_{}`);
     // do not memset either. ginState embeds std::thread / mutex / atomic, and
     // ncclComm embeds ncclRmaState, which holds a thread, mutex and condvar.
+    sharedRes_->owner = &comm_;
+    sharedRes_->tpNRanks = 1;
     comm_.sharedRes = sharedRes_.get();
     comm_.rank = 0;
     comm_.nRanks = 1;
@@ -310,6 +318,116 @@ TEST_F(GinHostFinalizeTest, DeregisterSkipsWindowStampedByAnotherGeneration) {
 
   EXPECT_EQ(ncclGinDeregister(&comm_, hostWins_, winGens_), ncclSuccess);
   EXPECT_EQ(fake_.deregMrSymCalls, 0);
+}
+
+// A splitShare child copies the owner's GIN backends, ginInstance included, with
+// no connections (ncclGinInitFromParent), then connects its own team through the
+// owner's plugin context. Anvil SDMA allgathers on the owner's bootstrap there,
+// so a child that does not span the owner's ranks in order is rejected before
+// any collective, with or without fabric memory. Other backends keep the develop
+// behavior.
+class GinHostSplitShareTest : public GinHostFinalizeTest {
+ protected:
+  std::unique_ptr<ncclComm> child_ = std::make_unique<ncclComm>();
+  std::vector<int> childTopParentRanks_;
+
+  void useAnvil() { backend()->ginType = NCCL_GIN_TYPE_ANVIL_SDMA; }
+
+  void makeChild(int ownerNRanks, std::vector<int> topParentRanks) {
+    sharedRes_->tpNRanks = ownerNRanks;
+    childTopParentRanks_ = std::move(topParentRanks);
+    child_->sharedRes = sharedRes_.get();
+    child_->rank = 0;
+    child_->nRanks = static_cast<int>(childTopParentRanks_.size());
+    child_->topParentRanks = childTopParentRanks_.data();
+    child_->contiguousRanksPerHost = 1;
+    child_->symmetricSupport = true;
+    child_->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
+
+    struct ncclGinState* gs = childGinState();
+    gs->supported = ginState()->supported;
+    gs->numActiveBackends = ginState()->numActiveBackends;
+    for (int i = 0; i < gs->numActiveBackends; i++) {
+      gs->backends[i] = ginState()->backends[i];
+      gs->backends[i].ginCommCount = 0;
+      std::memset(gs->backends[i].ginComms, 0, sizeof(gs->backends[i].ginComms));
+    }
+  }
+
+  struct ncclGinState* childGinState() { return &child_->ginState; }
+
+  void expectRejectedWithoutACollective() {
+    EXPECT_EQ(ncclGinConnectOnce(child_.get()), ncclInvalidUsage);
+    EXPECT_EQ(g_allGatherCalls, 0);
+    EXPECT_EQ(fake_.listenCalls, 0);
+    EXPECT_FALSE(childGinState()->connected);
+    // The GIN SDMA collectives pick Anvil SDMA by type, so they fall back.
+    EXPECT_FALSE(ncclGinTypeActive(child_.get(), NCCL_GIN_TYPE_ANVIL_SDMA));
+  }
+
+  // bootstrapAllGather is a no-op here, so a multi-rank child reads 0 for its
+  // peers' ginCommCount and opens no connection. Only a 1-rank child gets far
+  // enough to listen.
+  void expectConnectsThroughOwnerContext() {
+    EXPECT_EQ(ncclGinConnectOnce(child_.get()), ncclSuccess);
+    EXPECT_TRUE(childGinState()->connected);
+    EXPECT_EQ(childGinState()->backends[0].ginInstance, ginInstance_);
+    if (child_->nRanks == 1) {
+      EXPECT_GT(fake_.listenCalls, 0);
+      EXPECT_NE(childGinState()->backends[0].ginComms[0], nullptr);
+    }
+  }
+
+  void expectOwnerConnectionsUntouched() {
+    EXPECT_TRUE(ginState()->connected);
+    EXPECT_EQ(backend()->ginComms[0], ginComm0_);
+    EXPECT_EQ(backend()->ginComms[1], ginComm1_);
+  }
+};
+
+TEST_F(GinHostSplitShareTest, Anvil_SubsetChildIsRejected) {
+  useAnvil();
+  makeChild(/*ownerNRanks=*/3, {0, 2});
+
+  expectRejectedWithoutACollective();
+  expectOwnerConnectionsUntouched();
+}
+
+TEST_F(GinHostSplitShareTest, Anvil_OneRankChildIsRejectedBeforeOwnerConnects) {
+  useAnvil();
+  ginState()->connected = false;
+  backend()->ginComms[0] = nullptr;
+  backend()->ginComms[1] = nullptr;
+  makeChild(/*ownerNRanks=*/2, {0});
+
+  expectRejectedWithoutACollective();
+  EXPECT_FALSE(ginState()->connected);
+}
+
+TEST_F(GinHostSplitShareTest, Anvil_ReorderedChildIsRejected) {
+  useAnvil();
+  makeChild(/*ownerNRanks=*/2, {1, 0});
+
+  expectRejectedWithoutACollective();
+}
+
+TEST_F(GinHostSplitShareTest, Anvil_FullRankSetChildConnects) {
+  useAnvil();
+  makeChild(/*ownerNRanks=*/2, {0, 1});
+
+  EXPECT_TRUE(ncclGinTypeActive(child_.get(), NCCL_GIN_TYPE_ANVIL_SDMA));
+  expectConnectsThroughOwnerContext();
+  expectOwnerConnectionsUntouched();
+}
+
+// ncclSymkInitOnce reaches ncclGinConnectOnce from ncclCommSplit for a
+// multi-node child, so rejecting here would fail the split itself.
+TEST_F(GinHostSplitShareTest, OtherBackend_SubsetChildConnects) {
+  makeChild(/*ownerNRanks=*/2, {1});
+
+  EXPECT_TRUE(ncclGinTypeActive(child_.get(), NCCL_GIN_TYPE_PROXY));
+  expectConnectsThroughOwnerContext();
+  expectOwnerConnectionsUntouched();
 }
 
 TEST_F(GinHostFinalizeTest, AlreadyDisconnectedIsNoOp) {

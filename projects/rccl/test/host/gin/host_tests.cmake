@@ -34,6 +34,15 @@ rccl_add_gin_micro_binary(rccl-UnitTestsMicroGinHostFinalize gin-host-finalize-t
   SOURCES
     fakes/os_fakes.cc)
 
+# archinfo.cc: the real IsArchMatch, which gates fabric memory on gfx1250.
+rccl_add_gin_micro_binary(rccl-UnitTestsMicroGinAnvilReach gin-anvil-reach-test.cc
+  SOURCES
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
+    fakes/nccl_fakes.cc
+    fakes/search_fakes.cc
+  EXTRA_DEFS
+    GIN_ANVIL_REACH_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/gin/gin_anvil_reach.cc")
+
 # The test redirects rocmwrap.cc's DmaBufEnable param; keep the name and default in step.
 foreach(_f "${CMAKE_CURRENT_LIST_DIR}/../../../src/misc/rocmwrap.cc"
            "${CMAKE_CURRENT_LIST_DIR}/gin-host-proxy-test.cc")
