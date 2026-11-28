@@ -445,39 +445,35 @@ public:
 
   /// @brief Invalidate all cache lines, optionally restricted to one VMID.
   void invalidate_all(std::optional<uint32_t> vmid = std::nullopt) {
-    for (uint32_t first = 0; first < NumSets; first += sizeof(uint64_t)) {
-      const uint32_t end = std::min<uint32_t>(first + sizeof(uint64_t), NumSets);
-      uint64_t touched = 0;
-      // Full-cache maintenance already excludes concurrent set accesses.
-      // Scan empty marker groups together without changing fill-side writes.
-      std::memcpy(&touched, touched_sets_.data() + first, end - first);
-      if (touched == 0) {
-        continue;
+    for (uint32_t s = 0; s < NumSets; ++s) {
+      // Full-cache maintenance excludes fills. Each touched set is marked with 1.
+      if (!touched_sets_[s]) {
+        const auto *next =
+            static_cast<const uint8_t *>(std::memchr(touched_sets_.data() + s, 1, NumSets - s));
+        if (!next) {
+          break;
+        }
+        s = static_cast<uint32_t>(next - touched_sets_.data());
       }
-      for (uint32_t s = first; s < end; ++s) {
-        if (!touched_sets_[s]) {
+      for (uint32_t w = 0; w < Associativity; ++w) {
+        auto &t = tag_at(s, w);
+        if (vmid && t.vmid != *vmid) {
           continue;
         }
-        for (uint32_t w = 0; w < Associativity; ++w) {
-          auto &t = tag_at(s, w);
-          if (vmid && t.vmid != *vmid) {
-            continue;
-          }
-          t.coherence_epoch = 0;
-          t.admission_generation = 0;
-          t.cache_identity = 0;
-          t.address_space_identity = 0;
-          t.backing_address = 0;
-          t.mapping_attributes = 0;
-          t.local_backing_epoch = 0;
-          t.local_line_epoch = 0;
-          t.valid = false;
-          t.dirty = false;
-          t.coherence = CoherenceState::INVALID;
-        }
-        if (!vmid) {
-          touched_sets_[s] = 0;
-        }
+        t.coherence_epoch = 0;
+        t.admission_generation = 0;
+        t.cache_identity = 0;
+        t.address_space_identity = 0;
+        t.backing_address = 0;
+        t.mapping_attributes = 0;
+        t.local_backing_epoch = 0;
+        t.local_line_epoch = 0;
+        t.valid = false;
+        t.dirty = false;
+        t.coherence = CoherenceState::INVALID;
+      }
+      if (!vmid) {
+        touched_sets_[s] = 0;
       }
     }
   }

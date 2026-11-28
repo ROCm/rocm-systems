@@ -21,6 +21,7 @@
 #include "util/log.h"
 
 #include <array>
+#include <bit>
 #include <cstdint>
 #include <optional>
 
@@ -195,11 +196,15 @@ void ds_calculate_addresses(const DsInst &inst, amdgpu::Wavefront &wf, VectorMem
     return;
   }
   const std::span<const uint32_t> addresses = maybe_addresses.value();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) {
-      continue;
+  if (exec == (wf.wf_size() == 32 ? uint64_t{UINT32_MAX} : UINT64_MAX)) {
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      d.per_lane_addr[lane] = ds_address(ds_base, addresses[lane], offset);
     }
-    d.per_lane_addr[lane] = ds_address(ds_base, addresses[lane], offset);
+  } else {
+    for (uint64_t pending = exec; pending; pending &= pending - 1) {
+      const auto lane = std::countr_zero(pending);
+      d.per_lane_addr[lane] = ds_address(ds_base, addresses[lane], offset);
+    }
   }
   util::Logger::vm([&](auto &os) {
     static uint64_t ds_addr_count = 0;
