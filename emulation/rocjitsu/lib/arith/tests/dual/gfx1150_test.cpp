@@ -125,3 +125,32 @@ TEST(DualGfx1150, Dx9PostRoundFlushing) {
     }
   }
 }
+
+// Loose MUL can publish directly while retaining post-round output flushing and aliases.
+TEST(DualGfx1150, LooseDx9OutputFlushing) {
+  using namespace rocjitsu::arith::test;
+  Registers<4, 32> input;
+  for (int lane = 0; lane < 32; ++lane) {
+    input.v[0][lane] = (lane & 1 ? 0x80000000U : 0) | 0x00800000U;
+    input.v[1][lane] = 0x3f000000U;
+  }
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (uint32_t exec_mask : {0U, 0x80000001U, UINT32_MAX}) {
+      for (int aliasing_offset : {0, 1, 3}) {
+        auto actual = input;
+        uint32_t status = 0x100;
+        ASSERT_EQ(rj_arith_v_dual_mul_dx9_zero_f32_w32_gfx1150(
+                      cpu | RJ_ARITH_SEMANTICS_LOOSE | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS,
+                      exec_mask, 0, actual.v + aliasing_offset, actual.v, actual.v + 1, &status),
+                  RJ_ARITH_SUCCESS);
+        for (int lane = 0; lane < 32; ++lane) {
+          EXPECT_EQ(actual.v[aliasing_offset][lane], (exec_mask & (1U << lane))
+                                                         ? input.v[0][lane] & 0x80000000U
+                                                         : input.v[aliasing_offset][lane]);
+        }
+        actual.expect_preserved(input, aliasing_offset, 1);
+        EXPECT_EQ(status, 0x100U);
+      }
+    }
+  }
+}
