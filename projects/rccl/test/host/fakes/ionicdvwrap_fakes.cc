@@ -20,6 +20,9 @@ std::function<ncclResult_t(struct ibv_qp*, bool, bool)> g_ionicdvQpSetGda = Defa
 static ncclResult_t DefaultIonicdvPdSetUdmaMask(struct ibv_pd*, uint8_t) { return ncclSystemError; }
 std::function<ncclResult_t(struct ibv_pd*, uint8_t)> g_ionicdvPdSetUdmaMask = DefaultIonicdvPdSetUdmaMask;
 
+static ncclResult_t DefaultIonicdvPdSetSqcmb(struct ibv_pd*, bool, bool, bool) { return ncclSystemError; }
+std::function<ncclResult_t(struct ibv_pd*, bool, bool, bool)> g_ionicdvPdSetSqcmb = DefaultIonicdvPdSetSqcmb;
+
 static ncclResult_t DefaultIonicdvQpSetPuecPlaneRoute(struct ibv_qp*, uint8_t, struct ionic_dv_puec_route*) {
   return ncclSystemError;
 }
@@ -35,6 +38,7 @@ std::function<uint8_t(struct ibv_qp*)> g_ionicdvQpGetUdmaIdx = DefaultIonicdvQpG
 ASSERT_HOOK_MATCHES_PROD(g_ionicdvSymbols, wrap_ionicdv_symbols);
 ASSERT_HOOK_MATCHES_PROD(g_ionicdvQpSetGda, wrap_ionicdv_qp_set_gda);
 ASSERT_HOOK_MATCHES_PROD(g_ionicdvPdSetUdmaMask, wrap_ionicdv_pd_set_udma_mask);
+ASSERT_HOOK_MATCHES_PROD(g_ionicdvPdSetSqcmb, wrap_ionicdv_pd_set_sqcmb);
 ASSERT_HOOK_MATCHES_PROD(g_ionicdvQpSetPuecPlaneRoute, wrap_ionicdv_qp_set_puec_plane_route);
 ASSERT_HOOK_MATCHES_PROD(g_ionicdvCtxGetUdmaCount, wrap_ionicdv_ctx_get_udma_count);
 ASSERT_HOOK_MATCHES_PROD(g_ionicdvQpGetUdmaIdx, wrap_ionicdv_qp_get_udma_idx);
@@ -45,6 +49,9 @@ ncclResult_t wrap_ionicdv_qp_set_gda(struct ibv_qp* ibqp, bool enable_send, bool
 }
 ncclResult_t wrap_ionicdv_pd_set_udma_mask(struct ibv_pd* ibpd, uint8_t udma_mask) {
   return g_ionicdvPdSetUdmaMask(ibpd, udma_mask);
+}
+ncclResult_t wrap_ionicdv_pd_set_sqcmb(struct ibv_pd* ibpd, bool enable, bool expdb, bool require) {
+  return g_ionicdvPdSetSqcmb(ibpd, enable, expdb, require);
 }
 ncclResult_t wrap_ionicdv_qp_set_puec_plane_route(struct ibv_qp* qp, uint8_t plane_idx,
                                                   struct ionic_dv_puec_route* route) {
@@ -57,6 +64,7 @@ void ResetIonicdvwrapFakes() {
   g_ionicdvSymbols = DefaultIonicdvSymbols;
   g_ionicdvQpSetGda = DefaultIonicdvQpSetGda;
   g_ionicdvPdSetUdmaMask = DefaultIonicdvPdSetUdmaMask;
+  g_ionicdvPdSetSqcmb = DefaultIonicdvPdSetSqcmb;
   g_ionicdvQpSetPuecPlaneRoute = DefaultIonicdvQpSetPuecPlaneRoute;
   g_ionicdvCtxGetUdmaCount = DefaultIonicdvCtxGetUdmaCount;
   g_ionicdvQpGetUdmaIdx = DefaultIonicdvQpGetUdmaIdx;

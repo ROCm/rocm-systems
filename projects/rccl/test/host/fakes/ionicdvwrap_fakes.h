@@ -25,6 +25,8 @@ extern std::function<ncclResult_t()> g_ionicdvSymbols;
 extern std::function<ncclResult_t(struct ibv_qp* /*ibqp*/, bool /*enable_send*/, bool /*enable_recv*/)>
     g_ionicdvQpSetGda;
 extern std::function<ncclResult_t(struct ibv_pd* /*ibpd*/, uint8_t /*udma_mask*/)> g_ionicdvPdSetUdmaMask;
+extern std::function<ncclResult_t(struct ibv_pd* /*ibpd*/, bool /*enable*/, bool /*expdb*/, bool /*require*/)>
+    g_ionicdvPdSetSqcmb;
 extern std::function<ncclResult_t(struct ibv_qp* /*qp*/, uint8_t /*plane_idx*/,
                                   struct ionic_dv_puec_route* /*route*/)>
     g_ionicdvQpSetPuecPlaneRoute;

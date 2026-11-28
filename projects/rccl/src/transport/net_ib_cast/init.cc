@@ -464,6 +464,7 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
   {
     const char* mapFile = ncclGetEnv("RCCL_MULTIPLANE_MAP_FILE");
     IbCastMultiplaneEnable = IbCastAinicRoce && (mapFile != NULL && mapFile[0] != '\0');
+    if (IbCastAinicRoce) IbCastSetUseSqCmb();
   }
 
   if (IbCastNDevs == -1) {

@@ -25,6 +25,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "ScopedHook.h"
@@ -286,6 +287,7 @@ class NetIbCastConnectMicrotest : public ::testing::Test {
     ResetNcclFakes();
     rcclTelemetryEnabled = 0;
     IbCastMaxPostSendBytes = UINT32_MAX;
+    IbCastUseSqCmb = -1;
     g_testOpen = nullptr;
     g_verbs = nullptr;
   }
@@ -1511,6 +1513,145 @@ TEST_F(NetIbCastConnectQpMicrotest, DestroyBase_CqFailureKeepsThePdReference) {
   EXPECT_EQ(IbCastDevs[0].pdRefs, 1);
   destroyCqResult_ = ncclSuccess;
   IbCastDevs[0].pdRefs = 0;
+}
+
+// RCCL_AINIC_SQ_CMB (-1 default, 0 off, 1 on) and IONIC_SQ_CMB, resolved once by IbCastSetUseSqCmb and
+// applied to a device's PD by IbCastInitCommDevBase. The observable is the ionic_dv_pd_set_sqcmb call.
+class NetIbCastConnectSqCmbMicrotest : public NetIbCastConnectQpMicrotest {
+ protected:
+  struct SqCmbCall {
+    ibv_pd* pd;
+    bool enable, expdb, require;
+  };
+
+  // Resolves the two variables as IbCastInit does on AINIC; returns what it logged.
+  std::string Resolve(int64_t rccl, const char* ionic = nullptr) {
+    if (rccl != -1) Param("RCCL_AINIC_SQ_CMB", rccl);
+    if (ionic) SetMicroEnv("IONIC_SQ_CMB", ionic);
+    return InfoLog([] { IbCastSetUseSqCmb(); });
+  }
+
+  // Creates the first comm on device 0 and returns the calls libionic received.
+  std::vector<SqCmbCall> InitDevice(bool ainic = true) {
+    IbCastAinicRoce = ainic;
+    std::vector<SqCmbCall> calls;
+    Hook(g_ionicdvPdSetSqcmb, [&](ibv_pd* pd, bool enable, bool expdb, bool require) {
+      calls.push_back({pd, enable, expdb, require});
+      return ncclSuccess;
+    });
+    ncclIbNetCommDevBase a = {};
+    EXPECT_EQ(IbCastInitCommDevBase(0, &a, nullptr, 8), ncclSuccess);
+    if (!calls.empty()) EXPECT_EQ(calls[0].pd, a.pd);
+    IbCastDestroyBase(&a);
+    return calls;
+  }
+};
+
+TEST_F(NetIbCastConnectSqCmbMicrotest, RcclVariableUnset_LeavesThePdAlone) {
+  Resolve(-1);
+  EXPECT_TRUE(InitDevice().empty());
+}
+
+TEST_F(NetIbCastConnectSqCmbMicrotest, RcclVariableUnsetAndIonicSet_LeavesThePdAlone) {
+  Resolve(-1, "0");
+  EXPECT_TRUE(InitDevice().empty());
+}
+
+TEST_F(NetIbCastConnectSqCmbMicrotest, RcclVariableZero_DisablesCmbOnThePd) {
+  Resolve(0);
+  auto calls = InitDevice();
+  ASSERT_EQ(calls.size(), 1u);
+  EXPECT_FALSE(calls[0].enable);
+  EXPECT_FALSE(calls[0].require);
+}
+
+TEST_F(NetIbCastConnectSqCmbMicrotest, RcclVariableOne_EnablesCmbWithExpressDoorbellOnThePd) {
+  Resolve(1);
+  auto calls = InitDevice();
+  ASSERT_EQ(calls.size(), 1u);
+  EXPECT_TRUE(calls[0].enable);
+  EXPECT_TRUE(calls[0].expdb);
+  EXPECT_FALSE(calls[0].require);
+}
+
+TEST_F(NetIbCastConnectSqCmbMicrotest, RcclVariableSet_AppliesOnlyWhenThePdIsCreated) {
+  Resolve(0);
+  IbCastAinicRoce = true;
+  int calls = 0;
+  Hook(g_ionicdvPdSetSqcmb, [&](ibv_pd*, bool, bool, bool) {
+    ++calls;
+    return ncclSuccess;
+  });
+  ncclIbNetCommDevBase a = {}, b = {}, c = {};
+  ASSERT_EQ(IbCastInitCommDevBase(0, &a, nullptr, 8), ncclSuccess);
+  ASSERT_EQ(IbCastInitCommDevBase(0, &b, nullptr, 8), ncclSuccess);  // shares the PD
+  EXPECT_EQ(calls, 1);
+  ASSERT_EQ(IbCastInitCommDevBase(1, &c, nullptr, 8), ncclSuccess);  // another device, another PD
+  EXPECT_EQ(calls, 2);
+  IbCastDestroyBase(&a);
+  IbCastDestroyBase(&b);
+  IbCastDestroyBase(&c);
+}
+
+TEST_F(NetIbCastConnectSqCmbMicrotest, RcclVariableSetButNotAinic_LeavesThePdAlone) {
+  Resolve(0);
+  EXPECT_TRUE(InitDevice(/*ainic=*/false).empty());
+}
+
+TEST_F(NetIbCastConnectSqCmbMicrotest, LibionicLacksTheVerb_WarnsAndStillCreatesTheComm) {
+  Resolve(0);
+  IbCastAinicRoce = true;
+  Hook(g_ionicdvPdSetSqcmb, [](ibv_pd*, bool, bool, bool) { return ncclSystemError; });
+  ncclIbNetCommDevBase a = {};
+  const std::string log = CaptureLog([&] { ASSERT_EQ(IbCastInitCommDevBase(0, &a, nullptr, 8), ncclSuccess); });
+  EXPECT_TRUE(LogHas(log, "fake0: ionic_dv_pd_set_sqcmb failed")) << log;
+  IbCastDestroyBase(&a);
+}
+
+TEST_F(NetIbCastConnectSqCmbMicrotest, BothSetAndAgreeing_NoWarning) {
+  // libionic: a number whose bit 0 enables CMB, or e, or x (which implies e).
+  const std::pair<const char*, int64_t> agreements[] = {{"0", 0}, {"1", 1}, {"e", 1}, {"x", 1}, {"xw", 1}};
+  for (const auto& [ionic, rccl] : agreements) {
+    const std::string log = Resolve(rccl, ionic);
+    EXPECT_FALSE(LogHas(log, "conflicts")) << ionic << ": " << log;
+  }
+}
+
+TEST_F(NetIbCastConnectSqCmbMicrotest, BothSetAndConflicting_WarnsThatIonicTakesPriority) {
+  const std::pair<const char*, int64_t> conflicts[] = {{"0", 1}, {"4", 1}, {"r", 1}, {"1", 0}, {"e", 0}, {"xw", 0}};
+  for (const auto& [ionic, rccl] : conflicts) {
+    const std::string log = Resolve(rccl, ionic);
+    EXPECT_TRUE(LogHas(log, (std::string("IONIC_SQ_CMB=") + ionic + " conflicts with RCCL_AINIC_SQ_CMB").c_str()))
+        << ionic << ": " << log;
+    EXPECT_TRUE(LogHas(log, "IONIC_SQ_CMB takes priority")) << ionic << ": " << log;
+  }
+}
+
+// IONIC_SQ_CMB is already applied by libionic to every PD it allocates; RCCL must not replace it.
+TEST_F(NetIbCastConnectSqCmbMicrotest, BothSet_LeavesThePdToIonic) {
+  const std::pair<const char*, int64_t> both[] = {{"0", 1}, {"e", 0}, {"xw", 1}, {"0", 0}};
+  for (const auto& [ionic, rccl] : both) {
+    Resolve(rccl, ionic);
+    EXPECT_TRUE(InitDevice().empty()) << ionic << " " << rccl;
+  }
+}
+
+// The documented values are -1, 0 and 1. Any other value warns and is ignored, as if unset.
+TEST_F(NetIbCastConnectSqCmbMicrotest, RcclVariableOutOfRange_WarnsAndLeavesThePdAlone) {
+  for (int64_t value : {2, -2}) {
+    const std::string log = Resolve(value);
+    EXPECT_TRUE(LogHas(log, (std::string("RCCL_AINIC_SQ_CMB=") + std::to_string(value) + " is not -1, 0 or 1").c_str()))
+        << value << ": " << log;
+    EXPECT_TRUE(InitDevice().empty()) << value;
+  }
+}
+
+// When IONIC_SQ_CMB wins, RCCL must not report a placement of its own (the variable is ignored).
+TEST_F(NetIbCastConnectSqCmbMicrotest, BothSetAndConflicting_InfoDoesNotReportAnRcclPlacement) {
+  const std::string log = Resolve(1, "0");
+  EXPECT_TRUE(LogHas(log, "RCCL_AINIC_SQ_CMB ignored; AINIC send queues follow IONIC_SQ_CMB=0")) << log;
+  EXPECT_FALSE(LogHas(log, "send queues in CMB")) << log;
+  EXPECT_FALSE(LogHas(log, "send queues in host memory")) << log;
 }
 
 TEST_F(NetIbCastConnectMicrotest, MatchingScheme_FollowsOffloadSharingOooRqFailoverThenTheParam) {
