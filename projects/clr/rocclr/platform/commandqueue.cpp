@@ -163,24 +163,31 @@ void HostQueue::finish(bool cpu_wait) {
 
   if (IS_HIP) {
     minBatchSize = DEBUG_CLR_BATCH_CPU_SYNC_SIZE;
+  }
 
+  if (IS_HIP || AMD_DIRECT_DISPATCH) {
     command = getLastQueuedCommand(true);
     if (command == nullptr) {
       ClPrint(LOG_DEBUG, LOG_CMD, "No command awaiting completion on host");
-      return;
+      if (IS_HIP) {
+        return;
+      }
     }
 
-    if (!AMD_DIRECT_DISPATCH && !Os::isThreadAlive(thread_)) {
-      command->release();
-      return;
-    }
+    if (IS_HIP) {
+      if (!AMD_DIRECT_DISPATCH && !Os::isThreadAlive(thread_)) {
+        command->release();
+        return;
+      }
 
-    // Force blocking wait if requested. That allows to avoid a build up of unreleased CPU commands
-    if ((DEBUG_HIP_BLOCK_SYNC > 0) &&
-        (vdev()->QueuedAsyncHandlers().load() > DEBUG_HIP_BLOCK_SYNC)) {
-      cpu_wait = true;
+      // Force blocking wait if requested. That allows to avoid a build up of unreleased CPU commands
+      if ((DEBUG_HIP_BLOCK_SYNC > 0) &&
+          (vdev()->QueuedAsyncHandlers().load() > DEBUG_HIP_BLOCK_SYNC)) {
+        cpu_wait = true;
+      }
     }
-  } else {
+  }
+  if (!IS_HIP) {
     // Force CPU wait for OpenCL, since the tests may check OCL command status after finish
     cpu_wait = true;
   }
@@ -198,7 +205,8 @@ void HostQueue::finish(bool cpu_wait) {
     }
     const Command::EventWaitList nullWaitList = {};
     // Send a finish to make sure we finished all commands
-    command = new Marker(*this, false, nullWaitList, nullptr, batchSize < minBatchSize);
+    const bool markerCpuWait = IS_HIP ? (batchSize < minBatchSize) : cpu_wait;
+    command = new Marker(*this, false, nullWaitList, nullptr, markerCpuWait);
     if (command == NULL) {
       return;
     }

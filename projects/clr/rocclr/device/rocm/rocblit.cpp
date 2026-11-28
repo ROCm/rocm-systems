@@ -1265,7 +1265,7 @@ bool DmaBlitManager::hsaCopyStagedOrPinned(const_address hostSrc, address hostDs
       if (outBuffer.pinnedMem_ == nullptr) {  // Copy to Staging Buffer
         // Wait for prior GPU work before the CPU reads hostSrc — a host-function
         // callback (e.g. hipLaunchHostFunc) may still be writing to it.
-        if (firstTx) {
+        if (firstTx && gpu().HasPendingHostCallbacks()) {
           gpu().releaseGpuMemoryFence(false);
         }
         ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_COPY, "memcpy stg buf=%p, host src=%p, size=%zu",
@@ -2500,7 +2500,9 @@ bool KernelBlitManager::writeBuffer(const void* srcHost, device::Memory& dstMemo
       size_t stagedCopyOffset = 0;
 
       // Wait for prior GPU work (e.g. hipLaunchHostFunc callback) before the CPU reads srcAddr.
-      gpu().releaseGpuMemoryFence(false);
+      if (gpu().HasPendingHostCallbacks()) {
+        gpu().releaseGpuMemoryFence(false);
+      }
 
       while (totalSize > 0) {
         BufferState outBuffer = {0};

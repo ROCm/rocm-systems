@@ -318,6 +318,7 @@ void CL_CALLBACK ihipStreamCallback(cl_event event, cl_int command_exec_status, 
   auto* cbo = reinterpret_cast<StreamCallback*>(user_data);
   cbo->callback();
   delete cbo;
+  as_amd(event)->command().queue()->vdev()->DecrementPendingHostCallbacks();
 }
 
 // ================================================================================================
@@ -765,6 +766,7 @@ hipError_t streamCallback_common(hipStream_t stream, StreamCallback* cbo, void* 
     }
     return hipErrorInvalidHandle;
   }
+  hip_stream->vdev()->IncrementPendingHostCallbacks();
   command->enqueue();
   if (last_command != nullptr) {
     last_command->release();
