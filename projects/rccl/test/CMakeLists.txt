@@ -453,6 +453,7 @@ if(BUILD_TESTS)
       device/TestLdsTransfer.cpp
       device/GinDeviceTests.cpp
       device/GinBackendMaskDispatch_test.cpp
+      device/GinBarrierFlushOrderTests.cpp
       device/HierarchicalShuffleTests.cpp
       device/NcclUtilityDeviceTests.cpp
       device/SymkWorldPointerGetterTests.cpp
