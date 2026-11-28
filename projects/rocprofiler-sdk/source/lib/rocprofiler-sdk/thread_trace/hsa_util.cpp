@@ -46,8 +46,13 @@ hsa_submit(const att_queue_t& queue, hsa_ext_amd_aql_pm4_packet_t* packet, att_s
 {
     auto*          core        = CHECK_NOTNULL(hsa::get_core_table());
     const uint64_t write_index = core->hsa_queue_add_write_index_relaxed_fn(queue.hsa_queue, 1);
-    const size_t   index       = (write_index % queue.hsa_queue->size) * sizeof(*packet);
-    auto*          slot =
+
+    while(write_index - core->hsa_queue_load_read_index_scacquire_fn(queue.hsa_queue) >=
+          queue.hsa_queue->size)
+        std::this_thread::yield();
+
+    const size_t index = (write_index % queue.hsa_queue->size) * sizeof(*packet);
+    auto*        slot =
         reinterpret_cast<uint32_t*>(static_cast<char*>(queue.hsa_queue->base_address) + index);
     const auto* packet_words = reinterpret_cast<const uint32_t*>(packet);
 

@@ -63,7 +63,6 @@ constexpr TrieEntry type_dict[] = {
     {"s_barrie",         InstCategory::IMMED},
     {"s_endpgm",         InstCategory::IMMED},
     {"s_icache_inv",     InstCategory::IMMED},
-    {"s_dcache_inv",     InstCategory::IMMED},
     {"s_incperflvl",     InstCategory::IMMED},
     {"s_sethalt",        InstCategory::IMMED},
     {"s_decperflvl",     InstCategory::IMMED},

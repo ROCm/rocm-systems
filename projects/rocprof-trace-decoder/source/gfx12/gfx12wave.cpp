@@ -261,7 +261,6 @@ static const instruction_table_t& table_map_to_common_type =
     {(int) EINST::valu_scl_trans,    {WaveInstCategory::VALU, 1}           },
     {(int) EINST::salu2,             {WaveInstCategory::SALU, 2}           },
     {(int) EINST::salu5,             {WaveInstCategory::SALU, 5}           },
-    {(int) EINST::valu_scl_trans,    {WaveInstCategory::VALU, 1}           },
 
     {(int) EINST::lds_other_simd_1,  {WaveInstCategory::LDS_OTHER_SIMD, 1} },
     {(int) EINST::lds_other_simd_2,  {WaveInstCategory::LDS_OTHER_SIMD, 2} },

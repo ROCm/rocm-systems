@@ -447,6 +447,65 @@ TEST(MI400TokenGeneratorTest, NextValuAndLongTokenPaths)
     }
 }
 
+// The padded (fast) and unpadded (tail) read loops must treat realtime timestamps the same way:
+// duplicates on the same shader clock are merged, and the token is handed to the parser.
+TEST(MI400TokenGeneratorTest, TailLoopMatchesPaddedLoopForRealtimeTimestamp)
+{
+    gfx12::timestamp_type ts{};
+    ts.header = 0b0000001;
+    ts.rt = 1;
+    ts.pl = 0;
+    ts.time = 0x1000ull;
+
+    // 16 bytes: the first timestamp is read by the padded loop, the second by the tail loop.
+    std::array<uint8_t, 2 * sizeof(uint64_t)> buffer{};
+    std::memcpy(buffer.data(), &ts.raw, sizeof(ts.raw));
+    std::memcpy(buffer.data() + sizeof(ts.raw), &ts.raw, sizeof(ts.raw));
+
+    mi400::TokenGenerator gen(buffer.data(), buffer.size(), 0, 0, false);
+
+    auto first = gen.next();
+    EXPECT_EQ(first.type, RdnaType::TIMESTAMP);
+    EXPECT_EQ(first.contents, ts.raw);
+
+    auto second = gen.next();
+    EXPECT_EQ(second.type, RdnaType::TIMESTAMP);
+    EXPECT_EQ(second.contents, ts.raw);
+
+    ASSERT_EQ(gen.realtime.size(), 1u);
+    EXPECT_EQ(gen.realtime.front().realtime_clock, ts.time);
+}
+
+// After a WAVE_START_EXT with WSM != 3 exactly one extension byte is skipped; the tokens that
+// follow must still be decoded.
+TEST(MI400TokenGeneratorTest, WaveStartExtExtensionByteDoesNotSwallowStream)
+{
+    mi400::header_type header{};
+    header.header = 0b0010001;
+    header.version = 5;
+    header.WSM = 0;
+
+    std::array<uint8_t, 8 + 5 + 1 + 3 + 16> buffer{};
+    std::memcpy(buffer.data(), &header.raw, sizeof(header.raw));
+    buffer[8] = 0b11100;     // WAVE_START_EXT, 40 bits
+    buffer[13] = 0xFF;       // extension byte, must be skipped whatever it holds
+    buffer[14] = 0b01100001; // EVENT, 24 bits
+
+    mi400::TokenGenerator gen(buffer.data(), buffer.size(), 0, 0);
+
+    int events = 0;
+    for (int i = 0; i < 64 && gen.nextValid(); i++)
+        if (gen.next().type == RdnaType::EVENT) events++;
+
+    EXPECT_EQ(events, 1);
+}
+
+// tdm_other_simd used to be listed twice, and the NONE entry won.
+TEST(MI400WaveTest, TdmOtherSimdIsReportedAsOtherSimd)
+{
+    EXPECT_EQ(mi400::map_to_common_type(172, 0).category, WaveInstCategory::VMEM_OTHER_SIMD);
+}
+
 TEST(MI400TokenGeneratorTest, SafeReaderHandlesRealtimeValuAndExtendedPcTokens)
 {
     {

@@ -341,13 +341,14 @@ public:
     PipeArray64 current_codeobj_id{};
     PipeArray64 dispatch_pkt_addr{};
 
-    uint32_t num_thread_x{0};
-    uint32_t num_thread_y{0};
-    uint32_t num_thread_z{0};
-    uint32_t rsrc1{0};
-    uint32_t rsrc2{0};
-    uint32_t rsrc3{0};
-    uint32_t dispatch_initiator{0};
+    // Dispatch setup registers are per pipe, like the program and packet addresses above.
+    PipeArray<uint32_t> num_thread_x{};
+    PipeArray<uint32_t> num_thread_y{};
+    PipeArray<uint32_t> num_thread_z{};
+    PipeArray<uint32_t> rsrc1{};
+    PipeArray<uint32_t> rsrc2{};
+    PipeArray<uint32_t> rsrc3{};
+    PipeArray<uint32_t> dispatch_initiator{};
 
     uint64_t realtime_frequency{0};
     uint64_t counter_frequency{0};
@@ -439,15 +440,15 @@ public:
         {
             case COMPUTE_PGM_LO: wave_start_addr.setlo(token); break;
             case COMPUTE_PGM_HI: wave_start_addr.sethi(token); break;
-            case COMPUTE_NUM_THREAD_X: num_thread_x = token.regdata; break;
-            case COMPUTE_NUM_THREAD_Y: num_thread_y = token.regdata; break;
-            case COMPUTE_NUM_THREAD_Z: num_thread_z = token.regdata; break;
-            case COMPUTE_PGM_RSRC1: rsrc1 = token.regdata; break;
-            case COMPUTE_PGM_RSRC2: rsrc2 = token.regdata; break;
-            case COMPUTE_PGM_RSRC3: rsrc3 = token.regdata; break;
+            case COMPUTE_NUM_THREAD_X: num_thread_x.at_reg(token) = token.regdata; break;
+            case COMPUTE_NUM_THREAD_Y: num_thread_y.at_reg(token) = token.regdata; break;
+            case COMPUTE_NUM_THREAD_Z: num_thread_z.at_reg(token) = token.regdata; break;
+            case COMPUTE_PGM_RSRC1: rsrc1.at_reg(token) = token.regdata; break;
+            case COMPUTE_PGM_RSRC2: rsrc2.at_reg(token) = token.regdata; break;
+            case COMPUTE_PGM_RSRC3: rsrc3.at_reg(token) = token.regdata; break;
             case COMPUTE_DISPATCH_PKT_LO: dispatch_pkt_addr.setlo(token); break;
             case COMPUTE_DISPATCH_PKT_HI: dispatch_pkt_addr.sethi(token); break;
-            case COMPUTE_DISPATCH_INITIATOR: dispatch_initiator = token.regdata; break;
+            case COMPUTE_DISPATCH_INITIATOR: dispatch_initiator.at_reg(token) = token.regdata; break;
             default: break;
         };
     }
@@ -555,9 +556,12 @@ public:
         address_range_t co;
         if (table.find(pc, co)) event.entry_point = {pc - co.addr, co.id};
 
-        event.thread_dim_x = num_thread_x;
-        event.thread_dim_y = num_thread_y;
-        event.thread_dim_z = num_thread_z;
+        const uint32_t rsrc1 = this->rsrc1.at(me & 0x1).at(pipe);
+        const uint32_t rsrc2 = this->rsrc2.at(me & 0x1).at(pipe);
+
+        event.thread_dim_x = num_thread_x.at(me & 0x1).at(pipe);
+        event.thread_dim_y = num_thread_y.at(me & 0x1).at(pipe);
+        event.thread_dim_z = num_thread_z.at(me & 0x1).at(pipe);
         event.dispatch_pkt_addr = dispatch_pkt_addr.at(me & 0x1).at(pipe);
         event.lds_size = ((rsrc2 >> 15) & 0x1FF) * 512;
 

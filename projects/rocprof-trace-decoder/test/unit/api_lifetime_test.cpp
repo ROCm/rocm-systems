@@ -94,6 +94,13 @@ struct PostMainVerifier
         if (!exercise_v1()) fail_after_main(24);
         if (!exercise_v1()) fail_after_main(25);
 
+        // The main thread's thread_locals are already destroyed here.
+        rocprof_trace_decoder_handle_t late_handle{};
+        if (rocprof_trace_decoder_create_handle(&late_handle) != ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS)
+            fail_after_main(40);
+        if (rocprof_trace_decoder_destroy_handle(late_handle) != ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS)
+            fail_after_main(41);
+
         int worker_status = 0;
         std::thread worker(
             [&]()

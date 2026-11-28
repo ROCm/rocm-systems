@@ -67,7 +67,7 @@ inline void emit_codeobj_field(std::vector<StatusToken>& out, uint32_t marker_ty
 std::vector<StatusToken> build_status_tokens(const CSRegisterHandler& reg)
 {
     std::vector<StatusToken> out;
-    out.reserve(32 + 6 + 1 + reg.active_codeobjs.read().size() * 14);
+    out.reserve(32 + 48 + 1 + reg.active_codeobjs.read().size() * 14);
 
     for (uint8_t me = 0; me < 2; ++me)
     {
@@ -78,6 +78,12 @@ std::vector<StatusToken> build_status_tokens(const CSRegisterHandler& reg)
             {
                 out.push_back(encode_reg_cs(me, pipe, COMPUTE_PGM_LO, static_cast<uint32_t>(pgm)));
                 out.push_back(encode_reg_cs(me, pipe, COMPUTE_PGM_HI, static_cast<uint32_t>(pgm >> 32)));
+                out.push_back(encode_reg_cs(me, pipe, COMPUTE_NUM_THREAD_X, reg.num_thread_x.at(me).at(pipe)));
+                out.push_back(encode_reg_cs(me, pipe, COMPUTE_NUM_THREAD_Y, reg.num_thread_y.at(me).at(pipe)));
+                out.push_back(encode_reg_cs(me, pipe, COMPUTE_NUM_THREAD_Z, reg.num_thread_z.at(me).at(pipe)));
+                out.push_back(encode_reg_cs(me, pipe, COMPUTE_PGM_RSRC1, reg.rsrc1.at(me).at(pipe)));
+                out.push_back(encode_reg_cs(me, pipe, COMPUTE_PGM_RSRC2, reg.rsrc2.at(me).at(pipe)));
+                out.push_back(encode_reg_cs(me, pipe, COMPUTE_PGM_RSRC3, reg.rsrc3.at(me).at(pipe)));
             }
             uint64_t dpkt = reg.dispatch_pkt_addr.at(me).at(pipe);
             if (dpkt != 0)
@@ -87,13 +93,6 @@ std::vector<StatusToken> build_status_tokens(const CSRegisterHandler& reg)
             }
         }
     }
-
-    out.push_back(encode_reg_cs(0, 0, COMPUTE_NUM_THREAD_X, reg.num_thread_x));
-    out.push_back(encode_reg_cs(0, 0, COMPUTE_NUM_THREAD_Y, reg.num_thread_y));
-    out.push_back(encode_reg_cs(0, 0, COMPUTE_NUM_THREAD_Z, reg.num_thread_z));
-    out.push_back(encode_reg_cs(0, 0, COMPUTE_PGM_RSRC1, reg.rsrc1));
-    out.push_back(encode_reg_cs(0, 0, COMPUTE_PGM_RSRC2, reg.rsrc2));
-    out.push_back(encode_reg_cs(0, 0, COMPUTE_PGM_RSRC3, reg.rsrc3));
 
     if (reg.bIsROCMFormat)
     {

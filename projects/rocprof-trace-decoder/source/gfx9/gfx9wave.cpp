@@ -285,7 +285,8 @@ void wave_t::apply_inst(Token& token, int64_t& CYCLE_START_PHASE)
                 size_t index = last_inst_for_xnack.at(entry);
                 last_inst_for_xnack.at(entry) = 0;
 
-                if (index > 0 && index < instructions.size() && index < issued_inst_index)
+                // index is the original's position + 1, so <= also covers a replay issued right after it.
+                if (index > 0 && index < instructions.size() && index <= issued_inst_index)
                 {
                     auto& xnack = instructions.at(index - 1);
                     auto duration = xnack.duration;
@@ -294,6 +295,10 @@ void wave_t::apply_inst(Token& token, int64_t& CYCLE_START_PHASE)
                 }
             }
             instructions.erase(instructions.begin() + issued_inst_index);
+            // Everything recorded after the erased slot moved down by one.
+            for (auto& pending : issued_instructions) pending--;
+            for (auto& info : pc_infos)
+                if (info.first > issued_inst_index) info.first--;
             return;
         }
     }

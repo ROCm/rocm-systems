@@ -299,6 +299,10 @@ scan_gfx12_avx512vbmi(const uint8_t* buf, size_t size, QuickToken* __restrict__ 
 
         if (__builtin_expect(v & INFO_RARE, 0))
         {
+            // A rare token cut short by the end of the buffer is not reported, like the scalar
+            // tokenizer. The scan ends with state->pos at its first nibble.
+            if (tail_pos + nibbles > size_nibbles) break;
+
             out[n_out++] = QuickToken{load_contents64(buf, size, tail_pos), T.rare_type[key], tail_pos >> 1};
             if (n_out == out_cap) return stop_after(tail_pos + nibbles);
         }
