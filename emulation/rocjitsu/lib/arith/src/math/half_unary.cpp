@@ -62,6 +62,11 @@ template <rocjitsu::arith::Unary Op, bool Rdna3 = false, bool PreserveClampNan =
   if (!exec_mask) {
     return RJ_ARITH_SUCCESS;
   }
+  // Actual Loose does not require directed narrowing; keep the shared SIMD route available.
+  if ((flags & RJ_ARITH_FP_ROUND_MASK) &&
+      (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_LOOSE) {
+    flags &= ~RJ_ARITH_FP_ROUND_MASK;
+  }
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
   if constexpr (rocjitsu::arith::half_unary_rcp_rsq_sqrt<Op>) {
     if (!(flags & RJ_ARITH_FP_ROUND_MASK) &&
@@ -142,6 +147,20 @@ template <rocjitsu::arith::Unary Op, bool GuestDenormals = true, bool PreserveCl
   if (exec_mask == 0) {
     return RJ_ARITH_SUCCESS;
   }
+  // Loose may use host nearest rounding, including when guest ROUND is directed.
+  if ((flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_LOOSE) {
+    flags &= ~RJ_ARITH_FP_ROUND_MASK;
+  }
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+  if constexpr (Op == rocjitsu::arith::Unary::Fract) {
+    if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+      // The exact FRACT kernel is also the cheapest Loose implementation.
+      rocjitsu::arith::half_unary_exact_x86_64_v4<Op>(flags, exec_mask, uint32_t(modifiers), d[0],
+                                                      a[0]);
+      return RJ_ARITH_SUCCESS;
+    }
+  }
+#endif
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
   if constexpr (rocjitsu::arith::half_unary_rcp_rsq_sqrt<Op> || Op == rocjitsu::arith::Unary::Exp ||
                 Op == rocjitsu::arith::Unary::Log) {
@@ -153,6 +172,14 @@ template <rocjitsu::arith::Unary Op, bool GuestDenormals = true, bool PreserveCl
   }
 #endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
+  if constexpr (Op == rocjitsu::arith::Unary::Fract) {
+    if ((flags & RJ_ARITH_FP_ROUND_MASK) &&
+        rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+      rocjitsu::arith::half_unary_x86_64_v3<Op, GuestDenormals, true>(
+          flags, exec_mask, uint32_t(modifiers), d[0], a[0]);
+      return RJ_ARITH_SUCCESS;
+    }
+  }
   if (!(flags & RJ_ARITH_FP_ROUND_MASK) &&
       rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
     rocjitsu::arith::half_unary_x86_64_v3<Op, GuestDenormals>(flags, exec_mask, modifiers, d[0],
@@ -180,44 +207,50 @@ template <rocjitsu::arith::Unary Op, bool GuestDenormals = true, bool PreserveCl
         input &= 0x8000;
       }
     }
-    float x = rocjitsu::arith::alu_input(
-        rocjitsu::arith::as_bits(rocjitsu::arith::f16_to_float(input)), modifiers);
-    if constexpr (Op == rocjitsu::arith::Unary::Exp) {
-      // Bound finite intermediates without changing any final FP16 result,
-      // including finite-overflow saturation and output scaling by up to four.
-      if (__builtin_isfinite(x)) {
+    float x;
+    if constexpr (Op == rocjitsu::arith::Unary::Exp || Op == rocjitsu::arith::Unary::Log) {
+      if (modifiers & RJ_ARITH_ALU_ABS_A) {
+        input &= 0x7fff;
+      }
+      if (modifiers & RJ_ARITH_ALU_NEG_A) {
+        input ^= 0x8000;
+      }
+      const uint16_t magnitude = input & 0x7fff;
+      if (magnitude >= 0x7c00 ||
+          (Op == rocjitsu::arith::Unary::Log && ((input & 0x8000) || !magnitude))) {
+        // Reuse raw special-value handling rather than convert NaNs/infinities repeatedly.
+        result[lane] = rocjitsu::arith::half_unary_exact_value<Op, false, PreserveClampNan>(
+            flags, uint32_t(modifiers & ~(RJ_ARITH_ALU_ABS_A | RJ_ARITH_ALU_NEG_A)), input);
+        continue;
+      }
+      x = rocjitsu::arith::f16_to_float(input);
+      if constexpr (Op == rocjitsu::arith::Unary::Exp) {
+        // Special values were handled above; bound the native finite exponential.
         x = rocjitsu::arith::clamp(x, -64.0f, 64.0f);
       }
+    } else {
+      x = rocjitsu::arith::alu_input(rocjitsu::arith::as_bits(rocjitsu::arith::f16_to_float(input)),
+                                     modifiers);
     }
     float value = rocjitsu::arith::unary_value<Op>(x);
-    if constexpr (Op == rocjitsu::arith::Unary::Log) {
-      if (x == 0 && (flags & RJ_ARITH_FP16_OVFL)) {
-        value = -65504;
-      }
-    }
     if constexpr (Op == rocjitsu::arith::Unary::Rcp || Op == rocjitsu::arith::Unary::Rsq) {
       if ((flags & RJ_ARITH_FP16_OVFL) && x == 0) {
         value = __builtin_copysignf(65504.0f, value);
       }
     }
-    if constexpr (Op == rocjitsu::arith::Unary::Exp || Op == rocjitsu::arith::Unary::Log ||
-                  rocjitsu::arith::half_unary_rcp_rsq_sqrt<Op>) {
-      // Power-of-two scaling commutes with normal half rounding. For these
-      // three SFUs, CLAMP also removes the overflow distinction, so loose mode
-      // can omit the intermediate conversion when CLAMP is present.
-      if ((modifiers & RJ_ARITH_ALU_OMOD_MASK) &&
-          (!rocjitsu::arith::half_unary_rcp_rsq_sqrt<Op> || !(modifiers & RJ_ARITH_ALU_CLAMP))) {
+    if constexpr (rocjitsu::arith::half_unary_rcp_rsq_sqrt<Op>) {
+      // CLAMP removes the overflow distinction; otherwise retain explicit root saturation.
+      if ((modifiers & RJ_ARITH_ALU_OMOD_MASK) && !(modifiers & RJ_ARITH_ALU_CLAMP)) {
         value = rocjitsu::arith::f16_to_float(
             rocjitsu::arith::float_to_f16(value, flags & RJ_ARITH_FP16_OVFL));
       }
     }
     if constexpr (Op == rocjitsu::arith::Unary::Exp || Op == rocjitsu::arith::Unary::Log) {
       if (GuestDenormals && (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS)) {
-        uint16_t rounded = rocjitsu::arith::float_to_f16(value, flags & RJ_ARITH_FP16_OVFL);
-        if ((rounded & 0x7fff) < 0x400) {
-          rounded &= 0x8000;
+        // Loose needs no intermediate half rounding before final scaling/narrowing.
+        if (__builtin_fabsf(value) < 0x1p-14f) {
+          value = __builtin_copysignf(0.0f, value);
         }
-        value = rocjitsu::arith::f16_to_float(rounded);
       }
     }
     if constexpr (Op == rocjitsu::arith::Unary::Fract) {
@@ -274,13 +307,13 @@ template <rocjitsu::arith::Unary Op, bool GuestDenormals = true, bool PreserveCl
   }
   return RJ_ARITH_SUCCESS;
 }
-
 // Evaluate FP16 unary math for the selected lanes. Requires validated controls; preserve
 // inactive destination lanes.
 template <rocjitsu::arith::Unary Op, bool Rdna3 = false, bool QuietNan = false,
           bool AcceptExact = false, bool OlderProfile = false>
-int run(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d,
-        const uint32_t *const *a, [[maybe_unused]] uint32_t *state) {
+[[gnu::always_inline]] inline int run(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                      uint32_t *const *d, const uint32_t *const *a,
+                                      [[maybe_unused]] uint32_t *state) {
   if (rocjitsu::arith::reports_fp_status(flags)) {
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
@@ -305,7 +338,10 @@ int run(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d,
     flags |= RJ_ARITH_FP_IEEE_MODE;
   }
   if constexpr (supports_exact<Op> || (OlderProfile && Op == rocjitsu::arith::Unary::Fract)) {
-    if (QuietNan || rocjitsu::arith::is_exact(flags) || OlderProfile) {
+    // Integral results and normalized mantissas have one cheap model for both semantics.
+    constexpr bool shared_numeric =
+        rocjitsu::arith::unary_rounds_f32<Op> || Op == rocjitsu::arith::Unary::FrexpMant;
+    if (shared_numeric || QuietNan || rocjitsu::arith::is_exact(flags) || OlderProfile) {
       constexpr bool rdna3_nan_policy = Rdna3;
       if (flags & RJ_ARITH_FP_DX10_CLAMP_OFF) {
         return unary_exact<Op, rdna3_nan_policy, true>(flags, exec_mask, mode, d, a);
@@ -1224,7 +1260,9 @@ int rj_arith_v_frexp_mant_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask,
 int rj_arith_v_fract_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                     uint32_t *const *d, const uint32_t *const *a,
                                     uint32_t *trapsts) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  // Keep inherited guest rounding distinguishable from actual Loose's native narrowing.
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -1239,7 +1277,9 @@ int rj_arith_v_fract_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t
 int rj_arith_v_fract_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                     uint32_t *const *d, const uint32_t *const *a,
                                     uint32_t *trapsts) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  // Keep inherited guest rounding distinguishable from actual Loose's native narrowing.
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }

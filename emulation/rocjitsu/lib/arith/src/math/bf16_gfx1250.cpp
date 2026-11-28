@@ -20,22 +20,21 @@
 
 namespace {
 using namespace rocjitsu::arith;
-enum class Operation { Rcp, Rsq, Sqrt, Exp, Log, Sin, Cos, Tanh };
 
 // Evaluate the inherited FP32 model, including its NaN and denormal policy.
-template <Operation Op> uint32_t evaluate(uint32_t bits) {
-  if constexpr (Op == Operation::Rcp) {
+template <Bf16MathOp Op> uint32_t evaluate(uint32_t bits) {
+  if constexpr (Op == Bf16MathOp::Rcp) {
     return rcp_f32_bits(bits, true);
-  } else if constexpr (Op == Operation::Rsq) {
+  } else if constexpr (Op == Bf16MathOp::Rsq) {
     return rsq_f32_bits(bits, true);
-  } else if constexpr (Op == Operation::Sqrt) {
+  } else if constexpr (Op == Bf16MathOp::Sqrt) {
     return sqrt_f32_bits(bits, true);
-  } else if constexpr (Op == Operation::Exp) {
+  } else if constexpr (Op == Bf16MathOp::Exp) {
     return exp_f32_bits(bits, true);
-  } else if constexpr (Op == Operation::Log) {
+  } else if constexpr (Op == Bf16MathOp::Log) {
     return log_f32_bits(bits, true);
-  } else if constexpr (Op == Operation::Sin || Op == Operation::Cos) {
-    return trig::evaluate(bits, Op == Operation::Cos, 3, true);
+  } else if constexpr (Op == Bf16MathOp::Sin || Op == Bf16MathOp::Cos) {
+    return trig::evaluate(bits, Op == Bf16MathOp::Cos, 3, true);
   } else {
     if ((bits & 0x7fffffffU) > 0x7f800000U) {
       return bits | 0x400000U;
@@ -45,29 +44,29 @@ template <Operation Op> uint32_t evaluate(uint32_t bits) {
 }
 
 // Select an existing FP32 numeric core without its output modifiers or status reporting.
-template <Operation Op> constexpr Bf16MathCore fp32_core() {
-  if constexpr (Op == Operation::Rcp) {
+template <Bf16MathOp Op> constexpr Bf16MathCore fp32_core() {
+  if constexpr (Op == Bf16MathOp::Rcp) {
     return rj_arith_v_rcp_f32_w32_gfx12;
   }
-  if constexpr (Op == Operation::Rsq) {
+  if constexpr (Op == Bf16MathOp::Rsq) {
     return rj_arith_v_rsq_f32_w32_gfx12;
   }
-  if constexpr (Op == Operation::Sqrt) {
+  if constexpr (Op == Bf16MathOp::Sqrt) {
     return rj_arith_v_sqrt_f32_w32_gfx12;
   }
-  if constexpr (Op == Operation::Exp) {
+  if constexpr (Op == Bf16MathOp::Exp) {
     return rj_arith_v_exp_f32_w32_gfx12;
   }
-  if constexpr (Op == Operation::Log) {
+  if constexpr (Op == Bf16MathOp::Log) {
     return rj_arith_v_log_f32_w32_gfx12;
   }
-  if constexpr (Op == Operation::Sin) {
+  if constexpr (Op == Bf16MathOp::Sin) {
     return rj_arith_v_sin_f32_w32_gfx12;
   }
-  if constexpr (Op == Operation::Cos) {
+  if constexpr (Op == Bf16MathOp::Cos) {
     return rj_arith_v_cos_f32_w32_gfx12;
   }
-  return nullptr;
+  return rj_arith_v_tanh_f32_w32_gfx1250;
 }
 
 // Scale and clamp in FP32, then truncate to BF16 and finalize tiny OMOD results.
@@ -95,9 +94,10 @@ uint16_t narrow(uint32_t bits, uint32_t mode) {
 }
 
 // Evaluate active lanes with whole-wave alias safety and selected-half writes.
-template <Operation Op>
+template <Bf16MathOp Op>
 int run(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d,
         const uint32_t *const *a) {
+  const bool compatibility = (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY;
   flags = resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
   constexpr uint64_t controls = RJ_ARITH_ALU_ABS_A | RJ_ARITH_ALU_NEG_A | RJ_ARITH_ALU_HIGH_A |
                                 RJ_ARITH_ALU_HIGH_D | RJ_ARITH_ALU_OMOD_MASK | RJ_ARITH_ALU_CLAMP;
@@ -112,14 +112,31 @@ int run(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d,
   if (!exec_mask) {
     return RJ_ARITH_SUCCESS;
   }
-  if constexpr (Op != Operation::Tanh) {
+  // The staged adapter needs the original policy when it selects its FP32 core.
+  if (compatibility) {
+    flags = (flags & ~RJ_ARITH_SEMANTICS_MASK) | RJ_ARITH_SEMANTICS_COMPATIBILITY;
+  }
+  // TANH has no strict FP32 core; only Loose can use its native vector approximation.
+  if (Op != Bf16MathOp::Tanh || !compatibility) {
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
     if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+      if constexpr (Op != Bf16MathOp::Sin && Op != Bf16MathOp::Cos) {
+        if (!compatibility) {
+          bf16_math_loose_x86_64_v4<Op>(exec_mask, uint32_t(mode), d[0], a[0]);
+          return RJ_ARITH_SUCCESS;
+        }
+      }
       return bf16_math_x86_64_v4(fp32_core<Op>(), flags, exec_mask, uint32_t(mode), d[0], a[0]);
     }
 #endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
     if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+      if constexpr (Op != Bf16MathOp::Sin && Op != Bf16MathOp::Cos) {
+        if (!compatibility) {
+          bf16_math_loose_x86_64_v3<Op>(exec_mask, uint32_t(mode), d[0], a[0]);
+          return RJ_ARITH_SUCCESS;
+        }
+      }
       return bf16_math_x86_64_v3(fp32_core<Op>(), flags, exec_mask, uint32_t(mode), d[0], a[0]);
     }
 #endif
@@ -153,54 +170,54 @@ int run(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d,
 int rj_arith_v_rcp_bf16_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                     uint32_t *const *d, const uint32_t *const *a,
                                     uint32_t * /*excp_flag_user*/) {
-  return run<Operation::Rcp>(flags, exec_mask, instruction_flags, d, a);
+  return run<Bf16MathOp::Rcp>(flags, exec_mask, instruction_flags, d, a);
 }
 
 // Evaluate inherited BF16 rsq arithmetic; legacy execution produces no FP status.
 int rj_arith_v_rsq_bf16_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                     uint32_t *const *d, const uint32_t *const *a,
                                     uint32_t * /*excp_flag_user*/) {
-  return run<Operation::Rsq>(flags, exec_mask, instruction_flags, d, a);
+  return run<Bf16MathOp::Rsq>(flags, exec_mask, instruction_flags, d, a);
 }
 
 // Evaluate inherited BF16 sqrt arithmetic; legacy execution produces no FP status.
 int rj_arith_v_sqrt_bf16_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *const *d, const uint32_t *const *a,
                                      uint32_t * /*excp_flag_user*/) {
-  return run<Operation::Sqrt>(flags, exec_mask, instruction_flags, d, a);
+  return run<Bf16MathOp::Sqrt>(flags, exec_mask, instruction_flags, d, a);
 }
 
 // Evaluate inherited BF16 exp arithmetic; legacy execution produces no FP status.
 int rj_arith_v_exp_bf16_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                     uint32_t *const *d, const uint32_t *const *a,
                                     uint32_t * /*excp_flag_user*/) {
-  return run<Operation::Exp>(flags, exec_mask, instruction_flags, d, a);
+  return run<Bf16MathOp::Exp>(flags, exec_mask, instruction_flags, d, a);
 }
 
 // Evaluate inherited BF16 log arithmetic; legacy execution produces no FP status.
 int rj_arith_v_log_bf16_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                     uint32_t *const *d, const uint32_t *const *a,
                                     uint32_t * /*excp_flag_user*/) {
-  return run<Operation::Log>(flags, exec_mask, instruction_flags, d, a);
+  return run<Bf16MathOp::Log>(flags, exec_mask, instruction_flags, d, a);
 }
 
 // Evaluate inherited BF16 sin arithmetic; legacy execution produces no FP status.
 int rj_arith_v_sin_bf16_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                     uint32_t *const *d, const uint32_t *const *a,
                                     uint32_t * /*excp_flag_user*/) {
-  return run<Operation::Sin>(flags, exec_mask, instruction_flags, d, a);
+  return run<Bf16MathOp::Sin>(flags, exec_mask, instruction_flags, d, a);
 }
 
 // Evaluate inherited BF16 cos arithmetic; legacy execution produces no FP status.
 int rj_arith_v_cos_bf16_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                     uint32_t *const *d, const uint32_t *const *a,
                                     uint32_t * /*excp_flag_user*/) {
-  return run<Operation::Cos>(flags, exec_mask, instruction_flags, d, a);
+  return run<Bf16MathOp::Cos>(flags, exec_mask, instruction_flags, d, a);
 }
 
 // Evaluate inherited BF16 tanh arithmetic; legacy execution produces no FP status.
 int rj_arith_v_tanh_bf16_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *const *d, const uint32_t *const *a,
                                      uint32_t * /*excp_flag_user*/) {
-  return run<Operation::Tanh>(flags, exec_mask, instruction_flags, d, a);
+  return run<Bf16MathOp::Tanh>(flags, exec_mask, instruction_flags, d, a);
 }

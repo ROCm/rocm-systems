@@ -452,3 +452,21 @@ TEST(CdnaMath, Gfx950ExactAndQualification) {
     }
   }
 }
+
+// Compatibility retains guest-directed narrowing even though strict modes are unqualified.
+TEST(CdnaIntegral, CompatibilityFractionRounding) {
+  using namespace rocjitsu::arith::test;
+  for (uint64_t cpu : supported_cpu_levels()) {
+    Registers<2, 64> data;
+    // -3*2^-12 gives a fraction halfway between 0x3bfe and 0x3bff: upward selects the latter.
+    data.v[0][0] = data.v[0][63] = 0x9200U;
+    const uint64_t flags = cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY | RJ_ARITH_FP_ROUND_UP;
+    uint32_t status = 0x80000000U;
+    ASSERT_EQ(rj_arith_v_fract_f16_w32_gfx942(flags, 1, 0, data.v + 1, data.v, &status), 0);
+    EXPECT_EQ(data.v[1][0] & 0xffffU, 0x3bffU);
+    ASSERT_EQ(rj_arith_v_fract_f16_w64_gfx942(flags, 1ULL << 63, 0, data.v + 1, data.v, &status),
+              0);
+    EXPECT_EQ(data.v[1][63] & 0xffffU, 0x3bffU);
+    EXPECT_EQ(status, 0x80000000U);
+  }
+}

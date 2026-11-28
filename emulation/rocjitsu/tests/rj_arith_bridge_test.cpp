@@ -17853,8 +17853,8 @@ TEST(ArithBridgeTest, Gfx1250Bf16Math) {
           uint32_t *d[] = {output.data()};
           const uint32_t *a[] = {input.data()};
           uint32_t status = 0;
-          ASSERT_EQ(operation.call(uint64_t(semantics) << 16, uint32_t(wave.exec()), modifiers, d,
-                                   a, &status),
+          ASSERT_EQ(operation.call(fixture.cu->arithmetic_flags(), uint32_t(wave.exec()), modifiers,
+                                   d, a, &status),
                     RJ_ARITH_SUCCESS);
           std::array<uint32_t, 2> words{};
           if (encoding) {

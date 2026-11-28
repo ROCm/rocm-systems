@@ -6,68 +6,13 @@
 #include "common/validation.h"
 #include "common/x86_64/half_x86_64_v4.h"
 #include "math/trig.h"
-#include "math/trig_coefficients.h"
+#include "math/x86_64/trig_loose_x86_64_v4.h"
 #include "rj_arith/detail/rj_arith_math.h"
 #include <immintrin.h>
 #include <stdint.h>
 
 namespace rocjitsu::arith {
 namespace {
-
-// Evaluate the existing AVX2 reduced polynomial at AVX-512 width, before half rounding.
-template <bool Cosine> __m512 value(__m512i bits) {
-  auto zero = _mm512_setzero_si512();
-  auto magnitude = _mm512_and_si512(bits, _mm512_set1_epi32(INT32_MAX));
-  auto mantissa = _mm512_or_si512(_mm512_and_si512(magnitude, _mm512_set1_epi32(0x7fffff)),
-                                  _mm512_set1_epi32(0x800000));
-  // Variable shifts outside [0,31] produce zero, covering large and tiny inputs.
-  auto shift = _mm512_sub_epi32(_mm512_srli_epi32(magnitude, 23), _mm512_set1_epi32(119));
-  auto phase =
-      _mm512_and_si512(_mm512_or_si512(_mm512_sllv_epi32(mantissa, shift),
-                                       _mm512_srlv_epi32(mantissa, _mm512_sub_epi32(zero, shift))),
-                       _mm512_set1_epi32(INT32_MAX));
-  auto quadrant = _mm512_srli_epi32(phase, 29);
-  auto quarter = _mm512_and_si512(phase, _mm512_set1_epi32(0x1fffffff));
-  auto reflected = _mm512_cmpgt_epi32_mask(quarter, _mm512_set1_epi32(0x0fffffff));
-  auto reduced = _mm512_mask_sub_epi32(quarter, reflected, _mm512_set1_epi32(0x20000000), quarter);
-  auto table =
-      _mm512_and_si512(_mm512_xor_si512(_mm512_xor_si512(quadrant, _mm512_movm_epi32(reflected)),
-                                        _mm512_set1_epi32(Cosine)),
-                       _mm512_set1_epi32(1));
-  auto index = _mm512_srli_epi32(
-      _mm512_mask_sub_epi32(reduced, reflected, reduced, _mm512_set1_epi32(1)), 24);
-  auto fraction = _mm512_sub_epi32(reduced, _mm512_slli_epi32(index, 24));
-  auto column = _mm512_add_epi32(index, _mm512_slli_epi32(table, 4));
-  auto t = _mm512_mul_ps(_mm512_cvtepi32_ps(fraction), _mm512_set1_ps(0x1p-24f));
-  auto c0 = _mm512_cvtepi32_ps(_mm512_i32gather_epi32(column, trig::coefficients[0], 4));
-  auto c1 = _mm512_cvtepi32_ps(_mm512_i32gather_epi32(column, trig::coefficients[1], 4));
-  auto c2 = _mm512_cvtepi32_ps(_mm512_i32gather_epi32(column, trig::coefficients[2], 4));
-  auto c3 = _mm512_cvtepi32_ps(_mm512_i32gather_epi32(column, trig::coefficients[3], 4));
-  auto result =
-      _mm512_mul_ps(_mm512_fmadd_ps(t, _mm512_fmadd_ps(t, _mm512_fmadd_ps(t, c3, c2), c1), c0),
-                    _mm512_set1_ps(0x1p-26f));
-  auto sign = _mm512_srli_epi32(quadrant, 1);
-  if constexpr (Cosine) {
-    sign = _mm512_xor_si512(sign, quadrant);
-  } else {
-    sign = _mm512_xor_si512(sign, _mm512_srli_epi32(bits, 31));
-  }
-  sign = _mm512_mask_mov_epi32(_mm512_slli_epi32(sign, 31),
-                               _mm512_cmp_ps_mask(result, _mm512_setzero_ps(), _CMP_EQ_OQ), zero);
-  result = _mm512_xor_ps(result, _mm512_castsi512_ps(sign));
-  if constexpr (!Cosine) {
-    auto tiny = _mm512_cmplt_epi32_mask(magnitude, _mm512_set1_epi32(0x39c00000));
-    auto small = _mm512_castsi512_ps(_mm512_maskz_mov_epi32(tiny, bits));
-    small = _mm512_mul_ps(small, _mm512_castsi512_ps(_mm512_set1_epi32(0x40c90fd5)));
-    result = _mm512_mask_mov_ps(result, tiny, small);
-  }
-  auto infinity = _mm512_cmpeq_epi32_mask(magnitude, _mm512_set1_epi32(0x7f800000));
-  auto nan = _mm512_mask_mov_epi32(_mm512_or_si512(bits, _mm512_set1_epi32(0x400000)), infinity,
-                                   _mm512_set1_epi32(0xffc00000U));
-  return _mm512_mask_mov_ps(result,
-                            _mm512_cmpge_epi32_mask(magnitude, _mm512_set1_epi32(0x7f800000)),
-                            _mm512_castsi512_ps(nan));
-}
 
 // Apply half input/output policy and publish only the selected active halves.
 template <bool Cosine>
@@ -88,7 +33,7 @@ void run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *d, const u
       x = _mm512_castsi512_ps(_mm512_mask_and_epi32(
           _mm512_castps_si512(x), tiny, _mm512_castps_si512(x), _mm512_set1_epi32(INT32_MIN)));
     }
-    auto result = half_narrow(value<Cosine>(_mm512_castps_si512(x)), false);
+    auto result = half_narrow(trig_value<Cosine>(_mm512_castps_si512(x)), false);
     // Only these two signed inputs per operation need a one-half-ULP repair
     // to equal the inherited integer model; Loose shares the polynomial.
     auto repair =

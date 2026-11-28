@@ -53,7 +53,8 @@ int rj_arith_v_trig_preop_f64_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
 // Compatibility uses inherited FP32 models, scales/clamps before truncating to BF16,
 // and canonicalizes tiny/zero OMOD results to +0. Guest rounding/flush/IEEE and
 // FP16_OVFL controls are accepted but do not change these inherited policies.
-// Loose may use the same models. Strict empirical modes are unsupported.
+// Loose may use native FP32 arithmetic and polynomials before the same BF16 packing.
+// Strict empirical modes are unsupported.
 // FP status is unused; errors and inactive lanes leave all output storage unchanged.
 // Operands may overlap; zero EXEC permits null operand pointers.
 int rj_arith_v_rcp_bf16_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,

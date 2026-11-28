@@ -15,6 +15,19 @@
 
 namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE {
 
+// Select one of 32 existing coefficients with register permutations rather than gathers.
+inline __m256i trig_coefficient(const int32_t *row, __m256i column, __m256i bit3, __m256i bit4) {
+  auto a = _mm256_permutevar8x32_epi32(_mm256_loadu_si256(reinterpret_cast<const __m256i *>(row)),
+                                       column);
+  auto b = _mm256_permutevar8x32_epi32(
+      _mm256_loadu_si256(reinterpret_cast<const __m256i *>(row + 8)), column);
+  auto c = _mm256_permutevar8x32_epi32(
+      _mm256_loadu_si256(reinterpret_cast<const __m256i *>(row + 16)), column);
+  auto d = _mm256_permutevar8x32_epi32(
+      _mm256_loadu_si256(reinterpret_cast<const __m256i *>(row + 24)), column);
+  return _mm256_blendv_epi8(_mm256_blendv_epi8(a, b, bit3), _mm256_blendv_epi8(c, d, bit3), bit4);
+}
+
 // Return loose vector sine/cosine results from raw FP32 input encodings.
 template <bool Cosine> __m256 trig_value(__m256i bits) {
   const __m256i zero = _mm256_setzero_si256();
@@ -42,10 +55,12 @@ template <bool Cosine> __m256 trig_value(__m256i bits) {
   const __m256i fraction = _mm256_sub_epi32(reduced, _mm256_slli_epi32(index, 24));
   const __m256i column = _mm256_add_epi32(index, _mm256_slli_epi32(table, 4));
   const __m256 t = _mm256_mul_ps(_mm256_cvtepi32_ps(fraction), _mm256_set1_ps(0x1p-24f));
-  const __m256 c0 = _mm256_cvtepi32_ps(_mm256_i32gather_epi32(trig::coefficients[0], column, 4));
-  const __m256 c1 = _mm256_cvtepi32_ps(_mm256_i32gather_epi32(trig::coefficients[1], column, 4));
-  const __m256 c2 = _mm256_cvtepi32_ps(_mm256_i32gather_epi32(trig::coefficients[2], column, 4));
-  const __m256 c3 = _mm256_cvtepi32_ps(_mm256_i32gather_epi32(trig::coefficients[3], column, 4));
+  const auto bit3 = _mm256_srai_epi32(_mm256_slli_epi32(column, 28), 31);
+  const auto bit4 = _mm256_srai_epi32(_mm256_slli_epi32(column, 27), 31);
+  const __m256 c0 = _mm256_cvtepi32_ps(trig_coefficient(trig::coefficients[0], column, bit3, bit4));
+  const __m256 c1 = _mm256_cvtepi32_ps(trig_coefficient(trig::coefficients[1], column, bit3, bit4));
+  const __m256 c2 = _mm256_cvtepi32_ps(trig_coefficient(trig::coefficients[2], column, bit3, bit4));
+  const __m256 c3 = _mm256_cvtepi32_ps(trig_coefficient(trig::coefficients[3], column, bit3, bit4));
   __m256 value =
       _mm256_mul_ps(_mm256_fmadd_ps(t, _mm256_fmadd_ps(t, _mm256_fmadd_ps(t, c3, c2), c1), c0),
                     _mm256_set1_ps(0x1p-26f));

@@ -33,55 +33,82 @@ template <bool Half> void check() {
   input[4] = Half ? 0x8400U : 0x80800000U;
   for (uint64_t cpu : supported_cpu_levels()) {
     for (uint64_t semantics : semantics_modes()) {
-      for (int omod = 0; omod < 4; ++omod) {
-        for (bool clamp : {false, true}) {
-          auto actual = input;
-          const uint32_t *a[] = {actual.data()};
-          uint32_t *d[] = {actual.data()};
-          constexpr uint32_t exec_mask = 0xaaaaaabfU;
-          const uint64_t mode =
-              uint64_t(omod) * RJ_ARITH_ALU_OMOD_2 | (clamp ? RJ_ARITH_ALU_CLAMP : 0);
-          uint32_t status = 0x55;
-          const bool strict = semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL ||
-                              semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS;
-          ASSERT_EQ(call(cpu | semantics, exec_mask, mode, d, a, &status),
-                    strict ? RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS : RJ_ARITH_SUCCESS);
-          EXPECT_EQ(status, 0x55U);
-          for (int lane = 0; lane < 32; ++lane) {
-            if (strict || !(exec_mask & (1U << lane))) {
-              EXPECT_EQ(actual[lane], input[lane]);
-              continue;
-            }
-            uint32_t expected;
-            if (lane == 1) {
-              expected = clamp ? 0 : input[lane] | (Half ? 0x200U : 0x400000U);
-            } else {
-              const float x = Half ? float(half_value(uint16_t(input[lane])))
-                                   : std::bit_cast<float>(input[lane]);
-              float y = std::tanh(x);
-              if constexpr (Half) {
-                y = float(half_value(half_bits(y)));
+      for (int shift = 0; shift < (Half ? 32 : 1); shift += 16) {
+        for (int omod = 0; omod < 4; ++omod) {
+          for (bool clamp : {false, true}) {
+            auto actual = input;
+            if constexpr (Half) {
+              for (auto &word : actual) {
+                word = shift ? (word << 16) | 0xa5a5U : word | 0xa5a50000U;
               }
-              if (omod) {
-                const float minimum = Half ? 0x1p-14f : 0x1p-126f;
-                y = std::abs(y) < minimum ? 0.0f : y * (omod == 3 ? 0.5f : omod == 2 ? 4.0f : 2.0f);
-                if (std::abs(y) < minimum) {
-                  y = std::copysign(0.0f, y);
+            }
+            const auto before = actual;
+            const uint32_t *a[] = {actual.data()};
+            uint32_t *d[] = {actual.data()};
+            constexpr uint32_t exec_mask = 0xaaaaaabfU;
+            const uint64_t mode = uint64_t(omod) * RJ_ARITH_ALU_OMOD_2 |
+                                  (clamp ? RJ_ARITH_ALU_CLAMP : 0) |
+                                  (shift ? RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_D : 0) |
+                                  (omod & 1 ? RJ_ARITH_ALU_ABS_A | RJ_ARITH_ALU_NEG_A : 0);
+            uint32_t status = 0x55;
+            const bool strict = semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL ||
+                                semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS;
+            ASSERT_EQ(call(cpu | semantics, exec_mask, mode, d, a, &status),
+                      strict ? RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS : RJ_ARITH_SUCCESS);
+            EXPECT_EQ(status, 0x55U);
+            for (int lane = 0; lane < 32; ++lane) {
+              if (strict || !(exec_mask & (1U << lane))) {
+                EXPECT_EQ(actual[lane], before[lane]);
+                continue;
+              }
+              uint32_t expected;
+              if (lane == 1) {
+                uint32_t raw = input[lane];
+                if (omod & 1) {
+                  raw = (raw & (Half ? 0x7fffU : 0x7fffffffU)) | (Half ? 0x8000U : 0x80000000U);
                 }
+                expected = clamp ? 0 : raw | (Half ? 0x200U : 0x400000U);
+              } else {
+                float x = Half ? float(half_value(uint16_t(input[lane])))
+                               : std::bit_cast<float>(input[lane]);
+                if (omod & 1) {
+                  x = -std::abs(x);
+                }
+                float y = std::tanh(x);
+                if constexpr (Half) {
+                  y = float(half_value(half_bits(y)));
+                }
+                if (omod) {
+                  const float minimum = Half ? 0x1p-14f : 0x1p-126f;
+                  y = std::abs(y) < minimum ? 0.0f
+                                            : y * (omod == 3   ? 0.5f
+                                                   : omod == 2 ? 4.0f
+                                                               : 2.0f);
+                  if (std::abs(y) < minimum) {
+                    y = std::copysign(0.0f, y);
+                  }
+                }
+                if (clamp) {
+                  y = y <= 0 ? 0 : y > 1 ? 1 : y;
+                }
+                expected = Half ? half_bits(y) : std::bit_cast<uint32_t>(y);
               }
-              if (clamp) {
-                y = y <= 0 ? 0 : y > 1 ? 1 : y;
+              if constexpr (Half) {
+                const uint32_t keep = shift ? 0xffffU : 0xffff0000U;
+                EXPECT_EQ(actual[lane] & keep, before[lane] & keep);
               }
-              expected = Half ? half_bits(y) : std::bit_cast<uint32_t>(y);
-            }
-            if (semantics != RJ_ARITH_SEMANTICS_COMPATIBILITY && lane != 1) {
-              const double got =
-                  Half ? half_value(uint16_t(actual[lane])) : std::bit_cast<float>(actual[lane]);
-              const double want =
-                  Half ? half_value(uint16_t(expected)) : std::bit_cast<float>(expected);
-              EXPECT_NEAR(got, want, Half ? 0.002 : 2e-6) << "lane " << lane;
-            } else {
-              EXPECT_EQ(actual[lane], expected) << "lane " << lane;
+              if (semantics != RJ_ARITH_SEMANTICS_COMPATIBILITY && lane != 1) {
+                const double got = Half ? half_value(uint16_t(actual[lane] >> shift))
+                                        : std::bit_cast<float>(actual[lane]);
+                const double want =
+                    Half ? half_value(uint16_t(expected)) : std::bit_cast<float>(expected);
+                EXPECT_NEAR(got, want, Half ? 0.002 : 2e-6) << "lane " << lane;
+              } else {
+                if constexpr (Half) {
+                  expected = (expected << shift) | (before[lane] & (shift ? 0xffffU : 0xffff0000U));
+                }
+                EXPECT_EQ(actual[lane], expected) << "lane " << lane;
+              }
             }
           }
         }

@@ -6,6 +6,7 @@
 // FP32 transcendental flushing follows rocjitsu's shared execution models
 // and is checked against gfx1201 hardware captures.
 
+#include "math/unary.h"
 #include "common/alu.h"
 #include "common/sdwa_dispatch.h"
 #include "common/sdwa_output.h"
@@ -220,6 +221,14 @@ int unary_loose(uint64_t flags, uint32_t exec_mask, uint64_t modifiers, uint32_t
     return RJ_ARITH_SUCCESS;
   }
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
+  if constexpr (rocjitsu::arith::unary_flushes_f32<Op>) {
+    if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+      rocjitsu::arith::unary_loose_x86_64_v4<Op>(flags, exec_mask, uint32_t(modifiers), d[0], a[0]);
+      return RJ_ARITH_SUCCESS;
+    }
+  }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
   if constexpr (Op == rocjitsu::arith::Unary::Fract) {
     if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
       rocjitsu::arith::fract_x86_64_v4(flags, exec_mask, uint32_t(modifiers), d, a,
@@ -236,8 +245,6 @@ int unary_loose(uint64_t flags, uint32_t exec_mask, uint64_t modifiers, uint32_t
       return RJ_ARITH_SUCCESS;
     }
   }
-#endif
-#if defined(RJ_ARITH_HAVE_X86_64_V4)
   if constexpr (rocjitsu::arith::unary_rounds_f32<Op>) {
     if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
       rocjitsu::arith::round_exact_x86_64_v4(Op, exec_mask, uint32_t(modifiers), d[0], a[0], flags);
@@ -246,9 +253,7 @@ int unary_loose(uint64_t flags, uint32_t exec_mask, uint64_t modifiers, uint32_t
   }
 #endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
-  if ((rocjitsu::arith::unary_rounds_f32<Op> || Op == rocjitsu::arith::Unary::FrexpMant ||
-       Op == rocjitsu::arith::Unary::Fract || !(flags & RJ_ARITH_FP_ROUND_MASK)) &&
-      rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
     rocjitsu::arith::unary_x86_64_v3(Op, exec_mask, modifiers, d[0], a[0], flags);
     return RJ_ARITH_SUCCESS;
   }

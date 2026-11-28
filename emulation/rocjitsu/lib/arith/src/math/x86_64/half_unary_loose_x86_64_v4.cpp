@@ -6,7 +6,7 @@
 
 #include "common/x86_64/half_x86_64_v4.h"
 #include "math/half_unary.h"
-#include "math/x86_64/log_exp_loose_x86_64_v4.h"
+#include "math/x86_64/unary_loose_x86_64_v4.h"
 #include "rj_arith/detail/rj_arith_math.h"
 
 #include <immintrin.h>
@@ -39,9 +39,9 @@ void half_unary_loose_x86_64_v4(uint64_t flags, uint32_t exec_mask, uint32_t mod
     } else if constexpr (Op == Unary::Sqrt) {
       value = _mm512_sqrt_ps(x);
     } else if constexpr (Op == Unary::Exp) {
-      value = half_exp2_loose(x);
+      value = exp2_loose<true>(x);
     } else {
-      value = half_log2_loose(x);
+      value = log2_loose(x);
       if (saturate) {
         value = _mm512_mask_mov_ps(value, _mm512_cmp_ps_mask(x, _mm512_setzero_ps(), _CMP_EQ_OQ),
                                    _mm512_set1_ps(-65504));
