@@ -180,9 +180,9 @@ impl Fixture {
                         if state == 0 {
                             args.result = uapi::WAIT_TIMEOUT;
                         } else {
-                            event.payload[0] =
-                                u64::from(reported_gpu_id.load(Ordering::Acquire)) | (1_u64 << 32);
-                            event.payload[1] = u64::from(state == 2) | (1_u64 << 32);
+                            event.payload[0] = u64::from_ne_bytes([1, 0, 0, 0, 1, 0, 0, 0]);
+                            event.payload[1] = u64::from(state == 2)
+                                | (u64::from(reported_gpu_id.load(Ordering::Acquire)) << 32);
                             args.result = uapi::WAIT_COMPLETE;
                         }
                         return Ok(());

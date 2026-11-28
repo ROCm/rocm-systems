@@ -936,9 +936,10 @@ fn malformed_prefixes_and_aperture_counts_are_rejected() {
 #[test]
 fn hardware_exception_poll_uses_persistent_events_and_decodes_payload() {
     for (wait_result, memory_lost) in [
-        (uapi::WAIT_TIMEOUT, 0_u32),
+        (uapi::WAIT_TIMEOUT, 1_u8),
         (uapi::WAIT_COMPLETE, 0),
         (uapi::WAIT_COMPLETE, 1),
+        (uapi::WAIT_COMPLETE, 2),
     ] {
         let kfd = endpoint(Arc::new(move |call| {
             match call {
@@ -952,8 +953,11 @@ fn hardware_exception_poll_uses_persistent_events_and_decodes_payload() {
                     assert_eq!(args.count, 1);
                     assert_eq!(args.timeout, 0);
                     assert_eq!(event.event_id, 19);
-                    event.payload[0] = u64::from_ne_bytes([42, 0, 0, 0, 1, 0, 0, 0]);
-                    event.payload[1] = u64::from(memory_lost) | (1_u64 << 32);
+                    // kfd_hsa_hw_exception_data: reset_type, reset_cause,
+                    // memory_lost, gpu_id (four native-endian u32 fields).
+                    event.payload[0] = u64::from_ne_bytes([0, 0, 0, 0, 1, 0, 0, 0]);
+                    event.payload[1] =
+                        u64::from_ne_bytes([memory_lost, 0, 0, 0, 0x78, 0x56, 0x34, 0x12]);
                     args.result = wait_result;
                 }
                 _ => panic!("unexpected event call"),
@@ -965,8 +969,8 @@ fn hardware_exception_poll_uses_persistent_events_and_decodes_payload() {
         assert_eq!(
             kfd.hardware_exception(19).unwrap(),
             (wait_result == uapi::WAIT_COMPLETE).then_some(HardwareException {
-                gpu_id: 42,
-                reset_type: 1,
+                gpu_id: 0x1234_5678,
+                reset_type: 0,
                 memory_lost: memory_lost != 0,
                 reset_cause: 1,
             })

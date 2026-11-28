@@ -1045,10 +1045,10 @@ impl Kfd {
     ) -> io::Result<Option<HardwareException>> {
         self.poll_exception(event_id).map(|event| {
             event.map(|event| HardwareException {
-                gpu_id: payload_u32(&event, 0),
-                reset_type: payload_u32(&event, 1),
+                gpu_id: payload_u32(&event, 3),
+                reset_type: payload_u32(&event, 0),
                 memory_lost: payload_u32(&event, 2) != 0,
-                reset_cause: payload_u32(&event, 3),
+                reset_cause: payload_u32(&event, 1),
             })
         })
     }
